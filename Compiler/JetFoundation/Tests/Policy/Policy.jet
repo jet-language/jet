@@ -1,0 +1,348 @@
+// Behavioral claims for Policy.rs:1-1075 and its five matching Rust tests.
+fn policy_test_fact(key: FactKey, declarations: [FactContribution]) -> EffectiveFact {
+    if fact_resolve(key, declarations) == {
+        .Err(error) -> panic("fact resolution failed: {fact_error_message(error)}")
+        .Ok(resolved) -> resolved ?? panic("expected a fact")
+    }
+}
+fn policy_test_policy(key: PolicyKey, declarations: [PolicyDeclaration]) -> EffectivePolicy {
+    if policy_resolve(key, declarations) == {
+        .Err(_) -> panic("policy resolution failed")
+        .Ok(resolved) -> resolved ?? panic("expected a policy")
+    }
+}
+fn policy_test_profile(value: String, scope: SourceScope, layer: ContributionLayer, source: String) -> FactContribution {
+    fact_contribution_new("Build.Profile", FactValue.Text(value), scope, layer, source)
+}
+fn policy_test_declaration(key: PolicyKey, value: PolicyValue, scope: PolicyScope, start: Int) -> PolicyDeclaration {
+    PolicyDeclaration{key: key, value: value, scope: scope, span: Span{start: start, end: start + 1}, target: None, source: "policy.jet"}
+}
+// Rust test `memory_floor_words_are_not_policy_keys` (Policy.rs:2280-2284).
+#Test("memory_floor_words_are_not_policy_keys") {
+    assert(policy_key_parse("no_alloc") == None)
+    assert(policy_key_parse("zero_rc") == None)
+    assert(policy_key_parse("arena_bounded") == None)
+}
+// Rust test `contribution_law_orders_all_scopes_and_layers` (Policy.rs:2287-2381).
+#Test("contribution_law_orders_all_scopes_and_layers") {
+    key :: fact_key_new("Build.Profile")
+    declarations :: [FactContribution]{
+        policy_test_profile("package", SourceScope.Package, ContributionLayer.Declaration, "package.jet"),
+        policy_test_profile("file", SourceScope.File, ContributionLayer.Declaration, "src/main.jet"),
+        policy_test_profile("module", SourceScope.Module, ContributionLayer.Declaration, "src/main.jet"),
+        policy_test_profile("function", SourceScope.Function, ContributionLayer.Declaration, "src/main.jet"),
+        policy_test_profile("block", SourceScope.Block, ContributionLayer.Declaration, "src/main.jet"),
+        policy_test_profile("item", SourceScope.Item, ContributionLayer.Declaration, "src/main.jet"),
+        policy_test_profile("bundle", SourceScope.Package, ContributionLayer.OptimizationBundle, "build bundle"),
+        policy_test_profile("workspace", SourceScope.Package, ContributionLayer.Workspace, "workspace.jet"),
+        policy_test_profile("environment", SourceScope.Package, ContributionLayer.Environment, "env.dev"),
+        policy_test_profile("system", SourceScope.Package, ContributionLayer.System, "system.dev"),
+        policy_test_profile("fleet", SourceScope.Package, ContributionLayer.Fleet, "fleet.ci"),
+        policy_test_profile("cli", SourceScope.Package, ContributionLayer.CommandLine, "command line"),
+    }
+    resolved :: policy_test_fact(key, declarations)
+    assert(resolved.key == key)
+    assert(resolved.value == FactValue.Text("cli"))
+    assert_eq(resolved.provenance.len(), 12)
+    assert_eq(resolved.effective, 11)
+}
+// Rust test `contribution_law_conflicts_same_layer_and_force_pins_later_layers` (Policy.rs:2384-2445).
+#Test("contribution_law_conflicts_same_layer_and_force_pins_later_layers") {
+    key :: fact_key_new("Build.Profile")
+    same_layer :: [FactContribution]{
+        fact_contribution_at(policy_test_profile("debug", SourceScope.Package, ContributionLayer.Workspace, "workspace-a.jet"), Span{start: 10, end: 11}),
+        fact_contribution_at(policy_test_profile("release", SourceScope.Package, ContributionLayer.Workspace, "workspace-b.jet"), Span{start: 20, end: 21}),
+    }
+    if fact_resolve(key, same_layer) == {
+        .Err(error) -> {
+            if error == {
+                .Conflict(_, _, _, _) -> {}
+                else -> panic("expected conflict")
+            }
+            diagnostic :: fact_error_diagnostic(error) ?? panic("conflict lacks diagnostic")
+            assert_eq(diagnostic.code, "E3521")
+            assert_eq(diagnostic.span, Val(Span{start: 20, end: 21}))
+            assert_eq(fact_error_message(error), "fact `Build.Profile` has conflicting values at the workspace layer: workspace-a.jet:10 and workspace-b.jet:20")
+        }
+        .Ok(_) -> panic("expected conflicting writers")
+    }
+    declarations :: [FactContribution]{
+        policy_test_profile("debug", SourceScope.Package, ContributionLayer.Declaration, "package.jet"),
+        fact_contribution_force_with_reason(policy_test_profile("release", SourceScope.Package, ContributionLayer.System, "system.jet"), "release certification"),
+        policy_test_profile("debug", SourceScope.Package, ContributionLayer.CommandLine, "command line"),
+    }
+    resolved :: policy_test_fact(key, declarations)
+    assert(resolved.value == FactValue.Text("release"))
+    assert(resolved.forced)
+    explanation :: fact_explain(resolved)
+    assert(explanation.contains("[effective] system"))
+    assert(explanation.contains("pin=release certification"))
+    assert(explanation.contains("[shadowed] command line"))
+}
+// Rust test `resolver_owns_defaults_and_replays_default_writer` (Policy.rs:2448-2476).
+#Test("resolver_owns_defaults_and_replays_default_writer") {
+    profile :: fact_key_with_default("Build.Profile", FactValue.Text("dev"))
+    declarations :: [FactContribution]{policy_test_profile("release", SourceScope.Package, ContributionLayer.CommandLine, "command line")}
+    effective :: policy_test_fact(profile, declarations)
+    assert(effective.value == FactValue.Text("release"))
+    assert_eq(effective.provenance.len(), 2)
+    assert(fact_explain(effective).contains("[shadowed] declaration / package \"dev\""))
+    replayed :: policy_test_fact(profile, effective.provenance)
+    assert_eq(replayed.provenance.len(), 2)
+}
+// Rust test `tighten_only_facts_reject_widening` (Policy.rs:2479-2518).
+#Test("tighten_only_facts_reject_widening") {
+    key :: fact_key_tighten_only("Build.Limit")
+    declarations :: [FactContribution]{
+        fact_contribution_new("Build.Limit", FactValue.Int(8), SourceScope.Package, ContributionLayer.Declaration, "package.jet"),
+        fact_contribution_new("Build.Limit", FactValue.Int(4), SourceScope.Package, ContributionLayer.Workspace, "workspace.jet"),
+    }
+    assert(policy_test_fact(key, declarations).value == FactValue.Int(4))
+    widening :: [FactContribution]{
+        fact_contribution_new("Build.Limit", FactValue.Int(4), SourceScope.Package, ContributionLayer.Declaration, "package.jet"),
+        fact_contribution_new("Build.Limit", FactValue.Int(8), SourceScope.Package, ContributionLayer.Workspace, "workspace.jet"),
+    }
+    if fact_resolve(key, widening) == {
+        .Err(error) -> {
+            if error == {
+                .SafetyWidening(_, _, _) -> {}
+                else -> panic("expected widening")
+            }
+            assert_eq(fact_error_message(error), "fact `Build.Limit` widens from 4 at package.jet to 8 at workspace.jet")
+            assert(fact_error_diagnostic(error) == None)
+        }
+        .Ok(_) -> panic("expected widening failure")
+    }
+}
+
+#Test("policy key registry value parsing and display") {
+    loop key in AUDITED_GATE_KEYS {
+        assert_eq(policy_key_parse(policy_key_name(key)), Val(key))
+        assert(policy_key_is_audited_gate(key))
+        values :: [PolicyValue]{PolicyValue.Forbid, PolicyValue.Default, PolicyValue.GateOnly, PolicyValue.Obligations, PolicyValue.Relaxed, PolicyValue.PerSite, PolicyValue.Track, PolicyValue.Skip}
+        loop value in values {
+            parsed :: policy_parse_value(key, " {policy_value_display(value)} ") ?? panic("valid gate policy failed")
+            assert(parsed == value)
+        }
+    }
+    loop row in POLICY_RULES {
+        assert_eq(policy_key_parse(policy_key_name(row.key)), Val(row.key))
+    }
+    assert(policy_key_parse("Unsafe") == None)
+    assert(!policy_key_is_audited_gate(PolicyKey.ScopedGC))
+    assert_eq(policy_value_display(PolicyValue.Limit{value: 123}), "123")
+    assert_eq(policy_value_display(PolicyValue.Allow), ".Allow")
+    assert_eq(fact_value_display(FactValue.Bool(false)), "false")
+    assert_eq(fact_value_display(FactValue.Char('x')), "'x'")
+    assert_eq(fact_value_display(FactValue.Text("a\"b")), "\"a\"b\"")
+    assert_eq(fact_value_display(FactValue.Enum("Thing")), ".Thing")
+    assert_eq(fact_value_display(FactValue.OptionalText(Val("value"))), "Some(\"value\")")
+    assert_eq(fact_value_display(FactValue.OptionalText(None)), "None")
+    assert_eq(fact_value_display(FactValue.Policy(PolicyValue.Explicit)), ".Explicit")
+    assert((policy_parse_value(PolicyKey.Copies, ".Explicit") ?? panic("copies")) == PolicyValue.Explicit)
+    assert((policy_parse_value(PolicyKey.Sentries, ".Off") ?? panic("sentries")) == PolicyValue.Off)
+    assert((policy_parse_value(PolicyKey.ScopedGC, "true") ?? panic("gc")) == PolicyValue.Enabled)
+    if policy_parse_value(PolicyKey.Copies, "true") == {
+        .Err(e) -> assert_eq(e.message, "`copies` must be `.Explicit`")
+        .Ok(_) -> panic("copies true")
+    }
+    if policy_parse_value(PolicyKey.Sentries, ".Allow") == {
+        .Err(e) -> assert_eq(e.message, "`sentries` must be `.On` or `.Off`")
+        .Ok(_) -> panic("sentries Allow")
+    }
+    if policy_parse_value(PolicyKey.Unsafe, ".Allow") == {
+        .Err(e) -> assert_eq(e.message, "`unsafe` must be one of `.Forbid`, `.Default`, `.GateOnly`, `.Obligations`, `.Relaxed`, `.PerSite`, `.Track`, or `.Skip`")
+        .Ok(_) -> panic("Allow package value")
+    }
+    if policy_parse_value(PolicyKey.ExplicitUnits, "false") == {
+        .Err(e) -> assert_eq(e.message, "package policy `explicit_units` has an unsupported value")
+        .Ok(_) -> panic("false units")
+    }
+    assert(default_gate_value(PolicyKey.Unsafe) == PolicyValue.Default)
+    assert(default_gate_value(PolicyKey.Impure) == PolicyValue.GateOnly)
+    assert(default_gate_value(PolicyKey.Nondeterministic) == PolicyValue.GateOnly)
+    assert(default_gate_value(PolicyKey.Sentries) == PolicyValue.On)
+    assert(default_gate_value(PolicyKey.ScopedGC) == PolicyValue.Enabled)
+}
+#Test("policy resolver sorts lexical rungs and preserves explanation") {
+    declarations :: [PolicyDeclaration]{
+        policy_test_declaration(PolicyKey.Unsafe, PolicyValue.Track, PolicyScope.Function, 20),
+        policy_test_declaration(PolicyKey.Unsafe, PolicyValue.Default, PolicyScope.Package, 10),
+        policy_test_declaration(PolicyKey.Copies, PolicyValue.Explicit, PolicyScope.Package, 30),
+    }
+    resolved :: policy_test_policy(PolicyKey.Unsafe, declarations)
+    assert(resolved.value == PolicyValue.Track)
+    assert_eq(resolved.provenance.len(), 2)
+    assert_eq(policy_explain(resolved), "unsafe = .Track\n  [shadowed] package .Default at policy.jet:10..11\n  [effective] function .Track at policy.jet:20..21")
+    if policy_resolve(PolicyKey.Sentries, declarations) == {
+        .Ok(value) -> assert(value == None)
+        .Err(_) -> panic("empty policy")
+    }
+    prohibited :: [PolicyDeclaration]{policy_test_declaration(PolicyKey.ScopedGC, PolicyValue.Enabled, PolicyScope.Organization, 1)}
+    if policy_resolve(PolicyKey.ScopedGC, prohibited) == {
+        .Err(e) -> assert(e == PolicyError.ProhibitedScope{key: PolicyKey.ScopedGC, scope: PolicyScope.Organization, span: Span{start: 1, end: 2}})
+        .Ok(_) -> panic("organization gc")
+    }
+    duplicates :: [PolicyDeclaration]{
+        policy_test_declaration(PolicyKey.Unsafe, PolicyValue.Default, PolicyScope.Package, 1),
+        policy_test_declaration(PolicyKey.Unsafe, PolicyValue.Default, PolicyScope.Package, 2),
+    }
+    if policy_resolve(PolicyKey.Unsafe, duplicates) == {
+        .Err(e) -> assert(e == PolicyError.Conflict{key: PolicyKey.Unsafe, scope: PolicyScope.Package, first: Span{start: 1, end: 2}, second: Span{start: 2, end: 3}})
+        .Ok(_) -> panic("same-scope duplicate")
+    }
+    first := policy_test_declaration(PolicyKey.ScopedGC, PolicyValue.Enabled, PolicyScope.Block, 1)
+    first.target = Val(Span{start: 5, end: 6})
+    second := policy_test_declaration(PolicyKey.ScopedGC, PolicyValue.Forbid, PolicyScope.Block, 2)
+    second.target = Val(Span{start: 7, end: 8})
+    targets :: [PolicyDeclaration]{first, second}
+    assert(policy_test_policy(PolicyKey.ScopedGC, targets).value == PolicyValue.Forbid)
+}
+#Test("policy safety tightening and gate widening matrix") {
+    assert(!policy_gate_widens(PolicyValue.Default, PolicyValue.Allow))
+    assert(policy_gate_widens(PolicyValue.Forbid, PolicyValue.Allow))
+    assert(!policy_gate_widens(PolicyValue.Forbid, PolicyValue.Forbid))
+    assert(policy_gate_widens(PolicyValue.Forbid, PolicyValue.Track))
+    assert(!policy_gate_widens(PolicyValue.Obligations, PolicyValue.Track))
+    assert(policy_gate_widens(PolicyValue.Obligations, PolicyValue.Skip))
+    assert(!policy_gate_widens(PolicyValue.PerSite, PolicyValue.Skip))
+    assert(policy_gate_widens(PolicyValue.PerSite, PolicyValue.Obligations))
+    assert(!policy_gate_widens(PolicyValue.Relaxed, PolicyValue.Obligations))
+    assert(policy_gate_widens(PolicyValue.Track, PolicyValue.Skip))
+    assert(!policy_gate_widens(PolicyValue.On, PolicyValue.Off))
+    assert(policy_gate_widens(PolicyValue.Off, PolicyValue.On))
+    assert(policy_gate_widens(PolicyValue.Enabled, PolicyValue.Enabled))
+    keys :: [PolicyKey]{PolicyKey.Unsafe, PolicyKey.Impure, PolicyKey.Nondeterministic}
+    loop key in keys {
+        declarations :: [PolicyDeclaration]{policy_test_declaration(key, PolicyValue.Forbid, PolicyScope.Package, 1), policy_test_declaration(key, PolicyValue.Default, PolicyScope.Module, 2)}
+        if policy_resolve(key, declarations) == {
+            .Err(e) -> assert(e == PolicyError.Widening{key: key, outer: PolicyValue.Forbid, inner: PolicyValue.Default, span: Span{start: 2, end: 3}})
+            .Ok(_) -> panic("widened Forbid")
+        }
+    }
+    sentries :: [PolicyDeclaration]{policy_test_declaration(PolicyKey.Sentries, PolicyValue.On, PolicyScope.Package, 1), policy_test_declaration(PolicyKey.Sentries, PolicyValue.Off, PolicyScope.Module, 2)}
+    assert(policy_test_policy(PolicyKey.Sentries, sentries).value == PolicyValue.Off)
+    copies :: [PolicyDeclaration]{policy_test_declaration(PolicyKey.Copies, PolicyValue.Explicit, PolicyScope.Package, 1), policy_test_declaration(PolicyKey.Copies, PolicyValue.Explicit, PolicyScope.Function, 2)}
+    assert(policy_test_policy(PolicyKey.Copies, copies).value == PolicyValue.Explicit)
+    units :: [PolicyDeclaration]{policy_test_declaration(PolicyKey.ExplicitUnits, PolicyValue.Enabled, PolicyScope.Package, 1), policy_test_declaration(PolicyKey.ExplicitUnits, PolicyValue.Enabled, PolicyScope.Block, 2)}
+    assert(policy_test_policy(PolicyKey.ExplicitUnits, units).value == PolicyValue.Enabled)
+}
+#Test("invocation gates parse exact messages and use canonical policy ladder") {
+    gates := gate_set_new()
+    assert(gate_set_is_empty(gates))
+    gate_set_insert(&gates, PolicyKey.Unsafe)
+    gate_set_insert(&gates, PolicyKey.Impure)
+    gate_set_insert(&gates, PolicyKey.Unsafe)
+    gate_set_insert(&gates, PolicyKey.ScopedGC)
+    assert_eq(gates.bits, 3)
+    assert(gate_set_allows(gates, PolicyKey.Unsafe))
+    assert(gate_set_allows(gates, PolicyKey.Impure))
+    assert(!gate_set_allows(gates, PolicyKey.Nondeterministic))
+    assert(!gate_set_allows(gates, PolicyKey.ScopedGC))
+    assert(gate_set_is_empty(gate_set_allow(PolicyKey.Copies)))
+    assert((gate_set_parse(" unsafe = allow ") ?? panic("trimmed gate")) == PolicyKey.Unsafe)
+    if gate_set_parse("unsafe") == {
+        .Err(e) -> assert_eq(e.message, "use `--gate name=allow`")
+        .Ok(_) -> panic("missing equals")
+    }
+    if gate_set_parse(" nope =allow") == {
+        .Err(e) -> assert_eq(e.message, "`nope` is not an audited gate")
+        .Ok(_) -> panic("unknown gate")
+    }
+    if gate_set_parse("gc=allow") == {
+        .Err(e) -> assert_eq(e.message, "`--gate gc=allow` must name an audited gate with `=allow`")
+        .Ok(_) -> panic("gc gate")
+    }
+    if gate_set_parse("unsafe=allow=allow") == {
+        .Err(e) -> assert_eq(e.message, "`--gate unsafe=allow=allow` must name an audited gate with `=allow`")
+        .Ok(_) -> panic("extra equals")
+    }
+    if gate_set_parse("unsafe=.Allow") == {
+        .Err(e) -> assert_eq(e.message, "`--gate unsafe=.Allow` must name an audited gate with `=allow`")
+        .Ok(_) -> panic("wrong gate value")
+    }
+    declarations :: [PolicyDeclaration]{policy_test_declaration(PolicyKey.Unsafe, PolicyValue.Default, PolicyScope.Package, 1)}
+    effective :: if policy_resolve_with_gates(PolicyKey.Unsafe, declarations, gates) == {
+        .Err(_) -> panic("allowed gate")
+        .Ok(resolved) -> resolved ?? panic("expected package policy")
+    }
+    assert(effective.value == PolicyValue.Default)
+    assert_eq(effective.provenance.len(), 1)
+    forbid :: [PolicyDeclaration]{policy_test_declaration(PolicyKey.Unsafe, PolicyValue.Forbid, PolicyScope.Organization, 1)}
+    if policy_resolve_with_gates(PolicyKey.Unsafe, forbid, gates) == {
+        .Err(e) -> assert(e == PolicyError.Widening{key: PolicyKey.Unsafe, outer: PolicyValue.Forbid, inner: PolicyValue.Allow, span: Span{start: 0, end: 0}})
+        .Ok(_) -> panic("gate overrides Forbid")
+    }
+    block :: [PolicyDeclaration]{policy_test_declaration(PolicyKey.Unsafe, PolicyValue.Default, PolicyScope.Block, 1)}
+    if policy_resolve_with_gates(PolicyKey.Unsafe, block, gates) == {
+        .Err(e) -> assert(e == PolicyError.Conflict{key: PolicyKey.Unsafe, scope: PolicyScope.Block, first: Span{start: 1, end: 2}, second: Span{start: 0, end: 0}})
+        .Ok(_) -> panic("invocation block collision")
+    }
+}
+#Test("fact ordering ignores targets uses stable earliest equal writer and checks all conflicts") {
+    key :: fact_key_new("Build.Profile")
+    a := fact_contribution_at(policy_test_profile("same", SourceScope.Package, ContributionLayer.Workspace, "a"), Span{start: 5, end: 7})
+    a.target = Val(Span{start: 1, end: 2})
+    b := fact_contribution_at(policy_test_profile("same", SourceScope.Package, ContributionLayer.Workspace, "a"), Span{start: 5, end: 6})
+    b.target = Val(Span{start: 3, end: 4})
+    later :: policy_test_profile("same", SourceScope.Package, ContributionLayer.Workspace, "z")
+    declarations :: [FactContribution]{later, a, b}
+    resolved :: policy_test_fact(key, declarations)
+    assert_eq(resolved.effective, 0)
+    assert_eq(resolved.provenance[0].span.end, 6)
+    assert_eq(resolved.provenance[2].source, "z")
+    hidden_conflict :: [FactContribution]{
+        policy_test_profile("a", SourceScope.Package, ContributionLayer.Declaration, "a"),
+        policy_test_profile("b", SourceScope.Package, ContributionLayer.Declaration, "b"),
+        fact_contribution_force(policy_test_profile("pinned", SourceScope.Package, ContributionLayer.System, "system")),
+    }
+    if fact_resolve(key, hidden_conflict) == {
+        .Err(e) -> {
+            if e == {
+                .Conflict(_, _, _, _) -> {}
+                else -> panic("hidden conflict kind")
+            }
+        }
+        .Ok(_) -> panic("shadowed conflict suppressed")
+    }
+    bad_force :: [FactContribution]{fact_contribution_force(policy_test_profile("a", SourceScope.Package, ContributionLayer.CommandLine, "cli"))}
+    if fact_resolve(key, bad_force) == {
+        .Err(e) -> {
+            assert_eq(fact_error_message(e), "fact `Build.Profile` uses `.Force` at the unsupported command line layer (cli)")
+            assert(fact_error_diagnostic(e) == None)
+        }
+        .Ok(_) -> panic("invalid force layer")
+    }
+    unrelated :: [FactContribution]{fact_contribution_new("Other", FactValue.Int(1), SourceScope.Package, ContributionLayer.CommandLine, "cli")}
+    if fact_resolve(key, unrelated) == {
+        .Ok(value) -> assert(value == None)
+        .Err(_) -> panic("unrelated fact")
+    }
+}
+#Test("fact defaults force precedence reasons and safety comparisons") {
+    key :: fact_key_with_default_source("Build.Profile", FactValue.Text("dev"), "builtin")
+    empty :: [FactContribution]{}
+    default :: policy_test_fact(key, empty)
+    assert(default.provenance[0].default)
+    assert_eq(default.provenance[0].source, "builtin")
+    system :: fact_contribution_force_with_reason(policy_test_profile("release", SourceScope.Package, ContributionLayer.System, "system"), "system pin")
+    fleet :: fact_contribution_with_reason(fact_contribution_force_with_reason(policy_test_profile("fleet", SourceScope.Package, ContributionLayer.Fleet, "fleet"), "fleet pin"), "computed")
+    declarations :: [FactContribution]{system, fleet, policy_test_profile("cli", SourceScope.Package, ContributionLayer.CommandLine, "cli")}
+    resolved :: policy_test_fact(key, declarations)
+    assert(resolved.value == FactValue.Text("fleet"))
+    assert_eq(resolved.effective, 2)
+    assert(fact_explain(resolved).contains("[pinned] system / package \"release\" at system:0..0 pin=system pin"))
+    assert(fact_explain(resolved).contains("pin=fleet pin reason=computed"))
+    safety :: fact_key_tighten_only("Safety")
+    booleans :: [FactContribution]{fact_contribution_new("Safety", FactValue.Bool(true), SourceScope.Package, ContributionLayer.Declaration, "a"), fact_contribution_new("Safety", FactValue.Bool(false), SourceScope.Block, ContributionLayer.Declaration, "b")}
+    assert(policy_test_fact(safety, booleans).value == FactValue.Bool(false))
+    policy_values :: [FactContribution]{fact_contribution_new("Safety", FactValue.Policy(PolicyValue.Default), SourceScope.Package, ContributionLayer.Declaration, "a"), fact_contribution_new("Safety", FactValue.Policy(PolicyValue.Track), SourceScope.Block, ContributionLayer.Declaration, "b")}
+    assert(policy_test_fact(safety, policy_values).value == FactValue.Policy(PolicyValue.Track))
+    mixed :: [FactContribution]{fact_contribution_new("Safety", FactValue.Text("a"), SourceScope.Package, ContributionLayer.Declaration, "a"), fact_contribution_new("Safety", FactValue.Enum("a"), SourceScope.Block, ContributionLayer.Declaration, "b")}
+    if fact_resolve(safety, mixed) == {
+        .Err(e) -> assert_eq(fact_error_message(e), "fact `Safety` has unrelated safety values at a and b")
+        .Ok(_) -> panic("incomparable safety")
+    }
+    pinned :: [FactContribution]{fact_contribution_force(fact_contribution_new("Safety", FactValue.Int(1), SourceScope.Package, ContributionLayer.System, "system")), fact_contribution_new("Safety", FactValue.Int(9), SourceScope.Package, ContributionLayer.CommandLine, "cli")}
+    assert(policy_test_fact(safety, pinned).value == FactValue.Int(1))
+}

@@ -1,0 +1,1763 @@
+// PORT-PENDING 0107 crates-jet-foundation-src-testinghistory-slice-1808: crates/jet-foundation/src/TestingHistory.rs:1808-3566
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS impl HistoryCommand for crate::DataTree::DataTree {
+//RS     type Strategy = HistorySchemaStrategy;
+//RS 
+//RS     fn history_strategy() -> Self::Strategy {
+//RS         HistorySchemaStrategy::new("DataTree")
+//RS     }
+//RS }
+//RS 
+//RS impl HistoryStrategyBehavior<crate::DataTree::DataTree> for HistorySchemaStrategy {
+//RS     fn command_type(&self) -> &str {
+//RS         &self.command_type
+//RS     }
+//RS 
+//RS     fn distributions(&self) -> Vec<HistoryDistribution> {
+//RS         self.distributions.clone()
+//RS     }
+//RS 
+//RS     fn generate(
+//RS         &self,
+//RS         rng: &mut HistoryRng,
+//RS         case_index: usize,
+//RS         max_steps: usize,
+//RS     ) -> Option<TypedHistoryCase<crate::DataTree::DataTree>> {
+//RS         let generated =
+//RS             <Self as HistoryStrategyBehavior<HistorySchemaCommand>>::generate(
+//RS                 self,
+//RS                 rng,
+//RS                 case_index,
+//RS                 max_steps,
+//RS             )?;
+//RS         let commands = generated
+//RS             .case
+//RS             .operations
+//RS             .iter()
+//RS             .map(|operation| {
+//RS                 history_schema_command_data_tree(&Self::command_for(operation))
+//RS             })
+//RS             .collect();
+//RS         TypedHistoryCase::new(generated.case, commands)
+//RS     }
+//RS 
+//RS     fn rebuild(
+//RS         &self,
+//RS         case: &HistoryCase,
+//RS     ) -> Option<TypedHistoryCase<crate::DataTree::DataTree>> {
+//RS         let commands = case
+//RS             .operations
+//RS             .iter()
+//RS             .map(|operation| {
+//RS                 history_schema_command_data_tree(&Self::command_for(operation))
+//RS             })
+//RS             .collect();
+//RS         TypedHistoryCase::new(case.clone(), commands)
+//RS     }
+//RS 
+//RS     fn valid(&self, case: &TypedHistoryCase<crate::DataTree::DataTree>) -> bool {
+//RS         case.case.validate().is_ok() && case.commands.len() == case.case.operations.len()
+//RS     }
+//RS 
+//RS     fn commands_to_data_tree(
+//RS         &self,
+//RS         commands: &[crate::DataTree::DataTree],
+//RS     ) -> Option<crate::DataTree::DataTree> {
+//RS         Some(crate::DataTree::DataTree::Array(commands.to_vec()))
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS /// Bounds are recorded as evidence, rather than hidden runner constants.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct HistoryBounds {
+//RS     pub max_steps: usize,
+//RS     pub max_resources: usize,
+//RS     pub max_shrink_attempts: usize,
+//RS     pub max_discarded_cases: usize,
+//RS }
+//RS 
+//RS impl Default for HistoryBounds {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             max_steps: 64,
+//RS             max_resources: 64,
+//RS             max_shrink_attempts: 10_000,
+//RS             max_discarded_cases: 100,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl HistoryBounds {
+//RS     pub fn validate(self) -> Result<(), HistoryError> {
+//RS         if self.max_steps == 0 || self.max_steps > MAX_STEPS {
+//RS             return Err(HistoryError::InvalidConfig(
+//RS                 "max_steps must be between 1 and the history limit".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.max_resources == 0 || self.max_resources > MAX_RESOURCES {
+//RS             return Err(HistoryError::InvalidConfig(
+//RS                 "max_resources must be between 1 and the history limit".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.max_shrink_attempts == 0 || self.max_shrink_attempts > MAX_SHRINK_ATTEMPTS {
+//RS             return Err(HistoryError::InvalidConfig(
+//RS                 "max_shrink_attempts must be between 1 and the history limit".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.max_discarded_cases > MAX_CASES {
+//RS             return Err(HistoryError::InvalidConfig(
+//RS                 "max_discarded_cases exceeds the history limit".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS /// A visible weighted operation distribution.  The generator still owns the
+//RS /// domain semantics; these rows only document its bounded choices.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct HistoryDistribution {
+//RS     pub operation: String,
+//RS     pub weight: Count,
+//RS }
+//RS 
+//RS impl HistoryDistribution {
+//RS     pub fn new(operation: impl Into<String>, weight: Count) -> Result<Self, HistoryError> {
+//RS         let operation = operation.into();
+//RS         if operation.is_empty() || operation.len() > MAX_STRING_BYTES || weight == 0 {
+//RS             return Err(HistoryError::InvalidConfig(
+//RS                 "distribution operation and positive weight are required".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(Self { operation, weight })
+//RS     }
+//RS 
+//RS     fn json(&self) -> String {
+//RS         format!(
+//RS             "{{\"operation\":{},\"weight\":{}}}",
+//RS             quote(&self.operation),
+//RS             self.weight
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS /// Dependency labels let the runner reject direct and transitive production
+//RS /// calls before a mismatch becomes evidence.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum OracleDependencyKind {
+//RS     Independent,
+//RS     ProductionBehavior,
+//RS     Opaque,
+//RS     Unknown,
+//RS }
+//RS 
+//RS impl OracleDependencyKind {
+//RS     fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Independent => "independent",
+//RS             Self::ProductionBehavior => "production_behavior",
+//RS             Self::Opaque => "opaque",
+//RS             Self::Unknown => "unknown",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct OracleDependency {
+//RS     pub from: String,
+//RS     pub to: String,
+//RS     pub kind: OracleDependencyKind,
+//RS }
+//RS 
+//RS impl OracleDependency {
+//RS     pub fn new(
+//RS         from: impl Into<String>,
+//RS         to: impl Into<String>,
+//RS         kind: OracleDependencyKind,
+//RS     ) -> Self {
+//RS         Self {
+//RS             from: from.into(),
+//RS             to: to.into(),
+//RS             kind,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// An explicit oracle provenance declaration.  No oracle is independent by
+//RS /// assertion alone: every reachable dependency must be classified.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct OracleDeclaration {
+//RS     pub root: String,
+//RS     pub dependencies: Vec<OracleDependency>,
+//RS }
+//RS 
+//RS impl OracleDeclaration {
+//RS     pub fn independent(root: impl Into<String>) -> Self {
+//RS         Self {
+//RS             root: root.into(),
+//RS             dependencies: Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_dependency(mut self, dependency: OracleDependency) -> Self {
+//RS         self.dependencies.push(dependency);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn validate_independence(&self) -> Result<(), HistoryError> {
+//RS         if self.root.is_empty() || self.root.len() > MAX_STRING_BYTES {
+//RS             return Err(HistoryError::InvalidOracle(
+//RS                 "oracle root must be non-empty and bounded".to_string(),
+//RS             ));
+//RS         }
+//RS         let mut reachable = vec![self.root.clone()];
+//RS         let mut visited = BTreeSet::new();
+//RS         while let Some(node) = reachable.pop() {
+//RS             if !visited.insert(node.clone()) {
+//RS                 continue;
+//RS             }
+//RS             for dependency in self.dependencies.iter().filter(|edge| edge.from == node) {
+//RS                 if dependency.from == dependency.to {
+//RS                     return Err(HistoryError::InvalidOracle(format!(
+//RS                         "oracle dependency `{}` is self-confirming",
+//RS                         dependency.from
+//RS                     )));
+//RS                 }
+//RS                 match dependency.kind {
+//RS                     OracleDependencyKind::Independent => reachable.push(dependency.to.clone()),
+//RS                     OracleDependencyKind::ProductionBehavior => {
+//RS                         return Err(HistoryError::InvalidOracle(format!(
+//RS                             "oracle `{}` reaches production behavior `{}`",
+//RS                             dependency.from, dependency.to
+//RS                         )))
+//RS                     }
+//RS                     OracleDependencyKind::Opaque | OracleDependencyKind::Unknown => {
+//RS                         return Err(HistoryError::InvalidOracle(format!(
+//RS                             "oracle dependency `{}` -> `{}` is not certifiably independent ({})",
+//RS                             dependency.from,
+//RS                             dependency.to,
+//RS                             dependency.kind.as_str()
+//RS                         )))
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS /// A complete, deterministic campaign declaration.
+//RS #[derive(Clone, Debug)]
+//RS pub struct HistoryConfig {
+//RS     pub seed: u64,
+//RS     /// Number of generated cases. This remains a call-level bound rather than
+//RS     /// part of the per-strategy resource/step bounds.
+//RS     pub cases: usize,
+//RS     pub bounds: HistoryBounds,
+//RS     pub distributions: Vec<HistoryDistribution>,
+//RS     pub source: String,
+//RS     pub tool: String,
+//RS     pub target: String,
+//RS     pub relation: ObservationRelation,
+//RS     pub oracle: OracleDeclaration,
+//RS     /// The source-level operation type carried by this campaign. Keeping it
+//RS     /// in the envelope makes a changed generic command fail closed on replay.
+//RS     pub command_type: String,
+//RS }
+//RS 
+//RS impl HistoryConfig {
+//RS     pub fn new(
+//RS         seed: u64,
+//RS         cases: usize,
+//RS         bounds: HistoryBounds,
+//RS         source: impl Into<String>,
+//RS         tool: impl Into<String>,
+//RS         target: impl Into<String>,
+//RS         relation: ObservationRelation,
+//RS         oracle: OracleDeclaration,
+//RS     ) -> Self {
+//RS         Self {
+//RS             seed,
+//RS             cases,
+//RS             bounds,
+//RS             distributions: Vec::new(),
+//RS             source: source.into(),
+//RS             tool: tool.into(),
+//RS             target: target.into(),
+//RS             relation,
+//RS             oracle,
+//RS             command_type: "unspecified".to_string(),
+//RS         }
+//RS     }
+//RS     pub fn with_provenance(mut self, provenance: HistoryProvenance) -> Self {
+//RS         self.source = provenance.source;
+//RS         self.tool = provenance.tool;
+//RS         self.target = provenance.target;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_command_type(mut self, command_type: impl Into<String>) -> Self {
+//RS         self.command_type = command_type.into();
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_distribution(mut self, distribution: HistoryDistribution) -> Self {
+//RS         self.distributions.push(distribution);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), HistoryError> {
+//RS         if self.cases == 0 || self.cases > MAX_CASES {
+//RS             return Err(HistoryError::InvalidConfig(
+//RS                 "cases must be between 1 and the history limit".to_string(),
+//RS             ));
+//RS         }
+//RS         self.bounds.validate()?;
+//RS         for field in [
+//RS             (&self.source, "source"),
+//RS             (&self.tool, "tool"),
+//RS             (&self.target, "target"),
+//RS             (&self.command_type, "command type"),
+//RS         ] {
+//RS             if field.0.is_empty() || field.0.len() > MAX_STRING_BYTES {
+//RS                 return Err(HistoryError::InvalidConfig(format!(
+//RS                     "{} must be non-empty and bounded",
+//RS                     field.1
+//RS                 )));
+//RS             }
+//RS         }
+//RS         if self.distributions.len() > MAX_DISTRIBUTIONS {
+//RS             return Err(HistoryError::InvalidConfig(
+//RS                 "distribution count exceeds the history limit".to_string(),
+//RS             ));
+//RS         }
+//RS         for (index, distribution) in self.distributions.iter().enumerate() {
+//RS             if distribution.operation.is_empty()
+//RS                 || distribution.operation.len() > MAX_STRING_BYTES
+//RS                 || distribution.weight == 0
+//RS             {
+//RS                 return Err(HistoryError::InvalidConfig(format!(
+//RS                     "distribution {} has an invalid operation or weight",
+//RS                     index
+//RS                 )));
+//RS             }
+//RS         }
+//RS         self.oracle.validate_independence()?;
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Deterministic splitmix64 choices.  A case records its derived seed, so a
+//RS /// replay does not depend on how many earlier cases were discarded.
+//RS #[derive(Clone, Debug)]
+//RS pub struct HistoryRng {
+//RS     state: u64,
+//RS }
+//RS 
+//RS impl HistoryRng {
+//RS     pub fn new(seed: u64) -> Self {
+//RS         Self { state: seed }
+//RS     }
+//RS 
+//RS     pub fn state(&self) -> u64 {
+//RS         self.state
+//RS     }
+//RS 
+//RS     pub fn replace_state(&mut self, state: u64) {
+//RS         self.state = state;
+//RS     }
+//RS 
+//RS     pub fn next_u64(&mut self) -> u64 {
+//RS         self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+//RS         let mut value = self.state;
+//RS         value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+//RS         value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+//RS         value ^ (value >> 31)
+//RS     }
+//RS 
+//RS     pub fn below(&mut self, bound: u64) -> u64 {
+//RS         if bound == 0 {
+//RS             return 0;
+//RS         }
+//RS         self.next_u64() % bound
+//RS     }
+//RS 
+//RS     pub fn coin(&mut self) -> bool {
+//RS         self.below(2) == 0
+//RS     }
+//RS     /// Select one weighted operation without introducing platform-dependent
+//RS     /// randomness.  Invalid/empty distributions are rejected by returning
+//RS     /// `None`; callers can then discard the case rather than silently using a
+//RS     /// different operation.
+//RS     pub fn choose_distribution(&mut self, distributions: &[HistoryDistribution]) -> Option<usize> {
+//RS         let total = distributions.iter().try_fold(0u64, |total, distribution| {
+//RS             total.checked_add(u64::try_from(distribution.weight).ok()?)
+//RS         })?;
+//RS         if total == 0 {
+//RS             return None;
+//RS         }
+//RS         let mut choice = self.below(total);
+//RS         for (index, distribution) in distributions.iter().enumerate() {
+//RS             let weight = u64::try_from(distribution.weight).ok()?;
+//RS             if choice < weight {
+//RS                 return Some(index);
+//RS             }
+//RS             choice -= weight;
+//RS         }
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS /// Result of one bounded campaign.  A missing failure is not a proof of
+//RS /// equivalence; explored, discarded, and vacuous-precondition counts remain
+//RS /// visible to the caller.
+//RS #[derive(Clone, Debug)]
+//RS pub struct HistoryRun {
+//RS     pub seed: u64,
+//RS     pub cases: usize,
+//RS     pub bounds: HistoryBounds,
+//RS     pub distributions: Vec<HistoryDistribution>,
+//RS     pub explored_cases: usize,
+//RS     pub discarded_cases: usize,
+//RS     pub vacuous_preconditions: usize,
+//RS     pub failure: Option<HistoryArtifact>,
+//RS }
+//RS 
+//RS impl HistoryRun {
+//RS     pub fn has_failure(&self) -> bool {
+//RS         self.failure.is_some()
+//RS     }
+//RS 
+//RS     pub fn discarded_rate(&self) -> f64 {
+//RS         let total = self.explored_cases.saturating_add(self.discarded_cases);
+//RS         if total == 0 {
+//RS             return 0.0;
+//RS         }
+//RS         self.discarded_cases as f64 / total as f64
+//RS     }
+//RS }
+//RS 
+//RS /// Persisted counterexample.  The comparison record is the canonical verdict;
+//RS /// this wrapper adds the command type, typed operation and schedule needed to
+//RS /// replay it.
+//RS #[derive(Clone, Debug)]
+//RS pub struct HistoryArtifact {
+//RS     pub artifact_id: String,
+//RS     pub identity: ComparisonIdentity,
+//RS     pub case: HistoryCase,
+//RS     pub cases: usize,
+//RS     pub bounds: HistoryBounds,
+//RS     pub distributions: Vec<HistoryDistribution>,
+//RS     pub discarded_cases: usize,
+//RS     pub vacuous_preconditions: usize,
+//RS     pub command_type: String,
+//RS     pub oracle: OracleDeclaration,
+//RS     pub comparison: ComparisonRecord,
+//RS }
+//RS 
+//RS impl HistoryArtifact {
+//RS     fn new(
+//RS         config: &HistoryConfig,
+//RS         case: HistoryCase,
+//RS         comparison: ComparisonRecord,
+//RS         discarded_cases: usize,
+//RS     ) -> Result<Self, HistoryError> {
+//RS         let Some(sample) = comparison.first_mismatch() else {
+//RS             return Err(HistoryError::NoFailure);
+//RS         };
+//RS         let mut identity = sample.identity.clone();
+//RS         identity.seed = Some(case.seed);
+//RS         let vacuous_preconditions = case.vacuous_preconditions();
+//RS         let mut artifact = Self {
+//RS             artifact_id: String::new(),
+//RS             identity,
+//RS             case,
+//RS             cases: config.cases,
+//RS             bounds: config.bounds,
+//RS             distributions: config.distributions.clone(),
+//RS             discarded_cases,
+//RS             vacuous_preconditions,
+//RS             command_type: config.command_type.clone(),
+//RS             oracle: config.oracle.clone(),
+//RS             comparison,
+//RS         };
+//RS         artifact.artifact_id = SHA256::sha256_hex(artifact.payload_json().as_bytes());
+//RS         artifact.validate()?;
+//RS         Ok(artifact)
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), HistoryError> {
+//RS         self.case.validate()?;
+//RS         if !case_within_bounds(&self.case, self.bounds) {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "artifact case exceeds its recorded history bounds".to_string(),
+//RS             ));
+//RS         }
+//RS         self.oracle.validate_independence()?;
+//RS         if !self.identity.is_complete() {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "artifact identity is incomplete".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.identity.seed != Some(self.case.seed) {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "artifact identity seed does not match the replay case".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.command_type.is_empty() || self.command_type.len() > MAX_STRING_BYTES {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "artifact command type must be non-empty and bounded".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.vacuous_preconditions != self.case.vacuous_preconditions() {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "artifact vacuous-precondition count does not match its case".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.comparison.status != ComparisonStatus::Mismatch {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "history artifact must retain a comparison mismatch".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.comparison.universal_proof {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "finite history cannot be marked as universal proof".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.identity.case_id != self.case.case_id {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "artifact identity case does not match the replay case".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.identity.input_id != self.case.input_id() {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "artifact identity input does not match the replay case".to_string(),
+//RS             ));
+//RS         }
+//RS         let Some(sample) = self.comparison.first_mismatch() else {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "history artifact has no mismatch sample".to_string(),
+//RS             ));
+//RS         };
+//RS         if sample.identity != self.identity {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "artifact identity does not match the mismatch sample".to_string(),
+//RS             ));
+//RS         }
+//RS         let expected_id = SHA256::sha256_hex(self.payload_json().as_bytes());
+//RS         if self.artifact_id != expected_id {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "artifact identity hash does not match its payload".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Canonical JSON envelope.  Secret values can only enter through
+//RS     /// `HistoryValue::secret`, which stores a redaction label instead.
+//RS     pub fn json(&self) -> String {
+//RS         // `payload_json` is an object with stable key ordering.  Insert the
+//RS         // identity as the first field without reparsing a second schema.
+//RS         let payload = self.payload_json();
+//RS         let body = payload.strip_prefix('{').unwrap_or(payload.as_str());
+//RS         format!(
+//RS             "{{\"artifactId\":{},{}",
+//RS             quote(&self.artifact_id),
+//RS             body
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn write_json(&self, path: &Path) -> Result<(), HistoryError> {
+//RS         self.validate()?;
+//RS         let contents = format!("{}\n", self.json());
+//RS         if let Ok(metadata) = fs::symlink_metadata(path) {
+//RS             if metadata.file_type().is_symlink() || !metadata.is_file() {
+//RS                 return Err(HistoryError::Io(format!(
+//RS                     "artifact path is not a regular file: {}",
+//RS                     path.display()
+//RS                 )));
+//RS             }
+//RS             let existing = fs::read(path).map_err(|error| HistoryError::Io(error.to_string()))?;
+//RS             if existing == contents.as_bytes() {
+//RS                 return Ok(());
+//RS             }
+//RS             return Err(HistoryError::Io(format!(
+//RS                 "refusing to overwrite differing artifact: {}",
+//RS                 path.display()
+//RS             )));
+//RS         }
+//RS         if let Some(parent) = path.parent() {
+//RS             fs::create_dir_all(parent).map_err(|error| HistoryError::Io(error.to_string()))?;
+//RS         }
+//RS         let temporary = path.with_extension(format!(
+//RS             "json.tmp.{}.{}",
+//RS             std::process::id(),
+//RS             &SHA256::sha256_hex(contents.as_bytes())[..8]
+//RS         ));
+//RS         let write_result = (|| -> Result<(), HistoryError> {
+//RS             let mut file = fs::OpenOptions::new()
+//RS                 .write(true)
+//RS                 .create_new(true)
+//RS                 .open(&temporary)
+//RS                 .map_err(|error| HistoryError::Io(error.to_string()))?;
+//RS             file.write_all(contents.as_bytes())
+//RS                 .map_err(|error| HistoryError::Io(error.to_string()))?;
+//RS             file.sync_all()
+//RS                 .map_err(|error| HistoryError::Io(error.to_string()))?;
+//RS             Ok(())
+//RS         })();
+//RS         if let Err(error) = write_result {
+//RS             let _ = fs::remove_file(&temporary);
+//RS             return Err(error);
+//RS         }
+//RS         fs::rename(&temporary, path).map_err(|error| {
+//RS             let _ = fs::remove_file(&temporary);
+//RS             HistoryError::Io(error.to_string())
+//RS         })?;
+//RS         if let Some(parent) = path.parent() {
+//RS             fs::File::open(parent)
+//RS                 .map_err(|error| HistoryError::Io(error.to_string()))?
+//RS                 .sync_all()
+//RS                 .map_err(|error| HistoryError::Io(error.to_string()))?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn payload_json(&self) -> String {
+//RS         let operations = self
+//RS             .case
+//RS             .operations
+//RS             .iter()
+//RS             .map(HistoryOperation::json)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let schedule = self
+//RS             .case
+//RS             .schedule
+//RS             .iter()
+//RS             .map(HistoryScheduleChoice::json)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let distributions = self
+//RS             .distributions
+//RS             .iter()
+//RS             .map(HistoryDistribution::json)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!(
+//RS             "{{\"bounds\":{{\"maxDiscardedCases\":{},\"maxResources\":{},\"maxSteps\":{},\"maxShrinkAttempts\":{}}},\"case\":{},\"cases\":{},\"commandType\":{},\"comparison\":{},\"discardedCases\":{},\"distributions\":[{}],\"identity\":{},\"operations\":[{}],\"oracle\":{},\"schedule\":[{}],\"schema\":{},\"seed\":{},\"vacuousPreconditions\":{},\"version\":{}}}",
+//RS             self.bounds.max_discarded_cases,
+//RS             self.bounds.max_resources,
+//RS             self.bounds.max_steps,
+//RS             self.bounds.max_shrink_attempts,
+//RS             quote(&self.case.case_id),
+//RS             self.cases,
+//RS             quote(&self.command_type),
+//RS             comparison_json(&self.comparison),
+//RS             self.discarded_cases,
+//RS             distributions,
+//RS             identity_json(&self.identity),
+//RS             operations,
+//RS             oracle_json(&self.oracle),
+//RS             schedule,
+//RS             quote(HISTORY_SCHEMA),
+//RS             self.case.seed,
+//RS             self.vacuous_preconditions,
+//RS             HISTORY_VERSION,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS fn identity_json(identity: &ComparisonIdentity) -> String {
+//RS     format!(
+//RS         "{{\"caseId\":{},\"inputId\":{},\"seed\":{},\"source\":{},\"target\":{},\"tool\":{}}}",
+//RS         quote(&identity.case_id),
+//RS         quote(&identity.input_id),
+//RS         identity.seed.map_or_else(|| "null".to_string(), |seed| seed.to_string()),
+//RS         quote(&identity.source),
+//RS         quote(&identity.target),
+//RS         quote(&identity.tool),
+//RS     )
+//RS }
+//RS 
+//RS fn oracle_json(oracle: &OracleDeclaration) -> String {
+//RS     let dependencies = oracle
+//RS         .dependencies
+//RS         .iter()
+//RS         .map(|dependency| {
+//RS             format!(
+//RS                 "{{\"from\":{},\"kind\":{},\"to\":{}}}",
+//RS                 quote(&dependency.from),
+//RS                 quote(dependency.kind.as_str()),
+//RS                 quote(&dependency.to),
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"dependencies\":[{}],\"root\":{}}}",
+//RS         dependencies,
+//RS         quote(&oracle.root)
+//RS     )
+//RS }
+//RS 
+//RS fn comparison_json(comparison: &ComparisonRecord) -> String {
+//RS     let samples = comparison
+//RS         .samples
+//RS         .iter()
+//RS         .map(sample_json)
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"contamination\":{},\"discardedCases\":{},\"firstDifference\":{},\"reason\":{},\"relation\":{},\"samples\":[{}],\"status\":{},\"universalProof\":{}}}",
+//RS         comparison
+//RS             .contamination
+//RS             .as_ref()
+//RS             .map_or_else(|| "null".to_string(), |value| quote(value)),
+//RS         comparison.discarded_cases,
+//RS         comparison
+//RS             .first_difference
+//RS             .map_or_else(|| "null".to_string(), |value| value.to_string()),
+//RS         comparison
+//RS             .reason
+//RS             .as_ref()
+//RS             .map_or_else(|| "null".to_string(), |value| quote(value)),
+//RS         quote(comparison.relation.as_str()),
+//RS         samples,
+//RS         quote(comparison.status.as_str()),
+//RS         comparison.universal_proof,
+//RS     )
+//RS }
+//RS 
+//RS fn sample_json(sample: &ComparisonSample) -> String {
+//RS     let candidate_replay = sample
+//RS         .candidate_replay
+//RS         .as_ref()
+//RS         .map_or_else(|| "null".to_string(), observation_json);
+//RS     let reference_replay = sample
+//RS         .reference_replay
+//RS         .as_ref()
+//RS         .map_or_else(|| "null".to_string(), observation_json);
+//RS     format!(
+//RS         "{{\"candidate\":{},\"candidateReplay\":{},\"identity\":{},\"reference\":{},\"referenceReplay\":{}}}",
+//RS         observation_json(&sample.candidate),
+//RS         candidate_replay,
+//RS         identity_json(&sample.identity),
+//RS         observation_json(&sample.reference),
+//RS         reference_replay,
+//RS     )
+//RS }
+//RS 
+//RS fn observation_json(observation: &ComparisonObservation) -> String {
+//RS     let effects = observation
+//RS         .ordered_effects
+//RS         .iter()
+//RS         .map(|effect| quote(effect))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let cleanup = observation
+//RS         .cleanup
+//RS         .iter()
+//RS         .map(|effect| quote(effect))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"cleanup\":[{}],\"mutation\":{},\"orderedEffects\":[{}],\"raw\":{},\"typedFailure\":{}}}",
+//RS         cleanup,
+//RS         observation
+//RS             .mutation
+//RS             .as_ref()
+//RS             .map_or_else(|| "null".to_string(), |value| quote(value)),
+//RS         effects,
+//RS         quote(&observation.raw),
+//RS         observation
+//RS             .typed_failure
+//RS             .as_ref()
+//RS             .map_or_else(|| "null".to_string(), |value| quote(value)),
+//RS     )
+//RS }
+//RS 
+//RS /// Reduce a mismatch while preserving generic typed dependencies and the
+//RS /// canonical comparison's failure class.
+//RS pub fn shrink_history<F>(
+//RS     original: &HistoryCase,
+//RS     bounds: HistoryBounds,
+//RS     observe: F,
+//RS ) -> Result<(HistoryCase, ComparisonRecord), HistoryError>
+//RS where
+//RS     F: FnMut(&HistoryCase) -> ComparisonRecord,
+//RS {
+//RS     shrink_history_with_validity(original, bounds, |_| true, observe)
+//RS }
+//RS 
+//RS /// Reduce a mismatch while also applying domain-specific state validation.
+//RS /// The validator is where a booking/session model enforces state transitions;
+//RS /// generic handle validation remains in [`HistoryCase::validate`].
+//RS fn case_within_bounds(case: &HistoryCase, bounds: HistoryBounds) -> bool {
+//RS     if case.operations.len() > bounds.max_steps {
+//RS         return false;
+//RS     }
+//RS     let resources = case
+//RS         .operations
+//RS         .iter()
+//RS         .flat_map(|operation| operation.creates.iter().copied())
+//RS         .collect::<BTreeSet<_>>();
+//RS     resources.len() <= bounds.max_resources
+//RS }
+//RS 
+//RS pub fn shrink_history_with_validity<V, F>(
+//RS     original: &HistoryCase,
+//RS     bounds: HistoryBounds,
+//RS     mut valid: V,
+//RS     mut observe: F,
+//RS 
+//RS ) -> Result<(HistoryCase, ComparisonRecord), HistoryError>
+//RS where
+//RS     V: FnMut(&HistoryCase) -> bool,
+//RS     F: FnMut(&HistoryCase) -> ComparisonRecord,
+//RS {
+//RS     bounds.validate()?;
+//RS     original.validate()?;
+//RS     if !case_within_bounds(original, bounds) {
+//RS         return Err(HistoryError::InvalidCase(
+//RS             "starting case exceeds configured history bounds".to_string(),
+//RS         ));
+//RS     }
+//RS     if !valid(original) {
+//RS         return Err(HistoryError::InvalidCase(
+//RS             "cannot shrink an invalid starting case".to_string(),
+//RS         ));
+//RS     }
+//RS     let initial = observe(original);
+//RS     match initial.status {
+//RS         ComparisonStatus::Mismatch => {}
+//RS         ComparisonStatus::InvalidOracle | ComparisonStatus::Contaminated => {
+//RS             return Err(HistoryError::InvalidOracle(
+//RS                 initial
+//RS                     .reason
+//RS                     .clone()
+//RS                     .unwrap_or_else(|| "comparison rejected the oracle".to_string()),
+//RS             ));
+//RS         }
+//RS         _ => return Err(HistoryError::NoFailure),
+//RS     }
+//RS     let mut current = original.clone();
+//RS     let mut current_record = initial.clone();
+//RS     let mut attempts = 0usize;
+//RS     loop {
+//RS         let mut changed = false;
+//RS         for index in 0..current.operations.len() {
+//RS             if attempts >= bounds.max_shrink_attempts {
+//RS                 break;
+//RS             }
+//RS             let mut remove = BTreeSet::new();
+//RS             remove.insert(index as u32);
+//RS             let Some(candidate) = current.without_indices(&remove) else {
+//RS                 continue;
+//RS             };
+//RS             attempts += 1;
+//RS             if candidate.validate().is_err()
+//RS                 || !case_within_bounds(&candidate, bounds)
+//RS                 || !valid(&candidate)
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             let candidate_record = observe(&candidate);
+//RS             if preserves_failure(&current_record, &candidate_record) {
+//RS                 current = candidate;
+//RS                 current_record = candidate_record;
+//RS                 changed = true;
+//RS                 break;
+//RS             }
+//RS         }
+//RS         if changed {
+//RS             continue;
+//RS         }
+//RS         'values: for operation_index in 0..current.operations.len() {
+//RS             let argument_count = current.operations[operation_index].arguments.len();
+//RS             for argument_index in 0..argument_count {
+//RS                 let values = current.operations[operation_index].arguments[argument_index].shrinks();
+//RS                 for value in values {
+//RS                     if attempts >= bounds.max_shrink_attempts {
+//RS                         break 'values;
+//RS                     }
+//RS                     let Some(candidate) =
+//RS                         current.with_argument(operation_index, argument_index, value)
+//RS                     else {
+//RS                         continue;
+//RS                     };
+//RS                     attempts += 1;
+//RS                     if candidate.validate().is_err()
+//RS                         || !case_within_bounds(&candidate, bounds)
+//RS                         || !valid(&candidate)
+//RS                     {
+//RS                         continue;
+//RS                     }
+//RS                     let candidate_record = observe(&candidate);
+//RS                     if preserves_failure(&current_record, &candidate_record) {
+//RS                         current = candidate;
+//RS                         current_record = candidate_record;
+//RS                         changed = true;
+//RS                         break 'values;
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         if !changed {
+//RS             break;
+//RS         }
+//RS     }
+//RS     Ok((current, current_record))
+//RS }
+//RS 
+//RS fn preserves_failure(previous: &ComparisonRecord, candidate: &ComparisonRecord) -> bool {
+//RS     if candidate.status != ComparisonStatus::Mismatch || previous.relation != candidate.relation {
+//RS         return false;
+//RS     }
+//RS     let Some(previous_sample) = previous.first_mismatch() else {
+//RS         return false;
+//RS     };
+//RS     let Some(candidate_sample) = candidate.first_mismatch() else {
+//RS         return false;
+//RS     };
+//RS     previous_sample.reference.typed_failure == candidate_sample.reference.typed_failure
+//RS         && previous_sample.candidate.typed_failure == candidate_sample.candidate.typed_failure
+//RS         && previous_sample.reference.mutation == candidate_sample.reference.mutation
+//RS         && previous_sample.candidate.mutation == candidate_sample.candidate.mutation
+//RS         && previous_sample.reference.cleanup == candidate_sample.reference.cleanup
+//RS         && previous_sample.candidate.cleanup == candidate_sample.candidate.cleanup
+//RS }
+//RS 
+//RS /// Run a bounded campaign.  Invalid, unavailable, and unsupported cases count
+//RS /// as discarded; oracle contamination is a hard error and never a pass.
+//RS pub struct HistoryRunner {
+//RS     config: HistoryConfig,
+//RS }
+//RS 
+//RS impl HistoryRunner {
+//RS     pub fn new(config: HistoryConfig) -> Result<Self, HistoryError> {
+//RS         config.validate()?;
+//RS         Ok(Self { config })
+//RS     }
+//RS 
+//RS     pub fn run<G, F>(&self, generate: G, observe: F) -> Result<HistoryRun, HistoryError>
+//RS     where
+//RS         G: FnMut(&mut HistoryRng, usize) -> Option<HistoryCase>,
+//RS         F: FnMut(&HistoryCase) -> ComparisonRecord,
+//RS     {
+//RS         self.run_with_validity(generate, |_| true, observe)
+//RS     }
+//RS 
+//RS     pub fn run_with_validity<G, V, F>(
+//RS         &self,
+//RS         mut generate: G,
+//RS         mut valid: V,
+//RS         mut observe: F,
+//RS     ) -> Result<HistoryRun, HistoryError>
+//RS     where
+//RS         G: FnMut(&mut HistoryRng, usize) -> Option<HistoryCase>,
+//RS         V: FnMut(&HistoryCase) -> bool,
+//RS         F: FnMut(&HistoryCase) -> ComparisonRecord,
+//RS     {
+//RS         let mut rng = HistoryRng::new(self.config.seed);
+//RS         let mut explored_cases = 0usize;
+//RS         let mut discarded_cases = 0usize;
+//RS         let mut vacuous_preconditions = 0usize;
+//RS         for case_index in 0..self.config.cases {
+//RS             let Some(case) = generate(&mut rng, case_index) else {
+//RS                 discarded_cases += 1;
+//RS                 if discarded_cases > self.config.bounds.max_discarded_cases {
+//RS                     return Err(HistoryError::InvalidConfig(
+//RS                         "discarded cases exceeded the configured bound".to_string(),
+//RS                     ));
+//RS                 }
+//RS                 continue;
+//RS             };
+//RS             if case.validate().is_err()
+//RS                 || !case_within_bounds(&case, self.config.bounds)
+//RS                 || !valid(&case)
+//RS             {
+//RS                 discarded_cases += 1;
+//RS                 if discarded_cases > self.config.bounds.max_discarded_cases {
+//RS                     return Err(HistoryError::InvalidConfig(
+//RS                         "discarded cases exceeded the configured bound".to_string(),
+//RS                     ));
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             vacuous_preconditions += case.vacuous_preconditions();
+//RS             let record = observe(&case);
+//RS             match record.status {
+//RS                 ComparisonStatus::InvalidOracle | ComparisonStatus::Contaminated => {
+//RS                     return Err(HistoryError::InvalidOracle(
+//RS                         record
+//RS                             .reason
+//RS                             .unwrap_or_else(|| "comparison rejected the oracle".to_string()),
+//RS                     ));
+//RS                 }
+//RS                 ComparisonStatus::Mismatch => {
+//RS                     let (reduced_case, reduced_record) = shrink_history_with_validity(
+//RS                         &case,
+//RS                         self.config.bounds,
+//RS                         &mut valid,
+//RS                         &mut observe,
+//RS                     )?;
+//RS                     let artifact = HistoryArtifact::new(
+//RS                         &self.config,
+//RS                         reduced_case,
+//RS                         reduced_record,
+//RS                         discarded_cases,
+//RS                     )?;
+//RS                     return Ok(HistoryRun {
+//RS                         seed: self.config.seed,
+//RS                         cases: self.config.cases,
+//RS                         bounds: self.config.bounds,
+//RS                         distributions: self.config.distributions.clone(),
+//RS                         explored_cases: explored_cases + 1,
+//RS                         discarded_cases,
+//RS                         vacuous_preconditions,
+//RS                         failure: Some(artifact),
+//RS                     });
+//RS                 }
+//RS                 ComparisonStatus::Matched => {
+//RS                     explored_cases += 1;
+//RS                 }
+//RS                 ComparisonStatus::Empty
+//RS                 | ComparisonStatus::Unsupported
+//RS                 | ComparisonStatus::Unavailable
+//RS                 | ComparisonStatus::Timeout
+//RS                 | ComparisonStatus::Cancelled => {
+//RS                     explored_cases += 1;
+//RS                     discarded_cases += 1;
+//RS                     if discarded_cases > self.config.bounds.max_discarded_cases {
+//RS                         return Err(HistoryError::InvalidConfig(
+//RS                             "discarded cases exceeded the configured bound".to_string(),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(HistoryRun {
+//RS             seed: self.config.seed,
+//RS             cases: self.config.cases,
+//RS             bounds: self.config.bounds,
+//RS             distributions: self.config.distributions.clone(),
+//RS             explored_cases,
+//RS             discarded_cases,
+//RS             vacuous_preconditions,
+//RS             failure: None,
+//RS         })
+//RS     }
+//RS     /// Run a campaign through a typed command strategy.  Shrinking rebuilds
+//RS     /// the command vector from each candidate case before domain validation,
+//RS     /// so a reduced metadata row cannot silently become an untyped operation.
+//RS     pub fn run_strategy<Command, Strategy, F>(
+//RS         &self,
+//RS         strategy: &Strategy,
+//RS         observe: F,
+//RS     ) -> Result<HistoryRun, HistoryError>
+//RS     where
+//RS         Command: HistoryCommand,
+//RS         Strategy: HistoryStrategyBehavior<Command>,
+//RS         F: FnMut(&TypedHistoryCase<Command>) -> ComparisonRecord,
+//RS     {
+//RS         if self.config.command_type != strategy.command_type() {
+//RS             return Err(HistoryError::InvalidConfig(format!(
+//RS                 "history command type `{}` does not match strategy `{}`",
+//RS                 self.config.command_type,
+//RS                 strategy.command_type()
+//RS             )));
+//RS         }
+//RS         if let Some(reason) = strategy.unsupported_reason() {
+//RS             return Err(HistoryError::InvalidConfig(reason.to_string()));
+//RS         }
+//RS         let expected_distributions = strategy.distributions();
+//RS         if self.config.distributions != expected_distributions {
+//RS             return Err(HistoryError::InvalidConfig(
+//RS                 "history distributions do not match the command strategy".to_string(),
+//RS             ));
+//RS         }
+//RS         let mut observe = observe;
+//RS         let relation = self.config.relation.clone();
+//RS         self.run_with_validity(
+//RS             |rng, index| strategy.generate(rng, index, self.config.bounds.max_steps).map(|typed| typed.case),
+//RS             |case| {
+//RS                 strategy
+//RS                     .rebuild(case)
+//RS                     .as_ref()
+//RS                     .is_some_and(|typed| strategy.valid(typed))
+//RS             },
+//RS             |case| match strategy.rebuild(case) {
+//RS                 Some(typed) => observe(&typed),
+//RS                 None => ComparisonRecord::terminal(
+//RS                     relation.clone(),
+//RS                     ComparisonStatus::Unavailable,
+//RS                     "history strategy could not rebuild a typed operation".to_string(),
+//RS                 ),
+//RS             },
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS fn push_booking_operation(
+//RS     case: &mut HistoryCase,
+//RS     name: &str,
+//RS     argument: Option<HandleId>,
+//RS     creates: Option<HandleId>,
+//RS     consumes: Option<HandleId>,
+//RS     state: Option<&str>,
+//RS ) {
+//RS     let index = case.operations.len() as u32;
+//RS     let task = TaskId { value: index % 2 };
+//RS     let event = EventId { value: index + 1 };
+//RS     let mut operation = HistoryOperation::new(index, name).scheduled_on(task, event);
+//RS     if index > 0 {
+//RS         let previous = index - 1;
+//RS         operation = operation
+//RS             .depends_on(previous)
+//RS             .requires(HistoryPrecondition::TaskCompleted(TaskId {
+//RS                 value: previous % 2,
+//RS             }))
+//RS             .requires(HistoryPrecondition::EventAvailable(EventId {
+//RS                 value: previous + 1,
+//RS             }));
+//RS     }
+//RS     if let Some(argument) = argument {
+//RS         operation = operation.with_argument(HistoryValue::Handle(argument));
+//RS     }
+//RS     if let Some(creates) = creates {
+//RS         operation = operation.creates(creates);
+//RS     }
+//RS     if let Some(consumes) = consumes {
+//RS         operation = operation.consumes(consumes);
+//RS     }
+//RS     if let Some(state) = state {
+//RS         if let Some(argument) = argument {
+//RS             operation = operation.requires(HistoryPrecondition::HandleState {
+//RS                 handle: argument,
+//RS                 state: state.to_string(),
+//RS             });
+//RS         }
+//RS     }
+//RS     case.push(operation);
+//RS     case.schedule(
+//RS         HistoryScheduleChoice::new(index, if name == "timeout" { "deliver-late" } else { "fifo" })
+//RS             .for_task_event(task, event),
+//RS     );
+//RS }
+//RS 
+//RS /// A small domain fixture used by the executable documentation and by focused
+//RS /// tests.  It deliberately injects a retry-after-timeout defect into only the
+//RS /// candidate side; the reference transition table is independent.
+//RS ///
+//RS /// The public generator below keeps the fixture useful to callers that want a
+//RS /// deterministic counterexample without adopting a private booking model.
+//RS pub fn generate_booking_history_case(
+//RS     rng: &mut HistoryRng,
+//RS     case_index: usize,
+//RS     max_steps: usize,
+//RS ) -> Option<HistoryCase> {
+//RS     if max_steps < 3 {
+//RS         return None;
+//RS     }
+//RS     let case_seed = rng.next_u64();
+//RS     let mut local = HistoryRng::new(case_seed);
+//RS     let mut case = HistoryCase::new(format!("booking-{case_index}"), case_seed);
+//RS     let mut next_handle = 1u32;
+//RS     let mut active = Vec::new();
+//RS     let mut terminal = Vec::new();
+//RS 
+//RS     let first = HandleId { value: next_handle };
+//RS     next_handle += 1;
+//RS     push_booking_operation(&mut case, "reserve", None, Some(first), None, None);
+//RS     push_booking_operation(
+//RS         &mut case,
+//RS         "timeout",
+//RS         Some(first),
+//RS         None,
+//RS         None,
+//RS         Some("active"),
+//RS     );
+//RS     terminal.push((first, "timed_out"));
+//RS 
+//RS     let second = HandleId { value: next_handle };
+//RS     next_handle += 1;
+//RS     push_booking_operation(
+//RS         &mut case,
+//RS         "retry",
+//RS         Some(first),
+//RS         Some(second),
+//RS         Some(first),
+//RS         Some("timed_out"),
+//RS     );
+//RS     active.push(second);
+//RS 
+//RS     while case.operations.len() < max_steps {
+//RS         let choice = local.below(8);
+//RS         if choice < 3 || (active.is_empty() && terminal.is_empty()) {
+//RS             let handle = HandleId { value: next_handle };
+//RS             next_handle += 1;
+//RS             push_booking_operation(&mut case, "reserve", None, Some(handle), None, None);
+//RS             active.push(handle);
+//RS         } else if choice < 5 && !active.is_empty() {
+//RS             let index = local.below(active.len() as u64) as usize;
+//RS             let handle = active[index];
+//RS             push_booking_operation(
+//RS                 &mut case,
+//RS                 "cancel",
+//RS                 Some(handle),
+//RS                 None,
+//RS                 None,
+//RS                 Some("active"),
+//RS             );
+//RS             active.swap_remove(index);
+//RS             terminal.push((handle, "cancelled"));
+//RS         } else if choice < 7 && !active.is_empty() {
+//RS             let index = local.below(active.len() as u64) as usize;
+//RS             let handle = active[index];
+//RS             push_booking_operation(
+//RS                 &mut case,
+//RS                 "timeout",
+//RS                 Some(handle),
+//RS                 None,
+//RS                 None,
+//RS                 Some("active"),
+//RS             );
+//RS             active.swap_remove(index);
+//RS             terminal.push((handle, "timed_out"));
+//RS         } else if !terminal.is_empty() {
+//RS             let index = local.below(terminal.len() as u64) as usize;
+//RS             let (handle, retry_state) = terminal.swap_remove(index);
+//RS             let replacement = HandleId { value: next_handle };
+//RS             next_handle += 1;
+//RS             push_booking_operation(
+//RS                 &mut case,
+//RS                 "retry",
+//RS                 Some(handle),
+//RS                 Some(replacement),
+//RS                 Some(handle),
+//RS                 Some(retry_state),
+//RS             );
+//RS             active.push(replacement);
+//RS         } else {
+//RS             let handle = HandleId { value: next_handle };
+//RS             next_handle += 1;
+//RS             push_booking_operation(&mut case, "reserve", None, Some(handle), None, None);
+//RS             active.push(handle);
+//RS         }
+//RS     }
+//RS     Some(case)
+//RS }
+//RS 
+//RS fn booking_case_is_valid(case: &HistoryCase) -> bool {
+//RS     if case.validate().is_err() || case.schedule.len() != case.operations.len() {
+//RS         return false;
+//RS     }
+//RS     let mut states = BTreeMap::<HandleId, &'static str>::new();
+//RS     for (position, operation) in case.operations.iter().enumerate() {
+//RS         let index = position as u32;
+//RS         if operation.task != Some(TaskId { value: index % 2 })
+//RS             || operation.event != Some(EventId { value: index + 1 })
+//RS             || (position > 0
+//RS                 && (operation.depends_on.as_slice() != [index - 1]
+//RS                     || !operation.preconditions.iter().any(|precondition| {
+//RS                         matches!(
+//RS                             precondition,
+//RS                             HistoryPrecondition::TaskCompleted(task)
+//RS                                 if *task == (TaskId {
+//RS                                     value: (index - 1) % 2,
+//RS                                 })
+//RS                         )
+//RS                     })
+//RS                     || !operation.preconditions.iter().any(|precondition| {
+//RS                         matches!(
+//RS                             precondition,
+//RS                             HistoryPrecondition::EventAvailable(event)
+//RS                             if *event == (EventId {
+//RS                                 value: index,
+//RS                             })
+//RS                         )
+//RS                     })))
+//RS         {
+//RS             return false;
+//RS         }
+//RS         let choice = &case.schedule[position];
+//RS         if choice.operation != index
+//RS             || choice.task != operation.task
+//RS             || choice.event != operation.event
+//RS             || choice.choice
+//RS                 != if operation.name == "timeout" {
+//RS                     "deliver-late"
+//RS                 } else {
+//RS                     "fifo"
+//RS                 }
+//RS         {
+//RS             return false;
+//RS         }
+//RS         let handle = operation
+//RS             .arguments
+//RS             .iter()
+//RS             .find_map(HistoryValue::handles);
+//RS         match operation.name.as_str() {
+//RS             "reserve" => {
+//RS                 if operation.creates.len() != 1
+//RS                     || handle.is_some()
+//RS                     || !operation.consumes.is_empty()
+//RS                 {
+//RS                     return false;
+//RS                 }
+//RS                 states.insert(operation.creates[0], "active");
+//RS             }
+//RS             "cancel" | "timeout" => {
+//RS                 let Some(handle) = handle else { return false };
+//RS                 let expected_state = if operation.name == "cancel" {
+//RS                     "active"
+//RS                 } else {
+//RS                     "active"
+//RS                 };
+//RS                 if states.get(&handle) != Some(&expected_state)
+//RS                     || !operation.creates.is_empty()
+//RS                     || !operation.consumes.is_empty()
+//RS                     || !operation.preconditions.iter().any(|precondition| {
+//RS                         matches!(
+//RS                             precondition,
+//RS                             HistoryPrecondition::HandleState {
+//RS                                 handle: precondition_handle,
+//RS                                 state
+//RS                             } if *precondition_handle == handle && state == expected_state
+//RS                         )
+//RS                     })
+//RS                 {
+//RS                     return false;
+//RS                 }
+//RS                 let next_state = if operation.name == "cancel" {
+//RS                     "cancelled"
+//RS                 } else {
+//RS                     "timed_out"
+//RS                 };
+//RS                 states.insert(handle, next_state);
+//RS             }
+//RS             "retry" => {
+//RS                 let Some(handle) = handle else { return false };
+//RS                 if !matches!(
+//RS                     states.get(&handle),
+//RS                     Some(&"cancelled") | Some(&"timed_out")
+//RS                 ) || operation.creates.len() != 1
+//RS                     || operation.consumes.as_slice() != [handle]
+//RS                     || !operation.preconditions.iter().any(|precondition| {
+//RS                         matches!(
+//RS                             precondition,
+//RS                             HistoryPrecondition::HandleState {
+//RS                                 handle: precondition_handle,
+//RS                                 state
+//RS                             } if *precondition_handle == handle
+//RS                                 && (state == "cancelled" || state == "timed_out")
+//RS                         )
+//RS                     })
+//RS                 {
+//RS                     return false;
+//RS                 }
+//RS                 states.remove(&handle);
+//RS                 states.insert(operation.creates[0], "active");
+//RS             }
+//RS             _ => return false,
+//RS         }
+//RS     }
+//RS     true
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS enum BookingState {
+//RS     Active,
+//RS     Cancelled,
+//RS     TimedOut,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default)]
+//RS struct BookingWorld {
+//RS     states: BTreeMap<HandleId, BookingState>,
+//RS     effects: Vec<String>,
+//RS }
+//RS 
+//RS impl BookingWorld {
+//RS     fn apply_reference(&mut self, operation: &HistoryOperation) {
+//RS         let handle = operation
+//RS             .arguments
+//RS             .iter()
+//RS             .find_map(HistoryValue::handles);
+//RS         match operation.name.as_str() {
+//RS             "reserve" => {
+//RS                 if let Some(created) = operation.creates.first().copied() {
+//RS                     self.states.insert(created, BookingState::Active);
+//RS                     self.effects.push(format!("reserve:{}", created.value));
+//RS                 }
+//RS             }
+//RS             "cancel" => {
+//RS                 if let Some(handle) = handle {
+//RS                     self.states.insert(handle, BookingState::Cancelled);
+//RS                     self.effects.push(format!("cancel:{}", handle.value));
+//RS                 }
+//RS             }
+//RS             "timeout" => {
+//RS                 if let Some(handle) = handle {
+//RS                     self.states.insert(handle, BookingState::TimedOut);
+//RS                     self.effects.push(format!("timeout:{}", handle.value));
+//RS                 }
+//RS             }
+//RS             "retry" => {
+//RS                 if let (Some(handle), Some(created)) = (handle, operation.creates.first().copied()) {
+//RS                     self.states.remove(&handle);
+//RS                     self.states.insert(created, BookingState::Active);
+//RS                     self.effects.push(format!("retry:{}->{}", handle.value, created.value));
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     fn apply_candidate(&mut self, operation: &HistoryOperation, injected_defect: bool) {
+//RS         let handle = operation
+//RS             .arguments
+//RS             .iter()
+//RS             .find_map(HistoryValue::handles);
+//RS         match operation.name.as_str() {
+//RS             "reserve" => {
+//RS                 if let Some(created) = operation.creates.first().copied() {
+//RS                     self.states.insert(created, BookingState::Active);
+//RS                     self.effects.push(format!("reserve:{}", created.value));
+//RS                 }
+//RS             }
+//RS             "cancel" => {
+//RS                 if let Some(handle) = handle {
+//RS                     self.states.insert(handle, BookingState::Cancelled);
+//RS                     self.effects.push(format!("cancel:{}", handle.value));
+//RS                 }
+//RS             }
+//RS             "timeout" => {
+//RS                 if let Some(handle) = handle {
+//RS                     self.states.insert(handle, BookingState::TimedOut);
+//RS                     self.effects.push(format!("timeout:{}", handle.value));
+//RS                 }
+//RS             }
+//RS             "retry" => {
+//RS                 if let (Some(handle), Some(created)) = (handle, operation.creates.first().copied()) {
+//RS                     let timed_out = self.states.get(&handle) == Some(&BookingState::TimedOut);
+//RS                     if !(injected_defect && timed_out) {
+//RS                         self.states.remove(&handle);
+//RS                     }
+//RS                     self.states.insert(created, BookingState::Active);
+//RS                     self.effects.push(format!("retry:{}->{}", handle.value, created.value));
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     fn observation(&self) -> ComparisonObservation {
+//RS         let raw = self
+//RS             .states
+//RS             .iter()
+//RS             .map(|(handle, state)| {
+//RS                 let state = match state {
+//RS                     BookingState::Active => "active",
+//RS                     BookingState::Cancelled => "cancelled",
+//RS                     BookingState::TimedOut => "timed_out",
+//RS                 };
+//RS                 format!("{}={state}", handle.value)
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         ComparisonObservation::failure(raw, "booking_state")
+//RS             .with_mutation("booking lifecycle")
+//RS             .with_effects(self.effects.clone())
+//RS             .with_cleanup(["booking handles released"])
+//RS     }
+//RS }
+//RS 
+//RS /// Compare one booking case through the canonical comparison engine.
+//RS pub fn compare_booking_case(
+//RS     case: &HistoryCase,
+//RS     injected_defect: bool,
+//RS ) -> Result<ComparisonRecord, HistoryError> {
+//RS     if !booking_case_is_valid(case) {
+//RS         return Err(HistoryError::InvalidCase(
+//RS             "booking case violates a state precondition".to_string(),
+//RS         ));
+//RS     }
+//RS     let mut reference = BookingWorld::default();
+//RS     let mut candidate = BookingWorld::default();
+//RS     for operation in &case.operations {
+//RS         reference.apply_reference(operation);
+//RS         candidate.apply_candidate(operation, injected_defect);
+//RS     }
+//RS     let mut identity = ComparisonIdentity::new(
+//RS         case.case_id.clone(),
+//RS         case.input_id(),
+//RS         "Examples/features/tooling/test_history/run.jet",
+//RS         HISTORY_ENGINE,
+//RS         "booking",
+//RS     );
+//RS     identity.seed = Some(case.seed);
+//RS     Ok(compare_samples(
+//RS         ObservationRelation::OrderedEffects,
+//RS         [ComparisonSample::new(
+//RS             identity,
+//RS             reference.observation(),
+//RS             candidate.observation(),
+//RS         )],
+//RS     ))
+//RS }
+//RS 
+//RS /// Deterministic executable fixture for the history example and focused
+//RS /// integration checks.  The injected candidate defect must yield a reduced
+//RS /// artifact; without it the bounded campaign is matched.
+//RS pub fn run_booking_history_campaign(
+//RS     seed: u64,
+//RS     cases: usize,
+//RS     injected_defect: bool,
+//RS ) -> Result<HistoryRun, HistoryError> {
+//RS     let bounds = HistoryBounds {
+//RS         max_steps: 8,
+//RS         max_resources: 32,
+//RS         max_shrink_attempts: 10_000,
+//RS         max_discarded_cases: cases,
+//RS     };
+//RS     let strategy = BookingHistoryStrategy::new();
+//RS     let config = HistoryConfig::new(
+//RS         seed,
+//RS         cases,
+//RS         bounds,
+//RS         "Examples/features/tooling/test_history/run.jet",
+//RS         HISTORY_ENGINE,
+//RS         "booking",
+//RS         ObservationRelation::OrderedEffects,
+//RS         OracleDeclaration::independent("booking.reference"),
+//RS     )
+//RS     .with_command_type(strategy.command_type());
+//RS     let config = <BookingHistoryStrategy as HistoryStrategyBehavior<BookingCommand>>::distributions(&strategy)
+//RS         .into_iter()
+//RS         .fold(config, |config, distribution| config.with_distribution(distribution));
+//RS     let runner = HistoryRunner::new(config)?;
+//RS     runner.run_strategy::<BookingCommand, _, _>(&strategy, |typed| {
+//RS         let case = &typed.case;
+//RS         compare_booking_case(case, injected_defect).unwrap_or_else(|error| {
+//RS             let identity = ComparisonIdentity::new(
+//RS                 case.case_id.clone(),
+//RS                 case.input_id(),
+//RS                 "Examples/features/tooling/test_history/run.jet",
+//RS                 HISTORY_ENGINE,
+//RS                 "booking",
+//RS             );
+//RS             ComparisonRecord {
+//RS                 schema_version: crate::TestingComparison::TEST_COMPARISON_SCHEMA_VERSION,
+//RS                 status: ComparisonStatus::InvalidOracle,
+//RS                 relation: ObservationRelation::OrderedEffects,
+//RS                 samples: vec![ComparisonSample::new(
+//RS                     identity,
+//RS                     ComparisonObservation::failure("invalid", "history_error"),
+//RS                     ComparisonObservation::failure(error.to_string(), "history_error"),
+//RS                 )],
+//RS                 discarded_cases: 0,
+//RS                 first_difference: None,
+//RS                 reduced_counterexample: None,
+//RS                 contamination: None,
+//RS                 reason: Some(error.to_string()),
+//RS                 universal_proof: false,
+//RS             }
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn injected_booking_defect_reduces_to_valid_replay() {
+//RS         let run = run_booking_history_campaign(41, 4, true).expect("campaign");
+//RS         let artifact = run.failure.expect("injected defect must mismatch");
+//RS         assert!(artifact.case.operations.len() <= 3);
+//RS         assert!(booking_case_is_valid(&artifact.case));
+//RS         assert_eq!(artifact.comparison.status, ComparisonStatus::Mismatch);
+//RS         assert_eq!(artifact.identity.input_id, artifact.case.input_id());
+//RS         assert!(artifact.json().contains("\"schedule\""));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn matched_booking_campaign_is_not_a_universal_proof() {
+//RS         let run = run_booking_history_campaign(41, 4, false).expect("campaign");
+//RS         assert!(!run.has_failure());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn shrinker_preserves_handles_and_domain_dependencies() {
+//RS         let run = run_booking_history_campaign(41, 4, true).expect("campaign");
+//RS         let artifact = run.failure.expect("mismatch");
+//RS         artifact.case.validate().expect("generic dependencies");
+//RS         let names = artifact
+//RS             .case
+//RS             .operations
+//RS             .iter()
+//RS             .map(|operation| operation.name.as_str())
+//RS             .collect::<Vec<_>>();
+//RS         assert_eq!(names, ["reserve", "timeout", "retry"]);
+//RS         assert_eq!(
+//RS             artifact.case.operations[2].consumes,
+//RS             [HandleId { value: 1 }]
+//RS         );
+//RS         assert_eq!(
+//RS             artifact.case.operations[2].creates,
+//RS             [HandleId { value: 2 }]
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn generated_histories_cover_operations_and_dependencies() {
+//RS         let mut seen = BTreeSet::new();
+//RS         for seed in 0..256 {
+//RS             let mut rng = HistoryRng::new(seed);
+//RS             let case = generate_booking_history_case(&mut rng, seed as usize, 8)
+//RS                 .expect("booking generator produces a bounded case");
+//RS             for (position, operation) in case.operations.iter().enumerate() {
+//RS                 seen.insert(operation.name.clone());
+//RS                 assert_eq!(
+//RS                     operation.task,
+//RS                     Some(TaskId {
+//RS                         value: (position as u32) % 2,
+//RS                     })
+//RS                 );
+//RS                 assert_eq!(
+//RS                     operation.event,
+//RS                     Some(EventId {
+//RS                         value: position as u32 + 1,
+//RS                     })
+//RS                 );
+//RS                 if position > 0 {
+//RS                     assert_eq!(operation.depends_on, [position as u32 - 1]);
+//RS                     assert!(operation
+//RS                         .preconditions
+//RS                         .iter()
+//RS                         .any(|precondition| matches!(
+//RS                             precondition,
+//RS                             HistoryPrecondition::TaskCompleted(task)
+//RS                                 if *task
+//RS                                     == (TaskId {
+//RS                                         value: (position as u32 - 1) % 2,
+//RS                                     })
+//RS                         )));
+//RS                     assert!(operation
+//RS                         .preconditions
+//RS                         .iter()
+//RS                         .any(|precondition| matches!(
+//RS                             precondition,
+//RS                             HistoryPrecondition::EventAvailable(event)
+//RS                                 if *event
+//RS                                     == (EventId {
+//RS                                         value: position as u32,
+//RS                                     })
+//RS                         )));
+//RS                 }
+//RS             }
+//RS             if ["reserve", "cancel", "timeout", "retry"]
+//RS                 .iter()
+//RS                 .all(|name| seen.contains(*name))
+//RS             {
+//RS                 break;
+//RS             }
+//RS         }
+//RS         assert!(["reserve", "cancel", "timeout", "retry"]
+//RS             .iter()
+//RS             .all(|name| seen.contains(*name)));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn history_artifact_repeats_and_replays_same_failure() {
+//RS         let first = run_booking_history_campaign(41, 4, true)
+//RS             .expect("campaign")
+//RS             .failure
+//RS             .expect("injected defect");
+//RS         let second = run_booking_history_campaign(41, 4, true)
+//RS             .expect("campaign")
+//RS             .failure
+//RS             .expect("injected defect");
+//RS         assert_eq!(first.json(), second.json());
+//RS         let replay = compare_booking_case(&first.case, true).expect("replay");
+//RS         assert_eq!(replay.status, ComparisonStatus::Mismatch);
+//RS         let original = first.comparison.first_mismatch().expect("artifact mismatch");
+//RS         let replayed = replay.first_mismatch().expect("replay mismatch");
+//RS         assert_eq!(replayed.reference.typed_failure, original.reference.typed_failure);
+//RS         assert_eq!(replayed.candidate.typed_failure, original.candidate.typed_failure);
+//RS         assert_eq!(replayed.reference.mutation, original.reference.mutation);
+//RS         assert_eq!(replayed.candidate.mutation, original.candidate.mutation);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn discarded_cases_stop_at_the_declared_bound() {
+//RS         let config = HistoryConfig::new(
+//RS             41,
+//RS             1,
+//RS             HistoryBounds {
+//RS                 max_steps: 1,
+//RS                 max_resources: 1,
+//RS                 max_shrink_attempts: 1,
+//RS                 max_discarded_cases: 0,
+//RS             },
+//RS             "test",
+//RS             "typed-history-v1",
+//RS             "unit",
+//RS             ObservationRelation::TypedEquality,
+//RS             OracleDeclaration::independent("model"),
+//RS         );
+//RS         let runner = HistoryRunner::new(config).expect("valid config");
+//RS         let error = runner
+//RS             .run(|_, _| None, |_| unreachable!("discarded cases are not observed"))
+//RS             .expect_err("discard bound must be enforced");
+//RS         assert_eq!(
+//RS             error,
+//RS             HistoryError::InvalidConfig("discarded cases exceeded the configured bound".to_string())
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn oracle_validation_rejects_direct_transitive_and_opaque_edges() {
+//RS         let direct = OracleDeclaration::independent("model")
+//RS             .with_dependency(OracleDependency::new(
+//RS                 "model",
+//RS                 "production",
+//RS                 OracleDependencyKind::ProductionBehavior,
+//RS             ));
+//RS         assert!(matches!(
+//RS             direct.validate_independence(),
+//RS             Err(HistoryError::InvalidOracle(_))
+//RS         ));
+//RS         let transitive = OracleDeclaration::independent("model")
+//RS             .with_dependency(OracleDependency::new(
+//RS                 "model",
+//RS                 "helper",
+//RS                 OracleDependencyKind::Independent,
+//RS             ))
+//RS             .with_dependency(OracleDependency::new(
+//RS                 "helper",
+//RS                 "production",
+//RS                 OracleDependencyKind::ProductionBehavior,
+//RS             ));
+//RS         assert!(transitive.validate_independence().is_err());
+//RS         let opaque = OracleDeclaration::independent("model").with_dependency(
+//RS             OracleDependency::new("model", "opaque", OracleDependencyKind::Opaque),
+//RS         );
+//RS         assert!(opaque.validate_independence().is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn secret_constructor_never_retains_secret_value() {
+//RS         assert_eq!(
+//RS             HistoryValue::secret("password=not-persisted", "credential"),
+//RS             HistoryValue::Redacted("credential".to_string())
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 0107 crates/jet-foundation/src/TestingHistory.rs:1808-3566
+

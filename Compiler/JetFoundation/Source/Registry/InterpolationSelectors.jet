@@ -1,0 +1,29 @@
+// Rust: Syntax/effects_surface.rs:275-393. One selector vocabulary for parser,
+// formatter and migrations; selectors are not applied rules.
+pub enum InterpolationSelectorKind { Debug Pretty Fixed Grouped Hex Pad PadLeft Sci Percent Bin Oct Unit }
+pub enum InterpolationSelectorArguments { NoArguments Precision Width WidthFill UnitStyle(styles: [String]) }
+pub struct InterpolationSelector { pub name: String, pub kind: InterpolationSelectorKind, pub arguments: InterpolationSelectorArguments }
+pub INTERPOLATION_SELECTOR_RAIL :: ":"
+pub RETIRED_INTERPOLATION_SELECTOR_RAIL :: "#"
+pub INTERPOLATION_SELECTORS :: [InterpolationSelector]{
+    InterpolationSelector{name: "Debug", kind: .Debug, arguments: .NoArguments},
+    InterpolationSelector{name: "Pretty", kind: .Pretty, arguments: .NoArguments},
+    InterpolationSelector{name: "Fixed", kind: .Fixed, arguments: .Precision},
+    InterpolationSelector{name: "Grouped", kind: .Grouped, arguments: .Precision},
+    InterpolationSelector{name: "Hex", kind: .Hex, arguments: .Width},
+    InterpolationSelector{name: "Pad", kind: .Pad, arguments: .WidthFill},
+    InterpolationSelector{name: "PadLeft", kind: .PadLeft, arguments: .WidthFill},
+    InterpolationSelector{name: "Sci", kind: .Sci, arguments: .Precision},
+    InterpolationSelector{name: "Percent", kind: .Percent, arguments: .Precision},
+    InterpolationSelector{name: "Bin", kind: .Bin, arguments: .NoArguments},
+    InterpolationSelector{name: "Oct", kind: .Oct, arguments: .NoArguments},
+    InterpolationSelector{name: "Unit", kind: .Unit, arguments: .UnitStyle{styles: [String]{"name", "bare"}}},
+}
+pub fn interpolation_selector(name: String) -> InterpolationSelector? Never! {
+    loop selector in INTERPOLATION_SELECTORS { if selector.name == name -> return Val(selector) }
+    None
+}
+pub fn interpolation_selector_for_kind(kind: InterpolationSelectorKind) -> InterpolationSelector Never! {
+    loop selector in INTERPOLATION_SELECTORS { if selector.kind == kind -> return selector }
+    panic("every interpolation selector kind has one registry row")
+}

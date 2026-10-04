@@ -1,0 +1,2026 @@
+// PORT-PENDING 0347 crates-jet-sema-src-sema-app: crates/jet-sema/src/Sema/App.rs:1-2022
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-WEBAPP1=D / D-WEBAUTHOR1=D: extract the `fn run` App builder into one typed
+//RS //! application graph and diagnose undeclared dynamic edges, stray convention
+//RS //! files, and builder/file collisions.
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, StrPart, Type};
+//RS use crate::Traits::TraitRegistry;
+//RS use jet_foundation::App::{
+//RS     stable_island_identity, stable_pending_boundary_id, stable_route_identity, AppAction,
+//RS     AppCacheFact, AppFormFact, AppFormFieldFact, AppGraph, AppHydrationTrigger, AppIslandFact,
+//RS     AppMount, AppQueryFact, AppRenderFactMode, AppRenderFacts, AppRenderMode, AppResumeCapture,
+//RS     AppResumePayload, AppRoute, AppRouteBoundaries, AppRouteField, AppRouteLoader, AppRoutesFrom,
+//RS     AppStoreFact,
+//RS };
+//RS use crate::Sema::Effects::EffectSet;
+//RS use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+//RS use std::path::Path;
+//RS 
+//RS /// Walk the entry module for the App-returning `fn run` and record the static
+//RS /// builder graph.
+//RS pub fn extract_app_graph(bundle: &ProgramBundle) -> (Option<AppGraph>, Vec<Diagnostic>) {
+//RS     let registries = TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
+//RS     let registry = registries
+//RS         .get(bundle.entry)
+//RS         .cloned()
+//RS         .unwrap_or_default();
+//RS     extract_app_graph_inner(bundle, None, &registry)
+//RS }
+//RS 
+//RS pub fn extract_app_graph_with_effects_and_registry(
+//RS     bundle: &ProgramBundle,
+//RS     solved: &HashMap<String, EffectSet>,
+//RS     trait_reg: &TraitRegistry,
+//RS ) -> (Option<AppGraph>, Vec<Diagnostic>) {
+//RS     extract_app_graph_inner(bundle, Some(solved), trait_reg)
+//RS }
+//RS 
+//RS fn extract_app_graph_inner(
+//RS     bundle: &ProgramBundle,
+//RS     solved: Option<&HashMap<String, EffectSet>>,
+//RS     trait_reg: &TraitRegistry,
+//RS ) -> (Option<AppGraph>, Vec<Diagnostic>) {
+//RS     let Some(module) = bundle.modules.get(bundle.entry) else {
+//RS         return (None, Vec::new());
+//RS     };
+//RS     let Some(run_fn) = crate::AST::app_entry_run_fn(&module.items) else {
+//RS         return (None, Vec::new());
+//RS     };
+//RS 
+//RS     let mut graph = AppGraph {
+//RS         entry_file: module.display.clone(),
+//RS         hydration: "dev-overlay".to_string(),
+//RS         shared_tir: true,
+//RS         ..AppGraph::default()
+//RS     };
+//RS     let mut known_fns: HashMap<String, Func> = HashMap::new();
+//RS     for candidate in &bundle.modules {
+//RS         for function in collect_fn_defs(&candidate.items) {
+//RS             known_fns.entry(function.name.clone()).or_insert(function);
+//RS         }
+//RS     }
+//RS     let serializable_types = collect_serializable_types(bundle);
+//RS     let mut diags = Vec::new();
+//RS     let mut current_render = AppRenderMode::Csr;
+//RS     let mut next_override: Option<AppRenderFactMode> = None;
+//RS     let mut seen_paths: HashMap<String, (String, Span)> = HashMap::new();
+//RS 
+//RS     for stmt in &run_fn.body {
+//RS         if let Some(expr) = stmt_expr(stmt) {
+//RS             walk_builder(
+//RS                 expr,
+//RS                 &mut graph,
+//RS                 &mut diags,
+//RS                 &mut current_render,
+//RS                 &mut next_override,
+//RS                 &mut seen_paths,
+//RS                 &known_fns,
+//RS                 "builder",
+//RS             );
+//RS         }
+//RS     }
+//RS     // D-DX-SERVERFN1=A: actions and progressive forms share one checked wire
+//RS     // signature. Validate the named handler after graph discovery so route
+//RS     // extraction does not invent a second serializer/type registry.
+//RS     for action in &graph.actions {
+//RS         if matches!(action.kind.as_str(), "action" | "form" | "data" | "loader") {
+//RS             if let Some(function) = known_fns.get(&action.handler) {
+//RS                 diags.extend(crate::Sema::CheckerCoreLib::validate_server_function_boundary(
+//RS                     function,
+//RS                     trait_reg,
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // D-WEBAUTHOR1=D: expand each `.routes(from:)` root exhaustively.
+//RS     let roots: Vec<AppRoutesFrom> = graph.routes_from.clone();
+//RS     for root in roots {
+//RS         expand_routes_from(
+//RS             bundle,
+//RS             &root,
+//RS             &mut graph,
+//RS             &mut diags,
+//RS             &mut seen_paths,
+//RS             current_render,
+//RS             next_override,
+//RS         );
+//RS     }
+//RS     derive_route_contracts(bundle, &mut graph, &mut diags);
+//RS     graph.routes.sort_by(|left, right| {
+//RS         route_precedence(&right.path)
+//RS             .cmp(&route_precedence(&left.path))
+//RS             .then_with(|| left.path.cmp(&right.path))
+//RS             .then_with(|| left.handler.cmp(&right.handler))
+//RS     });
+//RS 
+//RS     derive_render_facts(
+//RS         &mut graph,
+//RS         &module.items,
+//RS         module.alias.as_str(),
+//RS         solved,
+//RS         &serializable_types,
+//RS         &mut diags,
+//RS     );
+//RS 
+//RS     collect_query_facts(bundle, &mut graph);
+//RS     collect_store_facts(bundle, &mut graph);
+//RS     collect_form_facts(bundle, &mut graph);
+//RS     (Some(graph), diags)
+//RS }
+//RS 
+//RS fn collect_query_facts(bundle: &ProgramBundle, graph: &mut AppGraph) {
+//RS     let mut facts = BTreeSet::new();
+//RS     for module in &bundle.modules {
+//RS         for function in collect_fn_defs(&module.items) {
+//RS             for statement in &function.body {
+//RS                 statement.for_each_expr(|expr| {
+//RS                     let (kind, args) = match expr {
+//RS                         Expr::Call(call) => {
+//RS                             (query_call_kind(&call.name), call.args.as_slice())
+//RS                         }
+//RS                         Expr::MethodCall {
+//RS                             receiver,
+//RS                             method,
+//RS                             args,
+//RS                             ..
+//RS                         } if is_query_receiver(receiver) => {
+//RS                             (query_method_kind(method), args.as_slice())
+//RS                         }
+//RS                         _ => return,
+//RS                     };
+//RS                     let Some(kind) = kind else {
+//RS                         return;
+//RS                     };
+//RS                     let (key, footprint) = if kind == "live" {
+//RS                         let Some(key) = const_string_arg(args, 0) else {
+//RS                             return;
+//RS                         };
+//RS                         let Some(footprint) = const_string_arg(args, 1) else {
+//RS                             return;
+//RS                         };
+//RS                         (key, footprint)
+//RS                     } else {
+//RS                         let Some(source) = const_string_arg(args, 0) else {
+//RS                             return;
+//RS                         };
+//RS                         (source.clone(), format!("ext:{source}"))
+//RS                     };
+//RS                     if key.trim().is_empty() || footprint.trim().is_empty() {
+//RS                         return;
+//RS                     }
+//RS                     facts.insert((
+//RS                         key,
+//RS                         footprint,
+//RS                         function.name.clone(),
+//RS                         kind.to_string(),
+//RS                     ));
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS     graph.queries = facts
+//RS         .into_iter()
+//RS         .map(|(key, footprint, source, kind)| AppQueryFact {
+//RS             key,
+//RS             footprint,
+//RS             source,
+//RS             kind,
+//RS         })
+//RS         .collect();
+//RS }
+//RS 
+//RS fn query_call_kind(name: &str) -> Option<&'static str> {
+//RS     match name {
+//RS         "query.live" | "web.query.live" | "core.web.query.live" => Some("live"),
+//RS         "query.subscribe"
+//RS         | "web.query.subscribe"
+//RS         | "core.web.query.subscribe" => Some("subscribe"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn query_method_kind(name: &str) -> Option<&'static str> {
+//RS     match name {
+//RS         "live" => Some("live"),
+//RS         "subscribe" => Some("subscribe"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn is_query_receiver(expr: &Expr) -> bool {
+//RS     match expr {
+//RS         Expr::Ident(name, _) => matches!(
+//RS             name.as_str(),
+//RS             "query" | "web.query" | "core.web.query"
+//RS         ),
+//RS         Expr::Field(base, field, _) => {
+//RS             field == "query"
+//RS                 && matches!(
+//RS                     base.as_ref(),
+//RS                     Expr::Ident(name, _) if matches!(name.as_str(), "web" | "core.web")
+//RS                 )
+//RS         }
+//RS         Expr::Paren(inner, _) => is_query_receiver(inner),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS fn collect_store_facts(bundle: &ProgramBundle, graph: &mut AppGraph) {
+//RS     let mut facts = BTreeSet::new();
+//RS     for module in &bundle.modules {
+//RS         for function in collect_fn_defs(&module.items) {
+//RS             for statement in &function.body {
+//RS                 statement.for_each_expr(|expr| {
+//RS                     let (kind, args) = match expr {
+//RS                         Expr::Call(call) => {
+//RS                             (store_call_kind(&call.name), call.args.as_slice())
+//RS                         }
+//RS                         Expr::MethodCall {
+//RS                             receiver,
+//RS                             method,
+//RS                             args,
+//RS                             ..
+//RS                         } if is_store_receiver(receiver) => {
+//RS                             (store_method_kind(method), args.as_slice())
+//RS                         }
+//RS                         _ => return,
+//RS                     };
+//RS                     let Some(kind) = kind else {
+//RS                         return;
+//RS                     };
+//RS                     let Some(name) = const_string_arg(args, 0) else {
+//RS                         return;
+//RS                     };
+//RS                     if name.trim().is_empty() {
+//RS                         return;
+//RS                     }
+//RS                     let history_limit = if kind == "with_history" {
+//RS                         const_int_arg(args, 2)
+//RS                             .map_or_else(|| "<dynamic>".to_string(), |value| value.to_string())
+//RS                     } else {
+//RS                         "default".to_string()
+//RS                     };
+//RS                     facts.insert((name, function.name.clone(), kind.to_string(), history_limit));
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS     graph.stores = facts
+//RS         .into_iter()
+//RS         .map(
+//RS             |(name, source, kind, history_limit)| AppStoreFact {
+//RS                 name,
+//RS                 source,
+//RS                 kind,
+//RS                 history_limit,
+//RS             },
+//RS         )
+//RS         .collect();
+//RS }
+//RS 
+//RS fn store_call_kind(name: &str) -> Option<&'static str> {
+//RS     match name {
+//RS         "store" | "web.store" | "core.web.store" => Some("default"),
+//RS         "store.with_history" | "web.store.with_history" | "core.web.store.with_history" => {
+//RS             Some("with_history")
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn store_method_kind(name: &str) -> Option<&'static str> {
+//RS     match name {
+//RS         "new" => Some("default"),
+//RS         "with_history" => Some("with_history"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn is_store_receiver(expr: &Expr) -> bool {
+//RS     match expr {
+//RS         Expr::Ident(name, _) => matches!(
+//RS             name.as_str(),
+//RS             "store" | "web.store" | "core.web.store"
+//RS         ),
+//RS         Expr::Field(base, field, _) => {
+//RS             field == "store"
+//RS                 && matches!(
+//RS                     base.as_ref(),
+//RS                     Expr::Ident(name, _) if matches!(name.as_str(), "web" | "core.web")
+//RS                 )
+//RS         }
+//RS         Expr::Paren(inner, _) => is_store_receiver(inner),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS /// D-WEBFORM1=A: project each checked `web.form(Model, action: handler)` call
+//RS /// onto the App graph. The projection reads the same model fields and action
+//RS /// contract as the core-call elaborator; it never stores live values.
+//RS fn collect_form_facts(bundle: &ProgramBundle, graph: &mut AppGraph) {
+//RS     let mut facts = BTreeMap::new();
+//RS     for module in &bundle.modules {
+//RS         for function in collect_fn_defs(&module.items) {
+//RS             for statement in &function.body {
+//RS                 statement.for_each_expr(|expr| {
+//RS                     let Some((model, action, span)) = form_call_parts(expr) else {
+//RS                         return;
+//RS                     };
+//RS                     let Some(record) = find_struct_bundle(bundle, &model) else {
+//RS                         return;
+//RS                     };
+//RS                     let fields = record
+//RS                         .fields
+//RS                         .iter()
+//RS                         .filter(|field| field.computed.is_none())
+//RS                         .map(|field| {
+//RS                             let base = match &field.ty {
+//RS                                 Type::Option(inner) => inner.as_ref(),
+//RS                                 ty => ty,
+//RS                             };
+//RS                             let (ty, control) = match base {
+//RS                                 Type::Int | Type::IntN { .. } => {
+//RS                                     ("Int".to_string(), "Number".to_string())
+//RS                                 }
+//RS                                 Type::Float => ("Float".to_string(), "Number".to_string()),
+//RS                                 Type::Bool => ("Bool".to_string(), "Checkbox".to_string()),
+//RS                                 Type::String => ("String".to_string(), "Text".to_string()),
+//RS                                 other => (other.name(), "Text".to_string()),
+//RS                             };
+//RS                             AppFormFieldFact {
+//RS                                 name: field.name.clone(),
+//RS                                 ty,
+//RS                                 required: !matches!(field.ty, Type::Option(_))
+//RS                                     && field.default.is_none(),
+//RS                                 default: field
+//RS                                     .default
+//RS                                     .as_deref()
+//RS                                     .and_then(|default| const_wire_text(Some(default))),
+//RS                                 label: form_label(&field.name),
+//RS                                 control,
+//RS                                 wire_name: field.name.clone(),
+//RS                             }
+//RS                         })
+//RS                         .collect::<Vec<_>>();
+//RS                     let action_fn = find_func_bundle(bundle, &action);
+//RS                     let (
+//RS                         input_type,
+//RS                         output_type,
+//RS                         error_type,
+//RS                         endpoint,
+//RS                         method,
+//RS                         csrf,
+//RS                         effects,
+//RS                         middleware,
+//RS                     ) = app_action_contract(action_fn, &action);
+//RS                     let fact = AppFormFact {
+//RS                         name: model.clone(),
+//RS                         model: model.clone(),
+//RS                         action: action.clone(),
+//RS                         input_type,
+//RS                         output_type,
+//RS                         error_type,
+//RS                         endpoint,
+//RS                         method,
+//RS                         csrf,
+//RS                         effects,
+//RS                         fields,
+//RS                         middleware,
+//RS                         provenance: function.name.clone(),
+//RS                         span_start: span.start,
+//RS                         span_end: span.end,
+//RS                     };
+//RS                     facts
+//RS                         .entry((model, action, function.name.clone()))
+//RS                         .or_insert(fact);
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS     graph.forms = facts.into_values().collect();
+//RS }
+//RS 
+//RS fn form_call_parts(expr: &Expr) -> Option<(String, String, Span)> {
+//RS     let Expr::Call(call) = expr else {
+//RS         return None;
+//RS     };
+//RS     if !matches!(
+//RS         call.name.as_str(),
+//RS         "form" | "web.form" | "core.web.form"
+//RS     ) {
+//RS         return None;
+//RS     }
+//RS     if call.args.len() != 2 {
+//RS         return None;
+//RS     }
+//RS     let action_index = call
+//RS         .args
+//RS         .iter()
+//RS         .position(|arg| arg.label.as_ref().is_some_and(|(label, _)| label == "action"))
+//RS         .unwrap_or(1);
+//RS     let model_index = if action_index == 0 { 1 } else { 0 };
+//RS     let model = form_model_name(&call.args.get(model_index)?.expr)?;
+//RS     let action = const_string_expr(&call.args.get(action_index)?.expr)
+//RS         .or_else(|| handler_name(call.args.get(action_index)))?;
+//RS     (!model.is_empty() && !action.is_empty()).then_some((model, action, call.name_span))
+//RS }
+//RS 
+//RS fn form_model_name(expr: &Expr) -> Option<String> {
+//RS     match expr {
+//RS         Expr::Ident(name, _) => Some(name.clone()),
+//RS         Expr::Paren(inner, _) => form_model_name(inner),
+//RS         Expr::OrFallback { value, .. } => form_model_name(value),
+//RS         Expr::MethodCall { method, args, .. } if method == "input" => {
+//RS             const_string_arg(args, 0)
+//RS         }
+//RS         Expr::Call(call) if call.name.ends_with(".input") || call.name == "input" => {
+//RS             const_string_arg(&call.args, 0)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn form_label(name: &str) -> String {
+//RS     name.split('_')
+//RS         .filter(|part| !part.is_empty())
+//RS         .map(|part| {
+//RS             let mut chars = part.chars();
+//RS             let Some(first) = chars.next() else {
+//RS                 return String::new();
+//RS             };
+//RS             first.to_uppercase().collect::<String>() + chars.as_str()
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(" ")
+//RS }
+//RS 
+//RS 
+//RS fn collect_fn_defs(items: &[Item]) -> Vec<Func> {
+//RS     let mut functions = Vec::new();
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(function) => functions.push(function.clone()),
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     functions.extend(collect_fn_defs(body));
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     functions
+//RS }
+//RS 
+//RS fn stmt_expr(stmt: &Stmt) -> Option<&Expr> {
+//RS     match stmt {
+//RS         Stmt::Expr(expr) => Some(expr),
+//RS         Stmt::Return(Some(expr), _) => Some(expr),
+//RS         Stmt::Val(binding) => Some(&binding.init),
+//RS         Stmt::Assign { value, .. } => Some(value),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn walk_builder(
+//RS     expr: &Expr,
+//RS     graph: &mut AppGraph,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     current_render: &mut AppRenderMode,
+//RS     next_override: &mut Option<AppRenderFactMode>,
+//RS     seen_paths: &mut HashMap<String, (String, Span)>,
+//RS     known_fns: &HashMap<String, Func>,
+//RS     provenance: &str,
+//RS ) {
+//RS     match expr {
+//RS         Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             method_span,
+//RS             ..
+//RS         } => {
+//RS             walk_builder(
+//RS                 receiver,
+//RS                 graph,
+//RS                 diags,
+//RS                 current_render,
+//RS                 next_override,
+//RS                 seen_paths,
+//RS                 known_fns,
+//RS                 provenance,
+//RS             );
+//RS             apply_method(
+//RS                 method,
+//RS                 args,
+//RS                 *method_span,
+//RS                 graph,
+//RS                 diags,
+//RS                 current_render,
+//RS                 next_override,
+//RS                 seen_paths,
+//RS                 known_fns,
+//RS                 provenance,
+//RS             );
+//RS         }
+//RS         // Sema may materialize an owning value, preserve a read place, or lift
+//RS         // the return payload through `Ok` around the root builder expression.
+//RS         // These wrappers do not change the application graph, so keep walking
+//RS         // through them.
+//RS         Expr::Copy(inner, _)
+//RS         | Expr::Place(inner, _, _)
+//RS         | Expr::Paren(inner, _)
+//RS         | Expr::Ok(inner, _) => {
+//RS             walk_builder(
+//RS                 inner,
+//RS                 graph,
+//RS                 diags,
+//RS                 current_render,
+//RS                 next_override,
+//RS                 seen_paths,
+//RS                 known_fns,
+//RS                 provenance,
+//RS             );
+//RS         }
+//RS         Expr::Call(call) => {
+//RS             if is_app_ctor_name(&call.name) && call.args.is_empty() {
+//RS                 return;
+//RS             }
+//RS             for arg in &call.args {
+//RS                 walk_builder(
+//RS                     &arg.expr,
+//RS                     graph,
+//RS                     diags,
+//RS                     current_render,
+//RS                     next_override,
+//RS                     seen_paths,
+//RS                     known_fns,
+//RS                     provenance,
+//RS                 );
+//RS             }
+//RS         }
+//RS         Expr::Field(base, field, _) if field == "app" => {
+//RS             let _ = base;
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn is_app_ctor_name(name: &str) -> bool {
+//RS     matches!(name, "app" | "web.app" | "core.web.app")
+//RS }
+//RS fn app_action_contract(
+//RS     function: Option<&Func>,
+//RS     name: &str,
+//RS ) -> (String, String, String, String, String, String, Vec<String>, Vec<String>) {
+//RS     let endpoint = format!("/actions/{name}");
+//RS     let method = "POST".to_string();
+//RS     let csrf = "same-origin".to_string();
+//RS     let Some(function) = function else {
+//RS         return (
+//RS             String::new(),
+//RS             String::new(),
+//RS             String::new(),
+//RS             endpoint,
+//RS             method,
+//RS             csrf,
+//RS             Vec::new(),
+//RS             Vec::new(),
+//RS         );
+//RS     };
+//RS     let params = function
+//RS         .params
+//RS         .iter()
+//RS         .filter(|parameter| parameter.name != "self")
+//RS         .collect::<Vec<_>>();
+//RS     let input_type = match params.as_slice() {
+//RS         [] => "Unit".to_string(),
+//RS         [parameter] => parameter.ty.name(),
+//RS         _ => format!(
+//RS             "({})",
+//RS             params
+//RS                 .iter()
+//RS                 .map(|parameter| format!("{}:{}", parameter.name, parameter.ty.name()))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         ),
+//RS     };
+//RS     let (output_type, error_type) = match function.failure_contract() {
+//RS         crate::AST::FailureContract::Default { success, error }
+//RS         | crate::AST::FailureContract::Explicit { success, error }
+//RS         | crate::AST::FailureContract::Inferred { success, error } => {
+//RS             (success.name(), error.name())
+//RS         }
+//RS         crate::AST::FailureContract::Optional { success } => (success.name(), "Never".to_string()),
+//RS         crate::AST::FailureContract::DeclaredNever => ("Never".to_string(), "Never".to_string()),
+//RS         crate::AST::FailureContract::Converted { success, target, .. } => {
+//RS             (success.name(), target.name())
+//RS         }
+//RS         crate::AST::FailureContract::ProvenUnreachable { success }
+//RS         | crate::AST::FailureContract::InferredNever { success } => {
+//RS             (success.name(), "Never".to_string())
+//RS         }
+//RS     };
+//RS     let effects = function
+//RS         .declared_effects
+//RS         .as_ref()
+//RS         .map(|effects| effects.iter().map(|(name, _)| name.clone()).collect())
+//RS         .unwrap_or_default();
+//RS     let middleware = jet_foundation::App::APP_SERVER_FUNCTION_MIDDLEWARE
+//RS         .iter()
+//RS         .map(|name| name.as_str().to_string())
+//RS         .collect();
+//RS     (
+//RS         input_type,
+//RS         output_type,
+//RS         error_type,
+//RS         endpoint,
+//RS         method,
+//RS         csrf,
+//RS         effects,
+//RS         middleware,
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS fn apply_method(
+//RS     method: &str,
+//RS     args: &[crate::AST::CallArg],
+//RS     method_span: Span,
+//RS     graph: &mut AppGraph,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     current_render: &mut AppRenderMode,
+//RS     next_override: &mut Option<AppRenderFactMode>,
+//RS     seen_paths: &mut HashMap<String, (String, Span)>,
+//RS     known_fns: &HashMap<String, Func>,
+//RS     provenance: &str,
+//RS ) {
+//RS     match method {
+//RS         "route" | "page" | "layout" => {
+//RS             let path = canonical_route_path(
+//RS                 &const_string_arg(args, 0).unwrap_or_else(|| "/".to_string()),
+//RS             );
+//RS             let handler = handler_name(args.get(1)).unwrap_or_else(|| "<dynamic>".to_string());
+//RS             if handler == "<dynamic>" || !known_fns.contains_key(&handler) {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E2810",
+//RS                     format!("route `{path}` is not a statically known handler"),
+//RS                     "D-WEBAPP1 keeps every route on the typed application graph; a runtime-built handler outside `.mount` is an unanalyzed edge".to_string(),
+//RS                     "pass a named function, or declare a typed `.mount(prefix, handler)` for dynamic subtrees".to_string(),
+//RS                     Some(method_span),
+//RS                 ));
+//RS             }
+//RS             let route_override = next_override.take();
+//RS             let render_facts = route_override.map_or_else(AppRenderFacts::default, |mode| {
+//RS                 AppRenderFacts {
+//RS                     mode,
+//RS                     reason: vec![format!("explicit render mode `{}`", mode.as_str())],
+//RS                     override_mode: Some(mode),
+//RS                     ..AppRenderFacts::default()
+//RS                 }
+//RS             });
+//RS             record_route(
+//RS                 graph,
+//RS                 diags,
+//RS                 seen_paths,
+//RS                 AppRoute {
+//RS                     path: path.clone(),
+//RS                     handler: handler.clone(),
+//RS                     route_identity: stable_route_identity(&path, &handler),
+//RS                     path_params: Vec::new(),
+//RS                     search_params: Vec::new(),
+//RS                     search_codec: "query".to_string(),
+//RS                     loader: None,
+//RS                     boundaries: AppRouteBoundaries::default(),
+//RS                     precedence: route_precedence_name(&path),
+//RS                     render: *current_render,
+//RS                     render_facts,
+//RS                     provenance: provenance.to_string(),
+//RS                     span_start: method_span.start,
+//RS                     span_end: method_span.end,
+//RS                 },
+//RS             );
+//RS         }
+//RS         "action" | "form" | "data" | "loader" => {
+//RS             let name = if method == "loader" {
+//RS                 handler_name(args.get(0))
+//RS                     .or_else(|| const_string_arg(args, 0))
+//RS                     .unwrap_or_else(|| method.to_string())
+//RS             } else {
+//RS                 const_string_arg(args, 0).unwrap_or_else(|| method.to_string())
+//RS             };
+//RS             let handler = handler_name(args.get(1)).unwrap_or_else(|| "<dynamic>".to_string());
+//RS             let preload = method == "loader" && labeled_bool_arg(args, "preload").unwrap_or(false);
+//RS             if handler == "<dynamic>" || !known_fns.contains_key(&handler) {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E2810",
+//RS                     format!("`{method}` `{name}` is not a statically known handler"),
+//RS                     "D-WEBAPP1 records actions/forms/data on the typed application graph; a runtime value outside `.mount` is an unanalyzed edge".to_string(),
+//RS                     "pass a named function, or declare a typed `.mount(prefix, handler)` for dynamic registration".to_string(),
+//RS                     Some(method_span),
+//RS                 ));
+//RS             }
+//RS             if method == "loader" {
+//RS                 // The runtime graph attaches a loader to the route registered
+//RS                 // immediately before it; the source must name that handler.
+//RS                 let attached = graph
+//RS                     .routes
+//RS                     .last()
+//RS                     .is_some_and(|route| route.handler == name);
+//RS                 if !attached {
+//RS                     diags.push(Diagnostic::error(
+//RS                         "E2810",
+//RS                         format!("`loader` for `{name}` does not follow that route registration"),
+//RS                         "a loader belongs to the route registered immediately before it in the App graph".to_string(),
+//RS                         format!("write `.loader({name}, …)` directly after `.route(path, {name})`"),
+//RS                         Some(method_span),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             let (
+//RS                 input_type,
+//RS                 output_type,
+//RS                 error_type,
+//RS                 endpoint,
+//RS                 method_name,
+//RS                 csrf,
+//RS                 effects,
+//RS                 middleware,
+//RS             ) = app_action_contract(known_fns.get(&handler), &name);
+//RS             graph.actions.push(AppAction {
+//RS                 name,
+//RS                 handler,
+//RS                 kind: method.to_string(),
+//RS                 preload,
+//RS                 input_type,
+//RS                 output_type,
+//RS                 error_type,
+//RS                 endpoint,
+//RS                 method: method_name,
+//RS                 csrf,
+//RS                 effects,
+//RS                 middleware,
+//RS                 provenance: provenance.to_string(),
+//RS                 span_start: method_span.start,
+//RS                 span_end: method_span.end,
+//RS             });
+//RS         }
+//RS         "pending" | "not_found" | "error" => {
+//RS             let handler = handler_name(args.first()).unwrap_or_else(|| "<dynamic>".to_string());
+//RS             if handler == "<dynamic>" || !known_fns.contains_key(&handler) {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E2810",
+//RS                     format!("`{method}` boundary is not a statically known handler"),
+//RS                     "route boundaries are part of the checked App graph and cannot be selected at runtime".to_string(),
+//RS                     "pass a named boundary function after a route registration".to_string(),
+//RS                     Some(method_span),
+//RS                 ));
+//RS             }
+//RS             if let Some(route) = graph.routes.last_mut() {
+//RS                 match method {
+//RS                     "pending" => route.boundaries.pending = Some(handler),
+//RS                     "not_found" => route.boundaries.not_found = Some(handler),
+//RS                     "error" => route.boundaries.error = Some(handler),
+//RS                     _ => {}
+//RS                 }
+//RS             } else {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E2810",
+//RS                     format!("`{method}` boundary has no preceding route"),
+//RS                     "a boundary must attach to one route identity in the App graph".to_string(),
+//RS                     "register a route before declaring its boundary".to_string(),
+//RS                     Some(method_span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         "mount" => {
+//RS             let prefix = const_string_arg(args, 0).unwrap_or_else(|| "/".to_string());
+//RS             let handler = handler_name(args.get(1)).unwrap_or_else(|| "<mount>".to_string());
+//RS             let mut effects = Vec::new();
+//RS             let mut security = Vec::new();
+//RS             if let Some(arg) = args.get(2) {
+//RS                 if let Some(s) = const_string_expr(&arg.expr) {
+//RS                     effects.push(s);
+//RS                 }
+//RS             }
+//RS             if let Some(arg) = args.get(3) {
+//RS                 if let Some(s) = const_string_expr(&arg.expr) {
+//RS                     security.push(s);
+//RS                 }
+//RS             }
+//RS             graph.mounts.push(AppMount {
+//RS                 prefix,
+//RS                 handler,
+//RS                 effects,
+//RS                 security,
+//RS                 provenance: provenance.to_string(),
+//RS                 span_start: method_span.start,
+//RS                 span_end: method_span.end,
+//RS             });
+//RS         }
+//RS         "routes" => {
+//RS             let root = labeled_string_arg(args, "from")
+//RS                 .or_else(|| const_string_arg(args, 0))
+//RS                 .unwrap_or_default();
+//RS             if root.is_empty() {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E2806",
+//RS                     "`.routes(from:)` needs a directory path".to_string(),
+//RS                     "file routing activates only through an explicit builder opt-in (D-WEBAUTHOR1)"
+//RS                         .to_string(),
+//RS                     "write `.routes(from: \"routes\")` with the convention root".to_string(),
+//RS                     Some(method_span),
+//RS                 ));
+//RS             } else {
+//RS                 graph.routes_from.push(AppRoutesFrom {
+//RS                     root,
+//RS                     span_start: method_span.start,
+//RS                     span_end: method_span.end,
+//RS                 });
+//RS             }
+//RS         }
+//RS         "csr" => {
+//RS             *current_render = AppRenderMode::Csr;
+//RS             *next_override = Some(AppRenderFactMode::from_legacy(*current_render));
+//RS         }
+//RS         "ssr" => {
+//RS             *current_render = AppRenderMode::Ssr;
+//RS             *next_override = Some(AppRenderFactMode::from_legacy(*current_render));
+//RS         }
+//RS         "ssg" => {
+//RS             *current_render = AppRenderMode::Ssg;
+//RS             *next_override = Some(AppRenderFactMode::from_legacy(*current_render));
+//RS         }
+//RS         "stream" | "streaming" => {
+//RS             *current_render = AppRenderMode::Stream;
+//RS             *next_override = Some(AppRenderFactMode::from_legacy(*current_render));
+//RS         }
+//RS         "island" => {
+//RS             *current_render = AppRenderMode::Island;
+//RS             *next_override = Some(AppRenderFactMode::from_legacy(*current_render));
+//RS         }
+//RS         "render" => {
+//RS             if let Some(mode) = render_mode_arg(args) {
+//RS                 let legacy = legacy_render_mode(mode);
+//RS                 *current_render = legacy;
+//RS                 *next_override = Some(mode);
+//RS                 if let Some(route) = graph.routes.last_mut() {
+//RS                     route.render = legacy;
+//RS                     route.render_facts = AppRenderFacts {
+//RS                         mode,
+//RS                         reason: vec![format!("explicit render mode `{}`", mode.as_str())],
+//RS                         override_mode: Some(mode),
+//RS                         ..AppRenderFacts::default()
+//RS                     };
+//RS                 }
+//RS             }
+//RS         }
+//RS         "security" => {
+//RS             if let Some(s) = const_string_arg(args, 0) {
+//RS                 graph.policy.security.push(s);
+//RS             }
+//RS         }
+//RS         "assets" => {
+//RS             if let Some(s) = const_string_arg(args, 0) {
+//RS                 graph.policy.assets.push(s);
+//RS             }
+//RS         }
+//RS         "split" | "code_split" => {
+//RS             if let Some(s) = const_string_arg(args, 0) {
+//RS                 graph.policy.split.push(s);
+//RS             }
+//RS         }
+//RS         "cache" => {
+//RS             if let Some(policy) = const_string_arg(args, 1) {
+//RS                 if let Some(route) = graph.routes.last_mut() {
+//RS                     if const_string_arg(args, 0).as_deref() == Some(route.path.as_str()) {
+//RS                         if let Some(cache) = AppCacheFact::parse(&policy) {
+//RS                             route.render_facts.cache = cache;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 graph.policy.cache.push(policy);
+//RS             } else if let Some(policy) = const_string_arg(args, 0) {
+//RS                 graph.policy.cache.push(policy);
+//RS             }
+//RS         }
+//RS         "a11y" => {
+//RS             if let Some(s) = const_string_arg(args, 0) {
+//RS                 graph.policy.a11y.push(s);
+//RS             }
+//RS         }
+//RS         "adapter" => {
+//RS             if let Some(s) = const_string_arg(args, 0) {
+//RS                 graph.policy.adapters.push(s);
+//RS             }
+//RS         }
+//RS         "hydration_release" => {
+//RS             graph.hydration = "release-keep-server".to_string();
+//RS         }
+//RS         "hydration_dev" => {
+//RS             graph.hydration = "dev-overlay".to_string();
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn record_route(
+//RS     graph: &mut AppGraph,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     seen_paths: &mut HashMap<String, (String, Span)>,
+//RS     route: AppRoute,
+//RS ) {
+//RS     let span = Span::new(route.span_start, route.span_end);
+//RS     if let Some((prev_prov, prev_span)) = seen_paths.get(&route.path) {
+//RS         diags.push(Diagnostic::error(
+//RS             "E2807",
+//RS             format!(
+//RS                 "route `{}` is registered both by `{}` and `{}`",
+//RS                 route.path, prev_prov, route.provenance
+//RS             ),
+//RS             "explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1)".to_string(),
+//RS             "remove one registration, or rename the convention file".to_string(),
+//RS             Some(span),
+//RS         ));
+//RS         if *prev_span != span {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E2807",
+//RS                 format!("earlier registration of route `{}`", route.path),
+//RS                 "both spans are kept so provenance stays audible".to_string(),
+//RS                 "delete or rename this registration".to_string(),
+//RS                 Some(*prev_span),
+//RS             ));
+//RS         }
+//RS         return;
+//RS     }
+//RS     for previous in &graph.routes {
+//RS         if routes_overlap(&previous.path, &route.path)
+//RS             && route_precedence(&previous.path) == route_precedence(&route.path)
+//RS         {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E2807",
+//RS                 format!(
+//RS                     "routes `{}` and `{}` are ambiguous",
+//RS                     previous.path, route.path
+//RS                 ),
+//RS                 "one checked route graph uses static-before-dynamic precedence; equally specific overlapping patterns have no deterministic owner".to_string(),
+//RS                 "make one pattern more specific, or remove the duplicate dynamic shape".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS             return;
+//RS         }
+//RS     }
+//RS     seen_paths.insert(route.path.clone(), (route.provenance.clone(), span));
+//RS     graph.routes.push(route);
+//RS }
+//RS fn canonical_route_path(path: &str) -> String {
+//RS     path.split('/')
+//RS         .map(|segment| {
+//RS             if segment.len() > 2 && segment.starts_with('{') && segment.ends_with('}') {
+//RS                 format!(":{}", &segment[1..segment.len() - 1])
+//RS             } else {
+//RS                 segment.to_string()
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("/")
+//RS }
+//RS 
+//RS fn route_parts(path: &str) -> Vec<(u8, String)> {
+//RS     canonical_route_path(path)
+//RS         .split('/')
+//RS         .filter(|segment| !segment.is_empty())
+//RS         .map(|segment| {
+//RS             if let Some(name) = segment.strip_prefix('*') {
+//RS                 (2, name.to_string())
+//RS             } else if let Some(name) = segment.strip_prefix(':') {
+//RS                 (1, name.to_string())
+//RS             } else {
+//RS                 (0, segment.to_string())
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn routes_overlap(left: &str, right: &str) -> bool {
+//RS     let left = route_parts(left);
+//RS     let right = route_parts(right);
+//RS     let left_catch = left.last().is_some_and(|(kind, _)| *kind == 2);
+//RS     let right_catch = right.last().is_some_and(|(kind, _)| *kind == 2);
+//RS     if !left_catch && !right_catch && left.len() != right.len() {
+//RS         return false;
+//RS     }
+//RS     let shared = left.len().min(right.len());
+//RS     for index in 0..shared {
+//RS         let (left_kind, left_name) = &left[index];
+//RS         let (right_kind, right_name) = &right[index];
+//RS         if *left_kind == 2 || *right_kind == 2 {
+//RS             return true;
+//RS         }
+//RS         if *left_kind == 0 && *right_kind == 0 && left_name != right_name {
+//RS             return false;
+//RS         }
+//RS     }
+//RS     left.len() == right.len() || left_catch || right_catch
+//RS }
+//RS 
+//RS fn route_precedence(path: &str) -> (usize, usize) {
+//RS     let parts = route_parts(path);
+//RS     (
+//RS         parts.iter().filter(|(kind, _)| *kind == 0).count(),
+//RS         parts.len(),
+//RS     )
+//RS }
+//RS 
+//RS fn route_precedence_name(path: &str) -> String {
+//RS     if route_parts(path).iter().all(|(kind, _)| *kind == 0) {
+//RS         "static".to_string()
+//RS     } else {
+//RS         "static-before-dynamic".to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn derive_route_contracts(
+//RS     bundle: &ProgramBundle,
+//RS     graph: &mut AppGraph,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     let serializable_types = collect_serializable_types(bundle);
+//RS     for route_index in 0..graph.routes.len() {
+//RS         let (path, handler, span, provenance) = {
+//RS             let route = &graph.routes[route_index];
+//RS             (
+//RS                 route.path.clone(),
+//RS                 route.handler.clone(),
+//RS                 Span::new(route.span_start, route.span_end),
+//RS                 route.provenance.clone(),
+//RS             )
+//RS         };
+//RS         let handler_fn = find_route_func(bundle, &graph.routes[route_index], &handler);
+//RS         let loader_action = graph
+//RS             .actions
+//RS             .iter()
+//RS             .filter(|action| {
+//RS                 matches!(action.kind.as_str(), "loader" | "data")
+//RS                     && action_matches(&path, &handler, action)
+//RS             })
+//RS             .last()
+//RS             .cloned();
+//RS         let loader_fn = loader_action
+//RS             .as_ref()
+//RS             .and_then(|action| find_func_bundle(bundle, &action.handler));
+//RS         let loader_data_type = loader_action.as_ref().map(|action| {
+//RS             loader_fn
+//RS                 .and_then(|function| function.return_type.as_ref())
+//RS                 .map(|ty| match ty {
+//RS                     Type::Result { ok, .. } => ok.show(),
+//RS                     ty => ty.show(),
+//RS                 })
+//RS                 .unwrap_or_else(|| {
+//RS                     if action.output_type.is_empty() {
+//RS                         "Unit".to_string()
+//RS                     } else {
+//RS                         action.output_type.clone()
+//RS                     }
+//RS                 })
+//RS         });
+//RS         if let Some(action) = &loader_action {
+//RS             if let Some(loader_fn) = loader_fn {
+//RS                 // A loader takes the same typed route inputs as its page;
+//RS                 // its result must cross the shared wire.
+//RS                 let _ = derive_route_inputs(
+//RS                     bundle,
+//RS                     loader_fn,
+//RS                     &path,
+//RS                     &serializable_types,
+//RS                     None,
+//RS                     true,
+//RS                     diags,
+//RS                     span,
+//RS                 );
+//RS                 let data_ty = match loader_fn.return_type.as_ref() {
+//RS                     Some(Type::Result { ok, .. }) => Some(ok.as_ref().clone()),
+//RS                     other => other.cloned(),
+//RS                 };
+//RS                 if !data_ty
+//RS                     .as_ref()
+//RS                     .is_some_and(|ty| is_resume_type_serializable(ty, &serializable_types))
+//RS                 {
+//RS                     diags.push(Diagnostic::error(
+//RS                         "E2810",
+//RS                         format!(
+//RS                             "route `{path}` loader `{}` data `{}` is not Codable",
+//RS                             action.handler,
+//RS                             loader_data_type.as_deref().unwrap_or("Unit")
+//RS                         ),
+//RS                         "loader data is serialized once for the page, the router cache, and the browser".to_string(),
+//RS                         "return a scalar, collection, or `#[Codable]` value from the loader".to_string(),
+//RS                         Some(Span::new(action.span_start, action.span_end)),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         let (path_params, search_params, search_codec) = handler_fn
+//RS             .map(|function| {
+//RS                 derive_route_inputs(
+//RS                     bundle,
+//RS                     function,
+//RS                     &path,
+//RS                     &serializable_types,
+//RS                     loader_data_type.clone(),
+//RS                     false,
+//RS                     diags,
+//RS                     span,
+//RS                 )
+//RS             })
+//RS             .unwrap_or_else(|| (Vec::new(), Vec::new(), "query".to_string()));
+//RS         let loader = loader_action.map(|action| AppRouteLoader {
+//RS             handler: action.handler.clone(),
+//RS             data_type: loader_data_type.clone().unwrap_or_else(|| "Unit".to_string()),
+//RS             dependency: if action.name.is_empty() {
+//RS                 action.handler.clone()
+//RS             } else {
+//RS                 action.name.clone()
+//RS             },
+//RS             preload: action.preload,
+//RS             cache_identity: stable_route_identity(&path, &handler),
+//RS         });
+//RS         let route = &mut graph.routes[route_index];
+//RS         route.path = canonical_route_path(&path);
+//RS         route.route_identity = stable_route_identity(&route.path, &handler);
+//RS         route.path_params = path_params;
+//RS         route.search_params = search_params;
+//RS         route.search_codec = search_codec;
+//RS         route.loader = loader;
+//RS         route.precedence = route_precedence_name(&route.path);
+//RS         let _ = provenance;
+//RS     }
+//RS }
+//RS 
+//RS fn find_route_func<'a>(
+//RS     bundle: &'a ProgramBundle,
+//RS     route: &AppRoute,
+//RS     handler: &str,
+//RS ) -> Option<&'a Func> {
+//RS     find_func_bundle(bundle, handler).or_else(|| {
+//RS         bundle
+//RS             .modules
+//RS             .iter()
+//RS             .find(|module| module.display.ends_with(&route.provenance))
+//RS             .and_then(|module| find_func(&module.items, "page"))
+//RS     })
+//RS }
+//RS 
+//RS fn find_func_bundle<'a>(bundle: &'a ProgramBundle, name: &str) -> Option<&'a Func> {
+//RS     bundle
+//RS         .modules
+//RS         .iter()
+//RS         .find_map(|module| find_func(&module.items, name))
+//RS }
+//RS 
+//RS fn derive_route_inputs(
+//RS     bundle: &ProgramBundle,
+//RS     function: &Func,
+//RS     path: &str,
+//RS     serializable_types: &HashSet<String>,
+//RS     loader_data_type: Option<String>,
+//RS     loader: bool,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     span: Span,
+//RS ) -> (Vec<AppRouteField>, Vec<AppRouteField>, String) {
+//RS     let mut path_params = Vec::new();
+//RS     let mut used = HashSet::new();
+//RS     let route_names = route_parts(path)
+//RS         .into_iter()
+//RS         .filter(|(kind, _)| *kind != 0)
+//RS         .map(|(_, name)| name)
+//RS         .collect::<Vec<_>>();
+//RS     for (position, name) in route_names.iter().enumerate() {
+//RS         let selected = function
+//RS             .params
+//RS             .iter()
+//RS             .enumerate()
+//RS             .find(|(index, parameter)| parameter.name == *name && !used.contains(index));
+//RS         let Some((index, parameter)) = selected else {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E2810",
+//RS                 format!("route `{path}` has no typed handler input for path parameter `{name}`"),
+//RS                 "every dynamic segment must map to one handler parameter in the checked App graph".to_string(),
+//RS                 format!("add `{name}: T` to the `{}` handler", function.name),
+//RS                 Some(span),
+//RS             ));
+//RS             continue;
+//RS         };
+//RS         used.insert(index);
+//RS         if matches!(&parameter.ty, Type::Option(_)) {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E2810",
+//RS                 format!("route `{path}` path parameter `{name}` cannot be optional"),
+//RS                 "path segments are always present; only search fields may be omitted".to_string(),
+//RS                 "make the path input required".to_string(),
+//RS                 Some(parameter.ty_span),
+//RS             ));
+//RS         }
+//RS         path_params.push(route_field(
+//RS             name,
+//RS             &parameter.ty,
+//RS             parameter.default.as_deref(),
+//RS             route_codec(&parameter.ty),
+//RS             true,
+//RS         ));
+//RS         let _ = position;
+//RS     }
+//RS 
+//RS     // Remaining inputs: at most one search binding (a Codable record, or a
+//RS     // scalar field named `search`/`query`) and, for page handlers, one
+//RS     // `data` input carrying the route's loader data.  TIR serializes exactly
+//RS     // this binding for the runtime decoder, so the rule is by name and type,
+//RS     // never by position.
+//RS     let mut search_params = Vec::new();
+//RS     let mut search_codec = "query".to_string();
+//RS     let mut search_bound = false;
+//RS     for (index, parameter) in function.params.iter().enumerate() {
+//RS         if used.contains(&index) {
+//RS             continue;
+//RS         }
+//RS         if parameter.name == "data" {
+//RS             if loader_data_type.is_none() {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E2810",
+//RS                     format!(
+//RS                         "route `{path}` handler `{}` reads `data` but declares no loader",
+//RS                         function.name
+//RS                     ),
+//RS                     "route data comes only from the route's `.loader(handler, loader)` registration".to_string(),
+//RS                     "declare a loader for this route or remove the `data` input".to_string(),
+//RS                     Some(parameter.ty_span),
+//RS                 ));
+//RS             } else if loader_data_type.as_deref() != Some(parameter.ty.show().as_str()) {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E2810",
+//RS                     format!(
+//RS                         "route `{path}` `data` input `{}` does not match loader data `{}`",
+//RS                         parameter.ty.show(),
+//RS                         loader_data_type.as_deref().unwrap_or("Unit")
+//RS                     ),
+//RS                     "the loader's success type is the route data type".to_string(),
+//RS                     "declare the `data` input with the loader's return type".to_string(),
+//RS                     Some(parameter.ty_span),
+//RS                 ));
+//RS             }
+//RS             used.insert(index);
+//RS             continue;
+//RS         }
+//RS         let record = named_type(&parameter.ty)
+//RS             .and_then(|name| find_struct_bundle(bundle, name).map(|structure| (name, structure)));
+//RS         let is_search = record.is_some() || matches!(parameter.name.as_str(), "search" | "query");
+//RS         if !is_search {
+//RS             continue;
+//RS         }
+//RS         if search_bound {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E2810",
+//RS                 format!(
+//RS                     "route `{path}` handler `{}` binds more than one search input",
+//RS                     function.name
+//RS                 ),
+//RS                 "the checked route graph accepts one search record or one scalar search field".to_string(),
+//RS                 "merge the search inputs into one Codable record".to_string(),
+//RS                 Some(parameter.ty_span),
+//RS             ));
+//RS             used.insert(index);
+//RS             continue;
+//RS         }
+//RS         search_bound = true;
+//RS         used.insert(index);
+//RS         match record {
+//RS             Some((name, structure)) => {
+//RS                 if !serializable_types.contains(name) {
+//RS                     diags.push(Diagnostic::error(
+//RS                         "E2810",
+//RS                         format!(
+//RS                             "route `{path}` search input `{}` is not Codable",
+//RS                             parameter.name
+//RS                         ),
+//RS                         "search records use the shared JSON codec and must have a checked Codable shape".to_string(),
+//RS                         format!("derive `#[Codable]` for `{name}`"),
+//RS                         Some(parameter.ty_span),
+//RS                     ));
+//RS                 }
+//RS                 search_params = structure
+//RS                     .fields
+//RS                     .iter()
+//RS                     .filter(|field| field.is_pub && field.computed.is_none())
+//RS                     .map(|field| {
+//RS                         route_field(
+//RS                             &field.name,
+//RS                             &field.ty,
+//RS                             field.default.as_deref(),
+//RS                             route_codec(&field.ty),
+//RS                             !is_optional_type(&field.ty) && field.default.is_none(),
+//RS                         )
+//RS                     })
+//RS                     .collect();
+//RS                 search_codec = "json".to_string();
+//RS             }
+//RS             None => {
+//RS                 search_params = vec![route_field(
+//RS                     &parameter.name,
+//RS                     &parameter.ty,
+//RS                     parameter.default.as_deref(),
+//RS                     route_codec(&parameter.ty),
+//RS                     !is_optional_type(&parameter.ty) && parameter.default.is_none(),
+//RS                 )];
+//RS             }
+//RS         }
+//RS     }
+//RS     for (index, parameter) in function.params.iter().enumerate() {
+//RS         if !used.contains(&index) {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E2810",
+//RS                 format!(
+//RS                     "route `{path}` handler `{}` has unbound input `{}`",
+//RS                     function.name, parameter.name
+//RS                 ),
+//RS                 "the checked route graph binds path parameters by name, one search record or a `search`/`query` field, and the loader `data`".to_string(),
+//RS                 "rename the input to its path segment, `search`, `query`, or `data`, or remove it".to_string(),
+//RS                 Some(parameter.ty_span),
+//RS             ));
+//RS         }
+//RS     }
+//RS     if !matches!(
+//RS         function.return_type.as_ref(),
+//RS         Some(Type::Named(name)) if name == "WebPage"
+//RS     ) && !matches!(
+//RS         function.return_type.as_ref(),
+//RS         Some(Type::Result { ok, .. }) if matches!(ok.as_ref(), Type::Named(name) if name == "WebPage")
+//RS     ) && !loader {
+//RS         diags.push(Diagnostic::error(
+//RS             "E2810",
+//RS             format!(
+//RS                 "route `{path}` handler `{}` must return `WebPage`",
+//RS                 function.name
+//RS             ),
+//RS             "page handlers render one WebPage or fail with a declared failure domain".to_string(),
+//RS             "declare the handler as `WebPage` or `WebPage !E`".to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS     (path_params, search_params, search_codec)
+//RS }
+//RS 
+//RS fn find_struct_bundle<'a>(
+//RS     bundle: &'a ProgramBundle,
+//RS     name: &str,
+//RS ) -> Option<&'a crate::AST::StructDef> {
+//RS     bundle
+//RS         .modules
+//RS         .iter()
+//RS         .find_map(|module| find_struct(&module.items, name))
+//RS }
+//RS 
+//RS fn find_struct<'a>(items: &'a [Item], name: &str) -> Option<&'a crate::AST::StructDef> {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Struct(def) if def.name == name => return Some(def),
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     if let Some(def) = find_struct(body, name) {
+//RS                         return Some(def);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn named_type(ty: &Type) -> Option<&str> {
+//RS     match ty {
+//RS         Type::Named(name) => Some(name.as_str()),
+//RS         Type::Option(inner) => named_type(inner),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn is_optional_type(ty: &Type) -> bool {
+//RS     matches!(ty, Type::Option(_))
+//RS }
+//RS 
+//RS fn route_codec(ty: &Type) -> String {
+//RS     match ty {
+//RS         Type::Option(inner) => route_codec(inner),
+//RS         Type::Int | Type::IntN { .. } => "int".to_string(),
+//RS         Type::Float => "float".to_string(),
+//RS         Type::Bool => "bool".to_string(),
+//RS         Type::Named(name) if matches!(name.as_str(), "JSON" | "Data") => "json".to_string(),
+//RS         _ => "string".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn const_wire_text(expr: Option<&Expr>) -> Option<String> {
+//RS     match expr? {
+//RS         Expr::Str(parts, _) => {
+//RS             let mut text = String::new();
+//RS             for part in parts {
+//RS                 match part {
+//RS                     StrPart::Lit(value) => text.push_str(value),
+//RS                     StrPart::Interp(..) => return None,
+//RS                 }
+//RS             }
+//RS             Some(text)
+//RS         }
+//RS         Expr::Int(value, ..) => Some(value.to_string()),
+//RS         Expr::Float(value, ..) => Some(value.to_string()),
+//RS         Expr::Bool(value, _) => Some(value.to_string()),
+//RS         Expr::Char(value, _) => Some(value.to_string()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn route_field(
+//RS     name: &str,
+//RS     ty: &Type,
+//RS     default_expr: Option<&Expr>,
+//RS     codec: String,
+//RS     required: bool,
+//RS ) -> AppRouteField {
+//RS     AppRouteField {
+//RS         name: name.to_string(),
+//RS         ty: ty.show(),
+//RS         codec,
+//RS         required,
+//RS         default: const_wire_text(default_expr),
+//RS     }
+//RS }
+//RS 
+//RS fn derive_render_facts(
+//RS     graph: &mut AppGraph,
+//RS     items: &[Item],
+//RS     module_alias: &str,
+//RS     solved: Option<&HashMap<String, EffectSet>>,
+//RS     serializable_types: &HashSet<String>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     for route_index in 0..graph.routes.len() {
+//RS         let (path, handler, override_mode, existing_cache) = {
+//RS             let route = &graph.routes[route_index];
+//RS             (
+//RS                 route.path.clone(),
+//RS                 route.handler.clone(),
+//RS                 route.render_facts.override_mode,
+//RS                 route.render_facts.cache,
+//RS             )
+//RS         };
+//RS         let handler_fn = find_func(items, &handler);
+//RS         let mut effect_names = BTreeSet::new();
+//RS         let mut capture_funcs = Vec::new();
+//RS         if let Some(function) = handler_fn {
+//RS             append_function_effects(function, module_alias, solved, &mut effect_names);
+//RS             capture_funcs.push(function);
+//RS         }
+//RS 
+//RS         let matching_actions: Vec<(String, String, String)> = graph
+//RS             .actions
+//RS             .iter()
+//RS             .filter(|action| action_matches(&path, &handler, action))
+//RS             .map(|action| {
+//RS                 (
+//RS                     action.kind.clone(),
+//RS                     action.name.clone(),
+//RS                     action.handler.clone(),
+//RS                 )
+//RS             })
+//RS             .collect();
+//RS         let mut loader = None;
+//RS         let mut form = None;
+//RS         for (kind, name, action_handler) in &matching_actions {
+//RS             if matches!(kind.as_str(), "data" | "loader") {
+//RS                 loader = Some(action_handler.clone());
+//RS             }
+//RS             if matches!(kind.as_str(), "form" | "action") {
+//RS                 form = Some(action_handler.clone());
+//RS             }
+//RS             if let Some(function) = find_func(items, action_handler) {
+//RS                 append_function_effects(function, module_alias, solved, &mut effect_names);
+//RS                 if matches!(kind.as_str(), "form" | "action") {
+//RS                     capture_funcs.push(function);
+//RS                 }
+//RS             }
+//RS             let _ = name;
+//RS         }
+//RS 
+//RS         let browser_effect = effect_names.iter().any(|effect| {
+//RS             effect_root(effect) == "Browser"
+//RS         }) || handler_fn.is_some_and(|function| {
+//RS             matches!(
+//RS                 function.web_marker,
+//RS                 Some(jet_foundation::WebPartition::WebPartitionMarker::JS)
+//RS             )
+//RS         });
+//RS         let runtime_effect = effect_names.iter().any(|effect| is_runtime_effect(effect));
+//RS         let reactive = handler_fn.is_some_and(|function| function.is_reactive);
+//RS         let interactive = browser_effect || reactive || form.is_some();
+//RS         let derived_mode = if browser_effect {
+//RS             AppRenderFactMode::Client
+//RS         } else if interactive {
+//RS             AppRenderFactMode::ServerIsland
+//RS         } else if loader.is_some() {
+//RS             AppRenderFactMode::ServerStream
+//RS         } else if runtime_effect {
+//RS             AppRenderFactMode::Server
+//RS         } else {
+//RS             AppRenderFactMode::Static
+//RS         };
+//RS         let mode = override_mode.unwrap_or(derived_mode);
+//RS         let pending_boundary_id = matches!(
+//RS             mode,
+//RS             AppRenderFactMode::ServerStream | AppRenderFactMode::ServerIsland
+//RS         )
+//RS         .then(|| stable_pending_boundary_id(&path, &handler));
+//RS 
+//RS         let mut reason = Vec::new();
+//RS         if let Some(explicit) = override_mode {
+//RS             reason.push(format!("explicit render mode `{}`", explicit.as_str()));
+//RS         } else {
+//RS             if browser_effect {
+//RS                 reason.push(format!("handler `{handler}` reaches Browser"));
+//RS             }
+//RS             if reactive {
+//RS                 reason.push(format!("handler `{handler}` is reactive"));
+//RS             }
+//RS             if let Some(loader) = &loader {
+//RS                 reason.push(format!("loader `{loader}` supplies runtime data"));
+//RS             }
+//RS             if let Some(form) = &form {
+//RS                 reason.push(format!("form/action `{form}` adds interactivity"));
+//RS             }
+//RS             if runtime_effect && loader.is_none() {
+//RS                 reason.push(format!(
+//RS                     "handler `{handler}` reaches runtime effect(s): {}",
+//RS                     effect_names.iter().cloned().collect::<Vec<_>>().join(", ")
+//RS                 ));
+//RS             }
+//RS             if reason.is_empty() {
+//RS                 reason.push(format!("handler `{handler}` has no runtime data or interactivity"));
+//RS             }
+//RS         }
+//RS 
+//RS         let cache = if existing_cache != AppCacheFact::Unspecified {
+//RS             existing_cache
+//RS         } else {
+//RS             graph
+//RS                 .policy
+//RS                 .cache
+//RS                 .iter()
+//RS                 .rev()
+//RS                 .find_map(|policy| AppCacheFact::parse(policy))
+//RS                 .unwrap_or(AppCacheFact::Unspecified)
+//RS         };
+//RS         let needs_island =
+//RS             interactive || matches!(mode, AppRenderFactMode::ServerIsland | AppRenderFactMode::Client);
+//RS         let island = if needs_island {
+//RS             let mut captures = BTreeMap::new();
+//RS             for function in capture_funcs {
+//RS                 for param in &function.params {
+//RS                     let ty = param.ty.show();
+//RS                     let serializable =
+//RS                         is_resume_type_serializable(&param.ty, serializable_types);
+//RS                     captures.entry(param.name.clone()).or_insert_with(|| AppResumeCapture {
+//RS                         name: param.name.clone(),
+//RS                         ty,
+//RS                         serializable,
+//RS                     });
+//RS                 }
+//RS             }
+//RS             let captures: Vec<AppResumeCapture> = captures.into_values().collect();
+//RS             let payload_serializable = captures.iter().all(|capture| capture.serializable);
+//RS             for capture in &captures {
+//RS                 if !capture.serializable {
+//RS                     diags.push(Diagnostic::error(
+//RS                         "E_WEB_SERIALIZE_CAPTURE",
+//RS                         format!(
+//RS                             "route `{path}` island capture `{}` of type `{}` cannot be resumed",
+//RS                             capture.name, capture.ty
+//RS                         ),
+//RS                         "resumable islands serialize their compiler-derived payload before browser execution"
+//RS                             .to_string(),
+//RS                         "use a scalar, collection, or `#[Codable]` value, or move the resource behind a server action"
+//RS                             .to_string(),
+//RS                         Some(Span::new(
+//RS                             graph.routes[route_index].span_start,
+//RS                             graph.routes[route_index].span_end,
+//RS                         )),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             let identity = stable_island_identity(&path, &handler);
+//RS             Some(AppIslandFact {
+//RS                 identity,
+//RS                 hydration_trigger: AppHydrationTrigger::Immediate,
+//RS                 resume_payload: AppResumePayload {
+//RS                     captures,
+//RS                     serializable: payload_serializable,
+//RS                 },
+//RS             })
+//RS         } else {
+//RS             None
+//RS         };
+//RS 
+//RS         let route = &mut graph.routes[route_index];
+//RS         route.render_facts = AppRenderFacts {
+//RS             mode,
+//RS             reason,
+//RS             effects: effect_names.into_iter().collect(),
+//RS             interactive: interactive || matches!(mode, AppRenderFactMode::ServerIsland | AppRenderFactMode::Client),
+//RS             loader,
+//RS             form,
+//RS             cache,
+//RS             override_mode,
+//RS             pending_boundary_id,
+//RS             island,
+//RS         };
+//RS     }
+//RS }
+//RS 
+//RS fn action_matches(path: &str, handler: &str, action: &AppAction) -> bool {
+//RS     action.name == path
+//RS         || action.name == handler
+//RS         || action.name == "*"
+//RS         || (path == "/" && action.name.is_empty())
+//RS }
+//RS 
+//RS fn append_function_effects(
+//RS     function: &Func,
+//RS     module_alias: &str,
+//RS     solved: Option<&HashMap<String, EffectSet>>,
+//RS     out: &mut BTreeSet<String>,
+//RS ) {
+//RS     if let Some(solved) = solved {
+//RS         if let Some(effects) = lookup_effects(solved, module_alias, &function.name) {
+//RS             out.extend(effects.iter().cloned());
+//RS             return;
+//RS         }
+//RS     }
+//RS     if let Some(declared) = &function.declared_effects {
+//RS         out.extend(declared.iter().map(|(name, _)| name.clone()));
+//RS     }
+//RS }
+//RS 
+//RS fn lookup_effects<'a>(
+//RS     solved: &'a HashMap<String, EffectSet>,
+//RS     module_alias: &str,
+//RS     function: &str,
+//RS ) -> Option<&'a EffectSet> {
+//RS     let qualified = format!("{module_alias}::{function}");
+//RS     solved
+//RS         .get(&qualified)
+//RS         .or_else(|| solved.get(function))
+//RS         .or_else(|| {
+//RS             solved.iter().find_map(|(key, effects)| {
+//RS                 (key.rsplit("::").next() == Some(function)
+//RS                     || key.rsplit("__").next() == Some(function))
+//RS                 .then_some(effects)
+//RS             })
+//RS         })
+//RS }
+//RS 
+//RS fn effect_root(effect: &str) -> &str {
+//RS     effect.split('.').next().unwrap_or(effect)
+//RS }
+//RS 
+//RS fn is_runtime_effect(effect: &str) -> bool {
+//RS     matches!(
+//RS         effect_root(effect),
+//RS         "DB" | "FS" | "Net" | "IO" | "Time" | "Rand" | "Env" | "Exec" | "Secret"
+//RS     ) || effect_root(effect) == "RequestContext"
+//RS }
+//RS 
+//RS fn find_func<'a>(items: &'a [Item], name: &str) -> Option<&'a Func> {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(function) if function.name == name => return Some(function),
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     if let Some(function) = find_func(body, name) {
+//RS                         return Some(function);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn collect_serializable_types(bundle: &ProgramBundle) -> HashSet<String> {
+//RS     fn collect(items: &[Item], out: &mut HashSet<String>) {
+//RS         for item in items {
+//RS             match item {
+//RS                 Item::Struct(def) if has_serde_derive(&def.derives) => {
+//RS                     out.insert(def.name.clone());
+//RS                 }
+//RS                 Item::Enum(def) if has_serde_derive(&def.derives) => {
+//RS                     out.insert(def.name.clone());
+//RS                 }
+//RS                 Item::CodeModule(module) => {
+//RS                     if let Some(body) = &module.body {
+//RS                         collect(body, out);
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let mut out = HashSet::new();
+//RS     for module in &bundle.modules {
+//RS         collect(&module.items, &mut out);
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn has_serde_derive(derives: &[(String, Span)]) -> bool {
+//RS     derives
+//RS         .iter()
+//RS         .any(|(name, _)| matches!(name.as_str(), "Codable" | "Encode" | "Decode"))
+//RS }
+//RS 
+//RS fn is_resume_type_serializable(ty: &Type, named: &HashSet<String>) -> bool {
+//RS     match ty {
+//RS         Type::Int
+//RS         | Type::Float
+//RS         | Type::Bool
+//RS         | Type::String
+//RS         | Type::Char
+//RS         | Type::IntN { .. }
+//RS         | Type::Float32
+//RS         | Type::Measure(_) => true,
+//RS         Type::List(inner)
+//RS         | Type::Shared(inner)
+//RS         | Type::Option(inner)
+//RS         | Type::InlineRange { base: inner, .. }
+//RS         | Type::Tagged { inner, .. }
+//RS         | Type::Quantity { base: inner, .. } => is_resume_type_serializable(inner, named),
+//RS         Type::FixedList { elem, .. } => is_resume_type_serializable(elem, named),
+//RS         Type::Map { key, value, .. } => {
+//RS             matches!(key.as_ref(), Type::String)
+//RS                 && is_resume_type_serializable(value, named)
+//RS         }
+//RS         Type::Result { ok, err } => {
+//RS             is_resume_type_serializable(ok, named) && is_resume_type_serializable(err, named)
+//RS         }
+//RS         Type::Tuple(fields) => fields
+//RS             .iter()
+//RS             .all(|(_, field)| is_resume_type_serializable(field, named)),
+//RS         Type::Union(members) => members
+//RS             .iter()
+//RS             .all(|member| is_resume_type_serializable(member, named)),
+//RS         Type::Named(name) => {
+//RS             matches!(
+//RS                 name.as_str(),
+//RS                 "Data" | "JSON" | "Date" | "DateTime" | "Decimal" | "Duration" | "Unit"
+//RS             ) || named.contains(name)
+//RS         }
+//RS         Type::Apply { name, args } => {
+//RS             named.contains(name)
+//RS                 && args
+//RS                     .iter()
+//RS                     .all(|arg| is_resume_type_serializable(arg, named))
+//RS         }
+//RS         Type::Fn { .. } | Type::TraitObject(_) => false,
+//RS     }
+//RS }
+//RS 
+//RS fn expand_routes_from(
+//RS     bundle: &ProgramBundle,
+//RS     root: &AppRoutesFrom,
+//RS     graph: &mut AppGraph,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     seen_paths: &mut HashMap<String, (String, Span)>,
+//RS     render: AppRenderMode,
+//RS     render_override: Option<AppRenderFactMode>,
+//RS ) {
+//RS     let dir = bundle.project_root.join(&root.root);
+//RS     if !dir.is_dir() {
+//RS         diags.push(Diagnostic::error(
+//RS             "E2806",
+//RS             format!("`.routes(from: \"{}\")` directory does not exist", root.root),
+//RS             "file routing expands only an explicit builder root; a missing directory cannot invent endpoints".to_string(),
+//RS             format!("create `{}/`, or remove the `.routes(from:)` line", root.root),
+//RS             Some(Span::new(root.span_start, root.span_end)),
+//RS         ));
+//RS         return;
+//RS     }
+//RS 
+//RS     let mut files = Vec::new();
+//RS     if let Err(err) = collect_jet_files(&dir, &dir, &mut files) {
+//RS         diags.push(Diagnostic::error(
+//RS             "E2806",
+//RS             format!("could not read `.routes(from: \"{}\")`: {err}", root.root),
+//RS             "convention expansion must see every file under the declared root".to_string(),
+//RS             "fix directory permissions, or remove the opt-in".to_string(),
+//RS             Some(Span::new(root.span_start, root.span_end)),
+//RS         ));
+//RS         return;
+//RS     }
+//RS     files.sort();
+//RS 
+//RS     for rel in &files {
+//RS         let file_name = Path::new(rel)
+//RS             .file_name()
+//RS             .and_then(|s| s.to_str())
+//RS             .unwrap_or("");
+//RS         // Leading `_` = explicitly non-routed (D-WEBAUTHOR1).
+//RS         if file_name.starts_with('_') {
+//RS             continue;
+//RS         }
+//RS         let file_path = dir.join(rel);
+//RS         if !convention_has_page(&file_path) {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E2806",
+//RS                 format!("convention file `{provenance}` has no `fn page`", provenance = format!("{}/{}", root.root, rel)),
+//RS                 "every file under a `.routes(from:)` root must declare `fn page` or start with `_` to opt out (D-WEBAUTHOR1)".to_string(),
+//RS                 "add `fn page()`, rename the file with a leading `_`, or remove it from the routes directory".to_string(),
+//RS                 Some(Span::new(root.span_start, root.span_end)),
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         let path = convention_path(rel);
+//RS         let provenance = format!("{}/{}", root.root, rel);
+//RS         let handler = convention_handler(rel);
+//RS         let render_facts = render_override.map_or_else(AppRenderFacts::default, |mode| {
+//RS             AppRenderFacts {
+//RS                 mode,
+//RS                 reason: vec![format!("explicit render mode `{}`", mode.as_str())],
+//RS                 override_mode: Some(mode),
+//RS                 ..AppRenderFacts::default()
+//RS             }
+//RS         });
+//RS         record_route(
+//RS             graph,
+//RS             diags,
+//RS             seen_paths,
+//RS             AppRoute {
+//RS                 path: path.clone(),
+//RS                 handler: handler.clone(),
+//RS                 route_identity: stable_route_identity(&path, &handler),
+//RS                 path_params: Vec::new(),
+//RS                 search_params: Vec::new(),
+//RS                 search_codec: "query".to_string(),
+//RS                 loader: None,
+//RS                 boundaries: AppRouteBoundaries::default(),
+//RS                 precedence: route_precedence_name(&path),
+//RS                 render,
+//RS                 render_facts,
+//RS                 provenance,
+//RS                 span_start: root.span_start,
+//RS                 span_end: root.span_end,
+//RS             },
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn collect_jet_files(root: &Path, dir: &Path, out: &mut Vec<String>) -> std::io::Result<()> {
+//RS     for path in jet_foundation::CheckReads::read_dir_sorted(dir)? {
+//RS         if path.is_dir() {
+//RS             collect_jet_files(root, &path, out)?;
+//RS             continue;
+//RS         }
+//RS         if path.extension().and_then(|s| s.to_str()) != Some("jet") {
+//RS             continue;
+//RS         }
+//RS         let rel = path
+//RS             .strip_prefix(root)
+//RS             .unwrap_or(&path)
+//RS             .to_string_lossy()
+//RS             .replace('\\', "/");
+//RS         out.push(rel);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn convention_path(rel: &str) -> String {
+//RS     let stem = Path::new(rel).with_extension("");
+//RS     let mut parts: Vec<&str> = stem.iter().filter_map(|s| s.to_str()).collect();
+//RS     if parts.last().copied() == Some("index") || parts.last().copied() == Some("page") {
+//RS         parts.pop();
+//RS     }
+//RS     if parts.is_empty() {
+//RS         return "/".to_string();
+//RS     }
+//RS     let mut path = String::new();
+//RS     for part in parts {
+//RS         path.push('/');
+//RS         if part.starts_with('[') && part.ends_with(']') {
+//RS             let name = &part[1..part.len() - 1];
+//RS             path.push(':');
+//RS             path.push_str(name);
+//RS         } else {
+//RS             path.push_str(part);
+//RS         }
+//RS     }
+//RS     path
+//RS }
+//RS 
+//RS fn convention_handler(rel: &str) -> String {
+//RS     rel.trim_end_matches(".jet")
+//RS         .replace(['/', '\\', '[', ']'], "_")
+//RS }
+//RS 
+//RS fn convention_has_page(path: &Path) -> bool {
+//RS     let Ok(src) = jet_foundation::CheckReads::read_to_string(path) else {
+//RS         return false;
+//RS     };
+//RS     for line in src.lines() {
+//RS         let trimmed = line.trim();
+//RS         if trimmed.starts_with("fn page") || trimmed.starts_with("pub fn page") {
+//RS             return true;
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS fn const_string_arg(args: &[crate::AST::CallArg], index: usize) -> Option<String> {
+//RS     args.get(index).and_then(|a| const_string_expr(&a.expr))
+//RS }
+//RS fn const_int_arg(args: &[crate::AST::CallArg], index: usize) -> Option<i64> {
+//RS     args.get(index).and_then(|arg| const_int_expr(&arg.expr))
+//RS }
+//RS 
+//RS fn const_int_expr(expr: &Expr) -> Option<i64> {
+//RS     match expr {
+//RS         Expr::Int(value, ..) => Some(*value),
+//RS         Expr::Paren(inner, _) => const_int_expr(inner),
+//RS         Expr::Unary(crate::AST::UnOp::Neg, inner, _) => const_int_expr(inner)?.checked_neg(),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn labeled_string_arg(args: &[crate::AST::CallArg], label: &str) -> Option<String> {
+//RS     args.iter()
+//RS         .find(|a| a.label.as_ref().is_some_and(|(name, _)| name == label))
+//RS         .and_then(|a| const_string_expr(&a.expr))
+//RS }
+//RS 
+//RS fn labeled_bool_arg(args: &[crate::AST::CallArg], label: &str) -> Option<bool> {
+//RS     args.iter()
+//RS         .find(|a| a.label.as_ref().is_some_and(|(name, _)| name == label))
+//RS         .and_then(|a| const_bool_expr(&a.expr))
+//RS         .or_else(|| {
+//RS             args.iter()
+//RS                 .rev()
+//RS                 .find(|a| a.label.is_none())
+//RS                 .and_then(|a| const_bool_expr(&a.expr))
+//RS         })
+//RS }
+//RS 
+//RS fn const_bool_expr(expr: &Expr) -> Option<bool> {
+//RS     match expr {
+//RS         Expr::Bool(value, _) => Some(*value),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn const_string_expr(expr: &Expr) -> Option<String> {
+//RS     match expr {
+//RS         Expr::Str(parts, _) => {
+//RS             let mut out = String::new();
+//RS             for part in parts {
+//RS                 match part {
+//RS                     StrPart::Lit(text) => out.push_str(text),
+//RS                     StrPart::Interp(..) => return None,
+//RS                 }
+//RS             }
+//RS             Some(out)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS fn render_mode_arg(args: &[crate::AST::CallArg]) -> Option<AppRenderFactMode> {
+//RS     let expr = &args.first()?.expr;
+//RS     let name = const_string_expr(expr).or_else(|| handler_name(args.first()))?;
+//RS     AppRenderFactMode::parse(&name)
+//RS }
+//RS 
+//RS fn legacy_render_mode(mode: AppRenderFactMode) -> AppRenderMode {
+//RS     match mode {
+//RS         AppRenderFactMode::Static => AppRenderMode::Ssg,
+//RS         AppRenderFactMode::Server => AppRenderMode::Ssr,
+//RS         AppRenderFactMode::ServerStream => AppRenderMode::Stream,
+//RS         AppRenderFactMode::ServerIsland => AppRenderMode::Island,
+//RS         AppRenderFactMode::Client => AppRenderMode::Csr,
+//RS     }
+//RS }
+//RS 
+//RS fn handler_name(arg: Option<&crate::AST::CallArg>) -> Option<String> {
+//RS     let expr = &arg?.expr;
+//RS     match expr {
+//RS         Expr::Ident(name, _) => Some(name.clone()),
+//RS         Expr::Field(_, field, _) => Some(field.clone()),
+//RS         _ => None,
+//RS     }
+//RS }
+// END-PORT-PENDING 0347 crates/jet-sema/src/Sema/App.rs:1-2022
+

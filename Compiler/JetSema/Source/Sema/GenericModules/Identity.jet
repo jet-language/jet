@@ -1,0 +1,189 @@
+// Rust Bundle/GenericModules/Identity.rs: exact full-key binary framing.
+use jet_foundation.[Type, ModuleArg, ModuleAliasDef, ModuleInstanceIdentity, ModuleInstanceApplication, Expr, Span, measure_kind, measure_expression, dimension_identity]
+
+fn sema_genmod_u64(out: &[U8], value: Int) Never! {
+    loop index in 0..<8 -> &out.push(U8{(value >> ((7 - index) * 8)) & 255})
+}
+fn sema_genmod_frame(out: &[U8], bytes: [U8]) Never! {
+    sema_genmod_u64(&out, bytes.len())
+    loop byte in bytes -> &out.push(byte)
+}
+fn sema_genmod_frame_text(out: &[U8], text: String) Never! {
+    sema_genmod_frame(&out, text.bytes())
+}
+fn sema_genmod_type_write(out: &[U8], ty: Type) Never! {
+    if ty == {
+        .Int -> &out.push(U8{1})
+        .Float -> &out.push(U8{2})
+        .Bool -> &out.push(U8{3})
+        .String -> &out.push(U8{4})
+        .Char -> &out.push(U8{5})
+        .List(inner) -> {
+            &out.push(U8{6})
+            sema_genmod_type_write(&out, inner)
+        }
+        .Map(key, _, value) -> {
+            &out.push(U8{7})
+            sema_genmod_type_write(&out, key)
+            sema_genmod_type_write(&out, value)
+        }
+        .Shared(inner) -> {
+            &out.push(U8{8})
+            sema_genmod_type_write(&out, inner)
+        }
+        .Option(inner) -> {
+            &out.push(U8{9})
+            sema_genmod_type_write(&out, inner)
+        }
+        .Result(ok, err) -> {
+            &out.push(U8{10})
+            sema_genmod_type_write(&out, ok)
+            sema_genmod_type_write(&out, err)
+        }
+        .Fn(params, ret, _, _, _, _) -> {
+            &out.push(U8{11})
+            sema_genmod_u64(&out, params.len())
+            loop param in params -> sema_genmod_type_write(&out, param)
+            if ret == {
+                .Val(value) -> {
+                    &out.push(U8{1})
+                    sema_genmod_type_write(&out, value)
+                }
+                .None -> &out.push(U8{0})
+            }
+        }
+        .Named(name) -> {
+            &out.push(U8{12})
+            sema_genmod_frame_text(&out, name)
+        }
+        .Apply(name, args) -> {
+            &out.push(U8{13})
+            sema_genmod_frame_text(&out, name)
+            sema_genmod_u64(&out, args.len())
+            loop arg in args -> sema_genmod_type_write(&out, arg)
+        }
+        .TraitObject(names) -> {
+            &out.push(U8{14})
+            sema_genmod_u64(&out, names.len())
+            loop name in names -> sema_genmod_frame_text(&out, name)
+        }
+        .Tuple(fields) -> {
+            &out.push(U8{15})
+            sema_genmod_u64(&out, fields.len())
+            loop field in fields {
+                sema_genmod_frame_text(&out, field.name)
+                sema_genmod_type_write(&out, field.ty)
+            }
+        }
+        .FixedList(elem, len) -> {
+            &out.push(U8{16})
+            sema_genmod_type_write(&out, elem)
+            sema_genmod_frame_text(&out, measure_kind(len))
+            sema_genmod_frame_text(&out, measure_expression(len))
+        }
+        .IntN(signed, bits) -> {
+            &out.push(U8{17})
+            &out.push(U8{if signed -> 1 else -> 0})
+            &out.push(U8{bits})
+        }
+        .Float32 -> &out.push(U8{18})
+        .Tagged(_, inner) -> sema_genmod_type_write(&out, inner)
+        .Union(members) -> {
+            &out.push(U8{19})
+            sema_genmod_u64(&out, members.len())
+            loop member in members -> sema_genmod_type_write(&out, member)
+        }
+        .Quantity(base, dimension) -> {
+            &out.push(U8{20})
+            sema_genmod_type_write(&out, base)
+            sema_genmod_frame_text(&out, dimension_identity(dimension))
+        }
+        .Measure(value) -> {
+            &out.push(U8{21})
+            sema_genmod_frame_text(&out, measure_kind(value))
+            sema_genmod_frame_text(&out, measure_expression(value))
+        }
+        .InlineRange(base, lo, hi) -> {
+            &out.push(U8{22})
+            sema_genmod_type_write(&out, base)
+            sema_genmod_u64(&out, lo)
+            sema_genmod_u64(&out, hi)
+        }
+    }
+}
+pub fn sema_genmod_type_full_key(ty: Type) -> [U8] Never! {
+    out := [U8]{}
+    sema_genmod_frame_text(&out, "jet.type.full-key.v1")
+    sema_genmod_type_write(&out, ty)
+    out
+}
+fn sema_genmod_parameter_bytes(params: [SemaGenericModuleParam]) -> [U8] Never! {
+    out := [U8]{}
+    sema_genmod_u64(&out, params.len())
+    loop param in params {
+        if param == {
+            .Type(name, bound) -> {
+                &out.push(U8{0})
+                sema_genmod_frame_text(&out, name)
+                sema_genmod_frame_text(&out, bound ?? "")
+            }
+            .Value(name, ty) -> {
+                &out.push(U8{1})
+                sema_genmod_frame_text(&out, name)
+                sema_genmod_frame(&out, sema_genmod_type_full_key(ty))
+            }
+            .Invalid -> &out.push(U8{2})
+        }
+    }
+    out
+}
+pub fn sema_genmod_definition_full_key(package: String, module_path: String, lexical_path: String, name: String) -> [U8] Never! {
+    out := [U8]{}
+    sema_genmod_frame_text(&out, "jet.genmod.definition.v1")
+    sema_genmod_frame_text(&out, package)
+    sema_genmod_frame_text(&out, module_path)
+    sema_genmod_frame_text(&out, lexical_path)
+    sema_genmod_frame_text(&out, "generic-module")
+    sema_genmod_frame_text(&out, name)
+    out
+}
+pub fn sema_genmod_application_bytes(definition: [U8], params: [U8], args: [[U8]]) -> [U8] Never! {
+    out := [U8]{}
+    sema_genmod_frame_text(&out, "jet.genmod.application.v1")
+    sema_genmod_frame(&out, definition)
+    sema_genmod_frame(&out, params)
+    sema_genmod_u64(&out, args.len())
+    loop arg in args -> sema_genmod_frame(&out, arg)
+    out
+}
+fn sema_genmod_expr_path(expression: Expr) -> String? Never! {
+    if expression == {
+        .Ident(name, _) | .ComptimeName(name, _, _) -> Val(name)
+        .Field(base, member, _) -> {
+            prefix :: sema_genmod_expr_path(base) ?? return None
+            Val("{prefix}.{member}")
+        }
+        .Paren(value, _) -> sema_genmod_expr_path(value)
+        else -> None
+    }
+}
+fn sema_genmod_argument_provenance(arg: ModuleArg, facts: SemaBuildFacts) -> [String] Never! {
+    if arg == .Value(expression, _) {
+        path :: sema_genmod_expr_path(expression) ?? return [String]{"closed value expression"}
+        sources := [String]{}
+        if sema_fact_build_setting_key(path) == .Val(key) {
+            loop source in facts.setting_provenance.get(key) ?? [String]{} -> &sources.push(source)
+        }
+        &sources.push("argument:{path}")
+        return sources
+    }
+    [String]{"type argument"}
+}
+fn sema_genmod_identity(binding: SemaGenericModuleBinding, source: SemaGenericModuleSource, alias: ModuleAliasDef, module_identity: String) -> ModuleInstanceIdentity Never! {
+    provenance := [[String]]{}
+    loop arg in alias.args -> &provenance.push(sema_genmod_argument_provenance(arg, source.build_facts))
+    ModuleInstanceIdentity{full_key: binding.full_key, fingerprint: binding.key, definition_id: source.key, argument_keys: binding.argument_keys, argument_values: binding.argument_values, argument_provenance: provenance, template_span: source.definition.span, applications: [ModuleInstanceApplication]{sema_genmod_application(alias, module_identity, binding.key)}}
+}
+fn sema_genmod_application(alias: ModuleAliasDef, module_identity: String, fingerprint: String) -> ModuleInstanceApplication Never! {
+    ModuleInstanceApplication{name: alias.name, source_module: module_identity, semantic_identity: "instance:{fingerprint}", span: alias.name_span}
+}

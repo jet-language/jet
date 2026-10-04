@@ -1,0 +1,74 @@
+// Composed original-producer witness, NOT a hand-authored Record. Needs the
+// real Driver/parser/Sema/MIR optimizer closure and #4494 native journal.
+use jet_driver.[JetDriverCompileRequest, JetDriverCompileTarget, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverHostFacts, jet_driver_compile, jet_driver_embedded_core_sources]
+use jet_eval.[jet_eval_default_config]
+use core.files.runtime.kernel_path_components as canonical_consumer_path
+
+struct CanonicalPassConsumerRename {}
+impl CanonicalPassConsumerRename.MIRCanonicalPassOperation {
+    fn apply(self, program: &MIRProgram) Never! {
+        program.package_identity = "{program.package_identity}-applied"
+    }
+}
+#Test("compiled canonical pass consumer reads the actual optimizer journal") {
+    canonical_pass_test_enable("mir.optimize-pipeline,mir.legality-verification,mir.pass-order-facts")
+    source :: "#PubFile\nfn value() -> Int { return 1 }\n"
+    path :: canonical_consumer_path.from_text("/journal/value.jet", canonical_consumer_path.PathPlatform.Unix)
+    root :: canonical_consumer_path.from_text("/journal", canonical_consumer_path.PathPlatform.Unix)
+    relative :: canonical_consumer_path.from_text("value.jet", canonical_consumer_path.PathPlatform.Unix)
+    core :: foundation_embedded_core()
+    request :: JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{
+            roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
+                canonical_path: root, identity: "journal-root", allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: relative, identity: "journal:value", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            }}, entry_root_identity: "journal-root", entry_path: path,
+        },
+        canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core),
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("journal-consumer"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
+        eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
+        record_store: None, trace_sink: None, mir_lint_every_pass: false,
+    }
+    result :: jet_driver_compile(^request)
+    assert(result.complete)
+    program := result.mir ?? panic("real compile did not retain MIR")
+    records :: canonical_pass_take()
+    assert(records.len() > 0)
+    found_pipeline := false
+    loop record in records {
+        if record.operation_id == "mir.optimize-pipeline" {
+            found_pipeline = true
+            assert_eq(record.output_payload, mir_canonical_payload(program))
+            assert_eq(record.output_identity, mir_canonical_identity(program))
+            assert_eq(record.stage, "optimization")
+            assert_eq(record.disposition, "preserve")
+        }
+    }
+    assert(found_pipeline)
+    original_package :: ~program.package_identity
+    canonical_pass_test_env.set("JET_ADAPTER_MODE", "")
+    mir_run_canonical_pass("test.apply", "Consumer.jet", &program, CanonicalPassConsumerRename{})
+    assert_eq(program.package_identity, "{original_package}-applied")
+    assert_eq(canonical_pass_take().len(), 0)
+    canonical_pass_test_enable("test.apply")
+    before_payload :: mir_canonical_payload(program)
+    before_identity :: mir_canonical_identity(program)
+    mir_run_canonical_pass("test.apply", "Consumer.jet", &program, CanonicalPassConsumerRename{})
+    assert_eq(program.package_identity, "{original_package}-applied-applied")
+    applied :: canonical_pass_take()
+    assert_eq(applied.len(), 1)
+    assert_eq(applied[0].input_payload, before_payload)
+    assert_eq(applied[0].input_identity, before_identity)
+    assert_eq(applied[0].output_payload, mir_canonical_payload(program))
+    assert_eq(applied[0].output_identity, mir_canonical_identity(program))
+    canonical_pass_test_enable("mir.pass-order-facts")
+    mir_canonical_mark_pass(&program, .LegalityVerification)
+    lengths :: loop function in program.functions -> function.optimization.pass_ids.len()
+    mir_canonical_mark_pass(&program, .LegalityVerification)
+    loop (index, function) in program.functions -> assert_eq(function.optimization.pass_ids.len(), lengths[index])
+    marked :: canonical_pass_take()
+    assert_eq(marked.len(), 2)
+    assert_eq(marked[0].disposition, "checked")
+    assert_eq(marked[1].occurrence, 2)
+}

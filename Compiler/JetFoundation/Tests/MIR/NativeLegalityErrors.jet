@@ -1,0 +1,40 @@
+// MIROptimization.rs:84-133. Full native typed error/Display denominator,
+// supplementing (not replacing) the ten original ownership/copy tests.
+struct MIRNativeErrorDisplayCase { error: MIRLegalityError, text: String }
+#Test("native legality Display retains every original variant and high-bit ID") {
+    function :: MIRFunctionID{value: U64{18446744073709551615}}
+    value :: MIRValueID{value: U64{9223372036854775808}}
+    span :: Span{start: 12, end: 34}
+    cases :: [MIRNativeErrorDisplayCase]{
+        MIRNativeErrorDisplayCase{error: .InvalidSpan(Val(function), span), text: "invalid MIR source span 12..34"},
+        MIRNativeErrorDisplayCase{error: .DuplicateInstruction(function, U64{9223372036854775808}), text: "function MirFunctionId(18446744073709551615) has duplicate instruction ID 9223372036854775808"},
+        MIRNativeErrorDisplayCase{error: .MissingValueMetadata(function, value), text: "function MirFunctionId(18446744073709551615) has no metadata for value MirValueId(9223372036854775808)"},
+        MIRNativeErrorDisplayCase{error: .UnexpectedValueMetadata(function, value), text: "function MirFunctionId(18446744073709551615) has metadata for missing value MirValueId(9223372036854775808)"},
+        MIRNativeErrorDisplayCase{error: .InvalidType(function, span), text: "function MirFunctionId(18446744073709551615) has an invalid type at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidLayout(function, span), text: "function MirFunctionId(18446744073709551615) has a type/layout mismatch at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidReference(function, "original subject", span), text: "function MirFunctionId(18446744073709551615) has invalid MIR reference original subject at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidPlaceAccess(function, U64{7}, span), text: "function MirFunctionId(18446744073709551615) writes through invalid place 7 at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidBorrow(function, U64{7}, span), text: "function MirFunctionId(18446744073709551615) borrows unreadable place 7 at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidOwnership(function, value, span), text: "function MirFunctionId(18446744073709551615) has invalid ownership for MirValueId(9223372036854775808) at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidMove(function, value, span), text: "function MirFunctionId(18446744073709551615) moves value MirValueId(9223372036854775808) more than once at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidMovedPlace(function, U64{7}, span), text: "function MirFunctionId(18446744073709551615) uses moved place 7 at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidDrop(function, U64{7}, span), text: "function MirFunctionId(18446744073709551615) has an invalid drop for place 7 at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidFailureEdge(function, span), text: "function MirFunctionId(18446744073709551615) has an invalid failure edge at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidEffectEdge(function, span), text: "function MirFunctionId(18446744073709551615) has an invalid effect edge at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidCoreCall(U64{7}, "key\n\""), text: "Core call \"key\\n\\\"\" has invalid metadata for 7"},
+        MIRNativeErrorDisplayCase{error: .InvalidPreludeCall(U64{7}, "member\n\""), text: "Prelude call \"member\\n\\\"\" has invalid metadata for 7"},
+        MIRNativeErrorDisplayCase{error: .InvalidFact(function, span), text: "function MirFunctionId(18446744073709551615) has an invalid optimization fact at 12..34"},
+        MIRNativeErrorDisplayCase{error: .InvalidCopyFact(function, value, .ViewMaterialize, span), text: "function MirFunctionId(18446744073709551615) copies MirValueId(9223372036854775808) with fact `view_materialize` its type does not admit at 12..34"},
+    }
+    loop row in cases -> assert_eq(mir_legality_error_text(row.error), row.text)
+}
+#Test("native legality Validation preserves the full nested typed payload") {
+    span :: Span{start: 12, end: 34}
+    error :: MIRValidationError.UseBeforeDefinition{function: MIRFunctionID{value: U64{9223372036854775808}}, value: MIRValueID{value: U64{18446744073709551615}}, span: span}
+    wrapped :: MIRLegalityError.Validation{error: error}
+    if wrapped == .Validation(actual) {
+        if actual == .UseBeforeDefinition(function, value, actual_span) { assert_eq(function.value, U64{9223372036854775808}); assert_eq(value.value, U64{18446744073709551615}); assert_eq(actual_span, span) }
+        else -> panic("native validation payload was flattened")
+    } else -> panic("native validation alternative was lost")
+    assert_eq(mir_legality_error_text(wrapped), "invalid MIR: {mir_validation_error_text(error)}")
+}

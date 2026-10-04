@@ -1,0 +1,164 @@
+// Codegen/mod.rs:2018-2078, 3411-3443. One Foundation SHA owner; identities
+// precede test stripping. The bounded cache is ordered by the original key,
+// not a timestamp or access order. A runtime producer owns this cache state.
+use jet_foundation.[MIRSHA256, mir_sha256_new, mir_sha256_update, mir_sha256_finish, mir_sha256_hex_bytes, mir_sha256_hex]
+
+JET_CORELIB_DIGEST_CACHE_LIMIT :: 32
+
+pub struct JetCoreEmissionFingerprintKey {
+    used_core: [String]
+    active_os: String
+    edition: String
+    force_corelib: Bool
+    test_harness: Bool
+    release_inspect: String?
+    devtools_panel_code: Bool
+    devtools_stream_code: Bool
+}
+
+pub struct JetCoreEmissionFingerprintEntry {
+    key: JetCoreEmissionFingerprintKey
+    fingerprint: String
+}
+
+pub struct JetRuntimeFingerprintCache {
+    entries: [JetCoreEmissionFingerprintEntry]
+}
+
+pub fn jet_runtime_fingerprint_cache() -> JetRuntimeFingerprintCache Never! {
+    JetRuntimeFingerprintCache{entries: [JetCoreEmissionFingerprintEntry]{}}
+}
+
+// Rust append_identity_field: byte length as unsigned big-endian u64, followed
+// by the exact UTF-8 bytes. Feed the same sequence incrementally without a
+// second source-sized identity allocation.
+pub fn jet_runtime_hash_identity_field(hash: &MIRSHA256, bytes: View<U8>) Never! {
+    length :: U64{bytes.len()}
+    prefix := [U8]{}
+    loop index in 0..<8 -> &prefix.push(U8.from_u64((length >> (8 * (7 - index))) & U64{255}) ?? panic("identity length byte is bounded"))
+    mir_sha256_update(hash, prefix.view(0..<prefix.len()))
+    mir_sha256_update(hash, bytes)
+}
+
+fn jet_runtime_hash_identity_text(hash: &MIRSHA256, value: String) Never! {
+    bytes :: value.bytes()
+    jet_runtime_hash_identity_field(hash, bytes.view(0..<bytes.len()))
+}
+
+fn jet_runtime_finish_hash(hash: ^MIRSHA256) -> String Never! {
+    digest :: mir_sha256_finish(^hash)
+    mir_sha256_hex_bytes(digest.view(0..<digest.len()))
+}
+
+pub fn jet_runtime_selected_source_fingerprint(sources: JetRuntimeCoreSources, selection: JetRuntimeCoreSourceSelection) -> String Never! {
+    hash := mir_sha256_new()
+    schema :: JET_CORE_SOURCE_CLOSURE_SCHEMA.bytes()
+    mir_sha256_update(&hash, schema.view(0..<schema.len()))
+    loop usage in selection.usages -> jet_runtime_hash_identity_text(&hash, usage)
+    loop index in selection.public_rows {
+        source :: sources.public_rows[index]
+        jet_runtime_hash_identity_text(&hash, source.module_name)
+        jet_runtime_hash_identity_text(&hash, source.path)
+        jet_runtime_hash_identity_text(&hash, source.source)
+    }
+    loop index in selection.private_rows {
+        source :: sources.private_rows[index]
+        jet_runtime_hash_identity_text(&hash, source.owner)
+        jet_runtime_hash_identity_text(&hash, source.module_name)
+        jet_runtime_hash_identity_text(&hash, source.alias)
+        jet_runtime_hash_identity_text(&hash, source.path)
+        jet_runtime_hash_identity_text(&hash, source.source)
+    }
+    jet_runtime_finish_hash(^hash)
+}
+
+pub fn jet_runtime_source_closure_fingerprint(sources: JetRuntimeCoreSources, used_core: View<String>) -> String Never! {
+    selection :: jet_runtime_select_core_sources(sources, used_core)
+    jet_runtime_selected_source_fingerprint(sources, selection)
+}
+
+// Codegen/mod.rs::corelib_emission_identity. `body` is the full assembled
+// unstripped closure, including scheduler/UI/app/edition source, not merely
+// the common kernel. Marker delimiters are outside this identity.
+pub fn jet_runtime_corelib_emission_identity(body: String, sources: JetRuntimeCoreSources, used_core: View<String>) -> String Never! {
+    source :: jet_runtime_source_closure_fingerprint(sources, used_core)
+    closure :: mir_sha256_hex(body)
+    length :: body.bytes().len()
+    hash := mir_sha256_new()
+    schema :: JET_CORE_SOURCE_CLOSURE_SCHEMA.bytes()
+    mir_sha256_update(&hash, schema.view(0..<schema.len()))
+    jet_runtime_hash_identity_text(&hash, source)
+    jet_runtime_hash_identity_text(&hash, closure)
+    jet_runtime_hash_identity_text(&hash, "{length}")
+    fingerprint :: jet_runtime_finish_hash(^hash)
+    "/* jet-corelib-r10 source={source} closure={closure} len={length} fp={fingerprint} */"
+}
+
+fn jet_runtime_text_order(left: String, right: String) -> Int Never! {
+    if left == right -> 0 else -> if left < right -> -1 else -> 1
+}
+
+fn jet_runtime_bool_order(left: Bool, right: Bool) -> Int Never! {
+    if left == right -> 0 else -> if !left -> -1 else -> 1
+}
+
+// Rust #[derive(Ord)] compares fields in declaration order, Vec lexically,
+// and None before Some. Do not turn this into a framed-string comparison:
+// length prefixes change lexical ordering and therefore change eviction.
+pub fn jet_runtime_core_fingerprint_key_order(left: JetCoreEmissionFingerprintKey, right: JetCoreEmissionFingerprintKey) -> Int Never! {
+    count :: if left.used_core.len() < right.used_core.len() -> left.used_core.len() else -> right.used_core.len()
+    loop index in 0..<count {
+        order :: jet_runtime_text_order(left.used_core[index], right.used_core[index])
+        if order != 0 -> return order
+    }
+    if left.used_core.len() != right.used_core.len() -> return if left.used_core.len() < right.used_core.len() -> -1 else -> 1
+    os :: jet_runtime_text_order(left.active_os, right.active_os)
+    if os != 0 -> return os
+    edition :: jet_runtime_text_order(left.edition, right.edition)
+    if edition != 0 -> return edition
+    force :: jet_runtime_bool_order(left.force_corelib, right.force_corelib)
+    if force != 0 -> return force
+    test :: jet_runtime_bool_order(left.test_harness, right.test_harness)
+    if test != 0 -> return test
+    if left.release_inspect == {
+        None -> { if right.release_inspect != None -> return -1 }
+        Val(value) -> {
+            other :: right.release_inspect ?? return 1
+            order :: jet_runtime_text_order(value, other)
+            if order != 0 -> return order
+        }
+    }
+    panel :: jet_runtime_bool_order(left.devtools_panel_code, right.devtools_panel_code)
+    if panel != 0 -> return panel
+    jet_runtime_bool_order(left.devtools_stream_code, right.devtools_stream_code)
+}
+
+fn jet_runtime_fingerprint_cache_lower_bound(cache: JetRuntimeFingerprintCache, key: JetCoreEmissionFingerprintKey) -> Int Never! {
+    lower := 0
+    upper := cache.entries.len()
+    loop lower < upper {
+        middle :: lower + (upper - lower) /% 2
+        if jet_runtime_core_fingerprint_key_order(cache.entries[middle].key, key) < 0 -> lower = middle + 1
+        else -> upper = middle
+    }
+    lower
+}
+
+pub fn jet_runtime_core_fingerprint_cache_get(cache: JetRuntimeFingerprintCache, key: JetCoreEmissionFingerprintKey) -> String? Never! {
+    index :: jet_runtime_fingerprint_cache_lower_bound(cache, key)
+    if index < cache.entries.len() && jet_runtime_core_fingerprint_key_order(cache.entries[index].key, key) == 0 -> return Val(cache.entries[index].fingerprint)
+    None
+}
+
+pub fn jet_runtime_core_fingerprint_cache_insert(cache: &JetRuntimeFingerprintCache, key: ^JetCoreEmissionFingerprintKey, fingerprint: String) Never! {
+    // Mirrors the post-computation Rust insertion: at capacity, evict the
+    // least existing key BEFORE inserting, even if a concurrent computation
+    // previously inserted this key. Cache hits themselves never alter order.
+    if cache.entries.len() >= JET_CORELIB_DIGEST_CACHE_LIMIT -> _ := &cache.entries.remove(0, .Slot)
+    index :: jet_runtime_fingerprint_cache_lower_bound(cache, key)
+    if index < cache.entries.len() && jet_runtime_core_fingerprint_key_order(cache.entries[index].key, key) == 0 {
+        cache.entries[index].fingerprint = fingerprint
+        return
+    }
+    &cache.entries.insert(index, JetCoreEmissionFingerprintEntry{key: ^key, fingerprint: fingerprint})
+}

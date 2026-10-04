@@ -258,7 +258,11 @@ fn jet_web_context(program: MIRProgram, config: JetWebEmitConfig) -> JetWebEmitC
 pub fn jet_web_emit(program: MIRProgram, config: JetWebEmitConfig) -> JetWebEmitResult {
     context := jet_web_context(program, config)
     if context.failure != None -> return JetWebEmitResult.Incomplete{failure: context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMIR, "E0003", "Web context construction failed", "the checked Web context did not retain a failure row", None)}
-    rust_config :: JetRustEmitConfig{target: "web", root_prefix: config.root_prefix, emit_types: true, emit_foreign: true, emit_metadata: true, local_rail: config.release_devtools_policy.local_rail, web_bucket: Val(MIRWebBucket.Wasm)}
+    rust_config := jet_rust_emit_config_for_artifact(config.artifact, config.layout, JetRustEmitTarget.WebWasm)
+    rust_config.root_prefix = config.root_prefix
+    rust_config.emit_metadata = true
+    rust_config.release_devtools_policy = config.release_devtools_policy
+    rust_config.web_bucket = Val(MIRWebBucket.Wasm)
     rust :: jet_rust_emit_program(context.program, rust_config, None)
     wasm :: if rust == {
         .Complete(source, manifest) -> source

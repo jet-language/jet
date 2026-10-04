@@ -1,0 +1,35 @@
+// Rust Evidence.rs:440–481,639–707,1128–1171. All host authority is explicit.
+use core.sys as evidence_sys
+use core.files as evidence_files
+pub fn evidence_build_from_environment() -[Env]> EvidenceBuild Never! { EvidenceBuild{toolchain: evidence_sys.get(EVIDENCE_TOOLCHAIN_ENV) ?? "", target: evidence_sys.get(EVIDENCE_TARGET_ENV) ?? "", profile: evidence_sys.get(EVIDENCE_PROFILE_ENV) ?? ""} }
+pub fn evidence_revision_from_environment() -[Env]> EvidenceRevision Never! { EvidenceRevision{source: evidence_sys.get(EVIDENCE_SOURCE_REVISION_ENV) ?? "", build: evidence_sys.get(EVIDENCE_BUILD_REVISION_ENV) ?? "", revision: evidence_sys.get(EVIDENCE_REVISION_ENV) ?? ""} }
+pub fn evidence_record_from_test_codes(kind_code: Int, state: Int, name: String, message: String, file: String, line: U32) -[Env]> EvidenceRecord EvidenceCodecError! {
+    kind :: evidence_kind_from_code(kind_code) ?? return Err(evidence_codec_error("unknown evidence kind {kind_code}"))
+    outcome :: if kind == EvidenceKind.Property && state == 0 -> EvidenceOutcome.Generated else -> evidence_outcome_from_test_state(state) ?? return Err(evidence_codec_error("unknown evidence state {state}"))
+    source :: EvidenceSource{path: file, line: if kind == EvidenceKind.Property -> U32{0} else -> line, column: U32{1}}
+    count :: if kind == EvidenceKind.Property -> U64{Int.from_u32(line)} else -> U64{1}
+    report_id :: evidence_sys.get(EVIDENCE_REPORT_ID_ENV) ?? "test-run"
+    identity :: evidence_identity_for_record(report_id, if name == "" -> "<anonymous>" else -> name, EvidenceProducerKind.Test, kind, source, count, message)
+    record := evidence_record_new(identity, kind, EvidenceProducerKind.Test, outcome, count, source, evidence_build_from_environment(), evidence_revision_from_environment())
+    record.detail = ~message
+    if message != "" -> &record.attachments.push(EvidenceAttachment{name: "detail", value: message})
+    if evidence_outcome_is_failure(outcome) {
+        code :: if kind == EvidenceKind.Runtime && name.starts_with("E") -> name else -> "E3001"
+        &record.diagnostics.push(EvidenceDiagnostic{code: code, message: message, source: Val(source)})
+    }
+    Ok(record)
+}
+pub fn evidence_report_read(path: String) -[FS.Read]> EvidenceReport EvidenceCodecError! {
+    bytes :: if evidence_files.read_bytes(path) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(evidence_codec_error("{error}")) }
+    }
+    evidence_report_from_bytes(bytes)
+}
+pub fn evidence_report_write(report: EvidenceReport, path: String) EvidenceCodecError! -[FS.Write]> {
+    bytes :: evidence_report_encode(report)
+    if evidence_files.write_bytes(path, bytes) == {
+        .Ok(_) -> return
+        .Err(error) -> return Err(evidence_codec_error("{error}"))
+    }
+}

@@ -1,0 +1,101 @@
+// No inline Rust tests in Acceleration.rs:1-670. Behavioral controls exercise
+// the exact gate precedence, arithmetic and canonical nested receipt projection.
+fn acceleration_test_input() -> AccelerationGateInput Never! {
+    AccelerationGateInput{items: 2048, sample_items: 128, sample_nanos: U64{100},
+        spawn_nanos: U64{100}, bandwidth_floor_nanos: U64{100},
+        first_chunk_serial_timed: true, spawn_cost_once_per_process: true,
+        bandwidth_floor_measured: true, release_build: true, cross_mode_parity_proven: true,
+        pin: None, workload: MIRAccelerationWorkloadFacts{nested_reuse: true, single_pass: false},
+        proof: MIRAccelerationProof{source_proven: true, independent_iterations: true,
+            no_aliasing: true, no_cross_iteration_dependencies: true, no_early_exit: true,
+            effect_free_body: true, ownership_safe: true, failure_order_preserved: true}}
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:58-80
+#Test("acceleration_fixed_reduction_order") {
+    order :: MIRFixedReductionOrder.canonical()
+    assert(order.is_canonical())
+    assert_eq(order.lane_for(17), Val(1))
+    assert_eq(order.tree_name(), "((0+1)+(2+3))+((4+5)+(6+7))")
+    zero :: MIRFixedReductionOrder{lanes: 0, seed_lane: 0, tree: MIRFixedReductionTree.AdjacentPairsThenRoot}
+    assert_eq(zero.lane_for(17), None)
+    assert(!zero.is_canonical())
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:551-627
+#Test("acceleration_gate_floor_and_pin_precede_release") {
+    gate :: AccelerationGate.d_accel1()
+    assert(!gate.should_measure(1024))
+    assert(gate.should_measure(1025))
+    input := acceleration_test_input()
+    input.items = 1024
+    input.pin = Val(AccelerationPin.Scalar)
+    input.release_build = false
+    assert_eq(gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input).status, AccelerationGateStatus.BelowStaticFloor)
+    input.items = 2048
+    assert_eq(gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input).status, AccelerationGateStatus.Pinned{pin: AccelerationPin.Scalar})
+    input.pin = None
+    assert_eq(gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input).status, AccelerationGateStatus.NotReleaseBuild)
+    input.release_build = true
+    input.cross_mode_parity_proven = false
+    assert_eq(gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input).status, AccelerationGateStatus.CrossModeParityMissing)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:580-608
+#Test("acceleration_gate_legality_and_measurement_precedence") {
+    gate :: AccelerationGate.default()
+    input := acceleration_test_input()
+    input.workload.single_pass = true
+    input.proof.source_proven = false
+    assert_eq(gate.evaluate(MIRAccelerationTransform.TransientColumnCopy, input).status, AccelerationGateStatus.ColumnCopyNotApplicable)
+    assert_eq(gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input).status, AccelerationGateStatus.ProofIncomplete)
+    input.proof.source_proven = true
+    input.first_chunk_serial_timed = false
+    assert_eq(gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input).status, AccelerationGateStatus.SampleNotTimed)
+    input.first_chunk_serial_timed = true
+    input.spawn_cost_once_per_process = false
+    assert_eq(gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input).status, AccelerationGateStatus.SpawnCostNotMeasured)
+    input.spawn_cost_once_per_process = true
+    input.bandwidth_floor_measured = false
+    assert_eq(gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input).status, AccelerationGateStatus.BandwidthFloorNotMeasured)
+    input.bandwidth_floor_measured = true
+    input.sample_items = 0
+    assert_eq(gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input).status, AccelerationGateStatus.InvalidMeasurement)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:630-662
+#Test("acceleration_projection_rounding_overflow_and_threshold") {
+    gate :: AccelerationGate.d_accel1()
+    input := acceleration_test_input()
+    decision :: gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input)
+    assert(decision.selected())
+    assert_eq(decision.measurement.projected_serial_nanos, Val(U64{1600}))
+    assert_eq(decision.measurement.required_serial_nanos, Val(U64{200}))
+    assert_eq(acceleration_project(U64{1}, U64{5}, U64{2}), Val(U64{3}))
+    assert_eq(acceleration_project(U64{0xffffffffffffffff}, U64{2}, U64{2}), None)
+    assert_eq(acceleration_project(U64{0xffffffffffffffff}, U64{1}, U64{2}), None)
+    input.sample_nanos = U64{1}
+    assert_eq(gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input).status, AccelerationGateStatus.ProjectedGainBelowThreshold)
+    input.sample_nanos = U64{0xffffffffffffffff}
+    assert_eq(gate.evaluate(MIRAccelerationTransform.PooledParallelChunks, input).status, AccelerationGateStatus.InvalidMeasurement)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:308-441
+#Test("acceleration_canonical_decision_roundtrip_and_pin_validation") {
+    gate :: AccelerationGate.d_accel1()
+    input := acceleration_test_input()
+    input.pin = Val(AccelerationPin.Local)
+    decision :: gate.evaluate(MIRAccelerationTransform.TransientColumnCopy, input)
+    json :: decision.to_canonical_json()
+    assert_eq(AccelerationDecision.from_canonical_json(json), Ok(decision))
+    input.pin = None
+    selected :: gate.evaluate(MIRAccelerationTransform.TransientColumnCopy, input)
+    assert_eq(AccelerationDecision.from_canonical_json(selected.to_canonical_json()), Ok(selected))
+    malformed :: CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "measurement", value: CanonicalJSON.Null},
+        CanonicalJSONField{key: "pin", value: CanonicalJSON.String("#Local")},
+        CanonicalJSONField{key: "status", value: CanonicalJSON.String("selected")},
+        CanonicalJSONField{key: "transform", value: CanonicalJSON.String("parallel")},
+    })
+    assert_eq(AccelerationDecision.from_canonical_json(malformed), Err("un-pinned acceleration decision carries a pin"))
+}

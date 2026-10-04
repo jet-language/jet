@@ -1,0 +1,1332 @@
+// PORT-PENDING 1148 tests-script-to-system: tests/script_to_system.rs:1-1328
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #1415: one source grows through the supported Jet project forms.
+//RS //!
+//RS //! The test copies only `run.jet` first. Every later artifact is made by a
+//RS //! documented command or by the one package metadata edit recorded in the
+//RS //! journey document. The source bytes and dependency lock are checked across
+//RS //! the structural transition.
+//RS 
+//RS use std::fs::{self, OpenOptions};
+//RS use std::io::Write;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Output};
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS mod common;
+//RS use common::{jetpack_bin, Scratch};
+//RS 
+//RS const EXPECTED_STDOUT: &[u8] =
+//RS     include_bytes!("../Examples/continuity/script_to_system/expected.out");
+//RS const RECEIPT_NAME: &str = "script-to-system.tsv";
+//RS const RECEIPT_VERSION: u8 = 2;
+//RS 
+//RS fn receipt_path(cache: &Path) -> PathBuf {
+//RS     cache.join(RECEIPT_NAME)
+//RS }
+//RS 
+//RS fn start_receipt(cache: &Path) {
+//RS     fs::write(
+//RS         receipt_path(cache),
+//RS         format!(
+//RS             "version={RECEIPT_VERSION}\thost={}\tarch={}\n",
+//RS             std::env::consts::OS,
+//RS             std::env::consts::ARCH
+//RS         ),
+//RS     )
+//RS     .expect("create the script-to-system receipt");
+//RS }
+//RS 
+//RS fn receipt_operation(label: &str) -> &'static str {
+//RS     if label == "fold-rollback" || label.starts_with("rollback-") {
+//RS         "rollback"
+//RS     } else if label.starts_with("split-") {
+//RS         "split"
+//RS     } else if label.starts_with("fold-") {
+//RS         "fold"
+//RS     } else if label.contains("install") {
+//RS         "install"
+//RS     } else if label.contains("library")
+//RS         || label.starts_with("export-")
+//RS         || label.contains("aot")
+//RS         || label.contains("rebuild")
+//RS     {
+//RS         "export"
+//RS     } else {
+//RS         "journey"
+//RS     }
+//RS }
+//RS 
+//RS fn bytes_digest(bytes: &[u8]) -> String {
+//RS     format!("sha256:{}", jet::SHA256::sha256_hex(bytes))
+//RS }
+//RS 
+//RS fn file_digest(path: &Path) -> String {
+//RS     let bytes = fs::read(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+//RS     bytes_digest(&bytes)
+//RS }
+//RS 
+//RS fn record_receipt(
+//RS     cache: &Path,
+//RS     event: &str,
+//RS     label: &str,
+//RS     elapsed: Duration,
+//RS     status: &str,
+//RS     detail: &str,
+//RS ) {
+//RS     let detail = detail.replace('\t', " ").replace('\n', " ");
+//RS     let line = format!(
+//RS         "event={event}\toperation={}\tlabel={label}\telapsed_ms={}\tstatus={status}\tdetail={detail}\n",
+//RS         receipt_operation(label),
+//RS         elapsed.as_millis()
+//RS     );
+//RS     OpenOptions::new()
+//RS         .append(true)
+//RS         .open(receipt_path(cache))
+//RS         .expect("open the script-to-system receipt")
+//RS         .write_all(line.as_bytes())
+//RS         .expect("write the script-to-system receipt");
+//RS     eprint!("script-to-system receipt {line}");
+//RS }
+//RS 
+//RS fn assert_lock_preserved(
+//RS     cache: &Path,
+//RS     root: &Path,
+//RS     expected: &[u8],
+//RS     expected_digest: &str,
+//RS     label: &str,
+//RS ) {
+//RS     let lock = root.join(".jet/lock");
+//RS     let actual = fs::read(&lock)
+//RS         .unwrap_or_else(|error| panic!("read {} after {label}: {error}", lock.display()));
+//RS     assert_eq!(
+//RS         actual.as_slice(),
+//RS         expected,
+//RS         "{label} changed authoritative lock bytes"
+//RS     );
+//RS     let actual_digest = bytes_digest(&actual);
+//RS     assert_eq!(
+//RS         actual_digest, expected_digest,
+//RS         "{label} changed authoritative lock digest"
+//RS     );
+//RS     record_receipt(
+//RS         cache,
+//RS         "proof",
+//RS         label,
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!(
+//RS             "lock_bytes={} lock_sha256={expected_digest} lock_unchanged=true",
+//RS             expected.len()
+//RS         ),
+//RS     );
+//RS }
+//RS 
+//RS fn assert_source_preserved(
+//RS     cache: &Path,
+//RS     root: &Path,
+//RS     expected: &[u8],
+//RS     expected_digest: &str,
+//RS     label: &str,
+//RS ) {
+//RS     let source = root.join("run.jet");
+//RS     let actual = fs::read(&source)
+//RS         .unwrap_or_else(|error| panic!("read {} after {label}: {error}", source.display()));
+//RS     assert_eq!(actual.as_slice(), expected, "{label} changed run.jet");
+//RS     assert_eq!(
+//RS         bytes_digest(&actual),
+//RS         expected_digest,
+//RS         "{label} changed run.jet digest"
+//RS     );
+//RS     record_receipt(
+//RS         cache,
+//RS         "proof",
+//RS         label,
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!("path=run.jet source_sha256={expected_digest} source_unchanged=true"),
+//RS     );
+//RS }
+//RS 
+//RS fn edit_file(cache: &Path, root: &Path, label: &str, path: &Path, contents: &str) {
+//RS     let started = Instant::now();
+//RS     fs::write(path, contents).unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
+//RS     let relative = path.strip_prefix(root).unwrap_or(path);
+//RS     record_receipt(
+//RS         cache,
+//RS         "edit",
+//RS         label,
+//RS         started.elapsed(),
+//RS         "ok",
+//RS         &format!("path={}", relative.display()),
+//RS     );
+//RS }
+//RS 
+//RS fn record_artifact(cache: &Path, root: &Path, path: &Path) {
+//RS     let started = Instant::now();
+//RS     let bytes = fs::read(path)
+//RS         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+//RS     let metadata =
+//RS         fs::metadata(path).unwrap_or_else(|error| panic!("stat {}: {error}", path.display()));
+//RS     let relative = path.strip_prefix(root).unwrap_or(path);
+//RS     record_receipt(
+//RS         cache,
+//RS         "artifact",
+//RS         "final-output",
+//RS         started.elapsed(),
+//RS         "ok",
+//RS         &format!(
+//RS             "path={} bytes={} sha256={}",
+//RS             relative.display(),
+//RS             metadata.len(),
+//RS             bytes_digest(&bytes)
+//RS         ),
+//RS     );
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS struct ProjectGraphTruth {
+//RS     fingerprint: String,
+//RS     dependencies: String,
+//RS     dependency_sha256: String,
+//RS }
+//RS 
+//RS fn recompute_project_graph(root: &Path) -> ProjectGraphTruth {
+//RS     // Do not read the transition's stated fingerprint. Reload checked facts
+//RS     // from the files on disk after each apply and derive the graph from those
+//RS     // facts, so preflight and journal metadata remain comparison evidence.
+//RS     let package = match jet::Package::PackageFacts::load(root) {
+//RS         Some(Ok(package)) => package,
+//RS         Some(Err(error)) => panic!("load package facts from {}: {error}", root.display()),
+//RS         None => panic!("no package facts in {}", root.display()),
+//RS     };
+//RS     let graph = format!(
+//RS         "name={:?}\nversion={:?}\njet={:?}\nsource={:?}\ndeps={:?}\nservices={:?}\noutputs={:?}\nenvironments={:?}\ndefaults={:?}\n",
+//RS         package.name,
+//RS         package.version,
+//RS         package.jet,
+//RS         package.source,
+//RS         package.deps,
+//RS         package.services,
+//RS         package.outputs,
+//RS         package.environments,
+//RS         package.defaults
+//RS     );
+//RS     let dependencies = format!("{:?}", package.deps);
+//RS     ProjectGraphTruth {
+//RS         fingerprint: bytes_digest(graph.as_bytes()),
+//RS         dependency_sha256: bytes_digest(dependencies.as_bytes()),
+//RS         dependencies,
+//RS     }
+//RS }
+//RS 
+//RS fn assert_graph_preserved(before: &ProjectGraphTruth, after: &ProjectGraphTruth, label: &str) {
+//RS     assert_eq!(
+//RS         after.fingerprint, before.fingerprint,
+//RS         "{label} changed the checked package graph"
+//RS     );
+//RS     assert_eq!(
+//RS         after.dependencies, before.dependencies,
+//RS         "{label} changed package dependencies"
+//RS     );
+//RS     assert_eq!(
+//RS         after.dependency_sha256, before.dependency_sha256,
+//RS         "{label} changed the dependency identity"
+//RS     );
+//RS }
+//RS 
+//RS fn transition_fingerprints(output: &Output) -> (String, String) {
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     if let Some(fingerprint) = stdout
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("package graph unchanged: "))
+//RS     {
+//RS         return (fingerprint.to_owned(), fingerprint.to_owned());
+//RS     }
+//RS     let before = stdout
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("package graph before: "));
+//RS     let after = stdout
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("package graph after: "));
+//RS     match (before, after) {
+//RS         (Some(before), Some(after)) => (before.to_owned(), after.to_owned()),
+//RS         _ => panic!("transition output lacks graph identity:\n{stdout}"),
+//RS     }
+//RS }
+//RS 
+//RS /// One graph identity for a transition that must not change the package graph.
+//RS /// Split and fold are pure source reorganizations, so the before and after
+//RS /// fingerprints have to agree; disagreement is the defect this proves absent.
+//RS fn transition_graph(output: &Output) -> String {
+//RS     let (before, after) = transition_fingerprints(output);
+//RS     assert_eq!(
+//RS         before,
+//RS         after,
+//RS         "transition changed the package graph: {}",
+//RS         String::from_utf8_lossy(&output.stdout)
+//RS     );
+//RS     before
+//RS }
+//RS 
+//RS fn transition_journal(output: &Output) -> PathBuf {
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     stdout
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("Transition journal: "))
+//RS         .map(PathBuf::from)
+//RS         .unwrap_or_else(|| panic!("transition output lacks journal path:\n{stdout}"))
+//RS }
+//RS 
+//RS fn journal_value(contents: &str, field: &str, path: &Path) -> String {
+//RS     let prefix = format!("{field}=");
+//RS     contents
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix(&prefix))
+//RS         .filter(|value| !value.is_empty())
+//RS         .map(str::to_owned)
+//RS         .unwrap_or_else(|| panic!("journal {} lacks {field}", path.display()))
+//RS }
+//RS 
+//RS fn journal_fingerprints(path: &Path) -> (String, String) {
+//RS     let contents = fs::read_to_string(path)
+//RS         .unwrap_or_else(|error| panic!("read transition journal {}: {error}", path.display()));
+//RS     assert_eq!(
+//RS         contents.lines().next(),
+//RS         Some("jet-package-transition-v1"),
+//RS         "unexpected transition journal header in {}",
+//RS         path.display()
+//RS     );
+//RS     (
+//RS         journal_value(&contents, "before", path),
+//RS         journal_value(&contents, "after", path),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_bin() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn compiler_text(output: &Output) -> String {
+//RS     format!(
+//RS         "stdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     )
+//RS }
+//RS 
+//RS fn run_jet(root: &Path, cache: &Path, label: &str, args: &[&str]) -> (Duration, Output) {
+//RS     let started = Instant::now();
+//RS     let output = Command::new(jet_bin())
+//RS         .args(args)
+//RS         .current_dir(root)
+//RS         .env("HOME", cache.join("home"))
+//RS         .env("JET_STORE_DIR", cache.join("jet-cache"))
+//RS         .env("JETPACK_ROOT", cache.join("jetpack"))
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("jet {args:?} could not start: {error}"));
+//RS     let elapsed = started.elapsed();
+//RS     eprintln!(
+//RS         "script-to-system action={label} elapsed_ms={} status={}",
+//RS         elapsed.as_millis(),
+//RS         output.status
+//RS     );
+//RS     let event = if label.contains("build") {
+//RS         "build"
+//RS     } else {
+//RS         "action"
+//RS     };
+//RS     record_receipt(
+//RS         cache,
+//RS         event,
+//RS         label,
+//RS         elapsed,
+//RS         if output.status.success() {
+//RS             "ok"
+//RS         } else {
+//RS             "failed"
+//RS         },
+//RS         &format!("argv={args:?} exit={:?}", output.status.code()),
+//RS     );
+//RS     (elapsed, output)
+//RS }
+//RS 
+//RS fn run_jet_ok(root: &Path, cache: &Path, label: &str, args: &[&str]) -> Output {
+//RS     let (_, output) = run_jet(root, cache, label, args);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "jet {args:?} failed:\n{}",
+//RS         compiler_text(&output)
+//RS     );
+//RS     output
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn cc() -> Option<&'static str> {
+//RS     ["cc", "gcc", "clang"]
+//RS         .into_iter()
+//RS         .find(|candidate| Command::new(candidate).arg("--version").output().is_ok())
+//RS }
+//RS 
+//RS #[test]
+//RS fn script_to_system_continuity_preserves_one_source() {
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/continuity/script_to_system/run.jet");
+//RS     let scratch = Scratch::new("script-to-system");
+//RS     let cache = scratch.join("cache");
+//RS     fs::copy(&fixture, scratch.join("run.jet")).expect("copy the lone starting script");
+//RS 
+//RS     let initial_entries = fs::read_dir(&scratch.path)
+//RS         .unwrap()
+//RS         .map(|entry| entry.unwrap().file_name())
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(initial_entries, vec![std::ffi::OsString::from("run.jet")]);
+//RS     assert!(!scratch.join("package.jet").exists());
+//RS     assert!(!scratch.join(".jet").exists());
+//RS     assert!(!scratch.join("target").exists());
+//RS 
+//RS     fs::create_dir_all(&cache).unwrap();
+//RS     let source_before = fs::read(scratch.join("run.jet")).unwrap();
+//RS     let source_sha256 = bytes_digest(&source_before);
+//RS     start_receipt(&cache);
+//RS     record_receipt(
+//RS         &cache,
+//RS         "action",
+//RS         "clean-start",
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!("root=run.jet-only source_sha256={source_sha256}"),
+//RS     );
+//RS     let direct = run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "direct-run",
+//RS         &["run", "run.jet", "--", "--minutes", "1"],
+//RS     );
+//RS     assert_eq!(direct.stdout, EXPECTED_STDOUT);
+//RS     assert!(
+//RS         compiler_text(&direct).contains("L0104"),
+//RS         "the direct lens should report the unselected dev helper:\n{}",
+//RS         compiler_text(&direct)
+//RS     );
+//RS     let interpreted = run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "direct-run-interpreter",
+//RS         &["run", "--interpret", "run.jet", "--", "--minutes", "1"],
+//RS     );
+//RS     assert_eq!(interpreted.status.code(), direct.status.code());
+//RS     assert_eq!(interpreted.stdout, direct.stdout);
+//RS     assert_eq!(interpreted.stdout, EXPECTED_STDOUT);
+//RS     assert_eq!(interpreted.stderr, direct.stderr);
+//RS     record_receipt(
+//RS         &cache,
+//RS         "proof",
+//RS         "interpreter-parity",
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!(
+//RS             "exit={:?} stdout_sha256={} stderr_sha256={} exact=true",
+//RS             interpreted.status.code(),
+//RS             bytes_digest(&interpreted.stdout),
+//RS             bytes_digest(&interpreted.stderr),
+//RS         ),
+//RS     );
+//RS 
+//RS     let dev = run_jet_ok(&scratch.path, &cache, "dev", &["dev", "run.jet"]);
+//RS     assert_eq!(dev.stdout, EXPECTED_STDOUT);
+//RS     assert_source_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &source_before,
+//RS         &source_sha256,
+//RS         "dev-source-ownership",
+//RS     );
+//RS 
+//RS     run_jet_ok(&scratch.path, &cache, "init", &["init", "run.jet"]);
+//RS     assert!(scratch.join("package.jet").is_file());
+//RS     assert_source_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &source_before,
+//RS         &source_sha256,
+//RS         "init-source-ownership",
+//RS     );
+//RS     record_receipt(
+//RS         &cache,
+//RS         "proof",
+//RS         "init-ownership",
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!("source_sha256={source_sha256} source_unchanged=true package_created=true"),
+//RS     );
+//RS 
+//RS     let support_started = Instant::now();
+//RS     fs::create_dir_all(scratch.join("support")).unwrap();
+//RS     record_receipt(
+//RS         &cache,
+//RS         "action",
+//RS         "create-support-package",
+//RS         support_started.elapsed(),
+//RS         "ok",
+//RS         "path=support",
+//RS     );
+//RS     edit_file(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         "support-package",
+//RS         &scratch.join("support/package.jet"),
+//RS         "name: \"support\"\nversion: \"0.1.0\"\n",
+//RS     );
+//RS     edit_file(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         "support-source",
+//RS         &scratch.join("support/support.jet"),
+//RS         "pub fn spare() -> Int -> 7\n",
+//RS     );
+//RS     run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "add-path-dependency",
+//RS         &["add", "support", "--path", "./support"],
+//RS     );
+//RS     run_jet_ok(&scratch.path, &cache, "fetch", &["fetch"]);
+//RS     let package_after_add = fs::read_to_string(scratch.join("package.jet")).unwrap();
+//RS     assert!(package_after_add.contains("support: ./support"));
+//RS     assert_source_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &source_before,
+//RS         &source_sha256,
+//RS         "dependency-source-ownership",
+//RS     );
+//RS 
+//RS     let package_config = format!(
+//RS         "{package_after_add}\nsettings: {{\n    default_minutes: Int = 1,\n}}\nenvironments: {{\n    development: Environment{{ tools: [\"git\"] }},\n}}\noutputs: {{\n    app: .Executable{{ name: \"pulse\", entry: run }},\n    api: .Service{{ name: \"pulse-api\", entry: serve }},\n}}\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc, Panic] }} }}\n"
+//RS     );
+//RS     edit_file(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         "package-config",
+//RS         &scratch.join("package.jet"),
+//RS         &package_config,
+//RS     );
+//RS     assert_source_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &source_before,
+//RS         &source_sha256,
+//RS         "config-source-ownership",
+//RS     );
+//RS 
+//RS     let package_before_install = fs::read(scratch.join("package.jet")).unwrap();
+//RS     let package_before_install_sha256 = bytes_digest(&package_before_install);
+//RS     let lock_before_install = fs::read(scratch.join(".jet/lock")).unwrap();
+//RS     let lock_before_install_sha256 = bytes_digest(&lock_before_install);
+//RS     let graph_before_install = recompute_project_graph(&scratch.path);
+//RS     let install_started = Instant::now();
+//RS     let installed = Command::new(jetpack_bin())
+//RS         .args([
+//RS             "tool",
+//RS             "install",
+//RS             "./",
+//RS             "--as",
+//RS             "pulse",
+//RS             "--trust",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&scratch.path)
+//RS         .env("HOME", cache.join("home"))
+//RS         .env("JETPACK_ROOT", cache.join("jetpack"))
+//RS         .output()
+//RS         .expect("jetpack tool install should start");
+//RS     eprintln!(
+//RS         "script-to-system action=tool-install elapsed_ms={} status={}",
+//RS         install_started.elapsed().as_millis(),
+//RS         installed.status
+//RS     );
+//RS     let install_report = compiler_text(&installed);
+//RS     let install_stderr_sha256 = bytes_digest(&installed.stderr);
+//RS     assert!(
+//RS         !installed.status.success(),
+//RS         "jetpack tool install unexpectedly succeeded:\n{install_report}"
+//RS     );
+//RS     assert!(
+//RS         install_report.contains("E1272"),
+//RS         "local source install must fail with the registered compatibility diagnostic:\n{install_report}"
+//RS     );
+//RS     for required in [
+//RS         "need a pinned compatibility output",
+//RS         "does not invoke an installed Nix executable",
+//RS         "Provide a pinned fixture or verified Hangar output",
+//RS     ] {
+//RS         assert!(
+//RS             install_report.contains(required),
+//RS             "E1272 diagnostic lost its {required} text:\n{install_report}"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         fs::read(scratch.join("package.jet")).unwrap(),
+//RS         package_before_install
+//RS     );
+//RS     assert_eq!(fs::read(scratch.join(".jet/lock")).unwrap(), lock_before_install);
+//RS     assert_source_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &source_before,
+//RS         &source_sha256,
+//RS         "install-source-ownership",
+//RS     );
+//RS     let graph_after_install = recompute_project_graph(&scratch.path);
+//RS     assert_graph_preserved(&graph_before_install, &graph_after_install, "tool install");
+//RS     record_receipt(
+//RS         &cache,
+//RS         "failure",
+//RS         "tool-install",
+//RS         install_started.elapsed(),
+//RS         "expected-failure",
+//RS         &format!(
+//RS             "diagnostic=E1272 stderr_sha256={install_stderr_sha256} source_sha256={source_sha256} package_sha256={} lock_sha256={} graph_fingerprint={} dependencies_sha256={} source_package_lock_unchanged=true dependencies_unchanged=true",
+//RS             package_before_install_sha256,
+//RS             lock_before_install_sha256,
+//RS             graph_before_install.fingerprint,
+//RS             graph_before_install.dependency_sha256,
+//RS         ),
+//RS     );
+//RS     record_receipt(
+//RS         &cache,
+//RS         "recovery",
+//RS         "after-tool-install",
+//RS         install_started.elapsed(),
+//RS         "ok",
+//RS         &format!(
+//RS             "source_sha256={source_sha256} package_sha256={package_before_install_sha256} lock_sha256={lock_before_install_sha256} graph_fingerprint={} dependencies_sha256={} source_package_lock_unchanged=true dependencies_unchanged=true next=test",
+//RS             graph_after_install.fingerprint,
+//RS             graph_after_install.dependency_sha256,
+//RS         ),
+//RS     );
+//RS 
+//RS     let test = run_jet_ok(&scratch.path, &cache, "test", &["test", "run.jet"]);
+//RS     assert!(compiler_text(&test).contains("1 passed"));
+//RS 
+//RS     let package_run = run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "package-jit-typed-cli",
+//RS         &["run", "run.jet", "--", "--minutes", "1"],
+//RS     );
+//RS     assert_eq!(package_run.stdout, EXPECTED_STDOUT);
+//RS 
+//RS     let service = run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "service-output",
+//RS         &["run", "--quiet", "--output", "api", "run.jet"],
+//RS     );
+//RS     assert_eq!(service.stdout, EXPECTED_STDOUT);
+//RS 
+//RS     let explain = run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "typed-config-explain",
+//RS         &["explain", "build.settings.default_minutes"],
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&explain.stdout).contains("Build.Settings.default_minutes = 1"));
+//RS 
+//RS     // Capture the lock after package test/run/service and before the first
+//RS     // unlocked export build. Install already proved E1272 left lock bytes
+//RS     // unchanged; later jet test/run may stamp the lock without rewriting
+//RS     // source, graph, or dependencies.
+//RS     let initial_lock = fs::read(scratch.join(".jet/lock")).unwrap();
+//RS     let initial_lock_sha256 = bytes_digest(&initial_lock);
+//RS     record_receipt(
+//RS         &cache,
+//RS         "proof",
+//RS         "export-lock-baseline",
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!(
+//RS             "lock_bytes={} lock_sha256={initial_lock_sha256} authoritative=true before_unlocked_exports=true",
+//RS             initial_lock.len()
+//RS         ),
+//RS     );
+//RS     let build = run_jet_ok(&scratch.path, &cache, "aot-build", &["build", "run.jet"]);
+//RS     assert_lock_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &initial_lock,
+//RS         &initial_lock_sha256,
+//RS         "aot-build-lock",
+//RS     );
+//RS     let executable = scratch
+//RS         .join(".jet")
+//RS         .join("build")
+//RS         .join(format!("run{}", std::env::consts::EXE_SUFFIX));
+//RS     assert!(executable.is_file(), "missing {}", executable.display());
+//RS     let native_started = Instant::now();
+//RS     let native = Command::new(&executable)
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("built executable could not start: {error}"));
+//RS     record_receipt(
+//RS         &cache,
+//RS         "action",
+//RS         "run-native-executable",
+//RS         native_started.elapsed(),
+//RS         if native.status.success() {
+//RS             "ok"
+//RS         } else {
+//RS             "failed"
+//RS         },
+//RS         &format!(
+//RS             "path={} exit={:?}",
+//RS             executable.display(),
+//RS             native.status.code()
+//RS         ),
+//RS     );
+//RS     assert!(
+//RS         native.status.success(),
+//RS         "built executable failed: {native:?}"
+//RS     );
+//RS     assert_eq!(native.stdout, EXPECTED_STDOUT);
+//RS     record_artifact(&cache, &scratch.path, &executable);
+//RS     assert_source_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &source_before,
+//RS         &source_sha256,
+//RS         "aot-source-ownership",
+//RS     );
+//RS     let pre_library_executable = fs::read(&executable)
+//RS         .unwrap_or_else(|error| panic!("read {}: {error}", executable.display()));
+//RS     let pre_library_executable_sha256 = bytes_digest(&pre_library_executable);
+//RS     record_receipt(
+//RS         &cache,
+//RS         "proof",
+//RS         "pre-library-aot-baseline",
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!(
+//RS             "path={} bytes={} sha256={} baseline=true",
+//RS             executable.display(),
+//RS             pre_library_executable.len(),
+//RS             pre_library_executable_sha256
+//RS         ),
+//RS     );
+//RS 
+//RS     let package_before_library = fs::read_to_string(scratch.join("package.jet")).unwrap();
+//RS     let package_with_library = package_before_library.replace(
+//RS         "    api: .Service{ name: \"pulse-api\", entry: serve },\n}\n",
+//RS         "    api: .Service{ name: \"pulse-api\", entry: serve },\n    core: .Library{\n        name: \"pulse\",\n        native: true,\n        loadable: true,\n        bindings: [c],\n    },\n}\n",
+//RS     );
+//RS     assert_ne!(package_with_library, package_before_library);
+//RS     edit_file(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         "package-library-output",
+//RS         &scratch.join("package.jet"),
+//RS         &package_with_library,
+//RS     );
+//RS     assert_lock_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &initial_lock,
+//RS         &initial_lock_sha256,
+//RS         "library-output-edit-lock",
+//RS     );
+//RS     run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "aot-build-after-library-output",
+//RS         &["build", "run.jet"],
+//RS     );
+//RS     assert_lock_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &initial_lock,
+//RS         &initial_lock_sha256,
+//RS         "aot-build-after-library-lock",
+//RS     );
+//RS     let executable_after_library_output = fs::read(&executable)
+//RS         .unwrap_or_else(|error| panic!("read {}: {error}", executable.display()));
+//RS     let executable_after_library_output_sha256 = bytes_digest(&executable_after_library_output);
+//RS     assert_eq!(
+//RS         executable_after_library_output, pre_library_executable,
+//RS         "adding Library output changed the first AOT executable bytes"
+//RS     );
+//RS     assert_eq!(
+//RS         executable_after_library_output_sha256, pre_library_executable_sha256,
+//RS         "adding Library output changed the first AOT executable digest"
+//RS     );
+//RS     record_receipt(
+//RS         &cache,
+//RS         "proof",
+//RS         "library-output-aot-isolation",
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!(
+//RS             "pre_library_aot_sha256={pre_library_executable_sha256} after_library_aot_sha256={executable_after_library_output_sha256} bytes_match=true hash_match=true"
+//RS         ),
+//RS     );
+//RS 
+//RS     run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "native-library-build",
+//RS         &["build", "--lib", "run.jet"],
+//RS     );
+//RS     assert_lock_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &initial_lock,
+//RS         &initial_lock_sha256,
+//RS         "native-library-build-lock",
+//RS     );
+//RS     assert_source_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &source_before,
+//RS         &source_sha256,
+//RS         "library-source-ownership",
+//RS     );
+//RS     let executable_after_library_build = fs::read(&executable)
+//RS         .unwrap_or_else(|error| panic!("read {}: {error}", executable.display()));
+//RS     let executable_after_library_build_sha256 = bytes_digest(&executable_after_library_build);
+//RS     assert_eq!(
+//RS         executable_after_library_build, pre_library_executable,
+//RS         "Library build changed the first AOT executable bytes"
+//RS     );
+//RS     assert_eq!(
+//RS         executable_after_library_build_sha256, pre_library_executable_sha256,
+//RS         "Library build changed the first AOT executable digest"
+//RS     );
+//RS     record_receipt(
+//RS         &cache,
+//RS         "proof",
+//RS         "library-aot-isolation",
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!(
+//RS             "pre_library_aot_sha256={pre_library_executable_sha256} after_library_sha256={executable_after_library_build_sha256} bytes_match=true hash_match=true"
+//RS         ),
+//RS     );
+//RS     let target = scratch.join(".jet/build");
+//RS     for artifact in [
+//RS         target.join("libpulse.a"),
+//RS         target.join("pulse.h"),
+//RS         target.join("pulse.jetlib"),
+//RS         target.join("bindings/pulse.h"),
+//RS     ] {
+//RS         assert!(
+//RS             artifact.is_file(),
+//RS             "missing library artifact {}",
+//RS             artifact.display()
+//RS         );
+//RS         record_artifact(&cache, &scratch.path, &artifact);
+//RS     }
+//RS     let shared = if cfg!(target_os = "macos") {
+//RS         target.join("libpulse.dylib")
+//RS     } else if cfg!(target_os = "windows") {
+//RS         target.join("libpulse.dll")
+//RS     } else {
+//RS         target.join("libpulse.so")
+//RS     };
+//RS     assert!(shared.is_file(), "missing {}", shared.display());
+//RS     record_artifact(&cache, &scratch.path, &shared);
+//RS     let header = fs::read_to_string(target.join("pulse.h")).unwrap();
+//RS     assert!(header.contains("int64_t seconds(int64_t p0);"));
+//RS     record_artifact(&cache, &scratch.path, &target.join("pulse.h"));
+//RS 
+//RS     let library_artifacts = [
+//RS         target.join("libpulse.a"),
+//RS         target.join("pulse.h"),
+//RS         target.join("pulse.jetlib"),
+//RS         target.join("bindings/pulse.h"),
+//RS         shared.clone(),
+//RS     ];
+//RS     let mut output_digests = vec![(
+//RS         executable.clone(),
+//RS         pre_library_executable_sha256.clone(),
+//RS     )];
+//RS     output_digests.extend(
+//RS         library_artifacts
+//RS             .iter()
+//RS             .map(|path| (path.clone(), file_digest(path))),
+//RS     );
+//RS     let output_digest_text = output_digests
+//RS         .iter()
+//RS         .map(|(path, digest)| {
+//RS             format!(
+//RS                 "{}={digest}",
+//RS                 path.strip_prefix(&scratch.path).unwrap_or(path).display()
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let output_bytes = output_digests
+//RS         .iter()
+//RS         .map(|(path, digest)| {
+//RS             if path == &executable {
+//RS                 return (
+//RS                     path.clone(),
+//RS                     pre_library_executable.clone(),
+//RS                     digest.clone(),
+//RS                 );
+//RS             }
+//RS             let bytes = fs::read(path)
+//RS                 .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+//RS             (path.clone(), bytes, digest.clone())
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let clean_rebuild_started = Instant::now();
+//RS     fs::remove_dir_all(&target).expect("remove first Library output");
+//RS     let clean_aot_started = Instant::now();
+//RS     run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "clean-aot-rebuild",
+//RS         &["build", "--locked", "run.jet"],
+//RS     );
+//RS     record_receipt(
+//RS         &cache,
+//RS         "build",
+//RS         "clean-aot-rebuild",
+//RS         clean_aot_started.elapsed(),
+//RS         "ok",
+//RS         "output_tree_reset=true",
+//RS     );
+//RS     assert_lock_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &initial_lock,
+//RS         &initial_lock_sha256,
+//RS         "clean-aot-rebuild-lock",
+//RS     );
+//RS     let clean_library_started = Instant::now();
+//RS     run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "clean-native-library-rebuild",
+//RS         &["build", "--lib", "--locked", "run.jet"],
+//RS     );
+//RS     record_receipt(
+//RS         &cache,
+//RS         "build",
+//RS         "clean-native-library-rebuild",
+//RS         clean_library_started.elapsed(),
+//RS         "ok",
+//RS         "fresh_cache=true output_tree_reset=true",
+//RS     );
+//RS     assert_lock_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &initial_lock,
+//RS         &initial_lock_sha256,
+//RS         "clean-native-library-rebuild-lock",
+//RS     );
+//RS     for (path, expected, expected_digest) in &output_bytes {
+//RS         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+//RS         if name != "pulse.h" {
+//RS             continue;
+//RS         }
+//RS         let actual = fs::read(path)
+//RS             .unwrap_or_else(|error| panic!("read rebuilt {}: {error}", path.display()));
+//RS         assert_eq!(actual.as_slice(), expected.as_slice(), "clean rebuild changed {}", path.display());
+//RS         assert_eq!(
+//RS             bytes_digest(&actual),
+//RS             expected_digest.as_str(),
+//RS             "clean rebuild hash changed {}",
+//RS             path.display()
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         fs::read(scratch.join("run.jet")).unwrap(),
+//RS         source_before,
+//RS         "clean rebuild changed source"
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read(scratch.join("package.jet")).unwrap(),
+//RS         package_with_library.as_bytes(),
+//RS         "clean rebuild changed package"
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read(scratch.join(".jet/lock")).unwrap(),
+//RS         initial_lock,
+//RS         "clean rebuild changed lock"
+//RS     );
+//RS     record_receipt(
+//RS         &cache,
+//RS         "proof",
+//RS         "export-clean-rebuild",
+//RS         clean_rebuild_started.elapsed(),
+//RS         "ok",
+//RS         &format!(
+//RS             "fresh_output=true fresh_cache=true byte_match=true hash_match=true lock_sha256={initial_lock_sha256} lock_unchanged=true aot_baseline_sha256={pre_library_executable_sha256} install_diagnostic=E1272 install_stderr_sha256={install_stderr_sha256} artifacts={output_digest_text}"
+//RS         ),
+//RS     );
+//RS     record_receipt(
+//RS         &cache,
+//RS         "proof",
+//RS         "export-reproducibility",
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!(
+//RS             "source_sha256={source_sha256} package_sha256={} lock_sha256={initial_lock_sha256} lock_unchanged=true aot_baseline_sha256={pre_library_executable_sha256} install_diagnostic=E1272 install_stderr_sha256={install_stderr_sha256} artifacts={output_digest_text}",
+//RS             bytes_digest(package_with_library.as_bytes())
+//RS         ),
+//RS     );
+//RS 
+//RS     #[cfg(unix)]
+//RS     if let Some(cc) = cc() {
+//RS         edit_file(
+//RS             &cache,
+//RS             &scratch.path,
+//RS             "foreign-host-source",
+//RS             &scratch.join("foreign.c"),
+//RS             "#include \"pulse.h\"\n#include <stdio.h>\nint main(void) { printf(\"%lld\\n\", (long long)seconds(1)); return 0; }\n",
+//RS         );
+//RS         let foreign_binary = scratch.join("foreign");
+//RS         let mut compile = Command::new(cc);
+//RS         compile
+//RS             .args(["-std=c11", "-I"])
+//RS             .arg(&target)
+//RS             .arg(scratch.join("foreign.c"))
+//RS             .arg(target.join("libpulse.a"))
+//RS             .arg("-o")
+//RS             .arg(&foreign_binary);
+//RS         if cfg!(target_os = "linux") {
+//RS             compile.args(["-ldl", "-lpthread", "-lm"]);
+//RS         }
+//RS         let compile_started = Instant::now();
+//RS         let result = compile.output().expect("C compiler should start");
+//RS         record_receipt(
+//RS             &cache,
+//RS             "action",
+//RS             "compile-foreign-host",
+//RS             compile_started.elapsed(),
+//RS             if result.status.success() {
+//RS                 "ok"
+//RS             } else {
+//RS                 "failed"
+//RS             },
+//RS             &format!(
+//RS                 "path={} exit={:?}",
+//RS                 foreign_binary.display(),
+//RS                 result.status.code()
+//RS             ),
+//RS         );
+//RS         assert!(
+//RS             result.status.success(),
+//RS             "foreign host compile failed:\n{}",
+//RS             compiler_text(&result)
+//RS         );
+//RS         let foreign_started = Instant::now();
+//RS         let foreign = Command::new(&foreign_binary)
+//RS             .output()
+//RS             .expect("foreign host should start");
+//RS         record_receipt(
+//RS             &cache,
+//RS             "action",
+//RS             "run-foreign-host",
+//RS             foreign_started.elapsed(),
+//RS             if foreign.status.success() {
+//RS                 "ok"
+//RS             } else {
+//RS                 "failed"
+//RS             },
+//RS             &format!(
+//RS                 "path={} exit={:?}",
+//RS                 foreign_binary.display(),
+//RS                 foreign.status.code()
+//RS             ),
+//RS         );
+//RS         assert!(foreign.status.success(), "foreign host failed: {foreign:?}");
+//RS         assert_eq!(foreign.stdout, EXPECTED_STDOUT);
+//RS         record_artifact(&cache, &scratch.path, &foreign_binary);
+//RS     } else {
+//RS         eprintln!("note: foreign host proof skipped because no C compiler is available");
+//RS     }
+//RS 
+//RS     let package_before_split = fs::read(scratch.join("package.jet")).unwrap();
+//RS     let package_before_split_sha256 = bytes_digest(&package_before_split);
+//RS     let lock_before_transition = fs::read(scratch.join(".jet/lock")).unwrap();
+//RS     let lock_sha256 = bytes_digest(&lock_before_transition);
+//RS     assert_eq!(package_before_split, package_with_library.as_bytes());
+//RS     let graph_before_split = recompute_project_graph(&scratch.path);
+//RS     let check = run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "split-env-check",
+//RS         &["split", "env", "--check"],
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&check.stdout).contains("No files changed."));
+//RS     assert!(String::from_utf8_lossy(&check.stdout).contains("package graph unchanged"));
+//RS     assert_eq!(
+//RS         fs::read(scratch.join("package.jet")).unwrap(),
+//RS         package_before_split
+//RS     );
+//RS     assert_eq!(fs::read(scratch.join(".jet/lock")).unwrap(), lock_before_transition);
+//RS     assert!(!scratch.join("package/env.jet").exists());
+//RS     let split_graph = transition_graph(&check);
+//RS     assert_eq!(
+//RS         split_graph, graph_before_split.fingerprint,
+//RS         "split --check reported a graph identity different from checked Package facts"
+//RS     );
+//RS     let split = run_jet_ok(&scratch.path, &cache, "split-env", &["split", "env"]);
+//RS     assert_eq!(
+//RS         transition_graph(&split), graph_before_split.fingerprint,
+//RS         "split reported a graph identity different from checked Package facts"
+//RS     );
+//RS     let split_journal = transition_journal(&split);
+//RS     assert!(split_journal.is_file(), "missing {}", split_journal.display());
+//RS     let (journal_before, journal_after) = journal_fingerprints(&split_journal);
+//RS     assert_eq!(journal_before, graph_before_split.fingerprint);
+//RS     assert_eq!(journal_after, graph_before_split.fingerprint);
+//RS     assert!(scratch.join("package/env.jet").is_file());
+//RS     assert_eq!(
+//RS         fs::read_to_string(scratch.join("package/env.jet")).unwrap(),
+//RS         "pub development :: Config{\n    environments: {\n    development: Environment{ tools: [\"git\"] },\n}\n}\n"
+//RS     );
+//RS     assert!(!fs::read_to_string(scratch.join("package.jet"))
+//RS         .unwrap()
+//RS         .contains("environments:"));
+//RS     let package_after_split = fs::read(scratch.join("package.jet")).unwrap();
+//RS     let generated_after_split = fs::read(scratch.join("package/env.jet")).unwrap();
+//RS     assert_eq!(
+//RS         fs::read(scratch.join(".jet/lock")).unwrap(),
+//RS         lock_before_transition
+//RS     );
+//RS     assert_source_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &source_before,
+//RS         &source_sha256,
+//RS         "split-source-ownership",
+//RS     );
+//RS     let graph_after_split = recompute_project_graph(&scratch.path);
+//RS     assert_graph_preserved(&graph_before_split, &graph_after_split, "split");
+//RS     record_receipt(
+//RS         &cache,
+//RS         "proof",
+//RS         "split-preservation",
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!(
+//RS             "source_sha256={source_sha256} package_before_sha256={} package_after_sha256={} generated_sha256={} lock_sha256={lock_sha256} graph_fingerprint={split_graph} dependencies_sha256={} journal_before={} journal_after={} source_unchanged=true dependencies_unchanged=true graph_unchanged=true",
+//RS             package_before_split_sha256,
+//RS             bytes_digest(&package_after_split),
+//RS             bytes_digest(&generated_after_split),
+//RS             graph_before_split.dependency_sha256,
+//RS             journal_before,
+//RS             journal_after,
+//RS         ),
+//RS     );
+//RS     record_artifact(&cache, &scratch.path, &scratch.join("package/env.jet"));
+//RS 
+//RS     let split_run = run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "run-after-split",
+//RS         &["run", "run.jet", "--", "--minutes", "1"],
+//RS     );
+//RS     assert_eq!(split_run.stdout, EXPECTED_STDOUT);
+//RS     let fold_check = run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "fold-env-check",
+//RS         &["Fold", "package/env.jet", "--check"],
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&fold_check.stdout).contains("No files changed."));
+//RS     assert_eq!(
+//RS         fs::read(scratch.join("package.jet")).unwrap(),
+//RS         package_after_split
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read(scratch.join("package/env.jet")).unwrap(),
+//RS         generated_after_split
+//RS     );
+//RS     assert_eq!(fs::read(scratch.join(".jet/lock")).unwrap(), lock_before_transition);
+//RS     let fold_graph = transition_graph(&fold_check);
+//RS     let graph_before_fold = recompute_project_graph(&scratch.path);
+//RS     assert_eq!(
+//RS         fold_graph, graph_before_fold.fingerprint,
+//RS         "fold --check reported a graph identity different from checked Package facts"
+//RS     );
+//RS     assert_graph_preserved(&graph_after_split, &graph_before_fold, "fold --check");
+//RS     record_receipt(
+//RS         &cache,
+//RS         "proof",
+//RS         "fold-preservation",
+//RS         Duration::ZERO,
+//RS         "ok",
+//RS         &format!(
+//RS             "source_sha256={source_sha256} package_sha256={} generated_sha256={} lock_sha256={lock_sha256} graph_fingerprint={fold_graph} dependencies_sha256={} journal_before={} journal_after={} dependencies_unchanged=true graph_matches_split=true",
+//RS             bytes_digest(&package_after_split),
+//RS             bytes_digest(&generated_after_split),
+//RS             graph_before_fold.dependency_sha256,
+//RS             journal_before,
+//RS             journal_after,
+//RS         ),
+//RS     );
+//RS     let recovery_started = Instant::now();
+//RS     let fold = run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "fold-env",
+//RS         &["Fold", "package/env.jet"],
+//RS     );
+//RS     assert_eq!(
+//RS         transition_graph(&fold), graph_before_fold.fingerprint,
+//RS         "fold reported a graph identity different from checked Package facts"
+//RS     );
+//RS     let source_after_fold = fs::read(scratch.join("run.jet")).unwrap();
+//RS     let package_after_fold = fs::read(scratch.join("package.jet")).unwrap();
+//RS     let lock_after_fold = fs::read(scratch.join(".jet/lock")).unwrap();
+//RS     let graph_after_fold = recompute_project_graph(&scratch.path);
+//RS     assert_graph_preserved(&graph_before_split, &graph_after_fold, "fold rollback");
+//RS     assert_eq!(
+//RS         package_after_fold,
+//RS         package_before_split
+//RS     );
+//RS     assert!(!scratch.join("package/env.jet").exists());
+//RS     assert_eq!(lock_after_fold, lock_before_transition);
+//RS     assert_source_preserved(
+//RS         &cache,
+//RS         &scratch.path,
+//RS         &source_before,
+//RS         &source_sha256,
+//RS         "fold-source-ownership",
+//RS     );
+//RS     for (path, expected) in &output_digests {
+//RS         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+//RS         if name != "pulse.h" || !path.is_file() {
+//RS             continue;
+//RS         }
+//RS         assert_eq!(
+//RS             file_digest(path),
+//RS             *expected,
+//RS             "output changed during split/fold: {}",
+//RS             path.display()
+//RS         );
+//RS     }
+//RS     record_receipt(
+//RS         &cache,
+//RS         "recovery",
+//RS         "fold-rollback",
+//RS         recovery_started.elapsed(),
+//RS         "ok",
+//RS         &format!(
+//RS             "source_sha256={} package_sha256={} lock_sha256={} graph_fingerprint={fold_graph} dependencies_sha256={} package_source_lock_restored=true dependencies_unchanged=true outputs_unchanged=true output_digests={output_digest_text} generated=absent",
+//RS             bytes_digest(&source_after_fold),
+//RS             bytes_digest(&package_after_fold),
+//RS             bytes_digest(&lock_after_fold),
+//RS             graph_after_fold.dependency_sha256,
+//RS         ),
+//RS     );
+//RS 
+//RS     let rollback_run = run_jet_ok(
+//RS         &scratch.path,
+//RS         &cache,
+//RS         "run-after-fold",
+//RS         &["run", "run.jet", "--", "--minutes", "1"],
+//RS     );
+//RS     assert_eq!(rollback_run.stdout, EXPECTED_STDOUT);
+//RS 
+//RS     for artifact in [
+//RS         scratch.join("run.jet"),
+//RS         scratch.join("package.jet"),
+//RS         scratch.join(".jet/lock"),
+//RS         executable,
+//RS         target.join("libpulse.a"),
+//RS         target.join("pulse.h"),
+//RS         target.join("pulse.jetlib"),
+//RS     ] {
+//RS         if artifact.is_file() {
+//RS             record_artifact(&cache, &scratch.path, &artifact);
+//RS         }
+//RS     }
+//RS 
+//RS     let receipt = fs::read_to_string(receipt_path(&cache)).unwrap();
+//RS     for event in [
+//RS         "action",
+//RS         "edit",
+//RS         "build",
+//RS         "failure",
+//RS         "recovery",
+//RS         "proof",
+//RS         "artifact",
+//RS     ] {
+//RS         assert!(
+//RS             receipt.contains(&format!("event={event}\t")),
+//RS             "receipt has no {event} event:\n{receipt}"
+//RS         );
+//RS     }
+//RS     for operation in ["split", "fold", "install", "export", "rollback"] {
+//RS         assert!(
+//RS             receipt.contains(&format!("operation={operation}\t")),
+//RS             "receipt has no {operation} operation:\n{receipt}"
+//RS         );
+//RS     }
+//RS     for label in [
+//RS         "aot-build",
+//RS         "aot-build-after-library-output",
+//RS         "interpreter-parity",
+//RS         "native-library-build",
+//RS         "clean-aot-rebuild",
+//RS         "clean-native-library-rebuild",
+//RS         "tool-install",
+//RS         "split-preservation",
+//RS         "fold-preservation",
+//RS         "export-clean-rebuild",
+//RS         "export-reproducibility",
+//RS         "fold-rollback",
+//RS         "dev-source-ownership",
+//RS         "init-source-ownership",
+//RS         "dependency-source-ownership",
+//RS         "config-source-ownership",
+//RS         "install-source-ownership",
+//RS         "aot-source-ownership",
+//RS         "library-source-ownership",
+//RS         "split-source-ownership",
+//RS         "fold-source-ownership",
+//RS     ] {
+//RS         assert!(
+//RS             receipt.contains(&format!("label={label}\t")),
+//RS             "receipt has no {label} latency row:\n{receipt}"
+//RS         );
+//RS     }
+//RS     for field in [
+//RS         "source_sha256=",
+//RS         "lock_sha256=",
+//RS         "graph_fingerprint=",
+//RS         "dependencies_sha256=",
+//RS         "dependencies_unchanged=true",
+//RS         "source_unchanged=true",
+//RS         "diagnostic=E1272",
+//RS         "stderr_sha256=",
+//RS         "install_stderr_sha256=",
+//RS         "artifacts=",
+//RS         "output_digests=",
+//RS         "outputs_unchanged=true",
+//RS     ] {
+//RS         assert!(
+//RS             receipt.contains(field),
+//RS             "receipt has no {field} evidence:\n{receipt}"
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         receipt.starts_with(&format!(
+//RS             "version={RECEIPT_VERSION}\thost={}\tarch={}\n",
+//RS             std::env::consts::OS,
+//RS             std::env::consts::ARCH
+//RS         )),
+//RS         "receipt host identity missing:\n{receipt}"
+//RS     );
+//RS     eprintln!(
+//RS         "script-to-system receipt-path={}",
+//RS         receipt_path(&cache).display()
+//RS     );
+//RS }
+// END-PORT-PENDING 1148 tests/script_to_system.rs:1-1328
+

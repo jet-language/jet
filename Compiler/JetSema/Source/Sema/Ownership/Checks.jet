@@ -2270,7 +2270,7 @@ pub fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, s
             }
             valid
         }
-        .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .OptMethodCall(receiver, _, _, _, args, _, _, _) -> {
             valid := sema_ownership_check_expression(&state, receiver, scopes, &diagnostics)
             loop arg in args {
                 if !sema_ownership_check_nested_call_value(&state, arg.expr, scopes, &diagnostics) -> valid = false

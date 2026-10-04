@@ -1,0 +1,1806 @@
+// PORT-PENDING 0597 crates-jet-comptime-src-comptime-reflect-slice-1: crates/jet-comptime/src/Comptime/Reflect.rs:1-1802
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-METAREFLECT1 / D-REFLECT1: build comptime reflection handles for user derives.
+//RS //!
+//RS //! `T.reflect()` in a derive body receives a `TypeInfo` value whose `.fields`,
+//RS //! `.methods`, `.type_params`, `.markers`, and `.expanded_markers` expose the
+//RS //! target type's shape. `.markers` preserves written markers and their
+//RS //! canonical declaration metadata (`sites`, `repeatable`); the expanded view
+//RS //! contains only derives lowered from them.
+//RS 
+//RS use crate::AST::{
+//RS     Dimension, DistinctDef, EnumDef, Exactness, Expr, Func, FunctionCallMetadata,
+//RS     FunctionObligations, Item, KnowledgeFact, Marker, MaturityTag, Measure, StructDef,
+//RS     StructLayout, Type, TypeParam, UnitFamilyDef, UnitScaleProvenance, VariantPayload,
+//RS     ViewProvenance,
+//RS };
+//RS 
+//RS use crate::AST::CtValue;
+//RS use jet_foundation::Layout::{FieldLayoutFacts, LayoutFacts, TargetLayout, TargetLayoutEngine};
+//RS use jet_foundation::Shape::ShapeProjectionKind;
+//RS use jet_foundation::Reflection::ReflectionField;
+//RS 
+//RS #[derive(Debug, Clone, Default)]
+//RS pub struct ProgramSemanticFacts {
+//RS     pub effects: std::collections::HashMap<String, Vec<String>>,
+//RS     pub arithmetic:
+//RS         std::collections::HashMap<String, Vec<jet_foundation::AST::ArithmeticPolicyFact>>,
+//RS     pub reaches_panic: std::collections::BTreeSet<String>,
+//RS     pub fact_registry: jet_foundation::Facts::FactRegistry,
+//RS     pub name_ledger: jet_foundation::Names::NameLedger,
+//RS }
+//RS 
+//RS /// Read-only projection of the checked semantic index for the comptime
+//RS /// program snapshot. The compiler owns the concrete `SemIndex`; this seam
+//RS /// keeps comptime independent of the loader crate while ensuring every row is
+//RS /// read from that one index instead of rebuilt here.
+//RS pub trait ProgramIndexView {
+//RS     fn definitions(&self) -> Vec<CtValue>;
+//RS     fn references(&self) -> Vec<CtValue>;
+//RS     fn call_edges(&self) -> Vec<CtValue>;
+//RS     fn structural_nodes(&self) -> Vec<CtValue>;
+//RS }
+//RS 
+//RS /// The source-qualified identity exposed by the build reflection surface.
+//RS ///
+//RS /// `NameLedger::semantic_identity` is the compiler's package/path key. Build
+//RS /// rules read the loader-qualified source namespace instead, which is also the
+//RS /// key used by sema's public effect and reachability rows.
+//RS pub fn program_reflection_identity(
+//RS     ledger: &jet_foundation::Names::NameLedger,
+//RS     module: usize,
+//RS     fallback_module: &str,
+//RS     symbol: &str,
+//RS ) -> String {
+//RS     let module = ledger.module_alias(module).unwrap_or(fallback_module);
+//RS     format!("{module}::{symbol}")
+//RS }
+//RS 
+//RS fn ct_str(s: impl Into<String>) -> CtValue {
+//RS     CtValue::Str(s.into())
+//RS }
+//RS 
+//RS fn ct_bool(b: bool) -> CtValue {
+//RS     CtValue::Bool(b)
+//RS }
+//RS 
+//RS fn ct_list(xs: Vec<CtValue>) -> CtValue {
+//RS     CtValue::List(xs)
+//RS }
+//RS 
+//RS fn layout_field_info(
+//RS     name: impl Into<String>,
+//RS     ty: impl Into<String>,
+//RS     guarantee: &str,
+//RS     source: &str,
+//RS     target: &TargetLayout,
+//RS     facts: Option<&FieldLayoutFacts>,
+//RS ) -> CtValue {
+//RS     ct_struct(
+//RS         crate::Syntax::TYPE_LAYOUT_FIELD,
+//RS         &[
+//RS             ("name", ct_str(name)),
+//RS             ("ty", ct_str(ty)),
+//RS             (
+//RS                 "offset",
+//RS                 optional_layout_byte(facts.and_then(|facts| facts.offset)),
+//RS             ),
+//RS             (
+//RS                 "size",
+//RS                 optional_layout_byte(facts.and_then(|facts| facts.size)),
+//RS             ),
+//RS             ("target", ct_str(target.triple.clone())),
+//RS             ("guarantee", ct_str(guarantee)),
+//RS             ("source", ct_str(source)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn layout_info(
+//RS     kind: &str,
+//RS     guarantee: &str,
+//RS     source: &str,
+//RS     target: &TargetLayout,
+//RS     fields: Vec<(String, String)>,
+//RS     facts: &LayoutFacts,
+//RS     alignment: Option<&jet_foundation::Layout::LayoutAlignmentFact>,
+//RS ) -> CtValue {
+//RS     ct_struct(
+//RS         crate::Syntax::TYPE_LAYOUT_INFO,
+//RS         &[
+//RS             ("kind", ct_str(kind)),
+//RS             (
+//RS                 "size",
+//RS                 optional_layout_byte(facts.bytes.map(|bytes| bytes.size)),
+//RS             ),
+//RS             (
+//RS                 "alignment",
+//RS                 optional_layout_byte(facts.bytes.map(|bytes| bytes.alignment)),
+//RS             ),
+//RS             (
+//RS                 "stride",
+//RS                 optional_layout_byte(facts.bytes.map(|bytes| bytes.stride)),
+//RS             ),
+//RS             (
+//RS                 "requested_alignment",
+//RS                 optional_layout_byte(alignment.map(|fact| fact.requested_alignment)),
+//RS             ),
+//RS             (
+//RS                 "effective_alignment",
+//RS                 optional_layout_byte(alignment.map(|fact| fact.effective_alignment)),
+//RS             ),
+//RS             ("target", ct_str(target.triple.clone())),
+//RS             ("guarantee", ct_str(guarantee)),
+//RS             ("source", ct_str(source)),
+//RS             (
+//RS                 "fields",
+//RS                 ct_list(
+//RS                     fields
+//RS                         .into_iter()
+//RS                         .enumerate()
+//RS                         .map(|(index, (name, ty))| {
+//RS                             layout_field_info(
+//RS                                 name,
+//RS                                 ty,
+//RS                                 guarantee,
+//RS                                 source,
+//RS                                 target,
+//RS                                 facts.fields.get(index),
+//RS                             )
+//RS                         })
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn optional_layout_byte(value: Option<u64>) -> CtValue {
+//RS     value
+//RS         .and_then(|value| i64::try_from(value).ok())
+//RS         .map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
+//RS         .unwrap_or_else(|| CtValue::absent(crate::AST::Type::Int))
+//RS }
+//RS 
+//RS fn layout_info_for_struct(s: &StructDef, engine: &TargetLayoutEngine<'_>) -> CtValue {
+//RS     let (kind, guarantee) = match s.layout.as_ref() {
+//RS         Some(StructLayout::C) => ("c", "repr(C) declaration".to_string()),
+//RS         Some(StructLayout::CAligned {
+//RS             alignment,
+//RS             target,
+//RS         }) => (
+//RS             "c",
+//RS             if *target {
+//RS                 format!("repr(C, align(target, {alignment})) declaration")
+//RS             } else {
+//RS                 format!("repr(C, align({alignment})) declaration")
+//RS             },
+//RS         ),
+//RS         Some(StructLayout::Columnar) => ("columnar", "columnar storage declaration".to_string()),
+//RS         None => ("default", "physical layout unspecified".to_string()),
+//RS     };
+//RS     let (facts, alignment) = match engine.checked_struct_facts(s) {
+//RS         Ok(checked) => (checked.physical, checked.alignment),
+//RS         Err(_) => (engine.struct_facts(s), None),
+//RS     };
+//RS     layout_info(
+//RS         kind,
+//RS         &guarantee,
+//RS         "struct declaration",
+//RS         engine.target(),
+//RS         s.reflection_fields()
+//RS             .map(|field| {
+//RS                 let name = jet_foundation::CLISchema::shape_field_names(s, field)
+//RS                     .name_for(ShapeProjectionKind::Layout)
+//RS                     .expect("checked layout field is missing its Layout shape name")
+//RS                     .to_owned();
+//RS                 (name, field.ty.name())
+//RS             })
+//RS             .collect(),
+//RS         &facts,
+//RS         alignment.as_ref(),
+//RS     )
+//RS }
+//RS 
+//RS /// Build the focused layout projection for a struct without exposing the
+//RS /// wider `TypeInfo` wrapper. Tooling uses this same value as `T.$layout`.
+//RS pub fn build_struct_layout_info(s: &StructDef) -> CtValue {
+//RS     let engine = TargetLayoutEngine::new(std::iter::empty::<&Item>(), TargetLayout::host());
+//RS     build_struct_layout_info_with_engine(s, &engine)
+//RS }
+//RS 
+//RS /// Build a struct layout projection using the bundle's canonical target engine.
+//RS pub fn build_struct_layout_info_with_engine(
+//RS     s: &StructDef,
+//RS     engine: &TargetLayoutEngine<'_>,
+//RS ) -> CtValue {
+//RS     layout_info_for_struct(s, engine)
+//RS }
+//RS 
+//RS fn layout_info_for_enum(def: &EnumDef, engine: &TargetLayoutEngine<'_>) -> CtValue {
+//RS     let fields = def.variants.iter().map(|variant| {
+//RS         let ty = match &variant.payload {
+//RS             VariantPayload::Unit => "Unit".to_string(),
+//RS             VariantPayload::Single(ty, _) => ty.name(),
+//RS             VariantPayload::Named(fields) => format!(
+//RS                 "{{{}}}",
+//RS                 fields
+//RS                     .iter()
+//RS                     .map(|field| format!("{}: {}", field.name, field.ty.name()))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ")
+//RS             ),
+//RS         };
+//RS         (variant.name.clone(), ty)
+//RS     });
+//RS     let fields = fields.collect::<Vec<_>>();
+//RS     let (kind, guarantee) = if def.c_layout_tag().is_some() {
+//RS         ("c", "repr(C) declaration")
+//RS     } else {
+//RS         ("default", "enum physical layout unspecified")
+//RS     };
+//RS     let facts = engine.enum_facts(def);
+//RS     layout_info(
+//RS         kind,
+//RS         guarantee,
+//RS         "enum declaration",
+//RS         engine.target(),
+//RS         fields,
+//RS         &facts,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// Build the focused layout projection for an enum without exposing the
+//RS /// wider `TypeInfo` wrapper. Tooling uses this same value as `T.$layout`.
+//RS pub fn build_enum_layout_info(def: &EnumDef) -> CtValue {
+//RS     let engine = TargetLayoutEngine::new(std::iter::empty::<&Item>(), TargetLayout::host());
+//RS     build_enum_layout_info_with_engine(def, &engine)
+//RS }
+//RS 
+//RS /// Build an enum layout projection using the bundle's canonical target engine.
+//RS pub fn build_enum_layout_info_with_engine(
+//RS     def: &EnumDef,
+//RS     engine: &TargetLayoutEngine<'_>,
+//RS ) -> CtValue {
+//RS     layout_info_for_enum(def, engine)
+//RS }
+//RS 
+//RS fn ct_struct(type_name: &str, fields: &[(&str, CtValue)]) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: fields
+//RS             .into_iter()
+//RS             .map(|(n, v)| (n.to_string(), v.clone()))
+//RS             .collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn source_span_value(span: jet_foundation::Diagnostics::Span) -> CtValue {
+//RS     ct_struct(
+//RS         crate::Syntax::TYPE_SOURCE_SPAN,
+//RS         &[
+//RS             ("start", CtValue::Int(span.start as i64)),
+//RS             ("end", CtValue::Int(span.end as i64)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn typed_enum(type_name: &str, variant: &str) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: type_name.to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn optional_value(value: Option<CtValue>, ty: &str) -> CtValue {
+//RS     value.map_or_else(
+//RS         || CtValue::absent(Type::Named(ty.to_string())),
+//RS         |value| CtValue::Present(Box::new(value)),
+//RS     )
+//RS }
+//RS 
+//RS /// One typed dimension fact. Axes remain records, so `Length^1` is not a
+//RS /// display-only string: callers can inspect the axis and exponent.
+//RS pub fn build_dimension_info(dimension: &Dimension) -> CtValue {
+//RS     let axes = dimension
+//RS         .axes()
+//RS         .map(|(name, exponent)| {
+//RS             ct_struct(
+//RS                 "DimensionAxis",
+//RS                 &[
+//RS                     ("name", ct_str(name)),
+//RS                     ("exponent", CtValue::Int(exponent as i64)),
+//RS                 ],
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     ct_struct(
+//RS         "DimensionInfo",
+//RS         &[
+//RS             ("axes", ct_list(axes)),
+//RS             ("identity", ct_str(dimension.identity())),
+//RS             ("display", ct_str(dimension.display_name())),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn build_range_value(start: CtValue, end: CtValue) -> CtValue {
+//RS     ct_struct(
+//RS         crate::Syntax::TYPE_RANGE,
+//RS         &[("start", start), ("end", end)],
+//RS     )
+//RS }
+//RS 
+//RS pub fn build_range_info(start: i64, end: i64) -> CtValue {
+//RS     build_range_value(CtValue::Int(start), CtValue::Int(end))
+//RS }
+//RS 
+//RS /// Keep reflected interval bounds exact when they exceed the small `Int`
+//RS /// carrier. A conversion failure leaves the enclosing optional range absent
+//RS /// so malformed metadata becomes an ordinary source-level failure, not an ICE.
+//RS fn reflected_integer(value: i128) -> Option<CtValue> {
+//RS     i64::try_from(value)
+//RS         .ok()
+//RS         .map(CtValue::Int)
+//RS         .or_else(|| {
+//RS             jet_foundation::Numeric::CtBigInt::from_str(&value.to_string())
+//RS                 .ok()
+//RS                 .map(CtValue::BigInt)
+//RS         })
+//RS }
+//RS 
+//RS fn reflected_range_info(start: i128, end: i128) -> Option<CtValue> {
+//RS     Some(build_range_value(
+//RS         reflected_integer(start)?,
+//RS         reflected_integer(end)?,
+//RS     ))
+//RS }
+//RS 
+//RS fn measure_info(measure: &Measure) -> CtValue {
+//RS     let (kind, value, symbol) = match measure {
+//RS         Measure::Literal { kind, value } => {
+//RS             let value = i64::try_from(*value).ok().map(CtValue::Int);
+//RS             let symbol = value.is_none().then(|| ct_str(measure.expression()));
+//RS             (kind.clone(), value, symbol)
+//RS         }
+//RS         Measure::SignedLiteral { kind, value } => (kind.clone(), Some(CtValue::Int(*value)), None),
+//RS         Measure::Symbol { kind, name } => (kind.clone(), None, Some(ct_str(name.clone()))),
+//RS         Measure::Combined { kind, .. } => {
+//RS             let value = measure
+//RS                 .literal_value()
+//RS                 .and_then(|value| i64::try_from(value).ok())
+//RS                 .map(CtValue::Int);
+//RS             let symbol = value.is_none().then(|| ct_str(measure.expression()));
+//RS             (kind.clone(), value, symbol)
+//RS         }
+//RS     };
+//RS     ct_struct(
+//RS         "MeasureInfo",
+//RS         &[
+//RS             ("kind", ct_str(kind)),
+//RS             ("value", optional_value(value, "Int")),
+//RS             ("symbol", optional_value(symbol, "String")),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn exactness_info(exactness: &Exactness) -> CtValue {
+//RS     let (kind, precision) = match exactness {
+//RS         Exactness::Exact => ("Exact", None),
+//RS         Exactness::Approximate { precision } => {
+//RS             ("Approximate", Some(CtValue::Int(i64::from(*precision))))
+//RS         }
+//RS         Exactness::Measured => ("Measured", None),
+//RS     };
+//RS     ct_struct(
+//RS         "ExactnessInfo",
+//RS         &[
+//RS             ("kind", typed_enum("ExactnessKind", kind)),
+//RS             ("precision", optional_value(precision, "Int")),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn layout_fact_info(bytes: u8) -> CtValue {
+//RS     ct_struct("LayoutFact", &[("bytes", CtValue::Int(bytes as i64))])
+//RS }
+//RS 
+//RS fn classification_info(name: &str) -> CtValue {
+//RS     ct_struct("ClassificationInfo", &[("name", ct_str(name))])
+//RS }
+//RS 
+//RS fn nominal_info(name: &str) -> CtValue {
+//RS     ct_struct("NominalInfo", &[("name", ct_str(name))])
+//RS }
+//RS 
+//RS fn obligation_info(obligations: &FunctionObligations) -> CtValue {
+//RS     let params = obligations
+//RS         .param_contract
+//RS         .as_deref()
+//RS         .unwrap_or_default()
+//RS         .iter()
+//RS         .map(|(name, zone)| {
+//RS             ct_struct(
+//RS                 "ObligationParamInfo",
+//RS                 &[
+//RS                     ("name", ct_str(name.clone())),
+//RS                     (
+//RS                         "zone",
+//RS                         typed_enum(
+//RS                             "ParamZone",
+//RS                             match zone {
+//RS                                 crate::AST::ParamZone::PositionalOnly => "PositionalOnly",
+//RS                                 crate::AST::ParamZone::Either => "Either",
+//RS                                 crate::AST::ParamZone::LabelOnly => "LabelOnly",
+//RS                             },
+//RS                         ),
+//RS                     ),
+//RS                 ],
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     ct_struct(
+//RS         "ObligationInfo",
+//RS         &[
+//RS             (
+//RS                 "effect_bound",
+//RS                 ct_list(
+//RS                     obligations
+//RS                         .effect_bound
+//RS                         .as_deref()
+//RS                         .unwrap_or_default()
+//RS                         .iter()
+//RS                         .cloned()
+//RS                         .map(ct_str)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             ("param_contract", ct_list(params)),
+//RS             (
+//RS                 "variadic",
+//RS                 ct_list(
+//RS                     obligations
+//RS                         .variadic
+//RS                         .as_deref()
+//RS                         .unwrap_or_default()
+//RS                         .iter()
+//RS                         .copied()
+//RS                         .map(ct_bool)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS pub fn build_sendability_info(known: bool) -> CtValue {
+//RS     ct_struct("SendabilityInfo", &[("known", ct_bool(known))])
+//RS }
+//RS 
+//RS pub fn build_movedness_info(moved: bool) -> CtValue {
+//RS     ct_struct("MovednessInfo", &[("known", ct_bool(moved))])
+//RS }
+//RS 
+//RS pub fn build_attribution_info(source: &str, code: Option<&str>) -> CtValue {
+//RS     ct_struct(
+//RS         "AttributionInfo",
+//RS         &[
+//RS             ("source", ct_str(source)),
+//RS             (
+//RS                 "code",
+//RS                 optional_value(code.map(|code| ct_str(code)), "String"),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS pub fn build_origin_info(
+//RS     tracked: bool,
+//RS     source: Option<&str>,
+//RS     line: Option<usize>,
+//RS     column: Option<usize>,
+//RS     ambiguity: bool,
+//RS ) -> CtValue {
+//RS     ct_struct(
+//RS         "OriginInfo",
+//RS         &[
+//RS             ("tracked", ct_bool(tracked)),
+//RS             ("source", optional_value(source.map(ct_str), "String")),
+//RS             (
+//RS                 "line",
+//RS                 optional_value(line.map(|line| CtValue::Int(line as i64)), "Int"),
+//RS             ),
+//RS             (
+//RS                 "column",
+//RS                 optional_value(column.map(|column| CtValue::Int(column as i64)), "Int"),
+//RS             ),
+//RS             ("ambiguity", ct_bool(ambiguity)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS pub fn build_origin_option(
+//RS     origin: Option<(bool, Option<&str>, Option<usize>, Option<usize>, bool)>,
+//RS ) -> CtValue {
+//RS     optional_value(
+//RS         origin.map(|(tracked, source, line, column, ambiguity)| {
+//RS             build_origin_info(tracked, source, line, column, ambiguity)
+//RS         }),
+//RS         "OriginInfo",
+//RS     )
+//RS }
+//RS 
+//RS pub fn build_view_provenance_info(provenance: &ViewProvenance) -> CtValue {
+//RS     ct_struct(
+//RS         "ViewProvenanceInfo",
+//RS         &[
+//RS             (
+//RS                 "sources",
+//RS                 ct_list(
+//RS                     provenance
+//RS                         .sources
+//RS                         .iter()
+//RS                         .map(|source| ct_str(source.canonical()))
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             ("mutable", ct_bool(provenance.mutable)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS pub fn build_unit_scale_provenance_info(provenance: &UnitScaleProvenance) -> CtValue {
+//RS     let (kind, value, source, uncertainty) = match provenance {
+//RS         UnitScaleProvenance::Rational => ("Rational", None, None, None),
+//RS         UnitScaleProvenance::SymbolicPi {
+//RS             numerator,
+//RS             denominator,
+//RS         } => (
+//RS             "SymbolicPi",
+//RS             Some(ct_str(format!("{numerator}/{denominator}"))),
+//RS             None,
+//RS             None,
+//RS         ),
+//RS         UnitScaleProvenance::Conventional { value, source } => (
+//RS             "Conventional",
+//RS             Some(ct_str(value)),
+//RS             Some(ct_str(source)),
+//RS             None,
+//RS         ),
+//RS         UnitScaleProvenance::Measured {
+//RS             central_value,
+//RS             standard_uncertainty,
+//RS             source,
+//RS         } => (
+//RS             "Measured",
+//RS             Some(ct_str(central_value)),
+//RS             Some(ct_str(source)),
+//RS             Some(ct_str(standard_uncertainty)),
+//RS         ),
+//RS     };
+//RS     ct_struct(
+//RS         "UnitScaleProvenanceInfo",
+//RS         &[
+//RS             ("kind", typed_enum("UnitScaleProvenanceKind", kind)),
+//RS             ("value", optional_value(value, "String")),
+//RS             ("source", optional_value(source, "String")),
+//RS             ("uncertainty", optional_value(uncertainty, "String")),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS pub fn build_maturity_info(maturity: MaturityTag) -> CtValue {
+//RS     ct_struct(
+//RS         "MaturityInfo",
+//RS         &[("level", typed_enum("Maturity", maturity.as_str()))],
+//RS     )
+//RS }
+//RS 
+//RS /// Names and paths remain strings because they are stable fact identities; the
+//RS /// fact's meaning is carried by the closed kind and its typed detail record.
+//RS fn fact_value(
+//RS     kind: &str,
+//RS     name: &str,
+//RS     members: impl IntoIterator<Item = String>,
+//RS     range: Option<CtValue>,
+//RS     dimension: Option<CtValue>,
+//RS ) -> CtValue {
+//RS     ct_struct(
+//RS         "FactValue",
+//RS         &[
+//RS             ("kind", typed_enum("FactKind", kind)),
+//RS             ("name", ct_str(name)),
+//RS             (
+//RS                 "members",
+//RS                 ct_list(members.into_iter().map(ct_str).collect()),
+//RS             ),
+//RS             ("range", optional_value(range, crate::Syntax::TYPE_RANGE)),
+//RS             ("dimension", optional_value(dimension, "DimensionInfo")),
+//RS             ("measure", optional_value(None, "MeasureInfo")),
+//RS             ("exactness", optional_value(None, "ExactnessInfo")),
+//RS             ("layout", optional_value(None, "LayoutFact")),
+//RS             ("classification", optional_value(None, "ClassificationInfo")),
+//RS             ("nominal", optional_value(None, "NominalInfo")),
+//RS             ("obligation", optional_value(None, "ObligationInfo")),
+//RS             ("state", optional_value(None, "StateRef")),
+//RS             ("sendability", optional_value(None, "SendabilityInfo")),
+//RS             (
+//RS                 "view_provenance",
+//RS                 optional_value(None, "ViewProvenanceInfo"),
+//RS             ),
+//RS             ("movedness", optional_value(None, "MovednessInfo")),
+//RS             ("attribution", optional_value(None, "AttributionInfo")),
+//RS             ("origin", optional_value(None, "OriginInfo")),
+//RS             (
+//RS                 "unit_scale_provenance",
+//RS                 optional_value(None, "UnitScaleProvenanceInfo"),
+//RS             ),
+//RS             ("maturity", optional_value(None, "MaturityInfo")),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn fact_value_with_detail(
+//RS     kind: &str,
+//RS     name: &str,
+//RS     members: impl IntoIterator<Item = String>,
+//RS     detail: CtValue,
+//RS     detail_field: &str,
+//RS ) -> CtValue {
+//RS     let mut value = fact_value(kind, name, members, None, None);
+//RS     if let CtValue::Struct { fields, .. } = &mut value {
+//RS         if let Some((_, field)) = fields
+//RS             .iter_mut()
+//RS             .find(|(field_name, _)| field_name == detail_field)
+//RS         {
+//RS             *field = CtValue::Present(Box::new(detail));
+//RS         }
+//RS     }
+//RS     value
+//RS }
+//RS 
+//RS fn fact_kind_for(plane: &str, fact: &KnowledgeFact) -> &'static str {
+//RS     let registered = jet_foundation::Registry::row(plane).unwrap_or_else(|| {
+//RS         jet_foundation::ice!(None, "reflection found unregistered plane `{plane}`")
+//RS     });
+//RS     assert_eq!(registered.kind(), jet_foundation::Registry::RowKind::Plane);
+//RS     let kind = jet_foundation::Registry::registered_fact_read(plane)
+//RS         .and_then(jet_foundation::Registry::FactRead::reflection_kind)
+//RS         .unwrap_or_else(|| {
+//RS             jet_foundation::ice!(None, "reflection found unreadable plane `{plane}`")
+//RS         });
+//RS     let produced = match fact {
+//RS         KnowledgeFact::Interval { .. } => "Range",
+//RS         KnowledgeFact::Layout { .. } => "Layout",
+//RS         KnowledgeFact::Measure(_) => "Measure",
+//RS         KnowledgeFact::Exactness(_) => "Exactness",
+//RS         KnowledgeFact::Dimension(_) => "Dimension",
+//RS         KnowledgeFact::Classification(_) => "Classification",
+//RS         KnowledgeFact::Nominal(_) => "Nominal",
+//RS         KnowledgeFact::Obligation(_) => "Obligation",
+//RS     };
+//RS     assert_eq!(
+//RS         kind, produced,
+//RS         "fact producer disagrees with registered plane `{plane}`"
+//RS     );
+//RS     kind
+//RS }
+//RS 
+//RS fn knowledge_fact_value(kind: &str, fact: &KnowledgeFact) -> CtValue {
+//RS     match fact {
+//RS         KnowledgeFact::Interval { lo, hi } => fact_value(
+//RS             kind,
+//RS             "range",
+//RS             std::iter::empty::<String>(),
+//RS             reflected_range_info(*lo, *hi),
+//RS             None,
+//RS         ),
+//RS         KnowledgeFact::Dimension(dimension) => fact_value(
+//RS             kind,
+//RS             "dimension",
+//RS             std::iter::empty::<String>(),
+//RS             None,
+//RS             Some(build_dimension_info(dimension)),
+//RS         ),
+//RS         KnowledgeFact::Measure(measure) => fact_value_with_detail(
+//RS             kind,
+//RS             "measure",
+//RS             std::iter::empty::<String>(),
+//RS             measure_info(measure),
+//RS             "measure",
+//RS         ),
+//RS         KnowledgeFact::Exactness(exactness) => fact_value_with_detail(
+//RS             kind,
+//RS             "exactness",
+//RS             std::iter::empty::<String>(),
+//RS             exactness_info(exactness),
+//RS             "exactness",
+//RS         ),
+//RS         KnowledgeFact::Layout { bytes } => fact_value_with_detail(
+//RS             kind,
+//RS             "layout",
+//RS             std::iter::empty::<String>(),
+//RS             layout_fact_info(*bytes),
+//RS             "layout",
+//RS         ),
+//RS         KnowledgeFact::Classification(name) => fact_value_with_detail(
+//RS             kind,
+//RS             "classification",
+//RS             [name.clone()],
+//RS             classification_info(name),
+//RS             "classification",
+//RS         ),
+//RS         KnowledgeFact::Nominal(name) => fact_value_with_detail(
+//RS             kind,
+//RS             "nominal",
+//RS             [name.clone()],
+//RS             nominal_info(name),
+//RS             "nominal",
+//RS         ),
+//RS         KnowledgeFact::Obligation(obligations) => fact_value_with_detail(
+//RS             kind,
+//RS             "obligation",
+//RS             std::iter::empty::<String>(),
+//RS             obligation_info(obligations),
+//RS             "obligation",
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn registered_fact_kind(name: &str) -> Option<&'static str> {
+//RS     jet_foundation::Registry::reflection_kind(name)
+//RS }
+//RS 
+//RS /// Reflect one row from the shared registration table. A row with no current
+//RS /// producer still has a typed, absent payload; it never falls back to a
+//RS /// display string or a private menu.
+//RS pub fn build_registered_fact_info(name: &str) -> Option<CtValue> {
+//RS     let row = jet_foundation::Registry::row(name)?;
+//RS     let kind = registered_fact_kind(row.name)?;
+//RS     let value = fact_value(kind, row.name, std::iter::empty::<String>(), None, None);
+//RS     let path = if row.name == "Attribution" {
+//RS         "report.$attribution".to_string()
+//RS     } else {
+//RS         row.name.to_string()
+//RS     };
+//RS     Some(fact_info(kind, row.name, path, value))
+//RS }
+//RS 
+//RS pub fn build_registered_fact_infos() -> Vec<CtValue> {
+//RS     jet_foundation::Registry::fact_rows()
+//RS         .filter_map(|row| build_registered_fact_info(row.name))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn fact_info(kind: &str, name: &str, path: String, value: CtValue) -> CtValue {
+//RS     ct_struct(
+//RS         "FactInfo",
+//RS         &[
+//RS             ("kind", typed_enum("FactKind", kind)),
+//RS             ("name", ct_str(name)),
+//RS             ("path", ct_str(path)),
+//RS             ("value", value),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn reflected_struct_field<'a>(value: &'a CtValue, name: &str) -> Option<&'a CtValue> {
+//RS     let CtValue::Struct { fields, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     fields
+//RS         .iter()
+//RS         .find(|(field, _)| field == name)
+//RS         .map(|(_, value)| value)
+//RS }
+//RS 
+//RS fn reflected_fact_value_detail<'a>(
+//RS     value: &'a CtValue,
+//RS     read: jet_foundation::Registry::FactRead,
+//RS ) -> Option<&'a CtValue> {
+//RS     let expected = read.reflection_kind()?;
+//RS     let CtValue::Enum { variant, .. } = reflected_struct_field(value, "kind")? else {
+//RS         return None;
+//RS     };
+//RS     if variant != expected {
+//RS         return None;
+//RS     }
+//RS     if matches!(read, jet_foundation::Registry::FactRead::RegisteredPlane(_)) {
+//RS         return Some(value);
+//RS     }
+//RS     let field = read.detail_field()?;
+//RS     match reflected_struct_field(value, field)? {
+//RS         CtValue::Present(value) => Some(value.as_ref()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn reflected_fact_info_detail<'a>(
+//RS     fact: &'a CtValue,
+//RS     read: jet_foundation::Registry::FactRead,
+//RS ) -> Option<&'a CtValue> {
+//RS     reflected_fact_value_detail(reflected_struct_field(fact, "value")?, read)
+//RS }
+//RS 
+//RS fn reflected_fact_list_detail<'a>(
+//RS     facts: &'a CtValue,
+//RS     read: jet_foundation::Registry::FactRead,
+//RS ) -> Option<&'a CtValue> {
+//RS     let CtValue::List(facts) = facts else {
+//RS         return None;
+//RS     };
+//RS     facts
+//RS         .iter()
+//RS         .find_map(|fact| reflected_fact_info_detail(fact, read))
+//RS }
+//RS 
+//RS /// Project one registered fact from an aggregate reflection value. Every
+//RS /// projection reads the typed FactInfo/FactValue carrier; no display path or
+//RS /// runtime member dispatch is involved.
+//RS pub fn reflected_fact_field<'a>(
+//RS     value: &'a CtValue,
+//RS     read: jet_foundation::Registry::FactRead,
+//RS ) -> Option<&'a CtValue> {
+//RS     let CtValue::Struct { type_name, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     match type_name.as_str() {
+//RS         "FactInfo" => reflected_fact_info_detail(value, read),
+//RS         "FactValue" => reflected_fact_value_detail(value, read),
+//RS         "TypeInfo" => {
+//RS             let facts = reflected_struct_field(value, "facts");
+//RS             match read {
+//RS                 jet_foundation::Registry::FactRead::States => {
+//RS                     reflected_struct_field(value, "states")
+//RS                 }
+//RS                 jet_foundation::Registry::FactRead::Dimension => facts
+//RS                     .and_then(|facts| reflected_fact_list_detail(facts, read))
+//RS                     .or_else(|| {
+//RS                         let CtValue::List(dimensions) =
+//RS                             reflected_struct_field(value, "dimensions")?
+//RS                         else {
+//RS                             return None;
+//RS                         };
+//RS                         dimensions.first()
+//RS                     }),
+//RS                 _ => facts.and_then(|facts| reflected_fact_list_detail(facts, read)),
+//RS             }
+//RS         }
+//RS         "FunctionInfo" | "MethodInfo" => match read {
+//RS             jet_foundation::Registry::FactRead::Effects => reflected_struct_field(value, "effects"),
+//RS             _ => reflected_struct_field(value, "facts")
+//RS                 .and_then(|facts| reflected_fact_list_detail(facts, read)),
+//RS         },
+//RS         "FieldInfo" => match read {
+//RS             jet_foundation::Registry::FactRead::Dimension => {
+//RS                 let CtValue::List(dimensions) = reflected_struct_field(value, "dimensions")? else {
+//RS                     return None;
+//RS                 };
+//RS                 dimensions.first()
+//RS             }
+//RS             _ => reflected_struct_field(value, "facts")
+//RS                 .and_then(|facts| reflected_fact_list_detail(facts, read)),
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn declared_function_facts(
+//RS     path: &str,
+//RS     maturity: Option<MaturityTag>,
+//RS     view_provenance: Option<&crate::AST::ViewProvenanceMap>,
+//RS ) -> Vec<CtValue> {
+//RS     let mut facts = Vec::new();
+//RS     for (kind, name, detail, value) in [
+//RS         (
+//RS             "Sendability",
+//RS             "sendability",
+//RS             "sendability",
+//RS             build_sendability_info(true),
+//RS         ),
+//RS         (
+//RS             "Movedness",
+//RS             "movedness",
+//RS             "movedness",
+//RS             build_movedness_info(false),
+//RS         ),
+//RS         (
+//RS             "Origin",
+//RS             "origin",
+//RS             "origin",
+//RS             build_origin_info(false, None, None, None, false),
+//RS         ),
+//RS     ] {
+//RS         facts.push(fact_info(
+//RS             kind,
+//RS             name,
+//RS             format!("{path}.${name}"),
+//RS             fact_value_with_detail(kind, name, std::iter::empty::<String>(), value, detail),
+//RS         ));
+//RS     }
+//RS     facts.push(fact_info(
+//RS         "Maturity",
+//RS         "maturity",
+//RS         format!("{path}.$maturity"),
+//RS         fact_value_with_detail(
+//RS             "Maturity",
+//RS             "maturity",
+//RS             std::iter::empty::<String>(),
+//RS             build_maturity_info(maturity.unwrap_or(MaturityTag::Experimental)),
+//RS             "maturity",
+//RS         ),
+//RS     ));
+//RS     let mut view_rows = 0;
+//RS     if let Some(view_provenance) = view_provenance {
+//RS         for (slot, provenance) in view_provenance {
+//RS             let slot_name = if slot.is_empty() {
+//RS                 "return".to_string()
+//RS             } else {
+//RS                 slot.join(".")
+//RS             };
+//RS             view_rows += 1;
+//RS             facts.push(fact_info(
+//RS                 "ViewProvenance",
+//RS                 "view_provenance",
+//RS                 format!("{path}.$view_provenance.{slot_name}"),
+//RS                 fact_value_with_detail(
+//RS                     "ViewProvenance",
+//RS                     "view_provenance",
+//RS                     [slot_name],
+//RS                     build_view_provenance_info(provenance),
+//RS                     "view_provenance",
+//RS                 ),
+//RS             ));
+//RS         }
+//RS     }
+//RS     if view_rows == 0 {
+//RS         let provenance = ViewProvenance {
+//RS             sources: std::collections::BTreeSet::new(),
+//RS             mutable: false,
+//RS         };
+//RS         facts.push(fact_info(
+//RS             "ViewProvenance",
+//RS             "view_provenance",
+//RS             format!("{path}.$view_provenance.return"),
+//RS             fact_value_with_detail(
+//RS                 "ViewProvenance",
+//RS                 "view_provenance",
+//RS                 ["return".to_string()],
+//RS                 build_view_provenance_info(&provenance),
+//RS                 "view_provenance",
+//RS             ),
+//RS         ));
+//RS     }
+//RS     facts
+//RS }
+//RS 
+//RS fn type_dimensions(ty: &Type) -> Vec<CtValue> {
+//RS     match ty {
+//RS         Type::Quantity { dimension, .. } => vec![build_dimension_info(dimension)],
+//RS         Type::Tagged { inner, .. } => type_dimensions(inner),
+//RS         _ => Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn type_fact_rows(path: &str, ty: &Type) -> Vec<CtValue> {
+//RS     ty.knowledge_vector()
+//RS         .iter()
+//RS         .map(|entry| {
+//RS             let kind = fact_kind_for(entry.plane, &entry.fact);
+//RS             let name = kind.to_ascii_lowercase();
+//RS             let suffix = if entry.path.is_empty() {
+//RS                 format!("${name}")
+//RS             } else {
+//RS                 format!("{}.${name}", entry.path.join("."))
+//RS             };
+//RS             fact_info(
+//RS                 kind,
+//RS                 &name,
+//RS                 format!("{path}.{suffix}"),
+//RS                 knowledge_fact_value(kind, &entry.fact),
+//RS             )
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn distinct_fact_rows(definition: &DistinctDef) -> Vec<CtValue> {
+//RS     let mut facts = Vec::new();
+//RS     if let Some((start, end, _)) = definition.range {
+//RS         facts.push(fact_info(
+//RS             "Range",
+//RS             "range",
+//RS             format!("{}.$range", definition.name),
+//RS             fact_value(
+//RS                 "Range",
+//RS                 "range",
+//RS                 std::iter::empty::<String>(),
+//RS                 Some(build_range_info(start, end)),
+//RS                 None,
+//RS             ),
+//RS         ));
+//RS     }
+//RS     if let Some((dimension, kind)) = &definition.quantity {
+//RS         facts.push(fact_info(
+//RS             "Dimension",
+//RS             "dimension",
+//RS             format!("{}.$dimension", definition.name),
+//RS             fact_value(
+//RS                 "Dimension",
+//RS                 "dimension",
+//RS                 [kind.name().to_string()],
+//RS                 None,
+//RS                 Some(build_dimension_info(dimension)),
+//RS             ),
+//RS         ));
+//RS     }
+//RS     facts
+//RS }
+//RS 
+//RS /// D-TYPE2-PLANE1=A: a marker reflects as the typed record its registry row
+//RS /// describes, at every position it may be written — the type, a field, a
+//RS /// method, a variant. Nothing reflects a marker as a bare name.
+//RS fn marker_infos(
+//RS     markers: &[Marker],
+//RS     vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+//RS ) -> Vec<CtValue> {
+//RS     markers
+//RS         .iter()
+//RS         .map(|marker| marker_info(marker, vocabulary))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn marker_arg_path(expression: &crate::AST::Expr) -> Option<String> {
+//RS     match expression {
+//RS         crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+//RS         crate::AST::Expr::Field(base, member, _) => {
+//RS             Some(format!("{}.{}", marker_arg_path(base)?, member))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn marker_arg_value(expression: &crate::AST::Expr, source_type: &str) -> CtValue {
+//RS     if source_type == "[Effect]" {
+//RS         if let crate::AST::Expr::ListLit(values, _) = expression {
+//RS             return CtValue::List(
+//RS                 values
+//RS                     .iter()
+//RS                     .filter_map(marker_arg_path)
+//RS                     .map(CtValue::Str)
+//RS                     .collect(),
+//RS             );
+//RS         }
+//RS     }
+//RS     if jet_foundation::Policy::rule_arg_declaration(source_type).is_some() {
+//RS         if let Some(path) = marker_arg_path(expression) {
+//RS             return CtValue::Enum {
+//RS                 type_name: source_type.to_string(),
+//RS                 variant: path.rsplit('.').next().unwrap_or(&path).to_string(),
+//RS                 args: Vec::new(),
+//RS             };
+//RS         }
+//RS     }
+//RS     match expression {
+//RS         crate::AST::Expr::Str(parts, _) => CtValue::Str(
+//RS             parts
+//RS                 .iter()
+//RS                 .filter_map(|part| match part {
+//RS                     crate::AST::StrPart::Lit(text) => Some(text.clone()),
+//RS                     _ => None,
+//RS                 })
+//RS                 .collect(),
+//RS         ),
+//RS         crate::AST::Expr::Int(value, _, _, raw) => {
+//RS             crate::Comptime::exact_integer_ct_value(*value, raw.as_deref())
+//RS         }
+//RS         crate::AST::Expr::Bool(value, _) => CtValue::Bool(*value),
+//RS         crate::AST::Expr::Char(value, _) => CtValue::Char(*value),
+//RS         _ => CtValue::Unit,
+//RS     }
+//RS }
+//RS 
+//RS fn marker_info(
+//RS     marker: &Marker,
+//RS     vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+//RS ) -> CtValue {
+//RS     // D-META-REG1=A: reflection reads the one registration table, not a
+//RS     // marker-only table beside it. A marker is the row whose target is written
+//RS     // code, so its signature rides on the row.
+//RS     let row = jet_foundation::Registry::row(&marker.name).and_then(|row| row.rule);
+//RS     let declaration = vocabulary.and_then(|vocabulary| vocabulary.declaration(&marker.name));
+//RS     let bindings = row.and_then(|row| row.signature.marker_argument_bindings(marker));
+//RS     let args = marker
+//RS         .args
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(index, argument)| {
+//RS             let declaration_parameter = vocabulary
+//RS                 .and_then(|vocabulary| vocabulary.declaration(&marker.name))
+//RS                 .and_then(|declaration| {
+//RS                     marker
+//RS                         .arg_labels
+//RS                         .get(index)
+//RS                         .and_then(|label| label.as_ref())
+//RS                         .and_then(|(name, _)| {
+//RS                             declaration
+//RS                                 .params
+//RS                                 .iter()
+//RS                                 .find(|parameter| parameter.name == *name)
+//RS                         })
+//RS                         .or_else(|| {
+//RS                             declaration
+//RS                                 .params
+//RS                                 .iter()
+//RS                                 .filter(|parameter| !parameter.name.starts_with('$'))
+//RS                                 .nth(index)
+//RS                         })
+//RS                 });
+//RS             let binding = bindings.as_ref().and_then(|bindings| {
+//RS                 bindings
+//RS                     .iter()
+//RS                     .find(|binding| binding.source_index == index)
+//RS             });
+//RS             let parameter = binding
+//RS                 .and_then(|binding| binding.parameter_index)
+//RS                 .and_then(|parameter| row.and_then(|row| row.signature.params.get(parameter)));
+//RS             let (argument_name, source_type) = if let Some(parameter) = declaration_parameter {
+//RS                 (
+//RS                     parameter.name.clone(),
+//RS                     parameter
+//RS                         .ty
+//RS                         .as_ref()
+//RS                         .map(Type::name)
+//RS                         .unwrap_or_else(|| "Value".to_string()),
+//RS                 )
+//RS             } else {
+//RS                 (
+//RS                     parameter
+//RS                         .map(|parameter| parameter.name.to_string())
+//RS                         .unwrap_or_else(|| "value".to_string()),
+//RS                     parameter
+//RS                         .map(|parameter| parameter.source_type.to_string())
+//RS                         .unwrap_or_else(|| "Value".to_string()),
+//RS                 )
+//RS             };
+//RS             ct_struct(
+//RS                 "MarkerArgInfo",
+//RS                 &[
+//RS                     ("name", ct_str(argument_name)),
+//RS                     ("ty", ct_str(source_type.clone())),
+//RS                     ("value", match argument {
+//RS                         crate::AST::MarkerCallArg::Expr(expression) =>
+//RS                             marker_arg_value(expression, &source_type),
+//RS                         crate::AST::MarkerCallArg::EffectRow { effects, .. } =>
+//RS                             CtValue::List(effects.iter().map(|(name, _)| CtValue::Str(name.clone())).collect()),
+//RS                     }),
+//RS                 ],
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     let sites = row
+//RS         .map(|row| row.sites.iter().map(|site| ct_str(site.name())).collect())
+//RS         .or_else(|| declaration.map(marker_declaration_sites))
+//RS         .unwrap_or_default();
+//RS     let repeatable = row
+//RS         .map(|row| row.repeatable)
+//RS         .or_else(|| declaration.map(marker_declaration_repeatable))
+//RS         .unwrap_or(false);
+//RS     marker_info_value(&marker.name, args, sites, repeatable)
+//RS }
+//RS 
+//RS fn marker_declaration_sites(declaration: &crate::AST::MarkerDecl) -> Vec<CtValue> {
+//RS     declaration
+//RS         .params
+//RS         .iter()
+//RS         .find(|parameter| parameter.name == "$sites")
+//RS         .and_then(|parameter| parameter.value.as_deref())
+//RS         .and_then(|value| match value {
+//RS             Expr::ListLit(values, _) => Some(values.as_slice()),
+//RS             _ => None,
+//RS         })
+//RS         .map(|values| {
+//RS             values
+//RS                 .iter()
+//RS                 .filter_map(|value| match value {
+//RS                     Expr::Ident(name, _) => Some(name.trim_start_matches('.')),
+//RS                     Expr::Field(_, member, _) => Some(member.as_str()),
+//RS                     Expr::EnumLit { variant, .. } => Some(variant.as_str()),
+//RS                     _ => None,
+//RS                 })
+//RS                 .map(ct_str)
+//RS                 .collect()
+//RS         })
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn marker_declaration_repeatable(declaration: &crate::AST::MarkerDecl) -> bool {
+//RS     declaration
+//RS         .params
+//RS         .iter()
+//RS         .find(|parameter| parameter.name == "$repeatable")
+//RS         .and_then(|parameter| parameter.value.as_deref())
+//RS         .is_some_and(|value| matches!(value, Expr::Bool(true, _)))
+//RS }
+//RS 
+//RS fn marker_info_value(
+//RS     name: &str,
+//RS     args: Vec<CtValue>,
+//RS     sites: Vec<CtValue>,
+//RS     repeatable: bool,
+//RS ) -> CtValue {
+//RS     ct_struct(
+//RS         "MarkerInfo",
+//RS         &[
+//RS             ("name", ct_str(name)),
+//RS             ("args", ct_list(args)),
+//RS             ("sites", ct_list(sites)),
+//RS             ("repeatable", ct_bool(repeatable)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn format_param(name: &str, ty: &crate::AST::Type) -> String {
+//RS     format!("{name}: {}", ty.name())
+//RS }
+//RS 
+//RS fn format_method_sig(method: &Func) -> String {
+//RS     let params = method
+//RS         .params
+//RS         .iter()
+//RS         .map(|p| format_param(&p.name, &p.ty))
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     format!(
+//RS         "fn {}({}) {}",
+//RS         method.name,
+//RS         params,
+//RS         method.effective_return_type().name()
+//RS     )
+//RS }
+//RS 
+//RS fn build_reflection_field_info(
+//RS     field: &ReflectionField,
+//RS     vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+//RS ) -> CtValue {
+//RS     ct_struct(
+//RS         "FieldInfo",
+//RS         &[
+//RS             ("name", ct_str(field.name.clone())),
+//RS             ("ty", ct_str(field.ty.name())),
+//RS             ("markers", ct_list(marker_infos(&field.markers, vocabulary))),
+//RS             ("dimensions", ct_list(type_dimensions(&field.ty))),
+//RS             ("facts", ct_list(type_fact_rows(&field.name, &field.ty))),
+//RS             ("is_pub", ct_bool(field.is_pub)),
+//RS             (
+//RS                 "span",
+//RS                 ct_struct(
+//RS                     crate::Syntax::TYPE_SOURCE_SPAN,
+//RS                     &[
+//RS                         ("start", CtValue::Int(field.span.start as i64)),
+//RS                         ("end", CtValue::Int(field.span.end as i64)),
+//RS                     ],
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn method_signature_type(method: &Func) -> Type {
+//RS     let param_contract = method
+//RS         .params
+//RS         .iter()
+//RS         .any(|param| param.zone != crate::AST::ParamZone::Either || param.public_label.is_some())
+//RS         .then(|| {
+//RS             method
+//RS                 .params
+//RS                 .iter()
+//RS                 .map(|param| (param.call_label().to_string(), param.zone))
+//RS                 .collect()
+//RS         });
+//RS     let call_metadata =
+//RS         method
+//RS             .params
+//RS             .iter()
+//RS             .any(|param| param.variadic)
+//RS             .then(|| FunctionCallMetadata {
+//RS                 variadic: method.params.iter().map(|param| param.variadic).collect(),
+//RS                 ..FunctionCallMetadata::default()
+//RS             });
+//RS     Type::Fn {
+//RS         params: method.params.iter().map(|param| param.ty.clone()).collect(),
+//RS         ret: Some(Box::new(method.effective_return_type())),
+//RS         effect_bound: method.declared_effects.clone(),
+//RS         param_contract,
+//RS         call_metadata,
+//RS         return_view_provenance: method.return_view_provenance.clone(),
+//RS     }
+//RS }
+//RS 
+//RS /// One reflected inherent method (D-REFLECT1).
+//RS pub fn build_method_info(method: &Func) -> CtValue {
+//RS     build_method_info_with_vocabulary(method, None)
+//RS }
+//RS 
+//RS fn build_method_info_with_vocabulary(
+//RS     method: &Func,
+//RS     vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+//RS ) -> CtValue {
+//RS     let param_strs = method
+//RS         .params
+//RS         .iter()
+//RS         .map(|p| ct_str(format_param(&p.name, &p.ty)))
+//RS         .collect();
+//RS     let dimensions = method
+//RS         .params
+//RS         .iter()
+//RS         .flat_map(|param| type_dimensions(&param.ty))
+//RS         .chain(type_dimensions(&method.effective_return_type()))
+//RS         .collect();
+//RS     let mut facts = declared_function_facts(
+//RS         &method.name,
+//RS         method.maturity,
+//RS         method.return_view_provenance.as_ref(),
+//RS     );
+//RS     facts.extend(type_fact_rows(&method.name, &method_signature_type(method)));
+//RS     let arithmetic = crate::AST::arithmetic_policy_facts(&method.body)
+//RS         .iter()
+//RS         .map(arithmetic_operation_info)
+//RS         .collect();
+//RS     let effects = method
+//RS         .declared_effects
+//RS         .as_ref()
+//RS         .map(|effects| {
+//RS             effects
+//RS                 .iter()
+//RS                 .map(|(name, _)| name.clone())
+//RS                 .collect::<Vec<_>>()
+//RS         })
+//RS         .unwrap_or_default();
+//RS     ct_struct(
+//RS         "MethodInfo",
+//RS         &[
+//RS             ("name", ct_str(method.name.clone())),
+//RS             ("return_type", ct_str(method.effective_return_type().name())),
+//RS             (
+//RS                 "failure_contract",
+//RS                 ct_str(method.failure_contract().effective_type().name()),
+//RS             ),
+//RS             ("failure_source", ct_str(method.failure_contract().source())),
+//RS             ("params", ct_list(param_strs)),
+//RS             ("signature", ct_str(format_method_sig(method))),
+//RS             ("effects", build_effect_info(&effects)),
+//RS             ("dimensions", ct_list(dimensions)),
+//RS             ("facts", ct_list(facts)),
+//RS             ("arithmetic", ct_list(arithmetic)),
+//RS             // D-REFLECT1: the retained marker nodes, same source as every other
+//RS             // consumer. This was hardcoded empty, so reflection reported that a
+//RS             // method carried no markers no matter what was written on it.
+//RS             (
+//RS                 "markers",
+//RS                 ct_list(marker_infos(&method.markers, vocabulary)),
+//RS             ),
+//RS             ("is_pub", ct_bool(method.is_pub)),
+//RS             (
+//RS                 "span",
+//RS                 ct_struct(
+//RS                     crate::Syntax::TYPE_SOURCE_SPAN,
+//RS                     &[
+//RS                         ("start", CtValue::Int(method.name_span.start as i64)),
+//RS                         ("end", CtValue::Int(method.name_span.end as i64)),
+//RS                     ],
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS /// One reflected type parameter (D-REFLECT1).
+//RS pub fn build_type_param_info(param: &TypeParam) -> CtValue {
+//RS     ct_struct(
+//RS         "TypeParamInfo",
+//RS         &[
+//RS             ("name", ct_str(param.name.clone())),
+//RS             (
+//RS                 "bounds",
+//RS                 ct_list(param.bounds.iter().map(|b| ct_str(b.clone())).collect()),
+//RS             ),
+//RS             (
+//RS                 "span",
+//RS                 ct_struct(
+//RS                     crate::Syntax::TYPE_SOURCE_SPAN,
+//RS                     &[
+//RS                         ("start", CtValue::Int(param.name_span.start as i64)),
+//RS                         ("end", CtValue::Int(param.name_span.end as i64)),
+//RS                     ],
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn derived_marker_info(name: &str) -> CtValue {
+//RS     let name = jet_foundation::Registry::row(name)
+//RS         .map(|row| row.name)
+//RS         .unwrap_or(name);
+//RS     marker_info_value(name, Vec::new(), Vec::new(), false)
+//RS }
+//RS 
+//RS /// Keep user-written markers separate from derives lowered from them. The
+//RS /// parser gives lowered derives the source marker's name span, so source
+//RS /// markers stay in `markers` and their lowered rows appear in `expanded_markers`.
+//RS fn type_level_marker_views(
+//RS     type_markers: &[Marker],
+//RS     serde_markers: &[Marker],
+//RS     derives: &[(String, crate::Diagnostics::Span)],
+//RS ) -> (Vec<CtValue>, Vec<CtValue>) {
+//RS     type_level_marker_views_with_vocabulary(type_markers, serde_markers, derives, None)
+//RS }
+//RS 
+//RS fn type_level_marker_views_with_vocabulary(
+//RS     type_markers: &[Marker],
+//RS     serde_markers: &[Marker],
+//RS     derives: &[(String, crate::Diagnostics::Span)],
+//RS     vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+//RS ) -> (Vec<CtValue>, Vec<CtValue>) {
+//RS     let written_source = if type_markers.is_empty() {
+//RS         serde_markers
+//RS     } else {
+//RS         type_markers
+//RS     };
+//RS     let mut written = marker_infos(written_source, vocabulary);
+//RS     let mut expanded = Vec::new();
+//RS     for (name, span) in derives {
+//RS         if written_source
+//RS             .iter()
+//RS             .any(|marker| marker.name_span == *span)
+//RS         {
+//RS             expanded.push(derived_marker_info(name));
+//RS         } else {
+//RS             written.push(derived_marker_info(name));
+//RS         }
+//RS     }
+//RS     (written, expanded)
+//RS }
+//RS 
+//RS fn state_path(owner: &str, state: &str) -> String {
+//RS     if state == "_" || state.contains(".State.") {
+//RS         state.to_string()
+//RS     } else {
+//RS         format!("{owner}.State.{state}")
+//RS     }
+//RS }
+//RS 
+//RS /// A state identity is not a display-only path. Keep the canonical path for
+//RS /// diagnostics, but expose owner and state as fields of a typed record.
+//RS pub fn build_state_ref(owner: &str, state: &str) -> CtValue {
+//RS     ct_struct(
+//RS         "StateRef",
+//RS         &[
+//RS             ("owner", ct_str(owner)),
+//RS             ("name", ct_str(state)),
+//RS             ("path", ct_str(state_path(owner, state))),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS /// Build the typed state values returned by `Type.$states`.
+//RS pub fn build_state_refs(owner: &str, states: &[String]) -> CtValue {
+//RS     ct_list(
+//RS         states
+//RS             .iter()
+//RS             .map(|state| build_state_ref(owner, state))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// Build the same state rows that the aggregate `TypeInfo.states` view uses.
+//RS pub fn build_state_infos(owner: &str, states: &[String]) -> CtValue {
+//RS     build_state_infos_with_graph(owner, states, None)
+//RS }
+//RS 
+//RS pub fn build_state_infos_with_graph(
+//RS     owner: &str,
+//RS     states: &[String],
+//RS     graph: Option<&jet_foundation::Facts::StateGraph>,
+//RS ) -> CtValue {
+//RS     ct_list(
+//RS         states
+//RS             .iter()
+//RS             .map(|state| {
+//RS                 let node =
+//RS                     graph.and_then(|graph| graph.states.iter().find(|node| node.name == *state));
+//RS                 ct_struct(
+//RS                     "StateInfo",
+//RS                     &[
+//RS                         ("name", ct_str(state)),
+//RS                         ("path", build_state_ref(owner, state)),
+//RS                         ("terminal", ct_bool(node.is_some_and(|node| node.terminal))),
+//RS                         (
+//RS                             "reachable",
+//RS                             node.and_then(|node| node.reachable)
+//RS                                 .map(|reachable| {
+//RS                                     CtValue::Present(Box::new(CtValue::Bool(reachable)))
+//RS                                 })
+//RS                                 .unwrap_or_else(|| CtValue::absent(crate::AST::Type::Bool)),
+//RS                         ),
+//RS                     ],
+//RS                 )
+//RS             })
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// Build the typed effect values returned by `fn.$effects`.
+//RS pub fn build_effect_info(effects: &[String]) -> CtValue {
+//RS     ct_struct(
+//RS         "EffectInfo",
+//RS         &[(
+//RS             "values",
+//RS             ct_list(effects.iter().cloned().map(ct_str).collect()),
+//RS         )],
+//RS     )
+//RS }
+//RS 
+//RS /// D-FACT-HOME1=A: build the one typed value for a homed, non-algebraic row.
+//RS /// The row lookup stays in `Registry`; this function only folds the producer's
+//RS /// already-known value into the shared `CtValue` carrier.
+//RS pub fn registered_fact_value(
+//RS     read: jet_foundation::Registry::FactRead,
+//RS     subject: &str,
+//RS     items: &[Item],
+//RS ) -> Option<CtValue> {
+//RS     let declared = |name: &str| {
+//RS         items.iter().any(|item| match item {
+//RS             Item::Struct(def) => def.name == name,
+//RS             Item::Enum(def) => def.name == name,
+//RS             Item::Distinct(def) => def.name == name,
+//RS             Item::Func(func) => func.name == name,
+//RS             Item::UnitFamily(family) => family.distinct_defs().iter().any(|def| def.name == name),
+//RS             _ => false,
+//RS         })
+//RS     };
+//RS 
+//RS     match read {
+//RS         jet_foundation::Registry::FactRead::Sendability if declared(subject) => {
+//RS             Some(build_sendability_info(true))
+//RS         }
+//RS         jet_foundation::Registry::FactRead::Movedness if declared(subject) => {
+//RS             Some(build_movedness_info(false))
+//RS         }
+//RS         jet_foundation::Registry::FactRead::Attribution if subject == "report" => {
+//RS             Some(build_attribution_info("report", None))
+//RS         }
+//RS         jet_foundation::Registry::FactRead::Origin if declared(subject) => {
+//RS             Some(build_origin_info(false, None, None, None, false))
+//RS         }
+//RS         jet_foundation::Registry::FactRead::ViewProvenance => items.iter().find_map(|item| {
+//RS             let Item::Func(function) = item else {
+//RS                 return None;
+//RS             };
+//RS             if function.name != subject {
+//RS                 return None;
+//RS             }
+//RS             let provenance = function
+//RS                 .return_view_provenance
+//RS                 .as_ref()
+//RS                 .and_then(|map| map.values().next())
+//RS                 .cloned()
+//RS                 .unwrap_or_else(|| ViewProvenance {
+//RS                     sources: std::collections::BTreeSet::new(),
+//RS                     mutable: false,
+//RS                 });
+//RS             Some(build_view_provenance_info(&provenance))
+//RS         }),
+//RS         jet_foundation::Registry::FactRead::UnitScaleProvenance => {
+//RS             items.iter().find_map(|item| match item {
+//RS                 Item::UnitFamily(family) => family
+//RS                     .members
+//RS                     .iter()
+//RS                     .find(|member| UnitFamilyDef::type_name(&member.name) == subject)
+//RS                     .map(|member| build_unit_scale_provenance_info(&member.scale_provenance)),
+//RS                 _ => None,
+//RS             })
+//RS         }
+//RS         read @ (jet_foundation::Registry::FactRead::Measure
+//RS         | jet_foundation::Registry::FactRead::Exactness
+//RS         | jet_foundation::Registry::FactRead::Classification
+//RS         | jet_foundation::Registry::FactRead::Obligation) => {
+//RS             reflect_type_value(items, subject, "main")
+//RS                 .and_then(|value| reflected_fact_field(&value, read).cloned())
+//RS         }
+//RS         jet_foundation::Registry::FactRead::Maturity => items.iter().find_map(|item| match item {
+//RS             Item::Func(function) if function.name == subject => Some(build_maturity_info(
+//RS                 function.maturity.unwrap_or(MaturityTag::Experimental),
+//RS             )),
+//RS             _ => None,
+//RS         }),
+//RS         jet_foundation::Registry::FactRead::RegisteredPlane(name)
+//RS             if jet_foundation::Registry::fact_declarations()
+//RS                 .iter()
+//RS                 .find(|declaration| declaration.name == name)
+//RS                 .is_some_and(|declaration| {
+//RS                     declaration.name == subject || declaration.source_name == subject
+//RS                 }) =>
+//RS         {
+//RS             let info = build_registered_fact_info(name)?;
+//RS             reflected_struct_field(&info, "value").cloned()
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Build a TypeInfo value from the same source items that sema is checking.
+//RS /// This is the static `Type.reflect()` fold; it does not create a runtime
+//RS /// reflection call or a second type table.
+//RS pub fn reflect_type_value(items: &[Item], type_name: &str, module: &str) -> Option<CtValue> {
+//RS     let target = TargetLayout::host();
+//RS     reflect_type_value_with_target(items, type_name, module, &target)
+//RS }
+//RS 
+//RS /// Fold `Type.reflect()` with the target carried by the checked build.
+//RS pub fn reflect_type_value_with_target(
+//RS     items: &[Item],
+//RS     type_name: &str,
+//RS     module: &str,
+//RS     target: &TargetLayout,
+//RS ) -> Option<CtValue> {
+//RS     reflect_type_value_with_target_and_graph(items, type_name, module, target, None)
+//RS }
+//RS 
+//RS pub fn reflect_type_value_with_target_and_graph(
+//RS     items: &[Item],
+//RS     type_name: &str,
+//RS     module: &str,
+//RS     target: &TargetLayout,
+//RS     graph: Option<&jet_foundation::Facts::StateGraph>,
+//RS ) -> Option<CtValue> {
+//RS     reflect_type_value_with_target_and_graph_and_facts(
+//RS         items, type_name, module, target, graph, None,
+//RS     )
+//RS }
+//RS 
+//RS /// Fold `Type.reflect()` from the checked erased fact registry. The optional
+//RS /// registry keeps this seam usable by small reflection-only callers; compiler
+//RS /// paths pass it so state labels and graph facts have one semantic owner.
+//RS pub fn reflect_type_value_with_target_and_graph_and_facts(
+//RS     items: &[Item],
+//RS     type_name: &str,
+//RS     module: &str,
+//RS     target: &TargetLayout,
+//RS     graph: Option<&jet_foundation::Facts::StateGraph>,
+//RS     facts: Option<&jet_foundation::Facts::FactRegistry>,
+//RS ) -> Option<CtValue> {
+//RS     let module = if module.is_empty() { "main" } else { module };
+//RS     let layout_engine = TargetLayoutEngine::new(items.iter(), target.clone());
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Struct(def) if def.name == type_name => {
+//RS                 let states = match facts {
+//RS                     Some(facts) => facts
+//RS                         .state_members(type_name)
+//RS                         .map_or_else(Vec::new, |states| states.to_vec()),
+//RS                     None => def
+//RS                         .state
+//RS                         .as_ref()
+//RS                         .map(|state| {
+//RS                             state
+//RS                                 .states
+//RS                                 .iter()
+//RS                                 .map(|(name, _)| name.clone())
+//RS                                 .collect::<Vec<_>>()
+//RS                         })
+//RS                         .unwrap_or_default(),
+//RS                 };
+//RS                 let graph = graph.or_else(|| {
+//RS                     facts.and_then(|facts| facts.state_graph(&format!("{}.State", def.name)))
+//RS                 });
+//RS                 let mut info = build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
+//RS                     def,
+//RS                     &states,
+//RS                     &format!("{module}.{type_name}"),
+//RS                     None,
+//RS                     &layout_engine,
+//RS                     graph,
+//RS                 );
+//RS                 append_trait_contracts_from_items(
+//RS                     &mut info,
+//RS                     items,
+//RS                     &def.name,
+//RS                     module,
+//RS                     &format!("{module}::{type_name}"),
+//RS                 );
+//RS                 return Some(info);
+//RS             }
+//RS             Item::Enum(def) if def.name == type_name => {
+//RS                 let path = format!("{module}.{type_name}");
+//RS                 let mut info = build_enum_type_info_with_engine(
+//RS                     def,
+//RS                     module,
+//RS                     &format!("{module}::{type_name}"),
+//RS                     &path,
+//RS                     &layout_engine,
+//RS                 );
+//RS                 append_trait_contracts_from_items(
+//RS                     &mut info,
+//RS                     items,
+//RS                     &def.name,
+//RS                     module,
+//RS                     &format!("{module}::{type_name}"),
+//RS                 );
+//RS                 return Some(info);
+//RS             }
+//RS             Item::Distinct(def) if def.name == type_name => {
+//RS                 let mut info = build_distinct_type_info_with_path(
+//RS                     def,
+//RS                     module,
+//RS                     &format!("{module}.{type_name}"),
+//RS                 );
+//RS                 append_trait_contracts_from_items(
+//RS                     &mut info,
+//RS                     items,
+//RS                     &def.name,
+//RS                     module,
+//RS                     &format!("{module}::{type_name}"),
+//RS                 );
+//RS                 return Some(info);
+//RS             }
+//RS             Item::UnitFamily(family) => {
+//RS                 let Some(member) = family
+//RS                     .members
+//RS                     .iter()
+//RS                     .find(|member| UnitFamilyDef::type_name(&member.name) == type_name)
+//RS                 else {
+//RS                     continue;
+//RS                 };
+//RS                 if let Some(def) = family
+//RS                     .distinct_defs()
+//RS                     .into_iter()
+//RS                     .find(|def| def.name == type_name)
+//RS                 {
+//RS                     let mut info = build_distinct_type_info_with_path(
+//RS                         &def,
+//RS                         module,
+//RS                         &format!("{module}.{type_name}"),
+//RS                     );
+//RS                     if let CtValue::Struct { fields, .. } = &mut info {
+//RS                         if let Some((_, CtValue::List(facts))) =
+//RS                             fields.iter_mut().find(|(name, _)| name == "facts")
+//RS                         {
+//RS                             let path = format!("{module}.{type_name}.$unit_scale_provenance");
+//RS                             facts.push(fact_info(
+//RS                                 "UnitScaleProvenance",
+//RS                                 "unit_scale_provenance",
+//RS                                 path,
+//RS                                 fact_value_with_detail(
+//RS                                     "UnitScaleProvenance",
+//RS                                     "unit_scale_provenance",
+//RS                                     std::iter::empty::<String>(),
+//RS                                     build_unit_scale_provenance_info(&member.scale_provenance),
+//RS                                     "unit_scale_provenance",
+//RS                                 ),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                     append_trait_contracts_from_items(
+//RS                         &mut info,
+//RS                         items,
+//RS                         &def.name,
+//RS                         module,
+//RS                         &format!("{module}::{type_name}"),
+//RS                     );
+//RS                     return Some(info);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS /// Project one direct nominal compiler fact through the same target-aware
+//RS /// `TypeInfo` value used by `Type.reflect()`. The three legacy fact spellings
+//RS /// are projections of that value, not a second layout/name/field algorithm.
+// END-PORT-PENDING 0597 crates/jet-comptime/src/Comptime/Reflect.rs:1-1802
+

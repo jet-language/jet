@@ -1,0 +1,1290 @@
+// PORT-PENDING 0465 crates-jet-codegen-src-codegen-mirweb-slice-7113: crates/jet-codegen/src/Codegen/MIRWeb.rs:7113-8398
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn json_generic_params(
+//RS     params: &[jet_foundation::MIR::MirGenericParam],
+//RS     program: &MirProgram,
+//RS ) -> Result<String, MirWebError> {
+//RS     let rows = params
+//RS         .iter()
+//RS         .map(|param| {
+//RS             let bounds = param
+//RS                 .bounds
+//RS                 .iter()
+//RS                 .map(|bound| {
+//RS                     let Some(trait_def) = program.traits.iter().find(|trait_def| trait_def.id == bound.id) else {
+//RS                         return Err(MirWebError::InvalidMir {
+//RS                             message: format!(
+//RS                                 "MIR generic parameter {} references missing trait {}",
+//RS                                 param.name, bound.id.0
+//RS                             ),
+//RS                         });
+//RS                     };
+//RS                     Ok(format!(
+//RS                         "{{\"id\":{},\"name\":{}}}",
+//RS                         bound.id.0,
+//RS                         json_string(&trait_def.name)
+//RS                     ))
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, MirWebError>>()?;
+//RS             Ok(format!(
+//RS                 "{{\"name\":{},\"bounds\":[{}]}}",
+//RS                 json_string(&param.name),
+//RS                 bounds.join(",")
+//RS             ))
+//RS         })
+//RS         .collect::<Result<Vec<_>, MirWebError>>()?;
+//RS     Ok(format!("[{}]", rows.join(",")))
+//RS }
+//RS 
+//RS fn json_modules(program: &MirProgram) -> String {
+//RS     let rows = program
+//RS         .modules
+//RS         .iter()
+//RS         .map(|module| {
+//RS             let imports = module
+//RS                 .imports
+//RS                 .iter()
+//RS                 .map(|id| id.0.to_string())
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             let items = module
+//RS                 .item_order
+//RS                 .iter()
+//RS                 .map(|item| json_string(&item_ref_descriptor(*item)))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             format!(
+//RS                 "{{\"id\":{},\"key\":{},\"name\":{},\"path\":{},\"source_file\":{},\"imports\":[{}],\"item_order\":[{}]}}",
+//RS                 module.id.0,
+//RS                 json_string(&module.key),
+//RS                 json_string(&module.name),
+//RS                 json_string(&module.path),
+//RS                 module.source_file.0,
+//RS                 imports,
+//RS                 items
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("[{}]", rows)
+//RS }
+//RS 
+//RS fn json_imports(program: &MirProgram) -> String {
+//RS     let rows = program
+//RS         .imports
+//RS         .iter()
+//RS         .map(|import| {
+//RS             format!(
+//RS                 "{{\"id\":{},\"module\":{},\"visibility\":{},\"alias\":{},\"kind\":{}}}",
+//RS                 import.id.0,
+//RS                 import.module.0,
+//RS                 json_string(visibility_descriptor(import.visibility)),
+//RS                 json_string(&import.alias),
+//RS                 json_string(&import_kind_descriptor(&import.kind))
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("[{}]", rows)
+//RS }
+//RS 
+//RS fn json_traits(program: &MirProgram) -> String {
+//RS     let rows = program
+//RS         .traits
+//RS         .iter()
+//RS         .map(|trait_def| {
+//RS             let associated_types = trait_def
+//RS                 .associated_types
+//RS                 .iter()
+//RS                 .map(|associated| json_string(&associated.name))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             let methods = trait_def
+//RS                 .methods
+//RS                 .iter()
+//RS                 .map(|method| {
+//RS                     format!(
+//RS                         "{{\"id\":{},\"name\":{},\"self_access\":{},\"default\":{}}}",
+//RS                         method.id.0,
+//RS                         json_string(&method.name),
+//RS                         optional_access(method.self_access),
+//RS                         optional_function_id(method.default)
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             format!(
+//RS                 "{{\"id\":{},\"module\":{},\"key\":{},\"name\":{},\"visibility\":{},\"associated_types\":[{}],\"methods\":[{}]}}",
+//RS                 trait_def.id.0,
+//RS                 trait_def.module.0,
+//RS                 json_string(&trait_def.key),
+//RS                 json_string(&trait_def.name),
+//RS                 json_string(visibility_descriptor(trait_def.visibility)),
+//RS                 associated_types,
+//RS                 methods
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("[{}]", rows)
+//RS }
+//RS 
+//RS fn json_impls(program: &MirProgram) -> String {
+//RS     let rows = program
+//RS         .impls
+//RS         .iter()
+//RS         .map(|impl_def| {
+//RS             let trait_ref = impl_def
+//RS                 .trait_ref
+//RS                 .as_ref()
+//RS                 .map(|trait_ref| {
+//RS                     format!(
+//RS                         "{{\"id\":{},\"name\":{}}}",
+//RS                         trait_ref.id.0,
+//RS                         json_string(&trait_ref.name)
+//RS                     )
+//RS                 })
+//RS                 .unwrap_or_else(|| "null".to_string());
+//RS             let associated_types = impl_def
+//RS                 .associated_types
+//RS                 .iter()
+//RS                 .map(|associated| {
+//RS                     format!(
+//RS                         "{{\"name\":{},\"type\":{}}}",
+//RS                         json_string(&associated.name),
+//RS                         json_string(&type_descriptor(&associated.ty))
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             let methods = impl_def
+//RS                 .methods
+//RS                 .iter()
+//RS                 .map(|id| id.0.to_string())
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             format!(
+//RS                 "{{\"id\":{},\"module\":{},\"key\":{},\"self_type\":{},\"trait\":{},\"associated_types\":[{}],\"methods\":[{}],\"delegation\":{},\"compiler_generated\":{},\"serde\":{},\"operator_rhs\":{},\"target_applicability\":{{\"web\":{}}}}}",
+//RS                 impl_def.id.0,
+//RS                 impl_def.module.0,
+//RS                 json_string(&impl_def.key),
+//RS                 json_string(&type_descriptor(&impl_def.self_type)),
+//RS                 trait_ref,
+//RS                 associated_types,
+//RS                 methods,
+//RS                 impl_def.delegation.map(|id| id.0.to_string()).unwrap_or_else(|| "null".to_string()),
+//RS                 impl_def.compiler_generated,
+//RS                 optional_serde_codec_descriptor(impl_def.serde.as_ref()),
+//RS                 impl_def.operator_rhs.as_ref().map(|ty| json_string(&type_descriptor(ty))).unwrap_or_else(|| "null".to_string()),
+//RS                 impl_def.target_applicability.web
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("[{}]", rows)
+//RS }
+//RS 
+//RS fn json_constants(program: &MirProgram) -> String {
+//RS     let rows = program
+//RS         .constants
+//RS         .iter()
+//RS         .map(|constant| {
+//RS             format!(
+//RS                 "{{\"id\":{},\"module\":{},\"key\":{},\"name\":{},\"visibility\":{},\"type\":{},\"value\":{}}}",
+//RS                 constant.id.0,
+//RS                 constant.module.0,
+//RS                 json_string(&constant.key),
+//RS                 json_string(&constant.name),
+//RS                 json_string(visibility_descriptor(constant.visibility)),
+//RS                 json_string(&type_descriptor(&constant.ty)),
+//RS                 json_string(&constant_descriptor(&constant.value))
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("[{}]", rows)
+//RS }
+//RS 
+//RS fn json_jobs(program: &MirProgram) -> String {
+//RS     let rows = program.jobs.iter().map(json_job).collect::<Vec<_>>().join(",");
+//RS     format!("[{}]", rows)
+//RS }
+//RS 
+//RS fn json_job(job: &MirJob) -> String {
+//RS     format!(
+//RS         "{{\"id\":{},\"function\":{},\"name\":{},\"scope\":{},\"schedule\":{},\"inputs\":{},\"dispatch\":{},\"after\":{},\"parallel\":{},\"packages\":{},\"working_directory\":{},\"input_paths\":{},\"output_paths\":{},\"skip\":{},\"cache\":{},\"limits\":{}}}",
+//RS         job.id.0,
+//RS         job.function.0,
+//RS         json_string(&job.name),
+//RS         json_string(job_scope_descriptor(job.scope)),
+//RS         optional_job_schedule_descriptor(job.schedule.as_ref()),
+//RS         json_cli_inputs(&job.inputs),
+//RS         json_string(job_dispatch_descriptor(job.dispatch)),
+//RS         json_string_list(&job.after),
+//RS         job.parallel,
+//RS         json_string_list(&job.packages),
+//RS         job.working_directory
+//RS             .as_ref()
+//RS             .map(|value| json_string(value))
+//RS             .unwrap_or_else(|| "null".to_string()),
+//RS         json_string_list(&job.input_paths),
+//RS         json_string_list(&job.output_paths),
+//RS         optional_job_skip_descriptor(job.skip.as_ref()),
+//RS         json_string(job_cache_policy_descriptor(job.cache)),
+//RS         json_string(&job_limits_descriptor(&job.limits))
+//RS     )
+//RS }
+//RS 
+//RS fn json_harnesses(program: &MirProgram) -> String {
+//RS     let rows = program
+//RS         .harnesses
+//RS         .iter()
+//RS         .map(|harness| {
+//RS             let tests = harness
+//RS                 .tests
+//RS                 .iter()
+//RS                 .map(|id| id.0.to_string())
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             let output_checks = harness
+//RS                 .output_checks
+//RS                 .iter()
+//RS                 .map(|check| {
+//RS                     format!(
+//RS                         "{{\"id\":{},\"name\":{},\"function\":{}}}",
+//RS                         check.id.0,
+//RS                         json_string(&check.name),
+//RS                         check.function.0
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             let coverage_points = harness
+//RS                 .coverage_points
+//RS                 .iter()
+//RS                 .map(|point| {
+//RS                     format!(
+//RS                         "{{\"id\":{},\"function\":{},\"block\":{}}}",
+//RS                         point.id.0, point.function.0, point.block.0
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             format!(
+//RS                 "{{\"id\":{},\"kind\":{},\"tests\":[{}],\"output_checks\":[{}],\"selected_test\":{},\"coverage_points\":[{}],\"command_override\":{}}}",
+//RS                 harness.id.0,
+//RS                 json_string(harness_kind_descriptor(harness.kind)),
+//RS                 tests,
+//RS                 output_checks,
+//RS                 harness
+//RS                     .selected_test
+//RS                     .map(|id| id.0.to_string())
+//RS                     .unwrap_or_else(|| "null".to_string()),
+//RS                 coverage_points,
+//RS                 harness.command_override
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("[{}]", rows)
+//RS }
+//RS 
+//RS fn json_artifacts(
+//RS     program: &MirProgram,
+//RS     selected_artifact: jet_foundation::MIR::MirArtifactId,
+//RS     selected_identity: &str,
+//RS ) -> Result<String, MirWebError> {
+//RS     let rows = program
+//RS         .artifacts
+//RS         .iter()
+//RS         .map(|artifact| {
+//RS             let identity = if artifact.id == selected_artifact {
+//RS                 selected_identity
+//RS             } else {
+//RS                 artifact.artifact_identity.as_str()
+//RS             };
+//RS             json_artifact(artifact, program, identity)
+//RS         })
+//RS         .collect::<Result<Vec<_>, MirWebError>>()?
+//RS         .join(",");
+//RS     Ok(format!("[{}]", rows))
+//RS }
+//RS 
+//RS fn json_artifact(
+//RS     artifact: &MirArtifactPlan,
+//RS     program: &MirProgram,
+//RS     artifact_identity: &str,
+//RS ) -> Result<String, MirWebError> {
+//RS     let modules = artifact.modules.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(",");
+//RS     let links = artifact.links.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(",");
+//RS     let jobs = artifact.jobs.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(",");
+//RS     let runtime_parts = artifact
+//RS         .runtime_parts
+//RS         .iter()
+//RS         .map(|part| json_string(runtime_part_descriptor(*part)))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let exports = artifact
+//RS         .exports
+//RS         .iter()
+//RS         .map(|export| {
+//RS             format!(
+//RS                 "{{\"symbol\":{},\"function\":{},\"abi\":{}}}",
+//RS                 json_string(&export.symbol),
+//RS                 export.function.0,
+//RS                 json_string(&foreign_abi_descriptor(&export.abi))
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     Ok(format!(
+//RS         "{{\"id\":{},\"kind\":{},\"name\":{},\"target\":{},\"mode\":{},\"modules\":[{}],\"links\":[{}],\"jobs\":[{}],\"runtime_parts\":[{}],\"exports\":[{}],\"provider_identity\":{},\"closure_identity\":{},\"artifact_identity\":{},\"entry\":{},\"harness\":{}}}",
+//RS         artifact.id.0,
+//RS         json_string(artifact.kind.as_str()),
+//RS         json_string(&artifact.name),
+//RS         json_string(artifact.target.as_str()),
+//RS         json_string(artifact.mode.as_str()),
+//RS         modules,
+//RS         links,
+//RS         jobs,
+//RS         runtime_parts,
+//RS         exports,
+//RS         json_string(&artifact.provider_identity),
+//RS         json_string(&artifact.closure_identity),
+//RS         json_string(artifact_identity),
+//RS         json_entry_spec(artifact.entry.as_ref(), program)?,
+//RS         artifact.harness.map(|id| id.0.to_string()).unwrap_or_else(|| "null".to_string())
+//RS     ))
+//RS }
+//RS 
+//RS fn json_entry_spec(entry: Option<&MirEntrySpec>, program: &MirProgram) -> Result<String, MirWebError> {
+//RS     let Some(entry) = entry else {
+//RS         return Ok("null".to_string());
+//RS     };
+//RS     let cli = match &entry.cli {
+//RS         None => "null".to_string(),
+//RS         Some(cli) => {
+//RS             let commands = cli
+//RS                 .commands
+//RS                 .iter()
+//RS                 .map(|command| {
+//RS                     if !program.functions.iter().any(|function| function.id == command.function) {
+//RS                         return Err(MirWebError::MissingUserFunction { function: command.function.0 });
+//RS                     }
+//RS                     Ok(format!(
+//RS                         "{{\"name\":{},\"description\":{},\"function\":{},\"receiver\":{},\"inputs\":{}}}",
+//RS                         json_string(&command.name),
+//RS                         command
+//RS                             .description
+//RS                             .as_ref()
+//RS                             .map(|value| json_string(value))
+//RS                             .unwrap_or_else(|| "null".to_string()),
+//RS                         command.function.0,
+//RS                         command.receiver.map(|id| id.0.to_string()).unwrap_or_else(|| "null".to_string()),
+//RS                         json_cli_inputs(&command.inputs)
+//RS                     ))
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, MirWebError>>()?
+//RS                 .join(",");
+//RS             format!(
+//RS                 "{{\"description\":{},\"record_inputs\":{},\"inputs\":{},\"commands\":[{}],\"standard\":{}}}",
+//RS                 cli.description
+//RS                     .as_ref()
+//RS                     .map(|value| json_string(value))
+//RS                     .unwrap_or_else(|| "null".to_string()),
+//RS                 cli.record_inputs,
+//RS                 json_cli_inputs(&cli.inputs),
+//RS                 commands,
+//RS                 cli.standard
+//RS             )
+//RS         }
+//RS     };
+//RS     Ok(format!(
+//RS         "{{\"kind\":{},\"function\":{},\"cli\":{},\"output\":{},\"initialize_environment\":{},\"initialize_gc\":{},\"serves_until_stopped\":{},\"package_version\":{}}}",
+//RS         json_string(entry_kind_descriptor(entry.kind)),
+//RS         entry.function.map(|id| id.0.to_string()).unwrap_or_else(|| "null".to_string()),
+//RS         cli,
+//RS         json_string(entry_output_descriptor(entry.output)),
+//RS         entry.initialize_environment,
+//RS         entry.initialize_gc,
+//RS         entry.serves_until_stopped,
+//RS         json_string(&entry.package_version)
+//RS     ))
+//RS }
+//RS 
+//RS fn json_cli_inputs(inputs: &[jet_foundation::MIR::MirCliInput]) -> String {
+//RS     let rows = inputs
+//RS         .iter()
+//RS         .map(|input| {
+//RS             format!(
+//RS                 "{{\"parameter\":{},\"name\":{},\"label\":{},\"type\":{},\"zone\":{},\"short\":{},\"env\":{},\"help\":{},\"metavar\":{},\"shape\":{},\"positional\":{},\"variadic\":{}}}",
+//RS                 input.parameter,
+//RS                 json_string(&input.name),
+//RS                 json_string(&input.label),
+//RS                 json_string(&type_descriptor(&input.ty)),
+//RS                 json_string(input.zone.as_str()),
+//RS                 input
+//RS                     .short
+//RS                     .as_ref()
+//RS                     .map(|value| json_string(value))
+//RS                     .unwrap_or_else(|| "null".to_string()),
+//RS                 input
+//RS                     .env
+//RS                     .as_ref()
+//RS                     .map(|value| json_string(value))
+//RS                     .unwrap_or_else(|| "null".to_string()),
+//RS                 json_string(&input.help),
+//RS                 input
+//RS                     .metavar
+//RS                     .as_ref()
+//RS                     .map(|value| json_string(value))
+//RS                     .unwrap_or_else(|| "null".to_string()),
+//RS                 json_cli_shape(&input.shape),
+//RS                 input
+//RS                     .positional
+//RS                     .map(|value| value.to_string())
+//RS                     .unwrap_or_else(|| "null".to_string()),
+//RS                 input.variadic
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("[{}]", rows)
+//RS }
+//RS 
+//RS fn json_cli_shape(shape: &jet_foundation::MIR::MirCliInputShape) -> String {
+//RS     match shape {
+//RS         jet_foundation::MIR::MirCliInputShape::Flag => "{\"kind\":\"flag\"}".to_string(),
+//RS         jet_foundation::MIR::MirCliInputShape::Value {
+//RS             kind,
+//RS             optional,
+//RS             default,
+//RS         } => format!(
+//RS             "{{\"kind\":{},\"optional\":{},\"default\":{}}}",
+//RS             json_string(cli_value_kind_descriptor(*kind)),
+//RS             optional,
+//RS             json_cli_default(default.as_ref())
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn json_cli_default(default: Option<&jet_foundation::MIR::MirCliDefault>) -> String {
+//RS     match default {
+//RS         None => "null".to_string(),
+//RS         Some(jet_foundation::MIR::MirCliDefault::TypeDefault) => "{\"kind\":\"type-default\"}".to_string(),
+//RS         Some(jet_foundation::MIR::MirCliDefault::Value(value)) => format!(
+//RS             "{{\"kind\":\"value\",\"value\":{}}}",
+//RS             json_string(&constant_descriptor(value))
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn json_string_list(values: &[String]) -> String {
+//RS     format!(
+//RS         "[{}]",
+//RS         values
+//RS             .iter()
+//RS             .map(|value| json_string(value))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",")
+//RS     )
+//RS }
+//RS 
+//RS fn optional_function_id(id: Option<jet_foundation::MIR::MirFunctionId>) -> String {
+//RS     id.map(|id| id.0.to_string()).unwrap_or_else(|| "null".to_string())
+//RS }
+//RS 
+//RS fn optional_access(access: Option<MirAccess>) -> String {
+//RS     access
+//RS         .map(|access| json_string(access_descriptor(access)))
+//RS         .unwrap_or_else(|| "null".to_string())
+//RS }
+//RS 
+//RS fn emit_source_map(assets: &MirWebAssets) -> String {
+//RS     let sources = assets.source_names.iter().map(|name| json_string(name)).collect::<Vec<_>>().join(",");
+//RS     let contents = assets.source_contents.iter().map(|content| json_string(content)).collect::<Vec<_>>().join(",");
+//RS     format!("{{\"version\":3,\"file\":\"app.js\",\"sources\":[{sources}],\"sourcesContent\":[{contents}],\"names\":[],\"mappings\":\"\"}}\n")
+//RS }
+//RS 
+//RS fn emit_command_record(
+//RS     program: &MirProgram,
+//RS     functions: &[&MirFunction],
+//RS     artifact: &MirArtifactPlan,
+//RS     entry: jet_foundation::MIR::MirFunctionId,
+//RS ) -> Result<Vec<u8>, MirWebError> {
+//RS     let entry_type = functions
+//RS         .iter()
+//RS         .find(|function| function.id == entry)
+//RS         .map(|function| function.name.as_str())
+//RS         .unwrap_or(artifact.name.as_str());
+//RS     let (description, standard, version, inputs, commands) = match artifact.entry.as_ref() {
+//RS         Some(entry) => match entry.cli.as_ref() {
+//RS             Some(cli) => (
+//RS                 cli.description.as_deref(),
+//RS                 cli.standard,
+//RS                 Some(entry.package_version.as_str()),
+//RS                 cli.inputs.as_slice(),
+//RS                 cli.commands.as_slice(),
+//RS             ),
+//RS             None => (
+//RS                 None,
+//RS                 false,
+//RS                 Some(entry.package_version.as_str()),
+//RS                 &[][..],
+//RS                 &[][..],
+//RS             ),
+//RS         },
+//RS         None => (None, false, None, &[][..], &[][..]),
+//RS     };
+//RS     let mut jobs = Vec::with_capacity(artifact.jobs.len());
+//RS     for job_id in &artifact.jobs {
+//RS         let Some(job) = program.jobs.iter().find(|job| job.id == *job_id) else {
+//RS             return Err(MirWebError::InvalidMir {
+//RS                 message: format!(
+//RS                     "MIR WebApplication artifact {} references missing job {} while encoding its command record",
+//RS                     artifact.id.0, job_id.0
+//RS                 ),
+//RS             });
+//RS         };
+//RS         jobs.push(job.clone());
+//RS     }
+//RS     Ok(jet_foundation::CLISchema::encode_mir_record(
+//RS         entry_type,
+//RS         description,
+//RS         standard,
+//RS         version,
+//RS         inputs,
+//RS         commands,
+//RS         &jobs,
+//RS     ))
+//RS }
+//RS 
+//RS fn function_in_bucket(function: &MirFunction, bucket: WebBucket) -> bool {
+//RS     function.web_bucket == Some(bucket)
+//RS }
+//RS 
+//RS fn is_wasm_export(function: &MirFunction) -> bool {
+//RS     match function.web_marker {
+//RS         Some(WebPartitionMarker::WasmExport) => true,
+//RS         Some(WebPartitionMarker::JS) | Some(WebPartitionMarker::Wasm) | None => false,
+//RS     }
+//RS }
+//RS 
+//RS fn optional_web_bucket(bucket: Option<WebBucket>) -> String {
+//RS     match bucket {
+//RS         Some(WebBucket::JS) => json_string("JS"),
+//RS         Some(WebBucket::Wasm) => json_string("Wasm"),
+//RS         None => "null".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn optional_web_marker(marker: Option<WebPartitionMarker>) -> String {
+//RS     match marker {
+//RS         Some(WebPartitionMarker::JS) => json_string("JS"),
+//RS         Some(WebPartitionMarker::Wasm) => json_string("Wasm"),
+//RS         Some(WebPartitionMarker::WasmExport) => json_string("WasmExport"),
+//RS         None => "null".to_string(),
+//RS     }
+//RS }
+//RS fn js_call_values(
+//RS     program: &MirProgram,
+//RS     function: &MirFunction,
+//RS     args: &[jet_foundation::MIR::MirCallArg],
+//RS     write_alias: bool,
+//RS ) -> Result<Vec<String>, MirWebError> {
+//RS     args.iter()
+//RS         .map(|arg| js_call_arg_value(program, function, arg, write_alias))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn js_call_arg_value(
+//RS     program: &MirProgram,
+//RS     function: &MirFunction,
+//RS     arg: &jet_foundation::MIR::MirCallArg,
+//RS     write_alias: bool,
+//RS ) -> Result<String, MirWebError> {
+//RS     let ty = mir_function_value_type(function, arg.value)?;
+//RS     let source = match arg.access {
+//RS         MirAccess::Move => js_move_value_expression(arg.value),
+//RS         MirAccess::Read => match arg.place {
+//RS             Some(place) => js_read_place_storage_expression(program, function, place)?,
+//RS             None => format!("__jet_values.get({})", arg.value.0),
+//RS         },
+//RS         MirAccess::Write => {
+//RS             let Some(place) = arg.place else {
+//RS                 return Err(MirWebError::InvalidMir {
+//RS                     message: format!(
+//RS                         "MIR Web write call argument {} has no checked place",
+//RS                         arg.value.0
+//RS                     ),
+//RS                 });
+//RS             };
+//RS             if write_alias {
+//RS                 format!(
+//RS                     "jet_web_write_arg({})",
+//RS                     js_place_cell_expression(program, function, place)?
+//RS                 )
+//RS             } else {
+//RS                 js_read_place_storage_expression(program, function, place)?
+//RS             }
+//RS         }
+//RS     };
+//RS     let mut value = if matches!(arg.access, MirAccess::Read)
+//RS         && !arg.implicit_clone
+//RS         && !arg.shared_auto_clone
+//RS     {
+//RS         js_copy_expression(program, ty, source)
+//RS     } else {
+//RS         source
+//RS     };
+//RS     if arg.implicit_clone || arg.shared_auto_clone {
+//RS         let copy_source = if arg.access == MirAccess::Write && write_alias {
+//RS             format!("jet_web_call_arg_value({value})")
+//RS         } else {
+//RS             value
+//RS         };
+//RS         value = js_copy_expression(program, ty, copy_source);
+//RS     }
+//RS     if let Some(coercion) = &arg.fn_coercion {
+//RS         if let Some(type_id) = coercion.ty.identity {
+//RS             ensure_type_instance(program, type_id)?;
+//RS         }
+//RS         // JavaScript function values already use the canonical callable ABI;
+//RS         // native boxing/coercion does not require a second representation.
+//RS     }
+//RS     if arg.widen_fixed_to_list {
+//RS         value = format!("Array.from({})", value);
+//RS     }
+//RS     if let Some(coercion) = &arg.widen_to_union {
+//RS         ensure_type_instance(program, coercion.union)?;
+//RS         let Some(type_def) = program.types.iter().find(|type_def| type_def.id == coercion.union) else {
+//RS             return Err(MirWebError::InvalidMir {
+//RS                 message: format!(
+//RS                     "MIR call argument {} widens to missing union type {}",
+//RS                     arg.value.0, coercion.union.0
+//RS                 ),
+//RS             });
+//RS         };
+//RS         match &type_def.kind {
+//RS             MirTypeDefKind::Enum { variants, .. } if variants.iter().any(|variant| variant.name == coercion.variant) => {}
+//RS             MirTypeDefKind::Enum { .. } => {
+//RS                 return Err(MirWebError::InvalidMir {
+//RS                     message: format!(
+//RS                         "MIR call argument {} widens to union {} with missing variant {}",
+//RS                         arg.value.0, coercion.union.0, coercion.variant
+//RS                     ),
+//RS                 });
+//RS             }
+//RS             MirTypeDefKind::Struct { .. }
+//RS             | MirTypeDefKind::Distinct { .. }
+//RS             | MirTypeDefKind::Alias { .. }
+//RS             | MirTypeDefKind::UnitFamily { .. } => {
+//RS                 return Err(MirWebError::InvalidMir {
+//RS                     message: format!(
+//RS                         "MIR call argument {} widens to non-enum union type {}",
+//RS                         arg.value.0, coercion.union.0
+//RS                     ),
+//RS                 });
+//RS             }
+//RS         }
+//RS         value = format!(
+//RS             "{{ tag: {}, values: [{}] }}",
+//RS             js_string(&coercion.variant),
+//RS             value
+//RS         );
+//RS     }
+//RS     match arg.box_as_trait {
+//RS         Some(_) => {
+//RS             // Canonical Web trait values are already their concrete JS objects.
+//RS         }
+//RS         None => {}
+//RS     }
+//RS     if arg.spread {
+//RS         Ok(format!("...{}", value))
+//RS     } else {
+//RS         Ok(value)
+//RS     }
+//RS }
+//RS 
+//RS fn type_descriptor(ty: &MirType) -> String {
+//RS     format!(
+//RS         "{}:abi={},size={},align={}",
+//RS         ty.name(),
+//RS         mir_abi_descriptor(ty.layout.abi),
+//RS         mir_size_descriptor(ty.layout.size),
+//RS         mir_size_descriptor(ty.layout.align)
+//RS     )
+//RS }
+//RS 
+//RS fn mir_abi_descriptor(abi: jet_foundation::MIR::MirAbi) -> String {
+//RS     match abi {
+//RS         jet_foundation::MIR::MirAbi::Scalar(kind) => {
+//RS             format!("scalar-{}", mir_scalar_kind_descriptor(kind))
+//RS         }
+//RS         jet_foundation::MIR::MirAbi::Aggregate => "aggregate".to_string(),
+//RS         jet_foundation::MIR::MirAbi::Sequence => "sequence".to_string(),
+//RS         jet_foundation::MIR::MirAbi::Function => "function".to_string(),
+//RS         jet_foundation::MIR::MirAbi::Nominal => "nominal".to_string(),
+//RS         jet_foundation::MIR::MirAbi::Dynamic => "dynamic".to_string(),
+//RS         jet_foundation::MIR::MirAbi::Never => "never".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn mir_scalar_kind_descriptor(kind: jet_foundation::MIR::MirScalarKind) -> &'static str {
+//RS     match kind {
+//RS         jet_foundation::MIR::MirScalarKind::Int => "int",
+//RS         jet_foundation::MIR::MirScalarKind::Float => "float",
+//RS         jet_foundation::MIR::MirScalarKind::Float32 => "float32",
+//RS         jet_foundation::MIR::MirScalarKind::Bool => "bool",
+//RS         jet_foundation::MIR::MirScalarKind::Char => "char",
+//RS         jet_foundation::MIR::MirScalarKind::Pointer => "pointer",
+//RS     }
+//RS }
+//RS 
+//RS fn mir_size_descriptor(size: jet_foundation::MIR::MirSize) -> String {
+//RS     match size {
+//RS         jet_foundation::MIR::MirSize::Static(bytes) => format!("static-{}", bytes),
+//RS         jet_foundation::MIR::MirSize::Dynamic => "dynamic".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn mir_int_width_descriptor(width: Option<(bool, u8)>) -> String {
+//RS     match width {
+//RS         Some((signed, bits)) => format!("{}-{}", if signed { "signed" } else { "unsigned" }, bits),
+//RS         None => "unspecified".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn mir_char_descriptor(value: char) -> String {
+//RS     value.escape_default().collect()
+//RS }
+//RS 
+//RS fn mir_bytes_descriptor(value: &[u8]) -> String {
+//RS     value.iter().map(|byte| format!("{byte:02x}")).collect::<Vec<_>>().join("")
+//RS }
+//RS 
+//RS fn mir_float_descriptor(value: f64, is_f32: bool) -> String {
+//RS     if is_f32 {
+//RS         format!("{}", value as f32)
+//RS     } else {
+//RS         value.to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn js_string(value: &str) -> String {
+//RS     format!("\"{}\"", escape_string(value))
+//RS }
+//RS 
+//RS fn json_string(value: &str) -> String {
+//RS     format!("\"{}\"", escape_string(value))
+//RS }
+//RS 
+//RS fn escape_string(value: &str) -> String {
+//RS     let mut out = String::new();
+//RS     for ch in value.chars() {
+//RS         match ch {
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '"' => out.push_str("\\\""),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '\r' => out.push_str("\\r"),
+//RS             '\t' => out.push_str("\\t"),
+//RS             '\u{08}' => out.push_str("\\b"),
+//RS             '\u{0c}' => out.push_str("\\f"),
+//RS             c if c.is_control() => write!(out, "\\u{:04x}", c as u32).unwrap(),
+//RS             c => out.push(c),
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn default_index_html() -> String {
+//RS     "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Jet app</title></head><body><script type=\"module\" src=\"./app.js\"></script></body></html>\n".to_string()
+//RS }
+//RS 
+//RS fn constant_descriptor(constant: &MirConstant) -> String {
+//RS     match constant {
+//RS         MirConstant::Int { value, width, spelling } => {
+//RS             format!(
+//RS                 "int:{}:{}:{}",
+//RS                 value,
+//RS                 mir_int_width_descriptor(*width),
+//RS                 spelling.as_deref().unwrap_or("")
+//RS             )
+//RS         }
+//RS         MirConstant::Float { value, f32, spelling } => {
+//RS             format!(
+//RS                 "float:{}:{}:{}",
+//RS                 mir_float_descriptor(*value, *f32),
+//RS                 f32,
+//RS                 spelling.as_deref().unwrap_or("")
+//RS             )
+//RS         }
+//RS         MirConstant::Bool(value) => format!("bool:{value}"),
+//RS         MirConstant::Char(value) => format!("char:{}", mir_char_descriptor(*value)),
+//RS         MirConstant::String(value) => format!("string:{value}"),
+//RS         MirConstant::Bytes(value) => format!("bytes:{}", mir_bytes_descriptor(value)),
+//RS         MirConstant::Unit => "unit".to_string(),
+//RS         MirConstant::BigInt(value) => format!("bigint:{value}"),
+//RS         MirConstant::List(values) => format!(
+//RS             "list:{}",
+//RS             values.iter().map(constant_descriptor).collect::<Vec<_>>().join(",")
+//RS         ),
+//RS         MirConstant::Map(values) => format!(
+//RS             "map:{}",
+//RS             values
+//RS                 .iter()
+//RS                 .map(|(key, value)| format!("{}={}", const_key_descriptor(key), constant_descriptor(value)))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         ),
+//RS         MirConstant::Struct { type_name, fields } => format!(
+//RS             "struct:{type_name}:{}",
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(name, value)| format!("{name}={}", constant_descriptor(value)))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         ),
+//RS         MirConstant::Enum { type_name, variant, args } => format!(
+//RS             "enum:{type_name}:{variant}:{}",
+//RS             args.iter()
+//RS                 .map(|(name, value)| format!(
+//RS                     "{}={}",
+//RS                     name.as_deref().unwrap_or(""),
+//RS                     constant_descriptor(value)
+//RS                 ))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         ),
+//RS         MirConstant::Present(value) => format!("present:{}", constant_descriptor(value)),
+//RS         MirConstant::Failed(report) => format!("failed:{}", const_report_descriptor(report)),
+//RS     }
+//RS }
+//RS 
+//RS fn const_report_descriptor(report: &MirConstReport) -> String {
+//RS     match report {
+//RS         MirConstReport::Clean(ty) => format!("clean:{}", ty.identity_key()),
+//RS         MirConstReport::Told(value) => format!("told:{}", constant_descriptor(value)),
+//RS     }
+//RS }
+//RS 
+//RS fn const_key_descriptor(key: &MirConstKey) -> String {
+//RS     match key {
+//RS         MirConstKey::Int(value) => format!("int:{value}"),
+//RS         MirConstKey::String(value) => format!("string:{value}"),
+//RS         MirConstKey::Bool(value) => format!("bool:{value}"),
+//RS         MirConstKey::Char(value) => format!("char:{}", mir_char_descriptor(*value)),
+//RS         MirConstKey::Tuple(values) => format!(
+//RS             "tuple:{}",
+//RS             values
+//RS                 .iter()
+//RS                 .map(|(name, key)| format!("{name}={}", const_key_descriptor(key)))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         ),
+//RS         MirConstKey::Struct { type_name, fields } => format!(
+//RS             "struct:{type_name}:{}",
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(name, key)| format!("{name}={}", const_key_descriptor(key)))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         ),
+//RS         MirConstKey::Enum { type_name, variant } => format!("enum:{type_name}:{variant}"),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS fn layout_compare_code(op: MirLayoutCompareOp) -> u8 {
+//RS     match op { MirLayoutCompareOp::Equal => 0, MirLayoutCompareOp::LessEqual => 1, MirLayoutCompareOp::GreaterEqual => 2 }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS fn task_group_code(kind: MirTaskGroupKind) -> u8 {
+//RS     match kind { MirTaskGroupKind::All => 0, MirTaskGroupKind::Any => 1, MirTaskGroupKind::Race => 2 }
+//RS }
+//RS 
+//RS fn select_code(kind: MirSelectKind) -> u8 {
+//RS     match kind { MirSelectKind::Start => 0, MirSelectKind::Receive => 1, MirSelectKind::After => 2, MirSelectKind::Wait => 3 }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS fn js_string_part(part: &MirStringPart) -> String {
+//RS     match part {
+//RS         MirStringPart::Literal(value) => js_string(value),
+//RS         MirStringPart::Value(value) => format!("__jet_values.get({})", value.0),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS fn type_def_kind_descriptor(kind: &MirTypeDefKind) -> String {
+//RS     match kind {
+//RS         MirTypeDefKind::Struct { fields, methods } => {
+//RS             format!("struct:fields={}:methods={}", fields.len(), methods.len())
+//RS         }
+//RS         MirTypeDefKind::Enum { variants, methods } => {
+//RS             format!("enum:variants={}:methods={}", variants.len(), methods.len())
+//RS         }
+//RS         MirTypeDefKind::Distinct { base, range } => {
+//RS             format!("distinct:{}:range={}", type_descriptor(base), mir_range_descriptor(*range))
+//RS         }
+//RS         MirTypeDefKind::Alias { target } => format!("alias:{}", type_descriptor(target)),
+//RS         MirTypeDefKind::UnitFamily { members } => format!("unit-family:{}", members.join(",")),
+//RS     }
+//RS }
+//RS 
+//RS fn mir_range_descriptor(range: Option<(i64, i64)>) -> String {
+//RS     range
+//RS         .map(|(lo, hi)| format!("{}..{}", lo, hi))
+//RS         .unwrap_or_else(|| "none".to_string())
+//RS }
+//RS 
+//RS fn function_kind_descriptor(kind: MirFunctionKind) -> &'static str {
+//RS     match kind {
+//RS         MirFunctionKind::Jet => "jet",
+//RS         MirFunctionKind::Foreign => "foreign",
+//RS         MirFunctionKind::Test => "test",
+//RS     }
+//RS }
+//RS 
+//RS fn visibility_descriptor(visibility: MirVisibility) -> &'static str {
+//RS     match visibility {
+//RS         MirVisibility::Private => "private",
+//RS         MirVisibility::Package => "package",
+//RS         MirVisibility::Public => "public",
+//RS     }
+//RS }
+//RS 
+//RS fn core_symbol(symbol: jet_foundation::Syntax::CoreCallSymbol) -> &'static str {
+//RS     match symbol {
+//RS         jet_foundation::Syntax::CoreCallSymbol::Prelude(name) => name,
+//RS         jet_foundation::Syntax::CoreCallSymbol::Rust(name) => name,
+//RS     }
+//RS }
+//RS 
+//RS fn prelude_family_descriptor(family: MirPreludeFamily) -> &'static str {
+//RS     match family {
+//RS         MirPreludeFamily::MathBuiltin => "math-builtin",
+//RS         MirPreludeFamily::PreciseBuiltin => "precise-builtin",
+//RS         MirPreludeFamily::BuiltinMethod => "builtin-method",
+//RS         MirPreludeFamily::HostBorrowCallback => "host-borrow-callback",
+//RS         MirPreludeFamily::Overflow => "overflow",
+//RS         MirPreludeFamily::HandleMethod => "handle-method",
+//RS         MirPreludeFamily::ClosureMethod => "closure-method",
+//RS         MirPreludeFamily::ColumnarAccess => "columnar-access",
+//RS         MirPreludeFamily::StaticPrelude => "static-prelude",
+//RS         MirPreludeFamily::Host => "host",
+//RS     }
+//RS }
+//RS 
+//RS fn prelude_abi_descriptor(abi: MirPreludeAbi) -> &'static str {
+//RS     match abi {
+//RS         MirPreludeAbi::Value => "value",
+//RS         MirPreludeAbi::Aggregate => "aggregate",
+//RS         MirPreludeAbi::Control => "control",
+//RS         MirPreludeAbi::Effect => "effect",
+//RS     }
+//RS }
+//RS 
+//RS fn core_call_fallibility_descriptor(
+//RS     value: jet_foundation::Syntax::CoreCallFallibility,
+//RS ) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::Syntax::CoreCallFallibility::Sema => "sema",
+//RS     }
+//RS }
+//RS 
+//RS fn optional_effect_descriptor(
+//RS     value: Option<&jet_foundation::Authority::Effect>,
+//RS ) -> String {
+//RS     value
+//RS         .map(|value| json_string(effect_descriptor(*value)))
+//RS         .unwrap_or_else(|| "null".to_string())
+//RS }
+//RS 
+//RS fn effect_descriptor(value: jet_foundation::Authority::Effect) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::Authority::Effect::Net => "net",
+//RS         jet_foundation::Authority::Effect::FS => "fs",
+//RS         jet_foundation::Authority::Effect::IO => "io",
+//RS         jet_foundation::Authority::Effect::DB => "db",
+//RS         jet_foundation::Authority::Effect::Time => "time",
+//RS         jet_foundation::Authority::Effect::Rand => "rand",
+//RS         jet_foundation::Authority::Effect::Env => "env",
+//RS         jet_foundation::Authority::Effect::Exec => "exec",
+//RS         jet_foundation::Authority::Effect::Log => "log",
+//RS         jet_foundation::Authority::Effect::GPU => "gpu",
+//RS         jet_foundation::Authority::Effect::Panic => "panic",
+//RS         jet_foundation::Authority::Effect::FFI => "ffi",
+//RS         jet_foundation::Authority::Effect::Browser => "browser",
+//RS         jet_foundation::Authority::Effect::Secret => "secret",
+//RS         jet_foundation::Authority::Effect::Mem => "mem",
+//RS     }
+//RS }
+//RS 
+//RS fn core_call_pure_route_descriptor(
+//RS     value: jet_foundation::Syntax::CoreCallPureRoute,
+//RS ) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::Syntax::CoreCallPureRoute::None => "none",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::Mime => "mime",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::Email => "email",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::EncodingXml => "encoding-xml",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::Time => "time",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::Math => "math",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::Measurement => "measurement",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::Date => "date",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::DateTime => "date-time",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::SketchHll => "sketch-hll",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::SketchTDigest => "sketch-t-digest",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::SketchCms => "sketch-cms",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::SketchReservoir => "sketch-reservoir",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::Ui => "ui",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::Raylib => "raylib",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::Io => "io",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::Net => "net",
+//RS         jet_foundation::Syntax::CoreCallPureRoute::Crypto => "crypto",
+//RS     }
+//RS }
+//RS 
+//RS fn core_call_interpreter_route_descriptor(
+//RS     value: jet_foundation::Syntax::CoreCallInterpreterRoute,
+//RS ) -> String {
+//RS     match value {
+//RS         jet_foundation::Syntax::CoreCallInterpreterRoute::None => "none".to_string(),
+//RS         jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(route) => {
+//RS             format!("pure-{}", core_call_pure_route_descriptor(route))
+//RS         }
+//RS         jet_foundation::Syntax::CoreCallInterpreterRoute::Ambient => "ambient".to_string(),
+//RS         jet_foundation::Syntax::CoreCallInterpreterRoute::TypedIntrinsic => {
+//RS             "typed-intrinsic".to_string()
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn item_ref_descriptor(item: jet_foundation::MIR::MirItemRef) -> String {
+//RS     match item {
+//RS         jet_foundation::MIR::MirItemRef::Type(id) => format!("type:{}", id.0),
+//RS         jet_foundation::MIR::MirItemRef::Trait(id) => format!("trait:{}", id.0),
+//RS         jet_foundation::MIR::MirItemRef::Function(id) => format!("function:{}", id.0),
+//RS         jet_foundation::MIR::MirItemRef::Constant(id) => format!("constant:{}", id.0),
+//RS         jet_foundation::MIR::MirItemRef::Impl(id) => format!("impl:{}", id.0),
+//RS         jet_foundation::MIR::MirItemRef::Foreign(id) => format!("foreign:{}", id.0),
+//RS         jet_foundation::MIR::MirItemRef::Import(id) => format!("import:{}", id.0),
+//RS     }
+//RS }
+//RS 
+//RS fn import_kind_descriptor(kind: &jet_foundation::MIR::MirImportKind) -> String {
+//RS     match kind {
+//RS         jet_foundation::MIR::MirImportKind::File { path } => format!("file:{path}"),
+//RS         jet_foundation::MIR::MirImportKind::Module { path } => format!("module:{path}"),
+//RS         jet_foundation::MIR::MirImportKind::Unqualified { module, items } => format!(
+//RS             "unqualified:module={}:items={}",
+//RS             module.0,
+//RS             items
+//RS                 .iter()
+//RS                 .map(|item| format!(
+//RS                     "{}:{}:{}",
+//RS                     item.original,
+//RS                     item.local,
+//RS                     item_ref_descriptor(item.item)
+//RS                 ))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn optional_serde_codec_descriptor(
+//RS     value: Option<&jet_foundation::MIR::MirSerdeCodec>,
+//RS ) -> String {
+//RS     value
+//RS         .map(|value| json_string(serde_codec_descriptor(*value)))
+//RS         .unwrap_or_else(|| "null".to_string())
+//RS }
+//RS 
+//RS fn serde_codec_descriptor(value: jet_foundation::MIR::MirSerdeCodec) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::MIR::MirSerdeCodec::Encode => "encode",
+//RS         jet_foundation::MIR::MirSerdeCodec::Decode => "decode",
+//RS     }
+//RS }
+//RS 
+//RS fn job_scope_descriptor(value: jet_foundation::MIR::MirJobScope) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::MIR::MirJobScope::Dev => "dev",
+//RS         jet_foundation::MIR::MirJobScope::Ship => "ship",
+//RS         jet_foundation::MIR::MirJobScope::Internal => "internal",
+//RS     }
+//RS }
+//RS 
+//RS fn job_schedule_descriptor(value: &jet_foundation::MIR::MirJobSchedule) -> String {
+//RS     match value {
+//RS         jet_foundation::MIR::MirJobSchedule::Duration { nanos } => {
+//RS             format!("duration:{nanos}")
+//RS         }
+//RS         jet_foundation::MIR::MirJobSchedule::WallClockTime { hour, minute } => {
+//RS             format!("wall-clock-time:{hour:02}:{minute:02}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn optional_job_schedule_descriptor(
+//RS     value: Option<&jet_foundation::MIR::MirJobSchedule>,
+//RS ) -> String {
+//RS     value
+//RS         .map(|value| json_string(&job_schedule_descriptor(value)))
+//RS         .unwrap_or_else(|| "null".to_string())
+//RS }
+//RS 
+//RS fn job_dispatch_descriptor(value: jet_foundation::MIR::MirJobDispatch) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::MIR::MirJobDispatch::Direct => "direct",
+//RS         jet_foundation::MIR::MirJobDispatch::Spawn => "spawn",
+//RS         jet_foundation::MIR::MirJobDispatch::Scheduled => "scheduled",
+//RS     }
+//RS }
+//RS 
+//RS fn job_skip_descriptor(value: &jet_foundation::MIR::MirJobSkip) -> String {
+//RS     match value {
+//RS         jet_foundation::MIR::MirJobSkip::Always(condition) => format!("always:{condition}"),
+//RS         jet_foundation::MIR::MirJobSkip::UnlessPlatform(platform) => {
+//RS             format!("unless-platform:{platform}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn optional_job_skip_descriptor(value: Option<&jet_foundation::MIR::MirJobSkip>) -> String {
+//RS     value
+//RS         .map(|value| json_string(&job_skip_descriptor(value)))
+//RS         .unwrap_or_else(|| "null".to_string())
+//RS }
+//RS 
+//RS fn job_cache_policy_descriptor(value: jet_foundation::MIR::MirJobCachePolicy) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::MIR::MirJobCachePolicy::Uncached => "uncached",
+//RS         jet_foundation::MIR::MirJobCachePolicy::Local => "local",
+//RS         jet_foundation::MIR::MirJobCachePolicy::Shared => "shared",
+//RS     }
+//RS }
+//RS 
+//RS fn job_limits_descriptor(limits: &BTreeMap<String, String>) -> String {
+//RS     limits
+//RS         .iter()
+//RS         .map(|(key, value)| format!("{key}={value}"))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",")
+//RS }
+//RS 
+//RS fn harness_kind_descriptor(value: jet_foundation::MIR::MirHarnessKind) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::MIR::MirHarnessKind::Test => "test",
+//RS         jet_foundation::MIR::MirHarnessKind::Fuzz => "fuzz",
+//RS         jet_foundation::MIR::MirHarnessKind::Coverage => "coverage",
+//RS     }
+//RS }
+//RS 
+//RS fn runtime_part_descriptor(value: jet_foundation::MIR::MirRuntimePartId) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::MIR::MirRuntimePartId::Gc => "gc",
+//RS         jet_foundation::MIR::MirRuntimePartId::Event => "event",
+//RS         jet_foundation::MIR::MirRuntimePartId::Realtime => "realtime",
+//RS         jet_foundation::MIR::MirRuntimePartId::EmbeddedHardware => "embedded-hardware",
+//RS         jet_foundation::MIR::MirRuntimePartId::Ui => "ui",
+//RS         jet_foundation::MIR::MirRuntimePartId::Devtools => "devtools",
+//RS         jet_foundation::MIR::MirRuntimePartId::Gtk => "gtk",
+//RS         jet_foundation::MIR::MirRuntimePartId::Apps => "apps",
+//RS         jet_foundation::MIR::MirRuntimePartId::Email => "email",
+//RS         jet_foundation::MIR::MirRuntimePartId::Game => "game",
+//RS         jet_foundation::MIR::MirRuntimePartId::Files => "files",
+//RS         jet_foundation::MIR::MirRuntimePartId::Interrupt => "interrupt",
+//RS         jet_foundation::MIR::MirRuntimePartId::FsRuntime => "fs-runtime",
+//RS         jet_foundation::MIR::MirRuntimePartId::Process => "process",
+//RS         jet_foundation::MIR::MirRuntimePartId::Crypto => "crypto",
+//RS         jet_foundation::MIR::MirRuntimePartId::Math => "math",
+//RS         jet_foundation::MIR::MirRuntimePartId::Encoding => "encoding",
+//RS         jet_foundation::MIR::MirRuntimePartId::Data => "data",
+//RS         jet_foundation::MIR::MirRuntimePartId::Fmt => "fmt",
+//RS         jet_foundation::MIR::MirRuntimePartId::DataFmt => "data-fmt",
+//RS         jet_foundation::MIR::MirRuntimePartId::Compute => "compute",
+//RS         jet_foundation::MIR::MirRuntimePartId::Http => "http",
+//RS         jet_foundation::MIR::MirRuntimePartId::WebSocket => "web-socket",
+//RS         jet_foundation::MIR::MirRuntimePartId::Browser => "browser",
+//RS         jet_foundation::MIR::MirRuntimePartId::Args => "args",
+//RS         jet_foundation::MIR::MirRuntimePartId::Reflect => "reflect",
+//RS         jet_foundation::MIR::MirRuntimePartId::AuthTokens => "auth-tokens",
+//RS         jet_foundation::MIR::MirRuntimePartId::AuthSession => "auth-session",
+//RS         jet_foundation::MIR::MirRuntimePartId::Sync => "sync",
+//RS         jet_foundation::MIR::MirRuntimePartId::Services => "services",
+//RS         jet_foundation::MIR::MirRuntimePartId::Mod => "mod",
+//RS     }
+//RS }
+//RS 
+//RS fn foreign_abi_descriptor(abi: &MirForeignAbi) -> String {
+//RS     match abi {
+//RS         MirForeignAbi::C => "c".to_string(),
+//RS         MirForeignAbi::CUnwind => "c-unwind".to_string(),
+//RS         MirForeignAbi::System => "system".to_string(),
+//RS         MirForeignAbi::Stdcall => "stdcall".to_string(),
+//RS         MirForeignAbi::Fastcall => "fastcall".to_string(),
+//RS         MirForeignAbi::Vectorcall => "vectorcall".to_string(),
+//RS         MirForeignAbi::Rust => "rust".to_string(),
+//RS         MirForeignAbi::Platform(name) => format!("platform:{name}"),
+//RS     }
+//RS }
+//RS 
+//RS fn entry_kind_descriptor(value: jet_foundation::MIR::MirEntryKind) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::MIR::MirEntryKind::Library => "library",
+//RS         jet_foundation::MIR::MirEntryKind::Command => "command",
+//RS         jet_foundation::MIR::MirEntryKind::App => "app",
+//RS         jet_foundation::MIR::MirEntryKind::Service => "service",
+//RS         jet_foundation::MIR::MirEntryKind::Test => "test",
+//RS     }
+//RS }
+//RS 
+//RS fn entry_output_descriptor(value: jet_foundation::MIR::MirEntryOutput) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::MIR::MirEntryOutput::None => "none",
+//RS         jet_foundation::MIR::MirEntryOutput::ReturnValue => "return-value",
+//RS         jet_foundation::MIR::MirEntryOutput::StandardOutput => "standard-output",
+//RS         jet_foundation::MIR::MirEntryOutput::ExitStatus => "exit-status",
+//RS     }
+//RS }
+//RS 
+//RS fn cli_value_kind_descriptor(value: jet_foundation::MIR::MirCliValueKind) -> &'static str {
+//RS     match value {
+//RS         jet_foundation::MIR::MirCliValueKind::Bool => "bool",
+//RS         jet_foundation::MIR::MirCliValueKind::Int => "int",
+//RS         jet_foundation::MIR::MirCliValueKind::Float => "float",
+//RS         jet_foundation::MIR::MirCliValueKind::String => "string",
+//RS         jet_foundation::MIR::MirCliValueKind::Path => "path",
+//RS     }
+//RS }
+//RS 
+//RS fn access_descriptor(value: MirAccess) -> &'static str {
+//RS     match value {
+//RS         MirAccess::Read => "read",
+//RS         MirAccess::Write => "write",
+//RS         MirAccess::Move => "move",
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn json_reconstructions(reconstructions: &[jet_foundation::MIR::MirWebParamReconstruction]) -> String {
+//RS     let rows = reconstructions.iter().map(|reconstruction| {
+//RS         let fields = reconstruction.fields.iter().map(|field| format!("{{\"field\":{},\"parameter\":{},\"type\":{}}}", json_string(&field.field), json_string(&field.parameter), json_string(&type_descriptor(&field.ty)))).collect::<Vec<_>>().join(",");
+//RS         format!("{{\"local\":{},\"type\":{},\"fields\":[{}]}}", json_string(&reconstruction.local), json_string(&type_descriptor(&reconstruction.ty)), fields)
+//RS     }).collect::<Vec<_>>().join(",");
+//RS     format!("[{rows}]")
+//RS }
+// END-PORT-PENDING 0465 crates/jet-codegen/src/Codegen/MIRWeb.rs:7113-8398
+

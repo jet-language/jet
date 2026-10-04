@@ -1,0 +1,920 @@
+// PORT-PENDING 1048 tests-event-observations-module-group: tests/event_observations.rs:1-509
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #286: real Event/AsyncEvent/DecisionHook runtime observations consumed by
+//RS //! the debugger. These tests attach to generated programs; no source scan can
+//RS //! satisfy them.
+//RS 
+//RS use std::fs;
+//RS use std::io::{BufRead, BufReader};
+//RS use std::process::{Child, Command, Stdio};
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS struct Running {
+//RS     child: Child,
+//RS     dir: std::path::PathBuf,
+//RS }
+//RS 
+//RS impl Drop for Running {
+//RS     fn drop(&mut self) {
+//RS         let pid = self.child.id();
+//RS         let _ = self.child.kill();
+//RS         let _ = self.child.wait();
+//RS         let _ = fs::remove_file(jet::DevServer::LiveInspect::snapshot_path(pid));
+//RS         let _ = fs::remove_dir_all(&self.dir);
+//RS     }
+//RS }
+//RS 
+//RS fn spawn_observed(tag: &str, source: &str) -> Option<Running> {
+//RS     if !common::have_rustc() {
+//RS         return None;
+//RS     }
+//RS     let dir = common::unique_tmp(&format!("jet_event_observe_{tag}"));
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Panic, Time, Time.Wait]\n    }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let source_path = dir.join("main.jet");
+//RS     fs::write(&source_path, source).unwrap();
+//RS     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["build", source_path.to_str().unwrap()])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "build failed:\n{}",
+//RS         String::from_utf8_lossy(&build.stderr)
+//RS     );
+//RS     let binary = dir
+//RS         .join(".jet")
+//RS         .join("build")
+//RS         .join(format!("main{}", std::env::consts::EXE_SUFFIX));
+//RS     let mut child = Command::new(binary)
+//RS         .env("JET_OBSERVE", "1")
+//RS         .env("JET_DEVTOOLS_RELAY_SESSION_ID", "event-observation-session")
+//RS         .env("JET_DEVTOOLS_RELAY_SOURCE_ID", "observed")
+//RS         .env("JET_DEVTOOLS_RELAY_BUILD_ID", "event-observation-build")
+//RS         .env("JET_DEVTOOLS_RELAY_REVISION", "event-observation-revision")
+//RS         .env("JET_DEVTOOLS_RELAY_WORLD_ID", "event-observation-world")
+//RS         .env("JET_SCHEDULER_THREADS", "2")
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS     let mut ready = String::new();
+//RS     BufReader::new(child.stdout.take().unwrap())
+//RS         .read_line(&mut ready)
+//RS         .unwrap();
+//RS     if ready.trim() != "READY" {
+//RS         let stderr = child
+//RS             .stderr
+//RS             .take()
+//RS             .map(|stream| {
+//RS                 let mut text = String::new();
+//RS                 let _ = BufReader::new(stream).read_line(&mut text);
+//RS                 text
+//RS             })
+//RS             .unwrap_or_default();
+//RS         panic!("observed program did not become ready: {ready:?} {stderr}");
+//RS     }
+//RS     Some(Running { child, dir })
+//RS }
+//RS 
+//RS fn debugger_events(pid: u32, terminal: &str) -> (String, String) {
+//RS     let deadline = Instant::now() + Duration::from_secs(5);
+//RS     let mut last = String::new();
+//RS     loop {
+//RS         if let Ok(snapshot) = jet::DevServer::LiveInspect::read(pid) {
+//RS             if snapshot.contains(terminal) {
+//RS                 let rendered = jet::Debug::render_event_observations(&snapshot)
+//RS                     .expect("debugger should consume the runtime event schema");
+//RS                 return (snapshot, rendered);
+//RS             }
+//RS             last = snapshot;
+//RS         }
+//RS         if Instant::now() >= deadline {
+//RS             let rendered = jet::Debug::render_event_observations(&last).unwrap_or_default();
+//RS             panic!("runtime event observation never became visible:\n{rendered}");
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(25));
+//RS     }
+//RS }
+//RS 
+//RS fn canvas_runtime(running: &Running) -> String {
+//RS     let graph = jet::Canvas::graph_json_for_entry_source_with_live_pid(
+//RS         &running.dir.join("main.jet"),
+//RS         None,
+//RS         running.child.id(),
+//RS     )
+//RS     .expect("Canvas should project the validated live Event sequence");
+//RS     graph
+//RS         .split_once("\"runtime_events\":")
+//RS         .and_then(|(_, tail)| tail.split_once(",\"event_dispatchers\""))
+//RS         .map(|(runtime, _)| runtime.to_string())
+//RS         .expect("Canvas runtime event facts")
+//RS }
+//RS 
+//RS #[test]
+//RS fn debugger_sees_only_executed_redacted_sync_and_hook_facts() {
+//RS     let Some(running) = spawn_observed(
+//RS         "sync_hook",
+//RS         r#"
+//RS use core.event as event
+//RS use core.time as time
+//RS 
+//RS fn run() {
+//RS     scope :: event.scope()
+//RS     executed :: event.new<String>()
+//RS     executed.on_priority(scope, 17, (secret: String) -> {})
+//RS     never_called :: event.new<String>()
+//RS     if false { &never_called.emit("UNEXECUTED_SECRET") }
+//RS     &executed.emit("SYNC_PAYLOAD_SECRET")
+//RS 
+//RS     hook :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+//RS     hook.on_priority(scope, 9, (secret: String) -> HookDecision.Fail("HOOK_FAILURE_SECRET"))
+//RS     hook.run("HOOK_PAYLOAD_SECRET")
+//RS 
+//RS     direct_scope :: event.scope()
+//RS     direct :: event.new<Int>()
+//RS     direct_sub :: direct.on(direct_scope, (n: Int) -> {})
+//RS     direct_sub.unsubscribe()
+//RS 
+//RS     once_scope :: event.scope()
+//RS     once_event :: event.new<Int>()
+//RS     once_event.once(once_scope, (n: Int) -> {})
+//RS     &once_event.emit(1)
+//RS     &once_event.emit(2)
+//RS 
+//RS     cancel_scope :: event.scope()
+//RS     cancel_hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+//RS     cancel_hook.on(cancel_scope, (n: Int) -> HookDecision.Continue)
+//RS     cancel_scope.cancel()
+//RS 
+//RS     rejected_scope :: event.scope()
+//RS     rejected_scope.cancel()
+//RS     rejected_event :: event.new<Int>()
+//RS     rejected_event.on(rejected_scope, (n: Int) -> {})
+//RS     rejected_hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+//RS     rejected_hook.on(rejected_scope, (n: Int) -> HookDecision.Continue)
+//RS     print("READY")
+//RS     time.sleep(30000ms)
+//RS }
+//RS "#,
+//RS     ) else {
+//RS         return;
+//RS     };
+//RS     let (snapshot, rendered) = debugger_events(running.child.id(), "\"terminal\":\"Fail\"");
+//RS     for secret in [
+//RS         "UNEXECUTED_SECRET",
+//RS         "SYNC_PAYLOAD_SECRET",
+//RS         "HOOK_FAILURE_SECRET",
+//RS         "HOOK_PAYLOAD_SECRET",
+//RS     ] {
+//RS         assert!(
+//RS             !snapshot.contains(secret),
+//RS             "runtime snapshot leaked {secret}"
+//RS         );
+//RS         assert!(!rendered.contains(secret), "debugger leaked {secret}");
+//RS     }
+//RS     assert!(rendered.contains("source=Event"));
+//RS     assert!(rendered.contains("priority=17"));
+//RS     assert!(rendered.contains("lifecycle=HandlerStarted"));
+//RS     assert!(rendered.contains("source=DecisionHook"));
+//RS     assert!(rendered.contains("priority=9"));
+//RS     assert!(rendered.contains("failure=Handler"));
+//RS     assert!(rendered.contains("terminal=Fail"));
+//RS     assert_eq!(rendered.matches("lifecycle=Subscribed").count(), 5);
+//RS     assert_eq!(rendered.matches("lifecycle=Removed").count(), 3);
+//RS     assert!(rendered
+//RS         .lines()
+//RS         .any(|line| line.contains("source=Event") && line.contains("lifecycle=Removed")));
+//RS     assert!(rendered
+//RS         .lines()
+//RS         .any(|line| line.contains("source=DecisionHook") && line.contains("lifecycle=Removed")));
+//RS     let removed_subscriptions = rendered
+//RS         .lines()
+//RS         .filter(|line| line.contains("lifecycle=Removed"))
+//RS         .filter_map(|line| {
+//RS             line.split_whitespace()
+//RS                 .find(|field| field.starts_with("subscription="))
+//RS         })
+//RS         .collect::<std::collections::HashSet<_>>();
+//RS     assert_eq!(removed_subscriptions.len(), 3, "{rendered}");
+//RS     assert_eq!(rendered.matches("lifecycle=DispatchStarted").count(), 4);
+//RS 
+//RS     let runtime = canvas_runtime(&running);
+//RS     for fact in [
+//RS         "\"source_truth\":\"executed_runtime_observations\"",
+//RS         "\"source\":\"Event\"",
+//RS         "\"source\":\"DecisionHook\"",
+//RS         "\"lifecycle\":\"Subscribed\"",
+//RS         "\"lifecycle\":\"Removed\"",
+//RS         "\"priority\":17",
+//RS         "\"priority\":9",
+//RS         "\"failure\":\"Handler\"",
+//RS         "\"terminal\":\"Fail\"",
+//RS     ] {
+//RS         assert!(
+//RS             runtime.contains(fact),
+//RS             "Canvas runtime facts missing {fact}: {runtime}"
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         !runtime.contains("source_span"),
+//RS         "static source fact leaked: {runtime}"
+//RS     );
+//RS     assert!(
+//RS         !runtime.contains("UNEXECUTED_SECRET"),
+//RS         "unexecuted payload leaked: {runtime}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn debugger_sees_pressure_drop_failure_close_and_single_terminals() {
+//RS     let Some(running) = spawn_observed(
+//RS         "async",
+//RS         r#"
+//RS use core.event as event
+//RS use core.tasks as tasks
+//RS use core.time as time
+//RS 
+//RS fn fail_async(n: Int) Err! {
+//RS     return Err("ASYNC_FAILURE_SECRET")
+//RS }
+//RS 
+//RS fn run() {
+//RS     print("READY")
+//RS     drop_scope :: event.scope()
+//RS     dropped :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
+//RS     (started_tx, started_rx) :: channel<Int>()
+//RS     (release_tx, release_rx) :: channel<Int>()
+//RS     dropped.on_priority(drop_scope, 23, (n: Int) -> {
+//RS         started_tx.send(~n)
+//RS         released :: release_rx.receive() ?? panic("release")
+//RS     })
+//RS     first :: dropped.emit_async(1)
+//RS     started :: started_rx.receive() ?? panic("started")
+//RS     second :: dropped.emit_async(2)
+//RS     newest :: dropped.emit_async(3)
+//RS     release_tx.send(1)
+//RS     started_second :: started_rx.receive() ?? panic("started second")
+//RS     release_tx.send(2)
+//RS     first.join() ?? panic("first")
+//RS     second.join() ?? panic("second")
+//RS     newest.join() ?? panic("newest")
+//RS 
+//RS     fail_scope :: event.scope()
+//RS     failing :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+//RS     failing.on(fail_scope, (n: Int) -> fail_async(n))
+//RS     failing.emit_async(4).join() ?? panic("failing")
+//RS 
+//RS     close_scope :: event.scope()
+//RS     closing :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+//RS     (close_started_tx, close_started_rx) :: channel<Int>()
+//RS     (close_release_tx, close_release_rx) :: channel<Int>()
+//RS     closing.on(close_scope, (n: Int) -> {
+//RS         close_started_tx.send(~n)
+//RS         released :: close_release_rx.receive() ?? panic("release")
+//RS     })
+//RS     close_running :: closing.emit_async(5)
+//RS     close_started :: close_started_rx.receive() ?? panic("started")
+//RS     close_queued :: closing.emit_async(6)
+//RS     close_blocked :: closing.emit_async(7)
+//RS     closing.close()
+//RS     close_scope.cancel()
+//RS     close_running.join() ?? panic("close running")
+//RS     close_queued.join() ?? panic("close queued")
+//RS     close_blocked.join() ?? panic("close blocked")
+//RS 
+//RS     time.sleep(30000ms)
+//RS }
+//RS "#,
+//RS     ) else {
+//RS         return;
+//RS     };
+//RS     let (snapshot, rendered) = debugger_events(running.child.id(), "\"terminal\":\"Closed\"");
+//RS     assert!(!snapshot.contains("ASYNC_FAILURE_SECRET"));
+//RS     assert!(!rendered.contains("ASYNC_FAILURE_SECRET"));
+//RS     assert!(rendered.contains("capacity=1 overflow=DropNewest"));
+//RS     assert!(rendered.contains("queued=1"));
+//RS     assert!(rendered.contains("blocked=1"));
+//RS     assert!(rendered.contains("priority=23"));
+//RS     assert!(rendered.contains("failure=Handler terminal=None"));
+//RS     assert!(rendered.contains("terminal=DroppedNewest"));
+//RS     assert!(rendered.contains("terminal=HandlerFailed"));
+//RS     assert!(rendered.contains("terminal=Closed"));
+//RS     assert!(rendered.contains("terminal=Cancelled"), "{rendered}");
+//RS 
+//RS     let runtime = canvas_runtime(&running);
+//RS     for fact in [
+//RS         "\"source\":\"AsyncEvent\"",
+//RS         "\"queued\":1",
+//RS         "\"blocked\":1",
+//RS         "\"capacity\":1",
+//RS         "\"overflow\":\"DropNewest\"",
+//RS         "\"priority\":23",
+//RS         "\"failure\":\"Handler\"",
+//RS         "\"terminal\":\"DroppedNewest\"",
+//RS         "\"terminal\":\"HandlerFailed\"",
+//RS         "\"terminal\":\"Closed\"",
+//RS         "\"terminal\":\"Cancelled\"",
+//RS     ] {
+//RS         assert!(
+//RS             runtime.contains(fact),
+//RS             "Canvas runtime facts missing {fact}: {runtime}"
+//RS         );
+//RS     }
+//RS 
+//RS     let dropped_line = rendered
+//RS         .lines()
+//RS         .find(|line| line.contains("terminal=DroppedNewest"))
+//RS         .expect("dropped dispatch terminal");
+//RS     let dispatch = dropped_line
+//RS         .split_whitespace()
+//RS         .find(|field| field.starts_with("dispatch="))
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         rendered
+//RS             .lines()
+//RS             .filter(|line| line.contains(dispatch) && line.contains("terminal=DroppedNewest"))
+//RS             .count(),
+//RS         1,
+//RS         "drop terminal must publish once"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn async_registration_and_once_removal_are_exact() {
+//RS     let Some(running) = spawn_observed(
+//RS         "async_lifecycle",
+//RS         r#"
+//RS use core.event as event
+//RS use core.time as time
+//RS 
+//RS fn run() {
+//RS     rejected_scope :: event.scope()
+//RS     rejected_scope.cancel()
+//RS     rejected :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+//RS     rejected.on(rejected_scope, (n: Int) -> {})
+//RS 
+//RS     once_scope :: event.scope()
+//RS     once_event :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+//RS     once_sub :: once_event.once(once_scope, (n: Int) -> {})
+//RS     once_event.emit_async(1).join() ?? panic("join")
+//RS     once_sub.unsubscribe()
+//RS     once_scope.cancel()
+//RS 
+//RS     print("READY")
+//RS     time.sleep(30000ms)
+//RS }
+//RS "#,
+//RS     ) else {
+//RS         return;
+//RS     };
+//RS     let (_snapshot, rendered) = debugger_events(running.child.id(), "\"lifecycle\":\"Removed\"");
+//RS     let subscribed = rendered
+//RS         .lines()
+//RS         .filter(|line| line.contains("source=AsyncEvent") && line.contains("lifecycle=Subscribed"))
+//RS         .collect::<Vec<_>>();
+//RS     let removed = rendered
+//RS         .lines()
+//RS         .filter(|line| line.contains("source=AsyncEvent") && line.contains("lifecycle=Removed"))
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         subscribed.len(),
+//RS         1,
+//RS         "pre-cancelled registration published: {rendered}"
+//RS     );
+//RS     assert_eq!(
+//RS         removed.len(),
+//RS         1,
+//RS         "async once removal duplicated: {rendered}"
+//RS     );
+//RS     let subscription = subscribed[0]
+//RS         .split_whitespace()
+//RS         .find(|field| field.starts_with("subscription="))
+//RS         .unwrap();
+//RS     assert!(
+//RS         removed[0].contains(subscription),
+//RS         "removal did not match once subscription: {rendered}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn runtime_event_sequence_is_bounded_and_debugger_preserves_exact_sequence() {
+//RS     let Some(running) = spawn_observed(
+//RS         "bounded",
+//RS         r#"
+//RS use core.event as event
+//RS use core.time as time
+//RS 
+//RS fn run() {
+//RS     scope :: event.scope()
+//RS     many :: event.new<Int>()
+//RS     many.on(scope, (n: Int) -> {})
+//RS     loop i in 0..<300 { &many.emit(i) }
+//RS     print("READY")
+//RS     time.sleep(30000ms)
+//RS }
+//RS "#,
+//RS     ) else {
+//RS         return;
+//RS     };
+//RS     let (snapshot, rendered) = debugger_events(running.child.id(), "\"terminal\":\"Delivered\"");
+//RS     assert_eq!(snapshot.matches("\"sequence\":").count(), 256);
+//RS     assert_eq!(rendered.lines().count(), 256);
+//RS     let first = rendered.lines().next().unwrap();
+//RS     let last = rendered.lines().last().unwrap();
+//RS     assert!(
+//RS         !first.contains("sequence=1 "),
+//RS         "old records were not evicted: {first}"
+//RS     );
+//RS     assert!(last.contains("terminal=Delivered"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn concurrent_runtime_observations_keep_sequence_in_push_order() {
+//RS     let Some(running) = spawn_observed(
+//RS         "concurrent_sequence",
+//RS         r#"
+//RS use core.event as event
+//RS use core.time as time
+//RS 
+//RS fn run() {
+//RS     scope :: event.scope()
+//RS     concurrent :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
+//RS     concurrent.on(scope, (n: Int) -> { time.sleep(1ms) })
+//RS     loop i in 0..<400 { concurrent.emit_async(i) }
+//RS     time.sleep(1500ms)
+//RS     print("READY")
+//RS     time.sleep(30000ms)
+//RS }
+//RS "#,
+//RS     ) else {
+//RS         return;
+//RS     };
+//RS     let (_snapshot, rendered) = debugger_events(running.child.id(), "\"source\":\"AsyncEvent\"");
+//RS     assert_eq!(rendered.lines().count(), 256);
+//RS     let sequences = rendered
+//RS         .lines()
+//RS         .map(|line| {
+//RS             line.split_whitespace()
+//RS                 .find_map(|field| field.strip_prefix("sequence="))
+//RS                 .unwrap()
+//RS                 .parse::<u64>()
+//RS                 .unwrap()
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     assert!(
+//RS         sequences.windows(2).all(|pair| pair[0] < pair[1]),
+//RS         "concurrent observation order diverged from sequence order"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn async_event_jit_callback_result_contract_matches_other_tiers() {
+//RS     let source = r#"
+//RS use core.event as event
+//RS 
+//RS #Error
+//RS enum EventFailure { Explicit }
+//RS 
+//RS fn fail(_n: Int) EventFailure! {
+//RS     return Err(EventFailure.Explicit)
+//RS }
+//RS 
+//RS fn run() {
+//RS     scope :: event.scope()
+//RS     async_event :: event.async_result<Int, EventFailure>(
+//RS         AsyncPolicy{ capacity: 2, overflow: .Block },
+//RS         .Collect
+//RS     ) ?? panic("policy")
+//RS     async_event.on(scope, (_n: Int) -> {})
+//RS     async_event.on(scope, (n: Int) -> fail(n))
+//RS 
+//RS     report :: async_event.emit_async(1).join() ?? panic("dispatch")
+//RS     print(report.state() == .HandlerFailed)
+//RS     print(report.delivered_handlers())
+//RS     print(report.failures().len())
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree(
+//RS         "async_event_jit_callback_result_contract",
+//RS         source,
+//RS         "true\n2\n1\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 1048 tests/event_observations.rs:1-509
+
+// PORT-PENDING 1048 tests-event-observations-module-group: tests/example_artifacts.rs:1-64
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Keep generated build output out of `Examples/`.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS fn artifact_paths(path: &Path, found: &mut Vec<PathBuf>) {
+//RS     let entries = fs::read_dir(path).unwrap_or_else(|error| {
+//RS         panic!("cannot read examples directory {}: {error}", path.display())
+//RS     });
+//RS     for entry in entries {
+//RS         let entry = entry.unwrap();
+//RS         let path = entry.path();
+//RS         let file_type = entry.file_type().unwrap();
+//RS         if file_type.is_dir() {
+//RS             if entry.file_name().to_str() == Some("build") {
+//RS                 found.push(path);
+//RS             } else {
+//RS                 artifact_paths(&path, found);
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if path.extension().and_then(|extension| extension.to_str()) == Some("rs")
+//RS             || is_executable(&path)
+//RS         {
+//RS             found.push(path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn is_executable(path: &Path) -> bool {
+//RS     use std::os::unix::fs::PermissionsExt;
+//RS 
+//RS     fs::metadata(path)
+//RS         .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+//RS         .unwrap_or(false)
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn is_executable(path: &Path) -> bool {
+//RS     matches!(
+//RS         path.extension().and_then(|extension| extension.to_str()),
+//RS         Some("exe") | Some("dll") | Some("com")
+//RS     )
+//RS }
+//RS 
+//RS #[test]
+//RS fn examples_contain_no_build_artifacts() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples");
+//RS     let mut found = Vec::new();
+//RS     artifact_paths(&root, &mut found);
+//RS     found.sort();
+//RS     assert!(
+//RS         found.is_empty(),
+//RS         "generated build artifacts under examples:\n{}",
+//RS         found
+//RS             .iter()
+//RS             .map(|path| path.display().to_string())
+//RS             .collect::<Vec<_>>()
+//RS             .join("\n")
+//RS     );
+//RS }
+// END-PORT-PENDING 1048 tests/example_artifacts.rs:1-64
+
+// PORT-PENDING 1048 tests-event-observations-module-group: tests/explain_syntax.rs:1-132
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS fn jet() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn cli_dir() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cli")
+//RS }
+//RS 
+//RS fn check_snapshot(name: &str, actual: &str) {
+//RS     let path = cli_dir().join(name);
+//RS     if std::env::var("UPDATE_EXPECT").is_ok() {
+//RS         fs::create_dir_all(cli_dir()).unwrap();
+//RS         fs::write(&path, actual).unwrap();
+//RS         return;
+//RS     }
+//RS     let expected = fs::read_to_string(&path).unwrap_or_else(|_| {
+//RS         panic!(
+//RS             "missing snapshot {}; run UPDATE_EXPECT=1 cargo test",
+//RS             path.display()
+//RS         )
+//RS     });
+//RS     assert_eq!(actual, expected, "snapshot mismatch for {}", name);
+//RS }
+//RS 
+//RS #[test]
+//RS fn explain_syntax_dictionary_golden() {
+//RS     for (query, snapshot) in [
+//RS         ("@", "explain_syntax_at.txt"),
+//RS         ("::", "explain_syntax_bind.txt"),
+//RS         ("#Live", "explain_syntax_marker.txt"),
+//RS         ("->", "explain_syntax_arrow.txt"),
+//RS         ("loop", "explain_syntax_keyword.txt"),
+//RS         ("^", "explain_syntax_caret.txt"),
+//RS         ("??", "explain_syntax_fallback.txt"),
+//RS     ] {
+//RS         let out = Command::new(jet())
+//RS             .args(["explain", query])
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(out.status.success(), "jet explain {query} failed");
+//RS         check_snapshot(snapshot, &String::from_utf8_lossy(&out.stdout));
+//RS     }
+//RS 
+//RS     let out = Command::new(jet())
+//RS         .args(["explain", "@@"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     check_snapshot(
+//RS         "explain_syntax_unknown.txt",
+//RS         &String::from_utf8_lossy(&out.stderr),
+//RS     );
+//RS }
+//RS 
+//RS /// #3723: `--verbose` adds the registry constant and owning decision that the
+//RS /// default plain-words answer leaves out.
+//RS #[test]
+//RS fn explain_syntax_verbose_names_registry_constant_and_decision() {
+//RS     let default = Command::new(jet())
+//RS         .args(["explain", "^"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let verbose = Command::new(jet())
+//RS         .args(["explain", "^", "--verbose"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(verbose.status.success(), "jet explain ^ --verbose failed");
+//RS     let default = String::from_utf8_lossy(&default.stdout);
+//RS     let verbose = String::from_utf8_lossy(&verbose.stdout);
+//RS     assert!(verbose.starts_with(default.as_ref()), "{verbose}");
+//RS     let row = jet::Syntax::lookup("^").expect("`^` row");
+//RS     assert!(
+//RS         verbose.contains(&format!("Registry name: {}", row.name))
+//RS             && verbose.contains(&format!("Decision: {}", row.decision)),
+//RS         "{verbose}"
+//RS     );
+//RS }
+//RS 
+//RS /// #3723: every registered sigil and operator explains itself in plain words:
+//RS /// each meaning has an example, and the default answer names no internal
+//RS /// constant (`SIGIL_`, `OP_`) or decision ID.
+//RS #[test]
+//RS fn explain_syntax_rows_are_plain_and_exampled() {
+//RS     let mut checked = 0;
+//RS     for row in jet::Syntax::rows().iter().filter(|row| {
+//RS         matches!(
+//RS             row.kind,
+//RS             jet::Syntax::SyntaxDictionaryKind::Sigil | jet::Syntax::SyntaxDictionaryKind::Operator
+//RS         )
+//RS     }) {
+//RS         checked += 1;
+//RS         let shown = jet::Syntax::display(row);
+//RS         assert!(
+//RS             !row.meanings.is_empty()
+//RS                 && row
+//RS                     .meanings
+//RS                     .iter()
+//RS                     .all(|meaning| !meaning.position.is_empty() && !meaning.example.trim().is_empty()),
+//RS             "`{shown}` needs a positioned meaning with an example for each use"
+//RS         );
+//RS         let explanation = jet::Explain::lookup(&shown).expect("dictionary row explains");
+//RS         let rendered = jet::Explain::render(&explanation, false);
+//RS         assert!(rendered.contains("Example:"), "`{shown}` has no example:\n{rendered}");
+//RS         for word in rendered.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-') {
+//RS             assert!(
+//RS                 !word.starts_with("SIGIL_") && !word.starts_with("OP_") && !word.starts_with("D-"),
+//RS                 "`{shown}` default explanation leaks `{word}`:\n{rendered}"
+//RS             );
+//RS         }
+//RS         assert!(
+//RS             !rendered.contains(&row.name) || row.name == row.token,
+//RS             "`{shown}` default explanation names its constant `{}`",
+//RS             row.name
+//RS         );
+//RS         for code in row.meanings.iter().flat_map(|meaning| &meaning.related_codes) {
+//RS             assert!(
+//RS                 jet::Explain::lookup(code).is_some_and(|related| !related.retired),
+//RS                 "`{shown}` names related code {code}, which is not a live diagnostic"
+//RS             );
+//RS         }
+//RS     }
+//RS     assert!(checked > 40, "expected the full sigil/operator ledger, walked {checked}");
+//RS }
+// END-PORT-PENDING 1048 tests/explain_syntax.rs:1-132
+
+// PORT-PENDING 1048 tests-event-observations-module-group: tests/fact_contribution_law.rs:1-199
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-CONF-MERGE1 / D-FACT-LAW1: one resolver owns every build-fact writer.
+//RS 
+//RS use jet_foundation::Diagnostics::Span;
+//RS use jet_foundation::Policy::{
+//RS     self, ContributionLayer, FactContribution, FactError, FactKey, FactValue, SourceScope,
+//RS };
+//RS 
+//RS fn writer(
+//RS     value: &str,
+//RS     scope: SourceScope,
+//RS     layer: ContributionLayer,
+//RS     source: &str,
+//RS ) -> FactContribution {
+//RS     FactContribution::new(
+//RS         "Build.Profile",
+//RS         FactValue::Text(value.to_string()),
+//RS         scope,
+//RS         layer,
+//RS         source,
+//RS     )
+//RS }
+//RS 
+//RS #[test]
+//RS fn source_scope_and_layer_order_produce_one_explainable_chain() {
+//RS     let declarations = [
+//RS         writer(
+//RS             "package",
+//RS             SourceScope::Package,
+//RS             ContributionLayer::Declaration,
+//RS             "package.jet",
+//RS         ),
+//RS         writer(
+//RS             "file",
+//RS             SourceScope::File,
+//RS             ContributionLayer::Declaration,
+//RS             "main.jet",
+//RS         ),
+//RS         writer(
+//RS             "module",
+//RS             SourceScope::Module,
+//RS             ContributionLayer::Declaration,
+//RS             "main.jet",
+//RS         ),
+//RS         writer(
+//RS             "function",
+//RS             SourceScope::Function,
+//RS             ContributionLayer::Declaration,
+//RS             "main.jet",
+//RS         ),
+//RS         writer(
+//RS             "block",
+//RS             SourceScope::Block,
+//RS             ContributionLayer::Declaration,
+//RS             "main.jet",
+//RS         ),
+//RS         writer(
+//RS             "item",
+//RS             SourceScope::Item,
+//RS             ContributionLayer::Declaration,
+//RS             "main.jet",
+//RS         ),
+//RS         writer(
+//RS             "profile",
+//RS             SourceScope::Package,
+//RS             ContributionLayer::OptimizationBundle,
+//RS             "release",
+//RS         ),
+//RS         writer(
+//RS             "cli",
+//RS             SourceScope::Package,
+//RS             ContributionLayer::CommandLine,
+//RS             "command line",
+//RS         ),
+//RS     ];
+//RS     let fact = Policy::resolve(FactKey::new("Build.Profile"), declarations)
+//RS         .expect("the canonical resolver accepts cross-layer overrides")
+//RS         .expect("the chain has writers");
+//RS 
+//RS     assert_eq!(fact.value, FactValue::Text("cli".to_string()));
+//RS     assert_eq!(fact.provenance.len(), 8);
+//RS     assert_eq!(fact.effective, 7);
+//RS     let explanation = Policy::explain(&fact);
+//RS     assert_eq!(
+//RS         explanation
+//RS             .lines()
+//RS             .filter(|line| line.contains('['))
+//RS             .count(),
+//RS         8
+//RS     );
+//RS     assert!(explanation.contains("[effective] command line / package"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn same_layer_conflict_names_both_sources() {
+//RS     let first = writer(
+//RS         "debug",
+//RS         SourceScope::Package,
+//RS         ContributionLayer::Workspace,
+//RS         "workspace-a.jet",
+//RS     )
+//RS     .at(Span::new(10, 16));
+//RS     let second = writer(
+//RS         "release",
+//RS         SourceScope::Package,
+//RS         ContributionLayer::Workspace,
+//RS         "workspace-b.jet",
+//RS     )
+//RS     .at(Span::new(24, 31));
+//RS     let error = Policy::resolve(FactKey::new("Build.Profile"), [first, second])
+//RS         .expect_err("different same-layer values must stop the build");
+//RS     assert!(matches!(error, FactError::Conflict { .. }));
+//RS 
+//RS     let diagnostic = error
+//RS         .diagnostic()
+//RS         .expect("conflicts have the UI diagnostic");
+//RS     assert_eq!(diagnostic.code, "E3521");
+//RS     assert!(diagnostic.why.contains("workspace-a.jet"));
+//RS     assert!(diagnostic.why.contains("workspace-b.jet"));
+//RS     assert_eq!(diagnostic.span, Some(Span::new(24, 31)));
+//RS }
+//RS 
+//RS #[test]
+//RS fn force_pins_later_layers_and_safety_only_tightens() {
+//RS     let force = writer(
+//RS         "release",
+//RS         SourceScope::Package,
+//RS         ContributionLayer::System,
+//RS         "system.jet",
+//RS     )
+//RS     .force_with_reason("certified profile");
+//RS     let fact = Policy::resolve(
+//RS         FactKey::new("Build.Profile"),
+//RS         [
+//RS             writer(
+//RS                 "dev",
+//RS                 SourceScope::Package,
+//RS                 ContributionLayer::Declaration,
+//RS                 "package.jet",
+//RS             ),
+//RS             force,
+//RS             writer(
+//RS                 "debug",
+//RS                 SourceScope::Package,
+//RS                 ContributionLayer::CommandLine,
+//RS                 "command line",
+//RS             ),
+//RS         ],
+//RS     )
+//RS     .expect("system force is valid")
+//RS     .expect("the chain has writers");
+//RS     assert_eq!(fact.value, FactValue::Text("release".to_string()));
+//RS     let explanation = Policy::explain(&fact);
+//RS     assert!(explanation.contains("pin=certified profile"));
+//RS     assert!(explanation.contains("[shadowed] command line"));
+//RS 
+//RS     let safety = FactKey::tighten_only("Build.Settings.tls");
+//RS     assert!(Policy::resolve(
+//RS         safety.clone(),
+//RS         [
+//RS             FactContribution::new(
+//RS                 "Build.Settings.tls",
+//RS                 FactValue::Bool(true),
+//RS                 SourceScope::Package,
+//RS                 ContributionLayer::Declaration,
+//RS                 "package.jet",
+//RS             ),
+//RS             FactContribution::new(
+//RS                 "Build.Settings.tls",
+//RS                 FactValue::Bool(false),
+//RS                 SourceScope::Package,
+//RS                 ContributionLayer::Environment,
+//RS                 "environment",
+//RS             ),
+//RS         ],
+//RS     )
+//RS     .is_ok());
+//RS     assert!(matches!(
+//RS         Policy::resolve(
+//RS             safety,
+//RS             [
+//RS                 FactContribution::new(
+//RS                     "Build.Settings.tls",
+//RS                     FactValue::Bool(false),
+//RS                     SourceScope::Package,
+//RS                     ContributionLayer::Declaration,
+//RS                     "package.jet",
+//RS                 ),
+//RS                 FactContribution::new(
+//RS                     "Build.Settings.tls",
+//RS                     FactValue::Bool(true),
+//RS                     SourceScope::Package,
+//RS                     ContributionLayer::Environment,
+//RS                     "environment",
+//RS                 ),
+//RS             ],
+//RS         ),
+//RS         Err(FactError::SafetyWidening { .. })
+//RS     ));
+//RS }
+// END-PORT-PENDING 1048 tests/fact_contribution_law.rs:1-199
+

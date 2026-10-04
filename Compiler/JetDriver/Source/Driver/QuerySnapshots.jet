@@ -1,0 +1,138 @@
+// Rust QueryService.rs:590–661. Host reads remain host-owned: a snapshot
+// reports absence and error kind explicitly, never as an empty successful read.
+use core.files.runtime.kernel_path_components as compiler_driver_os_path
+use jet_foundation.[mir_sha256_hex]
+
+pub enum JetDriverQueryFileState {
+    Present(bytes: [U8])
+    Missing
+    ReadFailed(kind: String)
+}
+
+pub struct JetDriverQueryExternalFile {
+    pub path: compiler_driver_os_path.OsPath
+    pub state: JetDriverQueryFileState
+}
+
+pub struct JetDriverQuerySnapshot {
+    pub request: JetDriverCompileRequest
+    pub external_files: [JetDriverQueryExternalFile]
+    pub cwd: compiler_driver_os_path.OsPath
+}
+
+// Rust canonical_path: absolute paths are NOT realpath/lexically normalized.
+pub fn jet_driver_query_path(cwd: compiler_driver_os_path.OsPath, path: compiler_driver_os_path.OsPath) -> compiler_driver_os_path.OsPath Never! {
+    if compiler_driver_os_path.is_absolute(path) -> return path
+    joined := ~cwd
+    compiler_driver_os_path.push(&joined, path)
+    joined
+}
+
+// Rust edit_bytes: longest common byte prefix and non-overlapping byte suffix.
+pub fn jet_driver_query_edit_bytes(old: String?, new: String) -> Int Never! {
+    fresh :: new.bytes()
+    previous :: old ?? return fresh.len()
+    if previous == new -> return 0
+    prior :: previous.bytes()
+    prefix := 0
+    loop prefix < prior.len() && prefix < fresh.len() && prior[prefix] == fresh[prefix] -> prefix += 1
+    old_tail :: prior.len() - prefix
+    new_tail :: fresh.len() - prefix
+    suffix := 0
+    loop suffix < old_tail && suffix < new_tail && prior[prior.len() - suffix - 1] == fresh[fresh.len() - suffix - 1] -> suffix += 1
+    old_tail + new_tail - 2 * suffix
+}
+
+fn jet_driver_query_sorted_paths(paths: [String]) -> [String] Never! {
+    result := ~paths
+    &result.sort()
+    unique := [String]{}
+    loop path in result {
+        if unique.len() == 0 || unique[unique.len() - 1] != path -> &unique.push(path)
+    }
+    unique
+}
+
+// Rust PathBuf::Ord + Eq. Native trait bodies/Map support remain a Core gate;
+// neither raw-byte nor lossy display order substitutes for component order.
+fn jet_driver_query_sorted_native_paths(paths: [compiler_driver_os_path.OsPath]) -> [compiler_driver_os_path.OsPath] Never! {
+    result := ~paths
+    &result.sort()
+    unique := [compiler_driver_os_path.OsPath]{}
+    loop path in result {
+        if unique.len() == 0 || !compiler_driver_os_path.equals(unique[unique.len() - 1], path) -> &unique.push(path)
+    }
+    unique
+}
+
+fn jet_driver_query_external_key(root: compiler_driver_os_path.OsPath) -> String Never! {
+    "checked-external:{compiler_driver_os_path.display(root)}"
+}
+
+// A frame distinguishes path/data boundaries, empty reads, missing files and
+// every host error kind. Hashing changes only the internal cache key, not the
+// source/provenance facts; no disk access occurs in this compiler service.
+pub fn jet_driver_query_frame(value: String) -> String Never! {
+    "{value.bytes().len()}:{value}"
+}
+
+pub fn jet_driver_query_state_fingerprint(state: JetDriverQueryFileState) -> String Never! {
+    if state == {
+        .Present(bytes) -> "bytes:{bytes:Debug}"
+        .Missing -> "missing"
+        .ReadFailed(kind) -> "error:{jet_driver_query_frame(kind)}"
+    }
+}
+
+fn jet_driver_query_file_fingerprint(snapshot: JetDriverQuerySnapshot, path: compiler_driver_os_path.OsPath, overlays: [compiler_driver_os_path.OsPath:String]) -> String Never! {
+    if overlays.get(path) == .Val(source) -> return "overlay:{jet_driver_query_frame(source)}"
+    loop root in snapshot.request.authorized_sources.roots {
+        loop file in root.files {
+            if compiler_driver_os_path.equals(file.path, path) -> return "source:{jet_driver_query_frame(file.identity)}:{jet_driver_query_frame(file.source)}"
+        }
+        loop file in root.foreign_cache_files {
+            if compiler_driver_os_path.equals(file.path, path) -> return "foreign:{jet_driver_query_frame(file.identity)}:{jet_driver_query_frame(file.source)}"
+        }
+    }
+    loop file in snapshot.external_files {
+        if !compiler_driver_os_path.equals(file.path, path) -> next
+        return jet_driver_query_state_fingerprint(file.state)
+    }
+    // Not supplied means absent from this immutable authorized snapshot. It
+    // never claims a successful empty read or permission to probe outside it.
+    "missing"
+}
+
+// Source difference: this retained framed-SHA cache fingerprint is not Rust's
+// DefaultHasher/Sip13 output. Exact cutover requires the sole Core path-hash
+// owner and selected-target Hash encodings; it is never an OsPath map key.
+pub fn jet_driver_query_external_fingerprint(snapshot: JetDriverQuerySnapshot, root: compiler_driver_os_path.OsPath, paths: [compiler_driver_os_path.OsPath], overlays: [compiler_driver_os_path.OsPath:String]) -> String Never! {
+    frames := [String]{jet_driver_query_frame("{root.platform:Debug}:{root.encoded:Debug}")}
+    loop path in jet_driver_query_sorted_native_paths(paths) {
+        &frames.push(jet_driver_query_frame("{path.platform:Debug}:{path.encoded:Debug}"))
+        &frames.push(jet_driver_query_frame(jet_driver_query_file_fingerprint(snapshot, path, overlays)))
+    }
+    mir_sha256_hex(frames.join(""))
+}
+
+fn jet_driver_query_default_external_paths(snapshot: JetDriverQuerySnapshot, root: compiler_driver_os_path.OsPath) -> [compiler_driver_os_path.OsPath] Never! {
+    parent :: jet_driver_parent_path(root)
+    package :: jet_driver_query_path(parent, compiler_driver_os_path.from_text("package.jet", root.platform))
+    legacy :: jet_driver_query_path(parent, compiler_driver_os_path.from_text("pkg.jet", root.platform))
+    has_package :: jet_driver_query_snapshot_source(snapshot, package) != None
+    has_legacy :: jet_driver_query_snapshot_source(snapshot, legacy) != None
+    paths := [compiler_driver_os_path.OsPath]{if has_legacy && !has_package -> legacy else -> package, jet_driver_query_path(parent, compiler_driver_os_path.from_text(".jet/lock", root.platform))}
+    if has_package && has_legacy -> &paths.push(legacy)
+    jet_driver_query_sorted_native_paths(paths)
+}
+
+
+
+fn jet_driver_query_snapshot_source(snapshot: JetDriverQuerySnapshot, path: compiler_driver_os_path.OsPath) -> String? Never! {
+    loop root in snapshot.request.authorized_sources.roots {
+        loop file in root.files {
+            if compiler_driver_os_path.equals(file.path, path) -> return Val(file.source)
+        }
+    }
+    None
+}

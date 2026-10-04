@@ -880,3 +880,94 @@ pub fn sema_collection_method_operation(contract: SemaCollectionMethodContract, 
         .ListMinMaxBy -> SemaCollectionOperation.Closure{operation: TClosureOp.ListMinMaxBy{tuple_struct: tuple_struct}}
     }
 }
+
+// Rust Numeric::precise_conversion_route. The sole precise route table feeds
+// both static lowering rows and return-type projection; Decimal/Fraction are
+// not reconstructed by filtering the fixed-numeric catalog.
+struct NumericPreciseRoute {
+    target: String
+    source: String
+    owner: String
+    function: String
+}
+
+NUMERIC_PRECISE_ROUTES :: prep { [NumericPreciseRoute]{
+    NumericPreciseRoute{target: "Decimal", source: "Int", owner: "Decimal", function: "from_int"},
+    NumericPreciseRoute{target: "Decimal", source: "Float", owner: "Decimal", function: "from_float"},
+    NumericPreciseRoute{target: "Decimal", source: "Fraction", owner: "Decimal", function: "from_fraction"},
+    NumericPreciseRoute{target: "Fraction", source: "Int", owner: "Fraction", function: "from_int"},
+    NumericPreciseRoute{target: "Fraction", source: "Float", owner: "Fraction", function: "from_float"},
+    NumericPreciseRoute{target: "Fraction", source: "Decimal", owner: "Fraction", function: "from_decimal"},
+    NumericPreciseRoute{target: "Float", source: "Decimal", owner: "Decimal", function: "to_float"},
+    NumericPreciseRoute{target: "Float", source: "Fraction", owner: "Fraction", function: "to_float"},
+    NumericPreciseRoute{target: "Int", source: "Decimal", owner: "Decimal", function: "to_int"},
+    NumericPreciseRoute{target: "Int", source: "Fraction", owner: "Fraction", function: "to_int"}
+} }
+
+fn numeric_precise_conversion_route_index(target: String, source: String) -> Int? {
+    loop (index, route) in NUMERIC_PRECISE_ROUTES {
+        if route.target == target && route.source == source -> return Val(index)
+    }
+    None
+}
+
+// Rust Numeric::precise_conversion_return, preserving the exact target carrier.
+fn numeric_precise_conversion_return(target: Type, method: String) -> Type? {
+    source :: builtin_numeric_source(method) ?? return None
+    route_index :: if target == {
+        .Int -> numeric_precise_conversion_route_index("Int", source)
+        .Float -> numeric_precise_conversion_route_index("Float", source)
+        .Named(name) -> if name == "Decimal" || name == "Fraction" -> numeric_precise_conversion_route_index(name, source) else -> None
+        else -> None
+    }
+    if route_index == None -> return None
+    Val(~target)
+}
+
+// Rust Type::is_integer/is_float. A quantity only contributes float numericity;
+// tagged and ranged integer carriers retain their full result type.
+fn numeric_conversion_integer(target: Type) -> Bool Never! {
+    if target == {
+        .Int -> true
+        .IntN(_, _) -> true
+        .InlineRange(base, _, _) -> numeric_conversion_integer(base)
+        .Tagged(_, inner) -> numeric_conversion_integer(inner)
+        else -> false
+    }
+}
+
+fn numeric_conversion_float(target: Type) -> Bool Never! {
+    if target == {
+        .Float -> true
+        .Float32 -> true
+        .Quantity(base, _) -> numeric_conversion_float(base)
+        .Tagged(_, inner) -> numeric_conversion_float(inner)
+        else -> false
+    }
+}
+
+// Rust Collections::int_conv_widening, shared with numeric lowering.
+fn numeric_conversion_widening(source_signed: Bool, source_bits: Int, target_signed: Bool, target_bits: Int) -> Bool Never! {
+    if source_signed && !target_signed -> return false
+    if !source_signed && target_signed -> return source_bits < target_bits
+    source_bits <= target_bits
+}
+
+// Rust Collections::numeric_conversion_return, flattening only the outer
+// Option<Option<Type>>: conversion returns always have a success type. Exact
+// routes, arity, source recognition and fallibility remain distinct internally.
+pub fn numeric_conversion_return(target: Type, method: String, argument_count: Int) -> Type? {
+    if argument_count != 1 -> return None
+    if numeric_precise_conversion_return(target, method) == .Val(result) -> return Val(^result)
+    if !numeric_conversion_integer(target) && !numeric_conversion_float(target) -> return None
+    source_name :: builtin_numeric_source(method) ?? return None
+    source :: builtin_numeric_kind(source_name) ?? return None
+    if source.fixed && target == Type.Int -> return Val(~target)
+    checked := if target == {
+        .InlineRange(_, _, _) -> true
+        .IntN(signed, bits) -> source.name == "Int" || !source.integer || (source.fixed && !numeric_conversion_widening(source.signed, source.bits, signed, bits))
+        else -> (!source.integer && numeric_conversion_integer(target)) || (source.ty == Type.Float && target == Type.Float32)
+    }
+    if checked -> return Val(Type.Result{ok: ~target, err: Type.String})
+    Val(~target)
+}

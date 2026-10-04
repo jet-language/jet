@@ -1,0 +1,1130 @@
+// PORT-PENDING 0522 crates-jet-codegen-src-codegen-tir-subset-expressions: crates/jet-codegen/src/Codegen/TIR/subset/expressions.rs:1-1126
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::core_module_path_from_receiver;
+//RS use super::refusal;
+//RS use crate::AST::{
+//RS     BinOp, EnumLitArg, Expr, IndexKind, Lambda, LambdaBody, OrFallback, Pattern, StrPart, Type,
+//RS };
+//RS use crate::Codegen::Cx;
+//RS use crate::Codegen::TIR::arg_conv_in_subset;
+//RS use crate::Codegen::TIR::enum_is_covered;
+//RS use crate::Codegen::TIR::fold_typed_fact_enum_equality;
+//RS use crate::Codegen::TIR::fold_typed_fact_enum_pattern;
+//RS use crate::Codegen::TIR::foreign_struct_lit_in_subset;
+//RS use crate::Codegen::TIR::is_covered_generic_struct_ty;
+//RS use crate::Codegen::TIR::is_covered_struct_ty;
+//RS use crate::Codegen::TIR::is_numeric_bounds_const;
+//RS use crate::Codegen::TIR::is_prelude_struct_name;
+//RS use crate::Codegen::TIR::method_call_in_subset;
+//RS use crate::Codegen::TIR::stmt_in_subset;
+//RS use crate::Codegen::TIR::struct_lit_constructible;
+//RS use crate::Codegen::is_db_value_type_name;
+//RS use crate::Codegen::is_json_type_name;
+//RS use crate::Codegen::is_key_variant;
+//RS use crate::Codegen::mangle_generated;
+//RS use crate::Syntax;
+//RS use std::collections::HashSet;
+//RS 
+//RS /// I2 self-report: a refusal records the expression it was about before the
+//RS /// `false` propagates out, so the `ice!` in `emit_func` can name the construct
+//RS /// instead of only the enclosing function (`subset::refusal`).
+//RS pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
+//RS     if expr_in_subset_inner(e, cx, locals) {
+//RS         return true;
+//RS     }
+//RS     refusal::note(refusal::EXPR, e.without_parens().span());
+//RS     false
+//RS }
+//RS 
+//RS fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
+//RS     let mut e = e;
+//RS     while let Expr::Paren(inner, _) = e {
+//RS         e = inner;
+//RS     }
+//RS     match e {
+//RS         Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) => true,
+//RS         Expr::ComptimeName { value, .. } => value.is_some(),
+//RS         Expr::Str(parts, _) => parts.iter().all(|p| match p {
+//RS             StrPart::Lit(_) => true,
+//RS             StrPart::Interp(e, _) => expr_in_subset(e, cx, locals),
+//RS         }),
+//RS         // An ident must resolve to a local/param, OR (c109 Phase 13) be a bare
+//RS         // function name used as a VALUE: a non-local, non-const name in `cx.fn_types`
+//RS         // with a `Type::Fn` type. The latter emits `emit_named_fn_value`'s
+//RS         // `Box::new(move |…| …) as <fn-type>` wrapper. A non-local that is a const
+//RS         // (inlined) or an unqualified module import is still out.
+//RS         Expr::Ident(name, _) => {
+//RS             // c109 Phase 24: a comptime const ident (`page_header`) inlines its pre-rendered
+//RS             // Rust value at the use site (`cx.consts[name]` — a TOTAL string fact, the same
+//RS             // `emit_expr` Ident arm reads). Admit it when it is a known const not shadowed by
+//RS             // a local. (A const used as an arithmetic operand resolves to `None` in
+//RS             // `ast_operand_is_integer` — `env.ty_of(const)` is `None` — exactly as the AST
+//RS             // path's `operand_is_integer`, so the overflow trap is never wrongly claimed.)
+//RS             (cx.consts.contains_key(name) && !locals.contains(name))
+//RS                 || locals.contains(name)
+//RS                 // D-NARG-D2: the shared sema call binder replaces an omitted
+//RS                 // default's earlier-parameter reference with a compiler-private
+//RS                 // slot name. The call-argument lowerer installs that slot in its
+//RS                 // local binder environment before lowering the expression, so it
+//RS                 // is covered even though it is not a source binding in the
+//RS                 // enclosing function.
+//RS                 || is_binder_ref_name(name)
+//RS                 || ident_is_named_fn_value(name, cx, locals)
+//RS         }
+//RS         Expr::Unary(_, inner, _) => {
+//RS             expr_in_subset(inner, cx, locals)
+//RS         }
+//RS         // D-FACT-ENUM-TIR: `value == .Variant` parses as a PatternTest. A
+//RS         // compiler fact enum comparison is closed here before a runtime enum
+//RS         // pattern can enter any engine.
+//RS         Expr::PatternTest {
+//RS             subject, pattern, ..
+//RS         } if fold_typed_fact_enum_pattern(subject, pattern).is_some() => true,
+//RS         // D-FAIL-CARRIER1: expression-position `value == None` is normalized by
+//RS         // sema to an absent pattern test.  Lowering uses the same option probe as
+//RS         // an `if` condition, so only the subject needs subset coverage here.
+//RS         Expr::PatternTest {
+//RS             subject,
+//RS             pattern: Pattern::Absent(_),
+//RS             ..
+//RS         } => expr_in_subset(subject, cx, locals),
+//RS         // S31: a nested payload pattern in expression position lowers to one
+//RS         // structural `PatternMatches` test.
+//RS         Expr::PatternTest {
+//RS             subject, pattern, ..
+//RS         } if pattern.has_nested_pattern() => expr_in_subset(subject, cx, locals),
+//RS         // D-TAG1: a binding-free variant/group pattern test in EXPRESSION position
+//RS         // (`hot :: d == .Fire`, `d == .Fire.Burn` inside `&&`, …) lowers to a plain
+//RS         // Bool `matches!` (`TExprKind::PatternMatches`). Admission needs a known
+//RS         // variant name; lowering resolves the owner from the checked subject type,
+//RS         // so a user enum variant spelled like a builtin (`Int`, `Char`) and a
+//RS         // `DataTree`/`Key` subject with the same name each keep their own owner.
+//RS         Expr::PatternTest {
+//RS             subject,
+//RS             pattern: Pattern::Variant {
+//RS                 variant, bindings, ..
+//RS             },
+//RS             ..
+//RS         } if bindings.is_empty() && cx.variant_owner.contains_key(variant) =>
+//RS         {
+//RS             expr_in_subset(subject, cx, locals)
+//RS         }
+//RS         // D-BINPAT1 / D-PARSESTR1: `bytes == [U8]{"JGB1"}` and string-pattern
+//RS         // tests in value position are PatternTest, not MethodCall equal.
+//RS         Expr::PatternTest {
+//RS             subject,
+//RS             pattern: Pattern::BinMatch { .. } | Pattern::StrMatch { .. },
+//RS             ..
+//RS         } => expr_in_subset(subject, cx, locals),
+//RS         // D-FACT-ENUM-TIR: generated fact reads are typed comptime enum values.
+//RS         // The shared TIR fold turns the closed comparison into a Bool before
+//RS         // either value reaches an engine or the Rust/Web emitter.
+//RS         Expr::Binary(op, l, r, _) if fold_typed_fact_enum_equality(*op, l, r).is_some() => true,
+//RS         Expr::Binary(_, l, r, _) => expr_in_subset(l, cx, locals) && expr_in_subset(r, cx, locals),
+//RS         // D-CHAINCMP1: `0 <= sev < 10` — in-subset iff every operand is.
+//RS         Expr::CompareChain { operands, .. } => {
+//RS             operands.iter().all(|e| expr_in_subset(e, cx, locals))
+//RS         }
+//RS         Expr::Call(c) => {
+//RS             // D-CONC-CHAN1=A: the readable `channel<T>()` constructor is a
+//RS             // direct builtin call, not a `core.tasks.channel` import. Lowering
+//RS             // normalizes it to the existing Prelude channel door below, so the
+//RS             // coverage proof must admit the same zero/one-argument shape.
+//RS             if c.name == Syntax::BUILTIN_CHANNEL
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS             {
+//RS                 return c.args.len() <= 1
+//RS                     && matches!(c.resolved_ret.as_ref(), Some(Type::Tuple(_)))
+//RS                     && c.args.iter().all(|arg| {
+//RS                         matches!(
+//RS                             arg.label.as_ref().map(|(label, _)| label.as_str()),
+//RS                             None | Some("capacity")
+//RS                         ) && expr_in_subset(&arg.expr, cx, locals)
+//RS                     });
+//RS             }
+//RS             // D-CALLPOLICY1=E: `apply` replaces a callable's policy metadata;
+//RS             // policy expressions are compile-time typed values and have no
+//RS             // runtime TIR child. The final callable must still be covered.
+//RS             if c.name == "apply"
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS                 && c.args
+//RS                     .last()
+//RS                     .is_some_and(|arg| arg.flags.callable_policy.is_some())
+//RS             {
+//RS                 return c.args.last().is_some_and(|arg| {
+//RS                     arg.label.is_none() && !arg.spread && expr_in_subset(&arg.expr, cx, locals)
+//RS                 });
+//RS             }
+//RS             // D-CONC-FREEZE1=A: `freeze` lowers to the existing owned-value
+//RS             // clone/materialization TIR nodes. Keep the coverage proof aligned
+//RS             // with that canonical lowering path and recurse into its operand.
+//RS             if c.name == Syntax::KW_FREEZE
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS                 && c.args.len() == 1
+//RS             {
+//RS                 return expr_in_subset(&c.args[0].expr, cx, locals);
+//RS             }
+//RS             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
+//RS             // parses as `Expr::Call { name: "f" }`, NOT `Expr::CallValue`. The AST path
+//RS             // (`emit_call`, env-contains-name branch) emits `(place)(args)` with args
+//RS             // lowered PLAINLY (`emit_call_args(.., None, ..)`). Cover it: the name is a
+//RS             // local (not a const) and every arg is in-subset + unlabeled.
+//RS             if locals.contains(&c.name) && !cx.consts.contains_key(&c.name) {
+//RS                 return c.args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+//RS             }
+//RS             // `print` is the one builtin the subset covers (one or more args —
+//RS             // D-VERDICT-1321-1 lowers a multi-arg print to one joined Print).
+//RS             let is_print = c.name == Syntax::BUILTIN_PRINT
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS                 && !c.args.is_empty();
+//RS             // D-ZIPPAD1: free zip-family calls are resolved by sema into the
+//RS             // call's `resolved_ret`; their labels name output columns or the
+//RS             // padding policy rather than ordinary function parameters.
+//RS             let is_zip_family = matches!(c.name.as_str(), "zip" | "zip_short" | "zip_pad")
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS                 && c.resolved_ret.is_some();
+//RS             // D-LIN1-DROP: `drop(x)` — the discard builtin (exactly one arg, not
+//RS             // shadowed by a user `drop` fn or local). Lowers to `TExprKind::Drop`.
+//RS             let is_drop = c.name == Syntax::BUILTIN_CONSUME
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS                 && c.args.len() == 1;
+//RS             let is_expect = c.name == Syntax::BUILTIN_EXPECT
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS                 && c.args.len() == 1;
+//RS             let is_close =
+//RS                 c.name == Syntax::RESOURCE_CLOSE && !locals.contains(&c.name) && c.args.len() == 1;
+//RS             // c109 Phase 26: the rich-runtime-report builtins `assert(cond[, msg])`,
+//RS             // `assert_eq(left, right)`, and `panic(msg)` (S36). Each is a bare
+//RS             // `Expr::Call` whose name is the builtin (not in `cx.sigs`, not shadowed by a
+//RS             // local) and whose argument count matches the AST `emit_require`/
+//RS             // `emit_require_eq`/`emit_panic_stop` shape. The whole statement string is
+//RS             // rendered at lowering (`TExprKind::RequireStop`). Every arg expr (cond/msg/
+//RS             // operands) must be in-subset (they are lowered + emitted via the TIR). Sema
+//RS             // validated the shape (arg count, `panic`'s 1 message arg). Excluded if a
+//RS             // user fn / local shadows the name (then the plain-call branch claims it).
+//RS             let is_assert = c.name == Syntax::BUILTIN_ASSERT
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS                 && (c.args.len() == 1 || c.args.len() == 2);
+//RS             let is_assert_eq = c.name == Syntax::BUILTIN_ASSERT_EQ
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS                 && c.args.len() == 2;
+//RS             let is_panic = c.name == Syntax::BUILTIN_PANIC
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS                 && c.args.len() == 1;
+//RS             // c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). A bare
+//RS             // `Expr::Call { name: "input" }` with NO user `input` fn (`!cx.sigs`) and no
+//RS             // local shadow lowers to the SAME `jet_std_io_input(None|Some(&(arg)))` form
+//RS             // as `io.input(...)` (the AST `emit_call` ambient-input branch, Expression.rs
+//RS             // ~L1778; sema mirrors it in CheckerInfer + returns `Result<String, IOError>`).
+//RS             // 0 args → `(None)`, 1 arg (a String prompt) → `(Some(&(arg)))`. Reproduced
+//RS             // byte-for-byte in `emit_tir_ambient_input`. Disjoint from a plain fn (those
+//RS             // ARE in `cx.sigs`) and the local-call branch (shadowing local handled above).
+//RS             // parity: guard tests/tir_language_features.rs::ambient_input
+//RS             let is_ambient_input = c.name == Syntax::BUILTIN_INPUT
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS                 && c.args.len() <= 1;
+//RS             // D-NUMWIDEN-CROSS1=E: an `approx(value)` marker is a typed
+//RS             // Int-to-Float conversion when early comptime registration reaches
+//RS             // TIR before sema annotates the call. Admit the same unshadowed
+//RS             // one-argument shape as the lowering path.
+//RS             let builtin_approx = c.name == Syntax::BUILTIN_APPROX
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name);
+//RS             if c.widen_approx || builtin_approx {
+//RS                 return c.args.len() == 1
+//RS                     && c.args[0].label.is_none()
+//RS                     && expr_in_subset(&c.args[0].expr, cx, locals);
+//RS             }
+//RS             // D-DBG1=A: the checked `debug(value)` trace; its second argument is
+//RS             // the sema-recorded site literal.
+//RS             if c.name == Syntax::INTERNAL_DEBUG_TRACE {
+//RS                 return c.args.len() == 2 && expr_in_subset(&c.args[0].expr, cx, locals);
+//RS             }
+//RS             // c109 Phase 28: the overflow opt-out builtins `wrapping(e)`/`saturating(e)`/
+//RS             // `checked(e)` (D-NUMOPS1), plus the sema-only checked-policy wrapper. The
+//RS             // unshadowed call carries one integer `Expr::Binary` and lowers to the
+//RS             // corresponding `TExprKind::OverflowOpt`; the operands must be in-subset.
+//RS             // `checked` yields `?T`, the others `T`. Return early so generic-call
+//RS             // argument machinery does not claim this shared Prelude seam.
+//RS             if matches!(
+//RS                 c.name.as_str(),
+//RS                 Syntax::BUILTIN_WRAPPING
+//RS                     | Syntax::BUILTIN_SATURATING
+//RS                     | Syntax::BUILTIN_CHECKED
+//RS                     | Syntax::INTERNAL_ARITHMETIC_CHECKED
+//RS             ) && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS             {
+//RS                 return matches!(
+//RS                     c.args.first().map(|a| &a.expr),
+//RS                     Some(Expr::Binary(
+//RS                         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow,
+//RS                         ..
+//RS                     ))
+//RS                 ) && c.args.len() == 1
+//RS                     && c.args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+//RS             }
+//RS             // Otherwise the callee must be a known *plain* top-level function:
+//RS             // in `cx.sigs`, not a local, and NOT an extern/FFI function or an
+//RS             // unqualified module import (those lower to different call forms — covered
+//RS             // separately below in c109 Phase 14).
+//RS             let is_plain_fn = !locals.contains(&c.name)
+//RS                 && cx.sigs.contains_key(&c.name)
+//RS                 && !cx.extern_funcs.contains_key(&c.name)
+//RS                 && !cx.unqualified_inline.contains_key(&c.name)
+//RS                 && !cx.unqualified_file.contains_key(&c.name)
+//RS                 && !cx.inline_import_names.contains(&c.name);
+//RS             // c109 Phase 23: a DISTINCT-type constructor `UserId(expr)` (D-DIST1) is a
+//RS             // bare `Expr::Call` whose name is a distinct type (not in `cx.sigs` — so the
+//RS             // AST `emit_call` falls through to `__jet_<Name>(args)` with NO sig, plain args).
+//RS             // The TIR's fallthrough `Call` form reproduces that exactly (sig lookup misses
+//RS             // → `lower_one_call_arg` with `conv: None` → plain arg, then `__jet_<Name>(…)`).
+//RS             // Sema validated the single-arg base-typed shape (E2 distinct checks); we admit
+//RS             // it when the name is a known distinct type, not shadowed by a local.
+//RS             let is_distinct_ctor =
+//RS                 !locals.contains(&c.name) && cx.distinct_types.contains_key(&c.name);
+//RS             // D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /
+//RS             // `Vec3(x,y,z)` / `Mat3(…)`. Lowers to the prelude `jet_math_<T>_new(…)`.
+//RS             let is_math_ctor = !locals.contains(&c.name)
+//RS                 && crate::Sema::is_math_type(&c.name)
+//RS                 && !cx.type_names.contains(&c.name);
+//RS             let is_precise_ctor = !locals.contains(&c.name)
+//RS                 && (c.name == crate::Syntax::TYPE_DECIMAL
+//RS                     || c.name == crate::Syntax::TYPE_FRACTION
+//RS                     || c.name == crate::Syntax::TYPE_COMPLEX)
+//RS                 && !cx.type_names.contains(&c.name);
+//RS             // D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: the synthetic typed-head call
+//RS             // sema rewrote a typed literal into (see `lower_expr`'s matching case).
+//RS             let is_typed_text_ctor = !locals.contains(&c.name)
+//RS                 && Syntax::typed_head_kind(&c.name)
+//RS                     .is_some_and(|kind| kind.is_interpolated_template())
+//RS                 && !cx.type_names.contains(&c.name);
+//RS             // D-REGEX-LIT1=D: sema rewrites a checked Regex typed literal to
+//RS             // this compiler-owned one-argument constructor.
+//RS             let is_regex_literal_ctor = !locals.contains(&c.name)
+//RS                 && c.name == Syntax::TYPE_REGEX
+//RS                 && !cx.type_names.contains(&c.name);
+//RS             // D-TYPE2-UNCERT1=A: sema types the canonical lowercase
+//RS             // `measurement(value, uncertainty: u)` constructor. Lowering maps
+//RS             // that source spelling to the one internal Measurement Core route.
+//RS             let is_measurement = c.name == "measurement"
+//RS                 && !cx.sigs.contains_key(&c.name)
+//RS                 && !locals.contains(&c.name)
+//RS                 && c.args.len() == 2
+//RS                 && matches!(
+//RS                     c.resolved_ret.as_ref(),
+//RS                     Some(Type::Apply { name, args })
+//RS                         if name == Syntax::TYPE_MEASUREMENT && args.as_slice() == [Type::Float]
+//RS                 );
+//RS             // c109 Phase 14: FFI extern + unqualified module-import calls are now
+//RS             // covered. Each lowers to its own resolved call form (`emit_call`'s
+//RS             // `extern_funcs`/`unqualified_inline`/`unqualified_file` arms). The
+//RS             // priority MUST match `emit_call`: extern is checked before the unqualified
+//RS             // arms, and a LOCAL/print/plain-fn callee was already claimed above. These
+//RS             // are all top-level (non-local) names, so they are disjoint from the
+//RS             // local-call branch. The extern arg form uses `emit_extern_call_args`
+//RS             // (a non-scalar `Read` arg is `(…).clone()`, not `&(…)`) — reproduced in
+//RS             // lowering; the Arc (`shared_auto_clone`) form stays excluded.
+//RS             let is_extern = !locals.contains(&c.name) && cx.extern_funcs.contains_key(&c.name);
+//RS             let is_unqual_inline = !locals.contains(&c.name)
+//RS                 && !cx.extern_funcs.contains_key(&c.name)
+//RS                 && (cx.unqualified_inline.contains_key(&c.name)
+//RS                     || cx.inline_import_names.contains(&c.name));
+//RS             let is_unqual_file = !locals.contains(&c.name)
+//RS                 && !cx.extern_funcs.contains_key(&c.name)
+//RS                 && cx.unqualified_file.contains_key(&c.name)
+//RS                 && !cx.inline_import_names.contains(&c.name);
+//RS             // c109 Phase 13: a callee with a **Fn-typed parameter** is now covered.
+//RS             // The arg routes through `emit_call_args`'s `Box::new(…) as <fn-type>`
+//RS             // coercion (`lower_one_call_arg` reproduces it from total facts). The Fn
+//RS             // arg itself must be in-subset (a lambda, a fn-name value, or a fn-typed
+//RS             // local). No special exclusion remains — the Box-coercion is total.
+//RS             // D-APILABEL1=A: sema binds labels by name and hands TIR declaration-
+//RS             // order arguments. Lowering has already used `source_index` to pin
+//RS             // observable reordered expressions; this subset gate need not read
+//RS             // the source-level `CallArg.label`.
+//RS             (is_print
+//RS                 || is_zip_family
+//RS                 || is_drop
+//RS                 || is_expect
+//RS                 || is_close
+//RS                 || is_ambient_input
+//RS                 || is_assert
+//RS                 || is_assert_eq
+//RS                 || is_panic
+//RS                 || is_plain_fn
+//RS                 || is_distinct_ctor
+//RS                 || is_math_ctor
+//RS                 || is_precise_ctor
+//RS                 || is_typed_text_ctor
+//RS                 || is_regex_literal_ctor
+//RS                 || is_measurement
+//RS                 || is_extern
+//RS                 || is_unqual_inline
+//RS                 || is_unqual_file)
+//RS                 && c.args.iter().all(|a| {
+//RS                     // c109 Phase 6b: a `Shared<T>` arg auto-cloning the Arc
+//RS                     // (`shared_auto_clone`) is COVERED for the plain-fn / distinct-ctor /
+//RS                     // unqualified-import paths — all route through `lower_one_call_arg`,
+//RS                     // which reproduces `emit_call_args`' `Arc::clone(&…)` from the total
+//RS                     // flag (and the receiving `Shared<T>` param renders identically via the
+//RS                     // shared `rust_param_type`). It stays EXCLUDED on the `is_extern` path
+//RS                     // only: extern args use `lower_extern_call_arg`, which does not carry
+//RS                     // the Arc form (the FFI boundary takes a `(…).clone()`, not an Arc).
+//RS                     // Labels do not change conversion coverage; lowering handles
+//RS                     // source-order temporaries after this subset gate.
+//RS                     (!a.flags.shared_auto_clone || !is_extern)
+//RS                         && (is_zip_family || arg_conv_in_subset(a))
+//RS                         && expr_in_subset(&a.expr, cx, locals)
+//RS                 })
+//RS         }
+//RS         Expr::If {
+//RS             cond,
+//RS             then_body,
+//RS             then_value,
+//RS             else_body,
+//RS             else_value,
+//RS             ..
+//RS         } => {
+//RS             let Some(bindings) = crate::Codegen::TIR::if_cond_in_subset(cond, cx, locals) else {
+//RS                 return false;
+//RS             };
+//RS             let mut then_locals = locals.clone();
+//RS             then_locals.extend(bindings);
+//RS             if !then_body
+//RS                 .iter()
+//RS                 .all(|s| stmt_in_subset(s, cx, &mut then_locals))
+//RS             {
+//RS                 return false;
+//RS             }
+//RS             if !expr_in_subset(then_value, cx, &then_locals) {
+//RS                 return false;
+//RS             }
+//RS             let mut else_locals = locals.clone();
+//RS             else_body
+//RS                 .iter()
+//RS                 .all(|s| stmt_in_subset(s, cx, &mut else_locals))
+//RS                 && expr_in_subset(else_value, cx, &else_locals)
+//RS         }
+//RS         // c109 Phase 3: a struct literal `S { f: v, … }`. Covered only when `S`
+//RS         // is a plain user struct the subset lowers, with no trait coercion or
+//RS         // cross-module namespace, and every field value is itself in-subset.
+//RS         Expr::StructLit {
+//RS             type_name,
+//RS             type_args,
+//RS             import_ns,
+//RS             as_trait,
+//RS             fields,
+//RS             ..
+//RS         } => {
+//RS             let core_email_struct = import_ns.as_deref().is_some_and(|alias| {
+//RS                 cx.any_core_import_module(alias) == Some(crate::Syntax::CORE_EMAIL_MODULE)
+//RS                     && matches!(
+//RS                         type_name.as_str(),
+//RS                         "RecipientReport" | "SendReport" | "Limits" | "DKIMConfig" | "SMTPConfig"
+//RS                     )
+//RS             });
+//RS             let core_cbor_struct = import_ns.as_deref().is_some_and(|alias| {
+//RS                 cx.any_core_import_module(alias) == Some("core.encoding.cbor")
+//RS                     && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
+//RS                     && type_args.is_empty()
+//RS             });
+//RS             let core_encoding_struct = import_ns.as_deref().is_some_and(|alias| {
+//RS                 cx.any_core_import_module(alias) == Some("core.encoding")
+//RS                     && matches!(
+//RS                         type_name.as_str(),
+//RS                         "EncodingLimits" | "EncodingCause" | "EncodingError"
+//RS                     )
+//RS                     && type_args.is_empty()
+//RS             });
+//RS             let core_xml_struct = import_ns.as_deref().is_some_and(|alias| {
+//RS                 cx.any_core_import_module(alias) == Some("core.encoding.xml")
+//RS                     && matches!(
+//RS                         type_name.as_str(),
+//RS                         "XMLLimits"
+//RS                             | "XMLParseOptions"
+//RS                             | "XMLRenderOptions"
+//RS                             | "XMLCanonical"
+//RS                             | "XMLError"
+//RS                     )
+//RS                     && type_args.is_empty()
+//RS             });
+//RS             // c109 Phase 30: a TRAIT-OBJECT coercion (S48 — `Circle {…}` in a `[Shape]`
+//RS             // list). The AST wraps the rendered literal `Box::new(<lit>) as Box<dyn
+//RS             // __jet_<Trait>>` (`emit_struct_lit`'s `as_trait` branch). Covered when the trait
+//RS             // is a known user trait and the base is a PLAIN covered user struct (no import_ns,
+//RS             // no type_args — a coerced foreign/generic literal is not a construct any covered
+//RS             // program produces, so stay conservative and require the plain form). The fields
+//RS             // are checked in the plain-struct path below. A coercion to a non-trait name (or a
+//RS             // foreign/generic coerced literal) stays excluded.
+//RS             if let Some(trait_name) = as_trait {
+//RS                 if !cx.trait_names.contains(trait_name)
+//RS                     || import_ns.is_some()
+//RS                     || !type_args.is_empty()
+//RS                     || is_prelude_struct_name(type_name)
+//RS                     || !is_covered_struct_ty(&Type::Named(type_name.clone()), cx)
+//RS                 {
+//RS                     return false;
+//RS                 }
+//RS                 return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
+//RS             }
+//RS             // c109 Phase 19: a FOREIGN (imported user) struct literal — a `import_ns`
+//RS             // namespace head (`{root}{mod}::{__jet_<Name>}[::<args>]`, mangled fields).
+//RS             // Covered when the named foreign type is a covered foreign struct and the
+//RS             // import alias resolves; the head is resolved at lowering (`lower_expr`).
+//RS             if import_ns.is_some()
+//RS                 && !core_email_struct
+//RS                 && !core_cbor_struct
+//RS                 && !core_encoding_struct
+//RS                 && !core_xml_struct
+//RS             {
+//RS                 return foreign_struct_lit_in_subset(
+//RS                     type_name,
+//RS                     type_args,
+//RS                     import_ns.as_deref(),
+//RS                     cx,
+//RS                 ) && fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
+//RS             }
+//RS             // The bare imported form is admitted only when its leaf resolves to one
+//RS             // canonical foreign identity. Ambiguous leaves stay out of the subset.
+//RS             if import_ns.is_none()
+//RS                 && !core_email_struct
+//RS                 && !core_cbor_struct
+//RS                 && !core_encoding_struct
+//RS                 && !core_xml_struct
+//RS                 && foreign_struct_lit_in_subset(type_name, type_args, None, cx)
+//RS             {
+//RS                 return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
+//RS             }
+//RS             // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`
+//RS             // → the turbofish `__jet_Pair::<T> { … }`). The base must be a covered struct
+//RS             // and every type arg covered/type-var (`is_covered_generic_struct_ty`). The
+//RS             // turbofish head is resolved at lowering via `user_type_apply_rust`.
+//RS             if !type_args.is_empty() {
+//RS                 if !is_covered_generic_struct_ty(
+//RS                     &Type::Apply {
+//RS                         name: type_name.clone(),
+//RS                         args: type_args.clone(),
+//RS                     },
+//RS                     cx,
+//RS                 ) {
+//RS                     return false;
+//RS                 }
+//RS                 return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
+//RS             }
+//RS             // c109 Phase 17: a PRELUDE struct literal (HTTPRequest/HTTPResponse) — the
+//RS             // `is_prelude_struct` branch of `emit_struct_lit` (a `<root>Jet…` head, PLAIN
+//RS             // field names, and an auto `params: BTreeMap::new()` for HTTPRequest).
+//RS             // Reproduced in `lower_expr`'s StructLit arm. Otherwise the named type must be a
+//RS             // covered user struct (`__jet_<name>` head, mangled fields).
+//RS             // c109: a recursive (boxed) struct is CONSTRUCTIBLE (the boxed field value is
+//RS             // wrapped `Box::new(…)`, a total fact at lowering) even though it is not a
+//RS             // covered VALUE type (a boxed field READ needs deref, kept on the AST path).
+//RS             if !is_prelude_struct_name(type_name)
+//RS                 && !is_covered_struct_ty(&Type::Named(type_name.clone()), cx)
+//RS                 && !struct_lit_constructible(type_name, cx, &mut HashSet::new())
+//RS             {
+//RS                 return false;
+//RS             }
+//RS             fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals))
+//RS         }
+//RS         // D-DOTCTOR3: should be elaborated away in sema; if present, walk body.
+//RS         Expr::TypedLit { body, .. } => {
+//RS             let mut ok = true;
+//RS             body.for_each_expr(|e| {
+//RS                 if ok {
+//RS                     ok = expr_in_subset(e, cx, locals);
+//RS                 }
+//RS             });
+//RS             ok
+//RS         }
+//RS         // c109 Phase 3: a struct field *read*. A non-Copy owning read was already
+//RS         // rewritten to a `.clone()` MethodCall by sema (which the subset excludes,
+//RS         // via the `MethodCall` arm below being absent — `_ => false`); what reaches
+//RS         // here is a borrow-position read. Cover it when the receiver is in-subset.
+//RS         // (`receiver.field` where the receiver is a known module/enum path is not a
+//RS         // `Field` value read — sema lowers those to other nodes — so a plain
+//RS         // in-subset receiver is the struct-value case.)
+//RS         Expr::Field(receiver, member, _) => {
+//RS             // `.clone` is never a real field; defensively exclude (sema's synthetic
+//RS             // clone is a MethodCall, not a Field, but a user `.clone` field read
+//RS             // would collide with the clone-emit special-case in the AST path).
+//RS             if member == "clone" {
+//RS                 return false;
+//RS             }
+//RS             // Sema types `math.pi` / `math.e` / … as module fields
+//RS             // (`infer_core_field`). Lower them as Float literals. Admit them
+//RS             // before the non-local ident veto, which otherwise refuses the
+//RS             // alias and ICEs as "expression `pi`".
+//RS             if core_module_path_from_receiver(receiver, cx, locals).as_deref() == Some("core.math")
+//RS                 && matches!(member.as_str(), "pi" | "e" | "tau" | "infinity" | "nan")
+//RS             {
+//RS                 return true;
+//RS             }
+//RS             if crate::Codegen::TIR::grouped_enum_unit_variant(cx, receiver, member, |name| {
+//RS                 locals.contains(name)
+//RS             })
+//RS             .is_some()
+//RS             {
+//RS                 return true;
+//RS             }
+//RS             // c109 Phase 4: a *unit* enum literal reaches codegen as a `Field` whose
+//RS             // receiver is the enum-name ident (sema only re-types it; it does NOT
+//RS             // rewrite the node — only payload literals become `Expr::EnumLit`). The
+//RS             // AST path emits `__jet_<Enum>::__jet_<variant>` for this case. Cover it
+//RS             // when the enum is a covered scalar-payload enum and `member` is one of
+//RS             // its (unit) variants. A receiver that is a known local can't also be a
+//RS             // covered enum name, so the two branches never collide.
+//RS             if let Expr::Ident(enum_name, _) = receiver.as_ref() {
+//RS                 let resolved_enum = cx
+//RS                     .core_qualified_rust_type_name(enum_name)
+//RS                     .unwrap_or(enum_name.as_str());
+//RS                 if !locals.contains(enum_name)
+//RS                     && ((resolved_enum == "SMTPSecurity"
+//RS                         && matches!(member.as_str(), "StartTLS" | "TLS"))
+//RS                         || (resolved_enum == "RecipientPolicy"
+//RS                             && matches!(member.as_str(), "RequireAll" | "DeliverAccepted"))
+//RS                         || (resolved_enum == "SMTPAuth" && member == "None")
+//RS                         || (resolved_enum == "TLSTrust" && member == "System")
+//RS                         // Core net readiness/shutdown unit variants (Field form `NetReadyInterest.Write`).
+//RS                         || (resolved_enum == "NetReadyInterest"
+//RS                             && matches!(member.as_str(), "Read" | "Write" | "ReadWrite"))
+//RS                         || (resolved_enum == "NetShutdown"
+//RS                             && matches!(member.as_str(), "Read" | "Write" | "Both")))
+//RS                 {
+//RS                     return true;
+//RS                 }
+//RS                 // D-FOUND-PLATFORM1=A: font enums are canonical Core values
+//RS                 // carried by the shared Prelude (not user enums, so Cx has no
+//RS                 // `enum_variants` row). The lowerer still emits the ordinary
+//RS                 // unit `EnumLit`, and `Cx::rust_type` owns the carrier spelling.
+//RS                 if !locals.contains(enum_name)
+//RS                     && !cx.type_names.contains(enum_name)
+//RS                     && matches!(resolved_enum, "FontStyle" | "GlyphShaper")
+//RS                     && jet_foundation::CoreModuleExports::core_enum_variants(resolved_enum)
+//RS                         .is_some_and(|variants| variants.contains(&member.as_str()))
+//RS                 {
+//RS                     return true;
+//RS                 }
+//RS                 if enum_name == "DataEvent"
+//RS                     && matches!(
+//RS                         member.as_str(),
+//RS                         "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd"
+//RS                     )
+//RS                 {
+//RS                     return true;
+//RS                 }
+//RS                 if (enum_name == "EncodingFormat"
+//RS                     && matches!(member.as_str(), "JSON" | "JSONL" | "CSV" | "XML" | "CBOR"))
+//RS                     || (enum_name == "EncodingErrorKind"
+//RS                         && matches!(
+//RS                             member.as_str(),
+//RS                             "Syntax" | "Truncated" | "Unsupported" | "Limit" | "IO" | "State"
+//RS                         ))
+//RS                 {
+//RS                     return true;
+//RS                 }
+//RS                 if !locals.contains(enum_name)
+//RS                     && (enum_is_covered(resolved_enum, cx)
+//RS                         || crate::Codegen::core_rust_type_name(resolved_enum).is_some())
+//RS                     && cx.enum_variants.get(resolved_enum).is_some_and(|variants| {
+//RS                         variants.iter().any(|(name, payload)| {
+//RS                             name == member && matches!(payload, crate::AST::VariantPayload::Unit)
+//RS                         })
+//RS                     })
+//RS                 {
+//RS                     return true;
+//RS                 }
+//RS                 // A selectively imported enum keeps its canonical owner in the
+//RS                 // variant table while the source receiver remains the visible leaf
+//RS                 // (`NoteType.User`). Resolve that owner before the ordinary local
+//RS                 // `variant_owner == enum_name` check; the canonical identity is the
+//RS                 // only Rust head the TIR may emit for a foreign enum.
+//RS                 if !locals.contains(enum_name)
+//RS                     && cx.variant_owner.get(member).is_some_and(|owner| {
+//RS                         owner.rsplit("::").next() == Some(enum_name) && enum_is_covered(owner, cx)
+//RS                     })
+//RS                 {
+//RS                     return true;
+//RS                 }
+//RS                 // c109 Phase 24: the `JSON.Null` unit construction reaches codegen as a
+//RS                 // `Field` (the AST `emit_expr` Field arm emits `{root}jet_std::JSON::Null`,
+//RS                 // Expression.rs ~L222). Cover it (the only no-arg JSON variant).
+//RS                 if !locals.contains(enum_name) && is_json_type_name(enum_name) && member == "Null" {
+//RS                     return true;
+//RS                 }
+//RS                 // D-DBDRIVER1: `DBValue.Null` — the same no-arg-`Field` shape as
+//RS                 // `JSON.Null` above, for the tagged SQL parameter/column value.
+//RS                 if !locals.contains(enum_name)
+//RS                     && is_db_value_type_name(enum_name)
+//RS                     && member == "Null"
+//RS                 {
+//RS                     return true;
+//RS                 }
+//RS                 // c109 Phase 28: a numeric BOUNDS constant (`U8.MAX`/`I32.MIN`/
+//RS                 // `Float.INFINITY`/… — D-NUMOPS1) reaches codegen as a `Field` whose
+//RS                 // receiver is a numeric type NAME and `member` is one of the per-type
+//RS                 // const names. The AST `emit_expr` Field arm (Expression.rs ~L224) emits
+//RS                 // `{rust_type}::{member}` (e.g. `u8::MAX`, `f64::INFINITY`). Cover it: a
+//RS                 // non-local numeric type name + a known const member. The rendered value
+//RS                 // + result type are resolved at lowering (`numeric_type_from_name`).
+//RS                 if !locals.contains(enum_name)
+//RS                     && crate::AST::numeric_type_from_name(enum_name).is_some()
+//RS                     && is_numeric_bounds_const(member)
+//RS                 {
+//RS                     return true;
+//RS                 }
+//RS                 // c109: a comptime-const receiver (`@PAIR_VALUE :: Pair{…}`; then
+//RS                 // `PAIR_VALUE.left`).
+//RS                 // The const inlines to its pre-rendered Rust value string (`cx.consts[P]`
+//RS                 // = `__jet_Pair { … }`) at the use site, and reading a field off it is a
+//RS                 // plain place read — the AST `emit_expr` Field arm routes the const-ident
+//RS                 // `inner` through `boxed_field_read`, which calls `emit_expr(Ident)` →
+//RS                 // `cx.consts[P]`, yielding `((__jet_Pair { … }).__jet_<field>)`. The TIR
+//RS                 // reproduces this exactly (`lower_expr`'s Ident arm already inlines the
+//RS                 // const string; the Field arm wraps it). A comptime const can hold a
+//RS                 // struct or enum value; either way the field read is byte-identical.
+//RS                 if !locals.contains(enum_name) && cx.consts.contains_key(enum_name) {
+//RS                     return true;
+//RS                 }
+//RS                 // A non-local ident receiver that is NOT a covered enum / comptime const
+//RS                 // (a core/json/numeric path, an imported namespace, a module alias) is
+//RS                 // excluded — those use Rust heads/spellings the subset does not emit.
+//RS                 if !locals.contains(enum_name) {
+//RS                     return false;
+//RS                 }
+//RS             }
+//RS             // c109: a boxed (recursive) struct field READ (`t.child` where the field is
+//RS             // `Box<…>`) is now covered — the read derefs the Box (`(*(…))`, a total
+//RS             // `boxed` fact lowered from `cx.boxed_edges`, mirroring the AST `boxed_field_read`).
+//RS             // In-subset iff the receiver is.
+//RS             expr_in_subset(receiver, cx, locals)
+//RS         }
+//RS         // c109 Phase 4: an enum literal `Enum.Variant`/`Variant(args)`/named. Covered
+//RS         // only when the named enum is a covered scalar-payload enum and every arg
+//RS         // value is itself in-subset (a scalar/Char value — the enum being covered
+//RS         // already guarantees the payload *types* are scalar, so no clone/box).
+//RS         Expr::EnumLit {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS             ..
+//RS         } => {
+//RS             let resolved_type = cx
+//RS                 .core_qualified_rust_type_name(type_name)
+//RS                 .unwrap_or(type_name.as_str());
+//RS             if (resolved_type == "SMTPSecurity" && matches!(variant.as_str(), "StartTLS" | "TLS"))
+//RS                 || (resolved_type == "RecipientPolicy"
+//RS                     && matches!(variant.as_str(), "RequireAll" | "DeliverAccepted"))
+//RS             {
+//RS                 return args.is_empty();
+//RS             }
+//RS             if (resolved_type == "SMTPAuth" && matches!(variant.as_str(), "None" | "Password"))
+//RS                 || (resolved_type == "TLSTrust"
+//RS                     && matches!(variant.as_str(), "System" | "SystemPlusCa"))
+//RS             {
+//RS                 return args.iter().all(|arg| match arg {
+//RS                     EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),
+//RS                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
+//RS                 });
+//RS             }
+//RS             if resolved_type == "TLSVersion" {
+//RS                 return args.is_empty() && matches!(variant.as_str(), "TLS12" | "TLS13");
+//RS             }
+//RS             if resolved_type == "TLSClientTrust"
+//RS                 && matches!(variant.as_str(), "System" | "SystemPlus" | "CustomOnly")
+//RS             {
+//RS                 return args.iter().all(|arg| match arg {
+//RS                     EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),
+//RS                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
+//RS                 });
+//RS             }
+//RS             if resolved_type == "HTTPProxy"
+//RS                 && matches!(variant.as_str(), "FromEnvironment" | "None" | "URL")
+//RS             {
+//RS                 return args.iter().all(|arg| match arg {
+//RS                     EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),
+//RS                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
+//RS                 });
+//RS             }
+//RS             // D-HTTP-CORS1=A: `.Any` / `.List([...])` CORS origins.
+//RS             if resolved_type == "HTTPCorsOrigins" && matches!(variant.as_str(), "Any" | "List") {
+//RS                 return args.iter().all(|arg| match arg {
+//RS                     EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),
+//RS                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
+//RS                 });
+//RS             }
+//RS             if resolved_type == "HTTPRedirectPolicy" && variant == "Follow" {
+//RS                 return args.iter().all(|arg| match arg {
+//RS                     EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),
+//RS                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
+//RS                 });
+//RS             }
+//RS             if resolved_type == "HTTPRetryPolicy"
+//RS                 && matches!(variant.as_str(), "None" | "Safe" | "Idempotent")
+//RS             {
+//RS                 return args.is_empty();
+//RS             }
+//RS             if resolved_type == "HTTPCookieJar" && variant == "Memory" {
+//RS                 return args.is_empty();
+//RS             }
+//RS             if resolved_type == "HTTPCompressEncoding" && variant == "Gzip" {
+//RS                 return args.is_empty();
+//RS             }
+//RS             // D-TERM1 (ratified 2026-06-22): `Key` is a core prelude enum, not in
+//RS             // the user registry, but is always covered — all payloads are scalar/Char.
+//RS             let key_type = crate::Syntax::TYPE_KEY;
+//RS             if type_name == key_type {
+//RS                 if !is_key_variant(variant) {
+//RS                     return false;
+//RS                 }
+//RS                 return args.iter().all(|a| match a {
+//RS                     EnumLitArg::Positional(e) => expr_in_subset(e, cx, locals),
+//RS                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
+//RS                 });
+//RS             }
+//RS             // Shared Prelude unit enums lower through their registered variant names.
+//RS             if matches!(
+//RS                 resolved_type,
+//RS                 "FontStyle"
+//RS                     | "GlyphShaper"
+//RS                     | "WebFormValueType"
+//RS                     | "WebFormControl"
+//RS                     | "WebFormValidationTiming"
+//RS                     | "WebTableSortDirection"
+//RS                     | "WebTablePageMode"
+//RS             ) {
+//RS                 return args.is_empty()
+//RS                     && jet_foundation::CoreModuleExports::core_enum_variants(resolved_type)
+//RS                         .is_some_and(|variants| variants.contains(&variant.as_str()));
+//RS             }
+//RS             // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum, always
+//RS             // covered — all three variants are unit (no payload args to check).
+//RS             if type_name == "ProcessStreamMode" {
+//RS                 return matches!(variant.as_str(), "Stream" | "Inherit" | "Capture");
+//RS             }
+//RS             if type_name == crate::Syntax::TYPE_TERMINAL_MODE {
+//RS                 return matches!(variant.as_str(), "Raw" | "Cooked");
+//RS             }
+//RS             // D-TEXTWIDTH1=B: `TextWidth`'s two field enums, always
+//RS             // covered — every variant is unit (no payload args to check).
+//RS             if type_name == "TextWidthAmbiguous" {
+//RS                 return matches!(variant.as_str(), "Narrow" | "Wide");
+//RS             }
+//RS             if type_name == "TextWidthControls" {
+//RS                 return matches!(variant.as_str(), "Zero" | "Reject");
+//RS             }
+//RS             // stdlib-api-laws D4: `WatchEvent`'s two field enums, always
+//RS             // covered — every variant is unit (no payload args to check).
+//RS             if type_name == "WatchDomain" {
+//RS                 return matches!(variant.as_str(), "File" | "Process" | "Port");
+//RS             }
+//RS             if type_name == "WatchKind" {
+//RS                 return matches!(
+//RS                     variant.as_str(),
+//RS                     "Created" | "Modified" | "Removed" | "Error" | "Exited" | "Ready"
+//RS                 );
+//RS             }
+//RS             if type_name == crate::Syntax::DURATION_UNIT_TYPE {
+//RS                 return crate::Syntax::DURATION_UNITS.contains(&variant.as_str());
+//RS             }
+//RS             if type_name == crate::Syntax::TYPE_REDUCE_OP {
+//RS                 return args.is_empty()
+//RS                     && matches!(variant.as_str(), "Add" | "Mul" | "Min" | "Max" | "Avg");
+//RS             }
+//RS             if type_name == "NetShutdown" {
+//RS                 return matches!(variant.as_str(), "Read" | "Write" | "Both");
+//RS             }
+//RS             if type_name == "NetReadyInterest" {
+//RS                 return matches!(variant.as_str(), "Read" | "Write" | "ReadWrite");
+//RS             }
+//RS             if resolved_type == "XMLCanonicalMode" {
+//RS                 return args.is_empty()
+//RS                     && matches!(variant.as_str(), "Inclusive11" | "Exclusive10");
+//RS             }
+//RS             if resolved_type == "XMLEncoding" {
+//RS                 return args.is_empty()
+//RS                     && matches!(variant.as_str(), "UTF8" | "UTF8BOM" | "UTF16LE" | "UTF16BE");
+//RS             }
+//RS             if resolved_type == "XMLLexicalPolicy" {
+//RS                 return args.is_empty()
+//RS                     && matches!(variant.as_str(), "PreserveValid" | "Deterministic");
+//RS             }
+//RS             if !enum_is_covered(resolved_type, cx)
+//RS                 && !(crate::Codegen::core_rust_type_name(resolved_type).is_some()
+//RS                     && cx.enum_variants.contains_key(resolved_type))
+//RS             {
+//RS                 return false;
+//RS             }
+//RS             // Defensive: the variant must belong to this enum (sema guaranteed it).
+//RS             if !cx
+//RS                 .enum_variants
+//RS                 .get(resolved_type)
+//RS                 .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
+//RS             {
+//RS                 return false;
+//RS             }
+//RS             args.iter().all(|a| match a {
+//RS                 EnumLitArg::Positional(e) => expr_in_subset(e, cx, locals),
+//RS                 EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
+//RS             })
+//RS         }
+//RS         // c109 Phase 5: a list literal `[a, b, c]`. Covered when every element is
+//RS         // itself in-subset. (An empty `[]` has no elements; sema requires a context
+//RS         // type — E0501 — which a covered binding/param/return supplies, so the
+//RS         // resulting `vec![]` is type-inferred by Rust from that context.)
+//RS         Expr::ListLit(elems, _) => elems.iter().all(|e| expr_in_subset(e, cx, locals)),
+//RS         // D-RANGE-VALUE1=A: a range value carries its checked Int bounds and
+//RS         // inclusivity into TIR. Literal `loop` ranges remain `ForKind::Range`,
+//RS         // so this admission does not change their direct-jump lowering.
+//RS         Expr::Range { start, end, .. } => {
+//RS             expr_in_subset(start, cx, locals) && expr_in_subset(end, cx, locals)
+//RS         }
+//RS         // D-VARIADIC1: list/call spread — covered when the spread operand is in-subset.
+//RS         Expr::Spread(inner, _) => expr_in_subset(inner, cx, locals),
+//RS         // c109 Phase 23: a named-tuple literal `(x: 1, y: 2)` (S73/D-SG7). Covered when
+//RS         // sema resolved the tuple TYPE (`ty.is_some()` — the canonical field order +
+//RS         // struct name come from it; an unresolved `ty` would force the AST's empty-
+//RS         // canonical `0i64` default, which the TIR must not guess) and every field value
+//RS         // is in-subset. The literal's values are reordered to the type's canonical field
+//RS         // order at lowering, reproducing `emit_expr`'s `TupleLit` arm.
+//RS         Expr::TupleLit(fields, _, ty) => {
+//RS             matches!(ty, Some(Type::Tuple(_)))
+//RS                 && fields.iter().all(|(_, e)| expr_in_subset(e, cx, locals))
+//RS         }
+//RS         // c109 Phase 5: a map literal `[k: v, …]` / `[:]`. Covered when every key
+//RS         // and value is in-subset. The empty `[:]` (no entries) is always covered.
+//RS         Expr::MapLit(entries, _) => entries
+//RS             .iter()
+//RS             .all(|(k, v)| expr_in_subset(k, cx, locals) && expr_in_subset(v, cx, locals)),
+//RS         // c109 Phase 5: indexing `coll[i]`. The `IndexKind` must be sema-resolved
+//RS         // (not `Unknown`) so the helper dispatch (`jet_index_map`/`jet_index_vec`)
+//RS         // is a total fact carried onto the TIR. Base + index must be in-subset.
+//RS         Expr::Index {
+//RS             base, index, kind, ..
+//RS         } => {
+//RS             !matches!(kind, IndexKind::Unknown)
+//RS                 && expr_in_subset(base, cx, locals)
+//RS                 && expr_in_subset(index, cx, locals)
+//RS         }
+//RS         // c109 Phase 5: an inclusive copy slice `coll[a..b]` (lists only — the AST
+//RS         // path's `jet_slice_vec` is list-specific). Base/start/end must be in-subset.
+//RS         Expr::Slice {
+//RS             base,
+//RS             start,
+//RS             end,
+//RS             range,
+//RS             ..
+//RS         } => {
+//RS             expr_in_subset(base, cx, locals)
+//RS                 && range.as_deref().map_or_else(
+//RS                     || expr_in_subset(start, cx, locals) && expr_in_subset(end, cx, locals),
+//RS                     |range| expr_in_subset(range, cx, locals),
+//RS                 )
+//RS         }
+//RS         // c109 Phase 6: a method call. Covered in exactly two shapes:
+//RS         //   (a) the sema-inserted `.clone()` (an owning non-Copy field read /
+//RS         //       borrowed value in owning position) — `(recv).clone()`;
+//RS         //   (b) a user-defined instance method on a covered struct/enum type
+//RS         //       (`recv_type` is `Some(T)`, `(T, method)` ∈ `method_sigs`, and the
+//RS         //       method name is NOT one a core/stdlib/builtin lowering intercepts).
+//RS         // Everything else (core/stdlib/collection/string/numeric methods, static
+//RS         // calls — whose `recv_type` is `None` — fallible/optional, fan-out, …) stays
+//RS         // on the AST path.
+//RS         Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             recv_type,
+//RS             resolved_ret,
+//RS             ..
+//RS         } => method_call_in_subset(receiver, method, args, recv_type, resolved_ret, cx, locals),
+//RS         // D-TAINT1: `#Tainted expr` — the tag is erased; in-subset iff the inner is.
+//RS         Expr::Tainted(inner, _, _) => expr_in_subset(inner, cx, locals),
+//RS         // c109 Phase 8: optional constructors `value(x)` / `null`. Covered when the
+//RS         // inner value (if any) is in-subset — they lower to `Some(x)` / `None`.
+//RS         Expr::Present(inner, _) => expr_in_subset(inner, cx, locals),
+//RS         Expr::Absent(_) => true,
+//RS         // D-REDUCE-VALUE1: a validated ReduceOp. Only appears inside `v.reduce(.Op)`; the
+//RS         // method lowering consumes it (it never emits on its own), so it is in-subset.
+//RS         Expr::ReduceMarker(_, _) => true,
+//RS         // c109 Phase 23: a `#Todo` typed goal. Covered when sema filled the expected
+//RS         // type (`expected_type.is_some()`); a `None` (sema didn't run/resolve) stays on
+//RS         // the AST path so the TIR never guesses the `(unknown)` fallback.
+//RS         Expr::Todo { expected_type, .. } => expected_type.is_some(),
+//RS         // Card #1440: the dead end of a sema-proved exhaustive dispatch — a
+//RS         // constant diverging leaf, trivially in-subset.
+//RS         Expr::NoElse(_) => true,
+//RS         // c109 Phase 8: fallible constructors `Ok(x)` / `Err(e)`. Covered when the
+//RS         // inner value is in-subset — they lower to `Ok(x)` / `Err(e)`.
+//RS         Expr::Ok(inner, _) | Expr::Err(inner, _) => expr_in_subset(inner, cx, locals),
+//RS         // c109 Phase 8: the `?` propagation operator. The `TryConvert` decision is a
+//RS         // total sema fact (`None`/`Typed { .. }`), reproduced verbatim. The
+//RS         // inner fallible value and the lazy note must themselves be in-subset (a
+//RS         // user fallible fn call, a local, an `ok`/`err` literal, or a covered
+//RS         // string interpolation). A core/stdlib fallible call (e.g. `fs.read`)
+//RS         // is NOT in-subset (it stays on the AST path — Phase 10), so a `?` on one is
+//RS         // excluded automatically.
+//RS         Expr::Try(inner, _, _, note) => {
+//RS             expr_in_subset(inner, cx, locals)
+//RS                 && note
+//RS                     .as_deref()
+//RS                     .is_none_or(|note| expr_in_subset(note, cx, locals))
+//RS         }
+//RS         // c109 Phase 8: the `??` fallback operator. `is_option` is total. The value
+//RS         // and the fallback must be in-subset. The Panic fallback form is deferred
+//RS         // (its `safe_locals_expr` reproduction is out of subset) — only Value and
+//RS         // early-`return` fallbacks are covered.
+//RS         Expr::OrFallback {
+//RS             value, fallback, ..
+//RS         } => expr_in_subset(value, cx, locals) && orfallback_rhs_in_subset(fallback, cx, locals),
+//RS         // c109 Phase 8: optional chaining `base?.member`. The `flatten` fact is total
+//RS         // (from sema). The base must be in-subset; the member read lowers to a plain
+//RS         // `.map`/`.and_then` closure access (no further dispatch).
+//RS         Expr::OptField { base, .. } => expr_in_subset(base, cx, locals),
+//RS         // c109 Phase 11: a lambda/closure literal. Covered when its body is in-subset
+//RS         // (lowered on the outer scope extended with the lambda's params + cloned
+//RS         // captures) and every capture/escape decision is a total `Lambda.meta` fact.
+//RS         Expr::Lambda(lam) => lambda_in_subset(lam, cx, locals),
+//RS         // c109 Phase 13: a direct call THROUGH a fn-value (`Expr::CallValue`).
+//RS         // Sema's `.call(args)` projection joins the same TIR function-value path.
+//RS         // Covered when the callee is in-subset (a fn-typed local, a fn-name value, or
+//RS         // a lambda) and every arg is in-subset. The AST path emits `({callee})({args})`
+//RS         // with args lowered plainly (`emit_call_args(.., None, ..)`), so no convention
+//RS         // facts are needed — any in-subset arg works; labels are still excluded.
+//RS         Expr::CallValue { callee, args, .. }
+//RS             if args.is_empty()
+//RS                 && matches!(
+//RS                     callee.as_ref(),
+//RS                     Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop
+//RS                 ) =>
+//RS         {
+//RS             let Expr::Lambda(lam) = callee.as_ref() else {
+//RS                 unreachable!("inline-loop guard requires a lambda")
+//RS             };
+//RS             lambda_in_subset(lam, cx, locals)
+//RS         }
+//RS         Expr::CallValue { callee, args, .. } => {
+//RS             expr_in_subset(callee, cx, locals)
+//RS                 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals))
+//RS         }
+//RS         // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr`, S58). The
+//RS         // address expr must be in-subset. The cast itself is safe Rust (no `unsafe`); it
+//RS         // is only constructible inside `use core.mem` + an `#Unsafe` region (sema
+//RS         // E3101/E3102), so it never appears in a non-unsafe context. `elem` is a total
+//RS         // type on the node — emit needs no inference.
+//RS         Expr::PtrFromAddr { addr, .. } => expr_in_subset(addr, cx, locals),
+//RS         // D-CAP9: postfix `p.*` deref and prefix `*x` raw-of. Both only appear
+//RS         // inside `use core.mem` + an `#Unsafe` region (sema-gated by E0208); the
+//RS         // deref/cast forms are byte-for-byte the AST path (no convention facts).
+//RS         Expr::Deref(inner, _) | Expr::RawOf(inner, _) => expr_in_subset(inner, cx, locals),
+//RS         // D-CAP2 (D-MEM1/S4): `copy x` — in-subset whenever `x` is.
+//RS         Expr::Copy(inner, _) => expr_in_subset(inner, cx, locals),
+//RS         Expr::Place(inner, _, _) => expr_in_subset(inner, cx, locals),
+//RS         // D-BINPAT1 / D-SHIFT1: take_pattern literals are compile-time pattern
+//RS         // trees. The handle-method gate matches them; covering the leaves here
+//RS         // keeps helper uses and any future call shape from dropping `run`.
+//RS         Expr::BinMatchLit(..) | Expr::StrMatchLit(..) => true,
+//RS         // Everything else (tuples, …) is out.
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-NARG-D2: is `name` one of the compiler-private slot names that the shared
+//RS /// call binder creates for an omitted default argument? The lowerer installs
+//RS /// these names only while lowering that argument; accepting their shape here
+//RS /// keeps the coverage proof aligned with that total lowering fact.
+//RS fn is_binder_ref_name(name: &str) -> bool {
+//RS     let Some(rest) = name.strip_prefix(&mangle_generated("binder_ref_")) else {
+//RS         return false;
+//RS     };
+//RS     let Some((site, slot)) = rest.split_once('_') else {
+//RS         return false;
+//RS     };
+//RS     !site.is_empty()
+//RS         && !slot.is_empty()
+//RS         && site.chars().all(|ch| ch.is_ascii_digit())
+//RS         && slot.chars().all(|ch| ch.is_ascii_digit())
+//RS }
+//RS 
+//RS /// c109 Phase 13: is `name` a bare top-level function used as a VALUE? It must be a
+//RS /// non-local, non-const name in `cx.fn_types` whose type is a `Type::Fn`. Such a name
+//RS /// emits `emit_named_fn_value`'s `Box::new(move |…| __jet_<name>(…)) as <fn-type>`
+//RS /// (Source/Codegen/Statement.rs). A const (inlined value) or an unqualified module
+//RS /// import is NOT a fn-value, so this stays narrow.
+//RS pub(crate) fn ident_is_named_fn_value(name: &str, cx: &Cx, locals: &HashSet<String>) -> bool {
+//RS     !locals.contains(name)
+//RS         && !cx.consts.contains_key(name)
+//RS         && matches!(cx.fn_types.get(name), Some(Type::Fn { .. }))
+//RS }
+//RS 
+//RS /// c109 Phase 8/15: is a `??` fallback right-hand side in-subset? `Value` and early
+//RS /// `return [expr]` are covered (Phase 8). c109 Phase 15: the `panic(…)` form is now
+//RS /// covered too — `emit_panic_stop`/`safe_locals_expr` is resolved from the lexical
+//RS /// lowering environment at the panic site. The panic message expression must
+//RS /// be in-subset (it is lowered into the rendered panic string). `panic(…)` always takes
+//RS /// exactly one message argument (the parser builds `OrFallback::Panic{args}` from it).
+//RS pub(crate) fn orfallback_rhs_in_subset(
+//RS     fallback: &OrFallback,
+//RS     cx: &Cx,
+//RS     locals: &HashSet<String>,
+//RS ) -> bool {
+//RS     // D-FAIL-BIND1=A: sema provides `err` only for a fallible fallback, and
+//RS     // TIR lowers it to the generated ambient slot. Include the source spelling
+//RS     // in the coverage environment so the gate agrees with that lowering.
+//RS     let mut fallback_locals = locals.clone();
+//RS     fallback_locals.insert(Syntax::AMBIENT_ERR.to_string());
+//RS     match fallback {
+//RS         OrFallback::Value(e) => expr_in_subset(e, cx, &fallback_locals),
+//RS         OrFallback::Block { body, value, .. } => {
+//RS             body.iter()
+//RS                 .all(|stmt| stmt_in_subset(stmt, cx, &mut fallback_locals))
+//RS                 && value
+//RS                     .as_ref()
+//RS                     .is_none_or(|value| expr_in_subset(value, cx, &fallback_locals))
+//RS         }
+//RS         OrFallback::Return(None, _) => true,
+//RS         OrFallback::Return(Some(e), _) => expr_in_subset(e, cx, &fallback_locals),
+//RS         OrFallback::Panic { args, .. } => {
+//RS             args.len() == 1 && expr_in_subset(&args[0].expr, cx, &fallback_locals)
+//RS         }
+//RS         OrFallback::Break(_)
+//RS         | OrFallback::Continue(_)
+//RS         | OrFallback::BreakLabel(..)
+//RS         | OrFallback::ContinueLabel(..) => true,
+//RS     }
+//RS }
+//RS 
+//RS /// c109 Phase 11: is a lambda/closure literal in-subset? The body must be entirely
+//RS /// in-subset when classified against the outer scope extended with the lambda's
+//RS /// params (new locals) and its captures. The capture/escape/Fn-vs-FnMut facts are
+//RS /// all total (`Lambda.meta`), so nothing is re-derived; the gate only proves the
+//RS /// body lowers. A `take_names` capture is an outer local (already in `locals`); a
+//RS /// param shadows. The body sees: outer locals (captures resolve via them — the AST
+//RS /// rebinds a cloned capture to `__jet_cap_<n>` but the *name* stays in scope) plus
+//RS /// the params.
+//RS pub(crate) fn lambda_in_subset(lam: &Lambda, cx: &Cx, locals: &HashSet<String>) -> bool {
+//RS     let mut body_locals = locals.clone();
+//RS     for p in &lam.params {
+//RS         body_locals.insert(p.name.clone());
+//RS     }
+//RS     match &lam.body {
+//RS         LambdaBody::Expr(e) => expr_in_subset(e, cx, &body_locals),
+//RS         LambdaBody::Block(stmts) => stmts
+//RS             .iter()
+//RS             .all(|s| stmt_in_subset(s, cx, &mut body_locals)),
+//RS     }
+//RS }
+// END-PORT-PENDING 0522 crates/jet-codegen/src/Codegen/TIR/subset/expressions.rs:1-1126
+

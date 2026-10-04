@@ -27,17 +27,25 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
     place_row := [U64:Int]{}
     loop (index, row) in builder.places -> _ := &place_row.add(row.id.value, index)
 
-    // Candidate flags: a whole-local place whose local has no other place.
+    // Candidate flags: a whole-local place whose local has no other place,
+    // in flag place ID order.
+    flag_places := [U64]{}
+    seen_flags := [U64:Bool]{}
+    loop record in builder.drop_live_all {
+        if seen_flags.get(record.live.value) != None -> next
+        _ := &seen_flags.add(record.live.value, true)
+        &flag_places.push(record.live.value)
+    }
+    &flag_places.sort()
     flag_of_place := [U64:Int]{}
     flag_of_local := [U64:Int]{}
     flag_count := 0
-    loop record in builder.drop_live_all {
-        if flag_of_place.get(record.live.value) != None -> next
-        if place_row.get(record.live.value) == None -> next
-        row :: builder.places[place_row.get(record.live.value) ?? panic("checked drop flag row is missing")]
+    loop flag_place in flag_places {
+        if place_row.get(flag_place) == None -> next
+        row :: builder.places[place_row.get(flag_place) ?? panic("checked drop flag row is missing")]
         if row.projections.len() != 0 || row.persist_key != None -> next
         if row.base == .Local(local) {
-            _ := &flag_of_place.add(record.live.value, flag_count)
+            _ := &flag_of_place.add(flag_place, flag_count)
             _ := &flag_of_local.add(local.value, flag_count)
             flag_count += 1
         }
@@ -131,7 +139,8 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
 
     // Forward constant propagation of every flag to a fixed point over flat
     // block x flag rows. A resolved guard only passes its state along the
-    // edge it takes.
+    // edge it takes. The entry block and every block entered through a
+    // cleanup edge (a failure or unwind drop row) start unknown.
     states := [Int]{}
     loop filler in 0..<(block_count * count) -> &states.push(3)
     reached := [Bool]{}
@@ -141,11 +150,20 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
         &queued.push(false)
     }
     pending := [Int]{}
-    entry :: block_index.get(builder.entry.value) ?? -1
-    if entry >= 0 {
-        reached[entry] = true
-        queued[entry] = true
-        &pending.push(entry)
+    roots := [Int]{block_index.get(builder.entry.value) ?? -1}
+    loop row in builder.drops {
+        if row.edge == {
+            .Failure(target) | .Unwind(target) -> &roots.push(block_index.get(target.value) ?? -1)
+            else -> {}
+        }
+    }
+    loop root in roots {
+        if root < 0 -> next
+        reached[root] = true
+        if !queued[root] {
+            queued[root] = true
+            &pending.push(root)
+        }
     }
     read_state := [U64:Int]{}
     loop pending.len() > 0 {

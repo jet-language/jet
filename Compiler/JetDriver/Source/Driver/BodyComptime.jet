@@ -1,6 +1,7 @@
 // Body expressions enter the ordinary comptime source/value graph. The
 // canonical driver evaluator remains the sole execution path; this file owns
 // body-site discovery, staging, and the value-fed function recheck boundary.
+use core.files.runtime.kernel_path_components as compiler_driver_os_path
 use jet_foundation.[
     CompilerTraceSink,
     Diagnostic,
@@ -13,6 +14,7 @@ use jet_sema.[
     SemaComptimeItemSource,
     SemaComptimeItemValue,
     SemaGraphResult,
+    SemaIncrementalSemaCache,
     SemaRegistrationGraph,
     sema_comptime_body_item_source,
     sema_comptime_graph_with_values,
@@ -179,6 +181,8 @@ pub fn jet_driver_orchestrate_comptime_bodies(
     load: JetDriverLoadResult,
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
+    incremental_cache: Shared<SemaIncrementalSemaCache>?,
+    project_root: compiler_driver_os_path.OsPath,
 ) -> JetDriverComptimeBodyResult {
     current_graph := initial_graph
     values := ~initial_values
@@ -258,7 +262,7 @@ pub fn jet_driver_orchestrate_comptime_bodies(
         }
         values = run.values
         functions = run.functions
-        current_graph = jet_driver_recheck_comptime_bodies(graph, body_stage, values, functions, request.trace_sink)
+        current_graph = jet_driver_recheck_comptime_bodies(graph, body_stage, values, functions, request.trace_sink, incremental_cache, project_root)
     }
 }
 
@@ -329,6 +333,8 @@ pub fn jet_driver_recheck_comptime_bodies(
     values: [SemaComptimeItemValue],
     comptime_functions: [SemaComptimeFunctionResult],
     trace_sink: CompilerTraceSink?,
+    incremental_cache: Shared<SemaIncrementalSemaCache>?,
+    project_root: compiler_driver_os_path.OsPath,
 ) -> SemaGraphResult {
-    sema_finalize_registration_graph(graph, stage, values, comptime_functions, trace_sink)
+    sema_finalize_registration_graph(graph, stage, values, comptime_functions, trace_sink, incremental_cache, project_root)
 }

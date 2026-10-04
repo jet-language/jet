@@ -1,0 +1,81 @@
+// Native Rust derived-Debug punctuation shared by the generated typed closure.
+// Compact comparisons stream directly into the canonical SipHash13 state;
+// equal rows allocate no output buffer and pretty text is only built on a diff.
+use core.collections.runtime.kernel_siphash13 as image_debug_sip
+struct MIRImageDebugWriter { pretty: Bool, depth: Int }
+fn mir_image_debug_writer(pretty: Bool) -> MIRImageDebugWriter Never! { MIRImageDebugWriter{pretty: pretty, depth: 0} }
+pub enum MIRImageDebugHashSink { Hash }
+impl MIRImageDebugHashSink.CanonicalDebugSink<image_debug_sip.SipHasher13> {
+    fn write(self, state: &image_debug_sip.SipHasher13, text: String) Never! { mir_image_debug_hasher_write(&state, text) }
+}
+fn mir_image_debug_write<S, W: CanonicalDebugSink<S>>(writer: &MIRImageDebugWriter, sink: W, state: &S, text: String) Never! {
+    sink.write(&state, text)
+}
+fn mir_image_debug_indent<S, W: CanonicalDebugSink<S>>(writer: &MIRImageDebugWriter, sink: W, state: &S) Never! {
+    loop _ in 0..<writer.depth -> mir_image_debug_write(&writer, sink, &state, "    ")
+}
+fn mir_image_debug_open<S, W: CanonicalDebugSink<S>>(writer: &MIRImageDebugWriter, sink: W, state: &S, compact: String, pretty: String, nonempty: Bool) Never! {
+    mir_image_debug_write(&writer, sink, &state, if writer.pretty -> pretty else -> compact)
+    if writer.pretty && nonempty {
+        mir_image_debug_write(&writer, sink, &state, "\n")
+        writer.depth += 1
+    }
+}
+fn mir_image_debug_item<S, W: CanonicalDebugSink<S>>(writer: &MIRImageDebugWriter, sink: W, state: &S, index: Int, label: String) Never! {
+    if writer.pretty -> mir_image_debug_indent(&writer, sink, &state)
+    else if index != 0 -> mir_image_debug_write(&writer, sink, &state, ", ")
+    if label != "" -> mir_image_debug_write(&writer, sink, &state, "{label}: ")
+}
+fn mir_image_debug_item_end<S, W: CanonicalDebugSink<S>>(writer: &MIRImageDebugWriter, sink: W, state: &S) Never! {
+    if writer.pretty -> mir_image_debug_write(&writer, sink, &state, ",\n")
+}
+fn mir_image_debug_close<S, W: CanonicalDebugSink<S>>(writer: &MIRImageDebugWriter, sink: W, state: &S, compact: String, pretty: String, nonempty: Bool) Never! {
+    if writer.pretty && nonempty {
+        writer.depth -= 1
+        mir_image_debug_indent(&writer, sink, &state)
+    }
+    mir_image_debug_write(&writer, sink, &state, if writer.pretty -> pretty else -> compact)
+}
+fn mir_image_debug_scalar_string<S, W: CanonicalDebugSink<S>>(writer: &MIRImageDebugWriter, sink: W, state: &S, text: String) Never! {
+    canonical_debug_write_string<S, W>(sink, &state, text)
+}
+fn mir_image_debug_scalar_char<S, W: CanonicalDebugSink<S>>(writer: &MIRImageDebugWriter, sink: W, state: &S, value: Char) Never! {
+    canonical_debug_write_char<S, W>(sink, &state, value)
+}
+fn mir_image_debug_seal<S, W: CanonicalDebugSink<S>>(writer: &MIRImageDebugWriter, sink: W, state: &S, seal: String?) MIRImageError! {
+    if seal == .Val(hex) {
+        bytes :: hex.bytes()
+        if bytes.len() != 64 -> return Err(MIRImageError{message: "MIR pipeline seal `{hex}` is not 64 hex digits"})
+        mir_image_debug_open(&writer, sink, &state, "Some(", "Some(", true)
+        mir_image_debug_item(&writer, sink, &state, 0, "")
+        mir_image_debug_open(&writer, sink, &state, "[", "[", true)
+        loop index in 0..<32 {
+            value :: Int.from_u8(mir_image_schema_seal_byte(bytes[index * 2], bytes[index * 2 + 1], hex))
+            mir_image_debug_item(&writer, sink, &state, index, "")
+            mir_image_debug_write(&writer, sink, &state, "{value}")
+            mir_image_debug_item_end(&writer, sink, &state)
+        }
+        mir_image_debug_close(&writer, sink, &state, "]", "]", true)
+        mir_image_debug_item_end(&writer, sink, &state)
+        mir_image_debug_close(&writer, sink, &state, ")", ")", true)
+    } else -> mir_image_debug_write(&writer, sink, &state, "None")
+    return
+}
+fn mir_image_debug_memo<S, W: CanonicalDebugSink<S>>(writer: &MIRImageDebugWriter, sink: W, state: &S, bound: Int?, unbounded: Bool) MIRImageError! {
+    if !unbounded && bound == None { mir_image_debug_write(&writer, sink, &state, "None"); return }
+    mir_image_debug_open(&writer, sink, &state, "Some(", "Some(", true)
+    mir_image_debug_item(&writer, sink, &state, 0, "")
+    if unbounded -> mir_image_debug_write(&writer, sink, &state, "None")
+    else if bound == .Val(value) {
+        if value < 0 || value > 18446744073709551615 -> return Err(MIRImageError{message: "MIR memo bound is outside native range"})
+        mir_image_debug_open(&writer, sink, &state, "Some(", "Some(", true)
+        mir_image_debug_item(&writer, sink, &state, 0, "")
+        mir_image_debug_write(&writer, sink, &state, "{value}")
+        mir_image_debug_item_end(&writer, sink, &state)
+        mir_image_debug_close(&writer, sink, &state, ")", ")", true)
+    }
+    mir_image_debug_item_end(&writer, sink, &state)
+    mir_image_debug_close(&writer, sink, &state, ")", ")", true)
+    return
+}
+pub struct MIRImageDebugField { pub path: String, pub native_text: String, pub restored_text: String }

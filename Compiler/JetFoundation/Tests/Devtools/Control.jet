@@ -1,0 +1,94 @@
+// DevtoolsControl.rs has no inline original tests. Canonical host DTO witnesses.
+#Test("EXPLAIN DTO preserves bounded valid and invalid requests") {
+    request :: jet_devtools_database_explain_request_new("session", "request", "statement", U64{30000}, U64{256}) ?? panic(err)
+    expected :: `{"session_id":"session","request_id":"request","statement_identity":"statement","timeout_ms":30000,"max_rows":256}`
+    assert_eq(jet_devtools_database_explain_request_render_json(request), expected)
+    timeouts :: [U64]{U64{0}, U64{30001}}
+    loop timeout in timeouts {
+        if jet_devtools_database_explain_request_new("session", "request", "statement", timeout, U64{1}) == {
+            .Err(error) -> assert_eq(error, "jet.devtools.v1 EXPLAIN timeout is outside its limit")
+            else -> panic("invalid timeout accepted")
+        }
+    }
+    limits :: [U64]{U64{0}, U64{257}}
+    loop limit in limits {
+        if jet_devtools_database_explain_request_new("session", "request", "statement", U64{1}, limit) == {
+            .Err(error) -> assert_eq(error, "jet.devtools.v1 EXPLAIN row limit is outside its limit")
+            else -> panic("invalid row limit accepted")
+        }
+    }
+    if jet_devtools_database_explain_request_new("session\u007f", "request", "statement", U64{1}, U64{1}) == {
+        .Err(error) -> assert_eq(error, "jet.devtools.v1 session_id contains a control character")
+        else -> panic("control identity accepted")
+    }
+}
+#Test("Control quotation retains its own backspace form and optional nulls") {
+    actual :: jet_devtools_control_text("\u0008\u000c\u007f\u0085\u009f\n\r\t\"\\é")
+    expected :: "\"\\b\\f\\u007f\\u0085\\u009f\\n\\r\\t\\\"\\\\é\""
+    assert_eq(actual, expected)
+    row :: jet_devtools_db_plan_row_new("root", None, "scan") ?? panic(err)
+    expected_row :: `{"id":"root","parent":null,"detail":"scan"}`
+    assert_eq(jet_devtools_db_plan_row_render_json(row), expected_row)
+}
+#Test("Control provenance validation retains original error order") {
+    request := jet_devtools_game_control_request_new("session", "request", .Pause) ?? panic(err)
+    request.kind = .Play
+    if jet_devtools_game_control_request_validate(request) == {
+        .Err(error) -> assert_eq(error, "game control `play` requires source_id")
+        else -> panic("play without provenance accepted")
+    }
+    request.source_id = Val("source")
+    request.revision = Val("revision")
+    _ :: jet_devtools_game_control_request_validate(request) ?? panic(err)
+    request.kind = .SelectWorld
+    request.world_id = Val("world")
+    request.component_id = Val("component")
+    if jet_devtools_game_control_request_validate(request) == {
+        .Err(error) -> assert_eq(error, "select_world component_id requires actor_id")
+        else -> panic("component without actor accepted")
+    }
+    request.actor_id = Val("actor")
+    request.kind = .EvaluateWorld
+    request.expression = Val("actor")
+    request.required_authority = Val("inspect")
+    request.frame_id = Val(U64{0})
+    request.budget = Val(U64{0})
+    if jet_devtools_game_control_request_validate(request) == {
+        .Err(error) -> assert_eq(error, "evaluate_world requires a positive budget")
+        else -> panic("zero budget accepted")
+    }
+    request.budget = Val(U64{1})
+    _ :: jet_devtools_game_control_request_validate(request) ?? panic(err)
+    request.source_span_start = Val(U64{5})
+    request.source_span_end = Val(U64{5})
+    if jet_devtools_game_control_request_validate(request) == {
+        .Err(error) -> assert_eq(error, "game control source span must end after it starts")
+        else -> panic("empty source span accepted")
+    }
+}
+#Test("Control envelope retains FIFO front requeue direction and capacity") {
+    envelope := jet_devtools_command_envelope_new("session", U64{1})
+    first :: jet_devtools_game_control_request_new("session", "first", .Pause) ?? panic(err)
+    second :: jet_devtools_project_rebuild_request_new("session", "second", "revision") ?? panic(err)
+    _ :: jet_devtools_command_envelope_enqueue_command(&envelope, .GameControl(~first)) ?? panic(err)
+    _ :: jet_devtools_command_envelope_enqueue_command(&envelope, .ProjectRebuild(second)) ?? panic(err)
+    polled :: jet_devtools_command_envelope_poll_command(&envelope) ?? panic("first")
+    assert_eq(jet_devtools_command_request_id(polled), "first")
+    _ :: jet_devtools_command_envelope_requeue_command_front(&envelope, polled) ?? panic(err)
+    assert_eq(jet_devtools_command_envelope_command_count(envelope), 2)
+    next_command :: jet_devtools_command_envelope_poll_command(&envelope) ?? panic("requeued")
+    assert_eq(jet_devtools_command_request_id(next_command), "first")
+    after :: jet_devtools_command_envelope_poll_command(&envelope) ?? panic("second")
+    assert_eq(jet_devtools_command_request_id(after), "second")
+    assert_eq(jet_devtools_command_envelope_poll_command(&envelope), None)
+    loop _ in 0..<JET_DEVTOOLS_MAX_COMMANDS -> _ :: jet_devtools_command_envelope_enqueue_command(&envelope, .GameControl(~first)) ?? panic(err)
+    if jet_devtools_command_envelope_enqueue_command(&envelope, .GameControl(~first)) == {
+        .Err(error) -> assert_eq(error, "jet.devtools.v1 command queue is full")
+        else -> panic("overfull command ring accepted")
+    }
+    envelope.direction = .RuntimeToHost
+    if jet_devtools_command_envelope_validate(envelope) == {
+        .Err(error) -> assert_eq(error, "jet.devtools.v1 command envelope direction must be host_to_runtime")
+        else -> panic("runtime to host command accepted")
+    }
+}

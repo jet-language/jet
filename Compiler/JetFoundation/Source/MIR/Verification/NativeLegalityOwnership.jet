@@ -1,0 +1,102 @@
+// MIROptimization.rs:4090-4295. Precompute path errors in dominance order,
+// then return them in native block/instruction order interleaved with native
+// scalar consumption checks. Thus faster indexing never changes first error.
+struct MIRNativeMoveFrame { block: Int, version: Int }
+fn mir_native_place_move_errors(function: MIRFunction, index: MIRNativeFunctionIndex, dominance: MIRPassDominance, reachable: [U64:Bool], feasible: [U64:Bool]) -> [U64:MIRLegalityError] Never! {
+    trie :: mir_native_path_trie(function)
+    children := [[Int]]{}
+    roots := [Int]{}
+    loop position in 0..<function.blocks.len() -> &children.push([Int]{})
+    loop position in 0..<function.blocks.len() {
+        if dominance.enter[position] < 0 -> next
+        parent :: dominance.parents[position]
+        if parent < 0 -> &roots.push(position)
+        else -> &children[parent].push(position)
+    }
+    tree := [MIRNativeMoveNode]{}
+    errors := [U64:MIRLegalityError]{}
+    work := [MIRNativeMoveFrame]{}
+    loop root in roots -> &work.push(MIRNativeMoveFrame{block: root, version: -1})
+    loop work.len() > 0 {
+        frame :: &work.pop() ?? panic("nonempty dominance worklist")
+        block :: function.blocks[frame.block]
+        version := frame.version
+        if reachable.get(block.id.value) != None && feasible.get(block.id.value) != None {
+            loop instruction in block.instructions {
+                uses :: mir_native_operation_place_uses(instruction.operation)
+                loop usage in uses {
+                    position :: index.definitions.places.get(usage.place.value) ?? next
+                    place :: function.places[position]
+                    error := None
+                    if usage.kind == .Reinitialize && place.access == .Read {
+                        loop projection in place.projections {
+                            if projection == .Deref(_) { error = Val(MIRLegalityError.InvalidPlaceAccess{function: function.id, place: usage.place.value, span: instruction.span}); break }
+                        }
+                    }
+                    if error == None && instruction.operation == .AddressOf(_, .Write) && place.access == .Read -> error = Val(MIRLegalityError.InvalidBorrow{function: function.id, place: usage.place.value, span: instruction.span})
+                    if error == None && usage.kind == .Move && place.base == .Static(_) && place.projections.len() != 0 -> error = Val(mir_native_reference(function.id, "static move place MirPlaceId({usage.place.value}) must target the whole static root", instruction.span))
+                    if error == None {
+                        node :: trie.places.get(usage.place.value) ?? next
+                        if mir_native_has_live_move(trie, tree, version, node, usage.kind) -> error = Val(MIRLegalityError.InvalidMovedPlace{function: function.id, place: usage.place.value, span: instruction.span})
+                    }
+                    if error == .Val(error) { errors[instruction.id.value] = error; break }
+                }
+                // Strict predecessors only: simultaneous writes cannot kill
+                // this instruction's newly moved paths.
+                loop usage in uses {
+                    if usage.kind != .Reinitialize -> next
+                    node :: trie.places.get(usage.place.value) ?? next
+                    row :: trie.nodes[node]
+                    version = mir_native_move_update(&tree, version, 0, trie.size, row.enter, row.exit, false)
+                }
+                loop usage in uses {
+                    if usage.kind != .Move -> next
+                    node :: trie.places.get(usage.place.value) ?? next
+                    row :: trie.nodes[node]
+                    version = mir_native_move_update(&tree, version, 0, trie.size, row.enter, row.enter + 1, true)
+                }
+            }
+        }
+        loop child in children[frame.block] -> &work.push(MIRNativeMoveFrame{block: child, version: version})
+    }
+    errors
+}
+struct MIRNativeConsumedValue { block: MIRBlockID, index: Int, span: Span }
+fn mir_native_verify_moves_and_borrows(function: MIRFunction, index: MIRNativeFunctionIndex, dominance: MIRPassDominance, reachable: [U64:Bool]) MIRLegalityError! {
+    feasible :: mir_native_reachable_with_boolean_locals(function, index)
+    path_errors :: mir_native_place_move_errors(function, index, dominance, reachable, feasible)
+    consumed := [U64:MIRNativeConsumedValue]{}
+    deadlines := [U64:MIRValueID?]{}
+    loop scope in function.scopes { if deadlines.get(scope.id.value) == None -> deadlines[scope.id.value] = scope.deadline }
+    loop block in function.blocks {
+        if reachable.get(block.id.value) == None || feasible.get(block.id.value) == None -> next
+        loop (position, instruction) in block.instructions {
+            values := mir_operation_value_uses(instruction.operation)
+            if instruction.operation == .ScopeEnter(scope, _) {
+                if (deadlines.get(scope.value) ?? None) == .Val(deadline) -> &values.push(deadline)
+            }
+            loop value in values {
+                if consumed.get(value.value) == .Val(event) {
+                    precedes :: if event.block == block.id -> event.index < position else -> mir_pass_dominates(dominance, event.block, block.id)
+                    if precedes -> return Err(MIRLegalityError.InvalidMove{function: function.id, value: value, span: event.span})
+                }
+            }
+            if path_errors.get(instruction.id.value) == .Val(error) -> return Err(error)
+            moved := [MIRValueID]{}
+            if instruction.operation == {
+                .Move(value) | .TraitBox(value, _) -> &moved.push(value)
+                .Drop(value, kind) -> { if kind != .NoDrop -> &moved.push(value) }
+                .Closure(_, captures, _) -> { loop capture in captures { if capture == .Value(value) -> &moved.push(value) } }
+                .Call(_, args, _) | .CoreCall(_, _, args, _, _, _) | .IndirectCall(_, args, _) | .Semantic(.StaticPreludeCall(_, args, _, _)) | .Semantic(.HardwareCall(_, _, _, args)) | .Semantic(.ClosureMethod(_, args, _)) | .Semantic(.HostCall(_, args)) -> { loop arg in args { if mir_native_call_arg_consumes(arg) -> &moved.push(arg.value) } }
+                else -> {}
+            }
+            loop value in moved {
+                if index.definitions.values.get(value.value) == None -> return Err(mir_native_reference(function.id, "move MirValueId({value.value})", instruction.span))
+                ownership :: mir_native_definition_ownership(function, index, value)
+                if ownership.mode == .Copy || ownership.mode == .ReadBorrow || ownership.mode == .WriteBorrow || consumed.get(value.value) != None -> return Err(MIRLegalityError.InvalidMove{function: function.id, value: value, span: instruction.span})
+                consumed[value.value] = MIRNativeConsumedValue{block: block.id, index: position, span: instruction.span}
+            }
+        }
+    }
+    return
+}

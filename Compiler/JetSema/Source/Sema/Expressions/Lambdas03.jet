@@ -1,0 +1,1377 @@
+// PORT-PENDING 0401 crates-jet-sema-src-sema-checkerinfer-calls-lambdas: crates/jet-sema/src/Sema/CheckerInfer/calls/lambdas.rs:1-1373
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::Diagnostics::{Diagnostic, TextEdit};
+//RS use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
+//RS use crate::Sema::CheckerInfer::is_reactive_handle_ty;
+//RS use crate::Sema::Diagnostics::type_fix_hint;
+//RS use crate::Sema::{
+//RS     Checker, LocalInfo, SendCrossing, SendProblemKind, SendabilityProblem, ViewAccess,
+//RS };
+//RS use crate::Syntax;
+//RS use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
+//RS use std::collections::HashSet;
+//RS impl<'a> Checker<'a> {
+//RS     pub(crate) fn check_lambda(
+//RS         &mut self,
+//RS         lam: &mut Lambda,
+//RS         expected: Option<&Type>,
+//RS     ) -> Option<Type> {
+//RS         // A lambda returned from a fallible function is checked against the
+//RS         // function-valued success slot, not against the outer Result carrier.
+//RS         // Keep the outer shape visible long enough to distinguish this case
+//RS         // from an ordinary callback that may infer its own failure carrier.
+//RS         let expected_result_callable = matches!(
+//RS             expected,
+//RS             Some(Type::Result { ok, .. }) if matches!(ok.as_ref(), Type::Fn { .. })
+//RS         );
+//RS         let expected = match expected {
+//RS             Some(Type::Result { ok, .. }) if matches!(ok.as_ref(), Type::Fn { .. }) => {
+//RS                 Some(ok.as_ref())
+//RS             }
+//RS             _ => expected,
+//RS         };
+//RS         let collecting_loop = lam.meta.collecting_loop;
+//RS         let result_loop = lam.meta.result_loop;
+//RS         let inline_loop = collecting_loop || result_loop;
+//RS         let (exp_params, exp_ret, exp_contract, exp_metadata) = match expected {
+//RS             Some(Type::Fn {
+//RS                 params,
+//RS                 ret,
+//RS                 param_contract,
+//RS                 call_metadata,
+//RS                 ..
+//RS             }) => (
+//RS                 Some(params.as_slice()),
+//RS                 ret.as_ref(),
+//RS                 param_contract.as_ref(),
+//RS                 call_metadata.as_ref(),
+//RS             ),
+//RS             _ => (None, None, None, None),
+//RS         };
+//RS         let expected_callable = matches!(expected, Some(Type::Fn { .. }));
+//RS         let (expected_result, expected_error) = if expected_callable {
+//RS             lambda_return_slots(exp_ret.map(|ret| ret.as_ref()))
+//RS         } else {
+//RS             (None, None)
+//RS         };
+//RS         let result_annotation_ok = if !expected_callable {
+//RS             true
+//RS         } else {
+//RS             match (expected_result, lam.result_type.as_ref()) {
+//RS                 (_, None) => true,
+//RS                 (Some(expected), Some(actual)) => lambda_slot_matches(expected, actual),
+//RS                 (None, Some(actual)) => is_unit_type(actual),
+//RS             }
+//RS         };
+//RS         let error_annotation_ok = if !expected_callable {
+//RS             true
+//RS         } else {
+//RS             match (expected_error, lam.error_type.as_ref()) {
+//RS                 (_, None) => true,
+//RS                 (Some(expected), Some(actual)) => lambda_slot_matches(expected, actual),
+//RS                 (None, Some(_)) => false,
+//RS             }
+//RS         };
+//RS         if let Some(ty) = &lam.result_type {
+//RS             self.check_declared_return_type(ty, lam.span);
+//RS         }
+//RS         if let Some(ty) = &lam.error_type {
+//RS             self.check_declared_type(ty, lam.span);
+//RS         }
+//RS         if !result_annotation_ok {
+//RS             if let (Some(expected), Some(actual)) = (expected_result, lam.result_type.as_ref()) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0113",
+//RS                     format!(
+//RS                         "this lambda should return {}, not {}",
+//RS                         expected.show(),
+//RS                         actual.show()
+//RS                     ),
+//RS                     "the lambda's return type must match what's expected here".to_string(),
+//RS                     type_fix_hint(expected, actual),
+//RS                     Some(lam.span),
+//RS                 ));
+//RS             } else if let Some(actual) = lam.result_type.as_ref() {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0113",
+//RS                     format!("this lambda should return Unit, not {}", actual.show()),
+//RS                     "the lambda's return type must match what's expected here".to_string(),
+//RS                     "remove the result annotation or change the expected function type".to_string(),
+//RS                     Some(lam.span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         if !error_annotation_ok {
+//RS             if let (Some(expected), Some(actual)) = (expected_error, lam.error_type.as_ref()) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0113",
+//RS                     format!(
+//RS                         "this lambda should fail with {}, not {}",
+//RS                         expected.show(),
+//RS                         actual.show()
+//RS                     ),
+//RS                     "the lambda's error type must match what's expected here".to_string(),
+//RS                     type_fix_hint(expected, actual),
+//RS                     Some(lam.span),
+//RS                 ));
+//RS             } else if let Some(actual) = lam.error_type.as_ref() {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0113",
+//RS                     format!(
+//RS                         "this lambda declares an unexpected error type {}",
+//RS                         actual.show()
+//RS                     ),
+//RS                     "the lambda's error type must match what's expected here".to_string(),
+//RS                     "remove the error annotation or change the expected function type".to_string(),
+//RS                     Some(lam.span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         let effective_ret = if lam.result_type.is_some() || lam.error_type.is_some() {
+//RS             let result = if result_annotation_ok {
+//RS                 lam.result_type
+//RS                     .clone()
+//RS                     .or_else(|| expected_result.cloned())
+//RS                     .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()))
+//RS             } else {
+//RS                 expected_result
+//RS                     .cloned()
+//RS                     .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()))
+//RS             };
+//RS             let error = if error_annotation_ok {
+//RS                 lam.error_type.clone().or_else(|| expected_error.cloned())
+//RS             } else {
+//RS                 expected_error.cloned()
+//RS             };
+//RS             // D-FAILURE-FOUNDATION1 / D-NEVER2: an ordinary explicit success
+//RS             // row gets the implicit Err carrier, but `Never` is itself a
+//RS             // complete no-success contract. Keep `!Never` as the separate
+//RS             // failure-side no-failure opt-out.
+//RS             let error = if matches!(
+//RS                 &result,
+//RS                 Type::Named(name) if name == Syntax::TYPE_NEVER
+//RS             ) {
+//RS                 error
+//RS             } else {
+//RS                 error.or_else(|| Some(Type::Named(Syntax::TYPE_ERR.to_string())))
+//RS             };
+//RS             match error {
+//RS                 Some(error) => Some(Type::Result {
+//RS                     ok: Box::new(result),
+//RS                     err: Box::new(error),
+//RS                 }),
+//RS                 None => Some(result),
+//RS             }
+//RS         } else {
+//RS             exp_ret.map(|ret| (**ret).clone())
+//RS         };
+//RS         // An unannotated callback borrows the expected function's success row
+//RS         // while its body is checked. If a nested call can fail, retain that
+//RS         // failure carrier on the callback; the caller then decides whether its
+//RS         // operation can project the carrier (for example collection map/filter)
+//RS         // or must reject the widened callback type.
+//RS         let infer_failure_carrier = expected_callable
+//RS             && !expected_result_callable
+//RS             && !exp_ret.is_some_and(|ret| is_unit_type(ret))
+//RS             && lam.result_type.is_none()
+//RS             && lam.error_type.is_none();
+//RS 
+//RS         if let Some(ep) = exp_params {
+//RS             if lam.params.len() != ep.len() {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0104",
+//RS                     format!(
+//RS                         "this lambda has {} parameter{}, but {} {} expected",
+//RS                         lam.params.len(),
+//RS                         if lam.params.len() == 1 { "" } else { "s" },
+//RS                         ep.len(),
+//RS                         if ep.len() == 1 { "was" } else { "were" }
+//RS                     ),
+//RS                     "parameter count must match the function type at this spot".to_string(),
+//RS                     "add or remove parameters, or fix the surrounding type".to_string(),
+//RS                     Some(lam.span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS 
+//RS         let mut param_types = Vec::new();
+//RS         for (i, p) in lam.params.iter_mut().enumerate() {
+//RS             let pty = if let Some(ty) = &p.ty {
+//RS                 self.check_declared_type(ty, p.ty_span.unwrap_or(p.name_span));
+//RS                 ty.clone()
+//RS             } else if let Some(ep) = exp_params.and_then(|ps| ps.get(i)) {
+//RS                 ep.clone()
+//RS             } else {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0801",
+//RS                     format!("tell me the type of `{}`", p.name),
+//RS                     "this lambda parameter has no type to go on".to_string(),
+//RS                     format!("write `({}: Int) -> …` (or whatever type fits)", p.name),
+//RS                     Some(p.name_span),
+//RS                 ));
+//RS                 Type::Int
+//RS             };
+//RS             param_types.push(pty);
+//RS         }
+//RS 
+//RS         if let Some(binding) = &self.lambda_binding {
+//RS             if lambda_body_refs_name(&lam.body, binding) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0804",
+//RS                     format!("a lambda can't call itself as `{}`", binding),
+//RS                     "short functions stored in a binding can't recurse in v1".to_string(),
+//RS                     format!(
+//RS                         "write a named `{}` instead of assigning the lambda to `{}`",
+//RS                         Syntax::KW_FN,
+//RS                         binding
+//RS                     ),
+//RS                     Some(lam.span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS 
+//RS         let escapes = self.lambda_escapes;
+//RS         lam.meta.escapes = escapes;
+//RS         lam.meta.materialized_captures.clear();
+//RS         lam.meta.frozen_captures.clear();
+//RS 
+//RS         let param_names: HashSet<String> = lam.params.iter().map(|p| p.name.clone()).collect();
+//RS         let take_set: HashSet<String> = lam.take_names.iter().map(|(n, _)| n.clone()).collect();
+//RS 
+//RS         let mut read_caps = HashSet::new();
+//RS         let mut mut_caps = HashSet::new();
+//RS         if !inline_loop {
+//RS             lambda_collect_captures(&lam.body, &param_names, &mut read_caps, &mut mut_caps);
+//RS         }
+//RS         // D-CONC-FREEZE1=A: explicit `task ^name` captures are captures
+//RS         // even when the body never reads the name directly. The move is
+//RS         // checked by the same crossing loop below.
+//RS         read_caps.extend(lam.take_names.iter().map(|(name, _)| name.clone()));
+//RS 
+//RS         for name in read_caps.iter().chain(mut_caps.iter()) {
+//RS             if take_set.contains(name) || param_names.contains(name) {
+//RS                 continue;
+//RS             }
+//RS             // Module aliases (imports and core_imports) are always in scope in
+//RS             // lambdas — they're not local variables but they're valid references.
+//RS             // Don't report them as unknown names; the body check validates calls.
+//RS             if self.imports.contains_key(name) || self.core_imports.contains_key(name) {
+//RS                 continue;
+//RS             }
+//RS             if self.is_known_enum(name) {
+//RS                 continue;
+//RS             }
+//RS             if self.lookup(name).is_none() && !self.consts.contains_key(name) {
+//RS                 self.unknown_name(name, lam.span);
+//RS             }
+//RS         }
+//RS         // D-CONC-SHARE1=A: a write through a `Shared<T>` handle is one
+//RS         // locked edit of the CELL, not a change to the handle binding.
+//RS         // `check_stmt` rewrites `handle.field += v` into
+//RS         // `handle.edit(payload -> { payload.field += v })`
+//RS         // (`Sema/SharedAccess.rs`), a body that only READS the handle — the
+//RS         // very shape the retired `handle.edit(…)` closure spelling had, and
+//RS         // the reason `shared_capture` below lets a handle cross a task with
+//RS         // no `^`. Capture collection above runs before that rewrite, so it
+//RS         // still sees the projection write and reports the handle as
+//RS         // mutated. Forget that stale fact for an immutable handle, so the
+//RS         // refusal below, `needs_fn_mut`, and `mut_captures` all describe
+//RS         // the body this lambda actually lowers. Nothing is lost: replacing
+//RS         // the handle itself (`handle = other`) is refused where it is
+//RS         // written, by the `Stmt::Assign` rail in
+//RS         // `CheckerCore/statements.rs`, with the same E0111 code. A `:=`
+//RS         // handle keeps its entry, so a genuine rebind still asks for
+//RS         // `FnMut`.
+//RS         mut_caps.retain(|name| {
+//RS             !self
+//RS                 .lookup(name)
+//RS                 .is_some_and(|info| !info.mutable && matches!(&info.ty, Type::Shared(_)))
+//RS         });
+//RS 
+//RS         for name in &mut_caps {
+//RS             if param_names.contains(name) || take_set.contains(name) {
+//RS                 continue;
+//RS             }
+//RS             // D-TASKBORROW1=A: a write borrow (`&place`) is already a
+//RS             // changeable place. Inside a task group child it stays one; the
+//RS             // disjointness proof below is what keeps the writes safe.
+//RS             if self.in_taskgroup_spawn && self.is_write_borrow(name) {
+//RS                 continue;
+//RS             }
+//RS             if let Some(info) = self.lookup(name) {
+//RS                 if !info.mutable {
+//RS                     let mut diagnostic = Diagnostic::error(
+//RS                         "E0111",
+//RS                         format!("`{}` can't be changed inside this lambda", name),
+//RS                         "changing a value inside a short function requires a `:=` binding"
+//RS                             .to_string(),
+//RS                         format!("declare `{name} := …` instead of `{name} :: …`"),
+//RS                         Some(lam.span),
+//RS                     );
+//RS                     if let Some(sigil_span) = info.binding_sigil_span {
+//RS                         diagnostic = diagnostic.with_edit(TextEdit {
+//RS                             span: sigil_span,
+//RS                             new_text: Syntax::SIGIL_BIND_MUT.to_string(),
+//RS                         });
+//RS                     }
+//RS                     self.diags.push(diagnostic);
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         lam.meta.needs_fn_mut = !mut_caps.is_empty();
+//RS         lam.meta.mut_captures = mut_caps
+//RS             .iter()
+//RS             .filter(|n| !take_set.contains(*n) && !param_names.contains(*n))
+//RS             .cloned()
+//RS             .collect();
+//RS 
+//RS         if escapes {
+//RS             let mut seen_caps: HashSet<String> = HashSet::new();
+//RS             for name in read_caps.iter().chain(mut_caps.iter()) {
+//RS                 if !seen_caps.insert(name.clone()) {
+//RS                     continue; // already processed this capture
+//RS                 }
+//RS                 if param_names.contains(name) {
+//RS                     continue;
+//RS                 }
+//RS                 let cap = self
+//RS                     .lookup(name)
+//RS                     .map(|i| (i.ty.clone(), i.param_conv))
+//RS                     .or_else(|| self.consts.get(name).map(|t| (t.clone(), None)));
+//RS                 let Some((cap_ty, cap_conv)) = cap else {
+//RS                     continue;
+//RS                 };
+//RS                 if self.interrupt_callback_depth > 0 {
+//RS                     let problem = if matches!(&cap_ty, Type::Fn { .. }) {
+//RS                         let callback_safe = self
+//RS                             .lookup(name)
+//RS                             .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
+//RS                             .unwrap_or_else(|| {
+//RS                                 self.funcs.contains_key(name)
+//RS                                     || self.unqualified.contains_key(name)
+//RS                                     || self.unqualified_file.contains_key(name)
+//RS                             });
+//RS                         if callback_safe {
+//RS                             None
+//RS                         } else {
+//RS                             self.crossing_problem(&cap_ty, SendCrossing::InterruptCallback, false)
+//RS                                 .or(Some(SendabilityProblem {
+//RS                                     root: None,
+//RS                                     path: Vec::new(),
+//RS                                     kind: SendProblemKind::ClosureCaptures,
+//RS                                 }))
+//RS                         }
+//RS                     } else {
+//RS                         self.crossing_problem_for_name(
+//RS                             name,
+//RS                             &cap_ty,
+//RS                             SendCrossing::InterruptCallback,
+//RS                             true,
+//RS                         )
+//RS                     };
+//RS                     if let Some(problem) = problem {
+//RS                         self.report_unsendable(
+//RS                             name,
+//RS                             &cap_ty,
+//RS                             problem,
+//RS                             SendCrossing::InterruptCallback,
+//RS                             lam.span,
+//RS                         );
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS                 // Cell-guard storage is a separate local-lambda rule. A task
+//RS                 // capture must reach the shared crossing prover instead of
+//RS                 // being shadowed by E0217.
+//RS                 if !self.is_task_spawn && self.type_contains_cell_guard(&cap_ty) {
+//RS                     self.report_cell_guard_storage(
+//RS                         format!("Cell guard `{name}` cannot be captured by a lambda"),
+//RS                         lam.span,
+//RS                     );
+//RS                     continue;
+//RS                 }
+//RS                 if matches!(&cap_ty, Type::Named(ty) if ty == Syntax::TYPE_TASKGROUP) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E1110",
+//RS                             format!("`{name}` is a `Group` and cannot escape in a lambda"),
+//RS                             "a task group is a scoped spawn authority that may flow only through a direct function or method parameter"
+//RS                                 .to_string(),
+//RS                             format!(
+//RS                                 "move this work to a function or method that takes `{name}: Group` and call it directly"
+//RS                             ),
+//RS                             Some(lam.span),
+//RS                         ));
+//RS                     continue;
+//RS                 }
+//RS                 let taken = take_set.contains(name);
+//RS                 let frozen_site = self.frozen_for(name);
+//RS                 if self.is_task_spawn && frozen_site.is_some() {
+//RS                     if !lam
+//RS                         .meta
+//RS                         .frozen_captures
+//RS                         .iter()
+//RS                         .any(|capture| capture == name)
+//RS                     {
+//RS                         lam.meta.frozen_captures.push(name.clone());
+//RS                     }
+//RS                 }
+//RS                 let cloneable = self.is_cloneable_type(&cap_ty);
+//RS                 // D-TASKBORROW1=A: a `task.group` child is joined by its group,
+//RS                 // so it may borrow places the owner still holds. Reads are free;
+//RS                 // writes need proven-disjoint places. Detached tasks, channels,
+//RS                 // and detached tasks keep the ownership-only rules below.
+//RS                 if self.in_taskgroup_spawn
+//RS                     && self.http_handler_depth == 0
+//RS                     && !taken
+//RS                     && frozen_site.is_none()
+//RS                 {
+//RS                     let fallback = match cap_conv {
+//RS                         Some(AccessConvention::Write) => Some(ViewAccess::Write),
+//RS                         Some(AccessConvention::Read) => Some(ViewAccess::Read),
+//RS                         _ => None,
+//RS                     };
+//RS                     match self.admit_scoped_borrow(name, fallback, lam.span) {
+//RS                         Some(true) => {
+//RS                             if self.is_task_spawn {
+//RS                                 if let Some(binding) = self
+//RS                                     .current_binding_name
+//RS                                     .as_ref()
+//RS                                     .or(self.task_spawn_binding_name.as_ref())
+//RS                                 {
+//RS                                     self.view_borrow_escape_tasks.insert(binding.clone());
+//RS                                 }
+//RS                             }
+//RS                             continue;
+//RS                         }
+//RS                         Some(false) => continue,
+//RS                         None => {}
+//RS                     }
+//RS                 }
+//RS                 if self.http_handler_depth == 0
+//RS                     && !cap_ty.is_scalar()
+//RS                     && !cloneable
+//RS                     && matches!(
+//RS                         cap_conv,
+//RS                         Some(AccessConvention::Read) | Some(AccessConvention::Write)
+//RS                     )
+//RS                 {
+//RS                     let destination = if self.is_task_spawn {
+//RS                         "a spawned task"
+//RS                     } else {
+//RS                         "a stored lambda"
+//RS                     };
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0120",
+//RS                         format!(
+//RS                             "`{}` was not moved here, so it cannot be captured by {}",
+//RS                             name, destination
+//RS                         ),
+//RS                         "this function can access the parameter, but it does not own the value; capture requires the move marker `^`"
+//RS                             .to_string(),
+//RS                         format!(
+//RS                             "make the parameter owned with the move marker `^`: `{}: {}{}`",
+//RS                             name,
+//RS                             Syntax::SIGIL_MOVE,
+//RS                             cap_ty.name()
+//RS                         ),
+//RS                         Some(lam.span),
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS                 if self.is_task_spawn || self.http_handler_depth > 0 {
+//RS                     let crossing = if self.http_handler_depth > 0 {
+//RS                         SendCrossing::HttpHandler
+//RS                     } else {
+//RS                         SendCrossing::TaskCapture
+//RS                     };
+//RS                     let closure_taken = if self.http_handler_depth > 0 {
+//RS                         true
+//RS                     } else {
+//RS                         taken || !cloneable
+//RS                     };
+//RS                     let problem = self.crossing_problem_for_name(
+//RS                         name,
+//RS                         &cap_ty,
+//RS                         crossing,
+//RS                         closure_taken,
+//RS                     );
+//RS                     if let Some(problem) = problem {
+//RS                         self.report_unsendable(name, &cap_ty, problem, crossing, lam.span);
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS                 if self.is_view(name) {
+//RS                     let read_only = self
+//RS                         .view_facts(name)
+//RS                         .iter()
+//RS                         .all(|fact| fact.access == ViewAccess::Read);
+//RS                     let copy_ty = crate::Sema::Diagnostics::owned_type_for_read_view(&cap_ty)
+//RS                         .or_else(|| {
+//RS                             (self.is_string_view(name) && matches!(cap_ty, Type::String))
+//RS                                 .then_some(Type::String)
+//RS                         });
+//RS                     if !self.is_task_spawn
+//RS                         && !self.copies_explicit()
+//RS                         && read_only
+//RS                         && copy_ty
+//RS                             .as_ref()
+//RS                             .is_some_and(|ty| self.is_cloneable_type(ty))
+//RS                     {
+//RS                         // The capture is an owning slot. Record the same
+//RS                         // materialization fact for AOT/JIT/interpreter;
+//RS                         // codegen must not turn a view into another view
+//RS                         // with `Clone`.
+//RS                         if !lam
+//RS                             .meta
+//RS                             .materialized_captures
+//RS                             .iter()
+//RS                             .any(|capture| capture == name)
+//RS                         {
+//RS                             lam.meta.materialized_captures.push(name.clone());
+//RS                         }
+//RS                         if !lam
+//RS                             .meta
+//RS                             .cloned_captures
+//RS                             .iter()
+//RS                             .any(|capture| capture == name)
+//RS                         {
+//RS                             lam.meta.cloned_captures.push(name.clone());
+//RS                         }
+//RS                         continue;
+//RS                     }
+//RS                     self.report_view_escape(name, "be captured by a stored lambda", lam.span);
+//RS                     continue;
+//RS                 }
+//RS                 // D-CONC-FREEZE1=A: a bare mutable capture is rejected by
+//RS                 // the same E1101 rail as a body write. A consuming `^`
+//RS                 // capture or a frozen snapshot removes the outer alias.
+//RS                 //
+//RS                 // A `Condition` has no outer alias to remove. `JetCondition`
+//RS                 // is `Arc<JetConditionProtocol>` behind `#[derive(Clone)]`
+//RS                 // (`Prelude/CoreLib/JetStd/MathTaskMem.rs`), so a clone
+//RS                 // aliases the ONE waiter queue, and the protocol's own
+//RS                 // `Mutex` plus epoch counter order the crossing — the same
+//RS                 // reason `Shared<T>` crosses. A wait set exists precisely so
+//RS                 // `guard.wait` in one task and `notify_all` in another
+//RS                 // rendezvous, so refusing it AT the task boundary refuses
+//RS                 // its only purpose. It is not put on the reactive rail:
+//RS                 // `is_reactive_handle_ty` also carries the `#Local` pin and
+//RS                 // the reactive-upgrade note, neither of which says anything
+//RS                 // about a wait set. Genuine sendability is still checked
+//RS                 // below by `crossing_problem_for_name`.
+//RS                 let shared_capture = matches!(&cap_ty, Type::Shared(_))
+//RS                     || matches!(&cap_ty, Type::Named(ty_name) if ty_name == Syntax::TYPE_CONDITION)
+//RS                     || is_reactive_handle_ty(&cap_ty)
+//RS                     || self.type_contains_cell_guard(&cap_ty);
+//RS                 let mutable_capture = self.lookup(name).is_some_and(|info| info.mutable);
+//RS                 if self.is_task_spawn
+//RS                     && !taken
+//RS                     && frozen_site.is_none()
+//RS                     && !shared_capture
+//RS                     && (mut_caps.contains(name) || mutable_capture)
+//RS                 {
+//RS                     self.report_concurrent_write(name, "task capture", lam.span);
+//RS                     continue;
+//RS                 }
+//RS                 if self.is_resource_type(&cap_ty) || !cloneable {
+//RS                     // D-ARROW-CONTROL1: escaping closures infer ownership.
+//RS                     // Owned non-Copy captures move at closure creation.
+//RS                     if !taken {
+//RS                         lam.meta.moved_captures.push(name.clone());
+//RS                     }
+//RS                 } else if is_reactive_handle_ty(&cap_ty) || matches!(cap_ty, Type::Shared(_)) {
+//RS                     // D-REACT1=B / D-DATARACE1=C: a reactive handle is an Arc-backed
+//RS                     // shared cell — capturing a "copy" shares the same reactive cell.
+//RS                     // The capture is recorded as a clone so codegen moves an Arc
+//RS                     // clone into the closure. Lock-ordered storage makes the clone
+//RS                     // Send without leaning on rustc.
+//RS                     // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is the same shape — an
+//RS                     // Arc-backed "copyable door" meant to be captured freely across
+//RS                     // `task` closures with no `take`; suppress the same lint.
+//RS                     if is_reactive_handle_ty(&cap_ty) {
+//RS                         if let Some(info) = self.lookup(name) {
+//RS                             if !info.reactive_local {
+//RS                                 let crossing = if info.reactive_shared {
+//RS                                     "#Shared pin + task"
+//RS                                 } else {
+//RS                                     "task"
+//RS                                 };
+//RS                                 self.note_reactive_upgrade(name, &cap_ty, crossing);
+//RS                             }
+//RS                         } else {
+//RS                             self.note_reactive_upgrade(name, &cap_ty, "task");
+//RS                         }
+//RS                     }
+//RS                     lam.meta.cloned_captures.push(name.clone());
+//RS                 } else if !taken {
+//RS                     lam.meta.cloned_captures.push(name.clone());
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         self.push_scope();
+//RS         let saved_param_names = std::mem::replace(
+//RS             &mut self.current_param_names,
+//RS             lam.params.iter().map(|param| param.name.clone()).collect(),
+//RS         );
+//RS         let saved_return_view_provenance = self.return_view_provenance.take();
+//RS         for (p, pty) in lam.params.iter().zip(param_types.iter()) {
+//RS             self.declare_in_scope(
+//RS                 &p.name,
+//RS                 LocalInfo {
+//RS                     def_span: p.name_span,
+//RS                     binding_sigil_span: None,
+//RS                     ty: pty.clone(),
+//RS                     // D-MEM1 S6: `Shared<T>.edit(f)`'s closure param is the one
+//RS                     // builtin-closure shape that binds its param mutable with no
+//RS                     // `&` sigil — the exclusive write lock IS the API contract.
+//RS                     mutable: self.lambda_param_mutable,
+//RS                     param_conv: Some(AccessConvention::Read),
+//RS                     decl_loop_depth: self.loop_depth,
+//RS                     interrupt_sendable: false,
+//RS                     reactive_local: false,
+//RS                     reactive_shared: false,
+//RS                     single_use_span: None,
+//RS                     invalid: false,
+//RS                 },
+//RS             );
+//RS         }
+//RS         let lending_params = if self.lambda_params_are_lending_views {
+//RS             lam.params
+//RS                 .iter()
+//RS                 .zip(param_types.iter())
+//RS                 .filter(|(_, ty)| {
+//RS                     matches!(
+//RS                         ty,
+//RS                         Type::Apply { name, args }
+//RS                             if name == "ViewMut" && args.len() == 1
+//RS                     )
+//RS                 })
+//RS                 .filter_map(|(param, _)| {
+//RS                     self.lending_view_loop_vars
+//RS                         .insert(param.name.clone())
+//RS                         .then(|| param.name.clone())
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS         } else {
+//RS             Vec::new()
+//RS         };
+//RS 
+//RS         // D-TXN2: a lambda body is a deferred execution context (it runs later —
+//RS         // e.g. an `on_commit` hook fires only post-commit). Effects inside it are
+//RS         // NOT rejected by the enclosing `#Transact` block, so zero the depth here
+//RS         // and restore it after the body. This is exactly why `name.on_commit(() =>
+//RS         // { fs.write(…) })` is the D-TXN2 fix-it: the irreversible work moves into
+//RS         // a lambda, off the block's direct path.
+//RS         let saved_txn_depth = self.txn_depth;
+//RS         let saved_txn_wall_depth = self.txn_wall_depth;
+//RS         if !inline_loop {
+//RS             self.txn_depth = 0;
+//RS             self.txn_wall_depth = 0;
+//RS         }
+//RS         let lambda_effect_snapshot = (
+//RS             self.fx_direct.clone(),
+//RS             self.fx_edges.clone(),
+//RS             self.fx_maximal,
+//RS         );
+//RS         self.lambda_effect_stack
+//RS             .push(crate::Sema::Effects::LambdaEffectAccum::default());
+//RS         let saved_expected = self.expected_type.clone();
+//RS         self.expected_type = effective_ret.clone();
+//RS         // A block-bodied lambda's `return` belongs to the lambda, not to the
+//RS         // enclosing named function. Give statement checking the expected
+//RS         // callback result while the lambda body is active.
+//RS         let saved_ret = self.ret.clone();
+//RS         let saved_failure_carrier_inference = self.failure_carrier_inference;
+//RS         let saved_failure_carrier = self.failure_carrier.clone();
+//RS         let saved_statement_expr_inference = self.statement_expr_inference;
+//RS         self.failure_carrier_inference = infer_failure_carrier;
+//RS         self.failure_carrier = None;
+//RS         self.statement_expr_inference = false;
+//RS         if infer_failure_carrier {
+//RS             self.ret = None;
+//RS         } else if let Some(ret) = &effective_ret {
+//RS             self.ret = Some(ret.clone());
+//RS         }
+//RS         let saved_in_lambda_body = self.in_lambda_body;
+//RS         let saved_inferred_mut_captures = std::mem::take(&mut self.inferred_lambda_mut_captures);
+//RS         // D-CONC-SPAWN1: the propagation fact is per lambda body — a `?`
+//RS         // inside a nested closure early-returns that closure, never this
+//RS         // one. Scope the working flag and harvest it below.
+//RS         let saved_task_body_propagates = std::mem::replace(&mut self.task_body_propagates, false);
+//RS         self.in_lambda_body = true;
+//RS         if matches!(
+//RS             effective_ret.as_ref(),
+//RS             Some(Type::Apply { name, .. }) if name == "View"
+//RS         ) {
+//RS             if let LambdaBody::Expr(expr) = &mut lam.body {
+//RS                 if !matches!(expr.as_ref(), Expr::Copy(..) | Expr::Place(..))
+//RS                     && self.place_from_expr(expr).is_some()
+//RS                 {
+//RS                     let span = expr.span();
+//RS                     let inner = std::mem::replace(expr, Box::new(Expr::Absent(span)));
+//RS                     *expr = Box::new(Expr::Place(inner, crate::AST::PlaceAccess::Read, span));
+//RS                 }
+//RS             }
+//RS         }
+//RS         if inline_loop {
+//RS             if let Some((label, span)) = lam.meta.loop_label.clone() {
+//RS                 install_inline_loop_label(&mut lam.body, &label, span);
+//RS             }
+//RS         }
+//RS         if collecting_loop {
+//RS             self.collect_item_types.push(None);
+//RS             self.pending_loop_value = Some((
+//RS                 crate::Sema::LoopValueKind::Collecting,
+//RS                 lam.meta.loop_label.as_ref().map(|(name, _)| name.clone()),
+//RS             ));
+//RS         } else if result_loop {
+//RS             self.pending_loop_value = Some((
+//RS                 crate::Sema::LoopValueKind::Result,
+//RS                 lam.meta.loop_label.as_ref().map(|(name, _)| name.clone()),
+//RS             ));
+//RS         }
+//RS         let mut body_ret = match &mut lam.body {
+//RS             LambdaBody::Expr(e) => {
+//RS                 if self.is_task_spawn {
+//RS                     self.borrow_ctx = true;
+//RS                 }
+//RS                 // S46 one-line bodies: `() -> transfer(...)` is the brace-free
+//RS                 // form of `() -> { transfer(...) }`. When no value is expected
+//RS                 // (() / !E callback, or inferred spawn body), treat the
+//RS                 // call as a statement so void functions do not trip E0116.
+//RS                 let needs_value = match effective_ret.as_ref() {
+//RS                     Some(Type::Named(name)) if name == "Unit" => false,
+//RS                     Some(Type::Result { ok, .. }) if matches!(ok.as_ref(), Type::Named(name) if name == "Unit") => {
+//RS                         false
+//RS                     }
+//RS                     None => false,
+//RS                     Some(_) => true,
+//RS                 };
+//RS                 // A lambda body runs only when its callable is invoked. Keep
+//RS                 // its terminal flow local to the deferred callable; a
+//RS                 // Never-diverging body must not make the enclosing scope
+//RS                 // unreachable merely because it was captured.
+//RS                 let reachable = self.flow.reachable;
+//RS                 let body_ret = if needs_value {
+//RS                     self.infer(e)
+//RS                 } else {
+//RS                     // The open return row still accepts value-producing calls,
+//RS                     // but a valueless call is a statement in this callback.
+//RS                     // Keep both cases on the shared statement call checker so
+//RS                     // `() -> print(...)` does not enter value-only E0116.
+//RS                     self.infer_fallible_stmt(e)
+//RS                 };
+//RS                 self.flow.reachable = reachable;
+//RS                 body_ret
+//RS             }
+//RS             LambdaBody::Block(stmts) => {
+//RS                 let value_expected = effective_ret.as_ref().filter(|ty| {
+//RS                     !matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+//RS                         && !matches!(
+//RS                             ty,
+//RS                             Type::Result { ok, .. }
+//RS                                 if matches!(ok.as_ref(), Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+//RS                         )
+//RS                 });
+//RS                 if let Some(expected) = value_expected {
+//RS                     // A callback body may never run. Its value tail still uses
+//RS                     // the ordinary return checker, but must not make the
+//RS                     // enclosing function unreachable.
+//RS                     let reachable = self.flow.reachable;
+//RS                     self.check_value_block(stmts, expected, false, lam.span);
+//RS                     self.flow.reachable = reachable;
+//RS                     Some(expected.clone())
+//RS                 } else {
+//RS                     // The body may never run (a spawned task, a callback), so
+//RS                     // a `return` inside it is a conditional return of the
+//RS                     // enclosing function, not an unconditional one (card #2006).
+//RS                     // An open value callback is checked once as a statement
+//RS                     // block for declarations/flow, then its tail is inferred
+//RS                     // as the callback value below. Drop only that first-pass
+//RS                     // E0402; ignored fallible calls earlier in the block remain
+//RS                     // errors.
+//RS                     let tail_span = stmts.iter().rev().find_map(|stmt| match stmt {
+//RS                         Stmt::Return(Some(expr), _) | Stmt::Expr(expr) => Some(expr.span()),
+//RS                         _ => None,
+//RS                     });
+//RS                     // The discarded-result fact (E0433) records the tail call
+//RS                     // under any written or automatic `?`; match that span.
+//RS                     let tail_call_span = stmts.iter().rev().find_map(|stmt| match stmt {
+//RS                         Stmt::Return(Some(_), _) => Some(None),
+//RS                         Stmt::Expr(expr) => Some(Some(match expr.without_parens() {
+//RS                             Expr::Try(inner, ..) => inner.without_parens().span(),
+//RS                             other => other.span(),
+//RS                         })),
+//RS                         _ => None,
+//RS                     }).flatten();
+//RS                     let diagnostics_start = self.diags.len();
+//RS                     let discarded_start = self.fx_discarded_results.len();
+//RS                     self.check_conditional_block(stmts, false);
+//RS                     if effective_ret.is_none() {
+//RS                         // An open callback's tail is its value, not a
+//RS                         // discarded statement result.
+//RS                         let tail_facts = self.fx_discarded_results.split_off(discarded_start);
+//RS                         self.fx_discarded_results.extend(
+//RS                             tail_facts
+//RS                                 .into_iter()
+//RS                                 .filter(|fact| Some(fact.span) != tail_call_span),
+//RS                         );
+//RS                     }
+//RS                     if effective_ret.is_none() || infer_failure_carrier {
+//RS                         let checked = self.diags.split_off(diagnostics_start);
+//RS                         self.diags.extend(checked.into_iter().filter(|diagnostic| {
+//RS                             let discarded_value_tail = effective_ret.is_none()
+//RS                                 && diagnostic.code == "L0527"
+//RS                                 && diagnostic.span == tail_span;
+//RS                             let ignored_failure_tail = infer_failure_carrier
+//RS                                 && diagnostic.code == "E0402"
+//RS                                 && diagnostic.span == tail_span;
+//RS                             !discarded_value_tail && !ignored_failure_tail
+//RS                         }));
+//RS                     }
+//RS                     let mut last_ret = None;
+//RS                     // Unit callbacks already statement-checked the tail.
+//RS                     // Re-inferring it would see `.join()` consume the same
+//RS                     // handle twice (E0121 at one span). Open/inferred
+//RS                     // returns still need the tail type; rewind those moves
+//RS                     // first so the second walk is a value check, not a reuse.
+//RS                     let need_tail_value = effective_ret.is_none() || infer_failure_carrier;
+//RS                     if need_tail_value {
+//RS                         for s in stmts.iter_mut().rev() {
+//RS                             match s {
+//RS                                 Stmt::Return(Some(e), _) => {
+//RS                                     self.rewind_moves_in_span(e.span());
+//RS                                     last_ret = self.infer(e);
+//RS                                     break;
+//RS                                 }
+//RS                                 Stmt::Expr(e) => {
+//RS                                     self.rewind_moves_in_span(e.span());
+//RS                                     last_ret = self.infer_fallible_stmt(e);
+//RS                                     break;
+//RS                                 }
+//RS                                 _ => {}
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     last_ret
+//RS                 }
+//RS             }
+//RS         };
+//RS         // D-EFFECT-LAMBDA1: publish the direct facts gathered by this same
+//RS         // authoritative body walk. Reachability replaces `effect_solved` in
+//RS         // bundle completion; the direct seed is useful before that projection.
+//RS         let lambda_effects = self
+//RS             .lambda_effect_stack
+//RS             .pop()
+//RS             .expect("lambda effect accumulator must be active");
+//RS         let direct = lambda_effects.direct;
+//RS         lam.meta.effect_direct = direct.clone();
+//RS         lam.meta.effect_solved = direct;
+//RS         lam.meta.effect_call_edges = lambda_effects.edges;
+//RS         lam.meta.effect_maximal = lambda_effects.maximal;
+//RS         lam.meta.effect_direct_spans = lambda_effects.direct_spans.into_iter().collect();
+//RS         if collecting_loop {
+//RS             let item_ty = self.collect_item_types.pop().flatten();
+//RS             let item_ty = item_ty.unwrap_or_else(|| {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0073",
+//RS                         "this collecting loop path produces no item".to_string(),
+//RS                         "every accepted iteration must contribute one non-unit value unless `next` omits it".to_string(),
+//RS                         "return a value on this path, or use `next` to omit the item; remove `->` if the loop only performs effects".to_string(),
+//RS                         Some(lam.span),
+//RS                     ));
+//RS                     Type::Int
+//RS                 });
+//RS             if let LambdaBody::Block(stmts) = &mut lam.body {
+//RS                 lower_collecting_loop(stmts, &item_ty, lam.span);
+//RS             }
+//RS             lam.meta.collect_item_type = Some(item_ty.clone());
+//RS             // The compiler invokes this closure immediately. It does not
+//RS             // create an escape or ownership boundary, so reads stay in
+//RS             // the current lexical environment.
+//RS             lam.meta.cloned_captures.clear();
+//RS             lam.meta.moved_captures.clear();
+//RS             body_ret = Some(Type::List(Box::new(item_ty)));
+//RS         } else if result_loop {
+//RS             let result_ty = self.last_loop_result_type.take().unwrap_or_else(|| {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0073",
+//RS                     "this loop has no final break value".to_string(),
+//RS                     "a loop used as a value must return one value through `break value`"
+//RS                         .to_string(),
+//RS                     "add `break value`, or use the loop only for effects".to_string(),
+//RS                     Some(lam.span),
+//RS                 ));
+//RS                 Type::Int
+//RS             });
+//RS             lam.meta.loop_result_type = Some(result_ty.clone());
+//RS             if lam.meta.requires_exhaustion_route && !lam.meta.exhaustion_route_attached {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                         "E0078",
+//RS                         "this finite value loop needs a written exhaustion route".to_string(),
+//RS                         "the source can end without a matching break, so the expression must state what exhaustion means".to_string(),
+//RS                         "add `?? fallback` after the closing `}`, or use the labeled loop form for `next` or `break`".to_string(),
+//RS                         lam.meta.exhaustion_span.or(Some(lam.span)),
+//RS                     ));
+//RS             }
+//RS             body_ret = Some(result_ty);
+//RS         }
+//RS 
+//RS         // An open return row uses `None` for a valueless function, as TIR
+//RS         // lowering and the self-hosted checker do. The statement checker
+//RS         // reports the real `Unit` call result while walking the body, but
+//RS         // that detail must not turn `Fn() -> None` into `Fn() -> Unit`: the
+//RS         // latter's effective return is the `Result<Unit, Err>` carrier, so a
+//RS         // direct call of a bound `() -> print(x)` would unwrap a carrier that
+//RS         // the lowered closure never returns.
+//RS         if effective_ret.is_none() && body_ret.as_ref().is_some_and(|ty| is_unit_type(ty)) {
+//RS             body_ret = None;
+//RS         }
+//RS 
+//RS         let inferred_mut_caps = std::mem::replace(
+//RS             &mut self.inferred_lambda_mut_captures,
+//RS             saved_inferred_mut_captures,
+//RS         )
+//RS         .into_iter()
+//RS         .filter(|name| read_caps.contains(name) || mut_caps.contains(name))
+//RS         .collect::<HashSet<_>>();
+//RS         // The builtin table is the authority for mutating receivers. Fold
+//RS         // its inferred roots into the same metadata explicit assignments
+//RS         // use, so `xs.push(x)` is FnMut just like `xs += [x]`.
+//RS         mut_caps.extend(inferred_mut_caps);
+//RS         lam.meta.needs_fn_mut = !mut_caps.is_empty();
+//RS         lam.meta.mut_captures = mut_caps
+//RS             .iter()
+//RS             .filter(|name| !take_set.contains(*name) && !param_names.contains(*name))
+//RS             .cloned()
+//RS             .collect();
+//RS         // D-CONC-SPAWN1: record this body's own propagation fact, then
+//RS         // restore the enclosing body's.
+//RS         let inferred_failure_carrier = self.failure_carrier.clone();
+//RS         lam.meta.fallible_propagation = self.task_body_propagates || self.failure_carrier.is_some();
+//RS         self.task_body_propagates = saved_task_body_propagates;
+//RS         self.in_lambda_body = saved_in_lambda_body;
+//RS         self.ret = saved_ret;
+//RS         self.expected_type = saved_expected;
+//RS         self.failure_carrier = saved_failure_carrier;
+//RS         self.failure_carrier_inference = saved_failure_carrier_inference;
+//RS         self.statement_expr_inference = saved_statement_expr_inference;
+//RS         self.txn_depth = saved_txn_depth;
+//RS         self.txn_wall_depth = saved_txn_wall_depth;
+//RS         for name in lending_params {
+//RS             self.lending_view_loop_vars.remove(&name);
+//RS         }
+//RS 
+//RS         self.pop_scope();
+//RS 
+//RS         if escapes {
+//RS             for (name, span) in &lam.take_names {
+//RS                 if let Some(info) = self.lookup(name) {
+//RS                     if !info.ty.is_scalar() {
+//RS                         if matches!(
+//RS                             info.param_conv,
+//RS                             Some(AccessConvention::Read) | Some(AccessConvention::Write)
+//RS                         ) {
+//RS                             let source_ty = info.ty.clone();
+//RS                             let diagnostic = Diagnostic::error(
+//RS                                 "E0120",
+//RS                                 format!(
+//RS                                     "`{}` was not moved here, so the lambda cannot take it with the move marker `^`",
+//RS                                     name
+//RS                                 ),
+//RS                                 "this function has read access only and does not own the value; the move marker `^` is required"
+//RS                                     .to_string(),
+//RS                                 format!(
+//RS                                     "take ownership in this function with the move marker `^`: `{}: {}{}`",
+//RS                                     name,
+//RS                                     Syntax::SIGIL_MOVE,
+//RS                                     source_ty.name()
+//RS                                 ),
+//RS                                 Some(*span),
+//RS                             );
+//RS                             self.diags.push(self.with_ownership_copy_edit(
+//RS                                 diagnostic,
+//RS                                 *span,
+//RS                                 Some(&source_ty),
+//RS                             ));
+//RS                         } else {
+//RS                             self.mark_moved_exact(name.clone(), *span, "an escaping lambda");
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         if let Some(bound) = lam.effects.as_ref() {
+//RS             let (before_direct, before_edges, before_maximal) = &lambda_effect_snapshot;
+//RS             self.record_callback_obligation(
+//RS                 bound,
+//RS                 before_direct,
+//RS                 before_edges,
+//RS                 *before_maximal,
+//RS                 lam.span,
+//RS             );
+//RS         }
+//RS 
+//RS         // An effect-free lambda remains effect-free when it closes over a
+//RS         // value. Do not use the foreign-thread-safety predicate for this: its
+//RS         // stricter capture rules are about crossing a C callback boundary,
+//RS         // while ordinary function values only need their own effect delta.
+//RS         let (before_direct, before_edges, before_maximal) = &lambda_effect_snapshot;
+//RS         let inferred_effect_free = self.fx_direct == *before_direct
+//RS             && self.fx_edges == *before_edges
+//RS             && self.fx_maximal == *before_maximal;
+//RS 
+//RS         let inferred_fallible_ret = if infer_failure_carrier {
+//RS             inferred_failure_carrier.as_ref().map(|carrier| {
+//RS                 let body = body_ret
+//RS                     .clone()
+//RS                     .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+//RS                 let ok = match body {
+//RS                     Type::Result { ok, .. } => *ok,
+//RS                     other => other,
+//RS                 };
+//RS                 match carrier {
+//RS                     Type::Result { err, .. } => Type::Result {
+//RS                         ok: Box::new(ok),
+//RS                         err: err.clone(),
+//RS                     },
+//RS                     _ => body_ret
+//RS                         .clone()
+//RS                         .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+//RS                 }
+//RS             })
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let ret_ty = if let Some(inferred) = &inferred_fallible_ret {
+//RS             if let (Some(expected), Some(actual)) = (&effective_ret, &body_ret) {
+//RS                 if !lambda_body_matches_return(expected, actual) {
+//RS                     let span = match &lam.body {
+//RS                         LambdaBody::Expr(expression) => expression.span(),
+//RS                         LambdaBody::Block(_) => lam.span,
+//RS                     };
+//RS                     let diagnostic = match actual {
+//RS                         Type::Result { err, .. } if !matches!(expected, Type::Result { .. }) => {
+//RS                             Diagnostic::error(
+//RS                                 "E0403",
+//RS                                 "this fallible call only works inside a function that returns a fallible result"
+//RS                                     .to_string(),
+//RS                                 "ordinary fallible calls propagate their failure automatically to the caller"
+//RS                                     .to_string(),
+//RS                                 format!(
+//RS                                     "declare `{}` in the return type before `->`, or handle the result with `??`",
+//RS                                     err.name()
+//RS                                 ),
+//RS                                 Some(span),
+//RS                             )
+//RS                         }
+//RS                         _ => Diagnostic::error(
+//RS                             "E0113",
+//RS                             format!(
+//RS                                 "this lambda should return {}, not {}",
+//RS                                 expected.show(),
+//RS                                 actual.show()
+//RS                             ),
+//RS                             "the lambda's return type must match what's expected here".to_string(),
+//RS                             type_fix_hint(expected, actual),
+//RS                             Some(lam.span),
+//RS                         ),
+//RS                     };
+//RS                     self.diags.push(diagnostic);
+//RS                 }
+//RS             }
+//RS             Some(inferred.clone())
+//RS         } else if let Some(er) = &effective_ret {
+//RS             if let Some(br) = &body_ret {
+//RS                 let resolved_call_is_fallible = self.lambda_body_call_fallibility(&lam.body);
+//RS                 if !lambda_body_matches_return(er, br)
+//RS                     && resolved_call_is_fallible != Some(false)
+//RS                 {
+//RS                     let diagnostic = match br {
+//RS                         Type::Result { err, .. }
+//RS                             if resolved_call_is_fallible == Some(true)
+//RS                                 && !matches!(er, Type::Result { .. }) =>
+//RS                         {
+//RS                             Diagnostic::error(
+//RS                                 "E0403",
+//RS                                 "this fallible call only works inside a function that returns a fallible result"
+//RS                                     .to_string(),
+//RS                                 "ordinary fallible calls propagate their failure automatically to the caller"
+//RS                                     .to_string(),
+//RS                                 format!(
+//RS                                     "declare `{}` in the return type before `->`, or handle the result with `??`",
+//RS                                     err.name()
+//RS                                 ),
+//RS                                 Some(lam.span),
+//RS                             )
+//RS                         }
+//RS                         _ => Diagnostic::error(
+//RS                             "E0113",
+//RS                             format!("this lambda should return {}, not {}", er.show(), br.show()),
+//RS                             "the lambda's return type must match what's expected here".to_string(),
+//RS                             type_fix_hint(er, br),
+//RS                             Some(lam.span),
+//RS                         ),
+//RS                     };
+//RS                     self.diags.push(diagnostic);
+//RS                 }
+//RS             }
+//RS             Some(er.clone())
+//RS         } else {
+//RS             body_ret
+//RS         };
+//RS         lam.meta.fallible_carrier = if lam.meta.fallible_propagation {
+//RS             inferred_fallible_ret.or_else(|| {
+//RS                 ret_ty.as_ref().and_then(|ty| {
+//RS                     matches!(ty, Type::Result { .. } | Type::Option(_)).then(|| ty.clone())
+//RS                 })
+//RS             })
+//RS         } else {
+//RS             None
+//RS         };
+//RS         if ret_ty
+//RS             .as_ref()
+//RS             .is_some_and(|ty| self.type_contains_view_boundary(ty))
+//RS         {
+//RS             if let LambdaBody::Expr(expr) = &lam.body {
+//RS                 self.check_aggregate_view_return(expr);
+//RS             }
+//RS         }
+//RS         let lambda_return_view_provenance = self.return_view_provenance.take();
+//RS         lam.meta.return_view_provenance = lambda_return_view_provenance.clone();
+//RS         self.return_view_provenance = saved_return_view_provenance;
+//RS         self.current_param_names = saved_param_names;
+//RS 
+//RS         Some(Type::Fn {
+//RS             params: param_types,
+//RS             ret: ret_ty.map(Box::new),
+//RS             // A lambda value is a concrete callback, not a demand for one.
+//RS             // A body sema proves effect-free publishes the empty bound so it
+//RS             // satisfies `-[]>` positions; anything else stays unbounded and
+//RS             // the call-site D-EFF2 obligation solver decides.
+//RS             effect_bound: lam
+//RS                 .effects
+//RS                 .clone()
+//RS                 .or_else(|| inferred_effect_free.then(Vec::new))
+//RS                 .or_else(|| crate::Sema::foreign_thread_safe_lambda(lam).then(Vec::new)),
+//RS             param_contract: exp_contract.cloned(),
+//RS             call_metadata: exp_metadata.cloned(),
+//RS             return_view_provenance: lambda_return_view_provenance,
+//RS         })
+//RS     }
+//RS     fn lambda_body_call_fallibility(&self, body: &LambdaBody) -> Option<bool> {
+//RS         let terminal = match body {
+//RS             LambdaBody::Expr(expr) => expr.as_ref(),
+//RS             LambdaBody::Block(stmts) => stmts.iter().rev().find_map(|stmt| match stmt {
+//RS                 Stmt::Return(Some(expr), _) | Stmt::Expr(expr) => Some(expr),
+//RS                 _ => None,
+//RS             })?,
+//RS         };
+//RS         match terminal.without_parens() {
+//RS             Expr::Call(call) => call.resolved_ret.as_ref().map(|ty| ty.is_fallible()),
+//RS             Expr::MethodCall { resolved_ret, .. } => {
+//RS                 resolved_ret.as_ref().map(|ty| ty.is_fallible())
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn lambda_return_slots(ret: Option<&Type>) -> (Option<&Type>, Option<&Type>) {
+//RS     match ret {
+//RS         Some(Type::Result { ok, err }) => (Some(ok.as_ref()), Some(err.as_ref())),
+//RS         Some(ret) => (Some(ret), None),
+//RS         None => (None, None),
+//RS     }
+//RS }
+//RS 
+//RS fn is_unit_type(ty: &Type) -> bool {
+//RS     matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+//RS }
+//RS 
+//RS fn lambda_slot_matches(expected: &Type, actual: &Type) -> bool {
+//RS     expected == actual || (is_unit_type(expected) && is_unit_type(actual))
+//RS }
+//RS 
+//RS fn lambda_body_matches_return(expected: &Type, actual: &Type) -> bool {
+//RS     expected == actual
+//RS         || matches!(expected, Type::Result { ok, .. } if lambda_slot_matches(ok, actual))
+//RS }
+//RS 
+//RS fn install_inline_loop_label(body: &mut LambdaBody, label: &str, span: crate::Diagnostics::Span) {
+//RS     let LambdaBody::Block(stmts) = body else {
+//RS         return;
+//RS     };
+//RS     let Some(root) = stmts.first_mut() else {
+//RS         return;
+//RS     };
+//RS     let old = match root {
+//RS         Stmt::Loop {
+//RS             label: root_label, ..
+//RS         }
+//RS         | Stmt::While {
+//RS             label: root_label, ..
+//RS         }
+//RS         | Stmt::For {
+//RS             label: root_label, ..
+//RS         }
+//RS         | Stmt::CountedLoop {
+//RS             label: root_label, ..
+//RS         } => root_label
+//RS             .replace((label.to_string(), span))
+//RS             .map(|(name, _)| name),
+//RS         _ => None,
+//RS     };
+//RS     if let Some(old) = old {
+//RS         rewrite_inline_loop_target(stmts, &old, label);
+//RS     }
+//RS }
+//RS 
+//RS fn rewrite_inline_loop_target(stmts: &mut [Stmt], old: &str, new: &str) {
+//RS     for stmt in stmts {
+//RS         match stmt {
+//RS             Stmt::BreakLabel(name, _)
+//RS             | Stmt::ContinueLabel(name, _)
+//RS             | Stmt::BreakLabelValue(name, _, _, _)
+//RS                 if name == old =>
+//RS             {
+//RS                 *name = new.to_string();
+//RS             }
+//RS             Stmt::Switch {
+//RS                 arms, else_body, ..
+//RS             }
+//RS             | Stmt::ComptimeSwitch {
+//RS                 arms, else_body, ..
+//RS             } => {
+//RS                 for arm in arms {
+//RS                     rewrite_inline_loop_target(&mut arm.body, old, new);
+//RS                 }
+//RS                 if let Some(body) = else_body {
+//RS                     rewrite_inline_loop_target(body, old, new);
+//RS                 }
+//RS             }
+//RS             Stmt::Loop { body, .. }
+//RS             | Stmt::While { body, .. }
+//RS             | Stmt::For { body, .. }
+//RS             | Stmt::CountedLoop { body, .. }
+//RS             | Stmt::Unsafe { body, .. }
+//RS             | Stmt::Impure { body, .. }
+//RS             | Stmt::Reactive { body, .. }
+//RS             | Stmt::Shield { body, .. }
+//RS             | Stmt::Switched { body, .. }
+//RS             | Stmt::Region { body, .. }
+//RS             | Stmt::Policy { body, .. }
+//RS             | Stmt::TaskGroup { body, .. }
+//RS             | Stmt::Layout { body, .. }
+//RS             | Stmt::AuthorityScope { body, .. }
+//RS             | Stmt::ComptimeBlock { body, .. }
+//RS             | Stmt::ContextBlock { body, .. }
+//RS             | Stmt::Live { body, .. }
+//RS             | Stmt::AssumeDet { body, .. }
+//RS             | Stmt::Transact { body, .. }
+//RS             | Stmt::ScopeMember { body, .. } => rewrite_inline_loop_target(body, old, new),
+//RS             Stmt::ComptimeIf {
+//RS                 then_body,
+//RS                 else_body,
+//RS                 ..
+//RS             } => {
+//RS                 rewrite_inline_loop_target(then_body, old, new);
+//RS                 if let Some(body) = else_body {
+//RS                     rewrite_inline_loop_target(body, old, new);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn lower_collecting_loop(stmts: &mut Vec<Stmt>, item_ty: &Type, span: crate::Diagnostics::Span) {
+//RS     let target = jet_foundation::Names::mangle(&format!("collect_{}", span.start));
+//RS     rewrite_collect_yields(stmts, &target);
+//RS     stmts.insert(
+//RS         0,
+//RS         Stmt::Val(crate::AST::Binding {
+//RS             mutable: true,
+//RS             markers: Vec::new(),
+//RS             reactive_upgrade: false,
+//RS             meta: None,
+//RS             name: target.clone(),
+//RS             name_span: span,
+//RS             sigil_span: None,
+//RS             pattern: None,
+//RS             ty: Some(Type::List(Box::new(item_ty.clone()))),
+//RS             ty_span: Some(span),
+//RS             init: crate::AST::Expr::ListLit(Vec::new(), span),
+//RS             is_comptime: false,
+//RS             ct: None,
+//RS             uninit: false,
+//RS             arena_view: false,
+//RS             string_view: false,
+//RS             gc_promotion: None,
+//RS             gc_transferred: false,
+//RS         }),
+//RS     );
+//RS     stmts.push(Stmt::Expr(crate::AST::Expr::Ident(target, span)));
+//RS }
+//RS 
+//RS fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
+//RS     for stmt in stmts {
+//RS         match stmt {
+//RS             Stmt::Yield(value, span) if span.start == span.end => {
+//RS                 let value = std::mem::replace(value, crate::AST::Expr::Int(0, *span, None, None));
+//RS                 *stmt = Stmt::Expr(crate::AST::Expr::MethodCall {
+//RS                     receiver: Box::new(crate::AST::Expr::Ident(target.to_string(), *span)),
+//RS                     method: "push".to_string(),
+//RS                     method_span: *span,
+//RS                     owner_type_args: Vec::new(),
+//RS                     type_args: Vec::new(),
+//RS                     args: vec![crate::AST::CallArg {
+//RS                         convention: AccessConvention::Read,
+//RS                         expr: value,
+//RS                         span: *span,
+//RS                         flags: crate::AST::CallArgFlags::default(),
+//RS                         label: None,
+//RS                         spread: false,
+//RS                     }],
+//RS                     recv_type: None,
+//RS                     resolved_ret: Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+//RS                     operator_rhs: None,
+//RS                     checked_widen: false,
+//RS                 });
+//RS             }
+//RS             Stmt::Loop { body, .. }
+//RS             | Stmt::While { body, .. }
+//RS             | Stmt::For { body, .. }
+//RS             | Stmt::CountedLoop { body, .. }
+//RS             | Stmt::Unsafe { body, .. }
+//RS             | Stmt::Impure { body, .. }
+//RS             | Stmt::Reactive { body, .. }
+//RS             | Stmt::Shield { body, .. }
+//RS             | Stmt::Switched { body, .. }
+//RS             | Stmt::Region { body, .. }
+//RS             | Stmt::Policy { body, .. }
+//RS             | Stmt::TaskGroup { body, .. }
+//RS             | Stmt::Layout { body, .. }
+//RS             | Stmt::AuthorityScope { body, .. }
+//RS             | Stmt::ComptimeBlock { body, .. }
+//RS             | Stmt::AssumeDet { body, .. }
+//RS             | Stmt::ScopeMember { body, .. } => rewrite_collect_yields(body, target),
+//RS             Stmt::Switch {
+//RS                 arms, else_body, ..
+//RS             } => {
+//RS                 for arm in arms {
+//RS                     rewrite_collect_yields(&mut arm.body, target);
+//RS                 }
+//RS                 if let Some(body) = else_body {
+//RS                     rewrite_collect_yields(body, target);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0401 crates/jet-sema/src/Sema/CheckerInfer/calls/lambdas.rs:1-1373
+

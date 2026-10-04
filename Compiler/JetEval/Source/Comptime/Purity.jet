@@ -1,0 +1,906 @@
+// PORT-PENDING 0596 crates-jet-comptime-src-comptime-purity: crates/jet-comptime/src/Comptime/Purity.rs:1-902
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Purity check: walk the call graph reachable from a comptime `init` and
+//RS //! reject the first call denied by the canonical comptime rights row
+//RS //! (E3401 — D-META-EFFECT1 c3). The same syntax walker serves the run-time
+//RS //! `-[]>` declaration check in `jet-sema/Sema/Effects.rs`; only the stage
+//RS //! options differ. The row allows memory-only operations; host effects such as
+//RS //! IO and FFI are denied. `embed_file`, `embed_bytes`, `find`, `panic`, and
+//RS //! `require` remain allowed through their existing evaluator paths.
+//RS 
+//RS use std::borrow::Borrow;
+//RS use std::collections::{HashMap, HashSet};
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::AST::{
+//RS     EnumLitArg, Expr, Func, LValue, LambdaBody, OrFallback, Pattern, Stmt, StrPart, StructPatField,
+//RS };
+//RS use jet_foundation::Authority::Holds;
+//RS use jet_foundation::sema::{RightsProvenance, RightsRow};
+//RS 
+//RS use super::Diagnostics::impurity_diag;
+//RS 
+//RS /// D-META-EFFECT1 c3 (merge review, card #1543): the one shared walker
+//RS /// serves two callers whose meaning of "reachable at this stage" differs on
+//RS /// exactly two statement kinds. Everything else about the walk is identical
+//RS /// between the two — this enum is the only place they may differ, per the
+//RS /// review's "one walk, explicit mode parameters" requirement.
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS pub enum PurityStage {
+//RS     /// jet-sema's `-[]>` declared-effect check (also the `jet eval --pure`
+//RS     /// whole-program root check): checks what actually executes at run
+//RS     /// time. `#Impure(...)` bodies DO run at run time — the marker records
+//RS     /// and gates the ambient call, it doesn't erase it — so a
+//RS     /// declared-pure function must still be checked inside one; an empty
+//RS     /// declared effect set can't silently admit an ambient call. `@ { ... }`
+//RS     /// comptime blocks emit no runtime code at all (I3), so they are
+//RS     /// excluded: nothing inside one can trip a run-time-voiced E3401.
+//RS     RunTime,
+//RS     /// jet-comptime's own build-time evaluation check (`check_purity`,
+//RS     /// `check_purity_stmts`): checks what runs while the compiler itself
+//RS     /// evaluates the expression. `#Impure(...)` bodies are gated by
+//RS     /// `--gate impure=allow`/E3411 at the point they would actually execute
+//RS     /// (unchanged prior behavior), so the build-time walk skips them here.
+//RS     /// A nested `@ { ... }` block runs for real during build-time
+//RS     /// evaluation too, so it stays in the walk.
+//RS     BuildTime,
+//RS }
+//RS 
+//RS /// Threaded through the syntax-only expr/stmt walk beneath the purity
+//RS /// checker. Three independent knobs because three different call shapes in
+//RS /// this file need three different combinations — see each field's doc.
+//RS #[derive(Clone, Copy)]
+//RS struct WalkOpts {
+//RS     /// `Expr::Lambda` bodies and `#AssumeDet` bodies: off for the purity
+//RS     /// walk (a closure's or `#AssumeDet` body isn't checked while walking
+//RS     /// its enclosing statement), on for `reachable_owned_funcs`, which wants
+//RS     /// every name reachable from anywhere, suppressed body or not.
+//RS     include_suppressed: bool,
+//RS     /// `#Impure(...)` bodies — see [`PurityStage`].
+//RS     descend_impure: bool,
+//RS     /// `@ { ... }` comptime blocks — see [`PurityStage`].
+//RS     descend_comptime_block: bool,
+//RS }
+//RS 
+//RS impl WalkOpts {
+//RS     /// The shape every non-purity-check caller in this file already used
+//RS     /// before the stage split existed: skip suppressed/impure bodies,
+//RS     /// always cross into comptime blocks. Also `PurityStage::BuildTime`'s
+//RS     /// shape — the split leaves build-time behavior unchanged.
+//RS     const PLAIN: WalkOpts = WalkOpts {
+//RS         include_suppressed: false,
+//RS         descend_impure: false,
+//RS         descend_comptime_block: true,
+//RS     };
+//RS 
+//RS     /// `reachable_owned_funcs` wants every reachable name, full stop.
+//RS     const REACHABLE: WalkOpts = WalkOpts {
+//RS         include_suppressed: true,
+//RS         descend_impure: true,
+//RS         descend_comptime_block: true,
+//RS     };
+//RS 
+//RS     fn for_stage(stage: PurityStage) -> WalkOpts {
+//RS         match stage {
+//RS             PurityStage::RunTime => WalkOpts {
+//RS                 include_suppressed: false,
+//RS                 descend_impure: true,
+//RS                 descend_comptime_block: false,
+//RS             },
+//RS             PurityStage::BuildTime => WalkOpts::PLAIN,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Walk the call graph reachable from `init`; reject the first call denied by
+//RS /// the canonical compile-time row (E3401). The row allows only `Mem`, so
+//RS /// builtins and foreign bindings use the same effect vocabulary as sema.
+//RS pub(super) fn check_purity_stmts(
+//RS     stmts: &[Stmt],
+//RS     funcs: &HashMap<String, &Func>,
+//RS     extern_names: &HashSet<String>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let row = RightsRow::comptime(RightsProvenance::new(
+//RS         "comptime",
+//RS         "compile-time block rights row",
+//RS     ));
+//RS     let is_leaf_impure =
+//RS         |name: &str| comptime_call_denial_path(&row, name, extern_names, &[]).is_some();
+//RS     walk_purity_stmts(
+//RS         stmts,
+//RS         funcs,
+//RS         &is_leaf_impure,
+//RS         &|name, path, span| {
+//RS             let mut call_chain = comptime_call_denial_path(&row, name, extern_names, path)
+//RS                 .unwrap_or_else(|| path.to_vec());
+//RS             call_chain.push(name.to_string());
+//RS             impurity_diag(name, path, span).with_rights_chain(
+//RS                 row.kind.name(),
+//RS                 call_chain,
+//RS                 std::iter::empty::<String>(),
+//RS                 None,
+//RS             )
+//RS         },
+//RS         PurityStage::BuildTime,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn check_purity(
+//RS     init: &Expr,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     extern_names: &HashSet<String>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let row = RightsRow::comptime(RightsProvenance::new(
+//RS         "comptime",
+//RS         "compile-time initializer rights row",
+//RS     ));
+//RS     let is_leaf_impure =
+//RS         |name: &str| comptime_call_denial_path(&row, name, extern_names, &[]).is_some();
+//RS     walk_purity_expr(
+//RS         init,
+//RS         funcs,
+//RS         &is_leaf_impure,
+//RS         &|name, path, span| {
+//RS             let mut call_chain = comptime_call_denial_path(&row, name, extern_names, path)
+//RS                 .unwrap_or_else(|| path.to_vec());
+//RS             call_chain.push(name.to_string());
+//RS             impurity_diag(name, path, span).with_rights_chain(
+//RS                 row.kind.name(),
+//RS                 call_chain,
+//RS                 std::iter::empty::<String>(),
+//RS                 None,
+//RS             )
+//RS         },
+//RS         PurityStage::BuildTime,
+//RS     )
+//RS }
+//RS 
+//RS fn comptime_call_right(name: &str, extern_names: &HashSet<String>) -> Option<String> {
+//RS     jet_foundation::Authority::builtin_effect(name)
+//RS         .map(|effect| effect.name().to_string())
+//RS         .or_else(|| {
+//RS             extern_names
+//RS                 .contains(name)
+//RS                 .then(|| jet_foundation::Authority::Effect::FFI.name().to_string())
+//RS         })
+//RS }
+//RS 
+//RS /// Walk one denied call through the canonical row and retain its typed chain.
+//RS fn comptime_call_denial_path(
+//RS     row: &RightsRow,
+//RS     name: &str,
+//RS     extern_names: &HashSet<String>,
+//RS     path: &[String],
+//RS ) -> Option<Vec<String>> {
+//RS     let right = comptime_call_right(name, extern_names)?;
+//RS     let effects = Holds::from([right]);
+//RS     row.walk(&effects, path, &[])
+//RS         .denials
+//RS         .into_iter()
+//RS         .next()
+//RS         .map(|denial| denial.chain.call_chain)
+//RS }
+//RS 
+//RS /// D-META-EFFECT1 c3: the one call-graph purity walk. Walks the call graph
+//RS /// reachable from `e`, recursing into `funcs` when a callee is known (with
+//RS /// cycle detection via `visited`), and reports the first call
+//RS /// `is_leaf_impure` accepts — built into a diagnostic by `diag(name, path,
+//RS /// span)` — with the full call-chain path that reached it. Empty `funcs`
+//RS /// makes this a direct-body-only check (no transitive recursion), which is
+//RS /// what a `-[]>`-declared function's own body check needs; a populated
+//RS /// `funcs` map (comptime's reachable functions, or a whole program's) makes
+//RS /// it the transitive `jet eval --pure` / comptime-evaluation check. `stage`
+//RS /// selects which statement kinds the walk descends into — see
+//RS /// [`PurityStage`].
+//RS pub fn walk_purity_expr<F>(
+//RS     e: &Expr,
+//RS     funcs: &HashMap<String, F>,
+//RS     is_leaf_impure: &impl Fn(&str) -> bool,
+//RS     diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
+//RS     stage: PurityStage,
+//RS ) -> Result<(), Diagnostic>
+//RS where
+//RS     F: Borrow<Func>,
+//RS {
+//RS     walk_purity_expr_from(
+//RS         e,
+//RS         funcs,
+//RS         is_leaf_impure,
+//RS         diag,
+//RS         &mut HashSet::new(),
+//RS         &mut Vec::new(),
+//RS         stage,
+//RS     )
+//RS }
+//RS 
+//RS /// Like [`walk_purity_expr`] but over a statement list, and like
+//RS /// [`walk_purity_stmts_from`] but with a fresh `visited`/`path`.
+//RS pub fn walk_purity_stmts<F>(
+//RS     stmts: &[Stmt],
+//RS     funcs: &HashMap<String, F>,
+//RS     is_leaf_impure: &impl Fn(&str) -> bool,
+//RS     diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
+//RS     stage: PurityStage,
+//RS ) -> Result<(), Diagnostic>
+//RS where
+//RS     F: Borrow<Func>,
+//RS {
+//RS     walk_purity_stmts_from(
+//RS         stmts,
+//RS         funcs,
+//RS         is_leaf_impure,
+//RS         diag,
+//RS         &mut HashSet::new(),
+//RS         &mut Vec::new(),
+//RS         stage,
+//RS     )
+//RS }
+//RS 
+//RS /// [`walk_purity_stmts`] with a caller-seeded `visited`/`path` — used by the
+//RS /// `jet eval --pure` whole-program root check, which seeds both with the
+//RS /// entry function's own name so a direct violation in the root reads
+//RS /// "`entry` calls `x`" instead of "`x` is impure, but `entry` declares
+//RS /// `-[]>`".
+//RS pub fn walk_purity_stmts_from<F>(
+//RS     stmts: &[Stmt],
+//RS     funcs: &HashMap<String, F>,
+//RS     is_leaf_impure: &impl Fn(&str) -> bool,
+//RS     diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
+//RS     visited: &mut HashSet<String>,
+//RS     path: &mut Vec<String>,
+//RS     stage: PurityStage,
+//RS ) -> Result<(), Diagnostic>
+//RS where
+//RS     F: Borrow<Func>,
+//RS {
+//RS     for stmt in stmts {
+//RS         walk_purity_stmt(stmt, funcs, is_leaf_impure, diag, visited, path, stage)?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn walk_purity_expr_from<F>(
+//RS     e: &Expr,
+//RS     funcs: &HashMap<String, F>,
+//RS     is_leaf_impure: &impl Fn(&str) -> bool,
+//RS     diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
+//RS     visited: &mut HashSet<String>,
+//RS     path: &mut Vec<String>,
+//RS     stage: PurityStage,
+//RS ) -> Result<(), Diagnostic>
+//RS where
+//RS     F: Borrow<Func>,
+//RS {
+//RS     let mut result = Ok(());
+//RS     walk_calls(e, &mut |name, span| {
+//RS         if result.is_err() {
+//RS             return;
+//RS         }
+//RS         if is_leaf_impure(name) {
+//RS             result = Err(diag(name, path, span));
+//RS         } else if let Some(f) = funcs.get(name) {
+//RS             let f = f.borrow();
+//RS             if visited.insert(name.to_string()) {
+//RS                 path.push(name.to_string());
+//RS                 for stmt in &f.body {
+//RS                     if result.is_err() {
+//RS                         break;
+//RS                     }
+//RS                     result =
+//RS                         walk_purity_stmt(stmt, funcs, is_leaf_impure, diag, visited, path, stage);
+//RS                 }
+//RS                 path.pop();
+//RS             }
+//RS         }
+//RS     });
+//RS     result
+//RS }
+//RS 
+//RS fn walk_purity_stmt<F>(
+//RS     s: &Stmt,
+//RS     funcs: &HashMap<String, F>,
+//RS     is_leaf_impure: &impl Fn(&str) -> bool,
+//RS     diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
+//RS     visited: &mut HashSet<String>,
+//RS     path: &mut Vec<String>,
+//RS     stage: PurityStage,
+//RS ) -> Result<(), Diagnostic>
+//RS where
+//RS     F: Borrow<Func>,
+//RS {
+//RS     let mut result = Ok(());
+//RS     walk_stmt_expr_nodes(s, WalkOpts::for_stage(stage), &mut |e| {
+//RS         if result.is_ok() {
+//RS             result = walk_purity_expr_from(e, funcs, is_leaf_impure, diag, visited, path, stage);
+//RS         }
+//RS     });
+//RS     result
+//RS }
+//RS 
+//RS /// D-CTIO1: run every build-time IO call in an initializer through the one
+//RS /// shared implementation before evaluation, using the call's own span. The
+//RS /// evaluator repeats the call for its value, but it carries no spans, so this
+//RS /// pre-pass is what makes `embed_file`/`embed_bytes`/`find` diagnostics point
+//RS /// at the call. Returns false when it reported at least one problem.
+//RS pub fn check_build_time_io(
+//RS     e: &Expr,
+//RS     base_dir: &std::path::Path,
+//RS     diags: &mut Vec<crate::Diagnostics::Diagnostic>,
+//RS ) -> bool {
+//RS     let before = diags.len();
+//RS     walk_expr_nodes(e, WalkOpts::PLAIN, &mut |expr| {
+//RS         let Expr::Call(call) = expr else { return };
+//RS         if !matches!(
+//RS             call.name.as_str(),
+//RS             crate::Syntax::BUILTIN_EMBED_FILE
+//RS                 | crate::Syntax::BUILTIN_EMBED_BYTES
+//RS                 | crate::Syntax::BUILTIN_FIND
+//RS         ) {
+//RS             return;
+//RS         }
+//RS         let Some(arg) = call.args.first() else { return };
+//RS         // Lock inputs are recorded by the evaluating pass, not here.
+//RS         if let Err(diagnostic) = crate::Comptime::eval_build_time_io(
+//RS             &call.name,
+//RS             base_dir,
+//RS             crate::Comptime::Methods::arg_string_literal(arg),
+//RS             None,
+//RS             call.name_span,
+//RS         ) {
+//RS             diags.push(diagnostic);
+//RS         }
+//RS     });
+//RS     diags.len() == before
+//RS }
+//RS 
+//RS /// Visit every direct `Call` name in an expression tree (shallow over
+//RS /// nested functions — recursion is driven by the purity walker).
+//RS pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
+//RS     walk_expr_nodes(e, WalkOpts::PLAIN, &mut |expr| {
+//RS         if let Expr::Call(call) = expr {
+//RS             f(&call.name, call.name_span);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// Visit every identifier read by an expression.
+//RS ///
+//RS /// This is intentionally a read-only syntax walk. Consumers that need
+//RS /// semantic dependency information must filter the names against their own
+//RS /// declaration table; function names and type names are also represented by
+//RS /// `Expr::Ident` while the front end is still doing pure syntax traversal.
+//RS pub fn walk_identifiers(e: &Expr, f: &mut impl FnMut(&str, Span)) {
+//RS     walk_expr_nodes(e, WalkOpts::PLAIN, &mut |expr| {
+//RS         if let Expr::Ident(name, span) = expr {
+//RS             f(name, *span);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS pub(super) fn reachable_owned_funcs(
+//RS     init: &Expr,
+//RS     funcs: &HashMap<String, Func>,
+//RS ) -> HashMap<String, Func> {
+//RS     let reachable_names = reachable_func_names(init, funcs);
+//RS     reachable_names
+//RS         .into_iter()
+//RS         .filter_map(|name| funcs.get(&name).cloned().map(|function| (name, function)))
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Names in the call closure rooted at `init`.
+//RS ///
+//RS /// This is separate from [`reachable_owned_funcs`] so callers that already
+//RS /// hold borrowed functions can prune their lowering table without cloning the
+//RS /// entire module first.
+//RS pub(super) fn reachable_func_names<F>(init: &Expr, funcs: &HashMap<String, F>) -> HashSet<String>
+//RS where
+//RS     F: Borrow<Func>,
+//RS {
+//RS     let mut roots = HashSet::new();
+//RS     reachable_func_roots(init, funcs, &mut roots);
+//RS     reachable_func_closure(roots, funcs)
+//RS }
+//RS 
+//RS fn known_func_name<F>(name: &str, funcs: &HashMap<String, F>) -> Option<String> {
+//RS     if funcs.contains_key(name) {
+//RS         return Some(name.to_string());
+//RS     }
+//RS     name.split_once('.')
+//RS         .map(|(module, symbol)| format!("{module}::{symbol}"))
+//RS         .filter(|qualified| funcs.contains_key(qualified))
+//RS }
+//RS 
+//RS fn expression_func_name<F>(expr: &Expr, funcs: &HashMap<String, F>) -> Option<String> {
+//RS     match expr {
+//RS         Expr::Call(call) => known_func_name(&call.name, funcs),
+//RS         Expr::Ident(name, _) => known_func_name(name, funcs),
+//RS         Expr::MethodCall {
+//RS             method,
+//RS             recv_type: Some(owner),
+//RS             ..
+//RS         } => {
+//RS             let qualified = format!("{owner}::{method}");
+//RS             known_func_name(&qualified, funcs)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Add the functions `init` names directly to `roots`.
+//RS pub(super) fn reachable_func_roots<F>(
+//RS     init: &Expr,
+//RS     funcs: &HashMap<String, F>,
+//RS     roots: &mut HashSet<String>,
+//RS ) where
+//RS     F: Borrow<Func>,
+//RS {
+//RS     walk_expr_nodes(init, WalkOpts::REACHABLE, &mut |expr| {
+//RS         if let Some(name) = expression_func_name(expr, funcs) {
+//RS             roots.insert(name);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// `roots` plus every function their bodies reach.
+//RS ///
+//RS /// The walk goes forward from the roots and reads only the bodies it reaches,
+//RS /// so its cost follows the closure, not the whole function table. A comptime
+//RS /// call site in a large unit therefore does not pay for every function in the
+//RS /// unit, and callers with many roots take one closure over their union.
+//RS pub(super) fn reachable_func_closure<F>(
+//RS     roots: HashSet<String>,
+//RS     funcs: &HashMap<String, F>,
+//RS ) -> HashSet<String>
+//RS where
+//RS     F: Borrow<Func>,
+//RS {
+//RS     let mut pending: Vec<String> = roots.iter().cloned().collect();
+//RS     let mut reached = roots;
+//RS     while let Some(name) = pending.pop() {
+//RS         let Some(function) = funcs.get(&name) else {
+//RS             continue;
+//RS         };
+//RS         for statement in &function.borrow().body {
+//RS             walk_stmt_expr_nodes(statement, WalkOpts::REACHABLE, &mut |expr| {
+//RS                 if let Some(dependency) = expression_func_name(expr, funcs) {
+//RS                     if reached.insert(dependency.clone()) {
+//RS                         pending.push(dependency);
+//RS                     }
+//RS                 }
+//RS             });
+//RS         }
+//RS     }
+//RS     reached
+//RS }
+//RS 
+//RS fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
+//RS     f(e);
+//RS     match e {
+//RS         Expr::Str(parts, _) => {
+//RS             for part in parts {
+//RS                 if let StrPart::Interp(expr, _) = part {
+//RS                     walk_expr_nodes(expr, opts, f);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Expr::StrMatchLit(_, _)
+//RS         | Expr::BinMatchLit(_, _)
+//RS         | Expr::Int(_, _, _, _)
+//RS         | Expr::Float(_, _, _, _)
+//RS         | Expr::Bool(_, _)
+//RS         | Expr::Unit(_)
+//RS         | Expr::Char(_, _)
+//RS         | Expr::Ident(_, _)
+//RS         | Expr::UnitLit { .. }
+//RS         | Expr::Absent(_)
+//RS         | Expr::Todo { .. }
+//RS         | Expr::NoElse(_)
+//RS         | Expr::ReduceMarker(_, _)
+//RS         | Expr::ComptimeName { .. } => {}
+//RS         Expr::ListLit(items, _)
+//RS         | Expr::CompareChain {
+//RS             operands: items, ..
+//RS         } => {
+//RS             for item in items {
+//RS                 walk_expr_nodes(item, opts, f);
+//RS             }
+//RS         }
+//RS         Expr::MemberSpread { base, .. } => walk_expr_nodes(base, opts, f),
+//RS         Expr::Spread(inner, _)
+//RS         | Expr::Unary(_, inner, _)
+//RS         | Expr::Deref(inner, _)
+//RS         | Expr::RawOf(inner, _)
+//RS         | Expr::Copy(inner, _)
+//RS         | Expr::Place(inner, _, _)
+//RS         | Expr::Field(inner, _, _)
+//RS         | Expr::Tainted(inner, _, _)
+//RS         | Expr::Present(inner, _)
+//RS         | Expr::Ok(inner, _)
+//RS         | Expr::Err(inner, _)
+//RS         | Expr::Paren(inner, _) => {
+//RS             walk_expr_nodes(inner, opts, f);
+//RS         }
+//RS         Expr::Try(inner, _, _, note) => {
+//RS             walk_expr_nodes(inner, opts, f);
+//RS             if let Some(note) = note {
+//RS                 walk_expr_nodes(note, opts, f);
+//RS             }
+//RS         }
+//RS         Expr::OptField { base, .. } => walk_expr_nodes(base, opts, f),
+//RS         Expr::Range { start, end, .. } => {
+//RS             walk_expr_nodes(start, opts, f);
+//RS             walk_expr_nodes(end, opts, f);
+//RS         }
+//RS         Expr::MapLit(entries, _) => {
+//RS             for (key, value) in entries {
+//RS                 walk_expr_nodes(key, opts, f);
+//RS                 walk_expr_nodes(value, opts, f);
+//RS             }
+//RS         }
+//RS         Expr::Index { base, index, .. } => {
+//RS             walk_expr_nodes(base, opts, f);
+//RS             walk_expr_nodes(index, opts, f);
+//RS         }
+//RS         Expr::Slice {
+//RS             base,
+//RS             start,
+//RS             end,
+//RS             range,
+//RS             ..
+//RS         } => {
+//RS             walk_expr_nodes(base, opts, f);
+//RS             if let Some(range) = range {
+//RS                 walk_expr_nodes(range, opts, f);
+//RS             } else {
+//RS                 walk_expr_nodes(start, opts, f);
+//RS                 walk_expr_nodes(end, opts, f);
+//RS             }
+//RS         }
+//RS         Expr::Call(call) => {
+//RS             for arg in &call.args {
+//RS                 walk_expr_nodes(&arg.expr, opts, f);
+//RS             }
+//RS         }
+//RS         Expr::Binary(_, left, right, _) => {
+//RS             walk_expr_nodes(left, opts, f);
+//RS             walk_expr_nodes(right, opts, f);
+//RS         }
+//RS         Expr::MethodCall { receiver, args, .. } => {
+//RS             walk_expr_nodes(receiver, opts, f);
+//RS             for arg in args {
+//RS                 walk_expr_nodes(&arg.expr, opts, f);
+//RS             }
+//RS         }
+//RS         Expr::StructLit { fields, .. } => {
+//RS             for (_, _, value) in fields {
+//RS                 walk_expr_nodes(value, opts, f);
+//RS             }
+//RS         }
+//RS         Expr::TypedLit { body, .. } => {
+//RS             body.for_each_expr(|value| walk_expr_nodes(value, opts, f));
+//RS         }
+//RS         Expr::EnumLit { args, .. } => {
+//RS             for arg in args {
+//RS                 let value = match arg {
+//RS                     EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => value,
+//RS                 };
+//RS                 walk_expr_nodes(value, opts, f);
+//RS             }
+//RS         }
+//RS         Expr::PatternTest {
+//RS             subject, pattern, ..
+//RS         } => {
+//RS             walk_expr_nodes(subject, opts, f);
+//RS             walk_pattern_expr_nodes(pattern, opts, f);
+//RS         }
+//RS         Expr::OrFallback {
+//RS             value, fallback, ..
+//RS         } => {
+//RS             walk_expr_nodes(value, opts, f);
+//RS             match fallback {
+//RS                 OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
+//RS                     walk_expr_nodes(value, opts, f);
+//RS                 }
+//RS                 OrFallback::Block { body, value, .. } => {
+//RS                     for stmt in body {
+//RS                         walk_stmt_expr_nodes(stmt, opts, f);
+//RS                     }
+//RS                     if let Some(value) = value {
+//RS                         walk_expr_nodes(value, opts, f);
+//RS                     }
+//RS                 }
+//RS                 OrFallback::Panic { args, .. } => {
+//RS                     for arg in args {
+//RS                         walk_expr_nodes(&arg.expr, opts, f);
+//RS                     }
+//RS                 }
+//RS                 OrFallback::Return(None, _)
+//RS                 | OrFallback::Break(_)
+//RS                 | OrFallback::Continue(_)
+//RS                 | OrFallback::BreakLabel(..)
+//RS                 | OrFallback::ContinueLabel(..) => {}
+//RS             }
+//RS         }
+//RS         Expr::If {
+//RS             cond,
+//RS             then_body,
+//RS             then_value,
+//RS             else_body,
+//RS             else_value,
+//RS             ..
+//RS         } => {
+//RS             walk_expr_nodes(cond, opts, f);
+//RS             for stmt in then_body {
+//RS                 walk_stmt_expr_nodes(stmt, opts, f);
+//RS             }
+//RS             walk_expr_nodes(then_value, opts, f);
+//RS             for stmt in else_body {
+//RS                 walk_stmt_expr_nodes(stmt, opts, f);
+//RS             }
+//RS             walk_expr_nodes(else_value, opts, f);
+//RS         }
+//RS         Expr::TupleLit(fields, _, _) => {
+//RS             for (_, value) in fields {
+//RS                 walk_expr_nodes(value, opts, f);
+//RS             }
+//RS         }
+//RS         Expr::Lambda(lambda) => {
+//RS             if opts.include_suppressed {
+//RS                 match &lambda.body {
+//RS                     LambdaBody::Expr(body) => walk_expr_nodes(body, opts, f),
+//RS                     LambdaBody::Block(body) => {
+//RS                         for stmt in body {
+//RS                             walk_stmt_expr_nodes(stmt, opts, f);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         Expr::CallValue { callee, args, .. } => {
+//RS             walk_expr_nodes(callee, opts, f);
+//RS             for arg in args {
+//RS                 walk_expr_nodes(&arg.expr, opts, f);
+//RS             }
+//RS         }
+//RS         Expr::PtrFromAddr { addr, .. } => walk_expr_nodes(addr, opts, f),
+//RS     }
+//RS }
+//RS 
+//RS /// Visit every expression, including nested suppressed bodies. Comptime
+//RS /// access guards use the same complete syntax walk as purity checks.
+//RS pub fn walk_expr_nodes_for_validation(e: &Expr, f: &mut impl FnMut(&Expr)) {
+//RS     walk_expr_nodes(e, WalkOpts::REACHABLE, f);
+//RS }
+//RS 
+//RS /// Visit every expression in a statement tree. Comptime access guards need
+//RS /// the same complete walk when the TIR bridge evaluates a whole block.
+//RS pub fn walk_stmt_expr_nodes_for_validation(stmts: &[Stmt], f: &mut impl FnMut(&Expr)) {
+//RS     for stmt in stmts {
+//RS         walk_stmt_expr_nodes(stmt, WalkOpts::REACHABLE, f);
+//RS     }
+//RS }
+//RS 
+//RS fn walk_pattern_expr_nodes(pattern: &Pattern, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
+//RS     match pattern {
+//RS         Pattern::Or(patterns, _) => {
+//RS             for pattern in patterns {
+//RS                 walk_pattern_expr_nodes(pattern, opts, f);
+//RS             }
+//RS         }
+//RS         Pattern::Struct { fields, .. } => {
+//RS             for field in fields {
+//RS                 if let StructPatField::Value { value, .. } = field {
+//RS                     walk_expr_nodes(value, opts, f);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Pattern::Variant { .. }
+//RS         | Pattern::Present { .. }
+//RS         | Pattern::Absent(_)
+//RS         | Pattern::Ok { .. }
+//RS         | Pattern::Err { .. }
+//RS         | Pattern::Range { .. }
+//RS         | Pattern::StrMatch { .. }
+//RS         | Pattern::BinMatch { .. } => {}
+//RS     }
+//RS }
+//RS 
+//RS fn walk_stmt_expr_nodes(s: &Stmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
+//RS     macro_rules! walk {
+//RS         ($expr:expr) => {
+//RS             walk_expr_nodes($expr, opts, f)
+//RS         };
+//RS     }
+//RS     match s {
+//RS         Stmt::Expr(expr)
+//RS         | Stmt::DeferClose { close: expr, .. }
+//RS         | Stmt::Val(crate::AST::Binding { init: expr, .. })
+//RS         | Stmt::Yield(expr, _) => {
+//RS             walk!(expr);
+//RS         }
+//RS         Stmt::Assign { target, value, .. } => {
+//RS             match target {
+//RS                 LValue::Local { .. } => {}
+//RS                 LValue::Index { base, index, .. } => {
+//RS                     walk!(base);
+//RS                     walk!(index);
+//RS                 }
+//RS                 LValue::Field { base, .. } => walk!(base),
+//RS             }
+//RS             walk!(value);
+//RS         }
+//RS         Stmt::Return(Some(expr), _) | Stmt::BreakValue(expr, _) => walk!(expr),
+//RS         Stmt::BreakLabelValue(_, _, expr, _) => walk!(expr),
+//RS         Stmt::Return(None, _)
+//RS         | Stmt::Break(_)
+//RS         | Stmt::Continue(_)
+//RS         | Stmt::BreakLabel(..)
+//RS         | Stmt::ContinueLabel(..) => {}
+//RS         Stmt::While { cond, body, .. } => {
+//RS             walk!(cond);
+//RS             walk_stmt_body_nodes(body, opts, f);
+//RS         }
+//RS         Stmt::For { kind, body, .. } => {
+//RS             match kind {
+//RS                 crate::AST::ForKind::Range {
+//RS                     start, end, step, ..
+//RS                 } => {
+//RS                     walk!(start);
+//RS                     walk!(end);
+//RS                     if let Some(step) = step {
+//RS                         walk!(step);
+//RS                     }
+//RS                 }
+//RS                 crate::AST::ForKind::In { collection, step } => {
+//RS                     walk!(collection);
+//RS                     if let Some(step) = step {
+//RS                         walk!(step);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             walk_stmt_body_nodes(body, opts, f);
+//RS         }
+//RS         Stmt::Switch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         }
+//RS         | Stmt::ComptimeSwitch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             walk!(subject);
+//RS             for arm in arms {
+//RS                 walk!(&arm.cond);
+//RS                 walk_stmt_body_nodes(&arm.body, opts, f);
+//RS             }
+//RS             if let Some(body) = else_body {
+//RS                 walk_stmt_body_nodes(body, opts, f);
+//RS             }
+//RS         }
+//RS         Stmt::CountedLoop {
+//RS             init,
+//RS             cond,
+//RS             step,
+//RS             body,
+//RS             ..
+//RS         } => {
+//RS             walk!(&init.init);
+//RS             walk!(cond);
+//RS             if let Some(step) = step {
+//RS                 walk_stmt_expr_nodes(step, opts, f);
+//RS             }
+//RS             walk_stmt_body_nodes(body, opts, f);
+//RS         }
+//RS         Stmt::Unsafe {
+//RS             audit_expr, body, ..
+//RS         } => {
+//RS             if let Some(audit) = audit_expr {
+//RS                 walk!(audit);
+//RS             }
+//RS             walk_stmt_body_nodes(body, opts, f);
+//RS         }
+//RS         Stmt::Impure {
+//RS             reason_expr, body, ..
+//RS         } => {
+//RS             // See PurityStage: run-time descends (an `-[]>` fn's declared
+//RS             // empty effect set must still reject an ambient call fenced only
+//RS             // by `#Impure`), build-time skips (the ambient call is checked
+//RS             // by --gate impure=allow/E3411 at the point it would actually run).
+//RS             if opts.descend_impure {
+//RS                 if let Some(reason) = reason_expr {
+//RS                     walk!(reason);
+//RS                 }
+//RS                 walk_stmt_body_nodes(body, opts, f);
+//RS             }
+//RS         }
+//RS         Stmt::AssumeDet {
+//RS             reason_expr, body, ..
+//RS         } => {
+//RS             if opts.include_suppressed {
+//RS                 walk!(reason_expr);
+//RS                 walk_stmt_body_nodes(body, opts, f);
+//RS             }
+//RS         }
+//RS         Stmt::ComptimeIf {
+//RS             cond,
+//RS             then_body,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             walk!(cond);
+//RS             walk_stmt_body_nodes(then_body, opts, f);
+//RS             if let Some(body) = else_body {
+//RS                 walk_stmt_body_nodes(body, opts, f);
+//RS             }
+//RS         }
+//RS         Stmt::ContextBlock { fields, body, .. } => {
+//RS             for (_, value, _) in fields {
+//RS                 walk!(value);
+//RS             }
+//RS             walk_stmt_body_nodes(body, opts, f);
+//RS         }
+//RS         Stmt::ScopeMember { args, body, .. } => {
+//RS             for arg in args {
+//RS                 walk!(arg);
+//RS             }
+//RS             walk_stmt_body_nodes(body, opts, f);
+//RS         }
+//RS         Stmt::ComptimeBlock { body, .. } => {
+//RS             // See PurityStage: build-time descends (a nested `@ { ... }`
+//RS             // block runs for real during build-time evaluation), run-time
+//RS             // skips (it emits no runtime code at all — I3 — so nothing
+//RS             // inside one can trip a run-time-voiced E3401).
+//RS             if opts.descend_comptime_block {
+//RS                 walk_stmt_body_nodes(body, opts, f);
+//RS             }
+//RS         }
+//RS         Stmt::Switched { marker, body, .. } => {
+//RS             if !crate::AST::switched_off(marker) {
+//RS                 walk_stmt_body_nodes(body, opts, f);
+//RS             }
+//RS         }
+//RS         Stmt::Loop { body, .. }
+//RS         | Stmt::Reactive { body, .. }
+//RS         | Stmt::Shield { body, .. }
+//RS         | Stmt::Region { body, .. }
+//RS         | Stmt::Policy { body, .. }
+//RS         | Stmt::TaskGroup { body, .. }
+//RS         | Stmt::Layout { body, .. }
+//RS         | Stmt::AuthorityScope { body, .. }
+//RS         | Stmt::Live { body, .. }
+//RS         | Stmt::Transact { body, .. } => {
+//RS             walk_stmt_body_nodes(body, opts, f);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn walk_if_stmt_expr_nodes(
+//RS     if_stmt: &crate::AST::IfStmt,
+//RS     opts: WalkOpts,
+//RS     f: &mut impl FnMut(&Expr),
+//RS ) {
+//RS     walk_expr_nodes(&if_stmt.cond, opts, f);
+//RS     walk_stmt_body_nodes(&if_stmt.then_body, opts, f);
+//RS     match &if_stmt.else_branch {
+//RS         Some(crate::AST::ElseBranch::ElseIf(inner)) => {
+//RS             walk_if_stmt_expr_nodes(inner, opts, f);
+//RS         }
+//RS         Some(crate::AST::ElseBranch::Else(body)) => {
+//RS             walk_stmt_body_nodes(body, opts, f);
+//RS         }
+//RS         None => {}
+//RS     }
+//RS }
+//RS 
+//RS fn walk_stmt_body_nodes(body: &[Stmt], opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
+//RS     for stmt in body {
+//RS         walk_stmt_expr_nodes(stmt, opts, f);
+//RS     }
+//RS }
+// END-PORT-PENDING 0596 crates/jet-comptime/src/Comptime/Purity.rs:1-902
+

@@ -1,0 +1,581 @@
+// PORT-PENDING 0558 crates-jet-comptime-src-comptime-argslite-module-group: crates/jet-comptime/src/Comptime/ArgsLite.rs:1-577
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Interpreter `core.args` — same algorithm as AOT `Args.rs` (include!).
+//RS 
+//RS mod native {
+//RS     use std::cell::RefCell;
+//RS 
+//RS     use crate::Comptime::Diagnostics::unsupported;
+//RS     use crate::Diagnostics::{Diagnostic, Span};
+//RS     use crate::AST::CtValue;
+//RS 
+//RS     #[allow(unexpected_cfgs)]
+//RS     mod job {
+//RS         include!("../../../jet-codegen/src/Prelude/JobQueueTypes.rs");
+//RS         include!("../../../jet-codegen/src/Prelude/Job.rs");
+//RS     }
+//RS     use job::jet_args_source_program_name;
+//RS 
+//RS     trait JetShow {
+//RS         fn jet_show(&self) -> String;
+//RS     }
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Args.rs");
+//RS 
+//RS     thread_local! {
+//RS         static SPECS: RefCell<Vec<JetArgsSpec>> = const { RefCell::new(Vec::new()) };
+//RS         static PARSED: RefCell<Vec<JetParsedArgs>> = const { RefCell::new(Vec::new()) };
+//RS     }
+//RS 
+//RS     fn push_spec(spec: JetArgsSpec) -> i64 {
+//RS         SPECS.with(|slot| {
+//RS             let mut v = slot.borrow_mut();
+//RS             v.push(spec);
+//RS             v.len() as i64
+//RS         })
+//RS     }
+//RS 
+//RS     fn take_spec(id: i64) -> Option<JetArgsSpec> {
+//RS         SPECS.with(|slot| {
+//RS             let v = slot.borrow();
+//RS             let idx = id.saturating_sub(1) as usize;
+//RS             v.get(idx).cloned()
+//RS         })
+//RS     }
+//RS 
+//RS     fn replace_spec(id: i64, spec: JetArgsSpec) -> i64 {
+//RS         SPECS.with(|slot| {
+//RS             let mut v = slot.borrow_mut();
+//RS             let idx = id.saturating_sub(1) as usize;
+//RS             if idx < v.len() {
+//RS                 v[idx] = spec;
+//RS                 id
+//RS             } else {
+//RS                 v.push(spec);
+//RS                 v.len() as i64
+//RS             }
+//RS         })
+//RS     }
+//RS 
+//RS     fn push_parsed(parsed: JetParsedArgs) -> i64 {
+//RS         PARSED.with(|slot| {
+//RS             let mut v = slot.borrow_mut();
+//RS             v.push(parsed);
+//RS             v.len() as i64
+//RS         })
+//RS     }
+//RS 
+//RS     fn with_parsed<R>(id: i64, f: impl FnOnce(&JetParsedArgs) -> R) -> Option<R> {
+//RS         PARSED.with(|slot| {
+//RS             let v = slot.borrow();
+//RS             let idx = id.saturating_sub(1) as usize;
+//RS             v.get(idx).map(|p| f(p))
+//RS         })
+//RS     }
+//RS 
+//RS     fn spec_value(id: i64) -> CtValue {
+//RS         CtValue::Struct {
+//RS             type_name: "ArgsSpec".to_string(),
+//RS             fields: vec![("id".to_string(), CtValue::Int(id))],
+//RS         }
+//RS     }
+//RS 
+//RS     fn parsed_value(id: i64) -> CtValue {
+//RS         CtValue::Struct {
+//RS             type_name: "ParsedArgs".to_string(),
+//RS             fields: vec![("id".to_string(), CtValue::Int(id))],
+//RS         }
+//RS     }
+//RS 
+//RS     fn spec_id(recv: &CtValue) -> Option<i64> {
+//RS         match recv {
+//RS             CtValue::Struct { type_name, fields } if type_name == "ArgsSpec" => {
+//RS                 fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
+//RS                     ("id", CtValue::Int(i)) => Some(*i),
+//RS                     _ => None,
+//RS                 })
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn parsed_id(recv: &CtValue) -> Option<i64> {
+//RS         match recv {
+//RS             CtValue::Struct { type_name, fields } if type_name == "ParsedArgs" => {
+//RS                 fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
+//RS                     ("id", CtValue::Int(i)) => Some(*i),
+//RS                     _ => None,
+//RS                 })
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn as_str(v: &CtValue, span: Span) -> Result<String, Diagnostic> {
+//RS         match v {
+//RS             CtValue::Str(s) => Ok(s.clone()),
+//RS             _ => Err(unsupported("args expects text", span)),
+//RS         }
+//RS     }
+//RS 
+//RS     fn str_arg(args: &[CtValue], i: usize, span: Span) -> Result<String, Diagnostic> {
+//RS         args.get(i)
+//RS             .ok_or_else(|| unsupported("args: missing argument", span))
+//RS             .and_then(|v| as_str(v, span))
+//RS     }
+//RS 
+//RS     fn optional_str_arg(
+//RS         args: &[CtValue],
+//RS         i: usize,
+//RS         span: Span,
+//RS     ) -> Result<Option<String>, Diagnostic> {
+//RS         match args.get(i) {
+//RS             Some(CtValue::Str(value)) => Ok(Some(value.clone())),
+//RS             Some(CtValue::Unit) | Some(CtValue::Failed(crate::AST::CtReport::Clean(_))) => Ok(None),
+//RS             Some(_) => Err(unsupported("args expects optional text", span)),
+//RS             None => Err(unsupported("args: missing argument", span)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn core_args_spec() -> CtValue {
+//RS         spec_value(push_spec(jet_args_spec()))
+//RS     }
+//RS 
+//RS     pub fn eval_handle(
+//RS         op: &str,
+//RS         recv: &mut CtValue,
+//RS         args: &mut [CtValue],
+//RS         span: Span,
+//RS     ) -> Option<Result<CtValue, Diagnostic>> {
+//RS         let result = match op {
+//RS             "ArgsSpecProgram" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let prog = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(id, jet_args_program(spec, &prog))))
+//RS             }
+//RS             "ArgsSpecFlag" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_flag(spec, &name, &help),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecFlagShort" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let short = match str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 2, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_flag_short(spec, &name, &short, &help),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecOption" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let meta = match str_arg(args, 2, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_option(spec, &name, &help, &meta),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecOptionDefault" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let meta = match str_arg(args, 2, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let default = match str_arg(args, 3, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_option_default(spec, &name, &help, &meta, &default),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecOptionInt" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let meta = match str_arg(args, 2, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_option_int(spec, &name, &help, &meta),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecOptionFloat" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let meta = match str_arg(args, 2, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_option_float(spec, &name, &help, &meta),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecOptionBase" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let short = match optional_str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 2, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let meta = match str_arg(args, 3, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let default = match optional_str_arg(args, 4, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let env = match optional_str_arg(args, 5, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let required = match args.get(6) {
+//RS                     Some(CtValue::Bool(value)) => *value,
+//RS                     _ => return Some(Err(unsupported("args expects Bool", span))),
+//RS                 };
+//RS                 let repeat = match args.get(7) {
+//RS                     Some(CtValue::Bool(value)) => *value,
+//RS                     _ => return Some(Err(unsupported("args expects Bool", span))),
+//RS                 };
+//RS                 let kind = match str_arg(args, 8, span) {
+//RS                     Ok(kind) => {
+//RS                         let value = match kind.as_str() {
+//RS                             "Int" => JetArgValueKind::Int,
+//RS                             "Float" => JetArgValueKind::Float,
+//RS                             _ => JetArgValueKind::String,
+//RS                         };
+//RS                         jet_args_option_base(
+//RS                             spec, &name, short, &help, &meta, default, env, required, repeat, value,
+//RS                         )
+//RS                     }
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(id, kind)))
+//RS             }
+//RS             "ArgsSpecOptionChoice" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let meta = match str_arg(args, 2, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let choices = match str_arg(args, 3, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_option_choice(spec, &name, &help, &meta, &choices),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecRepeat" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let meta = match str_arg(args, 2, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_repeat(spec, &name, &help, &meta),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecRequiredOption" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let meta = match str_arg(args, 2, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_required_option(spec, &name, &help, &meta),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecPositional" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_positional(spec, &name, &help),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecSubcommand" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let help = match str_arg(args, 1, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let nested_id = spec_id(args.get(2)?)?;
+//RS                 let nested = take_spec(nested_id)?;
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_subcommand(spec, &name, &help, nested),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecVersion" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let version = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_version(spec, &version),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecDescription" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let description = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(spec_value(replace_spec(
+//RS                     id,
+//RS                     jet_args_description(spec, &description),
+//RS                 )))
+//RS             }
+//RS             "ArgsSpecCompletion" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let shell = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(CtValue::Str(jet_args_completion(&spec, &shell)))
+//RS             }
+//RS             "ArgsSpecHelp" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 Ok(CtValue::Str(spec.help()))
+//RS             }
+//RS             "ArgsSpecParse" => {
+//RS                 let id = spec_id(recv)?;
+//RS                 let spec = take_spec(id)?;
+//RS                 let argv = match args.first() {
+//RS                     Some(CtValue::List(items)) => items
+//RS                         .iter()
+//RS                         .map(|v| as_str(v, span))
+//RS                         .collect::<Result<Vec<_>, _>>(),
+//RS                     _ => Err(unsupported("ArgsSpec.parse expects a list of text", span)),
+//RS                 };
+//RS                 let argv = match argv {
+//RS                     Ok(a) => a,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 match jet_args_parse(&spec, &argv) {
+//RS                     Ok(parsed) => Ok(CtValue::Present(Box::new(parsed_value(push_parsed(
+//RS                         parsed,
+//RS                     ))))),
+//RS                     Err(msg) => Ok(CtValue::failed(Box::new(CtValue::Str(msg)))),
+//RS                 }
+//RS             }
+//RS             "ParsedArgsFlag" => {
+//RS                 let id = parsed_id(recv)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(CtValue::Bool(
+//RS                     with_parsed(id, |p| jet_parsed_flag(p, &name)).unwrap_or(false),
+//RS                 ))
+//RS             }
+//RS             "ParsedArgsOption" => {
+//RS                 let id = parsed_id(recv)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(
+//RS                     match with_parsed(id, |p| jet_parsed_option(p, &name)).and_then(|r| r.ok()) {
+//RS                         Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+//RS                         None => CtValue::absent(crate::AST::Type::String),
+//RS                     },
+//RS                 )
+//RS             }
+//RS             "ParsedArgsOptionInt" => {
+//RS                 let id = parsed_id(recv)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(
+//RS                     match with_parsed(id, |p| jet_parsed_option_int(p, &name)).and_then(|r| r.ok())
+//RS                     {
+//RS                         Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+//RS                         None => CtValue::absent(crate::AST::Type::Int),
+//RS                     },
+//RS                 )
+//RS             }
+//RS             "ParsedArgsOptionFloat" => {
+//RS                 let id = parsed_id(recv)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 Ok(
+//RS                     match with_parsed(id, |p| jet_parsed_option_float(p, &name))
+//RS                         .and_then(|r| r.ok())
+//RS                     {
+//RS                         Some(n) => {
+//RS                             CtValue::Present(Box::new(CtValue::Float(crate::AST::CtFloat::f64(n))))
+//RS                         }
+//RS                         None => CtValue::absent(crate::AST::Type::Float),
+//RS                     },
+//RS                 )
+//RS             }
+//RS             "ParsedArgsOptions" => {
+//RS                 let id = parsed_id(recv)?;
+//RS                 let name = match str_arg(args, 0, span) {
+//RS                     Ok(s) => s,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 };
+//RS                 let items = with_parsed(id, |p| jet_parsed_options(p, &name)).unwrap_or_default();
+//RS                 Ok(CtValue::List(items.into_iter().map(CtValue::Str).collect()))
+//RS             }
+//RS             "ParsedArgsSubcommand" => {
+//RS                 let id = parsed_id(recv)?;
+//RS                 Ok(
+//RS                     match with_parsed(id, |p| jet_parsed_subcommand(p)).and_then(|r| r.ok()) {
+//RS                         Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+//RS                         None => CtValue::absent(crate::AST::Type::String),
+//RS                     },
+//RS                 )
+//RS             }
+//RS             "ParsedArgsPositional" => {
+//RS                 let id = parsed_id(recv)?;
+//RS                 let idx = match args.first() {
+//RS                     Some(CtValue::Int(n)) => *n,
+//RS                     _ => return Some(Err(unsupported("ParsedArgs.positional expects Int", span))),
+//RS                 };
+//RS                 Ok(
+//RS                     match with_parsed(id, |p| jet_parsed_positional(p, idx)).and_then(|r| r.ok()) {
+//RS                         Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+//RS                         None => CtValue::absent(crate::AST::Type::String),
+//RS                     },
+//RS                 )
+//RS             }
+//RS             _ => return None,
+//RS         };
+//RS         Some(result)
+//RS     }
+//RS }
+//RS 
+//RS pub use native::{core_args_spec, eval_handle};
+// END-PORT-PENDING 0558 crates/jet-comptime/src/Comptime/ArgsLite.rs:1-577
+

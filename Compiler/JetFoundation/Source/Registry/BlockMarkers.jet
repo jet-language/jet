@@ -1,0 +1,99 @@
+// Rust Registry.rs:2024-2173: typed projection shared by formatter/reflection.
+// The formatter needs the canonical row name, not a second registry table.
+pub enum MarkerArgument {
+    Expr(label: String?, value: Expr)
+    Ident(value: String)
+    Idents(label: String?, values: [NamedSpan])
+    Text(value: String)
+    Policy(declarations: [PolicyDeclaration])
+}
+pub struct MarkerRowAndArgs {
+    pub name: String
+    pub negated: Bool
+    pub args: [MarkerArgument]
+}
+
+// Rust Registry::marker_arguments: retain labels and expression arguments only.
+fn block_marker_arguments(marker: Marker) -> [MarkerArgument] Never! {
+    args := [MarkerArgument]{}
+    loop index in 0..<marker.args.len() {
+        if marker.args[index] == .Expr(value) {
+            label := String?{None}
+            if index < marker.arg_labels.len() {
+                if marker.arg_labels[index] == .Val(found) -> label = Val(found.name)
+            }
+            &args.push(MarkerArgument.Expr{label: label, value: value})
+        }
+    }
+    args
+}
+fn block_marker_reason(args: &[MarkerArgument], text: String?, expr: Expr?) Never! {
+    if expr == {
+        .Val(value) -> &args.push(MarkerArgument.Expr{label: None, value: value})
+        .None -> if text == .Val(value) -> &args.push(MarkerArgument.Text{value: value})
+    }
+}
+
+// Rust Registry::block_marker: canonical dedicated block-node metadata.
+pub fn block_marker(stmt: Stmt, policies: [PolicyDeclaration]) -> MarkerRowAndArgs? Never! {
+    args := [MarkerArgument]{}
+    name := ""
+    if stmt == {
+        .Unsafe(audit, audit_expr, _, span) -> {
+            name = "Unsafe"
+            block_marker_reason(&args, audit, audit_expr)
+            loop declaration in policies {
+                target :: declaration.target
+                if declaration.key == PolicyKey.Unsafe && target == .Val(target_span) && target_span == span {
+                    mode :: if declaration.value == {
+                        .Track -> Val(".Track")
+                        .Skip -> Val(".Skip")
+                        else -> None
+                    }
+                    if mode == .Val(value) {
+                        &args.push(MarkerArgument.Expr{label: Val("obligations"), value: Expr.Ident{name: value, span: span}})
+                        break
+                    }
+                }
+            }
+        }
+        .Impure(reason, reason_expr, _, _) -> {
+            name = "Impure"
+            block_marker_reason(&args, reason, reason_expr)
+        }
+        .Reactive(_, _) -> name = "Reactive"
+        .Shield(_, _) -> name = "Shield"
+        .Region(region, _, _, _) -> {
+            name = "Region"
+            &args.push(MarkerArgument.Ident{value: region})
+        }
+        .Policy(declarations, _, _) -> {
+            name = "Policy"
+            &args.push(MarkerArgument.Policy{declarations: declarations})
+        }
+        .AuthorityScope(caps, _, binding, _, _) -> {
+            name = "FX"
+            label :: if binding == {
+                .Val(value) -> Val(value.name)
+                .None -> None
+            }
+            &args.push(MarkerArgument.Idents{label: label, values: caps})
+        }
+        .ContextBlock(fields, _, _) -> {
+            name = "Context"
+            loop field in fields -> &args.push(MarkerArgument.Expr{label: Val(field.name), value: field.value})
+        }
+        .Live(_, _) -> name = "Live"
+        .AssumeDet(_, reason_expr, _, _) -> {
+            name = "Nondeterministic"
+            &args.push(MarkerArgument.Expr{label: None, value: reason_expr})
+        }
+        .Transact(handle, _, _, _, _) -> {
+            name = "Transact"
+            if handle == .Val(value) -> &args.push(MarkerArgument.Ident{value: value})
+        }
+        .Switched(marker, _, _) -> return Val(MarkerRowAndArgs{name: marker.name, negated: marker.negated, args: block_marker_arguments(marker)})
+        else -> return None
+    }
+    Val(MarkerRowAndArgs{name: name, negated: false, args: args})
+}

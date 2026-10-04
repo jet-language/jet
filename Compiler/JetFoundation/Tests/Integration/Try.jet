@@ -1,0 +1,978 @@
+// PORT-PENDING 1181 tests-try-module-group: tests/try.rs:1-115
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-DEVR-TRY1=A integration tests for overlay-first speculative edits.
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS static NEXT: AtomicU64 = AtomicU64::new(0);
+//RS 
+//RS fn jet() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn temp_dir(label: &str) -> PathBuf {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet-try-{label}-{}-{}",
+//RS         std::process::id(),
+//RS         NEXT.fetch_add(1, Ordering::Relaxed)
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(dir.join("examples")).unwrap();
+//RS     dir
+//RS }
+//RS 
+//RS fn fixture(label: &str, replacement: &str) -> (PathBuf, PathBuf, Vec<u8>, Vec<u8>) {
+//RS     let dir = temp_dir(label);
+//RS     let source_path = dir.join("examples/main.jet");
+//RS     let before = b"fn target() {\n    print(\"one\")\n}\n\nfn untouched() {\n    print(\"stable\")\n}\n\nfn run() {\n    target()\n}\n".to_vec();
+//RS     let start = before
+//RS         .windows(3)
+//RS         .position(|window| window == b"one")
+//RS         .unwrap();
+//RS     let mut after = before.clone();
+//RS     after.splice(start..start + 3, replacement.as_bytes().iter().copied());
+//RS     fs::write(&source_path, &before).unwrap();
+//RS     let plan_path = dir.join("try.json");
+//RS     fs::write(
+//RS         &plan_path,
+//RS         format!(
+//RS             "{{\"name\":\"{label}\",\"entry\":\"examples/main.jet\",\"edits\":[{{\"path\":\"examples/main.jet\",\"start\":{start},\"end\":{},\"new_text\":\"{replacement}\"}}]}}\n",
+//RS             start + 3
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     (dir, plan_path, before, after)
+//RS }
+//RS 
+//RS #[test]
+//RS fn default_try_rechecks_overlay_then_rolls_back_byte_for_byte() {
+//RS     let (dir, plan, before, _) = fixture("rollback", "two");
+//RS     let output = Command::new(jet()).arg("try").arg(&plan).output().unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(stdout.contains("claims re-checked"), "{stdout}");
+//RS     assert!(stdout.contains("claims reused"), "{stdout}");
+//RS     assert!(stdout.contains("rolled back (default)"), "{stdout}");
+//RS     assert_eq!(fs::read(dir.join("examples/main.jet")).unwrap(), before);
+//RS     assert!(
+//RS         !dir.join(".jet").exists(),
+//RS         "default try must not create a transaction directory"
+//RS     );
+//RS     let _ = fs::remove_dir_all(dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn keep_lands_the_same_bytes_as_the_staged_edit() {
+//RS     let (dir, plan, _, after) = fixture("keep", "two");
+//RS     let output = Command::new(jet())
+//RS         .args(["try", plan.to_str().unwrap(), "--keep"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stdout).contains("kept"),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stdout)
+//RS     );
+//RS     assert_eq!(fs::read(dir.join("examples/main.jet")).unwrap(), after);
+//RS     assert!(dir.join(".jet/codemods").is_dir());
+//RS     let _ = fs::remove_dir_all(dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn failed_verdict_rolls_back_without_keep() {
+//RS     let (dir, plan, before, _) = fixture("failed", "one");
+//RS     // Add a second closing quote to the string while preserving valid plan JSON.
+//RS     fs::write(
+//RS         &plan,
+//RS         format!(
+//RS             "{{\"name\":\"failed\",\"entry\":\"examples/main.jet\",\"edits\":[{{\"path\":\"examples/main.jet\",\"start\":{},\"end\":{},\"new_text\":\"one\\\"\"}}]}}\n",
+//RS             before.windows(3).position(|window| window == b"one").unwrap(),
+//RS             before.windows(3).position(|window| window == b"one").unwrap() + 3
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(jet()).arg("try").arg(&plan).output().unwrap();
+//RS     assert!(!output.status.success());
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stderr).contains("verdict failed"),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(fs::read(dir.join("examples/main.jet")).unwrap(), before);
+//RS     let _ = fs::remove_dir_all(dir);
+//RS }
+// END-PORT-PENDING 1181 tests/try.rs:1-115
+
+// PORT-PENDING 1181 tests-try-module-group: tests/type_sentinel_guard.rs:1-185
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #1662: `\0`-prefixed fake-name sentinels are a phantom-type anti-pattern
+//RS //! (D-FACT-HOME1 extension) — a compiler fact smuggled through a `String` field
+//RS //! that pretends to hold a real name, spellable/comparable/serializable, when
+//RS //! it should be a typed variant instead.
+//RS //!
+//RS //! Retired by card #1662: `APPROX_NUMERIC_WIDEN_MARKER` (real
+//RS //! `Call::widen_approx` field), `\0Quantity` (real `Type::Quantity` variant),
+//RS //! `\0compute.dimension.N` (real `Type::ComputeDim(u64)` variant),
+//RS //! `\0numeric.checked_widen` (real `Expr::MethodCall::checked_widen` field),
+//RS //! and the eight `Type::Tagged` provenance/access markers `\0core.crypto`,
+//RS //! `\0clock.deterministic`, `\0clock.system`, `\0expiring_secret.loan`,
+//RS //! `\0shared_guard.read`, `\0shared_guard.edit`, `\0terminal.fact_set`, and
+//RS //! `\0cpp.callback_abi` (real `TagMarker::Internal(InternalTag)` field,
+//RS //! replacing the `TagMarker::User(String)` piggy-back).
+//RS //!
+//RS //! The scan covers every AST source and the core surface — the homes where
+//RS //! typed AST/type sentinels are declared. The task surface has separate
+//RS //! parser-dispatch tags, not phantom AST/type values, so it is outside this
+//RS //! card's corpus. The allowlist is empty: every fake-name sentinel in that
+//RS //! corpus is retired (I8, I9).
+//RS //!
+//RS //! Diagnostic/fixture files are not scanned — only the compiler's own
+//RS //! foundation sources, where a sentinel constant is declared.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS 
+//RS /// Every `\0`-prefixed compiler-private marker still allowed to exist.
+//RS const ALLOWED_SENTINELS: &[&str] = &[];
+//RS 
+//RS /// The AST and core syntax surface — every home in this card's type/shape
+//RS /// sentinel corpus. `Syntax/effects_surface.rs` owns ratified task parser
+//RS /// dispatch tags; those are expression-lowering internals, not AST/type
+//RS /// sentinels. Binary-format modules (`CLISchema.rs` holds WASM/ELF magic
+//RS /// strings) are deliberately outside the scan too: a `\0asm` file magic is not
+//RS /// a fake-name type sentinel.
+//RS fn foundation_sources() -> Vec<PathBuf> {
+//RS     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/jet-foundation/src");
+//RS     let mut out = vec![
+//RS         src.join("lib.rs"),
+//RS         src.join("Syntax.rs"),
+//RS         src.join("Syntax/core_surface.rs"),
+//RS     ];
+//RS     let mut stack = vec![src.join("AST")];
+//RS     while let Some(dir) = stack.pop() {
+//RS         for entry in fs::read_dir(&dir).unwrap().flatten() {
+//RS             let path = entry.path();
+//RS             if path.is_dir() {
+//RS                 stack.push(path);
+//RS             } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+//RS                 out.push(path);
+//RS             }
+//RS         }
+//RS     }
+//RS     out.retain(|p| p.exists());
+//RS     out.sort();
+//RS     out
+//RS }
+//RS 
+//RS #[test]
+//RS fn defer_close_string_sentinel_stays_retired() {
+//RS     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let sentinel = ["\\0jet", ".defer.close"].concat();
+//RS     let mut stack = vec![manifest.join("Source"), manifest.join("crates")];
+//RS     while let Some(path) = stack.pop() {
+//RS         if path.is_dir() {
+//RS             for entry in fs::read_dir(&path).unwrap().flatten() {
+//RS                 stack.push(entry.path());
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+//RS             continue;
+//RS         }
+//RS         let text = fs::read_to_string(&path).unwrap();
+//RS         assert!(
+//RS             !text.contains(&sentinel),
+//RS             "{}: defer-close string sentinel must stay retired; use Stmt::DeferClose",
+//RS             path.display()
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn scan(path: &PathBuf) -> Vec<String> {
+//RS     let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+//RS     let mut found = Vec::new();
+//RS     for (line_no, line) in text.lines().enumerate() {
+//RS         let mut rest = line;
+//RS         while let Some(at) = rest.find("\"\\0") {
+//RS             let tail = &rest[at + 1..];
+//RS             let Some(end) = tail.find('"') else { break };
+//RS             let literal = &tail[..end];
+//RS             found.push(format!(
+//RS                 "{}:{}: \\0{}",
+//RS                 path.display(),
+//RS                 line_no + 1,
+//RS                 &literal[2..]
+//RS             ));
+//RS             rest = &tail[end + 1..];
+//RS         }
+//RS     }
+//RS     found
+//RS }
+//RS 
+//RS #[test]
+//RS fn nul_prefixed_type_sentinels_stay_on_the_allowlist() {
+//RS     let mut offenders = Vec::new();
+//RS     let mut survivors_seen = 0usize;
+//RS     for path in foundation_sources() {
+//RS         for hit in scan(&path) {
+//RS             let marker = hit.splitn(3, ": \\0").nth(1).map(|m| format!("\\0{m}"));
+//RS             let allowed = marker
+//RS                 .as_deref()
+//RS                 .is_some_and(|m| ALLOWED_SENTINELS.iter().any(|a| m.starts_with(a)));
+//RS             if allowed {
+//RS                 survivors_seen += 1;
+//RS             } else {
+//RS                 offenders.push(hit);
+//RS             }
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         offenders.is_empty(),
+//RS         "new \\0-prefixed compiler sentinel(s) outside the card #1662 allowlist \
+//RS          (add a real typed field/variant instead, per D-FACT-HOME1):\n{}",
+//RS         offenders.join("\n")
+//RS     );
+//RS     assert!(
+//RS         survivors_seen == 0,
+//RS         "allowlisted sentinel remains after the final sentinel retirement"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn approx_and_quantity_sentinels_are_retired() {
+//RS     for path in foundation_sources() {
+//RS         // Code lines only: a doc comment naming a retired constant for
+//RS         // provenance ("Was `X`: …") is history, not a reintroduction.
+//RS         let text = fs::read_to_string(&path)
+//RS             .unwrap()
+//RS             .lines()
+//RS             .filter(|l| !l.trim_start().starts_with("//"))
+//RS             .collect::<Vec<_>>()
+//RS             .join("\n");
+//RS         let shown = path.display();
+//RS         assert!(
+//RS             !text.contains("APPROX_NUMERIC_WIDEN_MARKER"),
+//RS             "{shown}: APPROX_NUMERIC_WIDEN_MARKER must stay retired (card #1662) — \
+//RS              use Call::widen_approx"
+//RS         );
+//RS         assert!(
+//RS             !text.contains("\\0Quantity"),
+//RS             "{shown}: the \\0Quantity string encoding must stay retired (card #1662) — \
+//RS              use Type::Quantity"
+//RS         );
+//RS         assert!(
+//RS             !text.contains("CHECKED_NUMERIC_WIDEN_MARKER"),
+//RS             "{shown}: CHECKED_NUMERIC_WIDEN_MARKER must stay retired (card #1662) — \
+//RS              use Expr::MethodCall::checked_widen"
+//RS         );
+//RS         assert!(
+//RS             !text.contains("COMPUTE_DIMENSION_PREFIX"),
+//RS             "{shown}: COMPUTE_DIMENSION_PREFIX must stay retired (card #1662) — \
+//RS              use Type::ComputeDim(u64)"
+//RS         );
+//RS         for retired_marker_const in [
+//RS             "CORE_CRYPTO_NOMINAL_MARKER",
+//RS             "DETERMINISTIC_CLOCK_MARKER",
+//RS             "SYSTEM_CLOCK_MARKER",
+//RS             "EXPIRING_SECRET_LOAN_MARKER",
+//RS             "SHARED_GUARD_READ_MARKER",
+//RS             "SHARED_GUARD_EDIT_MARKER",
+//RS             "TERMINAL_FACT_SET_MARKER",
+//RS             "CPP_CALLBACK_ABI_MARKER",
+//RS         ] {
+//RS             assert!(
+//RS                 !text.contains(retired_marker_const),
+//RS                 "{shown}: {retired_marker_const} must stay retired (card #1662) — \
+//RS                  use Type::Tagged with TagMarker::Internal(InternalTag)"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 1181 tests/type_sentinel_guard.rs:1-185
+
+// PORT-PENDING 1181 tests-try-module-group: tests/typestate.rs:1-666
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Typestate tests (D-STATE1 / D-STATE-HOME1 / D-STATE-REQ / D-STATE-TRANS):
+//RS //! `#State(S)` require-state guards and `#Transition(From, To)` transitions,
+//RS //! declared in a struct-owned `state { … }` section, with the wrong-state error E0150
+//RS //! and the unknown-state error E0151. State is a compile-time fact threaded by the
+//RS //! checker and erased in codegen (I3).
+//RS 
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS const TIER_SOURCE: &str = r#"
+//RS struct Settlement {
+//RS     state { Queued, Approved, Settled }
+//RS }
+//RS 
+//RS impl Settlement {
+//RS     #Transition(_, Queued) fn begin() -[]> Settlement { return Settlement{} }
+//RS     #Transition(Queued, Approved) fn approve(self: ^Settlement) -[]> Settlement { return self }
+//RS     #Transition(Approved, Settled) fn settle(self: ^Settlement) -[]> Settlement { return self }
+//RS     #State(Settled) fn report(self) -[]> String { return "settled" }
+//RS }
+//RS 
+//RS STATE_INFO :: prep { Settlement.reflect() }
+//RS 
+//RS fn run() {
+//RS     item := Settlement.begin()
+//RS     item = item.approve()
+//RS     item = item.settle()
+//RS     print(item.report())
+//RS     print(STATE_INFO.states[2].terminal)
+//RS     print(STATE_INFO.states[2].reachable ?? false)
+//RS }
+//RS "#;
+//RS 
+//RS const TIER_EXPECTED: &str = "settled\ntrue\ntrue\n";
+//RS 
+//RS fn codes(src: &str) -> Vec<String> {
+//RS     match jet::compile(src) {
+//RS         Ok(_) => Vec::new(),
+//RS         Err(diags) => diags.iter().map(|d| d.code.clone()).collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn diagnostics(src: &str) -> Vec<jet::Diagnostics::Diagnostic> {
+//RS     jet::compile(src).expect_err("fixture must produce diagnostics")
+//RS }
+//RS 
+//RS fn lint_codes(src: &str) -> Vec<String> {
+//RS     match jet::compile(src) {
+//RS         Ok(out) => out.lints.iter().map(|d| d.code.clone()).collect(),
+//RS         Err(_) => Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS /// D-STATE-HOME1=A: the owning struct carries one bounded named state set.
+//RS const DECL: &str = r#"
+//RS struct Reservation {
+//RS     state { Pending, Confirmed, CheckedIn }
+//RS     guest: String
+//RS }
+//RS 
+//RS impl Reservation {
+//RS     #Transition(_, Pending) fn book(guest: String) -[]> Reservation {
+//RS         return Reservation{ guest: ~guest }
+//RS     }
+//RS     #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -[]> Reservation {
+//RS         return self
+//RS     }
+//RS     #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) -[]> Reservation {
+//RS         return self
+//RS     }
+//RS     #State(CheckedIn) fn room_key(self) -[]> String {
+//RS         return "key"
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS /// The correct lifecycle (book -> pay -> check_in -> room_key) compiles clean.
+//RS #[test]
+//RS fn correct_lifecycle_ok() {
+//RS     let src = format!(
+//RS         "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
+//RS     );
+//RS     assert!(
+//RS         codes(&src).is_empty(),
+//RS         "correct order must compile: {:?}",
+//RS         codes(&src)
+//RS     );
+//RS }
+//RS 
+//RS /// Calling a `Confirmed`-transition on a still-`Pending` value is E0150.
+//RS #[test]
+//RS fn transition_in_wrong_state_is_error() {
+//RS     let src =
+//RS         format!("{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.check_in()\n}}\n");
+//RS     assert!(
+//RS         codes(&src).iter().any(|c| c == "E0150"),
+//RS         "skipping pay() must be E0150: {:?}",
+//RS         codes(&src)
+//RS     );
+//RS }
+//RS 
+//RS /// Calling a `#State(CheckedIn)` guarded read before checking in is E0150.
+//RS #[test]
+//RS fn guarded_read_in_wrong_state_is_error() {
+//RS     let src = format!(
+//RS         "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  print(r.room_key())\n}}\n"
+//RS     );
+//RS     assert!(
+//RS         codes(&src).iter().any(|c| c == "E0150"),
+//RS         "room_key before check_in must be E0150: {:?}",
+//RS         codes(&src)
+//RS     );
+//RS }
+//RS 
+//RS /// Doing every step in order, then the guarded read, is accepted.
+//RS #[test]
+//RS fn guarded_read_after_full_lifecycle_ok() {
+//RS     let src = format!(
+//RS         "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
+//RS     );
+//RS     assert!(
+//RS         !codes(&src).iter().any(|c| c == "E0150"),
+//RS         "full lifecycle then read must be clean: {:?}",
+//RS         codes(&src)
+//RS     );
+//RS }
+//RS 
+//RS /// A program with no typestate markers is entirely unaffected (no false E0150).
+//RS #[test]
+//RS fn no_typestate_is_inert() {
+//RS     let src = r#"
+//RS struct Box { n: Int }
+//RS impl Box {
+//RS     fn get(self) -[]> Int { return self.n }
+//RS }
+//RS fn run() {
+//RS     b :: Box{ n: 1 }
+//RS     print(b.get())
+//RS }
+//RS "#;
+//RS     assert!(
+//RS         !codes(src).iter().any(|c| c == "E0150"),
+//RS         "no typestate → no E0150: {:?}",
+//RS         codes(src)
+//RS     );
+//RS }
+//RS 
+//RS /// D-STATE-HOME1=A: a `#State(X)` marker referencing an undeclared state is E0151.
+//RS #[test]
+//RS fn unknown_state_in_marker_is_e0151() {
+//RS     let src = r#"
+//RS struct Crate {
+//RS     state { Full, Empty }
+//RS     data: Int
+//RS }
+//RS 
+//RS impl Crate {
+//RS     #Transition(_, Full) fn fill(data: Int) -[]> Crate {
+//RS         return Crate{ data: data }
+//RS     }
+//RS     #State(Stuffed) fn get(self) -[]> Int {
+//RS         return self.data
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     b := Crate.fill(1)
+//RS     print(b.get())
+//RS }
+//RS "#;
+//RS     assert!(
+//RS         codes(src).iter().any(|c| c == "E0151"),
+//RS         "unknown state must be E0151: {:?}",
+//RS         codes(src)
+//RS     );
+//RS }
+//RS 
+//RS /// D-STATE-HOME1=A: a `#Transition(A, B)` marker referencing an undeclared to-state is E0151.
+//RS #[test]
+//RS fn unknown_transition_to_state_is_e0151() {
+//RS     let src = r#"
+//RS struct Crate {
+//RS     state { Full, Empty }
+//RS     data: Int
+//RS }
+//RS 
+//RS impl Crate {
+//RS     #Transition(_, Stuffed) fn fill(data: Int) -[]> Crate {
+//RS         return Crate{ data: data }
+//RS     }
+//RS }
+//RS 
+//RS fn run() { }
+//RS "#;
+//RS     assert!(
+//RS         codes(src).iter().any(|c| c == "E0151"),
+//RS         "undeclared to-state in Transition must be E0151: {:?}",
+//RS         codes(src)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn unknown_transition_from_state_is_e0151() {
+//RS     let src = r#"
+//RS struct Crate { state { Full, Empty } }
+//RS impl Crate {
+//RS     #Transition(Gone, Full) fn fill() -[]> Crate { return Crate{} }
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics = codes(src);
+//RS     assert!(
+//RS         diagnostics.iter().any(|code| code == "E0151"),
+//RS         "undeclared from-state in Transition must be E0151: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn retired_top_level_state_companion_teaches_nested_owner() {
+//RS     let diagnostics = codes("state Door { Ready }\nstruct Door { opened: Bool }\nfn run() {}\n");
+//RS     assert!(
+//RS         diagnostics.iter().any(|code| code == "E0157"),
+//RS         "{diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn state_section_shape_diagnostics_are_distinct() {
+//RS     let empty = codes("struct Empty { state {} }\nfn run() {}\n");
+//RS     assert!(empty.iter().any(|code| code == "E0169"), "{empty:?}");
+//RS 
+//RS     let duplicate_section = codes("struct Door { state { Ready } state { Open } }\nfn run() {}\n");
+//RS     assert!(
+//RS         duplicate_section.iter().any(|code| code == "E0168"),
+//RS         "{duplicate_section:?}"
+//RS     );
+//RS 
+//RS     let duplicate_name = codes("struct Door { state { Ready, Ready } }\nfn run() {}\n");
+//RS     assert!(
+//RS         duplicate_name.iter().any(|code| code == "E0166"),
+//RS         "{duplicate_name:?}"
+//RS     );
+//RS 
+//RS     let member_collision = codes("struct Door { state { open } open: Bool }\nfn run() {}\n");
+//RS     assert!(
+//RS         member_collision.iter().any(|code| code == "E0167"),
+//RS         "{member_collision:?}"
+//RS     );
+//RS 
+//RS     let missing_owner = codes(
+//RS         "struct Door { opened: Bool }\nimpl Door { #State(Ready) fn open(self) {} }\nfn run() {}\n",
+//RS     );
+//RS     assert!(
+//RS         missing_owner.iter().any(|code| code == "E0159"),
+//RS         "{missing_owner:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn state_section_sema_diagnostic_spans_cover_the_section() {
+//RS     let empty = "struct Empty { state {} }\nfn run() {}\n";
+//RS     let empty_start = empty.find("state {").unwrap();
+//RS     let empty_end = empty_start + empty[empty_start..].find('}').unwrap() + 1;
+//RS     let empty_diagnostic = diagnostics(empty)
+//RS         .into_iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0169")
+//RS         .expect("E0169");
+//RS     assert_eq!(
+//RS         empty_diagnostic.span,
+//RS         Some(jet::Diagnostics::Span::new(empty_start, empty_end))
+//RS     );
+//RS 
+//RS     let repeated = "struct Door { state { Ready } state { Open } }\nfn run() {}\n";
+//RS     let repeated_start = repeated.rfind("state {").unwrap();
+//RS     let repeated_end = repeated_start + repeated[repeated_start..].find('}').unwrap() + 1;
+//RS     let repeated_diagnostic = diagnostics(repeated)
+//RS         .into_iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0168")
+//RS         .expect("E0168");
+//RS     assert_eq!(
+//RS         repeated_diagnostic.span,
+//RS         Some(jet::Diagnostics::Span::new(repeated_start, repeated_end))
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn qualified_state_markers_seed_leaf_states() {
+//RS     let src = r#"
+//RS struct Door {
+//RS     state { Closed, Open }
+//RS }
+//RS 
+//RS impl Door {
+//RS     #Transition(_, Door.State.Closed) fn new() -[]> Door { return Door{} }
+//RS     #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door {
+//RS         return self
+//RS     }
+//RS     #State(Door.State.Closed) fn inspect(self: ^Door) -[]> String {
+//RS         next := self.open()
+//RS         return "closed"
+//RS     }
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics = codes(src);
+//RS     assert!(diagnostics.is_empty(), "qualified markers must resolve to leaves: {diagnostics:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn member_collision_in_separate_impl_is_e0167() {
+//RS     let diagnostics =
+//RS         codes("struct Door { state { open } }\nimpl Door { fn open(self) {} }\nfn run() {}\n");
+//RS     assert!(
+//RS         diagnostics.iter().any(|code| code == "E0167"),
+//RS         "{diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_struct_state_set_is_shared_by_separate_impl() {
+//RS     let source = r#"
+//RS struct Box<T> {
+//RS     state { Empty, Full }
+//RS     value: T
+//RS }
+//RS 
+//RS impl Box {
+//RS     #Transition(_, Empty) fn new(value: ^T) -[]> Box<T> {
+//RS         return Box<T>{ value: value }
+//RS     }
+//RS     #Transition(Empty, Full) fn fill(self: ^Box<T>) -[]> Box<T> {
+//RS         return self
+//RS     }
+//RS }
+//RS 
+//RS impl Box {
+//RS     #State(Full) fn read(self) -[]> T {
+//RS         return self.value
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     box := Box<Int>.new(1)
+//RS     box = box.fill()
+//RS     print(box.read())
+//RS }
+//RS "#;
+//RS     let compiled = jet::compile(source).unwrap_or_else(|diags| panic!("{diags:#?}"));
+//RS     assert!(!compiled.rust.contains("Empty"), "state labels must erase");
+//RS     assert!(!compiled.rust.contains("Full"), "state labels must erase");
+//RS     assert!(
+//RS         !compiled.rust.contains("discriminant"),
+//RS         "typestate must not add a tag"
+//RS     );
+//RS     let wrong_order = source.replace("    box = box.fill()\n", "");
+//RS     assert!(
+//RS         codes(&wrong_order).iter().any(|code| code == "E0150"),
+//RS         "the shared generic state set must guard methods from a separate impl: {:?}",
+//RS         codes(&wrong_order)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn typestate_graph_is_folded_before_aot_jit_and_interpreter() {
+//RS     assert!(tir_support::have_rustc(), "AOT proof needs rustc");
+//RS     tir_support::assert_tiers_agree("typestate_graph_tiers", TIER_SOURCE, TIER_EXPECTED);
+//RS     let output = jet::compile(TIER_SOURCE).expect("typestate tier fixture must compile");
+//RS     for label in ["Queued", "Approved", "Settled", "Settlement.State"] {
+//RS         assert!(
+//RS             !output.rust.contains(label),
+//RS             "typestate fact `{label}` reached generated runtime Rust"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn typestate_graph_runs_on_resident_jit_without_runtime_state() {
+//RS     if !jet_jit::cranelift_host_supported() {
+//RS         eprintln!("note: resident Cranelift host unavailable; skipping resident-JIT proof");
+//RS         return;
+//RS     }
+//RS     let scratch = common::Scratch::new("typestate-jit");
+//RS     let path = scratch.join("main.jet");
+//RS     fs::write(&path, TIER_SOURCE).unwrap();
+//RS     let shown = path.to_string_lossy().into_owned();
+//RS     let mut bundle = jet::Loader::load_entry(&shown).expect("typestate fixture loads");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         diagnostics.is_empty(),
+//RS         "typestate fixture diagnostics: {diagnostics:#?}"
+//RS     );
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "typestate fixture must be resident-safe: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let outcome = jet::Interpreter::dev_iteration(&shown, false, false);
+//RS     let stdout = match outcome {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout, .. } => stdout,
+//RS         jet::Interpreter::RunOutcome::Problems(diags) => {
+//RS             panic!("resident JIT rejected typestate fixture: {diags:?}")
+//RS         }
+//RS     };
+//RS     assert_eq!(stdout, TIER_EXPECTED);
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "typestate fixture did not execute on JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::fallback_invoked_for_test(),
+//RS         "typestate fixture fell back to interpreter"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn typestate_graph_reaches_web_without_runtime_state() {
+//RS     let scratch = common::Scratch::new("typestate-web");
+//RS     let shown = scratch.join("main.jet");
+//RS     fs::write(&shown, TIER_SOURCE).unwrap();
+//RS     let shown = shown.to_string_lossy().into_owned();
+//RS     let output = jet::compile_web_with_path(TIER_SOURCE, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "web typestate fixture rejected:\n{}",
+//RS             jet::render_diagnostics(&shown, TIER_SOURCE, &diags)
+//RS         )
+//RS     });
+//RS     let web = output
+//RS         .web
+//RS         .expect("web typestate fixture must produce artifacts");
+//RS     for label in ["Queued", "Approved", "Settled", "Settlement.State"] {
+//RS         assert!(
+//RS             !web.wasm_rust.contains(label),
+//RS             "typestate fact `{label}` reached web runtime Rust"
+//RS         );
+//RS     }
+//RS     fs::write(scratch.join("app.js"), &web.js_app).unwrap();
+//RS     fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+//RS     fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
+//RS     let node = Command::new("node")
+//RS         .current_dir(&scratch.path)
+//RS         .arg("app.js")
+//RS         .output()
+//RS         .expect("spawn node");
+//RS     assert!(
+//RS         node.status.success(),
+//RS         "web typestate fixture failed:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&node.stdout),
+//RS         String::from_utf8_lossy(&node.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&node.stdout), TIER_EXPECTED);
+//RS }
+//RS 
+//RS /// D-STATE-TERMINAL1: a state with no outgoing transition is a valid terminal fact.
+//RS #[test]
+//RS fn terminal_state_has_no_unreachable_lint() {
+//RS     let src = format!(
+//RS         "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
+//RS     );
+//RS     assert!(
+//RS         codes(&src).is_empty(),
+//RS         "a terminal state must compile: {:?}",
+//RS         codes(&src)
+//RS     );
+//RS     assert!(
+//RS         !lint_codes(&src).iter().any(|c| c == "L0153"),
+//RS         "reachable terminal state must have no reachability lint: {:?}",
+//RS         lint_codes(&src)
+//RS     );
+//RS }
+//RS 
+//RS /// D-STATE-TERMINAL1: a self-loop and a reopen transition are outgoing edges.
+//RS #[test]
+//RS fn self_loop_and_reopen_states_are_nonterminal() {
+//RS     let src = r#"
+//RS struct Gate {
+//RS     state { Closed, Reopened }
+//RS     w: Int
+//RS }
+//RS 
+//RS impl Gate {
+//RS     #Transition(_, Closed) fn new(w: Int) -[]> Gate { return Gate{ w: w } }
+//RS     #Transition(Closed, Closed) fn hold(self: ^Gate) -[]> Gate { return self }
+//RS     #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate { return self }
+//RS }
+//RS 
+//RS fn run() {
+//RS     g := Gate.new(1)
+//RS     g = g.hold()
+//RS     g = g.reopen()
+//RS }
+//RS "#;
+//RS     // Closed has both a self-loop and a reopen edge. Reopened is terminal.
+//RS     assert!(
+//RS         codes(src).is_empty(),
+//RS         "no errors expected: {:?}",
+//RS         codes(src)
+//RS     );
+//RS     let lints = lint_codes(src);
+//RS     assert!(
+//RS         lints.iter().all(|code| code != "L0153"),
+//RS         "self-loop and reopen must not be unreachable: {:?}",
+//RS         lints
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn duplicate_transition_keeps_method_duplicate_diagnostic() {
+//RS     let src = r#"
+//RS struct Gate { state { Closed, Reopened } }
+//RS impl Gate {
+//RS     #Transition(_, Closed) fn new() -[]> Gate { return Gate{} }
+//RS     #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate { return self }
+//RS     #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate { return self }
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics = codes(src);
+//RS     assert!(
+//RS         diagnostics.iter().any(|code| code == "E0105"),
+//RS         "duplicate transitions must retain E0105: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn entry_graph_reports_only_unreachable_declared_states() {
+//RS     let src = r#"
+//RS struct Flow {
+//RS     state { Start, Done, Cancelled, Orphan }
+//RS }
+//RS impl Flow {
+//RS     #Transition(_, Start) fn start() -[]> Flow { return Flow{} }
+//RS     #Transition(Start, Done) fn done(self: ^Flow) -[]> Flow { return self }
+//RS     #Transition(Start, Cancelled) fn cancel(self: ^Flow) -[]> Flow { return self }
+//RS }
+//RS     fn run() {}
+//RS "#;
+//RS     let lints = lint_codes(src);
+//RS     assert_eq!(
+//RS         lints.iter().filter(|code| *code == "L0153").count(),
+//RS         1,
+//RS         "only the unreachable declared state should warn: {lints:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn no_entry_graph_does_not_invent_reachability() {
+//RS     let src = r#"
+//RS struct Flow { state { Start, Done } }
+//RS impl Flow {
+//RS     #Transition(Start, Done) fn done(self: ^Flow) -[]> Flow { return self }
+//RS }
+//RS fn run() {}
+//RS     "#;
+//RS     let lints = lint_codes(src);
+//RS     assert!(!lints.iter().any(|code| code == "L0153"), "{lints:?}");
+//RS }
+//RS 
+//RS /// D-FACT-FLOW1 (card #1621): a branch that confirms an order on one path and
+//RS /// cancels it on the other leaves the state unproved. The one join rule reports
+//RS /// the divergence (L0152) instead of keeping whatever arm was walked last.
+//RS const DIVERGENT: &str = r#"
+//RS struct Order {
+//RS     state { Draft, Confirmed, Cancelled, Closed }
+//RS     id: Int
+//RS }
+//RS 
+//RS impl Order {
+//RS     #Transition(_, Draft) fn start(id: Int) -[]> Order { return Order{ id: id } }
+//RS     #Transition(Draft, Confirmed) fn confirm(self: ^Order) -[]> Order { return self }
+//RS     #Transition(Draft, Cancelled) fn cancel(self: ^Order) -[]> Order { return self }
+//RS     #Transition(Confirmed, Closed) fn close(self: ^Order) -[]> Order { return self }
+//RS     #Transition(Cancelled, Closed) fn archive(self: ^Order) -[]> Order { return self }
+//RS     #State(Confirmed) fn ship(self) -[]> Int { return self.id }
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn divergent_branch_states_are_reported() {
+//RS     let src = format!(
+//RS         "{DIVERGENT}\nfn decide(paid: Bool) {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.cancel()\n  }}\n  print(order.id)\n}}\nfn run() {{ decide(true) }}\n"
+//RS     );
+//RS     assert!(
+//RS         lint_codes(&src).iter().any(|c| c == "L0152"),
+//RS         "a state-divergent branch must be reported: {:?}",
+//RS         lint_codes(&src)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn divergent_branch_does_not_keep_the_last_walked_arm() {
+//RS     let src = format!(
+//RS         "{DIVERGENT}\nfn decide(paid: Bool) {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.cancel()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(true) }}\n"
+//RS     );
+//RS     // Keeping the last arm would call `ship` on a `Cancelled` order and report
+//RS     // E0150. After the join the state is unproved, so the guard stays silent —
+//RS     // and the divergence itself is what gets reported.
+//RS     assert!(
+//RS         !codes(&src).iter().any(|c| c == "E0150"),
+//RS         "the last-walked arm must not decide the state: {:?}",
+//RS         codes(&src)
+//RS     );
+//RS     assert!(
+//RS         lint_codes(&src).iter().any(|c| c == "L0152"),
+//RS         "the divergence is reported instead: {:?}",
+//RS         lint_codes(&src)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn agreeing_branches_keep_the_state() {
+//RS     let src = format!(
+//RS         "{DIVERGENT}\nfn decide(paid: Bool) {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(true) }}\n"
+//RS     );
+//RS     assert!(
+//RS         codes(&src).is_empty(),
+//RS         "both paths reach `Confirmed`, so `ship` is in state: {:?}",
+//RS         codes(&src)
+//RS     );
+//RS     assert!(
+//RS         !lint_codes(&src).iter().any(|c| c == "L0152"),
+//RS         "agreeing paths are not a divergence: {:?}",
+//RS         lint_codes(&src)
+//RS     );
+//RS }
+//RS 
+//RS /// D-FACT-FLOW1 (card #1621): an else-less pattern table CheckerCore already
+//RS /// proved exhaustive has no fall-through path, so agreeing arms must not be
+//RS /// reported as diverging against the pre-table state.
+//RS #[test]
+//RS fn agreeing_switch_arms_over_an_exhaustive_enum_keep_the_state() {
+//RS     let src = format!(
+//RS         "{DIVERGENT}\nenum Mode {{ Fast Slow }}\nfn decide(m: Mode) {{\n  order := Order.start(1)\n  if m == {{\n    .Fast -> order = order.confirm()\n    .Slow -> order = order.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(Mode.Fast) }}\n"
+//RS     );
+//RS     assert!(
+//RS         codes(&src).is_empty(),
+//RS         "both arms of an exhaustive dispatch reach `Confirmed`, so `ship` is in state: {:?}",
+//RS         codes(&src)
+//RS     );
+//RS     assert!(
+//RS         !lint_codes(&src).iter().any(|c| c == "L0152"),
+//RS         "an exhaustive pattern table has no fall-through path to diverge from: {:?}",
+//RS         lint_codes(&src)
+//RS     );
+//RS }
+//RS 
+//RS /// D-FACT-FLOW1 (card #1621): a counted loop's body may run zero times, so
+//RS /// the loop merge is the join of the pre-loop state with the post-body state,
+//RS /// not the post-body state alone — a mismatch here is a real divergence.
+//RS #[test]
+//RS fn counted_loop_zero_iterations_reports_the_pre_loop_divergence() {
+//RS     let src = format!(
+//RS         "{DIVERGENT}\nfn decide(n: Int) {{\n  order := Order.start(1)\n  loop i := 0, i < n {{\n    fresh := Order.start(2)\n    order = fresh.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(1) }}\n"
+//RS     );
+//RS     assert!(
+//RS         lint_codes(&src).iter().any(|c| c == "L0152"),
+//RS         "the loop may run zero times, so `Draft` (skipped) and `Confirmed` \
+//RS          (ran) must be reported as diverging: {:?}",
+//RS         lint_codes(&src)
+//RS     );
+//RS }
+// END-PORT-PENDING 1181 tests/typestate.rs:1-666
+

@@ -1,0 +1,327 @@
+// Original Evidence.rs tests:2255–2332, plus malformed/stale/xfail controls.
+fn evidence_test_record(kind: Int, state: Int, name: String, file: String, line: Int) -> EvidenceRecord {
+    evidence_record_from_test_codes(kind, state, name, "", file, U32{line}) ?? panic("test record")
+}
+fn evidence_test_report(id: String, records: ^[EvidenceRecord]) -> EvidenceReport {
+    evidence_report_from_records(id, ^records)
+}
+fn evidence_test_wire(record: EvidenceRecord) -> [U8] {
+    wire := EVIDENCE_REPORT_MAGIC.bytes()
+    evidence_put_number(&wire, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
+    evidence_encode_record(record, &wire) ?? panic("encode")
+    wire
+}
+#Test("typed_wire_round_trip_preserves_unavailable_and_chain") {
+    value := evidence_test_record(0, 3, "missing", "a.jet", 7)
+    &value.chain.push(EvidenceChainLink{evidence_id: "upstream", relation: "derived-from"})
+    decoded :: evidence_decode_report_bytes(evidence_test_wire(value)) ?? panic("decode")
+    assert_eq(decoded.derivations.len(), 0)
+    assert_eq(decoded.records, [EvidenceRecord]{value})
+    assert(evidence_completeness_state(decoded.records[0].completeness) != "")
+}
+#Test("derivation_wire_round_trip_preserves_payload_and_reference") {
+    schedule :: MIRFrameSchedule{operations: [MIRFrameOperation]{}, dependencies: [MIRFrameDependency]{}, transfers: [MIRFrameTransfer]{}, reuse: [MIRFrameReuse]{}, retentions: [MIRFrameRetention]{}, conservative: [String]{"unknown schedule"}}
+    derivation :: derivation_record_with_payload(derivation_record("subject", "claim", "jet-sema", MIRDerivationMethod.StaticDerivation, "checked", [String]{"premise"}, derivation_identity("source", "build", "", "target")), DerivationPayload.FrameSchedule{schedule: schedule})
+    value := evidence_test_record(0, 0, "claim", "a.jet", 1)
+    evidence_record_set_derivation(&value, derivation)
+    wire := EVIDENCE_REPORT_MAGIC.bytes()
+    evidence_put_number(&wire, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
+    evidence_encode_record_with_derivation(value, derivation, &wire) ?? panic("encode definition")
+    decoded :: evidence_decode_report_bytes(wire) ?? panic("decode definition")
+    assert_eq(decoded.records, [EvidenceRecord]{value})
+    assert_eq(decoded.derivations, [DerivationRecord]{derivation})
+}
+#Test("merge_rejects_identity_and_schema_conflicts") {
+    one :: evidence_test_report("report", [EvidenceRecord]{evidence_record_with_report_id(evidence_test_record(0, 0, "a", "a.jet", 1), "report")})
+    two :: evidence_test_report("other", [EvidenceRecord]{evidence_record_with_report_id(evidence_test_record(0, 0, "b", "a.jet", 2), "other")})
+    assert(if evidence_report_merge([EvidenceReport]{one, two}) == {
+        .Err(.IdentityConflict(field, _, _)) -> field == "report_id"
+        else -> false
+    })
+    bad := evidence_test_report("report", [EvidenceRecord]{evidence_record_with_report_id(evidence_test_record(0, 0, "b", "a.jet", 2), "report")})
+    bad.schema_version = U16{4}
+    assert(if evidence_report_merge([EvidenceReport]{one, bad}) == {
+        .Err(.SchemaConflict(_, _)) -> true
+        else -> false
+    })
+}
+#Test("projection_is_source_then_producer_then_identity") {
+    records :: [EvidenceRecord]{evidence_record_with_report_id(evidence_test_record(0, 0, "z", "b.jet", 1), "report"), evidence_record_with_report_id(evidence_test_record(0, 0, "a", "a.jet", 2), "report"), evidence_record_with_report_id(evidence_test_record(0, 0, "b", "a.jet", 1), "report")}
+    report :: evidence_test_report("report", ^records)
+    rows :: evidence_report_query(report, None)
+    assert_eq(rows[0].source.path, "a.jet")
+    assert_eq(rows[0].source.line, U32{1})
+    assert_eq(rows[1].source.line, U32{2})
+    assert(evidence_projection_name(rows[0]).contains("jet-test"))
+}
+#Test("codec rejects malformed header codes truncation and invalid UTF8") {
+    assert(if evidence_decode_report_bytes([U8]{}) == {
+        .Err(error) -> error.message == "invalid evidence report magic"
+        else -> false
+    })
+    version := EVIDENCE_REPORT_MAGIC.bytes()
+    evidence_put_number(&version, U64{4}, 2)
+    assert(if evidence_decode_report_bytes(version) == {
+        .Err(error) -> error.message == "unsupported evidence report schema version 4"
+        else -> false
+    })
+    record :: evidence_test_record(0, 0, "unicode-λ", "λ.jet", 7)
+    wire :: evidence_test_wire(record)
+    decoded :: evidence_decode_report_bytes(wire) ?? panic("unicode")
+    assert_eq(decoded.records[0], record)
+    // A complete ten-byte header with no records is a valid empty stream.
+    empty_stream :: evidence_decode_report_bytes(~wire[0..<10]) ?? panic("empty stream")
+    assert_eq(empty_stream.records.len(), 0)
+    assert_eq(empty_stream.derivations.len(), 0)
+    loop size in 11..<wire.len() {
+        truncated :: ~wire[0..<size]
+        assert(if evidence_decode_report_bytes(truncated) == {
+            .Err(_) -> true
+            else -> false
+        })
+    }
+    bad := ~wire
+    bad[10] = U8{255}
+    assert(if evidence_decode_report_bytes(bad) == {
+        .Err(error) -> error.message == "unknown evidence kind 255"
+        else -> false
+    })
+    invalid := ~wire
+    cursor := evidence_cursor(~wire, 31)
+    loop _ in 0..<3 -> _ :: evidence_get_string(&cursor) ?? panic("identity")
+    _ :: evidence_get_number(&cursor, 8) ?? panic("source length")
+    invalid[cursor.at] = U8{255}
+    assert(if evidence_decode_report_bytes(invalid) == {
+        .Err(error) -> error.message == "non-UTF-8 evidence report field"
+        else -> false
+    })
+}
+#Test("expected failure is admitted only for failed or passed wire outcomes") {
+    outcomes :: [EvidenceOutcome]{EvidenceOutcome.Proved, EvidenceOutcome.Generated, EvidenceOutcome.Passed, EvidenceOutcome.Failed, EvidenceOutcome.Checked, EvidenceOutcome.Unchecked, EvidenceOutcome.Unavailable, EvidenceOutcome.Incomplete, EvidenceOutcome.NotObserved, EvidenceOutcome.Skipped, EvidenceOutcome.Error}
+    loop outcome in outcomes {
+        valid :: outcome == EvidenceOutcome.Failed || outcome == EvidenceOutcome.Passed
+        assert_eq(if evidence_expectation_validate(EvidenceExpectation.ExpectedFailure, outcome) == {
+            .Ok(_) -> true
+            .Err(_) -> false
+        }, valid)
+    }
+    failed :: evidence_record_with_expectation(evidence_test_record(0, 1, "xfail", "a.jet", 1), EvidenceExpectation.ExpectedFailure) ?? panic("xfail")
+    decoded :: evidence_decode_report_bytes(evidence_test_wire(failed)) ?? panic("xfail roundtrip")
+    assert(evidence_record_is_expected_failure(decoded.records[0]))
+    passed :: evidence_record_with_expectation(evidence_test_record(0, 0, "xpass", "a.jet", 1), EvidenceExpectation.ExpectedFailure) ?? panic("xpass")
+    assert(evidence_record_is_unexpected_pass(passed))
+    wire := evidence_test_wire(passed)
+    wire[13] = U8{138}
+    assert(if evidence_decode_report_bytes(wire) == {
+        .Err(error) -> error.message == "evidence expectation expected_failure cannot describe outcome error"
+        else -> false
+    })
+}
+#Test("completeness merge preserves first equal rank reason and unavailable dominance") {
+    value := EvidenceCompleteness.Complete
+    evidence_completeness_merge(&value, EvidenceCompleteness.Incomplete("first"))
+    evidence_completeness_merge(&value, EvidenceCompleteness.Incomplete("second"))
+    assert_eq(value, EvidenceCompleteness.Incomplete("first"))
+    evidence_completeness_merge(&value, EvidenceCompleteness.Unavailable("missing"))
+    evidence_completeness_merge(&value, EvidenceCompleteness.Complete)
+    assert_eq(value, EvidenceCompleteness.Unavailable("missing"))
+    record :: evidence_record_with_report_id(evidence_test_record(0, 3, "missing", "a.jet", 1), "report")
+    report :: evidence_test_report("report", [EvidenceRecord]{record})
+    assert(!evidence_report_is_complete(report))
+}
+#Test("derivation identity and unresolved links are rejected and changed inputs stale") {
+    record := evidence_record_with_report_id(evidence_test_record(0, 0, "claim", "a.jet", 1), "report")
+    derivation :: evidence_record_checked_derivation(record)
+    record.derivation = Val(derivation_record_reference(derivation))
+    report := evidence_report_new("report", EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
+    assert(if evidence_report_add_record(&report, ~record) == {
+        .Err(.MissingDerivation(_, _)) -> true
+        else -> false
+    })
+    evidence_report_add_record_with_derivation(&report, ^record, ^derivation) ?? panic("intern")
+    changed :: derivation_identity("changed-source", report.revision.build, report.revision.revision, report.build.target)
+    assert_eq(evidence_report_invalidate_derivations(&report, changed), 1)
+    assert_eq(report.derivations[0].disposition, MIRDerivationDisposition.Stale)
+    assert_eq(evidence_report_invalidate_derivations(&report, changed), 0)
+    bytes :: evidence_report_encode(report) ?? panic("stale encode")
+    decoded :: evidence_decode_report_bytes(bytes) ?? panic("stale decode")
+    assert_eq(decoded.derivations[0].disposition, MIRDerivationDisposition.Stale)
+}
+#Test("bounded fields and collections reject over limit without narrowing u64") {
+    out := [U8]{}
+    assert(if evidence_put_string(&out, "a".repeat(1048577)) == {
+        .Err(error) -> error.message == "evidence report field exceeds the 1 MiB limit"
+        else -> false
+    })
+    assert(if evidence_put_len(&out, 10001) == {
+        .Err(error) -> error.message == "evidence report collection is too large"
+        else -> false
+    })
+    record := evidence_test_record(0, 0, "large", "a.jet", 1)
+    record.count = U64{18446744073709551615}
+    decoded :: evidence_decode_report_bytes(evidence_test_wire(record)) ?? panic("u64")
+    assert_eq(decoded.records[0].count, record.count)
+}
+#Test("canonical report JSON sorts payloads without mutating typed record order") {
+    record := evidence_record_with_report_id(evidence_test_record(0, 0, "claim", "λ.jet", 7), "report")
+    &record.attachments.push(EvidenceAttachment{name: "z", value: "last"})
+    &record.attachments.push(EvidenceAttachment{name: "a", value: "\t\n\""})
+    &record.chain.push(EvidenceChainLink{evidence_id: "z", relation: "last"})
+    &record.chain.push(EvidenceChainLink{evidence_id: "a", relation: "first"})
+    report :: evidence_test_report("report", [EvidenceRecord]{record})
+    text :: evidence_report_json(report)
+    assert(text.starts_with("{{\"schema\":\"jet.evidence/v3\",\"identity\":{{\"claim\":\"\",\"evidence\":\"\",\"report\":\"report\"}}"))
+    assert(text.contains("\"attachments\":[{{\"name\":\"a\",\"value\":\"\\t\\n\\\"\"}},{{\"name\":\"z\",\"value\":\"last\"}}]"))
+    assert(text.contains("\"chain\":[{{\"evidence\":\"a\",\"relation\":\"first\"}},{{\"evidence\":\"z\",\"relation\":\"last\"}}]"))
+    assert(text.contains("\"source\":{{\"column\":1,\"line\":7,\"path\":\"λ.jet\"}}"))
+    assert_eq(report.records[0].attachments[0].name, "z")
+    assert_eq(report.records[0].chain[0].evidence_id, "z")
+}
+#Test("codec rejects derivation reference mismatch conflicting definitions and noncanonical identity") {
+    record := evidence_test_record(0, 0, "claim", "a.jet", 1)
+    derivation :: evidence_record_checked_derivation(record)
+    record.derivation = Val(MIRDerivationRef{id: "unresolved"})
+    unresolved := EVIDENCE_REPORT_MAGIC.bytes()
+    evidence_put_number(&unresolved, U64{3}, 2)
+    evidence_encode_record_body(record, &unresolved) ?? panic("unresolved body")
+    &unresolved.push(U8{0})
+    assert(if evidence_decode_report_bytes(unresolved) == {
+        .Err(error) -> error.message.contains("has an unresolved derivation reference")
+        else -> false
+    })
+    mismatch := EVIDENCE_REPORT_MAGIC.bytes()
+    evidence_put_number(&mismatch, U64{3}, 2)
+    evidence_encode_record_body(record, &mismatch) ?? panic("mismatch body")
+    &mismatch.push(U8{1})
+    evidence_encode_derivation(derivation, &mismatch) ?? panic("definition")
+    assert(if evidence_decode_report_bytes(mismatch) == {
+        .Err(error) -> error.message.contains("has a derivation reference mismatch")
+        else -> false
+    })
+    record.derivation = Val(derivation_record_reference(derivation))
+    conflict := EVIDENCE_REPORT_MAGIC.bytes()
+    evidence_put_number(&conflict, U64{3}, 2)
+    evidence_encode_record_with_derivation(record, derivation, &conflict) ?? panic("first")
+    changed := ~derivation
+    changed.disposition = MIRDerivationDisposition.Stale
+    evidence_encode_record_with_derivation(record, changed, &conflict) ?? panic("second")
+    assert(if evidence_decode_report_bytes(conflict) == {
+        .Err(error) -> error.message.contains("conflicting derivation definition")
+        else -> false
+    })
+    invalid := ~derivation
+    invalid.id = "wrong"
+    out := [U8]{}
+    assert(if evidence_encode_derivation(invalid, &out) == {
+        .Err(error) -> error.message == "derivation wrong has a non-canonical identity"
+        else -> false
+    })
+}
+// Main-ratified strict decoder correction; Rust tandem Evidence.rs:1865–1872.
+#Test("diagnostic source marker outside zero or one is rejected") {
+    record := evidence_test_record(0, 1, "failure", "a.jet", 1)
+    record.diagnostics[0].source = None
+    wire := evidence_test_wire(record)
+    cursor := evidence_cursor(~wire, 31)
+    loop _ in 0..<11 -> _ :: evidence_get_string(&cursor) ?? panic("string")
+    attachments :: evidence_get_len(&cursor) ?? panic("attachments")
+    loop _ in 0..<attachments {
+        _ :: evidence_get_string(&cursor) ?? panic("attachment name")
+        _ :: evidence_get_string(&cursor) ?? panic("attachment value")
+    }
+    diagnostics :: evidence_get_len(&cursor) ?? panic("diagnostics")
+    assert_eq(diagnostics, 1)
+    _ :: evidence_get_string(&cursor) ?? panic("code")
+    _ :: evidence_get_string(&cursor) ?? panic("message")
+    assert_eq(wire[cursor.at], U8{0})
+    wire[cursor.at] = U8{2}
+    assert(if evidence_decode_report_bytes(wire) == {
+        .Err(error) -> error.message == "unknown evidence diagnostic source marker 2"
+        else -> false
+    })
+}
+#Test("native inline header matches canonical magic and schema bytes") {
+    header := EVIDENCE_REPORT_MAGIC.bytes()
+    evidence_put_number(&header, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
+    assert_eq(header.len(), 10)
+    loop index in 0..<header.len() -> assert_eq(EVIDENCE_STREAM_HEADER[index], header[index])
+}
+
+// Evidence.rs:227–247 is an accessor, not a Rust #[test]. Exercise its whole
+// mapping rather than mistake that lexical anchor for an original test body.
+#Test("test state codes preserve all five terminal observations") {
+    outcomes :: [EvidenceOutcome]{EvidenceOutcome.Passed, EvidenceOutcome.Failed, EvidenceOutcome.Skipped, EvidenceOutcome.Unavailable, EvidenceOutcome.Error}
+    loop index in 0..<outcomes.len() {
+        assert_eq(evidence_outcome_from_test_state(index), Val(outcomes[index]))
+        assert_eq(evidence_outcome_test_state(outcomes[index]), Val(index))
+    }
+    assert_eq(evidence_outcome_from_test_state(5), None)
+    loop outcome in [EvidenceOutcome]{EvidenceOutcome.Proved, EvidenceOutcome.Generated, EvidenceOutcome.Checked, EvidenceOutcome.Unchecked, EvidenceOutcome.Incomplete, EvidenceOutcome.NotObserved} -> assert_eq(evidence_outcome_test_state(outcome), None)
+}
+#Test("record facet and derivation builders retain payload and borrow stable links") {
+    original :: evidence_test_record(0, 0, "claim", "a.jet", 1)
+    value := evidence_record_with_facet(~original, EvidenceFacet.Effects)
+    assert_eq(value.facet, EvidenceFacet.Effects)
+    evidence_record_set_facet(&value, EvidenceFacet.Replay)
+    assert_eq(value.facet, EvidenceFacet.Replay)
+    assert_eq(value.identity, original.identity)
+    derivation :: evidence_record_checked_derivation(value)
+    value = evidence_record_with_derivation(^value, derivation)
+    assert_eq(value.derivation, Val(derivation_record_reference(derivation)))
+    assert_eq(evidence_record_claim_name(value), "claim")
+    value.detail = "not the source path"
+    assert_eq(evidence_record_seed_or_detail(value), "a.jet")
+    evidence_record_clear_derivation(&value)
+    assert_eq(value.derivation, None)
+    evidence_record_set_derivation(&value, derivation)
+    assert_eq(value.derivation, Val(derivation_record_reference(derivation)))
+    &value.chain.push(EvidenceChainLink{evidence_id: "z", relation: "later"})
+    &value.chain.push(EvidenceChainLink{evidence_id: "a", relation: "earlier"})
+    row :: evidence_projection_from_record(value)
+    assert_eq(row.chain[0].evidence_id, "a")
+    assert_eq(value.chain[0].evidence_id, "z")
+    assert_eq(row.derivation, value.derivation)
+    assert_eq(row.facet, value.facet)
+}
+#Test("usize conversions and offset overflow retain Rust error precedence") {
+    maximum :: U64{65535}
+    assert_eq(evidence_checked_offset(U64{65527}, U64{8}, maximum), Val(maximum))
+    assert_eq(evidence_checked_offset(U64{65528}, U64{8}, maximum), None)
+    assert_eq(evidence_checked_offset(U64{18446744073709551615}, U64{0}, U64{18446744073709551615}), Val(U64{18446744073709551615}))
+    assert_eq(evidence_checked_offset(U64{18446744073709551615}, U64{1}, U64{18446744073709551615}), None)
+    cursor := EvidenceCursor{bytes: [U8]{}, at: 65534, usize_max: maximum}
+    assert(if evidence_get_number(&cursor, 2) == { .Err(error) -> error.message == "evidence report offset overflow" else -> false })
+    assert_eq(cursor.at, 65534)
+    assert(if evidence_get_byte(&cursor) == { .Err(error) -> error.message == "truncated evidence report" else -> false })
+    wire := [U8]{}
+    evidence_put_number(&wire, U64{18446744073709551615}, 8)
+    cursor = EvidenceCursor{bytes: ^wire, at: 0, usize_max: maximum}
+    assert(if evidence_get_string(&cursor) == { .Err(error) -> error.message == "evidence report field length is too large" else -> false })
+    assert_eq(cursor.at, 8)
+    collection := [U8]{}
+    evidence_put_number(&collection, U64{65536}, 4)
+    cursor = EvidenceCursor{bytes: ^collection, at: 0, usize_max: maximum}
+    assert(if evidence_get_len(&cursor) == { .Err(error) -> error.message == "evidence report collection length is too large" else -> false })
+    field := [U8]{}
+    evidence_put_number(&field, maximum, 8)
+    cursor = EvidenceCursor{bytes: ^field, at: 0, usize_max: maximum}
+    assert(if evidence_get_string(&cursor) == { .Err(error) -> error.message == "evidence report field offset overflow" else -> false })
+    utf8 := [U8]{}
+    evidence_put_number(&utf8, U64{1}, 8)
+    &utf8.push(U8{255})
+    cursor = EvidenceCursor{bytes: ^utf8, at: 0, usize_max: maximum}
+    assert(if evidence_get_string(&cursor) == { .Err(error) -> error.message == "non-UTF-8 evidence report field" else -> false })
+    assert_eq(cursor.at, 9)
+}
+
+#Test("identity conflicts retain Rust Debug rather than JSON string escaping") {
+    expected :: String.from_bytes([U8]{U8{0}, U8{127}, U8{194}, U8{133}, U8{206}, U8{187}}) ?? panic("UTF-8 fixture")
+    assert(if evidence_check_identity("report_id", expected, "other") == {
+        .Err(.IdentityConflict(field, left, right)) -> field == "report_id" && left == "\"\\0\\u{{7f}}\\u{{85}}λ\"" && right == "\"other\""
+        else -> false
+    })
+    assert(if evidence_check_identity("report_id", expected, expected) == {
+        .Ok(_) -> true
+        else -> false
+    })
+}

@@ -1,0 +1,24 @@
+use jet_foundation.[
+    foundation_embedded_core,
+]
+
+#Test("Driver core source ABI converts canonical public then private payload") {
+    core :: foundation_embedded_core()
+    public_rows :: core.public_sources()
+    private_rows :: core.private_sources()
+    actual :: jet_driver_embedded_core_sources(core)
+    assert(actual.len() == public_rows.len() + private_rows.len())
+    loop index in 0..<actual.len() {
+        expected :: if index < public_rows.len() -> public_rows[index] else -> private_rows[index - public_rows.len()]
+        assert(actual[index].module_name == expected.module_name)
+        assert(actual[index].alias == expected.alias)
+        assert(actual[index].path == expected.path)
+        assert(actual[index].owner == expected.owner)
+        assert(actual[index].owned_members == expected.owned_members)
+        assert(actual[index].source == expected.source)
+        assert(actual[index].source.trim() != "")
+    }
+    assert(actual[0].module_name == "app")
+    assert(actual[actual.len() - 1].module_name == "__core_text_string")
+    assert(actual[actual.len() - 1].owner == "core.text")
+}

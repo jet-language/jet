@@ -1,0 +1,295 @@
+// MIR.rs::MirProgram::validate and type validation helpers. Root identities,
+// ordered row traversal and errors remain distinct from optimizer legality.
+struct MIRValidationTables {
+    modules: [U64:Bool]
+    imports: [U64:Bool]
+    traits: [U64:Bool]
+    impls: [U64:Bool]
+    constants: [U64:Bool]
+    foreign: [U64:Bool]
+    links: [U64:Bool]
+    callbacks: [U64:Bool]
+    handles: [U64:Bool]
+    jobs: [U64:Bool]
+    tests: [U64:Bool]
+    harnesses: [U64:Bool]
+    artifacts: [U64:Bool]
+    functions: [U64:Int]
+    type_defs: [U64:Bool]
+    types: [U64:Bool]
+    core: [U64:Bool]
+    fields: [U64:Bool]
+    prelude: [U64:Bool]
+    sources: [U64:Bool]
+}
+fn mir_validation_add(ids: &[U64:Bool], id: U64, kind: String) MIRValidationError! {
+    if id == U64{0} -> return Err(MIRValidationError.ZeroId{kind: kind, span: None})
+    if ids.get(id) != None -> return Err(MIRValidationError.DuplicateId{kind: kind, id: id})
+    ids[id] = true
+    return
+}
+fn mir_validation_key(keys: &[String:Bool], key: String, kind: String) MIRValidationError! {
+    if keys.get(key) != None -> return Err(MIRValidationError.DuplicateKey{kind: kind, key: key})
+    keys[key] = true
+    return
+}
+fn mir_validation_require(ids: [U64:Bool], id: U64, kind: String) MIRValidationError! {
+    if ids.get(id) == None -> return Err(MIRValidationError.MissingReference{kind: kind, id: id})
+    return
+}
+fn mir_validation_require_function(tables: MIRValidationTables, id: MIRFunctionID, kind: String) MIRValidationError! {
+    if tables.functions.get(id.value) == None -> return Err(MIRValidationError.MissingReference{kind: kind, id: id.value})
+    return
+}
+fn mir_validation_type(ty: MIRType, ids: [U64:Bool]) MIRValidationError! {
+    id :: ty.identity ?? return Err(MIRValidationError.MissingTypeIdentity)
+    if ids.get(id.value) == None -> return Err(MIRValidationError.MissingTypeInstance{id: id})
+    return
+}
+fn mir_validation_failure(failure: MIRFailureCarrier, ids: [U64:Bool]) MIRValidationError! {
+    if failure == {
+        .Infallible -> {}
+        .Result(success, error) -> { mir_validation_type(success, ids); mir_validation_type(error, ids) }
+        .Optional(value) | .Diverges(value) -> mir_validation_type(value, ids)
+    }
+    return
+}
+fn mir_validation_fields(fields: View<MIRField>, ids: [U64:Bool]) MIRValidationError! {
+    loop field in fields -> mir_validation_type(field.ty, ids)
+    return
+}
+fn mir_validation_type_definition(def: MIRTypeDef, tables: MIRValidationTables) MIRValidationError! {
+    methods := View<MIRFunctionID>?{None}
+    if def.kind == {
+        .Struct(fields, functions) -> { mir_validation_fields(fields, tables.types); methods = Val(functions) }
+        .Enum(variants, functions) -> {
+            loop variant in variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    .Single(ty) -> mir_validation_type(ty, tables.types)
+                    .Named(fields) -> mir_validation_fields(fields, tables.types)
+                }
+            }
+            methods = Val(functions)
+        }
+        .Distinct(base, _) -> mir_validation_type(base, tables.types)
+        .Alias(target) -> mir_validation_type(target, tables.types)
+        .UnitFamily(_) -> {}
+    }
+    if methods == .Val(functions) {
+        loop id in functions {
+            if tables.functions.get(id.value) == None -> return Err(MIRValidationError.MissingEntry{id: id})
+        }
+    }
+    return
+}
+fn mir_validation_function_types(function: MIRFunction, ids: [U64:Bool]) MIRValidationError! {
+    loop param in function.params -> mir_validation_type(param.ty, ids)
+    loop capture in function.capture_params -> mir_validation_type(capture.ty, ids)
+    loop (slot, capture) in function.capture_params {
+        if capture.slot != slot -> return Err(MIRValidationError.DuplicateId{kind: "capture slot", id: U64{capture.slot}})
+    }
+    if function.declared_return == .Val(ty) -> mir_validation_type(ty, ids)
+    mir_validation_type(function.return_type, ids)
+    if function.generator == .Val(generator) -> mir_validation_type(generator.item, ids)
+    mir_validation_failure(function.failure, ids)
+    loop local in function.locals -> mir_validation_type(local.ty, ids)
+    loop value in function.values -> mir_validation_type(value.ty, ids)
+    loop place in function.places -> mir_validation_type(place.ty, ids)
+    return
+}
+fn mir_validation_item(item: MIRItemRef, prefix: String, tables: MIRValidationTables) MIRValidationError! {
+    if item == {
+        .Type(id) -> mir_validation_require(tables.type_defs, id.value, "{prefix} type")
+        .Trait(id) -> mir_validation_require(tables.traits, id.value, "{prefix} trait")
+        .Function(id) -> mir_validation_require_function(tables, id, "{prefix} function")
+        .Constant(id) -> mir_validation_require(tables.constants, id.value, "{prefix} constant")
+        .Impl(id) -> mir_validation_require(tables.impls, id.value, "{prefix} impl")
+        .Foreign(id) -> mir_validation_require(tables.foreign, id.value, "{prefix} foreign")
+        .Import(id) -> mir_validation_require(tables.imports, id.value, if prefix == "import" -> "import re-export" else -> "{prefix} import")
+    }
+    return
+}
+pub fn mir_validate_program(program: MIRProgram) MIRValidationError! {
+    if program.schema_version != MIR_SCHEMA_VERSION -> return Err(MIRValidationError.SchemaVersion{version: program.schema_version})
+    tables := MIRValidationTables{modules: [U64:Bool]{}, imports: [U64:Bool]{}, traits: [U64:Bool]{}, impls: [U64:Bool]{}, constants: [U64:Bool]{}, foreign: [U64:Bool]{}, links: [U64:Bool]{}, callbacks: [U64:Bool]{}, handles: [U64:Bool]{}, jobs: [U64:Bool]{}, tests: [U64:Bool]{}, harnesses: [U64:Bool]{}, artifacts: [U64:Bool]{}, functions: [U64:Int]{}, type_defs: [U64:Bool]{}, types: [U64:Bool]{}, core: [U64:Bool]{}, fields: [U64:Bool]{}, prelude: [U64:Bool]{}, sources: [U64:Bool]{}}
+    loop row in program.modules -> mir_validation_add(&tables.modules, row.id.value, "module")
+    loop row in program.imports -> mir_validation_add(&tables.imports, row.id.value, "import")
+    loop row in program.traits -> mir_validation_add(&tables.traits, row.id.value, "trait")
+    loop row in program.impls -> mir_validation_add(&tables.impls, row.id.value, "impl")
+    loop row in program.constants -> mir_validation_add(&tables.constants, row.id.value, "constant")
+    loop row in program.foreign -> mir_validation_add(&tables.foreign, row.id.value, "foreign")
+    loop row in program.links -> mir_validation_add(&tables.links, row.id.value, "link unit")
+    loop row in program.callbacks -> mir_validation_add(&tables.callbacks, row.id.value, "callback")
+    loop row in program.handles -> mir_validation_add(&tables.handles, row.id.value, "handle")
+    loop row in program.jobs -> mir_validation_add(&tables.jobs, row.id.value, "job")
+    loop row in program.tests -> mir_validation_add(&tables.tests, row.id.value, "test")
+    loop row in program.harnesses -> mir_validation_add(&tables.harnesses, row.id.value, "harness")
+    loop row in program.artifacts -> mir_validation_add(&tables.artifacts, row.id.value, "artifact")
+    keys := [String:Bool]{}
+    loop (index, function) in program.functions {
+        if function.id.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "function", span: Val(function.span)})
+        if tables.functions.get(function.id.value) != None -> return Err(MIRValidationError.DuplicateId{kind: "function", id: function.id.value})
+        mir_validation_key(&keys, function.key, "function")
+        tables.functions[function.id.value] = index
+    }
+    keys = [String:Bool]{}
+    loop ty in program.types {
+        if ty.id.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "type definition", span: Val(ty.span)})
+        mir_validation_add(&tables.type_defs, ty.id.value, "type definition")
+        mir_validation_key(&keys, ty.key, "type definition")
+    }
+    owner_ids := [U64:Bool]{}
+    nominal_ids := [U64:Bool]{}
+    keys = [String:Bool]{}
+    loop owner in program.core_owners {
+        if owner.id.value == U64{0} || owner.nominal_id.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "Core owner", span: None})
+        mir_validation_add(&owner_ids, owner.id.value, "Core owner")
+        mir_validation_add(&nominal_ids, owner.nominal_id.value, "Core owner nominal")
+        mir_validation_key(&keys, owner.key, "Core owner")
+        if owner.module_id == .Val(module_id) -> mir_validation_require(tables.modules, module_id.value, "Core owner module")
+    }
+    loop ty in program.type_instances {
+        id :: ty.identity ?? return Err(MIRValidationError.MissingTypeIdentity)
+        mir_validation_add(&tables.types, id.value, "type instance")
+    }
+    loop ty in program.types {
+        if tables.types.get(ty.id.value) == None -> return Err(MIRValidationError.MissingTypeInstance{id: ty.id})
+    }
+    loop def in program.types -> mir_validation_type_definition(def, tables)
+    loop foreign in program.foreign {
+        loop param in foreign.params -> mir_validation_type(param.ty, tables.types)
+        if foreign.return_type == .Val(ty) -> mir_validation_type(ty, tables.types)
+    }
+    keys = [String:Bool]{}
+    loop call in program.core_calls {
+        mir_validation_add(&tables.core, call.id.value, "Core call")
+        mir_validation_key(&keys, call.key, "Core call")
+    }
+    loop field in program.fields {
+        mir_validation_add(&tables.fields, field.id.value, "field")
+        if tables.types.get(field.owner.value) == None -> return Err(MIRValidationError.MissingTypeInstance{id: field.owner})
+        mir_validation_type(field.field.ty, tables.types)
+    }
+    loop call in program.prelude_calls {
+        if call.fallibility == .Failure(failure) -> mir_validation_failure(failure, tables.types)
+        mir_validation_add(&tables.prelude, call.id.value, "Prelude call")
+    }
+    loop source in program.source_files -> mir_validation_add(&tables.sources, source.id.value, "source file")
+    loop module in program.modules {
+        mir_validation_require(tables.sources, module.source_file.value, "module source file")
+        loop import in module.imports -> mir_validation_require(tables.imports, import.value, "module import")
+        loop child in module.children -> mir_validation_require(tables.modules, child.value, "module child")
+        loop item in module.item_order -> mir_validation_item(item, "module", tables)
+    }
+    loop import in program.imports {
+        mir_validation_require(tables.modules, import.module_id.value, "import owner module")
+        if import.kind == .Unqualified(module_id, items) {
+            mir_validation_require(tables.modules, module_id.value, "import target module")
+            loop item in items -> mir_validation_item(item.item, "import", tables)
+        }
+    }
+    loop function in program.functions {
+        mir_validation_require(tables.modules, function.module_id.value, "function module")
+        if function.form == {
+            .TopLevel -> {}
+            .Method(owner, _) -> mir_validation_type(owner, tables.types)
+            .TraitMethod(owner, trait_ref, _, _) -> { mir_validation_type(owner, tables.types); mir_validation_require(tables.traits, trait_ref.id.value, "trait method trait") }
+        }
+        loop generic in function.generic_params { loop bound in generic.bounds -> mir_validation_require(tables.traits, bound.id.value, "function generic bound") }
+    }
+    loop ty in program.types {
+        mir_validation_require(tables.modules, ty.module_id.value, "type module")
+        loop derive in ty.derives -> mir_validation_require(tables.traits, derive.value, "derived trait")
+        loop binding in ty.cli_bindings -> mir_validation_require_function(tables, binding.function, "CLI binding function")
+        loop generic in ty.generic_params { loop bound in generic.bounds -> mir_validation_require(tables.traits, bound.id.value, "type generic bound") }
+    }
+    method_ids := [U64:Bool]{}
+    loop trait_def in program.traits {
+        mir_validation_require(tables.modules, trait_def.module_id.value, "trait module")
+        loop method in trait_def.methods {
+            mir_validation_add(&method_ids, method.id.value, "trait method")
+            loop param in method.params -> mir_validation_type(param.ty, tables.types)
+            mir_validation_type(method.return_type, tables.types)
+            if method.declared_return == .Val(ty) -> mir_validation_type(ty, tables.types)
+            mir_validation_failure(method.failure, tables.types)
+            if method.default == .Val(id) -> mir_validation_require_function(tables, id, "trait default method")
+        }
+    }
+    loop implementation in program.impls {
+        mir_validation_require(tables.modules, implementation.module_id.value, "impl module")
+        mir_validation_type(implementation.self_type, tables.types)
+        if implementation.trait_ref == .Val(trait_ref) -> mir_validation_require(tables.traits, trait_ref.id.value, "impl trait")
+        loop associated in implementation.associated_types -> mir_validation_type(associated.ty, tables.types)
+        loop method in implementation.methods -> mir_validation_require_function(tables, method, "impl method")
+        if implementation.delegation == .Val(field) -> mir_validation_require(tables.fields, field.value, "impl delegation field")
+        if implementation.operator_rhs == .Val(ty) -> mir_validation_type(ty, tables.types)
+    }
+    loop constant in program.constants { mir_validation_require(tables.modules, constant.module_id.value, "constant module"); mir_validation_type(constant.ty, tables.types) }
+    loop foreign in program.foreign {
+        mir_validation_require(tables.modules, foreign.module_id.value, "foreign module")
+        loop param in foreign.params -> mir_validation_type(param.ty, tables.types)
+        if foreign.return_type == .Val(ty) -> mir_validation_type(ty, tables.types)
+        if foreign.link == .Val(id) -> mir_validation_require(tables.links, id.value, "foreign link")
+        if foreign.callback == .Val(id) -> mir_validation_require(tables.callbacks, id.value, "foreign callback")
+        if foreign.handle == .Val(id) -> mir_validation_require(tables.handles, id.value, "foreign handle")
+        if foreign.close_function == .Val(id) -> mir_validation_require_function(tables, id, "foreign lifecycle function")
+        if foreign.undo_function == .Val(id) -> mir_validation_require_function(tables, id, "foreign lifecycle function")
+        if foreign.close_foreign == .Val(id) -> mir_validation_require(tables.foreign, id.value, "foreign close function")
+    }
+    loop link in program.links { loop dependency in link.link_closure -> mir_validation_require(tables.links, dependency.value, "link closure") }
+    loop callback in program.callbacks {
+        mir_validation_require_function(tables, callback.function, "callback function")
+        loop param in callback.params -> mir_validation_type(param.ty, tables.types)
+        if callback.return_type == .Val(ty) -> mir_validation_type(ty, tables.types)
+    }
+    loop handle in program.handles {
+        mir_validation_type(handle.ty, tables.types)
+        if handle.close == .Val(id) -> mir_validation_require_function(tables, id, "handle lifecycle function")
+        if handle.undo == .Val(id) -> mir_validation_require_function(tables, id, "handle lifecycle function")
+        if handle.close_foreign == .Val(id) -> mir_validation_require(tables.foreign, id.value, "handle close foreign")
+    }
+    loop job in program.jobs {
+        mir_validation_require_function(tables, job.function, "job function")
+        loop input in job.inputs -> mir_validation_type(input.ty, tables.types)
+    }
+    loop test in program.tests {
+        mir_validation_require_function(tables, test.function, "test function")
+        if test.eligibility == .Val(id) -> mir_validation_require_function(tables, id, "test eligibility predicate")
+        loop param in test.parameters -> mir_validation_type(param.ty, tables.types)
+    }
+    loop harness in program.harnesses {
+        loop test in harness.tests -> mir_validation_require(tables.tests, test.value, "harness test")
+        if harness.selected_test == .Val(test) -> mir_validation_require(tables.tests, test.value, "selected fuzz test")
+        loop check in harness.output_checks {
+            if check.id.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "output check", span: None})
+            mir_validation_require_function(tables, check.function, "output check function")
+        }
+        loop point in harness.coverage_points {
+            if point.id.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "coverage point", span: Val(point.span)})
+            mir_validation_require_function(tables, point.function, "coverage function")
+        }
+    }
+    loop artifact in program.artifacts {
+        loop module_id in artifact.modules -> mir_validation_require(tables.modules, module_id.value, "artifact module")
+        loop link in artifact.links -> mir_validation_require(tables.links, link.value, "artifact link")
+        loop job in artifact.jobs -> mir_validation_require(tables.jobs, job.value, "artifact job")
+        if artifact.harness == .Val(id) -> mir_validation_require(tables.harnesses, id.value, "artifact harness")
+        if artifact.entry == .Val(entry) {
+            if entry.function == .Val(id) -> mir_validation_require_function(tables, id, "artifact entry function")
+            if entry.cli == .Val(cli) {
+                loop input in cli.inputs -> mir_validation_type(input.ty, tables.types)
+                loop command in cli.commands {
+                    mir_validation_require_function(tables, command.function, "CLI command function")
+                    loop input in command.inputs -> mir_validation_type(input.ty, tables.types)
+                }
+            }
+        }
+        loop export in artifact.exports -> mir_validation_require_function(tables, export.function, "artifact export")
+    }
+    loop function in program.functions {
+        mir_validation_function_types(function, tables.types)
+        mir_validation_function(function, program.functions[0..<program.functions.len()], tables)
+    }
+    return
+}

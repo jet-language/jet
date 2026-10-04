@@ -1,0 +1,1824 @@
+// PORT-PENDING 0498 crates-jet-codegen-src-codegen-tir-mir-slice-1815: crates/jet-codegen/src/Codegen/TIR/mir.rs:1815-3634
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn append_core_process_handle_rows(
+//RS     handles: &mut Vec<MirHandleLifecycle>,
+//RS     prelude_calls: &[MirPreludeCall],
+//RS ) {
+//RS     let needs_child = prelude_calls.iter().any(|row| {
+//RS         row.module == "core.handle"
+//RS             && (row.member == "process.spec.spawn" || row.member.starts_with("process.child."))
+//RS     });
+//RS     let needs_stdin = prelude_calls
+//RS         .iter()
+//RS         .any(|row| row.module == "core.handle" && row.member.starts_with("process.stdin_"));
+//RS     let rows = [
+//RS         (needs_child, "ProcessChild", "process.child.close"),
+//RS         (needs_stdin, "ProcessStdin", "process.stdin_close"),
+//RS     ];
+//RS     for (needed, typedef_name, close) in rows {
+//RS         if !needed
+//RS             || handles.iter().any(|row| {
+//RS                 row.payload.library == "core.process" && row.payload.typedef_name == typedef_name
+//RS             })
+//RS         {
+//RS             continue;
+//RS         }
+//RS         let key = format!("core::core.process::{typedef_name}");
+//RS         handles.push(MirHandleLifecycle {
+//RS             id: MirHandleId(stable_id("mir-handle", &key)),
+//RS             ty: lower_type(&Type::Named(typedef_name.to_string())),
+//RS             ownership: MirHandleOwnership::Owned,
+//RS             payload: MirHandlePayload {
+//RS                 library: "core.process".to_string(),
+//RS                 typedef_name: typedef_name.to_string(),
+//RS                 close: close.to_string(),
+//RS             },
+//RS             close: None,
+//RS             close_foreign: None,
+//RS             undo: None,
+//RS             send: false,
+//RS             sync: false,
+//RS             close_source: None,
+//RS             thread_safety: None,
+//RS         });
+//RS     }
+//RS     handles.sort_unstable_by_key(|row| row.id);
+//RS }
+//RS 
+//RS fn lower_foreign_rows(
+//RS     rows: &[TirForeignFact],
+//RS     _functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS ) -> Vec<MirForeign> {
+//RS     let mut result = rows
+//RS         .iter()
+//RS         .map(|row| {
+//RS             let module_id = jet_foundation::MIR::MirModuleId(stable_id("mir-module", &row.module));
+//RS             let mut effects = MirEffectFacts::default();
+//RS             if let Some(root) = &row.effect_root {
+//RS                 effects.direct.insert(root.clone());
+//RS                 effects.solved.insert(root.clone());
+//RS                 effects.direct_spans.insert(root.clone(), row.span);
+//RS             }
+//RS             MirForeign {
+//RS                 id: jet_foundation::MIR::MirForeignId(stable_id("mir-foreign", &row.key)),
+//RS                 module_id,
+//RS                 key: row.key.clone(),
+//RS                 module: row.module.clone(),
+//RS                 name: row.name.clone(),
+//RS                 span: row.span,
+//RS                 symbol: row.symbol.clone(),
+//RS                 path: row.path.clone(),
+//RS                 params: row.params.iter().map(lower_artifact_param).collect(),
+//RS                 bridge_eligible: row.bridge_eligible,
+//RS                 raw_scalar_abi: row.raw_scalar_abi,
+//RS                 return_type: row.return_type.as_ref().map(lower_type),
+//RS                 foreign_abi: lower_foreign_abi(&row.abi),
+//RS                 foreign_language: lower_foreign_language(&row.language),
+//RS                 target_applicability: lower_target_applicability(row.applicability),
+//RS                 effects,
+//RS                 callback_transport: row.callback_transport.clone(),
+//RS                 callback_plan_digest: row.callback_plan_digest.clone(),
+//RS                 callback_identity: row.callback_identity.clone(),
+//RS                 link: row
+//RS                     .link_key
+//RS                     .as_deref()
+//RS                     .map(|key| MirLinkUnitId(stable_id("mir-link", key))),
+//RS                 callback: row
+//RS                     .callback_key
+//RS                     .as_deref()
+//RS                     .map(|key| MirCallbackId(stable_id("mir-callback", key))),
+//RS                 handle: row
+//RS                     .handle_key
+//RS                     .as_deref()
+//RS                     .map(|key| MirHandleId(stable_id("mir-handle", key))),
+//RS                 close_function: row
+//RS                     .close_function_key
+//RS                     .as_deref()
+//RS                     .and_then(|key| resolve_function_key(key, &row.module, registry)),
+//RS                 undo_function: row
+//RS                     .undo_function_key
+//RS                     .as_deref()
+//RS                     .and_then(|key| resolve_function_key(key, &row.module, registry)),
+//RS                 close_foreign: None,
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     result.sort_unstable_by_key(|row| row.id);
+//RS     result
+//RS }
+//RS 
+//RS fn lower_target_applicability(
+//RS     applicability: TirTargetApplicability,
+//RS ) -> jet_foundation::MIR::MirTargetApplicability {
+//RS     applicability
+//RS }
+//RS 
+//RS fn lower_foreign_abi(abi: &str) -> MirForeignAbi {
+//RS     match abi.to_ascii_lowercase().as_str() {
+//RS         "c" => MirForeignAbi::C,
+//RS         "c-unwind" | "cunwind" => MirForeignAbi::CUnwind,
+//RS         "system" => MirForeignAbi::System,
+//RS         "stdcall" => MirForeignAbi::Stdcall,
+//RS         "fastcall" => MirForeignAbi::Fastcall,
+//RS         "vectorcall" => MirForeignAbi::Vectorcall,
+//RS         "rust" => MirForeignAbi::Rust,
+//RS         _ => MirForeignAbi::Platform(abi.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn lower_foreign_language(language: &str) -> MirForeignLanguage {
+//RS     match language
+//RS         .split(':')
+//RS         .next()
+//RS         .unwrap_or(language)
+//RS         .to_ascii_lowercase()
+//RS         .as_str()
+//RS     {
+//RS         "c" => MirForeignLanguage::C,
+//RS         "cpp" | "c++" => MirForeignLanguage::Cpp,
+//RS         "asm" | "assembly" => MirForeignLanguage::Assembly,
+//RS         _ => MirForeignLanguage::Rust,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_artifact_param(param: &TirParamFact) -> MirParam {
+//RS     let access = match param.access {
+//RS         super::artifact_plan::TirAccess::Read => MirAccess::Read,
+//RS         super::artifact_plan::TirAccess::Write => MirAccess::Write,
+//RS         super::artifact_plan::TirAccess::Move => MirAccess::Move,
+//RS     };
+//RS     let ownership = MirOwnership::from_access(access);
+//RS     MirParam {
+//RS         index: param.index,
+//RS         name: param.name.clone(),
+//RS         span: param.span,
+//RS         ty: lower_type(&param.ty),
+//RS         access,
+//RS         ownership,
+//RS         public_label: param.label.clone(),
+//RS         variadic: false,
+//RS         default_present: false,
+//RS     }
+//RS }
+//RS /// #3740 (D-FAILURE-FOUNDATION1): a callable whose failure set is empty
+//RS /// (`T Never!`, written or inferred) returns its success value directly on
+//RS /// every tier. Checked expressions keep naming the `Result<T, Never>`
+//RS /// carrier; this is that carrier's success type.
+//RS pub(super) fn never_carrier_success(ty: &Type) -> Option<&Type> {
+//RS     match ty.without_user_tags() {
+//RS         Type::Result { ok, err } if err.is_never() => Some(ok.as_ref()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// A checked `Result` carrier expression. #3708: callers checked before the
+//RS /// failure solve name the default `Result<T, Err>` of a callee that now
+//RS /// returns plainly, so reconciliation accepts any `Result` expression.
+//RS pub(super) fn is_result_carrier(ty: &Type) -> bool {
+//RS     matches!(ty.without_user_tags(), Type::Result { .. })
+//RS }
+//RS 
+//RS /// An executable return that is neither a failure nor an absence carrier.
+//RS pub(super) fn is_plain_return(ty: &Type) -> bool {
+//RS     !matches!(
+//RS         ty.without_user_tags(),
+//RS         Type::Result { .. } | Type::Option(_)
+//RS     ) && !ty.is_never()
+//RS }
+//RS 
+//RS /// #3740: whether a user callee's executable return `returned` is the plain
+//RS /// success value of the checked carrier `checked` its call site names. A
+//RS /// value return pairs with any `Result` carrier (#3708: a caller checked
+//RS /// before the failure solve names the default `Result<T, Err>`). An `Option`
+//RS /// return is plain only as the exact success of a `T? Never!` carrier, since
+//RS /// a callee that keeps its `T?` carrier returns that `Option` itself.
+//RS pub(super) fn is_plain_call_return(returned: &Type, checked: &Type) -> bool {
+//RS     if is_plain_return(returned) {
+//RS         return is_result_carrier(checked);
+//RS     }
+//RS     matches!(returned.without_user_tags(), Type::Option(_))
+//RS         && never_carrier_success(checked)
+//RS             .is_some_and(|success| success.without_user_tags() == returned.without_user_tags())
+//RS }
+//RS 
+//RS /// The adaptation a raw-payload function value needs to fill a callable slot
+//RS /// with the shared `Result` carrier: the slot parameters, the source payload
+//RS /// return, and the slot's carrier return. `None` when the two already agree.
+//RS fn fn_value_carrier_adaptation(source: &Type, slot: &Type) -> Option<(Vec<Type>, Type, Type)> {
+//RS     let (
+//RS         Type::Fn {
+//RS             params: source_params,
+//RS             ret: Some(source_ret),
+//RS             ..
+//RS         },
+//RS         Type::Fn {
+//RS             params: slot_params,
+//RS             ret: Some(slot_ret),
+//RS             ..
+//RS         },
+//RS     ) = (source.without_user_tags(), slot.without_user_tags())
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     if source_params.len() != slot_params.len()
+//RS         || !matches!(slot_ret.as_ref(), Type::Result { .. })
+//RS         || matches!(source_ret.as_ref(), Type::Result { .. } | Type::Option(_))
+//RS         || matches!(source_ret.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_NEVER)
+//RS     {
+//RS         return None;
+//RS     }
+//RS     let Type::Fn {
+//RS         ret: Some(effective_ret),
+//RS         ..
+//RS     } = source.without_user_tags().with_effective_fn_returns()
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     (effective_ret == *slot_ret).then(|| {
+//RS         (
+//RS             slot_params.clone(),
+//RS             source_ret.as_ref().clone(),
+//RS             slot_ret.as_ref().clone(),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn lower_failure_carrier_types(carrier: &TFailureCarrier) -> MirFailureCarrier {
+//RS     match carrier {
+//RS         TFailureCarrier::Infallible => MirFailureCarrier::Infallible,
+//RS         TFailureCarrier::Result { success, error } => MirFailureCarrier::Result {
+//RS             success: lower_type(success),
+//RS             error: lower_type(error),
+//RS         },
+//RS         TFailureCarrier::Optional { value } => MirFailureCarrier::Optional {
+//RS             value: lower_type(value),
+//RS         },
+//RS         TFailureCarrier::Diverges { value } => MirFailureCarrier::Diverges {
+//RS             value: lower_type(value),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn lower_effects(declared: Option<&Vec<(String, Span)>>) -> MirEffectFacts {
+//RS     let mut effects = MirEffectFacts::default();
+//RS     if let Some(declared) = declared {
+//RS         for (effect, span) in declared {
+//RS             effects.direct.insert(effect.clone());
+//RS             effects.solved.insert(effect.clone());
+//RS             effects.direct_spans.insert(effect.clone(), *span);
+//RS         }
+//RS     }
+//RS     effects
+//RS }
+//RS 
+//RS fn lower_trait_rows(
+//RS     rows: &[super::tir_to_mir_types::TirTraitDef],
+//RS     functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS ) -> Vec<MirTraitDef> {
+//RS     let mut result = rows
+//RS         .iter()
+//RS         .map(|row| MirTraitDef {
+//RS             id: MirTraitId(stable_id("mir-trait", &row.key)),
+//RS             module: jet_foundation::MIR::MirModuleId(stable_id("mir-module", &row.module)),
+//RS             key: row.key.clone(),
+//RS             name: row.name.clone(),
+//RS             span: row.span,
+//RS             visibility: lower_decl_visibility(row.visibility),
+//RS             associated_types: row
+//RS                 .associated_types
+//RS                 .iter()
+//RS                 .map(|associated| MirAssociatedTypeDecl {
+//RS                     name: associated.name.clone(),
+//RS                     span: associated.span,
+//RS                 })
+//RS                 .collect(),
+//RS             methods: row
+//RS                 .methods
+//RS                 .iter()
+//RS                 .map(|method| MirTraitMethod {
+//RS                     id: MirTraitMethodId(stable_id(
+//RS                         "mir-trait-method",
+//RS                         &format!("{}::{}", row.key, method.key),
+//RS                     )),
+//RS                     name: method.name.clone(),
+//RS                     span: method.span,
+//RS                     self_access: method.self_access.map(super::tir_to_mir_types::mir_access),
+//RS                     params: method.params.iter().map(TirParam::to_mir).collect(),
+//RS                     declared_return: method.declared_return.as_ref().map(lower_type),
+//RS                     return_type: lower_type(&method.return_type),
+//RS                     failure: lower_failure_carrier_types(&method.failure),
+//RS                     effects: lower_effects(method.declared_effects.as_ref()),
+//RS                     is_pure: method.is_pure,
+//RS                     return_view_provenance: method
+//RS                         .return_view_provenance
+//RS                         .as_ref()
+//RS                         .map(lower_view_provenance),
+//RS                     declared_return_view_provenance: None,
+//RS                     default: method.default_function_key.as_deref().and_then(|key| {
+//RS                         resolve_function_name_at(key, &row.module, method.span, functions, registry)
+//RS                             .or_else(|| resolve_function_key(key, &row.module, registry))
+//RS                     }),
+//RS                 })
+//RS                 .collect(),
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     result.sort_unstable_by_key(|row| row.id);
+//RS     result
+//RS }
+//RS 
+//RS /// Compiler-owned traits (Display, Equatable, Encode, …) arrive as impls and
+//RS /// trait methods without an `Item::Trait`. Canonical MIR still requires every
+//RS /// `MirTraitId` referenced by a function or impl to exist in the traits table.
+//RS fn synthesized_trait_associated_types(name: &str) -> Vec<MirAssociatedTypeDecl> {
+//RS     let names: &[&str] = match name.rsplit("::").next().unwrap_or(name) {
+//RS         crate::Syntax::TRAIT_ITERATOR => &["Item"],
+//RS         crate::Syntax::TRAIT_ITERABLE => &["Iter"],
+//RS         crate::Syntax::TRAIT_INDEX => &["Key", "Value"],
+//RS         crate::Syntax::TRAIT_ROLLBACK => &["Snapshot"],
+//RS         _ => &[],
+//RS     };
+//RS     names
+//RS         .iter()
+//RS         .map(|name| MirAssociatedTypeDecl {
+//RS             name: (*name).to_string(),
+//RS             span: Span::new(0, 0),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn ensure_referenced_traits(
+//RS     traits: &mut Vec<MirTraitDef>,
+//RS     impls: &[MirImplDef],
+//RS     functions: &[MirFunction],
+//RS     types: &[MirTypeDef],
+//RS ) {
+//RS     let mut known: HashSet<MirTraitId> = traits.iter().map(|row| row.id).collect();
+//RS     let mut needed: Vec<MirTraitRef> = Vec::new();
+//RS     let take = |trait_ref: &MirTraitRef,
+//RS                 known: &mut HashSet<MirTraitId>,
+//RS                 needed: &mut Vec<MirTraitRef>| {
+//RS         if known.insert(trait_ref.id) {
+//RS             needed.push(trait_ref.clone());
+//RS         }
+//RS     };
+//RS     for implementation in impls {
+//RS         if let Some(trait_ref) = &implementation.trait_ref {
+//RS             take(trait_ref, &mut known, &mut needed);
+//RS         }
+//RS     }
+//RS     for function in functions {
+//RS         match &function.form {
+//RS             MirFunctionForm::TraitMethod { trait_ref, .. } => {
+//RS                 take(trait_ref, &mut known, &mut needed);
+//RS             }
+//RS             MirFunctionForm::TopLevel | MirFunctionForm::Method { .. } => {}
+//RS         }
+//RS         for generic in &function.generic_params {
+//RS             for bound in &generic.bounds {
+//RS                 take(bound, &mut known, &mut needed);
+//RS             }
+//RS         }
+//RS     }
+//RS     for ty in types {
+//RS         for derive in &ty.derives {
+//RS             if known.insert(*derive) {
+//RS                 needed.push(MirTraitRef {
+//RS                     id: *derive,
+//RS                     name: format!("derive#{}", derive.0),
+//RS                 });
+//RS             }
+//RS         }
+//RS         for generic in &ty.generic_params {
+//RS             for bound in &generic.bounds {
+//RS                 take(bound, &mut known, &mut needed);
+//RS             }
+//RS         }
+//RS     }
+//RS     if needed.is_empty() {
+//RS         return;
+//RS     }
+//RS     let module = traits
+//RS         .first()
+//RS         .map(|row| row.module)
+//RS         .or_else(|| impls.first().map(|row| row.module))
+//RS         .or_else(|| functions.first().map(|row| row.module_id))
+//RS         .unwrap_or_else(|| jet_foundation::MIR::MirModuleId(stable_id("mir-module", "compiler")));
+//RS     for trait_ref in needed {
+//RS         traits.push(MirTraitDef {
+//RS             id: trait_ref.id,
+//RS             module,
+//RS             key: trait_ref.name.clone(),
+//RS             name: trait_ref.name.clone(),
+//RS             span: Span::new(0, 0),
+//RS             visibility: MirVisibility::Public,
+//RS             associated_types: synthesized_trait_associated_types(&trait_ref.name),
+//RS             methods: Vec::new(),
+//RS         });
+//RS     }
+//RS     traits.sort_unstable_by_key(|row| row.id);
+//RS }
+//RS 
+//RS fn tfunc_method_owner(function: &TFunc) -> Option<(&Type, Option<&str>)> {
+//RS     match &function.kind {
+//RS         TFuncKind::Method { owner_type, .. } => Some((owner_type, None)),
+//RS         TFuncKind::TraitMethod {
+//RS             owner_type,
+//RS             trait_name,
+//RS             ..
+//RS         } => Some((owner_type, Some(trait_name.as_str()))),
+//RS         TFuncKind::TopLevel => None,
+//RS     }
+//RS }
+//RS 
+//RS fn nominal_owner_name(ty: &Type) -> String {
+//RS     match ty {
+//RS         Type::Named(name) | Type::Apply { name, .. } => name.clone(),
+//RS         _ => ty.name(),
+//RS     }
+//RS }
+//RS 
+//RS fn method_base_leaf(name: &str) -> &str {
+//RS     let leaf = method_leaf(name);
+//RS     let leaf = leaf.split("__generic__").next().unwrap_or(leaf);
+//RS     leaf.split('<').next().unwrap_or(leaf)
+//RS }
+//RS 
+//RS fn impl_method_matches(
+//RS     function: &TFunc,
+//RS     row: &super::tir_to_mir_types::TirImplDef,
+//RS     method_key: &str,
+//RS ) -> bool {
+//RS     let Some((owner, function_trait)) = tfunc_method_owner(function) else {
+//RS         return false;
+//RS     };
+//RS     if function.module != row.module
+//RS         || method_base_leaf(method_key) != method_base_leaf(&function.name)
+//RS     {
+//RS         return false;
+//RS     }
+//RS     let row_trait = row.trait_ref.as_ref().or(row.trait_name.as_ref());
+//RS     if function_trait != row_trait.map(String::as_str) {
+//RS         return false;
+//RS     }
+//RS     let expected_owner = canonical_target_type(&row.module, &nominal_owner_name(&row.self_type));
+//RS     let actual_owner = canonical_target_type(&function.module, &nominal_owner_name(owner));
+//RS     if expected_owner != actual_owner {
+//RS         return false;
+//RS     }
+//RS     if let Some(expected_rhs) = &row.operator_rhs {
+//RS         let Some(actual_rhs) = function_operator_rhs(function) else {
+//RS             return false;
+//RS         };
+//RS         if canonical_target_type(&row.module, &expected_rhs.name())
+//RS             != canonical_target_type(&function.module, actual_rhs)
+//RS         {
+//RS             return false;
+//RS         }
+//RS     }
+//RS     true
+//RS }
+//RS 
+//RS fn lower_impl_rows(
+//RS     rows: &[super::tir_to_mir_types::TirImplDef],
+//RS     functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS     types: &[MirTypeDef],
+//RS ) -> Result<Vec<MirImplDef>, LowerError> {
+//RS     let mut result = Vec::new();
+//RS     for row in rows {
+//RS         let declared_self_type =
+//RS             module_relative_type_instance(types, &row.self_type, &row.module, row.span)?;
+//RS         let trait_name = row.trait_ref.as_ref().or(row.trait_name.as_ref());
+//RS         let mut method_groups: Vec<(MirType, Vec<MirFunctionId>)> = Vec::new();
+//RS         for method_key in &row.methods {
+//RS             let mut candidates = Vec::new();
+//RS             if let Some(id) = resolve_function_key(method_key, &row.module, registry) {
+//RS                 if let Some(function) = functions
+//RS                     .iter()
+//RS                     .find(|function| registry.id_for(function).ok() == Some(id))
+//RS                 {
+//RS                     candidates.push((id, function));
+//RS                 }
+//RS             }
+//RS             for function in functions
+//RS                 .iter()
+//RS                 .filter(|function| impl_method_matches(function, row, method_key))
+//RS             {
+//RS                 let id = registry.id_for(function)?;
+//RS                 if !candidates.iter().any(|(candidate, _)| *candidate == id) {
+//RS                     candidates.push((id, function));
+//RS                 }
+//RS             }
+//RS             for (id, function) in candidates {
+//RS                 let Some((owner, _)) = tfunc_method_owner(function) else {
+//RS                     continue;
+//RS                 };
+//RS                 let owner = module_relative_type_instance(types, owner, &row.module, row.span)?;
+//RS                 if let Some((_group_owner, group_methods)) = method_groups
+//RS                     .iter_mut()
+//RS                     .find(|(group_owner, _)| same_impl_owner(group_owner, &owner))
+//RS                 {
+//RS                     if !group_methods.contains(&id) {
+//RS                         group_methods.push(id);
+//RS                     }
+//RS                 } else {
+//RS                     method_groups.push((owner, vec![id]));
+//RS                 }
+//RS             }
+//RS         }
+//RS         if method_groups.is_empty() {
+//RS             method_groups.push((
+//RS                 declared_self_type,
+//RS                 row.methods
+//RS                     .iter()
+//RS                     .filter_map(|key| resolve_function_key(key, &row.module, registry))
+//RS                     .collect(),
+//RS             ));
+//RS         }
+//RS         // A source impl that lost every method to Core reachability is not an
+//RS         // executable implementation. Preserve genuinely empty impl rows (for
+//RS         // example, traits implemented entirely by defaults).
+//RS         if !row.methods.is_empty()
+//RS             && method_groups.iter().all(|(_, methods)| methods.is_empty())
+//RS         {
+//RS             continue;
+//RS         }
+//RS 
+//RS         for (self_type, methods) in method_groups {
+//RS             let key = canonical_impl_key(&row.module, &self_type, trait_name.map(String::as_str));
+//RS             result.push(MirImplDef {
+//RS                 id: MirImplId(stable_id("mir-impl", &key)),
+//RS                 module: jet_foundation::MIR::MirModuleId(stable_id("mir-module", &row.module)),
+//RS                 key,
+//RS                 span: row.span,
+//RS                 self_type,
+//RS                 // A literal capability impl is an inherent block of its hook.
+//RS                 trait_ref: trait_name
+//RS                     .filter(|name| !is_literal_capability_trait(name))
+//RS                     .map(|name| MirTraitRef {
+//RS                         id: MirTraitId(stable_id("mir-trait", name)),
+//RS                         name: name.clone(),
+//RS                     }),
+//RS                 associated_types: row
+//RS                     .associated_types
+//RS                     .iter()
+//RS                     .map(|associated| {
+//RS                         Ok(MirAssociatedTypeValue {
+//RS                             name: associated.name.clone(),
+//RS                             ty: module_relative_type_instance(
+//RS                                 types,
+//RS                                 &associated.ty,
+//RS                                 &row.module,
+//RS                                 associated.span,
+//RS                             )?,
+//RS                             span: associated.span,
+//RS                         })
+//RS                     })
+//RS                     .collect::<Result<Vec<_>, _>>()?,
+//RS                 methods,
+//RS                 delegation: row
+//RS                     .delegation_field
+//RS                     .as_deref()
+//RS                     .and_then(|name| resolve_field_id(types, name)),
+//RS                 compiler_generated: row.compiler_generated,
+//RS                 serde: row.serde.map(|serde| match serde {
+//RS                     super::tir_to_mir_types::TirSerdeCodec::Encode => MirSerdeCodec::Encode,
+//RS                     super::tir_to_mir_types::TirSerdeCodec::Decode => MirSerdeCodec::Decode,
+//RS                 }),
+//RS                 operator_rhs: row
+//RS                     .operator_rhs
+//RS                     .as_ref()
+//RS                     .map(|ty| module_relative_type_instance(types, ty, &row.module, row.span))
+//RS                     .transpose()?,
+//RS                 operator_marker: row.operator_marker.clone(),
+//RS                 target_os: row.target_os.clone(),
+//RS                 target_applicability: MirTargetApplicability {
+//RS                     rust_aot: true,
+//RS                     cranelift: true,
+//RS                     interpreter: true,
+//RS                     web: true,
+//RS                 },
+//RS             });
+//RS         }
+//RS     }
+//RS     // Separate inherent impl blocks share one canonical MIR identity. Merge their
+//RS     // checked method edges before validation rather than emitting duplicate IDs.
+//RS     let mut impl_indices = HashMap::<String, usize>::new();
+//RS     let mut deduplicated: Vec<MirImplDef> = Vec::with_capacity(result.len());
+//RS     for mut row in result {
+//RS         if let Some(index) = impl_indices.get(&row.key).copied() {
+//RS             let existing = &mut deduplicated[index];
+//RS             for method in row.methods.drain(..) {
+//RS                 if !existing.methods.contains(&method) {
+//RS                     existing.methods.push(method);
+//RS                 }
+//RS             }
+//RS         } else {
+//RS             let index = deduplicated.len();
+//RS             impl_indices.insert(row.key.clone(), index);
+//RS             deduplicated.push(row);
+//RS         }
+//RS     }
+//RS     let mut result = deduplicated;
+//RS 
+//RS     // Keep only checked method references; a method that did not enter the
+//RS     // executable TIR cannot be represented as a valid MIR edge. The checked
+//RS     // function ids are collected once (not rescanned per impl method).
+//RS     let checked_ids: HashSet<MirFunctionId> = functions
+//RS         .iter()
+//RS         .filter_map(|function| registry.id_for(function).ok())
+//RS         .collect();
+//RS     result.retain(|row| row.methods.iter().all(|id| checked_ids.contains(id)));
+//RS     result.sort_unstable_by_key(|row| row.id);
+//RS     Ok(result)
+//RS }
+//RS 
+//RS fn canonical_impl_key(module: &str, owner: &MirType, trait_name: Option<&str>) -> String {
+//RS     let qualified_display = canonical_target_type(module, &owner.display_name());
+//RS     let owner_display = if module.is_empty() {
+//RS         qualified_display.clone()
+//RS     } else {
+//RS         qualified_display
+//RS             .strip_prefix(&format!("{module}::"))
+//RS             .unwrap_or(&qualified_display)
+//RS             .to_string()
+//RS     };
+//RS     // Keep historical keys for plain nominal/scalar owners. Structured
+//RS     // instances (in particular `Owner<Args>`) retain their canonical MIR kind
+//RS     // identity as part of the key, so distinct generic owners cannot allocate
+//RS     // one impl ID merely because their display spellings agree.
+//RS     let owner = if owner.canonical_key() == qualified_display {
+//RS         owner_display
+//RS     } else {
+//RS         format!("{owner_display}__instance__{}", owner.canonical_key())
+//RS     };
+//RS     match trait_name {
+//RS         Some(trait_name) if !module.is_empty() => format!("{module}::{owner}::{trait_name}"),
+//RS         Some(trait_name) => format!("{owner}::{trait_name}"),
+//RS         None if !module.is_empty() => format!("{module}::{owner}"),
+//RS         None => owner,
+//RS     }
+//RS }
+//RS 
+//RS fn same_impl_owner(row: &MirType, owner: &MirType) -> bool {
+//RS     row.same_checked_type(owner)
+//RS }
+//RS 
+//RS fn find_impl_index(
+//RS     impls: &[MirImplDef],
+//RS     owner: &MirType,
+//RS     trait_ref: Option<&MirTraitRef>,
+//RS     module: jet_foundation::MIR::MirModuleId,
+//RS ) -> Option<usize> {
+//RS     impls.iter().enumerate().find_map(|(index, row)| {
+//RS         let trait_ok = match (row.trait_ref.as_ref(), trait_ref) {
+//RS             (None, None) => true,
+//RS             (Some(existing), Some(wanted)) => {
+//RS                 existing.id == wanted.id && existing.name == wanted.name
+//RS             }
+//RS             _ => false,
+//RS         };
+//RS         (row.module == module && trait_ok && same_impl_owner(&row.self_type, owner))
+//RS             .then_some(index)
+//RS     })
+//RS }
+//RS 
+//RS /// Inherent methods live on the type def, and nested derive methods are TFuncs,
+//RS /// but AOT only emits `MirFunctionForm::Method` / `TraitMethod` from an impl
+//RS /// row. Attach any function the declaration snapshot failed to name.
+//RS fn attach_orphan_methods(impls: &mut Vec<MirImplDef>, functions: &[MirFunction]) {
+//RS     let mut owned: HashSet<MirFunctionId> = impls
+//RS         .iter()
+//RS         .flat_map(|row| row.methods.iter().copied())
+//RS         .collect();
+//RS     for function in functions {
+//RS         if !owned.insert(function.id) {
+//RS             continue;
+//RS         }
+//RS         let (owner, trait_ref) = match &function.form {
+//RS             MirFunctionForm::TopLevel => continue,
+//RS             MirFunctionForm::Method { owner, .. } => (owner, None),
+//RS             MirFunctionForm::TraitMethod {
+//RS                 owner,
+//RS                 trait_ref,
+//RS                 serde: Some(_),
+//RS                 ..
+//RS             } => {
+//RS                 let _ = (owner, trait_ref);
+//RS                 continue;
+//RS             }
+//RS             MirFunctionForm::TraitMethod {
+//RS                 owner, trait_ref, ..
+//RS             } => (owner, Some(trait_ref)),
+//RS         };
+//RS         if let Some(index) = find_impl_index(impls, owner, trait_ref, function.module_id) {
+//RS             impls[index].methods.push(function.id);
+//RS             continue;
+//RS         }
+//RS         let key = canonical_impl_key(
+//RS             &function.module,
+//RS             owner,
+//RS             trait_ref.map(|trait_ref| trait_ref.name.as_str()),
+//RS         );
+//RS         impls.push(MirImplDef {
+//RS             id: MirImplId(stable_id("mir-impl", &key)),
+//RS             module: function.module_id,
+//RS             key,
+//RS             span: function.span,
+//RS             self_type: owner.clone(),
+//RS             trait_ref: trait_ref.cloned(),
+//RS             associated_types: Vec::new(),
+//RS             methods: vec![function.id],
+//RS             delegation: None,
+//RS             compiler_generated: false,
+//RS             serde: None,
+//RS             operator_rhs: None,
+//RS             operator_marker: None,
+//RS             target_os: None,
+//RS             target_applicability: MirTargetApplicability {
+//RS                 rust_aot: true,
+//RS                 cranelift: true,
+//RS                 interpreter: true,
+//RS                 web: true,
+//RS             },
+//RS         });
+//RS     }
+//RS     impls.sort_unstable_by_key(|row| row.id);
+//RS }
+//RS 
+//RS fn resolve_field_id(types: &[MirTypeDef], name: &str) -> Option<MirFieldId> {
+//RS     types.iter().find_map(|ty| match &ty.kind {
+//RS         MirTypeDefKind::Struct { fields, .. } => fields
+//RS             .iter()
+//RS             .find(|field| field.name == name)
+//RS             .map(|field| field.id),
+//RS         MirTypeDefKind::Enum { variants, .. } => {
+//RS             variants.iter().find_map(|variant| match &variant.payload {
+//RS                 MirVariantPayload::Named(fields) => fields
+//RS                     .iter()
+//RS                     .find(|field| field.name == name)
+//RS                     .map(|field| field.id),
+//RS                 _ => None,
+//RS             })
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn lower_decl_visibility(visibility: super::tir_to_mir_types::TirVisibility) -> MirVisibility {
+//RS     match visibility {
+//RS         super::tir_to_mir_types::TirVisibility::Private => MirVisibility::Private,
+//RS         super::tir_to_mir_types::TirVisibility::Package => MirVisibility::Package,
+//RS         super::tir_to_mir_types::TirVisibility::Public => MirVisibility::Public,
+//RS     }
+//RS }
+//RS 
+//RS /// Every module constant a function body may read through a `Global`: runtime
+//RS /// constants and storage, and (D-PREP-SURFACE2=A) prepared constants whose
+//RS /// build-time value is folded. A plain ALL_CAPS read lowers to the same
+//RS /// `Global` either way, so every tier must find the value here.
+//RS fn is_runtime_constant(row: &super::tir_to_mir_types::TirConstantDef) -> bool {
+//RS     !(row.is_comptime && matches!(row.value, CtValue::Unit))
+//RS         && !matches!(
+//RS             &row.ty,
+//RS             Type::Named(name)
+//RS                 if name == crate::Syntax::TYPE_OUTPUT
+//RS                     || name == crate::Syntax::TYPE_OUTPUT_DEFAULTS
+//RS         )
+//RS }
+//RS 
+//RS fn lower_constant_rows(rows: &[super::tir_to_mir_types::TirConstantDef]) -> Vec<MirConstantDef> {
+//RS     let mut result = rows
+//RS         .iter()
+//RS         .filter(|row| is_runtime_constant(row))
+//RS         .filter_map(|row| {
+//RS             Some(MirConstantDef {
+//RS                 id: jet_foundation::MIR::MirConstantId(stable_id("mir-constant", &row.key)),
+//RS                 module: jet_foundation::MIR::MirModuleId(stable_id("mir-module", &row.module)),
+//RS                 key: row.key.clone(),
+//RS                 name: row.name.clone(),
+//RS                 span: row.span,
+//RS                 visibility: lower_decl_visibility(row.visibility),
+//RS                 ty: lower_type(&row.ty),
+//RS                 is_storage: row.is_storage,
+//RS                 value: lower_constant_value(&row.value)?,
+//RS             })
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     result.sort_unstable_by_key(|row| row.id);
+//RS     result
+//RS }
+//RS 
+//RS /// The most scalar leaves a constant may hold and still be copied into each
+//RS /// use site; larger values stay one shared item.
+//RS const INLINE_CONSTANT_LEAVES: usize = 8;
+//RS /// The longest text a copied constant may carry per leaf.
+//RS const INLINE_CONSTANT_TEXT_BYTES: usize = 256;
+//RS 
+//RS /// Card #4258 (D-CONSTMARK1): a read of an immutable module constant whose
+//RS /// folded value is a scalar, text, or a small record or enum case of those
+//RS /// becomes a MIR `Constant` at the use site, so the optimizer can fold it and
+//RS /// no backend calls an accessor. `#Static` keeps the `Global` read of the
+//RS /// one addressable item; `#Inline` copies any value.
+//RS /// Tables stay one shared item; the emitter caches a large one.
+//RS fn inline_known_constant_reads(
+//RS     functions: &mut [MirFunction],
+//RS     rows: &[super::tir_to_mir_types::TirConstantDef],
+//RS     constants: &[MirConstantDef],
+//RS ) {
+//RS     let rows = rows
+//RS         .iter()
+//RS         .map(|row| (row.key.as_str(), row))
+//RS         .collect::<HashMap<_, _>>();
+//RS     let values = constants
+//RS         .iter()
+//RS         .filter(|constant| !constant.is_storage)
+//RS         .filter_map(|constant| {
+//RS             let row = rows.get(constant.key.as_str())?;
+//RS             let copied = !row.addressable
+//RS                 && (row.force_inline || inline_constant_fits(&constant.value, &mut 0));
+//RS             copied.then_some((constant.key.as_str(), &constant.value))
+//RS         })
+//RS         .collect::<HashMap<_, _>>();
+//RS     if values.is_empty() {
+//RS         return;
+//RS     }
+//RS     for function in functions {
+//RS         for block in &mut function.blocks {
+//RS             for instruction in &mut block.instructions {
+//RS                 let MirOperation::Global { name } = &instruction.operation else {
+//RS                     continue;
+//RS                 };
+//RS                 if let Some(value) = values.get(name.as_str()) {
+//RS                     // A sized-integer read keeps its width, as a literal does.
+//RS                     let mut constant = (*value).clone();
+//RS                     if let MirConstant::Int { width: width @ None, .. } = &mut constant {
+//RS                         *width = instruction.ty.as_ref().and_then(MirType::fixed_int);
+//RS                     }
+//RS                     instruction.operation = MirOperation::Constant(constant);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn inline_constant_fits(value: &MirConstant, leaves: &mut usize) -> bool {
+//RS     match value {
+//RS         MirConstant::Int { .. }
+//RS         | MirConstant::Float { .. }
+//RS         | MirConstant::Bool(_)
+//RS         | MirConstant::Char(_)
+//RS         | MirConstant::Unit
+//RS         | MirConstant::BigInt(_) => {}
+//RS         MirConstant::String(text) if text.len() <= INLINE_CONSTANT_TEXT_BYTES => {}
+//RS         MirConstant::Struct { fields, .. } => {
+//RS             return fields
+//RS                 .iter()
+//RS                 .all(|(_, field)| inline_constant_fits(field, leaves));
+//RS         }
+//RS         MirConstant::Enum { args, .. } => {
+//RS             return args.iter().all(|(_, arg)| inline_constant_fits(arg, leaves));
+//RS         }
+//RS         MirConstant::Present(inner) => return inline_constant_fits(inner, leaves),
+//RS         _ => return false,
+//RS     }
+//RS     *leaves += 1;
+//RS     *leaves <= INLINE_CONSTANT_LEAVES
+//RS }
+//RS 
+//RS fn lower_constant_value(value: &CtValue) -> Option<MirConstant> {
+//RS     Some(match value {
+//RS         CtValue::Int(value) => MirConstant::Int {
+//RS             value: *value,
+//RS             width: None,
+//RS             spelling: None,
+//RS         },
+//RS         CtValue::Float(value) => MirConstant::Float {
+//RS             value: value.as_f64(),
+//RS             f32: matches!(value, jet_foundation::AST::CtFloat::F32(_)),
+//RS             spelling: None,
+//RS         },
+//RS         CtValue::Bool(value) => MirConstant::Bool(*value),
+//RS         CtValue::Char(value) => MirConstant::Char(*value),
+//RS         CtValue::Str(value) => MirConstant::String(value.clone()),
+//RS         CtValue::BigInt(value) => MirConstant::BigInt(value.to_string_rep()),
+//RS         CtValue::Bytes(value) => MirConstant::Bytes(value.clone()),
+//RS         CtValue::List(values) => MirConstant::List(
+//RS             values
+//RS                 .iter()
+//RS                 .map(lower_constant_value)
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS         ),
+//RS         CtValue::Map(values) => MirConstant::Map(
+//RS             values
+//RS                 .iter()
+//RS                 .map(|(key, value)| Some((lower_const_key(key)?, lower_constant_value(value)?)))
+//RS                 .collect::<Option<BTreeMap<_, _>>>()?,
+//RS         ),
+//RS         CtValue::Struct { type_name, fields } => MirConstant::Struct {
+//RS             type_name: type_name.clone(),
+//RS             fields: fields
+//RS                 .iter()
+//RS                 .map(|(name, value)| Some((name.clone(), lower_constant_value(value)?)))
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS         },
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } => MirConstant::Enum {
+//RS             type_name: type_name.clone(),
+//RS             variant: variant.clone(),
+//RS             args: args
+//RS                 .iter()
+//RS                 .map(|(name, value)| Some((name.clone(), lower_constant_value(value)?)))
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS         },
+//RS         CtValue::Present(value) => MirConstant::Present(Box::new(lower_constant_value(value)?)),
+//RS         CtValue::Failed(report) => MirConstant::Failed(match report {
+//RS             CtReport::Clean(ty) => jet_foundation::MIR::MirConstReport::Clean(lower_type(ty)),
+//RS             CtReport::Told(value) => {
+//RS                 jet_foundation::MIR::MirConstReport::Told(Box::new(lower_constant_value(value)?))
+//RS             }
+//RS         }),
+//RS         CtValue::Unit => MirConstant::Unit,
+//RS         CtValue::Closure(_) => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn lower_const_key(key: &CtKey) -> Option<jet_foundation::MIR::MirConstKey> {
+//RS     Some(match key {
+//RS         CtKey::Int(value) => jet_foundation::MIR::MirConstKey::Int(*value),
+//RS         CtKey::Str(value) => jet_foundation::MIR::MirConstKey::String(value.clone()),
+//RS         CtKey::Bool(value) => jet_foundation::MIR::MirConstKey::Bool(*value),
+//RS         CtKey::Char(value) => jet_foundation::MIR::MirConstKey::Char(*value),
+//RS         CtKey::Tuple(fields) => jet_foundation::MIR::MirConstKey::Tuple(
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(name, key)| Some((name.clone(), lower_const_key(key)?)))
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS         ),
+//RS         CtKey::Struct { type_name, fields } => jet_foundation::MIR::MirConstKey::Struct {
+//RS             type_name: type_name.clone(),
+//RS             fields: fields
+//RS                 .iter()
+//RS                 .map(|(name, key)| Some((name.clone(), lower_const_key(key)?)))
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS         },
+//RS         CtKey::Enum { type_name, variant } => jet_foundation::MIR::MirConstKey::Enum {
+//RS             type_name: type_name.clone(),
+//RS             variant: variant.clone(),
+//RS         },
+//RS     })
+//RS }
+//RS fn lower_job_rows(
+//RS     rows: &[TirJobFact],
+//RS     functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS     lowered: &[MirFunction],
+//RS ) -> Vec<MirJob> {
+//RS     let mut result = rows
+//RS         .iter()
+//RS         .filter_map(|row| {
+//RS             let function = row
+//RS                 .function
+//RS                 .as_ref()
+//RS                 .and_then(|reference| resolve_function_ref(reference, functions, registry))?;
+//RS             Some(MirJob {
+//RS                 id: jet_foundation::MIR::MirJobId(stable_id("mir-job", &row.key)),
+//RS                 function,
+//RS                 name: row.name.clone(),
+//RS                 doc: row.doc.clone(),
+//RS                 after: row.after.clone(),
+//RS                 parallel: row.parallel,
+//RS                 scope: match row.scope {
+//RS                     crate::AST::JobScope::Dev => MirJobScope::Dev,
+//RS                     crate::AST::JobScope::Ship => MirJobScope::Ship,
+//RS                     crate::AST::JobScope::Internal => MirJobScope::Internal,
+//RS                 },
+//RS                 schedule: row.schedule.map(|schedule| match schedule {
+//RS                     crate::AST::EverySchedule::Duration { nanos } => {
+//RS                         MirJobSchedule::Duration { nanos }
+//RS                     }
+//RS                     crate::AST::EverySchedule::WallClockTime { hour, minute } => {
+//RS                         MirJobSchedule::WallClockTime { hour, minute }
+//RS                     }
+//RS                 }),
+//RS                 inputs: match &row.record_inputs {
+//RS                     // One `#CLI` record parameter: its fields are the inputs,
+//RS                     // lowered exactly like a record entry's.
+//RS                     Some(record) => record
+//RS                         .iter()
+//RS                         .enumerate()
+//RS                         .map(|(ordinal, input)| lower_cli_input(input, ordinal, None))
+//RS                         .collect(),
+//RS                     None => {
+//RS                         // Each input binds one checked job parameter and carries
+//RS                         // that parameter's canonical MIR type.
+//RS                         let params = lowered
+//RS                             .iter()
+//RS                             .find(|candidate| candidate.id == function)
+//RS                             .map(|candidate| candidate.params.as_slice())
+//RS                             .unwrap_or(&[]);
+//RS                         row.arguments
+//RS                             .iter()
+//RS                             .enumerate()
+//RS                             .map(|(index, argument)| {
+//RS                                 lower_job_argument(
+//RS                                     argument,
+//RS                                     index,
+//RS                                     params.get(index).map(|param| param.ty.clone()),
+//RS                                 )
+//RS                             })
+//RS                             .collect()
+//RS                     }
+//RS                 },
+//RS                 dispatch: if row.schedule.is_some() {
+//RS                     MirJobDispatch::Scheduled
+//RS                 } else {
+//RS                     MirJobDispatch::Direct
+//RS                 },
+//RS                 packages: row.packages.clone(),
+//RS                 working_directory: row.working_directory.clone(),
+//RS                 input_paths: row.input_paths.clone(),
+//RS                 output_paths: row.output_paths.clone(),
+//RS                 skip: row.skip.as_ref().map(|skip| match skip {
+//RS                     crate::AST::JobSkip::Always(reason) => MirJobSkip::Always(reason.clone()),
+//RS                     crate::AST::JobSkip::UnlessPlatform { platform } => {
+//RS                         MirJobSkip::UnlessPlatform(platform.clone())
+//RS                     }
+//RS                 }),
+//RS                 cache: match row.cache {
+//RS                     crate::AST::JobCachePolicy::Uncached => MirJobCachePolicy::Uncached,
+//RS                     crate::AST::JobCachePolicy::Local => MirJobCachePolicy::Local,
+//RS                     crate::AST::JobCachePolicy::Shared => MirJobCachePolicy::Shared,
+//RS                 },
+//RS                 limits: row.limits.clone(),
+//RS             })
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     result.sort_unstable_by_key(|row| row.id);
+//RS     result
+//RS }
+//RS 
+//RS /// The command-line value kind of a checked job parameter type.
+//RS fn job_value_kind(ty: &Type) -> MirCliValueKind {
+//RS     match ty {
+//RS         Type::Option(inner) => job_value_kind(inner),
+//RS         Type::Bool => MirCliValueKind::Bool,
+//RS         Type::Int | Type::IntN { .. } => MirCliValueKind::Int,
+//RS         Type::Float | Type::Float32 => MirCliValueKind::Float,
+//RS         Type::Named(name) if name == crate::Syntax::TYPE_PATH => MirCliValueKind::Path,
+//RS         _ => MirCliValueKind::String,
+//RS     }
+//RS }
+//RS 
+//RS /// One scalar job parameter as a command input. The shape follows the `#CLI`
+//RS /// record field rules (`CLISchema::command_schema_with_items`): `Bool` is a
+//RS /// flag, `?T` is optional, a default makes a non-optional value with that
+//RS /// default, and a required value fills positionally.
+//RS fn lower_job_argument(
+//RS     argument: &TirJobArgument,
+//RS     index: usize,
+//RS     lowered_ty: Option<jet_foundation::MIR::MirType>,
+//RS ) -> MirCliInput {
+//RS     let flag = matches!(argument.param_ty, Type::Bool) && !argument.variadic;
+//RS     let optional = matches!(argument.param_ty, Type::Option(_));
+//RS     let default = argument
+//RS         .default
+//RS         .as_ref()
+//RS         .filter(|_| !optional)
+//RS         .map(|value| MirCliDefault::Value(MirConstant::String(value.clone())));
+//RS     MirCliInput {
+//RS         parameter: index,
+//RS         name: argument.name.clone(),
+//RS         label: argument.label.clone(),
+//RS         ty: lowered_ty.unwrap_or_else(|| lower_type(&argument.param_ty)),
+//RS         zone: lower_param_zone(argument.zone),
+//RS         short: None,
+//RS         env: None,
+//RS         // Same flag, help, and metavar text a `#CLI` record field gets, so a
+//RS         // job's inputs pass the one CLI legality rule and render identically.
+//RS         help: format!("value for --{}", argument.name),
+//RS         metavar: (!flag).then(|| argument.name.replace('-', "_").to_uppercase()),
+//RS         shape: if flag {
+//RS             MirCliInputShape::Flag
+//RS         } else {
+//RS             MirCliInputShape::Value {
+//RS                 kind: job_value_kind(&argument.param_ty),
+//RS                 optional,
+//RS                 default,
+//RS             }
+//RS         },
+//RS         positional: (argument.required || argument.variadic).then_some(index as u16),
+//RS         variadic: argument.variadic,
+//RS         flag: argument.name.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn lower_test_rows(
+//RS     rows: &[TirTestFact],
+//RS     functions: &[TFunc],
+//RS     checked_functions: &[MirFunction],
+//RS     registry: &FunctionRegistry,
+//RS ) -> Result<Vec<MirTestCase>, LowerError> {
+//RS     let mut result = Vec::new();
+//RS     for row in rows {
+//RS         let Some(function) = resolve_function_ref(&row.function, functions, registry) else {
+//RS             continue;
+//RS         };
+//RS         let checked = checked_functions.iter().find(|candidate| candidate.id == function)
+//RS             .ok_or_else(|| LowerError::new(row.span, "test target has no checked MIR signature"))?;
+//RS         let mut parameters = Vec::with_capacity(row.parameters.len());
+//RS         for parameter in &row.parameters {
+//RS             let checked_parameter = checked.params.iter()
+//RS                 .find(|candidate| candidate.index == parameter.index)
+//RS                 .ok_or_else(|| LowerError::new(parameter.span, "test parameter has no checked MIR signature slot"))?;
+//RS             parameters.push(MirParam {
+//RS                 index: checked_parameter.index,
+//RS                 name: parameter.name.clone(),
+//RS                 span: parameter.span,
+//RS                 ty: checked_parameter.ty.clone(),
+//RS                 access: checked_parameter.access,
+//RS                 ownership: checked_parameter.ownership,
+//RS                 public_label: parameter.label.clone(),
+//RS                 variadic: checked_parameter.variadic,
+//RS                 default_present: checked_parameter.default_present,
+//RS             });
+//RS         }
+//RS         result.push(MirTestCase {
+//RS             id: jet_foundation::MIR::MirTestId(stable_id("mir-test", &row.key)),
+//RS             function,
+//RS             name: row.name.clone(),
+//RS             span: row.span,
+//RS             kind: match row.kind {
+//RS                 TirTestKind::Unit => MirTestKind::Unit,
+//RS                 TirTestKind::Property => MirTestKind::Property,
+//RS             },
+//RS             parameters,
+//RS             faults: row.faults.clone(),
+//RS             expected_failure: row.expected_failure,
+//RS             contract_generated: row.contract_generated,
+//RS             eligibility: row.eligibility.as_ref()
+//RS                 .and_then(|reference| resolve_function_ref(reference, functions, registry)),
+//RS             generation_unavailable_reason: row.generation_unavailable_reason.clone(),
+//RS         });
+//RS     }
+//RS     result.sort_unstable_by_key(|row| row.id);
+//RS     Ok(result)
+//RS }
+//RS 
+//RS fn function_block_id(
+//RS     reference: &TirFunctionRef,
+//RS     block: Option<&str>,
+//RS     functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS ) -> Option<(MirFunctionId, MirBlockId)> {
+//RS     let function = functions.iter().find(|function| {
+//RS         function.source_span == reference.span
+//RS             && (function.key == reference.key
+//RS                 || (function.module == reference.module && function.name == reference.name))
+//RS     })?;
+//RS     let function_id = registry.id_for(function).ok()?;
+//RS     let role = block.unwrap_or("entry");
+//RS     let identity = construct_identity(function, "block", reference.span, role, "");
+//RS     Some((function_id, MirBlockId(stable_id("mir-block", &identity))))
+//RS }
+//RS 
+//RS fn lower_harness_rows(
+//RS     rows: &[TirHarnessPlan],
+//RS     test_rows: &[TirTestFact],
+//RS     tests: &[MirTestCase],
+//RS     functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS ) -> Vec<MirHarnessPlan> {
+//RS     let test_ids = test_rows
+//RS         .iter()
+//RS         .filter(|row| {
+//RS             let id = MirTestId(stable_id("mir-test", &row.key));
+//RS             tests.iter().any(|test| test.id == id)
+//RS         })
+//RS         .map(|row| (row.key.clone(), MirTestId(stable_id("mir-test", &row.key))))
+//RS         .collect::<HashMap<_, _>>();
+//RS     let mut result = rows
+//RS         .iter()
+//RS         .map(|row| {
+//RS             let output_checks = row
+//RS                 .output_checks
+//RS                 .iter()
+//RS                 .filter_map(|check| {
+//RS                     let function = resolve_function_ref(&check.function, functions, registry)?;
+//RS                     Some(MirOutputCheck {
+//RS                         id: jet_foundation::MIR::MirOutputCheckId(stable_id(
+//RS                             "mir-output-check",
+//RS                             &check.key,
+//RS                         )),
+//RS                         name: check.name.clone(),
+//RS                         function,
+//RS                     })
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             let coverage_points = row
+//RS                 .coverage_points
+//RS                 .iter()
+//RS                 .filter_map(|point| {
+//RS                     let (function, block) = function_block_id(
+//RS                         &point.function,
+//RS                         point.block.as_deref(),
+//RS                         functions,
+//RS                         registry,
+//RS                     )?;
+//RS                     Some(MirCoveragePoint {
+//RS                         id: jet_foundation::MIR::MirCoveragePointId(stable_id(
+//RS                             "mir-coverage",
+//RS                             &point.key,
+//RS                         )),
+//RS                         function,
+//RS                         block,
+//RS                         span: point.span,
+//RS                     })
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             MirHarnessPlan {
+//RS                 id: jet_foundation::MIR::MirHarnessId(stable_id("mir-harness", &row.key)),
+//RS                 kind: match row.kind {
+//RS                     TirHarnessKind::Test => MirHarnessKind::Test,
+//RS                     TirHarnessKind::Fuzz => MirHarnessKind::Fuzz,
+//RS                     TirHarnessKind::Coverage => MirHarnessKind::Coverage,
+//RS                 },
+//RS                 tests: row
+//RS                     .tests
+//RS                     .iter()
+//RS                     .filter_map(|key| test_ids.get(key).copied())
+//RS                     .collect(),
+//RS                 output_checks,
+//RS                 selected_test: row
+//RS                     .selected_test
+//RS                     .as_ref()
+//RS                     .and_then(|key| test_ids.get(key).copied()),
+//RS                 coverage_points,
+//RS                 command_override: row.command_override,
+//RS             }
+//RS         })
+//RS         .filter(|row| {
+//RS             !row.tests.is_empty()
+//RS                 || !row.output_checks.is_empty()
+//RS                 || !row.coverage_points.is_empty()
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     result.sort_unstable_by_key(|row| row.id);
+//RS     result
+//RS }
+//RS 
+//RS fn cli_value_kind(kind: crate::CLISchema::CLIValueKind) -> MirCliValueKind {
+//RS     match kind {
+//RS         crate::CLISchema::CLIValueKind::Bool => MirCliValueKind::Bool,
+//RS         crate::CLISchema::CLIValueKind::Int => MirCliValueKind::Int,
+//RS         crate::CLISchema::CLIValueKind::Float => MirCliValueKind::Float,
+//RS         crate::CLISchema::CLIValueKind::String => MirCliValueKind::String,
+//RS         crate::CLISchema::CLIValueKind::Path => MirCliValueKind::Path,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_cli_default(default: &TirCliDefault) -> Option<MirCliDefault> {
+//RS     Some(match default {
+//RS         TirCliDefault::TypeDefault => MirCliDefault::TypeDefault,
+//RS         TirCliDefault::Value(value) => MirCliDefault::Value(lower_constant_value(value)?),
+//RS         // The checked CLI schema records this form as a rendered value. Keep
+//RS         // the value in MIR rather than dropping the default edge.
+//RS         TirCliDefault::Recorded(value) => MirCliDefault::Value(MirConstant::String(value.clone())),
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn lower_cli_input(
+//RS     input: &TirCliInput,
+//RS     ordinal: usize,
+//RS     parameter: Option<&TirParamFact>,
+//RS ) -> MirCliInput {
+//RS     let (kind, optional, mir_default) = match &input.shape {
+//RS         TirCliInputShape::Flag => (MirCliValueKind::Bool, false, None),
+//RS         TirCliInputShape::Value {
+//RS             kind,
+//RS             optional,
+//RS             default,
+//RS         } => (
+//RS             cli_value_kind(*kind),
+//RS             *optional,
+//RS             default.as_ref().and_then(lower_cli_default),
+//RS         ),
+//RS     };
+//RS     MirCliInput {
+//RS         parameter: parameter.map_or(ordinal, |param| param.index),
+//RS         name: input.field.clone(),
+//RS         label: parameter.map_or_else(|| input.field.clone(), |param| param.label.clone()),
+//RS         ty: parameter.map_or_else(
+//RS             || {
+//RS                 let scalar = match kind {
+//RS                     MirCliValueKind::Bool => Type::Bool,
+//RS                     MirCliValueKind::Int => Type::Int,
+//RS                     MirCliValueKind::Float => Type::Float,
+//RS                     MirCliValueKind::String | MirCliValueKind::Path => Type::String,
+//RS                 };
+//RS                 lower_type(&if input.variadic {
+//RS                     Type::List(Box::new(scalar))
+//RS                 } else if optional {
+//RS                     Type::Option(Box::new(scalar))
+//RS                 } else {
+//RS                     scalar
+//RS                 })
+//RS             },
+//RS             |param| lower_type(&param.ty),
+//RS         ),
+//RS         zone: parameter.map_or(jet_foundation::MIR::MirParamZone::Either, |param| {
+//RS             lower_param_zone(param.zone)
+//RS         }),
+//RS         short: input.short.clone(),
+//RS         env: input.env.clone(),
+//RS         help: input.help.clone(),
+//RS         metavar: input.metavar.clone(),
+//RS         shape: match &input.shape {
+//RS             TirCliInputShape::Flag => MirCliInputShape::Flag,
+//RS             TirCliInputShape::Value { .. } => MirCliInputShape::Value {
+//RS                 kind,
+//RS                 optional,
+//RS                 default: mir_default,
+//RS             },
+//RS         },
+//RS         positional: input.positional,
+//RS         variadic: input.variadic,
+//RS         flag: input.flag.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn cli_parameter<'a>(
+//RS     input: &TirCliInput,
+//RS     ordinal: usize,
+//RS     function: Option<&TirFunctionRef>,
+//RS     facts: &'a TirArtifactFacts,
+//RS ) -> Option<&'a TirParamFact> {
+//RS     let function = function?;
+//RS     let function = facts.functions.iter().find(|candidate| {
+//RS         candidate.reference.key == function.key && candidate.reference.span == function.span
+//RS     })?;
+//RS     function
+//RS         .params
+//RS         .iter()
+//RS         .find(|param| param.name == input.field || param.label == input.field)
+//RS         .or_else(|| function.params.get(ordinal))
+//RS }
+//RS 
+//RS fn lower_cli_entry(
+//RS     entry: &TirCliEntry,
+//RS     function: Option<&TirFunctionRef>,
+//RS     facts: &TirArtifactFacts,
+//RS     functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS ) -> MirCliEntry {
+//RS     let inputs = entry
+//RS         .inputs
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(ordinal, input)| {
+//RS             lower_cli_input(
+//RS                 input,
+//RS                 ordinal,
+//RS                 if entry.record_inputs {
+//RS                     None
+//RS                 } else {
+//RS                     cli_parameter(input, ordinal, function, facts)
+//RS                 },
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     let commands = entry
+//RS         .commands
+//RS         .iter()
+//RS         .filter_map(|command| {
+//RS             let function = command
+//RS                 .function
+//RS                 .as_ref()
+//RS                 .and_then(|reference| resolve_function_ref(reference, functions, registry))?;
+//RS             Some(MirCliCommand {
+//RS                 name: command.name.clone(),
+//RS                 description: command.description.clone(),
+//RS                 function,
+//RS                 receiver: command
+//RS                     .receiver
+//RS                     .as_ref()
+//RS                     .map(|receiver| MirTypeId(stable_id("mir-type", receiver))),
+//RS                 inputs: command
+//RS                     .inputs
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(ordinal, input)| {
+//RS                         lower_cli_input(
+//RS                             input,
+//RS                             ordinal,
+//RS                             cli_parameter(input, ordinal, command.function.as_ref(), facts),
+//RS                         )
+//RS                     })
+//RS                     .collect(),
+//RS             })
+//RS         })
+//RS         .collect();
+//RS     MirCliEntry {
+//RS         record_inputs: entry.record_inputs,
+//RS         description: entry.description.clone(),
+//RS         inputs,
+//RS         commands,
+//RS         standard: entry.standard,
+//RS         version: entry.version.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn lower_entry_spec(
+//RS     spec: &TirEntrySpec,
+//RS     facts: &TirArtifactFacts,
+//RS     functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS ) -> MirEntrySpec {
+//RS     MirEntrySpec {
+//RS         kind: match spec.kind {
+//RS             super::artifact_plan::TirArtifactEntryKind::Library => MirEntryKind::Library,
+//RS             super::artifact_plan::TirArtifactEntryKind::Command => MirEntryKind::Command,
+//RS             super::artifact_plan::TirArtifactEntryKind::App => MirEntryKind::App,
+//RS             super::artifact_plan::TirArtifactEntryKind::Service => MirEntryKind::Service,
+//RS             super::artifact_plan::TirArtifactEntryKind::Test => MirEntryKind::Test,
+//RS         },
+//RS         // Artifact entry references carry the canonical module-qualified
+//RS         // semantic key. Resolve that identity through the top-level index so
+//RS         // loader aliases and generated Rust spellings cannot select a method
+//RS         // or an unrelated same-named function.
+//RS         function: spec
+//RS             .function
+//RS             .as_ref()
+//RS             .and_then(|reference| registry.resolve_entry(&reference.key, reference.span).ok()),
+//RS         cli: spec.cli.as_ref().map(|entry| {
+//RS             lower_cli_entry(entry, spec.function.as_ref(), facts, functions, registry)
+//RS         }),
+//RS         output: match spec.output {
+//RS             TirEntryOutput::None => MirEntryOutput::None,
+//RS             TirEntryOutput::ReturnValue => MirEntryOutput::ReturnValue,
+//RS         },
+//RS         initialize_environment: spec.initialize_environment,
+//RS         initialize_gc: spec.initialize_gc,
+//RS         serves_until_stopped: spec.serves_until_stopped,
+//RS         package_version: spec.package_version.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn lower_artifact_rows(
+//RS     facts: &TirArtifactFacts,
+//RS     functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS ) -> Vec<MirArtifactPlan> {
+//RS     let mut result = facts
+//RS         .artifacts
+//RS         .iter()
+//RS         .map(|row| MirArtifactPlan {
+//RS             id: MirArtifactId(stable_id("mir-artifact", &row.key)),
+//RS             kind: row.kind,
+//RS             name: row.name.clone(),
+//RS             target: row.target,
+//RS             mode: facts.build_mode,
+//RS             modules: row
+//RS                 .modules
+//RS                 .iter()
+//RS                 .map(|key| jet_foundation::MIR::MirModuleId(stable_id("mir-module", key)))
+//RS                 .collect(),
+//RS             links: row
+//RS                 .links
+//RS                 .iter()
+//RS                 .map(|key| MirLinkUnitId(stable_id("mir-link", key)))
+//RS                 .collect(),
+//RS             jobs: row
+//RS                 .jobs
+//RS                 .iter()
+//RS                 .map(|key| MirJobId(stable_id("mir-job", key)))
+//RS                 .collect(),
+//RS             runtime_parts: {
+//RS                 let mut parts = crate::Codegen::runtime_parts_for_used_core(&row.runtime_parts);
+//RS                 for key in &row.runtime_parts {
+//RS                     if let Some(part) = parse_runtime_part(key) {
+//RS                         parts.insert(part);
+//RS                     }
+//RS                 }
+//RS                 parts
+//RS             },
+//RS             exports: row
+//RS                 .exports
+//RS                 .iter()
+//RS                 .filter_map(|export| {
+//RS                     Some(jet_foundation::MIR::MirExport {
+//RS                         symbol: export.symbol.clone(),
+//RS                         function: resolve_function_ref(&export.function, functions, registry)?,
+//RS                         abi: match export.abi {
+//RS                             super::artifact_plan::TirExportAbi::C => MirForeignAbi::C,
+//RS                         },
+//RS                     })
+//RS                 })
+//RS                 .collect(),
+//RS             provider_identity: row.provider_identity.clone(),
+//RS             closure_identity: row.closure_identity.clone(),
+//RS             artifact_identity: row.artifact_identity.clone(),
+//RS             entry: row
+//RS                 .entry
+//RS                 .as_ref()
+//RS                 .or(facts.entry.as_ref())
+//RS                 .map(|entry| lower_entry_spec(entry, facts, functions, registry)),
+//RS             harness: row
+//RS                 .harness
+//RS                 .as_deref()
+//RS                 .map(|key| jet_foundation::MIR::MirHarnessId(stable_id("mir-harness", key))),
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     result.sort_unstable_by_key(|row| row.id);
+//RS     result
+//RS }
+//RS 
+//RS fn lower_module_item(
+//RS     item: &TirItemRef,
+//RS     types: &[MirTypeDef],
+//RS     traits: &[MirTraitDef],
+//RS     impls: &[MirImplDef],
+//RS     constants: &[MirConstantDef],
+//RS     foreign: &[MirForeign],
+//RS     functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS     module: &str,
+//RS ) -> Option<jet_foundation::MIR::MirItemRef> {
+//RS     use jet_foundation::MIR::MirItemRef;
+//RS     match item {
+//RS         TirItemRef::Type(key) => types
+//RS             .iter()
+//RS             .find(|row| row.key == *key)
+//RS             .map(|row| MirItemRef::Type(row.id)),
+//RS         TirItemRef::Trait(key) => traits
+//RS             .iter()
+//RS             .find(|row| row.key == *key)
+//RS             .map(|row| MirItemRef::Trait(row.id)),
+//RS         TirItemRef::Function(key) => {
+//RS             resolve_function_key(key, module, registry).map(MirItemRef::Function)
+//RS         }
+//RS         TirItemRef::Constant(key) => constants
+//RS             .iter()
+//RS             .find(|row| row.key == *key)
+//RS             .map(|row| MirItemRef::Constant(row.id)),
+//RS         TirItemRef::Impl(key) => impls
+//RS             .iter()
+//RS             .find(|row| row.key == *key)
+//RS             .map(|row| MirItemRef::Impl(row.id)),
+//RS         TirItemRef::Foreign(key) => foreign
+//RS             .iter()
+//RS             .find(|row| row.key == *key)
+//RS             .map(|row| MirItemRef::Foreign(row.id)),
+//RS         TirItemRef::Unknown(key) => types
+//RS             .iter()
+//RS             .find(|row| row.key == *key)
+//RS             .map(|row| MirItemRef::Type(row.id))
+//RS             .or_else(|| {
+//RS                 traits
+//RS                     .iter()
+//RS                     .find(|row| row.key == *key)
+//RS                     .map(|row| MirItemRef::Trait(row.id))
+//RS             })
+//RS             .or_else(|| {
+//RS                 constants
+//RS                     .iter()
+//RS                     .find(|row| row.key == *key)
+//RS                     .map(|row| MirItemRef::Constant(row.id))
+//RS             })
+//RS             .or_else(|| {
+//RS                 impls
+//RS                     .iter()
+//RS                     .find(|row| row.key == *key)
+//RS                     .map(|row| MirItemRef::Impl(row.id))
+//RS             })
+//RS             .or_else(|| {
+//RS                 foreign
+//RS                     .iter()
+//RS                     .find(|row| row.key == *key)
+//RS                     .map(|row| MirItemRef::Foreign(row.id))
+//RS             })
+//RS             .or_else(|| resolve_function_key(key, module, registry).map(MirItemRef::Function))
+//RS             .or_else(|| {
+//RS                 functions
+//RS                     .iter()
+//RS                     .find(|function| function.key == *key)
+//RS                     .and_then(|function| registry.id_for(function).ok())
+//RS                     .map(MirItemRef::Function)
+//RS             }),
+//RS         TirItemRef::Module(_) => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Resolve the source-facing target of an unqualified import to the same
+//RS /// canonical key used by its `TirModuleFact` row.
+//RS ///
+//RS /// File-module imports carry only their checked alias when the import itself
+//RS /// is unqualified, while inline modules are represented as children of the
+//RS /// importing module. Prefer an exact canonical key, then the importing
+//RS /// module's child path, and finally a unique module name. An ambiguous name
+//RS /// remains unchanged rather than guessing a target.
+//RS fn canonical_module_key(modules: &[TirModuleFact], owner: &str, target: &str) -> String {
+//RS     if target.is_empty() {
+//RS         return target.to_string();
+//RS     }
+//RS     if modules.iter().any(|row| row.key == target) {
+//RS         return target.to_string();
+//RS     }
+//RS 
+//RS     let qualified = target
+//RS         .split('.')
+//RS         .fold(owner.to_string(), |mut key, segment| {
+//RS             if !segment.is_empty() {
+//RS                 if !key.is_empty() {
+//RS                     key.push_str("::");
+//RS                 }
+//RS                 key.push_str(segment);
+//RS             }
+//RS             key
+//RS         });
+//RS     if modules.iter().any(|row| row.key == qualified) {
+//RS         return qualified;
+//RS     }
+//RS 
+//RS     let mut matches = modules.iter().filter(|row| row.name == target);
+//RS     match (matches.next(), matches.next()) {
+//RS         (Some(row), None) => row.key.clone(),
+//RS         _ => target.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn lower_import_item(
+//RS     item: &TirImportItem,
+//RS     target_alias: &str,
+//RS     target_module: &str,
+//RS     types: &[MirTypeDef],
+//RS     traits: &[MirTraitDef],
+//RS     impls: &[MirImplDef],
+//RS     constants: &[MirConstantDef],
+//RS     foreign: &[MirForeign],
+//RS     functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS ) -> Option<jet_foundation::MIR::MirItemRef> {
+//RS     let resolved = lower_module_item(
+//RS         &item.item,
+//RS         types,
+//RS         traits,
+//RS         impls,
+//RS         constants,
+//RS         foreign,
+//RS         functions,
+//RS         registry,
+//RS         target_module,
+//RS     );
+//RS     if resolved.is_some() {
+//RS         return resolved;
+//RS     }
+//RS 
+//RS     let TirItemRef::Unknown(raw) = &item.item else {
+//RS         return None;
+//RS     };
+//RS     let suffix = raw
+//RS         .strip_prefix(target_alias)
+//RS         .and_then(|rest| rest.strip_prefix("::").or_else(|| rest.strip_prefix('.')))
+//RS         .filter(|suffix| !suffix.is_empty())
+//RS         .or_else(|| raw.rsplit_once('.').map(|(_, leaf)| leaf))
+//RS         .or_else(|| raw.rsplit_once("::").map(|(_, leaf)| leaf))
+//RS         .unwrap_or(item.original.as_str());
+//RS     let canonical = format!("{target_module}::{suffix}");
+//RS     lower_module_item(
+//RS         &TirItemRef::Unknown(canonical),
+//RS         types,
+//RS         traits,
+//RS         impls,
+//RS         constants,
+//RS         foreign,
+//RS         functions,
+//RS         registry,
+//RS         target_module,
+//RS     )
+//RS }
+//RS 
+//RS fn lower_module_rows(
+//RS     modules: &[TirModuleFact],
+//RS     import_rows: &[TirImportFact],
+//RS     types: &[MirTypeDef],
+//RS     traits: &[MirTraitDef],
+//RS     impls: &[MirImplDef],
+//RS     constants: &[MirConstantDef],
+//RS     foreign: &[MirForeign],
+//RS     links: &[MirLinkUnit],
+//RS     jobs: &[MirJob],
+//RS     functions: &[TFunc],
+//RS     registry: &FunctionRegistry,
+//RS     _source_files: &[MirSourceFile],
+//RS ) -> (Vec<jet_foundation::MIR::MirModule>, Vec<MirImport>) {
+//RS     let mut imports = import_rows
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(ordinal, row)| {
+//RS             let id = MirImportId(stable_id(
+//RS                 "mir-import",
+//RS                 &format!(
+//RS                     "{}|{}|{}..{}|{}",
+//RS                     row.module, row.alias, row.span.start, row.span.end, ordinal
+//RS                 ),
+//RS             ));
+//RS             let kind = match &row.kind {
+//RS                 TirImportKind::File { path } => MirImportKind::File { path: path.clone() },
+//RS                 TirImportKind::Module { path } => MirImportKind::Module { path: path.clone() },
+//RS                 TirImportKind::Unqualified { module, items } => {
+//RS                     let module_key = canonical_module_key(modules, &row.module, module);
+//RS                     MirImportKind::Unqualified {
+//RS                         module: jet_foundation::MIR::MirModuleId(stable_id(
+//RS                             "mir-module",
+//RS                             &module_key,
+//RS                         )),
+//RS                         items: items
+//RS                             .iter()
+//RS                             .filter_map(|item| {
+//RS                                 Some(MirImportItem {
+//RS                                     original: item.original.clone(),
+//RS                                     local: item.local.clone(),
+//RS                                     item: lower_import_item(
+//RS                                         item,
+//RS                                         module,
+//RS                                         &module_key,
+//RS                                         types,
+//RS                                         traits,
+//RS                                         impls,
+//RS                                         constants,
+//RS                                         foreign,
+//RS                                         functions,
+//RS                                         registry,
+//RS                                     )?,
+//RS                                 })
+//RS                             })
+//RS                             .collect(),
+//RS                     }
+//RS                 }
+//RS             };
+//RS             MirImport {
+//RS                 id,
+//RS                 module: jet_foundation::MIR::MirModuleId(stable_id("mir-module", &row.module)),
+//RS                 visibility: lower_name_visibility(row.visibility),
+//RS                 alias: row.alias.clone(),
+//RS                 kind,
+//RS                 span: row.span,
+//RS                 version: row.version.clone(),
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     imports.sort_unstable_by_key(|row| row.id);
+//RS 
+//RS     let mut module_rows = modules
+//RS         .iter()
+//RS         .map(|row| {
+//RS             let module_id = jet_foundation::MIR::MirModuleId(stable_id("mir-module", &row.key));
+//RS             let module_imports = imports
+//RS                 .iter()
+//RS                 .filter(|import| import.module == module_id)
+//RS                 .map(|import| import.id)
+//RS                 .collect();
+//RS             let item_order = row
+//RS                 .item_order
+//RS                 .iter()
+//RS                 .filter_map(|item| {
+//RS                     lower_module_item(
+//RS                         item, types, traits, impls, constants, foreign, functions, registry,
+//RS                         &row.key,
+//RS                     )
+//RS                 })
+//RS                 .collect();
+//RS             let _ = (links, jobs);
+//RS             jet_foundation::MIR::MirModule {
+//RS                 id: module_id,
+//RS                 key: row.key.clone(),
+//RS                 name: row.name.clone(),
+//RS                 path: row.path.clone(),
+//RS                 source_file: MirSourceFileId(stable_id("mir-source-file", &row.source_path)),
+//RS                 imports: module_imports,
+//RS                 children: row
+//RS                     .item_order
+//RS                     .iter()
+//RS                     .filter_map(|item| match item {
+//RS                         TirItemRef::Module(key) => Some(jet_foundation::MIR::MirModuleId(
+//RS                             stable_id("mir-module", key),
+//RS                         )),
+//RS                         _ => None,
+//RS                     })
+//RS                     .collect(),
+//RS                 item_order,
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     module_rows.sort_unstable_by_key(|row| row.id);
+//RS     (module_rows, imports)
+//RS }
+//RS 
+// END-PORT-PENDING 0498 crates/jet-codegen/src/Codegen/TIR/mir.rs:1815-3634
+

@@ -24,8 +24,10 @@ const packageSource = [
 const sourceRoots = [
   "Compiler/JetLexer/Source",
   "Compiler/JetFoundation/Source",
+  "Compiler/JetQueries/Source",
   "Compiler/JetOptimizer/Source",
   "Compiler/JetParser/Source/Parser",
+  "Compiler/JetParser/Source/Formatter",
   "Compiler/JetSema/Source",
   "Compiler/JetCodegen/Source/Codegen",
   "Compiler/JetCodegen/Source/Emit",
@@ -76,7 +78,7 @@ async function jetFilesUnder(directory) {
 // Files in different packages may also repeat one single-line Core import
 // (`use core.math as math`); inside one unit the repeat is a duplicate import
 // name (E0105), so every repeat after the first is blanked the same way.
-const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.\[[^\]]*\]/gm;
+const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_queries|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.\[[^\]]*\]/gm;
 const CORE_IMPORT = /^use core\.[^\[\n]*$/gm;
 const seenCoreImports = new Set();
 const blank = (block) => block.replace(/[^\n]/g, " ");

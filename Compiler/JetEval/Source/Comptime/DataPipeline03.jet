@@ -1,0 +1,1790 @@
+// PORT-PENDING 0582 crates-jet-comptime-src-comptime-datapipeline-slice-3710: crates/jet-comptime/src/Comptime/DataPipeline.rs:3710-5495
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub(super) fn eval_data_loader_method(
+//RS     interp: &mut super::Interpreter::Interp<'_>,
+//RS     recv: &CtValue,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if !matches!(recv, CtValue::Struct { type_name, .. } if type_name == "DataLoader") {
+//RS         return None;
+//RS     }
+//RS     let id = match data_loader_state_id(&interp.data_pipeline, recv, span) {
+//RS         Ok(id) => id,
+//RS         Err(error) => return Some(Err(error)),
+//RS     };
+//RS     let mut slot = interp
+//RS         .data_pipeline
+//RS         .loaders
+//RS         .get_mut(id - 1)
+//RS         .and_then(Option::take)
+//RS         .expect("loader identity checked");
+//RS     let result = (|| -> Result<CtValue, Diagnostic> {
+//RS         match method {
+//RS             "status" => Ok(data_kernel_status_value(
+//RS                 &jet_foundation::PreludeDataFlow::status(&slot.state),
+//RS             )),
+//RS             "source_identity" => Ok(data_kernel_source_value(&slot.state.source)),
+//RS             "authority" | "authority_of" => Ok(data_kernel_authority_value(&slot.state.authority)),
+//RS             "ready" => Ok(CtValue::Bool(jet_foundation::PreludeDataFlow::ready(
+//RS                 &slot.state,
+//RS             ))),
+//RS             "needs_refresh" => Ok(CtValue::Bool(
+//RS                 jet_foundation::PreludeDataFlow::needs_refresh(&slot.state),
+//RS             )),
+//RS             "snapshot_reusable" => {
+//RS                 let snapshot = args.first().ok_or_else(|| {
+//RS                     unsupported("`data.loader.snapshot_reusable()` needs a snapshot", span)
+//RS                 })?;
+//RS                 data_snapshot_reusable_value(recv, snapshot)
+//RS                     .map(CtValue::Bool)
+//RS                     .ok_or_else(|| unsupported("`snapshot_reusable()` needs a DataSnapshot", span))
+//RS             }
+//RS             "bind" => {
+//RS                 let payload = match args.first() {
+//RS                     Some(CtValue::Bytes(bytes)) => bytes.clone(),
+//RS                     Some(CtValue::List(values)) => values
+//RS                         .iter()
+//RS                         .map(|value| match value {
+//RS                             CtValue::Int(value) if (0..=255).contains(value) => Ok(*value as u8),
+//RS                             _ => Err(unsupported("`DataLoader.bind()` needs byte values", span)),
+//RS                         })
+//RS                         .collect::<Result<Vec<_>, _>>()?,
+//RS                     _ => {
+//RS                         return Err(unsupported(
+//RS                             "`DataLoader.bind()` needs byte values",
+//RS                             span,
+//RS                         ))
+//RS                     }
+//RS                 };
+//RS                 match jet_foundation::PreludeDataFlow::bind(&mut slot.state, payload) {
+//RS                     Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
+//RS                     Err(error) => {
+//RS                         jet_foundation::PreludeDataFlow::fail(&mut slot.state, &error);
+//RS                         Ok(data_loader_kernel_failure(error))
+//RS                     }
+//RS                 }
+//RS             }
+//RS             "bind_text" => {
+//RS                 let payload = match args.first() {
+//RS                     Some(CtValue::Str(value)) => value.as_bytes().to_vec(),
+//RS                     _ => return Err(unsupported("`DataLoader.bind_text()` needs String", span)),
+//RS                 };
+//RS                 match jet_foundation::PreludeDataFlow::bind(&mut slot.state, payload) {
+//RS                     Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
+//RS                     Err(error) => {
+//RS                         jet_foundation::PreludeDataFlow::fail(&mut slot.state, &error);
+//RS                         Ok(data_loader_kernel_failure(error))
+//RS                     }
+//RS                 }
+//RS             }
+//RS             "cancel" => {
+//RS                 jet_foundation::PreludeDataFlow::cancel(&mut slot.state);
+//RS                 Ok(CtValue::Unit)
+//RS             }
+//RS             "offline" => {
+//RS                 let enabled = match args.first() {
+//RS                     Some(CtValue::Bool(value)) => *value,
+//RS                     _ => return Err(unsupported("`DataLoader.offline()` needs Bool", span)),
+//RS                 };
+//RS                 jet_foundation::PreludeDataFlow::set_offline(&mut slot.state, enabled);
+//RS                 Ok(CtValue::Unit)
+//RS             }
+//RS             "invalidate" => {
+//RS                 let cause = match args.first() {
+//RS                     Some(CtValue::Enum {
+//RS                         type_name,
+//RS                         variant,
+//RS                         ..
+//RS                     }) if type_name == "DataInvalidationCause" => match variant.as_str() {
+//RS                         "NoCause" => jet_foundation::PreludeDataFlow::InvalidationCause::NoCause,
+//RS                         "Loader" => jet_foundation::PreludeDataFlow::InvalidationCause::Loader,
+//RS                         "Input" => jet_foundation::PreludeDataFlow::InvalidationCause::Input,
+//RS                         "ArchiveMember" => {
+//RS                             jet_foundation::PreludeDataFlow::InvalidationCause::ArchiveMember
+//RS                         }
+//RS                         "Parameters" => {
+//RS                             jet_foundation::PreludeDataFlow::InvalidationCause::Parameters
+//RS                         }
+//RS                         "Credential" => {
+//RS                             jet_foundation::PreludeDataFlow::InvalidationCause::Credential
+//RS                         }
+//RS                         "Capability" => {
+//RS                             jet_foundation::PreludeDataFlow::InvalidationCause::Capability
+//RS                         }
+//RS                         "Manual" => jet_foundation::PreludeDataFlow::InvalidationCause::Manual,
+//RS                         _ => {
+//RS                             return Err(unsupported(
+//RS                                 "`DataLoader.invalidate()` needs DataInvalidationCause",
+//RS                                 span,
+//RS                             ))
+//RS                         }
+//RS                     },
+//RS                     _ => {
+//RS                         return Err(unsupported(
+//RS                             "`DataLoader.invalidate()` needs DataInvalidationCause",
+//RS                             span,
+//RS                         ))
+//RS                     }
+//RS                 };
+//RS                 jet_foundation::PreludeDataFlow::invalidate(&mut slot.state, cause);
+//RS                 Ok(CtValue::Unit)
+//RS             }
+//RS             "stream" => {
+//RS                 if slot.state.cancelled {
+//RS                     let error = jet_foundation::PreludeDataFlow::KernelError {
+//RS                         kind: jet_foundation::PreludeDataFlow::ErrorKind::State,
+//RS                         operation: "data.loader.stream".to_string(),
+//RS                         reason: "loader was cancelled".to_string(),
+//RS                     };
+//RS                     jet_foundation::PreludeDataFlow::fail(&mut slot.state, &error);
+//RS                     return Ok(data_loader_kernel_failure(error));
+//RS                 }
+//RS                 if let Err(error) =
+//RS                     jet_foundation::PreludeDataFlow::validate_loader(&slot.state)
+//RS                 {
+//RS                     jet_foundation::PreludeDataFlow::fail(&mut slot.state, &error);
+//RS                     return Ok(data_loader_kernel_failure(error));
+//RS                 }
+//RS                 if let Err(error) =
+//RS                     jet_foundation::PreludeDataFlow::validate_limits(&slot.state.limits)
+//RS                 {
+//RS                     jet_foundation::PreludeDataFlow::fail(&mut slot.state, &error);
+//RS                     return Ok(data_loader_kernel_failure(error));
+//RS                 }
+//RS                 match data_stream_rows(&slot, interp, span) {
+//RS                     Ok(rows) => {
+//RS                         let size = slot
+//RS                             .state
+//RS                             .payload
+//RS                             .as_ref()
+//RS                             .map_or(0, Vec::len);
+//RS                         let bytes = i64::try_from(size).unwrap_or(i64::MAX);
+//RS                         slot.state.status.buffered_bytes = bytes;
+//RS                         slot.state.status.backpressure =
+//RS                             bytes > slot.state.limits.buffer_bytes;
+//RS                         Ok(CtValue::Present(Box::new(store_data_stream(
+//RS                             &mut interp.data_pipeline,
+//RS                             ComptimeStream {
+//RS                                 rows,
+//RS                                 cursor: 0,
+//RS                                 cancelled: false,
+//RS                                 row_ty: slot
+//RS                                     .decode_ty
+//RS                                     .as_ref()
+//RS                                     .map(data_stream_row_type),
+//RS                             },
+//RS                         ))))
+//RS                     }
+//RS                     Err(error) => {
+//RS                         data_loader_fail_value(&mut slot, &error, "data.loader.stream");
+//RS                         Ok(error)
+//RS                     }
+//RS                 }
+//RS             }
+//RS             "snapshot" => match data_snapshot_dynamic(&mut slot, interp, span) {
+//RS                 Ok(value) => Ok(value),
+//RS                 Err(error) => Ok(error),
+//RS             },
+//RS             _ => Err(unsupported(
+//RS                 &format!("`DataLoader.{method}()` is not a registered operation"),
+//RS                 span,
+//RS             )),
+//RS         }
+//RS     })();
+//RS     interp.data_pipeline.loaders[id - 1] = Some(slot);
+//RS     Some(result)
+//RS }
+//RS 
+//RS pub(super) fn eval_data_stream_method(
+//RS     interp: &mut super::Interpreter::Interp<'_>,
+//RS     recv: &CtValue,
+//RS     method: &str,
+//RS     _args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if !matches!(recv, CtValue::Struct { type_name, .. } if type_name == "DataStream") {
+//RS         return None;
+//RS     }
+//RS     let id = match data_stream_state_id(&interp.data_pipeline, recv, span) {
+//RS         Ok(id) => id,
+//RS         Err(error) => return Some(Err(error)),
+//RS     };
+//RS     let mut stream = interp
+//RS         .data_pipeline
+//RS         .streams
+//RS         .get_mut(id - 1)
+//RS         .and_then(Option::take)
+//RS         .expect("stream identity checked");
+//RS     let result = match method {
+//RS         "next" => Ok(data_stream_next(&mut stream)),
+//RS         "collect" => {
+//RS             if stream.cancelled {
+//RS                 Ok(data_loader_failure(
+//RS                     "State",
+//RS                     "data.stream.collect",
+//RS                     "stream was cancelled",
+//RS                 ))
+//RS             } else {
+//RS                 let rows = stream.rows[stream.cursor..].to_vec();
+//RS                 stream.cursor = stream.rows.len();
+//RS                 Ok(CtValue::Present(Box::new(CtValue::List(rows))))
+//RS             }
+//RS         }
+//RS         "cancel" => {
+//RS             stream.cancelled = true;
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         _ => Err(unsupported(
+//RS             &format!("`DataStream.{method}()` is not a registered operation"),
+//RS             span,
+//RS         )),
+//RS     };
+//RS     interp.data_pipeline.streams[id - 1] = Some(stream);
+//RS     Some(result)
+//RS }
+//RS 
+//RS fn ct_value_type_name(v: &CtValue) -> String {
+//RS     match v {
+//RS         CtValue::Int(_) => "Int".to_string(),
+//RS         CtValue::Float(value) => value.jet_type().name(),
+//RS         CtValue::Bool(_) => "Bool".to_string(),
+//RS         CtValue::Char(_) => "Char".to_string(),
+//RS         CtValue::Str(_) => "String".to_string(),
+//RS         CtValue::BigInt(_) => "Int".to_string(),
+//RS         CtValue::Bytes(_) => "[U8]".to_string(),
+//RS         CtValue::List(_) => "List".to_string(),
+//RS         CtValue::Map(_) => "Map".to_string(),
+//RS         CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => type_name.clone(),
+//RS         CtValue::Present(inner) => format!("{}?", ct_value_type_name(inner)),
+//RS         CtValue::Failed(CtReport::Clean(ty)) => format!("{}?", ty.name()),
+//RS         CtValue::Failed(CtReport::Told(_)) => "Result".to_string(),
+//RS         CtValue::Unit => "()".to_string(),
+//RS         CtValue::Closure(_) => "Fn".to_string(),
+//RS     }
+//RS }
+//RS // The typed plot handle is intentionally opaque to CtValue. Its state remains
+//RS // one shared `JetDataPlot` plan, while the interpreter only carries a stable
+//RS // slot identity through chained receiver calls.
+//RS 
+//RS fn plot_handle(id: usize) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlot",
+//RS         vec![("id", CtValue::Int(i64::try_from(id).unwrap_or(i64::MAX)))],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_handle_id(
+//RS     state: &DataPipelineState,
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<usize, Diagnostic> {
+//RS     let Some(CtValue::Int(id)) = struct_field(value, "JetDataPlot", "id") else {
+//RS         return Err(unsupported("`JetDataPlot` handle is malformed", span));
+//RS     };
+//RS     if *id <= 0 {
+//RS         return Err(unsupported("`JetDataPlot` handle is invalid", span));
+//RS     }
+//RS     let id = usize::try_from(*id)
+//RS         .map_err(|_| unsupported("`JetDataPlot` handle is invalid", span))?;
+//RS     state
+//RS         .plots
+//RS         .get(id - 1)
+//RS         .and_then(Option::as_ref)
+//RS         .map(|_| id)
+//RS         .ok_or_else(|| unsupported("`JetDataPlot` handle is stale", span))
+//RS }
+//RS 
+//RS fn store_plot(
+//RS     state: &mut DataPipelineState,
+//RS     plot: data_plot_rt::JetDataPlot<CtValue>,
+//RS ) -> CtValue {
+//RS     state.plots.push(Some(plot));
+//RS     plot_handle(state.plots.len())
+//RS }
+//RS 
+//RS fn replace_plot(
+//RS     state: &mut DataPipelineState,
+//RS     handle: &CtValue,
+//RS     plot: data_plot_rt::JetDataPlot<CtValue>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let id = plot_handle_id(state, handle, span)?;
+//RS     let slot = state
+//RS         .plots
+//RS         .get_mut(id - 1)
+//RS         .and_then(Option::as_mut)
+//RS         .ok_or_else(|| unsupported("`JetDataPlot` handle is stale", span))?;
+//RS     *slot = plot;
+//RS     Ok(handle.clone())
+//RS }
+//RS 
+//RS fn clone_plot(
+//RS     state: &DataPipelineState,
+//RS     handle: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlot<CtValue>, Diagnostic> {
+//RS     let id = plot_handle_id(state, handle, span)?;
+//RS     state
+//RS         .plots
+//RS         .get(id - 1)
+//RS         .and_then(Option::as_ref)
+//RS         .cloned()
+//RS         .ok_or_else(|| unsupported("`JetDataPlot` handle is stale", span))
+//RS }
+//RS 
+//RS fn plot_value(value: &CtValue) -> data_plot_rt::JetDataPlotValue {
+//RS     match value {
+//RS         CtValue::Int(value) => data_plot_rt::JetDataPlotValue::Integer(*value),
+//RS         CtValue::BigInt(value) => value
+//RS             .to_string_rep()
+//RS             .parse::<i64>()
+//RS             .map(data_plot_rt::JetDataPlotValue::Integer)
+//RS             .unwrap_or_else(|_| data_plot_rt::JetDataPlotValue::Text(value.to_string_rep())),
+//RS         CtValue::Float(value) => data_plot_rt::JetDataPlotValue::Number(value.as_f64()),
+//RS         CtValue::Bool(value) => data_plot_rt::JetDataPlotValue::Boolean(*value),
+//RS         CtValue::Char(value) => data_plot_rt::JetDataPlotValue::Text(value.to_string()),
+//RS         CtValue::Str(value) => data_plot_rt::JetDataPlotValue::Text(value.clone()),
+//RS         CtValue::Present(value) => plot_value(value),
+//RS         CtValue::Failed(_) => data_plot_rt::JetDataPlotValue::Null,
+//RS         CtValue::Unit => data_plot_rt::JetDataPlotValue::Null,
+//RS         _ => data_plot_rt::JetDataPlotValue::Text(query_cell_text(value)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_variant<'a>(
+//RS     value: &'a CtValue,
+//RS     expected: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a str, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             ..
+//RS         } if type_name.is_empty() || type_name == expected || type_name.ends_with(expected) => {
+//RS             Ok(variant
+//RS                 .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+//RS                 .unwrap_or(variant))
+//RS         }
+//RS         _ => Err(unsupported(
+//RS             &format!("expected `{expected}` option"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_enum_arg<'a>(
+//RS     value: &'a CtValue,
+//RS     name: &str,
+//RS     index: usize,
+//RS ) -> Option<&'a CtValue> {
+//RS     let CtValue::Enum { args, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     args.iter()
+//RS         .find_map(|(label, value)| (label.as_deref() == Some(name)).then_some(value))
+//RS         .or_else(|| args.get(index).map(|(_, value)| value))
+//RS }
+//RS 
+//RS fn plot_string(value: &CtValue, what: &str, span: Span) -> Result<String, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Str(value) => Ok(value.clone()),
+//RS         _ => Err(unsupported(&format!("{what} must be String"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_bool(value: &CtValue, what: &str, span: Span) -> Result<bool, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Bool(value) => Ok(*value),
+//RS         _ => Err(unsupported(&format!("{what} must be Bool"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_int(value: &CtValue, what: &str, span: Span) -> Result<i64, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Int(value) => Ok(*value),
+//RS         _ => Err(unsupported(&format!("{what} must be Int"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_float(value: &CtValue, what: &str, span: Span) -> Result<f64, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Float(value) => Ok(value.as_f64()),
+//RS         CtValue::Int(value) => Ok(*value as f64),
+//RS         _ => Err(unsupported(&format!("{what} must be Float"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_field(value: &CtValue, span: Span) -> Result<data_plot_rt::JetDataPlotField, Diagnostic> {
+//RS     if let Some(field) = struct_field(value, "JetDataPlotColumn", "field") {
+//RS         return plot_field(field, span);
+//RS     }
+//RS     let id = struct_field(value, "JetDataPlotField", "id")
+//RS         .and_then(|value| matches!(value, CtValue::Str(_)).then(|| query_cell_text(value)));
+//RS     let name = struct_field(value, "JetDataPlotField", "name")
+//RS         .ok_or_else(|| unsupported("plot column is missing field.name", span))
+//RS         .and_then(|value| plot_string(value, "plot field name", span))?;
+//RS     let type_name = struct_field(value, "JetDataPlotField", "type_name")
+//RS         .ok_or_else(|| unsupported("plot column is missing field.type_name", span))
+//RS         .and_then(|value| plot_string(value, "plot field type_name", span))?;
+//RS     Ok(match id {
+//RS         Some(id) => data_plot_rt::JetDataPlotField::with_id(id, name, type_name),
+//RS         None => data_plot_rt::JetDataPlotField::new(name, type_name),
+//RS     })
+//RS }
+//RS 
+//RS fn plot_column(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotColumn<CtValue>, Diagnostic> {
+//RS     let field = plot_field(value, span)?;
+//RS     let name = field.name.clone();
+//RS     Ok(data_plot_rt::jet_data_plot_column(field, move |row| {
+//RS         query_row_field(row, &name)
+//RS             .map(plot_value)
+//RS             .unwrap_or(data_plot_rt::JetDataPlotValue::Null)
+//RS     }))
+//RS }
+//RS 
+//RS fn plot_struct_field<'a>(value: &'a CtValue, name: &str) -> Option<&'a CtValue> {
+//RS     match value {
+//RS         CtValue::Struct { fields, .. } => fields
+//RS             .iter()
+//RS             .find_map(|(field, value)| (field == name).then_some(value)),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn plot_optional_bool(
+//RS     value: &CtValue,
+//RS     name: &str,
+//RS     default: bool,
+//RS     span: Span,
+//RS ) -> Result<bool, Diagnostic> {
+//RS     plot_struct_field(value, name)
+//RS         .map(|value| plot_bool(value, &format!("plot {name}"), span))
+//RS         .unwrap_or(Ok(default))
+//RS }
+//RS 
+//RS fn plot_optional_int(
+//RS     value: &CtValue,
+//RS     name: &str,
+//RS     default: i64,
+//RS     span: Span,
+//RS ) -> Result<i64, Diagnostic> {
+//RS     plot_struct_field(value, name)
+//RS         .map(|value| plot_int(value, &format!("plot {name}"), span))
+//RS         .unwrap_or(Ok(default))
+//RS }
+//RS 
+//RS fn plot_optional_float(
+//RS     value: &CtValue,
+//RS     name: &str,
+//RS     default: f64,
+//RS     span: Span,
+//RS ) -> Result<f64, Diagnostic> {
+//RS     plot_struct_field(value, name)
+//RS         .map(|value| plot_float(value, &format!("plot {name}"), span))
+//RS         .unwrap_or(Ok(default))
+//RS }
+//RS 
+//RS fn plot_mark(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotMark, Diagnostic> {
+//RS     match plot_variant(value, "JetDataPlotMark", span)? {
+//RS         "Line" => Ok(data_plot_rt::JetDataPlotMark::Line),
+//RS         "Bar" => Ok(data_plot_rt::JetDataPlotMark::Bar),
+//RS         "Point" => Ok(data_plot_rt::JetDataPlotMark::Point),
+//RS         _ => Err(unsupported("unknown JetDataPlotMark variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_channel(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotChannel, Diagnostic> {
+//RS     match plot_variant(value, "JetDataPlotChannel", span)? {
+//RS         "X" => Ok(data_plot_rt::JetDataPlotChannel::X),
+//RS         "Y" => Ok(data_plot_rt::JetDataPlotChannel::Y),
+//RS         "Color" => Ok(data_plot_rt::JetDataPlotChannel::Color),
+//RS         "Size" => Ok(data_plot_rt::JetDataPlotChannel::Size),
+//RS         "Text" => Ok(data_plot_rt::JetDataPlotChannel::Text),
+//RS         "Detail" => Ok(data_plot_rt::JetDataPlotChannel::Detail),
+//RS         _ => Err(unsupported("unknown JetDataPlotChannel variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_aggregate(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotAggregate, Diagnostic> {
+//RS     match plot_variant(value, "JetDataPlotAggregate", span)? {
+//RS         "None" => Ok(data_plot_rt::JetDataPlotAggregate::None),
+//RS         "Count" => Ok(data_plot_rt::JetDataPlotAggregate::Count),
+//RS         "Sum" => Ok(data_plot_rt::JetDataPlotAggregate::Sum),
+//RS         "Mean" => Ok(data_plot_rt::JetDataPlotAggregate::Mean),
+//RS         "Min" => Ok(data_plot_rt::JetDataPlotAggregate::Min),
+//RS         "Max" => Ok(data_plot_rt::JetDataPlotAggregate::Max),
+//RS         _ => Err(unsupported("unknown JetDataPlotAggregate variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_filter_op(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotFilterOp, Diagnostic> {
+//RS     match plot_variant(value, "JetDataPlotFilterOp", span)? {
+//RS         "Equal" => Ok(data_plot_rt::JetDataPlotFilterOp::Equal),
+//RS         "NotEqual" => Ok(data_plot_rt::JetDataPlotFilterOp::NotEqual),
+//RS         "Less" => Ok(data_plot_rt::JetDataPlotFilterOp::Less),
+//RS         "LessEqual" => Ok(data_plot_rt::JetDataPlotFilterOp::LessEqual),
+//RS         "Greater" => Ok(data_plot_rt::JetDataPlotFilterOp::Greater),
+//RS         "GreaterEqual" => Ok(data_plot_rt::JetDataPlotFilterOp::GreaterEqual),
+//RS         _ => Err(unsupported("unknown JetDataPlotFilterOp variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_scale_kind(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotScaleKind, Diagnostic> {
+//RS     match plot_variant(value, "JetDataPlotScaleKind", span)? {
+//RS         "Linear" => Ok(data_plot_rt::JetDataPlotScaleKind::Linear),
+//RS         "Log" => Ok(data_plot_rt::JetDataPlotScaleKind::Log),
+//RS         "Band" => Ok(data_plot_rt::JetDataPlotScaleKind::Band),
+//RS         "Point" => Ok(data_plot_rt::JetDataPlotScaleKind::Point),
+//RS         _ => Err(unsupported("unknown JetDataPlotScaleKind variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_domain(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotDomain, Diagnostic> {
+//RS     match plot_variant(value, "JetDataPlotDomain", span)? {
+//RS         "Auto" => Ok(data_plot_rt::JetDataPlotDomain::Auto),
+//RS         "Numeric" => {
+//RS             let min = plot_enum_arg(value, "min", 0)
+//RS                 .ok_or_else(|| unsupported("numeric plot domain is missing min", span))
+//RS                 .and_then(|value| plot_float(value, "plot domain min", span))?;
+//RS             let max = plot_enum_arg(value, "max", 1)
+//RS                 .ok_or_else(|| unsupported("numeric plot domain is missing max", span))
+//RS                 .and_then(|value| plot_float(value, "plot domain max", span))?;
+//RS             Ok(data_plot_rt::JetDataPlotDomain::Numeric { min, max })
+//RS         }
+//RS         "Categories" => {
+//RS             let values = plot_enum_arg(value, "values", 0)
+//RS                 .ok_or_else(|| unsupported("category plot domain is missing values", span))?;
+//RS             let CtValue::List(values) = values else {
+//RS                 return Err(unsupported("plot domain categories must be a list", span));
+//RS             };
+//RS             Ok(data_plot_rt::JetDataPlotDomain::Categories(
+//RS                 values
+//RS                     .iter()
+//RS                     .map(|value| plot_string(value, "plot domain category", span))
+//RS                     .collect::<Result<Vec<_>, _>>()?,
+//RS             ))
+//RS         }
+//RS         _ => Err(unsupported("unknown JetDataPlotDomain variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_encoding(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotEncoding, Diagnostic> {
+//RS     let channel = plot_struct_field(value, "channel")
+//RS         .ok_or_else(|| unsupported("plot encoding is missing channel", span))
+//RS         .and_then(|value| plot_channel(value, span))?;
+//RS     let field = plot_struct_field(value, "field")
+//RS         .ok_or_else(|| unsupported("plot encoding is missing field", span))
+//RS         .and_then(|value| plot_field(value, span))?;
+//RS     let aggregate = plot_struct_field(value, "aggregate")
+//RS         .ok_or_else(|| unsupported("plot encoding is missing aggregate", span))
+//RS         .and_then(|value| plot_aggregate(value, span))?;
+//RS     Ok(data_plot_rt::JetDataPlotEncoding::new(
+//RS         channel, field, aggregate,
+//RS     ))
+//RS }
+//RS 
+//RS fn plot_transform(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotTransform, Diagnostic> {
+//RS     match plot_variant(value, "JetDataPlotTransform", span)? {
+//RS         "Filter" => {
+//RS             let field = plot_enum_arg(value, "field", 0)
+//RS                 .ok_or_else(|| unsupported("plot filter is missing field", span))
+//RS                 .and_then(|value| plot_field(value, span))?;
+//RS             let op = plot_enum_arg(value, "op", 1)
+//RS                 .ok_or_else(|| unsupported("plot filter is missing op", span))
+//RS                 .and_then(|value| plot_filter_op(value, span))?;
+//RS             let filter_value = plot_enum_arg(value, "value", 2)
+//RS                 .ok_or_else(|| unsupported("plot filter is missing value", span))
+//RS                 .map(plot_value)?;
+//RS             Ok(data_plot_rt::JetDataPlotTransform::Filter {
+//RS                 field,
+//RS                 op,
+//RS                 value: filter_value,
+//RS             })
+//RS         }
+//RS         "Sort" => {
+//RS             let field = plot_enum_arg(value, "field", 0)
+//RS                 .ok_or_else(|| unsupported("plot sort is missing field", span))
+//RS                 .and_then(|value| plot_field(value, span))?;
+//RS             let descending = plot_enum_arg(value, "descending", 1)
+//RS                 .map(|value| plot_bool(value, "plot sort descending", span))
+//RS                 .transpose()?
+//RS                 .unwrap_or(false);
+//RS             Ok(data_plot_rt::JetDataPlotTransform::Sort {
+//RS                 field,
+//RS                 descending,
+//RS             })
+//RS         }
+//RS         "Bin" => {
+//RS             let field = plot_enum_arg(value, "field", 0)
+//RS                 .ok_or_else(|| unsupported("plot bin is missing field", span))
+//RS                 .and_then(|value| plot_field(value, span))?;
+//RS             let step = plot_enum_arg(value, "step", 1)
+//RS                 .ok_or_else(|| unsupported("plot bin is missing step", span))
+//RS                 .and_then(|value| plot_float(value, "plot bin step", span))?;
+//RS             Ok(data_plot_rt::JetDataPlotTransform::Bin { field, step })
+//RS         }
+//RS         "Aggregate" => {
+//RS             let group_by = plot_enum_arg(value, "group_by", 0)
+//RS                 .ok_or_else(|| unsupported("plot aggregate is missing group_by", span))?;
+//RS             let CtValue::List(group_by) = group_by else {
+//RS                 return Err(unsupported("plot aggregate group_by must be a list", span));
+//RS             };
+//RS             let group_by = group_by
+//RS                 .iter()
+//RS                 .map(|value| plot_field(value, span))
+//RS                 .collect::<Result<Vec<_>, _>>()?;
+//RS             let field = plot_enum_arg(value, "field", 1)
+//RS                 .ok_or_else(|| unsupported("plot aggregate is missing field", span))
+//RS                 .and_then(|value| plot_field(value, span))?;
+//RS             let aggregate = plot_enum_arg(value, "aggregate", 2)
+//RS                 .ok_or_else(|| unsupported("plot aggregate is missing aggregate", span))
+//RS                 .and_then(|value| plot_aggregate(value, span))?;
+//RS             Ok(data_plot_rt::JetDataPlotTransform::Aggregate {
+//RS                 group_by,
+//RS                 field,
+//RS                 aggregate,
+//RS             })
+//RS         }
+//RS         _ => Err(unsupported("unknown JetDataPlotTransform variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_scale(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotScale, Diagnostic> {
+//RS     let channel = plot_struct_field(value, "channel")
+//RS         .ok_or_else(|| unsupported("plot scale is missing channel", span))
+//RS         .and_then(|value| plot_channel(value, span))?;
+//RS     let kind = plot_struct_field(value, "kind")
+//RS         .ok_or_else(|| unsupported("plot scale is missing kind", span))
+//RS         .and_then(|value| plot_scale_kind(value, span))?;
+//RS     let domain = plot_struct_field(value, "domain")
+//RS         .ok_or_else(|| unsupported("plot scale is missing domain", span))
+//RS         .and_then(|value| plot_domain(value, span))?;
+//RS     Ok(data_plot_rt::JetDataPlotScale {
+//RS         channel,
+//RS         kind,
+//RS         domain,
+//RS         clamp: plot_optional_bool(value, "clamp", false, span)?,
+//RS         reverse: plot_optional_bool(value, "reverse", false, span)?,
+//RS     })
+//RS }
+//RS 
+//RS fn plot_axis(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotAxis, Diagnostic> {
+//RS     let channel = plot_struct_field(value, "channel")
+//RS         .ok_or_else(|| unsupported("plot axis is missing channel", span))
+//RS         .and_then(|value| plot_channel(value, span))?;
+//RS     let title = plot_struct_field(value, "title")
+//RS         .ok_or_else(|| unsupported("plot axis is missing title", span))
+//RS         .and_then(|value| plot_string(value, "plot axis title", span))?;
+//RS     Ok(data_plot_rt::JetDataPlotAxis {
+//RS         channel,
+//RS         title,
+//RS         visible: plot_optional_bool(value, "visible", true, span)?,
+//RS         grid: plot_optional_bool(value, "grid", true, span)?,
+//RS         ticks: plot_optional_int(value, "ticks", 5, span)?,
+//RS     })
+//RS }
+//RS 
+//RS fn plot_legend(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotLegend, Diagnostic> {
+//RS     let channel = plot_struct_field(value, "channel")
+//RS         .ok_or_else(|| unsupported("plot legend is missing channel", span))
+//RS         .and_then(|value| plot_channel(value, span))?;
+//RS     let title = plot_struct_field(value, "title")
+//RS         .ok_or_else(|| unsupported("plot legend is missing title", span))
+//RS         .and_then(|value| plot_string(value, "plot legend title", span))?;
+//RS     let position = match plot_variant(
+//RS         plot_struct_field(value, "position")
+//RS             .ok_or_else(|| unsupported("plot legend is missing position", span))?,
+//RS         "JetDataPlotLegendPosition",
+//RS         span,
+//RS     )? {
+//RS         "Top" => data_plot_rt::JetDataPlotLegendPosition::Top,
+//RS         "Right" => data_plot_rt::JetDataPlotLegendPosition::Right,
+//RS         "Bottom" => data_plot_rt::JetDataPlotLegendPosition::Bottom,
+//RS         "Left" => data_plot_rt::JetDataPlotLegendPosition::Left,
+//RS         _ => return Err(unsupported("unknown JetDataPlotLegendPosition", span)),
+//RS     };
+//RS     Ok(data_plot_rt::JetDataPlotLegend {
+//RS         channel,
+//RS         title,
+//RS         position,
+//RS         visible: plot_optional_bool(value, "visible", true, span)?,
+//RS     })
+//RS }
+//RS 
+//RS fn plot_facet(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotFacet, Diagnostic> {
+//RS     let field = plot_struct_field(value, "field")
+//RS         .ok_or_else(|| unsupported("plot facet is missing field", span))
+//RS         .and_then(|value| plot_field(value, span))?;
+//RS     let kind = match plot_variant(
+//RS         plot_struct_field(value, "kind")
+//RS             .ok_or_else(|| unsupported("plot facet is missing kind", span))?,
+//RS         "JetDataPlotFacetKind",
+//RS         span,
+//RS     )? {
+//RS         "Row" => data_plot_rt::JetDataPlotFacetKind::Row,
+//RS         "Column" => data_plot_rt::JetDataPlotFacetKind::Column,
+//RS         _ => return Err(unsupported("unknown JetDataPlotFacetKind", span)),
+//RS     };
+//RS     Ok(data_plot_rt::JetDataPlotFacet {
+//RS         field,
+//RS         kind,
+//RS         title: plot_struct_field(value, "title")
+//RS             .map(|value| plot_string(value, "plot facet title", span))
+//RS             .transpose()?
+//RS             .unwrap_or_default(),
+//RS         columns: plot_optional_int(value, "columns", 0, span)?,
+//RS         rows: plot_optional_int(value, "rows", 0, span)?,
+//RS     })
+//RS }
+//RS 
+//RS fn plot_layer(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotLayer, Diagnostic> {
+//RS     let name = plot_struct_field(value, "name")
+//RS         .ok_or_else(|| unsupported("plot layer is missing name", span))
+//RS         .and_then(|value| plot_string(value, "plot layer name", span))?;
+//RS     let mark = plot_struct_field(value, "mark")
+//RS         .ok_or_else(|| unsupported("plot layer is missing mark", span))
+//RS         .and_then(|value| plot_mark(value, span))?;
+//RS     let encodings = match plot_struct_field(value, "encodings") {
+//RS         Some(CtValue::List(values)) => values
+//RS             .iter()
+//RS             .map(|value| plot_encoding(value, span))
+//RS             .collect::<Result<Vec<_>, _>>()?,
+//RS         Some(_) => return Err(unsupported("plot layer encodings must be a list", span)),
+//RS         None => Vec::new(),
+//RS     };
+//RS     let transforms = match plot_struct_field(value, "transforms") {
+//RS         Some(CtValue::List(values)) => values
+//RS             .iter()
+//RS             .map(|value| plot_transform(value, span))
+//RS             .collect::<Result<Vec<_>, _>>()?,
+//RS         Some(_) => return Err(unsupported("plot layer transforms must be a list", span)),
+//RS         None => Vec::new(),
+//RS     };
+//RS     Ok(data_plot_rt::JetDataPlotLayer {
+//RS         name,
+//RS         mark,
+//RS         encodings,
+//RS         transforms,
+//RS         opacity: plot_optional_float(value, "opacity", 1.0, span)?,
+//RS     })
+//RS }
+//RS 
+//RS fn plot_interaction(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotInteraction, Diagnostic> {
+//RS     match plot_variant(value, "JetDataPlotInteraction", span)? {
+//RS         "Hover" => Ok(data_plot_rt::JetDataPlotInteraction::Hover),
+//RS         "Select" => Ok(data_plot_rt::JetDataPlotInteraction::Select),
+//RS         "Zoom" => Ok(data_plot_rt::JetDataPlotInteraction::Zoom),
+//RS         "Pan" => Ok(data_plot_rt::JetDataPlotInteraction::Pan),
+//RS         "Brush" => Ok(data_plot_rt::JetDataPlotInteraction::Brush),
+//RS         _ => Err(unsupported("unknown JetDataPlotInteraction variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_accessibility(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotAccessibility, Diagnostic> {
+//RS     Ok(data_plot_rt::JetDataPlotAccessibility {
+//RS         title: plot_struct_field(value, "title")
+//RS             .map(|value| plot_string(value, "plot accessibility title", span))
+//RS             .transpose()?
+//RS             .unwrap_or_default(),
+//RS         description: plot_struct_field(value, "description")
+//RS             .map(|value| plot_string(value, "plot accessibility description", span))
+//RS             .transpose()?
+//RS             .unwrap_or_default(),
+//RS         summary: plot_struct_field(value, "summary")
+//RS             .map(|value| plot_string(value, "plot accessibility summary", span))
+//RS             .transpose()?
+//RS             .unwrap_or_default(),
+//RS         keyboard: plot_optional_bool(value, "keyboard", true, span)?,
+//RS         announce_selection: plot_optional_bool(value, "announce_selection", true, span)?,
+//RS     })
+//RS }
+//RS 
+//RS fn plot_layout(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlotLayout, Diagnostic> {
+//RS     let defaults = data_plot_rt::JetDataPlotLayout::default();
+//RS     Ok(data_plot_rt::JetDataPlotLayout {
+//RS         width: plot_optional_float(value, "width", defaults.width, span)?,
+//RS         height: plot_optional_float(value, "height", defaults.height, span)?,
+//RS         margin_top: plot_optional_float(value, "margin_top", defaults.margin_top, span)?,
+//RS         margin_right: plot_optional_float(value, "margin_right", defaults.margin_right, span)?,
+//RS         margin_bottom: plot_optional_float(value, "margin_bottom", defaults.margin_bottom, span)?,
+//RS         margin_left: plot_optional_float(value, "margin_left", defaults.margin_left, span)?,
+//RS     })
+//RS }
+//RS fn plot_field_value(field: &data_plot_rt::JetDataPlotField) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotField",
+//RS         vec![
+//RS             ("id", CtValue::Str(field.id.clone())),
+//RS             ("name", CtValue::Str(field.name.clone())),
+//RS             ("type_name", CtValue::Str(field.type_name.clone())),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_enum_value(type_name: &str, variant: &str) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: type_name.to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_mark_value(mark: data_plot_rt::JetDataPlotMark) -> CtValue {
+//RS     plot_enum_value("JetDataPlotMark", mark.as_str())
+//RS }
+//RS 
+//RS fn plot_channel_value(channel: data_plot_rt::JetDataPlotChannel) -> CtValue {
+//RS     plot_enum_value("JetDataPlotChannel", channel.as_str())
+//RS }
+//RS 
+//RS fn plot_aggregate_value(aggregate: data_plot_rt::JetDataPlotAggregate) -> CtValue {
+//RS     plot_enum_value("JetDataPlotAggregate", aggregate.as_str())
+//RS }
+//RS 
+//RS fn plot_filter_op_value(op: data_plot_rt::JetDataPlotFilterOp) -> CtValue {
+//RS     plot_enum_value("JetDataPlotFilterOp", op.as_str())
+//RS }
+//RS 
+//RS fn plot_scale_kind_value(kind: data_plot_rt::JetDataPlotScaleKind) -> CtValue {
+//RS     plot_enum_value("JetDataPlotScaleKind", kind.as_str())
+//RS }
+//RS 
+//RS fn plot_domain_value(domain: &data_plot_rt::JetDataPlotDomain) -> CtValue {
+//RS     match domain {
+//RS         data_plot_rt::JetDataPlotDomain::Auto => {
+//RS             plot_enum_value("JetDataPlotDomain", "Auto")
+//RS         }
+//RS         data_plot_rt::JetDataPlotDomain::Numeric { min, max } => CtValue::Enum {
+//RS             type_name: "JetDataPlotDomain".to_string(),
+//RS             variant: "Numeric".to_string(),
+//RS             args: vec![
+//RS                 (Some("min".to_string()), CtValue::Float(CtFloat::f64(*min))),
+//RS                 (Some("max".to_string()), CtValue::Float(CtFloat::f64(*max))),
+//RS             ],
+//RS         },
+//RS         data_plot_rt::JetDataPlotDomain::Categories(values) => CtValue::Enum {
+//RS             type_name: "JetDataPlotDomain".to_string(),
+//RS             variant: "Categories".to_string(),
+//RS             args: vec![(
+//RS                 Some("values".to_string()),
+//RS                 CtValue::List(values.iter().cloned().map(CtValue::Str).collect()),
+//RS             )],
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn plot_value_value(value: &data_plot_rt::JetDataPlotValue) -> CtValue {
+//RS     let (variant, payload) = match value {
+//RS         data_plot_rt::JetDataPlotValue::Text(value) => ("Text", CtValue::Str(value.clone())),
+//RS         data_plot_rt::JetDataPlotValue::Integer(value) => ("Integer", CtValue::Int(*value)),
+//RS         data_plot_rt::JetDataPlotValue::Number(value) => {
+//RS             ("Number", CtValue::Float(CtFloat::f64(*value)))
+//RS         }
+//RS         data_plot_rt::JetDataPlotValue::Boolean(value) => ("Boolean", CtValue::Bool(*value)),
+//RS         data_plot_rt::JetDataPlotValue::Null => ("Null", CtValue::Unit),
+//RS     };
+//RS     CtValue::Enum {
+//RS         type_name: "JetDataPlotValue".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: if matches!(value, data_plot_rt::JetDataPlotValue::Null) {
+//RS             Vec::new()
+//RS         } else {
+//RS             vec![(None, payload)]
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn plot_encoding_value(encoding: &data_plot_rt::JetDataPlotEncoding) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotEncoding",
+//RS         vec![
+//RS             ("channel", plot_channel_value(encoding.channel)),
+//RS             ("field", plot_field_value(&encoding.field)),
+//RS             ("aggregate", plot_aggregate_value(encoding.aggregate)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_transform_value(transform: &data_plot_rt::JetDataPlotTransform) -> CtValue {
+//RS     match transform {
+//RS         data_plot_rt::JetDataPlotTransform::Filter { field, op, value } => CtValue::Enum {
+//RS             type_name: "JetDataPlotTransform".to_string(),
+//RS             variant: "Filter".to_string(),
+//RS             args: vec![
+//RS                 (Some("field".to_string()), plot_field_value(field)),
+//RS                 (Some("op".to_string()), plot_filter_op_value(*op)),
+//RS                 (Some("value".to_string()), plot_value_value(value)),
+//RS             ],
+//RS         },
+//RS         data_plot_rt::JetDataPlotTransform::Sort { field, descending } => CtValue::Enum {
+//RS             type_name: "JetDataPlotTransform".to_string(),
+//RS             variant: "Sort".to_string(),
+//RS             args: vec![
+//RS                 (Some("field".to_string()), plot_field_value(field)),
+//RS                 (Some("descending".to_string()), CtValue::Bool(*descending)),
+//RS             ],
+//RS         },
+//RS         data_plot_rt::JetDataPlotTransform::Bin { field, step } => CtValue::Enum {
+//RS             type_name: "JetDataPlotTransform".to_string(),
+//RS             variant: "Bin".to_string(),
+//RS             args: vec![
+//RS                 (Some("field".to_string()), plot_field_value(field)),
+//RS                 (
+//RS                     Some("step".to_string()),
+//RS                     CtValue::Float(CtFloat::f64(*step)),
+//RS                 ),
+//RS             ],
+//RS         },
+//RS         data_plot_rt::JetDataPlotTransform::Aggregate {
+//RS             group_by,
+//RS             field,
+//RS             aggregate,
+//RS         } => CtValue::Enum {
+//RS             type_name: "JetDataPlotTransform".to_string(),
+//RS             variant: "Aggregate".to_string(),
+//RS             args: vec![
+//RS                 (
+//RS                     Some("group_by".to_string()),
+//RS                     CtValue::List(group_by.iter().map(plot_field_value).collect()),
+//RS                 ),
+//RS                 (Some("field".to_string()), plot_field_value(field)),
+//RS                 (Some("aggregate".to_string()), plot_aggregate_value(*aggregate)),
+//RS             ],
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn plot_scale_value(scale: &data_plot_rt::JetDataPlotScale) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotScale",
+//RS         vec![
+//RS             ("channel", plot_channel_value(scale.channel)),
+//RS             ("kind", plot_scale_kind_value(scale.kind)),
+//RS             ("domain", plot_domain_value(&scale.domain)),
+//RS             ("clamp", CtValue::Bool(scale.clamp)),
+//RS             ("reverse", CtValue::Bool(scale.reverse)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_axis_value(axis: &data_plot_rt::JetDataPlotAxis) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotAxis",
+//RS         vec![
+//RS             ("channel", plot_channel_value(axis.channel)),
+//RS             ("title", CtValue::Str(axis.title.clone())),
+//RS             ("visible", CtValue::Bool(axis.visible)),
+//RS             ("grid", CtValue::Bool(axis.grid)),
+//RS             ("ticks", CtValue::Int(axis.ticks)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_legend_position_value(position: data_plot_rt::JetDataPlotLegendPosition) -> CtValue {
+//RS     plot_enum_value("JetDataPlotLegendPosition", position.as_str())
+//RS }
+//RS 
+//RS fn plot_legend_value(legend: &data_plot_rt::JetDataPlotLegend) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotLegend",
+//RS         vec![
+//RS             ("channel", plot_channel_value(legend.channel)),
+//RS             ("title", CtValue::Str(legend.title.clone())),
+//RS             ("position", plot_legend_position_value(legend.position)),
+//RS             ("visible", CtValue::Bool(legend.visible)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_facet_kind_value(kind: data_plot_rt::JetDataPlotFacetKind) -> CtValue {
+//RS     plot_enum_value("JetDataPlotFacetKind", kind.as_str())
+//RS }
+//RS 
+//RS fn plot_facet_value(facet: &data_plot_rt::JetDataPlotFacet) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotFacet",
+//RS         vec![
+//RS             ("field", plot_field_value(&facet.field)),
+//RS             ("kind", plot_facet_kind_value(facet.kind)),
+//RS             ("title", CtValue::Str(facet.title.clone())),
+//RS             ("columns", CtValue::Int(facet.columns)),
+//RS             ("rows", CtValue::Int(facet.rows)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_layer_value(layer: &data_plot_rt::JetDataPlotLayer) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotLayer",
+//RS         vec![
+//RS             ("name", CtValue::Str(layer.name.clone())),
+//RS             ("mark", plot_mark_value(layer.mark)),
+//RS             (
+//RS                 "encodings",
+//RS                 CtValue::List(layer.encodings.iter().map(plot_encoding_value).collect()),
+//RS             ),
+//RS             (
+//RS                 "transforms",
+//RS                 CtValue::List(layer.transforms.iter().map(plot_transform_value).collect()),
+//RS             ),
+//RS             ("opacity", CtValue::Float(CtFloat::f64(layer.opacity))),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_interaction_value(interaction: data_plot_rt::JetDataPlotInteraction) -> CtValue {
+//RS     plot_enum_value("JetDataPlotInteraction", interaction.as_str())
+//RS }
+//RS 
+//RS fn plot_accessibility_value(
+//RS     accessibility: &data_plot_rt::JetDataPlotAccessibility,
+//RS ) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotAccessibility",
+//RS         vec![
+//RS             ("title", CtValue::Str(accessibility.title.clone())),
+//RS             ("description", CtValue::Str(accessibility.description.clone())),
+//RS             ("summary", CtValue::Str(accessibility.summary.clone())),
+//RS             ("keyboard", CtValue::Bool(accessibility.keyboard)),
+//RS             (
+//RS                 "announce_selection",
+//RS                 CtValue::Bool(accessibility.announce_selection),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_layout_value(layout: &data_plot_rt::JetDataPlotLayout) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotLayout",
+//RS         vec![
+//RS             ("width", CtValue::Float(CtFloat::f64(layout.width))),
+//RS             ("height", CtValue::Float(CtFloat::f64(layout.height))),
+//RS             (
+//RS                 "margin_top",
+//RS                 CtValue::Float(CtFloat::f64(layout.margin_top)),
+//RS             ),
+//RS             (
+//RS                 "margin_right",
+//RS                 CtValue::Float(CtFloat::f64(layout.margin_right)),
+//RS             ),
+//RS             (
+//RS                 "margin_bottom",
+//RS                 CtValue::Float(CtFloat::f64(layout.margin_bottom)),
+//RS             ),
+//RS             (
+//RS                 "margin_left",
+//RS                 CtValue::Float(CtFloat::f64(layout.margin_left)),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_backend_value(backend: data_plot_rt::JetDataPlotBackend) -> CtValue {
+//RS     plot_enum_value("JetDataPlotBackend", backend.as_str())
+//RS }
+//RS 
+//RS fn plot_support_value(support: data_plot_rt::JetDataPlotSupport) -> CtValue {
+//RS     plot_enum_value("JetDataPlotSupport", support.as_str())
+//RS }
+//RS 
+//RS fn plot_source_value(source: &data_plot_rt::JetDataPlotSourceFacts) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotSourceFacts",
+//RS         vec![
+//RS             (
+//RS                 "table_plan_identity",
+//RS                 CtValue::Str(source.table_plan_identity.clone()),
+//RS             ),
+//RS             (
+//RS                 "source_identity",
+//RS                 CtValue::Str(source.source_identity.clone()),
+//RS             ),
+//RS             (
+//RS                 "schema_identity",
+//RS                 CtValue::Str(source.schema_identity.clone()),
+//RS             ),
+//RS             ("row_type", CtValue::Str(source.row_type.clone())),
+//RS             ("rows", CtValue::Int(source.rows)),
+//RS             ("data_identity", CtValue::Str(source.data_identity.clone())),
+//RS             ("provenance", CtValue::Str(source.provenance.clone())),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_schema_value(schema: &data_plot_rt::JetDataPlotSchema) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotSchema",
+//RS         vec![
+//RS             ("identity", CtValue::Str(schema.identity.clone())),
+//RS             ("row_type", CtValue::Str(schema.row_type.clone())),
+//RS             (
+//RS                 "columns",
+//RS                 CtValue::List(schema.columns.iter().map(plot_field_value).collect()),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_limits_value(limits: &data_plot_rt::jet_std::DataLimits) -> CtValue {
+//RS     ct_struct(
+//RS         "DataLimits",
+//RS         vec![
+//RS             ("max_groups", CtValue::Int(limits.max_groups)),
+//RS             ("max_sort_rows", CtValue::Int(limits.max_sort_rows)),
+//RS             ("max_join_rows", CtValue::Int(limits.max_join_rows)),
+//RS             ("max_output_rows", CtValue::Int(limits.max_output_rows)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_plan_value(plan: &data_plot_rt::JetDataPlotPlan) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotPlan",
+//RS         vec![
+//RS             ("source", plot_source_value(&plan.source)),
+//RS             ("schema", plot_schema_value(&plan.schema)),
+//RS             ("limits", plot_limits_value(&plan.limits)),
+//RS             ("mark", plot_mark_value(plan.mark)),
+//RS             (
+//RS                 "encodings",
+//RS                 CtValue::List(plan.encodings.iter().map(plot_encoding_value).collect()),
+//RS             ),
+//RS             (
+//RS                 "transforms",
+//RS                 CtValue::List(plan.transforms.iter().map(plot_transform_value).collect()),
+//RS             ),
+//RS             (
+//RS                 "scales",
+//RS                 CtValue::List(plan.scales.iter().map(plot_scale_value).collect()),
+//RS             ),
+//RS             (
+//RS                 "axes",
+//RS                 CtValue::List(plan.axes.iter().map(plot_axis_value).collect()),
+//RS             ),
+//RS             (
+//RS                 "legends",
+//RS                 CtValue::List(plan.legends.iter().map(plot_legend_value).collect()),
+//RS             ),
+//RS             (
+//RS                 "facets",
+//RS                 CtValue::List(plan.facets.iter().map(plot_facet_value).collect()),
+//RS             ),
+//RS             (
+//RS                 "layers",
+//RS                 CtValue::List(plan.layers.iter().map(plot_layer_value).collect()),
+//RS             ),
+//RS             (
+//RS                 "interactions",
+//RS                 CtValue::List(
+//RS                     plan.interactions
+//RS                         .iter()
+//RS                         .copied()
+//RS                         .map(plot_interaction_value)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "accessibility",
+//RS                 plot_accessibility_value(&plan.accessibility),
+//RS             ),
+//RS             ("layout", plot_layout_value(&plan.layout)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_capability_value(capability: &data_plot_rt::JetDataPlotCapability) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotCapability",
+//RS         vec![
+//RS             ("backend", plot_backend_value(capability.backend)),
+//RS             ("feature", CtValue::Str(capability.feature.clone())),
+//RS             ("support", plot_support_value(capability.support)),
+//RS             ("reason", CtValue::Str(capability.reason.clone())),
+//RS             ("replacement", CtValue::Str(capability.replacement.clone())),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_selected_row_value(row: &data_plot_rt::JetDataPlotSelectedRow) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotSelectedRow",
+//RS         vec![
+//RS             ("index", CtValue::Int(row.index)),
+//RS             (
+//RS                 "values",
+//RS                 CtValue::List(
+//RS                     row.values
+//RS                         .iter()
+//RS                         .map(|(field, value)| CtValue::Struct {
+//RS                             type_name: "tuple".to_string(),
+//RS                             fields: vec![
+//RS                                 ("field".to_string(), plot_field_value(field)),
+//RS                                 ("value".to_string(), plot_value_value(value)),
+//RS                             ],
+//RS                         })
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_inspection_value(inspection: &data_plot_rt::JetDataPlotInspection) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotInspection",
+//RS         vec![
+//RS             ("plan", plot_plan_value(&inspection.plan)),
+//RS             (
+//RS                 "selected_indices",
+//RS                 CtValue::List(
+//RS                     inspection
+//RS                         .selected_indices
+//RS                         .iter()
+//RS                         .copied()
+//RS                         .map(CtValue::Int)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "selected_columns",
+//RS                 CtValue::List(
+//RS                     inspection
+//RS                         .selected_columns
+//RS                         .iter()
+//RS                         .map(plot_field_value)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "selected_data",
+//RS                 CtValue::List(
+//RS                     inspection
+//RS                         .selected_data
+//RS                         .iter()
+//RS                         .map(plot_selected_row_value)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_render_format_value(format: data_plot_rt::JetDataPlotRenderFormat) -> CtValue {
+//RS     plot_enum_value("JetDataPlotRenderFormat", format.as_str())
+//RS }
+//RS 
+//RS fn plot_render_value(render: &data_plot_rt::JetDataPlotRender) -> CtValue {
+//RS     ct_struct(
+//RS         "JetDataPlotRender",
+//RS         vec![
+//RS             ("backend", plot_backend_value(render.backend)),
+//RS             ("format", plot_render_format_value(render.format)),
+//RS             ("body", CtValue::Str(render.body.clone())),
+//RS             ("source", plot_source_value(&render.source)),
+//RS             (
+//RS                 "capabilities",
+//RS                 CtValue::List(
+//RS                     render
+//RS                         .capabilities
+//RS                         .iter()
+//RS                         .map(plot_capability_value)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_rows_fields(
+//RS     arg0_ty: Option<&Type>,
+//RS     structs: &HashMap<String, &crate::AST::StructDef>,
+//RS     rows: &[CtValue],
+//RS ) -> Vec<data_plot_rt::JetDataPlotField> {
+//RS     if let Some(CtValue::Struct { fields, .. }) = rows.first() {
+//RS         return fields
+//RS             .iter()
+//RS             .map(|(name, value)| data_plot_rt::JetDataPlotField::new(name, ct_value_type_name(value)))
+//RS             .collect();
+//RS     }
+//RS     if let Some(elem_ty) = arg0_ty.and_then(data_schema_elem_ty) {
+//RS         if let Some(definition) = elem_ty.base_name().and_then(|name| structs.get(name)) {
+//RS             return definition
+//RS                 .fields
+//RS                 .iter()
+//RS                 .map(|field| {
+//RS                     data_plot_rt::JetDataPlotField::new(field.name.clone(), field.ty.name())
+//RS                 })
+//RS                 .collect();
+//RS         }
+//RS         return vec![data_plot_rt::JetDataPlotField::new("value", elem_ty.name())];
+//RS     }
+//RS     rows.first()
+//RS         .map(|value| {
+//RS             vec![data_plot_rt::JetDataPlotField::new(
+//RS                 "value",
+//RS                 ct_value_type_name(value),
+//RS             )]
+//RS         })
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS 
+//RS fn plot_error_value(error: &data_plot_rt::JetDataPlotError) -> CtValue {
+//RS     let optional_int = |value: Option<i64>| {
+//RS         value
+//RS             .map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
+//RS             .unwrap_or_else(|| CtValue::absent(Type::Int))
+//RS     };
+//RS     ct_struct(
+//RS         "DataError",
+//RS         vec![
+//RS             (
+//RS                 "kind",
+//RS                 plot_enum_value("DataErrorKind", &format!("{:?}", error.kind)),
+//RS             ),
+//RS             ("operation", CtValue::Str(error.operation.clone())),
+//RS             ("row", CtValue::absent(Type::Int)),
+//RS             ("column", CtValue::absent(Type::Int)),
+//RS             ("index", optional_int(error.index)),
+//RS             ("reason", CtValue::Str(error.to_string())),
+//RS             ("cause", CtValue::absent(Type::Named("EncodingError".to_string()))),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn plot_result<T>(
+//RS     result: Result<T, data_plot_rt::JetDataPlotError>,
+//RS     to_value: impl FnOnce(T) -> CtValue,
+//RS ) -> CtValue {
+//RS     match result {
+//RS         Ok(value) => CtValue::Present(Box::new(to_value(value))),
+//RS         Err(error) => CtValue::failed(Box::new(plot_error_value(&error))),
+//RS     }
+//RS }
+//RS 
+//RS fn plot_from_rows(
+//RS     rows: &CtValue,
+//RS     arg0_ty: Option<&Type>,
+//RS     structs: &HashMap<String, &crate::AST::StructDef>,
+//RS     span: Span,
+//RS ) -> Result<data_plot_rt::JetDataPlot<CtValue>, Diagnostic> {
+//RS     let rows = expect_list(rows, "plot", span)?.clone();
+//RS     let fields = plot_rows_fields(arg0_ty, structs, &rows);
+//RS     let row_type = arg0_ty
+//RS         .and_then(data_schema_elem_ty)
+//RS         .map(Type::name)
+//RS         .or_else(|| rows.first().map(ct_value_type_name))
+//RS         .unwrap_or_else(|| "Value".to_string());
+//RS     let identity = format!("data.list:{row_type}");
+//RS     let schema = data_plot_rt::JetDataPlotSchema::new(
+//RS         identity.clone(),
+//RS         row_type.clone(),
+//RS         fields.clone(),
+//RS     );
+//RS     let source = data_plot_rt::JetDataPlotSourceFacts::new(
+//RS         identity.clone(),
+//RS         identity.clone(),
+//RS         identity.clone(),
+//RS         row_type,
+//RS         i64::try_from(rows.len()).unwrap_or(i64::MAX),
+//RS         identity,
+//RS         "comptime:data.list",
+//RS     );
+//RS     let mut plot = data_plot_rt::JetDataPlot::from_rows_with_limits(
+//RS         rows,
+//RS         source,
+//RS         schema,
+//RS         data_plot_rt::jet_std::DataLimits::safe(),
+//RS     )
+//RS     .map_err(|error| unsupported(&error.to_string(), span))?;
+//RS     for field in fields {
+//RS         let name = field.name.clone();
+//RS         plot = plot
+//RS             .bind_column(data_plot_rt::jet_data_plot_column(field, move |row| {
+//RS                 let value = if name == "value" {
+//RS                     Some(row)
+//RS                 } else {
+//RS                     query_row_field(row, &name)
+//RS                 };
+//RS                 value
+//RS                     .map(plot_value)
+//RS                     .unwrap_or(data_plot_rt::JetDataPlotValue::Null)
+//RS             }))
+//RS             .map_err(|error| unsupported(&error.to_string(), span))?;
+//RS     }
+//RS     Ok(plot)
+//RS }
+//RS 
+//RS /// One declared row shape, for schema derivation: a struct's generic parameter
+//RS /// names in source order, then its `(field, declared type)` list in source
+//RS /// order.
+//RS ///
+//RS /// The AST comptime interpreter reads `StructDef`s; the canonical TIR
+//RS /// evaluator reads sema's registered field/type tables. Both hand the same
+//RS /// facts to the one kernel below, so neither tier owns a schema of its own.
+//RS pub type SchemaRow<'f> = &'f dyn Fn(&str) -> Option<(Vec<String>, Vec<(String, Type)>)>;
+//RS 
+//RS /// Build the `core.data.plot` value from ordinary typed list rows.
+//RS pub(crate) fn plot_static_call(
+//RS     state: &mut DataPipelineState,
+//RS     method: &str,
+//RS     argv: &[CtValue],
+//RS     arg0_ty: Option<&Type>,
+//RS     structs: &HashMap<String, &crate::AST::StructDef>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let one = |what: &str| {
+//RS         argv.first()
+//RS             .ok_or_else(|| unsupported(&format!("`data.{method}()`: missing {what}"), span))
+//RS     };
+//RS     match method {
+//RS         "plot" => {
+//RS             let plot = plot_from_rows(one("rows")?, arg0_ty, structs, span)?;
+//RS             Ok(CtValue::Present(Box::new(store_plot(state, plot))))
+//RS         }
+//RS         "inspect" => {
+//RS             let plot = clone_plot(state, one("plot")?, span)?;
+//RS             Ok(plot_result(plot.inspect(), |value| plot_inspection_value(&value)))
+//RS         }
+//RS         "inspect_json" => {
+//RS             let plot = clone_plot(state, one("plot")?, span)?;
+//RS             Ok(plot_result(plot.inspect_json(), CtValue::Str))
+//RS         }
+//RS         "text" => {
+//RS             let plot = clone_plot(state, one("plot")?, span)?;
+//RS             Ok(plot_result(plot.text(), CtValue::Str))
+//RS         }
+//RS         "svg" => {
+//RS             let plot = clone_plot(state, one("plot")?, span)?;
+//RS             Ok(plot_result(plot.svg(), CtValue::Str))
+//RS         }
+//RS         "show" => {
+//RS             let plot = clone_plot(state, one("plot")?, span)?;
+//RS             Ok(plot_result(plot.show(), |value| plot_render_value(&value)))
+//RS         }
+//RS         "render" => {
+//RS             let plot = clone_plot(state, one("plot")?, span)?;
+//RS             let backend = argv
+//RS                 .get(1)
+//RS                 .ok_or_else(|| unsupported("`data.render()`: missing backend", span))
+//RS                 .and_then(|value| match plot_variant(value, "JetDataPlotBackend", span)? {
+//RS                     "Terminal" => Ok(data_plot_rt::JetDataPlotBackend::Terminal),
+//RS                     "Browser" => Ok(data_plot_rt::JetDataPlotBackend::Browser),
+//RS                     "Native" => Ok(data_plot_rt::JetDataPlotBackend::Native),
+//RS                     "Export" => Ok(data_plot_rt::JetDataPlotBackend::Export),
+//RS                     _ => Err(unsupported("unknown JetDataPlotBackend variant", span)),
+//RS                 })?;
+//RS             Ok(plot_result(plot.render(backend), |value| plot_render_value(&value)))
+//RS         }
+//RS         _ => Err(unsupported(&format!("`data.{method}()`"), span)),
+//RS     }
+//RS }
+//RS 
+//RS /// Receiver-shaped plot calls share the same opaque plan slot as the static
+//RS /// render/inspection calls. The caller keeps the returned handle, while the
+//RS /// slot replacement makes aliases observe one logical builder plan.
+//RS pub(crate) fn eval_data_plot_method(
+//RS     state: &mut DataPipelineState,
+//RS     recv: &CtValue,
+//RS     method: &str,
+//RS     argv: &[CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if !matches!(
+//RS         recv,
+//RS         CtValue::Struct { type_name, .. } if type_name == "JetDataPlot"
+//RS     ) {
+//RS         return None;
+//RS     }
+//RS     let result = (|| {
+//RS         let plot = clone_plot(state, recv, span)?;
+//RS         match method {
+//RS             "line" => replace_plot(state, recv, plot.line(), span),
+//RS             "bar" => replace_plot(state, recv, plot.bar(), span),
+//RS             "point" => replace_plot(state, recv, plot.point(), span),
+//RS             "mark" => {
+//RS                 let mark = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.mark() needs a mark", span))
+//RS                     .and_then(|value| plot_mark(value, span))?;
+//RS                 replace_plot(state, recv, plot.mark(mark), span)
+//RS             }
+//RS             "x" => {
+//RS                 let column = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.x() needs a column", span))
+//RS                     .and_then(|value| plot_column(value, span))?;
+//RS                 match plot.x(column) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "y" => {
+//RS                 let column = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.y() needs a column", span))
+//RS                     .and_then(|value| plot_column(value, span))?;
+//RS                 let aggregate = argv
+//RS                     .get(1)
+//RS                     .ok_or_else(|| unsupported("plot.y() needs an aggregate", span))
+//RS                     .and_then(|value| plot_aggregate(value, span))?;
+//RS                 match plot.y(column, aggregate) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "color" | "size" | "text" | "text_channel" | "detail" => {
+//RS                 let column = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot channel method needs a column", span))
+//RS                     .and_then(|value| plot_column(value, span))?;
+//RS                 let result = match method {
+//RS                     "color" => plot.color(column),
+//RS                     "size" => plot.size(column),
+//RS                     "text" | "text_channel" => plot.text_channel(column),
+//RS                     "detail" => plot.detail(column),
+//RS                     _ => unreachable!("plot channel method set is closed"),
+//RS                 };
+//RS                 match result {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "encode" => {
+//RS                 let channel = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.encode() needs a channel", span))
+//RS                     .and_then(|value| plot_channel(value, span))?;
+//RS                 let column = argv
+//RS                     .get(1)
+//RS                     .ok_or_else(|| unsupported("plot.encode() needs a column", span))
+//RS                     .and_then(|value| plot_column(value, span))?;
+//RS                 let aggregate = argv
+//RS                     .get(2)
+//RS                     .ok_or_else(|| unsupported("plot.encode() needs an aggregate", span))
+//RS                     .and_then(|value| plot_aggregate(value, span))?;
+//RS                 match plot.encode(channel, column, aggregate) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "with_transform" => {
+//RS                 let transform = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.with_transform() needs a transform", span))
+//RS                     .and_then(|value| plot_transform(value, span))?;
+//RS                 match plot.with_transform(transform) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "with_scale" => {
+//RS                 let scale = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.with_scale() needs a scale", span))
+//RS                     .and_then(|value| plot_scale(value, span))?;
+//RS                 match plot.with_scale(scale) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "with_axis" => {
+//RS                 let axis = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.with_axis() needs an axis", span))
+//RS                     .and_then(|value| plot_axis(value, span))?;
+//RS                 match plot.with_axis(axis) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "with_legend" => {
+//RS                 let legend = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.with_legend() needs a legend", span))
+//RS                     .and_then(|value| plot_legend(value, span))?;
+//RS                 match plot.with_legend(legend) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "with_facet" => {
+//RS                 let facet = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.with_facet() needs a facet", span))
+//RS                     .and_then(|value| plot_facet(value, span))?;
+//RS                 let column = argv
+//RS                     .get(1)
+//RS                     .ok_or_else(|| unsupported("plot.with_facet() needs a column", span))
+//RS                     .and_then(|value| plot_column(value, span))?;
+//RS                 match plot.with_facet(facet, column) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "with_layer" => {
+//RS                 let layer = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.with_layer() needs a layer", span))
+//RS                     .and_then(|value| plot_layer(value, span))?;
+//RS                 match plot.with_layer(layer) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "with_interaction" => {
+//RS                 let interaction = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.with_interaction() needs an interaction", span))
+//RS                     .and_then(|value| plot_interaction(value, span))?;
+//RS                 match plot.with_interaction(interaction) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "accessibility" => {
+//RS                 let accessibility = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.accessibility() needs accessibility", span))
+//RS                     .and_then(|value| plot_accessibility(value, span))?;
+//RS                 match plot.accessibility(accessibility) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "layout" => {
+//RS                 let layout = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.layout() needs a layout", span))
+//RS                     .and_then(|value| plot_layout(value, span))?;
+//RS                 match plot.layout(layout) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             "select_indices" => {
+//RS                 let indices = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("plot.select_indices() needs indices", span))?;
+//RS                 let CtValue::List(indices) = indices else {
+//RS                     return Err(unsupported("plot.select_indices() needs a list", span));
+//RS                 };
+//RS                 let indices = indices
+//RS                     .iter()
+//RS                     .map(|value| plot_int(value, "plot selection index", span))
+//RS                     .collect::<Result<Vec<_>, _>>()?;
+//RS                 match plot.select_indices(indices) {
+//RS                     Ok(next) => replace_plot(state, recv, next, span),
+//RS                     Err(error) => return Ok(CtValue::failed(Box::new(plot_error_value(&error)))),
+//RS                 }
+//RS             }
+//RS             _ => {
+//RS                 return Err(unsupported(
+//RS                     &format!("unsupported JetDataPlot receiver method `{method}`"),
+//RS                     span,
+//RS                 ))
+//RS             }
+//RS         }
+//RS     })();
+//RS     Some(result)
+//RS }
+//RS 
+//RS /// `CtValue` carrier needs where the Rust helper carries `T` on the type.
+//RS 
+//RS 
+//RS /// Type-driven schema columns — the derivation AOT emits from
+//RS /// `emit_data_schema_columns`. A scalar list is one `value` column; a named
+//RS /// or applied row struct expands into its declared fields with the call-site
+//RS /// type arguments substituted in.
+//RS pub fn schema_columns_for_type(
+//RS     elem_ty: &Type,
+//RS     expand_struct: bool,
+//RS     row: SchemaRow<'_>,
+//RS ) -> Option<Vec<CtValue>> {
+//RS     if !expand_struct {
+//RS         return Some(vec![data_column("value", &elem_ty.name())]);
+//RS     }
+//RS     let Some(struct_name) = elem_ty.base_name() else {
+//RS         return Some(vec![data_column("value", &elem_ty.name())]);
+//RS     };
+//RS     let Some((type_params, fields)) = row(struct_name) else {
+//RS         return Some(vec![data_column("value", &elem_ty.name())]);
+//RS     };
+//RS     let args = match elem_ty {
+//RS         Type::Apply { args, .. } => args.as_slice(),
+//RS         Type::Named(_) => &[],
+//RS         _ => return None,
+//RS     };
+//RS     if type_params.len() != args.len() {
+//RS         return None;
+//RS     }
+//RS     let subst: HashMap<String, Type> = type_params.into_iter().zip(args.iter().cloned()).collect();
+//RS     Some(
+//RS         fields
+//RS             .iter()
+//RS             .map(|(name, field_ty)| {
+//RS                 let field_ty = crate::Generics::substitute_type(field_ty, &subst);
+//RS                 data_column(name, &field_ty.name())
+//RS             })
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// Derive `core.data.schema` from an ordinary list's checked row type.
+// END-PORT-PENDING 0582 crates/jet-comptime/src/Comptime/DataPipeline.rs:3710-5495
+

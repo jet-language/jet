@@ -1,0 +1,158 @@
+// Rust Facts.rs::BuildFactSnapshot / BuildSettingFact / BuildFactValue.
+// One Driver contribution fold creates the canonical native facts. Sema's
+// Type/TComptimeValue settings are a checker projection, not their identity.
+pub enum BuildFactValue {
+    Text(value: String)
+    OptionalText(value: String?)
+    Bool(value: Bool)
+    Int(value: Int)
+    Char(value: Char)
+    Enum(type_name: String, variant: String)
+}
+pub struct BuildSettingFact { pub ty: String, pub value: BuildFactValue }
+pub struct BuildFactSnapshot {
+    pub package_name: String
+    pub package_version: String
+    pub os: MIROSTarget
+    pub target_triple: String
+    pub target_dossier: MIRTargetDossier
+    pub profile: String
+    pub artifact_build: Bool
+    pub stamp: BuildStamp
+    pub contributions: [String:EffectiveFact]
+    pub settings: [String:BuildSettingFact]
+    pub setting_provenance: [String:[String]]
+}
+fn build_snapshot_write_value<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: BuildFactValue) Never! {
+    if value == {
+        .Text(text) -> {
+            sink.write(&out, "Text(")
+            canonical_debug_write_string<S, W>(sink, &out, text)
+            sink.write(&out, ")")
+        }
+        .OptionalText(text) -> {
+            sink.write(&out, "OptionalText(")
+            canonical_debug_write_optional_text<S, W>(sink, &out, text)
+            sink.write(&out, ")")
+        }
+        .Bool(flag) -> sink.write(&out, "Bool({flag:Debug})")
+        .Int(number) -> sink.write(&out, "Int({number})")
+        .Char(scalar) -> {
+            sink.write(&out, "Char(")
+            canonical_debug_write_char<S, W>(sink, &out, scalar)
+            sink.write(&out, ")")
+        }
+        .Enum(type_name, variant) -> {
+            sink.write(&out, "Enum {{ type_name: ")
+            canonical_debug_write_string<S, W>(sink, &out, type_name)
+            sink.write(&out, ", variant: ")
+            canonical_debug_write_string<S, W>(sink, &out, variant)
+            sink.write(&out, " }}")
+        }
+    }
+}
+fn build_snapshot_write_os(out: &[U8], value: MIROSTarget) Never! {
+    canonical_debug_write_os<[U8], CanonicalDebugBytes>(CanonicalDebugBytes.Writer, &out, value)
+}
+fn build_snapshot_write_layer(out: &[U8], value: MIRRuntimeLayer) Never! {
+    canonical_debug_write_layer<[U8], CanonicalDebugBytes>(CanonicalDebugBytes.Writer, &out, value)
+}
+// Rust PackageIdentity.rs:135-138: projected Debug omits exactly stamp.at,
+// contributions, setting_provenance. No clone, refold, or lookup at digest time.
+// Their collection value types are unreachable AFTER the original clears them.
+pub fn build_snapshot_write_check_debug<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, snapshot: BuildFactSnapshot) Never! {
+    sink.write(&out, "BuildFactSnapshot {{ package_name: ")
+    canonical_debug_write_string<S, W>(sink, &out, snapshot.package_name)
+    sink.write(&out, ", package_version: ")
+    canonical_debug_write_string<S, W>(sink, &out, snapshot.package_version)
+    sink.write(&out, ", os: ")
+    canonical_debug_write_os<S, W>(sink, &out, snapshot.os)
+    sink.write(&out, ", target_triple: ")
+    canonical_debug_write_string<S, W>(sink, &out, snapshot.target_triple)
+    sink.write(&out, ", target_dossier: ")
+    build_snapshot_write_target_dossier<S, W>(sink, &out, snapshot.target_dossier)
+    sink.write(&out, ", profile: ")
+    canonical_debug_write_string<S, W>(sink, &out, snapshot.profile)
+    sink.write(&out, ", artifact_build: {snapshot.artifact_build:Debug}, stamp: BuildStamp {{ git: ")
+    canonical_debug_write_optional_text<S, W>(sink, &out, snapshot.stamp.git)
+    sink.write(&out, ", dirty: {snapshot.stamp.dirty:Debug}, toolchain: ")
+    canonical_debug_write_string<S, W>(sink, &out, snapshot.stamp.toolchain)
+    sink.write(&out, ", at: \"\" }}, contributions: {{}}, settings: {{")
+    names :: snapshot.settings.keys().to_list()
+    order :: package_key_byte_order(names)
+    loop (position, index) in order {
+        if position != 0 -> sink.write(&out, ", ")
+        name :: names[index]
+        setting :: snapshot.settings[name]
+        canonical_debug_write_string<S, W>(sink, &out, name)
+        sink.write(&out, ": BuildSettingFact {{ ty: ")
+        canonical_debug_write_string<S, W>(sink, &out, setting.ty)
+        sink.write(&out, ", value: ")
+        build_snapshot_write_value<S, W>(sink, &out, setting.value)
+        sink.write(&out, " }}")
+    }
+    sink.write(&out, "}}, setting_provenance: {{}} }}")
+}
+// Byte projection for native differential fixtures. Hash-only production callers
+// use the SAME typed visitor with a bounded SHA sink, not a materialized String.
+pub fn build_snapshot_check_debug_bytes(snapshot: BuildFactSnapshot) -> [U8] Never! {
+    out := [U8]{}
+    build_snapshot_write_check_debug<[U8], CanonicalDebugBytes>(CanonicalDebugBytes.Writer, &out, snapshot)
+    out
+}
+
+#Error
+pub enum BuildFactSnapshotIdentityError { MissingNativeTargetTriple }
+// Rust Facts.rs::append_artifact_identity_bytes / Layout::from_build_facts.
+// An absent host triple is an explicit native gate, never a digest fallback.
+pub fn build_snapshot_append_artifact_identity_bytes(snapshot: BuildFactSnapshot, bytes: &[U8]) BuildFactSnapshotIdentityError! {
+    if snapshot.target_triple == "" -> return Err(BuildFactSnapshotIdentityError.MissingNativeTargetTriple)
+    mir_digest_append_target_dossier_bytes(snapshot.target_dossier, snapshot.target_triple, &bytes)
+    jet_target_layout_frame_string(&bytes, snapshot.profile)
+    jet_target_layout_frame_bool(&bytes, snapshot.artifact_build)
+    selected :: if snapshot.target_dossier.machine == {
+        .Val(machine) -> machine.layout
+        .None -> jet_target_layout_from_triple(snapshot.target_triple, PKG_BUILD_STAMP_TOOLCHAIN).facts
+    }
+    target_profile :: if snapshot.target_dossier.machine == {
+        .Val(machine) -> machine.layout.target_profile
+        .None -> "{snapshot.profile}:{snapshot.target_triple}"
+    }
+    // Native from_build_facts preserves Vec order and adds the tier only if
+    // absent. It does not sort or deduplicate authored execution modes.
+    execution_modes := [String]{}
+    loop mode in selected.execution_modes -> &execution_modes.push(mode)
+    if !selected.execution_modes.contains(snapshot.target_dossier.tier_identity) -> &execution_modes.push(snapshot.target_dossier.tier_identity)
+    facts :: MIRLayoutCapabilityFacts{
+        fact_version: selected.fact_version, target_profile: target_profile,
+        execution_modes: execution_modes, backend: "jet-codegen",
+        toolchain: snapshot.target_dossier.compiler_identity,
+        linker: snapshot.target_dossier.linker_identity,
+        allocator_provider: snapshot.target_dossier.provider_identity,
+        type_representation: selected.type_representation,
+        stack_placement: selected.stack_placement, global_placement: selected.global_placement,
+        heap_allocator: selected.heap_allocator, foreign_by_value_abi: selected.foreign_by_value_abi,
+    }
+    jet_target_layout_frame_string(&bytes, jet_target_layout_cache_identity(facts))
+    Ok()
+}
+pub fn build_snapshot_artifact_identity_bytes(snapshot: BuildFactSnapshot) -> [U8] BuildFactSnapshotIdentityError! {
+    bytes := [U8]{}
+    build_snapshot_append_artifact_identity_bytes(snapshot, &bytes)
+    Ok(bytes)
+}
+
+// Rust Facts.rs:110-123. These are the original default identities, not a
+// dossier reconstructed from a target machine or operating-system spelling.
+impl MIRTargetDossier {
+    pub fn default() -> MIRTargetDossier Never! {
+        MIRTargetDossier{machine: None, layer: MIRRuntimeLayer.Std, provider_identity: "hosted-default", closure_identity: "prelude-hosted-v1", linker_identity: "hosted-default", tier_identity: "dev", compiler_identity: PKG_BUILD_STAMP_TOOLCHAIN, environment_identity: "hosted", dependency_identity: "none"}
+    }
+}
+impl BuildFactSnapshot {
+    // Rust default: native capture supplies the actual host OS and host triple.
+    // Cross-target selected facts replace this snapshot before checking.
+    pub fn for_host(os: MIROSTarget, host_triple: String) -> BuildFactSnapshot Never! {
+        BuildFactSnapshot{package_name: "script", package_version: "0.0.0", os: os, target_triple: host_triple, target_dossier: MIRTargetDossier.default(), profile: "dev", artifact_build: false, stamp: BuildStamp.default(), contributions: [:], settings: [:], setting_provenance: [:]}
+    }
+}

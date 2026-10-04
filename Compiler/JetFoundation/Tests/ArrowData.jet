@@ -1,0 +1,259 @@
+// Rust crates/jet-foundation/src/ArrowData.rs:2100-2496.
+// Descriptor fixtures exercise the SAME validator used by Rust from_spec.
+// ArrowImported<Row>/ColumnBatch<Row> wrappers and real C fixtures are blocked
+// on #4494, not replaced by descriptor owners, mocks, or passing no-op tests.
+// Main publishes this suite alongside Source/ArrowData.jet after integration.
+
+fn arrow_test_target64() -> JetTargetLayout Never! {
+    jet_target_layout_from_triple("x86_64-unknown-linux-gnu", "0.0.1")
+}
+fn arrow_test_target32() -> JetTargetLayout Never! {
+    jet_target_layout_from_triple("i686-unknown-linux-gnu", "0.0.1")
+}
+// Rust 2104 schema.
+fn arrow_test_schema(^fields: [ArrowFieldSpec]) -> ArrowSchemaSpec Never! { ArrowSchemaSpec.new(^fields) }
+fn arrow_test_root(length: I64, ^children: [ArrowArraySpec]) -> ArrowArraySpec Never! {
+    ArrowArraySpec{length: length, null_count: 0, offset: 0, buffers: [ArrowBufferSpec]{},
+        children: ^children, dictionary: None, offsets: None}
+}
+fn arrow_test_import_error(schema: ArrowSchemaSpec, array: ArrowArraySpec, expected: [ArrowFieldSpec]?, limits: ArrowLimits, mode: ArrowImportMode, target: JetTargetLayout) -> ArrowError Never! {
+    if arrow_validate_import(schema, array, expected, limits, mode, target) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("expected declared Arrow import error")
+    }
+}
+fn arrow_test_array_error(field: ArrowFieldSpec, array: ArrowArraySpec, limits: ArrowLimits, depth: Int, target: JetTargetLayout) -> ArrowError Never! {
+    if arrow_validate_array(field, array, limits, depth, target) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("expected declared Arrow array error")
+    }
+}
+
+// Rust 2187-2211: all report and row-bound assertions. Unit decoder/typed batch
+// construction is separately #4494-gated; this is not a claimed owner proof.
+#Test("shared_import_reports_retained_bytes_without_copy descriptor and bounds") {
+    schema :: arrow_test_schema([ArrowFieldSpec]{ArrowFieldSpec.new("id", "l", false)})
+    array :: arrow_test_root(2, [ArrowArraySpec]{ArrowArraySpec.primitive(2, 0, 0, 16)})
+    report :: arrow_validate_import(schema, array, None, ArrowLimits.safe(), ArrowImportMode.Shared, arrow_test_target64()) ?? panic("valid shared descriptor")
+    assert(report.copy_label() == "shared")
+    assert(report.buffers_bytes == U64{16})
+    assert(if arrow_check_row_index(report, 0) == { .Ok(_) -> true .Err(_) -> false })
+    assert(if arrow_check_row_index(report, 1) == { .Ok(_) -> true .Err(_) -> false })
+    if arrow_check_row_index(report, 2) == {
+        .Err(error) -> assert(error.code == "E4302")
+        .Ok(_) -> panic("row bound must be checked")
+    }
+}
+
+// Rust 2214-2235: same reversed offset fixture and E4302 assertion.
+#Test("malformed_offsets_are_declared_results") {
+    target :: arrow_test_target64()
+    schema :: arrow_test_schema([ArrowFieldSpec]{ArrowFieldSpec.new("name", "u", true)})
+    child :: ArrowArraySpec.utf8(2, 0, 0, [I64]{0, 4, 3}, 4, target)
+    array :: arrow_test_root(2, [ArrowArraySpec]{child})
+    error :: arrow_test_import_error(schema, array, None, ArrowLimits.safe(), ArrowImportMode.NoCopy, target)
+    assert(error.code == "E4302")
+}
+
+// Rust 2238-2278: conversion refusal precedes checked layout; explicit Copy
+// descriptor discloses bytes and admits expected schema differences. Rust's
+// from_spec does not materialize values or convert them, and neither does this.
+#Test("no_copy_refuses_schema_conversion_but_copy_discloses_bytes") {
+    actual :: arrow_test_schema([ArrowFieldSpec]{ArrowFieldSpec.new("id", "i", false)})
+    wanted :: [ArrowFieldSpec]{ArrowFieldSpec.new("id", "l", false)}
+    array :: arrow_test_root(1, [ArrowArraySpec]{ArrowArraySpec.primitive(1, 0, 0, 4)})
+    target :: arrow_test_target64()
+    refused :: arrow_test_import_error(actual, array, Val(wanted), ArrowLimits.safe(), ArrowImportMode.NoCopy, target)
+    assert(refused.code == "E4305")
+    copied :: arrow_validate_import(actual, array, None, ArrowLimits.safe(), ArrowImportMode.Copy, target) ?? panic("explicit copy descriptor")
+    assert(copied.copy_label() == "copied")
+    assert(copied.buffers_bytes == U64{4})
+    converted :: arrow_validate_import(actual, array, Val(wanted), ArrowLimits.safe(), ArrowImportMode.Copy, target) ?? panic("explicit copy may admit a compatible physical field")
+    assert(converted.copy_label() == "copied")
+}
+
+// Rust 2281-2301: integer index, UTF8 dictionary, configured value-count limit.
+#Test("dictionary_layout_and_limits_are_checked") {
+    target :: arrow_test_target64()
+    field := ArrowFieldSpec.new("kind", "i", true)
+    field.dictionary = Val(ArrowFieldSpec.new("value", "u", false))
+    schema :: arrow_test_schema([ArrowFieldSpec]{field})
+    child := ArrowArraySpec.primitive(2, 0, 0, 8)
+    child.dictionary = Val(ArrowArraySpec.utf8(2, 0, 0, [I64]{0, 1, 2}, 2, target))
+    array :: arrow_test_root(2, [ArrowArraySpec]{child})
+    limits := ArrowLimits.safe()
+    limits.max_dictionary_values = I64{1}
+    error :: arrow_test_import_error(schema, array, None, limits, ArrowImportMode.Shared, target)
+    assert(error.code == "E4304")
+}
+
+#Test("Arrow registered codes physical formats and safe defaults") {
+    assert(ArrowErrorCode.UnsupportedSchema.code() == "E4301")
+    assert(ArrowErrorCode.MalformedLayout.code() == "E4302")
+    assert(ArrowErrorCode.Ownership.code() == "E4303")
+    assert(ArrowErrorCode.Limit.code() == "E4304")
+    assert(ArrowErrorCode.CopyRefused.code() == "E4305")
+    assert(ArrowErrorCode.ProducerFailure.code() == "E4306")
+    error :: ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "bad layout")
+    assert(error.display() == "E4302 arrow.array: bad layout")
+    assert(ARROW_FLAG_NULLABLE == I64{2})
+    assert(ARROW_FLAG_DICTIONARY_ORDERED == I64{1})
+    assert(ARROW_FLAG_MAP_KEYS_SORTED == I64{4})
+    assert(ARROW_MAX_C_STRING_BYTES == 4096)
+    limits :: ArrowLimits.default()
+    assert(limits.max_rows == I64{1000000})
+    assert(limits.max_columns == I64{1024})
+    assert(limits.max_children == I64{1024})
+    assert(limits.max_dictionary_values == I64{1000000})
+    assert(limits.max_buffer_bytes == U64{536870912})
+    assert(limits.max_total_bytes == U64{2147483648})
+    formats :: [String]{"b", "c", "s", "i", "l", "C", "S", "I", "L", "e", "f", "g", "u", "z"}
+    widths :: [U64?]{Val(U64{1}), Val(U64{1}), Val(U64{2}), Val(U64{4}), Val(U64{8}), Val(U64{1}), Val(U64{2}), Val(U64{4}), Val(U64{8}), Val(U64{2}), Val(U64{4}), Val(U64{8}), None, None}
+    loop index in 0..<formats.len() {
+        physical :: ArrowPhysicalType.parse(formats[index]) ?? panic("supported physical format")
+        assert(physical.width() == widths[index])
+    }
+    assert(ArrowPhysicalType.parse("+s") == None)
+    assert(ArrowPhysicalType.parse("U") == None)
+    assert(ArrowPhysicalType.parse("") == None)
+}
+
+#Test("Arrow half decoding preserves signed zero subnormals infinities and NaN") {
+    assert(arrow_f16_to_f64(U16{0}) == F64{0.0})
+    negative_zero :: arrow_f16_to_f64(U16{0x8000})
+    assert("{negative_zero:Debug}" == "-0.0")
+    assert(arrow_f16_to_f64(U16{1}) == F64{0.000000059604644775390625})
+    assert(arrow_f16_to_f64(U16{0x3c00}) == F64{1.0})
+    assert(arrow_f16_to_f64(U16{0xc000}) == F64{-2.0})
+    assert(arrow_f16_to_f64(U16{0x7bff}) == F64{65504.0})
+    assert(arrow_f16_to_f64(U16{0x7c00}) == F64.INFINITY)
+    assert(arrow_f16_to_f64(U16{0xfc00}) == F64.NEG_INFINITY)
+    assert(arrow_f16_to_f64(U16{0x7c01}).is_nan())
+}
+
+#Test("Arrow descriptor arithmetic obeys selected target usize not host width") {
+    target32 :: arrow_test_target32()
+    target64 :: arrow_test_target64()
+    assert(arrow_size_from_i64(I64{-1}, target64) == None)
+    assert(arrow_size_from_i64(I64{4294967296}, target32) == None)
+    assert(arrow_size_from_i64(I64{4294967296}, target64) == Val(U64{4294967296}))
+    assert(arrow_size_add(U64{4294967295}, U64{1}, target32) == None)
+    assert(arrow_size_mul(U64{1073741824}, U64{4}, target32) == None)
+    assert(arrow_size_add(U64{18446744073709551615}, U64{1}, target64) == None)
+    assert(arrow_size_mul(U64{9223372036854775808}, U64{2}, target64) == None)
+    field :: ArrowFieldSpec.new("id", "l", false)
+    array :: ArrowArraySpec.primitive(1, 4294967295, 0, 0)
+    error :: arrow_test_array_error(field, array, ArrowLimits.safe(), 0, target32)
+    assert(error.kind == ArrowErrorCode.MalformedLayout)
+    assert(error.reason == "field `id` index range overflows")
+}
+
+#Test("Arrow schema refusal precedence and all dictionary schema refusals") {
+    target :: arrow_test_target64()
+    empty_root :: arrow_test_root(0, [ArrowArraySpec]{})
+    duplicate :: arrow_test_schema([ArrowFieldSpec]{ArrowFieldSpec.new("x", "l", false), ArrowFieldSpec.new("x", "l", false)})
+    assert(arrow_test_import_error(duplicate, empty_root, None, ArrowLimits.safe(), ArrowImportMode.Shared, target).reason == "field names must be non-empty and unique")
+    empty_name :: arrow_test_schema([ArrowFieldSpec]{ArrowFieldSpec.new("", "l", false)})
+    assert(arrow_test_import_error(empty_name, empty_root, None, ArrowLimits.safe(), ArrowImportMode.Shared, target).kind == ArrowErrorCode.MalformedLayout)
+    unsupported :: arrow_test_schema([ArrowFieldSpec]{ArrowFieldSpec.new("x", "+s", false)})
+    assert(arrow_test_import_error(unsupported, empty_root, None, ArrowLimits.safe(), ArrowImportMode.Shared, target).kind == ArrowErrorCode.UnsupportedSchema)
+    field := ArrowFieldSpec.new("x", "u", false)
+    field.dictionary = Val(ArrowFieldSpec.new("value", "u", false))
+    assert(arrow_test_import_error(arrow_test_schema([ArrowFieldSpec]{field}), empty_root, None, ArrowLimits.safe(), ArrowImportMode.Shared, target).reason == "dictionary index `u` is not an integer")
+    nested := ArrowFieldSpec.new("value", "i", false)
+    nested.dictionary = Val(ArrowFieldSpec.new("leaf", "u", false))
+    indexed := ArrowFieldSpec.new("x", "i", false)
+    indexed.dictionary = Val(nested)
+    assert(arrow_test_import_error(arrow_test_schema([ArrowFieldSpec]{indexed}), empty_root, None, ArrowLimits.safe(), ArrowImportMode.Shared, target).reason == "nested dictionaries are not supported")
+    actual :: arrow_test_schema([ArrowFieldSpec]{ArrowFieldSpec.new("id", "l", true)})
+    wanted :: [ArrowFieldSpec]{ArrowFieldSpec.new("id", "l", false)}
+    // Invalid root layout is deliberately present: schema refusal must win.
+    assert(arrow_test_import_error(actual, empty_root, Val(wanted), ArrowLimits.safe(), ArrowImportMode.NoCopy, target).reason == "nullable field `id` cannot fill a non-nullable row")
+    assert(arrow_test_import_error(actual, empty_root, Val([ArrowFieldSpec]{}), ArrowLimits.safe(), ArrowImportMode.NoCopy, target).reason == "requested row schema has a different column count")
+}
+
+#Test("Arrow root validity and absent-buffer byte accounting are exact") {
+    target :: arrow_test_target64()
+    schema :: arrow_test_schema([ArrowFieldSpec]{})
+    root := arrow_test_root(9, [ArrowArraySpec]{})
+    root.null_count = I64{1}
+    assert(arrow_test_import_error(schema, root, None, ArrowLimits.safe(), ArrowImportMode.Shared, target).reason == "root array has nulls but no validity buffer")
+    root.buffers = [ArrowBufferSpec]{ArrowBufferSpec.present(1)}
+    assert(arrow_test_import_error(schema, root, None, ArrowLimits.safe(), ArrowImportMode.Shared, target).reason == "root validity buffer is shorter than its logical range")
+    root.buffers[0].bytes = U64{2}
+    report :: arrow_validate_import(schema, root, None, ArrowLimits.safe(), ArrowImportMode.Shared, target) ?? panic("two validity bytes cover nine rows")
+    assert(report.buffers_bytes == U64{2})
+    root.null_count = I64{0}
+    root.buffers[0].present = false
+    // Rust counts declared bytes even when the descriptor says absent.
+    absent_report :: arrow_validate_import(schema, root, None, ArrowLimits.safe(), ArrowImportMode.Shared, target) ?? panic("absent buffer descriptor")
+    assert(absent_report.buffers_bytes == U64{2})
+    root.null_count = I64{-2}
+    assert(arrow_test_import_error(schema, root, None, ArrowLimits.safe(), ArrowImportMode.Shared, target).reason == "root array has an invalid null count")
+}
+
+#Test("Arrow variable-width validation checks only the declared sliced range") {
+    target :: arrow_test_target64()
+    field :: ArrowFieldSpec.new("text", "u", false)
+    sliced := ArrowArraySpec.utf8(1, 1, 0, [I64]{-5, 2, 4}, 4, target)
+    assert((arrow_validate_array(field, sliced, ArrowLimits.safe(), 0, target) ?? panic("prefix offset is outside the slice")) == U64{16})
+    sliced.offsets = Val([I64]{-5, -1, 4})
+    assert(arrow_test_array_error(field, sliced, ArrowLimits.safe(), 0, target).reason == "field `text` has a negative first offset")
+    sliced.offsets = Val([I64]{0, 4, 2})
+    assert(arrow_test_array_error(field, sliced, ArrowLimits.safe(), 0, target).reason == "field `text` offsets are not monotonic")
+    sliced.offsets = None
+    assert(arrow_test_array_error(field, sliced, ArrowLimits.safe(), 0, target).reason == "field `text` does not disclose variable-width offsets")
+    sliced.offsets = Val([I64]{0, 2})
+    assert(arrow_test_array_error(field, sliced, ArrowLimits.safe(), 0, target).reason == "field `text` offsets buffer is too short")
+    sliced.offsets = Val([I64]{0, 2, 4})
+    sliced.buffers[1].bytes = U64{8}
+    assert(arrow_test_array_error(field, sliced, ArrowLimits.safe(), 0, target).reason == "field `text` offsets buffer is shorter than its logical range")
+    sliced.buffers[1].bytes = U64{12}
+    sliced.buffers[2].bytes = U64{3}
+    assert(arrow_test_array_error(field, sliced, ArrowLimits.safe(), 0, target).reason == "field `text` data buffer is shorter than its final offset")
+}
+
+#Test("Arrow dictionary accounting includes value buffers and preserves limits") {
+    target :: arrow_test_target64()
+    field := ArrowFieldSpec.new("kind", "i", true)
+    field.dictionary = Val(ArrowFieldSpec.new("value", "u", false))
+    child := ArrowArraySpec.primitive(2, 0, 0, 8)
+    assert(arrow_test_array_error(field, child, ArrowLimits.safe(), 0, target).reason == "dictionary field `kind` has no dictionary array")
+    child.dictionary = Val(ArrowArraySpec.utf8(2, 0, 0, [I64]{0, 1, 2}, 2, target))
+    report :: arrow_validate_import(arrow_test_schema([ArrowFieldSpec]{field}), arrow_test_root(2, [ArrowArraySpec]{child}), None, ArrowLimits.safe(), ArrowImportMode.Shared, target) ?? panic("valid dictionary descriptor")
+    assert(report.dictionary_columns == 1)
+    assert(report.buffers_bytes == U64{22})
+    assert(if report.disposition == { .Shared(bytes) -> bytes == U64{22} else -> false })
+    limits := ArrowLimits.safe()
+    limits.max_total_bytes = U64{21}
+    assert(arrow_test_import_error(arrow_test_schema([ArrowFieldSpec]{field}), arrow_test_root(2, [ArrowArraySpec]{child}), None, limits, ArrowImportMode.Shared, target).kind == ArrowErrorCode.Limit)
+    plain :: ArrowFieldSpec.new("kind", "i", true)
+    assert(arrow_test_array_error(plain, child, ArrowLimits.safe(), 0, target).reason == "field `kind` has an undeclared dictionary")
+}
+
+// Exact original C journeys remain NON-EXECUTABLE gates, not #Test no-ops.
+// The missing Core primitives and source anchors are in Source/ArrowData.jet.
+// 2109 explicit_copy_materializes_declared_values:
+//   C root format "+s", id format "l", names root/id; one child, two I64 values
+//   [3,5], absent validity, offset 0. Base callbacks (2114 release_schema,
+//   2117 release_array) clear their own release slots. Copy import succeeds;
+//   mutate producer values to [101,103]; cell(0,0)==Signed(3), cell(1,0)==Signed(5).
+//   Requires actual C-memory fixtures and nullable extern-C callback slots.
+// 2304 c_owner_releases_base_once_and_never_releases_children:
+//   C root format "", id "l", names root/id, values [11,22], absent validity,
+//   two rows, one child. Four STATIC SeqCst counters (ARRAY_RELEASES,
+//   SCHEMA_RELEASES, CHILD_ARRAY_RELEASES, CHILD_SCHEMA_RELEASES); callbacks at
+//   2312/2316/2320/2324 increment the matching counter and clear release.
+//   Shared import succeeds; cheap clone; duplicate SAME BASE pointers must yield
+//   E4303. Drop first handle -> base counts 0/0. Drop alias -> base counts 1/1,
+//   child counts 0/0. Real final-reference drop is essential, not explicit close.
+// 2416 malformed_c_layout_releases_claimed_base_before_returning_error:
+//   C root format "", id "l", names root/id; child length 1 with two NULL
+//   buffers, no validity; root length 1, one child, no root buffers. Two STATIC
+//   SeqCst counters at 2419/2420; callbacks 2421/2425 increment and clear release.
+//   NoCopy import rejects NULL values as E4302; both base counts already 1 when
+//   the error is returned. Failure must traverse the real claimed-owner guard.
+// Original typed from_spec/ColumnBatch<()> calls at 2190/2226/2250/2259/2269/2298
+// also remain #4494-gated until the ONE canonical ArrowImported owner exists.
+// Their descriptor results above are reachable source assertions, not a claim
+// that the original owner/callback/row-model integration has been exercised.

@@ -1,0 +1,26 @@
+// Shared verifier result carriers; Rust MIROptimization.rs legality boundary.
+pub enum MIROptimizationErrorKind {
+    InvalidSchema
+    InvalidCFG
+    InvalidDefUse
+    InvalidFact
+    // A MIR Lint rule (Docs/spec/mir-lint.md) failed: an internal compiler error.
+    Lint
+}
+
+pub struct MIROptimizationError {
+    pub pass: MIROptimizationPassID
+    pub kind: MIROptimizationErrorKind
+    pub function: MIRFunctionID?
+    pub span: Span
+    pub message: String
+}
+pub fn mir_pass_error(
+    pass: MIROptimizationPassID,
+    kind: MIROptimizationErrorKind,
+    function: MIRFunctionID?,
+    span: Span,
+    message: String,
+) -> MIROptimizationError Never! {
+    MIROptimizationError{pass: pass, kind: kind, function: function, span: span, message: message}
+}

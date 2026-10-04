@@ -1,0 +1,94 @@
+// PORT-PENDING 0318 crates-jet-lexer-src-lexer-strings-module-group: crates/jet-lexer/src/Lexer/mod.rs:1-90
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Lexer: source text -> tokens. Every token carries a byte span so that
+//RS //! diagnostics anywhere downstream can point at real source.
+//RS //!
+//RS //! M1: the lexer recovers from errors — it reports every problem it finds
+//RS //! in one run instead of stopping at the first.
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Syntax;
+//RS 
+//RS mod Scan;
+//RS mod Strings;
+//RS mod Terminators;
+//RS mod Tokens;
+//RS 
+//RS pub use Terminators::{lex, lex_config, lex_generated};
+//RS #[doc(hidden)]
+//RS pub use Terminators::{
+//RS     raw_token_fact, terminator_driver, with_terminator_driver, RawTokenFact,
+//RS     TerminatorDriver, TerminatorEvent, TERMINATOR_PASS_SOURCE,
+//RS };
+//RS pub use Tokens::{comments, describe, is_comment, without_comments, StrTokPart, TokKind, Token};
+//RS 
+//RS // `lex_raw` is part of the public surface (interpolation sub-streams) and is
+//RS // also called by sibling scan/strings modules.
+//RS pub use Scan::lex_raw;
+//RS 
+//RS struct Lexer<'a> {
+//RS     chars: Vec<(usize, char)>,
+//RS     end: usize,
+//RS     src: &'a str,
+//RS     i: usize,
+//RS     diags: Vec<Diagnostic>,
+//RS     allow_reserved_identifiers: bool,
+//RS     config_surface: bool,
+//RS     /// Number of enclosing string interpolations being lexed. This is passed
+//RS     /// through recursive sub-streams so hostile nesting cannot exhaust the
+//RS     /// lexer stack before the parser's source-depth check runs.
+//RS     interpolation_depth: usize,
+//RS }
+//RS 
+//RS /// The word behind a keyword token. A position that accepts any written word —
+//RS /// a marker name or a marker parameter name (D-VERDICT-1455-1) — needs the
+//RS /// spelling back. `keyword` below stays the one table; this reads it backwards.
+//RS pub fn keyword_spelling(kind: &TokKind) -> Option<&'static str> {
+//RS     Syntax::JET_KEYWORD_LIST
+//RS         .iter()
+//RS         .copied()
+//RS         .find(|word| keyword(word).as_ref() == Some(kind))
+//RS }
+//RS 
+//RS fn keyword(name: &str) -> Option<TokKind> {
+//RS     match name {
+//RS         s if s == Syntax::KW_FN => Some(TokKind::KwFn),
+//RS         s if s == Syntax::KW_PUB => Some(TokKind::KwPub),
+//RS         s if s == Syntax::KW_PRIV => Some(TokKind::KwPriv),
+//RS         s if s == Syntax::KW_IF => Some(TokKind::KwIf),
+//RS         s if s == Syntax::KW_ELSE => Some(TokKind::KwElse),
+//RS         s if s == Syntax::KW_IN => Some(TokKind::KwIn),
+//RS         s if s == Syntax::KW_BREAK => Some(TokKind::KwBreak),
+//RS         s if s == Syntax::LIT_TRUE => Some(TokKind::KwTrue),
+//RS         s if s == Syntax::LIT_FALSE => Some(TokKind::KwFalse),
+//RS         s if s == Syntax::KW_MUTATE => Some(TokKind::KwMutate),
+//RS         s if s == Syntax::KW_MOVE => Some(TokKind::KwMove),
+//RS         s if s == Syntax::KW_COPY => Some(TokKind::KwCopy),
+//RS         s if s == Syntax::KW_STRUCT => Some(TokKind::KwStruct),
+//RS         s if s == Syntax::KW_ENUM => Some(TokKind::KwEnum),
+//RS         s if s == Syntax::KW_IMPL => Some(TokKind::KwImpl),
+//RS         s if s == Syntax::KW_TRAIT => Some(TokKind::KwTrait),
+//RS         s if s == Syntax::KW_TAG => Some(TokKind::KwTag),
+//RS         s if s == Syntax::KW_EFFECT_DECL => Some(TokKind::KwEffect),
+//RS         s if s == Syntax::KW_DERIVE => Some(TokKind::KwDerive),
+//RS         s if s == Syntax::KW_SELF => Some(TokKind::KwSelf),
+//RS         s if s == Syntax::LIT_NULL => Some(TokKind::KwNull),
+//RS         s if s == Syntax::KW_IT => Some(TokKind::KwIt),
+//RS         s if s == Syntax::KW_CONST => Some(TokKind::KwConst),
+//RS         s if s == Syntax::KW_COMPTIME => Some(TokKind::KwComptime),
+//RS         s if s == Syntax::KW_RETURN => Some(TokKind::KwReturn),
+//RS         s if s == Syntax::KW_LOOP => Some(TokKind::KwLoop),
+//RS         s if s == Syntax::KW_YIELD => Some(TokKind::KwYield),
+//RS         s if s == Syntax::KW_USE => Some(TokKind::KwUse),
+//RS         s if s == Syntax::KW_EXTERN => Some(TokKind::KwExtern),
+//RS         s if s == Syntax::KW_MODULE => Some(TokKind::KwModule),
+//RS         // D-CASING1 follow-on: `Test`/`Todo`/`Pure` are NOT lexer keywords —
+//RS         // they are PascalCase `#`-markers recognized as `#` + ident in the
+//RS         // parser, so the bare words stay usable as ordinary identifiers (e.g. a
+//RS         // struct named `Test`). The lowercase foreign spellings are likewise
+//RS         // plain idents, matched in the parser for teaching errors.
+//RS         _ => None,
+//RS     }
+//RS }
+// END-PORT-PENDING 0318 crates/jet-lexer/src/Lexer/mod.rs:1-90
+

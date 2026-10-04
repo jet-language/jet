@@ -1,0 +1,20 @@
+// PORT-PENDING 0330 crates-jet-parser-src-parser-items-helpers: crates/jet-parser/src/Parser/Items/helpers.rs:1-16
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS /// U11: render one `Float`-lexed version segment (`major.minor`, e.g. `1.4`,
+//RS /// `1.0`) back to text. The lexer only ever produces this token from
+//RS /// `digits '.' digits`, so it always has a decimal point — but
+//RS /// `f64::to_string()` drops it for a whole-number float (`1.0.to_string()`
+//RS /// is `"1"`), which would silently turn `use pkg#1.0;` into `1` (a different,
+//RS /// wrong version). Force the point back on; the one still-documented edge
+//RS /// case is a trailing zero merged into the fraction (`1.10` vs `1.1` are
+//RS /// indistinguishable once lexed — see `Parser::inline_version`).
+//RS pub(super) fn format_version_segment(f: f64) -> String {
+//RS     let s = f.to_string();
+//RS     if s.contains('.') {
+//RS         s
+//RS     } else {
+//RS         format!("{s}.0")
+//RS     }
+//RS }
+// END-PORT-PENDING 0330 crates/jet-parser/src/Parser/Items/helpers.rs:1-16
+

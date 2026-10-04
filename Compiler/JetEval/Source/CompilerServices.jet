@@ -5,6 +5,7 @@ use jet_foundation.[
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
     Diagnostic,
+    FactRegistry,
     Func,
     Item,
     ParseResult,
@@ -130,17 +131,18 @@ use jet_parser.[
     parse_lexed,
 ]
 use jet_sema.[
-    SemaCompilerModuleSource,
     SemaGraphModuleResult,
     SemaGraphResult,
     SemaRegistrationGraph,
     SemaRegistrationModule,
-    sema_compiler_semantic_index_from_checked,
     sema_comptime_reflection_arithmetic_facts,
     sema_comptime_reflection_declared_function_facts,
 ]
+use jet_semindex.[SemIndex]
 
-JET_COMPILER_SERVICES_SCHEMA_VERSION :: 1
+// Rust Source/Compiler.rs:15-16: one version authority for every consumer.
+pub API_VERSION :: prep { 1 }
+pub SCHEMA_VERSION :: prep { 1 }
 
 pub enum JetCompilerServicesSourcePreparation {
     Masked(source: String)
@@ -166,17 +168,28 @@ pub struct JetCompilerServicesParseFacts {
     pub parsed: ParseResult
     pub value: TComptimeValue
 }
+// Rust CmdInspect::CheckProofRow. Producers populate only actual proven work;
+// explicit-file rows are the original four "not applicable" scope statements.
+pub struct JetCompilerServicesCheckProofRow {
+    pub output: String
+    pub name: String
+    pub status: String
+    pub detail: String
+    pub diagnostic: String
+}
+
 
 pub struct JetCompilerServicesCheckedInput {
     pub parsed: JetCompilerServicesParseFacts
     pub registration: SemaRegistrationGraph
     pub graph: SemaGraphResult
-    pub module_sources: [SemaCompilerModuleSource]
     pub diagnostics: [Diagnostic]
 }
 
 pub struct JetCompilerServicesCheckedFacts {
     pub value: TComptimeValue
+    // Usability of the checked carrier, independent of whether an index was
+    // requested. Existing read-only consumers use this as their complete gate.
     pub semantic_index_complete: Bool
 }
 
@@ -380,7 +393,7 @@ pub fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServi
         }})
     }
     value := TComptimeValue.Struct{type_name: "CompilerSourceMap", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(SCHEMA_VERSION)},
         TComptimeField{name: "sources", value: jet_eval_compiler_services_string_values(sources)},
         TComptimeField{name: "generated_lines", value: TComptimeValue.List{values: generated_lines}},
     }}
@@ -403,7 +416,7 @@ fn jet_eval_compiler_services_lex_value(source: String, lexed: Lexed) -> TCompti
         &tokens.push(value)
     }
     TComptimeValue.Struct{type_name: "CompilerLexed", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(SCHEMA_VERSION)},
         TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
         TComptimeField{name: "tokens", value: TComptimeValue.List{values: tokens}},
         TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(lexed.diagnostics)},
@@ -573,7 +586,7 @@ fn jet_eval_compiler_services_syntax_value(source: String, parsed: ParseResult) 
         loop item in parsed.program.items -> &items.push(jet_eval_compiler_services_syntax_node(item))
     }
     TComptimeValue.Struct{type_name: "CompilerSyntaxTree", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(SCHEMA_VERSION)},
         TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
         TComptimeField{name: "items", value: TComptimeValue.List{values: items}},
         TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(parsed.diagnostics)},
@@ -663,15 +676,14 @@ pub fn jet_eval_compiler_services_checked(input: JetCompilerServicesCheckedInput
             }
         }
     }
-    index := sema_compiler_semantic_index_from_checked(input.registration, input.graph, input.parsed.source, input.module_sources)
     has_errors := false
     loop diagnostic in diagnostics {
         if jet_eval_compiler_services_error_diagnostic(diagnostic) -> has_errors = true
     }
     semantic_index := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}
-    if !has_errors && index.complete -> semantic_index = TComptimeValue.Present{value: index.value}
+    index_complete := !has_errors && input.graph.complete
     value := TComptimeValue.Struct{type_name: "CompilerChecked", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(SCHEMA_VERSION)},
         TComptimeField{name: "source", value: jet_eval_compiler_services_string(input.parsed.source)},
         TComptimeField{name: "syntax", value: input.parsed.value},
         TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(diagnostics)},
@@ -679,7 +691,27 @@ pub fn jet_eval_compiler_services_checked(input: JetCompilerServicesCheckedInput
         TComptimeField{name: "effects", value: TComptimeValue.List{values: effects}},
         TComptimeField{name: "semantic_index", value: semantic_index},
     }}
-    JetCompilerServicesCheckedFacts{value: value, semantic_index_complete: !has_errors && index.complete}
+    JetCompilerServicesCheckedFacts{value: value, semantic_index_complete: index_complete}
+}
+
+// Attach the distinct compiler reflection view of Driver's SAME memoized
+// full index. The pure SemIndex builder is never called from this module.
+pub fn jet_eval_compiler_services_attach_index(checked: &JetCompilerServicesCheckedFacts, index: SemIndex, source: String, registry: FactRegistry) -> Bool Never! {
+    if !checked.semantic_index_complete -> return false
+    if checked.value == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == "semantic_index" && field.value == .Present(_) -> return true
+        }
+    }
+    if checked.value == .Struct(type_name, fields) {
+        loop position in 0..<fields.len() {
+            if fields[position].name != "semantic_index" -> next
+            fields[position].value = TComptimeValue.Present{value: jet_eval_compiler_semantic_index_value(index, source, registry)}
+            checked.value = TComptimeValue.Struct{type_name: type_name, fields: fields}
+            return true
+        }
+    }
+    false
 }
 // Package and build call sites must consume Jetpack's typed host query result;
 // this helper deliberately defines no package view, lock/profile, or graph facts.

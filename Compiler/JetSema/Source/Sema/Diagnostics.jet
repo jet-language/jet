@@ -1,5 +1,6 @@
 // Sema emits the shared Lexer Diagnostic value; it does not define a second
 // diagnostic payload or rebase the aggregate UTF-8 byte spans.
+use core.files.runtime.kernel_path_components as sema_source_os_path
 use jet_foundation.[
     DIAGNOSTIC_ERROR,
     Diagnostic,
@@ -17,6 +18,8 @@ pub enum SemaSourceOrigin { Snapshot CompilerGenerated }
 pub struct SemaSourceSegment {
     pub generated: Span
     pub source_file: String
+    // Native snapshot provenance; absent only for generated or authored tests.
+    pub physical_path: sema_source_os_path.OsPath?{None}
     pub source_start: Int
     pub line_starts: [Int]
     pub origin: SemaSourceOrigin
@@ -31,6 +34,7 @@ pub fn sema_source_file_at(segments: [SemaSourceSegment], fallback: String, fall
 
 pub struct SemaSourceLocation {
     pub source_path: String
+    pub physical_path: sema_source_os_path.OsPath?{None}
     pub aggregate_start: Int
     pub source_start: Int
     pub origin: SemaSourceOrigin
@@ -77,7 +81,15 @@ pub fn sema_source_location_at(segments: [SemaSourceSegment], site: Span) -> Sem
     if matches != 1 || candidate < 0 -> return None
     segment :: segments[candidate]
     if segment.source_file == "" || segment.generated.start < 0 || segment.source_start < 0 -> return None
-    Val(SemaSourceLocation{source_path: segment.source_file, aggregate_start: segment.generated.start, source_start: segment.source_start, origin: segment.origin})
+    Val(SemaSourceLocation{source_path: segment.source_file, physical_path: segment.physical_path, aggregate_start: segment.generated.start, source_start: segment.source_start, origin: segment.origin})
+}
+
+fn sema_source_native_paths_equal(left: sema_source_os_path.OsPath?, right: sema_source_os_path.OsPath?) -> Bool Never! {
+    if left == .Val(a) {
+        if right == .Val(b) -> return sema_source_os_path.equals(a, b)
+        return false
+    }
+    right == None
 }
 
 pub fn sema_diagnostic_with_source_location(diagnostic: ^Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic Never! {
@@ -85,6 +97,7 @@ pub fn sema_diagnostic_with_source_location(diagnostic: ^Diagnostic, segments: [
     span :: updated.span ?? return updated
     location :: sema_source_location_at(segments, span) ?? {
         updated.source_path = None
+        updated.source_native_path = None
         updated.source_offset = None
         updated.source_start = None
         return updated
@@ -92,12 +105,14 @@ pub fn sema_diagnostic_with_source_location(diagnostic: ^Diagnostic, segments: [
     if updated.edit == .Val(edit) {
         edit_location :: sema_source_location_at(segments, edit.span) ?? {
             updated.source_path = None
+            updated.source_native_path = None
             updated.source_offset = None
             updated.source_start = None
             return updated
         }
-        if edit_location.source_path != location.source_path || edit_location.aggregate_start != location.aggregate_start || edit_location.source_start != location.source_start || edit_location.origin != location.origin {
+        if edit_location.source_path != location.source_path || !sema_source_native_paths_equal(edit_location.physical_path, location.physical_path) || edit_location.aggregate_start != location.aggregate_start || edit_location.source_start != location.source_start || edit_location.origin != location.origin {
             updated.source_path = None
+            updated.source_native_path = None
             updated.source_offset = None
             updated.source_start = None
             return updated
@@ -110,9 +125,11 @@ pub fn sema_diagnostic_with_source_location(diagnostic: ^Diagnostic, segments: [
         updated.applicability = None
         updated.safety = None
     }
+    updated.source_native_path = location.physical_path
     if updated.source_path != None {
         if updated.source_path != Val(location.source_path) || updated.source_offset != Val(location.aggregate_start) || updated.source_start != Val(location.source_start) {
             updated.source_path = None
+            updated.source_native_path = None
             updated.source_offset = None
             updated.source_start = None
         }

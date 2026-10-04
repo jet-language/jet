@@ -1,0 +1,1445 @@
+// PORT-PENDING 1116 tests-mir-fact-lifecycle-module-group: tests/mir_fact_lifecycle.rs:1-697
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use jet_foundation::MIR::{
+//RS     MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget,
+//RS     MirCopyCost, MirOperation, MirOptimizationPolicy, MirPlaceBase, MirProjection,
+//RS     MirVectorAccessRoot, MirVectorLayout,
+//RS };
+//RS 
+//RS mod common;
+//RS 
+//RS fn lower_checked(source: &str) -> jet_foundation::MIR::MirProgram {
+//RS     let root = common::unique_tmp("jet_mir_fact_lifecycle");
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS     std::fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"mir_fact_lifecycle\"\nversion: \"1.0.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     let entry = root.join("main.jet");
+//RS     std::fs::write(&entry, source).unwrap();
+//RS 
+//RS     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+//RS     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+//RS         .into_iter()
+//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(errors.is_empty(), "{errors:#?}");
+//RS 
+//RS     let request = MirArtifactRequest::new(
+//RS         MirArtifactTarget::Cranelift,
+//RS         MirArtifactKind::NativeExecutable,
+//RS         MirArtifactBuildMode::Dev,
+//RS     );
+//RS     jet::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+//RS         .expect("checked bundle lowers through the public MIR optimizer path")
+//RS         .0
+//RS }
+//RS 
+//RS fn function<'a>(
+//RS     program: &'a jet_foundation::MIR::MirProgram,
+//RS     name: &str,
+//RS ) -> &'a jet_foundation::MIR::MirFunction {
+//RS     program
+//RS         .functions
+//RS         .iter()
+//RS         .find(|function| function.name == name)
+//RS         .unwrap_or_else(|| panic!("missing MIR function {name}"))
+//RS }
+//RS 
+//RS #[test]
+//RS fn changed_mir_recomputes_facts_and_rejects_stale_passes() {
+//RS     let source = r#"
+//RS fn auto(values: [Float#4]) -> [Float#4] {
+//RS     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+//RS     loop i in 0..<4 {
+//RS         output[i] = values[i] * 2.0
+//RS     }
+//RS     return output
+//RS }
+//RS 
+//RS fn scalar_sum(values: [Float#4]) -> Float {
+//RS     total := Float{0.0}
+//RS     loop i in 0..<4 { total += values[i] }
+//RS     return total
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let mir = lower_checked(source);
+//RS     let policy = MirOptimizationPolicy::conservative();
+//RS     let optimized = jet_foundation::MIR::optimize_mir_program(mir, &policy).unwrap();
+//RS     let reduction = function(&optimized, "scalar_sum");
+//RS     assert!(!reduction.optimization.auto_vectorizable);
+//RS     assert!(reduction
+//RS         .optimization
+//RS         .vector_facts
+//RS         .iter()
+//RS         .all(|fact| !fact.decision.is_eligible()));
+//RS     let auto = function(&optimized, "auto");
+//RS     assert!(
+//RS         auto.optimization.auto_vectorizable,
+//RS         "loop facts: {:#?}\nvector facts: {:#?}",
+//RS         auto.optimization.loop_facts,
+//RS         auto.optimization.vector_facts,
+//RS     );
+//RS     assert!(
+//RS         auto.optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .any(|fact| fact.decision.is_eligible())
+//RS     );
+//RS     let checked = auto
+//RS         .optimization
+//RS         .checked_vector_facts
+//RS         .iter()
+//RS         .find(|proof| {
+//RS             auto.optimization
+//RS                 .vector_facts
+//RS                 .iter()
+//RS                 .any(|fact| fact.loop_header == proof.loop_header)
+//RS         })
+//RS         .expect("eligible vector fact must retain its checked source proof");
+//RS     let derived = auto
+//RS         .optimization
+//RS         .vector_facts
+//RS         .iter()
+//RS         .find(|fact| fact.loop_header == checked.loop_header)
+//RS         .expect("eligible loop must retain its derived vector fact");
+//RS     let cursor = checked.cursor.expect("checked proof must identify its cursor");
+//RS     assert!(!checked.body_blocks.is_empty());
+//RS     assert!(checked.advance_block.is_some());
+//RS     assert!(!checked.accesses.is_empty());
+//RS     assert!(checked.packed);
+//RS     assert!(
+//RS         checked.span.start > 0
+//RS             && checked.span.end > checked.span.start
+//RS             && checked.span.end <= source.len(),
+//RS         "checked proof must retain a non-default source origin: {:?}",
+//RS         checked.span
+//RS     );
+//RS     assert!(
+//RS         source[checked.span.start..checked.span.end]
+//RS             .bytes()
+//RS             .any(|byte| !byte.is_ascii_whitespace()),
+//RS         "checked proof origin must cover source bytes"
+//RS     );
+//RS     assert!(
+//RS         checked.same_checked_scope(derived),
+//RS         "checked proof scope must match the canonical post-optimization row:\nchecked={checked:#?}\nderived={derived:#?}"
+//RS     );
+//RS     assert_eq!(
+//RS         checked.accesses.len(),
+//RS         3,
+//RS         "the elementwise witness must retain all canonical input/output access identities: {:#?}",
+//RS         checked.accesses
+//RS     );
+//RS     assert!(
+//RS         checked.accesses.iter().all(|access| {
+//RS             access.layout == MirVectorLayout::Flat
+//RS                 && access.field.is_none()
+//RS                 && access.column_index.is_none()
+//RS                 && matches!(access.root, MirVectorAccessRoot::Place(_))
+//RS         }),
+//RS         "flat elementwise proof must retain place roots without projections: {:#?}",
+//RS         checked.accesses
+//RS     );
+//RS     let mut access_roots = checked
+//RS         .accesses
+//RS         .iter()
+//RS         .map(|access| {
+//RS             let MirVectorAccessRoot::Place(place) = access.root else {
+//RS                 unreachable!("flat elementwise access must use a place root")
+//RS             };
+//RS             place
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     access_roots.sort();
+//RS     access_roots.dedup();
+//RS     assert_eq!(
+//RS         access_roots.len(),
+//RS         checked.accesses.len(),
+//RS         "each proven access must retain a distinct MIR place identity"
+//RS     );
+//RS     let mut access_roles = Vec::new();
+//RS     let induction_local = auto
+//RS         .locals
+//RS         .iter()
+//RS         .find(|local| local.name == "i")
+//RS         .expect("counted witness must retain its induction local");
+//RS     for place_id in access_roots {
+//RS         let place = auto
+//RS             .places
+//RS             .iter()
+//RS             .find(|place| place.id == place_id)
+//RS             .unwrap_or_else(|| panic!("checked access references unknown MIR place {place_id:?}"));
+//RS         let semantic_name = match &place.base {
+//RS             MirPlaceBase::Local(local) => auto
+//RS                 .locals
+//RS                 .iter()
+//RS                 .find(|candidate| candidate.id == *local)
+//RS                 .map(|local| local.name.clone()),
+//RS             MirPlaceBase::Parameter(value)
+//RS             | MirPlaceBase::Capture(value)
+//RS             | MirPlaceBase::Temporary(value) => auto
+//RS                 .blocks
+//RS                 .iter()
+//RS                 .flat_map(|block| block.instructions.iter())
+//RS                 .find_map(|instruction| {
+//RS                     (instruction.result == Some(*value)).then(|| match &instruction.operation {
+//RS                         MirOperation::Parameter { name, .. } => Some(name.clone()),
+//RS                         _ => None,
+//RS                     })?
+//RS                 }),
+//RS             MirPlaceBase::Static(_) => None,
+//RS         }
+//RS         .unwrap_or_else(|| panic!("checked access has no semantic local name: {place:?}"));
+//RS         let has_index = place
+//RS             .projections
+//RS             .iter()
+//RS             .any(|projection| matches!(projection, MirProjection::Index { .. }));
+//RS         let indexes_cursor = place.projections.iter().any(|projection| {
+//RS             matches!(
+//RS                 projection,
+//RS                 MirProjection::Index { index, .. } if *index == cursor
+//RS             )
+//RS         });
+//RS         access_roles.push((
+//RS             semantic_name,
+//RS             has_index,
+//RS             indexes_cursor,
+//RS             place.projections.is_empty(),
+//RS         ));
+//RS     }
+//RS     access_roles.sort();
+//RS     assert_eq!(
+//RS         access_roles,
+//RS         vec![
+//RS             ("i".to_string(), false, false, true),
+//RS             ("output".to_string(), true, false, false),
+//RS             ("values".to_string(), true, true, false),
+//RS         ],
+//RS         "checked access IDs must resolve to the induction, output, and input local roles"
+//RS     );
+//RS     let output_place = auto
+//RS         .places
+//RS         .iter()
+//RS         .find(|place| {
+//RS             matches!(
+//RS                 &place.base,
+//RS                 MirPlaceBase::Local(local)
+//RS                     if auto
+//RS                         .locals
+//RS                         .iter()
+//RS                         .any(|candidate| candidate.id == *local && candidate.name == "output")
+//RS             ) && place
+//RS                 .projections
+//RS                 .iter()
+//RS                 .any(|projection| matches!(projection, MirProjection::Index { .. }))
+//RS         })
+//RS         .and_then(|place| {
+//RS             place
+//RS                 .projections
+//RS                 .iter()
+//RS                 .find_map(|projection| match projection {
+//RS                     MirProjection::Index { index, .. } => Some(*index),
+//RS                     _ => None,
+//RS                 })
+//RS         })
+//RS         .expect("output access must retain its index identity");
+//RS     assert!(
+//RS         value_reads_place(
+//RS             auto,
+//RS             output_place,
+//RS             induction_local.place,
+//RS             &mut Vec::new()
+//RS         ),
+//RS         "output write index must be tied to the induction local: output index={output_place:?}, induction place={:?}",
+//RS         induction_local.place
+//RS     );
+//RS     assert!(checked.no_aliasing);
+//RS     assert!(checked.no_early_exit);
+//RS     assert!(checked.effect_free_body);
+//RS     assert!(checked.no_cross_iteration_dependencies);
+//RS 
+//RS     let mut overrun = optimized.clone();
+//RS     let overrun_function = function_mut(&mut overrun, "auto");
+//RS     let upper_bound = overrun_function
+//RS         .blocks
+//RS         .iter_mut()
+//RS         .flat_map(|block| &mut block.instructions)
+//RS         .find_map(|instruction| match &mut instruction.operation {
+//RS             jet_foundation::MIR::MirOperation::Constant(
+//RS                 jet_foundation::MIR::MirConstant::Int { value, .. },
+//RS             ) if *value == 4 => Some(value),
+//RS             _ => None,
+//RS         })
+//RS         .expect("the checked loop has a literal upper bound");
+//RS     *upper_bound = 5;
+//RS     overrun_function.optimization.pass_ids.clear();
+//RS     let overrun = jet_foundation::MIR::optimize_mir_program(overrun, &policy).unwrap();
+//RS     let overrun_function = function(&overrun, "auto");
+//RS     assert!(overrun_function
+//RS         .optimization
+//RS         .loop_facts
+//RS         .iter()
+//RS         .any(|fact| fact.trip_count == Some(5)));
+//RS     assert!(!overrun_function.optimization.auto_vectorizable);
+//RS 
+//RS     let mut changed = optimized.clone();
+//RS     function_mut(&mut changed, "auto")
+//RS         .effects
+//RS         .direct
+//RS         .insert("IO".to_string());
+//RS     assert!(
+//RS         jet_foundation::MIR::require_canonical_mir_optimization(&changed).is_err(),
+//RS         "changed MIR must not inherit the old pass receipt"
+//RS     );
+//RS     function_mut(&mut changed, "auto")
+//RS         .optimization
+//RS         .pass_ids
+//RS         .clear();
+//RS 
+//RS     let rejected = jet_foundation::MIR::optimize_mir_program(changed, &policy).unwrap();
+//RS     let auto = function(&rejected, "auto");
+//RS     assert!(!auto.optimization.auto_vectorizable);
+//RS     assert!(
+//RS         auto.optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .all(|fact| !fact.decision.is_eligible())
+//RS     );
+//RS     jet_foundation::MIR::require_canonical_mir_optimization(&rejected).unwrap();
+//RS 
+//RS     let no_op = jet_foundation::MIR::optimize_mir_program(rejected.clone(), &policy).unwrap();
+//RS     assert_eq!(
+//RS         rejected.deterministic_digest(),
+//RS         no_op.deterministic_digest(),
+//RS         "reoptimizing unchanged MIR must preserve identity"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn erased_loop_facts_do_not_make_the_function_vectorizable() {
+//RS     let source = r#"
+//RS fn erased(values: [Float#4]) -> [Float#4] {
+//RS     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+//RS     #Off {
+//RS         loop i in 0..<4 {
+//RS             output[i] = values[i] * 2.0
+//RS         }
+//RS     }
+//RS     return output
+//RS }
+//RS 
+//RS fn active(values: [Float#4]) -> [Float#4] {
+//RS     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+//RS     loop i in 0..<4 {
+//RS         output[i] = values[i] * 2.0
+//RS     }
+//RS     return output
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let mir = lower_checked(source);
+//RS     let optimized =
+//RS         jet_foundation::MIR::optimize_mir_program(mir, &MirOptimizationPolicy::conservative())
+//RS             .unwrap();
+//RS     let erased = function(&optimized, "erased");
+//RS     let active = function(&optimized, "active");
+//RS     assert!(
+//RS         !erased.optimization.auto_vectorizable,
+//RS         "erased loop facts must not make the function vectorizable: {:#?}",
+//RS         erased.optimization
+//RS     );
+//RS     assert!(
+//RS         active.optimization.auto_vectorizable,
+//RS         "active loop must retain its optimizer premise: {:#?}",
+//RS         active.optimization
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn elementwise_list_writes_keep_copy_cost_outside_the_loop() {
+//RS     let source = r#"
+//RS fn bare(values: [Float#4]) -> [Float#4] {
+//RS     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+//RS     loop i in 0..<4 {
+//RS         output[i] = values[i] * 2.0
+//RS     }
+//RS     return output
+//RS }
+//RS 
+//RS fn explicit(values: [Float#4]) -> [Float#4] {
+//RS     output := ~values
+//RS     loop i in 0..<4 {
+//RS         output[i] = values[i] * 2.0
+//RS     }
+//RS     return output
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let mir = lower_checked(source);
+//RS     let policy = MirOptimizationPolicy::conservative();
+//RS     let optimized = jet_foundation::MIR::optimize_mir_program(mir, &policy).unwrap();
+//RS 
+//RS     let bare = function(&optimized, "bare");
+//RS     let bare_loop = bare
+//RS         .optimization
+//RS         .loop_facts
+//RS         .first()
+//RS         .expect("bare elementwise loop fact");
+//RS     assert_eq!(bare_loop.copy_cost, MirCopyCost::None);
+//RS     assert!(
+//RS         bare.optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .any(|fact| fact.decision.is_eligible()),
+//RS         "bare/read elementwise writes must remain vector-eligible"
+//RS     );
+//RS 
+//RS     let explicit = function(&optimized, "explicit");
+//RS     let explicit_loop = explicit
+//RS         .optimization
+//RS         .loop_facts
+//RS         .first()
+//RS         .expect("explicit-copy elementwise loop fact");
+//RS     assert_eq!(explicit_loop.copy_cost, MirCopyCost::None);
+//RS     let explicit_copies = explicit
+//RS         .blocks
+//RS         .iter()
+//RS         .flat_map(|block| block.instructions.iter())
+//RS         .filter(|instruction| matches!(&instruction.operation, MirOperation::Copy { .. }))
+//RS         .count();
+//RS     assert_eq!(
+//RS         explicit_copies, 1,
+//RS         "explicit copy must be materialized once before the loop"
+//RS     );
+//RS     assert!(
+//RS         explicit
+//RS             .optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .any(|fact| fact.decision.is_eligible()),
+//RS         "explicit-copy destination must retain elementwise eligibility"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn checked_vector_proof_conflicts_cannot_repromote_a_loop() {
+//RS     let source = r#"
+//RS fn auto(values: [Float#4]) -> [Float#4] {
+//RS     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+//RS     loop i in 0..<4 { output[i] = values[i] * 2.0 }
+//RS     return output
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let mir = lower_checked(source);
+//RS     let policy = MirOptimizationPolicy::conservative();
+//RS 
+//RS     let mut missing = jet_foundation::MIR::optimize_mir_program(mir.clone(), &policy).unwrap();
+//RS     function_mut(&mut missing, "auto")
+//RS         .optimization
+//RS         .checked_vector_facts
+//RS         .clear();
+//RS     function_mut(&mut missing, "auto")
+//RS         .optimization
+//RS         .pass_ids
+//RS         .clear();
+//RS     let missing = jet_foundation::MIR::optimize_mir_program(missing, &policy).unwrap();
+//RS     assert!(
+//RS         function(&missing, "auto")
+//RS             .optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .all(|fact| !fact.decision.is_eligible()),
+//RS         "missing checked proof must keep the loop scalar"
+//RS     );
+//RS     let mut duplicate = jet_foundation::MIR::optimize_mir_program(mir.clone(), &policy).unwrap();
+//RS     let duplicate_proof = function(&duplicate, "auto")
+//RS         .optimization
+//RS         .checked_vector_facts
+//RS         .first()
+//RS         .cloned()
+//RS         .expect("auto loop checked proof");
+//RS     function_mut(&mut duplicate, "auto")
+//RS         .optimization
+//RS         .checked_vector_facts
+//RS         .push(duplicate_proof);
+//RS     function_mut(&mut duplicate, "auto")
+//RS         .optimization
+//RS         .pass_ids
+//RS         .clear();
+//RS     let duplicate = jet_foundation::MIR::optimize_mir_program(duplicate, &policy).unwrap();
+//RS     assert!(
+//RS         function(&duplicate, "auto")
+//RS             .optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .all(|fact| !fact.decision.is_eligible()),
+//RS         "duplicate checked proofs must remain conservatively rejected"
+//RS     );
+//RS 
+//RS 
+//RS     let mut conflict = jet_foundation::MIR::optimize_mir_program(mir.clone(), &policy).unwrap();
+//RS     let proof = function_mut(&mut conflict, "auto")
+//RS         .optimization
+//RS         .checked_vector_facts
+//RS         .first_mut()
+//RS         .expect("auto loop checked proof");
+//RS     proof.no_cross_iteration_dependencies = false;
+//RS     function_mut(&mut conflict, "auto")
+//RS         .optimization
+//RS         .pass_ids
+//RS         .clear();
+//RS     let conflict = jet_foundation::MIR::optimize_mir_program(conflict, &policy).unwrap();
+//RS     let auto = function(&conflict, "auto");
+//RS     assert!(
+//RS         auto.optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .all(|fact| !fact.decision.is_eligible()),
+//RS         "conflicting checked proof must not be re-promoted"
+//RS     );
+//RS     assert!(
+//RS         auto.optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .any(|fact| !fact.no_cross_iteration_dependencies),
+//RS         "the rejected cross-iteration fact must remain visible"
+//RS     );
+//RS 
+//RS     let mut stale_access =
+//RS         jet_foundation::MIR::optimize_mir_program(mir.clone(), &policy).unwrap();
+//RS     let proof = function_mut(&mut stale_access, "auto")
+//RS         .optimization
+//RS         .checked_vector_facts
+//RS         .first_mut()
+//RS         .expect("auto loop checked proof");
+//RS     assert!(!proof.accesses.is_empty());
+//RS     proof.accesses.clear();
+//RS     function_mut(&mut stale_access, "auto")
+//RS         .optimization
+//RS         .pass_ids
+//RS         .clear();
+//RS     let stale_access =
+//RS         jet_foundation::MIR::optimize_mir_program(stale_access, &policy).unwrap();
+//RS     assert!(
+//RS         function(&stale_access, "auto")
+//RS             .optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .all(|fact| !fact.decision.is_eligible()),
+//RS         "a proof with stale access identity must not re-promote the loop"
+//RS     );
+//RS 
+//RS     let mut changed_cfg = jet_foundation::MIR::optimize_mir_program(mir.clone(), &policy).unwrap();
+//RS     let checked = function(&changed_cfg, "auto")
+//RS         .optimization
+//RS         .checked_vector_facts
+//RS         .first()
+//RS         .cloned()
+//RS         .expect("auto loop checked proof");
+//RS     let exit = function(&changed_cfg, "auto")
+//RS         .optimization
+//RS         .loop_facts
+//RS         .iter()
+//RS         .find(|row| row.header == checked.loop_header)
+//RS         .and_then(|row| row.exit)
+//RS         .expect("auto loop exit");
+//RS     let body = checked.body_blocks[0];
+//RS     function_mut(&mut changed_cfg, "auto")
+//RS         .blocks
+//RS         .iter_mut()
+//RS         .find(|block| block.id == body)
+//RS         .expect("auto loop body block")
+//RS         .terminator = jet_foundation::MIR::MirTerminator::Jump { target: exit };
+//RS     function_mut(&mut changed_cfg, "auto")
+//RS         .optimization
+//RS         .pass_ids
+//RS         .clear();
+//RS     let changed_cfg =
+//RS         jet_foundation::MIR::optimize_mir_program(changed_cfg, &policy).unwrap();
+//RS     assert!(
+//RS         function(&changed_cfg, "auto")
+//RS             .optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .all(|fact| !fact.decision.is_eligible()),
+//RS         "CFG mutation must invalidate the checked loop scope"
+//RS     );
+//RS 
+//RS     let mut explicit_scalar = jet_foundation::MIR::optimize_mir_program(mir, &policy).unwrap();
+//RS     function_mut(&mut explicit_scalar, "auto").is_scalar = true;
+//RS     function_mut(&mut explicit_scalar, "auto")
+//RS         .optimization
+//RS         .pass_ids
+//RS         .clear();
+//RS     let explicit_scalar =
+//RS         jet_foundation::MIR::optimize_mir_program(explicit_scalar, &policy).unwrap();
+//RS     assert!(
+//RS         function(&explicit_scalar, "auto")
+//RS             .optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .all(|fact| !fact.decision.is_eligible()),
+//RS         "an explicit scalar fact must stay on the scalar path"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn columnar_field_arithmetic_keeps_packed_direct_layout() {
+//RS     let source = r#"
+//RS #Layout(columnar)
+//RS struct Particle {
+//RS     x: Float
+//RS     y: Float
+//RS     mass: Float
+//RS }
+//RS 
+//RS fn energy(ps: [Particle#4]) -> [Float#4] {
+//RS     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
+//RS     loop i in 0..<4 {
+//RS         output[i] = ps[i].x * ps[i].y + ps[i].mass
+//RS     }
+//RS     return output
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let mir = lower_checked(source);
+//RS     let policy = MirOptimizationPolicy::conservative();
+//RS     let optimized = jet_foundation::MIR::optimize_mir_program(mir, &policy).unwrap();
+//RS     let energy = function(&optimized, "energy");
+//RS     let fact = energy
+//RS         .optimization
+//RS         .vector_facts
+//RS         .iter()
+//RS         .find(|fact| fact.layout == jet_foundation::MIR::MirVectorLayout::ColumnarDirect)
+//RS         .unwrap_or_else(|| panic!("missing direct columnar vector fact: {:#?}", energy.optimization.vector_facts));
+//RS     assert!(
+//RS         fact.decision.is_eligible(),
+//RS         "columnar arithmetic should be eligible: {fact:#?}"
+//RS     );
+//RS     assert!(
+//RS         fact.packed,
+//RS         "columnar arithmetic should retain packed lowering: {fact:#?}"
+//RS     );
+//RS     assert!(
+//RS         fact.no_cross_iteration_dependencies,
+//RS         "independent field reads must not inherit a scalar loop-carried dependency: {fact:#?}"
+//RS     );
+//RS     assert!(
+//RS         fact.accesses
+//RS             .iter()
+//RS             .any(|access| access.layout == jet_foundation::MIR::MirVectorLayout::ColumnarDirect),
+//RS         "vector fact must retain a direct columnar access: {fact:#?}"
+//RS     );
+//RS     assert!(
+//RS         energy
+//RS             .optimization
+//RS             .acceleration_facts
+//RS             .iter()
+//RS             .all(|fact| {
+//RS                 fact.proof.source_proven
+//RS                     && fact.proof.no_aliasing
+//RS                     && fact.proof.no_cross_iteration_dependencies
+//RS                     && fact.proof.no_early_exit
+//RS                     && fact.proof.effect_free_body
+//RS                     && fact.proof.ownership_safe
+//RS                     && fact.proof.failure_order_preserved
+//RS             }),
+//RS         "columnar acceleration must retain every checked safety guard"
+//RS     );
+//RS }
+//RS 
+//RS fn value_reads_place(
+//RS     function: &jet_foundation::MIR::MirFunction,
+//RS     value: jet_foundation::MIR::MirValueId,
+//RS     place: jet_foundation::MIR::MirPlaceId,
+//RS     seen: &mut Vec<jet_foundation::MIR::MirValueId>,
+//RS ) -> bool {
+//RS     if seen.contains(&value) {
+//RS         return false;
+//RS     }
+//RS     seen.push(value);
+//RS     let Some(instruction) = function
+//RS         .blocks
+//RS         .iter()
+//RS         .flat_map(|block| block.instructions.iter())
+//RS         .find(|instruction| instruction.result == Some(value))
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     match &instruction.operation {
+//RS         MirOperation::ReadPlace(candidate) | MirOperation::MovePlace { place: candidate } => {
+//RS             *candidate == place
+//RS         }
+//RS         MirOperation::Copy { value, .. }
+//RS         | MirOperation::Move { value }
+//RS         | MirOperation::AttachTag { value, .. }
+//RS         | MirOperation::Convert { value, .. } => value_reads_place(function, *value, place, seen),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn function_mut<'a>(
+//RS     program: &'a mut jet_foundation::MIR::MirProgram,
+//RS     name: &str,
+//RS ) -> &'a mut jet_foundation::MIR::MirFunction {
+//RS     program
+//RS         .functions
+//RS         .iter_mut()
+//RS         .find(|function| function.name == name)
+//RS         .unwrap_or_else(|| panic!("missing MIR function {name}"))
+//RS }
+// END-PORT-PENDING 1116 tests/mir_fact_lifecycle.rs:1-697
+
+// PORT-PENDING 1116 tests-mir-fact-lifecycle-module-group: tests/mir_typed_error_carriers.rs:1-87
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS const BASE64_TYPED_ERROR_SOURCE: &str = r#"
+//RS use core.encoding.base64 as api
+//RS 
+//RS fn report_standard(text: String, expected: U8) {
+//RS     if api.decode(text) == {
+//RS         .Ok(bytes) -> {
+//RS             print(bytes.len())
+//RS             print(bytes[0])
+//RS             print(bytes[0] == expected)
+//RS         }
+//RS         .Err(error) -> print(error.reason)
+//RS     }
+//RS }
+//RS 
+//RS fn report_url(text: String, expected: U8) {
+//RS     if api.decode_url(text) == {
+//RS         .Ok(bytes) -> {
+//RS             print(bytes.len())
+//RS             print(bytes[0])
+//RS             print(bytes[0] == expected)
+//RS         }
+//RS         .Err(error) -> print(error.reason)
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(api.is_base64("jet"))
+//RS     print(api.is_base64("Zg=="))
+//RS     report_standard("Zg==", U8{102})
+//RS     report_standard("Zg=", U8{102})
+//RS     report_standard("a?==", U8{102})
+//RS     report_standard("Zh==", U8{102})
+//RS     report_standard("-w", U8{251})
+//RS     report_url("-w", U8{251})
+//RS     report_url("-w==", U8{251})
+//RS }
+//RS "#;
+//RS 
+//RS const OPTIONAL_FOLD_ELIGIBILITY_SOURCE: &str = r#"
+//RS use core.encoding.base64 as api
+//RS TEXT :: prep { "Zg==" }
+//RS 
+//RS fn report_shadowed_local(text: String) {
+//RS     input :: ~text
+//RS     if api.decode(input) == {
+//RS         .Ok(bytes) -> print(bytes.len())
+//RS         .Err(error) -> print(error.reason)
+//RS     }
+//RS }
+//RS 
+//RS fn report_reader_progress() {
+//RS     reader :: Reader.over([U8]{7, 9})
+//RS     first :: reader.read_u8() ?? U8{0}
+//RS     second :: reader.read_u8() ?? U8{0}
+//RS     print(first)
+//RS     print(second)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(TEXT)
+//RS     report_shadowed_local("a?==")
+//RS     report_reader_progress()
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn optional_folds_respect_runtime_shadowing_and_reader_invalidation() {
+//RS     tir_support::assert_tiers_agree(
+//RS         "optional_fold_eligibility",
+//RS         OPTIONAL_FOLD_ELIGIBILITY_SOURCE,
+//RS         "Zg==\ninvalid base64 at byte 1: byte 0x3F is not in the standard base64 alphabet\n7\n9\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn base64_typed_error_carrier_is_consistent_across_i9_tiers() {
+//RS     tir_support::assert_tiers_agree(
+//RS         "base64_typed_error_carrier",
+//RS         BASE64_TYPED_ERROR_SOURCE,
+//RS         "false\ntrue\n1\n102\ntrue\ninvalid base64 at byte 2: expected 1 padding characters\ninvalid base64 at byte 1: byte 0x3F is not in the standard base64 alphabet\ninvalid base64 at byte 1: non-zero unused bits\ninvalid base64 at byte 0: byte 0x2D is not in the standard base64 alphabet\n1\n251\ntrue\ninvalid base64url at byte 2: padding is not allowed\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 1116 tests/mir_typed_error_carriers.rs:1-87
+
+// PORT-PENDING 1116 tests-mir-fact-lifecycle-module-group: tests/modules.rs:1-649
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Stage 1a — `module name { … }` declarations (U3, unified-ecosystem §4).
+//RS //! Parser-level: the module shell (many per file, leading-`_` disable) and its
+//RS //! typed namespace contributions (`env.dev: Env{ … }`). Contribution *values*
+//RS //! reuse the existing struct-literal expression parser.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS use std::path::Path;
+//RS 
+//RS use jet::AST::{Call, Contribution, Expr, Item, Namespace, StrPart};
+//RS use tir_support::{build_and_run_multi, have_rustc, run_default_multi};
+//RS 
+//RS fn parse_items(src: &str) -> Vec<Item> {
+//RS     let (toks, lex_diags) = jet::Lexer::lex(src);
+//RS     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+//RS     jet::Parser::parse(&toks).expect("parse").items
+//RS }
+//RS 
+//RS fn write_files(root: &Path, files: &[(&str, &str)]) {
+//RS     for (relative, source) in files {
+//RS         let path = root.join(relative);
+//RS         if let Some(parent) = path.parent() {
+//RS             fs::create_dir_all(parent).unwrap();
+//RS         }
+//RS         fs::write(path, source).unwrap();
+//RS     }
+//RS }
+//RS 
+//RS fn run_forced_interpreter(
+//RS     name: &str,
+//RS     entry: &str,
+//RS     files: &[(&str, &str)],
+//RS ) -> (i32, String, String) {
+//RS     let scratch = common::Scratch::new(name);
+//RS     write_files(&scratch.path, files);
+//RS     let path = scratch.join(entry);
+//RS     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => (exit_code, stdout, stderr),
+//RS         jet::Interpreter::RunOutcome::Problems(diags) => {
+//RS             panic!("forced interpreter rejected {name}: {diags:?}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn assert_bodyless_module_runs(name: &str, declaration: &str) {
+//RS     let main_src = "module lib\nuse lib.[helper]\nfn run() { print(helper.value()) }\n";
+//RS     let lib_src = format!("{} module helper;\n", declaration);
+//RS     let files = [
+//RS         ("main.jet", main_src),
+//RS         ("lib.jet", lib_src.as_str()),
+//RS         (
+//RS             "helper.jet",
+//RS             "pub fn value() -> String { return \"visible\" }\n",
+//RS         ),
+//RS     ];
+//RS 
+//RS     if have_rustc() {
+//RS         let (code, stdout) = build_and_run_multi(name, "main.jet", &files);
+//RS         assert_eq!(code, 0);
+//RS         assert_eq!(stdout, "visible\n");
+//RS     }
+//RS 
+//RS     let (code, stdout, stderr) = run_default_multi(name, "main.jet", &files);
+//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
+//RS     assert_eq!(stdout, "visible\n");
+//RS 
+//RS     let (code, stdout, stderr) = run_forced_interpreter(name, "main.jet", &files);
+//RS     assert_eq!(code, 0, "forced interpreter failed: {stderr}");
+//RS     assert_eq!(stdout, "visible\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn perf_role_captures_budget_expression_and_spans() {
+//RS     let src = r#"module perf.release {
+//RS     budgets: [Budget{
+//RS         name: "binary",
+//RS         scope: .Target("cli"),
+//RS         metric: .BinarySize,
+//RS         limit: .AtMost(2MiB),
+//RS     }]
+//RS }
+//RS 
+//RS "#;
+//RS     let items = parse_items(src);
+//RS     let Item::Module(module) = &items[0] else {
+//RS         panic!("expected perf role module");
+//RS     };
+//RS     assert_eq!(module.name, "perf.release");
+//RS     assert_eq!(
+//RS         &src[module.name_span.start..module.name_span.end],
+//RS         "perf.release"
+//RS     );
+//RS     let contribution = &module.contributions[0];
+//RS     assert_eq!(contribution.namespace, Namespace::Perf);
+//RS     assert_eq!(contribution.path, "release");
+//RS     let jet::AST::ContribValue::Perf(perf) = &contribution.value else {
+//RS         panic!("expected typed perf role AST");
+//RS     };
+//RS     assert_eq!(
+//RS         &src[perf.budgets_span.start..perf.budgets_span.end],
+//RS         "budgets"
+//RS     );
+//RS     assert_eq!(perf.budgets.len(), 1);
+//RS     assert_eq!(perf.budgets[0].fields.len(), 4);
+//RS     let limit = perf.budgets[0]
+//RS         .fields
+//RS         .iter()
+//RS         .find(|field| field.name == "limit")
+//RS         .expect("typed limit field");
+//RS     let Expr::EnumLit { args, .. } = &limit.value else {
+//RS         panic!("typed limit enum");
+//RS     };
+//RS     let jet::AST::EnumLitArg::Positional(Expr::UnitLit {
+//RS         raw,
+//RS         suffix,
+//RS         suffix_span,
+//RS         ..
+//RS     }) = &args[0]
+//RS     else {
+//RS         panic!("typed unit literal");
+//RS     };
+//RS     assert_eq!((raw.as_str(), suffix.as_str()), ("2", "MiB"));
+//RS     assert_eq!(&src[suffix_span.start..suffix_span.end], "MiB");
+//RS     assert_eq!(
+//RS         &src[perf.span.start..perf.span.end],
+//RS         src[src.find("budgets").unwrap()..].trim_end()
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn perf_budget_sema_elaborates_defaults_and_field_spans() {
+//RS     let src = r#"module perf.release {
+//RS     budgets: [Budget{
+//RS         name: "binary",
+//RS         metric: .BinarySize,
+//RS         limit: .AtMost(2MiB),
+//RS     }]
+//RS }
+//RS 
+//RS "#;
+//RS     let (tokens, lex_diags) = jet::Lexer::lex(src);
+//RS     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+//RS     let program = jet::Parser::parse(&tokens).expect("parse");
+//RS     let specs = jet::Sema::collect_budget_specs(&program).expect("valid performance budget");
+//RS     assert_eq!(specs.len(), 1);
+//RS     let spec = &specs[0];
+//RS     assert_eq!(spec.role, "release");
+//RS     assert_eq!(spec.name, "binary");
+//RS     assert_eq!(spec.metric, "BinarySize");
+//RS     assert_eq!(spec.comparison, "Absolute");
+//RS     assert_eq!(spec.limit, "AtMost");
+//RS     assert_eq!(spec.enforcement, "Fail");
+//RS     assert_eq!(&src[spec.span.start..spec.span.end], "Budget{\n        name: \"binary\",\n        metric: .BinarySize,\n        limit: .AtMost(2MiB),\n    }");
+//RS     for field in ["name", "metric", "limit"] {
+//RS         let span = spec.field_spans.get(field).expect("field span");
+//RS         assert_eq!(&src[span.start..span.end], field);
+//RS     }
+//RS }
+//RS 
+//RS fn collect_perf_specs(
+//RS     src: &str,
+//RS ) -> Result<Vec<jet::Sema::BudgetSpec>, Vec<jet::Diagnostics::Diagnostic>> {
+//RS     let (tokens, lex_diags) = jet::Lexer::lex(src);
+//RS     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+//RS     let program = jet::Parser::parse(&tokens).expect("parse");
+//RS     jet::Sema::collect_budget_specs(&program)
+//RS }
+//RS 
+//RS #[test]
+//RS fn perf_budget_sema_rejects_duplicate_identity_and_effective_overlap() {
+//RS     let duplicate_name = r#"module perf.release {
+//RS     budgets: [
+//RS         Budget{ name: "binary", metric: .BinarySize, limit: .AtMost(2MiB) },
+//RS         Budget{ name: "binary", metric: .ArtifactSize, limit: .AtMost(3MiB) },
+//RS     ]
+//RS }
+//RS "#;
+//RS     let diagnostics = collect_perf_specs(duplicate_name).expect_err("duplicate identity");
+//RS     assert_eq!(diagnostics.last().expect("diagnostic").code, "E2904");
+//RS 
+//RS     let overlap = r#"module perf.release {
+//RS     budgets: [
+//RS         Budget{ name: "binary", metric: .BinarySize, limit: .AtMost(2MiB) },
+//RS         Budget{ name: "shipping", metric: .BinarySize, limit: .AtMost(3MiB) },
+//RS     ]
+//RS }
+//RS "#;
+//RS     let diagnostics = collect_perf_specs(overlap).expect_err("effective overlap");
+//RS     assert_eq!(diagnostics.last().expect("diagnostic").code, "E2904");
+//RS }
+//RS 
+//RS #[test]
+//RS fn perf_budget_sema_accepts_disjoint_target_applicability() {
+//RS     let src = r#"module perf.release {
+//RS     budgets: [
+//RS         Budget{
+//RS             name: "linux",
+//RS             metric: .BinarySize,
+//RS             limit: .AtMost(2MiB),
+//RS             applies: BudgetApplies{
+//RS                 targets: .Only([.Triple("x86_64-unknown-linux-gnu")]),
+//RS                 profiles: .All,
+//RS             },
+//RS         },
+//RS         Budget{
+//RS             name: "windows",
+//RS             metric: .BinarySize,
+//RS             limit: .AtMost(2MiB),
+//RS             applies: BudgetApplies{
+//RS                 targets: .Only([.Triple("x86_64-pc-windows-msvc")]),
+//RS                 profiles: .All,
+//RS             },
+//RS         },
+//RS     ]
+//RS }
+//RS 
+//RS "#;
+//RS     assert_eq!(collect_perf_specs(src).expect("disjoint budgets").len(), 2);
+//RS }
+//RS 
+//RS #[test]
+//RS fn perf_budget_sema_resolves_service_scope_and_provider() {
+//RS     let src = r#"module env.dev {
+//RS     services: { api: { enable: true } }
+//RS }
+//RS module perf.release {
+//RS     budgets: [Budget{
+//RS         name: "ready",
+//RS         scope: .Service("api"),
+//RS         metric: .ServiceReadiness,
+//RS         provider: .ServiceProbe("api"),
+//RS         comparison: .AbsoluteFrom("ci/linux-x64"),
+//RS         limit: .AtMost(2s),
+//RS         enforcement: .Warn,
+//RS     }]
+//RS }
+//RS "#;
+//RS     let specs = collect_perf_specs(src).expect("resolved service budget");
+//RS     assert_eq!(specs[0].scope, "Service(api)");
+//RS     assert_eq!(specs[0].provider, "ServiceProbe(api)");
+//RS     assert_eq!(specs[0].enforcement, "Warn");
+//RS }
+//RS 
+//RS #[test]
+//RS fn perf_budget_sema_rejects_statistical_budget_without_provider() {
+//RS     let src = r#"module perf.release {
+//RS     budgets: [Budget{
+//RS         name: "startup",
+//RS         scope: .Target("cli"),
+//RS         metric: .StartupTime,
+//RS         comparison: .AbsoluteFrom("ci/linux-x64"),
+//RS         limit: .AtMost(500ms),
+//RS     }]
+//RS }
+//RS "#;
+//RS     let diagnostics = collect_perf_specs(src).expect_err("statistical provider is required");
+//RS     let diagnostic = diagnostics.last().expect("diagnostic");
+//RS     assert_eq!(diagnostic.code, "E2903");
+//RS     assert_eq!(diagnostic.what, "performance budget startup is not valid");
+//RS     assert!(diagnostic.why.contains("provider"), "{diagnostic:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes() {
+//RS     let bad_percentile = r#"module perf.release {
+//RS     budgets: [Budget{
+//RS         name: "frame",
+//RS         scope: .Scene("menu"),
+//RS         metric: .FrameTime(.P42),
+//RS         provider: .SceneProbe("menu"),
+//RS         comparison: .AbsoluteFrom("ci/linux-x64"),
+//RS         limit: .AtMost(16ms),
+//RS     }]
+//RS }
+//RS 
+//RS "#;
+//RS     assert_eq!(
+//RS         collect_perf_specs(bad_percentile).expect_err("closed percentile")[0].code,
+//RS         "E2903"
+//RS     );
+//RS 
+//RS     let bad_baseline = r#"module perf.release {
+//RS     budgets: [Budget{
+//RS         name: "startup",
+//RS         scope: .Target("cli"),
+//RS         metric: .StartupTime,
+//RS         provider: .BuildArtifact("cli"),
+//RS         comparison: .AbsoluteFrom("CI//linux"),
+//RS         limit: .AtMost(500ms),
+//RS     }]
+//RS }
+//RS "#;
+//RS     assert_eq!(
+//RS         collect_perf_specs(bad_baseline).expect_err("baseline grammar")[0].code,
+//RS         "E2903"
+//RS     );
+//RS 
+//RS     let wrong_axis = r#"module perf.release {
+//RS     budgets: [Budget{
+//RS         name: "binary",
+//RS         metric: .BinarySize,
+//RS         limit: .AtMost(2MiB),
+//RS         applies: BudgetApplies{ profiles: .Only([.Triple("x86_64-unknown-linux-gnu")]) },
+//RS     }]
+//RS }
+//RS "#;
+//RS     assert_eq!(
+//RS         collect_perf_specs(wrong_axis).expect_err("profile selector family")[0].code,
+//RS         "E2903"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn perf_budget_sema_normalizes_rate_and_retains_canonical_facts() {
+//RS     let source = |baseline: &str, count: &str, seconds: i64| {
+//RS         format!(
+//RS             r#"module env.dev {{
+//RS     services: {{ api: {{ enable: true }} }}
+//RS }}
+//RS module perf.release {{
+//RS     budgets: [Budget{{
+//RS         name: "throughput",
+//RS         scope: .Service("api"),
+//RS         metric: .Throughput,
+//RS         provider: .ServiceProbe("api"),
+//RS         comparison: .AbsoluteFrom("{baseline}"),
+//RS         limit: .AtLeast(Rate{{ count: {count}, per: {seconds}s }}),
+//RS         enforcement: .Warn,
+//RS     }}]
+//RS }}
+//RS "#
+//RS         )
+//RS     };
+//RS     let first = collect_perf_specs(&source("ci/linux-x64", "100", 2))
+//RS         .expect("valid Rate")
+//RS         .remove(0);
+//RS     assert_eq!(first.comparison, "AbsoluteFrom");
+//RS     assert_eq!(
+//RS         first.comparison_fact.baseline.as_deref(),
+//RS         Some("ci/linux-x64")
+//RS     );
+//RS     assert_eq!(
+//RS         first.limit_fact.quantity,
+//RS         jet::Sema::BudgetQuantity::Rate {
+//RS             numerator: 1,
+//RS             denominator_ns: 20_000_000
+//RS         }
+//RS     );
+//RS     assert_eq!(
+//RS         first.limit_fact.raw,
+//RS         jet::Sema::BudgetRawQuantity::Rate {
+//RS             count_digits: "100".into(),
+//RS             per_digits: "2".into(),
+//RS             per_suffix: "s".into()
+//RS         }
+//RS     );
+//RS     let second = collect_perf_specs(&source("ci/macos-arm64", "75", 1))
+//RS         .expect("second valid Rate")
+//RS         .remove(0);
+//RS     assert_ne!(first.comparison_fact, second.comparison_fact);
+//RS     assert_ne!(first.limit_fact, second.limit_fact);
+//RS 
+//RS     let hostile = collect_perf_specs(&source("ci/linux-x64", "000_100", 2))
+//RS         .expect("Rate with legal leading zeroes and separators")
+//RS         .remove(0);
+//RS     assert_eq!(
+//RS         hostile.limit_fact.quantity,
+//RS         jet::Sema::BudgetQuantity::Rate {
+//RS             numerator: 1,
+//RS             denominator_ns: 20_000_000
+//RS         }
+//RS     );
+//RS     assert_eq!(
+//RS         hostile.limit_fact.raw,
+//RS         jet::Sema::BudgetRawQuantity::Rate {
+//RS             count_digits: "000_100".into(),
+//RS             per_digits: "2".into(),
+//RS             per_suffix: "s".into()
+//RS         }
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn perf_budget_sema_rejects_named_and_extra_limit_arguments() {
+//RS     let cases = [
+//RS         ("BinarySize", "", "", "Absolute", "AtMost", "2MiB"),
+//RS         (
+//RS             "StartupTime",
+//RS             "scope: .Service(\"api\"),",
+//RS             "provider: .ServiceProbe(\"api\"),",
+//RS             "RelativeTo(\"ci/linux-x64\")",
+//RS             "RegressionAtMost",
+//RS             "3pct",
+//RS         ),
+//RS         (
+//RS             "Throughput",
+//RS             "scope: .Service(\"api\"),",
+//RS             "provider: .ServiceProbe(\"api\"),",
+//RS             "RelativeTo(\"ci/linux-x64\")",
+//RS             "ImprovementAtLeast",
+//RS             "3pct",
+//RS         ),
+//RS         (
+//RS             "Throughput",
+//RS             "scope: .Service(\"api\"),",
+//RS             "provider: .ServiceProbe(\"api\"),",
+//RS             "AbsoluteFrom(\"ci/linux-x64\")",
+//RS             "AtLeast",
+//RS             "Rate{ count: 100, per: 1s }",
+//RS         ),
+//RS     ];
+//RS     for (metric, scope, provider, comparison, constructor, value) in cases {
+//RS         for limit_expr in [
+//RS             format!(".{constructor}{{ value: {value} }}"),
+//RS             format!(".{constructor}({value}, {value})"),
+//RS         ] {
+//RS             let src = format!(
+//RS                 r#"module env.dev {{ services: {{ api: {{ enable: true }} }} }}
+//RS module perf.release {{
+//RS     budgets: [Budget{{
+//RS         name: "hostile",
+//RS         {scope}
+//RS         metric: .{metric},
+//RS         {provider}
+//RS         comparison: .{comparison},
+//RS         limit: {limit_expr},
+//RS         enforcement: .Fail,
+//RS     }}]
+//RS }}
+//RS "#
+//RS             );
+//RS             let diagnostics =
+//RS                 collect_perf_specs(&src).expect_err("limit constructor arity must reject");
+//RS             assert_eq!(diagnostics[0].code, "E2903", "{limit_expr}");
+//RS             assert!(
+//RS                 diagnostics[0].why.contains("exactly one positional"),
+//RS                 "{:?}",
+//RS                 diagnostics[0]
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn parses_module_shell_with_contribution() {
+//RS     let src = r#"
+//RS module dev {
+//RS     env.dev: Env{
+//RS         prompt: "wordstats",
+//RS     }
+//RS }
+//RS "#;
+//RS     let items = parse_items(src);
+//RS     assert_eq!(items.len(), 1);
+//RS     let Item::Module(m) = &items[0] else {
+//RS         panic!("expected a module item, got {:?}", items[0]);
+//RS     };
+//RS     assert_eq!(m.name, "dev");
+//RS     assert!(m.is_auto_discovered());
+//RS     assert_eq!(m.contributions.len(), 1);
+//RS     let Contribution {
+//RS         namespace, path, ..
+//RS     } = &m.contributions[0];
+//RS     assert_eq!(*namespace, Namespace::Env);
+//RS     assert_eq!(path, "dev");
+//RS }
+//RS 
+//RS #[test]
+//RS fn parses_nested_sources_and_imports() {
+//RS     // U8: `sources:` / `imports:` nest inside the module body, as siblings of
+//RS     // the `env.dev: Env{ … }` contribution (owner, 2026-06-16; amends U4).
+//RS     let src = r#"
+//RS module dev {
+//RS     sources: { default: NixOS/nixpkgs/nixos-24.05@github }
+//RS     imports: find("./modules")
+//RS     env.dev: Env{
+//RS         prompt: "wordstats",
+//RS     }
+//RS }
+//RS "#;
+//RS     let items = parse_items(src);
+//RS     let Item::Module(m) = &items[0] else {
+//RS         panic!("expected a module item, got {:?}", items[0]);
+//RS     };
+//RS 
+//RS     // One named source; its `target@provider` ref is recovered by slicing the
+//RS     // source at the recorded span (the parser is token-based, the ref is not a
+//RS     // single token — modeval validates it via classify_provider_ref).
+//RS     assert_eq!(m.sources.len(), 1);
+//RS     assert_eq!(m.sources[0].name, "default");
+//RS     assert_eq!(
+//RS         &src[m.sources[0].ref_span.start..m.sources[0].ref_span.end],
+//RS         "NixOS/nixpkgs/nixos-24.05@github"
+//RS     );
+//RS 
+//RS     // One import: `find("./modules")`, parsed as an ordinary call expression.
+//RS     assert_eq!(m.imports.len(), 1);
+//RS     let Expr::Call(Call { name, args, .. }) = &m.imports[0] else {
+//RS         panic!("expected a call expression, got {:?}", m.imports[0]);
+//RS     };
+//RS     assert_eq!(name, "find");
+//RS     assert_eq!(args.len(), 1);
+//RS     let Expr::Str(parts, _) = &args[0].expr else {
+//RS         panic!("expected a string argument, got {:?}", args[0].expr);
+//RS     };
+//RS     let [StrPart::Lit(path)] = parts.as_slice() else {
+//RS         panic!("expected a single literal string part, got {parts:?}");
+//RS     };
+//RS     assert_eq!(path, "./modules");
+//RS 
+//RS     // The typed contribution still parses alongside the new fields.
+//RS     assert_eq!(m.contributions.len(), 1);
+//RS     assert_eq!(m.contributions[0].namespace, Namespace::Env);
+//RS     assert_eq!(m.contributions[0].path, "dev");
+//RS }
+//RS 
+//RS #[test]
+//RS fn module_without_sources_or_imports_has_empty_fields() {
+//RS     let src = r#"
+//RS module dev {
+//RS     env.dev: Env{ prompt: "x" }
+//RS }
+//RS "#;
+//RS     let items = parse_items(src);
+//RS     let Item::Module(m) = &items[0] else {
+//RS         panic!("expected a module item");
+//RS     };
+//RS     assert!(m.sources.is_empty());
+//RS     assert!(m.imports.is_empty());
+//RS     assert_eq!(m.contributions.len(), 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn leading_underscore_opts_module_out_of_auto_discovery() {
+//RS     let src = r#"
+//RS module _gaming {
+//RS     system.gaming: System{
+//RS         target: linux.x64,
+//RS     }
+//RS }
+//RS "#;
+//RS     let items = parse_items(src);
+//RS     let Item::Module(m) = &items[0] else {
+//RS         panic!("expected a module item");
+//RS     };
+//RS     assert_eq!(m.name, "_gaming");
+//RS     assert!(!m.is_auto_discovered());
+//RS     assert_eq!(m.contributions[0].namespace, Namespace::System);
+//RS }
+//RS 
+//RS #[test]
+//RS fn many_modules_per_file() {
+//RS     let src = r#"
+//RS module laptop {
+//RS     system.laptop: System{ target: linux.x64 }
+//RS }
+//RS module installer {
+//RS     image.installer: Image{ from: system.laptop, target: linux.arm64 }
+//RS }
+//RS "#;
+//RS     let items = parse_items(src);
+//RS     assert_eq!(items.len(), 2);
+//RS     let (Item::Module(a), Item::Module(b)) = (&items[0], &items[1]) else {
+//RS         panic!("expected two module items");
+//RS     };
+//RS     assert_eq!(a.name, "laptop");
+//RS     assert_eq!(a.contributions[0].namespace, Namespace::System);
+//RS     assert_eq!(b.name, "installer");
+//RS     assert_eq!(b.contributions[0].namespace, Namespace::Image);
+//RS }
+//RS 
+//RS #[test]
+//RS fn bodyless_public_module_is_visible_through_selective_import() {
+//RS     assert_bodyless_module_runs("bodyless_public_module", "pub");
+//RS }
+//RS 
+//RS #[test]
+//RS fn bodyless_package_module_is_visible_inside_package() {
+//RS     assert_bodyless_module_runs("bodyless_package_module", "pub(package)");
+//RS }
+//RS 
+//RS #[test]
+//RS fn bodyless_private_module_stays_hidden_outside_owner_file() {
+//RS     let scratch = common::Scratch::new("bodyless_private_module");
+//RS     write_files(
+//RS         &scratch.path,
+//RS         &[
+//RS             (
+//RS                 "main.jet",
+//RS                 "module lib\nuse lib.[helper]\nfn run() { print(helper.value()) }\n",
+//RS             ),
+//RS             ("lib.jet", "module helper;\n"),
+//RS             (
+//RS                 "helper.jet",
+//RS                 "pub fn value() -> String { return \"private\" }\n",
+//RS             ),
+//RS         ],
+//RS     );
+//RS 
+//RS     let entry = scratch.join("main.jet");
+//RS     let diagnostics = jet::check_with_path(entry.to_str().unwrap());
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0609"),
+//RS         "private bodyless module unexpectedly visible: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn bodyless_package_module_stays_hidden_across_packages() {
+//RS     let scratch = common::Scratch::new("bodyless_package_module_external");
+//RS     write_files(
+//RS         &scratch.path,
+//RS         &[
+//RS             (
+//RS                 "app/package.jet",
+//RS                 "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep: ../dep }\n",
+//RS             ),
+//RS             (
+//RS                 "app/main.jet",
+//RS                 "use dep\nuse dep.[helper]\nfn run() { print(helper.value()) }\n",
+//RS             ),
+//RS             ("dep/package.jet", "name: \"dep\"\nversion: \"0.1.0\"\n"),
+//RS             ("dep/dep.jet", "pub(package) module helper;\n"),
+//RS             (
+//RS                 "dep/helper.jet",
+//RS                 "pub fn value() -> String { return \"hidden\" }\n",
+//RS             ),
+//RS         ],
+//RS     );
+//RS 
+//RS     let entry = scratch.join("app/main.jet");
+//RS     let diagnostics = jet::check_with_path(entry.to_str().unwrap());
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| matches!(diagnostic.code.as_str(), "E0609" | "E0611")),
+//RS         "package-private bodyless module unexpectedly crossed package boundary: {diagnostics:?}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1116 tests/modules.rs:1-649
+

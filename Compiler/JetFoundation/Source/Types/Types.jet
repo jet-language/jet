@@ -85,20 +85,22 @@ pub fn measure_kind(measure: Measure) -> String Never! {
     }
 }
 
+// AST/types.rs `Measure::literal_value`: the Rust `u64` carrier; `checked_add`
+// and `checked_mul` overflow, signed literals, symbols and `match` are None.
 pub fn measure_literal_value(measure: Measure) -> Int? {
     if measure == {
-        .Literal(_, value) -> Val(value)
+        .Literal(_, value) -> measure_checked_u64(value)
         .Combined(_, rule, left, right) -> {
             if rule == {
                 .Add -> {
                     l :: measure_literal_value(left) ?? return None
                     r :: measure_literal_value(right) ?? return None
-                    Val(l + r)
+                    measure_checked_u64(l + r)
                 }
                 .Mul -> {
                     l :: measure_literal_value(left) ?? return None
                     r :: measure_literal_value(right) ?? return None
-                    Val(l * r)
+                    measure_checked_u64(l * r)
                 }
                 .Match -> None
             }
@@ -107,27 +109,69 @@ pub fn measure_literal_value(measure: Measure) -> Int? {
     }
 }
 
+// AST/types.rs `Measure::signed_literal_value`: the Rust `i64` carrier; an
+// unsigned literal above `i64::MAX` (`i64::try_from`) and `checked_add`/
+// `checked_mul` overflow are None.
 pub fn measure_signed_value(measure: Measure) -> Int? {
     if measure == {
-        .SignedLiteral(_, value) -> Val(value)
-        .Literal(_, value) -> Val(value)
+        .SignedLiteral(_, value) -> measure_checked_i64(value)
+        .Literal(_, value) -> {
+            unsigned :: measure_checked_u64(value) ?? return None
+            measure_checked_i64(unsigned)
+        }
         .Combined(_, rule, left, right) -> {
             if rule == {
                 .Add -> {
                     l :: measure_signed_value(left) ?? return None
                     r :: measure_signed_value(right) ?? return None
-                    Val(l + r)
+                    measure_checked_i64(l + r)
                 }
                 .Mul -> {
                     l :: measure_signed_value(left) ?? return None
                     r :: measure_signed_value(right) ?? return None
-                    Val(l * r)
+                    measure_checked_i64(l * r)
                 }
                 .Match -> None
             }
         }
         else -> None
     }
+}
+
+fn measure_checked_u64(value: Int) -> Int? {
+    if value < 0 || value > 18446744073709551615 -> return None
+    Val(value)
+}
+
+fn measure_checked_i64(value: Int) -> Int? {
+    if value < -9223372036854775808 || value > 9223372036854775807 -> return None
+    Val(value)
+}
+
+// AST/types.rs `Measure::combine`: same-kind operands only. `match` keeps equal
+// operands; Add/Mul fold the `u64` values first, then the `i64` values, where an
+// overflowing fold is None; any other pair stays a symbolic combination.
+fn measure_combine(left: Measure, right: Measure, rule: MeasureRule) -> Measure? {
+    kind :: measure_kind(left)
+    if kind != measure_kind(right) -> return None
+    if rule == MeasureRule.Match {
+        if left == right -> return Val(left)
+        return None
+    }
+    add :: rule == MeasureRule.Add
+    if measure_literal_value(left) == .Val(l) {
+        if measure_literal_value(right) == .Val(r) {
+            folded :: measure_checked_u64(if add -> l + r else -> l * r) ?? return None
+            return Val(Measure.Literal{kind: kind, value: folded})
+        }
+    }
+    if measure_signed_value(left) == .Val(l) {
+        if measure_signed_value(right) == .Val(r) {
+            folded :: measure_checked_i64(if add -> l + r else -> l * r) ?? return None
+            return Val(Measure.SignedLiteral{kind: kind, value: folded})
+        }
+    }
+    Val(Measure.Combined{kind: kind, rule: rule, left: left, right: right})
 }
 
 pub fn measure_expression(measure: Measure) -> String Never! {
@@ -156,8 +200,54 @@ pub struct DimensionAxis {
     pub exponent: Measure
 }
 
+// AST/types.rs `Dimension`: a Rust `BTreeMap` from nominal axis identity to its
+// exponent, so `axes` holds unique names in byte order and the constructors
+// below keep that invariant.
 pub struct Dimension {
     pub axes: [DimensionAxis]
+}
+
+// AST/types.rs `Dimension::base`.
+pub fn dimension_base(identity: String) -> Dimension Never! {
+    Dimension{axes: [DimensionAxis]{DimensionAxis{name: identity, exponent: Measure.SignedLiteral{kind: "exponent", value: 1}}}}
+}
+
+// AST/types.rs `Dimension::multiply`.
+pub fn dimension_multiply(left: Dimension, right: Dimension) -> Dimension? { dimension_combine(left, right, false) }
+
+// AST/types.rs `Dimension::divide`.
+pub fn dimension_divide(left: Dimension, right: Dimension) -> Dimension? { dimension_combine(left, right, true) }
+
+// AST/types.rs `Dimension::combine`: the left axes are kept verbatim; each right
+// axis is scaled by +/-1 and added to the matching left exponent through
+// `measure_combine`. A sum outside `i32` is None, a zero sum removes the axis,
+// and a new axis is inserted at its byte-ordered key position.
+fn dimension_combine(left: Dimension, right: Dimension, subtract: Bool) -> Dimension? {
+    axes := ~left.axes
+    factor :: Measure.SignedLiteral{kind: "exponent", value: if subtract -> -1 else -> 1}
+    loop axis in right.axes {
+        exponent :: measure_combine(axis.exponent, factor, MeasureRule.Mul) ?? return None
+        index := 0
+        loop index < axes.len() && axes[index].name < axis.name -> index += 1
+        present :: index < axes.len() && axes[index].name == axis.name
+        current :: if present -> axes[index].exponent else -> Measure.SignedLiteral{kind: "exponent", value: 0}
+        summed :: measure_combine(current, exponent, MeasureRule.Add) ?? return None
+        value :: measure_signed_value(summed) ?? return None
+        if value < -2147483648 || value > 2147483647 -> return None
+        if {
+            value == 0 && present -> {
+                _ := &axes.remove(index, .Slot)
+            }
+            value == 0 -> {}
+            present -> {
+                axes[index].exponent = summed
+            }
+            else -> {
+                &axes.insert(index, DimensionAxis{name: axis.name, exponent: summed})
+            }
+        }
+    }
+    Val(Dimension{axes: axes})
 }
 
 pub fn dimension_identity(dimension: Dimension) -> String Never! {
@@ -190,6 +280,71 @@ pub fn dimension_display_name(dimension: Dimension) -> String Never! {
 
 fn escape_dimension_axis(axis: String) -> String Never! {
     axis.replace("%", "%25").replace(";", "%3B").replace(":", "%3A")
+}
+
+// AST/types.rs `Dimension::from_identity`: `axis:exponent` parts joined by `;`
+// with escaped axes and nonzero `i32` exponents; a malformed part, a zero
+// exponent or a repeated axis is None.
+pub fn dimension_from_identity(identity: String) -> Dimension? {
+    axes := [DimensionAxis]{}
+    if identity == "" -> return Val(Dimension{axes: axes})
+    loop part in identity.split(";") {
+        colon :: part.last_index_of(":") ?? return None
+        exponent :: dimension_parse_i32(part.slice(colon + 1, part.len())) ?? return None
+        if exponent == 0 -> return None
+        name :: unescape_dimension_axis(part.slice(0, colon)) ?? return None
+        index := 0
+        loop index < axes.len() && axes[index].name < name -> index += 1
+        if index < axes.len() && axes[index].name == name -> return None
+        &axes.insert(index, DimensionAxis{name: name, exponent: Measure.SignedLiteral{kind: "exponent", value: exponent}})
+    }
+    Val(Dimension{axes: axes})
+}
+
+// Rust `str::parse::<i32>`: an optional sign, then one or more ASCII digits.
+fn dimension_parse_i32(text: String) -> Int? {
+    bytes :: text.bytes()
+    start :: if bytes.len() > 0 && (Int.from_u8(bytes[0]) == 43 || Int.from_u8(bytes[0]) == 45) -> 1 else -> 0
+    if start == bytes.len() -> return None
+    value := 0
+    loop index in start..<bytes.len() {
+        digit :: Int.from_u8(bytes[index]) - 48
+        if digit < 0 || digit > 9 -> return None
+        value = value * 10 + digit
+        if value > 2147483648 -> return None
+    }
+    if Int.from_u8(bytes[0]) == 45 -> value = -value
+    if value > 2147483647 -> return None
+    Val(value)
+}
+
+// AST/types.rs `unescape_axis`: `%25`, `%3B` and `%3A` only; any other `%`
+// sequence is None. Other bytes are copied as UTF-8 (the Rust reference pushes
+// each byte as a `char`, which mangles non-ASCII axes; not reproduced).
+fn unescape_dimension_axis(axis: String) -> String? {
+    bytes :: axis.bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        if Int.from_u8(bytes[index]) != 37 {
+            &out.push(bytes[index])
+            index += 1
+            next
+        }
+        if index + 3 > bytes.len() -> return None
+        high :: Int.from_u8(bytes[index + 1])
+        low :: Int.from_u8(bytes[index + 2])
+        decoded :: if {
+            high == 50 && low == 53 -> 37
+            high == 51 && low == 66 -> 59
+            high == 51 && low == 65 -> 58
+            else -> -1
+        }
+        if decoded < 0 -> return None
+        &out.push(U8{decoded})
+        index += 3
+    }
+    Val(String.from_bytes(out) ?? return None)
 }
 
 pub enum Exactness {
@@ -252,8 +407,55 @@ pub struct CallablePolicy {
     pub arguments: [String]
 }
 
+// Rust AST/types.rs CallablePolicy::display: arguments are already textual.
+pub fn callable_policy_display(policy: CallablePolicy) -> String Never! {
+    "{policy.name}({policy.arguments.join(", ")})"
+}
+
 pub struct CallablePolicyChain {
     pub policies: [CallablePolicy]
+}
+
+// Rust AST/types.rs::CallablePolicyChain::parse, preserving Result errors.
+pub fn callable_policy_chain_parse(expressions: [Expr]) -> CallablePolicyChain String! {
+    policies := [CallablePolicy]{}
+    loop expression in expressions {
+        call :: if expression == {
+            .Call(value) -> value
+            else -> { return Err("a callable policy is a call such as `retry(3)`") }
+        }
+        loop argument in call.args {
+            if argument.label != None || argument.spread -> return Err("`{call.name}` policies take ordinary positional values")
+        }
+        arguments :: loop argument in call.args -> policy_argument_text(argument.expr)
+        &policies.push(CallablePolicy{name: call.name, arguments: arguments})
+    }
+    Ok(CallablePolicyChain{policies: policies})
+}
+
+// Rust AST/types.rs::policy_argument_text. Float uses its value, not raw source;
+// only a one-part literal String receives Debug quoting.
+fn policy_argument_text(expression: Expr) -> String Never! {
+    if expression == {
+        .Str(parts, _) -> {
+            if parts.len() == 1 {
+                if parts[0] == .Lit(value) -> return "{value:Debug}"
+                return "<string>"
+            }
+            "<expression>"
+        }
+        .Int(value, _, _, source) -> source ?? "{value}"
+        .Float(value, _, _, _) -> "{value}"
+        .Bool(value, _) -> "{value}"
+        .Char(value, _) -> "'{value}'"
+        .Ident(name, _) -> name
+        .Field(base, field, _) -> "{policy_argument_text(base)}.{field}"
+        .Call(call) -> {
+            arguments :: loop argument in call.args -> policy_argument_text(argument.expr)
+            "{call.name}({arguments.join(", ")})"
+        }
+        else -> "<expression>"
+    }
 }
 
 // Callable defaults refer back to their owning declaration instead of copying
@@ -303,6 +505,56 @@ pub struct ViewProvenanceEntry {
 
 pub struct ViewProvenanceMap {
     pub entries: [ViewProvenanceEntry]
+}
+
+// Rust AST/comptime.rs::ViewSourcePath::canonical.
+pub fn view_source_path_canonical(value: ViewSourcePath) -> String Never! {
+    owner :: if value.source == {
+        .Receiver -> "receiver"
+        .Parameter(index) -> "parameter:{index}"
+        .Static(module_path, name) -> "static:{module_path}::{name}"
+    }
+    path :: loop projection in value.projections -> if projection == {
+        .Field(name) -> "field:{name}"
+        .Index -> "index"
+        .Range -> "range"
+    }
+    "{owner};path:{path.join("/")}"
+}
+
+// Rust BTreeSet<ViewSourcePath> ordering is enum/tuple ordering, never display
+// text ordering. Sort indices, borrowing the caller's paths; deduplicate as Set.
+pub fn view_provenance_canonical(value: ViewProvenance) -> String Never! {
+    order := (loop (index, _) in value.sources -> index)
+    paths :: value.sources[0..<value.sources.len()]
+    &order.sort_by((left: Int, right: Int) -> canonical_ast_compare_view_paths(paths[left], paths[right]))
+    sources := [String]{}
+    previous := Int?{None}
+    loop index in order {
+        if previous == .Val(old) && canonical_ast_compare_view_paths(paths[old], paths[index]) == Ordering.Equal -> next
+        &sources.push(view_source_path_canonical(paths[index]))
+        previous = Val(index)
+    }
+    access :: if value.mutable -> "write" else -> "read"
+    if sources.len() == 1 {
+        parts :: sources[0].split(";path:")
+        "{parts[0]};access:{access};path:{parts[1]}"
+    } else -> "one_of({sources.join(",")});access:{access}"
+}
+
+// Rust AST/comptime.rs::canonical_view_provenance_map: Vec<String> keys use
+// lexicographic segment order, not dotted display-string order.
+pub fn canonical_view_provenance_map(map: ViewProvenanceMap) -> String Never! {
+    order := (loop (index, _) in map.entries -> index)
+    entries :: map.entries[0..<map.entries.len()]
+    &order.sort_by((left: Int, right: Int) -> canonical_ast_compare_strings(entries[left].slot, entries[right].slot))
+    parts := [String]{}
+    loop index in order {
+        entry :: entries[index]
+        slot :: if entry.slot.len() == 0 -> "$" else -> entry.slot.join(".")
+        &parts.push("{slot}={view_provenance_canonical(entry.value)}")
+    }
+    parts.join("|")
 }
 
 pub enum SymbolKind {
@@ -1044,4 +1296,204 @@ fn merge_type_knowledge(target: [KnowledgeEntry], nested: KnowledgeVector, prefi
         &out.push(KnowledgeEntry{path: path, plane: entry.plane, fact: entry.fact})
     }
     out
+}
+
+struct CanonicalUnionMember { ty: Type, spelling: String, first: Int }
+
+// Rust AST/types.rs:1144-1174. Keep first occurrence under Type identity, then
+// stable source-spelling order. Empty and singleton unions collapse.
+pub fn canonicalize_union(members: [Type]) -> Type Never! {
+    unique := [CanonicalUnionMember]{}
+    loop member in members -> canonical_union_collect(member, &unique)
+    // #4499: retain Rust's exact O(n²) identity scan until canonical identity-key hashing exists; no regression.
+    // Descending order plus owning pop avoids a second whole-Type copy;
+    // first-occurrence indices make equal-spelling ordering explicitly stable.
+    &unique.sort_by((left: CanonicalUnionMember, right: CanonicalUnionMember) -> if left.spelling != right.spelling -> right.spelling <=> left.spelling else -> right.first <=> left.first)
+    if unique.len() == 0 -> return Type.Named{name: INTERNAL_UNIT_TYPE}
+    if unique.len() == 1 {
+        member := &unique.pop() ?? panic("singleton union has its member")
+        return ^member.ty
+    }
+    sorted := [Type]{}
+    loop unique.len() > 0 {
+        member := &unique.pop() ?? panic("nonempty union member queue")
+        &sorted.push(^member.ty)
+    }
+    Type.Union{members: sorted}
+}
+fn canonical_union_collect(ty: Type, unique: &[CanonicalUnionMember]) Never! {
+    if ty == .Union(inner) {
+        loop member in inner -> canonical_union_collect(member, &unique)
+        return
+    }
+    loop existing in unique {
+        if type_identity_equal(existing.ty, ty) -> return
+    }
+    &unique.push(CanonicalUnionMember{ty: ~ty, spelling: type_name(ty), first: unique.len()})
+}
+
+// Rust AST/types.rs:1071-1075,1453-1509. Visitors own leaf judgments; Apply
+// names do not constrain structural shape here.
+#Error
+pub enum CompositeTypePairError { ShapeMismatch }
+pub trait CompositeTypePairVisitor {
+    fn visit(&self, left: Type, right: Type) Never!
+}
+pub fn type_for_each_composite_pair<V: CompositeTypePairVisitor>(left: Type, right: Type, visitor: &V) CompositeTypePairError! {
+    if left == {
+        .List(left_inner) -> if right == .List(right_inner) {
+            &visitor.visit(left_inner, right_inner)
+            type_for_each_composite_pair<V>(left_inner, right_inner, &visitor)
+            return Ok(())
+        }
+        .Option(left_inner) -> if right == .Option(right_inner) {
+            &visitor.visit(left_inner, right_inner)
+            type_for_each_composite_pair<V>(left_inner, right_inner, &visitor)
+            return Ok(())
+        }
+        .Result(left_ok, left_err) -> if right == .Result(right_ok, right_err) {
+            &visitor.visit(left, right)
+            type_for_each_composite_pair<V>(left_ok, right_ok, &visitor)
+            type_for_each_composite_pair<V>(left_err, right_err, &visitor)
+            return Ok(())
+        }
+        .Apply(_, left_args) -> if right == .Apply(_, right_args) {
+            if left_args.len() != right_args.len() -> return Err(CompositeTypePairError.ShapeMismatch)
+            &visitor.visit(left, right)
+            loop (index, arg) in left_args -> type_for_each_composite_pair<V>(arg, right_args[index], &visitor)
+            return Ok(())
+        }
+        else -> {}
+    }
+    if type_is_walked_composite(left) || type_is_walked_composite(right) -> return Err(CompositeTypePairError.ShapeMismatch)
+    &visitor.visit(left, right)
+    Ok(())
+}
+fn type_is_walked_composite(ty: Type) -> Bool Never! {
+    if ty == { .List(_) | .Option(_) | .Result(_, _) | .Apply(_, _) -> true else -> false }
+}
+fn type_is_matched_walked_composite(left: Type, right: Type) -> Bool Never! {
+    if left == {
+        .List(_) -> right == .List(_)
+        .Option(_) -> right == .Option(_)
+        .Result(_, _) -> right == .Result(_, _)
+        .Apply(_, _) -> right == .Apply(_, _)
+        else -> false
+    }
+}
+
+// Rust AST/types.rs:1709-1742, reusing the existing variadic projection.
+fn type_function_obligations(ty: Type) -> FunctionObligations? Never! {
+    if ty == .Fn(_, _, effects, contract, metadata, provenance) {
+        variadic :: function_variadic_obligation(metadata)
+        if effects == None && contract == None && variadic == None && provenance == None -> return None
+        effect_names := [String]?{None}
+        if effects == .Val(rows) -> effect_names = Val(loop row in rows -> row.name)
+        return Val(FunctionObligations{effect_bound: effect_names, param_contract: ~contract, variadic: variadic, return_view_provenance: ~provenance})
+    }
+    None
+}
+
+// Rust FunctionObligations::satisfies (types.rs:567-623). The canonical
+// ViewProvenanceMap entry carrier remains the one shared representation.
+// #4499: lookup-complexity parity additionally needs canonical composite-key
+// ViewSlotPath maps and ViewSourcePath sets; preserve the existing shared
+// carriers until that capability lands, never encode keys into Strings.
+pub fn function_obligations_satisfy(offered: FunctionObligations, required: FunctionObligations) -> Bool Never! {
+    if required.effect_bound == .Val(required_effects) {
+        offered_effects :: offered.effect_bound ?? return false
+        loop effect in offered_effects { if !required_effects.contains(effect) -> return false }
+    }
+    if required.param_contract == .Val(required_contract) {
+        if offered.param_contract == .Val(offered_contract) {
+            if required_contract.len() != offered_contract.len() -> return false
+            loop (index, row) in offered_contract {
+                required_row :: required_contract[index]
+                if row.label != required_row.label || (row.zone != ParamZone.Either && row.zone != required_row.zone) -> return false
+            }
+        }
+    }
+    if required.variadic == .Val(required_variadic) {
+        if offered.variadic == .Val(offered_variadic) { if offered_variadic != required_variadic -> return false }
+    }
+    if required.return_view_provenance == .Val(required_map) {
+        offered_map :: offered.return_view_provenance ?? return false
+        loop required_entry in required_map.entries {
+            found := false
+            loop entry in offered_map.entries {
+                if entry.slot != required_entry.slot -> next
+                if required_entry.value.mutable && !entry.value.mutable -> return false
+                loop source in entry.value.sources {
+                    if !required_entry.value.sources.contains(source) -> return false
+                }
+                found = true
+                break
+            }
+            if !found -> return false
+        }
+    }
+    true
+}
+
+struct TypeObligationsVisitor { satisfied: Bool }
+impl TypeObligationsVisitor.CompositeTypePairVisitor {
+    fn visit(&self, required: Type, offered: Type) Never! {
+        if self.satisfied && !type_is_matched_walked_composite(required, offered) {
+            self.satisfied = type_obligations_satisfy(required, offered)
+        }
+    }
+}
+
+// Rust AST/types.rs:1744-1846. Only matching composite kinds invoke the
+// structural walker. Leaf carrier equality is a separate judgment.
+pub fn type_obligations_satisfy(required: Type, offered: Type) -> Bool Never! {
+    if required == {
+        .Fn(required_params, required_ret, _, _, _, _) -> if offered == .Fn(offered_params, offered_ret, _, _, _, _) {
+            if type_function_obligations(required) == .Val(contract) {
+                offered_contract :: type_function_obligations(offered) ?? FunctionObligations{effect_bound: None, param_contract: None, variadic: None, return_view_provenance: None}
+                if !function_obligations_satisfy(offered_contract, contract) -> return false
+            }
+            if required_params.len() != offered_params.len() -> return false
+            loop (index, param) in required_params {
+                if !type_obligations_satisfy(param, offered_params[index]) -> return false
+            }
+            return if required_ret == {
+                .None -> if offered_ret == { .None -> true .Val(value) -> type_is_unit_callable_return(value) }
+                .Val(value) -> if offered_ret == { .None -> type_is_unit_callable_return(value) .Val(other) -> type_obligations_satisfy(value, other) }
+            }
+        }
+        .Shared(inner) -> if offered == .Shared(other) -> return type_obligations_satisfy(inner, other)
+        .Map(key, _, value) -> if offered == .Map(other_key, _, other_value) -> return type_obligations_satisfy(key, other_key) && type_obligations_satisfy(value, other_value)
+        .Tuple(fields) -> if offered == .Tuple(other_fields) {
+            if fields.len() != other_fields.len() -> return false
+            loop (index, field) in fields {
+                if field.name != other_fields[index].name || !type_obligations_satisfy(field.ty, other_fields[index].ty) -> return false
+            }
+            return true
+        }
+        .FixedList(elem, _) -> if offered == .FixedList(other, _) -> return type_obligations_satisfy(elem, other)
+        .Quantity(base, _) -> if offered == .Quantity(other, _) -> return type_obligations_satisfy(base, other)
+        .Union(members) -> if offered == .Union(other_members) {
+            if members.len() != other_members.len() -> return false
+            loop (index, member) in members {
+                if !type_obligations_satisfy(member, other_members[index]) -> return false
+            }
+            return true
+        }
+        else -> {}
+    }
+    if type_is_matched_walked_composite(required, offered) {
+        visitor := TypeObligationsVisitor{satisfied: true}
+        if type_for_each_composite_pair<TypeObligationsVisitor>(required, offered, &visitor) == .Err(_) -> return false
+        return visitor.satisfied
+    }
+    // CoreCryptoNominal stays opaque; a transparent tag on the other side
+    // still unwraps, exactly as Rust's ordered guarded match arms do.
+    if required == .Tagged(marker, inner) {
+        if !tag_is_identity_bearing(marker) -> return type_obligations_satisfy(inner, offered)
+    }
+    if offered == .Tagged(marker, inner) {
+        if !tag_is_identity_bearing(marker) -> return type_obligations_satisfy(required, inner)
+    }
+    true
 }

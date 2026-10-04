@@ -1,0 +1,464 @@
+// This fragment extends the canonical jet_foundation MIR owner (MIR.jet).
+// Already-present declarations and collectors stay at that owner; the anchors
+// below map their Rust items without publishing duplicate types or aliases.
+// Rust: crates/jet-foundation/src/MIR.rs:3602 -> MIR.jet::MIRParam
+// Rust: crates/jet-foundation/src/MIR.rs:3614 -> MIR.jet::MIRCaptureParam
+// Rust: crates/jet-foundation/src/MIR.rs:3623 -> MIR.jet::MIRCaptureOperand
+// Rust: crates/jet-foundation/src/MIR.rs:3631 -> MIR.jet::MIRLocal (comptime -> is_comptime)
+// Rust: crates/jet-foundation/src/MIR.rs:3647 -> MIR.jet::MIRPlaceBase
+// Rust: crates/jet-foundation/src/MIR.rs:3656 -> MIR.jet::MIRProjection
+// Rust: crates/jet-foundation/src/MIR.rs:3691 -> MIR.jet::MIRPayloadKind
+// Rust: crates/jet-foundation/src/MIR.rs:3702 -> MIR.jet::MIRPlace
+// Rust: crates/jet-foundation/src/MIR.rs:3716 -> MIR.jet::MIRIndexKind
+// Rust: crates/jet-foundation/src/MIR.rs:3726 -> MIR.jet::MIRFnCoercion
+// Rust: crates/jet-foundation/src/MIR.rs:3731 -> MIR.jet::MIRUnionCoercion
+// Rust: crates/jet-foundation/src/MIR.rs:3738 -> MIR.jet::MIRCallArg
+// Rust: crates/jet-foundation/src/MIR.rs:3760 -> MIR.jet::mir_call_arg_type_uses
+// Rust: crates/jet-foundation/src/MIR.rs:3774 -> MIR.jet::mir_failure_type_uses
+// Rust: crates/jet-foundation/src/MIR.rs:3784 -> MIR.jet::mir_call_fallibility_type_uses
+// Rust: crates/jet-foundation/src/MIR.rs:3793 -> MIR.jet::MIRCallee
+// Rust: crates/jet-foundation/src/MIR.rs:3823 -> MIR.jet::MIRUnaryOp
+// Rust: crates/jet-foundation/src/MIR.rs:3829 -> MIR.jet::MIRBinaryOp
+impl MIRBinaryOp {
+    // Rust: crates/jet-foundation/src/MIR.rs:3855
+    pub fn is_comparison(self) -> Bool Never! {
+        if self == { .Eq | .Ne | .Lt | .Gt | .Le | .Ge -> true, else -> false }
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:3863
+    pub fn spell(self) -> String Never! {
+        if self == {
+            .Add -> "+"
+            .Sub -> "-"
+            .Mul -> "*"
+            .Div -> "/"
+            .FloorDiv -> "/%"
+            .Mod -> "%"
+            .Rem -> "%%"
+            .Pow -> "^"
+            .BitAnd -> "&"
+            .BitOr -> "|"
+            .BitXor -> "~|"
+            .Shl -> "<<"
+            .Shr -> ">>"
+            .Eq -> "=="
+            .Ne -> "!="
+            .Lt -> "<"
+            .Gt -> ">"
+            .Le -> "<="
+            .Ge -> ">="
+            .Compare -> "<=>"
+            .And -> "&&"
+            .Or -> "||"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3892 -> MIR.jet::MIRConstKey
+// Rust: crates/jet-foundation/src/MIR.rs:3909 -> MIR.jet::MIRConstant
+// #4499: MIRConstant.Map's existing entry representation must preserve Rust's
+// composite-key equality/order and sorted BTreeMap iteration at integration.
+// Rust: crates/jet-foundation/src/MIR.rs:3942 -> MIR.jet::MIRConstReport
+
+// GATE #4494: native atomic shared ownership, type erasure and poison-aware
+// mutex operations use the Rust std primitive names until Core supplies them.
+// These are private capability owners, never serialized or integer payloads.
+use std.sync.[Arc, Mutex]
+use std.any.Any
+use std.marker.[Send, Sync]
+use std.boxed.Box
+use std.result.Result
+use std.fmt
+
+// Rust: crates/jet-foundation/src/MIR.rs:3954
+pub struct MIRNativeOwned { owner: Arc<Any> }
+impl MIRNativeOwned {
+    // Rust: crates/jet-foundation/src/MIR.rs:3957
+    pub fn new<T: Any + Send + Sync>(^value: T) -> MIRNativeOwned Never! {
+        // GATE #4494: the erased owner retains T's Send + Sync contract.
+        MIRNativeOwned{owner: Arc.new(^value)}
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:3964
+    pub fn identity(self) -> Int Never! {
+        // GATE #4494: allocation identity, not a serialized pointer payload.
+        Arc.as_ptr(self.owner).addr()
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:3968
+    pub fn downcast_ref<T: Any>(self) -> (@T)? Never! from self {
+        // GATE #4494 / #4500: borrow stays tied to this retained owner.
+        self.owner.downcast_ref<T>()
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:3975
+    pub fn downcast<T: Any + Send + Sync>(^self) -> Result<Arc<T>, MIRNativeOwned> Never! {
+        // GATE #4494: failed downcast returns the original retained capability.
+        if self.owner.downcast<T>() == {
+            .Ok(owner) -> Result.Ok(^owner)
+            .Err(owner) -> Result.Err(MIRNativeOwned{owner: ^owner})
+        }
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:3953 (derive Clone)
+    pub fn clone(self) -> MIRNativeOwned Never! {
+        MIRNativeOwned{owner: Arc.clone(self.owner)}
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:3984
+    pub fn fmt(self, formatter: &fmt.Formatter) fmt.Error! {
+        formatter.write_str("<native-owned>")
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:3990
+    pub fn eq(self, other: MIRNativeOwned) -> Bool Never! {
+        Arc.ptr_eq(self.owner, other.owner)
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3995 (Eq): native owner equality is identity only.
+
+// Rust: crates/jet-foundation/src/MIR.rs:4004
+#Error
+pub enum MIRNativeCursorError {
+    // Source/resource failures retain the original checked runtime carrier.
+    Value(value: MIRRuntimeValue)
+    // Kernel/adapter failures remain distinct from domain values.
+    Internal(message: String)
+}
+impl MIRNativeCursorError {
+    // Rust: crates/jet-foundation/src/MIR.rs:4014
+    pub fn from_runtime_value(^value: MIRRuntimeValue) -> MIRNativeCursorError Never! {
+        .Value(^value)
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:4018
+    pub fn as_runtime_value(self) -> (@MIRRuntimeValue)? Never! from self {
+        if self == { .Value(value) -> Val(@value), .Internal(_) -> None }
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:4025
+    pub fn into_runtime_value(^self) -> MIRRuntimeValue? Never! {
+        if self == { .Value(value) -> Val(^value), .Internal(_) -> None }
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:4032
+    pub fn internal(^message: String) -> MIRNativeCursorError Never! { .Internal(^message) }
+    // Rust: crates/jet-foundation/src/MIR.rs:4036
+    pub fn is_internal(self) -> Bool Never! {
+        if self == { .Internal(_) -> true, .Value(_) -> false }
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:4040
+    pub fn internal_message(self) -> (@String)? Never! from self {
+        if self == { .Internal(message) -> Val(@message), .Value(_) -> None }
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:4049
+    pub fn from(message: String) -> MIRNativeCursorError Never! { .Internal(~message) }
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:4061
+// GATE #4494: Send is required, so aliases preserve the runtime thread contract.
+pub trait MIRNativeCursorState: Send {
+    // Rust: crates/jet-foundation/src/MIR.rs:4062
+    fn has_next(&self) -> Bool MIRNativeCursorError!
+    // Rust: crates/jet-foundation/src/MIR.rs:4063
+    fn value(&self) -> MIRRuntimeValue MIRNativeCursorError!
+    // Rust: crates/jet-foundation/src/MIR.rs:4064
+    fn advance(&self) MIRNativeCursorError!
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4072
+pub struct MIRNativeCursor { state: Arc<Mutex<Box<MIRNativeCursorState>>> }
+impl MIRNativeCursor {
+    // Rust: crates/jet-foundation/src/MIR.rs:4077
+    pub fn new<S: MIRNativeCursorState>(^state: S) -> MIRNativeCursor Never! {
+        // GATE #4494: S is retained for the lifetime of the shared cursor.
+        MIRNativeCursor{state: Arc.new(Mutex.new(Box.new(^state)))}
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:4086
+    pub fn identity(self) -> Int Never! { Arc.as_ptr(self.state).addr() }
+    // Rust: crates/jet-foundation/src/MIR.rs:4090
+    pub fn has_next(self) -> Bool MIRNativeCursorError! {
+        // GATE #4494: lock guard survives through the call and releases on return.
+        guard := if self.state.lock() == {
+            .Ok(guard) -> ^guard
+            .Err(_) -> return Err(MIRNativeCursorError.internal("native Prelude cursor state was poisoned"))
+        }
+        &guard.has_next()
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:4097
+    pub fn value(self) -> MIRRuntimeValue MIRNativeCursorError! {
+        guard := if self.state.lock() == {
+            .Ok(guard) -> ^guard
+            .Err(_) -> return Err(MIRNativeCursorError.internal("native Prelude cursor state was poisoned"))
+        }
+        &guard.value()
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:4104
+    pub fn advance(self) MIRNativeCursorError! {
+        guard := if self.state.lock() == {
+            .Ok(guard) -> ^guard
+            .Err(_) -> return Err(MIRNativeCursorError.internal("native Prelude cursor state was poisoned"))
+        }
+        &guard.advance()
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:4113
+    pub fn clone(self) -> MIRNativeCursor Never! { MIRNativeCursor{state: Arc.clone(self.state)} }
+    // Rust: crates/jet-foundation/src/MIR.rs:4121
+    pub fn fmt(self, formatter: &fmt.Formatter) fmt.Error! {
+        formatter.debug_struct("MirNativeCursor").field("identity", self.identity()).finish_non_exhaustive()
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:4130
+    pub fn eq(self, other: MIRNativeCursor) -> Bool Never! { Arc.ptr_eq(self.state, other.state) }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4135 (Eq): cursor equality is identity only.
+
+// Rust: crates/jet-foundation/src/MIR.rs:4140
+pub enum MIRRuntimeValue {
+    // Internal move sentinel: never user visible and never serialized.
+    Moved
+    Int(value: I64)
+    BigInt(value: String)
+    Float(value: F64, f32: Bool)
+    Bool(value: Bool)
+    Char(value: Char)
+    String(value: String)
+    Bytes(value: [U8])
+    List(values: [MIRRuntimeValue])
+    Map(entries: [MIRRuntimeMapEntry])
+    Struct(type_name: String, fields: [MIRRuntimeField])
+    Enum(type_name: String, variant: String, args: [MIRRuntimeEnumArg])
+    Present(value: MIRRuntimeValue)
+    FailedTold(value: MIRRuntimeValue)
+    Absent(element: MIRType)
+    Unit
+    NativeCursor(cursor: MIRNativeCursor)
+    NativeOwned(owner: MIRNativeOwned)
+    Closure(closure: MIRRuntimeClosure)
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4152 (named projection of pair)
+pub struct MIRRuntimeMapEntry { pub key: MIRConstKey, pub value: MIRRuntimeValue }
+// Rust: crates/jet-foundation/src/MIR.rs:4155 (named projection of pair)
+pub struct MIRRuntimeField { pub name: String, pub value: MIRRuntimeValue }
+// Rust: crates/jet-foundation/src/MIR.rs:4160 (named projection of pair)
+pub struct MIRRuntimeEnumArg { pub name: String?, pub value: MIRRuntimeValue }
+// Rust: crates/jet-foundation/src/MIR.rs:4174
+pub struct MIRRuntimeClosure { pub function: MIRFunctionID, pub captures: [MIRRuntimeValue] }
+// Rust: crates/jet-foundation/src/MIR.rs:4180 -> MIR.jet::MIRStringPart
+// Rust: crates/jet-foundation/src/MIR.rs:4186 -> MIR.jet::MIRTextHoleKind
+// Rust: crates/jet-foundation/src/MIR.rs:4195 -> MIR.jet::MIRTextPatternPart
+// Rust: crates/jet-foundation/src/MIR.rs:4205 -> MIR.jet::MIRBinaryPatternPart
+
+// Rust: crates/jet-foundation/src/MIR.rs:4220
+pub struct MIRPattern {
+    pub shape: MIRPatternShape
+    pub owner: MIRTypeID?
+    pub position: MIRPatternPosition
+    pub mutable: Bool
+    pub boxed: Bool
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4229
+pub enum MIRPatternPosition { Binding OptionBinding Arm VariantPath DataEntries(temp: MIRLocalID) }
+// Rust: crates/jet-foundation/src/MIR.rs:4238
+pub enum MIRPatternShape {
+    Variant(variant: String, bindings: [MIRPatternBinding], leading_dot: Bool, span: Span)
+    // Nested payload patterns retain the checked canonical owner.
+    Present(binding: String, binding_span: Span, inner: MIRPatternShape?, span: Span)
+    Absent(span: Span)
+    Ok(binding: String, binding_span: Span, inner: MIRPatternShape?, span: Span)
+    Err(binding: String, binding_span: Span, inner: MIRPatternShape?, span: Span)
+    Range(lo: I64, hi: I64, span: Span)
+    Or(alternatives: [MIRPatternShape], span: Span)
+    Struct(fields: [MIRPatternField], rest: Span?, span: Span)
+    Text(parts: [MIRTextPatternPart], span: Span)
+    Binary(parts: [MIRBinaryPatternPart], span: Span)
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4285
+pub enum MIRPatternBinding {
+    Wildcard
+    Bind(name: String, span: Span)
+    Range(lo: I64, hi: I64)
+    Nested(pattern: MIRPatternShape)
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4300
+pub enum MIRPatternField {
+    Bind(field: MIRFieldID, local: String, span: Span)
+    Value(field: MIRFieldID, value: MIRValueID, span: Span)
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4314 -> MIR.jet::MIRStructExtra (HttpRequestParams -> HTTPRequestParams)
+// Rust: crates/jet-foundation/src/MIR.rs:4320 -> MIR.jet::MIRLayoutCompareOp
+// Rust: crates/jet-foundation/src/MIR.rs:4327 -> MIR.jet::MIRRequireKind
+// Rust: crates/jet-foundation/src/MIR.rs:4333 -> MIR.jet::MIRHTTPMethod
+impl MIRHTTPMethod {
+    // Rust: crates/jet-foundation/src/MIR.rs:4344
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Get -> "GET", .Post -> "POST", .Put -> "PUT", .Delete -> "DELETE",
+            .Patch -> "PATCH", .Head -> "HEAD", .Options -> "OPTIONS"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4361
+pub enum MIRHTTPSchema {
+    Any Null Boolean Integer Number String
+    Array(item: MIRHTTPSchema)
+    Object(properties: [MIRHTTPPropertyFact], additional_properties: Bool)
+    OneOf(items: [MIRHTTPSchema])
+    Nullable(item: MIRHTTPSchema)
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4378
+pub struct MIRHTTPPropertyFact { pub name: String, pub schema: MIRHTTPSchema, pub required: Bool }
+// Rust: crates/jet-foundation/src/MIR.rs:4385
+pub enum MIRHTTPParameterLocation { Path Query Header Cookie }
+impl MIRHTTPParameterLocation {
+    // Rust: crates/jet-foundation/src/MIR.rs:4393
+    pub fn as_str(self) -> String Never! {
+        if self == { .Path -> "path", .Query -> "query", .Header -> "header", .Cookie -> "cookie" }
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4404
+pub struct MIRHTTPParameterFact {
+    pub name: String
+    pub location: MIRHTTPParameterLocation
+    pub required: Bool
+    pub catch_all: Bool
+    pub schema: MIRHTTPSchema
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4413
+pub struct MIRHTTPRequestBodyFact { pub required: Bool, pub content_type: String, pub schema: MIRHTTPSchema }
+// Rust: crates/jet-foundation/src/MIR.rs:4420
+pub struct MIRHTTPResponseFact { pub status: I64, pub description: String, pub schema: MIRHTTPSchema?, pub content_type: String? }
+// Rust: crates/jet-foundation/src/MIR.rs:4428
+pub struct MIRHTTPSecurityFact { pub scheme: String, pub scopes: [String] }
+// Rust: crates/jet-foundation/src/MIR.rs:4434
+pub struct MIRHTTPRouteFacts {
+    pub method: MIRHTTPMethod
+    // Checked source template, retained for the shared HTTP route parser.
+    pub pattern: String
+    // Canonical OpenAPI path, derived from pattern.
+    pub path: String
+    pub operation_id: String
+    pub summary: String?
+    pub parameters: [MIRHTTPParameterFact]
+    pub request_body: MIRHTTPRequestBodyFact?
+    pub responses: [MIRHTTPResponseFact]
+    pub security: [MIRHTTPSecurityFact]
+    pub provenance: String
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4450
+fn mir_http_json_quote(value: String) -> String Never! {
+    out := [U8]{U8{34}}
+    digits :: "0123456789abcdef".bytes()
+    // Rust char::is_control is exactly U+0000..001F and U+007F..009F.
+    // Scan UTF-8 once, preserving all other characters without re-encoding.
+    bytes := value.bytes()
+    index := 0
+    loop index < bytes.len() {
+        byte :: bytes[index]
+        if byte == U8{34} -> &out.extend("\\\"".bytes())
+        else if byte == U8{92} -> &out.extend("\\\\".bytes())
+        else if byte == U8{10} -> &out.extend("\\n".bytes())
+        else if byte == U8{13} -> &out.extend("\\r".bytes())
+        else if byte == U8{9} -> &out.extend("\\t".bytes())
+        else if byte < U8{32} || byte == U8{127} {
+            &out.extend("\\u00".bytes())
+            &out.push(digits[Int.from_u8(byte) >> 4])
+            &out.push(digits[Int.from_u8(byte) & 15])
+        } else if byte == U8{194} && index + 1 < bytes.len() && bytes[index + 1] >= U8{128} && bytes[index + 1] <= U8{159} {
+            index += 1
+            control :: Int.from_u8(bytes[index])
+            &out.extend("\\u00".bytes())
+            &out.push(digits[control >> 4])
+            &out.push(digits[control & 15])
+        } else -> &out.push(byte)
+        index += 1
+    }
+    &out.push(U8{34})
+    String.from_bytes(out) ?? panic("quoted UTF-8 became invalid")
+}
+impl MIRHTTPSchema {
+    // Rust: crates/jet-foundation/src/MIR.rs:4469
+    fn to_wire(self) -> String Never! {
+        if self == {
+            .Any -> "{}"
+            .Null -> "{\"type\":\"null\"}"
+            .Boolean -> "{\"type\":\"boolean\"}"
+            .Integer -> "{\"type\":\"integer\",\"format\":\"int64\"}"
+            .Number -> "{\"type\":\"number\",\"format\":\"double\"}"
+            .String -> "{\"type\":\"string\"}"
+            .Array(item) -> "{{\"type\":\"array\",\"items\":{item.to_wire()}}}"
+            .Object(properties, additional_properties) -> {
+                required := [String]{}
+                rendered := [String]{}
+                loop property in properties {
+                    if property.required -> &required.push(mir_http_json_quote(property.name))
+                    &rendered.push("{mir_http_json_quote(property.name)}:{property.schema.to_wire()}")
+                }
+                out := [U8]{}
+                &out.extend("{{\"type\":\"object\",\"properties\":{{{rendered.join(",")}}},\"additionalProperties\":{additional_properties}".bytes())
+                if required.len() != 0 -> &out.extend(",\"required\":[{required.join(",")}]".bytes())
+                &out.push(U8{125})
+                String.from_bytes(out) ?? panic("schema UTF-8 became invalid")
+            }
+            .OneOf(items) -> {
+                rendered := [String]{}
+                loop item in items -> &rendered.push(item.to_wire())
+                "{{\"oneOf\":[{rendered.join(",")}]}}"
+            }
+            .Nullable(item) -> "{{\"anyOf\":[{item.to_wire()},{{\"type\":\"null\"}}]}}"
+        }
+    }
+}
+impl MIRHTTPRouteFacts {
+    // Rust: crates/jet-foundation/src/MIR.rs:4521
+    pub fn operation_id(method: MIRHTTPMethod, path: String) -> String Never! {
+        hash := U64{14695981039346656037}
+        loop byte in "jet-openapi-operation-v1:".bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(U64{1099511628211})
+        loop byte in method.as_str().bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(U64{1099511628211})
+        // Rust's single NUL byte separates method from canonical path.
+        hash = hash.wrapping_mul(U64{1099511628211})
+        loop byte in path.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(U64{1099511628211})
+        digits :: "0123456789abcdef".bytes()
+        hex := [U8]{}
+        word :: Int.from_u64(hash)
+        loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &hex.push(digits[(word >> shift) & 15])
+        suffix :: String.from_bytes(hex) ?? panic("hex UTF-8 became invalid")
+        "jet_{method.as_str().to_ascii_lowercase()}_{suffix}"
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:4541
+    pub fn to_wire(self) -> String Never! {
+        parameters := [String]{}
+        loop parameter in self.parameters {
+            &parameters.push("{{\"name\":{mir_http_json_quote(parameter.name)},\"in\":{mir_http_json_quote(parameter.location.as_str())},\"required\":{parameter.required},\"catch_all\":{parameter.catch_all},\"schema\":{parameter.schema.to_wire()}}}")
+        }
+        request_body :: if self.request_body == {
+            .None -> "null"
+            .Val(body) -> "{{\"required\":{body.required},\"content_type\":{mir_http_json_quote(body.content_type)},\"schema\":{body.schema.to_wire()}}}"
+        }
+        responses := [String]{}
+        loop response in self.responses {
+            schema :: if response.schema == { .None -> "null", .Val(schema) -> schema.to_wire() }
+            content_type :: if response.content_type == { .None -> "null", .Val(content_type) -> mir_http_json_quote(content_type) }
+            &responses.push("{{\"status\":{response.status},\"description\":{mir_http_json_quote(response.description)},\"schema\":{schema},\"content_type\":{content_type}}}")
+        }
+        security := [String]{}
+        loop requirement in self.security {
+            scopes := [String]{}
+            loop scope in requirement.scopes -> &scopes.push(mir_http_json_quote(scope))
+            &security.push("{{\"scheme\":{mir_http_json_quote(requirement.scheme)},\"scopes\":[{scopes.join(",")}]}}")
+        }
+        summary :: if self.summary == { .None -> "null", .Val(summary) -> mir_http_json_quote(summary) }
+        "{{\"method\":{mir_http_json_quote(self.method.as_str())},\"pattern\":{mir_http_json_quote(self.pattern)},\"path\":{mir_http_json_quote(self.path)},\"operation_id\":{mir_http_json_quote(self.operation_id)},\"summary\":{summary},\"parameters\":[{parameters.join(",")}],\"request_body\":{request_body},\"responses\":[{responses.join(",")}],\"security\":[{security.join(",")}],\"provenance\":{mir_http_json_quote(self.provenance)}}}"
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:4629 -> MIR.jet::MIRPanicLoc
+// Rust: crates/jet-foundation/src/MIR.rs:4637 -> MIR.jet::MIRPanicContext
+// Rust: crates/jet-foundation/src/MIR.rs:4646 -> MIR.jet::MIRAllocatorKind
+// Rust: crates/jet-foundation/src/MIR.rs:4655 -> MIR.jet::MIRTaskGroupKind
+// Rust: crates/jet-foundation/src/MIR.rs:4663 -> MIR.jet::MIRSelectKind
+// Rust: crates/jet-foundation/src/MIR.rs:4670 -> MIR.jet::MIRCoreClosureKind
+// Rust: crates/jet-foundation/src/MIR.rs:4702 -> MIR.jet::MIRGCEditKind
+// Rust: crates/jet-foundation/src/MIR.rs:4719 -> MIR.jet::MIRHardwareOp (Dma -> DMA)
+// Rust: crates/jet-foundation/src/MIR.rs:4746 -> MIR.jet::MIRHardwareSetup
+// Rust: crates/jet-foundation/src/MIR.rs:4763 -> MIR.jet::MIRReflectField
+// Rust: crates/jet-foundation/src/MIR.rs:4771 -> MIR.jet::MIRSemanticOp
+// Rust: crates/jet-foundation/src/MIR.rs:5058 -> MIR.jet::mir_semantic_op_value_uses
+// Rust: crates/jet-foundation/src/MIR.rs:5170 -> MIR.jet::mir_semantic_op_prelude_calls
+// The two collectors retain the Rust branch order, including optional receiver,
+// closure and index operands; map/split Prelude call identities remain ordered.
+
+// Rust: crates/jet-foundation/src/MIR.rs:5311 -> MIR.jet::MIRBinaryDispatch
+// Rust: crates/jet-foundation/src/MIR.rs:5320 -> MIR.jet::MIREnumArg
+// Rust: crates/jet-foundation/src/MIR.rs:5330 -> MIR.jet::MIRDataPlanColumn
+// Rust: crates/jet-foundation/src/MIR.rs:5338 -> MIR.jet::MIRDataPlanCallable
+// Rust: crates/jet-foundation/src/MIR.rs:5347 -> MIR.jet::MIRDataPlanNode
+// Rust: crates/jet-foundation/src/MIR.rs:5361 -> MIR.jet::MIRDataPlanPhysicalNode
+// Rust: crates/jet-foundation/src/MIR.rs:5370 -> MIR.jet::MIRDataPlan
+// #4483 / #4409: these windows contain no target-selection or IO-error branches.

@@ -1,0 +1,659 @@
+// PORT-PENDING 0097 crates-jet-foundation-src-schemamigration-module-group: crates/jet-foundation/src/StreamCursor.rs:1-655
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // ── binary.Reader / text.Cursor (D-SHIFT1, c7shift) ──────────────────────────
+//RS // The "shift" kernel from linear stream parsing (Jai's `shift` primitive),
+//RS // without a dedicated operator (D-SHIFT1=A rejected that). `Reader` owns its
+//RS // byte buffer plus a read position; the borrowed constructor copies its input,
+//RS // while the lowering-only owned constructor transfers an already-owned buffer.
+//RS // Every read is fallible — a bounds miss is an ordinary `Err`, never a panic or
+//RS // silent truncation.
+//RS //
+//RS // I9: this file is the ONE implementation. `Codegen/mod.rs` splices it verbatim
+//RS // into the emitted AOT prelude (`include_str!`), and the canonical TIR
+//RS // evaluator calls the same functions directly (`eval/handles.rs`), so quick-run
+//RS // and full build read the same bytes and produce the same error text.
+//RS // It must stay std-only and free of `crate::` paths: the AOT copy compiles at
+//RS // the root of a generated program, not inside this crate.
+//RS #[derive(Clone)]
+//RS pub struct JetReader {
+//RS     pub buf: Vec<u8>,
+//RS     pub pos: usize,
+//RS }
+//RS #[derive(Clone)]
+//RS pub struct JetCursor {
+//RS     pub buf: String,
+//RS     pub pos: usize,
+//RS }
+//RS 
+//RS pub fn jet_reader_over(bytes: &Vec<u8>) -> JetReader {
+//RS     JetReader {
+//RS         buf: bytes.clone(),
+//RS         pos: 0,
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_reader_over_owned(bytes: Vec<u8>) -> JetReader {
+//RS     JetReader { buf: bytes, pos: 0 }
+//RS }
+//RS 
+//RS #[cold]
+//RS #[inline(never)]
+//RS pub fn jet_reader_bounds_error(method: &str, need: usize, r: &JetReader) -> String {
+//RS     format!(
+//RS         "Reader.{}: needed {} byte{} at position {}, only {} remain",
+//RS         method,
+//RS         need,
+//RS         if need == 1 { "" } else { "s" },
+//RS         r.pos,
+//RS         r.buf.len().saturating_sub(r.pos),
+//RS     )
+//RS }
+//RS 
+//RS pub fn jet_reader_take_fixed(r: &mut JetReader, n: usize, method: &str) -> Result<Vec<u8>, String> {
+//RS     let Some(end) = r.pos.checked_add(n) else {
+//RS         return Err(jet_reader_bounds_error(method, n, r));
+//RS     };
+//RS     if end > r.buf.len() {
+//RS         return Err(jet_reader_bounds_error(method, n, r));
+//RS     }
+//RS     let out = r.buf[r.pos..end].to_vec();
+//RS     r.pos = end;
+//RS     Ok(out)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u8_fast(r: &mut JetReader) -> Option<u8> {
+//RS     if r.buf.len().saturating_sub(r.pos) < 1 {
+//RS         return None;
+//RS     }
+//RS     let pos = r.pos;
+//RS     let value = r.buf[pos];
+//RS     r.pos = pos + 1;
+//RS     Some(value)
+//RS }
+//RS 
+//RS /// Prove that a fixed-width read region is resident before entering its hot
+//RS /// loop. The caller must consume exactly `count` bytes from the returned
+//RS /// half-open interval without changing the reader through another operation;
+//RS /// the region emitter enforces that condition from TIR. A miss deliberately
+//RS /// returns `None` without changing the reader so the ordinary fallible loop
+//RS /// can preserve its partial-progress and bounds-error behavior.
+//RS #[inline(always)]
+//RS pub fn jet_reader_region_bounds(r: &JetReader, count: i64) -> Option<(usize, usize)> {
+//RS     let count = usize::try_from(count).ok()?;
+//RS     let remaining = r.buf.len().checked_sub(r.pos)?;
+//RS     (count <= remaining).then_some((r.pos, r.pos + count))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u8(r: &mut JetReader) -> Result<u8, String> {
+//RS     jet_reader_read_u8_fast(r).ok_or_else(|| jet_reader_bounds_error("read_u8", 1, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i8_fast(r: &mut JetReader) -> Option<i8> {
+//RS     jet_reader_read_u8_fast(r).map(|value| value as i8)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i8(r: &mut JetReader) -> Result<i8, String> {
+//RS     jet_reader_read_i8_fast(r).ok_or_else(|| jet_reader_bounds_error("read_i8", 1, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u16_le_fast(r: &mut JetReader) -> Option<u16> {
+//RS     if r.buf.len().saturating_sub(r.pos) < 2 {
+//RS         return None;
+//RS     }
+//RS     let pos = r.pos;
+//RS     let value = u16::from_le_bytes([r.buf[pos], r.buf[pos + 1]]);
+//RS     r.pos = pos + 2;
+//RS     Some(value)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u16_le(r: &mut JetReader) -> Result<u16, String> {
+//RS     jet_reader_read_u16_le_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_u16_le", 2, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u16_be_fast(r: &mut JetReader) -> Option<u16> {
+//RS     if r.buf.len().saturating_sub(r.pos) < 2 {
+//RS         return None;
+//RS     }
+//RS     let pos = r.pos;
+//RS     let value = u16::from_be_bytes([r.buf[pos], r.buf[pos + 1]]);
+//RS     r.pos = pos + 2;
+//RS     Some(value)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u16_be(r: &mut JetReader) -> Result<u16, String> {
+//RS     jet_reader_read_u16_be_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_u16_be", 2, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i16_le_fast(r: &mut JetReader) -> Option<i16> {
+//RS     jet_reader_read_u16_le_fast(r).map(|value| value as i16)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i16_le(r: &mut JetReader) -> Result<i16, String> {
+//RS     jet_reader_read_i16_le_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_i16_le", 2, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i16_be_fast(r: &mut JetReader) -> Option<i16> {
+//RS     jet_reader_read_u16_be_fast(r).map(|value| value as i16)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i16_be(r: &mut JetReader) -> Result<i16, String> {
+//RS     jet_reader_read_i16_be_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_i16_be", 2, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u32_le_fast(r: &mut JetReader) -> Option<u32> {
+//RS     if r.buf.len().saturating_sub(r.pos) < 4 {
+//RS         return None;
+//RS     }
+//RS     let pos = r.pos;
+//RS     let value = u32::from_le_bytes([
+//RS         r.buf[pos],
+//RS         r.buf[pos + 1],
+//RS         r.buf[pos + 2],
+//RS         r.buf[pos + 3],
+//RS     ]);
+//RS     r.pos = pos + 4;
+//RS     Some(value)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u32_le(r: &mut JetReader) -> Result<u32, String> {
+//RS     jet_reader_read_u32_le_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_u32_le", 4, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u32_be_fast(r: &mut JetReader) -> Option<u32> {
+//RS     if r.buf.len().saturating_sub(r.pos) < 4 {
+//RS         return None;
+//RS     }
+//RS     let pos = r.pos;
+//RS     let value = u32::from_be_bytes([
+//RS         r.buf[pos],
+//RS         r.buf[pos + 1],
+//RS         r.buf[pos + 2],
+//RS         r.buf[pos + 3],
+//RS     ]);
+//RS     r.pos = pos + 4;
+//RS     Some(value)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u32_be(r: &mut JetReader) -> Result<u32, String> {
+//RS     jet_reader_read_u32_be_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_u32_be", 4, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i32_le_fast(r: &mut JetReader) -> Option<i32> {
+//RS     jet_reader_read_u32_le_fast(r).map(|value| value as i32)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i32_le(r: &mut JetReader) -> Result<i32, String> {
+//RS     jet_reader_read_i32_le_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_i32_le", 4, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i32_be_fast(r: &mut JetReader) -> Option<i32> {
+//RS     jet_reader_read_u32_be_fast(r).map(|value| value as i32)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i32_be(r: &mut JetReader) -> Result<i32, String> {
+//RS     jet_reader_read_i32_be_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_i32_be", 4, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u64_le_fast(r: &mut JetReader) -> Option<u64> {
+//RS     if r.buf.len().saturating_sub(r.pos) < 8 {
+//RS         return None;
+//RS     }
+//RS     let pos = r.pos;
+//RS     let value = u64::from_le_bytes([
+//RS         r.buf[pos],
+//RS         r.buf[pos + 1],
+//RS         r.buf[pos + 2],
+//RS         r.buf[pos + 3],
+//RS         r.buf[pos + 4],
+//RS         r.buf[pos + 5],
+//RS         r.buf[pos + 6],
+//RS         r.buf[pos + 7],
+//RS     ]);
+//RS     r.pos = pos + 8;
+//RS     Some(value)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u64_le(r: &mut JetReader) -> Result<u64, String> {
+//RS     jet_reader_read_u64_le_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_u64_le", 8, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u64_be_fast(r: &mut JetReader) -> Option<u64> {
+//RS     if r.buf.len().saturating_sub(r.pos) < 8 {
+//RS         return None;
+//RS     }
+//RS     let pos = r.pos;
+//RS     let value = u64::from_be_bytes([
+//RS         r.buf[pos],
+//RS         r.buf[pos + 1],
+//RS         r.buf[pos + 2],
+//RS         r.buf[pos + 3],
+//RS         r.buf[pos + 4],
+//RS         r.buf[pos + 5],
+//RS         r.buf[pos + 6],
+//RS         r.buf[pos + 7],
+//RS     ]);
+//RS     r.pos = pos + 8;
+//RS     Some(value)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_u64_be(r: &mut JetReader) -> Result<u64, String> {
+//RS     jet_reader_read_u64_be_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_u64_be", 8, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i64_le_fast(r: &mut JetReader) -> Option<i64> {
+//RS     jet_reader_read_u64_le_fast(r).map(|value| value as i64)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i64_le(r: &mut JetReader) -> Result<i64, String> {
+//RS     jet_reader_read_i64_le_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_i64_le", 8, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i64_be_fast(r: &mut JetReader) -> Option<i64> {
+//RS     jet_reader_read_u64_be_fast(r).map(|value| value as i64)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_i64_be(r: &mut JetReader) -> Result<i64, String> {
+//RS     jet_reader_read_i64_be_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_i64_be", 8, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_f32_le_fast(r: &mut JetReader) -> Option<f32> {
+//RS     if r.buf.len().saturating_sub(r.pos) < 4 {
+//RS         return None;
+//RS     }
+//RS     let pos = r.pos;
+//RS     let value = f32::from_le_bytes([
+//RS         r.buf[pos],
+//RS         r.buf[pos + 1],
+//RS         r.buf[pos + 2],
+//RS         r.buf[pos + 3],
+//RS     ]);
+//RS     r.pos = pos + 4;
+//RS     Some(value)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_f32_le(r: &mut JetReader) -> Result<f32, String> {
+//RS     jet_reader_read_f32_le_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_f32_le", 4, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_f32_be_fast(r: &mut JetReader) -> Option<f32> {
+//RS     if r.buf.len().saturating_sub(r.pos) < 4 {
+//RS         return None;
+//RS     }
+//RS     let pos = r.pos;
+//RS     let value = f32::from_be_bytes([
+//RS         r.buf[pos],
+//RS         r.buf[pos + 1],
+//RS         r.buf[pos + 2],
+//RS         r.buf[pos + 3],
+//RS     ]);
+//RS     r.pos = pos + 4;
+//RS     Some(value)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_f32_be(r: &mut JetReader) -> Result<f32, String> {
+//RS     jet_reader_read_f32_be_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_f32_be", 4, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_f64_le_fast(r: &mut JetReader) -> Option<f64> {
+//RS     if r.buf.len().saturating_sub(r.pos) < 8 {
+//RS         return None;
+//RS     }
+//RS     let pos = r.pos;
+//RS     let value = f64::from_le_bytes([
+//RS         r.buf[pos],
+//RS         r.buf[pos + 1],
+//RS         r.buf[pos + 2],
+//RS         r.buf[pos + 3],
+//RS         r.buf[pos + 4],
+//RS         r.buf[pos + 5],
+//RS         r.buf[pos + 6],
+//RS         r.buf[pos + 7],
+//RS     ]);
+//RS     r.pos = pos + 8;
+//RS     Some(value)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_f64_le(r: &mut JetReader) -> Result<f64, String> {
+//RS     jet_reader_read_f64_le_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_f64_le", 8, r))
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_f64_be_fast(r: &mut JetReader) -> Option<f64> {
+//RS     if r.buf.len().saturating_sub(r.pos) < 8 {
+//RS         return None;
+//RS     }
+//RS     let pos = r.pos;
+//RS     let value = f64::from_be_bytes([
+//RS         r.buf[pos],
+//RS         r.buf[pos + 1],
+//RS         r.buf[pos + 2],
+//RS         r.buf[pos + 3],
+//RS         r.buf[pos + 4],
+//RS         r.buf[pos + 5],
+//RS         r.buf[pos + 6],
+//RS         r.buf[pos + 7],
+//RS     ]);
+//RS     r.pos = pos + 8;
+//RS     Some(value)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_read_f64_be(r: &mut JetReader) -> Result<f64, String> {
+//RS     jet_reader_read_f64_be_fast(r)
+//RS         .ok_or_else(|| jet_reader_bounds_error("read_f64_be", 8, r))
+//RS }
+//RS 
+//RS pub fn jet_reader_peek(r: &JetReader) -> Result<u8, String> {
+//RS     r.buf
+//RS         .get(r.pos)
+//RS         .copied()
+//RS         .ok_or_else(|| jet_reader_bounds_error("peek", 1, r))
+//RS }
+//RS 
+//RS pub fn jet_reader_seek(r: &mut JetReader, position: i64) -> Result<(), String> {
+//RS     if position < 0 {
+//RS         return Err(format!(
+//RS             "Reader.seek: position must not be negative, got {}",
+//RS             position
+//RS         ));
+//RS     }
+//RS     let position = usize::try_from(position).map_err(|_| {
+//RS         format!(
+//RS             "Reader.seek: position {} is outside the addressable buffer",
+//RS             position
+//RS         )
+//RS     })?;
+//RS     if position > r.buf.len() {
+//RS         return Err(format!(
+//RS             "Reader.seek: position {} is beyond end {}",
+//RS             position,
+//RS             r.buf.len()
+//RS         ));
+//RS     }
+//RS     r.pos = position;
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub fn jet_reader_skip(r: &mut JetReader, count: i64) -> Result<(), String> {
+//RS     if count < 0 {
+//RS         return Err(format!(
+//RS             "Reader.skip: length must not be negative, got {}",
+//RS             count
+//RS         ));
+//RS     }
+//RS     let count = usize::try_from(count).map_err(|_| {
+//RS         format!(
+//RS             "Reader.skip: length {} is outside the addressable buffer",
+//RS             count
+//RS         )
+//RS     })?;
+//RS     let end = r.pos.checked_add(count).ok_or_else(|| {
+//RS         format!(
+//RS             "Reader.skip: position overflow at {} plus {}",
+//RS             r.pos, count
+//RS         )
+//RS     })?;
+//RS     if end > r.buf.len() {
+//RS         return Err(jet_reader_bounds_error("skip", count, r));
+//RS     }
+//RS     r.pos = end;
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub fn jet_reader_take(r: &mut JetReader, n: i64) -> Result<Vec<u8>, String> {
+//RS     if n < 0 {
+//RS         return Err(format!(
+//RS             "Reader.take: length must not be negative, got {}",
+//RS             n
+//RS         ));
+//RS     }
+//RS     let n = usize::try_from(n).map_err(|_| {
+//RS         format!(
+//RS             "Reader.take: length {} is outside the addressable buffer",
+//RS             n
+//RS         )
+//RS     })?;
+//RS     jet_reader_take_fixed(r, n, "take")
+//RS }
+//RS 
+//RS pub fn jet_reader_remaining(r: &JetReader) -> i64 {
+//RS     (r.buf.len() - r.pos) as i64
+//RS }
+//RS 
+//RS pub fn jet_reader_at_end(r: &JetReader) -> bool {
+//RS     r.pos >= r.buf.len()
+//RS }
+//RS 
+//RS pub fn jet_cursor_over(s: &String) -> JetCursor {
+//RS     JetCursor {
+//RS         buf: s.clone(),
+//RS         pos: 0,
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_cursor_take_until(c: &mut JetCursor, delim: &String) -> Result<String, String> {
+//RS     let tail = &c.buf[c.pos..];
+//RS     match tail.find(delim.as_str()) {
+//RS         Some(i) => {
+//RS             let out = tail[..i].to_string();
+//RS             c.pos += i;
+//RS             Ok(out)
+//RS         }
+//RS         None => Err(format!(
+//RS             "Cursor.take_until: {:?} not found in the remaining text",
+//RS             delim
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_cursor_skip_ws(c: &mut JetCursor) {
+//RS     let tail = jet_cursor_tail(c);
+//RS     let skipped = tail.len() - tail.trim_start().len();
+//RS     c.pos += skipped;
+//RS }
+//RS 
+//RS // `take_pattern` runs a different match engine on every tier: AOT inlines a
+//RS // closure specialized to the pattern, the Cranelift host and the interpreter
+//RS // walk the pattern as data. What surrounds the match is the same everywhere,
+//RS // so it lives here: what the scan may look at, how far a hit advances, and
+//RS // what a miss reports. A tier supplies the match and projects the bindings;
+//RS // it decides nothing else.
+//RS 
+//RS pub fn jet_cursor_tail(c: &JetCursor) -> &str {
+//RS     &c.buf[c.pos..]
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_reader_tail(r: &JetReader) -> &[u8] {
+//RS     &r.buf[r.pos..]
+//RS }
+//RS 
+//RS /// A matched prefix is consumed. `consumed` counts bytes from the tail.
+//RS pub fn jet_cursor_take_pattern(c: &mut JetCursor, consumed: usize) {
+//RS     c.pos += consumed;
+//RS }
+//RS 
+//RS /// Consume a matched prefix after checking the byte count against the tail.
+//RS ///
+//RS /// Reader pattern execution is fallible: a malformed/partial scan must never
+//RS /// move the cursor past the resident buffer.
+//RS #[inline(always)]
+//RS pub fn jet_reader_take_pattern(r: &mut JetReader, consumed: usize) -> Result<(), String> {
+//RS     let end = r
+//RS         .pos
+//RS         .checked_add(consumed)
+//RS         .ok_or_else(|| "Reader.take_pattern: position overflow".to_string())?;
+//RS     if end > r.buf.len() {
+//RS         return Err(format!(
+//RS             "Reader.take_pattern: {} bytes exceeds remaining input",
+//RS             consumed
+//RS         ));
+//RS     }
+//RS     r.pos = end;
+//RS     Ok(())
+//RS }
+//RS /// Advance a fixed-width pattern after `jet_reader_region_bounds` has proved
+//RS /// the complete `[start, end)` range is resident. The proof is part of the
+//RS /// caller contract: keeping this helper unchecked removes the second bounds
+//RS /// test from the fixed-pattern hot loop while the public fallible helper above
+//RS /// retains its ordinary error behavior for every other caller.
+//RS #[inline(always)]
+//RS #[allow(dead_code)]
+//RS pub(crate) fn jet_reader_take_pattern_checked(
+//RS     r: &mut JetReader,
+//RS     start: usize,
+//RS     end: usize,
+//RS ) {
+//RS     debug_assert_eq!(r.pos, start);
+//RS     debug_assert!(start <= end);
+//RS     debug_assert!(end <= r.buf.len());
+//RS     r.pos = end;
+//RS }
+//RS 
+//RS /// A miss leaves the position untouched and names it, so a caller can see
+//RS /// where the parse stalled.
+//RS pub fn jet_cursor_pattern_miss(c: &JetCursor) -> String {
+//RS     format!("pattern did not match at cursor position {}", c.pos)
+//RS }
+//RS 
+//RS pub fn jet_reader_pattern_miss(r: &JetReader) -> String {
+//RS     format!("pattern did not match at reader position {}", r.pos)
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod stream_cursor_tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn reads_advance_and_report_bounds() {
+//RS         let mut r = jet_reader_over(&vec![42, 0, 0, 0, 3, 0, 16, 32, 48]);
+//RS         assert_eq!(jet_reader_read_u32_le(&mut r), Ok(42));
+//RS         assert_eq!(jet_reader_read_u16_le(&mut r), Ok(3));
+//RS         assert_eq!(jet_reader_take(&mut r, 3), Ok(vec![16, 32, 48]));
+//RS         assert!(jet_reader_at_end(&r));
+//RS         assert_eq!(jet_reader_remaining(&r), 0);
+//RS         assert_eq!(
+//RS             jet_reader_read_u8(&mut r),
+//RS             Err("Reader.read_u8: needed 1 byte at position 9, only 0 remain".to_string())
+//RS         );
+//RS         assert_eq!(
+//RS             jet_reader_take(&mut r, -1),
+//RS             Err("Reader.take: length must not be negative, got -1".to_string())
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn fast_fixed_reads_advance_and_leave_misses_cold() {
+//RS         let mut r = jet_reader_over(&vec![0x2a, 0x00, 0x03]);
+//RS         assert_eq!(jet_reader_read_u8_fast(&mut r), Some(0x2a));
+//RS         assert_eq!(r.pos, 1);
+//RS         assert_eq!(jet_reader_read_u16_le_fast(&mut r), Some(0x0300));
+//RS         assert_eq!(r.pos, 3);
+//RS         assert_eq!(jet_reader_read_u8_fast(&mut r), None);
+//RS         assert_eq!(r.pos, 3);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn region_bounds_checks_without_advancing() {
+//RS         let r = jet_reader_over(&vec![1, 2, 3]);
+//RS         assert_eq!(jet_reader_region_bounds(&r, 2), Some((0, 2)));
+//RS         assert_eq!(r.pos, 0);
+//RS         assert_eq!(jet_reader_region_bounds(&r, 4), None);
+//RS         assert_eq!(r.pos, 0);
+//RS         assert_eq!(jet_reader_region_bounds(&r, -1), None);
+//RS         assert_eq!(r.pos, 0);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn reads_little_endian_floats() {
+//RS         let mut r = jet_reader_over(&vec![
+//RS             0x00, 0x00, 0xc0, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x40,
+//RS         ]);
+//RS         assert_eq!(jet_reader_read_f32_le(&mut r), Ok(1.5));
+//RS         assert_eq!(jet_reader_read_f64_le(&mut r), Ok(2.5));
+//RS         assert!(jet_reader_at_end(&r));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn take_pattern_advances_on_a_hit_and_names_the_position_on_a_miss() {
+//RS         let mut c = jet_cursor_over(&"abcdef".to_string());
+//RS         assert_eq!(jet_cursor_tail(&c), "abcdef");
+//RS         jet_cursor_take_pattern(&mut c, 3);
+//RS         assert_eq!(jet_cursor_tail(&c), "def");
+//RS         assert_eq!(
+//RS             jet_cursor_pattern_miss(&c),
+//RS             "pattern did not match at cursor position 3"
+//RS         );
+//RS 
+//RS         let mut r = jet_reader_over(&vec![1, 2, 3, 4]);
+//RS         jet_reader_take_pattern(&mut r, 2).unwrap();
+//RS         assert_eq!(jet_reader_tail(&r), &[3, 4]);
+//RS         assert_eq!(
+//RS             jet_reader_pattern_miss(&r),
+//RS             "pattern did not match at reader position 2"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn cursor_skips_space_and_takes_until() {
+//RS         let mut c = jet_cursor_over(&"   ab|cd".to_string());
+//RS         jet_cursor_skip_ws(&mut c);
+//RS         assert_eq!(c.pos, 3);
+//RS         assert_eq!(
+//RS             jet_cursor_take_until(&mut c, &"|".to_string()),
+//RS             Ok("ab".to_string())
+//RS         );
+//RS         assert!(jet_cursor_take_until(&mut c, &"!".to_string()).is_err());
+//RS     }
+//RS }
+// END-PORT-PENDING 0097 crates/jet-foundation/src/StreamCursor.rs:1-655
+

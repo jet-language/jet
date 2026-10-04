@@ -1,0 +1,103 @@
+// Codegen/mod.rs:1991-2063. Source ownership stays in FoundationEmbeddedCore.
+// This index retains its registry snapshot once; identities read original,
+// unstripped bodies. No caller-owned alternative source table is introduced.
+use jet_foundation.[FoundationEmbeddedCore, FoundationCoreSource]
+
+JET_CORE_SOURCE_CLOSURE_SCHEMA :: "jet-core-source-closure-v1"
+JET_CORE_SOURCE_MARKER_PREFIX :: "__core_source::"
+JET_CORE_INTRINSIC_MARKER_PREFIX :: "__core_intrinsic::"
+JET_CACHED_RUNTIME_BEGIN :: "// jet:cached-runtime-begin\n"
+JET_CACHED_RUNTIME_END :: "// jet:cached-runtime-end\n"
+JET_CACHED_CORE_BEGIN :: "// jet:cached-core-begin\n"
+JET_CACHED_CORE_END :: "// jet:cached-core-end\n"
+
+pub struct JetRuntimeCoreSources {
+    public_rows: [FoundationCoreSource]
+    private_rows: [FoundationCoreSource]
+    public_index: [String:Int]
+    private_index: [String:Int]
+}
+
+pub struct JetRuntimeCoreSourceSelection {
+    public_rows: [Int]
+    private_rows: [Int]
+    usages: [String]
+}
+
+pub fn jet_runtime_core_sources(core: FoundationEmbeddedCore) -> JetRuntimeCoreSources Never! {
+    public_rows := core.public_sources()
+    private_rows := core.private_sources()
+    public_index := [String:Int]{}
+    private_index := [String:Int]{}
+    loop index in 0..<public_rows.len() -> public_index[public_rows[index].module_name] = index
+    loop index in 0..<private_rows.len() -> private_index[private_rows[index].module_name] = index
+    JetRuntimeCoreSources{public_rows: ^public_rows, private_rows: ^private_rows, public_index: ^public_index, private_index: ^private_index}
+}
+
+// Codegen/mod.rs::is_internal_core_usage.
+pub fn jet_runtime_internal_core_usage(usage: String) -> Bool Never! {
+    usage.starts_with(JET_CORE_SOURCE_MARKER_PREFIX) || usage.starts_with(JET_CORE_INTRINSIC_MARKER_PREFIX)
+}
+
+// Codegen/mod.rs::core_source_usage_matches, exact :: (not dotted descendants).
+pub fn jet_runtime_core_source_usage_matches(usage: String, module: String) -> Bool Never! {
+    normalized := usage // #4303: source-marker slices flow to String calls.
+    if normalized.starts_with(JET_CORE_SOURCE_MARKER_PREFIX) -> normalized = normalized.slice(JET_CORE_SOURCE_MARKER_PREFIX.len(), normalized.len())
+    normalized == module || normalized.starts_with("{module}::")
+}
+
+// Codegen/mod.rs::is_archive_core_usage.
+pub fn jet_runtime_archive_core_usage(usage: String) -> Bool Never! {
+    jet_runtime_core_source_usage_matches(usage, "core.archive")
+}
+
+// Codegen/mod.rs::core_needs_embedded_runtime.
+pub fn jet_runtime_core_needs_embedded_runtime(usages: View<String>) -> Bool Never! {
+    loop usage in usages {
+        if !jet_runtime_internal_core_usage(usage) && !jet_runtime_archive_core_usage(usage) -> return true
+    }
+    false
+}
+
+pub fn jet_runtime_core_source_body(sources: JetRuntimeCoreSources, module: String) -> String Never! {
+    if sources.public_index.get(module) == .Val(index) -> return sources.public_rows[index].source
+    if sources.private_index.get(module) == .Val(index) -> return sources.private_rows[index].source
+    panic("Core source module `{module}` has no body text")
+}
+
+// Each usage and each registry row is indexed once. The selected-row order is
+// the canonical public registry order followed by private-parts order, never
+// name order. Private selection is attached only to a selected public owner.
+pub fn jet_runtime_select_core_sources(sources: JetRuntimeCoreSources, used_core: View<String>) -> JetRuntimeCoreSourceSelection Never! {
+    usage_set := [String:Bool]{}
+    selected_owners := [String:Bool]{}
+    loop usage in used_core {
+        usage_set[usage] = true
+        normalized := usage // #4303
+        if normalized.starts_with(JET_CORE_SOURCE_MARKER_PREFIX) -> normalized = normalized.slice(JET_CORE_SOURCE_MARKER_PREFIX.len(), normalized.len())
+        owner := normalized.before("::") // #4303
+        if sources.public_index.get(owner) != None -> selected_owners[owner] = true
+    }
+    usages := usage_set.keys().to_list()
+    &usages.sort()
+    public_rows := [Int]{}
+    private_rows := [Int]{}
+    loop index in 0..<sources.public_rows.len() {
+        if selected_owners.get(sources.public_rows[index].module_name) != None -> &public_rows.push(index)
+    }
+    loop index in 0..<sources.private_rows.len() {
+        if selected_owners.get(sources.private_rows[index].owner) != None -> &private_rows.push(index)
+    }
+    JetRuntimeCoreSourceSelection{public_rows: ^public_rows, private_rows: ^private_rows, usages: ^usages}
+}
+
+// Codegen/mod.rs::core_usage_matches. Runtime adapters use typed IDs from
+// jet_ring_runtime_parts_for_used_core, not this source-identity helper.
+pub fn jet_runtime_core_usage_matches(usages: View<String>, prefixes: View<String>) -> Bool Never! {
+    loop usage in usages {
+        loop prefix in prefixes {
+            if usage == prefix || usage.starts_with("{prefix}::") || usage.starts_with("{prefix}.") -> return true
+        }
+    }
+    false
+}

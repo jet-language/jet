@@ -1,0 +1,291 @@
+// Rust CheckReads.rs:246-284, preserved end to end. All snapshots below come
+// from the native recorder after REAL reads, never from a caller's input map.
+// Native-dependent originals remain gated on the Main-owned host batch;
+// exact OS ErrorKind / UTF-8 InvalidData witnesses additionally retain #4409.
+use core.files as check_reads_test_files
+use core.testing.host.check_reads as check_reads_test_host
+// Native fixture gates: exclusive_read_tests() -> RAII serialization guard;
+// raw_env_override(name, raw?) -> RAII restore guard; nonunicode_os_token()
+// -> one invalid platform OS-string token; nonunicode_file(root, bytes)
+// -> (raw_path, display_path), created through the real Foundation OS door.
+// The test serialization mutex is distinct from the recording mutex.
+// nonunicode_file creates _<invalid token>.jet to also pin App's basename law.
+
+#Test("check input digests retain exact SHA256 missing and unreadable spellings") {
+    // Independently pinned SHA256 bytes, not another producer-derived map.
+    assert(check_reads_bytes_digest("one".bytes()) == "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed")
+    assert(check_reads_env_digest(None) == "missing")
+    assert(check_reads_env_digest(Val("")) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    assert(check_reads_error_digest("NotFound") == "missing")
+    assert(check_reads_error_digest("PermissionDenied") == "unreadable:PermissionDenied")
+    assert(check_reads_error_digest("InvalidData") == "unreadable:InvalidData")
+    assert(check_reads_file_label("a/../b") == "file:a/../b")
+    assert(check_reads_dir_label("a") == "dir:a")
+    assert(check_reads_env_label("NAME") == "env:NAME")
+}
+
+
+fn check_reads_test_declared(reads: [CheckRead]) -> [String:String] Never! {
+    declared := [String:String]{}
+    loop read in reads -> declared[read.label] = read.digest
+    declared
+}
+fn check_reads_test_digest(reads: [CheckRead], label: String) -> String? Never! {
+    loop read in reads { if read.label == label -> return Val(read.digest) }
+    None
+}
+fn check_reads_test_empty_session() -[Env, FS.Read]> Never! {
+    session :: check_reads_begin_session()
+    assert(check_reads_finish_session(^session).len() == 0)
+}
+
+#Test("session_records_reads_and_audit_reports_undeclared_ones") {
+    // Native test guard serializes process-global recorder/environment tests;
+    // it is NOT a recorder/provider replacement and does not inject reads.
+    guard :: check_reads_test_host.exclusive_read_tests()
+    env_guard :: check_reads_test_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    temp :: check_reads_test_files.temp_dir("jet-check-reads") ?? panic("temporary directory")
+    root :: temp.path
+    declared_file :: check_reads_test_files.join(root, "declared.txt")
+    injected_file :: check_reads_test_files.join(root, "injected.txt")
+    absent_file :: check_reads_test_files.join(root, "absent.txt")
+    check_reads_test_files.write(declared_file, "one") ?? panic("declared file")
+    check_reads_test_files.write(injected_file, "two") ?? panic("injected file")
+
+    session :: check_reads_begin_session()
+    assert((check_reads_read(declared_file) ?? panic("read")) == "one".bytes())
+    assert(if check_reads_read(absent_file) == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    })
+    reads :: check_reads_finish_session(^session)
+    declared :: check_reads_test_declared(reads)
+    assert(declared.get(check_reads_file_label(absent_file)) == Val(CHECK_READS_MISSING))
+    assert(check_reads_undeclared(reads, declared).len() == 0)
+
+    // An injected read that the record does not declare fails the audit.
+    injected_session :: check_reads_begin_session()
+    _ := check_reads_read(declared_file) ?? panic("read declared")
+    _ := check_reads_read(injected_file) ?? panic("read injected")
+    injected_reads :: check_reads_finish_session(^injected_session)
+    missing :: check_reads_undeclared(injected_reads, declared)
+    assert(missing.len() == 1)
+    assert(missing[0].label == check_reads_file_label(injected_file))
+
+    // A declared input whose bytes changed no longer verifies.
+    check_reads_test_files.write(declared_file, "changed") ?? panic("change")
+    label :: check_reads_file_label(declared_file)
+    assert(check_reads_current_digest(label) != declared.get(label))
+
+    // Reads outside a session are not recorded.
+    _ := check_reads_read(declared_file) ?? panic("outside read")
+    check_reads_test_empty_session()
+    check_reads_test_files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("overlapping sessions share actual reads and unfinished drop preserves peers") {
+    guard :: check_reads_test_host.exclusive_read_tests()
+    env_guard :: check_reads_test_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    temp :: check_reads_test_files.temp_dir("jet-check-overlap") ?? panic("temporary directory")
+    first :: check_reads_test_files.join(temp.path, "first")
+    second :: check_reads_test_files.join(temp.path, "second")
+    check_reads_test_files.write(first, "a") ?? panic("first")
+    check_reads_test_files.write(second, "b") ?? panic("second")
+    outer :: check_reads_begin_session()
+    _ := check_reads_read(first) ?? panic("first read")
+    {
+        unfinished :: check_reads_begin_session()
+        _ := check_reads_read(second) ?? panic("second read")
+        // Lexical exit drops unfinished.native; no explicit finish snapshot.
+    }
+    inner :: check_reads_begin_session()
+    inner_reads :: check_reads_finish_session(^inner)
+    outer_reads :: check_reads_finish_session(^outer)
+    assert(inner_reads == outer_reads)
+    assert(inner_reads.len() == 2)
+    assert(inner_reads[0].label < inner_reads[1].label)
+    assert(check_reads_test_digest(inner_reads, check_reads_file_label(first)) == Val(check_reads_bytes_digest("a".bytes())))
+    assert(check_reads_test_digest(inner_reads, check_reads_file_label(second)) == Val(check_reads_bytes_digest("b".bytes())))
+    check_reads_test_empty_session()
+    check_reads_test_files.remove_all(temp.path) ?? panic("cleanup")
+}
+
+#Test("differing rereads pin conflict even after restoration") {
+    guard :: check_reads_test_host.exclusive_read_tests()
+    env_guard :: check_reads_test_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    temp :: check_reads_test_files.temp_dir("jet-check-conflict") ?? panic("temporary directory")
+    path :: check_reads_test_files.join(temp.path, "input")
+    check_reads_test_files.write(path, "old") ?? panic("old")
+    session :: check_reads_begin_session()
+    _ := check_reads_read(path) ?? panic("old read")
+    check_reads_test_files.write(path, "new") ?? panic("new")
+    _ := check_reads_read(path) ?? panic("new read")
+    check_reads_test_files.write(path, "old") ?? panic("restore")
+    _ := check_reads_read(path) ?? panic("restored read")
+    reads :: check_reads_finish_session(^session)
+    assert(reads.len() == 1)
+    assert(reads[0].digest == "conflict")
+    assert(check_reads_current_digest(reads[0].label) != Val(reads[0].digest))
+    assert(check_reads_undeclared(reads, [String:String]{}).len() == 1)
+    check_reads_test_files.remove_all(temp.path) ?? panic("cleanup")
+}
+
+#Test("sorted directory names have newline digests and current audit does not record") {
+    guard :: check_reads_test_host.exclusive_read_tests()
+    env_guard :: check_reads_test_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    temp :: check_reads_test_files.temp_dir("jet-check-dir") ?? panic("temporary directory")
+    check_reads_test_files.write(check_reads_test_files.join(temp.path, "z"), "z") ?? panic("z")
+    check_reads_test_files.write(check_reads_test_files.join(temp.path, "a"), "a") ?? panic("a")
+    check_reads_test_files.write(check_reads_test_files.join(temp.path, "é"), "e") ?? panic("unicode")
+    session :: check_reads_begin_session()
+    entries :: check_reads_read_dir_sorted(temp.path) ?? panic("listing")
+    names :: loop entry in entries -> entry.0
+    assert(names == [String]{"a", "z", "é"})
+    reads :: check_reads_finish_session(^session)
+    assert(reads.len() == 1)
+    assert(reads[0].digest == mir_sha256_hex("a\nz\né"))
+    audit_session :: check_reads_begin_session()
+    assert(check_reads_current_digest(reads[0].label) == Val(reads[0].digest))
+    assert(check_reads_current_digest("bogus:value") == None)
+    assert(check_reads_finish_session(^audit_session).len() == 0)
+    check_reads_test_files.remove_all(temp.path) ?? panic("cleanup")
+}
+
+#Test("unset empty and nonUnicode environment retain distinct read laws") {
+    guard :: check_reads_test_host.exclusive_read_tests()
+    inject_guard :: check_reads_test_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    name :: "JET_CHECK_READS_NATIVE_ENV_TEST"
+    {
+        absent_guard :: check_reads_test_host.raw_env_override(name, None)
+        session :: check_reads_begin_session()
+        assert(check_reads_env_var_os(name) == None)
+        reads :: check_reads_finish_session(^session)
+        assert(reads.len() == 1 && reads[0].digest == CHECK_READS_MISSING)
+    }
+    {
+        empty_guard :: check_reads_test_host.raw_env_override(name, Val([U8]{}))
+        session :: check_reads_begin_session()
+        assert(check_reads_env_var(name) == Val(""))
+        reads :: check_reads_finish_session(^session)
+        assert(reads.len() == 1 && reads[0].digest == mir_sha256_hex(""))
+    }
+    {
+        // Unix 0xff or a Windows lone surrogate in the opaque native encoding.
+        raw :: check_reads_test_host.nonunicode_os_token()
+        raw_guard :: check_reads_test_host.raw_env_override(name, Val(raw))
+        session :: check_reads_begin_session()
+        os_value :: check_reads_env_var_os(name) ?? panic("set raw value")
+        assert(os_value.0 == raw)
+        assert(os_value.1 == "�")
+        assert(os_value.2 == None)
+        assert(check_reads_env_var(name) == None)
+        reads :: check_reads_finish_session(^session)
+        assert(reads.len() == 1)
+        assert(reads[0].digest == mir_sha256_hex("�"))
+        assert(check_reads_current_digest(check_reads_env_label(name)) == Val(reads[0].digest))
+    }
+}
+
+#Test("nonUnicode directory entries retain native order and raw reopen tokens") {
+    guard :: check_reads_test_host.exclusive_read_tests()
+    env_guard :: check_reads_test_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    temp :: check_reads_test_files.temp_dir("jet-check-raw-dir") ?? panic("temporary directory")
+    check_reads_test_files.write(check_reads_test_files.join(temp.path, "z"), "z") ?? panic("z")
+    check_reads_test_files.write(check_reads_test_files.join(temp.path, "a"), "a") ?? panic("a")
+    raw_file :: check_reads_test_host.nonunicode_file(temp.path, "raw".bytes())
+    session :: check_reads_begin_session()
+    entries :: check_reads_read_dir_sorted(temp.path) ?? panic("raw listing")
+    found := false
+    loop entry in entries {
+        if entry.1 != raw_file.0 -> next
+        found = true
+        assert(entry.0 == check_reads_test_files.basename(raw_file.1))
+        opened :: check_reads_read_os(entry.1)
+        assert((opened.1 ?? panic("raw reopen")) == "raw".bytes())
+    }
+    assert(found, "native enumeration must retain the real nonUnicode entry")
+    reads :: check_reads_finish_session(^session)
+    names :: loop entry in entries -> entry.0
+    assert(check_reads_test_digest(reads, check_reads_dir_label(temp.path)) == Val(check_reads_listing_digest(names)))
+    assert(check_reads_test_digest(reads, check_reads_file_label(raw_file.1)) == Val(check_reads_bytes_digest("raw".bytes())))
+    check_reads_test_files.remove_all(temp.path) ?? panic("cleanup")
+}
+
+
+#Test("begin injection opens the raw nonUnicode path and audit catches it") {
+    guard :: check_reads_test_host.exclusive_read_tests()
+    temp :: check_reads_test_files.temp_dir("jet-check-raw-inject") ?? panic("temporary directory")
+    // Real platform fixture creates a name containing the native invalid token;
+    // its opaque path, not its lossy display, is installed in INJECT_ENV.
+    raw_file :: check_reads_test_host.nonunicode_file(temp.path, "two".bytes())
+    env_guard :: check_reads_test_host.raw_env_override(CHECK_READS_INJECT_ENV, Val(raw_file.0))
+    session :: check_reads_begin_session()
+    reads :: check_reads_finish_session(^session)
+    assert(reads.len() == 1)
+    assert(reads[0].label == check_reads_file_label(raw_file.1))
+    assert(reads[0].digest == check_reads_bytes_digest("two".bytes()))
+    assert(check_reads_undeclared(reads, [String:String]{}).len() == 1)
+    // Injection does not record an env:JET_CHECK_READS_INJECT read.
+    assert(check_reads_test_digest(reads, check_reads_env_label(CHECK_READS_INJECT_ENV)) == None)
+    check_reads_test_files.remove_all(temp.path) ?? panic("cleanup")
+}
+
+#Test("missing unreadable and invalid UTF8 preserve actual ErrorKind and byte digest") {
+    // #4409: native original ErrorKind must survive the reduced Core IOError.
+    guard :: check_reads_test_host.exclusive_read_tests()
+    env_guard :: check_reads_test_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    temp :: check_reads_test_files.temp_dir("jet-check-errors") ?? panic("temporary directory")
+    invalid :: check_reads_test_files.join(temp.path, "invalid")
+    bad_bytes :: [U8]{U8{255}, U8{0}}
+    check_reads_test_files.write_bytes(invalid, bad_bytes) ?? panic("invalid bytes")
+    session :: check_reads_begin_session()
+    result :: check_reads_read_to_string(invalid)
+    assert(if result == {
+        .Err(error) -> check_reads_native.io_error_kind(error) == "InvalidData"
+        .Ok(_) -> false
+    })
+    absent :: check_reads_test_files.join(temp.path, "absent")
+    _ := check_reads_read(absent)
+    unreadable :: check_reads_read(temp.path)
+    kind :: if unreadable == {
+        .Err(error) -> check_reads_native.io_error_kind(error)
+        .Ok(_) -> panic("a directory is not a regular file read")
+    }
+    reads :: check_reads_finish_session(^session)
+    assert(check_reads_test_digest(reads, check_reads_file_label(invalid)) == Val(check_reads_bytes_digest(bad_bytes)))
+    assert(check_reads_test_digest(reads, check_reads_file_label(absent)) == Val(CHECK_READS_MISSING))
+    assert(check_reads_test_digest(reads, check_reads_file_label(temp.path)) == Val(check_reads_error_digest(kind)))
+    assert(check_reads_error_digest("PermissionDenied") == "unreadable:PermissionDenied")
+    check_reads_test_files.remove_all(temp.path) ?? panic("cleanup")
+}
+
+#Test("rooted no-follow reads record both successful bytes and real refusals") {
+    guard :: check_reads_test_host.exclusive_read_tests()
+    env_guard :: check_reads_test_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    temp :: check_reads_test_files.temp_dir("jet-check-rooted") ?? panic("temporary directory")
+    input :: check_reads_joined_display(temp.path, "input")
+    check_reads_test_files.write(input, "rooted") ?? panic("input")
+    large :: check_reads_joined_display(temp.path, "large")
+    check_reads_test_files.write(large, "too large") ?? panic("large")
+    check_reads_test_files.symlink(input, check_reads_joined_display(temp.path, "link")) ?? panic("symlink fixture")
+    session :: check_reads_begin_session()
+    assert((check_reads_read_nofollow_at_root(temp.path, "input", U64{64}) ?? panic("rooted read")) == "rooted".bytes())
+    assert(if check_reads_read_nofollow_at_root(temp.path, "link", U64{64}) == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    })
+    assert(if check_reads_read_nofollow_at_root(temp.path, "../escape", U64{64}) == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    })
+    assert(if check_reads_read_nofollow_at_root(temp.path, "large", U64{3}) == {
+        .Err(error) -> check_reads_native.io_error_kind(error) == "InvalidData"
+        .Ok(_) -> false
+    })
+    reads :: check_reads_finish_session(^session)
+    assert(reads.len() == 4)
+    assert(check_reads_test_digest(reads, check_reads_file_label(input)) == Val(check_reads_bytes_digest("rooted".bytes())))
+    assert(check_reads_test_digest(reads, check_reads_file_label(large)) == Val("unreadable:InvalidData"))
+    loop read in reads { assert(read.label.starts_with("file:")) }
+    check_reads_test_files.remove_all(temp.path) ?? panic("cleanup")
+}

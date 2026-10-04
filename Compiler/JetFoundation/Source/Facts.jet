@@ -1,0 +1,253 @@
+// Rust jet-foundation/Facts.rs:357-747. These are erased checked metadata;
+// MIR/Reachability is CFG liveness and deliberately does not own these rows.
+pub enum FactKind { Effect State Tag }
+pub struct StateNode { pub name: String, pub terminal: Bool, pub reachable: Bool? }
+// Facts::StateTransition is StateGraphTransition in the flat Jet package:
+// AST's StateTransition already owns the source marker and its Span.
+pub struct StateGraphTransition { pub operation: String, pub from: String?, pub to: String }
+pub struct StateGraph { pub states: [StateNode], pub transitions: [StateGraphTransition] }
+pub struct FactDeclaration {
+    pub kind: FactKind
+    pub name: String
+    pub members: [String]
+    pub deny: [String]
+    pub from: [String]
+}
+pub struct FactRegistry {
+    pub declarations: [String:FactDeclaration]
+    pub state_member_order: [String:[String]]
+    pub state_graphs: [String:StateGraph]
+}
+pub fn fact_kind_name(kind: FactKind) -> String Never! {
+    if kind == {
+        .Effect -> "Effect"
+        .State -> "State"
+        .Tag -> "Tag"
+    }
+}
+fn fact_registry_key(kind: FactKind, name: String) -> String Never! { "{fact_kind_name(kind)}:{name}" }
+pub fn fact_registry_new() -> FactRegistry Never! {
+    FactRegistry{declarations: [String:FactDeclaration]{}, state_member_order: [String:[String]]{}, state_graphs: [String:StateGraph]{}}
+}
+// BTreeSet/BTreeMap iteration is observable: sorting occurs at the boundary,
+// while insertion/membership use the canonical hash map rather than scans.
+pub fn fact_sorted_strings(values: [String]) -> [String] Never! {
+    unique := [String:Bool]{}
+    loop value in values -> unique[value] = true
+    result := [String]{}
+    loop (value, _) in unique -> &result.push(value)
+    &result.sort()
+    result
+}
+pub fn fact_registry_declare_with_rules(registry: &FactRegistry, kind: FactKind, name: String, members: [String], deny: [String], from: [String]) Never! {
+    if kind == FactKind.State -> registry.state_member_order[name] = members
+    registry.declarations[fact_registry_key(kind, name)] = FactDeclaration{kind: kind, name: name, members: fact_sorted_strings(members), deny: fact_sorted_strings(deny), from: fact_sorted_strings(from)}
+}
+pub fn fact_registry_declare(registry: &FactRegistry, kind: FactKind, name: String, members: [String]) Never! {
+    fact_registry_declare_with_rules(&registry, kind, name, members, [String]{}, [String]{})
+}
+pub fn fact_registry_declare_state(registry: &FactRegistry, type_name: String, members: [String]) Never! {
+    fact_registry_declare(&registry, FactKind.State, "{type_name}.State", members)
+}
+pub fn fact_registry_from_state_items(items: [Item]) -> FactRegistry Never! {
+    registry := fact_registry_new()
+    loop item in items {
+        if item == .Struct(definition) {
+            state :: definition.state ?? next
+            members := [String]{}
+            loop member in state.states -> &members.push(member.name)
+            fact_registry_declare_state(&registry, definition.name, members)
+        }
+    }
+    registry
+}
+pub fn fact_registry_get(registry: FactRegistry, kind: FactKind, name: String) -> FactDeclaration? {
+    registry.declarations.get(fact_registry_key(kind, name))
+}
+pub fn fact_registry_contains(registry: FactRegistry, kind: FactKind, name: String) -> Bool Never! {
+    registry.declarations.get(fact_registry_key(kind, name)) != None
+}
+pub fn fact_registry_member(registry: FactRegistry, kind: FactKind, name: String, member: String) -> Bool Never! {
+    declaration :: fact_registry_get(registry, kind, name) ?? return false
+    declaration.members.contains(member)
+}
+pub fn fact_registry_declare_member(registry: &FactRegistry, kind: FactKind, name: String, member: String) Never! {
+    key :: fact_registry_key(kind, name)
+    declaration := registry.declarations.get(key) ?? FactDeclaration{kind: kind, name: name, members: [String]{}, deny: [String]{}, from: [String]{}}
+    if !declaration.members.contains(member) {
+        &declaration.members.push(member)
+        &declaration.members.sort()
+    }
+    registry.declarations[key] = declaration
+    if kind == FactKind.State {
+        ordered := registry.state_member_order.get(name) ?? [String]{}
+        if !ordered.contains(member) -> &ordered.push(member)
+        registry.state_member_order[name] = ordered
+    }
+}
+pub fn fact_registry_set_state_graph(registry: &FactRegistry, name: String, graph: StateGraph) Never! { registry.state_graphs[name] = graph }
+pub fn fact_registry_state_graph(registry: FactRegistry, name: String) -> StateGraph? { registry.state_graphs.get(name) }
+pub fn fact_registry_state_members(registry: FactRegistry, type_name: String) -> [String]? { registry.state_member_order.get("{type_name}.State") }
+pub fn fact_registry_iter(registry: FactRegistry) -> [FactDeclaration] Never! {
+    result := [FactDeclaration]{}
+    families :: [FactKind]{FactKind.Effect, FactKind.State, FactKind.Tag}
+    loop kind in families -> &result.extend(fact_registry_iter_kind(registry, kind))
+    result
+}
+pub fn fact_registry_iter_kind(registry: FactRegistry, kind: FactKind) -> [FactDeclaration] Never! {
+    names := [String]{}
+    loop (_, declaration) in registry.declarations {
+        if declaration.kind == kind -> &names.push(declaration.name)
+    }
+    &names.sort()
+    result := [FactDeclaration]{}
+    loop name in names -> &result.push(fact_registry_get(registry, kind, name) ?? panic("registered fact disappeared"))
+    result
+}
+pub struct ReachabilityRow { pub name: String, pub seeds: [String:[String]] }
+pub struct ReachabilityResult {
+    pub rows: [String:[String:[String]]]
+    pub proofs: [String:[String:[String:[String]]]]
+}
+pub fn reachability_row(result: ReachabilityResult, name: String) -> [String:[String]]? { result.rows.get(name) }
+pub fn reachability_path(result: ReachabilityResult, row: String, node: String, fact: String) -> [String]? {
+    values :: result.proofs.get(row) ?? return None
+    facts :: values.get(node) ?? return None
+    facts.get(fact)
+}
+pub fn reachability_nodes_with(result: ReachabilityResult, row: String, fact: String) -> [String] Never! {
+    values :: result.rows.get(row) ?? return [String]{}
+    nodes := [String]{}
+    loop (node, facts) in values {
+        if facts.contains(fact) -> &nodes.push(node)
+    }
+    &nodes.sort()
+    nodes
+}
+// Rust ReachabilityResult::copy_node: only the proof's first node changes.
+pub fn reachability_copy_node(result: &ReachabilityResult, alias: String, target: String) Never! {
+    names := [String]{}
+    loop (name, _) in result.rows -> &names.push(name)
+    loop name in names {
+        values := result.rows.get(name) ?? next
+        facts :: values.get(target) ?? next
+        values[alias] = facts
+        result.rows[name] = values
+        proofs := result.proofs.get(name) ?? [String:[String:[String]]]{}
+        target_proofs :: proofs.get(target) ?? next
+        alias_proofs := [String:[String]]{}
+        loop fact in facts {
+            path := target_proofs.get(fact) ?? next
+            if path.len() > 0 && path[0] == target -> path[0] = alias
+            alias_proofs[fact] = path
+        }
+        proofs[alias] = alias_proofs
+        result.proofs[name] = proofs
+    }
+}
+// Rust project_reachability: one deterministic work queue serves every row.
+// Per-node finite sets converge on cycles; first insertion fixes the witness.
+pub fn project_reachability(edges: [String:[String]], rows: [ReachabilityRow]) -> ReachabilityResult Never! {
+    nodes := [String]{}
+    predecessors := [String:[String]]{}
+    loop (caller, callees) in edges {
+        &nodes.push(caller)
+        &nodes.extend(callees)
+        loop callee in callees {
+            values := predecessors.get(callee) ?? [String]{}
+            &values.push(caller)
+            predecessors[callee] = values
+        }
+    }
+    loop row in rows { loop (node, _) in row.seeds -> &nodes.push(node) }
+    nodes = fact_sorted_strings(nodes)
+    predecessor_names := [String]{}
+    loop (node, _) in predecessors -> &predecessor_names.push(node)
+    loop node in predecessor_names -> predecessors[node] = fact_sorted_strings(predecessors.get(node) ?? [String]{})
+    result := ReachabilityResult{rows: [String:[String:[String]]]{}, proofs: [String:[String:[String:[String]]]]{}}
+    // Internal membership lattice avoids repeated linear fact membership.
+    lattice := [String:[String:[String:Bool]]]{}
+    queue := [String]{}
+    queued := [String:Bool]{}
+    loop row in rows {
+        values := [String:[String]]{}
+        memberships := [String:[String:Bool]]{}
+        proofs := [String:[String:[String]]]{}
+        loop node in nodes {
+            values[node] = [String]{}
+            memberships[node] = [String:Bool]{}
+        }
+        seed_names := [String]{}
+        loop (node, _) in row.seeds -> &seed_names.push(node)
+        &seed_names.sort()
+        loop node in seed_names {
+            facts :: fact_sorted_strings(row.seeds.get(node) ?? [String]{})
+            member := [String:Bool]{}
+            paths := [String:[String]]{}
+            loop fact in facts {
+                member[fact] = true
+                paths[fact] = [String]{node}
+            }
+            values[node] = facts
+            memberships[node] = member
+            proofs[node] = paths
+            previous :: predecessors.get(node) ?? [String]{}
+            loop predecessor in previous {
+                was_queued :: queued.get(predecessor) ?? false
+                if was_queued -> next
+                queued[predecessor] = true
+                &queue.push(predecessor)
+            }
+        }
+        result.rows[row.name] = values
+        result.proofs[row.name] = proofs
+        lattice[row.name] = memberships
+    }
+    cursor := 0
+    loop cursor < queue.len() {
+        caller :: queue[cursor]
+        cursor += 1
+        queued[caller] = false
+        callees :: fact_sorted_strings(edges.get(caller) ?? [String]{})
+        loop callee in callees {
+            loop row in rows {
+                values := result.rows.get(row.name) ?? panic("missing reachability row")
+                facts :: values.get(callee) ?? [String]{}
+                memberships := lattice.get(row.name) ?? panic("missing reachability lattice")
+                destination := memberships.get(caller) ?? [String:Bool]{}
+                caller_values := values.get(caller) ?? [String]{}
+                proofs := result.proofs.get(row.name) ?? panic("missing reachability proofs")
+                callee_proofs :: proofs.get(callee) ?? [String:[String]]{}
+                caller_proofs := proofs.get(caller) ?? [String:[String]]{}
+                changed := false
+                loop fact in facts {
+                    already_present :: destination.get(fact) ?? false
+                    if already_present -> next
+                    destination[fact] = true
+                    &caller_values.push(fact)
+                    path := [String]{caller}
+                    &path.extend(callee_proofs.get(fact) ?? [String]{callee})
+                    caller_proofs[fact] = path
+                    changed = true
+                }
+                if changed {
+                    &caller_values.sort()
+                    values[caller] = caller_values
+                    memberships[caller] = destination
+                    proofs[caller] = caller_proofs
+                    result.rows[row.name] = values
+                    result.proofs[row.name] = proofs
+                    lattice[row.name] = memberships
+                    previous :: predecessors.get(caller) ?? [String]{}
+                    loop predecessor in previous {
+                        was_queued :: queued.get(predecessor) ?? false
+                        if was_queued -> next
+                        queued[predecessor] = true
+                        &queue.push(predecessor)
+                    }
+                }
+            }
+        }
+    }
+    result
+}

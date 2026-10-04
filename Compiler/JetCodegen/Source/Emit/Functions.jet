@@ -1,5 +1,6 @@
 // Callable signatures and CFG body wrappers.
 use jet_foundation.[
+    foundation_generated_path,
     MIRAccess,
     MIRCaptureParam,
     MIRFieldID,
@@ -1201,7 +1202,33 @@ fn jet_rust_emit_inherent_method_symbol(name: String) -> String Never! {
     jet_rust_emit_mangle(jet_rust_emit_function_leaf(name))
 }
 
-fn jet_rust_emit_trait_method_head(ctx: &JetRustEmitContext, trait_name: String, method: MIRTraitMethod) -> String Never! {
+// MIRRust synthetic_rollback_type / synthetic_rollback_parameter_type.
+// Only the compiler-synthesized empty Rollback trait binds Snapshot as Self.
+fn jet_rust_emit_synthetic_rollback_type(ctx: &JetRustEmitContext, definition: MIRTraitDef, ty: MIRType) -> String Never! {
+    if definition.name != "Rollback" || definition.methods.len() != 0 -> return jet_rust_emit_type(&ctx, ty)
+    if ty.kind == .Apply(name, _) {
+        if name.name == "Snapshot" -> return "Self::{jet_rust_emit_mangle("Snapshot")}"
+    }
+    if ty.kind == .Result(ok, error) {
+        result := jet_rust_emit_type(&ctx, ok)
+        if ok.kind == .Apply(name, _) {
+            if name.name == "Snapshot" -> result = "Self::{jet_rust_emit_mangle("Snapshot")}"
+        }
+        return "{ctx.config.root_prefix}JetOutcome<{result}, {jet_rust_emit_type(&ctx, error)}>"
+    }
+    jet_rust_emit_type(&ctx, ty)
+}
+
+fn jet_rust_emit_synthetic_rollback_param_type(ctx: &JetRustEmitContext, definition: MIRTraitDef, parameter: MIRParam) -> String Never! {
+    ty :: jet_rust_emit_synthetic_rollback_type(&ctx, definition, parameter.ty)
+    if parameter.access == {
+        .Write -> "&mut {ty}"
+        .Read -> if jet_rust_emit_type_is_borrowed(parameter.ty) -> "&{ty}" else -> ty
+        .Move -> ty
+    }
+}
+
+fn jet_rust_emit_trait_method_head(ctx: &JetRustEmitContext, definition: MIRTraitDef, method: MIRTraitMethod) -> String Never! {
     params := [String]{}
     if method.self_access == .Val(access) {
         if access == {
@@ -1211,13 +1238,13 @@ fn jet_rust_emit_trait_method_head(ctx: &JetRustEmitContext, trait_name: String,
         }
     }
     loop (index, parameter) in method.params {
-        &params.push("{jet_rust_emit_trait_param_name(parameter, index)}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}")
+        &params.push("{jet_rust_emit_trait_param_name(parameter, index)}: {jet_rust_emit_synthetic_rollback_param_type(&ctx, definition, parameter)}")
     }
-    "fn {jet_rust_emit_trait_method_symbol(trait_name, method)}({params.join(", ")}) -> {jet_rust_emit_type(&ctx, method.return_type)}"
+    "fn {jet_rust_emit_trait_method_symbol(definition.name, method)}({params.join(", ")}) -> {jet_rust_emit_synthetic_rollback_type(&ctx, definition, method.return_type)}"
 }
 
-fn jet_rust_emit_trait_method_signature(ctx: &JetRustEmitContext, trait_name: String, method: MIRTraitMethod) -> String Never! {
-    "{jet_rust_emit_trait_method_head(&ctx, trait_name, method)};"
+fn jet_rust_emit_trait_method_signature(ctx: &JetRustEmitContext, definition: MIRTraitDef, method: MIRTraitMethod) -> String Never! {
+    "{jet_rust_emit_trait_method_head(&ctx, definition, method)};"
 }
 
 // A borrowed receiver forwards as `self` (a reborrow of `&self`/`&mut self`);
@@ -1232,7 +1259,7 @@ fn jet_rust_emit_trait_default_args(method: MIRTraitMethod) -> String Never! {
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_trait_method
 fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: MIRTraitDef, method: MIRTraitMethod, lines: &[String]) Never! {
     default_id :: method.default ?? {
-        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition.name, method)}")
+        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition, method)}")
         return
     }
     found := false
@@ -1265,17 +1292,17 @@ fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: M
     }
     if !found {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait default function is missing", "default trait methods must resolve to their checked MIR function row", Val(method.span))
-        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition.name, method)}")
+        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition, method)}")
         return
     }
     if !valid {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait default function ABI disagrees with its declaration", "default trait methods must preserve the checked trait, receiver, parameter, return, and failure facts", Val(method.span))
-        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition.name, method)}")
+        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition, method)}")
         return
     }
     if jet_rust_emit_function_index(ctx, default_id) == .Val(function_index) {
         if ctx.program.functions[function_index].id == default_id {
-            &lines.push("    {jet_rust_emit_trait_method_head(&ctx, definition.name, method)} {{")
+            &lines.push("    {jet_rust_emit_trait_method_head(&ctx, definition, method)} {{")
             &lines.push("        {jet_rust_emit_function_name(&ctx, default_id)}({jet_rust_emit_trait_default_args(method)})")
             &lines.push("    }}")
         }
@@ -1495,7 +1522,7 @@ fn jet_rust_emit_impl_carrier_trait(ctx: &JetRustEmitContext, implementation: MI
     definition :: ~ctx.program.types[position]
     if definition.id != identity -> return None
     if jet_rust_emit_module_selected(ctx, definition.module_id) && jet_rust_emit_declares_type_definition(&ctx, definition) -> return None
-    Val("__jet_ext{jet_rust_emit_generated_path(implementation.key)}")
+    Val("__jet_ext{foundation_generated_path(implementation.key)}")
 }
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_impl

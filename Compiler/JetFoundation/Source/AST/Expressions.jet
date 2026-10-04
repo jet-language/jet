@@ -30,7 +30,7 @@ pub enum Expr {
     Field(base: Expr, member: String, span: Span)
     OptField(base: Expr, member: String, member_span: Span, flatten: Bool, span: Span)
     MethodCall(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: String?, resolved_ret: Type?, operator_rhs: Type?, checked_widen: Bool)
-    OptMethodCall(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span)
+    OptMethodCall(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span, receiver_span: Span, call_span: Span)
     StructLit(type_name: String, type_args: [Type], import_ns: String?, as_trait: String?, fields: [ExprField], inferred: Bool, span: Span)
     TypedLit(head: Type?, body: TypedLitBody, span: Span)
     EnumLit(type_name: String, variant: String, variant_span: Span?, args: [EnumLitArg], leading_dot: Bool, span: Span)
@@ -473,13 +473,8 @@ pub struct FrameRetention {
 pub struct DerivationRef {
     pub id: String
 }
-// S71 / D-SUGAR6: the ordinary call that `receiver?.method(args)` runs on the
-// present payload. Syntax walkers reuse their `MethodCall` facts through it.
-pub fn expr_optional_method_call_as_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
-    Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
-}
 
-pub fn expr_span(expr: Expr) -> Span {
+pub fn expr_span(expr: Expr) -> Span Never! {
     if expr == {
         .Str(_, span) -> return span
         .StrMatchLit(_, span) -> return span
@@ -509,7 +504,7 @@ pub fn expr_span(expr: Expr) -> Span {
         .Field(_, _, span) -> return span
         .OptField(_, _, _, _, span) -> return span
         .MethodCall(_, _, method_span, _, _, _, _, _, _, _) -> return method_span
-        .OptMethodCall(_, _, method_span, _, _, _) -> return method_span
+        .OptMethodCall(_, _, method_span, _, _, _, _, _) -> return method_span
         .StructLit(_, _, _, _, _, _, span) -> return span
         .TypedLit(_, _, span) -> return span
         .EnumLit(_, _, _, _, _, span) -> return span
@@ -532,5 +527,754 @@ pub fn expr_span(expr: Expr) -> Span {
         .ComptimeName(_, span, _) -> return span
         .Paren(_, span) -> return span
     }
-    Span{start: 0, end: 0}
+}
+
+// Rust AST/expressions.rs::Expr::for_each_expr_mut and
+// AST/statements.rs::Stmt::for_each_expr: preorder, borrowing original nodes.
+// The read-only Rust statement wrapper's whole-graph clone is unnecessary.
+pub trait ASTExprVisitor {
+    fn visit(&self, expression: Expr) Never!
+}
+
+pub fn ast_expr_for_each_expr<V: ASTExprVisitor>(expression: Expr, visitor: &V) Never! {
+    &visitor.visit(expression)
+    if expression == {
+        .Str(parts, _) -> {
+            loop part in parts { if part == .Interp(value, _) -> ast_expr_for_each_expr<V>(value, &visitor) }
+        }
+        .ListLit(values, _) | .CompareChain(values, _, _, _) -> {
+            loop value in values -> ast_expr_for_each_expr<V>(value, &visitor)
+        }
+        .MemberSpread(value, _, _) | .Spread(value, _) | .Deref(value, _) |
+        .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _) | .Field(value, _, _) |
+        .OptField(value, _, _, _, _) | .Present(value, _) | .Ok(value, _) |
+        .Err(value, _) | .Paren(value, _) | .Unary(_, value, _) | .Tainted(value, _, _) ->
+            ast_expr_for_each_expr<V>(value, &visitor)
+        .Try(value, _, _, note) -> {
+            ast_expr_for_each_expr<V>(value, &visitor)
+            if note == .Val(value) -> ast_expr_for_each_expr<V>(value, &visitor)
+        }
+        .MapLit(entries, _) -> {
+            loop entry in entries {
+                ast_expr_for_each_expr<V>(entry.key, &visitor)
+                ast_expr_for_each_expr<V>(entry.value, &visitor)
+            }
+        }
+        .Index(base, index, _, _) -> {
+            ast_expr_for_each_expr<V>(base, &visitor)
+            ast_expr_for_each_expr<V>(index, &visitor)
+        }
+        .Slice(base, start, end, range, _) -> {
+            ast_expr_for_each_expr<V>(base, &visitor)
+            ast_expr_for_each_expr<V>(start, &visitor)
+            ast_expr_for_each_expr<V>(end, &visitor)
+            if range == .Val(value) -> ast_expr_for_each_expr<V>(value, &visitor)
+        }
+        .Range(left, right, _, _) | .Binary(_, left, right, _) -> {
+            ast_expr_for_each_expr<V>(left, &visitor)
+            ast_expr_for_each_expr<V>(right, &visitor)
+        }
+        .Call(call) -> ast_visit_call_args<V>(call.args, &visitor)
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) |
+        .OptMethodCall(receiver, _, _, _, args, _, _, _) | .CallValue(receiver, args, _) -> {
+            ast_expr_for_each_expr<V>(receiver, &visitor)
+            ast_visit_call_args<V>(args, &visitor)
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> {
+            loop field in fields -> ast_expr_for_each_expr<V>(field.value, &visitor)
+        }
+        .TypedLit(_, body, _) -> if body == {
+            .Fields(fields) -> { loop field in fields -> ast_expr_for_each_expr<V>(field.value, &visitor) }
+            .Elements(values) -> { loop value in values -> ast_expr_for_each_expr<V>(value, &visitor) }
+            .Entries(entries) -> {
+                loop entry in entries {
+                    ast_expr_for_each_expr<V>(entry.key, &visitor)
+                    ast_expr_for_each_expr<V>(entry.value, &visitor)
+                }
+            }
+            .Value(value) -> ast_expr_for_each_expr<V>(value, &visitor)
+            .ByteText(_) | .Empty -> {}
+        }
+        .EnumLit(_, _, _, args, _, _) -> {
+            loop argument in args {
+                if argument == {
+                    .Positional(value) | .Named(_, value) -> ast_expr_for_each_expr<V>(value, &visitor)
+                }
+            }
+        }
+        .PatternTest(subject, pattern, _) -> {
+            ast_expr_for_each_expr<V>(subject, &visitor)
+            ast_visit_pattern<V>(pattern, &visitor)
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            ast_expr_for_each_expr<V>(value, &visitor)
+            ast_visit_fallback<V>(fallback, &visitor)
+        }
+        .If(condition, then_body, then_value, else_body, else_value, _) -> {
+            ast_expr_for_each_expr<V>(condition, &visitor)
+            ast_visit_body<V>(then_body, &visitor, true)
+            ast_expr_for_each_expr<V>(then_value, &visitor)
+            ast_visit_body<V>(else_body, &visitor, true)
+            ast_expr_for_each_expr<V>(else_value, &visitor)
+        }
+        .TupleLit(fields, _, _) -> {
+            loop field in fields -> ast_expr_for_each_expr<V>(field.value, &visitor)
+        }
+        .Lambda(lambda) -> if lambda.body == {
+            .Expr(value) -> ast_expr_for_each_expr<V>(value, &visitor)
+            .Block(body) -> ast_visit_body<V>(body, &visitor, true)
+        }
+        .PtrFromAddr(_, _, _, address, _) -> ast_expr_for_each_expr<V>(address, &visitor)
+        .StrMatchLit(_, _) | .BinMatchLit(_, _) | .Int(_, _, _, _) |
+        .Float(_, _, _, _) | .Bool(_, _) | .Unit(_) | .Char(_, _) | .Ident(_, _) |
+        .UnitLit(_, _, _, _, _, _) | .Absent(_) | .Todo(_, _) | .NoElse(_) |
+        .ReduceMarker(_, _) | .ComptimeName(_, _, _) -> {}
+    }
+}
+
+pub fn ast_stmt_for_each_expr<V: ASTExprVisitor>(statement: Stmt, visitor: &V) Never! {
+    ast_visit_statement<V>(statement, &visitor, false)
+}
+fn ast_visit_body<V: ASTExprVisitor>(body: [Stmt], visitor: &V, nested_expression: Bool) Never! {
+    loop statement in body -> ast_visit_statement<V>(statement, &visitor, nested_expression)
+}
+fn ast_visit_call_args<V: ASTExprVisitor>(args: [CallArg], visitor: &V) Never! {
+    loop argument in args -> ast_expr_for_each_expr<V>(argument.expr, &visitor)
+}
+fn ast_visit_pattern<V: ASTExprVisitor>(pattern: Pattern, visitor: &V) Never! {
+    // Frozen Expr walker intentionally visits only Or and Struct value slots.
+    if pattern == {
+        .Or(alternatives, _) -> { loop alternative in alternatives -> ast_visit_pattern<V>(alternative, &visitor) }
+        .Struct(fields, _, _) -> {
+            loop field in fields { if field == .Value(_, _, value) -> ast_expr_for_each_expr<V>(value, &visitor) }
+        }
+        else -> {}
+    }
+}
+fn ast_visit_fallback<V: ASTExprVisitor>(fallback: OrFallback, visitor: &V) Never! {
+    if fallback == {
+        .Value(value) -> ast_expr_for_each_expr<V>(value, &visitor)
+        .Block(body, value, _) -> {
+            ast_visit_body<V>(body, &visitor, true)
+            if value == .Val(value) -> ast_expr_for_each_expr<V>(value, &visitor)
+        }
+        .Return(value, _) -> { if value == .Val(value) -> ast_expr_for_each_expr<V>(value, &visitor) }
+        .Panic(_, args) -> ast_visit_call_args<V>(args, &visitor)
+        else -> {}
+    }
+}
+fn ast_visit_statement<V: ASTExprVisitor>(statement: Stmt, visitor: &V, nested_expression: Bool) Never! {
+    if statement == {
+        .Expr(expression) | .DeferClose(expression, _) -> ast_expr_for_each_expr<V>(expression, &visitor)
+        .Val(binding) -> {
+            ast_expr_for_each_expr<V>(binding.init, &visitor)
+            // Expr's nested-statement walk includes refutable payloads, while
+            // Stmt's top-level walk includes only init (Rust 1257 vs 544).
+            if nested_expression {
+                if binding.pattern == .Val(.Refutable(pattern, fallback, _, _, _)) {
+                    ast_visit_pattern<V>(pattern, &visitor)
+                    ast_visit_fallback<V>(fallback, &visitor)
+                }
+            }
+        }
+        .Assign(target, _, _, value) -> {
+            if target == {
+                .Local(_, _) -> {}
+                .Index(base, index, _, _) -> {
+                    ast_expr_for_each_expr<V>(base, &visitor)
+                    ast_expr_for_each_expr<V>(index, &visitor)
+                }
+                .Field(base, _, _) -> ast_expr_for_each_expr<V>(base, &visitor)
+            }
+            ast_expr_for_each_expr<V>(value, &visitor)
+        }
+        .Return(value, _) -> { if value == .Val(value) -> ast_expr_for_each_expr<V>(value, &visitor) }
+        .While(condition, body, _, _, _) -> {
+            ast_expr_for_each_expr<V>(condition, &visitor)
+            ast_visit_body<V>(body, &visitor, nested_expression)
+        }
+        .For(_, _, _, kind, body, _, _, _, _) -> {
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    ast_expr_for_each_expr<V>(start, &visitor)
+                    ast_expr_for_each_expr<V>(end, &visitor)
+                    if step == .Val(value) -> ast_expr_for_each_expr<V>(value, &visitor)
+                }
+                .In(collection, step) -> {
+                    ast_expr_for_each_expr<V>(collection, &visitor)
+                    if step == .Val(value) -> ast_expr_for_each_expr<V>(value, &visitor)
+                }
+            }
+            ast_visit_body<V>(body, &visitor, nested_expression)
+        }
+        .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+            ast_expr_for_each_expr<V>(subject, &visitor)
+            loop arm in arms {
+                ast_expr_for_each_expr<V>(arm.cond, &visitor)
+                ast_visit_body<V>(arm.body, &visitor, nested_expression)
+            }
+            if else_body == .Val(body) -> ast_visit_body<V>(body, &visitor, nested_expression)
+        }
+        .BreakValue(value, _) | .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> ast_expr_for_each_expr<V>(value, &visitor)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) |
+        .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) |
+        .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) |
+        .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> ast_visit_body<V>(body, &visitor, nested_expression)
+        .Unsafe(_, reason, body, _) | .Impure(_, reason, body, _) -> {
+            if reason == .Val(value) -> ast_expr_for_each_expr<V>(value, &visitor)
+            ast_visit_body<V>(body, &visitor, nested_expression)
+        }
+        .CountedLoop(init, condition, step, body, _, _, _) -> {
+            ast_expr_for_each_expr<V>(init.init, &visitor)
+            ast_expr_for_each_expr<V>(condition, &visitor)
+            if step == .Val(value) -> ast_visit_statement<V>(value, &visitor, nested_expression)
+            ast_visit_body<V>(body, &visitor, nested_expression)
+        }
+        .TaskGroup(_, _, limit, body, _) -> {
+            if limit == .Val(value) -> ast_expr_for_each_expr<V>(value, &visitor)
+            ast_visit_body<V>(body, &visitor, nested_expression)
+        }
+        .ContextBlock(fields, body, _) -> {
+            loop field in fields -> ast_expr_for_each_expr<V>(field.value, &visitor)
+            ast_visit_body<V>(body, &visitor, nested_expression)
+        }
+        .AssumeDet(_, reason, body, _) -> {
+            ast_expr_for_each_expr<V>(reason, &visitor)
+            ast_visit_body<V>(body, &visitor, nested_expression)
+        }
+        .ComptimeIf(condition, _, then_body, else_body, _, _) -> {
+            ast_expr_for_each_expr<V>(condition, &visitor)
+            ast_visit_body<V>(then_body, &visitor, nested_expression)
+            if else_body == .Val(body) -> ast_visit_body<V>(body, &visitor, nested_expression)
+        }
+        .ScopeMember(_, _, args, _, body, _, _, _) -> {
+            loop argument in args -> ast_expr_for_each_expr<V>(argument, &visitor)
+            ast_visit_body<V>(body, &visitor, nested_expression)
+        }
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
+    }
+}
+
+// Rust expressions.rs:44–94. Names are syntax-owned; no private spelling table.
+pub fn arithmetic_mode_as_str(mode: ArithmeticMode) -> String Never! {
+    if mode == { .Checked -> "Checked", .Wrapping -> "Wrapping", .Saturating -> "Saturating" }
+}
+pub fn arithmetic_mode_from_expr(expression: Expr) -> ArithmeticMode? Never! {
+    if expression == {
+        .Ident(name, _) -> return arithmetic_mode_from_name(name)
+        .Field(_, name, _) -> return arithmetic_mode_from_name(name)
+        .EnumLit(_, variant, _, _, _, _) -> return arithmetic_mode_from_name(variant)
+        else -> return None
+    }
+}
+fn arithmetic_mode_from_name(name: String) -> ArithmeticMode? Never! {
+    if name == {
+        "Checked" -> Val(ArithmeticMode.Checked)
+        "Wrapping" -> Val(ArithmeticMode.Wrapping)
+        "Saturating" -> Val(ArithmeticMode.Saturating)
+        else -> None
+    }
+}
+pub fn arithmetic_mode_builtin(mode: ArithmeticMode) -> String Never! {
+    if mode == {
+        .Checked -> INTERNAL_ARITHMETIC_CHECKED
+        .Wrapping -> BUILTIN_WRAPPING
+        .Saturating -> BUILTIN_SATURATING
+    }
+}
+pub fn arithmetic_operation_as_str(operation: ArithmeticOperation) -> String Never! {
+    if operation == { .Add -> "add", .Sub -> "sub", .Mul -> "mul", .Neg -> "neg", .Pow -> "pow" }
+}
+pub fn bin_op_is_comparison(op: BinOp) -> Bool Never! {
+    if op == { .Eq | .Ne | .Lt | .Gt | .Le | .Ge -> true, else -> false }
+}
+pub fn bin_op_spell(op: BinOp) -> String Never! {
+    if op == {
+        .Add -> "+"
+        .Sub -> "-"
+        .Mul -> "*"
+        .Div -> "/"
+        .FloorDiv -> "/%"
+        .Mod -> "%"
+        .Rem -> "%%"
+        .Pow -> "^"
+        .BitAnd -> "&"
+        .BitOr -> "|"
+        .BitXor -> "~|"
+        .Shl -> "<<"
+        .Shr -> ">>"
+        .Eq -> "=="
+        .Ne -> "!="
+        .Lt -> "<"
+        .Gt -> ">"
+        .Le -> "<="
+        .Ge -> ">="
+        .Compare -> "<=>"
+        .And -> "&&"
+        .Or -> "||"
+    }
+}
+pub fn bin_op_compound_spell(op: BinOp) -> String? Never! {
+    if op == {
+        .Add -> Val("+=")
+        .Sub -> Val("-=")
+        .Mul -> Val("*=")
+        .Div -> Val("/=")
+        .FloorDiv -> Val("/%=")
+        .Mod -> Val("%=")
+        .Rem -> Val("%%=")
+        .Pow -> Val("^=")
+        .BitAnd -> Val("&=")
+        .BitOr -> Val("|=")
+        .BitXor -> Val("~|=")
+        .Shl -> Val("<<=")
+        .Shr -> Val(">>=")
+        else -> None
+    }
+}
+
+// #4500: these links borrow the original AST, never clone recursive nodes.
+pub fn marker_call_arg_as_expr(argument: MarkerCallArg) -> (@Expr)? Never! from argument {
+    if argument == { .Expr(value) -> Val(@value), .EffectRow(_, _) -> None }
+}
+pub fn marker_call_arg_span(argument: MarkerCallArg) -> Span Never! {
+    if argument == { .Expr(value) -> expr_span(value), .EffectRow(_, span) -> span }
+}
+pub fn expr_without_parens(expression: Expr) -> @Expr Never! from expression {
+    current := @expression
+    loop {
+        if current == .Paren(inner, _) -> current = @inner else -> return current
+    }
+}
+pub fn func_self_param(function: Func) -> (@Param)? Never! from function {
+    if function.params.len() > 0 && function.params[0].name == KW_SELF -> return Val(@function.params[0])
+    None
+}
+
+// Rust 548: ASCII text and explicit escapes are separate byte sources.
+pub fn typed_lit_byte_text_bytes(parts: [ByteTextPart]) -> [U8]? Never! {
+    bytes := [U8]{}
+    loop part in parts {
+        if part == {
+            .Lit(text) -> {
+                loop byte in text.bytes() {
+                    if Int.from_u8(byte) > 127 -> return None
+                    &bytes.push(byte)
+                }
+            }
+            .Byte(byte) -> &bytes.push(byte)
+        }
+    }
+    Val(bytes)
+}
+pub fn typed_lit_for_each_expr<V: ASTExprVisitor>(body: TypedLitBody, visitor: &V) Never! {
+    if body == {
+        .Fields(fields) -> { loop field in fields -> &visitor.visit(field.value) }
+        .Elements(elements) -> { loop value in elements -> &visitor.visit(value) }
+        .Entries(entries) -> {
+            loop entry in entries { &visitor.visit(entry.key); &visitor.visit(entry.value) }
+        }
+        .Value(value) -> &visitor.visit(value)
+        .ByteText(_) | .Empty -> {}
+    }
+}
+
+// Write-window payload bindings are aliases, not reconstructed/copied ASTs.
+// Each arm stays separate: an or-pattern cannot bind one exclusive window to
+// two different payload slots (D-OPT-WRITE1).
+pub trait ASTExprMutVisitor {
+    fn visit(&self, expression: &Expr) Never!
+}
+// Rust 216–221 MarkerCallArg::as_expr_mut is explicitly gated: @T is a
+// read-transitive link (#4500), not a returned exclusive scalar window.
+// No callback substitute or singleton ViewMut changes that API contract.
+pub fn typed_lit_for_each_expr_mut<V: ASTExprMutVisitor>(body: &TypedLitBody, visitor: &V) Never! {
+    if &body == {
+        .Fields(fields) -> { loop index in 0..<fields.len() -> &visitor.visit(&fields[index].value) }
+        .Elements(elements) -> { loop index in 0..<elements.len() -> &visitor.visit(&elements[index]) }
+        .Entries(entries) -> {
+            loop index in 0..<entries.len() {
+                &visitor.visit(&entries[index].key)
+                &visitor.visit(&entries[index].value)
+            }
+        }
+        .Value(value) -> &visitor.visit(&value)
+        .ByteText(_) -> {}
+        .Empty -> {}
+    }
+}
+
+// Reanchor only the outer diagnostic slots, exactly as Rust 1002–1078.
+// Nested values, suffix/variant/alias spans and unrelated metadata stay intact.
+pub fn expr_reanchor(expression: &Expr, span: Span) Never! {
+    if &expression == {
+        .Str(_, current) -> current = span
+        .StrMatchLit(_, current) -> current = span
+        .BinMatchLit(_, current) -> current = span
+        .Int(_, current, _, _) -> current = span
+        .Float(_, current, _, _) -> current = span
+        .Bool(_, current) -> current = span
+        .Unit(current) -> current = span
+        .Char(_, current) -> current = span
+        .ListLit(_, current) -> current = span
+        .MemberSpread(_, members, current) -> {
+            current = span
+            loop index in 0..<members.len() -> members[index].span = span
+        }
+        .Spread(_, current) -> current = span
+        .MapLit(_, current) -> current = span
+        .Index(_, _, current, _) -> current = span
+        .Slice(_, _, _, _, current) -> current = span
+        .Range(_, _, _, current) -> current = span
+        .Ident(_, current) -> current = span
+        .Call(call) -> call.name_span = span
+        .Unary(_, _, current) -> current = span
+        .Binary(_, _, _, current) -> current = span
+        .CompareChain(_, _, _, current) -> current = span
+        .UnitLit(_, _, _, _, _, current) -> current = span
+        .Deref(_, current) -> current = span
+        .RawOf(_, current) -> current = span
+        .Copy(_, current) -> current = span
+        .Place(_, _, current) -> current = span
+        .Field(_, _, current) -> current = span
+        .OptField(_, _, member_span, _, current) -> { current = span; member_span = span }
+        .MethodCall(_, _, method_span, _, _, _, _, _, _, _) -> method_span = span
+        .OptMethodCall(_, _, method_span, _, _, _, _, _) -> method_span = span
+        .StructLit(_, _, _, _, fields, _, current) -> {
+            current = span
+            loop index in 0..<fields.len() -> fields[index].name_span = span
+        }
+        .TypedLit(_, _, current) -> current = span
+        .EnumLit(_, _, _, _, _, current) -> current = span
+        .Tainted(_, _, current) -> current = span
+        .Present(_, current) -> current = span
+        .Absent(current) -> current = span
+        .Todo(current, _) -> current = span
+        .NoElse(current) -> current = span
+        .ReduceMarker(_, current) -> current = span
+        .PatternTest(_, _, current) -> current = span
+        .Ok(_, current) -> current = span
+        .Err(_, current) -> current = span
+        .Try(_, current, _, _) -> current = span
+        .OrFallback(_, _, _, current) -> current = span
+        .If(_, _, _, _, _, current) -> current = span
+        .TupleLit(_, current, _) -> current = span
+        .Lambda(lambda) -> lambda.span = span
+        .CallValue(_, _, current) -> current = span
+        .PtrFromAddr(_, _, _, _, current) -> current = span
+        .ComptimeName(_, current, _) -> current = span
+        .Paren(_, current) -> current = span
+    }
+}
+
+// Rust 1104–1238: visit before matching, so replacing a node in the visitor
+// changes which children are subsequently traversed.
+pub fn ast_expr_for_each_expr_mut<V: ASTExprMutVisitor>(expression: &Expr, visitor: &V) Never! {
+    &visitor.visit(&expression)
+    if &expression == {
+        .Str(parts, _) -> {
+            loop index in 0..<parts.len() {
+                if &parts[index] == .Interp(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+            }
+        }
+        .ListLit(values, _) -> ast_mut_visit_values<V>(&values, &visitor)
+        .MemberSpread(value, _, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Spread(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Deref(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .RawOf(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Copy(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Place(value, _, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Field(value, _, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Present(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Ok(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Err(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Paren(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Try(value, _, _, note) -> {
+            ast_expr_for_each_expr_mut<V>(&value, &visitor)
+            ast_mut_visit_optional<V>(&note, &visitor)
+        }
+        .MapLit(entries, _) -> {
+            loop index in 0..<entries.len() {
+                ast_expr_for_each_expr_mut<V>(&entries[index].key, &visitor)
+                ast_expr_for_each_expr_mut<V>(&entries[index].value, &visitor)
+            }
+        }
+        .Index(base, index, _, _) -> {
+            ast_expr_for_each_expr_mut<V>(&base, &visitor)
+            ast_expr_for_each_expr_mut<V>(&index, &visitor)
+        }
+        .Slice(base, start, end, range, _) -> {
+            ast_expr_for_each_expr_mut<V>(&base, &visitor)
+            ast_expr_for_each_expr_mut<V>(&start, &visitor)
+            ast_expr_for_each_expr_mut<V>(&end, &visitor)
+            ast_mut_visit_optional<V>(&range, &visitor)
+        }
+        .Range(start, end, _, _) -> {
+            ast_expr_for_each_expr_mut<V>(&start, &visitor)
+            ast_expr_for_each_expr_mut<V>(&end, &visitor)
+        }
+        .Call(call) -> ast_mut_visit_call_args<V>(&call.args, &visitor)
+        .Unary(_, value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Binary(_, left, right, _) -> {
+            ast_expr_for_each_expr_mut<V>(&left, &visitor)
+            ast_expr_for_each_expr_mut<V>(&right, &visitor)
+        }
+        .CompareChain(values, _, _, _) -> ast_mut_visit_values<V>(&values, &visitor)
+        .OptField(base, _, _, _, _) -> ast_expr_for_each_expr_mut<V>(&base, &visitor)
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) -> {
+            ast_expr_for_each_expr_mut<V>(&receiver, &visitor)
+            ast_mut_visit_call_args<V>(&args, &visitor)
+        }
+        .OptMethodCall(receiver, _, _, _, args, _, _, _) -> {
+            ast_expr_for_each_expr_mut<V>(&receiver, &visitor)
+            ast_mut_visit_call_args<V>(&args, &visitor)
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> {
+            loop index in 0..<fields.len() -> ast_expr_for_each_expr_mut<V>(&fields[index].value, &visitor)
+        }
+        .TypedLit(_, body, _) -> if &body == {
+            .Fields(fields) -> {
+                loop index in 0..<fields.len() -> ast_expr_for_each_expr_mut<V>(&fields[index].value, &visitor)
+            }
+            .Elements(elements) -> ast_mut_visit_values<V>(&elements, &visitor)
+            .Entries(entries) -> {
+                loop index in 0..<entries.len() {
+                    ast_expr_for_each_expr_mut<V>(&entries[index].key, &visitor)
+                    ast_expr_for_each_expr_mut<V>(&entries[index].value, &visitor)
+                }
+            }
+            .Value(value) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+            .ByteText(_) -> {}
+            .Empty -> {}
+        }
+        .EnumLit(_, _, _, args, _, _) -> {
+            loop index in 0..<args.len() {
+                if &args[index] == {
+                    .Positional(value) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+                    .Named(_, value) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+                }
+            }
+        }
+        .Tainted(value, _, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .PatternTest(subject, pattern, _) -> {
+            ast_expr_for_each_expr_mut<V>(&subject, &visitor)
+            ast_mut_visit_pattern<V>(&pattern, &visitor)
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            ast_expr_for_each_expr_mut<V>(&value, &visitor)
+            ast_mut_visit_fallback<V>(&fallback, &visitor)
+        }
+        .If(condition, then_body, then_value, else_body, else_value, _) -> {
+            ast_expr_for_each_expr_mut<V>(&condition, &visitor)
+            ast_mut_visit_body<V>(&then_body, &visitor)
+            ast_expr_for_each_expr_mut<V>(&then_value, &visitor)
+            ast_mut_visit_body<V>(&else_body, &visitor)
+            ast_expr_for_each_expr_mut<V>(&else_value, &visitor)
+        }
+        .TupleLit(fields, _, _) -> {
+            loop index in 0..<fields.len() -> ast_expr_for_each_expr_mut<V>(&fields[index].value, &visitor)
+        }
+        .Lambda(lambda) -> if &lambda.body == {
+            .Expr(value) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+            .Block(body) -> ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .CallValue(callee, args, _) -> {
+            ast_expr_for_each_expr_mut<V>(&callee, &visitor)
+            ast_mut_visit_call_args<V>(&args, &visitor)
+        }
+        .PtrFromAddr(_, _, _, address, _) -> ast_expr_for_each_expr_mut<V>(&address, &visitor)
+        .StrMatchLit(_, _) -> {}
+        .BinMatchLit(_, _) -> {}
+        .Int(_, _, _, _) -> {}
+        .Float(_, _, _, _) -> {}
+        .Bool(_, _) -> {}
+        .Unit(_) -> {}
+        .Char(_, _) -> {}
+        .Ident(_, _) -> {}
+        .UnitLit(_, _, _, _, _, _) -> {}
+        .Absent(_) -> {}
+        .Todo(_, _) -> {}
+        .NoElse(_) -> {}
+        .ReduceMarker(_, _) -> {}
+        .ComptimeName(_, _, _) -> {}
+    }
+}
+
+fn ast_mut_visit_values<V: ASTExprMutVisitor>(values: &[Expr], visitor: &V) Never! {
+    loop index in 0..<values.len() -> ast_expr_for_each_expr_mut<V>(&values[index], &visitor)
+}
+fn ast_mut_visit_optional<V: ASTExprMutVisitor>(value: &Expr?, visitor: &V) Never! {
+    if &value == .Val(inner) -> ast_expr_for_each_expr_mut<V>(&inner, &visitor)
+}
+fn ast_mut_visit_call_args<V: ASTExprMutVisitor>(args: &[CallArg], visitor: &V) Never! {
+    loop index in 0..<args.len() -> ast_expr_for_each_expr_mut<V>(&args[index].expr, &visitor)
+}
+fn ast_mut_visit_body<V: ASTExprMutVisitor>(body: &[Stmt], visitor: &V) Never! {
+    loop index in 0..<body.len() -> ast_mut_visit_statement<V>(&body[index], &visitor)
+}
+fn ast_mut_visit_lvalue<V: ASTExprMutVisitor>(target: &LValue, visitor: &V) Never! {
+    if &target == {
+        .Local(_, _) -> {}
+        .Index(base, index, _, _) -> {
+            ast_expr_for_each_expr_mut<V>(&base, &visitor)
+            ast_expr_for_each_expr_mut<V>(&index, &visitor)
+        }
+        .Field(base, _, _) -> ast_expr_for_each_expr_mut<V>(&base, &visitor)
+    }
+}
+fn ast_mut_visit_for_kind<V: ASTExprMutVisitor>(kind: &ForKind, visitor: &V) Never! {
+    if &kind == {
+        .Range(start, end, step, _) -> {
+            ast_expr_for_each_expr_mut<V>(&start, &visitor)
+            ast_expr_for_each_expr_mut<V>(&end, &visitor)
+            ast_mut_visit_optional<V>(&step, &visitor)
+        }
+        .In(collection, step) -> {
+            ast_expr_for_each_expr_mut<V>(&collection, &visitor)
+            ast_mut_visit_optional<V>(&step, &visitor)
+        }
+    }
+}
+fn ast_mut_visit_pattern<V: ASTExprMutVisitor>(pattern: &Pattern, visitor: &V) Never! {
+    if &pattern == {
+        .Or(alternatives, _) -> {
+            loop index in 0..<alternatives.len() -> ast_mut_visit_pattern<V>(&alternatives[index], &visitor)
+        }
+        .Struct(fields, _, _) -> {
+            loop index in 0..<fields.len() {
+                if &fields[index] == .Value(_, _, value) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+            }
+        }
+        else -> {}
+    }
+}
+fn ast_mut_visit_fallback<V: ASTExprMutVisitor>(fallback: &OrFallback, visitor: &V) Never! {
+    if &fallback == {
+        .Value(value) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Block(body, value, _) -> {
+            ast_mut_visit_body<V>(&body, &visitor)
+            ast_mut_visit_optional<V>(&value, &visitor)
+        }
+        .Return(value, _) -> ast_mut_visit_optional<V>(&value, &visitor)
+        .Panic(_, args) -> ast_mut_visit_call_args<V>(&args, &visitor)
+        else -> {}
+    }
+}
+fn ast_mut_visit_statement<V: ASTExprMutVisitor>(statement: &Stmt, visitor: &V) Never! {
+    if &statement == {
+        .Expr(value) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .DeferClose(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Val(binding) -> {
+            ast_expr_for_each_expr_mut<V>(&binding.init, &visitor)
+            if &binding.pattern == .Val(pattern) {
+                if &pattern == .Refutable(pattern, fallback, _, _, _) {
+                    ast_mut_visit_pattern<V>(&pattern, &visitor)
+                    ast_mut_visit_fallback<V>(&fallback, &visitor)
+                }
+            }
+        }
+        .Assign(target, _, _, value) -> {
+            ast_mut_visit_lvalue<V>(&target, &visitor)
+            ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        }
+        .Return(value, _) -> ast_mut_visit_optional<V>(&value, &visitor)
+        .While(condition, body, _, _, _) -> {
+            ast_expr_for_each_expr_mut<V>(&condition, &visitor)
+            ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .For(_, _, _, kind, body, _, _, _, _) -> {
+            ast_mut_visit_for_kind<V>(&kind, &visitor)
+            ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .Switch(subject, arms, else_body, _) -> {
+            ast_expr_for_each_expr_mut<V>(&subject, &visitor)
+            ast_mut_visit_arms<V>(&arms, &visitor)
+            if &else_body == .Val(body) -> ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .ComptimeSwitch(subject, arms, else_body, _) -> {
+            ast_expr_for_each_expr_mut<V>(&subject, &visitor)
+            ast_mut_visit_arms<V>(&arms, &visitor)
+            if &else_body == .Val(body) -> ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .BreakValue(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Yield(value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .BreakLabelValue(_, _, value, _) -> ast_expr_for_each_expr_mut<V>(&value, &visitor)
+        .Loop(body, _, _, _) -> ast_mut_visit_body<V>(&body, &visitor)
+        .Reactive(body, _) -> ast_mut_visit_body<V>(&body, &visitor)
+        .Shield(body, _) -> ast_mut_visit_body<V>(&body, &visitor)
+        .Switched(_, body, _) -> ast_mut_visit_body<V>(&body, &visitor)
+        .Region(_, _, body, _) -> ast_mut_visit_body<V>(&body, &visitor)
+        .Policy(_, body, _) -> ast_mut_visit_body<V>(&body, &visitor)
+        .AuthorityScope(_, _, _, body, _) -> ast_mut_visit_body<V>(&body, &visitor)
+        .ComptimeBlock(body, _, _) -> ast_mut_visit_body<V>(&body, &visitor)
+        .Live(body, _) -> ast_mut_visit_body<V>(&body, &visitor)
+        .Transact(_, _, body, _, _) -> ast_mut_visit_body<V>(&body, &visitor)
+        .Unsafe(_, reason, body, _) -> {
+            ast_mut_visit_optional<V>(&reason, &visitor)
+            ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .Impure(_, reason, body, _) -> {
+            ast_mut_visit_optional<V>(&reason, &visitor)
+            ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .CountedLoop(init, condition, step, body, _, _, _) -> {
+            ast_expr_for_each_expr_mut<V>(&init.init, &visitor)
+            ast_expr_for_each_expr_mut<V>(&condition, &visitor)
+            if &step == .Val(value) -> ast_mut_visit_statement<V>(&value, &visitor)
+            ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .TaskGroup(_, _, limit, body, _) -> {
+            ast_mut_visit_optional<V>(&limit, &visitor)
+            ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .Layout(_, _, body, _) -> ast_mut_visit_body<V>(&body, &visitor)
+        .ContextBlock(fields, body, _) -> {
+            loop index in 0..<fields.len() -> ast_expr_for_each_expr_mut<V>(&fields[index].value, &visitor)
+            ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .AssumeDet(_, reason, body, _) -> {
+            ast_expr_for_each_expr_mut<V>(&reason, &visitor)
+            ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .ComptimeIf(condition, _, then_body, else_body, _, _) -> {
+            ast_expr_for_each_expr_mut<V>(&condition, &visitor)
+            ast_mut_visit_body<V>(&then_body, &visitor)
+            if &else_body == .Val(body) -> ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .ScopeMember(_, _, args, _, body, _, _, _) -> {
+            ast_mut_visit_values<V>(&args, &visitor)
+            ast_mut_visit_body<V>(&body, &visitor)
+        }
+        .Break(_) -> {}
+        .Continue(_) -> {}
+        .BreakLabel(_, _) -> {}
+        .ContinueLabel(_, _) -> {}
+    }
+}
+fn ast_mut_visit_arms<V: ASTExprMutVisitor>(arms: &[SwitchArm], visitor: &V) Never! {
+    loop index in 0..<arms.len() {
+        ast_expr_for_each_expr_mut<V>(&arms[index].cond, &visitor)
+        ast_mut_visit_body<V>(&arms[index].body, &visitor)
+    }
+}
+
+// Rust 1458: only operation-bearing facts on free-call argument flags, in the
+// original Stmt::for_each_expr order. No deduplication, mode inference or
+// metadata/template/default traversal is introduced.
+struct ASTArithmeticFactsVisitor { facts: [ArithmeticPolicyFact] }
+impl ASTArithmeticFactsVisitor.ASTExprVisitor {
+    fn visit(&self, expression: Expr) Never! {
+        if expression == .Call(call) {
+            loop argument in call.args {
+                if argument.flags.arithmetic_policy == .Val(fact) {
+                    if fact.operation != None -> &self.facts.push(fact)
+                }
+            }
+        }
+    }
+}
+pub fn arithmetic_policy_facts(body: [Stmt]) -> [ArithmeticPolicyFact] Never! {
+    visitor := ASTArithmeticFactsVisitor{facts: [ArithmeticPolicyFact]{}}
+    loop statement in body -> ast_stmt_for_each_expr<ASTArithmeticFactsVisitor>(statement, &visitor)
+    visitor.facts
 }

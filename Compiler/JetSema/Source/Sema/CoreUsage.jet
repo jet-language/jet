@@ -28,7 +28,6 @@ use jet_foundation.[
     core_module_has_member,
     core_module_has_type,
     core_type_modules,
-    expr_optional_method_call_as_call,
     expr_span,
     jet_ring_prelude_closure_keys,
     jet_ring_prelude_closure_layer,
@@ -831,49 +830,7 @@ fn sema_core_collect_typed_literal_body(body: TypedLitBody, imports: [SemaCoreIm
     }
 }
 
-fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
-    if expr == {
-        .Call(call) -> {
-            if call.name == "input" -> sema_core_note_usage(&used, &spans, "core.term::input", Val(call.name_span))
-            if call.name == "Decimal" || call.name == "Fraction" || call.name == "Complex" -> sema_core_note_usage(&used, &spans, "core.math::__precise__", Val(call.name_span))
-            sema_core_note_builtin_math_type(call.name, registered, &used, &spans, Val(call.name_span))
-            sema_core_note_typed_head(&used, &spans, call.name, Val(call.name_span))
-            if call.name == "measurement" && call.resolved_ret != None {
-                ret := call.resolved_ret ?? Type.Named{name: "Unit"}
-                if ret == {
-                    .Apply(name, args) -> {
-                        if name == "Measurement" && args.len() == 1 && args[0] == Type.Float -> sema_core_note_usage(&used, &spans, "core.units::from", Val(call.name_span))
-                    }
-                    else -> {}
-                }
-            }
-            if call.name == "print" {
-                lone_string := if {
-                    call.args.len() == 1 -> {
-                        if call.args[0].expr == {
-                            .Str(_, _) -> true
-                            else -> false
-                        }
-                    }
-                    else -> false
-                }
-                if !lone_string -> sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
-            }
-            // D-DBG1=A: a `debug(value)` trace interpolates the value's Debug form.
-            if call.name == "debug" -> sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
-            row :: sema_core_import_find(imports, call.name)
-            if row != None {
-                imported := row
-                if sema_core_import_is_core(imported.module_name) && sema_core_import_usage_is_known(imported, call.name) -> sema_core_note_usage(&used, &spans, sema_core_import_usage(imported, call.name), Val(call.name_span))
-            }
-            loop ty in call.type_args -> sema_core_collect_type(ty, registered, &used, &spans, Val(call.name_span))
-            if call.resolved_ret != None -> sema_core_collect_type(call.resolved_ret ?? Type.Named{name: "Unit"}, registered, &used, &spans, Val(call.name_span))
-            loop arg in call.args {
-                sema_core_note_callback(&callbacks, arg.flags.c_callback_function_key)
-                sema_core_collect_expr(arg.expr, imports, registered, &used, &spans, &callbacks)
-            }
-        }
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, _, _) -> {
+fn sema_core_collect_method(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: String?, resolved_ret: Type?, imports: [SemaCoreImport], registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
             constructor_name := sema_core_generated_receiver_key(receiver)
             if method == "new" && !sema_core_generated_shadowed(registered, constructor_name) && sema_core_generated_constructor_marked(registered, constructor_name) -> sema_core_note_usage(&used, &spans, "core.mem::pool_shared", None)
             if receiver == {
@@ -948,6 +905,52 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 sema_core_note_callback(&callbacks, arg.flags.c_callback_function_key)
                 sema_core_collect_expr(arg.expr, imports, registered, &used, &spans, &callbacks)
             }
+}
+
+fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+    if expr == {
+        .Call(call) -> {
+            if call.name == "input" -> sema_core_note_usage(&used, &spans, "core.term::input", Val(call.name_span))
+            if call.name == "Decimal" || call.name == "Fraction" || call.name == "Complex" -> sema_core_note_usage(&used, &spans, "core.math::__precise__", Val(call.name_span))
+            sema_core_note_builtin_math_type(call.name, registered, &used, &spans, Val(call.name_span))
+            sema_core_note_typed_head(&used, &spans, call.name, Val(call.name_span))
+            if call.name == "measurement" && call.resolved_ret != None {
+                ret := call.resolved_ret ?? Type.Named{name: "Unit"}
+                if ret == {
+                    .Apply(name, args) -> {
+                        if name == "Measurement" && args.len() == 1 && args[0] == Type.Float -> sema_core_note_usage(&used, &spans, "core.units::from", Val(call.name_span))
+                    }
+                    else -> {}
+                }
+            }
+            if call.name == "print" {
+                lone_string := if {
+                    call.args.len() == 1 -> {
+                        if call.args[0].expr == {
+                            .Str(_, _) -> true
+                            else -> false
+                        }
+                    }
+                    else -> false
+                }
+                if !lone_string -> sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
+            }
+            // D-DBG1=A: a `debug(value)` trace interpolates the value's Debug form.
+            if call.name == "debug" -> sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
+            row :: sema_core_import_find(imports, call.name)
+            if row != None {
+                imported := row
+                if sema_core_import_is_core(imported.module_name) && sema_core_import_usage_is_known(imported, call.name) -> sema_core_note_usage(&used, &spans, sema_core_import_usage(imported, call.name), Val(call.name_span))
+            }
+            loop ty in call.type_args -> sema_core_collect_type(ty, registered, &used, &spans, Val(call.name_span))
+            if call.resolved_ret != None -> sema_core_collect_type(call.resolved_ret ?? Type.Named{name: "Unit"}, registered, &used, &spans, Val(call.name_span))
+            loop arg in call.args {
+                sema_core_note_callback(&callbacks, arg.flags.c_callback_function_key)
+                sema_core_collect_expr(arg.expr, imports, registered, &used, &spans, &callbacks)
+            }
+        }
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, _, _) -> {
+            sema_core_collect_method(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, imports, registered, &used, &spans, &callbacks)
         }
         .PtrFromAddr(_, _, elem, addr, span) -> {
             sema_core_collect_type(elem, registered, &used, &spans, Val(span))
@@ -968,7 +971,7 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
             sema_core_collect_expr(base, imports, registered, &used, &spans, &callbacks)
         }
         .OptField(base, _, _, _, _) -> sema_core_collect_expr(base, imports, registered, &used, &spans, &callbacks)
-        .OptMethodCall(receiver, method, method_span, type_args, args, _) -> sema_core_collect_expr(expr_optional_method_call_as_call(receiver, method, method_span, type_args, args), imports, registered, &used, &spans, &callbacks)
+        .OptMethodCall(receiver, method, method_span, type_args, args, _, _, _) -> sema_core_collect_method(receiver, method, method_span, [Type]{}, type_args, args, None, None, imports, registered, &used, &spans, &callbacks)
         .Unary(_, value, _) | .Deref(value, _) | .RawOf(value, _) | .Copy(value, _) | .Tainted(value, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
         .Place(value, _, _) -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
         .Try(value, _, _, context) -> {

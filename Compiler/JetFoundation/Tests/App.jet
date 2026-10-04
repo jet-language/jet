@@ -1,0 +1,193 @@
+// Original Foundation App.rs::json_round_shape, same complete route fixture.
+use jet_foundation.[MIRAppAction, MIRAppCacheFact, MIRAppFormFact, MIRAppFormFieldFact, MIRAppHydrationTrigger, MIRAppIslandFact, MIRAppMount, MIRAppPendingBoundaryID, MIRAppQueryFact, MIRAppRenderFactMode, MIRAppRenderMode, MIRAppResumeCapture, MIRAppResumePayload, MIRAppRoute, MIRAppRouteBoundaries, MIRAppRouteField, MIRAppRouteLoader, MIRAppRoutesFrom, MIRAppStoreFact]
+use jet_foundation.[app_cache_default, app_cache_name, app_cache_parse, app_capability_target, app_graph_default, app_graph_explain_lines, app_graph_new, app_graph_route_index, app_graph_to_json, app_hydration_trigger_default, app_hydration_trigger_name, app_hydration_trigger_parse, app_island_fact_default, app_pending_boundary_id_get, app_policy_default, app_render_fact_from_builder, app_render_fact_mode_name, app_render_fact_mode_parse, app_render_facts_default, app_render_mode_name, app_render_mode_parse, app_resume_payload_default, app_route_boundaries_default, app_route_index_entries, app_route_index_get, app_route_loader_default, app_target_supports, stable_island_identity, stable_pending_boundary_id, stable_route_identity]
+#Test("json_round_shape") {
+    graph := app_graph_default()
+    graph.entry_file = "app.jet"
+    graph.hydration = "dev-overlay"
+    graph.shared_tir = true
+    &graph.routes.push(MIRAppRoute{path: "/", handler: "home", route_identity: stable_route_identity("/", "home"), path_params: [MIRAppRouteField]{}, search_params: [MIRAppRouteField]{}, search_codec: "query", loader: None, boundaries: MIRAppRouteBoundaries{pending: None, not_found: None, error: None}, precedence: "static", render: MIRAppRenderMode.CSR, render_facts: app_render_facts_default(), provenance: "builder", span_start: 0, span_end: 1})
+    json :: app_graph_to_json(graph)
+    assert(json.contains("\"path\": \"/\""))
+    assert(json.contains("\"render\": \"csr\""))
+    assert(json.contains("\"shared_tir\": true"))
+    assert(json == "{{\n  \"entry\": \"app.jet\",\n  \"hydration\": \"dev-overlay\",\n  \"shared_tir\": true,\n  \"routes\": [\n    {{\n      \"path\": \"/\",\n      \"handler\": \"home\",\n      \"route_identity\": \"route-da1ce78d49191ffc6427a87c\",\n      \"path_params\": [],\n      \"search_params\": [],\n      \"search_codec\": \"query\",\n      \"loader\": null,\n      \"boundaries\": {{\"pending\":null,\"not_found\":null,\"error\":null}},\n      \"precedence\": \"static\",\n      \"render\": \"csr\",\n      \"render_facts\": {{\n        \"mode\": \"static\",\n        \"reason\": [],\n        \"effects\": [],\n        \"interactive\": false,\n        \"loader\": null,\n        \"form\": null,\n        \"cache\": \"unspecified\",\n        \"override\": null,\n        \"pending_boundary_id\": null,\n        \"island\": null\n      }},\n      \"provenance\": \"builder\"\n    }}\n  ],\n  \"actions\": [\n  ],\n  \"forms\": [\n  ],\n  \"queries\": [\n  ],\n  \"stores\": [\n  ],\n  \"mounts\": [\n  ],\n  \"routes_from\": [\n  ],\n  \"policy\": {{\n    \"security\": [],\n    \"assets\": [],\n    \"split\": [],\n    \"cache\": [],\n    \"a11y\": [],\n    \"adapters\": []\n  }}\n}}")
+    assert((app_route_index_get(app_graph_route_index(graph), "/") ?? panic("route index missing")) == 0)
+    lines :: app_graph_explain_lines(graph)
+    assert(lines[0] == "web application graph — app.jet")
+    assert(lines[1] == "hydration: dev-overlay (shared TIR: true)")
+    assert(lines[2] == "  / [static] -> home (builder)")
+    assert(stable_route_identity("/", "home") == "route-da1ce78d49191ffc6427a87c")
+}
+#Test("app_target_capabilities_and_spelling_match_canonical_contract") {
+    assert((app_capability_target("csr") ?? panic("CSR capability absent")) == "JS")
+    assert((app_capability_target("serve") ?? panic("serve capability absent")) == "Native")
+    assert(app_capability_target("route") == None)
+    assert(app_target_supports("JS", "Web"))
+    assert(app_target_supports("Native", "OS"))
+    assert(!app_target_supports("Native", "Web"))
+    assert(!app_target_supports("unknown", "Native"))
+    assert(app_render_mode_parse("streaming") == app_render_mode_parse("stream"))
+    assert(app_render_fact_mode_parse("ServerStream") == app_render_fact_mode_parse("server+stream"))
+}
+
+fn app_test_route(path: String, handler: String) -> MIRAppRoute Never! {
+    MIRAppRoute{path: path, handler: handler, route_identity: stable_route_identity(path, handler), path_params: [MIRAppRouteField]{}, search_params: [MIRAppRouteField]{}, search_codec: "query", loader: None, boundaries: app_route_boundaries_default(), precedence: "static", render: MIRAppRenderMode.CSR, render_facts: app_render_facts_default(), provenance: "builder", span_start: 0, span_end: 1}
+}
+
+#Test("app_defaults_are_rust_derived_defaults_not_builder_defaults") {
+    graph :: app_graph_default()
+    assert(graph.entry_file == "" && graph.hydration == "" && !graph.shared_tir)
+    assert(graph.routes.len() == 0 && graph.actions.len() == 0 && graph.forms.len() == 0)
+    assert(graph.queries.len() == 0 && graph.stores.len() == 0 && graph.mounts.len() == 0 && graph.routes_from.len() == 0)
+    policy :: app_policy_default()
+    assert(policy.security.len() == 0 && policy.assets.len() == 0 && policy.split.len() == 0)
+    assert(policy.cache.len() == 0 && policy.a11y.len() == 0 && policy.adapters.len() == 0)
+    facts :: app_render_facts_default()
+    assert(facts.mode == MIRAppRenderFactMode.Static && facts.cache == app_cache_default())
+    assert(facts.reason.len() == 0 && facts.effects.len() == 0 && !facts.interactive)
+    assert(facts.loader == None && facts.form == None && facts.override_mode == None)
+    assert(facts.pending_boundary_id == None && facts.island == None)
+    payload :: app_resume_payload_default()
+    assert(payload.captures.len() == 0 && !payload.serializable)
+    island :: app_island_fact_default()
+    assert(island.identity == "" && island.hydration_trigger == app_hydration_trigger_default())
+    assert(island.resume_payload.captures.len() == 0 && !island.resume_payload.serializable)
+    loader :: app_route_loader_default()
+    assert(loader.handler == "" && loader.data_type == "" && loader.dependency == "")
+    assert(!loader.preload && loader.cache_identity == "")
+    boundaries :: app_route_boundaries_default()
+    assert(boundaries.pending == None && boundaries.not_found == None && boundaries.error == None)
+    assert(app_pending_boundary_id_get(MIRAppPendingBoundaryID{value: U64{7}}) == U64{7})
+    assert(app_graph_to_json(graph) == "{{\n  \"entry\": \"\",\n  \"hydration\": \"\",\n  \"shared_tir\": false,\n  \"routes\": [\n  ],\n  \"actions\": [\n  ],\n  \"forms\": [\n  ],\n  \"queries\": [\n  ],\n  \"stores\": [\n  ],\n  \"mounts\": [\n  ],\n  \"routes_from\": [\n  ],\n  \"policy\": {{\n    \"security\": [],\n    \"assets\": [],\n    \"split\": [],\n    \"cache\": [],\n    \"a11y\": [],\n    \"adapters\": []\n  }}\n}}")
+    assert(app_graph_explain_lines(graph).len() == 2)
+}
+
+#Test("app_spellings_roundtrip_and_preserve_all_aliases") {
+    loop mode in [MIRAppRenderMode]{MIRAppRenderMode.CSR, MIRAppRenderMode.SSR, MIRAppRenderMode.SSG, MIRAppRenderMode.Stream, MIRAppRenderMode.Island} {
+        assert(app_render_mode_parse(app_render_mode_name(mode)) == Val(mode))
+        fact :: app_render_fact_from_builder(mode)
+        assert(app_render_fact_mode_parse(app_render_fact_mode_name(fact)) == Val(fact))
+    }
+    loop name in [String]{"static", "Static", "ssg"} -> assert(app_render_fact_mode_parse(name) == Val(MIRAppRenderFactMode.Static))
+    loop name in [String]{"server", "Server", "ssr"} -> assert(app_render_fact_mode_parse(name) == Val(MIRAppRenderFactMode.Server))
+    loop name in [String]{"server+stream", "ServerStream", "Stream", "stream", "streaming"} -> assert(app_render_fact_mode_parse(name) == Val(MIRAppRenderFactMode.ServerStream))
+    loop name in [String]{"server+island", "ServerIsland", "Island", "island"} -> assert(app_render_fact_mode_parse(name) == Val(MIRAppRenderFactMode.ServerIsland))
+    loop name in [String]{"client", "Client", "csr"} -> assert(app_render_fact_mode_parse(name) == Val(MIRAppRenderFactMode.Client))
+    assert(app_render_mode_parse("CSR") == None && app_render_fact_mode_parse("") == None)
+    loop name in [String]{"immutable", "static"} -> assert(app_cache_parse(name) == Val(MIRAppCacheFact.Immutable))
+    loop name in [String]{"revalidate", "stream"} -> assert(app_cache_parse(name) == Val(MIRAppCacheFact.Revalidate))
+    loop name in [String]{"private", "no-store"} -> assert(app_cache_parse(name) == Val(MIRAppCacheFact.Private))
+    assert(app_cache_parse("unspecified") == None && app_cache_name(app_cache_default()) == "unspecified")
+    loop trigger in [MIRAppHydrationTrigger]{MIRAppHydrationTrigger.Immediate, MIRAppHydrationTrigger.ClientLoad, MIRAppHydrationTrigger.ClientIdle, MIRAppHydrationTrigger.ClientVisible, MIRAppHydrationTrigger.Manual} -> assert(app_hydration_trigger_parse(app_hydration_trigger_name(trigger)) == Val(trigger))
+    assert(app_hydration_trigger_parse("client_load") == None)
+    loop method in [String]{"csr", "island", "hydration_dev", "hydration_release"} -> assert(app_capability_target(method) == Val("JS"))
+    loop method in [String]{"serve", "serve_on"} -> assert(app_capability_target(method) == Val("Native"))
+    assert(app_target_supports("JS", "JS") && app_target_supports("Native", "Native"))
+    assert(!app_target_supports("Native", "Freestanding") && !app_target_supports("JS", "OS"))
+}
+
+#Test("app_route_index_last_duplicate_wins_and_iteration_is_byte_sorted") {
+    graph := app_graph_default()
+    loop path in [String]{"/z", "/é", "/", "/a", "/z"} -> &graph.routes.push(app_test_route(path, "home"))
+    index :: app_graph_route_index(graph)
+    assert(app_route_index_get(index, "/z") == Val(4))
+    assert(app_route_index_get(index, "/missing") == None)
+    entries :: app_route_index_entries(index)
+    assert(entries.len() == 4)
+    assert(entries[0].path == "/" && entries[0].index == 2)
+    assert(entries[1].path == "/a" && entries[1].index == 3)
+    assert(entries[2].path == "/z" && entries[2].index == 4)
+    assert(entries[3].path == "/é" && entries[3].index == 1)
+    assert(app_route_index_entries(app_graph_route_index(app_graph_default())).len() == 0)
+}
+
+#Test("app_identity_domain_separation_delimiter_and_span_independence") {
+    assert(stable_route_identity("/", "home") == "route-da1ce78d49191ffc6427a87c")
+    assert(stable_route_identity("/ab", "c") != stable_route_identity("/a", "bc"))
+    assert(stable_island_identity("/ab", "c") != stable_island_identity("/a", "bc"))
+    assert(stable_pending_boundary_id("/ab", "c").value != stable_pending_boundary_id("/a", "bc").value)
+    assert(stable_island_identity("/", "home").len() == 31)
+    route := app_test_route("/é", "home")
+    identity :: route.route_identity
+    route.span_start = 30
+    route.span_end = 50
+    assert(route.route_identity == identity)
+}
+
+#Test("app_json_full_graph_optional_branches_and_explain_contract") {
+    graph := app_graph_new("app.jet")
+    route := app_test_route("/users/:id", "user")
+    &route.path_params.push(MIRAppRouteField{name: "id", ty: "Int", codec: "int", required: true, default: None})
+    &route.search_params.push(MIRAppRouteField{name: "q", ty: "String", codec: "string", required: false, default: Val("é\n\"")})
+    route.loader = Val(MIRAppRouteLoader{handler: "load", data_type: "User", dependency: "db", preload: true, cache_identity: "users"})
+    route.boundaries = MIRAppRouteBoundaries{pending: Val("wait"), not_found: Val("missing"), error: Val("failed")}
+    route.render_facts.mode = MIRAppRenderFactMode.ServerIsland
+    route.render_facts.reason = [String]{"data", "interactive"}
+    route.render_facts.effects = [String]{"IO", "Net"}
+    route.render_facts.interactive = true
+    route.render_facts.loader = Val("load")
+    route.render_facts.form = Val("edit")
+    route.render_facts.cache = MIRAppCacheFact.Private
+    route.render_facts.override_mode = Val(MIRAppRenderFactMode.Server)
+    route.render_facts.pending_boundary_id = Val(MIRAppPendingBoundaryID{value: U64{7}})
+    route.render_facts.island = Val(MIRAppIslandFact{identity: "island-test", hydration_trigger: MIRAppHydrationTrigger.ClientVisible, resume_payload: MIRAppResumePayload{serializable: true, captures: [MIRAppResumeCapture]{MIRAppResumeCapture{name: "id", ty: "Int", serializable: true}, MIRAppResumeCapture{name: "user", ty: "User", serializable: false}}}})
+    &graph.routes.push(route)
+    &graph.routes.push(app_test_route("/", "home"))
+    &graph.actions.push(MIRAppAction{name: "save", handler: "save_user", kind: "server", preload: true, input_type: "Input", output_type: "User", error_type: "Failure", endpoint: "/save", method: "POST", csrf: "token", effects: [String]{"IO"}, middleware: [String]{"auth"}, provenance: "builder", span_start: 0, span_end: 1})
+    &graph.forms.push(MIRAppFormFact{name: "edit", model: "User", action: "save", input_type: "Input", output_type: "User", error_type: "Failure", endpoint: "/save", method: "POST", csrf: "token", effects: [String]{"IO"}, fields: [MIRAppFormFieldFact]{MIRAppFormFieldFact{name: "name", ty: "String", required: false, default: Val("guest"), label: "Name", control: "text", wire_name: "user_name"}}, middleware: [String]{"auth"}, provenance: "builder", span_start: 0, span_end: 1})
+    &graph.queries.push(MIRAppQueryFact{key: "users", footprint: "db", source: "load", kind: "query"})
+    &graph.stores.push(MIRAppStoreFact{name: "local", source: "home", kind: "store", history_limit: "8"})
+    &graph.mounts.push(MIRAppMount{prefix: "/api", handler: "api", effects: [String]{"Net"}, security: [String]{"auth"}, provenance: "builder", span_start: 0, span_end: 1})
+    &graph.routes_from.push(MIRAppRoutesFrom{root: "pages", span_start: 0, span_end: 1})
+    &graph.routes_from.push(MIRAppRoutesFrom{root: "more", span_start: 2, span_end: 3})
+    graph.policy.security = [String]{"csp"}
+    graph.policy.assets = [String]{"public"}
+    graph.policy.split = [String]{"route"}
+    graph.policy.cache = [String]{"private"}
+    graph.policy.a11y = [String]{"strict"}
+    graph.policy.adapters = [String]{"native"}
+    json :: app_graph_to_json(graph)
+    assert(json.contains("\"path_params\": [{{\"name\":\"id\",\"type\":\"Int\",\"codec\":\"int\",\"required\":true,\"default\":null}}]"))
+    assert(json.contains("\"search_params\": [{{\"name\":\"q\",\"type\":\"String\",\"codec\":\"string\",\"required\":false,\"default\":\"é\\n\\\"\"}}]"))
+    assert(json.contains("\"loader\": {{\"handler\":\"load\",\"data_type\":\"User\",\"dependency\":\"db\",\"preload\":true,\"cache_identity\":\"users\"}}"))
+    assert(json.contains("\"boundaries\": {{\"pending\":\"wait\",\"not_found\":\"missing\",\"error\":\"failed\"}}"))
+    assert(json.contains("\"override\": \"server\"") && json.contains("\"pending_boundary_id\": 7"))
+    assert(json.contains("\"hydration_trigger\": \"client-visible\""))
+    assert(json.contains("{{\"name\": \"id\", \"type\": \"Int\", \"serializable\": true}},\n              {{\"name\": \"user\", \"type\": \"User\", \"serializable\": false}}\n"))
+    assert(json.contains("\"override\": null") && json.contains("\"pending_boundary_id\": null") && json.contains("\"island\": null"))
+    assert(json.contains("\"fields\":[{{\"name\":\"name\",\"ty\":\"String\",\"required\":false,\"default\":\"guest\",\"label\":\"Name\",\"control\":\"text\",\"wire_name\":\"user_name\"}}]"))
+    assert(json.contains("\"middleware\": [\"auth\"]") && json.contains("\"effects\": [\"IO\", \"Net\"]"))
+    assert(json.contains("\"history_limit\": \"8\"") && json.contains("\"footprint\": \"db\""))
+    assert(json.contains("    \"pages\",\n    \"more\"\n") && !json.ends_with("\n"))
+    lines :: app_graph_explain_lines(graph)
+    assert(lines[2] == "  /users/:id [server+island] -> user (builder)")
+    assert(lines[3].contains("path=[id:Int] search=[q:String] codec=query loader=load data=User preload=true cache=users boundaries=pending:wait not_found:missing error:failed"))
+    assert(lines[4] == "    render-facts: mode=server+island reason=data; interactive effects=[IO,Net] cache=private pending_boundary_id=7 island=island-test hydration=client-visible")
+    assert(lines[7] == "    render-facts: mode=static reason=unspecified effects=[] cache=unspecified")
+    assert(lines[8] == "  action save (server) -> save_user input=Input output=User error=Failure endpoint=/save method=POST csrf=token effects=[IO] middleware=[auth] (builder)")
+    assert(lines[9] == "  form edit model=User action=save input=Input output=User error=Failure endpoint=/save method=POST csrf=token fields=[name:String?] effects=[IO] middleware=[auth] (builder)")
+    assert(lines[10] == "  query users (query) footprint=db source=load")
+    assert(lines[11] == "  store local (store) history_limit=8 source=home")
+    assert(lines[12] == "  mount /api -> api effects=Net security=auth (builder)")
+    assert(lines[13] == "  routes(from: pages)" && lines[14] == "  routes(from: more)")
+    assert(lines[15] == "  security: csp" && lines[16] == "  assets: public" && lines[17] == "  split: route")
+    assert(lines[18] == "  cache: private" && lines[19] == "  a11y: strict" && lines[20] == "  adapters: native")
+    // Every top-level collection's non-final comma branch.
+    action_copy :: ~graph.actions[0]
+    form_copy :: ~graph.forms[0]
+    query_copy :: ~graph.queries[0]
+    store_copy :: ~graph.stores[0]
+    mount_copy :: ~graph.mounts[0]
+    &graph.actions.push(action_copy)
+    &graph.forms.push(form_copy)
+    &graph.queries.push(query_copy)
+    &graph.stores.push(store_copy)
+    &graph.mounts.push(mount_copy)
+    repeated :: app_graph_to_json(graph)
+    assert(repeated.contains("\"kind\": \"query\"\n    }},\n    {{\n      \"key\":"))
+    assert(repeated.contains("\"history_limit\": \"8\"\n    }},\n    {{\n      \"name\":"))
+    assert(repeated.contains("\"middleware\": [\"auth\"],\n      \"provenance\": \"builder\"\n    }},\n    {{\n      \"name\":"))
+    assert(repeated.contains("\"provenance\":\"builder\"}},\n    {{\"name\":\"edit\""))
+    assert(repeated.contains("\"security\": [\"auth\"],\n      \"provenance\": \"builder\"\n    }},\n    {{\n      \"prefix\":"))
+}

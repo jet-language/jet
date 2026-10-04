@@ -23,12 +23,11 @@ use jet_foundation.[
     NamedType,
     Span,
     StructDef,
-    TAppliedRule,
-    TAppliedRuleArgumentMenu,
-    TAppliedRuleCatalog,
     TComptimeKey,
     TComptimeValue,
     diagnostic_with_detail,
+    failure_contract_source,
+    func_failure_contract,
 ]
 
 pub struct SemaUserDeriveProvider {
@@ -121,14 +120,10 @@ fn sema_user_template_ct_value(value: TComptimeValue) -> CtValue? Never! {
     }
 }
 
-fn sema_user_template_catalog() -> TAppliedRuleCatalog Never! {
-    TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
-}
-
 // The registered nominal's full reflection handle (Rust
 // `build_struct_type_info_with_path_and_vocabulary_and_engine`).
 fn sema_user_template_type_info(graph: SemaRegistrationGraph, module_index: Int, owner: String) -> CtValue? {
-    info :: sema_comptime_reflection_type_info(graph, graph.modules[module_index].module_identity, owner, sema_user_template_catalog()) ?? return None
+    info :: sema_comptime_reflection_type_info(graph, graph.modules[module_index].module_identity, owner) ?? return None
     sema_user_template_ct_value(info)
 }
 
@@ -147,7 +142,7 @@ fn sema_user_template_function_info(function: Func) -> CtValue? {
         SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: ""}},
         SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: function.name}},
         SemaComptimeReflectionField{name: "failure_contract", value: sema_comptime_reflection_method_failure_type(function)},
-        SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: sema_failure_contract_source(function.return_type)}},
+        SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: failure_contract_source(func_failure_contract(function))}},
         SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: params}},
         SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(function.name_span)},
         SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_struct("EffectInfo", [SemaComptimeReflectionField]{SemaComptimeReflectionField{name: "values", value: TComptimeValue.List{values: effects}}})},

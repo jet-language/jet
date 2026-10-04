@@ -1,0 +1,1060 @@
+// PORT-PENDING 0610 crates-jet-driver-src-compilerextensionhook: crates/jet-driver/src/CompilerExtensionHook.rs:1-1056
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Post-sema compiler-extension hook (D-DX5-HOOK1=A / Tower #549).
+//RS //!
+//RS //! When `JET_COMPILER_EXTENSION` names a `compiler-extension-v1` `.wasm`,
+//RS //! the driver freezes a typed read-only snapshot after sema and sends it to
+//RS //! the sibling `jetpack` compiler-extension host. Wasmtime never links into
+//RS //! the compiler process. No new user syntax — env registration only until a
+//RS //! spelling ballot. Failures are Jet-owned (E1402); guests never crash the
+//RS //! compiler or expose rustc (I2/I3).
+//RS //!
+//RS //! Tower #549 C5 proofs live in `tests` below (host/SDK/diagnostic + AOT/dev
+//RS //! fact parity). Repository-wide verification runs at multi-card milestones.
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Severity, Span};
+//RS use crate::Sema::SemIndexEffectFacts;
+//RS use crate::AST::{Func, Item, ProgramBundle, StructDef, Type};
+//RS use jet_pkg_model::CompilerExtension::{
+//RS     self, decode_and_validate_response, message_exposes_rustc, Ability, AnalyzeResponse, Finding,
+//RS     ProtocolError, SpanFact, SymbolFact, TypeFact, TypeFactShape, TypeFieldFact, TypedSnapshot,
+//RS     ENV_COMPILER_EXTENSION, HOST_PROCESS_TIMEOUT_MS, HOST_SUBCOMMAND, MAX_SNAPSHOT_BYTES,
+//RS };
+//RS use std::collections::BTreeMap;
+//RS use std::io::{Read, Write};
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Stdio};
+//RS use std::thread;
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS const MAX_HOST_STDERR_BYTES: usize = 64 * 1024;
+//RS 
+//RS /// Run configured compiler-extension(s) after a successful sema pass.
+//RS /// Returns diagnostics to merge with the check/compile result (empty when
+//RS /// the env var is unset).
+//RS ///
+//RS /// `effect_facts` carries solved post-sema effects when the caller ran
+//RS /// `check_bundle_with_effect_facts`. When absent, `ReadEffects` is omitted
+//RS /// from advertised abilities — never invent `"pure"` or other placeholders.
+//RS /// Any sema error suppresses guest execution; extensions observe valid programs only.
+//RS pub fn post_sema_diagnostics(
+//RS     bundle: &ProgramBundle,
+//RS     effect_facts: Option<&SemIndexEffectFacts>,
+//RS     sema_diagnostics: &[Diagnostic],
+//RS ) -> Vec<Diagnostic> {
+//RS     if sema_diagnostics
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.severity == Severity::Error)
+//RS     {
+//RS         return Vec::new();
+//RS     }
+//RS     let Ok(path) = std::env::var(ENV_COMPILER_EXTENSION) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let path = path.trim();
+//RS     if path.is_empty() {
+//RS         return Vec::new();
+//RS     }
+//RS 
+//RS     let snapshot = match snapshot_from_bundle(bundle, effect_facts) {
+//RS         Ok(s) => s,
+//RS         Err(e) => return vec![host_failure(&e.message, None)],
+//RS     };
+//RS 
+//RS     match analyze_via_jetpack(path, &snapshot) {
+//RS         Ok(response) => findings_to_diagnostics(&snapshot, &response),
+//RS         Err(e) => {
+//RS             let msg = sanitize_host_message(&e.message);
+//RS             vec![host_failure(&msg, None)]
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Run one bounded, versioned compiler-extension exchange in the shipped
+//RS /// sibling `jetpack` process. Resolution never consults PATH: release binaries
+//RS /// use the same directory; Cargo test binaries also check their parent `debug`
+//RS /// directory when running from `debug/deps`.
+//RS fn analyze_via_jetpack(
+//RS     wasm_path: &str,
+//RS     snapshot: &TypedSnapshot,
+//RS ) -> Result<AnalyzeResponse, ProtocolError> {
+//RS     let host = compiler_extension_host_path()?;
+//RS     let mut command = Command::new(&host);
+//RS     command.arg(HOST_SUBCOMMAND).arg(wasm_path);
+//RS     analyze_via_host_command(
+//RS         command,
+//RS         snapshot,
+//RS         Duration::from_millis(HOST_PROCESS_TIMEOUT_MS),
+//RS     )
+//RS }
+//RS 
+//RS fn analyze_via_host_command(
+//RS     command: Command,
+//RS     snapshot: &TypedSnapshot,
+//RS     timeout: Duration,
+//RS ) -> Result<AnalyzeResponse, ProtocolError> {
+//RS     let request = snapshot.encode()?;
+//RS     let response = run_host_process(
+//RS         command,
+//RS         request,
+//RS         snapshot.limits.max_response_bytes,
+//RS         timeout,
+//RS     )?;
+//RS     decode_and_validate_response(snapshot, &response)
+//RS }
+//RS 
+//RS fn run_host_process(
+//RS     mut command: Command,
+//RS     request: Vec<u8>,
+//RS     max_response: usize,
+//RS     timeout: Duration,
+//RS ) -> Result<Vec<u8>, ProtocolError> {
+//RS     if request.len() > MAX_SNAPSHOT_BYTES {
+//RS         return Err(ProtocolError::new(format!(
+//RS             "compiler-extension snapshot exceeds IPC limit ({} > {MAX_SNAPSHOT_BYTES})",
+//RS             request.len()
+//RS         )));
+//RS     }
+//RS 
+//RS     let mut child = command
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .map_err(|e| ProtocolError::new(format!("couldn't start compiler-extension host: {e}")))?;
+//RS 
+//RS     let mut stdin = child
+//RS         .stdin
+//RS         .take()
+//RS         .ok_or_else(|| ProtocolError::new("compiler-extension host stdin is unavailable"))?;
+//RS     let stdout = child
+//RS         .stdout
+//RS         .take()
+//RS         .ok_or_else(|| ProtocolError::new("compiler-extension host stdout is unavailable"))?;
+//RS     let stderr = child
+//RS         .stderr
+//RS         .take()
+//RS         .ok_or_else(|| ProtocolError::new("compiler-extension host stderr is unavailable"))?;
+//RS 
+//RS     let writer = thread::spawn(move || {
+//RS         let result = stdin.write_all(&request);
+//RS         drop(stdin);
+//RS         result
+//RS     });
+//RS     let stdout_reader = thread::spawn(move || read_bounded(stdout, max_response));
+//RS     let stderr_reader = thread::spawn(move || read_bounded(stderr, MAX_HOST_STDERR_BYTES));
+//RS 
+//RS     let deadline = Instant::now() + timeout;
+//RS     let status = loop {
+//RS         match child.try_wait() {
+//RS             Ok(Some(status)) => break status,
+//RS             Ok(None) if Instant::now() < deadline => {
+//RS                 thread::sleep(Duration::from_millis(5));
+//RS             }
+//RS             Ok(None) => {
+//RS                 let _ = child.kill();
+//RS                 let _ = child.wait();
+//RS                 let _ = writer.join();
+//RS                 let _ = stdout_reader.join();
+//RS                 let _ = stderr_reader.join();
+//RS                 return Err(ProtocolError::new(format!(
+//RS                     "compiler-extension host timed out after {}ms",
+//RS                     timeout.as_millis()
+//RS                 )));
+//RS             }
+//RS             Err(e) => {
+//RS                 let _ = child.kill();
+//RS                 let _ = child.wait();
+//RS                 let _ = writer.join();
+//RS                 let _ = stdout_reader.join();
+//RS                 let _ = stderr_reader.join();
+//RS                 return Err(ProtocolError::new(format!(
+//RS                     "couldn't wait for compiler-extension host: {e}"
+//RS                 )));
+//RS             }
+//RS         }
+//RS     };
+//RS 
+//RS     let write_result = writer
+//RS         .join()
+//RS         .map_err(|_| ProtocolError::new("compiler-extension host input thread panicked"))?;
+//RS     let (stdout, stdout_overflow) = stdout_reader
+//RS         .join()
+//RS         .map_err(|_| ProtocolError::new("compiler-extension host output thread panicked"))?
+//RS         .map_err(|e| {
+//RS             ProtocolError::new(format!("couldn't read compiler-extension host output: {e}"))
+//RS         })?;
+//RS     let (stderr, stderr_overflow) = stderr_reader
+//RS         .join()
+//RS         .map_err(|_| ProtocolError::new("compiler-extension host error thread panicked"))?
+//RS         .map_err(|e| {
+//RS             ProtocolError::new(format!("couldn't read compiler-extension host error: {e}"))
+//RS         })?;
+//RS 
+//RS     if stdout_overflow {
+//RS         return Err(ProtocolError::new(format!(
+//RS             "compiler-extension host response exceeds IPC limit ({max_response} bytes)"
+//RS         )));
+//RS     }
+//RS     if stderr_overflow {
+//RS         return Err(ProtocolError::new(format!(
+//RS             "compiler-extension host error exceeds IPC limit ({MAX_HOST_STDERR_BYTES} bytes)"
+//RS         )));
+//RS     }
+//RS     if !status.success() {
+//RS         let message = String::from_utf8_lossy(&stderr);
+//RS         let message = message.trim();
+//RS         return Err(ProtocolError::new(if message.is_empty() {
+//RS             format!("compiler-extension host exited with {status}")
+//RS         } else {
+//RS             message.to_string()
+//RS         }));
+//RS     }
+//RS     write_result.map_err(|e| {
+//RS         ProtocolError::new(format!(
+//RS             "couldn't send snapshot to compiler-extension host: {e}"
+//RS         ))
+//RS     })?;
+//RS     Ok(stdout)
+//RS }
+//RS 
+//RS fn read_bounded(reader: impl Read, limit: usize) -> std::io::Result<(Vec<u8>, bool)> {
+//RS     let mut bytes = Vec::new();
+//RS     reader
+//RS         .take(limit.saturating_add(1) as u64)
+//RS         .read_to_end(&mut bytes)?;
+//RS     let overflow = bytes.len() > limit;
+//RS     if overflow {
+//RS         bytes.truncate(limit);
+//RS     }
+//RS     Ok((bytes, overflow))
+//RS }
+//RS 
+//RS fn compiler_extension_host_path() -> Result<PathBuf, ProtocolError> {
+//RS     let exe = std::env::current_exe()
+//RS         .map_err(|e| ProtocolError::new(format!("couldn't resolve compiler executable: {e}")))?;
+//RS     compiler_extension_host_path_for(&exe)
+//RS }
+//RS 
+//RS fn compiler_extension_host_path_for(exe: &Path) -> Result<PathBuf, ProtocolError> {
+//RS     compiler_extension_host_candidates(exe)
+//RS         .into_iter()
+//RS         .find(|candidate| candidate.is_file())
+//RS         .ok_or_else(|| {
+//RS             ProtocolError::new(
+//RS                 "compiler-extension host `jetpack` is missing beside the Jet compiler",
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS fn compiler_extension_host_candidates(exe: &Path) -> Vec<PathBuf> {
+//RS     let Some(dir) = exe.parent() else {
+//RS         return Vec::new();
+//RS     };
+//RS     let binary = format!(
+//RS         "{}{}",
+//RS         crate::Syntax::JETPACK_BINARY_NAME,
+//RS         std::env::consts::EXE_SUFFIX
+//RS     );
+//RS     let mut candidates = vec![dir.join(&binary)];
+//RS     if dir.file_name().is_some_and(|name| name == "deps") {
+//RS         if let Some(parent) = dir.parent() {
+//RS             candidates.push(parent.join(binary));
+//RS         }
+//RS     }
+//RS     candidates
+//RS }
+//RS 
+//RS fn sanitize_host_message(message: &str) -> String {
+//RS     if message_exposes_rustc(message) {
+//RS         return "compiler-extension failed with an internal message".into();
+//RS     }
+//RS     // Drop volatile wasmtime backtraces from user-facing copy (I4 snapshots).
+//RS     let first = message.lines().next().unwrap_or(message).trim();
+//RS     let trimmed = first
+//RS         .split("error while executing at wasm backtrace")
+//RS         .next()
+//RS         .unwrap_or(first)
+//RS         .trim()
+//RS         .trim_end_matches(':')
+//RS         .trim();
+//RS     if trimmed.is_empty() {
+//RS         "compiler-extension analyze trapped".into()
+//RS     } else {
+//RS         trimmed.to_string()
+//RS     }
+//RS }
+//RS 
+//RS /// Build a deterministic v1 snapshot from entry-module function symbols.
+//RS ///
+//RS /// Types come from the post-sema AST signature. Codable records and carrier
+//RS /// types reachable from those signatures are emitted as structural facts;
+//RS /// effects come from solved `SemIndexEffectFacts` when provided. Otherwise
+//RS /// `ReadEffects` is not advertised and symbol `effects` stay empty.
+//RS pub fn snapshot_from_bundle(
+//RS     bundle: &ProgramBundle,
+//RS     effect_facts: Option<&SemIndexEffectFacts>,
+//RS ) -> Result<TypedSnapshot, CompilerExtension::ProtocolError> {
+//RS     let module = &bundle.modules[bundle.entry];
+//RS     let file = module.display.clone();
+//RS     let mut abilities = Ability::v1_defaults().to_vec();
+//RS     if effect_facts.is_none() {
+//RS         abilities.retain(|c| *c != Ability::ReadEffects);
+//RS     }
+//RS     let mut types = interface_type_facts(&module.items);
+//RS     let mut symbols = Vec::new();
+//RS     let mut spans = Vec::new();
+//RS     let mut n = 0u32;
+//RS     for item in &module.items {
+//RS         let Item::Func(func) = item else {
+//RS             continue;
+//RS         };
+//RS         n += 1;
+//RS         let tid = format!("t{n}");
+//RS         let sid = format!("s{n}");
+//RS         let spid = format!("sp{n}");
+//RS         types.push(TypeFact {
+//RS             id: tid.clone(),
+//RS             repr: fn_type_repr(func),
+//RS             shape: TypeFactShape::Opaque,
+//RS         });
+//RS         let effects = effect_facts
+//RS             .and_then(|facts| {
+//RS                 facts
+//RS                     .solved
+//RS                     .get(&format!("{}::{}", module.alias, func.name))
+//RS             })
+//RS             .map(|set| set.iter().cloned().collect::<Vec<_>>())
+//RS             .unwrap_or_default();
+//RS         symbols.push(SymbolFact {
+//RS             id: sid,
+//RS             name: func.name.clone(),
+//RS             kind: "fn".into(),
+//RS             type_id: tid,
+//RS             span_id: spid.clone(),
+//RS             effects,
+//RS             provenance: "sema".into(),
+//RS         });
+//RS         spans.push(SpanFact {
+//RS             id: spid,
+//RS             file: file.clone(),
+//RS             start: func.name_span.start as u32,
+//RS             end: func.name_span.end as u32,
+//RS         });
+//RS     }
+//RS     if symbols.is_empty() {
+//RS         // Guests may still run; provide a file-level span so span_id refs can resolve.
+//RS         // No invented type/effect facts — drop read caps that would lie.
+//RS         abilities.retain(|c| {
+//RS             *c != Ability::ReadTypes && *c != Ability::ReadSymbols && *c != Ability::ReadEffects
+//RS         });
+//RS         types.clear();
+//RS         spans.push(SpanFact {
+//RS             id: "sp1".into(),
+//RS             file,
+//RS             start: 0,
+//RS             end: 0,
+//RS         });
+//RS     }
+//RS     TypedSnapshot::new(abilities, types, symbols, spans)
+//RS }
+//RS fn interface_type_facts(items: &[Item]) -> Vec<TypeFact> {
+//RS     let mut collector = InterfaceTypeCollector::new(items);
+//RS     for item in items {
+//RS         let Item::Func(func) = item else {
+//RS             continue;
+//RS         };
+//RS         for param in &func.params {
+//RS             collector.add_type(&param.ty);
+//RS         }
+//RS         if let Some(return_type) = &func.return_type {
+//RS             collector.add_type(return_type);
+//RS         }
+//RS     }
+//RS     collector.facts.into_values().collect()
+//RS }
+//RS 
+//RS struct InterfaceTypeCollector<'a> {
+//RS     structs: BTreeMap<&'a str, &'a StructDef>,
+//RS     facts: BTreeMap<String, TypeFact>,
+//RS }
+//RS 
+//RS impl<'a> InterfaceTypeCollector<'a> {
+//RS     fn new(items: &'a [Item]) -> Self {
+//RS         let mut structs = BTreeMap::new();
+//RS         for item in items {
+//RS             if let Item::Struct(def) = item {
+//RS                 structs.insert(def.name.as_str(), def);
+//RS             }
+//RS         }
+//RS         Self {
+//RS             structs,
+//RS             facts: BTreeMap::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn add_type(&mut self, ty: &Type) -> String {
+//RS         let id = format!("it:{}", ty.name());
+//RS         if self.facts.contains_key(&id) {
+//RS             return id;
+//RS         }
+//RS         self.facts.insert(
+//RS             id.clone(),
+//RS             TypeFact {
+//RS                 id: id.clone(),
+//RS                 repr: ty.name(),
+//RS                 shape: TypeFactShape::Opaque,
+//RS             },
+//RS         );
+//RS         let shape = match ty {
+//RS             Type::Int
+//RS             | Type::Float
+//RS             | Type::Bool
+//RS             | Type::String
+//RS             | Type::Char
+//RS             | Type::IntN { .. }
+//RS             | Type::Float32 => TypeFactShape::Scalar,
+//RS             Type::List(inner) => TypeFactShape::List {
+//RS                 element_type_id: self.add_type(inner),
+//RS             },
+//RS             Type::Option(inner) => TypeFactShape::Option {
+//RS                 inner_type_id: self.add_type(inner),
+//RS             },
+//RS             Type::Result { ok, err } => TypeFactShape::Result {
+//RS                 ok_type_id: self.add_type(ok),
+//RS                 error_type_id: self.add_type(err),
+//RS             },
+//RS             Type::Named(name) => {
+//RS                 let def = self
+//RS                     .structs
+//RS                     .get(name.as_str())
+//RS                     .copied()
+//RS                     .or_else(|| {
+//RS                         name.rsplit_once('.')
+//RS                             .and_then(|(_, leaf)| self.structs.get(leaf).copied())
+//RS                     });
+//RS                 match def {
+//RS                     None => TypeFactShape::Opaque,
+//RS                     Some(def) if !is_codable(def) => TypeFactShape::Opaque,
+//RS                     Some(def) => {
+//RS                         let fields = def
+//RS                             .fields
+//RS                             .iter()
+//RS                             .map(|field| (field.name.clone(), field.ty.clone()))
+//RS                             .collect::<Vec<_>>();
+//RS                         TypeFactShape::CodableRecord {
+//RS                             fields: fields
+//RS                                 .into_iter()
+//RS                                 .map(|(name, field_type)| TypeFieldFact {
+//RS                                     name,
+//RS                                     type_id: self.add_type(&field_type),
+//RS                                 })
+//RS                                 .collect(),
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => TypeFactShape::Opaque,
+//RS         };
+//RS         self.facts
+//RS             .get_mut(&id)
+//RS             .expect("inserted interface type")
+//RS             .shape = shape;
+//RS         id
+//RS     }
+//RS }
+//RS 
+//RS fn is_codable(def: &StructDef) -> bool {
+//RS     let mut encode = false;
+//RS     let mut decode = false;
+//RS     for (derive, _) in &def.derives {
+//RS         match derive.as_str() {
+//RS             crate::Syntax::MARKER_CODABLE => return true,
+//RS             crate::Syntax::MARKER_ENCODE => encode = true,
+//RS             crate::Syntax::MARKER_DECODE => decode = true,
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     encode && decode
+//RS }
+//RS 
+//RS 
+//RS fn fn_type_repr(func: &Func) -> String {
+//RS     let params = func
+//RS         .params
+//RS         .iter()
+//RS         .map(|p| format!("{}{}: {}", p.convention.sigil(), p.name, p.ty.name()))
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     match &func.return_type {
+//RS         Some(ret) => format!("fn({params}) {}", ret.name()),
+//RS         None => format!("fn({params})"),
+//RS     }
+//RS }
+//RS 
+//RS fn findings_to_diagnostics(
+//RS     snapshot: &TypedSnapshot,
+//RS     response: &AnalyzeResponse,
+//RS ) -> Vec<Diagnostic> {
+//RS     let mut out = Vec::with_capacity(response.findings.len());
+//RS     for finding in &response.findings {
+//RS         out.push(finding_to_diagnostic(snapshot, finding));
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn finding_to_diagnostic(snapshot: &TypedSnapshot, finding: &Finding) -> Diagnostic {
+//RS     let span = snapshot
+//RS         .spans
+//RS         .iter()
+//RS         .find(|s| s.id == finding.span_id)
+//RS         .map(|s| Span::new(s.start as usize, s.end as usize));
+//RS     // V1 maps every guest finding to a lint (L1401). Teams wall via
+//RS     // `policy.lints.deny` (D-LINTPOLICY1).
+//RS     Diagnostic::from_row(
+//RS         "L1401",
+//RS         &[
+//RS             ("rule", finding.rule.as_str()),
+//RS             ("severity", finding.severity.as_str()),
+//RS             ("message", finding.message.as_str()),
+//RS         ],
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS fn host_failure(message: &str, span: Option<Span>) -> Diagnostic {
+//RS     Diagnostic::from_row("E1402", &[("message", message)], span)
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use std::path::PathBuf;
+//RS     use std::sync::{Mutex, Once};
+//RS 
+//RS     static ENV_LOCK: Mutex<()> = Mutex::new(());
+//RS     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+//RS         ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
+//RS     }
+//RS     static HOST_BUILD: Once = Once::new();
+//RS     const SOURCE_X: &str =
+//RS         include_str!("../../jet-pkg-model/fixtures/compiler_extension/source_x.jet");
+//RS     const SOURCE_Y: &str =
+//RS         include_str!("../../jet-pkg-model/fixtures/compiler_extension/source_y.jet");
+//RS 
+//RS     fn fixture_wasm(name: &str) -> PathBuf {
+//RS         ensure_jetpack_host_built();
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS             .join("../jet-pkg-model/fixtures/compiler_extension")
+//RS             .join(name)
+//RS     }
+//RS 
+//RS     fn ensure_jetpack_host_built() {
+//RS         HOST_BUILD.call_once(|| {
+//RS             let status = Command::new(env!("CARGO"))
+//RS                 .args(["build", "-p", "jetpack-bin", "--bin", "jetpack"])
+//RS                 .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
+//RS                 .status()
+//RS                 .expect("start jetpack compiler-extension host build");
+//RS             assert!(status.success(), "build jetpack compiler-extension host");
+//RS         });
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn missing_sibling_never_falls_back_to_path() {
+//RS         let dir = tempfile_dir();
+//RS         let exe = dir.join("debug/deps/jet-driver-test");
+//RS         let candidates = compiler_extension_host_candidates(&exe);
+//RS         assert_eq!(
+//RS             candidates,
+//RS             vec![
+//RS                 dir.join(format!(
+//RS                     "debug/deps/jetpack{}",
+//RS                     std::env::consts::EXE_SUFFIX
+//RS                 )),
+//RS                 dir.join(format!("debug/jetpack{}", std::env::consts::EXE_SUFFIX)),
+//RS             ]
+//RS         );
+//RS         let err = compiler_extension_host_path_for(&exe).expect_err("missing sibling must fail");
+//RS         assert!(err.message.contains("missing beside the Jet compiler"));
+//RS         std::fs::remove_dir_all(dir).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn oversized_ipc_request_is_rejected_before_spawn() {
+//RS         let command = Command::new("this-host-must-not-run");
+//RS         let err = run_host_process(
+//RS             command,
+//RS             vec![0; MAX_SNAPSHOT_BYTES + 1],
+//RS             1,
+//RS             Duration::from_millis(10),
+//RS         )
+//RS         .expect_err("oversized request must fail before spawn");
+//RS         assert!(err.message.contains("snapshot exceeds IPC limit"));
+//RS         assert!(!err.message.contains("couldn't start"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     #[cfg(unix)]
+//RS     fn oversized_ipc_response_is_rejected() {
+//RS         let mut command = Command::new("sh");
+//RS         command.args(["-c", "head -c 300000 /dev/zero", "compiler-extension-host"]);
+//RS         let err = run_host_process(command, b"snapshot".to_vec(), 128, Duration::from_secs(1))
+//RS             .expect_err("oversized response must fail");
+//RS         assert_eq!(
+//RS             err.message,
+//RS             "compiler-extension host response exceeds IPC limit (128 bytes)"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     #[cfg(unix)]
+//RS     fn timeout_kills_and_reaps_host_process() {
+//RS         let dir = tempfile_dir();
+//RS         let pid_file = dir.join("host.pid");
+//RS         let mut command = Command::new("sh");
+//RS         command
+//RS             .arg("-c")
+//RS             .arg("printf '%s' \"$$\" > \"$1\"; exec sleep 60")
+//RS             .arg("compiler-extension-host")
+//RS             .arg(&pid_file);
+//RS         let err = run_host_process(
+//RS             command,
+//RS             b"snapshot".to_vec(),
+//RS             128,
+//RS             Duration::from_millis(100),
+//RS         )
+//RS         .expect_err("stuck host must time out");
+//RS         assert_eq!(err.message, "compiler-extension host timed out after 100ms");
+//RS         let pid = std::fs::read_to_string(&pid_file).expect("host must record pid");
+//RS         let alive = Command::new("kill")
+//RS             .args(["-0", pid.trim()])
+//RS             .stdout(Stdio::null())
+//RS             .stderr(Stdio::null())
+//RS             .status()
+//RS             .expect("probe host pid");
+//RS         assert!(!alive.success(), "timed-out host pid {pid} must be reaped");
+//RS         std::fs::remove_dir_all(dir).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     #[cfg(unix)]
+//RS     fn nonzero_host_stderr_is_sanitized_before_e1402() {
+//RS         let mut command = Command::new("sh");
+//RS         command.args([
+//RS             "-c",
+//RS             "printf 'rustc error[E0123] leaked\\nsecond line\\n' >&2; exit 9",
+//RS             "compiler-extension-host",
+//RS         ]);
+//RS         let err = run_host_process(command, b"snapshot".to_vec(), 128, Duration::from_secs(1))
+//RS             .expect_err("nonzero host must fail");
+//RS         assert!(err.message.contains("rustc error[E0123]"));
+//RS         let sanitized = sanitize_host_message(&err.message);
+//RS         assert_eq!(
+//RS             sanitized,
+//RS             "compiler-extension failed with an internal message"
+//RS         );
+//RS         let diagnostic = host_failure(&sanitized, None);
+//RS         assert_eq!(diagnostic.code, "E1402");
+//RS         assert!(!message_exposes_rustc(&diagnostic.what));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn post_sema_custom_lint_from_driver_env() {
+//RS         let _guard = env_lock();
+//RS         let dir = tempfile_dir();
+//RS         let src_path = dir.join("main.jet");
+//RS         std::fs::write(&src_path, SOURCE_X).unwrap();
+//RS         let wasm = fixture_wasm("lint_no_x.wasm");
+//RS         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+//RS         let (diags, bundle, _) =
+//RS             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
+//RS         std::env::remove_var(ENV_COMPILER_EXTENSION);
+//RS         assert!(bundle.is_some(), "sema must succeed; diags={diags:?}");
+//RS         let lint = diags.iter().find(|d| d.code == "L1401").unwrap_or_else(|| {
+//RS             panic!("custom-lint finding must surface as L1401; diags={diags:?}")
+//RS         });
+//RS         assert!(lint.what.contains("no-x"), "got {}", lint.what);
+//RS         assert!(lint.what.contains("prefer y"), "got {}", lint.what);
+//RS         assert!(!message_exposes_rustc(&lint.what));
+//RS         assert!(!message_exposes_rustc(&lint.why));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn post_sema_custom_lint_ignores_non_x_source() {
+//RS         let _guard = env_lock();
+//RS         let dir = tempfile_dir();
+//RS         let src_path = dir.join("main.jet");
+//RS         std::fs::write(&src_path, SOURCE_Y).unwrap();
+//RS         let wasm = fixture_wasm("lint_no_x.wasm");
+//RS         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+//RS         let (diags, bundle, _) =
+//RS             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
+//RS         std::env::remove_var(ENV_COMPILER_EXTENSION);
+//RS         assert!(bundle.is_some(), "sema must succeed; diags={diags:?}");
+//RS         assert!(
+//RS             !diags.iter().any(|d| d.code == "L1401"),
+//RS             "non-x source must not produce no-x lint; diags={diags:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn post_sema_crash_guest_fail_closed_e1402() {
+//RS         let _guard = env_lock();
+//RS         let dir = tempfile_dir();
+//RS         let src_path = dir.join("main.jet");
+//RS         std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
+//RS         let wasm = fixture_wasm("crash.wasm");
+//RS         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+//RS         let (diags, bundle, _) =
+//RS             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
+//RS         std::env::remove_var(ENV_COMPILER_EXTENSION);
+//RS         assert!(bundle.is_some());
+//RS         let err = diags
+//RS             .iter()
+//RS             .find(|d| d.code == "E1402")
+//RS             .expect("crash must become E1402");
+//RS         assert!(!message_exposes_rustc(&err.what));
+//RS         assert!(!message_exposes_rustc(&err.why));
+//RS         assert!(!diags.iter().any(|d| d.code == "L1401"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sema_error_never_executes_crash_guest() {
+//RS         let _guard = env_lock();
+//RS         let dir = tempfile_dir();
+//RS         let src_path = dir.join("main.jet");
+//RS         std::fs::write(&src_path, "fn run() {\n    print(missing)\n}\n").unwrap();
+//RS         let wasm = fixture_wasm("crash.wasm");
+//RS         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+//RS         let (diags, bundle, _) =
+//RS             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
+//RS         std::env::remove_var(ENV_COMPILER_EXTENSION);
+//RS         assert!(bundle.is_some(), "loader should return sema-invalid bundle");
+//RS         assert_eq!(diags.len(), 1, "only Jet sema failure should surface");
+//RS         assert_eq!(diags[0].code, "E0107", "got {diags:?}");
+//RS         assert!(
+//RS             !diags.iter().any(|d| d.code == "E1402" || d.code == "L1401"),
+//RS             "guest must not execute after sema failure; diags={diags:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn snapshot_uses_solved_effects_not_invented_pure() {
+//RS         let _guard = env_lock();
+//RS         std::env::remove_var(ENV_COMPILER_EXTENSION);
+//RS         let dir = tempfile_dir();
+//RS         let src_path = dir.join("main.jet");
+//RS         std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
+//RS         let (diags, bundle, facts) =
+//RS             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
+//RS         assert!(
+//RS             !diags
+//RS                 .iter()
+//RS                 .any(|d| d.severity == crate::Diagnostics::Severity::Error),
+//RS             "sema must succeed; diags={diags:?}"
+//RS         );
+//RS         let bundle = bundle.expect("bundle");
+//RS         let snap = snapshot_from_bundle(&bundle, Some(&facts)).expect("snapshot");
+//RS         assert!(
+//RS             snap.abilities.contains(&Ability::ReadEffects),
+//RS             "facts present → advertise ReadEffects"
+//RS         );
+//RS         let run = snap
+//RS             .symbols
+//RS             .iter()
+//RS             .find(|s| s.name == "run")
+//RS             .expect("run symbol");
+//RS         assert!(
+//RS             !run.effects.iter().any(|e| e == "pure"),
+//RS             "must not invent effect name `pure`; got {:?}",
+//RS             run.effects
+//RS         );
+//RS         assert!(
+//RS             run.effects.iter().any(|e| e == "IO" || e == "Log"),
+//RS             "print must solve to a real effect; got {:?}",
+//RS             run.effects
+//RS         );
+//RS         assert!(
+//RS             snap.types
+//RS                 .iter()
+//RS                 .any(|t| t.id == run.type_id && t.repr.starts_with("fn(")),
+//RS             "type_id must point at a real fn signature repr; types={:?}",
+//RS             snap.types
+//RS         );
+//RS     }
+//RS 
+//RS     /// `compile_bundle_path_opts_full` / entry-swap pass `None` facts: omit
+//RS     /// `ReadEffects` and leave symbol effects empty — never invent `"pure"`.
+//RS     #[test]
+//RS     fn snapshot_without_effect_facts_omits_read_effects() {
+//RS         let _guard = env_lock();
+//RS         std::env::remove_var(ENV_COMPILER_EXTENSION);
+//RS         let dir = tempfile_dir();
+//RS         let src_path = dir.join("main.jet");
+//RS         std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
+//RS         let (diags, bundle, _) =
+//RS             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
+//RS         assert!(
+//RS             !diags
+//RS                 .iter()
+//RS                 .any(|d| d.severity == crate::Diagnostics::Severity::Error),
+//RS             "sema must succeed; diags={diags:?}"
+//RS         );
+//RS         let bundle = bundle.expect("bundle");
+//RS         let snap = snapshot_from_bundle(&bundle, None).expect("snapshot");
+//RS         assert!(
+//RS             !snap.abilities.contains(&Ability::ReadEffects),
+//RS             "None facts must omit ReadEffects; caps={:?}",
+//RS             snap.abilities
+//RS         );
+//RS         for sym in &snap.symbols {
+//RS             assert!(
+//RS                 sym.effects.is_empty(),
+//RS                 "None facts → empty effects (no invented pure); {:?} got {:?}",
+//RS                 sym.name,
+//RS                 sym.effects
+//RS             );
+//RS             assert!(
+//RS                 !sym.effects.iter().any(|e| e == "pure"),
+//RS                 "must not invent `pure`"
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     /// opts_full (`jet run` compile path) still runs the hook with `None` facts.
+//RS     #[test]
+//RS     fn compile_opts_full_crash_guest_fail_closed_e1402() {
+//RS         let _guard = env_lock();
+//RS         let dir = tempfile_dir();
+//RS         let src_path = dir.join("main.jet");
+//RS         std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
+//RS         let wasm = fixture_wasm("crash.wasm");
+//RS         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+//RS         let err = crate::Driver::compile_bundle_path_opts(
+//RS             src_path.to_str().unwrap(),
+//RS             crate::Sema::CompileMode::Run,
+//RS             false,
+//RS             crate::Policy::GateSet::default(),
+//RS             false,
+//RS             None,
+//RS         )
+//RS         .expect_err("crash guest must fail closed on opts_full");
+//RS         std::env::remove_var(ENV_COMPILER_EXTENSION);
+//RS         assert!(
+//RS             err.iter().any(|d| d.code == "E1402"),
+//RS             "opts_full None-facts path must still surface E1402; got {err:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     /// Entry-swap (`jet dev` / job subcommands) still runs the hook with `None` facts.
+//RS     #[test]
+//RS     fn compile_entry_swap_crash_guest_fail_closed_e1402() {
+//RS         let _guard = env_lock();
+//RS         let dir = tempfile_dir();
+//RS         let src_path = dir.join("main.jet");
+//RS         std::fs::write(
+//RS             &src_path,
+//RS             "fn run() {\n    print(0)\n}\n\nfn dev() {\n    print(1)\n}\n",
+//RS         )
+//RS         .unwrap();
+//RS         let wasm = fixture_wasm("crash.wasm");
+//RS         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+//RS         let err = crate::Driver::compile_bundle_path_with_entry(src_path.to_str().unwrap(), "dev")
+//RS             .expect_err("crash guest must fail closed on entry-swap");
+//RS         std::env::remove_var(ENV_COMPILER_EXTENSION);
+//RS         assert!(
+//RS             err.iter().any(|d| d.code == "E1402"),
+//RS             "entry-swap None-facts path must still surface E1402; got {err:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     // --- Tower #549 C5 focused proofs ------------------------------------
+//RS     // Host/SDK/diagnostic + AOT/dev fact parity where both paths carry facts.
+//RS     // Independent Sol review closes C5; repository-wide verification runs at
+//RS     // multi-card milestones.
+//RS 
+//RS     /// Check vs Run modes freeze byte-identical typed snapshots when both
+//RS     /// have solved effect facts (AOT build uses Run; `jet check` uses Check).
+//RS     #[test]
+//RS     fn check_and_run_mode_effect_fact_snapshots_byte_identical() {
+//RS         let _guard = env_lock();
+//RS         std::env::remove_var(ENV_COMPILER_EXTENSION);
+//RS         let dir = tempfile_dir();
+//RS         let src_path = dir.join("main.jet");
+//RS         std::fs::write(&src_path, SOURCE_X).unwrap();
+//RS         let path = src_path.to_str().unwrap();
+//RS 
+//RS         let mut bundle_check =
+//RS             crate::Loader::load_entry_with_overlay(path, None, false).expect("load check");
+//RS         let (diags_c, facts_c) = crate::Sema::check_bundle_with_effect_facts(
+//RS             &mut bundle_check,
+//RS             crate::Sema::CompileMode::Check,
+//RS         );
+//RS         assert!(
+//RS             !diags_c
+//RS                 .iter()
+//RS                 .any(|d| d.severity == crate::Diagnostics::Severity::Error),
+//RS             "Check sema must succeed; diags={diags_c:?}"
+//RS         );
+//RS         let enc_check = snapshot_from_bundle(&bundle_check, Some(&facts_c))
+//RS             .expect("check snapshot")
+//RS             .encode()
+//RS             .expect("encode check");
+//RS 
+//RS         let mut bundle_run =
+//RS             crate::Loader::load_entry_with_overlay(path, None, false).expect("load run");
+//RS         let (diags_r, facts_r) = crate::Sema::check_bundle_with_effect_facts(
+//RS             &mut bundle_run,
+//RS             crate::Sema::CompileMode::Run,
+//RS         );
+//RS         assert!(
+//RS             !diags_r
+//RS                 .iter()
+//RS                 .any(|d| d.severity == crate::Diagnostics::Severity::Error),
+//RS             "Run sema must succeed; diags={diags_r:?}"
+//RS         );
+//RS         let enc_run = snapshot_from_bundle(&bundle_run, Some(&facts_r))
+//RS             .expect("run snapshot")
+//RS             .encode()
+//RS             .expect("encode run");
+//RS 
+//RS         assert_eq!(
+//RS             enc_check, enc_run,
+//RS             "Check vs Run typed snapshots must be byte-identical when both have effect facts"
+//RS         );
+//RS         let snap = snapshot_from_bundle(&bundle_check, Some(&facts_c)).unwrap();
+//RS         assert!(
+//RS             snap.abilities.contains(&Ability::ReadEffects),
+//RS             "fact-bearing snapshots must advertise ReadEffects; caps={:?}",
+//RS             snap.abilities
+//RS         );
+//RS     }
+//RS 
+//RS     /// `jet check` and `jet build` (facts path) surface the same L1401 finding.
+//RS     #[test]
+//RS     fn check_and_build_surface_same_l1401() {
+//RS         let _guard = env_lock();
+//RS         let dir = tempfile_dir();
+//RS         let src_path = dir.join("main.jet");
+//RS         std::fs::write(&src_path, SOURCE_X).unwrap();
+//RS         let path = src_path.to_str().unwrap();
+//RS         let wasm = fixture_wasm("lint_no_x.wasm");
+//RS         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+//RS 
+//RS         let (check_diags, bundle, _) =
+//RS             crate::Driver::check_file_with_effect_facts(path, None, false);
+//RS         assert!(
+//RS             bundle.is_some(),
+//RS             "check sema must succeed; diags={check_diags:?}"
+//RS         );
+//RS         let check_lint = check_diags
+//RS             .iter()
+//RS             .find(|d| d.code == "L1401")
+//RS             .unwrap_or_else(|| panic!("check must surface L1401; diags={check_diags:?}"));
+//RS 
+//RS         let build_out = crate::Driver::compile_bundle_path_build(
+//RS             path,
+//RS             crate::Driver::BuildRunOptions::default(),
+//RS         );
+//RS         std::env::remove_var(ENV_COMPILER_EXTENSION);
+//RS         let build_out = build_out.unwrap_or_else(|errs| {
+//RS             panic!("build must succeed with lint-only guest; errs={errs:?}")
+//RS         });
+//RS         let build_lint = build_out
+//RS             .compile
+//RS             .lints
+//RS             .iter()
+//RS             .find(|d| d.code == "L1401")
+//RS             .unwrap_or_else(|| {
+//RS                 panic!(
+//RS                     "build must surface L1401; lints={:?}",
+//RS                     build_out.compile.lints
+//RS                 )
+//RS             });
+//RS 
+//RS         assert_eq!(check_lint.what, build_lint.what);
+//RS         assert_eq!(check_lint.why, build_lint.why);
+//RS         assert!(check_lint.what.contains("no-x"));
+//RS         assert!(check_lint.what.contains("prefer y"));
+//RS     }
+//RS 
+//RS     /// AOT opts_full (`jet run`) and entry-swap (`jet dev`) both get L1401
+//RS     /// even with None effect facts (guest does not require ReadEffects).
+//RS     #[test]
+//RS     fn aot_opts_full_and_dev_entry_swap_surface_same_l1401() {
+//RS         let _guard = env_lock();
+//RS         let dir = tempfile_dir();
+//RS         let src_path = dir.join("main.jet");
+//RS         std::fs::write(&src_path, SOURCE_X).unwrap();
+//RS         let path = src_path.to_str().unwrap();
+//RS         let wasm = fixture_wasm("lint_no_x.wasm");
+//RS         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+//RS 
+//RS         let aot = crate::Driver::compile_bundle_path_opts(
+//RS             path,
+//RS             crate::Sema::CompileMode::Run,
+//RS             false,
+//RS             crate::Policy::GateSet::default(),
+//RS             false,
+//RS             None,
+//RS         )
+//RS         .unwrap_or_else(|errs| panic!("opts_full must succeed with lint guest; errs={errs:?}"));
+//RS         let aot_lint = aot
+//RS             .lints
+//RS             .iter()
+//RS             .find(|d| d.code == "L1401")
+//RS             .unwrap_or_else(|| panic!("opts_full must surface L1401; lints={:?}", aot.lints));
+//RS 
+//RS         let dev =
+//RS             crate::Driver::compile_bundle_path_with_entry(path, "dev").unwrap_or_else(|errs| {
+//RS                 panic!("entry-swap must succeed with lint guest; errs={errs:?}")
+//RS             });
+//RS         let dev_lint = dev
+//RS             .lints
+//RS             .iter()
+//RS             .find(|d| d.code == "L1401")
+//RS             .unwrap_or_else(|| panic!("entry-swap must surface L1401; lints={:?}", dev.lints));
+//RS 
+//RS         assert_eq!(aot_lint.what, dev_lint.what);
+//RS         assert_eq!(aot_lint.why, dev_lint.why);
+//RS 
+//RS         let negative_path = dir.join("negative.jet");
+//RS         std::fs::write(&negative_path, SOURCE_Y).unwrap();
+//RS         let negative = negative_path.to_str().unwrap();
+//RS         let aot_negative = crate::Driver::compile_bundle_path_opts(
+//RS             negative,
+//RS             crate::Sema::CompileMode::Run,
+//RS             false,
+//RS             crate::Policy::GateSet::default(),
+//RS             false,
+//RS             None,
+//RS         )
+//RS         .expect("negative opts_full must succeed");
+//RS         let dev_negative = crate::Driver::compile_bundle_path_with_entry(negative, "dev")
+//RS             .expect("negative entry-swap must succeed");
+//RS         std::env::remove_var(ENV_COMPILER_EXTENSION);
+//RS         assert!(
+//RS             !aot_negative.lints.iter().any(|d| d.code == "L1401")
+//RS                 && !dev_negative.lints.iter().any(|d| d.code == "L1401"),
+//RS             "AOT/dev must both omit no-x lint for non-x facts; aot={:?}, dev={:?}",
+//RS             aot_negative.lints,
+//RS             dev_negative.lints
+//RS         );
+//RS     }
+//RS 
+//RS     fn tempfile_dir() -> PathBuf {
+//RS         let dir = std::env::temp_dir().join(format!(
+//RS             "jet-cex-hook-{}-{}",
+//RS             std::process::id(),
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         std::fs::create_dir_all(&dir).unwrap();
+//RS         dir
+//RS     }
+//RS }
+// END-PORT-PENDING 0610 crates/jet-driver/src/CompilerExtensionHook.rs:1-1056
+

@@ -1,0 +1,89 @@
+// MIR.rs:8915-9145. These walkers preserve native validation's operand order;
+// optimizer-only argument-place validation remains in the legality walker.
+fn mir_validation_places(operation: MIROperation) -> [MIRPlaceID] Never! {
+    if operation == {
+        .ReadPlace(place) | .MovePlace(place) | .InitializeUninit(place)
+        | .RawAddressOf(place) | .AddressOf(place, _) | .WritePlace(place, _)
+        | .ReplacePlace(place, _) -> [MIRPlaceID]{place}
+        .Closure(_, captures, _) -> {
+            places := [MIRPlaceID]{}
+            loop capture in captures { if capture == .Place(place) -> &places.push(place) }
+            places
+        }
+        .Semantic(.BuiltinMethod(_, _, receiver_place, _, _)) -> if receiver_place == .Val(place) -> [MIRPlaceID]{place} else -> [MIRPlaceID]{}
+        else -> [MIRPlaceID]{}
+    }
+}
+fn mir_validation_locals(operation: MIROperation) -> [MIRLocalID] Never! {
+    if operation == {
+        .Semantic(.DataEntriesToMap(_, local)) -> [MIRLocalID]{local}
+        .Semantic(.RequireStop(_, _, _, _, context, _, _)) -> context.locals.map(local -> local.id)
+        else -> [MIRLocalID]{}
+    }
+}
+fn mir_validation_scopes(operation: MIROperation) -> [MIRScopeID] Never! {
+    if operation == {
+        .ScopeEnter(scope, _) | .ScopeExit(scope) -> [MIRScopeID]{scope}
+        else -> [MIRScopeID]{}
+    }
+}
+fn mir_validation_function_calls(operation: MIROperation) -> [MIRFunctionID] Never! {
+    if operation == {
+        .Call(.User(function), _, _) | .Call(.Associated(function, _), _, _)
+        | .Call(.Method(function, _), _, _) | .Closure(function, _, _) -> [MIRFunctionID]{function}
+        else -> [MIRFunctionID]{}
+    }
+}
+fn mir_validation_core_calls(operation: MIROperation) -> [MIRCoreCallID] Never! {
+    if operation == {
+        .CoreCall(call, _, _, _, _, _) | .Call(.Core(call), _, _) -> [MIRCoreCallID]{call}
+        else -> [MIRCoreCallID]{}
+    }
+}
+fn mir_validation_fields_used(operation: MIROperation) -> [MIRFieldID] Never! {
+    if operation == {
+        .ProjectMembers(_, members) -> ~members
+        .Field(_, field) -> [MIRFieldID]{field}
+        .Struct(_, fields) | .Tuple(_, fields) -> fields.map(field -> field.field)
+        .Semantic(semantic) -> {
+            if semantic == {
+                .StructLiteral(_, fields, _, _, boxed) -> {
+                    ids := fields.map(field -> field.field)
+                    loop field in boxed -> &ids.push(field)
+                    ids
+                }
+                .BuiltinMethod(_, _, _, _, fields) -> if fields == .Val(ids) -> ~ids else -> [MIRFieldID]{}
+                .CellGuardProject(_, _, _, paths, _, _) -> {
+                    ids := [MIRFieldID]{}
+                    loop path in paths { loop field in path -> &ids.push(field) }
+                    ids
+                }
+                .SharedGuardMap(_, _, path, _) -> ~path
+                .SharedGuardSplit(_, _, _, first, second, _) -> {
+                    ids := ~first
+                    loop field in second -> &ids.push(field)
+                    ids
+                }
+                .ColumnarRead(_, _, column, _, _) | .CarrierFact(_, _, column, _) -> [MIRFieldID]{column}
+                else -> [MIRFieldID]{}
+            }
+        }
+        else -> [MIRFieldID]{}
+    }
+}
+fn mir_validation_source_files(operation: MIROperation) -> [MIRSourceFileID] Never! {
+    if operation == {
+        .Todo(_, location, _) | .Index(_, _, _, _, _, location, _)
+        | .Slice(_, _, _, _, _, location) -> [MIRSourceFileID]{location.file}
+        .Convert(_, _, _, .Prelude(_, location, _)) -> [MIRSourceFileID]{location.file}
+        .Binary(_, .Prelude(_, location), _, _, _) -> if location == .Val(loc) -> [MIRSourceFileID]{loc.file} else -> [MIRSourceFileID]{}
+        .Semantic(semantic) -> {
+            if semantic == {
+                .RequireStop(_, _, _, location, _, _, _) | .HTTPRouterRegister(_, _, _, _, _, _, _, location) -> [MIRSourceFileID]{location.file}
+                .OverflowOption(_, _, _, location) -> if location == .Val(loc) -> [MIRSourceFileID]{loc.file} else -> [MIRSourceFileID]{}
+                else -> [MIRSourceFileID]{}
+            }
+        }
+        else -> [MIRSourceFileID]{}
+    }
+}

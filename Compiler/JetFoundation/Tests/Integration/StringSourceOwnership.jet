@@ -1,0 +1,1078 @@
+// PORT-PENDING 1156 tests-string-source-ownership-module-group: tests/string_source_ownership.rs:1-70
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! String's primitive identity stays compiler-owned while its receiver method
+//RS //! body is carried by a compiler-private Core source part.
+//RS mod common;
+//RS mod tir_support;
+//RS 
+//RS #[test]
+//RS fn string_source_part_is_not_a_public_core_module() {
+//RS     let source = include_str!("../Core/text/string.jet");
+//RS     assert!(source.contains("fn len(receiver: String) -> Int"));
+//RS     assert!(!source.contains("pub fn"));
+//RS 
+//RS     let public_core = include_str!("../crates/jet-codegen/src/Prelude/Core.jet");
+//RS     assert!(!public_core.contains("core.text.string"));
+//RS 
+//RS     let public_exports = include_str!("../crates/jet-foundation/src/CoreModuleExports.rs");
+//RS     assert!(!public_exports.contains("core.text.string"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn private_string_source_path_is_not_importable() {
+//RS     let diagnostics = jet::compile(
+//RS         "use core.text.string as string\nfn run() { print(string.len(\"x\")) }\n",
+//RS     )
+//RS     .expect_err("the compiler-private String source part must not be a public import");
+//RS     assert!(
+//RS         diagnostics.iter().any(|diagnostic| diagnostic.code == "E1001"),
+//RS         "private source path should be rejected as an unknown Core module: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn string_method_calls_target_the_private_jet_source_function() {
+//RS     let source = r#"
+//RS use core.text as text
+//RS 
+//RS fn run() {
+//RS     value :: "hello"
+//RS     print(value.len())
+//RS }
+//RS "#;
+//RS     let output = jet::compile(source).expect("String source method must compile");
+//RS     assert!(
+//RS         !output.rust.contains("impl String"),
+//RS         "String methods must not be emitted as an inherent Rust impl"
+//RS     );
+//RS     assert!(
+//RS         !output.rust.contains("impl &'static str"),
+//RS         "String methods must not be attached to the primitive Rust view"
+//RS     );
+//RS     assert!(
+//RS         !output.rust.contains("core.text.string"),
+//RS         "the private source part must not leak a public Core import path"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn string_len_source_agrees_across_execution_tiers() {
+//RS     // S41: with `core.text` in scope, `len` still counts Unicode scalars.
+//RS     tir_support::assert_tiers_agree(
+//RS         "string_len_source",
+//RS         r#"
+//RS use core.text as text
+//RS 
+//RS fn run() {
+//RS     print("héllo".len())
+//RS }
+//RS "#,
+//RS         "5\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 1156 tests/string_source_ownership.rs:1-70
+
+// PORT-PENDING 1156 tests-string-source-ownership-module-group: tests/structural_merge.rs:1-702
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-MERGE-* (Tower #143): hostile structural diff/merge product proof.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Output};
+//RS 
+//RS fn jet() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS fn dir(name: &str) -> PathBuf {
+//RS     let path = std::env::temp_dir().join(format!(
+//RS         "jet_structural_merge_{}_{}",
+//RS         std::process::id(),
+//RS         name
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&path);
+//RS     fs::create_dir_all(&path).unwrap();
+//RS     path
+//RS }
+//RS fn write(dir: &Path, name: &str, source: &str) -> PathBuf {
+//RS     let path = dir.join(name);
+//RS     fs::write(&path, source).unwrap();
+//RS     path
+//RS }
+//RS fn run(args: &[&str]) -> Output {
+//RS     Command::new(jet()).args(args).output().unwrap()
+//RS }
+//RS fn run_in(dir: &Path, args: &[&str]) -> Output {
+//RS     Command::new(jet())
+//RS         .current_dir(dir)
+//RS         .args(args)
+//RS         .output()
+//RS         .unwrap()
+//RS }
+//RS fn git(dir: &Path, args: &[&str]) -> Output {
+//RS     Command::new("git")
+//RS         .current_dir(dir)
+//RS         .args(args)
+//RS         .output()
+//RS         .unwrap()
+//RS }
+//RS fn semantic_rename_receipt(
+//RS     root: &Path,
+//RS     path: &Path,
+//RS     before: &str,
+//RS     after: &str,
+//RS     from: &str,
+//RS     to: &str,
+//RS ) {
+//RS     let dir = root.join(".jet/codemods");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let before_hash = jet::SHA256::sha256_hex(before.as_bytes());
+//RS     let after_hash = jet::SHA256::sha256_hex(after.as_bytes());
+//RS     let receipt = format!(
+//RS         "{{\"schema\":2,\"name\":\"recorded-rename\",\"project\":\"{}\",\"semantic_ops\":[{{\"kind\":\"rename\",\"from\":\"{}\",\"to\":\"{}\",\"targets\":[{{\"stable_id\":\"def:recorded\",\"before\":\"{}\",\"after\":\"{}\",\"kind\":\"function\",\"module_path\":\"{}\"}}],\"files\":[{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\"}}]}}],\"files\":[{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\"}}]}}\n",
+//RS         root.display(),
+//RS         from,
+//RS         to,
+//RS         from,
+//RS         to,
+//RS         path.display(),
+//RS         path.display(),
+//RS         before_hash,
+//RS         after_hash,
+//RS         path.display(),
+//RS         before_hash,
+//RS         after_hash,
+//RS     );
+//RS     fs::write(dir.join("recorded-rename.log.json"), receipt).unwrap();
+//RS }
+//RS 
+//RS const BASE: &str = "fn left() -[]> Int {\n    return 1\n}\n\nfn right() -[]> Int {\n    return 2\n}\n\nfn run() {\n    print(left() + right())\n}\n";
+//RS 
+//RS #[test]
+//RS fn structural_diff_classifies_body_and_rename_with_stable_ids() {
+//RS     let root = dir("diff");
+//RS     let before = write(&root, "before.jet", BASE);
+//RS     let after = write(&root, "after.jet", "fn first() -[]> Int { return 1 }\nfn right() -[]> Int { return 3 }\nfn run() { print(first() + right()) }\n");
+//RS     semantic_rename_receipt(
+//RS         &root,
+//RS         &before,
+//RS         BASE,
+//RS         &fs::read_to_string(&after).unwrap(),
+//RS         "left",
+//RS         "first",
+//RS     );
+//RS     let output = run(&[
+//RS         "diff",
+//RS         "--structural",
+//RS         before.to_str().unwrap(),
+//RS         after.to_str().unwrap(),
+//RS         "--json",
+//RS     ]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let report = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(report.contains("\"kind\":\"renamed\""), "{report}");
+//RS     assert!(report.contains("\"kind\":\"body_changed\""), "{report}");
+//RS     assert!(report.contains("\"stable_id\":\"def:"), "{report}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn structural_diff_does_not_infer_a_rename_from_hand_text() {
+//RS     let root = dir("hand_edit");
+//RS     let before = write(
+//RS         &root,
+//RS         "before.jet",
+//RS         "fn report() -[]> Int { return 1 }\nfn run() { print(report()) }\n",
+//RS     );
+//RS     let after = write(
+//RS         &root,
+//RS         "after.jet",
+//RS         "fn summarize() -[]> Int { return 1 }\nfn run() { print(summarize()) }\n",
+//RS     );
+//RS     let output = run(&[
+//RS         "diff",
+//RS         "--structural",
+//RS         before.to_str().unwrap(),
+//RS         after.to_str().unwrap(),
+//RS         "--json",
+//RS     ]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let report = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(!report.contains("\"kind\":\"renamed\""), "{report}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn structural_diff_ignores_format_comments_and_reports_signature_and_move() {
+//RS     let root = dir("diff_hostile");
+//RS     let old_dir = root.join("old");
+//RS     let new_dir = root.join("new");
+//RS     fs::create_dir_all(&old_dir).unwrap();
+//RS     fs::create_dir_all(&new_dir).unwrap();
+//RS     let before = write(
+//RS         &old_dir,
+//RS         "same.jet",
+//RS         "// old comment\nfn score(n: Int) -[]> Int { return n }\nfn run() { print(score(1)) }\n",
+//RS     );
+//RS     let after = write(&new_dir, "same.jet", "// new comment\nfn score(n: Int, bonus: Int) -[]> Int {\n    return n + bonus\n}\nfn run() { print(score(1, 2)) }\n");
+//RS     let output = run(&[
+//RS         "diff",
+//RS         "--structural",
+//RS         before.to_str().unwrap(),
+//RS         after.to_str().unwrap(),
+//RS         "--json",
+//RS     ]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let report = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         report.contains("\"kind\":\"signature_changed\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(report.contains("\"kind\":\"moved\""), "{report}");
+//RS 
+//RS     let same = write(&root, "format.jet", "fn score(n: Int) -[]> Int {\n    // only comment\n    return n\n}\nfn run() { print(score(1)) }\n");
+//RS     let no_churn = run(&[
+//RS         "diff",
+//RS         "--structural",
+//RS         before.to_str().unwrap(),
+//RS         same.to_str().unwrap(),
+//RS     ]);
+//RS     assert!(no_churn.status.success());
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&no_churn.stdout),
+//RS         "no structural changes\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn structural_diff_add_remove_reorder_rename_edit_is_deterministic() {
+//RS     let root = dir("diff_matrix");
+//RS     let before = write(&root, "before.jet", "fn only(value: Int) -[]> Int { return value }\nfn gone() -[]> Int { return 1 }\nfn run() { print(only(7)) }\n");
+//RS     let after = write(&root, "after.jet", "fn run() { print(renamed(7)) }\nfn added() -[]> Bool { return true }\nfn renamed(value: Int) -[]> Int { return 9 }\n");
+//RS     let args = [
+//RS         "diff",
+//RS         "--structural",
+//RS         before.to_str().unwrap(),
+//RS         after.to_str().unwrap(),
+//RS         "--json",
+//RS     ];
+//RS     let first = run(&args);
+//RS     let second = run(&args);
+//RS     assert!(
+//RS         first.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&first.stderr)
+//RS     );
+//RS     assert_eq!(first.stdout, second.stdout);
+//RS     let report = String::from_utf8_lossy(&first.stdout);
+//RS     for kind in ["added", "removed", "renamed", "body_changed"] {
+//RS         assert!(report.contains(&format!("\"kind\":\"{kind}\"")), "{report}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn structural_merge_composes_disjoint_edits_and_rechecks_output() {
+//RS     let root = dir("disjoint");
+//RS     let base = write(&root, "base.jet", BASE);
+//RS     let ours = write(&root, "ours.jet", "// retained file header\nfn left() -[]> Int { return 10 }\nfn right() -[]> Int { return 2 }\nfn run() { print(left() + right()) }\n");
+//RS     let theirs = write(&root, "theirs.jet", "fn left() -[]> Int { return 1 }\nfn right() -[]> Int { return 20 }\nfn run() { print(left() + right()) }\n");
+//RS     let merged = root.join("merged.jet");
+//RS     let output = run(&[
+//RS         "merge",
+//RS         "--structural",
+//RS         base.to_str().unwrap(),
+//RS         ours.to_str().unwrap(),
+//RS         theirs.to_str().unwrap(),
+//RS         "--out",
+//RS         merged.to_str().unwrap(),
+//RS     ]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let source = fs::read_to_string(&merged).unwrap();
+//RS     assert!(source.contains("return 10"), "{source}");
+//RS     assert!(source.contains("return 20"), "{source}");
+//RS     assert!(source.contains("retained file header"), "{source}");
+//RS     assert!(run(&["check", merged.to_str().unwrap()]).status.success());
+//RS }
+//RS 
+//RS #[test]
+//RS fn structural_merge_applies_recorded_rename_to_a_parallel_body_edit() {
+//RS     let root = dir("recorded_rename_merge");
+//RS     let base_source = "fn report() -[]> Int { return 1 }\nfn run() { print(report()) }\n";
+//RS     let ours_source = "fn summarize() -[]> Int { return 1 }\nfn run() { print(summarize()) }\n";
+//RS     let theirs_source = "fn report() -[]> Int { return 2 }\nfn run() { print(report()) }\n";
+//RS     let base = write(&root, "base.jet", base_source);
+//RS     let ours = write(&root, "ours.jet", ours_source);
+//RS     let theirs = write(&root, "theirs.jet", theirs_source);
+//RS     semantic_rename_receipt(
+//RS         &root,
+//RS         &base,
+//RS         base_source,
+//RS         ours_source,
+//RS         "report",
+//RS         "summarize",
+//RS     );
+//RS     let merged = root.join("merged.jet");
+//RS     let output = run(&[
+//RS         "merge",
+//RS         "--structural",
+//RS         base.to_str().unwrap(),
+//RS         ours.to_str().unwrap(),
+//RS         theirs.to_str().unwrap(),
+//RS         "--out",
+//RS         merged.to_str().unwrap(),
+//RS     ]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let source = fs::read_to_string(&merged).unwrap();
+//RS     assert!(source.contains("fn summarize"), "{source}");
+//RS     assert!(source.contains("return 2"), "{source}");
+//RS     assert!(!source.contains("fn report"), "{source}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn overlapping_edit_conflicts_without_writing_success_output() {
+//RS     let root = dir("conflict");
+//RS     let base = write(&root, "base.jet", BASE);
+//RS     let ours = write(&root, "ours.jet", "fn left() -[]> Int { return 10 }\nfn right() -[]> Int { return 2 }\nfn run() { print(left() + right()) }\n");
+//RS     let theirs = write(&root, "theirs.jet", "fn left() -[]> Int { return 11 }\nfn right() -[]> Int { return 2 }\nfn run() { print(left() + right()) }\n");
+//RS     let merged = root.join("must-not-exist.jet");
+//RS     let output = run(&[
+//RS         "merge",
+//RS         "--structural",
+//RS         base.to_str().unwrap(),
+//RS         ours.to_str().unwrap(),
+//RS         theirs.to_str().unwrap(),
+//RS         "--out",
+//RS         merged.to_str().unwrap(),
+//RS         "--json",
+//RS     ]);
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     assert!(!merged.exists());
+//RS     let report = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(report.contains("\"status\":\"conflict\""), "{report}");
+//RS     assert!(report.contains("\"kind\":\"overlapping_edit\""), "{report}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn delete_edit_and_duplicate_stable_identity_never_auto_merge() {
+//RS     let root = dir("identity_collision");
+//RS     let base = write(&root, "base.jet", "fn a() -[]> Int { return 1 }\nfn b() -[]> Int { return 1 }\nfn run() { print(a() + b()) }\n");
+//RS     let ours = write(&root, "ours.jet", "fn c() -[]> Int { return 1 }\nfn b() -[]> Int { return 1 }\nfn run() { print(c() + b()) }\n");
+//RS     let theirs = write(&root, "theirs.jet", "fn a() -[]> Int { return 2 }\nfn b() -[]> Int { return 1 }\nfn run() { print(a() + b()) }\n");
+//RS     let merged = root.join("must-not-exist.jet");
+//RS     let output = run(&[
+//RS         "merge",
+//RS         "--structural",
+//RS         base.to_str().unwrap(),
+//RS         ours.to_str().unwrap(),
+//RS         theirs.to_str().unwrap(),
+//RS         "--out",
+//RS         merged.to_str().unwrap(),
+//RS         "--json",
+//RS     ]);
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     assert!(!merged.exists());
+//RS     assert!(String::from_utf8_lossy(&output.stderr).contains("overlapping_edit"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn malformed_input_fails_before_output() {
+//RS     let root = dir("malformed");
+//RS     let base = write(&root, "base.jet", BASE);
+//RS     let bad = write(&root, "bad.jet", "fn run( {");
+//RS     let merged = root.join("must-not-exist.jet");
+//RS     let output = run(&[
+//RS         "merge",
+//RS         "--structural",
+//RS         base.to_str().unwrap(),
+//RS         base.to_str().unwrap(),
+//RS         bad.to_str().unwrap(),
+//RS         "--out",
+//RS         merged.to_str().unwrap(),
+//RS     ]);
+//RS     assert!(!output.status.success());
+//RS     assert!(!merged.exists());
+//RS     assert!(String::from_utf8_lossy(&output.stderr).contains("did not pass parser and sema"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn git_driver_install_is_idempotent_and_preserves_config() {
+//RS     let root = dir("driver");
+//RS     assert!(git(&root, &["init"]).status.success());
+//RS     assert!(git(&root, &["config", "merge.jetstruct.name", "stale"])
+//RS         .status
+//RS         .success());
+//RS     for _ in 0..2 {
+//RS         let output = run(&["merge", "install-driver", "--repo", root.to_str().unwrap()]);
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "{}",
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS     }
+//RS     let config = fs::read_to_string(root.join(".git/config")).unwrap();
+//RS     assert!(config.contains("[core]"));
+//RS     assert_eq!(config.matches("[merge \"jetstruct\"]").count(), 1);
+//RS     let attrs = fs::read_to_string(root.join(".gitattributes")).unwrap();
+//RS     assert_eq!(attrs.matches("*.jet merge=jetstruct").count(), 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn identical_bilateral_additions_merge_trivia_once() {
+//RS     let root = dir("bilateral_additions");
+//RS     let base = write(&root, "base.jet", "fn run() {}\n");
+//RS     let ours = write(
+//RS         &root,
+//RS         "ours.jet",
+//RS         "// ours note\nfn helper() -[]> Int { return 1 }\nfn run() {}\n",
+//RS     );
+//RS     let theirs = write(
+//RS         &root,
+//RS         "theirs.jet",
+//RS         "fn helper() -[]> Int { return 1 }\nfn run() {}\n",
+//RS     );
+//RS     let merged = root.join("merged.jet");
+//RS     let output = run(&[
+//RS         "merge",
+//RS         "--structural",
+//RS         base.to_str().unwrap(),
+//RS         ours.to_str().unwrap(),
+//RS         theirs.to_str().unwrap(),
+//RS         "--out",
+//RS         merged.to_str().unwrap(),
+//RS     ]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let source = fs::read_to_string(&merged).unwrap();
+//RS     assert_eq!(source.matches("fn helper").count(), 1, "{source}");
+//RS     assert_eq!(source.matches("ours note").count(), 1, "{source}");
+//RS 
+//RS     let ours = write(
+//RS         &root,
+//RS         "ours_distinct.jet",
+//RS         "// ours note\nfn helper() -[]> Int { return 1 }\nfn run() {}\n",
+//RS     );
+//RS     let theirs = write(
+//RS         &root,
+//RS         "theirs_distinct.jet",
+//RS         "// theirs note\nfn helper() -[]> Int { return 1 }\nfn run() {}\n",
+//RS     );
+//RS     let conflict_out = root.join("must-not-exist.jet");
+//RS     let conflict = run(&[
+//RS         "merge",
+//RS         "--structural",
+//RS         base.to_str().unwrap(),
+//RS         ours.to_str().unwrap(),
+//RS         theirs.to_str().unwrap(),
+//RS         "--out",
+//RS         conflict_out.to_str().unwrap(),
+//RS         "--json",
+//RS     ]);
+//RS     assert_eq!(conflict.status.code(), Some(1));
+//RS     assert!(!conflict_out.exists());
+//RS     assert!(String::from_utf8_lossy(&conflict.stderr).contains("inter_item_trivia"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn inter_item_trivia_three_way_merges_and_conflicts_honestly() {
+//RS     let root = dir("inter_item_trivia");
+//RS     let base = write(&root, "base.jet", BASE);
+//RS     let ours = write(
+//RS         &root,
+//RS         "ours.jet",
+//RS         "fn left() -[]> Int { return 10 }\n\n// ownership note\nfn right() -[]> Int { return 2 }\n\nfn run() { print(left() + right()) }\n",
+//RS     );
+//RS     let theirs = write(
+//RS         &root,
+//RS         "theirs.jet",
+//RS         "fn left() -[]> Int { return 1 }\n\nfn right() -[]> Int { return 20 }\n\nfn run() { print(left() + right()) }\n",
+//RS     );
+//RS     let merged = root.join("merged.jet");
+//RS     let output = run(&[
+//RS         "merge",
+//RS         "--structural",
+//RS         base.to_str().unwrap(),
+//RS         ours.to_str().unwrap(),
+//RS         theirs.to_str().unwrap(),
+//RS         "--out",
+//RS         merged.to_str().unwrap(),
+//RS     ]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let source = fs::read_to_string(&merged).unwrap();
+//RS     assert!(source.contains("ownership note"), "{source}");
+//RS     assert!(source.contains("return 10"), "{source}");
+//RS     assert!(source.contains("return 20"), "{source}");
+//RS 
+//RS     let theirs_trivia = write(
+//RS         &root,
+//RS         "theirs_trivia.jet",
+//RS         "fn left() -[]> Int { return 1 }\n\n// conflicting note\nfn right() -[]> Int { return 2 }\n\nfn run() { print(left() + right()) }\n",
+//RS     );
+//RS     let conflict_out = root.join("trivia-conflict.jet");
+//RS     let conflict = run(&[
+//RS         "merge",
+//RS         "--structural",
+//RS         base.to_str().unwrap(),
+//RS         ours.to_str().unwrap(),
+//RS         theirs_trivia.to_str().unwrap(),
+//RS         "--out",
+//RS         conflict_out.to_str().unwrap(),
+//RS         "--json",
+//RS     ]);
+//RS     assert_eq!(conflict.status.code(), Some(1));
+//RS     assert!(!conflict_out.exists());
+//RS     assert!(String::from_utf8_lossy(&conflict.stderr).contains("inter_item_trivia"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn nonexistent_relative_out_uses_its_real_import_root() {
+//RS     let root = dir("relative_out_imports");
+//RS     let project = root.join("project");
+//RS     fs::create_dir_all(&project).unwrap();
+//RS     write(
+//RS         &project,
+//RS         "support.jet",
+//RS         "pub fn value() -[]> Int { return 7 }\n",
+//RS     );
+//RS     let source = "use support.value\nfn run() { print(value()) }\n";
+//RS     let base = write(&project, "base.jet", source);
+//RS     let ours = write(&project, "ours.jet", source);
+//RS     let theirs = write(&project, "theirs.jet", source);
+//RS     let output = run_in(
+//RS         &project,
+//RS         &[
+//RS             "merge",
+//RS             "--structural",
+//RS             base.to_str().unwrap(),
+//RS             ours.to_str().unwrap(),
+//RS             theirs.to_str().unwrap(),
+//RS             "--out",
+//RS             "merged.jet",
+//RS         ],
+//RS     );
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(project.join("merged.jet").exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn signature_classification_and_move_do_not_depend_on_body_or_basename() {
+//RS     let root = dir("signature_and_move_identity");
+//RS     let old = root.join("old");
+//RS     let new = root.join("new");
+//RS     fs::create_dir_all(&old).unwrap();
+//RS     fs::create_dir_all(&new).unwrap();
+//RS     let before = write(
+//RS         &old,
+//RS         "alpha.jet",
+//RS         "fn score(n: Int) -[]> Int { return n + 1 }\nfn run() { print(score(1)) }\n",
+//RS     );
+//RS     let after = write(
+//RS         &new,
+//RS         "omega.jet",
+//RS         "fn score(n: Float) -[]> Float { return n + 2.0 }\nfn run() { print(score(1.0)) }\n",
+//RS     );
+//RS     let output = run(&[
+//RS         "diff",
+//RS         "--structural",
+//RS         before.to_str().unwrap(),
+//RS         after.to_str().unwrap(),
+//RS         "--json",
+//RS     ]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let report = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         report.contains("\"kind\":\"signature_changed\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(report.contains("\"kind\":\"moved\""), "{report}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn ambiguous_same_shape_and_cross_delete_rename_edit_never_guess() {
+//RS     let root = dir("ambiguous_cross_edits");
+//RS     let base = write(&root, "base.jet", "fn a() -[]> Int { return 1 }\nfn b() -[]> Int { return 1 }\nfn run() { print(a() + b()) }\n");
+//RS     let ours = write(&root, "ours.jet", "fn c() -[]> Int { return 1 }\nfn d() -[]> Int { return 1 }\nfn run() { print(c() + d()) }\n");
+//RS     let theirs = write(
+//RS         &root,
+//RS         "theirs.jet",
+//RS         "fn a() -[]> Int { return 2 }\nfn run() { print(a()) }\n",
+//RS     );
+//RS     let merged = root.join("must-not-exist.jet");
+//RS     let output = run(&[
+//RS         "merge",
+//RS         "--structural",
+//RS         base.to_str().unwrap(),
+//RS         ours.to_str().unwrap(),
+//RS         theirs.to_str().unwrap(),
+//RS         "--out",
+//RS         merged.to_str().unwrap(),
+//RS         "--json",
+//RS     ]);
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     assert!(!merged.exists());
+//RS     let report = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(report.contains("ambiguous_identity"), "{report}");
+//RS 
+//RS     let delete_base = write(
+//RS         &root,
+//RS         "delete_base.jet",
+//RS         "fn a() -[]> Int { return 1 }\nfn b() -[]> Int { return 1 }\nfn run() { print(b()) }\n",
+//RS     );
+//RS     let deleted = write(
+//RS         &root,
+//RS         "deleted.jet",
+//RS         "fn b() -[]> Int { return 1 }\nfn run() { print(b()) }\n",
+//RS     );
+//RS     let edited = write(
+//RS         &root,
+//RS         "edited.jet",
+//RS         "fn a() -[]> Int { return 9 }\nfn b() -[]> Int { return 1 }\nfn run() { print(b()) }\n",
+//RS     );
+//RS     let delete_out = root.join("delete-edit-must-not-exist.jet");
+//RS     let delete_edit = run(&[
+//RS         "merge",
+//RS         "--structural",
+//RS         delete_base.to_str().unwrap(),
+//RS         deleted.to_str().unwrap(),
+//RS         edited.to_str().unwrap(),
+//RS         "--out",
+//RS         delete_out.to_str().unwrap(),
+//RS         "--json",
+//RS     ]);
+//RS     assert_eq!(delete_edit.status.code(), Some(1));
+//RS     assert!(!delete_out.exists());
+//RS     assert!(String::from_utf8_lossy(&delete_edit.stderr).contains("delete_edit"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn git_driver_repairs_exact_keys_and_supports_gitdir_indirection() {
+//RS     let root = dir("driver_gitdir");
+//RS     let repo = root.join("repo");
+//RS     let worktree = root.join("linked");
+//RS     fs::create_dir_all(&repo).unwrap();
+//RS     assert!(git(&repo, &["init"]).status.success());
+//RS     assert!(
+//RS         git(&repo, &["config", "user.email", "jet-test@example.invalid"])
+//RS             .status
+//RS             .success()
+//RS     );
+//RS     assert!(git(&repo, &["config", "user.name", "Jet Test"])
+//RS         .status
+//RS         .success());
+//RS     assert!(git(&repo, &["config", "merge.jetstruct.name", "stale"])
+//RS         .status
+//RS         .success());
+//RS     assert!(git(&repo, &["config", "merge.other.driver", "keep-me"])
+//RS         .status
+//RS         .success());
+//RS     fs::write(repo.join("seed"), "seed\n").unwrap();
+//RS     assert!(git(&repo, &["add", "seed"]).status.success());
+//RS     assert!(git(&repo, &["commit", "-m", "seed"]).status.success());
+//RS     let added = git(
+//RS         &repo,
+//RS         &[
+//RS             "worktree",
+//RS             "add",
+//RS             "-b",
+//RS             "linked-test",
+//RS             worktree.to_str().unwrap(),
+//RS         ],
+//RS     );
+//RS     assert!(
+//RS         added.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&added.stderr)
+//RS     );
+//RS 
+//RS     let output = run(&[
+//RS         "merge",
+//RS         "install-driver",
+//RS         "--repo",
+//RS         worktree.to_str().unwrap(),
+//RS     ]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     for (key, expected) in [
+//RS         ("merge.jetstruct.name", "Jet structural merge"),
+//RS         (
+//RS             "merge.jetstruct.driver",
+//RS             "jet merge --structural %O %A %B --out %A",
+//RS         ),
+//RS         ("merge.other.driver", "keep-me"),
+//RS     ] {
+//RS         let readback = git(&worktree, &["config", "--local", "--get", key]);
+//RS         assert!(
+//RS             readback.status.success(),
+//RS             "{}",
+//RS             String::from_utf8_lossy(&readback.stderr)
+//RS         );
+//RS         assert_eq!(String::from_utf8_lossy(&readback.stdout).trim(), expected);
+//RS     }
+//RS     assert!(
+//RS         worktree.join(".git").is_file(),
+//RS         "test must exercise real linked-worktree indirection"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn structural_commands_have_specific_help() {
+//RS     for (command, needles) in [
+//RS         ("diff", &["--structural", "--json"] as &[&str]),
+//RS         (
+//RS             "merge",
+//RS             &["--structural", "--out", "install-driver", "--repo"] as &[&str],
+//RS         ),
+//RS     ] {
+//RS         for args in [[command, "--help"], ["help", command]] {
+//RS             let output = run(&args);
+//RS             assert!(
+//RS                 output.status.success(),
+//RS                 "{}",
+//RS                 String::from_utf8_lossy(&output.stderr)
+//RS             );
+//RS             let help = String::from_utf8_lossy(&output.stdout);
+//RS             for needle in needles {
+//RS                 assert!(
+//RS                     help.contains(needle),
+//RS                     "{command} help missing {needle}: {help}"
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 1156 tests/structural_merge.rs:1-702
+
+// PORT-PENDING 1156 tests-string-source-ownership-module-group: tests/structure_fact_plane.rs:1-294
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-STRUCT-PLANE1=A: structure rows, facts, gates, inspection registration,
+//RS //! and runtime erasure all use the one existing fact machinery.
+//RS 
+//RS use jet::Diagnostics::Span;
+//RS use jet_foundation::Names::{NameLedger, StructureFact, StructureFactKind};
+//RS use jet_foundation::Registry;
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::{Command, Output};
+//RS 
+//RS const FACT_SOURCE: &str = r#"
+//RS fact StructureLiveness($name: "Structure.Liveness", $holds: .Build, $safe: .Gain, $gates: ["_name"], $decision: "D-STRUCT-PLANE1")
+//RS 
+//RS fn run() {
+//RS     print("structure facts erase")
+//RS }
+//RS "#;
+//RS 
+//RS fn repo() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS fn structure_example() -> PathBuf {
+//RS     repo().join("Examples/features/tooling/structure_plane.jet")
+//RS }
+//RS 
+//RS fn run_jet(args: &[&str]) -> Output {
+//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .current_dir(repo())
+//RS         .env("NO_COLOR", "1")
+//RS         .args(args)
+//RS         .output()
+//RS         .expect("run jet")
+//RS }
+//RS 
+//RS fn successful_stdout(output: Output) -> String {
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "jet failed: stdout={} stderr={}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     String::from_utf8(output.stdout).expect("jet stdout is utf8")
+//RS }
+//RS 
+//RS #[test]
+//RS fn structure_rows_share_the_one_registry_and_law() {
+//RS     let rows: Vec<_> = Registry::structure_rows().collect();
+//RS     assert_eq!(
+//RS         rows.iter().map(|row| row.name).collect::<Vec<_>>(),
+//RS         vec![
+//RS             "Structure.Liveness",
+//RS             "Structure.Lifecycle",
+//RS             "Structure.ImportEdge",
+//RS         ]
+//RS     );
+//RS     assert_eq!(rows[0].gates, &["_name"][..]);
+//RS     assert_eq!(rows[1].gates, &["policy allow"][..]);
+//RS     assert_eq!(rows[2].gates, &["manifest rule edit"][..]);
+//RS     for kind in [
+//RS         StructureFactKind::Liveness,
+//RS         StructureFactKind::Lifecycle,
+//RS         StructureFactKind::ImportEdge,
+//RS     ] {
+//RS         assert!(Registry::structure_row(kind).is_some());
+//RS     }
+//RS     assert!(rows.iter().all(|row| {
+//RS         row.safe_direction != Registry::SafeDirection::None && !row.gates.is_empty()
+//RS     }));
+//RS     assert!(
+//RS         Registry::law_violations().is_empty(),
+//RS         "registry drift: {:?}",
+//RS         Registry::law_violations()
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn structure_facts_and_gates_use_one_ledger() {
+//RS     let mut names = NameLedger::default();
+//RS     let fact = StructureFact::new(
+//RS         StructureFactKind::ImportEdge,
+//RS         "app.ui -> app.db",
+//RS         "package.jet",
+//RS         Span::new(11, 20),
+//RS         "denied",
+//RS         "boundaries[0]",
+//RS         Some("manifest rule edit".to_string()),
+//RS     );
+//RS     names.record_structure_fact(fact.clone());
+//RS     names.record_structure_fact(fact);
+//RS     assert_eq!(names.structure_facts().len(), 1);
+//RS 
+//RS     let mut gates = jet::Sema::GateLedger::GateLedger::default();
+//RS     gates.append_structure_facts(&names);
+//RS     assert_eq!(gates.entries().len(), 1);
+//RS     assert_eq!(
+//RS         gates.entries()[0].kind,
+//RS         jet::Sema::GateLedger::GateKind::Structure
+//RS     );
+//RS     assert_eq!(gates.entries()[0].scope, "import-edge");
+//RS }
+//RS 
+//RS #[test]
+//RS fn inspect_structure_is_registered_in_the_cli() {
+//RS     let (_, action) = jet::CLI::nested_command("inspect", "structure")
+//RS         .expect("ratified structure inspection action");
+//RS     assert_eq!(action.usage, "structure [--json] <file.jet>");
+//RS     assert_eq!(action.handler.dispatch_word(), "structure");
+//RS }
+//RS 
+//RS #[test]
+//RS fn inspect_structure_text_and_json_expose_the_three_rows() {
+//RS     let example = "Examples/features/tooling/structure_plane.jet";
+//RS     let text = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["inspect", "structure", example])
+//RS         .output()
+//RS         .expect("run structure inspection");
+//RS     assert!(text.status.success(), "structure text failed: {text:?}");
+//RS     let text = String::from_utf8(text.stdout).expect("structure text is utf8");
+//RS     for expected in [
+//RS         "Structure.Liveness",
+//RS         "Structure.Lifecycle",
+//RS         "Structure.ImportEdge",
+//RS         "safe=gain",
+//RS         "safe=shrink",
+//RS         "_name",
+//RS         "policy allow",
+//RS         "manifest rule edit",
+//RS     ] {
+//RS         assert!(text.contains(expected), "missing {expected} in {text}");
+//RS     }
+//RS 
+//RS     let json = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["inspect", "structure", "--json", example])
+//RS         .output()
+//RS         .expect("run JSON structure inspection");
+//RS     assert!(json.status.success(), "structure JSON failed: {json:?}");
+//RS     let json = String::from_utf8(json.stdout).expect("structure JSON is utf8");
+//RS     assert!(json.starts_with("{\"schema_version\":1,"));
+//RS     for expected in [
+//RS         "Structure.Liveness",
+//RS         "Structure.Lifecycle",
+//RS         "Structure.ImportEdge",
+//RS         "\"safe_direction\":\"gain\"",
+//RS         "\"safe_direction\":\"shrink\"",
+//RS         "policy allow",
+//RS         "manifest rule edit",
+//RS     ] {
+//RS         assert!(json.contains(expected), "missing {expected} in {json}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn inspect_structure_text_and_json_match_the_fact_report_goldens() {
+//RS     let example = "Examples/features/tooling/structure_plane.jet";
+//RS     let text = successful_stdout(run_jet(&["inspect", "structure", example]));
+//RS     let expected_text = fs::read_to_string(
+//RS         repo().join("Examples/features/expected/tooling/structure_plane.structure.out"),
+//RS     )
+//RS     .expect("structure text golden");
+//RS     assert_eq!(text, expected_text);
+//RS 
+//RS     let json = successful_stdout(run_jet(&["inspect", "structure", "--json", example]));
+//RS     let expected_json = fs::read_to_string(
+//RS         repo().join("Examples/features/expected/tooling/structure_plane.structure.json"),
+//RS     )
+//RS     .expect("structure JSON golden");
+//RS     assert_eq!(json, expected_json);
+//RS }
+//RS 
+//RS #[test]
+//RS fn structure_plane_keeps_parser_sema_tir_and_runtime_tier_parity() {
+//RS     let path = structure_example();
+//RS     let source = fs::read_to_string(&path).expect("structure example source");
+//RS     let (tokens, lexer_diags) = jet::Lexer::lex(&source);
+//RS     assert!(lexer_diags.is_empty(), "lexer diagnostics: {lexer_diags:?}");
+//RS     jet::Parser::parse(&tokens).expect("structure example parses");
+//RS 
+//RS     let shown = path.to_str().expect("structure example path is utf8");
+//RS     let mut bundle = jet::Loader::load_entry(shown).expect("structure example loads");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .all(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Lint),
+//RS         "structure sema diagnostics: {diagnostics:#?}"
+//RS     );
+//RS     let mut diagnostic_codes: Vec<_> = diagnostics
+//RS         .iter()
+//RS         .map(|diagnostic| diagnostic.code.as_str())
+//RS         .collect();
+//RS     diagnostic_codes.sort_unstable();
+//RS     assert_eq!(diagnostic_codes, ["L0104", "L2001"]);
+//RS     let kinds: Vec<_> = bundle
+//RS         .name_ledger
+//RS         .structure_facts()
+//RS         .iter()
+//RS         .map(|fact| fact.kind)
+//RS         .collect();
+//RS     for kind in [
+//RS         StructureFactKind::Liveness,
+//RS         StructureFactKind::Lifecycle,
+//RS         StructureFactKind::ImportEdge,
+//RS     ] {
+//RS         assert!(kinds.contains(&kind), "missing {kind:?} in {kinds:?}");
+//RS     }
+//RS     let cache =
+//RS         std::env::temp_dir().join(format!("jet_structure_plane_tiers_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&cache);
+//RS     for (mode, args) in [
+//RS         ("release", vec!["run", "--release", shown]),
+//RS         ("default", vec!["run", shown]),
+//RS         ("interpret", vec!["run", "--interpret", shown]),
+//RS     ] {
+//RS         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .current_dir(repo())
+//RS             .env("NO_COLOR", "1")
+//RS             .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
+//RS             .env("JET_STORE_DIR", cache.join(mode).join("build"))
+//RS             .args(args)
+//RS             .output()
+//RS             .expect("run structure example tier");
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "{mode} failed: stdout={} stderr={}",
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         assert_eq!(output.stdout, b"structure fact plane\n", "{mode} output");
+//RS     }
+//RS 
+//RS     let dev = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .current_dir(repo())
+//RS         .env("NO_COLOR", "1")
+//RS         .env("JET_RUN_CACHE_DIR", cache.join("dev").join("run"))
+//RS         .env("JET_STORE_DIR", cache.join("dev").join("build"))
+//RS         .args(["dev", shown, "--watch=off"])
+//RS         .output()
+//RS         .expect("run structure example through dev");
+//RS     assert!(
+//RS         dev.status.success(),
+//RS         "dev failed: stdout={} stderr={}",
+//RS         String::from_utf8_lossy(&dev.stdout),
+//RS         String::from_utf8_lossy(&dev.stderr)
+//RS     );
+//RS     assert_eq!(dev.stdout, b"structure fact plane\n", "dev output");
+//RS     let _ = fs::remove_dir_all(cache);
+//RS }
+//RS 
+//RS #[test]
+//RS fn structure_plane_web_compile_erases_the_fact_plane() {
+//RS     let rustc = Command::new("rustc")
+//RS         .args([
+//RS             "--print",
+//RS             "target-libdir",
+//RS             "--target",
+//RS             "wasm32-unknown-unknown",
+//RS         ])
+//RS         .output()
+//RS         .expect("probe wasm target");
+//RS     if !rustc.status.success() {
+//RS         eprintln!("note: skipping structure web tier proof (wasm target unavailable)");
+//RS         return;
+//RS     }
+//RS     let example = "Examples/features/tooling/structure_plane.jet";
+//RS     let output = run_jet(&["build", "--target=web", example]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "web build failed: stdout={} stderr={}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn structure_fact_declaration_erases_before_codegen() {
+//RS     let output = jet::compile(FACT_SOURCE).expect("structure fact fixture compiles");
+//RS     assert!(output.rust.contains("structure facts erase"));
+//RS     assert!(!output.rust.contains("Structure.Liveness"));
+//RS     assert!(!output.rust.contains("$holds"));
+//RS     assert!(!output.rust.contains("manifest rule edit"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn structure_fact_declaration_erases_for_web_codegen() {
+//RS     let output = jet::compile_web_with_path(FACT_SOURCE, "structure_fact_plane_web.jet")
+//RS         .expect("structure fact fixture compiles for web");
+//RS     let web = output.web.expect("web artifacts are present");
+//RS     for generated in [&web.wasm_rust, &web.js_app] {
+//RS         assert!(!generated.contains("Structure.Liveness"));
+//RS         assert!(!generated.contains("$holds"));
+//RS         assert!(!generated.contains("manifest rule edit"));
+//RS     }
+//RS }
+// END-PORT-PENDING 1156 tests/structure_fact_plane.rs:1-294
+

@@ -1,0 +1,322 @@
+// Sema-owned native guest boundary (Rust Sema/Guest.rs). Artifact consumers
+// use these checked rows; they never reconstruct marker or scalar meaning.
+use jet_foundation.[AccessConvention, CtValue, Diagnostic, ExternFn, Func, Item, Marker, NamedSpan, ProgramBundle, RuleSite, Span, TTypeDef, Type, foundation_generated_path]
+
+pub enum SemaGuestDirection { Import Export }
+pub enum SemaGuestScalar { Int Float Bool Text }
+pub struct SemaGuestParam {
+    pub convention: AccessConvention
+    pub ty: Type
+}
+pub struct SemaGuestFunction {
+    pub direction: SemaGuestDirection
+    pub library: String?
+    pub name: String
+    pub symbol: String
+    pub params: [SemaGuestParam]
+    pub return_type: Type?
+    pub scalar: SemaGuestScalar?
+}
+
+// MarkerRules owns the callable/module marker law, including negation and
+// the first argument's Expr-vs-effect-row distinction.
+pub fn sema_is_guest_import_marker(marker: Marker) -> Bool Never! {
+    marker.name == "Import" && sema_marker_rules_is_guest_marker(marker, Val(RuleSite.Function))
+}
+pub fn sema_is_guest_export_marker(marker: Marker) -> Bool Never! {
+    marker.name == "Export" && sema_marker_rules_is_guest_marker(marker, Val(RuleSite.Function))
+}
+pub fn sema_is_guest_export(function: Func) -> Bool Never! {
+    loop marker in function.markers -> if sema_is_guest_export_marker(marker) -> return true
+    false
+}
+pub fn sema_is_guest_import(function: Func) -> Bool Never! {
+    loop marker in function.markers -> if sema_is_guest_import_marker(marker) -> return true
+    false
+}
+pub fn sema_guest_import_symbol(function: Func) -> String? Never! {
+    loop marker in function.markers {
+        if !sema_is_guest_import_marker(marker) -> next
+        // The first matching marker decides, even if its fact is invalid.
+        if marker.ct == {
+            .Val(value) -> if value == {
+                .Str(symbol) -> if symbol != "" -> return Val(symbol)
+                else -> {}
+            }
+            else -> {}
+        }
+        return None
+    }
+    None
+}
+pub fn sema_guest_import_wrapper_name(owner: String, name: String) -> String Never! {
+    module :: if owner == "" -> "root" else -> owner
+    foundation_generated_path("jet_ffi_guest.{module}.{name}")
+}
+pub fn sema_guest_export_native_symbol(name: String) -> String Never! {
+    // Rust replaces each Unicode scalar, not each UTF-8 byte, with one '_'.
+    bytes :: name.bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        ascii :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+        if index == 0 && code >= 48 && code <= 57 -> &out.push(U8{95})
+        &out.push(if ascii -> bytes[index] else -> U8{95})
+        index += if code < 128 -> 1 else if code < 224 -> 2 else if code < 240 -> 3 else -> 4
+    }
+    if out.len() == 0 -> &out.push(U8{95})
+    String.from_bytes(out) ?? panic("native symbol contains only ASCII")
+}
+fn sema_guest_foreign_declaration(function: Func, symbol: String) -> ExternFn Never! {
+    ExternFn{abi: None, name: function.name, name_span: function.name_span, params: function.params, return_type: function.return_type, return_type_span: function.return_type_span, rust_path: symbol, rust_path_span: function.name_span, generated: false, callback_transport: None, callback_plan_digest: None, callback_identity: None, effect_root: None, undo: function.undo, close: None, span: function.span}
+}
+pub fn sema_guest_import_bridge_compatible(function: Func) -> Bool Never! {
+    symbol :: sema_guest_import_symbol(function) ?? return false
+    sema_guest_foreign_declaration(function, symbol).hidden_c_bridge_compatible()
+}
+fn sema_guest_scalar(ty: Type) -> SemaGuestScalar? Never! {
+    if ty == {
+        .Int -> Val(SemaGuestScalar.Int)
+        .Float -> Val(SemaGuestScalar.Float)
+        .Bool -> Val(SemaGuestScalar.Bool)
+        .String -> Val(SemaGuestScalar.Text)
+        else -> None
+    }
+}
+fn sema_guest_scalar_shape(params: [SemaGuestParam], return_type: Type?) -> SemaGuestScalar? Never! {
+    shape := SemaGuestScalar?{None}
+    loop param in params {
+        next :: sema_guest_scalar(param.ty) ?? return None
+        if shape != None && shape != Val(next) -> return None
+        shape = Val(next)
+    }
+    next :: sema_guest_scalar(return_type ?? return None) ?? return None
+    if shape != None && shape != Val(next) -> return None
+    Val(next)
+}
+fn sema_guest_export_row(function: Func) -> SemaGuestFunction Never! {
+    params := (loop param in function.params -> SemaGuestParam{convention: param.convention, ty: param.ty})
+    SemaGuestFunction{direction: SemaGuestDirection.Export, library: None, name: function.name, symbol: function.name, params: params, return_type: function.return_type, scalar: sema_guest_scalar_shape(params, function.return_type)}
+}
+pub fn sema_guest_import_signature(library: String, function: ExternFn) -> SemaGuestFunction Never! {
+    params := (loop param in function.params -> SemaGuestParam{convention: param.convention, ty: param.ty})
+    SemaGuestFunction{direction: SemaGuestDirection.Import, library: Val(library), name: function.name, symbol: function.rust_path, params: params, return_type: function.return_type, scalar: sema_guest_scalar_shape(params, function.return_type)}
+}
+pub fn sema_guest_import_function_signature(function: Func) -> SemaGuestFunction? Never! {
+    symbol :: sema_guest_import_symbol(function) ?? return None
+    params := (loop param in function.params -> SemaGuestParam{convention: param.convention, ty: param.ty})
+    Val(SemaGuestFunction{direction: SemaGuestDirection.Import, library: None, name: function.name, symbol: symbol, params: params, return_type: function.return_type, scalar: sema_guest_scalar_shape(params, function.return_type)})
+}
+pub fn sema_guest_export_signature(function: Func) -> SemaGuestFunction? Never! {
+    if sema_is_guest_export(function) -> Val(sema_guest_export_row(function)) else -> None
+}
+pub fn sema_sandbox_export_signature(function: Func) -> SemaGuestFunction? Never! {
+    if function.is_pub && !function.is_package_pub -> Val(sema_guest_export_row(function)) else -> None
+}
+fn sema_guest_derives_codec(names: [NamedSpan]) -> Bool Never! {
+    encode := false
+    decode := false
+    loop derive in names {
+        if derive.name == "Codable" || derive.name == "Encode" -> encode = true
+        if derive.name == "Codable" || derive.name == "Decode" -> decode = true
+    }
+    encode && decode
+}
+fn sema_guest_sandbox_type(bundle: ProgramBundle, ty: Type, seen: &[String:Bool]) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String -> return true
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> return sema_guest_sandbox_type(bundle, inner, &seen)
+        .Result(ok, err) -> return sema_guest_sandbox_type(bundle, ok, &seen) && sema_guest_sandbox_type(bundle, err, &seen)
+        .Named(name) -> {
+            if seen.get(name) != None -> return false
+            seen[name] = true
+            safe := false
+            found := false
+            loop module in bundle.modules {
+                loop item in module.items {
+                    if item == {
+                        .Struct(definition) -> if definition.name == name && sema_guest_derives_codec(definition.derives) {
+                            safe = true
+                            loop field in definition.fields {
+                                if !sema_guest_sandbox_type(bundle, field.ty, &seen) { safe = false; break }
+                            }
+                            found = true
+                        }
+                        .TypeAlias(definition) -> if definition.name == name {
+                            safe = sema_guest_sandbox_type(bundle, definition.target, &seen)
+                            found = true
+                        }
+                        else -> {}
+                    }
+                    if found -> break
+                }
+                if found -> break
+            }
+            _ := &seen.remove(name)
+            return safe
+        }
+        else -> return false
+    }
+}
+pub fn sema_sandbox_component_type(bundle: ProgramBundle, ty: Type) -> Bool Never! {
+    seen := [String:Bool]{}
+    sema_guest_sandbox_type(bundle, ty, &seen)
+}
+
+pub fn sema_guest_surface(bundle: ProgramBundle) -> [SemaGuestFunction] Never! {
+    surface := [SemaGuestFunction]{}
+    loop (module_index, module) in bundle.modules {
+        loop item in module.items {
+            if item == {
+                .Func(function) -> {
+                    if module_index == bundle.entry {
+                        if sema_guest_export_signature(function) == .Val(export) -> &surface.push(export)
+                    }
+                    if sema_guest_import_function_signature(function) == .Val(import) -> &surface.push(import)
+                }
+                .CModule(module) -> loop function in module.functions -> &surface.push(sema_guest_import_signature(module.lib, function))
+                else -> {}
+            }
+        }
+    }
+    surface
+}
+pub fn sema_guest_export_surface(bundle: ProgramBundle) -> [SemaGuestFunction] Never! {
+    // Avoid constructing import rows which would only be discarded.
+    exports := [SemaGuestFunction]{}
+    loop item in bundle.modules[bundle.entry].items {
+        if item == .Func(function) {
+            if sema_guest_export_signature(function) == .Val(export) -> &exports.push(export)
+        }
+    }
+    exports
+}
+pub fn sema_sandbox_export_surface(bundle: ProgramBundle) -> [SemaGuestFunction] Never! {
+    exports := [SemaGuestFunction]{}
+    loop item in bundle.modules[bundle.entry].items {
+        if item == .Func(function) {
+            if sema_sandbox_export_signature(function) == .Val(export) -> &exports.push(export)
+        }
+    }
+    exports
+}
+pub fn sema_guest_import_surface(bundle: ProgramBundle) -> [SemaGuestFunction] Never! {
+    imports := [SemaGuestFunction]{}
+    loop module in bundle.modules {
+        loop item in module.items {
+            if item == {
+                .Func(function) -> if sema_guest_import_function_signature(function) == .Val(import) -> &imports.push(import)
+                .CModule(module) -> loop function in module.functions -> &imports.push(sema_guest_import_signature(module.lib, function))
+                else -> {}
+            }
+        }
+    }
+    imports
+}
+
+// The checked canonical TTypeDef map is the projection of Rust TypeRegistry's
+// named definitions; no private guest type registry or guessed layout exists.
+fn sema_guest_library_type(ty: Type, definitions: [String:TTypeDef], seen: &[String:Bool]) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> return sema_guest_library_type(inner, definitions, &seen)
+        .Result(ok, err) -> return sema_guest_library_type(ok, definitions, &seen) && sema_guest_library_type(err, definitions, &seen)
+        .Named(name) -> {
+            if seen.get(name) != None -> return false
+            seen[name] = true
+            safe := false
+            if definitions.get(name) == .Val(definition) {
+                if definition.kind == {
+                    .Struct(fields, _) -> {
+                        safe = true
+                        loop field in fields { if !sema_guest_library_type(field.ty, definitions, &seen) { safe = false; break } }
+                    }
+                    .Enum(variants, _) -> {
+                        safe = true
+                        loop variant in variants {
+                            if variant.payload == {
+                                .Unit -> {}
+                                .Single(field) -> if !sema_guest_library_type(field, definitions, &seen) -> safe = false
+                                .Named(fields) -> loop field in fields { if !sema_guest_library_type(field.ty, definitions, &seen) { safe = false; break } }
+                            }
+                            if !safe -> break
+                        }
+                    }
+                    .Distinct(base, _) -> safe = sema_guest_library_type(base, definitions, &seen)
+                    .Alias(target) -> safe = sema_guest_library_type(target, definitions, &seen)
+                    else -> {}
+                }
+            }
+            _ := &seen.remove(name)
+            return safe
+        }
+        else -> return false
+    }
+}
+pub fn sema_guest_library_component_signature(definitions: [String:TTypeDef], function: Func) -> Bool Never! {
+    return_type :: function.return_type ?? return false
+    seen := [String:Bool]{}
+    if !sema_guest_library_type(return_type, definitions, &seen) -> return false
+    loop param in function.params -> if !sema_guest_library_type(param.ty, definitions, &seen) -> return false
+    true
+}
+pub fn sema_check_guest_export_surface(items: [Item], graph: SemaRegistrationGraph, module_identity: String, definitions: [String:TTypeDef], diagnostics: &[Diagnostic]) -> Bool {
+    valid := true
+    loop item in items {
+        if item == .Func(function) {
+            if !sema_is_guest_export(function) -> next
+            if sema_guest_library_component_signature(definitions, function) -> next
+            if !sema_checked_foreign_parameter_signature(graph, module_identity, function.params, function.return_type, function.return_type_span ?? function.name_span, true, false, [SemaCheckedForeignHandle]{}, &diagnostics) -> valid = false
+        }
+    }
+    valid
+}
+fn sema_guest_record_symbol(symbols: &[String:String], symbol: String, owner: String, kind: String, name: String, span: Span?, diagnostics: &[Diagnostic]) Never! {
+    description :: "{kind} `{name}` in module `{owner}`"
+    previous :: symbols.get(symbol)
+    symbols[symbol] = description
+    if previous == .Val(previous) {
+        &diagnostics.push(sema_error_optional("E1341", span, "{previous} and {description} use the same C symbol `{symbol}`", "the native guest call surface must map every imported, exported, and generated C symbol unambiguously before codegen", "rename one declaration or its native symbol string"))
+    }
+}
+pub fn sema_check_guest_symbol_collisions(bundle: ProgramBundle, diagnostics: &[Diagnostic]) Never! {
+    symbols := [String:String]{}
+    has_text_export := false
+    loop (module_index, module) in bundle.modules {
+        loop item in module.items {
+            if item == {
+                .Func(function) -> {
+                    if sema_guest_import_function_signature(function) == .Val(import) -> sema_guest_record_symbol(&symbols, import.symbol, module.alias, "guest imports", function.name, Val(function.name_span), &diagnostics)
+                    if module_index == bundle.entry {
+                        if sema_guest_export_signature(function) == .Val(export) {
+                            if export.scalar == Val(SemaGuestScalar.Text) -> has_text_export = true
+                            sema_guest_record_symbol(&symbols, sema_guest_export_native_symbol(export.name), module.alias, "Library exports", function.name, Val(function.name_span), &diagnostics)
+                        }
+                    }
+                }
+                .CModule(c_module) -> loop function in c_module.functions -> sema_guest_record_symbol(&symbols, function.rust_path, module.alias, "C module imports", function.name, Val(function.name_span), &diagnostics)
+                else -> {}
+            }
+        }
+    }
+    if has_text_export -> sema_guest_record_symbol(&symbols, "jet_text_free", "<generated>", "generated C symbol", "jet_text_free", None, &diagnostics)
+}
+pub fn sema_check_guest_import_surface(items: [Item], graph: SemaRegistrationGraph, module_identity: String, diagnostics: &[Diagnostic]) -> Bool {
+    valid := true
+    loop item in items {
+        if item == .Func(function) {
+            if sema_guest_import_symbol(function) == None -> next
+            c_safe :: sema_checked_foreign_parameter_signature(graph, module_identity, function.params, function.return_type, function.return_type_span ?? function.name_span, true, false, [SemaCheckedForeignHandle]{}, &diagnostics)
+            if !c_safe -> valid = false else if !sema_guest_import_bridge_compatible(function) {
+                &diagnostics.push(sema_error("E1341", function.name_span, "guest import `{function.name}` cannot use the resident hidden C bridge", "per-callable imports have no direct C-module wrapper fallback", "use a read-only scalar or String bridge signature"))
+                valid = false
+            }
+        }
+    }
+    valid
+}
+
+// PluginExportFact/PluginInterface/PluginInterfaceRegistry and snapshot decoding
+// stay at Registration/PluginInterfaces.jet, their existing canonical owner.
+// from_bundle needs the retained ProgramBundle ingress, not a parallel registry.

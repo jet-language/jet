@@ -1,0 +1,244 @@
+// MIROptimization.rs:2555-2601. Checked routes are semantic metadata, not
+// guesses based on emitted symbols. One shape is borrowed by all checks.
+struct MIRNativeRouteShape { member: String, symbol: String, arity: Int, borrow_mask: [Bool] }
+fn mir_native_route_matches(route: MIRPreludeCall, family: MIRPreludeFamily, module_name: String, shape: MIRNativeRouteShape, abi: MIRPreludeABI) -> Bool Never! {
+    route.family == family && route.module_name == module_name && route.member == shape.member && mir_symbol_name(route.symbol) == shape.symbol && route.signature.arity == shape.arity && route.signature.max_arity == shape.arity && route.signature.borrow_mask == shape.borrow_mask && route.abi == abi
+}
+fn mir_native_typed_text_route_shape(kind: MIRTypedHeadKind) -> MIRNativeRouteShape Never! {
+    if kind == {
+        .SQL -> MIRNativeRouteShape{member: "sql_interpolate", symbol: "jet_typed_sql_interpolate", arity: 2, borrow_mask: [Bool]{true, false}}
+        .HTML -> MIRNativeRouteShape{member: "html_interpolate", symbol: "jet_typed_html_interpolate", arity: 3, borrow_mask: [Bool]{true, false, true}}
+        .Sh -> MIRNativeRouteShape{member: "sh_interpolate", symbol: "jet_typed_sh_interpolate", arity: 2, borrow_mask: [Bool]{true, false}}
+        .URL -> MIRNativeRouteShape{member: "url_literal", symbol: "jet_std::jet_typed_url_literal", arity: 2, borrow_mask: [Bool]{true, false}}
+        .Path -> MIRNativeRouteShape{member: "path_literal", symbol: "jet_typed_path_literal", arity: 2, borrow_mask: [Bool]{true, false}}
+        .DateTime -> MIRNativeRouteShape{member: "datetime_literal", symbol: "jet_typed_datetime_literal", arity: 2, borrow_mask: [Bool]{true, false}}
+    }
+}
+fn mir_native_gc_edit_route_shape(kind: MIRGCEditKind) -> MIRNativeRouteShape Never! {
+    if kind == {
+        .Clear -> MIRNativeRouteShape{member: "edit_clear", symbol: "jet_gc_edit_clear", arity: 2, borrow_mask: [Bool]{true, false}}
+        .Pop -> MIRNativeRouteShape{member: "edit_pop", symbol: "jet_gc_edit_pop", arity: 2, borrow_mask: [Bool]{true, false}}
+        .RemoveIndex -> MIRNativeRouteShape{member: "edit_remove_index", symbol: "jet_gc_edit_remove_index", arity: 3, borrow_mask: [Bool]{true, false, false}}
+        .InsertIndex -> MIRNativeRouteShape{member: "edit_insert_index", symbol: "jet_gc_edit_insert_index", arity: 4, borrow_mask: [Bool]{true, false, true, false}}
+        .Prepend -> MIRNativeRouteShape{member: "edit_prepend", symbol: "jet_gc_edit_prepend", arity: 3, borrow_mask: [Bool]{true, true, false}}
+        .Additive -> MIRNativeRouteShape{member: "edit_additive", symbol: "jet_gc_edit_additive", arity: 3, borrow_mask: [Bool]{true, true, false}}
+        .Plain -> MIRNativeRouteShape{member: "edit_plain", symbol: "jet_gc_edit_plain", arity: 2, borrow_mask: [Bool]{true, false}}
+        .EdgeSlot -> MIRNativeRouteShape{member: "edit_edge_slot", symbol: "jet_gc_edit_edge_slot", arity: 4, borrow_mask: [Bool]{true, true, false, false}}
+    }
+}
+fn mir_native_guard_paths_are_distinct(first: [MIRFieldID], second: [MIRFieldID]) -> Bool Never! {
+    length :: if first.len() < second.len() -> first.len() else -> second.len()
+    loop index in 0..<length { if first[index] != second[index] -> return true }
+    false
+}
+fn mir_native_require_value(index: MIRNativeFunctionIndex, value: MIRValueID, function: MIRFunctionID, span: Span) MIRLegalityError! {
+    if index.definitions.values.get(value.value) == None -> return Err(mir_native_reference(function, "value MirValueId({value.value})", span))
+    return
+}
+fn mir_native_verify_guard_route(program: MIRProgram, tables: MIRNativeProgramIndex, call: MIRPreludeCallID, module_name: String, shape: MIRNativeRouteShape, abi: MIRPreludeABI, function: MIRFunctionID, span: Span) MIRLegalityError! {
+    position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function, "Prelude call MirPreludeCallId({call.value})", span))
+    if !mir_native_route_matches(program.prelude_calls[position], .StaticPrelude, module_name, shape, abi) -> return Err(mir_native_reference(function, "guard route MirPreludeCallId({call.value}) does not match {shape.symbol}/{shape.member}/{shape.arity}", span))
+    return
+}
+
+// MIROptimization.rs:2914-3525. Generic reference visitors run first, exactly
+// as native; operation-specific laws then run in original operand order.
+fn mir_native_verify_semantic_operation(operation: MIRSemanticOp, span: Span, function: MIRFunction, index: MIRNativeFunctionIndex, program: MIRProgram, tables: MIRNativeProgramIndex) MIRLegalityError! {
+    loop call in mir_semantic_op_prelude_calls(operation) -> mir_native_require_prelude(tables, call, function.id, span)
+    loop field in mir_semantic_op_field_uses(operation) -> mir_native_require_field(tables, field, function.id, span)
+    loop source in mir_semantic_op_source_file_uses(operation) -> mir_native_require_source(tables, source, function.id, span)
+    loop ty in mir_semantic_op_type_uses(operation) -> mir_native_require_type(tables, ty, function.id, span)
+    if operation == {
+        .DataEntriesToMap(_, local) -> { if index.locals.get(local.value) == None -> return Err(mir_native_reference(function.id, "local MirLocalId({local.value})", span)) }
+        .HardwareCall(call, op, receiver, args) -> mir_native_verify_hardware_call(call, op, receiver, args, span, function, index, program, tables)
+        .BuiltinMethod(_, _, place, _, _) -> {
+            if place == .Val(place) {
+                if index.definitions.places.get(place.value) == None -> return Err(mir_native_reference(function.id, "receiver place MirPlaceId({place.value})", span))
+            }
+        }
+        .MathBuiltin(ty, _, _) | .PreciseBuiltin(ty, _, _) -> mir_native_require_type(tables, ty, function.id, span)
+        .StructLiteral(ty, _, _, coercion, _) -> {
+            mir_native_require_type(tables, ty, function.id, span)
+            if coercion == .Val(coercion) -> mir_native_require_type(tables, coercion, function.id, span)
+        }
+        .ColumnarRead(_, _, _, column, accessor) -> {
+            position :: tables.prelude.get(accessor.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({accessor.value})", span))
+            route :: program.prelude_calls[position]
+            suffix :: "#{column}"
+            if route.family != .ColumnarAccess || route.module_name != "core.columnar" || mir_symbol_name(route.symbol) != "jet_columns_gather_cell" || route.signature.arity != 3 || route.signature.max_arity != 3 || route.signature.borrow_mask != [Bool]{true, false, false} || route.abi != .Value || !route.member.ends_with(suffix) -> return Err(mir_native_reference(function.id, "columnar read route MirPreludeCallId({accessor.value}) has the wrong metadata", span))
+        }
+        .CellGuardProject(map_call, split_call, _, paths, editable, disjoint) -> {
+            member :: if editable -> "map_edit" else -> "map_read"
+            mir_native_verify_guard_route(program, tables, map_call, "core.cell_guard", MIRNativeRouteShape{member: member, symbol: "jet_cell_guard_map", arity: 2, borrow_mask: [Bool]{true, false}}, .Value, function.id, span)
+            if paths.len() < 1 || paths.len() > 2 -> return Err(mir_native_reference(function.id, "Cell guard projection must carry one or two paths", span))
+            loop path in paths { if path.len() == 0 -> return Err(mir_native_reference(function.id, "Cell guard projection has an empty path", span)) }
+            split :: paths.len() == 2
+            if (split_call != None) != split -> return Err(mir_native_reference(function.id, "Cell guard projection path arity disagrees with its split row", span))
+            if split_call == .Val(split_call) {
+                if split_call == map_call -> return Err(mir_native_reference(function.id, "Cell guard projection reuses its map row as its split row", span))
+                member :: if editable -> "split_edit" else -> "split_read"
+                mir_native_verify_guard_route(program, tables, split_call, "core.cell_guard", MIRNativeRouteShape{member: member, symbol: "jet_cell_guard_split", arity: 3, borrow_mask: [Bool]{true, false, false}}, .Value, function.id, span)
+                if !mir_native_guard_paths_are_distinct(paths[0], paths[1]) -> return Err(mir_native_reference(function.id, "Cell guard split paths must be distinct and non-prefix", span))
+            }
+            if disjoint && (!editable || !split) -> return Err(mir_native_reference(function.id, "Cell guard edit disjointness requires an editable split", span))
+            if editable && split && !disjoint -> return Err(mir_native_reference(function.id, "editable Cell guard split is missing disjoint paths proof", span))
+        }
+        .SharedGuardMap(call, _, path, editable) -> {
+            if path.len() == 0 -> return Err(mir_native_reference(function.id, "shared guard map has an empty path", span))
+            member :: if editable -> "map_edit" else -> "map_read"
+            mir_native_verify_guard_route(program, tables, call, "core.shared_guard", MIRNativeRouteShape{member: member, symbol: "jet_shared_guard_map", arity: 3, borrow_mask: [Bool]{true, false, false}}, .Control, function.id, span)
+        }
+        .SharedGuardSplit(call, map_call, _, first, second, editable) -> {
+            if first.len() == 0 || second.len() == 0 -> return Err(mir_native_reference(function.id, "shared guard split has an empty path", span))
+            if !mir_native_guard_paths_are_distinct(first, second) -> return Err(mir_native_reference(function.id, "shared guard split paths must be distinct and non-prefix", span))
+            if call == map_call -> return Err(mir_native_reference(function.id, "shared guard split reuses its split row as its map row", span))
+            split_member :: if editable -> "split_edit" else -> "split_read"
+            mir_native_verify_guard_route(program, tables, call, "core.shared_guard", MIRNativeRouteShape{member: split_member, symbol: "jet_shared_guard_split", arity: 4, borrow_mask: [Bool]{true, false, false, false}}, .Control, function.id, span)
+            map_member :: if editable -> "map_edit" else -> "map_read"
+            mir_native_verify_guard_route(program, tables, map_call, "core.shared_guard", MIRNativeRouteShape{member: map_member, symbol: "jet_shared_guard_map", arity: 3, borrow_mask: [Bool]{true, false, false}}, .Control, function.id, span)
+        }
+        .TextPatternMatch(call, _, parts) -> {
+            position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+            if !mir_native_route_matches(program.prelude_calls[position], .StaticPrelude, "core.pattern", MIRNativeRouteShape{member: "text_match", symbol: "jet_text_pattern_match", arity: 2, borrow_mask: [Bool]{true, false}}, .Value) -> return Err(mir_native_reference(function.id, "text pattern route MirPreludeCallId({call.value}) has the wrong metadata", span))
+            mir_native_verify_text_pattern_parts(parts, tables.types, function.id)
+        }
+        .BinaryPatternMatch(call, _, parts) -> {
+            position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+            if !mir_native_route_matches(program.prelude_calls[position], .StaticPrelude, "core.pattern", MIRNativeRouteShape{member: "binary_match", symbol: "jet_binary_pattern_match", arity: 2, borrow_mask: [Bool]{true, false}}, .Value) -> return Err(mir_native_reference(function.id, "binary pattern route MirPreludeCallId({call.value}) has the wrong metadata", span))
+            mir_native_verify_binary_pattern_parts(parts, tables.types, function.id)
+        }
+        .CursorTakePattern(_, receiver, parts) -> {
+            position :: index.definitions.places.get(receiver.value) ?? return Err(mir_native_reference(function.id, "receiver place MirPlaceId({receiver.value})", span))
+            if function.places[position].access == .Read -> return Err(mir_native_reference(function.id, "Cursor take_pattern receiver place MirPlaceId({receiver.value}) is not writable", span))
+            mir_native_verify_text_pattern_parts(parts, tables.types, function.id)
+        }
+        .ReaderTakePattern(_, receiver, parts) -> {
+            position :: index.definitions.places.get(receiver.value) ?? return Err(mir_native_reference(function.id, "receiver place MirPlaceId({receiver.value})", span))
+            if function.places[position].access == .Read -> return Err(mir_native_reference(function.id, "Reader take_pattern receiver place MirPlaceId({receiver.value}) is not writable", span))
+            mir_native_verify_binary_pattern_parts(parts, tables.types, function.id)
+        }
+        .RequireStop(_, kind, condition, _, context, _, _) -> {
+            requires :: kind == .Require || kind == .RequireEq
+            if (condition != None) != requires -> return Err(mir_native_reference(function.id, "require-stop {mir_native_require_kind_debug(kind)} condition presence is inconsistent", span))
+            if condition == .Val(condition) {
+                ty :: mir_native_definition_type(function, index, condition) ?? return Err(mir_native_reference(function.id, "require-stop condition value MirValueId({condition.value})", span))
+                if !mir_type_is_bool(ty) -> return Err(mir_native_reference(function.id, "require-stop condition MirValueId({condition.value}) is not Bool", span))
+            }
+            if context.function.len() == 0 -> return Err(mir_native_reference(function.id, "require-stop context has no function", span))
+            seen := [U64:Bool]{}
+            loop local in context.locals {
+                if local.name.len() == 0 -> return Err(mir_native_reference(function.id, "require-stop context has an unnamed local", span))
+                if seen.get(local.local.value) != None -> return Err(mir_native_reference(function.id, "duplicate require-stop local MirLocalId({local.local.value})", span))
+                seen[local.local.value] = true
+                if index.locals.get(local.local.value) == None -> return Err(mir_native_reference(function.id, "require-stop local MirLocalId({local.local.value})", span))
+            }
+        }
+        .CarrierFact(_, receiver, _, _) -> {
+            mir_native_require_value(index, receiver, function.id, span)
+            ty :: mir_native_definition_type(function, index, receiver) ?? return Err(mir_native_reference(function.id, "carrier fact receiver MirValueId({receiver.value})", span))
+            if !mir_type_is_result(ty) -> return Err(mir_native_reference(function.id, "carrier fact receiver MirValueId({receiver.value}) is not a Result", span))
+        }
+        .GCEdit(call, root, edges, edit, value_index, kind, site) -> {
+            mir_native_require_value(index, root, function.id, span)
+            loop edge in edges -> mir_native_require_value(index, edge, function.id, span)
+            mir_native_require_value(index, edit, function.id, span)
+            if value_index == .Val(value_index) -> mir_native_require_value(index, value_index, function.id, span)
+            if site.value == U64{0} -> return Err(mir_native_reference(function.id, "gc edit has a zero typed site ID", span))
+            shape :: mir_native_gc_edit_route_shape(kind)
+            position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+            if !mir_native_route_matches(program.prelude_calls[position], .StaticPrelude, "core.gc", shape, .Value) -> return Err(mir_native_reference(function.id, "gc edit route MirPreludeCallId({call.value}) does not match {shape.symbol}/{shape.member}/{shape.arity}", span))
+            if kind == {
+                .Clear | .Pop | .Plain -> { if value_index != None || edges.len() != 0 -> return Err(mir_native_reference(function.id, "gc edit {mir_native_gc_edit_debug(kind)} carries unused operands", span)) }
+                .RemoveIndex -> { if value_index == None || edges.len() != 0 -> return Err(mir_native_reference(function.id, "gc remove edit has the wrong operands", span)) }
+                .InsertIndex -> { if value_index == None -> return Err(mir_native_reference(function.id, "gc insert edit has no index", span)) }
+                .Prepend | .Additive -> { if value_index != None -> return Err(mir_native_reference(function.id, "gc edge edit {mir_native_gc_edit_debug(kind)} carries an index", span)) }
+                .EdgeSlot -> { if value_index != None || edges.len() == 0 -> return Err(mir_native_reference(function.id, "gc edge-slot edit has the wrong operands", span)) }
+            }
+        }
+        .TypedTextInterp(call, kind, literals, holes, trusted) -> {
+            shape :: mir_native_typed_text_route_shape(kind)
+            position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+            if !mir_native_route_matches(program.prelude_calls[position], .StaticPrelude, "core.typed_text", shape, .Value) -> return Err(mir_native_reference(function.id, "typed-text route MirPreludeCallId({call.value}) does not match {shape.symbol}/{shape.member}/{shape.arity}", span))
+            if literals.len() != holes.len() + 1 -> return Err(mir_native_reference(function.id, "typed-text interpolation must have one literal edge per hole", span))
+            if trusted.len() != holes.len() -> return Err(mir_native_reference(function.id, "typed-text interpolation trust metadata must match hole arity", span))
+            if kind != .HTML { loop value in trusted { if value -> return Err(mir_native_reference(function.id, "non-HTML typed-text interpolation carries HTML trust metadata", span)) } }
+        }
+        .CCallback(call, callback, lambda) -> {
+            if tables.callbacks.get(callback.value) == None -> return Err(mir_native_reference(function.id, "callback MirCallbackId({callback.value})", span))
+            position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+            if !mir_native_route_matches(program.prelude_calls[position], .StaticPrelude, "core.ffi", MIRNativeRouteShape{member: "callback_boundary", symbol: "jet_ffi_callback_boundary", arity: 1, borrow_mask: [Bool]{false}}, .Value) -> return Err(mir_native_reference(function.id, "callback route MirPreludeCallId({call.value}) has the wrong symbol, ABI, or arity", span))
+            mir_native_require_value(index, lambda, function.id, span)
+            ty :: mir_native_definition_type(function, index, lambda) ?? return Err(mir_native_reference(function.id, "C callback lambda MirValueId({lambda.value})", span))
+            if ty.kind != .Fn(_) -> return Err(mir_native_reference(function.id, "C callback lambda MirValueId({lambda.value}) is not a function", span))
+        }
+        .HTTPRouterRegister(call, receiver, path, handler, _, names, _, _) -> {
+            mir_native_require_value(index, receiver, function.id, span)
+            mir_native_require_value(index, path, function.id, span)
+            mir_native_require_value(index, handler, function.id, span)
+            position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+            receiver_type :: mir_native_definition_type(function, index, receiver) ?? return Err(mir_native_reference(function.id, "HTTP registration receiver MirValueId({receiver.value}) has the wrong type", span))
+            shape :: if mir_type_nominal_name(receiver_type) == {
+                .Val("HTTPMux") -> { if names.len() == 0 -> MIRNativeRouteShape{member: "mux_add_zero", symbol: "jet_http_mux_add_zero_handler", arity: 4, borrow_mask: [Bool]{true, false, false, false}} else -> MIRNativeRouteShape{member: "mux_add", symbol: "jet_http_mux_add_handler", arity: 4, borrow_mask: [Bool]{true, false, false, false}} }
+                .Val("HTTPRouter") -> MIRNativeRouteShape{member: "router_register", symbol: "jet_http_router_register", arity: 7, borrow_mask: [Bool]{true, false, false, false, true, false, false}}
+                else -> return Err(mir_native_reference(function.id, "HTTP registration receiver MirValueId({receiver.value}) has the wrong type", span))
+            }
+            if !mir_native_route_matches(program.prelude_calls[position], .StaticPrelude, "core.http", shape, .Control) -> return Err(mir_native_reference(function.id, "HTTP route registration route MirPreludeCallId({call.value}) has the wrong metadata", span))
+        }
+        .PluginInvoke(call, handle, _, _, args) -> {
+            mir_native_require_value(index, handle, function.id, span)
+            loop arg in args -> mir_native_require_value(index, arg, function.id, span)
+            position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+            if !mir_native_route_matches(program.prelude_calls[position], .HandleMethod, "core.handle", MIRNativeRouteShape{member: "plugin.invoke", symbol: "jet_plugin_call", arity: 3, borrow_mask: [Bool]{true, true, true}}, .Value) -> return Err(mir_native_reference(function.id, "plugin invocation route MirPreludeCallId({call.value}) has the wrong metadata", span))
+        }
+        .StaticPreludeCall(_, args, owner_types, types) -> {
+            mir_native_verify_call_args(args, function, index, tables.types, span)
+            loop arg in owner_types { if arg == .Type(ty) -> mir_native_verify_type(ty, span, function.id) }
+            loop ty in types -> mir_native_verify_type(ty, span, function.id)
+        }
+        .ClosureMethod(_, args, _) | .HostCall(_, args) -> mir_native_verify_call_args(args, function, index, tables.types, span)
+        .HostBorrowCallback(_, params) -> { loop ty in params -> mir_native_verify_type(ty, span, function.id) }
+        .CoreClosureCall(_, _, _, _, site, _) -> { if site.value == U64{0} -> return Err(mir_native_reference(function.id, "zero Core closure site", span)) }
+        .Print(_, _) | .AmbientInput(_, _) | .LayoutCompare(_, _, _, _) | .ReflectOf(_, _, _, _) | .LayoutLiteral(_) | .SharedGuardWait(_, _, _, _) | .ConditionNotify(_, _, _) | .AllocNew(_, _, _, _) | .DecodeUnder(_, _, _) | .OptionLift2(_, _, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOption(_, _, _, _) | .HandleMethod(_, _, _, _, _) | .TaskGroup(_, _, _) | .Select(_, _, _) | .PolicyFunction(_, _) | .InterruptFunction(_, _) -> {}
+    }
+    return
+}
+
+// MIROptimization.rs:3529-3602.
+fn mir_native_verify_text_pattern_parts(parts: [MIRTextPatternPart], types: [U64:Bool], function: MIRFunctionID) MIRLegalityError! {
+    loop part in parts {
+        if part == .Hole(kind, ty, span) {
+            if types.get(ty.value) == None -> return Err(mir_native_reference(function, "text pattern type MirTypeId({ty.value})", span))
+            if span.start > span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function), span: span})
+            if kind == .InlineRange(lo, hi) { if lo > hi -> return Err(mir_native_reference(function, "invalid text pattern range", span)) }
+        }
+    }
+    return
+}
+fn mir_native_verify_binary_pattern_parts(parts: [MIRBinaryPatternPart], types: [U64:Bool], function: MIRFunctionID) MIRLegalityError! {
+    loop part in parts {
+        if part == {
+            .Literal(_) -> {}
+            .Bits(width, ty, _, span) -> {
+                if types.get(ty.value) == None -> return Err(mir_native_reference(function, "binary pattern type MirTypeId({ty.value})", span))
+                if span.start > span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function), span: span})
+                if width == 0 -> return Err(mir_native_reference(function, "zero-width binary pattern", span))
+            }
+            .Rest(ty, span) -> {
+                if types.get(ty.value) == None -> return Err(mir_native_reference(function, "binary pattern rest type MirTypeId({ty.value})", span))
+                if span.start > span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function), span: span})
+            }
+        }
+    }
+    return
+}
+
+fn mir_native_require_kind_debug(kind: MIRRequireKind) -> String Never! {
+    if kind == { .Require -> "Require", .RequireEq -> "RequireEq", .Panic -> "Panic" }
+}
+fn mir_native_gc_edit_debug(kind: MIRGCEditKind) -> String Never! {
+    if kind == {
+        .Clear -> "Clear", .Pop -> "Pop", .RemoveIndex -> "RemoveIndex",
+        .InsertIndex -> "InsertIndex", .Prepend -> "Prepend",
+        .Additive -> "Additive", .Plain -> "Plain", .EdgeSlot -> "EdgeSlot",
+    }
+}

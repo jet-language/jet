@@ -1,0 +1,617 @@
+// String-literal lexing regressions: the original crates/jet-lexer Scan.rs
+// tests (1060-1306) plus Strings.rs byte-escape, nesting-limit and
+// interpolation-rebasing witnesses with byte-exact spans, messages and edits.
+use jet_foundation.[
+    Diagnostic,
+    DiagnosticLabel,
+    Span,
+    TextEdit,
+    diagnostic_from_registry,
+    diagnostic_with_edit,
+]
+
+fn strings_test_lex(source: String) -> Lexed {
+    lex_payload(source.bytes(), false)
+}
+
+fn strings_test_parts(tokens: [Token]) -> [[StringPart]] Never! {
+    strings := [[StringPart]]{}
+    loop token in tokens {
+        if token.kind == TOKEN_STRING -> &strings.push(~token.payload.string_parts)
+    }
+    strings
+}
+
+fn strings_test_is_text(parts: [StringPart], expected: String) -> Bool Never! {
+    parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && parts[0].text == expected
+}
+
+fn strings_test_is_byte(parts: [StringPart], expected: Int) -> Bool Never! {
+    parts.len() == 1 && parts[0].kind == STRING_PART_BYTE && parts[0].byte == expected
+}
+
+fn strings_test_has_interpolation(parts: [StringPart]) -> Bool Never! {
+    loop part in parts {
+        if part.kind == STRING_PART_INTERPOLATION -> return true
+    }
+    false
+}
+
+fn strings_test_diagnostic(diagnostic: Diagnostic, code: String, start: Int, end: Int, what: String) -> Bool Never! {
+    expected_span :: Val(Span{start: start, end: end})
+    diagnostic.code == code && diagnostic.span == expected_span && diagnostic.what == what
+}
+
+fn strings_test_byte_escape(diagnostic: Diagnostic, start: Int, end: Int) -> Bool Never! {
+    strings_test_diagnostic(diagnostic, "E0001", start, end, "`\\x` needs two hexadecimal digits")
+        && diagnostic.why == "A byte escape writes one byte as `\\xNN`, where both digits are hexadecimal"
+        && diagnostic.fix == "Write two hexadecimal digits after `\\x`, for example `\\x00`"
+}
+
+fn strings_test_nesting_limit(diagnostic: Diagnostic, start: Int, end: Int) -> Bool Never! {
+    strings_test_diagnostic(diagnostic, "E1403", start, end, "This code nests 257 levels deep; the limit is 256")
+        && diagnostic.why == "Each nested source form needs one compiler checking frame, and unbounded depth could overflow the compiler stack. The parser, sema, and TIR evaluator enforce the same published limit (D-COMPILE-STACK1=A). During `jet check`, Jet reports this diagnostic."
+        && diagnostic.fix == "Pull inner parts out into named bindings or helper functions."
+}
+
+fn strings_test_span(start: Int, end: Int) -> Span Never! {
+    Span{start: start, end: end}
+}
+
+// Scan.rs tests.
+#Test("raw_foreign_body_marker_does_not_capture_a_later_function") {
+    source :: `#FFI(c) fn foreign() -> Int {
+    """int64_t foreign(void) { return 1; }"""
+}
+
+fn ordinary(value: Int) {
+    text :: """
+value={value}
+"""
+}`
+    lexed :: strings_test_lex(source)
+    assert_eq(lexed.diagnostics.len(), 0)
+    strings :: strings_test_parts(lexed.tokens)
+    assert_eq(strings.len(), 2)
+    assert(strings[0].len() == 1 && strings[0][0].kind == STRING_PART_TEXT)
+    assert(strings_test_has_interpolation(strings[1]))
+}
+
+#Test("grouped_ffi_marker_keeps_foreign_body_raw") {
+    source :: `#[Unsafe("scalar registers"), FFI(asm)]
+fn add(a: Int, b: Int) -> Int {
+    """add {a}, {b} ; -> return"""
+}`
+    lexed :: strings_test_lex(source)
+    assert_eq(lexed.diagnostics.len(), 0)
+    found := false
+    strings :: strings_test_parts(lexed.tokens)
+    loop parts in strings {
+        if parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && parts[0].text.contains("-> return") -> found = true
+    }
+    assert(found)
+}
+
+#Test("adjacent_ffi_markers_keep_foreign_body_raw_in_both_orders") {
+    sources :: [String]{
+        `#Unsafe("registers") #FFI(asm) fn add() { """add {a}, {b}""" }`,
+        `#FFI(asm) #Unsafe("registers") fn add() { """add {a}, {b}""" }`,
+    }
+    loop source in sources {
+        lexed :: strings_test_lex(source)
+        assert_eq(lexed.diagnostics.len(), 0)
+        found := false
+        strings :: strings_test_parts(lexed.tokens)
+        loop parts in strings {
+            if strings_test_is_text(parts, `add {a}, {b}`) -> found = true
+        }
+        assert(found)
+    }
+}
+
+#Test("grouped_ffi_argument_name_does_not_make_an_ordinary_body_raw") {
+    source :: `#[Meta(category: FFI(asm)), Task] fn work() { text :: """
+value={value}
+""" }`
+    lexed :: strings_test_lex(source)
+    assert_eq(lexed.diagnostics.len(), 0)
+    found := false
+    strings :: strings_test_parts(lexed.tokens)
+    loop parts in strings {
+        if strings_test_has_interpolation(parts) -> found = true
+    }
+    assert(found)
+}
+
+#Test("typed_head_bodies_keep_backslashes_and_shared_holes_but_plain_strings_decode_them") {
+    source :: `plain :: "\n"
+pattern :: Regex.{"\n{{literal}}-{value}"}
+multiline :: Path.{"""
+\logs\app
+"""}`
+    lexed :: strings_test_lex(source)
+    assert_eq(lexed.diagnostics.len(), 0)
+    strings :: strings_test_parts(lexed.tokens)
+    assert_eq(strings.len(), 3)
+    assert(strings_test_is_text(strings[0], "\n"))
+    assert_eq(strings[1].len(), 2)
+    assert(strings[1][0].kind == STRING_PART_TEXT && strings[1][0].text == `\n{literal}-`)
+    assert_eq(strings[1][1].kind, STRING_PART_INTERPOLATION)
+    assert(strings_test_is_text(strings[2], `\logs\app`))
+}
+
+#Test("typed_head_lookbehind_preserves_comments_incomplete_and_byte_heads") {
+    prefix_count :: 128
+    source := ""
+    loop index in 0..<prefix_count {
+        source = "{source}prefix{index} :: \"prefix\"; "
+    }
+    tail :: `
+ordinary :: "\n"
+raw_dot :: Regex /* block */ . // line comment
+{ /* block */ "\n" }
+raw_name :: Regex /* block */ { // line comment
+"\n" }
+ordinary_lower :: regex /* block */ { /* block */ "\n" }
+incomplete_raw :: Regex /* block */ . /* block */ "\n"
+byte :: [ /* block */ U8 // line comment
+] /* block */ { /* block */ "\x41" }
+byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* block */ { /* block */ "\x42" }
+`
+    source = "{source}{tail}"
+    lexed :: strings_test_lex(source)
+    assert_eq(lexed.diagnostics.len(), 0)
+    strings :: strings_test_parts(lexed.tokens)
+    assert_eq(strings.len(), prefix_count + 7)
+    assert(strings_test_is_text(strings[prefix_count], "\n"))
+    assert(strings_test_is_text(strings[prefix_count + 1], `\n`))
+    assert(strings_test_is_text(strings[prefix_count + 2], `\n`))
+    assert(strings_test_is_text(strings[prefix_count + 3], "\n"))
+    assert(strings_test_is_text(strings[prefix_count + 4], "\n"))
+    assert(strings_test_is_byte(strings[prefix_count + 5], 65))
+    assert(strings_test_is_byte(strings[prefix_count + 6], 66))
+}
+
+// Scan.rs's frozen assertion expects no diagnostic and an `@layout` word,
+// but Scan.rs:550-623 (the reference implementation) reads `T.@layout` as the
+// retired fact spelling: E0003 with a `$layout` edit, recovered as `$layout`.
+// This witness pins the implementation; the stale Rust assertion is reported.
+#Test("at_distinguishes_prefix_package_ref_and_fence") {
+    lexed :: strings_test_lex("foo@bar @baz T.@layout <:0, 1:> $build T.$layout a$b $[x]$")
+    assert_eq(lexed.diagnostics.len(), 1)
+    retired :: lexed.diagnostics[0]
+    assert(strings_test_diagnostic(retired, "E0003", 15, 22, "`@layout` is retired; write `$layout`"))
+    assert_eq(retired.edit, Val(TextEdit{span: strings_test_span(15, 22), new_text: "$layout"}))
+    kinds :: loop token in lexed.tokens -> token.kind
+    texts :: loop token in lexed.tokens -> ~token.payload.decoded
+    assert(kinds[0] == TOKEN_IDENT && texts[0] == "foo")
+    assert_eq(kinds[1], TOKEN_AT)
+    assert(kinds[2] == TOKEN_IDENT && texts[2] == "bar")
+    assert(kinds[3] == TOKEN_IDENT && texts[3] == "@baz")
+    assert(kinds[4] == TOKEN_IDENT && texts[4] == "T")
+    assert_eq(kinds[5], TOKEN_DOT)
+    assert(kinds[6] == TOKEN_IDENT && texts[6] == "$layout")
+    assert_eq(kinds[7], TOKEN_FENCE_OPEN)
+    assert_eq(kinds[11], TOKEN_FENCE_CLOSE)
+    assert(kinds[12] == TOKEN_IDENT && texts[12] == "$build")
+    assert(kinds[13] == TOKEN_IDENT && texts[13] == "T")
+    assert_eq(kinds[14], TOKEN_DOT)
+    assert(kinds[15] == TOKEN_IDENT && texts[15] == "$layout")
+    // An adjacent `a$b` is not a fact read: `$` stays its own token.
+    assert(kinds[16] == TOKEN_IDENT && texts[16] == "a")
+    assert_eq(kinds[17], TOKEN_DOLLAR)
+    assert(kinds[18] == TOKEN_IDENT && texts[18] == "b")
+    assert_eq(kinds[19], TOKEN_DOLLAR)
+    assert_eq(kinds[20], TOKEN_LBRACKET)
+    assert_eq(kinds[22], TOKEN_RBRACKET)
+    assert_eq(kinds[23], TOKEN_DOLLAR)
+}
+
+#Test("fence_digraphs_are_longest_match_beside_comparisons_and_generics") {
+    lexed :: strings_test_lex("<: a :> x < y x <= y x <=> y x > y List<Int> a::b c:=d e:f")
+    assert_eq(lexed.diagnostics.len(), 0)
+    kinds := [Int]{}
+    loop token in lexed.tokens {
+        if token.kind != TOKEN_IDENT && token.kind != TOKEN_EOF -> &kinds.push(token.kind)
+    }
+    expected :: [Int]{TOKEN_FENCE_OPEN, TOKEN_FENCE_CLOSE, TOKEN_LT, TOKEN_LE, TOKEN_COMPARE, TOKEN_GT, TOKEN_LT, TOKEN_GT, TOKEN_COLON_COLON, TOKEN_COLON_EQ, TOKEN_COLON}
+    assert_eq(kinds, expected)
+}
+
+#Test("retired_fence_digraphs_teach_the_new_spelling_with_edits") {
+    lexed :: strings_test_lex("print(@[ a, b ]@) x:]@")
+    edits := [String]{}
+    loop diagnostic in lexed.diagnostics {
+        assert_eq(diagnostic.code, "E-FENCE-SPELLING")
+        edit :: diagnostic.edit ?? panic("fence respelling edit")
+        &edits.push(~edit.new_text)
+    }
+    assert_eq(edits, [String]{"<:", ":>", " :>"})
+    assert_eq(lexed.tokens[2].kind, TOKEN_FENCE_OPEN)
+    assert_eq(lexed.tokens[6].kind, TOKEN_FENCE_CLOSE)
+}
+
+// Strings.rs `invalid_byte_escape`: `pos(at + 4)` is four scalars past `\`,
+// clamped to the source end when the escape is truncated.
+#Test("truncated byte escape diagnostic end clamps to the source extent") {
+    lexed :: strings_test_lex(`[U8]{"\x"`)
+    assert_eq(lexed.diagnostics.len(), 1)
+    assert(strings_test_byte_escape(lexed.diagnostics[0], 6, 9))
+    strings :: strings_test_parts(lexed.tokens)
+    assert_eq(strings.len(), 1)
+    assert(strings_test_is_text(strings[0], ""))
+}
+
+#Test("unterminated byte escape at end of source keeps both diagnostics in bounds") {
+    lexed :: strings_test_lex(`x :: [U8]{"\x4`)
+    assert_eq(lexed.diagnostics.len(), 2)
+    assert(strings_test_byte_escape(lexed.diagnostics[0], 11, 14))
+    assert(strings_test_diagnostic(lexed.diagnostics[1], "E0002", 10, 14, "This text never gets a closing quote"))
+    assert_eq(strings_test_parts(lexed.tokens).len(), 0)
+}
+
+#Test("byte escape diagnostic counts scalars not bytes") {
+    lexed :: strings_test_lex(`[U8]{"\xé"}`)
+    assert_eq(lexed.diagnostics.len(), 1)
+    assert(strings_test_byte_escape(lexed.diagnostics[0], 6, 11))
+    strings :: strings_test_parts(lexed.tokens)
+    assert(strings_test_is_text(strings[0], "é"))
+}
+
+#Test("triple string byte escape diagnostic covers four scalars") {
+    lexed :: strings_test_lex(`[U8]{"""
+\xZ1
+"""}`)
+    assert_eq(lexed.diagnostics.len(), 1)
+    assert(strings_test_byte_escape(lexed.diagnostics[0], 9, 13))
+    strings :: strings_test_parts(lexed.tokens)
+    assert(strings_test_is_text(strings[0], "Z1"))
+}
+
+#Test("valid byte escapes decode beside literal text") {
+    lexed :: strings_test_lex(`[U8]{"a\x7Fb\x00"}`)
+    assert_eq(lexed.diagnostics.len(), 0)
+    parts :: strings_test_parts(lexed.tokens)[0]
+    assert_eq(parts.len(), 4)
+    assert(parts[0].kind == STRING_PART_TEXT && parts[0].text == "a")
+    assert(parts[1].kind == STRING_PART_BYTE && parts[1].byte == 127 && parts[1].span == strings_test_span(7, 11))
+    assert(parts[2].kind == STRING_PART_TEXT && parts[2].text == "b")
+    assert(parts[3].kind == STRING_PART_BYTE && parts[3].byte == 0 && parts[3].span == strings_test_span(12, 16))
+}
+
+// Strings.rs `string`: an unknown escape names the whole following scalar.
+#Test("unknown escape diagnostic spans the whole multibyte scalar") {
+    lexed :: strings_test_lex(`"\é"`)
+    assert_eq(lexed.diagnostics.len(), 1)
+    diagnostic :: lexed.diagnostics[0]
+    assert(strings_test_diagnostic(diagnostic, "E0001", 1, 4, "`\\é` isn't an escape Jet knows"))
+    assert_eq(diagnostic.why, "Inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)")
+    assert_eq(diagnostic.fix, "Write `\\\\` for a real backslash")
+}
+
+// Strings.rs `lex_interpolation`: E1403 at the shared limit, with the
+// registry row's prose and the hole span rebased onto the enclosing source.
+#Test("interpolation nesting limit reports E1403 with the registry prose") {
+    at_limit :: lex_payload_at_depth(`"{x}"`.bytes(), false, false, 256)
+    assert_eq(at_limit.diagnostics.len(), 1)
+    assert(strings_test_nesting_limit(at_limit.diagnostics[0], 1, 4))
+    parts :: strings_test_parts(at_limit.tokens)[0]
+    assert_eq(parts.len(), 1)
+    assert(parts[0].kind == STRING_PART_INTERPOLATION && parts[0].tokens.len() == 0)
+    below :: lex_payload_at_depth(`"{x}"`.bytes(), false, false, 255)
+    assert_eq(below.diagnostics.len(), 0)
+    inner :: strings_test_parts(below.tokens)[0][0].tokens
+    assert(inner[0].kind == TOKEN_IDENT && inner[0].span == strings_test_span(2, 3))
+    nested :: lex_payload_at_depth(`"{"{x}"}"`.bytes(), false, false, 255)
+    assert_eq(nested.diagnostics.len(), 1)
+    assert(strings_test_nesting_limit(nested.diagnostics[0], 3, 6))
+}
+
+// #4387 (repros/interpolation-edit.jet): a diagnostic raised inside an
+// interpolation rebases its main span and its edit span onto the file.
+#Test("interpolation diagnostic edit spans are rebased onto the source") {
+    source :: `fn run() {
+    _text :: "prefix {value.@name} suffix"
+}`
+    lexed :: strings_test_lex(source)
+    assert_eq(lexed.diagnostics.len(), 1)
+    retired :: lexed.diagnostics[0]
+    assert(strings_test_diagnostic(retired, "E0003", 39, 44, "`@name` is retired; write `$name`"))
+    assert_eq(retired.why, "Compiler facts and declaration metadata carry `$`; prefix `@` in code now marks a live link (D-COMPILER-NS1=A)")
+    assert_eq(retired.fix, "Replace `@name` with `$name`")
+    assert_eq(retired.edit, Val(TextEdit{span: strings_test_span(39, 44), new_text: "$name"}))
+    parts :: strings_test_parts(lexed.tokens)[0]
+    assert_eq(parts.len(), 3)
+    assert(parts[1].kind == STRING_PART_INTERPOLATION && parts[1].span == strings_test_span(32, 45))
+    tokens :: parts[1].tokens
+    assert(tokens[0].kind == TOKEN_IDENT && tokens[0].span == strings_test_span(33, 38))
+    assert(tokens[1].kind == TOKEN_DOT && tokens[1].span == strings_test_span(38, 39))
+    assert(tokens[2].kind == TOKEN_IDENT && tokens[2].payload.decoded == "$name" && tokens[2].span == strings_test_span(39, 44))
+    assert(tokens[3].kind == TOKEN_EOF && tokens[3].span == strings_test_span(44, 44))
+}
+
+#Test("nested interpolation token trees are rebased at every depth") {
+    lexed :: strings_test_lex(`"a{"b{c}"}"`)
+    assert_eq(lexed.diagnostics.len(), 0)
+    outer :: strings_test_parts(lexed.tokens)[0]
+    assert_eq(outer.len(), 2)
+    assert(outer[0].kind == STRING_PART_TEXT && outer[0].text == "a" && outer[0].span == strings_test_span(1, 2))
+    assert(outer[1].kind == STRING_PART_INTERPOLATION && outer[1].span == strings_test_span(2, 10))
+    middle :: outer[1].tokens
+    assert_eq(middle.len(), 2)
+    assert(middle[0].kind == TOKEN_STRING && middle[0].span == strings_test_span(3, 9))
+    assert(middle[1].kind == TOKEN_EOF && middle[1].span == strings_test_span(9, 9))
+    inner_parts :: middle[0].payload.string_parts
+    assert_eq(inner_parts.len(), 2)
+    assert(inner_parts[0].kind == STRING_PART_TEXT && inner_parts[0].span == strings_test_span(4, 5))
+    assert(inner_parts[1].kind == STRING_PART_INTERPOLATION && inner_parts[1].span == strings_test_span(5, 8))
+    innermost :: inner_parts[1].tokens
+    assert(innermost[0].kind == TOKEN_IDENT && innermost[0].payload.decoded == "c" && innermost[0].span == strings_test_span(6, 7))
+    assert(innermost[1].kind == TOKEN_EOF && innermost[1].span == strings_test_span(7, 7))
+}
+
+#Test("nested diagnostic rebasing shifts main edit and label spans") {
+    base :: diagnostic_from_registry("E0003", Val(strings_test_span(1, 2)), "what", "why", "fix")
+    diagnostic := diagnostic_with_edit(base, TextEdit{span: strings_test_span(1, 2), new_text: "x"})
+    diagnostic.labels = [DiagnosticLabel]{DiagnosticLabel{span: strings_test_span(0, 1), message: "here"}}
+    shifted_diagnostic(&diagnostic, 10)
+    assert_eq(diagnostic.span, Val(strings_test_span(11, 12)))
+    assert_eq(diagnostic.edit, Val(TextEdit{span: strings_test_span(11, 12), new_text: "x"}))
+    assert_eq(diagnostic.labels.len(), 1)
+    assert(diagnostic.labels[0].span == strings_test_span(10, 11) && diagnostic.labels[0].message == "here")
+    spanless := diagnostic_from_registry("E0003", None, "what", "why", "fix")
+    shifted_diagnostic(&spanless, 10)
+    assert(spanless.span == None)
+    assert(spanless.edit == None)
+}
+
+// Strings.rs raw_string/raw_fence_end: maximal fences, exact padding, opaque
+// braces/backslashes, and raw fences embedded in ordinary interpolation.
+#Test("raw fences preserve mismatched runs Unicode and all space payloads") {
+    sources :: [String]{"`` a`é```b ``", "`   `", "`  x  `"}
+    expected :: [String]{"a`é```b", "   ", " x "}
+    loop index in 0..<sources.len() {
+        lexed :: strings_test_lex(sources[index])
+        assert_eq(lexed.diagnostics.len(), 0)
+        assert_eq(lexed.tokens[0].kind, TOKEN_RAW_STRING)
+        assert_eq(lexed.tokens[0].payload.decoded, expected[index])
+        assert_eq(lexed.tokens[0].span, strings_test_span(0, sources[index].bytes().len()))
+    }
+}
+
+#Test("unclosed raw fences report the exact closing run") {
+    sources :: [String]{"`é", "``é`"}
+    fixes :: [String]{"Add a closing fence of 1 backtick", "Add a closing fence of 2 backticks"}
+    loop index in 0..<sources.len() {
+        lexed :: strings_test_lex(sources[index])
+        assert_eq(lexed.diagnostics.len(), 1)
+        diagnostic :: lexed.diagnostics[0]
+        assert(strings_test_diagnostic(diagnostic, "E0002", 0, sources[index].bytes().len(), "This raw text never gets a closing backtick fence"))
+        assert_eq(diagnostic.why, "A raw string closes with a backtick run that has the same length as its opening run")
+        assert_eq(diagnostic.fix, fixes[index])
+        assert_eq(lexed.tokens.len(), 1)
+    }
+}
+
+#Test("raw fence braces and quotes do not close an interpolation") {
+    lexed :: strings_test_lex(``"{`é}"{`}"``)
+    assert_eq(lexed.diagnostics.len(), 0)
+    parts :: strings_test_parts(lexed.tokens)[0]
+    assert_eq(parts.len(), 1)
+    assert_eq(parts[0].span, strings_test_span(1, 10))
+    assert_eq(parts[0].tokens[0].kind, TOKEN_RAW_STRING)
+    assert_eq(parts[0].tokens[0].payload.decoded, `é}"{`)
+    assert_eq(parts[0].tokens[0].span, strings_test_span(2, 9))
+    assert_eq(parts[0].tokens[1].span, strings_test_span(9, 9))
+}
+
+#Test("ordinary escapes and doubled braces decode without interpolation") {
+    lexed :: strings_test_lex(`"\n\t\"\\{{é}}"`)
+    assert_eq(lexed.diagnostics.len(), 0)
+    expected :: "\n\t\"\\{{é}}"
+    assert(strings_test_is_text(strings_test_parts(lexed.tokens)[0], expected))
+    assert_eq(lexed.tokens[0].payload.interpolations, 0)
+}
+
+#Test("all hexadecimal byte digits decode and upper X is not a byte escape") {
+    lexed :: strings_test_lex(`[U8]{"\x09\xaf\xAF\xFF\X41"}`)
+    assert_eq(lexed.diagnostics.len(), 1)
+    assert(strings_test_diagnostic(lexed.diagnostics[0], "E0001", 22, 24, "`\\X` isn't an escape Jet knows"))
+    parts :: strings_test_parts(lexed.tokens)[0]
+    assert_eq(parts.len(), 5)
+    expected :: [Int]{9, 175, 175, 255}
+    loop index in 0..<expected.len() {
+        assert_eq(parts[index].kind, STRING_PART_BYTE)
+        assert_eq(parts[index].byte, expected[index])
+        assert_eq(parts[index].span, strings_test_span(6 + index * 4, 10 + index * 4))
+    }
+    assert(parts[4].kind == STRING_PART_TEXT && parts[4].text == "41")
+}
+
+#Test("invalid byte escapes recover their digits and span into following source") {
+    lexed :: strings_test_lex(`[U8]{"\xG1\x1Z\x"} tail`)
+    assert_eq(lexed.diagnostics.len(), 3)
+    assert(strings_test_byte_escape(lexed.diagnostics[0], 6, 10))
+    assert(strings_test_byte_escape(lexed.diagnostics[1], 10, 14))
+    // Rust pos(at + 4) is source-wide: the quote and brace count too.
+    assert(strings_test_byte_escape(lexed.diagnostics[2], 14, 18))
+    assert(strings_test_is_text(strings_test_parts(lexed.tokens)[0], "G11Z"))
+}
+
+#Test("byte escape clamps at each truncated source boundary") {
+    sources :: [String]{`[U8]{"\x`, `[U8]{"\x4`, `[U8]{"\xé`, `[U8]{"\x🦀`}
+    loop source in sources {
+        lexed :: strings_test_lex(source)
+        assert_eq(lexed.diagnostics.len(), 2)
+        assert(strings_test_byte_escape(lexed.diagnostics[0], 6, source.bytes().len()))
+        assert(strings_test_diagnostic(lexed.diagnostics[1], "E0002", 5, source.bytes().len(), "This text never gets a closing quote"))
+        assert_eq(lexed.tokens[lexed.tokens.len() - 1].span, strings_test_span(source.bytes().len(), source.bytes().len()))
+    }
+}
+
+#Test("plain string byte escape spelling remains an unsupported escape") {
+    lexed :: strings_test_lex(`"\x41"`)
+    assert_eq(lexed.diagnostics.len(), 1)
+    assert(strings_test_diagnostic(lexed.diagnostics[0], "E0001", 1, 3, "`\\x` isn't an escape Jet knows"))
+    assert(strings_test_is_text(strings_test_parts(lexed.tokens)[0], "41"))
+}
+
+#Test("empty holes preserve the surrounding literal and its source span") {
+    lexed :: strings_test_lex(`"a{  }b"`)
+    assert_eq(lexed.diagnostics.len(), 1)
+    diagnostic :: lexed.diagnostics[0]
+    assert(strings_test_diagnostic(diagnostic, "E0003", 2, 6, "There's nothing inside this `{{ }}` to show"))
+    assert_eq(diagnostic.why, "Interpolation puts a value into the text, so the braces need a value")
+    assert_eq(diagnostic.fix, "Put a value inside, like `{{name}}`, or write `{{{{}}}}` for literal braces")
+    parts :: strings_test_parts(lexed.tokens)[0]
+    assert(strings_test_is_text(parts, "ab"))
+    assert_eq(parts[0].span, strings_test_span(1, 7))
+}
+
+#Test("lone closing brace diagnostic retains the rest of the text") {
+    lexed :: strings_test_lex(`"a}é"`)
+    assert_eq(lexed.diagnostics.len(), 1)
+    diagnostic :: lexed.diagnostics[0]
+    assert(strings_test_diagnostic(diagnostic, "E0001", 2, 3, "A lone `}}` inside quoted text"))
+    assert_eq(diagnostic.why, "Inside quoted text, `{{` and `}}` mark an interpolated value, so a literal brace is doubled")
+    assert_eq(diagnostic.fix, "Write `}}}}` to print a `}}`")
+    assert(strings_test_is_text(strings_test_parts(lexed.tokens)[0], "aé"))
+}
+
+#Test("unclosed interpolation suppresses the redundant closing quote diagnostic") {
+    lexed :: strings_test_lex("\"a{{x\nnext")
+    assert_eq(lexed.diagnostics.len(), 1)
+    diagnostic :: lexed.diagnostics[0]
+    assert(strings_test_diagnostic(diagnostic, "E0002", 2, 4, "This `{{` never gets a matching `}}`"))
+    assert_eq(diagnostic.why, "`{{` inside quoted text starts an interpolated value and needs a closing `}}` before the text ends; escaped braces use `{{{{`/`}}}}`, while raw backtick strings keep braces literal")
+    assert_eq(diagnostic.fix, "Add a `}}` after the value, write `{{{{` for an escaped brace, or write the text as ``…`` for raw text")
+    assert_eq(strings_test_parts(lexed.tokens).len(), 0)
+}
+
+#Test("unknown escape at source end remains in bounds") {
+    lexed :: strings_test_lex("\"\\")
+    assert_eq(lexed.diagnostics.len(), 2)
+    nul :: String.from_bytes([U8]{0}) ?? panic("NUL is valid UTF8")
+    expected :: "`\\{nul}` isn't an escape Jet knows"
+    assert(strings_test_diagnostic(lexed.diagnostics[0], "E0001", 1, 2, expected))
+    assert(strings_test_diagnostic(lexed.diagnostics[1], "E0002", 0, 2, "This text never gets a closing quote"))
+}
+
+#Test("triple strings strip closing indentation decode escapes and preserve UTF8 spans") {
+    source :: `"""
+    é\n
+      {value}
+    """`
+    lexed :: strings_test_lex(source)
+    assert_eq(lexed.diagnostics.len(), 0)
+    parts :: strings_test_parts(lexed.tokens)[0]
+    assert_eq(parts.len(), 2)
+    assert(parts[0].kind == STRING_PART_TEXT && parts[0].text == "é\n\n  ")
+    assert_eq(parts[1].span, strings_test_span(19, 26))
+    assert(parts[1].tokens[0].kind == TOKEN_IDENT && parts[1].tokens[0].payload.decoded == "value")
+    assert_eq(parts[1].tokens[0].span, strings_test_span(20, 25))
+    assert_eq(parts[1].tokens[1].span, strings_test_span(25, 25))
+}
+
+#Test("unclosed triple and foreign bodies retain distinct diagnostics") {
+    sources :: [String]{`"""é`, `#FFI(c) fn f() { """é`}
+    starts :: [Int]{0, 17}
+    whats :: [String]{"This multi-line text never gets a closing `\"\"\"`", "This raw foreign body never gets a closing `\"\"\"`"}
+    whys :: [String]{"A multi-line string starts and ends with `\"\"\"`", "A `#FFI` body preserves everything between its opening and closing `\"\"\"`"}
+    fixes :: [String]{"Add a closing `\"\"\"` on its own line", "Add a closing `\"\"\"` after the foreign source"}
+    loop index in 0..<sources.len() {
+        lexed :: strings_test_lex(sources[index])
+        assert_eq(lexed.diagnostics.len(), 1)
+        assert(strings_test_diagnostic(lexed.diagnostics[0], "E0002", starts[index], sources[index].bytes().len(), whats[index]))
+        assert_eq(lexed.diagnostics[0].why, whys[index])
+        assert_eq(lexed.diagnostics[0].fix, fixes[index])
+        assert_eq(strings_test_parts(lexed.tokens).len(), 0)
+    }
+}
+
+#Test("raw foreign body bytes are opaque including indentation and invalid escapes") {
+    source :: `#FFI(c) fn f() { """
+  \q "{é}" /* } */
+""" }`
+    expected :: `
+  \q "{é}" /* } */
+`
+    lexed :: strings_test_lex(source)
+    assert_eq(lexed.diagnostics.len(), 0)
+    assert(strings_test_is_text(strings_test_parts(lexed.tokens)[0], expected))
+}
+
+// #4474: do not copy the frozen flat quote/brace scanner. Jet already skips
+// character literals, comments and nested triple strings inside a hole.
+#Test("interpolation skips character comment and triple string delimiters") {
+    sources :: [String]{
+        `"""
+{'}'}
+"""`,
+        `"""
+{value /* } " /* { */ */ + 1}
+"""`,
+        `"""
+{value // } "
+}
+"""`,
+        `"""
+{"""
+é
+"""}
+"""`,
+    }
+    expected_kinds :: [Int]{TOKEN_CHAR, TOKEN_IDENT, TOKEN_IDENT, TOKEN_STRING}
+    loop index in 0..<sources.len() {
+        lexed :: strings_test_lex(sources[index])
+        assert_eq(lexed.diagnostics.len(), 0)
+        parts :: strings_test_parts(lexed.tokens)[0]
+        assert_eq(parts.len(), 1)
+        assert_eq(parts[0].kind, STRING_PART_INTERPOLATION)
+        assert_eq(parts[0].tokens[0].kind, expected_kinds[index])
+    }
+}
+
+#Test("generated interpolation preserves reserved identifier allowance") {
+    source :: `"é{__name}"`
+    ordinary :: strings_test_lex(source)
+    assert_eq(ordinary.diagnostics.len(), 1)
+    assert(strings_test_diagnostic(ordinary.diagnostics[0], "E0067", 4, 10, "`__name` is reserved for Jet"))
+    generated :: lex_generated_payload(source.bytes())
+    assert_eq(generated.diagnostics.len(), 0)
+    parts :: strings_test_parts(generated.tokens)[0]
+    assert_eq(parts[1].tokens[0].payload.decoded, "__name")
+    assert_eq(parts[1].tokens[0].span, strings_test_span(4, 10))
+}
+
+#Test("nested UTF8 interpolation diagnostics rebase edits at both depths") {
+    lexed :: strings_test_lex(`"é{"λ{v.@name}"}"`)
+    assert_eq(lexed.diagnostics.len(), 1)
+    diagnostic :: lexed.diagnostics[0]
+    assert(strings_test_diagnostic(diagnostic, "E0003", 10, 15, "`@name` is retired; write `$name`"))
+    assert_eq(diagnostic.edit, Val(TextEdit{span: strings_test_span(10, 15), new_text: "$name"}))
+}
+
+// #4474 exact Rust defect witnesses supplied by Main. These intentionally pin
+// the corrected Jet behavior rather than claiming frozen-reference identity.
+#Test("4474 quote character in a triple interpolation is not a string delimiter") {
+    lexed :: strings_test_lex(`"""
+{f('"')}
+"""`)
+    assert_eq(lexed.diagnostics.len(), 0)
+    parts :: strings_test_parts(lexed.tokens)[0]
+    assert_eq(parts.len(), 1)
+    assert_eq(parts[0].span, strings_test_span(4, 12))
+    inner :: parts[0].tokens
+    assert_eq(inner[2].kind, TOKEN_CHAR)
+    assert_eq(inner[2].payload.decoded, "\"")
+    assert_eq(inner[2].span, strings_test_span(7, 10))
+    assert_eq(inner[4].span, strings_test_span(11, 11))
+}
+
+#Test("4474 a brace inside a line comment cannot close an interpolation") {
+    lexed :: strings_test_lex(`"{a // }"`)
+    assert_eq(lexed.diagnostics.len(), 1)
+    assert(strings_test_diagnostic(lexed.diagnostics[0], "E0002", 1, 8, "This `{{` never gets a matching `}}`"))
+    assert_eq(strings_test_parts(lexed.tokens).len(), 0)
+}

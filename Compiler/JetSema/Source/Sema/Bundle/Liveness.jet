@@ -1,0 +1,610 @@
+// PORT-PENDING 0354 crates-jet-sema-src-sema-bundle-liveness-module-group: crates/jet-sema/src/Sema/Bundle/Liveness.rs:1-606
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-STRUCT-LIVE1=A: structure liveness is one sema projection over the name
+//RS //! ledger. The pass does not inspect generated code or ask an execution tier
+//RS //! to discover reachability.
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Syntax;
+//RS use crate::AST::{Func, ImportKind, Item, ProgramBundle};
+//RS use jet_foundation::App::AppGraph;
+//RS use jet_foundation::Names::{
+//RS     NameAlias, NameDeclaration, NameLedger, NameVisibility, StructureFact, StructureFactKind,
+//RS };
+//RS use std::collections::HashMap;
+//RS 
+//RS struct LivenessCandidate {
+//RS     code: &'static str,
+//RS     name: String,
+//RS     module: usize,
+//RS     span: Span,
+//RS     detail: &'static str,
+//RS     edit: crate::Diagnostics::TextEdit,
+//RS }
+//RS 
+//RS impl LivenessCandidate {
+//RS     fn diagnostic(&self) -> Diagnostic {
+//RS         Diagnostic::from_row(self.code, &[("name", self.name.as_str())], Some(self.span))
+//RS             .with_edit(self.edit.clone())
+//RS     }
+//RS 
+//RS     fn fact(&self, source: &str) -> StructureFact {
+//RS         StructureFact::new(
+//RS             StructureFactKind::Liveness,
+//RS             self.name.clone(),
+//RS             source.to_string(),
+//RS             self.span,
+//RS             "unreachable",
+//RS             self.detail,
+//RS             Some("_name".to_string()),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS /// The bundle and ledger lookups every declaration verdict makes, built in
+//RS /// one pass: scanning every reference and item per declaration made the pass
+//RS /// quadratic in unit size.
+//RS struct LivenessIndex<'a> {
+//RS     /// Functions and methods by (module, name span). The first in item order
+//RS     /// wins, as a walk of the module's items finds it.
+//RS     functions: HashMap<(usize, Span), &'a Func>,
+//RS     /// Reference sites by the declaration they name: (defining module path,
+//RS     /// definition span).
+//RS     references: HashMap<(&'a str, Span), Vec<ReferenceSite<'a>>>,
+//RS     /// Module display name to the first module carrying it.
+//RS     modules: HashMap<&'a str, usize>,
+//RS }
+//RS 
+//RS struct ReferenceSite<'a> {
+//RS     /// Ledger path of the module holding the reference.
+//RS     source: &'a str,
+//RS     start: usize,
+//RS     end: usize,
+//RS     kind: &'a str,
+//RS }
+//RS 
+//RS impl<'a> LivenessIndex<'a> {
+//RS     fn new(bundle: &'a ProgramBundle, ledger: &'a NameLedger) -> Self {
+//RS         let mut functions = HashMap::new();
+//RS         for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS             index_functions(module_idx, &module.items, &mut functions);
+//RS         }
+//RS         let mut references = HashMap::<_, Vec<_>>::new();
+//RS         for ((source, start, end), reference) in ledger.references() {
+//RS             references
+//RS                 .entry((reference.module_path.as_str(), reference.def_span))
+//RS                 .or_default()
+//RS                 .push(ReferenceSite {
+//RS                     source: source.as_str(),
+//RS                     start: *start,
+//RS                     end: *end,
+//RS                     kind: reference.kind.as_str(),
+//RS                 });
+//RS         }
+//RS         let mut modules = HashMap::new();
+//RS         for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS             modules.entry(module.display.as_str()).or_insert(module_idx);
+//RS         }
+//RS         Self {
+//RS             functions,
+//RS             references,
+//RS             modules,
+//RS         }
+//RS     }
+//RS 
+//RS     fn function(&self, module: usize, name_span: Span) -> Option<&'a Func> {
+//RS         self.functions.get(&(module, name_span)).copied()
+//RS     }
+//RS 
+//RS     fn references_to<'s>(&'s self, module_path: &'s str, def_span: Span) -> &'s [ReferenceSite<'a>] {
+//RS         // The key's path lifetime narrows to the query's (the map is
+//RS         // covariant in its key).
+//RS         let references: &'s HashMap<(&'s str, Span), Vec<ReferenceSite<'a>>> = &self.references;
+//RS         references
+//RS             .get(&(module_path, def_span))
+//RS             .map_or(&[][..], Vec::as_slice)
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn check_liveness(
+//RS     bundle: &ProgramBundle,
+//RS     ledger: &mut NameLedger,
+//RS     app_graph: Option<&AppGraph>,
+//RS ) -> Vec<Diagnostic> {
+//RS     let mut candidates = Vec::new();
+//RS     record_materialized_comptime_alias_uses(bundle, ledger);
+//RS     {
+//RS         let ledger = &*ledger;
+//RS         let index = LivenessIndex::new(bundle, ledger);
+//RS         collect_unused_imports(bundle, ledger, &mut candidates);
+//RS         collect_unused_private_functions(bundle, ledger, &index, app_graph, &mut candidates);
+//RS         collect_unreachable_exports(bundle, ledger, &index, app_graph, &mut candidates);
+//RS     }
+//RS 
+//RS     candidates.sort_by(|a, b| {
+//RS         bundle.modules[a.module].display
+//RS             .cmp(&bundle.modules[b.module].display)
+//RS             .then(a.span.start.cmp(&b.span.start))
+//RS             .then(a.code.cmp(b.code))
+//RS             .then(a.name.cmp(&b.name))
+//RS     });
+//RS 
+//RS     let mut origins = std::collections::HashMap::new();
+//RS     candidates
+//RS         .into_iter()
+//RS         .map(|candidate| {
+//RS             let module = &bundle.modules[candidate.module];
+//RS             let origin = origins.entry(candidate.module).or_insert_with(|| {
+//RS                 std::sync::Arc::new(crate::Diagnostics::DiagnosticOrigin::new(
+//RS                     module.display.clone(),
+//RS                     module.path.to_string_lossy().into_owned(),
+//RS                     module.source.clone(),
+//RS                 ))
+//RS             });
+//RS             ledger.record_structure_fact(candidate.fact(&module.display));
+//RS             let mut diagnostic = candidate.diagnostic();
+//RS             diagnostic.set_origin(origin.clone());
+//RS             diagnostic
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Re-project successful top-level comptime expressions whose value was
+//RS /// materialized before this bundle pass. A reused bundle can carry `ConstDef::ct`
+//RS /// from an earlier evaluation, bypassing `eval_comptime_items`'s callback after
+//RS /// `clear_sema_facts`; the original expression still owns the semantic alias
+//RS /// reads, so feed it through the same identity recorder before liveness projects
+//RS /// warnings.
+//RS fn record_materialized_comptime_alias_uses(bundle: &ProgramBundle, ledger: &mut NameLedger) {
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         // Every local import name a `prep` initializer can read: Core and
+//RS         // file module aliases, and member-import bindings (`use b.[f]`).
+//RS         let mut imports = std::collections::HashMap::new();
+//RS         for import in &module.imports {
+//RS             let path = import.core_module_path().unwrap_or_default();
+//RS             for binding in import.walk_bindings() {
+//RS                 imports.insert(binding.local, path.clone());
+//RS             }
+//RS             imports.insert(import.import_alias(), path);
+//RS         }
+//RS         if imports.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let globals = module
+//RS             .items
+//RS             .iter()
+//RS             .filter_map(|item| match item {
+//RS                 Item::Const(constant) if constant.is_comptime => constant
+//RS                     .ct
+//RS                     .as_ref()
+//RS                     .map(|value| (constant.name.clone(), value.clone())),
+//RS                 _ => None,
+//RS             })
+//RS             .collect::<std::collections::HashMap<_, _>>();
+//RS         for item in &module.items {
+//RS             let Item::Const(constant) = item else {
+//RS                 continue;
+//RS             };
+//RS             if !constant.is_comptime || constant.ct.is_none() {
+//RS                 continue;
+//RS             }
+//RS             crate::Sema::record_comptime_import_alias_uses(
+//RS                 ledger,
+//RS                 module_idx,
+//RS                 &constant.value,
+//RS                 &imports,
+//RS                 &globals,
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_unused_imports(
+//RS     bundle: &ProgramBundle,
+//RS     ledger: &NameLedger,
+//RS     candidates: &mut Vec<LivenessCandidate>,
+//RS ) {
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         for import in &module.imports {
+//RS             // A quoted Jet module has no `ImportBinding` row, but an explicit
+//RS             // alias still introduces a local namespace in the NameLedger.
+//RS             // C headers stay outside liveness because importing a bridge can
+//RS             // have link-time meaning even when no Jet name is read.
+//RS             if matches!(&import.kind, ImportKind::File(path, _) if !path.ends_with(".h"))
+//RS                 && !import.is_pub
+//RS                 && !import.is_package_pub
+//RS                 && !ignored_name(&import.alias)
+//RS             {
+//RS                 if let Some(alias) = ledger.alias(module_idx, &import.alias) {
+//RS                     if alias.span.start < alias.span.end && !alias_used(ledger, alias) {
+//RS                         let name = import.alias.clone();
+//RS                         let explicit_alias = import.alias_span.start > import.span.start;
+//RS                         let span = if explicit_alias {
+//RS                             alias.span
+//RS                         } else {
+//RS                             import.span
+//RS                         };
+//RS                         let edit = if explicit_alias {
+//RS                             rename_edit(span, &name)
+//RS                         } else {
+//RS                             crate::Diagnostics::TextEdit {
+//RS                                 span: import.span,
+//RS                                 new_text: String::new(),
+//RS                             }
+//RS                         };
+//RS                         candidates.push(LivenessCandidate {
+//RS                             code: "L0103",
+//RS                             name: name.clone(),
+//RS                             module: module_idx,
+//RS                             span,
+//RS                             detail: "import is never read",
+//RS                             edit,
+//RS                         });
+//RS                     }
+//RS                 }
+//RS             }
+//RS             for binding in import.walk_bindings() {
+//RS                 // A public import is an export surface, not a private local
+//RS                 // binding. Its reachability is checked by the export pass.
+//RS                 if binding.is_pub || binding.is_package_pub || ignored_name(&binding.local) {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(alias) = ledger.alias(module_idx, &binding.local) else {
+//RS                     continue;
+//RS                 };
+//RS                 if alias.span.start >= alias.span.end || alias_used(ledger, alias) {
+//RS                     continue;
+//RS                 }
+//RS                 let span = alias.span;
+//RS                 if span.start >= span.end {
+//RS                     continue;
+//RS                 }
+//RS                 let name = binding.local;
+//RS                 candidates.push(LivenessCandidate {
+//RS                     code: "L0103",
+//RS                     name: name.clone(),
+//RS                     module: module_idx,
+//RS                     span,
+//RS                     detail: "import is never read",
+//RS                     edit: rename_edit(span, &name),
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_unused_private_functions(
+//RS     bundle: &ProgramBundle,
+//RS     ledger: &NameLedger,
+//RS     index: &LivenessIndex<'_>,
+//RS     app_graph: Option<&AppGraph>,
+//RS     candidates: &mut Vec<LivenessCandidate>,
+//RS ) {
+//RS     for declaration in ledger.declarations() {
+//RS         if declaration.visibility != NameVisibility::Private
+//RS             || declaration.kind != "function"
+//RS             || ignored_name(&declaration.name)
+//RS             || declaration.span.start >= declaration.span.end
+//RS         {
+//RS             continue;
+//RS         }
+//RS         if function_is_root(bundle, index, declaration, app_graph)
+//RS             || private_function_used(bundle, ledger, index, declaration)
+//RS         {
+//RS             continue;
+//RS         }
+//RS         if bundle.modules.get(declaration.module).is_none() {
+//RS             continue;
+//RS         }
+//RS         let name = display_name(declaration);
+//RS         let edit = index
+//RS             .function(declaration.module, declaration.span)
+//RS             .filter(|function| removable_private_function(function))
+//RS             .map(|function| crate::Diagnostics::TextEdit {
+//RS                 span: function.span,
+//RS                 new_text: String::new(),
+//RS             })
+//RS             .unwrap_or_else(|| rename_edit(declaration.span, &name));
+//RS         candidates.push(LivenessCandidate {
+//RS             code: "L0104",
+//RS             name,
+//RS             module: declaration.module,
+//RS             span: declaration.span,
+//RS             detail: "private function is never reached",
+//RS             edit,
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn collect_unreachable_exports(
+//RS     bundle: &ProgramBundle,
+//RS     ledger: &NameLedger,
+//RS     index: &LivenessIndex<'_>,
+//RS     app_graph: Option<&AppGraph>,
+//RS     candidates: &mut Vec<LivenessCandidate>,
+//RS ) {
+//RS     for declaration in ledger.declarations() {
+//RS         if declaration.visibility != NameVisibility::Package
+//RS             || !export_kind(&declaration.kind)
+//RS             || ignored_name(&declaration.name)
+//RS             || declaration.name.contains('.')
+//RS             || declaration.span.start >= declaration.span.end
+//RS         {
+//RS             continue;
+//RS         }
+//RS         if function_is_root(bundle, index, declaration, app_graph)
+//RS             || declaration_reached_from_package(bundle, ledger, index, declaration)
+//RS         {
+//RS             continue;
+//RS         }
+//RS         let Some(_) = bundle.modules.get(declaration.module) else {
+//RS             continue;
+//RS         };
+//RS         candidates.push(LivenessCandidate {
+//RS             code: "L0105",
+//RS             name: display_name(declaration),
+//RS             module: declaration.module,
+//RS             span: declaration.span,
+//RS             detail: "package export is unreachable",
+//RS             edit: rename_edit(declaration.span, &display_name(declaration)),
+//RS         });
+//RS     }
+//RS 
+//RS     // `pub(package) use …` has an alias declaration rather than a top-level
+//RS     // item declaration. Only aliases represented by source import bindings
+//RS     // enter this export verdict; compiler-prelude aliases remain invisible.
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         for import in &module.imports {
+//RS             for binding in import.walk_bindings() {
+//RS                 if !binding.is_package_pub || ignored_name(&binding.local) {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(alias) = ledger.alias(module_idx, &binding.local) else {
+//RS                     continue;
+//RS                 };
+//RS                 if alias.span.start >= alias.span.end
+//RS                     || alias_reached_from_package(bundle, ledger, alias)
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 let span = alias.span;
+//RS                 if span.start >= span.end {
+//RS                     continue;
+//RS                 }
+//RS                 let name = binding.local;
+//RS                 candidates.push(LivenessCandidate {
+//RS                     code: "L0105",
+//RS                     name: name.clone(),
+//RS                     module: module_idx,
+//RS                     span,
+//RS                     detail: "package re-export is unreachable",
+//RS                     edit: rename_edit(span, &name),
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn ignored_name(name: &str) -> bool {
+//RS     name.is_empty() || name.starts_with('_') || name.starts_with(Syntax::GENERATED_NAME_PREFIX)
+//RS }
+//RS 
+//RS fn rename_edit(span: Span, name: &str) -> crate::Diagnostics::TextEdit {
+//RS     crate::Diagnostics::TextEdit {
+//RS         span,
+//RS         new_text: format!("_{name}"),
+//RS     }
+//RS }
+//RS 
+//RS fn removable_private_function(function: &Func) -> bool {
+//RS     function.body.is_empty()
+//RS         && function.meta.is_none()
+//RS         && function.markers.is_empty()
+//RS         && function.external_type.is_none()
+//RS         && function.inline_foreign.is_none()
+//RS         && function.undo.is_none()
+//RS         && function.web_marker.is_none()
+//RS         && function.pre.is_empty()
+//RS         && function.post.is_empty()
+//RS         && !function.compiler_generated
+//RS         && !function.is_unsafe
+//RS         && !function.is_pure
+//RS         && !function.is_reactive
+//RS         && !function.is_replayable
+//RS         && !function.is_job
+//RS         && function.every.is_none()
+//RS         && !function.is_must_use
+//RS         && function.kernel.is_none()
+//RS }
+//RS 
+//RS fn export_kind(kind: &str) -> bool {
+//RS     matches!(
+//RS         kind,
+//RS         "function"
+//RS             | "type"
+//RS             | "const"
+//RS             | "trait"
+//RS             | "protocol"
+//RS             | "state"
+//RS             | "tag"
+//RS             | "module"
+//RS             | "file_module"
+//RS             | "extern"
+//RS     )
+//RS }
+//RS 
+//RS fn display_name(declaration: &NameDeclaration) -> String {
+//RS     declaration
+//RS         .name
+//RS         .rsplit_once('.')
+//RS         .map(|(_, leaf)| leaf.to_string())
+//RS         .unwrap_or_else(|| declaration.name.clone())
+//RS }
+//RS 
+//RS fn alias_used(ledger: &NameLedger, alias: &NameAlias) -> bool {
+//RS     ledger.alias_used(alias.module, alias)
+//RS }
+//RS 
+//RS fn private_function_used(
+//RS     bundle: &ProgramBundle,
+//RS     ledger: &NameLedger,
+//RS     index: &LivenessIndex<'_>,
+//RS     declaration: &NameDeclaration,
+//RS ) -> bool {
+//RS     let Some(target_path) = bundle
+//RS         .modules
+//RS         .get(declaration.module)
+//RS         .map(|module| module.display.as_str())
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     let function_span = index
+//RS         .function(declaration.module, declaration.span)
+//RS         .map(|function| function.span);
+//RS     // D-MOD-CYCLE1=A: a package is one namespace, so a call from another
+//RS     // file of the same package reaches a private function too.
+//RS     let siblings = ledger
+//RS         .namespace_siblings(declaration.module)
+//RS         .into_iter()
+//RS         .filter_map(|sibling| bundle.modules.get(sibling))
+//RS         .map(|module| module.display.as_str())
+//RS         .collect::<Vec<_>>();
+//RS     index
+//RS         .references_to(target_path, declaration.span)
+//RS         .iter()
+//RS         .any(|site| {
+//RS             site.kind == "function"
+//RS                 && if site.source == target_path {
+//RS                     !function_span
+//RS                         .is_some_and(|span| site.start >= span.start && site.end <= span.end)
+//RS                 } else {
+//RS                     siblings.contains(&site.source)
+//RS                 }
+//RS         })
+//RS }
+//RS 
+//RS fn declaration_reached_from_package(
+//RS     bundle: &ProgramBundle,
+//RS     ledger: &NameLedger,
+//RS     index: &LivenessIndex<'_>,
+//RS     declaration: &NameDeclaration,
+//RS ) -> bool {
+//RS     let Some(target_module) = bundle.modules.get(declaration.module) else {
+//RS         return false;
+//RS     };
+//RS     let Some(target) = ledger.module(declaration.module) else {
+//RS         return false;
+//RS     };
+//RS     index
+//RS         .references_to(&target_module.display, declaration.span)
+//RS         .iter()
+//RS         .any(|site| {
+//RS             index.modules.get(site.source).is_some_and(|&source_idx| {
+//RS                 source_idx != declaration.module
+//RS                     && ledger
+//RS                         .module(source_idx)
+//RS                         .is_some_and(|source| source.package == target.package)
+//RS             })
+//RS         })
+//RS }
+//RS 
+//RS fn alias_reached_from_package(
+//RS     bundle: &ProgramBundle,
+//RS     ledger: &NameLedger,
+//RS     alias: &NameAlias,
+//RS ) -> bool {
+//RS     let Some(owner) = ledger.module(alias.module) else {
+//RS         return false;
+//RS     };
+//RS     ledger.aliases().any(|consumer| {
+//RS         consumer.module != alias.module
+//RS             && consumer.target_module == Some(alias.module)
+//RS             && consumer
+//RS                 .target
+//RS                 .rsplit_once('.')
+//RS                 .map_or(false, |(_, leaf)| leaf == alias.name)
+//RS             && ledger
+//RS                 .module(consumer.module)
+//RS                 .is_some_and(|module| module.package == owner.package)
+//RS             && bundle
+//RS                 .modules
+//RS                 .get(consumer.module)
+//RS                 .is_some_and(|module| module.display != owner.path)
+//RS     })
+//RS }
+//RS 
+//RS fn function_is_root(
+//RS     bundle: &ProgramBundle,
+//RS     index: &LivenessIndex<'_>,
+//RS     declaration: &NameDeclaration,
+//RS     app_graph: Option<&AppGraph>,
+//RS ) -> bool {
+//RS     let Some(function) = index.function(declaration.module, declaration.span) else {
+//RS         return false;
+//RS     };
+//RS     if super::is_build_entry(function) {
+//RS         return true;
+//RS     }
+//RS     if function.is_job
+//RS         || matches!(
+//RS             function.web_marker,
+//RS             Some(jet_foundation::WebPartition::WebPartitionMarker::WasmExport)
+//RS         )
+//RS     {
+//RS         return true;
+//RS     }
+//RS     if declaration.module == bundle.entry && function.name == "run" {
+//RS         return true;
+//RS     }
+//RS     let Some(graph) = app_graph else { return false };
+//RS     if declaration.module != bundle.entry {
+//RS         return false;
+//RS     }
+//RS     let handler = |name: &str| name == function.name;
+//RS     graph.routes.iter().any(|route| handler(&route.handler))
+//RS         || graph.actions.iter().any(|action| handler(&action.handler))
+//RS         || graph.mounts.iter().any(|mount| handler(&mount.handler))
+//RS }
+//RS 
+//RS /// Add every function and method of `items` under its name span, keeping the
+//RS /// first in item order.
+//RS fn index_functions<'a>(
+//RS     module: usize,
+//RS     items: &'a [Item],
+//RS     functions: &mut HashMap<(usize, Span), &'a Func>,
+//RS ) {
+//RS     for item in items {
+//RS         let methods: Box<dyn Iterator<Item = &'a Func>> = match item {
+//RS             Item::Func(function) => Box::new(std::iter::once(function)),
+//RS             Item::Struct(definition) => Box::new(
+//RS                 definition.methods.iter().chain(
+//RS                     definition
+//RS                         .trait_impls
+//RS                         .iter()
+//RS                         .flat_map(|implementation| implementation.methods.iter()),
+//RS                 ),
+//RS             ),
+//RS             Item::Enum(definition) => Box::new(
+//RS                 definition.methods.iter().chain(
+//RS                     definition
+//RS                         .trait_impls
+//RS                         .iter()
+//RS                         .flat_map(|implementation| implementation.methods.iter()),
+//RS                 ),
+//RS             ),
+//RS             Item::Impl(implementation) => Box::new(implementation.methods.iter()),
+//RS             Item::CodeModule(code_module) => {
+//RS                 if let Some(body) = &code_module.body {
+//RS                     index_functions(module, body, functions);
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             _ => continue,
+//RS         };
+//RS         for function in methods {
+//RS             functions.entry((module, function.name_span)).or_insert(function);
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0354 crates/jet-sema/src/Sema/Bundle/Liveness.rs:1-606
+

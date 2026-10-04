@@ -1,0 +1,167 @@
+// Rust Sema/Effects.rs::solve_reachability. Only captured checked summaries
+// supply graph edges; Tools never visits AST to recreate these facts.
+use jet_foundation.[ReachabilityResult, ReachabilityRow, fact_sorted_strings, project_reachability, reachability_copy_node, sema_effect_covers]
+
+fn sema_reachability_seed(values: &[String:[String]], node: String, fact: String) Never! {
+    facts := values.get(node) ?? [String]{}
+    if !facts.contains(fact) -> &facts.push(fact)
+    values[node] = facts
+}
+fn sema_reachability_has_root(values: [String], root: String) -> Bool Never! {
+    loop value in values { if sema_effect_covers(root, value) -> return true }
+    false
+}
+pub fn sema_solve_reachability(summaries: [String:EffectSummary], taint_seeds: [String:[String]]) -> ReachabilityResult Never! {
+    graph := [String:[String]]{}
+    effects := [String:[String]]{}
+    calls_exec := [String:[String]]{}
+    secret := [String:[String]]{}
+    keys := [String]{}
+    loop (name, summary) in summaries {
+        &keys.push(name)
+        graph[name] = summary.edges
+        direct := summary.direct
+        if summary.maximal -> &direct.extend(sema_effect_grantable_roots())
+        direct = fact_sorted_strings(direct)
+        if sema_reachability_has_root(direct, "Exec") -> sema_reachability_seed(&calls_exec, name, "Exec")
+        if sema_reachability_has_root(summary.direct, "Secret") -> sema_reachability_seed(&secret, name, "Secret")
+        if direct.len() > 0 -> effects[name] = direct
+    }
+    panic_seeds := [String:[String]]{"__jet_panic__": [String]{"panic"}}
+    sema_reachability_seed(&effects, "__jet_panic__", "Panic")
+    // Index exact identities and qualified suffixes once, in BTree key order.
+    &keys.sort()
+    seed_nodes := [String:[String]]{}
+    if taint_seeds.len() > 0 {
+        loop candidate in keys {
+            targets := seed_nodes.get(candidate) ?? [String]{}
+            &targets.push(candidate)
+            seed_nodes[candidate] = targets
+            bytes :: candidate.bytes()
+            loop offset in 0..<bytes.len() - 1 {
+                has_separator :: bytes[offset] == U8{58} && bytes[offset + 1] == U8{58}
+                if has_separator {
+                    suffix := String.from_bytes(bytes[offset + 2..<bytes.len()]) ?? next // #4303
+                    suffix_targets := seed_nodes.get(suffix) ?? [String]{}
+                    &suffix_targets.push(candidate)
+                    seed_nodes[suffix] = suffix_targets
+                }
+            }
+        }
+    }
+    taint := [String:[String]]{}
+    loop (name, facts) in taint_seeds {
+        seed_targets :: seed_nodes.get(name) ?? [String]{}
+        loop node in seed_targets {
+            tags := taint.get(node) ?? [String]{}
+            &tags.extend(facts)
+            taint[node] = fact_sorted_strings(tags)
+        }
+    }
+    project_reachability(graph, [ReachabilityRow]{
+        ReachabilityRow{name: "effects", seeds: effects},
+        ReachabilityRow{name: "panic", seeds: panic_seeds},
+        ReachabilityRow{name: "taint", seeds: taint},
+        ReachabilityRow{name: "secret", seeds: secret},
+        ReachabilityRow{name: "calls-exec", seeds: calls_exec},
+    })
+}
+
+pub struct SemaEffectQualificationModule { pub alias: String, pub summaries: [String:EffectSummary] }
+pub struct SemaQualifiedEffectFacts { pub summaries: [String:EffectSummary], pub reachability: ReachabilityResult }
+fn sema_qualify_effect_edge(edge: String, alias: String, local_keys: [String:Bool], aliases: [String:Bool], locations: [String:[String]]) -> String Never! {
+    if edge == "__jet_panic__" -> return ~edge
+    is_local :: local_keys.get(edge) ?? false
+    if is_local -> return "{alias}::{edge}"
+    bytes :: edge.bytes()
+    loop index in 0..<bytes.len() {
+        is_dot :: bytes[index] == U8{46}
+        if is_dot {
+            module_name := String.from_bytes(bytes[0..<index]) ?? "" // #4303
+            symbol := String.from_bytes(bytes[index + 1..<bytes.len()]) ?? "" // #4303
+            is_alias :: aliases.get(module_name) ?? false
+            if is_alias -> return "{module_name}::{symbol}"
+            break
+        }
+    }
+    values :: locations.get(edge) ?? return ~edge
+    if values.len() == 1 -> return values[0]
+    ~edge
+}
+fn sema_qualify_effect_edges(edges: [String], alias: String, local_keys: [String:Bool], aliases: [String:Bool], locations: [String:[String]]) -> [String] Never! {
+    result := [String]{}
+    loop edge in edges -> &result.push(sema_qualify_effect_edge(edge, alias, local_keys, aliases, locations))
+    fact_sorted_strings(result)
+}
+// Rust Bundle/Validation.rs::qualified_effect_facts. This adapter is for
+// module-local captured graphs; SymbolID-keyed Checks graphs are already
+// globally qualified and go directly through sema_solve_reachability.
+pub fn sema_qualified_effect_facts(modules: [SemaEffectQualificationModule], sealed: [SemaEffectQualificationModule], taint_seeds: [String:[String]]) -> SemaQualifiedEffectFacts Never! {
+    aliases := [String:Bool]{}
+    locations := [String:[String]]{}
+    loop module_facts in modules -> aliases[module_facts.alias] = true
+    sources := [SemaEffectQualificationModule]{}
+    &sources.extend(modules)
+    &sources.extend(sealed)
+    loop module_facts in sources {
+        loop (key, _) in module_facts.summaries {
+            targets := locations.get(key) ?? [String]{}
+            &targets.push("{module_facts.alias}::{key}")
+            locations[key] = targets
+        }
+    }
+    qualified := [String:EffectSummary]{}
+    loop module_facts in sealed {
+        loop (key, summary) in module_facts.summaries -> qualified["{module_facts.alias}::{key}"] = summary
+    }
+    loop module_facts in modules {
+        local_keys := [String:Bool]{}
+        loop (key, _) in module_facts.summaries -> local_keys[key] = true
+        loop (key, original) in module_facts.summaries {
+            summary := original
+            summary.edges = sema_qualify_effect_edges(summary.edges, module_facts.alias, local_keys, aliases, locations)
+            loop index in 0..<summary.regions.len() -> summary.regions[index].edges = sema_qualify_effect_edges(summary.regions[index].edges, module_facts.alias, local_keys, aliases, locations)
+            loop index in 0..<summary.callback_obligations.len() -> summary.callback_obligations[index].edges = sema_qualify_effect_edges(summary.callback_obligations[index].edges, module_facts.alias, local_keys, aliases, locations)
+            loop index in 0..<summary.autodiff_obligations.len() -> summary.autodiff_obligations[index].target = sema_qualify_effect_edge(summary.autodiff_obligations[index].target, module_facts.alias, local_keys, aliases, locations)
+            loop index in 0..<summary.discarded_results.len() -> summary.discarded_results[index].callee = sema_qualify_effect_edge(summary.discarded_results[index].callee, module_facts.alias, local_keys, aliases, locations)
+            loop index in 0..<summary.memory.calls.len() -> summary.memory.calls[index].callee = sema_qualify_effect_edge(summary.memory.calls[index].callee, module_facts.alias, local_keys, aliases, locations)
+            loop index in 0..<summary.memory.regions.len() {
+                summary.memory.regions[index].edges = sema_qualify_effect_edges(summary.memory.regions[index].edges, module_facts.alias, local_keys, aliases, locations)
+                loop call_index in 0..<summary.memory.regions[index].calls.len() -> summary.memory.regions[index].calls[call_index].callee = sema_qualify_effect_edge(summary.memory.regions[index].calls[call_index].callee, module_facts.alias, local_keys, aliases, locations)
+            }
+            qualified["{module_facts.alias}::{key}"] = summary
+        }
+    }
+    reachability := sema_solve_reachability(qualified, taint_seeds)
+    loop (short, targets) in locations {
+        if targets.len() != 1 -> next
+        summary :: qualified.get(targets[0]) ?? next
+        qualified[short] = summary
+        reachability_copy_node(&reachability, short, targets[0])
+    }
+    SemaQualifiedEffectFacts{summaries: qualified, reachability: reachability}
+}
+
+// Exact original declaration identity joins two existing retained owners.
+// CP-TAINT-RETURNS owns the additional inferred/source return producer; these
+// seeds faithfully retain the currently checked declared/FFI return facts.
+pub fn sema_checked_taint_reachability_seeds(registration: SemaRegistrationGraph, taint: SemaTaintResult) -> [String:[String]] Never! {
+    identities := [String:String]{}
+    loop registered_module in registration.modules {
+        loop function in registered_module.functions {
+            span :: function.declaration.name_span
+            identities["{registered_module.module_identity}:{span.start}:{span.end}"] = function.symbol.id.key
+        }
+        loop function in registered_module.foreign_functions {
+            span :: function.declaration.name_span
+            identities["{registered_module.module_identity}:{span.start}:{span.end}"] = function.symbol.id.key
+        }
+    }
+    seeds := [String:[String]]{}
+    loop callable in taint.callable_facts {
+        key :: identities.get("{callable.module_identity}:{callable.span.start}:{callable.span.end}") ?? next
+        if callable.return_tags.len() == 0 -> next
+        seeds[key] = fact_sorted_strings(callable.return_tags)
+    }
+    seeds
+}

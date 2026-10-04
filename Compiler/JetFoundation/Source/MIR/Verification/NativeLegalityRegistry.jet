@@ -1,0 +1,95 @@
+// MIROptimization.rs:231-252. The checked trait and RHS are authoritative.
+fn mir_native_verify_operator_markers(program: MIRProgram) MIRLegalityError! {
+    loop implementation in program.impls {
+        if implementation.operator_marker != Val(MIROperatorMarker.Commutative) -> next
+        valid := false
+        if implementation.trait_ref == .Val(trait_ref) {
+            parts :: trait_ref.name.split("::")
+            name :: parts[parts.len() - 1]
+            valid = name == TRAIT_ADD || name == TRAIT_MUL
+        }
+        if !valid || implementation.operator_rhs == None -> return Err(mir_native_invalid_row("invalid #Commutative operator marker", implementation.span))
+    }
+    return
+}
+
+// MIROptimization.rs:875-943. Index the canonical profile once (first row,
+// exactly as TargetHardwareFacts::{dma_channel,interrupt}'s native find).
+fn mir_native_verify_hardware_setups(program: MIRProgram) MIRLegalityError! {
+    span :: Span{start: 0, end: 0}
+    if program.facts.hardware_setups.len() == 0 -> return
+    profile_id :: program.facts.hardware_profile_id
+    if profile_id.len() == 0 -> return Err(mir_native_invalid_row("hardware setup has no profile ID", span))
+    profile :: program.facts.hardware_profile ?? return Err(mir_native_invalid_row("hardware setup has no target profile", span))
+    dma := [String:Int]{}
+    interrupts := [String:Int]{}
+    loop (index, fact) in profile.dma_channels { if dma.get(fact.name) == None -> dma[fact.name] = index }
+    loop (index, fact) in profile.interrupts { if interrupts.get(fact.name) == None -> interrupts[fact.name] = index }
+    channels := [String:Bool]{}
+    vectors := [Int:Bool]{}
+    loop setup in program.facts.hardware_setups {
+        if setup == {
+            .DMAConfigure(setup_profile, channel, width, ownership) -> {
+                if setup_profile.len() == 0 || setup_profile != profile_id || channel.len() == 0 -> return Err(mir_native_invalid_row("invalid DMA hardware setup identity", span))
+                index :: dma.get(channel) ?? return Err(mir_native_invalid_row("unknown DMA channel {channel}", span))
+                fact :: profile.dma_channels[index]
+                if fact.transfer_width != width || fact.ownership != ownership -> return Err(mir_native_invalid_row("DMA setup disagrees with channel {channel} facts", span))
+                if channels.get(channel) != None -> return Err(mir_native_invalid_row("duplicate DMA setup {channel}", span))
+                channels[channel] = true
+            }
+            .InterruptBind(setup_profile, interrupt, vector, handler, effects) -> {
+                if setup_profile.len() == 0 || setup_profile != profile_id || interrupt.len() == 0 || handler.len() == 0 || mir_native_has_empty_string(effects) -> return Err(mir_native_invalid_row("invalid interrupt hardware setup identity", span))
+                index :: interrupts.get(interrupt) ?? return Err(mir_native_invalid_row("unknown interrupt {interrupt}", span))
+                fact :: profile.interrupts[index]
+                if fact.vector != vector -> return Err(mir_native_invalid_row("interrupt {interrupt} vector disagrees with profile", span))
+                actual := [String:Bool]{}
+                expected := [String:Bool]{}
+                loop effect in effects -> actual[effect] = true
+                loop effect in fact.forbidden_effects -> expected[effect] = true
+                if actual.len() != expected.len() -> return Err(mir_native_invalid_row("interrupt {interrupt} effects disagree with profile", span))
+                loop effect in fact.forbidden_effects {
+                    if actual.get(effect) == None -> return Err(mir_native_invalid_row("interrupt {interrupt} effects disagree with profile", span))
+                }
+                if vectors.get(vector) != None -> return Err(mir_native_invalid_row("duplicate interrupt vector {vector}", span))
+                vectors[vector] = true
+            }
+        }
+    }
+    return
+}
+
+// MIROptimization.rs:964-1016.
+fn mir_native_verify_prelude_rows(program: MIRProgram, types: [U64:Bool], fields: [U64:Bool]) MIRLegalityError! {
+    zero :: MIRFunctionID{value: U64{0}}
+    seen_fields := [U64:Bool]{}
+    loop row in program.fields {
+        if row.id.value == U64{0} || row.field.id != row.id || seen_fields.get(row.id.value) != None || fields.get(row.id.value) == None || types.get(row.owner.value) == None || row.field.name.len() == 0 || !mir_native_valid_shape_field_names(row.field.shape_names) || row.field.span.start > row.field.span.end -> return Err(mir_native_invalid_row("field row MirFieldId({row.id.value})", row.field.span))
+        seen_fields[row.id.value] = true
+        mir_native_verify_type(row.field.ty, row.field.span, zero)
+    }
+    seen_sources := [U64:Bool]{}
+    loop source in program.source_files {
+        if source.id.value == U64{0} || seen_sources.get(source.id.value) != None || source.path.len() == 0 -> return Err(mir_native_invalid_row("source file MirSourceFileId({source.id.value})", Span{start: 0, end: 0}))
+        seen_sources[source.id.value] = true
+    }
+    seen_calls := [U64:Bool]{}
+    loop call in program.prelude_calls {
+        if call.id.value == U64{0} || seen_calls.get(call.id.value) != None || call.module_name.len() == 0 || call.member.len() == 0 || mir_symbol_name(call.symbol).len() == 0 || call.signature.arity != call.signature.borrow_mask.len() || call.signature.arity > call.signature.max_arity -> return Err(MIRLegalityError.InvalidPreludeCall{call: call.id.value, member: call.member})
+        seen_calls[call.id.value] = true
+        mir_native_verify_call_fallibility(call.fallibility, zero, Span{start: 0, end: 0})
+    }
+    return
+}
+
+// MIROptimization.rs:1019-1068. Executability/purity remain orthogonal.
+fn mir_native_verify_core_call(call: MIRCoreCall) MIRLegalityError! {
+    invalid :: MIRLegalityError.InvalidCoreCall{call: call.id.value, key: call.key}
+    if call.key.len() == 0 || (call.module_name.len() == 0 && !call.key.starts_with("receiver(")) || call.member.len() == 0 || call.arity != call.borrow_mask.len() || call.arity > call.max_arity || (call.coverage_bits & -128) != 0 || (core_call_symbol_name(call.symbol).len() == 0 && (call.coverage_bits & 0b1011000) != 0 && call.interpreter_route != .TypedIntrinsic) || call.jit_symbol == Val("") -> return Err(invalid)
+    if call.interpreter_route == {
+        .NoRoute -> { if (call.coverage_bits & 16) != 0 -> return Err(invalid) }
+        .Pure(route) -> { if route == .NoPureRoute || call.pure_route != route || (call.coverage_bits & 16) == 0 -> return Err(invalid) }
+        .Ambient -> { if (call.coverage_bits & 16) == 0 -> return Err(invalid) }
+        .TypedIntrinsic -> { if (call.coverage_bits & 16) == 0 || call.pure_route != .NoPureRoute -> return Err(invalid) }
+    }
+    return
+}

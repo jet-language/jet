@@ -1,0 +1,175 @@
+use CLISchema.[CLICommandSchema, CLIInputSchema, CLIInputShape, CLIValueKind, CLISubcommandSchema, JobFact, MetadataError, encode_record, decode_record, read_executable]
+use CLISchema02.[embed_wasm_record]
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:2455
+fn schema() -> CLICommandSchema Never! {
+    CLICommandSchema("Options", None,
+        [CLIInputSchema]{CLIInputSchema("output_file", "output-file", Val("o"), Val("OUTPUT_FILE"),
+            "destination", Val("OUTPUT_FILE"), CLIInputShape.Value(.Path, false, None), Val(U16{0}))},
+        [CLISubcommandSchema]{}, [JobFact]{}, false, None)
+}
+// Fixture byte writers implement Rust copy_from_slice / fixed-width to_{le,be}_bytes.
+fn fixture_zeroes(count: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop _ in 0..<count -> &out.push(U8{0})
+    ^out
+}
+fn fixture_copy(out: &[U8], at: Int, bytes: View<U8>) Never! {
+    loop index in 0..<bytes.len() -> out[at + index] = bytes[index]
+}
+fn fixture_number(out: &[U8], at: Int, value: U64, width: Int, little: Bool) Never! {
+    loop index in 0..<width {
+        shift :: (if little -> index else -> width - index - 1) * 8
+        out[at + index] = U8{Int{(value >> shift) & U64{255}}}
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2480
+fn elf(record: View<U8>) -> [U8] Never! {
+    names := [U8]{0}
+    loop byte in ".shstrtab".bytes() -> &names.push(byte)
+    &names.push(U8{0})
+    loop byte in ".jet_command".bytes() -> &names.push(byte)
+    &names.push(U8{0})
+    names_at :: 64
+    record_at :: names_at + names.len()
+    sections_at :: record_at + record.len()
+    bytes := fixture_zeroes(sections_at + 3 * 64)
+    bytes[0] = U8{127}
+    fixture_copy(&bytes, 1, "ELF".bytes())
+    bytes[4] = U8{2}
+    bytes[5] = U8{1}
+    fixture_number(&bytes, 40, U64{sections_at}, 8, true)
+    fixture_number(&bytes, 58, U64{64}, 2, true)
+    fixture_number(&bytes, 60, U64{3}, 2, true)
+    fixture_number(&bytes, 62, U64{1}, 2, true)
+    fixture_copy(&bytes, names_at, names.view())
+    fixture_copy(&bytes, record_at, record)
+    strings :: sections_at + 64
+    fixture_number(&bytes, strings, U64{1}, 4, true)
+    fixture_number(&bytes, strings + 24, U64{names_at}, 8, true)
+    fixture_number(&bytes, strings + 32, U64{names.len()}, 8, true)
+    metadata :: sections_at + 128
+    fixture_number(&bytes, metadata, U64{11}, 4, true)
+    fixture_number(&bytes, metadata + 24, U64{record_at}, 8, true)
+    fixture_number(&bytes, metadata + 32, U64{record.len()}, 8, true)
+    ^bytes
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2506
+fn pe(record: View<U8>, duplicate: Bool) -> [U8] Never! {
+    pe_at :: 128
+    count :: if duplicate -> 2 else -> 1
+    table :: pe_at + 24
+    raw_at :: table + count * 40
+    bytes := fixture_zeroes(raw_at + count * record.len())
+    fixture_copy(&bytes, 0, "MZ".bytes())
+    fixture_number(&bytes, 60, U64{pe_at}, 4, true)
+    fixture_copy(&bytes, pe_at, "PE".bytes())
+    fixture_number(&bytes, pe_at + 6, U64{count}, 2, true)
+    loop index in 0..<count {
+        section :: table + index * 40
+        fixture_copy(&bytes, section, ".jetcmd".bytes())
+        fixture_number(&bytes, section + 16, U64{record.len()}, 4, true)
+        offset :: raw_at + index * record.len()
+        fixture_number(&bytes, section + 20, U64{offset}, 4, true)
+        fixture_copy(&bytes, offset, record)
+    }
+    ^bytes
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2527
+fn pe_with_trailing(record: View<U8>, trailing: View<U8>) -> [U8] Never! {
+    bytes := pe(record, false)
+    table :: 128 + 24
+    fixture_number(&bytes, table + 16, U64{record.len() + trailing.len()}, 4, true)
+    loop byte in trailing -> &bytes.push(byte)
+    ^bytes
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2536
+fn mach(record: View<U8>) -> [U8] Never! {
+    command_size :: 72 + 80
+    record_at :: 32 + command_size
+    bytes := fixture_zeroes(record_at + record.len())
+    bytes[0] = U8{207}; bytes[1] = U8{250}; bytes[2] = U8{237}; bytes[3] = U8{254}
+    fixture_number(&bytes, 16, U64{1}, 4, true)
+    fixture_number(&bytes, 20, U64{command_size}, 4, true)
+    fixture_number(&bytes, 32, U64{25}, 4, true)
+    fixture_number(&bytes, 36, U64{command_size}, 4, true)
+    fixture_number(&bytes, 96, U64{1}, 4, true)
+    section :: 104
+    fixture_copy(&bytes, section, "__jetcmd".bytes())
+    fixture_number(&bytes, section + 40, U64{record.len()}, 8, true)
+    fixture_number(&bytes, section + 48, U64{record_at}, 4, true)
+    fixture_copy(&bytes, record_at, record)
+    ^bytes
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2554
+fn fat_mach(record: View<U8>) -> [U8] Never! {
+    first :: mach(record)
+    second :: mach(record)
+    table_end :: 8 + 2 * 20
+    second_at :: table_end + first.len()
+    bytes := fixture_zeroes(second_at + second.len())
+    bytes[0] = U8{202}; bytes[1] = U8{254}; bytes[2] = U8{186}; bytes[3] = U8{190}
+    fixture_number(&bytes, 4, U64{2}, 4, false)
+    fixture_number(&bytes, 16, U64{table_end}, 4, false)
+    fixture_number(&bytes, 20, U64{first.len()}, 4, false)
+    fixture_number(&bytes, 36, U64{second_at}, 4, false)
+    fixture_number(&bytes, 40, U64{second.len()}, 4, false)
+    fixture_copy(&bytes, table_end, first.view())
+    fixture_copy(&bytes, second_at, second.view())
+    ^bytes
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2571
+fn nested_fat_mach(record: View<U8>) -> [U8] Never! {
+    inner :: fat_mach(record)
+    table_end :: 8 + 20
+    bytes := fixture_zeroes(table_end + inner.len())
+    bytes[0] = U8{202}; bytes[1] = U8{254}; bytes[2] = U8{186}; bytes[3] = U8{190}
+    fixture_number(&bytes, 4, U64{1}, 4, false)
+    fixture_number(&bytes, 16, U64{table_end}, 4, false)
+    fixture_number(&bytes, 20, U64{inner.len()}, 4, false)
+    fixture_copy(&bytes, table_end, inner.view())
+    ^bytes
+}
+fn metadata_test_error(result: CLICommandSchema MetadataError!) -> MetadataError Never! {
+    if result == { .Err(error) -> error .Ok(_) -> panic("expected metadata error") }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2584
+#Test("canonical_record_round_trips") {
+    expected :: schema()
+    record :: encode_record(expected)
+    assert(decode_record(record.view()).unwrap() == expected)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2590
+#Test("reads_cross_format_section_fixtures") {
+    expected :: schema()
+    record :: encode_record(expected)
+    assert(read_executable(elf(record.view()).view()).unwrap() == expected)
+    assert(read_executable(pe(record.view(), false).view()).unwrap() == expected)
+    assert(read_executable(mach(record.view()).view()).unwrap() == expected)
+    assert(read_executable(fat_mach(record.view()).view()).unwrap() == expected)
+    wasm := [U8]{0, 97, 115, 109, 1, 0, 0, 0}
+    embed_wasm_record(&wasm, record.view()).unwrap()
+    assert(read_executable(wasm.view()).unwrap() == expected)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2603
+#Test("hostile_records_fail_closed") {
+    record := encode_record(schema())
+    assert(metadata_test_error(read_executable("not executable".bytes())) == .UnknownFormat)
+    empty_wasm :: [U8]{0, 97, 115, 109, 1, 0, 0, 0}
+    assert(metadata_test_error(read_executable(empty_wasm.view())) == .Missing)
+    assert(metadata_test_error(read_executable(pe(record.view(), true).view())) == .Duplicate)
+    assert(metadata_test_error(read_executable(pe_with_trailing(record.view(), record.view()).view())) == .Duplicate)
+    nonzero :: [U8]{0, 7}
+    assert(metadata_test_error(read_executable(pe_with_trailing(record.view(), nonzero.view()).view()))
+        == .Malformed("nonzero bytes after PE metadata record"))
+    zeroes :: fixture_zeroes(16)
+    assert(read_executable(pe_with_trailing(record.view(), zeroes.view()).view()).unwrap() == schema())
+    assert(metadata_test_error(read_executable(nested_fat_mach(record.view()).view()))
+        == .Malformed("nested universal Mach-O slice"))
+    unsupported := ~record
+    fixture_number(&unsupported, 8, U64{6}, 2, true)
+    assert(metadata_test_error(decode_record(unsupported.view())) == .UnsupportedVersion(U16{6}))
+    corrupt := ^record
+    corrupt[corrupt.len() - 1] ^= U8{1}
+    assert(metadata_test_error(decode_record(corrupt.view())) == .Malformed("digest mismatch"))
+}

@@ -1,0 +1,247 @@
+// Codegen/mod.rs:596-632, 1969-1982, 4289-4609. Text transformations for
+// emitted Rust DATA, never another Jet parser or evaluator. Source lowering
+// belongs to the same checked -> MIR -> emitter path as ordinary modules.
+
+pub enum JetRuntimeFoundationPlacement { Root Module(String) }
+
+// The generated Foundation path contract in Codegen/mod.rs. One owner drives
+// root self-import suppression and admits module-qualified flat imports.
+pub fn jet_runtime_foundation_placement(module: String) -> JetRuntimeFoundationPlacement? Never! {
+    if module == {
+        "Outcome" | "Shape" | "Devtools" | "DevtoolsNative" | "Evidence"
+        | "NumericConversion" | "ExactUnitConversion" | "StructuralDebug"
+        | "StreamCursor" -> Val(JetRuntimeFoundationPlacement.Root)
+        "RuntimeDiagnosticCore" -> Val(JetRuntimeFoundationPlacement.Module("RuntimeDiagnosticCore"))
+        "EncodingErrors" -> Val(JetRuntimeFoundationPlacement.Module("jet_encoding_errors"))
+        "JSONNumber" -> Val(JetRuntimeFoundationPlacement.Module("jet_json_number"))
+        "EncodingJson" -> Val(JetRuntimeFoundationPlacement.Module("jet_encoding_json"))
+        "DataTree" -> Val(JetRuntimeFoundationPlacement.Module("jet_foundation_datatree"))
+        "ArrowData" -> Val(JetRuntimeFoundationPlacement.Module("jet_arrow_data"))
+        "ArrowFileReader" -> Val(JetRuntimeFoundationPlacement.Module("jet_arrow_file_reader"))
+        "PreludeDataFlow" -> Val(JetRuntimeFoundationPlacement.Module("jet_prelude_data_flow"))
+        "SHA256" -> Val(JetRuntimeFoundationPlacement.Module("SHA256"))
+        "PerformanceBudget" -> Val(JetRuntimeFoundationPlacement.Module("PerformanceBudget"))
+        "Numeric" -> Val(JetRuntimeFoundationPlacement.Module("jet_foundation_numeric"))
+        "Facts" -> Val(JetRuntimeFoundationPlacement.Module("Facts"))
+        "ResourceSchedule" -> Val(JetRuntimeFoundationPlacement.Module("ResourceSchedule"))
+        "CompilerStack" -> Val(JetRuntimeFoundationPlacement.Module("CompilerStack"))
+        else -> None
+    }
+}
+
+pub struct JetRuntimePreludeSplit { imports: [String], body: String }
+pub struct JetRuntimeFlatImport { path: String, name: String, binding: String }
+
+fn jet_runtime_append_bytes(out: &[U8], bytes: View<U8>) Never! {
+    loop byte in bytes -> &out.push(byte)
+}
+
+fn jet_runtime_source_bytes_text(bytes: View<U8>) -> String Never! {
+    out := [U8]{}
+    jet_runtime_append_bytes(&out, bytes)
+    String.from_bytes(^out) ?? panic("Prelude source ranges preserve UTF-8")
+}
+
+// Rust split_leading_top_level_uses: only the LEADING plain use block. Header
+// comments/attributes remain in the body, and later pub use stays untouched.
+// The byte cursor visits each line once, including multi-line use statements.
+pub fn jet_runtime_split_leading_top_level_uses(source: String) -> JetRuntimePreludeSplit Never! {
+    bytes :: source.bytes()
+    imports := [String]{}
+    body := [U8]{}
+    cursor := 0
+    loop cursor < bytes.len() {
+        line_end := cursor
+        loop line_end < bytes.len() && bytes[line_end] != U8{10} -> line_end += 1
+        if line_end < bytes.len() -> line_end += 1
+        line := jet_runtime_source_bytes_text(bytes.view(cursor..<line_end))
+        trimmed := line.trim() // #4303
+        if trimmed.len() == 0 || trimmed.starts_with("//") || trimmed.starts_with("#") {
+            jet_runtime_append_bytes(&body, bytes.view(cursor..<line_end))
+            cursor = line_end
+            next
+        }
+        if cursor + 4 > line_end || bytes[cursor] != U8{117} || bytes[cursor + 1] != U8{115} || bytes[cursor + 2] != U8{101} || bytes[cursor + 3] != U8{32} -> break
+        end := line_end
+        scan := cursor
+        semicolon := false
+        loop scan < end {
+            if bytes[scan] == U8{59} -> semicolon = true
+            scan += 1
+        }
+        loop !semicolon && end < bytes.len() {
+            loop end < bytes.len() && bytes[end] != U8{10} {
+                if bytes[end] == U8{59} -> semicolon = true
+                end += 1
+            }
+            if end < bytes.len() -> end += 1
+        }
+        statement := jet_runtime_source_bytes_text(bytes.view(cursor..<end)).trim() // #4303
+        &imports.push(statement)
+        cursor = end
+    }
+    jet_runtime_append_bytes(&body, bytes.view(cursor..<bytes.len()))
+    JetRuntimePreludeSplit{imports: ^imports, body: String.from_bytes(^body) ?? panic("Prelude body preserves UTF-8")}
+}
+
+pub fn jet_runtime_flat_prelude_body(source: String) -> String Never! {
+    jet_runtime_split_leading_top_level_uses(source).body
+}
+
+pub fn jet_runtime_flat_prelude_import_bindings(source: String) -> [JetRuntimeFlatImport] Never! {
+    split :: jet_runtime_split_leading_top_level_uses(source)
+    bindings := [JetRuntimeFlatImport]{}
+    loop statement in split.imports {
+        item := statement // #4303
+        loop item.starts_with("use ") -> item = item.slice(4, item.len())
+        loop item.ends_with(";") -> item = item.slice(0, item.len() - 1)
+        item = item.trim()
+        path := ""
+        names := item // #4303
+        if item.split_once("::{{") == {
+            Val((head, tail)) -> {
+                path = head.trim()
+                names = tail
+                loop names.ends_with("}}") -> names = names.slice(0, names.len() - 1)
+            }
+            None -> {
+                if item.cut_last("::") == {
+                    Val((head, tail)) -> {
+                        path = head
+                        names = tail
+                    }
+                    None -> {}
+                }
+            }
+        }
+        loop raw_name in names.split(",") {
+            name := raw_name.trim() // #4303
+            if name.len() == 0 -> next
+            binding := name // #4303
+            if name.split_once(" as ") == .Val((original, alias)) {
+                name = original.trim()
+                binding = alias.trim()
+            }
+            &bindings.push(JetRuntimeFlatImport{path: path, name: name, binding: binding})
+        }
+    }
+    bindings
+}
+
+// FlatPreludeImport::identity: core/alloc imports are std re-exports. Preserve
+// the first spelling in output when the normalized item identity agrees.
+pub fn jet_runtime_flat_import_identity_path(path: String) -> String Never! {
+    if path.starts_with("core::") || path.starts_with("alloc::") {
+        rest := path.after("::") // #4303
+        return "std::{rest}"
+    }
+    path
+}
+
+pub fn jet_runtime_merge_flat_prelude_imports(sources: View<String>) -> String Never! {
+    bindings := [String:JetRuntimeFlatImport]{}
+    loop source in sources {
+        loop import in jet_runtime_flat_prelude_import_bindings(source) {
+            if import.path.starts_with("jet_foundation::") {
+                remainder := import.path.after("jet_foundation::") // #4303
+                module := remainder.before("::") // #4303
+                if jet_runtime_foundation_placement(module) == {
+                    Val(.Root) -> { if import.binding == import.name -> next }
+                    Val(.Module(_)) -> {}
+                    None -> panic("flat Prelude fragment imports `jet_foundation::{module}`, which the generated program does not embed; add its placement to FOUNDATION_PLACEMENTS")
+                }
+            }
+            if bindings.get(import.binding) == {
+                None -> bindings[import.binding] = import
+                Val(kept) -> {
+                    if kept.name != import.name || jet_runtime_flat_import_identity_path(kept.path) != jet_runtime_flat_import_identity_path(import.path) -> panic("flat Prelude fragments bind `{import.binding}` to two items: `{kept.path}::{kept.name}` and `{import.path}::{import.name}`")
+                }
+            }
+        }
+    }
+    ordered_bindings := bindings.keys().to_list()
+    &ordered_bindings.sort()
+    groups := [String:[String]]{}
+    loop name in ordered_bindings {
+        import :: bindings[name]
+        spelling :: if import.binding == import.name -> import.name else -> "{import.name} as {import.binding}"
+        if groups.get(import.path) == None -> groups[import.path] = [String]{}
+        &groups[import.path].push(spelling)
+    }
+    paths := groups.keys().to_list()
+    &paths.sort()
+    rendered := [String]{}
+    loop path in paths {
+        names :: groups[path]
+        if names.len() == 1 -> &rendered.push("use {path}::{names[0]};\n")
+        else -> &rendered.push("use {path}::{{{names.join(", ")}}};\n")
+    }
+    &rendered.push("\n")
+    rendered.join("")
+}
+
+// First complete marked region only. An absent end marker leaves source
+// unchanged, matching Rust rather than silently deleting the trailing body.
+pub fn jet_runtime_strip_source_shared_interop_jit(source: String) -> String Never! {
+    begin :: "    // jet:source-shared-interop-jit-begin\n"
+    end :: "    // jet:source-shared-interop-jit-end\n"
+    split :: source.split_once(begin) ?? return source
+    tail :: split.1.split_once(end) ?? return source
+    pieces :: [String]{split.0, tail.1}
+    pieces.join("")
+}
+
+pub fn jet_runtime_strip_scheduler_region(source: String, name: String) -> String Never! {
+    begin :: "// jet:scheduler-native-{name}-begin"
+    end :: "// jet:scheduler-native-{name}-end"
+    split :: source.split_once(begin) ?? return source
+    tail :: split.1.split_once(end) ?? return source
+    pieces :: [String]{split.0, tail.1}
+    pieces.join("")
+}
+
+// Rust scheduler native=true selects the actual native feature; false strips
+// notify/epoll/kqueue/iocp in that order. Import merge happens on all canonical
+// flat fragments before those bodies are flattened, not a handwritten list.
+pub fn jet_runtime_assemble_scheduler_prelude(scheduler: String, stream: String, flat_sources: View<String>, native_io: Bool) -> String Never! {
+    body := jet_runtime_flat_prelude_body(scheduler)
+    if native_io -> body = body.replace("feature = \"jet_native_io\"", "all()")
+    else {
+        regions :: [String]{"notify", "epoll", "kqueue", "iocp"}
+        loop region in regions -> body = jet_runtime_strip_scheduler_region(body, region)
+    }
+    pieces :: [String]{jet_runtime_merge_flat_prelude_imports(flat_sources), body, jet_runtime_flat_prelude_body(stream)}
+    pieces.join("")
+}
+
+pub fn jet_runtime_uses_native_scheduler(usages: View<String>) -> Bool Never! {
+    prefixes :: [String]{"core.tasks", "core.net", "core.http", "core.process", "core.files", "core.watcher", "core.term", "core.sys", "core.args", "core.testing", "core.perf", "core.mem.scope"}
+    jet_runtime_core_usage_matches(usages, prefixes.view(0..<prefixes.len()))
+}
+
+// Codegen/mod.rs::uses_gtk_backend_for is intentionally narrower than typed
+// part selection: the hosted label path admits exactly core.ui::gtk_backend.
+pub fn jet_runtime_uses_gtk_backend(usages: View<String>, active_os: String) -> Bool Never! {
+    if active_os != "linux" -> return false
+    loop usage in usages { if usage == "core.ui::gtk_backend" -> return true }
+    false
+}
+
+pub fn jet_runtime_package_edition_source(edition: String) -> String Never! {
+    bytes :: edition.bytes()
+    cursor := 0
+    if bytes.len() > 0 && bytes[0] == U8{43} -> cursor = 1
+    valid := cursor < bytes.len()
+    value := 0
+    loop cursor < bytes.len() {
+        digit :: Int.from_u8(bytes[cursor]) - 48
+        if digit < 0 || digit > 9 || value > 6553 || (value == 6553 && digit > 5) {
+            valid = false
+            break
+        }
+        value = value * 10 + digit
+        cursor += 1
+    }
+    if !valid -> value = 2027
+    "const __JET_PACKAGE_EDITION: u16 = {value};\n\n"
+}

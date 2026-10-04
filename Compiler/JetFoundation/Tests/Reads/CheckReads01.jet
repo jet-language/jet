@@ -1,0 +1,42 @@
+use jet_foundation.Reads.CheckReads.*
+use core.files.runtime.kernel_path_components.OSPath
+use std.env as check_reads_test_env
+use std.fs as check_reads_test_fs
+use std.process as check_reads_test_process
+
+// Rust: crates/jet-foundation/src/CheckReads.rs:246
+#Test("session_records_reads_and_audit_reports_undeclared_ones") {
+    // GATE #4494: fixtures use actual native files/environment/process id.
+    root :: check_reads_test_env.temp_dir().join(OSPath.from_text("jet-check-reads-{check_reads_test_process.id()}"))
+    _ :: check_reads_test_fs.remove_dir_all(root)
+    check_reads_test_fs.create_dir_all(root).unwrap()
+    declared_file :: root.join(OSPath.from_text("declared.txt"))
+    injected_file :: root.join(OSPath.from_text("injected.txt"))
+    check_reads_test_fs.write(declared_file, "one".bytes()).unwrap()
+    check_reads_test_fs.write(injected_file, "two".bytes()).unwrap()
+    session :: ReadSession.begin()
+    assert_eq(read(declared_file).unwrap(), "one".bytes())
+    assert(read(root.join(OSPath.from_text("absent.txt"))).is_err())
+    reads :: session.finish()
+    declared := [String:String]{}
+    loop observed in reads -> declared[observed.label] = observed.digest
+    assert_eq(declared["file:{root.join(OSPath.from_text("absent.txt")).display()}"], CHECK_READS_MISSING)
+    assert(check_reads_undeclared(reads, declared).is_empty())
+
+    session :: ReadSession.begin()
+    _ :: read(declared_file).unwrap()
+    _ :: read(injected_file).unwrap()
+    reads :: session.finish()
+    missing :: check_reads_undeclared(reads, declared)
+    assert_eq(missing.len(), 1)
+    assert_eq(missing[0].label, "file:{injected_file.display()}")
+
+    check_reads_test_fs.write(declared_file, "changed".bytes()).unwrap()
+    label :: "file:{declared_file.display()}"
+    assert(current_digest(label) != declared.get(label))
+
+    _ :: read(declared_file).unwrap()
+    session :: ReadSession.begin()
+    assert(session.finish().is_empty())
+    _ :: check_reads_test_fs.remove_dir_all(root)
+}

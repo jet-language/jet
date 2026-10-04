@@ -1,0 +1,632 @@
+// Canonical AST foreign bridge facts (Rust AST/ffi.rs). Paths stay native
+// OS-path values; display strings are never inverted into filesystem identity.
+use core.files.runtime.kernel_path_components as ffi_link_path
+
+pub enum ThreadSafety { Unspecified Safe Unsafe }
+pub enum CloseSource { Conventional Overlay }
+
+pub fn pkg_ffi_close_source_name(source: CloseSource) -> String Never! {
+    if source == { .Conventional -> "conventional" .Overlay -> "overlay" }
+}
+pub fn pkg_ffi_close_source_parse(value: String) -> CloseSource? Never! {
+    if value == { "conventional" -> Val(CloseSource.Conventional) "overlay" -> Val(CloseSource.Overlay) else -> None }
+}
+pub fn pkg_ffi_thread_safety_name(safety: ThreadSafety) -> String Never! {
+    if safety == { .Unspecified -> "unspecified" .Safe -> "safe" .Unsafe -> "unsafe" }
+}
+pub fn pkg_ffi_thread_safety_parse(value: String) -> ThreadSafety? Never! {
+    if value == { "unspecified" -> Val(ThreadSafety.Unspecified) "safe" -> Val(ThreadSafety.Safe) "unsafe" -> Val(ThreadSafety.Unsafe) else -> None }
+}
+
+// Rust FfiLinkClosure::new: sorted nonempty identities, no quadratic membership
+// scans. Exact empty strings disappear; whitespace-only identities do not.
+fn pkg_ffi_sorted_nonempty(values: ^[String]) -> [String] Never! {
+    sorted := ^values
+    &sorted.sort()
+    kept := 0
+    loop index in 0..<sorted.len() {
+        if sorted[index] == "" -> next
+        if kept > 0 && sorted[index] == sorted[kept - 1] -> next
+        if kept != index -> sorted[kept] = ^sorted[index]
+        kept += 1
+    }
+    loop sorted.len() > kept -> &sorted.pop().drop("discard the duplicate or empty row beyond the compacted prefix")
+    sorted
+}
+
+fn ffi_link_sorted_contains(rows: [String], name: String) -> Bool Never! {
+    low := 0
+    high := rows.len()
+    loop low < high {
+        mid :: (low + high) /% 2
+        if rows[mid] < name -> low = mid + 1 else -> high = mid
+    }
+    low < rows.len() && rows[low] == name
+}
+
+pub struct FfiLinkClosure {
+    pub direct: [String]
+    pub transitive: [String]
+
+    pub fn new(direct: ^[String], transitive: ^[String]) -> FfiLinkClosure Never! {
+        direct_rows :: pkg_ffi_sorted_nonempty(^direct)
+        transitive_rows := pkg_ffi_sorted_nonempty(^transitive)
+        kept := 0
+        loop index in 0..<transitive_rows.len() {
+            if ffi_link_sorted_contains(direct_rows, transitive_rows[index]) -> next
+            if kept != index -> transitive_rows[kept] = ^transitive_rows[index]
+            kept += 1
+        }
+        loop transitive_rows.len() > kept -> &transitive_rows.pop().drop("discard direct libraries beyond the compacted transitive prefix")
+        FfiLinkClosure{direct: direct_rows, transitive: transitive_rows}
+    }
+
+    pub fn empty() -> FfiLinkClosure Never! {
+        FfiLinkClosure{direct: [String]{}, transitive: [String]{}}
+    }
+
+    pub fn libraries(self) -> FfiLibraries from self {
+        FfiLibraries{closure: @self, at: 0}
+    }
+
+    pub fn stable_key(self) -> String Never! {
+        "direct={self.direct.join(",")};transitive={self.transitive.join(",")}"
+    }
+}
+
+// Rust FfiLinkClosure::libraries: borrow the owned lists through one stack
+// cursor; iteration never allocates or materializes copies of native names.
+pub struct FfiLibraries { pub closure: @FfiLinkClosure, pub at: Int }
+impl FfiLibraries.Iterator {
+    type Item = @String
+    fn next(&self) -> (@String)? from self {
+        index :: self.at
+        if index < self.closure.direct.len() {
+            self.at += 1
+            return Val(@self.closure.direct[index])
+        }
+        transitive_index :: index - self.closure.direct.len()
+        if transitive_index < self.closure.transitive.len() {
+            self.at += 1
+            return Val(@self.closure.transitive[transitive_index])
+        }
+        None
+    }
+}
+
+pub struct FfiHandleFact {
+    pub lib: String
+    pub typedef_name: String
+    pub jet_name: String
+    pub close: String
+    pub close_source: CloseSource
+    pub thread_safety: ThreadSafety
+
+    pub fn stable_key(self) -> String Never! {
+        "lib={self.lib};typedef={self.typedef_name};jet={self.jet_name};close={self.close};close-source={pkg_ffi_close_source_name(self.close_source)};thread-safety={pkg_ffi_thread_safety_name(self.thread_safety)}"
+    }
+}
+
+// Rust FfiLink1400–1426: preserve the complete link/provenance/native carrier.
+// cdylib belongs to the precisely retired resident JIT consumer, not to the
+// unrelated foreign handles, bridge identity or native link closure.
+pub struct FfiLink {
+    pub crate_name: String
+    pub cache_identity: String
+    pub provenance_path: ffi_link_path.OsPath
+    pub rlib_path: ffi_link_path.OsPath
+    pub cdylib_path: ffi_link_path.OsPath
+    pub target_deps_dir: ffi_link_path.OsPath
+    pub host_deps_dir: ffi_link_path.OsPath
+    pub helper_bin_path: ffi_link_path.OsPath?
+    pub secrets_helper_bin_path: ffi_link_path.OsPath?
+    pub handle_facts: [FfiHandleFact]
+    pub link_closure: FfiLinkClosure
+}
+
+impl FfiLink {
+    // Rust dependency_dirs1428–1435. The stack cursor borrows this link; no
+    // path list, OS-path copies or singleton collection are constructed.
+    // #4500: ratified memory-reference fields/returns require native lowering.
+    pub fn dependency_dirs(self) -> FfiDependencyDirs from self {
+        FfiDependencyDirs{link: @self, at: 0}
+    }
+}
+
+pub struct FfiDependencyDirs {
+    pub link: @FfiLink
+    pub at: Int
+}
+
+impl FfiDependencyDirs.Iterator {
+    type Item = @ffi_link_path.OsPath
+
+    fn next(&self) -> (@ffi_link_path.OsPath)? from self {
+        if self.at == 0 {
+            self.at = 1
+            return Val(@self.link.target_deps_dir)
+        }
+        if self.at == 1 {
+            self.at = 2
+            if !ffi_link_path.equals(self.link.host_deps_dir, self.link.target_deps_dir) -> return Val(@self.link.host_deps_dir)
+        }
+        None
+    }
+}
+// Rust AST/ffi.rs:9–790. One descriptor registry is shared by the compiler and
+// package binders. Capability lists and descriptor lookups borrow static rows.
+pub FOREIGN_DESCRIPTOR_SCHEMA :: prep { "jet-ffi-descriptor-v1" }
+pub FOREIGN_ABI_CONTRACT_VERSION :: prep { 1 }
+
+pub enum BinderSurface {
+    Namespace
+    pub fn debug_name(self) -> String Never! { "Namespace" }
+}
+pub enum BinderStatus {
+    Active Planned
+    pub fn debug_name(self) -> String Never! { if self == { .Active -> "Active" .Planned -> "Planned" } }
+}
+pub enum BinderRuntime {
+    DirectCAbi ClangCppShim LegacyRustExtern SupervisedPythonSidecar TargetDispatchedJs SwiftCAbiBridge GoCArchive EmbeddedJvm EmbeddedDotNet EmbeddedTcl EmbeddedLua FortranIsoCBinding GnuCobolCAbi AdaGnatCAbi FreePascalCdecl DartApiDl SupervisedPowerShell SupervisedPerl SupervisedRuby SupervisedPhpPool SupervisedR SupervisedOctave WindowsComAutomation
+    pub fn debug_name(self) -> String Never! {
+        if self == {
+            .DirectCAbi -> "DirectCAbi" .ClangCppShim -> "ClangCppShim" .LegacyRustExtern -> "LegacyRustExtern" .SupervisedPythonSidecar -> "SupervisedPythonSidecar" .TargetDispatchedJs -> "TargetDispatchedJs" .SwiftCAbiBridge -> "SwiftCAbiBridge" .GoCArchive -> "GoCArchive" .EmbeddedJvm -> "EmbeddedJvm" .EmbeddedDotNet -> "EmbeddedDotNet" .EmbeddedTcl -> "EmbeddedTcl" .EmbeddedLua -> "EmbeddedLua" .FortranIsoCBinding -> "FortranIsoCBinding" .GnuCobolCAbi -> "GnuCobolCAbi" .AdaGnatCAbi -> "AdaGnatCAbi" .FreePascalCdecl -> "FreePascalCdecl" .DartApiDl -> "DartApiDl" .SupervisedPowerShell -> "SupervisedPowerShell" .SupervisedPerl -> "SupervisedPerl" .SupervisedRuby -> "SupervisedRuby" .SupervisedPhpPool -> "SupervisedPhpPool" .SupervisedR -> "SupervisedR" .SupervisedOctave -> "SupervisedOctave" .WindowsComAutomation -> "WindowsComAutomation"
+        }
+    }
+}
+pub enum BindingStubKind {
+    CHeader CppHeader RustExternBlock PythonIntrospection TypeScriptDeclarations SwiftModule GoExports JvmClass DotNetAssembly TclScript LuaScript FortranIsoCBinding GnuCobolCopybook AdaSpec PascalSource DartContract PowerShellScript PerlScript RubyScript PhpScript RScript OctaveScript ComTypeLibrary
+    pub fn debug_name(self) -> String Never! {
+        if self == {
+            .CHeader -> "CHeader" .CppHeader -> "CppHeader" .RustExternBlock -> "RustExternBlock" .PythonIntrospection -> "PythonIntrospection" .TypeScriptDeclarations -> "TypeScriptDeclarations" .SwiftModule -> "SwiftModule" .GoExports -> "GoExports" .JvmClass -> "JvmClass" .DotNetAssembly -> "DotNetAssembly" .TclScript -> "TclScript" .LuaScript -> "LuaScript" .FortranIsoCBinding -> "FortranIsoCBinding" .GnuCobolCopybook -> "GnuCobolCopybook" .AdaSpec -> "AdaSpec" .PascalSource -> "PascalSource" .DartContract -> "DartContract" .PowerShellScript -> "PowerShellScript" .PerlScript -> "PerlScript" .RubyScript -> "RubyScript" .PhpScript -> "PhpScript" .RScript -> "RScript" .OctaveScript -> "OctaveScript" .ComTypeLibrary -> "ComTypeLibrary"
+        }
+    }
+}
+pub enum ForeignCallingConvention {
+    C Cpp Rust HostMessage
+    pub fn debug_name(self) -> String Never! { if self == { .C -> "C" .Cpp -> "Cpp" .Rust -> "Rust" .HostMessage -> "HostMessage" } }
+}
+pub enum ForeignLayoutModel {
+    CAbi AdapterTyped OpaqueHandle Message Native
+    pub fn debug_name(self) -> String Never! { if self == { .CAbi -> "CAbi" .AdapterTyped -> "AdapterTyped" .OpaqueHandle -> "OpaqueHandle" .Message -> "Message" .Native -> "Native" } }
+}
+pub enum ForeignOwnershipModel {
+    SignatureDeclared AdapterOwned ByValue BorrowedInputCopiedOutput OwnedHandle SharedHandle
+    pub fn debug_name(self) -> String Never! { if self == { .SignatureDeclared -> "SignatureDeclared" .AdapterOwned -> "AdapterOwned" .ByValue -> "ByValue" .BorrowedInputCopiedOutput -> "BorrowedInputCopiedOutput" .OwnedHandle -> "OwnedHandle" .SharedHandle -> "SharedHandle" } }
+}
+pub enum ForeignErrorModel {
+    JetBoundary AdapterResult ErrorCode TypedResult PanicBoundary ForeignException
+    pub fn debug_name(self) -> String Never! { if self == { .JetBoundary -> "JetBoundary" .AdapterResult -> "AdapterResult" .ErrorCode -> "ErrorCode" .TypedResult -> "TypedResult" .PanicBoundary -> "PanicBoundary" .ForeignException -> "ForeignException" } }
+}
+pub enum ForeignCallbackModel {
+    ReentrantThreadSafe AdapterMarshalled NoCallback CAbi HostRegistration
+    pub fn debug_name(self) -> String Never! { if self == { .ReentrantThreadSafe -> "ReentrantThreadSafe" .AdapterMarshalled -> "AdapterMarshalled" .NoCallback -> "None" .CAbi -> "CAbi" .HostRegistration -> "HostRegistration" } }
+}
+pub enum ForeignAsyncModel {
+    JetTask AdapterMarshalled
+    pub fn debug_name(self) -> String Never! { if self == { .JetTask -> "JetTask" .AdapterMarshalled -> "AdapterMarshalled" } }
+}
+pub enum ForeignTaskBoundary {
+    RejectCapturedState AdapterMarshalled
+    pub fn debug_name(self) -> String Never! { if self == { .RejectCapturedState -> "RejectCapturedState" .AdapterMarshalled -> "AdapterMarshalled" } }
+}
+pub enum ForeignSafety {
+    GeneratedWrapper UnsafeRaw
+    pub fn debug_name(self) -> String Never! { if self == { .GeneratedWrapper -> "GeneratedWrapper" .UnsafeRaw -> "UnsafeRaw" } }
+}
+pub enum ForeignScalar {
+    Int Float Bool Char String Unsupported
+    pub fn debug_name(self) -> String Never! { if self == { .Int -> "Int" .Float -> "Float" .Bool -> "Bool" .Char -> "Char" .String -> "String" .Unsupported -> "Unsupported" } }
+    pub fn jet_name(self) -> String? Never! { if self == { .Int -> Val("Int") .Float -> Val("Float") .Bool -> Val("Bool") .Char -> Val("Char") .String -> Val("String") .Unsupported -> None } }
+    pub fn c_rust_name(self) -> String? Never! { if self == { .Int -> Val("std::os::raw::c_longlong") .Float -> Val("f64") .Bool -> Val("bool") .Char -> Val("u32") .String -> Val("*const std::os::raw::c_char") .Unsupported -> None } }
+}
+
+pub struct ForeignAbiContract {
+    pub version: Int
+    pub calling_convention: ForeignCallingConvention
+    pub layout: ForeignLayoutModel
+    pub ownership: ForeignOwnershipModel
+    pub errors: ForeignErrorModel
+    pub callbacks: ForeignCallbackModel
+    pub async_completion: ForeignAsyncModel
+    pub task_boundary: ForeignTaskBoundary
+    pub safety: ForeignSafety
+    pub integer: ForeignScalar
+    pub floating: ForeignScalar
+    pub boolean: ForeignScalar
+    pub character: ForeignScalar
+    pub string: ForeignScalar
+
+    pub fn c() -> ForeignAbiContract Never! {
+        ForeignAbiContract{version: FOREIGN_ABI_CONTRACT_VERSION, calling_convention: ForeignCallingConvention.C, layout: ForeignLayoutModel.CAbi, ownership: ForeignOwnershipModel.SignatureDeclared, errors: ForeignErrorModel.JetBoundary, callbacks: ForeignCallbackModel.ReentrantThreadSafe, async_completion: ForeignAsyncModel.JetTask, task_boundary: ForeignTaskBoundary.RejectCapturedState, safety: ForeignSafety.GeneratedWrapper, integer: ForeignScalar.Int, floating: ForeignScalar.Float, boolean: ForeignScalar.Bool, character: ForeignScalar.Char, string: ForeignScalar.String}
+    }
+    pub fn cxx() -> ForeignAbiContract Never! {
+        contract := ForeignAbiContract.c()
+        contract.calling_convention = ForeignCallingConvention.Cpp
+        contract.layout = ForeignLayoutModel.OpaqueHandle
+        contract.ownership = ForeignOwnershipModel.OwnedHandle
+        contract
+    }
+    pub fn message() -> ForeignAbiContract Never! {
+        contract := ForeignAbiContract.c()
+        contract.calling_convention = ForeignCallingConvention.HostMessage
+        contract.layout = ForeignLayoutModel.AdapterTyped
+        contract.ownership = ForeignOwnershipModel.AdapterOwned
+        contract.errors = ForeignErrorModel.AdapterResult
+        contract.callbacks = ForeignCallbackModel.AdapterMarshalled
+        contract.async_completion = ForeignAsyncModel.AdapterMarshalled
+        contract.task_boundary = ForeignTaskBoundary.AdapterMarshalled
+        contract
+    }
+    pub fn native() -> ForeignAbiContract Never! {
+        contract := ForeignAbiContract.message()
+        contract.calling_convention = ForeignCallingConvention.Rust
+        contract.layout = ForeignLayoutModel.Native
+        contract
+    }
+    pub fn c_scalar(self, normalized: String) -> ForeignScalar? Never! {
+        if self.layout != ForeignLayoutModel.CAbi -> return None
+        if normalized.ends_with("*") {
+            // #4303: the trimmed view flows into checked String dispatch.
+            base := normalized.removesuffix("*").trim()
+            if base == { "char" | "signed char" | "unsigned char" -> return Val(ForeignScalar.String) else -> return None }
+        }
+        if normalized == {
+            "bool" | "_Bool" -> Val(ForeignScalar.Bool)
+            "float" | "double" | "long double" -> Val(ForeignScalar.Float)
+            "char" | "signed char" | "unsigned char" | "short" | "unsigned short" | "short int" | "unsigned short int" | "int" | "unsigned" | "unsigned int" | "signed" | "signed int" | "long" | "unsigned long" | "long int" | "unsigned long int" | "long long" | "unsigned long long" | "long long int" | "size_t" | "ssize_t" | "ptrdiff_t" | "intptr_t" | "uintptr_t" | "int8_t" | "int16_t" | "int32_t" | "int64_t" | "uint8_t" | "uint16_t" | "uint32_t" | "uint64_t" -> Val(ForeignScalar.Int)
+            else -> None
+        }
+    }
+    pub fn stamp(self) -> String Never! {
+        "{FOREIGN_DESCRIPTOR_SCHEMA};version={self.version};calling={self.calling_convention.debug_name()};layout={self.layout.debug_name()};ownership={self.ownership.debug_name()};errors={self.errors.debug_name()};callbacks={self.callbacks.debug_name()};async={self.async_completion.debug_name()};tasks={self.task_boundary.debug_name()};safety={self.safety.debug_name()};integer={self.integer.debug_name()};float={self.floating.debug_name()};bool={self.boolean.debug_name()};char={self.character.debug_name()};string={self.string.debug_name()}"
+    }
+    pub fn same_as(self, other: ForeignAbiContract) -> Bool Never! {
+        self.version == other.version && self.calling_convention == other.calling_convention && self.layout == other.layout && self.ownership == other.ownership && self.errors == other.errors && self.callbacks == other.callbacks && self.async_completion == other.async_completion && self.task_boundary == other.task_boundary && self.safety == other.safety && self.integer == other.integer && self.floating == other.floating && self.boolean == other.boolean && self.character == other.character && self.string == other.string
+    }
+}
+
+pub enum BinderCapability {
+    TypedStub SafeWrapper OwnershipConversion LayoutValidation ErrorConversion CallbackValidation CacheProvenance PackageProvider TargetDispatch UnsafeRawEscape
+    pub fn debug_name(self) -> String Never! { if self == { .TypedStub -> "TypedStub" .SafeWrapper -> "SafeWrapper" .OwnershipConversion -> "OwnershipConversion" .LayoutValidation -> "LayoutValidation" .ErrorConversion -> "ErrorConversion" .CallbackValidation -> "CallbackValidation" .CacheProvenance -> "CacheProvenance" .PackageProvider -> "PackageProvider" .TargetDispatch -> "TargetDispatch" .UnsafeRawEscape -> "UnsafeRawEscape" } }
+}
+pub enum ForeignProvider {
+    System Cargo Npm PyPi SwiftPm Jetpack
+    pub fn debug_name(self) -> String Never! { if self == { .System -> "System" .Cargo -> "Cargo" .Npm -> "Npm" .PyPi -> "PyPi" .SwiftPm -> "SwiftPm" .Jetpack -> "Jetpack" } }
+}
+pub enum ForeignStubFile {
+    NoStub Suffix(String) StemSuffix(String)
+    pub fn debug_name(self) -> String Never! { if self == { .NoStub -> "None" .Suffix(suffix) -> "Suffix({foundation_json_quote(suffix)})" .StemSuffix(suffix) -> "StemSuffix({foundation_json_quote(suffix)})" } }
+}
+
+pub struct BinderDescriptor {
+    pub language: ForeignLanguage
+    pub surface: BinderSurface
+    pub status: BinderStatus
+    pub runtime: BinderRuntime
+    pub stub_kind: BindingStubKind
+    pub contract: ForeignAbiContract
+    pub capabilities: View<BinderCapability>
+    pub effect_root: String
+    pub provider: ForeignProvider
+    pub cache_extension: String
+    pub type_stub_file: ForeignStubFile
+
+    pub fn abi_contract(self) -> ForeignAbiContract Never! { self.contract }
+    pub fn capabilities_debug(self) -> String Never! {
+        names := [String]{}
+        loop capability in self.capabilities -> &names.push(capability.debug_name())
+        "[{names.join(", ")}]"
+    }
+    pub fn stamp(self) -> String Never! {
+        "{FOREIGN_DESCRIPTOR_SCHEMA};language={self.language.debug_name()};surface={self.surface.debug_name()};status={self.status.debug_name()};runtime={self.runtime.debug_name()};stub={self.stub_kind.debug_name()};contract={self.contract.stamp()};effect={self.effect_root};provider={self.provider.debug_name()};cache={self.cache_extension};type-stub={self.type_stub_file.debug_name()};capabilities={self.capabilities_debug()};bridge={self.language.bridge_prefix()}"
+    }
+    pub fn capability_report(self) -> BinderCapabilityReport Never! {
+        BinderCapabilityReport{schema: FOREIGN_DESCRIPTOR_SCHEMA, language: self.language, status: self.status, contract: self.contract, effect_root: self.effect_root, provider: self.provider, capabilities: self.capabilities}
+    }
+}
+pub struct BinderCapabilityReport {
+    pub schema: String
+    pub language: ForeignLanguage
+    pub status: BinderStatus
+    pub contract: ForeignAbiContract
+    pub effect_root: String
+    pub provider: ForeignProvider
+    pub capabilities: View<BinderCapability>
+}
+
+FFI_C_CAPABILITIES :: prep { [BinderCapability]{.TypedStub, .SafeWrapper, .OwnershipConversion, .LayoutValidation, .ErrorConversion, .CallbackValidation, .CacheProvenance, .PackageProvider, .UnsafeRawEscape} }
+FFI_TARGET_CAPABILITIES :: prep { [BinderCapability]{.TypedStub, .SafeWrapper, .OwnershipConversion, .LayoutValidation, .ErrorConversion, .CallbackValidation, .CacheProvenance, .PackageProvider, .TargetDispatch, .UnsafeRawEscape} }
+FFI_ADAPTER_CAPABILITIES :: prep { [BinderCapability]{.TypedStub, .SafeWrapper, .OwnershipConversion, .LayoutValidation, .ErrorConversion, .CacheProvenance, .PackageProvider, .UnsafeRawEscape} }
+
+fn pkg_binder_row(language: ForeignLanguage, runtime: BinderRuntime, stub_kind: BindingStubKind, status: BinderStatus, contract: ForeignAbiContract, capabilities: View<BinderCapability>, effect_root: String, provider: ForeignProvider, type_stub_file: ForeignStubFile) -> BinderDescriptor Never! {
+    BinderDescriptor{language: language, surface: BinderSurface.Namespace, status: status, runtime: runtime, stub_kind: stub_kind, contract: contract, capabilities: capabilities, effect_root: effect_root, provider: provider, cache_extension: "jet", type_stub_file: type_stub_file}
+}
+
+FOREIGN_BINDERS :: prep {
+    c :: ForeignAbiContract.c()
+    message :: ForeignAbiContract.message()
+    c_caps :: FFI_C_CAPABILITIES[0..<FFI_C_CAPABILITIES.len()]
+    target_caps :: FFI_TARGET_CAPABILITIES[0..<FFI_TARGET_CAPABILITIES.len()]
+    adapter_caps :: FFI_ADAPTER_CAPABILITIES[0..<FFI_ADAPTER_CAPABILITIES.len()]
+    no_stub :: ForeignStubFile.NoStub
+    [BinderDescriptor]{
+        pkg_binder_row(.C, .DirectCAbi, .CHeader, .Active, c, c_caps, "FFI", .System, no_stub),
+        pkg_binder_row(.Cpp, .ClangCppShim, .CppHeader, .Active, ForeignAbiContract.cxx(), c_caps, "FFI.Cpp", .System, no_stub),
+        pkg_binder_row(.Rust, .LegacyRustExtern, .RustExternBlock, .Planned, ForeignAbiContract.native(), c_caps, "FFI", .Cargo, no_stub),
+        pkg_binder_row(.Py, .SupervisedPythonSidecar, .PythonIntrospection, .Active, message, adapter_caps, "FFI.Py", .PyPi, no_stub),
+        pkg_binder_row(.JS, .TargetDispatchedJs, .TypeScriptDeclarations, .Active, message, target_caps, "FFI", .Npm, ForeignStubFile.Suffix("d.ts")),
+        pkg_binder_row(.Swift, .SwiftCAbiBridge, .SwiftModule, .Planned, c, c_caps, "FFI", .SwiftPm, no_stub),
+        pkg_binder_row(.Go, .GoCArchive, .GoExports, .Active, c, c_caps, "FFI.Go", .System, no_stub),
+        pkg_binder_row(.Java, .EmbeddedJvm, .JvmClass, .Active, message, adapter_caps, "FFI.Java", .System, no_stub),
+        pkg_binder_row(.DotNet, .EmbeddedDotNet, .DotNetAssembly, .Active, message, adapter_caps, "FFI.DotNet", .System, no_stub),
+        pkg_binder_row(.Tcl, .EmbeddedTcl, .TclScript, .Active, message, adapter_caps, "FFI.Tcl", .System, no_stub),
+        pkg_binder_row(.Lua, .EmbeddedLua, .LuaScript, .Active, message, adapter_caps, "FFI.Lua", .System, no_stub),
+        pkg_binder_row(.Fortran, .FortranIsoCBinding, .FortranIsoCBinding, .Active, c, c_caps, "FFI.Fortran", .System, no_stub),
+        pkg_binder_row(.Cobol, .GnuCobolCAbi, .GnuCobolCopybook, .Active, c, c_caps, "FFI.Cobol", .System, no_stub),
+        pkg_binder_row(.Ada, .AdaGnatCAbi, .AdaSpec, .Active, c, c_caps, "FFI.Ada", .System, no_stub),
+        pkg_binder_row(.Pascal, .FreePascalCdecl, .PascalSource, .Active, c, c_caps, "FFI.Pascal", .System, no_stub),
+        pkg_binder_row(.Dart, .DartApiDl, .DartContract, .Active, message, adapter_caps, "FFI.Dart", .System, ForeignStubFile.StemSuffix("_host.dart")),
+        pkg_binder_row(.PowerShell, .SupervisedPowerShell, .PowerShellScript, .Active, message, adapter_caps, "FFI.PowerShell", .System, no_stub),
+        pkg_binder_row(.Perl, .SupervisedPerl, .PerlScript, .Active, message, adapter_caps, "FFI.Perl", .System, no_stub),
+        pkg_binder_row(.Ruby, .SupervisedRuby, .RubyScript, .Active, message, adapter_caps, "FFI.Ruby", .System, no_stub),
+        pkg_binder_row(.Php, .SupervisedPhpPool, .PhpScript, .Active, message, adapter_caps, "FFI.Php", .System, no_stub),
+        pkg_binder_row(.R, .SupervisedR, .RScript, .Active, message, adapter_caps, "FFI.R", .System, no_stub),
+        pkg_binder_row(.Octave, .SupervisedOctave, .OctaveScript, .Active, message, adapter_caps, "FFI.Octave", .System, no_stub),
+        pkg_binder_row(.Com, .WindowsComAutomation, .ComTypeLibrary, .Active, message, adapter_caps, "FFI.Com", .System, no_stub)
+    }
+}
+
+pub fn pkg_foreign_binders() -> View<BinderDescriptor> { FOREIGN_BINDERS[0..<FOREIGN_BINDERS.len()] }
+// #4500: descriptor references borrow the one static registry, not a copied list.
+pub fn pkg_binder_descriptor(language: ForeignLanguage) -> ?@BinderDescriptor {
+    loop index in 0..<FOREIGN_BINDERS.len() {
+        if FOREIGN_BINDERS[index].language == language -> return Val(@FOREIGN_BINDERS[index])
+    }
+    None
+}
+pub fn pkg_foreign_abi_contract(language: ForeignLanguage) -> ForeignAbiContract {
+    descriptor :: pkg_binder_descriptor(language) ?? return ForeignAbiContract.message()
+    descriptor.contract
+}
+
+// Rust AST/ffi.rs1121–1384: gathered foreign facts stay below pkg-model.
+pub struct FfiCloseAdapter {
+    pub lib: String
+    pub handle_type: String
+    pub raw_function: String
+    pub adapter_function: String
+}
+pub struct CImportLink {
+    pub importing_idx: Int
+    pub scope: String?
+    pub alias: String
+    pub target_idx: Int
+}
+pub struct CLib { pub lib: String, pub module_idx: Int }
+pub struct COverlayOverride { pub lib: String, pub generated_symbol: String, pub overlay_symbol: String }
+
+pub enum FfiEvidenceBasis {
+    Proved Enforced Contained Trusted Unknown
+    pub fn as_str(self) -> String Never! {
+        if self == { .Proved -> "proved" .Enforced -> "enforced" .Contained -> "contained" .Trusted -> "trusted" .Unknown -> "unknown" }
+    }
+    pub fn parse(value: String) -> FfiEvidenceBasis? Never! {
+        if value == { "proved" -> Val(.Proved) "enforced" -> Val(.Enforced) "contained" -> Val(.Contained) "trusted" -> Val(.Trusted) "unknown" -> Val(.Unknown) else -> None }
+    }
+    pub fn permits_guarantee(self) -> Bool Never! {
+        if self == { .Proved | .Enforced | .Contained -> true else -> false }
+    }
+    pub fn is_unknown(self) -> Bool Never! { self == FfiEvidenceBasis.Unknown }
+}
+
+pub FFI_BOUNDARY_OBLIGATIONS :: prep { [String]{"abi", "layout", "width", "alignment", "ownership", "lifetime", "cleanup", "encoding", "nullability", "errors", "exceptions", "callbacks", "task-thread", "target", "copy-cost", "effects"} }
+pub struct FfiBoundaryObligation {
+    pub name: String
+    pub basis: FfiEvidenceBasis
+    pub checker: String
+    pub assumptions: [String]
+    pub coverage_digest: String
+}
+
+pub struct FfiBoundaryFacts {
+    pub schema: String
+    pub digest: String
+    pub language: String
+    pub library: String
+    pub effect_root: String
+    pub effects: String
+    pub source_authority: String
+    pub artifact_coverage_digest: String
+    pub loaded_artifact: String
+    pub transitive_dependencies: [String]?
+    pub reachable_callbacks: [String]?
+    pub compiler_flags: [String]?
+    pub target: String
+    pub generator: String
+    pub obligations: [FfiBoundaryObligation]
+
+    pub fn obligation(self, name: String) -> ?@FfiBoundaryObligation from self {
+        loop index in 0..<self.obligations.len() {
+            if self.obligations[index].name == name -> return Val(@self.obligations[index])
+        }
+        None
+    }
+    pub fn permits_guarantee(self, name: String) -> Bool {
+        obligation :: self.obligation(name) ?? return false
+        obligation.basis.permits_guarantee()
+    }
+    pub fn has_unknown_obligations(self) -> Bool Never! {
+        loop obligation in self.obligations {
+            if obligation.basis.is_unknown() -> return true
+        }
+        false
+    }
+    // Rust Result<(), String>; use the compiler's single canonical error rail.
+    pub fn validate(self) Err! {
+        if self.schema.trim() == "" || self.digest.trim() == "" || self.language.trim() == "" || self.library.trim() == "" || self.effect_root.trim() == "" || self.effects.trim() == "" || self.source_authority.trim() == "" || self.artifact_coverage_digest.trim() == "" || self.loaded_artifact.trim() == "" || self.target.trim() == "" || self.generator.trim() == "" -> return Err("foreign boundary carrier is incomplete")
+        has_effect := false
+        loop effect in self.effects.split(";") {
+            if effect == self.effect_root { has_effect = true; break }
+        }
+        if !has_effect -> return Err("foreign boundary carrier narrowed its effect root")
+        coverage_complete :: self.transitive_dependencies != None && self.reachable_callbacks != None && self.compiler_flags != None
+        if !coverage_complete {
+            loop obligation in self.obligations {
+                if !obligation.basis.is_unknown() -> return Err("foreign boundary carrier has incomplete artifact coverage")
+            }
+        }
+        names := [String:Bool]{}
+        loop obligation in self.obligations {
+            if obligation.name.trim() == "" || obligation.checker.trim() == "" || obligation.assumptions.len() == 0 || obligation.coverage_digest != self.artifact_coverage_digest -> return Err("foreign boundary carrier has invalid `{obligation.name}` obligation")
+            if names.get(obligation.name) != None -> return Err("foreign boundary carrier repeats `{obligation.name}` obligation")
+            names[obligation.name] = true
+        }
+        loop obligation in FFI_BOUNDARY_OBLIGATIONS {
+            if names.get(obligation) == None -> return Err("foreign boundary carrier omits `{obligation}` obligation")
+        }
+        Ok(())
+    }
+}
+
+pub struct CFfi {
+    pub import_links: [CImportLink]
+    pub libs: [CLib]
+    pub overlay_overrides: [COverlayOverride]
+    pub boundaries: [FfiBoundaryFacts]
+    pub handle_facts: [FfiHandleFact]
+    pub link_closure: FfiLinkClosure
+    pub close_adapters: [FfiCloseAdapter]
+
+    pub fn empty() -> CFfi Never! {
+        CFfi{import_links: [CImportLink]{}, libs: [CLib]{}, overlay_overrides: [COverlayOverride]{}, boundaries: [FfiBoundaryFacts]{}, handle_facts: [FfiHandleFact]{}, link_closure: FfiLinkClosure.empty(), close_adapters: [FfiCloseAdapter]{}}
+    }
+    pub fn target_for(self, importing_idx: Int, alias: String) -> Int? Never! {
+        self.target_for_scope(importing_idx, None, alias)
+    }
+    pub fn target_for_scope(self, importing_idx: Int, scope: String?, alias: String) -> Int? Never! {
+        loop link in self.import_links {
+            if link.importing_idx == importing_idx && link.scope == scope && link.alias == alias -> return Val(link.target_idx)
+        }
+        None
+    }
+    pub fn links_c(self) -> Bool Never! { self.libs.len() > 0 }
+    pub fn handle_fact(self, lib: String, jet_name: String) -> ?@FfiHandleFact from self {
+        loop index in 0..<self.handle_facts.len() {
+            if self.handle_facts[index].lib == lib && self.handle_facts[index].jet_name == jet_name -> return Val(@self.handle_facts[index])
+        }
+        None
+    }
+    pub fn boundary_for(self, lib: String) -> ?@FfiBoundaryFacts from self {
+        loop index in 0..<self.boundaries.len() {
+            if self.boundaries[index].library == lib -> return Val(@self.boundaries[index])
+        }
+        None
+    }
+}
+
+// Rust ExternFn::hidden_c_bridge_compatible_with_handles. This is a checked
+// signature predicate, not execution through the precisely retired resident JIT.
+fn ffi_bridge_is_handle(ty: Type, names: [String:Bool]) -> Bool Never! {
+    if ty == { .Named(name) -> names.get(name) != None else -> false }
+}
+fn ffi_bridge_integer(ty: Type) -> Bool Never! {
+    if ty == { .Int | .IntN(_, _) -> true .Tagged(_, inner) | .InlineRange(inner, _, _) -> ffi_bridge_integer(inner) else -> false }
+}
+fn ffi_bridge_scalar(ty: Type) -> Bool Never! {
+    if ty == { .Int | .IntN(_, _) | .Float | .Float32 | .Bool -> true .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> ffi_bridge_scalar(inner) else -> false }
+}
+fn ffi_bridge_array_element(ty: Type, handles: [String:Bool]) -> Bool Never! {
+    if ffi_bridge_is_handle(ty, handles) -> return false
+    if ty == { .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) | .Named(_) -> true else -> false }
+}
+fn ffi_bridge_length_name(name: String) -> Bool Never! {
+    lower :: name.to_ascii_lower()
+    if lower == { "n" | "len" | "length" | "count" | "size" | "num" | "number" -> return true else -> {} }
+    suffixes :: [String]{"_len", "_length", "_count", "_size", "_num", "_number"}
+    loop suffix in suffixes { if lower.ends_with(suffix) -> return true }
+    prefixes :: [String]{"len_", "length_", "count_", "size_", "num_", "number_"}
+    loop prefix in prefixes { if lower.starts_with(prefix) -> return true }
+    false
+}
+
+impl ExternFn {
+    pub fn hidden_c_bridge_compatible(self) -> Bool Never! {
+        self.hidden_c_bridge_compatible_with_handles([FfiHandleFact]{})
+    }
+    pub fn hidden_c_bridge_compatible_with_handles(self, handles: [FfiHandleFact]) -> Bool Never! {
+        if self.generated {
+            transport :: self.callback_transport ?? ""
+            if transport == "managed" || transport == "managed-close" || transport == "emit-task" || self.name.starts_with("__jet_native_") -> return true
+        }
+        handle_names := [String:Bool]{}
+        loop handle in handles -> handle_names[handle.jet_name] = true
+        // Index count facts once: companion_count/return_count never rescan the
+        // entire signature per array row (same existential law as Rust).
+        count_rows := [Bool]{}
+        count_total := 0
+        return_count := false
+        loop parameter in self.params {
+            counted :: ffi_bridge_length_name(parameter.name) && ffi_bridge_integer(parameter.ty)
+            &count_rows.push(counted)
+            if counted {
+                count_total += 1
+                if parameter.convention == AccessConvention.Write -> return_count = true
+            }
+        }
+        array_return :: if self.return_type == { .Val(ty) -> if ty == { .List(_) -> true else -> false } else -> false }
+        generated_array_shape := self.generated && (!array_return || return_count)
+        loop (index, parameter) in self.params {
+            accepted :: if parameter.ty == {
+                .List(inner) -> parameter.convention != AccessConvention.Move && ffi_bridge_array_element(inner, handle_names) && count_total > (if count_rows[index] -> 1 else -> 0)
+                else -> parameter.convention == AccessConvention.Read || (parameter.convention == AccessConvention.Write && array_return && count_rows[index]) || (parameter.convention == AccessConvention.Move && ffi_bridge_is_handle(parameter.ty, handle_names))
+            }
+            if !accepted -> generated_array_shape = false
+        }
+        if generated_array_shape -> return true
+        resident_shape := true
+        loop parameter in self.params {
+            handle :: ffi_bridge_is_handle(parameter.ty, handle_names)
+            if parameter.convention == {
+                .Read | .Write -> {
+                    if !ffi_bridge_scalar(parameter.ty) && parameter.ty != Type.String && !handle -> resident_shape = false
+                }
+                .Move -> { if !handle -> resident_shape = false }
+            }
+        }
+        if self.return_type == .Val(ty) {
+            if !ffi_bridge_scalar(ty) && ty != Type.String && !ffi_bridge_is_handle(ty, handle_names) -> resident_shape = false
+        }
+        if resident_shape -> return true
+        loop parameter in self.params { if parameter.convention != AccessConvention.Read -> return false }
+        size :: self.params.len()
+        first_int :: size > 0 && self.params[0].ty == Type.Int
+        first_float :: size > 0 && self.params[0].ty == Type.Float
+        first_string :: size > 0 && self.params[0].ty == Type.String
+        first_bool :: size > 0 && self.params[0].ty == Type.Bool
+        first_handle :: size > 0 && ffi_bridge_is_handle(self.params[0].ty, handle_names)
+        int_string :: size >= 2 && first_int && self.params[1].ty == Type.String
+        result :: self.return_type ?? return size == 0 || (size == 1 && (first_int || first_handle))
+        if result == {
+            .Int -> size == 0 || (size == 1 && (first_int || first_string || first_handle)) || (size == 2 && (int_string || (first_int && self.params[1].ty == Type.Int)))
+            .Float -> {
+                if (size == 1 && (first_float || first_handle)) || (size == 2 && int_string) -> return true
+                if size != 6 -> return false
+                loop parameter in self.params { if parameter.ty != Type.Float -> return false }
+                true
+            }
+            .Bool -> size == 0 || (size == 1 && (first_bool || first_handle))
+            .String -> (size == 1 && (first_string || first_handle)) || (size == 2 && int_string) || (size == 3 && int_string && self.params[2].ty == Type.Int)
+            .Named(_) -> size == 0 && ffi_bridge_is_handle(result, handle_names)
+            else -> false
+        }
+    }
+}
+
+pub struct ComptimeInput { pub path: String, pub hash: String }
+impl ThreadSafety {
+    pub fn default() -> ThreadSafety Never! { ThreadSafety.Unspecified }
+}
+impl FfiEvidenceBasis {
+    pub fn default() -> FfiEvidenceBasis Never! { FfiEvidenceBasis.Unknown }
+}

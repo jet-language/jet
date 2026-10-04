@@ -1,0 +1,134 @@
+// Unit suite is assembled with InterpreterBoundary.jet in the driver package,
+// so private walkers stay private (matching Rust's nested test visibility).
+use jet_foundation.[AccessConvention, BuildFactSnapshot, CFfi, CModule, CModuleKind, Call, CallArg, DevtoolsRegistry, ExternFn, ExternRustBlock, Expr, ImportDecl, ImportKind, Item, LoadedModule, MIRAllocatorPolicy, MIROSTarget, MIRRuntimeLayer, PackageGuarantees, Param, ParamZone, ProgramBundle, Span, Stmt, Type, ast_empty_call_arg_flags, ast_func, name_ledger_new]
+use jet_driver.[InterpreterInvocation, debug_boundary_scan]
+use core.files.runtime.kernel_path_components as boundary_paths
+
+fn boundary_test_span() -> Span Never! { Span{start: 7, end: 11} }
+fn boundary_test_arg(expr: Expr, convention: AccessConvention) -> CallArg Never! {
+    CallArg{convention: convention, expr: expr, span: boundary_test_span(), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+}
+fn boundary_test_call(name: String, args: [CallArg]) -> Expr Never! {
+    Expr.Call{call: Call{name: name, name_span: boundary_test_span(), type_args: [], args: args, resolved_ret: None, range_checked: false, widen_approx: false}}
+}
+fn boundary_test_method(receiver: Expr, method: String, args: [CallArg]) -> Expr Never! {
+    Expr.MethodCall{receiver: receiver, method: method, method_span: boundary_test_span(), owner_type_args: [], type_args: [], args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+}
+fn boundary_test_bundle(items: [Item]) -> ProgramBundle Never! {
+    // Explicit fixture bytes/platform, never host path or target inference.
+    path :: boundary_paths.from_text("/boundary/main.jet", boundary_paths.PathPlatform.Unix)
+    module :: LoadedModule{path: path, display: "/boundary/main.jet", source: "", alias: "main", imports: [], items: items, script_body: [], block_spans: [], web_target_ceiling: None, pub_file: false, no_prelude: false, default_target: None, html_path: None, policy_declarations: [], user_policy_declarations: [], rule_facts: []}
+    ProgramBundle{entry: 0, project_root: boundary_paths.from_text("/boundary", boundary_paths.PathPlatform.Unix), modules: [LoadedModule]{module}, devtools_registry: DevtoolsRegistry.default(), parse_teaching: [], used_core: Set.new<String>(), ffi_callback_fns: Set.new<String>(), cffi: CFfi.empty(), comptime_inputs: [], name_ledger: name_ledger_new(), layer_ceiling: None, inferred_layer: MIRRuntimeLayer.Core, web_partitions: [:], web_partition_enforced: false, web_partition_report: None, dep_roots: [:], package_guarantees: PackageGuarantees.default(), program_allocator: MIRAllocatorPolicy.HostedDefault, active_os: MIROSTarget.Linux, build_facts: BuildFactSnapshot.for_host(MIROSTarget.Linux, "x86_64-unknown-linux-gnu"), edition: "2026"}
+}
+#Test("interpreter_invocation_commands") {
+    assert_eq(InterpreterInvocation.RunInterpret.command(), "jet run --interpret")
+    assert_eq(InterpreterInvocation.DevInterpret.command(), "jet dev --interpret")
+    assert_eq(InterpreterInvocation.RunDefault.command(), "jet run")
+    assert_eq(InterpreterInvocation.DevDefault.command(), "jet dev")
+    assert(InterpreterInvocation.RunInterpret.uses_interpreter())
+    assert(InterpreterInvocation.DevInterpret.uses_interpreter())
+    assert(!InterpreterInvocation.RunDefault.uses_interpreter())
+    assert(!InterpreterInvocation.DevDefault.uses_interpreter())
+}
+#Test("native_module_boundary_is_debug_sensitive") {
+    assert_eq(native_module_feature("core.mem", false), Val("the low-level `core.mem` tier"))
+    assert_eq(native_module_feature("core.files", false), None)
+    assert_eq(native_module_feature("core.files", true), Val("a file read or write"))
+    assert_eq(native_module_feature("core.sys", true), Val("an environment read"))
+    assert_eq(native_module_feature("core.process", true), None)
+    assert_eq(native_module_feature("core.time", true), None)
+    assert_eq(native_module_feature("core.math.random", true), None)
+}
+#Test("process_leaf_boundary_uses_registry") {
+    loop item in [String]{"argv", "args", "cmd", "exit", "run", "pipeline", "workspace"} -> assert_eq(process_leaf_feature("core.process", item), None)
+    assert_eq(process_leaf_feature("core.process", "unregistered"), Val("a process launch or an early exit"))
+    assert_eq(process_leaf_feature("core.sys", "unregistered"), Val("an OS fact or process control call"))
+    assert_eq(process_leaf_feature("core.math", "abs"), None)
+}
+#Test("process_walk_is_preorder_and_includes_nested_expressions") {
+    call :: boundary_test_call("launch", [])
+    methods :: [String:String]{"launch": "core.process", "p": "core.process"}
+    items :: [String:String]{"launch": "unregistered"}
+    statements :: [Stmt]{Stmt.Expr{expr: Expr.ListLit{elements: [Expr]{call}, span: boundary_test_span()}}}
+    boundary :: scan_stmts_for_process_edge(statements, methods, items) ?? panic("nested process edge must be found")
+    assert_eq(boundary.feature, "a process launch or an early exit")
+    assert_eq(boundary.span, Val(boundary_test_span()))
+    allowed :: boundary_test_method(Expr.Ident{name: "p", span: boundary_test_span()}, "argv", [])
+    assert_eq(process_edge_boundary(allowed, methods, items), None)
+    blocked :: boundary_test_method(Expr.Ident{name: "p", span: boundary_test_span()}, "unregistered", [])
+    assert(process_edge_boundary(blocked, methods, items) != None)
+    assert_eq(process_edge_boundary(call, [:], items), None)
+    assert_eq(process_edge_boundary(call, methods, [:]), None)
+}
+#Test("writeback_belongs_to_callee_not_argument") {
+    arg :: boundary_test_arg(Expr.Ident{name: "slot", span: boundary_test_span()}, AccessConvention.Write)
+    expr :: boundary_test_call("callee", [CallArg]{arg})
+    boundary :: expr_mut_arg(expr, [:], [:]) ?? panic("foreign frame cannot write back")
+    assert_eq(boundary.feature, "a `&` writeback argument passed to a function")
+    assert_eq(boundary.span, Val(boundary_test_span()))
+    assert_eq(expr_mut_arg(expr, [String:Bool]{"callee": true}, [:]), None)
+    assert_eq(expr_mut_arg(expr, [:], [String:String]{"callee": "shuffle"}), None)
+    read_arg :: boundary_test_arg(arg.expr, AccessConvention.Read)
+    assert_eq(expr_mut_arg(boundary_test_call("foreign", [CallArg]{read_arg}), [:], [:]), None)
+}
+#Test("method_and_call_value_write_arguments_do_not_false_boundary") {
+    arg :: boundary_test_arg(Expr.Ident{name: "slot", span: boundary_test_span()}, AccessConvention.Write)
+    receiver :: Expr.Ident{name: "core_alias", span: boundary_test_span()}
+    assert_eq(expr_mut_arg(boundary_test_method(receiver, "shuffle", [CallArg]{arg}), [:], [:]), None)
+    value_call :: Expr.CallValue{callee: receiver, args: [CallArg]{arg}, span: boundary_test_span()}
+    assert_eq(expr_mut_arg(value_call, [:], [:]), None)
+    nested :: boundary_test_arg(boundary_test_call("foreign", [CallArg]{arg}), AccessConvention.Read)
+    assert(expr_mut_arg(boundary_test_method(receiver, "method", [CallArg]{nested}), [:], [:]) != None)
+}
+#Test("mut_arg_statement_walk_matches_narrow_rust_contract") {
+    arg :: boundary_test_arg(Expr.Ident{name: "slot", span: boundary_test_span()}, AccessConvention.Write)
+    blocked :: boundary_test_call("foreign", [CallArg]{arg})
+    assert(scan_stmt_for_mut_arg(Stmt.Return{value: Val(blocked), span: boundary_test_span()}, [:], [:]) != None)
+    loop_stmt :: Stmt.Loop{body: [Stmt]{Stmt.Expr{expr: blocked}}, span: boundary_test_span(), arrow_body: false, label: None}
+    assert(scan_stmt_for_mut_arg(loop_stmt, [:], [:]) != None)
+    assert_eq(scan_stmt_for_mut_arg(Stmt.Return{value: None, span: boundary_test_span()}, [:], [:]), None)
+    // Rust's mut-argument scanner deliberately does not open list expressions.
+    assert_eq(expr_mut_arg(Expr.ListLit{elements: [Expr]{blocked}, span: boundary_test_span()}, [:], [:]), None)
+}
+#Test("debug_diagnostic_uses_original_function_span_and_noun_phrase") {
+    function := ast_func("helper", boundary_test_span(), boundary_test_span())
+    function.is_unsafe = true
+    bundle :: boundary_test_bundle([Item]{Item.Func{value: function}})
+    diagnostic :: debug_boundary_scan(bundle) ?? panic("unsafe function is a boundary")
+    assert_eq(diagnostic.code, "E2203")
+    assert_eq(diagnostic.span, Val(boundary_test_span()))
+    assert(diagnostic.what.contains("it uses an `#Unsafe` function"))
+    assert_eq(debug_boundary_scan(boundary_test_bundle([])), None)
+}
+
+fn boundary_test_foreign(ret: Type?) -> ExternFn Never! {
+    ExternFn{abi: None, name: "foreign", name_span: boundary_test_span(), params: [], return_type: ret, return_type_span: None, rust_path: "foreign", rust_path_span: boundary_test_span(), generated: false, callback_transport: None, callback_plan_digest: None, callback_identity: None, effect_root: None, undo: None, close: None, span: boundary_test_span()}
+}
+#Test("foreign_boundary_keeps_empty_and_supported_c_modules_interpretable") {
+    foreign := CModule{kind: CModuleKind.Extern, lib: "fixture", path_span: boundary_test_span(), functions: [], span: boundary_test_span()}
+    assert_eq(debug_boundary_scan(boundary_test_bundle([Item]{Item.CModule{value: foreign}})), None)
+    foreign.functions = [ExternFn]{boundary_test_foreign(None)}
+    assert_eq(debug_boundary_scan(boundary_test_bundle([Item]{Item.CModule{value: foreign}})), None)
+    foreign.functions = [ExternFn]{boundary_test_foreign(Val(Type.Named{name: "Opaque"}))}
+    diagnostic :: debug_boundary_scan(boundary_test_bundle([Item]{Item.CModule{value: foreign}})) ?? panic("unsupported C signature needs native backend")
+    assert(diagnostic.what.contains("it uses a C library"))
+    rust :: ExternRustBlock{crate_spec: "fixture", crate_span: boundary_test_span(), functions: [], span: boundary_test_span()}
+    rust_diagnostic :: debug_boundary_scan(boundary_test_bundle([Item]{Item.ExternRust{value: rust}})) ?? panic("extern Rust is always a boundary")
+    assert(rust_diagnostic.what.contains("Rust code called through `extern rust`"))
+}
+#Test("import_boundary_precedes_item_boundary") {
+    function := ast_func("helper", boundary_test_span(), boundary_test_span())
+    function.is_unsafe = true
+    bundle := boundary_test_bundle([Item]{Item.Func{value: function}})
+    import_span :: Span{start: 1, end: 4}
+    bundle.modules[0].imports = [ImportDecl]{ImportDecl{kind: ImportKind.Module{name: "core.files", span: import_span}, alias: "files", alias_span: import_span, span: import_span, item_spans: [], local_spans: [], is_pub: false, is_package_pub: false, inline_version: None}}
+    diagnostic :: debug_boundary_scan(bundle) ?? panic("file import is debug-impure")
+    assert_eq(diagnostic.span, Val(import_span))
+    assert(diagnostic.what.contains("it uses a file read or write"))
+}
+#Test("unresolved_typed_cli_signature_is_boundary") {
+    function := ast_func("run", boundary_test_span(), boundary_test_span())
+    function.params = [Param]{Param{convention: AccessConvention.Read, root: false, name: "args", name_span: boundary_test_span(), public_label: None, zone: ParamZone.Either, ty: Type.Named{name: "Opaque"}, ty_span: boundary_test_span(), default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None}}
+    diagnostic :: debug_boundary_scan(boundary_test_bundle([Item]{Item.Func{value: function}})) ?? panic("no checked CLI schema exists")
+    assert(diagnostic.what.contains("a typed CLI entry signature (`fn run(args: T)`)"))
+}

@@ -1,0 +1,1800 @@
+// PORT-PENDING 0532 crates-jet-codegen-src-codegen-tir-tir-to-mir-expr-slice-4584: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:4584-6379
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn record_lowered_expression(expr: &TExpr, value: &jet_foundation::MIR::MirValueId) {
+//RS     if CanonicalPass::enabled() {
+//RS         CanonicalPass::record(
+//RS             "lowering",
+//RS             "mir.lower-expression",
+//RS             "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs",
+//RS             "tir",
+//RS             super::canonical_expression_payload(expr),
+//RS             super::canonical_expression_identity(expr),
+//RS             "mir",
+//RS             CanonicalPass::debug_payload("mir", "mir.lower-expression", value),
+//RS             CanonicalPass::debug_identity("mir", "mir.lower-expression", value),
+//RS             "preserve",
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn lower_values(
+//RS     ctx: &mut LowerCtx,
+//RS     values: &[TExpr],
+//RS ) -> Result<Vec<jet_foundation::MIR::MirValueId>, LowerError> {
+//RS     values.iter().map(|value| ctx.lower_child(value)).collect()
+//RS }
+//RS /// Carry the checked trait element target into MIR list construction.  A
+//RS /// concrete value in a typed list remains its concrete MIR value; each backend
+//RS /// applies this fact at the list boundary rather than guessing from a slot.
+//RS fn list_trait_coercion(ctx: &mut LowerCtx, ty: &Type) -> Result<Option<MirTypeId>, LowerError> {
+//RS     let element = match ty.without_user_tags() {
+//RS         Type::List(element) | Type::FixedList { elem: element, .. } => element.without_user_tags(),
+//RS         _ => return Ok(None),
+//RS     };
+//RS     let trait_name = match element {
+//RS         Type::TraitObject(names) if names.len() == 1 => names.first().cloned(),
+//RS         Type::Named(name) if ctx.is_trait_name(name) => Some(name.clone()),
+//RS         _ => None,
+//RS     };
+//RS     let Some(trait_name) = trait_name else {
+//RS         return Ok(None);
+//RS     };
+//RS     let target = Type::TraitObject(vec![trait_name]);
+//RS     Ok(ctx.mir_type(&target)?.identity)
+//RS }
+//RS 
+//RS /// Lower `HandleMethod` arguments so every host-borrow callback is created
+//RS /// immediately before the call that borrows it.
+//RS ///
+//RS /// The legality verifier requires a `HostBorrowCallback` result to be consumed
+//RS /// by the very next instruction: the callback lends the host a checked
+//RS /// callable for exactly one call, and nothing may sit between the borrow and
+//RS /// that call.  App route/page/layout/loader rows carry a devtools binding text
+//RS /// after the handler, so ordinary source-order lowering would interpose that
+//RS /// constant.  Building a callback is side-effect free (a named function, a
+//RS /// capture-free lambda, or a local read), so deferring it keeps the checked
+//RS /// evaluation order of every other argument while the returned values keep
+//RS /// their source positions.
+//RS fn lower_handle_method_args(
+//RS     ctx: &mut LowerCtx,
+//RS     args: &[TExpr],
+//RS ) -> Result<Vec<jet_foundation::MIR::MirValueId>, LowerError> {
+//RS     let mut values = vec![None; args.len()];
+//RS     for (index, arg) in args.iter().enumerate() {
+//RS         if !is_host_borrow_callback(arg) {
+//RS             values[index] = Some(ctx.lower_child(arg)?);
+//RS         }
+//RS     }
+//RS     for (index, arg) in args.iter().enumerate() {
+//RS         if is_host_borrow_callback(arg) {
+//RS             values[index] = Some(ctx.lower_child(arg)?);
+//RS         }
+//RS     }
+//RS     Ok(values.into_iter().flatten().collect())
+//RS }
+//RS 
+//RS fn is_host_borrow_callback(arg: &TExpr) -> bool {
+//RS     match &arg.kind {
+//RS         TExprKind::HostBorrowCallback { .. } => true,
+//RS         TExprKind::FnValue {
+//RS             kind: TFnValueKind::Send { value },
+//RS         } => matches!(value.kind, TExprKind::HostBorrowCallback { .. }),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_hardware_op(
+//RS     ctx: &mut LowerCtx,
+//RS     op: &super::THardwareCall,
+//RS ) -> Result<MirHardwareOp, LowerError> {
+//RS     let op = match op {
+//RS         super::THardwareCall::RegisterRead {
+//RS             profile_id,
+//RS             block,
+//RS             register,
+//RS             width,
+//RS         } => MirHardwareOp::RegisterRead {
+//RS             profile_id: profile_id.clone(),
+//RS             block: block.clone(),
+//RS             register: register.clone(),
+//RS             width: *width,
+//RS         },
+//RS         super::THardwareCall::RegisterWrite {
+//RS             profile_id,
+//RS             block,
+//RS             register,
+//RS             width,
+//RS         } => MirHardwareOp::RegisterWrite {
+//RS             profile_id: profile_id.clone(),
+//RS             block: block.clone(),
+//RS             register: register.clone(),
+//RS             width: *width,
+//RS         },
+//RS         super::THardwareCall::DmaStart {
+//RS             profile_id,
+//RS             channel,
+//RS             buffer_ty,
+//RS         } => MirHardwareOp::DmaStart {
+//RS             profile_id: profile_id.clone(),
+//RS             channel: channel.clone(),
+//RS             buffer_ty: ctx.mir_type(buffer_ty)?,
+//RS         },
+//RS         super::THardwareCall::DmaWait {
+//RS             profile_id,
+//RS             channel,
+//RS             buffer_ty,
+//RS         } => MirHardwareOp::DmaWait {
+//RS             profile_id: profile_id.clone(),
+//RS             channel: channel.clone(),
+//RS             buffer_ty: ctx.mir_type(buffer_ty)?,
+//RS         },
+//RS     };
+//RS     Ok(op)
+//RS }
+//RS fn lower_mir_types(
+//RS     ctx: &mut LowerCtx,
+//RS     types: &[crate::AST::Type],
+//RS ) -> Result<Vec<MirType>, LowerError> {
+//RS     types.iter().map(|ty| ctx.mir_type(ty)).collect()
+//RS }
+//RS 
+//RS fn lower_require_stop(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     kind: &super::TRequireKind,
+//RS     always_stops: bool,
+//RS     loc: &super::TPanicLoc,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let (kind, condition, values) = match kind {
+//RS         super::TRequireKind::Require { cond, msg } => {
+//RS             let condition = ctx.lower_child(cond)?;
+//RS             let mut values = Vec::new();
+//RS             if let Some(msg) = msg.as_deref() {
+//RS                 values.push(ctx.lower_child(msg)?);
+//RS             }
+//RS             (MirRequireKind::Require, Some(condition), values)
+//RS         }
+//RS         super::TRequireKind::RequireEq { left, right } => {
+//RS             let left_ty = ctx.mir_type(&left.ty)?;
+//RS             let right_ty = ctx.mir_type(&right.ty)?;
+//RS             let left = ctx.lower_child(left)?;
+//RS             let right = ctx.lower_child(right)?;
+//RS             let route = super::require_eq_condition_route(&left_ty, &right_ty)?;
+//RS             let call = ctx.intern_prelude_route(route)?;
+//RS             let condition = ctx.emit(
+//RS                 "require-eq-condition",
+//RS                 Some(crate::AST::Type::Bool),
+//RS                 MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+//RS                     call,
+//RS                     args: vec![mir_value_arg(ctx, left), mir_value_arg(ctx, right)],
+//RS                     owner_type_args: Vec::new(),
+//RS                     type_args: Vec::new(),
+//RS                 }),
+//RS             )?;
+//RS             (
+//RS                 MirRequireKind::RequireEq,
+//RS                 Some(condition),
+//RS                 vec![left, right],
+//RS             )
+//RS         }
+//RS         super::TRequireKind::Panic { msg } => {
+//RS             (MirRequireKind::Panic, None, vec![ctx.lower_child(msg)?])
+//RS         }
+//RS     };
+//RS     let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
+//RS     let kind_key = match kind {
+//RS         MirRequireKind::Require => "require",
+//RS         MirRequireKind::RequireEq => "require_eq",
+//RS         MirRequireKind::Panic => "panic",
+//RS     };
+//RS     let call = ctx.intern_prelude_route(super::require_stop_route(
+//RS         kind_key,
+//RS         values.len(),
+//RS         &expr.ty,
+//RS         &carrier,
+//RS     )?)?;
+//RS     let location = MirPanicLoc {
+//RS         file: ctx.source_file_id_for(&loc.file),
+//RS         line: loc.line,
+//RS         column: loc.col,
+//RS     };
+//RS     let mut context = MirPanicContext {
+//RS         function: loc.fn_name.clone(),
+//RS         source_line: loc.src_line.clone(),
+//RS         caret: loc.caret,
+//RS         locals: loc
+//RS             .locals
+//RS             .iter()
+//RS             .filter_map(|(name, local)| ctx.local_id_for(local).ok().map(|id| (name.clone(), id)))
+//RS             .collect(),
+//RS     };
+//RS     // D-SHAPE-RESOURCE1=A: a stop still runs every active deferred close and
+//RS     // automatic scope-end close first. A conditional stop branches so only
+//RS     // its failure edge runs them; the success edge keeps them for its own
+//RS     // scope exits. The stop report never reads a local those cleanups moved.
+//RS     let stop_cleanups = ctx.has_stop_path_cleanups();
+//RS     if stop_cleanups {
+//RS         let moved = ctx.stop_path_moved_locals();
+//RS         context.locals.retain(|(_, local)| !moved.contains(local));
+//RS     }
+//RS     if !always_stops && stop_cleanups {
+//RS         if let Some(condition) = condition {
+//RS             let success = ctx.new_block(ctx.span(), "require.success")?;
+//RS             let failure = ctx.new_block(ctx.span(), "require.failure")?;
+//RS             ctx.terminate(MirTerminator::Branch {
+//RS                 condition,
+//RS                 then_target: success,
+//RS                 else_target: failure,
+//RS             });
+//RS             ctx.switch_to(failure);
+//RS             ctx.emit_stop_path_cleanups()?;
+//RS             ctx.emit(
+//RS                 "require-stop",
+//RS                 Some(expr.ty.clone()),
+//RS                 MirOperation::Semantic(MirSemanticOp::RequireStop {
+//RS                     call,
+//RS                     kind,
+//RS                     condition: Some(condition),
+//RS                     location,
+//RS                     context,
+//RS                     values,
+//RS                     always_stops: true,
+//RS                 }),
+//RS             )?;
+//RS             ctx.terminate(MirTerminator::Unreachable {
+//RS                 reason: "checked conditional stop".to_string(),
+//RS             });
+//RS             ctx.switch_to(success);
+//RS             return ctx.emit(
+//RS                 "require-pass",
+//RS                 Some(expr.ty.clone()),
+//RS                 MirOperation::Constant(MirConstant::Unit),
+//RS             );
+//RS         }
+//RS     }
+//RS     if always_stops && stop_cleanups {
+//RS         ctx.emit_stop_path_cleanups()?;
+//RS     }
+//RS     let value = ctx.emit(
+//RS         "require-stop",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Semantic(MirSemanticOp::RequireStop {
+//RS             call,
+//RS             kind,
+//RS             condition,
+//RS             location,
+//RS             context,
+//RS             values,
+//RS             always_stops,
+//RS         }),
+//RS     )?;
+//RS     if always_stops {
+//RS         ctx.terminate(MirTerminator::Unreachable {
+//RS             reason: "checked unconditional stop".to_string(),
+//RS         });
+//RS     }
+//RS     Ok(value)
+//RS }
+//RS 
+//RS fn lower_optional_field(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     base: &TExpr,
+//RS     member: &str,
+//RS     flatten: bool,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let inner_ty = match &base.ty {
+//RS         crate::AST::Type::Option(inner) => inner.as_ref(),
+//RS         _ => return unsupported_expr(ctx, "TExprKind::OptField (non-optional base)"),
+//RS     };
+//RS     let field = ctx.field_id_for_type(inner_ty, member)?;
+//RS     let field_ty = ctx.checked_field_type(inner_ty, member).map_err(|_| {
+//RS         ctx.error(
+//RS             ctx.span(),
+//RS             format!("missing checked optional field `{member}`"),
+//RS         )
+//RS     })?;
+//RS     let subject = ctx.lower_child(base)?;
+//RS     let condition = ctx.emit(
+//RS         "optional-field-condition",
+//RS         Some(crate::AST::Type::Bool),
+//RS         MirOperation::OptionIsSome { subject },
+//RS     )?;
+//RS     let present_block = ctx.new_block(ctx.span(), "optional-field-present")?;
+//RS     let absent_block = ctx.new_block(ctx.span(), "optional-field-absent")?;
+//RS     let join = ctx.new_block(ctx.span(), "optional-field-join")?;
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition,
+//RS         then_target: present_block,
+//RS         else_target: absent_block,
+//RS     });
+//RS 
+//RS     let mut incoming = Vec::with_capacity(2);
+//RS     ctx.switch_to(present_block);
+//RS     let unwrapped = ctx.emit(
+//RS         "optional-field-value",
+//RS         Some(inner_ty.clone()),
+//RS         MirOperation::OptionValue { subject },
+//RS     )?;
+//RS     let selected = ctx.emit(
+//RS         "optional-field-member",
+//RS         Some(field_ty.clone()),
+//RS         MirOperation::Field {
+//RS             base: unwrapped,
+//RS             field,
+//RS         },
+//RS     )?;
+//RS     let present = if flatten {
+//RS         selected
+//RS     } else {
+//RS         ctx.emit(
+//RS             "optional-field-present-wrap",
+//RS             Some(expr.ty.clone()),
+//RS             MirOperation::Present { value: selected },
+//RS         )?
+//RS     };
+//RS     let source = ctx.current_block();
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: join });
+//RS         incoming.push((source, present));
+//RS     }
+//RS 
+//RS     ctx.switch_to(absent_block);
+//RS     let absent = ctx.emit(
+//RS         "optional-field-absent-value",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Absent,
+//RS     )?;
+//RS     let source = ctx.current_block();
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: join });
+//RS         incoming.push((source, absent));
+//RS     }
+//RS 
+//RS     if incoming.is_empty() {
+//RS         return unsupported_expr(ctx, "TExprKind::OptField (no reachable branch)");
+//RS     }
+//RS     ctx.switch_to(join);
+//RS     ctx.emit(
+//RS         "optional-field-phi",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Phi { incoming },
+//RS     )
+//RS }
+//RS 
+//RS fn lower_option_lift2(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     function: &TExpr,
+//RS     left: &TExpr,
+//RS     right: &TExpr,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let Type::Option(result_inner) = expr.ty.without_user_tags() else {
+//RS         return Err(ctx.error(ctx.span(), "checked Option.lift2 result is not optional"));
+//RS     };
+//RS     let Type::Option(left_inner) = left.ty.without_user_tags() else {
+//RS         return Err(ctx.error(
+//RS             ctx.span(),
+//RS             "checked Option.lift2 left operand is not optional",
+//RS         ));
+//RS     };
+//RS     let Type::Option(right_inner) = right.ty.without_user_tags() else {
+//RS         return Err(ctx.error(
+//RS             ctx.span(),
+//RS             "checked Option.lift2 right operand is not optional",
+//RS         ));
+//RS     };
+//RS     let called_ty = match function.ty.without_user_tags() {
+//RS         Type::Fn { ret: Some(ret), .. } => (**ret).clone(),
+//RS         Type::Fn { ret: None, .. } => Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+//RS         _ => {
+//RS             return Err(ctx.error(
+//RS                 ctx.span(),
+//RS                 "checked Option.lift2 function has no function type",
+//RS             ));
+//RS         }
+//RS     };
+//RS     let function = ctx.lower_child(function)?;
+//RS     let left = ctx.lower_child(left)?;
+//RS     let right = ctx.lower_child(right)?;
+//RS     let left_condition = ctx.emit(
+//RS         "option-lift2-left-condition",
+//RS         Some(Type::Bool),
+//RS         MirOperation::OptionIsSome { subject: left },
+//RS     )?;
+//RS     let left_present = ctx.new_block(ctx.span(), "option-lift2-left-present")?;
+//RS     let left_absent = ctx.new_block(ctx.span(), "option-lift2-left-absent")?;
+//RS     let join = ctx.new_block(ctx.span(), "option-lift2-join")?;
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition: left_condition,
+//RS         then_target: left_present,
+//RS         else_target: left_absent,
+//RS     });
+//RS 
+//RS     let mut incoming = Vec::with_capacity(3);
+//RS     ctx.switch_to(left_present);
+//RS     let left_value = ctx.emit(
+//RS         "option-lift2-left-value",
+//RS         Some((**left_inner).clone()),
+//RS         MirOperation::OptionValue { subject: left },
+//RS     )?;
+//RS     let right_condition = ctx.emit(
+//RS         "option-lift2-right-condition",
+//RS         Some(Type::Bool),
+//RS         MirOperation::OptionIsSome { subject: right },
+//RS     )?;
+//RS     let both_present = ctx.new_block(ctx.span(), "option-lift2-both-present")?;
+//RS     let right_absent = ctx.new_block(ctx.span(), "option-lift2-right-absent")?;
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition: right_condition,
+//RS         then_target: both_present,
+//RS         else_target: right_absent,
+//RS     });
+//RS 
+//RS     ctx.switch_to(both_present);
+//RS     let right_value = ctx.emit(
+//RS         "option-lift2-right-value",
+//RS         Some((**right_inner).clone()),
+//RS         MirOperation::OptionValue { subject: right },
+//RS     )?;
+//RS     let called_raw = ctx.emit(
+//RS         "option-lift2-call",
+//RS         Some(called_ty.clone()),
+//RS         MirOperation::IndirectCall {
+//RS             callee: function,
+//RS             args: vec![
+//RS                 mir_value_arg(ctx, left_value),
+//RS                 mir_value_arg(ctx, right_value),
+//RS             ],
+//RS             type_args: Vec::new(),
+//RS         },
+//RS     )?;
+//RS     let called = ctx.trait_box_value(called_raw, &called_ty, result_inner)?;
+//RS     let present = ctx.emit(
+//RS         "option-lift2-present",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Present { value: called },
+//RS     )?;
+//RS     let source = ctx.current_block();
+//RS     ctx.terminate(MirTerminator::Jump { target: join });
+//RS     incoming.push((source, present));
+//RS 
+//RS     ctx.switch_to(right_absent);
+//RS     let absent = ctx.emit(
+//RS         "option-lift2-right-absent-value",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Absent,
+//RS     )?;
+//RS     let source = ctx.current_block();
+//RS     ctx.terminate(MirTerminator::Jump { target: join });
+//RS     incoming.push((source, absent));
+//RS 
+//RS     ctx.switch_to(left_absent);
+//RS     let absent = ctx.emit(
+//RS         "option-lift2-left-absent-value",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Absent,
+//RS     )?;
+//RS     let source = ctx.current_block();
+//RS     ctx.terminate(MirTerminator::Jump { target: join });
+//RS     incoming.push((source, absent));
+//RS 
+//RS     ctx.switch_to(join);
+//RS     ctx.emit(
+//RS         "option-lift2-phi",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Phi { incoming },
+//RS     )
+//RS }
+//RS 
+//RS fn lower_option_zip(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     recv: &TExpr,
+//RS     args: &[TExpr],
+//RS     elem_ty: &Type,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     if args.len() != 1 {
+//RS         return Err(ctx.error(ctx.span(), "checked Option.zip requires one operand"));
+//RS     }
+//RS     let Type::Option(left_inner) = recv.ty.without_user_tags() else {
+//RS         return Err(ctx.error(ctx.span(), "checked Option.zip receiver is not optional"));
+//RS     };
+//RS     let Type::Option(right_inner) = args[0].ty.without_user_tags() else {
+//RS         return Err(ctx.error(ctx.span(), "checked Option.zip operand is not optional"));
+//RS     };
+//RS     let Type::Tuple(fields) = elem_ty.without_user_tags() else {
+//RS         return Err(ctx.error(ctx.span(), "checked Option.zip result has no tuple fields"));
+//RS     };
+//RS     if fields.len() != 2 {
+//RS         return Err(ctx.error(ctx.span(), "checked Option.zip tuple shape is inconsistent"));
+//RS     }
+//RS     let left_target = fields[0].1.as_ref().clone();
+//RS     let right_target = fields[1].1.as_ref().clone();
+//RS     let tuple_ty = elem_ty.clone();
+//RS     let owner = ctx.mir_type(&tuple_ty)?.identity.ok_or_else(|| {
+//RS         ctx.error(
+//RS             ctx.span(),
+//RS             "checked Option.zip tuple has no canonical identity",
+//RS         )
+//RS     })?;
+//RS     let left = ctx.lower_child(recv)?;
+//RS     let right = ctx.lower_child(&args[0])?;
+//RS     let left_condition = ctx.emit(
+//RS         "option-zip-left-condition",
+//RS         Some(Type::Bool),
+//RS         MirOperation::OptionIsSome { subject: left },
+//RS     )?;
+//RS     let left_present = ctx.new_block(ctx.span(), "option-zip-left-present")?;
+//RS     let left_absent = ctx.new_block(ctx.span(), "option-zip-left-absent")?;
+//RS     let join = ctx.new_block(ctx.span(), "option-zip-join")?;
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition: left_condition,
+//RS         then_target: left_present,
+//RS         else_target: left_absent,
+//RS     });
+//RS 
+//RS     let mut incoming = Vec::with_capacity(3);
+//RS     ctx.switch_to(left_present);
+//RS     let left_source_ty = (**left_inner).clone();
+//RS     let left_value_raw = ctx.emit(
+//RS         "option-zip-left-value",
+//RS         Some(left_source_ty.clone()),
+//RS         MirOperation::OptionValue { subject: left },
+//RS     )?;
+//RS     let left_value = ctx.trait_box_value(left_value_raw, &left_source_ty, &left_target)?;
+//RS     if left_value == left_value_raw && left_source_ty != left_target {
+//RS         return Err(ctx.error(
+//RS             ctx.span(),
+//RS             "checked Option.zip left tuple field has no coercion fact",
+//RS         ));
+//RS     }
+//RS     let right_condition = ctx.emit(
+//RS         "option-zip-right-condition",
+//RS         Some(Type::Bool),
+//RS         MirOperation::OptionIsSome { subject: right },
+//RS     )?;
+//RS     let both_present = ctx.new_block(ctx.span(), "option-zip-both-present")?;
+//RS     let right_absent = ctx.new_block(ctx.span(), "option-zip-right-absent")?;
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition: right_condition,
+//RS         then_target: both_present,
+//RS         else_target: right_absent,
+//RS     });
+//RS 
+//RS     ctx.switch_to(both_present);
+//RS     let right_source_ty = (**right_inner).clone();
+//RS     let right_value_raw = ctx.emit(
+//RS         "option-zip-right-value",
+//RS         Some(right_source_ty.clone()),
+//RS         MirOperation::OptionValue { subject: right },
+//RS     )?;
+//RS     let right_value = ctx.trait_box_value(right_value_raw, &right_source_ty, &right_target)?;
+//RS     if right_value == right_value_raw && right_source_ty != right_target {
+//RS         return Err(ctx.error(
+//RS             ctx.span(),
+//RS             "checked Option.zip right tuple field has no coercion fact",
+//RS         ));
+//RS     }
+//RS     let tuple_fields = vec![
+//RS         (ctx.field_id_for_type(&tuple_ty, &fields[0].0)?, left_value),
+//RS         (ctx.field_id_for_type(&tuple_ty, &fields[1].0)?, right_value),
+//RS     ];
+//RS     let tuple = ctx.emit(
+//RS         "option-zip-tuple",
+//RS         Some(tuple_ty),
+//RS         MirOperation::Tuple {
+//RS             type_id: owner,
+//RS             fields: tuple_fields,
+//RS         },
+//RS     )?;
+//RS     let present = ctx.emit(
+//RS         "option-zip-present",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Present { value: tuple },
+//RS     )?;
+//RS     let source = ctx.current_block();
+//RS     ctx.terminate(MirTerminator::Jump { target: join });
+//RS     incoming.push((source, present));
+//RS 
+//RS     ctx.switch_to(right_absent);
+//RS     let absent = ctx.emit(
+//RS         "option-zip-right-absent-value",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Absent,
+//RS     )?;
+//RS     let source = ctx.current_block();
+//RS     ctx.terminate(MirTerminator::Jump { target: join });
+//RS     incoming.push((source, absent));
+//RS 
+//RS     ctx.switch_to(left_absent);
+//RS     let absent = ctx.emit(
+//RS         "option-zip-left-absent-value",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Absent,
+//RS     )?;
+//RS     let source = ctx.current_block();
+//RS     ctx.terminate(MirTerminator::Jump { target: join });
+//RS     incoming.push((source, absent));
+//RS 
+//RS     ctx.switch_to(join);
+//RS     ctx.emit(
+//RS         "option-zip-phi",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Phi { incoming },
+//RS     )
+//RS }
+//RS 
+//RS fn panic_location(ctx: &mut LowerCtx, line: usize) -> MirPanicLoc {
+//RS     let file = ctx.function.source_file.clone();
+//RS     MirPanicLoc {
+//RS         file: ctx.source_file_id_for(&file),
+//RS         line: line as u32,
+//RS 
+//RS         column: 1,
+//RS     }
+//RS }
+//RS pub(super) fn lower_binary_dispatch(
+//RS     ctx: &mut LowerCtx,
+//RS     op: BinOp,
+//RS     overflow: bool,
+//RS     lhs: &Type,
+//RS     rhs: &Type,
+//RS     result: &Type,
+//RS     line: u32,
+//RS ) -> Result<MirBinaryDispatch, LowerError> {
+//RS     let carrier = super::TFailureCarrier::from_checked_type(result);
+//RS     match super::binary_route(op, overflow, lhs, rhs, result, &carrier)? {
+//RS         super::TRoutePlan::Primitive => Ok(MirBinaryDispatch::Primitive),
+//RS         super::TRoutePlan::Prelude(route) => Ok(MirBinaryDispatch::Prelude {
+//RS             call: ctx.intern_prelude_route(route)?,
+//RS             location: Some(panic_location(ctx, line as usize)),
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn lower_index_hook(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     _type_name: &str,
+//RS     base: &TExpr,
+//RS     index: &TExpr,
+//RS     line: usize,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     // Index reads are ordinary user trait calls. Build the same resolved
+//RS     // MethodCall shape used by source-level dispatch so the concrete
+//RS     // `Grid::Index::get` identity and receiver convention stay intact.
+//RS     let option_ty = crate::AST::Type::Option(Box::new(expr.ty.clone()));
+//RS     let call_expr = TExpr {
+//RS         ty: option_ty.clone(),
+//RS         kind: TExprKind::MethodCall {
+//RS             recv: Box::new(base.clone()),
+//RS             method: TMethodRef::trait_method(crate::Syntax::TRAIT_INDEX, "get"),
+//RS             type_args: Vec::new(),
+//RS             args: vec![TCallArg {
+//RS                 value: index.clone(),
+//RS                 template_items: None,
+//RS                 borrow: !index.ty.is_scalar(),
+//RS                 mut_borrow: false,
+//RS                 clone: false,
+//RS                 arc_clone: false,
+//RS                 fn_coerce: None,
+//RS                 widen_to_vec: false,
+//RS                 widen_to_union: None,
+//RS                 box_as_trait: None,
+//RS             }],
+//RS             source_first_string_literal: None,
+//RS             operator_line: None,
+//RS         },
+//RS     };
+//RS     let call = lower_expr(ctx, &call_expr)?;
+//RS     let success_block = ctx.new_block(ctx.span(), "index-hook-success")?;
+//RS     let failure_block = ctx.new_block(ctx.span(), "index-hook-failure")?;
+//RS     let join = ctx.new_block(ctx.span(), "index-hook-join")?;
+//RS     let condition = ctx.emit(
+//RS         "index-hook-condition",
+//RS         Some(crate::AST::Type::Bool),
+//RS         MirOperation::OptionIsSome { subject: call },
+//RS     )?;
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition,
+//RS         then_target: success_block,
+//RS         else_target: failure_block,
+//RS     });
+//RS     let mut incoming = Vec::with_capacity(1);
+//RS     ctx.switch_to(success_block);
+//RS     let value = ctx.emit(
+//RS         "index-hook-value",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::OptionValue { subject: call },
+//RS     )?;
+//RS     let source = ctx.current_block();
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: join });
+//RS         incoming.push((source, value));
+//RS     }
+//RS     ctx.switch_to(failure_block);
+//RS     ctx.lower_index_hook_failure(line)?;
+//RS     if incoming.is_empty() {
+//RS         return unsupported_expr(ctx, "TExprKind::IndexHook (no reachable success branch)");
+//RS     }
+//RS     ctx.switch_to(join);
+//RS     ctx.emit(
+//RS         "index-hook-phi",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Phi { incoming },
+//RS     )
+//RS }
+//RS 
+//RS fn lower_inline_block(
+//RS     ctx: &mut LowerCtx,
+//RS     result_ty: &Type,
+//RS     stmts: &[super::TStmt],
+//RS ) -> Result<MirValueId, LowerError> {
+//RS     let Some((tail, prefix)) = stmts.split_last() else {
+//RS         return unsupported_expr(ctx, "TExprKind::InlineBlock (empty)");
+//RS     };
+//RS     ctx.lower_nested_stmts(prefix)?;
+//RS     match tail {
+//RS         super::TStmt::ExprStmt(value) => ctx.lower_child(value),
+//RS         super::TStmt::Loop { label, body } => {
+//RS             super::tir_to_mir_stmt::lower_loop_value(ctx, label.as_deref(), body, result_ty)
+//RS         }
+//RS         super::TStmt::Return(_)
+//RS         | super::TStmt::Break(_)
+//RS         | super::TStmt::BreakValue { .. }
+//RS         | super::TStmt::Continue(_) => {
+//RS             ctx.lower_nested_stmts(std::slice::from_ref(tail))?;
+//RS             if ctx.is_terminated() {
+//RS                 return ctx.emit(
+//RS                     "inline-block-divergent",
+//RS                     Some(result_ty.clone()),
+//RS                     MirOperation::Constant(MirConstant::Unit),
+//RS                 );
+//RS             }
+//RS             unsupported_expr(
+//RS                 ctx,
+//RS                 "TExprKind::InlineBlock (divergent tail did not terminate)",
+//RS             )
+//RS         }
+//RS         _ => unsupported_expr(ctx, "TExprKind::InlineBlock (non-expression tail)"),
+//RS     }
+//RS }
+//RS 
+//RS fn lower_compare_chain_hook(
+//RS     ctx: &mut LowerCtx,
+//RS     op: BinOp,
+//RS     left_ty: &Type,
+//RS     right_ty: &Type,
+//RS     left: MirValueId,
+//RS     right: MirValueId,
+//RS ) -> Result<MirValueId, LowerError> {
+//RS     let owner = ctx.mir_type(left_ty)?;
+//RS     let generic_receiver = ctx
+//RS         .function
+//RS         .generic_params
+//RS         .iter()
+//RS         .any(|param| param.name == left_ty.name());
+//RS     let (callee, access, call_return_type) = if generic_receiver {
+//RS         let (trait_ref, method, access) =
+//RS             ctx.trait_method_identity(crate::Syntax::TRAIT_COMPARABLE, "compare")?;
+//RS         let access = access.ok_or_else(|| {
+//RS             ctx.error(
+//RS                 ctx.span(),
+//RS                 "checked Comparable method has no receiver convention",
+//RS             )
+//RS         })?;
+//RS         (
+//RS             MirCallee::TraitMethod {
+//RS                 method,
+//RS                 trait_ref,
+//RS                 receiver: owner.clone(),
+//RS             },
+//RS             access,
+//RS             ctx.trait_method_return_type(crate::Syntax::TRAIT_COMPARABLE, "compare")?,
+//RS         )
+//RS     } else {
+//RS         let method = TMethodRef::operator(
+//RS             left_ty.name(),
+//RS             crate::Syntax::TRAIT_COMPARABLE,
+//RS             "compare",
+//RS             right_ty,
+//RS         );
+//RS         let function = ctx.function_id_for(&instance_method_lookup(&method, left_ty))?;
+//RS         let access = ctx
+//RS             .function_registry
+//RS             .receiver_access
+//RS             .get(&function)
+//RS             .copied()
+//RS             .ok_or_else(|| {
+//RS                 ctx.error(
+//RS                     ctx.span(),
+//RS                     "checked Comparable method has no receiver convention",
+//RS                 )
+//RS             })?;
+//RS         let call_return_type = ctx
+//RS             .function_registry
+//RS             .method_call_return_type_for(function, &[], left_ty)
+//RS             .map_err(|message| ctx.error(ctx.span(), message))?
+//RS             .unwrap_or_else(|| Type::Named(crate::Syntax::TYPE_ORDERING.to_string()));
+//RS         (
+//RS             MirCallee::Method { function, owner },
+//RS             access,
+//RS             call_return_type,
+//RS         )
+//RS     };
+//RS     let ordering = ctx.emit(
+//RS         "compare-chain-hook-call",
+//RS         Some(call_return_type),
+//RS         MirOperation::Call {
+//RS             callee,
+//RS             args: vec![
+//RS                 mir_value_arg_with_access(ctx, left, access),
+//RS                 mir_value_arg(ctx, right),
+//RS             ],
+//RS             type_args: Vec::new(),
+//RS         },
+//RS     )?;
+//RS     let variant = match op {
+//RS         BinOp::Lt => "Less",
+//RS         BinOp::Gt => "Greater",
+//RS         BinOp::Le => "Greater",
+//RS         BinOp::Ge => "Less",
+//RS         _ => {
+//RS             return Err(ctx.error(
+//RS                 ctx.span(),
+//RS                 "checked Comparable chain contains a non-relational operator",
+//RS             ));
+//RS         }
+//RS     };
+//RS     let matches = ctx.emit(
+//RS         "compare-chain-hook-test",
+//RS         Some(Type::Bool),
+//RS         MirOperation::EnumIs {
+//RS             subject: ordering,
+//RS             owner: ctx.type_id_for(crate::Syntax::TYPE_ORDERING)?,
+//RS             variant: variant.to_string(),
+//RS         },
+//RS     )?;
+//RS     if matches!(op, BinOp::Le | BinOp::Ge) {
+//RS         ctx.emit(
+//RS             "compare-chain-hook-invert",
+//RS             Some(Type::Bool),
+//RS             MirOperation::Unary {
+//RS                 op: jet_foundation::MIR::MirUnaryOp::Not,
+//RS                 value: matches,
+//RS             },
+//RS         )
+//RS     } else {
+//RS         Ok(matches)
+//RS     }
+//RS }
+//RS 
+//RS /// A Decimal relation in a comparison chain orders values through the Prelude
+//RS /// decimal compare kernel on every tier, then tests the resulting `Ordering`.
+//RS /// A primitive relation would order the runtime carrier instead of the number.
+//RS fn lower_decimal_relation(
+//RS     ctx: &mut LowerCtx,
+//RS     op: BinOp,
+//RS     left: MirValueId,
+//RS     right: MirValueId,
+//RS     carrier: &super::TFailureCarrier,
+//RS ) -> Result<MirValueId, LowerError> {
+//RS     let ordering_ty = Type::Named(crate::Syntax::TYPE_ORDERING.to_string());
+//RS     let type_id = ctx.nominal_type_id(crate::Syntax::TYPE_DECIMAL)?;
+//RS     let call = ctx.intern_prelude_route(super::precise_builtin_route(
+//RS         crate::Syntax::TYPE_DECIMAL,
+//RS         "compare",
+//RS         2,
+//RS         &ordering_ty,
+//RS         carrier,
+//RS     )?)?;
+//RS     let ordering = ctx.emit(
+//RS         "compare-chain-decimal",
+//RS         Some(ordering_ty),
+//RS         MirOperation::Semantic(MirSemanticOp::PreciseBuiltin {
+//RS             type_id,
+//RS             call,
+//RS             args: vec![left, right],
+//RS         }),
+//RS     )?;
+//RS     let variant = match op {
+//RS         BinOp::Lt | BinOp::Ge => "Less",
+//RS         BinOp::Gt | BinOp::Le => "Greater",
+//RS         _ => {
+//RS             return Err(ctx.error(
+//RS                 ctx.span(),
+//RS                 "checked Decimal chain contains a non-relational operator",
+//RS             ));
+//RS         }
+//RS     };
+//RS     let matches = ctx.emit(
+//RS         "compare-chain-decimal-test",
+//RS         Some(Type::Bool),
+//RS         MirOperation::EnumIs {
+//RS             subject: ordering,
+//RS             owner: ctx.type_id_for(crate::Syntax::TYPE_ORDERING)?,
+//RS             variant: variant.to_string(),
+//RS         },
+//RS     )?;
+//RS     if matches!(op, BinOp::Le | BinOp::Ge) {
+//RS         ctx.emit(
+//RS             "compare-chain-decimal-invert",
+//RS             Some(Type::Bool),
+//RS             MirOperation::Unary {
+//RS                 op: jet_foundation::MIR::MirUnaryOp::Not,
+//RS                 value: matches,
+//RS             },
+//RS         )
+//RS     } else {
+//RS         Ok(matches)
+//RS     }
+//RS }
+//RS 
+//RS fn lower_compare_chain(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     operands: &[TExpr],
+//RS     ops: &[crate::AST::BinOp],
+//RS     hooks: &[bool],
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     if operands.len() != ops.len().saturating_add(1) || operands.is_empty() {
+//RS         return unsupported_expr(ctx, "TExprKind::CompareChain (invalid arity)");
+//RS     }
+//RS     let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
+//RS     let false_block = ctx.new_block(ctx.span(), "compare-chain-false")?;
+//RS     let true_block = ctx.new_block(ctx.span(), "compare-chain-true")?;
+//RS     let join = ctx.new_block(ctx.span(), "compare-chain-join")?;
+//RS     let mut left = ctx.lower_child(&operands[0])?;
+//RS 
+//RS     for (index, op) in ops.iter().enumerate() {
+//RS         let right = ctx.lower_child(&operands[index + 1])?;
+//RS         let hook = hooks.get(index).copied().unwrap_or(false);
+//RS         let comparison = if hook {
+//RS             lower_compare_chain_hook(
+//RS                 ctx,
+//RS                 *op,
+//RS                 &operands[index].ty,
+//RS                 &operands[index + 1].ty,
+//RS                 left,
+//RS                 right,
+//RS             )?
+//RS         } else if matches!(&operands[index].ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL)
+//RS         {
+//RS             lower_decimal_relation(ctx, *op, left, right, &carrier)?
+//RS         } else {
+//RS             match super::compare_chain_route(*op, false, &operands[index].ty, &expr.ty, &carrier)? {
+//RS                 super::TRoutePlan::Primitive => ctx.emit(
+//RS                     "compare-chain-link",
+//RS                     Some(crate::AST::Type::Bool),
+//RS                     MirOperation::Binary {
+//RS                         op: super::mir_binary_op(*op),
+//RS                         left,
+//RS                         right,
+//RS                         dispatch: MirBinaryDispatch::Primitive,
+//RS                     },
+//RS                 )?,
+//RS                 super::TRoutePlan::Prelude(route) => {
+//RS                     let call = ctx.intern_prelude_route(route)?;
+//RS                     ctx.emit(
+//RS                         "compare-chain-link",
+//RS                         Some(crate::AST::Type::Bool),
+//RS                         MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+//RS                             call,
+//RS                             args: vec![mir_value_arg(ctx, left), mir_value_arg(ctx, right)],
+//RS                             owner_type_args: Vec::new(),
+//RS                             type_args: Vec::new(),
+//RS                         }),
+//RS                     )?
+//RS                 }
+//RS             }
+//RS         };
+//RS         let next = if index + 1 == ops.len() {
+//RS             true_block
+//RS         } else {
+//RS             ctx.new_block(ctx.span(), "compare-chain-next")?
+//RS         };
+//RS         ctx.terminate(MirTerminator::Branch {
+//RS             condition: comparison,
+//RS             then_target: next,
+//RS             else_target: false_block,
+//RS         });
+//RS         if index + 1 != ops.len() {
+//RS             ctx.switch_to(next);
+//RS             left = right;
+//RS         }
+//RS     }
+//RS 
+//RS     let mut incoming = Vec::with_capacity(2);
+//RS     ctx.switch_to(true_block);
+//RS     let true_value = ctx.emit(
+//RS         "compare-chain-true-value",
+//RS         Some(crate::AST::Type::Bool),
+//RS         MirOperation::Constant(MirConstant::Bool(true)),
+//RS     )?;
+//RS     let true_source = ctx.current_block();
+//RS     ctx.terminate(MirTerminator::Jump { target: join });
+//RS     incoming.push((true_source, true_value));
+//RS 
+//RS     ctx.switch_to(false_block);
+//RS     let false_value = ctx.emit(
+//RS         "compare-chain-false-value",
+//RS         Some(crate::AST::Type::Bool),
+//RS         MirOperation::Constant(MirConstant::Bool(false)),
+//RS     )?;
+//RS     let false_source = ctx.current_block();
+//RS     ctx.terminate(MirTerminator::Jump { target: join });
+//RS     incoming.push((false_source, false_value));
+//RS 
+//RS     ctx.switch_to(join);
+//RS     ctx.emit(
+//RS         "compare-chain-phi",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Phi { incoming },
+//RS     )
+//RS }
+//RS /// One open level of an if-expression chain: its expression and else value,
+//RS /// its join block, the arm values that reach the join, and its shadow mark.
+//RS struct IfExprLevel<'a> {
+//RS     expr: &'a TExpr,
+//RS     else_value: &'a TExpr,
+//RS     join: MirBlockId,
+//RS     incoming: Vec<(MirBlockId, jet_foundation::MIR::MirValueId)>,
+//RS     shadow_mark: usize,
+//RS }
+//RS 
+//RS /// Lower an if-expression and the if-expressions chained through its else
+//RS /// values (how a value `match` reaches TIR: one level per arm) in a loop, not
+//RS /// one `lower_expr` recursion per arm. Blocks, shadow restores, terminators,
+//RS /// phis and canonical rows are emitted in exactly the order the recursive
+//RS /// `lower_child(else_value)` calls produced.
+//RS fn lower_if_expr<'a>(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &'a TExpr,
+//RS     cond: &'a super::TIfCond,
+//RS     then_body: &'a [super::TStmt],
+//RS     then_value: &'a TExpr,
+//RS     else_body: &'a [super::TStmt],
+//RS     else_value: &'a TExpr,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let mut levels: Vec<IfExprLevel<'a>> = Vec::new();
+//RS     let (mut expr, mut cond, mut then_body, mut then_value, mut else_body, mut else_value) =
+//RS         (expr, cond, then_body, then_value, else_body, else_value);
+//RS     let mut value = loop {
+//RS         let then_block = ctx.new_block(ctx.span(), "if-then")?;
+//RS         let else_block = ctx.new_block(ctx.span(), "if-else")?;
+//RS         let join = ctx.new_block(ctx.span(), "if-join")?;
+//RS 
+//RS         // Condition bindings (`x == .Val(x)`) hold only on the then path.
+//RS         let shadow_mark = ctx.shadow_mark();
+//RS         lower_if_cond(ctx, cond, then_block, else_block)?;
+//RS 
+//RS         let mut incoming = Vec::with_capacity(2);
+//RS 
+//RS         ctx.switch_to(then_block);
+//RS         ctx.lower_nested_stmts(then_body)?;
+//RS         if !ctx.is_terminated() {
+//RS             let value = ctx.lower_child(then_value)?;
+//RS             let value = ctx.trait_box_value(value, &then_value.ty, &expr.ty)?;
+//RS             let source = ctx.current_block();
+//RS             if !ctx.is_terminated() {
+//RS                 ctx.terminate(MirTerminator::Jump { target: join });
+//RS                 incoming.push((source, value));
+//RS             }
+//RS         }
+//RS 
+//RS         ctx.restore_shadowed_locals(shadow_mark);
+//RS         ctx.switch_to(else_block);
+//RS         ctx.lower_nested_stmts(else_body)?;
+//RS         if !ctx.is_terminated() {
+//RS             if let TExprKind::IfExpr {
+//RS                 cond: next_cond,
+//RS                 then_body: next_then_body,
+//RS                 then_value: next_then_value,
+//RS                 else_body: next_else_body,
+//RS                 else_value: next_else_value,
+//RS             } = &else_value.kind
+//RS             {
+//RS                 levels.push(IfExprLevel {
+//RS                     expr,
+//RS                     else_value,
+//RS                     join,
+//RS                     incoming,
+//RS                     shadow_mark,
+//RS                 });
+//RS                 expr = else_value;
+//RS                 cond = &**next_cond;
+//RS                 then_body = next_then_body.as_slice();
+//RS                 then_value = &**next_then_value;
+//RS                 else_body = next_else_body.as_slice();
+//RS                 else_value = &**next_else_value;
+//RS                 continue;
+//RS             }
+//RS             let value = ctx.lower_child(else_value)?;
+//RS             close_if_expr_arm(ctx, expr, else_value, join, &mut incoming, value)?;
+//RS         }
+//RS         break finish_if_expr_level(ctx, expr, join, incoming, shadow_mark)?;
+//RS     };
+//RS     while let Some(mut level) = levels.pop() {
+//RS         // What `lower_expr` did after the nested level returned.
+//RS         record_lowered_expression(level.else_value, &value);
+//RS         close_if_expr_arm(ctx, level.expr, level.else_value, level.join, &mut level.incoming, value)?;
+//RS         value = finish_if_expr_level(ctx, level.expr, level.join, level.incoming, level.shadow_mark)?;
+//RS     }
+//RS     Ok(value)
+//RS }
+//RS 
+//RS /// Jump from the end of an if-expression arm to the join with its value.
+//RS fn close_if_expr_arm(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     arm_value: &TExpr,
+//RS     join: MirBlockId,
+//RS     incoming: &mut Vec<(MirBlockId, jet_foundation::MIR::MirValueId)>,
+//RS     value: jet_foundation::MIR::MirValueId,
+//RS ) -> Result<(), LowerError> {
+//RS     let value = ctx.trait_box_value(value, &arm_value.ty, &expr.ty)?;
+//RS     let source = ctx.current_block();
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: join });
+//RS         incoming.push((source, value));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Close one if-expression level: the phi of its arm values at the join.
+//RS fn finish_if_expr_level(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     join: MirBlockId,
+//RS     incoming: Vec<(MirBlockId, jet_foundation::MIR::MirValueId)>,
+//RS     shadow_mark: usize,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     ctx.restore_shadowed_locals(shadow_mark);
+//RS     if incoming.is_empty() {
+//RS         ctx.block_mut(join)?.terminator = MirTerminator::Unreachable {
+//RS             reason: "every conditional arm diverges".to_string(),
+//RS         };
+//RS         return ctx.emit(
+//RS             "diverging-conditional",
+//RS             Some(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
+//RS             MirOperation::Constant(MirConstant::Unit),
+//RS         );
+//RS     }
+//RS     ctx.switch_to(join);
+//RS     ctx.emit(
+//RS         "if-phi",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Phi { incoming },
+//RS     )
+//RS }
+//RS /// Result handlers share the single owned SSA carrier across both tests.
+//RS /// Each selected pattern consumes its payload; the other arm never reads a
+//RS /// clone of a non-Clone resource or a second copy of the transport.
+//RS fn lower_result_handler(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     source: &TExpr,
+//RS     ok_pattern: &super::TPattern,
+//RS     ok_body: &[super::TStmt],
+//RS     ok_value: &TExpr,
+//RS     err_pattern: &super::TPattern,
+//RS     err_body: &[super::TStmt],
+//RS     err_value: &TExpr,
+//RS     terminal: &TExpr,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let subject = ctx.lower_child(source)?;
+//RS     let ok_block = ctx.new_block(ctx.span(), "result-handler.ok")?;
+//RS     let err_test = ctx.new_block(ctx.span(), "result-handler.err-test")?;
+//RS     let err_block = ctx.new_block(ctx.span(), "result-handler.err")?;
+//RS     let terminal_block = ctx.new_block(ctx.span(), "result-handler.terminal")?;
+//RS     let join = ctx.new_block(ctx.span(), "result-handler.join")?;
+//RS     let ok = ctx.lower_pattern(ok_pattern)?;
+//RS     let ok_test = ctx.lower_pattern_condition(subject, &ok)?;
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition: ok_test,
+//RS         then_target: ok_block,
+//RS         else_target: err_test,
+//RS     });
+//RS 
+//RS     let mut incoming = Vec::with_capacity(3);
+//RS     ctx.switch_to(ok_block);
+//RS     ctx.lower_nested_stmts(ok_body)?;
+//RS     if !ctx.is_terminated() {
+//RS         let value = ctx.lower_child(ok_value)?;
+//RS         let value = ctx.trait_box_value(value, &ok_value.ty, &expr.ty)?;
+//RS         let from = ctx.current_block();
+//RS         if !ctx.is_terminated() {
+//RS             ctx.terminate(MirTerminator::Jump { target: join });
+//RS             incoming.push((from, value));
+//RS         }
+//RS     }
+//RS 
+//RS     ctx.switch_to(err_test);
+//RS     let err = ctx.lower_pattern(err_pattern)?;
+//RS     let err_test_value = ctx.lower_pattern_condition(subject, &err)?;
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition: err_test_value,
+//RS         then_target: err_block,
+//RS         else_target: terminal_block,
+//RS     });
+//RS     ctx.switch_to(err_block);
+//RS     ctx.lower_nested_stmts(err_body)?;
+//RS     if !ctx.is_terminated() {
+//RS         let value = ctx.lower_child(err_value)?;
+//RS         let value = ctx.trait_box_value(value, &err_value.ty, &expr.ty)?;
+//RS         let from = ctx.current_block();
+//RS         if !ctx.is_terminated() {
+//RS             ctx.terminate(MirTerminator::Jump { target: join });
+//RS             incoming.push((from, value));
+//RS         }
+//RS     }
+//RS     ctx.switch_to(terminal_block);
+//RS     let value = ctx.lower_child(terminal)?;
+//RS     let value = ctx.trait_box_value(value, &terminal.ty, &expr.ty)?;
+//RS     let from = ctx.current_block();
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: join });
+//RS         incoming.push((from, value));
+//RS     }
+//RS     if incoming.is_empty() {
+//RS         ctx.block_mut(join)?.terminator = MirTerminator::Unreachable {
+//RS             reason: "every Result handler arm diverges".to_string(),
+//RS         };
+//RS         return ctx.emit(
+//RS             "diverging-result-handler",
+//RS             Some(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
+//RS             MirOperation::Constant(MirConstant::Unit),
+//RS         );
+//RS     }
+//RS     ctx.switch_to(join);
+//RS     ctx.emit("result-handler.phi", Some(expr.ty.clone()), MirOperation::Phi { incoming })
+//RS }
+//RS 
+//RS /// #3740: the call whose value a `Try` consumes when its operand names a
+//RS /// `T Never!` carrier — the operand itself, or the tail of the inline block
+//RS /// that orders its arguments. The address identifies it while lowering.
+//RS fn plain_try_call_root(inner: &TExpr) -> Option<usize> {
+//RS     if !super::mir::is_result_carrier(&inner.ty) {
+//RS         return None;
+//RS     }
+//RS     let mut expr = inner;
+//RS     loop {
+//RS         match &expr.kind {
+//RS             TExprKind::Call { .. } | TExprKind::ModuleCall { .. } => {
+//RS                 return Some(expr as *const TExpr as usize);
+//RS             }
+//RS             TExprKind::InlineBlock(stmts) => match stmts.last() {
+//RS                 Some(super::TStmt::ExprStmt(tail)) => expr = tail,
+//RS                 _ => return None,
+//RS             },
+//RS             _ => return None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// #3740: a plain-return function hands back its success value. Its checked
+//RS /// body still returns the `T Never!` carrier — the implicit `Ok(v)` or a
+//RS /// carrier-typed value — so the executable return unwraps it here, once.
+//RS /// A `T? Never!` function hands back its `T?` the same way. `None` when the
+//RS /// function keeps a carrier-shaped return.
+//RS pub(super) fn lower_plain_return_value(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     expected: &Type,
+//RS ) -> Result<Option<jet_foundation::MIR::MirValueId>, LowerError> {
+//RS     if !super::mir::is_plain_call_return(expected, &expr.ty) {
+//RS         return Ok(None);
+//RS     }
+//RS     if let TExprKind::Ok(inner) = &expr.kind {
+//RS         return lower_carrier_payload(ctx, inner, Some(expected)).map(Some);
+//RS     }
+//RS     let value = ctx.lower_child(expr)?;
+//RS     if ctx.is_terminated() {
+//RS         return Ok(Some(value));
+//RS     }
+//RS     let carrier = expr.ty.without_user_tags().clone();
+//RS     lower_try_value(ctx, value, expected, &carrier, None, &TTryConvert::Never, None).map(Some)
+//RS }
+//RS 
+//RS fn try_child_already_propagated(inner: &TExpr) -> bool {
+//RS     match &inner.kind {
+//RS         TExprKind::ModuleCall {
+//RS             target_return: Some(target),
+//RS             ..
+//RS         } => matches!(target, Type::Result { .. } | Type::Option(_)) && target != &inner.ty,
+//RS         TExprKind::HostCall(host) => matches!(host.as_ref(), THostCall::EnvSet { .. }),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS fn checked_failure_return_type(ctx: &LowerCtx, carrier: &TFailureCarrier) -> Option<Type> {
+//RS     ctx.function.ret.clone().or_else(|| match carrier {
+//RS         TFailureCarrier::Result { success, error } => Some(Type::Result {
+//RS             ok: Box::new(success.clone()),
+//RS             err: Box::new(error.clone()),
+//RS         }),
+//RS         TFailureCarrier::Optional { value } => Some(Type::Option(Box::new(value.clone()))),
+//RS         TFailureCarrier::Diverges { value } => Some(value.clone()),
+//RS         TFailureCarrier::Infallible => None,
+//RS     })
+//RS }
+//RS 
+//RS fn lower_if_cond(
+//RS     ctx: &mut LowerCtx,
+//RS     cond: &super::TIfCond,
+//RS     then_target: MirBlockId,
+//RS     else_target: MirBlockId,
+//RS ) -> Result<(), LowerError> {
+//RS     match cond {
+//RS         super::TIfCond::Plain(expr) => {
+//RS             let condition = ctx.lower_child(expr)?;
+//RS             ctx.terminate(MirTerminator::Branch {
+//RS                 condition,
+//RS                 then_target,
+//RS                 else_target,
+//RS             });
+//RS         }
+//RS         super::TIfCond::And { left, right } => {
+//RS             let right_block = ctx.new_block(ctx.span(), "if-and-right")?;
+//RS             lower_if_cond(ctx, left, right_block, else_target)?;
+//RS             ctx.switch_to(right_block);
+//RS             lower_if_cond(ctx, right, then_target, else_target)?;
+//RS         }
+//RS         super::TIfCond::IfLet { pattern, subj } => {
+//RS             let subject = ctx.lower_pattern_subject(subj)?;
+//RS             let pattern = lower_pattern(ctx, pattern)?;
+//RS             let condition = ctx.lower_pattern_condition(subject, &pattern)?;
+//RS             ctx.terminate(MirTerminator::Branch {
+//RS                 condition,
+//RS                 then_target,
+//RS                 else_target,
+//RS             });
+//RS         }
+//RS         super::TIfCond::IsNone { subj } => {
+//RS             let subject = ctx.lower_child(subj)?;
+//RS             let pattern = MirPattern {
+//RS                 shape: MirPatternShape::Absent(ctx.span()),
+//RS                 owner: None,
+//RS                 position: MirPatternPosition::OptionBinding,
+//RS                 mutable: false,
+//RS                 boxed: false,
+//RS             };
+//RS             let condition = ctx.lower_pattern_condition(subject, &pattern)?;
+//RS             ctx.terminate(MirTerminator::Branch {
+//RS                 condition,
+//RS                 then_target,
+//RS                 else_target,
+//RS             });
+//RS         }
+//RS         super::TIfCond::Matches { pattern, subj } => {
+//RS             let subject = ctx.lower_pattern_subject(subj)?;
+//RS             let pattern = lower_pattern(ctx, pattern)?;
+//RS             let condition = ctx.lower_pattern_condition(subject, &pattern)?;
+//RS             ctx.terminate(MirTerminator::Branch {
+//RS                 condition,
+//RS                 then_target,
+//RS                 else_target,
+//RS             });
+//RS         }
+//RS         super::TIfCond::WithPrelude { prelude, cond } => {
+//RS             ctx.lower_nested_stmts(prelude)?;
+//RS             if !ctx.is_terminated() {
+//RS                 lower_if_cond(ctx, cond, then_target, else_target)?;
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// One `?` site (written or automatic) on a failure's way out (#3713).
+//RS #[derive(Clone, Copy)]
+//RS struct TryJourneySite<'a> {
+//RS     /// Pre-escaped source file, as `TExprKind::Try` carries it.
+//RS     file: &'a str,
+//RS     line: usize,
+//RS     column: usize,
+//RS     /// Pre-escaped enclosing function name.
+//RS     fn_name: &'a str,
+//RS     /// The operand is a Core call: its failure begins at this site, so any
+//RS     /// journey left over from an earlier, handled failure is dropped first.
+//RS     fresh_failure: bool,
+//RS }
+//RS 
+//RS /// A Core call runs no program code of its own, so when it fails the failure
+//RS /// starts at the call. A Core call that takes a callback can carry a failure
+//RS /// out of program code, so it keeps the journey that callback started.
+//RS fn try_operand_starts_failure(operand: &TExpr) -> bool {
+//RS     match &operand.kind {
+//RS         TExprKind::CoreCall { args, .. } => {
+//RS             !args.iter().any(|arg| matches!(arg.ty, Type::Fn { .. }))
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_fresh_failure(
+//RS     ctx: &mut LowerCtx,
+//RS     location: Option<TryJourneySite<'_>>,
+//RS ) -> Result<(), LowerError> {
+//RS     if location.is_some_and(|site| site.fresh_failure) {
+//RS         let reset_route = super::journey_reset_route()?;
+//RS         let unit_ty = Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string());
+//RS         let _ = emit_static_call(ctx, &unit_ty, reset_route, Vec::new())?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn lower_try_value(
+//RS     ctx: &mut LowerCtx,
+//RS     input: jet_foundation::MIR::MirValueId,
+//RS     result: &Type,
+//RS     input_ty: &Type,
+//RS     note: Option<&TExpr>,
+//RS     convert: &TTryConvert,
+//RS     location: Option<TryJourneySite<'_>>,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let is_result = matches!(input_ty, crate::AST::Type::Result { .. });
+//RS     let is_option = matches!(input_ty, crate::AST::Type::Option(_));
+//RS     if !is_result && !is_option {
+//RS         return unsupported_expr(ctx, "TExprKind::Try (non-carrier operand)");
+//RS     }
+//RS     // #3740: a `T Never!` operand has no failure value. A caller checked
+//RS     // before the failure solve still names a propagating conversion, but the
+//RS     // executable operand proves the failure edge dead.
+//RS     let never_convert = TTryConvert::Never;
+//RS     let convert = if matches!(input_ty, Type::Result { err, .. } if err.is_never()) {
+//RS         &never_convert
+//RS     } else {
+//RS         convert
+//RS     };
+//RS     let success_block = ctx.new_block(ctx.span(), "try-success")?;
+//RS     let failure_block = ctx.new_block(ctx.span(), "try-failure")?;
+//RS     let join = ctx.new_block(ctx.span(), "try-join")?;
+//RS     let mut incoming = Vec::with_capacity(2);
+//RS 
+//RS     let condition = if is_result {
+//RS         ctx.emit(
+//RS             "try-result-condition",
+//RS             Some(crate::AST::Type::Bool),
+//RS             MirOperation::ResultIsOk { subject: input },
+//RS         )?
+//RS     } else {
+//RS         ctx.emit(
+//RS             "try-option-condition",
+//RS             Some(crate::AST::Type::Bool),
+//RS             MirOperation::OptionIsSome { subject: input },
+//RS         )?
+//RS     };
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition,
+//RS         then_target: success_block,
+//RS         else_target: failure_block,
+//RS     });
+//RS 
+//RS     ctx.switch_to(success_block);
+//RS     if location.is_some() {
+//RS         let reset_route = super::journey_reset_route()?;
+//RS         let unit_ty = Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string());
+//RS         let _ = emit_static_call(ctx, &unit_ty, reset_route, Vec::new())?;
+//RS     }
+//RS     let success_ty = if is_result {
+//RS         input_ty
+//RS             .unwrap_result()
+//RS             .map(|(ok, _)| ok.clone())
+//RS             .ok_or_else(|| ctx.error(ctx.span(), "checked try result has no success type"))?
+//RS     } else {
+//RS         input_ty
+//RS             .unwrap_option()
+//RS             .cloned()
+//RS             .ok_or_else(|| ctx.error(ctx.span(), "checked try option has no success type"))?
+//RS     };
+//RS     if success_ty.is_never() {
+//RS         // A `Never` success (`Never E!`, `Never Never!`) has no value to
+//RS         // hand on; only the failure edge can leave this `Try`.
+//RS         ctx.terminate(MirTerminator::Unreachable {
+//RS             reason: "checked try success is uninhabited".to_string(),
+//RS         });
+//RS     } else {
+//RS         let success = if is_result {
+//RS             ctx.emit(
+//RS                 "try-result-value",
+//RS                 Some(success_ty.clone()),
+//RS                 MirOperation::ResultValue {
+//RS                     subject: input,
+//RS                     ok: true,
+//RS                 },
+//RS             )?
+//RS         } else {
+//RS             ctx.emit(
+//RS                 "try-option-value",
+//RS                 Some(success_ty.clone()),
+//RS                 MirOperation::OptionValue { subject: input },
+//RS             )?
+//RS         };
+//RS         let success = ctx.trait_box_value(success, &success_ty, result)?;
+//RS         let success_source = ctx.current_block();
+//RS         if !ctx.is_terminated() {
+//RS             ctx.terminate(MirTerminator::Jump { target: join });
+//RS             incoming.push((success_source, success));
+//RS         }
+//RS     }
+//RS 
+//RS     ctx.switch_to(failure_block);
+//RS     let carrier = ctx.function.failure_carrier.clone();
+//RS     match &carrier {
+//RS         super::TFailureCarrier::Result { .. } => {
+//RS             if matches!(convert, TTryConvert::Never) {
+//RS                 ctx.terminate(MirTerminator::Unreachable {
+//RS                     reason: "try conversion is unreachable".to_string(),
+//RS                 });
+//RS             } else {
+//RS                 let error = ctx.emit(
+//RS                     "try-result-error-value",
+//RS                     Some(
+//RS                         input_ty
+//RS                             .unwrap_result()
+//RS                             .map(|(_, error)| error.clone())
+//RS                             .ok_or_else(|| {
+//RS                                 ctx.error(ctx.span(), "checked try result has no error type")
+//RS                             })?,
+//RS                     ),
+//RS                     MirOperation::ResultValue {
+//RS                         subject: input,
+//RS                         ok: false,
+//RS                     },
+//RS                 )?;
+//RS                 if matches!(convert, TTryConvert::ProtocolExit) {
+//RS                     let route = super::try_conversion_route(convert, input_ty, result, &carrier)?;
+//RS                     let never_ty = Type::Named(crate::Syntax::TYPE_NEVER.to_string());
+//RS                     let _ = emit_static_call(ctx, &never_ty, route, vec![error])?;
+//RS                     ctx.terminate(MirTerminator::Unreachable {
+//RS                         reason: "protocol error exit diverges".to_string(),
+//RS                     });
+//RS                 } else {
+//RS                     lower_fresh_failure(ctx, location)?;
+//RS                     let note_value = note.map(|value| ctx.lower_child(value)).transpose()?;
+//RS                     let converted = lower_try_failure(
+//RS                         ctx, error, input_ty, convert, note_value, result, location, &carrier,
+//RS                     )?;
+//RS                     let return_ty =
+//RS                         checked_failure_return_type(ctx, &carrier).ok_or_else(|| {
+//RS                             ctx.error(ctx.span(), "checked try has no result return type")
+//RS                         })?;
+//RS                     let failure = ctx.emit(
+//RS                         "try-result-error",
+//RS                         Some(return_ty),
+//RS                         MirOperation::ResultErr { value: converted },
+//RS                     )?;
+//RS                     ctx.terminate_with_cleanup(
+//RS                         MirTerminator::Return {
+//RS                             value: Some(failure),
+//RS                         },
+//RS                         0,
+//RS                     )?;
+//RS                 }
+//RS             }
+//RS         }
+//RS         super::TFailureCarrier::Optional { .. } => {
+//RS             if matches!(convert, TTryConvert::Never) {
+//RS                 ctx.terminate(MirTerminator::Unreachable {
+//RS                     reason: "try conversion is unreachable".to_string(),
+//RS                 });
+//RS             } else if !matches!(convert, TTryConvert::None) {
+//RS                 return unsupported_expr(ctx, "TExprKind::Try (optional conversion)");
+//RS             } else {
+//RS                 lower_fresh_failure(ctx, location)?;
+//RS                 let note_value = note.map(|value| ctx.lower_child(value)).transpose()?;
+//RS                 if let Some(site) = location {
+//RS                     lower_try_journey(ctx, result, &carrier, note_value, site)?;
+//RS                 }
+//RS                 let return_ty = checked_failure_return_type(ctx, &carrier).ok_or_else(|| {
+//RS                     ctx.error(ctx.span(), "checked try has no optional return type")
+//RS                 })?;
+//RS                 let failure =
+//RS                     ctx.emit("try-optional-absent", Some(return_ty), MirOperation::Absent)?;
+//RS                 ctx.terminate_with_cleanup(
+//RS                     MirTerminator::Return {
+//RS                         value: Some(failure),
+//RS                     },
+//RS                     0,
+//RS                 )?;
+//RS             }
+//RS         }
+//RS         super::TFailureCarrier::Diverges { .. } => {
+//RS             if matches!(convert, TTryConvert::Never) {
+//RS                 ctx.terminate(MirTerminator::Unreachable {
+//RS                     reason: "try conversion is unreachable".to_string(),
+//RS                 });
+//RS             } else if matches!(convert, TTryConvert::ProtocolExit) && is_result {
+//RS                 let error = ctx.emit(
+//RS                     "try-result-error-value",
+//RS                     Some(
+//RS                         input_ty
+//RS                             .unwrap_result()
+//RS                             .map(|(_, error)| error.clone())
+//RS                             .ok_or_else(|| {
+//RS                                 ctx.error(ctx.span(), "checked try result has no error type")
+//RS                             })?,
+//RS                     ),
+//RS                     MirOperation::ResultValue {
+//RS                         subject: input,
+//RS                         ok: false,
+//RS                     },
+//RS                 )?;
+//RS                 let route = super::try_conversion_route(convert, input_ty, result, &carrier)?;
+//RS                 let never_ty = Type::Named(crate::Syntax::TYPE_NEVER.to_string());
+//RS                 let _ = emit_static_call(ctx, &never_ty, route, vec![error])?;
+//RS                 ctx.terminate(MirTerminator::Unreachable {
+//RS                     reason: "protocol error exit diverges".to_string(),
+//RS                 });
+//RS             } else {
+//RS                 return unsupported_expr(ctx, "TExprKind::Try (diverging carrier)");
+//RS             }
+//RS         }
+//RS         super::TFailureCarrier::Infallible => {
+//RS             ctx.switch_to(failure_block);
+//RS             ctx.terminate(MirTerminator::Unreachable {
+//RS                 reason: "try in an infallible function diverges on failure".to_string(),
+//RS             });
+//RS         }
+//RS     }
+//RS 
+//RS     if incoming.is_empty() {
+//RS         // Every edge left the `Try` (a `Never` success whose failure
+//RS         // propagated or is itself uninhabited). The join has no predecessor
+//RS         // and the placeholder below sits after a terminator, as for an `if`
+//RS         // whose every arm diverges.
+//RS         ctx.block_mut(join)?.terminator = MirTerminator::Unreachable {
+//RS             reason: "every try edge diverges".to_string(),
+//RS         };
+//RS         return ctx.emit(
+//RS             "diverging-try",
+//RS             Some(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
+//RS             MirOperation::Constant(MirConstant::Unit),
+//RS         );
+//RS     }
+//RS     ctx.switch_to(join);
+//RS     ctx.emit(
+//RS         "try-phi",
+//RS         Some(result.clone()),
+//RS         MirOperation::Phi { incoming },
+//RS     )
+//RS }
+//RS 
+//RS fn decode_try_location(value: &str) -> String {
+//RS     let value = value.strip_prefix('"').unwrap_or(value);
+//RS     let value = value.strip_suffix('"').unwrap_or(value);
+//RS     let mut decoded = String::with_capacity(value.len());
+//RS     let mut escaped = false;
+//RS     for ch in value.chars() {
+//RS         if escaped {
+//RS             if matches!(ch, '\\' | '"') {
+//RS                 decoded.push(ch);
+//RS             } else {
+//RS                 decoded.push('\\');
+//RS                 decoded.push(ch);
+//RS             }
+//RS             escaped = false;
+//RS         } else if ch == '\\' {
+//RS             escaped = true;
+//RS         } else {
+//RS             decoded.push(ch);
+//RS         }
+//RS     }
+//RS     if escaped {
+//RS         decoded.push('\\');
+//RS     }
+//RS     decoded
+//RS }
+//RS 
+//RS /// The source-site arguments every journey route takes, in ABI order: file,
+//RS /// line, column, function.
+//RS fn lower_try_context_values(
+//RS     ctx: &mut LowerCtx,
+//RS     file: &str,
+//RS     line: usize,
+//RS     column: usize,
+//RS     fn_name: &str,
+//RS ) -> Result<Vec<jet_foundation::MIR::MirValueId>, LowerError> {
+//RS     let line = u32::try_from(line)
+//RS         .map_err(|_| ctx.error(ctx.span(), "checked try source line does not fit u32"))?;
+//RS     let column = u32::try_from(column)
+//RS         .map_err(|_| ctx.error(ctx.span(), "checked try source column does not fit u32"))?;
+//RS     let file_value = ctx.emit(
+//RS         "try-context-file",
+//RS         Some(Type::String),
+//RS         MirOperation::Constant(MirConstant::String(decode_try_location(file))),
+//RS     )?;
+//RS     let line_value = ctx.emit(
+//RS         "try-context-line",
+//RS         Some(Type::IntN {
+//RS             signed: false,
+//RS             bits: 32,
+//RS         }),
+//RS         MirOperation::Constant(MirConstant::Int {
+//RS             value: i64::from(line),
+//RS             width: Some((false, 32)),
+//RS             spelling: None,
+//RS         }),
+//RS     )?;
+//RS     let column_value = ctx.emit(
+//RS         "try-context-column",
+//RS         Some(Type::IntN {
+//RS             signed: false,
+//RS             bits: 32,
+//RS         }),
+//RS         MirOperation::Constant(MirConstant::Int {
+//RS             value: i64::from(column),
+//RS             width: Some((false, 32)),
+//RS             spelling: None,
+//RS         }),
+//RS     )?;
+//RS     let fn_value = ctx.emit(
+//RS         "try-context-function",
+//RS         Some(Type::String),
+//RS         MirOperation::Constant(MirConstant::String(decode_try_location(fn_name))),
+//RS     )?;
+//RS     Ok(vec![file_value, line_value, column_value, fn_value])
+//RS }
+//RS 
+//RS fn lower_try_journey(
+//RS     ctx: &mut LowerCtx,
+//RS     result: &Type,
+//RS     carrier: &super::TFailureCarrier,
+//RS     note: Option<jet_foundation::MIR::MirValueId>,
+//RS     site: TryJourneySite<'_>,
+//RS ) -> Result<(), LowerError> {
+//RS     let mut values =
+//RS         lower_try_context_values(ctx, site.file, site.line, site.column, site.fn_name)?;
+//RS     let note = match note {
+//RS         Some(note) => note,
+//RS         None => ctx.emit(
+//RS             "try-context-empty-note",
+//RS             Some(Type::String),
+//RS             MirOperation::Constant(MirConstant::String(String::new())),
+//RS         )?,
+//RS     };
+//RS     values.push(note);
+//RS     let route = super::failure_note_route(result, carrier)?;
+//RS     let unit_ty = Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string());
+//RS     let _ = emit_static_call(ctx, &unit_ty, route, values)?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// D-UNIONTYPE1=A: the one member-to-union widening. Every site that turns a
+//RS /// member value into its anonymous union (binding, argument, explicit return,
+//RS /// tail value, and the implicit or `?(note)` failure hop) builds the union
+//RS /// here. The value is typed by the union itself, so it and its constructor
+//RS /// name the same canonical carrier row on every tier.
+//RS fn lower_union_widening(
+//RS     ctx: &mut LowerCtx,
+//RS     union: &Type,
+//RS     tag: &str,
+//RS     args: Vec<MirEnumArg>,
+//RS ) -> Result<MirValueId, LowerError> {
+//RS     let Type::Union(members) = union.without_user_tags() else {
+//RS         return Err(ctx.error(ctx.span(), "checked union widening has no union target"));
+//RS     };
+//RS     if !members
+//RS         .iter()
+//RS         .any(|member| crate::AST::union_member_tag(member) == tag)
+//RS     {
+//RS         return Err(ctx.error(
+//RS             ctx.span(),
+//RS             format!("checked union widening names no member `{tag}`"),
+//RS         ));
+//RS     }
+//RS     let type_id = ctx.type_id_for(&crate::AST::union_enum_name(members))?;
+//RS     ctx.emit(
+//RS         "union-widening",
+//RS         Some(union.clone()),
+//RS         MirOperation::Enum {
+//RS             type_id,
+//RS             variant: tag.to_string(),
+//RS             args,
+//RS         },
+//RS     )
+//RS }
+//RS 
+// END-PORT-PENDING 0532 crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:4584-6379
+

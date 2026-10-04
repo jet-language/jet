@@ -1,0 +1,87 @@
+// PORT-PENDING 0066 crates-jet-foundation-src-hex-module-group: crates/jet-foundation/src/JitBackend.rs:1-83
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! c139 (D-JITDEP1 / D-JIT2=A) — the stable `JitBackend` execution seam.
+//RS //!
+//RS //! Lives in `jet-foundation` so the `jet-jit/` sibling workspace member
+//RS //! (which carries the Cranelift dep) can implement the trait without
+//RS //! depending on the root `jet` crate (which would create a dep cycle).
+//RS //!
+//RS //! `Source/JitBackend.rs` re-exports everything here and adds
+//RS //! `InterpreterBackend` (the tier-0 interpreter impl).
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::MIR::{MirArtifactId, MirProgram};
+//RS /// What a single dev/serve iteration produced.
+//RS ///
+//RS /// Identical shape to the AOT compilation result (Q2 hard rule):
+//RS /// `Ran.stdout`/`Ran.stderr`/`Ran.exit_code` are byte-identical to the compiled
+//RS /// binary's output.
+//RS #[derive(Debug, Clone)]
+//RS pub enum RunOutcome {
+//RS     /// The program ran to completion. `stdout`/`stderr`/`exit_code` are
+//RS     /// byte-identical to the compiled program (Q2 — enforced by the
+//RS     /// differential battery in `tests/dev.rs`).
+//RS     Ran {
+//RS         stdout: String,
+//RS         stderr: String,
+//RS         exit_code: i32,
+//RS     },
+//RS     /// Front-end or runtime diagnostics, including E2202 fuel stops and
+//RS     /// canonical-evaluator refusals.
+//RS     Problems(Vec<Diagnostic>),
+//RS }
+//RS 
+//RS /// The execution seam shared by every tier (interpreter now, Cranelift later).
+//RS ///
+//RS /// Callers hold a `&mut dyn JitBackend` and never name a concrete engine, so
+//RS /// a future tier-1 (or c140 bytecode VM / c141 native JIT) is a drop-in.
+//RS pub trait JitBackend {
+//RS     /// The canonical, invocation-local policy carried by this backend.
+//RS     ///
+//RS     /// Foundation cannot depend on the package model without creating a
+//RS     /// dependency cycle, so the concrete adapters bind this projection to
+//RS     /// `ReleaseDevtoolsPolicy` themselves.  The policy is deliberately an
+//RS     /// input to every execution transition rather than backend-global state.
+//RS     type InvocationPolicy: ?Sized;
+//RS 
+//RS     /// Run an optimized canonical MIR artifact to completion.
+//RS     /// `try_anyway` is an invocation option passed to the canonical evaluator.
+//RS     fn run(
+//RS         &mut self,
+//RS         program: &MirProgram,
+//RS         artifact: MirArtifactId,
+//RS         try_anyway: bool,
+//RS         policy: &Self::InvocationPolicy,
+//RS     ) -> RunOutcome;
+//RS 
+//RS     /// Apply a type-stable edit to `module_name` and run the new artifact.
+//RS     ///
+//RS     /// The caller has already confirmed type stability via
+//RS     /// `Sema::HotSwap::type_stable_check`. `Err` means the run produced
+//RS     /// diagnostics (e.g. E2202 fuel stop), not a type mismatch.
+//RS     ///
+//RS     /// Cranelift tier-1 re-links the changed module in the resident process,
+//RS     /// preserving live heap state. Tier-0 re-evaluates from scratch.
+//RS     fn hot_swap(
+//RS         &mut self,
+//RS         module_name: &str,
+//RS         program: &MirProgram,
+//RS         artifact: MirArtifactId,
+//RS         try_anyway: bool,
+//RS         policy: &Self::InvocationPolicy,
+//RS     ) -> Result<RunOutcome, Vec<Diagnostic>>;
+//RS 
+//RS     /// Restart cleanly on a type/layout-changing edit and run the new artifact.
+//RS     ///
+//RS     /// Tier-0: same as `run`. Tier-1: tear down the resident process, rebuild,
+//RS     /// and announce the restart per D-HOTSWAP1.
+//RS     fn restart(
+//RS         &mut self,
+//RS         program: &MirProgram,
+//RS         artifact: MirArtifactId,
+//RS         try_anyway: bool,
+//RS         policy: &Self::InvocationPolicy,
+//RS     ) -> RunOutcome;
+//RS }
+// END-PORT-PENDING 0066 crates/jet-foundation/src/JitBackend.rs:1-83
+

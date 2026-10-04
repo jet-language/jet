@@ -1,0 +1,104 @@
+// Original AST/devtools.rs: one registry for declarations and typed publications.
+pub struct DevPanelMarker { pub span: Span, pub name_span: Span, pub negated: Bool, pub arg_count: Int }
+impl DevPanelMarker { pub fn is_valid(self) -> Bool Never! { !self.negated && self.arg_count == 0 } }
+impl Marker {
+    pub fn dev_panel_marker(self) -> DevPanelMarker? Never! {
+        if self.name != MARKER_DEV_PANEL -> return None
+        Val(DevPanelMarker{span: self.span, name_span: self.name_span, negated: self.negated, arg_count: self.args.len()})
+    }
+}
+impl Func {
+    pub fn dev_panel_marker(self) -> DevPanelMarker? Never! {
+        loop marker in self.markers { if marker.dev_panel_marker() == .Val(found) -> return Val(found) }
+        None
+    }
+}
+pub struct DevtoolsStateField { pub name: String, pub ty: Type, pub span: Span, pub has_default: Bool }
+impl DevtoolsStateField {
+    pub fn new(name: String, ty: Type, span: Span, has_default: Bool) -> DevtoolsStateField Never! { DevtoolsStateField{name: name, ty: ty, span: span, has_default: has_default} }
+    pub fn is_ready_before_publication(self) -> Bool Never! {
+        if self.ty == .Option(_) -> return true
+        self.has_default
+    }
+}
+pub struct DevtoolsPanel { pub package: String, pub module: String, pub function: String, pub state_type: Type, pub state_fields: [DevtoolsStateField], pub span: Span }
+impl DevtoolsPanel {
+    pub fn new(package: String, module: String, function: String, state_type: Type, state_fields: [DevtoolsStateField], span: Span) -> DevtoolsPanel Never! { DevtoolsPanel{package: package, module: module, function: function, state_type: state_type, state_fields: state_fields, span: span} }
+    pub fn identity(self) -> String Never! { "{self.package}::{self.module}::{self.function}" }
+    pub fn state_field(self, name: String) -> (@DevtoolsStateField)? Never! from self {
+        loop index in 0..<self.state_fields.len() { if self.state_fields[index].name == name -> return Val(@self.state_fields[index]) }
+        None
+    }
+}
+pub struct DevtoolsFactPublication { pub package: String, pub module: String, pub panel: String, pub field: String, pub value_type: Type, pub span: Span }
+impl DevtoolsFactPublication {
+    pub fn new(package: String, module: String, panel: String, field: String, value_type: Type, span: Span) -> DevtoolsFactPublication Never! { DevtoolsFactPublication{package: package, module: module, panel: panel, field: field, value_type: value_type, span: span} }
+}
+pub enum DevtoolsRegistryError {
+    DuplicatePanel(identity: String, first: Span, duplicate: Span)
+    UnknownStateField(package: String, module: String, panel: String, field: String, span: Span)
+    StateFieldTypeMismatch(package: String, module: String, panel: String, field: String, expected: Type, actual: Type, span: Span)
+}
+pub struct DevtoolsRegistry { panel_facts: [String:DevtoolsPanel], publication_facts: [DevtoolsFactPublication] }
+impl DevtoolsRegistry {
+    pub fn default() -> DevtoolsRegistry Never! { DevtoolsRegistry{panel_facts: [:], publication_facts: []} }
+    pub fn register_panel(&self, panel: ^DevtoolsPanel) -> Result<Unit,DevtoolsRegistryError> Never! {
+        identity :: panel.identity()
+        if self.panel_facts.get(identity) == .Val(first) -> return Err(DevtoolsRegistryError.DuplicatePanel{identity: identity, first: first.span, duplicate: panel.span})
+        self.panel_facts[identity] = ^panel
+        Ok(Unit)
+    }
+    pub fn validate_publication(self, publication: DevtoolsFactPublication) -> Result<Unit,DevtoolsRegistryError> Never! {
+        unknown :: DevtoolsRegistryError.UnknownStateField{package: publication.package, module: publication.module, panel: publication.panel, field: publication.field, span: publication.span}
+        panel :: self.panel(publication.panel) ?? return Err(unknown)
+        if panel.package != publication.package || panel.module != publication.module || panel.identity() != publication.panel -> return Err(unknown)
+        field :: panel.state_field(publication.field) ?? return Err(unknown)
+        if field.ty != publication.value_type -> return Err(DevtoolsRegistryError.StateFieldTypeMismatch{package: publication.package, module: publication.module, panel: publication.panel, field: publication.field, expected: field.ty, actual: publication.value_type, span: publication.span})
+        Ok(Unit)
+    }
+    pub fn register_publication(&self, publication: ^DevtoolsFactPublication) -> Result<Unit,DevtoolsRegistryError> Never! {
+        if self.validate_publication(publication) == .Err(error) -> return Err(error)
+        &self.publication_facts.push(^publication)
+        Ok(Unit)
+    }
+    pub fn panel(self, identity: String) -> (@DevtoolsPanel)? Never! from self {
+        if !self.panel_facts.has_key(identity) -> return None
+        Val(@self.panel_facts[identity])
+    }
+    pub fn panels(self) -> DevtoolsPanels Never! from self {
+        identities := self.panel_facts.keys().to_list()
+        &identities.sort()
+        DevtoolsPanels{registry: @self, identities: ^identities, at: 0}
+    }
+    pub fn publications(self) -> View<DevtoolsFactPublication> Never! from self { self.publication_facts.view(0..<self.publication_facts.len()) }
+    pub fn panel_for_field(self, package: String, module: String, field: String) -> (@DevtoolsPanel)? Never! from self {
+        loop panel in self.panels() { if panel.package == package && panel.module == module && panel.state_field(field) != None -> return Val(panel) }
+        None
+    }
+    pub fn unique_panel_for_field(self, package: String, field: String) -> (@DevtoolsPanel)? Never! from self {
+        found := (@DevtoolsPanel)?{None}
+        loop panel in self.panels() {
+            if panel.package != package || panel.state_field(field) == None -> next
+            if found != None -> return None
+            found = Val(panel)
+        }
+        found
+    }
+    pub fn state_field(self, package: String, module: String, panel: String, field: String) -> (@DevtoolsStateField)? Never! from self {
+        candidate :: self.panel(panel) ?? return None
+        if candidate.package != package || candidate.module != module -> return None
+        candidate.state_field(field)
+    }
+}
+// Native BTreeMap iteration order is lexical. Only keys are materialized for
+// the default ordered-map surface; panel bodies remain loans of this registry.
+pub struct DevtoolsPanels { registry: @DevtoolsRegistry, identities: [String], at: Int }
+impl DevtoolsPanels.Iterator {
+    type Item = @DevtoolsPanel
+    fn next(&self) -> (@DevtoolsPanel)? from self {
+        if self.at >= self.identities.len() -> return None
+        identity :: self.identities[self.at]
+        self.at += 1
+        self.registry.panel(identity)
+    }
+}

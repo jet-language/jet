@@ -54,7 +54,6 @@ use jet_foundation.[
     MIRScopeID,
     MIRSemanticOp,
     MIRStringPart,
-    MIRStringPartKind,
     MIRSwitchArm,
     MIRTagMarker,
     MIRTerminator,
@@ -494,7 +493,7 @@ fn mir_pass_inline_terminator(terminator: MIRTerminator, maps: MIRInlineMaps) ->
             MIRTerminator.Switch{subject: mir_pass_inline_value(maps, subject), arms: mapped_arms, otherwise: mir_pass_inline_block(maps, otherwise)}
         }
         .Return(value) -> MIRTerminator.Return{value: mir_pass_inline_optional_value(maps, value)}
-        .Yield(value, resume) -> MIRTerminator.Yield{value: mir_pass_inline_value(maps, value), resume: mir_pass_inline_block(maps, resume)}
+        .Yield(value, resume, cancel) -> MIRTerminator.Yield{value: mir_pass_inline_value(maps, value), resume: mir_pass_inline_block(maps, resume), cancel: mir_pass_inline_block(maps, cancel)}
         .Break(target, value) -> MIRTerminator.Break{target: mir_pass_inline_block(maps, target), value: mir_pass_inline_optional_value(maps, value)}
         .Continue(target) -> MIRTerminator.Continue{target: mir_pass_inline_block(maps, target)}
         .Unreachable(reason) -> MIRTerminator.Unreachable{reason: reason}
@@ -763,7 +762,7 @@ fn mir_pass_inline_operation(operation: MIROperation, maps: MIRInlineMaps, subst
         .Unary(op, value) -> Val(MIROperation.Unary{op: op, value: mir_pass_inline_value(maps, value)})
         .Binary(op, dispatch, overflow, left, right) -> Val(MIROperation.Binary{op: op, dispatch: dispatch, overflow: overflow, left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right)})
         .BuildString(parts) -> {
-            mapped :: loop part in parts -> MIRStringPart{kind: mir_pass_inline_string_part(part.kind, maps)}
+            mapped :: loop part in parts -> mir_pass_inline_string_part(part, maps)
             Val(MIROperation.BuildString{parts: mapped})
         }
         .BuildList(values, coercion) -> {
@@ -843,10 +842,10 @@ fn mir_pass_inline_operation(operation: MIROperation, maps: MIRInlineMaps, subst
     }
 }
 
-fn mir_pass_inline_string_part(part: MIRStringPartKind, maps: MIRInlineMaps) -> MIRStringPartKind Never! {
+fn mir_pass_inline_string_part(part: MIRStringPart, maps: MIRInlineMaps) -> MIRStringPart Never! {
     if part == {
-        .Literal(text) -> MIRStringPartKind.Literal{text: text}
-        .Interpolation(value, format) -> MIRStringPartKind.Interpolation{value: mir_pass_inline_value(maps, value), format: format}
+        .Literal(text) -> MIRStringPart.Literal{text: text}
+        .Value(value) -> MIRStringPart.Value{value: mir_pass_inline_value(maps, value)}
     }
 }
 

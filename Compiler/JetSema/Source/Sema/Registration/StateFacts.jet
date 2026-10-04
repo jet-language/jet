@@ -1,135 +1,132 @@
-// Canonical state graph facts for reflection and semantic consumers.
-// Invalid transition labels are omitted here; the dedicated state diagnostic
-// pass remains responsible for reporting them.
-use jet_foundation.[
-    Func,
-    Item,
-    NamedSpan,
-    StateDecl,
-    StructDef,
-]
-
-pub struct SemaStateGraphNode {
-    pub name: String
-    pub terminal: Bool
-    pub reachable: Bool?
-}
-
-pub struct SemaStateGraphTransition {
-    pub operation: String
-    pub from: String?
-    pub to: String
-}
+// Rust State.rs::checked_state_graphs: canonical erased metadata projection.
+// Bundle collection stores only marker/state/member facts, never copies Func
+// bodies or a flattened Item/registration graph for reflection or validation.
+use jet_foundation.[Func, Item, NamedSpan, Span, StateTransition, StateNode, StateGraphTransition]
 
 pub struct SemaStateGraphFact {
     pub type_name: String
-    pub states: [SemaStateGraphNode]
-    pub transitions: [SemaStateGraphTransition]
+    pub states: [StateNode]
+    pub transitions: [StateGraphTransition]
 }
-
-struct SemaStateGraphEdge {
-    from: String
-    to: String
+struct SemaStateDeclarationFact {
+    type_name: String
+    states: [NamedSpan]
+    span: Span
 }
-
-fn sema_state_graph_contains(values: [String], name: String) -> Bool Never! {
-    loop value in values {
-        if value == name -> return true
+struct SemaStateMethodFact {
+    name: String
+    requires: NamedSpan?
+    transition: StateTransition?
+    span: Span
+}
+struct SemaStateMetadata {
+    declarations: [String:SemaStateDeclarationFact]
+    declaration_order: [String]
+    methods: [String:[SemaStateMethodFact]]
+    members: [String:[String:Bool]]
+}
+fn sema_state_metadata_new() -> SemaStateMetadata Never! {
+    SemaStateMetadata{declarations: [String:SemaStateDeclarationFact]{}, declaration_order: [], methods: [String:[SemaStateMethodFact]]{}, members: [String:[String:Bool]]{}}
+}
+fn sema_state_metadata_methods(metadata: &SemaStateMetadata, owner: String, methods: [Func]) Never! {
+    rows := &metadata.methods.remove(owner) ?? [SemaStateMethodFact]{}
+    members := &metadata.members.remove(owner) ?? [String:Bool]{}
+    loop method in methods {
+        &rows.push(SemaStateMethodFact{name: method.name, requires: method.state_requires, transition: method.state_transition, span: method.span})
+        members[method.name] = true
     }
-    false
+    metadata.methods[owner] = rows
+    metadata.members[owner] = members
 }
-
+fn sema_state_metadata_add_item(metadata: &SemaStateMetadata, item: Item) Never! {
+    if item == {
+        .Impl(value) -> sema_state_metadata_methods(&metadata, value.type_name, value.methods)
+        .Struct(value) -> {
+            if value.state == .Val(state) {
+                if metadata.declarations.get(value.name) == None -> &metadata.declaration_order.push(value.name)
+                metadata.declarations[value.name] = SemaStateDeclarationFact{type_name: value.name, states: state.states, span: state.span}
+            }
+            members := &metadata.members.remove(value.name) ?? [String:Bool]{}
+            loop field in value.fields -> members[field.name] = true
+            metadata.members[value.name] = members
+            sema_state_metadata_methods(&metadata, value.name, value.methods)
+            loop block in value.trait_impls -> sema_state_metadata_methods(&metadata, value.name, block.methods)
+        }
+        .Enum(value) -> sema_state_metadata_methods(&metadata, value.name, value.methods)
+        else -> {}
+    }
+}
+fn sema_state_metadata_add(metadata: &SemaStateMetadata, items: [Item]) Never! {
+    loop item in items -> sema_state_metadata_add_item(&metadata, item)
+}
 fn sema_state_graph_leaf(owner: String, state: String) -> String? {
     if !state.contains(".") -> return Val(state)
-    parts :: state.split(".").to_list()
-    if parts.len() != 3 || parts[0] != owner || parts[1] != "State" -> return None
-    Val(parts[2])
+    prefix :: "{owner}.State."
+    if !state.starts_with(prefix) -> return None
+    bytes :: state.bytes()
+    leaf := String.from_bytes(bytes[prefix.bytes().len()..<bytes.len()]) ?? return None // #4303
+    if leaf.contains(".") -> return None
+    Val(leaf)
 }
-
-fn sema_state_graph_add_method_transitions(
-    methods: [Func],
-    owner: String,
-    state_names: [String],
-    outgoing: &[String],
-    edges: &[SemaStateGraphEdge],
-    transitions: &[SemaStateGraphTransition],
-    entries: &[String],
-) Never! {
-    loop method in methods {
-        transition :: method.state_transition ?? next
-        from := String?{None}
-        if transition.from == .Val(raw_from) {
-            from_leaf :: sema_state_graph_leaf(owner, raw_from) ?? next
-            if !sema_state_graph_contains(state_names, from_leaf) -> next
-            from = Val(from_leaf)
-        }
-        to :: sema_state_graph_leaf(owner, transition.to) ?? next
-        if !sema_state_graph_contains(state_names, to) -> next
-        if from == {
-            .Val(from_name) -> {
-                &outgoing.push(from_name)
-                &edges.push(SemaStateGraphEdge{from: from_name, to: to})
-            }
-            else -> {
-                &entries.push(to)
-            }
-        }
-        &transitions.push(SemaStateGraphTransition{operation: method.name, from: from, to: to})
-    }
-}
-
-fn sema_state_graph_for_struct(definition: StructDef, items: [Item]) -> SemaStateGraphFact Never! {
-    state :: definition.state ?? StateDecl{is_pub: false, is_package_pub: false, type_name: definition.name, type_name_span: definition.name_span, states: [NamedSpan]{}, span: definition.span}
-    state_names :: loop member in state.states -> member.name
-    outgoing := [String]{}
-    edges := [SemaStateGraphEdge]{}
-    transitions := [SemaStateGraphTransition]{}
+fn sema_state_graph_for_declaration(declaration: SemaStateDeclarationFact, methods: [SemaStateMethodFact]) -> SemaStateGraphFact Never! {
+    state_names := [String:Bool]{}
+    loop member in declaration.states -> state_names[member.name] = true
+    outgoing := [String:Bool]{}
+    edges := [String:[String]]{}
+    transitions := [StateGraphTransition]{}
     entries := [String]{}
-    loop item in items {
-        if item == {
-            .Impl(implementation) -> if implementation.type_name == definition.name {
-                sema_state_graph_add_method_transitions(implementation.methods, definition.name, state_names, &outgoing, &edges, &transitions, &entries)
-            }
-            .Struct(candidate) -> if candidate.name == definition.name {
-                sema_state_graph_add_method_transitions(candidate.methods, definition.name, state_names, &outgoing, &edges, &transitions, &entries)
-                loop block in candidate.trait_impls -> sema_state_graph_add_method_transitions(block.methods, definition.name, state_names, &outgoing, &edges, &transitions, &entries)
-            }
-            .Enum(candidate) -> if candidate.name == definition.name {
-                sema_state_graph_add_method_transitions(candidate.methods, definition.name, state_names, &outgoing, &edges, &transitions, &entries)
-                loop block in candidate.trait_impls -> sema_state_graph_add_method_transitions(block.methods, definition.name, state_names, &outgoing, &edges, &transitions, &entries)
-            }
-            else -> {}
+    loop method in methods {
+        transition :: method.transition ?? next
+        from := String?{None}
+        if transition.from == .Val(raw) {
+            leaf :: sema_state_graph_leaf(declaration.type_name, raw) ?? next
+            if state_names.get(leaf) == None -> next
+            from = Val(leaf)
         }
-    }
-    reachable_states := [String]{}
-    if entries.len() > 0 {
-        queue := entries
-        cursor := 0
-        loop cursor < queue.len() {
-            current :: queue[cursor]
-            cursor += 1
-            if sema_state_graph_contains(reachable_states, current) -> next
-            &reachable_states.push(current)
-            loop edge in edges {
-                if edge.from == current && !sema_state_graph_contains(reachable_states, edge.to) -> &queue.push(edge.to)
+        to :: sema_state_graph_leaf(declaration.type_name, transition.to) ?? next
+        if state_names.get(to) == None -> next
+        if from == {
+            .Val(name) -> {
+                outgoing[name] = true
+                next_states := &edges.remove(name) ?? [String]{}
+                &next_states.push(to)
+                edges[name] = next_states
             }
+            .None -> &entries.push(to)
         }
+        &transitions.push(StateGraphTransition{operation: method.name, from: from, to: to})
     }
-    nodes := [SemaStateGraphNode]{}
-    loop name in state_names {
-        &nodes.push(SemaStateGraphNode{
-            name: name,
-            terminal: !sema_state_graph_contains(outgoing, name),
-            reachable: if entries.len() == 0 -> None else -> Val(sema_state_graph_contains(reachable_states, name)),
-        })
+    reachable := [String:Bool]{}
+    queue := ~entries
+    cursor := 0
+    loop cursor < queue.len() {
+        current :: queue[cursor]
+        cursor += 1
+        if reachable.get(current) != None -> next
+        reachable[current] = true
+        &queue.extend(edges.get(current) ?? [String]{})
     }
-    SemaStateGraphFact{type_name: definition.name, states: nodes, transitions: transitions}
+    nodes := [StateNode]{}
+    loop member in declaration.states {
+        &nodes.push(StateNode{name: member.name, terminal: outgoing.get(member.name) == None, reachable: if entries.len() == 0 -> None else -> Val(reachable.get(member.name) != None)})
+    }
+    SemaStateGraphFact{type_name: declaration.type_name, states: nodes, transitions: transitions}
 }
-
-pub fn sema_state_graph_facts(items: [Item]) -> [SemaStateGraphFact] Never! {
-    graphs := [SemaStateGraphFact]{}
-    loop item in items {
-        if item == .Struct(definition) && definition.state != None -> &graphs.push(sema_state_graph_for_struct(definition, items))
+// Prep precedes body checking and generated declarations may still arrive.
+// Resolve the requested owner from the current complete registration bundle,
+// not an owner-module slice or a not-yet-published checked registry.
+fn sema_state_preparation_graph_fact(graph: SemaRegistrationGraph, owner: String) -> SemaStateGraphFact? {
+    metadata := sema_state_metadata_new()
+    loop module in graph.modules {
+        loop item in module.program.items {
+            if item == {
+                .Struct(value) -> if value.name == owner -> sema_state_metadata_add_item(&metadata, item)
+                .Impl(value) -> if value.type_name == owner -> sema_state_metadata_add_item(&metadata, item)
+                .Enum(value) -> if value.name == owner -> sema_state_metadata_add_item(&metadata, item)
+                else -> {}
+            }
+        }
     }
-    graphs
+    declaration :: metadata.declarations.get(owner) ?? return None
+    Val(sema_state_graph_for_declaration(declaration, metadata.methods.get(owner) ?? [SemaStateMethodFact]{}))
 }

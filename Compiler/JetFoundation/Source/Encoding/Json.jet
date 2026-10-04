@@ -1,0 +1,127 @@
+use core.encoding.[DataTree, EncodingLimits]
+use core.encoding.json as foundation_protocol_json
+
+#Error
+pub struct FoundationJSONError { pub message: String }
+
+// Main D-JSON=C cutover: Rust JSON::parse retires into Core EncodingJson.
+// Preserve Core's limits, exact Int domain and error reasons without a parser
+// mode or legacy-diagnostic bridge. Protocol-only callers use the seam below.
+pub fn foundation_json_parse(text: String) -> DataTree FoundationJSONError! {
+    if foundation_protocol_json.parse(text) == {
+        .Ok(value) -> Ok(value)
+        .Err(error) -> Err(FoundationJSONError{message: error.reason})
+    }
+}
+
+// Report/cache boundaries preserve EncodingJson's 64-container bound and
+// exact syntax errors, without introducing another parser or discarding errors.
+pub fn foundation_json_parse_with_limits(text: String, limits: EncodingLimits) -> DataTree FoundationJSONError! {
+    if foundation_protocol_json.parse_with_limits(text, limits) == {
+        .Ok(value) -> Ok(value)
+        .Err(error) -> Err(FoundationJSONError{message: error.reason})
+    }
+}
+
+// Rust `jet_foundation::JSON::json_escape` (JSON.rs:363-377): the unquoted JSON
+// string payload. `"`, `\`, LF, CR and TAB use short escapes; every other
+// Unicode control scalar (Cc: U+0000-U+001F, U+007F-U+009F) becomes `\u00xx`.
+// All other scalars are copied verbatim, so the output is valid UTF-8.
+pub fn foundation_json_write_escaped(out: &[U8], value: String) Never! {
+    bytes :: value.bytes()
+    hex :: "0123456789abcdef".bytes()
+    index := 0
+    loop index < bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        // U+0080-U+009F are encoded as C2 80 .. C2 9F.
+        control :: if {
+            byte < 32 || byte == 127 -> byte
+            byte == 194 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) <= 159 -> Int.from_u8(bytes[index + 1])
+            else -> -1
+        }
+        if {
+            byte == 34 -> json_escape_append(&out, "\\\"")
+            byte == 92 -> json_escape_append(&out, "\\\\")
+            byte == 10 -> json_escape_append(&out, "\\n")
+            byte == 13 -> json_escape_append(&out, "\\r")
+            byte == 9 -> json_escape_append(&out, "\\t")
+            control >= 0 -> {
+                json_escape_append(&out, "\\u00")
+                &out.push(hex[(control >> 4) & 15])
+                &out.push(hex[control & 15])
+                if byte == 194 -> index += 1
+            }
+            else -> &out.push(bytes[index])
+        }
+        index += 1
+    }
+}
+
+pub fn json_escape(value: String) -> String Never! {
+    out := [U8]{}
+    foundation_json_write_escaped(&out, value)
+    String.from_bytes(out) ?? panic("JSON escaping preserves UTF-8")
+}
+
+// Rust `jet_foundation::JSON::quote` (JSON.rs:379-381).
+pub fn foundation_json_write_quote(out: &[U8], value: String) Never! {
+    &out.push(U8{34})
+    foundation_json_write_escaped(&out, value)
+    &out.push(U8{34})
+}
+pub fn foundation_json_quote(value: String) -> String Never! {
+    out := [U8]{}
+    foundation_json_write_quote(&out, value)
+    String.from_bytes(out) ?? panic("JSON quoting preserves UTF-8")
+}
+
+fn json_escape_append(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+
+// Rust JSON::parse_json: strict protocol JSON, 1 MiB raw bytes and depth 64.
+// Core retains exact Int globally; this protocol boundary preserves frozen
+// JSONParser's i64 range with a borrowed validation walk, without conversion.
+pub fn foundation_parse_protocol_json(text: String) -> DataTree? Never! {
+    foundation_parse_protocol_json_with_limit(text, 1048576)
+}
+
+// Rust JSON::parse_json_with_limit: DAP supplies 16 MiB without widening LSP's
+// default. Core's one strict parser checks bytes/depth before parsing growth.
+// #3598: parse_with_limits exists in Core source but its frozen binary export
+// is missing (E1004). Preserve this call to the sole strict Core parser.
+pub fn foundation_parse_protocol_json_with_limit(text: String, max_bytes: Int) -> DataTree? Never! {
+    limits :: EncodingLimits{
+        buffer_bytes: 65536,
+        max_depth: 64,
+        max_item_bytes: max_bytes,
+        max_total_bytes: None,
+        max_expansion_depth: 32,
+        max_expansion_bytes: 8388608,
+    }
+    value :: foundation_protocol_json.parse_with_limits(text, limits) ?? return None
+    if foundation_protocol_json_integer_error(value) != None -> return None
+    Val(value)
+}
+
+// Rust JSONParser::number rejects out-of-i64 tokens as `invalid number`.
+// Only an actual rejection allocates its diagnostic; traversal borrows trees.
+fn foundation_protocol_json_integer_error(value: DataTree) -> String? Never! {
+    if value == {
+        .Int(number) -> {
+            if number < -9223372036854775808 || number > 9223372036854775807 -> return Val("invalid number `{number}`")
+        }
+        .Array(values) -> {
+            loop child in values {
+                error :: foundation_protocol_json_integer_error(child)
+                if error != None -> return error
+            }
+        }
+        .Object(entries) -> {
+            loop entry in entries {
+                error :: foundation_protocol_json_integer_error(entry.value)
+                if error != None -> return error
+            }
+        }
+        else -> {}
+    }
+    None
+}

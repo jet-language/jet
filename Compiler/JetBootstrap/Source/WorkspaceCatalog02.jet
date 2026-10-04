@@ -1,0 +1,1800 @@
+// PORT-PENDING 0551 compiler-bootstrap-tests-slice-1619: Compiler/Bootstrap/Tests.rs:1619-3414
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn bootstrap_private_self_compile_harness() {
+//RS     let repo = Path::new(crate::BOOTSTRAP_CANONICAL_SOURCE_ROOT);
+//RS     let StageZero {
+//RS         session,
+//RS         compiler_project,
+//RS         source_lease,
+//RS         project: stage_zero_project,
+//RS         binary: stage_zero_binary,
+//RS         id: stage_zero_id,
+//RS     } = build_stage_zero(repo, true);
+//RS     let task_roots_output = session.join("task-roots.out");
+//RS     let task_roots_receipt = session.join("task-roots.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_zero_binary,
+//RS         "task-roots",
+//RS         &compiler_project,
+//RS         BOOTSTRAP_ENTRY_RELATIVE,
+//RS         &task_roots_output,
+//RS         &task_roots_receipt,
+//RS     );
+//RS     assert_task_roots_receipt(&task_roots_output, &task_roots_receipt);
+//RS 
+//RS     let small_project = session.join("small-program");
+//RS     let small_entry = write_small_program(&small_project);
+//RS     assert_optional_codec_roundtrip(&stage_zero_binary, &small_project, &session, "stage-zero");
+//RS     let stage_zero_small_source = session.join("stage-zero-small.rs");
+//RS     let stage_zero_small_receipt = session.join("stage-zero-small.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_zero_binary,
+//RS         "factory",
+//RS         &small_project,
+//RS         SMALL_ENTRY_RELATIVE,
+//RS         &stage_zero_small_source,
+//RS         &stage_zero_small_receipt,
+//RS     );
+//RS     assert_factory_receipt(&stage_zero_small_receipt);
+//RS     let stage_zero_small_rust = fs::read_to_string(&stage_zero_small_source).unwrap_or_else(|error| {
+//RS         panic!(
+//RS             "stage-zero factory did not produce `{}`: {error}",
+//RS             stage_zero_small_source.display()
+//RS         )
+//RS     });
+//RS     let stage_zero_small_project = session.join("stage-zero-small-backend");
+//RS     let (stage_zero_small_binary, _) = build_backend_artifact(
+//RS         repo,
+//RS         &stage_zero_small_project,
+//RS         "jet_bootstrap_small_stage_zero",
+//RS         &stage_zero_small_rust,
+//RS     );
+//RS     let image_reuse_output = session.join("user-image-reuse.rs");
+//RS     let image_reuse_receipt = session.join("user-image-reuse.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_zero_small_binary,
+//RS         "factory",
+//RS         &small_project,
+//RS         SMALL_ENTRY_RELATIVE,
+//RS         &image_reuse_output,
+//RS         &image_reuse_receipt,
+//RS     );
+//RS     assert_factory_receipt(&image_reuse_receipt);
+//RS     assert_small_program_runs(&stage_zero_small_binary, "stage zero");
+//RS 
+//RS     source_lease.revalidate().unwrap_or_else(|error| {
+//RS         panic!("compiler source authority changed before stage-zero self-source: {error:?}")
+//RS     });
+//RS     let stage_one_raw = session.join("stage-one.rs");
+//RS     let stage_one_receipt = session.join("stage-one.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_zero_binary,
+//RS         "runner",
+//RS         &compiler_project,
+//RS         BOOTSTRAP_ENTRY_RELATIVE,
+//RS         &stage_one_raw,
+//RS         &stage_one_receipt,
+//RS     );
+//RS     source_lease.revalidate().unwrap_or_else(|error| {
+//RS         panic!("compiler source authority changed after stage-zero self-source: {error:?}")
+//RS     });
+//RS     assert_runner_receipt(&stage_one_receipt);
+//RS     let stage_one_source = append_generated_artifact_main(
+//RS         fs::read_to_string(&stage_one_raw).unwrap_or_else(|error| {
+//RS             panic!("stage-zero Runner did not produce stage one source: {error}")
+//RS         }),
+//RS         true,
+//RS     );
+//RS     let stage_one_image = generated_compiler_image(&stage_one_raw);
+//RS     let stage_one_project = session.join("stage-one");
+//RS     let (stage_one_binary, stage_one_id) = build_backend_artifact_with_native_library(
+//RS         repo,
+//RS         &stage_one_project,
+//RS         "jet_bootstrap_stage_one",
+//RS         &stage_one_source,
+//RS         Some(stage_one_image.as_slice()),
+//RS         None,
+//RS         None,
+//RS     );
+//RS     assert_ne!(
+//RS         stage_zero_id, stage_one_id,
+//RS         "distinct generated compiler artifacts must not reuse one identity"
+//RS     );
+//RS     assert_optional_codec_roundtrip(&stage_one_binary, &small_project, &session, "stage-one");
+//RS 
+//RS     let stage_one_small_source = session.join("stage-one-small.rs");
+//RS     let stage_one_small_receipt = session.join("stage-one-small.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_one_binary,
+//RS         "factory",
+//RS         &small_project,
+//RS         SMALL_ENTRY_RELATIVE,
+//RS         &stage_one_small_source,
+//RS         &stage_one_small_receipt,
+//RS     );
+//RS     assert_factory_receipt(&stage_one_small_receipt);
+//RS     let stage_one_small_rust = fs::read_to_string(&stage_one_small_source).unwrap_or_else(|error| {
+//RS         panic!(
+//RS             "stage-one factory did not produce `{}`: {error}",
+//RS             stage_one_small_source.display()
+//RS         )
+//RS     });
+//RS     let stage_one_small_project = session.join("stage-one-small-backend");
+//RS     let (stage_one_small_binary, _) = build_backend_artifact(
+//RS         repo,
+//RS         &stage_one_small_project,
+//RS         "jet_bootstrap_small_stage_one",
+//RS         &stage_one_small_rust,
+//RS     );
+//RS     assert_small_program_runs(&stage_one_small_binary, "stage one");
+//RS 
+//RS     source_lease.revalidate().unwrap_or_else(|error| {
+//RS         panic!("compiler source authority changed before stage-one self-source: {error:?}")
+//RS     });
+//RS     let stage_two_raw = session.join("stage-two.raw.rs");
+//RS     let stage_two_receipt = session.join("stage-two.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_one_binary,
+//RS         "runner",
+//RS         &compiler_project,
+//RS         BOOTSTRAP_ENTRY_RELATIVE,
+//RS         &stage_two_raw,
+//RS         &stage_two_receipt,
+//RS     );
+//RS     source_lease.revalidate().unwrap_or_else(|error| {
+//RS         panic!("compiler source authority changed after stage-one self-source: {error:?}")
+//RS     });
+//RS     assert_runner_receipt(&stage_two_receipt);
+//RS     let stage_two_source = session.join("stage-two.rs");
+//RS     let stage_two_source_text = append_generated_artifact_main(
+//RS         fs::read_to_string(&stage_two_raw).unwrap_or_else(|error| {
+//RS             panic!("stage-one Runner did not produce stage-two source: {error}")
+//RS         }),
+//RS         true,
+//RS     );
+//RS     fs::write(&stage_two_source, &stage_two_source_text).unwrap_or_else(|error| {
+//RS         panic!("cannot retain stage-two source `{}`: {error}", stage_two_source.display())
+//RS     });
+//RS     let stage_two_image = generated_compiler_image(&stage_two_raw);
+//RS     fs::write(stage_two_source.with_extension("image"), &stage_two_image).unwrap_or_else(|error| {
+//RS         panic!("cannot retain stage-two compiler image beside `{}`: {error}", stage_two_source.display())
+//RS     });
+//RS     let stage_two_project = session.join("stage-two");
+//RS     let (stage_two_binary, stage_two_id) = build_backend_artifact_with_native_library(
+//RS         repo,
+//RS         &stage_two_project,
+//RS         "jet_bootstrap_stage_two",
+//RS         &stage_two_source_text,
+//RS         Some(stage_two_image.as_slice()),
+//RS         None,
+//RS         None,
+//RS     );
+//RS     assert_ne!(
+//RS         stage_one_id, stage_two_id,
+//RS         "distinct generated compiler artifacts must not reuse one identity"
+//RS     );
+//RS     assert_optional_codec_roundtrip(&stage_two_binary, &small_project, &session, "stage-two");
+//RS     assert_mir_optimizer_compiler_source(&stage_two_binary, &compiler_project, &session);
+//RS     assert_mir_optimizer_fixtures(&stage_two_binary, repo, &session);
+//RS 
+//RS     let invalid_project = session.join("invalid-imported-source");
+//RS     let (invalid_entry, invalid_entry_source, imported_source_path, imported_source) =
+//RS         write_invalid_import_project(&invalid_project);
+//RS     let invalid_output = session.join("invalid-compile.rs");
+//RS     let invalid_receipt = session.join("invalid-compile.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_two_binary,
+//RS         "runner",
+//RS         &invalid_project,
+//RS         SMALL_ENTRY_RELATIVE,
+//RS         &invalid_output,
+//RS         &invalid_receipt,
+//RS     );
+//RS     let invalid_receipt_text = fs::read_to_string(&invalid_receipt).unwrap_or_else(|error| {
+//RS         panic!("cannot read generated invalid-compile receipt `{}`: {error}", invalid_receipt.display())
+//RS     });
+//RS     assert!(invalid_receipt_text.lines().any(|line| line == "complete=false"));
+//RS     assert_receipt_count_at_least(&invalid_receipt_text, "report_count", 1);
+//RS     assert!(
+//RS         !invalid_output.exists(),
+//RS         "an incomplete generated Jet compile must not produce backend Rust source"
+//RS     );
+//RS     assert!(
+//RS         imported_source.len() > imported_source.chars().count(),
+//RS         "invalid source fixture must exercise UTF-8 byte coordinates"
+//RS     );
+//RS     let end = imported_source.len();
+//RS     let generated_report = report_at_imported_eof(
+//RS         &receipt_reports(&invalid_receipt),
+//RS         &imported_source_path,
+//RS         end,
+//RS     );
+//RS     let source_closure = vec![
+//RS         (invalid_entry.clone(), invalid_entry_source.clone()),
+//RS         (imported_source_path.clone(), imported_source.clone()),
+//RS     ];
+//RS     let reference_reports =
+//RS         rust_reference_reports(&invalid_entry, &invalid_entry_source, &source_closure);
+//RS     let reference_report = report_at_imported_eof(
+//RS         &reference_reports,
+//RS         &imported_source_path,
+//RS         end,
+//RS     );
+//RS     assert_eq!(
+//RS         generated_report, reference_report,
+//RS         "generated Jet report for a non-entry Unicode EOF error must match the Rust reference"
+//RS     );
+//RS 
+//RS     let casing_project = session.join("identifier-casing");
+//RS     let (casing_entry, casing_entry_source, casing_closure) =
+//RS         write_identifier_casing_project(&casing_project);
+//RS     let casing_output = session.join("identifier-casing.rs");
+//RS     let casing_receipt = session.join("identifier-casing.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_two_binary,
+//RS         "runner",
+//RS         &casing_project,
+//RS         SMALL_ENTRY_RELATIVE,
+//RS         &casing_output,
+//RS         &casing_receipt,
+//RS     );
+//RS     let generated_casing_reports = receipt_reports(&casing_receipt)
+//RS         .into_iter()
+//RS         .filter(|report| report.contains("\"code\":\"E0357\""))
+//RS         .collect::<Vec<_>>();
+//RS     let reference_casing_reports =
+//RS         rust_reference_reports(&casing_entry, &casing_entry_source, &casing_closure)
+//RS             .into_iter()
+//RS             .filter(|report| report.contains("\"code\":\"E0357\""))
+//RS             .collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         reference_casing_reports.len(),
+//RS         8,
+//RS         "casing parity fixture must exercise every checked category: {reference_casing_reports:?}"
+//RS     );
+//RS     assert_eq!(
+//RS         generated_casing_reports, reference_casing_reports,
+//RS         "generated Jet E0357 reports must match the Rust reference (D-SHAPE-CASE1)"
+//RS     );
+//RS 
+//RS     let valid_report_project = session.join("valid-report");
+//RS     let (valid_entry, valid_entry_source) = write_valid_report_project(&valid_report_project);
+//RS     let valid_report_output = session.join("valid-report.rs");
+//RS     let valid_report_receipt = session.join("valid-report.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_two_binary,
+//RS         "runner",
+//RS         &valid_report_project,
+//RS         SMALL_ENTRY_RELATIVE,
+//RS         &valid_report_output,
+//RS         &valid_report_receipt,
+//RS     );
+//RS     assert_runner_receipt(&valid_report_receipt);
+//RS     assert!(
+//RS         valid_report_output.is_file(),
+//RS         "a complete generated Jet compile must produce backend Rust source"
+//RS     );
+//RS     let valid_source_closure = vec![(valid_entry, valid_entry_source)];
+//RS     let (valid_entry_path, valid_entry_text) = &valid_source_closure[0];
+//RS     let generated_valid_reports = receipt_reports(&valid_report_receipt);
+//RS     let reference_valid_reports =
+//RS         rust_reference_success_reports(valid_entry_path, valid_entry_text, &valid_source_closure);
+//RS     assert!(
+//RS         reference_valid_reports.iter().any(|report| report.contains("\"code\":\"L0104\"")),
+//RS         "valid parity fixture must exercise a successful compile with a lint report: {reference_valid_reports:?}"
+//RS     );
+//RS     assert!(
+//RS         reference_valid_reports.iter().any(|report| report.contains("\"code\":\"L0619\"")),
+//RS         "valid parity fixture must exercise a report with absent source metadata: {reference_valid_reports:?}"
+//RS     );
+//RS     assert_eq!(
+//RS         generated_valid_reports, reference_valid_reports,
+//RS         "generated Jet reports for a complete compile must match the Rust reference"
+//RS     );
+//RS 
+//RS     let closure_project = session.join("nested-closure-callback");
+//RS     write_nested_closure_callback_project(&closure_project);
+//RS     let closure_output = session.join("nested-closure-callback.rs");
+//RS     let closure_receipt = session.join("nested-closure-callback.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_two_binary,
+//RS         "factory",
+//RS         &closure_project,
+//RS         SMALL_ENTRY_RELATIVE,
+//RS         &closure_output,
+//RS         &closure_receipt,
+//RS     );
+//RS     assert_factory_receipt(&closure_receipt);
+//RS     assert!(
+//RS         closure_output.is_file(),
+//RS         "captured lambdas and C callback adapters must survive Pipeline MIR assembly and reach emission"
+//RS     );
+//RS 
+//RS     let projection_output = session.join("offset-projection.span");
+//RS     let projection_receipt = session.join("offset-projection.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_two_binary,
+//RS         "offset-projection",
+//RS         &small_project,
+//RS         SMALL_ENTRY_RELATIVE,
+//RS         &projection_output,
+//RS         &projection_receipt,
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(&projection_output).unwrap_or_else(|error| {
+//RS             panic!("cannot read nonzero-offset projection `{}`: {error}", projection_output.display())
+//RS         }),
+//RS         "0..4",
+//RS         "aggregate offset 1200 must rebase to UTF-8 physical byte span 0..4 in a four-byte file"
+//RS     );
+//RS     let projection_receipt_text = fs::read_to_string(&projection_receipt).unwrap_or_else(|error| {
+//RS         panic!("cannot read nonzero-offset projection receipt `{}`: {error}", projection_receipt.display())
+//RS     });
+//RS     assert!(projection_receipt_text.lines().any(|line| line == "span=0..4"));
+//RS 
+//RS     let stage_two_small_source = session.join("stage-two-small.rs");
+//RS     let stage_two_small_receipt = session.join("stage-two-small.receipt");
+//RS     run_generated_artifact(
+//RS         &stage_two_binary,
+//RS         "factory",
+//RS         &small_project,
+//RS         SMALL_ENTRY_RELATIVE,
+//RS         &stage_two_small_source,
+//RS         &stage_two_small_receipt,
+//RS     );
+//RS     assert_factory_receipt(&stage_two_small_receipt);
+//RS     let stage_two_small_rust = fs::read_to_string(&stage_two_small_source).unwrap_or_else(|error| {
+//RS         panic!(
+//RS             "stage-two factory did not produce `{}`: {error}",
+//RS             stage_two_small_source.display()
+//RS         )
+//RS     });
+//RS     let stage_two_small_project = session.join("stage-two-small-backend");
+//RS     let (stage_two_small_binary, _) = build_backend_artifact(
+//RS         repo,
+//RS         &stage_two_small_project,
+//RS         "jet_bootstrap_small_stage_two",
+//RS         &stage_two_small_rust,
+//RS     );
+//RS     assert_small_program_runs(&stage_two_small_binary, "stage two");
+//RS 
+//RS     let carrier_fixture_project = session.join("source-contract-carrier");
+//RS     write_source_fixture_project(
+//RS         &carrier_fixture_project,
+//RS         SOURCE_FIXTURE_MANIFEST,
+//RS         CARRIER_FIXTURE_SOURCE,
+//RS     );
+//RS     compile_and_run_source_fixture(
+//RS         &stage_two_binary,
+//RS         repo,
+//RS         &session,
+//RS         "carrier_binding",
+//RS         &carrier_fixture_project,
+//RS         CARRIER_FIXTURE_EXPECTED,
+//RS     );
+//RS 
+//RS     for (label, source, expected) in [
+//RS         (
+//RS             "operator_user_defined",
+//RS             USER_OPERATOR_FIXTURE_SOURCE,
+//RS             USER_OPERATOR_FIXTURE_EXPECTED,
+//RS         ),
+//RS         (
+//RS             "operator_spaceship",
+//RS             SPACESHIP_FIXTURE_SOURCE,
+//RS             SPACESHIP_FIXTURE_EXPECTED,
+//RS         ),
+//RS         (
+//RS             "exact_division_runtime",
+//RS             EXACT_DIVISION_FIXTURE_ONE,
+//RS             EXACT_DIVISION_FIXTURE_ONE_EXPECTED,
+//RS         ),
+//RS         (
+//RS             "exact_division_comptime",
+//RS             EXACT_DIVISION_FIXTURE_TWO,
+//RS             EXACT_DIVISION_FIXTURE_TWO_EXPECTED,
+//RS         ),
+//RS         (
+//RS             "operator_mixed_types",
+//RS             MIXED_OPERATOR_FIXTURE_SOURCE,
+//RS             MIXED_OPERATOR_FIXTURE_EXPECTED,
+//RS         ),
+//RS         (
+//RS             "enum_derived_order",
+//RS             DERIVED_ORDER_FIXTURE_SOURCE,
+//RS             DERIVED_ORDER_FIXTURE_EXPECTED,
+//RS         ),
+//RS         (
+//RS             "display_read_receiver",
+//RS             include_str!("../../Examples/features/traits/display_read_receiver.jet"),
+//RS             include_str!("../../Examples/features/expected/traits/display_read_receiver.out"),
+//RS         ),
+//RS         (
+//RS             "never_plain_return",
+//RS             NEVER_PLAIN_RETURN_FIXTURE_SOURCE,
+//RS             NEVER_PLAIN_RETURN_FIXTURE_EXPECTED,
+//RS         ),
+//RS         (
+//RS             "registry_rows",
+//RS             REGISTRY_ROWS_FIXTURE_SOURCE,
+//RS             REGISTRY_ROWS_FIXTURE_EXPECTED,
+//RS         ),
+//RS     ] {
+//RS         let project = session.join(label);
+//RS         write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, source);
+//RS         compile_and_run_source_fixture(
+//RS             &stage_two_binary,
+//RS             repo,
+//RS             &session,
+//RS             label,
+//RS             &project,
+//RS             expected,
+//RS         );
+//RS     }
+//RS     for receiver in ["^self", "&self"] {
+//RS         for inline in [false, true] {
+//RS             let method = format!("fn display({receiver}) -> String {{ \"label\" }}");
+//RS             let source = if inline {
+//RS                 format!("struct Label {{\n    text: String\n    impl Display {{ {method} }}\n}}\nfn run() {{}}\n")
+//RS             } else {
+//RS                 format!("struct Label {{ text: String }}\nimpl Label.Display {{ {method} }}\nfn run() {{}}\n")
+//RS             };
+//RS             let label = format!("display-receiver-{}-{inline}", if receiver == "^self" { "take" } else { "edit" });
+//RS             let project = session.join(&label);
+//RS             let entry = write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, &source);
+//RS             let output = session.join(format!("{label}.rs"));
+//RS             let receipt = session.join(format!("{label}.receipt"));
+//RS             run_generated_artifact(
+//RS                 &stage_two_binary,
+//RS                 "runner",
+//RS                 &project,
+//RS                 SMALL_ENTRY_RELATIVE,
+//RS                 &output,
+//RS                 &receipt,
+//RS             );
+//RS             assert!(!output.exists(), "invalid Display receiver reached Rust emission");
+//RS             let generated = receipt_reports(&receipt)
+//RS                 .into_iter()
+//RS                 .filter(|report| report.contains("\"code\":\"E0907\""))
+//RS                 .collect::<Vec<_>>();
+//RS             let source_closure = vec![(entry.clone(), source.clone())];
+//RS             let reference = rust_reference_reports(&entry, &source, &source_closure)
+//RS                 .into_iter()
+//RS                 .filter(|report| report.contains("\"code\":\"E0907\""))
+//RS                 .collect::<Vec<_>>();
+//RS             assert_eq!(reference.len(), 1, "Display receiver must fail in sema");
+//RS             assert_eq!(generated, reference, "Display receiver reports must agree");
+//RS         }
+//RS     }
+//RS     let partial_move_project = session.join("core-files-partial-move-siblings");
+//RS     write_source_fixture_project(
+//RS         &partial_move_project,
+//RS         SOURCE_FIXTURE_MANIFEST,
+//RS         CORE_FILES_PARTIAL_MOVE_SIBLINGS_SOURCE,
+//RS     );
+//RS     let partial_move_expected_stdout = "true\n".repeat(25);
+//RS     compile_and_run_source_fixture(
+//RS         &stage_two_binary,
+//RS         repo,
+//RS         &session,
+//RS         "core_files_partial_move_siblings",
+//RS         &partial_move_project,
+//RS         &partial_move_expected_stdout,
+//RS     );
+//RS     let uninit_partial_exit_project = session.join("uninit-fixed-partial-exit");
+//RS     write_source_fixture_project(
+//RS         &uninit_partial_exit_project,
+//RS         SOURCE_FIXTURE_MANIFEST,
+//RS         UNINIT_FIXED_PARTIAL_EXIT_SOURCE,
+//RS     );
+//RS     let uninit_partial_exit_expected_stdout = "7\n";
+//RS     compile_and_run_source_fixture(
+//RS         &stage_two_binary,
+//RS         repo,
+//RS         &session,
+//RS         "uninit_fixed_partial_exit",
+//RS         &uninit_partial_exit_project,
+//RS         uninit_partial_exit_expected_stdout,
+//RS     );
+//RS 
+//RS 
+//RS 
+//RS     let handle_lifetime_project = session.join("native-handle-lifetimes");
+//RS     let handle_lifetime_manifest = format!(
+//RS         "name: \"bootstrap_handle_lifetimes\"\nversion: \"0.1.0\"\nedition: \"2028\"\ndeps: {{ close: c@{:?} }}\noutputs: {{ app: .Executable{{ entry: run }} }}\n",
+//RS         handle_lifetime_project.display().to_string(),
+//RS     );
+//RS     write_source_fixture_project(
+//RS         &handle_lifetime_project,
+//RS         &handle_lifetime_manifest,
+//RS         HANDLE_LIFETIME_FIXTURE_SOURCE,
+//RS     );
+//RS     build_local_c_provider(
+//RS         &handle_lifetime_project,
+//RS         "close",
+//RS         HANDLE_LIFETIME_C_PROVIDER,
+//RS     );
+//RS     compile_and_run_source_fixture_with_native_library(
+//RS         &stage_two_binary,
+//RS         repo,
+//RS         &session,
+//RS         "native_handle_lifetimes",
+//RS         &handle_lifetime_project,
+//RS         HANDLE_LIFETIME_FIXTURE_EXPECTED,
+//RS         Some((handle_lifetime_project.as_path(), "close")),
+//RS     );
+//RS 
+//RS     let struct_word_project = session.join("struct_call_word");
+//RS     write_source_fixture_project(
+//RS         &struct_word_project,
+//RS         SOURCE_FIXTURE_MANIFEST,
+//RS         include_str!("../../Examples/features/basics/struct_call_word.jet"),
+//RS     );
+//RS     compile_and_run_source_fixture(
+//RS         &stage_two_binary,
+//RS         repo,
+//RS         &session,
+//RS         "struct_call_word",
+//RS         &struct_word_project,
+//RS         include_str!("../../Examples/features/expected/basics/struct_call_word.out"),
+//RS     );
+//RS 
+//RS     let provenance = session.join("bootstrap.provenance");
+//RS     let provenance_text = format!(
+//RS         "schema=jet-private-bootstrap/v1\ncompiler_project={}\nstage_zero_id={stage_zero_id}\nstage_zero_source={}\nstage_one_id={stage_one_id}\nstage_one_source={}\nstage_two_id={stage_two_id}\nstage_two_source={}\nstage_two_backend={}\nstage_two_small_backend={}\nsmall_entry={}\nbackend=Tools/agent/jet-env cargo build --manifest-path <cache-project>/Cargo.toml --bin <cache-binary>\n",
+//RS         compiler_project.display(),
+//RS         stage_zero_project.join("src/main.rs").display(),
+//RS         stage_one_project.join("src/main.rs").display(),
+//RS         stage_two_source.display(),
+//RS         stage_two_project.join("src/main.rs").display(),
+//RS         stage_two_small_project.join("src/main.rs").display(),
+//RS         small_entry.display(),
+//RS     );
+//RS     fs::write(&provenance, provenance_text).unwrap_or_else(|error| {
+//RS         panic!("cannot write bootstrap provenance `{}`: {error}", provenance.display())
+//RS     });
+//RS     assert!(provenance.is_file(), "bootstrap provenance was not retained");
+//RS }
+//RS 
+//RS fn home_path() -> PathBuf {
+//RS     PathBuf::from(
+//RS         std::env::var_os("HOME")
+//RS             .unwrap_or_else(|| panic!("HOME is required for the private bootstrap cache")),
+//RS     )
+//RS }
+//RS 
+//RS fn bootstrap_session_root() -> PathBuf {
+//RS     let timestamp = SystemTime::now()
+//RS         .duration_since(UNIX_EPOCH)
+//RS         .unwrap_or_else(|error| panic!("system clock is before the Unix epoch: {error}"))
+//RS         .as_nanos();
+//RS     home_path()
+//RS         .join(".cache/jet-test-scratch")
+//RS         .join(format!("bootstrap-self-{}-{timestamp}", std::process::id()))
+//RS }
+//RS 
+//RS 
+//RS fn assemble_compiler_sources(repo: &Path, task_roots: bool) {
+//RS     // The assembler runs only node; the test's own CARGO_TARGET_DIR may lie
+//RS     // outside `repo`, which jet-env rejects for cargo commands.
+//RS     let output = Command::new(repo.join("Tools/agent/jet-env"))
+//RS         .current_dir(repo)
+//RS         .env_remove("CARGO_TARGET_DIR")
+//RS         .args(["node", "Compiler/Bootstrap/assemble.mjs"])
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("cannot run bootstrap assembler: {error}"));
+//RS     assert_command_success("bootstrap assembler", &output);
+//RS     if !task_roots {
+//RS         return;
+//RS     }
+//RS     let compiler_entry = home_path()
+//RS         .join(BOOTSTRAP_PROJECT_RELATIVE)
+//RS         .join(BOOTSTRAP_ENTRY_RELATIVE);
+//RS     let mut compiler_source = fs::read_to_string(&compiler_entry).unwrap_or_else(|error| {
+//RS         panic!(
+//RS             "cannot read assembled compiler fixture `{}`: {error}",
+//RS             compiler_entry.display()
+//RS         )
+//RS     });
+//RS     compiler_source.push_str("\n\n");
+//RS     compiler_source.push_str(TASK_ROOTS_FIXTURE_SOURCE);
+//RS     fs::write(&compiler_entry, compiler_source).unwrap_or_else(|error| {
+//RS         panic!(
+//RS             "cannot add task-root fixture to the private compiler unit `{}`: {error}",
+//RS             compiler_entry.display()
+//RS         )
+//RS     });
+//RS }
+//RS 
+//RS fn write_small_program(project: &Path) -> PathBuf {
+//RS     fs::create_dir_all(project).unwrap_or_else(|error| {
+//RS         panic!("cannot create small Jet project `{}`: {error}", project.display())
+//RS     });
+//RS     let manifest = project.join("package.jet");
+//RS     let entry = project.join(SMALL_ENTRY_RELATIVE);
+//RS     fs::write(&manifest, SMALL_PROGRAM_MANIFEST).unwrap_or_else(|error| {
+//RS         panic!("cannot write small Jet manifest `{}`: {error}", manifest.display())
+//RS     });
+//RS     fs::write(&entry, SMALL_PROGRAM_SOURCE).unwrap_or_else(|error| {
+//RS         panic!("cannot write small Jet source `{}`: {error}", entry.display())
+//RS     });
+//RS     entry
+//RS }
+//RS 
+//RS fn write_source_fixture_project(project: &Path, manifest: &str, source: &str) -> PathBuf {
+//RS     fs::create_dir_all(project).unwrap_or_else(|error| {
+//RS         panic!("cannot create source fixture project `{}`: {error}", project.display())
+//RS     });
+//RS     let manifest_path = project.join("package.jet");
+//RS     let entry = project.join(SMALL_ENTRY_RELATIVE);
+//RS     fs::write(&manifest_path, manifest).unwrap_or_else(|error| {
+//RS         panic!("cannot write source fixture manifest `{}`: {error}", manifest_path.display())
+//RS     });
+//RS     fs::write(&entry, source).unwrap_or_else(|error| {
+//RS         panic!("cannot write source fixture `{}`: {error}", entry.display())
+//RS     });
+//RS     entry
+//RS }
+//RS fn assert_mir_optimizer_fixtures(binary: &Path, repo: &Path, session: &Path) {
+//RS     let fixtures = [
+//RS         (
+//RS             "inline",
+//RS             "tests/fixtures/mir_optimizer_inline.jet",
+//RS             "inline:11\nfailure:negative\n",
+//RS         ),
+//RS         (
+//RS             "loops",
+//RS             "tests/fixtures/mir_optimizer_loops.jet",
+//RS             "true true true true false\n",
+//RS         ),
+//RS         (
+//RS             "source_regressions",
+//RS             "tests/fixtures/mir_optimizer_source_regressions.jet",
+//RS             "unit:body\ntrue true true true true true true\n",
+//RS         ),
+//RS     ];
+//RS     for (name, fixture_path, expected_stdout) in fixtures {
+//RS         let fixture_source = fs::read_to_string(repo.join(fixture_path)).unwrap_or_else(|error| {
+//RS             panic!("cannot read MIR optimizer fixture `{fixture_path}`: {error}")
+//RS         });
+//RS         let project = session.join(format!("optimizer-{name}"));
+//RS         write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, &fixture_source);
+//RS         let generated_source = session.join(format!("optimizer-{name}.rs"));
+//RS         let receipt = session.join(format!("optimizer-{name}.receipt"));
+//RS         run_generated_artifact(
+//RS             binary,
+//RS             "factory",
+//RS             &project,
+//RS             SMALL_ENTRY_RELATIVE,
+//RS             &generated_source,
+//RS             &receipt,
+//RS         );
+//RS         assert_factory_receipt(&receipt);
+//RS         let generated_source = fs::read_to_string(&generated_source).unwrap_or_else(|error| {
+//RS             panic!("cannot read generated MIR optimizer backend for `{name}`: {error}")
+//RS         });
+//RS         let backend_project = session.join(format!("optimizer-{name}-backend"));
+//RS         let (backend_binary, _) = build_backend_artifact(
+//RS             repo,
+//RS             &backend_project,
+//RS             &format!("jet_bootstrap_optimizer_{name}"),
+//RS             &generated_source,
+//RS         );
+//RS         let output = Command::new(&backend_binary)
+//RS             .output()
+//RS             .unwrap_or_else(|error| panic!("cannot execute MIR optimizer fixture `{name}`: {error}"));
+//RS         assert_command_success(&format!("MIR optimizer fixture `{name}`"), &output);
+//RS         assert_eq!(
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             expected_stdout,
+//RS             "generated compiler changed MIR optimizer fixture `{name}` behavior"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn build_local_c_provider(root: &Path, library: &str, source: &str) {
+//RS     let source_path = root.join(format!("{library}.c"));
+//RS     let object_path = root.join(format!("{library}.o"));
+//RS     let archive_path = root.join(format!("lib{library}.a"));
+//RS     fs::write(&source_path, source).unwrap_or_else(|error| {
+//RS         panic!("cannot write C provider `{}`: {error}", source_path.display())
+//RS     });
+//RS     let compiler = ["cc", "gcc", "clang"]
+//RS         .into_iter()
+//RS         .find(|compiler| {
+//RS             Command::new(compiler)
+//RS                 .arg("--version")
+//RS                 .output()
+//RS                 .is_ok_and(|output| output.status.success())
+//RS         })
+//RS         .unwrap_or_else(|| panic!("C provider fixture requires cc, gcc, or clang"));
+//RS     let compile = Command::new(compiler)
+//RS         .arg("-c")
+//RS         .arg(&source_path)
+//RS         .arg("-o")
+//RS         .arg(&object_path)
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("cannot compile C provider `{}`: {error}", source_path.display()));
+//RS     assert_command_success("native C provider compile", &compile);
+//RS     let archive = Command::new("ar")
+//RS         .arg("rcs")
+//RS         .arg(&archive_path)
+//RS         .arg(&object_path)
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("cannot archive C provider `{}`: {error}", archive_path.display()));
+//RS     assert_command_success("native C provider archive", &archive);
+//RS }
+//RS 
+//RS fn compile_and_run_source_fixture(
+//RS     compiler: &Path,
+//RS     repo: &Path,
+//RS     session: &Path,
+//RS     label: &str,
+//RS     project: &Path,
+//RS     expected_stdout: &str,
+//RS ) {
+//RS     let raw_source = session.join(format!("{label}.raw.rs"));
+//RS     let receipt = session.join(format!("{label}.receipt"));
+//RS     run_generated_artifact(
+//RS         compiler,
+//RS         "runner",
+//RS         project,
+//RS         SMALL_ENTRY_RELATIVE,
+//RS         &raw_source,
+//RS         &receipt,
+//RS     );
+//RS     assert_runner_receipt(&receipt);
+//RS     let source = fs::read_to_string(&raw_source).unwrap_or_else(|error| {
+//RS         panic!("generated compiler did not emit `{}`: {error}", raw_source.display())
+//RS     });
+//RS     let backend_project = session.join(format!("{label}-backend"));
+//RS     let (binary, _) = build_backend_artifact(repo, &backend_project, label, &source);
+//RS     let output = Command::new(&binary)
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("cannot execute generated `{label}` fixture: {error}"));
+//RS     assert_command_success(&format!("generated `{label}` fixture"), &output);
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         expected_stdout,
+//RS         "generated `{label}` fixture output differs from its executable source contract"
+//RS     );
+//RS }
+//RS 
+//RS fn compile_and_run_source_fixture_with_native_library(
+//RS     compiler: &Path,
+//RS     repo: &Path,
+//RS     session: &Path,
+//RS     label: &str,
+//RS     project: &Path,
+//RS     expected_stdout: &str,
+//RS     native_library: Option<(&Path, &str)>,
+//RS ) {
+//RS     let raw_source = session.join(format!("{label}.raw.rs"));
+//RS     let receipt = session.join(format!("{label}.receipt"));
+//RS     run_generated_artifact(
+//RS         compiler,
+//RS         "runner",
+//RS         project,
+//RS         SMALL_ENTRY_RELATIVE,
+//RS         &raw_source,
+//RS         &receipt,
+//RS     );
+//RS     assert_runner_receipt(&receipt);
+//RS     let source = fs::read_to_string(&raw_source).unwrap_or_else(|error| {
+//RS         panic!("generated compiler did not emit `{}`: {error}", raw_source.display())
+//RS     });
+//RS     let backend_project = session.join(format!("{label}-backend"));
+//RS     let (binary, _) = build_backend_artifact_with_native_library(
+//RS         repo,
+//RS         &backend_project,
+//RS         label,
+//RS         &source,
+//RS         None,
+//RS         native_library,
+//RS         None,
+//RS     );
+//RS     let output = Command::new(&binary)
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("cannot execute generated `{label}` fixture: {error}"));
+//RS     assert_command_success(&format!("generated `{label}` fixture"), &output);
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         expected_stdout,
+//RS         "generated `{label}` fixture output differs from its executable source contract"
+//RS     );
+//RS }
+//RS 
+//RS fn assert_evaluator_materialization_helpers_in_mir(mir: &jet_foundation::MIR::MirProgram) {
+//RS     for helper_name in [
+//RS         "jet_eval_materialize_string_window",
+//RS         "jet_eval_materialize_list_window",
+//RS         "jet_eval_materialize_bytes_window",
+//RS     ] {
+//RS         let mut by_name = mir.functions.iter().filter(|function| function.name == helper_name);
+//RS         let helper = by_name
+//RS             .next()
+//RS             .unwrap_or_else(|| panic!("full-manifest MIR lacks evaluator helper `{helper_name}`"));
+//RS         assert!(
+//RS             by_name.next().is_none(),
+//RS             "full-manifest MIR has ambiguous evaluator helper `{helper_name}`"
+//RS         );
+//RS         let function_id = helper.id;
+//RS         let mut by_identity = mir.functions.iter().filter(|function| function.id == function_id);
+//RS         let checked_helper = by_identity
+//RS             .next()
+//RS             .unwrap_or_else(|| panic!("checked evaluator helper `{helper_name}` lost its function ID"));
+//RS         assert!(
+//RS             by_identity.next().is_none(),
+//RS             "checked evaluator helper `{helper_name}` has a duplicate MIR function ID"
+//RS         );
+//RS         assert!(
+//RS             checked_helper.blocks.iter().any(|block| {
+//RS                 block.instructions.iter().any(|instruction| {
+//RS                     matches!(
+//RS                         &instruction.operation,
+//RS                         MirOperation::Copy {
+//RS                             fact: jet_foundation::MIR::MirCopyFact::ViewMaterialize,
+//RS                             ..
+//RS                         }
+//RS                     )
+//RS                 })
+//RS             }),
+//RS             "checked evaluator helper `{helper_name}` ({function_id:?}) must contain a materializing Copy"
+//RS         );
+//RS     }
+//RS }
+//RS fn write_invalid_import_project(project: &Path) -> (PathBuf, String, PathBuf, String) {
+//RS     fs::create_dir_all(project).unwrap_or_else(|error| {
+//RS         panic!("cannot create invalid Jet project `{}`: {error}", project.display())
+//RS     });
+//RS     let manifest = project.join("package.jet");
+//RS     let entry = project.join(SMALL_ENTRY_RELATIVE);
+//RS     let entry_source = "use \"broken\" as broken\npub fn main() {\n    print(\"entry\")\n}\n".to_string();
+//RS     let imported_source = "pub fn broken() { print(\"🧪\")".to_string();
+//RS     let imported = project.join("broken.jet");
+//RS     fs::write(&manifest, SMALL_PROGRAM_MANIFEST).unwrap_or_else(|error| {
+//RS         panic!("cannot write invalid Jet manifest `{}`: {error}", manifest.display())
+//RS     });
+//RS     fs::write(&entry, &entry_source).unwrap_or_else(|error| {
+//RS         panic!("cannot write invalid Jet entry `{}`: {error}", entry.display())
+//RS     });
+//RS     fs::write(&imported, &imported_source).unwrap_or_else(|error| {
+//RS         panic!("cannot write invalid imported Jet source `{}`: {error}", imported.display())
+//RS     });
+//RS     (entry, entry_source, imported, imported_source)
+//RS }
+//RS 
+//RS /// D-SHAPE-CASE1 parity fixture: one E0357 per checked category, including a
+//RS /// module alias and an `@` constant whose span starts at its mark.
+//RS fn write_identifier_casing_project(project: &Path) -> (PathBuf, String, Vec<(PathBuf, String)>) {
+//RS     fs::create_dir_all(project).unwrap_or_else(|error| {
+//RS         panic!("cannot create identifier-casing Jet project `{}`: {error}", project.display())
+//RS     });
+//RS     let manifest = project.join("package.jet");
+//RS     let entry = project.join(SMALL_ENTRY_RELATIVE);
+//RS     let helper = project.join("helper.jet");
+//RS     let entry_source = r#"use "helper" as BadAlias
+//RS 
+//RS struct bad_type {
+//RS     BadField: Int
+//RS }
+//RS 
+//RS MAX_RETRIES :: prep { 3 }
+//RS BAD_CONSTANT :: prep { MAX_RETRIES }
+//RS 
+//RS fn BadFunction(BadParam: Int) -> Int {
+//RS     BadLocal :: BadParam
+//RS     callback :: (BadLambda: Int) -> BadLambda
+//RS     return callback(BadLocal)
+//RS }
+//RS 
+//RS pub fn main() {
+//RS     print(BadFunction(BAD_CONSTANT))
+//RS }
+//RS "#
+//RS     .to_string();
+//RS     let helper_source = "pub fn helper() -> Int {\n    return 1\n}\n".to_string();
+//RS     fs::write(&manifest, SMALL_PROGRAM_MANIFEST).unwrap_or_else(|error| {
+//RS         panic!("cannot write identifier-casing manifest `{}`: {error}", manifest.display())
+//RS     });
+//RS     fs::write(&entry, &entry_source).unwrap_or_else(|error| {
+//RS         panic!("cannot write identifier-casing entry `{}`: {error}", entry.display())
+//RS     });
+//RS     fs::write(&helper, &helper_source).unwrap_or_else(|error| {
+//RS         panic!("cannot write identifier-casing helper `{}`: {error}", helper.display())
+//RS     });
+//RS     let closure = vec![(entry.clone(), entry_source.clone()), (helper, helper_source)];
+//RS     (entry, entry_source, closure)
+//RS }
+//RS 
+//RS fn write_valid_report_project(project: &Path) -> (PathBuf, String) {
+//RS     fs::create_dir_all(project).unwrap_or_else(|error| {
+//RS         panic!("cannot create valid-report Jet project `{}`: {error}", project.display())
+//RS     });
+//RS     let manifest = project.join("package.jet");
+//RS     let entry = project.join(SMALL_ENTRY_RELATIVE);
+//RS     let entry_source = "fn unused() Int -> 1\n\npub fn main() {}\n".to_string();
+//RS     let manifest_source = r#"name: "bootstrap_small"
+//RS version: "0.1.0"
+//RS edition: "2028"
+//RS outputs: { app: .Executable{ entry: main } }
+//RS boundaries: {
+//RS     deny: [{ from: "bootstrap_small.run", to: "bootstrap_small.db" }]
+//RS }
+//RS "#;
+//RS     fs::write(&manifest, manifest_source).unwrap_or_else(|error| {
+//RS         panic!("cannot write valid-report Jet manifest `{}`: {error}", manifest.display())
+//RS     });
+//RS     fs::write(&entry, &entry_source).unwrap_or_else(|error| {
+//RS         panic!("cannot write valid-report Jet entry `{}`: {error}", entry.display())
+//RS     });
+//RS     (entry, entry_source)
+//RS }
+//RS 
+//RS fn write_nested_closure_callback_project(project: &Path) {
+//RS     fs::create_dir_all(project).unwrap_or_else(|error| {
+//RS         panic!("cannot create nested-lambda project `{}`: {error}", project.display())
+//RS     });
+//RS     let manifest = project.join("package.jet");
+//RS     let entry = project.join(SMALL_ENTRY_RELATIVE);
+//RS     let source = r#"use c.cb as c
+//RS 
+//RS #Import module c.cb {
+//RS     fn call(cb: fn(I32) I32 -[]>, x: I32) I32 = "call"
+//RS }
+//RS 
+//RS pub fn main() {
+//RS     prefix :: "nested"
+//RS     captured :: () -> prefix
+//RS     print(captured())
+//RS     print(c.call((x) -> x, 40))
+//RS }
+//RS "#;
+//RS     fs::write(&manifest, SMALL_PROGRAM_MANIFEST).unwrap_or_else(|error| {
+//RS         panic!("cannot write nested-lambda manifest `{}`: {error}", manifest.display())
+//RS     });
+//RS     fs::write(&entry, source).unwrap_or_else(|error| {
+//RS         panic!("cannot write nested-lambda source `{}`: {error}", entry.display())
+//RS     });
+//RS }
+//RS 
+//RS fn rust_reference_reports(
+//RS     entry: &Path,
+//RS     entry_source: &str,
+//RS     source_closure: &[(PathBuf, String)],
+//RS ) -> Vec<String> {
+//RS     let entry_path = entry
+//RS         .to_str()
+//RS         .unwrap_or_else(|| panic!("invalid Jet test entry path `{}`", entry.display()));
+//RS     let diagnostics =
+//RS         match crate::Driver::compile_bundle_path_opts_with_source_closure_and_runtime(
+//RS             entry_path,
+//RS             crate::Sema::CompileMode::Check,
+//RS             false,
+//RS             crate::Policy::GateSet::default(),
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             None,
+//RS             None,
+//RS             "dev",
+//RS             &BTreeMap::new(),
+//RS             false,
+//RS             None,
+//RS             source_closure,
+//RS             None,
+//RS         ) {
+//RS             Err(diagnostics) => diagnostics,
+//RS             Ok(_) => panic!("Rust reference accepted the intentionally invalid imported source"),
+//RS         };
+//RS     let report_path = jet_foundation::Report::ReportPath::from_process(entry_path);
+//RS     diagnostics
+//RS         .iter()
+//RS         .map(|diagnostic| diagnostic.to_report(&report_path, entry_source).json())
+//RS         .collect()
+//RS }
+//RS 
+//RS fn rust_reference_success_reports(
+//RS     entry: &Path,
+//RS     entry_source: &str,
+//RS     source_closure: &[(PathBuf, String)],
+//RS ) -> Vec<String> {
+//RS     let entry_path = entry
+//RS         .to_str()
+//RS         .unwrap_or_else(|| panic!("invalid Jet test entry path `{}`", entry.display()));
+//RS     let (output, _) = crate::Driver::compile_bundle_path_opts_with_source_closure_and_runtime(
+//RS         entry_path,
+//RS         crate::Sema::CompileMode::Check,
+//RS         false,
+//RS         crate::Policy::GateSet::default(),
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         None,
+//RS         None,
+//RS         "dev",
+//RS         &BTreeMap::new(),
+//RS         false,
+//RS         None,
+//RS         source_closure,
+//RS         None,
+//RS     )
+//RS     .unwrap_or_else(|diagnostics| panic!("Rust reference rejected valid report fixture: {diagnostics:?}"));
+//RS     let report_path = jet_foundation::Report::ReportPath::from_process(entry_path);
+//RS     output
+//RS         .lints
+//RS         .iter()
+//RS         .map(|diagnostic| diagnostic.to_report(&report_path, entry_source).json())
+//RS         .collect()
+//RS }
+//RS 
+//RS fn report_at_imported_eof(reports: &[String], path: &Path, end: usize) -> String {
+//RS     let file = format!("\"file\":\"{}\"", path.display());
+//RS     let span = format!("\"span\":{{\"start\":{end},\"end\":{end}}}");
+//RS     reports
+//RS         .iter()
+//RS         .find(|report| report.contains("\"code\":\"E0003\"") && report.contains(&file) && report.contains(&span))
+//RS         .cloned()
+//RS         .unwrap_or_else(|| {
+//RS             panic!(
+//RS                 "no imported-source EOF E0003 report for `{}` at byte {end}: {reports:?}",
+//RS                 path.display()
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS const TASK_ROOTS_BEGIN: &str = "// bootstrap:task-roots-begin";
+//RS const TASK_ROOTS_END: &str = "// bootstrap:task-roots-end";
+//RS 
+//RS fn append_generated_artifact_main(source: String, task_roots: bool) -> String {
+//RS     let mut complete = source;
+//RS     if task_roots {
+//RS         complete.push_str(GENERATED_ARTIFACT_MAIN);
+//RS         return complete;
+//RS     }
+//RS     let mut rest = GENERATED_ARTIFACT_MAIN;
+//RS     while let Some(begin) = rest.find(TASK_ROOTS_BEGIN) {
+//RS         complete.push_str(&rest[..begin]);
+//RS         let end = rest[begin..]
+//RS             .find(TASK_ROOTS_END)
+//RS             .unwrap_or_else(|| panic!("generated artifact main has an unterminated task-root region"));
+//RS         rest = &rest[begin + end + TASK_ROOTS_END.len()..];
+//RS     }
+//RS     complete.push_str(rest);
+//RS     complete
+//RS }
+//RS 
+//RS fn backend_identity_build_script(
+//RS     repo: &Path,
+//RS     native_library: Option<(&Path, &str)>,
+//RS ) -> String {
+//RS     let native_link_directives = native_library.map_or_else(String::new, |(directory, library)| {
+//RS         format!(
+//RS             "    println!(\"cargo:rustc-link-search=native={{}}\", {:?});\n    println!(\"cargo:rustc-link-lib=static={library}\");\n",
+//RS             directory.display().to_string(),
+//RS         )
+//RS     });
+//RS     // The identity code is inlined (the root build.rs `#[path]`-includes the
+//RS     // same two files) rather than taken from a `jet` build-dependency: that
+//RS     // dependency compiled the `jet` and `jet-jit` crates a second time for the
+//RS     // host, doubling the largest repository crates' share of the build.
+//RS     let inline_module = |relative: &str| {
+//RS         let path = repo.join(relative);
+//RS         fs::read_to_string(&path).unwrap_or_else(|error| {
+//RS             panic!("cannot read backend build-script module `{}`: {error}", path.display())
+//RS         })
+//RS     };
+//RS     format!(
+//RS         r#"use std::fs;
+//RS use std::path::Path;
+//RS 
+//RS #[allow(dead_code, non_snake_case)]
+//RS mod SHA256 {{
+//RS {sha256}
+//RS }}
+//RS 
+//RS #[allow(dead_code, non_snake_case)]
+//RS mod BuildIdentity {{
+//RS {build_identity}
+//RS }}
+//RS 
+//RS fn main() {{
+//RS     let root = Path::new({:?});
+//RS     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let source = fs::read(manifest_dir.join("generated.rs"))
+//RS         .expect("generated artifact source must be readable");
+//RS     let manifest = fs::read(manifest_dir.join("Cargo.toml"))
+//RS         .expect("generated artifact manifest must be readable");
+//RS     let build_script = fs::read(manifest_dir.join("build.rs"))
+//RS         .expect("generated artifact build script must be readable");
+//RS     let facts = BuildIdentity::build_facts()
+//RS         .expect("Cargo-supplied backend build facts must be readable");
+//RS     let mut extras = vec![
+//RS         ("Compiler/Bootstrap/__generated_compiler.rs".to_string(), source),
+//RS         ("Compiler/Bootstrap/__generated_cargo_manifest.toml".to_string(), manifest),
+//RS         ("Compiler/Bootstrap/__generated_cargo_build.rs".to_string(), build_script),
+//RS     ];
+//RS     // A compiler artifact embeds its image with `include_bytes!` from here.
+//RS     let image_path = manifest_dir.join("src/compiler.image");
+//RS     if let Ok(image) = fs::read(&image_path) {{
+//RS         extras.push(("Compiler/Bootstrap/__generated_compiler.image".to_string(), image));
+//RS         println!("cargo:rerun-if-changed={{}}", image_path.display());
+//RS     }}
+//RS     let identity = BuildIdentity::semantic_id_with_extra(
+//RS         root,
+//RS         BuildIdentity::COMPILER_DOMAIN,
+//RS         BuildIdentity::COMPILER_SOURCES,
+//RS         &facts,
+//RS         &extras,
+//RS     )
+//RS     .expect("generated compiler identity must be computable");
+//RS     fs::write(manifest_dir.join(".bootstrap-artifact-id"), &identity)
+//RS         .expect("generated compiler identity receipt must be writable");
+//RS     println!("cargo:rustc-env=JET_COMPILER_BUILD_ID={{identity}}");
+//RS     // The identity of the compiler *sources* (the root build.rs formula, no
+//RS     // generated extras): every stage built from one source tree reports it as
+//RS     // its compiler identity to the programs it compiles, so the compiler image
+//RS     // a self-compile archives does not change from stage to stage.
+//RS     let source_identity = BuildIdentity::semantic_id(
+//RS         root,
+//RS         BuildIdentity::COMPILER_DOMAIN,
+//RS         BuildIdentity::COMPILER_SOURCES,
+//RS         &facts,
+//RS     )
+//RS     .expect("generated compiler source identity must be computable");
+//RS     println!("cargo:rustc-env=JET_COMPILER_SOURCE_ID={{source_identity}}");
+//RS     println!("cargo::rustc-check-cfg=cfg(jet_bootstrap_compiler_artifact)");
+//RS     println!("cargo:rustc-cfg=jet_bootstrap_compiler_artifact");
+//RS     println!("cargo:rerun-if-changed={{}}", manifest_dir.join("generated.rs").display());
+//RS     println!("cargo:rerun-if-changed={{}}", manifest_dir.join("Cargo.toml").display());
+//RS     println!("cargo:rerun-if-changed={{}}", manifest_dir.join("build.rs").display());
+//RS     // The root build.rs watch set: SOURCE_ID hashes these roots and facts, so
+//RS     // an incremental backend build must rerun this script when any changes.
+//RS     for input in BuildIdentity::COMPILER_SOURCES {{
+//RS         println!("cargo:rerun-if-changed={{}}", root.join(input).display());
+//RS     }}
+//RS     for key in [
+//RS         "RUSTC",
+//RS         "TARGET",
+//RS         "HOST",
+//RS         "PROFILE",
+//RS         "OPT_LEVEL",
+//RS         "DEBUG",
+//RS         "CARGO_CFG_TARGET_FEATURE",
+//RS         "CARGO_ENCODED_RUSTFLAGS",
+//RS     ] {{
+//RS         println!("cargo:rerun-if-env-changed={{key}}");
+//RS     }}
+//RS     for key in BuildIdentity::profile_override_keys() {{
+//RS         println!("cargo:rerun-if-env-changed={{key}}");
+//RS     }}
+//RS     if let Some(spec) = BuildIdentity::target_spec_path() {{
+//RS         println!("cargo:rerun-if-changed={{}}", spec.display());
+//RS     }}
+//RS {native_link_directives}}}
+//RS "#,
+//RS         repo.display().to_string(),
+//RS         native_link_directives = native_link_directives,
+//RS         sha256 = inline_module("crates/jet-foundation/src/SHA256.rs"),
+//RS         build_identity = inline_module("Compiler/Bootstrap/BuildIdentity.rs"),
+//RS     )
+//RS }
+//RS /// The prepared FFI bridge an emitted program names (`jet_ffi_<key>`). The
+//RS /// backend build depends on its generated source package by path, Cargo's
+//RS /// equivalent of `jet build`'s `--extern` of the bridge rlib.
+//RS struct BackendFfiCrate {
+//RS     name: String,
+//RS     dir: PathBuf,
+//RS }
+//RS 
+//RS impl BackendFfiCrate {
+//RS     /// The manifest dependency row naming the bridge.
+//RS     fn dependency(&self) -> String {
+//RS         format!("{} = {{ path = {:?} }}\n", self.name, self.dir.display().to_string())
+//RS     }
+//RS 
+//RS     /// A retained bridge record (`stage-zero.ffi`): crate name and directory
+//RS     /// lines; empty when the program names no bridge.
+//RS     fn parse(record: &str) -> Option<Self> {
+//RS         record.split_once('\n').map(|(name, path)| BackendFfiCrate {
+//RS             name: name.to_string(),
+//RS             dir: PathBuf::from(path.trim_end_matches('\n')),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// One build unit of an emitted program, built as its own crate.
+//RS struct BackendUnit {
+//RS     crate_name: String,
+//RS     /// Crate names of the units this one names; each is built before it.
+//RS     deps: Vec<String>,
+//RS     /// The exported crate source (the facade of a sharded unit).
+//RS     source: String,
+//RS     /// The shard crates of a unit too large for one rustc (`shard_unit`);
+//RS     /// empty otherwise.
+//RS     shards: Vec<BackendShard>,
+//RS }
+//RS 
+//RS /// One shard crate of a sharded unit: `<unit>_s<index>` for hot code,
+//RS /// `<unit>_cold<index>` for cold code (`shard_unit`), which the release
+//RS /// profile builds unoptimized (`backend_unit_profiles`).
+//RS struct BackendShard {
+//RS     name: String,
+//RS     source: String,
+//RS     cold: bool,
+//RS }
+//RS 
+//RS /// An emitted program split into crates: the exported `jet_runtime` crate
+//RS /// (its runtime/Core block), the crates of its unit sections (MIRRust
+//RS /// `EmissionUnits`) in dependency order, and the main crate — everything
+//RS /// outside the sections (Host/Runner glue, the embedded compiler image, the
+//RS /// artifact main).
+//RS struct BackendWorkspace {
+//RS     runtime_lib: String,
+//RS     units: Vec<BackendUnit>,
+//RS     main: String,
+//RS }
+//RS 
+//RS /// Split a backend source into crates, as `jet_store::runtime::prepare`
+//RS /// splits a real build: the runtime/Core block always builds as its own
+//RS /// crate, so programs with the same block share one built runtime. Unit
+//RS /// dependencies come from the names each unit's text actually uses (every
+//RS /// program item is a unique `__jet_` symbol); units that name each other
+//RS /// cyclically merge into one crate. A source without unit sections has no
+//RS /// unit crates. `None` when the source has no runtime block.
+//RS fn split_backend_workspace(source: &str) -> Option<BackendWorkspace> {
+//RS     let Some(split) = jet_store::runtime::split_runtime_crate(source)
+//RS         .unwrap_or_else(|error| panic!("backend source: {error}"))
+//RS     else {
+//RS         assert!(!source.contains(UNIT_BEGIN_MARKER), "unit-split backend source has no runtime block");
+//RS         return None;
+//RS     };
+//RS     let mut sections: Vec<(String, String)> = Vec::new();
+//RS     let mut main = String::new();
+//RS     let mut open: Option<usize> = None;
+//RS     for line in split.program.split_inclusive('\n') {
+//RS         if let Some(name) = line.strip_prefix(UNIT_BEGIN_MARKER) {
+//RS             let name = name.trim_end();
+//RS             assert!(open.is_none(), "backend unit section `{name}` opens inside another section");
+//RS             let existing = sections.iter().position(|(existing, _)| existing == name);
+//RS             let index = existing.unwrap_or_else(|| {
+//RS                 sections.push((name.to_string(), String::new()));
+//RS                 sections.len() - 1
+//RS             });
+//RS             open = Some(index);
+//RS         } else if let Some(name) = line.strip_prefix(UNIT_END_MARKER) {
+//RS             let index = open
+//RS                 .take()
+//RS                 .unwrap_or_else(|| panic!("backend unit section `{}` closes without opening", name.trim_end()));
+//RS             assert_eq!(sections[index].0, name.trim_end(), "backend unit sections interleave");
+//RS         } else if let Some(index) = open {
+//RS             sections[index].1.push_str(line);
+//RS         } else {
+//RS             main.push_str(line);
+//RS         }
+//RS     }
+//RS     assert!(open.is_none(), "backend unit section is unterminated");
+//RS 
+//RS     let mut owners: HashMap<&str, usize> = HashMap::new();
+//RS     for (index, (_, text)) in sections.iter().enumerate() {
+//RS         for name in unit_definitions(text) {
+//RS             owners.entry(name).or_insert(index);
+//RS         }
+//RS     }
+//RS     let edges = sections
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(index, (_, text))| {
+//RS             unit_symbols(text)
+//RS                 .filter_map(|symbol| owners.get(symbol).copied())
+//RS                 .filter(|owner| *owner != index)
+//RS                 .collect::<BTreeSet<_>>()
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS 
+//RS     // Tarjan emits each strongly connected component after every component
+//RS     // it reaches: dependencies first, the build order.
+//RS     let components = strongly_connected_units(&edges);
+//RS     let mut component_of = vec![0; sections.len()];
+//RS     for (component, members) in components.iter().enumerate() {
+//RS         for member in members {
+//RS             component_of[*member] = component;
+//RS         }
+//RS     }
+//RS     let crate_names = components
+//RS         .iter()
+//RS         .map(|members| {
+//RS             let mut names = members.iter().map(|member| sections[*member].0.as_str()).collect::<Vec<_>>();
+//RS             names.sort_unstable();
+//RS             let name = names.join("_").to_ascii_lowercase();
+//RS             format!(
+//RS                 "jetc_{}",
+//RS                 name.chars()
+//RS                     .map(|character| if character.is_ascii_alphanumeric() { character } else { '_' })
+//RS                     .collect::<String>()
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let units = components
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(component, members)| {
+//RS             let mut members = members.clone();
+//RS             members.sort_unstable();
+//RS             let deps = members
+//RS                 .iter()
+//RS                 .flat_map(|member| edges[*member].iter().map(|target| component_of[*target]))
+//RS                 .filter(|target| *target != component)
+//RS                 .collect::<BTreeSet<_>>()
+//RS                 .into_iter()
+//RS                 .map(|target| crate_names[target].clone())
+//RS                 .collect::<Vec<_>>();
+//RS             let crate_name = crate_names[component].clone();
+//RS             let mut prelude = String::from("#![allow(warnings)]\nuse jet_runtime::*;\n");
+//RS             for dep in &deps {
+//RS                 prelude.push_str(&format!("use {dep}::*;\n"));
+//RS             }
+//RS             let text = members.iter().map(|member| sections[*member].1.as_str()).collect::<String>();
+//RS             let (source, shards) = match shard_unit(&text, BACKEND_SHARD_BYTES) {
+//RS                 Some(sharded) => {
+//RS                     let source = format!(
+//RS                         "{prelude}{}unsafe extern \"Rust\" {{\n{}}}\n",
+//RS                         jet_store::runtime::export_crate_source(&sharded.facade),
+//RS                         sharded.declarations,
+//RS                     );
+//RS                     let shard = |(index, text): (usize, &String), cold: bool| BackendShard {
+//RS                         name: format!("{crate_name}_{}{index}", if cold { "cold" } else { "s" }),
+//RS                         source: format!(
+//RS                             "{prelude}use {crate_name}::*;\n{}",
+//RS                             jet_store::runtime::export_crate_source(text)
+//RS                         ),
+//RS                         cold,
+//RS                     };
+//RS                     let hot = sharded.shards.iter().enumerate().map(|indexed| shard(indexed, false));
+//RS                     let cold = sharded.cold_shards.iter().enumerate().map(|indexed| shard(indexed, true));
+//RS                     let shards = hot.chain(cold).collect();
+//RS                     (source, shards)
+//RS                 }
+//RS                 None => (format!("{prelude}{}", jet_store::runtime::export_crate_source(&text)), Vec::new()),
+//RS             };
+//RS             BackendUnit {
+//RS                 crate_name,
+//RS                 deps,
+//RS                 source,
+//RS                 shards,
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS 
+//RS     let anchor = "use jet_runtime::*;\n";
+//RS     let at = main
+//RS         .find(anchor)
+//RS         .unwrap_or_else(|| panic!("split backend main has no `jet_runtime` import"))
+//RS         + anchor.len();
+//RS     // Shards are named by nothing (their functions are reached through the
+//RS     // facade's declarations), so the main crate links each explicitly.
+//RS     let uses = units
+//RS         .iter()
+//RS         .map(|unit| {
+//RS             let shards = unit.shards.iter().map(|shard| format!("use {} as _;\n", shard.name));
+//RS             std::iter::once(format!("use {}::*;\n", unit.crate_name)).chain(shards).collect::<String>()
+//RS         })
+//RS         .collect::<String>();
+//RS     main.insert_str(at, &uses);
+//RS     Some(BackendWorkspace {
+//RS         runtime_lib: split.runtime_lib,
+//RS         units,
+//RS         main,
+//RS     })
+//RS }
+//RS 
+//RS /// The `__jet_` symbols a unit section defines: its top-level items (emitted
+//RS /// at column 0) and the functions of its top-level foreign blocks. Indented
+//RS /// trait methods and body-local names are not unit-level definitions.
+//RS fn unit_definitions(text: &str) -> impl Iterator<Item = &str> {
+//RS     let mut in_foreign = false;
+//RS     text.lines().filter_map(move |line| {
+//RS         if in_foreign {
+//RS             in_foreign = !line.starts_with('}');
+//RS             return if in_foreign { defined_unit_item(line) } else { None };
+//RS         }
+//RS         if line.starts_with("extern ") || line.starts_with("unsafe extern ") {
+//RS             in_foreign = !line.trim_end().ends_with('}');
+//RS             return None;
+//RS         }
+//RS         if line.starts_with(char::is_whitespace) {
+//RS             return None;
+//RS         }
+//RS         defined_unit_item(line)
+//RS     })
+//RS }
+//RS 
+//RS /// The `__jet_` symbol a unit line defines at item level (`fn`, `struct`,
+//RS /// `enum`, `trait`, `type`, `static`, `const`, `union`, after visibility and
+//RS /// qualifiers), if any.
+//RS fn defined_unit_item(line: &str) -> Option<&str> {
+//RS     let mut rest = line.trim_start();
+//RS     for visibility in ["pub(crate) ", "pub(super) ", "pub "] {
+//RS         if let Some(stripped) = rest.strip_prefix(visibility) {
+//RS             rest = stripped;
+//RS             break;
+//RS         }
+//RS     }
+//RS     loop {
+//RS         if let Some(stripped) = rest.strip_prefix("const fn ") {
+//RS             return unit_symbol_at(stripped);
+//RS         }
+//RS         let current = rest;
+//RS         match ["unsafe ", "async ", "extern \"C\" ", "extern \"Rust\" "]
+//RS             .iter()
+//RS             .find_map(|qualifier| current.strip_prefix(qualifier))
+//RS         {
+//RS             Some(stripped) => rest = stripped,
+//RS             None => break,
+//RS         }
+//RS     }
+//RS     ["fn ", "struct ", "enum ", "trait ", "type ", "static mut ", "static ", "const ", "union "]
+//RS         .iter()
+//RS         .find_map(|keyword| rest.strip_prefix(keyword))
+//RS         .and_then(unit_symbol_at)
+//RS }
+//RS 
+//RS /// The `__jet_` identifier at the start of `text`.
+//RS fn unit_symbol_at(text: &str) -> Option<&str> {
+//RS     let end = text
+//RS         .find(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+//RS         .unwrap_or(text.len());
+//RS     let symbol = &text[..end];
+//RS     symbol.starts_with("__jet_").then_some(symbol)
+//RS }
+//RS 
+//RS /// Every whole `__jet_` identifier in `text`.
+//RS fn unit_symbols(text: &str) -> impl Iterator<Item = &str> {
+//RS     text.match_indices("__jet_").filter_map(move |(at, _)| {
+//RS         let starts_identifier = text[..at]
+//RS             .chars()
+//RS             .next_back()
+//RS             .is_none_or(|character| !(character.is_ascii_alphanumeric() || character == '_'));
+//RS         if starts_identifier { unit_symbol_at(&text[at..]) } else { None }
+//RS     })
+//RS }
+//RS 
+//RS /// Strongly connected components of the unit graph, each after every
+//RS /// component it reaches.
+//RS fn strongly_connected_units(edges: &[BTreeSet<usize>]) -> Vec<Vec<usize>> {
+//RS     struct Tarjan<'e> {
+//RS         edges: &'e [BTreeSet<usize>],
+//RS         index: Vec<Option<usize>>,
+//RS         low: Vec<usize>,
+//RS         on_stack: Vec<bool>,
+//RS         stack: Vec<usize>,
+//RS         next: usize,
+//RS         components: Vec<Vec<usize>>,
+//RS     }
+//RS     impl Tarjan<'_> {
+//RS         fn visit(&mut self, node: usize) {
+//RS             self.index[node] = Some(self.next);
+//RS             self.low[node] = self.next;
+//RS             self.next += 1;
+//RS             self.stack.push(node);
+//RS             self.on_stack[node] = true;
+//RS             for target in self.edges[node].clone() {
+//RS                 match self.index[target] {
+//RS                     None => {
+//RS                         self.visit(target);
+//RS                         self.low[node] = self.low[node].min(self.low[target]);
+//RS                     }
+//RS                     Some(index) if self.on_stack[target] => {
+//RS                         self.low[node] = self.low[node].min(index);
+//RS                     }
+//RS                     Some(_) => {}
+//RS                 }
+//RS             }
+//RS             if Some(self.low[node]) == self.index[node] {
+//RS                 let mut component = Vec::new();
+//RS                 while let Some(member) = self.stack.pop() {
+//RS                     self.on_stack[member] = false;
+//RS                     component.push(member);
+//RS                     if member == node {
+//RS                         break;
+//RS                     }
+//RS                 }
+//RS                 self.components.push(component);
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut tarjan = Tarjan {
+//RS         edges,
+//RS         index: vec![None; edges.len()],
+//RS         low: vec![0; edges.len()],
+//RS         on_stack: vec![false; edges.len()],
+//RS         stack: Vec::new(),
+//RS         next: 0,
+//RS         components: Vec::new(),
+//RS     };
+//RS     for node in 0..edges.len() {
+//RS         if tarjan.index[node].is_none() {
+//RS             tarjan.visit(node);
+//RS         }
+//RS     }
+//RS     tarjan.components
+//RS }
+//RS 
+//RS /// Write the runtime and unit crates under `units_root`; returns the main
+//RS /// manifest's dependency rows for them. Every crate may name the FFI bridge,
+//RS /// so each depends on it. The runtime crate's directory is named by the
+//RS /// digest of its source and bridge row, so programs that alternate between
+//RS /// runtime/Core blocks (their runtime parts differ) each keep their built
+//RS /// runtime instead of rewriting one directory. Files are rewritten only when
+//RS /// their bytes change, so cargo keeps unchanged crates built.
+//RS fn write_backend_workspace(
+//RS     units_root: &Path,
+//RS     workspace: &BackendWorkspace,
+//RS     ffi: Option<&BackendFfiCrate>,
+//RS ) -> String {
+//RS     let ffi_dependency = ffi.map_or_else(String::new, BackendFfiCrate::dependency);
+//RS     let runtime_digest = jet_foundation::SHA256::sha256_hex(
+//RS         format!("{ffi_dependency}\0{}", workspace.runtime_lib).as_bytes(),
+//RS     );
+//RS     let runtime_dir_name = format!("jet_runtime_{}", &runtime_digest[..16]);
+//RS     let runtime_dir = units_root.join(&runtime_dir_name);
+//RS     write_backend_crate(&runtime_dir, "jet_runtime", &[], &ffi_dependency, &workspace.runtime_lib);
+//RS     let mut dependencies = format!("jet_runtime = {{ path = {:?} }}\n", runtime_dir.display().to_string());
+//RS     // Unit and shard crates name the runtime by its digest directory.
+//RS     let unit_extra_dependencies = format!("jet_runtime = {{ path = \"../{runtime_dir_name}\" }}\n{ffi_dependency}");
+//RS     for unit in &workspace.units {
+//RS         let dir = units_root.join(&unit.crate_name);
+//RS         let mut deps = unit.deps.clone();
+//RS         write_backend_crate(&dir, &unit.crate_name, &deps, &unit_extra_dependencies, &unit.source);
+//RS         dependencies.push_str(&format!(
+//RS             "{} = {{ path = {:?} }}\n",
+//RS             unit.crate_name,
+//RS             dir.display().to_string()
+//RS         ));
+//RS         deps.push(unit.crate_name.clone());
+//RS         for shard in &unit.shards {
+//RS             let dir = units_root.join(&shard.name);
+//RS             write_backend_crate(&dir, &shard.name, &deps, &unit_extra_dependencies, &shard.source);
+//RS             dependencies.push_str(&format!("{} = {{ path = {:?} }}\n", shard.name, dir.display().to_string()));
+//RS         }
+//RS     }
+//RS     dependencies
+//RS }
+//RS 
+//RS /// The main manifest's profile overrides for the runtime and unit crates:
+//RS /// under dev `BACKEND_UNIT_PROFILE` for each (repository crates keep the
+//RS /// default dev profile); under the release profile `release` (which already
+//RS /// builds everything at opt-level 2 without debuginfo or LTO)
+//RS /// `BACKEND_COLD_PROFILE` for each cold shard.
+//RS fn backend_unit_profiles(workspace: &BackendWorkspace, release: Option<&str>) -> String {
+//RS     let shards = || workspace.units.iter().flat_map(|unit| &unit.shards);
+//RS     match release {
+//RS         None => std::iter::once("jet_runtime")
+//RS             .chain(workspace.units.iter().map(|unit| unit.crate_name.as_str()))
+//RS             .chain(shards().map(|shard| shard.name.as_str()))
+//RS             .map(|name| format!("\n[profile.dev.package.{name}]\n{BACKEND_UNIT_PROFILE}"))
+//RS             .collect(),
+//RS         Some(profile) => shards()
+//RS             .filter(|shard| shard.cold)
+//RS             .map(|shard| format!("\n[profile.{profile}.package.{}]\n{BACKEND_COLD_PROFILE}", shard.name))
+//RS             .collect(),
+//RS     }
+//RS }
+//RS 
+//RS /// One library crate of the backend workspace; `deps` are sibling crates,
+//RS /// `extra_dependencies` further manifest dependency rows.
+//RS fn write_backend_crate(dir: &Path, name: &str, deps: &[String], extra_dependencies: &str, lib: &str) {
+//RS     let mut manifest = format!("[package]\nname = {name:?}\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\n");
+//RS     for dep in deps {
+//RS         manifest.push_str(&format!("{dep} = {{ path = \"../{dep}\" }}\n"));
+//RS     }
+//RS     manifest.push_str(extra_dependencies);
+//RS     for (path, text) in [(dir.join("Cargo.toml"), manifest.as_str()), (dir.join("src/lib.rs"), lib)] {
+//RS         if fs::read(&path).is_ok_and(|existing| existing == text.as_bytes()) {
+//RS             continue;
+//RS         }
+//RS         if let Some(parent) = path.parent() {
+//RS             fs::create_dir_all(parent).unwrap_or_else(|error| {
+//RS                 panic!("cannot create backend crate directory `{}`: {error}", parent.display())
+//RS             });
+//RS         }
+//RS         fs::write(&path, text).unwrap_or_else(|error| {
+//RS             panic!("cannot write backend crate file `{}`: {error}", path.display())
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS /// A unit too large for one rustc, split by `shard_unit` (texts before
+//RS /// export).
+//RS struct ShardedUnit {
+//RS     /// Every type, trait, impl and unmovable item: the unit crate itself.
+//RS     facade: String,
+//RS     /// `unsafe extern "Rust"` block members declaring each moved function.
+//RS     declarations: String,
+//RS     /// Moved hot function definitions, at most about `shard_bytes` each.
+//RS     shards: Vec<String>,
+//RS     /// Moved cold function definitions (`MovedFunction::cold`), packed the
+//RS     /// same way into their own crates.
+//RS     cold_shards: Vec<String>,
+//RS }
+//RS 
+//RS /// One function moved out of a facade: its declaration and its definition
+//RS /// under its own symbol.
+//RS struct MovedFunction {
+//RS     declaration: String,
+//RS     definition: String,
+//RS     /// Code an optimized build should not optimize: a cold-trait impl
+//RS     /// method (`BACKEND_COLD_TRAITS`), constant table code (a parameterless
+//RS     /// function whose body is a `vec!` literal, or one chunk of a cached
+//RS     /// table's row fill, whose body starts `rows.push(`), or any function of
+//RS     /// at least `BACKEND_COLD_FUNCTION_BYTES`.
+//RS     cold: bool,
+//RS }
+//RS 
+//RS /// Shard a unit's text when it is longer than `shard_bytes`. Free
+//RS /// non-generic `__jet_` functions move to shard crates, which import the
+//RS /// facade and define each function `#[no_mangle]`; the facade declares them
+//RS /// in an `unsafe extern "Rust"` block, so every caller — facade, sibling
+//RS /// shards, dependent units — reaches a moved function through its symbol
+//RS /// and no shard depends on another. Impls stay beside their types (orphan
+//RS /// rule), but a large method body moves as a free function the method
+//RS /// calls. Cold and hot functions pack into separate shards, so the release
+//RS /// profile can leave the cold ones unoptimized. `None` for a small unit or
+//RS /// one with macros, which shards could not see.
+//RS fn shard_unit(text: &str, shard_bytes: usize) -> Option<ShardedUnit> {
+//RS     if text.len() <= shard_bytes {
+//RS         return None;
+//RS     }
+//RS     let mask = jet_foundation::RustSource::rust_code_mask(text);
+//RS     let (items, end) = masked_items(&mask);
+//RS     let mut facade = String::new();
+//RS     let mut uses = String::new();
+//RS     let mut declarations = String::new();
+//RS     let mut moved = Vec::new();
+//RS     for (start, end) in items {
+//RS         let (item, code) = (&text[start..end], &mask[start..end]);
+//RS         let head = &code[item_head(code)..];
+//RS         if head.starts_with("macro_rules!") {
+//RS             return None;
+//RS         }
+//RS         if head.starts_with("use ") || head.starts_with("pub use ") {
+//RS             uses.push_str(item);
+//RS         }
+//RS         if let Some(function) = movable_function(item, code) {
+//RS             declarations.push_str(&function.declaration);
+//RS             moved.push(function);
+//RS         } else if let Some((rewritten, functions)) = delegate_impl_methods(item, code) {
+//RS             facade.push_str(&rewritten);
+//RS             for function in functions {
+//RS                 declarations.push_str(&function.declaration);
+//RS                 moved.push(function);
+//RS             }
+//RS         } else {
+//RS             facade.push_str(item);
+//RS         }
+//RS     }
+//RS     facade.push_str(&text[end..]);
+//RS     let (mut shards, mut cold_shards): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+//RS     for function in moved {
+//RS         let packed = if function.cold { &mut cold_shards } else { &mut shards };
+//RS         match packed.last_mut() {
+//RS             Some(shard) if shard.len() + function.definition.len() <= shard_bytes => {
+//RS                 shard.push_str(&function.definition)
+//RS             }
+//RS             _ => packed.push(format!("{uses}{}", function.definition)),
+//RS         }
+//RS     }
+//RS     Some(ShardedUnit {
+//RS         facade,
+//RS         declarations,
+//RS         shards,
+//RS         cold_shards,
+//RS     })
+//RS }
+//RS 
+//RS /// Byte ranges of the top-level items of masked Rust `code`, each starting
+//RS /// where the previous one ended (leading whitespace and comments travel with
+//RS /// their item), and the end of the last one.
+//RS fn masked_items(code: &str) -> (Vec<(usize, usize)>, usize) {
+//RS     let mut items = Vec::new();
+//RS     let (mut start, mut depth) = (0usize, 0usize);
+//RS     for (at, byte) in code.bytes().enumerate() {
+//RS         match byte {
+//RS             b'{' | b'(' | b'[' => depth += 1,
+//RS             b'}' | b')' | b']' => {
+//RS                 depth = depth
+//RS                     .checked_sub(1)
+//RS                     .unwrap_or_else(|| panic!("backend unit source closes an unopened bracket at byte {at}"));
+//RS                 if depth == 0 && byte == b'}' {
+//RS                     items.push((start, at + 1));
+//RS                     start = at + 1;
+//RS                 }
+//RS             }
+//RS             b';' if depth == 0 => {
+//RS                 items.push((start, at + 1));
+//RS                 start = at + 1;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     (items, start)
+//RS }
+//RS 
+//RS /// Index of the bracket closing the one at `open` in masked `code`.
+//RS fn matching_bracket(code: &str, open: usize) -> usize {
+//RS     let mut depth = 0usize;
+//RS     for (offset, byte) in code[open..].bytes().enumerate() {
+//RS         match byte {
+//RS             b'{' | b'(' | b'[' => depth += 1,
+//RS             b'}' | b')' | b']' => {
+//RS                 depth -= 1;
+//RS                 if depth == 0 {
+//RS                     return open + offset;
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     panic!("backend unit source leaves a bracket open at byte {open}")
+//RS }
+//RS 
+//RS /// Offset of an item's keyword in masked `code`, past leading whitespace
+//RS /// and attributes.
+//RS fn item_head(code: &str) -> usize {
+//RS     let mut at = code.len() - code.trim_start().len();
+//RS     while code[at..].starts_with("#[") {
+//RS         at = matching_bracket(code, at + 1) + 1;
+//RS         at += code[at..].len() - code[at..].trim_start().len();
+//RS     }
+//RS     at
+//RS }
+//RS 
+//RS /// Whether every attribute in masked `attributes` is one a moved function
+//RS /// may keep (none changes its symbol, ABI or presence).
+//RS fn movable_attributes(attributes: &str) -> bool {
+//RS     attributes
+//RS         .split("#[")
+//RS         .skip(1)
+//RS         .all(|attribute| ["inline", "allow(", "cold]"].iter().any(|name| attribute.starts_with(name)))
+//RS }
+//RS 
+//RS /// Ranges of masked `code` between its depth-0 `separator`s (angle brackets
+//RS /// count as depth; the `>` of `->` does not).
+//RS fn split_top_level(code: &str, separator: u8) -> Vec<(usize, usize)> {
+//RS     let bytes = code.as_bytes();
+//RS     let (mut parts, mut start, mut depth) = (Vec::new(), 0usize, 0isize);
+//RS     for (at, byte) in bytes.iter().copied().enumerate() {
+//RS         match byte {
+//RS             b'{' | b'(' | b'[' | b'<' => depth += 1,
+//RS             b'>' if at > 0 && bytes[at - 1] == b'-' => {}
+//RS             b'}' | b')' | b']' | b'>' => depth -= 1,
+//RS             _ if byte == separator && depth == 0 => {
+//RS                 parts.push((start, at));
+//RS                 start = at + 1;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     parts.push((start, code.len()));
+//RS     parts
+//RS }
+//RS 
+//RS /// Offset of the `:` between a parameter's pattern and its type in masked
+//RS /// `code` (not a `::` path separator).
+//RS fn parameter_colon(code: &str) -> Option<usize> {
+//RS     let bytes = code.as_bytes();
+//RS     split_top_level(code, b':').into_iter().map(|(_, end)| end).find(|&at| {
+//RS         at < bytes.len() && bytes.get(at + 1) != Some(&b':') && (at == 0 || bytes[at - 1] != b':')
+//RS     })
+//RS }
+//RS 
+//RS fn is_identifier(text: &str) -> bool {
+//RS     !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+//RS }
+//RS 
+//RS /// A free, non-generic, non-const `__jet_` function item: its declaration
+//RS /// and its `#[no_mangle]` definition.
+// END-PORT-PENDING 0551 Compiler/Bootstrap/Tests.rs:1619-3414
+

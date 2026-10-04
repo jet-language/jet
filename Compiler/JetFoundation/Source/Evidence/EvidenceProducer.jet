@@ -1,0 +1,102 @@
+// Portable producer policy; Rust Evidence.rs:1326–1380,1440–1480.
+// The Core leaf supplies only native TLS, blocking lock and raw file authority.
+// Main owns its real provider binding; never invent a default/native mock here.
+// #4401: the native export remains gated; unknown header/field diagnostics
+// cascade from this genuine provider import, not a compiler-local replacement.
+use core.testing.host.evidence_host.[EvidenceAppendOperation, EvidenceExpectationSource, EvidenceHeaderBytes, evidence_append_io, evidence_append_scope, jet_evidence_expectation_current]
+// Rust's static magic plus big-endian version, stored inline without a heap list.
+EVIDENCE_STREAM_HEADER :: [U8#10]{U8{74}, U8{69}, U8{84}, U8{69}, U8{86}, U8{73}, U8{68}, U8{51}, U8{0}, U8{3}}
+fn evidence_header_is_current(header: EvidenceHeaderBytes) -> Bool Never! {
+    header.byte0 == EVIDENCE_STREAM_HEADER[0] && header.byte1 == EVIDENCE_STREAM_HEADER[1] && header.byte2 == EVIDENCE_STREAM_HEADER[2] && header.byte3 == EVIDENCE_STREAM_HEADER[3] && header.byte4 == EVIDENCE_STREAM_HEADER[4] && header.byte5 == EVIDENCE_STREAM_HEADER[5] && header.byte6 == EVIDENCE_STREAM_HEADER[6] && header.byte7 == EVIDENCE_STREAM_HEADER[7] && header.byte8 == EVIDENCE_STREAM_HEADER[8] && header.byte9 == EVIDENCE_STREAM_HEADER[9]
+}
+// Specialization retains checked native reader/writer owners and their drops.
+pub module evidence_append_policy<R, W> {
+    module io :: evidence_append_io<R, W>
+    use io.[Native as EvidenceFileNative]
+    pub module writer<N: EvidenceFileNative> {
+        struct Append {
+            native: N
+            path: String
+            frame: [U8]
+            fn append_open(self, writer: &W) Err! {
+                length :: self.native.length(writer)
+                if length == (U64{0}) {
+                    // Match Rust's two write_all calls, including partial-header errors.
+                    magic :: EVIDENCE_STREAM_HEADER[0..<8]
+                    self.native.write_all(&writer, magic)
+                    version :: EVIDENCE_STREAM_HEADER[8..<10]
+                    self.native.write_all(&writer, version)
+                } else {
+                    if length < (U64{10}) -> return Err("truncated evidence report header")
+                    reader := self.native.open_read(self.path)
+                    if self.native.read_exact_header(&reader) == {
+                        .Ok(header) -> {
+                            self.native.close_read(^reader)
+                            if !evidence_header_is_current(header) -> return Err("evidence report schema conflict")
+                        }
+                        .Err(read_error) -> {
+                            self.native.close_read(^reader)
+                            return Err(read_error)
+                        }
+                    }
+                }
+                extent :: self.frame[0..<self.frame.len()]
+                self.native.write_all(&writer, extent)
+                self.native.flush(&writer)
+                return
+            }
+        }
+        impl Append.EvidenceAppendOperation {
+            fn append(self) Err! {
+                if self.frame.len() > 16777216 -> return Err("evidence record exceeds the 16 MiB limit")
+                writer := self.native.open_append(self.path)
+                if self.append_open(&writer) == {
+                    .Ok(_) -> self.native.close_write(^writer)
+                    .Err(write_error) -> {
+                        self.native.close_write(^writer)
+                        return Err(write_error)
+                    }
+                }
+                return
+            }
+        }
+        module lock :: evidence_append_scope<Append>
+        use lock.[Native as EvidenceLockNative]
+        // The one native blocking scope invokes this closed visitor exactly once.
+        pub fn write_record_with_derivation<L: EvidenceLockNative>(native: ^N, locking: L, path: String, record: EvidenceRecord, derivation: DerivationRecord) Err! {
+            frame := [U8]{}
+            if evidence_encode_record_with_derivation(record, derivation, &frame) == {
+                .Ok(_) -> {}
+                .Err(error) -> return Err(error.message)
+            }
+            operation :: Append{native: native, path: path, frame: frame}
+            lock.with_append_lock(locking, ^operation)
+            return
+        }
+        pub fn write_record_from_codes<L: EvidenceLockNative, E: EvidenceExpectationSource>(native: ^N, locking: L, expectation_source: E, path: String, kind: Int, state: Int, name: String, message: String, file: String, line: U32) Err! -[Env]> {
+            record := if evidence_record_from_test_codes(kind, state, name, message, file, line) == {
+                .Ok(value) -> value
+                .Err(error) -> { return Err(error.message) }
+            }
+            if record.outcome == EvidenceOutcome.Passed || record.outcome == EvidenceOutcome.Failed {
+                expectation :: if jet_evidence_expectation_current(expectation_source) -> EvidenceExpectation.ExpectedFailure else -> EvidenceExpectation.Ordinary
+                if evidence_record_set_expectation(&record, expectation) == {
+                    .Ok(_) -> {}
+                    .Err(error) -> return Err(evidence_expectation_error_text(error))
+                }
+            }
+            derivation :: evidence_record_checked_derivation(record)
+            record.derivation = Val(derivation_record_reference(derivation))
+            write_record_with_derivation(^native, locking, path, record, derivation)
+            return
+        }
+        pub fn jet_evidence_record_write<L: EvidenceLockNative, E: EvidenceExpectationSource>(native: ^N, locking: L, expectation_source: E, kind: Int, state: Int, name: String, message: String, file: String, line: U32) Never! -[Env]> {
+            path :: evidence_sys.get(EVIDENCE_REPORT_ENV) ?? return
+            // Only this generated producer edge deliberately ignores IO failures.
+            if write_record_from_codes(^native, locking, expectation_source, path, kind, state, name, message, file, line) == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+        }
+    }
+}

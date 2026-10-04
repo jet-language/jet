@@ -1,0 +1,1771 @@
+// PORT-PENDING 0349 crates-jet-sema-src-sema-bundle-slice-1: crates/jet-sema/src/Sema/Bundle.rs:1-1767
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Syntax;
+//RS use crate::Traits::TraitRegistry;
+//RS use crate::AST::{
+//RS     AccessConvention, CodeModule, ConstAttr, EnumLitArg, Expr, ForKind, Func, GenericModuleDef,
+//RS     GenericModuleParam, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef, ModuleArg,
+//RS     OrFallback, Param, ParamZone, Pattern, ProgramBundle, RustConstKind, Stmt, StrPart, SwitchArm,
+//RS     Type, VariantPayload,
+//RS };
+//RS use std::collections::{HashMap, HashSet};
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS mod Comptime;
+//RS pub(super) mod ComptimeReuse;
+//RS mod Units;
+//RS 
+//RS mod GenericModules;
+//RS mod InlineCalls;
+//RS mod Liveness;
+//RS mod BodyDelta;
+//RS mod ItemReuse;
+//RS mod Outputs;
+//RS mod PackageSeal;
+//RS mod Parallel;
+//RS mod Pipeline;
+//RS mod TargetMachine;
+//RS mod Validation;
+//RS 
+//RS pub use Comptime::bundle_has_comptime_evaluation;
+//RS use Comptime::stmts_have_comptime_evaluation;
+//RS use Units::{inject_units_prelude, resolve_unit_dimensions};
+//RS pub use PackageSeal::{
+//RS     sealed_package_count, with_package_records, PackageRecordStore, PackageReuse,
+//RS     PackageReuseRow,
+//RS };
+//RS 
+//RS pub(crate) use InlineCalls::{mangle_inline_sibling_calls, rewrite_inline_calls_stmts};
+//RS 
+//RS pub(crate) use GenericModules::expand_generic_module_aliases;
+//RS pub(crate) use GenericModules::hoist_inline_module_member_types;
+//RS pub(crate) use GenericModules::module_type_name;
+//RS pub use GenericModules::specialize_function_types;
+//RS use GenericModules::{clone_enum, clone_struct};
+//RS use Outputs::{cli_entry_param_shape, no_run_error, resolve_outputs, CLIEntryShape};
+//RS use Pipeline::{
+//RS     check_bundle_opts_for_output as pipeline_check_bundle_opts_for_output,
+//RS     check_bundle_opts_for_output_with_context as pipeline_check_bundle_opts_for_output_with_context,
+//RS };
+//RS pub use TargetMachine::{
+//RS     check_target_machine, target_hardware_capabilities, target_hardware_profile,
+//RS     target_hardware_profile_id, target_hardware_use, target_hardware_use_with_effect_facts,
+//RS     target_machine_use, validate_target_hardware,
+//RS };
+//RS use Validation::{apply_helper_layer_inference, qualified_effect_facts, taint_check_item};
+//RS #[allow(unused_imports)]
+//RS pub(crate) use Validation::{
+//RS     checker_for_module, check_module_bodies, collect_core_expr, collect_core_lvalue, BodyProducts,
+//RS     collect_core_stmts, collect_used_core, expand_core_reachable_closure, fn_types_compatible,
+//RS     func_sig_to_fn_type, register_func_item, uses_raw_protocol_function_return,
+//RS     uses_raw_protocol_return,
+//RS };
+//RS 
+//RS #[derive(Clone, Debug, Default, Eq, PartialEq)]
+//RS pub struct IncrementalSemaStats {
+//RS     pub hits: u64,
+//RS     pub recomputes: u64,
+//RS     pub live_items: usize,
+//RS     pub live_item_bytes: usize,
+//RS     pub recomputed_items: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(super) struct CachedFunctionBody {
+//RS     pub input: Vec<u8>,
+//RS     pub function: Func,
+//RS     pub diagnostics: Vec<Diagnostic>,
+//RS     pub summaries: HashMap<String, EffectSummary>,
+//RS     pub comptime_inputs: Vec<crate::AST::ComptimeInput>,
+//RS     pub address_taken: HashSet<String>,
+//RS     pub name_ledger: jet_foundation::Names::NameLedger,
+//RS     pub pending_diagnostics: Vec<PendingFunctionDiagnostic>,
+//RS     /// D-INTBIG1: replay the typed exact-Int reachability fact on cache hits.
+//RS     pub uses_exact_int: bool,
+//RS     /// D-DX-PLUGIN1=D: replay the body's checked publication facts too.
+//RS     pub devtools_publications: Vec<jet_foundation::AST::DevtoolsFactPublication>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub(crate) struct PendingFunctionDiagnostic {
+//RS     pub function_key: String,
+//RS     pub function_span: Span,
+//RS     pub diagnostic: Diagnostic,
+//RS }
+//RS 
+//RS fn mark_failed_pending_functions(
+//RS     diagnostics: &[Diagnostic],
+//RS     pending: &[PendingFunctionDiagnostic],
+//RS     failed: &mut HashSet<String>,
+//RS ) {
+//RS     for diagnostic in diagnostics {
+//RS         if !matches!(diagnostic.severity, crate::Diagnostics::Severity::Error) {
+//RS             continue;
+//RS         }
+//RS         let Some(span) = diagnostic.span else {
+//RS             continue;
+//RS         };
+//RS         for candidate in pending {
+//RS             if span.start >= candidate.function_span.start
+//RS                 && span.end <= candidate.function_span.end
+//RS             {
+//RS                 failed.insert(candidate.function_key.clone());
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-CHOOSE-HEADS1=A / S83: keep the authored head order, then lower all
+//RS /// heads with one function name into one ordinary enum pattern table. The
+//RS /// regular registration, checker, TIR, AOT, JIT, and interpreter paths then
+//RS /// see exactly one function and one proof site.
+//RS fn desugar_multi_head_functions(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
+//RS     let mut variants: HashMap<String, Vec<(String, VariantPayload)>> = HashMap::new();
+//RS     for module in &bundle.modules {
+//RS         for item in &module.items {
+//RS             let Item::Enum(def) = item else { continue };
+//RS             for variant in &def.variants {
+//RS                 variants
+//RS                     .entry(variant.name.clone())
+//RS                     .or_default()
+//RS                     .push((def.name.clone(), variant.payload.clone()));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     enum OrderedItem {
+//RS         Item(Item),
+//RS         Heads(String),
+//RS     }
+//RS 
+//RS     for module in &mut bundle.modules {
+//RS         let items = std::mem::take(&mut module.items);
+//RS         let mut grouped: HashMap<String, Vec<Func>> = HashMap::new();
+//RS         let mut ordered = Vec::with_capacity(items.len());
+//RS         for item in items {
+//RS             match item {
+//RS                 Item::Func(function) if function.head_pattern.is_some() => {
+//RS                     let name = function.name.clone();
+//RS                     let heads = grouped.entry(name.clone()).or_default();
+//RS                     if heads.is_empty() {
+//RS                         ordered.push(OrderedItem::Heads(name));
+//RS                     }
+//RS                     heads.push(function);
+//RS                 }
+//RS                 item => ordered.push(OrderedItem::Item(item)),
+//RS             }
+//RS         }
+//RS 
+//RS         let mut rebuilt = Vec::with_capacity(ordered.len());
+//RS         for item in ordered {
+//RS             match item {
+//RS                 OrderedItem::Item(item) => rebuilt.push(item),
+//RS                 OrderedItem::Heads(name) => {
+//RS                     let heads = grouped
+//RS                         .remove(&name)
+//RS                         .expect("multi-head placeholder has a group");
+//RS                     rebuilt.push(Item::Func(fold_multi_head_function(
+//RS                         heads, &variants, diags,
+//RS                     )));
+//RS                 }
+//RS             }
+//RS         }
+//RS         module.items = rebuilt;
+//RS     }
+//RS }
+//RS 
+//RS fn fold_multi_head_function(
+//RS     heads: Vec<Func>,
+//RS     variants: &HashMap<String, Vec<(String, VariantPayload)>>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) -> Func {
+//RS     let mut folded = heads
+//RS         .first()
+//RS         .cloned()
+//RS         .expect("multi-head group is non-empty");
+//RS     let mut enum_name: Option<String> = None;
+//RS     let mut invalid = false;
+//RS     let mut arms = Vec::with_capacity(heads.len());
+//RS 
+//RS     for head in &heads {
+//RS         let Some(pattern) = head.head_pattern.clone() else {
+//RS             invalid = true;
+//RS             continue;
+//RS         };
+//RS         let Pattern::Variant { variant, .. } = &pattern else {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0305",
+//RS                 "a multi-head declaration needs an enum variant head".to_string(),
+//RS                 "multi-head coverage is proved by the enum pattern table".to_string(),
+//RS                 "write a variant head such as `Circle(radius: Float)`".to_string(),
+//RS                 Some(pattern.span()),
+//RS             ));
+//RS             invalid = true;
+//RS             continue;
+//RS         };
+//RS         let Some(candidates) = variants.get(variant) else {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0305",
+//RS                 format!("multi-head variant `{variant}` is not an enum variant"),
+//RS                 "a multi-head table can only cover variants declared by an enum".to_string(),
+//RS                 "check the variant spelling or declare the enum first".to_string(),
+//RS                 Some(pattern.span()),
+//RS             ));
+//RS             invalid = true;
+//RS             continue;
+//RS         };
+//RS         let Some((candidate_enum, payload)) = candidates.first() else {
+//RS             invalid = true;
+//RS             continue;
+//RS         };
+//RS         if candidates
+//RS             .iter()
+//RS             .any(|(other_enum, _)| other_enum != candidate_enum)
+//RS         {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0305",
+//RS                 format!("multi-head variant `{variant}` is ambiguous"),
+//RS                 "a bare head must identify one enum so one table subject can be typed".to_string(),
+//RS                 "use one enum's variants for this function name".to_string(),
+//RS                 Some(pattern.span()),
+//RS             ));
+//RS             invalid = true;
+//RS         }
+//RS         if let Some(previous) = &enum_name {
+//RS             if previous != candidate_enum {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E0305",
+//RS                     format!(
+//RS                         "multi-head variants `{}` and `{variant}` belong to different enums",
+//RS                         previous
+//RS                     ),
+//RS                     "one function has one argument type and one coverage table".to_string(),
+//RS                     "put heads for one enum under one function name".to_string(),
+//RS                     Some(pattern.span()),
+//RS                 ));
+//RS                 invalid = true;
+//RS             }
+//RS         } else {
+//RS             enum_name = Some(candidate_enum.clone());
+//RS         }
+//RS 
+//RS         let expected = match payload {
+//RS             VariantPayload::Unit => Vec::new(),
+//RS             VariantPayload::Single(ty, _) => vec![ty.clone()],
+//RS             VariantPayload::Named(fields) => fields.iter().map(|field| field.ty.clone()).collect(),
+//RS         };
+//RS         for (param, expected_ty) in head.params.iter().zip(expected.iter()) {
+//RS             if param.ty != *expected_ty {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E0305",
+//RS                     format!(
+//RS                         "multi-head binding `{}` has type `{}` but variant `{variant}` carries `{}`",
+//RS                         param.name,
+//RS                         param.ty.show(),
+//RS                         expected_ty.show()
+//RS                     ),
+//RS                     "head bindings must use the variant payload types".to_string(),
+//RS                     format!("write `{}` for this binding", expected_ty.show()),
+//RS                     Some(param.ty_span),
+//RS                 ));
+//RS                 invalid = true;
+//RS             }
+//RS         }
+//RS 
+//RS         let pattern_span = pattern.span();
+//RS         arms.push(SwitchArm {
+//RS             cond: Expr::PatternTest {
+//RS                 subject: Box::new(Expr::Ident(
+//RS                     Syntax::INTERNAL_MULTI_HEAD_SUBJECT.to_string(),
+//RS                     folded.name_span,
+//RS                 )),
+//RS                 pattern,
+//RS                 span: pattern_span,
+//RS             },
+//RS             body: head.body.clone(),
+//RS             span: pattern_span,
+//RS         });
+//RS     }
+//RS 
+//RS     if invalid || enum_name.is_none() {
+//RS         folded.head_pattern = None;
+//RS         return folded;
+//RS     }
+//RS     let enum_name = enum_name.expect("validated multi-head enum");
+//RS     let full_span = Span::new(
+//RS         folded.span.start,
+//RS         heads.last().map_or(folded.span.end, |head| head.span.end),
+//RS     );
+//RS     let subject = Expr::Ident(
+//RS         Syntax::INTERNAL_MULTI_HEAD_SUBJECT.to_string(),
+//RS         folded.name_span,
+//RS     );
+//RS     folded.params = vec![Param {
+//RS         convention: AccessConvention::Read,
+//RS         root: false,
+//RS         name: Syntax::INTERNAL_MULTI_HEAD_SUBJECT.to_string(),
+//RS         name_span: folded.name_span,
+//RS         public_label: None,
+//RS         zone: ParamZone::Either,
+//RS         ty: Type::Named(enum_name),
+//RS         ty_span: folded.name_span,
+//RS         default: None,
+//RS         variadic: false,
+//RS         variadic_bound_list: None,
+//RS         declared_view_from_names: None,
+//RS     }];
+//RS     folded.body = vec![Stmt::Switch {
+//RS         subject,
+//RS         arms,
+//RS         else_body: None,
+//RS         // Point coverage failures at the authored function name, not at a
+//RS         // compiler-created brace or switch span.
+//RS         span: folded.name_span,
+//RS     }];
+//RS     folded.span = full_span;
+//RS     folded.return_view_provenance = None;
+//RS     folded.declared_return_view_provenance = None;
+//RS     folded.head_pattern = None;
+//RS     folded
+//RS }
+//RS 
+//RS fn dedupe_unknown_names(diagnostics: &mut Vec<Diagnostic>) {
+//RS     let mut seen_unknown = HashSet::new();
+//RS     let mut seen_exact = HashSet::new();
+//RS     diagnostics.retain(|diagnostic| {
+//RS         if diagnostic.code == "E0107" {
+//RS             return diagnostic
+//RS                 .span
+//RS                 .is_none_or(|span| seen_unknown.insert((span.start, span.end)));
+//RS         }
+//RS         // Resolution and marker materialization can report the same operation
+//RS         // again, and a derived signature re-checks its target's declared type
+//RS         // at the target's name (E0358). Keep distinct messages at one span,
+//RS         // but collapse identical reports before the module joins the public
+//RS         // diagnostic stream.
+//RS         if matches!(diagnostic.code.as_str(), "E0119" | "E0302" | "E0354" | "E0358") {
+//RS             let Some(span) = diagnostic.span else {
+//RS                 return true;
+//RS             };
+//RS             return seen_exact.insert((
+//RS                 diagnostic.code.clone(),
+//RS                 diagnostic.what.clone(),
+//RS                 diagnostic.why.clone(),
+//RS                 diagnostic.fix.clone(),
+//RS                 span.start,
+//RS                 span.end,
+//RS             ));
+//RS         }
+//RS         true
+//RS     });
+//RS }
+//RS 
+//RS /// A rejected operation must not also report its conversion failure at the
+//RS /// same source expression. Pair each primary with only its known cascade.
+//RS fn prune_conversion_cascades(diagnostics: &mut Vec<Diagnostic>) {
+//RS     let impure_spans = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "E3401")
+//RS         .filter_map(|diagnostic| diagnostic.span)
+//RS         .collect::<Vec<_>>();
+//RS     let vault_spans = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "E0510")
+//RS         .filter_map(|diagnostic| diagnostic.span)
+//RS         .collect::<Vec<_>>();
+//RS     if !impure_spans.is_empty() || !vault_spans.is_empty() {
+//RS         diagnostics.retain(|diagnostic| match diagnostic.code.as_str() {
+//RS             // A spanless report has no proven relationship to the primary;
+//RS             // retain it rather than treating `None` as a wildcard.
+//RS             "E2404" => diagnostic
+//RS                 .span
+//RS                 .is_none_or(|span| !impure_spans.contains(&span)),
+//RS             "E2402" => diagnostic
+//RS                 .span
+//RS                 .is_none_or(|span| !vault_spans.contains(&span)),
+//RS             _ => true,
+//RS         });
+//RS     }
+//RS     // One helper failure domain is one root report. Include the checker-known
+//RS     // declaration provenance so same-named helpers in separate scopes remain
+//RS     // independent roots.
+//RS     let mut seen_failure_domains = HashSet::new();
+//RS     diagnostics.retain(|diagnostic| {
+//RS         let Some(detail) = diagnostic.detail.as_deref() else {
+//RS             return true;
+//RS         };
+//RS         let Some(detail) = detail.strip_prefix("failure-domain:") else {
+//RS             return true;
+//RS         };
+//RS         let Some(domain) = detail.lines().next() else {
+//RS             return true;
+//RS         };
+//RS         let definition = detail
+//RS             .lines()
+//RS             .find_map(|line| line.strip_prefix("definition: "))
+//RS             .unwrap_or_default();
+//RS         let key = (domain.to_string(), definition.to_string());
+//RS         diagnostic.code != "E2404" || seen_failure_domains.insert(key)
+//RS     });
+//RS }
+//RS 
+//RS /// D-SHAPE-INTERNAL1: one resolved soft-public name use is one lint, even when
+//RS /// overlapping sema resolution paths report the same source occurrence.
+//RS fn dedupe_soft_public_lints(diagnostics: &mut Vec<Diagnostic>) {
+//RS     let mut seen = HashSet::new();
+//RS     diagnostics.retain(|diagnostic| {
+//RS         if diagnostic.code != "L0601" {
+//RS             return true;
+//RS         }
+//RS         let Some(span) = diagnostic.span else {
+//RS             return true;
+//RS         };
+//RS         seen.insert((
+//RS             diagnostic.code.clone(),
+//RS             diagnostic.what.clone(),
+//RS             span.start,
+//RS             span.end,
+//RS         ))
+//RS     });
+//RS }
+//RS 
+//RS fn check_fact_tags_and_states(
+//RS     bundle: &ProgramBundle,
+//RS     states: &[ModuleState],
+//RS     returns: &HashMap<String, super::Taint::TagSet>,
+//RS     return_types: &super::Taint::ReturnTypes,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) -> jet_foundation::Facts::FactRegistry {
+//RS     let mut facts = jet_foundation::Facts::FactRegistry::default();
+//RS     register_effect_facts(bundle, &mut facts);
+//RS     super::Taint::register_builtin_tag_facts(&mut facts);
+//RS 
+//RS     let mut scrubbers = HashMap::new();
+//RS     let mut field_tags = HashMap::new();
+//RS     let mut field_types = HashMap::new();
+//RS     let mut known_sources = std::collections::BTreeSet::new();
+//RS     for module in &bundle.modules {
+//RS         super::Taint::collect_function_paths(&module.alias, &module.items, &mut known_sources);
+//RS     }
+//RS     for module in &bundle.modules {
+//RS         super::Taint::collect_field_facts(&module.items, &mut field_tags, &mut field_types);
+//RS         super::Taint::collect_tag_facts(
+//RS             &module.items,
+//RS             &mut facts,
+//RS             &mut scrubbers,
+//RS             &known_sources,
+//RS             diags,
+//RS             true,
+//RS         );
+//RS     }
+//RS     for module in &bundle.modules {
+//RS         super::Taint::collect_tag_facts(
+//RS             &module.items,
+//RS             &mut facts,
+//RS             &mut scrubbers,
+//RS             &known_sources,
+//RS             diags,
+//RS             false,
+//RS         );
+//RS     }
+//RS     for (index, module) in bundle.modules.iter().enumerate() {
+//RS         for item in &module.items {
+//RS             taint_check_item(
+//RS                 item,
+//RS                 &scrubbers,
+//RS                 &facts,
+//RS                 returns,
+//RS                 return_types,
+//RS                 &field_tags,
+//RS                 &field_types,
+//RS                 &states[index].core_imports,
+//RS                 diags,
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     let mut state_table = crate::Sema::StateTable::with_facts(facts);
+//RS     for module in &bundle.modules {
+//RS         state_table.add_items(&module.items);
+//RS     }
+//RS     if !state_table.is_empty() {
+//RS         // Declaration facts are bundle-wide: an owner and its inherent impls
+//RS         // may be loaded from different source modules. Validate the one
+//RS         // erased `Type.State` row against one item view so graphs and marker
+//RS         // paths do not depend on file placement.
+//RS         let all_items: Vec<Item> = bundle
+//RS             .modules
+//RS             .iter()
+//RS             .flat_map(|module| module.items.iter().cloned())
+//RS             .collect();
+//RS         state_table.validate_declarations(&all_items, diags);
+//RS         for module in &bundle.modules {
+//RS             crate::Sema::check_items_state(&module.items, &state_table, diags);
+//RS         }
+//RS     }
+//RS     state_table.into_facts()
+//RS }
+//RS 
+//RS fn register_effect_facts(bundle: &ProgramBundle, facts: &mut jet_foundation::Facts::FactRegistry) {
+//RS     use jet_foundation::Facts::FactKind;
+//RS     for effect in jet_foundation::Authority::EFFECT_ROOTS.iter() {
+//RS         facts.declare(FactKind::Effect, (*effect).to_string(), std::iter::empty());
+//RS     }
+//RS     for name in crate::Syntax::BUILTIN_EFFECT_LEAVES {
+//RS         let root = super::effect_root(name);
+//RS         let member = name.strip_prefix(root).unwrap().trim_start_matches('.');
+//RS         facts.declare_member(FactKind::Effect, root.to_string(), member.to_string());
+//RS     }
+//RS     fn collect(items: &[Item], facts: &mut jet_foundation::Facts::FactRegistry) {
+//RS         for item in items {
+//RS             match item {
+//RS                 Item::EffectDecl(declaration) => {
+//RS                     let root = super::effect_root(&declaration.name);
+//RS                     if let Some(member) = declaration
+//RS                         .name
+//RS                         .strip_prefix(root)
+//RS                         .and_then(|suffix| suffix.strip_prefix('.'))
+//RS                     {
+//RS                         facts.declare_member(
+//RS                             jet_foundation::Facts::FactKind::Effect,
+//RS                             root.to_string(),
+//RS                             member.to_string(),
+//RS                         );
+//RS                     }
+//RS                 }
+//RS                 Item::CodeModule(module) => {
+//RS                     if let Some(body) = &module.body {
+//RS                         collect(body, facts);
+//RS                     }
+//RS                 }
+//RS                 Item::GenericModule(module) => collect(&module.body, facts),
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS     for module in &bundle.modules {
+//RS         collect(&module.items, facts);
+//RS     }
+//RS }
+//RS 
+//RS fn validate_declared_effects(
+//RS     bundle: &ProgramBundle,
+//RS     facts: &jet_foundation::Facts::FactRegistry,
+//RS ) -> Vec<Diagnostic> {
+//RS     fn check_name(
+//RS         name: &str,
+//RS         span: Span,
+//RS         facts: &jet_foundation::Facts::FactRegistry,
+//RS         diags: &mut Vec<Diagnostic>,
+//RS     ) {
+//RS         if let Err(suggestion) = super::resolve_effect_name(name, facts) {
+//RS             if super::parse_effect_name(name).is_some() {
+//RS                 diags.push(super::undeclared_effect(
+//RS                     name,
+//RS                     suggestion.as_deref(),
+//RS                     Some(span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     fn check_type(
+//RS         ty: &Type,
+//RS         facts: &jet_foundation::Facts::FactRegistry,
+//RS         diags: &mut Vec<Diagnostic>,
+//RS     ) {
+//RS         match ty {
+//RS             Type::Fn {
+//RS                 params,
+//RS                 ret,
+//RS                 effect_bound,
+//RS                 ..
+//RS             } => {
+//RS                 for parameter in params {
+//RS                     check_type(parameter, facts, diags);
+//RS                 }
+//RS                 if let Some(ret) = ret {
+//RS                     check_type(ret, facts, diags);
+//RS                 }
+//RS                 if let Some(names) = effect_bound {
+//RS                     for (name, span) in names {
+//RS                         if super::effect_row_var(name).is_none() {
+//RS                             check_name(name, *span, facts, diags);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Type::List(inner)
+//RS             | Type::Option(inner)
+//RS             | Type::Shared(inner)
+//RS             | Type::Tagged { inner, .. }
+//RS             | Type::FixedList { elem: inner, .. } => check_type(inner, facts, diags),
+//RS             Type::Result { ok, err } => {
+//RS                 check_type(ok, facts, diags);
+//RS                 check_type(err, facts, diags);
+//RS             }
+//RS             Type::Apply { args, .. } | Type::Union(args) => {
+//RS                 for argument in args {
+//RS                     check_type(argument, facts, diags);
+//RS                 }
+//RS             }
+//RS             Type::Map { key, value, .. } => {
+//RS                 check_type(key, facts, diags);
+//RS                 check_type(value, facts, diags);
+//RS             }
+//RS             Type::Tuple(fields) => {
+//RS                 for (_, field) in fields {
+//RS                     check_type(field, facts, diags);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     fn check_stmts(
+//RS         body: &[Stmt],
+//RS         facts: &jet_foundation::Facts::FactRegistry,
+//RS         diags: &mut Vec<Diagnostic>,
+//RS     ) {
+//RS         for statement in body {
+//RS             match statement {
+//RS                 Stmt::Val(binding) => {
+//RS                     if let Some(ty) = &binding.ty {
+//RS                         check_type(ty, facts, diags);
+//RS                     }
+//RS                 }
+//RS                 Stmt::CountedLoop { init, .. } => {
+//RS                     if let Some(ty) = &init.ty {
+//RS                         check_type(ty, facts, diags);
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS             for nested in super::UnsafeObligations::nested_bodies(statement) {
+//RS                 check_stmts(nested, facts, diags);
+//RS             }
+//RS         }
+//RS     }
+//RS     fn check_func(
+//RS         function: &Func,
+//RS         facts: &jet_foundation::Facts::FactRegistry,
+//RS         diags: &mut Vec<Diagnostic>,
+//RS     ) {
+//RS         if let Some(names) = &function.declared_effects {
+//RS             for (name, span) in names {
+//RS                 let name = name.strip_prefix('!').unwrap_or(name);
+//RS                 if super::effect_row_var(name).is_none() {
+//RS                     check_name(name, *span, facts, diags);
+//RS                 }
+//RS             }
+//RS         }
+//RS         for parameter in &function.params {
+//RS             check_type(&parameter.ty, facts, diags);
+//RS         }
+//RS         if let Some(return_type) = &function.return_type {
+//RS             check_type(return_type, facts, diags);
+//RS         }
+//RS         check_stmts(&function.body, facts, diags);
+//RS     }
+//RS     fn check_items(
+//RS         items: &[Item],
+//RS         facts: &jet_foundation::Facts::FactRegistry,
+//RS         diags: &mut Vec<Diagnostic>,
+//RS     ) {
+//RS         for item in items {
+//RS             match item {
+//RS                 Item::EffectDecl(declaration) => {
+//RS                     if super::parse_effect_name(&declaration.name).is_none() {
+//RS                         diags.push(super::unknown_effect(
+//RS                             &declaration.name,
+//RS                             declaration.name_span,
+//RS                         ));
+//RS                     } else if !declaration.name.contains('.') {
+//RS                         diags.push(super::effect_leaf_required(
+//RS                             &declaration.name,
+//RS                             Some(declaration.name_span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 Item::Func(function) => check_func(function, facts, diags),
+//RS                 Item::Struct(definition) => {
+//RS                     for field in &definition.fields {
+//RS                         check_type(&field.ty, facts, diags);
+//RS                     }
+//RS                     for function in &definition.methods {
+//RS                         check_func(function, facts, diags);
+//RS                     }
+//RS                     for implementation in &definition.trait_impls {
+//RS                         for function in &implementation.methods {
+//RS                             check_func(function, facts, diags);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Enum(definition) => {
+//RS                     for variant in &definition.variants {
+//RS                         match &variant.payload {
+//RS                             crate::AST::VariantPayload::Unit => {}
+//RS                             crate::AST::VariantPayload::Single(ty, _) => {
+//RS                                 check_type(ty, facts, diags);
+//RS                             }
+//RS                             crate::AST::VariantPayload::Named(fields) => {
+//RS                                 for field in fields {
+//RS                                     check_type(&field.ty, facts, diags);
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     for function in &definition.methods {
+//RS                         check_func(function, facts, diags);
+//RS                     }
+//RS                     for implementation in &definition.trait_impls {
+//RS                         for function in &implementation.methods {
+//RS                             check_func(function, facts, diags);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Impl(implementation) => {
+//RS                     for function in &implementation.methods {
+//RS                         check_func(function, facts, diags);
+//RS                     }
+//RS                 }
+//RS                 Item::Trait(definition) => {
+//RS                     for method in &definition.methods {
+//RS                         if let Some(names) = &method.declared_effects {
+//RS                             for (name, span) in names {
+//RS                                 check_name(name, *span, facts, diags);
+//RS                             }
+//RS                         }
+//RS                         for parameter in &method.params {
+//RS                             check_type(&parameter.ty, facts, diags);
+//RS                         }
+//RS                         if let Some(return_type) = &method.return_type {
+//RS                             check_type(return_type, facts, diags);
+//RS                         }
+//RS                         if let Some(body) = &method.default_body {
+//RS                             check_stmts(body, facts, diags);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Test(test) => check_stmts(&test.body, facts, diags),
+//RS                 Item::CodeModule(module) => {
+//RS                     if let Some(body) = &module.body {
+//RS                         check_items(body, facts, diags);
+//RS                     }
+//RS                 }
+//RS                 Item::GenericModule(module) => check_items(&module.body, facts, diags),
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut diags = Vec::new();
+//RS     for module in &bundle.modules {
+//RS         check_items(&module.items, facts, &mut diags);
+//RS     }
+//RS     diags
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS pub struct IncrementalSemaCache {
+//RS     environment: Vec<u8>,
+//RS     module_interfaces: HashMap<String, Vec<u8>>,
+//RS     module_dependencies: HashMap<String, Vec<String>>,
+//RS     functions: HashMap<String, CachedFunctionBody>,
+//RS     hits: u64,
+//RS     recomputes: u64,
+//RS     measurement_recomputed_items: Vec<String>,
+//RS }
+//RS 
+//RS impl IncrementalSemaCache {
+//RS     pub fn new() -> Self {
+//RS         Self::default()
+//RS     }
+//RS 
+//RS     pub fn stats(&self) -> IncrementalSemaStats {
+//RS         IncrementalSemaStats {
+//RS             hits: self.hits,
+//RS             recomputes: self.recomputes,
+//RS             live_items: self.functions.len(),
+//RS             live_item_bytes: self.environment.len()
+//RS                 + self
+//RS                     .module_interfaces
+//RS                     .iter()
+//RS                     .map(|(module, fingerprint)| module.len() + fingerprint.len())
+//RS                     .sum::<usize>()
+//RS                 + self
+//RS                     .module_dependencies
+//RS                     .iter()
+//RS                     .map(|(module, dependencies)| {
+//RS                         module.len() + dependencies.iter().map(String::len).sum::<usize>()
+//RS                     })
+//RS                     .sum::<usize>()
+//RS                 + self
+//RS                     .functions
+//RS                     .iter()
+//RS                     .map(|(key, entry)| {
+//RS                         key.len()
+//RS                             + entry.input.len()
+//RS                             + format!("{:?}", entry.function).len()
+//RS                             + format!("{:?}", entry.diagnostics).len()
+//RS                             + format!("{:?}", entry.summaries).len()
+//RS                             + format!("{:?}", entry.comptime_inputs).len()
+//RS                             + format!("{:?}", entry.address_taken).len()
+//RS                             + format!("{:?}", entry.name_ledger).len()
+//RS                             + format!("{:?}", entry.pending_diagnostics).len()
+//RS                     })
+//RS                     .sum::<usize>(),
+//RS             recomputed_items: self.measurement_recomputed_items.clone(),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Start one measured re-verdict window. The cumulative counters stay
+//RS     /// available for existing clients; this list names only work in the next
+//RS     /// window so a receipt can show the edit's actual cone.
+//RS     pub fn clear_measurement(&mut self) {
+//RS         self.measurement_recomputed_items.clear();
+//RS     }
+//RS 
+//RS     pub fn clear(&mut self) {
+//RS         self.environment.clear();
+//RS         self.module_interfaces.clear();
+//RS         self.module_dependencies.clear();
+//RS         self.functions.clear();
+//RS         self.measurement_recomputed_items.clear();
+//RS     }
+//RS 
+//RS     fn begin_bundle(
+//RS         &mut self,
+//RS         bundle: &ProgramBundle,
+//RS         name_ledger: &jet_foundation::Names::NameLedger,
+//RS         plugin_interfaces: &PluginInterfaceRegistry,
+//RS     ) {
+//RS         // D-INCR-UNIT1=A: dirty the module interface and its reverse import
+//RS         // closure only. Private body edits are handled by the per-function
+//RS         // input below and do not fan out to unrelated modules.
+//RS         let environment = incremental_global_environment(bundle, plugin_interfaces.digest());
+//RS         let environment_changed = self.environment != environment;
+//RS         if environment_changed {
+//RS             self.environment = environment;
+//RS         }
+//RS 
+//RS         let interfaces = bundle
+//RS             .modules
+//RS             .iter()
+//RS             .map(|module| (module.display.clone(), incremental_module_interface(module)))
+//RS             .collect::<HashMap<_, _>>();
+//RS         let dependencies = incremental_module_dependencies_with_ledger(bundle, name_ledger);
+//RS         let mut dirty = self
+//RS             .module_interfaces
+//RS             .iter()
+//RS             .filter_map(|(module, _)| (!interfaces.contains_key(module)).then_some(module.clone()))
+//RS             .collect::<HashSet<_>>();
+//RS         dirty.extend(interfaces.iter().filter_map(|(module, fingerprint)| {
+//RS             (self.module_interfaces.get(module) != Some(fingerprint)).then_some(module.clone())
+//RS         }));
+//RS         // Resolved import targets are semantic input too. The source import
+//RS         // can stay unchanged while the ledger maps it to a different module
+//RS         // (for example after a file/module move), so invalidate that owner's
+//RS         // bodies before propagating the change through the current graph.
+//RS         dirty.extend(
+//RS             self.module_dependencies
+//RS                 .iter()
+//RS                 .filter_map(|(module, previous)| {
+//RS                     (dependencies.get(module) != Some(previous)).then_some(module.clone())
+//RS                 }),
+//RS         );
+//RS         dirty.extend(dependencies.iter().filter_map(|(module, current)| {
+//RS             (self.module_dependencies.get(module) != Some(current)).then_some(module.clone())
+//RS         }));
+//RS         if environment_changed {
+//RS             dirty.extend(interfaces.keys().cloned());
+//RS         }
+//RS 
+//RS         // An interface change invalidates the changed module and every module
+//RS         // that imports it. Body-only edits keep dependents warm: their effect
+//RS         // summaries are solved again below from the changed callee summary.
+//RS         loop {
+//RS             let newly_dirty = dependencies
+//RS                 .iter()
+//RS                 .filter_map(|(module, imported)| {
+//RS                     (!dirty.contains(module)
+//RS                         && imported.iter().any(|dependency| dirty.contains(dependency)))
+//RS                     .then_some(module.clone())
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             if newly_dirty.is_empty() {
+//RS                 break;
+//RS             }
+//RS             dirty.extend(newly_dirty);
+//RS         }
+//RS 
+//RS         if !dirty.is_empty() {
+//RS             self.functions.retain(|key, _| {
+//RS                 !dirty
+//RS                     .iter()
+//RS                     .any(|module| key == module || key.starts_with(&format!("{module}::")))
+//RS             });
+//RS         }
+//RS         self.module_interfaces = interfaces;
+//RS         self.module_dependencies = dependencies;
+//RS     }
+//RS 
+//RS     pub(super) fn get(&mut self, key: &str, input: &[u8]) -> Option<CachedFunctionBody> {
+//RS         let hit = self
+//RS             .functions
+//RS             .get(key)
+//RS             .filter(|entry| entry.input == input)
+//RS             .cloned();
+//RS         if hit.is_some() {
+//RS             self.hits += 1;
+//RS         }
+//RS         hit
+//RS     }
+//RS 
+//RS     pub(super) fn store(&mut self, key: String, entry: CachedFunctionBody) {
+//RS         self.record_recompute(key.clone());
+//RS         self.functions.insert(key, entry);
+//RS     }
+//RS 
+//RS     pub(super) fn record_recompute(&mut self, key: String) {
+//RS         self.recomputes += 1;
+//RS         self.measurement_recomputed_items.push(key);
+//RS     }
+//RS }
+//RS 
+//RS fn incremental_global_environment(bundle: &ProgramBundle, plugin_digest: &str) -> Vec<u8> {
+//RS     // These package facts can change between batch requests without changing
+//RS     // the source modules. Keep the sema cache keyed by the inputs that affect
+//RS     // body checking. `required_effects` is deliberately absent: completion
+//RS     // derives it from the checked bodies and writes it back to the bundle.
+//RS     let package_policy = (
+//RS         &bundle.package_guarantees.contain,
+//RS         bundle.package_guarantees.harden,
+//RS         &bundle.package_guarantees.dependency_names,
+//RS         &bundle.package_guarantees.effects,
+//RS         &bundle.package_guarantees.unsafe_paths,
+//RS         &bundle.package_guarantees.expert,
+//RS         &bundle.package_guarantees.deps,
+//RS         &bundle.package_guarantees.lints_deny,
+//RS         &bundle.package_guarantees.memory_denials,
+//RS         &bundle
+//RS             .package_guarantees
+//RS             .application_authority
+//RS             .granted_effects,
+//RS         &bundle
+//RS             .package_guarantees
+//RS             .application_authority
+//RS             .denied_effects,
+//RS         &bundle.package_guarantees.application_authority.authority,
+//RS     );
+//RS     // `BuildStamp.at` is a clock. Unlocked checks mint a new timestamp on
+//RS     // every request; that must not dirty every function body. Git, dirty,
+//RS     // and toolchain still participate because they can change lowering.
+//RS     let mut build_facts = bundle.build_facts.clone();
+//RS     build_facts.stamp.at.clear();
+//RS     build_facts.contributions.remove("Build.Stamp.At");
+//RS     build_facts.setting_provenance.remove("Build.Stamp.At");
+//RS     let mut out = crate::CanonicalAST::canonical_fragment(&(
+//RS         bundle.entry,
+//RS         &bundle.project_root,
+//RS         bundle.active_os,
+//RS         bundle.web_partition_enforced,
+//RS         &build_facts,
+//RS         bundle.layer_ceiling,
+//RS         &bundle.edition,
+//RS         package_policy,
+//RS         plugin_digest,
+//RS     ));
+//RS     out.extend(format!("{:?}", bundle.project_root).into_bytes());
+//RS     out
+//RS }
+//RS 
+//RS fn incremental_module_interface(module: &crate::AST::LoadedModule) -> Vec<u8> {
+//RS     let mut out = Vec::new();
+//RS     let metadata = (
+//RS         &module.path,
+//RS         &module.display,
+//RS         &module.alias,
+//RS         &module.imports,
+//RS         module.web_target_ceiling,
+//RS         module.pub_file,
+//RS         module.no_prelude,
+//RS         &module.default_target,
+//RS         &module.html_path,
+//RS         &module.policy_declarations,
+//RS     );
+//RS     out.extend(crate::CanonicalAST::canonical_fragment(&metadata));
+//RS     let additional_metadata = (
+//RS         &module.user_policy_declarations,
+//RS         &module.rule_facts,
+//RS         &module.script_body,
+//RS     );
+//RS     out.extend(crate::CanonicalAST::canonical_fragment(
+//RS         &additional_metadata,
+//RS     ));
+//RS     for item in &module.items {
+//RS         let mut item = item.clone();
+//RS         clear_callable_bodies(&mut item);
+//RS         // Span-stripped signature only. Absolute locations move when an
+//RS         // earlier body changes length; those positions belong in the
+//RS         // per-function cache input, not the module's semantic interface.
+//RS         out.extend(crate::CanonicalAST::canonical_fragment(&item));
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS fn incremental_module_dependencies(bundle: &ProgramBundle) -> HashMap<String, Vec<String>> {
+//RS     incremental_module_dependencies_with_ledger(bundle, &bundle.name_ledger)
+//RS }
+//RS 
+//RS fn incremental_module_dependencies_with_ledger(
+//RS     bundle: &ProgramBundle,
+//RS     name_ledger: &jet_foundation::Names::NameLedger,
+//RS ) -> HashMap<String, Vec<String>> {
+//RS     bundle
+//RS         .modules
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(module_idx, module)| {
+//RS             // D-NAME-WALK1=A: an inline or generic module can import an
+//RS             // already-loaded file module without adding a top-level import.
+//RS             // Track every scope or its cached callable may outlive the
+//RS             // dependency interface that it resolves.
+//RS             let mut dependencies = crate::AST::walk_imports(module)
+//RS                 .into_iter()
+//RS                 .filter_map(|(_, import)| {
+//RS                     incremental_import_target(bundle, name_ledger, module_idx, module, import)
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             dependencies.sort();
+//RS             dependencies.dedup();
+//RS             (module.display.clone(), dependencies)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn incremental_import_target(
+//RS     bundle: &ProgramBundle,
+//RS     name_ledger: &jet_foundation::Names::NameLedger,
+//RS     source_idx: usize,
+//RS     source: &crate::AST::LoadedModule,
+//RS     import: &crate::AST::ImportDecl,
+//RS ) -> Option<String> {
+//RS     // Loader/sema already resolved top-level imports against the loaded
+//RS     // bundle. Preserve that exact edge for invalidation; aliases and display
+//RS     // paths are projections and can collide across packages. Nested imports
+//RS     // are not seeded in the ledger yet, so they use the structural fallback
+//RS     // below.
+//RS     if let Some(target) = name_ledger.import_target(source_idx, import.span) {
+//RS         return bundle
+//RS             .modules
+//RS             .get(target)
+//RS             .map(|module| module.display.clone());
+//RS     }
+//RS     let requested = match &import.kind {
+//RS         ImportKind::File(path, _) | ImportKind::Module(path, _) => path.as_str(),
+//RS         ImportKind::Unqualified { module_alias, .. } => module_alias.as_str(),
+//RS     };
+//RS     let requested_stem = Path::new(requested)
+//RS         .file_stem()
+//RS         .and_then(|stem| stem.to_str())
+//RS         .unwrap_or(requested);
+//RS     let requested_path = if matches!(&import.kind, ImportKind::File(_, _)) {
+//RS         let mut path = source
+//RS             .path
+//RS             .parent()
+//RS             .unwrap_or_else(|| Path::new("."))
+//RS             .join(requested);
+//RS         if path.extension().is_none() {
+//RS             path.set_extension(Syntax::FILE_EXT.trim_start_matches('.'));
+//RS         }
+//RS         Some(normalize_incremental_path(&path))
+//RS     } else {
+//RS         None
+//RS     };
+//RS     bundle
+//RS         .modules
+//RS         .iter()
+//RS         .filter(|candidate| candidate.display != source.display)
+//RS         .find(|candidate| {
+//RS             let directory_module = candidate.path.file_name().and_then(|name| name.to_str())
+//RS                 == Some(Syntax::DEFAULT_ENTRY_FILE)
+//RS                 && candidate
+//RS                     .path
+//RS                     .parent()
+//RS                     .and_then(|parent| parent.file_name())
+//RS                     .and_then(|name| name.to_str())
+//RS                     == Some(requested_stem);
+//RS             requested_path
+//RS                 .as_ref()
+//RS                 .is_some_and(|path| normalize_incremental_path(&candidate.path) == *path)
+//RS                 || candidate.alias == requested
+//RS                 || candidate.alias == requested_stem
+//RS                 || candidate.display == requested
+//RS                 || candidate.display.ends_with(&format!("/{requested}"))
+//RS                 || candidate
+//RS                     .display
+//RS                     .ends_with(&format!("/{requested_stem}.jet"))
+//RS                 || directory_module
+//RS         })
+//RS         .map(|candidate| candidate.display.clone())
+//RS }
+//RS 
+//RS fn normalize_incremental_path(path: &Path) -> PathBuf {
+//RS     let mut normalized = PathBuf::new();
+//RS     for component in path.components() {
+//RS         match component {
+//RS             std::path::Component::CurDir => {}
+//RS             std::path::Component::ParentDir => {
+//RS                 normalized.pop();
+//RS             }
+//RS             component => normalized.push(component.as_os_str()),
+//RS         }
+//RS     }
+//RS     normalized
+//RS }
+//RS 
+//RS fn clear_callable_bodies(item: &mut Item) {
+//RS     let clear = |function: &mut Func| {
+//RS         function.body.clear();
+//RS         // The declaration end includes the body. Normalize it so an edit in a
+//RS         // trailing function does not invalidate unrelated earlier functions.
+//RS         function.span = function.name_span;
+//RS     };
+//RS     match item {
+//RS         Item::Func(function) => clear(function),
+//RS         Item::Struct(definition) => {
+//RS             definition.methods.iter_mut().for_each(clear);
+//RS             for implementation in &mut definition.trait_impls {
+//RS                 implementation.methods.iter_mut().for_each(clear);
+//RS             }
+//RS         }
+//RS         Item::Enum(definition) => {
+//RS             definition.methods.iter_mut().for_each(clear);
+//RS             for implementation in &mut definition.trait_impls {
+//RS                 implementation.methods.iter_mut().for_each(clear);
+//RS             }
+//RS         }
+//RS         Item::Impl(implementation) => implementation.methods.iter_mut().for_each(clear),
+//RS         Item::CodeModule(module) => {
+//RS             if let Some(body) = &mut module.body {
+//RS                 body.iter_mut().for_each(clear_callable_bodies);
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn builtin_type_registry() -> TypeRegistry {
+//RS     let zero = Span::new(0, 0);
+//RS     let variants = Syntax::ORDERING_VARIANTS
+//RS         .iter()
+//RS         .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+//RS         .collect::<HashMap<_, _>>();
+//RS     let mut types = HashMap::new();
+//RS     types.insert(
+//RS         Syntax::TYPE_ORDERING.to_string(),
+//RS         TypeDef::Enum {
+//RS             variants,
+//RS             variant_order: Syntax::ORDERING_VARIANTS.iter().map(|name| name.to_string()).collect(),
+//RS             groups: HashMap::new(),
+//RS             methods: HashMap::new(),
+//RS             single_use: false,
+//RS             deprecation: None,
+//RS             must_use: false,
+//RS             c_layout_tag: None,
+//RS         },
+//RS     );
+//RS     let remove_by_variants = ["Val", "Slot"]
+//RS         .into_iter()
+//RS         .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+//RS         .collect::<HashMap<_, _>>();
+//RS     types.insert(
+//RS         crate::Syntax::TYPE_REMOVE_BY.to_string(),
+//RS         TypeDef::Enum {
+//RS             variants: remove_by_variants,
+//RS             variant_order: vec!["Val".to_string(), "Slot".to_string()],
+//RS             groups: HashMap::new(),
+//RS             methods: HashMap::new(),
+//RS             deprecation: None,
+//RS             single_use: false,
+//RS             must_use: false,
+//RS             c_layout_tag: None,
+//RS         },
+//RS     );
+//RS     // D-UNITLIT1=A: literal facts enter a module only with an in-scope unit
+//RS     // family. Pipeline registration fills the fact registry after Prelude
+//RS     // injection; keeping it empty prevents `#NoPrelude` from gaining Time.
+//RS     let time_dimension = Some(crate::AST::Dimension::base("core.units::Time"));
+//RS     let time_package = PathBuf::from("core.units");
+//RS     let zero_ratio = crate::AST::UnitRatio::zero();
+//RS     let one_ratio = crate::AST::UnitRatio::integer(1);
+//RS     let unit_types = HashSet::from([
+//RS         crate::Syntax::DURATION_TYPE.to_string(),
+//RS         crate::Syntax::TYPE_INSTANT.to_string(),
+//RS     ]);
+//RS     let mut unit_facts = HashMap::new();
+//RS     unit_facts.insert(
+//RS         crate::Syntax::DURATION_TYPE.to_string(),
+//RS         UnitFact {
+//RS             package: time_package.clone(),
+//RS             family: "Time".to_string(),
+//RS             member: "ns".to_string(),
+//RS             dimension: time_dimension.clone(),
+//RS             scale: one_ratio.clone(),
+//RS             scale_provenance: crate::AST::UnitScaleProvenance::Rational,
+//RS             offset: zero_ratio.clone(),
+//RS             kind: QuantityKind::Delta,
+//RS         },
+//RS     );
+//RS     unit_facts.insert(
+//RS         crate::Syntax::TYPE_INSTANT.to_string(),
+//RS         UnitFact {
+//RS             package: time_package,
+//RS             family: "Time".to_string(),
+//RS             member: "ns".to_string(),
+//RS             dimension: time_dimension,
+//RS             scale: one_ratio,
+//RS             scale_provenance: crate::AST::UnitScaleProvenance::Rational,
+//RS             offset: zero_ratio,
+//RS             kind: QuantityKind::Point,
+//RS         },
+//RS     );
+//RS     TypeRegistry {
+//RS         types,
+//RS         error_types: HashSet::new(),
+//RS         unit_types,
+//RS         unit_facts,
+//RS         literal_facts: HashMap::new(),
+//RS         computed_fields: HashMap::new(),
+//RS         field_defaults: HashMap::new(),
+//RS         receipt_sections: HashMap::new(),
+//RS         nominal_memo: Default::default(),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn unit_fact(
+//RS     family: &crate::AST::UnitFamilyDef,
+//RS     type_name: &str,
+//RS     dimension: Option<crate::AST::Dimension>,
+//RS     package: PathBuf,
+//RS ) -> Option<UnitFact> {
+//RS     let affine = family.base.is_some()
+//RS         && family
+//RS             .members
+//RS             .iter()
+//RS             .any(|member| member.offset != crate::AST::UnitRatio::zero());
+//RS     family.members.iter().find_map(|member| {
+//RS         let stem = crate::AST::UnitFamilyDef::type_name(&member.name);
+//RS         let kind = if affine {
+//RS             if type_name == format!("{stem}Point") {
+//RS                 QuantityKind::Point
+//RS             } else if type_name == format!("{stem}Delta") {
+//RS                 QuantityKind::Delta
+//RS             } else {
+//RS                 return None;
+//RS             }
+//RS         } else if type_name == stem {
+//RS             QuantityKind::Linear
+//RS         } else {
+//RS             return None;
+//RS         };
+//RS         Some(UnitFact {
+//RS             package: package.clone(),
+//RS             family: family.family.clone(),
+//RS             member: member.name.clone(),
+//RS             dimension: dimension.clone(),
+//RS             scale: member.scale.clone(),
+//RS             scale_provenance: member.scale_provenance.clone(),
+//RS             offset: if kind == QuantityKind::Point {
+//RS                 member.offset.clone()
+//RS             } else {
+//RS                 crate::AST::UnitRatio::zero()
+//RS             },
+//RS             kind,
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn declare_name(
+//RS     ledger: &mut jet_foundation::Names::NameLedger,
+//RS     module: usize,
+//RS     name: impl Into<String>,
+//RS     path: impl Into<String>,
+//RS     kind: &str,
+//RS     span: Span,
+//RS     visibility: jet_foundation::Names::NameVisibility,
+//RS ) {
+//RS     ledger.declare(
+//RS         module,
+//RS         name.into(),
+//RS         path.into(),
+//RS         kind.to_string(),
+//RS         span,
+//RS         visibility,
+//RS     );
+//RS }
+//RS 
+//RS fn scoped_name(prefix: Option<&str>, name: &str) -> String {
+//RS     prefix.map_or_else(
+//RS         || name.to_string(),
+//RS         |prefix| jet_foundation::Names::member_name(prefix, name),
+//RS     )
+//RS }
+//RS 
+//RS fn scoped_path(prefix: &str, name: &str) -> String {
+//RS     format!("{prefix}.{name}")
+//RS }
+//RS 
+//RS fn declare_method_names(
+//RS     ledger: &mut jet_foundation::Names::NameLedger,
+//RS     module: usize,
+//RS     owner: &str,
+//RS     owner_path: &str,
+//RS     methods: &[Func],
+//RS ) {
+//RS     for method in methods {
+//RS         declare_name(
+//RS             ledger,
+//RS             module,
+//RS             format!("{owner}.{}", method.name),
+//RS             format!("{owner_path}.{}", method.name),
+//RS             "method",
+//RS             method.name_span,
+//RS             jet_foundation::Names::NameVisibility::from_flags(method.is_pub, method.is_package_pub),
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn declare_item_names_scoped(
+//RS     ledger: &mut jet_foundation::Names::NameLedger,
+//RS     module: usize,
+//RS     path_prefix: &str,
+//RS     name_prefix: Option<&str>,
+//RS     item: &Item,
+//RS ) {
+//RS     use jet_foundation::Names::NameVisibility;
+//RS 
+//RS     match item {
+//RS         Item::Func(function) => declare_name(
+//RS             ledger,
+//RS             module,
+//RS             scoped_name(name_prefix, &function.name),
+//RS             scoped_path(path_prefix, &function.name),
+//RS             "function",
+//RS             function.name_span,
+//RS             NameVisibility::from_flags(function.is_pub, function.is_package_pub),
+//RS         ),
+//RS         Item::Struct(definition) => {
+//RS             let item_name = scoped_name(name_prefix, &definition.name);
+//RS             let item_path = scoped_path(path_prefix, &definition.name);
+//RS             declare_name(
+//RS                 ledger,
+//RS                 module,
+//RS                 item_name.clone(),
+//RS                 item_path.clone(),
+//RS                 "type",
+//RS                 definition.name_span,
+//RS                 NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+//RS             );
+//RS             for field in &definition.fields {
+//RS                 declare_name(
+//RS                     ledger,
+//RS                     module,
+//RS                     format!("{item_name}.{}", field.name),
+//RS                     format!("{item_path}.{}", field.name),
+//RS                     "field",
+//RS                     field.name_span,
+//RS                     NameVisibility::from_flags(field.is_pub, field.is_package_pub),
+//RS                 );
+//RS             }
+//RS             if let Some(state) = &definition.state {
+//RS                 for (name, span) in &state.states {
+//RS                     declare_name(
+//RS                         ledger,
+//RS                         module,
+//RS                         format!("{item_name}.State.{name}"),
+//RS                         format!("{item_path}.State.{name}"),
+//RS                         "state",
+//RS                         *span,
+//RS                         NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+//RS                     );
+//RS                 }
+//RS             }
+//RS             declare_method_names(ledger, module, &item_name, &item_path, &definition.methods);
+//RS             for implementation in &definition.trait_impls {
+//RS                 declare_method_names(
+//RS                     ledger,
+//RS                     module,
+//RS                     &item_name,
+//RS                     &item_path,
+//RS                     &implementation.methods,
+//RS                 );
+//RS             }
+//RS         }
+//RS         Item::Enum(definition) => {
+//RS             let item_name = scoped_name(name_prefix, &definition.name);
+//RS             let item_path = scoped_path(path_prefix, &definition.name);
+//RS             let visibility =
+//RS                 NameVisibility::from_flags(definition.is_pub, definition.is_package_pub);
+//RS             declare_name(
+//RS                 ledger,
+//RS                 module,
+//RS                 item_name.clone(),
+//RS                 item_path.clone(),
+//RS                 "type",
+//RS                 definition.name_span,
+//RS                 visibility,
+//RS             );
+//RS             for variant in &definition.variants {
+//RS                 declare_name(
+//RS                     ledger,
+//RS                     module,
+//RS                     format!("{item_name}.{}", variant.name),
+//RS                     format!("{item_path}.{}", variant.name),
+//RS                     "variant",
+//RS                     variant.name_span,
+//RS                     visibility,
+//RS                 );
+//RS             }
+//RS             declare_method_names(ledger, module, &item_name, &item_path, &definition.methods);
+//RS             for implementation in &definition.trait_impls {
+//RS                 declare_method_names(
+//RS                     ledger,
+//RS                     module,
+//RS                     &item_name,
+//RS                     &item_path,
+//RS                     &implementation.methods,
+//RS                 );
+//RS             }
+//RS         }
+//RS         Item::Distinct(definition) => declare_name(
+//RS             ledger,
+//RS             module,
+//RS             scoped_name(name_prefix, &definition.name),
+//RS             scoped_path(path_prefix, &definition.name),
+//RS             "type",
+//RS             definition.name_span,
+//RS             NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+//RS         ),
+//RS         Item::TypeAlias(definition) => declare_name(
+//RS             ledger,
+//RS             module,
+//RS             scoped_name(name_prefix, &definition.name),
+//RS             scoped_path(path_prefix, &definition.name),
+//RS             "type",
+//RS             definition.name_span,
+//RS             NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+//RS         ),
+//RS         Item::UnitFamily(family) => {
+//RS             for definition in family.distinct_defs() {
+//RS                 declare_name(
+//RS                     ledger,
+//RS                     module,
+//RS                     scoped_name(name_prefix, &definition.name),
+//RS                     scoped_path(path_prefix, &definition.name),
+//RS                     "type",
+//RS                     definition.name_span,
+//RS                     NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+//RS                 );
+//RS             }
+//RS         }
+//RS         Item::Trait(definition) => {
+//RS             let item_name = scoped_name(name_prefix, &definition.name);
+//RS             let item_path = scoped_path(path_prefix, &definition.name);
+//RS             let visibility =
+//RS                 NameVisibility::from_flags(definition.is_pub, definition.is_package_pub);
+//RS             declare_name(
+//RS                 ledger,
+//RS                 module,
+//RS                 item_name.clone(),
+//RS                 item_path.clone(),
+//RS                 "trait",
+//RS                 definition.name_span,
+//RS                 visibility,
+//RS             );
+//RS             for method in &definition.methods {
+//RS                 declare_name(
+//RS                     ledger,
+//RS                     module,
+//RS                     format!("{item_name}.{}", method.name),
+//RS                     format!("{item_path}.{}", method.name),
+//RS                     "method",
+//RS                     method.name_span,
+//RS                     visibility,
+//RS                 );
+//RS             }
+//RS         }
+//RS         Item::Tag(definition) => declare_name(
+//RS             ledger,
+//RS             module,
+//RS             scoped_name(name_prefix, &definition.name),
+//RS             scoped_path(path_prefix, &definition.name),
+//RS             "tag",
+//RS             definition.name_span,
+//RS             NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+//RS         ),
+//RS         Item::Impl(implementation) => {
+//RS             let owner = scoped_name(name_prefix, &implementation.type_name);
+//RS             let owner_path = scoped_path(path_prefix, &implementation.type_name);
+//RS             declare_method_names(ledger, module, &owner, &owner_path, &implementation.methods);
+//RS             for (name, span, _) in &implementation.assoc_type_impls {
+//RS                 declare_name(
+//RS                     ledger,
+//RS                     module,
+//RS                     format!("{owner}.{name}"),
+//RS                     format!("{owner_path}.{name}"),
+//RS                     "associated_type",
+//RS                     *span,
+//RS                     NameVisibility::Private,
+//RS                 );
+//RS             }
+//RS         }
+//RS         Item::Const(definition) => declare_name(
+//RS             ledger,
+//RS             module,
+//RS             scoped_name(name_prefix, &definition.name),
+//RS             scoped_path(path_prefix, &definition.name),
+//RS             "const",
+//RS             definition.name_span,
+//RS             NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
+//RS         ),
+//RS         Item::ExternRust(block) => {
+//RS             for function in &block.functions {
+//RS                 declare_name(
+//RS                     ledger,
+//RS                     module,
+//RS                     scoped_name(name_prefix, &function.name),
+//RS                     scoped_path(path_prefix, &function.name),
+//RS                     "extern",
+//RS                     function.name_span,
+//RS                     NameVisibility::Private,
+//RS                 );
+//RS             }
+//RS         }
+//RS         Item::CModule(module_def) => {
+//RS             for function in &module_def.functions {
+//RS                 declare_name(
+//RS                     ledger,
+//RS                     module,
+//RS                     scoped_name(name_prefix, &function.name),
+//RS                     scoped_path(path_prefix, &function.name),
+//RS                     "extern",
+//RS                     function.name_span,
+//RS                     NameVisibility::Public,
+//RS                 );
+//RS             }
+//RS         }
+//RS         Item::CodeModule(code_module) => {
+//RS             let item_name = scoped_name(name_prefix, &code_module.name);
+//RS             let item_path = scoped_path(path_prefix, &code_module.name);
+//RS             let visibility =
+//RS                 NameVisibility::from_flags(code_module.is_pub, code_module.is_package_pub);
+//RS             declare_name(
+//RS                 ledger,
+//RS                 module,
+//RS                 item_name.clone(),
+//RS                 item_path.clone(),
+//RS                 if code_module.body.is_some() {
+//RS                     "module"
+//RS                 } else {
+//RS                     "file_module"
+//RS                 },
+//RS                 code_module.name_span,
+//RS                 visibility,
+//RS             );
+//RS             if let Some(body) = &code_module.body {
+//RS                 for nested in body {
+//RS                     declare_item_names_scoped(ledger, module, &item_path, Some(&item_name), nested);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Item::ProtocolDecl(protocol) => {
+//RS             let visibility = NameVisibility::from_flags(protocol.is_pub, protocol.is_package_pub);
+//RS             declare_name(
+//RS                 ledger,
+//RS                 module,
+//RS                 scoped_name(name_prefix, &protocol.name),
+//RS                 scoped_path(path_prefix, &protocol.name),
+//RS                 "protocol",
+//RS                 protocol.name_span,
+//RS                 visibility,
+//RS             );
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn declare_item_names(
+//RS     ledger: &mut jet_foundation::Names::NameLedger,
+//RS     module: usize,
+//RS     module_alias: &str,
+//RS     item: &Item,
+//RS ) {
+//RS     declare_item_names_scoped(ledger, module, module_alias, None, item);
+//RS }
+//RS 
+//RS fn state_marker_path(expr: &Expr) -> Option<(String, Span)> {
+//RS     match expr {
+//RS         Expr::Ident(name, span) => Some((name.clone(), *span)),
+//RS         Expr::Field(base, member, span) => {
+//RS             Some((format!("{}.{}", state_marker_path(base)?.0, member), *span))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn record_state_marker_references_for_method(
+//RS     ledger: &mut jet_foundation::Names::NameLedger,
+//RS     module_idx: usize,
+//RS     source_module: &str,
+//RS     owner: &str,
+//RS     method: &Func,
+//RS ) {
+//RS     for marker in &method.markers {
+//RS         let slots: &[usize] = match marker.name.as_str() {
+//RS             Syntax::KW_STATE => &[0],
+//RS             Syntax::KW_TRANSITION => &[0, 1],
+//RS             _ => &[],
+//RS         };
+//RS         for &slot in slots {
+//RS             let Some((raw, span)) = marker.expr_arg(slot).and_then(state_marker_path) else {
+//RS                 continue;
+//RS             };
+//RS             if raw == crate::Syntax::STATE_ENTRY {
+//RS                 continue;
+//RS             }
+//RS             let candidates = if raw.contains(".State.") {
+//RS                 // A qualified marker names one exact owner. Do not fall back
+//RS                 // to the current owner's leaf: that would make a misspelled
+//RS                 // `Other.State.Ready` appear to reference `owner.State.Ready`.
+//RS                 vec![raw.clone()]
+//RS             } else {
+//RS                 vec![format!("{owner}.State.{raw}")]
+//RS             };
+//RS             let Some(candidate) = candidates
+//RS                 .iter()
+//RS                 .find(|candidate| ledger.declaration(module_idx, candidate).is_some())
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             let Some((target_module, def_span, semantic_identity)) = ledger
+//RS                 .declaration(module_idx, candidate)
+//RS                 .map(|declaration| {
+//RS                     (
+//RS                         declaration.module,
+//RS                         declaration.span,
+//RS                         ledger.semantic_identity(declaration.module, candidate),
+//RS                     )
+//RS                 })
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             ledger.record_reference(
+//RS                 source_module.to_string(),
+//RS                 span.start,
+//RS                 span.end,
+//RS                 jet_foundation::Names::NameReference {
+//RS                     module_path: ledger
+//RS                         .module_path(target_module)
+//RS                         .unwrap_or(source_module)
+//RS                         .to_string(),
+//RS                     kind: "state".to_string(),
+//RS                     def_span,
+//RS                     semantic_identity,
+//RS                 },
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn record_state_marker_references_in_items(
+//RS     ledger: &mut jet_foundation::Names::NameLedger,
+//RS     module_idx: usize,
+//RS     source_module: &str,
+//RS     items: &[Item],
+//RS     prefix: Option<&str>,
+//RS ) {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Struct(definition) => {
+//RS                 let owner = scoped_name(prefix, &definition.name);
+//RS                 for method in &definition.methods {
+//RS                     record_state_marker_references_for_method(
+//RS                         ledger,
+//RS                         module_idx,
+//RS                         source_module,
+//RS                         &owner,
+//RS                         method,
+//RS                     );
+//RS                 }
+//RS                 for implementation in &definition.trait_impls {
+//RS                     for method in &implementation.methods {
+//RS                         record_state_marker_references_for_method(
+//RS                             ledger,
+//RS                             module_idx,
+//RS                             source_module,
+//RS                             &owner,
+//RS                             method,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Impl(implementation) => {
+//RS                 let owner = scoped_name(prefix, &implementation.type_name);
+//RS                 for method in &implementation.methods {
+//RS                     record_state_marker_references_for_method(
+//RS                         ledger,
+//RS                         module_idx,
+//RS                         source_module,
+//RS                         &owner,
+//RS                         method,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             Item::Enum(definition) => {
+//RS                 let owner = scoped_name(prefix, &definition.name);
+//RS                 for method in &definition.methods {
+//RS                     record_state_marker_references_for_method(
+//RS                         ledger,
+//RS                         module_idx,
+//RS                         source_module,
+//RS                         &owner,
+//RS                         method,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             Item::CodeModule(module) => {
+//RS                 let module_name = scoped_name(prefix, &module.name);
+//RS                 if let Some(body) = &module.body {
+//RS                     record_state_marker_references_in_items(
+//RS                         ledger,
+//RS                         module_idx,
+//RS                         source_module,
+//RS                         body,
+//RS                         Some(&module_name),
+//RS                     );
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn record_state_marker_references(
+//RS     bundle: &ProgramBundle,
+//RS     ledger: &mut jet_foundation::Names::NameLedger,
+//RS ) {
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         record_state_marker_references_in_items(
+//RS             ledger,
+//RS             module_idx,
+//RS             &module.display,
+//RS             &module.items,
+//RS             None,
+//RS         );
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0349 crates/jet-sema/src/Sema/Bundle.rs:1-1767
+

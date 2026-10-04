@@ -1,0 +1,40 @@
+// Rust Sema/ApiFreeze.rs:842-901. CheckReads is the sole audited reader.
+use core.files as api_freeze_files
+use jet_foundation.[check_reads_env_var, check_reads_read_to_string, check_reads_read_dir_sorted, check_reads_read_os, check_reads_joined_display]
+// Rust api_cache_dir/load_snapshot/save_snapshot/load_all/project_capability_digest.
+pub fn api_cache_dir(root: String) -[Env]> String Never! { check_reads_env_var("JET_API_CACHE_DIR") ?? check_reads_joined_display(root, ".jet/cache/api") }
+pub fn load_snapshot(root: String, package: String) -[Env, FS.Read]> APISnapshot? {
+    path :: check_reads_joined_display(api_cache_dir(root), "{package}.api")
+    if check_reads_read_to_string(path) == {
+        .Ok(raw) -> if api_snapshot_parse(raw) == {
+            .Ok(snapshot) -> Val(snapshot)
+            .Err(_) -> None
+        }
+        .Err(_) -> None
+    }
+}
+pub fn save_snapshot(root: String, snapshot: APISnapshot) APIFreezeError! -[Env, FS]> {
+    dir :: api_cache_dir(root)
+    if api_freeze_files.mkdir(dir, true) == .Err(error) -> return Err(APIFreezeError{message: "could not create api cache dir: {error}"})
+    if api_freeze_files.write(check_reads_joined_display(dir, "{snapshot.package}.api"), api_snapshot_write(snapshot)) == .Err(error) -> return Err(APIFreezeError{message: "could not write api snapshot: {error}"})
+}
+pub fn load_all_snapshots(root: String) -[Env, FS]> [APISnapshot] {
+    snapshots := [APISnapshot]{}
+    if check_reads_read_dir_sorted(api_cache_dir(root)) == .Ok(entries) {
+        loop entry in entries {
+            if api_freeze_files.suffix(entry.0) != ".api" -> next
+            opened :: check_reads_read_os(entry.1)
+            if opened.1 == .Ok(bytes) {
+                raw :: String.from_bytes(bytes) ?? next
+                if api_snapshot_parse(raw) == .Ok(snapshot) -> &snapshots.push(snapshot)
+            }
+        }
+    }
+    &snapshots.sort_by((left: APISnapshot, right: APISnapshot) -> left.package <=> right.package)
+    snapshots
+}
+pub fn project_capability_digest(root: String) -[Env, FS]> String {
+    snapshots :: load_all_snapshots(root)
+    parts :: loop snapshot in snapshots -> "{snapshot.package}\n{api_snapshot_capability_digest(snapshot)}"
+    parts.join("\n--\n")
+}

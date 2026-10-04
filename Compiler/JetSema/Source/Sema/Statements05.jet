@@ -1,0 +1,1803 @@
+// PORT-PENDING 0371 crates-jet-sema-src-sema-checkercore-statements-slice-1158: crates/jet-sema/src/Sema/CheckerCore/statements.rs:1158-2956
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     fn check_stmt_inner(&mut self, stmt: &mut Stmt) {
+//RS         // D-CONC-SHARE1=A (card #1561): a plain field write on a
+//RS         // `Shared<T>` handle is one atomic locked step. Rewrite before the
+//RS         // compound-assignment expansion below, so a read-modify-write
+//RS         // stays inside one lock and cannot lose an update.
+//RS         if self.desugar_shared_field_write(stmt) {
+//RS             self.check_stmt_inner(stmt);
+//RS             return;
+//RS         }
+//RS         if let Some(mut marker) = self.take_statement_rule_fact(stmt.span()) {
+//RS             let allow_names = if marker.name == Syntax::MARKER_ALLOW {
+//RS                 marker
+//RS                     .expr_args()
+//RS                     .filter_map(|argument| match argument {
+//RS                         Expr::Ident(name, _) => Some(name.clone()),
+//RS                         _ => None,
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS             } else {
+//RS                 Vec::new()
+//RS             };
+//RS             let marker_args = marker.expr_args_owned();
+//RS             if let Some(arguments) = self.validate_rule_signature(&mut marker) {
+//RS                 if marker.name == Syntax::MARKER_ALLOW {
+//RS                     self.statement_lint_allows.extend(allow_names);
+//RS                 }
+//RS                 let text = match arguments.constant_for_source(0) {
+//RS                     Some(crate::Comptime::CtValue::Str(value)) => Some(value.clone()),
+//RS                     _ => None,
+//RS                 };
+//RS                 match stmt {
+//RS                     Stmt::Unsafe {
+//RS                         audit, audit_expr, ..
+//RS                     } if marker.name == Syntax::KW_UNSAFE => {
+//RS                         *audit = text;
+//RS                         *audit_expr = marker_args.first().cloned();
+//RS                     }
+//RS                     Stmt::Impure {
+//RS                         reason,
+//RS                         reason_expr,
+//RS                         ..
+//RS                     } if marker.name == Syntax::KW_IMPURE => {
+//RS                         *reason = text;
+//RS                         *reason_expr = marker_args.first().cloned();
+//RS                     }
+//RS                     Stmt::AssumeDet {
+//RS                         reason,
+//RS                         reason_expr,
+//RS                         ..
+//RS                     } if marker.name == Syntax::MARKER_NONDETERMINISTIC => {
+//RS                         if let Some(text) = text {
+//RS                             *reason = text;
+//RS                         }
+//RS                         if let Some(argument) = marker_args.first() {
+//RS                             *reason_expr = argument.clone();
+//RS                         }
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Stmt::While { span, .. }
+//RS         | Stmt::For { span, .. }
+//RS         | Stmt::Loop { span, .. }
+//RS         | Stmt::CountedLoop { span, .. } = stmt
+//RS         {
+//RS             self.fx_memory_unbounded_control.push(*span);
+//RS             for region in &mut self.memory_policy_stack {
+//RS                 region.unbounded_control.push(*span);
+//RS             }
+//RS         }
+//RS         if let Stmt::Assign {
+//RS             target: LValue::Field { base, field, span },
+//RS             op: Some(op),
+//RS             value,
+//RS             ..
+//RS         } = stmt
+//RS         {
+//RS             if self.compound_nested_hook(base, field, *op) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0362",
+//RS                     "compound assignment can't target a nested operator field".to_string(),
+//RS                     "the current operator-place lowering supports one named owner and one field"
+//RS                         .to_string(),
+//RS                     "bind the inner value, update it, then assign the whole inner value back"
+//RS                         .to_string(),
+//RS                     Some(*span),
+//RS                 ));
+//RS                 let saved_expected = self.expected_type.clone();
+//RS                 if let Some(place_ty) = self.compound_field_type(base, field) {
+//RS                     self.expected_type = Some(place_ty);
+//RS                 }
+//RS                 self.infer(value);
+//RS                 self.expected_type = saved_expected;
+//RS                 return;
+//RS             }
+//RS         }
+//RS         // S17 / L0503: prefer `place += …` over `place = place + …`.
+//RS         // Must run before the hooked compound rewrite below, which expands
+//RS         // intentional `+=` into `place = place + …` and would false-positive.
+//RS         if let Stmt::Assign {
+//RS             target,
+//RS             op: None,
+//RS             op_span,
+//RS             value,
+//RS         } = &*stmt
+//RS         {
+//RS             if let Some((place, bin_op, compound)) = prefer_compound_assign(target, value) {
+//RS                 if !self.compound_assign_rejected(target, bin_op) {
+//RS                     self.diags.push(Diagnostic::from_row(
+//RS                         "L0503",
+//RS                         &[("place", place.as_str()), ("op", compound)],
+//RS                         Some(*op_span),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-OPDEF1=A: compound arithmetic is the same hook as its binary
+//RS         // form. Rewrite before checking so TIR/JIT see one MethodCall spine.
+//RS         let compound = match &*stmt {
+//RS             Stmt::Assign {
+//RS                 target: LValue::Local { name, name_span },
+//RS                 op: Some(op),
+//RS                 ..
+//RS             } => self
+//RS                 .lookup(name)
+//RS                 .map(|info| info.ty.clone())
+//RS                 .or_else(|| {
+//RS                     self.is_global_mutable_binding(name)
+//RS                         .then(|| self.consts.get(name).cloned())
+//RS                         .flatten()
+//RS                 })
+//RS                 .and_then(|ty| {
+//RS                     let trait_name = match op {
+//RS                         crate::AST::BinOp::Add => Some(Syntax::TRAIT_ADD),
+//RS                         crate::AST::BinOp::Sub => Some(Syntax::TRAIT_SUB),
+//RS                         crate::AST::BinOp::Mul => Some(Syntax::TRAIT_MUL),
+//RS                         crate::AST::BinOp::Div => Some(Syntax::TRAIT_DIV),
+//RS                         _ => None,
+//RS                     }?;
+//RS                     self.compound_type_implements(&ty, trait_name).then_some((
+//RS                         Expr::Ident(name.clone(), *name_span),
+//RS                         *name_span,
+//RS                         *op,
+//RS                     ))
+//RS                 }),
+//RS             Stmt::Assign {
+//RS                 target: LValue::Field { base, field, span },
+//RS                 op: Some(op),
+//RS                 ..
+//RS             } => (|| {
+//RS                 if !matches!(base.as_ref(), Expr::Ident(..) | Expr::Index { .. }) {
+//RS                     return None;
+//RS                 }
+//RS                 let field_ty = self.compound_field_type(base, field)?;
+//RS                 if matches!(base.as_ref(), Expr::Index { .. })
+//RS                     && matches!(&field_ty, Type::Named(_) | Type::Apply { .. })
+//RS                 {
+//RS                     return None;
+//RS                 }
+//RS                 let trait_name = match op {
+//RS                     crate::AST::BinOp::Add => Some(Syntax::TRAIT_ADD),
+//RS                     crate::AST::BinOp::Sub => Some(Syntax::TRAIT_SUB),
+//RS                     crate::AST::BinOp::Mul => Some(Syntax::TRAIT_MUL),
+//RS                     crate::AST::BinOp::Div => Some(Syntax::TRAIT_DIV),
+//RS                     _ => None,
+//RS                 }?;
+//RS                 self.compound_type_implements(&field_ty, trait_name)
+//RS                     .then_some((Expr::Field(base.clone(), field.clone(), *span), *span, *op))
+//RS             })(),
+//RS             _ => None,
+//RS         };
+//RS         if let Some((left, span, binary_op)) = compound {
+//RS             if let Stmt::Assign { op, value, .. } = stmt {
+//RS                 let rhs = std::mem::replace(value, Expr::Absent(span));
+//RS                 *value = Expr::Binary(binary_op, Box::new(left), Box::new(rhs), span);
+//RS                 *op = None;
+//RS             }
+//RS         }
+//RS         match stmt {
+//RS             Stmt::Val(b) => {
+//RS                 self.check_binding(b);
+//RS                 crate::Sema::Effects::record_authority_alias(self, b);
+//RS             }
+//RS             Stmt::Assign {
+//RS                 target,
+//RS                 op,
+//RS                 op_span: _,
+//RS                 value,
+//RS             } => {
+//RS                 let is_compound = op.is_some();
+//RS                 if let (Some(compound_op), LValue::Index { span, .. }) = (op.as_ref(), &*target) {
+//RS                     self.diags.push(Diagnostic::from_row(
+//RS                         "E0164",
+//RS                         &[("op", (*compound_op).spell())],
+//RS                         Some(*span),
+//RS                     ));
+//RS                     let saved_expected = self.expected_type.clone();
+//RS                     if let Some(place_ty) = self.lvalue_type(target) {
+//RS                         self.expected_type = Some(place_ty);
+//RS                     }
+//RS                     self.infer(value);
+//RS                     self.expected_type = saved_expected;
+//RS                     return;
+//RS                 }
+//RS                 let origin_write_root = match &*target {
+//RS                     LValue::Local { name, .. } => Some(name.clone()),
+//RS                     LValue::Field { base, .. } | LValue::Index { base, .. } => {
+//RS                         expr_root_ident(base).map(str::to_string)
+//RS                     }
+//RS                 };
+//RS                 if let LValue::Local { name, .. } = &*target {
+//RS                     self.mark_local_write(name);
+//RS                 }
+//RS                 self.check_lvalue_change(target, "be assigned");
+//RS                 self.validate_shared_guard_lvalue(target);
+//RS                 // Beginner magic: place type feeds `.{…}` / `.Variant` on the RHS.
+//RS                 let saved_expected = self.expected_type.clone();
+//RS                 let place_ty = self.lvalue_type(target);
+//RS                 if let Some(place_ty) = &place_ty {
+//RS                     self.expected_type = Some(place_ty.clone());
+//RS                 }
+//RS                 let mut vt = self.infer(value);
+//RS                 self.expected_type = saved_expected;
+//RS                 self.report_lending_view_escape(value, "replace another value");
+//RS                 if let (Some(source), Some(target_ty)) = (vt.as_ref(), place_ty.as_ref()) {
+//RS                     if source != target_ty && source.numeric_widening_to(target_ty).is_some() {
+//RS                         let source = source.clone();
+//RS                         self.widen_numeric_expr(value, &source, target_ty);
+//RS                         vt = Some(target_ty.clone());
+//RS                     }
+//RS                 }
+//RS                 if !is_compound {
+//RS                     if vt
+//RS                         .as_ref()
+//RS                         .is_some_and(crate::Sema::Diagnostics::contains_expiring_secret_loan)
+//RS                     {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                                 "E0201",
+//RS                                 "an ExpiringSecret loan cannot replace an owned value".to_string(),
+//RS                                 "the callback parameter is a temporary read-only loan that ends when `.with` returns".to_string(),
+//RS                                 "use the loan inside the callback and assign only a non-secret result".to_string(),
+//RS                                 Some(value.span()),
+//RS                             ));
+//RS                     }
+//RS                     self.reject_borrowed_param_subplace(
+//RS                         value,
+//RS                         vt.as_ref(),
+//RS                         "replace an owned value",
+//RS                     );
+//RS                     if let Expr::Ident(name, span) = value {
+//RS                         let borrowed = self.lookup(name).is_some_and(|info| {
+//RS                             !type_is_copy(&info.ty)
+//RS                                 && matches!(
+//RS                                     info.param_conv,
+//RS                                     Some(AccessConvention::Read) | Some(AccessConvention::Write)
+//RS                                 )
+//RS                         });
+//RS                         if borrowed {
+//RS                             let source_ty = self.lookup(name).map(|info| info.ty.clone());
+//RS                             let diagnostic = Diagnostic::error(
+//RS                                 "E0120",
+//RS                                 format!(
+//RS                                     "`{name}` was not moved here, so it cannot replace an owned value"
+//RS                                 ),
+//RS                                 "this function has read access only and does not own the value"
+//RS                                     .to_string(),
+//RS                                 format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+//RS                                 Some(*span),
+//RS                             );
+//RS                             self.diags.push(self.with_ownership_copy_edit(
+//RS                                 diagnostic,
+//RS                                 *span,
+//RS                                 source_ty.as_ref(),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 // D-OPT-LIFT1=A: a plain payload fills a `T?` place (local,
+//RS                 // field, or list/map item). A compound update reads the old
+//RS                 // value first, so it never lifts.
+//RS                 if !is_compound {
+//RS                     if let (Some(source), Some(target_ty)) = (vt.clone(), place_ty.as_ref()) {
+//RS                         if let Some(lifted) = self.lift_optional_slot(target_ty, &source, value) {
+//RS                             vt = Some(lifted);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 self.note_move_if_direct_ident(value, "the assignment");
+//RS                 // D-UNINIT-SENTINEL2: a plain `name = …` initializes a
+//RS                 // `Type.{ uninit }` binding (clears the not-yet-written flag);
+//RS                 // a compound `name += …` reads it first, so it's a
+//RS                 // read-before-write.
+//RS                 if let LValue::Local { name, name_span } = &*target {
+//RS                     if self.flow.uninit.contains(name) {
+//RS                         if is_compound {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E0420",
+//RS                                     format!("`{}` may be read before it is given a value", name),
+//RS                                     format!(
+//RS                                         "`{}+=` reads `{}` first, but it was declared with `Type{{ uninit }}` and has no value yet",
+//RS                                         name, name
+//RS                                     ),
+//RS                                     format!("give `{}` a value with `{} = …` before updating it", name, name),
+//RS                                     Some(*name_span),
+//RS                                 ));
+//RS                         }
+//RS                         self.flow.uninit.remove(name);
+//RS                     }
+//RS                 }
+//RS                 match target {
+//RS                     LValue::Local { name, name_span } => {
+//RS                         let name_span = *name_span;
+//RS                         if self.lambda_mut_borrow_active(name) {
+//RS                             self.diags.push(aliasing_while_mut(name, name_span));
+//RS                         }
+//RS                         let Some(info) = self.lookup(name).cloned() else {
+//RS                             if self.is_global_mutable_binding(name) {
+//RS                                 // A module-level mutable binding is a legal
+//RS                                 // write target; its type was checked at
+//RS                                 // declaration registration.
+//RS                                 return;
+//RS                             }
+//RS                             if self.consts.contains_key(name.as_str()) {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0111",
+//RS                                     format!("`{}` is a const and can never change", name),
+//RS                                     "a const is fixed for the whole program".to_string(),
+//RS                                     format!(
+//RS                                         "use a `{}` binding if it needs to change",
+//RS                                         Syntax::SIGIL_BIND_MUT
+//RS                                     ),
+//RS                                     Some(name_span),
+//RS                                 ));
+//RS                             } else {
+//RS                                 self.unknown_name(name, name_span);
+//RS                             }
+//RS                             return;
+//RS                         };
+//RS                         let target_was_frozen = self.frozen_for(name).is_some();
+//RS                         if !info.mutable
+//RS                             && !self.is_write_view(name)
+//RS                             && self.frozen_for(name).is_none()
+//RS                         {
+//RS                             let what = if info.param_conv.is_some() {
+//RS                                 format!("the parameter `{}` can't be changed here", name)
+//RS                             } else {
+//RS                                 format!(
+//RS                                     "`{}` was made with `{}`, so it can't change",
+//RS                                     name,
+//RS                                     Syntax::SIGIL_BIND_IMMUT
+//RS                                 )
+//RS                             };
+//RS                             let fix = if info.param_conv.is_some() {
+//RS                                 format!(
+//RS                                         "mark the parameter `{}: {}{}` with the write-access marker `&` if the function should change it",
+//RS                                         name,
+//RS                                         Syntax::SIGIL_WRITE,
+//RS                                         info.ty.name()
+//RS                                     )
+//RS                             } else {
+//RS                                 format!(
+//RS                                     "declare it with `{} {} ...` instead",
+//RS                                     name,
+//RS                                     Syntax::SIGIL_BIND_MUT
+//RS                                 )
+//RS                             };
+//RS                             let mut diagnostic = Diagnostic::error(
+//RS                                     "E0111",
+//RS                                     what,
+//RS                                     format!(
+//RS                                         "only `{}` bindings and parameters marked with the write-access marker `&` can be changed",
+//RS                                         Syntax::SIGIL_BIND_MUT,
+//RS                                     ),
+//RS                                     fix,
+//RS                                     Some(name_span),
+//RS                                 );
+//RS                             if let Some(sigil_span) = info.binding_sigil_span {
+//RS                                 diagnostic = diagnostic.with_edit(TextEdit {
+//RS                                     span: sigil_span,
+//RS                                     new_text: Syntax::SIGIL_BIND_MUT.to_string(),
+//RS                                 });
+//RS                             }
+//RS                             self.diags.push(diagnostic);
+//RS                         }
+//RS                         self.clear_moved_binding(name);
+//RS                         // D-CONC-FREEZE1=A: rebinding a local replaces its
+//RS                         // frozen proof only after the write check above.
+//RS                         // A rejected write through a frozen target keeps
+//RS                         // the original freeze site intact.
+//RS                         if !target_was_frozen && !is_compound && vt.is_some() {
+//RS                             let depth = self
+//RS                                 .binding_fact_depth(name)
+//RS                                 .unwrap_or_else(|| self.scope_depth());
+//RS                             if let Some(site) = self.frozen_expr_site(value) {
+//RS                                 self.flow.frozen.set_at(name, depth, site);
+//RS                             } else {
+//RS                                 self.flow.frozen.remove_at(name, depth);
+//RS                             }
+//RS                         }
+//RS                         if matches!(&info.ty, Type::Fn { .. }) {
+//RS                             let sendable = !is_compound
+//RS                                 && vt.as_ref().is_some_and(|value_ty| {
+//RS                                     self.interrupt_callback_expr_sendable(value, value_ty)
+//RS                                 })
+//RS                                 && info.param_conv.is_none();
+//RS                             self.set_interrupt_sendable(name, sendable);
+//RS                         }
+//RS                         // An invalid target carries a recovery type from its
+//RS                         // initializer's error; a mismatch against it is cascade.
+//RS                         if let (Some(vt), false) = (
+//RS                             vt.clone(),
+//RS                             info.invalid || info.ty == Type::Named(String::new()),
+//RS                         ) {
+//RS                             if crate::Sema::Diagnostics::is_deterministic_clock_type(&info.ty)
+//RS                                 && !crate::Sema::Diagnostics::is_deterministic_clock_type(&vt)
+//RS                             {
+//RS                                 self.diags.push(crate::Sema::e3403(
+//RS                                     "replacing a deterministic Clock with an unproven Clock",
+//RS                                     Some(value.span()),
+//RS                                 ));
+//RS                             }
+//RS                             if vt != info.ty {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0108",
+//RS                                     format!(
+//RS                                         "`{}` holds {}, but this value is {}",
+//RS                                         name,
+//RS                                         info.ty.show(),
+//RS                                         vt.show()
+//RS                                     ),
+//RS                                     "a binding keeps one type for its whole life".to_string(),
+//RS                                     division_fix_hint(&info.ty, &vt, value),
+//RS                                     Some(value.span()),
+//RS                                 ));
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     LValue::Index {
+//RS                         base,
+//RS                         index,
+//RS                         span,
+//RS                         kind,
+//RS                     } => {
+//RS                         let fixed_uninit = if !is_compound {
+//RS                             match base.as_ref() {
+//RS                                 Expr::Ident(name, _) => self
+//RS                                     .flow
+//RS                                     .uninit
+//RS                                     .remove(name)
+//RS                                     .map(|state| (name.clone(), state)),
+//RS                                 _ => None,
+//RS                             }
+//RS                         } else {
+//RS                             None
+//RS                         };
+//RS                         self.borrow_ctx = true;
+//RS                         let base_ty = self.infer(base);
+//RS                         let idx_ty = self.infer(index);
+//RS                         match &base_ty {
+//RS                             Some(Type::Map { .. }) => *kind = IndexKind::Map,
+//RS                             // S76/D-FIXARR1: `buf[i] = v` on a fixed-size `[T#N]` indexes
+//RS                             // exactly like a growable `[T]` — same gate as `infer_index`'s
+//RS                             // read-side `Type::FixedList` arm. Missing this left `kind` at
+//RS                             // its `IndexKind::Unknown` default, which the TIR subset gate
+//RS                             // (`stmt_in_subset`) reads as "sema did not resolve it" and
+//RS                             // excludes the whole function — an I2 ICE since TIR is the
+//RS                             // only codegen path (R7).
+//RS                             Some(Type::List(_)) | Some(Type::FixedList { .. }) => {
+//RS                                 *kind = IndexKind::List
+//RS                             }
+//RS                             Some(Type::Apply { name, .. }) if name == "ViewMut" => {
+//RS                                 *kind = IndexKind::List
+//RS                             }
+//RS                             Some(Type::Named(n)) if self.trait_reg.index_types.contains_key(n) => {
+//RS                                 *kind = IndexKind::User(n.clone());
+//RS                             }
+//RS                             // D-MEM1 S6: `pool[id] = v` — generation-checked write.
+//RS                             Some(Type::Apply {
+//RS                                 name,
+//RS                                 args: pool_args,
+//RS                             }) if name == "Pool" => {
+//RS                                 *kind = IndexKind::Pool;
+//RS                                 let is_matching_id = matches!(
+//RS                                     &idx_ty,
+//RS                                     Some(Type::Apply { name, args: id_args })
+//RS                                         if name == "ID" && id_args.first() == pool_args.first()
+//RS                                 );
+//RS                                 if !is_matching_id {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                             "E0112",
+//RS                                             format!(
+//RS                                                 "`Pool` indexes need a matching `ID<T>`, not {}",
+//RS                                                 idx_ty
+//RS                                                     .as_ref()
+//RS                                                     .map(|t| t.show())
+//RS                                                     .unwrap_or_else(|| "this".to_string())
+//RS                                             ),
+//RS                                             "a pool slot is only reached through the `ID<T>` its own `.add()` returned".to_string(),
+//RS                                             "index with the `ID<T>` handle from `.add(...)`".to_string(),
+//RS                                             Some(index.span()),
+//RS                                         ));
+//RS                                 }
+//RS                             }
+//RS                             _ => {}
+//RS                         }
+//RS                         // D-SOA1: index-WRITE through a columnar list (`xs[i] = …`)
+//RS                         // is deferred — v1 supports index-READ, field-read, `len`,
+//RS                         // `is_empty`, `push`, and iteration. Reject rather than
+//RS                         // miscompile (the columns type has no `IndexMut`).
+//RS                         if let Some(Type::List(inner)) = &base_ty {
+//RS                             if let Type::Named(elem) = inner.as_ref() {
+//RS                                 if self.registry.is_columnar(elem) {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                             "E1108",
+//RS                                             format!(
+//RS                                                 "writing through `[ ]` isn't supported on a columnar list `{}` yet",
+//RS                                                 Type::List(inner.clone()).show()
+//RS                                             ),
+//RS                                             "`#Layout(columnar)` lists support reading in v1 (indexing, field access, `len`, `is_empty`, `push`, iteration); index-write is deferred".to_string(),
+//RS                                             format!(
+//RS                                                 "drop `#Layout(columnar)` from `{}` to assign through `[ ]`, or rebuild the list with `push`",
+//RS                                                 elem
+//RS                                             ),
+//RS                                             Some(*span),
+//RS                                         ));
+//RS                                     return;
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         // Writing through `[ ]` changes the owner: the root
+//RS                         // name must be changeable and not under a `for` borrow.
+//RS                         let base_is_pool =
+//RS                             matches!(&base_ty, Some(Type::Apply { name, .. }) if name == "Pool");
+//RS                         let base_is_view_mut =
+//RS                             matches!(&base_ty, Some(Type::Apply { name, .. }) if name == "ViewMut");
+//RS                         let base_has_write_view =
+//RS                             expr_root_ident(base).is_some_and(|name| self.is_write_view(name));
+//RS                         if base_is_pool
+//RS                             || base_is_view_mut
+//RS                             || matches!(
+//RS                                 base_ty,
+//RS                                 Some(Type::Map { .. })
+//RS                                     | Some(Type::List(_))
+//RS                                     | Some(Type::FixedList { .. })
+//RS                             )
+//RS                         {
+//RS                             if let Some(root) = expr_root_ident(base) {
+//RS                                 let root = root.to_string();
+//RS                                 if self.iter_borrowed.contains(&root) {
+//RS                                     self.diags.push(collection_changed_in_loop(&root, *span));
+//RS                                 }
+//RS                                 if let Some(info) = self.lookup(&root) {
+//RS                                     if !base_is_view_mut
+//RS                                         && !base_has_write_view
+//RS                                         && !info.mutable
+//RS                                         && self.frozen_for(&root).is_none()
+//RS                                     {
+//RS                                         let (code, why, fix) = if matches!(
+//RS                                             info.param_conv,
+//RS                                             Some(AccessConvention::Read)
+//RS                                         ) {
+//RS                                             (
+//RS                                                     "E0205",
+//RS                                                     "an unmarked parameter gives read access only; assigning into it needs the write-access marker `&`".to_string(),
+//RS                                                     format!(
+//RS                                                         "change the parameter to `{}: {}{}` with the write-access marker `&`",
+//RS                                                         root,
+//RS                                                         Syntax::SIGIL_WRITE,
+//RS                                                         info.ty.name()
+//RS                                                     ),
+//RS                                                 )
+//RS                                         } else {
+//RS                                             (
+//RS                                                     "E0202",
+//RS                                                     "assigning into a collection edits it; the binding must be declared mutable".to_string(),
+//RS                                                     format!(
+//RS                                                         "declare `{} {} ...`",
+//RS                                                         root,
+//RS                                                         Syntax::SIGIL_BIND_MUT
+//RS                                                     ),
+//RS                                                 )
+//RS                                         };
+//RS                                         self.diags.push(Diagnostic::error(
+//RS                                                 code,
+//RS                                                 format!(
+//RS                                                     "cannot write to `{}` — it does not have the write-access marker `&`",
+//RS                                                     root
+//RS                                                 ),
+//RS                                                 why,
+//RS                                                 fix,
+//RS                                                 Some(*span),
+//RS                                             ));
+//RS                                     }
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         if !matches!(idx_ty.as_ref(), Some(Type::Int | Type::InlineRange { .. }))
+//RS                             && !matches!(base_ty, Some(Type::Map { .. }))
+//RS                         {
+//RS                             if let Some(ref it) = idx_ty {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0505",
+//RS                                     format!(
+//RS                                         "list indexes must be {}, not {}",
+//RS                                         Type::Int.show(),
+//RS                                         it.show()
+//RS                                     ),
+//RS                                     "count positions with a whole number starting at 0".to_string(),
+//RS                                     "use an Int index, like `items[0]`".to_string(),
+//RS                                     Some(index.span()),
+//RS                                 ));
+//RS                             }
+//RS                         }
+//RS                         if let Some(Type::Map {
+//RS                             key,
+//RS                             value: map_val_ty,
+//RS                             ..
+//RS                         }) = base_ty
+//RS                         {
+//RS                             if let Some(kt) = idx_ty {
+//RS                                 if kt != *key {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0505",
+//RS                                         format!(
+//RS                                             "this map holds keys of type {}, not {}",
+//RS                                             key.show(),
+//RS                                             kt.show()
+//RS                                         ),
+//RS                                         "the key in `map[key]` must match the map's key type"
+//RS                                             .to_string(),
+//RS                                         format!("use a {} key here", key.name()),
+//RS                                         Some(index.span()),
+//RS                                     ));
+//RS                                 }
+//RS                             }
+//RS                             if let Some(vt) = vt {
+//RS                                 if vt != *map_val_ty
+//RS                                     && !self.nominal_type_identity(&map_val_ty, &vt)
+//RS                                 {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0108",
+//RS                                         format!(
+//RS                                             "this map holds values of type {}, not {}",
+//RS                                             map_val_ty.show(),
+//RS                                             vt.show()
+//RS                                         ),
+//RS                                         "every value stored in a map must have the same type"
+//RS                                             .to_string(),
+//RS                                         type_fix_hint(&map_val_ty, &vt),
+//RS                                         Some(value.span()),
+//RS                                     ));
+//RS                                 }
+//RS                             }
+//RS                         } else if let Some(
+//RS                             Type::List(elem_ty) | Type::FixedList { elem: elem_ty, .. },
+//RS                         ) = base_ty
+//RS                         {
+//RS                             if let Some(vt) = vt {
+//RS                                 if vt != *elem_ty {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0108",
+//RS                                         format!(
+//RS                                             "this list holds {}, not {}",
+//RS                                             elem_ty.show(),
+//RS                                             vt.show()
+//RS                                         ),
+//RS                                         "every item stored in a list must have the same type"
+//RS                                             .to_string(),
+//RS                                         type_fix_hint(&elem_ty, &vt),
+//RS                                         Some(value.span()),
+//RS                                     ));
+//RS                                 }
+//RS                             }
+//RS                         } else if let Some(Type::Apply { name, args }) = base_ty {
+//RS                             if name == "ViewMut" {
+//RS                                 if let (Some(elem_ty), Some(vt)) = (args.first(), vt) {
+//RS                                     if vt != *elem_ty {
+//RS                                         self.diags.push(Diagnostic::error(
+//RS                                                 "E0108",
+//RS                                                 format!(
+//RS                                                     "this view holds {}, not {}",
+//RS                                                     elem_ty.show(),
+//RS                                                     vt.show()
+//RS                                                 ),
+//RS                                                 "every item written through a view must keep the owner's element type".to_string(),
+//RS                                                 type_fix_hint(elem_ty, &vt),
+//RS                                                 Some(value.span()),
+//RS                                             ));
+//RS                                     }
+//RS                                 }
+//RS                             }
+//RS                         } else if let Some(Type::Named(n)) = &base_ty {
+//RS                             if let Some((key_ty, value_ty)) = self.trait_reg.index_types.get(n) {
+//RS                                 if !self.trait_reg.index_mutable.contains(n) {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                             "E0505",
+//RS                                             format!(
+//RS                                                 "`{}` can be read with `[ ]` but not written — it has no `IndexMut` impl",
+//RS                                                 n
+//RS                                             ),
+//RS                                             "bracket assignment needs `impl Type.IndexMut { fn set(&self, k, v) }` with the write-access marker `&`"
+//RS                                                 .to_string(),
+//RS                                             format!(
+//RS                                                 "use `.set(key, value)` instead, or add `impl {n}.IndexMut`"
+//RS                                             ),
+//RS                                             Some(*span),
+//RS                                         ));
+//RS                                 }
+//RS                                 if let Some(kt) = idx_ty {
+//RS                                     if kt != *key_ty {
+//RS                                         self.diags.push(Diagnostic::error(
+//RS                                             "E0505",
+//RS                                             format!(
+//RS                                                 "this value indexes with {}, not {}",
+//RS                                                 key_ty.show(),
+//RS                                                 kt.show()
+//RS                                             ),
+//RS                                             "the key must match the type's `Index` key".to_string(),
+//RS                                             format!("use a {} key here", key_ty.name()),
+//RS                                             Some(index.span()),
+//RS                                         ));
+//RS                                     }
+//RS                                 }
+//RS                                 if let Some(vt) = vt {
+//RS                                     if vt != *value_ty {
+//RS                                         self.diags.push(Diagnostic::error(
+//RS                                             "E0108",
+//RS                                             format!(
+//RS                                                 "this value holds {}, not {}",
+//RS                                                 value_ty.show(),
+//RS                                                 vt.show()
+//RS                                             ),
+//RS                                             "the stored value must match the type's `Index` value"
+//RS                                                 .to_string(),
+//RS                                             type_fix_hint(value_ty, &vt),
+//RS                                             Some(value.span()),
+//RS                                         ));
+//RS                                     }
+//RS                                 }
+//RS                                 if let Some(root) = expr_root_ident(base) {
+//RS                                     let root = root.to_string();
+//RS                                     if let Some(info) = self.lookup(&root) {
+//RS                                         if !info.mutable && !self.is_write_view(&root) {
+//RS                                             self.diags.push(Diagnostic::error(
+//RS                                                     "E0202",
+//RS                                                     format!(
+//RS                                                         "cannot write to `{}` — it does not have the write-access marker `&`",
+//RS                                                         root
+//RS                                                     ),
+//RS                                                     "assigning through `[ ]` edits the value; the binding must be declared mutable"
+//RS                                                         .to_string(),
+//RS                                                     format!(
+//RS                                                         "declare `{} {} ...`",
+//RS                                                         root,
+//RS                                                         Syntax::SIGIL_BIND_MUT
+//RS                                                     ),
+//RS                                                     Some(*span),
+//RS                                                 ));
+//RS                                         }
+//RS                                     }
+//RS                                 }
+//RS                             }
+//RS                         } else if let Some(Type::String) = base_ty {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E0503",
+//RS                                     "strings aren't indexed with `[ ]`".to_string(),
+//RS                                     "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
+//RS                                     "e.g. `loop c in s.chars() { }` or `s.slice(0..2)`".to_string(),
+//RS                                     Some(*span),
+//RS                                 ));
+//RS                         }
+//RS                         if let Some((name, mut state)) = fixed_uninit {
+//RS                             let completely_initialized =
+//RS                                 if let (Some(len), Expr::Int(index, _, _, _)) =
+//RS                                     (state.fixed_len, index.as_ref())
+//RS                                 {
+//RS                                     if *index >= 0 && (*index as u64) < len {
+//RS                                         state.initialized_indexes.insert(*index as u64);
+//RS                                     }
+//RS                                     state.initialized_indexes.len() as u64 == len
+//RS                                 } else {
+//RS                                     false
+//RS                                 };
+//RS                             if !completely_initialized {
+//RS                                 self.flow.uninit.set(&name, state);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     // D-MUTSELF1: a field-assignment `place.field [op]= v`. The place
+//RS                     // must be a CHANGEABLE place: a `mut self` receiver, or a `:=`/`mut`
+//RS                     // local. A non-`mut` `self` (shared-read receiver) or an immutable/shared
+//RS                     // binding is E0205, pointed at the assignment, with a "write the
+//RS                     // receiver as `mut self`" / "make it changeable" fix (owner Q1).
+//RS                     LValue::Field { base, field, span } => {
+//RS                         self.borrow_ctx = true;
+//RS                         // D-SOA1: `xs[i].field = …` where `xs` is a columnar list
+//RS                         // would write into a throwaway gathered value, not the
+//RS                         // column — reject (field-WRITE on a columnar element is
+//RS                         // deferred; reads are supported). Detected off the index
+//RS                         // base's root binding type (the common `local[i].f` form).
+//RS                         if let Expr::Index { base: ib, .. } = base.as_ref() {
+//RS                             let columnar_elem = expr_root_ident(ib)
+//RS                                 .and_then(|root| self.lookup(root))
+//RS                                 .and_then(|info| match &info.ty {
+//RS                                     Type::List(inner) => match inner.as_ref() {
+//RS                                         Type::Named(elem) if self.registry.is_columnar(elem) => {
+//RS                                             Some(elem.clone())
+//RS                                         }
+//RS                                         _ => None,
+//RS                                     },
+//RS                                     _ => None,
+//RS                                 });
+//RS                             if let Some(elem) = columnar_elem {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                         "E1108",
+//RS                                         format!(
+//RS                                             "writing `{}[i].{}` isn't supported on a columnar list yet",
+//RS                                             expr_root_ident(ib).unwrap_or("xs"),
+//RS                                             field
+//RS                                         ),
+//RS                                         "`#Layout(columnar)` lists support reading a field (`xs[i].f`) in v1; writing one is deferred".to_string(),
+//RS                                         format!(
+//RS                                             "drop `#Layout(columnar)` from `{}` to write fields in place, or rebuild the element with `push`",
+//RS                                             elem
+//RS                                         ),
+//RS                                         Some(*span),
+//RS                                     ));
+//RS                                 return;
+//RS                             }
+//RS                         }
+//RS                         let suppress = self.suppress_partial_move_root_read;
+//RS                         if !is_compound {
+//RS                             self.suppress_partial_move_root_read = true;
+//RS                         }
+//RS                         let base_ty = self.infer(base);
+//RS                         self.suppress_partial_move_root_read = suppress;
+//RS                         // D-FIELDPOL1: `s.computed_field = v` — a computed field is
+//RS                         // never stored, so a plain assignment has nothing to write.
+//RS                         if let Some(bt) = &base_ty {
+//RS                             if self.field_is_computed(bt, field) {
+//RS                                 self.diags.push(computed_field_not_settable(field, *span));
+//RS                                 return;
+//RS                             }
+//RS                         }
+//RS                         // D-SWIZZLE1: overlapping write swizzles (`v.xx = …`) are rejected.
+//RS                         if let Some(Type::Named(type_name)) = &base_ty {
+//RS                             if is_swizzleable_math_type(type_name)
+//RS                                 && !self.registry.contains(type_name)
+//RS                             {
+//RS                                 if let SwizzleParse::Ok(lanes) =
+//RS                                     parse_swizzle_member(field, type_name)
+//RS                                 {
+//RS                                     if swizzle_write_overlaps(&lanes) {
+//RS                                         self.diags.push(Diagnostic::error(
+//RS                                                 "E3111",
+//RS                                                 format!(
+//RS                                                     "write swizzle `{}` repeats a lane on `{}`",
+//RS                                                     field, type_name
+//RS                                                 ),
+//RS                                                 "each lane may be written at most once — overlapping patterns like `v.xx` have no single meaning"
+//RS                                                     .to_string(),
+//RS                                                 format!(
+//RS                                                     "assign each lane once, e.g. `{}.xy = …` instead of `{}.{} = …`",
+//RS                                                     expr_root_ident(base).unwrap_or("v"),
+//RS                                                     expr_root_ident(base).unwrap_or("v"),
+//RS                                                     field
+//RS                                                 ),
+//RS                                                 Some(*span),
+//RS                                             ));
+//RS                                         return;
+//RS                                     }
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         // Validate the field exists and get its type (emits E0302 on a
+//RS                         // bad field). The value's type must match the field type (E0108).
+//RS                         if let Some(bt) = &base_ty {
+//RS                             if let Some(ft) = self.field_type(bt, field, *span) {
+//RS                                 if self.type_contains_view_boundary(&ft) {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                             "E2305",
+//RS                                             format!("view field `{field}` cannot be assigned a new source"),
+//RS                                             "a stored view field has one stabilized owner relationship; overwriting it would erase or change that public provenance"
+//RS                                                 .to_string(),
+//RS                                             "construct a new value with the new view, or keep the original field source unchanged"
+//RS                                                 .to_string(),
+//RS                                             Some(*span),
+//RS                                         ));
+//RS                                     return;
+//RS                                 }
+//RS                                 if let Some(vt) = &vt {
+//RS                                     if ft != Type::Named(String::new()) {
+//RS                                         self.check_struct_field_assignable(
+//RS                                             field, &ft, vt, value, value.span(),
+//RS                                         );
+//RS                                     }
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         // The root place must be changeable. The headline is `self`:
+//RS                         // a `mut self` receiver (param_conv == Mutate) may be mutated;
+//RS                         // a shared-read `self`, or any non-`mut` local, may not.
+//RS                         if let Some(root) = expr_root_ident(base) {
+//RS                             let root = root.to_string();
+//RS                             if let Some(info) = self.lookup(&root) {
+//RS                                 if !info.mutable
+//RS                                     && !self.is_write_view(&root)
+//RS                                     && !self.is_edit_shared_guard(&root)
+//RS                                     && self.frozen_for(&root).is_none()
+//RS                                 {
+//RS                                     let is_self = root == Syntax::KW_SELF;
+//RS                                     let what = if is_self {
+//RS                                         format!(
+//RS                                                 "cannot edit `{}` — `{}` has read access only; the write-access marker `&` is required",
+//RS                                                 field,
+//RS                                                 Syntax::KW_SELF
+//RS                                             )
+//RS                                     } else {
+//RS                                         format!("cannot edit `{}` — `{}` does not have the write-access marker `&`", field, root)
+//RS                                     };
+//RS                                     let fix = if is_self {
+//RS                                         format!(
+//RS                                                 "write the receiver with the write-access marker `&`: `{}{}` to grant write access",
+//RS                                                 Syntax::SIGIL_WRITE,
+//RS                                                 Syntax::KW_SELF
+//RS                                             )
+//RS                                     } else if info.param_conv.is_some() {
+//RS                                         format!(
+//RS                                                 "mark the parameter with the write-access marker `&`: `{}: {}{}` to grant write access",
+//RS                                                 root,
+//RS                                                 Syntax::SIGIL_WRITE,
+//RS                                                 info.ty.name()
+//RS                                             )
+//RS                                     } else {
+//RS                                         format!(
+//RS                                             "declare it with `{} {} ...` to give it write access",
+//RS                                             root,
+//RS                                             Syntax::SIGIL_BIND_MUT
+//RS                                         )
+//RS                                     };
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                             "E0205",
+//RS                                             what,
+//RS                                             "editing a field requires the write-access marker `&` on the owning place".to_string(),
+//RS                                             fix,
+//RS                                             Some(*span),
+//RS                                         ));
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         if !is_compound && base_ty.is_some() {
+//RS                             let target = Expr::Field(base.clone(), field.clone(), *span);
+//RS                             self.clear_moved_expr(&target);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 // D-TRACK-ORIGIN1=A: any successful write into a tracked
+//RS                 // binding, including a field or index place, ends the old
+//RS                 // value's provenance. Reads on the RHS above still observe
+//RS                 // the pre-write fact.
+//RS                 if let Some(root) = origin_write_root.as_deref() {
+//RS                     self.clear_origin(root);
+//RS                 }
+//RS             }
+//RS             Stmt::Expr(_) => {
+//RS                 if self.rewrite_anonymous_taskgroup_spawn(stmt) {
+//RS                     if let Stmt::Val(b) = stmt {
+//RS                         let synthetic_name = b.name.clone();
+//RS                         self.check_binding(b);
+//RS                         // A nested block can pop before its enclosing task
+//RS                         // group gets a chance to consume pending spawns.
+//RS                         self.mark_taskgroup_spawn_owned(&synthetic_name);
+//RS                         crate::Sema::Effects::record_authority_alias(self, b);
+//RS                     }
+//RS                     return;
+//RS                 }
+//RS                 let Stmt::Expr(expr) = stmt else {
+//RS                     return;
+//RS                 };
+//RS                 // D-IGNORERET2=A: `.drop("reason")` is the blessed explicit-discard
+//RS                 // terminal. When recognized, infer the *receiver* (for side effects),
+//RS                 // validate the reason is a non-empty string literal, and suppress E0402.
+//RS                 if let Expr::MethodCall {
+//RS                     receiver,
+//RS                     method,
+//RS                     method_span,
+//RS                     args,
+//RS                     ..
+//RS                 } = expr
+//RS                 {
+//RS                     if method == Syntax::METHOD_DROP {
+//RS                         let recv_ty = self.infer_without_auto_propagation(receiver);
+//RS                         // Validate reason argument — must be a non-empty string literal.
+//RS                         match args.first() {
+//RS                             Some(a) => match &a.expr {
+//RS                                 Expr::Str(parts, _)
+//RS                                     if parts.len() == 1
+//RS                                         && matches!(&parts[0], StrPart::Lit(s) if s.is_empty()) =>
+//RS                                 {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                             "E0407",
+//RS                                             "`.drop()` reason must not be empty".to_string(),
+//RS                                             "the reason documents why this result is intentionally discarded".to_string(),
+//RS                                             "write `.drop(\"why this is fine to ignore\")` with a real explanation".to_string(),
+//RS                                             Some(*method_span),
+//RS                                         ));
+//RS                                 }
+//RS                                 Expr::Str(parts, _)
+//RS                                     if parts.iter().all(|p| matches!(p, StrPart::Lit(_))) =>
+//RS                                 {
+//RS                                     // Non-empty plain string literal — valid.
+//RS                                 }
+//RS                                 _ => {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0407",
+//RS                                         "`.drop()` requires a string literal reason".to_string(),
+//RS                                         "the reason must be a compile-time string, not a variable"
+//RS                                             .to_string(),
+//RS                                         "write `.drop(\"why this is fine to ignore\")`".to_string(),
+//RS                                         Some(*method_span),
+//RS                                     ));
+//RS                                 }
+//RS                             },
+//RS                             None => {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                         "E0407",
+//RS                                         "`.drop()` requires a reason argument".to_string(),
+//RS                                         "the reason documents why this result is intentionally discarded".to_string(),
+//RS                                         "write `.drop(\"why this is fine to ignore\")`".to_string(),
+//RS                                         Some(*method_span),
+//RS                                     ));
+//RS                             }
+//RS                         }
+//RS                         // E0402 is suppressed — that is the entire point of `.drop()`.
+//RS                         // Task drop is still rejected (L1101) because `.drop()` on a task
+//RS                         // doesn't actually join it; use `.detach()` for fire-and-forget.
+//RS                         if let Some(ty) = recv_ty {
+//RS                             if is_task_type(&ty) {
+//RS                                 self.diags.push(crate::Sema::CheckerOwnership::l1101_unjoined_task(
+//RS                                         "this task",
+//RS                                         "`.drop()` discards the handle without joining it, so the task may outlive the function",
+//RS                                         expr.span(),
+//RS                                     ));
+//RS                             }
+//RS                         }
+//RS                         // Short-circuit: don't fall through to the generic E0402 path.
+//RS                         return;
+//RS                     }
+//RS                 }
+//RS                 // A statement consumes the call's success value. An enclosing
+//RS                 // value-if may leave its Result carrier in `expected_type`,
+//RS                 // but that expectation belongs only to the branch value, not
+//RS                 // to this statement.
+//RS                 let must_use_call_target = self.ignored_must_use_call_target(expr);
+//RS                 let discard_calls_start = self.fx_memory_calls.len();
+//RS                 let discard_diagnostics_start = self.diags.len();
+//RS                 let lost_tail = self.lost_tail_span == Some(expr.span());
+//RS                 let saved_expected = self.expected_type.take();
+//RS                 let inferred = self.infer_statement_expr(expr);
+//RS                 self.expected_type = saved_expected;
+//RS                 if let Some(ty) = inferred {
+//RS                     if ty.is_fallible() && !self.suppress_must_use {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                                 "E0402",
+//RS                                 "this call can fail and nothing checks it".to_string(),
+//RS                                 "a fallible result can't be ignored — handle it or say failure is impossible"
+//RS                                     .to_string(),
+//RS                                 format!(
+//RS                                     "use `{}`, `{}`, `{} ...`, or `.drop(\"reason\")` to intentionally discard",
+//RS                                     Syntax::OP_TRY_SUFFIX,
+//RS                                     Syntax::OP_FALLBACK,
+//RS                                     Syntax::BUILTIN_PANIC
+//RS                                 ),
+//RS                                 Some(expr.span()),
+//RS                             ));
+//RS                     } else if !self.suppress_must_use {
+//RS                         self.check_ignored_must_use(expr, &ty, expr.span(), must_use_call_target);
+//RS                         if lost_tail {
+//RS                             // D-DISCARD1=A: the last line of a function with
+//RS                             // no written return type; its value goes nowhere.
+//RS                             // A unit `Never!` call succeeds with unit only.
+//RS                             let success = match &ty {
+//RS                                 Type::Result { ok, err } if err.is_never() => ok.as_ref(),
+//RS                                 other => other,
+//RS                             };
+//RS                             let unit = matches!(success, Type::Named(name)
+//RS                                 if name == Syntax::INTERNAL_UNIT_TYPE || name == Syntax::TYPE_UNIT)
+//RS                                 || success.is_never();
+//RS                             let reported = self.diags[discard_diagnostics_start..]
+//RS                                 .iter()
+//RS                                 .any(|diagnostic| diagnostic.severity == Severity::Error);
+//RS                             if !unit && !reported {
+//RS                                 let shown = self.display_type(&ty).name();
+//RS                                 self.diags.push(crate::Sema::Effects::e0433_lost_tail(
+//RS                                     &self.fn_name,
+//RS                                     &shown,
+//RS                                     expr.span(),
+//RS                                 ));
+//RS                             }
+//RS                         } else {
+//RS                             self.record_discarded_result(
+//RS                                 expr,
+//RS                                 &ty,
+//RS                                 discard_calls_start,
+//RS                                 discard_diagnostics_start,
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                     // An implicit fallible `Unit` call carries its success
+//RS                     // value in `Result<Unit, E>`. L0508 is about dropping
+//RS                     // that success value, not the internal failure carrier.
+//RS                     let arrow_body_value_type = match &ty {
+//RS                         Type::Result { ok, .. } => ok.as_ref(),
+//RS                         _ => &ty,
+//RS                     };
+//RS                     if self.arrow_loop_body
+//RS                         && !matches!(
+//RS                             arrow_body_value_type,
+//RS                             Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE
+//RS                         )
+//RS                         && !self.is_unit_type(arrow_body_value_type)
+//RS                     {
+//RS                         self.diags.push(Diagnostic::lint(
+//RS                                 "L0508",
+//RS                                 "this arrow loop body computes a value and drops it".to_string(),
+//RS                                 "a statement-position loop arrow discards its body's value; the loop takes write access (&) for items when it updates the source".to_string(),
+//RS                                 "bind the loop with `::` to collect its values, or write `loop v in &values -> v *= 2` so it takes write access (&) for items".to_string(),
+//RS                                 Some(expr.span()),
+//RS                             ));
+//RS                     }
+//RS                     // An unbound spawn belongs to its enclosing scope; only a
+//RS                     // named handle carries the join duty checked at scope end.
+//RS                 }
+//RS             }
+//RS             Stmt::DeferClose { close, .. } => {
+//RS                 let saved_expected = self.expected_type.take();
+//RS                 self.infer_fallible_stmt(close);
+//RS                 self.expected_type = saved_expected;
+//RS             }
+//RS             Stmt::Return(expr, span) => {
+//RS                 // D-COPY-DEFAULT1=A: `return` leaves every loop, so its moves
+//RS                 // are last uses, not reuses on a later iteration.
+//RS                 let saved_exit = self.loop_exit_depth.replace((0, self.loop_depth));
+//RS                 self.check_return_expr(expr, span, None);
+//RS                 self.loop_exit_depth = saved_exit;
+//RS             }
+//RS             // D-STREAMYIELD1: `yield expr` — legal only in a function whose return
+//RS             // type is `Stream<T>` (E0805 otherwise); `expr: T` (E0807 on mismatch).
+//RS             Stmt::Yield(e, span) => {
+//RS                 // Yielding-loop collection uses a compiler-private zero-width
+//RS                 // marker. A real `yield` nested in that loop still belongs to
+//RS                 // an enclosing Stream generator.
+//RS                 if span.start == span.end && !self.collect_item_types.is_empty() {
+//RS                     let saved_expected = self.expected_type.clone();
+//RS                     let expected = self.collect_item_types.last().and_then(Clone::clone);
+//RS                     self.expected_type = expected.clone();
+//RS                     let got = self.infer(e).map(|ty| self.resolve_type(ty));
+//RS                     self.expected_type = saved_expected;
+//RS                     if let Some(got) = got {
+//RS                         if matches!(&got, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE) {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E0073",
+//RS                                     "this collecting loop path produces no item".to_string(),
+//RS                                     "every accepted iteration must contribute one non-unit value unless `next` omits it".to_string(),
+//RS                                     "return a value on this path, or remove `->`".to_string(),
+//RS                                     Some(e.span()),
+//RS                                 ));
+//RS                         } else if let Some(want) = expected {
+//RS                             // D-NUMJOIN1=A: a numeric item widens into the
+//RS                             // item type the loop is already building.
+//RS                             if got != want && got.numeric_widening_to(&want).is_some() {
+//RS                                 // Keep the same sema widening path used by
+//RS                                 // calls, returns, and ordinary lists. It
+//RS                                 // gates range erasure before the item is
+//RS                                 // stored in the collected carrier.
+//RS                                 let source = got.clone();
+//RS                                 self.widen_numeric_expr(e, &source, &want);
+//RS                             } else if got != want {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                         "E0074",
+//RS                                         "this collecting loop produces incompatible item types".to_string(),
+//RS                                         format!("one collecting loop builds one `[{}]`, but this item is {}", want.show(), got.show()),
+//RS                                         "convert every item to one type, or split the loops".to_string(),
+//RS                                         Some(e.span()),
+//RS                                     ));
+//RS                             }
+//RS                         } else {
+//RS                             *self.collect_item_types.last_mut().expect("checked above") = Some(got);
+//RS                         }
+//RS                     }
+//RS                     return;
+//RS                 }
+//RS                 let elem_ty = stream_element_type(self.declared_return_type.as_ref())
+//RS                     .map(|ty| self.resolve_type(ty));
+//RS                 let Some(elem_ty) = elem_ty else {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0805",
+//RS                             format!("`{}` outside a generator", Syntax::KW_YIELD),
+//RS                             "`yield` hands a value to a `Stream<T>` consumer — only a function declared `Stream<T> ->` may use it".to_string(),
+//RS                             format!("declare `{}<T> ->` on this function, or remove the `{}`", Syntax::TYPE_STREAM, Syntax::KW_YIELD),
+//RS                             Some(*span),
+//RS                         ));
+//RS                     self.infer(e);
+//RS                     return;
+//RS                 };
+//RS                 let saved_expected = self.expected_type.clone();
+//RS                 self.expected_type = Some(elem_ty.clone());
+//RS                 let got = self.infer(e);
+//RS                 self.expected_type = saved_expected;
+//RS                 if let Some(got) = got {
+//RS                     let got = self.resolve_type(got);
+//RS                     if got != elem_ty {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0807",
+//RS                             format!(
+//RS                                 "this yields {}, but the stream is `{}<{}>`",
+//RS                                 got.show(),
+//RS                                 Syntax::TYPE_STREAM,
+//RS                                 elem_ty.show()
+//RS                             ),
+//RS                             "every `yield` in a generator must hand back the stream's element type"
+//RS                                 .to_string(),
+//RS                             type_fix_hint(&elem_ty, &got),
+//RS                             Some(e.span()),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): build-time execution block.
+//RS             Stmt::ComptimeBlock { .. } => self.check_comptime_block(stmt),
+//RS             // D-WHEN1/D-WHEN2 (ratified 2026-06-19): compile-time conditional.
+//RS             Stmt::ComptimeIf { .. } => self.check_comptime_if(stmt),
+//RS             Stmt::While {
+//RS                 cond,
+//RS                 body,
+//RS                 span,
+//RS                 arrow_body,
+//RS                 label,
+//RS             } => {
+//RS                 let memory_multiplier = self.memory_control_multiplier;
+//RS                 self.lint_shared_busy_wait(cond, body, *span, label.is_none());
+//RS                 self.memory_control_multiplier = None;
+//RS                 self.require_bool(cond, "a `loop` condition");
+//RS                 if let Some((n, label_span)) = label {
+//RS                     self.declare_loop_label(n, *label_span);
+//RS                 }
+//RS                 self.push_loop_value_frame(label.as_ref());
+//RS                 self.push_loop_break_frame();
+//RS                 self.loop_depth += 1;
+//RS                 // D-FACT-FLOW1: one loop rule for every plane — a body may run zero
+//RS                 // times, so the facts after the loop join the zero-turn path with the
+//RS                 // path one walk of the body left behind.
+//RS                 let before_loop = self.flow.clone();
+//RS                 let previous_arrow_loop_body = self.arrow_loop_body;
+//RS                 self.arrow_loop_body = *arrow_body;
+//RS                 self.check_block(body, true);
+//RS                 self.arrow_loop_body = previous_arrow_loop_body;
+//RS                 let after_body = self.flow.clone();
+//RS                 self.join_loop_flow(
+//RS                     &before_loop,
+//RS                     &after_body,
+//RS                     !matches!(cond.without_parens(), Expr::Bool(true, _)),
+//RS                 );
+//RS                 self.loop_depth -= 1;
+//RS                 if after_body.reachable {
+//RS                     if let Some((name, span)) = drained_collection(cond, body) {
+//RS                         let name = name.to_string();
+//RS                         let carries_duty = self
+//RS                             .lookup(&name)
+//RS                             .is_some_and(|info| self.type_is_single_use(&info.ty));
+//RS                         if carries_duty {
+//RS                             self.mark_moved_by(name, span, ".loop()");
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 self.pop_loop_value_frame();
+//RS                 if label.is_some() {
+//RS                     self.loop_labels.pop();
+//RS                 }
+//RS                 self.memory_control_multiplier = memory_multiplier;
+//RS             }
+//RS             Stmt::For {
+//RS                 var,
+//RS                 var_span,
+//RS                 var2,
+//RS                 kind,
+//RS                 body,
+//RS                 span: _,
+//RS                 arrow_body,
+//RS                 label,
+//RS                 auto_vectorization,
+//RS             } => {
+//RS                 let memory_multiplier = self.memory_control_multiplier;
+//RS                 let loop_multiplier = memory_multiplier.and_then(|outer| {
+//RS                     statically_bounded_for_iterations(kind)
+//RS                         .and_then(|iterations| outer.checked_mul(iterations))
+//RS                 });
+//RS                 self.memory_control_multiplier = memory_multiplier;
+//RS                 if let Some((n, label_span)) = label {
+//RS                     self.declare_loop_label(n, *label_span);
+//RS                 }
+//RS                 // D-FACT-FLOW1: one loop rule for every plane — a body may run
+//RS                 // zero times, so the facts after the loop join the zero-turn
+//RS                 // path with the path one walk of the body left behind.
+//RS                 let before_loop = self.flow.clone();
+//RS                 self.push_loop_value_frame(label.as_ref());
+//RS                 self.push_loop_break_frame();
+//RS                 match kind {
+//RS                     ForKind::Range {
+//RS                         start,
+//RS                         end,
+//RS                         step,
+//RS                         exclusive,
+//RS                     } => {
+//RS                         for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
+//RS                             let t = self.infer_loop_header(e);
+//RS                             if let Some(t) = t {
+//RS                                 if !matches!(&t, Type::Int | Type::InlineRange { .. }) {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                             "E0109",
+//RS                                             format!(
+//RS                                                 "the {} of a `for` range must be {}, not {}",
+//RS                                                 which,
+//RS                                                 Type::Int.show(),
+//RS                                                 t.show()
+//RS                                             ),
+//RS                                             "`loop` counts whole numbers between two ends (inclusive `..` includes both, S22; exclusive `..<` stops before the end)"
+//RS                                                 .to_string(),
+//RS                                             "use Int values for both ends, like `1..10` or `0..<n`".to_string(),
+//RS                                             Some(e.span()),
+//RS                                         ));
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         if let Some(step) = step {
+//RS                             // D-LOOP-ADVANCE2=A: the stride must be a positive Int.
+//RS                             let t = self.infer(step);
+//RS                             if let Some(t) = t {
+//RS                                 if !matches!(&t, Type::Int | Type::InlineRange { .. }) {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0123",
+//RS                                         format!(
+//RS                                             "a range loop stride must be {}, not {}",
+//RS                                             Type::Int.show(),
+//RS                                             t.show()
+//RS                                         ),
+//RS                                         "the stride is how far to count each turn, so it must be a whole number"
+//RS                                             .to_string(),
+//RS                                         "use an Int stride, like `loop i in 0..10, 2 { ... }`".to_string(),
+//RS                                         Some(step.span()),
+//RS                                     ));
+//RS                                 }
+//RS                             }
+//RS                             if let Expr::Int(n, sp, _, _) = step {
+//RS                                 if *n <= 0 {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                             "E0123",
+//RS                                             format!("a range loop stride must be positive, not {}", n),
+//RS                                             "a zero or negative stride would never reach the end"
+//RS                                                 .to_string(),
+//RS                                             "use a stride of 1 or more, like `loop i in 0..10, 2 { ... }`".to_string(),
+//RS                                             Some(*sp),
+//RS                                         ));
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         self.loop_depth += 1;
+//RS                         self.push_scope();
+//RS                         let vs = *var_span;
+//RS                         let v = var.clone();
+//RS                         if self.lookup(&v).is_some() || self.consts.contains_key(&v) {
+//RS                             self.diags.push(already_defined(&v, vs));
+//RS                         }
+//RS                         self.declare_in_scope(
+//RS                             &v,
+//RS                             LocalInfo {
+//RS                                 def_span: vs,
+//RS                                 binding_sigil_span: None,
+//RS                                 ty: Type::Int,
+//RS                                 mutable: false,
+//RS                                 param_conv: None,
+//RS                                 decl_loop_depth: self.loop_depth,
+//RS                                 interrupt_sendable: false,
+//RS                                 reactive_local: false,
+//RS                                 reactive_shared: false,
+//RS                                 single_use_span: None,
+//RS                                 invalid: false,
+//RS                             },
+//RS                         );
+//RS                         self.memory_control_multiplier = loop_multiplier;
+//RS                         let previous_arrow_loop_body = self.arrow_loop_body;
+//RS                         self.arrow_loop_body = *arrow_body;
+//RS                         let before_auto_direct = self.fx_direct.clone();
+//RS                         let before_auto_edges = self.fx_edges.clone();
+//RS                         let before_auto_maximal = self.fx_maximal;
+//RS                         self.check_stmts_in_scope(body);
+//RS                         self.arrow_loop_body = previous_arrow_loop_body;
+//RS 
+//RS                         // D-RANGE-EXCL1=C: teach when inclusive `….xs.len()` indexes that same xs
+//RS                         // with this loop's index name (the provable 0..len trap).
+//RS                         if !*exclusive {
+//RS                             if let Some(root) = range_end_len_root(end) {
+//RS                                 if stmts_index_root_with(body, &root, var) {
+//RS                                     let end_span = end.span();
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                             "E0364",
+//RS                                             format!(
+//RS                                                 "this range includes `{root}.len()`, one past the last index"
+//RS                                             ),
+//RS                                             format!(
+//RS                                                 "`{root}.len()` is the count of items, so inclusive `..` runs one step too far when the body indexes `{root}`"
+//RS                                             ),
+//RS                                             format!(
+//RS                                                 "write `loop (i, item) in {root}` — or `loop i in {root}.indexes` — or `0..<{root}.len()`"
+//RS                                             ),
+//RS                                             Some(end_span),
+//RS                                         ));
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         *auto_vectorization = self.prove_auto_vectorization_loop(
+//RS                             kind,
+//RS                             var,
+//RS                             body,
+//RS                             &before_auto_direct,
+//RS                             &before_auto_edges,
+//RS                             before_auto_maximal,
+//RS                         );
+//RS                         self.pop_scope();
+//RS                         self.loop_depth -= 1;
+//RS                     }
+//RS                     ForKind::In { collection, step } => {
+//RS                         if let Some(step) = step {
+//RS                             if let Some(ty) = self.infer_loop_header(step) {
+//RS                                 if !matches!(&ty, Type::Int | Type::InlineRange { .. }) {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                             "E0123",
+//RS                                             format!("a source loop stride must be {}, not {}", Type::Int.show(), ty.show()),
+//RS                                             "the stride counts source pulls, so it must be a positive whole number".to_string(),
+//RS                                             "use an Int stride of 1 or more".to_string(),
+//RS                                             Some(step.span()),
+//RS                                         ));
+//RS                                 }
+//RS                             }
+//RS                             if matches!(step, Expr::Int(n, ..) if *n <= 0) {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0123",
+//RS                                     "a source loop stride must be positive".to_string(),
+//RS                                     "zero or a negative value cannot select a later source item"
+//RS                                         .to_string(),
+//RS                                     "use a stride of 1 or more".to_string(),
+//RS                                     Some(step.span()),
+//RS                                 ));
+//RS                             }
+//RS                         }
+//RS                         let coll_ty = self.infer_loop_header(collection);
+//RS                         let bindingless = var == Syntax::KW_IT && var2.is_none();
+//RS                         let nested_bindingless =
+//RS                             bindingless && self.implicit_loop_subject_depth > 0;
+//RS                         if nested_bindingless {
+//RS                             self.diags.push(Diagnostic::from_row(
+//RS                                 "E0380",
+//RS                                 &[],
+//RS                                 Some(collection.span()),
+//RS                             ));
+//RS                         }
+//RS                         let borrowed = collection_root_name(collection);
+//RS                         // A written drive (`loop x in &items`) holds the same
+//RS                         // source for the whole body, so a change to it inside
+//RS                         // the body is the same overlap as for a by-value drive.
+//RS                         let driven = borrowed.clone().or_else(|| match &*collection {
+//RS                             Expr::Place(inner, _, _) => collection_root_name(inner),
+//RS                             _ => None,
+//RS                         });
+//RS                         // A collection iterated by value is consumed: each
+//RS                         // step hands you the element itself. Match codegen's
+//RS                         // `by_value` predicate exactly — task-handle lists
+//RS                         // (including nested `[[Task<…>]]`), Stream, Iter, and
+//RS                         // HTTPBodyChunks. Two-binding loops consume too.
+//RS                         let task_list_consume = matches!(
+//RS                             &coll_ty,
+//RS                             Some(Type::List(inner) | Type::FixedList { elem: inner, .. })
+//RS                                 if type_requires_owned_iteration(inner)
+//RS                         );
+//RS                         let streaming_consume = matches!(
+//RS                             &coll_ty,
+//RS                             Some(Type::Apply { name, .. })
+//RS                                 if name == crate::Syntax::TYPE_STREAM
+//RS                                     || name == Syntax::TYPE_ITER
+//RS                                     || name == Syntax::TYPE_VIEW_ITER
+//RS                         ) || matches!(
+//RS                             &coll_ty,
+//RS                             Some(Type::Named(name)) if name == "HTTPBodyChunks"
+//RS                         );
+//RS                         let consumes_collection = task_list_consume || streaming_consume;
+//RS                         let owns_collection =
+//RS                             !consumes_collection || self.frame_can_consume_collection(collection);
+//RS                         if !owns_collection {
+//RS                             if task_list_consume {
+//RS                                 self.report_borrowed_loop_consume(collection, &coll_ty);
+//RS                             } else {
+//RS                                 // Stream / Iter / HTTPBodyChunks. Peel
+//RS                                 // Paren/Copy so a wrapped Ident still hits
+//RS                                 // the move helper; field/index must get a
+//RS                                 // diagnostic — consume_builtin_receiver is
+//RS                                 // Ident-only and codegen still iterates by
+//RS                                 // value (I2).
+//RS                                 let place = match &*collection {
+//RS                                     Expr::Paren(inner, _) | Expr::Copy(inner, _) => inner.as_ref(),
+//RS                                     other => other,
+//RS                                 };
+//RS                                 if matches!(place, Expr::Ident(..)) {
+//RS                                     self.consume_builtin_receiver(place, "loop");
+//RS                                 } else {
+//RS                                     let diagnostic = Diagnostic::error(
+//RS                                         "E0120",
+//RS                                         "this loop can't take a stream or iterator out of a field or index"
+//RS                                             .to_string(),
+//RS                                         "each step pulls from the source itself, so the loop must take a whole value this scope owns"
+//RS                                             .to_string(),
+//RS                                         "bind it into a local this scope owns first (`src := …`), then write `loop x in src { … }`"
+//RS                                             .to_string(),
+//RS                                         Some(collection.span()),
+//RS                                     );
+//RS                                     self.diags.push(self.with_ownership_copy_edit(
+//RS                                         diagnostic,
+//RS                                         crate::Sema::CheckerOwnership::copy_edit_anchor(&*collection),
+//RS                                         coll_ty.as_ref(),
+//RS                                     ));
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         let lending_var = match (&coll_ty, var2.as_ref()) {
+//RS                             (
+//RS                                 Some(Type::List(inner) | Type::FixedList { elem: inner, .. }),
+//RS                                 None,
+//RS                             ) if matches!(
+//RS                                 inner.as_ref(),
+//RS                                 Type::Apply { name, .. } if name == "ViewMut"
+//RS                             ) =>
+//RS                             {
+//RS                                 Some(var.clone())
+//RS                             }
+//RS                             (
+//RS                                 Some(Type::List(inner) | Type::FixedList { elem: inner, .. }),
+//RS                                 Some((value, _)),
+//RS                             ) if matches!(
+//RS                                 inner.as_ref(),
+//RS                                 Type::Apply { name, .. } if name == "ViewMut"
+//RS                             ) =>
+//RS                             {
+//RS                                 Some(value.clone())
+//RS                             }
+//RS                             _ => None,
+//RS                         };
+//RS                         self.loop_depth += 1;
+//RS                         if let Some(n) = driven.clone() {
+//RS                             self.iter_borrowed.insert(n);
+//RS                         }
+//RS                         self.push_scope();
+//RS                         match &coll_ty {
+//RS                             Some(Type::List(inner)) | Some(Type::FixedList { elem: inner, .. }) => {
+//RS                                 // D-RANGE-EXCL1=C: two bindings are index then item; one binding stays item-only.
+//RS                                 if let Some((v2, v2s)) = var2.as_ref() {
+//RS                                     self.declare_loop_var(var.clone(), *var_span, &Type::Int);
+//RS                                     self.declare_loop_var(v2.clone(), *v2s, inner);
+//RS                                 } else {
+//RS                                     self.declare_loop_var(var.clone(), *var_span, inner);
+//RS                                 }
+//RS                             }
+//RS                             Some(Type::Apply { name, args })
+//RS                                 if (name == Syntax::TYPE_ITER
+//RS                                     || name == Syntax::TYPE_VIEW_ITER)
+//RS                                     && args.len() == 1 =>
+//RS                             {
+//RS                                 self.declare_loop_var(var.clone(), *var_span, &args[0]);
+//RS                             }
+//RS                             Some(Type::Map { key, value, .. }) => {
+//RS                                 if let Some((v2, v2s)) = var2.as_ref() {
+//RS                                     self.declare_loop_var(var.clone(), *var_span, key);
+//RS                                     self.declare_loop_var(v2.clone(), *v2s, value);
+//RS                                 } else {
+//RS                                     let entry = Type::Tuple(vec![
+//RS                                         ("key".to_string(), Box::new((**key).clone())),
+//RS                                         ("value".to_string(), Box::new((**value).clone())),
+//RS                                     ]);
+//RS                                     self.declare_loop_var(var.clone(), *var_span, &entry);
+//RS                                 }
+//RS                             }
+//RS                             // E2-M7: `loop line in handle.lines()` — streaming line iterator.
+//RS                             Some(Type::Named(n)) if n == "FileLines" => {
+//RS                                 self.declare_loop_var(var.clone(), *var_span, &Type::String);
+//RS                             }
+//RS                             // D-STDIN1=A: `loop line in io.stdin().lines()` — streaming stdin iterator.
+//RS                             Some(Type::Named(n)) if n == "StdinLines" => {
+//RS                                 self.declare_loop_var(var.clone(), *var_span, &Type::String);
+//RS                             }
+//RS                             // `loop line in child.stdout.lines()` /
+//RS                             // `child.stderr.lines()` — streaming subprocess output.
+//RS                             Some(Type::Named(n)) if n == "ProcessLines" => {
+//RS                                 self.declare_loop_var(var.clone(), *var_span, &Type::String);
+//RS                             }
+//RS                             Some(Type::Named(n)) if n == Syntax::TYPE_RANGE => {
+//RS                                 if var2.is_some() {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0109",
+//RS                                         "a Range loop has one value per step".to_string(),
+//RS                                         "Range values yield whole numbers, not key-value pairs"
+//RS                                             .to_string(),
+//RS                                         "use one loop name".to_string(),
+//RS                                         Some(collection.span()),
+//RS                                     ));
+//RS                                 }
+//RS                                 self.declare_loop_var(var.clone(), *var_span, &Type::Int);
+//RS                             }
+//RS                             Some(Type::Named(n)) if n == "HTTPBodyChunks" => {
+//RS                                 self.declare_loop_var(
+//RS                                     var.clone(),
+//RS                                     *var_span,
+//RS                                     &Type::Result {
+//RS                                         ok: Box::new(Type::List(Box::new(Type::Named(
+//RS                                             "U8".to_string(),
+//RS                                         )))),
+//RS                                         err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                                     },
+//RS                                 );
+//RS                             }
+//RS                             Some(Type::Named(n)) if encoding_reader_item_type(n).is_some() => {
+//RS                                 if var2.is_some() {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0109",
+//RS                                         format!(
+//RS                                             "`loop (x, y) in` on `{}` needs one loop name, not two",
+//RS                                             n
+//RS                                         ),
+//RS                                         "a codec reader yields one item per step".to_string(),
+//RS                                         format!("write `loop item in {n}`").to_string(),
+//RS                                         Some(collection.span()),
+//RS                                     ));
+//RS                                 } else if let Some(item_ty) = encoding_reader_item_type(n) {
+//RS                                     self.declare_loop_var(var.clone(), *var_span, &item_ty);
+//RS                                 }
+//RS                             }
+//RS                             Some(Type::Named(n))
+//RS                                 if self.trait_reg.iterable_items.contains_key(n) =>
+//RS                             {
+//RS                                 if var2.is_some() {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0109",
+//RS                                         format!(
+//RS                                             "`loop (x, y) in` on `{}` needs one loop name, not two",
+//RS                                             n
+//RS                                         ),
+//RS                                         "a custom iterable yields one item per step".to_string(),
+//RS                                         format!("write `loop item in {n}`").to_string(),
+//RS                                         Some(collection.span()),
+//RS                                     ));
+//RS                                 } else {
+//RS                                     let item_ty = self
+//RS                                         .trait_reg
+//RS                                         .iterable_items
+//RS                                         .get(n)
+//RS                                         .cloned()
+//RS                                         .unwrap_or(Type::Int);
+//RS                                     self.declare_loop_var(var.clone(), *var_span, &item_ty);
+//RS                                 }
+//RS                             }
+//RS                             // D-STREAMYIELD1: `loop x in a_stream { }` — pull one value
+//RS                             // at a time from a generator's `Stream<T>`, blocking until
+//RS                             // the producer yields (or ends the stream by returning).
+//RS                             Some(Type::Apply { name, args })
+//RS                                 if name == crate::Syntax::TYPE_STREAM && args.len() == 1 =>
+//RS                             {
+//RS                                 self.declare_loop_var(var.clone(), *var_span, &args[0]);
+//RS                             }
+//RS                             // D-CONC-CHAN1=A: a receiver is a pull source. The loop
+//RS                             // ends on the channel's closed sentinel.
+//RS                             Some(Type::Apply { name, args })
+//RS                                 if name == crate::Syntax::TYPE_RECEIVER && args.len() == 1 =>
+//RS                             {
+//RS                                 self.declare_loop_var(var.clone(), *var_span, &args[0]);
+//RS                             }
+//RS                             // D-DYNARRAY1 / D-RANGE-EXCL1=C: `loop x in window` — View iterates
+//RS                             // elements; two bindings are index then item.
+//RS                             Some(Type::Apply { name, args })
+//RS                                 if matches!(name.as_str(), "View" | "ViewMut")
+//RS                                     && args.len() == 1 =>
+//RS                             {
+//RS                                 if let Some((v2, v2s)) = var2.as_ref() {
+//RS                                     self.declare_loop_var(var.clone(), *var_span, &Type::Int);
+//RS                                     self.declare_loop_var(v2.clone(), *v2s, &args[0]);
+//RS                                 } else {
+//RS                                     self.declare_loop_var(var.clone(), *var_span, &args[0]);
+//RS                                 }
+//RS                             }
+//RS                             Some(other) => {
+//RS                                 if bindingless {
+//RS                                     if !nested_bindingless {
+//RS                                         self.diags.push(Diagnostic::from_row(
+//RS                                             "E0380",
+//RS                                             &[],
+//RS                                             Some(collection.span()),
+//RS                                         ));
+//RS                                     }
+//RS                                 } else {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                             "E0109",
+//RS                                             format!(
+//RS                                                 "`for x in` needs a list or map, not {}",
+//RS                                                 other.show()
+//RS                                             ),
+//RS                                             "walk items with `loop item in items { }` or characters with `loop c in s.chars() { }`".to_string(),
+//RS                                             "use a `List`, `Map`, or `s.chars()`".to_string(),
+//RS                                             Some(collection.span()),
+//RS                                         ));
+//RS                                     self.declare_invalid_loop_vars(var, *var_span, var2.as_ref());
+//RS                                 }
+//RS                             }
+//RS                             // The source failed to check and already reported.
+//RS                             None => self.declare_invalid_loop_vars(var, *var_span, var2.as_ref()),
+//RS                         }
+//RS                         if let Some(name) = &lending_var {
+//RS                             self.lending_view_loop_vars.insert(name.clone());
+//RS                         }
+//RS                         self.memory_control_multiplier = loop_multiplier;
+//RS                         let previous_arrow_loop_body = self.arrow_loop_body;
+//RS                         self.arrow_loop_body = *arrow_body;
+//RS                         if bindingless && !nested_bindingless {
+//RS                             self.implicit_loop_subject_depth += 1;
+//RS                         }
+//RS                         self.check_stmts_in_scope(body);
+//RS                         if bindingless && !nested_bindingless {
+//RS                             self.implicit_loop_subject_depth -= 1;
+//RS                         }
+//RS                         self.arrow_loop_body = previous_arrow_loop_body;
+//RS                         if let Some(name) = &lending_var {
+//RS                             self.lending_view_loop_vars.remove(name);
+//RS                         }
+//RS                         self.pop_scope();
+//RS                         if let Some(n) = driven {
+//RS                             self.iter_borrowed.remove(&n);
+//RS                         }
+//RS                         self.loop_depth -= 1;
+//RS                         // A by-value collection cannot be iterated by copy, so
+//RS                         // the loop takes it. Record the move after leaving the
+//RS                         // loop: the collection is consumed by this loop, not
+//RS                         // inside it, so a later use is ordinary use-after-move
+//RS                         // (E0121) instead of a rustc rejection (I2).
+//RS                         // `consumes_collection` above matches the codegen
+//RS                         // `by_value` predicate. A collection this frame could
+//RS                         // not take already reported E0120, so do not also
+//RS                         // record a move it never made.
+//RS                         if consumes_collection && owns_collection {
+//RS                             if let Some(name) = borrowed {
+//RS                                 self.mark_moved_by(name, collection.span(), ".loop()");
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 self.pop_loop_value_frame();
+//RS                 let after_body = self.flow.clone();
+//RS                 self.join_loop_flow(&before_loop, &after_body, true);
+//RS                 if label.is_some() {
+//RS                     self.loop_labels.pop();
+//RS                 }
+//RS                 self.memory_control_multiplier = memory_multiplier;
+//RS             }
+//RS             Stmt::Switch {
+//RS                 subject,
+//RS                 arms,
+//RS                 else_body,
+//RS                 span,
+//RS             }
+//RS             | Stmt::ComptimeSwitch {
+//RS                 subject,
+//RS                 arms,
+//RS                 else_body,
+//RS                 span,
+//RS             } => self.check_switch(subject, arms, else_body, *span, None),
+//RS             Stmt::Break(span) => {
+//RS                 self.check_break_without_value(None, *span);
+//RS             }
+//RS             Stmt::BreakValue(value, span) => {
+//RS                 // D-COPY-DEFAULT1=A: an unlabeled `break` value leaves the
+//RS                 // innermost loop only.
+//RS                 let saved_exit = self
+//RS                     .loop_exit_depth
+//RS                     .replace((self.loop_depth.saturating_sub(1), self.loop_depth));
+//RS                 self.check_break_value(None, value, *span);
+//RS                 self.loop_exit_depth = saved_exit;
+//RS             }
+//RS             Stmt::Continue(span) => {
+//RS                 if self.loop_depth == 0 {
+//RS                     self.diags
+//RS                         .push(loop_control_outside(Syntax::KW_NEXT, *span));
+//RS                 }
+//RS             }
+//RS             // D-ARROW-CONTROL1: `break(name)` / `next(name)`.
+// END-PORT-PENDING 0371 crates/jet-sema/src/Sema/CheckerCore/statements.rs:1158-2956
+

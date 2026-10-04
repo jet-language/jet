@@ -1,0 +1,291 @@
+// PORT-PENDING 0059 crates-jet-foundation-src-compilerstack-module-group: crates/jet-foundation/src/Coverage.rs:1-287
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Deterministic diagnostic repair-coverage facts and ratchet validation.
+//RS 
+//RS use std::collections::BTreeMap;
+//RS 
+//RS use crate::Report::{NoFixReasonKind, ReportEnvelope};
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct CoverageEntry {
+//RS     pub plane: String,
+//RS     pub fix_edits: bool,
+//RS     pub no_fix_reason: Option<NoFixReasonKind>,
+//RS }
+//RS 
+//RS impl CoverageEntry {
+//RS     pub fn new(
+//RS         plane: impl Into<String>,
+//RS         fix_edits: bool,
+//RS         no_fix_reason: Option<NoFixReasonKind>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             plane: plane.into(),
+//RS             fix_edits,
+//RS             no_fix_reason,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn from_report(plane: impl Into<String>, report: &ReportEnvelope) -> Self {
+//RS         Self::new(
+//RS             plane,
+//RS             !report.fix_edits().is_empty(),
+//RS             report.no_fix_reason().map(|reason| reason.kind),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
+//RS pub struct CoverageFact {
+//RS     pub plane: String,
+//RS     pub rows: usize,
+//RS     pub edit_covered: usize,
+//RS     pub reason_covered: usize,
+//RS     pub behavior_reasons: usize,
+//RS     pub design_reasons: usize,
+//RS     pub ambiguous_reasons: usize,
+//RS     pub uncovered: usize,
+//RS }
+//RS 
+//RS impl CoverageFact {
+//RS     pub fn is_closed(&self) -> bool {
+//RS         self.uncovered == 0
+//RS     }
+//RS 
+//RS     pub fn json(&self) -> String {
+//RS         format!(
+//RS             "{{\"plane\":{},\"rows\":{},\"edit_covered\":{},\"reason_covered\":{},\"behavior_reasons\":{},\"design_reasons\":{},\"ambiguous_reasons\":{},\"uncovered\":{}}}",
+//RS             crate::JSON::quote(&self.plane),
+//RS             self.rows,
+//RS             self.edit_covered,
+//RS             self.reason_covered,
+//RS             self.behavior_reasons,
+//RS             self.design_reasons,
+//RS             self.ambiguous_reasons,
+//RS             self.uncovered,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS pub fn try_facts(entries: impl IntoIterator<Item = CoverageEntry>) -> Result<Vec<CoverageFact>, String> {
+//RS     let mut facts = BTreeMap::<String, CoverageFact>::new();
+//RS     for entry in entries {
+//RS         if entry.plane.trim().is_empty() {
+//RS             return Err("diagnostic coverage plane must not be empty".to_string());
+//RS         }
+//RS         if entry.fix_edits && entry.no_fix_reason.is_some() {
+//RS             return Err(format!(
+//RS                 "coverage row in plane `{}` has both fix_edits and no_fix_reason",
+//RS                 entry.plane
+//RS             ));
+//RS         }
+//RS         let fact = facts.entry(entry.plane.clone()).or_insert_with(|| CoverageFact {
+//RS             plane: entry.plane,
+//RS             ..CoverageFact::default()
+//RS         });
+//RS         fact.rows += 1;
+//RS         if entry.fix_edits {
+//RS             fact.edit_covered += 1;
+//RS         } else if let Some(kind) = entry.no_fix_reason {
+//RS             fact.reason_covered += 1;
+//RS             match kind {
+//RS                 NoFixReasonKind::Behavior => fact.behavior_reasons += 1,
+//RS                 NoFixReasonKind::Design => fact.design_reasons += 1,
+//RS                 NoFixReasonKind::Ambiguous => fact.ambiguous_reasons += 1,
+//RS             }
+//RS         } else {
+//RS             fact.uncovered += 1;
+//RS         }
+//RS     }
+//RS     Ok(facts.into_values().collect())
+//RS }
+//RS 
+//RS pub fn facts(entries: &[CoverageEntry]) -> Vec<CoverageFact> {
+//RS     try_facts(entries.iter().cloned()).expect("invalid diagnostic coverage row")
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+//RS pub struct CoverageBaselineRow {
+//RS     pub edit_covered: usize,
+//RS     pub reason_covered: usize,
+//RS     pub total: usize,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
+//RS pub struct CoverageBaseline {
+//RS     pub rows: BTreeMap<String, CoverageBaselineRow>,
+//RS }
+//RS 
+//RS impl CoverageBaseline {
+//RS     pub fn parse(text: &str) -> Result<Self, String> {
+//RS         let mut baseline = Self::default();
+//RS         for (index, line) in text.lines().enumerate() {
+//RS             let line = line.trim();
+//RS             if line.is_empty() || line.starts_with('#') {
+//RS                 continue;
+//RS             }
+//RS             let fields = line.split_whitespace().collect::<Vec<_>>();
+//RS             if fields.len() != 4 {
+//RS                 return Err(format!(
+//RS                     "coverage baseline line {} must contain plane, edit count, reason count, and total",
+//RS                     index + 1
+//RS                 ));
+//RS             }
+//RS             let row = CoverageBaselineRow {
+//RS                 edit_covered: fields[1]
+//RS                     .parse()
+//RS                     .map_err(|_| format!("invalid edit count on coverage baseline line {}", index + 1))?,
+//RS                 reason_covered: fields[2].parse().map_err(|_| {
+//RS                     format!("invalid reason count on coverage baseline line {}", index + 1)
+//RS                 })?,
+//RS                 total: fields[3]
+//RS                     .parse()
+//RS                     .map_err(|_| format!("invalid total on coverage baseline line {}", index + 1))?,
+//RS             };
+//RS             if row.edit_covered + row.reason_covered > row.total {
+//RS                 return Err(format!(
+//RS                     "coverage baseline line {} counts more covered rows than total",
+//RS                     index + 1
+//RS                 ));
+//RS             }
+//RS             if baseline.rows.insert(fields[0].to_string(), row).is_some() {
+//RS                 return Err(format!("duplicate coverage baseline plane `{}`", fields[0]));
+//RS             }
+//RS         }
+//RS         Ok(baseline)
+//RS     }
+//RS 
+//RS     pub fn render(&self) -> String {
+//RS         let mut out = String::new();
+//RS         for (plane, row) in &self.rows {
+//RS             out.push_str(&format!(
+//RS                 "{} {} {} {}\n",
+//RS                 plane, row.edit_covered, row.reason_covered, row.total
+//RS             ));
+//RS         }
+//RS         out
+//RS     }
+//RS     /// Project the ratified floor as reportable facts without changing the
+//RS     /// stored baseline. This keeps edit coverage and reviewed-reason coverage
+//RS     /// visible as separate counters.
+//RS     pub fn facts(&self) -> Vec<CoverageFact> {
+//RS         self.rows
+//RS             .iter()
+//RS             .map(|(plane, row)| CoverageFact {
+//RS                 plane: plane.clone(),
+//RS                 rows: row.total,
+//RS                 edit_covered: row.edit_covered,
+//RS                 reason_covered: row.reason_covered,
+//RS                 uncovered: row
+//RS                     .total
+//RS                     .saturating_sub(row.edit_covered + row.reason_covered),
+//RS                 ..CoverageFact::default()
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS 
+//RS     pub fn from_facts(facts: &[CoverageFact]) -> Self {
+//RS         let rows = facts
+//RS             .iter()
+//RS             .map(|fact| {
+//RS                 (
+//RS                     fact.plane.clone(),
+//RS                     CoverageBaselineRow {
+//RS                         edit_covered: fact.edit_covered,
+//RS                         reason_covered: fact.reason_covered,
+//RS                         total: fact.rows,
+//RS                     },
+//RS                 )
+//RS             })
+//RS             .collect();
+//RS         Self { rows }
+//RS     }
+//RS 
+//RS     pub fn validate(&self, current: &[CoverageFact]) -> Result<(), String> {
+//RS         let current = current
+//RS             .iter()
+//RS             .map(|fact| (fact.plane.as_str(), fact))
+//RS             .collect::<BTreeMap<_, _>>();
+//RS         for (plane, previous) in &self.rows {
+//RS             let Some(fact) = current.get(plane.as_str()) else {
+//RS                 return Err(format!("coverage plane `{plane}` disappeared"));
+//RS             };
+//RS             let current_row = CoverageBaselineRow {
+//RS                 edit_covered: fact.edit_covered,
+//RS                 reason_covered: fact.reason_covered,
+//RS                 total: fact.rows,
+//RS             };
+//RS             validate_non_decreasing_row(plane, *previous, current_row)?;
+//RS             let previous_uncovered = previous
+//RS                 .total
+//RS                 .saturating_sub(previous.edit_covered + previous.reason_covered);
+//RS             if current_row.total > previous.total {
+//RS                 let current_uncovered = current_row
+//RS                     .total
+//RS                     .saturating_sub(current_row.edit_covered + current_row.reason_covered);
+//RS                 if current_uncovered > previous_uncovered {
+//RS                     return Err(format!(
+//RS                         "new row in open coverage plane `{plane}` has neither fix_edits nor no_fix_reason"
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         for fact in current.values() {
+//RS             if !self.rows.contains_key(fact.plane.as_str()) && fact.uncovered > 0 {
+//RS                 return Err(format!(
+//RS                     "new coverage plane `{}` has a row with neither fix_edits nor no_fix_reason",
+//RS                     fact.plane
+//RS                 ));
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS pub fn validate_non_decreasing(previous: &CoverageFact, current: &CoverageFact) -> Result<(), String> {
+//RS     if previous.plane != current.plane {
+//RS         return Err("coverage ratchet compares different planes".to_string());
+//RS     }
+//RS     validate_non_decreasing_row(
+//RS         &current.plane,
+//RS         CoverageBaselineRow {
+//RS             edit_covered: previous.edit_covered,
+//RS             reason_covered: previous.reason_covered,
+//RS             total: previous.rows,
+//RS         },
+//RS         CoverageBaselineRow {
+//RS             edit_covered: current.edit_covered,
+//RS             reason_covered: current.reason_covered,
+//RS             total: current.rows,
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn validate_non_decreasing_row(
+//RS     plane: &str,
+//RS     previous: CoverageBaselineRow,
+//RS     current: CoverageBaselineRow,
+//RS ) -> Result<(), String> {
+//RS     if current.edit_covered < previous.edit_covered
+//RS         || current.reason_covered < previous.reason_covered
+//RS         || current.total < previous.total
+//RS     {
+//RS         return Err(format!("coverage baseline decreased for plane `{plane}`"));
+//RS     }
+//RS     if current.edit_covered + current.reason_covered > current.total {
+//RS         return Err(format!("coverage counts exceed total for plane `{plane}`"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub fn validate_registry_coverage(
+//RS     entries: impl IntoIterator<Item = CoverageEntry>,
+//RS     baseline: &CoverageBaseline,
+//RS ) -> Result<Vec<CoverageFact>, String> {
+//RS     let facts = try_facts(entries)?;
+//RS     baseline.validate(&facts)?;
+//RS     Ok(facts)
+//RS }
+// END-PORT-PENDING 0059 crates/jet-foundation/src/Coverage.rs:1-287
+

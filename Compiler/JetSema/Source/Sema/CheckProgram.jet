@@ -1,18 +1,30 @@
 // Module-level declaration registration followed by function body checking.
 // The result explicitly reports when a source form lies beyond this checker
 // slice so consumers cannot treat its TIR as a complete semantic program.
+use core.files.runtime.kernel_path_components as sema_program_os_path
 use jet_foundation.[
     AccessConvention,
+    CodeModule,
     CompilerTraceSink,
     DIAGNOSTIC_ERROR,
     Diagnostic,
     Expr,
     Func,
+    FailureContract,
     Item,
-    MIRNameAlias,
-    MIRNameDeclaration,
-    MIRNameFacts,
-    MIRNameModule,
+    PolicyKey,
+    MIRAppGraph,
+    NameLedger,
+    name_ledger_new,
+    name_ledger_declare,
+    name_ledger_record_alias,
+    name_ledger_record_reference,
+    name_ledger_record_display_path,
+    name_ledger_record_import_target,
+    name_ledger_record_alias_use,
+    name_ledger_set_module,
+    name_ledger_set_module_namespace,
+    name_ledger_record_structure_fact,
     MIRNameReference,
     MIRNameVisibility,
     MIRRuntimeLayer,
@@ -40,6 +52,7 @@ use jet_foundation.[
     TFunc,
     TFuncKind,
     TGenericParam,
+    TJobFact,
     TParameter,
     TStmt,
     TTargetApplicability,
@@ -55,6 +68,10 @@ use jet_foundation.[
     ViewSourcePath,
     ViewSourceProjection,
     expr_span,
+    failure_contract_from_return_type,
+    failure_contract_source,
+    func_failure_contract,
+    foundation_decode_generated_path_suffix,
     symbol_id,
     tir_symbol_local,
     type_name,
@@ -64,6 +81,7 @@ use jet_foundation.[
 pub struct SemaResult {
     pub module_name: String
     pub functions: [TFunc]
+    pub jobs: [TJobFact]{[TJobFact]{}}
     pub call_facts: [SemaCallSiteFact]
     pub hardware_use: MIRTargetHardwareUse
     pub name_references: [SemaNameReferenceFact]
@@ -84,6 +102,7 @@ pub struct SemaGraphModuleResult {
     pub source_file: String
     pub declarations: TDeclarationFacts
     pub functions: [TFunc]
+    pub jobs: [TJobFact]{[TJobFact]{}}
     pub nominals: [SemaRegistrationNominal]
     // Position in `nominals` of the first nominal per declared name, so a
     // nominal spelling resolves without scanning every module's nominals.
@@ -194,13 +213,16 @@ pub struct SemaRegistrationPackagePolicy {
     pub authority_needs: [String]
     pub runtime_ceiling: MIRRuntimeLayer?
     pub edition: String
+    pub dependency_names: [String:Bool]
+    pub dep_roots: [String:sema_program_os_path.OsPath]
+    pub dependency_allowlist: [String:Bool]?
 }
 
 pub struct SemaComptimeDeclarationStage {
     pub modules: [SemaGraphModuleResult]
     pub imports: [SemaRegistrationImport]
     pub package_policies: [SemaRegistrationPackagePolicy]
-    pub names: MIRNameFacts
+    pub names: NameLedger
     pub sources: [SemaComptimeItemSource]
     pub diagnostics: [Diagnostic]
     pub complete: Bool
@@ -217,6 +239,7 @@ pub struct SemaComptimeItemCheck {
 pub struct SemaComptimeFunctionResult {
     pub module_identity: String
     pub function_key: String
+    pub job: TJobFact?{None}
     pub function: TFunc?
     pub dependencies: [String]
     pub waiting_dependencies: [String]
@@ -235,6 +258,13 @@ pub struct SemaComptimeFunctionResult {
     pub incomplete_reasons: [String]{[String]{}}
 }
 
+pub struct SemaCheckedCallableReturn {
+    pub module_identity: String
+    pub name: String
+    pub return_type: Type?
+    pub failure_contract: FailureContract
+}
+
 pub struct SemaGraphResult {
     pub package_identity: String
     pub entry_module_identity: String
@@ -247,16 +277,23 @@ pub struct SemaGraphResult {
     pub comptime_requests: [SemaComptimeRequest]
     pub comptime_body_sources: [SemaComptimeBodySource]
     pub compute_facts: [SemaComputeFunctionFacts]
-    pub names: MIRNameFacts
+    pub names: NameLedger
+    // Required, retained by the same Checks solve that publishes TIR effects.
+    pub effect_facts: SemIndexEffectFacts
     pub diagnostics: [Diagnostic]
     pub complete: Bool
     // #3708: the unannotated top-level functions the bundle failure solve
     // proved infallible, by symbol key.
     pub inferred_infallible: [String]{[String]{}}
+    // Authored/projected callable signatures for receipt consumers. Keep
+    // declaration metadata, not another copied registration graph.
+    pub callable_returns: [SemaCheckedCallableReturn]{[SemaCheckedCallableReturn]{}}
+    pub incomplete_reasons: [String]{[String]{}}
 }
 
 struct SemaFunctionResult {
     value: TFunc?
+    job: TJobFact?{None}
     complete: Bool
     exact_int_reachable: Bool
     copy_events: [SemaCopyEvent]
@@ -834,6 +871,11 @@ fn sema_function_kind_owner_type(function_kind: TFuncKind) -> Type? {
 // place on `module_scopes`, then both are restored. Copying them per function
 // cost a copy of the registration graph and of every module declaration.
 fn sema_function_check(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, module_scopes: &SemaScopeTable, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+    sema_incremental_function_check(func, owner_id, function_kind, raw_protocol_return, &environment, &module_scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+}
+
+// Rust Bundle/Validation.rs check_func_body's real miss path.
+fn sema_function_check_uncached(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, module_scopes: &SemaScopeTable, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     base_generic_params :: ~environment.generic_params
     share_known := [Span]{}
     loop {
@@ -929,7 +971,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if func.is_comptime -> scopes.comptime_execution_depth = 1
     context := sema_check_context_init()
     context.generic_params = generic_params
-    if func.return_type != None -> context.failure_contract_source = sema_failure_contract_source(func.return_type)
+    if func.return_type != None -> context.failure_contract_source = failure_contract_source(func_failure_contract(func))
     // A lifted inline-module member reports its own body under its source name.
     context.function_name = sema_inline_member_source_name(func.name)
     updated.function_name = func.name
@@ -945,6 +987,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if func.is_unsafe {
         unsafe_source :: sema_effect_source_from_function_key(func, module_identity, owner_id.key)
         unsafe_gate_valid = sema_effect_check_unsafe_function(unsafe_source, &diagnostics)
+        if !sema_scope_audited_gate_allowed(scopes, PolicyKey.Unsafe, func.unsafe_span ?? func.span, &diagnostics) -> unsafe_gate_valid = false
         if !unsafe_gate_valid -> complete = false
     }
     if !sema_function_header_supported(func, &context) -> complete = false
@@ -1025,6 +1068,12 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         }
         param_index += 1
     }
+    // Rust Registration.rs:773: all parameters are now in scope. The
+    // retained target index supplies only this callable's marker arguments.
+    if !sema_marker_rules_check_target(func.span, updated, &scopes, &state, &tail_store, &context, &diagnostics) -> complete = false
+    if func.meta == .Val(meta) && meta.span != func.span {
+        if !sema_marker_rules_check_target(meta.span, updated, &scopes, &state, &tail_store, &context, &diagnostics) -> complete = false
+    }
     if func.return_type == .Val(declared_return) {
         resolved_return := declared_return
         resolved_return = sema_function_resolve_declared(updated, declared_return, module_identity, generic_params)
@@ -1033,6 +1082,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if func.is_unsafe && unsafe_gate_valid -> context.unsafe_depth = 1
     contract :: sema_contract_check_function(func, updated, &scopes, &state, &tail_store, &context, &diagnostics)
     if !contract.complete -> complete = false
+    context.arithmetic_policy = sema_function_header_arithmetic_policy(func)
 
 
     // D-DISCARD1=A: with no written return type the function returns
@@ -1057,6 +1107,11 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     loop site in state.share_found -> &share_found.push(site)
     if !statements.complete -> complete = false
     if !sema_check_never_fallthrough(func, scopes, &diagnostics) -> complete = false
+    // Rust BodyCheck::check_fn calls check_every_marker after typed marker
+    // validation, even when another body error prevents a TIR function.
+    job_schedule :: sema_check_every_marker(func, updated, context)
+    loop diagnostic in job_schedule.diagnostics -> &diagnostics.push(diagnostic)
+    if !job_schedule.complete -> complete = false
     body := statements.value
     if contract.complete && contract.post.len() > 0 {
         body = [TStmt]{TStmt.ContractScope{pre: [TContract]{}, body: body, post: contract.post, result: contract.result, span: func.span}}
@@ -1131,8 +1186,12 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         uses_stack_sentry: false,
         kind: function_kind,
     }
+    job_artifact :: sema_check_job_artifact(func, tir, updated)
+    loop diagnostic in job_artifact.diagnostics -> &diagnostics.push(diagnostic)
+    if !job_artifact.complete -> return sema_function_check_incomplete(owner_id.key, context)
     SemaFunctionResult{
         value: Val(tir),
+        job: job_artifact.fact,
         complete: true,
         exact_int_reachable: context.exact_int_reachable,
         copy_events: ~context.copy_events,
@@ -1146,6 +1205,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
 pub fn check_program(program: Program, module_name: String, source_file: String, source_segments: [SemaSourceSegment]) -> SemaResult {
     diagnostics := [Diagnostic]{}
     functions := [TFunc]{}
+    jobs := [TJobFact]{}
     call_facts := [SemaCallSiteFact]{}
     hardware_use := sema_hardware_empty_use()
     name_references := [SemaNameReferenceFact]{}
@@ -1203,6 +1263,7 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
                 loop fact in function_call_facts -> &call_facts.push(fact)
                 loop request in function_comptime_requests -> &comptime_requests.push(request)
                 loop reference in function_name_references -> &name_references.push(reference)
+                if checked.complete && checked.job == .Val(job) -> &jobs.push(job)
                 if !checked.complete || !sema_append_function(&functions, checked) -> complete = false
             }
             else -> {}
@@ -1213,7 +1274,7 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
     // failure-domain obligation is emitted as reported.
     if sema_failure_settle_obligations(&diagnostics, [String]{}) -> complete = false
     sema_attach_diagnostic_source_locations(&diagnostics, 0, source_segments)
-    SemaResult{module_name: module_name, functions: functions, call_facts: call_facts, hardware_use: hardware_use, comptime_requests: comptime_requests, comptime_body_sources: comptime_body_sources, compute_facts: compute_facts, name_references: name_references, exact_int_reachable: exact_int_reachable, copy_events: copy_events, diagnostics: diagnostics, complete: complete}
+    SemaResult{module_name: module_name, functions: functions, jobs: jobs, call_facts: call_facts, hardware_use: hardware_use, comptime_requests: comptime_requests, comptime_body_sources: comptime_body_sources, compute_facts: compute_facts, name_references: name_references, exact_int_reachable: exact_int_reachable, copy_events: copy_events, diagnostics: diagnostics, complete: complete}
 }
 
 fn sema_comptime_find_checked_function(functions: [SemaComptimeFunctionResult], module_identity: String, function_key: String) -> SemaComptimeFunctionResult? {
@@ -1404,6 +1465,7 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &
         module_identity: module_identity,
         function_key: function_key,
         function: checked.value,
+        job: checked.job,
         dependencies: dependencies,
         waiting_dependencies: waiting,
         calls: calls,
@@ -1550,8 +1612,6 @@ fn sema_check_unsupported_program_forms(program: Program) -> [String] Never! {
     if program.html_path != None -> &forms.push("html path")
     if sema_function_memory_has_unsupported_policies(program.policy_declarations) -> &forms.push("memory policy")
     if program.user_policy_declarations.len() > 0 -> &forms.push("user policy declarations")
-    if program.applied_rules.len() > 0 -> &forms.push("applied rules")
-    if program.rule_facts.len() > 0 -> &forms.push("rule facts")
     forms
 }
 
@@ -1603,6 +1663,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
     source_module :: graph.modules[module_index]
     diagnostics := [Diagnostic]{}
     functions := [TFunc]{}
+    jobs := [TJobFact]{}
     call_facts := [SemaCallSiteFact]{}
     hardware_use := sema_hardware_empty_use()
     name_references := [SemaNameReferenceFact]{}
@@ -1630,18 +1691,30 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
     }
     sema_scope_environment_enter_module(&environment, source_module, sema_comptime_body_values_from_items(values))
     program := source_module.program
+    // Rust CheckInner::check_marker_vocabulary / check_declared_rule_facts.
+    // Dynamic arguments are checked by function/statement hooks in their live
+    // scopes. Static arguments wait until the declaration products are staged.
+    if environment.marker_registry == .Val(registry) {
+        marker_state := sema_ownership_state_init()
+        marker_tails := sema_statement_tail_store_init()
+        marker_context := sema_check_context_init()
+        marker_check :: sema_marker_rules_check(registry, program, environment, &scopes, &marker_state, &marker_tails, &marker_context, values, check_bodies)
+        loop diagnostic in marker_check.diagnostics -> &diagnostics.push(diagnostic)
+        loop request in marker_check.comptime_requests -> &comptime_requests.push(request)
+        if sema_has_error_since(marker_check.diagnostics, 0) {
+            complete = false
+            &incomplete_reasons.push("marker declaration validation reported errors")
+        }
+    } else {
+        complete = false
+        &incomplete_reasons.push("the retained marker vocabulary could not be constructed")
+    }
     // `block_spans` is source-layout metadata (every braced body records one),
     // not executable content, so it never makes a module incomplete.
     unsupported_forms := sema_check_unsupported_program_forms(program)
     if unsupported_forms.len() > 0 {
         complete = false
         loop form in unsupported_forms -> &incomplete_reasons.push("unsupported program form `{form}`")
-    }
-    job_diagnostics := sema_check_job_names(program.items)
-    if job_diagnostics.len() > 0 {
-        loop diagnostic in job_diagnostics -> &diagnostics.push(diagnostic)
-        complete = false
-        &incomplete_reasons.push("invalid job names")
     }
     item_index := 0
     loop item_index < program.items.len() {
@@ -1650,7 +1723,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
             // (the canonical effect module): registration consumes them and
             // runtime lowering excludes them, like the Rust checker ignoring
             // `Item::EffectDecl`.
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .Const(_) | .UnitFamily(_) | .Impl(_) | .EffectDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .Const(_) | .UnitFamily(_) | .Impl(_) | .EffectDecl(_) | .Module(_) -> {}
             // Foreign blocks register their functions, which the foreign stage
             // below checks (Rust `CheckInner` foreign registration); marker and
             // derive declarations are consumed by the applied-rule registry and
@@ -1718,7 +1791,9 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                         summary_row := sema_function_memory_find(memory_plan, source_module.module_identity, func.span)
                         summary_func := func
                         if summary_row == .Val(row) -> summary_func = row.function
+                        environment.incremental_probe = true
                         checked := sema_function_check(summary_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, false, &environment, &scopes, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
+                        environment.incremental_probe = false
                         if checked.value == .Val(function) {
                             _ := sema_function_publish_return_views(&scopes, function)
                             provenance = function.return_view_provenance
@@ -1763,6 +1838,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                             }
                             loop source in checked_function.comptime_body_sources -> &comptime_body_sources.push(source)
                             &compute_facts.push(checked_function.compute_facts)
+                            if checked_function.complete && checked_function.job == .Val(job) -> &jobs.push(job)
                         }
                         .None -> {
                             function_call_facts := [SemaCallSiteFact]{}
@@ -1804,6 +1880,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                             loop fact in function_call_facts -> &call_facts.push(fact)
                             loop request in function_comptime_requests -> &comptime_requests.push(request)
                             loop reference in function_name_references -> &name_references.push(reference)
+                            if checked.complete && checked.job == .Val(job) -> &jobs.push(job)
                             if !checked.complete {
                                 complete = false
                                 sema_check_push_function_reasons("function `{func.name}`", checked, &incomplete_reasons)
@@ -1900,6 +1977,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         module_identity: source_module.module_identity,
         module_name: source_module.module_name,
         functions: functions,
+        jobs: jobs,
         nominals: source_module.nominals,
         nominal_positions: sema_check_nominal_positions(source_module.nominals),
         constants: source_module.constants,
@@ -1934,13 +2012,13 @@ fn sema_name_visibility(value: Int) -> MIRNameVisibility Never! {
     MIRNameVisibility.Private
 }
 
-// Name facts keep the first row per identity. Rows are appended as found and
-// `sema_name_build_facts` drops later duplicates once, in one indexed pass.
-fn sema_name_add_declaration(facts: &MIRNameFacts, module_index: Int, name: String, path: String, kind: String, span: Span, visibility: MIRNameVisibility) Never! {
-    &facts.declarations.push(MIRNameDeclaration{module_index: module_index, name: name, path: path, kind: kind, span: span, visibility: visibility})
+// Registration writes are ordered. As in Rust NameLedger's insert, the latest
+// row owns each declaration/alias/use-site key; first insertion fixes order.
+fn sema_name_add_declaration(facts: &NameLedger, module_index: Int, name: String, path: String, kind: String, span: Span, visibility: MIRNameVisibility) Never! {
+    name_ledger_declare(&facts, module_index, name, path, kind, span, visibility)
 }
 
-fn sema_name_add_reference(facts: &MIRNameFacts, graph: SemaRegistrationGraph, owner_names: [String:String], span: Span, symbol: Symbol, kind: String) Never! {
+fn sema_name_add_reference(facts: &NameLedger, graph: SemaRegistrationGraph, owner_names: [String:String], source_path: String, span: Span, symbol: Symbol, kind: String) Never! {
     module_index :: sema_registration_module_index(graph, symbol.module_name) ?? return
     source_module :: graph.modules[module_index]
     declaration_name := symbol.name
@@ -1951,7 +2029,7 @@ fn sema_name_add_reference(facts: &MIRNameFacts, graph: SemaRegistrationGraph, o
     }
     semantic_identity := String?{None}
     if kind != "local" && kind != "param" -> semantic_identity = Val("{source_module.package_identity}::{source_module.module_path}::{declaration_name}")
-    &facts.references.push(MIRNameReference{module_path: source_module.module_path, kind: kind, def_span: symbol.span, semantic_identity: semantic_identity})
+    name_ledger_record_reference(&facts, source_path, span.start, span.end, MIRNameReference{module_path: source_module.module_path, kind: kind, def_span: symbol.span, semantic_identity: semantic_identity})
 }
 
 fn sema_name_owner_index_key(module_index: Int, owner_key: String) -> String Never! {
@@ -2004,50 +2082,9 @@ fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> [String:SemaNameResol
     index
 }
 
-fn sema_name_first_declarations(rows: [MIRNameDeclaration]) -> [MIRNameDeclaration] Never! {
-    seen := [String:Bool]{}
-    kept := [MIRNameDeclaration]{}
-    loop row in rows {
-        key :: "{row.module_index}|{row.name}"
-        if seen.get(key) != None -> next
-        seen[key] = true
-        &kept.push(row)
-    }
-    kept
-}
-
-fn sema_name_first_aliases(rows: [MIRNameAlias]) -> [MIRNameAlias] Never! {
-    seen := [String:Bool]{}
-    kept := [MIRNameAlias]{}
-    loop row in rows {
-        key :: "{row.module_index}|{row.name}"
-        if seen.get(key) != None -> next
-        seen[key] = true
-        &kept.push(row)
-    }
-    kept
-}
-
-fn sema_name_first_references(rows: [MIRNameReference]) -> [MIRNameReference] Never! {
-    seen := [String:Bool]{}
-    kept := [MIRNameReference]{}
-    loop row in rows {
-        // The path is length-prefixed and the identity is last, so no two
-        // distinct rows share a key.
-        identity :: if row.semantic_identity == {
-            .Val(value) -> "+{value}"
-            else -> "-"
-        }
-        key :: "{row.module_path.len()}:{row.module_path}|{row.kind}|{row.def_span.start}:{row.def_span.end}|{identity}"
-        if seen.get(key) != None -> next
-        seen[key] = true
-        &kept.push(row)
-    }
-    kept
-}
 
 fn sema_name_visibility_flags(is_pub: Bool, is_package_pub: Bool) -> MIRNameVisibility Never! {
-    if is_pub -> return MIRNameVisibility.Public
+    if is_pub && !is_package_pub -> return MIRNameVisibility.Public
     if is_package_pub -> return MIRNameVisibility.Package
     MIRNameVisibility.Private
 }
@@ -2061,18 +2098,31 @@ fn sema_name_scoped_path(prefix: String, name: String) -> String Never! {
     "{prefix}.{name}"
 }
 
-fn sema_name_add_method(facts: &MIRNameFacts, module_index: Int, owner_name: String, owner_path: String, function: Func) Never! {
+fn sema_name_add_method(facts: &NameLedger, module_index: Int, owner_name: String, owner_path: String, function: Func) Never! {
     name := sema_name_scoped(owner_name, function.name)
     path := sema_name_scoped_path(owner_path, function.name)
     visibility := sema_name_visibility_flags(function.is_pub, function.is_package_pub)
     sema_name_add_declaration(&facts, module_index, name, path, "method", function.name_span, visibility)
 }
 
-fn sema_name_add_item(facts: &MIRNameFacts, module_index: Int, module_path: String, prefix: String, item: Item) Never! {
+// Inline lowering retains the generated member key. Its injective path
+// projection, not that key, is the declaration's source-facing canonical path.
+fn sema_name_function_path(module_alias: String, name: String) -> String Never! {
+    if name.starts_with("__jet_") {
+        suffix := name.slice(6, name.len()) // #4303
+        decoded :: foundation_decode_generated_path_suffix(suffix)
+        if decoded == .Val(path) {
+            if path.contains(".") -> return "{module_alias}.{path}"
+        }
+    }
+    "{module_alias}.{name}"
+}
+
+fn sema_name_add_item(facts: &NameLedger, module_index: Int, module_path: String, prefix: String, item: Item) Never! {
     if item == {
         .Func(function) -> {
             name := sema_name_scoped(prefix, function.name)
-            path := sema_name_scoped_path(module_path, function.name)
+            path := sema_name_function_path(module_path, function.name)
             visibility := sema_name_visibility_flags(function.is_pub, function.is_package_pub)
             sema_name_add_declaration(&facts, module_index, name, path, "function", function.name_span, visibility)
         }
@@ -2137,7 +2187,7 @@ fn sema_name_add_item(facts: &MIRNameFacts, module_index: Int, module_path: Stri
         .Const(definition) -> {
             name := sema_name_scoped(prefix, definition.name)
             path := sema_name_scoped_path(module_path, definition.name)
-            sema_name_add_declaration(&facts, module_index, name, path, "const", definition.name_span, MIRNameVisibility.Private)
+            sema_name_add_declaration(&facts, module_index, name, path, "const", definition.name_span, sema_name_visibility_flags(definition.is_pub, definition.is_package_pub))
         }
         .ExternRust(block) -> {
             loop function in block.functions {
@@ -2190,7 +2240,7 @@ fn sema_name_tir_visibility(value: TVisibility) -> MIRNameVisibility Never! {
     MIRNameVisibility.Private
 }
 
-fn sema_name_add_tir_declarations(facts: &MIRNameFacts, module_index: Int, module_path: String, declarations: TDeclarationFacts) Never! {
+fn sema_name_add_tir_declarations(facts: &NameLedger, module_index: Int, module_path: String, declarations: TDeclarationFacts) Never! {
     loop definition in declarations.type_defs {
         name := definition.name
         path := sema_name_scoped_path(module_path, name)
@@ -2215,44 +2265,186 @@ fn sema_name_add_tir_declarations(facts: &MIRNameFacts, module_index: Int, modul
     }
 }
 
-fn sema_name_add_alias(facts: &MIRNameFacts, module_index: Int, name: String, target: String, target_module: Int?, span: Span, visibility: Int) Never! {
-    &facts.aliases.push(MIRNameAlias{module_index: module_index, name: name, target: target, target_module: target_module, span: span, visibility: sema_name_visibility(visibility)})
+fn sema_name_add_alias(facts: &NameLedger, module_index: Int, name: String, target: String, target_module: Int?, span: Span, visibility: Int) Never! {
+    name_ledger_record_alias(&facts, module_index, name, target, target_module, span, sema_name_visibility(visibility))
 }
 
-pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> MIRNameFacts Never! {
-    facts := MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
-    loop graph_module in graph.modules -> &facts.modules.push(MIRNameModule{alias: graph_module.module_name, path: graph_module.module_path, package: graph_module.package_identity})
+// Rust Bundle/GenericModules.rs:146-383. Capture the checked expansion's
+// presentation without resolving names again or changing semantic identities.
+fn sema_name_strip_prefix(name: String, prefix: String) -> String Never! {
+    if !name.starts_with(prefix) -> return name
+    suffix := name.slice(prefix.len(), name.len()) // #4303
+    suffix
+}
+
+fn sema_name_display_add(facts: &NameLedger, module_index: Int, module_alias: String, internal: String, display: String) Never! {
+    name_ledger_record_display_path(&facts, module_index, "{module_alias}.{internal}", display)
+}
+
+fn sema_name_display_methods(facts: &NameLedger, module_index: Int, module_alias: String, internal: String, display: String, methods: [Func]) Never! {
+    loop method in methods -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{method.name}", "{display}.{method.name}")
+}
+
+fn sema_name_display_item(facts: &NameLedger, module_index: Int, module_alias: String, scope: String, internal_prefix: String, display_prefix: String, item: Item) Never! {
+    type_prefix :: sema_inline_type_prefix(scope)
+    value_prefix :: sema_genmod_value_name(scope, "")
+    if item == {
+        .Struct(definition) -> {
+            internal :: sema_name_scoped(internal_prefix, definition.name)
+            display :: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
+            sema_name_display_add(&facts, module_index, module_alias, internal, display)
+            loop field in definition.fields -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{field.name}", "{display}.{field.name}")
+            sema_name_display_methods(&facts, module_index, module_alias, internal, display, definition.methods)
+            loop implementation in definition.trait_impls -> sema_name_display_methods(&facts, module_index, module_alias, internal, display, implementation.methods)
+        }
+        .Enum(definition) -> {
+            internal :: sema_name_scoped(internal_prefix, definition.name)
+            display :: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
+            sema_name_display_add(&facts, module_index, module_alias, internal, display)
+            loop variant in definition.variants -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{variant.name}", "{display}.{variant.name}")
+            sema_name_display_methods(&facts, module_index, module_alias, internal, display, definition.methods)
+            loop implementation in definition.trait_impls -> sema_name_display_methods(&facts, module_index, module_alias, internal, display, implementation.methods)
+        }
+        .Trait(definition) -> {
+            internal :: sema_name_scoped(internal_prefix, definition.name)
+            display :: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
+            sema_name_display_add(&facts, module_index, module_alias, internal, display)
+            loop method in definition.methods -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{method.name}", "{display}.{method.name}")
+        }
+        .Tag(definition) -> sema_name_display_add(&facts, module_index, module_alias, sema_name_scoped(internal_prefix, definition.name), "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}")
+        .Const(definition) -> sema_name_display_add(&facts, module_index, module_alias, sema_name_scoped(internal_prefix, definition.name), "{display_prefix}.{sema_name_strip_prefix(definition.name, value_prefix)}")
+        .Func(function) -> sema_name_display_add(&facts, module_index, module_alias, sema_name_scoped(internal_prefix, function.name), "{display_prefix}.{function.name}")
+        .Impl(implementation) -> {
+            internal :: sema_name_scoped(internal_prefix, implementation.type_name)
+            display :: "{display_prefix}.{sema_name_strip_prefix(implementation.type_name, type_prefix)}"
+            sema_name_display_add(&facts, module_index, module_alias, internal, display)
+            sema_name_display_methods(&facts, module_index, module_alias, internal, display, implementation.methods)
+        }
+        .CodeModule(child) -> {
+            internal :: sema_name_scoped(internal_prefix, child.name)
+            display :: "{display_prefix}.{sema_name_strip_prefix(child.name, value_prefix)}"
+            sema_name_display_add(&facts, module_index, module_alias, internal, display)
+            if child.body == .Val(body) {
+                loop nested in body -> sema_name_display_item(&facts, module_index, module_alias, child.name, internal, display, nested)
+            }
+        }
+        else -> {}
+    }
+}
+
+fn sema_name_display_selected(item: Item, type_prefix: String, value_prefix: String?) -> Bool Never! {
+    if item == {
+        .Struct(definition) -> definition.name.starts_with(type_prefix)
+        .Enum(definition) -> definition.name.starts_with(type_prefix)
+        .Trait(definition) -> definition.name.starts_with(type_prefix)
+        .Tag(definition) -> definition.name.starts_with(type_prefix)
+        .Impl(implementation) -> implementation.type_name.starts_with(type_prefix)
+        .Const(definition) -> if value_prefix == .Val(prefix) -> definition.name.starts_with(prefix) else -> false
+        .CodeModule(child) -> if value_prefix == .Val(prefix) -> child.name.starts_with(prefix) else -> false
+        else -> false
+    }
+}
+
+fn sema_name_plain_display_paths(facts: &NameLedger, module_index: Int, module_alias: String, instance: CodeModule, source_path: String, display_path: String, items: [Item]) Never! {
+    scope :: sema_inline_type_alias(source_path)
+    type_prefix :: sema_inline_type_prefix(scope)
+    loop item in items {
+        if sema_name_display_selected(item, type_prefix, None) -> sema_name_display_item(&facts, module_index, module_alias, scope, "", display_path, item)
+    }
+    if instance.body == .Val(body) {
+        loop item in body {
+            if item == .CodeModule(child) -> sema_name_plain_display_paths(&facts, module_index, module_alias, child, "{source_path}.{child.name}", "{display_path}.{child.name}", items)
+        }
+    }
+}
+
+fn sema_name_add_display_paths(facts: &NameLedger, module_index: Int, module_alias: String, items: [Item]) Never! {
+    loop item in items {
+        if item == .CodeModule(instance) {
+            if instance.instance_identity != None {
+                sema_name_display_add(&facts, module_index, module_alias, instance.name, instance.name)
+                if instance.body == .Val(body) {
+                    loop nested in body -> sema_name_display_item(&facts, module_index, module_alias, instance.name, instance.name, instance.name, nested)
+                }
+                type_prefix :: sema_inline_type_prefix(instance.name)
+                value_prefix :: sema_genmod_value_name(instance.name, "")
+                loop lifted in items {
+                    if sema_name_display_selected(lifted, type_prefix, Val(value_prefix)) -> sema_name_display_item(&facts, module_index, module_alias, instance.name, "", instance.name, lifted)
+                }
+            } else if instance.body != None -> sema_name_plain_display_paths(&facts, module_index, module_alias, instance, instance.name, instance.name, items)
+        }
+    }
+}
+
+pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> NameLedger Never! {
+    facts := name_ledger_new()
+    loop (index, graph_module) in graph.modules {
+        name_ledger_set_module(&facts, index, graph_module.module_name, graph_module.module_path, graph_module.package_identity)
+        if sema_registration_package_is_namespace(graph_module.package_identity) -> name_ledger_set_module_namespace(&facts, index, graph_module.package_identity)
+    }
     owner_names :: sema_name_owner_index(graph)
     symbol_index :: sema_name_symbol_index(graph)
     module_index := 0
     loop module_index < graph.modules.len() {
         source :: graph.modules[module_index]
         checked :: modules[module_index]
-        sema_name_add_tir_declarations(&facts, module_index, source.module_path, checked.declarations)
-        loop item in source.program.items -> sema_name_add_item(&facts, module_index, source.module_path, "", item)
+        sema_name_add_tir_declarations(&facts, module_index, source.module_name, checked.declarations)
+        loop item in source.program.items -> sema_name_add_item(&facts, module_index, source.module_name, "", item)
+        sema_name_add_display_paths(&facts, module_index, source.module_name, source.program.items)
         loop import in source.imports {
-            target_index := sema_registration_module_index(graph, import.target_module_identity)
+            target_index :: sema_registration_module_index(graph, import.target_module_identity)
+            if target_index == .Val(target) -> name_ledger_record_import_target(&facts, module_index, import.declaration.span, target)
             target_name := import.target_module_identity
-            if target_index != None -> target_name = graph.modules[target_index ?? 0].module_name
-            target_alias := import.declaration.alias
-            if import.declaration.kind == {
-                .File(path, _) -> target_name = path
-                .Module(name, _) -> target_name = name
-                .Unqualified(module_alias, _, _, _, _) -> target_name = module_alias
+            if target_index == .Val(index) -> target_name = graph.modules[index].module_name
+            else {
+                if import.declaration.kind == {
+                    .File(path, _) -> target_name = path
+                    .Module(name, _) -> target_name = name
+                    .Unqualified(module_alias, _, _, _, _) -> target_name = module_alias
+                }
             }
-            sema_name_add_alias(&facts, module_index, target_alias, target_name, target_index, import.declaration.alias_span, import.visibility)
+            // `use dep.[names]` must not replace the separate namespace binding.
+            namespace_bound_elsewhere := false
+            if import.declaration.kind == .Unqualified(_, _, _, _, _) {
+                loop other in source.imports {
+                    if other.declaration.alias != import.declaration.alias -> next
+                    if other.declaration.kind == {
+                        .File(_, _) | .Module(_, _) -> namespace_bound_elsewhere = true
+                        else -> {}
+                    }
+                }
+            }
+            if !namespace_bound_elsewhere -> sema_name_add_alias(&facts, module_index, import.declaration.alias, target_name, target_index, import.declaration.alias_span, import.visibility)
             if import.declaration.kind == {
                 .Unqualified(_, _, _, _, _) -> {
-                    loop binding in import.bindings -> sema_name_add_alias(&facts, module_index, binding.local, "{target_name}.{binding.original}", sema_registration_module_index(graph, binding.target_module_identity), binding.symbol.span, binding.visibility)
+                    loop binding in import.bindings {
+                        owner_index :: sema_registration_module_index(graph, binding.target_module_identity)
+                        owner_name := binding.target_module_identity
+                        if owner_index == .Val(index) -> owner_name = graph.modules[index].module_name
+                        target := "{owner_name}.{binding.original}"
+                        if binding.symbol.kind == SymbolKind.Import -> target = owner_name
+                        sema_name_add_alias(&facts, module_index, binding.local, target, owner_index, binding.symbol.span, binding.visibility)
+                    }
                 }
                 else -> {}
             }
         }
-        loop reference in checked.name_references -> sema_name_add_reference(&facts, graph, owner_names, reference.span, reference.symbol, reference.kind)
+        // Units dimension claims consume the exact written import aliases,
+        // including unqualified public claims; preserve those ledger reads.
+        loop alias in source.unit_dimension_aliases {
+            loop import in source.imports {
+                if import.declaration.alias != alias -> next
+                name_ledger_record_alias_use(&facts, module_index, import.declaration.alias_span)
+                loop binding in import.bindings {
+                    if binding.symbol.kind == SymbolKind.Import -> sema_name_add_reference(&facts, graph, owner_names, source.module_path, import.declaration.alias_span, binding.symbol, "import_alias")
+                }
+            }
+        }
+        loop reference in checked.name_references -> sema_name_add_reference(&facts, graph, owner_names, source.module_path, reference.span, reference.symbol, reference.kind)
         loop call in checked.call_facts {
             callee :: call.callee ?? next
             resolved :: symbol_index.get(callee.key)
-            if resolved == .Val(declaration) -> sema_name_add_reference(&facts, graph, owner_names, call.span, declaration.symbol, declaration.kind)
+            if resolved == .Val(declaration) -> sema_name_add_reference(&facts, graph, owner_names, source.module_path, call.span, declaration.symbol, declaration.kind)
         }
         module_index += 1
     }
@@ -2261,7 +2453,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         target_index :: sema_registration_module_index(graph, edge.target_module_identity) ?? next
         source :: graph.modules[source_index]
         target :: graph.modules[target_index]
-        &facts.structure_facts.push(MIRStructureFact{
+        name_ledger_record_structure_fact(&facts, MIRStructureFact{
             kind: MIRStructureFactKind.ImportEdge,
             subject: "{source.module_name} -> {target.module_name}",
             source: source.module_path,
@@ -2271,13 +2463,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
             gate: None,
         })
     }
-    MIRNameFacts{
-        modules: facts.modules,
-        declarations: sema_name_first_declarations(facts.declarations),
-        aliases: sema_name_first_aliases(facts.aliases),
-        references: sema_name_first_references(facts.references),
-        structure_facts: facts.structure_facts,
-    }
+    facts
 }
 
 // The constant values keyed "{module identity}|{key}", first row winning,
@@ -2879,7 +3065,7 @@ fn sema_compute_module_owns_site(module_result: SemaGraphModuleResult, span: Spa
 // written, and nothing else owns its return protocol (the Rust reference's
 // `failure_inference_candidate`).
 fn sema_failure_inference_candidate(func: Func) -> Bool Never! {
-    if sema_failure_contract_source(func.return_type) != "implicit default !Err" -> return false
+    if failure_contract_source(failure_contract_from_return_type(func.return_type)) != "implicit default !Err" -> return false
     if func.return_type == .Val(.Apply(name, _)) && name == "Stream" -> return false
     !func.compiler_generated && !func.is_comptime && !func.is_job && func.every == None && func.inline_foreign == None && !func.gc_return && func.pre.len() == 0 && func.post.len() == 0 && func.web_marker == None && func.external_type == None
 }
@@ -2908,6 +3094,12 @@ fn sema_failure_solve(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRes
     }
     candidates := [SemaFunctionFailureFacts]{}
     inferred := [String:Bool]{}
+    declared_empty := [String:Bool]{}
+    loop registered_module in graph.modules {
+        loop function in registered_module.functions {
+            if sema_failure_carrier(function.declaration.return_type) == TFailureCarrier.Infallible -> declared_empty[function.symbol.id.key] = true
+        }
+    }
     loop module_result in modules {
         source_index :: sema_registration_module_index(graph, module_result.module_identity) ?? next
         loop facts in module_result.failure_facts {
@@ -2923,7 +3115,7 @@ fn sema_failure_solve(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRes
         loop facts in candidates {
             if !(inferred.get(facts.function_key) ?? false) -> next
             loop edge in facts.edges {
-                if !(inferred.get(edge) ?? false) {
+                if !(inferred.get(edge) ?? false) && !declared_empty.has_key(edge) {
                     inferred[facts.function_key] = false
                     changed = true
                     break
@@ -2983,10 +3175,11 @@ struct SemaFinalizeModuleChecks {
 
 // One body check of every registered module against the graph's current
 // contracts.
-fn sema_finalize_check_modules(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], trace_sink: CompilerTraceSink?) -> SemaFinalizeModuleChecks {
+fn sema_finalize_check_modules(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], trace_sink: CompilerTraceSink?, incremental_cache: Shared<SemaIncrementalSemaCache>?) -> SemaFinalizeModuleChecks {
     if trace_sink == .Val(sink) -> sink.begin("sema.bodies", "", -1, -1)
     memory_plan := sema_function_memory_plan_from_graph(graph)
     environment := sema_check_pass_environment(graph, checked_types)
+    environment.incremental_cache = incremental_cache
     diagnostics := [Diagnostic]{}
     modules := [SemaGraphModuleResult]{}
     complete := true
@@ -3026,7 +3219,13 @@ fn sema_check_script_entries(graph: SemaRegistrationGraph, diagnostics: &[Diagno
     found
 }
 
-pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], trace_sink: CompilerTraceSink?) -> SemaGraphResult {
+pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], trace_sink: CompilerTraceSink?, incremental_cache: Shared<SemaIncrementalSemaCache>?, project_root: sema_program_os_path.OsPath) -> SemaGraphResult {
+    // Rust IncrementalSemaCache::begin_bundle: only the authored registration
+    // contracts participate; downstream inferred contracts are solved afresh.
+    if incremental_cache == .Val(storage) {
+        permit := storage.guard_edit()
+        sema_incremental_begin_graph(&permit.value, graph, stage.package_policies, values)
+    }
     resolved_graph := sema_comptime_graph_with_values(graph, values)
     diagnostics := stage.diagnostics
     checked_types := [TTypeDef]{}
@@ -3034,26 +3233,28 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
         loop type_definition in staged_module.declarations.type_defs -> &checked_types.push(type_definition)
     }
     complete := graph.complete && stage.complete
+    job_reasons := [String]{}
+    if !sema_check_job_graph(resolved_graph, stage.package_policies, &diagnostics, &job_reasons) -> complete = false
     loop result in comptime_functions {
         loop diagnostic in result.diagnostics -> &diagnostics.push(diagnostic)
         if !result.complete -> complete = false
     }
-    checked := sema_finalize_check_modules(resolved_graph, values, comptime_functions, checked_types, trace_sink)
+    // Rust Completion.rs:263–276 probes only selected typed-failure rows
+    // before checking real bodies, so callers read one inferred contract.
+    union_start :: diagnostics.len()
+    _ := sema_failure_union_prepare(&resolved_graph, checked_types, values, &diagnostics)
+    if diagnostics.len() > union_start -> complete = false
+    checked := sema_finalize_check_modules(resolved_graph, values, comptime_functions, checked_types, trace_sink, incremental_cache)
     // #3708: every body is checked, so the failure solve finds the
     // unannotated functions that can never fail.
     if trace_sink == .Val(sink) -> sink.begin("sema.failure", "", -1, -1)
     inferred_infallible := sema_failure_solve(resolved_graph, checked.modules)
-    // D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: the same rows settle the
-    // failure union of every unannotated function. Each inferred contract,
-    // and the `T Never!` plain return of each infallible one (#3708 T1), is
-    // projected onto the graph; the bundle is then checked once more so every
-    // caller, the bodies and lowering read that one contract.
-    union_start :: diagnostics.len()
-    projected := sema_failure_union_infer(&resolved_graph, checked.modules, &diagnostics)
-    if diagnostics.len() > union_start -> complete = false
-    if sema_failure_project_infallible(&resolved_graph, inferred_infallible, comptime_functions) -> projected = true
+    // Rust solve_inferred_failure: project the empty failure set AFTER the
+    // body-products pass. Codegen's existing plain-return reconciliation
+    // consumes the original checked carriers; no second body check occurs.
+    _ := sema_failure_project_infallible(&resolved_graph, inferred_infallible, comptime_functions)
+    sema_failure_project_checked_infallible(resolved_graph, &checked.modules, inferred_infallible)
     if trace_sink == .Val(sink) -> sink.end("sema.failure", inferred_infallible.len())
-    if projected -> checked = sema_finalize_check_modules(resolved_graph, values, comptime_functions, checked_types, trace_sink)
     loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
     if !checked.complete -> complete = false
     modules := checked.modules
@@ -3083,6 +3284,9 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
             call_facts: module_result.call_facts,
             source_segments: source.source_segments,
             trait_bounds: sema_effect_trait_bounds(source.program.items),
+            trait_contracts: sema_effect_trait_contracts(source),
+            compute_facts: module_result.compute_facts,
+            failure_facts: module_result.failure_facts,
         })
     }
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
@@ -3215,6 +3419,32 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
     // D-STRUCT-LIVE1=A: warning-only structure verdicts (L0104/L0105) once
     // every checked body's references are known.
     loop diagnostic in sema_liveness_structure(resolved_graph, modules) -> &diagnostics.push(diagnostic)
+    callable_returns := [SemaCheckedCallableReturn]{}
+    loop registered_module in resolved_graph.modules {
+        loop function in registered_module.functions {
+            &callable_returns.push(SemaCheckedCallableReturn{module_identity: registered_module.module_identity, name: function.declaration.name, return_type: function.declaration.return_type, failure_contract: func_failure_contract(function.declaration)})
+        }
+    }
+    names := sema_name_build_facts(resolved_graph, modules)
+    // Rust Completion.rs: one actual taint producer, shared multirow graph,
+    // checked registry, and checked App discovery before final publication.
+    taint := sema_taint_check_graph(resolved_graph, diagnostics)
+    diagnostics = taint.diagnostics
+    reachability := sema_solve_reachability(effects.summaries, sema_checked_taint_reachability_seeds(resolved_graph, taint))
+    registry := sema_fact_registry_from_checked_taint(resolved_graph, taint)
+    sema_state_check_graph(resolved_graph, modules, call_facts, &registry, &diagnostics)
+    app_check := sema_extract_app_graph(resolved_graph, effects.solved, checked_types, project_root)
+    &diagnostics.extend(app_check.diagnostics)
+    if sema_has_error_since(diagnostics, 0) -> complete = false
+    effect_facts := SemIndexEffectFacts{
+        summaries: effects.summaries, solved: effects.solved,
+        reachability: reachability,
+        memory_declarations: effects.memory_declarations,
+        memory_projections: effects.memory_projections,
+        name_ledger: names,
+        fact_registry: registry,
+        web_app: app_check.graph,
+    }
     SemaGraphResult{
         package_identity: graph.package_identity,
         entry_module_identity: graph.entry_module_identity,
@@ -3227,9 +3457,12 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
         comptime_requests: comptime_requests,
         comptime_body_sources: comptime_body_sources,
         compute_facts: compute_facts,
-        names: sema_name_build_facts(resolved_graph, modules),
+        names: names,
+        effect_facts: effect_facts,
         diagnostics: diagnostics,
         complete: complete,
+        incomplete_reasons: job_reasons,
         inferred_infallible: inferred_infallible,
+        callable_returns: callable_returns,
     }
 }

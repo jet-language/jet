@@ -1,0 +1,1373 @@
+// PORT-PENDING 0529 crates-jet-codegen-src-codegen-tir-tir-to-mir-expr-slice-1: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:1-1369
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Canonical projection of checked TIR expressions and patterns into MIR.
+//RS //!
+//RS //! This module is deliberately a projection only. It consumes facts already
+//RS //! present in checked TIR; it never re-derives meaning from AST.
+//RS use jet_foundation::MIR::{
+//RS     MirAccess, MirAllocatorKind, MirBinaryDispatch, MirBinaryPatternPart, MirBlockId, MirCallArg,
+//RS     MirCallSignature, MirCallbackAdapter, MirCallbackId, MirCallee, MirConstKey, MirConstReport,
+//RS     MirConstant, MirConversion, MirCoreCall, MirCoreClosureKind, MirDataPlan, MirDataPlanCallable,
+//RS     MirDataPlanColumn, MirDataPlanNode, MirDataPlanNodeId, MirDataPlanPhysicalNode, MirEnumArg,
+//RS     MirForeignAbi, MirGcEditSiteId, MirHardwareOp, MirIndexKind, MirLayoutCompareOp, MirOperation,
+//RS     MirOwnership, MirPanicContext, MirPanicLoc, MirParam, MirPattern, MirPatternBinding,
+//RS     MirPatternField, MirPatternPosition, MirPatternShape, MirPlace, MirPlaceBase, MirPlaceId,
+//RS     MirPreludeAbi, MirPreludeFamily, MirPreludeTypeArg, MirReflectField, MirRequireKind,
+//RS     MirSelectKind, MirSemanticOp, MirStringPart, MirStructExtra, MirSymbol, MirTaskGroupKind,
+//RS     MirTerminator, MirTextHoleKind, MirTextPatternPart, MirType, MirTypeId, MirValueId, stable_id,
+//RS };
+//RS 
+//RS use super::{
+//RS     ListSpreadPart, TBinaryPatternPart, TBuiltinOp, TCallArg, TCaptureFacts, TCoreClosureKind,
+//RS     TEffectFacts, TEnumArg, TEnumPayload, TExpr, TExprKind, TFailureCarrier, TFnValueKind,
+//RS     TGcEditKind, THandleOp, THostCall, TLambda, TLambdaBody, TLocal, TMethodRef, TNumericOp,
+//RS     TOptionProbe, TPattern, TPatternBinding, TPatternField, TPatternPosition, TPatternShape,
+//RS     TPlace, TPreludeRoute, TStrPart, TTextPatternPart, TTryConvert,
+//RS };
+//RS use jet_foundation::CanonicalPass;
+//RS use std::collections::BTreeMap;
+//RS 
+//RS use super::mir::{LowerCtx, LowerError};
+//RS use crate::AST::{BinOp, Type};
+//RS fn shared_guard_type_name(name: &str) -> bool {
+//RS     let leaf = name
+//RS         .rsplit("::")
+//RS         .next()
+//RS         .and_then(|part| part.rsplit('.').next())
+//RS         .unwrap_or(name);
+//RS     leaf == crate::Syntax::TYPE_SHARED_GUARD
+//RS }
+//RS 
+//RS fn shared_guard_value_type(ty: &Type) -> Option<Type> {
+//RS     match ty {
+//RS         Type::Apply { name, args } if shared_guard_type_name(name) && args.len() == 1 => {
+//RS             Some(args[0].clone())
+//RS         }
+//RS         Type::Tagged { inner, .. } => shared_guard_value_type(inner),
+//RS         Type::Shared(inner) | Type::Option(inner) => shared_guard_value_type(inner),
+//RS         Type::Result { ok, .. } => shared_guard_value_type(ok),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS fn pin_inner_type(ty: &Type) -> Option<Type> {
+//RS     match ty.without_user_tags() {
+//RS         Type::Apply { name, args } if name == crate::Syntax::TYPE_PIN && args.len() == 1 => {
+//RS             Some(args[0].clone())
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Whether `expr` names a place built only from a local or parameter, list
+//RS /// or map elements, and stored struct fields, so a field read can project it
+//RS /// without copying. `xs[i].f` reads `f` through one index-then-field place
+//RS /// instead of copying the whole element and then its field.
+//RS fn is_stored_field_chain(ctx: &mut LowerCtx, expr: &TExpr) -> bool {
+//RS     match &expr.kind {
+//RS         TExprKind::Local(_) => pin_inner_type(&expr.ty).is_none(),
+//RS         TExprKind::Index { .. } => pin_inner_type(&expr.ty).is_none(),
+//RS         TExprKind::Field { recv, field, .. } => {
+//RS             pin_inner_type(&recv.ty).is_none()
+//RS                 && is_stored_field_chain(ctx, recv)
+//RS                 && ctx.is_stored_struct_field(&recv.ty, field)
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_carrier_payload(
+//RS     ctx: &mut LowerCtx,
+//RS     inner: &TExpr,
+//RS     expected: Option<&Type>,
+//RS ) -> Result<MirValueId, LowerError> {
+//RS     let value = ctx.lower_child(inner)?;
+//RS     if ctx.is_terminated() {
+//RS         return Ok(value);
+//RS     }
+//RS     // The checked carrier can widen a fixed-width integer payload to Int.
+//RS     // Keep that conversion in canonical MIR rather than a backend wrapper.
+//RS     if let Some(expected) = expected {
+//RS         if matches!(expected.without_user_tags(), Type::Int)
+//RS             && matches!(inner.ty.without_user_tags(), Type::IntN { .. })
+//RS         {
+//RS             let target = ctx.mir_type(expected)?;
+//RS             return ctx.emit(
+//RS                 "carrier-payload-numeric",
+//RS                 Some(expected.clone()),
+//RS                 MirOperation::Convert {
+//RS                     value,
+//RS                     parameters: Vec::new(),
+//RS                     target,
+//RS                     conversion: MirConversion::NumericCast,
+//RS                 },
+//RS             );
+//RS         }
+//RS         return ctx.trait_box_value(value, &inner.ty, expected);
+//RS     }
+//RS     Ok(value)
+//RS }
+//RS 
+//RS fn zip_callback(
+//RS     ctx: &mut LowerCtx,
+//RS     params: Vec<Type>,
+//RS     body: TExpr,
+//RS ) -> Result<MirValueId, LowerError> {
+//RS     let lambda = TLambda {
+//RS         source_params: (0..params.len())
+//RS             .map(|index| format!("zip_{index}"))
+//RS             .collect(),
+//RS         param_types: params,
+//RS         ret: Some(body.ty.clone()),
+//RS         failure_carrier: TFailureCarrier::Infallible,
+//RS         executable: TLambdaBody::Expr(Box::new(body)),
+//RS         source_span: ctx.span(),
+//RS         frame_schedule: None,
+//RS         frame_schedule_derivation: None,
+//RS         capture_facts: TCaptureFacts::default(),
+//RS         host_param_conventions: None,
+//RS         effects: TEffectFacts::default(),
+//RS         jit_name: String::new(),
+//RS         is_move: true,
+//RS         boxed: false,
+//RS         rc: false,
+//RS         arc: false,
+//RS         captures: Vec::new(),
+//RS         capture_origins: Default::default(),
+//RS         materialized_captures: Vec::new(),
+//RS         frozen_captures: Vec::new(),
+//RS         uses_stack_sentry: false,
+//RS     };
+//RS     ctx.lower_synthetic_lambda(&lambda, "zip")
+//RS }
+//RS 
+//RS fn zip_context_arg(
+//RS     ctx: &mut LowerCtx,
+//RS     label: &str,
+//RS     ty: Type,
+//RS     constant: MirConstant,
+//RS ) -> Result<MirCallArg, LowerError> {
+//RS     let value = ctx.emit(label, Some(ty), MirOperation::Constant(constant))?;
+//RS     Ok(mir_value_arg_with_access(ctx, value, MirAccess::Read))
+//RS }
+//RS 
+//RS fn zip_context_args(ctx: &mut LowerCtx) -> Result<Vec<MirCallArg>, LowerError> {
+//RS     let span = ctx.span();
+//RS     let (source_line, line, col) = {
+//RS         let (source_line, line, col) = match ctx.function_source() {
+//RS             Some(source) => {
+//RS                 crate::Codegen::TIR::tir_src_line_at(source.text, &source.lines, span.start)
+//RS             }
+//RS             None => ("", 1, 1),
+//RS         };
+//RS         (source_line.trim_end().to_string(), line, col)
+//RS     };
+//RS     let file = ctx.function.source_file.clone();
+//RS     let function = ctx.function.name.clone();
+//RS     let caret = u32::try_from(span.end.saturating_sub(span.start))
+//RS         .map_err(|_| ctx.error(span, "zip source span does not fit u32"))?;
+//RS     let int_ty = || Type::IntN {
+//RS         signed: false,
+//RS         bits: 32,
+//RS     };
+//RS     Ok(vec![
+//RS         zip_context_arg(
+//RS             ctx,
+//RS             "zip-context-policy",
+//RS             Type::String,
+//RS             MirConstant::String("strict".to_string()),
+//RS         )?,
+//RS         zip_context_arg(
+//RS             ctx,
+//RS             "zip-context-file",
+//RS             Type::String,
+//RS             MirConstant::String(file.clone()),
+//RS         )?,
+//RS         zip_context_arg(
+//RS             ctx,
+//RS             "zip-context-line",
+//RS             int_ty(),
+//RS             MirConstant::Int {
+//RS                 value: i64::from(line),
+//RS                 width: Some((false, 32)),
+//RS                 spelling: None,
+//RS             },
+//RS         )?,
+//RS         zip_context_arg(
+//RS             ctx,
+//RS             "zip-context-function",
+//RS             Type::String,
+//RS             MirConstant::String(function.clone()),
+//RS         )?,
+//RS         zip_context_arg(
+//RS             ctx,
+//RS             "zip-context-source-line",
+//RS             Type::String,
+//RS             MirConstant::String(source_line.clone()),
+//RS         )?,
+//RS         zip_context_arg(
+//RS             ctx,
+//RS             "zip-context-column",
+//RS             int_ty(),
+//RS             MirConstant::Int {
+//RS                 value: i64::from(col),
+//RS                 width: Some((false, 32)),
+//RS                 spelling: None,
+//RS             },
+//RS         )?,
+//RS         zip_context_arg(
+//RS             ctx,
+//RS             "zip-context-caret",
+//RS             int_ty(),
+//RS             MirConstant::Int {
+//RS                 value: i64::from(caret),
+//RS                 width: Some((false, 32)),
+//RS                 spelling: None,
+//RS             },
+//RS         )?,
+//RS     ])
+//RS }
+//RS 
+//RS fn zip_closure_call(
+//RS     ctx: &mut LowerCtx,
+//RS     result: Type,
+//RS     route: TPreludeRoute,
+//RS     receiver: MirValueId,
+//RS     values: Vec<(MirValueId, MirAccess)>,
+//RS ) -> Result<MirValueId, LowerError> {
+//RS     let strict = route.member == "zip_strict";
+//RS     let mut args = values
+//RS         .into_iter()
+//RS         .map(|(value, access)| mir_value_arg_with_access(ctx, value, access))
+//RS         .collect::<Vec<_>>();
+//RS     if strict {
+//RS         args.extend(zip_context_args(ctx)?);
+//RS     }
+//RS     let call = ctx.intern_prelude_route(route)?;
+//RS     ctx.emit(
+//RS         "zip-closure",
+//RS         Some(result),
+//RS         MirOperation::Semantic(MirSemanticOp::ClosureMethod {
+//RS             call,
+//RS             receiver,
+//RS             args,
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS fn lower_unzip(ctx: &mut LowerCtx, expr: &TExpr, recv: &TExpr) -> Result<MirValueId, LowerError> {
+//RS     let Type::Tuple(fields) = expr.ty.without_user_tags() else {
+//RS         return Err(ctx.error(ctx.span(), "checked unzip result is not a tuple"));
+//RS     };
+//RS     let item_ty = match recv.ty.without_user_tags() {
+//RS         Type::List(element) | Type::FixedList { elem: element, .. } => (**element).clone(),
+//RS         Type::Apply { args, .. }
+//RS             if crate::Collections::is_iter_type(&recv.ty) && args.len() == 1 =>
+//RS         {
+//RS             args[0].clone()
+//RS         }
+//RS         _ => return Err(ctx.error(ctx.span(), "checked unzip receiver is not a sequence")),
+//RS     };
+//RS     let source = if crate::Collections::is_iter_type(&recv.ty) {
+//RS         if let TExprKind::Local(local) = &recv.kind {
+//RS             let place = lower_local_place(ctx, local, MirAccess::Move)?;
+//RS             ctx.emit(
+//RS                 "unzip-source",
+//RS                 Some(recv.ty.clone()),
+//RS                 MirOperation::MovePlace { place },
+//RS             )?
+//RS         } else {
+//RS             ctx.lower_child(recv)?
+//RS         }
+//RS     } else {
+//RS         ctx.lower_child(recv)?
+//RS     };
+//RS     let mut columns = Vec::with_capacity(fields.len());
+//RS     let unit_ty = Type::Named("Unit".to_string());
+//RS     for (name, column_ty) in fields {
+//RS         let Type::List(element) = column_ty.without_user_tags() else {
+//RS             return Err(ctx.error(ctx.span(), "checked unzip column is not a List"));
+//RS         };
+//RS         let local = TLocal::generated(format!("unzip_{}_{}", source.0, name)).as_mutable();
+//RS         let place = ctx.bind_local(&local, (**column_ty).clone(), true, false, false)?;
+//RS         let empty = ctx.emit(
+//RS             "unzip-empty",
+//RS             Some((**column_ty).clone()),
+//RS             MirOperation::BuildList {
+//RS                 values: Vec::new(),
+//RS                 trait_coercion: None,
+//RS             },
+//RS         )?;
+//RS         ctx.emit(
+//RS             "unzip-column",
+//RS             None,
+//RS             MirOperation::WritePlace {
+//RS                 place,
+//RS                 value: empty,
+//RS             },
+//RS         )?;
+//RS         let input_field = ctx.field_id_for_type(&item_ty, name)?;
+//RS         let output_field = ctx.field_id_for_type(&expr.ty, name)?;
+//RS         let push = ctx.intern_prelude_route(TBuiltinOp::Push.prelude_route(
+//RS             column_ty,
+//RS             &unit_ty,
+//RS             &TFailureCarrier::Infallible,
+//RS         )?)?;
+//RS         columns.push((
+//RS             local,
+//RS             place,
+//RS             (**column_ty).clone(),
+//RS             (**element).clone(),
+//RS             input_field,
+//RS             output_field,
+//RS             push,
+//RS         ));
+//RS     }
+//RS     let routes = super::loop_route_bundle();
+//RS     let init = ctx.intern_prelude_route(routes.iter_init)?;
+//RS     let has_next = ctx.intern_prelude_route(routes.iter_has_next)?;
+//RS     let value = ctx.intern_prelude_route(routes.iter_value)?;
+//RS     let advance = ctx.intern_prelude_route(routes.iter_advance)?;
+//RS     let cursor = ctx.emit(
+//RS         "unzip-cursor",
+//RS         Some(Type::Named("IterCursor".to_string())),
+//RS         MirOperation::LoopIterInit {
+//RS             call: init,
+//RS             collection: source,
+//RS             step: None,
+//RS             by_value: true,
+//RS             source_kind: jet_foundation::MIR::MirLoopSourceKind::Plain,
+//RS         },
+//RS     )?;
+//RS     let header = ctx.new_block(ctx.span(), "unzip.header")?;
+//RS     let body = ctx.new_block(ctx.span(), "unzip.body")?;
+//RS     let exit = ctx.new_block(ctx.span(), "unzip.exit")?;
+//RS     ctx.terminate(MirTerminator::Jump { target: header });
+//RS     ctx.switch_to(header);
+//RS     let condition = ctx.emit(
+//RS         "unzip-has-next",
+//RS         Some(Type::Bool),
+//RS         MirOperation::LoopIterHasNext {
+//RS             call: has_next,
+//RS             cursor,
+//RS         },
+//RS     )?;
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition,
+//RS         then_target: body,
+//RS         else_target: exit,
+//RS     });
+//RS     ctx.switch_to(body);
+//RS     let item = ctx.emit(
+//RS         "unzip-row",
+//RS         Some(item_ty),
+//RS         MirOperation::LoopIterValue {
+//RS             call: value,
+//RS             cursor,
+//RS         },
+//RS     )?;
+//RS     for (_, place, column_ty, element, input_field, _, push) in &columns {
+//RS         let value = ctx.emit(
+//RS             "unzip-field",
+//RS             Some(element.clone()),
+//RS             MirOperation::Field {
+//RS                 base: item,
+//RS                 field: *input_field,
+//RS             },
+//RS         )?;
+//RS         let receiver = ctx.emit(
+//RS             "unzip-column-ref",
+//RS             Some(column_ty.clone()),
+//RS             MirOperation::AddressOf {
+//RS                 place: *place,
+//RS                 access: MirAccess::Write,
+//RS             },
+//RS         )?;
+//RS         ctx.emit(
+//RS             "unzip-push",
+//RS             None,
+//RS             MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+//RS                 call: *push,
+//RS                 receiver,
+//RS                 receiver_place: Some(*place),
+//RS                 args: vec![value],
+//RS                 aggregate_fields: None,
+//RS             }),
+//RS         )?;
+//RS     }
+//RS     ctx.emit(
+//RS         "unzip-advance",
+//RS         None,
+//RS         MirOperation::LoopIterAdvance {
+//RS             call: advance,
+//RS             cursor,
+//RS         },
+//RS     )?;
+//RS     ctx.terminate(MirTerminator::Jump { target: header });
+//RS     ctx.switch_to(exit);
+//RS     let fields = columns
+//RS         .into_iter()
+//RS         .map(|(local, _, column_ty, _, _, field, _)| {
+//RS             let place = lower_local_place(ctx, &local, MirAccess::Move)?;
+//RS             let value = ctx.emit(
+//RS                 "unzip-column-result",
+//RS                 Some(column_ty),
+//RS                 MirOperation::MovePlace { place },
+//RS             )?;
+//RS             Ok((field, value))
+//RS         })
+//RS         .collect::<Result<Vec<_>, LowerError>>()?;
+//RS     let owner = ctx
+//RS         .mir_type(&expr.ty)?
+//RS         .identity
+//RS         .ok_or_else(|| ctx.error(ctx.span(), "checked unzip tuple has no canonical identity"))?;
+//RS     ctx.emit(
+//RS         "unzip-result",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Tuple {
+//RS             type_id: owner,
+//RS             fields,
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn lower_zip(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     recv: &TExpr,
+//RS     op: &TBuiltinOp,
+//RS     args: &[TExpr],
+//RS ) -> Result<MirValueId, LowerError> {
+//RS     let TBuiltinOp::Zip {
+//RS         mode,
+//RS         fields,
+//RS         flatten,
+//RS         input_count,
+//RS         fill_mode,
+//RS         field_types,
+//RS         ..
+//RS     } = op
+//RS     else {
+//RS         unreachable!("zip projection receives the checked zip operation")
+//RS     };
+//RS     let fill_count = usize::from(
+//RS         *mode == super::TZipMode::Pad && *fill_mode != super::TZipFillMode::DefaultNone,
+//RS     );
+//RS     if *flatten
+//RS         || *input_count < 2
+//RS         || fields.len() != *input_count
+//RS         || field_types.len() != *input_count
+//RS         || args.len() != input_count - 1 + fill_count
+//RS     {
+//RS         return Err(ctx.error(ctx.span(), "checked zip has inconsistent column facts"));
+//RS     }
+//RS     // Evaluate source expressions and the fill expression once, in source order.
+//RS     let mut inputs = Vec::with_capacity(*input_count);
+//RS     inputs.push((lower_builtin_receiver(ctx, recv, false)?.0, &recv.ty));
+//RS     for input in &args[..input_count - 1] {
+//RS         inputs.push((lower_builtin_receiver(ctx, input, false)?.0, &input.ty));
+//RS     }
+//RS     let fill = if fill_count == 1 {
+//RS         let fill = &args[input_count - 1];
+//RS         Some((ctx.lower_child(fill)?, &fill.ty))
+//RS     } else {
+//RS         None
+//RS     };
+//RS     let mut columns = Vec::with_capacity(*input_count);
+//RS     let mut fills = Vec::with_capacity(*input_count);
+//RS     for (index, (value, input_ty)) in inputs.into_iter().enumerate() {
+//RS         let element = match input_ty.without_user_tags() {
+//RS             Type::List(element) | Type::FixedList { elem: element, .. } => (**element).clone(),
+//RS             Type::Apply { args, .. }
+//RS                 if crate::Collections::is_iter_type(input_ty) && args.len() == 1 =>
+//RS             {
+//RS                 args[0].clone()
+//RS             }
+//RS             _ => return Err(ctx.error(ctx.span(), "checked zip input has no sequence element")),
+//RS         };
+//RS         let iter_ty = crate::Collections::iter_ty(element.clone());
+//RS         let mut value = if crate::Collections::is_iter_type(input_ty) {
+//RS             value
+//RS         } else {
+//RS             let route = TBuiltinOp::ListLazy.prelude_route(
+//RS                 input_ty,
+//RS                 &iter_ty,
+//RS                 &TFailureCarrier::Infallible,
+//RS             )?;
+//RS             let call = ctx.intern_prelude_route(route)?;
+//RS             ctx.emit(
+//RS                 "zip-source",
+//RS                 Some(iter_ty.clone()),
+//RS                 MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+//RS                     call,
+//RS                     receiver: value,
+//RS                     receiver_place: None,
+//RS                     args: Vec::new(),
+//RS                     aggregate_fields: None,
+//RS                 }),
+//RS             )?
+//RS         };
+//RS         if *mode == super::TZipMode::Pad {
+//RS             let target = &field_types[index];
+//RS             let fill_value = if let Some((fill, fill_ty)) = fill {
+//RS                 let (fill, actual) = if *fill_mode == super::TZipFillMode::Columns {
+//RS                     let Type::Tuple(shape) = fill_ty else {
+//RS                         return Err(ctx.error(ctx.span(), "checked zip column fills have no tuple"));
+//RS                     };
+//RS                     let actual = shape
+//RS                         .iter()
+//RS                         .find(|(name, _)| name == &fields[index])
+//RS                         .map(|(_, ty)| ty.as_ref())
+//RS                         .ok_or_else(|| {
+//RS                             ctx.error(ctx.span(), "checked zip fill column is missing")
+//RS                         })?;
+//RS                     let field = ctx.field_id_for_type(fill_ty, &fields[index])?;
+//RS                     let fill = ctx.emit(
+//RS                         "zip-fill-column",
+//RS                         Some(actual.clone()),
+//RS                         MirOperation::Field { base: fill, field },
+//RS                     )?;
+//RS                     (fill, actual)
+//RS                 } else {
+//RS                     (fill, fill_ty)
+//RS                 };
+//RS                 if actual == target {
+//RS                     fill
+//RS                 } else {
+//RS                     let mir_target = ctx.mir_type(target)?;
+//RS                     ctx.emit(
+//RS                         "zip-fill-widen",
+//RS                         Some(target.clone()),
+//RS                         MirOperation::Convert {
+//RS                             value: fill,
+//RS                             parameters: Vec::new(),
+//RS                             target: mir_target,
+//RS                             conversion: MirConversion::NumericCast,
+//RS                         },
+//RS                     )?
+//RS                 }
+//RS             } else {
+//RS                 let local = TExpr {
+//RS                     ty: element.clone(),
+//RS                     kind: TExprKind::Local(TLocal::user("zip_0")),
+//RS                 };
+//RS                 let callback = zip_callback(
+//RS                     ctx,
+//RS                     vec![element],
+//RS                     TExpr {
+//RS                         ty: target.clone(),
+//RS                         kind: TExprKind::Present(Box::new(local)),
+//RS                     },
+//RS                 )?;
+//RS                 let result = crate::Collections::iter_ty(target.clone());
+//RS                 let route = super::TClosureOp::Map.prelude_route(
+//RS                     &iter_ty,
+//RS                     &result,
+//RS                     &TFailureCarrier::Infallible,
+//RS                 )?;
+//RS                 value =
+//RS                     zip_closure_call(ctx, result, route, value, vec![(callback, MirAccess::Move)])?;
+//RS                 ctx.emit(
+//RS                     "zip-fill-absent",
+//RS                     Some(target.clone()),
+//RS                     MirOperation::Absent,
+//RS                 )?
+//RS             };
+//RS             fills.push(fill_value);
+//RS         }
+//RS         columns.push(value);
+//RS     }
+//RS     let mut left = columns[0];
+//RS     let mut left_ty = field_types[0].clone();
+//RS     let mut left_fill = fills.first().copied();
+//RS     for column in 1..*input_count {
+//RS         let shape: Vec<_> = fields[..=column]
+//RS             .iter()
+//RS             .cloned()
+//RS             .zip(field_types[..=column].iter().cloned())
+//RS             .collect();
+//RS         let row_ty = Type::Tuple(
+//RS             shape
+//RS                 .iter()
+//RS                 .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
+//RS                 .collect(),
+//RS         );
+//RS         let left_local = TExpr {
+//RS             ty: left_ty.clone(),
+//RS             kind: TExprKind::Local(TLocal::user("zip_0")),
+//RS         };
+//RS         let mut row_fields = Vec::with_capacity(column + 1);
+//RS         for index in 0..column {
+//RS             let value = if column == 1 {
+//RS                 left_local.clone()
+//RS             } else {
+//RS                 TExpr {
+//RS                     ty: field_types[index].clone(),
+//RS                     kind: TExprKind::Field {
+//RS                         recv: Box::new(left_local.clone()),
+//RS                         field: fields[index].clone(),
+//RS                         boxed: false,
+//RS                     },
+//RS                 }
+//RS             };
+//RS             row_fields.push((fields[index].clone(), value));
+//RS         }
+//RS         row_fields.push((
+//RS             fields[column].clone(),
+//RS             TExpr {
+//RS                 ty: field_types[column].clone(),
+//RS                 kind: TExprKind::Local(TLocal::user("zip_1")),
+//RS             },
+//RS         ));
+//RS         let callback = zip_callback(
+//RS             ctx,
+//RS             vec![left_ty, field_types[column].clone()],
+//RS             TExpr {
+//RS                 ty: row_ty.clone(),
+//RS                 kind: TExprKind::TupleLit {
+//RS                     struct_name: crate::Codegen::Tuples::tuple_struct_name(&shape),
+//RS                     fields: row_fields,
+//RS                 },
+//RS             },
+//RS         )?;
+//RS         let mut values = vec![(columns[column], MirAccess::Move)];
+//RS         if let Some(fill) = left_fill {
+//RS             values.extend([(fill, MirAccess::Read), (fills[column], MirAccess::Read)]);
+//RS         }
+//RS         values.push((callback, MirAccess::Move));
+//RS         let result = if column + 1 == *input_count {
+//RS             expr.ty.clone()
+//RS         } else {
+//RS             crate::Collections::iter_ty(row_ty.clone())
+//RS         };
+//RS         left = zip_closure_call(ctx, result, super::zip_closure_route(*mode), left, values)?;
+//RS         if left_fill.is_some() && column + 1 < *input_count {
+//RS             let owner = ctx
+//RS                 .mir_type(&row_ty)?
+//RS                 .identity
+//RS                 .ok_or_else(|| ctx.error(ctx.span(), "zip fill tuple has no type identity"))?;
+//RS             let tuple_fields = fields[..=column]
+//RS                 .iter()
+//RS                 .zip(&fills)
+//RS                 .map(|(name, value)| Ok((ctx.field_id_for_type(&row_ty, name)?, *value)))
+//RS                 .collect::<Result<Vec<_>, LowerError>>()?;
+//RS             left_fill = Some(ctx.emit(
+//RS                 "zip-fill-prefix",
+//RS                 Some(row_ty.clone()),
+//RS                 MirOperation::Tuple {
+//RS                     type_id: owner,
+//RS                     fields: tuple_fields,
+//RS                 },
+//RS             )?);
+//RS         }
+//RS         left_ty = row_ty;
+//RS     }
+//RS     Ok(left)
+//RS }
+//RS 
+//RS fn csv_query_row_type(ty: &Type) -> Option<Type> {
+//RS     let Type::Result { ok, .. } = ty.without_user_tags() else {
+//RS         return None;
+//RS     };
+//RS     let Type::Apply { name, args } = ok.without_user_tags() else {
+//RS         return None;
+//RS     };
+//RS     (name == "Query" && args.len() == 1).then(|| args[0].clone())
+//RS }
+//RS /// Recover the single checked `T` carried by typed DataLoader/DataSnapshot/
+//RS /// DataStream calls.  The call result retains the full fallible/optional/list
+//RS /// shape, so peel only those wrappers and never infer a second wire type.
+//RS fn data_row_type(ty: &Type) -> Option<Type> {
+//RS     match ty.without_user_tags() {
+//RS         Type::Result { ok, .. } | Type::Option(ok) => data_row_type(ok),
+//RS         Type::Apply { name, args }
+//RS             if matches!(name.as_str(), "DataLoader" | "DataSnapshot" | "DataStream")
+//RS                 && args.len() == 1 =>
+//RS         {
+//RS             Some(args[0].clone())
+//RS         }
+//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_data_plan_node_id(id: crate::AST::DataPlanNodeId) -> MirDataPlanNodeId {
+//RS     MirDataPlanNodeId(id.index() as u64)
+//RS }
+//RS 
+//RS fn lower_data_plan(
+//RS     ctx: &mut LowerCtx<'_>,
+//RS     plan: &super::TDataPlan,
+//RS ) -> Result<MirDataPlan, LowerError> {
+//RS     let logical = plan
+//RS         .logical
+//RS         .iter()
+//RS         .map(|node| {
+//RS             let callable = match &node.callable {
+//RS                 Some(callable) => Some(MirDataPlanCallable {
+//RS                     label: callable.label.clone(),
+//RS                     parameter: ctx.mir_type(&callable.parameter)?,
+//RS                     result: ctx.mir_type(&callable.result)?,
+//RS                     span: callable.span,
+//RS                 }),
+//RS                 None => None,
+//RS             };
+//RS             Ok(MirDataPlanNode {
+//RS                 id: lower_data_plan_node_id(node.id),
+//RS                 operation: node.operation,
+//RS                 inputs: node
+//RS                     .inputs
+//RS                     .iter()
+//RS                     .copied()
+//RS                     .map(lower_data_plan_node_id)
+//RS                     .collect(),
+//RS                 source: node.source,
+//RS                 row_type: ctx.mir_type(&node.schema.row_type)?,
+//RS                 columns: node
+//RS                     .schema
+//RS                     .columns
+//RS                     .iter()
+//RS                     .map(|column| {
+//RS                         Ok(MirDataPlanColumn {
+//RS                             name: column.name.clone(),
+//RS                             ty: ctx.mir_type(&column.ty)?,
+//RS                             nullable: column.nullable,
+//RS                         })
+//RS                     })
+//RS                     .collect::<Result<Vec<_>, LowerError>>()?,
+//RS                 callable,
+//RS                 stream: node.stream.clone(),
+//RS                 span: node.span,
+//RS             })
+//RS         })
+//RS         .collect::<Result<Vec<_>, LowerError>>()?;
+//RS     let physical = plan
+//RS         .physical
+//RS         .iter()
+//RS         .map(|node| MirDataPlanPhysicalNode {
+//RS             logical: lower_data_plan_node_id(node.logical),
+//RS             operator: node.operator,
+//RS             stream: node.stream.clone(),
+//RS             reason: node.reason.clone(),
+//RS         })
+//RS         .collect();
+//RS     Ok(MirDataPlan {
+//RS         schema_version: MirDataPlan::SCHEMA_VERSION,
+//RS         source: plan.source,
+//RS         logical,
+//RS         physical,
+//RS         output: lower_data_plan_node_id(plan.output),
+//RS         source_span: plan.source_span,
+//RS     })
+//RS }
+//RS fn mir_const_key(key: &crate::AST::CtKey) -> MirConstKey {
+//RS     match key {
+//RS         crate::AST::CtKey::Int(value) => MirConstKey::Int(*value),
+//RS         crate::AST::CtKey::Str(value) => MirConstKey::String(value.clone()),
+//RS         crate::AST::CtKey::Bool(value) => MirConstKey::Bool(*value),
+//RS         crate::AST::CtKey::Char(value) => MirConstKey::Char(*value),
+//RS         crate::AST::CtKey::Tuple(fields) => MirConstKey::Tuple(
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(name, key)| (name.clone(), mir_const_key(key)))
+//RS                 .collect(),
+//RS         ),
+//RS         crate::AST::CtKey::Struct { type_name, fields } => MirConstKey::Struct {
+//RS             type_name: type_name.clone(),
+//RS             fields: fields
+//RS                 .iter()
+//RS                 .map(|(name, key)| (name.clone(), mir_const_key(key)))
+//RS                 .collect(),
+//RS         },
+//RS         crate::AST::CtKey::Enum { type_name, variant } => MirConstKey::Enum {
+//RS             type_name: type_name.clone(),
+//RS             variant: variant.clone(),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn mir_constant(
+//RS     ctx: &mut LowerCtx,
+//RS     value: &crate::AST::CtValue,
+//RS ) -> Result<MirConstant, LowerError> {
+//RS     Ok(match value {
+//RS         crate::AST::CtValue::Int(value) => MirConstant::Int {
+//RS             value: *value,
+//RS             width: None,
+//RS             spelling: None,
+//RS         },
+//RS         crate::AST::CtValue::Float(value) => MirConstant::Float {
+//RS             value: value.as_f64(),
+//RS             f32: matches!(value, crate::AST::CtFloat::F32(_)),
+//RS             spelling: None,
+//RS         },
+//RS         crate::AST::CtValue::Bool(value) => MirConstant::Bool(*value),
+//RS         crate::AST::CtValue::Char(value) => MirConstant::Char(*value),
+//RS         crate::AST::CtValue::Str(value) => MirConstant::String(value.clone()),
+//RS         crate::AST::CtValue::BigInt(value) => MirConstant::BigInt(value.to_string_rep()),
+//RS         crate::AST::CtValue::Bytes(value) => MirConstant::Bytes(value.clone()),
+//RS         crate::AST::CtValue::List(values) => MirConstant::List(
+//RS             values
+//RS                 .iter()
+//RS                 .map(|value| mir_constant(ctx, value))
+//RS                 .collect::<Result<Vec<_>, _>>()?,
+//RS         ),
+//RS         crate::AST::CtValue::Map(entries) => MirConstant::Map(
+//RS             entries
+//RS                 .iter()
+//RS                 .map(|(key, value)| Ok((mir_const_key(key), mir_constant(ctx, value)?)))
+//RS                 .collect::<Result<_, LowerError>>()?,
+//RS         ),
+//RS         crate::AST::CtValue::Struct { type_name, fields } => MirConstant::Struct {
+//RS             type_name: type_name.clone(),
+//RS             fields: fields
+//RS                 .iter()
+//RS                 .map(|(name, value)| Ok((name.clone(), mir_constant(ctx, value)?)))
+//RS                 .collect::<Result<_, LowerError>>()?,
+//RS         },
+//RS         crate::AST::CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } => MirConstant::Enum {
+//RS             type_name: type_name.clone(),
+//RS             variant: variant.clone(),
+//RS             args: args
+//RS                 .iter()
+//RS                 .map(|(name, value)| Ok((name.clone(), mir_constant(ctx, value)?)))
+//RS                 .collect::<Result<_, LowerError>>()?,
+//RS         },
+//RS         crate::AST::CtValue::Present(value) => {
+//RS             MirConstant::Present(Box::new(mir_constant(ctx, value)?))
+//RS         }
+//RS         crate::AST::CtValue::Failed(report) => MirConstant::Failed(match report {
+//RS             crate::AST::CtReport::Clean(ty) => MirConstReport::Clean(ctx.mir_type(ty)?),
+//RS             crate::AST::CtReport::Told(value) => {
+//RS                 MirConstReport::Told(Box::new(mir_constant(ctx, value)?))
+//RS             }
+//RS         }),
+//RS         crate::AST::CtValue::Unit => MirConstant::Unit,
+//RS         crate::AST::CtValue::Closure(_) => {
+//RS             return Err(ctx.error(
+//RS                 ctx.span(),
+//RS                 "checked comptime closure cannot lower as a neutral MIR constant",
+//RS             ));
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn lower_persistent_place(
+//RS     ctx: &mut LowerCtx,
+//RS     local: &TLocal,
+//RS     access: MirAccess,
+//RS ) -> Result<MirPlaceId, LowerError> {
+//RS     let Some(key) = local.persist_key.as_ref() else {
+//RS         return ctx.place_for_local(local, access);
+//RS     };
+//RS     if let Some(place) = ctx
+//RS         .places
+//RS         .iter_mut()
+//RS         .find(|place| place.persist_key.as_ref() == Some(key))
+//RS     {
+//RS         place.access = match (place.access, access) {
+//RS             (MirAccess::Move, _) | (_, MirAccess::Move) => MirAccess::Move,
+//RS             (MirAccess::Write, _) | (_, MirAccess::Write) => MirAccess::Write,
+//RS             _ => MirAccess::Read,
+//RS         };
+//RS         return Ok(place.id);
+//RS     }
+//RS     let ty = local.persist_ty.clone().ok_or_else(|| {
+//RS         ctx.error(
+//RS             ctx.span(),
+//RS             format!("persistent local `{}` has no checked type", local.name),
+//RS         )
+//RS     })?;
+//RS     let span = ctx.span();
+//RS     let id = MirPlaceId(stable_id(
+//RS         "mir-place",
+//RS         &format!("{}|persistent|{key}", ctx.function.key),
+//RS     ));
+//RS     let mir_ty = ctx.mir_type(&ty)?;
+//RS     ctx.places.push(MirPlace {
+//RS         id,
+//RS         span,
+//RS         ty: mir_ty,
+//RS         base: MirPlaceBase::Static(key.clone()),
+//RS         projections: Vec::new(),
+//RS         access,
+//RS         persist_key: Some(key.clone()),
+//RS     });
+//RS     Ok(id)
+//RS }
+//RS 
+//RS fn lower_local_place(
+//RS     ctx: &mut LowerCtx,
+//RS     local: &TLocal,
+//RS     access: MirAccess,
+//RS ) -> Result<MirPlaceId, LowerError> {
+//RS     if local.is_persistent() {
+//RS         lower_persistent_place(ctx, local, access)
+//RS     } else {
+//RS         let name = ctx.resolved_local_name(local);
+//RS         if name != local.name {
+//RS             return ctx.place_for_local(&TLocal::user(name), access);
+//RS         }
+//RS         ctx.place_for_local(local, access)
+//RS     }
+//RS }
+//RS fn lower_local_value(
+//RS     ctx: &mut LowerCtx,
+//RS     local: &TLocal,
+//RS     ty: &Type,
+//RS ) -> Result<MirValueId, LowerError> {
+//RS     let place = lower_local_place(ctx, local, MirAccess::Read)?;
+//RS     let value_ty = if matches!(ty, Type::String) && ctx.place_is_string_view(place) {
+//RS         Type::Apply {
+//RS             name: "View".to_string(),
+//RS             args: vec![Type::Named("str".to_string())],
+//RS         }
+//RS     } else {
+//RS         ty.clone()
+//RS     };
+//RS     let value = ctx.emit("local.read", Some(value_ty), MirOperation::ReadPlace(place))?;
+//RS     ctx.local_values.insert(local.name.clone(), value);
+//RS     Ok(value)
+//RS }
+//RS 
+//RS /// Whether `expr` reads an element (or a field path below an element) of a
+//RS /// list, map, or pool. Such a place is never moved out of its container.
+//RS fn reads_container_element(expr: &TExpr) -> bool {
+//RS     let mut current = expr;
+//RS     loop {
+//RS         match &current.kind {
+//RS             TExprKind::Index { .. } | TExprKind::PoolSlot { .. } => return true,
+//RS             TExprKind::Field { recv, .. } => current = recv,
+//RS             _ => return false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn lower_receiver_place(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     access: MirAccess,
+//RS ) -> Result<Option<jet_foundation::MIR::MirPlaceId>, LowerError> {
+//RS     let place = match &expr.kind {
+//RS         TExprKind::Borrow { place, .. } => {
+//RS             let value = ctx.lower_child(expr)?;
+//RS             let id = ctx.place_id("temporary", &format!("{}", value.0))?;
+//RS             let span = ctx.span();
+//RS             let ty = ctx.mir_type(&expr.ty)?;
+//RS             ctx.places.push(MirPlace {
+//RS                 id,
+//RS                 span,
+//RS                 ty,
+//RS                 base: MirPlaceBase::Temporary(value),
+//RS                 projections: Vec::new(),
+//RS                 access,
+//RS                 persist_key: None,
+//RS             });
+//RS             Some(ctx.project_deref_place(id, place.ty.clone(), ctx.span())?)
+//RS         }
+//RS         // A read-only alias (a read window, a walked list's item) names
+//RS         // another value's slot; a consuming use takes the value path, which
+//RS         // copies, instead of moving the slot out of its owner.
+//RS         TExprKind::Local(local) if access == MirAccess::Move && ctx.local_is_read_alias(local) => {
+//RS             return Ok(None);
+//RS         }
+//RS         TExprKind::Local(local) => Some(lower_local_place(ctx, local, access)?),
+//RS         // An element of a list, map, or pool is never moved out of its
+//RS         // container: there is no checked move kernel for an index, and sema
+//RS         // keeps the slot readable after a consuming use (`f(list[i])` into a
+//RS         // `^T` parameter). The caller's value path reads the element instead,
+//RS         // exactly as the Jet codegen lowers a non-local `Move`.
+//RS         TExprKind::Index { .. } | TExprKind::PoolSlot { .. } if access == MirAccess::Move => {
+//RS             return Ok(None);
+//RS         }
+//RS         TExprKind::Index {
+//RS             base,
+//RS             index,
+//RS             is_map,
+//RS             uninit_fixed,
+//RS             ..
+//RS         } => {
+//RS             let kind = if *is_map {
+//RS                 MirIndexKind::Map
+//RS             } else if *uninit_fixed {
+//RS                 MirIndexKind::FixedListProof
+//RS             } else {
+//RS                 MirIndexKind::List
+//RS             };
+//RS             Some(ctx.lower_index_place(base, index, kind, access)?)
+//RS         }
+//RS         TExprKind::Field { recv, field, .. } => {
+//RS             let Some(base) = lower_receiver_place(ctx, recv, access)? else {
+//RS                 return Ok(None);
+//RS             };
+//RS             let base = if let Some(inner) = pin_inner_type(&recv.ty) {
+//RS                 if matches!(&recv.kind, TExprKind::Borrow { .. }) {
+//RS                     base
+//RS                 } else {
+//RS                     ctx.project_deref_place(base, inner, ctx.span())?
+//RS                 }
+//RS             } else {
+//RS                 base
+//RS             };
+//RS             Some(ctx.project_field_place(base, field, expr.ty.clone(), ctx.span())?)
+//RS         }
+//RS         TExprKind::SharedGuardValue { guard, .. } => {
+//RS             let base = if let Some(base) = lower_receiver_place(ctx, guard, access)? {
+//RS                 base
+//RS             } else {
+//RS                 let value = ctx.lower_child(guard)?;
+//RS                 let id = ctx.place_id("temporary.shared-guard", &format!("{}", value.0))?;
+//RS                 let span = ctx.span();
+//RS                 let ty = ctx.mir_type(&guard.ty)?;
+//RS                 ctx.places.push(MirPlace {
+//RS                     id,
+//RS                     span,
+//RS                     ty,
+//RS                     base: MirPlaceBase::Temporary(value),
+//RS                     projections: Vec::new(),
+//RS                     access,
+//RS                     persist_key: None,
+//RS                 });
+//RS                 id
+//RS             };
+//RS             Some(ctx.project_deref_place(base, expr.ty.clone(), ctx.span())?)
+//RS         }
+//RS         TExprKind::PoolSlot {
+//RS             pool, id, field, ..
+//RS         } => {
+//RS             let base = ctx.lower_index_place(pool, id, MirIndexKind::Pool, access)?;
+//RS             match field {
+//RS                 Some(field) => {
+//RS                     Some(ctx.project_field_place(base, field, expr.ty.clone(), ctx.span())?)
+//RS                 }
+//RS                 None => Some(base),
+//RS             }
+//RS         }
+//RS         // D-SHAPE-PLACE1=A: `&list[a..b]` written through is a range window
+//RS         // place over the owner list, so a write argument or a mutating
+//RS         // receiver edits the owner's storage instead of a view copy.
+//RS         TExprKind::BuiltinMethod {
+//RS             recv,
+//RS             op: TBuiltinOp::ViewMutNew { line },
+//RS             args,
+//RS         } if access == MirAccess::Write
+//RS             && matches!(recv.ty.without_user_tags(), Type::List(_)) =>
+//RS         {
+//RS             let Some(base) = lower_receiver_place(ctx, recv, access)? else {
+//RS                 return Ok(None);
+//RS             };
+//RS             let range = match args.as_slice() {
+//RS                 [range] => ctx.lower_child(range)?,
+//RS                 [start, end] => {
+//RS                     let range = TExpr {
+//RS                         ty: Type::Named("Range".to_string()),
+//RS                         kind: TExprKind::StructLit {
+//RS                             fields: vec![
+//RS                                 ("start".to_string(), start.clone(), false),
+//RS                                 ("end".to_string(), end.clone(), false),
+//RS                                 (
+//RS                                     "exclusive".to_string(),
+//RS                                     TExpr {
+//RS                                         ty: Type::Bool,
+//RS                                         kind: TExprKind::BoolLit(false),
+//RS                                     },
+//RS                                     false,
+//RS                                 ),
+//RS                             ],
+//RS                             extra: None,
+//RS                             as_trait: None,
+//RS                         },
+//RS                     };
+//RS                     ctx.lower_child(&range)?
+//RS                 }
+//RS                 _ => return Err(ctx.error(ctx.span(), "checked range window has no bounds")),
+//RS             };
+//RS             Some(ctx.project_range_place(base, range, *line, ctx.span())?)
+//RS         }
+//RS         _ => None,
+//RS     };
+//RS     Ok(place)
+//RS }
+//RS 
+//RS fn lower_builtin_receiver(
+//RS     ctx: &mut LowerCtx,
+//RS     recv: &TExpr,
+//RS     mutating: bool,
+//RS ) -> Result<
+//RS     (
+//RS         jet_foundation::MIR::MirValueId,
+//RS         Option<jet_foundation::MIR::MirPlaceId>,
+//RS     ),
+//RS     LowerError,
+//RS > {
+//RS     if !mutating {
+//RS         if crate::Collections::is_iter_type(&recv.ty) {
+//RS             if let Some(place) = lower_receiver_place(ctx, recv, MirAccess::Move)? {
+//RS                 let receiver = ctx.emit(
+//RS                     "builtin-owned-receiver",
+//RS                     Some(recv.ty.clone()),
+//RS                     MirOperation::MovePlace { place },
+//RS                 )?;
+//RS                 return Ok((receiver, None));
+//RS             }
+//RS         }
+//RS         return Ok((ctx.lower_child(recv)?, None));
+//RS     }
+//RS     let Some(place) = lower_receiver_place(ctx, recv, MirAccess::Write)? else {
+//RS         return Ok((ctx.lower_child(recv)?, None));
+//RS     };
+//RS     // Indexed collection elements are resident handles, not stable Rust
+//RS     // addresses. Read the handle while retaining the checked place so the
+//RS     // builtin host can mutate the collection object in place.
+//RS     if matches!(recv.kind, TExprKind::Index { .. } | TExprKind::Field { .. })
+//RS         && matches!(
+//RS             recv.ty.without_user_tags(),
+//RS             Type::List(_) | Type::Map { .. }
+//RS         )
+//RS     {
+//RS         let receiver = ctx.emit(
+//RS             "builtin-collection-value-receiver",
+//RS             Some(recv.ty.clone()),
+//RS             MirOperation::ReadPlace(place),
+//RS         )?;
+//RS         return Ok((receiver, Some(place)));
+//RS     }
+//RS     let receiver = ctx.emit(
+//RS         "builtin-mutating-receiver",
+//RS         Some(recv.ty.clone()),
+//RS         MirOperation::AddressOf {
+//RS             place,
+//RS             access: MirAccess::Write,
+//RS         },
+//RS     )?;
+//RS     Ok((receiver, Some(place)))
+//RS }
+//RS fn untagged_type(ty: &Type) -> &Type {
+//RS     match ty {
+//RS         Type::Tagged { inner, .. } => untagged_type(inner),
+//RS         _ => ty,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_list_min_max(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     recv: &TExpr,
+//RS     op: &TBuiltinOp,
+//RS     args: &[TExpr],
+//RS     carrier: &TFailureCarrier,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     if !args.is_empty() {
+//RS         return Err(ctx.error(
+//RS             ctx.span(),
+//RS             "checked List.min_max operation received unexpected arguments",
+//RS         ));
+//RS     }
+//RS     let Type::Option(inner) = untagged_type(&expr.ty) else {
+//RS         return Err(ctx.error(ctx.span(), "checked List.min_max result is not optional"));
+//RS     };
+//RS     let tuple_ty = untagged_type(inner);
+//RS     let Type::Tuple(fields) = tuple_ty else {
+//RS         return Err(ctx.error(
+//RS             ctx.span(),
+//RS             "checked List.min_max result has no named tuple fields",
+//RS         ));
+//RS     };
+//RS     if fields.len() != 2
+//RS         || !fields.iter().any(|(name, _)| name == "min")
+//RS         || !fields.iter().any(|(name, _)| name == "max")
+//RS     {
+//RS         return Err(ctx.error(
+//RS             ctx.span(),
+//RS             "checked List.min_max result must contain exactly min and max fields",
+//RS         ));
+//RS     }
+//RS     let aggregate_fields = ["min", "max"]
+//RS         .into_iter()
+//RS         .map(|name| ctx.field_id_for_type(tuple_ty, name))
+//RS         .collect::<Result<Vec<_>, LowerError>>()?;
+//RS     let (receiver, receiver_place) = lower_builtin_receiver(ctx, recv, false)?;
+//RS     let route = op
+//RS         .prelude_route(&recv.ty, &expr.ty, carrier)
+//RS         .map_err(|error| ctx.error(ctx.span(), format!("builtin method {op:?}: {error:?}")))?;
+//RS     let call = ctx.intern_prelude_route(route)?;
+//RS     ctx.emit(
+//RS         "list-min-max",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+//RS             call,
+//RS             receiver,
+//RS             receiver_place,
+//RS             args: Vec::new(),
+//RS             aggregate_fields: Some(aggregate_fields),
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS fn lower_consuming_task_value(ctx: &mut LowerCtx, value: &TExpr) -> Result<MirValueId, LowerError> {
+//RS     if let Some(place) = lower_receiver_place(ctx, value, MirAccess::Move)? {
+//RS         return ctx.emit(
+//RS             "task-consuming-value",
+//RS             Some(value.ty.clone()),
+//RS             MirOperation::MovePlace { place },
+//RS         );
+//RS     }
+//RS     ctx.lower_child(value)
+//RS }
+//RS 
+//RS fn math_builtin_type_id(
+//RS     ctx: &mut LowerCtx,
+//RS     type_name: &str,
+//RS ) -> Result<jet_foundation::MIR::MirTypeId, LowerError> {
+//RS     let source = match type_name {
+//RS         "Int" => Type::Int,
+//RS         "Float" => Type::Float,
+//RS         "F32" | "Float32" => Type::Float32,
+//RS         _ => Type::Named(type_name.to_string()),
+//RS     };
+//RS     let identity = ctx.mir_type(&source)?.identity;
+//RS     identity.ok_or_else(|| {
+//RS         ctx.error(
+//RS             ctx.span(),
+//RS             format!("checked MIR math builtin type `{type_name}` has no identity"),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn lower_math_swizzle_read(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     type_name: &str,
+//RS     recv: &TExpr,
+//RS     lanes: &[u8],
+//RS     carrier: &TFailureCarrier,
+//RS ) -> Result<MirValueId, LowerError> {
+//RS     if lanes.is_empty() {
+//RS         return Err(ctx.error(ctx.span(), "checked swizzle has no lanes"));
+//RS     }
+//RS     let base = ctx.lower_child(recv)?;
+//RS     let scalar_ty = crate::Sema::math_scalar_ty(type_name);
+//RS     let lane_carrier = TFailureCarrier::from_checked_type(&scalar_ty);
+//RS     let line = ctx.source_line();
+//RS     let mut values = Vec::with_capacity(lanes.len());
+//RS     for (ordinal, lane) in lanes.iter().enumerate() {
+//RS         let index = ctx.emit(
+//RS             &format!("math-swizzle-index-{ordinal}"),
+//RS             Some(Type::Int),
+//RS             MirOperation::Constant(MirConstant::Int {
+//RS                 value: i64::from(*lane),
+//RS                 width: None,
+//RS                 spelling: None,
+//RS             }),
+//RS         )?;
+//RS         let call = ctx.intern_prelude_route(super::lane_index_route(
+//RS             type_name,
+//RS             &scalar_ty,
+//RS             &lane_carrier,
+//RS         )?)?;
+//RS         let location = panic_location(ctx, line as usize);
+//RS         let context = ctx.panic_context_at(line, None);
+//RS         let value = ctx.emit(
+//RS             "math-swizzle-lane",
+//RS             Some(scalar_ty.clone()),
+//RS             MirOperation::Index {
+//RS                 call,
+//RS                 base,
+//RS                 index,
+//RS                 kind: MirIndexKind::Lane,
+//RS                 access: MirAccess::Read,
+//RS                 location,
+//RS                 context,
+//RS             },
+//RS         )?;
+//RS         values.push(value);
+//RS     }
+//RS     if values.len() == 1 {
+//RS         return Ok(values[0]);
+//RS     }
+//RS     let result_type = match expr.ty.without_user_tags() {
+//RS         Type::Named(name) => name.as_str(),
+//RS         _ => {
+//RS             return Err(ctx.error(
+//RS                 ctx.span(),
+//RS                 "checked multi-lane swizzle has no vector result type",
+//RS             ));
+//RS         }
+//RS     };
+//RS     let type_id = math_builtin_type_id(ctx, result_type)?;
+//RS     let route = super::math_builtin_route(result_type, "new", values.len(), &expr.ty, carrier)?;
+//RS     let call = ctx.intern_prelude_route(route)?;
+//RS     ctx.emit(
+//RS         "math-swizzle-constructor",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Semantic(MirSemanticOp::MathBuiltin {
+//RS             type_id,
+//RS             call,
+//RS             args: values,
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS fn lower_short_circuit_binary(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     op: BinOp,
+//RS     lhs: &TExpr,
+//RS     rhs: &TExpr,
+//RS ) -> Result<MirValueId, LowerError> {
+//RS     let left = ctx.lower_child(lhs)?;
+//RS     if ctx.is_terminated() {
+//RS         return Ok(left);
+//RS     }
+//RS 
+//RS     let right_block = ctx.new_block(ctx.span(), "short-circuit-right")?;
+//RS     let short_block = ctx.new_block(ctx.span(), "short-circuit-short")?;
+//RS     let join = ctx.new_block(ctx.span(), "short-circuit-join")?;
+//RS     let (then_target, else_target, short_value) = match op {
+//RS         BinOp::And => (right_block, short_block, false),
+//RS         BinOp::Or => (short_block, right_block, true),
+//RS         _ => return unsupported_expr(ctx, "TExprKind::Binary (invalid short-circuit op)"),
+//RS     };
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition: left,
+//RS         then_target,
+//RS         else_target,
+//RS     });
+//RS 
+//RS     let mut incoming = Vec::with_capacity(2);
+//RS     ctx.switch_to(short_block);
+//RS     let short = ctx.emit(
+//RS         "short-circuit-value",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Constant(MirConstant::Bool(short_value)),
+//RS     )?;
+//RS     let source = ctx.current_block();
+//RS     ctx.terminate(MirTerminator::Jump { target: join });
+//RS     incoming.push((source, short));
+//RS 
+//RS     ctx.switch_to(right_block);
+//RS     let right = ctx.lower_child(rhs)?;
+//RS     let source = ctx.current_block();
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: join });
+//RS         incoming.push((source, right));
+//RS     }
+//RS 
+//RS     ctx.switch_to(join);
+//RS     ctx.emit(
+//RS         "short-circuit-phi",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Phi { incoming },
+//RS     )
+//RS }
+//RS 
+//RS /// Lower one checked TIR expression into one canonical MIR value.
+//RS ///
+//RS /// Every `TExprKind` is named explicitly.  The match is intentionally not a
+//RS /// wildcard: adding a TIR expression requires an explicit canonical-MIR
+//RS /// decision (or an explicit boundary error) here.
+// END-PORT-PENDING 0529 crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:1-1369
+

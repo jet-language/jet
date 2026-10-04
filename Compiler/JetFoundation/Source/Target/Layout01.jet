@@ -1,0 +1,288 @@
+// Canonical Layout.jet extension; publish in the SAME JetFoundation module.
+// Rust: crates/jet-foundation/src/Layout.rs:1
+// Concrete byte facts remain limited to compiler-owned C/columnar layouts.
+// Existing items below map to Layout.jet; shared fact carriers map to MIR/MIR.jet.
+// Integration: add Source/Target/Layout01.jet and Tests/Target/Layout01.jet to
+// the existing JetFoundation source/test lists, without a new public module.
+// Integration corrections in Layout.jet:
+// - support_exact_rows: consume alignments through jet_target_layout_sorted_alignments
+//   before computing proven and constructing the fact row.
+// - supports_alignment: use support.proven &&
+//   jet_target_layout_alignment_index(support.alignments, alignment) != None.
+// These two helpers supply the Rust sorting/dedup and binary-search gaps, not
+// another support-fact mechanism. No native allocation/atomic operations occur;
+// #4494, #4499 and #4409 are not applicable to this reference window.
+
+// Rust: crates/jet-foundation/src/Layout.rs:15
+// LAYOUT_FACT_VERSION -> Layout.jet::JET_TARGET_LAYOUT_FACT_VERSION.
+// Rust: crates/jet-foundation/src/Layout.rs:19
+// PORTABLE_ALIGNMENT_BASELINE_MAX -> JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX.
+// Rust: crates/jet-foundation/src/Layout.rs:24
+// PORTABLE_ALIGNMENT_BASELINE -> JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE.
+// Rust: crates/jet-foundation/src/Layout.rs:50
+// LayoutSupportFacts -> MIR/MIR.jet::MIRLayoutSupportFacts.
+// Rust: crates/jet-foundation/src/Layout.rs:67
+// LayoutSupportFacts::unknown -> jet_target_layout_support_unknown.
+
+// Rust: crates/jet-foundation/src/Layout.rs:78
+// LayoutSupportFacts::exact -> jet_target_layout_support_exact_rows after the
+// integration correction above (all fields otherwise match the canonical row).
+fn jet_target_layout_sorted_alignments(values: ^[Int]) -> [Int] Never! {
+    sorted := ^values
+    &sorted.sort()
+    kept := 0
+    loop index in 0..<sorted.len() {
+        if kept > 0 && sorted[index] == sorted[kept - 1] -> next
+        if kept != index -> sorted[kept] = sorted[index]
+        kept += 1
+    }
+    loop sorted.len() > kept -> &sorted.pop().drop("discard duplicate alignment beyond compacted prefix")
+    sorted
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:97
+// powers_through -> jet_target_layout_support_powers_through (already produces
+// sorted unique powers, preserves checked multiplication and unknown boundary).
+// Rust: crates/jet-foundation/src/Layout.rs:121
+// with_abi -> jet_target_layout_support_with_abi.
+// Rust: crates/jet-foundation/src/Layout.rs:126
+// supports_alignment -> jet_target_layout_supports_alignment after correction.
+fn jet_target_layout_alignment_index(alignments: [Int], alignment: Int) -> Int? Never! {
+    low := 0
+    high := alignments.len()
+    loop low < high {
+        middle :: low + (high - low) /% 2
+        if alignments[middle] < alignment -> low = middle + 1 else -> high = middle
+    }
+    if low < alignments.len() && alignments[low] == alignment -> Val(low) else -> None
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:130
+fn jet_target_layout_support_intersect(left: MIRLayoutSupportFacts, right: MIRLayoutSupportFacts) -> MIRLayoutSupportFacts Never! {
+    alignments := [Int]{}
+    if left.proven && right.proven {
+        loop alignment in left.alignments {
+            if jet_target_layout_alignment_index(right.alignments, alignment) != None -> &alignments.push(alignment)
+        }
+    }
+    max_size := Int?{None}
+    if left.max_size == .Val(a) {
+        if right.max_size == .Val(b) -> max_size = Val(if a < b -> a else -> b)
+    }
+    max_address := Int?{None}
+    if left.max_address == .Val(a) {
+        if right.max_address == .Val(b) -> max_address = Val(if a < b -> a else -> b)
+    }
+    abi :: if left.abi == right.abi -> left.abi else -> None
+    MIRLayoutSupportFacts{
+        proven: left.proven && right.proven && alignments.len() > 0,
+        alignments: ^alignments, max_size: max_size, max_address: max_address,
+        abi: abi, provenance: "intersection({left.provenance}, {right.provenance})",
+    }
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:161
+pub struct LayoutExecutionFacts {
+    pub mode: String
+    pub type_representation: MIRLayoutSupportFacts
+    pub stack_placement: MIRLayoutSupportFacts
+    pub global_placement: MIRLayoutSupportFacts
+    pub heap_allocator: MIRLayoutSupportFacts
+    pub foreign_by_value_abi: MIRLayoutSupportFacts
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:171
+pub fn jet_target_layout_execution_uniform(mode: String, support: MIRLayoutSupportFacts) -> LayoutExecutionFacts Never! {
+    LayoutExecutionFacts{mode: mode, type_representation: support,
+        stack_placement: support, global_placement: support,
+        heap_allocator: support, foreign_by_value_abi: support}
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:187
+// LayoutCapabilityFacts -> MIR/MIR.jet::MIRLayoutCapabilityFacts.
+// Rust: crates/jet-foundation/src/Layout.rs:203
+pub fn jet_target_layout_from_execution_modes(target_profile: String, backend: String, toolchain: String, linker: String, allocator_provider: String, modes: [LayoutExecutionFacts]) -> MIRLayoutCapabilityFacts Never! {
+    execution_modes := loop mode in modes -> mode.mode
+    &execution_modes.sort()
+    kept := 0
+    loop index in 0..<execution_modes.len() {
+        if kept > 0 && execution_modes[index] == execution_modes[kept - 1] -> next
+        if kept != index -> execution_modes[kept] = ^execution_modes[index]
+        kept += 1
+    }
+    loop execution_modes.len() > kept -> &execution_modes.pop().drop("discard duplicate execution mode")
+    type_representation := jet_target_layout_support_unknown()
+    stack_placement := jet_target_layout_support_unknown()
+    global_placement := jet_target_layout_support_unknown()
+    heap_allocator := jet_target_layout_support_unknown()
+    foreign_by_value_abi := jet_target_layout_support_unknown()
+    if modes.len() > 0 {
+        first :: modes[0]
+        type_representation = first.type_representation
+        stack_placement = first.stack_placement
+        global_placement = first.global_placement
+        heap_allocator = first.heap_allocator
+        foreign_by_value_abi = first.foreign_by_value_abi
+    }
+    loop index in 1..<modes.len() {
+        mode :: modes[index]
+        type_representation = jet_target_layout_support_intersect(type_representation, mode.type_representation)
+        stack_placement = jet_target_layout_support_intersect(stack_placement, mode.stack_placement)
+        global_placement = jet_target_layout_support_intersect(global_placement, mode.global_placement)
+        heap_allocator = jet_target_layout_support_intersect(heap_allocator, mode.heap_allocator)
+        foreign_by_value_abi = jet_target_layout_support_intersect(foreign_by_value_abi, mode.foreign_by_value_abi)
+    }
+    MIRLayoutCapabilityFacts{fact_version: JET_TARGET_LAYOUT_FACT_VERSION,
+        target_profile: target_profile, execution_modes: ^execution_modes,
+        backend: backend, toolchain: toolchain, linker: linker,
+        allocator_provider: allocator_provider, type_representation: ^type_representation,
+        stack_placement: ^stack_placement, global_placement: ^global_placement,
+        heap_allocator: ^heap_allocator, foreign_by_value_abi: ^foreign_by_value_abi}
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:264
+// for_triple -> jet_target_layout_from_triple_and_version(...).facts;
+// known families, address bounds, C ABI, aot mode and provenance match exactly.
+// Rust: crates/jet-foundation/src/Layout.rs:309
+pub fn jet_target_layout_with_identity(facts: ^MIRLayoutCapabilityFacts, target_profile: String, execution_modes: [String], backend: String, toolchain: String, linker: String, allocator_provider: String) -> MIRLayoutCapabilityFacts Never! {
+    updated := ^facts
+    updated.target_profile = target_profile
+    updated.execution_modes = execution_modes
+    updated.backend = backend
+    updated.toolchain = toolchain
+    updated.linker = linker
+    updated.allocator_provider = allocator_provider
+    updated
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:327
+// cache_identity -> jet_target_layout_cache_identity: each length-prefixed LE
+// frame, optional bound default, provenance and SHA256 prefix are retained.
+// Rust: crates/jet-foundation/src/Layout.rs:370
+// check_alignment -> jet_target_layout_check_alignment (same validation order).
+// Rust: crates/jet-foundation/src/Layout.rs:410
+// check_storage -> jet_target_layout_check_storage (same support planes, bounds,
+// address overflow and error precedence).
+// Rust: crates/jet-foundation/src/Layout.rs:467
+// LayoutAlignmentFact -> MIR/MIR.jet::MIRLayoutAlignmentFact.
+// Rust: crates/jet-foundation/src/Layout.rs:476
+// LayoutAlignmentError -> Layout.jet::JetLayoutAlignmentError.
+// Rust: crates/jet-foundation/src/Layout.rs:496
+// reason -> jet_target_layout_alignment_error_reason (exact messages).
+// Rust: crates/jet-foundation/src/Layout.rs:518
+// LayoutStorageKind -> JetLayoutStorageKind.
+// Rust: crates/jet-foundation/src/Layout.rs:526
+// as_str -> jet_target_layout_storage_kind_name_lower.
+// Rust: crates/jet-foundation/src/Layout.rs:537
+// LayoutStorageError -> JetLayoutStorageError.
+// Rust: crates/jet-foundation/src/Layout.rs:569
+// reason -> jet_target_layout_storage_error_reason (exact Debug-kind messages).
+// Rust: crates/jet-foundation/src/Layout.rs:604
+// append_layout_identity_frame -> jet_target_layout_frame.
+// Rust: crates/jet-foundation/src/Layout.rs:611
+// TargetLayout -> JetTargetLayout (Rust layout_facts field -> facts).
+// Rust: crates/jet-foundation/src/Layout.rs:624
+pub fn jet_target_layout_host() -> JetTargetLayout Never! {
+    jet_target_layout_from_triple(jet_target_layout_host_triple(), PKG_BUILD_STAMP_TOOLCHAIN)
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:629
+// from_triple -> jet_target_layout_from_triple; package version is supplied by
+// the canonical PKG_BUILD_STAMP_TOOLCHAIN constant, not the selected program.
+// Rust: crates/jet-foundation/src/Layout.rs:651
+pub fn jet_target_layout_from_build_facts(facts: BuildFactSnapshot) -> JetTargetLayout Never! {
+    triple :: if facts.target_triple == "" -> jet_target_layout_host_triple() else -> facts.target_triple
+    target := jet_target_layout_from_triple(triple, PKG_BUILD_STAMP_TOOLCHAIN)
+    if facts.target_dossier.machine == .Val(machine) -> target.facts = machine.layout
+    modes := ~target.facts.execution_modes
+    if !modes.contains(facts.target_dossier.tier_identity) -> &modes.push(facts.target_dossier.tier_identity)
+    target_profile :: if facts.target_dossier.machine == {
+        .Val(machine) -> machine.layout.target_profile
+        None -> "{facts.profile}:{target.triple}"
+    }
+    target.facts = jet_target_layout_with_identity(^target.facts, target_profile, ^modes,
+        "jet-codegen", facts.target_dossier.compiler_identity,
+        facts.target_dossier.linker_identity, facts.target_dossier.provider_identity)
+    target
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:686
+// supports_atomic_word -> jet_target_layout_supports_atomic_word.
+// Rust: crates/jet-foundation/src/Layout.rs:692
+// check_array_storage -> jet_target_layout_check_array_storage (checked stride).
+// Rust: crates/jet-foundation/src/Layout.rs:709
+pub fn jet_target_layout_host_triple() -> String Never! {
+    // GATE #4483: Rust std process-host constants are required here, NOT the
+    // program's selected target. An explicit build target bypasses this branch.
+    arch :: std.env.consts.ARCH
+    os :: std.env.consts.OS
+    if {
+        arch == "x86_64" && os == "linux" -> "x86_64-unknown-linux-gnu"
+        arch == "aarch64" && os == "linux" -> "aarch64-unknown-linux-gnu"
+        arch == "x86_64" && os == "windows" -> "x86_64-pc-windows-msvc"
+        arch == "aarch64" && os == "windows" -> "aarch64-pc-windows-msvc"
+        arch == "x86_64" && os == "macos" -> "x86_64-apple-darwin"
+        arch == "aarch64" && os == "macos" -> "aarch64-apple-darwin"
+        os == "wasi" -> "{arch}-wasi"
+        else -> "{arch}-unknown-{os}"
+    }
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:725
+// ByteLayout -> Layout.jet::ByteLayout.
+// Rust: crates/jet-foundation/src/Layout.rs:733
+// FieldLayoutFacts -> Layout.jet::FieldLayoutFacts.
+// Rust: crates/jet-foundation/src/Layout.rs:743
+// LayoutFacts -> Layout.jet::LayoutFacts.
+// Rust: crates/jet-foundation/src/Layout.rs:750
+// CheckedLayoutFacts -> Layout.jet::CheckedLayoutFacts.
+// Rust: crates/jet-foundation/src/Layout.rs:756
+// unknown -> jet_target_layout_unknown (all five unknown columns retained).
+// Rust: crates/jet-foundation/src/Layout.rs:774
+// TargetLayoutEngine -> Layout.jet::TargetLayoutEngine (canonical indexed registry).
+// Rust: crates/jet-foundation/src/Layout.rs:780
+// new -> jet_target_layout_engine; first item of each name is indexed once.
+// Rust: crates/jet-foundation/src/Layout.rs:790
+pub fn jet_target_layout_engine_host(items: [Item]) -> TargetLayoutEngine Never! {
+    jet_target_layout_engine(items, jet_target_layout_host())
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:797
+// target -> jet_target_layout_engine_target.
+// Rust: crates/jet-foundation/src/Layout.rs:804
+// struct_facts -> jet_target_layout_struct_facts.
+// Rust: crates/jet-foundation/src/Layout.rs:812
+// checked_struct_facts -> jet_target_layout_checked_struct_facts.
+// Rust: crates/jet-foundation/src/Layout.rs:839
+// enum_facts -> jet_target_layout_enum_facts_inner_named via enum_facts; every
+// unit/single/named payload, overflow and partial-known field branch retained.
+// Rust: crates/jet-foundation/src/Layout.rs:930
+// struct_facts_inner -> jet_target_layout_struct_facts_inner_named.
+// Rust: crates/jet-foundation/src/Layout.rs:961
+// aggregate_fields -> jet_target_layout_aggregate.
+// Rust: crates/jet-foundation/src/Layout.rs:1015
+// aggregate_types -> enum_facts_inner_named's named payload aggregate call.
+// Rust: crates/jet-foundation/src/Layout.rs:1026
+// type_layout_inner -> jet_target_layout_type_inner (all Type arms retained).
+// Rust: crates/jet-foundation/src/Layout.rs:1077
+// atomic_layout -> jet_target_layout_atomic_layout.
+// Rust: crates/jet-foundation/src/Layout.rs:1087
+// named_type_layout -> jet_target_layout_named_type / jet_target_layout_named_item.
+// Rust: crates/jet-foundation/src/Layout.rs:1120
+// scalar_layout -> jet_target_layout_scalar.
+// Rust: crates/jet-foundation/src/Layout.rs:1128
+// enum_tag_size -> jet_target_layout_enum_tag_size.
+// Rust: crates/jet-foundation/src/Layout.rs:1140
+// aligned_struct_facts -> jet_target_layout_aligned_struct_facts.
+// Rust: crates/jet-foundation/src/Layout.rs:1161
+// item_name -> jet_target_layout_item_name.
+// Rust: crates/jet-foundation/src/Layout.rs:1174
+// atomic_scalar_type -> jet_target_layout_atomic_scalar_type.
+// Rust: crates/jet-foundation/src/Layout.rs:1186
+// atomic_add_type -> jet_target_layout_atomic_add_type.
+// Rust: crates/jet-foundation/src/Layout.rs:1191
+// scalar_alignment -> jet_target_layout_scalar_alignment.
+// Rust: crates/jet-foundation/src/Layout.rs:1199
+// align_up -> jet_layout_align_up (u64 overflow preserved in exact Int arithmetic).
+// Rust: crates/jet-foundation/src/Layout.rs:1206
+// tests -> Tests/Target/Layout01.jet, including both fixture helpers and all five tests.

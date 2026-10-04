@@ -10,6 +10,7 @@
 // per value, and conditions are answered directly on the scope values the
 // template already owns (no merged scope snapshot per condition).
 use jet_foundation.[
+    ast_comptime_literal_expr,
     BinOp,
     BindPattern,
     Binding,
@@ -369,43 +370,6 @@ fn sema_derive_static_binary(op: BinOp, lhs: CtValue, rhs: CtValue) -> CtValue? 
     Val(CtValue.Bool{value: result})
 }
 
-// Rust `comptime_literal_expr` / `build_fact_expr`: a template value becomes
-// the literal the parser would have produced for it; a unit enum stays a
-// value-carrying name so the typed boundary can fold it.
-fn sema_derive_literal_expr(value: CtValue, span: Span) -> Expr? Never! {
-    if value == {
-        .Int(number) -> Val(Expr.Int{value: number, span: span, width: None, raw: None})
-        .Bool(flag) -> Val(Expr.Bool{value: flag, span: span})
-        .Str(text) -> Val(Expr.Str{parts: [StrPart.Lit{text: text}], span: span})
-        .Char(character) -> Val(Expr.Char{value: "{character}", span: span})
-        .Unit -> Val(Expr.Unit{span: span})
-        .Enum(_, _, args) -> {
-            if args.len() != 0 -> return None
-            Val(Expr.ComptimeName{name: "", span: span, value: Val(value)})
-        }
-        .List(values) -> {
-            elements := [Expr]{}
-            loop item in values {
-                element :: sema_derive_literal_expr(item, span) ?? return None
-                &elements.push(element)
-            }
-            Val(Expr.ListLit{elements: elements, span: span})
-        }
-        .Present(inner) -> {
-            element :: sema_derive_literal_expr(inner, span) ?? return None
-            Val(Expr.Present{value: element, span: span})
-        }
-        .Struct(type_name, fields) -> {
-            expanded := [ExprField]{}
-            loop field in fields {
-                element :: sema_derive_literal_expr(field.value, span) ?? return None
-                &expanded.push(ExprField{name: field.name, name_span: span, value: element})
-            }
-            Val(Expr.StructLit{type_name: type_name, type_args: [Type]{}, import_ns: None, as_trait: None, fields: expanded, inferred: false, span: span})
-        }
-        else -> None
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Name splices (D-NAME-SPLICE1=B): `$name` splices the template binding `name`.
@@ -767,7 +731,7 @@ fn sema_derive_expand_expr_node(expansion: &SemaDeriveExpansion, expression: Exp
         .Ident(name, span) -> {
             if !name.starts_with("$") -> return ~expression
             value :: sema_derive_scope_value(expansion, name) ?? return ~expression
-            return sema_derive_literal_expr(value, span) ?? ~expression
+            return ast_comptime_literal_expr(value, span) ?? ~expression
         }
         .Call(call) -> {
             updated := call
@@ -793,7 +757,7 @@ fn sema_derive_expand_expr_node(expansion: &SemaDeriveExpansion, expression: Exp
             }
             return Expr.MethodCall{receiver: sema_derive_expand_expr(&expansion, receiver), method: sema_derive_expand_name(&expansion, method, method_span), method_span: method_span, owner_type_args: sema_derive_expand_types(&expansion, owner_type_args), type_args: sema_derive_expand_types(&expansion, type_args), args: sema_derive_expand_call_args(&expansion, args), recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen}
         }
-        .OptMethodCall(receiver, method, method_span, type_args, args, span) -> return Expr.OptMethodCall{receiver: sema_derive_expand_expr(&expansion, receiver), method: sema_derive_expand_name(&expansion, method, method_span), method_span: method_span, type_args: sema_derive_expand_types(&expansion, type_args), args: sema_derive_expand_call_args(&expansion, args), span: span}
+        .OptMethodCall(receiver, method, method_span, type_args, args, span, receiver_span, call_span) -> return Expr.OptMethodCall{receiver: sema_derive_expand_expr(&expansion, receiver), method: sema_derive_expand_name(&expansion, method, method_span), method_span: method_span, type_args: sema_derive_expand_types(&expansion, type_args), args: sema_derive_expand_call_args(&expansion, args), span: span, receiver_span: receiver_span, call_span: call_span}
         .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span) -> return Expr.StructLit{type_name: sema_derive_expand_name(&expansion, type_name, span), type_args: sema_derive_expand_types(&expansion, type_args), import_ns: import_ns, as_trait: as_trait, fields: sema_derive_expand_fields(&expansion, fields), inferred: inferred, span: span}
         .TypedLit(head, body, span) -> return Expr.TypedLit{head: head.map((value) -> sema_derive_expand_type(&expansion, value)), body: sema_derive_expand_typed_body(&expansion, body), span: span}
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span) -> return sema_derive_expand_enum_lit(&expansion, type_name, variant, variant_span, args, leading_dot, span)
@@ -819,7 +783,7 @@ fn sema_derive_expand_expr_node(expansion: &SemaDeriveExpansion, expression: Exp
         .ComptimeName(name, span, value) -> {
             if value != None -> return ~expression
             bound :: sema_derive_scope_value(expansion, name) ?? return ~expression
-            return sema_derive_literal_expr(bound, span) ?? ~expression
+            return ast_comptime_literal_expr(bound, span) ?? ~expression
         }
         .Paren(value, span) -> return Expr.Paren{value: sema_derive_expand_expr(&expansion, value), span: span}
         else -> {}
@@ -836,7 +800,7 @@ fn sema_derive_reflect_literal(expansion: SemaDeriveExpansion, receiver: Expr, s
     }
     value :: sema_derive_scope_value(expansion, name) ?? return None
     if value == .Struct(type_name, _) {
-        if type_name == "TypeInfo" -> return sema_derive_literal_expr(value, span)
+        if type_name == "TypeInfo" -> return ast_comptime_literal_expr(value, span)
     }
     None
 }
@@ -885,7 +849,7 @@ fn sema_derive_expand_field(expansion: &SemaDeriveExpansion, base: Expr, member:
     if binding == .Val(name) {
         if sema_derive_scope_value(expansion, name) == .Val(owner) {
             if sema_derive_struct_field(owner, member) == .Val(value) {
-                if sema_derive_literal_expr(value, span) == .Val(literal) -> return literal
+                if ast_comptime_literal_expr(value, span) == .Val(literal) -> return literal
             }
         }
     }
@@ -1001,7 +965,7 @@ fn sema_derive_expand_binding(expansion: &SemaDeriveExpansion, binding: Binding)
     if binding.pattern == .Val(pattern) {
         updated.pattern = Val(if pattern == {
             .Struct(type_name, type_span, fields, rest, span) -> BindPattern.Struct{type_name: sema_derive_expand_name(&expansion, type_name, type_span), type_span: type_span, fields: fields, rest: rest, span: span}
-            .Refutable(inner, fallback, names, span) -> BindPattern.Refutable{pattern: sema_derive_expand_pattern(&expansion, inner, None), fallback: sema_derive_expand_or_fallback(&expansion, fallback), names: names, span: span}
+            .Refutable(inner, fallback, names, span, synthesized) -> BindPattern.Refutable{pattern: sema_derive_expand_pattern(&expansion, inner, None), fallback: sema_derive_expand_or_fallback(&expansion, fallback), names: names, span: span, synthesized: synthesized}
             else -> ~pattern
         })
     }

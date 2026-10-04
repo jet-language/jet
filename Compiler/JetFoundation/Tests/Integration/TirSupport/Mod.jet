@@ -1,0 +1,1005 @@
+// PORT-PENDING 1178 tests-tir-support-mod: tests/tir_support/mod.rs:1-1001
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code)]
+//RS 
+//RS use crate::common::unique_tmp;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS // Tier-parity scratch programs exercise the language and Core surface, not an
+//RS // application manifest. Give every scratch project one explicit test
+//RS // authority decision so an authority-floor change cannot turn unrelated
+//RS // tests into per-test allowlists.
+//RS pub(crate) const TIR_TEST_PACKAGE: &str = "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n";
+//RS 
+//RS 
+//RS pub(crate) fn write_test_package(dir: &Path, source: &str) {
+//RS     let temp = std::env::temp_dir();
+//RS     let scratch = crate::common::test_scratch_root("scratch");
+//RS     assert!(
+//RS         dir.parent() == Some(temp.as_path()) || dir.parent() == Some(scratch.as_path()),
+//RS         "TIR test package must live in its own scratch child: {}",
+//RS         dir.display()
+//RS     );
+//RS     fs::write(dir.join("package.jet"), source).unwrap();
+//RS }
+//RS pub fn assert_awaited_web_tier(name: &str, source: &str, expected: &str) {
+//RS     let scratch = crate::common::Scratch::new(name);
+//RS     write_test_package(&scratch.path, TIR_TEST_PACKAGE);
+//RS     let entry = scratch.path.join("run.jet");
+//RS     fs::write(&entry, source).unwrap();
+//RS     let output = jet::compile_web_with_path(source, entry.to_str().unwrap())
+//RS         .unwrap_or_else(|diagnostics| panic!("{name} web pass fixture rejected: {diagnostics:#?}"));
+//RS     let web = output.web.expect("web artifacts for the same Jet pass");
+//RS     fs::write(scratch.path.join("package.json"), "{\"type\":\"module\"}\n").unwrap();
+//RS     fs::write(scratch.path.join("app.js"), web.js_app).unwrap();
+//RS     fs::write(scratch.path.join("jet_dom_runtime.js"), web.dom_runtime).unwrap();
+//RS     fs::write(scratch.path.join("app_wasm.rs"), web.wasm_rust).unwrap();
+//RS     let wasm = Command::new("rustc").current_dir(&scratch.path).args([
+//RS         "--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib",
+//RS         "-O", "app_wasm.rs", "-o", "app.wasm",
+//RS     ]).output().expect("web proof requires rustc with wasm32 target");
+//RS     assert!(wasm.status.success(), "{name} web Wasm build: {}", String::from_utf8_lossy(&wasm.stderr));
+//RS     fs::write(scratch.path.join("run.mjs"), "const { jet_main } = await import('./app.js');\nawait jet_main();\n").unwrap();
+//RS     let node = Command::new("node").current_dir(&scratch.path).arg("run.mjs")
+//RS         .output().expect("web proof requires Node; absence is not a pass");
+//RS     assert!(node.status.success(), "{name} awaited web entry: {}", String::from_utf8_lossy(&node.stderr));
+//RS     assert_eq!(String::from_utf8_lossy(&node.stdout), expected, "{name} awaited web stdout");
+//RS }
+//RS 
+//RS pub fn have_rustc() -> bool {
+//RS     let present = Command::new("rustc").arg("--version").output().is_ok();
+//RS     if !present && std::env::var("JET_REQUIRE_RUSTC").as_deref() == Ok("1") {
+//RS         panic!(
+//RS             "JET_REQUIRE_RUSTC=1 but rustc not found on PATH — refusing to \
+//RS              silently skip I2 (rustc-must-accept) coverage. Fix the CI \
+//RS              environment; do not unset JET_REQUIRE_RUSTC to paper over this."
+//RS         );
+//RS     }
+//RS     present
+//RS }
+//RS 
+//RS pub fn build_and_run(name: &str, src: &str) -> (i32, String) {
+//RS     let (code, stdout, _stderr) = build_and_run_full("jet_tir_test", name, src);
+//RS     (code, stdout)
+//RS }
+//RS 
+//RS pub fn compile(name: &str, src: &str) -> String {
+//RS     let scratch = crate::common::Scratch::new("jet_tir_compile");
+//RS     let dir = &scratch.path;
+//RS     write_test_package(&dir, TIR_TEST_PACKAGE);
+//RS     let jet_path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&jet_path, src).unwrap();
+//RS     let shown = jet_path.to_string_lossy().into_owned();
+//RS     jet::compile_with_path(src, &shown)
+//RS         .unwrap_or_else(|diags| {
+//RS             panic!(
+//RS                 "front end rejected:\n{}",
+//RS                 jet::render_diagnostics(&shown, src, &diags)
+//RS             )
+//RS         })
+//RS         .rust
+//RS }
+//RS 
+//RS /// Compile source that has no repository path. The compiler still needs a
+//RS /// real bundle path to resolve its package and module context.
+//RS pub fn compile_source(
+//RS     name: &str,
+//RS     src: &str,
+//RS ) -> Result<jet::CompileOutput, Vec<jet::Diagnostics::Diagnostic>> {
+//RS     let scratch = crate::common::Scratch::new("jet_tir_compile_source");
+//RS     let dir = &scratch.path;
+//RS     write_test_package(&dir, TIR_TEST_PACKAGE);
+//RS     let filename = if name.ends_with(".jet") {
+//RS         name.to_string()
+//RS     } else {
+//RS         format!("{name}.jet")
+//RS     };
+//RS     let path = dir.join(filename);
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy().into_owned();
+//RS     let result = jet::compile_with_path(src, &shown);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     result
+//RS }
+//RS 
+//RS pub fn build_and_run_full(prefix: &str, name: &str, src: &str) -> (i32, String, String) {
+//RS     build_and_run_full_inner(prefix, name, src, None)
+//RS }
+//RS 
+//RS /// Run a snippet the way `jet run` does — through the Cranelift host, with the
+//RS /// interpreter picking up whatever the host deopts on. `build_and_run*` above
+//RS /// only ever proves AOT, so a rule re-encoded in an engine would pass every one
+//RS /// of those and still be wrong (I9). Needs no rustc.
+//RS ///
+//RS /// Returns `(exit code, stdout, stderr)`.
+//RS pub fn jit_run(name: &str, src: &str) -> (i32, String, String) {
+//RS     jit_run_with_package(name, src, &[], None)
+//RS }
+//RS 
+//RS fn jit_run_with_package(
+//RS     name: &str,
+//RS     src: &str,
+//RS     vars: &[(&str, &str)],
+//RS     package_source: Option<&str>,
+//RS ) -> (i32, String, String) {
+//RS     let scratch = crate::common::Scratch::new("jet_jit_run");
+//RS     let dir = &scratch.path;
+//RS     let jet_name = format!("{name}.jet");
+//RS     let jet_path = dir.join(&jet_name);
+//RS     fs::write(&jet_path, src).unwrap();
+//RS     write_test_package(&dir, package_source.unwrap_or(TIR_TEST_PACKAGE));
+//RS     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS     command
+//RS         .arg("run")
+//RS         .arg(&jet_path)
+//RS         .current_dir(&dir)
+//RS         .env("JET_STORE_DIR", dir.join("cache"))
+//RS         .env("JETPACK_ROOT", dir.join("jetpack"));
+//RS     for (key, value) in vars {
+//RS         command.env(key, value);
+//RS     }
+//RS     let out = command.output().unwrap();
+//RS     let stderr = normalize_workspace_root_paths(
+//RS         &String::from_utf8_lossy(&out.stderr),
+//RS         &dir,
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     (
+//RS         out.status.code().unwrap_or(-1),
+//RS         String::from_utf8_lossy(&out.stdout).into_owned(),
+//RS         stderr,
+//RS     )
+//RS }
+//RS 
+//RS pub fn jit_run_traced(name: &str, src: &str) -> (i32, String, String) {
+//RS     let scratch = crate::common::Scratch::new("jet_jit_run_traced");
+//RS     let dir = &scratch.path;
+//RS     let jet_path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&jet_path, src).unwrap();
+//RS     write_test_package(&dir, TIR_TEST_PACKAGE);
+//RS     let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", jet_path.to_str().unwrap(), "--trace-tiers"])
+//RS         .current_dir(&dir)
+//RS         .env("JET_STORE_DIR", dir.join("cache"))
+//RS         .env("JETPACK_ROOT", dir.join("jetpack"))
+//RS         .output()
+//RS         .unwrap();
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     (
+//RS         out.status.code().unwrap_or(-1),
+//RS         String::from_utf8_lossy(&out.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&out.stderr).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS /// `jit_run` with environment variables the program can read back.
+//RS ///
+//RS /// A trap test needs an operand the comptime evaluator cannot see. It folds
+//RS /// literals, calls, and loops over literal lists, so a value that only exists
+//RS /// in the process environment is the smallest thing that reaches the Cranelift
+//RS /// host instead of stopping the build with a comptime diagnostic.
+//RS pub fn jit_run_with_env(name: &str, src: &str, vars: &[(&str, &str)]) -> (i32, String, String) {
+//RS     jit_run_with_env_args(name, src, vars, &[])
+//RS }
+//RS 
+//RS /// `jit_run` with process env and program argv after `--`.
+//RS pub fn jit_run_with_env_args(
+//RS     name: &str,
+//RS     src: &str,
+//RS     vars: &[(&str, &str)],
+//RS     program_args: &[&str],
+//RS ) -> (i32, String, String) {
+//RS     let scratch = crate::common::Scratch::new("jet_jit_run");
+//RS     let dir = &scratch.path;
+//RS     let jet_name = format!("{name}.jet");
+//RS     let jet_path = dir.join(&jet_name);
+//RS     fs::write(&jet_path, src).unwrap();
+//RS     write_test_package(&dir, TIR_TEST_PACKAGE);
+//RS     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS     command
+//RS         .arg("run")
+//RS         .arg(&jet_path)
+//RS         .current_dir(&dir)
+//RS         // Keep every run out of the shared build cache, which is keyed on the
+//RS         // AST hash and would otherwise serve a binary built before this change.
+//RS         .env("JET_STORE_DIR", dir.join("cache"))
+//RS         .env("JETPACK_ROOT", dir.join("jetpack"));
+//RS     for (key, value) in vars {
+//RS         command.env(key, value);
+//RS     }
+//RS     if !program_args.is_empty() {
+//RS         command.arg("--");
+//RS         for arg in program_args {
+//RS             command.arg(arg);
+//RS         }
+//RS     }
+//RS     let out = command.output().unwrap();
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     (
+//RS         out.status.code().unwrap_or(-1),
+//RS         String::from_utf8_lossy(&out.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&out.stderr).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS pub fn interpreter_run(name: &str, src: &str) -> (i32, String, String) {
+//RS     interpreter_run_with_package(name, src, None)
+//RS }
+//RS 
+//RS fn interpreter_run_with_package(
+//RS     name: &str,
+//RS     src: &str,
+//RS     package_source: Option<&str>,
+//RS ) -> (i32, String, String) {
+//RS     let scratch = crate::common::Scratch::new("jet_interpreter_run");
+//RS     let dir = &scratch.path;
+//RS     let path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&path, src).unwrap();
+//RS     write_test_package(&dir, package_source.unwrap_or(TIR_TEST_PACKAGE));
+//RS     let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .arg("run")
+//RS         .arg("--interpret")
+//RS         .arg(&path)
+//RS         .current_dir(&dir)
+//RS         .env("JET_STORE_DIR", dir.join("cache"))
+//RS         .env("JETPACK_ROOT", dir.join("jetpack"))
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = normalize_workspace_root_paths(
+//RS         &String::from_utf8_lossy(&out.stderr),
+//RS         &dir,
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     (
+//RS         out.status.code().unwrap_or(-1),
+//RS         String::from_utf8_lossy(&out.stdout).into_owned(),
+//RS         stderr,
+//RS     )
+//RS }
+//RS 
+//RS /// The same snippet on both tiers, asserting they agree. This is the shape I9
+//RS /// actually asks for: not "AOT prints X", but "every tier prints the same X".
+//RS pub fn assert_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
+//RS     assert_tiers_agree_with_package(name, src, expected_stdout, None);
+//RS }
+//RS 
+//RS /// Run one plugin-backed program from a fresh project carrying the matching
+//RS /// frozen Component interface snapshot. The artifact itself may live outside
+//RS /// the project; only its stem selects the snapshot alias.
+//RS pub fn run_plugin_tier(
+//RS     name: &str,
+//RS     src: &str,
+//RS     tier: &str,
+//RS     artifact: &Path,
+//RS     api_snapshot: &str,
+//RS ) -> (i32, String, String) {
+//RS     let dir = unique_tmp(&format!("jet_plugin_tier_{name}_{tier}"));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     write_test_package(&dir, TIR_TEST_PACKAGE);
+//RS     let api_dir = dir.join(".jet/cache/api");
+//RS     fs::create_dir_all(&api_dir).unwrap();
+//RS     let stem = artifact
+//RS         .file_stem()
+//RS         .and_then(|stem| stem.to_str())
+//RS         .unwrap_or_else(|| panic!("plugin artifact has no UTF-8 stem: {}", artifact.display()));
+//RS     fs::write(api_dir.join(format!("plugin__{stem}.api")), api_snapshot).unwrap();
+//RS     let path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&path, src).unwrap();
+//RS 
+//RS     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS     command.arg("run");
+//RS     match tier {
+//RS         "release" => {
+//RS             command.arg("--release");
+//RS         }
+//RS         "jit" => {}
+//RS         "interpreter" => {
+//RS             command.arg("--interpret");
+//RS         }
+//RS         other => panic!("unknown plugin tier `{other}`"),
+//RS     }
+//RS     command
+//RS         .arg(&path)
+//RS         .current_dir(&dir)
+//RS         .env("JET_STORE_DIR", dir.join(format!("cache-{tier}")))
+//RS         .env("JETPACK_ROOT", dir.join(format!("jetpack-{tier}")))
+//RS         .env("JETPACK_ENV", "1")
+//RS         .env("NO_COLOR", "1");
+//RS     let output = command.output().unwrap();
+//RS     let result = (
+//RS         output.status.code().unwrap_or(-1),
+//RS         String::from_utf8_lossy(&output.stdout).into_owned(),
+//RS         normalize_workspace_root_paths(&String::from_utf8_lossy(&output.stderr), &dir),
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     result
+//RS }
+//RS 
+//RS /// Prove one plugin call through release/AOT, default JIT, and forced
+//RS /// interpreter with one staged immutable interface contract.
+//RS pub fn assert_tiers_agree_with_plugin(
+//RS     name: &str,
+//RS     src: &str,
+//RS     expected_stdout: &str,
+//RS     artifact: &Path,
+//RS     api_snapshot: &str,
+//RS ) {
+//RS     let mut runs = vec![
+//RS         ("jit", run_plugin_tier(name, src, "jit", artifact, api_snapshot)),
+//RS         (
+//RS             "interpreter",
+//RS             run_plugin_tier(name, src, "interpreter", artifact, api_snapshot),
+//RS         ),
+//RS     ];
+//RS     if have_rustc() {
+//RS         runs.push((
+//RS             "release",
+//RS             run_plugin_tier(name, src, "release", artifact, api_snapshot),
+//RS         ));
+//RS     }
+//RS     let (baseline_tier, baseline) = runs.first().expect("plugin tier list is non-empty");
+//RS     assert_eq!(
+//RS         baseline.0, 0,
+//RS         "{baseline_tier} plugin run failed:\n{}",
+//RS         baseline.2
+//RS     );
+//RS     assert_eq!(baseline.1, expected_stdout, "{baseline_tier} plugin output");
+//RS     for (tier, result) in runs.iter().skip(1) {
+//RS         assert_eq!(result.0, baseline.0, "{tier} plugin exit code disagreed");
+//RS         assert_eq!(result.1, baseline.1, "{tier} plugin output disagreed");
+//RS         assert_eq!(result.2, baseline.2, "{tier} plugin stderr disagreed");
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Tier parity with a temporary package policy. Effectful snippets need an
+//RS /// application authority decision before the real JIT and interpreter paths
+//RS /// will execute them; the source remains unchanged and the policy is test-only.
+//RS pub fn assert_tiers_agree_with_application_policy(
+//RS     name: &str,
+//RS     src: &str,
+//RS     expected_stdout: &str,
+//RS     package_source: &str,
+//RS ) {
+//RS     assert_tiers_agree_with_package(name, src, expected_stdout, Some(package_source));
+//RS }
+//RS 
+//RS fn assert_tiers_agree_with_package(
+//RS     name: &str,
+//RS     src: &str,
+//RS     expected_stdout: &str,
+//RS     package_source: Option<&str>,
+//RS ) {
+//RS     let (jit_code, jit_out, jit_err_raw) = jit_run_with_package(name, src, &[], package_source);
+//RS     let jit_err = jit_err_raw;
+//RS     assert_eq!(jit_code, 0, "`jet run` failed:\n{jit_err}");
+//RS     assert_eq!(
+//RS         jit_out, expected_stdout,
+//RS         "`jet run` (Cranelift/interpreter) disagreed:\n{jit_err}"
+//RS     );
+//RS     let (interpreter_code, interpreter_out, interpreter_err_raw) =
+//RS         interpreter_run_with_package(name, src, package_source);
+//RS     let interpreter_err = interpreter_err_raw;
+//RS     assert_eq!(
+//RS         interpreter_code, jit_code,
+//RS         "forced interpreter and default JIT exit codes disagree:\ninterpreter stderr: {interpreter_err}\nJIT stderr: {jit_err}"
+//RS     );
+//RS     assert_eq!(
+//RS         interpreter_out, jit_out,
+//RS         "forced interpreter and default JIT stdout disagree:\ninterpreter stderr: {interpreter_err}\nJIT stderr: {jit_err}"
+//RS     );
+//RS     assert_eq!(
+//RS         interpreter_err, jit_err,
+//RS         "forced interpreter and default JIT stderr disagree"
+//RS     );
+//RS     if have_rustc() {
+//RS         let (aot_code, aot_out, aot_err_raw) = build_and_run_full("jet_tir_test", name, src);
+//RS         let aot_err = aot_err_raw;
+//RS         assert_eq!(
+//RS             aot_code, jit_code,
+//RS             "AOT and `jet run` exit codes disagree:\n{aot_err}"
+//RS         );
+//RS         assert_eq!(
+//RS             aot_out, jit_out,
+//RS             "AOT and `jet run` disagree — one tier re-encoded the rule (I9)"
+//RS         );
+//RS         assert_eq!(
+//RS             aot_err, jit_err,
+//RS             "AOT and `jet run` stderr disagree — one tier re-encoded the rule (I9)"
+//RS         );
+//RS         assert_eq!(
+//RS             aot_code, interpreter_code,
+//RS             "AOT and forced interpreter exit codes disagree"
+//RS         );
+//RS         assert_eq!(
+//RS             aot_out, interpreter_out,
+//RS             "AOT and forced interpreter stdout disagree"
+//RS         );
+//RS         assert_eq!(
+//RS             aot_err, interpreter_err,
+//RS             "AOT and forced interpreter stderr disagree"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// Run an executable example through the three hosted lenses named by I9:
+//RS /// release/AOT, default `jet run`, and forced TIR interpretation.
+//RS pub fn assert_example_cli_tiers_agree(stem: &str, expected_stdout: &str) {
+//RS     assert_example_cli_tiers_agree_with(stem, |actual| {
+//RS         assert_eq!(actual, expected_stdout);
+//RS     });
+//RS }
+//RS 
+//RS pub fn assert_example_cli_tiers_agree_with<F>(stem: &str, check_stdout: F)
+//RS where
+//RS     F: Fn(&str),
+//RS {
+//RS     assert_example_cli_tiers_agree_with_package(stem, None, check_stdout);
+//RS }
+//RS 
+//RS /// Run an executable example from an isolated scratch package. This keeps a
+//RS /// narrowly scoped authority grant out of the shared examples tree.
+//RS pub fn assert_example_cli_tiers_agree_with_package<F>(
+//RS     stem: &str,
+//RS     package_source: Option<&str>,
+//RS     check_stdout: F,
+//RS ) where
+//RS     F: Fn(&str),
+//RS {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let stem_path = root.join("Examples/features").join(stem);
+//RS     let source = if stem_path.is_dir() {
+//RS         stem_path.join("run.jet")
+//RS     } else {
+//RS         stem_path.with_extension("jet")
+//RS     };
+//RS     assert!(
+//RS         source.is_file(),
+//RS         "missing executable allocator example: {}",
+//RS         source.display()
+//RS     );
+//RS     let (scratch, run_source) = if let Some(package_source) = package_source {
+//RS         let scratch = crate::common::Scratch::new("jet_example_policy");
+//RS         let run_source = scratch.join(
+//RS             source
+//RS                 .file_name()
+//RS                 .expect("example source has a filename")
+//RS                 .to_str()
+//RS                 .expect("example source filename is UTF-8"),
+//RS         );
+//RS         fs::copy(&source, &run_source).unwrap();
+//RS         write_test_package(&scratch.path, package_source);
+//RS         (Some(scratch), run_source)
+//RS     } else {
+//RS         (None, source.clone())
+//RS     };
+//RS     let run_cwd = scratch
+//RS         .as_ref()
+//RS         .map_or(root.as_path(), |scratch| scratch.path.as_path());
+//RS 
+//RS     let modes = [
+//RS         ("release", true, false),
+//RS         ("default", false, false),
+//RS         ("interpret", false, true),
+//RS     ];
+//RS     let mut baseline = None;
+//RS     for (mode, release, interpret) in modes {
+//RS         let cache_scratch = crate::common::Scratch::new(&format!("jet_example_{mode}"));
+//RS         let cache = &cache_scratch.path;
+//RS         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS         command.arg("run");
+//RS         if release {
+//RS             command.arg("--release");
+//RS         }
+//RS         if interpret {
+//RS             command.arg("--interpret");
+//RS         }
+//RS         command
+//RS             .arg(&run_source)
+//RS             .current_dir(run_cwd)
+//RS             .env("JET_STORE_DIR", cache.join("cache"))
+//RS             .env("JETPACK_ROOT", cache.join("jetpack"))
+//RS             .env("NO_COLOR", "1")
+//RS             // The test itself already runs inside Tools/agent/jet-env. Mark
+//RS             // the child as active there so the project-env gate does not turn
+//RS             // this tier-parity proof into an E1355 test.
+//RS             .env("JETPACK_ENV", "1");
+//RS         let output = command.output().unwrap();
+//RS         let result = (
+//RS             output.status.code().unwrap_or(-1),
+//RS             String::from_utf8_lossy(&output.stdout).into_owned(),
+//RS             String::from_utf8_lossy(&output.stderr).into_owned(),
+//RS         );
+//RS         assert_eq!(result.0, 0, "{mode} run failed for {stem}:\n{}", result.2);
+//RS         check_stdout(&result.1);
+//RS         if let Some((baseline_mode, baseline_code, baseline_stdout)) = &baseline {
+//RS             assert_eq!(
+//RS                 result.0, *baseline_code,
+//RS                 "{mode} exit code disagreed with {baseline_mode} for {stem}"
+//RS             );
+//RS             assert_eq!(
+//RS                 &result.1, baseline_stdout,
+//RS                 "{mode} output disagreed with {baseline_mode} for {stem}"
+//RS             );
+//RS         } else {
+//RS             baseline = Some((mode, result.0, result.1));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Replace only the exact generated source/scratch-root prefix. The oracle
+//RS /// keeps project-relative paths, while a tier may embed its unique temp root.
+//RS fn normalize_workspace_root_paths(stderr: &str, root: &std::path::Path) -> String {
+//RS     let root = root.display().to_string();
+//RS     stderr
+//RS         .replace(&format!("{root}/"), "")
+//RS         .replace(&format!("{root}\\"), "")
+//RS }
+//RS 
+//RS /// Run an executable error example through debug/release AOT, default jet run,
+//RS /// and the forced interpreter. The .err.out file is one byte oracle.
+//RS pub fn assert_example_cli_error_tiers_agree(
+//RS     stem: &str,
+//RS     expected_exit_code: i32,
+//RS     expected_stderr: &str,
+//RS ) {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let source = root.join("Examples/features").join(format!("{stem}.jet"));
+//RS     assert!(
+//RS         source.is_file(),
+//RS         "missing executable error example: {}",
+//RS         source.display()
+//RS     );
+//RS     let relative = format!("Examples/features/{stem}.jet");
+//RS     let modes = [
+//RS         ("debug", Some("--profile=debug"), false),
+//RS         ("release", Some("--release"), false),
+//RS         ("default", None, false),
+//RS         ("interpret", None, true),
+//RS     ];
+//RS     let mut baseline = None;
+//RS     for (mode, profile, interpret) in modes {
+//RS         let cache_scratch =
+//RS             crate::common::Scratch::new(&format!("jet_example_error_{mode}"));
+//RS         let cache = &cache_scratch.path;
+//RS         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS         command.arg("run");
+//RS         if let Some(profile) = profile {
+//RS             command.arg(profile);
+//RS         }
+//RS         if interpret {
+//RS             command.arg("--interpret");
+//RS         }
+//RS         command
+//RS             .arg(&relative)
+//RS             .current_dir(&root)
+//RS             .env("JET_STORE_DIR", cache.join("cache"))
+//RS             .env("JETPACK_ROOT", cache.join("jetpack"))
+//RS             .env("NO_COLOR", "1");
+//RS         let output = command.output().unwrap();
+//RS         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+//RS         let result = (
+//RS             output.status.code().unwrap_or(-1),
+//RS             String::from_utf8_lossy(&output.stdout).into_owned(),
+//RS             normalize_workspace_root_paths(&stderr, &root),
+//RS         );
+//RS         assert_eq!(result.0, expected_exit_code, "{mode} exit code for {stem}");
+//RS         assert!(
+//RS             result.1.is_empty(),
+//RS             "{mode} stdout for {stem}: {:?}",
+//RS             result.1
+//RS         );
+//RS         assert_eq!(
+//RS             result.2, expected_stderr,
+//RS             "{mode} stderr disagreed with the .err.out oracle for {stem}"
+//RS         );
+//RS         if let Some((baseline_mode, baseline_result)) = &baseline {
+//RS             assert_eq!(
+//RS                 &result, baseline_result,
+//RS                 "{mode} result disagreed with {baseline_mode} for {stem}"
+//RS             );
+//RS         } else {
+//RS             baseline = Some((mode, result));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub fn build_and_run_full_with_cfg(
+//RS     prefix: &str,
+//RS     name: &str,
+//RS     src: &str,
+//RS     rustc_cfg: &str,
+//RS ) -> (i32, String, String) {
+//RS     build_and_run_full_inner(prefix, name, src, Some(rustc_cfg))
+//RS }
+//RS 
+//RS fn build_and_run_full_inner(
+//RS     prefix: &str,
+//RS     name: &str,
+//RS     src: &str,
+//RS     rustc_cfg: Option<&str>,
+//RS ) -> (i32, String, String) {
+//RS     let scratch = crate::common::Scratch::new(prefix);
+//RS     let dir = &scratch.path;
+//RS     write_test_package(&dir, TIR_TEST_PACKAGE);
+//RS     let jet_path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&jet_path, src).unwrap();
+//RS     let shown = jet_path.to_string_lossy().into_owned();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     // Compare runtime stderr across tiers. Compile-time lints are checked
+//RS     // separately; `jet run` does not emit them as program stderr.
+//RS     let rs = dir.join(format!("{name}.rs"));
+//RS     let bin = dir.join(name);
+//RS     fs::write(&rs, &out.rust).unwrap();
+//RS     let mut rustc_cmd = Command::new("rustc");
+//RS     rustc_cmd.args(["--edition", "2021", "--crate-name"]);
+//RS     rustc_cmd.arg(jet::Syntax::sanitize_crate_name(
+//RS         rs.file_stem()
+//RS             .and_then(|name| name.to_str())
+//RS             .unwrap_or("out"),
+//RS     ));
+//RS     rustc_cmd.args([rs.to_str().unwrap(), "-o", bin.to_str().unwrap()]);
+//RS     if let Some(cfg) = rustc_cfg {
+//RS         rustc_cmd.args(["--cfg", cfg]);
+//RS     }
+//RS     if let Some(link) = &out.ffi {
+//RS         rustc_cmd
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc_cmd
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     let rustc = rustc_cmd.output().unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc rejected generated code (I2 violation):\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let run = Command::new(&bin).output().unwrap();
+//RS     let run_stderr = String::from_utf8_lossy(&run.stderr);
+//RS     let stderr = normalize_workspace_root_paths(&run_stderr, &dir);
+//RS     (
+//RS         run.status.code().unwrap_or(0),
+//RS         String::from_utf8_lossy(&run.stdout).into_owned(),
+//RS         stderr,
+//RS     )
+//RS }
+//RS 
+//RS /// Build and run a multi-file program from a fresh temporary directory.
+//RS #[allow(dead_code)]
+//RS pub fn build_and_run_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i32, String) {
+//RS     let scratch = crate::common::Scratch::new(&format!("jet_tir_multi_{name}"));
+//RS     let dir = &scratch.path;
+//RS     write_test_package(&dir, TIR_TEST_PACKAGE);
+//RS     for (rel, src) in files {
+//RS         let path = dir.join(rel);
+//RS         if let Some(parent) = path.parent() {
+//RS             fs::create_dir_all(parent).unwrap();
+//RS         }
+//RS         fs::write(&path, src).unwrap();
+//RS     }
+//RS     let entry_path = dir.join(entry);
+//RS     let shown = entry_path.to_string_lossy().into_owned();
+//RS     let entry_src = fs::read_to_string(&entry_path).unwrap();
+//RS     let out = jet::compile_with_path(&entry_src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected:\n{}",
+//RS             jet::render_diagnostics(&shown, &entry_src, &diags)
+//RS         )
+//RS     });
+//RS     let rs = dir.join(format!("{name}.rs"));
+//RS     let bin = dir.join(name);
+//RS     fs::write(&rs, &out.rust).unwrap();
+//RS     let rustc = Command::new("rustc")
+//RS         .args(["--edition", "2021", "--crate-name"])
+//RS         .arg(jet::Syntax::sanitize_crate_name(
+//RS             rs.file_stem()
+//RS                 .and_then(|name| name.to_str())
+//RS                 .unwrap_or("out"),
+//RS         ))
+//RS         .args([rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc rejected generated code (I2 violation):\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let run = Command::new(&bin).output().unwrap();
+//RS     (
+//RS         run.status.code().unwrap_or(0),
+//RS         String::from_utf8_lossy(&run.stdout).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS /// Build a multi-file program through the public release-profile AOT path,
+//RS /// then execute the emitted artifact.
+//RS pub fn build_release_and_run_multi(
+//RS     name: &str,
+//RS     entry: &str,
+//RS     files: &[(&str, &str)],
+//RS ) -> (i32, String, String) {
+//RS     let scratch = crate::common::Scratch::new(&format!("jet_release_multi_{name}"));
+//RS     let dir = &scratch.path;
+//RS     write_test_package(&dir, TIR_TEST_PACKAGE);
+//RS     for (rel, src) in files {
+//RS         let path = dir.join(rel);
+//RS         if let Some(parent) = path.parent() {
+//RS             fs::create_dir_all(parent).unwrap();
+//RS         }
+//RS         fs::write(&path, src).unwrap();
+//RS     }
+//RS     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["build", "--release", entry])
+//RS         .current_dir(&dir)
+//RS         .env("JET_STORE_DIR", dir.join("cache"))
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     if !build.status.success() {
+//RS         return (
+//RS             build.status.code().unwrap_or(1),
+//RS             String::new(),
+//RS             String::from_utf8_lossy(&build.stderr).into_owned(),
+//RS         );
+//RS     }
+//RS     let artifact = dir.join(".jet/build").join(
+//RS         std::path::Path::new(entry)
+//RS             .file_stem()
+//RS             .expect("release entry has a file stem"),
+//RS     );
+//RS     let run = Command::new(artifact).current_dir(&dir).output().unwrap();
+//RS     (
+//RS         run.status.code().unwrap_or(1),
+//RS         String::from_utf8_lossy(&run.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&run.stderr).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS /// Run a scratch program through release AOT, default resident JIT, and the
+//RS /// forced interpreter.
+//RS pub fn assert_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
+//RS     let files = [("main.jet", src)];
+//RS     let runs = [
+//RS         build_release_and_run_multi(name, "main.jet", &files),
+//RS         run_default_multi(name, "main.jet", &files),
+//RS         run_interpret_multi(name, "main.jet", &files),
+//RS     ];
+//RS     let baseline = &runs[0];
+//RS     for (mode, result) in ["release AOT", "default resident JIT", "forced interpreter"]
+//RS         .into_iter()
+//RS         .zip(runs.iter())
+//RS     {
+//RS         assert_eq!(result.0, 0, "{mode} failed:\n{}", result.2);
+//RS         assert_eq!(result.1, expected_stdout, "{mode} output disagreed");
+//RS         assert_eq!(result.0, baseline.0, "{mode} exit code disagreed");
+//RS         assert_eq!(result.1, baseline.1, "{mode} stdout disagreed");
+//RS     }
+//RS }
+//RS /// Run a single-file source through release AOT, resident JIT, and the
+//RS /// forced interpreter. The source is passed by path; a minimal local package
+//RS /// keeps authority discovery inside this fixture.
+//RS pub fn assert_bare_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
+//RS     let scratch = crate::common::Scratch::new(&format!("jet_bare_tiers_{name}"));
+//RS     let dir = &scratch.path;
+//RS     write_test_package(&dir, "name: \"tir_bare_tiers\"\nversion: \"0.1.0\"\n");
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     let path = path.to_string_lossy().into_owned();
+//RS     let modes = [
+//RS         ("release AOT", vec!["run", "--release", path.as_str()]),
+//RS         ("default resident JIT", vec!["run", path.as_str()]),
+//RS         (
+//RS             "forced interpreter",
+//RS             vec!["run", "--interpret", path.as_str()],
+//RS         ),
+//RS     ];
+//RS     let mut baseline = None;
+//RS     for (mode, args) in modes {
+//RS         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .args(args)
+//RS             .current_dir(&dir)
+//RS             .env("JET_STORE_DIR", dir.join(format!("cache-{mode}")))
+//RS             .env("JETPACK_ROOT", dir.join(format!("jetpack-{mode}")))
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         let result = (
+//RS             output.status.code().unwrap_or(-1),
+//RS             String::from_utf8_lossy(&output.stdout).into_owned(),
+//RS             String::from_utf8_lossy(&output.stderr).into_owned(),
+//RS         );
+//RS         assert_eq!(result.0, 0, "{mode} failed:\n{}", result.2);
+//RS         assert_eq!(result.1, expected_stdout, "{mode} output disagreed");
+//RS         if let Some((baseline_mode, baseline_result)) = &baseline {
+//RS             assert_eq!(
+//RS                 &result, baseline_result,
+//RS                 "{mode} disagreed with {baseline_mode}"
+//RS             );
+//RS         } else {
+//RS             baseline = Some((mode, result));
+//RS         }
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// Assert one authority-denied generic call has the same diagnostic on every
+//RS /// execution tier. The package grants the ordinary default roots but omits
+//RS /// the effect under test, so no tier receives that authority.
+//RS pub fn assert_release_tier_error_with_application_policy(
+//RS     name: &str,
+//RS     src: &str,
+//RS     package_source: &str,
+//RS     expected_code: &str,
+//RS ) {
+//RS     let scratch = crate::common::Scratch::new(&format!("jet_policy_tiers_{name}"));
+//RS     let dir = &scratch.path;
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     write_test_package(&dir, package_source);
+//RS     let path = path.to_string_lossy().into_owned();
+//RS     let modes = [
+//RS         ("release AOT", vec!["run", "--release", path.as_str()]),
+//RS         ("default resident JIT", vec!["run", path.as_str()]),
+//RS         (
+//RS             "forced interpreter",
+//RS             vec!["run", "--interpret", path.as_str()],
+//RS         ),
+//RS     ];
+//RS     let mut baseline = None;
+//RS     for (mode, args) in modes {
+//RS         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .args(args)
+//RS             .current_dir(&dir)
+//RS             .env("JET_STORE_DIR", dir.join(format!("cache-{mode}")))
+//RS             .env("JETPACK_ROOT", dir.join(format!("jetpack-{mode}")))
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         let result = (
+//RS             output.status.code().unwrap_or(-1),
+//RS             String::from_utf8_lossy(&output.stdout).into_owned(),
+//RS             String::from_utf8_lossy(&output.stderr).into_owned(),
+//RS         );
+//RS         assert_ne!(result.0, 0, "{mode} unexpectedly succeeded");
+//RS         assert!(result.1.is_empty(), "{mode} wrote stdout: {:?}", result.1);
+//RS         assert!(
+//RS             result.2.contains(expected_code),
+//RS             "{mode} did not report {expected_code}:\n{}",
+//RS             result.2
+//RS         );
+//RS         if let Some((baseline_mode, baseline_result)) = &baseline {
+//RS             assert_eq!(
+//RS                 &result, baseline_result,
+//RS                 "{mode} disagreed with {baseline_mode}"
+//RS             );
+//RS         } else {
+//RS             baseline = Some((mode, result));
+//RS         }
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// Assert the stable E3010 code/message across release AOT, resident JIT, and
+//RS /// forced interpretation while ignoring adapter-specific source locations.
+//RS pub fn assert_release_error_tiers_agree(name: &str, src: &str, expected_message: &str) {
+//RS     let files = [("main.jet", src)];
+//RS     let runs = [
+//RS         build_release_and_run_multi(name, "main.jet", &files),
+//RS         run_default_multi(name, "main.jet", &files),
+//RS         run_interpret_multi(name, "main.jet", &files),
+//RS     ];
+//RS     let expected_prefix = format!("Stop [E3010]: `{expected_message}`");
+//RS     let baseline_code = runs[0].0;
+//RS     let mut baseline_prefix = None;
+//RS     for (mode, result) in ["release AOT", "default resident JIT", "forced interpreter"]
+//RS         .into_iter()
+//RS         .zip(runs.iter())
+//RS     {
+//RS         assert_ne!(result.0, 0, "{mode} unexpectedly succeeded");
+//RS         assert_eq!(result.0, baseline_code, "{mode} exit code disagreed");
+//RS         assert!(result.1.is_empty(), "{mode} wrote stdout: {:?}", result.1);
+//RS         let prefix = result
+//RS             .2
+//RS             .lines()
+//RS             .find(|line| line.contains("Stop [E3010]:"))
+//RS             .and_then(|line| line.split(" — ").next())
+//RS             .unwrap_or_else(|| panic!("{mode} did not report E3010:\n{}", result.2));
+//RS         assert_eq!(prefix, expected_prefix.as_str(), "{mode} message disagreed");
+//RS         if let Some(baseline_prefix) = baseline_prefix {
+//RS             assert_eq!(prefix, baseline_prefix, "{mode} detail disagreed");
+//RS         } else {
+//RS             baseline_prefix = Some(prefix);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Run a multi-file program through the default `jet run` lens.
+//RS pub fn run_default_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i32, String, String) {
+//RS     let scratch = crate::common::Scratch::new(&format!("jet_jit_multi_{name}"));
+//RS     let dir = &scratch.path;
+//RS     for (rel, src) in files {
+//RS         let path = dir.join(rel);
+//RS         if let Some(parent) = path.parent() {
+//RS             fs::create_dir_all(parent).unwrap();
+//RS         }
+//RS         fs::write(&path, src).unwrap();
+//RS     }
+//RS     write_test_package(&dir, TIR_TEST_PACKAGE);
+//RS     let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", entry, "--trace-tiers"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .env("JET_STORE_DIR", dir.join("cache"))
+//RS         .env("JETPACK_ROOT", dir.join("jetpack"))
+//RS         .output()
+//RS         .unwrap();
+//RS     let result = (
+//RS         run.status.code().unwrap_or(1),
+//RS         String::from_utf8_lossy(&run.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&run.stderr).into_owned(),
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     result
+//RS }
+//RS 
+//RS /// Run a multi-file program through the forced TIR interpreter (`--interpret`).
+//RS /// I9: the default lens can hide a rule that only one engine knows, so a
+//RS /// cross-module fact has to answer on this lens too, with no Cranelift host to
+//RS /// fall back on.
+//RS #[allow(dead_code)]
+//RS pub fn run_interpret_multi(
+//RS     name: &str,
+//RS     entry: &str,
+//RS     files: &[(&str, &str)],
+//RS ) -> (i32, String, String) {
+//RS     let scratch = crate::common::Scratch::new(&format!("jet_interp_multi_{name}"));
+//RS     let dir = &scratch.path;
+//RS     for (rel, src) in files {
+//RS         let path = dir.join(rel);
+//RS         if let Some(parent) = path.parent() {
+//RS             fs::create_dir_all(parent).unwrap();
+//RS         }
+//RS         fs::write(&path, src).unwrap();
+//RS     }
+//RS     write_test_package(&dir, TIR_TEST_PACKAGE);
+//RS     let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", "--interpret", entry, "--trace-tiers"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .env("JET_STORE_DIR", dir.join("cache"))
+//RS         .env("JETPACK_ROOT", dir.join("jetpack"))
+//RS         .output()
+//RS         .unwrap();
+//RS     let result = (
+//RS         run.status.code().unwrap_or(1),
+//RS         String::from_utf8_lossy(&run.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&run.stderr).into_owned(),
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     result
+//RS }
+//RS 
+//RS pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
+//RS     crate::common::strip_vetted_prelude_modules(rust_code)
+//RS }
+//RS 
+//RS #[test]
+//RS fn watcher_process_probe_is_vetted_without_hiding_user_unsafe() {
+//RS     let generated = "// JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe\nunsafe { ffi() }\n// JET_VETTED_UNSAFE_END: jet_watch_process_probe\nunsafe { user_pointer() }";
+//RS     let stripped = strip_vetted_prelude_modules(generated);
+//RS     assert!(!stripped.contains("ffi()"));
+//RS     assert!(stripped.contains("unsafe { user_pointer() }"));
+//RS }
+// END-PORT-PENDING 1178 tests/tir_support/mod.rs:1-1001
+

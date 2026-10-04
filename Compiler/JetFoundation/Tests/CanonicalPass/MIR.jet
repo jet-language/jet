@@ -1,0 +1,30 @@
+// Original structured MIR snapshot field order; not native ProgramDebug.
+#Test("canonical pass MIR instructions retain ordered uses and copy premise") {
+    span :: Span{start: 3, end: 9}
+    instruction :: MIRInstruction{
+        id: MIROpID{value: U64{18446744073709551615}}, span: span, source_line: Val(4),
+        result: Val(MIRValueID{value: U64{9223372036854775808}}), ty: None,
+        operation: MIROperation.Copy{value: MIRValueID{value: U64{18446744073709551615}}, fact: MIRCopyFact.Explicit},
+    }
+    assert_eq(canonical_pass_mir_instruction(instruction), "{\"id\":\"18446744073709551615\",\"span\":{\"start\":3,\"end\":9},\"source_line\":4,\"result\":\"9223372036854775808\",\"type\":null,\"operation\":{\"kind\":\"Copy\",\"value_uses\":[\"18446744073709551615\"],\"copy_fact\":\"explicit\"}}")
+}
+#Test("canonical pass MIR type preserves native ABI and dynamic sizes") {
+    ty :: MIRType{kind: MIRTypeKind.Bool, identity: None, layout: MIRLayout{abi: MIRABI.Scalar{kind: MIRScalarKind.Bool}, size: MIRSize.Static{bytes: 1}, align: MIRSize.Dynamic}}
+    assert_eq(canonical_pass_mir_type(ty), "{\"key\":\"Bool\",\"identity\":null,\"abi\":\"Scalar(Bool)\",\"size\":1,\"align\":null}")
+}
+#Test("canonical pass MIR block snapshots actual changed instruction order") {
+    span :: Span{start: 1, end: 2}
+    block := MIRBasicBlock{id: MIRBlockID{value: U64{7}}, span: span, instructions: [MIRInstruction]{}, terminator: MIRTerminator.Return{value: None}}
+    before :: canonical_pass_mir_block(block)
+    &block.instructions.push(MIRInstruction{id: MIROpID{value: U64{2}}, span: span, source_line: None, result: None, ty: None, operation: MIROperation.Constant{value: MIRConstant.Bool{value: true}}})
+    after :: canonical_pass_mir_block(block)
+    assert_eq(before, "{\"id\":\"7\",\"span\":{\"start\":1,\"end\":2},\"instructions\":[],\"terminator\":\"Return\"}")
+    assert(before != after)
+    assert(after.contains("\"kind\":\"Constant\",\"value_uses\":[]"))
+}
+#Test("canonical pass CLI snapshot parser keeps original literal fallback") {
+    assert(canonical_pass_status_snapshot("not JSON") == .String("not JSON"))
+    assert(canonical_pass_status_snapshot("null") == .Null)
+    assert(canonical_pass_status_snapshot("42") == .Integer(42))
+    assert(canonical_pass_status_snapshot("[1,true]") == .Array(_))
+}

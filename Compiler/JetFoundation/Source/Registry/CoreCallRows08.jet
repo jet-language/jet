@@ -1,0 +1,509 @@
+// PORT-PENDING 0492 crates-jet-codegen-src-codegen-tir-lower-method-calls-slice-13217: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:13217-13721
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn comptime_host_type_leaf(name: &str) -> &str {
+//RS     name.rsplit("::")
+//RS         .next()
+//RS         .unwrap_or(name)
+//RS         .rsplit('.')
+//RS         .next()
+//RS         .unwrap_or(name)
+//RS }
+//RS 
+//RS fn is_comptime_host_method(ty_name: &str, method: &str) -> bool {
+//RS     match comptime_host_type_leaf(ty_name) {
+//RS         Syntax::TYPE_BUILD_CONTEXT => matches!(
+//RS             method,
+//RS             "generate"
+//RS                 | "find"
+//RS                 | "embed"
+//RS                 | "fetch"
+//RS                 | "plugin"
+//RS                 | "action"
+//RS                 | "legacy"
+//RS                 | "add_executable"
+//RS                 | "add_library"
+//RS                 | "add_test"
+//RS                 | "add_asset_bundle"
+//RS                 | "add_doc"
+//RS                 | "add_install"
+//RS                 | "add_package"
+//RS                 | "add_publish"
+//RS                 | "toolchain"
+//RS                 | "signing"
+//RS                 | "probe"
+//RS                 | "error"
+//RS                 | "plan"
+//RS                 | "contribute"
+//RS         ),
+//RS         Syntax::TYPE_PROGRAM_INFO => matches!(
+//RS             method,
+//RS             "types"
+//RS                 | "functions"
+//RS                 | "packages"
+//RS                 | "definitions"
+//RS                 | "references"
+//RS                 | "call_edges"
+//RS                 | "structural_nodes"
+//RS         ),
+//RS         Syntax::TYPE_TYPE_INFO | "FieldInfo" | "MethodInfo" => {
+//RS             matches!(method, "has_marker" | "implements" | "has_method")
+//RS         }
+//RS         "CompilerLexed"
+//RS         | "CompilerSyntaxTree"
+//RS         | "CompilerChecked"
+//RS         | "CompilerSourceMap"
+//RS         | "CompilerPackageError"
+//RS         | "CompilerDependency"
+//RS         | "CompilerPackageTarget"
+//RS         | "CompilerPackageOutput"
+//RS         | "CompilerBuildProfile"
+//RS         | "CompilerManifest"
+//RS         | "CompilerPackage"
+//RS         | "CompilerLockedPackage"
+//RS         | "CompilerLock"
+//RS         | "CompilerKeyValue"
+//RS         | "CompilerProfile"
+//RS         | "CompilerProfileSet" => true,
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn instantiate_method_sig(
+//RS     cx: &Cx,
+//RS     type_name: &str,
+//RS     method: &str,
+//RS     sig: &[(AccessConvention, Type)],
+//RS     owner_type_args: &[Type],
+//RS     method_type_args: &[Type],
+//RS ) -> Vec<(AccessConvention, Type)> {
+//RS     let mut subst = std::collections::HashMap::new();
+//RS     if let Some(owner_params) = cx.struct_type_param_order.get(type_name) {
+//RS         for (param, actual) in owner_params.iter().zip(owner_type_args) {
+//RS             subst.insert(param.clone(), actual.clone());
+//RS         }
+//RS     }
+//RS     if let Some(method_params) = cx
+//RS         .method_type_params
+//RS         .get(&(type_name.to_string(), method.to_string()))
+//RS     {
+//RS         for (param, actual) in method_params.iter().zip(method_type_args) {
+//RS             subst.insert(param.name.clone(), actual.clone());
+//RS         }
+//RS     }
+//RS     sig.iter()
+//RS         .map(|(conv, ty)| (*conv, crate::Generics::substitute_type(ty, &subst)))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn instantiate_method_ret(
+//RS     cx: &Cx,
+//RS     type_name: &str,
+//RS     method: &str,
+//RS     owner_type_args: &[Type],
+//RS     method_type_args: &[Type],
+//RS     resolved_ret: Option<&Type>,
+//RS ) -> Option<Type> {
+//RS     let template = resolved_ret.cloned().or_else(|| {
+//RS         cx.method_rets
+//RS             .get(&(type_name.to_string(), method.to_string()))
+//RS             .cloned()
+//RS             .flatten()
+//RS     })?;
+//RS     let mut subst = owner_type_subst(cx, type_name, owner_type_args);
+//RS     if let Some(method_params) = cx
+//RS         .method_type_params
+//RS         .get(&(type_name.to_string(), method.to_string()))
+//RS     {
+//RS         for (param, actual) in method_params.iter().zip(method_type_args) {
+//RS             subst.insert(param.name.clone(), actual.clone());
+//RS         }
+//RS     }
+//RS     Some(crate::Generics::substitute_type(&template, &subst))
+//RS }
+//RS 
+//RS fn resolved_method_type_args(
+//RS     cx: &Cx,
+//RS     type_name: &str,
+//RS     method: &str,
+//RS     sig: &[(AccessConvention, Type)],
+//RS     owner_type_args: &[Type],
+//RS     args: &[TCallArg],
+//RS     explicit_type_args: &[Type],
+//RS     resolved_ret: Option<&Type>,
+//RS ) -> Vec<Type> {
+//RS     if !explicit_type_args.is_empty() {
+//RS         return explicit_type_args.to_vec();
+//RS     }
+//RS     let Some(method_params) = cx
+//RS         .method_type_params
+//RS         .get(&(type_name.to_string(), method.to_string()))
+//RS     else {
+//RS         return Vec::new();
+//RS     };
+//RS     if method_params.is_empty() {
+//RS         return Vec::new();
+//RS     }
+//RS     let names: std::collections::HashSet<String> = method_params
+//RS         .iter()
+//RS         .map(|param| param.name.clone())
+//RS         .collect();
+//RS     let mut subst = std::collections::HashMap::new();
+//RS     for ((_, template), arg) in sig.iter().zip(args) {
+//RS         if !crate::Codegen::TIR::bind_generic_type(template, &arg.value.ty, &names, &mut subst) {
+//RS             return Vec::new();
+//RS         }
+//RS     }
+//RS     if let (Some(template), Some(actual)) = (
+//RS         cx.method_rets
+//RS             .get(&(type_name.to_string(), method.to_string()))
+//RS             .and_then(Option::as_ref),
+//RS         resolved_ret,
+//RS     ) {
+//RS         let owner_subst = owner_type_subst(cx, type_name, owner_type_args);
+//RS         let template = crate::Generics::substitute_type(template, &owner_subst);
+//RS         let effective_template =
+//RS             jet_foundation::AST::FailureContract::from_return_type(Some(&template))
+//RS                 .effective_type();
+//RS         let mut effective_subst = subst.clone();
+//RS         if crate::Codegen::TIR::bind_generic_type(
+//RS             &effective_template,
+//RS             actual,
+//RS             &names,
+//RS             &mut effective_subst,
+//RS         ) {
+//RS             subst = effective_subst;
+//RS         } else if !crate::Codegen::TIR::bind_generic_type(&template, actual, &names, &mut subst) {
+//RS             return Vec::new();
+//RS         }
+//RS     }
+//RS     method_params
+//RS         .iter()
+//RS         .map(|param| subst.get(&param.name).cloned())
+//RS         .collect::<Option<Vec<_>>>()
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn owner_type_subst(
+//RS     cx: &Cx,
+//RS     type_name: &str,
+//RS     owner_type_args: &[Type],
+//RS ) -> std::collections::HashMap<String, Type> {
+//RS     cx.struct_type_param_order
+//RS         .get(type_name)
+//RS         .into_iter()
+//RS         .flat_map(|params| params.iter().zip(owner_type_args))
+//RS         .map(|(param, actual)| (param.clone(), actual.clone()))
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Demand generic codec instances and lower JSON values through `Encode`.
+//RS fn prepare_generic_serde_codec(
+//RS     cx: &Cx,
+//RS     fn_name: &str,
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: &mut [TExpr],
+//RS     ret_ty: &Type,
+//RS ) {
+//RS     let encoding = matches!(
+//RS         module,
+//RS         "core.sys"
+//RS             | "core.encoding.json"
+//RS             | "core.encoding.toml"
+//RS             | "core.encoding.yaml"
+//RS             | "core.encoding.csv"
+//RS             | "core.encoding.cbor"
+//RS     );
+//RS     if !encoding {
+//RS         return;
+//RS     }
+//RS     cx.jit_canonical_calls
+//RS         .borrow_mut()
+//RS         .insert(fn_name.to_string());
+//RS     if matches!(
+//RS         method,
+//RS         "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical" | "query"
+//RS     ) {
+//RS         if let Some(arg) = args.first() {
+//RS             if matches!(&arg.ty, Type::Apply { .. }) {
+//RS                 cx.jit_method_calls.borrow_mut().insert(
+//RS                     crate::Codegen::TIR::generic_method_instance_key(&arg.ty, "encode", &[]),
+//RS                     (arg.ty.clone(), "encode".to_string(), Vec::new()),
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS     if method == "decode" || method == "query" {
+//RS         if let Type::Result { ok, .. } = ret_ty {
+//RS             if cx.migrations.contains_key(&ok.name()) {
+//RS                 cx.jit_canonical_deopt
+//RS                     .borrow_mut()
+//RS                     .insert(fn_name.to_string());
+//RS             }
+//RS             let decode_ty = match ok.as_ref() {
+//RS                 Type::List(inner) if method == "query" => inner.as_ref(),
+//RS                 other => other,
+//RS             };
+//RS             if matches!(decode_ty, Type::Apply { .. }) {
+//RS                 cx.jit_method_calls.borrow_mut().insert(
+//RS                     crate::Codegen::TIR::generic_method_instance_key(decode_ty, "decode", &[]),
+//RS                     (decode_ty.clone(), "decode".to_string(), Vec::new()),
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS     if matches!(
+//RS         module,
+//RS         "core.encoding.json" | "core.encoding.toml" | "core.encoding.yaml"
+//RS     ) && matches!(method, "to_string" | "to_string_pretty")
+//RS     {
+//RS         if let Some(arg) = args.first_mut() {
+//RS             let value = std::mem::replace(
+//RS                 arg,
+//RS                 TExpr {
+//RS                     ty: unit_type(),
+//RS                     kind: TExprKind::Unit,
+//RS                 },
+//RS             );
+//RS             *arg = lower_serde_encode_node(value, cx);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// #3740: a named function value names its checked `T Never!` carrier, while
+//RS /// the function itself returns `T`. A collection callback slot that takes a
+//RS /// plain value gets the executable return, so lowering passes the function
+//RS /// directly. `Never Never!` keeps its carrier, as the function does.
+//RS fn name_plain_callback_return(callback: &mut TExpr) {
+//RS     fn is_named_function(value: &TExpr) -> bool {
+//RS         match &value.kind {
+//RS             TExprKind::FnValue {
+//RS                 kind:
+//RS                     crate::Codegen::TIR::TFnValueKind::NamedFn {
+//RS                         name: Some(_),
+//RS                         lambda: None,
+//RS                         ..
+//RS                     },
+//RS             } => true,
+//RS             TExprKind::HostCall(call) => {
+//RS                 matches!(call.as_ref(), crate::Codegen::TIR::THostCall::FnName(_))
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS     let named = if let TExprKind::HostBorrowCallback { callable, .. } = &mut callback.kind {
+//RS         let inner_named = is_named_function(callable);
+//RS         if inner_named {
+//RS             name_plain_callback_return(callable);
+//RS         }
+//RS         inner_named
+//RS     } else {
+//RS         is_named_function(callback)
+//RS     };
+//RS     if !named {
+//RS         return;
+//RS     }
+//RS     if let Type::Fn { ret: Some(ret), .. } = &mut callback.ty {
+//RS         if let Some(success) = crate::Codegen::TIR::mir::never_carrier_success(ret)
+//RS             .filter(|success| !success.is_never())
+//RS             .cloned()
+//RS         {
+//RS             **ret = success;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod checked_core_source_target_tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn imported_core_source_call_uses_checked_module_member_identity() {
+//RS         jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+//RS             let source_text = "fn run() {}";
+//RS             let (tokens, diagnostics) = crate::Lexer::lex(source_text);
+//RS             assert!(diagnostics.is_empty(), "lex errors: {diagnostics:?}");
+//RS             let program = crate::Parser::parse(&tokens).expect("parse failed");
+//RS             let mut cx = crate::Codegen::build_cx(&program, source_text, "caller.jet");
+//RS             cx.module_alias = "caller".to_string();
+//RS 
+//RS             let module = "core.http.client";
+//RS             let method = "request";
+//RS             let source_module = jet_foundation::CoreModuleExports::core_source_module(module)
+//RS                 .expect("HTTP client source module");
+//RS             assert!(
+//RS                 jet_foundation::CoreModuleExports::core_source_owns(module, method),
+//RS                 "the source module must own the checked request wrapper"
+//RS             );
+//RS             cx.core_source_modules
+//RS                 .insert(module.to_string(), source_module.alias.to_string());
+//RS             let checked_module_identity = "source-package::Core/http/client.jet";
+//RS             cx.core_source_sigs.insert(
+//RS                 (module.to_string(), method.to_string()),
+//RS                 crate::Codegen::CoreSourceFunctionSignature {
+//RS                     module_identity: checked_module_identity.to_string(),
+//RS                     type_params: Vec::new(),
+//RS                     params: vec![
+//RS                         (AccessConvention::Move, Type::String),
+//RS                         (AccessConvention::Move, Type::String),
+//RS                     ],
+//RS                     return_type: Some(Type::Named("HTTPRequest".to_string())),
+//RS                 },
+//RS             );
+//RS 
+//RS             let span = crate::Diagnostics::Span::new(0, 0);
+//RS             let string_arg = |text: &str| crate::AST::CallArg {
+//RS                 convention: AccessConvention::Move,
+//RS                 expr: Expr::Str(
+//RS                     vec![crate::AST::StrPart::Lit(text.to_string())],
+//RS                     span,
+//RS                 ),
+//RS                 span,
+//RS                 flags: Default::default(),
+//RS                 label: None,
+//RS                 spread: false,
+//RS             };
+//RS             let args = vec![string_arg("GET"), string_arg("http://example.test")];
+//RS             let mut env = LowerEnv::new("run".to_string());
+//RS             let resolved_return = Type::Named("HTTPRequest".to_string());
+//RS             let lowered = lower_core_source_call(
+//RS                 span,
+//RS                 module,
+//RS                 method,
+//RS                 &[],
+//RS                 Some(&resolved_return),
+//RS                 &args,
+//RS                 &cx,
+//RS                 &mut env,
+//RS             )
+//RS             .expect("owned Core source calls use the source-module route");
+//RS             let TExprKind::ModuleCall {
+//RS                 form: TModuleCallForm::Qualified { rust_mod, rust_fn },
+//RS                 ..
+//RS             } = lowered.kind
+//RS             else {
+//RS                 panic!("expected the checked Core source module call");
+//RS             };
+//RS 
+//RS             assert_eq!(
+//RS                 format!("{rust_mod}::{rust_fn}"),
+//RS                 "source-package::Core/http/client.jet::request",
+//RS                 "MIR resolves imported Core calls by their sema-qualified function key"
+//RS             );
+//RS         });
+//RS     }
+//RS     #[test]
+//RS     fn checked_source_callback_parameter_uses_effective_failure_carrier() {
+//RS         jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+//RS             let source_text = "fn run() {}";
+//RS             let (tokens, diagnostics) = crate::Lexer::lex(source_text);
+//RS             assert!(diagnostics.is_empty(), "lex errors: {diagnostics:?}");
+//RS             let program = crate::Parser::parse(&tokens).expect("parse failed");
+//RS             let cx = crate::Codegen::build_cx(&program, source_text, "caller.jet");
+//RS             let callback = Type::Fn {
+//RS                 params: Vec::new(),
+//RS                 ret: Some(Box::new(Type::String)),
+//RS                 effect_bound: None,
+//RS                 param_contract: None,
+//RS                 call_metadata: None,
+//RS                 return_view_provenance: None,
+//RS             };
+//RS             let signature = crate::Codegen::CoreSourceFunctionSignature {
+//RS                 module_identity: "source-package::Core/web/query.jet".to_string(),
+//RS                 type_params: Vec::new(),
+//RS                 params: vec![(AccessConvention::Move, callback)],
+//RS                 return_type: None,
+//RS             };
+//RS 
+//RS             let params = checked_core_source_call_signature(&cx, &signature, &[]);
+//RS             let Type::Fn {
+//RS                 ret: Some(ret), ..
+//RS             } = &params[0].1
+//RS             else {
+//RS                 panic!("checked Core callback parameter must remain a function type");
+//RS             };
+//RS             let Type::Result { ok, err } = ret.as_ref() else {
+//RS                 panic!("checked Core callback return must use the shared failure carrier");
+//RS             };
+//RS             assert_eq!(ok.as_ref(), &Type::String);
+//RS             assert_eq!(
+//RS                 err.as_ref(),
+//RS                 &Type::Named(crate::Syntax::TYPE_ERR.to_string()),
+//RS                 "callback error ABI must preserve the checked Jet error domain"
+//RS             );
+//RS         });
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn checked_source_generic_call_records_canonical_concrete_instance() {
+//RS         jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+//RS             let source_text = "fn run() {}";
+//RS             let (tokens, diagnostics) = crate::Lexer::lex(source_text);
+//RS             assert!(diagnostics.is_empty(), "lex errors: {diagnostics:?}");
+//RS             let program = crate::Parser::parse(&tokens).expect("parse failed");
+//RS             let cx = crate::Codegen::build_cx(&program, source_text, "caller.jet");
+//RS             let owner = "source-package::Core/data/data.jet";
+//RS             let signature = crate::Codegen::CoreSourceFunctionSignature {
+//RS                 module_identity: owner.to_string(),
+//RS                 type_params: vec!["T".to_string()],
+//RS                 params: vec![
+//RS                     (AccessConvention::Move, Type::String),
+//RS                     (
+//RS                         AccessConvention::Move,
+//RS                         Type::List(Box::new(Type::String)),
+//RS                     ),
+//RS                     (AccessConvention::Move, Type::String),
+//RS                     (
+//RS                         AccessConvention::Move,
+//RS                         Type::Named("DataLimits".to_string()),
+//RS                     ),
+//RS                 ],
+//RS                 return_type: Some(Type::Apply {
+//RS                     name: "DataLoader".to_string(),
+//RS                     args: vec![Type::Named("T".to_string())],
+//RS                 }),
+//RS             };
+//RS             let argument = |ty| TCallArg {
+//RS                 value: TExpr {
+//RS                     ty,
+//RS                     kind: TExprKind::DefaultLit,
+//RS                 },
+//RS                 template_items: None,
+//RS                 borrow: false,
+//RS                 mut_borrow: false,
+//RS                 clone: false,
+//RS                 arc_clone: false,
+//RS                 fn_coerce: None,
+//RS                 widen_to_vec: false,
+//RS                 widen_to_union: None,
+//RS                 box_as_trait: None,
+//RS             };
+//RS             let args = vec![
+//RS                 argument(Type::String),
+//RS                 argument(Type::List(Box::new(Type::String))),
+//RS                 argument(Type::String),
+//RS                 argument(Type::Named("DataLimits".to_string())),
+//RS             ];
+//RS 
+//RS             let instance = demand_core_source_generic_function(
+//RS                 &cx,
+//RS                 "database",
+//RS                 &signature,
+//RS                 &args,
+//RS                 &[Type::String],
+//RS             )
+//RS             .expect("checked generic arguments produce a concrete source instance");
+//RS             assert_eq!(instance, "database__generic__String");
+//RS             assert_eq!(
+//RS                 cx.jit_core_source_generic_calls.borrow().get(&(
+//RS                     owner.to_string(),
+//RS                     "database".to_string(),
+//RS                 )),
+//RS                 Some(&vec![vec![Type::String]]),
+//RS                 "the demand retains its canonical checked source owner"
+//RS             );
+//RS         });
+//RS     }
+//RS }
+// END-PORT-PENDING 0492 crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:13217-13721
+

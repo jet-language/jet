@@ -1,0 +1,236 @@
+// PORT-PENDING 0554 crates-jet-comptime-build: crates/jet-comptime/build.rs:1-232
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS fn main() {
+//RS     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+//RS     write_web_kernel_std(&manifest);
+//RS     write_native_scheduler(&manifest);
+//RS     write_clock_rt(&manifest);
+//RS     write_pool_rt(&manifest);
+//RS }
+//RS 
+//RS fn write_pool_rt(manifest: &Path) {
+//RS     let source = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs");
+//RS     println!("cargo:rerun-if-changed={}", source.display());
+//RS     let pool = extract_pool(&std::fs::read_to_string(source).expect("read canonical Pool kernel"));
+//RS     let mut body = String::from(
+//RS         "pub mod jet_std {\n\
+//RS          use jet_foundation::Outcome::{JetAbsent, JetOutcome};\n",
+//RS     );
+//RS     body.push_str(&pool);
+//RS     body.push_str("\n}\n");
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("pool_rt.rs");
+//RS     std::fs::write(out, body).expect("write pool_rt.rs");
+//RS }
+//RS fn write_clock_rt(manifest: &PathBuf) {
+//RS     let types = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs");
+//RS     let operations = manifest.join("../jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs");
+//RS     println!("cargo:rerun-if-changed={}", types.display());
+//RS     println!("cargo:rerun-if-changed={}", operations.display());
+//RS     let types = std::fs::read_to_string(types).expect("read canonical Clock types");
+//RS     let start = types.find("#[derive(Debug)]\npub enum ClockState {").expect("ClockState");
+//RS     let end = types.find("#[derive(Clone, Debug, PartialEq)]\npub struct Rng {").expect("Rng");
+//RS     let mut body = String::from("pub mod jet_std {\n");
+//RS     body.push_str(&types[start..end]);
+//RS     body.push_str("\n}\n");
+//RS     let operations = std::fs::read_to_string(operations).expect("read canonical Clock operations");
+//RS     let start = operations.find("fn jet_std_clock_new(").expect("Clock.new");
+//RS     let end = operations.find("fn jet_clock_wait(").expect("Clock.wait");
+//RS     body.push_str(&operations[start..end].replace("fn jet_", "pub fn jet_"));
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("clock_rt.rs");
+//RS     std::fs::write(out, body).expect("write clock_rt.rs");
+//RS }
+//RS 
+//RS fn write_web_kernel_std(manifest: &Path) {
+//RS     let reactive_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs");
+//RS     let encoding_types_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
+//RS     let json_codec_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
+//RS     let math_task_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs");
+//RS     for source in [&reactive_src, &encoding_types_src, &json_codec_src, &math_task_src] {
+//RS         println!("cargo:rerun-if-changed={}", source.display());
+//RS     }
+//RS 
+//RS     let reactive =
+//RS         extract_reactive(&std::fs::read_to_string(&reactive_src).expect("read ReactiveEventWatch.rs"));
+//RS     let encoding_types =
+//RS         unindent(&std::fs::read_to_string(&encoding_types_src).expect("read EncodingTypes.rs"));
+//RS     let json_codec = unindent(
+//RS         &std::fs::read_to_string(&json_codec_src).expect("read JSONCodec.rs"),
+//RS     );
+//RS     let native_task =
+//RS         extract_native_task(&std::fs::read_to_string(&math_task_src).expect("read MathTaskMem.rs"));
+//RS     let shared =
+//RS         extract_shared(&std::fs::read_to_string(&math_task_src).expect("read MathTaskMem.rs"));
+//RS 
+//RS     let mut body = String::with_capacity(
+//RS         native_task.len() + shared.len() + reactive.len() + encoding_types.len() + json_codec.len() + 4,
+//RS     );
+//RS     body.push_str("use jet_foundation::Outcome::{JetAbsent, JetOutcome};\n");
+//RS     body.push_str(&native_task);
+//RS     body.push('\n');
+//RS     body.push_str(&shared);
+//RS     body.push('\n');
+//RS     body.push_str(&reactive);
+//RS     body.push('\n');
+//RS     body.push_str(&encoding_types);
+//RS     body.push('\n');
+//RS     body.push_str(&json_codec);
+//RS 
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("web_kernel_std.rs");
+//RS     std::fs::write(&out, body).expect("write web_kernel_std.rs");
+//RS }
+//RS fn write_native_scheduler(manifest: &Path) {
+//RS     let runtime_control_src =
+//RS         manifest.join("../jet-codegen/src/Prelude/Core/RuntimeControl.rs");
+//RS     let sources = [
+//RS         (manifest.join("../jet-codegen/src/Prelude/Deadline.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/Prelude/WorkflowWait.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/SchedulerHost.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/Prelude/Core/TimeMonotonic.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/Prelude/Core/TimeInstant.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/Prelude/Core/Realtime.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/Prelude/Scheduler.rs"), true),
+//RS         (manifest.join("../jet-codegen/src/Prelude/CoreLib/Top/WorkflowSleep.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/Prelude/Stream.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/Prelude/Core/Duration.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/Prelude/Core/Time.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/Prelude/Core/Stream.rs"), false),
+//RS         (manifest.join("../jet-codegen/src/Prelude/Observe.rs"), false),
+//RS     ];
+//RS     println!("cargo:rerun-if-changed={}", runtime_control_src.display());
+//RS     let mut body = String::new();
+//RS     for (source, native_cfg) in sources {
+//RS         println!("cargo:rerun-if-changed={}", source.display());
+//RS         let mut text = std::fs::read_to_string(&source)
+//RS             .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
+//RS         if native_cfg {
+//RS             text = text.replace("feature = \"jet_native_io\"", "all()");
+//RS         }
+//RS         body.push_str(&text);
+//RS         body.push_str("\n\n");
+//RS     }
+//RS     body.push_str(&extract_stm(
+//RS         &std::fs::read_to_string(&runtime_control_src)
+//RS             .unwrap_or_else(|error| panic!("read {}: {error}", runtime_control_src.display())),
+//RS     ));
+//RS     body.push_str("\n\n");
+//RS 
+//RS     let out =
+//RS         PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("web_kernel_native_scheduler.rs");
+//RS     std::fs::write(&out, body).expect("write web_kernel_native_scheduler.rs");
+//RS }
+//RS 
+//RS fn unindent(source: &str) -> String {
+//RS     source
+//RS         .lines()
+//RS         .map(|line| line.strip_prefix("    ").unwrap_or(line))
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n")
+//RS }
+//RS 
+//RS fn extract_reactive(raw: &str) -> String {
+//RS     let start = raw
+//RS         .find("// ── D-REACT1=B + D-DATARACE1=C")
+//RS         .expect("reactive marker");
+//RS     let end_sync = raw
+//RS         .find("    pub struct JetAsyncPolicy")
+//RS         .expect("JetAsyncPolicy marker");
+//RS     let start_hooks = raw
+//RS         .find("    struct JetHookListener<")
+//RS         .expect("JetHookListener marker");
+//RS     let end_hooks = raw
+//RS         .find("    pub struct WatchHandle")
+//RS         .expect("WatchHandle marker");
+//RS 
+//RS     let mut body = unindent(&raw[start..end_sync]);
+//RS     strip_orphan_derives(&mut body);
+//RS     body.push('\n');
+//RS     body.push_str(&unindent(&raw[start_hooks..end_hooks]));
+//RS     strip_orphan_derives(&mut body);
+//RS     body
+//RS }
+//RS 
+//RS fn extract_native_task(raw: &str) -> String {
+//RS     let start = raw
+//RS         .find("    struct JetTaskState<T: Send + 'static> {")
+//RS         .expect("JetTaskState marker");
+//RS     let end = raw
+//RS         .find("    fn jet_task_entries<T: Send + 'static>(")
+//RS         .expect("jet_task_entries marker");
+//RS     unindent(&raw[start..end])
+//RS }
+//RS fn extract_pool(raw: &str) -> String {
+//RS     let pool_start = raw
+//RS         .find("    enum JetPoolSlot<T>")
+//RS         .expect("JetPoolSlot marker");
+//RS     let pool_end = pool_start
+//RS         + raw[pool_start..]
+//RS             .find("    // D-MEM1 S6: an opaque-handle placeholder")
+//RS             .expect("JetPool display marker");
+//RS     let id_start = raw.find("    pub struct JetId<T>").expect("JetId marker");
+//RS     let id_end = raw
+//RS         .find("    impl<T> super::__jet_Equatable")
+//RS         .expect("JetId semantic adapter marker");
+//RS 
+//RS     let mut body = unindent(&raw[pool_start..pool_end]);
+//RS     body.push('\n');
+//RS     body.push_str(&unindent(&raw[id_start..id_end]));
+//RS     body
+//RS }
+//RS 
+//RS fn extract_shared(raw: &str) -> String {
+//RS     let start = raw
+//RS         .find(
+//RS             "    #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n    pub enum JetSharedRevisionError",
+//RS         )
+//RS         .expect("JetSharedRevisionError marker");
+//RS     let end = raw
+//RS         .find("    enum JetPoolSlot<T>")
+//RS         .expect("JetPoolSlot marker");
+//RS     let mut shared = raw[start..end].to_string();
+//RS     let jit_start = shared
+//RS         .find("    // jet:source-shared-interop-jit-begin\n")
+//RS         .expect("SourceSharedInterop begin marker");
+//RS     let jit_end = shared[jit_start..]
+//RS         .find("    // jet:source-shared-interop-jit-end\n")
+//RS         .map(|offset| jit_start + offset)
+//RS         .expect("SourceSharedInterop end marker");
+//RS     let jit_end = shared[jit_end..]
+//RS         .find('\n')
+//RS         .map(|offset| jit_end + offset + 1)
+//RS         .unwrap_or(shared.len());
+//RS     shared.replace_range(jit_start..jit_end, "");
+//RS     unindent(&shared).replace("crate::", "super::super::")
+//RS }
+//RS 
+//RS fn extract_stm(raw: &str) -> String {
+//RS     let start = raw.find("mod jet_stm {\n").expect("jet_stm marker");
+//RS     let end = raw[start..]
+//RS         .find("\n}\ntrait __jet_Serialize")
+//RS         .map(|offset| start + offset + 2)
+//RS         .expect("jet_stm end marker");
+//RS     raw[start..end].replace("crate::", "super::super::")
+//RS }
+//RS 
+//RS fn strip_orphan_derives(body: &mut String) {
+//RS     loop {
+//RS         let trimmed = body.trim_end();
+//RS         let orphan = trimmed.ends_with("#[derive(Clone)]")
+//RS             || trimmed.ends_with("#[derive(Clone, Copy)]")
+//RS             || trimmed.ends_with("#[derive(Clone, Copy, Debug, Eq, PartialEq)]")
+//RS             || trimmed.ends_with("#[derive(Clone, Copy, Debug, PartialEq, Eq)]");
+//RS         if !orphan {
+//RS             break;
+//RS         }
+//RS         if let Some(index) = body.rfind("#[derive") {
+//RS             body.truncate(index);
+//RS             *body = body.trim_end().to_string();
+//RS         } else {
+//RS             break;
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0554 crates/jet-comptime/build.rs:1-232
+

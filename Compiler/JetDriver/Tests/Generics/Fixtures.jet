@@ -1,0 +1,278 @@
+// Original tests/generics.rs witnesses, unchanged source programs.
+GENMOD_PROFILE_SOURCE :: `
+module cache<K>(capacity: Int) {
+    pub struct Buffer { items: [K#capacity] }
+    pub fn slots() -> Int -> capacity
+}
+PROFILE_SLOTS :: prep { $build.settings.cache_slots }
+module tuned :: cache<Int>($build.settings.cache_slots)
+module chained :: cache<Int>(PROFILE_SLOTS)
+fn run() { print(tuned.slots()) }
+`
+GENMOD_CANONICAL_SOURCE :: `
+BASE :: prep { 40 }
+module cache<K>(capacity: Int) {
+    COMPUTED_SIZE :: prep { BASE + capacity }
+    pub struct Entry { items: [K#capacity] }
+    pub fn size() -> Int -> COMPUTED_SIZE
+}
+module x :: cache<Int>(64)
+module plain_template<K> {
+    pub fn identity(value: K) -> K -> value
+}
+module plain :: plain_template<Int>
+fn run() {
+    print(x.size())
+    print(plain.identity(7))
+}
+`
+GENMOD_DIAGNOSTIC_SOURCE :: `
+module box<T> {
+    pub struct Entry { value: T }
+}
+module boxed :: box<Int>
+fn wrong(value: boxed.Entry) -> String { return value }
+fn run() {}
+`
+GENMOD_NESTED_SOURCE :: `
+module outer<T>(count: Int) {
+    module inner<U>(extra: Int) {
+        pub fn total(first: T, second: U) -> Int { return count + extra }
+    }
+    module closed :: inner<T>(count)
+}
+module instance :: outer<String>(3)
+fn run() {}
+`
+GENMOD_BODY_SOURCE :: `
+module complete<T>(count: Int, label: String) {
+    #Meta(category: label)
+    VALUE :: prep { count }
+    COMPTIME_VALUE :: prep { count + 1 }
+    tag Marked { deny: [Net] }
+    trait Reveal { fn reveal(self) -> T }
+    struct Wrapped { value: T }
+    enum Maybe { Empty Value(T) }
+    impl Wrapped.Reveal { fn reveal(self) -> T { return self.value } }
+    enum SourceErr { Bad(T) }
+    enum TargetErr { Wrapped(SourceErr) }
+    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
+    #Target(OS.Linux)
+    impl Wrapped { fn linux_value(self) -> T { return self.value } }
+    module plain { pub fn value() -> Int { return count } }
+    module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+    module nested_use :: nested<T>
+    #Meta(category: label)
+    pub fn marked(value: ^#Marked T) -> #Marked T {
+        #Meta(category: label)
+        local := T{ value }
+        return local
+    }
+    #Test fn identity(value: T) { expect(count == count) }
+    #Test("complete") { .measure { assert(label == label) } }
+}
+module complete_use :: complete<Int>(3, "generic module")
+fn run() {}
+`
+GENMOD_BOUNDARIES_SOURCE :: `
+module with_bar_baz<T> { pub struct BarBaz { value: T } }
+module with_baz<T> { pub struct Baz { value: T } }
+module foo :: with_bar_baz<Int>
+module foo_bar :: with_baz<Int>
+fn run() {
+    first :: foo.BarBaz{ value: 1 }
+    second :: foo_bar.Baz{ value: 2 }
+    print(first.value + second.value)
+}
+`
+GENMOD_MULTI_SOURCE :: `
+module left
+module right
+use left.[boxed as left_boxed]
+use right.[boxed as right_boxed]
+module first :: left_boxed<Int>(3)
+module equivalent :: left_boxed<Int>(3)
+module different_type :: left_boxed<String>(3)
+module different_value :: left_boxed<Int>(4)
+module different_path :: right_boxed<Int>(3)
+fn run() {}
+`
+GENMOD_SHADOW_SOURCE :: `
+module box(capacity: Int) {
+    BASE :: prep { capacity }
+    pub fn shadowed() -> Int {
+        base :: prep { 5 }
+        return base
+    }
+    pub fn plain_shadowed() -> Int {
+        capacity := 5
+        return capacity
+    }
+}
+module b32 :: box(32)
+fn run() {
+    print(b32.shadowed())
+    print(b32.plain_shadowed())
+}
+`
+GENMOD_NESTED_RUN_SOURCE :: `
+module outer<T>(count: Int) {
+    module plain {
+        module inner<U> {
+            pub fn total(value: U) -> Int { return count }
+        }
+        module closed :: inner<T>
+        module forwarded :: closed
+        pub fn result(value: T) -> Int {
+            return closed.total(value) + forwarded.total(value)
+        }
+    }
+    pub fn result(value: T) -> Int {
+        return plain.result(value)
+    }
+}
+module selected :: outer<Int>(3)
+fn run() {
+    print(selected.result(1))
+}
+`
+GENMOD_CLOSED_SOURCE :: `
+enum Mode { Fast Safe }
+module keyed(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
+    pub fn value() -> Int { return count }
+}
+module same :: keyed(true, 3, 'a', "x", Mode.Fast)
+module equivalent :: keyed(1 < 2, 1 + 2, 'a', "x", Mode.Fast)
+module different_bool :: keyed(false, 3, 'a', "x", Mode.Fast)
+module different_int :: keyed(true, 4, 'a', "x", Mode.Fast)
+module different_char :: keyed(true, 3, 'b', "x", Mode.Fast)
+module different_string :: keyed(true, 3, 'a', "y", Mode.Fast)
+module different_enum :: keyed(true, 3, 'a', "x", Mode.Safe)
+fn run() {}
+`
+// Examples/features/modules/generic_modules.jet: complete acceptance program.
+GENMOD_COMPLETE_SOURCE :: `
+module cache<K>(capacity: Int) {
+    BASE :: prep { capacity }
+    COMPUTED_SIZE :: prep { BASE + 1 }
+    pub struct Entry {
+        key: K
+        limit: Int -> capacity
+    }
+    pub enum Slot {
+        Empty
+        Value(K)
+    }
+    pub fn entry(k: K) -> Entry { return Entry{key: k} }
+    pub fn slot(k: K) -> Slot { Slot.Value(k) }
+    pub fn key_of(k: K) -> String { return "key" }
+    pub fn describe() -> String { "generic cache" }
+    pub fn size() -> Int { COMPUTED_SIZE }
+}
+module forward_cache :: int_cache
+module int_cache :: cache<Int>(32)
+enum Mode {
+    Fast
+    Safe
+}
+module tier_zero(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
+    #Meta(category: "tier zero")
+    pub fn show() {
+        print(flag)
+        print(count)
+        print(letter)
+        print(label)
+        print(mode == Mode.Fast)
+    }
+}
+module values :: tier_zero(true, 7, 'J', "jet", Mode.Fast)
+trait Token {}
+struct GoodToken {}
+impl GoodToken.Token {}
+module annotation_kinds<Item: Token>(count: Int) {
+    pub fn count() -> Int { count }
+}
+module kinds :: annotation_kinds<GoodToken>(8)
+module fixed_buffer<T>(capacity: Int) {
+    pub struct Buffer { items: [T#capacity] }
+    pub fn echo(values: [T#capacity]) -> [T#capacity] { return ~values }
+}
+module three_ints :: fixed_buffer<Int>(3)
+module local_laws<T> {
+    pub trait Reveal {
+        type Output
+        fn reveal(self) -> T
+    }
+    pub struct Wrapped { value: T }
+    impl Wrapped.Reveal {
+        type Output = T
+        fn reveal(self) -> T { self.value }
+    }
+    pub enum SourceErr { Bad(T) }
+    pub enum TargetErr { Wrapped(SourceErr) }
+    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
+}
+module int_laws :: local_laws<Int>
+fn run() {
+    k :: int_cache.key_of(42)
+    d :: int_cache.describe()
+    n :: int_cache.size()
+    e :: int_cache.entry(42)
+    s :: int_cache.slot(7)
+    print(k)
+    print(d)
+    print(n)
+    print(e.key)
+    print(e.limit)
+    forwarded :: forward_cache.entry(9)
+    print(forward_cache.size())
+    print(forwarded.key)
+    if s == {
+        .Value(v) -> { print(v) }
+        .Empty -> { print(0) }
+    }
+    values.show()
+    print(kinds.count())
+    input :: [Int#3]{1, 2, 3}
+    fixed :: three_ints.echo(input)
+    buffer :: three_ints.Buffer{items: fixed}
+    print(buffer.items[2])
+    wrapped :: int_laws.Wrapped{value: 91}
+    print(wrapped.reveal())
+}
+`
+// Examples/features/modules/fact_value_arguments.jet, including its Package.
+GENMOD_FACT_EXAMPLE_SOURCE :: `
+package {
+    name: "fact_value_arguments"
+    settings: { cache_slots: Int = 3 }
+    build: {
+        compact: Build{ optimize: full, settings: { cache_slots: 2 } },
+        spacious: Build{ optimize: full, settings: { cache_slots: 5 } },
+    }
+}
+module cache<K>(capacity: Int) {
+    pub struct Buffer { items: [K#capacity] }
+    pub fn slots() -> Int { capacity }
+}
+module tuned :: cache<Int>($build.settings.cache_slots)
+fn run() { print(tuned.slots()) }
+`
+// Original InstanceCollisionTests parser-admitted snapshot witness.
+GENMOD_SNAPSHOT_SOURCE :: `
+module everything<T> {
+    @answer :: 42
+    tag Marked { deny: [Net] }
+    trait Show { fn show(self) -> T }
+    struct Boxed { value: T }
+    enum Maybe { Empty Value(T) }
+    impl Boxed.Show { fn show(self) -> T { return self.value } }
+    fn id(value: T) -> T { return ~value }
+    module nested { fn nested() {} }
+    module inner<U> { fn inner(value: U) -> U { return ~value } }
+    module int_inner :: inner<Int>
+    #Test("smoke") { expect(@answer == 42) }
+    #Test("work") { .measure { assert(@answer == 42) } }
+}
+fn run() {}
+`

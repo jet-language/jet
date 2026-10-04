@@ -1,0 +1,231 @@
+// RuntimeMirCodec.rs declaration mapping. A mapping is checked against BOTH
+// schemas, including all native-only and Source-only fields, before emission.
+// New semantic carriers must be added at their canonical declaration owner;
+// this module does not provide opaque values, default fields or aliases.
+pub struct MIRImageSourceField { pub name: String, pub ty: String }
+pub struct MIRImageSourceVariant { pub name: String, pub fields: [MIRImageSourceField] }
+pub enum MIRImageSourceBody { Struct(fields: [MIRImageSourceField]) Enum(variants: [MIRImageSourceVariant]) Tuple }
+pub struct MIRImageSourceDefinition { pub name: String, pub body: MIRImageSourceBody }
+pub struct MIRImageGeneratorMapping {
+    pub source: [String:MIRImageSourceDefinition]
+    pub native_to_source: [String:String]
+}
+fn mir_image_gen_spell_self(text: String, owner: String) -> String Never! {
+    parts := [String]{}
+    cursor := 0
+    loop {
+        start :: mir_image_gen_find(text, "Self", cursor) ?? break
+        &parts.push(text.slice(cursor, start))
+        before :: mir_image_gen_byte(text, start - 1)
+        after :: mir_image_gen_byte(text, start + 4)
+        boundary := true
+        if before == .Val(byte) && mir_image_gen_identifier_byte(byte) -> boundary = false
+        if after == .Val(byte) && mir_image_gen_identifier_byte(byte) -> boundary = false
+        &parts.push(if boundary -> owner else -> "Self")
+        cursor = start + 4
+    }
+    &parts.push(text.slice(cursor, text.len()))
+    parts.join("")
+}
+fn mir_image_gen_source_fields(body: String, owner: String) -> [MIRImageSourceField] MIRImageError! {
+    starts := [Int]{}
+    cursor := 0
+    depth := 0
+    bytes :: body.bytes()
+    loop cursor < bytes.len() {
+        byte :: bytes[cursor]
+        if depth == 0 && mir_image_gen_token(body, cursor, "pub") -> &starts.push(cursor)
+        if byte == U8{40} || byte == U8{91} || byte == U8{123} || byte == U8{60} -> depth += 1
+        else if byte == U8{62} && cursor > 0 && bytes[cursor - 1] == U8{45} {}
+        else if byte == U8{41} || byte == U8{93} || byte == U8{125} || byte == U8{62} -> depth = if depth > 0 -> depth - 1 else -> 0
+        cursor += 1
+    }
+    fields := [MIRImageSourceField]{}
+    loop index in 0..<starts.len() {
+        end :: if index + 1 < starts.len() -> starts[index + 1] else -> bytes.len()
+        raw :: mir_image_gen_trim(body.slice(starts[index], end))
+        position := mir_image_gen_skip_space(raw, 3)
+        if mir_image_gen_byte(raw, position) == .Val(U8{40}) {
+            close :: mir_image_generator_matching(raw, position, U8{40}, U8{41}) ?? return Err(MIRImageError{message: "unclosed source field visibility"})
+            position = mir_image_gen_skip_space(raw, close + 1)
+        }
+        id :: mir_image_gen_identifier(raw, position)
+        position = mir_image_gen_skip_space(raw, id.1)
+        if mir_image_gen_byte(raw, position) != .Val(U8{58}) -> return Err(MIRImageError{message: "field `{id.0}` has no type"})
+        ty :: mir_image_generator_split(raw.slice(position + 1, raw.len()), U8{44})[0]
+        &fields.push(MIRImageSourceField{name: id.0, ty: mir_image_gen_spell_self(mir_image_gen_trim(ty), owner)})
+    }
+    Ok(fields)
+}
+fn mir_image_gen_source_variants(body: String, owner: String) -> [MIRImageSourceVariant] MIRImageError! {
+    variants := [MIRImageSourceVariant]{}
+    cursor := 0
+    loop cursor < body.len() {
+        cursor = mir_image_gen_skip_space(body, cursor)
+        if mir_image_gen_byte(body, cursor) == .Val(U8{44}) { cursor += 1; continue }
+        if cursor == body.len() -> break
+        id :: mir_image_gen_identifier(body, cursor)
+        cursor = mir_image_gen_skip_space(body, id.1)
+        fields := [MIRImageSourceField]{}
+        if mir_image_gen_byte(body, cursor) == .Val(U8{40}) {
+            end :: mir_image_generator_matching(body, cursor, U8{40}, U8{41}) ?? return Err(MIRImageError{message: "unclosed Source variant `{id.0}`"})
+            loop raw in mir_image_generator_split(body.slice(cursor + 1, end), U8{44}) {
+                colon :: mir_image_generator_top_level(raw, U8{58}) ?? return Err(MIRImageError{message: "named MIR variant field `{raw}` has no type"})
+                &fields.push(MIRImageSourceField{name: mir_image_gen_trim(raw.slice(0, colon)), ty: mir_image_gen_spell_self(mir_image_gen_trim(raw.slice(colon + 1, raw.len())), owner)})
+            }
+            cursor = end + 1
+        }
+        &variants.push(MIRImageSourceVariant{name: id.0, fields: fields})
+    }
+    Ok(variants)
+}
+pub fn mir_image_generator_source_definitions(input: String) -> [MIRImageSourceDefinition] MIRImageError! {
+    lines := [String]{}
+    loop line in input.split("\n") {
+        before :: mir_image_gen_find(line, "//", 0)
+        &lines.push(if before == .Val(index) -> line.slice(0, index) else -> line)
+    }
+    text :: lines.join("\n")
+    definitions := [MIRImageSourceDefinition]{}
+    cursor := 0
+    loop {
+        next :: mir_image_gen_next_definition(text, cursor) ?? break
+        if next.0 == "type" { cursor = next.1 + 8; continue }
+        position := mir_image_gen_skip_space(text, next.1 + next.0.len() + 4)
+        if mir_image_gen_byte(text, position) == .Val(U8{36}) { cursor = position + 1; continue }
+        id :: mir_image_gen_identifier(text, position)
+        position = mir_image_gen_skip_space(text, id.1)
+        body := MIRImageSourceBody.Tuple
+        if mir_image_gen_byte(text, position) == .Val(U8{123}) {
+            end :: mir_image_generator_matching(text, position, U8{123}, U8{125}) ?? return Err(MIRImageError{message: "unclosed Source MIR declaration `{id.0}`"})
+            inner :: text.slice(position + 1, end)
+            body = if next.0 == "struct" -> MIRImageSourceBody.Struct(mir_image_gen_source_fields(inner, id.0)) else -> MIRImageSourceBody.Enum(mir_image_gen_source_variants(inner, id.0))
+            position = end + 1
+        } else if mir_image_gen_byte(text, position) == .Val(U8{40}) {
+            end :: mir_image_generator_matching(text, position, U8{40}, U8{41}) ?? return Err(MIRImageError{message: "unclosed Source tuple `{id.0}`"})
+            position = end + 1
+        } else -> return Err(MIRImageError{message: "MIR declaration `{id.0}` has no body"})
+        &definitions.push(MIRImageSourceDefinition{name: id.0, body: body})
+        cursor = position
+    }
+    mir_image_generator_unique_source_definitions(definitions)
+    Ok(definitions)
+}
+pub fn mir_image_generator_unique_source_definitions(definitions: [MIRImageSourceDefinition]) MIRImageError! {
+    names := [String:Bool]{}
+    loop definition in definitions {
+        if names.get(definition.name) == .Val(_) -> return Err(MIRImageError{message: "duplicate MIR schema type `{definition.name}`"})
+        names[definition.name] = true
+        members := [String:Bool]{}
+        if definition.body == {
+            .Struct(fields) -> loop field in fields {
+                if members.get(field.name) == .Val(_) -> return Err(MIRImageError{message: "duplicate MIR schema field `{definition.name}.{field.name}`"})
+                members[field.name] = true
+            }
+            .Enum(variants) -> loop variant in variants {
+                if members.get(variant.name) == .Val(_) -> return Err(MIRImageError{message: "duplicate MIR schema variant `{definition.name}::{variant.name}`"})
+                members[variant.name] = true
+            }
+            .Tuple -> {}
+        }
+    }
+    return
+}
+pub fn mir_image_generator_source_type(input: String) -> MIRImageSchemaType MIRImageError! {
+    text := mir_image_gen_trim(input)
+    loop text.ends_with(",") -> text = mir_image_gen_trim(text.slice(0, text.len() - 1))
+    if text == "" -> return Err(MIRImageError{message: "empty MIR field type"})
+    if text.starts_with("?") -> return Ok(MIRImageSchemaType.Optional(mir_image_generator_source_type(text.slice(1, text.len()))))
+    if text.ends_with("?") -> return Ok(MIRImageSchemaType.Optional(mir_image_generator_source_type(text.slice(0, text.len() - 1))))
+    if text.starts_with("[") && text.ends_with("]") {
+        inner :: text.slice(1, text.len() - 1)
+        if mir_image_generator_top_level(inner, U8{58}) == .Val(colon) -> return Ok(MIRImageSchemaType.Map(mir_image_generator_source_type(inner.slice(0, colon)), mir_image_generator_source_type(inner.slice(colon + 1, inner.len())), false))
+        return Ok(MIRImageSchemaType.Sequence(mir_image_generator_source_type(inner)))
+    }
+    mir_image_generator_parse_type(text)
+}
+pub fn mir_image_generator_source_field(owner: String, native_field: String) -> String Never! {
+    if (owner, native_field) == {
+        ("MIRImport", "module") -> "module_id"
+        ("MIRTypeDef", "module") -> "module_id"
+        ("MIRTraitDef", "module") -> "module_id"
+        ("MIRImplDef", "module") -> "module_id"
+        ("MIRConstantDef", "module") -> "module_id"
+        ("MIRFunction", "module") -> "module_name"
+        ("MIRPreludeCall", "module") -> "module_name"
+        ("MIRCoreCall", "module") -> "module_name"
+        ("MIRForeign", "module") -> "module_name"
+        ("MIRCLib", "module") -> "module_name"
+        ("MIRCoreCall", "effect") -> "effect_kind"
+        ("MIRPreludeCall", "effect") -> "effect_kind"
+        ("MIRNameDeclaration", "module") -> "module_index"
+        ("MIRNameAlias", "module") -> "module_index"
+        ("MIRLocal", "comptime") -> "is_comptime"
+        else -> native_field
+    }
+}
+pub fn mir_image_generator_native_variant(owner: String, source_variant: String) -> String Never! {
+    if (owner, source_variant) == {
+        ("MIRDropKind", "NoDrop") -> "None"
+        ("MIRCopyCost", "NoCopy") -> "None"
+        ("MIREntryOutput", "NoOutput") -> "None"
+        ("MIRAllocatorPolicy", "NoAllocator") -> "None"
+        ("MIRClockPolicy", "NoClock") -> "None"
+        ("MIREntropyPolicy", "NoEntropy") -> "None"
+        ("MIRSchedulerPolicy", "NoScheduler") -> "None"
+        ("MIRByteSinkPolicy", "NoByteSink") -> "None"
+        ("MIRMMIOPolicy", "NoMMIO") -> "None"
+        ("CoreCallPureRoute", "NoPureRoute") -> "None"
+        ("CoreCallInterpreterRoute", "NoRoute") -> "None"
+        else -> source_variant
+    }
+}
+fn mir_image_gen_source_field_index(fields: [MIRImageSourceField], name: String) -> Int? Never! {
+    loop index in 0..<fields.len() -> if fields[index].name == name -> return Val(index)
+    None
+}
+fn mir_image_gen_variant_fields(body: MIRImageSchemaVariantBody) -> [MIRImageSchemaField] Never! {
+    if body == {
+        .Struct(fields) -> fields
+        .Tuple(types) -> {
+            fields := [MIRImageSchemaField]{}
+            loop index in 0..<types.len() -> &fields.push(MIRImageSchemaField{name: "{index}", ty: types[index], public: true})
+            fields
+        }
+        else -> [MIRImageSchemaField]{}
+    }
+}
+pub fn mir_image_generator_align_variant(owner: String, source: MIRImageSourceVariant, native: MIRImageSchemaVariant) -> [Int?] MIRImageError! {
+    fields :: mir_image_gen_variant_fields(native.body)
+    aligned := [Int?]{}
+    if fields.len() == source.fields.len() {
+        loop index in 0..<fields.len() -> &aligned.push(Val(index))
+        return Ok(aligned)
+    }
+    used := [Int:Bool]{}
+    loop field in fields {
+        index :: mir_image_gen_source_field_index(source.fields, field.name) ?? return Err(MIRImageError{message: "native MIR enum field `{owner}::{native.name}.{field.name}` has no lossless Source-MIR field"})
+        used[index] = true
+        &aligned.push(Val(index))
+    }
+    loop index in 0..<source.fields.len() {
+        if used.get(index) == .Val(_) -> continue
+        if owner == "MIROperation" && source.name == "Binary" && source.fields[index].name == "overflow" -> continue
+        return Err(MIRImageError{message: "MIR enum variant `{owner}::{source.name}` changes payload arity"})
+    }
+    Ok(aligned)
+}
+pub fn mir_image_generator_check_struct(owner: String, source: [MIRImageSourceField], native: [MIRImageSchemaField]) MIRImageError! {
+    used := [String:Bool]{}
+    loop field in native {
+        name :: mir_image_generator_source_field(owner, field.name)
+        if mir_image_gen_source_field_index(source, name) == None -> return Err(MIRImageError{message: "native MIR field `{owner}.{field.name}` has no lossless Source-MIR field"})
+        used[name] = true
+    }
+    loop field in source {
+        if used.get(field.name) == .Val(_) -> continue
+        if owner == "MIRFunction" && field.name == "memo_unbounded" -> continue
+        return Err(MIRImageError{message: "Source MIR field `{owner}.{field.name}` has no native MIR destination"})
+    }
+    return
+}

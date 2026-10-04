@@ -1,0 +1,43 @@
+// D-WEBAPP1 / D-WEBAUTHOR1 / D-APP-UNIFY1: App metadata stays at its
+// existing MIR owner. These are the missing Rust App.rs derived defaults,
+// scalar accessor, and ordered route-index boundary; no parallel App graph.
+// app_graph_new is a builder convenience, NOT AppGraph::default: Rust defaults
+// entry/hydration to empty strings and shared_tir to false.
+pub fn app_cache_default() -> MIRAppCacheFact Never! { MIRAppCacheFact.Unspecified }
+pub fn app_hydration_trigger_default() -> MIRAppHydrationTrigger Never! { MIRAppHydrationTrigger.Immediate }
+pub fn app_pending_boundary_id_get(id: MIRAppPendingBoundaryID) -> U64 Never! { id.value }
+pub fn app_resume_payload_default() -> MIRAppResumePayload Never! {
+    MIRAppResumePayload{captures: [MIRAppResumeCapture]{}, serializable: false}
+}
+pub fn app_island_fact_default() -> MIRAppIslandFact Never! {
+    MIRAppIslandFact{identity: "", hydration_trigger: app_hydration_trigger_default(), resume_payload: app_resume_payload_default()}
+}
+pub fn app_route_loader_default() -> MIRAppRouteLoader Never! {
+    MIRAppRouteLoader{handler: "", data_type: "", dependency: "", preload: false, cache_identity: ""}
+}
+pub fn app_route_boundaries_default() -> MIRAppRouteBoundaries Never! {
+    MIRAppRouteBoundaries{pending: None, not_found: None, error: None}
+}
+pub fn app_policy_default() -> MIRAppPolicy Never! {
+    MIRAppPolicy{security: [String]{}, assets: [String]{}, split: [String]{}, cache: [String]{}, a11y: [String]{}, adapters: [String]{}}
+}
+pub fn app_graph_default() -> MIRAppGraph Never! {
+    MIRAppGraph{entry_file: "", routes: [MIRAppRoute]{}, actions: [MIRAppAction]{}, forms: [MIRAppFormFact]{}, queries: [MIRAppQueryFact]{}, stores: [MIRAppStoreFact]{}, mounts: [MIRAppMount]{}, routes_from: [MIRAppRoutesFrom]{}, policy: app_policy_default(), hydration: "", shared_tir: false}
+}
+
+// Rust BTreeMap<String,usize>: lookup uses the canonical map; observable
+// traversal sorts UTF-8 string keys once at the iteration boundary, matching
+// the existing Foundation fact_sorted_strings convention. Never use Core's
+// insertion-ordered string/string map or a linear search as a substitute.
+pub struct AppRouteIndex { priv rows: [String:Int] }
+pub struct AppRouteIndexEntry { pub path: String, pub index: Int }
+pub fn app_route_index_get(index: AppRouteIndex, path: String) -> Int? Never! {
+    index.rows.get(path)
+}
+pub fn app_route_index_entries(index: AppRouteIndex) -> [AppRouteIndexEntry] Never! {
+    keys := index.rows.keys().to_list()
+    &keys.sort()
+    entries := [AppRouteIndexEntry]{}
+    loop key in keys -> &entries.push(AppRouteIndexEntry{path: key, index: index.rows.get(key) ?? panic("route index key disappeared")})
+    entries
+}

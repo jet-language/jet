@@ -1,0 +1,51 @@
+// Build projection of the canonical Prelude effect table.
+// Runtime-only FFI, Browser, and Secret roots are deliberately excluded.
+use Authority.[parse_root]
+
+// Source: crates/jet-codegen/src/Prelude/Effects.jet
+// Source SHA-256: cb7a9b9ef6c7be8620deacda9eb20c0411f81a39f432c8a01a94f9427414bc2f
+// Rust: crates/jet-foundation/src/BuildEffects.rs:10
+pub enum BuildEffect { Net FS IO DB Time Rand Env Exec Log GPU }
+impl BuildEffect {
+    // Rust: crates/jet-foundation/src/BuildEffects.rs:24
+    pub const ALL: [BuildEffect] = [.Net, .FS, .IO, .DB, .Time, .Rand, .Env, .Exec, .Log, .GPU]
+    // Rust: crates/jet-foundation/src/BuildEffects.rs:37
+    pub fn name(self) -> String Never! {
+        if self == {
+            .Net -> "Net"
+            .FS -> "FS"
+            .IO -> "IO"
+            .DB -> "DB"
+            .Time -> "Time"
+            .Rand -> "Rand"
+            .Env -> "Env"
+            .Exec -> "Exec"
+            .Log -> "Log"
+            .GPU -> "GPU"
+        }
+    }
+    // Rust: crates/jet-foundation/src/BuildEffects.rs:52
+    pub fn flag(self) -> String Never! {
+        if self == {
+            .Net -> "net"
+            .FS -> "fs"
+            .IO -> "io"
+            .DB -> "db"
+            .Time -> "time"
+            .Rand -> "rand"
+            .Env -> "env"
+            .Exec -> "exec"
+            .Log -> "log"
+            .GPU -> "gpu"
+        }
+    }
+    // Rust: crates/jet-foundation/src/BuildEffects.rs:67
+    pub fn parse(value: String) -> BuildEffect? Never! {
+        if value.contains('.') -> return None
+        canonical :: parse_root(value) ?? return None
+        loop effect in BuildEffect.ALL {
+            if canonical == effect.name() -> return Val(effect)
+        }
+        None
+    }
+}

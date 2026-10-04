@@ -1,4 +1,16 @@
 use core.text as diagnostic_unicode
+use core.files as diagnostic_files
+use core.text.runtime.unicode_assets as diagnostic_assets
+use core.text.runtime.kernel_unicode_string as diagnostic_text
+use core.text.runtime.assets.unicode_general_category as diagnostic_category
+use core.text.runtime.assets.unicode_grapheme_break as diagnostic_grapheme
+use core.text.runtime.assets.unicode_incb as diagnostic_incb
+use core.text.runtime.assets.unicode_extended_pictographic as diagnostic_pictographic
+use core.text.runtime.assets.unicode_east_asian_width as diagnostic_east_asian
+use core.text.runtime.assets.unicode_emoji as diagnostic_emoji
+use core.text.runtime.assets.unicode_emoji_presentation as diagnostic_emoji_presentation
+use core.text.runtime.assets.unicode_default_ignorable as diagnostic_ignorable
+use core.files.runtime.kernel_path_components as diagnostic_paths
 
 pub enum DiagnosticRegistryStatus { Active Retired Reserved }
 
@@ -31,10 +43,13 @@ pub struct DiagnosticRegistryRow {
     pub what: String
     pub why: String
     pub fix: String
+    // Required publication column; Main regenerates DiagnosticRows with the
+    // exact ordered, deduplicated holes of what/why/fix. Never infer at a raise.
+    pub template_holes: [String]
     pub detail: Bool
     pub structured_fix: DiagnosticRegistryFix?
-    pub fix_safety: DiagnosticFixSafety?
-    pub no_fix_reason: DiagnosticNoFixReason?
+    pub fix_safety: FixSafety?
+    pub no_fix_reason: NoFixReason?
 }
 
 fn diagnostic_byte_at(source: [U8], index: Int) -> Int Never! {
@@ -46,7 +61,7 @@ fn diagnostic_is_continuation(value: Int) -> Bool Never! {
     value >= 128 && value <= 191
 }
 
-fn diagnostic_utf8_width(source: [U8], index: Int) -> Int Never! {
+pub fn diagnostic_utf8_width(source: [U8], index: Int) -> Int Never! {
     first :: diagnostic_byte_at(source, index)
     if {
         first < 0 -> 0
@@ -69,7 +84,7 @@ fn diagnostic_scalar_at(source: [U8], index: Int) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-fn diagnostic_is_whitespace_at(source: [U8], index: Int) -> Bool Never! {
+pub fn diagnostic_is_whitespace_at(source: [U8], index: Int) -> Bool Never! {
     value :: diagnostic_byte_at(source, index)
     if {
         value < 0 -> false
@@ -156,13 +171,11 @@ fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> Te
     }
 }
 
-fn diagnostic_registry_applicability(row: DiagnosticRegistryRow, has_edit: Bool) -> DiagnosticFixApplicability? {
+fn diagnostic_registry_applicability(row: DiagnosticRegistryRow, has_edit: Bool) -> FixApplicability? {
     if !has_edit -> return None
     safety :: row.fix_safety ?? return None
-    if safety == {
-        .Formatting | .BehaviorPreserving -> Val(DiagnosticFixApplicability.Safe)
-        else -> Val(DiagnosticFixApplicability.Suggested)
-    }
+    if safety.auto_apply() -> return Val(FixApplicability.Safe)
+    Val(FixApplicability.Suggested)
 }
 
 fn diagnostic_registry_project_row(diagnostic: ^Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic Never! {
@@ -184,6 +197,10 @@ fn diagnostic_registry_project_row(diagnostic: ^Diagnostic, row: DiagnosticRegis
 // span; the generated registry row owns protocol metadata and static edits.
 pub fn diagnostic_from_registry(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
     row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+    diagnostic_registry_construct(row, code, span, what, why, fix)
+}
+
+fn diagnostic_registry_construct(row: DiagnosticRegistryRow, code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
     diagnostic :: Diagnostic{
         moment: row.moment,
         severity: row.severity,
@@ -199,12 +216,14 @@ pub fn diagnostic_from_registry(code: String, span: Span?, what: String, why: St
 // Dynamic Source edits are authorized and graded by the generated row. This
 // preserves the exact replacement/span authored by the producer without
 // deriving safety from human Fix prose.
+// Rust Diagnostics.rs:509-530 `with_edit`: reject an attached reason before
+// looking up the edit channel; the report's current reason is authoritative.
 pub fn diagnostic_registry_with_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
-    if !diagnostic_registry_is_source_edit(fix) -> panic("updated `{updated.code}` has no Source edit registry channel")
+    if updated.no_fix_reason != None -> panic("diagnostic `{updated.code}` cannot carry an edit and no-fix reason")
+    row :: diagnostic_registry_row(updated.code) ?? panic("diagnostic `{updated.code}` has no generated Source registry row")
+    fix :: row.structured_fix ?? panic("diagnostic `{updated.code}` has no registry-owned edit channel")
+    if !diagnostic_registry_is_source_edit(fix) -> panic("diagnostic `{updated.code}` has no Source edit registry channel")
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
     updated.safety = row.fix_safety
@@ -226,32 +245,27 @@ fn diagnostic_registry_is_generated_edit(fix: DiagnosticRegistryFix) -> Bool Nev
     }
 }
 
-fn diagnostic_registry_safety_auto_apply(safety: DiagnosticFixSafety) -> Bool Never! {
-    if safety == {
-        .Formatting | .BehaviorPreserving -> true
-        else -> false
-    }
-}
-
-pub fn diagnostic_registry_with_edit_grade(diagnostic: ^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+// Rust Diagnostics.rs:428-460 `with_edit_grade`, including reason-first rejection.
+pub fn diagnostic_registry_with_edit_grade(diagnostic: ^Diagnostic, edit: TextEdit, applicability: FixApplicability, safety: FixSafety) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
-    if !diagnostic_registry_is_source_edit(fix) -> panic("updated `{updated.code}` has no Source edit registry channel")
-    if applicability == DiagnosticFixApplicability.Safe && !diagnostic_registry_safety_auto_apply(safety) -> panic("safe updated edit `{updated.code}` must have an auto-applicable safety grade")
+    if updated.no_fix_reason != None -> panic("diagnostic `{updated.code}` cannot carry an edit and no-fix reason")
+    row :: diagnostic_registry_row(updated.code) ?? panic("diagnostic `{updated.code}` has no generated Source registry row")
+    fix :: row.structured_fix ?? panic("diagnostic `{updated.code}` has no registry-owned edit channel")
+    if !diagnostic_registry_is_source_edit(fix) -> panic("diagnostic `{updated.code}` has no Source edit registry channel")
+    if applicability == FixApplicability.Safe && !safety.auto_apply() -> panic("safe diagnostic edit `{updated.code}` must have an auto-applicable safety grade")
     updated.edit = Val(edit)
     updated.applicability = Val(applicability)
     updated.safety = Val(safety)
     updated
 }
 
+// Rust Diagnostics.rs:359-383 `set_structured_edit`, including reason-first rejection.
 pub fn diagnostic_registry_with_structured_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned generated edit channel")
-    if !diagnostic_registry_is_generated_edit(fix) -> panic("updated `{updated.code}` has no generated structured edit registry channel")
+    if updated.no_fix_reason != None -> panic("diagnostic `{updated.code}` cannot carry an edit and no-fix reason")
+    row :: diagnostic_registry_row(updated.code) ?? panic("diagnostic `{updated.code}` has no generated Source registry row")
+    fix :: row.structured_fix ?? panic("diagnostic `{updated.code}` has no registry-owned generated edit channel")
+    if !diagnostic_registry_is_generated_edit(fix) -> panic("diagnostic `{updated.code}` has no generated structured edit registry channel")
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
     updated.safety = row.fix_safety
@@ -260,20 +274,20 @@ pub fn diagnostic_registry_with_structured_edit(diagnostic: ^Diagnostic, edit: T
 
 pub fn diagnostic_registry_with_source_derived_suggestion(diagnostic: ^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     updated := diagnostic
-    if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if row.no_fix_reason == None -> panic("updated `{updated.code}` has no explanatory row reason to replace")
+    if updated.edit != None -> panic("diagnostic `{updated.code}` already carries an edit")
+    row :: diagnostic_registry_row(updated.code) ?? panic("diagnostic `{updated.code}` has no generated Source registry row")
+    if row.no_fix_reason == None -> panic("diagnostic `{updated.code}` has no explanatory row reason to replace")
     updated.no_fix_reason = None
-    updated.applicability = Val(DiagnosticFixApplicability.Suggested)
-    updated.safety = Val(DiagnosticFixSafety.NeedsReview)
+    updated.applicability = Val(FixApplicability.Suggested)
+    updated.safety = Val(FixSafety.NeedsReview)
     updated.edit = Val(TextEdit{span: span, new_text: new_text})
     updated
 }
 
 pub fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    if updated.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and no-fix reason")
-    if updated.edit == None || updated.applicability == None || updated.safety == None -> panic("updated `{updated.code}` needs a graded primary edit before an alternative")
+    if updated.no_fix_reason != None -> panic("diagnostic `{updated.code}` cannot carry an edit and no-fix reason")
+    if updated.edit == None || updated.applicability == None || updated.safety == None -> panic("diagnostic `{updated.code}` needs a graded primary edit before an alternative")
     if updated.structured == None {
         updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: [TextEdit]{edit}})
         return updated
@@ -286,7 +300,418 @@ pub fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: 
             updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: alternatives})
             updated
         }
-        else -> panic("updated `{updated.code}` cannot carry source edit alternatives with another structured payload")
+        else -> panic("diagnostic `{updated.code}` cannot carry source edit alternatives with another structured payload")
     }
 }
 
+// Rust Diagnostics.rs:33,138. These values do not depend on the host target.
+pub CORE_SOURCE_ROOT :: "<corelib>"
+pub MAX_SOURCE_NESTING :: 256
+
+// Rust Diagnostics.rs:51-64. SHA-256 consumes the exact checked UTF-8 snapshot.
+pub fn diagnostic_origin_new(display: String, path: String, source: String) -> DiagnosticOrigin Never! {
+    revision :: mir_sha256_hex(source)
+    DiagnosticOrigin{display: display, path: path, source: source, revision: revision}
+}
+
+// Rust Diagnostics.rs:91-102. A Jet panic carries the same branded message;
+// hook installation/unwind suppression remain explicit native gates below.
+pub fn diagnostic_ice(span: Span?, message: String) -> Never Never! {
+    if span == .Val(location) -> panic("internal compiler error: {message} (source bytes {location.start}..{location.end})")
+    panic("internal compiler error: {message}")
+}
+
+// Rust Diagnostics.rs:497-505. Preserve primary-then-alternative order.
+pub fn diagnostic_all_edits(diagnostic: Diagnostic) -> [TextEdit] Never! {
+    edits := [TextEdit]{}
+    if diagnostic.edit == .Val(edit) -> &edits.push(edit)
+    if diagnostic.structured == .Val(structured) {
+        if structured == .SuggestedEdits(alternatives) {
+            loop edit in alternatives -> &edits.push(edit)
+        }
+    }
+    edits
+}
+
+// Rust Diagnostics.rs:569-578: insertion at start, not replacement of span.
+pub fn diagnostic_with_suggested_edit(diagnostic: ^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
+    diagnostic_registry_with_edit_grade(^diagnostic, TextEdit{span: Span{start: span.start, end: span.start}, new_text: new_text}, FixApplicability.Suggested, FixSafety.NeedsReview)
+}
+
+// Rust Diagnostics.rs:585-627. A programmable build code need not have a row.
+// Validation precedes lookup; a registered code still takes all row metadata.
+pub fn diagnostic_project_error(code: String, what: String, why: String, fix: String, span: Span?) -> Diagnostic ReportError! {
+    if code == "" -> return Err(ReportError.new("custom diagnostic code must not be empty"))
+    bytes :: code.bytes()
+    at := 0
+    loop at < bytes.len() {
+        cp :: diagnostic_text.scalar_at(bytes, at)
+        if cp < 32 || (cp >= 127 && cp <= 159) -> return Err(ReportError.new("custom diagnostic code must not contain control characters"))
+        at += diagnostic_text.utf8_width_at(bytes, at)
+    }
+    diagnostic := Diagnostic{
+        moment: DiagnosticMoment.Compile,
+        severity: DIAGNOSTIC_ERROR,
+        code: code,
+        span: span,
+        what: diagnostic_sentence_case_line(what),
+        why: diagnostic_sentence_case_line(why),
+        fix: diagnostic_sentence_case_line(fix),
+    }
+    if diagnostic_registry_row(code) == .Val(row) {
+        diagnostic.moment = row.moment
+        diagnostic.severity = row.severity
+        diagnostic = diagnostic_registry_project_row(^diagnostic, row)
+    }
+    Ok(diagnostic)
+}
+
+// Rust Diagnostics.rs:640-668. These are transport/control values, not rows.
+fn diagnostic_internal_sentinel(code: String, what: String, why: String, span: Span?) -> Diagnostic Never! {
+    Diagnostic{moment: DiagnosticMoment.Run, severity: DIAGNOSTIC_ERROR, code: code, what: what, why: why, fix: "", span: span}
+}
+
+// Rust Diagnostics.rs:298/672 and 302/677 share the same internal constructors.
+pub fn diagnostic_soft_exit(what: String, why: String, span: Span?) -> Diagnostic Never! {
+    diagnostic_internal_sentinel("SOFT_EXIT", what, why, span)
+}
+
+pub fn diagnostic_task_cancelled(span: Span?) -> Diagnostic Never! {
+    diagnostic_internal_sentinel("TASK_CANCELLED", "task cancelled", "the owning task group stopped this task", span)
+}
+
+pub fn diagnostic_runtime_host_fault(stdout: String, what: String) -> Diagnostic Never! {
+    diagnostic := diagnostic_internal_sentinel("RUNTIME_HOST_FAULT", what, "", None)
+    diagnostic.structured = Val(DiagnosticStructured.RuntimeHostFault{stdout: stdout})
+    diagnostic
+}
+
+pub fn diagnostic_runtime_host_fault_parts(diagnostic: Diagnostic) -> (stdout: String, what: String)? Never! {
+    structured :: diagnostic.structured ?? return None
+    if structured == .RuntimeHostFault(stdout) -> return Val((stdout: stdout, what: diagnostic.what))
+    None
+}
+
+// Rust Diagnostics.rs:1417-1428. Only the file URL needs filesystem effects;
+// OSC 8 wrapping is a byte projection and never mutates a report location.
+pub fn diagnostic_osc8(url: String, text: String) -> String Never! {
+    escape :: String.from_bytes([U8]{27}) ?? panic("ESC is valid UTF-8")
+    "{escape}]8;;{url}{escape}\\{text}{escape}]8;;{escape}\\"
+}
+
+pub fn diagnostic_file_url(file: String, line: Int, col: Int) -[FS, Env]> String Never! {
+    absolute := diagnostic_files.canonicalize(file) ?? file
+    "file://{absolute}:{line}:{col}"
+}
+
+// Rust Diagnostics.rs:1469-1511. Index once, binary-search each line query.
+// The byte owner is supplied once; queries never materialize another source
+// String or byte array. `line_text` returns a borrowed range, as Rust's &str.
+// String->borrowed-UTF8 ingress/lifetime emission remain #4318/#4392 Core gates.
+pub struct DiagnosticLineIndex {
+    starts: [Int]
+
+    pub fn new(source: [U8]) -> DiagnosticLineIndex Never! {
+        starts := [Int]{0}
+        loop (index, byte) in source {
+            if byte == (U8{10}) -> &starts.push(index + 1)
+        }
+        DiagnosticLineIndex{starts: starts}
+    }
+
+    pub fn line_col(self, source: [U8], offset: Int) -> (line: Int, col: Int) Never! {
+        limit :: if offset > source.len() -> source.len() else -> offset
+        low := 0
+        high := self.starts.len()
+        loop low < high {
+            middle :: low + (high - low) /% 2
+            if self.starts[middle] <= limit -> low = middle + 1 else -> high = middle
+        }
+        column := 1
+        loop index in self.starts[low - 1]..<limit {
+            if !diagnostic_is_continuation(Int.from_u8(source[index])) -> column += 1
+        }
+        (line: low, col: column)
+    }
+
+    pub fn line_text(self, source: [U8], line: Int) -> View<U8> from source {
+        index :: if line <= 0 -> 0 else -> line - 1
+        if index >= self.starts.len() -> return source[0..<0]
+        start :: self.starts[index]
+        end := start
+        loop end < source.len() && source[end] != (U8{10}) -> end += 1
+        // A final bare CR is retained; only CR immediately before LF is cut.
+        if end < source.len() && end > start && source[end - 1] == (U8{13}) -> end -= 1
+        source[start..<end]
+    }
+}
+
+// Rust Diagnostics.rs:1513-1551 binary searches use the ONE Core JUCD decoder.
+fn diagnostic_unicode_general_category(cp: Int) -> Int Never! {
+    diagnostic_assets.asset_tag(diagnostic_category.UNICODE_GENERAL_CATEGORY, cp, 0)
+}
+
+fn diagnostic_unicode_grapheme_class(cp: Int) -> Int Never! {
+    diagnostic_assets.asset_tag(diagnostic_grapheme.UNICODE_GRAPHEME_BREAK, cp, 0)
+}
+
+fn diagnostic_unicode_incb(cp: Int) -> Int Never! {
+    diagnostic_assets.asset_tag(diagnostic_incb.UNICODE_INCB, cp, 0)
+}
+
+fn diagnostic_unicode_is_pictographic(cp: Int) -> Bool Never! {
+    diagnostic_assets.asset_contains(diagnostic_pictographic.UNICODE_EXTENDED_PICTOGRAPHIC, cp)
+}
+
+// Rust Diagnostics.rs:1553-1583, exact UAX #29 class tags in the pinned asset.
+fn diagnostic_unicode_grapheme_break(previous: Int, current: Int) -> Bool Never! {
+    if previous == 1 && current == 2 -> return false
+    if (previous >= 1 && previous <= 3) || (current >= 1 && current <= 3) -> return true
+    if previous == 9 && (current == 9 || current == 10 || current == 12 || current == 13) -> return false
+    if (previous == 12 || previous == 10) && (current == 10 || current == 11) -> return false
+    if (previous == 13 || previous == 11) && current == 11 -> return false
+    current != 4 && current != 5 && current != 8 && previous != 7
+}
+
+// Rust Diagnostics.rs:1585-1651. The returned spans borrow byte identity
+// rather than allocating/cloning one owned String for each grapheme.
+fn diagnostic_grapheme_spans(bytes: [U8]) -> [Span] Never! {
+    spans := [Span]{}
+    if bytes.len() == 0 -> return spans
+    first :: diagnostic_text.scalar_at(bytes, 0)
+    previous := diagnostic_unicode_grapheme_class(first)
+    ri_run := if previous == 6 -> 1 else -> 0
+    saw_pictographic := diagnostic_unicode_is_pictographic(first)
+    incb_pending := diagnostic_unicode_incb(first) == 2
+    incb_linker := false
+    start := 0
+    at := diagnostic_text.utf8_width_at(bytes, 0)
+    loop at < bytes.len() {
+        cp :: diagnostic_text.scalar_at(bytes, at)
+        current :: diagnostic_unicode_grapheme_class(cp)
+        incb :: diagnostic_unicode_incb(cp)
+        split :: if {
+            previous == 5 && saw_pictographic && diagnostic_unicode_is_pictographic(cp) -> false
+            previous == 6 && current == 6 -> ri_run % 2 == 0
+            incb_pending && incb_linker && incb == 2 -> false
+            else -> diagnostic_unicode_grapheme_break(previous, current)
+        }
+        if split {
+            &spans.push(Span{start: start, end: at})
+            start = at
+        }
+        ri_run = if current == 6 -> ri_run + 1 else -> 0
+        if current != 4 && current != 5 -> saw_pictographic = diagnostic_unicode_is_pictographic(cp)
+        if {
+            incb == 2 -> { incb_pending = true; incb_linker = false }
+            incb == 1 && incb_pending -> incb_linker = true
+            incb == 3 || incb == 1 -> {}
+            else -> { incb_pending = false; incb_linker = false }
+        }
+        previous = current
+        at += diagnostic_text.utf8_width_at(bytes, at)
+    }
+    &spans.push(Span{start: start, end: bytes.len()})
+    spans
+}
+
+// Rust Diagnostics.rs:1653-1695, exact keycap/RI/variation-selector/wide/
+// default-ignorable precedence. Scan the cluster without a scalar-vector copy.
+fn diagnostic_cluster_width(bytes: [U8], span: Span) -> Int Never! {
+    if span.start >= span.end -> return 0
+    base :: diagnostic_text.scalar_at(bytes, span.start)
+    if diagnostic_unicode_general_category(base) == 0 -> return 0
+    count := 0
+    second := -1
+    third := -1
+    has_vs16 := false
+    has_emoji := false
+    wide := false
+    all_ignorable := true
+    at := span.start
+    loop at < span.end {
+        cp :: diagnostic_text.scalar_at(bytes, at)
+        count += 1
+        if count == 2 -> second = cp
+        if count == 3 -> third = cp
+        if cp == 65039 -> has_vs16 = true
+        if diagnostic_assets.asset_contains(diagnostic_emoji.UNICODE_EMOJI, cp) -> has_emoji = true
+        if diagnostic_assets.asset_tag(diagnostic_east_asian.UNICODE_EAST_ASIAN_WIDTH, cp, 0) == 2 || diagnostic_assets.asset_contains(diagnostic_emoji_presentation.UNICODE_EMOJI_PRESENTATION, cp) -> wide = true
+        category :: diagnostic_unicode_general_category(cp)
+        if category != 2 && category != 3 && !diagnostic_assets.asset_contains(diagnostic_ignorable.UNICODE_DEFAULT_IGNORABLE, cp) -> all_ignorable = false
+        at += diagnostic_text.utf8_width_at(bytes, at)
+    }
+    key_base :: (base >= 48 && base <= 57) || base == 35 || base == 42
+    keycap :: key_base && ((count == 2 && second == 8419) || (count == 3 && second == 65039 && third == 8419))
+    ri_pair :: count >= 2 && diagnostic_unicode_grapheme_class(base) == 6 && diagnostic_unicode_grapheme_class(second) == 6
+    if keycap || ri_pair || (has_vs16 && has_emoji) || wide -> return 2
+    if all_ignorable -> return 0
+    1
+}
+
+pub fn diagnostic_display_width(text: String) -> Int Never! {
+    bytes :: text.bytes()
+    width := 0
+    loop span in diagnostic_grapheme_spans(bytes) -> width += diagnostic_cluster_width(bytes, span)
+    width
+}
+
+// Rust Diagnostics.rs:1707-1730. Argument is one Unicode scalar, not a byte.
+pub fn diagnostic_display_char_width(cp: Int) -> Int Never! {
+    category :: diagnostic_unicode_general_category(cp)
+    if category == 0 || category == 2 || category == 3 || diagnostic_assets.asset_contains(diagnostic_ignorable.UNICODE_DEFAULT_IGNORABLE, cp) -> return 0
+    if diagnostic_assets.asset_tag(diagnostic_east_asian.UNICODE_EAST_ASIAN_WIDTH, cp, 0) == 2 || diagnostic_assets.asset_contains(diagnostic_emoji_presentation.UNICODE_EMOJI_PRESENTATION, cp) -> return 2
+    1
+}
+
+// Rust Diagnostics.rs:1752-1769. No attachment is promised unless it exists.
+pub fn diagnostic_render_ice_report(what: String, detail: String, generated_file_attached: Bool) -> String Never! {
+    clause :: if generated_file_attached -> " and the generated file below" else -> ""
+    report :: "internal compiler error: {what}\nThis is a bug in {BINARY_NAME}, NOT in your program. Please report it,\nattaching your source file{clause}."
+    if detail == "" -> return report
+    "{report}\n{detail}"
+}
+
+// Native gate (#4494, #4483), Rust Diagnostics.rs:1771-1843:
+// ICE_PANIC_HOOK_SUPPRESSED / IcePanicHookGuard::drop /
+// with_ice_panic_hook_suppressed / install_ice_panic_hook require canonical
+// TLS bool get/replace/set, unwind-safe scope destruction, process panic-hook
+// callback registration with typed payload/location, backtrace capture/display,
+// selected-target debug-build facts, and stderr. No fake callback or Rust bridge.
+
+// Rust Diagnostics.rs:67-69. Process-path semantics use an explicit platform
+// fact supplied by the process owner (#4483); no host-derived path guessing.
+pub fn diagnostic_origin_is_core_source(origin: DiagnosticOrigin, platform: diagnostic_paths.PathPlatform) -> Bool Never! {
+    path :: diagnostic_paths.from_text(origin.path, platform)
+    root :: diagnostic_paths.from_text(CORE_SOURCE_ROOT, platform)
+    diagnostic_paths.starts_with(path, root)
+}
+
+pub struct DiagnosticTemplateHole {
+    pub name: String
+    pub value: String
+}
+
+pub struct DiagnosticRegistryRendered {
+    pub what: String
+    pub why: String
+    pub fix: String
+}
+
+// Registry.rs:2328-2354 / Diagnostics.rs:324-354. Validation preserves the
+// producer's hole order and unknown-before-duplicate-before-missing precedence.
+// The name indexes avoid repeated whole-hole scans and never parse replacement
+// values as templates.
+pub fn diagnostic_registry_render(row: DiagnosticRegistryRow, holes: [DiagnosticTemplateHole]) -> DiagnosticRegistryRendered Never! {
+    declared := [String:Bool]{}
+    loop name in row.template_holes -> &declared.set(name, true)
+    indexes := [String:Int]{}
+    counts := [String:Int]{}
+    loop (index, hole) in holes {
+        &indexes.set(hole.name, index)
+        count :: counts.get(hole.name) ?? 0
+        &counts.set(hole.name, count + 1)
+    }
+    loop hole in holes {
+        if declared.get(hole.name) == None -> diagnostic_ice(None, "diagnostic `{row.code}` has no template hole `{hole.name}`")
+        if counts.get(hole.name) != Val(1) -> diagnostic_ice(None, "diagnostic `{row.code}` receives template hole `{hole.name}` more than once")
+    }
+    loop name in row.template_holes {
+        if indexes.get(name) == None -> diagnostic_ice(None, "diagnostic `{row.code}` is missing template hole `{name}`")
+    }
+    DiagnosticRegistryRendered{
+        what: diagnostic_render_template(row.what, holes, indexes),
+        why: diagnostic_render_template(row.why, holes, indexes),
+        fix: diagnostic_render_template(row.fix, holes, indexes),
+    }
+}
+
+// Outcome.rs:2415-2423 / RuntimeDiagnosticCore.rs:58-93. Byte writer owned
+// by the typed registry projection until the shared runtime source publishes
+// its callable seam; braces in filled values remain data, never re-expanded.
+fn diagnostic_render_template(template: String, holes: [DiagnosticTemplateHole], indexes: [String:Int]) -> String Never! {
+    bytes :: template.bytes()
+    out := [U8]{}
+    at := 0
+    loop at < bytes.len() {
+        byte :: bytes[at]
+        if at + 1 < bytes.len() && (byte == (U8{123}) || byte == (U8{125})) && bytes[at + 1] == byte {
+            &out.push(byte)
+            at += 2
+            next
+        }
+        if byte == (U8{123}) {
+            close := at + 1
+            valid := true
+            loop close < bytes.len() && bytes[close] != (U8{125}) {
+                cp :: Int.from_u8(bytes[close])
+                if !((cp >= 48 && cp <= 57) || (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122) || cp == 95) {
+                    valid = false
+                    break
+                }
+                close += 1
+            }
+            if valid && close > at + 1 && close < bytes.len() {
+                name :: diagnostic_bytes_text(bytes, at + 1, close)
+                index :: indexes.get(name) ?? panic("missing diagnostic template hole `{name}`")
+                loop value_byte in holes[index].value.bytes() -> &out.push(value_byte)
+                at = close + 1
+                next
+            }
+        }
+        // A byte projection of valid UTF-8 preserves malformed/literal braces.
+        &out.push(byte)
+        at += 1
+    }
+    String.from_bytes(out) ?? panic("diagnostic template writer preserves UTF-8")
+}
+
+pub fn diagnostic_from_row(code: String, holes: [DiagnosticTemplateHole], span: Span?) -> Diagnostic Never! {
+    row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no typed row")
+    rendered :: diagnostic_registry_render(row, holes)
+    diagnostic_registry_construct(row, code, span, rendered.what, rendered.why, rendered.fix)
+}
+
+pub fn diagnostic_e3403(what: String, span: Span?) -> Diagnostic Never! {
+    diagnostic :: diagnostic_from_row("E3403", [DiagnosticTemplateHole]{DiagnosticTemplateHole{name: "what", value: what}}, span)
+    diagnostic_with_rights(^diagnostic, "pure", [String]{what}, [String]{}, None)
+}
+
+pub fn diagnostic_layout_byte_facts_unavailable(type_name: String, member: String, span: Span?) -> Diagnostic Never! {
+    diagnostic_from_row("E0959", [DiagnosticTemplateHole]{DiagnosticTemplateHole{name: "type", value: type_name}, DiagnosticTemplateHole{name: "member", value: member}}, span)
+}
+
+pub fn diagnostic_source_nesting_exceeded(depth: Int, span: Span) -> Diagnostic Never! {
+    diagnostic_from_row("E1403", [DiagnosticTemplateHole]{DiagnosticTemplateHole{name: "depth", value: "{depth}"}}, Val(span))
+}
+
+// Rust Diagnostics.rs:840-892. One typed crypto row, two optional fact shapes.
+pub fn diagnostic_crypto_misuse(why: String, fix: String, span: Span, reason: DiagnosticCryptoMisuseReason, operation: String, expected: String, actual: Int) -> Diagnostic Never! {
+    diagnostic := diagnostic_from_row("E2702", [DiagnosticTemplateHole]{DiagnosticTemplateHole{name: "why", value: why}, DiagnosticTemplateHole{name: "fix", value: fix}}, Val(span))
+    row :: diagnostic_registry_row("E2702") ?? panic("E2702 must keep its typed crypto structured fix")
+    if row.structured_fix != Val(DiagnosticRegistryFix.CryptoMisuse) -> panic("E2702 must keep its typed crypto structured fix")
+    diagnostic.structured = Val(DiagnosticStructured.CryptoMisuse{reason: reason, operation: operation, expected: Val(expected), actual: Val(actual)})
+    diagnostic
+}
+
+pub fn diagnostic_crypto_misuse_fact(why: String, fix: String, span: Span, reason: DiagnosticCryptoMisuseReason, operation: String) -> Diagnostic Never! {
+    diagnostic := diagnostic_from_row("E2702", [DiagnosticTemplateHole]{DiagnosticTemplateHole{name: "why", value: why}, DiagnosticTemplateHole{name: "fix", value: fix}}, Val(span))
+    row :: diagnostic_registry_row("E2702") ?? panic("E2702 must keep its typed crypto structured fix")
+    if row.structured_fix != Val(DiagnosticRegistryFix.CryptoMisuse) -> panic("E2702 must keep its typed crypto structured fix")
+    diagnostic.structured = Val(DiagnosticStructured.CryptoMisuse{reason: reason, operation: operation, expected: None, actual: None})
+    diagnostic
+}
+
+// Rust Diagnostics.rs:1321-1339. The canonical Report writer has identical
+// RFC 8259/C0 policy (unlike foundation_json_quote's extra C1 escaping).
+pub fn diagnostic_json_str(value: String) -> String Never! {
+    bytes := [U8]{}
+    report_json_string(&bytes, value)
+    String.from_bytes(bytes) ?? panic("report JSON writer preserves UTF-8")
+}
+
+// Rust Diagnostics.rs:1354-1363.
+pub fn diagnostic_render_success_json(file: ReportPath) -> String Never! {
+    value :: if file.is_empty() -> StatusValue.Null else -> StatusValue.String{value: file.as_str()}
+    StatusEnvelope.new("check", true).with_field("file", value).json_line()
+}

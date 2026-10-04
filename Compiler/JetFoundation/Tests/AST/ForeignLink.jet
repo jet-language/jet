@@ -1,0 +1,103 @@
+// Rust AST/ffi.rs canonical descriptor/fact tests and both original pure
+// resident-writeback signature predicates. No resident JIT execution.
+use jet_foundation as f
+
+fn ffi_test_param(name: String, access: f.AccessConvention, ty: f.Type) -> f.Param Never! {
+    f.Param{convention: access, root: false, name: name, name_span: f.Span{start: 0, end: 0}, public_label: None,
+        zone: f.ParamZone.Either, ty: ty, ty_span: f.Span{start: 0, end: 0}, default: None, variadic: false,
+        variadic_bound_list: None, declared_view_from_names: None}
+}
+fn ffi_test_foreign(params: [f.Param], ret: f.Type?, generated: Bool) -> f.ExternFn Never! {
+    f.ExternFn{abi: None, name: "ffi_fixture", name_span: f.Span{start: 0, end: 0}, params: params, return_type: ret,
+        return_type_span: None, rust_path: "ffi_fixture", rust_path_span: f.Span{start: 0, end: 0}, generated: generated, callback_transport: None,
+        callback_plan_digest: None, callback_identity: None, effect_root: None, undo: None, close: None,
+        span: f.Span{start: 0, end: 0}}
+}
+fn ffi_test_handle(name: String) -> f.FfiHandleFact Never! {
+    f.FfiHandleFact{lib: "fixture", typedef_name: name, jet_name: name, close: "{name}_close", close_source: f.CloseSource.Conventional, thread_safety: f.ThreadSafety.Safe}
+}
+
+test "resident_writeback_gate_admits_checked_scalar_string_and_handle_rows" {
+    no_handles :: [f.FfiHandleFact]{}
+    assert(ffi_test_foreign([f.Param]{ffi_test_param("value", f.AccessConvention.Write, f.Type.Int)}, None, false).hidden_c_bridge_compatible_with_handles(no_handles))
+    assert(ffi_test_foreign([f.Param]{ffi_test_param("value", f.AccessConvention.Write, f.Type.String)}, Val(f.Type.String), false).hidden_c_bridge_compatible_with_handles(no_handles))
+    handles :: [f.FfiHandleFact]{ffi_test_handle("HbFont")}
+    assert(ffi_test_foreign([f.Param]{ffi_test_param("font", f.AccessConvention.Write, f.Type.Named("HbFont")), ffi_test_param("scale", f.AccessConvention.Read, f.Type.Int)}, None, true).hidden_c_bridge_compatible_with_handles(handles))
+    assert(ffi_test_foreign([f.Param]{ffi_test_param("font", f.AccessConvention.Move, f.Type.Named("HbFont"))}, None, true).hidden_c_bridge_compatible_with_handles(handles))
+    mixed_handles :: [f.FfiHandleFact]{ffi_test_handle("HbFont"), ffi_test_handle("HbBuffer")}
+    assert(ffi_test_foreign([f.Param]{ffi_test_param("font", f.AccessConvention.Write, f.Type.Named("HbFont")), ffi_test_param("buffer", f.AccessConvention.Read, f.Type.Named("HbBuffer"))}, None, true).hidden_c_bridge_compatible_with_handles(mixed_handles))
+    assert(!ffi_test_foreign([f.Param]{ffi_test_param("font", f.AccessConvention.Write, f.Type.Named("HbFont"))}, None, true).hidden_c_bridge_compatible_with_handles(no_handles))
+}
+
+test "resident_writeback_gate_preserves_record_and_list_direct_routes" {
+    handles :: [f.FfiHandleFact]{ffi_test_handle("HbFont")}
+    assert(!ffi_test_foreign([f.Param]{ffi_test_param("coord", f.AccessConvention.Write, f.Type.Named("Coord"))}, None, false).hidden_c_bridge_compatible_with_handles(handles))
+    assert(!ffi_test_foreign([f.Param]{ffi_test_param("coord", f.AccessConvention.Write, f.Type.List(f.Type.Named("Coord")))}, None, false).hidden_c_bridge_compatible_with_handles(handles))
+    assert(!ffi_test_foreign([f.Param]{ffi_test_param("coord", f.AccessConvention.Write, f.Type.List(f.Type.Int))}, None, false).hidden_c_bridge_compatible_with_handles(handles))
+    assert(!ffi_test_foreign([f.Param]{ffi_test_param("values", f.AccessConvention.Read, f.Type.List(f.Type.Int))}, None, true).hidden_c_bridge_compatible_with_handles(handles))
+    assert(ffi_test_foreign([f.Param]{ffi_test_param("values", f.AccessConvention.Read, f.Type.List(f.Type.Int)), ffi_test_param("length", f.AccessConvention.Write, f.Type.Int)}, Val(f.Type.List(f.Type.Int)), true).hidden_c_bridge_compatible_with_handles(handles))
+}
+
+test "FFI link closure normalizes ownership in place and borrows deterministic libraries" {
+    closure :: f.FfiLinkClosure.new([String]{"z", "", "a", "z", " "}, [String]{"a", "c", "b", "c", ""})
+    assert_eq(closure.direct, [String]{" ", "a", "z"})
+    assert_eq(closure.transitive, [String]{"b", "c"})
+    assert_eq(closure.stable_key(), "direct= ,a,z;transitive=b,c")
+    names := [String]{}
+    loop name in closure.libraries() -> &names.push("{name}")
+    assert_eq(names, [String]{" ", "a", "z", "b", "c"})
+    assert_eq(f.FfiLinkClosure.empty().stable_key(), "direct=;transitive=")
+}
+
+test "every foreign descriptor projects the canonical ABI contract" {
+    count := 0
+    loop descriptor in f.pkg_foreign_binders() {
+        count += 1
+        found :: f.pkg_binder_descriptor(descriptor.language) ?? panic("registered language has no descriptor")
+        assert_eq(found.language, descriptor.language)
+        assert_eq(f.pkg_foreign_abi_contract(descriptor.language), descriptor.contract)
+        assert(found.stamp().starts_with(f.FOREIGN_DESCRIPTOR_SCHEMA))
+        assert_eq(found.contract.version, f.FOREIGN_ABI_CONTRACT_VERSION)
+    }
+    assert_eq(count, f.ForeignLanguage.all().len())
+}
+
+test "FFI evidence defaults and guarantee semantics remain explicit" {
+    assert_eq(f.ThreadSafety.default(), f.ThreadSafety.Unspecified)
+    assert_eq(f.FfiEvidenceBasis.default(), f.FfiEvidenceBasis.Unknown)
+    loop basis in [f.FfiEvidenceBasis]{.Proved, .Enforced, .Contained, .Trusted, .Unknown} {
+        assert_eq(f.FfiEvidenceBasis.parse(basis.as_str()), Val(basis))
+        assert_eq(basis.permits_guarantee(), basis == f.FfiEvidenceBasis.Proved || basis == f.FfiEvidenceBasis.Enforced || basis == f.FfiEvidenceBasis.Contained)
+    }
+    assert_eq(f.FfiEvidenceBasis.parse("PROVED"), None)
+}
+
+fn ffi_test_boundary() -> f.FfiBoundaryFacts Never! {
+    obligations := [f.FfiBoundaryObligation]{}
+    loop name in f.FFI_BOUNDARY_OBLIGATIONS -> &obligations.push(f.FfiBoundaryObligation{name: name, basis: f.FfiEvidenceBasis.Unknown,
+        checker: "fixture-checker", assumptions: [String]{"fixture-signature"}, coverage_digest: "fixture-coverage"})
+    f.FfiBoundaryFacts{schema: "fixture-boundary", digest: "fixture-digest", language: "c", library: "fixture", effect_root: "FFI.C",
+        effects: "FFI.C;FS.Read", source_authority: "fixture-source", artifact_coverage_digest: "fixture-coverage", loaded_artifact: "fixture-artifact",
+        transitive_dependencies: Val([String]{}), reachable_callbacks: Val([String]{}), compiler_flags: Val([String]{}), target: "x86_64-unknown-linux-gnu",
+        generator: "fixture-generator", obligations: obligations}
+}
+
+test "FFI boundary validator retains complete coverage and deliberate failure controls" {
+    boundary := ffi_test_boundary()
+    assert_eq(boundary.validate(), Ok(()))
+    assert(boundary.has_unknown_obligations())
+    assert(!boundary.permits_guarantee("abi"))
+    boundary.obligations[0].basis = f.FfiEvidenceBasis.Proved
+    assert(boundary.permits_guarantee("abi"))
+    boundary.transitive_dependencies = None
+    assert_eq(boundary.validate(), Err("foreign boundary carrier has incomplete artifact coverage"))
+    boundary.transitive_dependencies = Val([String]{})
+    boundary.effects = "FS.Read"
+    assert_eq(boundary.validate(), Err("foreign boundary carrier narrowed its effect root"))
+    boundary.effects = "FFI.C;FS.Read"
+    &boundary.obligations.push(boundary.obligations[0])
+    assert_eq(boundary.validate(), Err("foreign boundary carrier repeats `abi` obligation"))
+    &boundary.obligations.pop().drop("restore the valid fixture after duplicate-control assertion")
+    boundary.obligations[0].coverage_digest = "other-artifact"
+    assert_eq(boundary.validate(), Err("foreign boundary carrier has invalid `abi` obligation"))
+}

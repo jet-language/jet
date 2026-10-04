@@ -1,0 +1,860 @@
+// PORT-PENDING 0964 tests-agent-workloads-slice-2016: tests/agent_workloads.rs:2016-2871
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn repository_and_git_jet_adapters_use_production_paths() {
+//RS     let checks = [
+//RS         (
+//RS             "repository_marker_scan.jet",
+//RS             ["core.files", "fs.walk"].as_slice(),
+//RS         ),
+//RS         (
+//RS             "repository_semantic_inspection.jet",
+//RS             ["inspect", "semindex"].as_slice(),
+//RS         ),
+//RS         (
+//RS             "repository_semantic_edit.jet",
+//RS             ["inspect", "codemod", "--yes"].as_slice(),
+//RS         ),
+//RS         (
+//RS             "git_diff_review.jet",
+//RS             ["git", "diff", "--no-index", "--name-status"].as_slice(),
+//RS         ),
+//RS     ];
+//RS     for (adapter, needles) in checks {
+//RS         let source = fs::read_to_string(corpus_root().join("adapters").join(adapter)).unwrap();
+//RS         for needle in needles {
+//RS             assert!(
+//RS                 source.contains(needle),
+//RS                 "{adapter} no longer reaches the production path containing {needle}"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn structured_data_database_http_jet_adapters_use_production_paths() {
+//RS     let checks = [
+//RS         (
+//RS             "structured_data.jet",
+//RS             [
+//RS                 "use core.encoding.json",
+//RS                 "fs.read(input)",
+//RS                 "json.decode<Batch>",
+//RS                 "json.to_string",
+//RS             ]
+//RS             .as_slice(),
+//RS         ),
+//RS         (
+//RS             "database_access.jet",
+//RS             [
+//RS                 "use core.db",
+//RS                 "db.open_memory()",
+//RS                 "db.migrate",
+//RS                 "scoped.execute(",
+//RS                 "scoped.query_one(",
+//RS                 "scoped.close()",
+//RS             ]
+//RS             .as_slice(),
+//RS         ),
+//RS         (
+//RS             "http_api.jet",
+//RS             [
+//RS                 "use core.http.client",
+//RS                 "use core.http.server",
+//RS                 "net.tcp_listen(",
+//RS                 "http_server.serve_once_listener",
+//RS                 "http_client.request(",
+//RS                 "request.send()",
+//RS             ]
+//RS             .as_slice(),
+//RS         ),
+//RS     ];
+//RS     for (adapter, needles) in checks {
+//RS         let source = fs::read_to_string(corpus_root().join("adapters").join(adapter)).unwrap();
+//RS         for needle in needles {
+//RS             assert!(
+//RS                 source.contains(needle),
+//RS                 "{adapter} no longer reaches the production path containing {needle}"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn mcp_terminal_service_jet_adapters_use_production_paths() {
+//RS     let checks = [
+//RS         (
+//RS             "mcp_resource.jet",
+//RS             [
+//RS                 "process.cmd([jet, \"self\", \"lsp\"])",
+//RS                 "resources/list",
+//RS                 "resources/read",
+//RS                 "child.stdin.write",
+//RS                 "jet://environment",
+//RS                 "-32002",
+//RS                 "/agent-secret",
+//RS             ]
+//RS             .as_slice(),
+//RS         ),
+//RS         (
+//RS             "interactive_terminal.jet",
+//RS             [
+//RS                 ".terminal(TerminalPolicy",
+//RS                 ".spawn()",
+//RS                 "terminal_session.sh",
+//RS                 "session.resize",
+//RS                 "child.wait()",
+//RS                 "Name: ",
+//RS                 "Hello Ada",
+//RS                 "Choice blue",
+//RS                 "terminal_closed.sh",
+//RS                 "interactive-terminal-closed",
+//RS                 ".timeout(",
+//RS             ]
+//RS             .as_slice(),
+//RS         ),
+//RS         (
+//RS             "service_lifecycle.jet",
+//RS             [
+//RS                 "JETPACK_FAKE_SYSTEMD_STATE",
+//RS                 "\"services\", \"up\"",
+//RS                 "\"services\", \"health\"",
+//RS                 "\"services\", \"wait\"",
+//RS                 "\"services\", \"logs\"",
+//RS                 "\"services\", \"down\"",
+//RS                 "E1261",
+//RS                 "supervisor.error",
+//RS                 "phase=failed",
+//RS                 "recovery=startup-failed",
+//RS             ]
+//RS             .as_slice(),
+//RS         ),
+//RS     ];
+//RS     for (adapter, needles) in checks {
+//RS         let source = fs::read_to_string(corpus_root().join("adapters").join(adapter)).unwrap();
+//RS         for needle in needles {
+//RS             assert!(
+//RS                 source.contains(needle),
+//RS                 "{adapter} no longer reaches the production path containing {needle}"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn structured_data_database_http_production_paths_handle_success_and_hostile_inputs() {
+//RS     let jet_cli = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+//RS     let task_ids = [
+//RS         "structured-data-transform",
+//RS         "structured-data-hostile",
+//RS         "database-access",
+//RS         "database-hostile",
+//RS         "http-api",
+//RS         "http-hostile",
+//RS     ];
+//RS     let mut checked = 0;
+//RS 
+//RS     for task in read_tasks()
+//RS         .into_iter()
+//RS         .filter(|task| task_ids.contains(&task.id.as_str()))
+//RS     {
+//RS         let input = corpus_root().join(&task.input);
+//RS         let expected = fs::read(corpus_root().join(&task.expected)).unwrap();
+//RS         let before = input_hashes(&input);
+//RS         let scratch = Scratch::new("jet_agent_1167_production_path");
+//RS         let source = corpus_root()
+//RS             .join("adapters")
+//RS             .join(format!("{}.jet", adapter_stem(&task.id)));
+//RS         let bounded = run_bounded(
+//RS             adapter_command("jet", &source, &jet_cli, &input, &scratch.path, &task.id),
+//RS             "#1167 production path",
+//RS             PROCESS_DEADLINE,
+//RS         );
+//RS         fs::remove_file(scratch.path.join("package.jet")).unwrap();
+//RS         fs::remove_file(scratch.path.join(source.file_name().unwrap())).unwrap();
+//RS 
+//RS         assert!(!bounded.timed_out, "{} timed out", task.id);
+//RS         assert!(!bounded.limit_exceeded, "{} hit output limit", task.id);
+//RS         assert_eq!(bounded.output.status.code(), Some(0), "{} failed", task.id);
+//RS         assert_eq!(
+//RS             bounded.output.stdout, expected,
+//RS             "{} output drifted",
+//RS             task.id
+//RS         );
+//RS         assert_eq!(input_hashes(&input), before, "{} changed input", task.id);
+//RS         assert_eq!(
+//RS             scratch_output_violations(
+//RS                 "jet",
+//RS                 &scratch.path,
+//RS                 &source.file_stem().unwrap().to_string_lossy(),
+//RS             ),
+//RS             Vec::<String>::new(),
+//RS             "{} left scratch residue",
+//RS             task.id
+//RS         );
+//RS         checked += 1;
+//RS     }
+//RS 
+//RS     assert_eq!(checked, task_ids.len(), "#1167 task set drifted");
+//RS }
+//RS 
+//RS #[test]
+//RS fn delimited_workload_adapters_match_aot_default_run_and_interpreter() {
+//RS     let jet_cli = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+//RS     let cases = [
+//RS         ("browser-automation-preflight", "browser/preflight.tsv"),
+//RS         ("database-access", "database/records.tsv"),
+//RS         ("desktop-interaction-focus", "desktop/focus.tsv"),
+//RS         ("incident-report-success", "incidents/success.tsv"),
+//RS         ("process-batch-success", "processes/success.tsv"),
+//RS     ];
+//RS     let tiers: [(&str, &[&str]); 3] = [
+//RS         ("aot", &["--release"]),
+//RS         ("default-run", &[]),
+//RS         ("interpreter", &["--interpret"]),
+//RS     ];
+//RS     for (task_id, input_relative) in cases {
+//RS         let source = corpus_root()
+//RS             .join("adapters")
+//RS             .join(format!("{}.jet", adapter_stem(task_id)));
+//RS         let input = corpus_root().join("inputs").join(input_relative);
+//RS         let expected = fs::read(
+//RS             corpus_root()
+//RS                 .join("expected")
+//RS                 .join(format!("{task_id}.out")),
+//RS         )
+//RS         .unwrap();
+//RS         for (tier, tier_args) in tiers {
+//RS             let scratch = Scratch::new("jet_delimited_tier");
+//RS             fs::write(
+//RS                 scratch.path.join("package.jet"),
+//RS                 "name: \"delimited-workload-adapters\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [Browser, DB, Exec, FS, IO, Mem.Alloc, Net] } }\n",
+//RS             )
+//RS             .unwrap();
+//RS             let tier_source = scratch.path.join(source.file_name().unwrap());
+//RS             fs::copy(&source, &tier_source).unwrap();
+//RS             let run = run_bounded(
+//RS                 jet_tier_command(
+//RS                     &jet_cli,
+//RS                     &tier_source,
+//RS                     &input,
+//RS                     &scratch.path,
+//RS                     task_id,
+//RS                     tier_args,
+//RS                 ),
+//RS                 tier,
+//RS                 PROCESS_DEADLINE,
+//RS             );
+//RS             fs::remove_file(scratch.path.join("package.jet")).unwrap();
+//RS             fs::remove_file(&tier_source).unwrap();
+//RS             assert!(!run.timed_out, "{task_id} {tier} tier timed out");
+//RS             assert!(!run.limit_exceeded, "{task_id} {tier} tier hit output limit");
+//RS             assert_eq!(
+//RS                 run.output.status.code(),
+//RS                 Some(0),
+//RS                 "{task_id} {tier} failed: {}",
+//RS                 stderr_receipt(&run.output)
+//RS             );
+//RS             assert_eq!(run.output.stdout, expected, "{task_id} {tier} output drifted");
+//RS             assert!(
+//RS                 run.output.stderr.is_empty(),
+//RS                 "{task_id} {tier} wrote stderr: {}",
+//RS                 stderr_receipt(&run.output)
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn native_os_matrix_is_frozen_and_names_current_host() {
+//RS     let matrix = read_native_os_matrix();
+//RS     let actual = matrix
+//RS         .iter()
+//RS         .map(|row| {
+//RS             (
+//RS                 row.0.as_str(),
+//RS                 row.1.as_str(),
+//RS                 row.2.as_str(),
+//RS                 row.3.as_str(),
+//RS                 row.4.as_str(),
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         actual, EXPECTED_NATIVE_OS_MATRIX,
+//RS         "native OS matrix changed without a frozen review"
+//RS     );
+//RS     assert!(
+//RS         matrix.iter().any(|row| row.0 == std::env::consts::OS),
+//RS         "current host `{}` is absent from the frozen native OS matrix",
+//RS         std::env::consts::OS
+//RS     );
+//RS     let current = matrix
+//RS         .iter()
+//RS         .find(|row| row.0 == std::env::consts::OS)
+//RS         .unwrap();
+//RS     assert!(
+//RS         current.1 == "any" || current.1 == std::env::consts::ARCH,
+//RS         "current host architecture `{}` is absent from the frozen native OS matrix",
+//RS         std::env::consts::ARCH
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_baseline_is_frozen_and_each_loss_has_an_owner() {
+//RS     let tasks = read_tasks();
+//RS     let baseline = read_jet_baseline();
+//RS     assert_eq!(
+//RS         baseline.len(),
+//RS         tasks.len(),
+//RS         "Jet baseline must contain one row per corpus task"
+//RS     );
+//RS     for (task, row) in tasks.iter().zip(baseline) {
+//RS         assert_eq!(row.0, task.id, "Jet baseline task order drifted");
+//RS         assert_eq!(row.1, "pass", "baseline must freeze a passing Jet task");
+//RS         assert_eq!(row.2, task.loss_cards, "baseline loss owner drifted");
+//RS         assert!(
+//RS             row.2.split(';').all(|owner| {
+//RS                 owner
+//RS                     .split_once('=')
+//RS                     .map(|(_, target)| target.starts_with('#') || target.starts_with("non-goal:"))
+//RS                     .unwrap_or(false)
+//RS             }),
+//RS             "Jet loss owner must name a card or ratified non-goal: {}",
+//RS             row.2
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn checksum_closure_rejects_drift_and_hostile_sums() {
+//RS     let scratch = Scratch::new("jet_agent_checksum_closure");
+//RS     fs::create_dir_all(scratch.path.join("inputs")).unwrap();
+//RS     fs::create_dir_all(scratch.path.join("expected")).unwrap();
+//RS     fs::write(scratch.path.join("inputs/task.txt"), "input").unwrap();
+//RS     fs::write(scratch.path.join("expected/task.out"), "output").unwrap();
+//RS     let sums = format!(
+//RS         "{}  inputs/task.txt\n{}  expected/task.out\n",
+//RS         jet::SHA256::sha256_hex(b"input"),
+//RS         jet::SHA256::sha256_hex(b"output")
+//RS     );
+//RS     assert_eq!(verify_checksum_closure(&scratch.path, &sums), Ok(2));
+//RS     fs::write(scratch.path.join("inputs/unhashed.txt"), "extra").unwrap();
+//RS     let error = verify_checksum_closure(&scratch.path, &sums).unwrap_err();
+//RS     assert!(
+//RS         error.contains("unhashed") && error.contains("inputs/unhashed.txt"),
+//RS         "{error}"
+//RS     );
+//RS     fs::remove_file(scratch.path.join("inputs/unhashed.txt")).unwrap();
+//RS 
+//RS     let input_hash = jet::SHA256::sha256_hex(b"input");
+//RS     let output_hash = jet::SHA256::sha256_hex(b"output");
+//RS 
+//RS     // A drifted byte in a declared fixture names the fixture.
+//RS     fs::write(scratch.path.join("inputs/task.txt"), "drifted").unwrap();
+//RS     let error = verify_checksum_closure(&scratch.path, &sums).unwrap_err();
+//RS     assert_eq!(error, "fixture drift: inputs/task.txt");
+//RS     fs::write(scratch.path.join("inputs/task.txt"), "input").unwrap();
+//RS 
+//RS     // A removed declared fixture is reported as missing, never as a pass.
+//RS     fs::remove_file(scratch.path.join("expected/task.out")).unwrap();
+//RS     let error = verify_checksum_closure(&scratch.path, &sums).unwrap_err();
+//RS     assert!(
+//RS         error.contains("missing") && error.contains("expected/task.out"),
+//RS         "{error}"
+//RS     );
+//RS     fs::write(scratch.path.join("expected/task.out"), "output").unwrap();
+//RS     assert_eq!(verify_checksum_closure(&scratch.path, &sums), Ok(2));
+//RS 
+//RS     // A hostile SHA256SUMS cannot smuggle a path out of the corpus root, hide a
+//RS     // fixture behind a duplicate row, or pass a row the reader cannot split.
+//RS     for (hostile, reason) in [
+//RS         (
+//RS             format!("{input_hash}  /etc/passwd\n{output_hash}  expected/task.out\n"),
+//RS             "invalid checksum path: /etc/passwd".to_string(),
+//RS         ),
+//RS         (
+//RS             format!("{input_hash}  ../outside.txt\n{output_hash}  expected/task.out\n"),
+//RS             "invalid checksum path: ../outside.txt".to_string(),
+//RS         ),
+//RS         (
+//RS             format!("{input_hash}  ..\\outside.txt\n{output_hash}  expected/task.out\n"),
+//RS             "invalid checksum path: ..\\outside.txt".to_string(),
+//RS         ),
+//RS         (
+//RS             format!("{input_hash}  inputs//task.txt\n{output_hash}  expected/task.out\n"),
+//RS             "invalid checksum path: inputs//task.txt".to_string(),
+//RS         ),
+//RS         (
+//RS             format!("{input_hash}  inputs/./task.txt\n{output_hash}  expected/task.out\n"),
+//RS             "invalid checksum path: inputs/./task.txt".to_string(),
+//RS         ),
+//RS         (
+//RS             format!(
+//RS                 "{input_hash}  inputs/task.txt\n{output_hash}  inputs/task.txt\n{output_hash}  expected/task.out\n"
+//RS             ),
+//RS             "duplicate checksum path: inputs/task.txt".to_string(),
+//RS         ),
+//RS         (
+//RS             format!("{input_hash} inputs/task.txt\n{output_hash}  expected/task.out\n"),
+//RS             format!("bad SHA256SUMS row: {input_hash} inputs/task.txt"),
+//RS         ),
+//RS     ] {
+//RS         assert_eq!(verify_checksum_closure(&scratch.path, &hostile), Err(reason));
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn process_deadline_reaps_and_scratch_drop_cleans() {
+//RS     let scratch_path;
+//RS     {
+//RS         let scratch = Scratch::new("jet_agent_process_deadline");
+//RS         scratch_path = scratch.path.clone();
+//RS         fs::write(scratch.path.join("sentinel"), "cleanup").unwrap();
+//RS         let mut command = Command::new("python3");
+//RS         command.args(["-c", "import time; time.sleep(10)"]);
+//RS         let bounded = run_bounded(command, "timeout regression", Duration::from_millis(25));
+//RS         assert!(bounded.timed_out, "deadline did not stop the process");
+//RS         assert!(!bounded.limit_exceeded, "deadline fixture hit output limit");
+//RS         assert!(
+//RS             bounded.elapsed < Duration::from_secs(2),
+//RS             "deadline cleanup took too long: {:?}",
+//RS             bounded.elapsed
+//RS         );
+//RS     }
+//RS     assert!(!scratch_path.exists(), "scratch directory survived Drop");
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn process_output_limit_fails_closed() {
+//RS     let scratch = Scratch::new("jet_agent_process_output_limit");
+//RS     let mut command = Command::new("python3");
+//RS     command.args(["-c", "import sys; sys.stdout.write('x' * 2000000)"]);
+//RS     command.current_dir(&scratch.path);
+//RS     let bounded = run_bounded(command, "output limit regression", PROCESS_DEADLINE);
+//RS     assert!(
+//RS         bounded.limit_exceeded,
+//RS         "output limit did not stop the process"
+//RS     );
+//RS     assert!(!bounded.timed_out, "output limit was reported as a timeout");
+//RS     assert!(
+//RS         bounded.elapsed < Duration::from_secs(2),
+//RS         "output limit cleanup took too long: {:?}",
+//RS         bounded.elapsed
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS #[test]
+//RS fn production_process_limits_authority_and_descendant_cleanup() {
+//RS     fn run_lens(source: &Path, release: bool, scratch: &Scratch) -> Output {
+//RS         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS         command.arg("run");
+//RS         if release {
+//RS             command.arg("--release");
+//RS         }
+//RS         command.arg(source).current_dir(&scratch.path);
+//RS         let bounded = run_bounded(command, "process policy corpus", PROCESS_DEADLINE);
+//RS         assert!(!bounded.timed_out, "Jet process policy fixture timed out");
+//RS         assert!(
+//RS             !bounded.limit_exceeded,
+//RS             "Jet process policy fixture hit output limit"
+//RS         );
+//RS         assert_eq!(
+//RS             bounded.output.status.code(),
+//RS             Some(0),
+//RS             "{}",
+//RS             stderr_receipt(&bounded.output)
+//RS         );
+//RS         bounded.output
+//RS     }
+//RS 
+//RS     let source = r#"use core.process as process
+//RS 
+//RS fn limit_blocked() -> Bool {
+//RS     process.cmd(["printf", "12345"])
+//RS         .stdout(.Capture)
+//RS         .stderr(.Capture)
+//RS         .output_limit(3)
+//RS         .run() ?? return true
+//RS     return false
+//RS }
+//RS 
+//RS fn authority_refused() -> Bool {
+//RS     policy :: Authority.from_rights(["Net:example.com"])
+//RS     process.cmd(["printf", "authority"]).under(policy).plan() ?? return true
+//RS     return false
+//RS }
+//RS 
+//RS fn run() {
+//RS     if limit_blocked() -> print("limit=blocked") else -> print("limit=leaked")
+//RS     if authority_refused() -> print("authority=refused") else -> print("authority=planned")
+//RS 
+//RS     child :: process.cmd(["sh", "-c", "sleep 30 & child=$!; echo $child > child.pid; wait"])
+//RS         .stdout(.Capture)
+//RS         .stderr(.Capture)
+//RS         .timeout(Duration.milliseconds(50) ?? panic("bad timeout"))
+//RS         .run() ?? panic("timeout launch failed")
+//RS     if !child.timed_out -> panic("timeout did not fire")
+//RS     print("timeout=cancelled")
+//RS }
+//RS "#;
+//RS 
+//RS     for release in [false, true] {
+//RS         let scratch = Scratch::new(if release {
+//RS             "jet_agent_process_policy_release"
+//RS         } else {
+//RS             "jet_agent_process_policy_default"
+//RS         });
+//RS         let source_path = scratch.path.join("process_policy.jet");
+//RS         fs::write(&source_path, source).unwrap();
+//RS         write_agent_workload_package(&scratch.path);
+//RS         let output = run_lens(&source_path, release, &scratch);
+//RS         assert_eq!(
+//RS             output.stdout,
+//RS             b"limit=blocked\nauthority=refused\ntimeout=cancelled\n"
+//RS         );
+//RS         let child_pid = fs::read_to_string(scratch.path.join("child.pid"))
+//RS             .unwrap()
+//RS             .trim()
+//RS             .parse::<u32>()
+//RS             .unwrap();
+//RS         let deadline = Instant::now() + Duration::from_secs(2);
+//RS         while !process_is_gone_or_zombie(child_pid) {
+//RS             assert!(
+//RS                 Instant::now() < deadline,
+//RS                 "timed-out process left descendant {child_pid}"
+//RS             );
+//RS             thread::sleep(Duration::from_millis(10));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn scratch_output_shape_rejects_arbitrary_build_residue() {
+//RS     fn valid_jet_scratch(prefix: &str) -> Scratch {
+//RS         let scratch = Scratch::new(prefix);
+//RS         fs::create_dir_all(scratch.path.join(".jet/build")).unwrap();
+//RS         fs::write(
+//RS             scratch.path.join(".jet/build/process_batch"),
+//RS             "declared artifact",
+//RS         )
+//RS         .unwrap();
+//RS         scratch
+//RS     }
+//RS 
+//RS     let cache_hit = valid_jet_scratch("jet_agent_scratch_cache_hit");
+//RS     assert_eq!(
+//RS         scratch_output_violations("jet", &cache_hit.path, "process_batch"),
+//RS         Vec::<String>::new()
+//RS     );
+//RS 
+//RS     let cache_miss = valid_jet_scratch("jet_agent_scratch_cache_miss");
+//RS     fs::write(
+//RS         cache_miss.path.join(".jet/build/process_batch.rs"),
+//RS         "declared generated Rust",
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(
+//RS         scratch_output_violations("jet", &cache_miss.path, "process_batch"),
+//RS         Vec::<String>::new()
+//RS     );
+//RS 
+//RS     let build_leak = valid_jet_scratch("jet_agent_scratch_build_leak");
+//RS     fs::write(
+//RS         build_leak.path.join(".jet/build/leak"),
+//RS         "undeclared residue",
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(
+//RS         scratch_output_violations("jet", &build_leak.path, "process_batch"),
+//RS         vec!["unexpected file: .jet/build/leak".to_string()]
+//RS     );
+//RS 
+//RS     let root_leak = valid_jet_scratch("jet_agent_scratch_root_leak");
+//RS     fs::write(root_leak.path.join("leak"), "undeclared residue").unwrap();
+//RS     assert_eq!(
+//RS         scratch_output_violations("jet", &root_leak.path, "process_batch"),
+//RS         vec!["unexpected file: leak".to_string()]
+//RS     );
+//RS 
+//RS     let nested_leak = valid_jet_scratch("jet_agent_scratch_nested_leak");
+//RS     fs::create_dir(nested_leak.path.join(".jet/build/nested")).unwrap();
+//RS     fs::write(
+//RS         nested_leak.path.join(".jet/build/nested/leak"),
+//RS         "undeclared residue",
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(
+//RS         scratch_output_violations("jet", &nested_leak.path, "process_batch"),
+//RS         vec![
+//RS             "unexpected directory: .jet/build/nested".to_string(),
+//RS             "unexpected file: .jet/build/nested/leak".to_string(),
+//RS         ]
+//RS     );
+//RS 
+//RS     let wrong_type = valid_jet_scratch("jet_agent_scratch_wrong_type");
+//RS     fs::create_dir(wrong_type.path.join(".jet/build/process_batch.rs")).unwrap();
+//RS     assert_eq!(
+//RS         scratch_output_violations("jet", &wrong_type.path, "process_batch"),
+//RS         vec!["unexpected directory: .jet/build/process_batch.rs".to_string()]
+//RS     );
+//RS 
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let symlink_leak = valid_jet_scratch("jet_agent_scratch_symlink");
+//RS         symlink(
+//RS             "missing-target",
+//RS             symlink_leak.path.join(".jet/build/process_batch.rs"),
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(
+//RS             scratch_output_violations("jet", &symlink_leak.path, "process_batch"),
+//RS             vec!["unexpected symlink: .jet/build/process_batch.rs".to_string()]
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn equivalent_adapters_complete_declared_tasks() {
+//RS     if std::env::consts::OS == "windows" {
+//RS         panic!("Bash is explicitly unavailable as a native Windows adapter; this task cannot pass");
+//RS     }
+//RS 
+//RS     let jet_cli = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+//RS     let jet_artifact = jet::SHA256::sha256_hex(&fs::read(&jet_cli).unwrap());
+//RS     let versions = BTreeMap::from([
+//RS         ("jet", command_version(&jet_cli, "--version", "jet")),
+//RS         (
+//RS             "bash",
+//RS             command_version(Path::new("bash"), "--version", "bash"),
+//RS         ),
+//RS         (
+//RS             "python",
+//RS             command_version(Path::new("python3"), "--version", "python3"),
+//RS         ),
+//RS         (
+//RS             "node",
+//RS             command_version(Path::new("node"), "--version", "node"),
+//RS         ),
+//RS     ]);
+//RS     let pinned_versions = pinned_adapter_versions();
+//RS     for adapter in BASELINE_ADAPTERS {
+//RS         assert_eq!(
+//RS             versions[adapter], pinned_versions[adapter],
+//RS             "{adapter} is not the committed pinned shipped tool"
+//RS         );
+//RS     }
+//RS     let git_version = command_version(Path::new("git"), "--version", "git");
+//RS     let mut baseline = BaselineCapture::from_env();
+//RS     let capture_baselines = baseline.is_some();
+//RS     let run_policy_digest = policy_digest();
+//RS     println!("{}", policy_receipt(&run_policy_digest));
+//RS 
+//RS     for task in read_tasks() {
+//RS         validate_authority(&task.authority).unwrap_or_else(|error| panic!("{error}"));
+//RS         let input = corpus_root().join(&task.input);
+//RS         let expected = fs::read(corpus_root().join(&task.expected)).unwrap();
+//RS         let before = input_hashes(&input);
+//RS         let stem = adapter_stem(&task.id);
+//RS         let mut measurements = Vec::new();
+//RS         let mut declared_outputs = Vec::new();
+//RS         for &(adapter, extension) in ADAPTERS {
+//RS             if capture_baselines && adapter == "jet" {
+//RS                 continue;
+//RS             }
+//RS             let scratch = Scratch::new("jet_agent_workload");
+//RS             let source = corpus_root()
+//RS                 .join("adapters")
+//RS                 .join(format!("{stem}.{extension}"));
+//RS             let cold = run_bounded(
+//RS                 adapter_command(adapter, &source, &jet_cli, &input, &scratch.path, &task.id),
+//RS                 adapter,
+//RS                 PROCESS_DEADLINE,
+//RS             );
+//RS             let warm = run_bounded(
+//RS                 adapter_command(adapter, &source, &jet_cli, &input, &scratch.path, &task.id),
+//RS                 adapter,
+//RS                 PROCESS_DEADLINE,
+//RS             );
+//RS             if adapter == "jet" {
+//RS                 fs::remove_file(scratch.path.join("package.jet")).unwrap();
+//RS                 fs::remove_file(scratch.path.join(source.file_name().unwrap())).unwrap();
+//RS             }
+//RS             assert!(!cold.timed_out, "{} {adapter} cold run timed out", task.id);
+//RS             assert!(!warm.timed_out, "{} {adapter} warm run timed out", task.id);
+//RS             assert!(
+//RS                 !cold.limit_exceeded,
+//RS                 "{} {adapter} cold output limit exceeded",
+//RS                 task.id
+//RS             );
+//RS             assert!(
+//RS                 !warm.limit_exceeded,
+//RS                 "{} {adapter} warm output limit exceeded",
+//RS                 task.id
+//RS             );
+//RS             assert_eq!(
+//RS                 cold.output.status.code(),
+//RS                 Some(0),
+//RS                 "{} {adapter} cold exit drifted: {}",
+//RS                 task.id,
+//RS                 stderr_receipt(&cold.output)
+//RS             );
+//RS             assert_eq!(
+//RS                 cold.output.stdout, expected,
+//RS                 "{} {adapter} cold stdout drifted",
+//RS                 task.id
+//RS             );
+//RS             assert_eq!(
+//RS                 warm.output.status.code(),
+//RS                 Some(0),
+//RS                 "{} {adapter} warm exit drifted",
+//RS                 task.id
+//RS             );
+//RS             assert_eq!(
+//RS                 warm.output.stdout, cold.output.stdout,
+//RS                 "{} {adapter} output was unstable",
+//RS                 task.id
+//RS             );
+//RS             assert_eq!(
+//RS                 input_hashes(&input),
+//RS                 before,
+//RS                 "{} {adapter} changed its read-only input authority",
+//RS                 task.id
+//RS             );
+//RS             let jet_artifact_name = source.file_stem().unwrap().to_string_lossy();
+//RS             // This must run before Scratch::drop so adapter residue cannot be
+//RS             // mistaken for successful cleanup. Jet may leave only its exact
+//RS             // public AOT `.jet/build` cache-hit or cache-miss shape; no adapter
+//RS             // gets a broad path exception.
+//RS             assert_eq!(
+//RS                 scratch_output_violations(adapter, &scratch.path, &jet_artifact_name),
+//RS                 Vec::<String>::new(),
+//RS                 "{} {adapter} left undeclared scratch residue",
+//RS                 task.id
+//RS             );
+//RS             if adapter != "jet" {
+//RS                 if let Some(capture) = baseline.as_mut() {
+//RS                     capture.record(
+//RS                         &task,
+//RS                         adapter,
+//RS                         &source,
+//RS                         &input,
+//RS                         &expected,
+//RS                         &cold,
+//RS                         &warm,
+//RS                         &versions[adapter],
+//RS                     );
+//RS                 }
+//RS             }
+//RS             declared_outputs.push(cold.output.stdout);
+//RS             measurements.push(Measurement {
+//RS                 adapter,
+//RS                 source_tokens: source_tokens(&source),
+//RS                 cold: cold.elapsed,
+//RS                 warm: warm.elapsed,
+//RS                 version: versions[adapter].clone(),
+//RS                 cold_stderr_bytes: cold.output.stderr.len(),
+//RS                 cold_stderr_sha256: jet::SHA256::sha256_hex(&cold.output.stderr),
+//RS                 warm_stderr_bytes: warm.output.stderr.len(),
+//RS                 warm_stderr_sha256: jet::SHA256::sha256_hex(&warm.output.stderr),
+//RS             });
+//RS         }
+//RS         assert!(
+//RS             declared_outputs.windows(2).all(|pair| pair[0] == pair[1]),
+//RS             "{} adapters disagreed on the declared outcome",
+//RS             task.id
+//RS         );
+//RS 
+//RS         println!(
+//RS             "machine\tos={}\tarch={}\tcorpus=1\ttask={}\tevidence={}\tcard={}\tlosses=red:{}\tjet_artifact={}\tjet_sha256={}\tgit_version={}\tpolicy_digest={}\tauthority={}",
+//RS             std::env::consts::OS,
+//RS             std::env::consts::ARCH,
+//RS             task.id,
+//RS             task.evidence,
+//RS             task.tower_card,
+//RS             task.loss_cards,
+//RS             jet_cli.display(),
+//RS             jet_artifact,
+//RS             git_version.replace('\t', " "),
+//RS             run_policy_digest,
+//RS             task.authority
+//RS         );
+//RS         for result in &measurements {
+//RS             println!(
+//RS                 "result\ttask={}\tadapter={}\tsuccess=true\tsource_tokens={}\tcold_ns={}\twarm_ns={}\toutput_stable=true\tversion={}\tcold_stderr_bytes={}\tcold_stderr_sha256={}\twarm_stderr_bytes={}\twarm_stderr_sha256={}\tpolicy_digest={}\tlimits={}\tdescendants={}\toutputs={}\treceipt={}\tauthority={}\tagent_tool_calls=not-recorded:#769\trepair_turns=not-recorded:#769\tpeak_memory=not-recorded:#769\tdiagnostic_quality=not-recorded:#769\torphan_processes=not-recorded:#769\tsandbox_escapes=not-recorded:#769\tnetwork=unmeasured:#769\texternal_writes=unmeasured:#769\tcross_platform=not-run:#769",
+//RS                 task.id,
+//RS                 result.adapter,
+//RS                 result.source_tokens,
+//RS                 result.cold.as_nanos(),
+//RS                 result.warm.as_nanos(),
+//RS                 result.version.replace('\t', " "),
+//RS                 result.cold_stderr_bytes,
+//RS                 result.cold_stderr_sha256,
+//RS                 result.warm_stderr_bytes,
+//RS                 result.warm_stderr_sha256,
+//RS                 run_policy_digest,
+//RS                 policy_field("limits"),
+//RS                 policy_field("descendants"),
+//RS                 policy_field("outputs"),
+//RS                 policy_field("receipt"),
+//RS                 task.authority
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn llm_digest_first_program() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["inspect", "digest", "--topic", "first-program"])
+//RS         .current_dir(&root)
+//RS         .output()
+//RS         .expect("generate digest first program");
+//RS     assert!(output.status.success(), "{}", stderr_receipt(&output));
+//RS     let digest = String::from_utf8(output.stdout).expect("digest is UTF-8");
+//RS     let fixture = corpus_root().join("llm_digest");
+//RS     let expected = fs::read(fixture.join("transcript.txt")).unwrap();
+//RS     let program = digest
+//RS         .split_once("```jet\n")
+//RS         .and_then(|(_, rest)| rest.split_once("\n```"))
+//RS         .map(|(program, _)| program)
+//RS         .expect("first-program topic contains an executable Jet example");
+//RS 
+//RS     let scratch = Scratch::new("jet_llm_digest_first_program");
+//RS     let source = scratch.path.join("first_program.jet");
+//RS     fs::write(&source, program).expect("write generated first program");
+//RS     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS     command
+//RS         .args(["run", "--release"])
+//RS         .arg(&source)
+//RS         .current_dir(&scratch.path);
+//RS     let bounded = run_bounded(command, "llm digest first program", PROCESS_DEADLINE);
+//RS     assert!(!bounded.timed_out, "llm digest first program timed out");
+//RS     assert!(
+//RS         !bounded.limit_exceeded,
+//RS         "llm digest first program hit output limit"
+//RS     );
+//RS     assert!(
+//RS         bounded.output.status.success(),
+//RS         "llm digest first program failed: {}",
+//RS         stderr_receipt(&bounded.output)
+//RS     );
+//RS     assert_eq!(
+//RS         bounded.output.stdout, expected,
+//RS         "first-program transcript drifted"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_corpus_policy_runs_with_agent_workloads() {
+//RS     common::corpus_policy::CorpusPolicy::load()
+//RS         .expect("corpus manifest")
+//RS         .check_gate("workload")
+//RS         .expect("agent workload corpus semantic policy");
+//RS }
+// END-PORT-PENDING 0964 tests/agent_workloads.rs:2016-2871
+

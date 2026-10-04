@@ -1,0 +1,98 @@
+// Codegen/mod.rs:945-1040: generated runtime ABI declarations and FFI hook.
+// These are source-emission algorithms, not a replacement runtime body.
+// Cached Prelude assembly additionally requires the canonical compiled source
+// graph. Nothing here pretends an omitted graph is a complete runtime.
+use jet_foundation.[FfiLink]
+
+// D-MEMREF1/LIFE1/EXCL1; #4500 is the shared optional-borrow language gate.
+// No owned descriptor copy or fallback FFI bridge is introduced.
+pub fn jet_runtime_ffi_reporter_source(ffi: ?@FfiLink) -> String Never! {
+    link :: ffi ?? return "fn jet_ffi_install_reporter() {{}}\n\n"
+    "// JET_VETTED_UNSAFE_BEGIN: ffi_reporter\nextern \"C\" fn jet_ffi_reporter(message: *const u8, len: usize) {{\n    let _ = (message, len);\n}}\n// JET_VETTED_UNSAFE_END: ffi_reporter\nfn jet_ffi_install_reporter() {{ {link.crate_name}::jet_ffi_set_reporter(jet_ffi_reporter); }}\n\n"
+}
+
+// The one primitive list admitted by Codegen/mod.rs::COMPARABLE_PRIMITIVES.
+JET_RUNTIME_COMPARABLE_PRIMITIVES :: prep { [String]{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool", "char", "String"} }
+
+pub fn jet_runtime_comparable_primitive_source() -> String Never! {
+    rows := [String]{}
+    loop ty in JET_RUNTIME_COMPARABLE_PRIMITIVES -> &rows.push("impl __jet_Comparable for {ty} {{ fn compare(&self, rhs: &Self) -> __jet_Ordering {{ if self < rhs {{ __jet_Ordering::__jet_Less }} else if self > rhs {{ __jet_Ordering::__jet_Greater }} else {{ __jet_Ordering::__jet_Equal }} }} }}\n")
+    rows.join("")
+}
+
+pub fn jet_runtime_cached_runtime_traits_source() -> String Never! {
+    rows := [String]{
+        "pub trait __jet_Display {{\n",
+        "    fn display(&self) -> String;\n",
+        "}}\n\n",
+        "pub trait __jet_Equatable: Sized {{ fn equal(&self, rhs: &Self) -> bool; }}\n",
+    }
+    equatable :: [String]{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char", "String"}
+    loop ty in equatable -> &rows.push("impl __jet_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n")
+    &rows.push("\n")
+    &rows.push("#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\npub enum __jet_Ordering {{ __jet_Less, __jet_Equal, __jet_Greater }}\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq)]\npub enum __jet_RemoveBy {{ __jet_Val, __jet_Slot }}\n\n")
+    &rows.push("pub trait __jet_Comparable: Sized {{ fn compare(&self, rhs: &Self) -> __jet_Ordering; }}\n")
+    &rows.push(jet_runtime_comparable_primitive_source())
+    operators :: [(String, String)]{("Add", "add"), ("Sub", "sub"), ("Mul", "mul"), ("Div", "div")}
+    loop (name, method) in operators -> &rows.push("pub trait __jet_{name}<Rhs = Self>: Sized {{ type Output; fn {method}(&self, rhs: &Rhs) -> Self::Output; }}\n")
+    &rows.push("pub trait __jet_Index {{\n    type __jet_Key;\n    type __jet_Value;\n    fn get(&self, key: &Self::__jet_Key) -> JetOutcome<Self::__jet_Value, JetAbsent>;\n}}\n")
+    &rows.push("pub trait __jet_IndexMut: __jet_Index {{\n    fn set(&mut self, key: &Self::__jet_Key, value: &Self::__jet_Value) -> JetOutcome<(), JetErr>;\n}}\n")
+    &rows.push("pub trait __jet_Iterator {{\n    type __jet_Item;\n    fn next(&mut self) -> JetOutcome<Self::__jet_Item, JetAbsent>;\n}}\n")
+    &rows.push("pub trait __jet_Iterable: Sized {{\n    type __jet_Iter;\n    fn iter(self) -> Self::__jet_Iter;\n}}\n")
+    &rows.push("pub trait __jet_Close: Sized {{\n    fn close(self);\n}}\n")
+    &rows.push("\n")
+    rows.join("")
+}
+
+// Codegen/mod.rs::push_collections_prelude: exactly one sibling marker is
+// mandatory. This is an emitted-source splice, not a runtime include lookup.
+pub fn jet_runtime_expand_collections_cursor(collections: String, cursor_kernel: String) -> String Never! {
+    marker :: "include!(\"LoopCursor.rs\");"
+    split :: collections.split_once(marker) ?? panic("Collections Prelude source is missing its cursor-kernel marker")
+    if split.1.contains(marker) -> panic("Collections Prelude source has duplicate cursor-kernel markers")
+    pieces :: [String]{split.0, cursor_kernel, split.1}
+    pieces.join("")
+}
+
+pub fn jet_runtime_embedded_devtools_source(source: String) -> String Never! {
+    begin :: "// JET_HOST_DEVTOOLS_NATIVE_BEGIN"
+    end :: "// JET_HOST_DEVTOOLS_NATIVE_END"
+    before :: source.split_once(begin) ?? panic("Devtools host native region begin marker missing")
+    after :: source.split_once(end) ?? panic("Devtools host native region end marker missing")
+    if before.0.bytes().len() >= after.0.bytes().len() + end.bytes().len() -> panic("Devtools host native region markers are out of order")
+    pieces :: [String]{before.0, after.1}
+    pieces.join("")
+}
+
+pub fn jet_runtime_embedded_outcome_source(source: String, diagnostic_projection: String) -> String Never! {
+    stop_begin :: "// JET_HOST_RUNTIME_STOP_BEGIN"
+    stop_end :: "// JET_HOST_RUNTIME_STOP_END"
+    sentry_begin :: "// JET_HOST_RUNTIME_SENTRY_BEGIN"
+    sentry_end :: "// JET_HOST_RUNTIME_SENTRY_END"
+    before_stop :: source.split_once(stop_begin) ?? panic("Outcome host runtime-stop wrapper marker missing")
+    after_stop :: source.split_once(stop_end) ?? panic("Outcome host runtime-stop wrapper end marker missing")
+    before_sentry :: source.split_once(sentry_begin) ?? panic("Outcome host sentry wrapper marker missing")
+    after_sentry :: source.split_once(sentry_end) ?? panic("Outcome host sentry wrapper end marker missing")
+    stop_end_offset :: after_stop.0.bytes().len() + stop_end.bytes().len()
+    sentry_start_offset :: before_sentry.0.bytes().len()
+    sentry_end_offset :: after_sentry.0.bytes().len() + sentry_end.bytes().len()
+    if stop_end_offset > sentry_start_offset || sentry_start_offset > sentry_end_offset -> panic("Outcome host wrappers are out of order")
+    middle :: after_stop.1.split_once(sentry_begin) ?? panic("Outcome host wrappers are out of order")
+    pieces :: [String]{before_stop.0, middle.0, after_sentry.1, diagnostic_projection}
+    pieces.join("")
+}
+
+// Codegen/mod.rs::portable_embedded_hardware_source: the host-only boundary
+// is mandatory, not an optional empty hardware implementation.
+pub fn jet_runtime_portable_embedded_hardware_source(source: String) -> String Never! {
+    split :: source.split_once("// JET_EMBEDDED_HARDWARE_HOST_BEGIN:") ?? panic("embedded hardware host bridge marker is missing")
+    split.0
+}
+
+pub fn jet_runtime_data_plot_prelude_body(source: String) -> String Never! {
+    source.replace("use std::collections::{{BTreeMap, BTreeSet}};\nuse std::sync::Arc as JetDataPlotArc;\n", "")
+}
+
+pub fn jet_runtime_data_query_prelude_source(source: String, sql_kernel: String) -> String Never! {
+    source.replace("    include!(\"../../Core/SqlQuery.rs\");\n", sql_kernel)
+}

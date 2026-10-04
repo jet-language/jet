@@ -1,0 +1,1065 @@
+// PORT-PENDING 1163 tests-support-nix-index-cache-server-module-group: tests/support/nix_index_cache_server.rs:1-600
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Signed loopback and static index/cache peers for the index-backed Nix provider tests.
+//RS //!
+//RS //! The peer serves only bytes. It never writes a Hangar, creates a fixture
+//RS //! directory, or invokes a Nix process. Request counters make cache-repair
+//RS //! scope observable.
+//RS 
+//RS #![allow(dead_code)]
+//RS 
+//RS use jetpack::test_nix_index::{self, TestIndexRecord, TestSignedIndex};
+//RS use jetpack::Store::{self, NixCompression, NixNarInfo, NixNarInfoSignature};
+//RS use std::collections::BTreeMap;
+//RS use std::fs;
+//RS use std::io::{Read, Write};
+//RS use std::net::{TcpListener, TcpStream};
+//RS use std::path::Path;
+//RS use std::sync::atomic::{AtomicBool, Ordering};
+//RS use std::sync::{Arc, Mutex};
+//RS use std::thread;
+//RS use std::time::Duration;
+//RS 
+//RS #[path = "static_file_server.rs"]
+//RS mod static_file_server;
+//RS use static_file_server::StaticFileServer;
+//RS 
+//RS pub const CHANNEL: &str = "nixpkgs-unstable";
+//RS pub const SYSTEM: &str = "x86_64-linux";
+//RS pub const REVISION: &str = "c8f90650c15282fa8656a041bfbbd2403997a9a7";
+//RS const INDEX_KEY_ID: &str = "fixture-index-signer-v1";
+//RS const CACHE_KEY_ID: &str = "jet-test-cache-v1";
+//RS const SIGNING_SEED: [u8; 32] = [7; 32];
+//RS 
+//RS pub const ROOT_PATH: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ripgrep-15.2.0";
+//RS pub const LIB_PATH: &str = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-ripgrep-lib-1.0";
+//RS pub const RUNTIME_PATH: &str = "/nix/store/cccccccccccccccccccccccccccccccc-ripgrep-runtime-1.0";
+//RS pub const DRV_PATH: &str = "/nix/store/dddddddddddddddddddddddddddddddd-ripgrep-15.2.0.drv";
+//RS fn valid_fixture_times() -> (u64, u64, u64) {
+//RS     let now = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .expect("test clock is before Unix epoch")
+//RS         .as_secs();
+//RS     (
+//RS         now.saturating_sub(60),
+//RS         now.saturating_sub(60),
+//RS         now.saturating_add(365 * 24 * 60 * 60),
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS enum ObjectKind {
+//RS     Root,
+//RS     Library,
+//RS     Runtime,
+//RS }
+//RS 
+//RS pub struct NixIndexCacheServer {
+//RS     pub endpoint: String,
+//RS     pub index_endpoint: String,
+//RS     pub root_store_path: String,
+//RS     pub transitive_store_paths: Vec<String>,
+//RS     pub signed_index: TestSignedIndex,
+//RS     routes: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+//RS     counts: Arc<Mutex<BTreeMap<String, usize>>>,
+//RS     online: Arc<AtomicBool>,
+//RS     stop: Arc<AtomicBool>,
+//RS     join: Option<thread::JoinHandle<()>>,
+//RS }
+//RS 
+//RS impl NixIndexCacheServer {
+//RS     pub fn start_ripgrep(scratch: &Path) -> Self {
+//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind Nix test server");
+//RS         listener
+//RS             .set_nonblocking(true)
+//RS             .expect("set Nix test server nonblocking");
+//RS         let address = listener.local_addr().expect("Nix test server address");
+//RS         let endpoint = format!("http://127.0.0.1:{}", address.port());
+//RS         let index_endpoint = format!("{endpoint}/index");
+//RS         let (signed_index, normalized_routes, root_store_path, transitive_store_paths) =
+//RS             ripgrep_fixture(&endpoint, &index_endpoint, scratch);
+//RS         Self::finish(
+//RS             listener,
+//RS             endpoint,
+//RS             index_endpoint,
+//RS             signed_index,
+//RS             normalized_routes,
+//RS             root_store_path,
+//RS             transitive_store_paths,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn start_static_ripgrep(
+//RS         scratch: &Path,
+//RS         publication: &Path,
+//RS     ) -> StaticNixIndexCacheServer {
+//RS         let static_server = StaticFileServer::start(publication);
+//RS         let endpoint = static_server.endpoint.clone();
+//RS         let (signed_index, routes, root_store_path, transitive_store_paths) =
+//RS             ripgrep_fixture(&endpoint, &endpoint, scratch);
+//RS         write_static_routes(publication, &routes);
+//RS         StaticNixIndexCacheServer {
+//RS             endpoint,
+//RS             index_endpoint: static_server.endpoint.clone(),
+//RS             root_store_path: root_store_path.to_string(),
+//RS             transitive_store_paths,
+//RS             signed_index,
+//RS             _server: static_server,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn start_unindexed(scratch: &Path) -> Self {
+//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind Nix test server");
+//RS         listener
+//RS             .set_nonblocking(true)
+//RS             .expect("set Nix test server nonblocking");
+//RS         let address = listener.local_addr().expect("Nix test server address");
+//RS         let endpoint = format!("http://127.0.0.1:{}", address.port());
+//RS         let index_endpoint = format!("{endpoint}/index");
+//RS         let (released_unix, issued_unix, expires_unix) = valid_fixture_times();
+//RS         let signed_index = test_nix_index::signed(
+//RS             SIGNING_SEED,
+//RS             INDEX_KEY_ID,
+//RS             &index_endpoint,
+//RS             CHANNEL,
+//RS             REVISION,
+//RS             SYSTEM,
+//RS             released_unix,
+//RS             1,
+//RS             issued_unix,
+//RS             expires_unix,
+//RS             Vec::new(),
+//RS             vec![(vec!["postgres".to_string()], "missing-narinfo".to_string())],
+//RS         )
+//RS         .expect("build signed unindexed Nix test index");
+//RS         let _ = scratch;
+//RS         Self::finish(
+//RS             listener,
+//RS             endpoint.clone(),
+//RS             index_endpoint,
+//RS             signed_index.clone(),
+//RS             index_routes(&signed_index, &endpoint, CHANNEL),
+//RS             ROOT_PATH,
+//RS             Vec::new(),
+//RS         )
+//RS     }
+//RS 
+//RS     #[allow(clippy::too_many_arguments)]
+//RS     fn finish(
+//RS         listener: TcpListener,
+//RS         endpoint: String,
+//RS         index_endpoint: String,
+//RS         signed_index: TestSignedIndex,
+//RS         routes: BTreeMap<String, Vec<u8>>,
+//RS         root_store_path: &str,
+//RS         transitive_store_paths: Vec<String>,
+//RS     ) -> Self {
+//RS         let routes = Arc::new(Mutex::new(routes));
+//RS         let counts = Arc::new(Mutex::new(BTreeMap::new()));
+//RS         let online = Arc::new(AtomicBool::new(true));
+//RS         let stop = Arc::new(AtomicBool::new(false));
+//RS         let thread_routes = Arc::clone(&routes);
+//RS         let thread_counts = Arc::clone(&counts);
+//RS         let thread_online = Arc::clone(&online);
+//RS         let thread_stop = Arc::clone(&stop);
+//RS         let join = thread::spawn(move || {
+//RS             while !thread_stop.load(Ordering::Relaxed) {
+//RS                 match listener.accept() {
+//RS                     Ok((stream, _)) => serve_request(
+//RS                         stream,
+//RS                         &thread_routes,
+//RS                         &thread_counts,
+//RS                         thread_online.load(Ordering::Relaxed),
+//RS                     ),
+//RS                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                         thread::sleep(Duration::from_millis(1));
+//RS                     }
+//RS                     Err(_) => break,
+//RS                 }
+//RS             }
+//RS         });
+//RS         Self {
+//RS             endpoint,
+//RS             index_endpoint,
+//RS             root_store_path: root_store_path.to_string(),
+//RS             transitive_store_paths,
+//RS             signed_index,
+//RS             routes,
+//RS             counts,
+//RS             online,
+//RS             stop,
+//RS             join: Some(join),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn install(&self, root: &Path) {
+//RS         install_fixture_config(root, &self.index_endpoint, &self.endpoint, &self.signed_index);
+//RS     }
+//RS 
+//RS     pub fn install_local_catalog(&self, root: &Path) {
+//RS         let target_dir = root.join("index-v1").join(REVISION).join(SYSTEM);
+//RS         fs::create_dir_all(&target_dir).expect("local Nix catalog target directory");
+//RS         let digest = jetpack::SHA256::sha256_hex(&self.signed_index.index_bytes);
+//RS         fs::write(
+//RS             target_dir.join(format!("{digest}.json.zst")),
+//RS             &self.signed_index.index_bytes,
+//RS         )
+//RS         .expect("local Nix catalog target");
+//RS     }
+//RS 
+//RS     pub fn corrupt_index_signature(&self) {
+//RS         let path = self
+//RS             .signed_index
+//RS             .target_signature_url
+//RS             .strip_prefix(&self.endpoint)
+//RS             .expect("index signature belongs to server");
+//RS         let mut signature = self.signed_index.index_signature.clone();
+//RS         signature.push(b'!');
+//RS         self.routes
+//RS             .lock()
+//RS             .expect("Nix test routes")
+//RS             .insert(path.to_string(), signature);
+//RS     }
+//RS 
+//RS     pub fn stop_network(&self) {
+//RS         self.online.store(false, Ordering::Relaxed);
+//RS     }
+//RS 
+//RS     pub fn start_network(&self) {
+//RS         self.online.store(true, Ordering::Relaxed);
+//RS     }
+//RS 
+//RS     pub fn reset_counts(&self) {
+//RS         self.counts.lock().expect("Nix request counts").clear();
+//RS     }
+//RS 
+//RS     pub fn count(&self, path: &str) -> usize {
+//RS         self.counts
+//RS             .lock()
+//RS             .expect("Nix request counts")
+//RS             .get(path)
+//RS             .copied()
+//RS             .unwrap_or_default()
+//RS     }
+//RS 
+//RS     pub fn object_request_count(&self, store_path: &str) -> usize {
+//RS         let basename = store_path
+//RS             .strip_prefix("/nix/store/")
+//RS             .expect("test store path prefix");
+//RS         let nar_path = match store_path {
+//RS             ROOT_PATH => "/nar/root.nar",
+//RS             LIB_PATH => "/nar/lib.nar",
+//RS             RUNTIME_PATH => "/nar/runtime.nar",
+//RS             _ => return self.count(&format!("/{}.narinfo", &basename[..32])),
+//RS         };
+//RS         self.count(&format!("/{}.narinfo", &basename[..32])) + self.count(nar_path)
+//RS     }
+//RS }
+//RS 
+//RS pub struct StaticNixIndexCacheServer {
+//RS     pub endpoint: String,
+//RS     pub index_endpoint: String,
+//RS     pub root_store_path: String,
+//RS     pub transitive_store_paths: Vec<String>,
+//RS     pub signed_index: TestSignedIndex,
+//RS     _server: StaticFileServer,
+//RS }
+//RS 
+//RS impl StaticNixIndexCacheServer {
+//RS     pub fn install(&self, root: &Path) {
+//RS         install_fixture_config(root, &self.index_endpoint, &self.endpoint, &self.signed_index);
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for NixIndexCacheServer {
+//RS     fn drop(&mut self) {
+//RS         self.stop.store(true, Ordering::Relaxed);
+//RS         let _ = TcpStream::connect(
+//RS             self.endpoint
+//RS                 .strip_prefix("http://")
+//RS                 .expect("loopback Nix test endpoint"),
+//RS         );
+//RS         if let Some(join) = self.join.take() {
+//RS             join.join().expect("Nix test server thread");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn index_routes(
+//RS     signed: &TestSignedIndex,
+//RS     endpoint: &str,
+//RS     channel: &str,
+//RS ) -> BTreeMap<String, Vec<u8>> {
+//RS     let target_path = signed
+//RS         .target_url
+//RS         .strip_prefix(endpoint)
+//RS         .expect("index target belongs to server")
+//RS         .to_string();
+//RS     let index_prefix = target_path
+//RS         .split_once("/index-v1/")
+//RS         .map(|(prefix, _)| prefix)
+//RS         .expect("index target has the v1 path");
+//RS     let manifest = format!("{index_prefix}/v1/{channel}/manifest.json");
+//RS     let target_signature_path = signed
+//RS         .target_signature_url
+//RS         .strip_prefix(endpoint)
+//RS         .expect("index target signature belongs to server")
+//RS         .to_string();
+//RS     BTreeMap::from([
+//RS         (manifest.clone(), signed.manifest_bytes.clone()),
+//RS         (
+//RS             format!("{manifest}.sig.json"),
+//RS             signed.manifest_signature.clone(),
+//RS         ),
+//RS         (target_path, signed.index_bytes.clone()),
+//RS         (target_signature_path, signed.index_signature.clone()),
+//RS     ])
+//RS }
+//RS 
+//RS fn install_fixture_config(
+//RS     root: &Path,
+//RS     index_endpoint: &str,
+//RS     cache_endpoint: &str,
+//RS     signed_index: &TestSignedIndex,
+//RS ) {
+//RS     fs::create_dir_all(root.join("config")).expect("Nix index config directory");
+//RS     fs::create_dir_all(root.join("trust")).expect("Nix index trust directory");
+//RS     fs::write(
+//RS         root.join("config/nix-index-v1.endpoint"),
+//RS         format!("{index_endpoint}\n"),
+//RS     )
+//RS     .expect("Nix index endpoint");
+//RS     fs::write(
+//RS         root.join("trust/nix-index-v1.ed25519.pub"),
+//RS         format!(
+//RS             "{}:{}\n",
+//RS             INDEX_KEY_ID,
+//RS             base64_encode(&signed_index.public_key)
+//RS         ),
+//RS     )
+//RS     .expect("Nix index trust key");
+//RS     fs::write(
+//RS         root.join("config/nix-cache-v1.endpoint"),
+//RS         format!("{cache_endpoint}\n"),
+//RS     )
+//RS     .expect("Nix cache endpoint");
+//RS     fs::write(
+//RS         root.join("trust/nix-cache-v1.ed25519.pub"),
+//RS         format!(
+//RS             "{}:{}\n",
+//RS             CACHE_KEY_ID,
+//RS             base64_encode(&test_nix_index::public_key(SIGNING_SEED))
+//RS         ),
+//RS     )
+//RS     .expect("Nix cache trust key");
+//RS }
+//RS 
+//RS fn ripgrep_fixture(
+//RS     endpoint: &str,
+//RS     index_endpoint: &str,
+//RS     scratch: &Path,
+//RS ) -> (TestSignedIndex, BTreeMap<String, Vec<u8>>, &'static str, Vec<String>) {
+//RS     let (released_unix, issued_unix, expires_unix) = valid_fixture_times();
+//RS     let signed_index = test_nix_index::signed(
+//RS         SIGNING_SEED,
+//RS         INDEX_KEY_ID,
+//RS         index_endpoint,
+//RS         CHANNEL,
+//RS         REVISION,
+//RS         SYSTEM,
+//RS         released_unix,
+//RS         1,
+//RS         issued_unix,
+//RS         expires_unix,
+//RS         vec![TestIndexRecord {
+//RS             attrpath: vec!["ripgrep".to_string()],
+//RS             version: "15.2.0".to_string(),
+//RS             drv_path: DRV_PATH.to_string(),
+//RS             outputs: BTreeMap::from([(String::from("out"), ROOT_PATH.to_string())]),
+//RS         }],
+//RS         Vec::new(),
+//RS     )
+//RS     .expect("build signed Nix test index");
+//RS     let source = scratch.join("nix-index-cache-nar-source");
+//RS     let objects = [
+//RS         (ROOT_PATH, ObjectKind::Root, "root.nar"),
+//RS         (LIB_PATH, ObjectKind::Library, "lib.nar"),
+//RS         (RUNTIME_PATH, ObjectKind::Runtime, "runtime.nar"),
+//RS     ];
+//RS     let mut nars = BTreeMap::new();
+//RS     for (store_path, kind, _nar_name) in objects {
+//RS         let nar = make_nar(&source, kind);
+//RS         nars.insert(store_path.to_string(), nar);
+//RS     }
+//RS     let mut routes = index_routes(&signed_index, endpoint, CHANNEL);
+//RS     routes.insert(
+//RS         "/nix-cache-info".to_string(),
+//RS         b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+//RS     );
+//RS     for (store_path, kind, nar_name) in objects {
+//RS         let nar = nars.get(store_path).expect("Nix test NAR was built");
+//RS         let basename = store_path
+//RS             .strip_prefix("/nix/store/")
+//RS             .expect("test store path prefix");
+//RS         routes.insert(
+//RS             format!("/{}.narinfo", &basename[..32]),
+//RS             signed_narinfo(
+//RS                 store_path,
+//RS                 nar_name,
+//RS                 nar,
+//RS                 match kind {
+//RS                     ObjectKind::Root => vec![LIB_PATH],
+//RS                     ObjectKind::Library => vec![RUNTIME_PATH],
+//RS                     ObjectKind::Runtime => Vec::new(),
+//RS                 }
+//RS                 .as_slice(),
+//RS                 CACHE_KEY_ID,
+//RS                 SIGNING_SEED,
+//RS             ),
+//RS         );
+//RS         routes.insert(format!("/nar/{nar_name}"), nar.clone());
+//RS     }
+//RS     let _ = fs::remove_dir_all(&source);
+//RS     (
+//RS         signed_index,
+//RS         routes,
+//RS         ROOT_PATH,
+//RS         vec![LIB_PATH.to_string(), RUNTIME_PATH.to_string()],
+//RS     )
+//RS }
+//RS 
+//RS fn write_static_routes(root: &Path, routes: &BTreeMap<String, Vec<u8>>) {
+//RS     for (route, bytes) in routes {
+//RS         let relative = route
+//RS             .strip_prefix('/')
+//RS             .expect("static route starts with slash");
+//RS         let path = root.join(relative);
+//RS         fs::create_dir_all(path.parent().expect("static route parent"))
+//RS             .expect("static route directory");
+//RS         fs::write(path, bytes).expect("static route bytes");
+//RS     }
+//RS }
+//RS 
+//RS fn make_nar(root: &Path, kind: ObjectKind) -> Vec<u8> {
+//RS     let _ = fs::remove_dir_all(root);
+//RS     fs::create_dir_all(root).expect("Nix NAR source root");
+//RS     match kind {
+//RS         ObjectKind::Root => {
+//RS             fs::create_dir_all(root.join("bin")).expect("Nix executable directory");
+//RS             let executable = root.join("bin/rg");
+//RS             fs::write(&executable, b"#!/bin/sh\necho ripgrep 15.2.0\n").expect("Nix executable");
+//RS             #[cfg(unix)]
+//RS             {
+//RS                 use std::os::unix::fs::PermissionsExt as _;
+//RS                 fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+//RS                     .expect("Nix executable mode");
+//RS             }
+//RS         }
+//RS         ObjectKind::Library => {
+//RS             fs::create_dir_all(root.join("lib")).expect("Nix library directory");
+//RS             fs::write(root.join("lib/marker"), b"library").expect("Nix library marker");
+//RS         }
+//RS         ObjectKind::Runtime => {
+//RS             fs::create_dir_all(root.join("share")).expect("Nix runtime directory");
+//RS             fs::write(root.join("share/marker"), b"runtime").expect("Nix runtime marker");
+//RS         }
+//RS     }
+//RS     let (nar, _) = Store::write_nar(root).expect("encode Nix test NAR");
+//RS     nar
+//RS }
+//RS 
+//RS fn signed_narinfo(
+//RS     store_path: &str,
+//RS     nar_name: &str,
+//RS     nar: &[u8],
+//RS     references: &[&str],
+//RS     key_id: &str,
+//RS     seed: [u8; 32],
+//RS ) -> Vec<u8> {
+//RS     let hash = format!("sha256:{}", jetpack::SHA256::sha256_hex(nar));
+//RS     let references = references
+//RS         .iter()
+//RS         .map(|reference| {
+//RS             reference
+//RS                 .rsplit('/')
+//RS                 .next()
+//RS                 .expect("Nix reference basename")
+//RS         })
+//RS         .map(str::to_string)
+//RS         .collect::<Vec<_>>();
+//RS     let info = NixNarInfo {
+//RS         store_path: store_path.to_string(),
+//RS         url: format!("nar/{nar_name}"),
+//RS         compression: NixCompression::None,
+//RS         file_hash: Some(hash.clone()),
+//RS         file_size: Some(nar.len() as u64),
+//RS         nar_hash: hash,
+//RS         nar_size: nar.len() as u64,
+//RS         references: references.clone(),
+//RS         deriver: None,
+//RS         ca: None,
+//RS         signatures: Vec::new(),
+//RS     };
+//RS     let signature = test_nix_index::sign(
+//RS         seed,
+//RS         &info
+//RS             .fingerprint("/nix/store")
+//RS             .expect("Nix narinfo fingerprint"),
+//RS     );
+//RS     let signature = signature
+//RS         .try_into()
+//RS         .expect("ed25519 signature has 64 bytes");
+//RS     let signature = NixNarInfoSignature {
+//RS         key_id: key_id.to_string(),
+//RS         signature,
+//RS     };
+//RS     format!(
+//RS         "StorePath: {}\nURL: {}\nCompression: none\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\nReferences: {}\nSig: {}:{}\n",
+//RS         info.store_path,
+//RS         info.url,
+//RS         info.file_hash.as_deref().expect("Nix FileHash"),
+//RS         info.file_size.expect("Nix FileSize"),
+//RS         info.nar_hash,
+//RS         info.nar_size,
+//RS         references.join(" "),
+//RS         key_id,
+//RS         base64_encode(&signature.signature),
+//RS     )
+//RS     .into_bytes()
+//RS }
+//RS 
+//RS fn serve_request(
+//RS     mut stream: TcpStream,
+//RS     routes: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+//RS     counts: &Arc<Mutex<BTreeMap<String, usize>>>,
+//RS     online: bool,
+//RS ) {
+//RS     let mut request = [0u8; 16 * 1024];
+//RS     let count = stream.read(&mut request).unwrap_or_default();
+//RS     let path = std::str::from_utf8(&request[..count])
+//RS         .ok()
+//RS         .and_then(|request| request.lines().next())
+//RS         .and_then(|line| line.split_whitespace().nth(1))
+//RS         .unwrap_or("/")
+//RS         .split('?')
+//RS         .next()
+//RS         .unwrap_or("/")
+//RS         .to_string();
+//RS     *counts
+//RS         .lock()
+//RS         .expect("Nix request counts")
+//RS         .entry(path.clone())
+//RS         .or_default() += 1;
+//RS     let body = if online {
+//RS         routes.lock().expect("Nix test routes").get(&path).cloned()
+//RS     } else {
+//RS         None
+//RS     };
+//RS     match body {
+//RS         Some(body) => {
+//RS             let header = format!(
+//RS                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+//RS                 body.len()
+//RS             );
+//RS             let _ = stream.write_all(header.as_bytes());
+//RS             let _ = stream.write_all(&body);
+//RS         }
+//RS         None => {
+//RS             let _ = stream.write_all(
+//RS                 b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn base64_encode(bytes: &[u8]) -> String {
+//RS     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+//RS     let mut output = String::new();
+//RS     for chunk in bytes.chunks(3) {
+//RS         let first = chunk[0];
+//RS         output.push(ALPHABET[(first >> 2) as usize] as char);
+//RS         output.push(
+//RS             ALPHABET
+//RS                 [((first & 0x03) << 4 | chunk.get(1).copied().unwrap_or_default() >> 4) as usize]
+//RS                 as char,
+//RS         );
+//RS         if let Some(second) = chunk.get(1) {
+//RS             output.push(
+//RS                 ALPHABET[((second & 0x0f) << 2 | chunk.get(2).copied().unwrap_or_default() >> 6)
+//RS                     as usize] as char,
+//RS             );
+//RS         } else {
+//RS             output.push('=');
+//RS         }
+//RS         if let Some(third) = chunk.get(2) {
+//RS             output.push(ALPHABET[(third & 0x3f) as usize] as char);
+//RS         } else {
+//RS             output.push('=');
+//RS         }
+//RS     }
+//RS     output
+//RS }
+// END-PORT-PENDING 1163 tests/support/nix_index_cache_server.rs:1-600
+
+// PORT-PENDING 1163 tests-support-nix-index-cache-server-module-group: tests/support/no_nix_namespace.rs:1-309
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Rootless Linux harness for tests that must start without a host Nix store.
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS // This module is included by several test roots and each compiles it
+//RS // separately, so a root that only runs offline phases never constructs
+//RS // `Enabled`. jetpack_engine.rs does.
+//RS #[allow(dead_code)]
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum NetworkMode {
+//RS     Enabled,
+//RS     Disabled,
+//RS }
+//RS 
+//RS pub const CHILD_MARKER: &str = "JET_NO_NIX_NAMESPACE_CHILD";
+//RS pub fn run_in_no_nix_namespace<F>(exact_test_name: &str, network_mode: NetworkMode, child_body: F)
+//RS where
+//RS     F: FnOnce(),
+//RS {
+//RS     if std::env::var_os(CHILD_MARKER).is_some() {
+//RS         assert_no_host_store();
+//RS         child_body();
+//RS         return;
+//RS     }
+//RS 
+//RS     #[cfg(not(target_os = "linux"))]
+//RS     {
+//RS         let _ = (exact_test_name, network_mode);
+//RS         panic!("no-host-store namespace proof requires Linux");
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     {
+//RS         let unshare = find_helper("unshare");
+//RS         let mount = find_helper("mount");
+//RS         let umount = find_helper("umount");
+//RS         let shell = find_helper("sh");
+//RS         let mkdir = find_helper("mkdir");
+//RS         let ldd = find_helper("ldd");
+//RS         let readlink = find_helper("readlink");
+//RS         let sort = find_helper("sort");
+//RS         let ln = find_helper("ln");
+//RS         let true_binary = find_helper("true");
+//RS         let test_binary = std::env::current_exe().expect("current test executable");
+//RS         let bootstrap_root =
+//RS             std::env::temp_dir().join(format!("jet-no-nix-bootstrap-{}", std::process::id()));
+//RS         fs::create_dir_all(&bootstrap_root).expect("create no-host-store bootstrap");
+//RS         let bootstrap_unshare = patch_interpreter(&unshare, &bootstrap_root.join("unshare"));
+//RS         let bootstrap_mount = patch_interpreter(&mount, &bootstrap_root.join("mount"));
+//RS         let bootstrap_shell = patch_interpreter(&shell, &bootstrap_root.join("sh"));
+//RS         // Derive the jetpack binary from the running test executable rather
+//RS         // than `crate::common`: this harness is included by test roots that do
+//RS         // not carry that module, and depending on it breaks their build.
+//RS         let subject_binary = test_binary
+//RS             .parent()
+//RS             .and_then(|deps| deps.parent())
+//RS             .map(|profile| profile.join("jetpack"))
+//RS             .filter(|candidate| candidate.exists())
+//RS             .expect("jetpack binary beside the test executable");
+//RS         let subject_binary = &subject_binary;
+//RS         let bootstrap_subject = patch_interpreter(subject_binary, &bootstrap_root.join("jetpack"));
+//RS         let script = r#"set -eu
+//RS unshare="$1"
+//RS mount="$2"
+//RS umount="$3"
+//RS shell="$4"
+//RS mkdir="$5"
+//RS ldd="$6"
+//RS readlink="$7"
+//RS sort="$8"
+//RS ln="$9"
+//RS test_binary="${10}"
+//RS test_name="${11}"
+//RS bootstrap_unshare="${12}"
+//RS bootstrap_mount="${13}"
+//RS bootstrap_shell="${14}"
+//RS # The binary under test is spawned inside the namespace, so its own runtime
+//RS # closure has to be staged as well. Without it the process cannot load its
+//RS # interpreter and dies with ENOENT before any package resolution happens.
+//RS subject_binary="${15}"
+//RS subject_image="${16:-}"
+//RS true_binary="${17:-}"
+//RS scratch_root="${TMPDIR:-/tmp}"
+//RS host_nix="$scratch_root/jet-no-nix-host-$$"
+//RS runtime_stage="$scratch_root/jet-no-nix-runtime-$$"
+//RS mount_real="$($readlink -f "$mount")"
+//RS umount_real="$($readlink -f "$umount")"
+//RS mkdir_real="$($readlink -f "$mkdir")"
+//RS set -f
+//RS emit_store_root() {
+//RS     case "$1" in
+//RS         /nix/store/*)
+//RS             token=${1#/nix/store/}
+//RS             printf '/nix/store/%s\n' "${token%%/*}"
+//RS             resolved="$($readlink -f "$1" 2>/dev/null || true)"
+//RS             case "$resolved" in
+//RS                 /nix/store/*)
+//RS                     token=${resolved#/nix/store/}
+//RS                     printf '/nix/store/%s\n' "${token%%/*}"
+//RS                     ;;
+//RS             esac
+//RS             ;;
+//RS     esac
+//RS }
+//RS store_roots() {
+//RS     if [ -f "$1" ]; then
+//RS         for token in $($ldd "$1"); do
+//RS             emit_store_root "$token"
+//RS         done
+//RS     fi
+//RS     emit_store_root "$($readlink -f "$1")"
+//RS }
+//RS runtime_roots="$(
+//RS     store_roots "$test_binary"
+//RS     [ -n "$subject_binary" ] && store_roots "$subject_binary"
+//RS     store_roots /bin
+//RS     store_roots /bin/sh
+//RS     store_roots /run/current-system/sw
+//RS     [ -n "$true_binary" ] && store_roots "$true_binary"
+//RS     for helper in "$unshare" "$mount" "$umount" "$shell" "$mkdir" "$ldd" "$readlink" "$sort" "$ln"; do
+//RS         store_roots "$helper"
+//RS     done
+//RS )"
+//RS runtime_roots=$(printf '%s\n' "$runtime_roots" | $sort -u)
+//RS loader=""
+//RS for token in $($ldd "$test_binary"); do
+//RS     case "$token" in
+//RS         */ld-linux*.so*) loader="$token" ;;
+//RS     esac
+//RS done
+//RS [ -n "$loader" ]
+//RS exec 9<"$loader"
+//RS loader=/proc/self/fd/9
+//RS 
+//RS stage_path() {
+//RS     case "$1" in
+//RS         /nix/store/*) printf '%s/store/%s\n' "$runtime_stage" "${1#/nix/store/}" ;;
+//RS         *) printf '%s\n' "$1" ;;
+//RS     esac
+//RS }
+//RS 
+//RS library_path=""
+//RS run() {
+//RS     if [ -n "$library_path" ]; then
+//RS         "$loader" --library-path "$library_path" "$@"
+//RS     else
+//RS         "$loader" "$@"
+//RS     fi
+//RS }
+//RS 
+//RS "$mkdir_real" --coreutils-prog=mkdir -p /nix
+//RS "$mkdir_real" --coreutils-prog=mkdir -p "$host_nix"
+//RS "$mkdir_real" --coreutils-prog=mkdir -p "$runtime_stage/store" "$runtime_stage/usr/bin"
+//RS "$mount_real" --rbind /nix "$host_nix"
+//RS "$mount_real" --make-rslave "$host_nix"
+//RS for runtime in $runtime_roots; do
+//RS     name=${runtime##*/}
+//RS     "$mkdir_real" --coreutils-prog=mkdir -p "$runtime_stage/store/$name"
+//RS     "$mount_real" --rbind "$host_nix/store/$name" "$runtime_stage/store/$name"
+//RS     "$mount_real" --make-rslave "$runtime_stage/store/$name"
+//RS done
+//RS for runtime in $runtime_roots; do
+//RS     name=${runtime##*/}
+//RS     for libdir in lib lib64; do
+//RS         path="$runtime_stage/store/$name/$libdir"
+//RS         if [ -d "$path" ]; then
+//RS             [ -z "$library_path" ] || library_path="$library_path:"
+//RS             library_path="$library_path$path"
+//RS         fi
+//RS     done
+//RS done
+//RS if [ -n "$subject_image" ]; then
+//RS     "$mount_real" --bind "$subject_image" "$subject_binary"
+//RS fi
+//RS if [ -n "$true_binary" ]; then
+//RS     true_real="$($readlink -f "$true_binary")"
+//RS     "$ln" -s "$(stage_path "$true_real")" "$runtime_stage/usr/bin/true"
+//RS fi
+//RS if [ -n "$bootstrap_unshare" ]; then
+//RS     "$ln" -s "$bootstrap_unshare" "$runtime_stage/usr/bin/unshare"
+//RS fi
+//RS if [ -n "$bootstrap_mount" ]; then
+//RS     "$ln" -s "$bootstrap_mount" "$runtime_stage/usr/bin/mount"
+//RS fi
+//RS if [ -n "$bootstrap_shell" ]; then
+//RS     "$ln" -s "$bootstrap_shell" "$runtime_stage/usr/bin/sh"
+//RS fi
+//RS if [ -n "$bootstrap_unshare$bootstrap_mount$bootstrap_shell" ]; then
+//RS     # Nix hosts often make /bin/sh a symlink into /nix/store. The projected
+//RS     # package can use that absolute interpreter after /nix/store is hidden.
+//RS     # Keep both canonical system-bin paths on the staged helper set.
+//RS     "$mount_real" --bind "$runtime_stage/usr/bin" /usr/bin
+//RS     "$mount_real" --bind "$runtime_stage/usr/bin" /bin
+//RS fi
+//RS 
+//RS mount="$(stage_path "$mount_real")"
+//RS umount="$(stage_path "$umount_real")"
+//RS run "$mount" -t tmpfs -o mode=0755 jet-no-nix /nix
+//RS run "$umount" -l "$host_nix"
+//RS test ! -e /nix/store
+//RS export LD_LIBRARY_PATH="$library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+//RS if [ -n "$library_path" ]; then
+//RS     exec "$loader" --library-path "$library_path" "$test_binary" "$test_name" --exact --include-ignored --nocapture
+//RS else
+//RS     exec "$loader" "$test_binary" "$test_name" --exact --include-ignored --nocapture
+//RS fi
+//RS "#;
+//RS 
+//RS         let mut command = Command::new(&unshare);
+//RS         command
+//RS             .args([
+//RS                 "--user",
+//RS                 "--map-root-user",
+//RS                 "--mount",
+//RS                 "--propagation",
+//RS                 "private",
+//RS             ])
+//RS             .args((network_mode == NetworkMode::Disabled).then_some("--net"))
+//RS             .arg(&shell)
+//RS             .args(["-c", script, "jet-no-nix-namespace"])
+//RS             .arg(&unshare)
+//RS             .arg(mount)
+//RS             .arg(umount)
+//RS             .arg(&shell)
+//RS             .arg(mkdir)
+//RS             .arg(ldd)
+//RS             .arg(readlink)
+//RS             .arg(sort)
+//RS             .arg(ln)
+//RS             .arg(test_binary)
+//RS             .arg(exact_test_name)
+//RS             .arg(
+//RS                 bootstrap_unshare
+//RS                     .as_deref()
+//RS                     .unwrap_or_else(|| Path::new("")),
+//RS             )
+//RS             .arg(bootstrap_mount.as_deref().unwrap_or_else(|| Path::new("")))
+//RS             .arg(bootstrap_shell.as_deref().unwrap_or_else(|| Path::new("")))
+//RS             .arg(subject_binary.as_os_str())
+//RS             .arg(
+//RS                 bootstrap_subject
+//RS                     .as_deref()
+//RS                     .unwrap_or_else(|| Path::new("")),
+//RS             )
+//RS             .arg(true_binary.as_os_str())
+//RS             .env(CHILD_MARKER, "1");
+//RS         let status = command
+//RS             .status()
+//RS             .unwrap_or_else(|error| panic!("starting no-host-store namespace: {error}"));
+//RS         let _ = fs::remove_dir_all(&bootstrap_root);
+//RS         assert!(
+//RS             status.success(),
+//RS             "no-host-store namespace proof failed for `{exact_test_name}`: {status}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn patch_interpreter(source: &Path, destination: &Path) -> Option<PathBuf> {
+//RS     let mut bytes = fs::read(source).ok()?;
+//RS     let replacement = b"/proc/self/fd/9";
+//RS     let marker = b"/nix/store/";
+//RS     let mut search_from = 0;
+//RS     loop {
+//RS         let offset = search_from
+//RS             + bytes[search_from..]
+//RS                 .windows(marker.len())
+//RS                 .position(|part| part == marker)?;
+//RS         let end = bytes[offset..]
+//RS             .iter()
+//RS             .position(|byte| *byte == 0)
+//RS             .map_or(bytes.len(), |length| offset + length);
+//RS         let value = &bytes[offset..end];
+//RS         if value.windows(8).any(|part| part == b"ld-linux") {
+//RS             if replacement.len() >= value.len() {
+//RS                 return None;
+//RS             }
+//RS             bytes[offset..end].fill(0);
+//RS             bytes[offset..offset + replacement.len()].copy_from_slice(replacement);
+//RS             break;
+//RS         }
+//RS         search_from = end.saturating_add(1);
+//RS     }
+//RS     fs::write(destination, bytes).ok()?;
+//RS     fs::set_permissions(destination, fs::metadata(source).ok()?.permissions()).ok()?;
+//RS     Some(destination.to_path_buf())
+//RS }
+//RS 
+//RS fn assert_no_host_store() {
+//RS     match std::fs::symlink_metadata("/nix/store") {
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS         Ok(_) => panic!("test child started with a visible /nix/store"),
+//RS         Err(error) => panic!("could not inspect /nix/store before Jetpack: {error}"),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn find_helper(name: &str) -> PathBuf {
+//RS     [
+//RS         PathBuf::from(format!("/run/current-system/sw/bin/{name}")),
+//RS         PathBuf::from(format!("/usr/bin/{name}")),
+//RS         PathBuf::from(format!("/bin/{name}")),
+//RS     ]
+//RS     .into_iter()
+//RS     .find(|path| path.is_file())
+//RS     .unwrap_or_else(|| panic!("required namespace helper `{name}` is not installed"))
+//RS }
+// END-PORT-PENDING 1163 tests/support/no_nix_namespace.rs:1-309
+
+// PORT-PENDING 1163 tests-support-nix-index-cache-server-module-group: tests/support/static_file_server.rs:1-144
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Disk-backed HTTP fixture for static publication tests.
+//RS //!
+//RS //! The server has no route map and no generated responses. Every successful
+//RS //! response comes from one regular file below the supplied publication root.
+//RS 
+//RS #![allow(dead_code)]
+//RS 
+//RS use std::fs;
+//RS use std::io::{Read, Write};
+//RS use std::net::{TcpListener, TcpStream};
+//RS use std::path::{Component, Path, PathBuf};
+//RS use std::sync::atomic::{AtomicBool, Ordering};
+//RS use std::sync::Arc;
+//RS use std::thread;
+//RS use std::time::Duration;
+//RS 
+//RS pub struct StaticFileServer {
+//RS     pub endpoint: String,
+//RS     stop: Arc<AtomicBool>,
+//RS     join: Option<thread::JoinHandle<()>>,
+//RS }
+//RS 
+//RS impl StaticFileServer {
+//RS     pub fn start(root: &Path) -> Self {
+//RS         fs::create_dir_all(root).expect("static publication root");
+//RS         let metadata = fs::symlink_metadata(root).expect("static publication metadata");
+//RS         assert!(metadata.is_dir(), "static publication root is not a directory");
+//RS         assert!(
+//RS             !metadata.file_type().is_symlink(),
+//RS             "static publication root must not be a symlink"
+//RS         );
+//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind static file server");
+//RS         listener
+//RS             .set_nonblocking(true)
+//RS             .expect("set static file server nonblocking");
+//RS         let address = listener.local_addr().expect("static file server address");
+//RS         let endpoint = format!("http://127.0.0.1:{}", address.port());
+//RS         let root = root.to_path_buf();
+//RS         let stop = Arc::new(AtomicBool::new(false));
+//RS         let thread_stop = Arc::clone(&stop);
+//RS         let thread_root = root.clone();
+//RS         let join = thread::spawn(move || {
+//RS             while !thread_stop.load(Ordering::Relaxed) {
+//RS                 match listener.accept() {
+//RS                     Ok((stream, _)) => serve_request(stream, &thread_root),
+//RS                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                         thread::sleep(Duration::from_millis(1));
+//RS                     }
+//RS                     Err(_) => break,
+//RS                 }
+//RS             }
+//RS         });
+//RS         Self {
+//RS             endpoint,
+//RS             stop,
+//RS             join: Some(join),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for StaticFileServer {
+//RS     fn drop(&mut self) {
+//RS         self.stop.store(true, Ordering::Relaxed);
+//RS         let _ = self
+//RS             .endpoint
+//RS             .strip_prefix("http://")
+//RS             .and_then(|address| TcpStream::connect(address).ok());
+//RS         if let Some(join) = self.join.take() {
+//RS             join.join().expect("static file server thread");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn serve_request(mut stream: TcpStream, root: &Path) {
+//RS     let mut request = [0u8; 16 * 1024];
+//RS     let count = stream.read(&mut request).unwrap_or_default();
+//RS     let Some((method, target)) = std::str::from_utf8(&request[..count])
+//RS         .ok()
+//RS         .and_then(|request| request.lines().next())
+//RS         .and_then(|line| {
+//RS             let mut fields = line.split_whitespace();
+//RS             Some((fields.next()?, fields.next()?))
+//RS         })
+//RS     else {
+//RS         respond(&mut stream, "400 Bad Request", "text/plain", b"");
+//RS         return;
+//RS     };
+//RS     if method != "GET" {
+//RS         respond(&mut stream, "405 Method Not Allowed", "text/plain", b"");
+//RS         return;
+//RS     }
+//RS     let path = target.split_once('?').map_or(target, |(path, _)| path);
+//RS     let path = path.split_once('#').map_or(path, |(path, _)| path);
+//RS     let Some(file) = safe_file_path(root, path) else {
+//RS         respond(&mut stream, "400 Bad Request", "text/plain", b"");
+//RS         return;
+//RS     };
+//RS     let body = match fs::symlink_metadata(&file) {
+//RS         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => None,
+//RS         Ok(_) => fs::read(&file).ok(),
+//RS         Err(_) => None,
+//RS     };
+//RS     match body {
+//RS         Some(body) => respond(&mut stream, "200 OK", content_type(&file), &body),
+//RS         None => respond(&mut stream, "404 Not Found", "text/plain", b""),
+//RS     }
+//RS }
+//RS 
+//RS fn safe_file_path(root: &Path, target: &str) -> Option<PathBuf> {
+//RS     let mut path = root.to_path_buf();
+//RS     for raw in target.strip_prefix('/')?.split('/') {
+//RS         if raw.is_empty() || raw.contains('\\') {
+//RS             return None;
+//RS         }
+//RS         let component = Path::new(raw).components().next()?;
+//RS         if !matches!(component, Component::Normal(_)) {
+//RS             return None;
+//RS         }
+//RS         path.push(raw);
+//RS         let metadata = fs::symlink_metadata(&path).ok()?;
+//RS         if metadata.file_type().is_symlink() {
+//RS             return None;
+//RS         }
+//RS     }
+//RS     (path != root).then_some(path)
+//RS }
+//RS 
+//RS fn content_type(path: &Path) -> &'static str {
+//RS     match path.extension().and_then(|value| value.to_str()) {
+//RS         Some("json") => "application/json",
+//RS         Some("zst") => "application/zstd",
+//RS         Some("nar") => "application/octet-stream",
+//RS         _ => "text/plain",
+//RS     }
+//RS }
+//RS 
+//RS fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &[u8]) {
+//RS     let header = format!(
+//RS         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+//RS         body.len()
+//RS     );
+//RS     let _ = stream.write_all(header.as_bytes());
+//RS     let _ = stream.write_all(body);
+//RS }
+// END-PORT-PENDING 1163 tests/support/static_file_server.rs:1-144
+

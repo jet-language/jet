@@ -1,0 +1,160 @@
+// PORT-PENDING 0066 crates-jet-foundation-src-hex-module-group: crates/jet-foundation/src/HotSwap.rs:1-156
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Backend-neutral facts for one live source edit.
+//RS //!
+//RS //! Sema owns the compatibility verdict and state-retention facts. Execution
+//RS //! adapters consume this record; they must not compare source or type shapes a
+//RS //! second time.
+//RS 
+//RS use crate::Game::JetGameChangeFact;
+//RS use crate::SchemaMigration::SchemaMigrationPlan;
+//RS /// Whether the changed module can be redefined in the resident process.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum HotSwapCompatibility {
+//RS     /// The module's runtime type surface is unchanged.
+//RS     Compatible,
+//RS     /// The module's runtime type surface changed and needs a clean restart.
+//RS     Incompatible { reason: String },
+//RS }
+//RS 
+//RS impl HotSwapCompatibility {
+//RS     /// Return whether a resident code replacement is permitted.
+//RS     pub const fn is_compatible(&self) -> bool {
+//RS         matches!(self, Self::Compatible)
+//RS     }
+//RS 
+//RS     /// Return the semantic restart reason, if the edit is incompatible.
+//RS     pub fn reason(&self) -> Option<&str> {
+//RS         match self {
+//RS             Self::Compatible => None,
+//RS             Self::Incompatible { reason } => Some(reason),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The semantic action an adapter must take for one persistent state key.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum StateRetentionDecision {
+//RS     /// Keep the existing value associated with the key.
+//RS     Preserve,
+//RS     /// Do not reuse the existing value; seed the key from the new bundle.
+//RS     Fresh { reason: String },
+//RS }
+//RS 
+//RS /// One state-key retention fact emitted by sema.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct StateRetentionFact {
+//RS     /// Canonical `module.alias::binding` identity used by `PersistStore`.
+//RS     pub key: String,
+//RS     pub decision: StateRetentionDecision,
+//RS }
+//RS 
+//RS impl StateRetentionFact {
+//RS     /// Build a fact that keeps the value for `key`.
+//RS     pub fn preserve(key: impl Into<String>) -> Self {
+//RS         Self {
+//RS             key: key.into(),
+//RS             decision: StateRetentionDecision::Preserve,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Build a fact that seeds `key` from the new declaration.
+//RS     pub fn fresh(key: impl Into<String>, reason: impl Into<String>) -> Self {
+//RS         Self {
+//RS             key: key.into(),
+//RS             decision: StateRetentionDecision::Fresh {
+//RS                 reason: reason.into(),
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     /// Return whether this fact keeps the existing state value.
+//RS     pub const fn is_preserved(&self) -> bool {
+//RS         matches!(self.decision, StateRetentionDecision::Preserve)
+//RS     }
+//RS }
+//RS 
+//RS /// Complete semantic verdict for one changed module.
+//RS ///
+//RS /// `changed` explains the compatibility verdict. `changed_functions` carries
+//RS /// canonical sema identities (`module.display::fn:name` and the matching
+//RS /// method forms) for every changed callable. `rechecked_items` is filled by the
+//RS /// incremental sema entry after the existing dependency/cache walk; adapters
+//RS /// may display it but never use it to make a second invalidation decision.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct HotSwapDecision {
+//RS     /// Stable module display/alias selected by the caller.
+//RS     pub module: String,
+//RS     pub compatibility: HotSwapCompatibility,
+//RS     pub changed: Vec<String>,
+//RS     pub changed_functions: Vec<String>,
+//RS     pub state: Vec<StateRetentionFact>,
+//RS     /// Canonical `#PublishedSchema` migration plans supplied by sema. The
+//RS     /// resident adapter applies these plans; it never reconstructs migration
+//RS     /// operations from source or a second schema table.
+//RS     pub schema_migrations: Vec<SchemaMigrationPlan>,
+//RS     pub rechecked_items: Vec<String>,
+//RS     /// Checked game change facts supplied by the watcher/build/package seam.
+//RS     /// Adapters publish these facts but never infer them from paths.
+//RS     pub change_facts: Vec<JetGameChangeFact>,
+//RS }
+//RS 
+//RS impl HotSwapDecision {
+//RS     /// Return whether the resident adapter may redefine code in place.
+//RS     pub fn is_compatible(&self) -> bool {
+//RS         self.compatibility.is_compatible()
+//RS     }
+//RS 
+//RS     /// Return whether the adapter must perform a clean restart.
+//RS     pub fn requires_restart(&self) -> bool {
+//RS         !self.is_compatible()
+//RS     }
+//RS 
+//RS     /// Attach the measured incremental semantic cone to this verdict.
+//RS     pub fn with_rechecked_items(mut self, mut items: Vec<String>) -> Self {
+//RS         items.sort();
+//RS         items.dedup();
+//RS         self.rechecked_items = items;
+//RS         self
+//RS     }
+//RS 
+//RS     /// Attach checked game change facts from the watcher/build/package seam.
+//RS     pub fn with_change_facts(mut self, mut facts: Vec<JetGameChangeFact>) -> Self {
+//RS         facts.sort_by(|left, right| {
+//RS             left.path
+//RS                 .cmp(&right.path)
+//RS                 .then_with(|| left.kind.cmp(&right.kind))
+//RS         });
+//RS         self.change_facts = facts;
+//RS         self
+//RS     }
+//RS 
+//RS     /// Attach canonical published-schema migration plans from sema.
+//RS     pub fn with_schema_migrations(mut self, mut plans: Vec<SchemaMigrationPlan>) -> Self {
+//RS         plans.sort_by(|left, right| left.type_name.cmp(&right.type_name));
+//RS         self.schema_migrations = plans;
+//RS         self
+//RS     }
+//RS 
+//RS     /// Borrow canonical migration plans without exposing adapter storage.
+//RS     pub fn schema_migrations(&self) -> &[SchemaMigrationPlan] {
+//RS         &self.schema_migrations
+//RS     }
+//RS 
+//RS     /// Borrow checked game change facts without exposing adapter storage.
+//RS     pub fn change_facts(&self) -> &[JetGameChangeFact] {
+//RS         &self.change_facts
+//RS     }
+//RS 
+//RS     /// Borrow state-retention facts without exposing adapter-specific storage.
+//RS     pub fn state_facts(&self) -> &[StateRetentionFact] {
+//RS         &self.state
+//RS     }
+//RS 
+//RS     /// Borrow the measured semantic recheck set.
+//RS     pub fn rechecked(&self) -> &[String] {
+//RS         &self.rechecked_items
+//RS     }
+//RS }
+// END-PORT-PENDING 0066 crates/jet-foundation/src/HotSwap.rs:1-156
+

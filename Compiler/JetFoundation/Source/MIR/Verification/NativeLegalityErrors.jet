@@ -1,0 +1,55 @@
+// MIROptimization.rs:84-135. Native semantic failures retain the original
+// typed payloads; pass policy and pass wrappers are owned by the optimizer.
+#Error
+pub enum MIRLegalityError {
+    Validation(error: MIRValidationError)
+    InvalidSpan(function: MIRFunctionID?, span: Span)
+    DuplicateInstruction(function: MIRFunctionID, id: U64)
+    MissingValueMetadata(function: MIRFunctionID, value: MIRValueID)
+    UnexpectedValueMetadata(function: MIRFunctionID, value: MIRValueID)
+    InvalidType(function: MIRFunctionID, span: Span)
+    InvalidLayout(function: MIRFunctionID, span: Span)
+    InvalidReference(function: MIRFunctionID, subject: String, span: Span)
+    InvalidPlaceAccess(function: MIRFunctionID, place: U64, span: Span)
+    InvalidBorrow(function: MIRFunctionID, place: U64, span: Span)
+    InvalidOwnership(function: MIRFunctionID, value: MIRValueID, span: Span)
+    InvalidMove(function: MIRFunctionID, value: MIRValueID, span: Span)
+    InvalidMovedPlace(function: MIRFunctionID, place: U64, span: Span)
+    InvalidDrop(function: MIRFunctionID, place: U64, span: Span)
+    InvalidFailureEdge(function: MIRFunctionID, span: Span)
+    InvalidEffectEdge(function: MIRFunctionID, span: Span)
+    InvalidCoreCall(call: U64, key: String)
+    InvalidPreludeCall(call: U64, member: String)
+    InvalidFact(function: MIRFunctionID, span: Span)
+    InvalidCopyFact(function: MIRFunctionID, value: MIRValueID, fact: MIRCopyFact, span: Span)
+}
+
+pub fn mir_legality_error_text(error: MIRLegalityError) -> String Never! {
+    if error == {
+        .Validation(error) -> "invalid MIR: {mir_validation_error_text(error)}"
+        .InvalidSpan(_, span) -> "invalid MIR source span {span.start}..{span.end}"
+        .DuplicateInstruction(function, id) -> "function MirFunctionId({function.value}) has duplicate instruction ID {id}"
+        .MissingValueMetadata(function, value) -> "function MirFunctionId({function.value}) has no metadata for value MirValueId({value.value})"
+        .UnexpectedValueMetadata(function, value) -> "function MirFunctionId({function.value}) has metadata for missing value MirValueId({value.value})"
+        .InvalidType(function, span) -> "function MirFunctionId({function.value}) has an invalid type at {span.start}..{span.end}"
+        .InvalidLayout(function, span) -> "function MirFunctionId({function.value}) has a type/layout mismatch at {span.start}..{span.end}"
+        .InvalidReference(function, subject, span) -> "function MirFunctionId({function.value}) has invalid MIR reference {subject} at {span.start}..{span.end}"
+        .InvalidPlaceAccess(function, place, span) -> "function MirFunctionId({function.value}) writes through invalid place {place} at {span.start}..{span.end}"
+        .InvalidBorrow(function, place, span) -> "function MirFunctionId({function.value}) borrows unreadable place {place} at {span.start}..{span.end}"
+        .InvalidOwnership(function, value, span) -> "function MirFunctionId({function.value}) has invalid ownership for MirValueId({value.value}) at {span.start}..{span.end}"
+        .InvalidMove(function, value, span) -> "function MirFunctionId({function.value}) moves value MirValueId({value.value}) more than once at {span.start}..{span.end}"
+        .InvalidMovedPlace(function, place, span) -> "function MirFunctionId({function.value}) uses moved place {place} at {span.start}..{span.end}"
+        .InvalidDrop(function, place, span) -> "function MirFunctionId({function.value}) has an invalid drop for place {place} at {span.start}..{span.end}"
+        .InvalidFailureEdge(function, span) -> "function MirFunctionId({function.value}) has an invalid failure edge at {span.start}..{span.end}"
+        .InvalidEffectEdge(function, span) -> "function MirFunctionId({function.value}) has an invalid effect edge at {span.start}..{span.end}"
+        .InvalidCoreCall(call, key) -> "Core call {key:Debug} has invalid metadata for {call}"
+        .InvalidPreludeCall(call, member) -> "Prelude call {member:Debug} has invalid metadata for {call}"
+        .InvalidFact(function, span) -> "function MirFunctionId({function.value}) has an invalid optimization fact at {span.start}..{span.end}"
+        .InvalidCopyFact(function, value, fact, span) -> "function MirFunctionId({function.value}) copies MirValueId({value.value}) with fact `{mir_copy_fact_name(fact)}` its type does not admit at {span.start}..{span.end}"
+    }
+}
+
+// MIROptimization.rs:221-228.
+fn mir_native_invalid_row(subject: String, span: Span) -> MIRLegalityError Never! {
+    MIRLegalityError.InvalidReference{function: MIRFunctionID{value: U64{0}}, subject: subject, span: span}
+}

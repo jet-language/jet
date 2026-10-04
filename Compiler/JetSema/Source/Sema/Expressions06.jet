@@ -1,0 +1,2457 @@
+// PORT-PENDING 0403 crates-jet-sema-src-sema-checkerinfer-calls-method-calls-slice-1032: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:1032-3484
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     pub(crate) fn infer_method_call(
+//RS         &mut self,
+//RS         receiver: &mut Box<Expr>,
+//RS         method: &str,
+//RS         span: Span,
+//RS         owner_type_args: &mut Vec<Type>,
+//RS         type_args: &mut Vec<Type>,
+//RS         args: &mut Vec<crate::AST::CallArg>,
+//RS         recv_type_out: &mut Option<String>,
+//RS         resolved_ret_out: &mut Option<Type>,
+//RS     ) -> Option<Type> {
+//RS         if let Some(path) = checker_hardware_path(receiver, &self.core_imports) {
+//RS             let is_board = self
+//RS                 .core_imports
+//RS                 .get(path.first().map(String::as_str).unwrap_or_default())
+//RS                 .is_some_and(|module| module.starts_with("board."));
+//RS             if is_board && matches!(method, "read" | "write" | "set" | "clear") {
+//RS                 for arg in args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 let ret = if method == "read" {
+//RS                     Type::Int
+//RS                 } else {
+//RS                     Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS         }
+//RS         if method == "start"
+//RS             && matches!(receiver.as_ref(), Expr::Ident(name, _) if name == "dma")
+//RS             && args.len() >= 2
+//RS         {
+//RS             for arg in args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             let ret = Type::Named("__JetDmaTransfer".to_string());
+//RS             *recv_type_out = Some("__JetDma".to_string());
+//RS             *resolved_ret_out = Some(ret.clone());
+//RS             return Some(ret);
+//RS         }
+//RS         if method == "wait"
+//RS             && matches!(receiver.as_ref(), Expr::Ident(name, _) if self
+//RS                 .lookup(name)
+//RS                 .is_some_and(|info| matches!(&info.ty, Type::Named(ty) if ty == "__JetDmaTransfer")))
+//RS         {
+//RS             let ret = Type::Named("__JetDmaBuffer".to_string());
+//RS             *resolved_ret_out = Some(ret.clone());
+//RS             return Some(ret);
+//RS         }
+//RS         // D-VALIDATE1: the first pass elaborates `Validate.over(value)` into
+//RS         // the hidden builder literal. Chained calls infer their receiver again;
+//RS         // keep that compiler-owned node idempotent instead of trying to resolve
+//RS         // the erased `over` method on the materialized builder.
+//RS         if recv_type_out.as_deref() == Some(Syntax::INTERNAL_VALIDATE_OVER)
+//RS             && method == "over"
+//RS             && args.is_empty()
+//RS             && matches!(
+//RS                 receiver.as_ref(),
+//RS                 Expr::StructLit { type_name, .. }
+//RS                     if type_name == Syntax::TYPE_VALIDATE_BUILDER
+//RS             )
+//RS         {
+//RS             return resolved_ret_out.clone();
+//RS         }
+//RS         // D-MEMO1=A: `name.cache()` is a read-only projection of one
+//RS         // memoized function's store. It is resolved from the registered
+//RS         // function signature before ordinary receiver/method lookup.
+//RS         if method == Syntax::METHOD_MEMO_CACHE && args.is_empty() {
+//RS             if let Expr::Ident(name, _) = receiver.as_ref() {
+//RS                 if self
+//RS                     .funcs
+//RS                     .get(name)
+//RS                     .is_some_and(|signature| signature.memo_bound.is_some())
+//RS                 {
+//RS                     let stats = Type::Named(Syntax::TYPE_MEMO_STATS.to_string());
+//RS                     *resolved_ret_out = Some(stats.clone());
+//RS                     return Some(stats);
+//RS                 }
+//RS             }
+//RS         }
+//RS         if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER)
+//RS         {
+//RS             return self.infer_task_surface_method(
+//RS                 receiver,
+//RS                 method,
+//RS                 span,
+//RS                 args,
+//RS                 recv_type_out,
+//RS                 resolved_ret_out,
+//RS             );
+//RS         }
+//RS         // D-ALLOC2: allocator methods operate through the runtime's audited
+//RS         // interior-mutable storage. `alloc` may coexist with existing views;
+//RS         // `reset` invalidates them. Do not run the ordinary owner-read check
+//RS         // for either operation, or a valid live view produces E0220 before the
+//RS         // allocator-specific transition can run.
+//RS         let allocator_view_preserving_receiver = matches!(method, "alloc" | "try_alloc" | "reset")
+//RS             && matches!(receiver.as_ref(), Expr::Ident(name, _) if self
+//RS                 .lookup(name)
+//RS                 .is_some_and(|info| is_allocator_type(&info.ty)));
+//RS         // D-MOD2: an imported file can expose an inline module, so
+//RS         // `alias.module.item(...)` must resolve the module member before the
+//RS         // ordinary receiver walk tries to treat `alias.module` as a value.
+//RS         if let Expr::Field(base, inline_module, _) = receiver.as_ref() {
+//RS             if let Expr::Ident(alias, alias_span) = base.as_ref() {
+//RS                 if let Some(&module_idx) = self.imports.get(alias) {
+//RS                     let is_inline_module = self.modules.is_some_and(|modules| {
+//RS                         modules[module_idx].code_modules.contains_key(inline_module)
+//RS                     });
+//RS                     if is_inline_module {
+//RS                         return self.infer_import_call(
+//RS                             alias,
+//RS                             module_idx,
+//RS                             &format!("{inline_module}.{method}"),
+//RS                             *alias_span,
+//RS                             span,
+//RS                             type_args,
+//RS                             args,
+//RS                             resolved_ret_out,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-FOUND-RECEIPT1: `receipt` is one compiler-owned ambient handle.
+//RS         // The payload is checked against its declaration-owned #Receipt/#Codable
+//RS         // fact; no source constructor or `core.receipt` module exists.
+//RS         if method == Syntax::METHOD_RECEIPT_ATTACH
+//RS             && matches!(receiver.as_ref(), Expr::Ident(name, _) if name == "receipt")
+//RS             && self.lookup("receipt").is_none()
+//RS         {
+//RS             let ret = Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string());
+//RS             *recv_type_out = Some(Syntax::INTERNAL_RECEIPT_HANDLE.to_string());
+//RS             *resolved_ret_out = Some(ret.clone());
+//RS             if args.len() != 1 {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0103",
+//RS                     "`receipt.attach` takes exactly one argument".to_string(),
+//RS                     "one typed value becomes one named receipt section".to_string(),
+//RS                     "write `receipt.attach(value)`".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 return Some(ret);
+//RS             }
+//RS             let payload_ty = self.infer(&mut args[0].expr);
+//RS             let type_name = payload_ty.as_ref().and_then(|ty| match ty {
+//RS                 Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+//RS                 _ => None,
+//RS             });
+//RS             let Some(type_name) = type_name else {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E2411",
+//RS                     "receipt sections require a named `#Receipt` type".to_string(),
+//RS                     "the section schema and wire encoder are declaration-owned".to_string(),
+//RS                     "declare a `#Codable` record with `#Receipt(\"name\")`".to_string(),
+//RS                     Some(args[0].expr.span()),
+//RS                 ));
+//RS                 return Some(ret);
+//RS             };
+//RS             if self.registry.receipt_section(type_name).is_none() {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E2411",
+//RS                     format!("type `{type_name}` is not a `#Receipt` section"),
+//RS                     "receipt attachment accepts only declaration-owned typed sections".to_string(),
+//RS                     "add `#Receipt(\"name\")` and `#Codable` to the record".to_string(),
+//RS                     Some(args[0].expr.span()),
+//RS                 ));
+//RS             } else if let Some(payload_ty) = payload_ty.as_ref() {
+//RS                 self.check_encodable(payload_ty, args[0].expr.span());
+//RS             }
+//RS             return Some(ret);
+//RS         }
+//RS         self.check_call_receiver_evaluation(receiver, span);
+//RS         // D-SHAPE-PLACE1=A: `.view(a..b)` is retired. Keep the parser's
+//RS         // range-shaped recovery long enough to point at the old spelling,
+//RS         // but never admit it to the type system.
+//RS         if method == Syntax::METHOD_VIEW {
+//RS             self.infer(receiver);
+//RS             for arg in args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0214",
+//RS                 "`.view(a..b)` is now a bare range place".to_string(),
+//RS                 "place access follows the sigil reading rule".to_string(),
+//RS                 "replace `value.view(a..b)` with `value[a..b]`".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         // D-TYPEDTEXT1=D: `SQL.raw("…")` / `HTML.raw("…")` — the sole audited
+//RS         // escape from a runtime `String` into a typed-text position. `SQL`/
+//RS         // `HTML` here name the type, not a value (checked via `lookup` so a
+//RS         // shadowing local of that name still resolves normally below).
+//RS         if method == "raw" {
+//RS             let (type_name, shadowed) = match receiver.as_ref() {
+//RS                 Expr::Ident(name, _) => (Some(name.clone()), self.lookup(name).is_some()),
+//RS                 Expr::Field(base, member, _) if matches!(base.as_ref(), Expr::Ident(..)) => {
+//RS                     let Expr::Ident(alias, _) = base.as_ref() else {
+//RS                         unreachable!("checked qualified type receiver")
+//RS                     };
+//RS                     (
+//RS                         Some(format!("{alias}.{member}")),
+//RS                         self.lookup(alias).is_some(),
+//RS                     )
+//RS                 }
+//RS                 _ => (None, false),
+//RS             };
+//RS             if let (Some(type_name), false) = (type_name, shadowed) {
+//RS                 let is_builtin =
+//RS                     Syntax::typed_head_kind(&type_name).is_some_and(|kind| kind.is_typed_text());
+//RS                 let checked = self.checked_text_type_name(&type_name);
+//RS                 let is_checked = checked.is_some();
+//RS                 if is_builtin || is_checked {
+//RS                     let result = checked
+//RS                         .map(|(canonical, _)| Type::Named(canonical))
+//RS                         .unwrap_or_else(|| Type::Named(type_name.clone()));
+//RS                     *resolved_ret_out = Some(result.clone());
+//RS                     if args.len() != 1 {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0103",
+//RS                             format!("`{}.raw()` takes exactly one argument", type_name),
+//RS                             "`.raw()` wraps one already-audited `String` as the escape hatch"
+//RS                                 .to_string(),
+//RS                             format!("write `{}.raw(text)`", type_name),
+//RS                             Some(span),
+//RS                         ));
+//RS                         return Some(result);
+//RS                     }
+//RS                     let arg_ty = self.infer(&mut args[0].expr);
+//RS                     if let Some(t) = arg_ty {
+//RS                         self.check_type_assignable(&Type::String, &t, args[0].expr.span());
+//RS                     }
+//RS                     if is_checked {
+//RS                         if !self.in_unsafe {
+//RS                             self.diags
+//RS                                 .push(Diagnostic::from_row("E0387", &[], Some(span)));
+//RS                         }
+//RS                     }
+//RS                     return Some(result);
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-PATHFS1 / E0340: `read_dir` is not a Jet API — teach the typed path path.
+//RS         if method == "read_dir" {
+//RS             self.infer(receiver); // still type-check the receiver
+//RS             for a in args.iter_mut() {
+//RS                 self.infer(&mut a.expr);
+//RS             }
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0340",
+//RS                 "`read_dir` is not a method in Jet".to_string(),
+//RS                 "Jet uses typed paths; raw-string directory helpers are not exposed".to_string(),
+//RS                 "write `Path.from(path).walk()` to list a directory recursively".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         // D-CAP2 (D-MEM1/S4): `.clone()` is not user-typable Jet syntax — `clone`
+//RS         // falls through to the ordinary "no such method" path below like any
+//RS         // other unrecognized name (I8: `copy x` is the one copy spelling).
+//RS         self.lint_allocation_hints(method, span);
+//RS         // D-DIST3 (ratified 2026-06-20): `.raw()` unwraps a distinct type.
+//RS         if method == crate::Syntax::METHOD_DISTINCT_RAW {
+//RS             self.borrow_ctx = true;
+//RS             let recv_ty = self.infer(receiver)?;
+//RS             if let Type::Named(ref n) = recv_ty {
+//RS                 if let Some(base) = self.registry.distinct_base(n).cloned() {
+//RS                     if !crate::Sema::knowledge_gate_allows(
+//RS                         crate::Sema::KnowledgePlane::Range,
+//RS                         crate::Sema::KnowledgeGate::RawProjection,
+//RS                     ) {
+//RS                         return None;
+//RS                     }
+//RS                     if !args.is_empty() {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0103",
+//RS                             format!(
+//RS                                 "`.{}()` takes no arguments",
+//RS                                 crate::Syntax::METHOD_DISTINCT_RAW
+//RS                             ),
+//RS                             "`.raw()` simply unwraps the base value — no arguments needed"
+//RS                                 .to_string(),
+//RS                             "write `.raw()` with no arguments".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                     *recv_type_out = Some(n.clone());
+//RS                     *resolved_ret_out = Some(base.clone());
+//RS                     return Some(base);
+//RS                 }
+//RS             }
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0311",
+//RS                 format!(
+//RS                     "`.{}()` is only valid on a distinct type value",
+//RS                     crate::Syntax::METHOD_DISTINCT_RAW
+//RS                 ),
+//RS                 "`.raw()` unwraps a distinct type to its base representation".to_string(),
+//RS                 format!(
+//RS                     "only call `.raw()` on a value whose type was declared with `{} distinct`",
+//RS                     crate::Syntax::SIGIL_BIND_IMMUT
+//RS                 ),
+//RS                 Some(span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         // D-TOOL4 (E2-M11): `expect(x).snapshot()` — the special snapshot
+//RS         // assertion. Recognized by checking the receiver type.
+//RS         if method == Syntax::BUILTIN_SNAPSHOT
+//RS             && self.core_module_path_from_receiver(receiver).is_none()
+//RS         {
+//RS             let recv_ty = self.infer(receiver);
+//RS             if recv_ty
+//RS                 .as_ref()
+//RS                 .map(|t| t == &Type::Named("__JetExpect__".to_string()))
+//RS                 .unwrap_or(false)
+//RS             {
+//RS                 // Valid: snapshot assertion — void, no return type.
+//RS                 return None;
+//RS             }
+//RS             // Not from expect() — error.
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E2901",
+//RS                 format!(
+//RS                     "`.{}()` is only valid on the result of `{}(…)`",
+//RS                     Syntax::BUILTIN_SNAPSHOT,
+//RS                     Syntax::BUILTIN_EXPECT
+//RS                 ),
+//RS                 "snapshot testing: call `expect(value).snapshot()` in a test block".to_string(),
+//RS                 format!("e.g. `{}(my_result).snapshot()`", Syntax::BUILTIN_EXPECT),
+//RS                 Some(span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         if let Expr::Ident(root, _) = &**receiver {
+//RS             if root == "File" && method == Syntax::FOREIGN_OPEN {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0038",
+//RS                     "`File.open` is not the M10 file API".to_string(),
+//RS                     "M10 uses whole-file helpers in `core.files`, not a `File.open` handle type"
+//RS                         .to_string(),
+//RS                     "import `core.files as fs` and call `fs.read(path)` or `fs.write(path, text)` \
+//RS                          (or `fs.open(path)` for a streaming handle)"
+//RS                         .to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 for a in args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS         }
+//RS         // D-PROTO1/D-PROTO2: `Payment.Client.client()` — static call on a dotted
+//RS         // protocol handle type (PascalCase.PascalCase).
+//RS         if let Expr::Field(base, leaf, _) = &**receiver {
+//RS             if let Expr::Ident(prefix, _) = &**base {
+//RS                 if prefix
+//RS                     .chars()
+//RS                     .next()
+//RS                     .is_some_and(|c| c.is_ascii_uppercase())
+//RS                 {
+//RS                     let full = format!("{prefix}.{leaf}");
+//RS                     if self.registry.method(&full, method).is_some() {
+//RS                         return self.check_static_method(
+//RS                             &full,
+//RS                             method,
+//RS                             span,
+//RS                             owner_type_args,
+//RS                             type_args,
+//RS                             args,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-ENC1: nested-namespace access — `encoding.json.to_string(x)` where `encoding`
+//RS         // is a library alias (`use core.encoding`) and `json` a registered submodule. The
+//RS         // method-call receiver is `Field(Ident(alias), leaf)`; resolve to the submodule
+//RS         // `<ns>.<leaf>` as a core call. Guarded by `is_known_core_module`, so it fires only
+//RS         // for real submodules (e.g. `core.encoding.json`), never plain field access.
+//RS         if let Expr::Field(base, leaf, _) = &**receiver {
+//RS             if let Expr::Ident(alias, alias_span) = &**base {
+//RS                 if let Some(ns) = self.core_imports.get(alias).cloned() {
+//RS                     self.record_import_alias_reference(alias, *alias_span);
+//RS                     if ns == "core.net.tls" && leaf == "ClientConfig" && method == "default" {
+//RS                         if !args.is_empty() {
+//RS                             self.diags.push(wrong_core_arity(
+//RS                                 "ClientConfig.default",
+//RS                                 0,
+//RS                                 args.len(),
+//RS                                 span,
+//RS                             ));
+//RS                             for arg in args.iter_mut() {
+//RS                                 self.infer(&mut arg.expr);
+//RS                             }
+//RS                         }
+//RS                         *recv_type_out = Some("TLSClientConfigType".to_string());
+//RS                         return Some(Type::Named("TLSClientConfig".to_string()));
+//RS                     }
+//RS                     if ns == "core.http.client" && leaf == "Client" && method == "new" {
+//RS                         if !args.is_empty() {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity("Client.new", 0, args.len(), span));
+//RS                             for arg in args.iter_mut() {
+//RS                                 self.infer(&mut arg.expr);
+//RS                             }
+//RS                         }
+//RS                         *recv_type_out = Some("HTTPClientType".to_string());
+//RS                         return Some(Type::Named("HTTPClient".to_string()));
+//RS                     }
+//RS                     if ns == "core.net.tls" && leaf == "RootCertificates" && method == "from_pem" {
+//RS                         if args.len() != 1 {
+//RS                             self.diags.push(wrong_core_arity(
+//RS                                 "RootCertificates.from_pem",
+//RS                                 1,
+//RS                                 args.len(),
+//RS                                 span,
+//RS                             ));
+//RS                         }
+//RS                         if let Some(arg) = args.first_mut() {
+//RS                             self.expect_core_arg(
+//RS                                 "RootCertificates.from_pem",
+//RS                                 0,
+//RS                                 &Type::List(Box::new(u8_ty())),
+//RS                                 arg,
+//RS                             );
+//RS                         }
+//RS                         *recv_type_out = Some("TLSRootCertificatesType".to_string());
+//RS                         return Some(result_ty(
+//RS                             Type::Named("TLSRootCertificates".to_string()),
+//RS                             Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS                         ));
+//RS                     }
+//RS                     if ns == "core.net.tls" && leaf == "ClientIdentity" && method == "from_pem" {
+//RS                         if args.len() != 2 {
+//RS                             self.diags.push(wrong_core_arity(
+//RS                                 "ClientIdentity.from_pem",
+//RS                                 2,
+//RS                                 args.len(),
+//RS                                 span,
+//RS                             ));
+//RS                         }
+//RS                         crate::Sema::CheckerCoreLib::require_exact_labels(
+//RS                             "ClientIdentity.from_pem",
+//RS                             args,
+//RS                             &[(0, "cert_chain"), (1, "private_key")],
+//RS                             span,
+//RS                             &mut self.diags,
+//RS                         );
+//RS                         for (index, arg) in args.iter_mut().enumerate() {
+//RS                             self.expect_core_arg(
+//RS                                 "ClientIdentity.from_pem",
+//RS                                 index,
+//RS                                 &Type::List(Box::new(u8_ty())),
+//RS                                 arg,
+//RS                             );
+//RS                         }
+//RS                         *recv_type_out = Some("TLSClientIdentityType".to_string());
+//RS                         return Some(result_ty(
+//RS                             Type::Named("TLSClientIdentity".to_string()),
+//RS                             Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS                         ));
+//RS                     }
+//RS                     if ns == "core.crypto.vault"
+//RS                         && leaf == "KeyUnlock"
+//RS                         && matches!(method, "Recipient" | "Passphrase")
+//RS                     {
+//RS                         if args.len() != 1 {
+//RS                             self.diags.push(wrong_core_arity(
+//RS                                 &format!("KeyUnlock.{method}"),
+//RS                                 1,
+//RS                                 args.len(),
+//RS                                 span,
+//RS                             ));
+//RS                         }
+//RS                         let expected = crate::Sema::Diagnostics::core_crypto_nominal(
+//RS                             if method == "Recipient" {
+//RS                                 Type::Named("X25519SecretKey".to_string())
+//RS                             } else {
+//RS                                 Type::Named("Secret".to_string())
+//RS                             },
+//RS                         );
+//RS                         if let Some(arg) = args.first_mut() {
+//RS                             self.expect_core_arg(&format!("KeyUnlock.{method}"), 0, &expected, arg);
+//RS                         }
+//RS                         **receiver = Expr::Ident("KeyUnlock".to_string(), span);
+//RS                         *resolved_ret_out = Some(Type::Named("KeyUnlock".to_string()));
+//RS                         return Some(Type::Named("KeyUnlock".to_string()));
+//RS                     }
+//RS                     // D-SOLVER-LIB1=A: `Solver` is a runtime handle, not a
+//RS                     // declared Core struct, so its constructor must be claimed
+//RS                     // before the generic Core type-item static route below.
+//RS                     if ns == "core.compute.solve" && leaf == Syntax::SOLVER_TYPE && method == "new"
+//RS                     {
+//RS                         if args.len() != 1 {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0101",
+//RS                                 format!("`Solver.new` takes 1 argument, got {}", args.len()),
+//RS                                 "solver construction needs one deterministic seed".to_string(),
+//RS                                 "write `Solve.Solver.new(seed)`".to_string(),
+//RS                                 Some(span),
+//RS                             ));
+//RS                         }
+//RS                         for a in args.iter_mut() {
+//RS                             self.infer(&mut a.expr);
+//RS                         }
+//RS                         let ret = Type::Named(Syntax::SOLVER_TYPE.to_string());
+//RS                         *recv_type_out = Some(Syntax::SOLVER_TYPE.to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     // `core.game` constructors mint runtime handles (GameScene,
+//RS                     // GameReplay, GameBackend) that `game.run` and codegen's
+//RS                     // `game_static_type` expect with the module-qualified
+//RS                     // receiver intact, so claim them before the generic Core
+//RS                     // type-item route rewrites the receiver to the source struct.
+//RS                     if ns == "core.game" {
+//RS                         match (leaf.as_str(), method) {
+//RS                             ("Scene", "new") => {
+//RS                                 if args.len() != 1 {
+//RS                                     self.diags.push(wrong_core_arity(
+//RS                                         "Scene.new",
+//RS                                         1,
+//RS                                         args.len(),
+//RS                                         span,
+//RS                                     ));
+//RS                                 }
+//RS                                 if let Some(arg) = args.get_mut(0) {
+//RS                                     self.expect_core_arg("Scene.new", 0, &Type::String, arg);
+//RS                                 }
+//RS                                 *recv_type_out = Some("GameSceneType".to_string());
+//RS                                 return Some(Type::Named("GameScene".to_string()));
+//RS                             }
+//RS                             ("Replay", "record") => {
+//RS                                 if args.len() != 1 {
+//RS                                     self.diags.push(wrong_core_arity(
+//RS                                         "Replay.record",
+//RS                                         1,
+//RS                                         args.len(),
+//RS                                         span,
+//RS                                     ));
+//RS                                 }
+//RS                                 if let Some(arg) = args.get_mut(0) {
+//RS                                     self.expect_core_arg("Replay.record", 0, &Type::String, arg);
+//RS                                     if let Expr::Str(parts, literal_span) = &arg.expr {
+//RS                                         if let [StrPart::Lit(path)] = parts.as_slice() {
+//RS                                             if crate::Syntax::artifact_kind(path)
+//RS                                                 != Some(crate::Syntax::ArtifactKind::GameReplay)
+//RS                                             {
+//RS                                                 let actual = crate::Syntax::artifact_kind(path);
+//RS                                                 let why = match actual {
+//RS                                                         Some(crate::Syntax::ArtifactKind::ProofReplay) => "that suffix identifies a proof replay, not a game input replay".to_string(),
+//RS                                                         Some(kind) => format!("that suffix identifies a {kind:?} artifact, not a game input replay"),
+//RS                                                         None => format!("game input replay paths end in `{}`", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
+//RS                                                     };
+//RS                                                 self.diags.push(Diagnostic::error(
+//RS                                                         "E0103",
+//RS                                                         format!("`Replay.record` needs a `{}` game replay path", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
+//RS                                                         why,
+//RS                                                         format!("rename the path to end in `{}`", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
+//RS                                                         Some(*literal_span),
+//RS                                                     ));
+//RS                                             }
+//RS                                         }
+//RS                                     }
+//RS                                 }
+//RS                                 *recv_type_out = Some("GameReplayType".to_string());
+//RS                                 return Some(Type::Named("GameReplay".to_string()));
+//RS                             }
+//RS                             ("Backend", "headless") => {
+//RS                                 if !args.is_empty() {
+//RS                                     self.diags.push(wrong_core_arity(
+//RS                                         "Backend.headless",
+//RS                                         0,
+//RS                                         args.len(),
+//RS                                         span,
+//RS                                     ));
+//RS                                     for a in args.iter_mut() {
+//RS                                         self.infer(&mut a.expr);
+//RS                                     }
+//RS                                 }
+//RS                                 *recv_type_out = Some("GameBackendType".to_string());
+//RS                                 return Some(Type::Named("GameBackend".to_string()));
+//RS                             }
+//RS                             _ => {}
+//RS                         }
+//RS                     }
+//RS                     if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
+//RS                         let type_name = if matches!(
+//RS                             ns.as_str(),
+//RS                             "core.http" | "core.http.client" | "core.http.server"
+//RS                         ) {
+//RS                             match leaf.as_str() {
+//RS                                 "Body" | "Headers" => leaf.clone(),
+//RS                                 "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
+//RS                                 | "Request" | "Response" | "Handler" | "Error" | "Proxy" => {
+//RS                                     format!("HTTP{leaf}")
+//RS                                 }
+//RS                                 "HTTPError" => "HTTPError".to_string(),
+//RS                                 _ => leaf.clone(),
+//RS                             }
+//RS                         } else {
+//RS                             leaf.clone()
+//RS                         };
+//RS                         **receiver = Expr::Ident(type_name.clone(), span);
+//RS                         // `core.mem` allocator fields are constructor sentinels, not
+//RS                         // ordinary static types. Preserve the checked return fact on
+//RS                         // the call node before the generic static-method fallback.
+//RS                         if matches!(type_name.as_str(), "Arena" | "Bump" | "Pool" | "Fixed") {
+//RS                             if let Some(ret) = alloc_method_return(
+//RS                                 &type_name,
+//RS                                 method,
+//RS                                 args,
+//RS                                 span,
+//RS                                 &mut self.diags,
+//RS                             ) {
+//RS                                 for arg in args.iter_mut() {
+//RS                                     self.infer(&mut arg.expr);
+//RS                                 }
+//RS                                 *recv_type_out = Some(type_name.clone());
+//RS                                 *resolved_ret_out = ret.clone();
+//RS                                 return ret;
+//RS                             }
+//RS                         }
+//RS                         if matches!(type_name.as_str(), "SigningKey" | "X25519SecretKey")
+//RS                             && method == "generate"
+//RS                         {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E1004",
+//RS                                     format!("`{type_name}.generate` was retired"),
+//RS                                     "constructors that draw entropy use `new_random` (D-SHAPE-CTORVERB1)".to_string(),
+//RS                                     format!("use `{type_name}.new_random()`"),
+//RS                                     Some(span),
+//RS                                 ));
+//RS                             for arg in args.iter_mut() {
+//RS                                 self.infer(&mut arg.expr);
+//RS                             }
+//RS                             let ret = result_ty(
+//RS                                 Type::Named(type_name.clone()),
+//RS                                 Type::Named("CryptoError".to_string()),
+//RS                             );
+//RS                             *recv_type_out = Some(type_name.clone());
+//RS                             *resolved_ret_out = Some(ret.clone());
+//RS                             return Some(ret);
+//RS                         }
+//RS                         if ns == "core.crypto.vault"
+//RS                             && type_name == "ExpiringSecret"
+//RS                             && method == "new"
+//RS                         {
+//RS                             if args.len() != 3 {
+//RS                                 self.diags.push(wrong_core_arity(
+//RS                                     "ExpiringSecret.new",
+//RS                                     3,
+//RS                                     args.len(),
+//RS                                     span,
+//RS                                 ));
+//RS                                 for arg in args.iter_mut() {
+//RS                                     self.infer(&mut arg.expr);
+//RS                                 }
+//RS                                 return None;
+//RS                             }
+//RS                             let value_ty = self.infer(&mut args[0].expr).unwrap_or(Type::Int);
+//RS                             let allowed =
+//RS                                 crate::Sema::Diagnostics::is_expiring_secret_member_type(&value_ty);
+//RS                             if !allowed {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                         "E0112",
+//RS                                         format!(
+//RS                                             "`ExpiringSecret.new` cannot own {}",
+//RS                                             value_ty.show()
+//RS                                         ),
+//RS                                         "expiring secrets accept only the closed, move-only secret family with audited zeroizing Drop behavior".to_string(),
+//RS                                         "convert text or bytes to `crypto.Secret`, or use `crypto.SigningKey` / `crypto.X25519SecretKey`".to_string(),
+//RS                                         Some(args[0].expr.span()),
+//RS                                     ));
+//RS                             }
+//RS                             self.check_take_arg_ownership(
+//RS                                 "ExpiringSecret.new",
+//RS                                 0,
+//RS                                 &value_ty,
+//RS                                 &mut args[0],
+//RS                             );
+//RS                             self.expect_core_arg(
+//RS                                 "ExpiringSecret.new",
+//RS                                 1,
+//RS                                 &Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
+//RS                                 &mut args[1],
+//RS                             );
+//RS                             self.borrow_ctx = true;
+//RS                             let clock_ty = self.infer(&mut args[2].expr).unwrap_or_else(|| {
+//RS                                 Type::Named(crate::Syntax::CLOCK_TYPE.to_string())
+//RS                             });
+//RS                             if !crate::Sema::Diagnostics::is_clock_type(&clock_ty) {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                         "E0112",
+//RS                                         format!(
+//RS                                             "`ExpiringSecret.new` wants `Clock` for argument 3, but this is {}",
+//RS                                             clock_ty.show()
+//RS                                         ),
+//RS                                         "secret expiry must observe the explicitly injected clock"
+//RS                                             .to_string(),
+//RS                                         "use `Clock.new(...)` for deterministic code or `Clock.system()` for production"
+//RS                                             .to_string(),
+//RS                                         Some(args[2].expr.span()),
+//RS                                     ));
+//RS                             }
+//RS                             let ret = Type::Apply {
+//RS                                 name: "ExpiringSecret".to_string(),
+//RS                                 args: vec![value_ty],
+//RS                             };
+//RS                             let ret =
+//RS                                 if crate::Sema::Diagnostics::is_deterministic_clock_type(&clock_ty)
+//RS                                 {
+//RS                                     crate::Sema::Diagnostics::deterministic_clock_type(ret)
+//RS                                 } else if crate::Sema::Diagnostics::is_system_clock_type(&clock_ty)
+//RS                                 {
+//RS                                     crate::Sema::Diagnostics::system_clock_type(ret)
+//RS                                 } else {
+//RS                                     ret
+//RS                                 };
+//RS                             *recv_type_out = Some("ExpiringSecret".to_string());
+//RS                             *resolved_ret_out = Some(ret.clone());
+//RS                             return Some(ret);
+//RS                         }
+//RS                         let ty = Type::Named(type_name.clone());
+//RS                         let http_error = || Type::Named("HTTPError".to_string());
+//RS                         let http_result = |ok: Type| Type::Result {
+//RS                             ok: Box::new(ok),
+//RS                             err: Box::new(http_error()),
+//RS                         };
+//RS                         let http_static = match (type_name.as_str(), method, args.len()) {
+//RS                             ("HTTPMethod", "custom", 1) => {
+//RS                                 self.expect_core_arg(
+//RS                                     "Method.custom",
+//RS                                     0,
+//RS                                     &Type::String,
+//RS                                     &mut args[0],
+//RS                                 );
+//RS                                 Some(http_result(ty.clone()))
+//RS                             }
+//RS                             (
+//RS                                 "HTTPMethod",
+//RS                                 "get" | "head" | "post" | "put" | "delete" | "connect" | "options"
+//RS                                 | "trace" | "patch",
+//RS                                 0,
+//RS                             ) => Some(ty.clone()),
+//RS                             ("HTTPStatus", "new", 1) => {
+//RS                                 self.expect_core_arg("Status.new", 0, &Type::Int, &mut args[0]);
+//RS                                 Some(http_result(ty.clone()))
+//RS                             }
+//RS                             ("HTTPVersion", "http_1_0" | "http_1_1" | "http_2", 0) => {
+//RS                                 Some(ty.clone())
+//RS                             }
+//RS                             ("HTTPHeaderName", "new", 1) | ("HTTPHeaderValue", "new", 1) => {
+//RS                                 self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+//RS                                 Some(http_result(ty.clone()))
+//RS                             }
+//RS                             ("Headers", "new", 0) | ("Body", "empty", 0) => {
+//RS                                 Some(ty.clone())
+//RS                             }
+//RS                             ("Body", "bytes", 1) => {
+//RS                                 self.expect_core_arg(
+//RS                                     "Body.bytes",
+//RS                                     0,
+//RS                                     &Type::List(Box::new(u8_ty())),
+//RS                                     &mut args[0],
+//RS                                 );
+//RS                                 Some(ty.clone())
+//RS                             }
+//RS                             ("Body", "text", 1 | 2) => {
+//RS                                 self.expect_core_arg("Body.text", 0, &Type::String, &mut args[0]);
+//RS                                 if args.len() == 2 {
+//RS                                     self.expect_core_arg(
+//RS                                         "Body.text",
+//RS                                         1,
+//RS                                         &Type::Named("MIME".to_string()),
+//RS                                         &mut args[1],
+//RS                                     );
+//RS                                 }
+//RS                                 Some(ty.clone())
+//RS                             }
+//RS                             ("Body", "json", 1) => {
+//RS                                 self.infer(&mut args[0].expr);
+//RS                                 Some(ty.clone())
+//RS                             }
+//RS                             ("Body", "form" | "multipart", 1) => {
+//RS                                 self.expect_core_arg(
+//RS                                     method,
+//RS                                     0,
+//RS                                     &Type::Map {
+//RS                                         key: Box::new(Type::String),
+//RS                                         key_span: None,
+//RS                                         value: Box::new(Type::String),
+//RS                                     },
+//RS                                     &mut args[0],
+//RS                                 );
+//RS                                 Some(ty.clone())
+//RS                             }
+//RS                             ("Body", "reader", 1 | 2) => {
+//RS                                 self.expect_core_arg_moving(
+//RS                                     "Body.reader",
+//RS                                     0,
+//RS                                     &Type::Named("FileReader".to_string()),
+//RS                                     &mut args[0],
+//RS                                 );
+//RS                                 args[0].convention = AccessConvention::Move;
+//RS                                 if args.len() == 2 {
+//RS                                     self.expect_core_arg(
+//RS                                         "Body.reader",
+//RS                                         1,
+//RS                                         &Type::Int,
+//RS                                         &mut args[1],
+//RS                                     );
+//RS                                 }
+//RS                                 Some(http_result(ty.clone()))
+//RS                             }
+//RS                             _ => None,
+//RS                         };
+//RS                         if let Some(ret) = http_static {
+//RS                             *resolved_ret_out = Some(ret.clone());
+//RS                             return Some(ret);
+//RS                         }
+//RS                         if let Some(ret) =
+//RS                             Collections::builtin_method_return(&ty, method, args.len(), true)
+//RS                         {
+//RS                             self.record_static_time_effect(&type_name, method, span);
+//RS                             let ret =
+//RS                                 self.finish_builtin_method(receiver, method, &ty, args, span, ret);
+//RS                             let ret = if type_name == crate::Syntax::CLOCK_TYPE {
+//RS                                 if method == "system" {
+//RS                                     ret.map(crate::Sema::Diagnostics::system_clock_type)
+//RS                                 } else if method == "new" {
+//RS                                     ret.map(crate::Sema::Diagnostics::deterministic_clock_type)
+//RS                                 } else {
+//RS                                     ret
+//RS                                 }
+//RS                             } else if ns.as_str() == "core.crypto" {
+//RS                                 ret.map(crate::Sema::Diagnostics::core_crypto_nominal)
+//RS                             } else {
+//RS                                 ret
+//RS                             };
+//RS                             *resolved_ret_out = ret.clone();
+//RS                             return ret;
+//RS                         }
+//RS                         // Module-qualified payload constructors such as
+//RS                         // `encoding.DataEvent.Key("name")` rewrite to a type
+//RS                         // ident above, then parse as method calls. Resolve them
+//RS                         // as enum literals before the static-method fallback.
+//RS                         {
+//RS                             let has_variant = self
+//RS                                 .resolve_enum_variants_cloned(&type_name)
+//RS                                 .map(|v| v.contains_key(method))
+//RS                                 .unwrap_or(false);
+//RS                             if has_variant {
+//RS                                 let saved: Vec<Expr> = args
+//RS                                     .iter_mut()
+//RS                                     .map(|a| {
+//RS                                         std::mem::replace(
+//RS                                             &mut a.expr,
+//RS                                             Expr::Int(0, a.span, None, None),
+//RS                                         )
+//RS                                     })
+//RS                                     .collect();
+//RS                                 let mut enum_args: Vec<EnumLitArg> =
+//RS                                     saved.into_iter().map(EnumLitArg::Positional).collect();
+//RS                                 let ty = self.check_enum_lit(
+//RS                                     &type_name,
+//RS                                     method,
+//RS                                     &mut enum_args,
+//RS                                     span,
+//RS                                     Some(span),
+//RS                                 );
+//RS                                 for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
+//RS                                     if let EnumLitArg::Positional(expr) = enum_arg {
+//RS                                         arg.expr = expr;
+//RS                                     }
+//RS                                 }
+//RS                                 // Leave recv_type unset. TIR lowers
+//RS                                 // `DataEvent.Key(...)` only when the receiver
+//RS                                 // is a type ident and recv_type is None.
+//RS                                 **receiver = Expr::Ident(type_name.clone(), span);
+//RS                                 return Some(ty);
+//RS                             }
+//RS                         }
+//RS                         return self.check_static_method(
+//RS                             &type_name,
+//RS                             method,
+//RS                             span,
+//RS                             owner_type_args,
+//RS                             type_args,
+//RS                             args,
+//RS                         );
+//RS                     }
+//RS                     if ns == "core.encoding" && leaf == "EncodingLimits" && method == "safe" {
+//RS                         return self.check_static_method(
+//RS                             "EncodingLimits",
+//RS                             method,
+//RS                             span,
+//RS                             owner_type_args,
+//RS                             type_args,
+//RS                             args,
+//RS                         );
+//RS                     }
+//RS                     if ns == "core.encoding.cbor" && leaf == "CBOROptions" && method == "safe" {
+//RS                         return self.check_static_method(
+//RS                             "CBOROptions",
+//RS                             method,
+//RS                             span,
+//RS                             owner_type_args,
+//RS                             type_args,
+//RS                             args,
+//RS                         );
+//RS                     }
+//RS                     if ns == "core.encoding.xml"
+//RS                         && (leaf == "XMLLimits" || leaf == "XMLParseOptions")
+//RS                         && method == "safe"
+//RS                     {
+//RS                         return self.check_static_method(
+//RS                             leaf,
+//RS                             method,
+//RS                             span,
+//RS                             owner_type_args,
+//RS                             type_args,
+//RS                             args,
+//RS                         );
+//RS                     }
+//RS                     if ns == "core.email" && leaf == "Limits" && method == "safe" {
+//RS                         return self.check_static_method(
+//RS                             "Limits",
+//RS                             method,
+//RS                             span,
+//RS                             owner_type_args,
+//RS                             type_args,
+//RS                             args,
+//RS                         );
+//RS                     }
+//RS                     if ns == "core.data" && leaf == "DataLimits" && method == "safe" {
+//RS                         return self.check_static_method(
+//RS                             "DataLimits",
+//RS                             method,
+//RS                             span,
+//RS                             owner_type_args,
+//RS                             type_args,
+//RS                             args,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-VERDICT-1867-1: an inline module may publicly re-export a
+//RS         // foreign namespace. Keep the namespace hop structural here;
+//RS         // the actual library function still resolves through the same
+//RS         // imported-module checker as a direct `use`.
+//RS         if let Expr::Field(base, leaf, _) = &**receiver {
+//RS             if let Expr::Ident(inline_alias, inline_alias_span) = &**base {
+//RS                 if let Some(&mod_idx) = self
+//RS                     .inline_reexport_foreign
+//RS                     .get(&(inline_alias.clone(), leaf.clone()))
+//RS                 {
+//RS                     return self.infer_import_call(
+//RS                         inline_alias,
+//RS                         mod_idx,
+//RS                         method,
+//RS                         *inline_alias_span,
+//RS                         span,
+//RS                         type_args,
+//RS                         args,
+//RS                         resolved_ret_out,
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS         // Direct grouped imports bind a type name to its owning Core module.
+//RS         // Resolve constructors on that alias before the module-call fallback;
+//RS         // otherwise `use core.encoding.[DataTree]` is misread as
+//RS         // `core.encoding.Bool`.
+//RS         if let Expr::Ident(alias, alias_span) = &**receiver {
+//RS             if let (Some(module), Some(item)) = (
+//RS                 self.core_imports.get(alias).cloned(),
+//RS                 self.core_item_imports.get(alias).cloned(),
+//RS             ) {
+//RS                 if is_json_type_name(&item) {
+//RS                     if let Some(ret) = self.check_core_json_lit(method, args, span) {
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                 }
+//RS                 if module == "core.encoding"
+//RS                     && matches!(item.as_str(), "DataEvent" | "EncodingErrorKind" | "EncodingFormat")
+//RS                 {
+//RS                     let has_variant = self
+//RS                         .resolve_enum_variants_cloned(&item)
+//RS                         .is_some_and(|variants| variants.contains_key(method));
+//RS                     if has_variant {
+//RS                         let saved: Vec<Expr> = args
+//RS                             .iter_mut()
+//RS                             .map(|arg| {
+//RS                                 std::mem::replace(
+//RS                                     &mut arg.expr,
+//RS                                     Expr::Int(0, arg.span, None, None),
+//RS                                 )
+//RS                             })
+//RS                             .collect();
+//RS                         let mut enum_args: Vec<EnumLitArg> =
+//RS                             saved.into_iter().map(EnumLitArg::Positional).collect();
+//RS                         let ty = self.check_enum_lit(
+//RS                             &item,
+//RS                             method,
+//RS                             &mut enum_args,
+//RS                             span,
+//RS                             Some(span),
+//RS                         );
+//RS                         for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
+//RS                             if let EnumLitArg::Positional(expr) = enum_arg {
+//RS                                 arg.expr = expr;
+//RS                             }
+//RS                         }
+//RS                         **receiver = Expr::Ident(item, span);
+//RS                         *resolved_ret_out = Some(ty.clone());
+//RS                         return Some(ty);
+//RS                     }
+//RS                 }
+//RS                 if module == "core.encoding" && item == "EncodingLimits" && method == "safe" {
+//RS                     let ret = self.check_static_method(
+//RS                         &item,
+//RS                         method,
+//RS                         span,
+//RS                         owner_type_args,
+//RS                         type_args,
+//RS                         args,
+//RS                     );
+//RS                     *resolved_ret_out = ret.clone();
+//RS                     return ret;
+//RS                 }
+//RS                 if module == "core.crypto"
+//RS                     && item == "Secret"
+//RS                     && matches!(method, "from_text" | "from_bytes")
+//RS                 {
+//RS                     self.record_import_alias_reference(alias, *alias_span);
+//RS                     **receiver = Expr::Ident(item.clone(), span);
+//RS                     let ret = self.check_static_method(
+//RS                         &item,
+//RS                         method,
+//RS                         span,
+//RS                         owner_type_args,
+//RS                         type_args,
+//RS                         args,
+//RS                     );
+//RS                     *resolved_ret_out = ret.clone();
+//RS                     return ret;
+//RS                 }
+//RS                 let _ = alias_span;
+//RS             }
+//RS         }
+//RS         if let Some((module, alias, alias_span)) = self.core_module_path_from_receiver(receiver) {
+//RS             self.inferred_call_type_args = None;
+//RS             let ret = self.infer_core_call(
+//RS                 &module,
+//RS                 method,
+//RS                 Some(&alias),
+//RS                 alias_span,
+//RS                 span,
+//RS                 type_args,
+//RS                 args,
+//RS                 resolved_ret_out,
+//RS             );
+//RS             self.record_inferred_call_type_args(type_args);
+//RS             // A source-owned call returns its effective carrier for expression
+//RS             // inference and publishes its plain declared return separately.
+//RS             if resolved_ret_out.is_none() {
+//RS                 *resolved_ret_out = ret.clone();
+//RS             }
+//RS             return ret;
+//RS         }
+//RS         if let Expr::Ident(alias, alias_span) = &**receiver {
+//RS             if let Some(module) = self.core_imports.get(alias).cloned() {
+//RS                 self.inferred_call_type_args = None;
+//RS                 let ret = self.infer_core_call(
+//RS                     &module,
+//RS                     method,
+//RS                     Some(alias),
+//RS                     *alias_span,
+//RS                     span,
+//RS                     type_args,
+//RS                     args,
+//RS                     resolved_ret_out,
+//RS                 );
+//RS                 self.record_inferred_call_type_args(type_args);
+//RS                 if resolved_ret_out.is_none() {
+//RS                     *resolved_ret_out = ret.clone();
+//RS                 }
+//RS                 return ret;
+//RS             }
+//RS             if let Some(&mod_idx) = self.imports.get(alias) {
+//RS                 self.inferred_call_type_args = None;
+//RS                 let ret = self.infer_import_call(
+//RS                     alias,
+//RS                     mod_idx,
+//RS                     method,
+//RS                     *alias_span,
+//RS                     span,
+//RS                     type_args,
+//RS                     args,
+//RS                     resolved_ret_out,
+//RS                 );
+//RS                 self.record_inferred_call_type_args(type_args);
+//RS                 return ret;
+//RS             }
+//RS             // D-MOD2: inline code module call — `math.double(x)` where `math` is an
+//RS             // inline `module math { … }` in this file. Resolve via mangled name.
+//RS             if let Some(canonical) = self.code_modules.get(alias.as_str()) {
+//RS                 let mangled = jet_foundation::Names::member_name(canonical, method);
+//RS                 self.inferred_call_type_args = None;
+//RS                 let ret = self.infer_code_module_call(
+//RS                     alias,
+//RS                     &mangled,
+//RS                     *alias_span,
+//RS                     span,
+//RS                     type_args,
+//RS                     args,
+//RS                     resolved_ret_out,
+//RS                 );
+//RS                 self.record_inferred_call_type_args(type_args);
+//RS                 return ret;
+//RS             }
+//RS         }
+//RS         // D-TYPE2-SPELL1: an inline range uses the destination-owned
+//RS         // conversion seam. Runtime inputs stay fallible; a literal is
+//RS         // discharged here after the same interval proof used by literal
+//RS         // parameter/return checking.
+//RS         if self.lookup(crate::Syntax::TYPE_INT).is_none()
+//RS             && method == crate::Syntax::conversion_method_for_source("Int")
+//RS             && inline_range_descriptor(receiver).is_some()
+//RS         {
+//RS             let (lo, hi) =
+//RS                 inline_range_descriptor(receiver).expect("inline range descriptor checked above");
+//RS             if lo > hi {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0137",
+//RS                     format!("this range is empty — {lo} is after {hi}"),
+//RS                     "a range's low bound must not be greater than its high bound".to_string(),
+//RS                     format!("write `{hi}..{lo}` (swap the bounds), or fix the values"),
+//RS                     Some(span),
+//RS                 ));
+//RS                 for arg in args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS             if args.len() != 1 {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0104",
+//RS                     format!(
+//RS                         "`Int({lo}..{hi}).{method}` takes one value, got {}",
+//RS                         args.len()
+//RS                     ),
+//RS                     "a range conversion wraps exactly one integer value".to_string(),
+//RS                     format!("write `Int({lo}..{hi}).{method}(value)`"),
+//RS                     Some(span),
+//RS                 ));
+//RS                 for arg in args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS             let source = Type::Int;
+//RS             let old = self.expected_type.replace(source.clone());
+//RS             let got = self.infer(&mut args[0].expr);
+//RS             self.expected_type = old;
+//RS             if let Some(got) = got.as_ref() {
+//RS                 self.check_type_assignable(&source, got, args[0].expr.span());
+//RS             }
+//RS             let target = Type::InlineRange {
+//RS                 base: Box::new(Type::Int),
+//RS                 lo,
+//RS                 hi,
+//RS             };
+//RS             // The inner call is sema-approved descriptor metadata. TIR
+//RS             // reads it to recognize the static receiver without redoing
+//RS             // parser or type inference work in an engine.
+//RS             if let Expr::Call(call) = receiver.as_mut() {
+//RS                 call.resolved_ret = Some(target.clone());
+//RS             }
+//RS             if let Some((value, literal_span)) = inline_range_literal(&args[0].expr) {
+//RS                 if !IntegerInterval::new(i128::from(lo), i128::from(hi)).contains_exact(&value) {
+//RS                     self.diags.push(
+//RS                         crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
+//RS                             &value,
+//RS                             lo,
+//RS                             hi,
+//RS                             literal_span,
+//RS                         ),
+//RS                     );
+//RS                 }
+//RS                 *resolved_ret_out = Some(target.clone());
+//RS                 return Some(target);
+//RS             }
+//RS             // D-FAILURE-FOUNDATION1: ordinary calls auto-propagate their
+//RS             // Result carrier, which would hide the binding-level range rule
+//RS             // below by rewriting this method call to `Try`. Keep the source
+//RS             // diagnostic at the conversion seam while the binding is active;
+//RS             // an explicit `Try` has nonzero `failure_auto_depth` and remains
+//RS             // legal.
+//RS             if self.failure_auto_depth == 0 && self.current_binding_name.is_some() {
+//RS                 self.diags
+//RS                     .push(crate::Sema::Diagnostics::inline_range_runtime_conversion(
+//RS                         lo,
+//RS                         hi,
+//RS                         method,
+//RS                         args[0].expr.span(),
+//RS                     ));
+//RS             }
+//RS             let ret = Type::Result {
+//RS                 ok: Box::new(target),
+//RS                 err: Box::new(Type::String),
+//RS             };
+//RS             *resolved_ret_out = Some(ret.clone());
+//RS             return Some(ret);
+//RS         }
+//RS         // D-FOUND-PLATFORM1=A: a leading `.cmd("key")` is contextual syntax,
+//RS         // not a dynamic host shortcut call. The argument expected by `button`
+//RS         // supplies the UiShortcut type; turn the parser's empty receiver into
+//RS         // the canonical static owner before TIR lowering.
+//RS         if method == "cmd"
+//RS             && matches!(
+//RS                 receiver.as_ref(),
+//RS                 Expr::Ident(name, _) if name.is_empty() || name == "UIShortcut"
+//RS             )
+//RS         {
+//RS             let receiver_span = receiver.span();
+//RS             **receiver = Expr::Ident("UIShortcut".to_string(), receiver_span);
+//RS             let shortcut_ty = Type::Named("UIShortcut".to_string());
+//RS             *resolved_ret_out = Some(shortcut_ty.clone());
+//RS             if args.len() != 1 {
+//RS                 self.diags
+//RS                     .push(wrong_core_arity("UIShortcut.cmd", 1, args.len(), span));
+//RS                 for arg in args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return Some(shortcut_ty);
+//RS             }
+//RS             let literal = match args[0].expr.without_parens() {
+//RS                 Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+//RS                     crate::AST::StrPart::Lit(value) => Some(value.clone()),
+//RS                     _ => None,
+//RS                 },
+//RS                 _ => None,
+//RS             };
+//RS             self.expect_core_arg(
+//RS                 "UIShortcut.cmd",
+//RS                 0,
+//RS                 &Type::String,
+//RS                 &mut args[0],
+//RS             );
+//RS             let valid = args[0].label.is_none()
+//RS                 && literal.as_deref().is_some_and(|value| !value.trim().is_empty());
+//RS             if !valid {
+//RS                 let shortcut = literal.as_deref().unwrap_or("<expression>");
+//RS                 let reason = if args[0].label.is_some() {
+//RS                     "the key must be positional"
+//RS                 } else if literal.is_none() {
+//RS                     "the key must be one plain string literal"
+//RS                 } else {
+//RS                     "the key must not be empty"
+//RS                 };
+//RS                 self.diags.push(Diagnostic::from_row(
+//RS                     "E2938",
+//RS                     &[("shortcut", shortcut), ("reason", reason)],
+//RS                     Some(args[0].span),
+//RS                 ));
+//RS             }
+//RS             return Some(shortcut_ty);
+//RS         }
+//RS         if let Expr::Ident(type_name, type_span) = &**receiver {
+//RS             let display_type_name = self.display_type_name(type_name, None);
+//RS             // D-VALIDATE1: the use-site escape keeps the same `check` rule
+//RS             // vocabulary as an in-body validator. `over` is a compiler-owned
+//RS             // static head; it materializes the ordinary generated builder so
+//RS             // every later `check`/`finish` call remains normal Jet code.
+//RS             if type_name == Syntax::TYPE_VALIDATE
+//RS                 && method == "over"
+//RS                 && self.lookup(type_name).is_none()
+//RS             {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("Validate.over", 1, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let value_ty = self.infer(&mut args[0].expr)?;
+//RS                 let value_span = args[0].span;
+//RS                 let value =
+//RS                     std::mem::replace(&mut args[0].expr, Expr::Int(0, value_span, None, None));
+//RS                 let builder_ty = Type::Apply {
+//RS                     name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
+//RS                     args: vec![value_ty],
+//RS                 };
+//RS                 **receiver = Expr::StructLit {
+//RS                     type_name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
+//RS                     type_args: match &builder_ty {
+//RS                         Type::Apply { args, .. } => args.clone(),
+//RS                         _ => Vec::new(),
+//RS                     },
+//RS                     import_ns: None,
+//RS                     as_trait: None,
+//RS                     fields: vec![
+//RS                         ("value".to_string(), span, Expr::Copy(Box::new(value), span)),
+//RS                         ("errors".to_string(), span, Expr::ListLit(Vec::new(), span)),
+//RS                     ],
+//RS                     inferred: false,
+//RS                     span,
+//RS                 };
+//RS                 args.clear();
+//RS                 *recv_type_out = Some(Syntax::INTERNAL_VALIDATE_OVER.to_string());
+//RS                 *resolved_ret_out = Some(builder_ty.clone());
+//RS                 return Some(builder_ty);
+//RS             }
+//RS             // D-SERDE13=B: `Data.Text(x)` etc. — the retired spelling of the value
+//RS             // tree. Point at `DataTree` (no alias, I8) before generic resolution.
+//RS             if type_name == "Data" {
+//RS                 self.diags.push(data_renamed_to_datatree(*type_span));
+//RS                 for a in args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(json_ty());
+//RS             }
+//RS             // D-VALIDATE-DECODE1=B: one shared transform frames every
+//RS             // error in a child Result while preserving its success type.
+//RS             // Generated codecs use this for the field/index boundary;
+//RS             // it is an error-list helper, not another decode API.
+//RS             if type_name == "FieldError" && method == "under" {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("FieldError.under", 2, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("FieldError.under", 0, &Type::String, &mut args[0]);
+//RS                 let result_ty = self.infer(&mut args[1].expr)?;
+//RS                 if !matches!(&result_ty, Type::Result { err, .. } if **err == decode_error_ty()) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0905",
+//RS                             "`FieldError.under` expects a result with `[FieldError]` errors".to_string(),
+//RS                             "the framing helper preserves the child result and prefixes every accumulated decode failure".to_string(),
+//RS                             "pass a typed decode/accessor result, such as `tree.field(\"name\")?.decode<T>()`".to_string(),
+//RS                             Some(args[1].expr.span()),
+//RS                         ));
+//RS                 }
+//RS                 *resolved_ret_out = Some(result_ty.clone());
+//RS                 return Some(result_ty);
+//RS             }
+//RS             if self.lookup(type_name).is_none()
+//RS                 && type_name == crate::Syntax::EXPIRING_VALUE_TYPE
+//RS                 && method == "new"
+//RS             {
+//RS                 if args.len() != 3 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("ExpiringValue.new", 3, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let value_ty = self
+//RS                     .infer(&mut args[0].expr)
+//RS                     .unwrap_or(Type::Named("Unknown".to_string()));
+//RS                 self.expect_core_arg(
+//RS                     "ExpiringValue.new",
+//RS                     1,
+//RS                     &Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
+//RS                     &mut args[1],
+//RS                 );
+//RS                 self.expect_core_arg(
+//RS                     "ExpiringValue.new",
+//RS                     2,
+//RS                     &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
+//RS                     &mut args[2],
+//RS                 );
+//RS                 let ret = Type::Apply {
+//RS                     name: crate::Syntax::EXPIRING_VALUE_TYPE.to_string(),
+//RS                     args: vec![value_ty],
+//RS                 };
+//RS                 *recv_type_out = Some(crate::Syntax::EXPIRING_VALUE_TYPE.to_string());
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             if self.lookup(type_name).is_none()
+//RS                 && matches!(type_name.as_str(), "SigningKey" | "X25519SecretKey")
+//RS                 && method == "generate"
+//RS             {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E1004",
+//RS                     format!("`{type_name}.generate` was retired"),
+//RS                     "constructors that draw entropy use `new_random` (D-SHAPE-CTORVERB1)"
+//RS                         .to_string(),
+//RS                     format!("use `{type_name}.new_random()`"),
+//RS                     Some(span),
+//RS                 ));
+//RS                 for arg in args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return Some(result_ty(
+//RS                     Type::Named(type_name.clone()),
+//RS                     Type::Named("CryptoError".to_string()),
+//RS                 ));
+//RS             }
+//RS             // D-ENC-DYN1=A+: `DataTree`/`JSON`/`TOML`/`YAML`/`CSV` name the one dynamic
+//RS             // value; they are reserved core type names (a user type may not redefine them).
+//RS             // TIR lowers both constructors from `resolved_ret`; the checked
+//RS             // dynamic-value type is carried on the call node here, never
+//RS             // re-derived from the receiver's spelling.
+//RS             if is_json_type_name(type_name) {
+//RS                 if let Some(ret) = self.check_core_json_lit(method, args, span) {
+//RS                     *resolved_ret_out = Some(ret.clone());
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS             // D-DBDRIVER1: `DBValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` —
+//RS             // the tagged SQL parameter/column value construction (same mechanism as
+//RS             // `Data`/`JSON` above). `DBValue.Null` (no args) is a `Field`, not a
+//RS             // `MethodCall` — handled in `infer_field` alongside `Data.Null`.
+//RS             if type_name == Syntax::TYPE_DB_VALUE {
+//RS                 if let Some(ret) = self.check_core_dbvalue_lit(method, args, span) {
+//RS                     *resolved_ret_out = Some(ret.clone());
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS             // D-ATOMIC-WIDTH1=A: generic Atomic constructors are static
+//RS             // Prelude calls, not user associated methods. Keep the source
+//RS             // generic argument on the checked result so every backend emits
+//RS             // the same one-word carrier.
+//RS             if type_name == Syntax::TYPE_ATOMIC
+//RS                 && self.lookup(type_name).is_none()
+//RS                 && owner_type_args.len() == 1
+//RS             {
+//RS                 let inner = owner_type_args[0].clone();
+//RS                 if jet_foundation::Layout::atomic_scalar_type(&inner) {
+//RS                     let (expected, ret) = match method {
+//RS                         "new" => (
+//RS                             inner.clone(),
+//RS                             Type::Apply {
+//RS                                 name: Syntax::TYPE_ATOMIC.to_string(),
+//RS                                 args: vec![inner.clone()],
+//RS                             },
+//RS                         ),
+//RS                         "try_new" => (
+//RS                             inner.clone(),
+//RS                             Type::Result {
+//RS                                 ok: Box::new(Type::Apply {
+//RS                                     name: Syntax::TYPE_ATOMIC.to_string(),
+//RS                                     args: vec![inner.clone()],
+//RS                                 }),
+//RS                                 err: Box::new(Type::Named(
+//RS                                     Syntax::TYPE_ALLOC_ERROR.to_string(),
+//RS                                 )),
+//RS                             },
+//RS                         ),
+//RS                         _ => {
+//RS                             // This is not a constructor; let normal static
+//RS                             // method resolution produce its canonical error.
+//RS                             return None;
+//RS                         }
+//RS                     };
+//RS                     if args.len() != 1 {
+//RS                         self.diags.push(wrong_core_arity(
+//RS                             &format!("Atomic.{method}"),
+//RS                             1,
+//RS                             args.len(),
+//RS                             span,
+//RS                         ));
+//RS                         for arg in args.iter_mut() {
+//RS                             self.infer(&mut arg.expr);
+//RS                         }
+//RS                     } else {
+//RS                         self.expect_core_arg(
+//RS                             &format!("Atomic.{method}"),
+//RS                             0,
+//RS                             &expected,
+//RS                             &mut args[0],
+//RS                         );
+//RS                     }
+//RS                     *recv_type_out = Some(Syntax::TYPE_ATOMIC.to_string());
+//RS                     *resolved_ret_out = Some(ret.clone());
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS             {
+//RS                 let has_variant = self
+//RS                     .resolve_enum_variants_cloned(type_name)
+//RS                     .map(|v| v.contains_key(method))
+//RS                     .unwrap_or(false);
+//RS                 if has_variant {
+//RS                     let saved: Vec<Expr> = args
+//RS                         .iter_mut()
+//RS                         .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span, None, None)))
+//RS                         .collect();
+//RS                     let mut enum_args: Vec<EnumLitArg> =
+//RS                         saved.into_iter().map(EnumLitArg::Positional).collect();
+//RS                     let ty =
+//RS                         self.check_enum_lit(type_name, method, &mut enum_args, span, Some(span));
+//RS                     for (a, ea) in args.iter_mut().zip(enum_args) {
+//RS                         if let EnumLitArg::Positional(e) = ea {
+//RS                             a.expr = e;
+//RS                         }
+//RS                     }
+//RS                     return Some(ty);
+//RS                 }
+//RS             }
+//RS             let distinct_numeric_conversion = self.registry.is_distinct(type_name)
+//RS                 && self.registry.distinct_base(type_name).is_some_and(|base| {
+//RS                     base.is_numeric() && Syntax::numeric_conversion_source(method).is_some()
+//RS                 });
+//RS             if ((type_name == "EncodingLimits"
+//RS                 || type_name == "CBOROptions"
+//RS                 || type_name == "XMLLimits"
+//RS                 || type_name == "XMLParseOptions"
+//RS                 || type_name == "Limits"
+//RS                 || type_name == "DataLimits")
+//RS                 && method == "safe")
+//RS                 || (!distinct_numeric_conversion
+//RS                     && self.resolve_method_sig(type_name, method).is_some())
+//RS             {
+//RS                 self.record_static_time_effect(type_name, method, span);
+//RS                 let ret = self.check_static_method(
+//RS                     type_name,
+//RS                     method,
+//RS                     span,
+//RS                     owner_type_args,
+//RS                     type_args,
+//RS                     args,
+//RS                 );
+//RS                 let ret = if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
+//RS                     ret.map(crate::Sema::Diagnostics::system_clock_type)
+//RS                 } else {
+//RS                     ret
+//RS                 };
+//RS                 *resolved_ret_out = ret.clone();
+//RS                 return ret;
+//RS             }
+//RS             // D-FIDELITY-API1=A: `core.perf.Perf` static API. `use core.perf as perf`
+//RS             // remains accepted as the existing module-alias path.
+//RS             if type_name == "Perf" && !self.registry.contains("Perf") {
+//RS                 let ret = self.infer_core_call(
+//RS                     "core.perf",
+//RS                     method,
+//RS                     None,
+//RS                     receiver.span(),
+//RS                     span,
+//RS                     type_args,
+//RS                     args,
+//RS                     resolved_ret_out,
+//RS                 );
+//RS                 if resolved_ret_out.is_none() {
+//RS                     *resolved_ret_out = ret.clone();
+//RS                 }
+//RS                 return ret;
+//RS             }
+//RS             // A value binding wins over an ambient built-in type spelling.
+//RS             // Keep this aligned with TIR's static-call shadow check so sema
+//RS             // never accepts code that lowering must reject.
+//RS             if self.lookup(type_name).is_none() {
+//RS                 if let Some(ty) = builtin_type_from_ident(type_name) {
+//RS                     if let Some(ret) =
+//RS                         Collections::builtin_method_return(&ty, method, args.len(), true)
+//RS                     {
+//RS                         self.record_static_time_effect(type_name, method, span);
+//RS                         let ret =
+//RS                             self.finish_builtin_method(receiver, method, &ty, args, span, ret);
+//RS                         let ret = if type_name == crate::Syntax::CLOCK_TYPE {
+//RS                             if method == "system" {
+//RS                                 ret.map(crate::Sema::Diagnostics::system_clock_type)
+//RS                             } else if method == "new" {
+//RS                                 ret.map(crate::Sema::Diagnostics::deterministic_clock_type)
+//RS                             } else {
+//RS                                 ret
+//RS                             }
+//RS                         } else {
+//RS                             ret
+//RS                         };
+//RS                         // Keep the checked static return fact on the method-call
+//RS                         // node. TIR constructors consume this fact; re-deriving it
+//RS                         // from the receiver would weaken shadowing and fallibility.
+//RS                         *resolved_ret_out = ret.clone();
+//RS                         return ret;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             // D-SHAPE-CONVERT1=A: every numeric-backed distinct type,
+//RS             // including #UnitFamily members, gets the same destination-owned
+//RS             // conversion as its base (`UserId.from_int`, `Meter.from_float`).
+//RS             if self.registry.is_distinct(type_name) {
+//RS                 if let Some(base) = self.registry.distinct_base(type_name).cloned() {
+//RS                     let base_method = Syntax::conversion_method_for_source(&base.name());
+//RS                     if !base.is_numeric() && method == base_method {
+//RS                         if args.len() != 1 {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0104",
+//RS                                 format!(
+//RS                                     "`{display_type_name}.{method}` takes one value, got {}",
+//RS                                     args.len()
+//RS                                 ),
+//RS                                 "a distinct conversion wraps exactly one value of its base type"
+//RS                                     .to_string(),
+//RS                                 format!("write `{display_type_name}.{method}(value)`"),
+//RS                                 Some(span),
+//RS                             ));
+//RS                             for arg in args.iter_mut() {
+//RS                                 self.infer(&mut arg.expr);
+//RS                             }
+//RS                             return None;
+//RS                         }
+//RS                         let old = self.expected_type.replace(base.clone());
+//RS                         let got = self.infer(&mut args[0].expr);
+//RS                         self.expected_type = old;
+//RS                         if got.as_ref().is_some_and(|got| got != &base) {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E0108",
+//RS                                     format!("argument to `{display_type_name}.{method}` should be {}, not {}", base.name(), got.as_ref().unwrap().name()),
+//RS                                     "the source name fixes the conversion input type".to_string(),
+//RS                                     format!("pass a {} value", base.name()),
+//RS                                     Some(args[0].expr.span()),
+//RS                                 ));
+//RS                         }
+//RS                         let ret = Type::Named(type_name.clone());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     if let Some(source) = base
+//RS                         .is_numeric()
+//RS                         .then_some(method)
+//RS                         .and_then(Syntax::numeric_conversion_source)
+//RS                         .and_then(crate::AST::numeric_type_from_name)
+//RS                     {
+//RS                         if args.len() != 1 {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0104",
+//RS                                 format!(
+//RS                                     "`{display_type_name}.{method}` takes one value, got {}",
+//RS                                     args.len()
+//RS                                 ),
+//RS                                 "a distinct conversion wraps exactly one value of its base type"
+//RS                                     .to_string(),
+//RS                                 format!("write `{display_type_name}.{method}(value)`"),
+//RS                                 Some(span),
+//RS                             ));
+//RS                             for arg in args.iter_mut() {
+//RS                                 self.infer(&mut arg.expr);
+//RS                             }
+//RS                             return None;
+//RS                         }
+//RS                         let old = self.expected_type.replace(source.clone());
+//RS                         let got = self.infer(&mut args[0].expr);
+//RS                         self.expected_type = old;
+//RS                         if got.as_ref().is_some_and(|got| got != &source) {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E0108",
+//RS                                     format!("argument to `{display_type_name}.{method}` should be {}, not {}", source.name(), got.as_ref().unwrap().name()),
+//RS                                     "the source name fixes the conversion input type".to_string(),
+//RS                                     format!("pass a {} value", source.name()),
+//RS                                     Some(args[0].expr.span()),
+//RS                                 ));
+//RS                         }
+//RS                         let target = Type::Named(type_name.clone());
+//RS                         let base_conversion =
+//RS                             Collections::numeric_conversion_return(&base, method, 1)
+//RS                                 .flatten()
+//RS                                 .expect("numeric distinct conversion has a numeric base");
+//RS                         let converted_literal = match (&args[0].expr, &source, &base) {
+//RS                             (Expr::Int(n, literal_span, _, raw), source, base)
+//RS                                 if source.is_integer() && base.is_integer() =>
+//RS                             {
+//RS                                 let value = exact_integer_literal(*n, raw.as_deref());
+//RS                                 let fits_base = base
+//RS                                     .integer_range()
+//RS                                     .map(IntegerInterval::from_bounds)
+//RS                                     .is_none_or(|interval| interval.contains_exact(&value));
+//RS                                 fits_base.then_some((value, *literal_span))
+//RS                             }
+//RS                             (Expr::Float(n, literal_span, _, _), source, base)
+//RS                                 if source.is_float() && base.is_integer() && n.is_finite() =>
+//RS                             {
+//RS                                 let truncated = n.trunc();
+//RS                                 let (lo, upper_exclusive) = match base {
+//RS                                     Type::Int => (i64::MIN as f64, -(i64::MIN as f64)),
+//RS                                     Type::IntN { .. } => {
+//RS                                         let interval = IntegerInterval::from_bounds(
+//RS                                             base.integer_range().expect(
+//RS                                                 "fixed integer widths carry an interval fact",
+//RS                                             ),
+//RS                                         );
+//RS                                         (interval.lo as f64, interval.hi as f64 + 1.0)
+//RS                                     }
+//RS                                     _ => unreachable!(),
+//RS                                 };
+//RS                                 (truncated >= lo && truncated < upper_exclusive).then_some((
+//RS                                     crate::Numeric::CtBigInt::from_int(truncated as i64),
+//RS                                     *literal_span,
+//RS                                 ))
+//RS                             }
+//RS                             _ => None,
+//RS                         };
+//RS                         let literal_in_range = self.registry.distinct_range(type_name).and_then(|(lo, hi)| {
+//RS                                 converted_literal.map(|(value, literal_span)| {
+//RS                                     let interval = IntegerInterval::new(i128::from(lo), i128::from(hi));
+//RS                                     if !interval.contains_exact(&value) {
+//RS                                         let shown = value.to_string_rep();
+//RS                                         self.diags.push(Diagnostic::error(
+//RS                                             "E0135",
+//RS                                             format!("`{shown}` is outside `{display_type_name}`'s range {lo}..{hi}"),
+//RS                                             format!("a range type only holds values inside its bounds; `{shown}` can never be a `{display_type_name}`"),
+//RS                                             format!("use a value in `{lo}..{hi}`, or widen the type's range"),
+//RS                                             Some(literal_span),
+//RS                                         ));
+//RS                                     }
+//RS                                 })
+//RS                             }).is_some();
+//RS                         let ret = if matches!(base_conversion, Type::Result { .. })
+//RS                             || (!literal_in_range
+//RS                                 && self.registry.distinct_range(type_name).is_some())
+//RS                         {
+//RS                             Type::Result {
+//RS                                 ok: Box::new(target),
+//RS                                 err: Box::new(Type::String),
+//RS                             }
+//RS                         } else {
+//RS                             target
+//RS                         };
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             // D-COLLBREADTH1=A: `Set.from([...])` → `Set<T>`.
+//RS             // T is inferred from the list argument's element type.
+//RS             if type_name == "Set" && method == "from" && args.len() == 1 {
+//RS                 let arg_ty = self.infer(&mut args[0].expr);
+//RS                 let elem_ty = match arg_ty {
+//RS                     Some(Type::List(inner)) => *inner,
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 if !self.hashable_type_eligible(&elem_ty) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0506",
+//RS                             format!("`Set<{}>` is not valid — `{}` is not hashable", elem_ty.name(), elem_ty.name()),
+//RS                             "Set elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type".to_string(),
+//RS                             format!("change the element type to a hashable type, or use a `[{}]` list instead", elem_ty.name()),
+//RS                             Some(span),
+//RS                         ));
+//RS                 }
+//RS                 return Some(Type::Apply {
+//RS                     name: "Set".to_string(),
+//RS                     args: vec![elem_ty],
+//RS                 });
+//RS             }
+//RS             // #1478: `Set.new()` → empty HashSet; elem from annotation/expected.
+//RS             if type_name == "Set" && method == "new" && args.is_empty() {
+//RS                 let elem_ty = match &self.expected_type {
+//RS                     Some(Type::Apply { name, args, .. }) if name == "Set" && !args.is_empty() => {
+//RS                         args[0].clone()
+//RS                     }
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 if !self.hashable_type_eligible(&elem_ty) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0506",
+//RS                             format!("`Set<{}>` is not valid — `{}` is not hashable", elem_ty.name(), elem_ty.name()),
+//RS                             "Set elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type".to_string(),
+//RS                             format!("change the element type to a hashable type, or use a `[{}]` list instead", elem_ty.name()),
+//RS                             Some(span),
+//RS                         ));
+//RS                 }
+//RS                 let ret = Type::Apply {
+//RS                     name: "Set".to_string(),
+//RS                     args: vec![elem_ty],
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             // #1477: `Map.new()` / `Map.from_keys(keys, default)` / `Map.fromkeys(keys, default)`.
+//RS             if type_name == Syntax::TYPE_MAP && method == "new" && args.is_empty() {
+//RS                 let (key, value) = match &self.expected_type {
+//RS                     Some(Type::Map { key, value, .. }) => ((**key).clone(), (**value).clone()),
+//RS                     _ => (Type::Int, Type::Int),
+//RS                 };
+//RS                 let ret = Type::Map {
+//RS                     key: Box::new(key),
+//RS                     key_span: None,
+//RS                     value: Box::new(value),
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             if type_name == Syntax::TYPE_MAP
+//RS                 && matches!(method, "from_keys" | "fromkeys")
+//RS                 && args.len() == 2
+//RS             {
+//RS                 let keys_ty = self.infer(&mut args[0].expr);
+//RS                 let key = match keys_ty {
+//RS                     Some(Type::List(inner)) => *inner,
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 let value = self.infer(&mut args[1].expr).unwrap_or(Type::Int);
+//RS                 let ret = Type::Map {
+//RS                     key: Box::new(key),
+//RS                     key_span: None,
+//RS                     value: Box::new(value),
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             // D-ITERTOOLS1=A: `Rank.from([...])` → `Rank<T>`.
+//RS             if type_name == Syntax::TYPE_RANK && method == "from" && args.len() == 1 {
+//RS                 let arg_ty = self.infer(&mut args[0].expr);
+//RS                 let elem_ty = match arg_ty {
+//RS                     Some(Type::List(inner)) => *inner,
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 return Some(Type::Apply {
+//RS                     name: Syntax::TYPE_RANK.to_string(),
+//RS                     args: vec![elem_ty],
+//RS                 });
+//RS             }
+//RS             if type_name == Syntax::TYPE_RANK && method == "new" && args.is_empty() {
+//RS                 let elem_ty = match &self.expected_type {
+//RS                     Some(Type::Apply { name, args, .. })
+//RS                         if name == Syntax::TYPE_RANK && !args.is_empty() =>
+//RS                     {
+//RS                         args[0].clone()
+//RS                     }
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 let ret = Type::Apply {
+//RS                     name: Syntax::TYPE_RANK.to_string(),
+//RS                     args: vec![elem_ty],
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             // D-ITERTOOLS1=A: `PriorityQueue.from([...])` / `.new()`.
+//RS             if type_name == Syntax::TYPE_PRIORITY_QUEUE && method == "from" && args.len() == 1 {
+//RS                 let arg_ty = self.infer(&mut args[0].expr);
+//RS                 let elem_ty = match arg_ty {
+//RS                     Some(Type::List(inner)) => *inner,
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 return Some(Type::Apply {
+//RS                     name: Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+//RS                     args: vec![elem_ty],
+//RS                 });
+//RS             }
+//RS             if type_name == Syntax::TYPE_PRIORITY_QUEUE && method == "new" && args.is_empty() {
+//RS                 let elem_ty = match &self.expected_type {
+//RS                     Some(Type::Apply { name, args, .. })
+//RS                         if name == Syntax::TYPE_PRIORITY_QUEUE && !args.is_empty() =>
+//RS                     {
+//RS                         args[0].clone()
+//RS                     }
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 let ret = Type::Apply {
+//RS                     name: Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+//RS                     args: vec![elem_ty],
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             // D-ITERTOOLS1=A: `Cache<K,V>.new(capacity)`, expected type supplies K/V.
+//RS             if type_name == Syntax::TYPE_LRU && method == "new" && args.len() == 1 {
+//RS                 self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
+//RS                 let (key_ty, value_ty) = match &self.expected_type {
+//RS                     Some(Type::Apply { name, args, .. })
+//RS                         if name == Syntax::TYPE_LRU && args.len() >= 2 =>
+//RS                     {
+//RS                         (args[0].clone(), args[1].clone())
+//RS                     }
+//RS                     _ => (Type::String, Type::Int),
+//RS                 };
+//RS                 let ret = Type::Apply {
+//RS                     name: Syntax::TYPE_LRU.to_string(),
+//RS                     args: vec![key_ty, value_ty],
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             if type_name == Syntax::TYPE_BITS && method == "new" && args.is_empty() {
+//RS                 return Some(Type::Named(Syntax::TYPE_BITS.to_string()));
+//RS             }
+//RS             if type_name == Syntax::TYPE_BYTES && method == "new" && args.is_empty() {
+//RS                 return Some(Type::Named(Syntax::TYPE_BYTES.to_string()));
+//RS             }
+//RS             if type_name == Syntax::TYPE_BYTES && method == "with_capacity" && args.len() == 1 {
+//RS                 self.expect_core_arg("with_capacity", 0, &Type::Int, &mut args[0]);
+//RS                 return Some(Type::Named(Syntax::TYPE_BYTES.to_string()));
+//RS             }
+//RS             if type_name == Syntax::TYPE_BYTES && method == "from" && args.len() == 1 {
+//RS                 self.expect_core_arg(
+//RS                     "from",
+//RS                     0,
+//RS                     &Type::List(Box::new(Type::IntN {
+//RS                         signed: false,
+//RS                         bits: 8,
+//RS                     })),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 return Some(Type::Named(Syntax::TYPE_BYTES.to_string()));
+//RS             }
+//RS             // D-COLLBREADTH1=A: `Queue.new()` → `Queue<T>`.
+//RS             // T is inferred from the type annotation's expected type.
+//RS             // D-COLLBREADTH1=A: `Queue.init([...])` → collect list into VecDeque.
+//RS             if type_name == Syntax::TYPE_QUEUE && method == "init" && args.len() == 1 {
+//RS                 let arg_ty = self.infer(&mut args[0].expr);
+//RS                 let elem_ty = match arg_ty {
+//RS                     Some(Type::List(inner)) => *inner,
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 return Some(Type::Apply {
+//RS                     name: Syntax::TYPE_QUEUE.to_string(),
+//RS                     args: vec![elem_ty],
+//RS                 });
+//RS             }
+//RS             if type_name == Syntax::TYPE_QUEUE && method == "new" && args.is_empty() {
+//RS                 let elem_ty = match &self.expected_type {
+//RS                     Some(Type::Apply { name, args, .. })
+//RS                         if name == Syntax::TYPE_QUEUE && !args.is_empty() =>
+//RS                     {
+//RS                         args[0].clone()
+//RS                     }
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 let ret = Type::Apply {
+//RS                     name: Syntax::TYPE_QUEUE.to_string(),
+//RS                     args: vec![elem_ty],
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             // D-TAG1: `Tally.new()` → `Tally<T>`. Turbofish / annotation supplies T.
+//RS             if type_name == Syntax::TYPE_TALLY && method == "new" && args.is_empty() {
+//RS                 let elem_ty = type_args
+//RS                     .first()
+//RS                     .or_else(|| owner_type_args.first())
+//RS                     .cloned()
+//RS                     .unwrap_or_else(|| match &self.expected_type {
+//RS                         Some(Type::Apply { name, args, .. })
+//RS                             if name == Syntax::TYPE_TALLY && !args.is_empty() =>
+//RS                         {
+//RS                             args[0].clone()
+//RS                         }
+//RS                         _ => Type::Int,
+//RS                     });
+//RS                 if !self.hashable_type_eligible(&elem_ty) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0506",
+//RS                             format!(
+//RS                                 "`Tally<{}>` is not valid — `{}` is not hashable",
+//RS                                 elem_ty.name(),
+//RS                                 elem_ty.name()
+//RS                             ),
+//RS                             "Tally elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type".to_string(),
+//RS                             format!(
+//RS                                 "change the element type to a hashable type, or use a `[{}]` list instead",
+//RS                                 elem_ty.name()
+//RS                             ),
+//RS                             Some(span),
+//RS                         ));
+//RS                 }
+//RS                 let ret = Type::Apply {
+//RS                     name: Syntax::TYPE_TALLY.to_string(),
+//RS                     args: vec![elem_ty],
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             // D-CONC-SHARE1=A (amends D-MEM1 S6 / D-SHARED-API1=A):
+//RS             // `shared x` — a lock-guarded shared value (`Arc<RwLock<T>>`
+//RS             // class). `T` is inferred from the constructed value, or from an
+//RS             // enclosing `Shared<T>` expectation when the value is shape-free.
+//RS             // The parser desugars the prefix form to this one constructor node
+//RS             // and teaches E1115 on the retired
+//RS             // `Shared.new(x)` call, so every tier keeps one shape.
+//RS             if type_name == "Shared" && method == "new" {
+//RS                 self.record_memory_event(crate::Sema::MemoryEvent::new(
+//RS                     crate::Sema::MemoryEventKind::Allocation,
+//RS                     span,
+//RS                     "`shared` allocates shared storage",
+//RS                 ));
+//RS                 self.record_memory_event(crate::Sema::MemoryEvent::new(
+//RS                     crate::Sema::MemoryEventKind::RetainRelease,
+//RS                     span,
+//RS                     "`shared` introduces reference-counted ownership",
+//RS                 ));
+//RS                 if args.len() != 1 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0104",
+//RS                         format!("`shared` takes exactly one value, got {}", args.len()),
+//RS                         "a `Shared<T>` wraps exactly one starting value".to_string(),
+//RS                         "write `shared value`".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let expected_elem_ty =
+//RS                     owner_type_args
+//RS                         .first()
+//RS                         .cloned()
+//RS                         .or_else(|| match &self.expected_type {
+//RS                             Some(Type::Shared(inner)) => Some((**inner).clone()),
+//RS                             _ => None,
+//RS                         });
+//RS                 let elem_ty = match expected_elem_ty {
+//RS                     Some(expected) => self
+//RS                         .infer_with_expected(&mut args[0].expr, &expected)
+//RS                         .unwrap_or(expected),
+//RS                     None => self.infer(&mut args[0].expr).unwrap_or(Type::Int),
+//RS                 };
+//RS                 if self.shared_storage_problem(&elem_ty).is_some() {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E1102",
+//RS                             format!(
+//RS                                 "{} cannot be stored in `Shared<T>`",
+//RS                                 elem_ty.show()
+//RS                             ),
+//RS                             "a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized".to_string(),
+//RS                             "store the value itself in `Shared<T>`, then read and write its fields directly".to_string(),
+//RS                             Some(args[0].expr.span()),
+//RS                         ));
+//RS                 }
+//RS                 let ret = Type::Shared(Box::new(elem_ty));
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             // D-LOCALCELL1=A: `Cell.new(x)` constructs one thread-confined
+//RS             // interior-mutation handle. An annotation or explicit type
+//RS             // argument supplies `T` for `None`; otherwise `x` infers it.
+//RS             if type_name == "Cell" && method == "new" {
+//RS                 self.record_memory_event(crate::Sema::MemoryEvent::new(
+//RS                     crate::Sema::MemoryEventKind::Allocation,
+//RS                     span,
+//RS                     "`Cell.new` allocates local storage",
+//RS                 ));
+//RS                 if args.len() != 1 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0104",
+//RS                         format!("`Cell.new` takes exactly one value, got {}", args.len()),
+//RS                         "a `Cell<T>` stores exactly one starting value".to_string(),
+//RS                         "write `Cell.new(value)`".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let expected = type_args
+//RS                     .first()
+//RS                     .cloned()
+//RS                     .or_else(|| match &self.expected_type {
+//RS                         Some(Type::Apply { name, args }) if name == "Cell" && !args.is_empty() => {
+//RS                             Some(args[0].clone())
+//RS                         }
+//RS                         _ => None,
+//RS                     });
+//RS                 let saved_expected = self.expected_type.clone();
+//RS                 self.expected_type = expected.clone();
+//RS                 let inferred = self.infer(&mut args[0].expr).unwrap_or(Type::Int);
+//RS                 self.expected_type = saved_expected;
+//RS                 let elem_ty = expected.unwrap_or(inferred);
+//RS                 let ret = Type::Apply {
+//RS                     name: "Cell".to_string(),
+//RS                     args: vec![elem_ty],
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>.new()` — an empty generational
+//RS             // arena. `T` comes from the call-site turbofish (`Pool<Player>.new()`)
+//RS             // or, failing that, the binding's type annotation — same fallback shape
+//RS             // as `Queue.new()`/`Tally.new()` above.
+//RS             if type_name == "Pool" && method == "new" && args.is_empty() {
+//RS                 let elem_ty = type_args
+//RS                     .first()
+//RS                     .cloned()
+//RS                     .or_else(|| owner_type_args.first().cloned())
+//RS                     .unwrap_or_else(|| match &self.expected_type {
+//RS                         Some(Type::Apply { name, args, .. })
+//RS                             if name == "Pool" && !args.is_empty() =>
+//RS                         {
+//RS                             args[0].clone()
+//RS                         }
+//RS                         _ => Type::Int,
+//RS                     });
+//RS                 let ret = Type::Apply {
+//RS                     name: "Pool".to_string(),
+//RS                     args: vec![elem_ty],
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS             // D-PATHFS1: `Path.from(str)` — typed path constructor.
+//RS             if type_name == "Path" && method == "from" && !self.registry.contains("Path") {
+//RS                 if args.len() != 1 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0104",
+//RS                         format!("`Path.from` takes one string argument, got {}", args.len()),
+//RS                         "`Path.from` constructs a typed path from a string".to_string(),
+//RS                         "write `Path.from(some_string)`".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 for a in args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(Type::Named("Path".to_string()));
+//RS             }
+//RS             // D-SHIFT1 (c7shift): `Reader.over(bytes)` — bare static
+//RS             // constructor over `[U8]`, same shape as `Path.from` above (a
+//RS             // reserved core type name, no import needed; a user's own
+//RS             // `Reader` type always wins — `!self.registry.contains`).
+//RS             // Argument checking for all `Reader`/`Cursor` positions goes
+//RS             // through `check_shift_arg` (E0112 fallback included —
+//RS             // `check_type_assignable` alone lets a plain mismatch through).
+//RS             if type_name == "Reader" && method == "over" && !self.registry.contains("Reader") {
+//RS                 if args.len() != 1 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0104",
+//RS                         format!(
+//RS                             "`Reader.over` takes one `[U8]` argument, got {}",
+//RS                             args.len()
+//RS                         ),
+//RS                         "`Reader.over` wraps a byte list in a consuming, fallible cursor"
+//RS                             .to_string(),
+//RS                         "write `Reader.over(some_bytes)`".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 if let Some(arg) = args.first_mut() {
+//RS                     let want = Type::List(Box::new(u8_ty()));
+//RS                     self.check_shift_arg("Reader.over", &want, arg);
+//RS                     arg.flags.owned_last_use = arg.convention == AccessConvention::Read
+//RS                         && self.proven_owned_last_use(&arg.expr, &want);
+//RS                 }
+//RS                 for a in args.iter_mut().skip(1) {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(Type::Named("Reader".to_string()));
+//RS             }
+//RS             // D-SHIFT1 (c7shift): `Cursor.over(s)` — bare static constructor
+//RS             // over `String`, same shape as `Reader.over` above.
+//RS             if type_name == "Cursor" && method == "over" && !self.registry.contains("Cursor") {
+//RS                 if args.len() != 1 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0104",
+//RS                         format!(
+//RS                             "`Cursor.over` takes one `String` argument, got {}",
+//RS                             args.len()
+//RS                         ),
+//RS                         "`Cursor.over` wraps a string in a consuming, fallible text cursor"
+//RS                             .to_string(),
+//RS                         "write `Cursor.over(some_string)`".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 if let Some(arg) = args.first_mut() {
+//RS                     self.check_shift_arg("Cursor.over", &Type::String, arg);
+//RS                 }
+//RS                 for a in args.iter_mut().skip(1) {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(Type::Named("Cursor".to_string()));
+//RS             }
+//RS             // D-HOLE1: `Option.lift2(f, a, b)` — apply a two-argument function to
+//RS             // `a`/`b` only when both are present; `null` otherwise. A static
+//RS             // combinator (both optionals are plain arguments, not the receiver), so
+//RS             // it's resolved directly here, the same static-constructor shape as
+//RS             // `Set.from`/`Queue.new`/`Path.from` above.
+//RS             if type_name == "Option" && method == "lift2" && !self.registry.contains("Option") {
+//RS                 return self.check_option_lift2(args, span, resolved_ret_out);
+//RS             }
+//RS             // D-SPACE-GEOMETRY1=A: stock constructors retain their nominal
+//RS             // space in the returned type; the scalar fields are ordinary
+//RS             // Float values and therefore need no heap-backed tag.
+//RS             if is_geometry_type(type_name) && !self.registry.contains(type_name) {
+//RS                 if let Some(ret) = geometry_static_return_with_owner(
+//RS                     type_name,
+//RS                     method,
+//RS                     args.len(),
+//RS                     owner_type_args,
+//RS                 ) {
+//RS                     if let Some(expected) =
+//RS                         geometry_static_arg_types(type_name, method, owner_type_args)
+//RS                     {
+//RS                         for (idx, (arg, want)) in
+//RS                             args.iter_mut().zip(expected.iter()).enumerate()
+//RS                         {
+//RS                             self.expect_core_arg(
+//RS                                 &format!("{type_name}.{method}"),
+//RS                                 idx,
+//RS                                 want,
+//RS                                 arg,
+//RS                             );
+//RS                         }
+//RS                     } else {
+//RS                         for arg in args.iter_mut() {
+//RS                             self.infer(&mut arg.expr);
+//RS                         }
+//RS                     }
+//RS                     *recv_type_out = Some(type_name.clone());
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS 
+//RS             // D-SIMD2 / D-LINALG1: a STATIC method on a built-in math type —
+//RS             // `F32x4.splat(x)` / `Vec3.from_array([…])`. The arg is elaborated
+//RS             // against the method's expected type (so a literal becomes the
+//RS             // component type / the `[T#N]` bridge).
+//RS             if is_math_type(type_name) && !self.registry.contains(type_name) {
+//RS                 if let Some(ret) = math_static_return(type_name, method, args.len()) {
+//RS                     if let Some(want) = math_static_arg_ty(type_name, method) {
+//RS                         if let Some(arg) = args.first_mut() {
+//RS                             let old = self.expected_type.replace(want.clone());
+//RS                             let got = self.infer(&mut arg.expr);
+//RS                             self.expected_type = old;
+//RS                             if let Some(g) = got {
+//RS                                 if g != want {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0128",
+//RS                                         format!(
+//RS                                             "`{}.{}()` expects a `{}`, got `{}`",
+//RS                                             type_name,
+//RS                                             method,
+//RS                                             want.name(),
+//RS                                             g.name()
+//RS                                         ),
+//RS                                         format!(
+//RS                                             "`{}.{}` builds a `{}` from a `{}`",
+//RS                                             type_name,
+//RS                                             method,
+//RS                                             type_name,
+//RS                                             want.name()
+//RS                                         ),
+//RS                                         format!("pass a `{}` value", want.name()),
+//RS                                         Some(arg.expr.span()),
+//RS                                     ));
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS             // Built-in type identity does not depend on whether a particular
+//RS             // static method is registered. All valid builtin static shapes
+//RS             // returned above; an unknown one follows the ordinary E0102
+//RS             // method diagnostic instead of reinterpreting the type as a value.
+//RS             if self.lookup(type_name).is_none() && builtin_type_from_ident(type_name).is_some() {
+//RS                 return self.check_static_method(
+//RS                     type_name,
+//RS                     method,
+//RS                     span,
+//RS                     owner_type_args,
+//RS                     type_args,
+//RS                     args,
+//RS                 );
+//RS             }
+//RS         }
+//RS         // D-VALIDATE1: `Validate.over(s).check(...)` and `.finish()` are
+//RS         // surface methods on the generated builder. Validate the rule at
+//RS         // this boundary, then lower the call through the ordinary generated
+//RS         // methods so AOT, JIT, interpreter, and web share one implementation.
+//RS         if matches!(method, "check" | "finish") {
+//RS             if let Some(recv_ty) = self.infer(receiver) {
+//RS                 if let Type::Apply {
+//RS                     name,
+//RS                     args: type_args,
+//RS                 } = &recv_ty
+//RS                 {
+//RS                     if name == Syntax::TYPE_VALIDATE_BUILDER && type_args.len() == 1 {
+//RS                         let subject_ty = type_args[0].clone();
+//RS                         let builder_ty = recv_ty.clone();
+//RS                         *recv_type_out = Some(Syntax::TYPE_VALIDATE_BUILDER.to_string());
+//RS                         if method == "finish" {
+//RS                             if !args.is_empty() {
+//RS                                 self.diags.push(wrong_core_arity(
+//RS                                     "Validate.finish",
+//RS                                     0,
+//RS                                     args.len(),
+//RS                                     span,
+//RS                                 ));
+//RS                                 for arg in args.iter_mut() {
+//RS                                     self.infer(&mut arg.expr);
+//RS                                 }
+//RS                             }
+//RS                             let result = Type::Result {
+//RS                                 ok: Box::new(subject_ty),
+//RS                                 err: Box::new(decode_error_ty()),
+//RS                             };
+//RS                             *resolved_ret_out = Some(result.clone());
+//RS                             return Some(result);
+//RS                         }
+//RS 
+//RS                         if args.len() != 3 {
+//RS                             self.diags.push(crate::Sema::e0353_bad_validate_rule(span));
+//RS                             for arg in args.iter_mut() {
+//RS                                 self.infer(&mut arg.expr);
+//RS                             }
+//RS                             *resolved_ret_out = Some(builder_ty.clone());
+//RS                             return Some(builder_ty);
+//RS                         }
+//RS                         let valid_shape = args[0].label.is_none()
+//RS                             && args[1]
+//RS                                 .label
+//RS                                 .as_ref()
+//RS                                 .is_some_and(|(label, _)| label == "at")
+//RS                             && args[2].label.is_none();
+//RS                         let field_name = match &args[1].expr {
+//RS                             Expr::Ident(name, field_span) => Some((name.clone(), *field_span)),
+//RS                             // The first pass elaborates the bare field name to
+//RS                             // the String consumed by the generated method. A
+//RS                             // chained receiver can infer this call more than
+//RS                             // once, so accept that compiler-owned form only
+//RS                             // when the builder dispatch fact is already set.
+//RS                             Expr::Str(parts, field_span)
+//RS                                 if recv_type_out.as_deref()
+//RS                                     == Some(Syntax::TYPE_VALIDATE_BUILDER)
+//RS                                     && matches!(parts.as_slice(), [StrPart::Lit(_)]) =>
+//RS                             {
+//RS                                 let [StrPart::Lit(name)] = parts.as_slice() else {
+//RS                                     unreachable!("single literal checked above")
+//RS                                 };
+//RS                                 Some((name.clone(), *field_span))
+//RS                             }
+//RS                             _ => None,
+//RS                         };
+//RS                         let Some((field_name, field_span)) = field_name else {
+//RS                             self.diags
+//RS                                 .push(crate::Sema::e0353_bad_validate_rule(args[1].span));
+//RS                             for arg in args.iter_mut() {
+//RS                                 self.infer(&mut arg.expr);
+//RS                             }
+//RS                             *resolved_ret_out = Some(builder_ty.clone());
+//RS                             return Some(builder_ty);
+//RS                         };
+//RS                         if !valid_shape {
+//RS                             self.diags
+//RS                                 .push(crate::Sema::e0353_bad_validate_rule(args[1].span));
+//RS                             for arg in args.iter_mut() {
+//RS                                 self.infer(&mut arg.expr);
+//RS                             }
+//RS                             *resolved_ret_out = Some(builder_ty.clone());
+//RS                             return Some(builder_ty);
+//RS                         }
+//RS                         let subject_name = match &subject_ty {
+//RS                             Type::Named(name) | Type::Apply { name, .. } => name.as_str(),
+//RS                             _ => "",
+//RS                         };
+//RS                         let has_field = !subject_name.is_empty()
+//RS                             && self.struct_fields_for_type_name(subject_name).is_some_and(
+//RS                                 |fields| fields.iter().any(|(name, _, _)| name == &field_name),
+//RS                             );
+//RS                         if !has_field {
+//RS                             self.diags.push(crate::Sema::e0354_unknown_validate_field(
+//RS                                 &field_name,
+//RS                                 field_span,
+//RS                             ));
+//RS                         }
+//RS                         // `at:` is a path label, not a runtime expression. Resolve
+//RS                         // the bare sibling field now so the generated method receives
+//RS                         // the canonical String expected by the one FieldError contract.
+//RS                         args[1].expr =
+//RS                             Expr::Str(vec![StrPart::Lit(field_name)], args[1].expr.span());
+//RS                         if let Some(condition_ty) = self.infer(&mut args[0].expr) {
+//RS                             self.check_type_assignable(
+//RS                                 &Type::Bool,
+//RS                                 &condition_ty,
+//RS                                 args[0].expr.span(),
+//RS                             );
+//RS                         }
+//RS                         if let Some(reason_ty) = self.infer(&mut args[2].expr) {
+//RS                             self.check_type_assignable(
+//RS                                 &Type::String,
+//RS                                 &reason_ty,
+//RS                                 args[2].expr.span(),
+//RS                             );
+//RS                         }
+//RS                         *resolved_ret_out = Some(builder_ty.clone());
+//RS                         return Some(builder_ty);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         self.borrow_ctx = true;
+//RS         // D-MEM1 stage S5: chaining `.trim()`/`.after()`/`.before()` onto a
+//RS         // string-view name is the one builtin-method shape its bare `&str`
+//RS         // Rust place supports (the `_view` prelude helpers take `&str`) — the
+//RS         // general `Expr::Ident` E2307 check must not fire for THIS receiver
+//RS         // read. Every other method name reaches the same `self.infer(receiver)`
+//RS         // call with the flag left false, so it fires normally.
+//RS         let recv_is_exempt_view = matches!(receiver.as_ref(), Expr::Ident(n, _)
+//RS                 if self.is_string_view(n) && matches!(method, "trim" | "after" | "before"));
+//RS         if recv_is_exempt_view {
+//RS             self.allow_string_view_read = true;
+//RS         }
+//RS         let recv_ty = if allocator_view_preserving_receiver {
+//RS             let saved = self.suppress_partial_move_root_read;
+//RS             self.suppress_partial_move_root_read = true;
+//RS             let recv_ty = self.infer(receiver);
+//RS             self.suppress_partial_move_root_read = saved;
+//RS             recv_ty
+//RS         } else {
+//RS             self.infer(receiver)
+//RS         };
+//RS         if recv_is_exempt_view {
+//RS             self.allow_string_view_read = false;
+//RS         }
+//RS         let recv_ty = recv_ty?;
+//RS         let receiver_is_clock = crate::Sema::Diagnostics::is_clock_type(&recv_ty);
+//RS         let clock_is_deterministic =
+//RS             crate::Sema::Diagnostics::is_deterministic_clock_type(&recv_ty);
+//RS         let expiring_clock_is_deterministic = matches!(
+//RS             &recv_ty,
+//RS             Type::Tagged { marker, inner }
+//RS                 if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock))
+//RS                     && matches!(
+//RS                         inner.as_ref(),
+//RS                         Type::Apply { name, .. } if name == "ExpiringSecret"
+//RS                     )
+//RS         );
+//RS         // Most fact tags are type-transparent. These compiler-owned tags
+//RS         // carry method policy and must survive through method lookup.
+//RS         let recv_ty = match recv_ty {
+//RS             Type::Tagged { marker, inner }
+//RS                 if matches!(
+//RS                     marker,
+//RS                     crate::AST::TagMarker::Internal(
+//RS                         crate::AST::InternalTag::SharedGuardRead
+//RS                             | crate::AST::InternalTag::SharedGuardEdit
+//RS                             | crate::AST::InternalTag::TerminalFactSet
+//RS                             | crate::AST::InternalTag::CoreCryptoNominal
+//RS                             | crate::AST::InternalTag::SystemClock
+//RS                     )
+//RS                 ) =>
+//RS             {
+//RS                 Type::Tagged { marker, inner }
+//RS             }
+// END-PORT-PENDING 0403 crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:1032-3484
+

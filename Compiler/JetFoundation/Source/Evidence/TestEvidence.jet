@@ -1,0 +1,130 @@
+// Canonical typed test boundary; Prelude/Core/TestEvidence.rs:1–338.
+#Error
+pub enum TestEvidenceError {
+    SchemaConflict(expected: U16, found: U16)
+    ProducerConflict(expected: EvidenceProducerKind, found: EvidenceProducerKind)
+    EmptyReportID
+    EmptyClaimID
+    EmptyEvidenceID
+    InvalidOutcome(EvidenceOutcome)
+    InvalidExpectation(expectation: EvidenceExpectation, outcome: EvidenceOutcome)
+    IdentityConflict(field: String, expected: String, found: String)
+    IO(operation: String, path: String, message: String)
+    GoldenMissing(String)
+    GoldenUnreadable(String)
+    GoldenMismatch(path: String, diff: String)
+    FixtureMissing(String)
+    FixtureUnreadable(String)
+    ContradictoryOutcome(claim_id: String, existing: EvidenceOutcome, found: EvidenceOutcome)
+    Foundation(EvidenceMergeError)
+}
+pub fn test_evidence_error_text(error: TestEvidenceError) -> String Never! {
+    if error == {
+        .SchemaConflict(expected, found) -> "test evidence requires jet.evidence/v{expected}, found v{found}"
+        .ProducerConflict(expected, found) -> "test evidence producer must be {evidence_producer_name(expected)}, found {evidence_producer_name(found)}"
+        .EmptyReportID -> "test evidence report id must not be empty"
+        .EmptyClaimID -> "test evidence claim id must not be empty"
+        .EmptyEvidenceID -> "test evidence evidence id must not be empty"
+        .InvalidOutcome(outcome) -> "test evidence outcome {evidence_outcome_name(outcome)} is not a terminal test outcome"
+        .InvalidExpectation(expectation, outcome) -> "test evidence expectation {evidence_expectation_name(expectation)} cannot describe outcome {evidence_outcome_name(outcome)}"
+        .IdentityConflict(field, expected, found) -> "test evidence identity conflict for {field}: {expected} versus {found}"
+        .IO(operation, path, message) -> "test evidence {operation} failed for {path}: {message}"
+        .GoldenMissing(path) -> "golden file is missing: {path}\npath: {path}"
+        .GoldenUnreadable(path) -> "golden file cannot be read: {path}\npath: {path}"
+        .GoldenMismatch(path, diff) -> "golden file differs: {path}\npath: {path}\n{diff}"
+        .FixtureMissing(path) -> "fixture is missing: {path}\npath: {path}"
+        .FixtureUnreadable(path) -> "fixture cannot be read: {path}\npath: {path}"
+        .ContradictoryOutcome(claim, existing, found) -> "test claim {claim} has contradictory terminal outcomes: {evidence_outcome_name(existing)} versus {evidence_outcome_name(found)}"
+        .Foundation(foundation_error) -> evidence_merge_error_text(foundation_error)
+    }
+}
+pub fn test_evidence_report_parts(error: TestEvidenceError) -> (message: String, detail: String) Never! {
+    text :: test_evidence_error_text(error)
+    if !text.contains("\n") -> return (message: text, detail: "")
+    (message: text.before("\n"), detail: text.after("\n"))
+}
+fn validate_test_report(report: EvidenceReport) TestEvidenceError! {
+    if report.schema_version != EVIDENCE_REPORT_VERSION -> return Err(TestEvidenceError.SchemaConflict{expected: EVIDENCE_REPORT_VERSION, found: report.schema_version})
+    if report.producer != EvidenceProducerKind.Test -> return Err(TestEvidenceError.ProducerConflict{expected: EvidenceProducerKind.Test, found: report.producer})
+    if report.identity.report_id == "" -> return Err(TestEvidenceError.EmptyReportID)
+    return
+}
+fn is_terminal_test_outcome(outcome: EvidenceOutcome) -> Bool Never! {
+    if outcome == {
+        .Generated | .Passed | .Failed | .Skipped | .Unavailable | .Error -> true
+        else -> false
+    }
+}
+fn validate_test_record(report: EvidenceReport, record: EvidenceRecord) TestEvidenceError! {
+    if record.producer != EvidenceProducerKind.Test -> return Err(TestEvidenceError.ProducerConflict{expected: EvidenceProducerKind.Test, found: record.producer})
+    if record.identity.report_id != report.identity.report_id -> return Err(TestEvidenceError.IdentityConflict{field: "report_id", expected: report.identity.report_id, found: record.identity.report_id})
+    if record.identity.claim_id == "" -> return Err(TestEvidenceError.EmptyClaimID)
+    if record.identity.evidence_id == "" -> return Err(TestEvidenceError.EmptyEvidenceID)
+    if !is_terminal_test_outcome(record.outcome) -> return Err(TestEvidenceError.InvalidOutcome(record.outcome))
+    if evidence_record_validate(record) == {
+        .Err(error) -> return Err(TestEvidenceError.InvalidExpectation{expectation: error.expectation, outcome: error.outcome})
+        .Ok(_) -> {}
+    }
+    if report.identity.claim_id != "" && report.identity.claim_id != record.identity.claim_id -> return Err(TestEvidenceError.IdentityConflict{field: "claim_id", expected: report.identity.claim_id, found: record.identity.claim_id})
+    if report.identity.evidence_id != "" && report.identity.evidence_id != record.identity.evidence_id -> return Err(TestEvidenceError.IdentityConflict{field: "evidence_id", expected: report.identity.evidence_id, found: record.identity.evidence_id})
+    return
+}
+pub fn validate_test_records(report: EvidenceReport) TestEvidenceError! {
+    outcomes := [String:EvidenceOutcome]{}
+    evidence := [String:Int]{}
+    loop index in 0..<report.records.len() {
+        record :: report.records[index]
+        validate_test_record(report, record)
+        if outcomes.get(record.identity.claim_id) == { .Val(existing) -> {
+            if existing != record.outcome -> return Err(TestEvidenceError.ContradictoryOutcome{claim_id: record.identity.claim_id, existing: existing, found: record.outcome})
+        }
+        .None -> outcomes[record.identity.claim_id] = record.outcome }
+        if evidence.get(record.identity.evidence_id) == { .Val(existing) -> {
+            if report.records[existing] != record -> return Err(TestEvidenceError.Foundation(EvidenceMergeError.RecordConflict(record.identity.evidence_id)))
+        }
+        .None -> evidence[record.identity.evidence_id] = index }
+    }
+    return
+}
+pub fn record_test_case(report: &EvidenceReport, record: ^EvidenceRecord) TestEvidenceError! {
+    validate_test_report(report)
+    validate_test_record(report, record)
+    loop existing in report.records {
+        if existing.identity.claim_id == record.identity.claim_id {
+            if existing.outcome != record.outcome -> return Err(TestEvidenceError.ContradictoryOutcome{claim_id: record.identity.claim_id, existing: existing.outcome, found: record.outcome})
+            break
+        }
+    }
+    if record.derivation != None {
+        if evidence_report_add_record(&report, ^record) == {
+            .Ok(_) -> return
+            .Err(error) -> return Err(TestEvidenceError.Foundation(error))
+        }
+    } else {
+        derivation :: evidence_record_checked_derivation(record)
+        if evidence_report_add_record_with_derivation(&report, ^record, ^derivation) == {
+            .Ok(_) -> return
+            .Err(error) -> return Err(TestEvidenceError.Foundation(error))
+        }
+    }
+}
+pub fn finalize_test_report(report: ^EvidenceReport) -> EvidenceReport TestEvidenceError! {
+    validate_test_report(report)
+    validate_test_records(report)
+    value := report
+    records :: value.records
+    value.records = [EvidenceRecord]{}
+    loop record in records -> record_test_case(&value, ^record)
+    Ok(value)
+}
+// Validation without materializing the unused query rows at the report adapter.
+pub fn test_evidence_validate(report: EvidenceReport) TestEvidenceError! {
+    validate_test_report(report)
+    validate_test_records(report)
+    return
+}
+pub fn query_test_evidence(report: EvidenceReport, claim_id: String?) -> [EvidenceProjection] TestEvidenceError! {
+    validate_test_report(report)
+    validate_test_records(report)
+    Ok(evidence_report_query(report, claim_id))
+}

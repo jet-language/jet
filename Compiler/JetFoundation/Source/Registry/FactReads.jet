@@ -1,0 +1,279 @@
+// Rust Registry.rs FactRead/TYPED_FACT_READS and Prelude/Facts.jet planes.
+// One registry supplies source lookup, reflection, detail slots and tools menus.
+pub enum FactRead {
+    Layout Name Fields Range Dimension Measure Exactness Classification Obligation
+    States Effects Sendability Movedness Attribution Origin ViewProvenance UnitScaleProvenance Maturity
+    RegisteredPlane(name: String)
+    BuildPackageName BuildPackageVersion BuildOS BuildProfile BuildStampGit BuildStampDirty BuildStampToolchain BuildStampAt
+}
+
+struct FoundationFactReadRow {
+    read: FactRead
+    member: String?
+    reflection: String?
+    detail: String?
+    planes: [String]
+}
+
+fn foundation_fact_read_row(read: ^FactRead, member: ^String, reflection: ^String, detail: ^String?, planes: ^[String]) -> FoundationFactReadRow Never! {
+    FoundationFactReadRow{read: ^read, member: Val(^member), reflection: Val(^reflection), detail: ^detail, planes: ^planes}
+}
+
+FOUNDATION_FACT_READ_ROWS :: prep { [FoundationFactReadRow]{
+    foundation_fact_read_row(FactRead.Layout, "$layout", "Layout", None, [String]{"Type.Layout"}),
+    foundation_fact_read_row(FactRead.Name, "$name", "Nominal", None, [String]{"Type.Nominal"}),
+    foundation_fact_read_row(FactRead.Fields, "$fields", "Layout", None, [String]{"Type.Layout"}),
+    foundation_fact_read_row(FactRead.Range, "$range", "Range", Val("range"), [String]{"Type.Interval"}),
+    foundation_fact_read_row(FactRead.Dimension, "$dimension", "Dimension", Val("dimension"), [String]{"Type.Dimension"}),
+    foundation_fact_read_row(FactRead.Measure, "$measure", "Measure", Val("measure"), [String]{"Type.Measure"}),
+    foundation_fact_read_row(FactRead.Exactness, "$exactness", "Exactness", Val("exactness"), [String]{"Type.Exactness", "Exactness"}),
+    foundation_fact_read_row(FactRead.Classification, "$classification", "Classification", Val("classification"), [String]{"Type.Classification"}),
+    foundation_fact_read_row(FactRead.Obligation, "$obligation", "Obligation", Val("obligation"), [String]{"Type.Obligation"}),
+    foundation_fact_read_row(FactRead.States, "$states", "States", Val("state"), [String]{"States"}),
+    foundation_fact_read_row(FactRead.Effects, "$effects", "Effects", None, [String]{"Effects"}),
+    foundation_fact_read_row(FactRead.Sendability, "$sendability", "Sendability", Val("sendability"), [String]{"Sendability"}),
+    foundation_fact_read_row(FactRead.Movedness, "$movedness", "Movedness", Val("movedness"), [String]{"Movedness"}),
+    foundation_fact_read_row(FactRead.Attribution, "$attribution", "Attribution", Val("attribution"), [String]{"Attribution"}),
+    foundation_fact_read_row(FactRead.Origin, "$origin", "Origin", Val("origin"), [String]{"Origin"}),
+    foundation_fact_read_row(FactRead.ViewProvenance, "$view_provenance", "ViewProvenance", Val("view_provenance"), [String]{"ViewProvenance"}),
+    foundation_fact_read_row(FactRead.UnitScaleProvenance, "$unit_scale_provenance", "UnitScaleProvenance", Val("unit_scale_provenance"), [String]{"UnitScaleProvenance"}),
+    foundation_fact_read_row(FactRead.Maturity, "$maturity", "Maturity", Val("maturity"), [String]{"Maturity"}),
+    FoundationFactReadRow{read: FactRead.BuildProfile, member: Val("$profile"), reflection: None, detail: None, planes: [String]{}},
+    foundation_fact_read_row(FactRead.RegisteredPlane{name: "Flow"}, "$flow", "Flow", None, [String]{"Flow"}),
+    foundation_fact_read_row(FactRead.RegisteredPlane{name: "Taint"}, "$taint", "Taint", None, [String]{"Taint"}),
+    foundation_fact_read_row(FactRead.RegisteredPlane{name: "Duty"}, "$duty", "Duty", None, [String]{"Duty"})
+} }
+
+// Rust Registry::fact_read_members: typed order, BuildProfile, then the
+// registered planes without a dedicated carrier, in Prelude declaration order.
+pub fn fact_read_members() -> [String] Never! {
+    members := [String]{}
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        if row.member == .Val(member) -> &members.push(~member)
+    }
+    ^members
+}
+
+pub fn fact_read_kind(member: String) -> FactRead? {
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        if row.member == .Val(source) {
+            if source == member -> return Val(~row.read)
+        }
+    }
+    None
+}
+
+pub fn fact_read_source_member(read: FactRead) -> String? {
+    if read == .RegisteredPlane(_) -> return None
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        if row.read == read -> return ~row.member
+    }
+    None
+}
+
+pub fn fact_read_reflection_kind(read: FactRead) -> String? {
+    if read == .RegisteredPlane(name) {
+        loop row in FOUNDATION_FACT_READ_ROWS {
+            if row.planes.contains(name) -> return ~row.reflection
+        }
+        return None
+    }
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        if row.read == read -> return ~row.reflection
+    }
+    None
+}
+
+pub fn fact_read_detail_field(read: FactRead) -> String? {
+    if read == .RegisteredPlane(_) -> return None
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        if row.read == read -> return ~row.detail
+    }
+    None
+}
+
+pub fn fact_read_public_read_type(read: FactRead) -> String? {
+    if read == FactRead.Origin -> return Val("OriginInfo?")
+    None
+}
+
+// Syntax/core_surface.rs:31–54. Preserve ordered suffix matching (not file
+// extension splitting: ProofReplay's suffix includes a second dot/hyphen word).
+pub enum ArtifactKind { SourceMap Notebook Proof Trace GameReplay ProofReplay }
+pub struct ArtifactKindRow {
+    pub kind: ArtifactKind
+    pub suffix: String
+}
+pub ARTIFACT_KINDS :: prep { [ArtifactKindRow]{
+    ArtifactKindRow{kind: .SourceMap, suffix: ARTIFACT_EXT_SOURCE_MAP},
+    ArtifactKindRow{kind: .Notebook, suffix: ARTIFACT_EXT_NOTEBOOK},
+    ArtifactKindRow{kind: .Proof, suffix: ARTIFACT_EXT_PROOF},
+    ArtifactKindRow{kind: .Trace, suffix: ARTIFACT_EXT_TRACE},
+    ArtifactKindRow{kind: .GameReplay, suffix: ARTIFACT_EXT_GAME_REPLAY},
+    ArtifactKindRow{kind: .ProofReplay, suffix: ARTIFACT_EXT_PROOF_REPLAY},
+} }
+pub fn artifact_kind(path: String) -> ArtifactKind? Never! {
+    loop row in ARTIFACT_KINDS {
+        if path.ends_with(row.suffix) -> return Val(row.kind)
+    }
+    None
+}
+
+// The mark is part of the identifier; plain and marked names are distinct.
+pub fn is_comptime_name(name: String) -> Bool Never! { name.starts_with(COMPTIME_MARK) }
+pub fn is_fact_root(name: String) -> Bool Never! {
+    name == FACT_ROOT_BUILD || name == FACT_ROOT_PACKAGE || name == FACT_ROOT_PHASE || name == FACT_ROOT_PROGRAM
+}
+pub enum RetiredFactSpelling { Root(name: String) SubjectMember }
+pub fn retired_fact_spelling(name: String) -> RetiredFactSpelling? Never! {
+    if !name.starts_with(RETIRED_COMPTIME_MARK) -> return None
+    rest := name.slice(RETIRED_COMPTIME_MARK.len(), name.len()) // #4303
+    if rest == {
+        "build" -> Val(RetiredFactSpelling.Root{name: ~FACT_ROOT_BUILD})
+        "PHASE" -> Val(RetiredFactSpelling.Root{name: ~FACT_ROOT_PHASE})
+        "PROGRAM" -> Val(RetiredFactSpelling.Root{name: ~FACT_ROOT_PROGRAM})
+        "PACKAGE" -> Val(RetiredFactSpelling.Root{name: ~FACT_ROOT_PACKAGE})
+        "TYPE" | "FUNCTION" | "METHOD" | "CLOSURE" | "VALUE" -> Val(RetiredFactSpelling.SubjectMember)
+        else -> None
+    }
+}
+
+// #4475 D-UNICODE-CASE1: the canonical Unicode Uppercase property owner in
+// Syntax/NameCase.jet, never ASCII or mapping-change approximations.
+pub fn is_constant_name(name: String) -> Bool Never! {
+    !is_comptime_name(name) && !name.starts_with(RETIRED_COMPTIME_MARK) &&
+        name_has_uppercase(name) && name_has_case(name, NameCase.Screaming)
+}
+pub fn retired_constant_respelling(name: String) -> String? Never! {
+    if !name.starts_with(RETIRED_COMPTIME_MARK) -> return None
+    rest := name.slice(RETIRED_COMPTIME_MARK.len(), name.len()) // #4303
+    Val(canonical_name_case(rest, NameCase.Screaming))
+}
+
+pub fn terminal_fact(name: String) -> String? Never! {
+    loop fact in TERMINAL_FACTS {
+        if fact == name -> return Val(~fact)
+    }
+    None
+}
+pub fn access_label(sigil: String) -> String Never! {
+    if sigil == SIGIL_WRITE -> return ~WRITE_ACCESS_LABEL
+    if sigil == SIGIL_MOVE -> return ~MOVE_MARKER_LABEL
+    "the access marker"
+}
+
+// Syntax::TypedHeadKind's canonical existing carrier is MIRTypedHeadKind in
+// MIR/MIR.jet (also carried by TIR). Do not introduce a second enum universe.
+pub fn MIRTypedHeadKind.source_name(self) -> String Never! {
+    if self == {
+        .SQL -> ~DSL_BLOCK_SQL
+        .HTML -> ~MARKER_HTML
+        .Sh -> ~TYPE_SH
+        .URL -> ~TYPE_URL
+        .Path -> ~TYPE_PATH
+        .DateTime -> ~TYPE_DATETIME
+    }
+}
+pub fn MIRTypedHeadKind.internal_type_name(self) -> String Never! { self.source_name() }
+pub fn MIRTypedHeadKind.is_typed_text(self) -> Bool Never! {
+    self == .SQL || self == .HTML || self == .Sh
+}
+pub fn MIRTypedHeadKind.is_boundary(self) -> Bool Never! {
+    self == .URL || self == .Path || self == .DateTime
+}
+pub fn MIRTypedHeadKind.is_interpolated_template(self) -> Bool Never! {
+    self.is_typed_text() || self.is_boundary()
+}
+pub fn MIRTypedHeadKind.forbids_holes(self) -> Bool Never! { self == .DateTime }
+// core_owner_module/carrier_record_module already live at
+// MIR/MIR.jet::mir_boundary_head_owner_module/mir_boundary_head_carrier_module.
+// Keep those as the single owner, without allocating an intermediate source
+// name through a redundant typed-head forwarding method.
+pub fn typed_head_kind(name: String) -> MIRTypedHeadKind? Never! {
+    if name == {
+        DSL_BLOCK_SQL -> Val(MIRTypedHeadKind.SQL)
+        MARKER_HTML -> Val(MIRTypedHeadKind.HTML)
+        TYPE_SH -> Val(MIRTypedHeadKind.Sh)
+        TYPE_URL -> Val(MIRTypedHeadKind.URL)
+        TYPE_PATH -> Val(MIRTypedHeadKind.Path)
+        TYPE_DATETIME -> Val(MIRTypedHeadKind.DateTime)
+        else -> None
+    }
+}
+
+// Safety policy only; these are names, not native allocation or pointer bodies.
+pub enum CoreMemGate { Import Audit }
+pub struct CoreMemGateRow {
+    pub name: String
+    pub gate: CoreMemGate
+}
+pub CORE_MEM_GATE_TIERS :: prep { [CoreMemGateRow]{
+    CoreMemGateRow{name: TYPE_PTR, gate: .Import},
+    CoreMemGateRow{name: MEM_FROM_ADDR, gate: .Audit},
+    CoreMemGateRow{name: MEM_VOLATILE_READ, gate: .Audit},
+    CoreMemGateRow{name: MEM_VOLATILE_WRITE, gate: .Audit},
+    CoreMemGateRow{name: MEM_ADDRESS_OF, gate: .Import},
+    CoreMemGateRow{name: MEM_PIN, gate: .Import},
+    CoreMemGateRow{name: TYPE_PIN, gate: .Import},
+    CoreMemGateRow{name: MEM_ARENA, gate: .Import},
+    CoreMemGateRow{name: MEM_BUMP, gate: .Import},
+    CoreMemGateRow{name: MEM_POOL, gate: .Import},
+    CoreMemGateRow{name: MEM_FIXED, gate: .Import},
+    CoreMemGateRow{name: TYPE_ALLOC_ERROR, gate: .Import},
+    CoreMemGateRow{name: "Atomic", gate: .Import},
+} }
+pub fn core_mem_gate(item: String) -> CoreMemGate? Never! {
+    loop row in CORE_MEM_GATE_TIERS {
+        if row.name == item -> return Val(row.gate)
+    }
+    None
+}
+pub fn core_mem_requires_audit(item: String) -> Bool Never! {
+    core_mem_gate(item) != Val(CoreMemGate.Import)
+}
+
+pub fn duration_unit_for_constructor(method: String) -> String? Never! {
+    if method == {
+        "nanoseconds" -> Val("Nanoseconds")
+        "microseconds" -> Val("Microseconds")
+        "milliseconds" -> Val("Milliseconds")
+        "seconds" -> Val("Seconds")
+        "minutes" -> Val("Minutes")
+        "hours" -> Val("Hours")
+        else -> None
+    }
+}
+pub fn memo_stats_call(name: String) -> String Never! { "{MEMO_STATS_CALL_PREFIX}{name}" }
+
+pub struct CompilerFactMemberRow {
+    pub fact: String
+    pub member: String
+}
+pub COMPILER_FACTS :: prep { [CompilerFactMemberRow]{
+    CompilerFactMemberRow{fact: COMPILER_FACT_LAYOUT, member: "layout"},
+    CompilerFactMemberRow{fact: COMPILER_FACT_NAME, member: "name"},
+    CompilerFactMemberRow{fact: COMPILER_FACT_FIELDS, member: "fields"},
+} }
+pub fn compiler_fact_member(fact: String) -> String? Never! {
+    loop row in COMPILER_FACTS {
+        if row.fact == fact -> return Val(~row.member)
+    }
+    None
+}
+// Rust core_surface.rs:1124/1128 delegate to the existing typed Registry
+// fact_read_kind/fact_read_members above, including dynamically declared planes.
+pub fn is_layout_byte_fact(type_name: String, field: String) -> Bool Never! {
+    if type_name == TYPE_LAYOUT_INFO {
+        return field == "size" || field == "alignment" || field == "stride" ||
+            field == "requested_alignment" || field == "effective_alignment"
+    }
+    type_name == TYPE_LAYOUT_FIELD && (field == "offset" || field == "size")
+}
+pub fn layout_selector(name: String) -> String Never! { "{LAYOUT_SELECTOR_PREFIX}{name}" }
+// #4392: this remains a view of the caller's original name, including an empty
+// suffix. Host lifetime emission is a gate, never a reason to copy the suffix.
+pub fn layout_selector_name(name: String) -> String? from name {
+    if !name.starts_with(LAYOUT_SELECTOR_PREFIX) -> return None
+    rest := name.slice(LAYOUT_SELECTOR_PREFIX.len(), name.len()) // #4303
+    Val(rest)
+}

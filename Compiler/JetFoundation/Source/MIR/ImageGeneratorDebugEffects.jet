@@ -1,0 +1,39 @@
+// Determine runtime Debug effects once through reverse native dependency
+// edges. Hardware/type diagnostics remain infallible: only Source memo/seal
+// adapters have representation failures; graph parents inherit that effect.
+fn mir_image_gen_debug_effects(schema: MIRImageSchema, reachable: [String]) -> [String:Bool] MIRImageError! {
+    reverse := [String:[String]]{}
+    effects := [String:Bool]{}
+    pending := [String]{}
+    loop key in reachable {
+        definition :: schema.definitions[key]
+        if definition.body == .Struct(fields) {
+            loop field in fields {
+                if (key == "crate::MIR::MirFunction" && field.name == "memo_bound") || (key == "crate::MIR::MirOptimizationFacts" && field.name == "derived_from_digest") {
+                    if effects.get(key) == None { effects[key] = true; &pending.push(key) }
+                }
+            }
+        }
+        children := [String:Bool]{}
+        loop name in mir_image_gen_body_names(definition.body) {
+            if mir_image_gen_builtin(name) -> continue
+            child :: mir_image_generator_resolve_type(schema, definition, name)
+            if children.get(child) == .Val(_) -> continue
+            children[child] = true
+            if reverse.get(child) == None -> reverse[child] = [String]{}
+            &reverse[child].push(key)
+        }
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        child :: pending[cursor]
+        cursor += 1
+        parents :: reverse.get(child) ?? [String]{}
+        loop parent in parents {
+            if effects.get(parent) == .Val(_) -> continue
+            effects[parent] = true
+            &pending.push(parent)
+        }
+    }
+    Ok(effects)
+}

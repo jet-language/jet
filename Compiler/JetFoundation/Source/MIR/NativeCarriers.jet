@@ -1,0 +1,29 @@
+// Codegen/NativeLoopCursor.rs:69-77. Checked native-resource lookup metadata
+// is inward Foundation transport, not an emitter dependency or pointer value.
+// Physical MIRNativeOwned/MIRNativeCursor remain #4494 capability-gated;
+// this key never claims to retain either owner and is not a wire carrier.
+pub struct NativeLoopResourceKey {
+    pub handle: MIRHandleID
+    pub raw: I64
+    pub source_kind: MIRLoopSourceKind
+}
+
+// MIR.rs:6458-6464,7679-7693. A frame carries the exact canonical execution
+// identity (whose program-sized data is Shared), never a synthetic session ID.
+pub struct MIRFrameIdentity {
+    pub schema_version: Int
+    pub execution: MIRExecutionIdentity
+    pub function: MIRFunctionID
+    pub block: MIRBlockID?
+    pub sequence: U64
+}
+pub fn mir_frame_identity(program: MIRProgram, artifact: MIRArtifactID?, function: MIRFunctionID, block: MIRBlockID?, sequence: U64) -> MIRFrameIdentity MIRIdentityError! {
+    execution :: mir_execution_identity(program, artifact)
+    Ok(MIRFrameIdentity{schema_version: MIR_IDENTITY_SCHEMA_VERSION, execution: execution, function: function, block: block, sequence: sequence})
+}
+// MIR.rs:6687-6704. Reuses the canonical identity text provider; no second
+// program digester or String/Debug substitute for the execution identity.
+pub fn mir_frame_identity_canonical_text(identity: MIRFrameIdentity) -> String Never! {
+    block :: if identity.block == { .Val(id) -> "block:{id.value};" else -> "block:none;" }
+    "mir-frame-identity:{identity.schema_version};{mir_execution_identity_canonical_text(identity.execution)};function:{identity.function.value};{block}sequence:{identity.sequence};"
+}

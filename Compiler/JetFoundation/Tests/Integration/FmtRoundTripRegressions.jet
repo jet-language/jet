@@ -1,0 +1,860 @@
+// PORT-PENDING 1062 tests-fmt-round-trip-regressions-module-group: tests/fmt_round_trip_regressions.rs:1-203
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[test]
+//RS fn qualified_variant_heads_round_trip_through_protocol_expansion() {
+//RS     let literal_source = "fn make() -[]> Payment.Client { return Payment.Client{_token: 0} }\n";
+//RS     let literal = jet::format_source(literal_source).expect("qualified literal should format");
+//RS     assert!(literal.contains("Payment.Client{_token: 0}"), "{literal}");
+//RS     assert!(!literal.contains("Payment.Client.{"), "{literal}");
+//RS     assert_eq!(
+//RS         literal,
+//RS         jet::format_source(&literal).expect("qualified literal should reformat")
+//RS     );
+//RS 
+//RS     let source = include_str!("../Examples/features/concurrency/protocol.jet");
+//RS     let formatted = jet::format_source(source).expect("protocol source should format");
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted).expect("formatted protocol source should reformat")
+//RS     );
+//RS     jet::compile(&formatted).expect("protocol expansion must emit canonical variant literals");
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_module_template_struct_heads_round_trip() {
+//RS     let source = r#"module cache<K>(capacity: Int) {
+//RS     struct Entry { key: K }
+//RS     fn entry(k: K) -[]> Entry { return Entry{key: k} }
+//RS }
+//RS 
+//RS "#;
+//RS     let formatted = jet::format_source(source).expect("generic module source should format");
+//RS     assert!(
+//RS         formatted.contains("Entry{"),
+//RS         "struct head was not canonicalized:\n{formatted}"
+//RS     );
+//RS     assert!(
+//RS         !formatted.contains("Entry.{"),
+//RS         "retired struct head survived formatting:\n{formatted}"
+//RS     );
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted).expect("formatted generic module should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn derive_template_bodies_round_trip_retired_signatures() {
+//RS     let source = include_str!("../Examples/features/reflection/derive_loop.jet");
+//RS     let formatted = jet::format_source(source).expect("derive template should format");
+//RS     assert!(
+//RS         formatted.contains("fn $method(self) -> String -> field.$name"),
+//RS         "derive callable was not canonicalized:\n{formatted}"
+//RS     );
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted).expect("formatted derive template should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn marker_template_bodies_round_trip_retired_signatures() {
+//RS     let source = include_str!("../Examples/features/reflection/user_rule_body.jet");
+//RS     let formatted = jet::format_source(source).expect("marker template should format");
+//RS     assert!(
+//RS         formatted.contains("fn greeting(self) -> String -> \"hello\""),
+//RS         "marker callable was not canonicalized:\n{formatted}"
+//RS     );
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted).expect("formatted marker template should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_module_and_library_bodies_round_trip_retired_signatures() {
+//RS     let generic = include_str!("../Examples/features/modules/generic_modules.jet");
+//RS     let formatted = jet::format_source(generic).expect("generic module should format");
+//RS     assert!(
+//RS         formatted.contains("pub fn slot(k: K) -> Slot -> Slot.Value(k)"),
+//RS         "generic module callable was not canonicalized:\n{formatted}"
+//RS     );
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted).expect("formatted generic module should reformat")
+//RS     );
+//RS 
+//RS     let library = include_str!("../Examples/features/modules/library.jet");
+//RS     let formatted = jet::format_source(library).expect("library should format");
+//RS     assert!(
+//RS         formatted.contains("fn greeting(self) -> String\n"),
+//RS         "library signature was not canonicalized:\n{formatted}"
+//RS     );
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted).expect("formatted library should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn callback_view_provenance_round_trips_retired_function_type_arrows() {
+//RS     let source = include_str!("../Examples/features/memory/view_from_callback.jet");
+//RS     let formatted = jet::format_source(source).expect("callback view source should format");
+//RS     assert!(
+//RS         formatted.contains("pick: fn(String, String) -> View<str> from _0"),
+//RS         "function-type result arrow survived formatting:\n{formatted}"
+//RS     );
+//RS     assert!(
+//RS         formatted.contains(") View<str> from input {"),
+//RS         "callable result arrow survived formatting:\n{formatted}"
+//RS     );
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted).expect("formatted callback view source should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn generated_source_template_bodies_round_trip_retired_signatures() {
+//RS     let source = include_str!(
+//RS         "../Examples/features/tooling/build_entry_discovery/packages/foundation/tools/build.jet"
+//RS     );
+//RS     let formatted = jet::format_source(source).expect("generated source template should format");
+//RS     assert!(
+//RS         formatted.contains("fn foundation_marker() -> String -> \"foundation\""),
+//RS         "generated callable was not canonicalized:\n{formatted}"
+//RS     );
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted)
+//RS             .expect("formatted generated source template should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn inline_module_struct_heads_round_trip() {
+//RS     let source = r#"module arith {
+//RS     struct Tally { total: Int }
+//RS     fn tally(value: Int) -[]> Tally { return Tally{total: value} }
+//RS }
+//RS "#;
+//RS     let formatted = jet::format_source(source).expect("inline module source should format");
+//RS     assert!(
+//RS         formatted.contains("Tally{"),
+//RS         "struct head was not canonicalized:\n{formatted}"
+//RS     );
+//RS     assert!(
+//RS         !formatted.contains("Tally.{"),
+//RS         "retired struct head survived formatting:\n{formatted}"
+//RS     );
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted).expect("formatted inline module should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn effect_arrows_round_trip_beside_foreign_bodies() {
+//RS     let source = r#"#Import module c.demo {
+//RS     fn probe(value: Int) -> Int = "probe"
+//RS }
+//RS 
+//RS fn run() -[IO]> Int {
+//RS     return 1
+//RS }
+//RS "#;
+//RS     let formatted = jet::format_source(source).expect("foreign source should format");
+//RS     assert!(
+//RS         formatted.contains("fn probe(value: Int) -> Int = \"probe\""),
+//RS         "foreign declaration arrow was not canonicalized:\n{formatted}"
+//RS     );
+//RS     assert!(
+//RS         formatted.contains("fn run() -[IO]> Int"),
+//RS         "effect arrow was not canonicalized:\n{formatted}"
+//RS     );
+//RS     assert!(
+//RS         !formatted.contains("=[IO]=>") && !formatted.contains("Int) => Int"),
+//RS         "retired arrow survived formatting:\n{formatted}"
+//RS     );
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted).expect("formatted foreign source should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn interpolated_struct_literals_survive_retired_dot_migration() {
+//RS     let source = r#"fn run() {
+//RS     print("{NoDebug{value: 2}:Debug}")
+//RS     print("{Probe{value: 2} == Probe{value: 1}:Debug}")
+//RS }
+//RS "#;
+//RS     let formatted = jet::format_source(source).expect("interpolated literals should format");
+//RS     assert!(
+//RS         formatted.contains(r#"print("{NoDebug{value: 2}:Debug}")"#),
+//RS         "formatter dropped the interpolated struct literal:\n{formatted}"
+//RS     );
+//RS     assert!(
+//RS         formatted.contains(r#"print("{Probe{value: 2} == Probe{value: 1}:Debug}")"#),
+//RS         "formatter dropped the interpolated struct comparison:\n{formatted}"
+//RS     );
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted).expect("formatted interpolations should reformat")
+//RS     );
+//RS }
+// END-PORT-PENDING 1062 tests/fmt_round_trip_regressions.rs:1-203
+
+// PORT-PENDING 1062 tests-fmt-round-trip-regressions-module-group: tests/fmt_wave_a.rs:1-210
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #3172: a bounded formatter preservation matrix and CLI outcome proof.
+//RS //!
+//RS //! Keep this slice source-local: it exercises the public formatter facade and
+//RS //! the existing `jet fmt` front door without introducing another formatting
+//RS //! policy or a second fixture convention.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::Path;
+//RS use std::process::{Command, Output};
+//RS 
+//RS const WHITESPACE_AND_LITERALS: &str = concat!(
+//RS     "fn run(){\n",
+//RS     "\t// tabbed comment: \"quotes\" {braces}\n",
+//RS     "\tvalue::\"quoted \\\"text\\\" and {{braces}}; escapes: \\t \\n\"\n",
+//RS     "\t/* outer {brace}, \"quote\", /* nested */ still here */\n",
+//RS     "\tprint(\"{value}\")\n",
+//RS     "}\n",
+//RS );
+//RS 
+//RS const TRIPLE_STRING: &str = r#"fn run() {
+//RS     who :: "Jet"
+//RS     banner :: """
+//RS     hello, {who}
+//RS         indented
+//RS     """
+//RS     print("{banner}")
+//RS }
+//RS "#;
+//RS 
+//RS const INTERPOLATION_SELECTORS: &str = concat!(
+//RS     "fn run(){\n",
+//RS     "price::1234.5\n",
+//RS     "print(\"{price:Fixed(2)}\")\n",
+//RS     "print(\"{price:Grouped(2)}\")\n",
+//RS     "}\n",
+//RS );
+//RS 
+//RS const ATTACHED_COMMENTS: &str = concat!(
+//RS     "// declaration boundary comment\n",
+//RS     "fn run(){\n",
+//RS     "    // control boundary comment\n",
+//RS     "    if true {\n",
+//RS     "        print(\"attached\")\n",
+//RS     "    }\n",
+//RS     "}\n",
+//RS );
+//RS 
+//RS fn semantic_identity(source: &str) -> Vec<u8> {
+//RS     let (tokens, diagnostics) = jet::Lexer::lex(source);
+//RS     assert!(
+//RS         diagnostics.is_empty(),
+//RS         "fixture should lex before identity comparison: {diagnostics:?}"
+//RS     );
+//RS     let program = jet::Parser::parse_for_fmt(&tokens)
+//RS         .unwrap_or_else(|diagnostics| panic!("fixture should parse: {diagnostics:?}"));
+//RS     jet::Formatter::canonical_program(&program)
+//RS }
+//RS 
+//RS #[test]
+//RS fn preservation_matrix_survives_two_canonical_formatter_passes() {
+//RS     let cases: &[(&str, &str, &[&str])] = &[
+//RS         (
+//RS             "comments, tabs, newlines, quotes, and braces",
+//RS             WHITESPACE_AND_LITERALS,
+//RS             &[
+//RS                 "// tabbed comment: \"quotes\" {braces}",
+//RS                 r#"quoted \"text\" and {{braces}}; escapes: \t \n"#,
+//RS                 "/* nested */ still here */",
+//RS                 "print(\"{value}\")",
+//RS             ],
+//RS         ),
+//RS         (
+//RS             "triple strings",
+//RS             TRIPLE_STRING,
+//RS             &[
+//RS                 "banner :: \"\"\"\n",
+//RS                 "hello, {who}\n",
+//RS                 "        indented\n",
+//RS                 "print(\"{banner}\")",
+//RS             ],
+//RS         ),
+//RS         (
+//RS             "interpolation selectors",
+//RS             INTERPOLATION_SELECTORS,
+//RS             &[
+//RS                 "print(\"{price:Fixed(2)}\")",
+//RS                 "print(\"{price:Grouped(2)}\")",
+//RS             ],
+//RS         ),
+//RS         (
+//RS             "comments attached to declaration and control boundaries",
+//RS             ATTACHED_COMMENTS,
+//RS             &[
+//RS                 "// declaration boundary comment",
+//RS                 "// control boundary comment",
+//RS                 "if true",
+//RS                 "print(\"attached\")",
+//RS             ],
+//RS         ),
+//RS     ];
+//RS 
+//RS     for &(label, source, needles) in cases {
+//RS         let before = semantic_identity(source);
+//RS         let once = jet::format_source(source)
+//RS             .unwrap_or_else(|diagnostics| panic!("fmt failed for {label}: {diagnostics:?}"));
+//RS         for needle in needles {
+//RS             assert!(
+//RS                 once.contains(needle),
+//RS                 "{label}: formatter dropped {needle:?}\n--- got ---\n{once}"
+//RS             );
+//RS         }
+//RS         assert!(
+//RS             once.ends_with('\n'),
+//RS             "{label}: canonical output must end with a newline"
+//RS         );
+//RS         assert_eq!(
+//RS             before,
+//RS             semantic_identity(&once),
+//RS             "{label}: first formatter pass changed semantic identity"
+//RS         );
+//RS 
+//RS         let twice = jet::format_source(&once)
+//RS             .unwrap_or_else(|diagnostics| panic!("second fmt failed for {label}: {diagnostics:?}"));
+//RS         assert_eq!(once, twice, "{label}: formatter is not idempotent");
+//RS         assert_eq!(
+//RS             semantic_identity(&once),
+//RS             semantic_identity(&twice),
+//RS             "{label}: semantic identity changed across formatter passes"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn syntax_only_formatter_reports_invalid_input() {
+//RS     let diagnostics = jet::format_source("fn broken(")
+//RS         .expect_err("invalid syntax must not be accepted by the formatter");
+//RS     assert!(
+//RS         !diagnostics.is_empty(),
+//RS         "invalid syntax should return at least one formatter diagnostic"
+//RS     );
+//RS }
+//RS 
+//RS const CLI_FIXTURE: &str = WHITESPACE_AND_LITERALS;
+//RS 
+//RS fn run_fmt(root: &Path, args: &[&str]) -> Output {
+//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(args)
+//RS         .current_dir(root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("run jet fmt {args:?}: {error}"))
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_check_diff_and_write_keep_distinct_file_outcomes() {
+//RS     let scratch = common::Scratch::new("fmt-wave-a-cli");
+//RS     let path = scratch.join("main.jet");
+//RS     fs::write(&path, CLI_FIXTURE).expect("write deterministic fmt fixture");
+//RS     let before = fs::read_to_string(&path).expect("read fmt fixture");
+//RS     let canonical = jet::format_source(CLI_FIXTURE).expect("fixture should have canonical output");
+//RS 
+//RS     let check = run_fmt(&scratch.path, &["fmt", "--check", "main.jet"]);
+//RS     assert_eq!(
+//RS         check.status.code(),
+//RS         Some(1),
+//RS         "--check should reject dirty source: {}",
+//RS         String::from_utf8_lossy(&check.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(&path).unwrap(),
+//RS         before,
+//RS         "--check must not mutate the fixture"
+//RS     );
+//RS 
+//RS     let diff = run_fmt(&scratch.path, &["fmt", "--check", "--diff", "main.jet"]);
+//RS     assert_eq!(
+//RS         diff.status.code(),
+//RS         Some(1),
+//RS         "--check --diff should reject dirty source: {}",
+//RS         String::from_utf8_lossy(&diff.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&diff.stdout);
+//RS     assert!(
+//RS         stdout.contains("--- main.jet") && stdout.contains("+++ main.jet"),
+//RS         "--check --diff should print a unified diff, got:\n{stdout}"
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(&path).unwrap(),
+//RS         before,
+//RS         "--check --diff must not mutate the fixture"
+//RS     );
+//RS 
+//RS     let write = run_fmt(&scratch.path, &["fmt", "main.jet"]);
+//RS     assert_eq!(
+//RS         write.status.code(),
+//RS         Some(0),
+//RS         "write mode should succeed: {}",
+//RS         String::from_utf8_lossy(&write.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(&path).unwrap(),
+//RS         canonical,
+//RS         "write mode must persist the canonical formatter output"
+//RS     );
+//RS 
+//RS     let clean = run_fmt(&scratch.path, &["fmt", "--check", "main.jet"]);
+//RS     assert_eq!(clean.status.code(), Some(0), "canonical fixture should pass --check");
+//RS }
+// END-PORT-PENDING 1062 tests/fmt_wave_a.rs:1-210
+
+// PORT-PENDING 1062 tests-fmt-round-trip-regressions-module-group: tests/foreign_build_hosts.rs:1-266
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #1347: foreign build hosts keep one checked Jet Library contract.
+//RS //!
+//RS //! The real host commands are listed in the reference proof matrix. This
+//RS //! target stays runnable on a normal Jet checkout: it checks that the adapter
+//RS //! files, input declarations, fixture layout, and maintained-line promise are
+//RS //! present without treating an absent CMake/Gradle/Bazel/MSBuild installation
+//RS //! as a successful integration.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS fn repo_root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS fn read(path: &Path) -> String {
+//RS     fs::read_to_string(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+//RS }
+//RS 
+//RS fn maintained_lines(path: &Path) -> usize {
+//RS     read(path)
+//RS         .lines()
+//RS         .map(str::trim)
+//RS         .filter(|line| {
+//RS             !line.is_empty()
+//RS                 && !line.starts_with('#')
+//RS                 && !line.starts_with("//")
+//RS                 && !line.starts_with("<!--")
+//RS         })
+//RS         .count()
+//RS }
+//RS 
+//RS #[test]
+//RS fn adapters_use_one_jet_library_runner_and_fail_closed_outputs() {
+//RS     let root = repo_root().join("Tools/foreign-build-hosts");
+//RS     let runner = read(&root.join("jet-library.sh"));
+//RS     let powershell = read(&root.join("jet-library.ps1"));
+//RS     for text in [&runner, &powershell] {
+//RS         assert!(text.contains("build"), "runner does not invoke Jet build");
+//RS         assert!(text.contains("--lib"), "runner does not select Library export");
+//RS         assert!(text.contains("--locked"), "runner does not pin lock provenance");
+//RS         assert!(text.contains("--output"), "runner does not select manifest output");
+//RS         assert!(!text.contains("fetch --locked"), "runner substitutes a fetch preflight for the locked build");
+//RS         assert!(text.contains("package.jet"), "runner does not declare the manifest");
+//RS         assert!(text.contains(".jet/lock"), "runner does not declare the lock");
+//RS         assert!(text.contains("jet-host.receipt"), "runner does not publish provenance");
+//RS         assert!(text.contains("jet-host.stamp"), "runner does not publish completion");
+//RS         assert!(
+//RS             text.contains("\"schema\":2") || text.contains("schema = 2"),
+//RS             "runner does not version its structured receipt"
+//RS         );
+//RS         assert!(text.contains("sha256"), "runner does not record content digests");
+//RS         assert!(text.contains("jet-library.complete"), "runner does not require the complete Jet artifact set");
+//RS         assert!(text.contains("timed out"), "runner lock wait is unbounded");
+//RS         assert!(text.contains("kill") || text.contains("Stop-Process"), "runner does not clean up cancellation");
+//RS         assert!(text.contains("JET-HOST-TOOL"), "runner lacks tool diagnostics");
+//RS         assert!(text.contains("JET-HOST-INPUT"), "runner lacks input diagnostics");
+//RS         assert!(text.contains("JET-HOST-ABI"), "runner lacks ABI diagnostics");
+//RS         assert!(text.contains("cl.exe"), "runner does not reject the MSVC ABI");
+//RS     }
+//RS     assert!(runner.contains("${CC:-cc}"), "POSIX runner has no host-linker fallback");
+//RS     assert!(powershell.contains("taskkill.exe"), "Windows runner does not kill build descendants");
+//RS     assert!(powershell.contains("project parts"), "Windows runner does not derive the source closure");
+//RS     assert!(powershell.contains("TimeoutSeconds"), "Windows runner has no bounded build timeout");
+//RS     for variable in ["RUSTC", "RUSTC_LINKER", "CC", "NO_COLOR", "PATH"] {
+//RS         assert!(powershell.contains(&format!("EnvironmentVariables[\"{variable}\"]")), "Windows runner does not pass {variable}");
+//RS     }
+//RS 
+//RS     let adapters = [
+//RS         root.join("cmake/Jet.cmake"),
+//RS         root.join("gradle/jet-library.gradle"),
+//RS         root.join("bazel/jet_library.bzl"),
+//RS         root.join("msbuild/Jet.Library.targets"),
+//RS     ];
+//RS     for path in adapters {
+//RS         let text = read(&path);
+//RS         assert!(text.contains("jet-library"), "{} bypasses the shared runner", path.display());
+//RS         assert!(!text.contains("rustc"), "{} owns Jet code generation", path.display());
+//RS         assert!(!text.contains("cargo"), "{} owns a duplicate build engine", path.display());
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn representative_projects_declare_exact_inputs_and_stay_under_ten_lines() {
+//RS     let root = repo_root().join("tests/fixtures/foreign_build_hosts");
+//RS     let projects = [
+//RS         ("cmake", "CMakeLists.txt"),
+//RS         ("gradle", "build.gradle"),
+//RS         ("bazel", "BUILD.bazel"),
+//RS         ("msbuild", "host.proj"),
+//RS     ];
+//RS     for (host, build_file) in projects {
+//RS         let project = root.join(host);
+//RS         let build = read(&project.join(build_file));
+//RS         assert!(
+//RS             maintained_lines(&project.join(build_file)) < 10,
+//RS             "{host} build grew past ten maintained lines"
+//RS         );
+//RS         for (input, fixture) in [
+//RS             ("package.jet", "package.jet"),
+//RS             (".jet/lock", "lock.fixture"),
+//RS             ("library.jet", "library.jet"),
+//RS             ("extra.jet", "extra.jet"),
+//RS         ] {
+//RS             assert!(project.join(fixture).is_file(), "{host} is missing {input}");
+//RS             let named = build.contains(input)
+//RS                 || (input == ".jet/lock" && build.contains(".jet\\lock"));
+//RS             assert!(named, "{host} build does not name {input}");
+//RS         }
+//RS         assert!(project.join("package.jet").is_file());
+//RS         assert!(read(&project.join("lock.fixture")).contains("[build.stamp]"));
+//RS         assert!(read(&project.join("package.jet")).contains(".Library"));
+//RS         assert!(build.contains("loadable"), "{host} does not name the native artifact");
+//RS         let host_source = if host == "msbuild" { "host.cpp" } else { "host.c" };
+//RS         assert!(read(&project.join(host_source)).contains("on_tick(41) == 42"));
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn host_descriptors_are_small_and_route_to_native_library_targets() {
+//RS     let root = repo_root().join("tests/fixtures/foreign_build_hosts");
+//RS     let cmake = read(&root.join("cmake/CMakeLists.txt"));
+//RS     assert!(cmake.contains("find_package(Jet REQUIRED)"));
+//RS     assert!(!cmake.contains("CMAKE_MODULE_PATH"));
+//RS     assert!(cmake.contains("jet_library"));
+//RS     assert!(cmake.contains("target_link_libraries"));
+//RS     let cmake_adapter = read(&repo_root().join("Tools/foreign-build-hosts/cmake/Jet.cmake"));
+//RS     assert!(cmake_adapter.contains("set(_kind static)"));
+//RS     assert!(cmake_adapter.contains("CMAKE_CXX_COMPILER"));
+//RS     assert!(cmake_adapter.contains("add_custom_target(\"${TARGET}_jet\" DEPENDS ${_outputs})"));
+//RS 
+//RS         let gradle = read(&root.join("gradle/build.gradle"));
+//RS         assert!(gradle.contains("jet-library.gradle"));
+//RS         assert!(gradle.contains("dependsOn \"jetLibrary\""));
+//RS         assert!(gradle.contains("jetLibrary.staticLibrary"));
+//RS         assert!(gradle.contains("inputs.files jetLibrary.staticLibrary()"));
+//RS 
+//RS     let bazel = read(&root.join("bazel/BUILD.bazel"));
+//RS     assert!(bazel.contains("jet_library"));
+//RS     assert!(bazel.contains("cc_binary"));
+//RS     assert!(bazel.contains("linkopts"));
+//RS     let bazel_adapter = read(&repo_root().join("Tools/foreign-build-hosts/bazel/jet_library.bzl"));
+//RS     assert!(bazel_adapter.contains("ctx.actions.run"));
+//RS     assert!(bazel_adapter.contains("args.add"));
+//RS     assert!(bazel_adapter.contains("short_path"));
+//RS     assert!(!bazel_adapter.contains("$(location"));
+//RS 
+//RS     let msbuild = read(&root.join("msbuild/host.proj"));
+//RS     assert!(msbuild.contains("Jet.Library.targets"));
+//RS     assert!(msbuild.contains("DependsOnTargets=\"JetLibrary\""));
+//RS     assert!(msbuild.contains("JetLibraryStatic"));
+//RS     assert!(msbuild.contains("Inputs=\"$(MSBuildProjectDirectory)\\host.cpp"));
+//RS     assert!(msbuild.contains("Outputs=\"$(IntermediateOutputPath)host.exe"));
+//RS     let msbuild_adapter = read(&repo_root().join("Tools/foreign-build-hosts/msbuild/Jet.Library.targets"));
+//RS     assert!(msbuild_adapter.contains("$(MSBuildProjectDirectory)\\"));
+//RS     assert!(msbuild_adapter.contains(".jet\\lock"));
+//RS     assert!(msbuild_adapter.contains("$(MSBuildThisFileDirectory)..\\jet-library.ps1"));
+//RS     assert!(msbuild_adapter.contains("$(JetLibraryIntermediate)\\jet-host.stamp"));
+//RS 
+//RS     let lifecycle = root.join("msbuild/lifecycle.cpp");
+//RS     assert!(lifecycle.is_file());
+//RS     let lifecycle_text = read(&lifecycle);
+//RS     assert!(lifecycle_text.contains("#ifdef _WIN32"));
+//RS     assert!(lifecycle_text.contains("LoadLibraryA"));
+//RS     assert!(lifecycle_text.contains("std::thread"));
+//RS 
+//RS     let docs = read(&repo_root().join("Docs/spec/reference/foreign-build-hosts.md"));
+//RS     for term in [
+//RS         "CMake",
+//RS         "Gradle",
+//RS         "Bazel",
+//RS         "MSBuild",
+//RS         "--locked",
+//RS         "jet-host.receipt",
+//RS         "jet-host.stamp",
+//RS         "jet-library-set-v1",
+//RS         "lifecycle.cpp",
+//RS         "CMAKE_TOOLCHAIN_FILE",
+//RS     ] {
+//RS         assert!(docs.contains(term), "reference docs omit {term}");
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn shared_runner_publishes_only_after_a_successful_jet_export() {
+//RS     use std::os::unix::fs::PermissionsExt;
+//RS 
+//RS     let scratch = common::Scratch::new("foreign-host-runner");
+//RS     fs::create_dir_all(scratch.path.join(".jet")).unwrap();
+//RS     fs::write(scratch.path.join("package.jet"), "name: \"runner\"\nversion: \"0.1.0\"\n").unwrap();
+//RS     fs::write(
+//RS         scratch.path.join(".jet/lock"),
+//RS         "version = 1\n\n[build.stamp]\ngit = \"runner\"\ndirty = false\ntoolchain = \"1.0.0\"\nat = \"2026-08-29T00:00:00.000000000Z\"\n\n[root]\ndependencies = []\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(scratch.path.join("library.jet"), "pub fn on_tick(dt: Int) -> Int -> dt + 1\n").unwrap();
+//RS     let fake_jet = scratch.path.join("fake-jet");
+//RS     fs::write(
+//RS         &fake_jet,
+//RS         "#!/bin/sh\nif [ \"$1\" = project ] && [ \"$2\" = parts ]; then printf 'automatic __project.library library.jet\\n'; exit 0; fi\nif [ \"$1\" = build ] && [ \"${FAKE_JET_FAIL:-0}\" = 1 ]; then exit 17; fi\nif [ \"$1\" = build ]; then mkdir -p .jet/build; printf '%s\\n' \"$@\" > .jet/build/args; printf archive > .jet/build/libloadable.a; printf header > .jet/build/loadable.h; printf 'jet-jetlib-v3\\0' > .jet/build/loadable.jetlib; a=$(sha256sum .jet/build/libloadable.a | cut -d' ' -f1); h=$(sha256sum .jet/build/loadable.h | cut -d' ' -f1); j=$(sha256sum .jet/build/loadable.jetlib | cut -d' ' -f1); printf 'jet-library-set-v1\\nlibloadable.a\\tsha256-%s\\nloadable.h\\tsha256-%s\\nloadable.jetlib\\tsha256-%s\\n' \"$a\" \"$h\" \"$j\" > .jet/build/.loadable.jet-library.complete; fi\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::set_permissions(&fake_jet, fs::Permissions::from_mode(0o755)).unwrap();
+//RS 
+//RS     let destination = scratch.path.join("host-build");
+//RS     let runner = repo_root().join("Tools/foreign-build-hosts/jet-library.sh");
+//RS     let args = [
+//RS         "--jet",
+//RS         fake_jet.to_str().unwrap(),
+//RS         "--project",
+//RS         scratch.path.to_str().unwrap(),
+//RS         "--entry",
+//RS         "library.jet",
+//RS         "--output",
+//RS         "core",
+//RS         "--library",
+//RS         "loadable",
+//RS         "--dest",
+//RS         destination.to_str().unwrap(),
+//RS         "--kind",
+//RS         "static",
+//RS         "--loadable",
+//RS         "--input",
+//RS         "library.jet",
+//RS     ];
+//RS     let first = Command::new("bash").arg(&runner).args(args).status().unwrap();
+//RS     assert!(first.success(), "the fake Jet Library export should publish");
+//RS     assert!(destination.join("libloadable.a").is_file());
+//RS     assert!(destination.join("loadable.h").is_file());
+//RS     assert!(destination.join("loadable.jetlib").is_file());
+//RS     assert!(destination.join("jet-host.receipt").is_file());
+//RS     assert!(destination.join("jet-host.stamp").is_file());
+//RS     let receipt = read(&destination.join("jet-host.receipt"));
+//RS     assert!(receipt.contains("\"schema\":2"));
+//RS     assert!(receipt.contains("\"output\":\"core\""));
+//RS     assert!(receipt.contains("\"lock\":{\"path\":\".jet/lock\",\"digest\":\"sha256-"));
+//RS     assert!(receipt.contains("\"command\":[\"build\",\"--lib\",\"--locked\",\"--output\",\"core\",\"--profile=dev\",\"library.jet\"]"));
+//RS     assert!(scratch.path.join(".jet/build/.loadable.jet-library.complete").is_file());
+//RS     let invoked = read(&scratch.path.join(".jet/build/args"));
+//RS     assert!(invoked.lines().any(|line| line == "--lib"));
+//RS     assert!(invoked.lines().any(|line| line == "--locked"));
+//RS     assert!(invoked.lines().any(|line| line == "--output"));
+//RS     assert!(invoked.lines().any(|line| line == "core"));
+//RS     assert!(invoked.lines().any(|line| line == "library.jet"));
+//RS 
+//RS     let failed = Command::new("bash")
+//RS         .arg(&runner)
+//RS         .args(args)
+//RS         .env("FAKE_JET_FAIL", "1")
+//RS         .status()
+//RS         .unwrap();
+//RS     assert!(!failed.success(), "a failed Jet export must fail the host action");
+//RS     assert!(!destination.join("libloadable.a").exists());
+//RS     assert!(!destination.join("loadable.h").exists());
+//RS     assert!(!destination.join("loadable.jetlib").exists());
+//RS     assert!(!destination.join("jet-host.receipt").exists());
+//RS     assert!(!destination.join("jet-host.stamp").exists());
+//RS     assert!(!fs::read_dir(&destination)
+//RS         .unwrap()
+//RS         .flatten()
+//RS         .any(|entry| entry.file_name().to_string_lossy().starts_with(".jet-host-stage.")));
+//RS }
+// END-PORT-PENDING 1062 tests/foreign_build_hosts.rs:1-266
+
+// PORT-PENDING 1062 tests-fmt-round-trip-regressions-module-group: tests/fresh_agent_t4.rs:1-165
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Output};
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+//RS 
+//RS const VALID_OUTPUT: &[u8] = br#"{"count":2,"name":"Ada","note":"line \"one\""}
+//RS "#;
+//RS 
+//RS struct MalformedCase {
+//RS     fixture: &'static str,
+//RS     line: usize,
+//RS     reason: &'static str,
+//RS }
+//RS 
+//RS const MALFORMED_CASES: &[MalformedCase] = &[
+//RS     MalformedCase {
+//RS         fixture: "truncated.tsv",
+//RS         line: 3,
+//RS         reason: "what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>",
+//RS     },
+//RS     MalformedCase {
+//RS         fixture: "empty-key.tsv",
+//RS         line: 3,
+//RS         reason: "what=empty TSV key; why=each row needs a named report field; fix=write name, count, or note before the tab",
+//RS     },
+//RS     MalformedCase {
+//RS         fixture: "extra-column.tsv",
+//RS         line: 3,
+//RS         reason: "what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>",
+//RS     },
+//RS     MalformedCase {
+//RS         fixture: "unknown-key.tsv",
+//RS         line: 3,
+//RS         reason: "what=unknown TSV key; why=only name, count, and note are valid report fields; fix=use one of the required keys",
+//RS     },
+//RS     MalformedCase {
+//RS         fixture: "duplicate-key.tsv",
+//RS         line: 3,
+//RS         reason: "what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row",
+//RS     },
+//RS     MalformedCase {
+//RS         fixture: "invalid-count.tsv",
+//RS         line: 2,
+//RS         reason: "what=invalid count value; why=count must be a decimal integer; fix=write a whole-number count",
+//RS     },
+//RS     MalformedCase {
+//RS         fixture: "missing-required-key.tsv",
+//RS         line: 3,
+//RS         reason: "what=missing required TSV key; why=report needs name, count, and note; fix=add the missing row",
+//RS     },
+//RS ];
+//RS 
+//RS struct Scratch {
+//RS     path: PathBuf,
+//RS }
+//RS 
+//RS impl Scratch {
+//RS     fn new(tier: &str) -> Self {
+//RS         let sequence = SCRATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+//RS         let path = std::env::temp_dir().join(format!(
+//RS             "jet-fresh-agent-t4-{}-{tier}-{sequence}",
+//RS             std::process::id()
+//RS         ));
+//RS         fs::create_dir_all(&path).expect("create T4 scratch directory");
+//RS         Self { path }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for Scratch {
+//RS     fn drop(&mut self) {
+//RS         let _ = fs::remove_dir_all(&self.path);
+//RS     }
+//RS }
+//RS 
+//RS fn fixture_root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fresh_agent_t4")
+//RS }
+//RS 
+//RS fn copy_fixture_project(root: &Path, scratch: &Path) {
+//RS     fs::copy(root.join("package.jet"), scratch.join("package.jet"))
+//RS         .expect("copy T4 package manifest");
+//RS     fs::copy(root.join("run.jet"), scratch.join("run.jet")).expect("copy T4 Jet program");
+//RS }
+//RS 
+//RS fn run_tier(scratch: &Scratch, command_args: &[&str]) -> Output {
+//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(command_args)
+//RS         .args(["run.jet", "--", "report.tsv"])
+//RS         .current_dir(&scratch.path)
+//RS         .env("JET_STORE_DIR", scratch.path.join("cache"))
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run T4 Jet fixture")
+//RS }
+//RS 
+//RS #[test]
+//RS fn fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers() {
+//RS     let root = fixture_root();
+//RS     let mut tiers: Vec<(&str, &[&str])> = vec![
+//RS         ("default", &["run"]),
+//RS         ("dev", &["dev", "--watch=off"]),
+//RS         ("interpreter", &["run", "--interpret"]),
+//RS     ];
+//RS     let has_rustc = Command::new("rustc")
+//RS         .arg("--version")
+//RS         .output()
+//RS         .map(|output| output.status.success())
+//RS         .unwrap_or(false);
+//RS     if has_rustc {
+//RS         tiers.push(("aot", &["run", "--release"]));
+//RS     }
+//RS 
+//RS     for (tier, tier_args) in tiers {
+//RS         let scratch = Scratch::new(tier);
+//RS         copy_fixture_project(&root, &scratch.path);
+//RS 
+//RS         fs::copy(root.join("report.tsv"), scratch.path.join("report.tsv"))
+//RS             .expect("copy valid T4 input");
+//RS         let valid = run_tier(&scratch, tier_args);
+//RS         assert!(
+//RS             valid.status.success(),
+//RS             "{tier} valid T4 run failed: {}",
+//RS             String::from_utf8_lossy(&valid.stderr)
+//RS         );
+//RS         assert_eq!(valid.stdout, VALID_OUTPUT, "{tier} valid output drifted");
+//RS         assert!(
+//RS             valid.stderr.is_empty(),
+//RS             "{tier} valid run wrote stderr: {}",
+//RS             String::from_utf8_lossy(&valid.stderr)
+//RS         );
+//RS 
+//RS         for case in MALFORMED_CASES {
+//RS             fs::copy(
+//RS                 root.join("inputs").join(case.fixture),
+//RS                 scratch.path.join("report.tsv"),
+//RS             )
+//RS             .expect("copy malformed T4 input");
+//RS             let malformed = run_tier(&scratch, tier_args);
+//RS             assert_eq!(
+//RS                 malformed.status.code(),
+//RS                 Some(1),
+//RS                 "{tier} {} returned the wrong exit code",
+//RS                 case.fixture
+//RS             );
+//RS             assert!(
+//RS                 malformed.stdout.is_empty(),
+//RS                 "{tier} {} wrote stdout: {}",
+//RS                 case.fixture,
+//RS                 String::from_utf8_lossy(&malformed.stdout)
+//RS             );
+//RS             let expected = format!(
+//RS                 "report.tsv:{}:{}\n",
+//RS                 case.line, case.reason
+//RS             );
+//RS             assert_eq!(
+//RS                 String::from_utf8_lossy(&malformed.stderr),
+//RS                 expected,
+//RS                 "{tier} {} diagnostic drifted",
+//RS                 case.fixture
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 1062 tests/fresh_agent_t4.rs:1-165
+

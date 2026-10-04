@@ -4,6 +4,7 @@
 // the registration graph's declaration identities; it is never reconstructed
 // from generated TIR and it does not maintain a second name registry.
 use jet_foundation.[
+    sema_effect_covers,
     BindPattern,
     Diagnostic,
     Effect,
@@ -20,7 +21,6 @@ use jet_foundation.[
     Type,
     core_call,
     diagnostic_with_edit,
-    expr_optional_method_call_as_call,
     expr_span,
 ]
 
@@ -237,8 +237,8 @@ fn sema_taint_catalog_init() -> SemaTaintCatalog Never! {
 }
 
 fn sema_taint_edit_distance(left: String, right: String) -> Int Never! {
-    a := left.bytes()
-    b := right.bytes()
+    a := left.chars()
+    b := right.chars()
     previous := [Int]{}
     index := 0
     loop index <= b.len() {
@@ -678,7 +678,9 @@ fn sema_taint_type_of_expr(state: SemaTaintFlowState, expression: Expr) -> Strin
                 .None -> {}
             }
         }
-        .OptMethodCall(receiver, method, method_span, type_args, args, _) -> return sema_taint_type_of_expr(state, expr_optional_method_call_as_call(receiver, method, method_span, type_args, args))
+        // Optional syntax retains no checked recv_type/resolved_ret, exactly
+        // like the ordinary unannotated MethodCall metadata projection.
+        .OptMethodCall(_, _, _, _, _, _, _, _) -> return None
         .Field(base, field, _) | .OptField(base, field, _, _, _) -> {
             owner :: sema_taint_type_of_expr(state, base) ?? return None
             fact :: sema_taint_find_field(state.catalog, state.module_identity, owner, field) ?? return None
@@ -708,6 +710,18 @@ fn sema_taint_scrub(state: SemaTaintFlowState, tags: &[String], owner: String, n
 }
  
 
+fn sema_taint_method_tags(state: &SemaTaintFlowState, receiver: Expr, method: String, args: [CallArg], recv_type: String?) -> [String] {
+            tags := sema_taint_tags_of(&state, receiver)
+            loop argument in args -> sema_taint_union(&tags, sema_taint_tags_of(&state, argument.expr))
+            destinations := sema_taint_method_destinations(state, receiver, method, recv_type)
+            sema_taint_union(&tags, sema_taint_source_tags(state, destinations))
+            sema_taint_union(&tags, sema_taint_call_return_tags(state, recv_type ?? "", method))
+            sema_taint_scrub(state, &tags, recv_type ?? "", method)
+            if sema_taint_is_typed_decode(state, receiver, method) -> sema_taint_clear_origins(&tags)
+            if sema_taint_is_credential_verify(state, receiver, method) -> sema_taint_remove(&tags, "Credential")
+            return tags
+}
+
 fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] {
     if expression == {
         .Tainted(inner, tag_value, _) -> {
@@ -727,17 +741,9 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
             return tags
         }
         .MethodCall(receiver, method, _, _, _, args, recv_type, _, _, _) -> {
-            tags := sema_taint_tags_of(&state, receiver)
-            loop argument in args -> sema_taint_union(&tags, sema_taint_tags_of(&state, argument.expr))
-            destinations := sema_taint_method_destinations(state, receiver, method, recv_type)
-            sema_taint_union(&tags, sema_taint_source_tags(state, destinations))
-            sema_taint_union(&tags, sema_taint_call_return_tags(state, recv_type ?? "", method))
-            sema_taint_scrub(state, &tags, recv_type ?? "", method)
-            if sema_taint_is_typed_decode(state, receiver, method) -> sema_taint_clear_origins(&tags)
-            if sema_taint_is_credential_verify(state, receiver, method) -> sema_taint_remove(&tags, "Credential")
-            return tags
+            return sema_taint_method_tags(&state, receiver, method, args, recv_type)
         }
-        .OptMethodCall(receiver, method, method_span, type_args, args, _) -> return sema_taint_tags_of(&state, expr_optional_method_call_as_call(receiver, method, method_span, type_args, args))
+        .OptMethodCall(receiver, method, _, _, args, _, _, _) -> return sema_taint_method_tags(&state, receiver, method, args, None)
         .CallValue(callee, args, _) -> {
             tags := sema_taint_tags_of(&state, callee)
             loop argument in args -> sema_taint_union(&tags, sema_taint_tags_of(&state, argument.expr))
@@ -891,9 +897,7 @@ fn sema_taint_e0721(tag_value: String, api: String, destinations: [String], span
     sema_error("E0721", span, "a `{tag_value}` value is denied at `{api}`", "the declaration for `{tag_value}` denies `{destination}`, which covers this destination", fix)
 }
 
-fn sema_taint_check_expr(state: &SemaTaintFlowState, expression: Expr) {
-    if expression == {
-        .MethodCall(receiver, method, method_span, _, _, args, recv_type, _, _, _) -> {
+fn sema_taint_check_method(state: &SemaTaintFlowState, receiver: Expr, method: String, method_span: Span, args: [CallArg], recv_type: String?) {
             destinations := sema_taint_method_destinations(state, receiver, method, recv_type)
             loop argument in args {
                 tags := sema_taint_tags_of(&state, argument.expr)
@@ -914,6 +918,12 @@ fn sema_taint_check_expr(state: &SemaTaintFlowState, expression: Expr) {
             }
             sema_taint_check_expr(&state, receiver)
             loop argument in args -> sema_taint_check_expr(&state, argument.expr)
+}
+
+fn sema_taint_check_expr(state: &SemaTaintFlowState, expression: Expr) {
+    if expression == {
+        .MethodCall(receiver, method, method_span, _, _, args, recv_type, _, _, _) -> {
+            sema_taint_check_method(&state, receiver, method, method_span, args, recv_type)
         }
         .Call(call) -> {
             credential_sink := call.name == "print" || call.name == "eprint"
@@ -955,7 +965,7 @@ fn sema_taint_check_expr(state: &SemaTaintFlowState, expression: Expr) {
             }
         }
         .OptField(base, _, _, _, _) -> sema_taint_check_expr(&state, base)
-        .OptMethodCall(receiver, method, method_span, type_args, args, _) -> sema_taint_check_expr(&state, expr_optional_method_call_as_call(receiver, method, method_span, type_args, args))
+        .OptMethodCall(receiver, method, method_span, _, args, _, _, _) -> sema_taint_check_method(&state, receiver, method, method_span, args, None)
         .Index(base, index, _, _) -> {
             sema_taint_check_expr(&state, base)
             sema_taint_check_expr(&state, index)
@@ -1051,7 +1061,7 @@ fn sema_taint_pattern_names(pattern: BindPattern) -> [String] Never! {
         .Struct(_, _, fields, _, _) -> loop field in fields -> &names.push(field.name)
         .List(fields, _) -> loop field in fields -> &names.push(field.name)
         .Tuple(fields, _) -> loop field in fields -> &names.push(field.name)
-        .Refutable(_, _, fields, _) -> loop field in fields -> &names.push(field.name)
+        .Refutable(_, _, fields, _, _) -> loop field in fields -> &names.push(field.name)
     }
     names
 }
@@ -1143,7 +1153,7 @@ fn sema_taint_check_stmt(state: &SemaTaintFlowState, statement: Stmt) {
             }
             if else_body == {
                 .Val(body) -> &paths.push(sema_taint_walk_path(&state, before, body))
-                .None -> if !sema_taint_switch_exhaustive(arms, state.existing_diagnostics, span) -> &paths.push(before)
+                .None -> if !sema_flow_switch_exhaustive(arms, state.existing_diagnostics, span) -> &paths.push(before)
             }
             sema_taint_merge_paths(&state, before, paths)
         }
@@ -1261,36 +1271,6 @@ fn sema_taint_check_loop_body(state: &SemaTaintFlowState, body: [Stmt]) {
     sema_taint_merge_paths(&state, before, [SemaTaintSnapshot]{before, after_body})
 }
 
-fn sema_taint_same_span(left: Span?, right: Span?) -> Bool Never! {
-    if left == {
-        .Val(a) -> {
-            if right == {
-                .Val(b) -> return a.start == b.start && a.end == b.end
-                .None -> return false
-            }
-        }
-        .None -> {
-            if right == {
-                .None -> return true
-                .Val(_) -> return false
-            }
-        }
-    }
-}
-
-fn sema_taint_switch_exhaustive(arms: [SwitchArm], diagnostics: [Diagnostic], span: Span) -> Bool Never! {
-    if arms.len() == 0 -> return false
-    loop arm in arms {
-        if arm.cond == {
-            .PatternTest(_, _, _) -> {}
-            else -> return false
-        }
-    }
-    loop diagnostic in diagnostics {
-        if diagnostic.code == "E0307" && sema_taint_same_span(diagnostic.span, Val(span)) -> return false
-    }
-    true
-}
 
 fn sema_taint_module_name(graph: SemaRegistrationGraph, module_identity: String) -> String Never! {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return ""
@@ -1515,7 +1495,7 @@ pub fn sema_taint_check_graph(graph: SemaRegistrationGraph, existing_diagnostics
 
 fn sema_taint_has_diagnostic(diagnostics: [Diagnostic], candidate: Diagnostic) -> Bool Never! {
     loop diagnostic in diagnostics {
-        if diagnostic.code == candidate.code && sema_taint_same_span(diagnostic.span, candidate.span) && diagnostic.source_path == candidate.source_path && diagnostic.source_offset == candidate.source_offset && diagnostic.what == candidate.what -> return true
+        if diagnostic.code == candidate.code && sema_flow_same_span(diagnostic.span, candidate.span) && diagnostic.source_path == candidate.source_path && diagnostic.source_offset == candidate.source_offset && diagnostic.what == candidate.what -> return true
     }
     false
 }

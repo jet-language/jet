@@ -1,0 +1,295 @@
+// Rust: jet-parser/src/Formatter/mod.rs::canonical_program and simplify catalog.
+use jet_foundation.[EnumLitArg, Expr, Func, Item, Program, Span, Stmt, SwitchArm, Type, canonical_ast_formatter_program]
+
+// Public identity retains constructor heads; source-only block_spans is omitted.
+pub fn jet_format_canonical_program(program: Program) -> [U8] Never! {
+    jet_format_canonicalize_generated_loop_labels(canonical_ast_formatter_program(program))
+}
+// Rust: mod.rs::canonical_simplify_program consumes its freshly parsed baseline.
+// Artifact-store identity never erases constructor types or copies an AST graph.
+fn jet_format_canonical_simplify_program(program: ^Program) -> [U8] Never! {
+    normalized := program
+    jet_format_for_each_simplify_func(&normalized.items)
+    jet_format_canonicalize_struct_literal_heads(jet_format_canonical_program(normalized))
+}
+fn jet_format_normalize_simplify_function(function: &Func) Never! {
+    if function.body.len() == 1 {
+        if function.body[0] == .Return(value, _) { if value == .Val(payload) -> function.body[0] = Stmt.Expr{expr: payload} }
+    }
+}
+// Rust: mod.rs::for_each_simplify_func. Tail normalization visits module methods.
+fn jet_format_for_each_simplify_func(items: &[Item]) Never! {
+    loop index in 0..<items.len() {
+        if items[index] == {
+            .Func(function) -> {
+                updated := function
+                jet_format_normalize_simplify_function(&updated)
+                items[index] = Item.Func{value: updated}
+            }
+            .Struct(definition) -> {
+                updated := definition
+                jet_format_visit_methods(&updated.methods)
+                loop implementation in 0..<updated.trait_impls.len() -> jet_format_visit_methods(&updated.trait_impls[implementation].methods)
+                items[index] = Item.Struct{value: updated}
+            }
+            .Enum(definition) -> {
+                updated := definition
+                jet_format_visit_methods(&updated.methods)
+                loop implementation in 0..<updated.trait_impls.len() -> jet_format_visit_methods(&updated.trait_impls[implementation].methods)
+                items[index] = Item.Enum{value: updated}
+            }
+            .Impl(definition) -> {
+                updated := definition
+                jet_format_visit_methods(&updated.methods)
+                items[index] = Item.Impl{value: updated}
+            }
+            .CodeModule(definition) -> {
+                if definition.body == .Val(body) {
+                    nested := body
+                    jet_format_for_each_simplify_func(&nested)
+                    updated := definition
+                    updated.body = Val(nested)
+                    items[index] = Item.CodeModule{value: updated}
+                }
+            }
+            .GenericModule(definition) -> {
+                updated := definition
+                jet_format_for_each_simplify_func(&updated.body)
+                items[index] = Item.GenericModule{value: updated}
+            }
+            else -> {}
+        }
+    }
+}
+fn jet_format_visit_methods(methods: &[Func]) Never! {
+    loop index in 0..<methods.len() -> jet_format_normalize_simplify_function(&methods[index])
+}
+// Rust: mod.rs::strip_redundant_optional_returns. The printer projects these
+// payloads in exactly the selected function/body positions, without AST copies.
+fn jet_format_optional_payload_self_typed(value: Expr) -> Bool Never! {
+    if value == {
+        .Ident(_, _) | .Bool(_, _) | .Char(_, _) -> true
+        .Field(base, _, _) -> jet_format_optional_payload_self_typed(base)
+        else -> false
+    }
+}
+fn jet_format_optional_value(context: &JetFormatterContext, value: Expr, prec: JetFormatterPrec) Never! {
+    saved_tail :: ~context.optional_tail
+    context.optional_tail = false
+    if context.optional_body_visit {
+        if value == .EnumLit(type_name, variant, _, args, _, _) {
+            if type_name == "" && variant == "Val" && args.len() == 1 {
+                if args[0] == .Positional(inner) {
+                    if jet_format_optional_payload_self_typed(inner) {
+                        jet_format_expr(&context, inner, prec)
+                        context.optional_tail = saved_tail
+                        return
+                    }
+                }
+            }
+        }
+    }
+    jet_format_expr(&context, value, prec)
+    context.optional_tail = saved_tail
+}
+fn jet_format_expr_with_optional_visit(context: &JetFormatterContext, value: Expr, visit: Bool) Never! {
+    saved :: ~context.optional_body_visit
+    context.optional_body_visit = saved && visit
+    jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+    context.optional_body_visit = saved
+}
+// Rust: mod.rs::debug_node_end/debug_field_ends. Quotes and escapes prevent
+// structural punctuation in literal contents from changing tree boundaries.
+fn jet_format_debug_node_end(bytes: [U8], open: Int, limit: Int) -> Int? Never! {
+    depth := 0
+    quote := -1
+    escaped := false
+    loop index in open..<limit {
+        byte :: Int.from_u8(bytes[index])
+        if quote >= 0 {
+            if {
+                escaped -> escaped = false
+                byte == 92 -> escaped = true
+                byte == quote -> quote = -1
+            }
+            next
+        }
+        if {
+            byte == 34 || byte == 39 -> quote = byte
+            byte == 123 -> depth += 1
+            byte == 125 -> {
+                if depth == 0 -> return None
+                depth -= 1
+                if depth == 0 -> return Val(index + 1)
+            }
+        }
+    }
+    None
+}
+fn jet_format_debug_field_ends(bytes: [U8], start: Int, end: Int) -> [Int] Never! {
+    ends := [Int]{}
+    braces := 0
+    brackets := 0
+    parens := 0
+    quote := -1
+    escaped := false
+    loop index in start..<end {
+        byte :: Int.from_u8(bytes[index])
+        if quote >= 0 {
+            if {
+                escaped -> escaped = false
+                byte == 92 -> escaped = true
+                byte == quote -> quote = -1
+            }
+            next
+        }
+        if {
+            byte == 34 || byte == 39 -> quote = byte
+            byte == 123 -> braces += 1
+            byte == 125 && braces > 0 -> braces -= 1
+            byte == 91 -> brackets += 1
+            byte == 93 && brackets > 0 -> brackets -= 1
+            byte == 40 -> parens += 1
+            byte == 41 && parens > 0 -> parens -= 1
+            byte == 44 && braces == 0 && brackets == 0 && parens == 0 -> &ends.push(index + 1)
+        }
+    }
+    if ends.len() == 0 || ends[ends.len() - 1] != end -> &ends.push(end)
+    ends
+}
+fn jet_format_bytes_match(bytes: [U8], start: Int, mark: [U8]) -> Bool Never! {
+    if start < 0 || start + mark.len() > bytes.len() -> return false
+    loop index in 0..<mark.len() { if bytes[start + index] != mark[index] -> return false }
+    true
+}
+fn jet_format_append_bytes(out: &[U8], bytes: [U8], start: Int, end: Int) Never! {
+    loop index in start..<end -> &out.push(bytes[index])
+}
+// Rust: mod.rs::canonicalize_struct_literal_heads/canonicalize_struct_literal_node.
+fn jet_format_canonicalize_struct_literal_heads(bytes: [U8]) -> [U8] Never! {
+    out := [U8]{}
+    jet_format_canonicalize_struct_literal_range(&out, bytes, 0, bytes.len())
+    out
+}
+fn jet_format_canonicalize_struct_literal_range(out: &[U8], bytes: [U8], start: Int, limit: Int) Never! {
+    mark :: "StructLit {{".bytes()
+    index := start
+    quote := -1
+    escaped := false
+    loop index < limit {
+        byte :: Int.from_u8(bytes[index])
+        if quote >= 0 {
+            &out.push(bytes[index])
+            if {
+                escaped -> escaped = false
+                byte == 92 -> escaped = true
+                byte == quote -> quote = -1
+            }
+            index += 1
+            next
+        }
+        if byte == 34 || byte == 39 -> quote = byte
+        if index + mark.len() <= limit && jet_format_bytes_match(bytes, index, mark) {
+            if jet_format_debug_node_end(bytes, index + mark.len() - 1, limit) == .Val(end) {
+                jet_format_canonicalize_struct_literal_node(&out, bytes, index, end)
+                index = end
+                next
+            }
+        }
+        &out.push(bytes[index])
+        index += 1
+    }
+}
+fn jet_format_canonicalize_struct_literal_node(out: &[U8], bytes: [U8], begin: Int, limit: Int) Never! {
+    open := begin
+    loop open < limit && bytes[open] != (U8{123}) -> open += 1
+    if open == limit {
+        jet_format_append_bytes(&out, bytes, begin, limit)
+        return
+    }
+    jet_format_append_bytes(&out, bytes, begin, open + 1)
+    start := open + 1
+    loop end in jet_format_debug_field_ends(bytes, start, limit - 1) {
+        colon := start
+        loop colon < end && bytes[colon] != (U8{58}) -> colon += 1
+        replacement := String?{None}
+        if colon < end {
+            name :: (String.from_bytes(bytes[start..<colon]) ?? panic("Debug field names are UTF-8")).trim()
+            replacement = if name == {
+                "type_name" -> Val(" \"\"")
+                "type_args" -> Val(" []")
+                "import_ns" -> Val(" None")
+                "inferred" -> Val(" true")
+                else -> None
+            }
+        }
+        if replacement == .Val(text) {
+            jet_format_append_bytes(&out, bytes, start, colon + 1)
+            loop byte in text.bytes() -> &out.push(byte)
+            if end > start && bytes[end - 1] == (U8{44}) -> &out.push(U8{44})
+        } else {
+            jet_format_canonicalize_struct_literal_range(&out, bytes, start, end)
+        }
+        start = end
+    }
+    jet_format_append_bytes(&out, bytes, start, limit - 1)
+    &out.push(U8{125})
+}
+// Rust: mod.rs::canonicalize_generated_loop_labels. Limit rewriting to actual
+// loop-label fields/exits: user literal lookalikes must remain meaning-bearing.
+fn jet_format_canonicalize_generated_loop_labels(bytes: [U8]) -> [U8] Never! {
+    out := [U8]{}
+    seen := [String:Int]{}
+    index := 0
+    loop index < bytes.len() {
+        byte :: bytes[index]
+        if byte != (U8{34}) && byte != (U8{39}) {
+            &out.push(byte)
+            index += 1
+            next
+        }
+        start :: index
+        quote :: byte
+        index += 1
+        loop index < bytes.len() {
+            current :: bytes[index]
+            index += 1
+            if current == (U8{92}) {
+                if index < bytes.len() -> index += 1
+                next
+            }
+            if current == quote -> break
+        }
+        text :: String.from_bytes(bytes[start + 1..<index - 1]) ?? ""
+        // Fixed-size structural suffix tests keep the scan linear and avoid
+        // allocating/copying the entire preceding tree at every string.
+        label_suffixes :: [String]{
+            "BreakLabel(", "ContinueLabel(", "BreakLabelValue(",
+            "label: Some((", "loop_label: Some((",
+        }
+        label_position := false
+        loop suffix in label_suffixes {
+            mark :: suffix.bytes()
+            if jet_format_bytes_match(bytes, start - mark.len(), mark) -> label_position = true
+        }
+        stem := ""
+        if text.starts_with("__jet_value_loop_") -> stem = "__jet_value_loop_"
+        if text.starts_with("__jet_collect_loop_") -> stem = "__jet_collect_loop_"
+        digits :: if stem == "" -> "" else -> text.slice(stem.len(), text.len())
+        numeric := digits.len() > 0
+        loop digit in digits.bytes() { if digit < (U8{48}) || digit > (U8{57}) -> numeric = false }
+        if label_position && stem != "" && numeric {
+            ordinal := seen.get(text)
+            if ordinal == None {
+                ordinal = Val(seen.len())
+                &seen.add(text, ordinal ?? panic("assigned above")).drop("new generated label")
+            }
+            number :: ordinal ?? panic("known label")
+            rendered :: "\"{stem}{number}\"".bytes()
+            jet_format_append_bytes(&out, rendered, 0, rendered.len())
+        } else {
+            jet_format_append_bytes(&out, bytes, start, index)
+        }
+    }
+    out
+}

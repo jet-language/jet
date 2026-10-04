@@ -1,0 +1,1357 @@
+// PORT-PENDING 1065 tests-golden: tests/golden.rs:1-1353
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Golden tests: every example program must pass the front end, and (when
+//RS //! rustc is available) build and print exactly its expected output.
+//RS //! Examples are the executable spec (invariant I5).
+//RS //!
+//RS //! Also enforces:
+//RS //!   I1 — generated code never contains `unsafe`
+//RS //!   I2 — rustc accepting the generated code; a rejection here is a
+//RS //!        front-end soundness bug, reported loudly
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS use std::sync::{Arc, Mutex};
+//RS 
+//RS mod common;
+//RS use common::{
+//RS     add_generated_rust, example_stdin, fixture_filter, fixture_matches, have_rustc, panic_message,
+//RS     strip_vetted_prelude_modules, test_worker_count, unified_diff, unsafe_keyword_columns,
+//RS };
+//RS 
+//RS #[derive(Clone)]
+//RS struct GoldenEntry {
+//RS     path: PathBuf,
+//RS     stem: String,
+//RS     shown: String,
+//RS }
+//RS 
+//RS struct GoldenEnv {
+//RS     ex_dir: PathBuf,
+//RS     ext: &'static str,
+//RS     have_rustc: bool,
+//RS     have_cargo: bool,
+//RS     have_gtk: bool,
+//RS     update_expected: bool,
+//RS }
+//RS 
+//RS /// Keep golden's per-run program and FFI-bridge caches private to this test
+//RS /// process. Those caches are not content-verified end to end, and parallel test
+//RS /// binaries can delete or republish their artifacts while a release example is
+//RS /// linking them. Golden examples must prove generated code, not depend on
+//RS /// another suite's cache timing.
+//RS ///
+//RS /// The runtime rlib cache is deliberately NOT in here: it is content-addressed
+//RS /// and digest-verified, so it is safe to share and expensive to rebuild.
+//RS struct GoldenScratch {
+//RS     path: PathBuf,
+//RS }
+//RS 
+//RS impl Drop for GoldenScratch {
+//RS     fn drop(&mut self) {
+//RS         let _ = fs::remove_dir_all(&self.path);
+//RS     }
+//RS }
+//RS 
+//RS struct FeatureFixtureScratch {
+//RS     root: PathBuf,
+//RS     entry: PathBuf,
+//RS }
+//RS 
+//RS impl FeatureFixtureScratch {
+//RS     fn for_entry(entry: &Path) -> Option<Self> {
+//RS         let project_root = entry.parent()?;
+//RS         if !contains_fixture_state(project_root) {
+//RS             return None;
+//RS         }
+//RS 
+//RS         let base = std::env::var_os("JET_TEST_SCRATCH_DIR")
+//RS             .or_else(|| std::env::var_os("JET_TEST_SCRATCH"))
+//RS             .map(PathBuf::from)
+//RS             .unwrap_or_else(|| {
+//RS                 PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
+//RS                     .join(".cache/jet-test-scratch")
+//RS             });
+//RS         fs::create_dir_all(&base).expect("create golden fixture scratch root");
+//RS         let base = fs::canonicalize(base).expect("canonicalize golden fixture scratch root");
+//RS         let repo = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).expect("canonicalize repo root");
+//RS         assert!(
+//RS             !base.starts_with(&repo) && !base.starts_with("/tmp"),
+//RS             "golden fixture scratch must be outside the repository and disk-backed: {}",
+//RS             base.display()
+//RS         );
+//RS 
+//RS         let stamp = std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .expect("system clock before Unix epoch")
+//RS             .as_nanos();
+//RS         let root = base.join(format!("golden-fixture-{}-{stamp}", std::process::id()));
+//RS         fs::create_dir_all(&root).expect("create golden fixture project");
+//RS         copy_feature_project(project_root, &root);
+//RS         Some(Self {
+//RS             entry: root.join(entry.file_name()?),
+//RS             root,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for FeatureFixtureScratch {
+//RS     fn drop(&mut self) {
+//RS         let _ = fs::remove_dir_all(&self.root);
+//RS     }
+//RS }
+//RS 
+//RS fn contains_fixture_state(root: &Path) -> bool {
+//RS     fs::read_dir(root)
+//RS         .unwrap_or_else(|error| panic!("read example project {}: {error}", root.display()))
+//RS         .flatten()
+//RS         .any(|item| {
+//RS             let path = item.path();
+//RS             let name = item.file_name();
+//RS             if !item.file_type().is_ok_and(|kind| kind.is_dir()) {
+//RS                 return false;
+//RS             }
+//RS             if name == "fixture-state" {
+//RS                 return true;
+//RS             }
+//RS             name != ".jet" && contains_fixture_state(&path)
+//RS         })
+//RS }
+//RS 
+//RS fn copy_feature_project(source: &Path, destination: &Path) {
+//RS     for item in fs::read_dir(source)
+//RS         .unwrap_or_else(|error| panic!("read example project {}: {error}", source.display()))
+//RS         .flatten()
+//RS     {
+//RS         let name = item.file_name();
+//RS         let kind = item.file_type().expect("read example fixture entry type");
+//RS         let from = item.path();
+//RS         if kind.is_dir() && name == ".jet" {
+//RS             continue;
+//RS         }
+//RS         if kind.is_dir() && name == "fixture-state" {
+//RS             let state = destination.join(".jet");
+//RS             fs::create_dir_all(&state).expect("create staged example .jet state");
+//RS             copy_feature_state(&from, &state);
+//RS         } else if kind.is_dir() {
+//RS             let to = destination.join(&name);
+//RS             fs::create_dir_all(&to).expect("create copied example directory");
+//RS             copy_feature_project(&from, &to);
+//RS         } else if kind.is_file() {
+//RS             fs::copy(&from, destination.join(&name)).unwrap_or_else(|error| {
+//RS                 panic!(
+//RS                     "copy example fixture {} into {}: {error}",
+//RS                     from.display(),
+//RS                     destination.display()
+//RS                 )
+//RS             });
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn copy_feature_state(source: &Path, destination: &Path) {
+//RS     for item in fs::read_dir(source)
+//RS         .unwrap_or_else(|error| panic!("read fixture state {}: {error}", source.display()))
+//RS         .flatten()
+//RS     {
+//RS         let from = item.path();
+//RS         let to = destination.join(item.file_name());
+//RS         let kind = item.file_type().expect("read fixture state entry type");
+//RS         if kind.is_dir() {
+//RS             fs::create_dir_all(&to).expect("create staged fixture state directory");
+//RS             copy_feature_state(&from, &to);
+//RS         } else if kind.is_file() {
+//RS             fs::copy(&from, &to).unwrap_or_else(|error| {
+//RS                 panic!(
+//RS                     "copy fixture state {} into {}: {error}",
+//RS                     from.display(),
+//RS                     destination.display()
+//RS                 )
+//RS             });
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn gtk_loader_unavailable(stderr: &[u8]) -> bool {
+//RS     let stderr = String::from_utf8_lossy(stderr);
+//RS     stderr.contains("symbol lookup error")
+//RS         && stderr.contains("libgtk-4.so")
+//RS         && stderr.contains("undefined symbol")
+//RS }
+//RS 
+//RS fn assert_compute_vulkan_webgpu_output(stdout: &str) {
+//RS     let lines: Vec<_> = stdout.lines().collect();
+//RS     assert_eq!(
+//RS         lines.len(),
+//RS         2,
+//RS         "unexpected output from tooling/compute_vulkan_webgpu: {stdout:?}"
+//RS     );
+//RS     assert!(
+//RS         matches!(lines[0], "vulkan:accepted" | "vulkan:rejected"),
+//RS         "Vulkan must report its real availability: {stdout:?}"
+//RS     );
+//RS     assert_eq!(
+//RS         lines[1], "webgpu:rejected",
+//RS         "native WebGPU must fail closed: {stdout:?}"
+//RS     );
+//RS }
+//RS 
+//RS fn assert_front_end(entry: &GoldenEntry, src: &str) {
+//RS     let diagnostics = jet::check_with_path(entry.path.to_str().expect("example path is utf8"));
+//RS     assert!(
+//RS         !diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+//RS         "example {} failed the front end:\n{}",
+//RS         entry.stem,
+//RS         jet::render_diagnostics(&entry.shown, src, &diagnostics)
+//RS     );
+//RS }
+//RS 
+//RS /// Does running this example start a service that serves until the process is
+//RS /// stopped? One canonical answer, `jet::AST::bundle_serves_until_stopped` — the
+//RS /// same fact `tests/dev_parts/support.rs` reads, never a stem list.
+//RS fn example_serves_until_stopped(path: &Path) -> bool {
+//RS     let Some(path) = path.to_str() else {
+//RS         return false;
+//RS     };
+//RS     let Ok(mut bundle) = jet::Loader::load_entry(path) else {
+//RS         return false;
+//RS     };
+//RS     let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     jet::AST::bundle_serves_until_stopped(&bundle)
+//RS }
+//RS 
+//RS #[test]
+//RS fn statement_attributes_codegen_shape() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let path = root.join("Examples/features/tooling/statement_attributes.jet");
+//RS     let src = fs::read_to_string(&path).unwrap();
+//RS     let out = jet::compile_with_path(&src, "Examples/features/tooling/statement_attributes.jet")
+//RS         .unwrap_or_else(|diags| {
+//RS             panic!(
+//RS                 "statement attributes example failed front end:\n{}",
+//RS                 jet::render_diagnostics(
+//RS                     "Examples/features/tooling/statement_attributes.jet",
+//RS                     &src,
+//RS                     &diags
+//RS                 )
+//RS             )
+//RS         });
+//RS     let core_end = out
+//RS         .rust
+//RS         .rfind("// jet:cached-core-end")
+//RS         .expect("generated output has cached-core boundary");
+//RS     let entry_end = out
+//RS         .rust
+//RS         .find("// jet-mir-entry")
+//RS         .expect("generated output has MIR entry boundary");
+//RS     let generated_entry = &out.rust[core_end..entry_end];
+//RS     assert!(
+//RS         !generated_entry.contains("\"off\"") && !generated_entry.contains("\"off block\""),
+//RS         "`#Off` body must not appear in generated entry:\n{}",
+//RS         generated_entry
+//RS     );
+//RS     assert!(
+//RS         generated_entry.contains("#[cfg(not(jet_release))]") && generated_entry.contains("debug"),
+//RS         "`#DebugOnly` body must be cfg-gated for release:\n{}",
+//RS         generated_entry
+//RS     );
+//RS }
+//RS 
+//RS fn feature_stem(path: &Path, ex_dir: &Path) -> String {
+//RS     path.strip_prefix(ex_dir)
+//RS         .expect("feature path must be below Examples/features")
+//RS         .to_string_lossy()
+//RS         .replace('\\', "/")
+//RS }
+//RS 
+//RS fn push_feature_source(entries: &mut Vec<GoldenEntry>, path: PathBuf, ex_dir: &Path, ext: &str) {
+//RS     let stem = feature_stem(&path, ex_dir)
+//RS         .strip_suffix(&format!(".{ext}"))
+//RS         .unwrap_or_else(|| panic!("feature source has unexpected extension: {}", path.display()))
+//RS         .to_owned();
+//RS     entries.push(GoldenEntry {
+//RS         shown: format!("Examples/features/{stem}.{ext}"),
+//RS         path,
+//RS         stem,
+//RS     });
+//RS }
+//RS 
+//RS fn push_feature_project(entries: &mut Vec<GoldenEntry>, run: PathBuf, ex_dir: &Path, ext: &str) {
+//RS     let stem = feature_stem(
+//RS         run.parent().expect("run entry must have a project directory"),
+//RS         ex_dir,
+//RS     );
+//RS     entries.push(GoldenEntry {
+//RS         shown: format!("Examples/features/{stem}/run.{ext}"),
+//RS         path: run,
+//RS         stem,
+//RS     });
+//RS }
+//RS 
+//RS fn collect_feature_project_entries(
+//RS     dir: &Path,
+//RS     ex_dir: &Path,
+//RS     ext: &str,
+//RS     entries: &mut Vec<GoldenEntry>,
+//RS ) {
+//RS     let Some(name) = dir.file_name().and_then(|name| name.to_str()) else {
+//RS         return;
+//RS     };
+//RS     if name.starts_with('.') || name == "expected" {
+//RS         return;
+//RS     }
+//RS 
+//RS     let run = dir.join(format!("run.{ext}"));
+//RS     if run.is_file() {
+//RS         push_feature_project(entries, run, ex_dir, ext);
+//RS         return;
+//RS     }
+//RS 
+//RS     // A package/workspace without a canonical run entry owns its descendants;
+//RS     // those files are modules, build scripts, or member-package fixtures.
+//RS     if dir.join("package.jet").is_file() || dir.join("workspace.jet").is_file() {
+//RS         return;
+//RS     }
+//RS 
+//RS     let Ok(children) = fs::read_dir(dir) else {
+//RS         return;
+//RS     };
+//RS     for child in children.flatten() {
+//RS         let path = child.path();
+//RS         if path.is_dir() {
+//RS             collect_feature_project_entries(&path, ex_dir, ext, entries);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_feature_golden_entries(ex_dir: &Path, ext: &str) -> Vec<GoldenEntry> {
+//RS     let mut entries = Vec::new();
+//RS     let Ok(topics) = fs::read_dir(ex_dir) else {
+//RS         return entries;
+//RS     };
+//RS     for topic in topics.flatten() {
+//RS         let topic_path = topic.path();
+//RS         let Some(topic_name) = topic_path.file_name().and_then(|name| name.to_str()) else {
+//RS             continue;
+//RS         };
+//RS         if !topic_path.is_dir() || topic_name.starts_with('.') || topic_name == "expected" {
+//RS             continue;
+//RS         }
+//RS         let Ok(children) = fs::read_dir(&topic_path) else {
+//RS             continue;
+//RS         };
+//RS         for child in children.flatten() {
+//RS             let path = child.path();
+//RS             if path.is_file()
+//RS                 && path.extension().and_then(|extension| extension.to_str()) == Some(ext)
+//RS                 && path.file_name().and_then(|name| name.to_str()) != Some("package.jet")
+//RS                 && path.file_name().and_then(|name| name.to_str()) != Some("workspace.jet")
+//RS                 && !path
+//RS                     .file_name()
+//RS                     .and_then(|name| name.to_str())
+//RS                     .is_some_and(|name| name.starts_with('.'))
+//RS             {
+//RS                 push_feature_source(&mut entries, path, ex_dir, ext);
+//RS             } else if path.is_dir() {
+//RS                 collect_feature_project_entries(&path, ex_dir, ext, &mut entries);
+//RS             }
+//RS         }
+//RS     }
+//RS     entries.sort_by(|a, b| a.stem.cmp(&b.stem));
+//RS     entries
+//RS }
+//RS 
+//RS #[test]
+//RS fn feature_entry_discovery_stops_at_project_roots() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let entries = collect_feature_golden_entries(&root.join("Examples/features"), "jet");
+//RS 
+//RS     assert!(
+//RS         entries.iter().any(|entry| entry.stem == "basics/onboarding"),
+//RS         "nested run.jet project was not discovered"
+//RS     );
+//RS     for module in [
+//RS         "foundations/storage/cache",
+//RS         "foundations/tooling/load",
+//RS         "packages/sandbox_mathkit/sandbox_src",
+//RS     ] {
+//RS         assert!(
+//RS             !entries.iter().any(|entry| entry.stem == module),
+//RS             "module/member fixture was incorrectly treated as an executable: {module}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn examples_compile_and_run() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let ex_dir = root.join("Examples/features");
+//RS     let ext = jet::Syntax::FILE_EXT;
+//RS     let have_rustc = have_rustc();
+//RS     let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
+//RS     // D-UIDEVSHELL1=A (c134 Phase 8): the native GTK4 example links `-lgtk-4`
+//RS     // via `pkg-config gtk4`. Only build+run it where gtk4 dev headers exist
+//RS     // (the nix dev shell).
+//RS     let have_gtk = Command::new("pkg-config")
+//RS         .args(["--exists", "gtk4"])
+//RS         .status()
+//RS         .map(|s| s.success())
+//RS         .unwrap_or(false);
+//RS     let scratch = std::env::temp_dir().join(format!(
+//RS         "jet-golden-scratch-{}-{}",
+//RS         std::process::id(),
+//RS         std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .expect("system clock is after Unix epoch")
+//RS             .as_nanos()
+//RS     ));
+//RS     let ffi_cache = scratch.join("ffi");
+//RS     // #2074/#2516: the store is content-addressed and re-verified against the
+//RS     // artifact digest on every hit, so sharing it across runs cannot
+//RS     // resurrect a stale artifact — a wrong key is a miss, never a reuse. A
+//RS     // per-run store would instead pay one cold runtime compile per key on
+//RS     // every golden run, which is the exact cost this substrate exists to
+//RS     // remove. Living under the target dir keeps `cargo clean` as the reset.
+//RS     let store = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jet-golden-store");
+//RS     std::env::set_var("JET_STORE_DIR", &store);
+//RS     std::env::set_var("JET_FFI_CACHE_DIR", &ffi_cache);
+//RS     let _scratch = GoldenScratch { path: scratch };
+//RS     if !have_rustc {
+//RS         eprintln!("note: rustc not found; checking codegen only, skipping build+run");
+//RS     }
+//RS 
+//RS     // A feature source is executable when it is a standalone `.jet` file
+//RS     // directly under a topic, or the `run.jet` entry of a project directory.
+//RS     // Once a package/workspace root is found, its descendants are modules,
+//RS     // fixtures, or member packages; do not run them as independent programs.
+//RS     // This keeps the corpus census complete without turning implementation
+//RS     // files into false golden entries.
+//RS     let mut entries = collect_feature_golden_entries(&ex_dir, ext);
+//RS     let filter = fixture_filter("JET_GOLDEN_FILTER");
+//RS     entries.retain(|entry| fixture_matches(filter.as_deref(), &entry.shown));
+//RS     assert!(
+//RS         !entries.is_empty(),
+//RS         "JET_GOLDEN_FILTER matched no examples: {}",
+//RS         filter.as_deref().unwrap_or("<unfiltered>")
+//RS     );
+//RS     let update_expected = match std::env::var("JET_UPDATE_GOLDEN") {
+//RS         Err(_) => false,
+//RS         Ok(value) if value == "1" => {
+//RS             assert!(
+//RS                 filter.is_some(),
+//RS                 "JET_UPDATE_GOLDEN=1 requires JET_GOLDEN_FILTER so updates stay scoped"
+//RS             );
+//RS             true
+//RS         }
+//RS         Ok(value) => panic!("JET_UPDATE_GOLDEN must be exactly 1, got {value:?}"),
+//RS     };
+//RS     let env = Arc::new(GoldenEnv {
+//RS         ex_dir,
+//RS         ext,
+//RS         have_rustc,
+//RS         have_cargo,
+//RS         have_gtk,
+//RS         update_expected,
+//RS     });
+//RS     let jobs = Arc::new(Mutex::new(std::collections::VecDeque::from(entries)));
+//RS     let failures = Arc::new(Mutex::new(Vec::<String>::new()));
+//RS     let checked = Arc::new(Mutex::new(0usize));
+//RS     let mut handles = Vec::new();
+//RS     for _ in 0..test_worker_count(16) {
+//RS         let env = Arc::clone(&env);
+//RS         let jobs = Arc::clone(&jobs);
+//RS         let failures = Arc::clone(&failures);
+//RS         let checked = Arc::clone(&checked);
+//RS         // Match `Tools/agent/jet-env` / nix RUST_MIN_STACK (~60MiB). Default
+//RS         // worker stacks (~2–8MiB) overflow on large `if subject OP { … }` tables
+//RS         // (D-IFDIST1 value/statement dispatch) during sema.
+//RS         handles.push(
+//RS             std::thread::Builder::new()
+//RS                 .stack_size(64 * 1024 * 1024)
+//RS                 .spawn(move || loop {
+//RS                     let Some(entry) = jobs.lock().unwrap().pop_front() else {
+//RS                         break;
+//RS                     };
+//RS                     let stem = entry.stem.clone();
+//RS                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS                         check_golden_entry(&entry, &env)
+//RS                     }));
+//RS                     match result {
+//RS                         Ok(()) => *checked.lock().unwrap() += 1,
+//RS                         Err(payload) => failures
+//RS                             .lock()
+//RS                             .unwrap()
+//RS                             .push(format!("{stem}: {}", panic_message(payload))),
+//RS                     }
+//RS                 })
+//RS                 .expect("golden worker thread"),
+//RS         );
+//RS     }
+//RS     for handle in handles {
+//RS         handle
+//RS             .join()
+//RS             .expect("golden worker panicked outside harness");
+//RS     }
+//RS     let failures = failures.lock().unwrap();
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "golden example failures:\n{}",
+//RS         failures.join("\n\n")
+//RS     );
+//RS     let checked = *checked.lock().unwrap();
+//RS     assert!(
+//RS         filter.is_some() || checked >= 2,
+//RS         "expected at least 2 examples, found {}",
+//RS         checked
+//RS     );
+//RS }
+//RS 
+//RS /// I1's one exception: the examples that TEACH the audited `#Unsafe` tier, so
+//RS /// their generated Rust must carry `unsafe` — in gated `unsafe { … }` /
+//RS /// `unsafe fn` / `unsafe extern` form only. Every other stem must generate none.
+//RS ///
+//RS /// DERIVED, never hand-typed: the repository already keeps exactly one registry
+//RS /// of approved user-written unsafe regions — the `unsafe-ratchet` baseline in
+//RS /// `Docs/spec/safety.md`, scanned and enforced by
+//RS /// `Tools/agent/check-unsafe-ratchet.mjs` (`tests/unsafe_ratchet.rs`,
+//RS /// `Tools/agent/verify-full.sh`). A new `#Unsafe` gate cannot land without
+//RS /// refreshing that baseline in the same change, so reading it here makes the two
+//RS /// facts one fact.
+//RS ///
+//RS /// A hand copy was a second registry of the same fact, and it rotted twice: the
+//RS /// dev-sentry/gate-ladder rows were red from 2026-08-13 with nothing watching
+//RS /// `golden`, and `a5bea5f25` added an approved gate at
+//RS /// `Examples/features/crypto/random_api_split.jet:28` ("compare the typed and
+//RS /// raw HKDF rungs"), refreshed the baseline as the ratchet demands, and left the
+//RS /// list behind — so `golden` reported an APPROVED region as an I1 violation.
+//RS ///
+//RS /// Deriving cannot widen I1: a region only enters the baseline through the
+//RS /// ratchet, a stem with no approved region that emits `unsafe` still fails the
+//RS /// negative assertion below, and a stem with one that stops emitting still fails
+//RS /// the positive one.
+//RS ///
+//RS /// Both directions are still asserted below, and the gated form is scanned with
+//RS /// `common::unsafe_keyword_columns` — three audited stems carry the word in
+//RS /// their own file name, which a plain substring scan could not tell from code.
+//RS static GATED_UNSAFE_STEMS: std::sync::LazyLock<std::collections::HashSet<String>> =
+//RS     std::sync::LazyLock::new(|| {
+//RS         let baseline_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Docs/spec/safety.md");
+//RS         let baseline = fs::read_to_string(&baseline_path).unwrap_or_else(|err| {
+//RS             panic!(
+//RS                 "cannot read the approved unsafe-region baseline {}: {err}",
+//RS                 baseline_path.display()
+//RS             )
+//RS         });
+//RS         let data = baseline
+//RS             .split_once("<!-- unsafe-ratchet:data")
+//RS             .and_then(|(_, rest)| rest.split_once("\n-->"))
+//RS             .map(|(data, _)| data)
+//RS             .unwrap_or_else(|| {
+//RS                 panic!(
+//RS                     "{} has no `unsafe-ratchet:data` baseline block",
+//RS                     baseline_path.display()
+//RS                 )
+//RS             });
+//RS         let example_prefix = "Examples/features/";
+//RS         let jet_suffix = format!(".{}", jet::Syntax::FILE_EXT);
+//RS         let stems: std::collections::HashSet<String> = data
+//RS             .lines()
+//RS             .filter_map(|line| {
+//RS                 let quoted = line.trim().strip_prefix("\"file\":")?.trim_start();
+//RS                 let file = quoted.strip_prefix('"')?.split('"').next()?;
+//RS                 let stem = file
+//RS                     .strip_prefix(example_prefix)?
+//RS                     .strip_suffix(&jet_suffix)?;
+//RS                 Some(stem.to_owned())
+//RS             })
+//RS             .collect();
+//RS         assert!(
+//RS             !stems.is_empty(),
+//RS             "{} records no approved `Examples/features` unsafe region; the audited-tier \
+//RS              examples (lowlevel/memory/effects/crypto) must appear there",
+//RS             baseline_path.display()
+//RS         );
+//RS         stems
+//RS     });
+//RS 
+//RS fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
+//RS     // D-JPK-TASKRUN1 / I5 (card #476): job_runner proves both `#Job` entry
+//RS     // paths — leaf `greet` stays callable while sibling `seed_data` calls it.
+//RS     if entry.stem == "devloop/job_runner" {
+//RS         check_job_runner_jobs(entry, env);
+//RS         return;
+//RS     }
+//RS 
+//RS     if entry.stem.starts_with("lowlevel/polyglot_") {
+//RS         check_polyglot_binder_example(entry, env);
+//RS         return;
+//RS     }
+//RS     let src = fs::read_to_string(&entry.path).unwrap();
+//RS     // Fixture state has one canonical, non-dot source tree. Materialize it as
+//RS     // project `.jet` state only in the disk-backed test scratch directory.
+//RS     let staged_fixture = FeatureFixtureScratch::for_entry(&entry.path);
+//RS     let compile_path = staged_fixture
+//RS         .as_ref()
+//RS         .map(|scratch| scratch.entry.to_string_lossy().into_owned())
+//RS         .unwrap_or_else(|| entry.shown.clone());
+//RS 
+//RS 
+//RS     let stem = entry.stem.as_str();
+//RS     let needs_gtk = stem == "ui/ui_native_linux";
+//RS     if needs_gtk && !env.have_gtk {
+//RS         assert_front_end(entry, &src);
+//RS         eprintln!(
+//RS             "note: front end checked; skipping Examples/features/{stem}.jet build (need gtk4)"
+//RS         );
+//RS         return;
+//RS     }
+//RS     let uses_ffi_bridge = matches!(
+//RS         stem,
+//RS         "lowlevel/ffi"
+//RS             | "io/archive"
+//RS             | "io/db"
+//RS             | "crypto/crypto_envelope"
+//RS             | "crypto/crypto_sign"
+//RS             | "crypto/crypto_migration"
+//RS             | "crypto/crypto_suite"
+//RS             | "crypto/vault_secret"
+//RS             | "crypto/auth_tokens"
+//RS             | "io/compress_gzip"
+//RS             | "io/compress_zstd"
+//RS     );
+//RS 
+//RS     if uses_ffi_bridge && !env.have_cargo {
+//RS         assert_front_end(entry, &src);
+//RS         eprintln!(
+//RS             "note: front end checked; skipping Examples/features/{stem}.jet golden (need cargo for FFI bridge)"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     // Ordinary examples use the repo-relative `entry.shown` path, not the
+//RS     // absolute `entry.path`: Loader stores this value as the entry display path
+//RS     // and observable source-location examples pin it in their goldens. Projects
+//RS     // with canonical `fixture-state` are staged under safe scratch so their
+//RS     // required `.jet` state is never created in the checkout; their diagnostics
+//RS     // and output goldens still use `entry.shown`.
+//RS     let compiled_result = if has_package_build_entry(Path::new(&compile_path), &src) {
+//RS         jet::compile_programmable_build(&compile_path, &[])
+//RS     } else {
+//RS         jet::compile_with_path(&src, &compile_path)
+//RS     };
+//RS     let compiled = match compiled_result {
+//RS         Ok(c) => c,
+//RS         Err(diags) => panic!(
+//RS             "example {} failed the front end:\n{}",
+//RS             stem,
+//RS             jet::render_diagnostics(
+//RS                 &format!("Examples/features/{}.{}", stem, env.ext),
+//RS                 &src,
+//RS                 &diags
+//RS             )
+//RS         ),
+//RS     };
+//RS     assert!(
+//RS         !compiled
+//RS             .lints
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "L0507"),
+//RS         "feature example {stem} still teaches the discouraged braced/chained branch form:\n{}",
+//RS         jet::render_diagnostics(&entry.shown, &src, &compiled.lints)
+//RS     );
+//RS     let rust_code = compiled.rust;
+//RS     let ffi_link = compiled.ffi;
+//RS     let user_code = strip_vetted_prelude_modules(&rust_code);
+//RS 
+//RS     if GATED_UNSAFE_STEMS.contains(stem) {
+//RS         assert!(
+//RS             user_code
+//RS                 .lines()
+//RS                 .any(|line| !unsafe_keyword_columns(line).is_empty()),
+//RS             "the audited example {} should exercise the gated `unsafe` tier",
+//RS             stem
+//RS         );
+//RS         for (i, line) in user_code.lines().enumerate() {
+//RS             for col in unsafe_keyword_columns(line) {
+//RS                 let after = line[col + "unsafe".len()..].trim_start();
+//RS                 assert!(
+//RS                     after.starts_with('{') || after.starts_with("fn "),
+//RS                     "{} emits an ungated `unsafe` at line {}: {}",
+//RS                     stem,
+//RS                     i + 1,
+//RS                     line.trim()
+//RS                 );
+//RS             }
+//RS         }
+//RS     } else if stem == "game/raylib_window" {
+//RS         assert!(
+//RS             !user_code.contains("unsafe fn __jet_"),
+//RS             "raylib user functions must stay safe; bridge unsafe stays in vetted prelude"
+//RS         );
+//RS     } else {
+//RS         let leftover: Vec<String> = user_code
+//RS             .lines()
+//RS             .enumerate()
+//RS             .filter(|(_, line)| !unsafe_keyword_columns(line).is_empty())
+//RS             .map(|(i, line)| format!("  line {}: {}", i + 1, line.trim()))
+//RS             .collect();
+//RS         assert!(
+//RS             leftover.is_empty(),
+//RS             "generated Rust for {} contains `unsafe` outside vetted memory helpers:\n{}",
+//RS             stem,
+//RS             leftover.join("\n")
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         rust_code.contains("fn main()"),
+//RS         "generated Rust for {} has no fn main",
+//RS         stem
+//RS     );
+//RS 
+//RS     if needs_gtk && !env.have_rustc {
+//RS         eprintln!(
+//RS             "note: front end checked; skipping Examples/features/{stem}.jet build (need gtk4 + rustc)"
+//RS         );
+//RS         return;
+//RS     }
+//RS     let needs_raylib_display = stem == "game/raylib_window";
+//RS     if needs_raylib_display && std::env::var("JET_RAYLIB_DISPLAY").as_deref() != Ok("1") {
+//RS         eprintln!(
+//RS             "note: front end checked; skipping Examples/features/{stem}.jet build (set JET_RAYLIB_DISPLAY=1)"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     if !env.have_rustc {
+//RS         return;
+//RS     }
+//RS     let flat_stem = stem.replace('/', "_");
+//RS     let dir = std::env::temp_dir();
+//RS     let rs = dir.join(format!(
+//RS         "jet_golden_{}_{}.rs",
+//RS         std::process::id(),
+//RS         flat_stem
+//RS     ));
+//RS     let bin = dir.join(format!("jet_golden_{}_{}", std::process::id(), flat_stem));
+//RS     let mut rustc_cmd = Command::new("rustc");
+//RS     let _runtime_lease = add_generated_rust(&mut rustc_cmd, &rs, &rust_code, ffi_link.is_some(), &[]);
+//RS     rustc_cmd.arg("-o").arg(&bin);
+//RS     if let Some(link) = &ffi_link {
+//RS         rustc_cmd
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc_cmd
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     let clinks = jet::resolve_c_links(entry.path.to_str().unwrap())
+//RS         .expect("resolve_c_links should succeed for example C bindings");
+//RS     for arg in &clinks {
+//RS         rustc_cmd.arg(arg);
+//RS     }
+//RS     let out = rustc_cmd.output().unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "I2 violated: rustc rejected generated code for {} — this is a jet bug:\n{}",
+//RS         stem,
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     // #2016 / D-WEBAPP-SERVE1=D: an `App`-returning entry is handed to
+//RS     // `App::serve`, which binds a listener and then serves until the process is
+//RS     // stopped. Such a program has no terminating stdout and no exit code of its
+//RS     // own, so it cannot have a `.out` golden — running it here would hang the
+//RS     // suite (or, for the three `App` examples, race a fixed port). It stays in
+//RS     // the COMPILE universe: front end, I1, and I2 above all still apply.
+//RS     // Held back by the canonical derived predicate — the same one
+//RS     // `tests/dev_parts/support.rs` uses — so a fourth service example is
+//RS     // classified instead of discovered as a timeout.
+//RS     if example_serves_until_stopped(&entry.path) {
+//RS         eprintln!(
+//RS             "note: built Examples/features/{stem}.jet; not run (service entry serves until stopped)"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     let mut run_cmd = Command::new(&bin);
+//RS     if needs_gtk {
+//RS         run_cmd.env("JET_UI_HEADLESS", "1");
+//RS     }
+//RS     // An interactive example only reproduces its golden against the answers
+//RS     // that golden was recorded with. `common::example_stdin` is the one home
+//RS     // for those answers (I8); this run asks for them by stem instead of
+//RS     // naming the example and restating its bytes.
+//RS     let run = if let Some(answers) = example_stdin(stem) {
+//RS         use std::io::Write;
+//RS         use std::process::Stdio;
+//RS         let mut child = run_cmd
+//RS             .stdin(Stdio::piped())
+//RS             .stdout(Stdio::piped())
+//RS             .stderr(Stdio::piped())
+//RS             .spawn()
+//RS             .unwrap();
+//RS         child
+//RS             .stdin
+//RS             .take()
+//RS             .unwrap()
+//RS             .write_all(answers.piped.as_bytes())
+//RS             .unwrap();
+//RS         child.wait_with_output().unwrap()
+//RS     } else {
+//RS         run_cmd.output().unwrap()
+//RS     };
+//RS     if needs_gtk && !run.status.success() && gtk_loader_unavailable(&run.stderr) {
+//RS         eprintln!(
+//RS             "note: skipping Examples/features/{stem}.jet run (gtk4 runtime loader unavailable)"
+//RS         );
+//RS         return;
+//RS     }
+//RS     // Suffix rule (Examples/README.md "Auxiliary golden stream suffix"):
+//RS     // `.err.out` = expected non-zero exit (panic/uncaught Err); `.stderr.out`
+//RS     // = expected exit 0 with pinned incidental stderr. Never a third suffix.
+//RS     let err_path = env
+//RS         .ex_dir
+//RS         .join("expected")
+//RS         .join(format!("{}.err.out", stem));
+//RS     let success_err_path = env
+//RS         .ex_dir
+//RS         .join("expected")
+//RS         .join(format!("{}.stderr.out", stem));
+//RS     if err_path.exists() {
+//RS         let code = run.status.code();
+//RS         assert!(
+//RS             code == Some(70) || code == Some(1),
+//RS             "exit code mismatch for example {stem}: expected 70 (panic) or 1 (uncaught Err), got {code:?}"
+//RS         );
+//RS         let actual_err = String::from_utf8_lossy(&run.stderr);
+//RS         if env.update_expected {
+//RS             fs::write(&err_path, actual_err.as_bytes()).unwrap();
+//RS         } else {
+//RS             let expected_err = fs::read_to_string(&err_path)
+//RS                 .unwrap_or_else(|_| panic!("missing Examples/features/expected/{}.err.out", stem));
+//RS             if actual_err != expected_err {
+//RS                 panic!(
+//RS                     "stderr mismatch for example {stem}:\n{}",
+//RS                     unified_diff(
+//RS                         &format!("Examples/features/expected/{stem}.err.out"),
+//RS                         &format!("Examples/features/{stem} stderr (actual)"),
+//RS                         &expected_err,
+//RS                         &actual_err,
+//RS                     )
+//RS                 );
+//RS             }
+//RS         }
+//RS         record_golden_receipt(entry, env, &run, &run.stdout);
+//RS     } else {
+//RS         assert!(
+//RS             run.status.success(),
+//RS             "example {} failed at runtime:\nstdout: {}\nstderr: {}",
+//RS             stem,
+//RS             String::from_utf8_lossy(&run.stdout),
+//RS             String::from_utf8_lossy(&run.stderr)
+//RS         );
+//RS         let out_path = env.ex_dir.join("expected").join(format!("{}.out", stem));
+//RS         let actual_raw = String::from_utf8_lossy(&run.stdout);
+//RS         // CLI usage intentionally names argv[0]. The golden binary has a
+//RS         // process-specific temporary name, so normalize it to the source
+//RS         // basename while keeping every other byte exact.
+//RS         let actual_normalized;
+//RS         let actual = if stem.starts_with("cli/") {
+//RS             let source_name = entry
+//RS                 .path
+//RS                 .file_stem()
+//RS                 .and_then(|name| name.to_str())
+//RS                 .expect("golden source name is utf8");
+//RS             let binary_name = bin
+//RS                 .file_name()
+//RS                 .and_then(|name| name.to_str())
+//RS                 .expect("golden binary name is utf8");
+//RS             actual_normalized = actual_raw.replacen(
+//RS                 &format!("Usage: {binary_name}"),
+//RS                 &format!("Usage: {source_name}"),
+//RS                 1,
+//RS             );
+//RS             actual_normalized.as_str()
+//RS         } else {
+//RS             actual_raw.as_ref()
+//RS         };
+//RS         if env.update_expected {
+//RS             fs::create_dir_all(out_path.parent().unwrap()).unwrap();
+//RS             fs::write(&out_path, actual.as_bytes()).unwrap();
+//RS         } else {
+//RS             assert!(
+//RS                 out_path.is_file(),
+//RS                 "missing Examples/features/expected/{stem}.out; run with JET_UPDATE_GOLDEN=1 and a scoped JET_GOLDEN_FILTER to create it"
+//RS             );
+//RS             let expected = fs::read_to_string(&out_path).unwrap();
+//RS             if stem == "tooling/compute_vulkan_webgpu" {
+//RS                 // Vulkan availability is host-dependent: the shell may expose
+//RS                 // the loader while the machine still has no usable device.
+//RS                 // Validate the portable contract instead of pinning one host's
+//RS                 // acceptance bit in a cross-host golden.
+//RS                 assert_compute_vulkan_webgpu_output(actual);
+//RS             } else if actual != expected {
+//RS                 panic!(
+//RS                     "output mismatch for example {stem}:\n{}",
+//RS                     unified_diff(
+//RS                         &format!("Examples/features/expected/{stem}.out"),
+//RS                         &format!("Examples/features/{stem} stdout (actual)"),
+//RS                         &expected,
+//RS                         &actual,
+//RS                     )
+//RS                 );
+//RS             }
+//RS         }
+//RS         if success_err_path.exists() {
+//RS             let actual_err = String::from_utf8_lossy(&run.stderr);
+//RS             if env.update_expected {
+//RS                 fs::write(&success_err_path, actual_err.as_bytes()).unwrap();
+//RS             } else {
+//RS                 let expected_err = fs::read_to_string(&success_err_path).unwrap_or_else(|_| {
+//RS                     panic!("missing Examples/features/expected/{}.stderr.out", stem)
+//RS                 });
+//RS                 if actual_err != expected_err {
+//RS                     panic!(
+//RS                         "stderr mismatch for example {stem}:\n{}",
+//RS                         unified_diff(
+//RS                             &format!("Examples/features/expected/{stem}.stderr.out"),
+//RS                             &format!("Examples/features/{stem} stderr (actual)"),
+//RS                             &expected_err,
+//RS                             &actual_err,
+//RS                         )
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS         record_golden_receipt(entry, env, &run, actual.as_bytes());
+//RS     }
+//RS }
+//RS 
+//RS /// Keep the expected channel as the executable-spec input, but record the
+//RS /// observed result in the same content-addressed store as CLI test results.
+//RS /// A missing expected channel produces no claim; an absent input cannot make a
+//RS /// status projection look current.
+//RS fn record_golden_receipt(
+//RS     entry: &GoldenEntry,
+//RS     env: &GoldenEnv,
+//RS     output: &std::process::Output,
+//RS     stdout: &[u8],
+//RS ) {
+//RS     let err_path = env
+//RS         .ex_dir
+//RS         .join("expected")
+//RS         .join(format!("{}.err.out", entry.stem));
+//RS     let stdout_path = env
+//RS         .ex_dir
+//RS         .join("expected")
+//RS         .join(format!("{}.out", entry.stem));
+//RS     let stderr_path = env
+//RS         .ex_dir
+//RS         .join("expected")
+//RS         .join(format!("{}.stderr.out", entry.stem));
+//RS     let expected = if err_path.is_file() {
+//RS         err_path
+//RS     } else if stdout_path.is_file() {
+//RS         stdout_path
+//RS     } else {
+//RS         return;
+//RS     };
+//RS     let mut expected_paths = vec![expected];
+//RS     if stderr_path.is_file() {
+//RS         expected_paths.push(stderr_path);
+//RS     }
+//RS     record_golden_receipt_at_output(
+//RS         entry,
+//RS         env,
+//RS         output,
+//RS         stdout,
+//RS         &output.stderr,
+//RS         "aot",
+//RS         None,
+//RS         &expected_paths,
+//RS         &[],
+//RS     );
+//RS }
+//RS 
+//RS fn record_golden_receipt_at(
+//RS     entry: &GoldenEntry,
+//RS     env: &GoldenEnv,
+//RS     output: &std::process::Output,
+//RS     tier: &str,
+//RS     variant: Option<&str>,
+//RS     expected_paths: &[PathBuf],
+//RS     extra_inputs: &[PathBuf],
+//RS ) {
+//RS     record_golden_receipt_at_output(
+//RS         entry,
+//RS         env,
+//RS         output,
+//RS         &output.stdout,
+//RS         &output.stderr,
+//RS         tier,
+//RS         variant,
+//RS         expected_paths,
+//RS         extra_inputs,
+//RS     );
+//RS }
+//RS 
+//RS fn record_golden_receipt_at_output(
+//RS     entry: &GoldenEntry,
+//RS     env: &GoldenEnv,
+//RS     output: &std::process::Output,
+//RS     stdout: &[u8],
+//RS     stderr: &[u8],
+//RS     tier: &str,
+//RS     variant: Option<&str>,
+//RS     expected_paths: &[PathBuf],
+//RS     extra_inputs: &[PathBuf],
+//RS ) {
+//RS     if expected_paths.iter().any(|path| !path.is_file()) {
+//RS         return;
+//RS     }
+//RS     let mut inputs = vec![entry.path.clone()];
+//RS     inputs.extend(extra_inputs.iter().cloned().filter(|path| path.is_file()));
+//RS     inputs.extend(expected_paths.iter().cloned());
+//RS     let root = env
+//RS         .ex_dir
+//RS         .parent()
+//RS         .and_then(Path::parent)
+//RS         .unwrap_or_else(|| Path::new("."));
+//RS     let store_root = std::env::var_os("JET_RECEIPT_DIR")
+//RS         .map(PathBuf::from)
+//RS         .unwrap_or_else(|| root.join(".jet").join("receipts"));
+//RS     let store = jet::ReceiptStore::ReceiptStore::new(store_root);
+//RS     let mut argv = vec!["golden".into(), entry.path.to_string_lossy().into_owned(), tier.to_string()];
+//RS     if let Some(variant) = variant {
+//RS         argv.push(variant.to_string());
+//RS     }
+//RS     let status = output.status.code().unwrap_or(1);
+//RS     store
+//RS         .record("golden", &argv, &inputs, status, stdout, stderr)
+//RS         .unwrap_or_else(|error| {
+//RS             panic!(
+//RS                 "could not record golden receipt for {}: {error}",
+//RS                 entry.stem
+//RS             )
+//RS         });
+//RS }
+//RS 
+//RS /// Use the production package resolver to decide whether an example needs the
+//RS /// programmable-build path. The source-text check remains for source files
+//RS /// whose package build entry is declared in their ordinary Jet source.
+//RS fn has_package_build_entry(path: &Path, source: &str) -> bool {
+//RS     if source.contains("fn build(") {
+//RS         return true;
+//RS     }
+//RS     let Some(root) = path.parent() else {
+//RS         return false;
+//RS     };
+//RS     let Ok(resolver) = jet::Authority::AuthorityResolver::open(root) else {
+//RS         return false;
+//RS     };
+//RS     let facts = match resolver.checked_manifest(Path::new(".")) {
+//RS         Ok(manifest) => manifest.facts,
+//RS         Err(error) if error.is_missing() => jet::Package::PackageFacts::default(),
+//RS         Err(_) => return false,
+//RS     };
+//RS     facts
+//RS         .resolve_build_entry_checked(&resolver)
+//RS         .ok()
+//RS         .flatten()
+//RS         .is_some()
+//RS }
+//RS 
+//RS /// I5 for card #502: each managed-runtime example binds its checked foreign
+//RS /// source through the public CLI, then runs the generated project binding.
+//RS /// Generated caches and native archives stay temp-only and host-specific.
+//RS fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
+//RS     let (language, package, foreign_source) = match entry.stem.as_str() {
+//RS         "lowlevel/polyglot_go" => ("go", "handles", "handles.go"),
+//RS         "lowlevel/polyglot_java" => ("java", "counter", "Counter.java"),
+//RS         "lowlevel/polyglot_dotnet" => ("cs", "counter", "Counter.cs"),
+//RS         "lowlevel/polyglot_pascal" => ("pascal", "counter", "Counter.pas"),
+//RS         "lowlevel/polyglot_ada" => ("ada", "geodesy", "geodesy.ads"),
+//RS         "lowlevel/polyglot_fortran" => ("fortran", "matrix", "matrix.f90"),
+//RS         "lowlevel/polyglot_tcl" => ("tcl", "eda", "eda.tcl"),
+//RS         "lowlevel/polyglot_dart" => ("dart", "callbacks", "callbacks.dart"),
+//RS         other => panic!("unknown polyglot golden `{other}`"),
+//RS     };
+//RS     let src = fs::read_to_string(&entry.path).unwrap();
+//RS     if language != "dart" {
+//RS         assert_front_end(entry, &src);
+//RS     }
+//RS     if !env.have_rustc || !env.have_cargo {
+//RS         eprintln!(
+//RS             "note: front end checked; skipping Examples/features/{} golden (need provisioned compiler toolchain)",
+//RS             entry.stem
+//RS         );
+//RS         return;
+//RS     }
+//RS     // These examples exercise the real foreign-language inspection path. The
+//RS     // source fixture is still valid when a host does not provision that
+//RS     // language tool, so use the same capability-gated skip shape as the GTK
+//RS     // and raylib examples instead of turning an environmental absence into a
+//RS     // golden failure.
+//RS     let tool = match language {
+//RS         "go" => "go",
+//RS         "fortran" => "gfortran",
+//RS         "java" => "javac",
+//RS         "cs" => "dotnet",
+//RS         "pascal" => "fpc",
+//RS         "ada" => "gnatmake",
+//RS         "tcl" => "tclsh",
+//RS         "dart" => "dart",
+//RS         _ => unreachable!("binder language has no provisioned tool"),
+//RS     };
+//RS     let have_tool = Command::new(tool)
+//RS         .arg("--version")
+//RS         .output()
+//RS         .map(|output| output.status.success())
+//RS         .unwrap_or(false);
+//RS     if !have_tool {
+//RS         eprintln!(
+//RS             "note: front end checked; skipping Examples/features/{} golden (need provisioned {})",
+//RS             entry.stem, tool
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     let flat_stem = entry.stem.replace('/', "_");
+//RS     let dir = std::env::temp_dir().join(format!("jet_golden_{}_{}", std::process::id(), flat_stem));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source_dir = entry.path.parent().expect("polyglot example directory");
+//RS     fs::copy(&entry.path, dir.join("run.jet")).unwrap();
+//RS     fs::copy(source_dir.join(foreign_source), dir.join(foreign_source)).unwrap();
+//RS     if language == "ada" {
+//RS         fs::copy(source_dir.join("geodesy.adb"), dir.join("geodesy.adb")).unwrap();
+//RS     }
+//RS     if language == "dart" {
+//RS         fs::copy(source_dir.join("host.dart"), dir.join("host.dart")).unwrap();
+//RS     }
+//RS 
+//RS     let mut bind = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS     bind.current_dir(&dir).env("NO_COLOR", "1");
+//RS     bind.args(["inspect", "bind", language, foreign_source]);
+//RS     if language == "dart" {
+//RS         bind.args(["--jet", "run.jet"]);
+//RS     }
+//RS     let bind = bind.args(["--pkg", package]).output().unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "{} binder example failed:\n{}",
+//RS         language,
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     if language == "dart" {
+//RS         let check = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .args(["check", "run.jet"])
+//RS             .current_dir(&dir)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             check.status.success(),
+//RS             "Dart generated binding failed its front end:\n{}",
+//RS             String::from_utf8_lossy(&check.stderr)
+//RS         );
+//RS     }
+//RS 
+//RS     let run = if language == "dart" {
+//RS         Command::new("dart")
+//RS             .args(["run", "host.dart"])
+//RS             .current_dir(&dir)
+//RS             .output()
+//RS             .unwrap()
+//RS     } else {
+//RS         Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .args(["run", "run.jet"])
+//RS             .current_dir(&dir)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "{} binder example failed at runtime:\nstdout: {}\nstderr: {}",
+//RS         language,
+//RS         String::from_utf8_lossy(&run.stdout),
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS 
+//RS     let out_path = env
+//RS         .ex_dir
+//RS         .join("expected")
+//RS         .join(format!("{}.out", entry.stem));
+//RS     assert!(
+//RS         out_path.is_file(),
+//RS         "missing Examples/features/expected/{}.out",
+//RS         entry.stem
+//RS     );
+//RS     let mut foreign_inputs = vec![source_dir.join(foreign_source)];
+//RS     if language == "ada" {
+//RS         foreign_inputs.push(source_dir.join("geodesy.adb"));
+//RS     }
+//RS     if language == "dart" {
+//RS         foreign_inputs.push(source_dir.join("host.dart"));
+//RS     }
+//RS     record_golden_receipt_at(
+//RS         entry,
+//RS         env,
+//RS         &run,
+//RS         "dev",
+//RS         None,
+//RS         std::slice::from_ref(&out_path),
+//RS         &foreign_inputs,
+//RS     );
+//RS     let actual = String::from_utf8_lossy(&run.stdout);
+//RS     if env.update_expected {
+//RS         fs::write(&out_path, actual.as_bytes()).unwrap();
+//RS     } else {
+//RS         let expected = fs::read_to_string(&out_path).unwrap();
+//RS         if actual != expected {
+//RS             panic!(
+//RS                 "output mismatch for example {}:\n{}",
+//RS                 entry.stem,
+//RS                 unified_diff(
+//RS                     &format!("Examples/features/expected/{}.out", entry.stem),
+//RS                     &format!("Examples/features/{}/run.jet stdout (actual)", entry.stem),
+//RS                     &expected,
+//RS                     &actual,
+//RS                 )
+//RS             );
+//RS         }
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// I5 for `Examples/features/devloop/job_runner.jet`: one generated binary
+//RS /// dispatches every named `#Job` entry through argv.
+//RS fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
+//RS     let src = fs::read_to_string(&entry.path).unwrap();
+//RS     let path = entry.path.to_str().expect("example path is utf8");
+//RS     let compiled = jet::compile_with_path(&src, path).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "job_runner subcommand table failed the front end:\n{}",
+//RS             jet::render_diagnostics(&entry.shown, &src, &diags)
+//RS         )
+//RS     });
+//RS     let job_runner_user_code = strip_vetted_prelude_modules(&compiled.rust);
+//RS     assert!(
+//RS         job_runner_user_code
+//RS             .lines()
+//RS             .all(|line| unsafe_keyword_columns(line).is_empty()),
+//RS         "generated Rust for job_runner contains ungated `unsafe`"
+//RS     );
+//RS     assert!(
+//RS         compiled.rust.contains("fn main()"),
+//RS         "job_runner has no fn main"
+//RS     );
+//RS     if !env.have_rustc {
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir();
+//RS     let rs = dir.join(format!(
+//RS         "jet_golden_{}_devloop_job_runner.rs",
+//RS         std::process::id()
+//RS     ));
+//RS     let bin = dir.join(format!(
+//RS         "jet_golden_{}_devloop_job_runner",
+//RS         std::process::id()
+//RS     ));
+//RS     let mut rustc = Command::new("rustc");
+//RS     let _runtime_lease = add_generated_rust(&mut rustc, &rs, &compiled.rust, compiled.ffi.is_some(), &[]);
+//RS     rustc.arg("-o").arg(&bin);
+//RS     if let Some(link) = &compiled.ffi {
+//RS         rustc
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     let out = rustc.output().unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "I2 violated: rustc rejected job_runner:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     for (job, expected_name) in [
+//RS         ("greet", "job_runner.greet"),
+//RS         ("seed_data", "job_runner.seed_data"),
+//RS     ] {
+//RS         let run = Command::new(&bin).arg(job).output().unwrap();
+//RS         assert!(
+//RS             run.status.success(),
+//RS             "job_runner subcommand `{job}` failed at runtime:\nstdout: {}\nstderr: {}",
+//RS             String::from_utf8_lossy(&run.stdout),
+//RS             String::from_utf8_lossy(&run.stderr)
+//RS         );
+//RS         let out_path = env
+//RS             .ex_dir
+//RS             .join("expected")
+//RS             .join(format!("devloop/{expected_name}.out"));
+//RS         assert!(out_path.is_file(), "missing expected output for `{job}`");
+//RS         record_golden_receipt_at(
+//RS             entry,
+//RS             env,
+//RS             &run,
+//RS             "aot",
+//RS             Some(job),
+//RS             std::slice::from_ref(&out_path),
+//RS             &[],
+//RS         );
+//RS         let actual = String::from_utf8_lossy(&run.stdout);
+//RS         if env.update_expected {
+//RS             fs::write(&out_path, actual.as_bytes()).unwrap();
+//RS         } else {
+//RS             let expected = fs::read_to_string(&out_path).unwrap();
+//RS             if actual != expected {
+//RS                 panic!(
+//RS                     "output mismatch for job_runner subcommand `{job}`:\n{}",
+//RS                     unified_diff(
+//RS                         &format!("Examples/features/expected/devloop/{expected_name}.out"),
+//RS                         &format!("Examples/features/devloop/job_runner subcommand `{job}` stdout"),
+//RS                         &expected,
+//RS                         &actual,
+//RS                     )
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS     let _ = fs::remove_file(&rs);
+//RS     let _ = fs::remove_file(&bin);
+//RS }
+//RS 
+//RS #[test]
+//RS fn watcher_process_probe_is_vetted_without_hiding_user_unsafe() {
+//RS     let generated = "// JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe\nunsafe { ffi() }\n// JET_VETTED_UNSAFE_END: jet_watch_process_probe\nunsafe { user_pointer() }";
+//RS     let stripped = strip_vetted_prelude_modules(generated);
+//RS     assert!(!stripped.contains("ffi()"));
+//RS     assert!(stripped.contains("unsafe { user_pointer() }"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_guard_runtime_is_vetted_without_hiding_user_unsafe() {
+//RS     let generated = "// jet:shared-guard-internal-begin\nunsafe { first() }\n// jet:shared-guard-internal-end\n// jet:shared-guard-internal-begin\nunsafe { second() }\n// jet:shared-guard-internal-end\nunsafe { user_pointer() }";
+//RS     let stripped = strip_vetted_prelude_modules(generated);
+//RS     assert!(!stripped.contains("first()"));
+//RS     assert!(!stripped.contains("second()"));
+//RS     assert!(stripped.contains("unsafe { user_pointer() }"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_corpus_policy_runs_with_the_golden_gate() {
+//RS     common::corpus_policy::CorpusPolicy::load()
+//RS         .expect("corpus manifest")
+//RS         .check_gate("golden")
+//RS         .expect("golden corpus semantic policy");
+//RS }
+// END-PORT-PENDING 1065 tests/golden.rs:1-1353
+

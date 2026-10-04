@@ -1,7 +1,16 @@
 // Jet-owned Rust source emission context. The emitter consumes complete MIR and
 // never asks the Rust compiler to rediscover checked policy.
 use jet_foundation.[
+    foundation_generated_path,
     MIRAccess,
+    MIRArtifactID,
+    MIRArtifactIdentity,
+    mir_artifact_identity,
+    mir_identity_error_text,
+    JetTargetLayout,
+    JetReleaseDevtoolsPolicy,
+    FfiLink,
+    pkg_release_policy_development,
     MIRCompilerBuiltin,
     MIRCoreCall,
     MIRCoreCallID,
@@ -30,16 +39,45 @@ use jet_foundation.[
     mir_type_same_checked_type,
 ]
 
+// MIRRust MirRustTarget: the selected checked target partition.
+pub enum JetRustEmitTarget { Native WebWasm }
+
 pub struct JetRustEmitConfig {
-    pub target: String
+    pub target: JetTargetLayout
+    pub target_kind: JetRustEmitTarget
+    pub artifact: MIRArtifactID
+    // D-MEMREF1/LIFE1/EXCL1; #4500 implements the ratified stored borrow.
+    pub ffi: ?@FfiLink
     pub web_bucket: MIRWebBucket?
     pub root_prefix: String
     pub emit_types: Bool
     pub emit_foreign: Bool
     pub emit_metadata: Bool
-    // The release devtools policy's local rail: persistent writes report to
-    // the live value observer only while it is enabled.
-    pub local_rail: Bool
+    pub semantic_digest: [U8 #32]?
+    pub emit_debug_linemap: Bool
+    pub emit_runtime: Bool
+    pub release_devtools_policy: JetReleaseDevtoolsPolicy
+    pub prune_unreachable_codecs: Bool
+}
+
+// MIRRust MirRustExecutionConfig::for_artifact: pruning is opt-in.
+pub fn jet_rust_emit_config_for_artifact(artifact: MIRArtifactID, target: JetTargetLayout, target_kind: JetRustEmitTarget) -> JetRustEmitConfig Never! {
+    JetRustEmitConfig{
+        target: target,
+        target_kind: target_kind,
+        artifact: artifact,
+        ffi: None,
+        web_bucket: None,
+        root_prefix: "",
+        emit_types: true,
+        emit_foreign: true,
+        emit_metadata: false,
+        semantic_digest: None,
+        emit_debug_linemap: false,
+        emit_runtime: true,
+        release_devtools_policy: pkg_release_policy_development(),
+        prune_unreachable_codecs: false,
+    }
 }
 
 pub enum JetRustEmitFailureKind {
@@ -138,12 +176,21 @@ pub enum JetRustEmitResult {
     Incomplete(failure: JetRustEmitFailure)
 }
 
+// Metadata has no source payload and never runs ordinary item emission.
+pub enum JetRustEmitMetadataResult {
+    Complete(manifest: JetRustEmitManifest)
+    Incomplete(failure: JetRustEmitFailure)
+}
+
 JET_RUST_EMIT_NO_CYCLE_FLOOR :: 9223372036854775807
 
 pub struct JetRustEmitContext {
-    pub program: MIRProgram
-    pub config: JetRustEmitConfig
+    // #4500: the sole indexed state borrows the checked graph and config.
+    pub program: @MIRProgram
+    pub config: @JetRustEmitConfig
+    pub artifact_identity: MIRArtifactIdentity?
     pub function_names: [String:String]
+    pub item_names: [String:String]
     pub type_names: [String:String]
     pub type_by_name: [String:String]
     pub trait_names: [String:String]
@@ -217,6 +264,7 @@ pub struct JetRustEmitContext {
     // Module id keys of the selected artifact plan (MIRRust module_selected),
     // set by jet_rust_emit_program; every module is selected without a plan.
     pub selected_modules: [String:Bool]
+    pub module_keys: [U64:String]
     pub all_modules_selected: Bool
 }
 
@@ -362,7 +410,7 @@ fn jet_rust_emit_mangle(name: String) -> String Never! {
 // MIRRust mangle_variant: a grouped leaf keeps its dotted identity through the
 // path encoding (`__jet_Net_dPing`); a flat variant takes the plain mangle.
 fn jet_rust_emit_mangle_variant(name: String) -> String Never! {
-    if name.contains(".") -> jet_rust_emit_generated_path(name) else -> jet_rust_emit_mangle(name)
+    if name.contains(".") -> foundation_generated_path(name) else -> jet_rust_emit_mangle(name)
 }
 
 fn jet_rust_emit_hex(value: Int) -> String Never! {
@@ -807,7 +855,7 @@ fn jet_rust_emit_compiler_trait_symbol(name: String) -> String Never! {
 }
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::new
-fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetRustEmitContext Never! {
+fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetRustEmitContext from program | config {
     functions := [String:String]{}
     types := [String:String]{}
     type_by_name := [String:String]{}
@@ -913,10 +961,14 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         }
     }
     loop slot in 0..<impl_trait_rows.len() -> impls_by_trait[impl_trait_keys[slot]] = impl_trait_rows[slot]
+    module_keys := [U64:String]{}
+    loop row in program.modules -> module_keys[row.id.value] = row.key
     ctx := JetRustEmitContext{
-        program: program,
-        config: config,
+        program: @program,
+        config: @config,
+        artifact_identity: None,
         function_names: functions,
+        item_names: [String:String]{},
         type_names: types,
         type_by_name: type_by_name,
         trait_names: traits,
@@ -957,19 +1009,29 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         unit_ratio_parameters: [U64:Bool]{},
         selected_modules: [String:Bool]{},
         all_modules_selected: true,
+        module_keys: module_keys,
     }
     if ctx.program.schema_version != MIR_SCHEMA_VERSION {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR schema is not supported by the Jet Rust emitter", "rebuild the emitter and lowering together so both sides use the same MIR schema", None)
         return ctx
     }
-    if ctx.config.target != "rust_aot" && ctx.config.target != "web" {
-        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedTarget, "E0003", "Rust source emission received an unsupported target partition", "the current Jet emitter accepts only rust_aot or web", None)
-        return ctx
-    }
-    if ctx.config.web_bucket != None && ctx.config.target != "web" {
+    if ctx.config.web_bucket != None && ctx.config.target_kind != JetRustEmitTarget.WebWasm {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedTarget, "E0003", "Web partition emission requires the web target", "only Web target emission may select a checked JS/Wasm bucket", None)
         return ctx
     }
+    plan :: jet_rust_emit_selected_artifact(&ctx) ?? return ctx
+    ctx.all_modules_selected = false
+    loop module_id in plan.modules -> ctx.selected_modules[jet_rust_emit_id_key(module_id.value)] = true
+    if mir_artifact_identity(program, config.artifact) == {
+        .Ok(identity) -> ctx.artifact_identity = Val(identity)
+        .Err(error) -> {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR Rust emission requires canonical artifact identity", mir_identity_error_text(error), None)
+            return ctx
+        }
+    }
+    loop row in program.constants -> ctx.item_names["constant:{row.id.value}"] = foundation_generated_path(row.key)
+    loop row in program.impls -> ctx.item_names["impl:{row.id.value}"] = foundation_generated_path(row.key)
+    loop row in program.imports -> ctx.item_names["import:{row.id.value}"] = jet_rust_emit_mangle(row.alias)
 
     loop function in ctx.program.functions {
         key :: jet_rust_emit_id_key(function.id.value)
@@ -977,7 +1039,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR function identity is duplicated", "each checked function must have one stable source-emission symbol", Val(function.span))
             return ctx
         }
-        &ctx.function_names.add(key, jet_rust_emit_generated_path(function.key)).drop("the prior lookup proved this function key is new")
+        &ctx.function_names.add(key, foundation_generated_path(function.key)).drop("the prior lookup proved this function key is new")
     }
     native_type_keys := [String:Bool]{}
     loop definition in ctx.program.types {
@@ -992,9 +1054,9 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         if native -> native_type_keys[key] = true
         symbol :: if definition.compiler_builtin == {
             .Val(builtin) -> {
-                if builtin == MIRCompilerBuiltin.DefaultErr -> "{ctx.config.root_prefix}JetErr" else -> jet_rust_emit_generated_path(definition.key)
+                if builtin == MIRCompilerBuiltin.DefaultErr -> "{ctx.config.root_prefix}JetErr" else -> foundation_generated_path(definition.key)
             }
-            else -> if jet_rust_emit_has_native_type_projection(definition.key) -> jet_rust_emit_apply_type(&ctx, MIRNominalRef{id: definition.id, name: definition.key}, [MIRType]{}) else -> jet_rust_emit_generated_path(definition.key)
+            else -> if jet_rust_emit_has_native_type_projection(definition.key) -> jet_rust_emit_apply_type(&ctx, MIRNominalRef{id: definition.id, name: definition.key}, [MIRType]{}) else -> foundation_generated_path(definition.key)
         }
         &ctx.type_names.add(key, symbol).drop("the prior lookup proved this type key is new")
         &ctx.type_by_name.add(definition.key, symbol).drop("a later same-named row takes the canonical key spelling")
@@ -1033,7 +1095,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR trait identity is duplicated", "each checked trait must have one stable source-emission symbol", Val(trait_row.span))
             return ctx
         }
-        symbol :: if jet_rust_emit_compiler_owned_trait(trait_row.name) -> jet_rust_emit_compiler_trait_symbol(trait_row.name) else -> jet_rust_emit_generated_path(trait_row.key)
+        symbol :: if jet_rust_emit_compiler_owned_trait(trait_row.name) -> jet_rust_emit_compiler_trait_symbol(trait_row.name) else -> foundation_generated_path(trait_row.key)
         &ctx.trait_names.add(key, symbol).drop("the prior lookup proved this trait key is new")
     }
     loop instance in ctx.program.type_instances -> jet_rust_emit_collect_dyn_clone_traits(&ctx, instance)
@@ -1043,7 +1105,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR foreign identity is duplicated", "each foreign declaration must have one stable source-emission symbol", Val(foreign.span))
             return ctx
         }
-        name :: if foreign.name.len() == 0 -> jet_rust_emit_generated_path(foreign.key) else -> jet_rust_emit_mangle(foreign.name)
+        name :: if foreign.name.len() == 0 -> foundation_generated_path(foreign.key) else -> jet_rust_emit_mangle(foreign.name)
         &ctx.foreign_names.add(key, name).drop("the prior lookup proved this foreign key is new")
     }
     // MIRRust RustEmitter::new: a structural tuple projects its members by
@@ -1071,6 +1133,7 @@ fn jet_rust_emit_type_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitTypeMeta
     out := [JetRustEmitTypeMetadata]{}
     if !ctx.config.emit_types -> return out
     loop definition in ctx.program.types {
+        if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
         symbol :: ctx.type_names.get(jet_rust_emit_id_key(definition.id.value)) ?? {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR type identity is missing from the emitter registry", "type metadata must use the same canonical symbol as emitted type declarations", Val(definition.span))
             next
@@ -1087,6 +1150,7 @@ fn jet_rust_emit_type_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitTypeMeta
 fn jet_rust_emit_callable_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitCallableMetadata] Never! {
     out := [JetRustEmitCallableMetadata]{}
     loop function in ctx.program.functions {
+        if !jet_rust_emit_module_selected(ctx, function.module_id) -> next
         if !jet_rust_emit_function_target_enabled(ctx.config, function) -> next
         top_level :: if function.form == {
             .TopLevel -> true
@@ -1101,6 +1165,7 @@ fn jet_rust_emit_callable_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitCall
         parameter_access := [MIRAccess]{}
         parameter_mir_types := [MIRType]{}
         loop parameter in function.params {
+            if jet_rust_emit_is_receiver(function, parameter.index) -> next
             &parameter_types.push(jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access))
             &parameter_access.push(parameter.access)
             &parameter_mir_types.push(parameter.ty)
@@ -1136,6 +1201,7 @@ fn jet_rust_emit_variant_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitVaria
     out := [JetRustEmitVariantMetadata]{}
     if !ctx.config.emit_types -> return out
     loop definition in ctx.program.types {
+        if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
         // Variant rows describe the enums this artifact declares; the
         // runtime's own carriers keep their payload spellings there.
         if !jet_rust_emit_declares_type_definition(&ctx, definition) -> next
@@ -1175,6 +1241,7 @@ fn jet_rust_emit_trait_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitTraitMe
     out := [JetRustEmitTraitMetadata]{}
     if !ctx.config.emit_types -> return out
     loop definition in ctx.program.traits {
+        if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
         &out.push(JetRustEmitTraitMetadata{
             trait_id: definition.id,
             key: definition.key,
@@ -1189,10 +1256,8 @@ fn jet_rust_emit_trait_method_metadata(ctx: &JetRustEmitContext) -> [JetRustEmit
     out := [JetRustEmitTraitMethodMetadata]{}
     if !ctx.config.emit_types -> return out
     loop definition in ctx.program.traits {
-        module_key := String?{None}
-        loop module_row in ctx.program.modules {
-            if module_row.id == definition.module_id -> module_key = Val(module_row.key)
-        }
+        if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
+        module_key :: ctx.module_keys.get(definition.module_id.value)
         key_prefix :: module_key ?? {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait module is missing", "trait method metadata keys require the canonical module key from the trait's owning module", Val(definition.span))
             next
@@ -1201,7 +1266,7 @@ fn jet_rust_emit_trait_method_metadata(ctx: &JetRustEmitContext) -> [JetRustEmit
             parameter_types := [String]{}
             parameter_access := [MIRAccess]{}
             loop parameter in method.params {
-                &parameter_types.push(jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access))
+                &parameter_types.push(jet_rust_emit_synthetic_rollback_param_type(&ctx, definition, parameter))
                 &parameter_access.push(parameter.access)
             }
             &out.push(JetRustEmitTraitMethodMetadata{
@@ -1213,16 +1278,16 @@ fn jet_rust_emit_trait_method_metadata(ctx: &JetRustEmitContext) -> [JetRustEmit
                 receiver_access: method.self_access,
                 parameter_types: parameter_types,
                 parameter_access: parameter_access,
-                return_type: jet_rust_emit_type(&ctx, method.return_type),
+                return_type: jet_rust_emit_synthetic_rollback_type(&ctx, definition, method.return_type),
             })
         }
     }
     out
 }
 
-fn jet_rust_emit_result(ctx: JetRustEmitContext, source: String) -> JetRustEmitResult Never! {
+fn jet_rust_emit_result(ctx: ^JetRustEmitContext, source: ^String) -> JetRustEmitResult Never! {
     if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete{failure: failure}
-    state := ctx
+    state := ^ctx
     bytes :: source.bytes().len()
     type_metadata :: jet_rust_emit_type_metadata(&state)
     callable_metadata :: jet_rust_emit_callable_metadata(&state)
@@ -1232,25 +1297,34 @@ fn jet_rust_emit_result(ctx: JetRustEmitContext, source: String) -> JetRustEmitR
     trait_method_metadata :: jet_rust_emit_trait_method_metadata(&state)
     if state.failure == .Val(failure) -> return JetRustEmitResult.Incomplete{failure: failure}
     manifest :: JetRustEmitManifest{
-        schema_version: ctx.program.schema_version,
-        target: ctx.config.target,
-        package_identity: ctx.program.package_identity,
-        type_count: ctx.program.types.len(),
-        function_count: ctx.program.functions.len(),
-        foreign_count: ctx.program.foreign.len(),
+        schema_version: state.program.schema_version,
+        target: if state.config.target_kind == JetRustEmitTarget.WebWasm -> "web" else -> "rust_aot",
+        package_identity: state.program.package_identity,
+        type_count: state.program.types.len(),
+        function_count: state.program.functions.len(),
+        foreign_count: state.program.foreign.len(),
         source_bytes: bytes,
-        function_symbols: ctx.function_names,
-        type_symbols: ctx.type_names,
-        field_symbols: ctx.field_names,
-        variant_symbols: ctx.variant_names,
-        variant_source_names: ctx.variant_source_names,
-        variant_wire_names: ctx.variant_wire_names,
-        type_metadata: type_metadata,
-        callable_metadata: callable_metadata,
-        field_metadata: field_metadata,
-        variant_metadata: variant_metadata,
-        traits: trait_metadata,
-        trait_methods: trait_method_metadata,
+        function_symbols: ^state.function_names,
+        type_symbols: ^state.type_names,
+        field_symbols: ^state.field_names,
+        variant_symbols: ^state.variant_names,
+        variant_source_names: ^state.variant_source_names,
+        variant_wire_names: ^state.variant_wire_names,
+        type_metadata: ^type_metadata,
+        callable_metadata: ^callable_metadata,
+        field_metadata: ^field_metadata,
+        variant_metadata: ^variant_metadata,
+        traits: ^trait_metadata,
+        trait_methods: ^trait_method_metadata,
     }
-    JetRustEmitResult.Complete{source: source, manifest: manifest}
+    JetRustEmitResult.Complete{source: ^source, manifest: ^manifest}
+}
+
+// MIRRust mir_rust_aot_metadata: one indexed emitter state, no source scraping.
+pub fn jet_rust_emit_aot_metadata(program: MIRProgram, config: JetRustEmitConfig) -> JetRustEmitMetadataResult Never! {
+    ctx :: jet_rust_emit_context(program, config)
+    if jet_rust_emit_result(^ctx, "") == {
+        .Complete(_, manifest) -> JetRustEmitMetadataResult.Complete{manifest: manifest}
+        .Incomplete(failure) -> JetRustEmitMetadataResult.Incomplete{failure: failure}
+    }
 }

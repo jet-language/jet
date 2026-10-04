@@ -1,0 +1,701 @@
+// PORT-PENDING 0445 crates-jet-sema-src-sema-sharedaccess-module-group: crates/jet-sema/src/Sema/WebPartition.rs:1-697
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-WASM1=A (c123 M1): classify functions into JS/WASM buckets and diagnose crossings.
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Generics::{DECODE, ENCODE};
+//RS use crate::Syntax::{self, WebBucket, WebPartitionMarker};
+//RS use crate::AST::{EnumDef, Func, Item, ProgramBundle, StructDef, Type, VariantPayload};
+//RS use jet_foundation::WebPartition::{partition_effect_key, partition_key};
+//RS use std::collections::{HashMap, HashSet};
+//RS 
+//RS use super::effect_key;
+//RS use super::effect_set_has_root;
+//RS use super::inline_effect_key;
+//RS use super::Effect;
+//RS use super::EffectSet;
+//RS use super::EffectSummary;
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub(crate) struct FuncWebMeta {
+//RS     key: String,
+//RS     effect_key: String,
+//RS     name: String,
+//RS     name_span: crate::Diagnostics::Span,
+//RS     marker: Option<WebPartitionMarker>,
+//RS     ceiling: Option<WebBucket>,
+//RS     params: Vec<Type>,
+//RS     return_type: Option<Type>,
+//RS }
+//RS 
+//RS #[derive(Debug, Default)]
+//RS struct ABITypeIndex {
+//RS     structs: HashMap<String, StructDef>,
+//RS     enums: HashMap<String, EnumDef>,
+//RS }
+//RS 
+//RS impl ABITypeIndex {
+//RS     fn from_bundle(bundle: &ProgramBundle) -> Self {
+//RS         let mut out = Self::default();
+//RS         for module in &bundle.modules {
+//RS             collect_abi_types(&module.items, &mut out);
+//RS         }
+//RS         out
+//RS     }
+//RS }
+//RS 
+//RS fn collect_abi_types(items: &[Item], out: &mut ABITypeIndex) {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Struct(s) => {
+//RS                 out.structs.insert(s.name.clone(), clone_struct(s));
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 out.enums.insert(e.name.clone(), clone_enum(e));
+//RS             }
+//RS             Item::CodeModule(cm) => {
+//RS                 if let Some(body) = &cm.body {
+//RS                     collect_abi_types(body, out);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn clone_struct(s: &StructDef) -> StructDef {
+//RS     let mut result = s.clone();
+//RS     result.methods.clear();
+//RS     result.trait_impls.clear();
+//RS     result
+//RS }
+//RS 
+//RS fn clone_enum(e: &crate::AST::EnumDef) -> EnumDef {
+//RS     let mut result = e.clone();
+//RS     result.methods.clear();
+//RS     result.trait_impls.clear();
+//RS     result
+//RS }
+//RS 
+//RS fn has_codable_derive(derives: &[(String, crate::Diagnostics::Span)]) -> bool {
+//RS     let mut encode = false;
+//RS     let mut decode = false;
+//RS     for (d, _) in derives {
+//RS         match d.as_str() {
+//RS             Syntax::MARKER_CODABLE => return true,
+//RS             d if d == ENCODE => encode = true,
+//RS             d if d == DECODE => decode = true,
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     encode && decode
+//RS }
+//RS 
+//RS fn is_abi_safe_type_full(ty: &Type, idx: &ABITypeIndex) -> bool {
+//RS     if Syntax::is_abi_safe_type(ty) {
+//RS         return true;
+//RS     }
+//RS     match ty {
+//RS         Type::Named(n) => idx.is_codable_named(n, &[]),
+//RS         Type::Apply { name, args } => idx.is_codable_named(name, args),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS impl ABITypeIndex {
+//RS     fn is_codable_named(&self, name: &str, args: &[Type]) -> bool {
+//RS         if let Some(s) = self.structs.get(name) {
+//RS             if !has_codable_derive(&s.derives) {
+//RS                 return false;
+//RS             }
+//RS             if !s.type_params.is_empty() && !args.is_empty() {
+//RS                 if args.len() != s.type_params.len() {
+//RS                     return false;
+//RS                 }
+//RS                 return args.iter().all(|t| is_abi_safe_type_full(t, self));
+//RS             }
+//RS             return s.fields.iter().all(|f| is_abi_safe_type_full(&f.ty, self));
+//RS         }
+//RS         if let Some(e) = self.enums.get(name) {
+//RS             if !has_codable_derive(&e.derives) {
+//RS                 return false;
+//RS             }
+//RS             if !e.type_params.is_empty() && !args.is_empty() {
+//RS                 if args.len() != e.type_params.len() {
+//RS                     return false;
+//RS                 }
+//RS                 return args.iter().all(|t| is_abi_safe_type_full(t, self));
+//RS             }
+//RS             return e.variants.iter().all(|v| match &v.payload {
+//RS                 VariantPayload::Unit => true,
+//RS                 VariantPayload::Single(t, _) => is_abi_safe_type_full(t, self),
+//RS                 VariantPayload::Named(fields) => {
+//RS                     fields.iter().all(|f| is_abi_safe_type_full(&f.ty, self))
+//RS                 }
+//RS             });
+//RS         }
+//RS         false
+//RS     }
+//RS }
+//RS 
+//RS /// Apply the checked sema policy to one callable. All backends reuse this
+//RS /// precedence: explicit marker, Browser effect, inherited ceiling, Stream
+//RS /// producer, then the Wasm default.
+//RS pub fn checked_web_bucket(
+//RS     marker: Option<WebPartitionMarker>,
+//RS     ceiling: Option<WebBucket>,
+//RS     effects: &EffectSet,
+//RS     return_type: Option<&Type>,
+//RS ) -> WebBucket {
+//RS     if let Some(m) = marker {
+//RS         return m.bucket();
+//RS     }
+//RS     if effect_set_has_root(effects, Effect::Browser) {
+//RS         return WebBucket::JS;
+//RS     }
+//RS     if let Some(c) = ceiling {
+//RS         return c;
+//RS     }
+//RS     // D-CONC-STREAM1=A / D-STREAMYIELD1: a `Stream<T>` is a resumable
+//RS     // producer. The browser adapter is JavaScript's generator protocol; keep
+//RS     // the default web bucket honest so an unmarked stream does not fall into
+//RS     // the synchronous Wasm ABI and silently lose yield/close behavior.
+//RS     if return_type.is_some_and(is_stream_type) {
+//RS         return WebBucket::JS;
+//RS     }
+//RS     WebBucket::Wasm
+//RS }
+//RS 
+//RS fn is_stream_type(ty: &Type) -> bool {
+//RS     matches!(ty, Type::Apply { name, args } if name == Syntax::TYPE_STREAM && args.len() == 1)
+//RS }
+//RS 
+//RS fn funcs_have_web_markers(functions: &[Func]) -> bool {
+//RS     functions.iter().any(|function| function.web_marker.is_some())
+//RS }
+//RS 
+//RS fn items_have_web_markers(items: &[Item]) -> bool {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(f) if f.web_marker.is_some() => return true,
+//RS             Item::Struct(s)
+//RS                 if funcs_have_web_markers(&s.methods)
+//RS                     || s
+//RS                         .trait_impls
+//RS                         .iter()
+//RS                         .any(|implementation| funcs_have_web_markers(&implementation.methods)) =>
+//RS             {
+//RS                 return true;
+//RS             }
+//RS             Item::Enum(e)
+//RS                 if funcs_have_web_markers(&e.methods)
+//RS                     || e
+//RS                         .trait_impls
+//RS                         .iter()
+//RS                         .any(|implementation| funcs_have_web_markers(&implementation.methods)) =>
+//RS             {
+//RS                 return true;
+//RS             }
+//RS             Item::Impl(implementation) if funcs_have_web_markers(&implementation.methods) => {
+//RS                 return true;
+//RS             }
+//RS             Item::CodeModule(cm) => {
+//RS                 if cm.web_target.is_some() {
+//RS                     return true;
+//RS                 }
+//RS                 if let Some(body) = &cm.body {
+//RS                     if items_have_web_markers(body) {
+//RS                         return true;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS /// Partition diagnostics run only for web builds or sources that opt in via markers.
+//RS fn web_partition_active(bundle: &ProgramBundle) -> bool {
+//RS     if bundle.web_partition_enforced {
+//RS         return true;
+//RS     }
+//RS     for module in &bundle.modules {
+//RS         if module.web_target_ceiling.is_some() {
+//RS             return true;
+//RS         }
+//RS         if items_have_web_markers(&module.items) {
+//RS             return true;
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS fn push_func_meta(
+//RS     function: &Func,
+//RS     owner_type: Option<&str>,
+//RS     file_ceiling: Option<WebBucket>,
+//RS     module_ceiling: Option<WebBucket>,
+//RS     module_prefix: Option<&str>,
+//RS     file_alias: &str,
+//RS     is_entry: bool,
+//RS     out: &mut Vec<FuncWebMeta>,
+//RS ) {
+//RS     let ceiling = module_ceiling.or(file_ceiling);
+//RS     let local_key = match owner_type {
+//RS         Some(owner) => effect_key(Some(owner), &function.name),
+//RS         None => match module_prefix {
+//RS             Some(module) => inline_effect_key(module, &function.name),
+//RS             None => effect_key(None, &function.name),
+//RS         },
+//RS     };
+//RS     let function_name = owner_type
+//RS         .map(|owner| format!("{owner}::{}", function.name))
+//RS         .unwrap_or_else(|| function.name.clone());
+//RS     let file_prefix = (!is_entry && module_prefix.is_none()).then_some(file_alias);
+//RS     let key = partition_key(file_prefix, module_prefix, &function_name);
+//RS     out.push(FuncWebMeta {
+//RS         key,
+//RS         effect_key: partition_effect_key(file_alias, &local_key),
+//RS         name: function_name,
+//RS         name_span: function.name_span,
+//RS         marker: function.web_marker,
+//RS         ceiling,
+//RS         params: function.params.iter().map(|p| p.ty.clone()).collect(),
+//RS         return_type: function.return_type.clone(),
+//RS     });
+//RS }
+//RS 
+//RS fn collect_method_meta(
+//RS     methods: &[Func],
+//RS     owner_type: &str,
+//RS     file_ceiling: Option<WebBucket>,
+//RS     module_ceiling: Option<WebBucket>,
+//RS     module_prefix: Option<&str>,
+//RS     file_alias: &str,
+//RS     is_entry: bool,
+//RS     out: &mut Vec<FuncWebMeta>,
+//RS ) {
+//RS     for method in methods {
+//RS         push_func_meta(
+//RS             method,
+//RS             Some(owner_type),
+//RS             file_ceiling,
+//RS             module_ceiling,
+//RS             module_prefix,
+//RS             file_alias,
+//RS             is_entry,
+//RS             out,
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn collect_funcs(
+//RS     items: &[Item],
+//RS     file_ceiling: Option<WebBucket>,
+//RS     module_ceiling: Option<WebBucket>,
+//RS     module_prefix: Option<&str>,
+//RS     file_alias: &str,
+//RS     is_entry: bool,
+//RS     out: &mut Vec<FuncWebMeta>,
+//RS ) {
+//RS     let ceiling = module_ceiling.or(file_ceiling);
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(function) => push_func_meta(
+//RS                 function,
+//RS                 None,
+//RS                 file_ceiling,
+//RS                 module_ceiling,
+//RS                 module_prefix,
+//RS                 file_alias,
+//RS                 is_entry,
+//RS                 out,
+//RS             ),
+//RS             Item::Struct(structure) => {
+//RS                 collect_method_meta(
+//RS                     &structure.methods,
+//RS                     &structure.name,
+//RS                     file_ceiling,
+//RS                     module_ceiling,
+//RS                     module_prefix,
+//RS                     file_alias,
+//RS                     is_entry,
+//RS                     out,
+//RS                 );
+//RS                 for implementation in &structure.trait_impls {
+//RS                     collect_method_meta(
+//RS                         &implementation.methods,
+//RS                         &structure.name,
+//RS                         file_ceiling,
+//RS                         module_ceiling,
+//RS                         module_prefix,
+//RS                         file_alias,
+//RS                         is_entry,
+//RS                         out,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             Item::Enum(enumeration) => {
+//RS                 collect_method_meta(
+//RS                     &enumeration.methods,
+//RS                     &enumeration.name,
+//RS                     file_ceiling,
+//RS                     module_ceiling,
+//RS                     module_prefix,
+//RS                     file_alias,
+//RS                     is_entry,
+//RS                     out,
+//RS                 );
+//RS                 for implementation in &enumeration.trait_impls {
+//RS                     collect_method_meta(
+//RS                         &implementation.methods,
+//RS                         &enumeration.name,
+//RS                         file_ceiling,
+//RS                         module_ceiling,
+//RS                         module_prefix,
+//RS                         file_alias,
+//RS                         is_entry,
+//RS                         out,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             Item::Impl(implementation) => collect_method_meta(
+//RS                 &implementation.methods,
+//RS                 &implementation.type_name,
+//RS                 file_ceiling,
+//RS                 module_ceiling,
+//RS                 module_prefix,
+//RS                 file_alias,
+//RS                 is_entry,
+//RS                 out,
+//RS             ),
+//RS             Item::CodeModule(cm) => {
+//RS                 let mod_ceiling = cm.web_target.or(ceiling);
+//RS                 if let Some(body) = &cm.body {
+//RS                     collect_funcs(
+//RS                         body,
+//RS                         file_ceiling,
+//RS                         mod_ceiling,
+//RS                         Some(&cm.name),
+//RS                         file_alias,
+//RS                         is_entry,
+//RS                         out,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn type_show(ty: &Type) -> String {
+//RS     match ty {
+//RS         Type::Int => "Int".to_string(),
+//RS         Type::Float => "Float".to_string(),
+//RS         Type::Bool => "Bool".to_string(),
+//RS         Type::String => "String".to_string(),
+//RS         Type::Char => "Char".to_string(),
+//RS         Type::Named(n) => n.clone(),
+//RS         Type::List(inner) => format!("[{}]", type_show(inner)),
+//RS         Type::Map { value, .. } => format!("Map<String, {}>", type_show(value)),
+//RS         Type::Fn {
+//RS             params,
+//RS             ret,
+//RS             effect_bound,
+//RS             ..
+//RS         } => format!("Fn {{ params: {params:?}, ret: {ret:?}, effect_bound: {effect_bound:?} }}"),
+//RS         other => format!("{other:?}"),
+//RS     }
+//RS }
+//RS 
+//RS fn marker_show(marker: Option<WebPartitionMarker>) -> &'static str {
+//RS     match marker {
+//RS         Some(m) => m.name(),
+//RS         None => "—",
+//RS     }
+//RS }
+//RS 
+//RS fn reason_show(f: &FuncWebMeta, effects: &EffectSet) -> String {
+//RS     if let Some(m) = f.marker {
+//RS         return format!("#{}", marker_show(Some(m)));
+//RS     }
+//RS     if effect_set_has_root(effects, Effect::Browser) {
+//RS         return "inferred: Browser effect".to_string();
+//RS     }
+//RS     if let Some(c) = f.ceiling {
+//RS         return format!("#{}({})", Syntax::MARKER_TARGET, c.name());
+//RS     }
+//RS     if f.return_type.as_ref().is_some_and(is_stream_type) {
+//RS         return "inferred: Stream producer".to_string();
+//RS     }
+//RS     if f.name == "run" {
+//RS         return "entry".to_string();
+//RS     }
+//RS     "inferred: pure / no Browser effect".to_string()
+//RS }
+//RS 
+//RS fn effects_show(effects: &EffectSet) -> String {
+//RS     let mut names: Vec<&str> = effects.iter().map(|e| e.as_str()).collect();
+//RS     names.sort_unstable();
+//RS     if names.is_empty() {
+//RS         "(pure)".to_string()
+//RS     } else {
+//RS         names.join(", ")
+//RS     }
+//RS }
+//RS 
+//RS /// Human-readable partition report for `jet build --target web --explain-partition`.
+//RS pub fn format_partition_report(
+//RS     metas: &[FuncWebMeta],
+//RS     partitions: &HashMap<String, WebBucket>,
+//RS     solved: &HashMap<String, EffectSet>,
+//RS ) -> String {
+//RS     let mut lines = vec![
+//RS         "Web partition report".to_string(),
+//RS         "================================".to_string(),
+//RS     ];
+//RS     let mut rows: Vec<_> = metas.iter().collect();
+//RS     rows.sort_by(|a, b| a.key.cmp(&b.key));
+//RS     for f in rows {
+//RS         let bucket = partitions.get(&f.key).copied().unwrap_or(WebBucket::Wasm);
+//RS         let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
+//RS         lines.push(format!(
+//RS             "{:<24} -> {:<4}  {}  effects: {}",
+//RS             f.name,
+//RS             bucket.name(),
+//RS             reason_show(f, &effects),
+//RS             effects_show(&effects),
+//RS         ));
+//RS     }
+//RS     lines.push(String::new());
+//RS     lines.join("\n")
+//RS }
+//RS 
+//RS fn check_abi_export(f: &FuncWebMeta, idx: &ABITypeIndex, diags: &mut Vec<Diagnostic>) {
+//RS     let Some(WebPartitionMarker::WasmExport) = f.marker else {
+//RS         return;
+//RS     };
+//RS     for p in &f.params {
+//RS         if !is_abi_safe_type_full(p, idx) {
+//RS             diags.push(Syntax::web_abi_type(
+//RS                 &type_show(p),
+//RS                 "on a `#WasmExport` parameter",
+//RS                 Some(f.name_span),
+//RS             ));
+//RS         }
+//RS     }
+//RS     if let Some(ret) = &f.return_type {
+//RS         if !is_abi_safe_type_full(ret, idx) {
+//RS             diags.push(Syntax::web_abi_type(
+//RS                 &type_show(ret),
+//RS                 "as a `#WasmExport` return type",
+//RS                 Some(f.name_span),
+//RS             ));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn check_target_browser(
+//RS     f: &FuncWebMeta,
+//RS     bucket: WebBucket,
+//RS     effects: &EffectSet,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     if bucket == WebBucket::Wasm && effect_set_has_root(effects, Effect::Browser) {
+//RS         diags.push(Syntax::web_target_browser(&f.name, Some(f.name_span)));
+//RS     }
+//RS }
+//RS 
+//RS /// Collect the named values that App builder methods hand to the Web runtime.
+//RS ///
+//RS /// These values are emitted as JS closures by TIR. The form facts projected
+//RS /// from `web.form(Model, action: handler)` are deliberately not included:
+//RS /// that core call is rewritten to a typed input plus an action-name string,
+//RS /// rather than a callback value.
+//RS fn app_web_callback_names(bundle: &ProgramBundle) -> HashSet<String> {
+//RS     let Some(graph) = super::App::extract_app_graph(bundle).0 else {
+//RS         return HashSet::new();
+//RS     };
+//RS     let mut callbacks = HashSet::new();
+//RS     let mut insert = |name: &str| {
+//RS         if !name.is_empty() && !name.starts_with('<') {
+//RS             callbacks.insert(name.to_string());
+//RS         }
+//RS     };
+//RS 
+//RS     for route in &graph.routes {
+//RS         insert(&route.handler);
+//RS         if let Some(loader) = &route.loader {
+//RS             insert(&loader.handler);
+//RS         }
+//RS         if let Some(handler) = &route.boundaries.pending {
+//RS             insert(handler);
+//RS         }
+//RS         if let Some(handler) = &route.boundaries.not_found {
+//RS             insert(handler);
+//RS         }
+//RS         if let Some(handler) = &route.boundaries.error {
+//RS             insert(handler);
+//RS         }
+//RS     }
+//RS     for action in &graph.actions {
+//RS         insert(&action.handler);
+//RS     }
+//RS     for mount in &graph.mounts {
+//RS         insert(&mount.handler);
+//RS     }
+//RS     callbacks
+//RS }
+//RS 
+//RS /// Walk the bundle, assign buckets, and emit partition / ABI diagnostics.
+//RS pub fn check_web_partition(
+//RS     bundle: &mut ProgramBundle,
+//RS     summaries: &HashMap<String, EffectSummary>,
+//RS     solved: &HashMap<String, EffectSet>,
+//RS ) -> Vec<Diagnostic> {
+//RS     let mut metas = Vec::new();
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         collect_funcs(
+//RS             &module.items,
+//RS             module.web_target_ceiling,
+//RS             None,
+//RS             None,
+//RS             &module.alias,
+//RS             module_idx == bundle.entry,
+//RS             &mut metas,
+//RS         );
+//RS     }
+//RS 
+//RS     let mut partitions: HashMap<String, WebBucket> = HashMap::new();
+//RS     for f in &metas {
+//RS         let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
+//RS         let bucket = checked_web_bucket(f.marker, f.ceiling, &effects, f.return_type.as_ref());
+//RS         partitions.insert(f.key.clone(), bucket);
+//RS     }
+//RS     // App builder callback values cross directly into the Web JS runtime, so
+//RS     // they are JS roots even when their bodies are otherwise pure. Keep
+//RS     // explicit per-function and file/module ceilings authoritative, matching
+//RS     // the ordinary call-graph propagation below.
+//RS     if web_partition_active(bundle) {
+//RS         let app_callbacks = app_web_callback_names(bundle);
+//RS         for function in &metas {
+//RS             if app_callbacks.contains(&function.name)
+//RS                 && function.marker.is_none()
+//RS                 && function.ceiling.is_none()
+//RS             {
+//RS                 partitions.insert(function.key.clone(), WebBucket::JS);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // D-WEBTIR1 / D-CONC-STREAM1: a JS generator can only be consumed by JS,
+//RS     // and a JS caller cannot invoke an ordinary Wasm function without the
+//RS     // explicit WasmExport bridge. Promote unmarked functions along those call
+//RS     // edges until the partition graph is closed. Explicit #Target choices stay
+//RS     // authoritative and are reported by the existing crossing diagnostic.
+//RS     loop {
+//RS         let mut changed = false;
+//RS         for (caller_key, summary) in summaries {
+//RS             let Some(caller_meta) = metas
+//RS                 .iter()
+//RS                 .find(|meta| meta.effect_key.as_str() == caller_key.as_str())
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             let caller_bucket = partitions
+//RS                 .get(&caller_meta.key)
+//RS                 .copied()
+//RS                 .unwrap_or(WebBucket::Wasm);
+//RS             for callee_key in &summary.edges {
+//RS                 let Some(callee_meta) = metas
+//RS                     .iter()
+//RS                     .find(|meta| meta.effect_key.as_str() == callee_key.as_str())
+//RS                 else {
+//RS                     continue;
+//RS                 };
+//RS                 let callee_bucket = partitions
+//RS                     .get(&callee_meta.key)
+//RS                     .copied()
+//RS                     .unwrap_or(WebBucket::Wasm);
+//RS                 if caller_bucket == WebBucket::Wasm
+//RS                     && callee_bucket == WebBucket::JS
+//RS                     && caller_meta.marker.is_none()
+//RS                     && caller_meta.ceiling.is_none()
+//RS                 {
+//RS                     if partitions.insert(caller_meta.key.clone(), WebBucket::JS)
+//RS                         != Some(WebBucket::JS)
+//RS                     {
+//RS                         changed = true;
+//RS                     }
+//RS                 } else if caller_bucket == WebBucket::JS
+//RS                     && callee_bucket == WebBucket::Wasm
+//RS                     && callee_meta.marker.is_none()
+//RS                     && callee_meta.ceiling.is_none()
+//RS                 {
+//RS                     if partitions.insert(callee_meta.key.clone(), WebBucket::JS)
+//RS                         != Some(WebBucket::JS)
+//RS                     {
+//RS                         changed = true;
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         if !changed {
+//RS             break;
+//RS         }
+//RS     }
+//RS 
+//RS     bundle.web_partitions = partitions.clone();
+//RS 
+//RS     if bundle.web_partition_enforced {
+//RS         bundle.web_partition_report = Some(format_partition_report(&metas, &partitions, solved));
+//RS     }
+//RS 
+//RS     if !web_partition_active(bundle) {
+//RS         return Vec::new();
+//RS     }
+//RS 
+//RS     let abi_idx = ABITypeIndex::from_bundle(bundle);
+//RS     let mut diags = Vec::new();
+//RS     for f in &metas {
+//RS         let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
+//RS         let bucket = partitions.get(&f.key).copied().unwrap_or(WebBucket::Wasm);
+//RS         check_abi_export(f, &abi_idx, &mut diags);
+//RS         check_target_browser(f, bucket, &effects, &mut diags);
+//RS     }
+//RS 
+//RS     let meta_by_effect_key: HashMap<&str, &FuncWebMeta> =
+//RS         metas.iter().map(|m| (m.effect_key.as_str(), m)).collect();
+//RS 
+//RS     for (caller_key, summary) in summaries {
+//RS         let Some(caller_meta) = meta_by_effect_key.get(caller_key.as_str()) else {
+//RS             continue;
+//RS         };
+//RS         let caller_bucket = &partitions[&caller_meta.key];
+//RS         for callee_key in &summary.edges {
+//RS             let Some(callee_meta) = meta_by_effect_key.get(callee_key.as_str()) else {
+//RS                 continue;
+//RS             };
+//RS             let callee_bucket = &partitions[&callee_meta.key];
+//RS             if caller_bucket != callee_bucket {
+//RS                 let wasm_export_bridge = *caller_bucket == WebBucket::JS
+//RS                     && *callee_bucket == WebBucket::Wasm
+//RS                     && callee_meta.marker == Some(WebPartitionMarker::WasmExport);
+//RS                 if wasm_export_bridge {
+//RS                     continue;
+//RS                 }
+//RS                 diags.push(Syntax::web_cross_partition(
+//RS                     &caller_meta.key,
+//RS                     &callee_meta.name,
+//RS                     *caller_bucket,
+//RS                     *callee_bucket,
+//RS                     Some(caller_meta.name_span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     diags
+//RS }
+// END-PORT-PENDING 0445 crates/jet-sema/src/Sema/WebPartition.rs:1-697
+

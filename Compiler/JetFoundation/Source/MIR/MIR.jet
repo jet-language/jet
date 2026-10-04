@@ -191,77 +191,104 @@ pub fn mir_measure_expression(measure: MIRMeasure) -> String Never! {
     }
 }
 
+// MIR.rs `MirMeasure::literal_value`: a Rust `u64` measure. `checked_add` and
+// `checked_mul` overflow, symbols, signed literals and `match` are None.
 pub fn mir_measure_literal_value(measure: MIRMeasure) -> Int? {
     if measure == {
-        .Literal(_, value) -> Val(value)
+        .Literal(_, value) -> mir_measure_checked_u64(value)
         .Combined(_, rule, left, right) -> {
             if rule == {
                 .Add -> {
                     a :: mir_measure_literal_value(left) ?? return None
                     b :: mir_measure_literal_value(right) ?? return None
-                    Val(a + b)
+                    mir_measure_checked_u64(a + b)
                 }
                 .Mul -> {
                     a :: mir_measure_literal_value(left) ?? return None
                     b :: mir_measure_literal_value(right) ?? return None
-                    Val(a * b)
+                    mir_measure_checked_u64(a * b)
                 }
                 .Match -> None
             }
         }
         else -> None
     }
+}
+
+// MIR.rs `MirMeasure::signed_literal_value`: a Rust `i64` measure. An unsigned
+// literal above `i64::MAX` (`i64::try_from`) and `checked_add`/`checked_mul`
+// overflow are None.
+fn mir_measure_signed_literal_value(measure: MIRMeasure) -> Int? {
+    if measure == {
+        .SignedLiteral(_, value) -> mir_measure_checked_i64(value)
+        .Literal(_, value) -> {
+            unsigned :: mir_measure_checked_u64(value) ?? return None
+            mir_measure_checked_i64(unsigned)
+        }
+        .Combined(_, rule, left, right) -> {
+            if rule == {
+                .Add -> {
+                    a :: mir_measure_signed_literal_value(left) ?? return None
+                    b :: mir_measure_signed_literal_value(right) ?? return None
+                    mir_measure_checked_i64(a + b)
+                }
+                .Mul -> {
+                    a :: mir_measure_signed_literal_value(left) ?? return None
+                    b :: mir_measure_signed_literal_value(right) ?? return None
+                    mir_measure_checked_i64(a * b)
+                }
+                .Match -> None
+            }
+        }
+        else -> None
+    }
+}
+
+// The Rust `u64` carrier of `MirMeasure::Literal` and its checked arithmetic.
+fn mir_measure_checked_u64(value: Int) -> Int? {
+    if value < 0 || value > 18446744073709551615 -> return None
+    Val(value)
+}
+
+// The Rust `i64` carrier of `MirMeasure::SignedLiteral` and its checked arithmetic.
+fn mir_measure_checked_i64(value: Int) -> Int? {
+    if value < -9223372036854775808 || value > 9223372036854775807 -> return None
+    Val(value)
 }
 
 pub struct MIRDimensionAxis { pub name: String, pub exponent: MIRMeasure }
 
+// MIR.rs `MirDimension`: producers supply the Rust `BTreeMap` key invariant,
+// unique axis names in byte order; exponents are kept as lowered.
+// `MirDimension::scalar` is the empty axis list; `measure_exponents` is `axes`.
 pub struct MIRDimension { pub axes: [MIRDimensionAxis] }
 
-fn mir_measure_signed_value(measure: MIRMeasure) -> Int? {
-    if measure == {
-        .Literal(_, value) -> Val(value)
-        .SignedLiteral(_, value) -> Val(value)
-        .Combined(_, rule, left, right) -> {
-            if rule == {
-                .Add -> {
-                    a :: mir_measure_signed_value(left) ?? return None
-                    b :: mir_measure_signed_value(right) ?? return None
-                    Val(a + b)
-                }
-                .Mul -> {
-                    a :: mir_measure_signed_value(left) ?? return None
-                    b :: mir_measure_signed_value(right) ?? return None
-                    Val(a * b)
-                }
-                .Match -> None
-            }
-        }
-        else -> None
-    }
+// MIR.rs `MirDimension::axes`: every exponent is a concrete `i32` measure.
+fn mir_dimension_axis_exponent(exponent: MIRMeasure) -> Int Never! {
+    value :: mir_measure_signed_literal_value(exponent) ?? panic("dimension exponent must be a concrete i32 measure")
+    if value < -2147483648 || value > 2147483647 -> panic("dimension exponent must be a concrete i32 measure")
+    value
 }
 
+// MIR.rs `MirDimension::identity`: `axis:exponent` over the measure display
+// (`mir_measure_expression`), joined by `;`. Symbolic exponents stay symbolic.
 pub fn mir_dimension_identity(dimension: MIRDimension) -> String Never! {
     parts := [String]{}
-    loop axis in dimension.axes {
-        exponent :: mir_measure_signed_value(axis.exponent).map(value -> "{value}") ?? mir_measure_expression(axis.exponent)
-        &parts.push("{axis.name}:{exponent}")
-    }
+    loop axis in dimension.axes -> &parts.push("{axis.name}:{mir_measure_expression(axis.exponent)}")
     parts.join(";")
 }
 
+// MIR.rs `MirDimension::display_name`: the leaf after the last `::`, raised to
+// its concrete `i32` exponent unless it is 1; the empty dimension is `Scalar`.
 pub fn mir_dimension_display_name(dimension: MIRDimension) -> String Never! {
     parts := [String]{}
     loop axis in dimension.axes {
-        leaf := axis.name.split("::").to_list()
-        name :: if leaf.len() == 0 -> axis.name else -> leaf[leaf.len() - 1]
-        exponent :: mir_measure_signed_value(axis.exponent)
-        rendered :: if {
-            (exponent ?? 0) == 1 -> name
-            else -> {
-                exponent_name :: exponent.map(value -> "{value}") ?? mir_measure_expression(axis.exponent)
-                "{name}^{exponent_name}"
-            }
+        exponent :: mir_dimension_axis_exponent(axis.exponent)
+        name := if axis.name.last_index_of("::") == {
+            .Val(at) -> axis.name.slice(at + 2, axis.name.len())
+            else -> axis.name
         }
+        rendered := if exponent == 1 -> name else -> "{name}^{exponent}"
         &parts.push(rendered)
     }
     if parts.len() == 0 -> return "Scalar"
@@ -1365,30 +1392,10 @@ pub struct MIRPanicLocal { pub name: String, pub local: MIRLocalID }
 
 pub struct MIRPanicContext { pub function: String, pub source_line: String, pub caret: Int, pub locals: [MIRPanicLocal] }
 
-pub enum MIRStringFormat {
-    Display
-    Debug
-    Pretty
-    Fixed(digits: Int)
-    Grouped(digits: Int)
-    Hex(digits: Int)
-    Pad(width: Int, fill: String)
-    PadLeft(width: Int, fill: String)
-    Sci(digits: Int)
-    Percent(digits: Int)
-    Bin
-    Oct
-    Unit(format: MIRUnitFormat)
-}
-
-pub enum MIRUnitFormat { Symbol Name Bare }
-
-pub enum MIRStringPartKind {
+pub enum MIRStringPart {
     Literal(text: String)
-    Interpolation(value: MIRValueID, format: MIRStringFormat)
+    Value(value: MIRValueID)
 }
-
-pub struct MIRStringPart { pub kind: MIRStringPartKind }
 
 pub struct MIRPhiIncoming { pub block: MIRBlockID, pub value: MIRValueID }
 
@@ -1864,7 +1871,7 @@ pub enum MIROperation {
 
 pub struct MIRFieldValue { pub field: MIRFieldID, pub value: MIRValueID }
 
-pub struct MIRCaptureFacts { pub escapes: Bool, pub needs_fn_mut: Bool, pub mutable: [String], pub cloned: [String], pub frozen: [String], pub materialized: [String], pub moved: [String] }
+pub struct MIRCaptureFacts { pub escapes: Bool, pub needs_fn_mut: Bool, pub mutable: [String], pub cloned: [String], pub frozen: [String], pub materialized: [String], pub moved: [String], pub frame_schedule: MIRFrameSchedule?, pub frame_schedule_derivation: MIRDerivationRef? }
 
 pub enum MIRTestScopeMember { ExpectFail(expected_code: String?) Timeout(duration: MIRValueID) Skip(whole_test: Bool) Measure }
 
@@ -1906,7 +1913,7 @@ pub enum MIRTerminator {
     Branch(condition: MIRValueID, then_target: MIRBlockID, else_target: MIRBlockID)
     Switch(subject: MIRValueID, arms: [MIRSwitchArm], otherwise: MIRBlockID)
     Return(value: MIRValueID?)
-    Yield(value: MIRValueID, resume: MIRBlockID)
+    Yield(value: MIRValueID, resume: MIRBlockID, cancel: MIRBlockID)
     Break(target: MIRBlockID, value: MIRValueID?)
     Continue(target: MIRBlockID)
     Unreachable(reason: String)
@@ -1916,7 +1923,9 @@ pub enum MIRDropEdge { Normal Return Failure(target: MIRBlockID) Unwind(target: 
 
 pub struct MIRDropAction { pub place: MIRPlaceID, pub edge: MIRDropEdge, pub span: Span }
 
-pub struct MIRKernelFacts { pub bounds: Bool, pub alias_free: Bool, pub captures: Bool, pub race_free: Bool, pub barriers_uniform: Bool, pub control_flow: Bool }
+pub enum MIRKernelMode { Parallel }
+
+pub struct MIRKernelFacts { pub mode: MIRKernelMode, pub bounds: Bool, pub alias_free: Bool, pub captures: Bool, pub race_free: Bool, pub barriers_uniform: Bool, pub control_flow: Bool }
 
 pub struct MIRGeneratorFacts { pub item: MIRType }
 
@@ -2193,7 +2202,7 @@ pub fn mir_terminator_targets(terminator: MIRTerminator) -> [MIRBlockID] Never! 
             &targets.push(otherwise)
             targets
         }
-        .Yield(_, resume) -> [MIRBlockID]{resume}
+        .Yield(_, resume, cancel) -> [MIRBlockID]{resume, cancel}
         .Break(target, _) -> [MIRBlockID]{target}
         .Continue(target) -> [MIRBlockID]{target}
         else -> [MIRBlockID]{}
@@ -2216,7 +2225,7 @@ pub fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Neve
             value_id :: value ?? return [MIRValueID]{}
             [MIRValueID]{value_id}
         }
-        .Yield(value, _) -> [MIRValueID]{value}
+        .Yield(value, _, _) -> [MIRValueID]{value}
         else -> [MIRValueID]{}
     }
 }
@@ -2241,9 +2250,9 @@ pub fn mir_operation_value_uses(operation: MIROperation) -> [MIRValueID] Never! 
         }
         .BuildString(parts) -> {
             loop part in parts {
-                if part.kind == {
+                if part == {
                     .Literal(_) -> {}
-                    .Interpolation(value, _) -> &uses.push(value)
+                    .Value(value) -> &uses.push(value)
                 }
             }
         }
@@ -3085,6 +3094,8 @@ pub struct MIRStructureFact {
     pub detail: String
     pub gate: String?
 }
+
+pub struct MIRNameCanonicalPath { pub name: String, pub path: String }
 
 pub struct MIRNameFacts {
     pub modules: [MIRNameModule]

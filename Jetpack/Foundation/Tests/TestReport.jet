@@ -1,0 +1,84 @@
+// Original TestReport.rs:400–463 plus byte-exact terminal transport controls.
+fn test_report_fixture() -> EvidenceReport {
+    report := evidence_report_new("test-report", EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
+    cases :: [(kind: Int, state: Int, name: String, line: Int, expectation: EvidenceExpectation)]{
+        (kind: 0, state: 0, name: "pass", line: 1, expectation: EvidenceExpectation.Ordinary),
+        (kind: 0, state: 1, name: "xfail", line: 2, expectation: EvidenceExpectation.ExpectedFailure),
+        (kind: 0, state: 0, name: "xpass", line: 3, expectation: EvidenceExpectation.ExpectedFailure),
+        (kind: 0, state: 2, name: "skip", line: 4, expectation: EvidenceExpectation.Ordinary),
+        (kind: 0, state: 4, name: "error", line: 5, expectation: EvidenceExpectation.Ordinary),
+        (kind: 2, state: 1, name: "raw-xfail", line: 6, expectation: EvidenceExpectation.ExpectedFailure),
+        (kind: 2, state: 1, name: "raw-fail", line: 7, expectation: EvidenceExpectation.Ordinary),
+    }
+    loop case in cases {
+        record :: evidence_record_from_test_codes(case.kind, case.state, case.name, "", "tests.jet", U32{case.line}) ?? panic("record")
+        scoped :: evidence_record_with_report_id(^record, "test-report")
+        expected :: evidence_record_with_expectation(^scoped, case.expectation) ?? panic("expectation")
+        record_test_case(&report, ^expected) ?? panic("insert")
+    }
+    finalize_test_report(^report) ?? panic("finalize")
+}
+#Test("test report failed and error frames preserve diagnostic and attachments") {
+    record := evidence_record_from_test_codes(0, 1, "failure", "assertion failed", "tests.jet", U32{4}) ?? panic("record")
+    record.source.column = U32{3}
+    &record.attachments.push(EvidenceAttachment{name: "detail", value: "omit"})
+    &record.attachments.push(EvidenceAttachment{name: "captured", value: "one\ntwo"})
+    &record.attachments.push(EvidenceAttachment{name: "empty", value: ""})
+    text :: JetTestReport.render_record(record)
+    assert_eq(text, "  Stop [E3001]: assertion failed\n    --> tests.jet:4\n        ^\n    captured: one\n    captured: two\n  More: jet-lang.dev/e/E3001\n")
+    record.outcome = EvidenceOutcome.Error
+    record.detail = ""
+    record.diagnostics = [EvidenceDiagnostic]{}
+    record.attachments = [EvidenceAttachment]{}
+    assert(JetTestReport.render_record(record).starts_with("  Error [E3001]: error\n"))
+}
+#Test("test report renderer retains extra diagnostic lines and anonymous source absence") {
+    record := evidence_record_from_test_codes(2, 1, "E4001", "detail", "", U32{0}) ?? panic("runtime")
+    record.diagnostics[0].message = "reason\nnext"
+    assert_eq(JetTestReport.render_record(record), "  Stop [E4001]: detail\n    reason\n    next\n  More: jet-lang.dev/e/E4001\n")
+}
+#Test("canonical_records_drive_counts_and_status") {
+    evidence :: test_report_fixture()
+    view :: JetTestReport.from_evidence(evidence) ?? panic("view")
+    assert_eq(view.passed, 1)
+    assert_eq(view.failed, 1)
+    assert_eq(view.skipped, 1)
+    assert_eq(view.expected_failures, 1)
+    assert_eq(view.unexpected_passes, 1)
+    assert_eq(evidence.records.len(), 7)
+    raw_xfail := false
+    raw_fail := false
+    loop record in evidence.records {
+        if record.identity.claim_id == "raw-xfail" -> raw_xfail = true
+        if record.identity.claim_id == "raw-fail" -> raw_fail = true
+    }
+    assert(raw_xfail)
+    assert(raw_fail)
+    status :: view.status_envelope(evidence) ?? panic("status")
+    text :: status.json()
+    assert(text.contains("\"schema\":\"jet.status/v1\""))
+    assert(text.contains("\"claim\":\"xfail\""))
+    assert(text.contains("\"expectation\":\"expected_failure\""))
+    assert(text.contains("\"outcome\":\"error\""))
+    assert(text.contains("\"selected\":5"))
+    assert(!status.ok)
+    assert_eq(view.json(evidence), text)
+    assert_eq(view.summary(), "1 passed, 1 failed, 1 skipped, 1 expected-fail, 1 unexpected-pass")
+    assert_eq(evidence.identity.claim_id, "")
+    assert_eq(evidence.identity.evidence_id, "")
+}
+#Test("test report unavailable generated and raw failures never count as example passes") {
+    report := evidence_report_new("run", EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
+    generated :: evidence_record_with_report_id(evidence_record_from_test_codes(3, 0, "property", "", "seed", U32{20}) ?? panic("property"), "run")
+    unavailable :: evidence_record_with_report_id(evidence_record_from_test_codes(0, 3, "missing", "", "", U32{0}) ?? panic("missing"), "run")
+    raw :: evidence_record_with_report_id(evidence_record_from_test_codes(2, 1, "raw", "", "", U32{0}) ?? panic("raw"), "run")
+    record_test_case(&report, ^generated) ?? panic("generated")
+    record_test_case(&report, ^unavailable) ?? panic("unavailable")
+    record_test_case(&report, ^raw) ?? panic("raw")
+    view :: JetTestReport.from_evidence(report) ?? panic("view")
+    assert_eq(view.passed, 0)
+    assert_eq(view.failed, 0)
+    assert_eq(view.selected(), 0)
+    assert(!evidence_report_is_complete(report))
+    assert_eq(view.summary(), "0 passed, 0 failed, 0 skipped")
+}

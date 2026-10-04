@@ -1,0 +1,508 @@
+// Canonical publication contracts. Rust Sema/ApiFreeze.rs and Publish/API.rs.
+// Functions borrow declarations and checked graphs; only projected metadata is owned.
+// #4303 gates borrowed-text/String read ABI proofs; never materialize text to
+// hide it. #4445 gates stamping ORIGINAL Loader Func.diverges before projection.
+use jet_foundation.[AccessConvention, BinOp, Dimension, EffectRowEntry, EnumDef, Expr, Func, InternalTag, Item, NameLedger, MIRNameVisibility, Span, StructDef, TFunc, TraitDef, TraitMethodSig, Type, TypeParam, UnitRatio, UnitScaleProvenance, ViewProvenanceMap, access_sigil, canonical_view_provenance_map, view_provenance_canonical, dimension_base, dimension_divide, dimension_identity, dimension_multiply, foundation_member_name, measure_expression, type_name, unit_family_type_name, name_ledger_new, name_ledger_declarations]
+
+pub API_SNAPSHOT_VERSION :: U32{3}
+pub struct FrozenFn { pub name: String, pub signature: String }
+pub struct APISnapshot {
+    pub api_version: U32
+    pub package: String
+    pub published_version: String
+    pub funcs: [FrozenFn]
+}
+pub struct APIUnitDimensions { pub identities: [String:String] }
+// Rust Publish::ApiItem: the non-function SemVer surface shares this provider.
+pub struct PublicAPIItem { pub kind: String, pub name: String, pub signature: String }
+#Error
+pub struct APIFreezeError { pub message: String }
+
+// Rust ApiSnapshot::write: preserve vector order, including parsed snapshots.
+pub fn api_snapshot_write(snapshot: APISnapshot) -> String Never! {
+    out := "api_version = {snapshot.api_version}\npackage = {snapshot.package}\npublished_version = {snapshot.published_version}\n".bytes()
+    loop function in snapshot.funcs {
+        loop byte in function.signature.bytes() -> &out.push(byte)
+        &out.push(U8{10})
+    }
+    String.from_bytes(out) ?? panic("snapshot output is UTF-8")
+}
+fn api_fn_name_of(line: String) -> String? Never! {
+    if !line.starts_with("fn ") -> return None
+    rest :: line.slice(3, line.len())
+    end := rest.find("(")
+    if end < 0 -> end = rest.len()
+    // Main-ratified tandem fix: keep generic signature bytes, not in names.
+    generic_start :: rest.find("<")
+    if generic_start >= 0 && generic_start < end -> end = generic_start
+    name :: rest.slice(0, end).trim()
+    if name == "" -> None else -> Val(name)
+}
+// Rust ApiSnapshot::parse: no version rejection, sorting, or duplicate rejection.
+pub fn api_snapshot_parse(raw: String) -> APISnapshot APIFreezeError! {
+    version := U32?{None}
+    package := String?{None}
+    published := String?{None}
+    funcs := [FrozenFn]{}
+    loop raw_line in raw.split("\n") {
+        line :: raw_line.trim()
+        if line == "" -> next
+        if {
+            line.starts_with("api_version = ") -> {
+                rest :: line.slice(14, line.len())
+                digits := rest
+                if digits.starts_with("+") -> digits = digits.slice(1, digits.len())
+                if digits == "" -> return Err(APIFreezeError{message: "invalid api_version: {rest}"})
+                number := 0
+                loop byte in digits.bytes() {
+                    code :: Int.from_u8(byte)
+                    if code < 48 || code > 57 -> return Err(APIFreezeError{message: "invalid api_version: {rest}"})
+                    number = number * 10 + code - 48
+                    if number > 4294967295 -> return Err(APIFreezeError{message: "invalid api_version: {rest}"})
+                }
+                version = Val(U32{number})
+            }
+            line.starts_with("package = ") -> package = Val(line.slice(10, line.len()))
+            line.starts_with("published_version = ") -> published = Val(line.slice(20, line.len()))
+            line.starts_with("fn ") -> {
+                name :: api_fn_name_of(line) ?? return Err(APIFreezeError{message: "malformed fn line: {line}"})
+                &funcs.push(FrozenFn{name: name, signature: line})
+            }
+            else -> return Err(APIFreezeError{message: "unknown line in api snapshot: {line}"})
+        }
+    }
+    Ok(APISnapshot{api_version: version ?? return Err(APIFreezeError{message: "missing api_version"}), package: package ?? return Err(APIFreezeError{message: "missing package"}), published_version: published ?? return Err(APIFreezeError{message: "missing published_version"}), funcs: funcs})
+}
+// Rust ApiSnapshot::capability_digest: signature order, not name/vector order.
+pub fn api_snapshot_capability_digest(snapshot: APISnapshot) -> String Never! {
+    order := (loop (index, _) in snapshot.funcs -> index)
+    funcs_view :: snapshot.funcs[0..snapshot.funcs.len()]
+    &order.sort_by((left: Int, right: Int) -> funcs_view[left].signature <=> funcs_view[right].signature)
+    out := [U8]{}
+    loop (position, index) in order {
+        if position != 0 -> &out.push(U8{10})
+        loop byte in snapshot.funcs[index].signature.bytes() -> &out.push(byte)
+    }
+    String.from_bytes(out) ?? panic("snapshot digest is UTF-8")
+}
+
+// Rust canonical_api_type_name: unit annotations recurse through all type shapes.
+pub fn canonical_api_type_name(ty: Type, dimensions: APIUnitDimensions) -> String Never! {
+    if ty == {
+        .Named(name) -> return dimensions.identities.get(name).map(identity -> "{name}{identity}") ?? type_name(ty)
+        .List(inner) -> return "[{canonical_api_type_name(inner, dimensions)}]"
+        .Map(key, _, value) -> return "[{canonical_api_type_name(key, dimensions)}:{canonical_api_type_name(value, dimensions)}]"
+        .Shared(inner) -> return "Shared<{canonical_api_type_name(inner, dimensions)}>"
+        .Option(inner) -> return "{api_marked_type_name(inner, dimensions)}?"
+        .Result(ok, err) -> {
+            contract :: "{api_marked_type_name(err, dimensions)}!"
+            if ok == (Type.Named{name: "Unit"}) -> return contract
+            if err == (Type.Named{name: "Err"}) -> return canonical_api_type_name(ok, dimensions)
+            return "{api_marked_type_name(ok, dimensions)} {contract}"
+        }
+        .Fn(params, ret, bound, _, _, _) -> {
+            names :: loop param in params -> canonical_api_type_name(param, dimensions)
+            signature := "fn({names.join(", ")})"
+            if ret == .Val(value) -> signature = "{signature} {canonical_api_type_name(value, dimensions)}"
+            if bound == .Val(row) -> signature = "{signature} -[{(loop entry in row -> entry.name).join(", ")}]>"
+            return signature
+        }
+        .Apply(name, args) -> {
+            if name == "Ptr" && args.len() == 1 -> return "*{canonical_api_type_name(args[0], dimensions)}"
+            return "{name}<{(loop arg in args -> canonical_api_type_name(arg, dimensions)).join(", ")}>"
+        }
+        .Tuple(fields) -> return "({(loop field in fields -> "{field.name}: {canonical_api_type_name(field.ty, dimensions)}").join(", ")})"
+        .FixedList(elem, len) -> return "[{canonical_api_type_name(elem, dimensions)}#{measure_expression(len)}]"
+        .Tagged(marker, inner) -> {
+            if marker == .Internal(internal_tag) {
+                if internal_tag == InternalTag.CoreCryptoNominal || internal_tag == InternalTag.TerminalFactSet -> return canonical_api_type_name(inner, dimensions)
+            }
+            marker_name :: if marker == {
+                .User(name) -> name
+                .Internal(internal_tag) -> api_internal_tag_name(internal_tag)
+            }
+            return "#{marker_name} {canonical_api_type_name(inner, dimensions)}"
+        }
+        .Union(members) -> return (loop member in members -> canonical_api_type_name(member, dimensions)).join(" | ")
+        else -> return type_name(ty)
+    }
+}
+fn api_marked_type_name(ty: Type, dimensions: APIUnitDimensions) -> String Never! {
+    name :: canonical_api_type_name(ty, dimensions)
+    if ty == {
+        .Union(_) | .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> "({name})"
+        else -> name
+    }
+}
+// Rust canonical_type_params.
+pub fn canonical_type_params(params: [TypeParam]) -> String Never! {
+    if params.len() == 0 -> return ""
+    names :: loop param in params -> if {
+        param.bounds.len() == 0 -> param.name
+        param.bounds.len() == 1 -> "{param.name}: {param.bounds[0]}"
+        else -> "{param.name}: [{param.bounds.join(", ")}]"
+    }
+    "<{names.join(", ")}>"
+}
+// Rust normalized_public_effect_row: concrete set plus symbolic/negative contracts.
+pub fn normalized_public_effect_row(function: Func, inferred: [String]) -> [String] Never! {
+    names := Set.from(inferred)
+    if function.declared_effects == .Val(row) {
+        loop entry in row {
+            if (entry.name.starts_with("..") && entry.name != "..") || entry.name.starts_with("!") -> &names.add(entry.name)
+        }
+    }
+    if function.effect_via == .Val(param) -> &names.add("via {param.name}")
+    sorted := names.to_list()
+    &sorted.sort()
+    sorted
+}
+// Rust canonical_fn_signature_with_effects: metadata follows the effect row.
+pub fn canonical_fn_signature_with_effects(function: Func, inferred: [String]?, dimensions: APIUnitDimensions) -> String Never! {
+    api_fn_signature(function, inferred, dimensions, function.return_view_provenance)
+}
+fn api_fn_signature(function: Func, inferred: [String]?, dimensions: APIUnitDimensions, views: ViewProvenanceMap?) -> String Never! {
+    params :: loop param in function.params -> "{param.name}: {access_sigil(param.convention)}{canonical_api_type_name(param.ty, dimensions)}"
+    signature := "fn {function.name}{canonical_type_params(function.type_params)}({params.join(", ")})"
+    if function.return_type == .Val(ret) -> signature = "{signature} {canonical_api_type_name(ret, dimensions)}"
+    if inferred == .Val(row) -> signature = "{signature} -[{normalized_public_effect_row(function, row).join(", ")}]>"
+    if views == .Val(provenance) {
+        if {
+            provenance.entries.len() == 1 && provenance.entries[0].slot.len() == 0 -> signature = "{signature} ; view_source = {view_provenance_canonical(provenance.entries[0].value)}"
+            else -> signature = "{signature} ; view_sources = {canonical_view_provenance_map(provenance)}"
+        }
+    }
+    declared_never :: function.return_type.map(ty -> api_type_has_never_success(ty)) ?? false
+    if declared_never || function.diverges -> signature = "{signature} ; never_declared = {declared_never} ; never_inferred = {function.diverges}"
+    signature
+}
+pub fn canonical_fn_signature(function: Func, dimensions: APIUnitDimensions) -> String Never! { canonical_fn_signature_with_effects(function, None, dimensions) }
+pub fn fn_signature(function: Func) -> String Never! { canonical_fn_signature(function, APIUnitDimensions{identities: [String:String]{}}) }
+pub fn fn_signature_with_effects(function: Func, inferred: [String]?) -> String Never! { canonical_fn_signature_with_effects(function, inferred, APIUnitDimensions{identities: [String:String]{}}) }
+// Rust trait_method_signature: declared order, no inference for dynamic dispatch.
+pub fn trait_method_signature(owner: String, method: TraitMethodSig, dimensions: APIUnitDimensions) -> String Never! {
+    params :: loop param in method.params -> "{param.name}: {access_sigil(param.convention)}{canonical_api_type_name(param.ty, dimensions)}"
+    signature := "fn {owner}.{method.name}({params.join(", ")})"
+    if method.return_type == .Val(ret) -> signature = "{signature} {canonical_api_type_name(ret, dimensions)}"
+    if method.declared_effects == .Val(row) -> signature = "{signature} -[{(loop entry in row -> entry.name).join(", ")}]>"
+    signature
+}
+// Rust signature_without_effect_row: current marker wins over old spellings.
+pub fn signature_without_effect_row(signature: String) -> String Never! {
+    marker := " -["
+    close_marker := "]>"
+    start := api_last_index(signature, marker)
+    current := true
+    if start < 0 {
+        current = false
+        marker = " =["
+        close_marker = "]=>"
+        start = api_last_index(signature, marker)
+        if start < 0 {
+            marker = " --["
+            close_marker = "]->"
+            start = api_last_index(signature, marker)
+        }
+    }
+    if start < 0 -> return ~signature
+    rest :: signature.slice(start + marker.len(), signature.len())
+    close := api_first_index(rest, close_marker)
+    if close < 0 -> return ~signature
+    suffix :: rest.slice(close + close_marker.len(), rest.len())
+    arrow :: if !current && suffix.starts_with(" ") -> " ->" else -> ""
+    "{signature.slice(0, start)}{arrow}{suffix}"
+}
+fn api_first_index(text: String, needle: String) -> Int Never! { text.find(needle) }
+fn api_last_index(text: String, needle: String) -> Int Never! { text.rfind(needle) }
+pub fn legacy_api_name(name: String) -> String Never! {
+    dot :: name.rfind(".")
+    if dot < 0 -> name else -> name.slice(dot + 1, name.len())
+}
+pub fn qualify_api_signature(namespace: String?, signature: String) -> String Never! {
+    if namespace == .Val(name) {
+        if signature.starts_with("fn ") -> return "fn {name}.{signature.slice(3, signature.len())}"
+    }
+    ~signature
+}
+pub fn legacy_api_signature(signature: String) -> String Never! {
+    normalized :: signature_without_effect_row(signature).replace("Int (a whole number)", "Int").replace("Float (an approximate binary number)", "Float").replace("Bool (true or false)", "Bool").replace("String (text)", "String").replace("Char (one character)", "Char").replace("F32 (a 32-bit approximate binary number)", "F32")
+    if !normalized.starts_with("fn ") -> return normalized
+    rest :: normalized.slice(3, normalized.len())
+    open :: api_first_index(rest, "(")
+    if open < 0 -> return normalized
+    "fn {legacy_api_name(rest.slice(0, open))}{rest.slice(open, rest.len())}"
+}
+
+// Rust snapshot_from_items_with_context and Publish/API::collect_public_api.
+// Name/effect indices contain only positions in the caller-owned facts, never graphs.
+struct APIProjectionContext {
+    public_names: [String:Bool]
+    effect_positions: [String:Int]
+    use_ledger: Bool
+    dimensions: APIUnitDimensions
+    current: Bool
+}
+fn api_supported_name(name: String) -> Bool Never! {
+    // Rust classify_identifier: generated/reserved '_' shapes are not promises.
+    name == "_" || !name.starts_with("_")
+}
+fn api_item_name(namespace: String?, name: String) -> String Never! {
+    namespace.map(prefix -> "{prefix}.{name}") ?? name
+}
+fn api_semantic_name(namespace: String?, name: String) -> String Never! {
+    namespace.map(prefix -> foundation_member_name(prefix, name)) ?? name
+}
+fn api_struct_signature(definition: StructDef, dimensions: APIUnitDimensions) -> String Never! {
+    is_cli := false
+    loop derived in definition.derives { if derived.name == "CLI" -> is_cli = true }
+    positional := 0
+    fields := [String]{}
+    loop field in definition.fields {
+        if !api_supported_name(field.name) -> next
+        ty :: canonical_api_type_name(field.ty, dimensions)
+        suffix := ""
+        if is_cli {
+            flag_only := false
+            loop marker in field.serde_markers { if marker.name == "Flag" -> flag_only = true }
+            if {
+                field.ty != Type.Bool && !(field.ty == .Option(_)) && field.default == None && !flag_only -> {
+                    suffix = " [positional {positional}]"
+                    if positional < 65535 -> positional += 1
+                }
+                flag_only -> suffix = " [flag]"
+                else -> {}
+            }
+        }
+        &fields.push("{field.name}: {ty}{suffix}")
+    }
+    "struct {definition.name} {{ {fields.join("; ")} }}"
+}
+fn api_enum_signature(definition: EnumDef) -> String Never! {
+    variants := [String]{}
+    loop variant in definition.variants { if api_supported_name(variant.name) -> &variants.push(variant.name) }
+    "enum {definition.name} {{ {variants.join(", ")} }}"
+}
+fn api_trait_signature(definition: TraitDef, dimensions: APIUnitDimensions) -> String Never! {
+    methods := [String]{}
+    loop method in definition.methods { if api_supported_name(method.name) -> &methods.push(trait_method_signature(definition.name, method, dimensions)) }
+    "trait {definition.name} {{ {methods.join(", ")} }}"
+}
+fn api_collect_public(items: [Item], context: APIProjectionContext, functions: [TFunc], solved: [String:[String]]?, alias: String?, semantic: String?, display: String?, frozen: &[FrozenFn], surface: &[PublicAPIItem]) Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> {
+                if !api_supported_name(function.name) -> next
+                name :: api_semantic_name(semantic, function.name)
+                public :: api_is_public(context, semantic, display, function.name, function.name_span, function.span, function.is_pub && !function.is_package_pub)
+                if !public -> next
+                effects := [String]?{None}
+                position :: context.effect_positions.get(name) ?? (context.effect_positions.get("@{function.span.start}:{function.span.end}") ?? -1)
+                if position >= 0 -> effects = Val(functions[position].effects.solved)
+                if solved == .Val(sets) {
+                    effects = sets.get(function.name)
+                    if alias == .Val(prefix) {
+                        if sets.get("{prefix}::{name}") == .Val(row) -> effects = Val(row)
+                    }
+                }
+                // Freeze uses an empty solved row on missing function facts;
+                // Publish's SemVer signature preserves its Option(None).
+                views :: if position >= 0 -> functions[position].return_view_provenance else -> function.return_view_provenance
+                signature :: qualify_api_signature(display, api_fn_signature(function, effects, context.dimensions, views))
+                frozen_signature :: if context.current && effects == None -> qualify_api_signature(display, api_fn_signature(function, Val([String]{}), context.dimensions, views)) else -> signature
+                qualified :: api_item_name(display, function.name)
+                &frozen.push(FrozenFn{name: qualified, signature: frozen_signature})
+                &surface.push(PublicAPIItem{kind: "fn", name: qualified, signature: signature})
+            }
+            .Struct(definition) -> {
+                if !api_supported_name(definition.name) -> next
+                if api_is_public(context, semantic, display, definition.name, definition.name_span, definition.span, definition.is_pub && !definition.is_package_pub) -> &surface.push(PublicAPIItem{kind: "struct", name: api_item_name(display, definition.name), signature: api_struct_signature(definition, context.dimensions)})
+            }
+            .Enum(definition) -> {
+                if !api_supported_name(definition.name) -> next
+                if api_is_public(context, semantic, display, definition.name, definition.name_span, definition.span, definition.is_pub && !definition.is_package_pub) -> &surface.push(PublicAPIItem{kind: "enum", name: api_item_name(display, definition.name), signature: api_enum_signature(definition)})
+            }
+            .Trait(definition) -> {
+                public :: api_is_public(context, semantic, display, definition.name, definition.name_span, definition.span, definition.is_pub && !definition.is_package_pub)
+                if !public -> next
+                if api_supported_name(definition.name) -> &surface.push(PublicAPIItem{kind: "trait", name: api_item_name(display, definition.name), signature: api_trait_signature(definition, context.dimensions)})
+                loop method in definition.methods {
+                    if !api_supported_name(method.name) -> next
+                    qualified :: api_item_name(display, "{definition.name}.{method.name}")
+                    signature :: qualify_api_signature(display, trait_method_signature(definition.name, method, context.dimensions))
+                    &frozen.push(FrozenFn{name: qualified, signature: signature})
+                    &surface.push(PublicAPIItem{kind: "fn", name: qualified, signature: signature})
+                }
+            }
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) -> api_collect_public(body, context, functions, solved, alias, Val(api_semantic_name(semantic, code_module.name)), Val(api_item_name(display, code_module.name)), &frozen, &surface)
+            }
+            // Rust Publish/API.rs:220-223: constants have no published contract.
+            .Const(_) -> {}
+            else -> {}
+        }
+    }
+}
+pub struct APIProjection { pub snapshot: APISnapshot, pub items: [PublicAPIItem] }
+// Rust NameLedger::public reads the retained source ledger, not native MIR.
+fn api_is_public(context: APIProjectionContext, semantic: String?, display: String?, name: String, span: Span, declaration_span: Span, authored: Bool) -> Bool Never! {
+    if !context.use_ledger -> return authored
+    context.public_names.get("@{span.start}:{span.end}") ?? (context.public_names.get("@{declaration_span.start}:{declaration_span.end}") ?? (context.public_names.get(api_item_name(display, name)) ?? (context.public_names.get(api_semantic_name(semantic, name)) ?? false)))
+}
+fn api_sort_projection(funcs: &[FrozenFn], items: &[PublicAPIItem]) Never! {
+    &funcs.sort_by((left: FrozenFn, right: FrozenFn) -> if left.name != right.name -> left.name <=> right.name else -> left.signature <=> right.signature)
+    // Rust ApiItem derives Ord in declaration order: kind, name, signature.
+    &items.sort_by((left: PublicAPIItem, right: PublicAPIItem) -> if {
+        left.kind != right.kind -> left.kind <=> right.kind
+        left.name != right.name -> left.name <=> right.name
+        else -> left.signature <=> right.signature
+    })
+}
+// Rust snapshot_from_items: AST-only fixtures are explicitly pre-v3.
+pub fn snapshot_from_items(items: [Item], package: String, version: String) -> APISnapshot Never! {
+    snapshot_from_items_with_effects(items, package, version, None, None)
+}
+
+// Rust snapshot_from_items_with_effects / snapshot_from_items_with_ledger.
+// These borrow solved rows; current publication uses the checked adapter.
+pub fn snapshot_from_items_with_effects(items: [Item], package: String, version: String, solved: [String:[String]]?, module_alias: String?) -> APISnapshot Never! {
+    api_project_items(items, package, version, [TFunc]{}, [String:Int]{}, solved, module_alias, 0, name_ledger_new(), false, solved != None).snapshot
+}
+pub fn snapshot_from_items_with_ledger(items: [Item], package: String, version: String, solved: [String:[String]]?, module_alias: String?, module_index: Int, ledger: NameLedger) -> APISnapshot Never! {
+    public_api_from_items_with_ledger(items, package, version, solved, module_alias, module_index, ledger).snapshot
+}
+// Rust Publish/API::collect_public_api and ApiFreeze share traversal/carriers.
+pub fn public_api_from_items_with_ledger(items: [Item], package: String, version: String, solved: [String:[String]]?, module_alias: String?, module_index: Int, ledger: NameLedger) -> APIProjection Never! {
+    api_project_items(items, package, version, [TFunc]{}, [String:Int]{}, solved, module_alias, module_index, ledger, true, solved != None)
+}
+fn api_project_items(items: [Item], package: String, version: String, functions: [TFunc], positions: [String:Int], solved: [String:[String]]?, alias: String?, module_index: Int, ledger: NameLedger, use_ledger: Bool, current: Bool) -> APIProjection Never! {
+    public_names := [String:Bool]{}
+    if use_ledger {
+        loop declaration in name_ledger_declarations(ledger) {
+            if declaration.module_index != module_index -> next
+            public :: declaration.visibility == MIRNameVisibility.Public
+            if !public_names.has_key(declaration.name) -> public_names[declaration.name] = public
+            span_key :: "@{declaration.span.start}:{declaration.span.end}"
+            if !public_names.has_key(span_key) -> public_names[span_key] = public
+        }
+    }
+    dimensions := APIUnitDimensions{identities: [String:String]{}}
+    collect_api_unit_dimensions(items, package, &dimensions)
+    context :: APIProjectionContext{public_names: public_names, effect_positions: positions, use_ledger: use_ledger, dimensions: dimensions, current: current}
+    funcs := [FrozenFn]{}
+    surface := [PublicAPIItem]{}
+    api_collect_public(items, context, functions, solved, alias, None, None, &funcs, &surface)
+    api_sort_projection(&funcs, &surface)
+    APIProjection{snapshot: APISnapshot{api_version: if current -> API_SNAPSHOT_VERSION else -> U32{2}, package: package, published_version: version, funcs: funcs}, items: surface}
+}
+
+// Rust resolve_api_dimension: names and checked multiplication/division only.
+fn api_resolve_dimension(expression: Expr, visible: [String:Dimension]) -> Dimension? Never! {
+    if expression == {
+        .Ident(name, _) -> visible.get(name)
+        .Binary(op, left, right, _) -> {
+            if op != BinOp.Mul && op != BinOp.Div -> return None
+            lhs :: api_resolve_dimension(left, visible) ?? return None
+            rhs :: api_resolve_dimension(right, visible) ?? return None
+            if op == BinOp.Mul -> dimension_multiply(lhs, rhs) else -> dimension_divide(lhs, rhs)
+        }
+        else -> None
+    }
+}
+fn api_unit_ratio(value: UnitRatio) -> String Never! {
+    if value.denominator == 1 -> "{value.numerator}" else -> "{value.numerator}/{value.denominator}"
+}
+// Rust unit_scale_provenance_identity, not the human-readable unit display.
+fn api_unit_scale_provenance(value: UnitScaleProvenance) -> String Never! {
+    if value == {
+        .Rational -> "Rational"
+        .SymbolicPi(numerator, denominator) -> "SymbolicPi({api_unit_ratio(numerator)}/{api_unit_ratio(denominator)})"
+        .Conventional(text, source) -> "Conventional({text};{source})"
+        .Measured(central, uncertainty, source) -> "Measured({central};{uncertainty};{source})"
+    }
+}
+// Rust collect_api_unit_dimensions: local resolved map then derived fixed point.
+pub fn collect_api_unit_dimensions(items: [Item], package: String, output: &APIUnitDimensions) Never! {
+    resolved := [String:Dimension]{}
+    loop item in items {
+        if item == .UnitFamily(family) {
+            if family.resolved_dimension == {
+                .Val(dimension) -> resolved[family.family] = dimension
+                else -> {
+                    if family.dimension == .Val(.Base(_)) -> resolved[family.family] = dimension_base("{package}::{family.family}")
+                }
+            }
+        }
+    }
+    progress := true
+    loop progress {
+        progress = false
+        loop item in items {
+            if item == .UnitFamily(family) {
+                if resolved.has_key(family.family) -> next
+                if family.dimension == .Val(.Derived(expression)) {
+                    if api_resolve_dimension(expression, resolved) == .Val(dimension) {
+                        resolved[family.family] = dimension
+                        progress = true
+                    }
+                }
+            }
+        }
+    }
+    loop item in items {
+        if item == {
+            .UnitFamily(family) -> {
+                dimension :: resolved.get(family.family).map(value -> dimension_identity(value))
+                if dimension == None && family.base == None -> next
+                owner := package
+                if family.resolved_owner == .Val(resolved_owner) {
+                    if resolved_owner == "core.units" -> owner = "core.units"
+                }
+                base :: family.base.map(value -> unit_family_type_name(value.name))
+                affine := false
+                if base != None {
+                    loop member in family.members { if member.offset.numerator != 0 -> affine = true }
+                }
+                loop member in family.members {
+                    type_name :: unit_family_type_name(member.name)
+                    count :: if affine -> 2 else -> 1
+                    loop index in 0..<count {
+                        name :: if affine -> "{type_name}{if index == 0 -> "Point" else -> "Delta"}" else -> type_name
+                        offset :: if affine && index == 1 -> "0" else -> api_unit_ratio(member.offset)
+                        base_name :: base ?? ""
+                        dimension_name :: dimension ?? ""
+                        identity :: if {
+                            base == None -> "{{family={family.family}; base=Float; dimension={dimension_name}}}"
+                            dimension != None -> "{{package={owner}; family={family.family}; base={base_name}; dimension={dimension_name}; scale={api_unit_ratio(member.scale)}; provenance={api_unit_scale_provenance(member.scale_provenance)}; offset={offset}}}"
+                            else -> "{{package={owner}; family={family.family}; base={base_name}; scale={api_unit_ratio(member.scale)}; provenance={api_unit_scale_provenance(member.scale_provenance)}; offset={offset}}}"
+                        }
+                        output.identities[name] = identity
+                    }
+                }
+            }
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) -> collect_api_unit_dimensions(body, package, &output)
+            }
+            else -> {}
+        }
+    }
+}
+fn api_internal_tag_name(internal_tag: InternalTag) -> String Never! {
+    if internal_tag == {
+        .CoreCryptoNominal -> "core.crypto"
+        .DeterministicClock -> "clock.deterministic"
+        .SystemClock -> "clock.system"
+        .ExpiringSecretLoan -> "expiring_secret.loan"
+        .SharedGuardRead -> "shared_guard.read"
+        .SharedGuardEdit -> "shared_guard.edit"
+        .TerminalFactSet -> "terminal.fact_set"
+        .CppCallbackABI -> "cpp.callback_abi"
+        .AllocatorView -> "allocator.view"
+    }
+}
+fn api_type_has_never_success(ty: Type) -> Bool Never! {
+    if ty == {
+        .Named(name) -> name == "Never"
+        .Result(ok, _) -> ok == Type.Named{name: "Never"}
+        else -> false
+    }
+}

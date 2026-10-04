@@ -152,13 +152,16 @@ The Jet-hosted CLI ([`Compiler/JetCli`](../../../Compiler/JetCli)) runs
 nearest directory at or above the file that holds `package.jet`, or the file's
 own directory for a loose file, with every `.jet` file under it (dot names,
 `target`, `build`, `node_modules`, `bin`, and nested projects stay out) and the
-generated C/C++ binding caches. The Core library bodies are read from the Jet
-toolchain source tree named by `JET_TOOLCHAIN_ROOT` (the directory that holds
-`Core/`); the Core row table and the canonical effect source are generated
-into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
-by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
-`node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
-holds current.
+generated C/C++ binding caches. Core declaration text, public source modules,
+compiler-private source parts, Effects declarations and builtin tags are
+embedded by the canonical Foundation
+[`FoundationEmbeddedCore`](../../../Compiler/JetFoundation/Source/Registry/EmbeddedCore.jet)
+accessor. Driver requests and tool argument-menu initialization use this same
+payload; no toolchain source directory is needed at runtime.
+`node Compiler/Bootstrap/generate-core-sources.mjs` regenerates its private
+payload from the native metadata and Prelude/Core source files;
+`node Tools/agent/check-core-surface-ledger.mjs --write` runs that generator
+and `--check` holds it current.
 
 `jet build` writes `.jet/build/<stem>` in that source root. The default and
 `--profile debug` builds use the Jet-native backend (`lir_lower_program` and a

@@ -1,0 +1,1072 @@
+// PORT-PENDING 0357 crates-jet-sema-src-sema-bundle-pipeline-completion-module-group: crates/jet-sema/src/Sema/Bundle/Pipeline/Completion.rs:1-1068
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use super::super::Validation::check_ui_capabilities;
+//RS 
+//RS pub(super) fn complete_bundle_check(
+//RS     bundle: &mut ProgramBundle,
+//RS     states_mut: &mut [ModuleState],
+//RS     plugin_interfaces: &PluginInterfaceRegistry,
+//RS     devtools_registry: &mut jet_foundation::AST::DevtoolsRegistry,
+//RS     mode: CompileMode,
+//RS     no_os: bool,
+//RS     gates: crate::Policy::GateSet,
+//RS     explicit_output: Option<&str>,
+//RS     mut incremental: Option<&mut IncrementalSemaCache>,
+//RS     allow_compiler_api: bool,
+//RS     mut name_ledger: jet_foundation::Names::NameLedger,
+//RS     mut diags: Vec<Diagnostic>,
+//RS ) -> (
+//RS     Vec<Diagnostic>,
+//RS     super::super::super::Effects::SemIndexEffectFacts,
+//RS ) {
+//RS     let states: &[ModuleState] = &*states_mut;
+//RS     populate_name_ledger(bundle, &states, &mut name_ledger);
+//RS     super::super::record_state_marker_references(bundle, &mut name_ledger);
+//RS     record_import_edge_facts(bundle, &mut name_ledger);
+//RS 
+//RS     // D-SHARED-CYCLE1=C: run one graph/memo pass after registry and import
+//RS     // identities are complete, so a qualified field type resolves to its
+//RS     // owning module instead of a registry-order-dependent leaf name.
+//RS     check_strong_shared_cycles(&states, &name_ledger, &mut diags);
+//RS 
+//RS     for idx in 0..bundle.modules.len() {
+//RS         for item in &bundle.modules[idx].items {
+//RS             let Item::Impl(i) = item else { continue };
+//RS             if !i.type_name.contains('.') {
+//RS                 continue;
+//RS             }
+//RS             if !impl_type_exists(
+//RS                 &i.type_name,
+//RS                 &states[idx].registry,
+//RS                 &states[idx].imports,
+//RS                 Some(&states),
+//RS             ) {
+//RS                 diags.push(e0301_impl_target(i));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // D-SHAPE-OUTPUT-CALLABLE1: freeze every runnable Output to the ordinary
+//RS     // function it resolves to before entry selection or lowering can inspect it.
+//RS     resolve_outputs(
+//RS         bundle,
+//RS         &states,
+//RS         &mut name_ledger,
+//RS         mode,
+//RS         explicit_output,
+//RS         &mut diags,
+//RS     );
+//RS 
+//RS     // Parity with the single-file path: `@static` and address-taken consts
+//RS     // must lower to Rust `static` in bundle mode too.
+//RS     for module in bundle.modules.iter_mut() {
+//RS         let const_names: Vec<String> = module
+//RS             .items
+//RS             .iter()
+//RS             .filter_map(|i| match i {
+//RS                 Item::Const(c) => Some(c.name.clone()),
+//RS                 _ => None,
+//RS             })
+//RS             .collect();
+//RS         let mut address_taken: HashSet<String> = HashSet::new();
+//RS         for item in &module.items {
+//RS             match item {
+//RS                 Item::Func(f) => {
+//RS                     walk_stmts_for_const_refs(&f.body, &const_names, &mut address_taken)
+//RS                 }
+//RS                 Item::Struct(s) => {
+//RS                     for m in &s.methods {
+//RS                         walk_stmts_for_const_refs(&m.body, &const_names, &mut address_taken);
+//RS                     }
+//RS                 }
+//RS                 Item::Enum(e) => {
+//RS                     for m in &e.methods {
+//RS                         walk_stmts_for_const_refs(&m.body, &const_names, &mut address_taken);
+//RS                     }
+//RS                 }
+//RS                 Item::Impl(i) => {
+//RS                     for m in &i.methods {
+//RS                         walk_stmts_for_const_refs(&m.body, &const_names, &mut address_taken);
+//RS                     }
+//RS                 }
+//RS                 Item::Test(t) => {
+//RS                     walk_stmts_for_const_refs(&t.body, &const_names, &mut address_taken)
+//RS                 }
+//RS                 Item::EffectDecl(_)
+//RS                 | Item::MarkerDecl(_)
+//RS                 | Item::FactDecl(_)
+//RS                 | Item::Const(_)
+//RS                 | Item::ExternRust(_)
+//RS                 | Item::Trait(_)
+//RS                 | Item::Tag(_) // D-QUAL2: tags erase
+//RS                 | Item::Module(_)
+//RS                 | Item::Distinct(_)
+//RS                 | Item::TypeAlias(_) // D-TYPEALIAS1: erases
+//RS                 | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
+//RS                 | Item::CModule(_) | Item::CodeModule(_)
+//RS                 | Item::ErrorConv(_)
+//RS                 | Item::Migration(_) // D-MIGRATE1
+//RS                 | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
+//RS                 | Item::UserDerive(_) // D-METADERIVE1=A: already expanded above
+//RS                 | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before this pass
+//RS                 | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
+//RS                 | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
+//RS             }
+//RS         }
+//RS         for item in &mut module.items {
+//RS             if let Item::Const(c) = item {
+//RS                 let force_static =
+//RS                     c.is_persist || c.mutable || c.attrs.contains(&ConstAttr::ForceStatic);
+//RS                 c.rust_kind = if force_static || address_taken.contains(&c.name) {
+//RS                     RustConstKind::Static
+//RS                 } else {
+//RS                     RustConstKind::Const
+//RS                 };
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // Each non-entry module becomes a Rust `mod __jet_<alias>`; a type in the
+//RS     // entry file with the same name would collide in the type namespace.
+//RS     for (idx, m) in bundle.modules.iter().enumerate() {
+//RS         if idx == bundle.entry {
+//RS             continue;
+//RS         }
+//RS         if states[bundle.entry].registry.contains(&m.alias) {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0105",
+//RS                 format!(
+//RS                     "the type `{}` clashes with the imported file `{}`",
+//RS                     m.alias, m.display
+//RS                 ),
+//RS                 "a type and an imported module can't share a name".to_string(),
+//RS                 format!(
+//RS                     "rename the type, or import with `{} other_name`",
+//RS                     Syntax::KW_AS
+//RS                 ),
+//RS                 None,
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     if mode == CompileMode::Run || mode == CompileMode::Eval {
+//RS         let entry_items = &bundle.modules[bundle.entry].items;
+//RS         let has_selected_output = entry_items.iter().any(|item| {
+//RS             matches!(item, Item::Const(value) if value.resolved_output.as_ref().is_some_and(|output| output.selected))
+//RS         });
+//RS         if has_selected_output {
+//RS             // The selected Output contract was checked before body checking.
+//RS         } else if let Some(run_fn) = entry_items.iter().find_map(|i| match i {
+//RS             Item::Func(f) if f.name == "run" => Some(f),
+//RS             _ => None,
+//RS         }) {
+//RS             // S12/D-CLIFLAG1: `run` is the only program entry name. Its
+//RS             // canonical CLI schema owns both direct scalar inputs and the
+//RS             // one typed CLI-spec parameter (`#[CLI]` program struct).
+//RS             let direct_cli = jet_foundation::CLISchema::is_direct_run_entry(entry_items);
+//RS             if direct_cli {
+//RS                 // The canonical schema producer has already classified every
+//RS                 // direct input and its default. Keep this gate in sema, but do
+//RS                 // not reconstruct that policy here.
+//RS             } else if run_fn.params.len() == 1 {
+//RS                 let param = &run_fn.params[0];
+//RS                 let cli_module =
+//RS                     jet_foundation::CLISchema::entry_type_module(bundle).unwrap_or(bundle.entry);
+//RS                 if jet_foundation::CheckReads::env_var_os("JET_DEBUG_CLI").is_some() {
+//RS                     eprintln!(
+//RS                         "cli-debug sema module={cli_module} param={:?} cli={:?} derives={:?}",
+//RS                         param.ty,
+//RS                         states[cli_module]
+//RS                             .trait_reg
+//RS                             .implements_trait("RunArgs", "CLI"),
+//RS                         states[cli_module]
+//RS                             .trait_reg
+//RS                             .derives
+//RS                             .keys()
+//RS                             .collect::<Vec<_>>()
+//RS                     );
+//RS                 }
+//RS                 match cli_entry_param_shape(
+//RS                     &bundle.modules[cli_module].items,
+//RS                     &param.ty,
+//RS                     &states[cli_module].trait_reg,
+//RS                 ) {
+//RS                     CLIEntryShape::Struct => {}
+//RS                     CLIEntryShape::Invalid => diags.push(e1308(Some(param.ty_span))),
+//RS                 }
+//RS             } else if run_fn.params.len() > 1 {
+//RS                 diags.push(e1308(Some(run_fn.name_span)));
+//RS             }
+//RS         } else {
+//RS             diags.push(no_run_error());
+//RS         }
+//RS     }
+//RS     match mode {
+//RS         CompileMode::Test if !states.iter().any(|state| !state.tests.is_empty())
+//RS             && !bundle.modules[bundle.entry].items.iter().any(|item| {
+//RS                 matches!(item, Item::Const(value) if value.resolved_output.as_ref().is_some_and(|output| output.selected && output.kind == crate::AST::OutputKind::Check))
+//RS             }) => {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0601",
+//RS                 format!("no `#{}` blocks found to run", Syntax::KW_TEST),
+//RS                 format!(
+//RS                     "add at least one top-level block: #{}(\"describes what this checks\") {{ ... }}",
+//RS                     Syntax::KW_TEST
+//RS                 ),
+//RS                 format!(
+//RS                     "use `{}` and `{}` inside the block to check results",
+//RS                     Syntax::BUILTIN_ASSERT,
+//RS                     Syntax::BUILTIN_ASSERT_EQ
+//RS                 ),
+//RS                 None,
+//RS             ));
+//RS         }
+//RS         CompileMode::Test
+//RS         | CompileMode::TestOverride
+//RS         | CompileMode::Run
+//RS         | CompileMode::Check
+//RS         | CompileMode::Eval => {}
+//RS     }
+//RS 
+//RS     // D-EFF1: collect effect summaries across every module, then run the
+//RS     // shared reachability projection and enforce each `#(…)` bound once.
+//RS     let mut declared_effect_facts = jet_foundation::Facts::FactRegistry::default();
+//RS     register_effect_facts(bundle, &mut declared_effect_facts);
+//RS     diags.extend(validate_declared_effects(bundle, &declared_effect_facts));
+//RS 
+//RS     // D-CTEFFECT1 Tier-1: accumulate embed inputs from all module checks.
+//RS     // Use a temporary to avoid simultaneous &mut borrows of `bundle`.
+//RS     if mode == CompileMode::Check {
+//RS         if let Some(cache) = incremental.as_deref_mut() {
+//RS             cache.begin_bundle(bundle, &name_ledger, plugin_interfaces);
+//RS         }
+//RS     } else {
+//RS         incremental = None;
+//RS     }
+//RS     let mut embed_inputs = std::mem::take(&mut bundle.comptime_inputs);
+//RS     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
+//RS     let mut module_effect_summaries: Vec<(String, HashMap<String, EffectSummary>)> = Vec::new();
+//RS     diags.extend(check_job_collisions(&bundle.modules));
+//RS     // D-DX-JOBGRAPH1=A: reject unknown predecessors, cycles, and package
+//RS     // authority violations before any execution tier receives a job table.
+//RS     diags.extend(check_job_graph(bundle));
+//RS     // anywhere in the bundle, accumulated across every module below; the
+//RS     // `#Inline(Always)` address-taken pass (E0918) runs after the loop, once
+//RS     // this set is complete across the whole bundle.
+//RS     let mut global_addr_taken: HashSet<String> = HashSet::new();
+//RS     fn preserve_inline_foreign_caller_path(diagnostic: &Diagnostic) -> bool {
+//RS         matches!(
+//RS             diagnostic.code.as_str(),
+//RS             "E3102" | "E3215" | "E3222" | "E3223"
+//RS         )
+//RS     }
+//RS 
+//RS     // D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: settle the failure union of
+//RS     // every unannotated function (and mint its own error cases) before any
+//RS     // real body check, so callers see the inferred contract.
+//RS     super::FailureUnion::infer_failure_unions(
+//RS         bundle,
+//RS         states_mut,
+//RS         plugin_interfaces,
+//RS         devtools_registry,
+//RS         &declared_effect_facts,
+//RS         no_os,
+//RS         gates,
+//RS         &name_ledger,
+//RS         &mut diags,
+//RS     );
+//RS     // #2517 S2: a `jet check` inside a package-record session seals every
+//RS     // dependency package whose check key has a record. The inferred failure
+//RS     // contracts above are part of each interface digest, so the keys are
+//RS     // computed only now.
+//RS     let mut seal = if mode == CompileMode::Check {
+//RS         super::super::PackageSeal::SealPlan::begin(bundle, &name_ledger, plugin_interfaces.digest())
+//RS     } else {
+//RS         None
+//RS     };
+//RS     let states: &[ModuleState] = &*states_mut;
+//RS     let mut module_pending_diagnostics = Vec::with_capacity(bundle.modules.len());
+//RS     let mut sealed_nodes: Vec<(String, Vec<(String, EffectSummary)>)> = Vec::new();
+//RS     let mut sealed_inferred: HashMap<usize, HashSet<String>> = HashMap::new();
+//RS     let mut devtools_publications = Vec::new();
+//RS     for (idx, module) in bundle.modules.iter_mut().enumerate() {
+//RS         let module_alias = name_ledger
+//RS             .module_alias(idx)
+//RS             .unwrap_or(&module.alias)
+//RS             .to_string();
+//RS         if let Some(sealed) = seal.as_mut().and_then(|plan| plan.modules.get_mut(&idx)) {
+//RS             // A sealed module is not body-checked: its recorded item
+//RS             // summaries and module facts stand in for the checked bodies.
+//RS             global_addr_taken.extend(sealed.address_taken.iter().cloned());
+//RS             if sealed.exact_int {
+//RS                 states[idx].exact_int_reachable.set(true);
+//RS             }
+//RS             sealed_inferred.insert(idx, std::mem::take(&mut sealed.inferred_infallible));
+//RS             sealed_nodes.push((module_alias.clone(), std::mem::take(&mut sealed.summaries)));
+//RS             module_pending_diagnostics.push(Vec::new());
+//RS             module_effect_summaries.push((module_alias, HashMap::new()));
+//RS             continue;
+//RS         }
+//RS         let origin = std::sync::Arc::new(
+//RS             jet_foundation::Diagnostics::DiagnosticOrigin::new(
+//RS                 module.display.clone(),
+//RS                 module.path.to_string_lossy().into_owned(),
+//RS                 module.source.clone(),
+//RS             ),
+//RS         );
+//RS         let mut products = BodyProducts::default();
+//RS         let mut module_diags = check_module_bodies(
+//RS             module,
+//RS             idx,
+//RS             &states,
+//RS             plugin_interfaces,
+//RS             devtools_registry,
+//RS             &declared_effect_facts,
+//RS             mode,
+//RS             no_os,
+//RS             gates,
+//RS             &mut name_ledger,
+//RS             &mut products,
+//RS             incremental.as_deref_mut(),
+//RS         );
+//RS         let BodyProducts {
+//RS             summaries: mut local_summaries,
+//RS             embed_inputs: module_inputs,
+//RS             addr_taken: local_addr_taken,
+//RS             pending_diagnostics: mut local_pending_diagnostics,
+//RS             devtools_publications: module_publications,
+//RS             ..
+//RS         } = products;
+//RS         global_addr_taken.extend(local_addr_taken.iter().cloned());
+//RS         devtools_publications.extend(module_publications);
+//RS         if let Some(plan) = seal.as_mut() {
+//RS             plan.outputs.insert(
+//RS                 idx,
+//RS                 super::super::PackageSeal::ModuleOutputs {
+//RS                     address_taken: local_addr_taken,
+//RS                     discovered_inputs: !module_inputs.is_empty(),
+//RS                 },
+//RS             );
+//RS         }
+//RS         embed_inputs.extend(module_inputs);
+//RS         dedupe_unknown_names(&mut module_diags);
+//RS         super::super::prune_conversion_cascades(&mut module_diags);
+//RS         dedupe_soft_public_lints(&mut module_diags);
+//RS         for diagnostic in &mut module_diags {
+//RS             if !preserve_inline_foreign_caller_path(diagnostic) {
+//RS                 diagnostic.set_origin(origin.clone());
+//RS             }
+//RS         }
+//RS         for pending in &mut local_pending_diagnostics {
+//RS             if !preserve_inline_foreign_caller_path(&pending.diagnostic) {
+//RS                 pending.diagnostic.set_origin(origin.clone());
+//RS             }
+//RS         }
+//RS         // Spans are local to a module. Attach same-span causes before this
+//RS         // batch joins the other modules, so an identical byte range in a
+//RS         // separate source file can never become a false dependency.
+//RS         attach_known_cause_links(&mut module_diags);
+//RS         diags.extend(module_diags);
+//RS         for pending in &mut local_pending_diagnostics {
+//RS             pending.function_key = name_ledger
+//RS                 .semantic_identity(idx, &pending.function_key)
+//RS                 .unwrap_or_else(|| format!("{}::{}", module.alias, pending.function_key));
+//RS         }
+//RS         module_pending_diagnostics.push(local_pending_diagnostics);
+//RS         super::super::super::Effects::collect_lambda_effect_summaries(
+//RS             std::slice::from_mut(module),
+//RS             &name_ledger,
+//RS             &mut local_summaries,
+//RS         );
+//RS         seed_trait_dispatch_effects(&module.items, &mut local_summaries);
+//RS         apply_effect_via(&module.items, &mut local_summaries, &mut Vec::new());
+//RS         effect_summaries.extend(local_summaries.clone());
+//RS         module_effect_summaries.push((module_alias, local_summaries));
+//RS     }
+//RS     // #3708: every body is checked; infer the empty failure sets and settle
+//RS     // the E2404 obligations recorded against unannotated callees. The
+//RS     // module-qualified result lets E0433 treat a dropped call to an
+//RS     // inferred-infallible callee as pure (D-DISCARD1=A).
+//RS     let inferred_sets = super::super::super::solve_inferred_failure(
+//RS         bundle,
+//RS         &module_effect_summaries,
+//RS         &global_addr_taken,
+//RS         &sealed_inferred,
+//RS         &name_ledger,
+//RS         &mut diags,
+//RS     );
+//RS     let inferred_infallible: HashSet<String> = inferred_sets
+//RS         .iter()
+//RS         .zip(&module_effect_summaries)
+//RS         .flat_map(|(names, (alias, _))| names.iter().map(move |name| format!("{alias}::{name}")))
+//RS         .collect();
+//RS     // D-DX-PLUGIN1=D: body inference owns publication typing. Project the
+//RS     // facts the body checks produced, in source order, into the one shared
+//RS     // panel registry before checking field liveness.
+//RS     for publication in devtools_publications {
+//RS         if devtools_registry
+//RS             .publications()
+//RS             .iter()
+//RS             .any(|existing| existing.span == publication.span)
+//RS         {
+//RS             continue;
+//RS         }
+//RS         if let Err(error) = devtools_registry.register_publication(publication) {
+//RS             diags.push(registry_error(error));
+//RS         }
+//RS     }
+//RS     check_unfed_state_fields(devtools_registry, &mut diags);
+//RS     bundle.devtools_registry = devtools_registry.clone();
+//RS     bundle.comptime_inputs = embed_inputs;
+//RS     // D-METHODMACRO1=A: E0918 (address-taken) needs every module's function
+//RS     // bodies checked first. Methods can't appear in `global_addr_taken`
+//RS     // (Jet's grammar has no way to read a method's bare name as a value), so
+//RS     // this only ever fires for top-level functions.
+//RS     let mut failed_diagnostic_phases = HashSet::new();
+//RS     for (module_index, module) in bundle.modules.iter().enumerate() {
+//RS         let phase_diagnostic_start = diags.len();
+//RS         for item in &module.items {
+//RS             if let Item::Func(f) = item {
+//RS                 if f.is_inline_always && global_addr_taken.contains(&f.name) {
+//RS                     diags.push(e0918_address_taken(
+//RS                         &f.name,
+//RS                         f.inline_span.unwrap_or(f.name_span),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         mark_failed_pending_functions(
+//RS             &diags[phase_diagnostic_start..],
+//RS             &module_pending_diagnostics[module_index],
+//RS             &mut failed_diagnostic_phases,
+//RS         );
+//RS     }
+//RS     // D-EFF2 (`#(via f)`): seed each via-fn's summary with its callback's bound
+//RS     // before projection, so its published effect set is a tight pass-through.
+//RS     for (module_index, module) in bundle.modules.iter().enumerate() {
+//RS         let phase_diagnostic_start = diags.len();
+//RS         apply_effect_via(&module.items, &mut effect_summaries, &mut diags);
+//RS         mark_failed_pending_functions(
+//RS             &diags[phase_diagnostic_start..],
+//RS             &module_pending_diagnostics[module_index],
+//RS             &mut failed_diagnostic_phases,
+//RS         );
+//RS     }
+//RS     // File modules need qualified facts: bare top-level names overwrite one
+//RS     // another, while D-EFFECT-OMIT1 requires one cross-package solver answer.
+//RS     let mut taint_returns = HashMap::new();
+//RS     let mut return_types = HashMap::new();
+//RS     for module in &bundle.modules {
+//RS         super::super::super::Taint::collect_return_tag_facts(
+//RS             &module.items,
+//RS             &mut taint_returns,
+//RS             &mut return_types,
+//RS         );
+//RS     }
+//RS     let (public_summaries, public_reachability) =
+//RS         qualified_effect_facts(&module_effect_summaries, &sealed_nodes, &taint_returns);
+//RS     let mut public_solved: HashMap<String, EffectSet> = public_summaries
+//RS         .keys()
+//RS         .filter_map(|key| {
+//RS             public_reachability
+//RS                 .row("effects")
+//RS                 .and_then(|row| row.get(key))
+//RS                 .map(|effects| (key.clone(), effects.clone()))
+//RS         })
+//RS         .collect();
+//RS     super::super::super::Effects::project_lambda_effect_facts(
+//RS         &mut bundle.modules,
+//RS         &name_ledger,
+//RS         &public_summaries,
+//RS         &public_reachability,
+//RS     );
+//RS     // D-EFFECT-AUTHORITY1: publish the exact selected-entry row once, after
+//RS     // the qualified reachability fixpoint closes. All execution tiers receive
+//RS     // this bundle carrier; none of them recompute effects from source.
+//RS     bundle
+//RS         .package_guarantees
+//RS         .application_authority
+//RS         .required_effects =
+//RS         super::super::super::Effects::program_effects(bundle, &public_solved, "run");
+//RS     super::super::super::CheckerCoreLib::validate_service_handlers(
+//RS         bundle,
+//RS         &public_summaries,
+//RS         &public_solved,
+//RS         &mut diags,
+//RS     );
+//RS     if let Some(row) = public_reachability.row("taint") {
+//RS         for (key, tags) in row {
+//RS             if !tags.is_empty() {
+//RS                 taint_returns.insert(key.clone(), tags.clone());
+//RS             }
+//RS         }
+//RS     }
+//RS     // The Output carries the same solved effect row used by diagnostics and
+//RS     // semantic-index consumers. Tooling never re-walks the callable body.
+//RS     for module in &mut bundle.modules {
+//RS         let display = module.display.clone();
+//RS         for item in &mut module.items {
+//RS             let Item::Const(value) = item else { continue };
+//RS             let Some(output) = &mut value.resolved_output else {
+//RS                 continue;
+//RS             };
+//RS             let alias = name_ledger
+//RS                 .module_alias(output.module)
+//RS                 .unwrap_or(&states[output.module].module_alias);
+//RS             let identity = name_ledger
+//RS                 .semantic_identity(output.module, &output.semantic_name)
+//RS                 .unwrap_or_else(|| format!("{alias}::{}", output.semantic_name));
+//RS             let local_identity = format!("{alias}::{}", output.semantic_name);
+//RS             output.effects = public_solved
+//RS                 .get(&identity)
+//RS                 .or_else(|| public_solved.get(&local_identity))
+//RS                 .map(|effects| effects.iter().cloned().collect())
+//RS                 .unwrap_or_default();
+//RS             name_ledger.record_reference(
+//RS                 display.clone(),
+//RS                 output.reference.start,
+//RS                 output.reference.end,
+//RS                 jet_foundation::Names::NameReference {
+//RS                     module_path: output.source_path.clone(),
+//RS                     kind: "function".to_string(),
+//RS                     def_span: output.definition,
+//RS                     semantic_identity: Some(identity),
+//RS                 },
+//RS             );
+//RS         }
+//RS     }
+//RS     // `public_summaries` also carries unique short aliases for tooling. Run
+//RS     // diagnostics only over canonical module-qualified nodes so each source
+//RS     // obligation is reported once.
+//RS     let module_aliases = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(module_idx, module)| {
+//RS             format!(
+//RS                 "{}::",
+//RS                 name_ledger
+//RS                     .module_alias(module_idx)
+//RS                     .unwrap_or(&module.alias)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let validation_summaries = public_summaries
+//RS         .iter()
+//RS         .filter(|(key, _)| module_aliases.iter().any(|prefix| key.starts_with(prefix)))
+//RS         .map(|(key, summary)| (key.clone(), summary.clone()))
+//RS         .collect::<HashMap<_, _>>();
+//RS     super::super::super::Effects::check_autodiff_purity(
+//RS         &validation_summaries,
+//RS         &public_solved,
+//RS         &mut diags,
+//RS     );
+//RS     // Candidate facts survive only when their entire function
+//RS     // remains error-free through the solved effect phases below.
+//RS     for (module_index, module) in bundle.modules.iter().enumerate() {
+//RS         let phase_diagnostic_start = diags.len();
+//RS         let prefix = format!(
+//RS             "{}::",
+//RS             name_ledger
+//RS                 .module_alias(module_index)
+//RS                 .unwrap_or(&module.alias)
+//RS         );
+//RS         let local_solved = public_solved
+//RS             .iter()
+//RS             .filter_map(|(key, row)| {
+//RS                 key.strip_prefix(&prefix)
+//RS                     .map(|key| (key.to_string(), row.clone()))
+//RS             })
+//RS             .collect::<HashMap<_, _>>();
+//RS         let local_summaries = validation_summaries
+//RS             .iter()
+//RS             .map(|(key, summary)| {
+//RS                 if let Some(key) = key.strip_prefix(&prefix) {
+//RS                     let mut summary = summary.clone();
+//RS                     summary.edges = summary
+//RS                         .edges
+//RS                         .iter()
+//RS                         .map(|edge| edge.strip_prefix(&prefix).unwrap_or(edge).to_string())
+//RS                         .collect();
+//RS                     for call in &mut summary.memory.calls {
+//RS                         call.callee = call
+//RS                             .callee
+//RS                             .strip_prefix(&prefix)
+//RS                             .unwrap_or(&call.callee)
+//RS                             .to_string();
+//RS                     }
+//RS                     (key.to_string(), summary)
+//RS                 } else {
+//RS                     (key.clone(), summary.clone())
+//RS                 }
+//RS             })
+//RS             .collect::<HashMap<_, _>>();
+//RS         check_effect_boundaries(&module.items, &local_solved, &local_summaries, &mut diags);
+//RS         let module_alias = name_ledger
+//RS             .module_alias(module_index)
+//RS             .unwrap_or(&module.alias);
+//RS         super::super::super::Effects::check_inferred_purity(
+//RS             &module.items,
+//RS             module_alias,
+//RS             &validation_summaries,
+//RS             &public_solved,
+//RS             &public_reachability,
+//RS             &mut diags,
+//RS         );
+//RS         check_replayable_effects(&module.items, &local_solved, &mut diags);
+//RS         check_secret_grants(
+//RS             &module.items,
+//RS             module_alias,
+//RS             &public_reachability.nodes_with("secret", Effect::Secret.name()),
+//RS             &mut diags,
+//RS         );
+//RS         mark_failed_pending_functions(
+//RS             &diags[phase_diagnostic_start..],
+//RS             &module_pending_diagnostics[module_index],
+//RS             &mut failed_diagnostic_phases,
+//RS         );
+//RS     }
+//RS     check_region_caps(
+//RS         &validation_summaries,
+//RS         &public_solved,
+//RS         &mut failed_diagnostic_phases,
+//RS         &mut diags,
+//RS     );
+//RS     // D-EFF2: callback param effect bounds (E0747).
+//RS     check_callback_bounds(
+//RS         &validation_summaries,
+//RS         &public_solved,
+//RS         &mut failed_diagnostic_phases,
+//RS         &mut diags,
+//RS     );
+//RS     // P7 / D-DISCARD1=A: a dropped result of a pure, infallible call does
+//RS     // nothing (E0433).
+//RS     super::super::super::Effects::check_discarded_results(
+//RS         &validation_summaries,
+//RS         &public_summaries,
+//RS         &public_solved,
+//RS         &inferred_infallible,
+//RS         &mut diags,
+//RS     );
+//RS     for (module_index, pending_diagnostics) in module_pending_diagnostics.into_iter().enumerate() {
+//RS         let module_alias = name_ledger
+//RS             .module_alias(module_index)
+//RS             .unwrap_or(&bundle.modules[module_index].alias);
+//RS         let identity_prefix = name_ledger
+//RS             .module_identity(module_index)
+//RS             .map(|identity| format!("{identity}::"));
+//RS         for pending in pending_diagnostics {
+//RS             let loader_key = identity_prefix.as_deref().and_then(|prefix| {
+//RS                 pending
+//RS                     .function_key
+//RS                     .strip_prefix(prefix)
+//RS                     .map(|local| format!("{module_alias}::{local}"))
+//RS             });
+//RS             if !failed_diagnostic_phases.contains(&pending.function_key)
+//RS                 && !loader_key
+//RS                     .as_deref()
+//RS                     .is_some_and(|key| failed_diagnostic_phases.contains(key))
+//RS             {
+//RS                 diags.push(pending.diagnostic);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // JS/WASM partition inference and boundary checks.
+//RS     // D-MEM-FACTS1: function effect-row denials and package manifest denials
+//RS     // are checked only after the same qualified, dependency-complete graph is projected.
+//RS     // #657 feeds the other scope levels and the two remaining fact values into
+//RS     // this declaration surface; reachability itself stays single-mechanism.
+//RS     let (memory_summaries, memory_declarations) =
+//RS         super::super::super::MemoryFacts::bundle_memory_inputs(bundle, &public_summaries);
+//RS     let memory_projections = memory_declarations
+//RS         .iter()
+//RS         .flat_map(|declaration| {
+//RS             declaration.roots.iter().map(|root| {
+//RS                 (
+//RS                     (root.clone(), declaration.fact),
+//RS                     super::super::super::MemoryFacts::project_memory_fact(
+//RS                         declaration.fact,
+//RS                         root,
+//RS                         &memory_summaries,
+//RS                     ),
+//RS                 )
+//RS             })
+//RS         })
+//RS         .collect::<HashMap<_, _>>();
+//RS     diags.extend(super::super::super::MemoryFacts::check_memory_facts(
+//RS         &memory_declarations,
+//RS         &memory_summaries,
+//RS     ));
+//RS     diags.extend(check_web_partition(
+//RS         bundle,
+//RS         &public_summaries,
+//RS         &public_solved,
+//RS     ));
+//RS 
+//RS     // D-WEBAPP1=D / D-WEBAUTHOR1=D (Tower #1274, #1703): one sema-known application graph.
+//RS     let (app_graph, app_diags) =
+//RS         super::super::super::App::extract_app_graph_with_effects_and_registry(
+//RS             bundle,
+//RS             &public_solved,
+//RS             &states[bundle.entry].trait_reg,
+//RS         );
+//RS     diags.extend(app_diags);
+//RS     // D-STRUCT-LIVE1=A: all body references, resolved outputs, and application
+//RS     // roots are now present in the one name ledger. Emit the four warning-only
+//RS     // structure verdicts before the ledger is published on the bundle.
+//RS     diags.extend(super::super::Liveness::check_liveness(
+//RS         bundle,
+//RS         &mut name_ledger,
+//RS         app_graph.as_ref(),
+//RS     ));
+//RS 
+//RS     // D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating —
+//RS     // mixed-axis conflicts and unmatched cross-gate calls.
+//RS     diags.extend(check_os_target(bundle, no_os));
+//RS 
+//RS     // D-FACTMODEL1=A: one erased fact model for tags, effects, and states.
+//RS     // Keep the pass in its own frame; this bundle checker already carries the
+//RS     // compiler's largest solved graphs.
+//RS     let fact_registry =
+//RS         check_fact_tags_and_states(bundle, &states, &taint_returns, &return_types, &mut diags);
+//RS 
+//RS     let (mut used_core, usage_spans, ffi_callback_fns) = collect_used_core(bundle, &states);
+//RS     // D-CLIFLAG1: generated CLI specs/decoders and job argv dispatch call
+//RS     // straight into `core.args`'s `JetArgsSpec`/`JetParsedArgs`/argv Prelude
+//RS     // — but they're pure codegen text, not a Jet method call `collect_used_core`
+//RS     // can see by walking function bodies.
+//RS     // Force the same `CORELIB_PRELUDE` inclusion a hand-written
+//RS     // `use core.args` would trigger (any key works; the caller only checks
+//RS     // "is this set empty").
+//RS     if bundle.modules.iter().any(|m| {
+//RS         m.items.iter().any(|i| {
+//RS             matches!(i, Item::Struct(s) if s.derives.iter().any(|(t, _)| t == "CLI"))
+//RS                 || matches!(i, Item::Func(f) if f.is_job)
+//RS         })
+//RS     }) {
+//RS         used_core.insert("core.args::spec".to_string());
+//RS     }
+//RS     // D-MEM1 S6: `Shared<T>`/`Pool<T>`/`Id<T>` need `CORELIB_PRELUDE`'s `jet_std`
+//RS     // module (`JetShared`/`JetPool`/`JetId`), but need no `use core.X` import to
+//RS     // reach them — `collect_used_core` only walks
+//RS     // import aliases, so it never sees them. Same forced-insert shape as
+//RS     // D-CLIFLAG1 above; a cheap source-text scan is deliberately over-eager (a
+//RS     // false positive just includes the prelude when it wasn't strictly needed —
+//RS     // harmless, `#![allow(warnings)]` covers the unused code).
+//RS     if bundle.modules.iter().any(|m| {
+//RS         m.source.contains("Pool<")
+//RS             || m.source.contains("Shared<")
+//RS             // D-CONC-SHARE1=A: `shared x` is the one construction spelling
+//RS             // (`Shared.new(` is retired, E1115), so the probe reads the word.
+//RS             || m.source.contains("shared ")
+//RS             || m.source.contains("Cell<")
+//RS             || m.source.contains("Cell.new(")
+//RS             || m.source.contains("ID<")
+//RS     }) {
+//RS         used_core.insert("core.mem::pool_shared".to_string());
+//RS     }
+//RS     // D-TYPE2-MEASURE1=A: `Vec<N>` and `Matrix<M, N>` are unqualified core
+//RS     // generics, so a program can name them — and lower `Matrix * Matrix` to
+//RS     // `core.compute::matmul` — without any `use core.compute` import for
+//RS     // `collect_used_core` to see. Same forced-insert shape as D-MEM1 S6 above,
+//RS     // and over-eager for the same harmless reason.
+//RS     if bundle
+//RS         .modules
+//RS         .iter()
+//RS         .any(|m| m.source.contains("Matrix<") || m.source.contains("Vec<"))
+//RS     {
+//RS         used_core.insert("core.compute::shape_alias".to_string());
+//RS     }
+//RS     // D-VALIDATE1 (card #506): a `validate { … }` block synthesizes
+//RS     // `Type.validate(value)`, which returns `[jet_std::FieldError]` — same
+//RS     // forced-insert shape as D-CLIFLAG1/D-MEM1 S6 above, since declaring the
+//RS     // block needs no `use core.X` import to reach `CORELIB_PRELUDE`.
+//RS     if bundle.modules.iter().any(|m| {
+//RS         m.items
+//RS             .iter()
+//RS             .any(|i| matches!(i, Item::Struct(s) if !s.validate_block.is_empty()))
+//RS     }) {
+//RS         used_core.insert("core.validate::field_error".to_string());
+//RS     }
+//RS     // D-CORE-SOURCE-AUTHORITY1=A: late sema-generated helpers join the same
+//RS     // source-owned package and audited ABI closure as explicit calls.
+//RS     expand_core_reachable_closure(&mut used_core);
+//RS     diags.extend(check_ui_capabilities(bundle, &used_core, &usage_spans));
+//RS     bundle.used_core = used_core;
+//RS     bundle.ffi_callback_fns = ffi_callback_fns;
+//RS     diags.extend(super::super::super::MemoryFacts::annotate_scoped_gc_promotions(bundle));
+//RS     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
+//RS     bundle.name_ledger = name_ledger.clone();
+//RS     // D-BUILDENTRY1 / I2+I3+I9 (Tower card 2008): checking is finished, so the
+//RS     // build entry has had every diagnostic it is owed. It is not runtime code,
+//RS     // and `BuildContext`/`BuildPlan` have no runtime lowering, so leaving it in
+//RS     // hands codegen a function the typed IR cannot cover — an internal compiler
+//RS     // error raised by `emit_func`, from a program sema just accepted. Project it
+//RS     // out here, once, and every engine downstream sees the same program.
+//RS     //
+//RS     // Two checks keep their build entry. `allow_compiler_api` is the build
+//RS     // session's own check of the selected root, whose caller still holds an
+//RS     // index into the entry module's items and evaluates the entry next; the
+//RS     // Driver removes it after the build runs. `Check` is `jet check`/LSP, which
+//RS     // emits no code and reports `E3501` against the item.
+//RS     if !allow_compiler_api && mode != CompileMode::Check {
+//RS         super::super::strip_build_only_entries(bundle);
+//RS     }
+//RS     // D-EFFBUDGET1: package enforcement aggregates each package's solved
+//RS     // effects. A root caller inherits a dependency's Panic row for sema
+//RS     // boundaries, but that same row would produce an unspanned root E1220
+//RS     // beside the dependency-boundary diagnostic. Keep the full row through
+//RS     // every sema check above, then project only this duplicate at the final
+//RS     // fact boundary.
+//RS     suppress_duplicate_root_panic(
+//RS         bundle,
+//RS         &name_ledger,
+//RS         &public_summaries,
+//RS         &mut public_solved,
+//RS     );
+//RS     // #2517 S2: publish the clean dependency packages this run checked, then
+//RS     // drop the reports on sealed modules. A package is recorded only when
+//RS     // its check reported nothing that reaches the importer, so a sealed
+//RS     // module's reports (from phases that saw its erased bodies) are dropped.
+//RS     if let Some(plan) = seal {
+//RS         let sealed_paths = plan.sealed_paths(bundle);
+//RS         let exact_int = states
+//RS             .iter()
+//RS             .map(|state| state.exact_int_reachable.get())
+//RS             .collect::<Vec<_>>();
+//RS         plan.finish(
+//RS             bundle,
+//RS             &name_ledger,
+//RS             &public_summaries,
+//RS             &inferred_sets,
+//RS             &exact_int,
+//RS             &diags,
+//RS         );
+//RS         diags.retain(|diagnostic| {
+//RS             !diagnostic
+//RS                 .origin()
+//RS                 .is_some_and(|origin| sealed_paths.contains(&origin.path))
+//RS         });
+//RS     }
+//RS 
+//RS     // Core modules are checked in the same bundle so their errors keep the
+//RS     // program honest, but Core is library source: its lints are not the
+//RS     // user's to act on and never reach user output.
+//RS     diags.retain(|diagnostic| {
+//RS         diagnostic.severity != crate::Diagnostics::Severity::Lint
+//RS             || !diagnostic
+//RS                 .origin()
+//RS                 .is_some_and(|origin| origin.is_core_source())
+//RS     });
+//RS     jet_foundation::Diagnostics::order_diagnostics_root_first(&mut diags);
+//RS     (
+//RS         diags,
+//RS         super::super::super::Effects::SemIndexEffectFacts {
+//RS             summaries: public_summaries,
+//RS             solved: public_solved,
+//RS             reachability: public_reachability,
+//RS             memory_declarations,
+//RS             memory_projections,
+//RS             name_ledger: name_ledger.clone(),
+//RS             web_app: app_graph,
+//RS             fact_registry,
+//RS         },
+//RS     )
+//RS }
+//RS fn suppress_duplicate_root_panic(
+//RS     bundle: &ProgramBundle,
+//RS     ledger: &jet_foundation::Names::NameLedger,
+//RS     summaries: &HashMap<String, EffectSummary>,
+//RS     solved: &mut HashMap<String, EffectSet>,
+//RS ) {
+//RS     let mut root_aliases = HashSet::new();
+//RS     let mut dependency_aliases = HashSet::new();
+//RS     for (module_index, module) in bundle.modules.iter().enumerate() {
+//RS         let aliases = [
+//RS             module.alias.as_str(),
+//RS             ledger.module_alias(module_index).unwrap_or(&module.alias),
+//RS         ];
+//RS         let owner = bundle
+//RS             .dep_roots
+//RS             .iter()
+//RS             .find(|(_, root)| module.path.starts_with(root))
+//RS             .map(|(name, _)| name.as_str());
+//RS         if let Some(dependency) = owner {
+//RS             if dependency_boundary_span(bundle, dependency).is_some() {
+//RS                 dependency_aliases.extend(aliases.into_iter().map(str::to_owned));
+//RS             }
+//RS         } else {
+//RS             root_aliases.extend(aliases.into_iter().map(str::to_owned));
+//RS         }
+//RS     }
+//RS     if root_aliases.is_empty() || dependency_aliases.is_empty() {
+//RS         return;
+//RS     }
+//RS 
+//RS     let root_keys = solved
+//RS         .keys()
+//RS         .filter(|key| {
+//RS             key.split_once("::")
+//RS                 .is_some_and(|(alias, _)| root_aliases.contains(alias))
+//RS         })
+//RS         .cloned()
+//RS         .collect::<Vec<_>>();
+//RS     for key in root_keys {
+//RS         let Some(effects) = solved.get_mut(&key) else {
+//RS             continue;
+//RS         };
+//RS         if !effect_set_has_root(effects, Effect::Panic) {
+//RS             continue;
+//RS         }
+//RS         let Some(site) = panic_site_for_budget(&key, summaries, &mut HashSet::new()) else {
+//RS             continue;
+//RS         };
+//RS         let site_alias = site.split_once("::").map(|(alias, _)| alias);
+//RS         if !site_alias.is_some_and(|alias| dependency_aliases.contains(alias))
+//RS             || panic_reaches_root(&key, summaries, &root_aliases, &mut HashSet::new())
+//RS         {
+//RS             continue;
+//RS         }
+//RS         effects.retain(|effect| effect_root(effect) != Effect::Panic.name());
+//RS     }
+//RS }
+//RS 
+//RS fn dependency_boundary_span(bundle: &ProgramBundle, dependency: &str) -> Option<Span> {
+//RS     bundle
+//RS         .modules
+//RS         .get(bundle.entry)?
+//RS         .imports
+//RS         .iter()
+//RS         .find_map(|import| match &import.kind {
+//RS             ImportKind::Module(name, span) if name == dependency => Some(*span),
+//RS             ImportKind::Unqualified {
+//RS                 module_alias,
+//RS                 module_alias_span,
+//RS                 ..
+//RS             } if module_alias == dependency => Some(*module_alias_span),
+//RS             _ => None,
+//RS         })
+//RS }
+//RS 
+//RS fn panic_site_for_budget(
+//RS     key: &str,
+//RS     summaries: &HashMap<String, EffectSummary>,
+//RS     seen: &mut HashSet<String>,
+//RS ) -> Option<String> {
+//RS     if !seen.insert(key.to_string()) {
+//RS         return None;
+//RS     }
+//RS     let summary = summaries.get(key)?;
+//RS     if summary.maximal
+//RS         || effect_set_has_root(&summary.direct, Effect::Panic)
+//RS         || summary.edges.contains("__jet_panic__")
+//RS     {
+//RS         return Some(key.to_string());
+//RS     }
+//RS     summary
+//RS         .edges
+//RS         .iter()
+//RS         .find_map(|callee| panic_site_for_budget(callee, summaries, seen))
+//RS }
+//RS 
+//RS fn panic_reaches_root(
+//RS     key: &str,
+//RS     summaries: &HashMap<String, EffectSummary>,
+//RS     root_aliases: &HashSet<String>,
+//RS     seen: &mut HashSet<String>,
+//RS ) -> bool {
+//RS     if !seen.insert(key.to_string()) {
+//RS         return false;
+//RS     }
+//RS     let Some(summary) = summaries.get(key) else {
+//RS         return false;
+//RS     };
+//RS     let is_root = key
+//RS         .split_once("::")
+//RS         .is_some_and(|(alias, _)| root_aliases.contains(alias));
+//RS     if is_root
+//RS         && (summary.maximal
+//RS             || effect_set_has_root(&summary.direct, Effect::Panic)
+//RS             || summary.edges.contains("__jet_panic__"))
+//RS     {
+//RS         return true;
+//RS     }
+//RS     summary
+//RS         .edges
+//RS         .iter()
+//RS         .any(|callee| panic_reaches_root(callee, summaries, root_aliases, seen))
+//RS }
+//RS 
+//RS 
+//RS /// Project the causal edges that survive the checker into the one report
+//RS /// batch. `E0104` is the call-owned root for the recoverable call shape that
+//RS /// can still produce a failure-domain report; `E0112` and other argument
+//RS /// diagnostics remain independent because fixing them does not necessarily
+//RS /// remove the caller's failure-domain mismatch.
+//RS fn attach_known_cause_links(diagnostics: &mut [Diagnostic]) {
+//RS     for index in 0..diagnostics.len() {
+//RS         let dependent = &diagnostics[index];
+//RS         if dependent.code != "E2404" || !dependent.cause.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let Some(span) = dependent.span else {
+//RS             continue;
+//RS         };
+//RS         let cause = diagnostics
+//RS             .iter()
+//RS             .enumerate()
+//RS             .find_map(|(candidate_index, candidate)| {
+//RS                 (candidate_index != index
+//RS                     && candidate.code == "E0104"
+//RS                     && candidate.span == Some(span))
+//RS                 .then(|| candidate.clone())
+//RS             });
+//RS         let Some(cause) = cause else {
+//RS             continue;
+//RS         };
+//RS         diagnostics[index] = dependent.clone().caused_by(&cause);
+//RS     }
+//RS }
+//RS 
+//RS /// D-STRUCT-PLANE1=A: loader and sema already resolve file/import targets into
+//RS /// `NameLedger`. Project those resolved edges into the same structure fact
+//RS /// shape; no engine needs to rediscover the module graph.
+//RS fn record_import_edge_facts(
+//RS     bundle: &ProgramBundle,
+//RS     ledger: &mut jet_foundation::Names::NameLedger,
+//RS ) {
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         let source = ledger
+//RS             .module_path(module_idx)
+//RS             .unwrap_or(&module.display)
+//RS             .to_string();
+//RS         for import in &module.imports {
+//RS             let Some(target_idx) = ledger.import_target(module_idx, import.span) else {
+//RS                 continue;
+//RS             };
+//RS             let Some(target) = ledger.module_path(target_idx).map(str::to_string) else {
+//RS                 continue;
+//RS             };
+//RS             if ledger.structure_facts().iter().any(|fact| {
+//RS                 fact.kind == jet_foundation::Names::StructureFactKind::ImportEdge
+//RS                     && fact.source == source
+//RS                     && fact.span == import.span
+//RS             }) {
+//RS                 continue;
+//RS             }
+//RS             ledger.record_structure_fact(jet_foundation::Names::StructureFact::new(
+//RS                 jet_foundation::Names::StructureFactKind::ImportEdge,
+//RS                 format!("{source} -> {target}"),
+//RS                 source.clone(),
+//RS                 import.span,
+//RS                 "resolved",
+//RS                 "resolved import edge",
+//RS                 None,
+//RS             ));
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0357 crates/jet-sema/src/Sema/Bundle/Pipeline/Completion.rs:1-1068
+

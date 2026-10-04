@@ -1,0 +1,12 @@
+use NumericConversion.[jet_numeric_checked_widen]
+// Rust: crates/jet-foundation/src/NumericConversion.rs:166
+#Test("checked_widen_accepts_exact_runtime_values_and_rejects_rounding") {
+    assert(jet_numeric_checked_widen(U64{9_007_199_254_740_992}, true, false) == Val(F64{9_007_199_254_740_992.0}))
+    assert(jet_numeric_checked_widen(U64{9_007_199_254_740_993}, true, false) == None)
+    assert(jet_numeric_checked_widen(I64{-9_007_199_254_740_992}.to_bits(), true, false) == Val(F64{-9_007_199_254_740_992.0}))
+    assert(jet_numeric_checked_widen(I64{-9_007_199_254_740_993}.to_bits(), true, false) == None)
+    assert(jet_numeric_checked_widen(U64{16_777_216}, false, true) == Val(F64{16_777_216.0}))
+    assert(jet_numeric_checked_widen(U64{16_777_217}, false, true) == None)
+    assert(jet_numeric_checked_widen(I64.min.to_bits(), true, false) != None)
+    assert(jet_numeric_checked_widen(U64.max, false, false) == None)
+}

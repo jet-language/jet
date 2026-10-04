@@ -1,0 +1,304 @@
+// Original package_outputs::typed_settings_preserves_tier_parity_and_cli_override,
+// computed_build_contribution_records_lock_and_matches_explain_golden, plus
+// Driver::seed_build_facts_from_stamp validation boundaries. Actual loader,
+// PackageModel, registration and Sema; no handwritten resolved setting facts.
+use jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileRequest, JetDriverCompileTarget, JetDriverHostFacts, JetDriverCompilerCheckInput, JetDriverCompilerCheckResult, JetDriverCheckScope, jet_driver_compiler_check, jet_driver_embedded_core_sources]
+use jet_eval.[JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse, jet_eval_default_config]
+use jet_foundation.[FactContribution, FactValue, ContributionLayer, SourceScope, TComptimeValue, GateSet, PolicyKey, gate_set_allow, fact_contribution_new, fact_contribution_with_reason, foundation_embedded_core]
+use jet_foundation.[BuildStamp]
+use jet_driver.[JetDriverOrganizationPolicySource]
+use core.files.runtime.kernel_path_components as settings_os_path
+
+fn settings_path(text: String) -> settings_os_path.OsPath Never! {
+    settings_os_path.from_text(text, settings_os_path.PathPlatform.Unix)
+}
+
+fn settings_request(manifest: String?, source: String) -> JetDriverCompileRequest Never! {
+    files := [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: settings_path("/settings/Main.jet"), relative_path: settings_path("Main.jet"), identity: "settings-source", source: source}}
+    if manifest == .Val(text) -> &files.push(JetDriverAuthorizedSourceFile{path: settings_path("/settings/package.jet"), relative_path: settings_path("package.jet"), identity: "settings-manifest", source: text})
+    core :: foundation_embedded_core()
+    JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: settings_path("/settings"), identity: "settings-root", allow_hardlinks: false, files: files, foreign_cache_files: []}}, entry_root_identity: "settings-root", entry_path: settings_path("/settings/Main.jet")},
+        canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core),
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("jet@0.1.0#settings-test"), build_stamp: Val(BuildStamp{git: Val("abc123"), dirty: true, toolchain: "0.1.0", at: "2026-10-03T00:00:00Z"})},
+        eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
+        record_store: None, trace_sink: None, mir_lint_every_pass: false,
+    }
+}
+fn settings_check(request: JetDriverCompileRequest, source: String) -> JetDriverCompilerCheckResult {
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: source})}) ?? panic("actual setting fixture parser failed")
+    jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request})
+}
+fn settings_clean(result: JetDriverCompilerCheckResult) Never! {
+    assert_eq(result.internal_problem, None)
+    assert(result.complete)
+    assert_eq(result.diagnostics.len(), 0)
+}
+fn settings_has_error(result: JetDriverCompilerCheckResult, code: String, what: String) Never! {
+    assert(!result.complete)
+    assert_eq(result.internal_problem, None)
+    loop diagnostic in result.diagnostics {
+        if diagnostic.code == code && diagnostic.what == what -> return
+    }
+    panic("missing exact {code}: {what}")
+}
+fn settings_manifest(settings: String, profiles: String) -> String Never! {
+    "name: \"typed_settings\"\nversion: \"0.1.0\"\nsettings: {{ {settings} }}\n{profiles}\n"
+}
+
+#Test("typed_settings_preserves_tier_parity_and_cli_override: real typed producer") {
+    source :: "fn enabled() -> Bool { return $build.settings.tls }\nfn slots() -> Int { return $build.settings.slots }\nfn endpoint() -> String { return $build.settings.endpoint }\nfn run() {}\n"
+    manifest :: settings_manifest("tls: Bool = true, slots: Int = 3, endpoint: String = \"https://api.example.com\"", "build: { release: { optimize: full, settings: { tls: false, slots: 7 } } }")
+    request := settings_request(Val(manifest), source)
+    request.profile = "release"
+    request.setting_overrides = [String:String]{"tls": "true"}
+    result :: settings_check(request, source)
+    settings_clean(result)
+    registration :: result.registration ?? panic("retained registration missing")
+    assert_eq(registration.build_facts.settings["tls"].value, TComptimeValue.Bool{value: true})
+    assert_eq(registration.build_facts.settings["slots"].value, TComptimeValue.Int{value: 7})
+    assert_eq(registration.build_facts.setting_provenance["tls"], [String]{"package.jet:settings.tls (default)", "package.jet:build.release.settings.tls", "command line:--set tls=true"})
+    assert_eq(registration.build_facts.contributions["Build.Profile"].value, FactValue.Text("release"))
+    assert_eq(registration.build_facts.contributions["Build.Stamp.Git"].value, FactValue.OptionalText(Val("abc123")))
+    assert_eq(registration.build_facts.contributions["Build.Stamp.Dirty"].value, FactValue.Bool(true))
+}
+#Test("inactive profile cannot hide undeclared setting") {
+    source :: "fn run() {}\n"
+    manifest :: settings_manifest("tls: Bool = true", "build: { inactive: { optimize: none, settings: { ghost: true } } }")
+    settings_has_error(settings_check(settings_request(Val(manifest), source), source), "E0302", "`$build.settings.ghost` is undeclared")
+}
+#Test("inactive profile cannot hide invalid Bool") {
+    source :: "fn run() {}\n"
+    manifest :: settings_manifest("tls: Bool = true", "build: { inactive: { optimize: none, settings: { tls: yes } } }")
+    settings_has_error(settings_check(settings_request(Val(manifest), source), source), "E0302", "setting `tls` cannot use `yes` as `Bool`")
+}
+#Test("undeclared typed read keeps original diagnostic") {
+    source :: "fn missing() -> Bool { return $build.settings.ghost }\nfn run() {}\n"
+    result :: settings_check(settings_request(Val(settings_manifest("tls: Bool = true", "")), source), source)
+    settings_has_error(result, "E0302", "`$build.settings.ghost` is undeclared")
+}
+#Test("no manifest refuses CLI settings") {
+    source :: "fn run() {}\n"
+    request := settings_request(None, source)
+    request.setting_overrides = [String:String]{"cli_only": "true"}
+    settings_has_error(settings_check(request, source), "E0302", "`$build.settings.cli_only` is undeclared")
+}
+#Test("signed i64 setting boundary and exact literal domain") {
+    source :: "fn minimum() -> Int { return $build.settings.minimum }\nfn run() {}\n"
+    manifest :: settings_manifest("minimum: Int = -9223372036854775808", "")
+    result :: settings_check(settings_request(Val(manifest), source), source)
+    settings_clean(result)
+    registration :: result.registration ?? panic("registration missing")
+    assert_eq(registration.build_facts.settings["minimum"].value, TComptimeValue.Int{value: -9223372036854775808})
+    invalids :: [String]{"9223372036854775808", "1_000", "1.0", "0x10"}
+    loop raw in invalids {
+        request := settings_request(Val(manifest), source)
+        request.setting_overrides = [String:String]{"minimum": raw}
+        expected :: "setting `minimum` cannot use `{raw}` as `Int`"
+        settings_has_error(settings_check(request, source), "E0302", expected)
+    }
+}
+#Test("fieldless enum setting folds typed value and rejects unknown variant") {
+    source :: "enum Mode { On, Off }\nfn mode() -> Mode { return $build.settings.mode }\nfn run() {}\n"
+    manifest :: settings_manifest("mode: Mode = .On", "")
+    result :: settings_check(settings_request(Val(manifest), source), source)
+    settings_clean(result)
+    registration :: result.registration ?? panic("registration missing")
+    assert_eq(registration.build_facts.settings["mode"].value, TComptimeValue.Enum{type_name: "Mode", variant: "On", args: []})
+    request := settings_request(Val(manifest), source)
+    request.setting_overrides = [String:String]{"mode": ".Missing"}
+    settings_has_error(settings_check(request, source), "E0302", "setting `mode` cannot use `.Missing` as `Mode`")
+}
+#Test("payload enum is not a fieldless setting type") {
+    source :: "enum Mode { On(Int), Off }\nfn run() {}\n"
+    manifest :: settings_manifest("mode: Mode = .Off", "")
+    settings_has_error(settings_check(settings_request(Val(manifest), source), source), "E0302", "setting `mode` cannot use `.Off` as `Mode`")
+}
+#Test("computed_build_contribution retains canonical writer and reason") {
+    source :: "fn slots() -> Int { return $build.settings.cache_slots }\nfn run() {}\n"
+    manifest :: settings_manifest("cache_slots: Int = 2", "")
+    request := settings_request(Val(manifest), source)
+    writer :: fact_contribution_with_reason(fact_contribution_new("Build.Settings.cache_slots", FactValue.Int(4), SourceScope.Function, ContributionLayer.Environment, "typed_settings::build"), "computed by fn build")
+    request.computed_setting_contributions = [FactContribution]{writer}
+    result :: settings_check(request, source)
+    settings_clean(result)
+    registration :: result.registration ?? panic("registration missing")
+    assert_eq(registration.build_facts.settings["cache_slots"].value, TComptimeValue.Int{value: 4})
+    assert_eq(registration.build_facts.setting_provenance["cache_slots"], [String]{"package.jet:settings.cache_slots (default)", "typed_settings::build (computed by fn build)"})
+    assert_eq(registration.build_facts.contributions["Build.Settings.cache_slots"].provenance[1], writer)
+}
+#Test("computed setting type is checked without textual coercion") {
+    source :: "fn run() {}\n"
+    request := settings_request(Val(settings_manifest("tls: Bool = true", "")), source)
+    request.computed_setting_contributions = [FactContribution]{fact_contribution_new("Build.Settings.tls", FactValue.Text("false"), SourceScope.Function, ContributionLayer.Environment, "typed_settings::build")}
+    settings_has_error(settings_check(request, source), "E0302", "setting `tls` cannot use `\"false\"` as `Bool`")
+}
+#Test("computed same-layer conflicts retain resolver diagnostic") {
+    source :: "fn run() {}\n"
+    request := settings_request(Val(settings_manifest("slots: Int = 2", "")), source)
+    request.computed_setting_contributions = [FactContribution]{fact_contribution_new("Build.Settings.slots", FactValue.Int(4), SourceScope.Function, ContributionLayer.Environment, "a"), fact_contribution_new("Build.Settings.slots", FactValue.Int(5), SourceScope.Function, ContributionLayer.Environment, "b")}
+    settings_has_error(settings_check(request, source), "E3521", "fact `Build.Settings.slots` has conflicting values at the environment layer")
+}
+#Test("compiled BuildPlan original provider witness remains an exact gate") {
+    source :: "fn build(b: BuildContext) -> BuildPlan {\n    b.contribute(\"cache_slots\", 4)\n    return b.plan()\n}\nfn run() { print($build.settings.cache_slots) }\n"
+    request := settings_request(Val("name: \"build_contribution_demo\"\nversion: \"0.1.0\"\nsettings: { cache_slots: Int = 1 }\nauthority: { holds: { allow: [IO] } }\n"), source)
+    request.check_scope = JetDriverCheckScope.Project
+    result :: settings_check(request, source)
+    assert(!result.complete)
+    assert_eq(result.internal_problem, Val("CP-BUILD-PREFLIGHT: compiled BuildPlan provider is not available"))
+}
+#Test("missing BuildStamp is internal provider refusal not invented provenance") {
+    source :: "fn run() {}\n"
+    request := settings_request(None, source)
+    request.host_facts.build_stamp = None
+    result :: settings_check(request, source)
+    assert(!result.complete)
+    assert_eq(result.internal_problem, Val("CP-POLICY-SETTINGS: the native host omitted its lock-authorized build stamp"))
+}
+
+#Test("Char and escaped String defaults keep exact typed values") {
+    source :: "fn letter() -> Char { return $build.settings.letter }\nfn text() -> String { return $build.settings.text }\nfn run() {}\n"
+    manifest :: settings_manifest("letter: Char = 'é', text: String = \"a\\nb\"", "")
+    result :: settings_check(settings_request(Val(manifest), source), source)
+    settings_clean(result)
+    registration :: result.registration ?? panic("registration missing")
+    assert_eq(registration.build_facts.settings["letter"].value, TComptimeValue.Char{value: 233})
+    assert_eq(registration.build_facts.settings["text"].value, TComptimeValue.String{value: "a\nb"})
+}
+#Test("folded setting is checked against actual expected type") {
+    source :: "fn wrong() -> Bool { return $build.settings.slots }\nfn run() {}\n"
+    result :: settings_check(settings_request(Val(settings_manifest("slots: Int = 3", "")), source), source)
+    assert(!result.complete)
+    assert_eq(result.internal_problem, None)
+    assert(result.diagnostics.len() > 0)
+}
+#Test("CLI wins over computed and profile with complete provenance") {
+    source :: "fn slots() -> Int { return $build.settings.slots }\nfn run() {}\n"
+    request := settings_request(Val(settings_manifest("slots: Int = 2", "build: { release: { optimize: full, settings: { slots: 3 } } }")), source)
+    request.profile = "release"
+    request.setting_overrides = [String:String]{"slots": "5"}
+    request.computed_setting_contributions = [FactContribution]{fact_contribution_new("Build.Settings.slots", FactValue.Int(4), SourceScope.Function, ContributionLayer.Environment, "computed")}
+    result :: settings_check(request, source)
+    settings_clean(result)
+    registration :: result.registration ?? panic("registration missing")
+    assert_eq(registration.build_facts.settings["slots"].value, TComptimeValue.Int{value: 5})
+    assert_eq(registration.build_facts.setting_provenance["slots"], [String]{"package.jet:settings.slots (default)", "package.jet:build.release.settings.slots", "computed", "command line:--set slots=5"})
+}
+#Test("computed writers cannot create undeclared settings or fixed leaves") {
+    source :: "fn run() {}\n"
+    paths :: [String]{"Build.Settings.ghost", "Build.Profile"}
+    loop path in paths {
+        request := settings_request(Val(settings_manifest("tls: Bool = true", "")), source)
+        request.computed_setting_contributions = [FactContribution]{fact_contribution_new(path, FactValue.Bool(true), SourceScope.Function, ContributionLayer.Environment, "computed")}
+        key :: if path == "Build.Settings.ghost" -> "ghost" else -> path
+        expected :: "`$build.settings.{key}` is undeclared"
+        settings_has_error(settings_check(request, source), "E0302", expected)
+    }
+}
+#Test("organization_gate_policy_refuses_each_audited_invocation_gate: package control") {
+    // Original CLI witness uses a configured organization document. This
+    // canonical package declaration control exercises the SAME retained policy
+    // resolver; the real organization provider witness remains separately owed.
+    keys :: [PolicyKey]{PolicyKey.Unsafe, PolicyKey.Impure, PolicyKey.Nondeterministic}
+    names :: [String]{"unsafe", "impure", "nondeterministic"}
+    markers :: [String]{"Unsafe", "Impure", "Nondeterministic"}
+    loop index in 0..<keys.len() {
+        marker :: markers[index]
+        name :: names[index]
+        source :: "fn run() {{ #{marker}(\"policy refusal\") {{}} }}\n"
+        manifest :: "name: \"policy\"\nversion: \"0.1.0\"\npolicy: {{ {name}: .Forbid }}\n"
+        request := settings_request(Val(manifest), source)
+        request.gates = gate_set_allow(keys[index])
+        expected :: "the `{name}` gate is denied by effective policy"
+        settings_has_error(settings_check(request, source), "E3415", expected)
+    }
+}
+
+#Test("organization_gate_policy_refuses_each_audited_invocation_gate: original raw document") {
+    keys :: [PolicyKey]{PolicyKey.Unsafe, PolicyKey.Impure, PolicyKey.Nondeterministic}
+    names :: [String]{"unsafe", "impure", "nondeterministic"}
+    markers :: [String]{"Unsafe", "Impure", "Nondeterministic"}
+    document :: JetDriverAuthorizedSourceFile{path: settings_path("/admin/org-policy.jet"), relative_path: settings_path("org-policy.jet"), identity: "organization-policy", source: "policy: { unsafe: .Forbid, impure: .Forbid, nondeterministic: .Forbid }\n"}
+    loop index in 0..<keys.len() {
+        marker :: markers[index]
+        name :: names[index]
+        source :: "fn run() {{ #{marker}(\"org refusal\") {{}} }}\n"
+        request := settings_request(None, source)
+        request.gates = gate_set_allow(keys[index])
+        request.host_facts.organization_policy = JetDriverOrganizationPolicySource.Loaded(document)
+        expected :: "the `{name}` gate is denied by effective policy"
+        settings_has_error(settings_check(request, source), "E3415", expected)
+    }
+}
+#Test("configured_organization_unsafe_policy_fails_closed_and_keeps_path") {
+    source :: "fn run() {}\n"
+    request := settings_request(None, source)
+    request.host_facts.organization_policy = JetDriverOrganizationPolicySource.Unreadable{path: "/admin/missing-policy.jet", detail: "No such file or directory"}
+    result :: settings_check(request, source)
+    settings_has_error(result, "E3109", "cannot read the configured organization gate policy")
+    diagnostic :: result.diagnostics[0]
+    assert_eq(diagnostic.source_path, Val("/admin/missing-policy.jet"))
+    assert_eq(diagnostic.why, "JET_ORG_UNSAFE_POLICY names `/admin/missing-policy.jet`, but it could not be read: No such file or directory")
+}
+#Test("organization_policy_document_is_exact_and_fails_closed: original malformed and wrong shape") {
+    source :: "fn run() {}\n"
+    documents :: [String]{"policy: { unsafe: .Obligations", "policy: { unsafe: .Obligations }\npackage: {}", "policy: {}", "policy: { explicit_units: true }"}
+    loop (index, document) in documents {
+        request := settings_request(None, source)
+        request.host_facts.organization_policy = JetDriverOrganizationPolicySource.Loaded(JetDriverAuthorizedSourceFile{path: settings_path("/admin/org-policy.jet"), relative_path: settings_path("org-policy.jet"), identity: "organization-policy", source: document})
+        what :: if index < 2 -> "the configured organization gate policy is malformed" else -> "the organization gate policy has the wrong shape"
+        settings_has_error(settings_check(request, source), "E3109", what)
+    }
+}
+#Test("configured organization policy without native reader stays internal gate") {
+    source :: "fn run() {}\n"
+    request := settings_request(None, source)
+    request.host_facts.organization_policy = JetDriverOrganizationPolicySource.MissingProvider("/admin/org-policy.jet")
+    result :: settings_check(request, source)
+    assert(!result.complete)
+    assert_eq(result.internal_problem, Val("CP-POLICY-SETTINGS: the native host omitted the configured organization policy `/admin/org-policy.jet`"))
+}
+
+#Test("invalid default is rejected before profiles or CLI can replace it") {
+    source :: "fn run() {}\n"
+    request := settings_request(Val(settings_manifest("tls: Bool = yes", "build: { release: { optimize: full, settings: { tls: true } } }")), source)
+    request.profile = "release"
+    request.setting_overrides = [String:String]{"tls": "true"}
+    settings_has_error(settings_check(request, source), "E0302", "setting `tls` cannot use `yes` as `Bool`")
+}
+#Test("manifest-less computed writers are refused, not silently dropped") {
+    source :: "fn run() {}\n"
+    request := settings_request(None, source)
+    request.computed_setting_contributions = [FactContribution]{fact_contribution_new("Build.Settings.ghost", FactValue.Bool(true), SourceScope.Function, ContributionLayer.Environment, "computed")}
+    settings_has_error(settings_check(request, source), "E0302", "`$build.settings.ghost` is undeclared")
+}
+
+// Original success witness, deliberately NOT converted into a passing refusal
+// test. CP-BUILD-PREFLIGHT compiled provider + lock/tier receipts remain gates.
+#Test("computed_build_contribution_records_lock_and_matches_explain_golden: original producer success") {
+    source :: "fn build(b: BuildContext) -> BuildPlan {\n    b.contribute(\"cache_slots\", 4)\n    return b.plan()\n}\nfn run() { print($build.settings.cache_slots) }\n"
+    request := settings_request(Val("name: \"build_contribution_demo\"\nversion: \"0.1.0\"\nsettings: { cache_slots: Int = 1 }\nauthority: { holds: { allow: [IO] } }\n"), source)
+    request.check_scope = JetDriverCheckScope.Project
+    result :: settings_check(request, source)
+    settings_clean(result)
+    registration :: result.registration ?? panic("real compiled BuildPlan must seed registration")
+    assert_eq(registration.build_facts.settings["cache_slots"].value, TComptimeValue.Int{value: 4})
+    assert_eq(registration.build_facts.setting_provenance["cache_slots"], [String]{"package.jet:settings.cache_slots (default)", "build_contribution_demo::build (computed by fn build)"})
+}
+
+// Original tests/generics.rs profile_fact witness: no handwritten prepared
+// facts or literal-substituted source; canonical module definition evaluation
+// must read exactly the same retained setting snapshot as normal Sema reads.
+#Test("generic module setting definition folds original direct and prepared paths") {
+    source :: "module cache<K>(capacity: Int) {\n    pub struct Buffer { items: [K#capacity] }\n    pub fn slots() -> Int -> capacity\n}\nPROFILE_SLOTS :: prep { $build.settings.cache_slots }\nmodule tuned :: cache<Int>($build.settings.cache_slots)\nmodule chained :: cache<Int>(PROFILE_SLOTS)\nfn run() { print(tuned.slots()) }\n"
+    manifest :: "name: \"profile_fact\"\nversion: \"0.1.0\"\nsettings: { cache_slots: Int = 1 }\nbuild: { compact: Build{ optimize: full, settings: { cache_slots: 2 } }, spacious: Build{ optimize: full, settings: { cache_slots: 5 } } }\n"
+    profiles :: [String]{"compact", "spacious"}
+    loop (index, profile) in profiles {
+        request := settings_request(Val(manifest), source)
+        request.profile = profile
+        result :: settings_check(request, source)
+        settings_clean(result)
+        registration :: result.registration ?? panic("profile fact registration missing")
+        assert_eq(registration.build_facts.settings["cache_slots"].value, TComptimeValue.Int{value: if index == 0 -> 2 else -> 5})
+    }
+}

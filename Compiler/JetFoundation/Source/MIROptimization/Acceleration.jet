@@ -1,0 +1,374 @@
+// Typed legality and D-ACCEL1 decisions; this owner never reads clocks or starts workers.
+use core.sys as acceleration_target_facts
+
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:10
+pub ACCELERATION_RECEIPT_TYPE_NAME :: "AccelerationDecision"
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:12
+pub ACCELERATION_RECEIPT_SECTION_PREFIX :: "jet.acceleration."
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:16
+pub ACCELERATION_RECEIPT_SCHEMA :: prep { "AccelerationDecision{TEXT_NUL}decision:(measurement: (bandwidth_floor_nanos: Int, floor_nanos: Int, items: Int, projected_serial_nanos: Int?, required_serial_nanos: Int?, sample_items: Int, sample_nanos: Int, spawn_nanos: Int), pin: String?, status: String, transform: String);function:String;loop_header:Int;source:(end: Int, start: Int);" }
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:20
+pub ACCELERATION_RECEIPT_SCHEMA_DIGEST :: "20e12f682eae102174b015d816a7170a9c6042b87ec67722cbee3bf3f0eae388"
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:24
+pub D_FRED_REDUCTION_LANES :: 8
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:27
+pub D_ACCEL_STATIC_FLOOR_ITEMS :: 1024
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:29
+pub D_ACCEL_CACHE_BLOCK_BYTES :: 64 * 1024
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:31
+pub D_ACCEL_REQUIRED_GAIN_NUMERATOR :: U64{2}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:32
+pub D_ACCEL_REQUIRED_GAIN_DENOMINATOR :: U64{1}
+
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:36
+// FixedReductionTree -> MIR/MIR.jet::MIRFixedReductionTree.
+impl MIRFixedReductionTree {
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:41
+    pub fn as_str(self) -> String Never! {
+        if self == { .AdjacentPairsThenRoot -> "((0+1)+(2+3))+((4+5)+(6+7))" }
+    }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:51
+// FixedReductionOrder -> MIR/MIR.jet::MIRFixedReductionOrder.
+impl MIRFixedReductionOrder {
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:58
+    pub fn canonical() -> MIRFixedReductionOrder Never! {
+        MIRFixedReductionOrder{lanes: D_FRED_REDUCTION_LANES, seed_lane: 0, tree: MIRFixedReductionTree.AdjacentPairsThenRoot}
+    }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:66
+    pub fn is_canonical(self) -> Bool Never! {
+        self.lanes == D_FRED_REDUCTION_LANES && self.seed_lane == 0 && self.tree == MIRFixedReductionTree.AdjacentPairsThenRoot
+    }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:72
+    pub fn lane_for(self, index: Int) -> Int? Never! {
+        if self.lanes == 0 -> None else -> Val(index % self.lanes)
+    }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:80
+    pub fn tree_name(self) -> String Never! { self.tree.as_str() }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:87
+pub D_FRED1_FIXED_ORDER :: prep { MIRFixedReductionOrder.canonical() }
+
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:93
+// AccelerationTransform -> MIR/MIR.jet::MIRAccelerationTransform.
+impl MIRAccelerationTransform {
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:99
+    pub fn as_str(self) -> String Never! {
+        if self == { .TransientColumnCopy -> "column-copy" .PooledParallelChunks -> "parallel" }
+    }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:110
+// AccelerationProof -> MIR/MIR.jet::MIRAccelerationProof.
+impl MIRAccelerationProof {
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:122
+    pub fn unavailable() -> MIRAccelerationProof Never! {
+        MIRAccelerationProof{source_proven: false, independent_iterations: false,
+            no_aliasing: false, no_cross_iteration_dependencies: false, no_early_exit: false,
+            effect_free_body: false, ownership_safe: false, failure_order_preserved: false}
+    }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:135
+    pub fn proves(self, transform: MIRAccelerationTransform) -> Bool Never! {
+        common :: self.source_proven && self.no_aliasing && self.no_cross_iteration_dependencies && self.no_early_exit && self.effect_free_body && self.ownership_safe && self.failure_order_preserved
+        if transform == { .TransientColumnCopy | .PooledParallelChunks -> common && self.independent_iterations }
+    }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:155
+// AccelerationWorkloadFacts -> MIR/MIR.jet::MIRAccelerationWorkloadFacts.
+impl MIRAccelerationWorkloadFacts {
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:161
+    pub fn none() -> MIRAccelerationWorkloadFacts Never! {
+        MIRAccelerationWorkloadFacts{nested_reuse: false, single_pass: false}
+    }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:168
+    pub fn column_copy_applicable(self) -> Bool Never! { self.nested_reuse && !self.single_pass }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:175
+// AccelerationPin -> CanonicalPass/AccelerationDebug.jet::AccelerationPin.
+impl AccelerationPin {
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:181
+    pub fn as_str(self) -> String Never! { if self == { .Scalar -> "#Scalar" .Local -> "#Local" } }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:192
+// AccelerationGateInput -> CanonicalPass/AccelerationDebug.jet::AccelerationGateInput.
+impl AccelerationGateInput {
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:210
+    pub fn deferred() -> AccelerationGateInput Never! {
+        AccelerationGateInput{items: 0, sample_items: 0, sample_nanos: U64{0},
+            spawn_nanos: U64{0}, bandwidth_floor_nanos: U64{0},
+            first_chunk_serial_timed: false, spawn_cost_once_per_process: false,
+            bandwidth_floor_measured: false, release_build: false, cross_mode_parity_proven: false,
+            pin: None, workload: MIRAccelerationWorkloadFacts.none(), proof: MIRAccelerationProof.unavailable()}
+    }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:230
+    pub fn default() -> AccelerationGateInput Never! { AccelerationGateInput.deferred() }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:238
+// AccelerationGateStatus -> CanonicalPass/AccelerationDebug.jet::AccelerationGateStatus.
+impl AccelerationGateStatus {
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:254
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .BelowStaticFloor -> "below-static-floor"
+            .Pinned(_) -> "pinned"
+            .NotReleaseBuild -> "not-release-build"
+            .CrossModeParityMissing -> "cross-mode-parity-missing"
+            .ColumnCopyNotApplicable -> "column-copy-not-applicable"
+            .ProofIncomplete -> "proof-incomplete"
+            .SampleNotTimed -> "sample-not-timed"
+            .SpawnCostNotMeasured -> "spawn-cost-not-measured"
+            .BandwidthFloorNotMeasured -> "bandwidth-floor-not-measured"
+            .InvalidMeasurement -> "invalid-measurement"
+            .ProjectedGainBelowThreshold -> "projected-gain-below-threshold"
+            .Selected -> "selected"
+        }
+    }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:271
+    pub fn is_selected(self) -> Bool Never! { self == AccelerationGateStatus.Selected }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:278
+// AccelerationMeasurement -> CanonicalPass/AccelerationDebug.jet::AccelerationMeasurement.
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:292
+// AccelerationDecision -> CanonicalPass/AccelerationDebug.jet::AccelerationDecision.
+impl AccelerationDecision {
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:299
+    pub fn selected(self) -> Bool Never! { self.status.is_selected() }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:308
+    pub fn to_canonical_json(self) -> CanonicalJSON Never! {
+        pin :: if self.status == { .Pinned(pin) -> CanonicalJSON.String(pin.as_str()) else -> CanonicalJSON.Null }
+        // Fixed unique sorted keys use the existing canonical Object carrier.
+        measurement :: CanonicalJSON.Object([CanonicalJSONField]{
+            CanonicalJSONField{key: "bandwidth_floor_nanos", value: acceleration_integer(Int.from_u64(self.measurement.bandwidth_floor_nanos))},
+            CanonicalJSONField{key: "floor_nanos", value: acceleration_integer(Int.from_u64(self.measurement.floor_nanos))},
+            CanonicalJSONField{key: "items", value: acceleration_integer(self.measurement.items)},
+            CanonicalJSONField{key: "projected_serial_nanos", value: acceleration_optional_integer(self.measurement.projected_serial_nanos)},
+            CanonicalJSONField{key: "required_serial_nanos", value: acceleration_optional_integer(self.measurement.required_serial_nanos)},
+            CanonicalJSONField{key: "sample_items", value: acceleration_integer(self.measurement.sample_items)},
+            CanonicalJSONField{key: "sample_nanos", value: acceleration_integer(Int.from_u64(self.measurement.sample_nanos))},
+            CanonicalJSONField{key: "spawn_nanos", value: acceleration_integer(Int.from_u64(self.measurement.spawn_nanos))},
+        })
+        CanonicalJSON.Object([CanonicalJSONField]{
+            CanonicalJSONField{key: "measurement", value: measurement},
+            CanonicalJSONField{key: "pin", value: pin},
+            CanonicalJSONField{key: "status", value: CanonicalJSON.String(self.status.as_str())},
+            CanonicalJSONField{key: "transform", value: CanonicalJSON.String(self.transform.as_str())},
+        })
+    }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:363
+    pub fn from_canonical_json(value: CanonicalJSON) -> AccelerationDecision Err! {
+        fields :: acceleration_object(value, "acceleration decision")
+        acceleration_require_fields(fields, "acceleration decision", [String]{"measurement", "pin", "status", "transform"})
+        transform_name :: acceleration_string(fields, "transform")
+        transform :: if transform_name == {
+            "column-copy" -> MIRAccelerationTransform.TransientColumnCopy
+            "parallel" -> MIRAccelerationTransform.PooledParallelChunks
+            else -> return Err("unknown acceleration transform `{transform_name}`")
+        }
+        pin :: if acceleration_field(fields, "pin") == {
+            None -> None
+            .Val(value) -> if value == { .Null -> None else -> Val(acceleration_pin(value)) }
+        }
+        status_name :: acceleration_string(fields, "status")
+        status :: if status_name == {
+            "below-static-floor" -> AccelerationGateStatus.BelowStaticFloor
+            "pinned" -> AccelerationGateStatus.Pinned{pin: pin ?? return Err("pinned acceleration decision is missing pin")}
+            "not-release-build" -> AccelerationGateStatus.NotReleaseBuild
+            "cross-mode-parity-missing" -> AccelerationGateStatus.CrossModeParityMissing
+            "column-copy-not-applicable" -> AccelerationGateStatus.ColumnCopyNotApplicable
+            "proof-incomplete" -> AccelerationGateStatus.ProofIncomplete
+            "sample-not-timed" -> AccelerationGateStatus.SampleNotTimed
+            "spawn-cost-not-measured" -> AccelerationGateStatus.SpawnCostNotMeasured
+            "bandwidth-floor-not-measured" -> AccelerationGateStatus.BandwidthFloorNotMeasured
+            "invalid-measurement" -> AccelerationGateStatus.InvalidMeasurement
+            "projected-gain-below-threshold" -> AccelerationGateStatus.ProjectedGainBelowThreshold
+            "selected" -> AccelerationGateStatus.Selected
+            else -> return Err("unknown acceleration gate status `{status_name}`")
+        }
+        if pin != None {
+            if status == { .Pinned(_) -> {} else -> return Err("un-pinned acceleration decision carries a pin") }
+        }
+        measurement_value :: acceleration_field(fields, "measurement") ?? return Err("acceleration decision is missing measurement")
+        measurement :: acceleration_object(measurement_value, "acceleration measurement")
+        acceleration_require_fields(measurement, "acceleration measurement", [String]{
+            "bandwidth_floor_nanos", "floor_nanos", "items", "projected_serial_nanos",
+            "required_serial_nanos", "sample_items", "sample_nanos", "spawn_nanos"})
+        Ok(AccelerationDecision{transform: transform, status: status,
+            measurement: AccelerationMeasurement{
+                bandwidth_floor_nanos: acceleration_u64(measurement, "bandwidth_floor_nanos"),
+                floor_nanos: acceleration_u64(measurement, "floor_nanos"),
+                items: acceleration_usize(measurement, "items"),
+                projected_serial_nanos: acceleration_optional_u64(measurement, "projected_serial_nanos"),
+                required_serial_nanos: acceleration_optional_u64(measurement, "required_serial_nanos"),
+                sample_items: acceleration_usize(measurement, "sample_items"),
+                sample_nanos: acceleration_u64(measurement, "sample_nanos"),
+                spawn_nanos: acceleration_u64(measurement, "spawn_nanos"),
+            }})
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:445
+fn acceleration_integer(value: Int) -> CanonicalJSON Never! {
+    if canonical_json_integer("{value}") == { .Ok(value) -> value .Err(_) -> panic("acceleration integer is canonical") }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:449
+fn acceleration_optional_integer(value: U64?) -> CanonicalJSON Never! {
+    if value == { .Val(value) -> acceleration_integer(Int.from_u64(value)) None -> CanonicalJSON.Null }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:455
+fn acceleration_object(value: CanonicalJSON, label: String) -> [CanonicalJSONField] Err! {
+    if value == { .Object(fields) -> Ok(fields) else -> Err("{label} must be a canonical object") }
+}
+// CanonicalJSON's sorted field carrier provides the same logarithmic lookup as
+// Rust's BTreeMap without copying the complete value or building a second map.
+fn acceleration_field(fields: [CanonicalJSONField], key: String) -> CanonicalJSON? Never! {
+    low := 0
+    high := fields.len()
+    loop low < high {
+        middle :: low + (high - low) /% 2
+        if fields[middle].key < key -> low = middle + 1 else -> high = middle
+    }
+    if low < fields.len() && fields[low].key == key -> Val(fields[low].value) else -> None
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:465
+fn acceleration_require_fields(fields: [CanonicalJSONField], label: String, keys: [String]) Err! {
+    if fields.len() != keys.len() -> return Err("{label} has missing or unknown fields")
+    loop key in keys {
+        if acceleration_field(fields, key) == None -> return Err("{label} has missing or unknown fields")
+    }
+    Ok()
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:476
+fn acceleration_string(fields: [CanonicalJSONField], key: String) -> String Err! {
+    value :: acceleration_field(fields, key) ?? return Err("acceleration field `{key}` is missing")
+    if value == { .String(value) -> Ok(value) else -> Err("acceleration field `{key}` must be a string") }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:487
+fn acceleration_pin(value: CanonicalJSON) -> AccelerationPin Err! {
+    if value == {
+        .Null -> Err("pinned acceleration decision is missing pin")
+        .String(value) -> if value == {
+            "#Scalar" -> Ok(AccelerationPin.Scalar)
+            "#Local" -> Ok(AccelerationPin.Local)
+            else -> Err("unknown acceleration pin `{value}`")
+        }
+        else -> Err("acceleration field `pin` must be a string or null")
+    }
+}
+// Exact Rust unsigned decimal parser domain; optional '+' is accepted, '-' and
+// whitespace are not. U64 overflow is checked before each multiply/add.
+fn acceleration_parse_unsigned(text: String, maximum: U64, key: String) -> U64 Err! {
+    bytes :: text.bytes()
+    start :: if bytes.len() > 0 && bytes[0] == U8{43} -> 1 else -> 0
+    if start == bytes.len() -> return Err("acceleration field `{key}` is out of range")
+    value := U64{0}
+    loop index in start..<bytes.len() {
+        byte :: bytes[index]
+        if byte < U8{48} || byte > U8{57} -> return Err("acceleration field `{key}` is out of range")
+        digit :: U64.from_u8(byte - U8{48})
+        if digit > maximum || value > (maximum - digit) / U64{10} -> return Err("acceleration field `{key}` is out of range")
+        value = value * U64{10} + digit
+    }
+    Ok(value)
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:499
+fn acceleration_u64(fields: [CanonicalJSONField], key: String) -> U64 Err! {
+    value :: acceleration_field(fields, key) ?? return Err("acceleration field `{key}` is missing")
+    if value == {
+        .Integer(text) -> acceleration_parse_unsigned(text, U64{0xffffffffffffffff}, key)
+        else -> Err("acceleration field `{key}` must be an integer")
+    }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:512
+fn acceleration_usize(fields: [CanonicalJSONField], key: String) -> Int Err! {
+    value :: acceleration_field(fields, key) ?? return Err("acceleration field `{key}` is missing")
+    if value == {
+        .Integer(text) -> {
+            // GATE #4483: execution target usize width, never host assumptions.
+            Ok(Int.from_u64(acceleration_parse_unsigned(text, acceleration_target_facts.usize_max(), key)))
+        }
+        else -> Err("acceleration field `{key}` must be an integer")
+    }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:525
+fn acceleration_optional_u64(fields: [CanonicalJSONField], key: String) -> U64? Err! {
+    value :: acceleration_field(fields, key) ?? return Err("acceleration field `{key}` is missing")
+    if value == {
+        .Null -> Ok(None)
+        .Integer(text) -> Ok(Val(acceleration_parse_unsigned(text, U64{0xffffffffffffffff}, key)))
+        else -> Err("acceleration field `{key}` must be an integer or null")
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:543
+pub struct AccelerationGate {
+    pub static_floor_items: Int
+    pub cache_block_bytes: Int
+    pub required_gain_numerator: U64
+    pub required_gain_denominator: U64
+}
+impl AccelerationGate {
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:551
+    pub fn d_accel1() -> AccelerationGate Never! {
+        AccelerationGate{static_floor_items: D_ACCEL_STATIC_FLOOR_ITEMS,
+            cache_block_bytes: D_ACCEL_CACHE_BLOCK_BYTES,
+            required_gain_numerator: D_ACCEL_REQUIRED_GAIN_NUMERATOR,
+            required_gain_denominator: D_ACCEL_REQUIRED_GAIN_DENOMINATOR}
+    }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:560
+    pub fn should_measure(self, items: Int) -> Bool Never! { items > self.static_floor_items }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:564
+    pub fn evaluate(self, transform: MIRAccelerationTransform, input: AccelerationGateInput) -> AccelerationDecision Never! {
+        measurement :: self.measurement(input)
+        status :: if {
+            input.items <= self.static_floor_items -> AccelerationGateStatus.BelowStaticFloor
+            input.pin != None -> AccelerationGateStatus.Pinned{pin: input.pin ?? panic("pin was present")}
+            !input.release_build -> AccelerationGateStatus.NotReleaseBuild
+            !input.cross_mode_parity_proven -> AccelerationGateStatus.CrossModeParityMissing
+            transform == MIRAccelerationTransform.TransientColumnCopy && !input.workload.column_copy_applicable() -> AccelerationGateStatus.ColumnCopyNotApplicable
+            !input.proof.proves(transform) -> AccelerationGateStatus.ProofIncomplete
+            !input.first_chunk_serial_timed -> AccelerationGateStatus.SampleNotTimed
+            !input.spawn_cost_once_per_process -> AccelerationGateStatus.SpawnCostNotMeasured
+            !input.bandwidth_floor_measured -> AccelerationGateStatus.BandwidthFloorNotMeasured
+            input.sample_items == 0 || input.sample_items > input.items || input.sample_nanos == U64{0} || input.spawn_nanos == U64{0} || input.bandwidth_floor_nanos == U64{0} || self.required_gain_numerator == U64{0} || self.required_gain_denominator == U64{0} -> AccelerationGateStatus.InvalidMeasurement
+            measurement.projected_serial_nanos == None || measurement.required_serial_nanos == None -> AccelerationGateStatus.InvalidMeasurement
+            (measurement.projected_serial_nanos ?? U64{0}) < (measurement.required_serial_nanos ?? U64{0}) -> AccelerationGateStatus.ProjectedGainBelowThreshold
+            else -> AccelerationGateStatus.Selected
+        }
+        decision :: AccelerationDecision{transform: transform, status: status, measurement: measurement}
+        // This existing typed producer preserves the exact CanonicalPass enabled
+        // branch, input/output Debug payloads, identities and checked premises.
+        canonical_pass_record_acceleration(input, decision)
+        decision
+    }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:630
+    fn measurement(self, input: AccelerationGateInput) -> AccelerationMeasurement Never! {
+        floor_nanos :: if input.spawn_nanos > input.bandwidth_floor_nanos -> input.spawn_nanos else -> input.bandwidth_floor_nanos
+        items :: U64.from_int(input.items)
+        sample_items :: U64.from_int(input.sample_items)
+        projected_serial_nanos :: if items == {
+            .Val(items) -> if sample_items == {
+                .Val(count) -> if count != U64{0} -> acceleration_project(input.sample_nanos, items, count) else -> None
+                None -> None
+            }
+            None -> None
+        }
+        required_serial_nanos :: if self.required_gain_denominator == U64{0} -> None
+            else -> acceleration_project(floor_nanos, self.required_gain_numerator, self.required_gain_denominator)
+        AccelerationMeasurement{items: input.items, sample_items: input.sample_items,
+            sample_nanos: input.sample_nanos, spawn_nanos: input.spawn_nanos,
+            bandwidth_floor_nanos: input.bandwidth_floor_nanos, floor_nanos: floor_nanos,
+            projected_serial_nanos: projected_serial_nanos, required_serial_nanos: required_serial_nanos}
+    }
+    // Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:667
+    pub fn default() -> AccelerationGate Never! { AccelerationGate.d_accel1() }
+}
+// Rust: crates/jet-foundation/src/MIROptimization/Acceleration.rs:638-651
+fn acceleration_project(value: U64, factor: U64, divisor: U64) -> U64? Never! {
+    maximum :: U64{0xffffffffffffffff}
+    if factor != U64{0} && value > maximum / factor -> return None
+    product :: value * factor
+    rounding :: divisor - U64{1}
+    if product > maximum - rounding -> return None
+    Val((product + rounding) / divisor)
+}
+// #4494/#4499/#4409 are not applicable: supplied numeric facts only, no clock,
+// worker, allocation primitive, composite map key or IO operation in Rust 1-670.

@@ -1,0 +1,1154 @@
+// PORT-PENDING 1077 tests-ice-regressions-module-group: tests/ice_regressions.rs:1-480
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Regression battery for four codegen ICEs (I2/I3 violations) where the
+//RS //! front end emitted Rust that rustc rejected instead of compiling correct
+//RS //! code. Each case must pass the front end and — when rustc is available —
+//RS //! build (rustc accepting the output is the whole point: a rejection here is
+//RS //! a P0 front-end soundness bug, invariant I2).
+//RS //!
+//RS //! B1 — `JSON.Text(x)` on a borrowed (`view`) parameter moved out of the
+//RS //!      borrow; sema must insert a clone.
+//RS //! B2 — field access on a core struct (`ProcessResult.code`) mangled the field
+//RS //!      name to `__jet_code`; the core struct has unprefixed fields.
+//RS //! B3 — `.get(k)` on a `Map` bound from an `Object(root)` pattern lowered to
+//RS //!      list indexing; the binding must keep its `Map` type.
+//RS //! B4 — `for k, v in recv.field { … }` parsed `recv.field { … }` as a struct
+//RS //!      literal instead of a loop body.
+//RS //! B5 — `buf[i] = x` on a fixed-size `[T#N]` array left `IndexKind` at its
+//RS //!      `Unknown` default (sema's write-side match only knew `List`/`Map`/
+//RS //!      `User`, unlike the read-side `infer_index`); the TIR subset gate
+//RS //!      excludes any `Unknown`-kind index assign, so codegen (TIR is the
+//RS //!      only path, R7) panicked with an I2 ICE instead of emitting code.
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS use common::have_rustc;
+//RS 
+//RS /// Front-end-compile `src`, then (when rustc is present) build the generated
+//RS /// Rust, asserting it is accepted. `name` only labels temp files / failures.
+//RS /// Goes through `compile_with_path` (from a real temp file) so `use core.*`
+//RS /// core imports resolve, exactly like `jet run`.
+//RS fn assert_compiles(name: &str, src: &str) {
+//RS     let dir = std::env::temp_dir().join(format!("jet_ice_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "{name}: front end rejected a valid program:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     let user_rust = common::strip_vetted_prelude_modules(&out.rust);
+//RS     assert!(!user_rust.contains("unsafe"), "{name}: invariant I1");
+//RS 
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping build for {name}");
+//RS         return;
+//RS     }
+//RS     let rs = dir.join(format!("jet_ice_{name}.rs"));
+//RS     let bin = dir.join(format!("jet_ice_{name}"));
+//RS     fs::write(&rs, &out.rust).unwrap();
+//RS     let res = Command::new("rustc")
+//RS         .args(["--edition", "2021"])
+//RS         .arg(&rs)
+//RS         .arg("-o")
+//RS         .arg(&bin)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         res.status.success(),
+//RS         "I2 violated: rustc rejected generated code for {name} — this is a jet bug:\n{}",
+//RS         String::from_utf8_lossy(&res.stderr)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn b1_json_text_clones_borrowed_view_param() {
+//RS     assert_compiles(
+//RS         "b1_json_text_view",
+//RS         r#"
+//RS use core.encoding.json as json
+//RS fn wrap(x: String) -[]> String {
+//RS     j :: JSON.Text(~x)
+//RS     return json.to_string(j)
+//RS }
+//RS fn run() {
+//RS     print(wrap("hi"))
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn b2_std_struct_field_uses_plain_name() {
+//RS     assert_compiles(
+//RS         "b2_process_result_field",
+//RS         r#"
+//RS use core.process as process
+//RS fn run() {
+//RS     result :: process.run(["echo", "hi"]) ?? panic("run failed")
+//RS     print(result.code)
+//RS     print(result.output)
+//RS     print(result.errors)
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn b3_map_get_through_object_pattern() {
+//RS     assert_compiles(
+//RS         "b3_map_get_object_pattern",
+//RS         r#"
+//RS use core.encoding.json as json
+//RS fn run() {
+//RS     data :: json.parse("{{\"a\":1}}") ?? panic("bad")
+//RS     if data == .Object(root) {
+//RS         v :: root.get("a") ?? JSON.Null
+//RS         print(json.to_string(v))
+//RS     }
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn b4_for_in_field_subject_parses_body_not_struct_lit() {
+//RS     assert_compiles(
+//RS         "b4_for_field_subject",
+//RS         r#"
+//RS struct Holder {
+//RS     items: [String:Int]
+//RS }
+//RS fn run() {
+//RS     h := Holder{ items: [] }
+//RS     h.items["x"] = 1
+//RS     loop (k, v) in h.items {
+//RS         print(k)
+//RS         print(v)
+//RS     }
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn b5_fixed_array_index_assign() {
+//RS     assert_compiles(
+//RS         "b5_fixed_array_index_assign",
+//RS         r#"
+//RS fn run() {
+//RS     buf := [Int#3]{ 1, 2, 3 }
+//RS     i := 1
+//RS     buf[i] = 99
+//RS     print(buf[0])
+//RS     print(buf[1])
+//RS     print(buf[2])
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS /// D-EPPAYLOAD1: an OWNED LOCAL moved into an enum-payload construction, then
+//RS /// read again afterward, used to move it for real in the generated Rust
+//RS /// (`__jet_Wrapped::__jet_Value(__jet_s)`) with no jet-level diagnostic — the
+//RS /// later `print("{s}")` reached rustc as a raw, unreported E0382. Sema now
+//RS /// auto-clones an owning-position bare ident that is still live after the
+//RS /// construction (the same rule `clone_borrowed_struct_field_value` already
+//RS /// applied to a *borrowed-param* struct field, now widened to owned locals
+//RS /// and threaded through enum-payload construction too).
+//RS #[test]
+//RS fn b6_enum_payload_clones_owned_local_still_live() {
+//RS     assert_compiles(
+//RS         "b6_enum_payload_owned_local",
+//RS         r#"
+//RS enum Wrapped {
+//RS     Value(String)
+//RS }
+//RS fn run() {
+//RS     s := "hi"
+//RS     w := Wrapped.Value(s)
+//RS     print("{s}")
+//RS     print(w == Wrapped.Value("hi"))
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS /// The analogous STRUCT-FIELD case: an owned local moved into a struct
+//RS /// literal field, then read again — the exact same gap, now closed by the
+//RS /// same widened `clone_borrowed_struct_field_value` check.
+//RS #[test]
+//RS fn b7_struct_field_clones_owned_local_still_live() {
+//RS     assert_compiles(
+//RS         "b7_struct_field_owned_local",
+//RS         r#"
+//RS struct Holder {
+//RS     payload: String
+//RS }
+//RS fn run() {
+//RS     s := "hi"
+//RS     h := Holder{ payload: s }
+//RS     print("{s}")
+//RS     print(h.payload)
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn b8_value_if_fallible_arms_keep_one_value_type() {
+//RS     assert_compiles(
+//RS         "b8_value_if_bool_never",
+//RS         r#"
+//RS fn next(value: DataTree) -> Bool Never! { return true }
+//RS fn value_if_bool_never(value: DataTree) -> Bool Never! {
+//RS     return if value == {
+//RS         .Null -> false
+//RS         else -> next(~value)
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(value_if_bool_never(DataTree.Null))
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_compiles(
+//RS         "b8_value_if_string_err",
+//RS         r#"
+//RS fn next(value: DataTree) -> String { return "next" }
+//RS fn value_if_string_err(value: DataTree) -> String {
+//RS     return if value == {
+//RS         .Null -> "null"
+//RS         else -> next(~value)
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(value_if_string_err(DataTree.Null))
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_compiles(
+//RS         "b8_value_if_list_err",
+//RS         r#"
+//RS fn next(value: DataTree) -> [String] { return [String]{} }
+//RS fn value_if_list_err(value: DataTree) -> [String] {
+//RS     empty := [String]{}
+//RS     return if value == {
+//RS         .Text(text) -> next(DataTree.Text(~text))
+//RS         else -> empty
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(value_if_list_err(DataTree.Null))
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_compiles(
+//RS         "b8_value_if_comptime_method_fallback",
+//RS         r#"
+//RS fn command_action(argv: [Int]) -> Int Never! {
+//RS     return argv.get(0) ?? 1
+//RS }
+//RS ACTION :: prep { command_action([0]) }
+//RS fn run() {
+//RS     print(ACTION)
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn b6_generated_trait_protocol_returns_are_raw() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_ice_b6_protocol_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("b6_generated_trait_protocol.jet");
+//RS     let source = r#"
+//RS use core.encoding.json as json
+//RS 
+//RS #CLI
+//RS struct Args {
+//RS     #Doc("count") count: Int{1}
+//RS }
+//RS 
+//RS struct Pair {
+//RS     left: Int
+//RS     right: Int
+//RS }
+//RS 
+//RS enum Mark {
+//RS     Low
+//RS     High
+//RS }
+//RS 
+//RS #Codable
+//RS struct Envelope<T> {
+//RS     value: T
+//RS }
+//RS 
+//RS fn run(args: Args) {
+//RS     pair :: Pair{left: args.count, right: 2}
+//RS     other :: Pair{left: 2, right: 3}
+//RS     print(pair == other)
+//RS     print(pair < other)
+//RS     print(Mark.Low == Mark.Low)
+//RS     wire :: json.to_string(Envelope<Int>{value: args.count})
+//RS     decoded :: json.decode<Envelope<Int>>(wire) ?? panic("decode")
+//RS     print(decoded.value)
+//RS }
+//RS "#;
+//RS     fs::write(&path, source).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "b6_generated_trait_protocol_returns_are_raw: front end rejected a valid program:\n{}",
+//RS             jet::render_diagnostics(&shown, source, &diags)
+//RS         )
+//RS     });
+//RS     let rust = common::strip_vetted_prelude_modules(&out.rust);
+//RS 
+//RS     for (trait_name, method_name, return_type) in [
+//RS         ("__jet_Equatable", "equal", "bool"),
+//RS         ("__jet_Comparable", "compare", "__jet_Ordering"),
+//RS         ("__jet_Encode", "jet_encode", "jet_std::DataTree"),
+//RS     ] {
+//RS         let marker = format!("{trait_name} for __jet_");
+//RS         let mut found = false;
+//RS         let mut search_from = 0;
+//RS         while let Some(relative) = rust[search_from..].find(&marker) {
+//RS             let hit = search_from + relative;
+//RS             // Generic impl headers are `impl<T...>`, so match the shared prefix.
+//RS             let start = rust[..hit]
+//RS                 .rfind("\nimpl")
+//RS                 .map(|index| index + 1)
+//RS                 .unwrap_or(0);
+//RS             let block = &rust[start..];
+//RS             let end = block.find("\n}\n").unwrap_or(block.len());
+//RS             let block = &block[..end];
+//RS             let signature = block
+//RS                 .lines()
+//RS                 .find(|line| line.contains(&format!("fn {method_name}(")))
+//RS                 .unwrap_or_else(|| panic!("missing {trait_name}.{method_name} in:\n{block}"));
+//RS             assert!(
+//RS                 signature.contains(&format!(" -> {return_type} {{")),
+//RS                 "{trait_name}.{method_name} has wrong ABI: {signature}"
+//RS             );
+//RS             assert!(
+//RS                 !block.contains("return Ok("),
+//RS                 "{trait_name}.{method_name} wraps its raw protocol return:\n{block}"
+//RS             );
+//RS             found = true;
+//RS             search_from = start + end;
+//RS         }
+//RS         assert!(found, "missing generated {trait_name} implementation");
+//RS     }
+//RS     assert!(
+//RS         rust.contains("__jet_Encode for __jet_Envelope<"),
+//RS         "generic #Codable witness did not emit its encode implementation"
+//RS     );
+//RS     assert!(
+//RS         rust.contains("fn jet_decode(") && rust.contains("-> Result<"),
+//RS         "generated decode lost its declared Result ABI"
+//RS     );
+//RS     assert!(
+//RS         !rust.contains("unsafe"),
+//RS         "b6_generated_trait_protocol_returns_are_raw: invariant I1"
+//RS     );
+//RS 
+//RS     if have_rustc() {
+//RS         let rs = dir.join("b6_generated_trait_protocol.rs");
+//RS         let bin = dir.join("b6_generated_trait_protocol");
+//RS         fs::write(&rs, &out.rust).unwrap();
+//RS         let res = Command::new("rustc")
+//RS             .args(["--edition", "2021"])
+//RS             .arg(&rs)
+//RS             .arg("-o")
+//RS             .arg(&bin)
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             res.status.success(),
+//RS             "I2 violated: rustc rejected generated code for b6_generated_trait_protocol_returns_are_raw:\n{}",
+//RS             String::from_utf8_lossy(&res.stderr)
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn b9_core_nominal_values_have_clone_display_and_assignment_support() {
+//RS     assert_compiles(
+//RS         "b9_core_nominal_values",
+//RS         include_str!("ice_regressions/core_nominal_values.jet"),
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn b10_precise_numeric_methods_on_struct_fields() {
+//RS     assert_compiles(
+//RS         "b10_decimal_field_methods",
+//RS         include_str!("ice_regressions/decimal_field_methods.jet"),
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn b11_shared_typed_empty_map_keeps_payload_type() {
+//RS     assert_compiles(
+//RS         "b11_shared_typed_empty_map",
+//RS         include_str!("ice_regressions/shared_typed_empty_map.jet"),
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn b12_c_module_import_keeps_plain_c_return() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_ice_c_module_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let native = dir.join("native");
+//RS     fs::create_dir_all(&native).unwrap();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"c_module_plain_return\"\nversion: \"0.1.0\"\ndeps: { answer: c@\"./native\" }\n",
+//RS     )
+//RS     .unwrap();
+//RS     assert!(
+//RS         Command::new("ar")
+//RS             .args(["rcs"])
+//RS             .arg(native.join("libanswer.a"))
+//RS             .status()
+//RS             .unwrap()
+//RS             .success(),
+//RS         "C-module fixture needs an archive for its declared local dependency"
+//RS     );
+//RS     let path = dir.join("c_module_import_plain_return.jet");
+//RS     let source = include_str!("ice_regressions/c_module_import_plain_return.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let diagnostics = jet::check_with_path(&shown);
+//RS     assert!(
+//RS         diagnostics.is_empty(),
+//RS         "b12_c_module_import_keeps_plain_c_return: `jet check` rejected fixture:\n{}",
+//RS         jet::render_diagnostics(&shown, source, &diagnostics)
+//RS     );
+//RS     let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "b12_c_module_import_keeps_plain_c_return: compile rejected fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, source, &diags)
+//RS         )
+//RS     });
+//RS     let run = out
+//RS         .rust
+//RS         .split("pub fn __jet_run()")
+//RS         .nth(1)
+//RS         .expect("generated run function");
+//RS     assert!(
+//RS         run.contains("__jet___c_answer::__jet_value()"),
+//RS         "C-module call missing from generated run:\n{run}"
+//RS     );
+//RS     assert!(
+//RS         !run.contains("jet_trace_err(__jet___c_answer::__jet_value()"),
+//RS         "plain C-module return acquired a hidden Result trace wrapper:\n{run}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn b13_c_bridge_call_keeps_declared_return() {
+//RS     let source = include_str!("../Examples/features/lowlevel/cbind/run.jet");
+//RS     let shown = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/lowlevel/cbind/run.jet");
+//RS     let shown = shown.to_string_lossy();
+//RS     let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "b13_c_bridge_call_keeps_declared_return: compile rejected fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, source, &diags)
+//RS         )
+//RS     });
+//RS     let run = out
+//RS         .rust
+//RS         .split("pub fn __jet_run()")
+//RS         .nth(1)
+//RS         .expect("generated run function");
+//RS     assert!(
+//RS         run.contains("|| jet_std::jet_int_from_i64("),
+//RS         "C bridge call did not retain its declared integer return:\n{run}"
+//RS     );
+//RS     assert!(
+//RS         !run.contains("|| Ok::<_, JetErr>(jet_std::jet_int_from_i64("),
+//RS         "C bridge call acquired the callable Result carrier:\n{run}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1077 tests/ice_regressions.rs:1-480
+
+// PORT-PENDING 1077 tests-ice-regressions-module-group: tests/ice_report_codegen_rejection.rs:1-158
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #2276: a rustc rejection of generated Rust is an ICE, not a user
+//RS //! diagnostic. The debug-only self-test seam makes real rustc reject the
+//RS //! private input while the shared generated source remains attachable.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "cli_parts/support.rs"]
+//RS mod cli_support;
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS #[test]
+//RS fn generated_rust_rejection_is_a_branded_ice_and_preserves_backend_evidence() {
+//RS     let project = common::Scratch::new("ice-generated-rust-rejection");
+//RS     let source = format!(
+//RS         "fn run() {{\n    print(\"rejection-{}\")\n}}\n",
+//RS         std::process::id()
+//RS     );
+//RS     fs::write(project.join("main.jet"), &source).unwrap();
+//RS 
+//RS     // Dev profiles build through Cranelift and generate no Rust (#3953);
+//RS     // `ci` is a rustc profile, so rustc sees the generated source.
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["build", "--profile=ci", "--verbose", "main.jet"])
+//RS         .current_dir(&project.path)
+//RS         .env("JET_ICE_RUSTC_REJECTION_SELF_TEST", "1")
+//RS         .env("JET_PROVE_FRESH_TEST", "1")
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("jet build should start");
+//RS 
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(101),
+//RS         "generated-Rust rejection must exit as an ICE:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS 
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(
+//RS         stderr.contains("internal compiler error:"),
+//RS         "backend rejection must remain an internal compiler error:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains(project.join(".jet/build/main.rs").to_string_lossy().as_ref()),
+//RS         "report must identify the preserved generated source:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("JET_RUSTC_REJECTION_SENTINEL"),
+//RS         "report must retain the first backend error:\n{stderr}"
+//RS     );
+//RS 
+//RS     assert!(project.join(".jet/build/main.rs").is_file());
+//RS     let log_path = project.join(".jet/build/main.rustc.log");
+//RS     assert!(
+//RS         stderr.contains(log_path.to_string_lossy().as_ref()),
+//RS         "report must identify the complete backend log:\n{stderr}"
+//RS     );
+//RS     let log = fs::read_to_string(&log_path).expect("backend stderr must survive the ICE");
+//RS     assert!(
+//RS         log.contains("JET_RUSTC_REJECTION_SENTINEL"),
+//RS         "persisted backend stderr lost the first rejection:\n{log}"
+//RS     );
+//RS     assert!(
+//RS         log.contains("JET_RUSTC_REJECTION_SECOND_SENTINEL"),
+//RS         "persisted backend stderr lost the second rejection:\n{log}"
+//RS     );
+//RS 
+//RS     let output_text = format!("{}{}", String::from_utf8_lossy(&output.stdout), stderr);
+//RS     assert!(
+//RS         output_text.contains("[build] rustc error:\nerror: JET_RUSTC_REJECTION_SENTINEL"),
+//RS         "verbose build must echo the first backend error:\n{output_text}"
+//RS     );
+//RS     assert!(
+//RS         !output_text.contains("JET_RUSTC_REJECTION_SECOND_SENTINEL"),
+//RS         "verbose output must exclude later backend errors:\n{output_text}"
+//RS     );
+//RS     assert!(
+//RS         !output_text.contains("warning:"),
+//RS         "verbose output must exclude later backend warnings:\n{output_text}"
+//RS     );
+//RS 
+//RS     let banner = &stderr[stderr.find("internal compiler error:").unwrap()..];
+//RS     assert!(
+//RS         !banner.contains("JET_RUSTC_REJECTION_SECOND_SENTINEL"),
+//RS         "ICE banner must exclude later backend errors:\n{banner}"
+//RS     );
+//RS     assert!(
+//RS         !banner.contains("warning:"),
+//RS         "ICE banner must exclude later backend warnings:\n{banner}"
+//RS     );
+//RS     cli_support::check_snapshot(
+//RS         "generated_rust_rejection.txt",
+//RS         &normalize_backend_locations(banner, &project.path),
+//RS     );
+//RS     cli_support::check_snapshot(
+//RS         "generated_rust_rejection.rustc.txt",
+//RS         &normalize_backend_error_excerpts(&log, &project.path),
+//RS     );
+//RS }
+//RS 
+//RS 
+//RS fn normalize_backend_error_excerpts(text: &str, project: &std::path::Path) -> String {
+//RS     let mut excerpts = Vec::new();
+//RS     let mut current: Option<String> = None;
+//RS     for line in text.lines() {
+//RS         let header = line.trim_start();
+//RS         if header.starts_with("error:") || header.starts_with("error[") {
+//RS             if let Some(block) = current.take() {
+//RS                 if block.contains("JET_RUSTC_REJECTION_") {
+//RS                     excerpts.push(block.trim_end().to_string());
+//RS                 }
+//RS             }
+//RS             current = Some(line.to_string());
+//RS         } else if header.starts_with("warning:") {
+//RS             if let Some(block) = current.take() {
+//RS                 if block.contains("JET_RUSTC_REJECTION_") {
+//RS                     excerpts.push(block.trim_end().to_string());
+//RS                 }
+//RS             }
+//RS         } else if let Some(block) = current.as_mut() {
+//RS             block.push('\n');
+//RS             block.push_str(line);
+//RS         }
+//RS     }
+//RS     if let Some(block) = current {
+//RS         if block.contains("JET_RUSTC_REJECTION_") {
+//RS             excerpts.push(block.trim_end().to_string());
+//RS         }
+//RS     }
+//RS     normalize_backend_locations(&excerpts.join("\n\n"), project)
+//RS }
+//RS 
+//RS fn normalize_backend_locations(text: &str, project: &std::path::Path) -> String {
+//RS     let text = text.replace(project.to_string_lossy().as_ref(), "<project>");
+//RS     let mut normalized = String::new();
+//RS     for line in text.lines() {
+//RS         if line.trim_start().starts_with("--> ") {
+//RS             normalized.push_str("  --> <generated>:<line>:<column>");
+//RS         } else if let Some((number, source)) = line.split_once('|') {
+//RS             if number.trim().parse::<usize>().is_ok() {
+//RS                 normalized.push_str("<line> |");
+//RS                 normalized.push_str(source);
+//RS             } else if number.trim().is_empty() {
+//RS                 normalized.push_str("       |");
+//RS                 normalized.push_str(source);
+//RS             } else {
+//RS                 normalized.push_str(line);
+//RS             }
+//RS         } else {
+//RS             normalized.push_str(line);
+//RS         }
+//RS         normalized.push('\n');
+//RS     }
+//RS     normalized
+//RS }
+//RS 
+// END-PORT-PENDING 1077 tests/ice_report_codegen_rejection.rs:1-158
+
+// PORT-PENDING 1077 tests-ice-regressions-module-group: tests/ice_report_single_home.rs:1-105
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #1661 (D-ONCE-*): the jet binary panic hook renders one branded ICE
+//RS //! report on every uncaught panic, and the five hand-typed ICE banner
+//RS //! phrasings that used to live in `Source/CmdCompile.rs` collapse into the
+//RS //! one home: `jet_foundation::Diagnostics::render_ice_report`.
+//RS //!
+//RS //! Two guards:
+//RS //!   - `no_hand_typed_ice_banner_outside_the_one_home`: fails if a second
+//RS //!     hand-typed "internal compiler error:" *banner line* (the report's
+//RS //!     first line, as opposed to a plain panic message) reappears anywhere
+//RS //!     under `Source/` outside `Diagnostics.rs` itself.
+//RS //!   - `panic_hook_prints_the_branded_report_and_exits_101`: spawns the real
+//RS //!     `jet` binary with a deliberate panic (`JET_ICE_SELF_TEST=1`) and
+//RS //!     proves the hook's actual output: no raw Rust panic text / no
+//RS //!     `RUST_BACKTRACE` hint, the branded report instead, exit code 101.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS fn root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+//RS     let Ok(entries) = fs::read_dir(dir) else {
+//RS         return;
+//RS     };
+//RS     for entry in entries.flatten() {
+//RS         let path = entry.path();
+//RS         if path.is_dir() {
+//RS             collect_rs_files(&path, out);
+//RS         } else if path.extension().is_some_and(|e| e == "rs") {
+//RS             out.push(path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn no_hand_typed_ice_banner_outside_the_one_home() {
+//RS     let root = root();
+//RS     let mut files = Vec::new();
+//RS     collect_rs_files(&root.join("Source"), &mut files);
+//RS 
+//RS     let mut violations = Vec::new();
+//RS     for file in files {
+//RS         let text = fs::read_to_string(&file).unwrap_or_default();
+//RS         for (n, line) in text.lines().enumerate() {
+//RS             let trimmed = line.trim_start();
+//RS             if trimmed.starts_with("//") {
+//RS                 continue;
+//RS             }
+//RS             // A hand-typed banner literal: the exact ICE first-line prefix
+//RS             // inside a string, NOT a call into render_ice_report (which
+//RS             // legitimately passes a `what` string that may start with other
+//RS             // words) and NOT a reference to the shared function/macro.
+//RS             if (line.contains("\"internal compiler error")
+//RS                 || line.contains("(internal compiler error)"))
+//RS                 && !line.contains("render_ice_report")
+//RS             {
+//RS                 violations.push(format!("{}:{}: {}", file.display(), n + 1, line.trim()));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     assert!(
+//RS         violations.is_empty(),
+//RS         "hand-typed ICE banner outside the one home (jet_foundation::Diagnostics::render_ice_report):\n{}",
+//RS         violations.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn panic_hook_prints_the_branded_report_and_exits_101() {
+//RS     let bin = env!("CARGO_BIN_EXE_jet");
+//RS     let out = Command::new(bin)
+//RS         .env("JET_ICE_SELF_TEST", "1")
+//RS         .output()
+//RS         .expect("failed to run jet");
+//RS 
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(101),
+//RS         "an uncaught panic must still exit ICE (101)"
+//RS     );
+//RS 
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("internal compiler error: ICE self-test triggered by JET_ICE_SELF_TEST"),
+//RS         "missing branded ICE first line:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("This is a bug in jet, NOT in your program. Please report it,"),
+//RS         "missing branded report body:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("RUST_BACKTRACE"),
+//RS         "raw Rust panic hint leaked past the hook:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("thread 'main' panicked at"),
+//RS         "raw Rust panic text leaked past the hook:\n{stderr}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1077 tests/ice_report_single_home.rs:1-105
+
+// PORT-PENDING 1077 tests-ice-regressions-module-group: tests/impl_shape_matrix.rs:1-395
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::collections::BTreeSet;
+//RS use std::path::PathBuf;
+//RS 
+//RS const SOURCE_PATH: &str = "Examples/features/traits/impl_shape_matrix.jet";
+//RS const SOURCE: &str = include_str!("../Examples/features/traits/impl_shape_matrix.jet");
+//RS const EXPECTED: &str =
+//RS     include_str!("../Examples/features/expected/traits/impl_shape_matrix.out");
+//RS 
+//RS const DISPLAY: &str = "Display";
+//RS const DEBUG: &str = "Debug";
+//RS const EQUATABLE: &str = "Equatable";
+//RS const LABELED_CONTEXTS: &[&str] = &["bare", "debug", "pretty", "nested"];
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS enum Resolution {
+//RS     Auto,
+//RS     Explicit,
+//RS     Bundle,
+//RS     Unavailable,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy)]
+//RS struct MatrixRow {
+//RS     owner: &'static str,
+//RS     binding: &'static str,
+//RS     label: &'static str,
+//RS     display: Resolution,
+//RS     debug: Resolution,
+//RS }
+//RS 
+//RS // Keep this list closed. The admission assertion below derives the admitted
+//RS // owner set from the fixture, so adding a sema-admitted owner without adding a
+//RS // row fails this test instead of silently shrinking the matrix.
+//RS const ROWS: &[MatrixRow] = &[
+//RS     MatrixRow {
+//RS         owner: "AutoOwner",
+//RS         binding: "auto",
+//RS         label: "auto",
+//RS         display: Resolution::Auto,
+//RS         debug: Resolution::Auto,
+//RS     },
+//RS     MatrixRow {
+//RS         owner: "DisplayOnlyOwner",
+//RS         binding: "display_only",
+//RS         label: "display-only",
+//RS         display: Resolution::Explicit,
+//RS         debug: Resolution::Auto,
+//RS     },
+//RS     MatrixRow {
+//RS         owner: "DebugOnlyOwner",
+//RS         binding: "debug_only",
+//RS         label: "debug-only",
+//RS         display: Resolution::Auto,
+//RS         debug: Resolution::Explicit,
+//RS     },
+//RS     MatrixRow {
+//RS         owner: "DisplayDebugOwner",
+//RS         binding: "display_debug",
+//RS         label: "display-debug",
+//RS         display: Resolution::Explicit,
+//RS         debug: Resolution::Explicit,
+//RS     },
+//RS     MatrixRow {
+//RS         owner: "EquatableOwner",
+//RS         binding: "equatable",
+//RS         label: "equatable",
+//RS         display: Resolution::Explicit,
+//RS         debug: Resolution::Auto,
+//RS     },
+//RS     MatrixRow {
+//RS         owner: "GenericOwner",
+//RS         binding: "generic",
+//RS         label: "generic",
+//RS         display: Resolution::Explicit,
+//RS         debug: Resolution::Explicit,
+//RS     },
+//RS     MatrixRow {
+//RS         owner: "EnumOwner",
+//RS         binding: "enum_value",
+//RS         label: "enum",
+//RS         display: Resolution::Explicit,
+//RS         debug: Resolution::Explicit,
+//RS     },
+//RS     MatrixRow {
+//RS         owner: "UnitOwner",
+//RS         binding: "unit",
+//RS         label: "unit",
+//RS         display: Resolution::Explicit,
+//RS         debug: Resolution::Explicit,
+//RS     },
+//RS     MatrixRow {
+//RS         owner: "DistinctOwner",
+//RS         binding: "distinct",
+//RS         label: "distinct",
+//RS         display: Resolution::Bundle,
+//RS         // The distinct fixture has a sema-admitted Printable bundle only. Its
+//RS         // Debug cells intentionally use the admitted base value (`raw()`),
+//RS         // because a distinct's backend Debug impl is not a sema Debug impl.
+//RS         debug: Resolution::Unavailable,
+//RS     },
+//RS ];
+//RS 
+//RS fn source_path() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(SOURCE_PATH)
+//RS }
+//RS 
+//RS fn source_items(bundle: &jet::AST::ProgramBundle) -> Vec<jet::AST::Item> {
+//RS     bundle.modules[bundle.entry].items.clone()
+//RS }
+//RS 
+//RS fn local_nominals(items: &[jet::AST::Item]) -> BTreeSet<String> {
+//RS     items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             jet::AST::Item::Struct(def) => Some(def.name.clone()),
+//RS             jet::AST::Item::Enum(def) => Some(def.name.clone()),
+//RS             jet::AST::Item::Distinct(def) => Some(def.name.clone()),
+//RS             _ => None,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn explicit_impls(items: &[jet::AST::Item]) -> BTreeSet<(String, String)> {
+//RS     let mut result = BTreeSet::new();
+//RS     for item in items {
+//RS         match item {
+//RS             jet::AST::Item::Struct(def) => {
+//RS                 for implementation in &def.trait_impls {
+//RS                     result.insert((def.name.clone(), implementation.trait_name.clone()));
+//RS                 }
+//RS             }
+//RS             jet::AST::Item::Enum(def) => {
+//RS                 for implementation in &def.trait_impls {
+//RS                     result.insert((def.name.clone(), implementation.trait_name.clone()));
+//RS                 }
+//RS             }
+//RS             jet::AST::Item::Impl(implementation) => {
+//RS                 if let Some(trait_name) = &implementation.trait_name {
+//RS                     result.insert((implementation.type_name.clone(), trait_name.clone()));
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn row_resolution(row: &MatrixRow, trait_name: &str) -> Resolution {
+//RS     match trait_name {
+//RS         DISPLAY => row.display,
+//RS         DEBUG => row.debug,
+//RS         _ => panic!("unsupported matrix trait `{trait_name}`"),
+//RS     }
+//RS }
+//RS 
+//RS fn sema_admits(registry: &jet::Traits::TraitRegistry, owner: &str, trait_name: &str) -> bool {
+//RS     match trait_name {
+//RS         DISPLAY => {
+//RS             registry.implements_trait(owner, DISPLAY) || registry.auto_printable.contains(owner)
+//RS         }
+//RS         DEBUG => registry.implements_trait(owner, DEBUG),
+//RS         _ => panic!("unsupported matrix trait `{trait_name}`"),
+//RS     }
+//RS }
+//RS 
+//RS fn matrix_admitted_pairs() -> BTreeSet<(String, String)> {
+//RS     ROWS.iter()
+//RS         .flat_map(|row| [DISPLAY, DEBUG].into_iter().filter_map(move |trait_name| {
+//RS             (row_resolution(row, trait_name) != Resolution::Unavailable)
+//RS                 .then(|| (row.owner.to_string(), trait_name.to_string()))
+//RS         }))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn sema_admitted_pairs(
+//RS     registry: &jet::Traits::TraitRegistry,
+//RS     local: &BTreeSet<String>,
+//RS ) -> BTreeSet<(String, String)> {
+//RS     local
+//RS         .iter()
+//RS         .flat_map(|owner| {
+//RS             [DISPLAY, DEBUG].into_iter().filter_map(move |trait_name| {
+//RS                 sema_admits(registry, owner, trait_name)
+//RS                     .then(|| (owner.clone(), trait_name.to_string()))
+//RS             })
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn assert_matrix_cells() {
+//RS     assert_eq!(ROWS.len(), 9, "the closed impl-shape space changed");
+//RS     let owners: BTreeSet<_> = ROWS.iter().map(|row| row.owner).collect();
+//RS     assert_eq!(owners.len(), ROWS.len(), "matrix owners must be unique");
+//RS     let bindings: BTreeSet<_> = ROWS.iter().map(|row| row.binding).collect();
+//RS     assert_eq!(bindings.len(), ROWS.len(), "matrix bindings must be unique");
+//RS     let labels: BTreeSet<_> = ROWS.iter().map(|row| row.label).collect();
+//RS     assert_eq!(labels.len(), ROWS.len(), "matrix labels must be unique");
+//RS 
+//RS     for row in ROWS {
+//RS         for context in LABELED_CONTEXTS {
+//RS             let prefix = format!("{}/{context}=", row.label);
+//RS             assert_eq!(
+//RS                 SOURCE.matches(prefix.as_str()).count(),
+//RS                 1,
+//RS                 "source needs one {context} cell for {}",
+//RS                 row.owner
+//RS             );
+//RS             assert_eq!(
+//RS                 EXPECTED.matches(prefix.as_str()).count(),
+//RS                 1,
+//RS                 "golden needs one {context} cell for {}",
+//RS                 row.owner
+//RS             );
+//RS         }
+//RS         let print_call = format!("print(~{})", row.binding);
+//RS         assert_eq!(
+//RS             SOURCE.matches(print_call.as_str()).count(),
+//RS             1,
+//RS             "source needs one print(v) cell for {}",
+//RS             row.owner
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         SOURCE.matches("print(~").count(),
+//RS         ROWS.len(),
+//RS         "source must have one direct print cell per row"
+//RS     );
+//RS }
+//RS 
+//RS fn assert_admission(
+//RS     registry: &jet::Traits::TraitRegistry,
+//RS     explicit: &BTreeSet<(String, String)>,
+//RS     local: &BTreeSet<String>,
+//RS ) {
+//RS     let admitted = sema_admitted_pairs(registry, local);
+//RS     let rows = matrix_admitted_pairs();
+//RS     assert_eq!(
+//RS         admitted, rows,
+//RS         "every sema-admitted local Display/Debug shape needs a matrix row"
+//RS     );
+//RS 
+//RS     for matrix_row in ROWS {
+//RS         assert_resolution(
+//RS             registry,
+//RS             explicit,
+//RS             matrix_row.owner,
+//RS             DISPLAY,
+//RS             matrix_row.display,
+//RS         );
+//RS         assert_resolution(
+//RS             registry,
+//RS             explicit,
+//RS             matrix_row.owner,
+//RS             DEBUG,
+//RS             matrix_row.debug,
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn assert_resolution(
+//RS     registry: &jet::Traits::TraitRegistry,
+//RS     explicit: &BTreeSet<(String, String)>,
+//RS     owner: &str,
+//RS     trait_name: &str,
+//RS     resolution: Resolution,
+//RS ) {
+//RS     let has_explicit = explicit.contains(&(owner.to_string(), trait_name.to_string()));
+//RS     match resolution {
+//RS         Resolution::Explicit => {
+//RS             assert!(has_explicit, "{owner} needs an explicit {trait_name} impl");
+//RS             assert!(
+//RS                 registry.implements_trait(owner, trait_name),
+//RS                 "sema must admit {owner}.{trait_name}"
+//RS             );
+//RS         }
+//RS         Resolution::Auto => {
+//RS             assert!(!has_explicit, "{owner}.{trait_name} must not have a custom impl");
+//RS             if trait_name == DISPLAY {
+//RS                 assert!(
+//RS                     registry.auto_printable.contains(owner),
+//RS                     "sema must admit auto {owner}.{trait_name}"
+//RS                 );
+//RS             }
+//RS             if trait_name == DEBUG {
+//RS                 assert!(
+//RS                     registry.auto_debug.contains(owner),
+//RS                     "sema must admit auto {owner}.{trait_name}"
+//RS                 );
+//RS             }
+//RS         }
+//RS         Resolution::Bundle => {
+//RS             assert!(!has_explicit, "{owner}.{trait_name} must use its bundle");
+//RS             assert!(
+//RS                 registry.implements_trait(owner, trait_name),
+//RS                 "sema must admit bundled {owner}.{trait_name}"
+//RS             );
+//RS         }
+//RS         Resolution::Unavailable => {
+//RS             assert!(!has_explicit, "{owner}.{trait_name} is not sema-admitted");
+//RS             assert!(!registry.implements_trait(owner, trait_name));
+//RS             assert!(!registry.auto_printable.contains(owner));
+//RS             assert!(!registry.auto_debug.contains(owner));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn assert_aot_and_admission_contract(
+//RS     registry: &jet::Traits::TraitRegistry,
+//RS     explicit: &BTreeSet<(String, String)>,
+//RS     local: &BTreeSet<String>,
+//RS ) {
+//RS     assert_admission(registry, explicit, local);
+//RS }
+//RS 
+//RS #[test]
+//RS fn impl_shape_matrix_covers_all_contexts_and_resolution_seams() {
+//RS     assert_matrix_cells();
+//RS 
+//RS     let path = source_path();
+//RS     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("matrix loads");
+//RS     let items_before_sema = source_items(&bundle);
+//RS     let explicit = explicit_impls(&items_before_sema);
+//RS     let local = local_nominals(&items_before_sema);
+//RS     let registry = jet::Traits::TraitRegistry::auto_derives_for_items(&items_before_sema);
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     let errors: Vec<_> = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(errors.is_empty(), "matrix sema errors: {errors:?}");
+//RS 
+//RS     assert!(
+//RS         items_before_sema.iter().any(|item| matches!(
+//RS             item,
+//RS             jet::AST::Item::Struct(def)
+//RS                 if def.name == "EquatableOwner"
+//RS                     && def.derives.iter().any(|(name, _)| name == EQUATABLE)
+//RS         )),
+//RS         "EquatableOwner must retain the derived-Equatable matrix shape"
+//RS     );
+//RS 
+//RS     let compiled = jet::compile_with_path(SOURCE, path.to_str().unwrap())
+//RS         .expect("matrix AOT codegen");
+//RS 
+//RS     // The closed matrix is the admission oracle; executable tier parity below
+//RS     // is the consumer-facing proof of its rendering behavior.
+//RS     assert_aot_and_admission_contract(&registry, &explicit, &local);
+//RS 
+//RS     // This runs the same fixture through release/AOT and the default Cranelift
+//RS     // tier. It is the executable half of the observable contract and golden gate.
+//RS     tir_support::assert_example_cli_tiers_agree("traits/impl_shape_matrix", EXPECTED);
+//RS 
+//RS     // The ordinary three-mode helper proves output parity, but it does not
+//RS     // prove that the default run stayed on the resident seam. Trace the same
+//RS     // fixture once so the matrix cannot pass through tier 0 only.
+//RS     let (code, stdout, stderr) =
+//RS         tir_support::jit_run_traced("impl_shape_matrix_native", SOURCE);
+//RS     assert_eq!(code, 0, "default `jet run` failed for impl_shape_matrix: {stderr}");
+//RS     assert_eq!(stdout, EXPECTED);
+//RS     assert!(
+//RS         stderr
+//RS             .lines()
+//RS             .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+//RS         "impl_shape_matrix did not execute on the resident JIT: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn impl_shape_matrix_retains_typed_operator_rhs() {
+//RS     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/operators/mixed_types.jet");
+//RS     let bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("operator example loads");
+//RS     let rhs = bundle.modules[bundle.entry]
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| {
+//RS             let jet::AST::Item::Impl(implementation) = item else {
+//RS                 return None;
+//RS             };
+//RS             if implementation.type_name == "Money"
+//RS                 && implementation.trait_name.as_deref() == Some("Add")
+//RS             {
+//RS                 implementation.operator_rhs.clone()
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         });
+//RS     assert_eq!(rhs, Some(jet::AST::Type::Int));
+//RS }
+// END-PORT-PENDING 1077 tests/impl_shape_matrix.rs:1-395
+

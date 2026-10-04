@@ -71,7 +71,20 @@ pub enum BindPattern {
     Struct(type_name: String, type_span: Span, fields: [BindName], rest: Span?, span: Span)
     List(elems: [BindName], span: Span)
     Tuple(elems: [BindName], span: Span)
-    Refutable(pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span)
+    Refutable(pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span, synthesized: Bool)
+}
+
+// Rust AST/patterns.rs::BindPattern::{span,names}. These are retained parser
+// bindings, not Pattern::binding_names and not a second pattern traversal.
+pub fn bind_pattern_span(pattern: BindPattern) -> Span Never! {
+    if pattern == {
+        .Struct(_, _, _, _, span) | .List(_, span) | .Tuple(_, span) | .Refutable(_, _, _, span, _) -> span
+    }
+}
+pub fn bind_pattern_names(pattern: BindPattern) -> [BindName] Never! {
+    if pattern == {
+        .Struct(_, _, names, _, _) | .List(names, _) | .Tuple(names, _) | .Refutable(_, _, names, _, _) -> names
+    }
 }
 
 pub enum OrFallback {

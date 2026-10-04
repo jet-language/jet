@@ -1,0 +1,624 @@
+// Persist.rs:1-1163 — checked process-resident #Persist store.
+// The runtime carrier belongs to MIR, not Persist: MIRRuntimeValue and its
+// MIRRuntimeMapEntry/MIRRuntimeField/MIRRuntimeEnumArg records must be supplied by
+// the canonical MIR owner (MIR.rs:4140-4171). No erased/native stand-in lives here.
+// Names follow CompW35's MIR-DECL-PARITY-ABI. Runtime native owners and exact
+// mir_runtime_value_debug are explicitly unpublished #4494 dependencies.
+// #4494: SHARED below requires once-only process-global initialization, a real
+// Shared lock, poison-on-unwind fidelity and destruction at process shutdown.
+// It must survive program/JIT generations; it is neither TLS nor a session slot.
+// #4483/#4499/#4409 are not used: no target facts, composite map keys or IO.
+
+pub struct PersistIdentity { pub module: String, pub name: String }
+pub struct PersistEntry { pub module: String, pub name: String, pub shape: String, pub payload: String }
+pub enum PersistRejectReason {
+    InvalidIdentity
+    ShapeChanged(from: String, to: String)
+    MigrationUnavailable(from: String, to: String)
+    ExplicitRestart
+    Transaction(detail: String)
+}
+pub enum PersistOutcome {
+    Kept(entry: PersistEntry)
+    Migrated(entry: PersistEntry)
+    Reset(reason: String, entry: PersistEntry)
+    Rejected(reason: PersistRejectReason, prior: PersistIdentity)
+}
+struct PersistRuntimeValue { pub shape: String, pub value: MIRRuntimeValue }
+pub struct PersistStore {
+    priv entries: [String:PersistEntry]
+    priv runtime_values: [String:PersistRuntimeValue]
+}
+pub struct PersistPrep {
+    pub by_name: [String:CtValue]
+    pub by_key: [String:CtValue]
+    pub messages: [String]
+    pub error: String?
+}
+pub struct PersistRuntimeMigration { pub key: String, pub shape: String, pub value: MIRRuntimeValue }
+
+// Rust char::is_control is Unicode Cc, including the two-byte C1 range.
+fn persist_has_control(text: String) -> Bool Never! {
+    bytes :: text.bytes()
+    loop index in 0..<bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        if byte < 32 || byte == 127 -> return true
+        if byte == 194 && index + 1 < bytes.len() && bytes[index + 1] >= (U8{128}) && bytes[index + 1] <= (U8{159}) -> return true
+    }
+    false
+}
+pub fn persist_identity_new(module: String, name: String) -> PersistIdentity Never! { PersistIdentity{module: ~module, name: ~name} }
+pub fn persist_identity_key(identity: PersistIdentity) -> String Never! { "{identity.module}::{identity.name}" }
+pub fn persist_identity_is_valid(identity: PersistIdentity) -> Bool Never! {
+    identity.module != "" && identity.name != "" && !persist_has_control(identity.module) && !persist_has_control(identity.name)
+}
+pub fn persist_entry_identity(entry: PersistEntry) -> PersistIdentity Never! { persist_identity_new(entry.module, entry.name) }
+pub fn persist_entry_stable_key(entry: PersistEntry) -> String Never! { "{entry.module}::{entry.name}" }
+pub fn persist_entry_type_identity(entry: PersistEntry) -> String Never! { entry.shape }
+pub fn persist_entry_is_valid(entry: PersistEntry) -> Bool Never! {
+    persist_identity_is_valid(persist_entry_identity(entry)) && entry.shape != "" && !persist_has_control(entry.shape)
+}
+pub fn persist_reject_reason_message(reason: PersistRejectReason) -> String Never! {
+    if reason == {
+        .InvalidIdentity -> "persist identity is empty or contains control text"
+        .ShapeChanged(from, to) -> "persist shape changed: `{from}` → `{to}`"
+        .MigrationUnavailable(from, to) -> "no migration is available for persist shape `{from}` → `{to}`"
+        .ExplicitRestart -> "replacement is disabled by the explicit restart policy"
+        .Transaction(detail) -> ~detail
+    }
+}
+pub fn persist_outcome_disposition(outcome: PersistOutcome) -> String Never! {
+    if outcome == { .Kept(_) -> "kept", .Migrated(_) -> "migrated", .Reset(_, _) -> "reset", .Rejected(_, _) -> "rejected" }
+}
+pub fn persist_outcome_entry(outcome: PersistOutcome) -> PersistEntry? Never! {
+    if outcome == { .Kept(entry) | .Migrated(entry) | .Reset(_, entry) -> Val(~entry), .Rejected(_, _) -> None }
+}
+pub fn persist_outcome_identity(outcome: PersistOutcome) -> PersistIdentity Never! {
+    if outcome == { .Rejected(_, prior) -> ~prior, else -> persist_entry_identity(persist_outcome_entry(outcome) ?? panic("accepted outcome has no entry")) }
+}
+pub fn persist_outcome_reason(outcome: PersistOutcome) -> String? Never! {
+    if outcome == {
+        .Kept(_) -> None
+        .Migrated(_) -> Val("published schema migration applied")
+        .Reset(reason, _) -> Val(~reason)
+        .Rejected(reason, _) -> Val(persist_reject_reason_message(reason))
+    }
+}
+pub fn persist_outcome_is_accepted(outcome: PersistOutcome) -> Bool Never! { persist_outcome_disposition(outcome) != "rejected" }
+fn persist_runtime_value_equal(left: PersistRuntimeValue, right: PersistRuntimeValue) -> Bool Never! { left.shape == right.shape && left.value == right.value }
+fn persist_store_key(module: String, name: String) -> String Never! { "{module}::{name}" }
+pub fn persist_store_new() -> PersistStore Never! { PersistStore{entries: [String:PersistEntry]{}, runtime_values: [String:PersistRuntimeValue]{}} }
+pub fn persist_store_put(store: &PersistStore, entry: PersistEntry) Never! {
+    key :: persist_entry_stable_key(entry)
+    same_shape :: if store.entries.get(key) == { .Val(prior) -> prior.shape == entry.shape, .None -> false }
+    if !same_shape -> _ := &store.runtime_values.remove(key)
+    store.entries[key] = ~entry
+}
+pub fn persist_store_get(store: PersistStore, module: String, name: String) -> PersistEntry? Never! { store.entries.get(persist_store_key(module, name)) }
+// Match Foundation's existing BTreeMap convention: native hash lookup, one
+// byte-ordered sort at observation, never quadratic insertion scans.
+pub fn persist_store_entries(store: PersistStore) -> [PersistEntry] Never! {
+    keys := store.entries.keys().to_list()
+    &keys.sort()
+    loop key in keys -> store.entries.get(key) ?? panic("persist entry disappeared")
+}
+pub fn persist_store_is_empty(store: PersistStore) -> Bool Never! { store.entries.len() == 0 }
+pub fn persist_store_len(store: PersistStore) -> Int Never! { store.entries.len() }
+pub fn persist_store_reset(store: &PersistStore, module: String, name: String, shape: String, payload: String, reason: String) -> PersistOutcome Never! {
+    identity :: persist_identity_new(module, name)
+    if !persist_identity_is_valid(identity) || shape == "" || persist_has_control(shape) -> return PersistOutcome.Rejected{reason: PersistRejectReason.InvalidIdentity, prior: identity}
+    entry :: PersistEntry{module: ~module, name: ~name, shape: ~shape, payload: ~payload}
+    _ := &store.runtime_values.remove(persist_entry_stable_key(entry))
+    persist_store_put(&store, entry)
+    PersistOutcome.Reset{reason: ~reason, entry: entry}
+}
+pub fn persist_store_plan_migrate(store: PersistStore, module: String, name: String, new_shape: String, fresh_payload: String) -> PersistOutcome Never! {
+    identity :: persist_identity_new(module, name)
+    if !persist_identity_is_valid(identity) || new_shape == "" || persist_has_control(new_shape) -> return PersistOutcome.Rejected{reason: PersistRejectReason.InvalidIdentity, prior: identity}
+    key :: persist_identity_key(identity)
+    old :: store.entries.get(key) ?? return PersistOutcome.Kept{entry: PersistEntry{module: ~module, name: ~name, shape: ~new_shape, payload: ~fresh_payload}}
+    runtime :: store.runtime_values.get(key)
+    if old.shape == new_shape {
+        resident_matches :: if runtime == { .Val(value) -> value.shape == old.shape && persist_runtime_value_matches_shape(new_shape, value.value), .None -> false }
+        if persist_payload_matches_shape(new_shape, old.payload) || resident_matches -> return PersistOutcome.Kept{entry: old}
+        return PersistOutcome.Rejected{reason: PersistRejectReason.Transaction{detail: "persist payload does not match declared shape `{new_shape}`"}, prior: persist_entry_identity(old)}
+    }
+    resident_compatible :: if runtime == { .Val(value) -> value.shape == old.shape && persist_runtime_shape_compatible(old.shape, new_shape), .None -> false }
+    if persist_payload_compatible(old.payload, new_shape) || resident_compatible -> return PersistOutcome.Migrated{entry: PersistEntry{module: ~module, name: ~name, shape: ~new_shape, payload: old.payload}}
+    PersistOutcome.Rejected{reason: PersistRejectReason.MigrationUnavailable{from: old.shape, to: ~new_shape}, prior: persist_entry_identity(old)}
+}
+pub fn persist_store_apply_outcome(store: &PersistStore, outcome: PersistOutcome) PersistRejectReason! {
+    if outcome == .Rejected(reason, prior) {
+        _ := &store.runtime_values.remove(persist_identity_key(prior))
+        return Err(~reason)
+    }
+    persist_store_put(&store, persist_outcome_entry(outcome) ?? return)
+}
+pub fn persist_store_migrate(store: &PersistStore, module: String, name: String, new_shape: String, fresh_payload: String) -> PersistOutcome Never! {
+    outcome :: persist_store_plan_migrate(store, module, name, new_shape, fresh_payload)
+    _ := persist_store_apply_outcome(&store, outcome)
+    outcome
+}
+fn persist_payload_compatible(payload: String, new_shape: String) -> Bool Never! {
+    if !new_shape.ends_with("+") -> return false
+    base := new_shape.slice(0..<(new_shape.len() - 1)) // #4303
+    persist_json_string_field(payload, "shape") == Val(base)
+}
+fn persist_carrier(shape: String) -> String Never! {
+    end :: shape.index_of("|") ?? return ~shape
+    carrier := shape.slice(0..<end) // #4303
+    carrier
+}
+fn persist_payload_matches_shape(expected: String, payload: String) -> Bool Never! {
+    actual :: persist_json_string_field(payload, "shape") ?? return false
+    carrier :: persist_carrier(expected)
+    if (actual == "Int" || actual == "BigInt") && persist_integer_shape(carrier) -> return true
+    if carrier == "F32" && actual == "F32" -> return true
+    if carrier == "F32" && actual == "Float" -> return persist_json_bool_field(payload, "f32") == Val(true)
+    if carrier == "Float" && actual == "Float" -> return persist_json_bool_field(payload, "f32") != Val(true)
+    carrier == actual
+}
+fn persist_integer_shape(shape: String) -> Bool Never! {
+    if shape == "Int" || shape.len() < 2 -> return shape == "Int"
+    bytes :: shape.bytes()
+    if bytes[0] != (U8{73}) && bytes[0] != (U8{85}) -> return false
+    bits := shape.slice(1..<shape.len()) // #4303
+    // Rust u8::from_str accepts a leading '+', but not whitespace or negatives.
+    raw :: bits.bytes()
+    start :: if raw[0] == (U8{43}) -> 1 else -> 0
+    if start == raw.len() -> return false
+    loop i in start..<raw.len() -> if raw[i] < (U8{48}) || raw[i] > (U8{57}) -> return false
+    value :: Int.parse(bits) ?? return false
+    value >= 0 && value <= 255
+}
+
+// Persist.rs:390-481. Native branches reject by VARIANT, before any access to
+// a cursor/owner; even id:* never bypasses this recursive admission check.
+pub fn persist_runtime_value_supported(value: MIRRuntimeValue) -> Bool Never! {
+    if value == {
+        .Moved | .NativeCursor(_) | .NativeOwned(_) | .Closure(_) -> false
+        .Int(_) | .BigInt(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .Bytes(_) | .Unit -> true
+        .List(values) -> { loop child in values -> if !persist_runtime_value_supported(child) -> return false; true }
+        .Map(values) -> { loop row in values -> if !persist_runtime_key_supported(row.key) || !persist_runtime_value_supported(row.value) -> return false; true }
+        .Struct(name, fields) -> {
+            if name == "" || persist_has_control(name) -> return false
+            loop field in fields -> if field.name == "" || persist_has_control(field.name) || !persist_runtime_value_supported(field.value) -> return false
+            true
+        }
+        .Enum(name, variant, args) -> {
+            if name == "" || persist_has_control(name) || variant == "" || persist_has_control(variant) -> return false
+            loop arg in args {
+                if arg.name == .Val(label) && (label == "" || persist_has_control(label)) -> return false
+                if !persist_runtime_value_supported(arg.value) -> return false
+            }
+            true
+        }
+        .Present(inner) | .FailedTold(inner) -> persist_runtime_value_supported(inner)
+        .Absent(element) -> persist_runtime_type_supported(element)
+    }
+}
+fn persist_runtime_key_supported(key: MIRConstKey) -> Bool Never! {
+    if key == {
+        .Int(_) | .String(_) | .Bool(_) | .Char(_) | .Enum(_, _) -> true
+        .Tuple(fields) | .Struct(_, fields) -> { loop field in fields -> if !persist_runtime_key_supported(field.key) -> return false; true }
+    }
+}
+fn persist_runtime_type_supported(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Fn(_) | .SendFn(_, _, _) | .TraitObject(_) -> false
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> persist_runtime_type_supported(inner)
+        .Map(key, value) -> persist_runtime_type_supported(key) && persist_runtime_type_supported(value)
+        .Result(ok, err) -> persist_runtime_type_supported(ok) && persist_runtime_type_supported(err)
+        .Apply(_, args) | .Union(args) -> { loop arg in args -> if !persist_runtime_type_supported(arg) -> return false; true }
+        .Tuple(fields) -> { loop field in fields -> if !persist_runtime_type_supported(field.ty) -> return false; true }
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
+    }
+}
+pub fn persist_runtime_value_matches_shape(shape: String, value: MIRRuntimeValue) -> Bool Never! {
+    if !persist_runtime_value_supported(value) -> return false
+    carrier :: persist_carrier(shape)
+    if carrier.starts_with("id:") -> return true
+    if value == {
+        .Int(_) | .BigInt(_) -> carrier == "Int" || persist_integer_shape(carrier)
+        .Float(_, f32) -> ((carrier == "F32" || carrier == "Float32") && f32) || (carrier == "Float" && !f32)
+        .Bool(_) -> carrier == "Bool"
+        .Char(_) -> carrier == "Char"
+        .String(_) -> carrier == "String"
+        .Bytes(_) -> carrier == "Bytes" || carrier == "[U8]"
+        .List(_) -> (carrier.starts_with("[") && !carrier.contains(":")) || carrier.starts_with("List<") || carrier.starts_with("FixedList<")
+        .Map(_) -> (carrier.starts_with("[") && carrier.contains(":")) || carrier.starts_with("Map<")
+        .Struct(name, _) -> carrier == name || carrier.starts_with("Tuple(") || carrier.starts_with("Struct")
+        .Enum(name, _, _) -> carrier == name || carrier.starts_with("Enum") || carrier.starts_with("Union")
+        .Present(_) | .FailedTold(_) | .Absent(_) -> carrier.starts_with("?") || carrier.starts_with("Option<") || carrier.starts_with("Result<") || carrier.contains(" ! ")
+        .Unit -> carrier == "Unit" || carrier == "()"
+        .Moved | .Closure(_) | .NativeCursor(_) | .NativeOwned(_) -> false
+    }
+}
+fn persist_runtime_shape_compatible(old_shape: String, new_shape: String) -> Bool Never! {
+    if !new_shape.ends_with("+") -> return false
+    base := new_shape.slice(0..<(new_shape.len() - 1)) // #4303
+    base == old_shape
+}
+fn persist_ct_to_runtime_key(key: CtKey) -> MIRConstKey? Never! {
+    if key == {
+        .Int(value) -> Val(MIRConstKey.Int{value: value})
+        .Str(value) -> Val(MIRConstKey.String{value: ~value})
+        .Bool(value) -> Val(MIRConstKey.Bool{value: value})
+        .Char(value) -> Val(MIRConstKey.Char{value: ast_comptime_char_scalar(value)})
+        .Tuple(fields) -> {
+            converted := [MIRConstKeyField]{}
+            loop field in fields -> &converted.push(MIRConstKeyField{name: ~field.name, key: persist_ct_to_runtime_key(field.value) ?? return None})
+            Val(MIRConstKey.Tuple{fields: converted})
+        }
+        .Struct(name, fields) -> {
+            converted := [MIRConstKeyField]{}
+            loop field in fields -> &converted.push(MIRConstKeyField{name: ~field.name, key: persist_ct_to_runtime_key(field.value) ?? return None})
+            Val(MIRConstKey.Struct{type_name: ~name, fields: converted})
+        }
+        .Enum(name, variant) -> Val(MIRConstKey.Enum{type_name: ~name, variant: ~variant})
+    }
+}
+fn persist_ct_to_runtime_value(value: CtValue) -> MIRRuntimeValue? Never! {
+    if value == {
+        .Int(value) -> Val(MIRRuntimeValue.Int{value: value})
+        .Float(number) -> if number == { .F32(value) -> Val(MIRRuntimeValue.Float{value: value, f32: true}), .F64(value) -> Val(MIRRuntimeValue.Float{value: value, f32: false}) }
+        .Bool(value) -> Val(MIRRuntimeValue.Bool{value: value})
+        .Char(value) -> Val(MIRRuntimeValue.Char{value: value})
+        .Str(value) -> Val(MIRRuntimeValue.String{value: ~value})
+        .BigInt(value) -> Val(MIRRuntimeValue.BigInt{value: ~value})
+        .Bytes(values) -> Val(MIRRuntimeValue.Bytes{value: ~values})
+        .List(values) -> {
+            converted := [MIRRuntimeValue]{}
+            loop child in values -> &converted.push(persist_ct_to_runtime_value(child) ?? return None)
+            Val(MIRRuntimeValue.List{values: converted})
+        }
+        .Map(values) -> {
+            converted := [MIRRuntimeMapEntry]{}
+            loop row in values -> &converted.push(MIRRuntimeMapEntry{key: persist_ct_to_runtime_key(row.key) ?? return None, value: persist_ct_to_runtime_value(row.value) ?? return None})
+            Val(MIRRuntimeValue.Map{entries: converted})
+        }
+        .Struct(name, fields) -> {
+            converted := [MIRRuntimeField]{}
+            loop field in fields -> &converted.push(MIRRuntimeField{name: ~field.name, value: persist_ct_to_runtime_value(field.value) ?? return None})
+            Val(MIRRuntimeValue.Struct{type_name: ~name, fields: converted})
+        }
+        .Enum(name, variant, args) -> {
+            converted := [MIRRuntimeEnumArg]{}
+            loop arg in args -> &converted.push(MIRRuntimeEnumArg{name: ~arg.label, value: persist_ct_to_runtime_value(arg.value) ?? return None})
+            Val(MIRRuntimeValue.Enum{type_name: ~name, variant: ~variant, args: converted})
+        }
+        .Present(inner) -> Val(MIRRuntimeValue.Present{value: persist_ct_to_runtime_value(inner) ?? return None})
+        .Failed(report) -> if report == {
+            .Clean(ty) -> Val(MIRRuntimeValue.Absent{element: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref(type_name(ty)), args: [MIRType]{}})})
+            .Told(inner) -> Val(MIRRuntimeValue.FailedTold{value: persist_ct_to_runtime_value(inner) ?? return None})
+        }
+        .Unit -> Val(MIRRuntimeValue.Unit)
+        .Closure(_) -> None
+    }
+}
+
+pub fn persist_prep_new() -> PersistPrep Never! {
+    PersistPrep{by_name: [String:CtValue]{}, by_key: [String:CtValue]{}, messages: [String]{}, error: None}
+}
+// Persist.rs:19-23. Declaration is capability-gated, not an initialized-per-call
+// replacement. Main must publish the process-global lazy Shared contract.
+PERSIST_SHARED :: shared persist_store_new()
+fn persist_shared_store() -> Shared<PersistStore> Never! { PERSIST_SHARED }
+pub fn persist_shared_clone() -> PersistStore Never! {
+    shared_store :: persist_shared_store()
+    guard := shared_store.guard_read()
+    ~guard.value
+}
+pub fn persist_shared_replace(store: PersistStore) Never! {
+    shared_store :: persist_shared_store()
+    guard := shared_store.guard_edit()
+    guard.value = ~store
+}
+pub fn persist_shared_clear() Never! { persist_shared_replace(persist_store_new()) }
+pub fn persist_shared_read_key(key: String) -> CtValue? Never! {
+    shared_store :: persist_shared_store()
+    guard := shared_store.guard_read()
+    entry :: guard.value.entries.get(key) ?? return None
+    if !persist_payload_matches_shape(entry.shape, entry.payload) -> return None
+    persist_decode_payload(entry.payload)
+}
+pub fn persist_shared_write_key(key: String, value: CtValue) -> Bool Never! {
+    shared_store :: persist_shared_store()
+    guard := shared_store.guard_edit()
+    entry := guard.value.entries.get(key) ?? return false
+    shape :: entry.shape
+    payload :: persist_encode_payload(value)
+    if !persist_payload_matches_shape(shape, payload) -> return false
+    runtime :: persist_ct_to_runtime_value(value)
+    if runtime == .Val(resident) && !persist_runtime_value_matches_shape(shape, resident) -> return false
+    entry.payload = payload
+    guard.value.entries[key] = entry
+    if runtime == {
+        .Val(resident) -> guard.value.runtime_values[key] = PersistRuntimeValue{shape: shape, value: resident}
+        .None -> _ := &guard.value.runtime_values.remove(key)
+    }
+    true
+}
+pub fn persist_shared_commit_runtime_migrations(migrations: [PersistRuntimeMigration]) String! {
+    if migrations.len() == 0 -> return
+    shared_store :: persist_shared_store()
+    guard := shared_store.guard_edit()
+    seen := [String:Bool]{}
+    prepared := [PersistPreparedMigration]{}
+    loop migration in migrations {
+        if seen.contains_key(migration.key) -> return Err("duplicate persist migration key `{migration.key}`")
+        seen[migration.key] = true
+        if migration.shape == "" || persist_has_control(migration.shape) -> return Err("persist migration `{migration.key}` has an invalid target shape")
+        if !guard.value.entries.contains_key(migration.key) -> return Err("persist migration `{migration.key}` has no resident entry")
+        if !persist_runtime_value_matches_shape(migration.shape, migration.value) -> return Err("persist migration `{migration.key}` produced a value incompatible with `{migration.shape}`")
+        &prepared.push(PersistPreparedMigration{key: ~migration.key, shape: ~migration.shape, payload: persist_encode_runtime_payload(migration.value), value: ~migration.value})
+    }
+    // Nothing changes before every row passes; one guard spans validation and
+    // publication. Duplicate/invalid/missing/incompatible precedence is exact.
+    loop row in prepared {
+        entry := guard.value.entries.get(row.key) ?? return Err("persist migration `{row.key}` lost its entry")
+        entry.shape = ~row.shape
+        entry.payload = row.payload
+        guard.value.entries[row.key] = entry
+        guard.value.runtime_values[row.key] = PersistRuntimeValue{shape: row.shape, value: row.value}
+    }
+}
+struct PersistPreparedMigration { pub key: String, pub shape: String, pub payload: String, pub value: MIRRuntimeValue }
+fn persist_encode_runtime_payload(value: MIRRuntimeValue) -> String Never! {
+    if value == {
+        .Int(number) -> "{{\"shape\":\"Int\",\"value\":{number}}}"
+        .BigInt(number) -> "{{\"shape\":\"BigInt\",\"value\":\"{json_escape(number)}\"}}"
+        .Float(number, f32) -> {
+            shape :: if f32 -> "F32" else -> "Float"
+            "{{\"shape\":\"{shape}\",\"value\":{number},\"f32\":{f32}}}"
+        }
+        .Bool(value) -> "{{\"shape\":\"Bool\",\"value\":{value}}}"
+        .Char(value) -> "{{\"shape\":\"Char\",\"value\":\"{json_escape("{value}")}\"}}"
+        .String(value) -> "{{\"shape\":\"String\",\"value\":\"{json_escape(value)}\"}}"
+        else -> "{{\"shape\":\"Opaque\",\"debug\":\"{json_escape(mir_runtime_value_debug(value))}\"}}"
+    }
+}
+pub fn persist_shared_read_runtime_key(key: String) -> MIRRuntimeValue? Never! {
+    shared_store :: persist_shared_store()
+    guard := shared_store.guard_read()
+    entry :: guard.value.entries.get(key) ?? return None
+    runtime :: guard.value.runtime_values.get(key) ?? return None
+    if runtime.shape != entry.shape || !persist_runtime_value_matches_shape(entry.shape, runtime.value) -> return None
+    Val(~runtime.value)
+}
+pub fn persist_shared_write_runtime_key(key: String, value: MIRRuntimeValue) -> Bool Never! {
+    shared_store :: persist_shared_store()
+    guard := shared_store.guard_edit()
+    entry :: guard.value.entries.get(key) ?? return false
+    if !persist_runtime_value_matches_shape(entry.shape, value) -> return false
+    guard.value.runtime_values[key] = PersistRuntimeValue{shape: ~entry.shape, value: ~value}
+    true
+}
+pub fn persist_shared_remove_key(key: String) -> Bool Never! {
+    shared_store :: persist_shared_store()
+    guard := shared_store.guard_edit()
+    removed_entry :: &guard.value.entries.remove(key) != None
+    removed_runtime :: &guard.value.runtime_values.remove(key) != None
+    removed_entry || removed_runtime
+}
+pub fn persist_prepare_bundle(bundle: ProgramBundle) -> PersistPrep Never! {
+    shared_store :: persist_shared_store()
+    guard := shared_store.guard_edit()
+    candidate := ~guard.value
+    prep := persist_prepare_bundle_into(bundle, &candidate)
+    if prep.error == {
+        .Val(error) -> &prep.messages.push("[persist] transaction rejected: {error}")
+        .None -> guard.value = candidate
+    }
+    prep
+}
+// ProgramBundle/LoadedModule are the AST/program_imports.rs:594 canonical
+// owner (CP-PROGRAM-BUNDLE), not a Persist snapshot or registration facade.
+pub fn persist_prepare_bundle_into(bundle: ProgramBundle, store: &PersistStore) -> PersistPrep Never! {
+    prep := persist_prep_new()
+    rejection := String?.None
+    loop module_index in 0..<bundle.modules.len() {
+        module :: bundle.modules[module_index]
+        module_identity :: name_ledger_module_identity(bundle.name_ledger, module_index) ?? ~module.alias
+        loop item in module.items {
+            definition :: if item == { .Const(value) -> value, else -> next }
+            if !definition.is_persist && !definition.mutable -> next
+            fresh :: persist_const_runtime_value(definition) ?? next
+            key :: persist_store_key(module_identity, definition.name)
+            shape :: persist_shape_fingerprint(definition.ty, fresh)
+            fresh_payload :: persist_encode_payload(fresh)
+            if definition.mutable && !definition.is_persist {
+                persist_store_put(&store, PersistEntry{module: ~module_identity, name: ~definition.name, shape: ~shape, payload: fresh_payload})
+                if persist_ct_to_runtime_value(fresh) == .Val(runtime) -> store.runtime_values[key] = PersistRuntimeValue{shape: shape, value: runtime}
+                prep.by_name[definition.name] = ~fresh
+                prep.by_key[key] = fresh
+                next
+            }
+            outcome :: persist_store_plan_migrate(store, module_identity, definition.name, shape, fresh_payload)
+            rejected :: !persist_outcome_is_accepted(outcome)
+            if rejected {
+                reason :: persist_outcome_reason(outcome) ?? "replacement refused"
+                if rejection == None -> rejection = Val("{persist_identity_key(persist_outcome_identity(outcome))}: {reason}")
+            } else -> _ := persist_store_apply_outcome(&store, outcome)
+            entry :: persist_outcome_entry(outcome) ?? store.entries.get(key) ?? PersistEntry{module: ~module_identity, name: ~definition.name, shape: ~shape, payload: ~fresh_payload}
+            note :: if persist_outcome_disposition(outcome) == {
+                "migrated" -> Val("[persist] migrated `{module_identity}::{definition.name}` to new shape")
+                "rejected" -> Val("[persist] rejected `{persist_identity_key(persist_outcome_identity(outcome))}`: {persist_outcome_reason(outcome) ?? "replacement refused"}")
+                else -> persist_outcome_reason(outcome).map(reason -> "[persist] {reason}")
+            }
+            if note == .Val(message) -> &prep.messages.push(message)
+            same_shape_kept :: if outcome == { .Kept(kept) -> kept.shape == shape, else -> false }
+            value :: if same_shape_kept || rejected -> persist_decode_payload(entry.payload) ?? ~fresh else -> ~fresh
+            if !rejected && (!same_shape_kept || !store.runtime_values.contains_key(key)) {
+                if persist_ct_to_runtime_value(value) == .Val(runtime) {
+                    if persist_runtime_value_matches_shape(entry.shape, runtime) -> store.runtime_values[key] = PersistRuntimeValue{shape: ~entry.shape, value: runtime}
+                }
+            }
+            prep.by_name[definition.name] = ~value
+            prep.by_key[key] = value
+        }
+    }
+    prep.error = rejection
+    prep
+}
+fn persist_narrow_f32(value: Float) -> Float Never! {
+    if value != value -> return Float.NAN
+    // IEEE round-to-nearest overflow threshold: max finite + half an ulp.
+    if value >= Float{340282356779733661637539395458142568448} -> return Float.INFINITY
+    if value <= Float{-340282356779733661637539395458142568448} -> return Float.NEG_INFINITY
+    narrow :: F32.from_float(value) ?? panic("finite in-range F32 cast failed")
+    Float.from_f32(narrow)
+}
+fn persist_const_runtime_value(definition: ConstDef) -> CtValue? Never! {
+    if definition.ct == .Val(value) -> return Val(~value)
+    if definition.value == {
+        .Int(value, _, _, _) -> Val(CtValue.Int{value: value})
+        .Bool(value, _) -> Val(CtValue.Bool{value: value})
+        .Str(parts, _) -> {
+            if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(CtValue.Str{value: ~text})
+            None
+        }
+        .Float(value, _, f32, _) -> Val(CtValue.Float{value: if f32 -> CtFloat.F32{value: persist_narrow_f32(value)} else -> CtFloat.F64{value: value}})
+        .Char(text, _) -> Val(CtValue.Char{value: text.chars()[0]})
+        else -> None
+    }
+}
+fn persist_shape_fingerprint(ty: Type?, value: CtValue) -> String Never! {
+    type_identity_key(ty ?? ast_comptime_value_type(value))
+}
+pub fn persist_encode_payload(value: CtValue) -> String Never! {
+    if value == {
+        .Int(number) -> "{{\"shape\":\"Int\",\"value\":{number}}}"
+        .Bool(value) -> "{{\"shape\":\"Bool\",\"value\":{value}}}"
+        .Str(value) -> "{{\"shape\":\"String\",\"value\":\"{json_escape(value)}\"}}"
+        .Char(value) -> "{{\"shape\":\"Char\",\"value\":\"{json_escape("{value}")}\"}}"
+        .Float(number) -> {
+            if number == {
+                .F32(value) -> "{{\"shape\":\"F32\",\"value\":{comptime_float_render(value, 32)},\"f32\":true}}"
+                .F64(value) -> "{{\"shape\":\"Float\",\"value\":{comptime_float_render(value, 64)},\"f32\":false}}"
+            }
+        }
+        else -> {
+            debug_bytes := [U8]{}
+            canonical_ast_write_ct_value<CanonicalASTParsedDefaults>(&debug_bytes, CanonicalASTParsedDefaults.Parsed, value, false)
+            debug :: String.from_bytes(debug_bytes) ?? panic("canonical CtValue Debug preserves UTF-8")
+            "{{\"shape\":\"Opaque\",\"debug\":\"{json_escape(debug)}\"}}"
+        }
+    }
+}
+pub fn persist_decode_payload(payload: String) -> CtValue? Never! {
+    shape :: persist_json_string_field(payload, "shape") ?? return None
+    if shape == {
+        "Int" -> persist_json_i64_field(payload, "value").map(value -> CtValue.Int{value: value})
+        "Bool" -> persist_json_bool_field(payload, "value").map(value -> CtValue.Bool{value: value})
+        "String" -> persist_json_string_field(payload, "value").map(value -> CtValue.Str{value: value})
+        "Char" -> {
+            text :: persist_json_string_field(payload, "value") ?? return None
+            bytes :: text.bytes()
+            if bytes.len() == 0 || persist_scalar_end(bytes, 0) != bytes.len() -> return None
+            Val(CtValue.Char{value: text.chars()[0]})
+        }
+        "F32" | "Float" -> {
+            raw :: persist_json_raw_field(payload, "value") ?? return None
+            value :: Float.parse(raw) ?? return None
+            f32 :: persist_json_bool_field(payload, "f32") ?? (shape == "F32")
+            Val(CtValue.Float{value: if f32 -> CtFloat.F32{value: persist_narrow_f32(value)} else -> CtFloat.F64{value: value}})
+        }
+        else -> None
+    }
+}
+// This is intentionally the Rust field extractor, NOT the strict JSON parser:
+// arbitrary escapes pass through, invalid Unicode escapes disappear, and short
+// \u sequences are parsed as the collected (up to four) scalars.
+fn persist_unescape_json_string(text: String) -> String Never! {
+    bytes :: text.bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        byte :: bytes[index]
+        index += 1
+        if byte != (U8{92}) { &out.push(byte); next }
+        if index == bytes.len() -> break
+        escaped :: Int.from_u8(bytes[index])
+        end :: persist_scalar_end(bytes, index)
+        if escaped == 117 {
+            index = end
+            count := 0
+            code := 0
+            valid := true
+            saw_digit := false
+            loop index < bytes.len() && count < 4 {
+                digit_byte :: Int.from_u8(bytes[index])
+                scalar_end :: persist_scalar_end(bytes, index)
+                digit :: if { digit_byte >= 48 && digit_byte <= 57 -> digit_byte - 48, digit_byte >= 65 && digit_byte <= 70 -> digit_byte - 55, digit_byte >= 97 && digit_byte <= 102 -> digit_byte - 87, else -> -1 }
+                // Rust u32::from_str_radix accepts one initial '+'.
+                if !(count == 0 && digit_byte == 43) {
+                    if digit < 0 -> valid = false
+                    else { code = code * 16 + digit; saw_digit = true }
+                }
+                index = scalar_end
+                count += 1
+            }
+            if valid && saw_digit && code <= 1114111 && !(code >= 55296 && code <= 57343) -> persist_append(&out, comptime_character(code))
+        } else {
+            decoded :: if { escaped == 110 -> 10, escaped == 114 -> 13, escaped == 116 -> 9, else -> escaped }
+            if decoded != escaped -> &out.push(U8{decoded})
+            else -> loop i in index..<end -> &out.push(bytes[i])
+            index = end
+        }
+    }
+    String.from_bytes(out) ?? panic("unescape preserves Unicode scalars")
+}
+fn persist_scalar_end(bytes: [U8], start: Int) -> Int Never! {
+    first :: Int.from_u8(bytes[start])
+    start + (if first < 128 -> 1 else -> if first < 224 -> 2 else -> if first < 240 -> 3 else -> 4)
+}
+fn persist_append(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+fn persist_json_string_field(payload: String, field: String) -> String? Never! {
+    marker :: "\"{field}\":\""
+    found :: payload.index_of(marker) ?? return None
+    rest := payload.slice((found + marker.len())..<payload.len()) // #4303
+    bytes :: rest.bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        byte :: bytes[index]
+        index += 1
+        if byte == (U8{92}) {
+            if index == bytes.len() -> return None
+            &out.push(byte)
+            end :: persist_scalar_end(bytes, index)
+            loop i in index..<end -> &out.push(bytes[i])
+            index = end
+            next
+        }
+        if byte == (U8{34}) -> return Val(persist_unescape_json_string(String.from_bytes(out) ?? panic("field preserves UTF-8")))
+        &out.push(byte)
+    }
+    None
+}
+fn persist_json_raw_field(payload: String, field: String) -> String? Never! {
+    marker :: "\"{field}\":"
+    found :: payload.index_of(marker) ?? return None
+    rest := payload.slice((found + marker.len())..<payload.len()).trim_start() // #4303
+    bytes :: rest.bytes()
+    end := bytes.len()
+    loop i in 0..<bytes.len() -> if bytes[i] == (U8{44}) || bytes[i] == (U8{125}) { end = i; break }
+    raw := rest.slice(0..<end).trim() // #4303
+    Val(raw)
+}
+fn persist_json_i64_field(payload: String, field: String) -> Int? Never! {
+    raw :: persist_json_raw_field(payload, field) ?? return None
+    bytes :: raw.bytes()
+    if bytes.len() == 0 -> return None
+    start :: if bytes[0] == (U8{43}) || bytes[0] == (U8{45}) -> 1 else -> 0
+    if start == bytes.len() -> return None
+    loop i in start..<bytes.len() -> if bytes[i] < (U8{48}) || bytes[i] > (U8{57}) -> return None
+    value :: Int.parse(raw) ?? return None
+    if value < -9223372036854775808 || value > 9223372036854775807 -> return None
+    Val(value)
+}
+fn persist_json_bool_field(payload: String, field: String) -> Bool? Never! {
+    raw :: persist_json_raw_field(payload, field) ?? return None
+    if raw == { "true" -> Val(true), "false" -> Val(false), else -> None }
+}

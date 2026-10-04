@@ -1,0 +1,54 @@
+// Pure CheckerSchedule::check_every_marker publication controls. These do not
+// stand in for the check -> retained ProgramBundle -> registry witness, whose
+// source ownership belongs to CP-PROGRAM-BUNDLE.
+use jet_foundation.[EveryArg, Func, Item, JobFact]
+use jet_parser.[parse_source]
+
+fn checked_job_registry_test_function(source: String) -> Func Never! {
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    loop item in parsed.program.items {
+        if item == .Func(function) -> return function
+    }
+    panic("no function in schedule fixture")
+}
+
+#Test("every_publication_clears_previous_fact_before_typed_refusal") {
+    function := checked_job_registry_test_function("#[Job, Every(\"03:00\")]\nfn tick() {{}}\n")
+    environment :: sema_scope_environment_init(None, "main", "jobs", "main", "jobs.jet", SemaSourceOrigin.Snapshot, [], [], [])
+    context := sema_check_context_init()
+    first :: sema_check_every_marker(&function, environment, context)
+    assert(first.complete)
+    assert(first.schedule != None)
+    assert_eq(function.every.unwrap().resolved, first.schedule)
+    assert_eq(JobFact.from_function(function).schedule, Val("day 03:00"))
+    // The typed checker owns E0930. This pure guard must clear the old fact
+    // without resolving the argument or introducing a second E0926.
+    context.invalid_every_argument = true
+    refused :: sema_check_every_marker(&function, environment, context)
+    assert(!refused.complete)
+    assert_eq(refused.schedule, None)
+    assert_eq(function.every.unwrap().resolved, None)
+    assert_eq(refused.diagnostics.len(), 0)
+}
+
+#Test("every_dynamic_value_refusal_clears_previous_fact_at_argument_span") {
+    function := checked_job_registry_test_function("#[Job, Every(\"03:00\")]\nfn tick() {{}}\n")
+    dynamic := checked_job_registry_test_function("#[Job, Every(schedule)]\nfn tick(schedule: Duration) {{}}\n")
+    environment :: sema_scope_environment_init(None, "main", "jobs", "main", "jobs.jet", SemaSourceOrigin.Snapshot, [], [], [])
+    context :: sema_check_context_init()
+    first :: sema_check_every_marker(&function, environment, context)
+    assert(first.complete)
+    stale :: function.every.unwrap().resolved
+    assert(stale != None)
+    if dynamic.every == .Val(marker) -> marker.resolved = stale
+    refused :: sema_check_every_marker(&dynamic, environment, context)
+    assert(!refused.complete)
+    assert_eq(dynamic.every.unwrap().resolved, None)
+    assert_eq(refused.schedule, None)
+    assert_eq(refused.diagnostics.len(), 1)
+    assert_eq(refused.diagnostics[0].code, "E0926")
+    if dynamic.every.unwrap().arg == .Expression(expression) {
+        assert_eq(refused.diagnostics[0].span, Val(jet_foundation.expr_span(expression)))
+    } else { panic("the original dynamic argument was not retained") }
+}

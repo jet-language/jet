@@ -1,0 +1,101 @@
+// Original Syntax.rs casing_tests:889–925, unchanged substantive assertions.
+// #4475 gates Unicode property acceptance; no ASCII-only substitute corpus.
+#Test("uncased_unicode_letters_obey_both_grammar_tiers") {
+    assert(name_has_case("日本語", NameCase.Pascal))
+    assert(name_has_case("日本語", NameCase.Snake))
+    assert(canonical_name_case("日本語", NameCase.Pascal) == "日本語")
+    assert(canonical_name_case("日本語", NameCase.Snake) == "日本語")
+}
+#Test("cased_unicode_letters_follow_the_selected_tier") {
+    assert(name_has_case("Éclair", NameCase.Pascal))
+    assert(name_has_case("éclair", NameCase.Snake))
+    assert(canonical_name_case("Éclair", NameCase.Snake) == "éclair")
+    assert(canonical_name_case("éclair", NameCase.Pascal) == "Éclair")
+}
+#Test("acronym_pascal_to_snake") {
+    assert(canonical_name_case("HTTPHeader", NameCase.Snake) == "http_header")
+    assert(canonical_name_case("HTTP_API", NameCase.Snake) == "http_api")
+    assert(canonical_name_case("MacOS", NameCase.Snake) == "mac_os")
+}
+#Test("screaming_constants_use_all_caps") {
+    assert(name_has_case("MAX_RETRIES", NameCase.Screaming))
+    assert(!name_has_case("max_retries", NameCase.Screaming))
+    assert(canonical_name_case("max_retries", NameCase.Screaming) == "MAX_RETRIES")
+    assert(canonical_name_case("HTTPHeader", NameCase.Screaming) == "HTTP_HEADER")
+}
+
+#Test("name category registry preserves all original ordered rows") {
+    categories :: [String]{
+        "associated type", "distinct type", "enum", "enum variant", "variant group", "marker",
+        "protocol", "protocol message", "state", "state type", "struct", "tag", "trait", "type",
+        "type alias", "type parameter", "unit family", "config name", "constant", "field", "function",
+        "generic module", "lambda parameter", "local", "local constant", "loop label", "message field",
+        "method", "module", "module variable", "module alias", "parameter", "pattern binding",
+        "unit member", "value parameter", "variant field",
+    }
+    assert(NAME_CASE_CATEGORIES.len() == categories.len())
+    loop index in 0..<categories.len() {
+        expected :: if index < 17 -> NameCase.Pascal else if index == 18 -> NameCase.Screaming else -> NameCase.Snake
+        assert(NAME_CASE_CATEGORIES[index].category == categories[index])
+        assert(NAME_CASE_CATEGORIES[index].case == expected)
+        assert(name_case_for_category(categories[index]) == Val(expected))
+    }
+    loop category in [String]{"", "Type", "unknown", "module.constant"} -> assert(name_case_for_category(category) == None)
+}
+
+#Test("casing grammar preserves soft public names one mark and invalid underscore branches") {
+    loop case in [NameCase]{.Pascal, .Snake, .Screaming} {
+        assert(name_has_case("_", case))
+        loop name in [String]{"", "$", "$_", "__name", "_name_", "a__b", "1name", "name!", "$$name"} {
+            assert(!name_has_case(name, case))
+        }
+    }
+    assert(name_has_case("$HTTPHeader", NameCase.Pascal))
+    assert(name_has_case("$_http_header", NameCase.Snake))
+    assert(name_has_case("$_HTTP_HEADER", NameCase.Screaming))
+    assert(name_has_case("_Éclair", NameCase.Pascal))
+    assert(name_has_case("_éclair2", NameCase.Snake))
+    assert(!name_has_case("Éclair_Head", NameCase.Pascal))
+    assert(!name_has_case("éclair_Head", NameCase.Snake))
+    assert(!name_has_case("ÉCLAIR_Head", NameCase.Screaming))
+    // Titlecase is alphabetic but neither Lowercase nor Uppercase in Rust.
+    assert(name_has_case("ǅ", NameCase.Pascal))
+    assert(name_has_case("ǅ", NameCase.Snake))
+    assert(name_has_case("ǅ", NameCase.Screaming))
+    assert(!name_has_uppercase("ǅ"))
+    assert(!name_has_uppercase("日本語"))
+    assert(name_has_uppercase("Ⅻ")) // Other_Uppercase, not just Lu.
+    assert(name_has_case("ͅ", NameCase.Snake)) // U+0345 Other_Lowercase.
+    assert(!name_has_case("ͅ", NameCase.Screaming))
+}
+
+#Test("mechanical word splitting preserves glued runs uncased and nonword scalars") {
+    assert(split_pascal_words("HTTPHeader") == [String]{"HTTP", "Header"})
+    assert(split_pascal_words("HTTP_API") == [String]{"HTTP", "API"})
+    assert(split_pascal_words("MacOS") == [String]{"Mac", "OS"})
+    assert(split_pascal_words("HTTPAPI") == [String]{"HTTPAPI"})
+    assert(split_pascal_words("__HTTP__Header_") == [String]{"HTTP", "Header"})
+    assert(split_pascal_words("ÉCLAIRHeader") == [String]{"ÉCLAIR", "Header"})
+    assert(split_pascal_words("日本語HTTPHeader") == [String]{"日本語", "HTTP", "Header"})
+    assert(split_pascal_words("foo2Bar") == [String]{"foo2", "Bar"})
+    assert(split_pascal_words("A1B") == [String]{"A1", "B"})
+    assert(split_pascal_words("") == [String]{})
+    assert(split_pascal_words("___") == [String]{})
+    // The fast path preserves existing underscores, including repeated ones.
+    assert(to_snake_acronym("snake__case_") == "snake__case_")
+    assert(to_snake_acronym("HTTP__API_") == "http_api")
+    assert(to_snake_acronym("ÉclairHeader") == "éclair_header")
+}
+
+#Test("canonical names retain all marks one soft prefix and full Unicode expansions") {
+    assert(canonical_name_case("$$HTTPHeader", NameCase.Snake) == "$$http_header")
+    assert(canonical_name_case("$__http__header_", NameCase.Pascal) == "$_HttpHeader")
+    assert(canonical_name_case("__http__header_", NameCase.Snake) == "_http__header_")
+    assert(canonical_name_case("___", NameCase.Pascal) == "_")
+    assert(canonical_name_case("", NameCase.Screaming) == "")
+    assert(canonical_name_case("$", NameCase.Screaming) == "$")
+    assert(canonical_name_case("ßeta", NameCase.Pascal) == "SSeta")
+    assert(canonical_name_case("straße", NameCase.Screaming) == "STRASSE")
+    assert(canonical_name_case("éCLAIR_tail", NameCase.Pascal) == "ÉCLAIRTail")
+    assert(canonical_name_case("ΑΒΓHeader", NameCase.Snake) == "αβγ_header")
+}

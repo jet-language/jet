@@ -1,0 +1,915 @@
+// PORT-PENDING 0520 crates-jet-codegen-src-codegen-tir-subset-builtin-methods: crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:1-911
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::Codegen::TIR::TNumericOp;
+//RS 
+//RS /// c109 Phase 9: is `method` (with `nargs` arguments) a built-in collection/string
+//RS /// method the TIR lowers? This is the NON-closure, non-numeric, non-handle slice of
+//RS /// built-in method lowering, restricted to the list/map/
+//RS /// string surface (`Source/Collections.rs`). The closure-taking methods (`map`/
+//RS /// `filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` — `Collections::
+//RS /// is_closure_method`) are deferred to the lambda phase; the numeric width/predicate/
+//RS /// numeric queries (`is_nan`/`count_ones`/… — D-NUMOPS1) and the handle methods
+//RS /// (FileWriter/TcpStream/HTTPRequest/… — Phase 10) carry a nominal
+//RS /// `Some(recv_type)`, while parenthesized/fallible String receivers may carry
+//RS /// `Some("String")`; the subset gate admits that one canonical String exception.
+//RS /// This name list is the final filter. The arg count disambiguates `join()` (no
+//RS /// separator) vs `join(sep)`.
+//RS pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
+//RS     // Closure-taking methods are NEVER covered here (Phase 11), even by name.
+//RS     // Exception: 0-arg forms that share a name with a closure adapter
+//RS     // (Bytes.position — cursor read, not Iter.position(pred)).
+//RS     if crate::Collections::is_closure_method(method) && nargs > 0 {
+//RS         return false;
+//RS     }
+//RS     // D-ZIPPAD1: zip-family arity is variadic. Sema has already validated the
+//RS     // receiver and every input/fill label; lowering carries the resolved row
+//RS     // shape, so this gate must not impose an artificial arity ceiling.
+//RS     if matches!(method, "zip" | "zip_short" | "zip_pad") {
+//RS         return true;
+//RS     }
+//RS     matches!(
+//RS         (method, nargs),
+//RS         // D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a
+//RS         // failure; `.partial` and `.notes` read the carrier's middle states.
+//RS         ("or_err", 1) | ("partial", 0) | ("notes", 0)
+//RS         // List + map shared.
+//RS         // D-PLACE1: Atomic<T> methods are keyed by the receiver type in
+//RS         // `method_call_in_subset`; these names are not collection fallbacks.
+//RS         | ("load", 0) | ("store", 1)
+//RS         | ("compare_exchange", 2) | ("publish", 1) | ("observe", 0)
+//RS         |         ("len", 0) | ("is_empty", 0) | ("clear", 0)
+//RS         // List-only, except for Iter's positional terminal.
+//RS         | ("push", 1) | ("append", 1) | ("pop", 0) | ("pop", 1) | ("first", 0) | ("last", 0)
+//RS         | ("index_of" | "index", 1) | ("reverse", 0) | ("sort", 0) | ("sort_desc", 0) | ("join", 1)
+//RS         // List + map: insert/remove/get (the Map vs List branch resolves at lowering).
+//RS         | ("insert", 2) | ("add", 2) | ("add_new", 2) | ("remove", 1 | 2) | ("get", 1)
+//RS         // List + string: contains.
+//RS         | ("contains", 1)
+//RS         // Map-only.
+//RS         | ("keys", 0) | ("values", 0) | ("items", 0) | ("has_key", 1)
+//RS         | ("setdefault", 2)
+//RS         | ("update", 1) | ("merge", 1) | ("merge", 2)
+//RS         | ("strip" | "lstrip" | "rstrip", 0)
+//RS         | ("expandtabs", 1) | ("find", 1) | ("rfind", 1) | ("rindex", 1)
+//RS         | ("partition", 1)
+//RS         | ("repeat", 1) | ("slice", 2)
+//RS         | ("trim_start", 0) | ("trim_end", 0)
+//RS         | ("pad_start", 2) | ("pad_end", 2)
+//RS         | ("is_alphabetic", 0) | ("is_numeric", 0)
+//RS         | ("is_whitespace", 0) | ("is_ascii", 0)
+//RS         | ("to_title", 0) | ("split_once", 1) | ("cut_last", 1)
+//RS         | ("is_lower", 0) | ("is_upper", 0)
+//RS         | ("capitalize", 0) | ("swapcase", 0) | ("normalize", 0)
+//RS         | ("remove_prefix", 1) | ("remove_suffix", 1)
+//RS         | ("rsplit", 1)
+//RS         | ("count", 1) | ("counts", 0) | ("extend", 1) | ("concat", 1)
+//RS         // D-STR-AFTER1: first-occurrence substring split.
+//RS         | ("after", 1) | ("before", 1)
+//RS         // c97/D-STRPARSE1: parsing stays `Type.parse`.
+//RS         | ("lines", 0) | ("bytes", 0)
+//RS         // D-STR-DECLINE1=C: `parse`/`to_int`/`to_float` — same numeric
+//RS         // parse mechanisms, with String as the receiver.
+//RS         | ("parse", 0) | ("to_int", 0) | ("to_float", 0)
+//RS         | ("matches", 1) | ("match", 1)
+//RS         // `to_string` (String/Bool/Char receiver — String may retain
+//RS         // `recv_type == Some("String")` through parentheses/fallibility; Bool/Char
+//RS         // stay untyped here; numeric `to_string` sets another nominal `recv_type`).
+//RS         | ("to_string", 0)
+//RS         // D-ITER1: non-closure lazy adapters.
+//RS         | ("take", 1) | ("skip", 1) | ("step_by", 1)
+//RS         | ("dedup", 0) | ("chunks", 1) | ("windows", 1)
+//RS         | ("indexed", 0) | ("indexes", 0) | ("zip", 1)
+//RS         | ("sum", 0) | ("product", 0) | ("min", 0) | ("max", 0)
+//RS         | ("flatten", 0) | ("intersperse", 1) | ("unzip", 0)
+//RS         // #1479 Iter ledger surface (non-closure).
+//RS         | ("cycle", 1) | ("drop_last", 1) | ("shuffle", 0)
+//RS         | ("is_sorted", 0) | ("average", 0)
+//RS         // D-ITER-RESUME1=A: one exclusive pull from an Iter.
+//RS         | ("next", 0)
+//RS         // D-LOOPMAP1=B: enter the lazy pipeline plane from an in-memory list.
+//RS         | ("lazy", 0)
+//RS         // D-COLLBREADTH1=A: Set<T> instance methods.
+//RS         | ("add", 1) | ("discard", 1) | ("union", 1) | ("to_list", 0)
+//RS         | ("intersection", 1) | ("difference", 1)
+//RS         | ("symmetric_difference", 1)
+//RS         | ("difference_update" | "intersection_update" | "symmetric_difference_update", 1)
+//RS         | ("is_subset" | "issubset", 1)
+//RS         | ("is_superset" | "issuperset", 1)
+//RS         | ("is_disjoint" | "isdisjoint", 1)
+//RS         | ("to_set", 0)
+//RS         | ("peek", 0) | ("to_sorted_list", 0)
+//RS         | ("capacity", 0) | ("count", 0) | ("to_bytes", 0)
+//RS         | ("write_u8", 1) | ("write_byte", 1) | ("write_u16_le", 1) | ("write_u16_be", 1)
+//RS         | ("write_i8", 1)
+//RS         | ("write_i16_le", 1) | ("write_i16_be", 1)
+//RS         | ("write_u32_le", 1) | ("write_u32_be", 1)
+//RS         | ("write_i32_le", 1) | ("write_i32_be", 1)
+//RS         | ("write_u64_le", 1) | ("write_u64_be", 1)
+//RS         | ("write_i64_le", 1) | ("write_i64_be", 1)
+//RS         | ("write_f32_le", 1) | ("write_f32_be", 1)
+//RS         | ("write_f64_le", 1) | ("write_f64_be", 1)
+//RS         | ("write_bytes", 1) | ("write", 1)
+//RS         | ("position", 0) | ("eof", 0) | ("rewind", 0) | ("flush", 0) | ("close", 0)
+//RS         | ("shutdown", 0) | ("get_buffer", 0) | ("buffer", 0) | ("string", 0)
+//RS         | ("title", 0) | ("clone", 0) | ("copy", 0) | ("read", 0)
+//RS         | ("seek", 1) | ("read_bytes", 1) | ("read_string", 1)
+//RS         | ("last_index_of", 1) | ("equal", 1) | ("compare", 1) | ("copy_to", 1)
+//RS         | ("binary_search", 1) | ("random", 0) | ("min_max", 0) | ("slice", 1)
+//RS         | ("contains_value", 1) | ("pop_first", 0) | ("top_n", 1)
+//RS         | ("write_to", 1)
+//RS         // D-TAG1: Tally<T> instance methods (add/remove share list/set arms above).
+//RS         | ("has", 1)
+//RS         // D-COLLBREADTH1=A: Queue<T> instance methods.
+//RS         | ("push_front", 1) | ("push_back", 1)
+//RS         | ("pop_front", 0) | ("pop_back", 0)
+//RS         | ("peek_front", 0) | ("peek_back", 0)
+//RS         | ("delete", 1)
+//RS         // D-FAILCOMP1: failure-aware list adapter.
+//RS         | ("try_collect", 0)
+//RS         // D-ALLOCFAIL1=A: the fallible-allocation rail is an ordinary builtin
+//RS         // receiver op on the same list/map/string surface — sema types it via
+//RS         // `Collections::*_method_return` (so `recv_type` stays `None`),
+//RS         // `resolve_builtin_op` maps it to `TBuiltinOp::TryPush`/`TryStringPush`/
+//RS         // `TryReserve`/`TryInsertMap`, and emit renders `jet_list_try_push`/
+//RS         // `jet_string_try_push`/`jet_list_try_reserve`/`jet_map_try_insert`.
+//RS         // This gate is the third table of that set and must name them too, or a
+//RS         // `#Test` body using the rail leaves the subset and `emit_test_body`
+//RS         // reports an internal compiler error instead of emitting (I2/R7).
+//RS         | ("try_push", 1) | ("try_reserve", 1) | ("try_insert", 2)
+//RS         // D-DYNARRAY1: `list.view(a..b)` — zero-copy window constructor. The
+//RS         // View<T> read-accessor methods (`get`/`first`/`last`/`index_of`/
+//RS         // `len`/`is_empty`/`contains`) need no separate entry — they share
+//RS         // the exact same (name, argcount) pairs as the list arms above, and
+//RS         // `resolve_builtin_op`/`method_call_in_subset` don't branch on
+//RS         // receiver type for those (a `&[T]` receiver satisfies them exactly
+//RS         // as a `Vec<T>` does — see `Context::rust_type`'s `View` arm).
+//RS         | ("view", 2)
+//RS         | ("split_write", 1)
+//RS         | ("get_disjoint_write", 1)
+//RS     )
+//RS     // NOTE: `is_empty` (now Bool-typed in `Collections::*_method_return` after the
+//RS     // c109 fix; lowered to `TBuiltinOp::IsEmpty`) is covered above. `join()` (no
+//RS     // separator) stays excluded: sema requires `join(sep)` (E0311 on no-arg), so the
+//RS     // no-arg form never reaches codegen — its AST arm is dead.
+//RS }
+//RS 
+//RS /// c109 Phase 21 + D-COROUTINE1=A / D-TUPLE-DESTRUCT1: is `(method, nargs)` a
+//RS /// Task/Receiver/Sender concurrency method (`emit_builtin_method`'s `Type::Apply`-
+//RS /// receiver arms)? `Task.join()/detach()/pause()/pause(mode)/resume()/cancel()`,
+//RS /// `Receiver.receive()`, `Sender.send(v)`, `close()`. Card #1685 moved the spawn
+//RS /// surface to one keyword with nested combinators, retiring `Task.wait()`,
+//RS /// `.trace()`, `.exception()` and the `*_all` task-group twins from this set;
+//RS /// `wait`/0 now belongs to `Process` and `trace`/0 to the Event family, both keyed
+//RS /// on receiver type below. The arg count disambiguates `Task.join()` (0 args) from
+//RS /// the list `join(sep)` (1 arg, shape d) and `Sender.send(v)`
+//RS /// (1 arg) — every name+arity here is disjoint from every other covered shape.
+//RS pub(crate) fn is_concurrency_method_name(method: &str, nargs: usize) -> bool {
+//RS     matches!(
+//RS         (method, nargs),
+//RS         ("join", 0)
+//RS             | ("detach", 0)
+//RS             | ("pause", 0)
+//RS             | ("pause", 1)
+//RS             | ("resume", 0)
+//RS             | ("cancel", 0)
+//RS             | ("receive", 0)
+//RS             | ("try_receive", 0)
+//RS             | ("is_timer", 0)
+//RS             | ("is_interval", 0)
+//RS             | ("is_cancelled", 0)
+//RS             | ("is_ready", 0)
+//RS             | ("delay_ms", 0)
+//RS             | ("send", 1)
+//RS             | ("close", 0)
+//RS     )
+//RS }
+//RS 
+//RS /// D-REACT1=B: is `(method, nargs)` a reactive `Signal`/`Derived` method?
+//RS /// `Signal.get()`/`Derived.get()` (0 args), `Signal.set(v)` (1 arg). Always keyed
+//RS /// together with `recv_type == Some("Signal"|"Derived")`, never on the name alone.
+//RS pub(crate) fn is_reactive_method_name(method: &str, nargs: usize) -> bool {
+//RS     matches!((method, nargs), ("get", 0) | ("set", 1))
+//RS }
+//RS 
+//RS pub(crate) fn is_reactive_effect_method_name(method: &str, nargs: usize) -> bool {
+//RS     matches!((method, nargs), ("unsubscribe" | "is_active", 0))
+//RS }
+//RS 
+//RS pub(crate) fn is_event_handle_type(name: Option<&str>) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         Some(
+//RS             "Event"
+//RS                 | "AsyncEvent"
+//RS                 | "Hook"
+//RS                 | "DecisionHook"
+//RS                 | "Subscription"
+//RS                 | "EventScope"
+//RS                 | "EventTrace"
+//RS                 | "DispatchReport"
+//RS         )
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn is_event_method_name(method: &str, nargs: usize) -> bool {
+//RS     matches!(
+//RS         (method, nargs),
+//RS         ("on" | "once", 2)
+//RS             | ("on_priority", 3)
+//RS             | ("emit" | "emit_async", 1)
+//RS             | ("run", 1 | 2)
+//RS             | ("unsubscribe" | "is_active" | "cancel" | "active_count", 0)
+//RS             | ("trace" | "listener_count" | "queued_count", 0)
+//RS             | ("summary" | "delivered" | "queued" | "dropped", 0)
+//RS             | (
+//RS                 "close"
+//RS                     | "running_count"
+//RS                     | "blocked_count"
+//RS                     | "accepted"
+//RS                     | "delivered_handlers"
+//RS                     | "state"
+//RS                     | "failures",
+//RS                 0
+//RS             )
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn is_watch_handle_type(name: Option<&str>) -> bool {
+//RS     matches!(name, Some("WatchHandle" | "WatchSet"))
+//RS }
+//RS 
+//RS pub(crate) fn is_watch_method_name(method: &str, nargs: usize) -> bool {
+//RS     matches!(
+//RS         (method, nargs),
+//RS         ("poll" | "events" | "summary", 0)
+//RS             | ("is_active" | "cancel", 0)
+//RS             | ("on" | "once", 2)
+//RS             | ("add", 1)
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn is_process_handle_method_name(
+//RS     recv_type: Option<&str>,
+//RS     method: &str,
+//RS     nargs: usize,
+//RS ) -> bool {
+//RS     match recv_type {
+//RS         Some("ProcessSpec") => matches!(
+//RS             (method, nargs),
+//RS             ("cwd" | "env_remove" | "stdin" | "stdout" | "stderr" | "arg" | "args_extend", 1)
+//RS                 | ("env", 2)
+//RS                 // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: beginner and
+//RS                 // expert terminal opt-in plus the keyed host report.
+//RS                 | ("terminal", 0 | 1)
+//RS                 | ("env_clear" | "detached" | "abilities" | "plan" | "run" | "run_checked" | "spawn", 0)
+//RS                 | ("under", 1)
+//RS                 | ("timeout" | "cpu_time_limit" | "output_limit" | "memory_limit" | "open_file_limit", 1)
+//RS         ),
+//RS         Some("ProcessChild") => matches!(
+//RS             (method, nargs),
+//RS             (
+//RS                 "id" | "wait" | "exited" | "kill" | "terminate" | "interrupt",
+//RS                 0
+//RS             )
+//RS         ),
+//RS         Some("TerminalSession") => matches!((method, nargs), ("resize", 1)),
+//RS         // D-PROCESS1=A / D-FOUND-LIFECYCLE1=A: `.write(text)` and `.close()`
+//RS         // on `child.stdin`.
+//RS         Some("ProcessStdin") => matches!((method, nargs), ("write", 1) | ("close", 0)),
+//RS         // D-PROCESS1=A: `.lines()` on `child.stdout`/`child.stderr`.
+//RS         Some("ProcessStdoutStream") | Some("ProcessStderrStream") => {
+//RS             matches!((method, nargs), ("lines", 0))
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-TYPE2-UNCERT1=A: Measurement observations plus the internal `sqrt` route.
+//RS /// Arithmetic lowers directly from the ordinary operators to the resident
+//RS /// Measurement handle op, so this table does not keep named arithmetic aliases.
+//RS pub(crate) fn is_measurement_method_name(method: &str, nargs: usize) -> bool {
+//RS     matches!((method, nargs), ("value" | "uncertainty" | "sqrt", 0))
+//RS }
+//RS 
+//RS /// D-PENDING1=B: is `(method, nargs)` a `Loadable<T,E>` method?
+//RS /// `.is_loading()/.is_loaded()/.is_failed()/.is_idle()/.loaded()` (0 args),
+//RS /// `.or_else(default)` (1 arg).
+//RS /// Always keyed with `recv_type == Some("Loadable")`.
+//RS pub(crate) fn is_loadable_method_name(method: &str, nargs: usize) -> bool {
+//RS     matches!(
+//RS         (method, nargs),
+//RS         (
+//RS             "is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded",
+//RS             0
+//RS         ) | ("or_else", 1)
+//RS     )
+//RS }
+//RS 
+//RS /// D-RENDERTGT2=A (c133 M1/M2): is `(backend, method, nargs)` a UI backend method?
+//RS pub(crate) fn is_ui_backend_method_name(backend: Option<&str>, method: &str, nargs: usize) -> bool {
+//RS     match (backend, method, nargs) {
+//RS         (_, "measure", 2) | (_, "layout", 2) | (_, "paint", 1) | (_, "on_event", 1) => true,
+//RS         // D-UI-MOUNT1=A: measure→layout→paint; 1-arg uses the backend default viewport.
+//RS         (_, "mount", 1 | 2) => true,
+//RS         (Some("NullBackend"), "commands", 0) => true,
+//RS         (Some("TUIBackend"), "frame_lines" | "render_count", 0) => true,
+//RS         // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing.
+//RS         (_, "set_focus_group", 1) | (_, "focused_label", 0) => true,
+//RS         // D-UIDEVSHELL1=A (c134 Phase 8): native GTK4 retained-widget surface.
+//RS         (Some("GtkBackend"), "label" | "button", 1) => true,
+//RS         (Some("GtkBackend"), "set_text" | "set_color" | "on_click", 2) => true,
+//RS         (Some("GtkBackend"), "set_size", 3) => true,
+//RS         (Some("GtkBackend"), "present", 1) => true,
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// c-devserver (owner-directed 2026-07-01): is `(method, nargs)` a `DevServer`
+//RS /// builder method? `.html(path)` / `.port(n)` (1 arg each), `.serve()` (0 args).
+//RS pub(crate) fn is_devserver_method_name(method: &str, nargs: usize) -> bool {
+//RS     matches!((method, nargs), ("html", 1) | ("port", 1) | ("serve", 0))
+//RS }
+//RS 
+//RS /// D-WEBAPP1=D: is `(method, nargs)` an `App` builder method?
+//RS pub(crate) fn is_app_method_name(method: &str, nargs: usize) -> bool {
+//RS     matches!(
+//RS         (method, nargs),
+//RS         ("route" | "page" | "layout", 2)
+//RS             | ("loader", 2 | 3)
+//RS             | ("pending" | "not_found" | "error", 1)
+//RS             | ("action" | "form" | "data", 2)
+//RS             | ("mount", 2 | 3 | 4)
+//RS             | (
+//RS                 "routes"
+//RS                     | "security"
+//RS                     | "assets"
+//RS                     | "split"
+//RS                     | "code_split"
+//RS                     | "cache"
+//RS                     | "a11y"
+//RS                     | "adapter",
+//RS                 1
+//RS             )
+//RS             | (
+//RS                 "csr"
+//RS                     | "ssr"
+//RS                     | "ssg"
+//RS                     | "stream"
+//RS                     | "streaming"
+//RS                     | "island"
+//RS                     | "hydration_dev"
+//RS                     | "hydration_release"
+//RS                     | "facts_json",
+//RS                 0
+//RS             )
+//RS             | ("serve", 0 | 1)
+//RS             | ("serve_on", 1)
+//RS     )
+//RS }
+//RS 
+//RS /// D-NETDEP1=A / D-HTTPLIB1=A: is this an HTTP type?
+//RS pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
+//RS     matches!(
+//RS         recv_type,
+//RS         Some(
+//RS             "HTTPRequest"
+//RS                 | "HTTPClient"
+//RS                 | "HTTPResponse"
+//RS                 | "Headers"
+//RS                 | "Body"
+//RS                 | "HTTPMux"
+//RS                 | "HTTPHandler"
+//RS                 | "HTTPServer"
+//RS                 | "HTTPServerTLS"
+//RS                 | "WsConn"
+//RS                 | "WsMessage"
+//RS                 | "Browser"
+//RS                 | "BrowserContext"
+//RS                 | "BrowserPage"
+//RS                 | "BrowserFrame"
+//RS                 | "BrowserLocator"
+//RS                 | "BrowserIntercept"
+//RS                 | "BrowserEvent"
+//RS                 | "BrowserTrace"
+//RS                 | "BrowserReceipt"
+//RS                 | "BrowserPrivacy"
+//RS                 | "BrowserAbilities"
+//RS                 | "BrowserProtocol"
+//RS                 | "BrowserLocked",
+//RS         )
+//RS     )
+//RS }
+//RS 
+//RS /// D-NETDEP1=A / D-HTTPLIB1=A: is `method` valid for this HTTP type?
+//RS pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool {
+//RS     match recv_type {
+//RS         Some("HTTPRequest") => matches!(
+//RS             method,
+//RS             "method"
+//RS                 | "path"
+//RS                 | "param"
+//RS                 | "body_len"
+//RS                 | "under_limit"
+//RS                 | "header"
+//RS                 | "body"
+//RS                 | "text"
+//RS                 | "timeout"
+//RS                 | "connect_timeout"
+//RS                 | "read_timeout"
+//RS                 | "total_timeout"
+//RS                 | "dns_timeout"
+//RS                 | "tls_timeout"
+//RS                 | "write_timeout"
+//RS                 | "first_byte_timeout"
+//RS                 | "redirects"
+//RS                 | "proxy"
+//RS                 | "cookie"
+//RS                 | "form"
+//RS                 | "multipart_text"
+//RS                 | "send"
+//RS                 | "trailers"
+//RS                 | "json"
+//RS         ),
+//RS         Some("HTTPResponse") => matches!(
+//RS             method,
+//RS             "status"
+//RS                 | "text"
+//RS                 | "json"
+//RS                 | "body"
+//RS                 | "header"
+//RS                 | "cookies"
+//RS                 | "trailers"
+//RS                 | "protocol"
+//RS                 | "remote_address"
+//RS                 | "redirect_history"
+//RS                 | "timings"
+//RS                 | "reused_connection"
+//RS                 | "raw_content_encoding"
+//RS         ),
+//RS         Some("HTTPClient") => matches!(
+//RS             method,
+//RS             "cookies"
+//RS                 | "redirects"
+//RS                 | "protocols"
+//RS                 | "timeouts"
+//RS                 | "raw_encoding"
+//RS                 | "proxy"
+//RS                 | "tls"
+//RS                 | "allow_http_downgrade"
+//RS                 | "retries"
+//RS                 | "send"
+//RS         ),
+//RS         Some("Headers") => matches!(method, "first" | "all" | "append" | "set" | "remove"),
+//RS         Some("Body") => matches!(method, "bytes" | "text" | "json" | "chunks" | "copy_to"),
+//RS         Some("HTTPMux") => matches!(
+//RS             method,
+//RS             "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"
+//RS         ),
+//RS         Some("HTTPHandler") => method == "handle",
+//RS         Some("HTTPServer") => matches!(method, "local_addr" | "serve" | "shutdown" | "wait"),
+//RS         Some("WsConn") => matches!(method, "send_text" | "send_bytes" | "recv" | "close"),
+//RS         Some("WsMessage") => matches!(
+//RS             method,
+//RS             "is_text" | "is_binary" | "is_close" | "text" | "bytes"
+//RS         ),
+//RS         Some("Browser") => matches!(
+//RS             method,
+//RS             "abilities"
+//RS                 | "context"
+//RS                 | "subscribe"
+//RS                 | "next_event"
+//RS                 | "add_intercept"
+//RS                 | "add_intercept_url"
+//RS                 | "continue_request"
+//RS                 | "fail_request"
+//RS                 | "fulfill_request"
+//RS                 | "allow_downloads"
+//RS                 | "protocol"
+//RS                 | "trace"
+//RS                 | "privacy"
+//RS                 | "receipt"
+//RS                 | "close"
+//RS         ),
+//RS         Some("BrowserContext") => {
+//RS             matches!(method, "page" | "tab" | "close" | "isolated" | "user_hash")
+//RS         }
+//RS         Some("BrowserPage") => matches!(
+//RS             method,
+//RS             "goto"
+//RS                 | "get_by_role"
+//RS                 | "get_by_text"
+//RS                 | "get_by_label"
+//RS                 | "get_by_placeholder"
+//RS                 | "get_by_test_id"
+//RS                 | "get_by_css"
+//RS                 | "close"
+//RS                 | "main_frame"
+//RS                 | "frames"
+//RS                 | "screenshot"
+//RS                 | "pdf"
+//RS                 | "set_cookie"
+//RS                 | "cookie"
+//RS                 | "clear_cookies"
+//RS                 | "storage_get"
+//RS                 | "storage_set"
+//RS                 | "storage_clear"
+//RS         ),
+//RS         Some("BrowserFrame") => method == "close",
+//RS         Some("BrowserLocator") => {
+//RS             matches!(
+//RS                 method,
+//RS                 "wait" | "wait_gone" | "click" | "hover" | "fill" | "press" | "set_files"
+//RS             )
+//RS         }
+//RS         Some("BrowserIntercept") => method == "remove",
+//RS         Some("BrowserEvent") => matches!(
+//RS             method,
+//RS             "kind"
+//RS                 | "request_id"
+//RS                 | "request_method"
+//RS                 | "url_hash"
+//RS                 | "is_blocked"
+//RS                 | "status_code"
+//RS                 | "download_id"
+//RS                 | "suggested_filename_hash"
+//RS         ),
+//RS         Some("BrowserProtocol") => method == "send",
+//RS         Some("BrowserAbilities") => matches!(method, "bidi" | "cdp" | "profile"),
+//RS         Some("BrowserTrace") => matches!(method, "entry_count" | "redacted" | "summary"),
+//RS         Some("BrowserReceipt") => {
+//RS             matches!(
+//RS                 method,
+//RS                 "entry_count" | "redacted" | "summary" | "isolated" | "cleaned"
+//RS             )
+//RS         }
+//RS         Some("BrowserPrivacy") => {
+//RS             matches!(
+//RS                 method,
+//RS                 "isolated_profiles" | "redact_receipts" | "shared_profiles"
+//RS             )
+//RS         }
+//RS         Some("BrowserLocked") => {
+//RS             matches!(
+//RS                 method,
+//RS                 "engine" | "version" | "binary" | "protocol" | "verify"
+//RS             )
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-TIMEDEPTH1=A: is `method` valid for this civil-time type?
+//RS ///
+//RS /// The one table (I8). Lowering builds every `CivilTimeMethod` node from it, and
+//RS /// the resident-JIT residency gate (`jet-jit/src/jit/safety.rs`) asks the same
+//RS /// question instead of keeping a second flattened copy — the copy that admitted
+//RS /// `ZonedDateTime.add_duration` with no host arm behind it (#2030).
+//RS pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool {
+//RS     match recv_type {
+//RS         Some("Date" | "LocalDate") => matches!(
+//RS             method,
+//RS             "year"
+//RS                 | "month"
+//RS                 | "day"
+//RS                 | "add_days"
+//RS                 | "add_months"
+//RS                 | "add_period"
+//RS                 | "subtract_period"
+//RS                 | "diff_days"
+//RS                 | "weekday"
+//RS                 | "iso_weekday"
+//RS                 | "day_of_year"
+//RS                 | "iso_week"
+//RS                 | "iso_week_year"
+//RS                 | "quarter_of_year"
+//RS                 | "days_in_month"
+//RS                 | "is_leap_year"
+//RS                 | "truncate"
+//RS                 | "replace"
+//RS                 | "format"
+//RS                 | "format_checked"
+//RS                 | "until"
+//RS                 | "since"
+//RS                 | "with"
+//RS                 | "to_string"
+//RS                 | "equal"
+//RS                 | "compare"
+//RS         ),
+//RS         Some("LocalTime") => matches!(
+//RS             method,
+//RS             "hour"
+//RS                 | "minute"
+//RS                 | "second"
+//RS                 | "millisecond"
+//RS                 | "microsecond"
+//RS                 | "nanosecond"
+//RS                 | "add_duration"
+//RS                 | "subtract_duration"
+//RS                 | "round"
+//RS                 | "truncate"
+//RS                 | "floor"
+//RS                 | "ceil"
+//RS                 | "until"
+//RS                 | "since"
+//RS                 | "format"
+//RS                 | "format_checked"
+//RS                 | "to_string"
+//RS                 | "equal"
+//RS                 | "compare"
+//RS         ),
+//RS         Some("DateTime") => matches!(
+//RS             method,
+//RS             "hour"
+//RS                 | "minute"
+//RS                 | "second"
+//RS                 | "millisecond"
+//RS                 | "microsecond"
+//RS                 | "nanosecond"
+//RS                 | "to_timestamp"
+//RS                 | "to_unix_ms"
+//RS                 | "to_unix_s"
+//RS                 | "to_unix_us"
+//RS                 | "to_unix_ns"
+//RS                 | "date"
+//RS                 | "time"
+//RS                 | "plus_duration"
+//RS                 | "subtract_duration"
+//RS                 | "add_nanoseconds"
+//RS                 | "difference"
+//RS                 | "add_period"
+//RS                 | "subtract_period"
+//RS                 | "until"
+//RS                 | "since"
+//RS                 | "truncate"
+//RS                 | "round"
+//RS                 | "floor"
+//RS                 | "ceil"
+//RS                 | "replace"
+//RS                 | "with"
+//RS                 | "in_zone"
+//RS                 | "format_rfc3339"
+//RS                 | "format"
+//RS                 | "format_checked"
+//RS                 | "to_string"
+//RS                 | "equal"
+//RS                 | "compare"
+//RS         ),
+//RS         Some("Instant") => matches!(method, "elapsed_millis" | "elapsed" | "equal" | "compare"),
+//RS         Some("Period") => matches!(
+//RS             method,
+//RS             "years"
+//RS                 | "months"
+//RS                 | "days"
+//RS                 | "sign"
+//RS                 | "is_zero"
+//RS                 | "abs"
+//RS                 | "negated"
+//RS                 | "add"
+//RS                 | "sub"
+//RS                 | "total_in"
+//RS                 | "to_string"
+//RS         ),
+//RS         Some("Zone") => matches!(
+//RS             method,
+//RS             "name" | "next_transition" | "previous_transition" | "start_of_day" | "hours_in_day"
+//RS         ),
+//RS         Some("ZonedDateTime") => matches!(
+//RS             method,
+//RS             "date"
+//RS                 | "time"
+//RS                 | "offset_seconds"
+//RS                 | "is_dst"
+//RS                 | "to_datetime"
+//RS                 | "zone"
+//RS                 | "add_duration"
+//RS                 | "subtract_duration"
+//RS                 | "add_period"
+//RS                 | "subtract_period"
+//RS                 | "with_time"
+//RS                 | "with_zone"
+//RS                 | "until"
+//RS                 | "since"
+//RS                 | "next_transition"
+//RS                 | "previous_transition"
+//RS                 | "start_of_day"
+//RS                 | "hours_in_day"
+//RS                 | "format"
+//RS                 | "format_rfc9557"
+//RS                 | "format_checked"
+//RS                 | "to_string"
+//RS                 | "equal"
+//RS                 | "compare"
+//RS         ),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-APPROX1=A: is this a sketch receiver type?
+//RS pub(crate) fn is_sketch_type(recv_type: Option<&str>) -> bool {
+//RS     matches!(
+//RS         recv_type,
+//RS         Some("HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler")
+//RS     )
+//RS }
+//RS 
+//RS /// D-APPROX1=A: is `method` a valid method for this sketch type?
+//RS pub(crate) fn is_sketch_method_name(recv_type: Option<&str>, method: &str) -> bool {
+//RS     match recv_type {
+//RS         Some("HyperLogLog") => matches!(method, "add" | "count"),
+//RS         Some("TDigest") => matches!(method, "add" | "quantile"),
+//RS         Some("CountMinSketch") => matches!(method, "add" | "count"),
+//RS         Some("ReservoirSampler") => matches!(method, "add" | "sample"),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// Resolve a numeric receiver query into a total TIR operation.
+//RS pub(crate) fn resolve_numeric_op(method: &str, src_name: &str, line: u32) -> Option<TNumericOp> {
+//RS     // D-GO127-STDLIB1=A: exact Int's Euclidean pair is binary, so its
+//RS     // source line travels with the resolved operation for the zero-divisor
+//RS     // boundary. The right-hand expression is carried by NumericBinaryMethod.
+//RS     if src_name == "Int" {
+//RS         match method {
+//RS             crate::Syntax::METHOD_DIV_EUCLID => return Some(TNumericOp::EuclideanDiv { line }),
+//RS             crate::Syntax::METHOD_REM_EUCLID => return Some(TNumericOp::EuclideanRem { line }),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     // Float predicates → `(recv).{method}()`.
+//RS     if let "is_nan" | "is_infinite" | "is_finite" = method {
+//RS         return Some(TNumericOp::Predicate(method.to_string()));
+//RS     }
+//RS     // Integer bit-population queries → `((recv).{method}() as i64)`.
+//RS     if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" | "bit_count"
+//RS     | "bit_length" = method
+//RS     {
+//RS         let width = match src_name {
+//RS             "I8" | "U8" => 8,
+//RS             "I16" | "U16" => 16,
+//RS             "I32" | "U32" => 32,
+//RS             _ => 64,
+//RS         };
+//RS         return Some(TNumericOp::BitCount {
+//RS             method: method.to_string(),
+//RS             width,
+//RS         });
+//RS     }
+//RS     // `to_string` on a numeric receiver → `(recv).jet_show()` (the AST `to_string` arm).
+//RS     if method == "to_string" {
+//RS         return Some(TNumericOp::ToShow);
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS /// D-SHAPE-CONVERT1=A: resolve `Target.from_source(value)` to the existing
+//RS /// numeric conversion TIR operation. The call direction changes; the checked
+//RS /// widening/narrowing law does not.
+//RS pub(crate) fn resolve_numeric_conversion_op(
+//RS     target_name: &str,
+//RS     source_name: &str,
+//RS ) -> Option<TNumericOp> {
+//RS     let (dst_rust, dst_int) = numeric_rust_type_tir(target_name)?;
+//RS     let Some((dsigned, dbits)) = dst_int else {
+//RS         if dst_rust == "f32" && matches!(source_name, "Float" | "F64") {
+//RS             return Some(TNumericOp::FloatNarrow {
+//RS                 dst_spelling: target_name.to_string(),
+//RS             });
+//RS         }
+//RS         return Some(TNumericOp::CastAs {
+//RS             dst_rust: dst_rust.to_string(),
+//RS         });
+//RS     };
+//RS     // `U64` is carried as an i64 word at the TIR/evaluator boundary. A
+//RS     // direct `TryFrom<i64>` would inspect the carrier's signed spelling and
+//RS     // reject or sign-wrap values whose high bit is set. The existing CastAs
+//RS     // adapters instead select the exact `Int.from_u64` Prelude path.
+//RS     if target_name == "Int" && matches!(parse_int_name_tir(source_name), Some((false, _))) {
+//RS         return Some(TNumericOp::CastAs {
+//RS             dst_rust: dst_rust.to_string(),
+//RS         });
+//RS     }
+//RS     if source_name == "Int" && target_name != "Int" {
+//RS         return Some(TNumericOp::TryFrom {
+//RS             host_kind: numeric_host_kind(dsigned, dbits)?,
+//RS             dst_rust: dst_rust.to_string(),
+//RS             dst_spelling: target_name.to_string(),
+//RS         });
+//RS     }
+//RS     match parse_int_name_tir(source_name) {
+//RS         Some((ssigned, sbits)) => {
+//RS             let (slo, shi) = crate::AST::int_range(ssigned, sbits);
+//RS             let (dlo, dhi) = crate::AST::int_range(dsigned, dbits);
+//RS             if dlo <= slo && shi <= dhi {
+//RS                 Some(TNumericOp::CastAs {
+//RS                     dst_rust: dst_rust.to_string(),
+//RS                 })
+//RS             } else {
+//RS                 Some(TNumericOp::TryFrom {
+//RS                     host_kind: numeric_host_kind(dsigned, dbits)?,
+//RS                     dst_rust: dst_rust.to_string(),
+//RS                     dst_spelling: target_name.to_string(),
+//RS                 })
+//RS             }
+//RS         }
+//RS         None => {
+//RS             let (lo, hi) = crate::AST::int_range(dsigned, dbits);
+//RS             Some(TNumericOp::FloatToInt {
+//RS                 host_kind: numeric_host_kind(dsigned, dbits)?,
+//RS                 dst_rust: dst_rust.to_string(),
+//RS                 dst_spelling: target_name.to_string(),
+//RS                 lower: format!("{lo}.0"),
+//RS                 upper_exclusive: format!("{}.0", hi + 1),
+//RS             })
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn numeric_host_kind(signed: bool, bits: u8) -> Option<i64> {
+//RS     Some(match (signed, bits) {
+//RS         (true, 8) => 0,
+//RS         (true, 16) => 1,
+//RS         (true, 32) => 2,
+//RS         (true, 64) => 3,
+//RS         (false, 8) => 4,
+//RS         (false, 16) => 5,
+//RS         (false, 32) => 6,
+//RS         (false, 64) => 7,
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn numeric_rust_type_tir(name: &str) -> Option<(&'static str, Option<(bool, u8)>)> {
+//RS     Some(match name {
+//RS         "I8" => ("i8", Some((true, 8))),
+//RS         "I16" => ("i16", Some((true, 16))),
+//RS         "I32" => ("i32", Some((true, 32))),
+//RS         "I64" | "Int" => ("i64", Some((true, 64))),
+//RS         "U8" => ("u8", Some((false, 8))),
+//RS         "U16" => ("u16", Some((false, 16))),
+//RS         "U32" => ("u32", Some((false, 32))),
+//RS         "U64" => ("u64", Some((false, 64))),
+//RS         "F32" => ("f32", None),
+//RS         "F64" | "Float" => ("f64", None),
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS /// c109 Phase 12: TIR-local copy of `parse_int_name` —
+//RS /// parse a numeric type name to `(signed, bits)`, `None` for floats/non-numeric.
+//RS pub(crate) fn parse_int_name_tir(name: &str) -> Option<(bool, u8)> {
+//RS     match name {
+//RS         "Int" => Some((true, 64)),
+//RS         "Float" | "F32" | "F64" => None,
+//RS         _ => {
+//RS             let signed = name.starts_with('I');
+//RS             if (signed || name.starts_with('U')) && name.len() > 1 {
+//RS                 name[1..].parse::<u8>().ok().map(|b| (signed, b))
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Is `method` (with `nargs` args) a numeric method the TIR lowers?
+//RS /// This is the D-INTBIG1/D-NUMOPS1 slice of
+//RS /// `emit_builtin_method` keyed on a numeric receiver (`recv_type == Some(numeric)`):
+//RS /// the float predicates (`is_nan`/`is_infinite`/`is_finite`), the integer bit-pop
+//RS /// queries (`count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros`), and the
+//RS /// fixed-width overflow-policy methods. `to_string` on a numeric receiver is NOT here — it sets
+//RS /// `recv_type == Some(numeric)` too, but the AST routes it through the plain
+//RS /// `to_string` arm (`(recv).jet_show()`), which is the Phase-9 `BuiltinMethod` shape;
+//RS /// a numeric `to_string` carries `recv_type == Some`, so it never reaches the Phase-9
+//RS /// `recv_type.is_none()` gate — it must be covered here as a distinct op.
+//RS pub(crate) fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
+//RS     crate::Collections::numeric_overflow_method(method, nargs).is_some()
+//RS         || (nargs == 1
+//RS             && matches!(
+//RS                 method,
+//RS                 crate::Syntax::METHOD_DIV_EUCLID | crate::Syntax::METHOD_REM_EUCLID
+//RS             ))
+//RS         || (nargs == 0
+//RS             && matches!(
+//RS                 method,
+//RS                 "is_nan"
+//RS                     | "is_infinite"
+//RS                     | "is_finite"
+//RS                     | "count_ones"
+//RS                     | "count_zeros"
+//RS                     | "leading_zeros"
+//RS                     | "trailing_zeros"
+//RS                     | "to_string"
+//RS             ))
+//RS }
+//RS 
+//RS /// c109 Phase 28: is `member` a per-type numeric bounds constant (`U8.MAX`,
+//RS /// `I32.MIN`, `Float.INFINITY`, …)? Mirrors the AST `emit_expr` Field arm's filter
+//RS /// exactly.
+//RS pub(crate) fn is_numeric_bounds_const(member: &str) -> bool {
+//RS     matches!(
+//RS         member,
+//RS         "MIN" | "MAX" | "INFINITY" | "NEG_INFINITY" | "NAN" | "EPSILON"
+//RS     )
+//RS }
+// END-PORT-PENDING 0520 crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:1-911
+

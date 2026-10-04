@@ -1,0 +1,1804 @@
+// PORT-PENDING 0113 crates-jet-foundation-src-xmlpull-slice-3629: crates/jet-foundation/src/XmlPull.rs:3629-5428
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     fn max_name_bytes_checks_element_raw_before_retention() {
+//RS         let mut limits = Limits::safe();
+//RS         limits.max_name_bytes = 3;
+//RS         // Prefixed raw `p:ab` is 4 UTF-8 bytes even though local/prefix alone fit.
+//RS         let error = parse_document_with(
+//RS             "<r xmlns:p='urn:p'><p:ab/></r>",
+//RS             &ParseOptions {
+//RS                 entities: EntityPolicy::Preserve,
+//RS                 limits,
+//RS             },
+//RS         )
+//RS         .expect_err("raw name budget");
+//RS         assert_eq!(error.kind, Reason::Limit);
+//RS         assert!(error.reason.contains("max_name_bytes (3)"));
+//RS         assert!(error.reason.contains("element name") || error.reason.contains("name"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn applies_entity_policy_and_replacement_budget() {
+//RS         let source = "<!DOCTYPE r [<!ENTITY e 'ignored'>]><r>&e;</r>";
+//RS         let mut values = BTreeMap::new();
+//RS         values.insert("e".to_string(), "value".to_string());
+//RS         let resolved = parse_document_with(
+//RS             source,
+//RS             &ParseOptions {
+//RS                 entities: EntityPolicy::Resolve(values.clone()),
+//RS                 limits: Limits::safe(),
+//RS             },
+//RS         )
+//RS         .expect("explicit inert replacement");
+//RS         let rendered = render_document(&resolved).expect("render");
+//RS         assert_eq!(rendered, source);
+//RS 
+//RS         let rejected = parse_document_with(
+//RS             source,
+//RS             &ParseOptions {
+//RS                 entities: EntityPolicy::Reject,
+//RS                 limits: Limits::safe(),
+//RS             },
+//RS         )
+//RS         .expect_err("reject policy");
+//RS         assert_eq!(rejected.kind, Reason::Entity);
+//RS 
+//RS         let mut limits = Limits::safe();
+//RS         limits.max_entity_replacement_bytes = 4;
+//RS         let limited = parse_document_with(
+//RS             source,
+//RS             &ParseOptions {
+//RS                 entities: EntityPolicy::Resolve(values.clone()),
+//RS                 limits,
+//RS             },
+//RS         )
+//RS         .expect_err("replacement budget");
+//RS         assert_eq!(limited.kind, Reason::Limit);
+//RS         assert!(limited.reason.contains("max_entity_replacement_bytes (4)"));
+//RS 
+//RS         let mut limits = Limits::safe();
+//RS         limits.max_entity_depth = 0;
+//RS         let limited = parse_document_with(
+//RS             source,
+//RS             &ParseOptions {
+//RS                 entities: EntityPolicy::Resolve(values),
+//RS                 limits,
+//RS             },
+//RS         )
+//RS         .expect_err("entity depth budget");
+//RS         assert_eq!(limited.kind, Reason::Limit);
+//RS         assert!(limited.reason.contains("max_entity_depth (0)"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn entity_policy_rejects_external_parameter_cycles_and_keeps_resolve_inert() {
+//RS         let external = parse_document(
+//RS             "<!DOCTYPE r [<!ENTITY e SYSTEM 'file:///tmp/jet_xml_entity_probe'>]><r>&e;</r>",
+//RS         )
+//RS         .expect_err("external entity");
+//RS         assert_eq!(external.kind, Reason::Unsupported);
+//RS         assert!(external.reason.contains("external entity"));
+//RS 
+//RS         let parameter =
+//RS             parse_document("<!DOCTYPE r [<!ENTITY % pe 'x'>]><r/>").expect_err("parameter");
+//RS         assert_eq!(parameter.kind, Reason::Unsupported);
+//RS         assert!(parameter.reason.contains("parameter entity"));
+//RS 
+//RS         let pe_ref = parse_document("<!DOCTYPE r [<!ENTITY e '%pe;'>]><r/>").expect_err("pe ref");
+//RS         assert_eq!(pe_ref.kind, Reason::Unsupported);
+//RS         assert!(pe_ref.reason.contains("parameter entity"));
+//RS 
+//RS         let cycle = parse_document("<!DOCTYPE r [<!ENTITY a '&b;'><!ENTITY b '&a;'>]><r>&a;</r>")
+//RS             .expect_err("cycle");
+//RS         assert_eq!(cycle.kind, Reason::EntityCycle);
+//RS 
+//RS         let mut values = BTreeMap::new();
+//RS         values.insert("e".to_string(), "<x/>&y;".to_string());
+//RS         let tree = parse_document_with(
+//RS             "<!DOCTYPE r [<!ENTITY e 'ignored'>]><r>&e;</r>",
+//RS             &ParseOptions {
+//RS                 entities: EntityPolicy::Resolve(values),
+//RS                 limits: Limits::safe(),
+//RS             },
+//RS         )
+//RS         .expect("inert resolve");
+//RS         let Some(Value::Array(document_children)) = field(&tree, "children") else {
+//RS             panic!("document children")
+//RS         };
+//RS         let root = document_children
+//RS             .iter()
+//RS             .find(|node| matches!(field(node, "$xml"), Some(Value::Text(tag)) if tag == "element"))
+//RS             .expect("root");
+//RS         let Some(Value::Array(children)) = field(root, "children") else {
+//RS             panic!("root children")
+//RS         };
+//RS         assert_eq!(children.len(), 1);
+//RS         assert_eq!(
+//RS             field(&children[0], "$xml"),
+//RS             Some(&Value::Text("entity_ref".into()))
+//RS         );
+//RS         assert_eq!(
+//RS             field(&children[0], "resolved_value"),
+//RS             Some(&Value::Text("<x/>&y;".into()))
+//RS         );
+//RS         assert!(
+//RS             !children.iter().any(
+//RS                 |node| matches!(field(node, "$xml"), Some(Value::Text(tag)) if tag == "element")
+//RS             ),
+//RS             "Resolve must not reparse replacement markup"
+//RS         );
+//RS 
+//RS         let with_system =
+//RS             parse_document("<!DOCTYPE r SYSTEM 'file:///tmp/jet_xml_entity_probe'><r/>")
+//RS                 .expect("external subset id stays inert data");
+//RS         let Some(Value::Array(children)) = field(&with_system, "children") else {
+//RS             panic!("document children")
+//RS         };
+//RS         assert!(children.iter().any(|node| {
+//RS             matches!(field(node, "$xml"), Some(Value::Text(tag)) if tag == "doctype")
+//RS                 && matches!(field(node, "system_id"), Some(Value::Text(id)) if id == "file:///tmp/jet_xml_entity_probe")
+//RS         }));
+//RS     }
+//RS 
+//RS     fn lex_chunks(bytes: &[u8], split: usize) -> Vec<(TokenKind, String, Vec<u8>)> {
+//RS         let mut lexer = ByteLexer::new(1024);
+//RS         lexer.push(&bytes[..split]).expect("first chunk");
+//RS         let mut tokens = Vec::new();
+//RS         while let Some(token) = lexer.next_token().expect("first tokens") {
+//RS             tokens.push((token.kind, token.text, token.raw_bytes));
+//RS         }
+//RS         lexer.push(&bytes[split..]).expect("second chunk");
+//RS         lexer.finish_input().expect("finish input");
+//RS         while let Some(token) = lexer.next_token().expect("remaining tokens") {
+//RS             tokens.push((token.kind, token.text, token.raw_bytes));
+//RS         }
+//RS         tokens
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn byte_lexer_is_chunk_invariant_and_preserves_utf8_bytes() {
+//RS         let bytes = b"\xef\xbb\xbf<r a='>'>h\xc3\xa9&amp;<!--x>y--><![CDATA[z>]]></r>";
+//RS         let expected = lex_chunks(bytes, bytes.len());
+//RS         for split in 0..=bytes.len() {
+//RS             assert_eq!(lex_chunks(bytes, split), expected, "split {split}");
+//RS         }
+//RS         let raw: Vec<u8> = expected
+//RS             .iter()
+//RS             .flat_map(|(_, _, raw)| raw.clone())
+//RS             .collect();
+//RS         assert_eq!(raw, bytes[3..]);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn byte_lexer_decodes_utf16_at_every_byte_boundary() {
+//RS         let source = "<?xml version='1.0'?><r>\u{1f642}&amp;</r>";
+//RS         for (encoding, bom, bytes) in [
+//RS             (
+//RS                 WireEncoding::Utf16Le,
+//RS                 vec![0xff, 0xfe],
+//RS                 source
+//RS                     .encode_utf16()
+//RS                     .flat_map(u16::to_le_bytes)
+//RS                     .collect::<Vec<_>>(),
+//RS             ),
+//RS             (
+//RS                 WireEncoding::Utf16Be,
+//RS                 vec![0xfe, 0xff],
+//RS                 source
+//RS                     .encode_utf16()
+//RS                     .flat_map(u16::to_be_bytes)
+//RS                     .collect::<Vec<_>>(),
+//RS             ),
+//RS         ] {
+//RS             let mut wire = bom.clone();
+//RS             wire.extend(bytes);
+//RS             let expected = lex_chunks(&wire, wire.len());
+//RS             for split in 0..=wire.len() {
+//RS                 assert_eq!(
+//RS                     lex_chunks(&wire, split),
+//RS                     expected,
+//RS                     "{encoding:?} split {split}"
+//RS                 );
+//RS             }
+//RS             assert_eq!(
+//RS                 expected
+//RS                     .iter()
+//RS                     .map(|(_, text, _)| text.as_str())
+//RS                     .collect::<String>(),
+//RS                 source
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stream_bytes_validate_declaration_and_preserve_encoding_identity() {
+//RS         for (wire, bom, declared) in [
+//RS             (WireEncoding::UTF8, vec![0xef, 0xbb, 0xbf], "UTF-16"),
+//RS             (WireEncoding::Utf16Le, vec![0xff, 0xfe], "UTF-8"),
+//RS             (WireEncoding::Utf16Be, vec![0xfe, 0xff], "UTF-8"),
+//RS         ] {
+//RS             let source = format!("<?xml version='1.0' encoding='{declared}'?><r/>");
+//RS             let mut bytes = bom.clone();
+//RS             bytes.extend(wire_bytes(&source, wire));
+//RS             let mut scanner = StreamScanner::new(4096, ParseOptions::safe()).expect("scanner");
+//RS             scanner.push(&bytes).expect("input bytes");
+//RS             scanner.finish_input().expect("finish input");
+//RS             assert!(matches!(
+//RS                 scanner.next().expect("document start"),
+//RS                 Some(StreamEvent {
+//RS                     event: Event::DocumentStart,
+//RS                     ..
+//RS                 })
+//RS             ));
+//RS             let error = scanner.next().expect_err("conflicting XML declaration");
+//RS             assert_eq!(error.kind, Reason::InvalidEncoding, "{wire:?}");
+//RS             assert_eq!(error.offset, bom.len(), "{wire:?}");
+//RS         }
+//RS 
+//RS         for (wire, render, bom, declared) in [
+//RS             (
+//RS                 WireEncoding::UTF8,
+//RS                 RenderEncoding::UTF8Bom,
+//RS                 vec![0xef, 0xbb, 0xbf],
+//RS                 "UTF-8",
+//RS             ),
+//RS             (
+//RS                 WireEncoding::Utf16Le,
+//RS                 RenderEncoding::Utf16Le,
+//RS                 vec![0xff, 0xfe],
+//RS                 "UTF-16",
+//RS             ),
+//RS             (
+//RS                 WireEncoding::Utf16Be,
+//RS                 RenderEncoding::Utf16Be,
+//RS                 vec![0xfe, 0xff],
+//RS                 "UTF-16BE",
+//RS             ),
+//RS         ] {
+//RS             let source = format!("<?xml version='1.0' encoding='{declared}'?><r>\u{1f642}</r>");
+//RS             let mut bytes = bom;
+//RS             bytes.extend(wire_bytes(&source, wire));
+//RS             let events = stream_values(&bytes, bytes.len());
+//RS             let mut writer = StreamWriter::new(render, LexicalPolicy::PreserveValid);
+//RS             let mut output = Vec::new();
+//RS             for event in &events {
+//RS                 output.extend(writer.write(event).expect("write matching encoded event"));
+//RS             }
+//RS             assert_eq!(output, bytes, "{wire:?} byte identity");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn whole_bytes_share_stream_encoding_and_identity() {
+//RS         for (wire, render, bom, declared) in [
+//RS             (
+//RS                 WireEncoding::UTF8,
+//RS                 RenderEncoding::UTF8Bom,
+//RS                 vec![0xef, 0xbb, 0xbf],
+//RS                 "UTF-8",
+//RS             ),
+//RS             (
+//RS                 WireEncoding::Utf16Le,
+//RS                 RenderEncoding::Utf16Le,
+//RS                 vec![0xff, 0xfe],
+//RS                 "UTF-16",
+//RS             ),
+//RS             (
+//RS                 WireEncoding::Utf16Be,
+//RS                 RenderEncoding::Utf16Be,
+//RS                 vec![0xfe, 0xff],
+//RS                 "UTF-16BE",
+//RS             ),
+//RS         ] {
+//RS             let source =
+//RS                 format!("<?xml version='1.0' encoding='{declared}'?><r>\u{e9}\u{1f642}</r>");
+//RS             let mut bytes = bom;
+//RS             bytes.extend(wire_bytes(&source, wire));
+//RS             let value = parse_document_bytes(&bytes).expect("whole byte parse");
+//RS             assert_eq!(
+//RS                 render_document_bytes(&value, render, LexicalPolicy::PreserveValid)
+//RS                     .expect("whole byte render"),
+//RS                 bytes,
+//RS                 "{wire:?} byte identity",
+//RS             );
+//RS         }
+//RS 
+//RS         let source = "<?xml version='1.0' encoding='UTF-8'?><r/>";
+//RS         let mut conflict = vec![0xff, 0xfe];
+//RS         conflict.extend(wire_bytes(source, WireEncoding::Utf16Le));
+//RS         let error = parse_document_bytes(&conflict).expect_err("conflicting declaration");
+//RS         assert_eq!(error.kind, Reason::InvalidEncoding);
+//RS         assert_eq!(error.offset, 2);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn byte_lexer_fuses_encoding_and_item_limit_errors() {
+//RS         let mut invalid = ByteLexer::new(32);
+//RS         invalid
+//RS             .push(&[0xef, 0xbb, 0xbf, 0xff])
+//RS             .expect_err("invalid UTF-8");
+//RS         let first = invalid.next_token().expect_err("terminal error");
+//RS         assert_eq!(invalid.push(b"<r/>").expect_err("fused"), first);
+//RS 
+//RS         let mut continuation = ByteLexer::new(32);
+//RS         let first = continuation
+//RS             .push(&[0xc2, 0x20, b'<'])
+//RS             .expect_err("invalid continuation");
+//RS         assert_eq!(continuation.finish_input().expect_err("fused"), first);
+//RS 
+//RS         let mut limited = ByteLexer::new(3);
+//RS         let first = limited.push(b"<root>").expect_err("item limit");
+//RS         assert_eq!(first.kind, Reason::Limit);
+//RS         assert_eq!(limited.finish_input().expect_err("fused"), first);
+//RS     }
+//RS 
+//RS     fn stream_events(bytes: &[u8], split: usize) -> Vec<Event> {
+//RS         let mut scanner = StreamScanner::new(4096, ParseOptions::safe()).expect("scanner");
+//RS         scanner.push(&bytes[..split]).expect("first");
+//RS         let mut events = Vec::new();
+//RS         while let Some(event) = scanner.next().expect("events") {
+//RS             events.push(event.event)
+//RS         }
+//RS         scanner.push(&bytes[split..]).expect("second");
+//RS         scanner.finish_input().expect("finish");
+//RS         while let Some(event) = scanner.next().expect("events") {
+//RS             events.push(event.event)
+//RS         }
+//RS         events
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stream_scanner_preserves_semantics_across_every_byte_split() {
+//RS         let bytes = b"\xef\xbb\xbf<?xml version='1.0'?><r xmlns:p='u'>x&amp;<p:c/></r>\n";
+//RS         let expected = stream_events(bytes, bytes.len());
+//RS         for split in 0..=bytes.len() {
+//RS             assert_eq!(stream_events(bytes, split), expected, "split {split}")
+//RS         }
+//RS         assert!(matches!(&expected[2],Event::ElementStart{name,..} if name.local=="r"));
+//RS         assert!(
+//RS             matches!(&expected[5],Event::ElementStart{name,..} if name.namespace_uri.as_deref()==Some("u"))
+//RS         );
+//RS         assert!(matches!(expected.last(), Some(Event::DocumentEnd)));
+//RS     }
+//RS 
+//RS     fn stream_values(bytes: &[u8], split: usize) -> Vec<Value> {
+//RS         let mut scanner = StreamScanner::new(4096, ParseOptions::safe()).expect("scanner");
+//RS         let mut values = Vec::new();
+//RS         scanner.push(&bytes[..split]).expect("first chunk");
+//RS         while let Some(event) = scanner.next().expect("first events") {
+//RS             values.push(stream_event_value(event));
+//RS         }
+//RS         scanner.push(&bytes[split..]).expect("second chunk");
+//RS         scanner.finish_input().expect("finish input");
+//RS         while let Some(event) = scanner.next().expect("last events") {
+//RS             values.push(stream_event_value(event));
+//RS         }
+//RS         values
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stream_writer_preserves_every_event_across_every_input_split() {
+//RS         let source = b"\xef\xbb\xbf<?xml version='1.0' encoding='UTF-8'?><r xmlns:p='urn:p' p:z='1'>x&amp;<![CDATA[<y>]]><!--c--><?go now?><p:e/></r>";
+//RS         for split in 0..=source.len() {
+//RS             let mut writer =
+//RS                 StreamWriter::new(RenderEncoding::UTF8Bom, LexicalPolicy::PreserveValid);
+//RS             let mut output = Vec::new();
+//RS             for event in stream_values(source, split) {
+//RS                 output.extend(writer.write(&event).expect("write event"));
+//RS             }
+//RS             assert!(writer.is_finished());
+//RS             assert_eq!(output, source, "split {split}");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stream_writer_rejects_hostile_raw_byte_evidence() {
+//RS         let source = b"<r  a='x'/>";
+//RS         for case in [
+//RS             "negative byte",
+//RS             "oversized byte",
+//RS             "extra key",
+//RS             "both raw forms",
+//RS         ] {
+//RS             let mut events = stream_values(source, source.len());
+//RS             let Value::Object(event) = &mut events[1] else {
+//RS                 panic!("element_start event")
+//RS             };
+//RS             let Some((_, Value::Object(lexical))) =
+//RS                 event.iter_mut().find(|(key, _)| key == "open_lexical")
+//RS             else {
+//RS                 panic!("open_lexical object")
+//RS             };
+//RS             match case {
+//RS                 "negative byte" | "oversized byte" => {
+//RS                     let value = if case == "negative byte" { -1 } else { 256 };
+//RS                     lexical
+//RS                         .iter_mut()
+//RS                         .find(|(key, _)| key == "raw_bytes")
+//RS                         .unwrap()
+//RS                         .1 = Value::Array(vec![Value::Int(value)]);
+//RS                 }
+//RS                 "extra key" => lexical.push(("extra".to_string(), Value::Null)),
+//RS                 "both raw forms" => {
+//RS                     lexical
+//RS                         .iter_mut()
+//RS                         .find(|(key, _)| key == "raw_text")
+//RS                         .unwrap()
+//RS                         .1 = Value::Text("<forged/>".to_string());
+//RS                 }
+//RS                 _ => unreachable!(),
+//RS             }
+//RS 
+//RS             let mut writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::PreserveValid);
+//RS             let mut output = Vec::new();
+//RS             for event in &events {
+//RS                 output.extend(
+//RS                     writer
+//RS                         .write(event)
+//RS                         .expect("write hostile event deterministically"),
+//RS                 );
+//RS             }
+//RS             assert_eq!(output, b"<r a='x'/>", "{case}");
+//RS             assert_ne!(output, source, "{case} replayed forged raw bytes");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stream_writer_emits_selected_encoding_and_rejects_state_without_output() {
+//RS         let source = b"<r a='x'>z</r>";
+//RS         let events = stream_values(source, source.len());
+//RS         for (encoding, bom, body) in [
+//RS             (RenderEncoding::UTF8, Vec::new(), source.to_vec()),
+//RS             (
+//RS                 RenderEncoding::Utf16Le,
+//RS                 vec![0xff, 0xfe],
+//RS                 String::from_utf8(source.to_vec())
+//RS                     .unwrap()
+//RS                     .encode_utf16()
+//RS                     .flat_map(u16::to_le_bytes)
+//RS                     .collect(),
+//RS             ),
+//RS             (
+//RS                 RenderEncoding::Utf16Be,
+//RS                 vec![0xfe, 0xff],
+//RS                 String::from_utf8(source.to_vec())
+//RS                     .unwrap()
+//RS                     .encode_utf16()
+//RS                     .flat_map(u16::to_be_bytes)
+//RS                     .collect(),
+//RS             ),
+//RS         ] {
+//RS             let mut writer = StreamWriter::new(encoding, LexicalPolicy::Deterministic);
+//RS             let mut output = Vec::new();
+//RS             for event in &events {
+//RS                 output.extend(writer.write(event).expect("encoded event"));
+//RS             }
+//RS             let mut expected = bom;
+//RS             expected.extend(body);
+//RS             assert_eq!(output, expected);
+//RS         }
+//RS         let mut writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::Deterministic);
+//RS         let before = writer.clone();
+//RS         let error = writer
+//RS             .write(&events[1])
+//RS             .expect_err("missing document start");
+//RS         assert!(error.reason.contains("document_start"));
+//RS         assert_eq!(writer.started, before.started);
+//RS         assert_eq!(writer.stack, before.stack);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn xml_10_namespaces_closed_tree_algebra_for_parse_surfaces() {
+//RS         // Criterion 1 corpus: XML 1.0 Fifth Edition + Namespaces 1.0 into the
+//RS         // closed DataTree algebra across parse / parse_with / parse_bytes.
+//RS         let source = "<?xml version='1.0' encoding='UTF-8'?>\n<!--prolog-->\n<root xmlns='urn:r' xmlns:p='urn:p' a='1' p:b='2'>text<!--c--><![CDATA[<x>]]><?go now?><p:child/>&amp;tail</root>\n";
+//RS         let tree = parse_document(source).expect("parse");
+//RS         let with = parse_document_with(source, &ParseOptions::safe()).expect("parse_with");
+//RS         let bytes = parse_document_bytes(source.as_bytes()).expect("parse_bytes");
+//RS         assert_eq!(field(&tree, "$xml"), Some(&Value::Text("document".into())));
+//RS         assert_eq!(strip_lexical(&tree), strip_lexical(&with));
+//RS         assert_eq!(
+//RS             strip_lexical(field(&tree, "children").expect("string children")),
+//RS             strip_lexical(field(&bytes, "children").expect("byte children"))
+//RS         );
+//RS         assert_eq!(
+//RS             field(&bytes, "encoding"),
+//RS             Some(&Value::Text("UTF-8".into()))
+//RS         );
+//RS         assert_eq!(field(&bytes, "bom"), Some(&Value::Array(Vec::new())));
+//RS 
+//RS         let Value::Array(children) = field(&tree, "children").cloned().expect("children") else {
+//RS             panic!("children array");
+//RS         };
+//RS         assert_eq!(
+//RS             children
+//RS                 .iter()
+//RS                 .map(|node| required_text(node, "$xml").expect("tag"))
+//RS                 .collect::<Vec<_>>(),
+//RS             vec![
+//RS                 "declaration",
+//RS                 "document_whitespace",
+//RS                 "comment",
+//RS                 "document_whitespace",
+//RS                 "element",
+//RS                 "document_whitespace",
+//RS             ]
+//RS         );
+//RS         assert_eq!(
+//RS             field(&children[1], "value"),
+//RS             Some(&Value::Text("\n".into()))
+//RS         );
+//RS 
+//RS         let root = children
+//RS             .iter()
+//RS             .find(|node| matches!(field(node, "$xml"), Some(Value::Text(tag)) if tag == "element"))
+//RS             .expect("root");
+//RS         let (raw, prefix, local, uri) = expanded_name_parts(root).expect("expanded");
+//RS         assert_eq!(
+//RS             (raw.as_str(), prefix, local.as_str(), uri.as_deref()),
+//RS             ("root", None, "root", Some("urn:r"))
+//RS         );
+//RS         let Value::Array(namespaces) = field(root, "namespaces").cloned().expect("ns") else {
+//RS             panic!("namespaces");
+//RS         };
+//RS         assert_eq!(namespaces.len(), 2);
+//RS         let Value::Array(attributes) = field(root, "attributes").cloned().expect("attrs") else {
+//RS             panic!("attributes");
+//RS         };
+//RS         assert_eq!(attributes.len(), 2);
+//RS         assert_eq!(
+//RS             (
+//RS                 expanded_name_parts(&attributes[0]).expect("a").2.as_str(),
+//RS                 field(&attributes[0], "normalized_value"),
+//RS             ),
+//RS             ("a", Some(&Value::Text("1".into())))
+//RS         );
+//RS         assert_eq!(
+//RS             expanded_name_parts(&attributes[1]).expect("b").3.as_deref(),
+//RS             Some("urn:p")
+//RS         );
+//RS 
+//RS         let Value::Array(content) = field(root, "children").cloned().expect("mixed") else {
+//RS             panic!("mixed content");
+//RS         };
+//RS         assert_eq!(
+//RS             content
+//RS                 .iter()
+//RS                 .map(|node| required_text(node, "$xml").expect("child tag"))
+//RS                 .collect::<Vec<_>>(),
+//RS             vec![
+//RS                 "text",
+//RS                 "comment",
+//RS                 "cdata",
+//RS                 "processing_instruction",
+//RS                 "element",
+//RS                 "entity_ref",
+//RS                 "text",
+//RS             ]
+//RS         );
+//RS 
+//RS         let dup = parse_document("<r xmlns:p='u' xmlns:q='u' p:a='1' q:a='2'/>")
+//RS             .expect_err("duplicate expanded attribute");
+//RS         assert_eq!(dup.kind, Reason::DuplicateAttribute);
+//RS         assert_eq!(dup.line, Some(1));
+//RS         assert!(dup.column.is_some());
+//RS         // Open-tag attribute errors locate before the element is stacked.
+//RS         assert_eq!(dup.path, "$");
+//RS 
+//RS         let mismatch = parse_document("<r>\n <a></b></r>").expect_err("mismatch");
+//RS         assert_eq!(
+//RS             (
+//RS                 mismatch.kind,
+//RS                 mismatch.offset,
+//RS                 mismatch.line,
+//RS                 mismatch.column,
+//RS                 mismatch.path.as_str()
+//RS             ),
+//RS             (Reason::MismatchedTag, 8, Some(2), Some(5), "$/r/a")
+//RS         );
+//RS 
+//RS         assert_eq!(render_document(&tree).expect("round-trip"), source);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn parse_bytes_identity_and_token_local_lexical_reuse() {
+//RS         let source = "<?xml version='1.0' encoding='UTF-8'?><r><!--keep--><![CDATA[stay]]>x</r>";
+//RS         let mut utf8_bom = vec![0xef, 0xbb, 0xbf];
+//RS         utf8_bom.extend(source.as_bytes());
+//RS         let mut tree = parse_document_bytes(&utf8_bom).expect("parse bom");
+//RS         let identity =
+//RS             render_document_bytes(&tree, RenderEncoding::UTF8Bom, LexicalPolicy::PreserveValid)
+//RS                 .expect("identity");
+//RS         assert_eq!(identity, utf8_bom);
+//RS 
+//RS         // Edit one text token; unchanged sibling tokens must reuse raw_bytes.
+//RS         let Value::Object(ref mut doc_entries) = tree else {
+//RS             panic!("document object");
+//RS         };
+//RS         let children_slot = doc_entries
+//RS             .iter_mut()
+//RS             .find(|(key, _)| key == "children")
+//RS             .map(|(_, value)| value)
+//RS             .expect("children");
+//RS         let Value::Array(children) = children_slot else {
+//RS             panic!("children array");
+//RS         };
+//RS         let root = children
+//RS             .iter_mut()
+//RS             .find(|node| matches!(field(node, "$xml"), Some(Value::Text(tag)) if tag == "element"))
+//RS             .expect("root");
+//RS         let Value::Object(ref mut root_entries) = root else {
+//RS             panic!("root object");
+//RS         };
+//RS         let content_slot = root_entries
+//RS             .iter_mut()
+//RS             .find(|(key, _)| key == "children")
+//RS             .map(|(_, value)| value)
+//RS             .expect("content");
+//RS         let Value::Array(content) = content_slot else {
+//RS             panic!("content array");
+//RS         };
+//RS         let text_node = content
+//RS             .iter_mut()
+//RS             .find(|node| matches!(field(node, "$xml"), Some(Value::Text(tag)) if tag == "text"))
+//RS             .expect("text");
+//RS         let Value::Object(text_entries) = text_node else {
+//RS             panic!("text object");
+//RS         };
+//RS         text_entries
+//RS             .iter_mut()
+//RS             .find(|(key, _)| key == "value")
+//RS             .expect("value")
+//RS             .1 = text("edited");
+//RS         let lexical = text_entries
+//RS             .iter_mut()
+//RS             .find(|(key, _)| key == "lexical")
+//RS             .map(|(_, value)| value)
+//RS             .expect("lexical");
+//RS         let Value::Object(lex_entries) = lexical else {
+//RS             panic!("lexical object");
+//RS         };
+//RS         // Drop raw_bytes evidence so only this token re-renders.
+//RS         lex_entries
+//RS             .iter_mut()
+//RS             .find(|(key, _)| key == "raw_bytes")
+//RS             .expect("raw_bytes")
+//RS             .1 = Value::Null;
+//RS         lex_entries
+//RS             .iter_mut()
+//RS             .find(|(key, _)| key == "semantic")
+//RS             .expect("semantic")
+//RS             .1 = object(vec![("value", text("edited"))]);
+//RS 
+//RS         let out =
+//RS             render_document_bytes(&tree, RenderEncoding::UTF8Bom, LexicalPolicy::PreserveValid)
+//RS                 .expect("token edit");
+//RS         assert_ne!(out, utf8_bom);
+//RS         let out_text = String::from_utf8(out[3..].to_vec()).expect("utf8 body");
+//RS         assert!(out_text.contains("<!--keep-->"));
+//RS         assert!(out_text.contains("<![CDATA[stay]]>"));
+//RS         assert!(out_text.contains(">edited</r>"));
+//RS         assert!(!out_text.contains(">x</r>"));
+//RS 
+//RS         // Encoding family conflict rejects before identity reuse.
+//RS         let mut conflict = vec![0xff, 0xfe];
+//RS         conflict.extend(wire_bytes(
+//RS             "<?xml version='1.0' encoding='UTF-8'?><r/>",
+//RS             WireEncoding::Utf16Le,
+//RS         ));
+//RS         let error = parse_document_bytes(&conflict).expect_err("conflict");
+//RS         assert_eq!(error.kind, Reason::InvalidEncoding);
+//RS 
+//RS         // Unsupported encoding signature without BOM stays UTF-8 only when ASCII XML.
+//RS         let latin = b"<?xml version='1.0' encoding='ISO-8859-1'?><r/>";
+//RS         let error = parse_document_bytes(latin).expect_err("latin1");
+//RS         assert_eq!(error.kind, Reason::InvalidEncoding);
+//RS 
+//RS         // UTF-16LE/BE identity under matching render encoding.
+//RS         for (bom, wire, render, declared) in [
+//RS             (
+//RS                 vec![0xff, 0xfe],
+//RS                 WireEncoding::Utf16Le,
+//RS                 RenderEncoding::Utf16Le,
+//RS                 "UTF-16",
+//RS             ),
+//RS             (
+//RS                 vec![0xfe, 0xff],
+//RS                 WireEncoding::Utf16Be,
+//RS                 RenderEncoding::Utf16Be,
+//RS                 "UTF-16BE",
+//RS             ),
+//RS         ] {
+//RS             let text_src = format!("<?xml version='1.0' encoding='{declared}'?><r/>");
+//RS             let mut bytes = bom.clone();
+//RS             bytes.extend(wire_bytes(&text_src, wire));
+//RS             let doc = parse_document_bytes(&bytes).expect("utf16 parse");
+//RS             assert_eq!(
+//RS                 render_document_bytes(&doc, render, LexicalPolicy::PreserveValid)
+//RS                     .expect("utf16 render"),
+//RS                 bytes
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn canonical_xml_w3c_whole_document_corpus() {
+//RS         // Provenance: tests/data/xml/c14n/PROVENANCE.md — hand-built from
+//RS         // W3C C14N 1.1 + Exclusive C14N 1.0 for whole-document node-sets.
+//RS         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/xml/c14n");
+//RS         let cases = [
+//RS             (
+//RS                 "incl11_sort_escape",
+//RS                 CanonicalOptions {
+//RS                     mode: CanonicalMode::Inclusive11,
+//RS                     comments: false,
+//RS                     inclusive_prefixes: vec![],
+//RS                 },
+//RS             ),
+//RS             (
+//RS                 "incl11_with_comments",
+//RS                 CanonicalOptions {
+//RS                     mode: CanonicalMode::Inclusive11,
+//RS                     comments: true,
+//RS                     inclusive_prefixes: vec![],
+//RS                 },
+//RS             ),
+//RS             (
+//RS                 "excl10_omit_unused",
+//RS                 CanonicalOptions {
+//RS                     mode: CanonicalMode::Exclusive10,
+//RS                     comments: false,
+//RS                     inclusive_prefixes: vec![],
+//RS                 },
+//RS             ),
+//RS             (
+//RS                 "excl10_inclusive_prefix",
+//RS                 CanonicalOptions {
+//RS                     mode: CanonicalMode::Exclusive10,
+//RS                     comments: false,
+//RS                     inclusive_prefixes: vec!["b".to_string()],
+//RS                 },
+//RS             ),
+//RS             (
+//RS                 "excl10_with_comments",
+//RS                 CanonicalOptions {
+//RS                     mode: CanonicalMode::Exclusive10,
+//RS                     comments: true,
+//RS                     inclusive_prefixes: vec![],
+//RS                 },
+//RS             ),
+//RS         ];
+//RS         for (stem, options) in cases {
+//RS             let input = fs::read_to_string(root.join(format!("{stem}.in.xml"))).expect(stem);
+//RS             let expected = fs::read_to_string(root.join(format!("{stem}.out.xml"))).expect(stem);
+//RS             let tree = parse_document(input.trim_end_matches('\n'))
+//RS                 .unwrap_or_else(|e| panic!("{stem} parse: {e:?}"));
+//RS             let got = canonical_document(&tree, &options)
+//RS                 .unwrap_or_else(|e| panic!("{stem} canonical: {e:?}"));
+//RS             assert_eq!(got, expected.trim_end_matches('\n'), "{stem}");
+//RS         }
+//RS 
+//RS         let tree = parse_document("<r xmlns:q='urn:q' xmlns:p='urn:p' q:z='2' a='1'><e/></r>")
+//RS             .expect("reject options tree");
+//RS         let err = canonical_document(
+//RS             &tree,
+//RS             &CanonicalOptions {
+//RS                 mode: CanonicalMode::Inclusive11,
+//RS                 comments: false,
+//RS                 inclusive_prefixes: vec!["p".to_string()],
+//RS             },
+//RS         )
+//RS         .expect_err("inclusive_prefixes illegal for Inclusive11");
+//RS         assert_eq!(err.kind, Reason::Shape);
+//RS 
+//RS         let relative = parse_document("<r xmlns:p='relative'><p:e/></r>").expect("relative");
+//RS         let err = canonical_document(
+//RS             &relative,
+//RS             &CanonicalOptions {
+//RS                 mode: CanonicalMode::Exclusive10,
+//RS                 comments: false,
+//RS                 inclusive_prefixes: vec![],
+//RS             },
+//RS         )
+//RS         .expect_err("relative NS");
+//RS         assert_eq!(err.kind, Reason::Namespace);
+//RS 
+//RS         let unresolved =
+//RS             parse_document("<!DOCTYPE r [<!ENTITY e 'x'>]><r>&e;</r>").expect("entity");
+//RS         // Preserve leaves unresolved_value Null → Canonicalization reject.
+//RS         let err = canonical_document(
+//RS             &unresolved,
+//RS             &CanonicalOptions {
+//RS                 mode: CanonicalMode::Inclusive11,
+//RS                 comments: false,
+//RS                 inclusive_prefixes: vec![],
+//RS             },
+//RS         )
+//RS         .expect_err("unresolved entity");
+//RS         assert_eq!(err.kind, Reason::Canonicalization);
+//RS 
+//RS         let not_doc = object(vec![
+//RS             ("$xml", text("element")),
+//RS             (
+//RS                 "name",
+//RS                 object(vec![
+//RS                     ("raw", text("r")),
+//RS                     ("prefix", Value::Null),
+//RS                     ("local", text("r")),
+//RS                     ("namespace_uri", Value::Null),
+//RS                 ]),
+//RS             ),
+//RS             ("namespaces", Value::Array(vec![])),
+//RS             ("attributes", Value::Array(vec![])),
+//RS             ("children", Value::Array(vec![])),
+//RS             ("empty_style", text("empty")),
+//RS             ("open_lexical", Value::Null),
+//RS             ("close_lexical", Value::Null),
+//RS         ]);
+//RS         let err = canonical_document(
+//RS             &not_doc,
+//RS             &CanonicalOptions {
+//RS                 mode: CanonicalMode::Inclusive11,
+//RS                 comments: false,
+//RS                 inclusive_prefixes: vec![],
+//RS             },
+//RS         )
+//RS         .expect_err("non-document");
+//RS         assert_eq!(err.kind, Reason::Shape);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn fold_unfold_inverses_and_hostile_event_algebra() {
+//RS         let source = "<?xml version='1.0' encoding='UTF-8'?>\n<!--c-->\n<root xmlns:p='urn:p' a='1'>x&amp;<![CDATA[<y>]]><?go now?><p:e/></root>\n";
+//RS         let tree = parse_document_bytes(source.as_bytes()).expect("parse bytes");
+//RS         let events = unfold_events(&tree).expect("unfold");
+//RS         assert_eq!(
+//RS             required_text(&events[0], "$xml_event").expect("start"),
+//RS             "document_start"
+//RS         );
+//RS         assert_eq!(
+//RS             required_text(events.last().expect("end"), "$xml_event").expect("end tag"),
+//RS             "document_end"
+//RS         );
+//RS         let folded = fold_events(&events).expect("fold");
+//RS         assert_eq!(folded, tree);
+//RS         let re_unfolded = unfold_events(&folded).expect("re-unfold");
+//RS         assert_eq!(re_unfolded, events);
+//RS 
+//RS         // Hostile chunking: every split yields identical event algebra, and
+//RS         // fold(events) matches whole-byte parse.
+//RS         let bytes = source.as_bytes();
+//RS         let expected = stream_values(bytes, bytes.len());
+//RS         for split in 0..=bytes.len() {
+//RS             let chunked = stream_values(bytes, split);
+//RS             assert_eq!(chunked, expected, "hostile chunk split {split}");
+//RS         }
+//RS         assert_eq!(fold_events(&expected).expect("fold chunked"), tree);
+//RS 
+//RS         // Incomplete stream (no document_end).
+//RS         let incomplete: Vec<_> = expected[..expected.len() - 1].to_vec();
+//RS         let err = fold_events(&incomplete).expect_err("incomplete");
+//RS         assert_eq!(err.kind, Reason::Shape);
+//RS         assert!(err.reason.contains("complete document"));
+//RS 
+//RS         // Post-end event.
+//RS         let mut after_end = expected.clone();
+//RS         after_end.push(object(vec![("$xml_event", text("document_end"))]));
+//RS         let err = fold_events(&after_end).expect_err("post end");
+//RS         assert!(err.reason.contains("after document_end"));
+//RS 
+//RS         // Mismatched element_end expanded name.
+//RS         let mut mismatched = expected.clone();
+//RS         let end = mismatched
+//RS             .iter_mut()
+//RS             .find(|event| {
+//RS                 matches!(
+//RS                     field(event, "$xml_event"),
+//RS                     Some(Value::Text(tag)) if tag == "element_end"
+//RS                 )
+//RS             })
+//RS             .expect("element_end");
+//RS         let Value::Object(entries) = end else {
+//RS             panic!("object")
+//RS         };
+//RS         let name = entries
+//RS             .iter_mut()
+//RS             .find(|(key, _)| key == "name")
+//RS             .map(|(_, value)| value)
+//RS             .expect("name");
+//RS         *name = object(vec![
+//RS             ("raw", text("other")),
+//RS             ("prefix", Value::Null),
+//RS             ("local", text("other")),
+//RS             ("namespace_uri", Value::Null),
+//RS         ]);
+//RS         let err = fold_events(&mismatched).expect_err("mismatch");
+//RS         assert_eq!(err.kind, Reason::MismatchedTag);
+//RS 
+//RS         // Writer hostile order / terminal lifecycle.
+//RS         let mut writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::Deterministic);
+//RS         let err = writer
+//RS             .write(&object(vec![("$xml_event", text("document_end"))]))
+//RS             .expect_err("end before start");
+//RS         assert!(err.reason.contains("document_start"));
+//RS 
+//RS         writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::Deterministic);
+//RS         writer.write(&expected[0]).expect("document_start");
+//RS         let err = writer.write(&expected[0]).expect_err("duplicate start");
+//RS         assert!(err.reason.contains("duplicate"));
+//RS 
+//RS         writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::Deterministic);
+//RS         for event in &expected {
+//RS             writer.write(event).expect("write complete");
+//RS         }
+//RS         assert!(writer.is_finished());
+//RS         let err = writer
+//RS             .write(&object(vec![("$xml_event", text("document_end"))]))
+//RS             .expect_err("post terminal");
+//RS         assert!(err.reason.contains("after document_end"));
+//RS 
+//RS         // Finish before document_end: writer not finished; incomplete stack.
+//RS         writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::Deterministic);
+//RS         writer.write(&expected[0]).expect("start");
+//RS         // Skip to first element_start and write an explicit open without close.
+//RS         let start = expected
+//RS             .iter()
+//RS             .find(|event| {
+//RS                 matches!(
+//RS                     field(event, "$xml_event"),
+//RS                     Some(Value::Text(tag)) if tag == "element_start"
+//RS                         && matches!(field(*event, "empty_style"), Some(Value::Text(style)) if style == "explicit")
+//RS                 )
+//RS             })
+//RS             .expect("root start");
+//RS         writer.write(start).expect("open root");
+//RS         let err = writer
+//RS             .write(&object(vec![("$xml_event", text("document_end"))]))
+//RS             .expect_err("incomplete closure");
+//RS         assert!(err.reason.contains("closed root"));
+//RS         assert!(!writer.is_finished());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn canonical_xml_sorts_and_normalizes_semantic_infoset() {
+//RS         let tree = parse_document("<?xml version='1.0'?><r xmlns:q='urn:q' xmlns:p='urn:p' q:z='2' a='x&#xA;y' p:a='1'><e/><!--c--><![CDATA[<&]]></r>").expect("tree");
+//RS         let without = canonical_document(
+//RS             &tree,
+//RS             &CanonicalOptions {
+//RS                 mode: CanonicalMode::Inclusive11,
+//RS                 comments: false,
+//RS                 inclusive_prefixes: vec![],
+//RS             },
+//RS         )
+//RS         .expect("canonical");
+//RS         assert_eq!(without, "<r xmlns:p=\"urn:p\" xmlns:q=\"urn:q\" a=\"x&#xA;y\" p:a=\"1\" q:z=\"2\"><e></e>&lt;&amp;</r>");
+//RS         let with = canonical_document(
+//RS             &tree,
+//RS             &CanonicalOptions {
+//RS                 mode: CanonicalMode::Exclusive10,
+//RS                 comments: true,
+//RS                 inclusive_prefixes: vec!["p".to_string()],
+//RS             },
+//RS         )
+//RS         .expect("exclusive");
+//RS         assert_eq!(with, "<r xmlns:p=\"urn:p\" xmlns:q=\"urn:q\" a=\"x&#xA;y\" p:a=\"1\" q:z=\"2\"><e></e><!--c-->&lt;&amp;</r>");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn projection_helpers_follow_d_encxml_projection1_a() {
+//RS         let doc = parse_document(
+//RS             r#"<catalog xmlns:s="urn:shop"><s:book id="7"><title>Hi</title><s:price currency="USD">9</s:price><!--note--></s:book></catalog>"#,
+//RS         )
+//RS         .expect("parse");
+//RS         let root = document_root(&doc).expect("root");
+//RS         let (raw, prefix, local, uri) = expanded_name_parts(&root).expect("name");
+//RS         assert_eq!(raw, "catalog");
+//RS         assert_eq!(prefix, None);
+//RS         assert_eq!(local, "catalog");
+//RS         assert_eq!(uri, None);
+//RS         assert_eq!(lookup_attribute(&root, "missing").expect("attr"), None);
+//RS 
+//RS         let book = element_content(&root)
+//RS             .expect("content")
+//RS             .into_iter()
+//RS             .find(|node| matches!(field(node, "$xml"), Some(Value::Text(tag)) if tag == "element"))
+//RS             .expect("book");
+//RS         let (_, _, book_local, book_uri) = expanded_name_parts(&book).expect("book name");
+//RS         assert_eq!(book_local, "book");
+//RS         assert_eq!(book_uri.as_deref(), Some("urn:shop"));
+//RS         assert_eq!(
+//RS             lookup_attribute(&book, "id").expect("id").as_deref(),
+//RS             Some("7")
+//RS         );
+//RS         assert_eq!(
+//RS             lookup_attribute(&book, "{urn:shop}id")
+//RS                 .expect("clark")
+//RS                 .as_deref(),
+//RS             None
+//RS         );
+//RS 
+//RS         let projected = project_document_for_decode(&doc).expect("project");
+//RS         let Value::Object(entries) = projected else {
+//RS             panic!("object")
+//RS         };
+//RS         assert!(entries.iter().any(|(key, _)| key == "{urn:shop}book"));
+//RS         let book_proj = entries
+//RS             .iter()
+//RS             .find(|(key, _)| key == "{urn:shop}book")
+//RS             .map(|(_, value)| value)
+//RS             .expect("book proj");
+//RS         let Value::Object(book_entries) = book_proj else {
+//RS             panic!("book object")
+//RS         };
+//RS         assert!(book_entries
+//RS             .iter()
+//RS             .any(|(key, value)| key == "@id" && matches!(value, Value::Text(text) if text == "7")));
+//RS         assert!(book_entries.iter().any(|(key, _)| key == "$content"));
+//RS         assert!(!book_entries.iter().any(|(key, _)| key == "$text"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn projection_maps_simple_children_and_price_for_codable() {
+//RS         let doc = parse_document(
+//RS             r#"<catalog><book id="7"><title>Hi</title><price currency="USD">9</price></book><book id="8"><title>Lo</title><price currency="EUR">3</price></book></catalog>"#,
+//RS         )
+//RS         .expect("parse");
+//RS         let projected = project_document_for_decode(&doc).expect("project");
+//RS         let Value::Object(entries) = projected else {
+//RS             panic!("object")
+//RS         };
+//RS         let book = match entries
+//RS             .iter()
+//RS             .find(|(key, _)| key == "book")
+//RS             .map(|(_, value)| value)
+//RS         {
+//RS             Some(Value::Array(items)) => &items[0],
+//RS             other => panic!("expected book array, got {other:?}"),
+//RS         };
+//RS         let Value::Object(book_entries) = book else {
+//RS             panic!("book object")
+//RS         };
+//RS         assert!(book_entries
+//RS             .iter()
+//RS             .any(|(key, value)| key == "@id" && matches!(value, Value::Text(text) if text == "7")));
+//RS         assert!(book_entries.iter().any(
+//RS             |(key, value)| key == "title" && matches!(value, Value::Text(text) if text == "Hi")
+//RS         ));
+//RS         let price = book_entries
+//RS             .iter()
+//RS             .find(|(key, _)| key == "price")
+//RS             .map(|(_, value)| value)
+//RS             .expect("price");
+//RS         let Value::Object(price_entries) = price else {
+//RS             panic!("price object: {price:?}")
+//RS         };
+//RS         assert!(price_entries.iter().any(|(key, value)| key == "@currency"
+//RS             && matches!(value, Value::Text(text) if text == "USD")));
+//RS         assert!(price_entries.iter().any(
+//RS             |(key, value)| key == "$text" && matches!(value, Value::Text(text) if text == "9")
+//RS         ));
+//RS     }
+//RS }
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct Error {
+//RS     pub kind: Reason,
+//RS     pub offset: usize,
+//RS     pub line: Option<usize>,
+//RS     pub column: Option<usize>,
+//RS     pub path: String,
+//RS     pub reason: String,
+//RS }
+//RS impl Error {
+//RS     fn at(offset: usize, reason: impl Into<String>) -> Self {
+//RS         Self::at_kind(offset, Reason::Malformed, reason)
+//RS     }
+//RS     fn at_kind(offset: usize, kind: Reason, reason: impl Into<String>) -> Self {
+//RS         Self {
+//RS             kind,
+//RS             offset,
+//RS             line: None,
+//RS             column: None,
+//RS             path: "$".to_string(),
+//RS             reason: reason.into(),
+//RS         }
+//RS     }
+//RS     fn limit(reason: impl Into<String>) -> Self {
+//RS         // Constructor/source-less Limit errors keep empty path (D-ENCXML1/D-ENCSTREAM).
+//RS         Self {
+//RS             kind: Reason::Limit,
+//RS             offset: 0,
+//RS             line: None,
+//RS             column: None,
+//RS             path: String::new(),
+//RS             reason: reason.into(),
+//RS         }
+//RS     }
+//RS     fn located(mut self, source: &str, path: String) -> Self {
+//RS         let offset = self.offset.min(source.len());
+//RS         let prefix = &source[..offset];
+//RS         self.line = Some(
+//RS             prefix
+//RS                 .chars()
+//RS                 .filter(|character| *character == '\n')
+//RS                 .count()
+//RS                 + 1,
+//RS         );
+//RS         self.column = Some(prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1);
+//RS         self.path = path;
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum Reason {
+//RS     InvalidEncoding,
+//RS     Malformed,
+//RS     MismatchedTag,
+//RS     InvalidName,
+//RS     Namespace,
+//RS     DuplicateAttribute,
+//RS     Entity,
+//RS     EntityCycle,
+//RS     Limit,
+//RS     Canonicalization,
+//RS     Shape,
+//RS     Unsupported,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct Limits {
+//RS     pub max_depth: usize,
+//RS     pub max_nodes: usize,
+//RS     pub max_attributes_per_element: usize,
+//RS     pub max_name_bytes: usize,
+//RS     pub max_text_bytes: usize,
+//RS     pub max_entity_declarations: usize,
+//RS     pub max_entity_depth: usize,
+//RS     pub max_entity_replacement_bytes: usize,
+//RS }
+//RS 
+//RS impl Limits {
+//RS     pub fn safe() -> Self {
+//RS         Self {
+//RS             max_depth: 256,
+//RS             max_nodes: 1_000_000,
+//RS             max_attributes_per_element: 1024,
+//RS             max_name_bytes: 4096,
+//RS             max_text_bytes: 16_777_216,
+//RS             max_entity_declarations: 1024,
+//RS             max_entity_depth: 32,
+//RS             max_entity_replacement_bytes: 8_388_608,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), Error> {
+//RS         let checks = [
+//RS             ("max_depth", self.max_depth, 1, 4096),
+//RS             ("max_nodes", self.max_nodes, 1, 1_000_000_000),
+//RS             (
+//RS                 "max_attributes_per_element",
+//RS                 self.max_attributes_per_element,
+//RS                 0,
+//RS                 1_000_000,
+//RS             ),
+//RS             ("max_name_bytes", self.max_name_bytes, 1, 1_048_576),
+//RS             ("max_text_bytes", self.max_text_bytes, 0, 1_073_741_824),
+//RS             (
+//RS                 "max_entity_declarations",
+//RS                 self.max_entity_declarations,
+//RS                 0,
+//RS                 1_000_000,
+//RS             ),
+//RS             ("max_entity_depth", self.max_entity_depth, 0, 256),
+//RS             (
+//RS                 "max_entity_replacement_bytes",
+//RS                 self.max_entity_replacement_bytes,
+//RS                 0,
+//RS                 1_073_741_824,
+//RS             ),
+//RS         ];
+//RS         for (name, value, minimum, maximum) in checks {
+//RS             if !(minimum..=maximum).contains(&value) {
+//RS                 return Err(Error::limit(format!(
+//RS                     "XML limit `{name}` must be between {minimum} and {maximum}"
+//RS                 )));
+//RS             }
+//RS         }
+//RS         if self.max_entity_depth > self.max_depth {
+//RS             return Err(Error::limit(
+//RS                 "XML limit `max_entity_depth` exceeds `max_depth`",
+//RS             ));
+//RS         }
+//RS         if self.max_entity_replacement_bytes > self.max_text_bytes {
+//RS             return Err(Error::limit(
+//RS                 "XML limit `max_entity_replacement_bytes` exceeds `max_text_bytes`",
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum EntityPolicy {
+//RS     Preserve,
+//RS     Reject,
+//RS     Resolve(BTreeMap<String, String>),
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct ParseOptions {
+//RS     pub entities: EntityPolicy,
+//RS     pub limits: Limits,
+//RS }
+//RS 
+//RS impl ParseOptions {
+//RS     pub fn safe() -> Self {
+//RS         Self {
+//RS             entities: EntityPolicy::Preserve,
+//RS             limits: Limits::safe(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Wire encoding selected once from BOM/signature bytes. The incremental
+//RS /// lexer keeps each decoded scalar paired with its original bytes so stream
+//RS /// lexical evidence never requires retaining a document-sized source buffer.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum WireEncoding {
+//RS     UTF8,
+//RS     Utf16Le,
+//RS     Utf16Be,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum TokenKind {
+//RS     Text,
+//RS     Entity,
+//RS     Markup,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct ByteToken {
+//RS     pub kind: TokenKind,
+//RS     pub text: String,
+//RS     pub raw_bytes: Vec<u8>,
+//RS     pub scalar_bytes: Vec<usize>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct DecodedUnit {
+//RS     scalar: char,
+//RS     raw: Vec<u8>,
+//RS }
+//RS 
+//RS /// Owned, bounded, chunk-invariant XML byte lexer. It performs encoding/BOM
+//RS /// selection and XML-aware token framing (quotes, comments, CDATA, PI, and
+//RS /// DOCTYPE subsets) before the semantic Scanner consumes a token. No token is
+//RS /// split because an IO chunk ended; retained memory is one token plus at most
+//RS /// four undecoded bytes.
+//RS pub struct ByteLexer {
+//RS     encoding: Option<WireEncoding>,
+//RS     bom: Vec<u8>,
+//RS     undecided: Vec<u8>,
+//RS     pending: Vec<u8>,
+//RS     units: Vec<DecodedUnit>,
+//RS     max_item_bytes: usize,
+//RS     wire_offset: usize,
+//RS     eof: bool,
+//RS     terminal: Option<Error>,
+//RS }
+//RS 
+//RS impl ByteLexer {
+//RS     pub fn new(max_item_bytes: usize) -> Self {
+//RS         Self {
+//RS             encoding: None,
+//RS             bom: Vec::new(),
+//RS             undecided: Vec::new(),
+//RS             pending: Vec::new(),
+//RS             units: Vec::new(),
+//RS             max_item_bytes,
+//RS             wire_offset: 0,
+//RS             eof: false,
+//RS             terminal: None,
+//RS         }
+//RS     }
+//RS     pub fn encoding(&self) -> Option<WireEncoding> {
+//RS         self.encoding
+//RS     }
+//RS     pub fn bom(&self) -> &[u8] {
+//RS         &self.bom
+//RS     }
+//RS     fn fail<T>(&mut self, kind: Reason, reason: impl Into<String>) -> Result<T, Error> {
+//RS         let error = Error::at_kind(self.wire_offset, kind, reason);
+//RS         self.terminal = Some(error.clone());
+//RS         Err(error)
+//RS     }
+//RS     fn choose_encoding(&mut self, final_input: bool) -> Result<(), Error> {
+//RS         if self.encoding.is_some() {
+//RS             return Ok(());
+//RS         }
+//RS         if self.undecided.starts_with(&[0xef, 0xbb, 0xbf]) {
+//RS             self.encoding = Some(WireEncoding::UTF8);
+//RS             self.bom = self.undecided.drain(..3).collect();
+//RS             self.wire_offset = 3;
+//RS         } else if self.undecided.starts_with(&[0xff, 0xfe]) {
+//RS             self.encoding = Some(WireEncoding::Utf16Le);
+//RS             self.bom = self.undecided.drain(..2).collect();
+//RS             self.wire_offset = 2;
+//RS         } else if self.undecided.starts_with(&[0xfe, 0xff]) {
+//RS             self.encoding = Some(WireEncoding::Utf16Be);
+//RS             self.bom = self.undecided.drain(..2).collect();
+//RS             self.wire_offset = 2;
+//RS         } else if self.undecided.len() >= 4 {
+//RS             self.encoding = Some(if self.undecided[..4] == [0, b'<', 0, b'?'] {
+//RS                 WireEncoding::Utf16Be
+//RS             } else if self.undecided[..4] == [b'<', 0, b'?', 0] {
+//RS                 WireEncoding::Utf16Le
+//RS             } else {
+//RS                 WireEncoding::UTF8
+//RS             });
+//RS         } else if final_input || self.undecided.len() >= 3 {
+//RS             self.encoding = Some(WireEncoding::UTF8);
+//RS         }
+//RS         if self.encoding.is_some() {
+//RS             self.pending.append(&mut self.undecided);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS     pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
+//RS         if let Some(error) = &self.terminal {
+//RS             return Err(error.clone());
+//RS         }
+//RS         if self.eof {
+//RS             return self.fail(Reason::Malformed, "XML bytes arrived after end of input");
+//RS         }
+//RS         if self.encoding.is_none() {
+//RS             self.undecided.extend_from_slice(bytes);
+//RS             self.choose_encoding(false)?;
+//RS         } else {
+//RS             self.pending.extend_from_slice(bytes);
+//RS         }
+//RS         self.decode(false)
+//RS     }
+//RS     pub fn finish_input(&mut self) -> Result<(), Error> {
+//RS         if let Some(error) = &self.terminal {
+//RS             return Err(error.clone());
+//RS         }
+//RS         self.eof = true;
+//RS         self.choose_encoding(true)?;
+//RS         self.decode(true)
+//RS     }
+//RS     fn retain(&mut self, scalar: char, raw: Vec<u8>) -> Result<(), Error> {
+//RS         let retained: usize = self.units.iter().map(|unit| unit.raw.len()).sum();
+//RS         if retained.saturating_add(raw.len()) > self.max_item_bytes {
+//RS             return self.fail(
+//RS                 Reason::Limit,
+//RS                 format!("XML token exceeds max_item_bytes ({})", self.max_item_bytes),
+//RS             );
+//RS         }
+//RS         self.wire_offset = self.wire_offset.saturating_add(raw.len());
+//RS         self.units.push(DecodedUnit { scalar, raw });
+//RS         Ok(())
+//RS     }
+//RS     fn decode(&mut self, final_input: bool) -> Result<(), Error> {
+//RS         let Some(encoding) = self.encoding else {
+//RS             return Ok(());
+//RS         };
+//RS         loop {
+//RS             // Never append past an already-complete token. finish_input used to
+//RS             // glue the next scalar onto a finished Markup and strand Text crumbs.
+//RS             if self.boundary().is_some() {
+//RS                 break;
+//RS             }
+//RS             match encoding {
+//RS                 WireEncoding::UTF8 => {
+//RS                     let Some(&first) = self.pending.first() else {
+//RS                         break;
+//RS                     };
+//RS                     let width = if first < 0x80 {
+//RS                         1
+//RS                     } else if first & 0xe0 == 0xc0 {
+//RS                         2
+//RS                     } else if first & 0xf0 == 0xe0 {
+//RS                         3
+//RS                     } else if first & 0xf8 == 0xf0 {
+//RS                         4
+//RS                     } else {
+//RS                         return self.fail(Reason::InvalidEncoding, "invalid UTF-8 leading byte");
+//RS                     };
+//RS                     if self.pending.len() < width {
+//RS                         break;
+//RS                     }
+//RS                     let raw: Vec<u8> = self.pending.drain(..width).collect();
+//RS                     let text = match std::str::from_utf8(&raw) {
+//RS                         Ok(text) => text,
+//RS                         Err(_) => {
+//RS                             return self.fail(Reason::InvalidEncoding, "invalid UTF-8 sequence")
+//RS                         }
+//RS                     };
+//RS                     let Some(scalar) = text.chars().next() else {
+//RS                         return self.fail(Reason::InvalidEncoding, "empty UTF-8 sequence");
+//RS                     };
+//RS                     self.retain(scalar, raw)?;
+//RS                 }
+//RS                 WireEncoding::Utf16Le | WireEncoding::Utf16Be => {
+//RS                     if self.pending.len() < 2 {
+//RS                         break;
+//RS                     }
+//RS                     let unit = if encoding == WireEncoding::Utf16Le {
+//RS                         u16::from_le_bytes([self.pending[0], self.pending[1]])
+//RS                     } else {
+//RS                         u16::from_be_bytes([self.pending[0], self.pending[1]])
+//RS                     };
+//RS                     let width = if (0xd800..=0xdbff).contains(&unit) {
+//RS                         4
+//RS                     } else {
+//RS                         2
+//RS                     };
+//RS                     if self.pending.len() < width {
+//RS                         break;
+//RS                     }
+//RS                     let raw: Vec<u8> = self.pending.drain(..width).collect();
+//RS                     let scalar = if width == 2 {
+//RS                         if (0xdc00..=0xdfff).contains(&unit) {
+//RS                             return self
+//RS                                 .fail(Reason::InvalidEncoding, "unpaired UTF-16 low surrogate");
+//RS                         }
+//RS                         let Some(scalar) = char::from_u32(unit as u32) else {
+//RS                             return self.fail(Reason::InvalidEncoding, "invalid UTF-16 scalar");
+//RS                         };
+//RS                         scalar
+//RS                     } else {
+//RS                         let low = if encoding == WireEncoding::Utf16Le {
+//RS                             u16::from_le_bytes([raw[2], raw[3]])
+//RS                         } else {
+//RS                             u16::from_be_bytes([raw[2], raw[3]])
+//RS                         };
+//RS                         if !(0xdc00..=0xdfff).contains(&low) {
+//RS                             return self
+//RS                                 .fail(Reason::InvalidEncoding, "unpaired UTF-16 high surrogate");
+//RS                         }
+//RS                         let Some(scalar) = char::from_u32(
+//RS                             0x10000 + (((unit - 0xd800) as u32) << 10) + (low - 0xdc00) as u32,
+//RS                         ) else {
+//RS                             return self.fail(Reason::InvalidEncoding, "invalid UTF-16 scalar");
+//RS                         };
+//RS                         scalar
+//RS                     };
+//RS                     self.retain(scalar, raw)?;
+//RS                 }
+//RS             }
+//RS         }
+//RS         if final_input && self.boundary().is_none() && !self.pending.is_empty() {
+//RS             return self.fail(Reason::InvalidEncoding, "truncated encoded XML scalar");
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS     fn boundary(&self) -> Option<(usize, TokenKind)> {
+//RS         if self.units.is_empty() {
+//RS             return None;
+//RS         }
+//RS         let chars: Vec<char> = self.units.iter().map(|unit| unit.scalar).collect();
+//RS         if chars[0] == '&' {
+//RS             return chars
+//RS                 .iter()
+//RS                 .position(|c| *c == ';')
+//RS                 .map(|i| (i + 1, TokenKind::Entity));
+//RS         }
+//RS         if chars[0] != '<' {
+//RS             if let Some(index) = chars.iter().position(|c| *c == '<' || *c == '&') {
+//RS                 return Some((index, TokenKind::Text));
+//RS             }
+//RS             // Close Text at EOF only when every pending wire byte is already a unit.
+//RS             // Otherwise decode would freeze one scalar at a time under eof=true.
+//RS             if self.eof && self.pending.is_empty() {
+//RS                 return Some((chars.len(), TokenKind::Text));
+//RS             }
+//RS             return None;
+//RS         }
+//RS         let text: String = chars.iter().collect();
+//RS         for (lead, end) in [("<!--", "-->"), ("<![CDATA[", "]]>"), ("<?", "?>")] {
+//RS             if text.starts_with(lead) {
+//RS                 return text
+//RS                     .find(end)
+//RS                     .map(|i| (text[..i + end.len()].chars().count(), TokenKind::Markup));
+//RS             }
+//RS         }
+//RS         let mut quote = None;
+//RS         let mut bracket = 0i32;
+//RS         for (index, scalar) in chars.iter().enumerate().skip(1) {
+//RS             if let Some(expected) = quote {
+//RS                 if *scalar == expected {
+//RS                     quote = None;
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             if *scalar == '\'' || *scalar == '"' {
+//RS                 quote = Some(*scalar);
+//RS             } else if text.starts_with("<!DOCTYPE") && *scalar == '[' {
+//RS                 bracket += 1;
+//RS             } else if text.starts_with("<!DOCTYPE") && *scalar == ']' {
+//RS                 bracket -= 1;
+//RS             } else if *scalar == '>' && bracket == 0 {
+//RS                 return Some((index + 1, TokenKind::Markup));
+//RS             }
+//RS         }
+//RS         None
+//RS     }
+//RS     pub fn next_token(&mut self) -> Result<Option<ByteToken>, Error> {
+//RS         if let Some(error) = &self.terminal {
+//RS             return Err(error.clone());
+//RS         }
+//RS         self.decode(self.eof)?;
+//RS         let Some((count, kind)) = self.boundary() else {
+//RS             if self.eof && !self.units.is_empty() {
+//RS                 return self.fail(Reason::Malformed, "unterminated XML token at end of input");
+//RS             }
+//RS             return Ok(None);
+//RS         };
+//RS         if count == 0 {
+//RS             return Ok(None);
+//RS         }
+//RS         let drained: Vec<_> = self.units.drain(..count).collect();
+//RS         let scalar_bytes = drained.iter().map(|unit| unit.raw.len()).collect();
+//RS         Ok(Some(ByteToken {
+//RS             kind,
+//RS             text: drained.iter().map(|unit| unit.scalar).collect(),
+//RS             raw_bytes: drained.into_iter().flat_map(|unit| unit.raw).collect(),
+//RS             scalar_bytes,
+//RS         }))
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct StreamEvent {
+//RS     pub event: Event,
+//RS     pub raw_bytes: Vec<u8>,
+//RS     pub encoding: WireEncoding,
+//RS     pub bom: Vec<u8>,
+//RS }
+//RS 
+//RS /// Persistent semantic projection over ByteLexer. Scanner remains the sole XML
+//RS /// grammar/namespace/limit engine; this adapter supplies one complete lexical
+//RS /// token at a time and transfers its owned semantic state between calls.
+//RS pub struct StreamScanner {
+//RS     lexer: ByteLexer,
+//RS     options: ParseOptions,
+//RS     started: bool,
+//RS     ended: bool,
+//RS     root_seen: bool,
+//RS     root_closed: bool,
+//RS     declaration_seen: bool,
+//RS     doctype_seen: bool,
+//RS     declared_entities: BTreeMap<String, DeclaredEntityKind>,
+//RS     stack: Vec<Frame>,
+//RS     nodes: usize,
+//RS     text_bytes: usize,
+//RS     entity_replacement_bytes: usize,
+//RS     wire_consumed: usize,
+//RS     line: usize,
+//RS     column: usize,
+//RS     terminal: Option<Error>,
+//RS }
+//RS 
+//RS impl StreamScanner {
+//RS     pub fn new(max_item_bytes: usize, options: ParseOptions) -> Result<Self, Error> {
+//RS         options.limits.validate()?;
+//RS         Ok(Self {
+//RS             lexer: ByteLexer::new(max_item_bytes),
+//RS             options,
+//RS             started: false,
+//RS             ended: false,
+//RS             root_seen: false,
+//RS             root_closed: false,
+//RS             declaration_seen: false,
+//RS             doctype_seen: false,
+//RS             declared_entities: BTreeMap::new(),
+//RS             stack: Vec::new(),
+//RS             nodes: 0,
+//RS             text_bytes: 0,
+//RS             entity_replacement_bytes: 0,
+//RS             wire_consumed: 0,
+//RS             line: 1,
+//RS             column: 1,
+//RS             terminal: None,
+//RS         })
+//RS     }
+//RS     pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
+//RS         if let Some(error) = &self.terminal {
+//RS             return Err(error.clone());
+//RS         }
+//RS         self.lexer.push(bytes).map_err(|error| {
+//RS             self.terminal = Some(error.clone());
+//RS             error
+//RS         })
+//RS     }
+//RS     pub fn finish_input(&mut self) -> Result<(), Error> {
+//RS         if let Some(error) = &self.terminal {
+//RS             return Err(error.clone());
+//RS         }
+//RS         self.lexer.finish_input().map_err(|error| {
+//RS             self.terminal = Some(error.clone());
+//RS             error
+//RS         })
+//RS     }
+//RS     fn fail<T>(&mut self, mut error: Error) -> Result<T, Error> {
+//RS         if error.line.is_none() {
+//RS             error.line = Some(self.line);
+//RS             error.column = Some(self.column)
+//RS         }
+//RS         self.terminal = Some(error.clone());
+//RS         Err(error)
+//RS     }
+//RS     pub fn next(&mut self) -> Result<Option<StreamEvent>, Error> {
+//RS         if let Some(error) = &self.terminal {
+//RS             return Err(error.clone());
+//RS         }
+//RS         let Some(encoding) = self.lexer.encoding() else {
+//RS             return Ok(None);
+//RS         };
+//RS         if !self.started {
+//RS             self.started = true;
+//RS             self.nodes = 1;
+//RS             self.wire_consumed = self.lexer.bom().len();
+//RS             return Ok(Some(StreamEvent {
+//RS                 event: Event::DocumentStart,
+//RS                 raw_bytes: Vec::new(),
+//RS                 encoding,
+//RS                 bom: self.lexer.bom().to_vec(),
+//RS             }));
+//RS         }
+//RS         let Some(token) = self.lexer.next_token().map_err(|error| {
+//RS             self.terminal = Some(error.clone());
+//RS             error
+//RS         })?
+//RS         else {
+//RS             if !self.lexer.eof {
+//RS                 return Ok(None);
+//RS             }
+//RS             if self.ended {
+//RS                 return Ok(None);
+//RS             }
+//RS             if !self.stack.is_empty() {
+//RS                 return self.fail(Error::at_kind(
+//RS                     self.wire_consumed,
+//RS                     Reason::Malformed,
+//RS                     "XML document ended before closing element",
+//RS                 ));
+//RS             }
+//RS             if !self.root_seen {
+//RS                 return self.fail(Error::at_kind(
+//RS                     self.wire_consumed,
+//RS                     Reason::Malformed,
+//RS                     "empty XML document",
+//RS                 ));
+//RS             }
+//RS             self.ended = true;
+//RS             return Ok(Some(StreamEvent {
+//RS                 event: Event::DocumentEnd,
+//RS                 raw_bytes: Vec::new(),
+//RS                 encoding,
+//RS                 bom: self.lexer.bom().to_vec(),
+//RS             }));
+//RS         };
+//RS         if token.text.starts_with("<?xml") && self.wire_consumed != self.lexer.bom().len() {
+//RS             return self.fail(Error::at_kind(
+//RS                 self.wire_consumed,
+//RS                 Reason::Malformed,
+//RS                 "XML declaration is out of order",
+//RS             ));
+//RS         }
+//RS         let mut scanner = Scanner {
+//RS             source: &token.text,
+//RS             wire_encoding: Some(encoding),
+//RS             offset: 0,
+//RS             started: true,
+//RS             ended: false,
+//RS             root_seen: self.root_seen,
+//RS             root_closed: self.root_closed,
+//RS             declaration_seen: self.declaration_seen,
+//RS             doctype_seen: self.doctype_seen,
+//RS             declared_entities: self.declared_entities.clone(),
+//RS             stack: self.stack.clone(),
+//RS             options: self.options.clone(),
+//RS             nodes: self.nodes,
+//RS             text_bytes: self.text_bytes,
+//RS             entity_replacement_bytes: self.entity_replacement_bytes,
+//RS         };
+//RS         let event = match scanner.next() {
+//RS             Ok(Some(event)) => event,
+//RS             Ok(None) => {
+//RS                 return self.fail(Error::at_kind(
+//RS                     self.wire_consumed,
+//RS                     Reason::Malformed,
+//RS                     "XML token produced no event",
+//RS                 ))
+//RS             }
+//RS             Err(mut error) => {
+//RS                 let scalar_count = token.text[..error.offset.min(token.text.len())]
+//RS                     .chars()
+//RS                     .count();
+//RS                 error.offset = self.wire_consumed
+//RS                     + token.scalar_bytes.iter().take(scalar_count).sum::<usize>();
+//RS                 let local_line = error.line.unwrap_or(1);
+//RS                 let local_column = error.column.unwrap_or(1);
+//RS                 error.line = Some(self.line + local_line - 1);
+//RS                 error.column = Some(if local_line == 1 {
+//RS                     self.column + local_column - 1
+//RS                 } else {
+//RS                     local_column
+//RS                 });
+//RS                 return self.fail(error);
+//RS             }
+//RS         };
+//RS         self.root_seen = scanner.root_seen;
+//RS         self.root_closed = scanner.root_closed;
+//RS         self.declaration_seen = scanner.declaration_seen;
+//RS         self.doctype_seen = scanner.doctype_seen;
+//RS         self.declared_entities = scanner.declared_entities;
+//RS         self.stack = scanner.stack;
+//RS         self.nodes = scanner.nodes;
+//RS         self.text_bytes = scanner.text_bytes;
+//RS         self.entity_replacement_bytes = scanner.entity_replacement_bytes;
+//RS         self.wire_consumed += token.raw_bytes.len();
+//RS         for scalar in token.text.chars() {
+//RS             if scalar == '\n' {
+//RS                 self.line += 1;
+//RS                 self.column = 1
+//RS             } else {
+//RS                 self.column += 1
+//RS             }
+//RS         }
+//RS         Ok(Some(StreamEvent {
+//RS             event,
+//RS             raw_bytes: token.raw_bytes,
+//RS             encoding,
+//RS             bom: self.lexer.bom().to_vec(),
+//RS         }))
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct Frame {
+//RS     name: Name,
+//RS     namespaces: Vec<(Option<String>, String)>,
+//RS }
+//RS pub struct Scanner<'a> {
+//RS     source: &'a str,
+//RS     wire_encoding: Option<WireEncoding>,
+//RS     offset: usize,
+//RS     started: bool,
+//RS     ended: bool,
+//RS     root_seen: bool,
+//RS     root_closed: bool,
+//RS     declaration_seen: bool,
+//RS     doctype_seen: bool,
+//RS     declared_entities: BTreeMap<String, DeclaredEntityKind>,
+//RS     stack: Vec<Frame>,
+//RS     options: ParseOptions,
+//RS     nodes: usize,
+//RS     text_bytes: usize,
+//RS     entity_replacement_bytes: usize,
+//RS }
+//RS 
+//RS fn name_start(c: char) -> bool {
+//RS     matches!(c, ':'|'A'..='Z'|'_'|'a'..='z')
+//RS         || matches!(c as u32, 0xC0..=0xD6|0xD8..=0xF6|0xF8..=0x2FF|0x370..=0x37D|0x37F..=0x1FFF|0x200C..=0x200D|0x2070..=0x218F|0x2C00..=0x2FEF|0x3001..=0xD7FF|0xF900..=0xFDCF|0xFDF0..=0xFFFD|0x10000..=0xEFFFF)
+//RS }
+//RS fn name_char(c: char) -> bool {
+//RS     name_start(c)
+//RS         || matches!(c, '-' | '.' | '0'..='9' | '\u{B7}')
+//RS         || matches!(c as u32, 0x0300..=0x036F|0x203F..=0x2040)
+//RS }
+//RS fn valid_name(s: &str) -> bool {
+//RS     let mut cs = s.chars();
+//RS     cs.next().is_some_and(name_start) && cs.all(name_char) && s.matches(':').count() <= 1
+//RS }
+//RS fn valid_xml_char(character: char) -> bool {
+//RS     matches!(
+//RS         character as u32,
+//RS         0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF
+//RS     )
+//RS }
+// END-PORT-PENDING 0113 crates/jet-foundation/src/XmlPull.rs:3629-5428
+

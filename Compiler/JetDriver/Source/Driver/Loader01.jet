@@ -1,0 +1,845 @@
+// PORT-PENDING 0064 crates-jet-foundation-src-facts-module-group: crates/jet-foundation/src/Facts.rs:1-841
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Shared compile-time fact model (D-FACTMODEL1=A).
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet, VecDeque};
+//RS use std::path::Path;
+//RS /// Canonical shape facts are defined once in `Shape` and re-exported through
+//RS /// the shared fact plane. Consumers must use this registry rather than build a
+//RS /// projection-specific field table.
+//RS pub use crate::Shape::{
+//RS     ShapeDimensions, ShapeEncoding, ShapeError, ShapeFact, ShapeFieldFact, ShapeFieldNames,
+//RS     ShapeIdentity, ShapeLayoutFact, ShapeLayoutKind, ShapeOrigin, ShapeProjectedField,
+//RS     ShapeProjection, ShapeProjectionKind, ShapeProvenance, ShapeSpan, ShapeType,
+//RS };
+//RS 
+//RS /// D-SHAPE-ONE1: one checked shape fact registry feeds every projection.
+//RS #[derive(Debug, Clone, Default, PartialEq, Eq)]
+//RS pub struct ShapeFactRegistry {
+//RS     facts: BTreeMap<ShapeIdentity, ShapeFact>,
+//RS }
+//RS 
+//RS impl ShapeFactRegistry {
+//RS     /// Validate and register one canonical fact. Re-registering an identity
+//RS     /// replaces the previous checked row and returns it to the caller.
+//RS     pub fn insert(&mut self, fact: ShapeFact) -> Result<Option<ShapeFact>, ShapeError> {
+//RS         fact.validate()?;
+//RS         Ok(self.facts.insert(fact.identity.clone(), fact))
+//RS     }
+//RS 
+//RS     pub fn get(&self, identity: &ShapeIdentity) -> Option<&ShapeFact> {
+//RS         self.facts.get(identity)
+//RS     }
+//RS 
+//RS     pub fn project(
+//RS         &self,
+//RS         identity: &ShapeIdentity,
+//RS         kind: ShapeProjectionKind,
+//RS     ) -> Result<Option<ShapeProjection>, ShapeError> {
+//RS         self.get(identity)
+//RS             .map(|fact| fact.project(kind))
+//RS             .transpose()
+//RS     }
+//RS 
+//RS     pub fn iter(&self) -> impl Iterator<Item = &ShapeFact> {
+//RS         self.facts.values()
+//RS     }
+//RS 
+//RS     pub fn len(&self) -> usize {
+//RS         self.facts.len()
+//RS     }
+//RS 
+//RS     pub fn is_empty(&self) -> bool {
+//RS         self.facts.is_empty()
+//RS     }
+//RS }
+//RS 
+//RS pub use crate::Authority::{EFFECT_ROOTS, EFFECT_SOURCE};
+//RS 
+//RS /// D-CONF-STAMP1=B: the provenance carried by the build fact plane. `at` is
+//RS /// deliberately a lock-history value; it is empty until a lock-writing path
+//RS /// supplies the first stamp and is never refreshed while a lock already has
+//RS /// one.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildStamp {
+//RS     pub git: Option<String>,
+//RS     pub dirty: bool,
+//RS     pub toolchain: String,
+//RS     pub at: String,
+//RS }
+//RS 
+//RS impl Default for BuildStamp {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             git: None,
+//RS             dirty: false,
+//RS             toolchain: env!("CARGO_PKG_VERSION").to_string(),
+//RS             at: String::new(),
+//RS         }
+//RS     }
+//RS }
+//RS /// Stable target inputs that distinguish one emitted Prelude artifact from
+//RS /// another. The target triple remains the adjacent `BuildFactSnapshot` fact;
+//RS /// these fields capture the selected runtime layer, provider, source closure,
+//RS /// linker, tier, compiler, environment, and dependency identities that the
+//RS /// triple alone cannot identify.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct TargetDossier {
+//RS     /// The checked target machine selected for this artifact.
+//RS     ///
+//RS     /// This is intentionally owned by the dossier rather than reconstructed
+//RS     /// from a target triple. `None` is the hosted/default snapshot.
+//RS     pub machine: Option<Box<crate::TargetMachine::TargetMachine>>,
+//RS     /// The selected runtime ring for the reachable Prelude closure.
+//RS     pub layer: crate::RingLayer::RuntimeLayer,
+//RS     /// An opaque, stable provider identity. Providers should include their
+//RS     /// content digest in this value when their implementation can change.
+//RS     pub provider_identity: String,
+//RS     /// An opaque, stable identity for the canonical Prelude source closure.
+//RS     pub closure_identity: String,
+//RS     /// Identity of the linker input, including a content digest for files.
+//RS     pub linker_identity: String,
+//RS     /// Selected execution tier (AOT, Dev, or JIT).
+//RS     pub tier_identity: String,
+//RS     /// Compiler/code-generation identity.
+//RS     pub compiler_identity: String,
+//RS     /// Environment boundary (hosted, browser, WASI, or no-OS).
+//RS     pub environment_identity: String,
+//RS     /// Resolved dependency graph identity.
+//RS     pub dependency_identity: String,
+//RS }
+//RS 
+//RS impl Default for TargetDossier {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             machine: None,
+//RS             layer: crate::RingLayer::RuntimeLayer::Std,
+//RS             provider_identity: "hosted-default".to_string(),
+//RS             closure_identity: "prelude-hosted-v1".to_string(),
+//RS             linker_identity: "hosted-default".to_string(),
+//RS             tier_identity: "dev".to_string(),
+//RS             compiler_identity: env!("CARGO_PKG_VERSION").to_string(),
+//RS             environment_identity: "hosted".to_string(),
+//RS             dependency_identity: "none".to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl TargetDossier {
+//RS     pub fn new(
+//RS         layer: crate::RingLayer::RuntimeLayer,
+//RS         provider_identity: impl Into<String>,
+//RS         closure_identity: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             layer,
+//RS             provider_identity: provider_identity.into(),
+//RS             closure_identity: closure_identity.into(),
+//RS             ..Self::default()
+//RS         }
+//RS     }
+//RS 
+//RS     /// Append canonical bytes for the target dossier portion of an artifact
+//RS     /// key.
+//RS     ///
+//RS     /// Length framing is intentional: it keeps field boundaries unambiguous,
+//RS     /// so identities such as `("ab", "c")` cannot collide with `("a", "bc")`.
+//RS     pub fn append_cache_bytes(&self, target_triple: &str, bytes: &mut Vec<u8>) {
+//RS         bytes.extend_from_slice(b"jet-target-dossier-v3\0");
+//RS         append_cache_frame(
+//RS             bytes,
+//RS             if self.machine.is_some() {
+//RS                 b"selected-machine"
+//RS             } else {
+//RS                 b"hosted-default"
+//RS             },
+//RS         );
+//RS         if let Some(machine) = self.machine.as_deref() {
+//RS             append_cache_frame(bytes, machine.name.as_bytes());
+//RS             append_cache_frame(bytes, machine.triple.as_bytes());
+//RS             append_cache_frame(bytes, machine.provider_identity().as_bytes());
+//RS             append_cache_frame(bytes, machine.linker_identity().as_bytes());
+//RS         }
+//RS         for value in [
+//RS             target_triple,
+//RS             self.layer.as_str(),
+//RS             self.provider_identity.as_str(),
+//RS             self.closure_identity.as_str(),
+//RS             self.linker_identity.as_str(),
+//RS             self.tier_identity.as_str(),
+//RS             self.compiler_identity.as_str(),
+//RS             self.environment_identity.as_str(),
+//RS             self.dependency_identity.as_str(),
+//RS         ] {
+//RS             append_cache_frame(bytes, value.as_bytes());
+//RS         }
+//RS     }
+//RS 
+//RS     /// Canonical bytes for the target dossier portion of an artifact key.
+//RS     pub fn cache_bytes(&self, target_triple: &str) -> Vec<u8> {
+//RS         let mut bytes = Vec::new();
+//RS         self.append_cache_bytes(target_triple, &mut bytes);
+//RS         bytes
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn append_cache_frame(bytes: &mut Vec<u8>, value: &[u8]) {
+//RS     bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+//RS     bytes.extend_from_slice(value);
+//RS }
+//RS 
+//RS /// The one typed snapshot consumed by every front-end fact reader. Engines do
+//RS /// not discover any of these values; they only receive the folded literals.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildFactSnapshot {
+//RS     pub package_name: String,
+//RS     pub package_version: String,
+//RS     pub os: crate::OSTarget::OSTarget,
+//RS     /// Target identity used by target-aware compiler facts. This is an
+//RS     /// internal build input, not a user-declared fact row.
+//RS     pub target_triple: String,
+//RS     /// Stable identity of the selected runtime layer, provider, and Prelude
+//RS     /// source closure. This is folded into artifact/cache keys.
+//RS     pub target_dossier: TargetDossier,
+//RS     pub profile: String,
+//RS     /// D-DBG1=A: true when this compile produces a shipped artifact
+//RS     /// (`jet build`). Together with a release profile it is the one fact
+//RS     /// sema reads to reject a leftover `debug(...)` trace.
+//RS     pub artifact_build: bool,
+//RS     pub stamp: BuildStamp,
+//RS     /// Resolved contribution chains used by `jet explain`; fact readers still
+//RS     /// consume the folded fields above.
+//RS     pub contributions: BTreeMap<String, crate::Policy::EffectiveFact>,
+//RS     /// D-CONF-MODULE1=A: effective declared settings for the selected build
+//RS     /// profile. The map is a folded input, not an engine-visible lookup.
+//RS     pub settings: BTreeMap<String, BuildSettingFact>,
+//RS     /// The contribution chain for each effective setting, kept beside the
+//RS     /// value so semantic tools can explain a specialized argument.
+//RS     pub setting_provenance: BTreeMap<String, Vec<String>>,
+//RS }
+//RS 
+//RS /// One declared setting after the contribution ladder has been resolved.
+//RS /// The declaration type stays beside the value so later readers do not need
+//RS /// to rediscover manifest syntax.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildSettingFact {
+//RS     pub ty: String,
+//RS     pub value: BuildFactValue,
+//RS }
+//RS 
+//RS impl Default for BuildFactSnapshot {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             package_name: "script".to_string(),
+//RS             package_version: "0.0.0".to_string(),
+//RS             os: crate::OSTarget::OSTarget::host(),
+//RS             target_triple: crate::Layout::TargetLayout::host_triple(),
+//RS             target_dossier: TargetDossier::default(),
+//RS             profile: "dev".to_string(),
+//RS             artifact_build: false,
+//RS             stamp: BuildStamp::default(),
+//RS             contributions: BTreeMap::new(),
+//RS             settings: BTreeMap::new(),
+//RS             setting_provenance: BTreeMap::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl BuildFactSnapshot {
+//RS     /// D-CONF-READ1=A: the manifest-less rung uses the entry filename as its
+//RS     /// package identity and `0.0.0` as its version.
+//RS     pub fn script(file: &Path, os: crate::OSTarget::OSTarget, profile: &str) -> Self {
+//RS         let package_name = file
+//RS             .file_stem()
+//RS             .and_then(|name| name.to_str())
+//RS             .filter(|name| !name.is_empty())
+//RS             .unwrap_or("script")
+//RS             .to_string();
+//RS         Self {
+//RS             package_name,
+//RS             package_version: "0.0.0".to_string(),
+//RS             os,
+//RS             target_triple: crate::Layout::TargetLayout::host_triple(),
+//RS             target_dossier: TargetDossier::default(),
+//RS             profile: profile.to_string(),
+//RS             artifact_build: false,
+//RS             stamp: BuildStamp::default(),
+//RS             contributions: BTreeMap::new(),
+//RS             settings: BTreeMap::new(),
+//RS             setting_provenance: BTreeMap::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Set the target dossier while retaining the rest of the folded facts.
+//RS     pub fn with_target_dossier(mut self, target_dossier: TargetDossier) -> Self {
+//RS         self.target_dossier = target_dossier;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn append_artifact_identity_bytes(&self, bytes: &mut Vec<u8>) {
+//RS         self.target_dossier
+//RS             .append_cache_bytes(&self.target_triple, bytes);
+//RS         append_cache_frame(bytes, self.profile.as_bytes());
+//RS         append_cache_frame(bytes, &[u8::from(self.artifact_build)]);
+//RS         let layout = crate::Layout::TargetLayout::from_build_facts(self);
+//RS         append_cache_frame(bytes, layout.layout_facts.cache_identity().as_bytes());
+//RS     }
+//RS 
+//RS     /// D-DBG1=A: `debug(...)` traces are development-only. A shipped artifact
+//RS     /// (`jet build`) or a release-profile compile rejects any that remain.
+//RS     pub fn rejects_debug_traces(&self) -> bool {
+//RS         self.artifact_build
+//RS             || self.profile == crate::Syntax::BUILD_PROFILE_RELEASE
+//RS             || self.profile == crate::Syntax::BUILD_PROFILE_HARDENED
+//RS     }
+//RS 
+//RS     /// Canonical target identity bytes for artifact and runtime cache keys.
+//RS     pub fn artifact_identity_bytes(&self) -> Vec<u8> {
+//RS         let mut bytes = Vec::new();
+//RS         self.append_artifact_identity_bytes(&mut bytes);
+//RS         bytes
+//RS     }
+//RS 
+//RS     pub fn contribution(&self, name: &str) -> Option<&crate::Policy::EffectiveFact> {
+//RS         self.contributions.get(name)
+//RS     }
+//RS 
+//RS     /// Resolve one declared setting from the already-seeded build snapshot.
+//RS     pub fn setting_value(&self, name: &str) -> Option<BuildFactValue> {
+//RS         self.settings.get(name).map(|setting| setting.value.clone())
+//RS     }
+//RS 
+//RS     pub fn setting(&self, key: &str) -> Option<&BuildSettingFact> {
+//RS         self.settings.get(key)
+//RS     }
+//RS     /// Resolve a registered build leaf into a value shape. The registry owns
+//RS     /// the path-to-row mapping; this snapshot owns only the values.
+//RS     pub fn value(&self, read: crate::Registry::FactRead) -> Option<BuildFactValue> {
+//RS         match read {
+//RS             crate::Registry::FactRead::BuildPackageName => {
+//RS                 Some(BuildFactValue::Text(self.package_name.clone()))
+//RS             }
+//RS             crate::Registry::FactRead::BuildPackageVersion => {
+//RS                 Some(BuildFactValue::Text(self.package_version.clone()))
+//RS             }
+//RS             crate::Registry::FactRead::BuildOS => {
+//RS                 Some(BuildFactValue::Text(self.os.name().to_string()))
+//RS             }
+//RS             crate::Registry::FactRead::BuildProfile => {
+//RS                 Some(BuildFactValue::Text(self.profile.clone()))
+//RS             }
+//RS             crate::Registry::FactRead::BuildStampGit => {
+//RS                 Some(BuildFactValue::OptionalText(self.stamp.git.clone()))
+//RS             }
+//RS             crate::Registry::FactRead::BuildStampDirty => {
+//RS                 Some(BuildFactValue::Bool(self.stamp.dirty))
+//RS             }
+//RS             crate::Registry::FactRead::BuildStampToolchain => {
+//RS                 Some(BuildFactValue::Text(self.stamp.toolchain.clone()))
+//RS             }
+//RS             crate::Registry::FactRead::BuildStampAt => {
+//RS                 Some(BuildFactValue::Text(self.stamp.at.clone()))
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum BuildFactValue {
+//RS     Text(String),
+//RS     OptionalText(Option<String>),
+//RS     Bool(bool),
+//RS     Int(i64),
+//RS     Char(char),
+//RS     Enum { type_name: String, variant: String },
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub enum FactKind {
+//RS     Effect,
+//RS     State,
+//RS     Tag,
+//RS }
+//RS 
+//RS /// Checked typestate facts. The graph is compile-time metadata only; engines
+//RS /// never receive a state discriminator or transition policy.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct StateGraph {
+//RS     pub states: Vec<StateNode>,
+//RS     pub transitions: Vec<StateTransition>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct StateNode {
+//RS     pub name: String,
+//RS     pub terminal: bool,
+//RS     /// `None` means that the declaration has no entry transition, so
+//RS     /// reachability from an initial state is not defined.
+//RS     pub reachable: Option<bool>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct StateTransition {
+//RS     pub operation: String,
+//RS     pub from: Option<String>,
+//RS     pub to: String,
+//RS }
+//RS 
+//RS impl FactKind {
+//RS     pub const fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Effect => "Effect",
+//RS             Self::State => "State",
+//RS             Self::Tag => "Tag",
+//RS         }
+//RS     }
+//RS }
+//RS pub use crate::FactsDerivation::{
+//RS     DerivationDisposition, DerivationIdentity, DerivationMethod, DerivationObservation,
+//RS     DerivationPayload, DerivationRecord, DerivationRef,
+//RS };
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct FactDeclaration {
+//RS     pub kind: FactKind,
+//RS     pub name: String,
+//RS     pub members: BTreeSet<String>,
+//RS     /// Destinations rejected by this fact. Used by tag facts; empty for other
+//RS     /// families.
+//RS     pub deny: BTreeSet<String>,
+//RS     /// Sources that introduce this fact. Used by tag facts; empty for other
+//RS     /// families.
+//RS     pub from: BTreeSet<String>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Default, PartialEq, Eq)]
+//RS pub struct FactRegistry {
+//RS     declarations: BTreeMap<(FactKind, String), FactDeclaration>,
+//RS     /// State labels retain declaration order for typed reflection. The set in
+//RS     /// `FactDeclaration` remains the membership/validation view.
+//RS     state_member_order: BTreeMap<String, Vec<String>>,
+//RS     state_graphs: BTreeMap<String, StateGraph>,
+//RS }
+//RS 
+//RS impl FactRegistry {
+//RS     pub fn declare(
+//RS         &mut self,
+//RS         kind: FactKind,
+//RS         name: impl Into<String>,
+//RS         members: impl IntoIterator<Item = String>,
+//RS     ) {
+//RS         let name = name.into();
+//RS         self.declare_with_rules(kind, name, members, std::iter::empty(), std::iter::empty());
+//RS     }
+//RS 
+//RS     pub fn declare_with_rules(
+//RS         &mut self,
+//RS         kind: FactKind,
+//RS         name: impl Into<String>,
+//RS         members: impl IntoIterator<Item = String>,
+//RS         deny: impl IntoIterator<Item = String>,
+//RS         from: impl IntoIterator<Item = String>,
+//RS     ) {
+//RS         let name = name.into();
+//RS         let members = members.into_iter().collect::<Vec<_>>();
+//RS         if kind == FactKind::State {
+//RS             self.state_member_order
+//RS                 .insert(name.clone(), members.clone());
+//RS         }
+//RS         self.declarations.insert(
+//RS             (kind, name.clone()),
+//RS             FactDeclaration {
+//RS                 kind,
+//RS                 name,
+//RS                 members: members.into_iter().collect(),
+//RS                 deny: deny.into_iter().collect(),
+//RS                 from: from.into_iter().collect(),
+//RS             },
+//RS         );
+//RS     }
+//RS 
+//RS     /// Register the erased state plane owned by one nominal type.
+//RS     pub fn declare_state(
+//RS         &mut self,
+//RS         type_name: impl Into<String>,
+//RS         members: impl IntoIterator<Item = String>,
+//RS     ) {
+//RS         self.declare(
+//RS             FactKind::State,
+//RS             format!("{}.State", type_name.into()),
+//RS             members,
+//RS         );
+//RS     }
+//RS 
+//RS     /// Build the state portion of the erased registry from nested struct
+//RS     /// sections. Sema remains responsible for marker validation and graphs;
+//RS     /// this constructor gives early comptime folds the same fact row.
+//RS     pub fn from_state_items<'a>(items: impl IntoIterator<Item = &'a crate::AST::Item>) -> Self {
+//RS         let mut registry = Self::default();
+//RS         for item in items {
+//RS             let crate::AST::Item::Struct(structure) = item else {
+//RS                 continue;
+//RS             };
+//RS             let Some(state) = &structure.state else {
+//RS                 continue;
+//RS             };
+//RS             registry.declare_state(
+//RS                 structure.name.clone(),
+//RS                 state.states.iter().map(|(name, _)| name.clone()),
+//RS             );
+//RS         }
+//RS         registry
+//RS     }
+//RS 
+//RS     pub fn get(&self, kind: FactKind, name: &str) -> Option<&FactDeclaration> {
+//RS         self.declarations.get(&(kind, name.to_string()))
+//RS     }
+//RS 
+//RS     pub fn declare_member(
+//RS         &mut self,
+//RS         kind: FactKind,
+//RS         name: impl Into<String>,
+//RS         member: impl Into<String>,
+//RS     ) {
+//RS         let name = name.into();
+//RS         let member = member.into();
+//RS         self.declarations
+//RS             .entry((kind, name.clone()))
+//RS             .or_insert_with(|| FactDeclaration {
+//RS                 kind,
+//RS                 name: name.clone(),
+//RS                 members: BTreeSet::new(),
+//RS                 deny: BTreeSet::new(),
+//RS                 from: BTreeSet::new(),
+//RS             })
+//RS             .members
+//RS             .insert(member.clone());
+//RS         if kind == FactKind::State {
+//RS             let ordered = self.state_member_order.entry(name).or_default();
+//RS             if !ordered.contains(&member) {
+//RS                 ordered.push(member);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Attach the checked graph to its erased state fact row.
+//RS     pub fn set_state_graph(&mut self, name: impl Into<String>, graph: StateGraph) {
+//RS         self.state_graphs.insert(name.into(), graph);
+//RS     }
+//RS 
+//RS     pub fn state_graph(&self, name: &str) -> Option<&StateGraph> {
+//RS         self.state_graphs.get(name)
+//RS     }
+//RS 
+//RS     /// Return state labels in the order written in the owning struct section.
+//RS     pub fn state_members(&self, type_name: &str) -> Option<&[String]> {
+//RS         self.state_member_order
+//RS             .get(&format!("{type_name}.State"))
+//RS             .map(Vec::as_slice)
+//RS     }
+//RS 
+//RS     pub fn contains(&self, kind: FactKind, name: &str) -> bool {
+//RS         self.declarations.contains_key(&(kind, name.to_string()))
+//RS     }
+//RS 
+//RS     pub fn iter(&self) -> impl Iterator<Item = &FactDeclaration> {
+//RS         self.declarations.values()
+//RS     }
+//RS 
+//RS     pub fn iter_kind(&self, kind: FactKind) -> impl Iterator<Item = &FactDeclaration> {
+//RS         self.declarations
+//RS             .values()
+//RS             .filter(move |declaration| declaration.kind == kind)
+//RS     }
+//RS 
+//RS     pub fn member(&self, kind: FactKind, declaration: &str, member: &str) -> bool {
+//RS         self.get(kind, declaration)
+//RS             .is_some_and(|fact| fact.members.contains(member))
+//RS     }
+//RS }
+//RS 
+//RS /// One subsumption rule for every hierarchical fact family.
+//RS pub fn fact_covers(bound: &str, fact: &str) -> bool {
+//RS     crate::Authority::covers(bound, fact)
+//RS }
+//RS 
+//RS /// Values propagated by one call-graph fact row. Each row uses the finite-set
+//RS /// lattice: facts only join by union, so cycles converge without a recursive
+//RS /// walker.
+//RS pub type ReachabilityValues = BTreeMap<String, BTreeSet<String>>;
+//RS 
+//RS /// One property projection over a shared call graph.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct ReachabilityRow {
+//RS     pub name: String,
+//RS     pub seeds: ReachabilityValues,
+//RS }
+//RS 
+//RS impl ReachabilityRow {
+//RS     pub fn new(name: impl Into<String>, seeds: ReachabilityValues) -> Self {
+//RS         Self {
+//RS             name: name.into(),
+//RS             seeds,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// All fact rows projected by one call-graph traversal.
+//RS #[derive(Debug, Clone, Default, PartialEq, Eq)]
+//RS pub struct ReachabilityResult {
+//RS     rows: BTreeMap<String, ReachabilityValues>,
+//RS     proofs: BTreeMap<(String, String, String), Vec<String>>,
+//RS }
+//RS 
+//RS impl ReachabilityResult {
+//RS     pub fn row(&self, name: &str) -> Option<&ReachabilityValues> {
+//RS         self.rows.get(name)
+//RS     }
+//RS 
+//RS     pub fn path(&self, row: &str, node: &str, fact: &str) -> Option<&[String]> {
+//RS         self.proofs
+//RS             .get(&(row.to_string(), node.to_string(), fact.to_string()))
+//RS             .map(Vec::as_slice)
+//RS     }
+//RS 
+//RS     pub fn nodes_with(&self, row: &str, fact: &str) -> BTreeSet<String> {
+//RS         self.row(row)
+//RS             .into_iter()
+//RS             .flat_map(|values| values.iter())
+//RS             .filter(|(_, facts)| facts.contains(fact))
+//RS             .map(|(node, _)| node.clone())
+//RS             .collect()
+//RS     }
+//RS 
+//RS     /// Copy solved facts onto a unique short-name alias after qualification.
+//RS     pub fn copy_node(&mut self, alias: &str, target: &str) {
+//RS         let row_names: Vec<String> = self.rows.keys().cloned().collect();
+//RS         for row_name in row_names {
+//RS             let Some(facts) = self
+//RS                 .rows
+//RS                 .get(&row_name)
+//RS                 .and_then(|values| values.get(target))
+//RS                 .cloned()
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             if let Some(values) = self.rows.get_mut(&row_name) {
+//RS                 values.insert(alias.to_string(), facts.clone());
+//RS             }
+//RS             for fact in facts {
+//RS                 if let Some(path) = self
+//RS                     .proofs
+//RS                     .get(&(row_name.clone(), target.to_string(), fact.clone()))
+//RS                     .cloned()
+//RS                 {
+//RS                     let mut alias_path = path;
+//RS                     if alias_path
+//RS                         .first()
+//RS                         .is_some_and(|node| node.as_str() == target)
+//RS                     {
+//RS                         alias_path[0] = alias.to_string();
+//RS                     }
+//RS                     self.proofs
+//RS                         .insert((row_name.clone(), alias.to_string(), fact), alias_path);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Project every reachability property from one edge set.
+//RS pub fn project_reachability(
+//RS     edges: &BTreeMap<String, BTreeSet<String>>,
+//RS     rows: impl IntoIterator<Item = ReachabilityRow>,
+//RS ) -> ReachabilityResult {
+//RS     let rows: Vec<ReachabilityRow> = rows.into_iter().collect();
+//RS     let mut nodes = BTreeSet::new();
+//RS     for (caller, callees) in edges {
+//RS         nodes.insert(caller.clone());
+//RS         nodes.extend(callees.iter().cloned());
+//RS     }
+//RS     for row in &rows {
+//RS         nodes.extend(row.seeds.keys().cloned());
+//RS     }
+//RS 
+//RS     let mut values = BTreeMap::new();
+//RS     let mut proofs = BTreeMap::new();
+//RS     for row in &rows {
+//RS         let mut row_values = BTreeMap::new();
+//RS         for node in &nodes {
+//RS             row_values.insert(node.clone(), BTreeSet::new());
+//RS         }
+//RS         for (node, facts) in &row.seeds {
+//RS             let destination = row_values.entry(node.clone()).or_default();
+//RS             for fact in facts {
+//RS                 if destination.insert(fact.clone()) {
+//RS                     proofs.insert(
+//RS                         (row.name.clone(), node.clone(), fact.clone()),
+//RS                         vec![node.clone()],
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS         values.insert(row.name.clone(), row_values);
+//RS     }
+//RS 
+//RS     let mut predecessors: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+//RS     for (caller, callees) in edges {
+//RS         for callee in callees {
+//RS             predecessors
+//RS                 .entry(callee.clone())
+//RS                 .or_default()
+//RS                 .insert(caller.clone());
+//RS         }
+//RS     }
+//RS 
+//RS     let mut queue = VecDeque::new();
+//RS     let mut queued = BTreeSet::new();
+//RS     for row in &rows {
+//RS         for node in row.seeds.keys() {
+//RS             for predecessor in predecessors.get(node).into_iter().flatten().cloned() {
+//RS                 if queued.insert(predecessor.clone()) {
+//RS                     queue.push_back(predecessor);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     while let Some(caller) = queue.pop_front() {
+//RS         queued.remove(&caller);
+//RS         let Some(callees) = edges.get(&caller) else {
+//RS             continue;
+//RS         };
+//RS         for callee in callees {
+//RS             for row in &rows {
+//RS                 let facts = values
+//RS                     .get(&row.name)
+//RS                     .and_then(|row_values| row_values.get(callee))
+//RS                     .cloned()
+//RS                     .unwrap_or_default();
+//RS                 for fact in facts {
+//RS                     let changed = values
+//RS                         .get_mut(&row.name)
+//RS                         .and_then(|row_values| row_values.get_mut(&caller))
+//RS                         .is_some_and(|destination| destination.insert(fact.clone()));
+//RS                     if !changed {
+//RS                         continue;
+//RS                     }
+//RS                     let mut path = proofs
+//RS                         .get(&(row.name.clone(), callee.clone(), fact.clone()))
+//RS                         .cloned()
+//RS                         .unwrap_or_else(|| vec![callee.clone()]);
+//RS                     path.insert(0, caller.clone());
+//RS                     proofs.insert((row.name.clone(), caller.clone(), fact), path);
+//RS                     for predecessor in predecessors.get(&caller).into_iter().flatten().cloned() {
+//RS                         if queued.insert(predecessor.clone()) {
+//RS                             queue.push_back(predecessor);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     ReachabilityResult {
+//RS         rows: values,
+//RS         proofs,
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::{
+//RS         fact_covers, project_reachability, BuildFactSnapshot, FactKind, FactRegistry,
+//RS         ReachabilityRow, TargetDossier,
+//RS     };
+//RS     use crate::RingLayer::RuntimeLayer;
+//RS     use std::collections::{BTreeMap, BTreeSet};
+//RS 
+//RS     #[test]
+//RS     fn subsumption_uses_segment_boundaries() {
+//RS         assert!(fact_covers("FS", "FS"));
+//RS         assert!(fact_covers("FS", "FS.Read"));
+//RS         assert!(!fact_covers("FS", "FStore"));
+//RS         assert!(!fact_covers("FS.Read", "FS"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn fact_families_have_distinct_namespaces() {
+//RS         let mut facts = FactRegistry::default();
+//RS         facts.declare(FactKind::Effect, "Secret", std::iter::empty());
+//RS         facts.declare_with_rules(
+//RS             FactKind::Tag,
+//RS             "Secret",
+//RS             std::iter::empty(),
+//RS             ["Log".to_string()],
+//RS             std::iter::empty(),
+//RS         );
+//RS 
+//RS         assert_eq!(
+//RS             facts.get(FactKind::Effect, "Secret").unwrap().kind,
+//RS             FactKind::Effect
+//RS         );
+//RS         assert_eq!(facts.get(FactKind::Tag, "Secret").unwrap().deny.len(), 1);
+//RS         assert_eq!(facts.iter().count(), 2);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn one_traversal_projects_new_fact_row_with_existing_rows() {
+//RS         let edges = BTreeMap::from([
+//RS             ("root".to_string(), BTreeSet::from(["mid".to_string()])),
+//RS             ("mid".to_string(), BTreeSet::from(["leaf".to_string()])),
+//RS             ("leaf".to_string(), BTreeSet::from(["root".to_string()])),
+//RS         ]);
+//RS         let result = project_reachability(
+//RS             &edges,
+//RS             [
+//RS                 ReachabilityRow::new(
+//RS                     "effects",
+//RS                     BTreeMap::from([("leaf".to_string(), BTreeSet::from(["FS".to_string()]))]),
+//RS                 ),
+//RS                 ReachabilityRow::new(
+//RS                     "panic",
+//RS                     BTreeMap::from([("leaf".to_string(), BTreeSet::from(["panic".to_string()]))]),
+//RS                 ),
+//RS                 ReachabilityRow::new(
+//RS                     "calls-exec",
+//RS                     BTreeMap::from([("leaf".to_string(), BTreeSet::from(["Exec".to_string()]))]),
+//RS                 ),
+//RS             ],
+//RS         );
+//RS 
+//RS         assert!(result.nodes_with("effects", "FS").contains("root"));
+//RS         assert!(result.nodes_with("panic", "panic").contains("root"));
+//RS         assert!(result.nodes_with("calls-exec", "Exec").contains("root"));
+//RS         assert_eq!(
+//RS             result.path("effects", "root", "FS").unwrap(),
+//RS             &vec!["root".to_string(), "mid".to_string(), "leaf".to_string()]
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn target_dossier_identity_is_framed_and_profile_sensitive() {
+//RS         let hosted = BuildFactSnapshot::default();
+//RS         let no_os = hosted.clone().with_target_dossier(TargetDossier::new(
+//RS             RuntimeLayer::Core,
+//RS             "board.uart",
+//RS             "prelude-core-v1",
+//RS         ));
+//RS 
+//RS         assert_ne!(
+//RS             hosted.artifact_identity_bytes(),
+//RS             no_os.artifact_identity_bytes()
+//RS         );
+//RS 
+//RS         let left = TargetDossier::new(RuntimeLayer::Core, "ab", "c");
+//RS         let right = TargetDossier::new(RuntimeLayer::Core, "a", "bc");
+//RS         assert_ne!(
+//RS             left.cache_bytes("test-target"),
+//RS             right.cache_bytes("test-target")
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 0064 crates/jet-foundation/src/Facts.rs:1-841
+

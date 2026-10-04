@@ -1,19 +1,26 @@
 // Source, module, and package identities remain separate at the driver boundary.
+use core.files.runtime.kernel_path_components as compiler_driver_os_path
 use jet_foundation.[
     CompilerTraceSink,
+    BuildStamp,
     Diagnostic,
+    FoundationEmbeddedCore,
+    GateSet,
+    FactContribution,
+    PolicyDeclaration,
     JetReleaseDevtoolsPolicy,
     MIRAllocatorPolicy,
     MIRArtifactBuildMode,
     MIRArtifactID,
     MIRFunctionID,
+    MIROSTarget,
     MIRProgram,
     MIRRuntimeLayer,
+    MIRTargetDossier,
     MIRSourceFile,
     PackageKeyDependency,
     PackageKeySourceFile,
-    PackageKeyTargetFact,
-    Program,
+    ProgramBundle,
     Record,
     RecordSection,
     Span,
@@ -27,6 +34,7 @@ use jet_foundation.[
     record_decode,
     record_encode,
 ]
+use jet_pkg_model.[PackageFacts]
 use jet_sema.[
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
@@ -42,14 +50,17 @@ use jet_eval.[
 ]
 
 pub struct JetDriverAuthorizedSourceFile {
-    pub path: String
-    pub relative_path: String
+    pub path: compiler_driver_os_path.OsPath
+    pub relative_path: compiler_driver_os_path.OsPath
     pub identity: String
     pub source: String
+    // Authority.rs:CheckedFile.bytes, retained from the checked descriptor.
+    // Binary archive/runtime/worker inputs never pass through text decoding.
+    pub bytes: [U8]?{None}
 }
 
 pub struct JetDriverAuthorizedSourceRoot {
-    pub canonical_path: String
+    pub canonical_path: compiler_driver_os_path.OsPath
     pub identity: String
     pub allow_hardlinks: Bool
     pub files: [JetDriverAuthorizedSourceFile]
@@ -59,13 +70,72 @@ pub struct JetDriverAuthorizedSourceRoot {
 pub struct JetDriverAuthorizedSourceSnapshot {
     pub roots: [JetDriverAuthorizedSourceRoot]
     pub entry_root_identity: String
-    pub entry_path: String
+    pub entry_path: compiler_driver_os_path.OsPath
+}
+// A query borrows the host-authorized roots and owns only its selected entry
+// metadata. Overlay text travels beside this view, never inside a cloned request.
+struct JetDriverAuthorizedSourceView {
+    roots: View<JetDriverAuthorizedSourceRoot>
+    entry_root_identity: String
+    entry_path: compiler_driver_os_path.OsPath
+}
+fn jet_driver_authorized_source_view(snapshot: JetDriverAuthorizedSourceSnapshot, entry: compiler_driver_os_path.OsPath?) -> JetDriverAuthorizedSourceView Never! {
+    selected_root := ~snapshot.entry_root_identity
+    selected_path := ~snapshot.entry_path
+    if entry == .Val(path) {
+        // An unauthorized selection must fail validation, not check the old entry.
+        selected_path = ~path
+        loop root in snapshot.roots {
+            loop file in root.files {
+                if compiler_driver_os_path.equals(file.path, path) {
+                    selected_root = ~root.identity
+                    selected_path = ~file.path
+                }
+            }
+        }
+    }
+    JetDriverAuthorizedSourceView{roots: snapshot.roots[0..<snapshot.roots.len()], entry_root_identity: selected_root, entry_path: selected_path}
+}
+fn jet_driver_source_view_entry_root_path(snapshot: JetDriverAuthorizedSourceView) -> compiler_driver_os_path.OsPath Never! {
+    loop root in snapshot.roots {
+        if root.identity == snapshot.entry_root_identity -> return root.canonical_path
+    }
+    compiler_driver_os_path.OsPath{encoded: [U8]{}, platform: snapshot.entry_path.platform}
+}
+// Empty-separator `after` is a full-buffer read window, not an owned text copy.
+// #4303 remains the genuine borrowed-text/String read-call ABI gate.
+fn jet_driver_source_view_text(file: JetDriverAuthorizedSourceFile, overlays: [compiler_driver_os_path.OsPath:String]) -> View<str> from file | overlays {
+    if overlays.get(file.path) == .Val(text) {
+        source :: text.after("")
+        return source
+    }
+    source :: file.source.after("")
+    return source
 }
 
 pub struct JetDriverHostFacts {
     pub target_triple: String?
     pub active_os: String?
     pub compiler_identity: String?
+    // Original Loader defaults use the actual HOST, independent of --target.
+    pub loader_host_os: MIROSTarget?
+    pub loader_host_triple: String?
+    // Rust build_stamp_for_facts: native authority captures/replays the lock
+    // stamp before pure Driver resolution; absence is an internal input failure.
+    pub build_stamp: BuildStamp?{None}
+    // Exact Facts::TargetDossier selected/captured by native authority. None is
+    // a missing producer, distinct from a dossier whose machine field is None.
+    pub target_dossier: MIRTargetDossier?{None}
+    pub organization_policy: JetDriverOrganizationPolicySource{JetDriverOrganizationPolicySource.Absent}
+}
+
+// Rust Loader::load_organization_policy raw authority result. `Absent` means
+// no configured policy, never an unreadable/missing configured input.
+pub enum JetDriverOrganizationPolicySource {
+    Absent
+    Loaded(file: JetDriverAuthorizedSourceFile)
+    Unreadable(path: String, detail: String)
+    MissingProvider(path: String)
 }
 
 pub enum JetDriverCompileTarget {
@@ -92,6 +162,22 @@ pub struct JetDriverCoreSource {
     pub source: String
 }
 
+// Convert Foundation's canonical payload to the existing native request ABI.
+// No host reads, empty rows or second metadata/source table.
+pub fn jet_driver_embedded_core_sources(core: FoundationEmbeddedCore) -> [JetDriverCoreSource] Never! {
+    sources := [JetDriverCoreSource]{}
+    loop row in core.public_sources() {
+        &sources.push(JetDriverCoreSource{module_name: ^row.module_name, alias: ^row.alias, path: ^row.path, owner: ^row.owner, owned_members: ^row.owned_members, source: ^row.source})
+    }
+    loop row in core.private_sources() {
+        &sources.push(JetDriverCoreSource{module_name: ^row.module_name, alias: ^row.alias, path: ^row.path, owner: ^row.owner, owned_members: ^row.owned_members, source: ^row.source})
+    }
+    sources
+}
+
+// Command intent is independent of the entry's membership in a package.
+pub enum JetDriverCheckScope { Project ExplicitFile }
+
 pub struct JetDriverCompileRequest {
     pub authorized_sources: JetDriverAuthorizedSourceSnapshot
     pub canonical_effect_source: String
@@ -99,6 +185,18 @@ pub struct JetDriverCompileRequest {
     pub host_facts: JetDriverHostFacts
     pub eval_config: JetEvalConfig
     pub target: JetDriverCompileTarget
+    pub check_scope: JetDriverCheckScope{JetDriverCheckScope.ExplicitFile}
+    pub profile: String{"dev"}
+    pub artifact_build: Bool{false}
+    pub selected_output: String?{None}
+    pub entry_function: String?{None}
+    pub run_mode: Bool{false}
+    pub semantic_index_requested: Bool{false}
+    pub setting_overrides: [String:String]{[String:String]{}}
+    // Rust seed_build_facts_with_contributions: compiled BuildPlan provider
+    // publishes real typed writers here; no evaluator-global setting lookup.
+    pub computed_setting_contributions: [FactContribution]{[FactContribution]{}}
+    pub gates: GateSet{GateSet{bits: 0}}
     pub record_store: JetDriverRecordStore?
     // The host's streaming trace (`JET_TRACE_FILE`); `None` traces nothing.
     pub trace_sink: CompilerTraceSink?
@@ -125,13 +223,25 @@ pub trait JetDriverRecordStore {
 struct JetDriverSourceUnit {
     root_index: Int
     file_index: Int
+    // Physical generated caches belong to the same checked root, not files[].
+    foreign_cache_index: Int?{None}
     root_identity: String
     package_identity: String
     module_name: String
+    // Original loaded namespace spelling, distinct from semantic Core name.
+    alias: String
+    // Rust bundle membership is decided at the actual loader constructor.
+    bundle_module: Bool
     path: String
+    physical_path: compiler_driver_os_path.OsPath?
     relative_path: String
+    // Original native relative path, absent for generated/Core units.
+    relative_os_path: compiler_driver_os_path.OsPath?
     source_segments: [SemaSourceSegment]
     source_origin: SemaSourceOrigin
+    // Synthetic foreign declarations have empty LoadedModule source, while
+    // their checked spans refer to a separately retained generated assembly.
+    provenance_source_file: String?{None}
 }
 
 struct JetDriverPackageDependency {
@@ -151,7 +261,7 @@ struct JetDriverPackageEntry {
 
 struct JetDriverPackageInfo {
     root_index: Int
-    root_path: String
+    root_path: compiler_driver_os_path.OsPath
     identity: String
     name: String
     version: String
@@ -167,6 +277,8 @@ struct JetDriverPackageInfo {
     // D-MOD-CYCLE1=A: the kinds the manifest's `outputs:` declare. A package
     // that declares a Library and no Executable has no `fn run` (E0625).
     outputs: JetDriverPackageOutputs
+    // The sole PackageModel parser publishes the manifest's declarations.
+    manifest_facts: PackageFacts?{None}
 }
 
 struct JetDriverPackageOutputs {
@@ -178,10 +290,10 @@ struct JetDriverPackageOutputs {
 }
 
 struct JetDriverSourceIndex {
-    by_identity: [String:Int]
     by_module_name: [String:Int]
     ambiguous_module_names: [String:Bool]
-    by_path: [String:Int]
+    by_path: [compiler_driver_os_path.OSPath:Int]
+    generated_paths: [String:Int]
 }
 
 struct JetDriverSourceIndexResult {
@@ -192,6 +304,9 @@ struct JetDriverSourceIndexResult {
 
 struct JetDriverSourceFileCollection {
     files: [MIRSourceFile]
+    index: [compiler_driver_os_path.OsPath:Int]
+    generated_index: [String:Int]
+    physical_paths: [compiler_driver_os_path.OsPath]
     diagnostics: [Diagnostic]
     complete: Bool
 }
@@ -204,15 +319,17 @@ struct JetDriverSourceCatalogResult {
     complete: Bool
 }
 
-enum JetDriverStage { Collect Parse Load Check Comptime Lower Assemble Pass Emit }
+pub enum JetDriverStage { Collect Parse Load Check Comptime Lower Assemble Pass Emit }
 
-struct JetDriverLoadedModule {
-    source_unit_index: Int
-    source_identity: String
-    package_identity: String
-    module_identity: String
-    module_name: String
-    program: Program
+// Driver-only identity/provenance. No AST or second loaded-program owner.
+pub struct JetDriverModuleFacts {
+    pub source_unit_index: Int
+    pub source_identity: String
+    pub package_identity: String
+    pub module_identity: String
+    pub module_name: String
+    pub bundle_index: Int?
+    parse_metadata: JetDriverParseMetadata
 }
 
 struct JetDriverCompileTrace {
@@ -222,19 +339,27 @@ struct JetDriverCompileTrace {
     exit_code: Int?
 }
 
-struct JetDriverLoadResult {
-    package_identity: String
+pub struct JetDriverLoadResult {
+    pub bundle: Shared<ProgramBundle>
+    // Actual selected authority root; bundle.project_root uses the same path.
+    pub project_root: compiler_driver_os_path.OsPath
+    pub package_identity: String
     packages: [JetDriverPackageInfo]
     source_units: [JetDriverSourceUnit]
-    entry_source_identity: String
-    entry_module_identity: String
-    modules: [JetDriverLoadedModule]
+    pub entry_source_identity: String
+    pub entry_module_identity: String
+    pub modules: [JetDriverModuleFacts]
     imports: [SemaRegistrationImportEdge]
-    source_files: [MIRSourceFile]
-    generated_source_files: [MIRSourceFile]
-    diagnostics: [Diagnostic]
-    failed_stage: JetDriverStage?
-    complete: Bool
+    package_namespaces: [String:compiler_driver_os_path.OsPath]{[String:compiler_driver_os_path.OsPath]{}}
+    pub source_files: [MIRSourceFile]
+    pub source_file_index: [compiler_driver_os_path.OsPath:Int]{[compiler_driver_os_path.OsPath:Int]{}}
+    pub generated_source_file_index: [String:Int]{[String:Int]{}}
+    pub physical_source_paths: [compiler_driver_os_path.OsPath]{[compiler_driver_os_path.OsPath]{}}
+    pub generated_source_files: [MIRSourceFile]
+    pub diagnostics: [Diagnostic]
+    organization_policy: [PolicyDeclaration]?{None}
+    pub failed_stage: JetDriverStage?
+    pub complete: Bool
 }
 
 pub struct JetDriverCompileResult {
@@ -265,14 +390,22 @@ fn jet_driver_source_identity(package_identity: String, path: String) -> String 
 fn jet_driver_module_identity(package_identity: String, path: String) -> String Never! {
     "module:{package_identity.len()}:{package_identity}:{path}"
 }
+// A semantic registration label is an ordinal, not a filesystem map key.
+fn jet_driver_source_unit_identity_label(unit: JetDriverSourceUnit) -> String Never! {
+    if unit.source_origin == SemaSourceOrigin.Snapshot {
+        if unit.foreign_cache_index == .Val(index) -> return "native-cache:{unit.root_index}:{index}"
+        return "native-source:{unit.root_index}:{unit.file_index}"
+    }
+    unit.path
+}
 
-fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegment] Never! {
+fn jet_driver_source_segments(path: String, physical_path: compiler_driver_os_path.OsPath, source: String) -> [SemaSourceSegment] Never! {
     bytes :: source.bytes()
     line_starts := [Int]{0}
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) -> &line_starts.push(index + 1)
     }
-    [SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: path, source_start: 0, line_starts: line_starts, origin: SemaSourceOrigin.Snapshot}]
+    [SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: path, physical_path: Val(physical_path), source_start: 0, line_starts: line_starts, origin: SemaSourceOrigin.Snapshot}]
 }
 
 // The path a checked source carries through the compile: its source and
@@ -280,27 +413,19 @@ fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegmen
 // in the Rust driver's `relative_display`, a file beneath the entry root is
 // named relative to that root and any other path keeps its canonical form,
 // so compiler output never depends on where the project is checked out.
-fn jet_driver_display_path(entry_root: String, path: String) -> String Never! {
-    if entry_root.len() == 0 -> return ~path
-    if path == entry_root -> return ""
-    prefix :: if entry_root.ends_with("/") -> entry_root else -> "{entry_root}/"
-    if path.starts_with(prefix) -> path.slice(prefix.len(), path.len()) else -> path
+fn jet_driver_display_path(entry_root: compiler_driver_os_path.OsPath, path: compiler_driver_os_path.OsPath) -> String Never! {
+    if entry_root.encoded.len() == 0 -> return compiler_driver_os_path.display(path)
+    if compiler_driver_os_path.strip_prefix_span(path, entry_root) == .Val(extent) -> return compiler_driver_os_path.display_span(path, extent)
+    compiler_driver_os_path.display(path)
 }
 
-// The canonical path a display path names (the inverse of
-// `jet_driver_display_path`); authority checks compare physical paths.
-fn jet_driver_physical_path(entry_root: String, display: String) -> String Never! {
-    if entry_root.len() == 0 || display.starts_with("/") -> return ~display
-    if display.len() == 0 -> return ~entry_root
-    if entry_root.ends_with("/") -> "{entry_root}{display}" else -> "{entry_root}/{display}"
-}
 
-// The canonical path of the snapshot's entry root, or "" when it names none.
-fn jet_driver_entry_root_path(snapshot: JetDriverAuthorizedSourceSnapshot) -> String Never! {
+// No inverse display-to-native conversion exists. Native roots retain platform.
+fn jet_driver_entry_root_path(snapshot: JetDriverAuthorizedSourceSnapshot) -> compiler_driver_os_path.OsPath Never! {
     loop root in snapshot.roots {
         if root.identity == snapshot.entry_root_identity -> return root.canonical_path
     }
-    ""
+    compiler_driver_os_path.OsPath{encoded: [U8]{}, platform: snapshot.entry_path.platform}
 }
 
 fn jet_driver_diagnostic(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
@@ -329,56 +454,40 @@ fn jet_driver_module_index_key(package_identity: String, module_name: String) ->
     "{package_identity.len()}:{package_identity}:{module_name}"
 }
 
+fn jet_driver_index_source_unit(source_index: &JetDriverSourceIndex, unit: JetDriverSourceUnit, index: Int, diagnostics: &[Diagnostic]) {
+    module_key :: jet_driver_module_index_key(unit.package_identity, unit.module_name)
+    valid := true
+    if unit.package_identity.len() == 0 {
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no package identity", "module identities must be scoped to the package selected by the loader", "resolve the package identity from its authorized manifest"))
+        valid = false
+    }
+    if unit.module_name.len() == 0 {
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no module identity", "every loaded source belongs to one named module", "derive a module name from the checked source path"))
+        valid = false
+    }
+    if unit.path.len() == 0 || unit.relative_path.len() == 0 {
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no canonical path", "source identity and diagnostics require a stable path inside one authority root", "supply the canonical path and root-relative path selected by the native authority adapter"))
+        valid = false
+    }
+    duplicate :: if unit.physical_path == .Val(path) -> source_index.by_path.get(path) != None else -> source_index.generated_paths.get(unit.path) != None
+    if duplicate {
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0105", "the canonical source path is duplicated", "one path identifies exactly one checked source record", "keep only one source record for this canonical path"))
+        valid = false
+    }
+    if valid {
+        if unit.physical_path == .Val(path) -> source_index.by_path[path] = index else -> source_index.generated_paths[unit.path] = index
+        if {
+            source_index.by_module_name.get(module_key) != None -> _ := &source_index.ambiguous_module_names.add(module_key, true)
+            else -> _ := &source_index.by_module_name.add(module_key, index)
+        }
+    }
+}
+
 fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriverSourceIndexResult {
-    by_identity := [String:Int]{}
-    by_module_name := [String:Int]{}
-    ambiguous_module_names := [String:Bool]{}
-    by_path := [String:Int]{}
+    source_index := JetDriverSourceIndex{by_module_name: [String:Int]{}, ambiguous_module_names: [String:Bool]{}, by_path: [compiler_driver_os_path.OSPath:Int]{}, generated_paths: [String:Int]{}}
     diagnostics := [Diagnostic]{}
-    loop (index, unit) in source_units {
-        identity :: jet_driver_source_identity(unit.package_identity, unit.path)
-        module_key :: jet_driver_module_index_key(unit.package_identity, unit.module_name)
-        valid := true
-        if unit.package_identity.len() == 0 {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no package identity", "module identities must be scoped to the package selected by the loader", "resolve the package identity from its authorized manifest"))
-            valid = false
-        }
-        if unit.module_name.len() == 0 {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no module identity", "every loaded source belongs to one named module", "derive a module name from the checked source path"))
-            valid = false
-        }
-        if unit.path.len() == 0 || unit.relative_path.len() == 0 {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no canonical path", "source identity and diagnostics require a stable path inside one authority root", "supply the canonical path and root-relative path selected by the native authority adapter"))
-            valid = false
-        }
-        if by_identity.get(identity) != None {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0105", "the source unit identity is duplicated", "one package path identifies exactly one source unit", "remove the duplicate source unit"))
-            valid = false
-        }
-        if by_path.get(unit.path) != None {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0105", "the canonical source path is duplicated", "one path identifies exactly one checked source record", "keep only one source record for this canonical path"))
-            valid = false
-        }
-        if valid {
-            _ := &by_identity.add(identity, index)
-            _ := &by_path.add(unit.path, index)
-            if {
-                by_module_name.get(module_key) != None -> _ := &ambiguous_module_names.add(module_key, true)
-                else -> _ := &by_module_name.add(module_key, index)
-            }
-        }
-    }
-    complete :: diagnostics.len() == 0
-    JetDriverSourceIndexResult{
-        index: JetDriverSourceIndex{
-            by_identity: by_identity,
-            by_module_name: by_module_name,
-            ambiguous_module_names: ambiguous_module_names,
-            by_path: by_path,
-        },
-        diagnostics: diagnostics,
-        complete: complete,
-    }
+    loop (index, unit) in source_units -> jet_driver_index_source_unit(&source_index, unit, index, &diagnostics)
+    JetDriverSourceIndexResult{index: source_index, diagnostics: diagnostics, complete: diagnostics.len() == 0}
 }
 
 // D-BUILD-NOCHANGE1=A: the Receipt closure for one driver request. The host
@@ -403,8 +512,20 @@ pub fn jet_driver_receipt_closure(verb: String, request: JetDriverCompileRequest
     verb_field :: jet_driver_receipt_field("verb", verb)
     compiler_field :: jet_driver_receipt_field("compiler", compiler)
     target_field :: jet_driver_receipt_field("target", target)
-    entry_field :: jet_driver_receipt_field("entry", request.authorized_sources.entry_path)
+    entry_field :: jet_driver_receipt_field("entry", compiler_driver_os_path.display(request.authorized_sources.entry_path))
     closure = "{closure}{verb_field}{compiler_field}{target_field}{entry_field}"
+    request_options :: "{request.check_scope:Debug}:{request.profile:Debug}:{request.selected_output:Debug}:{request.entry_function:Debug}:{request.run_mode}:{request.semantic_index_requested}:{request.gates.bits}"
+    closure += jet_driver_receipt_field("request-options", request_options)
+    closure += jet_driver_receipt_field("build-stamp", "{request.host_facts.build_stamp:Debug}")
+    closure += jet_driver_receipt_field("artifact-build", "{request.artifact_build}")
+    closure += jet_driver_receipt_field("organization-policy", "{request.host_facts.organization_policy:Debug}")
+    loop writer in request.computed_setting_contributions -> closure += jet_driver_receipt_field("computed-setting", "{writer:Debug}")
+    setting_keys := request.setting_overrides.keys().to_list()
+    &setting_keys.sort()
+    loop key in setting_keys {
+        closure += jet_driver_receipt_field("setting-name", key)
+        closure += jet_driver_receipt_field("setting-value", request.setting_overrides.get(key) ?? "")
+    }
     loop option in options {
         option_field :: jet_driver_receipt_field("option", option)
         closure = "{closure}{option_field}"
@@ -413,7 +534,7 @@ pub fn jet_driver_receipt_closure(verb: String, request: JetDriverCompileRequest
         root_field :: jet_driver_receipt_field("root", root.identity)
         closure = "{closure}{root_field}"
         loop file in root.files {
-            path_field :: jet_driver_receipt_field("module", file.relative_path)
+            path_field :: jet_driver_receipt_field("module", compiler_driver_os_path.display(file.relative_path))
             digest_field :: jet_driver_receipt_field("sha256", mir_sha256_hex(file.source))
             closure = "{closure}{path_field}{digest_field}"
         }
@@ -430,27 +551,12 @@ pub fn jet_driver_receipt_answers(receipt: JetDriverReceipt, verb: String, reque
 // #2517 package keys for the self-hosted driver, framed by
 // `package_key_*` in JetFoundation.
 
-// The facts self-hosted sema reads from the request for one package: the
-// active OS, the target triple, the package edition, and whether the build
-// targets the web. The build clock and root policy never enter.
-pub fn jet_driver_package_target_facts(request: JetDriverCompileRequest, package: JetDriverPackageInfo) -> [PackageKeyTargetFact] Never! {
-    web :: if request.target == {
-        .Web(_, _, _) -> "true"
-        .Native -> "false"
-    }
-    [PackageKeyTargetFact]{
-        PackageKeyTargetFact{name: "active_os", value: request.host_facts.active_os ?? ""},
-        PackageKeyTargetFact{name: "edition", value: package.edition},
-        PackageKeyTargetFact{name: "target_triple", value: request.host_facts.target_triple ?? ""},
-        PackageKeyTargetFact{name: "web", value: web},
-    }
-}
 
 // The package.jet source of a package that has a manifest.
-fn jet_driver_package_manifest_source(package: JetDriverPackageInfo, snapshot: JetDriverAuthorizedSourceSnapshot) -> String? Never! {
+fn jet_driver_package_manifest_source(package: JetDriverPackageInfo, snapshot: JetDriverAuthorizedSourceSnapshot) -> [U8]? Never! {
     if package.manifest_path == None -> return None
     loop file in snapshot.roots[package.root_index].files {
-        if file.relative_path == "package.jet" -> return Val(file.source)
+        if compiler_driver_os_path.equals(file.relative_path, compiler_driver_os_path.from_text("package.jet", file.path.platform)) -> return Val(file.source.bytes())
     }
     None
 }
@@ -462,7 +568,7 @@ pub fn jet_driver_package_source_digest(package: JetDriverPackageInfo, snapshot:
     loop unit in source_units {
         if unit.package_identity != package.identity -> next
         file :: snapshot.roots[unit.root_index].files[unit.file_index]
-        &files.push(PackageKeySourceFile{relative_path: unit.relative_path, source: file.source})
+        &files.push(PackageKeySourceFile{relative_path: unit.relative_path, source: file.source.bytes()})
     }
     package_key_source_digest(files, jet_driver_package_manifest_source(package, snapshot))
 }
@@ -470,8 +576,10 @@ pub fn jet_driver_package_source_digest(package: JetDriverPackageInfo, snapshot:
 // The package check key: `None` when the host names no compiler identity or
 // a direct dependency has no interface digest yet (it must be checked
 // first). `interface_digests` maps package identity to interface digest.
-pub fn jet_driver_package_check_key(package: JetDriverPackageInfo, packages: [JetDriverPackageInfo], interface_digests: [String:String], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
+pub fn jet_driver_package_check_key(package: JetDriverPackageInfo, packages: [JetDriverPackageInfo], interface_digests: [String:String], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], checked: JetDriverCompilerCheckResult) -> String? Never! {
     compiler :: request.host_facts.compiler_identity ?? return None
+    if !checked.complete -> return None
+    facts :: jet_driver_compiler_target_fact_pairs(checked) ?? return None
     dependencies := [PackageKeyDependency]{}
     loop dependency in package.dependencies {
         loop candidate in packages {
@@ -480,7 +588,7 @@ pub fn jet_driver_package_check_key(package: JetDriverPackageInfo, packages: [Je
             &dependencies.push(PackageKeyDependency{identity: candidate.identity, interface_digest: digest})
         }
     }
-    target :: package_key_target_facts_digest(jet_driver_package_target_facts(request, package))
+    target :: package_key_target_facts_digest(facts)
     source :: jet_driver_package_source_digest(package, request.authorized_sources, source_units)
     Val(package_key_check_key(compiler, target, package.identity, source, dependencies))
 }

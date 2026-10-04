@@ -1,0 +1,809 @@
+// PORT-PENDING 1113 tests-marker-rule-signatures: tests/marker_rule_signatures.rs:1-805
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS fn checked(source: &str, mode: jet::Sema::CompileMode) -> (jet::AST::ProgramBundle, Vec<String>) {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_marker_rule_signatures_{}_{}",
+//RS         std::process::id(),
+//RS         std::thread::current().name().unwrap_or("test")
+//RS     ));
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     std::fs::write(&path, source).unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+//RS     let codes = jet::Sema::check_bundle(&mut bundle, mode)
+//RS         .into_iter()
+//RS         .map(|diagnostic| diagnostic.code.to_string())
+//RS         .collect();
+//RS     (bundle, codes)
+//RS }
+//RS 
+//RS fn codes(source: &str) -> Vec<String> {
+//RS     checked(source, jet::Sema::CompileMode::Check).1
+//RS }
+//RS 
+//RS fn diagnostics(source: &str) -> Vec<jet::Diagnostics::Diagnostic> {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_marker_rule_signatures_diagnostics_{}_{}",
+//RS         std::process::id(),
+//RS         std::thread::current().name().unwrap_or("test")
+//RS     ));
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     std::fs::write(&path, source).unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+//RS     jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check)
+//RS }
+//RS 
+//RS fn parse_diagnostics(source: &str) -> Vec<jet::Diagnostics::Diagnostic> {
+//RS     let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
+//RS     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+//RS     jet::Parser::parse(&tokens).err().unwrap_or_default()
+//RS }
+//RS 
+//RS fn parse_codes(source: &str) -> Vec<String> {
+//RS     parse_diagnostics(source)
+//RS         .into_iter()
+//RS         .map(|diagnostic| diagnostic.code)
+//RS         .collect()
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_lang_marker_enums_accept_dot_literals_without_imports() {
+//RS     let diagnostics = codes("#Inline(.Always)\nfn helper() -> Int -> 1\nfn run() {}");
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn arithmetic_policy_accepts_only_declared_sites_and_modes() {
+//RS     let valid = codes(
+//RS         r#"
+//RS #Arithmetic(.Checked) fn checked() {}
+//RS struct Accumulator { value: U8 }
+//RS impl Accumulator {
+//RS     #Arithmetic(.Wrapping) fn step(self) {}
+//RS }
+//RS fn run() {
+//RS     #Arithmetic(.Saturating) {}
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(valid.is_empty(), "{valid:?}");
+//RS 
+//RS     let wrong_site = codes("#Arithmetic(.Wrapping) struct Bad { value: U8 }\nfn run() {}");
+//RS     assert!(
+//RS         wrong_site.iter().any(|code| code == "E0355"),
+//RS         "{wrong_site:?}"
+//RS     );
+//RS 
+//RS     let wrong_mode = codes("#Arithmetic(.Other) fn bad() {}\nfn run() {}");
+//RS     assert!(
+//RS         wrong_mode.iter().any(|code| code == "E0930"),
+//RS         "{wrong_mode:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn job_scope_and_reserved_names_use_the_job_diagnostic() {
+//RS     // D-JOB-NAMES1=A: Jet command words such as `output`, `serve`, and `lint`
+//RS     // are ordinary job names; only the lifecycle entries, `help`, and
+//RS     // `version` are reserved.
+//RS     let valid = codes(
+//RS         "#Job(.Ship) fn ship() {}\n#Job(.Internal) fn inspect_job() {}\n#Job fn output() {}\n#Job fn serve() {}\n#Job fn lint() {}\nfn run() {}",
+//RS     );
+//RS     assert!(valid.is_empty(), "{valid:?}");
+//RS 
+//RS     for reserved in ["run", "dev", "build", "test", "help", "version"] {
+//RS         let diagnostics = codes(&format!("#Job fn {reserved}() {{}}\nfn main() {{}}"));
+//RS         assert!(
+//RS             diagnostics.iter().any(|code| code == "E0928"),
+//RS             "{reserved}: {diagnostics:?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn qualified_core_lang_hierarchical_marker_enums_use_the_variant_root() {
+//RS     let diagnostics = codes(
+//RS         r#"
+//RS use core.compiler.lang as lang
+//RS 
+//RS #Target(lang.Target.Web)
+//RS fn helper() {}
+//RS 
+//RS fn run() {
+//RS     #FX(lang.Effect.Net) {}
+//RS     #FX(grant: lang.Effect.Net) {}
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn qualified_state_namespace_is_valid_and_not_a_value() {
+//RS     let valid = codes(
+//RS         "struct Door { state { Closed, Open }\n#State(Door.State.Closed) fn close(self) {}\n#Transition(Door.State.Closed, Door.State.Open) fn open(self) {}\n}\nfn run() {}",
+//RS     );
+//RS     assert!(!valid.iter().any(|code| code == "E0151"), "{valid:?}");
+//RS 
+//RS     let value =
+//RS         codes("struct Door { state { Closed, Open } }\nfn run() { print(Door.State.Open) }");
+//RS     assert!(value.iter().any(|code| code == "E0302"), "{value:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn retired_bench_marker_teaches_measured_test() {
+//RS     let diagnostics = codes("#Bench(\"old\") { assert(true) }\nfn run() {}\n");
+//RS     assert!(
+//RS         diagnostics.iter().any(|code| code == "E0927"),
+//RS         "{diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn signed_auto_derive_markers_parse_on_types() {
+//RS     for source in [
+//RS         "#!Printable\nstruct Quiet { value: Int }\nfn run() {}",
+//RS         "#[!Debug, !Equatable, Printable]\nstruct Mixed { value: Int }\nfn run() {}",
+//RS         "#!Codable\nstruct QuietCodec { value: Int }\nfn run() {}",
+//RS         "#!Encode\nstruct QuietEncoder { value: Int }\nfn run() {}",
+//RS         "#!Decode\nstruct QuietDecoder { value: Int }\nfn run() {}",
+//RS         "#!Comparable\nstruct QuietOrder { value: Int }\nfn run() {}",
+//RS     ] {
+//RS         let diagnostics = parse_codes(source);
+//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}\n{source}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn negative_sign_is_reserved_for_auto_derive_traits() {
+//RS     for source in ["#!Pure\nfn run() {}", "#[!Inline]\nfn run() {}"] {
+//RS         let diagnostics = parse_codes(source);
+//RS         assert_eq!(diagnostics, vec!["E0931"], "{diagnostics:?}\n{source}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn field_and_variant_sites_reject_every_non_applicable_example() {
+//RS     for source in [
+//RS         "#[Job, Static] struct Bad { value: Int }\nfn run() {}",
+//RS         "enum Bad { #Comparable Value }\nfn run() {}",
+//RS         "enum Bad { #Skip Value }\nfn run() {}",
+//RS     ] {
+//RS         let diagnostics = parse_codes(source);
+//RS         assert_eq!(
+//RS             diagnostics.iter().filter(|code| *code == "E0355").count(),
+//RS             1,
+//RS             "{diagnostics:?}\n{source}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn method_markers_share_the_ordered_registry_collector() {
+//RS     let source = r#"
+//RS struct Door {
+//RS     state { Ready }
+//RS     #[Inline, State(Ready)]
+//RS     fn open(self) {}
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
+//RS     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+//RS     let program = jet::Parser::parse(&tokens).expect("method marker list should parse");
+//RS     let jet::AST::Item::Struct(door) = &program.items[0] else {
+//RS         panic!("Door struct")
+//RS     };
+//RS     assert!(door.methods[0].is_inline);
+//RS     assert_eq!(
+//RS         door.methods[0]
+//RS             .state_requires
+//RS             .as_ref()
+//RS             .map(|state| state.0.as_str()),
+//RS         Some("Ready")
+//RS     );
+//RS 
+//RS     let wrong = parse_codes("struct Bad { #Job fn work(self) {} }\nfn run() {}");
+//RS     assert_eq!(wrong.iter().filter(|code| *code == "E0355").count(), 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn parser_binds_the_authoritative_declaration_site_matrix() {
+//RS     let fixtures = [
+//RS         (
+//RS             "#allow(float_money) price: Float",
+//RS             "struct Money { #allow(float_money) price: Float }\nfn run() {}",
+//RS             jet::Policy::RuleSite::Field,
+//RS         ),
+//RS         (
+//RS             "#Rename on enum variant",
+//RS             "enum Status { #Rename(\"ready\") Ready }\nfn run() {}",
+//RS             jet::Policy::RuleSite::Variant,
+//RS         ),
+//RS         (
+//RS             "#Inline on method",
+//RS             "struct Box { #Inline fn open(self) {} }\nfn run() {}",
+//RS             jet::Policy::RuleSite::Method,
+//RS         ),
+//RS         (
+//RS             "#HTML on file",
+//RS             "#HTML(\"index.html\")\nfn run() {}",
+//RS             jet::Policy::RuleSite::File,
+//RS         ),
+//RS         (
+//RS             "#Test declaration",
+//RS             "#Test(\"works\") {}\nfn run() {}",
+//RS             jet::Policy::RuleSite::Test,
+//RS         ),
+//RS         (
+//RS             "#Job on function",
+//RS             "#Job fn work() {}\nfn run() {}",
+//RS             jet::Policy::RuleSite::Function,
+//RS         ),
+//RS         // D-CONSTMARK1=A / spec.md:718-720: the `.Constant` site is the marked
+//RS         // compile-time binding. An unmarked `limit :: 10` is not a declaration
+//RS         // at this scope, so this is the only spelling that reaches the row.
+//RS         (
+//RS             "#Static on a marked constant",
+//RS             "#Static LIMIT :: prep { 10 }\nfn run() {}",
+//RS             jet::Policy::RuleSite::Constant,
+//RS         ),
+//RS     ];
+//RS     for (label, source, expected_site) in fixtures {
+//RS         let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
+//RS         assert!(
+//RS             lexer_diagnostics.is_empty(),
+//RS             "{label}: {lexer_diagnostics:?}"
+//RS         );
+//RS         let program = jet::Parser::parse(&tokens)
+//RS             .unwrap_or_else(|diagnostics| panic!("{label}: {diagnostics:?}"));
+//RS         assert!(
+//RS             program
+//RS                 .rule_facts
+//RS                 .iter()
+//RS                 .any(|application| application.site == Some(expected_site)),
+//RS             "{label}: {:?}",
+//RS             program.rule_facts
+//RS         );
+//RS     }
+//RS 
+//RS     let (tokens, lexer_diagnostics) = jet::Lexer::lex("#Policy(copies: .Explicit)\nfn run() {}");
+//RS     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+//RS     let program = jet::Parser::parse(&tokens)
+//RS         .unwrap_or_else(|diagnostics| panic!("#Policy module declaration: {diagnostics:?}"));
+//RS     assert!(
+//RS         program
+//RS             .policy_declarations
+//RS             .iter()
+//RS             .any(|declaration| declaration.scope == jet::Policy::PolicyScope::Module),
+//RS         "#Policy module declaration: {:?}",
+//RS         program.policy_declarations
+//RS     );
+//RS }
+//RS 
+//RS /// I4: a wrong-site report has to name a spelling that works. `#Static` is the
+//RS /// one active row whose only site is `.Constant`, and the only way to reach
+//RS /// that site is a module constant (D-PREP-SURFACE2=A) — so the generic "move
+//RS /// it to a registered site" fix has nowhere to send the writer.
+//RS #[test]
+//RS fn a_constant_only_row_teaches_the_marked_binding() {
+//RS     let unmarked = parse_diagnostics("#Static limit :: 10\nfn run() {}");
+//RS     let wrong_site = unmarked
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0355")
+//RS         .unwrap_or_else(|| panic!("expected the wrong-site report: {unmarked:?}"));
+//RS     assert!(
+//RS         wrong_site.fix.contains("`#Static NAME :: prep { value }`"),
+//RS         "{}",
+//RS         wrong_site.fix
+//RS     );
+//RS 
+//RS     // A row with more than one legal site keeps the generic fix: moving it
+//RS     // really is the whole instruction there.
+//RS     let elsewhere = parse_diagnostics("#Off\nfn run() {}");
+//RS     assert!(
+//RS         elsewhere.iter().any(|diagnostic| diagnostic.code == "E0355"
+//RS             && diagnostic.fix == "move `#Off` to one of its registered sites"),
+//RS         "{elsewhere:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn task_metadata_binds_typed_platform_skip_limits_and_formats_stably() {
+//RS     for (platform, spelling) in [("Linux", ".Linux"), ("MacOS", ".MacOS")] {
+//RS         let source = format!(
+//RS             "#Job(.Dev, skip: .Unless(.Platform({spelling})), limits: [\"cpu\": 2]) fn build() {{}}\nfn run() {{}}\n"
+//RS         );
+//RS         let (tokens, lexer_diagnostics) = jet::Lexer::lex(&source);
+//RS         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+//RS         let program = jet::Parser::parse(&tokens).expect("typed task skip should parse");
+//RS         let function = program
+//RS             .items
+//RS             .iter()
+//RS             .find_map(|item| match item {
+//RS                 jet::AST::Item::Func(function) if function.name == "build" => Some(function),
+//RS                 _ => None,
+//RS             })
+//RS             .expect("build task");
+//RS         assert!(matches!(
+//RS             function
+//RS                 .job_metadata
+//RS                 .as_ref()
+//RS                 .and_then(|metadata| metadata.skip.as_ref()),
+//RS             Some(jet::AST::JobSkip::UnlessPlatform { platform: actual })
+//RS                 if actual == platform
+//RS         ));
+//RS         assert_eq!(
+//RS             function
+//RS                 .job_metadata
+//RS                 .as_ref()
+//RS                 .and_then(|metadata| metadata.limits.get("cpu"))
+//RS                 .map(String::as_str),
+//RS             Some("2")
+//RS         );
+//RS         let skip = function
+//RS             .job_metadata
+//RS             .as_ref()
+//RS             .and_then(|metadata| metadata.skip.as_ref())
+//RS             .expect("typed task skip");
+//RS         assert_eq!(
+//RS             skip.reason_for_host("aarch64-macos").is_none(),
+//RS             platform == "MacOS"
+//RS         );
+//RS         assert_eq!(
+//RS             skip.reason_for_host("x86_64-linux").is_none(),
+//RS             platform == "Linux"
+//RS         );
+//RS 
+//RS         let formatted = jet::format_source(&source).expect("typed task skip should format");
+//RS         assert!(
+//RS             formatted.contains(&format!("skip: .Unless(.Platform({spelling}))")),
+//RS             "{formatted}"
+//RS         );
+//RS         assert_eq!(formatted, jet::format_source(&formatted).unwrap());
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn adjacent_method_markers_keep_the_shared_e0999_rewrite() {
+//RS     let source =
+//RS         "struct Door { state { Ready } #Inline #State(Ready) fn open(self) {} }\nfn run() {}";
+//RS     let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
+//RS     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+//RS     let (_, diagnostics) =
+//RS         jet::Parser::parse_for_check(&tokens).expect("adjacent method markers recover");
+//RS     let diagnostic = diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0999")
+//RS         .expect("shared adjacent-marker diagnostic");
+//RS     assert_eq!(
+//RS         diagnostic.edit.as_ref().map(|edit| edit.new_text.as_str()),
+//RS         Some("#[Inline, State(Ready)]")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn string_and_bool_rule_arguments_use_local_semantic_types() {
+//RS     let valid = codes(
+//RS         r#"
+//RS fn run() {
+//RS     category :: "Movement"
+//RS     enabled :: true
+//RS     #Meta(category: category, tunable: enabled) speed :: 1
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(
+//RS         !valid
+//RS             .iter()
+//RS             .any(|code| matches!(code.as_str(), "E0930" | "E3112" | "L3102")),
+//RS         "{valid:?}"
+//RS     );
+//RS 
+//RS     let wrong = codes(
+//RS         r#"
+//RS fn run() {
+//RS     category :: 42
+//RS     enabled :: 1
+//RS     #Meta(category: category, tunable: enabled) speed :: 1
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_eq!(
+//RS         wrong.iter().filter(|code| code.as_str() == "E0930").count(),
+//RS         1,
+//RS         "{wrong:?}"
+//RS     );
+//RS     assert!(!wrong
+//RS         .iter()
+//RS         .any(|code| matches!(code.as_str(), "E0345" | "E0347")));
+//RS }
+//RS 
+//RS #[test]
+//RS fn int_rule_arguments_use_local_semantic_types() {
+//RS     let valid = codes(
+//RS         r#"
+//RS fn run() {
+//RS     deadline :: 42
+//RS     #Context(deadline: deadline) {}
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(!valid
+//RS         .iter()
+//RS         .any(|code| matches!(code.as_str(), "E0930" | "E0762")));
+//RS 
+//RS     let wrong = codes(
+//RS         r#"
+//RS fn run() {
+//RS     deadline :: "soon"
+//RS     #Context(deadline: deadline) {}
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_eq!(
+//RS         wrong.iter().filter(|code| code.as_str() == "E0930").count(),
+//RS         1,
+//RS         "{wrong:?}"
+//RS     );
+//RS     assert!(!wrong.iter().any(|code| code == "E0762"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn duration_rule_arguments_use_function_parameter_types() {
+//RS     let valid = codes(
+//RS         r#"
+//RS #[Job, Every(schedule)]
+//RS fn tick(schedule: Duration) {}
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     assert!(
+//RS         !valid
+//RS             .iter()
+//RS             .any(|code| matches!(code.as_str(), "E0930" | "E3112" | "L3102")),
+//RS         "{valid:?}"
+//RS     );
+//RS     assert!(valid.iter().any(|code| code == "E0926"), "{valid:?}");
+//RS 
+//RS     let wrong = codes(
+//RS         r#"
+//RS #[Job, Every(schedule)]
+//RS fn tick(schedule: Int) {}
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     assert_eq!(
+//RS         wrong.iter().filter(|code| code.as_str() == "E0930").count(),
+//RS         1,
+//RS         "{wrong:?}"
+//RS     );
+//RS     assert!(!wrong.iter().any(|code| code == "E0926"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn block_string_rules_use_local_semantic_types() {
+//RS     let valid = codes(
+//RS         r#"
+//RS fn run() {
+//RS     reason :: "audited"
+//RS     #Unsafe(reason) {}
+//RS     #Impure(reason) {}
+//RS     #Nondeterministic(reason) {}
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(
+//RS         !valid
+//RS             .iter()
+//RS             .any(|code| matches!(code.as_str(), "E0930" | "E3112" | "L3102")),
+//RS         "{valid:?}"
+//RS     );
+//RS 
+//RS     let wrong = codes(
+//RS         r#"
+//RS fn run() {
+//RS     reason :: 42
+//RS     #Unsafe(reason) {}
+//RS     #Impure(reason) {}
+//RS     #Nondeterministic(reason) {}
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_eq!(
+//RS         wrong.iter().filter(|code| code.as_str() == "E0930").count(),
+//RS         3,
+//RS         "{wrong:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn contract_messages_use_function_parameter_types() {
+//RS     let valid = codes(
+//RS         r#"
+//RS #[Pre(value > 0, message), Post(result > 0, message)]
+//RS fn positive(value: Int, message: String) -> Int {
+//RS     return value
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     assert!(!valid.iter().any(|code| code == "E0930"), "{valid:?}");
+//RS 
+//RS     let wrong = codes(
+//RS         r#"
+//RS #[Pre(value > 0, message), Post(result > 0, message)]
+//RS fn positive(value: Int, message: Int) -> Int {
+//RS     return value
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     assert_eq!(
+//RS         wrong.iter().filter(|code| code.as_str() == "E0930").count(),
+//RS         2,
+//RS         "{wrong:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn static_string_products_resolve_before_consumers() {
+//RS     let source = r#"
+//RS LABEL :: prep { "shared" }
+//RS PAGE :: prep { "index.html" }
+//RS #HTML(PAGE)
+//RS Tiny :: distinct Int(0..3)
+//RS #Test(LABEL) {}
+//RS fn run() {}
+//RS "#;
+//RS     let (bundle, diagnostics) = checked(source, jet::Sema::CompileMode::Check);
+//RS     assert!(
+//RS         !diagnostics.iter().any(|code| code == "E0930"),
+//RS         "{diagnostics:?}"
+//RS     );
+//RS     let module = &bundle.modules[bundle.entry];
+//RS     assert_eq!(module.html_path.as_deref(), Some("index.html"));
+//RS     let mut saw_test = false;
+//RS     let mut saw_range = false;
+//RS     for item in &module.items {
+//RS         match item {
+//RS             jet::AST::Item::Test(test) => saw_test = test.name.as_deref() == Some("shared"),
+//RS             jet::AST::Item::Distinct(distinct) if distinct.name == "Tiny" => {
+//RS                 saw_range = distinct
+//RS                     .range
+//RS                     .is_some_and(|(low, high, _)| low == 0 && high == 3)
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     assert!(saw_test && saw_range);
+//RS }
+//RS 
+//RS #[test]
+//RS fn html_marker_uses_typed_path_signature() {
+//RS     let source = "#HTML(Path{\"index.html\"})\nfn run() {}";
+//RS     let (bundle, valid_diagnostics) = checked(source, jet::Sema::CompileMode::Check);
+//RS     assert!(
+//RS         !valid_diagnostics.iter().any(|code| code == "E0930"),
+//RS         "{valid_diagnostics:?}"
+//RS     );
+//RS     assert_eq!(
+//RS         bundle.modules[bundle.entry].html_path.as_deref(),
+//RS         Some("index.html")
+//RS     );
+//RS 
+//RS     let parser_diagnostics = parse_diagnostics("#HTML(\"index.html\")\nfn run() {}");
+//RS     assert!(
+//RS         !parser_diagnostics.iter().any(|diagnostic| diagnostic.code == "E0930"),
+//RS         "{parser_diagnostics:?}"
+//RS     );
+//RS     let invalid = diagnostics("#HTML(\"index.html\")\nfn run() {}");
+//RS     let errors: Vec<_> = invalid
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "E0930")
+//RS         .collect();
+//RS     assert_eq!(errors.len(), 1, "{invalid:?}");
+//RS     assert_eq!(
+//RS         errors[0].what,
+//RS         "`#HTML` arguments do not match `HTML(page: Path)`"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn static_string_products_report_one_shared_type_error_each() {
+//RS     for source in [
+//RS         "VALUE :: prep { 42 }\n#HTML(VALUE)\nfn run() {}",
+//RS         "VALUE :: prep { 42 }\n#Test(VALUE) {}\nfn run() {}",
+//RS     ] {
+//RS         let diagnostics = codes(source);
+//RS         assert_eq!(
+//RS             diagnostics
+//RS                 .iter()
+//RS                 .filter(|code| code.as_str() == "E0930")
+//RS                 .count(),
+//RS             1,
+//RS             "{diagnostics:?}\n{source}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn static_type_and_field_strings_use_the_same_signature_gate() {
+//RS     let valid = codes(
+//RS         r#"
+//RS TAG_NAME :: prep { "kind" }
+//RS FIELD_NAME :: prep { "identifier" }
+//RS VARIANT_NAME :: prep { "ready" }
+//RS #[Codable, Discriminant(TAG_NAME)]
+//RS enum Event { #Rename(VARIANT_NAME) Ready }
+//RS #Codable
+//RS struct Row { #Rename(FIELD_NAME) id: Int }
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     assert!(!valid.iter().any(|code| code == "E0930"), "{valid:?}");
+//RS 
+//RS     for source in [
+//RS         "VALUE :: prep { 42 }\n#[Codable, Discriminant(VALUE)] enum Event { Ready }\nfn run() {}",
+//RS         "VALUE :: prep { 42 }\n#Codable struct Row { #Rename(VALUE) id: Int }\nfn run() {}",
+//RS         "VALUE :: prep { 42 }\n#Codable enum Event { #Rename(VALUE) Ready }\nfn run() {}",
+//RS     ] {
+//RS         let diagnostics = codes(source);
+//RS         assert_eq!(
+//RS             diagnostics.iter().filter(|code| *code == "E0930").count(),
+//RS             1,
+//RS             "{diagnostics:?}\n{source}"
+//RS         );
+//RS         assert!(
+//RS             !diagnostics
+//RS                 .iter()
+//RS                 .any(|code| matches!(code.as_str(), "E2407" | "E2409")),
+//RS             "{diagnostics:?}\n{source}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn static_string_products_reject_nonstatic_expressions_once() {
+//RS     for source in [
+//RS         "#HTML(runtime_name)\nfn run() {}",
+//RS         "#Test(runtime_name) {}\nfn run() {}",
+//RS     ] {
+//RS         let diagnostics = codes(source);
+//RS         assert_eq!(
+//RS             diagnostics
+//RS                 .iter()
+//RS                 .filter(|code| code.as_str() == "E0930")
+//RS                 .count(),
+//RS             1,
+//RS             "{diagnostics:?}\n{source}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn invariant_marker_is_retired_in_favor_of_range_types() {
+//RS     let source = "#Invariant(\"value >= 0 && value < 4\") Index4 :: distinct Int\nfn run() {}";
+//RS     let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
+//RS     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+//RS     let diagnostics = jet::Parser::parse(&tokens).expect_err("retired marker must not parse");
+//RS     assert!(
+//RS         diagnostics.iter().any(|diagnostic| {
+//RS             diagnostic.code == "E0927"
+//RS                 && diagnostic.what.contains("#Invariant")
+//RS                 && diagnostic.fix.contains("distinct Int(lo..hi)")
+//RS         }),
+//RS         "{diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn sized_and_named_range_failures_share_the_index_error_shape() {
+//RS     let diagnostics = diagnostics(
+//RS         r#"
+//RS Die :: distinct Int(1..6)
+//RS fn sized(faces: [Int#6], index: U8) -> Int { return faces[index] }
+//RS fn named(faces: [Int#6], index: Die) -> Int { return faces[index] }
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     let errors: Vec<_> = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "E0965")
+//RS         .collect();
+//RS     assert_eq!(errors.len(), 2, "{diagnostics:?}");
+//RS     assert_eq!(errors[0].why, errors[1].why, "{diagnostics:?}");
+//RS     assert_eq!(errors[0].fix, errors[1].fix, "{diagnostics:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn duplicate_html_markers_still_fail_before_resolution() {
+//RS     let source = r#"
+//RS FIRST :: prep { "first.html" }
+//RS SECOND :: prep { "second.html" }
+//RS #HTML(FIRST)
+//RS #HTML(SECOND)
+//RS fn run() {}
+//RS "#;
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_marker_rule_signatures_duplicate_html_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     std::fs::write(&path, source).unwrap();
+//RS     let diagnostics = jet::Loader::load_entry(path.to_str().unwrap())
+//RS         .expect_err("duplicate HTML markers must fail during loading");
+//RS     assert_eq!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .filter(|diagnostic| diagnostic.code == "E0003")
+//RS             .count(),
+//RS         1,
+//RS         "{diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_instances_materialize_distinct_test_names() {
+//RS     let (bundle, diagnostics) = checked(
+//RS         r#"
+//RS module suite(label: String) {
+//RS     #Test(label) {}
+//RS }
+//RS module first :: suite("case")
+//RS module second :: suite("other")
+//RS fn run() {}
+//RS "#,
+//RS         jet::Sema::CompileMode::Check,
+//RS     );
+//RS     assert!(
+//RS         !diagnostics
+//RS             .iter()
+//RS             .any(|code| matches!(code.as_str(), "E0105" | "E0930")),
+//RS         "{diagnostics:?}"
+//RS     );
+//RS     let mut names = bundle.modules[bundle.entry]
+//RS         .items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             jet::AST::Item::Test(test) => test.name.clone(),
+//RS             _ => None,
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     names.sort();
+//RS     assert_eq!(names, ["first_case", "second_other"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn resolved_test_names_keep_duplicate_identity() {
+//RS     let diagnostics = codes(
+//RS         r#"
+//RS NAME :: prep { "same" }
+//RS #Test(NAME) {}
+//RS #Test("same") {}
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     assert_eq!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .filter(|code| code.as_str() == "E0105")
+//RS             .count(),
+//RS         1,
+//RS         "{diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn formatter_preserves_static_rule_expressions() {
+//RS     let source = "NAME :: prep { \"case\" }\n#Test(NAME) {}\n#HTML(NAME)\nfn run() {}\n";
+//RS     let formatted = jet::format_source(source).expect("static rule expressions should format");
+//RS     assert!(formatted.contains("#Test(NAME)"), "{formatted}");
+//RS     assert!(formatted.contains("#HTML(NAME)"), "{formatted}");
+//RS }
+// END-PORT-PENDING 1113 tests/marker_rule_signatures.rs:1-805
+

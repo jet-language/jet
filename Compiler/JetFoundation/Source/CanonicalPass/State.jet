@@ -1,0 +1,54 @@
+// CanonicalPass.rs:44-106. #4494 native typed TLS guard capability: the
+// provider MUST initialize canonical_pass_state_new once per OS thread and
+// retain it until thread exit. borrow_mut exposes the original mutable state,
+// rejects nested borrows and releases on every return/stop/unwind. These are
+// real missing provider requirements, never a global/per-request substitute.
+use core.thread.host.local_state as canonical_pass_tls
+use core.sys.host.os_path_ingress as canonical_pass_env
+use core.files.runtime.kernel_path_components as canonical_pass_os_path
+
+// CanonicalPass.rs:55-57,104-106. Guard owns the loan, not a cloned journal.
+pub fn canonical_pass_clear() Never! {
+    guard := canonical_pass_tls.borrow_mut<CanonicalPassState>("jet.canonical-pass.v1")
+    canonical_pass_state_clear(&guard.value)
+}
+pub fn canonical_pass_take() -> [CanonicalPassRecord] Never! {
+    guard := canonical_pass_tls.borrow_mut<CanonicalPassState>("jet.canonical-pass.v1")
+    canonical_pass_state_take(&guard.value)
+}
+
+// CanonicalPass.rs:71-77: env::var is STRICT UTF-8, unlike enabled's var_os.
+fn canonical_pass_selected(operation_id: String) -> Bool Never! {
+    ids_os :: canonical_pass_env.var_os("JET_ADAPTER_OPERATION_IDS") ?? return false
+    ids :: canonical_pass_os_path.to_str(ids_os) ?? return false
+    loop candidate in ids.split(",") {
+        if candidate == operation_id -> return true
+    }
+    false
+}
+pub fn canonical_pass_record(
+    stage: String,
+    operation_id: String,
+    source: String,
+    input_representation: String,
+    input_payload: ^String,
+    input_identity: ^String,
+    output_representation: String,
+    output_payload: ^String,
+    output_identity: ^String,
+    disposition: String,
+) Never! {
+    if !canonical_pass_enabled() || !canonical_pass_selected(operation_id) -> return
+    // Only the source's disabled/not-selected branches are no-ops. Allocation,
+    // TLS/borrow failures propagate; evidence does not hide compiler failures.
+    record :: CanonicalPassRecord{
+        stage: ~stage, operation_id: ~operation_id, occurrence: 0, order: 0,
+        source: ~source, input_representation: ~input_representation,
+        input_payload: ^input_payload, input_identity: ^input_identity,
+        output_representation: ~output_representation,
+        output_payload: ^output_payload, output_identity: ^output_identity,
+        premises: ~CANONICAL_PASS_BASE_PREMISES, disposition: ~disposition,
+    }
+    guard := canonical_pass_tls.borrow_mut<CanonicalPassState>("jet.canonical-pass.v1")
+    canonical_pass_state_append(&guard.value, ^record)
+}

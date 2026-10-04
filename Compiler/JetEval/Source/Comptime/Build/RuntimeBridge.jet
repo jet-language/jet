@@ -1,0 +1,2147 @@
+// PORT-PENDING 0569 crates-jet-comptime-src-comptime-build-runtime-bridge: crates/jet-comptime/src/Comptime/Build/runtime_bridge.rs:1-2143
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::actions_policy::{
+//RS     ActionCache, ActionKind, ActionSpec, BuildCapability, BuildPolicy, BuildResourcePool,
+//RS     LegacyWrapperSpec,
+//RS };
+//RS use super::context::BuildContext;
+//RS use super::errors_keys::{dependency_cycle_text, BuildError};
+//RS use super::cache_cas::ActionKey;
+//RS use super::handles::{
+//RS     ActionHandle, ActionId, PluginId, ProbeHandle, ProbeId, SigningIdentityHandle,
+//RS     SigningIdentityId, TargetId, TargetRef, ToolchainHandle, ToolchainId,
+//RS };
+//RS use super::plan_graph::{
+//RS     BuildExecutionReport, BuildGraph, BuildGraphAction, BuildGraphActionKey, BuildGraphCacheDelta,
+//RS     BuildGraphDiff, BuildGraphFile, BuildGraphFileDelta, BuildGraphKeyDelta, BuildGraphTarget,
+//RS     BuildPlan, BuildPlanNode,
+//RS };
+//RS use super::provenance_toolchains::{
+//RS     BuildProvenance, LinkerIdentity, ProbeSpec, ReproducibilityClass, SdkIdentity,
+//RS     SigningIdentitySpec, SysrootIdentity, ToolchainSpec,
+//RS };
+//RS use super::targets::{TargetKind, TargetSpec};
+//RS use crate::Diagnostics::{Diagnostic, Span, StructuredDiagnostic};
+//RS use crate::AST::{ComptimeInput, CtValue, Type};
+//RS use std::cell::RefCell;
+//RS use std::collections::BTreeMap;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS #[derive(Debug)]
+//RS struct ProgramBuildSession {
+//RS     context: BuildContext,
+//RS     package: String,
+//RS     project_root: PathBuf,
+//RS     diagnostics: Vec<Diagnostic>,
+//RS     last_span: Span,
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static PROGRAM_BUILD_SESSIONS: RefCell<BTreeMap<u64, ProgramBuildSession>> =
+//RS         const { RefCell::new(BTreeMap::new()) };
+//RS     /// The latest completed receipt is only a query aid. Its graph identity
+//RS     /// must match before cache facts can be attached to a new static plan.
+//RS     static PROGRAM_BUILD_EXECUTION_RECEIPTS: RefCell<Vec<(BuildGraph, BuildExecutionReport)>> =
+//RS         const { RefCell::new(Vec::new()) };
+//RS }
+//RS 
+//RS /// Start one selected-root build evaluation. Session is thread-local so
+//RS /// parallel compiler invocations cannot share graph mutation.
+//RS pub fn begin_program_build(package: impl Into<String>, program: CtValue) -> CtValue {
+//RS     begin_program_build_with_policy(package, program, BuildPolicy::local_default())
+//RS }
+//RS 
+//RS /// Start a build session with the caller's already-resolved policy. The
+//RS /// default entry point remains permissive for Rust-only graph consumers; the
+//RS /// compiler driver passes the real package/workspace policy here.
+//RS pub fn begin_program_build_with_policy(
+//RS     package: impl Into<String>,
+//RS     program: CtValue,
+//RS     policy: BuildPolicy,
+//RS ) -> CtValue {
+//RS     begin_program_build_with_policy_at(package, program, policy, Path::new("."))
+//RS }
+//RS 
+//RS /// Start a build session with the owning project root. The root is retained
+//RS /// for production-only imports whose semantics come from a canonical project
+//RS /// file (legacy wrappers); source text cannot substitute another root.
+//RS pub fn begin_program_build_with_policy_at(
+//RS     package: impl Into<String>,
+//RS     program: CtValue,
+//RS     policy: BuildPolicy,
+//RS     project_root: &Path,
+//RS ) -> CtValue {
+//RS     let context = BuildContext::new_with_policy(policy);
+//RS     let id = context.context;
+//RS     PROGRAM_BUILD_SESSIONS.with(|sessions| {
+//RS         sessions.borrow_mut().insert(
+//RS             id,
+//RS             ProgramBuildSession {
+//RS                 context,
+//RS                 package: package.into(),
+//RS                 project_root: project_root.to_path_buf(),
+//RS                 diagnostics: Vec::new(),
+//RS                 last_span: Span::new(0, 0),
+//RS             },
+//RS         );
+//RS     });
+//RS     CtValue::Struct {
+//RS         type_name: crate::Syntax::TYPE_BUILD_CONTEXT.to_string(),
+//RS         fields: vec![
+//RS             ("__session".to_string(), CtValue::Int(id as i64)),
+//RS             ("program".to_string(), program),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS pub fn abort_program_build(context: &CtValue) {
+//RS     if let Some(id) = build_session_id(context) {
+//RS         PROGRAM_BUILD_SESSIONS.with(|sessions| {
+//RS             sessions.borrow_mut().remove(&id);
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS pub fn finish_program_build(
+//RS     context: &CtValue,
+//RS     returned: &CtValue,
+//RS ) -> Result<(BuildPlan, Vec<Diagnostic>), Diagnostic> {
+//RS     let id = build_session_id(context)
+//RS         .ok_or_else(|| build_diag("lost build context", Span::new(0, 0)))?;
+//RS     let default = returned_handle(returned, crate::Syntax::TYPE_BUILD_PLAN)
+//RS         .and_then(|(_, target)| (target >= 0).then_some(target as usize));
+//RS     let session = PROGRAM_BUILD_SESSIONS.with(|sessions| sessions.borrow_mut().remove(&id));
+//RS     let session = session.ok_or_else(|| build_diag("build context expired", Span::new(0, 0)))?;
+//RS     let error_span = session.last_span;
+//RS     let plan = match default {
+//RS         Some(target) => session
+//RS             .context
+//RS             .plan_with_default(TargetRef {
+//RS                 id: TargetId(target),
+//RS                 context: id,
+//RS             })
+//RS             .map_err(|e| build_error_diag(&e, error_span)),
+//RS         None => session
+//RS             .context
+//RS             .plan()
+//RS 
+//RS             .map_err(|e| build_error_diag(&e, error_span)),
+//RS     }?;
+//RS     Ok((plan, session.diagnostics))
+//RS }
+//RS /// Install one completed execution report for the current thread's later
+//RS /// build-query/tooling pass. This is intentionally a Rust-side ambient hook,
+//RS /// not a Jet loader or a public receipt constructor.
+//RS #[doc(hidden)]
+//RS pub fn install_build_execution_receipt(
+//RS     plan: &BuildPlan,
+//RS     execution: &BuildExecutionReport,
+//RS ) {
+//RS     if !execution.events.iter().any(|event| {
+//RS         matches!(
+//RS             event,
+//RS             super::plan_graph::BuildExecutionEvent::Finished { .. }
+//RS         )
+//RS     }) {
+//RS         return;
+//RS     }
+//RS     let graph = plan.graph();
+//RS     PROGRAM_BUILD_EXECUTION_RECEIPTS.with(|receipts| {
+//RS         let mut receipts = receipts.borrow_mut();
+//RS         receipts.retain(|(known, _)| known != &graph);
+//RS         receipts.push((graph, execution.clone()));
+//RS         let excess = receipts.len().saturating_sub(8);
+//RS         if excess != 0 {
+//RS             receipts.drain(..excess);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn execution_receipt_for_graph(graph: &BuildGraph) -> Option<BuildExecutionReport> {
+//RS     PROGRAM_BUILD_EXECUTION_RECEIPTS.with(|receipts| {
+//RS         receipts
+//RS             .borrow()
+//RS             .iter()
+//RS             .rev()
+//RS             .find(|(known, _)| known == graph)
+//RS             .map(|(_, execution)| execution.clone())
+//RS     })
+//RS }
+//RS /// Project one plan through the ambient receipt context used by in-process
+//RS /// tooling and CLI queries. An explicit report wins; otherwise an exact static
+//RS /// graph identity may reuse a completed report from this thread.
+//RS #[doc(hidden)]
+//RS pub fn graph_for_build_query(
+//RS     plan: &BuildPlan,
+//RS     execution: Option<&BuildExecutionReport>,
+//RS ) -> BuildGraph {
+//RS     if let Some(execution) = execution {
+//RS         return plan.graph_with_execution(Some(execution));
+//RS     }
+//RS     let static_graph = plan.graph();
+//RS     let ambient = execution_receipt_for_graph(&static_graph);
+//RS     plan.graph_with_execution(ambient.as_ref())
+//RS }
+//RS 
+//RS /// D-BUILDQUERY1=A: project the checked plan without opening a store or
+//RS /// re-deciding any graph meaning in a tier-specific host.
+//RS pub fn eval_build_graph(plan: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+//RS     let Some((session_id, target_id)) =
+//RS         returned_handle(plan, crate::Syntax::TYPE_BUILD_PLAN)
+//RS     else {
+//RS         return Err(build_query_diag(
+//RS             "argument 1 must be a BuildPlan returned by this build",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     let graph = PROGRAM_BUILD_SESSIONS.with(|sessions| {
+//RS         let sessions = sessions.borrow();
+//RS         let session = sessions
+//RS             .get(&session_id)
+//RS             .ok_or_else(|| build_query_diag("build context expired", span))?;
+//RS         let plan = if target_id >= 0 {
+//RS             session
+//RS                 .context
+//RS                 .plan_with_default(TargetRef {
+//RS                     id: TargetId(target_id as usize),
+//RS                     context: session_id,
+//RS                 })
+//RS         } else {
+//RS             session.context.plan()
+//RS         };
+//RS         plan.map(|plan| graph_for_build_query(&plan, None))
+//RS         .map_err(|error| build_error_diag(&error, span))
+//RS     })?;
+//RS     Ok(build_graph_value(&graph))
+//RS }
+//RS 
+//RS /// D-BUILDQUERY1=A: compare two typed graph projections. The graph parser is
+//RS /// deliberately private; source code can only receive these records from the
+//RS /// canonical query above, while malformed values fail with a normal diagnostic.
+//RS pub fn eval_build_receipt_diff(
+//RS     before: &CtValue,
+//RS     after: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let before = build_graph_from_value(before, span)?;
+//RS     let after = build_graph_from_value(after, span)?;
+//RS     Ok(build_graph_diff_value(&before.diff(&after)))
+//RS }
+//RS 
+//RS fn build_query_diag(detail: impl Into<String>, span: Span) -> Diagnostic {
+//RS     let detail = detail.into();
+//RS     Diagnostic::error(
+//RS         "E3502",
+//RS         format!("build graph query failed: {detail}"),
+//RS         "core.build exposes only canonical checked BuildPlan facts".to_string(),
+//RS         "pass a BuildPlan or BuildGraph returned by this build".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn graph_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: fields
+//RS             .into_iter()
+//RS             .map(|(name, value)| (name.to_string(), value))
+//RS             .collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn graph_list(values: impl IntoIterator<Item = CtValue>) -> CtValue {
+//RS     CtValue::List(values.into_iter().collect())
+//RS }
+//RS 
+//RS fn graph_option(value: Option<CtValue>, element_type: Type) -> CtValue {
+//RS     value.map_or_else(
+//RS         || CtValue::absent(element_type),
+//RS         |value| CtValue::Present(Box::new(value)),
+//RS     )
+//RS }
+//RS 
+//RS fn graph_option_int(value: Option<usize>) -> CtValue {
+//RS     graph_option(value.map(|value| CtValue::Int(value as i64)), Type::Int)
+//RS }
+//RS 
+//RS fn graph_option_string(value: Option<String>) -> CtValue {
+//RS     graph_option(value.map(CtValue::Str), Type::String)
+//RS }
+//RS 
+//RS fn graph_option_bool(value: Option<bool>) -> CtValue {
+//RS     graph_option(value.map(CtValue::Bool), Type::Bool)
+//RS }
+//RS 
+//RS fn build_graph_value(graph: &BuildGraph) -> CtValue {
+//RS     let action_keys = graph.action_keys();
+//RS     let cache_hits = graph.cache_hits();
+//RS     let affected_files = graph.affected_files();
+//RS     graph_struct(
+//RS         crate::Syntax::TYPE_BUILD_GRAPH,
+//RS         vec![
+//RS             (
+//RS                 "targets",
+//RS                 graph_list(graph.targets.iter().map(build_graph_target_value)),
+//RS             ),
+//RS             (
+//RS                 "actions",
+//RS                 graph_list(graph.actions.iter().map(build_graph_action_value)),
+//RS             ),
+//RS             (
+//RS                 "action_keys",
+//RS                 graph_list(action_keys.iter().map(build_graph_action_key_value)),
+//RS             ),
+//RS             (
+//RS                 "cache_hits",
+//RS                 graph_list(cache_hits.iter().map(|action| build_graph_action_value(action))),
+//RS             ),
+//RS             (
+//RS                 "files",
+//RS                 graph_list(graph.files.iter().map(build_graph_file_value)),
+//RS             ),
+//RS             (
+//RS                 "affected_files",
+//RS                 graph_list(affected_files.iter().map(build_graph_file_value)),
+//RS             ),
+//RS             (
+//RS                 "nodes",
+//RS                 graph_list(graph.nodes.iter().map(build_graph_node_value)),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn build_graph_target_value(target: &BuildGraphTarget) -> CtValue {
+//RS     graph_struct(
+//RS         crate::Syntax::TYPE_BUILD_GRAPH_TARGET,
+//RS         vec![
+//RS             ("id", CtValue::Int(target.id.0 as i64)),
+//RS             ("name", CtValue::Str(target.name.clone())),
+//RS             ("kind", CtValue::Str(format!("{:?}", target.kind))),
+//RS             (
+//RS                 "deps",
+//RS                 graph_list(
+//RS                     target
+//RS                         .deps
+//RS                         .iter()
+//RS                         .map(|id| CtValue::Int(id.0 as i64)),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "actions",
+//RS                 graph_list(
+//RS                     target
+//RS                         .actions
+//RS                         .iter()
+//RS                         .map(|id| CtValue::Int(id.0 as i64)),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "files",
+//RS                 graph_list(target.files.iter().cloned().map(CtValue::Str)),
+//RS             ),
+//RS             ("plugin", graph_option_int(target.plugin.map(|id| id.0))),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn build_graph_action_value(action: &BuildGraphAction) -> CtValue {
+//RS     graph_struct(
+//RS         crate::Syntax::TYPE_BUILD_GRAPH_ACTION,
+//RS         vec![
+//RS             ("id", CtValue::Int(action.id.0 as i64)),
+//RS             ("name", CtValue::Str(action.name.clone())),
+//RS             ("kind", CtValue::Str(action.kind.as_str().to_string())),
+//RS             (
+//RS                 "inputs",
+//RS                 graph_list(action.inputs.iter().cloned().map(CtValue::Str)),
+//RS             ),
+//RS             (
+//RS                 "outputs",
+//RS                 graph_list(action.outputs.iter().cloned().map(CtValue::Str)),
+//RS             ),
+//RS             ("target", graph_option_int(action.target.map(|id| id.0))),
+//RS             (
+//RS                 "caps",
+//RS                 graph_list(
+//RS                     action
+//RS                         .caps
+//RS                         .iter()
+//RS                         .map(|cap| CtValue::Str(cap.name().to_string())),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "pools",
+//RS                 graph_list(
+//RS                     action
+//RS                         .pools
+//RS                         .iter()
+//RS                         .map(|pool| CtValue::Str(pool.as_str().to_string())),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "legacy_wrapper",
+//RS                 graph_option_string(
+//RS                     action
+//RS                         .legacy_wrapper
+//RS                         .map(|wrapper| wrapper.as_str().to_string()),
+//RS                 ),
+//RS             ),
+//RS             ("plugin", graph_option_int(action.plugin.map(|id| id.0))),
+//RS             ("compiler_owned", CtValue::Bool(action.compiler_owned)),
+//RS             ("key", CtValue::Str(action.key.as_str().to_string())),
+//RS             ("cache_hit", graph_option_bool(action.cache_hit)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn build_graph_file_value(file: &BuildGraphFile) -> CtValue {
+//RS     graph_struct(
+//RS         crate::Syntax::TYPE_BUILD_GRAPH_FILE,
+//RS         vec![
+//RS             ("path", CtValue::Str(file.path.clone())),
+//RS             ("owner", graph_option_int(file.owner.map(|id| id.0))),
+//RS             (
+//RS                 "consumers",
+//RS                 graph_list(
+//RS                     file.consumers
+//RS                         .iter()
+//RS                         .map(|id| CtValue::Int(id.0 as i64)),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "targets",
+//RS                 graph_list(
+//RS                     file.targets
+//RS                         .iter()
+//RS                         .map(|id| CtValue::Int(id.0 as i64)),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn build_graph_node_value(node: &BuildPlanNode) -> CtValue {
+//RS     graph_struct(
+//RS         crate::Syntax::TYPE_BUILD_GRAPH_NODE,
+//RS         vec![
+//RS             ("kind", CtValue::Str(node.kind.as_str().to_string())),
+//RS             ("key", CtValue::Str(node.key.clone())),
+//RS             ("subject", CtValue::Str(node.subject.clone())),
+//RS             (
+//RS                 "inputs",
+//RS                 graph_list(node.inputs.iter().cloned().map(CtValue::Str)),
+//RS             ),
+//RS             (
+//RS                 "input_digests",
+//RS                 graph_list(node.input_digests.iter().map(|(name, digest)| {
+//RS                     graph_struct(
+//RS                         crate::Syntax::TYPE_BUILD_GRAPH_INPUT_DIGEST,
+//RS                         vec![
+//RS                             ("name", CtValue::Str(name.clone())),
+//RS                             ("digest", CtValue::Str(digest.clone())),
+//RS                         ],
+//RS                     )
+//RS                 })),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn build_graph_action_key_value(key: &BuildGraphActionKey) -> CtValue {
+//RS     graph_struct(
+//RS         crate::Syntax::TYPE_BUILD_GRAPH_ACTION_KEY,
+//RS         vec![
+//RS             ("action", CtValue::Str(key.action.clone())),
+//RS             ("key", CtValue::Str(key.key.as_str().to_string())),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn build_graph_diff_value(diff: &BuildGraphDiff) -> CtValue {
+//RS     graph_struct(
+//RS         crate::Syntax::TYPE_BUILD_GRAPH_DIFF,
+//RS         vec![
+//RS             (
+//RS                 "file_deltas",
+//RS                 graph_list(diff.file_deltas.iter().map(build_graph_file_delta_value)),
+//RS             ),
+//RS             (
+//RS                 "affected_files",
+//RS                 graph_list(diff.affected_files.iter().cloned().map(CtValue::Str)),
+//RS             ),
+//RS             (
+//RS                 "key_deltas",
+//RS                 graph_list(diff.key_deltas.iter().map(build_graph_key_delta_value)),
+//RS             ),
+//RS             (
+//RS                 "cache_deltas",
+//RS                 graph_list(diff.cache_deltas.iter().map(build_graph_cache_delta_value)),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn build_graph_file_delta_value(delta: &BuildGraphFileDelta) -> CtValue {
+//RS     graph_struct(
+//RS         crate::Syntax::TYPE_BUILD_GRAPH_FILE_DELTA,
+//RS         vec![
+//RS             ("path", CtValue::Str(delta.path.clone())),
+//RS             (
+//RS                 "before",
+//RS                 graph_option(
+//RS                     delta.before.as_ref().map(build_graph_file_value),
+//RS                     Type::Named(crate::Syntax::TYPE_BUILD_GRAPH_FILE.to_string()),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "after",
+//RS                 graph_option(
+//RS                     delta.after.as_ref().map(build_graph_file_value),
+//RS                     Type::Named(crate::Syntax::TYPE_BUILD_GRAPH_FILE.to_string()),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn build_graph_key_delta_value(delta: &BuildGraphKeyDelta) -> CtValue {
+//RS     graph_struct(
+//RS         crate::Syntax::TYPE_BUILD_GRAPH_KEY_DELTA,
+//RS         vec![
+//RS             ("action", CtValue::Str(delta.action.clone())),
+//RS             (
+//RS                 "before",
+//RS                 graph_option_string(delta.before.as_ref().map(|key| key.as_str().to_string())),
+//RS             ),
+//RS             (
+//RS                 "after",
+//RS                 graph_option_string(delta.after.as_ref().map(|key| key.as_str().to_string())),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn build_graph_cache_delta_value(delta: &BuildGraphCacheDelta) -> CtValue {
+//RS     graph_struct(
+//RS         crate::Syntax::TYPE_BUILD_GRAPH_CACHE_DELTA,
+//RS         vec![
+//RS             ("action", CtValue::Str(delta.action.clone())),
+//RS             ("before", graph_option_bool(delta.before)),
+//RS             ("after", graph_option_bool(delta.after)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn graph_payload(value: &CtValue) -> &CtValue {
+//RS     match value {
+//RS         CtValue::Present(value) => value.as_ref(),
+//RS         value => value,
+//RS     }
+//RS }
+//RS 
+//RS fn graph_struct_fields<'a>(
+//RS     value: &'a CtValue,
+//RS     type_name: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a [(String, CtValue)], Diagnostic> {
+//RS     match graph_payload(value) {
+//RS         CtValue::Struct {
+//RS             type_name: actual,
+//RS             fields,
+//RS         } if actual == type_name => Ok(fields),
+//RS         _ => Err(build_query_diag(
+//RS             format!("value must be a `{type_name}`"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn graph_field<'a>(
+//RS     fields: &'a [(String, CtValue)],
+//RS     name: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a CtValue, Diagnostic> {
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(field, value)| (field == name).then_some(value))
+//RS         .ok_or_else(|| build_query_diag(format!("`{name}` is missing"), span))
+//RS }
+//RS 
+//RS fn graph_list_value<'a>(
+//RS     value: &'a CtValue,
+//RS     name: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a [CtValue], Diagnostic> {
+//RS     match graph_payload(value) {
+//RS         CtValue::List(values) => Ok(values),
+//RS         _ => Err(build_query_diag(format!("`{name}` must be a list"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn graph_int(value: &CtValue, name: &str, span: Span) -> Result<i64, Diagnostic> {
+//RS     match graph_payload(value) {
+//RS         CtValue::Int(value) => Ok(*value),
+//RS         _ => Err(build_query_diag(format!("`{name}` must be an Int"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn graph_id(value: &CtValue, name: &str, span: Span) -> Result<usize, Diagnostic> {
+//RS     let value = graph_int(value, name, span)?;
+//RS     usize::try_from(value)
+//RS         .map_err(|_| build_query_diag(format!("`{name}` must be a non-negative id"), span))
+//RS }
+//RS 
+//RS fn graph_string(value: &CtValue, name: &str, span: Span) -> Result<String, Diagnostic> {
+//RS     match graph_payload(value) {
+//RS         CtValue::Str(value) => Ok(value.clone()),
+//RS         _ => Err(build_query_diag(format!("`{name}` must be a String"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn graph_bool(value: &CtValue, name: &str, span: Span) -> Result<bool, Diagnostic> {
+//RS     match graph_payload(value) {
+//RS         CtValue::Bool(value) => Ok(*value),
+//RS         _ => Err(build_query_diag(format!("`{name}` must be a Bool"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn graph_strings(
+//RS     value: &CtValue,
+//RS     name: &str,
+//RS     span: Span,
+//RS ) -> Result<Vec<String>, Diagnostic> {
+//RS     graph_list_value(value, name, span)?
+//RS         .iter()
+//RS         .map(|value| graph_string(value, name, span))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn graph_ids(value: &CtValue, name: &str, span: Span) -> Result<Vec<usize>, Diagnostic> {
+//RS     graph_list_value(value, name, span)?
+//RS         .iter()
+//RS         .map(|value| graph_id(value, name, span))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn graph_optional_int(
+//RS     value: &CtValue,
+//RS     name: &str,
+//RS     span: Span,
+//RS ) -> Result<Option<usize>, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Failed(crate::AST::CtReport::Clean(_)) => Ok(None),
+//RS         CtValue::Present(value) => Ok(Some(graph_id(value, name, span)?)),
+//RS         _ => Err(build_query_diag(format!("`{name}` must be an optional Int"), span)),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn graph_optional_bool(
+//RS     value: &CtValue,
+//RS     name: &str,
+//RS     span: Span,
+//RS ) -> Result<Option<bool>, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Failed(crate::AST::CtReport::Clean(_)) => Ok(None),
+//RS         CtValue::Present(value) => Ok(Some(graph_bool(value, name, span)?)),
+//RS         _ => Err(build_query_diag(format!("`{name}` must be an optional Bool"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn graph_target_kind(value: &str) -> TargetKind {
+//RS     match value {
+//RS         "Executable" | "executable" => TargetKind::Executable,
+//RS         "Test" | "test" => TargetKind::Test,
+//RS         _ => TargetKind::Library,
+//RS     }
+//RS }
+//RS 
+//RS fn graph_action_kind(value: &str) -> ActionKind {
+//RS     match value {
+//RS         "compile" | "Compile" => ActionKind::Compile,
+//RS         "docs" | "Docs" => ActionKind::Docs,
+//RS         "debug" | "Debug" => ActionKind::Debug,
+//RS         "source-archive" | "SourceArchive" => ActionKind::SourceArchive,
+//RS         _ => ActionKind::Generic,
+//RS     }
+//RS }
+//RS 
+//RS fn build_graph_from_value(value: &CtValue, span: Span) -> Result<BuildGraph, Diagnostic> {
+//RS     let fields = graph_struct_fields(value, crate::Syntax::TYPE_BUILD_GRAPH, span)?;
+//RS     let targets = graph_list_value(graph_field(fields, "targets", span)?, "targets", span)?
+//RS         .iter()
+//RS         .map(|value| {
+//RS             let fields =
+//RS                 graph_struct_fields(value, crate::Syntax::TYPE_BUILD_GRAPH_TARGET, span)?;
+//RS             let id = TargetId(graph_id(graph_field(fields, "id", span)?, "id", span)?);
+//RS             let name = graph_string(graph_field(fields, "name", span)?, "name", span)?;
+//RS             let kind = graph_target_kind(&graph_string(
+//RS                 graph_field(fields, "kind", span)?,
+//RS                 "kind",
+//RS                 span,
+//RS             )?);
+//RS             let deps = graph_ids(graph_field(fields, "deps", span)?, "deps", span)?
+//RS                 .into_iter()
+//RS                 .map(TargetId)
+//RS                 .collect();
+//RS             let actions = graph_ids(graph_field(fields, "actions", span)?, "actions", span)?
+//RS                 .into_iter()
+//RS                 .map(ActionId)
+//RS                 .collect();
+//RS             let files = graph_strings(graph_field(fields, "files", span)?, "files", span)?;
+//RS             let plugin = graph_optional_int(graph_field(fields, "plugin", span)?, "plugin", span)?
+//RS                 .map(PluginId);
+//RS             Ok(BuildGraphTarget {
+//RS                 id,
+//RS                 name,
+//RS                 kind,
+//RS                 deps,
+//RS                 actions,
+//RS                 files,
+//RS                 plugin,
+//RS             })
+//RS         })
+//RS         .collect::<Result<Vec<_>, Diagnostic>>()?;
+//RS     let actions = graph_list_value(graph_field(fields, "actions", span)?, "actions", span)?
+//RS         .iter()
+//RS         .map(|value| {
+//RS             let fields =
+//RS                 graph_struct_fields(value, crate::Syntax::TYPE_BUILD_GRAPH_ACTION, span)?;
+//RS             let id = ActionId(graph_id(graph_field(fields, "id", span)?, "id", span)?);
+//RS             let name = graph_string(graph_field(fields, "name", span)?, "name", span)?;
+//RS             let kind = graph_action_kind(&graph_string(
+//RS                 graph_field(fields, "kind", span)?,
+//RS                 "kind",
+//RS                 span,
+//RS             )?);
+//RS             let inputs = graph_strings(graph_field(fields, "inputs", span)?, "inputs", span)?;
+//RS             let outputs =
+//RS                 graph_strings(graph_field(fields, "outputs", span)?, "outputs", span)?;
+//RS             let target = graph_optional_int(graph_field(fields, "target", span)?, "target", span)?
+//RS                 .map(TargetId);
+//RS             let plugin = graph_optional_int(graph_field(fields, "plugin", span)?, "plugin", span)?
+//RS                 .map(PluginId);
+//RS             let compiler_owned =
+//RS                 graph_bool(graph_field(fields, "compiler_owned", span)?, "compiler_owned", span)?;
+//RS             let key = ActionKey::new(graph_string(
+//RS                 graph_field(fields, "key", span)?,
+//RS                 "key",
+//RS                 span,
+//RS             )?);
+//RS             let cache_hit =
+//RS                 graph_optional_bool(graph_field(fields, "cache_hit", span)?, "cache_hit", span)?;
+//RS             Ok(BuildGraphAction {
+//RS                 id,
+//RS                 name,
+//RS                 kind,
+//RS                 inputs,
+//RS                 outputs,
+//RS                 target,
+//RS                 caps: Vec::new(),
+//RS                 pools: Vec::new(),
+//RS                 legacy_wrapper: None,
+//RS                 plugin,
+//RS                 compiler_owned,
+//RS                 key,
+//RS                 cache_hit,
+//RS             })
+//RS         })
+//RS         .collect::<Result<Vec<_>, Diagnostic>>()?;
+//RS     let files = graph_list_value(graph_field(fields, "files", span)?, "files", span)?
+//RS         .iter()
+//RS         .map(|value| {
+//RS             let fields =
+//RS                 graph_struct_fields(value, crate::Syntax::TYPE_BUILD_GRAPH_FILE, span)?;
+//RS             let path = graph_string(graph_field(fields, "path", span)?, "path", span)?;
+//RS             let owner = graph_optional_int(graph_field(fields, "owner", span)?, "owner", span)?
+//RS                 .map(ActionId);
+//RS             let consumers =
+//RS                 graph_ids(graph_field(fields, "consumers", span)?, "consumers", span)?
+//RS                     .into_iter()
+//RS                     .map(ActionId)
+//RS                     .collect();
+//RS             let targets =
+//RS                 graph_ids(graph_field(fields, "targets", span)?, "targets", span)?
+//RS                     .into_iter()
+//RS                     .map(TargetId)
+//RS                     .collect();
+//RS             Ok(BuildGraphFile {
+//RS                 path,
+//RS                 owner,
+//RS                 consumers,
+//RS                 targets,
+//RS             })
+//RS         })
+//RS         .collect::<Result<Vec<_>, Diagnostic>>()?;
+//RS     Ok(BuildGraph {
+//RS         targets,
+//RS         actions,
+//RS         files,
+//RS         nodes: Vec::new(),
+//RS     })
+//RS }
+//RS 
+//RS #[doc(hidden)]
+//RS pub fn eval_program_build_method(
+//RS     receiver: &CtValue,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     generated_source: Option<&str>,
+//RS     span: Span,
+//RS     in_impure_gate: bool,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     let id = build_session_id(receiver)?;
+//RS     Some(PROGRAM_BUILD_SESSIONS.with(|sessions| {
+//RS         let mut sessions = sessions.borrow_mut();
+//RS         let session = sessions
+//RS             .get_mut(&id)
+//RS             .ok_or_else(|| build_diag("build context expired", span))?;
+//RS         session.last_span = span;
+//RS         eval_session_method(
+//RS             id,
+//RS             session,
+//RS             method,
+//RS             args,
+//RS             generated_source,
+//RS             span,
+//RS             in_impure_gate,
+//RS         )
+//RS     }))
+//RS }
+//RS 
+//RS #[doc(hidden)]
+//RS pub fn eval_program_build_input_method(
+//RS     receiver: &CtValue,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     first_string_literal: Option<&str>,
+//RS     base_dir: &Path,
+//RS     embed_inputs: Option<&mut Vec<ComptimeInput>>,
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     build_session_id(receiver)?;
+//RS     match method {
+//RS         "find" => Some((|| {
+//RS             if args.len() != 1 {
+//RS                 return Err(build_diag("`b.find` requires exactly one glob", span));
+//RS             }
+//RS             let builtin = crate::Syntax::BUILTIN_FIND;
+//RS             let glob = first_string_literal.ok_or_else(|| {
+//RS                 crate::Comptime::Methods::embed_path_err(builtin, "literal", span)
+//RS             })?;
+//RS             let glob = crate::Comptime::Methods::check_literal_embed_path(builtin, glob, span)?;
+//RS             crate::Comptime::Methods::eval_locked_find(base_dir, &glob, embed_inputs, span)
+//RS         })()),
+//RS         "embed" => Some(crate::Comptime::Methods::eval_build_embed(
+//RS             args,
+//RS             base_dir,
+//RS             embed_inputs,
+//RS             span,
+//RS         )),
+//RS         "fetch" => Some(
+//RS             crate::Comptime::Methods::eval_net_fetch(args, base_dir, embed_inputs, span)
+//RS                 .map(|value| CtValue::Present(Box::new(value))),
+//RS         ),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn eval_session_method(
+//RS     id: u64,
+//RS     session: &mut ProgramBuildSession,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     generated_source: Option<&str>,
+//RS     span: Span,
+//RS     in_impure_gate: bool,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let action_caps_index = match method {
+//RS         "action" => Some(4),
+//RS         "legacy" => Some(5),
+//RS         _ => None,
+//RS     };
+//RS     let action_has_effects = action_caps_index
+//RS         .and_then(|index| args.get(index))
+//RS         .is_some_and(|value| matches!(value, CtValue::List(values) if !values.is_empty()));
+//RS     let plugin_requested = method == "plugin";
+//RS     let ambient_probe = method == "probe"
+//RS         && !args.iter().rev().take(2).any(|value| {
+//RS             matches!(value, CtValue::Str(name) if name.eq_ignore_ascii_case("reproducible"))
+//RS         });
+//RS     if (ambient_probe || action_has_effects || plugin_requested) && !in_impure_gate {
+//RS         return Err(Diagnostic::error(
+//RS             "E3502",
+//RS             format!(
+//RS                 "`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`"
+//RS             ),
+//RS             "build effects must be declared exactly where an auditor can see them".to_string(),
+//RS             format!("wrap the `b.{method}` call in `#Impure(\"why it is needed\")`"),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS     let result = match method {
+//RS         "plugin" => {
+//RS             let manifest = string_arg(&args, 0, span)?;
+//RS             let component = string_arg(&args, 1, span)?;
+//RS             let policy = session.context.policy().clone();
+//RS             session
+//RS                 .context
+//RS                 .apply_packaged_wasm_component_plugin_from_host(
+//RS                     Path::new(&manifest),
+//RS                     Path::new(&component),
+//RS                     &policy,
+//RS                 )
+//RS                 .map(|_| CtValue::Unit)
+//RS         }
+//RS         "generate" => {
+//RS             if args.len() != 1 {
+//RS                 return Err(build_diag(
+//RS                     "`b.generate` requires a name and typed item block",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             let name = string_arg(&args, 0, span)?;
+//RS             let source = generated_source.ok_or_else(|| {
+//RS                 build_diag(
+//RS                     "`b.generate` requires a typed item block; source strings are retired",
+//RS                     span,
+//RS                 )
+//RS             })?;
+//RS             let path = format!(
+//RS                 ".jet/generated/{}/{}.jet",
+//RS                 session.package,
+//RS                 safe_name(&name)
+//RS             );
+//RS             session
+//RS                 .context
+//RS                 .generate(name, path, source.to_string())
+//RS                 .map(|_| CtValue::Unit)
+//RS         }
+//RS         "action" => {
+//RS             let name = string_arg(&args, 0, span)?;
+//RS             let inputs = string_list_arg(&args, 1, span)?;
+//RS             let outputs = string_list_arg(&args, 2, span)?;
+//RS             let argv = string_list_arg(&args, 3, span)?;
+//RS             let caps = string_list_arg(&args, 4, span)?;
+//RS             let mut spec = ActionSpec::cached(argv)
+//RS                 .with_inputs(inputs)
+//RS                 .with_outputs(outputs);
+//RS             for cap in caps {
+//RS                 spec = spec.with_cap(parse_capability(&cap, span)?);
+//RS             }
+//RS             if args.len() >= 7 {
+//RS                 let toolchain =
+//RS                     handle_arg(&args, 5, crate::Syntax::TYPE_BUILD_TOOLCHAIN, id, span)?;
+//RS                 spec = spec.with_toolchain(ToolchainHandle {
+//RS                     id: ToolchainId(toolchain),
+//RS                     context: id,
+//RS                 });
+//RS                 for probe in handle_list_arg(&args, 6, crate::Syntax::TYPE_BUILD_PROBE, id, span)? {
+//RS                     spec = spec.with_probe(ProbeHandle {
+//RS                         id: ProbeId(probe),
+//RS                         context: id,
+//RS                     });
+//RS                 }
+//RS             }
+//RS             if args.len() >= 8 {
+//RS                 let signing = handle_arg(&args, 7, "BuildSigningIdentity", id, span)?;
+//RS                 spec = spec.with_signing_identity(super::handles::SigningIdentityHandle {
+//RS                     id: super::handles::SigningIdentityId(signing),
+//RS                     context: id,
+//RS                 });
+//RS             }
+//RS             if args.len() >= 9 {
+//RS                 let kind = string_arg(&args, 8, span)?;
+//RS                 let kind = match kind.to_ascii_lowercase().as_str() {
+//RS                     "compile" => ActionKind::Compile,
+//RS                     "docs" => ActionKind::Docs,
+//RS                     "debug" => ActionKind::Debug,
+//RS                     "source_archive" | "source-archive" => ActionKind::SourceArchive,
+//RS                     "generic" => ActionKind::Generic,
+//RS                     _ => return Err(build_diag(&format!("unknown action kind `{kind}`"), span)),
+//RS                 };
+//RS                 spec = spec.with_kind(kind);
+//RS             }
+//RS             if args.len() >= 10 {
+//RS                 for pool in string_list_arg(&args, 9, span)? {
+//RS                     let pool = match pool.to_ascii_lowercase().as_str() {
+//RS                         "cpu" => BuildResourcePool::CPU,
+//RS                         "memory" => BuildResourcePool::Memory,
+//RS                         "linker" => BuildResourcePool::Linker,
+//RS                         "console" => BuildResourcePool::Console,
+//RS                         "gpu" => BuildResourcePool::GPU,
+//RS                         _ => BuildResourcePool::Custom(pool),
+//RS                     };
+//RS                     spec = spec.with_pool(pool);
+//RS                 }
+//RS             }
+//RS             if args.len() >= 11 {
+//RS                 for entry in string_list_arg(&args, 10, span)? {
+//RS                     let (key, value) = entry.split_once('=').ok_or_else(|| {
+//RS                         build_diag("action environment entries must use KEY=VALUE", span)
+//RS                     })?;
+//RS                     spec = spec.with_env(key, value);
+//RS                 }
+//RS             }
+//RS             if args.len() >= 12 {
+//RS                 spec = spec.with_env_allowlist(string_list_arg(&args, 11, span)?);
+//RS             }
+//RS             if args.len() >= 13 {
+//RS                 for entry in string_list_arg(&args, 12, span)? {
+//RS                     let (helper, version) = entry.split_once('=').ok_or_else(|| {
+//RS                         build_diag("action helper entries must use NAME=VERSION", span)
+//RS                     })?;
+//RS                     spec = spec.with_helper_version(helper, version);
+//RS                 }
+//RS             }
+//RS             if args.len() >= 14 {
+//RS                 for entry in string_list_arg(&args, 13, span)? {
+//RS                     let (label, value) = entry.split_once('=').ok_or_else(|| {
+//RS                         build_diag("action label entries must use NAME=VALUE", span)
+//RS                     })?;
+//RS                     spec = spec.with_label(label, value);
+//RS                 }
+//RS             }
+//RS             if args.len() >= 15 {
+//RS                 let cache = string_arg(&args, 14, span)?;
+//RS                 spec.cache = match cache.to_ascii_lowercase().as_str() {
+//RS                     "cached" => ActionCache::Cached,
+//RS                     "phony" | "uncached" => ActionCache::UncachedPhony,
+//RS                     _ => return Err(build_diag("action cache must be cached or phony", span)),
+//RS                 };
+//RS             }
+//RS             session
+//RS                 .context
+//RS                 .action(name, spec)
+//RS                 .map(|handle| handle_value(crate::Syntax::TYPE_BUILD_ACTION, id, handle.id.0))
+//RS         }
+//RS         "legacy" => {
+//RS             let kind = string_arg(&args, 0, span)?;
+//RS             let name = string_arg(&args, 1, span)?;
+//RS             let inputs = string_list_arg(&args, 2, span)?;
+//RS             let outputs = string_list_arg(&args, 3, span)?;
+//RS             let argv = string_list_arg(&args, 4, span)?;
+//RS             let caps = string_list_arg(&args, 5, span)?;
+//RS             let mut wrapper = match kind.to_ascii_lowercase().as_str() {
+//RS                 "cmake" => LegacyWrapperSpec::cmake(argv),
+//RS                 "make" => LegacyWrapperSpec::make(argv),
+//RS                 "gradle" => LegacyWrapperSpec::gradle(argv),
+//RS                 "npm" => LegacyWrapperSpec::npm(argv),
+//RS                 "cargo" => LegacyWrapperSpec::cargo(argv),
+//RS                 _ => {
+//RS                     return Err(build_diag(
+//RS                         &format!("unknown legacy wrapper `{kind}`"),
+//RS                         span,
+//RS                     ))
+//RS                 }
+//RS             }
+//RS             .with_inputs(inputs)
+//RS             .with_outputs(outputs);
+//RS             for cap in caps {
+//RS                 wrapper = wrapper.with_cap(parse_capability(&cap, span)?);
+//RS             }
+//RS             if args.len() >= 7 {
+//RS                 let toolchain =
+//RS                     handle_arg(&args, 6, crate::Syntax::TYPE_BUILD_TOOLCHAIN, id, span)?;
+//RS                 wrapper = wrapper.with_toolchain(ToolchainHandle {
+//RS                     id: ToolchainId(toolchain),
+//RS                     context: id,
+//RS                 });
+//RS             }
+//RS             if args.len() >= 8 {
+//RS                 for probe in handle_list_arg(&args, 7, crate::Syntax::TYPE_BUILD_PROBE, id, span)? {
+//RS                     wrapper = wrapper.with_probe(ProbeHandle {
+//RS                         id: ProbeId(probe),
+//RS                         context: id,
+//RS                     });
+//RS                 }
+//RS             }
+//RS             if args.len() >= 9 {
+//RS                 let signing = handle_arg(&args, 8, "BuildSigningIdentity", id, span)?;
+//RS                 wrapper = wrapper.with_signing_identity(SigningIdentityHandle {
+//RS                     id: SigningIdentityId(signing),
+//RS                     context: id,
+//RS                 });
+//RS             }
+//RS             if args.len() >= 10 {
+//RS                 let kind = string_arg(&args, 9, span)?;
+//RS                 wrapper = wrapper.with_kind(match kind.to_ascii_lowercase().as_str() {
+//RS                     "compile" => ActionKind::Compile,
+//RS                     "docs" => ActionKind::Docs,
+//RS                     "debug" => ActionKind::Debug,
+//RS                     "source_archive" | "source-archive" => ActionKind::SourceArchive,
+//RS                     "generic" => ActionKind::Generic,
+//RS                     _ => return Err(build_diag(&format!("unknown action kind `{kind}`"), span)),
+//RS                 });
+//RS             }
+//RS             if args.len() >= 11 {
+//RS                 for pool in string_list_arg(&args, 10, span)? {
+//RS                     let pool = match pool.to_ascii_lowercase().as_str() {
+//RS                         "cpu" => BuildResourcePool::CPU,
+//RS                         "memory" => BuildResourcePool::Memory,
+//RS                         "linker" => BuildResourcePool::Linker,
+//RS                         "console" => BuildResourcePool::Console,
+//RS                         "gpu" => BuildResourcePool::GPU,
+//RS                         _ => BuildResourcePool::Custom(pool),
+//RS                     };
+//RS                     wrapper = wrapper.with_pool(pool);
+//RS                 }
+//RS             }
+//RS             if args.len() >= 12 {
+//RS                 for entry in string_list_arg(&args, 11, span)? {
+//RS                     let (key, value) = entry.split_once('=').ok_or_else(|| {
+//RS                         build_diag(
+//RS                             "legacy wrapper environment entries must use KEY=VALUE",
+//RS                             span,
+//RS                         )
+//RS                     })?;
+//RS                     wrapper = wrapper.with_env(key, value);
+//RS                 }
+//RS             }
+//RS             if args.len() >= 13 {
+//RS                 wrapper = wrapper.with_env_allowlist(string_list_arg(&args, 12, span)?);
+//RS             }
+//RS             if args.len() >= 14 {
+//RS                 for entry in string_list_arg(&args, 13, span)? {
+//RS                     let (helper, version) = entry.split_once('=').ok_or_else(|| {
+//RS                         build_diag("legacy wrapper helper entries must use NAME=VERSION", span)
+//RS                     })?;
+//RS                     wrapper = wrapper.with_helper_version(helper, version);
+//RS                 }
+//RS             }
+//RS             if args.len() >= 15 {
+//RS                 for entry in string_list_arg(&args, 14, span)? {
+//RS                     let (label, value) = entry.split_once('=').ok_or_else(|| {
+//RS                         build_diag("legacy wrapper label entries must use NAME=VALUE", span)
+//RS                     })?;
+//RS                     if matches!(label, "legacy.import" | "legacy.project-file") {
+//RS                         return Err(build_diag(
+//RS                             "legacy import labels are reserved; pass the canonical project file as the final argument",
+//RS                             span,
+//RS                         ));
+//RS                     }
+//RS                     wrapper = wrapper.with_label(label, value);
+//RS                 }
+//RS             }
+//RS             if args.len() >= 16 {
+//RS                 let cache = string_arg(&args, 15, span)?;
+//RS                 wrapper = wrapper.with_cache(match cache.to_ascii_lowercase().as_str() {
+//RS                     "cached" => ActionCache::Cached,
+//RS                     "phony" | "uncached" => ActionCache::UncachedPhony,
+//RS                     _ => {
+//RS                         return Err(build_diag(
+//RS                             "legacy wrapper cache must be cached or phony",
+//RS                             span,
+//RS                         ))
+//RS                     }
+//RS                 });
+//RS             }
+//RS             // A denied wrapper cannot contribute a graph. Preserve the
+//RS             // policy diagnostic before reading a canonical file that will
+//RS             // never be admitted, while allowed builds still take the exact
+//RS             // importer contract path below.
+//RS             if matches!(
+//RS                 &session.context.policy().legacy_wrappers,
+//RS                 super::actions_policy::PolicySetting::Deny(_)
+//RS             ) {
+//RS                 let error = BuildError::PolicyDenied(wrapper.explain(session.context.policy()));
+//RS                 return Ok(CtValue::failed(Box::new(build_error_value(&error, span))));
+//RS             }
+//RS             if args.len() >= 17 {
+//RS                 let project_file = string_arg(&args, 16, span)?;
+//RS                 if project_file != wrapper.kind.project_file() {
+//RS                     return Err(build_diag(
+//RS                         &format!(
+//RS                             "legacy {} import must use `{}`",
+//RS                             wrapper.kind.as_str(),
+//RS                             wrapper.kind.project_file()
+//RS                         ),
+//RS                         span,
+//RS                     ));
+//RS                 }
+//RS                 let imported =
+//RS                     match LegacyWrapperSpec::from_project_file(&session.project_root, wrapper.kind)
+//RS                     {
+//RS                         Ok(imported) => imported,
+//RS                         Err(error) => {
+//RS                             return Ok(CtValue::failed(Box::new(build_error_value(&error, span))))
+//RS                         }
+//RS                     };
+//RS                 validate_legacy_import_contract(&wrapper, &imported, span)?;
+//RS                 for (label, value) in imported.labels {
+//RS                     if !matches!(label.as_str(), "legacy.import" | "legacy.project-file") {
+//RS                         wrapper = wrapper.with_label(label, value);
+//RS                     }
+//RS                 }
+//RS                 wrapper = wrapper.with_project_file(project_file);
+//RS             }
+//RS             let spec = match wrapper.into_action_spec(session.context.policy()) {
+//RS                 Ok(spec) => spec,
+//RS                 Err(error) => {
+//RS                     return Ok(CtValue::failed(Box::new(build_error_value(&error, span))))
+//RS                 }
+//RS             };
+//RS             session
+//RS                 .context
+//RS                 .action(name, spec)
+//RS                 .map(|handle| handle_value(crate::Syntax::TYPE_BUILD_ACTION, id, handle.id.0))
+//RS         }
+//RS         "add_executable" | "add_library" | "add_test" | "add_asset_bundle" | "add_doc"
+//RS         | "add_install" | "add_package" | "add_publish" => {
+//RS             let name = string_arg(&args, 0, span)?;
+//RS             let sources = string_list_arg(&args, 1, span)?;
+//RS             let actions = handle_list_arg(&args, 2, crate::Syntax::TYPE_BUILD_ACTION, id, span)?;
+//RS             let mut spec = TargetSpec::new();
+//RS             for source in sources {
+//RS                 spec = spec.with_source(source);
+//RS             }
+//RS             for action in actions {
+//RS                 spec = spec.with_action(ActionHandle {
+//RS                     id: ActionId(action),
+//RS                     context: id,
+//RS                 });
+//RS             }
+//RS             if args.len() >= 4 {
+//RS                 for target in handle_list_arg(&args, 3, crate::Syntax::TYPE_BUILD_TARGET, id, span)?
+//RS                 {
+//RS                     spec = spec.with_dep(TargetRef {
+//RS                         id: TargetId(target),
+//RS                         context: id,
+//RS                     });
+//RS                 }
+//RS             }
+//RS             if args.len() >= 5 {
+//RS                 for probe in handle_list_arg(&args, 4, crate::Syntax::TYPE_BUILD_PROBE, id, span)? {
+//RS                     spec = spec.with_probe(ProbeHandle {
+//RS                         id: ProbeId(probe),
+//RS                         context: id,
+//RS                     });
+//RS                 }
+//RS             }
+//RS             if args.len() >= 6 {
+//RS                 let toolchain =
+//RS                     handle_arg(&args, 5, crate::Syntax::TYPE_BUILD_TOOLCHAIN, id, span)?;
+//RS                 spec = spec.with_toolchain(ToolchainHandle {
+//RS                     id: ToolchainId(toolchain),
+//RS                     context: id,
+//RS                 });
+//RS             }
+//RS             if args.len() >= 7 {
+//RS                 let signing = handle_arg(&args, 6, "BuildSigningIdentity", id, span)?;
+//RS                 spec = spec.with_signing_identity(super::handles::SigningIdentityHandle {
+//RS                     id: super::handles::SigningIdentityId(signing),
+//RS                     context: id,
+//RS                 });
+//RS             }
+//RS             let target = match method {
+//RS                 "add_executable" => session.context.add_executable(name, spec).map(|h| h.id.0),
+//RS                 "add_library" => session.context.add_library(name, spec).map(|h| h.id.0),
+//RS                 "add_test" => session.context.add_test(name, spec).map(|h| h.id.0),
+//RS                 "add_asset_bundle" => session.context.add_asset_bundle(name, spec).map(|h| h.id.0),
+//RS                 "add_doc" => session.context.add_doc(name, spec).map(|h| h.id.0),
+//RS                 "add_install" => session.context.add_install(name, spec).map(|h| h.id.0),
+//RS                 "add_package" => session.context.add_package(name, spec).map(|h| h.id.0),
+//RS                 "add_publish" => session.context.add_publish(name, spec).map(|h| h.id.0),
+//RS                 _ => unreachable!(),
+//RS             };
+//RS             target.map(|target| handle_value(crate::Syntax::TYPE_BUILD_TARGET, id, target))
+//RS         }
+//RS         "toolchain" => {
+//RS             let name = string_arg(&args, 0, span)?;
+//RS             let triple = string_arg(&args, 1, span)?;
+//RS             let provenance = BuildProvenance::user_declared("fn build", None);
+//RS             let mut toolchain = ToolchainSpec::target(triple, provenance.clone());
+//RS             if args.len() >= 3 {
+//RS                 toolchain = toolchain.with_host_triple(string_arg(&args, 2, span)?);
+//RS             }
+//RS             if args.len() >= 4 {
+//RS                 let sdk = string_arg(&args, 3, span)?;
+//RS                 toolchain =
+//RS                     toolchain.with_sdk(SdkIdentity::new(sdk, "declared", provenance.clone()));
+//RS             }
+//RS             if args.len() >= 5 {
+//RS                 let linker = string_arg(&args, 4, span)?;
+//RS                 toolchain = toolchain.with_linker(LinkerIdentity::new(linker, provenance.clone()));
+//RS             }
+//RS             if args.len() >= 6 {
+//RS                 let sysroot = string_arg(&args, 5, span)?;
+//RS                 toolchain = toolchain.with_sysroot(SysrootIdentity::new(
+//RS                     sysroot,
+//RS                     "declared",
+//RS                     provenance.clone(),
+//RS                 ));
+//RS             }
+//RS             session
+//RS                 .context
+//RS                 .toolchain(name, toolchain)
+//RS                 .map(|h| handle_value(crate::Syntax::TYPE_BUILD_TOOLCHAIN, id, h.id.0))
+//RS         }
+//RS         "signing" => {
+//RS             let name = string_arg(&args, 0, span)?;
+//RS             let label = string_arg(&args, 1, span)?;
+//RS             session
+//RS                 .context
+//RS                 .signing_identity(
+//RS                     name,
+//RS                     SigningIdentitySpec::new(
+//RS                         label,
+//RS                         BuildProvenance::user_declared("fn build", None),
+//RS                     ),
+//RS                 )
+//RS                 .map(|handle| handle_value("BuildSigningIdentity", id, handle.id.0))
+//RS         }
+//RS         "probe" => {
+//RS             let name = string_arg(&args, 0, span)?;
+//RS             let kind = string_arg(&args, 1, span)?;
+//RS             let value = string_arg(&args, 2, span)?;
+//RS             let mut spec = match kind.as_str() {
+//RS                 "find_program" => ProbeSpec::find_program(value),
+//RS                 "pkg_config" => ProbeSpec::pkg_config(value),
+//RS                 "header" => ProbeSpec::header_check(value),
+//RS                 "compile_check" if (4..=6).contains(&args.len()) => ProbeSpec::compile_check(
+//RS                     value,
+//RS                     std::iter::empty::<String>(),
+//RS                     string_arg(&args, 3, span)?,
+//RS                 ),
+//RS                 _ => {
+//RS                     return Err(build_diag(
+//RS                         &format!("unknown typed probe kind `{kind}`"),
+//RS                         span,
+//RS                     ))
+//RS                 }
+//RS             };
+//RS             let (reproducibility, toolchain_index) = if kind == "compile_check" {
+//RS                 match args.get(4) {
+//RS                     Some(CtValue::Struct { .. }) => (None, Some(4)),
+//RS                     Some(_) => (args.get(4), (args.len() >= 6).then_some(5)),
+//RS                     None => (None, None),
+//RS                 }
+//RS             } else {
+//RS                 if args.len() > 5 {
+//RS                     return Err(build_diag(
+//RS                         "non-compile probes accept at most one reproducibility value and one toolchain",
+//RS                         span,
+//RS                     ));
+//RS                 }
+//RS                 match args.get(3) {
+//RS                     Some(CtValue::Struct { .. }) => (None, Some(3)),
+//RS                     Some(_) => (args.get(3), (args.len() >= 5).then_some(4)),
+//RS                     None => (None, None),
+//RS                 }
+//RS             };
+//RS             if let Some(value) = reproducibility {
+//RS                 let value = match value {
+//RS                     CtValue::Str(value) => value,
+//RS                     _ => {
+//RS                         return Err(build_diag(
+//RS                             "probe reproducibility must be `ambient` or `reproducible`",
+//RS                             span,
+//RS                         ))
+//RS                     }
+//RS                 };
+//RS                 spec = spec.with_reproducibility(match value.to_ascii_lowercase().as_str() {
+//RS                     "ambient" => ReproducibilityClass::Ambient,
+//RS                     "reproducible" => ReproducibilityClass::Reproducible,
+//RS                     _ => {
+//RS                         return Err(build_diag(
+//RS                             "probe reproducibility must be `ambient` or `reproducible`",
+//RS                             span,
+//RS                         ))
+//RS                     }
+//RS                 });
+//RS             }
+//RS             if let Some(index) = toolchain_index {
+//RS                 let toolchain =
+//RS                     handle_arg(&args, index, crate::Syntax::TYPE_BUILD_TOOLCHAIN, id, span)?;
+//RS                 spec = spec.with_toolchain(ToolchainHandle {
+//RS                     id: ToolchainId(toolchain),
+//RS                     context: id,
+//RS                 });
+//RS             }
+//RS             session
+//RS                 .context
+//RS                 .probe(name, spec)
+//RS                 .map(|h| handle_value(crate::Syntax::TYPE_BUILD_PROBE, id, h.id.0))
+//RS         }
+//RS         "error" => {
+//RS             let diagnostic_span = source_span_arg(&args, 0, span)?;
+//RS             let code = string_arg(&args, 1, span)?;
+//RS             let what = string_arg(&args, 2, span)?;
+//RS             let why = string_arg(&args, 3, span)?;
+//RS             let fix = string_arg(&args, 4, span)?;
+//RS             let reserved = code.len() > 1
+//RS                 && matches!(code.as_bytes()[0], b'E' | b'W')
+//RS                 && code.as_bytes()[1..].iter().all(u8::is_ascii_digit);
+//RS             if reserved {
+//RS                 session.diagnostics.push(Diagnostic::error(
+//RS                     "E3530",
+//RS                     format!("build rule code `{code}` is reserved"),
+//RS                     "codes beginning with E or W followed only by digits belong to the compiler"
+//RS                         .to_string(),
+//RS                     "use a project prefix such as `ORG01`".to_string(),
+//RS                     Some(diagnostic_span),
+//RS                 ));
+//RS             } else {
+//RS                 match build_project_error(code, what, why, fix, Some(diagnostic_span)) {
+//RS                     Ok(diagnostic) => session.diagnostics.push(diagnostic),
+//RS                     Err(detail) => session
+//RS                         .diagnostics
+//RS                         .push(build_diag(detail, diagnostic_span)),
+//RS                 }
+//RS             }
+//RS             return Ok(CtValue::Unit);
+//RS         }
+//RS         "plan" => {
+//RS             let default = if args.is_empty() {
+//RS                 usize::MAX
+//RS             } else {
+//RS                 handle_arg(&args, 0, crate::Syntax::TYPE_BUILD_TARGET, id, span)?
+//RS             };
+//RS             return Ok(CtValue::Present(Box::new(handle_value(
+//RS                 crate::Syntax::TYPE_BUILD_PLAN,
+//RS                 id,
+//RS                 default,
+//RS             ))));
+//RS         }
+//RS         "contribute" => {
+//RS             if args.len() != 2 {
+//RS                 return Err(build_diag(
+//RS                     "`b.contribute` requires a fact name and one value",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             let name = string_arg(&args, 0, span)?;
+//RS             if name.trim().is_empty() || name.contains('.') {
+//RS                 return Err(build_diag(
+//RS                     "`b.contribute` needs one declared setting name, such as `cache_slots`",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             let value = fact_value_arg(&args[1], span)?;
+//RS             let contribution = jet_foundation::Policy::FactContribution::new(
+//RS                 format!("Build.Settings.{name}"),
+//RS                 value,
+//RS                 jet_foundation::Policy::SourceScope::Function,
+//RS                 jet_foundation::Policy::ContributionLayer::Environment,
+//RS                 format!("{}::build", session.package),
+//RS             )
+//RS             .at(span)
+//RS             .with_reason("computed by fn build");
+//RS             session.context.contribute(contribution);
+//RS             return Ok(CtValue::Unit);
+//RS         }
+//RS         _ => {
+//RS             return None
+//RS                 .ok_or_else(|| build_diag(&format!("unknown build method `{method}`"), span))
+//RS         }
+//RS     };
+//RS     Ok(match result {
+//RS         Ok(value) => CtValue::Present(Box::new(value)),
+//RS         Err(error) => CtValue::failed(Box::new(build_error_value(&error, span))),
+//RS     })
+//RS }
+//RS 
+//RS fn fact_value_arg(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<jet_foundation::Policy::FactValue, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Bool(value) => Ok(jet_foundation::Policy::FactValue::Bool(*value)),
+//RS         CtValue::Int(value) => Ok(jet_foundation::Policy::FactValue::Int(*value)),
+//RS         CtValue::Char(value) => Ok(jet_foundation::Policy::FactValue::Char(*value)),
+//RS         CtValue::Str(value) => Ok(jet_foundation::Policy::FactValue::Text(value.clone())),
+//RS         CtValue::Enum { variant, args, .. } if args.is_empty() => {
+//RS             Ok(jet_foundation::Policy::FactValue::Enum(variant.clone()))
+//RS         }
+//RS         _ => Err(build_diag(
+//RS             "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value",
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS /// A source-level `b.legacy` call declares the graph handles, while the
+//RS /// canonical project file remains the authority for the wrapper command and
+//RS /// discovered paths. Require the caller to repeat every imported fact in the
+//RS /// typed call. This makes the production graph inspectable and prevents a
+//RS /// stale source-side facade from silently discarding project-file semantics.
+//RS fn validate_legacy_import_contract(
+//RS     declared: &LegacyWrapperSpec,
+//RS     imported: &LegacyWrapperSpec,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     if declared.argv != imported.argv {
+//RS         return Err(build_diag(
+//RS             "legacy wrapper argv does not match its canonical project-file import",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let declared_inputs = declared
+//RS         .inputs
+//RS         .iter()
+//RS         .cloned()
+//RS         .collect::<std::collections::BTreeSet<_>>();
+//RS     let imported_inputs = imported
+//RS         .inputs
+//RS         .iter()
+//RS         .cloned()
+//RS         .collect::<std::collections::BTreeSet<_>>();
+//RS     if declared_inputs != imported_inputs {
+//RS         return Err(build_diag(
+//RS             "legacy wrapper inputs must exactly match its canonical project-file import",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let declared_outputs = declared
+//RS         .outputs
+//RS         .iter()
+//RS         .cloned()
+//RS         .collect::<std::collections::BTreeSet<_>>();
+//RS     let imported_outputs = imported
+//RS         .outputs
+//RS         .iter()
+//RS         .cloned()
+//RS         .collect::<std::collections::BTreeSet<_>>();
+//RS     if declared_outputs != imported_outputs {
+//RS         return Err(build_diag(
+//RS             "legacy wrapper outputs must exactly match its canonical project-file import",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if declared.caps != imported.caps {
+//RS         return Err(build_diag(
+//RS             "legacy wrapper abilities must exactly match its canonical project-file import",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if declared.env != imported.env {
+//RS         return Err(build_diag(
+//RS             "legacy wrapper environment does not match its canonical project-file import",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if declared.env_allowlist != imported.env_allowlist {
+//RS         return Err(build_diag(
+//RS             "legacy wrapper environment allowlist must exactly match its canonical project-file import",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if declared.resource_pools != imported.resource_pools {
+//RS         return Err(build_diag(
+//RS             "legacy wrapper resource pools must exactly match its canonical project-file import",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if imported.cache != ActionCache::Cached && declared.cache != imported.cache {
+//RS         return Err(build_diag(
+//RS             "legacy wrapper cache policy does not match its canonical project-file import",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if imported.action_kind != ActionKind::Generic && declared.action_kind != imported.action_kind {
+//RS         return Err(build_diag(
+//RS             "legacy wrapper action kind does not match its canonical project-file import",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn build_session_id(value: &CtValue) -> Option<u64> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return None;
+//RS     };
+//RS     if type_name != crate::Syntax::TYPE_BUILD_CONTEXT {
+//RS         return None;
+//RS     }
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS             ("__session", CtValue::Int(id)) if *id >= 0 => Some(*id as u64),
+//RS             _ => None,
+//RS         })
+//RS }
+//RS 
+//RS fn returned_handle(value: &CtValue, type_name: &str) -> Option<(u64, i64)> {
+//RS     let value = match value {
+//RS         CtValue::Present(value) => value.as_ref(),
+//RS         other => other,
+//RS     };
+//RS     let CtValue::Struct {
+//RS         type_name: actual,
+//RS         fields,
+//RS     } = value
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     if actual != type_name {
+//RS         return None;
+//RS     }
+//RS     let session = fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
+//RS         ("session", CtValue::Int(id)) => Some(*id as u64),
+//RS         _ => None,
+//RS     })?;
+//RS     let id = fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
+//RS         ("id", CtValue::Int(id)) => Some(*id),
+//RS         _ => None,
+//RS     })?;
+//RS     Some((session, id))
+//RS }
+//RS 
+//RS fn handle_value(type_name: &str, session: u64, id: usize) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: vec![
+//RS             ("session".to_string(), CtValue::Int(session as i64)),
+//RS             ("id".to_string(), CtValue::Int(id as i64)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn handle_arg(
+//RS     args: &[CtValue],
+//RS     index: usize,
+//RS     ty: &str,
+//RS     session: u64,
+//RS     span: Span,
+//RS ) -> Result<usize, Diagnostic> {
+//RS     match args.get(index).and_then(|v| returned_handle(v, ty)) {
+//RS         Some((actual, id)) if actual == session && id >= 0 => Ok(id as usize),
+//RS         _ => Err(build_diag(
+//RS             &format!("argument {} must be a `{ty}` from this build", index + 1),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn handle_list_arg(
+//RS     args: &[CtValue],
+//RS     index: usize,
+//RS     ty: &str,
+//RS     session: u64,
+//RS     span: Span,
+//RS ) -> Result<Vec<usize>, Diagnostic> {
+//RS     let Some(CtValue::List(values)) = args.get(index) else {
+//RS         return Err(build_diag(
+//RS             &format!("argument {} must be a list", index + 1),
+//RS             span,
+//RS         ));
+//RS     };
+//RS     values
+//RS         .iter()
+//RS         .map(|value| handle_arg(std::slice::from_ref(value), 0, ty, session, span))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn string_arg(args: &[CtValue], index: usize, span: Span) -> Result<String, Diagnostic> {
+//RS     match args.get(index) {
+//RS         Some(CtValue::Str(value)) => Ok(value.clone()),
+//RS         _ => Err(build_diag(
+//RS             &format!("argument {} must be String", index + 1),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn source_span_arg(args: &[CtValue], index: usize, span: Span) -> Result<Span, Diagnostic> {
+//RS     let Some(CtValue::Struct { type_name, fields }) = args.get(index) else {
+//RS         return Err(build_diag(
+//RS             "custom build diagnostics require a source span",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     if type_name != crate::Syntax::TYPE_SOURCE_SPAN {
+//RS         return Err(build_diag(
+//RS             "custom build diagnostics require a source span",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let value = |name: &str| {
+//RS         fields
+//RS             .iter()
+//RS             .find_map(|(field, value)| match (field.as_str(), value) {
+//RS                 (actual, CtValue::Int(value)) if actual == name && *value >= 0 => {
+//RS                     Some(*value as usize)
+//RS                 }
+//RS                 _ => None,
+//RS             })
+//RS     };
+//RS     match (value("start"), value("end")) {
+//RS         (Some(start), Some(end)) if start <= end => Ok(Span::new(start, end)),
+//RS         _ => Err(build_diag(
+//RS             "custom build diagnostics require a valid source span",
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn string_list_arg(args: &[CtValue], index: usize, span: Span) -> Result<Vec<String>, Diagnostic> {
+//RS     let Some(CtValue::List(values)) = args.get(index) else {
+//RS         return Err(build_diag(
+//RS             &format!("argument {} must be [String]", index + 1),
+//RS             span,
+//RS         ));
+//RS     };
+//RS     values
+//RS         .iter()
+//RS         .map(|value| match value {
+//RS             CtValue::Str(value) => Ok(value.clone()),
+//RS             _ => Err(build_diag(
+//RS                 &format!("argument {} must be [String]", index + 1),
+//RS                 span,
+//RS             )),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn parse_capability(name: &str, span: Span) -> Result<BuildCapability, Diagnostic> {
+//RS     BuildCapability::parse(name).ok_or_else(|| {
+//RS         build_diag(
+//RS             &format!("unknown build effect `{name}`; use one of the ten declared effects"),
+//RS             span,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn safe_name(name: &str) -> String {
+//RS     name.chars()
+//RS         .map(|c| {
+//RS             if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+//RS                 c
+//RS             } else {
+//RS                 '_'
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn build_error_jet_error(error: &BuildError, span: Span) -> jet_foundation::Outcome::JetErr {
+//RS     let mut jet_error = jet_foundation::Outcome::jet_err_with_identity(
+//RS         build_error_text(error),
+//RS         Ok("E3502".to_string()),
+//RS         Err(jet_foundation::Outcome::JetAbsent),
+//RS         format!("BuildError::{}", build_error_variant(error)),
+//RS     );
+//RS     jet_foundation::Outcome::jet_err_set_details(&mut jet_error, build_error_details(error, span));
+//RS     jet_error
+//RS }
+//RS 
+//RS fn build_error_value(error: &BuildError, span: Span) -> CtValue {
+//RS     CtValue::from_jet_err(&build_error_jet_error(error, span))
+//RS }
+//RS 
+//RS pub fn build_error_diagnostic_from_value(
+//RS     error: &CtValue,
+//RS     fallback_span: Span,
+//RS ) -> Option<Diagnostic> {
+//RS     let jet_error = error.to_jet_err()?;
+//RS     jet_foundation::Outcome::jet_err_details(&jet_error)?;
+//RS     let report = jet_foundation::Outcome::jet_error_report(&jet_error);
+//RS     let span = report
+//RS         .details
+//RS         .as_ref()
+//RS         .and_then(|details| details.source_span.as_ref())
+//RS         .map_or(fallback_span, |span| Span::new(span.start, span.end));
+//RS     let mut diagnostic = build_diag(&report.message, span);
+//RS     diagnostic.structured = Some(StructuredDiagnostic::BuildError { report });
+//RS     Some(diagnostic)
+//RS }
+//RS 
+//RS fn build_error_diag(error: &BuildError, span: Span) -> Diagnostic {
+//RS     let report = jet_foundation::Outcome::jet_error_report(&build_error_jet_error(error, span));
+//RS     let mut diagnostic = build_diag(&report.message, span);
+//RS     diagnostic.structured = Some(StructuredDiagnostic::BuildError { report });
+//RS     diagnostic
+//RS }
+//RS 
+//RS fn build_error_variant(error: &BuildError) -> &'static str {
+//RS     match error {
+//RS         BuildError::EmptyTargetName => "EmptyTargetName",
+//RS         BuildError::EmptyActionName => "EmptyActionName",
+//RS         BuildError::EmptyToolchainName => "EmptyToolchainName",
+//RS         BuildError::EmptySigningIdentityName => "EmptySigningIdentityName",
+//RS         BuildError::EmptyProbeName => "EmptyProbeName",
+//RS         BuildError::DuplicateTargetName(_) => "DuplicateTargetName",
+//RS         BuildError::DuplicateActionName(_) => "DuplicateActionName",
+//RS         BuildError::CompilerPackageDependencyMissing { .. } => "CompilerPackageDependencyMissing",
+//RS         BuildError::DuplicateToolchainName(_) => "DuplicateToolchainName",
+//RS         BuildError::DuplicateSigningIdentityName(_) => "DuplicateSigningIdentityName",
+//RS         BuildError::DuplicateProbeName(_) => "DuplicateProbeName",
+//RS         BuildError::EmptyPath => "EmptyPath",
+//RS         BuildError::InvalidPath(_) => "InvalidPath",
+//RS         BuildError::EmptyToolchainTriple(_) => "EmptyToolchainTriple",
+//RS         BuildError::EmptyIdentityField(_) => "EmptyIdentityField",
+//RS         BuildError::MissingLockedProvenance(_) => "MissingLockedProvenance",
+//RS         BuildError::EmptyProbeField(_) => "EmptyProbeField",
+//RS         BuildError::EmptyActionArgv(_) => "EmptyActionArgv",
+//RS         BuildError::EmptyEnvName(_) => "EmptyEnvName",
+//RS         BuildError::UndeclaredEnvName { .. } => "UndeclaredEnvName",
+//RS         BuildError::CachedActionWithoutOutputs(_) => "CachedActionWithoutOutputs",
+//RS         BuildError::PhonyActionWithoutCaps(_) => "PhonyActionWithoutCaps",
+//RS         BuildError::PhonyActionWithOutputs(_) => "PhonyActionWithOutputs",
+//RS         BuildError::DuplicateActionOutput { .. } => "DuplicateActionOutput",
+//RS         BuildError::DuplicateBuildOutput { .. } => "DuplicateBuildOutput",
+//RS         BuildError::UnknownTarget(_) => "UnknownTarget",
+//RS         BuildError::UnknownAction(_) => "UnknownAction",
+//RS         BuildError::UnknownToolchain(_) => "UnknownToolchain",
+//RS         BuildError::UnknownSigningIdentity(_) => "UnknownSigningIdentity",
+//RS         BuildError::UnknownProbe(_) => "UnknownProbe",
+//RS         BuildError::LegacyWrapperWithoutInputs(_) => "LegacyWrapperWithoutInputs",
+//RS         BuildError::LegacyWrapperWithoutOutputs(_) => "LegacyWrapperWithoutOutputs",
+//RS         BuildError::LegacyWrapperWithoutCaps(_) => "LegacyWrapperWithoutCaps",
+//RS         BuildError::LegacyWrapperCommandMismatch { .. } => "LegacyWrapperCommandMismatch",
+//RS         BuildError::LegacyProjectFileMissing(_) => "LegacyProjectFileMissing",
+//RS         BuildError::LegacyProjectFileInvalid(_) => "LegacyProjectFileInvalid",
+//RS         BuildError::PolicyDenied(_) => "PolicyDenied",
+//RS         BuildError::EmptyPluginField(_) => "EmptyPluginField",
+//RS         BuildError::InvalidPluginDigest(_) => "InvalidPluginDigest",
+//RS         BuildError::PackagedPlugin(_) => "PackagedPlugin",
+//RS         BuildError::PluginVersionMismatch { .. } => "PluginVersionMismatch",
+//RS         BuildError::EmptyGeneratedModuleField(_) => "EmptyGeneratedModuleField",
+//RS         BuildError::InvalidGeneratedModulePath(_) => "InvalidGeneratedModulePath",
+//RS         BuildError::DuplicateGeneratedModuleName(_) => "DuplicateGeneratedModuleName",
+//RS         BuildError::DuplicateGeneratedModulePath(_) => "DuplicateGeneratedModulePath",
+//RS         BuildError::GeneratedModuleCycle { .. } => "GeneratedModuleCycle",
+//RS         BuildError::TargetDependencyCycle(_) => "TargetDependencyCycle",
+//RS         BuildError::ActionDependencyCycle(_) => "ActionDependencyCycle",
+//RS     }
+//RS }
+//RS 
+//RS fn build_error_details(error: &BuildError, span: Span) -> jet_foundation::Outcome::JetErrorDetails {
+//RS     let fields = match error {
+//RS         BuildError::EmptyTargetName
+//RS         | BuildError::EmptyActionName
+//RS         | BuildError::EmptyToolchainName
+//RS         | BuildError::EmptySigningIdentityName
+//RS         | BuildError::EmptyProbeName
+//RS         | BuildError::EmptyPath => Vec::new(),
+//RS         BuildError::DuplicateTargetName(value)
+//RS         | BuildError::DuplicateActionName(value)
+//RS         | BuildError::DuplicateToolchainName(value)
+//RS         | BuildError::DuplicateSigningIdentityName(value)
+//RS         | BuildError::DuplicateProbeName(value)
+//RS         | BuildError::InvalidPath(value)
+//RS         | BuildError::EmptyToolchainTriple(value)
+//RS         | BuildError::EmptyIdentityField(value)
+//RS         | BuildError::MissingLockedProvenance(value)
+//RS         | BuildError::EmptyProbeField(value)
+//RS         | BuildError::EmptyActionArgv(value)
+//RS         | BuildError::EmptyEnvName(value)
+//RS         | BuildError::CachedActionWithoutOutputs(value)
+//RS         | BuildError::PhonyActionWithoutCaps(value)
+//RS         | BuildError::PhonyActionWithOutputs(value)
+//RS         | BuildError::LegacyProjectFileInvalid(value)
+//RS         | BuildError::EmptyPluginField(value)
+//RS         | BuildError::InvalidPluginDigest(value)
+//RS         | BuildError::PackagedPlugin(value)
+//RS         | BuildError::EmptyGeneratedModuleField(value)
+//RS         | BuildError::InvalidGeneratedModulePath(value)
+//RS         | BuildError::DuplicateGeneratedModuleName(value)
+//RS         | BuildError::DuplicateGeneratedModulePath(value) => {
+//RS             vec![build_error_text_field("value", value)]
+//RS         }
+//RS         BuildError::CompilerPackageDependencyMissing {
+//RS             package,
+//RS             dependency,
+//RS         } => vec![
+//RS             build_error_text_field("package", package),
+//RS             build_error_text_field("dependency", dependency),
+//RS         ],
+//RS         BuildError::UndeclaredEnvName { action, key } => vec![
+//RS             build_error_text_field("action", action),
+//RS             build_error_text_field("key", key),
+//RS         ],
+//RS         BuildError::DuplicateActionOutput { action, output } => vec![
+//RS             build_error_text_field("action", action),
+//RS             build_error_text_field("output", output),
+//RS         ],
+//RS         BuildError::DuplicateBuildOutput {
+//RS             output,
+//RS             first_action,
+//RS             second_action,
+//RS         } => vec![
+//RS             build_error_text_field("output", output),
+//RS             build_error_text_field("first_action", first_action),
+//RS             build_error_text_field("second_action", second_action),
+//RS         ],
+//RS         BuildError::UnknownTarget(id) => vec![build_error_number_field("id", id.0)],
+//RS         BuildError::UnknownAction(id) => vec![build_error_number_field("id", id.0)],
+//RS         BuildError::UnknownToolchain(id) => vec![build_error_number_field("id", id.0)],
+//RS         BuildError::UnknownSigningIdentity(id) => vec![build_error_number_field("id", id.0)],
+//RS         BuildError::UnknownProbe(id) => vec![build_error_number_field("id", id.0)],
+//RS         BuildError::LegacyWrapperWithoutInputs(kind)
+//RS         | BuildError::LegacyWrapperWithoutOutputs(kind)
+//RS         | BuildError::LegacyWrapperWithoutCaps(kind)
+//RS         | BuildError::LegacyProjectFileMissing(kind) => {
+//RS             vec![build_error_text_field("kind", kind.as_str())]
+//RS         }
+//RS         BuildError::LegacyWrapperCommandMismatch { wrapper, actual } => vec![
+//RS             build_error_text_field("wrapper", wrapper.as_str()),
+//RS             build_error_text_field("actual", actual),
+//RS         ],
+//RS         BuildError::PolicyDenied(explanation) => vec![
+//RS             build_error_text_field("subject", &explanation.subject),
+//RS             build_error_bool_field("allowed", explanation.allowed),
+//RS             build_error_text_field("reason", &explanation.reason),
+//RS             build_error_json_field(
+//RS                 "required_caps",
+//RS                 format!(
+//RS                     "[{}]",
+//RS                     explanation
+//RS                         .required_caps
+//RS                         .iter()
+//RS                         .map(|cap| build_error_json_string(cap.name()))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(",")
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS         BuildError::PluginVersionMismatch {
+//RS             plugin,
+//RS             expected,
+//RS             actual,
+//RS         } => vec![
+//RS             build_error_text_field("plugin", plugin),
+//RS             build_error_text_field("expected", expected),
+//RS             build_error_text_field("actual", actual),
+//RS         ],
+//RS         BuildError::GeneratedModuleCycle { module, path } => vec![
+//RS             build_error_text_field("module", module),
+//RS             build_error_text_field("path", path),
+//RS         ],
+//RS         BuildError::TargetDependencyCycle(cycle) | BuildError::ActionDependencyCycle(cycle) => {
+//RS             vec![build_error_json_field(
+//RS                 "nodes",
+//RS                 format!(
+//RS                     "[{}]",
+//RS                     cycle
+//RS                         .nodes()
+//RS                         .iter()
+//RS                         .map(|node| build_error_json_string(node))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(",")
+//RS                 ),
+//RS             )]
+//RS         }
+//RS     };
+//RS     jet_foundation::Outcome::JetErrorDetails {
+//RS         variant: build_error_variant(error).to_string(),
+//RS         fields,
+//RS         source_span: Some(jet_foundation::Outcome::JetErrorSpan {
+//RS             start: span.start,
+//RS             end: span.end,
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn build_error_text_field(name: &str, value: &str) -> jet_foundation::Outcome::JetErrorField {
+//RS     build_error_json_field(name, build_error_json_string(value))
+//RS }
+//RS 
+//RS fn build_error_number_field(name: &str, value: usize) -> jet_foundation::Outcome::JetErrorField {
+//RS     build_error_json_field(name, value.to_string())
+//RS }
+//RS 
+//RS fn build_error_bool_field(name: &str, value: bool) -> jet_foundation::Outcome::JetErrorField {
+//RS     build_error_json_field(name, value.to_string())
+//RS }
+//RS 
+//RS fn build_error_json_field(name: &str, value: String) -> jet_foundation::Outcome::JetErrorField {
+//RS     jet_foundation::Outcome::JetErrorField {
+//RS         name: name.to_string(),
+//RS         value,
+//RS     }
+//RS }
+//RS 
+//RS fn build_error_json_string(value: &str) -> String {
+//RS     let mut out = String::with_capacity(value.len() + 2);
+//RS     out.push('"');
+//RS     for ch in value.chars() {
+//RS         match ch {
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '"' => out.push_str("\\\""),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '\r' => out.push_str("\\r"),
+//RS             '\t' => out.push_str("\\t"),
+//RS             ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+//RS             ch => out.push(ch),
+//RS         }
+//RS     }
+//RS     out.push('"');
+//RS     out
+//RS }
+//RS 
+//RS fn build_error_text(error: &BuildError) -> String {
+//RS     match error {
+//RS         BuildError::DuplicateTargetName(name) => {
+//RS             format!("target name `{name}` is registered twice")
+//RS         }
+//RS         BuildError::DuplicateActionName(name) => {
+//RS             format!("action name `{name}` is registered twice")
+//RS         }
+//RS         BuildError::CompilerPackageDependencyMissing {
+//RS             package,
+//RS             dependency,
+//RS         } => format!(
+//RS             "compiler package `{package}` depends on missing package artifact `{dependency}`"
+//RS         ),
+//RS         BuildError::DuplicateToolchainName(name) => {
+//RS             format!("toolchain name `{name}` is registered twice")
+//RS         }
+//RS         BuildError::DuplicateProbeName(name) => format!("probe name `{name}` is registered twice"),
+//RS         BuildError::InvalidPath(path) => {
+//RS             format!("build path `{path}` must be relative and stay inside the project")
+//RS         }
+//RS         BuildError::LegacyProjectFileMissing(kind) => format!(
+//RS             "legacy {} import requires `{}` in the project root",
+//RS             kind.as_str(),
+//RS             kind.project_file()
+//RS         ),
+//RS         BuildError::LegacyProjectFileInvalid(path) => {
+//RS             format!("legacy project file `{path}` must be a readable regular file")
+//RS         }
+//RS         BuildError::UndeclaredEnvName { action, key } => {
+//RS             format!("action `{action}` allowlists undeclared environment variable `{key}`")
+//RS         }
+//RS         BuildError::PackagedPlugin(message) => format!("packaged build plugin rejected: {message}"),
+//RS         BuildError::InvalidPluginDigest(message) => {
+//RS             format!("build plugin component digest is invalid: {message}")
+//RS         }
+//RS         BuildError::CachedActionWithoutOutputs(name) => {
+//RS             format!("cached action `{name}` declares no outputs")
+//RS         }
+//RS         BuildError::PhonyActionWithoutCaps(name) => {
+//RS             format!("uncached action `{name}` declares no abilities")
+//RS         }
+//RS         BuildError::DuplicateBuildOutput {
+//RS             output,
+//RS             first_action,
+//RS             second_action,
+//RS         } => format!("output `{output}` is owned by both `{first_action}` and `{second_action}`"),
+//RS         BuildError::DuplicateGeneratedModuleName(name) => {
+//RS             format!("E3511: generation rounds form a cycle: module `{name}` is generated twice")
+//RS         }
+//RS         BuildError::DuplicateGeneratedModulePath(path) => {
+//RS             format!("E3511: generation rounds form a cycle: path `{path}` is generated twice")
+//RS         }
+//RS         BuildError::GeneratedModuleCycle { module, path } => format!(
+//RS             "E3511: generation rounds form a cycle: `{module}` and `{path}` have two producers"
+//RS         ),
+//RS         BuildError::TargetDependencyCycle(cycle) => dependency_cycle_text("target", cycle),
+//RS         BuildError::ActionDependencyCycle(cycle) => dependency_cycle_text("action", cycle),
+//RS         other => format!("{other:?}"),
+//RS     }
+//RS }
+//RS 
+//RS fn build_diag(detail: &str, span: Span) -> Diagnostic {
+//RS     if let Some(detail) = detail.strip_prefix("E3511: ") {
+//RS         return Diagnostic::error(
+//RS             "E3511",
+//RS             format!("build plan is invalid: {detail}"),
+//RS             "generated source must reach a bounded deterministic order, not loop until quiescent"
+//RS                 .to_string(),
+//RS             "break the dependency between these generators or give each generated module one owner"
+//RS                 .to_string(),
+//RS             Some(span),
+//RS         );
+//RS     }
+//RS     Diagnostic::error(
+//RS         "E3502",
+//RS         format!("build plan is invalid: {detail}"),
+//RS         "`fn build` must return one deterministic typed graph whose handles all belong to that build".to_string(),
+//RS         "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn build_project_error(
+//RS     code: String,
+//RS     what: String,
+//RS     why: String,
+//RS     fix: String,
+//RS     span: Option<Span>,
+//RS ) -> Result<Diagnostic, &'static str> {
+//RS     Diagnostic::project_error(code, what, why, fix, span)
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use crate::AST::CtReport;
+//RS 
+//RS     #[test]
+//RS     fn build_context_failure_keeps_typed_report_facts() {
+//RS         let context = begin_program_build("report-test", CtValue::Unit);
+//RS         let span = Span::new(11, 17);
+//RS         let args = || {
+//RS             vec![
+//RS                 CtValue::Str("app".to_string()),
+//RS                 CtValue::List(Vec::new()),
+//RS                 CtValue::List(Vec::new()),
+//RS             ]
+//RS         };
+//RS 
+//RS         let first =
+//RS             eval_program_build_method(&context, "add_executable", args(), None, span, false)
+//RS                 .expect("build context")
+//RS                 .expect("first target declaration");
+//RS         assert!(first.is_present());
+//RS 
+//RS         let mut failed =
+//RS             eval_program_build_method(&context, "add_executable", args(), None, span, false)
+//RS                 .expect("build context")
+//RS                 .expect("duplicate target result");
+//RS         assert!(matches!(failed, CtValue::Failed(CtReport::Told(_))));
+//RS         assert!(failed.add_error_context(
+//RS             "while declaring app".to_string(),
+//RS             "build.jet".to_string(),
+//RS             23,
+//RS         ));
+//RS 
+//RS         jet_foundation::Outcome::jet_journey_reset();
+//RS         jet_foundation::Outcome::jet_journey_frame("build.jet", 23, 5, "build", || {
+//RS             "while declaring app".to_string()
+//RS         });
+//RS         let jet_error = failed.to_jet_err().expect("default error carrier");
+//RS         let report = jet_foundation::Outcome::jet_error_report(&jet_error);
+//RS 
+//RS         assert_eq!(
+//RS             report.typed_identity.as_deref(),
+//RS             Some("BuildError::DuplicateTargetName")
+//RS         );
+//RS         let details = report.details.as_ref().expect("typed build details");
+//RS         assert_eq!(details.variant, "DuplicateTargetName");
+//RS         assert_eq!(details.fields.len(), 1);
+//RS         assert_eq!(details.fields[0].name, "value");
+//RS         assert_eq!(details.fields[0].value, "\"app\"");
+//RS         assert_eq!(
+//RS             details.source_span.as_ref(),
+//RS             Some(&jet_foundation::Outcome::JetErrorSpan { start: 11, end: 17 })
+//RS         );
+//RS         assert!(report.causes.is_empty());
+//RS         assert_eq!(report.context_frames.len(), 1);
+//RS         assert_eq!(report.context_frames[0].text, "while declaring app");
+//RS         assert_eq!(report.context_frames[0].file, "build.jet");
+//RS         assert_eq!(report.context_frames[0].line, 23);
+//RS         let origin = report.origin.as_ref().expect("the failing build call is the origin");
+//RS         assert_eq!(origin.fn_name, "build");
+//RS         assert_eq!(origin.file, "build.jet");
+//RS         assert_eq!(origin.line, 23);
+//RS         assert!(report.source_journey.is_empty());
+//RS         assert!(report.to_json().contains(
+//RS             "\"details\":{\"variant\":\"DuplicateTargetName\",\"fields\":{\"value\":\"app\"}"
+//RS         ));
+//RS 
+//RS         let diagnostic = build_error_diagnostic_from_value(&failed, Span::new(0, 0))
+//RS             .expect("structured build diagnostic");
+//RS         assert!(matches!(
+//RS             diagnostic.structured,
+//RS             Some(StructuredDiagnostic::BuildError { .. })
+//RS         ));
+//RS 
+//RS         abort_program_build(&context);
+//RS     }
+//RS }
+// END-PORT-PENDING 0569 crates/jet-comptime/src/Comptime/Build/runtime_bridge.rs:1-2143
+

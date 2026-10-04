@@ -1,0 +1,57 @@
+use jet_foundation.[Span, TextEdit]
+use jet_driver.[ApplyError, apply_edits, changes_text]
+
+fn ed(start: Int, end: Int, text: String) -> TextEdit Never! {
+    TextEdit{span: Span{start: start, end: end}, new_text: text}
+}
+#Test("empty_is_identity") {
+    edits :: [TextEdit]{}
+    assert_eq(apply_edits("hello", edits[0..edits.len()]), Ok("hello"))
+}
+#Test("single_replacement") {
+    edits :: [TextEdit]{ed(0, 3, "def")}
+    assert_eq(apply_edits("abc x = 1;", edits[0..edits.len()]), Ok("def x = 1;"))
+}
+#Test("right_to_left_keeps_offsets_valid") {
+    edits :: [TextEdit]{ed(0, 3, "def"), ed(11, 14, "def")}
+    assert_eq(apply_edits("abc a = 1; abc b = 2;", edits[0..edits.len()]), Ok("def a = 1; def b = 2;"))
+}
+#Test("unordered_input_is_sorted") {
+    edits :: [TextEdit]{ed(11, 14, "def"), ed(0, 3, "def")}
+    assert_eq(apply_edits("abc a = 1; abc b = 2;", edits[0..edits.len()]), Ok("def a = 1; def b = 2;"))
+}
+#Test("length_changing_edits_compose") {
+    edits :: [TextEdit]{ed(0, 2, "XXXX"), ed(3, 5, "Y")}
+    assert_eq(apply_edits("ab cd", edits[0..edits.len()]), Ok("XXXX Y"))
+}
+#Test("abutting_edits_are_allowed") {
+    edits :: [TextEdit]{ed(0, 2, "X"), ed(2, 4, "Y")}
+    assert_eq(apply_edits("abcd", edits[0..edits.len()]), Ok("XY"))
+}
+#Test("insertion_at_same_point_does_not_overlap") {
+    edits :: [TextEdit]{ed(2, 2, "X"), ed(2, 2, "Y")}
+    output :: apply_edits("abcd", edits[0..edits.len()]) ?? panic("insertions must succeed")
+    assert(output.starts_with("ab") && output.ends_with("cd"))
+    assert_eq(output.len(), 6)
+    assert_eq(output, "abXYcd")
+}
+#Test("overlapping_edits_are_rejected") {
+    edits :: [TextEdit]{ed(0, 4, "X"), ed(2, 6, "Y")}
+    assert_eq(apply_edits("abcdef", edits[0..edits.len()]), Err(ApplyError.Overlap{first: Span{start: 0, end: 4}, second: Span{start: 2, end: 6}}))
+}
+#Test("stale_span_clamps_without_panic") {
+    edits :: [TextEdit]{ed(5, 9, "Z")}
+    assert_eq(apply_edits("ab", edits[0..edits.len()]), Ok("abZ"))
+}
+#Test("changes_text_detects_noop") {
+    same :: [TextEdit]{ed(0, 3, "abc")}
+    changed :: [TextEdit]{ed(0, 3, "def")}
+    assert(!changes_text("abc x = 1;", same[0..same.len()]))
+    assert(changes_text("abc x = 1;", changed[0..changed.len()]))
+    overlapping :: [TextEdit]{ed(0, 4, "X"), ed(2, 6, "Y")}
+    assert(changes_text("abcdef", overlapping[0..overlapping.len()]))
+}
+#Test("byte_offsets_and_stale_insertions") {
+    edits :: [TextEdit]{ed(0, 2, "e"), ed(7, 9, "X"), ed(10, 12, "Y")}
+    assert_eq(apply_edits("é!", edits[0..edits.len()]), Ok("e!XY"))
+}

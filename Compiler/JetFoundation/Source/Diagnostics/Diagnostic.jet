@@ -1,5 +1,6 @@
 // Canonical diagnostic values shared by every compiler phase. Spans are UTF-8
 // byte offsets into the checked source; edits and labels use the same spans.
+use core.files.runtime.kernel_path_components as diagnostic_os_path
 
 pub struct Span {
     pub start: Int
@@ -10,17 +11,22 @@ pub struct TextEdit {
     pub span: Span
     pub new_text: String
 }
-pub enum DiagnosticMoment { Compile Run Test Tool }
+// Rust Diagnostics.rs:110-127 `ReportMoment`. Fix grades and no-fix reasons
+// are the canonical Report/Report.jet carriers (Rust re-exports them here).
+pub enum DiagnosticMoment {
+    Compile
+    Run
+    Test
+    Tool
 
-pub enum DiagnosticFixApplicability { Safe Suggested }
-
-pub enum DiagnosticFixSafety { Formatting BehaviorPreserving APIChanging TargetChanging NeedsReview }
-
-pub enum DiagnosticNoFixReasonKind { Behavior Design Ambiguous }
-
-pub struct DiagnosticNoFixReason {
-    pub kind: DiagnosticNoFixReasonKind
-    pub next: String
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Compile -> "compile"
+            .Run -> "run"
+            .Test -> "test"
+            .Tool -> "tool"
+        }
+    }
 }
 
 pub struct DiagnosticOrigin {
@@ -44,6 +50,7 @@ pub struct DiagnosticLabel {
     pub message: String
 }
 
+// Rust Diagnostics.rs:159-191 `CryptoMisuseReason`.
 pub enum DiagnosticCryptoMisuseReason {
     InvalidLength
     NonceLength
@@ -56,58 +63,28 @@ pub enum DiagnosticCryptoMisuseReason {
     RawNonce
     RawAlgorithm
     DeterministicEntropy
-}
 
-pub struct DiagnosticErrorContextFrame {
-    pub text: String
-    pub file: String
-    pub line: Int
-}
-
-pub struct DiagnosticErrorConversion {
-    pub source: String
-    pub target: String
-}
-
-pub struct DiagnosticErrorField {
-    pub name: String
-    pub value: String
-}
-
-pub struct DiagnosticErrorSpan {
-    pub start: Int
-    pub end: Int
-}
-
-pub struct DiagnosticErrorDetails {
-    pub variant: String
-    pub fields: [DiagnosticErrorField]
-    pub source_span: DiagnosticErrorSpan?{None}
-}
-
-pub struct DiagnosticErrorJourneyFrame {
-    pub fn_name: String
-    pub file: String
-    pub line: Int
-    pub note: String
-    pub hops: Int
-}
-
-pub struct DiagnosticBuildError {
-    pub code: String?{None}
-    pub message: String
-    pub typed_identity: String?{None}
-    pub causes: [DiagnosticBuildError]{[DiagnosticBuildError]{}}
-    pub context_frames: [DiagnosticErrorContextFrame]{[DiagnosticErrorContextFrame]{}}
-    pub source_journey: [DiagnosticErrorJourneyFrame]{[DiagnosticErrorJourneyFrame]{}}
-    pub conversion_history: [DiagnosticErrorConversion]{[DiagnosticErrorConversion]{}}
-    pub details: DiagnosticErrorDetails?{None}
+    fn as_str(self) -> String Never! {
+        if self == {
+            .InvalidLength -> "invalid_length"
+            .NonceLength -> "nonce_length"
+            .OutputLength -> "output_length"
+            .SaltLength -> "salt_length"
+            .MemoryCost -> "memory_cost"
+            .IterationCount -> "iteration_count"
+            .LaneCount -> "lane_count"
+            .MemoryTimeCost -> "memory_time_cost"
+            .RawNonce -> "raw_nonce"
+            .RawAlgorithm -> "raw_algorithm"
+            .DeterministicEntropy -> "deterministic_entropy"
+        }
+    }
 }
 
 pub enum DiagnosticStructured {
     SuggestedEdits(edits: [TextEdit])
     CryptoMisuse(reason: DiagnosticCryptoMisuseReason, operation: String, expected: String?, actual: Int?)
-    BuildError(report: DiagnosticBuildError)
+    BuildError(report: JetErrorReport)
     RuntimeHostFault(stdout: String)
 }
 
@@ -117,6 +94,8 @@ pub struct Diagnostic {
     pub code: String
     pub span: Span?{None}
     pub source_path: String?{None}
+    // Retained native selector; source_path/origin remain lossy output labels.
+    pub source_native_path: diagnostic_os_path.OsPath?{None}
     pub source_offset: Int?{None}
     pub source_start: Int?{None}
     pub origin: DiagnosticOrigin?{None}
@@ -126,9 +105,9 @@ pub struct Diagnostic {
     pub why: String
     pub fix: String
     pub edit: TextEdit?{None}
-    pub applicability: DiagnosticFixApplicability?{None}
-    pub safety: DiagnosticFixSafety?{None}
-    pub no_fix_reason: DiagnosticNoFixReason?{None}
+    pub applicability: FixApplicability?{None}
+    pub safety: FixSafety?{None}
+    pub no_fix_reason: NoFixReason?{None}
     pub detail: String?{None}
     pub structured: DiagnosticStructured?{None}
     pub decision_row: MIRDecisionRow?{None}
@@ -170,16 +149,172 @@ pub fn diagnostic_with_origin(diagnostic: ^Diagnostic, origin: DiagnosticOrigin)
     updated
 }
 
-pub fn diagnostic_with_cause(diagnostic: ^Diagnostic, cause: DiagnosticCause) -> Diagnostic Never! {
+// Rust Diagnostics.rs:827-837 `Diagnostic::caused_by`: put the nearest
+// wrapped report first, followed by its own causes in their existing order.
+pub fn diagnostic_caused_by(diagnostic: ^Diagnostic, cause: Diagnostic) -> Diagnostic Never! {
     updated := diagnostic
-    &updated.cause.push(cause)
+    &updated.cause.push(DiagnosticCause{code: cause.code, span: cause.span, origin: cause.origin})
+    loop link in cause.cause -> &updated.cause.push(link)
     updated
 }
 
-pub fn diagnostic_with_causes(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) -> Diagnostic Never! {
-    updated := diagnostic
-    updated.cause = causes
-    updated
+// Rust Diagnostics.rs:230-234 `DiagnosticCause::matches`: a cause names a
+// report by its code, primary span, and owning source snapshot.
+pub fn diagnostic_cause_matches(cause: DiagnosticCause, diagnostic: Diagnostic) -> Bool Never! {
+    cause.code == diagnostic.code && cause.span == diagnostic.span && cause.origin == diagnostic.origin
+}
+
+fn diagnostic_cause_is_pending(diagnostic: Diagnostic, pending: [Diagnostic]) -> Bool Never! {
+    loop cause in diagnostic.cause {
+        loop candidate in pending {
+            if diagnostic_cause_matches(cause, candidate) -> return true
+        }
+    }
+    false
+}
+
+// Rust Diagnostics.rs:1212-1231 `order_diagnostics_root_first`: put root
+// diagnostics before reports that name them as causes. The stable pass keeps
+// source order among independent reports and breaks a cycle by leaving the
+// remaining reports in their original order.
+pub fn diagnostic_order_root_first(diagnostics: ^[Diagnostic]) -> [Diagnostic] Never! {
+    pending := diagnostics
+    ordered := [Diagnostic]{}
+    loop pending.len() > 0 {
+        next := -1
+        loop index in 0..<pending.len() {
+            if !diagnostic_cause_is_pending(pending[index], pending) {
+                next = index
+                break
+            }
+        }
+        if next < 0 {
+            loop rest in pending -> &ordered.push(rest)
+            break
+        }
+        removed := &pending.remove(next, .Slot)
+        root :: removed ?? panic("root-first ordering selected a pending diagnostic")
+        &ordered.push(root)
+    }
+    ordered
+}
+
+// Rust Diagnostics.rs:1365-1386 `report_clear_counts`: count the reports
+// whose explicit cause chain names each report. A transitive dependent counts
+// once, so consumers rank roots without rebuilding the graph from text.
+pub fn diagnostic_report_clear_counts(diagnostics: [Diagnostic]) -> [Int] Never! {
+    counts := [Int]{}
+    loop index in 0..<diagnostics.len() {
+        count := 0
+        loop dependent_index in 0..<diagnostics.len() {
+            if dependent_index == index -> next
+            loop cause in diagnostics[dependent_index].cause {
+                if diagnostic_cause_matches(cause, diagnostics[index]) {
+                    count += 1
+                    break
+                }
+            }
+        }
+        &counts.push(count)
+    }
+    counts
+}
+
+// Rust Diagnostics.rs:1073-1076 `to_report`.
+pub fn diagnostic_to_report(diagnostic: Diagnostic, file: ReportPath, src: String) -[FS, Env]> ReportEnvelope Never! {
+    diagnostic_to_report_with_clears(diagnostic, file, src, 0)
+}
+
+// Rust Diagnostics.rs:1078-1200 `to_report_with_clears`: project one report
+// with its batch-derived dependent count. A diagnostic that owns its source
+// snapshot reports against that snapshot instead of the caller's file.
+pub fn diagnostic_to_report_with_clears(diagnostic: Diagnostic, file: ReportPath, src: String, clears: Int) -[FS, Env]> ReportEnvelope Never! {
+    if diagnostic.origin == {
+        .Val(origin) -> diagnostic_project_report(diagnostic, ReportPath.from_process(origin.path), origin.source, clears)
+        .None -> diagnostic_project_report(diagnostic, file, src, clears)
+    }
+}
+
+fn diagnostic_push_report_edit(report: &ReportEnvelope, diagnostic: Diagnostic, file: ReportPath, edit: TextEdit) Never! {
+    safety :: diagnostic.safety ?? panic("diagnostic `{diagnostic.code}` has an edit without a safety grade")
+    if &report.push_fix_edit(ReportEdit.new(file, ReportSpan.new(edit.span.start, edit.span.end), edit.new_text, safety)) == {
+        .Ok(_) -> {}
+        .Err(error) -> panic(error.message)
+    }
+}
+
+fn diagnostic_project_report(diagnostic: Diagnostic, file: ReportPath, src: String, clears: Int) -[FS, Env]> ReportEnvelope Never! {
+    severity :: if diagnostic.severity == DIAGNOSTIC_LINT -> "warning" else -> "error"
+    report := ReportEnvelope.new(diagnostic.moment.as_str(), severity, diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
+    report.applicability = diagnostic.applicability
+    report.denial_kind = diagnostic.denial_kind
+    report.call_chain = diagnostic.call_chain
+    report.scope_chain = diagnostic.scope_chain
+    report.nearest_granting_scope = diagnostic.nearest_granting_scope
+    report.detail = diagnostic.detail
+    if !file.is_empty() -> report.file = Val(file)
+    if diagnostic.span == .Val(span) {
+        report.line = Val(diagnostic_line_at(src, span.start))
+        report.col = Val(diagnostic_column_at(src, span.start))
+        report.span = Val(ReportSpan.new(span.start, span.end))
+    }
+    // `all_edits` order: the primary repair, then source-derived alternatives.
+    if diagnostic.edit == .Val(edit) -> diagnostic_push_report_edit(&report, diagnostic, file, edit)
+    if diagnostic.structured == .Val(structured) {
+        if structured == {
+            .SuggestedEdits(alternatives) -> {
+                loop alternative in alternatives -> diagnostic_push_report_edit(&report, diagnostic, file, alternative)
+            }
+            .CryptoMisuse(reason, operation, expected, actual) -> report.extension = Val(ReportExtension.Crypto{reason: reason.as_str(), operation: operation, expected: expected, actual: actual})
+            .BuildError(error) -> report.extension = Val(ReportExtension.BuildError{report: error.to_json()})
+            .RuntimeHostFault(_) -> {}
+        }
+    }
+    if diagnostic.no_fix_reason == .Val(reason) {
+        if &report.set_no_fix_reason(reason) == {
+            .Ok(_) -> {}
+            .Err(error) -> panic(error.message)
+        }
+    }
+    loop cause in diagnostic.cause {
+        projected := ReportCause.new(cause.code)
+        if cause.span == .Val(span) -> projected.span = Val(ReportSpan.new(span.start, span.end))
+        if cause.origin == .Val(origin) {
+            path :: ReportPath.from_process(origin.path)
+            if !path.is_empty() -> projected.file = Val(path)
+            if cause.span == .Val(span) {
+                projected.line = Val(diagnostic_line_at(origin.source, span.start))
+                projected.col = Val(diagnostic_column_at(origin.source, span.start))
+            }
+        }
+        &report.cause.push(projected)
+    }
+    loop label in diagnostic.labels {
+        &report.labels.push(ReportLabel{line: diagnostic_line_at(src, label.span.start), col: diagnostic_column_at(src, label.span.start), span: ReportSpan.new(label.span.start, label.span.end), message: label.message})
+    }
+    report.clears = clears
+    report
+}
+
+// Rust Diagnostics.rs:1202-1210 `to_json`/`to_json_with_clears`.
+pub fn diagnostic_to_json(diagnostic: Diagnostic, file: ReportPath, src: String) -[FS, Env]> String Never! {
+    diagnostic_to_report(diagnostic, file, src).json()
+}
+
+pub fn diagnostic_to_json_with_clears(diagnostic: Diagnostic, file: ReportPath, src: String, clears: Int) -[FS, Env]> String Never! {
+    diagnostic_to_report_with_clears(diagnostic, file, src, clears).json()
+}
+
+// Rust Diagnostics.rs:1341-1350 `render_all_json`: reports as JSON Lines. An
+// empty batch emits no bytes.
+pub fn diagnostic_render_all_json(file: ReportPath, src: String, diagnostics: [Diagnostic]) -[FS, Env]> String Never! {
+    out := [U8]{}
+    clears :: diagnostic_report_clear_counts(diagnostics)
+    loop index in 0..<diagnostics.len() {
+        loop byte in diagnostic_to_json_with_clears(diagnostics[index], file, src, clears[index]).bytes() -> &out.push(byte)
+        &out.push(U8{10})
+    }
+    String.from_bytes(out) ?? panic("report JSON lines preserve UTF-8")
 }
 
 pub fn diagnostic_with_label(diagnostic: ^Diagnostic, span: Span, message: String) -> Diagnostic Never! {
@@ -188,11 +323,11 @@ pub fn diagnostic_with_label(diagnostic: ^Diagnostic, span: Span, message: Strin
     updated
 }
 
-pub fn diagnostic_with_edit_grade(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+pub fn diagnostic_with_edit_grade(diagnostic: Diagnostic, edit: TextEdit, applicability: FixApplicability, safety: FixSafety) -> Diagnostic Never! {
     diagnostic_registry_with_edit_grade(^diagnostic, edit, applicability, safety)
 }
 
-pub fn diagnostic_with_fix_grades(diagnostic: Diagnostic, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+pub fn diagnostic_with_fix_grades(diagnostic: Diagnostic, applicability: FixApplicability, safety: FixSafety) -> Diagnostic Never! {
     edit :: diagnostic.edit ?? panic("diagnostic `{diagnostic.code}` needs an edit before applying explicit fix grades")
     diagnostic_registry_with_edit_grade(^diagnostic, edit, applicability, safety)
 }
@@ -209,10 +344,26 @@ pub fn diagnostic_with_alternative_edit(diagnostic: Diagnostic, edit: TextEdit) 
     diagnostic_registry_with_alternative_edit(^diagnostic, edit)
 }
 
-pub fn diagnostic_with_no_fix_reason(diagnostic: ^Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic Never! {
+// Rust Diagnostics.rs:496-505 `all_edits` emptiness: the primary repair or
+// any source-derived alternative.
+fn diagnostic_has_edits(diagnostic: Diagnostic) -> Bool Never! {
+    if diagnostic.edit != None -> return true
+    structured :: diagnostic.structured ?? return false
+    if structured == {
+        .SuggestedEdits(edits) -> edits.len() > 0
+        else -> false
+    }
+}
+
+// Rust Diagnostics.rs:795-811 `set_no_fix_reason`/`with_no_fix_reason`:
+// attach a reviewed next action only when this diagnostic has no edits; the
+// reason itself passes the canonical `NoFixReason.validate`.
+pub fn diagnostic_with_no_fix_reason(diagnostic: ^Diagnostic, reason: NoFixReason) -> Diagnostic ReportError! {
     updated := diagnostic
+    if diagnostic_has_edits(updated) -> return Err(ReportError.new("diagnostic `{updated.code}` cannot carry fix_edits and no_fix_reason"))
+    reason.validate()
     updated.no_fix_reason = Val(reason)
-    updated
+    Ok(updated)
 }
 
 pub fn diagnostic_with_detail(diagnostic: ^Diagnostic, detail: String) -> Diagnostic Never! {

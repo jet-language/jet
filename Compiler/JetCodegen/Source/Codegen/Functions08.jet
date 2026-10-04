@@ -1,0 +1,1809 @@
+// PORT-PENDING 0509 crates-jet-codegen-src-codegen-tir-mod-slice-8627: crates/jet-codegen/src/Codegen/TIR/mod.rs:8627-10431
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn integer_cost_fact(op: BinOp, lhs: &TExpr, rhs: &TExpr) -> TCostFact {
+//RS     let state = match (integer_bounds_for_expr(lhs), integer_bounds_for_expr(rhs)) {
+//RS         (Some(lhs), Some(rhs)) => match combine_integer_bounds(op, lhs, rhs) {
+//RS             Some(result)
+//RS                 if bounds_fit_inline(lhs)
+//RS                     && bounds_fit_inline(rhs)
+//RS                     && bounds_fit_inline(result) =>
+//RS             {
+//RS                 TCostState::OptimizerRemoved
+//RS             }
+//RS             _ => TCostState::SemanticRemainder,
+//RS         },
+//RS         _ => TCostState::SemanticRemainder,
+//RS     };
+//RS     TCostFact {
+//RS         kind: TCostKind::ExactIntSpill,
+//RS         state,
+//RS     }
+//RS }
+//RS 
+//RS fn integer_unary_cost_fact(operand: &TExpr) -> TCostFact {
+//RS     let state = match integer_bounds_for_expr(operand).and_then(|bounds| {
+//RS         bounds.lo.checked_neg().map(|_| TIntegerBounds {
+//RS             lo: -bounds.hi,
+//RS             hi: -bounds.lo,
+//RS         })
+//RS     }) {
+//RS         Some(result)
+//RS             if integer_bounds_for_expr(operand).is_some_and(bounds_fit_inline)
+//RS                 && bounds_fit_inline(result) =>
+//RS         {
+//RS             TCostState::OptimizerRemoved
+//RS         }
+//RS         _ => TCostState::SemanticRemainder,
+//RS     };
+//RS     TCostFact {
+//RS         kind: TCostKind::ExactIntSpill,
+//RS         state,
+//RS     }
+//RS }
+//RS 
+//RS fn is_outcome_type(ty: &Type) -> bool {
+//RS     matches!(ty, Type::Result { .. } | Type::Option(_))
+//RS }
+//RS 
+//RS fn is_outcome_constructor(kind: &TExprKind) -> bool {
+//RS     matches!(
+//RS         kind,
+//RS         TExprKind::Absent
+//RS             | TExprKind::Present(_)
+//RS             | TExprKind::Ok(_)
+//RS             | TExprKind::Err(..)
+//RS             | TExprKind::Call { .. }
+//RS             | TExprKind::MethodCall { .. }
+//RS             | TExprKind::StaticCall { .. }
+//RS             | TExprKind::BuiltinMethod { .. }
+//RS             | TExprKind::ClosureMethod { .. }
+//RS             | TExprKind::HandleMethod { .. }
+//RS             | TExprKind::CoreCall { .. }
+//RS             | TExprKind::ModuleCall { .. }
+//RS             | TExprKind::ExternCall { .. }
+//RS             | TExprKind::HostCall(_)
+//RS             | TExprKind::RangeCheckedCtor { .. }
+//RS             | TExprKind::DistinctConvert { fallible: true, .. }
+//RS             | TExprKind::UnitConvert { fallible: true, .. }
+//RS             | TExprKind::DecodeUnder { .. }
+//RS             | TExprKind::OptionLift2 { .. }
+//RS             | TExprKind::OptField { .. }
+//RS             | TExprKind::TaskGroupAll { .. }
+//RS             | TExprKind::TaskGroupRace { .. }
+//RS             | TExprKind::TaskGroupAny { .. }
+//RS     )
+//RS }
+//RS 
+//RS fn cost_fact_for_expr(expr: &TExpr) -> Option<TCostFact> {
+//RS     match &expr.kind {
+//RS         TExprKind::MaterializeView(_) => Some(TCostFact::semantic(TCostKind::ViewMaterialization)),
+//RS         TExprKind::BuiltinMethod { recv, op, .. }
+//RS             if matches!(&recv.ty, Type::Map { .. }) && op.needs_mut_receiver_place() =>
+//RS         {
+//RS             Some(TCostFact::semantic(TCostKind::CollectionCopyOnWrite))
+//RS         }
+//RS         TExprKind::Binary { op, lhs, rhs, .. }
+//RS             if matches!(&expr.ty, Type::Int)
+//RS                 && matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul) =>
+//RS         {
+//RS             Some(integer_cost_fact(*op, lhs, rhs))
+//RS         }
+//RS         TExprKind::Unary {
+//RS             op: UnOp::Neg,
+//RS             operand,
+//RS         } if matches!(&expr.ty, Type::Int) => Some(integer_unary_cost_fact(operand)),
+//RS         TExprKind::Index {
+//RS             base,
+//RS             is_map: false,
+//RS             uninit_fixed: false,
+//RS             ..
+//RS         } if matches!(&base.ty, Type::List(_) | Type::FixedList { .. }) => {
+//RS             Some(TCostFact::semantic(TCostKind::RepresentationFallback))
+//RS         }
+//RS         _ if is_outcome_type(&expr.ty) && is_outcome_constructor(&expr.kind) => {
+//RS             Some(TCostFact::semantic(TCostKind::OutcomeConstruction))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// One piece of a D-VARIADIC1 list spread literal — either a single element or `...list`.
+//RS #[derive(Clone)]
+//RS pub enum ListSpreadPart {
+//RS     Elem(TExpr),
+//RS     Spread(TExpr),
+//RS }
+//RS 
+//RS impl TExpr {
+//RS     /// Return the optimizer facts already established for this expression.
+//RS     ///
+//RS     /// `ty` and `CtLit` are sema's resolved type/value carriers. The
+//RS     /// `InlineRange` operation is retained in the structured kind after the
+//RS     /// runtime range carrier is canonicalized, so its interval remains a fact
+//RS     /// rather than a codegen guess. Access facts are exposed only for explicit
+//RS     /// borrow/resource nodes; all other expressions stay conservative.
+//RS     pub fn fact_channel(&self) -> TFactChannel<'_> {
+//RS         let exclusivity = match &self.kind {
+//RS             TExprKind::Borrow { mutable: true, .. } => TExclusivity::Exclusive,
+//RS             TExprKind::Borrow { mutable: false, .. } => TExclusivity::Shared,
+//RS             TExprKind::ResourceTake(_) | TExprKind::Move(_) => TExclusivity::Move,
+//RS             _ => TExclusivity::Unknown,
+//RS         };
+//RS         let comptime_value = match &self.kind {
+//RS             TExprKind::CtLit(value) => Some(value),
+//RS             _ => None,
+//RS         };
+//RS         TFactChannel {
+//RS             ty: Some(&self.ty),
+//RS             integer_bounds: integer_bounds_for_expr(self),
+//RS             exclusivity,
+//RS             purity: TPurity::Unknown,
+//RS             no_cross_iteration_deps: false,
+//RS             comptime_value,
+//RS             cost: cost_fact_for_expr(self),
+//RS         }
+//RS     }
+//RS }
+//RS fn collect_cost_lambda(
+//RS     lambda: &TLambda,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     match &lambda.executable {
+//RS         TLambdaBody::Expr(expr) => {
+//RS             collect_cost_expr(expr, function, span, loop_depth, sites);
+//RS         }
+//RS         TLambdaBody::Block(body) => {
+//RS             collect_cost_stmts(body, function, span, loop_depth, sites);
+//RS         }
+//RS         TLambdaBody::SharedBlock(body) => {
+//RS             collect_cost_stmts(body.as_ref(), function, span, loop_depth, sites);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_cost_place(
+//RS     place: &TPlace,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     if let TPlace::Expr(expr) = place {
+//RS         collect_cost_expr(expr, function, span, loop_depth, sites);
+//RS     }
+//RS }
+//RS 
+//RS fn collect_cost_enum_payload(
+//RS     payload: &TEnumPayload,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     match payload {
+//RS         TEnumPayload::Unit => {}
+//RS         TEnumPayload::Positional(args) => {
+//RS             for arg in args {
+//RS                 collect_cost_expr(&arg.value, function, span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TEnumPayload::Named(args) => {
+//RS             for (_, arg) in args {
+//RS                 collect_cost_expr(&arg.value, function, span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_cost_require(
+//RS     require: &TRequireKind,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     match require {
+//RS         TRequireKind::Require { cond, msg } => {
+//RS             collect_cost_expr(cond, function, span, loop_depth, sites);
+//RS             if let Some(msg) = msg {
+//RS                 collect_cost_expr(msg, function, span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TRequireKind::RequireEq { left, right } => {
+//RS             collect_cost_expr(left, function, span, loop_depth, sites);
+//RS             collect_cost_expr(right, function, span, loop_depth, sites);
+//RS         }
+//RS         TRequireKind::Panic { msg } => {
+//RS             collect_cost_expr(msg, function, span, loop_depth, sites);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_cost_core_closure(
+//RS     kind: &TCoreClosureKind,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     match kind {
+//RS         TCoreClosureKind::Spawn {
+//RS             group, executable, ..
+//RS         } => {
+//RS             if let Some(group) = group {
+//RS                 collect_cost_expr(group, function, span, loop_depth, sites);
+//RS             }
+//RS             collect_cost_lambda(executable, function, span, loop_depth, sites);
+//RS         }
+//RS         TCoreClosureKind::Realtime {
+//RS             rate,
+//RS             frames,
+//RS             executable,
+//RS         } => {
+//RS             collect_cost_expr(rate, function, span, loop_depth, sites);
+//RS             collect_cost_expr(frames, function, span, loop_depth, sites);
+//RS             collect_cost_lambda(executable, function, span, loop_depth, sites);
+//RS         }
+//RS         TCoreClosureKind::Serve { addr, .. } => {
+//RS             collect_cost_expr(addr, function, span, loop_depth, sites);
+//RS         }
+//RS         TCoreClosureKind::OnInterrupt { callback } => {
+//RS             collect_cost_expr(callback, function, span, loop_depth, sites);
+//RS         }
+//RS         TCoreClosureKind::Guard { executable, .. }
+//RS         | TCoreClosureKind::OnCommit { executable, .. }
+//RS         | TCoreClosureKind::OnRollback { executable, .. }
+//RS         | TCoreClosureKind::ReactiveDerived { executable, .. }
+//RS         | TCoreClosureKind::ReactiveEffect { executable, .. }
+//RS         | TCoreClosureKind::UiReactiveRender { executable, .. } => {
+//RS             collect_cost_lambda(executable, function, span, loop_depth, sites);
+//RS         }
+//RS         TCoreClosureKind::UiPreview {
+//RS             name,
+//RS             viewport,
+//RS             executable,
+//RS             ..
+//RS         } => {
+//RS             collect_cost_expr(name, function, span, loop_depth, sites);
+//RS             if let Some(viewport) = viewport {
+//RS                 collect_cost_expr(viewport, function, span, loop_depth, sites);
+//RS             }
+//RS             collect_cost_lambda(executable, function, span, loop_depth, sites);
+//RS         }
+//RS         TCoreClosureKind::UiButtonOnClick {
+//RS             label,
+//RS             shortcut,
+//RS             accessible_label,
+//RS             executable,
+//RS             ..
+//RS         } => {
+//RS             collect_cost_expr(label, function, span, loop_depth, sites);
+//RS             collect_cost_expr(shortcut, function, span, loop_depth, sites);
+//RS             collect_cost_expr(accessible_label, function, span, loop_depth, sites);
+//RS             collect_cost_lambda(executable, function, span, loop_depth, sites);
+//RS         }
+//RS         TCoreClosureKind::UiTextInputOnDrop {
+//RS             state,
+//RS             ime,
+//RS             executable,
+//RS             ..
+//RS         } => {
+//RS             collect_cost_expr(state, function, span, loop_depth, sites);
+//RS             collect_cost_expr(ime, function, span, loop_depth, sites);
+//RS             collect_cost_lambda(executable, function, span, loop_depth, sites);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_cost_fn_value(
+//RS     kind: &TFnValueKind,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     match kind {
+//RS         TFnValueKind::NamedFn { lambda, .. } => {
+//RS             if let Some(lambda) = lambda {
+//RS                 collect_cost_lambda(lambda, function, span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TFnValueKind::Policy {
+//RS             callee,
+//RS             policy_args,
+//RS             ..
+//RS         } => {
+//RS             collect_cost_expr(callee, function, span, loop_depth, sites);
+//RS             collect_cost_call_args(policy_args, function, span, loop_depth, sites);
+//RS         }
+//RS         TFnValueKind::Call { callee, args } => {
+//RS             collect_cost_expr(callee, function, span, loop_depth, sites);
+//RS             collect_cost_call_args(args, function, span, loop_depth, sites);
+//RS         }
+//RS         TFnValueKind::Send { value } => {
+//RS             collect_cost_expr(value, function, span, loop_depth, sites);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_cost_host_arg(
+//RS     arg: &THostArg,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     match arg {
+//RS         THostArg::Expr(value) | THostArg::Borrow(value) => {
+//RS             collect_cost_expr(value, function, span, loop_depth, sites);
+//RS         }
+//RS         THostArg::Lambda(lambda) => {
+//RS             collect_cost_lambda(lambda, function, span, loop_depth, sites);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_cost_call_args(
+//RS     args: &[TCallArg],
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     for arg in args {
+//RS         collect_cost_expr(&arg.value, function, span, loop_depth, sites);
+//RS     }
+//RS }
+//RS 
+//RS fn collect_cost_expr(
+//RS     expr: &TExpr,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     collect_cost_expr_with_state_and_context(expr, function, span, loop_depth, sites, None, false);
+//RS }
+//RS 
+//RS /// Collect an expression whose outcome carrier is consumed by its parent
+//RS /// operation. Nested expressions still use the ordinary retained-value rules.
+//RS fn collect_cost_expr_consumed(
+//RS     expr: &TExpr,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     collect_cost_expr_with_state_and_context(expr, function, span, loop_depth, sites, None, true);
+//RS }
+//RS 
+//RS fn collect_cost_expr_with_state_and_context(
+//RS     expr: &TExpr,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS     state_override: Option<TCostState>,
+//RS     outcome_consumed: bool,
+//RS ) {
+//RS     let expr_span = match &expr.kind {
+//RS         TExprKind::CoreCall { source_span, .. } => *source_span,
+//RS         _ => span,
+//RS     };
+//RS     if let Some(fact) = expr.fact_channel().cost {
+//RS         let state = state_override.unwrap_or(fact.state);
+//RS         // A carrier consumed by `??`, `?`, or a scrutiny node is not retained
+//RS         // across the iteration. Keep an optimizer proof for an available
+//RS         // fast-path operation, but do not project ordinary carrier creation as
+//RS         // a hidden super-linear cost.
+//RS         if !outcome_consumed
+//RS             || fact.kind != TCostKind::OutcomeConstruction
+//RS             || state == TCostState::OptimizerRemoved
+//RS         {
+//RS             sites.push(TCostSite {
+//RS                 function: function.to_string(),
+//RS                 span: expr_span,
+//RS                 kind: fact.kind,
+//RS                 state,
+//RS                 loop_depth,
+//RS             });
+//RS         }
+//RS     }
+//RS 
+//RS     match &expr.kind {
+//RS         TExprKind::InlineBlock(body) => {
+//RS             collect_cost_stmts(body, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::StrLit(parts) => {
+//RS             for part in parts {
+//RS                 if let TStrPart::Interp(value, _) = part {
+//RS                     collect_cost_expr(value, function, expr_span, loop_depth, sites);
+//RS                 }
+//RS             }
+//RS         }
+//RS         TExprKind::HostCall(host) => match host.as_ref() {
+//RS             THostCall::Helper { args, .. } => {
+//RS                 for arg in args {
+//RS                     collect_cost_host_arg(arg, function, expr_span, loop_depth, sites);
+//RS                 }
+//RS             }
+//RS             THostCall::Method { recv, args, .. } => {
+//RS                 collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+//RS                 for arg in args {
+//RS                     collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+//RS                 }
+//RS             }
+//RS             THostCall::CarrierFact { recv, .. } | THostCall::OptionProbe { inner: recv, .. } => {
+//RS                 collect_cost_expr_consumed(recv, function, expr_span, loop_depth, sites);
+//RS             }
+//RS             THostCall::CellGuardProject { recv, .. } | THostCall::TupleIndex { base: recv, .. } => {
+//RS                 collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+//RS             }
+//RS             THostCall::FixedListIndex { base, index, .. } => {
+//RS                 collect_cost_expr(base, function, expr_span, loop_depth, sites);
+//RS                 collect_cost_expr(index, function, expr_span, loop_depth, sites);
+//RS             }
+//RS             THostCall::TypedText { arg, .. } | THostCall::YieldSend { value: arg } => {
+//RS                 collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+//RS             }
+//RS             THostCall::GcEdit {
+//RS                 edit, index_temp, ..
+//RS             } => {
+//RS                 collect_cost_expr(edit, function, expr_span, loop_depth, sites);
+//RS                 if let Some((_, index)) = index_temp {
+//RS                     collect_cost_expr(index, function, expr_span, loop_depth, sites);
+//RS                 }
+//RS             }
+//RS             THostCall::StrMatchScan { subject, .. } => {
+//RS                 collect_cost_expr(subject, function, expr_span, loop_depth, sites);
+//RS             }
+//RS             THostCall::BinMatchScan { subject, .. } => {
+//RS                 collect_cost_expr(subject, function, expr_span, loop_depth, sites);
+//RS             }
+//RS             THostCall::TypedTextInterp { holes, .. } => {
+//RS                 for hole in holes {
+//RS                     collect_cost_expr(hole, function, expr_span, loop_depth, sites);
+//RS                 }
+//RS             }
+//RS             THostCall::ExpectSnapshot { value, .. } => {
+//RS                 collect_cost_expr(value, function, expr_span, loop_depth, sites);
+//RS             }
+//RS             THostCall::EnvSet { name, value, .. } => {
+//RS                 collect_cost_expr(name, function, expr_span, loop_depth, sites);
+//RS                 collect_cost_expr(value, function, expr_span, loop_depth, sites);
+//RS             }
+//RS             THostCall::ExpiringSecretNew {
+//RS                 value,
+//RS                 duration,
+//RS                 clock,
+//RS                 ..
+//RS             }
+//RS             | THostCall::ExpiringValueNew {
+//RS                 value,
+//RS                 duration,
+//RS                 clock,
+//RS             } => {
+//RS                 collect_cost_expr(value, function, expr_span, loop_depth, sites);
+//RS                 collect_cost_expr(duration, function, expr_span, loop_depth, sites);
+//RS                 collect_cost_expr(clock, function, expr_span, loop_depth, sites);
+//RS             }
+//RS             THostCall::CCallback { lambda, .. } => {
+//RS                 collect_cost_lambda(lambda, function, expr_span, loop_depth, sites);
+//RS             }
+//RS             THostCall::FnName(_)
+//RS             | THostCall::MemoStats { .. }
+//RS             | THostCall::GcRead { .. }
+//RS             | THostCall::SwitchSubjectField { .. }
+//RS             | THostCall::SwitchSubjectValue
+//RS             | THostCall::NumericBounds { .. } => {}
+//RS         },
+//RS         TExprKind::Call { args, .. }
+//RS         | TExprKind::StaticCall { args, .. }
+//RS         | TExprKind::ModuleCall { args, .. } => {
+//RS             collect_cost_call_args(args, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::AllocNew { args, .. } => {
+//RS             collect_cost_call_args(args, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::DistinctCtor { arg, .. }
+//RS         | TExprKind::RangeCheckedCtor { arg, .. }
+//RS         | TExprKind::DistinctConvert { arg, .. }
+//RS         | TExprKind::Print(arg)
+//RS         | TExprKind::Close(arg)
+//RS         | TExprKind::ResourceNew(arg)
+//RS         | TExprKind::DistinctRaw(arg)
+//RS         | TExprKind::Present(arg)
+//RS         | TExprKind::Ok(arg)
+//RS         | TExprKind::Err(arg, _)
+//RS         | TExprKind::Deref(arg)
+//RS         | TExprKind::RawOf(arg)
+//RS         | TExprKind::Clone(arg, _)
+//RS         | TExprKind::ExplicitCopy(arg)
+//RS         | TExprKind::MaterializeView(arg) => {
+//RS             collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::Drop(arg) => {
+//RS             collect_cost_expr_consumed(arg, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::UnitConvert { arg, rounding, .. } => {
+//RS             collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+//RS             if let Some((_, rounding)) = rounding {
+//RS                 collect_cost_expr(rounding, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::MathBuiltin { args, .. } | TExprKind::PreciseBuiltin { args, .. } => {
+//RS             for arg in args {
+//RS                 collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::RequireStop { kind, .. } => {
+//RS             collect_cost_require(kind, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::AmbientInput { prompt } => {
+//RS             if let Some(prompt) = prompt {
+//RS                 collect_cost_expr(prompt, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::Binary { lhs, rhs, .. }
+//RS         | TExprKind::LayoutCompare { lhs, rhs, .. }
+//RS         | TExprKind::NumericBinaryMethod {
+//RS             recv: lhs,
+//RS             arg: rhs,
+//RS             ..
+//RS         }
+//RS         | TExprKind::OverflowOpt { lhs, rhs, .. } => {
+//RS             collect_cost_expr(lhs, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(rhs, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::CompareChain { operands, .. } => {
+//RS             for operand in operands {
+//RS                 collect_cost_expr(operand, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::LayoutLit { inner }
+//RS         | TExprKind::Unary { operand: inner, .. }
+//RS         | TExprKind::Borrow { place: inner, .. }
+//RS         | TExprKind::Move(inner) => {
+//RS             collect_cost_expr(inner, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::StructLit { fields, .. } => {
+//RS             for (_, value, _) in fields {
+//RS                 collect_cost_expr(value, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::Field { recv, .. }
+//RS         | TExprKind::SharedGuardValue { guard: recv, .. }
+//RS         | TExprKind::SharedGuardMap { guard: recv, .. }
+//RS         | TExprKind::SharedGuardSplit { guard: recv, .. }
+//RS         | TExprKind::PtrFromAddr { addr: recv, .. }
+//RS         | TExprKind::MathSwizzleRead { recv, .. }
+//RS         | TExprKind::TaskGroupAll { tasks: recv }
+//RS         | TExprKind::TaskGroupRace { tasks: recv }
+//RS         | TExprKind::TaskGroupAny { tasks: recv } => {
+//RS             collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::PatternMatches { subj: recv, .. } => {
+//RS             collect_cost_expr_consumed(recv, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::SharedGuardWait {
+//RS             guard,
+//RS             condition,
+//RS             predicate,
+//RS         } => {
+//RS             collect_cost_expr(guard, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(condition, function, expr_span, loop_depth, sites);
+//RS             collect_cost_lambda(predicate, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::ConditionNotify { condition, .. } => {
+//RS             collect_cost_expr(condition, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::EnumLit { payload, .. } => {
+//RS             collect_cost_enum_payload(payload, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::JSONLit { arg, .. } | TExprKind::DBValueLit { arg, .. } => {
+//RS             if let Some(arg) = arg {
+//RS                 collect_cost_expr(&arg.0, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::ListLit(values) | TExprKind::ColumnarListLit { elems: values, .. } => {
+//RS             for value in values {
+//RS                 collect_cost_expr(value, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::ListSpread { parts } => {
+//RS             for part in parts {
+//RS                 match part {
+//RS                     ListSpreadPart::Elem(value) | ListSpreadPart::Spread(value) => {
+//RS                         collect_cost_expr(value, function, expr_span, loop_depth, sites);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         TExprKind::ColumnarGather { base, index, .. }
+//RS         | TExprKind::ColumnarColumnRead { base, index, .. }
+//RS         | TExprKind::Index { base, index, .. }
+//RS         | TExprKind::IndexHook { base, index, .. }
+//RS         | TExprKind::MathLaneIndex { base, index, .. } => {
+//RS             collect_cost_expr(base, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(index, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::PoolSlot { pool, id, .. } => {
+//RS             collect_cost_expr(pool, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(id, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::Slice {
+//RS             base,
+//RS             start,
+//RS             end,
+//RS             range,
+//RS             ..
+//RS         } => {
+//RS             collect_cost_expr(base, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(start, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(end, function, expr_span, loop_depth, sites);
+//RS             if let Some(range) = range {
+//RS                 collect_cost_expr(range, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::MethodCall { recv, args, .. } => {
+//RS             collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+//RS             collect_cost_call_args(args, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::DecodeUnder { segment, inner } => {
+//RS             collect_cost_expr(segment, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr_consumed(inner, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::BuiltinMethod { recv, args, .. }
+//RS         | TExprKind::ClosureMethod { recv, args, .. }
+//RS         | TExprKind::HandleMethod { recv, args, .. } => {
+//RS             collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+//RS             for arg in args {
+//RS                 collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::CoreCall { args, .. } => {
+//RS             for arg in args {
+//RS                 collect_cost_expr(arg, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::IfExpr {
+//RS             cond,
+//RS             then_body,
+//RS             then_value,
+//RS             else_body,
+//RS             else_value,
+//RS         } => {
+//RS             collect_cost_cond(cond, function, expr_span, loop_depth, sites);
+//RS             collect_cost_stmts(then_body, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(then_value, function, expr_span, loop_depth, sites);
+//RS             collect_cost_stmts(else_body, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(else_value, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::ResultHandler {
+//RS             subject, ok_body, ok_value, err_body, err_value, terminal, ..
+//RS         } => {
+//RS             collect_cost_expr_consumed(subject, function, expr_span, loop_depth, sites);
+//RS             collect_cost_stmts(ok_body, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(ok_value, function, expr_span, loop_depth, sites);
+//RS             collect_cost_stmts(err_body, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(err_value, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(terminal, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::Try { inner, note, .. } => {
+//RS             collect_cost_expr_consumed(inner, function, expr_span, loop_depth, sites);
+//RS             if let Some(note) = note {
+//RS                 collect_cost_expr(note, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::OrFallback { value, fallback } => {
+//RS             collect_cost_expr_with_state_and_context(
+//RS                 value,
+//RS                 function,
+//RS                 expr_span,
+//RS                 loop_depth,
+//RS                 sites,
+//RS                 Some(TCostState::OptimizerRemoved),
+//RS                 true,
+//RS             );
+//RS             match fallback {
+//RS                 TOrFallback::Value(value) | TOrFallback::Return(Some(value)) => {
+//RS                     collect_cost_expr(value, function, expr_span, loop_depth, sites);
+//RS                 }
+//RS                 TOrFallback::Panic { msg, .. } => {
+//RS                     collect_cost_expr(msg, function, expr_span, loop_depth, sites);
+//RS                 }
+//RS                 TOrFallback::Return(None)
+//RS                 | TOrFallback::Break
+//RS                 | TOrFallback::Continue
+//RS                 | TOrFallback::BreakLabel(_)
+//RS                 | TOrFallback::ContinueLabel(_) => {}
+//RS             }
+//RS         }
+//RS         TExprKind::OptField { base, .. } => {
+//RS             collect_cost_expr_consumed(base, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::OptionLift2 { f, a, b } => {
+//RS             collect_cost_expr(f, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr_consumed(a, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr_consumed(b, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::HostBorrowCallback { callable, .. } => {
+//RS             collect_cost_expr(callable, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::Lambda(lambda) => {
+//RS             collect_cost_lambda(lambda, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::NumericMethod { recv, .. } => {
+//RS             collect_cost_expr(recv, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::SelectRecv { builder, channel } => {
+//RS             collect_cost_expr(builder, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(channel, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::SelectAfter {
+//RS             builder,
+//RS             duration,
+//RS             value,
+//RS         } => {
+//RS             collect_cost_expr(builder, function, expr_span, loop_depth, sites);
+//RS             collect_cost_expr(duration, function, expr_span, loop_depth, sites);
+//RS             if let Some(value) = value {
+//RS                 collect_cost_expr(value, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::SelectWait { builder, .. } => {
+//RS             collect_cost_expr(builder, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::CoreClosureCall { kind } => {
+//RS             collect_cost_core_closure(kind, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::FnValue { kind } => {
+//RS             collect_cost_fn_value(kind, function, expr_span, loop_depth, sites);
+//RS         }
+//RS         TExprKind::ExternCall { args, .. } => {
+//RS             for arg in args {
+//RS                 collect_cost_expr(&arg.value, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::TupleLit { fields, .. } => {
+//RS             for (_, value) in fields {
+//RS                 collect_cost_expr(value, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TExprKind::MapLit(fields) => {
+//RS             for (left, right) in fields {
+//RS                 collect_cost_expr(left, function, expr_span, loop_depth, sites);
+//RS                 collect_cost_expr(right, function, expr_span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn collect_cost_cond(
+//RS     cond: &TIfCond,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     match cond {
+//RS         TIfCond::Plain(expr) => {
+//RS             collect_cost_expr(expr, function, span, loop_depth, sites);
+//RS         }
+//RS         TIfCond::IfLet { subj, .. } | TIfCond::IsNone { subj } | TIfCond::Matches { subj, .. } => {
+//RS             collect_cost_expr_consumed(subj, function, span, loop_depth, sites);
+//RS         }
+//RS         TIfCond::And { left, right } => {
+//RS             collect_cost_cond(left, function, span, loop_depth, sites);
+//RS             collect_cost_cond(right, function, span, loop_depth, sites);
+//RS         }
+//RS         TIfCond::WithPrelude { prelude, cond } => {
+//RS             collect_cost_stmts(prelude, function, span, loop_depth, sites);
+//RS             collect_cost_cond(cond, function, span, loop_depth, sites);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_cost_stmts(
+//RS     stmts: &[TStmt],
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     let mut current_span = span;
+//RS     for stmt in stmts {
+//RS         if let TStmt::SourceSpan(source_span) = stmt {
+//RS             current_span = *source_span;
+//RS             continue;
+//RS         }
+//RS         collect_cost_stmt(stmt, function, current_span, loop_depth, sites);
+//RS     }
+//RS }
+//RS 
+//RS fn collect_cost_stmt(
+//RS     stmt: &TStmt,
+//RS     function: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     loop_depth: usize,
+//RS     sites: &mut Vec<TCostSite>,
+//RS ) {
+//RS     match stmt {
+//RS         TStmt::Contract { contract } => {
+//RS             collect_cost_expr(&contract.condition, function, span, loop_depth, sites);
+//RS             collect_cost_expr(&contract.message, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::ContractScope {
+//RS             pre, body, post, ..
+//RS         } => {
+//RS             for contract in pre.iter().chain(post) {
+//RS                 collect_cost_expr(&contract.condition, function, span, loop_depth, sites);
+//RS                 collect_cost_expr(&contract.message, function, span, loop_depth, sites);
+//RS             }
+//RS             collect_cost_stmts(body, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::Let { init, .. }
+//RS         | TStmt::TupleDestructure { init, .. }
+//RS         | TStmt::StructDestructure { init, .. }
+//RS         | TStmt::ListDestructure { init, .. } => {
+//RS             collect_cost_expr(init, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::RefutableBind { init, fallback, .. } => {
+//RS             collect_cost_expr_consumed(init, function, span, loop_depth, sites);
+//RS             collect_cost_stmts(fallback, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::GcEdit {
+//RS             index_temp, stmt, ..
+//RS         } => {
+//RS             if let Some((_, index)) = index_temp {
+//RS                 collect_cost_expr(index, function, span, loop_depth, sites);
+//RS             }
+//RS             collect_cost_stmt(stmt, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::SplitViews { owner, .. } => {
+//RS             if let Some(owner) = owner {
+//RS                 collect_cost_expr(owner, function, span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TStmt::Assign { place, value, .. } => {
+//RS             collect_cost_place(place, function, span, loop_depth, sites);
+//RS             collect_cost_expr(value, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::Return(value) => {
+//RS             if let Some(value) = value {
+//RS                 collect_cost_expr(value, function, span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TStmt::ExprStmt(expr) => {
+//RS             collect_cost_expr_consumed(expr, function, span, loop_depth, sites)
+//RS         }
+//RS         TStmt::TaskGroup { limit, body, .. } => {
+//RS             if let Some(limit) = limit {
+//RS                 collect_cost_expr(limit, function, span, loop_depth, sites);
+//RS             }
+//RS             collect_cost_stmts(body, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::DeferClose { close, .. } => {
+//RS             collect_cost_expr(close, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::If {
+//RS             cond,
+//RS             then_body,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             collect_cost_cond(cond, function, span, loop_depth, sites);
+//RS             collect_cost_stmts(then_body, function, span, loop_depth, sites);
+//RS             if let Some(else_body) = else_body {
+//RS                 collect_cost_stmts(else_body, function, span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TStmt::Loop { body, .. } => {
+//RS             collect_cost_stmts(body, function, span, loop_depth + 1, sites);
+//RS         }
+//RS         TStmt::While { cond, body, .. } => {
+//RS             collect_cost_expr(cond, function, span, loop_depth + 1, sites);
+//RS             collect_cost_stmts(body, function, span, loop_depth + 1, sites);
+//RS         }
+//RS         TStmt::CountedLoop {
+//RS             init,
+//RS             cond,
+//RS             step,
+//RS             body,
+//RS             ..
+//RS         } => {
+//RS             collect_cost_stmt(init, function, span, loop_depth, sites);
+//RS             collect_cost_expr(cond, function, span, loop_depth + 1, sites);
+//RS             if let Some(step) = step {
+//RS                 collect_cost_stmt(step, function, span, loop_depth + 1, sites);
+//RS             }
+//RS             collect_cost_stmts(body, function, span, loop_depth + 1, sites);
+//RS         }
+//RS         TStmt::Range {
+//RS             source,
+//RS             start,
+//RS             end,
+//RS             step,
+//RS             body,
+//RS             ..
+//RS         } => {
+//RS             if let Some(source) = source {
+//RS                 collect_cost_expr(source, function, span, loop_depth, sites);
+//RS             }
+//RS             collect_cost_expr(start, function, span, loop_depth, sites);
+//RS             collect_cost_expr(end, function, span, loop_depth, sites);
+//RS             if let Some(step) = step {
+//RS                 collect_cost_expr(step, function, span, loop_depth, sites);
+//RS             }
+//RS             collect_cost_stmts(body, function, span, loop_depth + 1, sites);
+//RS         }
+//RS         TStmt::BreakValue { value, .. } => {
+//RS             collect_cost_expr(value, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::EnumMatch {
+//RS             scrutinee,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             collect_cost_expr_consumed(scrutinee, function, span, loop_depth, sites);
+//RS             for arm in arms {
+//RS                 collect_cost_stmts(&arm.body, function, span, loop_depth, sites);
+//RS             }
+//RS             if let Some(else_body) = else_body {
+//RS                 collect_cost_stmts(else_body, function, span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TStmt::RangeSwitch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS         } => {
+//RS             collect_cost_expr(subject, function, span, loop_depth, sites);
+//RS             for (_, _, body) in arms {
+//RS                 collect_cost_stmts(body, function, span, loop_depth, sites);
+//RS             }
+//RS             collect_cost_stmts(else_body, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::IndexAssign {
+//RS             base,
+//RS             index,
+//RS             value,
+//RS             is_map,
+//RS             ..
+//RS         } => {
+//RS             if *is_map {
+//RS                 sites.push(TCostSite {
+//RS                     function: function.to_string(),
+//RS                     span,
+//RS                     kind: TCostKind::CollectionCopyOnWrite,
+//RS                     state: TCostState::SemanticRemainder,
+//RS                     loop_depth,
+//RS                 });
+//RS             }
+//RS             collect_cost_expr(base, function, span, loop_depth, sites);
+//RS             collect_cost_expr(index, function, span, loop_depth, sites);
+//RS             collect_cost_expr(value, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::IndexFieldAssign(assign) => {
+//RS             if assign.is_map {
+//RS                 sites.push(TCostSite {
+//RS                     function: function.to_string(),
+//RS                     span,
+//RS                     kind: TCostKind::CollectionCopyOnWrite,
+//RS                     state: TCostState::SemanticRemainder,
+//RS                     loop_depth,
+//RS                 });
+//RS             }
+//RS             collect_cost_expr(&assign.base, function, span, loop_depth, sites);
+//RS             collect_cost_expr(&assign.index, function, span, loop_depth, sites);
+//RS             collect_cost_expr(&assign.value, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::IndexHookAssign {
+//RS             base, index, value, ..
+//RS         } => {
+//RS             collect_cost_expr(base, function, span, loop_depth, sites);
+//RS             collect_cost_expr(index, function, span, loop_depth, sites);
+//RS             collect_cost_expr(value, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::MathSwizzleAssign { base, value, .. } => {
+//RS             collect_cost_expr(base, function, span, loop_depth, sites);
+//RS             collect_cost_expr(value, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::ForIn {
+//RS             source,
+//RS             collection,
+//RS             step,
+//RS             body,
+//RS             ..
+//RS         } => {
+//RS             collect_cost_expr(source, function, span, loop_depth, sites);
+//RS             collect_cost_expr(collection, function, span, loop_depth, sites);
+//RS             if let Some(step) = step {
+//RS                 collect_cost_expr(step, function, span, loop_depth, sites);
+//RS             }
+//RS             collect_cost_stmts(body, function, span, loop_depth + 1, sites);
+//RS         }
+//RS         TStmt::Inline(body)
+//RS         | TStmt::DebugOnly(body)
+//RS         | TStmt::Unsafe { body, .. }
+//RS         | TStmt::SentryPolicy { body, .. }
+//RS         | TStmt::Impure(body)
+//RS         | TStmt::Region(body)
+//RS         | TStmt::Live { body }
+//RS         | TStmt::Shield { body } => {
+//RS             collect_cost_stmts(body, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::Reactive { executable, .. } => {
+//RS             collect_cost_lambda(executable, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::ScopeMember { kind, body } => {
+//RS             if let ScopeMemberKind::Timeout(timeout) = kind {
+//RS                 collect_cost_expr(timeout, function, span, loop_depth, sites);
+//RS             }
+//RS             collect_cost_stmts(body, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::MixedSwitch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             collect_cost_expr(subject, function, span, loop_depth, sites);
+//RS             for (condition, body) in arms {
+//RS                 collect_cost_expr(condition, function, span, loop_depth, sites);
+//RS                 collect_cost_stmts(body, function, span, loop_depth, sites);
+//RS             }
+//RS             if let Some(else_body) = else_body {
+//RS                 collect_cost_stmts(else_body, function, span, loop_depth, sites);
+//RS             }
+//RS         }
+//RS         TStmt::Layout { body, .. } => {
+//RS             collect_cost_stmts(body, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::ContextBlock { guards, body } => {
+//RS             for (_, guard) in guards {
+//RS                 collect_cost_expr(guard, function, span, loop_depth, sites);
+//RS             }
+//RS             collect_cost_stmts(body, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::Transact { body, .. } => {
+//RS             collect_cost_stmts(body, function, span, loop_depth, sites);
+//RS         }
+//RS         TStmt::SourceSpan(_)
+//RS         | TStmt::LineMarker(_)
+//RS         | TStmt::Break(_)
+//RS         | TStmt::Continue(_)
+//RS         | TStmt::Erased { .. } => {}
+//RS         TStmt::InvariantViolation { construct, span } => {
+//RS             panic!("checked TIR contains invariant violation `{construct}` at {span:?}");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct TCostCallable {
+//RS     module: usize,
+//RS     declaration_span: crate::Diagnostics::Span,
+//RS     source_span: Option<crate::Diagnostics::Span>,
+//RS     body_span: Option<crate::Diagnostics::Span>,
+//RS     /// A compiler-generated body (a built-in derive expanded from
+//RS     /// `Prelude/Derives.jet`). Its spans are provider-template offsets that
+//RS     /// overlap the host file's authored code, so span containment cannot tell
+//RS     /// its references from those of the authored callable at the same offsets.
+//RS     generated_body: bool,
+//RS     source_name: Option<String>,
+//RS     declaration_name: String,
+//RS     method: bool,
+//RS     declaration_path: String,
+//RS     label: String,
+//RS     foreign: bool,
+//RS     type_parameterized: bool,
+//RS     root: bool,
+//RS }
+//RS 
+//RS /// The checked source function of every callable declaration, keyed by its
+//RS /// module and declaration span, with whether its owner type is generic. The
+//RS /// cost passes ask once per callable, so the items are walked once per pass
+//RS /// instead of once per question (which made `jet check` quadratic).
+//RS struct CostFunctionIndex<'a> {
+//RS     functions: std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
+//RS }
+//RS 
+//RS impl<'a> CostFunctionIndex<'a> {
+//RS     fn new(bundle: &'a ProgramBundle) -> Self {
+//RS         let mut functions = std::collections::HashMap::new();
+//RS         for (module, data) in bundle.modules.iter().enumerate() {
+//RS             index_cost_functions(&data.items, module, &mut functions);
+//RS         }
+//RS         Self { functions }
+//RS     }
+//RS 
+//RS     fn get(&self, module: usize, span: crate::Diagnostics::Span) -> Option<(&'a Func, bool)> {
+//RS         self.functions.get(&(module, span)).copied()
+//RS     }
+//RS }
+//RS 
+//RS fn index_cost_functions<'a>(
+//RS     items: &'a [Item],
+//RS     module: usize,
+//RS     functions: &mut std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
+//RS ) {
+//RS     // The first declaration at a span wins, as in a front-to-back search.
+//RS     fn add<'a>(
+//RS         functions: &mut std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
+//RS         module: usize,
+//RS         methods: impl IntoIterator<Item = &'a Func>,
+//RS         owner_is_generic: bool,
+//RS     ) {
+//RS         for function in methods {
+//RS             functions
+//RS                 .entry((module, function.name_span))
+//RS                 .or_insert((function, owner_is_generic));
+//RS         }
+//RS     }
+//RS     // An `impl` extends a generic owner when this item list declares that
+//RS     // owner with type parameters.
+//RS     let generic_owners = items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             Item::Struct(definition) if !definition.type_params.is_empty() => {
+//RS                 Some(definition.name.as_str())
+//RS             }
+//RS             Item::Enum(definition) if !definition.type_params.is_empty() => {
+//RS                 Some(definition.name.as_str())
+//RS             }
+//RS             _ => None,
+//RS         })
+//RS         .collect::<std::collections::HashSet<_>>();
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(function) => add(functions, module, [function], false),
+//RS             Item::Struct(definition) => add(
+//RS                 functions,
+//RS                 module,
+//RS                 definition.methods.iter().chain(
+//RS                     definition
+//RS                         .trait_impls
+//RS                         .iter()
+//RS                         .flat_map(|implementation| implementation.methods.iter()),
+//RS                 ),
+//RS                 !definition.type_params.is_empty(),
+//RS             ),
+//RS             Item::Enum(definition) => add(
+//RS                 functions,
+//RS                 module,
+//RS                 definition.methods.iter().chain(
+//RS                     definition
+//RS                         .trait_impls
+//RS                         .iter()
+//RS                         .flat_map(|implementation| implementation.methods.iter()),
+//RS                 ),
+//RS                 !definition.type_params.is_empty(),
+//RS             ),
+//RS             Item::Impl(implementation) => add(
+//RS                 functions,
+//RS                 module,
+//RS                 &implementation.methods,
+//RS                 generic_owners.contains(implementation.type_name.as_str()),
+//RS             ),
+//RS             Item::CodeModule(code_module) => {
+//RS                 if let Some(body) = &code_module.body {
+//RS                     index_cost_functions(body, module, functions);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Every `(module, definition)` a selected build output names.
+//RS fn collect_selected_cost_outputs(
+//RS     items: &[Item],
+//RS     selected: &mut std::collections::HashSet<(usize, crate::Diagnostics::Span)>,
+//RS ) {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Const(value) => {
+//RS                 if let Some(output) = value.resolved_output.as_ref().filter(|output| output.selected) {
+//RS                     selected.insert((output.module, output.definition));
+//RS                 }
+//RS             }
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = module.body.as_deref() {
+//RS                     collect_selected_cost_outputs(body, selected);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Lookup tables over one pass's cost callables. Reachability asks them once
+//RS /// per checked name reference, so no question may rescan every callable.
+//RS struct CostCallableIndex {
+//RS     /// Module of each callable, by callable index.
+//RS     modules: Vec<usize>,
+//RS     /// Callables by declaration span, in callable order.
+//RS     by_span: std::collections::HashMap<crate::Diagnostics::Span, Vec<usize>>,
+//RS     /// Callables by semantic identity (`module::name`), in callable order.
+//RS     by_identity: std::collections::HashMap<String, Vec<usize>>,
+//RS     /// Callables with a body, under every module path spelling that
+//RS     /// [`cost_module_path_matches`] accepts for their module.
+//RS     bodies: std::collections::HashMap<String, CostBodySpans>,
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct CostBodySpans {
+//RS     authored: CostSpanList,
+//RS     generated: CostSpanList,
+//RS }
+//RS 
+//RS /// Body spans sorted by start, with the running maximum end, so a containment
+//RS /// query stops as soon as no earlier span can reach past the reference.
+//RS #[derive(Default)]
+//RS struct CostSpanList {
+//RS     /// `(start, end, callable index)`.
+//RS     spans: Vec<(usize, usize, usize)>,
+//RS     max_end: Vec<usize>,
+//RS }
+//RS 
+//RS impl CostSpanList {
+//RS     fn finish(&mut self) {
+//RS         self.spans.sort_unstable();
+//RS         let mut max_end = 0;
+//RS         self.max_end = self
+//RS             .spans
+//RS             .iter()
+//RS             .map(|&(_, end, _)| {
+//RS                 max_end = max_end.max(end);
+//RS                 max_end
+//RS             })
+//RS             .collect();
+//RS     }
+//RS 
+//RS     /// Push `(callable index, body width)` for every body containing
+//RS     /// `start..end`.
+//RS     fn containing(&self, start: usize, end: usize, out: &mut Vec<(usize, usize)>) {
+//RS         let mut position = self.spans.partition_point(|&(span_start, _, _)| span_start <= start);
+//RS         while position > 0 {
+//RS             position -= 1;
+//RS             if self.max_end[position] < end {
+//RS                 break;
+//RS             }
+//RS             let (span_start, span_end, index) = self.spans[position];
+//RS             if end <= span_end {
+//RS                 out.push((index, span_end.saturating_sub(span_start)));
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl CostCallableIndex {
+//RS     fn new(bundle: &ProgramBundle, callables: &[TCostCallable]) -> Self {
+//RS         let mut by_span = std::collections::HashMap::<_, Vec<usize>>::new();
+//RS         let mut by_identity = std::collections::HashMap::<_, Vec<usize>>::new();
+//RS         let mut bodies = std::collections::HashMap::<String, CostBodySpans>::new();
+//RS         for (index, callable) in callables.iter().enumerate() {
+//RS             by_span.entry(callable.declaration_span).or_default().push(index);
+//RS             if let Some(identity) = callable_semantic_identity(bundle, callable) {
+//RS                 by_identity.entry(identity).or_default().push(index);
+//RS             }
+//RS             let Some(span) = callable.body_span else {
+//RS                 continue;
+//RS             };
+//RS             let mut paths = Vec::new();
+//RS             if let Some(path) = bundle.name_ledger.module_path(callable.module) {
+//RS                 paths.push(path.to_string());
+//RS             }
+//RS             if let Some(module) = bundle.modules.get(callable.module) {
+//RS                 if !paths.iter().any(|path| path == module.display.as_str()) {
+//RS                     paths.push(module.display.as_str().to_string());
+//RS                 }
+//RS             }
+//RS             for path in paths {
+//RS                 let spans = bodies.entry(path).or_default();
+//RS                 let list = if callable.generated_body {
+//RS                     &mut spans.generated
+//RS                 } else {
+//RS                     &mut spans.authored
+//RS                 };
+//RS                 list.spans.push((span.start, span.end, index));
+//RS             }
+//RS         }
+//RS         for spans in bodies.values_mut() {
+//RS             spans.authored.finish();
+//RS             spans.generated.finish();
+//RS         }
+//RS         Self {
+//RS             modules: callables.iter().map(|callable| callable.module).collect(),
+//RS             by_span,
+//RS             by_identity,
+//RS             bodies,
+//RS         }
+//RS     }
+//RS 
+//RS     /// The first callable declared at `span` in `module`.
+//RS     fn declared(&self, module: usize, span: crate::Diagnostics::Span) -> Option<usize> {
+//RS         self.by_span
+//RS             .get(&span)?
+//RS             .iter()
+//RS             .copied()
+//RS             .find(|&index| self.modules[index] == module)
+//RS     }
+//RS 
+//RS     fn declared_at(&self, span: crate::Diagnostics::Span) -> &[usize] {
+//RS         self.by_span.get(&span).map_or(&[][..], Vec::as_slice)
+//RS     }
+//RS 
+//RS     fn with_identity(&self, identity: &str) -> &[usize] {
+//RS         self.by_identity.get(identity).map_or(&[][..], Vec::as_slice)
+//RS     }
+//RS }
+//RS 
+//RS fn cost_callable_is_root(
+//RS     bundle: &ProgramBundle,
+//RS     declaration: &jet_foundation::Names::NameDeclaration,
+//RS     function: Option<&crate::AST::Func>,
+//RS     app_graph: Option<&jet_foundation::App::AppGraph>,
+//RS     selected_outputs: &std::collections::HashSet<(usize, crate::Diagnostics::Span)>,
+//RS ) -> bool {
+//RS     let Some(function) = function else {
+//RS         return false;
+//RS     };
+//RS     if function.is_job
+//RS         || matches!(
+//RS             function.web_marker,
+//RS             Some(jet_foundation::WebPartition::WebPartitionMarker::WasmExport)
+//RS         )
+//RS         || (declaration.module == bundle.entry && function.name == "run")
+//RS         || selected_outputs.contains(&(declaration.module, declaration.span))
+//RS     {
+//RS         return true;
+//RS     }
+//RS     if declaration.module != bundle.entry {
+//RS         return false;
+//RS     }
+//RS     let Some(graph) = app_graph else { return false };
+//RS     graph
+//RS         .routes
+//RS         .iter()
+//RS         .any(|route| route.handler == function.name)
+//RS         || graph
+//RS             .actions
+//RS             .iter()
+//RS             .any(|action| action.handler == function.name)
+//RS         || graph
+//RS             .mounts
+//RS             .iter()
+//RS             .any(|mount| mount.handler == function.name)
+//RS }
+//RS 
+//RS fn cost_callables(
+//RS     bundle: &ProgramBundle,
+//RS     app_graph: Option<&jet_foundation::App::AppGraph>,
+//RS ) -> Vec<TCostCallable> {
+//RS     let functions = CostFunctionIndex::new(bundle);
+//RS     let mut selected_outputs = std::collections::HashSet::new();
+//RS     for module in &bundle.modules {
+//RS         collect_selected_cost_outputs(&module.items, &mut selected_outputs);
+//RS     }
+//RS     let mut callables = Vec::new();
+//RS     for declaration in bundle.name_ledger.declarations() {
+//RS         if !matches!(declaration.kind.as_str(), "function" | "method" | "extern") {
+//RS             continue;
+//RS         }
+//RS         let function = if declaration.kind == "extern" {
+//RS             None
+//RS         } else {
+//RS             functions.get(declaration.module, declaration.span)
+//RS         };
+//RS         if declaration.kind != "extern" && function.is_none() {
+//RS             continue;
+//RS         }
+//RS         let (source_span, body_span, source_name, inline_foreign) = function.as_ref().map_or(
+//RS             (None, None, None, false),
+//RS             |(function, _owner_is_generic)| {
+//RS                 let inline_foreign = function.inline_foreign.is_some();
+//RS                 (
+//RS                     Some(function.span),
+//RS                     (!inline_foreign).then_some(function.span),
+//RS                     Some(function.name.clone()),
+//RS                     inline_foreign,
+//RS                 )
+//RS             },
+//RS         );
+//RS         let type_parameterized = function
+//RS             .as_ref()
+//RS             .is_some_and(|(function, owner_is_generic)| {
+//RS                 *owner_is_generic || !function.type_params.is_empty()
+//RS             });
+//RS         let generated_body = function
+//RS             .as_ref()
+//RS             .is_some_and(|(function, _)| function.compiler_generated);
+//RS         let root = cost_callable_is_root(
+//RS             bundle,
+//RS             declaration,
+//RS             function.map(|(function, _)| function),
+//RS             app_graph,
+//RS             &selected_outputs,
+//RS         );
+//RS         let module_label = bundle
+//RS             .modules
+//RS             .get(declaration.module)
+//RS             .map(|module| module.display.as_str())
+//RS             .unwrap_or("<unknown module>");
+//RS         callables.push(TCostCallable {
+//RS             module: declaration.module,
+//RS             declaration_span: declaration.span,
+//RS             source_span,
+//RS             body_span,
+//RS             generated_body,
+//RS             source_name,
+//RS             declaration_name: declaration.name.clone(),
+//RS             method: declaration.kind == "method",
+//RS             declaration_path: declaration.path.clone(),
+//RS             label: format!("{module_label}:{}", declaration.path),
+//RS             foreign: declaration.kind == "extern" || inline_foreign,
+//RS             type_parameterized,
+//RS             root,
+//RS         });
+//RS     }
+//RS     callables
+//RS }
+//RS 
+//RS fn cost_module_path_matches(bundle: &ProgramBundle, module: usize, path: &str) -> bool {
+//RS     bundle
+//RS         .name_ledger
+//RS         .module_path(module)
+//RS         .is_some_and(|candidate| candidate == path)
+//RS         || bundle
+//RS             .modules
+//RS             .get(module)
+//RS             .is_some_and(|candidate| candidate.display.as_str() == path)
+//RS }
+//RS 
+//RS /// Callees of every callable, from checked function references and loaded
+//RS /// Core source calls. The graph does not depend on which callables are roots.
+//RS fn cost_call_graph(
+//RS     bundle: &ProgramBundle,
+//RS     callables: &[TCostCallable],
+//RS     index: &CostCallableIndex,
+//RS ) -> Vec<Vec<usize>> {
+//RS     let mut callees = vec![Vec::new(); callables.len()];
+//RS     for ((source, start, end), reference) in bundle.name_ledger.references() {
+//RS         if !is_checked_function_reference(reference) {
+//RS             continue;
+//RS         }
+//RS         let Some(target) = callable_for_reference(bundle, callables, index, reference) else {
+//RS             continue;
+//RS         };
+//RS         for caller in callables_containing_reference(index, source, *start, *end) {
+//RS             callees[caller].push(target);
+//RS         }
+//RS     }
+//RS     for (caller, target) in checked_core_source_call_edges(bundle, callables, index) {
+//RS         callees[caller].push(target);
+//RS     }
+//RS     callees
+//RS }
+//RS 
+//RS fn reachable_from_roots(callees: &[Vec<usize>], callables: &[TCostCallable]) -> Vec<bool> {
+//RS     let mut reachable = callables
+//RS         .iter()
+//RS         .map(|callable| callable.root)
+//RS         .collect::<Vec<_>>();
+//RS     let mut pending = (0..callables.len())
+//RS         .filter(|index| reachable[*index])
+//RS         .collect::<Vec<_>>();
+//RS     while let Some(caller) = pending.pop() {
+//RS         for &target in &callees[caller] {
+//RS             if !reachable[target] {
+//RS                 reachable[target] = true;
+//RS                 pending.push(target);
+//RS             }
+//RS         }
+//RS     }
+//RS     reachable
+//RS }
+//RS 
+//RS fn reachable_cost_callables(bundle: &ProgramBundle, callables: &[TCostCallable]) -> Vec<bool> {
+//RS     let index = CostCallableIndex::new(bundle, callables);
+//RS     reachable_from_roots(&cost_call_graph(bundle, callables, &index), callables)
+//RS }
+//RS 
+//RS fn core_source_module_indices(bundle: &ProgramBundle) -> std::collections::HashSet<usize> {
+//RS     bundle
+//RS         .modules
+//RS         .iter()
+//RS         .enumerate()
+//RS         .filter_map(|(index, module)| {
+//RS             let public_source = jet_foundation::CoreModuleExports::core_source_modules()
+//RS                 .iter()
+//RS                 .any(|source| {
+//RS                     source.alias == module.alias && source.path == module.display.as_str()
+//RS                 });
+//RS             let private_source = jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
+//RS                 .iter()
+//RS                 .any(|part| {
+//RS                     part.source.alias == module.alias
+//RS                         && part.source.path == module.display.as_str()
+//RS                 });
+//RS             (public_source || private_source).then_some(index)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn callable_semantic_identity(bundle: &ProgramBundle, callable: &TCostCallable) -> Option<String> {
+//RS     bundle
+//RS         .name_ledger
+//RS         .module_identity(callable.module)
+//RS         .map(|module| format!("{module}::{}", callable.declaration_name))
+//RS }
+//RS 
+//RS /// The callables a reference at `start..end` of `source` belongs to: the
+//RS /// innermost authored callable whose body contains it, plus every generated
+//RS /// callable whose body span contains it. A generated body carries template
+//RS /// offsets, so it must never outrank the authored callable really written at
+//RS /// those offsets (that pruned `inflate`'s callees once the derive template got
+//RS /// shorter than `inflate`). Crediting the reference to both only keeps extra
+//RS /// targets reachable; it never drops a live one.
+//RS fn callables_containing_reference(
+//RS     index: &CostCallableIndex,
+//RS     source: &str,
+//RS     start: usize,
+//RS     end: usize,
+//RS ) -> Vec<usize> {
+//RS     let Some(bodies) = index.bodies.get(source) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let mut found = Vec::new();
+//RS     bodies.generated.containing(start, end, &mut found);
+//RS     let mut containing = found.iter().map(|&(callable, _)| callable).collect::<Vec<_>>();
+//RS     containing.sort_unstable();
+//RS     found.clear();
+//RS     bodies.authored.containing(start, end, &mut found);
+//RS     // The narrowest body wins; the earliest callable breaks a width tie.
+//RS     containing.extend(
+//RS         found
+//RS             .into_iter()
+//RS             .min_by_key(|&(callable, width)| (width, callable))
+//RS             .map(|(callable, _)| callable),
+//RS     );
+//RS     containing
+//RS }
+//RS 
+//RS fn checked_function_reference_identity(
+//RS     reference: &jet_foundation::Names::NameReference,
+//RS ) -> Option<&str> {
+//RS     let identity = reference.semantic_identity.as_deref()?;
+//RS     match reference.kind.as_str() {
+//RS         "function" => Some(identity.strip_prefix("fn:").unwrap_or(identity)),
+//RS         "semantic" => identity.strip_prefix("fn:"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn is_checked_function_reference(reference: &jet_foundation::Names::NameReference) -> bool {
+//RS     reference.kind == "function" || checked_function_reference_identity(reference).is_some()
+//RS }
+//RS 
+//RS fn callable_for_reference(
+//RS     bundle: &ProgramBundle,
+//RS     callables: &[TCostCallable],
+//RS     index: &CostCallableIndex,
+//RS     reference: &jet_foundation::Names::NameReference,
+//RS ) -> Option<usize> {
+//RS     if reference.kind == "semantic" {
+//RS         let identity = checked_function_reference_identity(reference)?;
+//RS         return index.with_identity(identity).first().copied();
+//RS     }
+//RS     if reference.kind != "function" {
+//RS         return None;
+//RS     }
+//RS     let declared = index.declared_at(reference.def_span);
+//RS     let path_matches = |callable: usize| {
+//RS         cost_module_path_matches(bundle, callables[callable].module, &reference.module_path)
+//RS     };
+//RS     if let Some(identity) = checked_function_reference_identity(reference) {
+//RS         if let Some(&callable) = declared.iter().find(|&&callable| {
+//RS             path_matches(callable)
+//RS                 && callable_semantic_identity(bundle, &callables[callable]).as_deref()
+//RS                     == Some(identity)
+//RS         }) {
+//RS             return Some(callable);
+//RS         }
+//RS     }
+//RS     declared.iter().copied().find(|&callable| path_matches(callable))
+//RS }
+//RS 
+//RS fn checked_core_module_path_from_receiver(
+//RS     receiver: &Expr,
+//RS     core_imports: &std::collections::HashMap<String, String>,
+//RS     name_ledger: &jet_foundation::Names::NameLedger,
+//RS     source_path: &str,
+//RS ) -> Option<String> {
+//RS     match receiver {
+//RS         Expr::Ident(alias, span)
+//RS             if name_ledger
+//RS                 .reference(source_path, span.start, span.end)
+//RS                 .is_some_and(|reference| reference.kind == "import_alias") =>
+//RS         {
+//RS             core_imports.get(alias).cloned()
+//RS         }
+//RS         Expr::Field(base, leaf, _) => {
+//RS             let module = checked_core_module_path_from_receiver(
+//RS                 base,
+//RS                 core_imports,
+//RS                 name_ledger,
+//RS                 source_path,
+//RS             )?;
+//RS             let submodule = format!("{module}.{leaf}");
+//RS             crate::Syntax::is_known_core_module(&submodule).then_some(submodule)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn checked_core_source_signature<'a>(
+//RS     module: &str,
+//RS     method: &str,
+//RS     resolved_return: Option<&Type>,
+//RS     signatures: &'a std::collections::HashMap<
+//RS         (String, String),
+//RS         crate::Codegen::CoreSourceFunctionSignature,
+//RS     >,
+//RS ) -> Option<&'a crate::Codegen::CoreSourceFunctionSignature> {
+//RS     if resolved_return.is_none()
+//RS         || !jet_foundation::CoreModuleExports::core_source_owns(module, method)
+//RS     {
+//RS         return None;
+//RS     }
+//RS     signatures.get(&(module.to_string(), method.to_string()))
+//RS }
+//RS 
+//RS fn checked_local_function_declaration_span(
+//RS     module: usize,
+//RS     name: &str,
+//RS     resolved_return: Option<&Type>,
+//RS     declaration: Option<&jet_foundation::Names::NameDeclaration>,
+//RS ) -> Option<crate::Diagnostics::Span> {
+//RS     let declaration = declaration?;
+//RS     (resolved_return.is_some()
+//RS         && declaration.module == module
+//RS         && declaration.name == name
+//RS         && declaration.kind == "function")
+//RS         .then_some(declaration.span)
+//RS }
+//RS 
+//RS fn checked_local_function_call_target(
+//RS     bundle: &ProgramBundle,
+//RS     index: &CostCallableIndex,
+//RS     module: usize,
+//RS     call: &crate::AST::Call,
+//RS ) -> Option<usize> {
+//RS     let declaration_span = checked_local_function_declaration_span(
+//RS         module,
+//RS         &call.name,
+//RS         call.resolved_ret.as_ref(),
+//RS         bundle.name_ledger.declaration(module, &call.name),
+//RS     )?;
+//RS     index.declared(module, declaration_span)
+//RS }
+//RS 
+//RS // Direct Core-module syntax is sema-checked as a Core call and may not leave a
+//RS // function NameReference. Keep its loaded source body in the same checked
+//RS // closure TIR uses to emit the canonical source-module target.
+//RS fn checked_core_source_call_edges(
+//RS     bundle: &ProgramBundle,
+//RS     callables: &[TCostCallable],
+//RS     index: &CostCallableIndex,
+//RS ) -> Vec<(usize, usize)> {
+//RS     let signatures = crate::Codegen::core_source_sig_map(bundle);
+//RS     let core_imports = (0..bundle.modules.len())
+//RS         .map(|module| crate::Codegen::core_import_map(bundle, module))
+//RS         .collect::<Vec<_>>();
+//RS     let core_modules = core_source_module_indices(bundle);
+//RS     let functions = CostFunctionIndex::new(bundle);
+//RS     let mut edges = Vec::new();
+//RS 
+//RS     for (caller_index, callable) in callables.iter().enumerate() {
+//RS         let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
+//RS             continue;
+//RS         };
+//RS         let Some(imports) = core_imports.get(callable.module) else {
+//RS             continue;
+//RS         };
+//RS         let Some(source_path) = bundle.name_ledger.module_path(callable.module) else {
+//RS             continue;
+//RS         };
+//RS         for statement in &function.body {
+//RS             statement.for_each_expr(&mut |expression: &Expr| match expression {
+//RS                 Expr::Call(call) if core_modules.contains(&callable.module) => {
+//RS                     if let Some(target) = checked_local_function_call_target(
+//RS                         bundle,
+//RS                         index,
+//RS                         callable.module,
+//RS                         call,
+//RS                     ) {
+//RS                         edges.push((caller_index, target));
+//RS                     }
+//RS                 }
+//RS                 Expr::MethodCall {
+//RS                     receiver,
+//RS                     method,
+//RS                     resolved_ret,
+//RS                     ..
+//RS                 } => {
+//RS                     let Some(module) = checked_core_module_path_from_receiver(
+//RS                         receiver.as_ref(),
+//RS                         imports,
+//RS                         &bundle.name_ledger,
+//RS                         source_path,
+//RS                     ) else {
+//RS                         return;
+//RS                     };
+//RS                     let Some(signature) = checked_core_source_signature(
+//RS                         &module,
+//RS                         method.as_str(),
+//RS                         resolved_ret.as_ref(),
+//RS                         &signatures,
+//RS                     ) else {
+//RS                         return;
+//RS                     };
+//RS                     let module_identity = signature.module_identity.as_str();
+//RS                     if bundle
+//RS                         .name_ledger
+//RS                         .module_identity(callable.module)
+//RS                         .as_deref()
+//RS                         == Some(module_identity)
+//RS                     {
+//RS                         return;
+//RS                     }
+//RS                     let target_identity = format!("{module_identity}::{method}");
+//RS                     if let Some(&target_index) = index
+//RS                         .with_identity(&target_identity)
+//RS                         .iter()
+//RS                         .find(|&&target| core_modules.contains(&callables[target].module))
+//RS                     {
+//RS                         edges.push((caller_index, target_index));
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             });
+//RS         }
+//RS     }
+//RS     edges.sort_unstable();
+//RS     edges.dedup();
+//RS     edges
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod checked_function_reference_tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn core_module_function_reference_is_a_reachability_edge() {
+//RS         let reference = jet_foundation::Names::NameReference {
+//RS             module_path: "Core/http/http.jet".to_string(),
+//RS             kind: "semantic".to_string(),
+//RS             def_span: crate::Diagnostics::Span::new(1, 2),
+//RS             semantic_identity: Some(
+//RS                 "fn:<corelib>/Core/http::Core/http/client.jet::request".to_string(),
+//RS             ),
+//RS         };
+//RS 
+//RS         assert_eq!(
+//RS             checked_function_reference_identity(&reference),
+//RS             Some("<corelib>/Core/http::Core/http/client.jet::request")
+//RS         );
+//RS         assert!(is_checked_function_reference(&reference));
+//RS     }
+//RS 
+//RS     #[test]
+// END-PORT-PENDING 0509 crates/jet-codegen/src/Codegen/TIR/mod.rs:8627-10431
+

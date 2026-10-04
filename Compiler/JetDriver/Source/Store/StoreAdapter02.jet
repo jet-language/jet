@@ -1,0 +1,984 @@
+// PORT-PENDING 0832 crates-jet-store-src-lib-module-group-slice-1792: crates/jet-store/src/lib.rs:1792-2771
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn read_file(path: &Path) -> Result<RawRead, StoreError> {
+//RS     let metadata = match fs::symlink_metadata(path) {
+//RS         Ok(metadata) => metadata,
+//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(RawRead::Missing),
+//RS         Err(error) => return Err(StoreError::Io(error)),
+//RS     };
+//RS     if metadata.file_type().is_symlink() || !metadata.is_file() {
+//RS         return Ok(RawRead::Corrupt("entry is not a regular file".to_string()));
+//RS     }
+//RS     let mut file = match File::open(path) {
+//RS         Ok(file) => file,
+//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => {
+//RS             return Ok(RawRead::Corrupt("entry disappeared while opening".to_string()));
+//RS         }
+//RS         Err(error) => return Err(StoreError::Io(error)),
+//RS     };
+//RS     let held = file.metadata()?;
+//RS     if !same_file(&metadata, &held) {
+//RS         return Ok(RawRead::Corrupt("entry changed while opening".to_string()));
+//RS     }
+//RS     let mut bytes = Vec::with_capacity((held.len() as usize).min(64 * 1024));
+//RS     file.read_to_end(&mut bytes)?;
+//RS     let after = file.metadata()?;
+//RS     let path_after = fs::symlink_metadata(path)?;
+//RS     if bytes.len() as u64 != held.len() || !same_file(&held, &after) || !same_file(&held, &path_after) {
+//RS         return Ok(RawRead::Corrupt("entry changed while reading".to_string()));
+//RS     }
+//RS     Ok(RawRead::Bytes(bytes))
+//RS }
+//RS 
+//RS fn encode_action(action: ActionHandle, record: &[u8]) -> Vec<u8> {
+//RS     let digest = sha256(record);
+//RS     let mut output = Vec::with_capacity(ACTION_MAGIC.len() + 32 + 8 + 32 + record.len());
+//RS     output.extend_from_slice(ACTION_MAGIC);
+//RS     output.extend_from_slice(action.digest().as_bytes());
+//RS     output.extend_from_slice(&(record.len() as u64).to_le_bytes());
+//RS     output.extend_from_slice(&digest);
+//RS     output.extend_from_slice(record);
+//RS     output
+//RS }
+//RS 
+//RS fn decode_action(action: ActionHandle, bytes: &[u8]) -> Result<Vec<u8>, String> {
+//RS     let header_len = ACTION_MAGIC.len() + 32 + 8 + 32;
+//RS     if bytes.len() < header_len || !bytes.starts_with(ACTION_MAGIC) {
+//RS         return Err("action record has an unknown version or short header".to_string());
+//RS     }
+//RS     let key_start = ACTION_MAGIC.len();
+//RS     let key_end = key_start + 32;
+//RS     if bytes[key_start..key_end] != *action.digest().as_bytes() {
+//RS         return Err("action key does not match its path".to_string());
+//RS     }
+//RS     let length_start = key_end;
+//RS     let length_end = length_start + 8;
+//RS     let length_bytes: [u8; 8] = bytes[length_start..length_end]
+//RS         .try_into()
+//RS         .map_err(|_| "action length header is truncated".to_string())?;
+//RS     let length = u64::from_le_bytes(length_bytes);
+//RS     let digest_start = length_end;
+//RS     let digest_end = digest_start + 32;
+//RS     let payload = &bytes[digest_end..];
+//RS     if length != payload.len() as u64 {
+//RS         return Err("action record length does not match its payload".to_string());
+//RS     }
+//RS     if sha256(payload) != bytes[digest_start..digest_end] {
+//RS         return Err("action record payload digest mismatch".to_string());
+//RS     }
+//RS     Ok(payload.to_vec())
+//RS }
+//RS 
+//RS fn is_unsupported_store_version(bytes: &[u8]) -> bool {
+//RS     let Some(versioned) = bytes.strip_prefix(b"jet.store.v") else {
+//RS         return false;
+//RS     };
+//RS     let Some((&version, suffix)) = versioned.split_first() else {
+//RS         return false;
+//RS     };
+//RS     version.is_ascii_digit() && version != b'1' && suffix.first() == Some(&0)
+//RS }
+//RS 
+//RS fn action_for_key(key: &str) -> Result<ActionHandle, StoreError> {
+//RS     Ok(ActionHandle::new(Digest::from_hex(key)?))
+//RS }
+//RS 
+//RS fn encode_artifact(object: ObjectHandle, executable: bool) -> Vec<u8> {
+//RS     let mut bytes = Vec::with_capacity(ARTIFACT_MAGIC.len() + 32 + 8 + 1);
+//RS     bytes.extend_from_slice(ARTIFACT_MAGIC);
+//RS     bytes.extend_from_slice(object.digest().as_bytes());
+//RS     bytes.extend_from_slice(&object.length().to_le_bytes());
+//RS     bytes.push(u8::from(executable));
+//RS     bytes
+//RS }
+//RS 
+//RS fn decode_artifact(bytes: &[u8]) -> Option<(ObjectHandle, bool)> {
+//RS     let expected = ARTIFACT_MAGIC.len() + 32 + 8 + 1;
+//RS     if bytes.len() != expected || !bytes.starts_with(ARTIFACT_MAGIC) {
+//RS         return None;
+//RS     }
+//RS     let digest_start = ARTIFACT_MAGIC.len();
+//RS     let digest_end = digest_start + 32;
+//RS     let length_end = digest_end + 8;
+//RS     let digest: [u8; 32] = bytes[digest_start..digest_end].try_into().ok()?;
+//RS     let length = u64::from_le_bytes(bytes[digest_end..length_end].try_into().ok()?);
+//RS     let executable = match bytes[length_end] {
+//RS         0 => false,
+//RS         1 => true,
+//RS         _ => return None,
+//RS     };
+//RS     Some((ObjectHandle::new(Digest(digest), length), executable))
+//RS }
+//RS 
+//RS fn is_executable(metadata: &fs::Metadata) -> bool {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         metadata.permissions().mode() & 0o111 != 0
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = metadata;
+//RS         false
+//RS     }
+//RS }
+//RS 
+//RS fn parse_lease(_path: &Path, bytes: &[u8]) -> Option<LeaseRecord> {
+//RS     let text = std::str::from_utf8(bytes).ok()?;
+//RS     let mut lines = text.lines();
+//RS     let header: Vec<&str> = lines.next()?.split('|').collect();
+//RS     if header.len() != 4 || header[0] != STORE_VERSION || header[1] != "lease" {
+//RS         return None;
+//RS     }
+//RS     let pid = header[2].parse().ok()?;
+//RS     if header[3].is_empty() {
+//RS         return None;
+//RS     }
+//RS     let owner = ProcessIdentity::new(pid, header[3]);
+//RS     let mut targets = BTreeSet::new();
+//RS     for line in lines {
+//RS         let fields: Vec<&str> = line.split('|').collect();
+//RS         if fields.len() != 2 {
+//RS             return None;
+//RS         }
+//RS         let key = parse_wire_key(fields[0], fields[1])?;
+//RS         targets.insert(key);
+//RS     }
+//RS     Some(LeaseRecord {
+//RS         owner,
+//RS         targets: targets.into_iter().collect(),
+//RS     })
+//RS }
+//RS 
+//RS fn parse_owner_line(bytes: &[u8]) -> Option<ProcessIdentity> {
+//RS     let text = std::str::from_utf8(bytes).ok()?;
+//RS     let fields: Vec<&str> = text.trim_end_matches('\n').split('|').collect();
+//RS     if fields.len() != 4 || fields[0] != STORE_VERSION || fields[1] != "lock" || fields[3].is_empty() {
+//RS         return None;
+//RS     }
+//RS     Some(ProcessIdentity::new(fields[2].parse().ok()?, fields[3]))
+//RS }
+//RS 
+//RS fn read_journal(path: &Path) -> Result<JournalState, StoreError> {
+//RS     let bytes = match fs::read(path) {
+//RS         Ok(bytes) => bytes,
+//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => {
+//RS             return Ok(JournalState {
+//RS                 valid: true,
+//RS                 ..JournalState::default()
+//RS             })
+//RS         }
+//RS         Err(error) => return Err(StoreError::Io(error)),
+//RS     };
+//RS     let mut state = JournalState {
+//RS         valid: true,
+//RS         bytes: bytes.len() as u64,
+//RS         ..JournalState::default()
+//RS     };
+//RS     for line in bytes.split(|byte| *byte == b'\n') {
+//RS         if line.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let Some((operation, key, sequence)) = parse_journal_line(line) else {
+//RS             state.valid = false;
+//RS             break;
+//RS         };
+//RS         state.last_sequence = state.last_sequence.max(sequence);
+//RS         if operation == "remove" {
+//RS             state.entries.remove(&key);
+//RS         } else {
+//RS             state.entries.insert(key, JournalMeta { last_use: sequence });
+//RS         }
+//RS     }
+//RS     Ok(state)
+//RS }
+//RS 
+//RS /// One checksummed journal line as `(operation, key, sequence)`; `None` for a
+//RS /// torn, foreign or corrupt line.
+//RS fn parse_journal_line(line: &[u8]) -> Option<(&str, EntryKey, u64)> {
+//RS     let line = line.strip_suffix(b"\r").unwrap_or(line);
+//RS     let text = std::str::from_utf8(line).ok()?;
+//RS     let fields: Vec<&str> = text.split('|').collect();
+//RS     if fields.len() != 7 || fields[0] != STORE_VERSION {
+//RS         return None;
+//RS     }
+//RS     // The checksum covers everything before it, trailing separator included.
+//RS     let prefix = &text[..text.len() - fields[6].len()];
+//RS     if sha256_hex(prefix.as_bytes()) != fields[6] {
+//RS         return None;
+//RS     }
+//RS     fields[4].parse::<u64>().ok()?;
+//RS     let sequence = fields[5].parse::<u64>().ok()?;
+//RS     let key = parse_wire_key(fields[2], fields[3])?;
+//RS     matches!(fields[1], "put" | "touch" | "remove").then_some((fields[1], key, sequence))
+//RS }
+//RS 
+//RS /// Bytes read from the journal's end to find its final line. A line is one
+//RS /// wire key plus a few short fields, far below this.
+//RS const JOURNAL_TAIL_WINDOW: u64 = 64 * 1024;
+//RS 
+//RS /// The journal's last sequence number, read from its final line alone.
+//RS ///
+//RS /// Every append numbers its lines after the previous maximum and compaction
+//RS /// renumbers in file order, so the final line carries the maximum. An append
+//RS /// therefore costs O(1) instead of re-verifying the whole journal, which grows
+//RS /// with every store hit. `None` marks a torn or corrupt tail: the caller
+//RS /// compacts. Full-journal readers (status, prune, compaction) still verify
+//RS /// every line.
+//RS fn journal_tail_sequence(path: &Path) -> Result<Option<u64>, StoreError> {
+//RS     let mut file = match File::open(path) {
+//RS         Ok(file) => file,
+//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Some(0)),
+//RS         Err(error) => return Err(StoreError::Io(error)),
+//RS     };
+//RS     let length = file.metadata()?.len();
+//RS     if length == 0 {
+//RS         return Ok(Some(0));
+//RS     }
+//RS     let window = length.min(JOURNAL_TAIL_WINDOW);
+//RS     file.seek(io::SeekFrom::Start(length - window))?;
+//RS     let mut tail = Vec::with_capacity(window as usize);
+//RS     file.take(window).read_to_end(&mut tail)?;
+//RS     let Some(body) = tail.strip_suffix(b"\n") else {
+//RS         return Ok(None);
+//RS     };
+//RS     let start = match body.iter().rposition(|byte| *byte == b'\n') {
+//RS         Some(newline) => newline + 1,
+//RS         None if window < length => return Ok(None),
+//RS         None => 0,
+//RS     };
+//RS     Ok(parse_journal_line(&body[start..]).map(|(_, _, sequence)| sequence))
+//RS }
+//RS 
+//RS fn parse_wire_key(kind: &str, value: &str) -> Option<EntryKey> {
+//RS     match kind {
+//RS         "blob" => Digest::from_hex(value).ok().map(|_| EntryKey::Blob(value.to_string())),
+//RS         "action" => Digest::from_hex(value).ok().map(|_| EntryKey::Action(value.to_string())),
+//RS         "lto" => {
+//RS             let (namespace, digest) = value.split_once('~')?;
+//RS             LtoNamespace::new(namespace).ok()?;
+//RS             Digest::from_hex(digest).ok()?;
+//RS             Some(EntryKey::Lto(namespace.to_string(), digest.to_string()))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn scan_flat_namespace(
+//RS     directory: &Path,
+//RS     kind: EntryKind,
+//RS     namespace: Option<String>,
+//RS     output: &mut Vec<StoredEntry>,
+//RS ) -> Result<(), StoreError> {
+//RS     for path in sorted_children(directory)? {
+//RS         let metadata = match fs::symlink_metadata(&path) {
+//RS             Ok(metadata) => metadata,
+//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+//RS             Err(error) => return Err(StoreError::Io(error)),
+//RS         };
+//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
+//RS             continue;
+//RS         }
+//RS         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+//RS             continue;
+//RS         };
+//RS         if Digest::from_hex(name).is_err() {
+//RS             continue;
+//RS         }
+//RS         let key = match kind {
+//RS             EntryKind::Blob => EntryKey::Blob(name.to_string()),
+//RS             EntryKind::Action => EntryKey::Action(name.to_string()),
+//RS             EntryKind::Lto => EntryKey::Lto(namespace.clone().expect("LTO namespace"), name.to_string()),
+//RS         };
+//RS         output.push(StoredEntry {
+//RS             key,
+//RS             path,
+//RS             size_bytes: metadata.len(),
+//RS             last_use: 0,
+//RS             pinned: false,
+//RS         });
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn sorted_children(directory: &Path) -> Result<Vec<PathBuf>, StoreError> {
+//RS     let mut paths = Vec::new();
+//RS     for entry in fs::read_dir(directory)? {
+//RS         paths.push(entry?.path());
+//RS     }
+//RS     paths.sort_by(|left, right| left.as_os_str().cmp(right.as_os_str()));
+//RS     Ok(paths)
+//RS }
+//RS 
+//RS fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+//RS     replace_file(path, bytes, true)
+//RS }
+//RS 
+//RS /// `atomic_write` without the disk syncs: readers still see the old file or
+//RS /// the whole new one, but a crash may lose the new one.
+//RS fn replace_unsynced(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+//RS     replace_file(path, bytes, false)
+//RS }
+//RS 
+//RS fn replace_file(path: &Path, bytes: &[u8], durable: bool) -> Result<(), StoreError> {
+//RS     let parent = path
+//RS         .parent()
+//RS         .ok_or_else(|| StoreError::Config(format!("store path has no parent: {}", path.display())))?;
+//RS     ensure_dir(parent)?;
+//RS     let file_name = path
+//RS         .file_name()
+//RS         .and_then(|name| name.to_str())
+//RS         .ok_or_else(|| StoreError::InvalidKey(path.display().to_string()))?;
+//RS     let temporary = parent.join(format!(".{file_name}.tmp-{}-{}", std::process::id(), next_counter()));
+//RS     let result = (|| -> Result<(), StoreError> {
+//RS         let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+//RS         file.write_all(bytes)?;
+//RS         if durable {
+//RS             file.sync_all()?;
+//RS         }
+//RS         drop(file);
+//RS         fs::rename(&temporary, path)?;
+//RS         if durable {
+//RS             sync_dir(parent)?;
+//RS         }
+//RS         Ok(())
+//RS     })();
+//RS     if result.is_err() {
+//RS         let _ = fs::remove_file(&temporary);
+//RS     }
+//RS     result
+//RS }
+//RS fn set_executable(path: &Path, executable: bool) -> Result<(), StoreError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         let metadata = fs::metadata(path)?;
+//RS         let mut permissions = metadata.permissions();
+//RS         let mode = permissions.mode();
+//RS         permissions.set_mode(if executable { mode | 0o111 } else { mode & !0o111 });
+//RS         fs::set_permissions(path, permissions)?;
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = (path, executable);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn create_new_synced(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+//RS     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+//RS     file.write_all(bytes)?;
+//RS     file.sync_all()?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn append_synced(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+//RS     if let Ok(metadata) = fs::symlink_metadata(path) {
+//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
+//RS             return Err(StoreError::Corrupt {
+//RS                 path: path.to_path_buf(),
+//RS                 reason: "journal is not a regular file".to_string(),
+//RS             });
+//RS         }
+//RS     }
+//RS     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+//RS     file.write_all(bytes)?;
+//RS     file.sync_all()?;
+//RS     sync_dir(path.parent().expect("journal path has parent"))?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn ensure_dir(path: &Path) -> Result<(), StoreError> {
+//RS     match fs::symlink_metadata(path) {
+//RS         Ok(metadata) if metadata.file_type().is_symlink() => Err(StoreError::Config(format!(
+//RS             "store directory is a symlink: {}",
+//RS             path.display()
+//RS         ))),
+//RS         Ok(metadata) if metadata.is_dir() => Ok(()),
+//RS         Ok(_) => Err(StoreError::Config(format!("store path is not a directory: {}", path.display()))),
+//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => {
+//RS             fs::create_dir(path)?;
+//RS             sync_dir(path.parent().expect("created directory has parent"))
+//RS         }
+//RS         Err(error) => Err(StoreError::Io(error)),
+//RS     }
+//RS }
+//RS 
+//RS fn sync_dir(path: &Path) -> Result<(), StoreError> {
+//RS     match File::open(path).and_then(|file| file.sync_all()) {
+//RS         Ok(()) => Ok(()),
+//RS         Err(error) if matches!(error.kind(), io::ErrorKind::Unsupported | io::ErrorKind::InvalidInput) => Ok(()),
+//RS         Err(error) => Err(StoreError::Io(error)),
+//RS     }
+//RS }
+//RS 
+//RS fn same_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::MetadataExt;
+//RS         left.dev() == right.dev() && left.ino() == right.ino() && left.len() == right.len()
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         left.len() == right.len() && left.modified().ok() == right.modified().ok()
+//RS     }
+//RS }
+//RS 
+//RS fn validate_component(value: &str, label: &str) -> Result<(), StoreError> {
+//RS     if value.is_empty() || value == "." || value == ".." || value.len() > 128 {
+//RS         return Err(StoreError::InvalidKey(format!("invalid {label} `{value}`")));
+//RS     }
+//RS     if !value
+//RS         .bytes()
+//RS         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+//RS     {
+//RS         return Err(StoreError::InvalidKey(format!("invalid {label} `{value}`")));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn parse_optional_size(name: &str) -> Result<Option<u64>, StoreError> {
+//RS     match std::env::var(name) {
+//RS         Ok(value) => parse_size(&value).map(Some).map_err(|error| match error {
+//RS             StoreError::Config(message) => StoreError::Config(format!("{name}: {message}")),
+//RS             other => other,
+//RS         }),
+//RS         Err(std::env::VarError::NotPresent) => Ok(None),
+//RS         Err(std::env::VarError::NotUnicode(_)) => Err(StoreError::Config(format!("{name} is not valid UTF-8"))),
+//RS     }
+//RS }
+//RS 
+//RS /// Parse a byte size such as `4G`, `512MiB`, or a bare byte count.
+//RS pub fn parse_size(value: &str) -> Result<u64, StoreError> {
+//RS     let value = value.trim();
+//RS     if value.is_empty() {
+//RS         return Err(StoreError::Config("size cannot be empty".to_string()));
+//RS     }
+//RS     let upper = value.to_ascii_uppercase();
+//RS     let suffixes = [
+//RS         ("TIB", 1024u64.pow(4)),
+//RS         ("TB", 1024u64.pow(4)),
+//RS         ("GIB", 1024u64.pow(3)),
+//RS         ("GB", 1024u64.pow(3)),
+//RS         ("MIB", 1024u64.pow(2)),
+//RS         ("MB", 1024u64.pow(2)),
+//RS         ("KIB", 1024u64),
+//RS         ("KB", 1024u64),
+//RS         ("T", 1024u64.pow(4)),
+//RS         ("G", 1024u64.pow(3)),
+//RS         ("M", 1024u64.pow(2)),
+//RS         ("K", 1024u64),
+//RS         ("B", 1u64),
+//RS     ];
+//RS     let (number, multiplier) = suffixes
+//RS         .iter()
+//RS         .find_map(|(suffix, multiplier)| upper.strip_suffix(suffix).map(|number| (number, *multiplier)))
+//RS         .unwrap_or((upper.as_str(), 1));
+//RS     let number = number
+//RS         .trim()
+//RS         .parse::<u64>()
+//RS         .map_err(|_| StoreError::Config(format!("invalid byte size `{value}`")))?;
+//RS     number
+//RS         .checked_mul(multiplier)
+//RS         .ok_or_else(|| StoreError::Config(format!("byte size `{value}` is too large")))
+//RS }
+//RS 
+//RS fn default_store_root() -> Result<PathBuf, StoreError> {
+//RS     let home = std::env::var_os("HOME")
+//RS         .or_else(|| std::env::var_os("USERPROFILE"))
+//RS         .ok_or_else(|| StoreError::Config("cannot determine home directory".to_string()))?;
+//RS     Ok(PathBuf::from(home).join(".cache").join("jet").join("store"))
+//RS }
+//RS 
+//RS fn hex_value(byte: u8) -> Option<u8> {
+//RS     match byte {
+//RS         b'0'..=b'9' => Some(byte - b'0'),
+//RS         b'a'..=b'f' => Some(byte - b'a' + 10),
+//RS         b'A'..=b'F' => Some(byte - b'A' + 10),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn hex_digit(value: u8) -> char {
+//RS     match value {
+//RS         0..=9 => (b'0' + value) as char,
+//RS         10..=15 => (b'a' + value - 10) as char,
+//RS         _ => unreachable!("hex nibble is bounded"),
+//RS     }
+//RS }
+//RS 
+//RS fn next_counter() -> u64 {
+//RS     FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+//RS }
+//RS 
+//RS fn current_process_identity() -> ProcessIdentity {
+//RS     let pid = std::process::id();
+//RS     let start = process_start_token(pid).unwrap_or_else(|| {
+//RS         static FALLBACK: OnceLock<String> = OnceLock::new();
+//RS         FALLBACK
+//RS             .get_or_init(|| {
+//RS                 let now = SystemTime::now()
+//RS                     .duration_since(UNIX_EPOCH)
+//RS                     .unwrap_or_default()
+//RS                     .as_nanos();
+//RS                 format!("fallback-{pid}-{now}")
+//RS             })
+//RS             .clone()
+//RS     });
+//RS     ProcessIdentity::new(pid, start)
+//RS }
+//RS 
+//RS fn owner_liveness(owner: &ProcessIdentity) -> Option<bool> {
+//RS     let current = current_process_identity();
+//RS     if owner.pid() == current.pid() {
+//RS         return Some(owner.start() == current.start());
+//RS     }
+//RS     match lookup_process_start(owner.pid()) {
+//RS         IdentityLookup::Found(start) => Some(start == owner.start()),
+//RS         IdentityLookup::Missing => Some(false),
+//RS         IdentityLookup::Unknown => None,
+//RS     }
+//RS }
+//RS 
+//RS enum IdentityLookup {
+//RS     Found(String),
+//RS     Missing,
+//RS     Unknown,
+//RS }
+//RS 
+//RS fn process_start_token(pid: u32) -> Option<String> {
+//RS     match lookup_process_start(pid) {
+//RS         IdentityLookup::Found(start) => Some(start),
+//RS         IdentityLookup::Missing | IdentityLookup::Unknown => None,
+//RS     }
+//RS }
+//RS 
+//RS fn lookup_process_start(pid: u32) -> IdentityLookup {
+//RS     #[cfg(target_os = "linux")]
+//RS     {
+//RS         let path = format!("/proc/{pid}/stat");
+//RS         let content = match fs::read_to_string(path) {
+//RS             Ok(content) => content,
+//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => return IdentityLookup::Missing,
+//RS             Err(_) => return IdentityLookup::Unknown,
+//RS         };
+//RS         let Some(close) = content.rfind(") ") else {
+//RS             return IdentityLookup::Unknown;
+//RS         };
+//RS         let fields: Vec<&str> = content[close + 2..].split_whitespace().collect();
+//RS         let Some(start) = fields.get(19) else {
+//RS             return IdentityLookup::Unknown;
+//RS         };
+//RS         return IdentityLookup::Found((*start).to_string());
+//RS     }
+//RS     #[cfg(not(target_os = "linux"))]
+//RS     {
+//RS         let _ = pid;
+//RS         IdentityLookup::Unknown
+//RS     }
+//RS }
+//RS 
+//RS fn filesystem_stats(path: &Path) -> Option<DiskStats> {
+//RS     let output = Command::new("df")
+//RS         .arg("-Pk")
+//RS         .arg(path)
+//RS         .env("LC_ALL", "C")
+//RS         .output()
+//RS         .ok()?;
+//RS     if !output.status.success() {
+//RS         return None;
+//RS     }
+//RS     let output_text = String::from_utf8_lossy(&output.stdout);
+//RS     let line = output_text
+//RS         .lines()
+//RS         .filter(|line| !line.trim().is_empty())
+//RS         .last()?;
+//RS     let fields: Vec<&str> = line.split_whitespace().collect();
+//RS     if fields.len() < 5 {
+//RS         return None;
+//RS     }
+//RS     let total = fields[1].parse::<u64>().ok()?.checked_mul(1024)?;
+//RS     let available = fields[3].parse::<u64>().ok()?.checked_mul(1024)?;
+//RS     Some(DiskStats {
+//RS         total_bytes: total,
+//RS         available_bytes: available,
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     #[cfg(unix)]
+//RS     use std::os::unix::fs::PermissionsExt;
+//RS     use std::sync::{Arc, Barrier};
+//RS 
+//RS     fn test_store(cap: u64) -> (Store, PathBuf) {
+//RS         let root = std::env::temp_dir().join(format!("jet-store-test-{}-{}", std::process::id(), next_counter()));
+//RS         let config = StoreConfig::new(root.clone())
+//RS             .with_cap_bytes(cap)
+//RS             .with_reserve_bytes(0);
+//RS         (Store::open(config).expect("store opens"), root)
+//RS     }
+//RS 
+//RS     fn cleanup(root: &Path) {
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn lock_timeout_reports_owner_and_elapsed_wait() {
+//RS         let (_, root) = test_store(1024);
+//RS         let store = Store::open(
+//RS             StoreConfig::new(root.clone())
+//RS                 .with_cap_bytes(1024)
+//RS                 .with_reserve_bytes(0)
+//RS                 .with_lock_wait(Duration::from_millis(25)),
+//RS         )
+//RS         .expect("store opens");
+//RS         let lock = store.acquire_lock().expect("test lock");
+//RS         let error = match store.acquire_lock() {
+//RS             Err(error) => error,
+//RS             Ok(_) => panic!("live lock unexpectedly acquired"),
+//RS         };
+//RS         let text = error.to_string();
+//RS         match error {
+//RS             StoreError::Locked {
+//RS                 path,
+//RS                 owner_pid,
+//RS                 elapsed,
+//RS             } => {
+//RS                 assert_eq!(path, root.join("locks/store.lock"));
+//RS                 assert_eq!(owner_pid, Some(ProcessIdentity::current().pid()));
+//RS                 assert!(elapsed >= Duration::from_millis(25));
+//RS             }
+//RS             other => panic!("unexpected lock error: {other:?}"),
+//RS         }
+//RS         assert!(text.contains("owner pid"));
+//RS         assert!(text.contains("after waiting"));
+//RS         drop(lock);
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn concurrent_publishers_wait_for_shared_lock() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-store-concurrent-{}-{}",
+//RS             std::process::id(),
+//RS             next_counter()
+//RS         ));
+//RS         let store = Store::open(
+//RS             StoreConfig::new(root.clone())
+//RS                 .with_cap_bytes(1024 * 1024)
+//RS                 .with_reserve_bytes(0)
+//RS                 .with_lock_wait(Duration::from_secs(3)),
+//RS         )
+//RS         .expect("store opens");
+//RS         let lock = store.acquire_lock().expect("test lock");
+//RS         let barrier = Arc::new(Barrier::new(3));
+//RS         let left_store = store.clone();
+//RS         let left_barrier = barrier.clone();
+//RS         let left = thread::spawn(move || {
+//RS             left_barrier.wait();
+//RS             left_store.publish_blob(b"left")
+//RS         });
+//RS         let right_store = store.clone();
+//RS         let right_barrier = barrier.clone();
+//RS         let right = thread::spawn(move || {
+//RS             right_barrier.wait();
+//RS             right_store.publish_blob(b"right")
+//RS         });
+//RS         barrier.wait();
+//RS         thread::sleep(Duration::from_millis(2200));
+//RS         drop(lock);
+//RS         let left = left.join().expect("left publisher thread");
+//RS         let right = right.join().expect("right publisher thread");
+//RS         assert!(left.is_ok(), "left publish failed: {left:?}");
+//RS         assert!(right.is_ok(), "right publish failed: {right:?}");
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn blob_round_trip_and_layout() {
+//RS         let (store, root) = test_store(1024);
+//RS         let bytes = b"hello store";
+//RS         let object = store.publish_blob(bytes).expect("publish");
+//RS         assert_eq!(object.length(), bytes.len() as u64);
+//RS         assert_eq!(store.get_blob(&object).expect("get"), Some(bytes.to_vec()));
+//RS         assert!(store.object_path(&object).is_file());
+//RS         assert!(root.join("cas").is_dir());
+//RS         assert!(root.join("ac").is_dir());
+//RS         assert!(root.join("lto").is_dir());
+//RS         assert!(root.join("locks").is_dir());
+//RS         assert!(root.join("leases").is_dir());
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn corrupt_blob_is_quarantined_and_can_be_republished() {
+//RS         let (store, root) = test_store(1024);
+//RS         let object = store.publish_blob(b"good").expect("publish");
+//RS         fs::write(store.object_path(&object), b"bad").expect("corrupt");
+//RS         assert_eq!(store.get_blob(&object).expect("miss"), None);
+//RS         let quarantined: Vec<_> = fs::read_dir(root.join("quarantine"))
+//RS             .expect("quarantine directory")
+//RS             .collect();
+//RS         assert_eq!(quarantined.len(), 1);
+//RS         store.publish_object(object, b"good").expect("repair");
+//RS         assert_eq!(store.get_blob(&object).expect("get"), Some(b"good".to_vec()));
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn action_envelope_is_verified_and_immutable() {
+//RS         let (store, root) = test_store(1024);
+//RS         let action = store.action("compile|unit-a");
+//RS         store.publish_action(action, b"record").expect("publish");
+//RS         assert_eq!(store.get_action(&action).expect("get"), Some(b"record".to_vec()));
+//RS         assert!(matches!(
+//RS             store.publish_action(action, b"different"),
+//RS             Err(StoreError::Conflict { .. })
+//RS         ));
+//RS         fs::write(store.action_path(&action), b"bad").expect("corrupt");
+//RS         assert_eq!(store.get_action(&action).expect("miss"), None);
+//RS         assert_eq!(fs::read_dir(root.join("quarantine")).expect("quarantine").count(), 1);
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn lto_namespace_round_trip() {
+//RS         let (store, root) = test_store(1024);
+//RS         let object = store.publish_lto("output-identity", b"thin-lto").expect("publish");
+//RS         assert_eq!(
+//RS             store.get_lto("output-identity", &object).expect("get"),
+//RS             Some(b"thin-lto".to_vec())
+//RS         );
+//RS         assert!(store.lto_path("output-identity", &object).is_file());
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn journal_replays_and_prune_is_lru_and_deterministic() {
+//RS         let (store, root) = test_store(1024);
+//RS         let first = store.publish_blob(b"1111").expect("first");
+//RS         let second = store.publish_blob(b"2222").expect("second");
+//RS         let third = store.publish_blob(b"3333").expect("third");
+//RS         let _ = store.get_blob(&second).expect("touch");
+//RS         let reopened = Store::open(store.config().clone()).expect("reopen");
+//RS         let status = reopened.status().expect("status");
+//RS         assert_eq!(status.entries.len(), 3);
+//RS         let report = reopened.prune_to(4).expect("prune");
+//RS         assert_eq!(report.after_bytes, 4);
+//RS         assert!(reopened.get_blob(&second).expect("second").is_some());
+//RS         assert!(reopened.get_blob(&first).expect("first").is_none());
+//RS         assert!(reopened.get_blob(&third).expect("third").is_none());
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn live_lease_pins_blob_and_stale_lease_is_reclaimed() {
+//RS         let (store, root) = test_store(1024);
+//RS         let first = store.publish_blob(b"1111").expect("first");
+//RS         let second = store.publish_blob(b"2222").expect("second");
+//RS         let lease = store.acquire_lease(&[first]).expect("lease");
+//RS         let stale = root.join("leases").join("lease-stale");
+//RS         fs::write(&stale, format!("{STORE_VERSION}|lease|4294967295|dead\nblob|{}\n", second.key()))
+//RS             .expect("stale lease");
+//RS         let report = store.prune_to(0).expect("prune");
+//RS         assert!(report.blocked);
+//RS         assert!(store.get_blob(&first).expect("pinned").is_some());
+//RS         assert!(!stale.exists());
+//RS         drop(lease);
+//RS         let report = store.prune_to(0).expect("prune after release");
+//RS         assert!(!report.blocked);
+//RS         assert_eq!(report.after_bytes, 0);
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn cap_refuses_oversized_write_without_partial_files() {
+//RS         let (store, root) = test_store(3);
+//RS         let result = store.publish_blob(b"four");
+//RS         assert!(matches!(result, Err(StoreError::Capacity { .. })));
+//RS         assert_eq!(fs::read_dir(root.join("cas")).expect("cas").count(), 0);
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn malformed_journal_replays_valid_prefix() {
+//RS         let (store, root) = test_store(1024);
+//RS         let object = store.publish_blob(b"payload").expect("publish");
+//RS         let mut journal = fs::OpenOptions::new()
+//RS             .append(true)
+//RS             .open(root.join("journal"))
+//RS             .expect("journal");
+//RS         journal.write_all(b"not a journal record\n").expect("append");
+//RS         drop(journal);
+//RS         let reopened = Store::open(store.config().clone()).expect("reopen");
+//RS         assert_eq!(reopened.get_blob(&object).expect("get"), Some(b"payload".to_vec()));
+//RS         assert!(reopened.status().expect("status").entries.len() == 1);
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn size_parser_accepts_human_units() {
+//RS         assert_eq!(parse_size("42").unwrap(), 42);
+//RS         assert_eq!(parse_size("1k").unwrap(), 1024);
+//RS         assert_eq!(parse_size("2KB").unwrap(), 2 * 1024);
+//RS         assert_eq!(parse_size("3MiB").unwrap(), 3 * 1024 * 1024);
+//RS         assert_eq!(parse_size("4gb").unwrap(), 4 * 1024 * 1024 * 1024);
+//RS         assert!(parse_size("nope").is_err());
+//RS         assert!(parse_size("18446744073709551615K").is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn host_limit_overrides_adaptive_and_persists() {
+//RS         let (store, root) = test_store(1024);
+//RS         assert_eq!(store.host_limit().unwrap(), None);
+//RS         store.set_host_limit(Some(512)).unwrap();
+//RS         assert_eq!(store.host_limit().unwrap(), Some(512));
+//RS         assert_eq!(store.limit(), 512);
+//RS         let reopened = Store::open(store.config().clone()).unwrap();
+//RS         assert_eq!(reopened.host_limit().unwrap(), Some(512));
+//RS         reopened.set_host_limit(None).unwrap();
+//RS         assert_eq!(reopened.host_limit().unwrap(), None);
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn reserve_admission_refuses_when_disk_reserve_would_be_breached() {
+//RS         let (_, root) = test_store(u64::MAX);
+//RS         let gated = Store::open(
+//RS             StoreConfig::new(root.clone())
+//RS                 .with_cap_bytes(u64::MAX)
+//RS                 .with_reserve_bytes(u64::MAX),
+//RS         )
+//RS         .unwrap();
+//RS         assert!(matches!(
+//RS             gated.publish_blob(b"reserve"),
+//RS             Err(StoreError::Capacity { .. })
+//RS         ));
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn artifact_round_trip_repairs_corrupt_object() {
+//RS         let (store, root) = test_store(1024 * 1024);
+//RS         let source = root.join("input");
+//RS         let destination = root.join("output");
+//RS         fs::write(&source, b"artifact").unwrap();
+//RS         #[cfg(unix)]
+//RS         {
+//RS             use std::os::unix::fs::PermissionsExt;
+//RS             let mut permissions = fs::metadata(&source).unwrap().permissions();
+//RS             permissions.set_mode(0o755);
+//RS             fs::set_permissions(&source, permissions).unwrap();
+//RS         }
+//RS         let key = Digest::hash(b"artifact-key").to_hex();
+//RS         let artifact = store.publish_file(&key, &source).unwrap();
+//RS         assert!(artifact.path.starts_with(root.join("cas")));
+//RS         assert!(matches!(
+//RS             store.restore_file(&key, &destination).unwrap(),
+//RS             ArtifactRestore::Hit {
+//RS                 executable: true,
+//RS                 ..
+//RS             }
+//RS         ));
+//RS         assert_eq!(fs::read(&destination).unwrap(), b"artifact");
+//RS         #[cfg(unix)]
+//RS         assert_ne!(
+//RS             fs::metadata(&destination)
+//RS                 .unwrap()
+//RS                 .permissions()
+//RS                 .mode()
+//RS                 & 0o111,
+//RS             0
+//RS         );
+//RS         fs::write(&artifact.path, b"broken").unwrap();
+//RS         assert!(matches!(
+//RS             store.restore_file(&key, &destination).unwrap(),
+//RS             ArtifactRestore::Corrupt
+//RS         ));
+//RS         store.publish_file(&key, &source).unwrap();
+//RS         assert!(matches!(
+//RS             store.restore_file(&key, &destination).unwrap(),
+//RS             ArtifactRestore::Hit { .. }
+//RS         ));
+//RS         cleanup(&root);
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn second_process_live_lease_blocks_prune() {
+//RS         const CHILD_ROOT: &str = "JET_STORE_LEASE_CHILD_ROOT";
+//RS         const CHILD_KEY: &str = "JET_STORE_LEASE_CHILD_KEY";
+//RS         const CHILD_LENGTH: &str = "JET_STORE_LEASE_CHILD_LENGTH";
+//RS         const CHILD_READY: &str = "JET_STORE_LEASE_CHILD_READY";
+//RS         const CHILD_RELEASE: &str = "JET_STORE_LEASE_CHILD_RELEASE";
+//RS 
+//RS         if let Some(child_root) = std::env::var_os(CHILD_ROOT) {
+//RS             let root = PathBuf::from(child_root);
+//RS             let key = std::env::var(CHILD_KEY).unwrap();
+//RS             let length = std::env::var(CHILD_LENGTH).unwrap().parse().unwrap();
+//RS             let object = ObjectHandle::new(Digest::from_hex(&key).unwrap(), length);
+//RS             let store =
+//RS                 Store::open(StoreConfig::new(root).with_cap_bytes(1024).with_reserve_bytes(0)).unwrap();
+//RS             let lease = store.acquire_lease(&[object]).unwrap();
+//RS             fs::write(std::env::var_os(CHILD_READY).unwrap(), b"ready").unwrap();
+//RS             let release = PathBuf::from(std::env::var_os(CHILD_RELEASE).unwrap());
+//RS             while !release.is_file() {
+//RS                 thread::sleep(Duration::from_millis(5));
+//RS             }
+//RS             drop(lease);
+//RS             return;
+//RS         }
+//RS 
+//RS         let (store, root) = test_store(1024);
+//RS         let object = store.publish_blob(b"leased").unwrap();
+//RS         let ready = root.join("child-ready");
+//RS         let release = root.join("child-release");
+//RS         let mut child = Command::new(std::env::current_exe().unwrap())
+//RS             .args(["--exact", "tests::second_process_live_lease_blocks_prune", "--nocapture"])
+//RS             .env(CHILD_ROOT, &root)
+//RS             .env(CHILD_KEY, object.digest().to_hex())
+//RS             .env(CHILD_LENGTH, object.length().to_string())
+//RS             .env(CHILD_READY, &ready)
+//RS             .env(CHILD_RELEASE, &release)
+//RS             .spawn()
+//RS             .unwrap();
+//RS         let deadline = Instant::now() + Duration::from_secs(5);
+//RS         while !ready.is_file() {
+//RS             if let Some(status) = child.try_wait().unwrap() {
+//RS                 panic!("lease child exited early: {status}");
+//RS             }
+//RS             assert!(Instant::now() < deadline, "timed out waiting for lease child");
+//RS             thread::sleep(Duration::from_millis(5));
+//RS         }
+//RS         let report = store.prune_to(0).unwrap();
+//RS         assert!(report.blocked);
+//RS         assert!(store.object_path(&object).is_file());
+//RS         fs::write(&release, b"release").unwrap();
+//RS         assert!(child.wait().unwrap().success());
+//RS         let report = store.prune_to(0).unwrap();
+//RS         assert!(!report.blocked);
+//RS         cleanup(&root);
+//RS     }
+//RS     #[test]
+//RS     fn previous_store_and_build_record_fixtures_fail_closed() {
+//RS         let action = ActionHandle::from_key("build-metadata-compat");
+//RS         let legacy_action =
+//RS             include_bytes!("../../../tests/fixtures/build-metadata-compat/store-v0.magic");
+//RS         assert_eq!(
+//RS             decode_action(action, legacy_action).expect_err("previous store schema must be rejected"),
+//RS             "action record has an unknown version or short header"
+//RS         );
+//RS 
+//RS         assert_eq!(
+//RS             BuildRecord::from_json(include_str!(
+//RS                 "../../../tests/fixtures/build-metadata-compat/build-record-v0.json"
+//RS             ))
+//RS             .expect_err("previous build-record schema must be rejected"),
+//RS             "unsupported build record schema `jet.build-record/v0`"
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 0832 crates/jet-store/src/lib.rs:1792-2771
+

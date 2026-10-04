@@ -1,0 +1,1787 @@
+// PORT-PENDING 1033 tests-dev-parts-routine-slice-3658: tests/dev_parts/routine.rs:3658-5440
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn resident_jit_result_abi_covers_calls_ok_err_try_and_entry() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let success = r#"
+//RS fn choose_ok() -> Float String! {
+//RS     return Ok(0.25)
+//RS }
+//RS 
+//RS fn choose_err() -> Float String! {
+//RS     return Err("typed boom")
+//RS }
+//RS 
+//RS fn forward() -> Float String! {
+//RS     value :: choose_ok()
+//RS     return Ok(value + 0.25)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(forward())
+//RS }
+//RS "#;
+//RS     let success_jit = run_cranelift_outcome(success, "result_success");
+//RS     assert_eq!(
+//RS         success_jit,
+//RS         ProgramOutput::ran("0.5\n".into(), "".into(), 0)
+//RS     );
+//RS 
+//RS     let failure = success.replace("choose_ok()", "choose_err()");
+//RS     let failure_jit = run_cranelift_outcome(&failure, "result_failure");
+//RS     // `run_cranelift_outcome` writes the fixture at this exact path, and every
+//RS     // journey frame names it, so the expectation must be built from it.
+//RS     let failure_shown = std::env::temp_dir()
+//RS         .join("jet_jit_result_result_failure.jet")
+//RS         .to_string_lossy()
+//RS         .into_owned();
+//RS     // D-FAIL-CTX1=A (ratified 2026-08-06, card #1532): "Each automatic
+//RS     // propagation crossing joins the failure journey on every tier, whether it
+//RS     // has a note or not." That authorises the two E3002 hops — `forward`'s
+//RS     // call on line 11 and `run`'s on
+//RS     // line 16 — origin first under the root failure, spelled the way E3002 now
+//RS     // registers it: `  {n}. {fn} ({file}:{line})`.
+//RS     // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): `fn run()` uses
+//RS     // the implicit default error, so the `String` error arrives as that error and
+//RS     // the process edge prints one full report and exits 1. `jet_render_err`
+//RS     // renders `Error: {message}` with no code and `Error [{code}]: {message}`
+//RS     // with one. Same shape as the ratified AOT golden
+//RS     // `Examples/features/expected/errors/error_context.err.out`.
+//RS     assert_eq!(
+//RS         failure_jit,
+//RS         ProgramOutput::ran(
+//RS             String::new(),
+//RS             format!(
+//RS                 "Error: typed boom\n\
+//RS                  \x20Trail [E3002] (2 hops via ?, origin first):\n\
+//RS                  \x20 1. forward ({failure_shown}:11)\n\
+//RS                  \x20 2. run ({failure_shown}:16)\n"
+//RS             ),
+//RS             1
+//RS         )
+//RS     );
+//RS 
+//RS     // Journey frames name the fixture path (D-FAIL-CTX1=A), so the interpreter
+//RS     // must read the *same* file the JIT ran; a separate `*_interp` temp name
+//RS     // would diff on the path instead of on semantics.
+//RS     for (src, tag, expected) in [
+//RS         (success, "result_success", success_jit),
+//RS         (&failure, "result_failure", failure_jit),
+//RS     ] {
+//RS         let p = std::env::temp_dir().join(format!("jet_jit_result_{tag}.jet"));
+//RS         fs::write(&p, src).unwrap();
+//RS         let shown = p.to_string_lossy().to_string();
+//RS         let interpreted = match dev_iteration(&shown, false, true) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS             RunOutcome::Problems(ds) => panic!("`{tag}` interpreter failed: {ds:?}"),
+//RS         };
+//RS         assert_eq!(
+//RS             interpreted, expected,
+//RS             "JIT/interpreter Result drift for `{tag}`"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_fallible_void_cfg_fallthrough_matches_aot() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let one_arm_fallthrough = r#"
+//RS fn direct_ok() -> Int {
+//RS     return Ok(7)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(direct_ok())
+//RS     stop :: false
+//RS     if stop {
+//RS         return Err("one-arm stopped")
+//RS     }
+//RS     print("one-arm fallthrough")
+//RS }
+//RS "#;
+//RS     let nested_fallthrough = r#"
+//RS fn direct_ok() -> Int {
+//RS     return Ok(7)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(direct_ok())
+//RS     outer :: true
+//RS     inner :: false
+//RS     if outer {
+//RS         if inner {
+//RS             return Err("nested stopped")
+//RS         }
+//RS     }
+//RS     print("nested fallthrough")
+//RS }
+//RS "#;
+//RS     let neither_arm_terminates = r#"
+//RS fn direct_ok() -> Int {
+//RS     return Ok(7)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(direct_ok())
+//RS     if true {
+//RS         print("left continues")
+//RS     } else {
+//RS         print("right continues")
+//RS     }
+//RS     print("neither terminated")
+//RS }
+//RS "#;
+//RS     let both_arms_terminate = r#"
+//RS fn direct_ok() -> Int {
+//RS     return Ok(7)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(direct_ok())
+//RS     if true {
+//RS         return Err("left branch")
+//RS     } else {
+//RS         return Err("right branch")
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS     let cases = [
+//RS         (
+//RS             "one_arm_fallthrough",
+//RS             one_arm_fallthrough,
+//RS             ProgramOutput::ran("7\none-arm fallthrough\n".into(), "".into(), 0),
+//RS         ),
+//RS         (
+//RS             "nested_fallthrough",
+//RS             nested_fallthrough,
+//RS             ProgramOutput::ran("7\nnested fallthrough\n".into(), "".into(), 0),
+//RS         ),
+//RS         (
+//RS             "neither_arm_terminates",
+//RS             neither_arm_terminates,
+//RS             ProgramOutput::ran(
+//RS                 "7\nleft continues\nneither terminated\n".into(),
+//RS                 "".into(),
+//RS                 0,
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "both_arms_terminate",
+//RS             both_arms_terminate,
+//RS             // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): `fn run()`
+//RS             // uses the implicit default error, so `return Err("left branch")`
+//RS             // reaches the process edge as one full default-error report and exits
+//RS             // 1. `jet_render_err` renders `Error: {message}` when the error
+//RS             // carries no code — see the ratified golden
+//RS             // `Examples/features/expected/errors/default_err_edge.err.out`, which
+//RS             // shows the `Error [CODE]: …` form of the same renderer. No journey
+//RS             // frame here: D-FAIL-CTX1=A appends a frame per propagation crossing, and this
+//RS             // `Err` is returned directly rather than re-raised.
+//RS             ProgramOutput::ran("7\n".into(), "Error: left branch\n".into(), 1),
+//RS         ),
+//RS     ];
+//RS 
+//RS     for (i, (tag, src, expected)) in cases.into_iter().enumerate() {
+//RS         let jit = run_cranelift_without_fallback(src, tag);
+//RS         assert_eq!(jit, expected, "resident JIT CFG result drift for `{tag}`");
+//RS 
+//RS         let path = std::env::temp_dir().join(format!("jet_jit_{tag}.jet"));
+//RS         fs::write(&path, src).unwrap();
+//RS         let shown = path.to_string_lossy().to_string();
+//RS         let dir = std::env::temp_dir().join(format!("jet_jit_{tag}_{}", std::process::id()));
+//RS         let aot = compiled_binary_output(&dir, tag, i, tag, &shown);
+//RS         assert_eq!(aot, expected, "AOT CFG result drift for `{tag}`");
+//RS         assert_eq!(
+//RS             jit, aot,
+//RS             "AOT and resident JIT CFG semantics drift for `{tag}`"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_fidelity_matches_runtime_contract() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let valid = r#"
+//RS use core.perf as perf
+//RS 
+//RS fn run() {
+//RS     perf.reset_fidelity()
+//RS     print(perf.default_fidelity())
+//RS     perf.override_fidelity(0.25)
+//RS     print(perf.fidelity())
+//RS     perf.reset_fidelity()
+//RS     print(perf.fidelity())
+//RS }
+//RS "#;
+//RS     let expected_valid = ProgramOutput::ran("1.0\n0.25\n1.0\n".into(), "".into(), 0);
+//RS     assert_eq!(
+//RS         run_cranelift_outcome(valid, "fidelity_valid"),
+//RS         expected_valid
+//RS     );
+//RS     let valid_path = std::env::temp_dir().join("jet_jit_fidelity_valid_interp.jet");
+//RS     fs::write(&valid_path, valid).unwrap();
+//RS     let valid_shown = valid_path.to_string_lossy().to_string();
+//RS     let interpreted = match dev_iteration(&valid_shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(ds) => panic!("fidelity interpreter failed: {ds:?}"),
+//RS     };
+//RS     assert_eq!(interpreted, expected_valid);
+//RS     let aot_dir = std::env::temp_dir().join(format!("jet_jit_fidelity_aot_{}", std::process::id()));
+//RS     assert_eq!(
+//RS         compiled_binary_output(&aot_dir, "fidelity", 0, "fidelity", &valid_shown),
+//RS         expected_valid
+//RS     );
+//RS 
+//RS     for (value, tag) in [
+//RS         ("-0.01", "negative"),
+//RS         ("1.01", "above_one"),
+//RS         ("(1.0 / 0.0)", "infinite"),
+//RS         ("(0.0 / 0.0)", "nan"),
+//RS     ] {
+//RS         let src = format!(
+//RS             r#"use core.perf as perf
+//RS fn run() {{
+//RS     perf.reset_fidelity()
+//RS     perf.override_fidelity(0.375)
+//RS     perf.override_fidelity({value})
+//RS }}"#
+//RS         );
+//RS         let got = run_cranelift_outcome(&src, tag);
+//RS         assert_eq!(got.exit_code, 1, "{tag} must fail");
+//RS         assert!(
+//RS             got.stderr.contains("OutOfRange") && got.stderr.contains("PerfError"),
+//RS             "{tag}: {:?}",
+//RS             got.stderr
+//RS         );
+//RS         let read = r#"use core.perf as perf
+//RS fn run() { print(perf.fidelity()) }"#;
+//RS         assert_eq!(
+//RS             run_cranelift_outcome(read, &format!("{tag}_state")),
+//RS             ProgramOutput::ran("0.375\n".into(), "".into(), 0),
+//RS             "{tag} changed fidelity before returning Err"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// The canonical MIR evaluator executes a sema-approved raw-memory `#Unsafe`
+//RS /// region, and its live sentries report invalid provenance at runtime.
+//RS ///
+//RS /// D-MEM-SENTRY1 fixes the contract: a located R0801 program-side stop at
+//RS /// exit 70 (I2), identical on every tier — `tests/tir_unsafe_and_runtime.rs`
+//RS /// `sentry_faults_are_tier_parity` pins the same contract for the forced
+//RS /// interpreter, the default JIT, and AOT. This test pins the shipped outcome:
+//RS /// the outcome kind, exit status, empty stdout, and the R0801 code, gate reason,
+//RS /// provenance detail, and obligation clause.
+//RS #[test]
+//RS fn unsafe_blocks_are_evaluated_by_canonical_mir_with_live_sentries() {
+//RS     let raw = jet::Loader::load_entry(&example_path("memory/rawptr"))
+//RS         .expect("rawptr example should load");
+//RS 
+//RS     let fault_path = std::env::temp_dir().join(format!(
+//RS         "jet_unsafe_mir_runtime_{}.jet",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::write(
+//RS         &fault_path,
+//RS         "use core.mem\nfn run() {\n    #Unsafe(\"mapped address is valid and aligned\") {\n        p :: mem.Ptr<Int>.from_addr(0x40000100)\n        print(p.*)\n    }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let fault_file = fault_path.to_string_lossy().into_owned();
+//RS     let _fault_bundle =
+//RS         jet::Loader::load_entry(&fault_file).expect("pointer cast example should load");
+//RS     match dev_iteration(&fault_file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(
+//RS                 exit_code, 70,
+//RS                 "a raw read with no allocation provenance is a program-side stop: {stderr}"
+//RS             );
+//RS             assert!(
+//RS                 stdout.is_empty(),
+//RS                 "the refused deref must not have printed: {stdout:?}"
+//RS             );
+//RS             for marker in [
+//RS                 "Runtime fault [R0801]",
+//RS                 "mapped address is valid and aligned",
+//RS                 "no live allocation contains this address",
+//RS                 "obligation `valid_ptr` was not met on this run",
+//RS             ] {
+//RS                 assert!(
+//RS                     stderr.contains(marker),
+//RS                     "interpreter sentry report is missing `{marker}`: {stderr}"
+//RS                 );
+//RS             }
+//RS         }
+//RS         outcome => panic!(
+//RS             "a sema-approved #Unsafe region must be evaluated by canonical MIR, \
+//RS              not refused at a boundary: {outcome:?}"
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn io_style_raw_nonunicode_no_color_uses_presence_semantics() {
+//RS     use std::os::unix::ffi::OsStringExt;
+//RS 
+//RS     std::thread::Builder::new()
+//RS         .spawn(|| {
+//RS             let src =
+//RS                 "use core.term as io\nfn run() {\n    print(io.style(\"red\", \"plain\"))\n}\n";
+//RS             let dir = common::unique_tmp("jet_raw_no_color");
+//RS             fs::create_dir_all(&dir).unwrap();
+//RS             let input = dir.join("raw_no_color.jet");
+//RS             fs::write(&input, src).unwrap();
+//RS             let compiled = jet::compile_with_path(src, input.to_str().unwrap())
+//RS                 .expect("raw NO_COLOR fixture must compile");
+//RS             let rust = dir.join("raw_no_color.rs");
+//RS             let bin = dir.join("raw_no_color_test");
+//RS             let probe = r#"
+//RS 
+//RS // PROVES: the colour decision honours `NO_COLOR` by PRESENCE. The variable is
+//RS // set here to a single 0xff byte -- present, and not valid Unicode -- and the
+//RS // environment half of the production decision still says "no colour". It also
+//RS // proves the decision reads the raw logical-env entry: the decoding accessor
+//RS // reports the same variable absent, so routing the decision through it would
+//RS // silently re-enable colour (the #1206 review defect).
+//RS //
+//RS // DOES NOT PROVE: that colour is emitted when `NO_COLOR` is absent. The test
+//RS // harness captures this program's stdout with a pipe, so the stream half of the
+//RS // decision (`jet_term_stdout_is_terminal`) is false here for an unrelated
+//RS // reason. That is precisely why the environment half is asserted through its
+//RS // own seam, and why the composed check below hands `jet_term_style_enabled` a
+//RS // forced `stdout_is_terminal = true`: asserting `jet_style_enabled() == false`
+//RS // alone would pass even if `NO_COLOR` were ignored outright. Terminal-attached
+//RS // behaviour belongs to tests/terminal.rs and the io/terminal_parity ledger.
+//RS //
+//RS // Called from `main` right after `jet_std_env_init()`. A failure panics, so the
+//RS // program exits non-zero and the entry never prints.
+//RS fn jet_probe_no_color_presence() {
+//RS     // The raw logical-env lookup the colour decision uses sees the variable.
+//RS     assert!(jet_env_value_raw("NO_COLOR").is_some());
+//RS     // The decoding accessor calls the very same variable absent.
+//RS     assert!(jet_std_env_get(&"NO_COLOR".to_string()).is_none());
+//RS 
+//RS     // The canonical resolver receives raw presence facts, so this cannot go
+//RS     // green because stdout happens to be a pipe.
+//RS     let no_color = jet_env_value_raw("NO_COLOR").is_some();
+//RS     let force_color = jet_env_value_raw("FORCE_COLOR").is_some();
+//RS     assert!(no_color, "set-but-non-Unicode NO_COLOR must register as present");
+//RS     assert!(!jet_term_style_enabled(no_color, force_color, true));
+//RS 
+//RS     // End to end through the user-facing surface: no escape codes.
+//RS     let styled = jet_std_io_style(&"red".to_string(), &"plain".to_string());
+//RS     assert_eq!(styled, "plain");
+//RS }
+//RS "#;
+//RS             // The probe runs from the generated program's own `main`, NOT from a
+//RS             // `rustc --test` harness. `--test` turns `cfg(test)` on for the whole
+//RS             // generated crate, which activates every Prelude fragment's private
+//RS             // unit-test module at one crate root -- and `PRELUDE_PARTS`
+//RS             // (Codegen/mod.rs:157) unconditionally emits both
+//RS             // `Prelude/Core/Progress.rs` and `Prelude/NumericWiden.rs`, each of
+//RS             // which declares a bare `mod tests`. That is E0428, in every generated
+//RS             // program, since Progress.rs gained its module on 2026-08-04 (d0098d284;
+//RS             // NumericWiden.rs got the first one 2026-07-29, e61c31131). No shipped
+//RS             // consumer sees it -- `jet test` builds its own harness (TEST_PRELUDE /
+//RS             // `jet_test_print`), and tests/common/mod.rs:189 already calls raw
+//RS             // `--test` on generated Rust "an uncommon inspection mode ... not the
+//RS             // Jet test-harness build path". So the collision is a Prelude hygiene
+//RS             // defect worth its own card, and this probe simply stops needing the
+//RS             // mode that exposes it.
+//RS             //
+//RS             // `jet_std_env_init();` is the first statement of every generated
+//RS             // `main` (all four emitters: Codegen/mod.rs:3416, 3566, 4621, 4978), and
+//RS             // tests/env_overlay.rs:118 pins that exact text. Hooking after it means
+//RS             // the logical env table is already seeded when the probe reads it. The
+//RS             // replacement count is asserted, so a drift in generated `main` fails
+//RS             // loudly here instead of silently skipping the probe.
+//RS             const MAIN_ANCHOR: &str = "fn main() {\n    jet_std_env_init();";
+//RS             assert_eq!(
+//RS                 compiled.rust.matches(MAIN_ANCHOR).count(),
+//RS                 1,
+//RS                 "generated `main` no longer starts with `jet_std_env_init();` -- \
+//RS                  re-anchor this probe, do not skip it"
+//RS             );
+//RS             let hooked = compiled.rust.replacen(
+//RS                 MAIN_ANCHOR,
+//RS                 &format!("{MAIN_ANCHOR}\n    jet_probe_no_color_presence();"),
+//RS                 1,
+//RS             );
+//RS             let generated = format!("{hooked}{probe}");
+//RS             // Build the whole generated crate as ONE crate. `add_generated_rust`
+//RS             // only forces the inline (single-crate) form for `--test` or FFI
+//RS             // builds; any other flag set splits `PRELUDE_PARTS` into a cached
+//RS             // runtime rlib, which would put `jet_term_style_enabled` in another
+//RS             // crate where the probe cannot see it. This fixture has no FFI, so an
+//RS             // inline build needs no `--extern` and no cache.
+//RS             assert!(
+//RS                 compiled.ffi.is_none(),
+//RS                 "raw NO_COLOR fixture must not need FFI"
+//RS             );
+//RS             fs::write(&rust, &generated).unwrap();
+//RS             let built = Command::new("rustc")
+//RS                 .args(["--edition", "2021", "--crate-name", "raw_no_color"])
+//RS                 .arg(&rust)
+//RS                 .arg("-o")
+//RS                 .arg(&bin)
+//RS                 .output()
+//RS                 .unwrap();
+//RS             assert!(
+//RS                 built.status.success(),
+//RS                 "rustc rejected raw NO_COLOR probe:\n{}",
+//RS                 String::from_utf8_lossy(&built.stderr)
+//RS             );
+//RS             let run = Command::new(&bin)
+//RS                 .env("NO_COLOR", std::ffi::OsString::from_vec(vec![0xff]))
+//RS                 .output()
+//RS                 .unwrap();
+//RS             assert!(
+//RS                 run.status.success(),
+//RS                 "raw NO_COLOR presence probe failed:\nstdout:\n{}\nstderr:\n{}",
+//RS                 String::from_utf8_lossy(&run.stdout),
+//RS                 String::from_utf8_lossy(&run.stderr)
+//RS             );
+//RS             // The probe ran before the Jet entry, and the entry's own output is the
+//RS             // end-to-end half: `io.style("red", "plain")` carries no escape codes.
+//RS             assert_eq!(String::from_utf8_lossy(&run.stdout), "plain\n");
+//RS             let _ = fs::remove_dir_all(dir);
+//RS         })
+//RS         .unwrap()
+//RS         .join()
+//RS         .unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn jit_1216_adversarial_regressions() {
+//RS     const CASE: &str = "JET_1216_ADVERSARIAL_CASE";
+//RS     if let Ok(case) = std::env::var(CASE) {
+//RS         let source = match case.as_str() {
+//RS             "oob" => "fn run() { xs := [1]\n xs[4] = 2 }\n",
+//RS             "stm_return" => {
+//RS                 r#"
+//RS struct Slot { value: Int }
+//RS fn rollback(cell: Shared<Slot>) {
+//RS     #Transact(tx) {
+//RS         cell.value = 9
+//RS         return
+//RS     }
+//RS }
+//RS fn run() {
+//RS     cell :: shared Slot{value: 1}
+//RS     rollback(cell)
+//RS     print(cell.value)
+//RS }
+//RS "#
+//RS             }
+//RS             "generator" => {
+//RS                 r#"
+//RS fn stopped() -> Stream<Int> {
+//RS     yield 1
+//RS     yield 2
+//RS }
+//RS fn closes() -> Stream<Int> {
+//RS     yield 3
+//RS     return
+//RS }
+//RS fn run() {
+//RS     loop value in stopped() {
+//RS         print(value)
+//RS         break
+//RS     }
+//RS     loop value in closes() { print(value) }
+//RS     print("done")
+//RS }
+//RS "#
+//RS             }
+//RS             "raw_alias" => {
+//RS                 r#"
+//RS use core.mem
+//RS fn run() {
+//RS     value := 4
+//RS     #Unsafe("the pointer stays inside this stack frame") {
+//RS         pointer :: *Int{*value}
+//RS         mem.volatile_write(pointer, 9)
+//RS         print(value)
+//RS     }
+//RS }
+//RS "#
+//RS             }
+//RS             "option_minus_one" => {
+//RS                 r#"
+//RS fn run() {
+//RS     queue := PriorityQueue.from([-1])
+//RS     print(&queue.pop())
+//RS     print(&queue.pop())
+//RS }
+//RS "#
+//RS             }
+//RS             "sum_bigint" => {
+//RS                 r#"
+//RS fn run() {
+//RS     print([Int.MAX, 1].sum())
+//RS }
+//RS "#
+//RS             }
+//RS             _ => panic!("unknown #1216 adversarial case `{case}`"),
+//RS         };
+//RS         jet_jit::reset_jit_trace_for_test();
+//RS         let outcome = run_cranelift_outcome_without_fallback(source, &format!("1216_{case}"));
+//RS         match case.as_str() {
+//RS             "oob" => {
+//RS                 // Live bounds traps use the registered E3010 stop.
+//RS                 let RunOutcome::Ran {
+//RS                     stdout: _,
+//RS                     stderr,
+//RS                     exit_code,
+//RS                 } = outcome
+//RS                 else {
+//RS                     panic!("`{case}` expected runtime trap Ran, got: {outcome:?}");
+//RS                 };
+//RS                 assert_eq!(exit_code, 70, "`{case}` must exit 70: err={stderr}");
+//RS                 assert!(
+//RS                     stderr.contains("Stop [E3010]"),
+//RS                     "`{case}` must use the E3010 stop, got: {stderr}"
+//RS                 );
+//RS                 assert!(
+//RS                     !stderr.contains("E0953") && !stderr.contains("comptime"),
+//RS                     "`{case}` must not use comptime voice: {stderr}"
+//RS                 );
+//RS                 if case == "oob" {
+//RS                     assert!(
+//RS                         stderr.contains("the list has 1 items, so position 4 doesn't exist"),
+//RS                         "`oob` trap wording: {stderr}"
+//RS                     );
+//RS                 }
+//RS             }
+//RS             expected_case => {
+//RS                 let RunOutcome::Ran { stdout, .. } = outcome else {
+//RS                     panic!("`{expected_case}` did not run in resident JIT: {outcome:?}");
+//RS                 };
+//RS                 let expected = match expected_case {
+//RS                     "stm_return" => "1\n",
+//RS                     "generator" => "1\n3\ndone\n",
+//RS                     "raw_alias" => "9\n",
+//RS                     "option_minus_one" => "-1\nnull\n",
+//RS                     "sum_bigint" => "9223372036854775808\n",
+//RS                     _ => unreachable!(),
+//RS                 };
+//RS                 assert_eq!(stdout, expected);
+//RS                 if expected_case == "raw_alias" {
+//RS                     // D-MEM-SENTRY1=A (ratified 2026-08-12, card #1889) is an
+//RS                     // owner-ratified I9 instrumentation carve-out: raw memory stays
+//RS                     // on canonical TIR so the Prelude witness owns gate state,
+//RS                     // provenance, quarantine, poison and R08xx reporting, and
+//RS                     // Cranelift only marshals safe values rather than growing a
+//RS                     // second memory policy. `raw_alias` is `*Int{*value}` plus a
+//RS                     // core.mem call, i.e. exactly the two shapes the walker now
+//RS                     // refuses, so the correct route is a silent deopt to canonical
+//RS                     // TIR -- not native execution. This case was authored under
+//RS                     // #1216 on 2026-07-27, sixteen days before that ratification.
+//RS                     assert!(
+//RS                         !jet_jit::jit_executed_for_test(),
+//RS                         "`raw_alias` must not claim native execution"
+//RS                     );
+//RS                     assert!(
+//RS                         jet_jit::deopt_invoked_for_test(),
+//RS                         "`raw_alias` must take the D-MEM-SENTRY1 canonical-TIR route"
+//RS                     );
+//RS                     assert!(
+//RS                         !jet_jit::fallback_invoked_for_test(),
+//RS                         "`raw_alias` deopt must not trip forbidden fallback"
+//RS                     );
+//RS                 } else {
+//RS                     assert!(jet_jit::jit_executed_for_test());
+//RS                     assert!(!jet_jit::deopt_invoked_for_test());
+//RS                 }
+//RS             }
+//RS         }
+//RS         return;
+//RS     }
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     for case in [
+//RS         "oob",
+//RS         "stm_return",
+//RS         "generator",
+//RS         "raw_alias",
+//RS         "option_minus_one",
+//RS         "sum_bigint",
+//RS     ] {
+//RS         let mut command = Command::new(std::env::current_exe().expect("current dev test binary"));
+//RS         command
+//RS             .args(["--exact", "jit_1216_adversarial_regressions", "--nocapture"])
+//RS             .env(CASE, case)
+//RS             .env("NO_COLOR", "1");
+//RS         let output = command_output_with_timeout(
+//RS             command,
+//RS             Duration::from_secs(10),
+//RS             &format!("#1216 adversarial `{case}`"),
+//RS         );
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "{case}: stdout:\n{}\nstderr:\n{}",
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn uninit_fixed_mutating_borrow_matches_interpreter_resident_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let source = r#"
+//RS use core.mem
+//RS 
+//RS fn set_first(bytes: &[U8#2]) {
+//RS     bytes[0] = 8
+//RS }
+//RS 
+//RS fn first(bytes: [U8#2]) -> U8 {
+//RS     index :: 0
+//RS     return bytes[index]
+//RS }
+//RS 
+//RS fn run() {
+//RS     bytes := [U8#2]{ uninit }
+//RS     bytes[0] = 1
+//RS     bytes[1] = 2
+//RS     set_first(&bytes)
+//RS     print(bytes[0])
+//RS     print(first(bytes))
+//RS }
+//RS "#;
+//RS     let file = std::env::temp_dir().join(format!(
+//RS         "jet_uninit_fixed_mutating_borrow_{}.jet",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::write(&file, source).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let expected = ProgramOutput::ran("8\n8\n".to_string(), String::new(), 0);
+//RS 
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("forced interpreter failed: {diags:?}"),
+//RS     };
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(source, "uninit_fixed_mutating_borrow");
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "uninitialized fixed-list fill did not execute in resident JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "uninitialized fixed-list fill used deopt or fallback"
+//RS     );
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_uninit_fixed_mutating_borrow_aot_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "uninit_fixed_mutating_borrow",
+//RS         0,
+//RS         "uninit_fixed_mutating_borrow",
+//RS         &shown,
+//RS     );
+//RS 
+//RS     assert_eq!(interpreted, expected, "forced interpreter output drifted");
+//RS     assert_eq!(resident, expected, "resident JIT output drifted");
+//RS     assert_eq!(aot, expected, "AOT output drifted");
+//RS     assert_eq!(resident, interpreted, "JIT and interpreter output differ");
+//RS     assert_eq!(resident, aot, "JIT and AOT output differ");
+//RS 
+//RS     let _ = fs::remove_file(file);
+//RS     let _ = fs::remove_dir_all(dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn uninit_fixed_dynamic_oob_uses_the_resident_jit_trap_path() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let source = r#"
+//RS use core.mem
+//RS 
+//RS fn outside() -> Int {
+//RS     return 2
+//RS }
+//RS 
+//RS fn run() {
+//RS     bytes := [U8#2]{ uninit }
+//RS     bytes[0] = 1
+//RS     bytes[1] = 2
+//RS     print(bytes[outside()])
+//RS }
+//RS "#;
+//RS     let mut bundle = bundle_of(source, "uninit_fixed_dynamic_oob");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     let errors = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect::<Vec<_>>();
+//RS     assert!(errors.is_empty(), "{errors:#?}");
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "{}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     match run_cranelift_outcome_without_fallback(source, "uninit_fixed_dynamic_oob") {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(
+//RS                 exit_code, 70,
+//RS                 "dynamic OOB must exit 70: out={stdout} err={stderr}"
+//RS             );
+//RS             assert!(
+//RS                 stderr.contains("Stop [E3010]")
+//RS                     && stderr.contains("the list has 2 items")
+//RS                     && stderr.contains("doesn't exist"),
+//RS                 "dynamic OOB trap wording: {stderr}"
+//RS             );
+//RS             assert!(
+//RS                 !stderr.contains("E0953") && !stderr.contains("comptime"),
+//RS                 "dynamic OOB must not use comptime voice: {stderr}"
+//RS             );
+//RS         }
+//RS         other => panic!("dynamic OOB expected runtime trap, got: {other:?}"),
+//RS     }
+//RS     assert!(jet_jit::jit_executed_for_test());
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "dynamic out-of-bounds index used deopt or fallback"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_scalar_edit_matches_interpreter_resident_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let source = r#"
+//RS struct Counter { value: Int }
+//RS fn run() {
+//RS     counter :: shared Counter{value: 0}
+//RS     counter.value += 1
+//RS     print(counter.value)
+//RS }
+//RS "#;
+//RS     let file =
+//RS         std::env::temp_dir().join(format!("jet_shared_scalar_edit_{}.jet", std::process::id()));
+//RS     fs::write(&file, source).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let expected = ProgramOutput::ran("1\n".to_string(), String::new(), 0);
+//RS 
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("forced interpreter failed: {diags:?}"),
+//RS     };
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(source, "shared_scalar_edit");
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "the shared field write did not execute in resident JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "the shared field write used deopt or fallback"
+//RS     );
+//RS 
+//RS     let dir =
+//RS         std::env::temp_dir().join(format!("jet_shared_scalar_edit_aot_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let aot = compiled_binary_output(&dir, "shared_scalar_edit", 0, "shared_scalar_edit", &shown);
+//RS 
+//RS     assert_eq!(interpreted, expected, "forced interpreter output drifted");
+//RS     assert_eq!(resident, expected, "resident JIT output drifted");
+//RS     assert_eq!(aot, expected, "AOT output drifted");
+//RS     assert_eq!(resident, interpreted, "JIT and interpreter output differ");
+//RS     assert_eq!(resident, aot, "JIT and AOT output differ");
+//RS 
+//RS     let _ = fs::remove_file(file);
+//RS     let _ = fs::remove_dir_all(dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     for stem in ["comptime/comptime_core", "comptime/comptime_tiers"] {
+//RS         let file = example_path(stem);
+//RS         let expected = ProgramOutput::ran(golden_stdout(stem), String::new(), 0);
+//RS         let interpreted = match dev_iteration(&file, false, true) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS             RunOutcome::Problems(diags) => {
+//RS                 panic!("interpreter failed `{stem}`: {diags:?}")
+//RS             }
+//RS         };
+//RS 
+//RS         let source = fs::read_to_string(&file).unwrap();
+//RS         jet_jit::reset_jit_trace_for_test();
+//RS         let resident = run_cranelift_without_fallback(&source, &stem.replace('/', "_"));
+//RS         assert!(
+//RS             jet_jit::jit_executed_for_test(),
+//RS             "`{stem}` did not execute in JIT"
+//RS         );
+//RS         assert!(
+//RS             !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS             "`{stem}` used deopt or fallback"
+//RS         );
+//RS 
+//RS         let dir = std::env::temp_dir().join(format!(
+//RS             "jet_comptime_scalar_{}_{}",
+//RS             stem.replace('/', "_"),
+//RS             std::process::id()
+//RS         ));
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS         fs::create_dir_all(&dir).unwrap();
+//RS         let aot = compiled_binary_output(&dir, "comptime_scalar", 0, stem, &file);
+//RS 
+//RS         assert_eq!(interpreted, expected, "interpreter drifted for `{stem}`");
+//RS         assert_eq!(resident, expected, "resident JIT drifted for `{stem}`");
+//RS         assert_eq!(aot, expected, "AOT drifted for `{stem}`");
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS     }
+//RS 
+//RS     let source = r#"
+//RS F32_NAN :: prep { F32.NAN }
+//RS F32_INF :: prep { F32.INFINITY }
+//RS F32_NEG_INF :: prep { F32.NEG_INFINITY }
+//RS F64_NAN :: prep { Float.NAN }
+//RS F64_INF :: prep { Float.INFINITY }
+//RS F64_NEG_INF :: prep { Float.NEG_INFINITY }
+//RS 
+//RS fn run() {
+//RS     print(F32_NAN)
+//RS     print(F32_INF)
+//RS     print(F32_NEG_INF)
+//RS     print(F64_NAN)
+//RS     print(F64_INF)
+//RS     print(F64_NEG_INF)
+//RS }
+//RS "#;
+//RS     let expected = ProgramOutput::ran("NaN\ninf\n-inf\nNaN\ninf\n-inf\n".into(), "".into(), 0);
+//RS     let dir = std::env::temp_dir().join(format!("jet_comptime_nonfinite_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("comptime_nonfinite.jet");
+//RS     fs::write(&file, source).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS 
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("interpreter failed nonfinite scalars: {diags:?}"),
+//RS     };
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(source, "comptime_nonfinite");
+//RS     assert!(jet_jit::jit_executed_for_test());
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "nonfinite scalar fixture used deopt or fallback"
+//RS     );
+//RS     let aot = compiled_binary_output(&dir, "comptime_nonfinite", 0, "comptime_nonfinite", &shown);
+//RS 
+//RS     assert_eq!(interpreted, expected);
+//RS     assert_eq!(resident, expected);
+//RS     assert_eq!(aot, expected);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_modules_full_example_matches_resident_jit_and_aot() {
+//RS     let dir = common::unique_tmp("jet_generic_modules_full_example");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("generic_modules.jet");
+//RS     fs::copy("Examples/features/modules/generic_modules.jet", &file).unwrap();
+//RS     assert_cranelift_three_way(file.to_str().unwrap(), "modules/generic_modules");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn array_of_structs_field_mutation_three_way() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let file = "Examples/features/collections/struct_list_mutation.jet";
+//RS     // Tiered/default path (and three-way) cover IndexFieldAssign via Cranelift;
+//RS     // pure-interpreter coverage is optional (#779 expands TIR assign arms).
+//RS     assert_cranelift_three_way(file, "collections/struct_list_mutation");
+//RS }
+//RS 
+//RS #[test]
+//RS fn place_windows_matches_resident_jit_and_aot_without_fallback() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stem = "memory/place_windows";
+//RS     let file = example_path(stem);
+//RS     let expected = ProgramOutput::ran(golden_stdout(stem), String::new(), 0);
+//RS     // The ratchet here used to require the forced interpreter to stop at
+//RS     // the retired boundary. It runs the example now, so that claim is stale:
+//RS     // (c86f848ed) stopped `run_bundle_at_stage` reporting every lowering
+//RS     // failure as a missing `run`, and the place-loan mechanism reached
+//RS     // `__JetViewMut` regions — this example's own subject.
+//RS     //
+//RS     // A boundary that has fallen is not weakened into silence. The interpreter
+//RS     // now owes the same golden every other tier owes here, which is strictly
+//RS     // more than "it must refuse" ever proved, and it is what the corpus sweep
+//RS     // already measures for this stem (`check_interpreter_stem`, no manifested
+//RS     // divergence entry).
+//RS     let interpreted = match dev_iteration(&file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("`{stem}` must run in the forced interpreter: {diags:?}")
+//RS         }
+//RS     };
+//RS 
+//RS     let source = fs::read_to_string(&file).unwrap();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(&source, "place_windows");
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "`{stem}` did not execute in JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "`{stem}` used deopt or fallback"
+//RS     );
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_place_windows_{}", std::process::id()));
+//RS     let aot = compiled_binary_output(&dir, "place_windows", 0, stem, &file);
+//RS     assert_eq!(interpreted, expected, "interpreter drifted for `{stem}`");
+//RS     assert_eq!(resident, expected, "resident JIT drifted for `{stem}`");
+//RS     assert_eq!(aot, expected, "AOT drifted for `{stem}`");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn fixed_width_integers_match_interpreter_resident_jit_default_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     // Two retired spellings, both from before this fixture's neighbours moved.
+//RS     // D-ARROW-CONTROL1: a callable result is `=>`; `->` is reserved for
+//RS     // selected or yielded control values, and sema rejects it with E0070, so
+//RS     // every signature below stopped type-checking and the forced interpreter
+//RS     // reported nine E0070s instead of running. D-EXPOP1=A / D-XORSPELL1=A
+//RS     // (2026-08-05): the caret raises to a power and exclusive-or is `~|`, so
+//RS     // `flags ^ mask` on a trapping `U8` would overflow rather than answer the
+//RS     // 7 this block asks for. Both spellings move; not one expected value does.
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let source = r#"
+//RS fn i8_id(value: I8) -> I8 { return value }
+//RS fn i16_id(value: I16) -> I16 { return value }
+//RS fn i32_id(value: I32) -> I32 { return value }
+//RS fn i64_id(value: I64) -> I64 { return value }
+//RS fn u8_id(value: U8) -> U8 { return value }
+//RS fn u16_id(value: U16) -> U16 { return value }
+//RS fn u32_id(value: U32) -> U32 { return value }
+//RS fn u64_id(value: U64) -> U64 { return value }
+//RS fn pass_u64(value: U64?) -> (U64?) { return ~value }
+//RS 
+//RS fn run() {
+//RS     print(i8_id(I8{-8}))
+//RS     print(i16_id(I16{-1600}))
+//RS     print(i32_id(I32{-320000}))
+//RS     print(i64_id(-6400000000))
+//RS     print(u8_id(U8{8}))
+//RS     print(u16_id(U16{1600}))
+//RS     print(u32_id(U32{320000}))
+//RS     maximum :: u64_id(U64.MAX)
+//RS     print(maximum)
+//RS     print("{maximum}")
+//RS     print(maximum.to_string())
+//RS     print("{maximum:Debug}")
+//RS     print([maximum, U64{1}])
+//RS     print([U64#2]{maximum, U64{1}})
+//RS     print(-i8_id(I8{8}))
+//RS     print(-i16_id(I16{16}))
+//RS     print(-i32_id(I32{32}))
+//RS     print(-i64_id(64))
+//RS 
+//RS     print(i8_id(I8{10}) + I8{5})
+//RS     print(i16_id(I16{100}) - I16{40})
+//RS     print(i32_id(I32{7}) * I32{6})
+//RS     print(i64_id(84) / 2)
+//RS     print(19 % 4)
+//RS     print(i8_id(I8{7}) % I8{3})
+//RS     flags :: u8_id(U8{13})
+//RS     mask :: U8{10}
+//RS     print(flags & mask)
+//RS     combined := U8{flags}
+//RS     combined |= mask
+//RS     print(combined)
+//RS     print(flags ~| mask)
+//RS     print(flags << 1)
+//RS     print(u8_id(U8.MAX) << 1)
+//RS     print(i8_id(I8{64}) << 1)
+//RS     print(flags >> 2)
+//RS     print(u16_id(U16.MAX) > U16{1})
+//RS     print(u32_id(U32.MAX) > U32{1})
+//RS     print(maximum > U64{1})
+//RS     print(maximum >> 63)
+//RS     print(flags.count_ones())
+//RS     print(flags.count_zeros())
+//RS     print(flags.leading_zeros())
+//RS     print(flags.trailing_zeros())
+//RS 
+//RS     i8_max :: I8.MAX
+//RS     i8_one :: I8{1}
+//RS     i8_zero :: I8{0}
+//RS     print(wrapping(i8_max + i8_one))
+//RS     print(saturating(i8_max + i8_one))
+//RS     print(checked(i8_max + i8_zero) ?? i8_zero)
+//RS     print(checked(i8_max + i8_one) ?? i8_zero)
+//RS     i16_max :: I16.MAX
+//RS     i16_one :: I16{1}
+//RS     i16_zero :: I16{0}
+//RS     print(wrapping(i16_max + i16_one))
+//RS     print(saturating(i16_max + i16_one))
+//RS     print(checked(i16_max + i16_zero) ?? i16_zero)
+//RS     print(checked(i16_max + i16_one) ?? i16_zero)
+//RS     i32_max :: I32.MAX
+//RS     i32_one :: I32{1}
+//RS     i32_zero :: I32{0}
+//RS     print(wrapping(i32_max + i32_one))
+//RS     print(saturating(i32_max + i32_one))
+//RS     print(checked(i32_max + i32_zero) ?? i32_zero)
+//RS     print(checked(i32_max + i32_one) ?? i32_zero)
+//RS     i64_max :: I64{9223372036854775807}
+//RS     i64_one :: I64{1}
+//RS     i64_zero :: I64{0}
+//RS     print(wrapping(i64_max + i64_one))
+//RS     print(saturating(i64_max + i64_one))
+//RS     print(checked(i64_max + i64_zero) ?? i64_zero)
+//RS     print(checked(i64_max + i64_one) ?? i64_zero)
+//RS     u8_max :: U8.MAX
+//RS     u8_one :: U8{1}
+//RS     u8_zero :: U8{0}
+//RS     print(wrapping(u8_max + u8_one))
+//RS     print(saturating(u8_max + u8_one))
+//RS     print(checked(u8_max + u8_zero) ?? u8_zero)
+//RS     print(checked(u8_max + u8_one) ?? u8_zero)
+//RS     u16_max :: U16.MAX
+//RS     u16_one :: U16{1}
+//RS     u16_zero :: U16{0}
+//RS     print(wrapping(u16_max + u16_one))
+//RS     print(saturating(u16_max + u16_one))
+//RS     print(checked(u16_max + u16_zero) ?? u16_zero)
+//RS     print(checked(u16_max + u16_one) ?? u16_zero)
+//RS     u32_max :: U32.MAX
+//RS     u32_one :: U32{1}
+//RS     u32_zero :: U32{0}
+//RS     print(wrapping(u32_max + u32_one))
+//RS     print(saturating(u32_max + u32_one))
+//RS     print(checked(u32_max + u32_zero) ?? u32_zero)
+//RS     print(checked(u32_max + u32_one) ?? u32_zero)
+//RS     u64_one :: U64{1}
+//RS     u64_zero :: U64{0}
+//RS     print(wrapping(maximum + u64_one))
+//RS     print(saturating(maximum + u64_one))
+//RS     print(checked(maximum + u64_zero) ?? u64_zero)
+//RS     print(checked(maximum + u64_one) ?? u64_zero)
+//RS     print(pass_u64(checked(maximum + u64_zero)))
+//RS     print(pass_u64(checked(maximum + u64_one)))
+//RS     print(pass_u64(checked(maximum + u64_zero)) ?? u64_zero)
+//RS     print(checked(u64_zero - u64_one) ?? maximum)
+//RS     print(checked(maximum / u64_one) ?? u64_zero)
+//RS     print(checked(maximum / u64_zero) ?? u64_zero)
+//RS     i8_negative :: I8{-1}
+//RS     print(checked(i8_negative + i8_zero) ?? i8_zero)
+//RS }
+//RS "#;
+//RS     let expected = ProgramOutput::ran(
+//RS         concat!(
+//RS             "-8\n-1600\n-320000\n-6400000000\n8\n1600\n320000\n",
+//RS             "18446744073709551615\n18446744073709551615\n18446744073709551615\n",
+//RS             "18446744073709551615\n",
+//RS             "[18446744073709551615, 1]\n[18446744073709551615, 1]\n",
+//RS             "-8\n-16\n-32\n-64\n15\n60\n42\n42\n3\n1\n8\n15\n7\n26\n254\n-128\n3\n",
+//RS             "true\ntrue\ntrue\n1\n3\n5\n4\n0\n",
+//RS             "-128\n127\n127\n0\n",
+//RS             "-32768\n32767\n32767\n0\n",
+//RS             "-2147483648\n2147483647\n2147483647\n0\n",
+//RS             "-9223372036854775808\n9223372036854775807\n9223372036854775807\n0\n",
+//RS             "0\n255\n255\n0\n",
+//RS             "0\n65535\n65535\n0\n",
+//RS             "0\n4294967295\n4294967295\n0\n",
+//RS             "0\n18446744073709551615\n18446744073709551615\n0\n",
+//RS             "18446744073709551615\nnull\n",
+//RS             "18446744073709551615\n18446744073709551615\n",
+//RS             "18446744073709551615\n0\n-1\n",
+//RS         )
+//RS         .into(),
+//RS         String::new(),
+//RS         0,
+//RS     );
+//RS     let dir = std::env::temp_dir().join(format!("jet_fixed_width_integers_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("fixed_width_integers.jet");
+//RS     fs::write(&file, source).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let bundle = checked_bundle_from_path(&shown);
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "fixed-width integer fixture must be resident-safe: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS         .unwrap_or_else(|reason| panic!("fixed-width integer fixture must JIT-compile: {reason}"));
+//RS 
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("fixed-width interpreter failed: {diags:?}"),
+//RS     };
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(source, "fixed_width_integers");
+//RS     assert!(jet_jit::jit_executed_for_test());
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "fixed-width fixture used deopt or fallback"
+//RS     );
+//RS     let default = match dev_iteration(&shown, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("fixed-width default run failed: {diags:?}"),
+//RS     };
+//RS     let aot = compiled_binary_output(&dir, "fixed_width_integers", 0, "fixed_width", &shown);
+//RS 
+//RS     assert_eq!(interpreted, expected, "interpreter fixed-width drift");
+//RS     assert_eq!(resident, expected, "resident JIT fixed-width drift");
+//RS     assert_eq!(default, expected, "default fixed-width drift");
+//RS     assert_eq!(aot, expected, "AOT fixed-width drift");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS 
+//RS     for stem in ["lowlevel/sized_integers", "types/typed_literal_forms"] {
+//RS         let example = example_path(stem);
+//RS         assert_cranelift_three_way(&example, stem);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn fixed_width_signed_remainder_overflow_traps_across_tiers() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let source = r#"
+//RS fn remainder(value: I8, divisor: I8) -> I8 {
+//RS     return value % divisor
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(remainder(I8.MIN, I8{-1}))
+//RS }
+//RS "#;
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_fixed_width_remainder_trap_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("fixed_width_remainder_trap.jet");
+//RS     fs::write(&file, source).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let bundle = checked_bundle_from_path(&shown);
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "signed remainder trap fixture must stay resident-safe: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS         .unwrap_or_else(|reason| panic!("signed remainder fixture must JIT-compile: {reason}"));
+//RS 
+//RS     // D-MODSEM1: `MIN % -1` is 0 and fits — jet_mod answers rather than traps.
+//RS     let expected = ProgramOutput::ran("0\n".into(), String::new(), 0);
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         other => panic!("interpreter MIN % -1: {other:?}"),
+//RS     };
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident =
+//RS         match run_cranelift_outcome_without_fallback(source, "fixed_width_remainder_trap") {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS             other => panic!("resident JIT MIN % -1: {other:?}"),
+//RS         };
+//RS     assert!(jet_jit::jit_executed_for_test());
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "signed remainder fixture used deopt or fallback"
+//RS     );
+//RS     assert_eq!(interpreted, expected, "interpreter MIN % -1 drift");
+//RS     assert_eq!(resident, expected, "resident JIT MIN % -1 drift");
+//RS 
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "fixed_width_remainder_trap",
+//RS         0,
+//RS         "fixed_width_remainder_trap",
+//RS         &shown,
+//RS     );
+//RS     assert_eq!(aot, expected, "AOT MIN % -1 presentation drift");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn fixed_width_and_plain_int_remainder_zero_traps_across_tiers() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let cases = [
+//RS         (
+//RS             "fixed_width",
+//RS             r#"
+//RS fn remainder(value: I8, divisor: I8) -> I8 {
+//RS     return value % divisor
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(remainder(I8{7}, I8{0}))
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "plain_int",
+//RS             r#"
+//RS fn remainder(value: Int, divisor: Int) -> Int {
+//RS     return value % divisor
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(remainder(19, 0))
+//RS }
+//RS "#,
+//RS         ),
+//RS     ];
+//RS     let dir = std::env::temp_dir().join(format!("jet_remainder_zero_traps_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS 
+//RS     for (i, (tag, source)) in cases.into_iter().enumerate() {
+//RS         let file = dir.join(format!("{tag}.jet"));
+//RS         fs::write(&file, source).unwrap();
+//RS         let shown = file.to_string_lossy().to_string();
+//RS         let bundle = checked_bundle_from_path(&shown);
+//RS         assert!(
+//RS             common::cranelift_resident_safe(&bundle),
+//RS             "{tag} remainder-zero fixture must stay resident-safe: {}",
+//RS             common::cranelift_resident_safe_detail(&bundle)
+//RS         );
+//RS             common::compile_cranelift_bundle(&bundle, &common::development_policy()).unwrap_or_else(|reason| {
+//RS             panic!("{tag} remainder-zero fixture must JIT-compile: {reason}")
+//RS         });
+//RS 
+//RS         let interpreted = match dev_iteration(&shown, false, true) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(
+//RS                     exit_code, 70,
+//RS                     "{tag} interpreter must exit 70: out={stdout} err={stderr}"
+//RS                 );
+//RS                 assert!(
+//RS                     stderr.contains("Stop [E3010]") && stderr.contains("divided by zero"),
+//RS                     "{tag} interpreter trap wording: {stderr}"
+//RS                 );
+//RS                 assert!(
+//RS                     !stderr.contains("E0953") && !stderr.contains("comptime"),
+//RS                     "{tag} interpreter must not use comptime voice: {stderr}"
+//RS                 );
+//RS                 (stdout, stderr)
+//RS             }
+//RS             other => panic!("{tag} interpreter expected runtime trap, got: {other:?}"),
+//RS         };
+//RS         jet_jit::reset_jit_trace_for_test();
+//RS         let resident = match run_cranelift_outcome_without_fallback(source, tag) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(
+//RS                     exit_code, 70,
+//RS                     "{tag} resident JIT must exit 70: out={stdout} err={stderr}"
+//RS                 );
+//RS                 assert!(
+//RS                     stderr.contains("Stop [E3010]") && stderr.contains("divided by zero"),
+//RS                     "{tag} resident trap wording: {stderr}"
+//RS                 );
+//RS                 assert!(
+//RS                     !stderr.contains("E0953") && !stderr.contains("comptime"),
+//RS                     "{tag} resident must not use comptime voice: {stderr}"
+//RS                 );
+//RS                 (stdout, stderr)
+//RS             }
+//RS             other => panic!("{tag} resident JIT expected runtime trap, got: {other:?}"),
+//RS         };
+//RS         assert!(
+//RS             jet_jit::jit_executed_for_test(),
+//RS             "{tag} remainder-zero fixture did not execute in resident JIT"
+//RS         );
+//RS         assert!(
+//RS             !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS             "{tag} remainder-zero fixture used deopt or fallback"
+//RS         );
+//RS         assert_eq!(
+//RS             interpreted.0, resident.0,
+//RS             "{tag} stdout drift between interpret and resident"
+//RS         );
+//RS         // stderr paths may differ (source span formatting); pin the panic sentence.
+//RS         assert!(
+//RS             interpreted.1.contains("divided by zero") && resident.1.contains("divided by zero")
+//RS         );
+//RS 
+//RS         let aot = compiled_binary_output(&dir, tag, i, tag, &shown);
+//RS         assert_eq!(aot.exit_code, 70, "{tag} AOT must exit 70");
+//RS         assert!(
+//RS             aot.stderr.contains("Stop [E3010]") && aot.stderr.contains("divided by zero"),
+//RS             "{tag} AOT remainder-zero presentation drift: {}",
+//RS             aot.stderr
+//RS         );
+//RS         assert!(
+//RS             !aot.stderr.contains("panicked at") && !aot.stderr.contains("E0953"),
+//RS             "{tag} leaked a raw Rust panic or comptime voice"
+//RS         );
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn fixed_width_mixed_sign_shift_counts_trap_across_tiers() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let cases = [
+//RS         (
+//RS             "shl_negative",
+//RS             "U8",
+//RS             "I8",
+//RS             "U8{1}",
+//RS             "I8{-1}",
+//RS             "<<",
+//RS             "shifting left by -1 bits is out of range (this type is 8 bits wide)",
+//RS         ),
+//RS         (
+//RS             "shr_negative",
+//RS             "U8",
+//RS             "I8",
+//RS             "U8{1}",
+//RS             "I8{-1}",
+//RS             ">>",
+//RS             "shifting right by -1 bits is out of range (this type is 8 bits wide)",
+//RS         ),
+//RS         (
+//RS             "shl_huge",
+//RS             "I8",
+//RS             "U64",
+//RS             "I8{1}",
+//RS             "U64.MAX",
+//RS             "<<",
+//RS             "shifting left by 18446744073709551615 bits is out of range (this type is 8 bits wide)",
+//RS         ),
+//RS         (
+//RS             "shr_width",
+//RS             "U8",
+//RS             "U8",
+//RS             "U8{1}",
+//RS             "U8{8}",
+//RS             ">>",
+//RS             "shifting right by 8 bits is out of range (this type is 8 bits wide)",
+//RS         ),
+//RS     ];
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_fixed_width_shift_traps_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS 
+//RS     for (i, (tag, value_ty, count_ty, value, count, operator, trap)) in
+//RS         cases.into_iter().enumerate()
+//RS     {
+//RS         let source = format!(
+//RS             "fn shift(value: {value_ty}, count: {count_ty}) {value_ty} {{\n    return value {operator} count\n}}\n\nfn run() {{\n    print(shift({value}, {count}))\n}}\n"
+//RS         );
+//RS         let file = dir.join(format!("{tag}.jet"));
+//RS         fs::write(&file, &source).unwrap();
+//RS         let shown = file.to_string_lossy().to_string();
+//RS         let bundle = checked_bundle_from_path(&shown);
+//RS         assert!(
+//RS             common::cranelift_resident_safe(&bundle),
+//RS             "{tag} must stay resident-safe: {}",
+//RS             common::cranelift_resident_safe_detail(&bundle)
+//RS         );
+//RS         common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS             .unwrap_or_else(|reason| panic!("{tag} must JIT-compile: {reason}"));
+//RS 
+//RS         let interpreted = match dev_iteration(&shown, false, true) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(
+//RS                     exit_code, 70,
+//RS                     "{tag} interpreter must exit 70: out={stdout} err={stderr}"
+//RS                 );
+//RS                 assert!(
+//RS                     stderr.contains("Stop [E3010]") && stderr.contains(trap),
+//RS                     "{tag} interpreter trap wording: {stderr}"
+//RS                 );
+//RS                 assert!(
+//RS                     !stderr.contains("E0953") && !stderr.contains("comptime"),
+//RS                     "{tag} interpreter must not use comptime voice: {stderr}"
+//RS                 );
+//RS                 (stdout, stderr)
+//RS             }
+//RS             other => panic!("{tag} interpreter expected runtime trap, got: {other:?}"),
+//RS         };
+//RS         jet_jit::reset_jit_trace_for_test();
+//RS         let resident = match run_cranelift_outcome_without_fallback(&source, tag) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(
+//RS                     exit_code, 70,
+//RS                     "{tag} resident JIT must exit 70: out={stdout} err={stderr}"
+//RS                 );
+//RS                 assert!(
+//RS                     stderr.contains("Stop [E3010]") && stderr.contains(trap),
+//RS                     "{tag} resident trap wording: {stderr}"
+//RS                 );
+//RS                 assert!(
+//RS                     !stderr.contains("E0953") && !stderr.contains("comptime"),
+//RS                     "{tag} resident must not use comptime voice: {stderr}"
+//RS                 );
+//RS                 (stdout, stderr)
+//RS             }
+//RS             other => panic!("{tag} resident JIT expected runtime trap, got: {other:?}"),
+//RS         };
+//RS         assert!(
+//RS             jet_jit::jit_executed_for_test(),
+//RS             "{tag} did not run natively"
+//RS         );
+//RS         assert!(
+//RS             !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS             "{tag} used deopt or fallback"
+//RS         );
+//RS         assert_eq!(
+//RS             interpreted.0, resident.0,
+//RS             "{tag} stdout drift between interpret and resident"
+//RS         );
+//RS 
+//RS         let aot = compiled_binary_output(&dir, tag, i, tag, &shown);
+//RS         assert_eq!(aot.exit_code, 70, "{tag} AOT must exit 70");
+//RS         assert!(
+//RS             aot.stderr.contains("Stop [E3010]") && aot.stderr.contains(trap),
+//RS             "{tag} AOT shift trap presentation drift: {}",
+//RS             aot.stderr
+//RS         );
+//RS         assert!(
+//RS             !aot.stderr.contains("E0953") && !aot.stderr.contains("panicked at"),
+//RS             "{tag} leaked comptime voice or raw Rust panic"
+//RS         );
+//RS     }
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn numeric_singleton_splits_match_resident_jit_and_aot_without_fallback() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     // D-EXPOP1=A / D-XORSPELL1=A (ratified 2026-08-05, syntax-decisions.md):
+//RS     // `^=` raises in place and exclusive-or-assign is `~|=`. This fixture was
+//RS     // written when the caret was xor, so `high ^= 10` had stopped meaning what
+//RS     // the golden below says: the resident tier answered 9 ^ 10 = 3486784401,
+//RS     // then `|= 8` = 3486784409, which is the RIGHT answer for the operator on
+//RS     // the page. The bit-operator coverage this block exists for is spelled
+//RS     // `~|=` now, so the operator moves and every expected value stays.
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let source = r#"
+//RS fn run() {
+//RS     values := [1.5, 2.5, 3.5]
+//RS     first :: &values[0]
+//RS     last :: &values[2]
+//RS     first = 4.5
+//RS     last = 6.5
+//RS     first += 1.25
+//RS     last += 0.25
+//RS     print(first)
+//RS     print(last)
+//RS     print(values[0])
+//RS     print(values[2])
+//RS 
+//RS     counts := [1, 2, 3]
+//RS     low :: &counts[0]
+//RS     high :: &counts[2]
+//RS     low += 4
+//RS     high += 6
+//RS     low &= 6
+//RS     low <<= 1
+//RS     high ~|= 10
+//RS     high |= 8
+//RS     print(low)
+//RS     print(high)
+//RS     print(counts[0])
+//RS     print(counts[2])
+//RS }
+//RS "#;
+//RS     let expected = ProgramOutput::ran(
+//RS         "5.75\n6.75\n5.75\n6.75\n8\n11\n8\n11\n".into(),
+//RS         String::new(),
+//RS         0,
+//RS     );
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_numeric_singleton_splits_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("numeric_singleton_splits.jet");
+//RS     fs::write(&file, source).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let bundle = checked_bundle_from_path(&shown);
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "numeric singleton splits must stay resident-safe: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS         .unwrap_or_else(|reason| panic!("numeric singleton splits must JIT-compile: {reason}"));
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(source, "numeric_singleton_splits");
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "numeric singleton splits did not execute in JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "numeric singleton splits used deopt or fallback"
+//RS     );
+//RS 
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "numeric_singleton_splits",
+//RS         0,
+//RS         "numeric_singleton_splits",
+//RS         &shown,
+//RS     );
+//RS     assert_eq!(
+//RS         resident, expected,
+//RS         "resident JIT numeric singleton split drifted"
+//RS     );
+//RS     assert_eq!(aot, expected, "AOT numeric singleton split drifted");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// #1989 — two independent sites, both "one type source for the host".
+//RS ///
+//RS /// `Size` is a CORE struct with no TIR entry, so TIR leaves `Type::Int` on
+//RS /// `size.width` while the field lowering recovers the declared slot and emits
+//RS /// an `f64`. `emit_print`'s integer fast path used to key on the raw `inner.ty`
+//RS /// and hand that `f64` to `int_to_string`, declared `i64`.
+//RS ///
+//RS /// Separately, the compiler-written `Frame::decode` decodes a `[Float#4]`
+//RS /// field: `result_payload` yields `f64` while `lower_datatree_decode_list_items`
+//RS /// hardcoded `list_push`, declared `i64`. The codec is generated for every
+//RS /// structurally eligible struct (D-META-AUTO1=A), so declaring `Frame` emits
+//RS /// that site — `require_funcs` proves it rather than assuming it.
+//RS #[test]
+//RS fn resident_jit_1989_print_and_decode_host_types_pass_the_verifier() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS 
+//RS     assert_resident_clif_shape(
+//RS         "clif_1989_core_struct_float_field_print",
+//RS         r#"use core.ui as ui
+//RS 
+//RS fn run() {
+//RS     backend :: ui.null_backend()
+//RS     node :: ui.node("hello", 100.0, 20.0)
+//RS     constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
+//RS     size :: backend.measure(node, constraint)
+//RS     print(size.width)
+//RS     print(size.height)
+//RS }
+//RS "#,
+//RS         &["run"],
+//RS         "100.0\n20.0\n",
+//RS     );
+//RS 
+//RS     assert_resident_clif_shape(
+//RS         "clif_1989_fixed_float_list_decode_push",
+//RS         r#"struct Frame {
+//RS     values: [Float#4]
+//RS }
+//RS 
+//RS fn run() {
+//RS     frame :: Frame{values: [Float#4]{1.5, 2.5, 3.5, 4.5}}
+//RS     print(frame.values[3])
+//RS }
+//RS "#,
+//RS         &["Frame::decode"],
+//RS         "4.5\n",
+//RS     );
+//RS }
+//RS 
+//RS /// #1990 — `core.regex.flags` declares three `i64` parameters, and Jet lowers
+//RS /// `Bool` to `i8`. `lower_recorded_core_call_values` built the call straight
+//RS /// from `lower_expr` results with no reconciliation against the callee's
+//RS /// declared `AbiParam` list, so three `iconst.i8` went into `i64` slots. The
+//RS /// hand-written `core.regex` branch has widened since ec4c9c460, but the
+//RS /// registry path runs first and shadows it, which is how a real fix coexisted
+//RS /// with a live bug — so the fixture must go through `re.flags`, not a
+//RS /// hand-lowered spelling.
+//RS ///
+//RS /// `rx.flags()` reads back all three marshalled arguments (`i`, `m`, no `s`),
+//RS /// and `count("A")` is 1 only if `case_insensitive` genuinely reached the
+//RS /// engine, so a truncated or garbage extension shows in stdout as well.
+//RS #[test]
+//RS fn resident_jit_1990_bool_core_call_args_pass_the_verifier() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS 
+//RS     assert_resident_clif_shape(
+//RS         "clif_1990_bool_core_call_args",
+//RS         r#"use core.regex as re
+//RS 
+//RS fn run() {
+//RS     flag_set :: re.flags(true, true, false)
+//RS     rx :: re.compile_with("[a-z]+", flag_set) ?? panic("bad pattern")
+//RS     print(rx.flags())
+//RS     print(rx.count("A"))
+//RS }
+//RS "#,
+//RS         &["run"],
+//RS         "im\n1\n",
+//RS     );
+//RS }
+//RS 
+//RS /// #1991 — a sema-proved-dead edge still has to hand a value to the slot it
+//RS /// flows into. An exhaustive `Float` match lowers to nested if-let expressions
+//RS /// whose final else is `Unreachable`, and it merges on an `f64` block
+//RS /// parameter; `Unreachable` returned `iconst.i64 0` regardless, so the jump
+//RS /// passed an `i64` into an `f64` block parameter. The arms must therefore be
+//RS /// exhaustive (no `else`), and the match must yield `Float`.
+//RS #[test]
+//RS fn resident_jit_1991_dead_edge_zero_passes_the_verifier() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS 
+//RS     assert_resident_clif_shape(
+//RS         "clif_1991_dead_edge_zero_merge_type",
+//RS         r#"enum Shape {
+//RS     Circle(Float)
+//RS     Square(Float)
+//RS     Empty
+//RS }
+//RS 
+//RS fn area(s: Shape) -> Float {
+//RS     return if s == {
+//RS         .Circle(r) -> r * r
+//RS         .Square(side) -> side * side
+//RS         .Empty -> 0.0
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(area(.Circle(3.0)))
+//RS     print(area(.Square(4.0)))
+//RS     print(area(.Empty))
+//RS }
+//RS "#,
+//RS         &["area"],
+//RS         "9.0\n16.0\n0.0\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1033 tests/dev_parts/routine.rs:3658-5440
+

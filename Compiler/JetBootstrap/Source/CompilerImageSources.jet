@@ -1,0 +1,55 @@
+// CompilerImage.rs:512-554. Same Driver-retained authorized snapshot; no open,
+// source reread, copied snapshot, absolute-root inode/time hash, or path-only key.
+use core.files.runtime.kernel_path_components as compiler_image_os_path
+use jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceFile]
+use jet_foundation.[MIRSHA256, mir_sha256_new, mir_sha256_update, mir_sha256_finish, mir_sha256_bytes]
+
+fn compiler_image_hash_u64(hash: &MIRSHA256, value: U64) Never! {
+    bytes := [U8]{}
+    loop index in 0..<8 -> &bytes.push(U8.from_u64((value >> (index * 8)) & U64{255}) ?? U8{0})
+    mir_sha256_update(&hash, bytes[0..<bytes.len()])
+}
+fn compiler_image_hash_string(hash: &MIRSHA256, value: String) Never! {
+    bytes :: value.bytes()
+    compiler_image_hash_u64(&hash, U64{bytes.len()})
+    mir_sha256_update(&hash, bytes[0..<bytes.len()])
+}
+fn compiler_image_hash_files(hash: &MIRSHA256, files: View<JetDriverAuthorizedSourceFile>) Never! {
+    compiler_image_hash_u64(&hash, U64{files.len()})
+    loop file in files {
+        compiler_image_hash_string(&hash, compiler_image_os_path.display(file.relative_path))
+        bytes :: file.source.bytes()
+        compiler_image_hash_u64(&hash, U64{bytes.len()})
+        digest :: mir_sha256_bytes(bytes[0..<bytes.len()])
+        mir_sha256_update(&hash, digest[0..<digest.len()])
+    }
+}
+pub fn compiler_image_source_authority_digest(source: JetDriverAuthorizedSourceSnapshot) -> [U8] Never! {
+    hash := mir_sha256_new()
+    entry_root := Int?{None}
+    loop (index, root) in source.roots {
+        if root.identity == source.entry_root_identity { entry_root = Val(index); break }
+    }
+    compiler_image_hash_u64(&hash, if entry_root == .Val(index) -> U64{index} else -> U64{18446744073709551615})
+    entry := compiler_image_os_path.display(source.entry_path)
+    if entry_root == .Val(index) {
+        if compiler_image_os_path.strip_prefix_span(source.entry_path, source.roots[index].canonical_path) == .Val(extent) {
+            relative := compiler_image_os_path.display_span(source.entry_path, extent)
+            // #4303: a trim/slice view flowing into a String-typed call.
+            bytes :: relative.bytes()
+            start := 0
+            loop start < bytes.len() && bytes[start] == U8{47} -> start += 1
+            relative = relative.slice(start, relative.len())
+            entry = relative
+        }
+    }
+    compiler_image_hash_string(&hash, entry)
+    compiler_image_hash_u64(&hash, U64{source.roots.len()})
+    loop root in source.roots {
+        flag :: [U8]{if root.allow_hardlinks -> U8{1} else -> U8{0}}
+        mir_sha256_update(&hash, flag[0..<1])
+        compiler_image_hash_files(&hash, root.files[0..<root.files.len()])
+        compiler_image_hash_files(&hash, root.foreign_cache_files[0..<root.foreign_cache_files.len()])
+    }
+    mir_sha256_finish(^hash)
+}

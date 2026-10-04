@@ -1,0 +1,269 @@
+// Rust jet-foundation/App.rs. MIRApp* are the exact erased App metadata
+// carriers, not executable bodies: spans remain byte offsets and bodies TIR.
+pub fn app_capability_target(method: String) -> String? {
+    if {
+        method == "csr" || method == "island" || method == "hydration_dev" || method == "hydration_release" -> Val("JS")
+        method == "serve" || method == "serve_on" -> Val("Native")
+        else -> None
+    }
+}
+pub fn app_target_supports(required: String, target: String) -> Bool Never! {
+    if required == "JS" -> return target == "Web" || target == "JS"
+    required == "Native" && (target == "Native" || target == "OS")
+}
+pub fn app_render_mode_name(mode: MIRAppRenderMode) -> String Never! {
+    if mode == {
+        .CSR -> "csr"
+        .SSR -> "ssr"
+        .SSG -> "ssg"
+        .Stream -> "stream"
+        .Island -> "island"
+    }
+}
+pub fn app_render_mode_parse(name: String) -> MIRAppRenderMode? {
+    if name == {
+        "csr" -> Val(MIRAppRenderMode.CSR)
+        "ssr" -> Val(MIRAppRenderMode.SSR)
+        "ssg" -> Val(MIRAppRenderMode.SSG)
+        "stream" | "streaming" -> Val(MIRAppRenderMode.Stream)
+        "island" -> Val(MIRAppRenderMode.Island)
+        else -> None
+    }
+}
+pub fn app_render_fact_mode_name(mode: MIRAppRenderFactMode) -> String Never! {
+    if mode == {
+        .Static -> "static"
+        .Server -> "server"
+        .ServerStream -> "server+stream"
+        .ServerIsland -> "server+island"
+        .Client -> "client"
+    }
+}
+pub fn app_render_fact_mode_parse(name: String) -> MIRAppRenderFactMode? {
+    if name == {
+        "static" | "Static" | "ssg" -> Val(MIRAppRenderFactMode.Static)
+        "server" | "Server" | "ssr" -> Val(MIRAppRenderFactMode.Server)
+        "server+stream" | "ServerStream" | "Stream" | "stream" | "streaming" -> Val(MIRAppRenderFactMode.ServerStream)
+        "server+island" | "ServerIsland" | "Island" | "island" -> Val(MIRAppRenderFactMode.ServerIsland)
+        "client" | "Client" | "csr" -> Val(MIRAppRenderFactMode.Client)
+        else -> None
+    }
+}
+pub fn app_render_fact_from_builder(mode: MIRAppRenderMode) -> MIRAppRenderFactMode Never! {
+    if mode == {
+        .CSR -> MIRAppRenderFactMode.Client
+        .SSR -> MIRAppRenderFactMode.Server
+        .SSG -> MIRAppRenderFactMode.Static
+        .Stream -> MIRAppRenderFactMode.ServerStream
+        .Island -> MIRAppRenderFactMode.ServerIsland
+    }
+}
+pub fn app_cache_name(cache: MIRAppCacheFact) -> String Never! {
+    if cache == {
+        .Unspecified -> "unspecified"
+        .Immutable -> "immutable"
+        .Revalidate -> "revalidate"
+        .Private -> "private"
+    }
+}
+pub fn app_cache_parse(name: String) -> MIRAppCacheFact? {
+    if name == {
+        "immutable" | "static" -> Val(MIRAppCacheFact.Immutable)
+        "revalidate" | "stream" -> Val(MIRAppCacheFact.Revalidate)
+        "private" | "no-store" -> Val(MIRAppCacheFact.Private)
+        else -> None
+    }
+}
+pub fn app_hydration_trigger_name(trigger: MIRAppHydrationTrigger) -> String Never! {
+    if trigger == {
+        .Immediate -> "immediate"
+        .ClientLoad -> "client-load"
+        .ClientIdle -> "client-idle"
+        .ClientVisible -> "client-visible"
+        .Manual -> "manual"
+    }
+}
+pub fn app_hydration_trigger_parse(name: String) -> MIRAppHydrationTrigger? {
+    if name == {
+        "immediate" -> Val(MIRAppHydrationTrigger.Immediate)
+        "client-load" -> Val(MIRAppHydrationTrigger.ClientLoad)
+        "client-idle" -> Val(MIRAppHydrationTrigger.ClientIdle)
+        "client-visible" -> Val(MIRAppHydrationTrigger.ClientVisible)
+        "manual" -> Val(MIRAppHydrationTrigger.Manual)
+        else -> None
+    }
+}
+pub fn app_render_facts_default() -> MIRAppRenderFacts Never! {
+    MIRAppRenderFacts{mode: MIRAppRenderFactMode.Static, reason: [String]{}, effects: [String]{}, interactive: false, loader: None, form: None, cache: MIRAppCacheFact.Unspecified, override_mode: None, pending_boundary_id: None, island: None}
+}
+pub fn app_graph_new(entry_file: String) -> MIRAppGraph Never! {
+    MIRAppGraph{entry_file: entry_file, routes: [MIRAppRoute]{}, actions: [MIRAppAction]{}, forms: [MIRAppFormFact]{}, queries: [MIRAppQueryFact]{}, stores: [MIRAppStoreFact]{}, mounts: [MIRAppMount]{}, routes_from: [MIRAppRoutesFrom]{}, policy: MIRAppPolicy{security: [String]{}, assets: [String]{}, split: [String]{}, cache: [String]{}, a11y: [String]{}, adapters: [String]{}}, hydration: "dev-overlay", shared_tir: true}
+}
+// Identity input is UTF-8, includes the NUL delimiter, excludes source spans.
+fn app_identity_bytes(prefix: String, path: String, handler: String) -> [U8] Never! {
+    bytes := "{prefix}{path}".bytes()
+    &bytes.push(U8{0})
+    loop byte in handler.bytes() -> &bytes.push(byte)
+    bytes
+}
+pub fn stable_route_identity(path: String, handler: String) -> String Never! {
+    bytes :: app_identity_bytes("jet:route:v1:", path, handler)
+    hash :: mir_sha256_bytes(bytes[0..<bytes.len()])
+    digest := mir_sha256_hex_bytes(hash[0..<hash.len()])
+    "route-{digest.slice(0, 24)}"
+}
+pub fn stable_island_identity(path: String, handler: String) -> String Never! {
+    bytes :: app_identity_bytes("jet:island:v1:", path, handler)
+    hash :: mir_sha256_bytes(bytes[0..<bytes.len()])
+    digest := mir_sha256_hex_bytes(hash[0..<hash.len()])
+    "island-{digest.slice(0, 24)}"
+}
+pub fn stable_pending_boundary_id(path: String, handler: String) -> MIRAppPendingBoundaryID Never! {
+    bytes :: app_identity_bytes("jet:pending-boundary:v1:", path, handler)
+    digest :: mir_sha256_bytes(bytes[0..<bytes.len()])
+    value := U64{0}
+    loop index in 0..<8 -> value = (value << 8) | U64.from_u8(digest[index])
+    MIRAppPendingBoundaryID{value: value}
+}
+pub fn app_server_function_middleware() -> [String] Never! { [String]{"context", "auth", "csp", "logging", "observability"} }
+fn app_json_optional(value: String?) -> String Never! {
+    if value == {
+        .Val(text) -> foundation_json_quote(text)
+        .None -> "null"
+    }
+}
+fn app_json_strings(values: [String]) -> String Never! {
+    encoded :: loop value in values -> foundation_json_quote(value)
+    "[{encoded.join(", ")}]"
+}
+fn app_json_route_fields(fields: [MIRAppRouteField]) -> String Never! {
+    values := [String]{}
+    loop field in fields -> &values.push("{{\"name\":{foundation_json_quote(field.name)},\"type\":{foundation_json_quote(field.ty)},\"codec\":{foundation_json_quote(field.codec)},\"required\":{field.required},\"default\":{app_json_optional(field.default)}}}")
+    "[{values.join(",")}]"
+}
+fn app_json_loader(loader: MIRAppRouteLoader?) -> String Never! {
+    value :: loader ?? return "null"
+    "{{\"handler\":{foundation_json_quote(value.handler)},\"data_type\":{foundation_json_quote(value.data_type)},\"dependency\":{foundation_json_quote(value.dependency)},\"preload\":{value.preload},\"cache_identity\":{foundation_json_quote(value.cache_identity)}}}"
+}
+fn app_json_boundaries(boundaries: MIRAppRouteBoundaries) -> String Never! {
+    "{{\"pending\":{app_json_optional(boundaries.pending)},\"not_found\":{app_json_optional(boundaries.not_found)},\"error\":{app_json_optional(boundaries.error)}}}"
+}
+// AppGraph::to_json preserves the reference field order and pretty bytes;
+// string escaping is the one Foundation quote operation, never a new codec.
+pub fn app_graph_to_json(graph: MIRAppGraph) -> String Never! {
+    out := [U8]{}
+    canonical_ast_write(&out, "{{\n  \"entry\": {foundation_json_quote(graph.entry_file)},\n  \"hydration\": {foundation_json_quote(graph.hydration)},\n  \"shared_tir\": {graph.shared_tir},\n  \"routes\": [\n")
+    loop (index, route) in graph.routes {
+        facts :: route.render_facts
+        override_text :: if facts.override_mode == {
+            .Val(mode) -> foundation_json_quote(app_render_fact_mode_name(mode))
+            .None -> "null"
+        }
+        pending_text :: if facts.pending_boundary_id == {
+            .Val(id) -> "{id.value}"
+            .None -> "null"
+        }
+        canonical_ast_write(&out, "    {{\n      \"path\": {foundation_json_quote(route.path)},\n      \"handler\": {foundation_json_quote(route.handler)},\n      \"route_identity\": {foundation_json_quote(route.route_identity)},\n      \"path_params\": {app_json_route_fields(route.path_params)},\n      \"search_params\": {app_json_route_fields(route.search_params)},\n      \"search_codec\": {foundation_json_quote(route.search_codec)},\n      \"loader\": {app_json_loader(route.loader)},\n      \"boundaries\": {app_json_boundaries(route.boundaries)},\n      \"precedence\": {foundation_json_quote(route.precedence)},\n      \"render\": {foundation_json_quote(app_render_mode_name(route.render))},\n      \"render_facts\": {{\n        \"mode\": {foundation_json_quote(app_render_fact_mode_name(facts.mode))},\n        \"reason\": {app_json_strings(facts.reason)},\n        \"effects\": {app_json_strings(facts.effects)},\n        \"interactive\": {facts.interactive},\n        \"loader\": {app_json_optional(facts.loader)},\n        \"form\": {app_json_optional(facts.form)},\n        \"cache\": {foundation_json_quote(app_cache_name(facts.cache))},\n        \"override\": {override_text},\n        \"pending_boundary_id\": {pending_text},\n")
+        if facts.island == {
+            .Val(island) -> {
+                canonical_ast_write(&out, "        \"island\": {{\n          \"identity\": {foundation_json_quote(island.identity)},\n          \"hydration_trigger\": {foundation_json_quote(app_hydration_trigger_name(island.hydration_trigger))},\n          \"resume_payload\": {{\n            \"serializable\": {island.resume_payload.serializable},\n            \"captures\": [\n")
+                loop (capture_index, capture) in island.resume_payload.captures {
+                    canonical_ast_write(&out, "              {{\"name\": {foundation_json_quote(capture.name)}, \"type\": {foundation_json_quote(capture.ty)}, \"serializable\": {capture.serializable}}}")
+                    if capture_index + 1 != island.resume_payload.captures.len() -> &out.push(U8{44})
+                    &out.push(U8{10})
+                }
+                canonical_ast_write(&out, "            ]\n          }}\n        }}\n")
+            }
+            .None -> canonical_ast_write(&out, "        \"island\": null\n")
+        }
+        canonical_ast_write(&out, "      }},\n      \"provenance\": {foundation_json_quote(route.provenance)}\n    }}")
+        if index + 1 != graph.routes.len() -> &out.push(U8{44})
+        &out.push(U8{10})
+    }
+    canonical_ast_write(&out, "  ],\n  \"actions\": [\n")
+    loop (index, action) in graph.actions {
+        canonical_ast_write(&out, "    {{\n      \"name\": {foundation_json_quote(action.name)},\n      \"handler\": {foundation_json_quote(action.handler)},\n      \"kind\": {foundation_json_quote(action.kind)},\n      \"preload\": {action.preload},\n      \"input\": {foundation_json_quote(action.input_type)},\n      \"output\": {foundation_json_quote(action.output_type)},\n      \"error\": {foundation_json_quote(action.error_type)},\n      \"endpoint\": {foundation_json_quote(action.endpoint)},\n      \"method\": {foundation_json_quote(action.method)},\n      \"csrf\": {foundation_json_quote(action.csrf)},\n      \"effects\": {app_json_strings(action.effects)},\n      \"middleware\": {app_json_strings(action.middleware)},\n      \"provenance\": {foundation_json_quote(action.provenance)}\n    }}")
+        if index + 1 != graph.actions.len() -> &out.push(U8{44})
+        &out.push(U8{10})
+    }
+    canonical_ast_write(&out, "  ],\n  \"forms\": [\n")
+    loop (index, form) in graph.forms {
+        fields := [String]{}
+        loop field in form.fields -> &fields.push("{{\"name\":{foundation_json_quote(field.name)},\"ty\":{foundation_json_quote(field.ty)},\"required\":{field.required},\"default\":{app_json_optional(field.default)},\"label\":{foundation_json_quote(field.label)},\"control\":{foundation_json_quote(field.control)},\"wire_name\":{foundation_json_quote(field.wire_name)}}}")
+        canonical_ast_write(&out, "    {{\"name\":{foundation_json_quote(form.name)},\"model\":{foundation_json_quote(form.model)},\"action\":{foundation_json_quote(form.action)},\"input\":{foundation_json_quote(form.input_type)},\"output\":{foundation_json_quote(form.output_type)},\"error\":{foundation_json_quote(form.error_type)},\"endpoint\":{foundation_json_quote(form.endpoint)},\"method\":{foundation_json_quote(form.method)},\"csrf\":{foundation_json_quote(form.csrf)},\"effects\":{app_json_strings(form.effects)},\"fields\":[{fields.join(",")}],\"middleware\":{app_json_strings(form.middleware)},\"provenance\":{foundation_json_quote(form.provenance)}}}")
+        if index + 1 != graph.forms.len() -> &out.push(U8{44})
+        &out.push(U8{10})
+    }
+    canonical_ast_write(&out, "  ],\n  \"queries\": [\n")
+    loop (index, query) in graph.queries {
+        canonical_ast_write(&out, "    {{\n      \"key\": {foundation_json_quote(query.key)},\n      \"footprint\": {foundation_json_quote(query.footprint)},\n      \"source\": {foundation_json_quote(query.source)},\n      \"kind\": {foundation_json_quote(query.kind)}\n    }}")
+        if index + 1 != graph.queries.len() -> &out.push(U8{44})
+        &out.push(U8{10})
+    }
+    canonical_ast_write(&out, "  ],\n  \"stores\": [\n")
+    loop (index, store) in graph.stores {
+        canonical_ast_write(&out, "    {{\n      \"name\": {foundation_json_quote(store.name)},\n      \"source\": {foundation_json_quote(store.source)},\n      \"kind\": {foundation_json_quote(store.kind)},\n      \"history_limit\": {foundation_json_quote(store.history_limit)}\n    }}")
+        if index + 1 != graph.stores.len() -> &out.push(U8{44})
+        &out.push(U8{10})
+    }
+    canonical_ast_write(&out, "  ],\n  \"mounts\": [\n")
+    loop (index, mount) in graph.mounts {
+        canonical_ast_write(&out, "    {{\n      \"prefix\": {foundation_json_quote(mount.prefix)},\n      \"handler\": {foundation_json_quote(mount.handler)},\n      \"effects\": {app_json_strings(mount.effects)},\n      \"security\": {app_json_strings(mount.security)},\n      \"provenance\": {foundation_json_quote(mount.provenance)}\n    }}")
+        if index + 1 != graph.mounts.len() -> &out.push(U8{44})
+        &out.push(U8{10})
+    }
+    canonical_ast_write(&out, "  ],\n  \"routes_from\": [\n")
+    loop (index, root) in graph.routes_from {
+        canonical_ast_write(&out, "    {foundation_json_quote(root.root)}")
+        if index + 1 != graph.routes_from.len() -> &out.push(U8{44})
+        &out.push(U8{10})
+    }
+    policy :: graph.policy
+    canonical_ast_write(&out, "  ],\n  \"policy\": {{\n    \"security\": {app_json_strings(policy.security)},\n    \"assets\": {app_json_strings(policy.assets)},\n    \"split\": {app_json_strings(policy.split)},\n    \"cache\": {app_json_strings(policy.cache)},\n    \"a11y\": {app_json_strings(policy.a11y)},\n    \"adapters\": {app_json_strings(policy.adapters)}\n  }}\n}}")
+    String.from_bytes(out) ?? panic("App JSON escaping preserves UTF-8")
+}
+pub fn app_graph_explain_lines(graph: MIRAppGraph) -> [String] Never! {
+    lines := [String]{"web application graph — {graph.entry_file}", "hydration: {graph.hydration} (shared TIR: {graph.shared_tir})"}
+    loop route in graph.routes {
+        &lines.push("  {route.path} [{app_render_fact_mode_name(route.render_facts.mode)}] -> {route.handler} ({route.provenance})")
+        path_params :: loop field in route.path_params -> "{field.name}:{field.ty}"
+        search_params :: loop field in route.search_params -> "{field.name}:{field.ty}"
+        loader :: if route.loader == {
+            .Val(value) -> " loader={value.handler} data={value.data_type} preload={value.preload} cache={value.cache_identity}"
+            .None -> ""
+        }
+        &lines.push("    route-contract: identity={route.route_identity} precedence={route.precedence} path=[{path_params.join(",")}] search=[{search_params.join(",")}] codec={route.search_codec}{loader} boundaries=pending:{route.boundaries.pending ?? "-"} not_found:{route.boundaries.not_found ?? "-"} error:{route.boundaries.error ?? "-"}")
+        facts :: route.render_facts
+        reason :: if facts.reason.len() == 0 -> "unspecified" else -> facts.reason.join("; ")
+        pending :: if facts.pending_boundary_id == {
+            .Val(id) -> " pending_boundary_id={id.value}"
+            .None -> ""
+        }
+        island :: if facts.island == {
+            .Val(value) -> " island={value.identity} hydration={app_hydration_trigger_name(value.hydration_trigger)}"
+            .None -> ""
+        }
+        &lines.push("    render-facts: mode={app_render_fact_mode_name(facts.mode)} reason={reason} effects=[{facts.effects.join(",")}] cache={app_cache_name(facts.cache)}{pending}{island}")
+    }
+    loop action in graph.actions -> &lines.push("  action {action.name} ({action.kind}) -> {action.handler} input={action.input_type} output={action.output_type} error={action.error_type} endpoint={action.endpoint} method={action.method} csrf={action.csrf} effects=[{action.effects.join(",")}] middleware=[{action.middleware.join(",")}] ({action.provenance})")
+    loop form in graph.forms {
+        fields :: loop field in form.fields -> "{field.name}:{field.ty}{if field.required -> "" else -> "?"}"
+        &lines.push("  form {form.name} model={form.model} action={form.action} input={form.input_type} output={form.output_type} error={form.error_type} endpoint={form.endpoint} method={form.method} csrf={form.csrf} fields=[{fields.join(",")}] effects=[{form.effects.join(",")}] middleware=[{form.middleware.join(",")}] ({form.provenance})")
+    }
+    loop query in graph.queries -> &lines.push("  query {query.key} ({query.kind}) footprint={query.footprint} source={query.source}")
+    loop store in graph.stores -> &lines.push("  store {store.name} ({store.kind}) history_limit={store.history_limit} source={store.source}")
+    loop mount in graph.mounts -> &lines.push("  mount {mount.prefix} -> {mount.handler} effects={mount.effects.join(",")} security={mount.security.join(",")} ({mount.provenance})")
+    loop root in graph.routes_from -> &lines.push("  routes(from: {root.root})")
+    if graph.policy.security.len() > 0 -> &lines.push("  security: {graph.policy.security.join(", ")}")
+    if graph.policy.assets.len() > 0 -> &lines.push("  assets: {graph.policy.assets.join(", ")}")
+    if graph.policy.split.len() > 0 -> &lines.push("  split: {graph.policy.split.join(", ")}")
+    if graph.policy.cache.len() > 0 -> &lines.push("  cache: {graph.policy.cache.join(", ")}")
+    if graph.policy.a11y.len() > 0 -> &lines.push("  a11y: {graph.policy.a11y.join(", ")}")
+    if graph.policy.adapters.len() > 0 -> &lines.push("  adapters: {graph.policy.adapters.join(", ")}")
+    lines
+}
+pub fn app_graph_route_index(graph: MIRAppGraph) -> AppRouteIndex Never! {
+    rows := [String:Int]{}
+    loop (index, route) in graph.routes -> rows[route.path] = index
+    AppRouteIndex{rows: rows}
+}

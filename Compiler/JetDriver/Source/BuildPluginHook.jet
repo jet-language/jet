@@ -1,0 +1,168 @@
+// PORT-PENDING 0608 crates-jet-driver-src-budgetview-module-group: crates/jet-driver/src/BuildPluginHook.rs:1-164
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Driver-side bridge for packaged build-plugin components.
+//RS //!
+//RS //! The driver owns policy and graph mutation but never links Wasmtime. It
+//RS //! sends the verified package identity to the sibling `jetpack` host and
+//RS //! validates the returned typed contribution before `BuildContext` commits it.
+//RS 
+//RS use jet_comptime::Comptime::Build::{
+//RS     decode_build_plugin_response, encode_build_plugin_request, PackagedPluginContribution,
+//RS     WasmComponentPluginSpec, BUILD_PLUGIN_HOST_SUBCOMMAND, BUILD_PLUGIN_MAX_REQUEST_BYTES,
+//RS     BUILD_PLUGIN_MAX_RESPONSE_BYTES,
+//RS };
+//RS use std::io::{Read, Write};
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Stdio};
+//RS use std::thread;
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS const MAX_HOST_STDERR_BYTES: usize = 64 * 1024;
+//RS const HOST_TIMEOUT: Duration = Duration::from_secs(2);
+//RS 
+//RS pub fn run_packaged_build_plugin(
+//RS     manifest_path: &Path,
+//RS     component_path: &Path,
+//RS     spec: &WasmComponentPluginSpec,
+//RS     manifest_digest: &str,
+//RS ) -> Result<PackagedPluginContribution, String> {
+//RS     let host = host_path()?;
+//RS     let mut command = Command::new(host);
+//RS     command
+//RS         .arg(BUILD_PLUGIN_HOST_SUBCOMMAND)
+//RS         .arg(manifest_path)
+//RS         .arg(component_path);
+//RS     command.arg(manifest_digest).arg(&spec.component_digest);
+//RS     let request = encode_build_plugin_request(spec);
+//RS     let response = run_host_process(command, request)?;
+//RS     decode_build_plugin_response(&response)
+//RS }
+//RS 
+//RS fn host_path() -> Result<PathBuf, String> {
+//RS     let executable = std::env::current_exe()
+//RS         .map_err(|error| format!("couldn't resolve compiler executable: {error}"))?;
+//RS     let Some(directory) = executable.parent() else {
+//RS         return Err("compiler executable has no parent directory".to_string());
+//RS     };
+//RS     let binary = format!(
+//RS         "{}{}",
+//RS         crate::Syntax::JETPACK_BINARY_NAME,
+//RS         std::env::consts::EXE_SUFFIX
+//RS     );
+//RS     let mut candidates = vec![directory.join(&binary)];
+//RS     if directory.file_name().is_some_and(|name| name == "deps") {
+//RS         if let Some(parent) = directory.parent() {
+//RS             candidates.push(parent.join(binary));
+//RS         }
+//RS     }
+//RS     candidates
+//RS         .into_iter()
+//RS         .find(|candidate| candidate.is_file())
+//RS         .ok_or_else(|| "packaged build-plugin host jetpack is missing beside Jet".to_string())
+//RS }
+//RS 
+//RS fn run_host_process(mut command: Command, request: Vec<u8>) -> Result<Vec<u8>, String> {
+//RS     if request.len() > BUILD_PLUGIN_MAX_REQUEST_BYTES {
+//RS         return Err(format!(
+//RS             "build-plugin request exceeds {BUILD_PLUGIN_MAX_REQUEST_BYTES} bytes"
+//RS         ));
+//RS     }
+//RS     let mut child = command
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .map_err(|error| format!("couldn't start build-plugin host: {error}"))?;
+//RS     let mut stdin = child
+//RS         .stdin
+//RS         .take()
+//RS         .ok_or_else(|| "build-plugin host stdin is unavailable".to_string())?;
+//RS     let stdout = child
+//RS         .stdout
+//RS         .take()
+//RS         .ok_or_else(|| "build-plugin host stdout is unavailable".to_string())?;
+//RS     let stderr = child
+//RS         .stderr
+//RS         .take()
+//RS         .ok_or_else(|| "build-plugin host stderr is unavailable".to_string())?;
+//RS     let writer = thread::spawn(move || {
+//RS         let result = stdin.write_all(&request);
+//RS         drop(stdin);
+//RS         result
+//RS     });
+//RS     let stdout_reader =
+//RS         thread::spawn(move || read_bounded(stdout, BUILD_PLUGIN_MAX_RESPONSE_BYTES));
+//RS     let stderr_reader = thread::spawn(move || read_bounded(stderr, MAX_HOST_STDERR_BYTES));
+//RS     let deadline = Instant::now() + HOST_TIMEOUT;
+//RS     let status = loop {
+//RS         match child.try_wait() {
+//RS             Ok(Some(status)) => break status,
+//RS             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
+//RS             Ok(None) => {
+//RS                 let _ = child.kill();
+//RS                 let _ = child.wait();
+//RS                 let _ = writer.join();
+//RS                 let _ = stdout_reader.join();
+//RS                 let _ = stderr_reader.join();
+//RS                 return Err(format!(
+//RS                     "build-plugin host timed out after {}ms",
+//RS                     HOST_TIMEOUT.as_millis()
+//RS                 ));
+//RS             }
+//RS             Err(error) => {
+//RS                 let _ = child.kill();
+//RS                 let _ = child.wait();
+//RS                 let _ = writer.join();
+//RS                 let _ = stdout_reader.join();
+//RS                 let _ = stderr_reader.join();
+//RS                 return Err(format!("couldn't wait for build-plugin host: {error}"));
+//RS             }
+//RS         }
+//RS     };
+//RS     let write_result = writer
+//RS         .join()
+//RS         .map_err(|_| "build-plugin host input thread panicked".to_string())?;
+//RS     let (stdout, stdout_overflow) = stdout_reader
+//RS         .join()
+//RS         .map_err(|_| "build-plugin host output thread panicked".to_string())?
+//RS         .map_err(|error| format!("couldn't read build-plugin host output: {error}"))?;
+//RS     let (stderr, stderr_overflow) = stderr_reader
+//RS         .join()
+//RS         .map_err(|_| "build-plugin host error thread panicked".to_string())?
+//RS         .map_err(|error| format!("couldn't read build-plugin host error: {error}"))?;
+//RS     if stdout_overflow {
+//RS         return Err(format!(
+//RS             "build-plugin host response exceeds {BUILD_PLUGIN_MAX_RESPONSE_BYTES} bytes"
+//RS         ));
+//RS     }
+//RS     if stderr_overflow {
+//RS         return Err(format!(
+//RS             "build-plugin host error exceeds {MAX_HOST_STDERR_BYTES} bytes"
+//RS         ));
+//RS     }
+//RS     if !status.success() {
+//RS         let message = String::from_utf8_lossy(&stderr);
+//RS         let message = message.trim();
+//RS         return Err(if message.is_empty() {
+//RS             format!("build-plugin host exited with {status}")
+//RS         } else {
+//RS             message.to_string()
+//RS         });
+//RS     }
+//RS     write_result.map_err(|error| format!("couldn't send request to build-plugin host: {error}"))?;
+//RS     Ok(stdout)
+//RS }
+//RS 
+//RS fn read_bounded(reader: impl Read, limit: usize) -> std::io::Result<(Vec<u8>, bool)> {
+//RS     let mut bytes = Vec::new();
+//RS     reader
+//RS         .take(limit.saturating_add(1) as u64)
+//RS         .read_to_end(&mut bytes)?;
+//RS     let overflow = bytes.len() > limit;
+//RS     if overflow {
+//RS         bytes.truncate(limit);
+//RS     }
+//RS     Ok((bytes, overflow))
+//RS }
+// END-PORT-PENDING 0608 crates/jet-driver/src/BuildPluginHook.rs:1-164
+

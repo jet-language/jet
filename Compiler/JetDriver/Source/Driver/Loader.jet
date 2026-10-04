@@ -1,11 +1,16 @@
 // In-memory source closure loader. Filesystem authority and provider access stay
 // with their adapters; this stage only resolves the checked source collection.
+use core.files.runtime.kernel_path_components as compiler_driver_os_path
+use jet_pkg_model.[AuthorityResolver, CheckedFile, WorkspaceDeclarationCache, PackageFacts, pkg_extract_inline_package, pkg_manifest_parse_diagnostic]
+use core.files.host.retained_descriptor as compiler_driver_root_io
 use jet_foundation.[
     CORE_CALLS,
     CORE_MODULE_EXPORTS,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
     Diagnostic,
+    DiagnosticOrigin,
+    DEFAULT_ENTRY_FILE,
     ImportDecl,
     ImportKind,
     ImportedItem,
@@ -18,6 +23,7 @@ use jet_foundation.[
     NamedSpan,
     ParseResult,
     Program,
+    ProgramBundle,
     Span,
     ast_program,
     core_module_export,
@@ -26,6 +32,7 @@ use jet_foundation.[
     jet_ring_parse_manifest_layer,
     mir_boundary_head_carrier_module,
     mir_source_file_id,
+    mir_sha256_hex,
 ]
 use jet_lexer.[
     TOKEN_BLOCK_COMMENT,
@@ -60,6 +67,7 @@ use jet_sema.[
     sema_effect_root,
     sema_registration_unit_family_type_names,
 ]
+use jet_eval.[JetCompilerServicesParseFacts]
 
 JET_DRIVER_LATEST_EDITION :: prep { "2028" }
 
@@ -71,10 +79,6 @@ JET_DRIVER_FIRST_PARTY_RESERVED :: prep { [String]{
     "toml", "crypto", "archive",
 } }
 
-struct JetDriverFilePath {
-    path: String
-    valid: Bool
-}
 
 fn jet_driver_set_failed_stage(current: JetDriverStage?, next: JetDriverStage) -> JetDriverStage? {
     if current == None -> return Val(next)
@@ -109,34 +113,31 @@ fn jet_driver_program_has_inline_module(program: Program, name: String) -> Bool 
     false
 }
 
-fn jet_driver_file_import_path(importing_relative_path: String, import_path: String) -> JetDriverFilePath Never! {
-    if import_path.len() == 0 || import_path.starts_with("/") || import_path.contains("\\") -> return JetDriverFilePath{path: "", valid: false}
-    importing_parts :: importing_relative_path.split("/").to_list()
-    target_parts := [String]{}
-    loop index in 0..<importing_parts.len() - 1 {
-        if importing_parts[index].len() > 0 -> &target_parts.push(importing_parts[index])
+// Rust resolve_file_import splits the authored Jet import spelling on '/', then
+// delegates each segment's platform semantics to PathBuf::push.
+fn jet_driver_file_import_from_directory(directory: compiler_driver_os_path.OsPath, import_path: String) -> compiler_driver_os_path.OsPath Never! {
+    target := ~directory
+    loop part in import_path.split("/") {
+        if part.is_empty() || part == "." -> next
+        authored_part := part // #4303
+        compiler_driver_os_path.push(&target, compiler_driver_os_path.from_text(authored_part, directory.platform))
     }
-    imported_parts :: import_path.split("/").to_list()
-    imported_count := 0
-    loop part in imported_parts {
-        if part == "" || part == "." -> next
-        if part == ".." {
-            if target_parts.len() == 0 -> return JetDriverFilePath{path: "", valid: false}
-            _ := &target_parts.pop()
-            imported_count += 1
-            next
-        }
-        &target_parts.push(part)
-        imported_count += 1
+    _ := compiler_driver_os_path.set_extension(&target, "jet")
+    compiler_driver_os_path.normalize_identity(target)
+}
+fn jet_driver_file_import_path(importing_path: compiler_driver_os_path.OsPath, import_path: String) -> compiler_driver_os_path.OsPath? Never! {
+    directory :: if compiler_driver_os_path.parent_span(importing_path) == {
+        .Val(parent) -> compiler_driver_os_path.owned_span(importing_path, parent)
+        .None -> compiler_driver_os_path.from_text(".", importing_path.platform)
     }
-    if imported_count == 0 || target_parts.len() == 0 -> return JetDriverFilePath{path: "", valid: false}
-    file_name :: &target_parts.pop() ?? return JetDriverFilePath{path: "", valid: false}
-    name_parts := file_name.split(".").to_list()
-    if name_parts.len() > 1 {
-        _ := &name_parts.pop()
-    }
-    &target_parts.push("{name_parts.join(".")}.jet")
-    JetDriverFilePath{path: target_parts.join("/"), valid: true}
+    path :: jet_driver_file_import_from_directory(directory, import_path)
+    if compiler_driver_os_path.file_name_span(path) == None -> None else -> Val(path)
+}
+
+fn jet_driver_unit_native_relative(unit: JetDriverSourceUnit) -> compiler_driver_os_path.OsPath Never! {
+    if unit.relative_os_path == .Val(path) -> return path
+    assert(unit.source_origin == SemaSourceOrigin.CompilerGenerated)
+    compiler_driver_os_path.from_text(unit.relative_path, compiler_driver_os_path.PathPlatform.Unix)
 }
 
 fn jet_driver_is_manifest_string(kind: Int) -> Bool Never! {
@@ -677,34 +678,19 @@ fn jet_driver_dependency_selector(source: String, dependency_name: String) -> St
     Val(target)
 }
 
-fn jet_driver_dependency_path(root: String, source: String) -> JetDriverFilePath Never! {
-    if source.starts_with("/") || source.contains("\\") -> return JetDriverFilePath{path: "", valid: false}
-    parts := [String]{}
-    absolute :: root.starts_with("/")
-    loop part in root.split("/") {
-        if part.len() > 0 -> &parts.push(part)
-    }
-    loop part in source.split("/") {
-        if part.len() == 0 || part == "." -> next
-        if {
-            part == ".." -> {
-                if parts.len() == 0 -> return JetDriverFilePath{path: "", valid: false}
-                _ := &parts.pop()
-            }
-            else -> &parts.push(part)
-        }
-    }
-    if parts.len() == 0 && !absolute -> return JetDriverFilePath{path: "", valid: false}
-    joined :: parts.join("/")
-    path :: if absolute -> "/{joined}" else -> joined
-    JetDriverFilePath{path: path, valid: true}
+fn jet_driver_dependency_path(root: compiler_driver_os_path.OsPath, source: String) -> compiler_driver_os_path.OsPath? Never! {
+    authored :: compiler_driver_os_path.from_text(source, root.platform)
+    if compiler_driver_os_path.has_root(authored) || compiler_driver_os_path.parse_prefix(authored).kind != compiler_driver_os_path.PrefixKind.Absent -> return None
+    joined := ~root
+    compiler_driver_os_path.push(&joined, authored)
+    Val(compiler_driver_os_path.normalize_identity(joined))
 }
 
 // D-MOD-CYCLE1=A: whether the root package reaches `path`: it declares that
 // directory, or the directory lies beside one it declares outside its tree.
-fn jet_driver_root_reaches(declared: [String], sibling_dirs: [String], path: String) -> Bool Never! {
+fn jet_driver_root_reaches(declared: [compiler_driver_os_path.OsPath], sibling_dirs: [compiler_driver_os_path.OsPath], path: compiler_driver_os_path.OsPath) -> Bool Never! {
     loop candidate in declared {
-        if candidate == path -> return true
+        if compiler_driver_os_path.equals(candidate, path) -> return true
     }
     loop directory in sibling_dirs {
         if jet_driver_path_within(path, directory) -> return true
@@ -713,19 +699,16 @@ fn jet_driver_root_reaches(declared: [String], sibling_dirs: [String], path: Str
 }
 
 // Whether `path` is `directory` or lies beneath it.
-fn jet_driver_path_within(path: String, directory: String) -> Bool Never! {
-    prefix :: if directory.ends_with("/") -> directory else -> "{directory}/"
-    path == directory || path.starts_with(prefix)
+fn jet_driver_path_within(path: compiler_driver_os_path.OsPath, directory: compiler_driver_os_path.OsPath) -> Bool Never! {
+    compiler_driver_os_path.strip_prefix_span(path, directory) != None
 }
 
-fn jet_driver_parent_path(path: String) -> String Never! {
-    parts := path.split("/").to_list()
-    _ := &parts.pop()
-    parent :: parts.join("/")
-    if parent.len() == 0 -> "/" else -> parent
+fn jet_driver_parent_path(path: compiler_driver_os_path.OsPath) -> compiler_driver_os_path.OsPath Never! {
+    if compiler_driver_os_path.parent_span(path) == .Val(extent) -> return compiler_driver_os_path.owned_span(path, extent)
+    path
 }
 
-fn jet_driver_resolve_package_dependencies(packages: &[JetDriverPackageInfo], snapshot: JetDriverAuthorizedSourceSnapshot, diagnostics: &[Diagnostic]) {
+fn jet_driver_resolve_package_dependencies(packages: &[JetDriverPackageInfo], snapshot: JetDriverAuthorizedSourceView, diagnostics: &[Diagnostic]) {
     // D-MOD-CYCLE1=A: a path dependency that a dependency declares stays below
     // that dependency's directory (E1206) unless the root package reaches it:
     // the root declares that directory itself, or the directory lies beside
@@ -736,18 +719,17 @@ fn jet_driver_resolve_package_dependencies(packages: &[JetDriverPackageInfo], sn
     loop root_index in 0..<snapshot.roots.len() {
         if snapshot.roots[root_index].identity == snapshot.entry_root_identity -> entry_root_index = root_index
     }
-    reach_declared := [String]{}
-    reach_sibling_dirs := [String]{}
+    reach_declared := [compiler_driver_os_path.OsPath]{}
+    reach_sibling_dirs := [compiler_driver_os_path.OsPath]{}
     if entry_root_index >= 0 {
         entry_root :: snapshot.roots[entry_root_index].canonical_path
         loop package in packages {
             if package.root_index != entry_root_index -> next
             loop dependency in package.dependencies {
                 if !dependency.source.starts_with("./") && !dependency.source.starts_with("../") -> next
-                resolved :: jet_driver_dependency_path(entry_root, dependency.source)
-                if !resolved.valid -> next
-                &reach_declared.push(resolved.path)
-                if !jet_driver_path_within(resolved.path, entry_root) -> &reach_sibling_dirs.push(jet_driver_parent_path(resolved.path))
+                resolved :: jet_driver_dependency_path(entry_root, dependency.source) ?? next
+                &reach_declared.push(resolved)
+                if !jet_driver_path_within(resolved, entry_root) -> &reach_sibling_dirs.push(jet_driver_parent_path(resolved))
             }
         }
     }
@@ -759,14 +741,15 @@ fn jet_driver_resolve_package_dependencies(packages: &[JetDriverPackageInfo], sn
                 dependency.source.starts_with("./") || dependency.source.starts_with("../") -> {
                     root :: snapshot.roots[package.root_index]
                     resolved :: jet_driver_dependency_path(root.canonical_path, dependency.source)
-                    if resolved.valid && entry_root_index >= 0 && package.root_index != entry_root_index && !jet_driver_path_within(resolved.path, root.canonical_path) && !jet_driver_root_reaches(reach_declared, reach_sibling_dirs, resolved.path) {
-                        &diagnostics.push(jet_driver_diagnostic_at_source("E1206", dependency.span, dependency.source_path, 0, "path dependency `{dependency.name}` escapes its parent package", "the path `{dependency.source}` resolves outside the declaring package directory `{root.canonical_path}`", "use a relative path below the declaring package directory"))
+                    if resolved == .Val(path) && entry_root_index >= 0 && package.root_index != entry_root_index && !jet_driver_path_within(path, root.canonical_path) && !jet_driver_root_reaches(reach_declared, reach_sibling_dirs, path) {
+                        root_display :: compiler_driver_os_path.display(root.canonical_path)
+                        &diagnostics.push(jet_driver_diagnostic_at_source("E1206", dependency.span, dependency.source_path, 0, "path dependency `{dependency.name}` escapes its parent package", "the path `{dependency.source}` resolves outside the declaring package directory `{root_display}`", "use a relative path below the declaring package directory"))
                         next
                     }
                     target_root := Int?{None}
-                    if resolved.valid {
+                    if resolved == .Val(path) {
                         loop root_index in 0..<snapshot.roots.len() {
-                            if snapshot.roots[root_index].canonical_path == resolved.path -> target_root = Val(root_index)
+                            if compiler_driver_os_path.equals(snapshot.roots[root_index].canonical_path, path) -> target_root = Val(root_index)
                         }
                     }
                     if target_root == {
@@ -882,16 +865,23 @@ fn jet_driver_manifest_outputs(tokens: [Token], open_index: Int, close_index: In
     outputs
 }
 
-fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, diagnostics: &[Diagnostic]) -> JetDriverPackageInfo {
+fn jet_driver_native_span_matches_text(path: compiler_driver_os_path.OsPath, extent: compiler_driver_os_path.PathSpan, text: String) -> Bool Never! {
+    authored :: compiler_driver_os_path.from_text(text, path.platform)
+    cursor := compiler_driver_os_path.components(authored)
+    expected :: compiler_driver_os_path.next(authored, &cursor) ?? return false
+    compiler_driver_os_path.component_equal(path, compiler_driver_os_path.PathComponent{kind: compiler_driver_os_path.ComponentKind.Normal, span: extent}, authored, expected)
+}
+
+fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceView, root_index: Int, overlays: [compiler_driver_os_path.OsPath:String], diagnostics: &[Diagnostic]) -> JetDriverPackageInfo {
     root := snapshot.roots[root_index]
-    entry_root :: jet_driver_entry_root_path(snapshot)
+    entry_root :: jet_driver_source_view_entry_root_path(snapshot)
     manifest_file_index := Int?{None}
     retired_manifest := false
     retired_manifest_path := ""
     loop file_index in 0..<root.files.len() {
-        relative := root.files[file_index].relative_path
-        if relative == "package.jet" -> manifest_file_index = Val(file_index)
-        if relative == "jet.toml" {
+        relative :: root.files[file_index].relative_path
+        if compiler_driver_os_path.equals(relative, compiler_driver_os_path.from_text("package.jet", relative.platform)) -> manifest_file_index = Val(file_index)
+        if compiler_driver_os_path.equals(relative, compiler_driver_os_path.from_text("jet.toml", relative.platform)) {
             retired_manifest = true
             retired_manifest_path = jet_driver_display_path(entry_root, root.files[file_index].path)
         }
@@ -900,8 +890,8 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         if retired_manifest {
             &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains a retired package manifest", "package identity is read only from the canonical package.jet manifest", "replace the retired manifest with package.jet"))
         }
-        root_display :: jet_driver_display_path(entry_root, root.canonical_path)
-        identity :: "source-root:{root_display.len()}:{root_display}"
+        // This is a retained authority label, not a native-path map key.
+        identity :: "source-root:{root.identity.len()}:{root.identity}"
         return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: "", edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
     }
     if retired_manifest {
@@ -910,7 +900,12 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     manifest :: manifest_file_index ?? 0
     manifest_path := jet_driver_display_path(entry_root, root.files[manifest].path)
     manifest_diagnostic_start :: diagnostics.len()
-    source := root.files[manifest].source
+    source := jet_driver_source_view_text(root.files[manifest], overlays) // #4303
+    manifest_facts := PackageFacts?{None}
+    if PackageFacts.parse(source, manifest_path) == {
+        .Ok(facts) -> manifest_facts = Val(facts)
+        .Err(error) -> &diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, error))
+    }
     lexed :: lex_config(source.bytes())
     loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic)
     tokens :: lexed.tokens
@@ -1069,19 +1064,19 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     }
     diagnostic_index := manifest_diagnostic_start
     loop diagnostic_index < diagnostics.len() {
-        diagnostics[diagnostic_index] = diagnostic_with_source_path(diagnostics[diagnostic_index], manifest_path, 0)
+        mapped := diagnostic_with_source_path(diagnostics[diagnostic_index], manifest_path, 0)
+        mapped.source_native_path = Val(root.files[manifest].path)
+        mapped.origin = Val(DiagnosticOrigin{display: manifest_path, path: compiler_driver_os_path.display(root.files[manifest].path), source: source, revision: mir_sha256_hex(source)})
+        diagnostics[diagnostic_index] = mapped
         diagnostic_index += 1
     }
     identity :: jet_driver_package_identity(name, version)
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), dependencies: dependencies, outputs: outputs}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), dependencies: dependencies, outputs: outputs, manifest_facts: manifest_facts}
 }
 
-fn jet_driver_default_module_alias(relative_path: String) -> String Never! {
-    parts := relative_path.split("/").to_list()
-    file_name :: &parts.pop() ?? "module.jet"
-    name_parts := file_name.split(".").to_list()
-    if name_parts.len() > 1 -> _ := &name_parts.pop()
-    raw := name_parts.join(".")
+fn jet_driver_default_module_alias(relative_path: compiler_driver_os_path.OsPath) -> String Never! {
+    stem :: compiler_driver_os_path.file_stem_span(relative_path)
+    raw := if stem == .Val(extent) -> compiler_driver_os_path.display_span(relative_path, extent) else -> "module"
     if raw.len() == 0 -> raw = "module"
     raw_bytes :: raw.bytes()
     alias := ""
@@ -1115,13 +1110,12 @@ fn jet_driver_default_module_alias(relative_path: String) -> String Never! {
     alias
 }
 
-fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDriverSourceCatalogResult {
-    snapshot :: request.authorized_sources
+fn jet_driver_build_source_catalog(snapshot: JetDriverAuthorizedSourceView, overlays: [compiler_driver_os_path.OsPath:String]) -> JetDriverSourceCatalogResult {
     diagnostics := [Diagnostic]{}
     jet_driver_validate_authorized_snapshot(snapshot, &diagnostics)
     packages := [JetDriverPackageInfo]{}
     loop root_index in 0..<snapshot.roots.len() {
-        package :: jet_driver_parse_package_root(snapshot, root_index, &diagnostics)
+        package :: jet_driver_parse_package_root(snapshot, root_index, overlays, &diagnostics)
         loop existing in packages {
             if existing.identity == package.identity {
                 &diagnostics.push(jet_driver_diagnostic_without_span("E0105", "two authority roots have the same package identity", "one package identity resolves to one checked source root", "remove the duplicate package root or give the package a distinct name and version"))
@@ -1131,24 +1125,34 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
     }
     jet_driver_resolve_package_dependencies(&packages, snapshot, &diagnostics)
 
-    entry_root :: jet_driver_entry_root_path(snapshot)
+    entry_root :: jet_driver_source_view_entry_root_path(snapshot)
     source_units := [JetDriverSourceUnit]{}
     loop root_index in 0..<snapshot.roots.len() {
         root :: snapshot.roots[root_index]
         package :: packages[root_index]
         loop (file_index, file) in root.files {
-            if file.relative_path == "package.jet" || file.relative_path == "jet.toml" || !file.relative_path.ends_with(".jet") -> next
+            relative := compiler_driver_os_path.display(file.relative_path) // #4303
+            if compiler_driver_os_path.equals(file.relative_path, compiler_driver_os_path.from_text("package.jet", file.path.platform)) || compiler_driver_os_path.equals(file.relative_path, compiler_driver_os_path.from_text("jet.toml", file.path.platform)) -> next
+            extension :: compiler_driver_os_path.extension_span(file.relative_path) ?? next
+            if !jet_driver_native_span_matches_text(file.relative_path, extension, "jet") -> next
             unit_path :: jet_driver_display_path(entry_root, file.path)
+            unit_alias :: jet_driver_default_module_alias(file.relative_path)
             &source_units.push(JetDriverSourceUnit{
                 root_index: root_index,
                 file_index: file_index,
+                foreign_cache_index: None,
                 root_identity: root.identity,
                 package_identity: package.identity,
-                module_name: jet_driver_default_module_alias(file.relative_path),
+                module_name: unit_alias,
+                alias: unit_alias,
+                bundle_module: true,
                 path: unit_path,
-                relative_path: file.relative_path,
-                source_segments: jet_driver_source_segments(unit_path, file.source),
+                physical_path: Val(file.path),
+                relative_path: relative,
+                relative_os_path: Val(file.relative_path),
+                source_segments: jet_driver_source_segments(unit_path, file.path, jet_driver_source_view_text(file, overlays)),
                 source_origin: SemaSourceOrigin.Snapshot,
+                provenance_source_file: None,
             })
         }
     }
@@ -1162,9 +1166,8 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
         entry_root_index == None -> &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the entry authority root has no parsed package identity", "the compilation package comes from the selected root manifest", "select the entry package root from the authorized source snapshot"))
         else -> entry_package_identity = packages[entry_root_index ?? 0].identity
     }
-    entry_display :: jet_driver_display_path(entry_root, snapshot.entry_path)
     entry_unit_found :: loop unit in source_units {
-        if unit.path == entry_display && unit.root_identity == snapshot.entry_root_identity {
+        if unit.physical_path == .Val(path) && compiler_driver_os_path.equals(path, snapshot.entry_path) && unit.root_identity == snapshot.entry_root_identity {
             break true
         }
     } ?? false
@@ -1180,12 +1183,6 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
     }
 }
 
-fn jet_driver_source_file_index(files: [MIRSourceFile], path: String) -> Int? {
-    loop index in 0..<files.len() {
-        if files[index].path == path -> return Val(index)
-    }
-    None
-}
 
 fn jet_driver_add_source_file(files: &[MIRSourceFile], file: MIRSourceFile, diagnostics: &[Diagnostic]) {
     if file.id.value != mir_source_file_id(file.path).value {
@@ -1206,86 +1203,101 @@ fn jet_driver_add_source_file(files: &[MIRSourceFile], file: MIRSourceFile, diag
     }
     &files.push(file)
 }
+// Physical identities never pass through the lossy source label or MIR ID.
+fn jet_driver_add_collected_source_file(files: &[MIRSourceFile], index: &[compiler_driver_os_path.OsPath:Int], generated_index: &[String:Int], physical_paths: &[compiler_driver_os_path.OsPath], file: MIRSourceFile, physical_path: compiler_driver_os_path.OsPath?, diagnostics: &[Diagnostic]) {
+    existing :: if physical_path == .Val(path) -> index.get(path) else -> generated_index.get(file.path)
+    if existing == .Val(previous) {
+        if files[previous].source != file.source {
+            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "one canonical source path has conflicting source records", "a native source identity must name one immutable byte sequence", "provide one source record for this native path"))
+        }
+        return
+    }
+    if physical_path == .Val(path) -> index[path] = files.len() else -> generated_index[file.path] = files.len()
+    &files.push(file)
+    if physical_path == .Val(path) -> &physical_paths.push(path)
+}
 
-fn jet_driver_valid_authority_relative_path(path: String) -> Bool Never! {
-    if path.len() == 0 || path.starts_with("/") || path.contains("\\") -> return false
-    loop part in path.split("/") {
-        if part.len() == 0 || part == "." || part == ".." -> return false
+fn jet_driver_valid_authority_relative_path(path: compiler_driver_os_path.OsPath) -> Bool Never! {
+    if path.encoded.len() == 0 || compiler_driver_os_path.has_root(path) || compiler_driver_os_path.parse_prefix(path).kind != compiler_driver_os_path.PrefixKind.Absent -> return false
+    cursor := compiler_driver_os_path.components(path)
+    loop {
+        component :: compiler_driver_os_path.next(path, &cursor) ?? break
+        if component.kind != compiler_driver_os_path.ComponentKind.Normal -> return false
     }
     true
 }
 
-fn jet_driver_authority_path(root: String, relative: String) -> String Never! {
-    if root == "/" -> return "/{relative}"
-    if root.ends_with("/") -> return "{root}{relative}"
-    "{root}/{relative}"
+fn jet_driver_authority_path(root: compiler_driver_os_path.OsPath, relative: compiler_driver_os_path.OsPath) -> compiler_driver_os_path.OsPath Never! {
+    joined := ~root
+    compiler_driver_os_path.push(&joined, relative)
+    joined
 }
 
-fn jet_driver_validate_authorized_snapshot(snapshot: JetDriverAuthorizedSourceSnapshot, diagnostics: &[Diagnostic]) -> Bool {
+fn jet_driver_validate_authorized_snapshot(snapshot: JetDriverAuthorizedSourceView, diagnostics: &[Diagnostic]) -> Bool {
     before :: diagnostics.len()
     if snapshot.roots.len() == 0 {
         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native source snapshot has no authority roots", "every compiler source must come from a pinned native authority root", "supply the checked source roots selected for this compilation"))
     }
-    if snapshot.entry_root_identity.len() == 0 || snapshot.entry_path.len() == 0 {
+    if snapshot.entry_root_identity.len() == 0 || snapshot.entry_path.encoded.len() == 0 {
         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native source snapshot has no entry identity", "compilation begins at one checked file beneath one pinned root", "select the entry path and root identity from AuthorityResolver"))
     }
     entry_root_count := 0
     entry_found := false
     loop (root_index, root) in snapshot.roots {
-        if root.identity.len() == 0 || root.canonical_path.len() == 0 || root.canonical_path.contains("\\") {
+        if root.identity.len() == 0 || root.canonical_path.encoded.len() == 0 || !compiler_driver_os_path.is_absolute(root.canonical_path) {
             &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a native source root has no canonical path or pinned identity", "source authority is bound to one opened root object", "provide the root identity and canonical path from AuthorityResolver"))
         }
         if root.identity == snapshot.entry_root_identity -> entry_root_count += 1
         loop previous_root_index in 0..<root_index {
             previous :: snapshot.roots[previous_root_index]
-            if previous.identity == root.identity || previous.canonical_path == root.canonical_path {
+            if previous.identity == root.identity || compiler_driver_os_path.equals(previous.canonical_path, root.canonical_path) {
                 &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native source snapshot repeats an authority root", "one checked root object has one identity and one canonical path", "provide each authority root once"))
             }
         }
         loop (file_index, file) in root.files {
-            if file.identity.len() == 0 || !jet_driver_valid_authority_relative_path(file.relative_path) || file.path != jet_driver_authority_path(root.canonical_path, file.relative_path) {
+            if file.identity.len() == 0 || !jet_driver_valid_authority_relative_path(file.relative_path) || file.path.platform != root.canonical_path.platform || file.relative_path.platform != root.canonical_path.platform || !compiler_driver_os_path.equals(file.path, jet_driver_authority_path(root.canonical_path, file.relative_path)) {
                 &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a native source file is not bound to its canonical authority root", "file bytes and object identity must come from one checked relative open beneath the pinned root", "provide the canonical path, relative path, and file identity from the same checked handle"))
             }
-            if file.path == snapshot.entry_path && root.identity == snapshot.entry_root_identity -> entry_found = true
+            if compiler_driver_os_path.equals(file.path, snapshot.entry_path) && root.identity == snapshot.entry_root_identity -> entry_found = true
             loop previous_file_index in 0..<file_index {
-                if root.files[previous_file_index].path == file.path {
+                if compiler_driver_os_path.equals(root.files[previous_file_index].path, file.path) {
                     &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native source root repeats a canonical file path", "one canonical source path names one immutable byte sequence", "provide the checked file once"))
                 }
             }
             loop previous_root in 0..<root_index {
                 loop previous_file in snapshot.roots[previous_root].files {
-                    if previous_file.path == file.path {
+                    if compiler_driver_os_path.equals(previous_file.path, file.path) {
                         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two native roots claim the same canonical source path", "one path must have one authority owner", "remove the duplicate path from the source snapshot"))
                     }
                 }
                 loop previous_cache in snapshot.roots[previous_root].foreign_cache_files {
-                    if previous_cache.path == file.path {
+                    if compiler_driver_os_path.equals(previous_cache.path, file.path) {
                         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source file and foreign cache claim the same canonical path", "one path must have one authority owner and one immutable source record", "remove the duplicate path from the source snapshot"))
                     }
                 }
             }
         }
         loop (cache_index, cache_file) in root.foreign_cache_files {
-            if cache_file.identity.len() == 0 || !jet_driver_valid_authority_relative_path(cache_file.relative_path) || cache_file.path != jet_driver_authority_path(root.canonical_path, cache_file.relative_path) {
+            if cache_file.identity.len() == 0 || !jet_driver_valid_authority_relative_path(cache_file.relative_path) || cache_file.path.platform != root.canonical_path.platform || cache_file.relative_path.platform != root.canonical_path.platform || !compiler_driver_os_path.equals(cache_file.path, jet_driver_authority_path(root.canonical_path, cache_file.relative_path)) {
                 &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a foreign cache source is not bound to its canonical authority root", "cache bytes and object identity must come from one checked relative open beneath the pinned root", "provide the canonical path, relative path, and cache identity from the same checked handle"))
             }
             loop source_file in root.files {
-                if source_file.path == cache_file.path {
+                if compiler_driver_os_path.equals(source_file.path, cache_file.path) {
                     &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a foreign cache source collides with an authorized source path", "physical source and provider cache records have distinct immutable identities", "use one canonical source record for this path"))
                 }
             }
             loop previous_cache_index in 0..<cache_index {
-                if root.foreign_cache_files[previous_cache_index].path == cache_file.path {
+                if compiler_driver_os_path.equals(root.foreign_cache_files[previous_cache_index].path, cache_file.path) {
                     &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native source root repeats a foreign cache path", "one canonical cache path names one immutable byte sequence", "provide the checked cache file once"))
                 }
             }
             loop previous_root in 0..<root_index {
                 previous :: snapshot.roots[previous_root]
                 loop previous_file in previous.files {
-                    if previous_file.path == cache_file.path -> &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two native records claim the same canonical cache path", "one path must have one authority owner and one immutable source record", "remove the duplicate cache path"))
+                    if compiler_driver_os_path.equals(previous_file.path, cache_file.path) -> &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two native records claim the same canonical cache path", "one path must have one authority owner and one immutable source record", "remove the duplicate cache path"))
                 }
                 loop previous_file in previous.foreign_cache_files {
-                    if previous_file.path == cache_file.path -> &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two native roots claim the same canonical cache path", "one path must have one authority owner and one immutable source record", "remove the duplicate cache path"))
+                    if compiler_driver_os_path.equals(previous_file.path, cache_file.path) -> &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two native roots claim the same canonical cache path", "one path must have one authority owner and one immutable source record", "remove the duplicate cache path"))
                 }
             }
         }
@@ -1296,24 +1308,22 @@ fn jet_driver_validate_authorized_snapshot(snapshot: JetDriverAuthorizedSourceSn
     diagnostics.len() == before
 }
 
-// `path` is a source's display path (`jet_driver_display_path`); the lookup
-// compares the canonical path it names.
-fn jet_driver_find_snapshot_source_file(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, path: String, diagnostics: &[Diagnostic]) -> JetDriverAuthorizedSourceFile? {
+// Native provenance selects the exact retained original, never a display label.
+fn jet_driver_find_snapshot_source_file(snapshot: JetDriverAuthorizedSourceView, root_index: Int, path: compiler_driver_os_path.OsPath, overlays: [compiler_driver_os_path.OsPath:String], diagnostics: &[Diagnostic]) -> JetDriverAuthorizedSourceFile? {
     if root_index < 0 || root_index >= snapshot.roots.len() -> return None
     root :: snapshot.roots[root_index]
-    physical :: jet_driver_physical_path(jet_driver_entry_root_path(snapshot), path)
     found := JetDriverAuthorizedSourceFile?{None}
     loop file in root.files {
-        if file.path == physical {
+        if compiler_driver_os_path.equals(file.path, path) {
             if found != None {
                 &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source provenance path resolves to multiple authorized records", "one source path must name one immutable physical file", "remove the duplicate authorized source record"))
                 return None
             }
-            found = Val(file)
+            found = Val(JetDriverAuthorizedSourceFile{path: file.path, relative_path: file.relative_path, identity: file.identity, source: jet_driver_source_view_text(file, overlays)})
         }
     }
     loop file in root.foreign_cache_files {
-        if file.path == physical {
+        if compiler_driver_os_path.equals(file.path, path) {
             if found != None {
                 &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source provenance path resolves to both source and cache records", "one source path must name one immutable physical file", "use distinct canonical paths for source and cache records"))
                 return None
@@ -1326,14 +1336,14 @@ fn jet_driver_find_snapshot_source_file(snapshot: JetDriverAuthorizedSourceSnaps
 
 // Whether a display path names an authorized disk source, so that no
 // compiler-generated identity can alias one.
-fn jet_driver_source_path_is_authorized(snapshot: JetDriverAuthorizedSourceSnapshot, path: String) -> Bool Never! {
-    physical :: jet_driver_physical_path(jet_driver_entry_root_path(snapshot), path)
+fn jet_driver_source_path_is_authorized(snapshot: JetDriverAuthorizedSourceView, path: String) -> Bool Never! {
+    entry_root :: jet_driver_source_view_entry_root_path(snapshot)
     loop root in snapshot.roots {
         loop file in root.files {
-            if file.path == physical -> return true
+            if jet_driver_display_path(entry_root, file.path) == path -> return true
         }
         loop file in root.foreign_cache_files {
-            if file.path == physical -> return true
+            if jet_driver_display_path(entry_root, file.path) == path -> return true
         }
     }
     false
@@ -1365,9 +1375,12 @@ fn jet_driver_source_segment_bytes_match(aggregate_bytes: [U8], segment: SemaSou
     true
 }
 
-fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule], generated_sources: [MIRSourceFile]) -> JetDriverSourceFileCollection {
-    entry_root :: jet_driver_entry_root_path(snapshot)
+fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceView, source_units: [JetDriverSourceUnit], modules: [JetDriverModuleFacts], generated_sources: [MIRSourceFile], overlays: [compiler_driver_os_path.OsPath:String]) -> JetDriverSourceFileCollection {
+    entry_root :: jet_driver_source_view_entry_root_path(snapshot)
     files := [MIRSourceFile]{}
+    source_file_index := [compiler_driver_os_path.OsPath:Int]{}
+    generated_source_file_index := [String:Int]{}
+    physical_paths := [compiler_driver_os_path.OsPath]{}
     diagnostics := [Diagnostic]{}
     loop loaded_module in modules {
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= source_units.len() {
@@ -1386,7 +1399,7 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
                 &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "an embedded Core module has no exact source text record", "Core source bytes are retained beside the loaded module", "retain the loader's Core source record"))
                 next
             }
-            jet_driver_add_source_file(&files, core_file, &diagnostics)
+            jet_driver_add_collected_source_file(&files, &source_file_index, &generated_source_file_index, &physical_paths, core_file, None, &diagnostics)
             next
         }
         if unit.root_index < 0 || unit.root_index >= snapshot.roots.len() {
@@ -1401,16 +1414,31 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
         aggregate_file := MIRSourceFile?{None}
         if unit.source_origin == {
             .Snapshot -> {
-                if unit.file_index < 0 || unit.file_index >= root.files.len() {
-                    &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a snapshot source unit names no authorized source file", "physical source bytes must come from the exact checked file record", "retain the catalog file index"))
+                file := if unit.foreign_cache_index == {
+                    .Val(index) -> {
+                        if unit.file_index != -1 || index < 0 || index >= root.foreign_cache_files.len() {
+                            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a loaded foreign cache names no authorized cache file", "CFFI cache provenance retains the exact checked cache index", "retain its original foreign-cache index"))
+                            next
+                        }
+                        root.foreign_cache_files[index]
+                    }
+                    .None -> {
+                        if unit.file_index < 0 || unit.file_index >= root.files.len() {
+                            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a snapshot source unit names no authorized source file", "physical source bytes must come from the exact checked file record", "retain the catalog file index"))
+                            next
+                        }
+                        root.files[unit.file_index]
+                    }
+                }
+                native_path :: unit.physical_path ?? {
+                    &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a snapshot source unit has no retained native path", "physical bytes remain attached to one checked file", "retain its exact original OS path"))
                     next
                 }
-                file := root.files[unit.file_index]
-                if jet_driver_display_path(entry_root, file.path) != unit.path {
+                if !compiler_driver_os_path.equals(native_path, file.path) {
                     &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a snapshot source unit's path differs from its authorized file", "physical bytes and source identity remain attached to one checked file", "rebuild the source unit from its exact authorized file"))
                     next
                 }
-                aggregate_file = Val(MIRSourceFile{id: mir_source_file_id(unit.path), path: unit.path, source: file.source})
+                aggregate_file = Val(MIRSourceFile{id: mir_source_file_id(unit.path), path: unit.path, source: jet_driver_source_view_text(file, overlays)})
             }
             else -> {
                 if unit.file_index != -1 || jet_driver_source_path_is_authorized(snapshot, unit.path) {
@@ -1425,8 +1453,15 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
             }
         }
         aggregate :: aggregate_file ?? next
-        jet_driver_add_source_file(&files, aggregate, &diagnostics)
-        aggregate_bytes :: aggregate.source.bytes()
+        jet_driver_add_collected_source_file(&files, &source_file_index, &generated_source_file_index, &physical_paths, aggregate, unit.physical_path, &diagnostics)
+        // CFFI.rs:1642 keeps synthetic LoadedModule.source empty. Its actual
+        // source record stays above; only span validation uses the private
+        // compiler assembly, never the loaded metadata row.
+        span_source :: if unit.provenance_source_file == {
+            .Val(path) -> jet_driver_find_generated_source_file(generated_sources, path, &diagnostics) ?? next
+            .None -> aggregate
+        }
+        aggregate_bytes :: span_source.source.bytes()
         previous_generated_end := -1
         loop segment in unit.source_segments {
             segment_length :: segment.generated.end - segment.generated.start
@@ -1457,11 +1492,15 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
             }
             if segment.origin == {
                 .Snapshot -> {
-                    raw :: jet_driver_find_snapshot_source_file(snapshot, unit.root_index, segment.source_file, &diagnostics) ?? {
+                    native_path :: segment.physical_path ?? {
+                        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a snapshot source segment has no retained native path", "display labels never authorize physical provenance", "retain the exact source or cache OS path at capture"))
+                        next
+                    }
+                    raw :: jet_driver_find_snapshot_source_file(snapshot, unit.root_index, native_path, overlays, &diagnostics) ?? {
                         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a snapshot source segment is absent from the authorized root or foreign cache snapshot", "physical source lookup uses only exact checked source records", "provide the matching immutable source or cache file"))
                         next
                     }
-                    if raw.identity.len() == 0 || !jet_driver_valid_authority_relative_path(raw.relative_path) || raw.path != jet_driver_authority_path(root.canonical_path, raw.relative_path) {
+                    if raw.identity.len() == 0 || !jet_driver_valid_authority_relative_path(raw.relative_path) || !compiler_driver_os_path.equals(raw.path, jet_driver_authority_path(root.canonical_path, raw.relative_path)) {
                         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source segment's physical origin is not bound to its canonical root", "source bytes and path identity come from the same checked open", "provide the exact authorized source record"))
                         next
                     }
@@ -1471,7 +1510,7 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
                         next
                     }
                     raw_path :: jet_driver_display_path(entry_root, raw.path)
-                    jet_driver_add_source_file(&files, MIRSourceFile{id: mir_source_file_id(raw_path), path: raw_path, source: raw.source}, &diagnostics)
+                    jet_driver_add_collected_source_file(&files, &source_file_index, &generated_source_file_index, &physical_paths, MIRSourceFile{id: mir_source_file_id(raw_path), path: raw_path, source: raw.source}, Val(raw.path), &diagnostics)
                 }
                 else -> {
                     if jet_driver_source_path_is_authorized(snapshot, segment.source_file) {
@@ -1487,7 +1526,7 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
                         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a compiler-generated source segment does not match its exact generated bytes", "generated provenance remains bounded by its retained compiler output", "regenerate the segment from its exact compiler-generated source"))
                         next
                     }
-                    jet_driver_add_source_file(&files, raw, &diagnostics)
+                    jet_driver_add_collected_source_file(&files, &source_file_index, &generated_source_file_index, &physical_paths, raw, None, &diagnostics)
                 }
             }
         }
@@ -1501,9 +1540,9 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
         if jet_driver_source_path_is_authorized(snapshot, generated.path) {
             &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a compiler-generated source record aliases an authorized disk path", "compiler output is never substituted for an authorized source record", "use a distinct generated-source identity"))
         }
-        jet_driver_add_source_file(&files, generated, &diagnostics)
+        jet_driver_add_collected_source_file(&files, &source_file_index, &generated_source_file_index, &physical_paths, generated, None, &diagnostics)
     }
-    JetDriverSourceFileCollection{files: files, diagnostics: diagnostics, complete: !jet_driver_has_errors(diagnostics)}
+    JetDriverSourceFileCollection{files: files, index: source_file_index, generated_index: generated_source_file_index, physical_paths: physical_paths, diagnostics: diagnostics, complete: !jet_driver_has_errors(diagnostics)}
 }
 
 fn jet_driver_find_module_target(index: JetDriverSourceIndex, source_units: [JetDriverSourceUnit], package_identity: String, module_name: String, span: Span, diagnostics: &[Diagnostic]) -> Int? {
@@ -1533,11 +1572,11 @@ fn jet_driver_find_dependency(package: JetDriverPackageInfo, dependency_name: St
     None
 }
 
-fn jet_driver_find_source_path(source_units: [JetDriverSourceUnit], root_index: Int, relative_paths: [String], diagnostics: &[Diagnostic], span: Span) -> Int? {
+fn jet_driver_find_source_path(source_units: [JetDriverSourceUnit], root_index: Int, relative_paths: [compiler_driver_os_path.OsPath], diagnostics: &[Diagnostic], span: Span) -> Int? {
     target := Int?{None}
     loop relative_path in relative_paths {
         loop (index, unit) in source_units {
-            if unit.root_index == root_index && unit.relative_path == relative_path {
+            if unit.root_index == root_index && unit.relative_os_path == .Val(path) && compiler_driver_os_path.equals(path, relative_path) {
                 if target != None {
                     &diagnostics.push(jet_driver_diagnostic("E0105", span, "a module path selects more than one checked source unit", "module resolution must bind one package-relative source path", "remove the duplicate module source or select one module path"))
                     return None
@@ -1589,10 +1628,11 @@ fn jet_driver_find_module_import_target(
             if module_path.len() > 0 -> module_path = "{module_path}/{part}" else -> module_path = part
         }
         candidate_paths :: if module_path.len() > 0 -> [String]{"{module_path}.jet", "{module_path}/run.jet"} else -> [String]{"{selected_dependency.name}.jet", "{selected_dependency.name}/run.jet"}
-        target := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, candidate_paths, &diagnostics, span)
+        native_candidates :: loop candidate in candidate_paths -> compiler_driver_os_path.from_text(candidate, target_package.root_path.platform)
+        target := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, native_candidates, &diagnostics, span)
         if target != None -> return target
         if module_path.len() == 0 && !jet_driver_has_errors(diagnostics) {
-            root_entry := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, [String]{"run.jet"}, &diagnostics, span)
+            root_entry := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, [compiler_driver_os_path.OsPath]{compiler_driver_os_path.from_text("run.jet", target_package.root_path.platform)}, &diagnostics, span)
             if root_entry != None -> return root_entry
             // D-MOD-CYCLE1=A: a dependency package is one namespace; any member
             // file stands for it, and loading that member loads the whole package.
@@ -1616,7 +1656,7 @@ fn jet_driver_find_module_import_target(
         }
         if module_path.len() > 0 -> module_path = "{module_path}/{part}" else -> module_path = part
     }
-    candidate_paths :: [String]{"{module_path}.jet", "{module_path}/run.jet"}
+    candidate_paths :: [compiler_driver_os_path.OsPath]{compiler_driver_os_path.from_text("{module_path}.jet", source_package.root_path.platform), compiler_driver_os_path.from_text("{module_path}/run.jet", source_package.root_path.platform)}
     diagnostics_before :: diagnostics.len()
     target := jet_driver_find_source_path(source_units, source_unit.root_index, candidate_paths, &diagnostics, span)
     if target != None -> return target
@@ -1719,27 +1759,34 @@ fn jet_driver_unit_is_loose(unit: JetDriverSourceUnit) -> Bool Never! {
 // modules; loose files and embedded Core modules have no namespace.
 fn jet_driver_unit_is_namespace_member(unit: JetDriverSourceUnit) -> Bool Never! {
     if jet_driver_unit_is_loose(unit) || jet_driver_unit_is_core(unit) -> return false
-    parts := unit.relative_path.split("/").to_list()
-    file_name :: &parts.pop() ?? ""
-    file_name != "pkg.jet" && file_name != "workspace.jet"
+    path :: unit.relative_os_path ?? return false
+    cursor := compiler_driver_os_path.components(path)
+    name :: compiler_driver_os_path.next_back(path, &cursor) ?? return false
+    payload :: compiler_driver_os_path.from_text("pkg.jet", path.platform)
+    workspace :: compiler_driver_os_path.from_text("workspace.jet", path.platform)
+    payload_cursor := compiler_driver_os_path.components(payload)
+    workspace_cursor := compiler_driver_os_path.components(workspace)
+    payload_name :: compiler_driver_os_path.next(payload, &payload_cursor) ?? return false
+    workspace_name :: compiler_driver_os_path.next(workspace, &workspace_cursor) ?? return false
+    !compiler_driver_os_path.component_equal(path, name, payload, payload_name) && !compiler_driver_os_path.component_equal(path, name, workspace, workspace_name)
 }
 
-fn jet_driver_lookup_file_target(source_units: [JetDriverSourceUnit], importing_unit: JetDriverSourceUnit, import_path: String, span: Span, diagnostics: &[Diagnostic]) -> Int? {
-    walks_up :: loop part in import_path.split("/") {
-        if part == ".." {
-            break true
-        }
-    } ?? false
-    if walks_up && !jet_driver_unit_is_loose(importing_unit) {
+fn jet_driver_lookup_file_target_from_root(source_units: [JetDriverSourceUnit], importing_unit: JetDriverSourceUnit, import_path: String, span: Span, diagnostics: &[Diagnostic], import_directory: compiler_driver_os_path.OsPath?) -> Int? {
+    loose :: jet_driver_unit_is_loose(importing_unit)
+    if import_path.contains("..") && !loose {
         &diagnostics.push(jet_driver_diagnostic("E0602", span, "this import path escapes the package", "inside a package, file imports stay in the package tree — `..` works only for loose files outside any package", "use a path without `..`, or move the file inside the package tree"))
         return None
     }
-    resolved :: jet_driver_file_import_path(importing_unit.relative_path, import_path)
-    if !resolved.valid {
-        &diagnostics.push(jet_driver_diagnostic("E0602", span, "this file import path escapes or is not relative to its authorized source root", "file imports may traverse parent directories only while remaining beneath the same pinned root", "use a relative file path contained by the source root"))
-        return None
+    physical :: importing_unit.physical_path ?? return None
+    path :: if import_directory == {
+        .Val(directory) -> jet_driver_file_import_from_directory(directory, import_path)
+        .None -> jet_driver_file_import_path(physical, import_path) ?? return None
     }
-    jet_driver_find_source_path(source_units, importing_unit.root_index, [String]{resolved.path}, &diagnostics, span)
+    loop (index, unit) in source_units {
+        if !loose && unit.root_index != importing_unit.root_index -> next
+        if unit.physical_path == .Val(candidate) && compiler_driver_os_path.equals(candidate, path) -> return Val(index)
+    }
+    None
 }
 
 // D-MOD1 (Rust `resolve_code_module_file`): the source unit a body-less
@@ -1748,10 +1795,9 @@ fn jet_driver_lookup_file_target(source_units: [JetDriverSourceUnit], importing_
 fn jet_driver_code_module_file(source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, name: String, name_span: Span, diagnostics: &[Diagnostic]) -> Int? {
     candidates :: [String]{name, "{name}/module"}
     loop candidate in candidates {
-        resolved :: jet_driver_file_import_path(unit.relative_path, candidate)
-        if !resolved.valid -> next
+        resolved :: jet_driver_file_import_path(jet_driver_unit_native_relative(unit), candidate) ?? next
         loop (index, source_unit) in source_units {
-            if source_unit.root_index == unit.root_index && source_unit.relative_path == resolved.path -> return Val(index)
+            if source_unit.root_index == unit.root_index && source_unit.relative_os_path == .Val(path) && compiler_driver_os_path.equals(path, resolved) -> return Val(index)
         }
     }
     &diagnostics.push(jet_driver_diagnostic("E0607", name_span, "module `{name}` not found", "looked for `{name}.jet` and `{name}/module.jet` next to this file", "create `{name}.jet` next to this file"))
@@ -1853,9 +1899,9 @@ fn jet_driver_free_binding_span(imports: [ImportDecl], start: Int) -> Span Never
     Span{start: candidate, end: candidate}
 }
 
-fn jet_driver_path_leaf(path: String) -> String Never! {
-    parts := path.split("/").to_list()
-    &parts.pop() ?? path
+fn jet_driver_path_leaf(path: compiler_driver_os_path.OsPath) -> String Never! {
+    if compiler_driver_os_path.file_name_span(path) == .Val(extent) -> return compiler_driver_os_path.display_span(path, extent)
+    compiler_driver_os_path.display(path)
 }
 
 // D-MOD-CYCLE1=A: make every package one namespace. A name declared in two
@@ -1866,13 +1912,16 @@ fn jet_driver_path_leaf(path: String) -> String Never! {
 // imported one. Their zero-width spans are not written source; they never
 // render. The binding aliases start with `__jet_pkg_`.
 fn jet_driver_bind_package_namespaces(
-    modules: &[JetDriverLoadedModule],
+    bundle_owner: Shared<ProgramBundle>,
+    modules: &[JetDriverModuleFacts],
     edges: &[SemaRegistrationImportEdge],
     source_units: [JetDriverSourceUnit],
     packages: [JetDriverPackageInfo],
-    roots: [JetDriverAuthorizedSourceRoot],
+    roots: View<JetDriverAuthorizedSourceRoot>,
     diagnostics: &[Diagnostic],
+    namespace_roots: &[String:compiler_driver_os_path.OsPath],
 ) -> Bool {
+    bundle := bundle_owner.guard_edit()
     loop package in packages {
         members := [Int]{}
         loop module_index in 0..<modules.len() {
@@ -1880,6 +1929,8 @@ fn jet_driver_bind_package_namespaces(
             if unit.root_index == package.root_index && jet_driver_unit_is_namespace_member(unit) -> &members.push(module_index)
         }
         if members.len() == 0 -> next
+        // The same membership pass owns name binding and package partition.
+        loop module_index in members -> namespace_roots[modules[module_index].module_identity] = package.root_path
         // One `fn run` per package, unless the manifest names each entry
         // (owner ruling B, like Cargo `[[bin]]`): `.Executable{ entry:
         // tool.run }` keeps `tool.jet`'s `run` its own. A package-root command
@@ -1900,7 +1951,7 @@ fn jet_driver_bind_package_namespaces(
                 else -> ""
             }
             member_names := [NamedSpan]{}
-            loop declared in jet_driver_namespace_item_names(modules[module_index].program.items) {
+            loop declared in jet_driver_namespace_item_names(bundle.value.modules[modules[module_index].bundle_index ?? panic("loaded namespace member has no bundle row")].items) {
                 if (named_entry && declared.name == "run") || declared.name == role_command -> next
                 &member_names.push(declared)
             }
@@ -1940,8 +1991,8 @@ fn jet_driver_bind_package_namespaces(
                 if sibling_index == module_index || names[sibling_position].len() == 0 -> next
                 sibling_unit :: source_units[modules[sibling_index].source_unit_index]
                 alias :: "__jet_pkg_{sibling_unit.module_name}"
-                file_span :: jet_driver_free_binding_span(modules[module_index].program.imports, next_start)
-                list_span :: jet_driver_free_binding_span(modules[module_index].program.imports, file_span.start + 1)
+                file_span :: jet_driver_free_binding_span(bundle.value.modules[modules[module_index].bundle_index ?? panic("loaded namespace member has no bundle row")].imports, next_start)
+                list_span :: jet_driver_free_binding_span(bundle.value.modules[modules[module_index].bundle_index ?? panic("loaded namespace member has no bundle row")].imports, file_span.start + 1)
                 next_start = list_span.start + 1
                 items := [ImportedItem]{}
                 item_spans := [Span]{}
@@ -1951,8 +2002,8 @@ fn jet_driver_bind_package_namespaces(
                 }
                 file_import :: ImportDecl{kind: ImportKind.File{path: sibling_unit.relative_path, span: file_span}, alias: alias, alias_span: file_span, span: file_span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
                 list_import :: ImportDecl{kind: ImportKind.Unqualified{module_alias: alias, module_alias_span: list_span, items: items, items_span: list_span, span: list_span}, alias: alias, alias_span: list_span, span: list_span, item_spans: item_spans, local_spans: item_spans, is_pub: false, is_package_pub: false, inline_version: None}
-                &modules[module_index].program.imports.push(file_import)
-                &modules[module_index].program.imports.push(list_import)
+                &bundle.value.modules[modules[module_index].bundle_index ?? panic("loaded namespace member has no bundle row")].imports.push(file_import)
+                &bundle.value.modules[modules[module_index].bundle_index ?? panic("loaded namespace member has no bundle row")].imports.push(list_import)
                 &edges.push(SemaRegistrationImportEdge{source_module_identity: modules[module_index].module_identity, target_module_identity: modules[sibling_index].module_identity, target_package_identity: sibling_unit.package_identity, declaration: file_import, foreign_binding: None})
                 &edges.push(SemaRegistrationImportEdge{source_module_identity: modules[module_index].module_identity, target_module_identity: modules[sibling_index].module_identity, target_package_identity: sibling_unit.package_identity, declaration: list_import, foreign_binding: None})
             }
@@ -1983,7 +2034,7 @@ fn jet_driver_unit_is_core(unit: JetDriverSourceUnit) -> Bool Never! {
 // (`<corelib>/Core/perf::Core/perf/perf.jet`), so its nominals are keyed
 // `<corelib>/Core/perf::Core/perf/perf.jet::PerfError` exactly as in Rust.
 fn jet_driver_unit_module_identity(unit: JetDriverSourceUnit) -> String Never! {
-    if !jet_driver_unit_is_core(unit) -> return jet_driver_module_identity(unit.package_identity, unit.path)
+    if !jet_driver_unit_is_core(unit) -> return jet_driver_module_identity(unit.package_identity, jet_driver_source_unit_identity_label(unit))
     if unit.file_index < 0 -> return unit.path
     parts := unit.relative_path.split("/").to_list()
     _ := &parts.pop()
@@ -2078,19 +2129,25 @@ fn jet_driver_core_source_segments(path: String, source: String) -> [SemaSourceS
     segments
 }
 
-fn jet_driver_add_core_unit(source_units: &[JetDriverSourceUnit], queued: &[Bool], generated: &[MIRSourceFile], module_name: String, relative_path: String, file_index: Int, source: String) -> Int {
+fn jet_driver_add_core_unit(source_units: &[JetDriverSourceUnit], queued: &[Bool], generated: &[MIRSourceFile], module_name: String, alias: String, bundle_module: Bool, relative_path: String, file_index: Int, source: String) -> Int {
     path :: "{JET_DRIVER_CORE_SOURCE_ROOT}/{relative_path}"
     &generated.push(MIRSourceFile{id: mir_source_file_id(path), path: path, source: source})
     &source_units.push(JetDriverSourceUnit{
         root_index: -1,
         file_index: file_index,
+        foreign_cache_index: None,
         root_identity: JET_DRIVER_CORE_SOURCE_ROOT,
         package_identity: path,
         module_name: module_name,
+        alias: alias,
+        bundle_module: bundle_module,
         path: path,
+        physical_path: None,
         relative_path: relative_path,
+        relative_os_path: None,
         source_segments: jet_driver_core_source_segments(path, source),
         source_origin: SemaSourceOrigin.CompilerGenerated,
+        provenance_source_file: None,
     })
     &queued.push(false)
     source_units.len() - 1
@@ -2144,10 +2201,10 @@ fn jet_driver_core_unit(
     }
     loop (row_index, row) in core_sources {
         if row.owner != "" || row.module_name != module_name -> next
-        target :: jet_driver_add_core_unit(&source_units, &queued, &generated, row.module_name, row.path, row_index, row.source)
+        target :: jet_driver_add_core_unit(&source_units, &queued, &generated, row.module_name, row.alias, true, row.path, row_index, row.source)
         loop (part_index, part) in core_sources {
             if part.owner != module_name -> next
-            part_unit :: jet_driver_add_core_unit(&source_units, &queued, &generated, part.module_name, part.path, part_index, part.source)
+            part_unit :: jet_driver_add_core_unit(&source_units, &queued, &generated, part.module_name, part.alias, true, part.path, part_index, part.source)
             queued[part_unit] = true
             &pending.push(part_unit)
         }
@@ -2157,7 +2214,9 @@ fn jet_driver_core_unit(
         &diagnostics.push(jet_driver_unknown_core_module(module_name, span, "use"))
         return None
     }
-    Val(jet_driver_add_core_unit(&source_units, &queued, &generated, module_name, "{module_name}.jet", -1, ""))
+    // Native Core namespace resolution is registration-only; Rust Loader
+    // schedules actual CoreSource modules, not empty namespace helpers.
+    Val(jet_driver_add_core_unit(&source_units, &queued, &generated, module_name, module_name, false, "{module_name}.jet", -1, ""))
 }
 
 // E1001 for a `core.*` path that names no Core module. Rust
@@ -2173,7 +2232,7 @@ fn jet_driver_unknown_core_module(module_name: String, span: Span, fix_verb: Str
 }
 
 // The loaded module position of the Core module `module_name`, if any.
-fn jet_driver_core_module_position(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], module_name: String) -> Int? {
+fn jet_driver_core_module_position(modules: [JetDriverModuleFacts], source_units: [JetDriverSourceUnit], module_name: String) -> Int? {
     loop (position, module_row) in modules {
         unit :: source_units[module_row.source_unit_index]
         if jet_driver_unit_is_core(unit) && unit.module_name == module_name -> return Val(position)
@@ -2183,7 +2242,7 @@ fn jet_driver_core_module_position(modules: [JetDriverLoadedModule], source_unit
 
 // Place the Core module at `position`, then the compiler-private parts its
 // source row owns (`core.text` owns `Core/text/string.jet`).
-fn jet_driver_place_core_module(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], position: Int, placed: &[Bool], order: &[Int]) Never! {
+fn jet_driver_place_core_module(modules: [JetDriverModuleFacts], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], position: Int, placed: &[Bool], order: &[Int]) Never! {
     if placed[position] -> return
     placed[position] = true
     &order.push(position)
@@ -2203,7 +2262,8 @@ fn jet_driver_place_core_module(modules: [JetDriverLoadedModule], source_units: 
 // bare `URL`), in Core table order, each followed by the private parts it
 // owns; then, breadth first, the Core modules those import, in import order.
 // Host-only Core modules, which Rust never loads, come last in load order.
-fn jet_driver_order_core_modules(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], names_url_carrier: Bool) -> [JetDriverLoadedModule] Never! {
+fn jet_driver_order_core_modules(bundle_owner: Shared<ProgramBundle>, modules: [JetDriverModuleFacts], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], names_url_carrier: Bool) -> [JetDriverModuleFacts] Never! {
+    bundle :: bundle_owner.guard_read()
     placed := [Bool]{}
     direct := [Bool]{}
     loop position in 0..<modules.len() {
@@ -2212,7 +2272,7 @@ fn jet_driver_order_core_modules(modules: [JetDriverLoadedModule], source_units:
     }
     loop module_row in modules {
         if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
-        loop declaration in module_row.program.imports {
+        loop declaration in jet_driver_program_snapshot(bundle.value, module_row).imports {
             core_name :: jet_driver_core_import_module(declaration) ?? next
             position :: jet_driver_core_module_position(modules, source_units, core_name) ?? next
             direct[position] = true
@@ -2230,14 +2290,14 @@ fn jet_driver_order_core_modules(modules: [JetDriverLoadedModule], source_units:
     }
     cursor := 0
     loop cursor < order.len() {
-        loop declaration in modules[order[cursor]].program.imports {
+        loop declaration in jet_driver_program_snapshot(bundle.value, modules[order[cursor]]).imports {
             core_name :: jet_driver_core_import_module(declaration) ?? next
             position :: jet_driver_core_module_position(modules, source_units, core_name) ?? next
             if source_units[modules[position].source_unit_index].file_index >= 0 -> jet_driver_place_core_module(modules, source_units, core_sources, position, &placed, &order)
         }
         cursor += 1
     }
-    ordered := [JetDriverLoadedModule]{}
+    ordered := [JetDriverModuleFacts]{}
     loop module_row in modules {
         if !jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> &ordered.push(module_row)
     }
@@ -2248,53 +2308,185 @@ fn jet_driver_order_core_modules(modules: [JetDriverLoadedModule], source_units:
     ordered
 }
 
-pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
-    diagnostics := [Diagnostic]{}
-    failed_stage := JetDriverStage?{None}
-    catalog :: jet_driver_build_source_catalog(request)
-    loop diagnostic in catalog.diagnostics -> &diagnostics.push(diagnostic)
-    if !catalog.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
-    source_index_result :: jet_driver_build_source_index(catalog.source_units)
-    loop diagnostic in source_index_result.diagnostics -> &diagnostics.push(diagnostic)
-    if !source_index_result.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
-    entry_index := source_index_result.index.by_path.get(jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), request.authorized_sources.entry_path))
-    if entry_index == None {
-        &diagnostics.push(jet_driver_diagnostic_without_span("E0603", "the entry source unit is not in the selected package source snapshot", "compilation begins from one exact source file beneath the selected authority root", "select the entry source from the authorized package snapshot"))
-        failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
+// Rust Loader.rs3054-3240/3696-3720. These native discovery operations run
+// outside the immutable source-closure replay; one cache belongs to one scan.
+// Shared AuthorityResolver owns every checked handle, policy and revalidation.
+fn jet_driver_workspace_root_checked(start: compiler_driver_os_path.OsPath, cache: &WorkspaceDeclarationCache) -[FS, Env]> compiler_driver_os_path.OsPath? Diagnostic! {
+    dir := if AuthorityResolver.authority_walk_root(start) == {
+        .Ok(path) -> path
+        .Err(error) -> return Err(error.workspace_diagnostic())
     }
-    if jet_driver_has_errors(diagnostics) {
-        return JetDriverLoadResult{
-            package_identity: catalog.entry_package_identity,
-            packages: catalog.packages,
-            source_units: catalog.source_units,
-            entry_source_identity: "",
-            entry_module_identity: "",
-            modules: [JetDriverLoadedModule]{},
-            imports: [SemaRegistrationImportEdge]{},
-            source_files: [MIRSourceFile]{},
-            generated_source_files: [MIRSourceFile]{},
-            diagnostics: diagnostics,
-            failed_stage: failed_stage,
-            complete: false,
+    loop {
+        opened :: if AuthorityResolver.open_for_authority_walk(dir) == {
+            .Ok(resolver) -> resolver
+            .Err(error) -> return Err(error.workspace_diagnostic())
         }
+        if opened == .Val(resolver) {
+            if resolver.resolve_workspace_source(&cache) == {
+                .Ok(.Val(_)) -> return Ok(Val(dir))
+                .Ok(.None) -> {}
+                .Err(error) -> return Err(error.workspace_diagnostic())
+            }
+        }
+        dir = AuthorityResolver.authority_walk_parent(dir) ?? return Ok(None)
     }
+}
+pub fn jet_driver_find_workspace_root_checked(start: compiler_driver_os_path.OsPath) -[FS, Env]> compiler_driver_os_path.OsPath? Diagnostic! {
+    cache := WorkspaceDeclarationCache.new()
+    jet_driver_workspace_root_checked(start, &cache)
+}
+pub fn jet_driver_find_repository_root(start: compiler_driver_os_path.OsPath) -[FS, Env]> compiler_driver_os_path.OsPath? Never! {
+    dir := if AuthorityResolver.authority_walk_root(start) == {
+        .Ok(path) -> path
+        .Err(_) -> return None
+    }
+    loop {
+        marker := ~dir
+        compiler_driver_os_path.push(&marker, compiler_driver_os_path.from_text(".git", dir.platform))
+        if compiler_driver_root_io.symlink_metadata(marker) == .Ok(metadata) {
+            if !metadata.is_symlink && (metadata.is_dir || metadata.is_file) -> return Val(dir)
+        }
+        dir = AuthorityResolver.authority_walk_parent(dir) ?? return None
+    }
+}
+fn jet_driver_checked_inline_package_entry(resolver: AuthorityResolver) -[FS, Env]> CheckedFile? Diagnostic! {
+    candidates :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
+    loop relative in candidates {
+        file :: if resolver.checked_file(compiler_driver_os_path.from_text(relative, resolver.root.platform)) == {
+            .Ok(found) -> found
+            .Err(error) -> { if error.is_missing() -> next else -> return Err(error.diagnostic()) }
+        }
+        source :: if file.text() == {
+            .Ok(text) -> text
+            .Err(error) -> return Err(error.diagnostic())
+        }
+        inline :: if pkg_extract_inline_package(source) == {
+            .Ok(block) -> block
+            .Err(error) -> return Err(error.diagnostic())
+        }
+        if resolver.revalidate_file(file) == .Err(error) -> return Err(error.diagnostic())
+        if inline != None -> return Ok(Val(file))
+    }
+    Ok(None)
+}
+fn jet_driver_manifest_root_checked(start: compiler_driver_os_path.OsPath, cache: &WorkspaceDeclarationCache) -[FS, Env]> compiler_driver_os_path.OsPath? Diagnostic! {
+    dir := if AuthorityResolver.authority_walk_root(start) == {
+        .Ok(path) -> path
+        .Err(error) -> return Err(error.diagnostic())
+    }
+    loop {
+        opened :: if AuthorityResolver.open_for_authority_walk(dir) == {
+            .Ok(resolver) -> resolver
+            .Err(error) -> return Err(error.diagnostic())
+        }
+        if opened == {
+            .Val(resolver) -> {
+                if resolver.resolve_workspace_source(&cache) == {
+                    .Ok(.Val(_)) -> {
+                        if resolver.checked_manifest(compiler_driver_os_path.from_text(".", dir.platform)) == {
+                            .Ok(_) -> return Ok(Val(dir))
+                            .Err(error) -> { if error.is_missing() -> return Ok(None) else -> return Err(error.diagnostic()) }
+                        }
+                    }
+                    .Ok(.None) -> {}
+                    .Err(error) -> return Err(error.workspace_diagnostic())
+                }
+                if resolver.checked_manifest(compiler_driver_os_path.from_text(".", dir.platform)) == {
+                    .Ok(_) -> return Ok(Val(dir))
+                    .Err(error) -> { if !error.is_missing() -> return Err(error.diagnostic()) }
+                }
+            }
+            .None -> {
+                resolver :: if AuthorityResolver.open(dir) == {
+                    .Ok(found) -> found
+                    .Err(error) -> return Err(error.diagnostic())
+                }
+                if resolver.checked_manifest(compiler_driver_os_path.from_text(".", dir.platform)) == {
+                    .Ok(_) -> {
+                        if resolver.resolve_workspace_source(&cache) == .Err(error) -> return Err(error.workspace_diagnostic())
+                        return Ok(Val(dir))
+                    }
+                    .Err(error) -> { if !error.is_missing() -> return Err(error.diagnostic()) }
+                }
+            }
+        }
+        dir = AuthorityResolver.authority_walk_parent(dir) ?? return Ok(None)
+    }
+}
+fn jet_driver_checked_inline_root_at_boundary(dir: compiler_driver_os_path.OsPath, cache: &WorkspaceDeclarationCache) -[FS, Env]> (compiler_driver_os_path.OsPath?, Bool) Diagnostic! {
+    resolver :: if AuthorityResolver.open(dir) == {
+        .Ok(found) -> found
+        .Err(error) -> return Err(error.diagnostic())
+    }
+    has_manifest :: if resolver.checked_manifest(compiler_driver_os_path.from_text(".", dir.platform)) == {
+        .Ok(_) -> true
+        .Err(error) -> { if error.is_missing() -> false else -> return Err(error.diagnostic()) }
+    }
+    has_inline :: jet_driver_checked_inline_package_entry(resolver) != None
+    if has_manifest || has_inline {
+        if resolver.resolve_workspace_source(&cache) == .Err(error) -> return Err(error.workspace_diagnostic())
+    }
+    Ok((if has_inline -> Val(dir) else -> None, has_manifest))
+}
+fn jet_driver_inline_package_root_checked(start: compiler_driver_os_path.OsPath, cache: &WorkspaceDeclarationCache) -[FS, Env]> compiler_driver_os_path.OsPath? Diagnostic! {
+    dir := if AuthorityResolver.authority_walk_root(start) == {
+        .Ok(path) -> path
+        .Err(error) -> return Err(error.diagnostic())
+    }
+    loop {
+        opened :: if AuthorityResolver.open_for_authority_walk(dir) == {
+            .Ok(resolver) -> resolver
+            .Err(error) -> return Err(error.diagnostic())
+        }
+        if opened == {
+            .None -> {
+                checked :: jet_driver_checked_inline_root_at_boundary(dir, &cache)
+                if checked.0 != None -> return Ok(checked.0)
+                if checked.1 -> return Ok(None)
+            }
+            .Val(resolver) -> {
+                workspace_boundary :: if resolver.resolve_workspace_source(&cache) == {
+                    .Ok(found) -> found != None
+                    .Err(error) -> return Err(error.workspace_diagnostic())
+                }
+                has_manifest :: if resolver.checked_manifest(compiler_driver_os_path.from_text(".", dir.platform)) == {
+                    .Ok(_) -> true
+                    .Err(error) -> { if error.is_missing() -> false else -> return Err(error.diagnostic()) }
+                }
+                if jet_driver_checked_inline_package_entry(resolver) != None -> return Ok(Val(dir))
+                if workspace_boundary || has_manifest -> return Ok(None)
+            }
+        }
+        dir = AuthorityResolver.authority_walk_parent(dir) ?? return Ok(None)
+    }
+}
+fn jet_driver_package_root_checked(start: compiler_driver_os_path.OsPath, cache: &WorkspaceDeclarationCache) -[FS, Env]> compiler_driver_os_path.OsPath? Diagnostic! {
+    manifest :: jet_driver_manifest_root_checked(start, &cache)
+    inline :: jet_driver_inline_package_root_checked(start, &cache)
+    if inline != None -> Ok(inline) else -> Ok(manifest)
+}
+pub fn jet_driver_find_package_root_checked(start: compiler_driver_os_path.OsPath) -[FS, Env]> compiler_driver_os_path.OsPath? Diagnostic! {
+    cache := WorkspaceDeclarationCache.new()
+    jet_driver_package_root_checked(start, &cache)
+}
+// This is the artifact/project selector, NOT ProgramBundle.project_root.
+pub fn jet_driver_selected_project_root(start: compiler_driver_os_path.OsPath) -[FS, Env]> compiler_driver_os_path.OsPath Diagnostic! {
+    cache := WorkspaceDeclarationCache.new()
+    if jet_driver_workspace_root_checked(start, &cache) == .Val(root) -> return Ok(root)
+    if jet_driver_find_repository_root(start) == .Val(root) -> return Ok(root)
+    if jet_driver_package_root_checked(start, &cache) == .Val(root) -> return Ok(root)
+    if AuthorityResolver.authority_walk_root(start) == {
+        .Ok(root) -> Ok(root)
+        .Err(error) -> Err(error.diagnostic())
+    }
+}
 
-    source_units := catalog.source_units
-    units_by_source :: source_index_result.index
-    selected_entry :: source_units[entry_index ?? 0]
-    entry_source_identity :: jet_driver_source_identity(selected_entry.package_identity, selected_entry.path)
-    entry_module_identity :: jet_driver_module_identity(selected_entry.package_identity, selected_entry.path)
-    pending := [Int]{entry_index ?? 0}
-    queued := [Bool]{}
-    loop unit_index in 0..<source_units.len() -> &queued.push(false)
-    queued[entry_index ?? 0] = true
-    modules := [JetDriverLoadedModule]{}
-    namespace_expanded := [Bool]{}
-    loop root_index in 0..<request.authorized_sources.roots.len() -> &namespace_expanded.push(false)
-    resolved_imports := [SemaRegistrationImportEdge]{}
-    // Exact text records of the embedded Core modules the closure loads.
-    core_generated := [MIRSourceFile]{}
-    names_url_carrier := false
+// One canonical pending-source/import closure, shared by entry loading and
+// generated C-cache loading. Retained cache ASTs are never lexed a second time.
+fn jet_driver_load_pending_sources(request: JetDriverCompileRequest, snapshot: JetDriverAuthorizedSourceView, overlays: [compiler_driver_os_path.OSPath:String], import_root: compiler_driver_os_path.OSPath?, entry_index: Int?, parsed_entry: JetCompilerServicesParseFacts?, packages: [JetDriverPackageInfo], units_by_source: JetDriverSourceIndex, source_units: &[JetDriverSourceUnit], modules: &[JetDriverModuleFacts], bundle_owner: Shared<ProgramBundle>, resolved_imports: &[SemaRegistrationImportEdge], core_generated: &[MIRSourceFile], diagnostics: &[Diagnostic], pending: &[Int], queued: &[Bool], namespace_expanded: &[Bool], retained_modules: [Int:Int], initial_failed_stage: JetDriverStage?, initial_names_url_carrier: Bool) -> (failed_stage: JetDriverStage?, names_url_carrier: Bool) {
+    bundle := bundle_owner.guard_edit()
+    failed_stage := initial_failed_stage
+    names_url_carrier := initial_names_url_carrier
     pending_index := 0
     loop pending_index < pending.len() {
         source_unit_index := pending[pending_index]
@@ -2315,31 +2507,45 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
             }
         }
         if request.trace_sink == .Val(sink) -> sink.begin("parse", unit.relative_path, pending_index - 1, pending.len())
-        parse_result :: if is_core -> jet_driver_parse_core_source(request.core_sources, unit) else -> parse_source(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source.bytes())
+        source :: if {
+            is_core -> ""
+            unit.foreign_cache_index == .Val(index) -> jet_driver_source_view_text(snapshot.roots[unit.root_index].foreign_cache_files[index], overlays)
+            else -> jet_driver_source_view_text(snapshot.roots[unit.root_index].files[unit.file_index], overlays)
+        }
+        // The compiler-service caller already parsed this exact overlay entry.
+        // Reuse its canonical facts; imported modules use the ordinary parser.
+        parse_result :: if {
+            retained_modules.get(source_unit_index) == .Val(index) -> ParseResult{program: jet_driver_program_snapshot(bundle.value, modules[index]), diagnostics: [Diagnostic]{}}
+            is_core -> jet_driver_parse_core_source(request.core_sources, unit)
+            source_unit_index == (entry_index ?? -1) && parsed_entry != None -> (parsed_entry ?? panic("validated parsed entry is absent")).parsed
+            else -> parse_source(source.bytes())
+        }
         if request.trace_sink == .Val(sink) -> sink.end("parse", parse_result.program.items.len())
         parse_diagnostic_start :: diagnostics.len()
         loop diagnostic in parse_result.diagnostics -> &diagnostics.push(diagnostic)
         loop parse_diagnostic_index in parse_diagnostic_start..<diagnostics.len() {
             diagnostics[parse_diagnostic_index] = diagnostic_with_source_path(diagnostics[parse_diagnostic_index], unit.path, 0)
+            diagnostics[parse_diagnostic_index].source_native_path = unit.physical_path
         }
         if jet_driver_has_errors(parse_result.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
         program := parse_result.program
-        jet_driver_bind_dependency_imports(&program, unit, catalog.packages)
+        jet_driver_bind_dependency_imports(&program, unit, packages)
         module_identity :: jet_driver_unit_module_identity(unit)
-        module_position :: modules.len()
-        &modules.push(JetDriverLoadedModule{
-            source_unit_index: source_unit_index,
-            source_identity: jet_driver_source_identity(unit.package_identity, unit.path),
-            package_identity: unit.package_identity,
-            module_identity: module_identity,
-            module_name: unit.module_name,
-            program: program,
-        })
+        module_position :: if retained_modules.get(source_unit_index) == {
+            .Val(index) -> index
+            .None -> {
+                index :: modules.len()
+                &modules.push(jet_driver_append_loaded_module(&bundle.value, unit, source_unit_index, source, ^program))
+                index
+            }
+        }
+        // Only an immutable lookup snapshot survives the move into the bundle.
+        program = jet_driver_program_snapshot(bundle.value, modules[module_position])
         if jet_driver_has_errors(parse_result.diagnostics) -> next
         // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
         // record, so a module that names it loads that Core source without a
         // `use` (Rust `source_names_identifier` in the loader).
-        if !is_core && jet_driver_source_names_identifier(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source, "URL") {
+        if !is_core && jet_driver_source_names_identifier(source, "URL") {
             names_url_carrier = true
             url_carrier :: mir_boundary_head_carrier_module("URL") ?? ""
             url_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, url_carrier, Span{start: 0, end: 0}, &diagnostics)
@@ -2371,7 +2577,8 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                         next
                     }
                     diagnostics_before :: diagnostics.len()
-                    target_index = jet_driver_lookup_file_target(source_units, unit, path, span, &diagnostics)
+                    base :: if entry_index == Val(source_unit_index) -> import_root else -> None
+                    target_index = jet_driver_lookup_file_target_from_root(source_units, unit, path, span, &diagnostics, base)
                     if target_index == None && diagnostics.len() == diagnostics_before {
                         &diagnostics.push(jet_driver_diagnostic("E0603", span, "the imported file is not in the authorized package source snapshot", "file imports resolve only against exact checked files beneath the same source root", "include the imported source file in the authorized source snapshot"))
                     }
@@ -2385,7 +2592,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                             unit,
                             name,
                             declaration.inline_version,
-                            catalog.packages,
+                            packages,
                             source_units,
                             units_by_source,
                             span,
@@ -2445,8 +2652,8 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                     }
                     // Rust names the file relative to the declaring file,
                     // without its extension: `name` or `name/module`.
-                    direct :: jet_driver_file_import_path(unit.relative_path, definition.name)
-                    import_path :: if direct.valid && direct.path == target_unit.relative_path -> definition.name else -> "{definition.name}/module"
+                    direct :: jet_driver_file_import_path(jet_driver_unit_native_relative(unit), definition.name)
+                    import_path :: if direct == .Val(path) && target_unit.relative_os_path == .Val(target) && compiler_driver_os_path.equals(path, target) -> definition.name else -> "{definition.name}/module"
                     synthetic :: ImportDecl{kind: ImportKind.File{path: import_path, span: definition.name_span}, alias: definition.name, alias_span: definition.name_span, span: definition.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None}
                     &modules[module_position].program.imports.push(synthetic)
                     if aliases.get(definition.name) == None -> _ := &aliases.add(definition.name, target_unit_index)
@@ -2475,6 +2682,16 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                     target_index := jet_driver_find_alias(aliases, module_alias)
                     // `use core.perf.[PerfError]` selects from the Core module itself.
                     core_module :: jet_driver_core_import_module(declaration)
+                    if target_index == None && core_module == None && entry_index == Val(source_unit_index) && import_root == .Val(root) {
+                        target_index = jet_driver_lookup_file_target_from_root(source_units, unit, module_alias, module_alias_span, &diagnostics, Val(root))
+                        if target_index == .Val(index) {
+                            _ := &aliases.add(module_alias, index)
+                            if !queued[index] {
+                                queued[index] = true
+                                &pending.push(index)
+                            }
+                        }
+                    }
                     if target_index == None {
                         if core_module == .Val(core_name) {
                             // Rust reports an unknown selective Core path per
@@ -2510,17 +2727,159 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         }
         loop import_diagnostic_index in import_diagnostic_start..<diagnostics.len() {
             diagnostics[import_diagnostic_index] = diagnostic_with_source_path(diagnostics[import_diagnostic_index], unit.path, 0)
+            diagnostics[import_diagnostic_index].source_native_path = unit.physical_path
         }
     }
-    if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(&modules, &resolved_imports, source_units, catalog.packages, request.authorized_sources.roots, &diagnostics) {
+    (failed_stage: failed_stage, names_url_carrier: names_url_carrier)
+}
+
+struct JetDriverRetainedCacheLoadState {
+    source_index: JetDriverSourceIndex
+    indexed_units: Int
+    synced_modules: Int
+    queued: [Bool]
+    namespace_expanded: [Bool]
+    entry_index: Int?
+    names_url_carrier: Bool
+}
+
+fn jet_driver_sync_retained_cache_load_state(state: &JetDriverRetainedCacheLoadState, load: JetDriverLoadResult, diagnostics: &[Diagnostic]) {
+    loop state.indexed_units < load.source_units.len() {
+        index :: state.indexed_units
+        jet_driver_index_source_unit(&state.source_index, load.source_units[index], index, &diagnostics)
+        if index >= state.queued.len() -> &state.queued.push(false)
+        state.indexed_units += 1
+    }
+    loop state.synced_modules < load.modules.len() {
+        module :: load.modules[state.synced_modules]
+        state.queued[module.source_unit_index] = true
+        unit :: load.source_units[module.source_unit_index]
+        if jet_driver_unit_is_namespace_member(unit) -> state.namespace_expanded[unit.root_index] = true
+        if module.module_identity == load.entry_module_identity -> state.entry_index = Val(module.source_unit_index)
+        state.synced_modules += 1
+    }
+}
+
+fn jet_driver_retained_cache_load_state(snapshot: JetDriverAuthorizedSourceView, load: JetDriverLoadResult, diagnostics: &[Diagnostic]) -> JetDriverRetainedCacheLoadState {
+    indexed :: jet_driver_build_source_index(load.source_units)
+    loop diagnostic in indexed.diagnostics -> &diagnostics.push(diagnostic)
+    state := JetDriverRetainedCacheLoadState{source_index: indexed.index, indexed_units: load.source_units.len(), synced_modules: 0, queued: loop unit in load.source_units -> false, namespace_expanded: loop root in snapshot.roots -> false, entry_index: None, names_url_carrier: false}
+    jet_driver_sync_retained_cache_load_state(&state, load, &diagnostics)
+    state
+}
+
+fn jet_driver_load_retained_cache_imports(request: JetDriverCompileRequest, snapshot: JetDriverAuthorizedSourceView, overlays: [compiler_driver_os_path.OSPath:String], load: &JetDriverLoadResult, state: &JetDriverRetainedCacheLoadState, retained_modules: [Int:Int], diagnostics: &[Diagnostic]) {
+    jet_driver_sync_retained_cache_load_state(&state, load, &diagnostics)
+    pending := retained_modules.keys().to_list()
+    &pending.sort()
+    closure :: jet_driver_load_pending_sources(request, snapshot, overlays, None, state.entry_index, None, load.packages, state.source_index, &load.source_units, &load.modules, load.bundle, &load.imports, &load.generated_source_files, &diagnostics, &pending, &state.queued, &state.namespace_expanded, retained_modules, load.failed_stage, state.names_url_carrier)
+    load.failed_stage = closure.failed_stage
+    state.names_url_carrier = closure.names_url_carrier
+    jet_driver_sync_retained_cache_load_state(&state, load, &diagnostics)
+    if jet_driver_has_errors(diagnostics) -> load.complete = false
+}
+
+pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
+    snapshot :: jet_driver_authorized_source_view(request.authorized_sources, None)
+    jet_driver_load_from_source_view(request, snapshot, [compiler_driver_os_path.OsPath:String]{}, None, None)
+}
+fn jet_driver_load_from_source_view(request: JetDriverCompileRequest, snapshot: JetDriverAuthorizedSourceView, overlays: [compiler_driver_os_path.OsPath:String], import_root: compiler_driver_os_path.OsPath?, parsed_entry: JetCompilerServicesParseFacts?) -> JetDriverLoadResult {
+    bundle_owner :: jet_driver_empty_bundle(request, jet_driver_source_view_entry_root_path(snapshot))
+    diagnostics := [Diagnostic]{}
+    failed_stage := JetDriverStage?{None}
+    // Rust load_organization_policy runs before loading package/module sources.
+    organization_policy :: jet_driver_organization_policy(request.host_facts.organization_policy, &diagnostics)
+    if organization_policy == None && diagnostics.len() != 0 {
+        return JetDriverLoadResult{
+            bundle: bundle_owner,
+            project_root: jet_driver_source_view_entry_root_path(snapshot),
+            package_identity: "", packages: [], source_units: [],
+            entry_source_identity: "", entry_module_identity: "",
+            modules: [], imports: [], source_files: [], generated_source_files: [],
+            diagnostics: diagnostics, failed_stage: Val(JetDriverStage.Load),
+            complete: false, organization_policy: None,
+        }
+    }
+    catalog :: jet_driver_build_source_catalog(snapshot, overlays)
+    loop diagnostic in catalog.diagnostics -> &diagnostics.push(diagnostic)
+    if !catalog.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
+    // Rust Loader::load_entry_with_overlays_and_import_root: select a relative
+    // import directory, never widen the caller's captured source authority.
+    if import_root == .Val(root) {
+        authority_root :: jet_driver_source_view_entry_root_path(snapshot)
+        relative :: compiler_driver_os_path.strip_prefix(root, authority_root)
+        if relative == None || (relative == .Val(path) && path.encoded.len() != 0 && !jet_driver_valid_authority_relative_path(path)) {
+            &diagnostics.push(jet_driver_diagnostic_without_span("E0602", "the import root is outside the selected authorized source root", "an import-root override selects paths within the original pinned source authority", "select a canonical directory beneath the entry authority root"))
+            failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
+        }
+    }
+    source_index_result :: jet_driver_build_source_index(catalog.source_units)
+    loop diagnostic in source_index_result.diagnostics -> &diagnostics.push(diagnostic)
+    if !source_index_result.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
+    entry_index := source_index_result.index.by_path.get(snapshot.entry_path)
+    if entry_index == None {
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0603", "the entry source unit is not in the selected package source snapshot", "compilation begins from one exact source file beneath the selected authority root", "select the entry source from the authorized package snapshot"))
+        failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
+    }
+    if parsed_entry == .Val(parsed) && entry_index == .Val(index) {
+        unit :: catalog.source_units[index]
+        source := jet_driver_source_view_text(snapshot.roots[unit.root_index].files[unit.file_index], overlays) // #4303
+        if source != parsed.source {
+            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the compiler query source is not the exact loaded entry", "a captured source view and its parsed facts must name the same immutable source bytes", "parse the selected overlay entry from the caller-held source snapshot"))
+            failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
+        }
+    }
+    if jet_driver_has_errors(diagnostics) {
+        return JetDriverLoadResult{
+            bundle: bundle_owner,
+            project_root: jet_driver_source_view_entry_root_path(snapshot),
+            package_identity: catalog.entry_package_identity,
+            packages: catalog.packages,
+            source_units: catalog.source_units,
+            entry_source_identity: "",
+            entry_module_identity: "",
+            modules: [JetDriverModuleFacts]{},
+            imports: [SemaRegistrationImportEdge]{},
+            source_files: [MIRSourceFile]{},
+            generated_source_files: [MIRSourceFile]{},
+            diagnostics: diagnostics,
+            organization_policy: organization_policy,
+            failed_stage: failed_stage,
+            complete: false,
+        }
+    }
+
+    source_units := catalog.source_units
+    units_by_source :: source_index_result.index
+    selected_entry :: source_units[entry_index ?? 0]
+    entry_source_identity :: jet_driver_source_identity(selected_entry.package_identity, jet_driver_source_unit_identity_label(selected_entry))
+    entry_module_identity :: jet_driver_unit_module_identity(selected_entry)
+    pending := [Int]{entry_index ?? 0}
+    queued := [Bool]{}
+    loop unit_index in 0..<source_units.len() -> &queued.push(false)
+    queued[entry_index ?? 0] = true
+    modules := [JetDriverModuleFacts]{}
+    namespace_expanded := [Bool]{}
+    loop root_index in 0..<snapshot.roots.len() -> &namespace_expanded.push(false)
+    resolved_imports := [SemaRegistrationImportEdge]{}
+    // Exact text records of the embedded Core modules the closure loads.
+    core_generated := [MIRSourceFile]{}
+    names_url_carrier := false
+    closure :: jet_driver_load_pending_sources(request, snapshot, overlays, import_root, entry_index, parsed_entry, catalog.packages, units_by_source, &source_units, &modules, bundle_owner, &resolved_imports, &core_generated, &diagnostics, &pending, &queued, &namespace_expanded, [Int:Int]{}, failed_stage, names_url_carrier)
+    failed_stage = closure.failed_stage
+    names_url_carrier = closure.names_url_carrier
+    namespace_roots := [String:compiler_driver_os_path.OsPath]{}
+    if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(bundle_owner, &modules, &resolved_imports, source_units, catalog.packages, snapshot.roots, &diagnostics, &namespace_roots) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
-    modules = jet_driver_order_core_modules(modules, source_units, request.core_sources, names_url_carrier)
-    provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, core_generated)
+    modules = jet_driver_order_core_modules(bundle_owner, modules, source_units, request.core_sources, names_url_carrier)
+    provenance :: jet_driver_collect_source_files(snapshot, source_units, modules, core_generated, overlays)
     loop diagnostic in provenance.diagnostics -> &diagnostics.push(diagnostic)
     if !provenance.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
     complete :: failed_stage == None && !jet_driver_has_errors(diagnostics)
-    JetDriverLoadResult{
+    result := JetDriverLoadResult{
+        bundle: bundle_owner,
+        project_root: jet_driver_source_view_entry_root_path(snapshot),
         package_identity: catalog.entry_package_identity,
         packages: catalog.packages,
         source_units: source_units,
@@ -2528,10 +2887,18 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         entry_module_identity: entry_module_identity,
         modules: modules,
         imports: resolved_imports,
+        package_namespaces: namespace_roots,
         source_files: provenance.files,
+        source_file_index: provenance.index,
+        generated_source_file_index: provenance.generated_index,
+        physical_source_paths: provenance.physical_paths,
         generated_source_files: core_generated,
         diagnostics: diagnostics,
+        organization_policy: organization_policy,
         failed_stage: failed_stage,
         complete: complete,
     }
+    jet_driver_reorder_bundle(&result)
+    jet_driver_seed_bundle(result, snapshot.roots)
+    result
 }

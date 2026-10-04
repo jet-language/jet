@@ -1,0 +1,922 @@
+// PORT-PENDING 0542 crates-jet-codegen-src-schedulerhost-module-group: crates/jet-codegen/src/SchedulerHost.rs:1-918
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Host bindings for the compiled copy of `Prelude/Scheduler.rs`.
+//RS //
+//RS // I9: there is one scheduler. `Prelude/Scheduler.rs` is the scheduler; AOT
+//RS // embeds that source into the generated program and `jet_codegen::scheduler`
+//RS // compiles the same source for the Cranelift JIT and the interpreter's ambient
+//RS // host. Nothing in this file re-encodes scheduling policy, defaults, or error
+//RS // meaning. It only supplies the sibling-prelude symbols that the emitted
+//RS // program gets from its own flat module, plus the marshalling the JIT needs.
+//RS 
+//RS // ---------------------------------------------------------------------------
+//RS // Panic boundary. AOT source: Prelude/Core.rs.
+//RS // The scheduler asks "may I unwind out of this frame?" before it turns a
+//RS // cancel or a deadline into a panic. In an emitted program the answer also
+//RS // counts `#Interrupt` handler frames; the JIT host has no interrupt-handler
+//RS // prelude, so a scheduler task frame is the whole answer here.
+//RS // ---------------------------------------------------------------------------
+//RS 
+//RS thread_local! {
+//RS     static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS }
+//RS 
+//RS /// Enter a frame that a scheduler interrupt may unwind out of.
+//RS pub fn jet_scheduler_task_panic_enter() {
+//RS     JET_IN_SCHEDULER_TASK.with(|c| c.set(true));
+//RS }
+//RS 
+//RS /// Leave that frame.
+//RS pub fn jet_scheduler_task_panic_leave() {
+//RS     JET_IN_SCHEDULER_TASK.with(|c| c.set(false));
+//RS }
+//RS 
+//RS /// Whether the current JIT frame belongs to a scheduler task. The JIT uses
+//RS /// this only to keep a task's runtime trap local until its join boundary has
+//RS /// converted it into a `TaskFailure`; a sibling must not observe that trap at
+//RS /// its next loop header.
+//RS pub fn jet_scheduler_in_task() -> bool {
+//RS     JET_IN_SCHEDULER_TASK.with(|c| c.get())
+//RS }
+//RS 
+//RS pub fn jet_scheduler_panic_should_unwind() -> bool {
+//RS     JET_IN_SCHEDULER_TASK.with(|c| c.get())
+//RS }
+//RS 
+//RS fn jet_runtime_diagnostic(rendered: String) -> ! {
+//RS     // The scheduler may be inside a native wait or a task boundary. Carry the
+//RS     // Foundation-rendered report through that boundary; the owning adapter
+//RS     // decides the final target edge after cleanup.
+//RS     std::panic::panic_any(rendered);
+//RS }
+//RS 
+//RS fn jet_scheduler_runtime_stop(msg: &str) -> ! {
+//RS     let report = jet_foundation::Outcome::jet_render_runtime_stop(
+//RS         "E3001", "", 0, "", "", 1, 1, msg, "",
+//RS     );
+//RS     if jet_scheduler_panic_should_unwind() {
+//RS         panic!("{}", report.rendered);
+//RS     }
+//RS     jet_runtime_diagnostic(report.rendered);
+//RS }
+//RS 
+//RS pub fn jet_scheduler_runtime_stop_with_report(report: String) -> ! {
+//RS     jet_runtime_diagnostic(report);
+//RS }
+//RS 
+//RS fn jet_runtime_caught_stop(message: &str) {
+//RS     if message.starts_with("Stop [E") {
+//RS         eprint!("{message}");
+//RS         if !message.ends_with('\n') {
+//RS             eprintln!();
+//RS         }
+//RS         return;
+//RS     }
+//RS     let report = jet_foundation::Outcome::jet_render_runtime_stop(
+//RS         "E3001", "", 0, "", "", 1, 1, message, "",
+//RS     );
+//RS     eprint!("{}", report.rendered);
+//RS }
+//RS 
+//RS // ---------------------------------------------------------------------------
+//RS // `#Para` deferred failure. AOT source: Prelude/Core.rs.
+//RS // Inside a `#Para` region a failure is carried to the collection point instead
+//RS // of raised in the worker. The JIT host has no `#Para` runtime, so the flag is
+//RS // never set here — but the one scheduler source keeps its real carrier path.
+//RS // ---------------------------------------------------------------------------
+//RS 
+//RS thread_local! {
+//RS     static JET_PARA_DEFER_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS }
+//RS 
+//RS enum JetParaRuntimeFailure {
+//RS     SchedulerFatal { msg: String },
+//RS }
+//RS 
+//RS // ---------------------------------------------------------------------------
+//RS // Task deadline. Clock, budget, and JetDeadlineGuard: one home in
+//RS // Prelude/Deadline.rs (card #1747), included above by `lib.rs`'s `scheduler`
+//RS // module and by the AOT emission list in `Codegen/mod.rs`, so the two cannot
+//RS // drift. The E3003 text comes from the one renderer in Prelude/TaskGroup.rs.
+//RS // ---------------------------------------------------------------------------
+//RS 
+//RS fn jet_deadline_exceeded(wait_kind: &str) -> ! {
+//RS     let rendered = jet_std::jet_task_deadline(wait_kind).render();
+//RS     jet_std::jet_task_deadline_mark_pending();
+//RS     if jet_scheduler_panic_should_unwind()
+//RS         || jet_scheduler_wait_boundary_should_unwind()
+//RS         || jet_typed_deadline_boundary_should_unwind()
+//RS     {
+//RS         std::panic::panic_any(JetDeadlineUnwind { rendered });
+//RS     }
+//RS     jet_runtime_diagnostic(rendered);
+//RS }
+//RS 
+//RS // ---------------------------------------------------------------------------
+//RS // JIT marshalling. No counterpart in the emitted prelude, because AOT reaches
+//RS // the same scheduler entry points through generated code instead.
+//RS // ---------------------------------------------------------------------------
+//RS 
+//RS /// JIT marshalling for the one generic Prelude select door. Cranelift values
+//RS /// happen to use `i64` slots, including opaque String handles; that ABI choice
+//RS /// does not narrow the `Receiver<T>` language contract.
+//RS pub fn jet_scheduler_select_int_channels_timed<T: Send>(
+//RS     channels: &[JetSchedulerChannel<T>],
+//RS     timers: Vec<(u64, T)>,
+//RS ) -> T {
+//RS     let recvs: Vec<_> = channels.iter().map(|c| c.select_inner()).collect();
+//RS     jet_scheduler_select_values(
+//RS         recvs,
+//RS         timers
+//RS             .into_iter()
+//RS             .map(|(ms, value)| (ms, Some(value)))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod scheduler_host_tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn the_jit_scheduler_is_the_prelude_scheduler() {
+//RS         // Anti-refork guard. The JIT host must compile Prelude/Scheduler.rs
+//RS         // itself, never a second copy under src/scheduler*.
+//RS         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS         let root = if manifest.join("src/Prelude/Scheduler.rs").exists() {
+//RS             manifest.to_path_buf()
+//RS         } else {
+//RS             // jet-comptime concatenates this host into OUT_DIR. The one
+//RS             // Prelude scheduler still lives next to jet-codegen's lib.rs.
+//RS             manifest.join("../jet-codegen")
+//RS         };
+//RS         for crate_root in [manifest, root.as_path()] {
+//RS             assert!(
+//RS                 !crate_root.join("src/scheduler.rs").exists(),
+//RS                 "src/scheduler.rs is a second scheduler; the JIT compiles Prelude/Scheduler.rs"
+//RS             );
+//RS             assert!(
+//RS                 !crate_root.join("src/scheduler").exists(),
+//RS                 "src/scheduler/ is a second scheduler; the JIT compiles Prelude/Scheduler.rs"
+//RS             );
+//RS         }
+//RS         let lib = std::fs::read_to_string(root.join("src/lib.rs")).unwrap();
+//RS         assert!(
+//RS             lib.contains("include!(\"Prelude/Scheduler.rs\")"),
+//RS             "the scheduler module must include the one Prelude scheduler source"
+//RS         );
+//RS         assert!(
+//RS             lib.contains("include!(\"Prelude/Stream.rs\")"),
+//RS             "the scheduler module must include the one Prelude Stream source"
+//RS         );
+//RS         assert!(
+//RS             !root.join("src/stream.rs").exists(),
+//RS             "src/stream.rs is a second Stream runtime; use Prelude/Stream.rs"
+//RS         );
+//RS         // D-CONC-STREAM1=A: one cancellation and cleanup law. A stream's
+//RS         // cancel fact IS the producer child's `JetTaskControl`, and `yield`
+//RS         // reaches the shared task wait point. A stream-local control type or a
+//RS         // stream-only wait check is the second law this card deleted, and it is
+//RS         // how the AOT and development builds freed a producer differently.
+//RS         let stream = std::fs::read_to_string(root.join("src/Prelude/Stream.rs")).unwrap();
+//RS         assert!(
+//RS             !stream.contains("StreamControl"),
+//RS             "a stream-local cancellation control is a second shutdown law; \
+//RS              the producer child's JetTaskControl is the one cancel fact"
+//RS         );
+//RS         let evaluator =
+//RS             std::fs::read_to_string(root.join("src/Codegen/MIREval.rs")).unwrap();
+//RS         assert!(
+//RS             !evaluator.contains("stream_wait_check") && !evaluator.contains("stream_cancel"),
+//RS             "the evaluator's yield wait point must be the shared task wait point \
+//RS              (`task_wait_check`), not a stream-only twin"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stream_pull_releases_exactly_one_yield_at_a_time() {
+//RS         let events = Arc::new(Mutex::new(Vec::new()));
+//RS         let (sender, mut consumer) = jet_stream::<i64>();
+//RS         let producer_events = Arc::clone(&events);
+//RS         let producer = std::thread::spawn(move || {
+//RS             producer_events.lock().unwrap().push("before-1");
+//RS             assert!(sender.send_stream(1));
+//RS             producer_events.lock().unwrap().push("after-1");
+//RS             assert!(!sender.send_stream(2));
+//RS             producer_events.lock().unwrap().push("after-2");
+//RS         });
+//RS 
+//RS         assert_eq!(consumer.pull(), Some(1));
+//RS         assert_eq!(*events.lock().unwrap(), vec!["before-1"]);
+//RS         assert_eq!(consumer.pull(), Some(2));
+//RS         assert_eq!(*events.lock().unwrap(), vec!["before-1", "after-1"]);
+//RS 
+//RS         drop(consumer);
+//RS         producer.join().unwrap();
+//RS         assert_eq!(
+//RS             *events.lock().unwrap(),
+//RS             vec!["before-1", "after-1", "after-2"]
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stream_sender_observes_explicit_consumer_close() {
+//RS         let (sender, mut consumer) = jet_stream::<i64>();
+//RS         let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+//RS         let producer = std::thread::spawn(move || {
+//RS             assert!(!sender.send_stream(1));
+//RS             done_tx.send(()).unwrap();
+//RS         });
+//RS 
+//RS         assert_eq!(consumer.pull(), Some(1));
+//RS         drop(consumer);
+//RS         done_rx
+//RS             .recv_timeout(Duration::from_secs(1))
+//RS             .expect("closed Stream did not release its producer");
+//RS         producer.join().unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stream_drop_uses_the_shared_task_cancel_cleanup_path() {
+//RS         struct CleanupMark(std::sync::Arc<std::sync::atomic::AtomicBool>);
+//RS 
+//RS         impl Drop for CleanupMark {
+//RS             fn drop(&mut self) {
+//RS                 self.0.store(true, Ordering::Release);
+//RS             }
+//RS         }
+//RS 
+//RS         let cleaned = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let continued = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let producer_cleaned = std::sync::Arc::clone(&cleaned);
+//RS         let producer_continued = std::sync::Arc::clone(&continued);
+//RS         let stream = jet_stream_task(move |sender| {
+//RS             let _cleanup = CleanupMark(producer_cleaned);
+//RS             assert!(sender.send_stream(1));
+//RS             producer_continued.store(true, Ordering::Release);
+//RS         });
+//RS 
+//RS         let mut iterator = stream.into_iter();
+//RS         assert_eq!(iterator.next(), Some(1));
+//RS         drop(iterator);
+//RS 
+//RS         assert!(cleaned.load(Ordering::Acquire));
+//RS         assert!(!continued.load(Ordering::Acquire));
+//RS     }
+//RS 
+//RS     /// D-CONC-STREAM1=A drift guard, the behavioral half: one cancellation and
+//RS     /// cleanup law means a stream producer and a plain task child are stopped by
+//RS     /// the SAME code. Both park at a wait point; the stream is cancelled by
+//RS     /// dropping its consumer (`JetStream::drop`) and the task by
+//RS     /// `handle.cancel()` (`JetTaskControl::cancel`). Both must unwind at the
+//RS     /// wait point, run cleanup on the way out, execute nothing after the wait,
+//RS     /// and report `Cancelled` — never `Panicked`. A stream-local shutdown path
+//RS     /// makes exactly one of these two columns disagree, which is the drift the
+//RS     /// field audit found between the AOT and development builds.
+//RS     #[test]
+//RS     fn one_cancel_law_stops_a_stream_producer_and_a_task_child_alike() {
+//RS         struct CleanupMark(Arc<AtomicBool>);
+//RS 
+//RS         impl Drop for CleanupMark {
+//RS             fn drop(&mut self) {
+//RS                 self.0.store(true, Ordering::Release);
+//RS             }
+//RS         }
+//RS 
+//RS         // Column one: a stream producer, cancelled by dropping the consumer.
+//RS         let stream_cleaned = Arc::new(AtomicBool::new(false));
+//RS         let stream_continued = Arc::new(AtomicBool::new(false));
+//RS         let cleaned = Arc::clone(&stream_cleaned);
+//RS         let continued = Arc::clone(&stream_continued);
+//RS         let stream = jet_stream_task(move |sender| {
+//RS             let _cleanup = CleanupMark(cleaned);
+//RS             assert!(sender.send_stream(1));
+//RS             continued.store(true, Ordering::Release);
+//RS         });
+//RS         let mut iterator = stream.into_iter();
+//RS         assert_eq!(iterator.next(), Some(1));
+//RS         drop(iterator);
+//RS 
+//RS         // Column two: a plain task child parked on a channel receive, cancelled
+//RS         // through its own control.
+//RS         let task_cleaned = Arc::new(AtomicBool::new(false));
+//RS         let task_continued = Arc::new(AtomicBool::new(false));
+//RS         let cleaned = Arc::clone(&task_cleaned);
+//RS         let continued = Arc::clone(&task_continued);
+//RS         let channel = JetSchedulerChannel::<i64>::new();
+//RS         let parked = channel.clone();
+//RS         let control = JetTaskControl::new();
+//RS         let join = jet_scheduler_spawn_with_control(
+//RS             move || {
+//RS                 let _cleanup = CleanupMark(cleaned);
+//RS                 let _ = parked.receive();
+//RS                 continued.store(true, Ordering::Release);
+//RS             },
+//RS             control.clone(),
+//RS         );
+//RS         control.cancel();
+//RS         match join.rx.recv_timeout(Duration::from_secs(5)) {
+//RS             Ok(JetSchedulerResult::Cancelled) => {}
+//RS             _ => unreachable!("a cancelled task child must report Cancelled"),
+//RS         }
+//RS 
+//RS         assert_eq!(
+//RS             (
+//RS                 stream_cleaned.load(Ordering::Acquire),
+//RS                 stream_continued.load(Ordering::Acquire),
+//RS             ),
+//RS             (
+//RS                 task_cleaned.load(Ordering::Acquire),
+//RS                 task_continued.load(Ordering::Acquire),
+//RS             ),
+//RS             "a stream producer and a task child must be freed by one law"
+//RS         );
+//RS         assert!(stream_cleaned.load(Ordering::Acquire));
+//RS         assert!(!stream_continued.load(Ordering::Acquire));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn a_cancel_reached_from_cleanup_defers_instead_of_aborting() {
+//RS         // #2007: `JetStreamSender::drop` runs a channel send — a wait point —
+//RS         // from drop glue while its producer is already unwinding. A second
+//RS         // raise there is a double panic, which Rust turns into `panic in a
+//RS         // destructor during cleanup` and a process abort instead of an outcome.
+//RS         // The cleanup rule defers it: the wait point completes, the
+//RS         // notification is delivered, and the in-flight payload survives.
+//RS         struct SendFromCleanup(JetSchedulerSender<i64>, Arc<AtomicBool>);
+//RS         impl Drop for SendFromCleanup {
+//RS             fn drop(&mut self) {
+//RS                 self.1.store(self.0.send(7), Ordering::Release);
+//RS             }
+//RS         }
+//RS 
+//RS         let channel = JetSchedulerChannel::<i64>::new();
+//RS         let delivered = Arc::new(AtomicBool::new(false));
+//RS         let control = JetTaskControl::new();
+//RS         control.cancel();
+//RS         jet_scheduler_set_task_control(Some(control));
+//RS         jet_scheduler_task_panic_enter();
+//RS 
+//RS         let cleanup_delivered = Arc::clone(&delivered);
+//RS         let sender = channel.sender();
+//RS         let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+//RS             let _cleanup = SendFromCleanup(sender, cleanup_delivered);
+//RS             std::panic::panic_any("producer failure");
+//RS         }))
+//RS         .expect_err("the original unwind must reach the task frame");
+//RS         assert_eq!(
+//RS             payload.downcast_ref::<&'static str>().copied(),
+//RS             Some("producer failure"),
+//RS             "a cancel observed during cleanup must not replace the in-flight failure"
+//RS         );
+//RS         assert!(
+//RS             delivered.load(Ordering::Acquire),
+//RS             "a wait point reached from drop glue must complete instead of raising"
+//RS         );
+//RS         assert_eq!(channel.try_receive(), Some(7));
+//RS         assert!(
+//RS             !jet_scheduler_shielded(),
+//RS             "the cleanup deferral lasts exactly as long as the unwind"
+//RS         );
+//RS 
+//RS         // Deferred, not discarded: with no unwind in flight the same cancelled
+//RS         // wait point still unwinds preemptively (D-CANCELMODEL1=C).
+//RS         let raised = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS             channel.sender().send(8);
+//RS         }))
+//RS         .expect_err("a cancelled wait point must still unwind outside cleanup");
+//RS         assert!(
+//RS             jet_scheduler_is_cancel_unwind(raised.as_ref()),
+//RS             "the deferral must not change which payload a live wait point raises"
+//RS         );
+//RS         assert_eq!(channel.try_receive(), None);
+//RS 
+//RS         jet_scheduler_task_panic_leave();
+//RS         jet_scheduler_set_task_control(None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stream_producer_failure_still_completes_consumer() {
+//RS         let (sender, mut consumer) = jet_stream::<i64>();
+//RS         let producer = std::thread::spawn(move || {
+//RS             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS                 assert!(sender.send_stream(1));
+//RS                 panic!("producer failure");
+//RS             }));
+//RS             if result.is_err() {
+//RS                 sender.fail();
+//RS             }
+//RS         });
+//RS 
+//RS         assert_eq!(consumer.pull(), Some(1));
+//RS         assert_eq!(consumer.pull(), None);
+//RS         assert!(consumer.failed());
+//RS         drop(consumer);
+//RS         producer.join().unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn spawned_deadline_keeps_its_rendered_diagnostic() {
+//RS         let join = jet_scheduler_spawn(|| -> i64 {
+//RS             std::panic::panic_any(JetDeadlineUnwind {
+//RS                 rendered: "deadline detail".to_string(),
+//RS             })
+//RS         });
+//RS         match join.rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+//RS             JetSchedulerResult::Deadline(rendered) => {
+//RS                 assert_eq!(rendered, "deadline detail");
+//RS             }
+//RS             _ => unreachable!("spawned deadline must stay distinct from a task panic"),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn zero_capacity_channel_clamps_to_a_buffer_of_one() {
+//RS         // I9: `channel<T>(0)` must mean the same thing under the JIT as
+//RS         // under the shipped AOT prelude, whose `bounded()` clamps with
+//RS         // `capacity.max(1)`. Capacity is a memory/backpressure bound, not a
+//RS         // rendezvous handshake; no zero-capacity semantics are ratified.
+//RS         let channel = JetSchedulerChannel::bounded(0);
+//RS         let sender = channel.sender();
+//RS         let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+//RS         let worker = std::thread::spawn(move || {
+//RS             assert!(sender.send(7));
+//RS             done_tx.send(()).unwrap();
+//RS         });
+//RS         // A capacity-1 buffer accepts the first send without a receiver.
+//RS         done_rx
+//RS             .recv_timeout(std::time::Duration::from_secs(1))
+//RS             .unwrap();
+//RS         assert_eq!(channel.receive(), Some(7));
+//RS         worker.join().unwrap();
+//RS     }
+//RS 
+//RS     fn ready_entries_in_reverse_completion_order(
+//RS     ) -> Vec<(JetSchedulerJoin<i64>, Arc<JetTaskControl>)> {
+//RS         let (slow_tx, slow_rx) = std::sync::mpsc::sync_channel(1);
+//RS         let (fast_tx, fast_rx) = std::sync::mpsc::sync_channel(1);
+//RS         fast_tx.send(JetSchedulerResult::Value(42)).unwrap();
+//RS         slow_tx.send(JetSchedulerResult::Value(7)).unwrap();
+//RS 
+//RS         let fast_order = Arc::new(OnceLock::new());
+//RS         fast_order.set(0).unwrap();
+//RS         let slow_order = Arc::new(OnceLock::new());
+//RS         slow_order.set(1).unwrap();
+//RS 
+//RS         vec![
+//RS             (
+//RS                 JetSchedulerJoin {
+//RS                     rx: slow_rx,
+//RS                     pending: std::sync::Mutex::new(None),
+//RS                     completion_order: slow_order,
+//RS                     completion_wait: ParkSlot::new(),
+//RS                     identity: "scheduler-host-slow".to_string(),
+//RS                 },
+//RS                 JetTaskControl::new(),
+//RS             ),
+//RS             (
+//RS                 JetSchedulerJoin {
+//RS                     rx: fast_rx,
+//RS                     pending: std::sync::Mutex::new(None),
+//RS                     completion_order: fast_order,
+//RS                     completion_wait: ParkSlot::new(),
+//RS                     identity: "scheduler-host-fast".to_string(),
+//RS                 },
+//RS                 JetTaskControl::new(),
+//RS             ),
+//RS         ]
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn race_uses_completion_order_when_results_are_already_ready() {
+//RS         assert_eq!(
+//RS             jet_scheduler_race(ready_entries_in_reverse_completion_order()).unwrap(),
+//RS             42
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn any_uses_completion_order_when_results_are_already_ready() {
+//RS         assert_eq!(
+//RS             jet_scheduler_any(ready_entries_in_reverse_completion_order()).unwrap(),
+//RS             42
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn timed_select_returns_the_timer_arm_value() {
+//RS         let channel = JetSchedulerChannel::<i64>::new();
+//RS         assert_eq!(
+//RS             jet_scheduler_select_int_channels_timed(&[channel], vec![(0, 99)]),
+//RS             99
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn timed_select_preserves_a_non_int_payload() {
+//RS         let channel = JetSchedulerChannel::<String>::new();
+//RS         assert_eq!(
+//RS             jet_scheduler_select_int_channels_timed(&[channel], vec![(0, "generic".into())]),
+//RS             "generic"
+//RS         );
+//RS     }
+//RS 
+//RS     // Tower #126 scale guard. Drives `n` tasks against a capacity-1 channel so
+//RS     // every send hits backpressure and must PARK until the receiver drains it.
+//RS     // Deterministic (no rustc, no wall-clock thresholds) and it fails on the three
+//RS     // audited failure modes:
+//RS     //   * lost wake / deadlock  → the watchdog trips instead of hanging forever,
+//RS     //   * busy-wait             → zero real condvar blocks recorded,
+//RS     //   * waiter leak           → send/recv waiter vectors are not drained.
+//RS     fn run_backpressure_scale(n: i64) {
+//RS         let handle = std::thread::spawn(move || {
+//RS             let before = jet_scheduler_metric_park_blocks();
+//RS             let channel = JetSchedulerChannel::<i64>::bounded(1);
+//RS             for _ in 0..n {
+//RS                 let sender = channel.sender();
+//RS                 let _ = jet_scheduler_spawn(move || {
+//RS                     sender.send(1);
+//RS                 });
+//RS             }
+//RS             let mut total = 0i64;
+//RS             for _ in 0..n {
+//RS                 total += channel
+//RS                     .receive()
+//RS                     .expect("channel closed before all sends drained");
+//RS             }
+//RS             jet_scheduler_drain();
+//RS             let blocks = jet_scheduler_metric_park_blocks().saturating_sub(before);
+//RS             let inner = channel.select_inner();
+//RS             let st = inner.state.lock().unwrap();
+//RS             (total, blocks, st.send_waiters.len(), st.recv_waiters.len())
+//RS         });
+//RS 
+//RS         let start = Instant::now();
+//RS         let budget = Duration::from_secs(120);
+//RS         while !handle.is_finished() {
+//RS             assert!(
+//RS                 start.elapsed() < budget,
+//RS                 "scale workload hung: a park never woke (lost-wake / deadlock)"
+//RS             );
+//RS             std::thread::sleep(Duration::from_millis(20));
+//RS         }
+//RS         let (total, blocks, send_leak, recv_leak) = handle.join().expect("scale worker panicked");
+//RS 
+//RS         assert_eq!(total, n, "every task's message must be delivered exactly once");
+//RS         assert!(
+//RS             blocks > 0,
+//RS             "no task ever blocked on a park condvar under capacity-1 backpressure — \
+//RS              the scheduler is busy-waiting, not parking"
+//RS         );
+//RS         assert_eq!(
+//RS             send_leak, 0,
+//RS             "send waiters leaked after drain (unbounded growth)"
+//RS         );
+//RS         assert_eq!(
+//RS             recv_leak, 0,
+//RS             "recv waiters leaked after drain (unbounded growth)"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn scale_10k_tasks_park_under_backpressure() {
+//RS         run_backpressure_scale(10_000);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     #[ignore = "local 100k parked-task scale proof; run with --ignored"]
+//RS     fn scale_100k_tasks_park_under_backpressure() {
+//RS         run_backpressure_scale(100_000);
+//RS     }
+//RS 
+//RS     // Tower #126: prove pause/cancel are real control over a *running* task —
+//RS     // they actually park/unblock it at its wait point, not merely flip a flag a
+//RS     // `trace()` can read.
+//RS 
+//RS     #[test]
+//RS     fn pause_holds_a_running_task_at_its_wait_point_until_resume() {
+//RS         use std::sync::atomic::AtomicUsize;
+//RS         let control = JetTaskControl::new();
+//RS         let ready = JetSchedulerChannel::<i64>::new();
+//RS         let ready_tx = ready.sender();
+//RS         let work = JetSchedulerChannel::<i64>::new();
+//RS         let work_tx = work.sender();
+//RS         let progressed = Arc::new(AtomicUsize::new(0));
+//RS 
+//RS         let task_ready = ready_tx;
+//RS         let task_work = work;
+//RS         let task_progressed = progressed.clone();
+//RS         let _join = jet_scheduler_spawn_with_control(
+//RS             move || {
+//RS                 task_ready.send(1);
+//RS                 // Parks here until a value arrives AND the task is not paused.
+//RS                 let _ = task_work.receive();
+//RS                 task_progressed.fetch_add(1, Ordering::SeqCst);
+//RS             },
+//RS             control.clone(),
+//RS         );
+//RS 
+//RS         // Task has reached the wait point.
+//RS         assert_eq!(ready.receive(), Some(1));
+//RS         control.pause();
+//RS         // Make the value available: a flag-only "pause" would let the task run.
+//RS         work_tx.send(42);
+//RS         std::thread::sleep(Duration::from_millis(60));
+//RS         assert_eq!(
+//RS             progressed.load(Ordering::SeqCst),
+//RS             0,
+//RS             "paused task consumed the value and ran past its wait point — pause is not real"
+//RS         );
+//RS 
+//RS         control.resume();
+//RS         let start = Instant::now();
+//RS         while progressed.load(Ordering::SeqCst) == 0 {
+//RS             assert!(
+//RS                 start.elapsed() < Duration::from_secs(5),
+//RS                 "resumed task never progressed"
+//RS             );
+//RS             std::thread::yield_now();
+//RS         }
+//RS         jet_scheduler_drain();
+//RS     }
+//RS 
+//RS     // D-CANCELMODEL1=C: cancel is PREEMPTIVE — a cancelled parked task unwinds at
+//RS     // its wait point, runs Drop-backed cleanup, never runs the code after the wait,
+//RS     // and its result becomes Cancelled (not a delivered value).
+//RS     #[test]
+//RS     fn cancel_unwinds_a_parked_task_runs_drop_and_reports_cancelled() {
+//RS         use std::sync::atomic::AtomicUsize;
+//RS 
+//RS         // 0 = untouched, 1 = ran past the wait (BUG), 2 = Drop ran during unwind.
+//RS         struct DropMark(Arc<AtomicUsize>);
+//RS         impl Drop for DropMark {
+//RS             fn drop(&mut self) {
+//RS                 // Only record the unwind cleanup; a normal return sets 1 first.
+//RS                 let _ = self
+//RS                     .0
+//RS                     .compare_exchange(0, 2, Ordering::SeqCst, Ordering::SeqCst);
+//RS             }
+//RS         }
+//RS 
+//RS         let control = JetTaskControl::new();
+//RS         let ready = JetSchedulerChannel::<i64>::new();
+//RS         let ready_tx = ready.sender();
+//RS         // Nothing is ever sent on `work`: only cancellation can free the task.
+//RS         let work = JetSchedulerChannel::<i64>::new();
+//RS         let outcome = Arc::new(AtomicUsize::new(0));
+//RS 
+//RS         let task_ready = ready_tx;
+//RS         let task_work = work;
+//RS         let task_outcome = outcome.clone();
+//RS         let join = jet_scheduler_spawn_with_control(
+//RS             move || {
+//RS                 let _mark = DropMark(task_outcome.clone());
+//RS                 task_ready.send(1);
+//RS                 // Cancel unwinds HERE; the store below must never run.
+//RS                 let _got = task_work.receive();
+//RS                 task_outcome.store(1, Ordering::SeqCst);
+//RS                 0i64
+//RS             },
+//RS             control.clone(),
+//RS         );
+//RS 
+//RS         assert_eq!(ready.receive(), Some(1));
+//RS         // Task is now parked forever unless cancel actually unwinds it.
+//RS         control.cancel();
+//RS         let start = Instant::now();
+//RS         loop {
+//RS             match join.try_recv() {
+//RS                 Some(JetSchedulerResult::Cancelled) => break,
+//RS                 Some(other) => panic!(
+//RS                     "cancelled task must report Cancelled, got {}",
+//RS                     match other {
+//RS                         JetSchedulerResult::Value(_) => "Value",
+//RS                         JetSchedulerResult::Panicked(_) => "Panicked",
+//RS                         JetSchedulerResult::Cancelled => unreachable!(),
+//RS                         JetSchedulerResult::Deadline(_) => "Deadline",
+//RS                     }
+//RS                 ),
+//RS                 None => {
+//RS                     assert!(
+//RS                         start.elapsed() < Duration::from_secs(5),
+//RS                         "cancel did not unwind the parked task"
+//RS                     );
+//RS                     std::thread::yield_now();
+//RS                 }
+//RS             }
+//RS         }
+//RS         assert_eq!(
+//RS             outcome.load(Ordering::SeqCst),
+//RS             2,
+//RS             "unwind must run Drop cleanup and skip the code after the wait point"
+//RS         );
+//RS         jet_scheduler_drain();
+//RS     }
+//RS 
+//RS     // D-CANCELMODEL1=C shield: a cancel that arrives while a shielded region runs
+//RS     // is DEFERRED — wait points inside complete normally, and the unwind lands only
+//RS     // when the region exits. Runtime machinery is syntax-free until D-SHIELDNAME1.
+//RS     #[test]
+//RS     fn shielded_region_defers_cancel_until_it_exits() {
+//RS         use std::sync::atomic::AtomicUsize;
+//RS         let control = JetTaskControl::new();
+//RS         let ready = JetSchedulerChannel::<i64>::new();
+//RS         let ready_tx = ready.sender();
+//RS         // A value IS delivered so the shielded recv can complete despite the cancel.
+//RS         let work = JetSchedulerChannel::<i64>::new();
+//RS         let work_tx = work.sender();
+//RS         // 0 none, bit1 = shielded recv completed, then unwind => Cancelled result.
+//RS         let stage = Arc::new(AtomicUsize::new(0));
+//RS 
+//RS         let task_ready = ready_tx;
+//RS         let task_work = work;
+//RS         let task_stage = stage.clone();
+//RS         let join = jet_scheduler_spawn_with_control(
+//RS             move || {
+//RS                 task_ready.send(1);
+//RS                 jet_scheduler_shield_enter();
+//RS                 // Wait point INSIDE the shield: must NOT unwind on the pending cancel.
+//RS                 let got = task_work.receive();
+//RS                 if got == Some(42) {
+//RS                     task_stage.store(1, Ordering::SeqCst);
+//RS                 }
+//RS                 jet_scheduler_shield_leave(); // pending cancel unwinds HERE
+//RS                 task_stage.store(9, Ordering::SeqCst); // must never run
+//RS                 0i64
+//RS             },
+//RS             control.clone(),
+//RS         );
+//RS 
+//RS         assert_eq!(ready.receive(), Some(1));
+//RS         // Cancel while the task is parked inside the shield.
+//RS         control.cancel();
+//RS         // Give cancel a moment; the shielded recv must still be waiting for its value.
+//RS         std::thread::sleep(Duration::from_millis(30));
+//RS         assert_eq!(
+//RS             stage.load(Ordering::SeqCst),
+//RS             0,
+//RS             "shielded recv completed or unwound before its value arrived"
+//RS         );
+//RS         work_tx.send(42); // completes the shielded recv
+//RS         let start = Instant::now();
+//RS         loop {
+//RS             match join.try_recv() {
+//RS                 Some(JetSchedulerResult::Cancelled) => break,
+//RS                 Some(_) => panic!("shielded task must end Cancelled after the region"),
+//RS                 None => {
+//RS                     assert!(
+//RS                         start.elapsed() < Duration::from_secs(5),
+//RS                         "deferred cancel never landed at shield exit"
+//RS                     );
+//RS                     std::thread::yield_now();
+//RS                 }
+//RS             }
+//RS         }
+//RS         assert_eq!(
+//RS             stage.load(Ordering::SeqCst),
+//RS             1,
+//RS             "shielded recv must complete (stage 1) and the post-shield code must not run"
+//RS         );
+//RS         jet_scheduler_drain();
+//RS     }
+//RS 
+//RS     // D-CANCELMODEL1=C shield/deadline interaction: a deadline that closes while
+//RS     // shielded is likewise deferred to region exit (E3003 unwind), staying
+//RS     // consistent with the cancel case.
+//RS     #[test]
+//RS     fn shield_defers_deadline_until_it_exits() {
+//RS         jet_scheduler_set_task_control(Some(JetTaskControl::new()));
+//RS         jet_scheduler_task_panic_enter();
+//RS         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS             jet_scheduler_shield_enter();
+//RS             // Deadline is exceeded, but we are shielded: no unwind here.
+//RS             TEST_DEADLINE_EXCEEDED.with(|d| d.set(true));
+//RS             let slot = ParkSlot::new();
+//RS             slot.wake();
+//RS             jet_scheduler_yield("shielded wait", &slot, Some(Duration::from_millis(1)));
+//RS             // Reaching here proves the shielded wait did not unwind on the deadline.
+//RS             jet_scheduler_shield_leave(); // deadline unwinds HERE
+//RS             "no-unwind"
+//RS         }));
+//RS         TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+//RS         jet_scheduler_set_task_control(None);
+//RS         jet_scheduler_task_panic_leave();
+//RS         assert!(
+//RS             result.is_err(),
+//RS             "deadline deferred by the shield must unwind when the region exits"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn non_unwind_wait_boundary_returns_typed_deadline_for_yield() {
+//RS         jet_scheduler_set_task_control(Some(JetTaskControl::new()));
+//RS         jet_scheduler_task_panic_enter();
+//RS         TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.set(true));
+//RS         let result = jet_scheduler_wait_without_unwind(jet_scheduler_yield_now);
+//RS         TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.set(false));
+//RS         jet_scheduler_set_task_control(None);
+//RS         jet_scheduler_task_panic_leave();
+//RS         match result {
+//RS             JetSchedulerWait::Deadline(rendered) => {
+//RS                 assert_eq!(rendered, jet_std::jet_task_deadline("task yield").render());
+//RS             }
+//RS             _ => panic!("yield deadline must cross native boundary as typed status"),
+//RS         }
+//RS     }
+//RS 
+//RS     // Exercise the exact RAII shape emitted by Codegen/TIR/emit/statements.rs.
+//RS     // These helpers deliberately do not call `_leave` from test bodies: Drop is
+//RS     // what must cover every control-flow and unwind edge.
+//RS     struct EmittedShieldGuard<F: FnOnce()>(Option<F>);
+//RS     impl<F: FnOnce()> Drop for EmittedShieldGuard<F> {
+//RS         fn drop(&mut self) {
+//RS             if let Some(f) = self.0.take() {
+//RS                 f();
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     macro_rules! emitted_shield {
+//RS         ($body:block) => {{
+//RS             jet_scheduler_shield_enter();
+//RS             let _shield_guard = EmittedShieldGuard(Some(|| jet_scheduler_shield_leave()));
+//RS             $body
+//RS         }};
+//RS     }
+//RS 
+//RS     fn emitted_early_return() -> i64 {
+//RS         emitted_shield!({ return 17 });
+//RS     }
+//RS 
+//RS     fn emitted_try_exit() -> Result<i64, &'static str> {
+//RS         emitted_shield!({ Err("stop")? });
+//RS         Ok(1)
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn emitted_shield_guard_covers_control_flow_unwind_and_reset_matrix() {
+//RS         // Outside a task/catch frame, even an expired ambient deadline is inert.
+//RS         TEST_DEADLINE_EXCEEDED.with(|d| d.set(true));
+//RS         emitted_shield!({ assert!(!jet_scheduler_shielded()) });
+//RS         TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+//RS 
+//RS         jet_scheduler_task_panic_enter();
+//RS         jet_scheduler_set_task_control(Some(JetTaskControl::new()));
+//RS 
+//RS         emitted_shield!({
+//RS             assert!(jet_scheduler_shielded());
+//RS             emitted_shield!({ assert!(jet_scheduler_shielded()) });
+//RS             assert!(jet_scheduler_shielded());
+//RS         });
+//RS         assert!(!jet_scheduler_shielded(), "nested guards must balance depth");
+//RS         assert_eq!(emitted_early_return(), 17);
+//RS         assert!(!jet_scheduler_shielded(), "return must drop the guard");
+//RS         assert_eq!(emitted_try_exit(), Err("stop"));
+//RS         assert!(!jet_scheduler_shielded(), "? must drop the guard");
+//RS 
+//RS         // A body panic wins over pending cancel/deadline: guard decrements depth
+//RS         // but must not begin a second panic while unwinding.
+//RS         for pending_deadline in [false, true] {
+//RS             let control = JetTaskControl::new();
+//RS             control.cancel();
+//RS             jet_scheduler_set_task_control(Some(control));
+//RS             TEST_DEADLINE_EXCEEDED.with(|d| d.set(pending_deadline));
+//RS             let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS                 emitted_shield!({ panic!("body panic") });
+//RS             }));
+//RS             let text = panic
+//RS                 .expect_err("body must panic")
+//RS                 .downcast::<&'static str>()
+//RS                 .map(|s| *s)
+//RS                 .unwrap_or("");
+//RS             assert_eq!(text, "body panic");
+//RS             assert!(!jet_scheduler_shielded(), "panic must reset shield depth");
+//RS             TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+//RS         }
+//RS 
+//RS         // When both become pending during a normal body, deadline has priority.
+//RS         let control = JetTaskControl::new();
+//RS         control.cancel();
+//RS         jet_scheduler_set_task_control(Some(control));
+//RS         let both = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS             emitted_shield!({ TEST_DEADLINE_EXCEEDED.with(|d| d.set(true)) });
+//RS         }));
+//RS         let payload = both.expect_err("pending deadline must land at guard drop");
+//RS         let text = payload
+//RS             .downcast_ref::<JetDeadlineUnwind>()
+//RS             .map(|deadline| deadline.rendered.as_str())
+//RS             .unwrap_or("");
+//RS         assert_eq!(text, jet_std::jet_task_deadline("shield exit").render());
+//RS         assert!(!jet_scheduler_shielded());
+//RS         TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+//RS 
+//RS         // Same worker/thread can run a later task with clean depth and control.
+//RS         jet_scheduler_set_task_control(Some(JetTaskControl::new()));
+//RS         emitted_shield!({ assert!(jet_scheduler_shielded()) });
+//RS         assert!(!jet_scheduler_shielded(), "subsequent task must start clean");
+//RS         jet_scheduler_set_task_control(None);
+//RS         jet_scheduler_task_panic_leave();
+//RS     }
+//RS }
+// END-PORT-PENDING 0542 crates/jet-codegen/src/SchedulerHost.rs:1-918
+

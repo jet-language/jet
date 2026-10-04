@@ -1,0 +1,129 @@
+// MIROptimization.rs:1553-1753,1902-2002,2490-2543. Context consists of
+// canonical row indexes; no function graph is copied into a verifier carrier.
+fn mir_native_index_route_arity(kind: MIRIndexKind) -> Int Never! {
+    if kind == { .List | .FixedListProof | .Lane -> 4 .Map -> 8 .Pool -> 6 }
+}
+fn mir_native_verify_panic_context(context: MIRPanicContext, function: MIRFunction, locals: [U64:Int], span: Span) MIRLegalityError! {
+    if context.function.len() == 0 -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "panic context has no function", span: span})
+    seen := [U64:Bool]{}
+    loop row in context.locals {
+        if row.name.len() == 0 -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "panic context has an unnamed local", span: span})
+        if seen.get(row.local.value) != None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "duplicate panic context local MirLocalId({row.local.value})", span: span})
+        seen[row.local.value] = true
+        if locals.get(row.local.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "panic context local MirLocalId({row.local.value})", span: span})
+    }
+    return
+}
+fn mir_native_verify_place(place: MIRPlace, function: MIRFunction, index: MIRNativeFunctionIndex, program: MIRProgram, tables: MIRNativeProgramIndex) MIRLegalityError! {
+    mir_native_verify_type(place.ty, place.span, function.id)
+    if place.base == {
+        .Local(local) -> {
+            if index.locals.get(local.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "local MirLocalId({local.value})", span: place.span})
+        }
+        .Parameter(value) | .Capture(value) | .Temporary(value) -> {
+            if index.definitions.values.get(value.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "place base MirValueId({value.value})", span: place.span})
+        }
+        .Static(name) -> {
+            if name.len() == 0 -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "empty static place", span: place.span})
+        }
+    }
+    loop projection in place.projections {
+        if projection == {
+            .Field(field, span) -> {
+                if tables.fields.get(field.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "field projection MirFieldId({field.value})", span: span})
+                if span.start > span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function.id), span: span})
+            }
+            .Index(kind, value, call, write_call, location, context, span) -> {
+                if index.definitions.values.get(value.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "index MirValueId({value.value})", span: span})
+                position :: tables.prelude.get(call.value) ?? return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "Prelude call MirPreludeCallId({call.value})", span: span})
+                route :: program.prelude_calls[position]
+                arity :: mir_native_index_route_arity(kind)
+                if route.signature.arity != arity || route.signature.max_arity != arity || route.abi != .Value -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "index projection route MirPreludeCallId({call.value}) must use Value ABI with arity {arity}", span: span})
+                if (place.access == .Write) != (write_call != None) -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "index write accessor disagrees with place access", span: span})
+                if write_call == .Val(write_call) {
+                    position :: tables.prelude.get(write_call.value) ?? return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "Prelude write call MirPreludeCallId({write_call.value})", span: span})
+                    route :: program.prelude_calls[position]
+                    setter :: if kind == { .List | .FixedListProof | .Lane -> 5 .Map -> 3 .Pool -> 7 }
+                    if route.signature.arity != setter || route.signature.max_arity != setter || route.abi != .Value -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "index setter route MirPreludeCallId({write_call.value}) must use Value ABI with arity {setter}", span: span})
+                }
+                requires_context :: kind == .Pool || kind == .Map
+                if requires_context != (context != None) -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "index projection context disagrees with index kind", span: span})
+                if context == .Val(context) -> mir_native_verify_panic_context(context, function, index.locals, span)
+                if tables.sources.get(location.file.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "source file MirSourceFileId({location.file.value})", span: span})
+                if span.start > span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function.id), span: span})
+            }
+            .Deref(span) | .Payload(_, span) -> {
+                if span.start > span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function.id), span: span})
+            }
+            .Range(range, location, span) -> {
+                if index.definitions.values.get(range.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "range window MirValueId({range.value})", span: span})
+                if tables.sources.get(location.file.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "source file MirSourceFileId({location.file.value})", span: span})
+                if span.start > span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function.id), span: span})
+            }
+        }
+    }
+    return
+}
+fn mir_native_move_place_has_unowned_projection(place: MIRPlace) -> Bool Never! {
+    if mir_native_type_is_copy(place.ty) -> return false
+    loop projection in place.projections {
+        if projection == .Index(.Lane, _, _, _, _, _, _) | .Deref(_) -> return true
+    }
+    false
+}
+fn mir_native_call_args_mutably_borrow_place(args: [MIRCallArg], place: MIRPlaceID) -> Bool Never! {
+    loop arg in args { if arg.place == Val(place) && arg.access == .Write -> return true }
+    false
+}
+fn mir_native_operation_mutably_borrows_place(operation: MIROperation, place: MIRPlaceID) -> Bool Never! {
+    if operation == {
+        .AddressOf(candidate, .Write) -> candidate == place
+        .Call(_, args, _) | .CoreCall(_, _, args, _, _, _) | .IndirectCall(_, args, _) -> mir_native_call_args_mutably_borrow_place(args, place)
+        .Semantic(semantic) -> {
+            if semantic == {
+                .StaticPreludeCall(_, args, _, _) | .HardwareCall(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) -> mir_native_call_args_mutably_borrow_place(args, place)
+                .BuiltinMethod(_, _, .Val(candidate), _, _) -> candidate == place
+                else -> false
+            }
+        }
+        else -> false
+    }
+}
+fn mir_native_verify_static_mutable_place(operation: MIROperation, place: MIRPlace, function: MIRFunctionID, span: Span) MIRLegalityError! {
+    if place.base == .Static(_) {
+        if mir_native_operation_mutably_borrows_place(operation, place.id) -> return Err(MIRLegalityError.InvalidReference{function: function, subject: "mutable borrow of static place MirPlaceId({place.id.value}) cannot escape its storage cell", span: span})
+        if operation == .WritePlace(_, _) | .ReplacePlace(_, _) {
+            if place.projections.len() != 0 -> return Err(MIRLegalityError.InvalidReference{function: function, subject: "static write place MirPlaceId({place.id.value}) must assign the whole static root", span: span})
+        }
+    }
+    return
+}
+fn mir_native_verify_move_place_projection(operation: MIROperation, function: MIRFunction, index: MIRNativeFunctionIndex, span: Span) MIRLegalityError! {
+    if operation == .MovePlace(place) {
+        position :: index.definitions.places.get(place.value) ?? return
+        row :: function.places[position]
+        if mir_native_move_place_has_unowned_projection(row) -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "non-Copy MovePlace MirPlaceId({row.id.value}) has a Lane or dereference projection without an owning representation", span: span})
+    }
+    return
+}
+fn mir_native_verify_call_args(args: [MIRCallArg], function: MIRFunction, index: MIRNativeFunctionIndex, types: [U64:Bool], operation_span: Span) MIRLegalityError! {
+    loop arg in args {
+        if arg.span.start > arg.span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function.id), span: arg.span})
+        if arg.access == .Write && arg.place == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "write call argument MirValueId({arg.value.value}) has no checked place", span: operation_span})
+        source :: mir_native_definition_type(function, index, arg.value) ?? return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "call argument value MirValueId({arg.value.value})", span: operation_span})
+        ownership :: mir_native_definition_ownership(function, index, arg.value)
+        if arg.label == Val("") -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "empty call label", span: operation_span})
+        if arg.fn_coercion == .Val(coercion) -> mir_native_verify_type(coercion.ty, arg.span, function.id)
+        if arg.widen_to_union == .Val(coercion) {
+            if types.get(coercion.union.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "union widening type MirTypeId({coercion.union.value})", span: operation_span})
+            if coercion.variant.len() == 0 -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "union widening has an empty variant", span: operation_span})
+        }
+        if arg.box_as_trait == .Val(ty) {
+            if types.get(ty.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "trait boxing type MirTypeId({ty.value})", span: operation_span})
+        }
+        boxes_trait :: arg.box_as_trait != None && source.kind != .TraitObject(_)
+        consumes :: arg.fn_coercion != None || arg.widen_to_union != None || boxes_trait
+        if consumes && ownership.mode != .Copy && arg.access != .Move && !arg.implicit_clone && !arg.shared_auto_clone && !arg.owned_last_use -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "coercion consumes non-Copy argument MirValueId({arg.value.value})", span: operation_span})
+    }
+    return
+}

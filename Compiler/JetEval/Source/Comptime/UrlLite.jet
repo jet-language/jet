@@ -1,0 +1,132 @@
+// PORT-PENDING 0601 crates-jet-comptime-src-comptime-syncjetstd-module-group: crates/jet-comptime/src/Comptime/UrlLite.rs:1-128
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! CtValue adapters over the canonical Prelude URL/MIME kernel.
+//RS 
+//RS mod url_kernel {
+//RS     #[derive(Clone, Debug)]
+//RS     pub struct JetURLParts {
+//RS         pub scheme: String,
+//RS         pub username: Option<String>,
+//RS         pub password: Option<String>,
+//RS         pub host: Option<String>,
+//RS         pub port: Option<i64>,
+//RS         pub path: String,
+//RS         pub query: Vec<(String, String)>,
+//RS         pub fragment: Option<String>,
+//RS         pub typed_host: Option<Vec<(String, bool)>>,
+//RS         pub typed_path: Option<Vec<(String, bool)>>,
+//RS     }
+//RS 
+//RS     #[derive(Clone, Debug, PartialEq)]
+//RS     pub struct JetMIME {
+//RS         pub top: String,
+//RS         pub sub: String,
+//RS         pub parameters: Vec<Vec<String>>,
+//RS     }
+//RS 
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
+//RS 
+//RS     pub(super) fn render_query(pairs: &[(String, String)]) -> String {
+//RS         jet_url_render_query(pairs)
+//RS     }
+//RS 
+//RS     pub(super) fn percent_encode(value: &str) -> String {
+//RS         jet_url_percent_encode(value, false)
+//RS     }
+//RS 
+//RS     pub(super) fn percent_decode(value: &str) -> Result<String, String> {
+//RS         jet_url_percent_decode_str(value)
+//RS     }
+//RS }
+//RS 
+//RS pub(super) type UrlParts = url_kernel::JetURLParts;
+//RS /// The one MIME value the HTTP message kernel names as `jet_std::JetMIME`.
+//RS pub(crate) use url_kernel::JetMIME;
+//RS 
+//RS /// Re-enter the canonical URL kernel from the `core.net.url.URL` record fields
+//RS /// without reparsing or normalizing; the kernel owns the projection.
+//RS #[allow(clippy::too_many_arguments)]
+//RS pub(super) fn from_core_record(
+//RS     scheme: &str,
+//RS     user_text: &str,
+//RS     password_text: &str,
+//RS     host: &str,
+//RS     port: i64,
+//RS     port_explicit: bool,
+//RS     path: &str,
+//RS     query: &str,
+//RS     fragment: &str,
+//RS ) -> UrlParts {
+//RS     url_kernel::JetURLParts::from_core_record(
+//RS         scheme,
+//RS         user_text,
+//RS         password_text,
+//RS         host,
+//RS         port,
+//RS         port_explicit,
+//RS         path,
+//RS         query,
+//RS         fragment,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn parse(input: &str) -> Result<UrlParts, String> {
+//RS     url_kernel::JetURLParts::parse(&input.to_string())
+//RS }
+//RS 
+//RS pub(super) fn validate_typed_url_literal(literals: &[String]) -> Result<(), String> {
+//RS     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+//RS     url_kernel::jet_validate_typed_url_literal(&literal_refs)
+//RS }
+//RS 
+//RS pub(super) fn typed_url_literal(literals: &[String], holes: &[String]) -> UrlParts {
+//RS     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+//RS     url_kernel::jet_typed_url_parts_literal(&literal_refs, holes.to_vec())
+//RS }
+//RS 
+//RS pub(super) fn from_parts(
+//RS     scheme: &str,
+//RS     host: &str,
+//RS     path: &str,
+//RS     query: &[Vec<String>],
+//RS     fragment: &str,
+//RS ) -> Result<UrlParts, String> {
+//RS     url_kernel::JetURLParts::from_parts(
+//RS         &scheme.to_string(),
+//RS         &host.to_string(),
+//RS         &path.to_string(),
+//RS         &query.to_vec(),
+//RS         &fragment.to_string(),
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn file(path: &str) -> UrlParts {
+//RS     url_kernel::JetURLParts::file(&path.to_string())
+//RS }
+//RS 
+//RS pub(super) fn data(mime_rendered: &str, text: &str) -> UrlParts {
+//RS     let mime = url_kernel::JetMIME::parse(&mime_rendered.to_string()).unwrap_or_else(|_| {
+//RS         url_kernel::JetMIME {
+//RS             top: mime_rendered.to_string(),
+//RS             sub: String::new(),
+//RS             parameters: Vec::new(),
+//RS         }
+//RS     });
+//RS     url_kernel::JetURLParts::data(&mime, &text.to_string())
+//RS }
+//RS 
+//RS pub(super) fn url_render_query(pairs: &[(String, String)]) -> String {
+//RS     url_kernel::render_query(pairs)
+//RS }
+//RS 
+//RS pub(crate) fn url_percent_encode(value: &str, path: bool) -> String {
+//RS     url_kernel::jet_url_percent_encode(value, path)
+//RS }
+//RS 
+//RS pub(crate) fn url_percent_decode_str(value: &str) -> Result<String, String> {
+//RS     url_kernel::percent_decode(value)
+//RS }
+// END-PORT-PENDING 0601 crates/jet-comptime/src/Comptime/UrlLite.rs:1-128
+

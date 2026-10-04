@@ -1,0 +1,25 @@
+// Rust Publish/API.rs:33-64: project the already loaded/checked entry.
+use jet_foundation.[Item]
+
+// `items` is the actual entry surface retained by the Loader/Driver caller.
+// Registration lowers inline modules destructively, so it cannot stand in for
+// authored nesting. All inputs are read borrows; no graph/program is copied.
+// Span identities connect the retained entry to checked lowered declarations.
+pub fn sema_public_api_from_checked(items: [Item], registration: SemaRegistrationGraph, checked: SemaGraphResult, package: String, version: String) -> APIProjection Never! {
+    module_index :: registration.module_rows.get(registration.entry_module_identity) ?? panic("API projection requires the registered entry module")
+    checked_index := -1
+    loop (index, checked_module) in checked.modules {
+        if checked_module.module_identity == registration.entry_module_identity {
+            checked_index = index
+            break
+        }
+    }
+    if checked_index < 0 -> panic("API projection requires checked entry module facts")
+    positions := [String:Int]{}
+    loop (index, function) in checked.modules[checked_index].functions {
+        if !positions.has_key(function.name) -> positions[function.name] = index
+        span_key :: "@{function.source_span.start}:{function.source_span.end}"
+        if !positions.has_key(span_key) -> positions[span_key] = index
+    }
+    api_project_items(items, package, version, checked.modules[checked_index].functions, positions, None, None, module_index, checked.names, true, true)
+}

@@ -1,0 +1,43 @@
+// PORT-PENDING 0091 crates-jet-foundation-src-reflection-module-group: crates/jet-foundation/src/Reflection.rs:1-39
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-METAREFLECT1: the registered field rows shared by every reflection view.
+//RS //!
+//RS //! Comptime `T.reflect().fields` and runtime `reflect.of(x).fields` are two
+//RS //! projections of these rows.  The runtime projection erases compile-time
+//RS //! metadata, but it never rebuilds a second field list from a string fallback.
+//RS 
+//RS use crate::Diagnostics::Span;
+//RS use crate::AST::{Field, Marker, StructDef, Type};
+//RS 
+//RS /// One registered user-type field as seen by the reflection model.
+//RS #[derive(Debug, Clone)]
+//RS pub struct ReflectionField {
+//RS     pub name: String,
+//RS     pub ty: Type,
+//RS     pub markers: Vec<Marker>,
+//RS     pub is_pub: bool,
+//RS     pub span: Span,
+//RS }
+//RS 
+//RS impl ReflectionField {
+//RS     /// Copy the canonical field facts once from the AST registration row.
+//RS     pub fn from_field(field: &Field) -> Self {
+//RS         Self {
+//RS             name: field.name.clone(),
+//RS             ty: field.ty.clone(),
+//RS             markers: field.serde_markers.clone(),
+//RS             is_pub: field.is_pub,
+//RS             span: field.name_span,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Read the one registered field-row list for a struct in declaration order.
+//RS pub fn fields(definition: &StructDef) -> Vec<ReflectionField> {
+//RS     definition
+//RS         .reflection_fields()
+//RS         .map(ReflectionField::from_field)
+//RS         .collect()
+//RS }
+// END-PORT-PENDING 0091 crates/jet-foundation/src/Reflection.rs:1-39
+

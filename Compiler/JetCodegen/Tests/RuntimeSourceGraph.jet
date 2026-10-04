@@ -1,0 +1,232 @@
+// Real runtime-source helper witnesses. Full mod.rs producer originals remain
+// owed until its canonical compiled Prelude/Core graph is published; these
+// tests do not replace that complete assembled-closure acceptance.
+use jet_foundation.[foundation_embedded_core, mir_sha256_new, mir_sha256_update, mir_sha256_finish, strip_test_items, Type, TypeTupleField, Measure]
+
+#Test("runtime source cached marker bytes are exact") {
+    assert_eq(JET_CACHED_RUNTIME_BEGIN, "// jet:cached-runtime-begin\n")
+    assert_eq(JET_CACHED_RUNTIME_END, "// jet:cached-runtime-end\n")
+    assert_eq(JET_CACHED_CORE_BEGIN, "// jet:cached-core-begin\n")
+    assert_eq(JET_CACHED_CORE_END, "// jet:cached-core-end\n")
+}
+
+#Test("runtime absent FFI retains the original no-op installation hook") {
+    assert_eq(jet_runtime_ffi_reporter_source(None), "fn jet_ffi_install_reporter() {{}}\n\n")
+}
+
+#Test("runtime source identity fields frame UTF8 byte lengths as BE-u64") {
+    hash := mir_sha256_new()
+    value :: "é".bytes()
+    jet_runtime_hash_identity_field(&hash, value.view(0..<value.len()))
+    expected := mir_sha256_new()
+    framed :: [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{2}, U8{195}, U8{169}}
+    mir_sha256_update(&expected, framed.view(0..<framed.len()))
+    assert_eq(mir_sha256_finish(^hash), mir_sha256_finish(^expected))
+}
+
+#Test("runtime Core source selection uses canonical rows and public-owner private parts") {
+    sources :: jet_runtime_core_sources(foundation_embedded_core())
+    usages :: [String]{"core.text::count", "__core_source::core.text", "core.text::count", "__core_intrinsic::core.math"}
+    selected :: jet_runtime_select_core_sources(sources, usages.view(0..<usages.len()))
+    assert_eq(selected.public_rows.len(), 1)
+    assert_eq(sources.public_rows[selected.public_rows[0]].module_name, "core.text")
+    assert_eq(selected.private_rows.len(), 1)
+    assert_eq(sources.private_rows[selected.private_rows[0]].owner, "core.text")
+    assert_eq(sources.private_rows[selected.private_rows[0]].module_name, "__core_text_string")
+    assert_eq(selected.usages.len(), 3)
+    isolated :: [String]{"__core_text_string"}
+    assert_eq(jet_runtime_select_core_sources(sources, isolated.view(0..<isolated.len())).private_rows.len(), 0)
+    dotted :: [String]{"core.text.child::count"}
+    assert_eq(jet_runtime_select_core_sources(sources, dotted.view(0..<dotted.len())).private_rows.len(), 0)
+}
+
+#Test("runtime source fingerprint preserves registry order and sorted unique usage") {
+    sources :: jet_runtime_core_sources(foundation_embedded_core())
+    left :: [String]{"core.text::count", "core.math::abs", "core.text::count"}
+    right :: [String]{"core.math::abs", "core.text::count"}
+    assert_eq(jet_runtime_source_closure_fingerprint(sources, left.view(0..<left.len())), jet_runtime_source_closure_fingerprint(sources, right.view(0..<right.len())))
+    selection :: jet_runtime_select_core_sources(sources, left.view(0..<left.len()))
+    assert_eq(selection.public_rows.len(), 2)
+    assert(selection.public_rows[0] < selection.public_rows[1])
+    other :: [String]{"core.files::read"}
+    assert(jet_runtime_source_closure_fingerprint(sources, left.view(0..<left.len())) != jet_runtime_source_closure_fingerprint(sources, other.view(0..<other.len())))
+}
+
+#Test("runtime source identity hashes private and public unstripped bodies") {
+    sources := jet_runtime_core_sources(foundation_embedded_core())
+    usages :: [String]{"core.text::count"}
+    initial :: jet_runtime_source_closure_fingerprint(sources, usages.view(0..<usages.len()))
+    selected :: jet_runtime_select_core_sources(sources, usages.view(0..<usages.len()))
+    public_index :: selected.public_rows[0]
+    sources.public_rows[public_index].source += "\n// public identity mutation\n"
+    public_changed :: jet_runtime_source_closure_fingerprint(sources, usages.view(0..<usages.len()))
+    assert(initial != public_changed)
+    private_index :: selected.private_rows[0]
+    sources.private_rows[private_index].source += "\n#[cfg(test)]\nfn identity_only_test() {{}}\n"
+    private_changed :: jet_runtime_source_closure_fingerprint(sources, usages.view(0..<usages.len()))
+    assert(public_changed != private_changed)
+    assert(!strip_test_items(sources.private_rows[private_index].source).contains("fn identity_only_test"))
+    // Identity is intentionally sensitive to tests, despite deterministic
+    // stripping making the appended item disappear from emitted source.
+}
+
+#Test("runtime closure identity includes whole UTF8 emitted body before test stripping") {
+    sources :: jet_runtime_core_sources(foundation_embedded_core())
+    usages :: [String]{"core.files::read"}
+    body :: "fn jet_visible() {{}} // é\n"
+    identity :: jet_runtime_corelib_emission_identity(body, sources, usages.view(0..<usages.len()))
+    assert(identity.contains("len={body.bytes().len()}"))
+    changed :: "{body}#[cfg(test)]\nfn hidden_test() {{}}\n"
+    assert_eq(strip_test_items(changed), body)
+    assert(identity != jet_runtime_corelib_emission_identity(changed, sources, usages.view(0..<usages.len())))
+}
+
+#Test("runtime internal and archive-only demand avoids the full Core kernel") {
+    hidden :: [String]{"__core_source::core.text", "__core_intrinsic::core.math"}
+    archive :: [String]{"core.archive::compress"}
+    child :: [String]{"core.archive.gzip::compress"}
+    files :: [String]{"core.files::read"}
+    assert(!jet_runtime_core_needs_embedded_runtime(hidden.view(0..<hidden.len())))
+    assert(!jet_runtime_core_needs_embedded_runtime(archive.view(0..<archive.len())))
+    assert(jet_runtime_core_needs_embedded_runtime(child.view(0..<child.len())))
+    assert(jet_runtime_core_needs_embedded_runtime(files.view(0..<files.len())))
+}
+
+fn runtime_source_test_key(name: String) -> JetCoreEmissionFingerprintKey Never! {
+    JetCoreEmissionFingerprintKey{used_core: [String]{name}, active_os: "linux", edition: "2027", force_corelib: false, test_harness: false, release_inspect: None, devtools_panel_code: true, devtools_stream_code: true}
+}
+
+#Test("runtime bounded fingerprint cache evicts the least key not least recently used") {
+    cache := jet_runtime_fingerprint_cache()
+    loop index in 0..<32 {
+        key := runtime_source_test_key("item-{index}")
+        jet_runtime_core_fingerprint_cache_insert(&cache, ^key, "fingerprint-{index}")
+    }
+    assert_eq(cache.entries.len(), 32)
+    assert_eq(jet_runtime_core_fingerprint_cache_get(cache, runtime_source_test_key("item-0")), Val("fingerprint-0"))
+    first := runtime_source_test_key("!")
+    jet_runtime_core_fingerprint_cache_insert(&cache, ^first, "first")
+    assert_eq(cache.entries.len(), 32)
+    assert_eq(jet_runtime_core_fingerprint_cache_get(cache, runtime_source_test_key("item-0")), None)
+    assert_eq(jet_runtime_core_fingerprint_cache_get(cache, runtime_source_test_key("!")), Val("first"))
+    assert_eq(jet_runtime_core_fingerprint_cache_get(cache, runtime_source_test_key("item-1")), Val("fingerprint-1"))
+    last := runtime_source_test_key("~")
+    jet_runtime_core_fingerprint_cache_insert(&cache, ^last, "last")
+    assert_eq(jet_runtime_core_fingerprint_cache_get(cache, runtime_source_test_key("!")), None)
+    assert_eq(cache.entries.len(), 32)
+}
+
+#Test("runtime cache key ordering retains all original fields and None-before-Some") {
+    base :: runtime_source_test_key("core.files::read")
+    os := runtime_source_test_key("core.files::read")
+    os.active_os = "windows"
+    assert(jet_runtime_core_fingerprint_key_order(base, os) < 0)
+    edition := runtime_source_test_key("core.files::read")
+    edition.edition = "2028"
+    assert(jet_runtime_core_fingerprint_key_order(base, edition) < 0)
+    force := runtime_source_test_key("core.files::read")
+    force.force_corelib = true
+    assert(jet_runtime_core_fingerprint_key_order(base, force) < 0)
+    harness := runtime_source_test_key("core.files::read")
+    harness.test_harness = true
+    assert(jet_runtime_core_fingerprint_key_order(base, harness) < 0)
+    release := runtime_source_test_key("core.files::read")
+    release.release_inspect = Val("")
+    assert(jet_runtime_core_fingerprint_key_order(base, release) < 0)
+    panel := runtime_source_test_key("core.files::read")
+    panel.devtools_panel_code = false
+    assert(jet_runtime_core_fingerprint_key_order(panel, base) < 0)
+    stream := runtime_source_test_key("core.files::read")
+    stream.devtools_stream_code = false
+    assert(jet_runtime_core_fingerprint_key_order(stream, base) < 0)
+}
+
+#Test("runtime flat import split retains Unicode headers and later public reexports") {
+    source :: "// é\n\u{2003}\n#![allow(dead_code)]\nuse std::time::Duration;\nuse std::collections::{{\n    BTreeMap, BTreeSet\n}};\nfn jet_kept() {{}}\npub use nested::Kept;\n"
+    split :: jet_runtime_split_leading_top_level_uses(source)
+    assert_eq(split.imports.len(), 2)
+    assert_eq(split.body, "// é\n\u{2003}\n#![allow(dead_code)]\nfn jet_kept() {{}}\npub use nested::Kept;\n")
+}
+
+#Test("runtime flat import merge normalizes std reexports and suppresses root selfimports") {
+    sources :: [String]{"use core::time::Duration;\nuse jet_foundation::Outcome::JetErr;\nfn a() {{}}\n", "use std::time::Duration;\nuse std::collections::{{BTreeMap, BTreeSet}};\nuse jet_foundation::Outcome::JetErr as Alias;\nfn b() {{}}\n"}
+    merged :: jet_runtime_merge_flat_prelude_imports(sources.view(0..<sources.len()))
+    assert_eq(merged, "use core::time::Duration;\nuse jet_foundation::Outcome::JetErr as Alias;\nuse std::collections::{{BTreeMap, BTreeSet}};\n\n")
+}
+
+#Test("runtime scheduler and Source Shared region stripping keep unmatched tails") {
+    shared :: "α\n    // jet:source-shared-interop-jit-begin\nremoved\n    // jet:source-shared-interop-jit-end\nω\n"
+    assert_eq(jet_runtime_strip_source_shared_interop_jit(shared), "α\nω\n")
+    unmatched :: "α\n    // jet:source-shared-interop-jit-begin\nretain\n"
+    assert_eq(jet_runtime_strip_source_shared_interop_jit(unmatched), unmatched)
+    scheduler :: "α// jet:scheduler-native-epoll-beginremoved// jet:scheduler-native-epoll-endω"
+    assert_eq(jet_runtime_strip_scheduler_region(scheduler, "epoll"), "αω")
+    assert_eq(jet_runtime_strip_scheduler_region(scheduler, "kqueue"), scheduler)
+}
+
+#Test("runtime scheduler native and portable assembly uses one merged import parser") {
+    scheduler :: "use std::time::Duration;\n#[cfg(feature = \"jet_native_io\")]\nfn jet_base() {{}}\n// jet:scheduler-native-epoll-begin\nfn native_only() {{}}\n// jet:scheduler-native-epoll-end\n"
+    stream :: "use core::time::Duration;\nfn jet_stream() {{}}\n"
+    flat :: [String]{scheduler, stream}
+    native :: jet_runtime_assemble_scheduler_prelude(scheduler, stream, flat.view(0..<flat.len()), true)
+    portable :: jet_runtime_assemble_scheduler_prelude(scheduler, stream, flat.view(0..<flat.len()), false)
+    assert(native.starts_with("use std::time::Duration;\n\n"))
+    assert(native.contains("#[cfg(all())]"))
+    assert(native.contains("fn native_only()"))
+    assert(!portable.contains("fn native_only()"))
+    assert(portable.contains("fn jet_stream()"))
+}
+
+#Test("runtime native scheduler demand checks module boundaries and GTK checks selected OS") {
+    native :: [String]{"core.files::read"}
+    false_prefix :: [String]{"core.filesystem::read"}
+    gtk :: [String]{"core.ui::gtk_backend"}
+    dotted :: [String]{"core.ui.gtk_backend"}
+    assert(jet_runtime_uses_native_scheduler(native.view(0..<native.len())))
+    assert(!jet_runtime_uses_native_scheduler(false_prefix.view(0..<false_prefix.len())))
+    assert(jet_runtime_uses_gtk_backend(gtk.view(0..<gtk.len()), "linux"))
+    assert(!jet_runtime_uses_gtk_backend(gtk.view(0..<gtk.len()), "macos"))
+    assert(!jet_runtime_uses_gtk_backend(dotted.view(0..<dotted.len()), "linux"))
+}
+
+#Test("runtime package edition retains Rust u16 parsing boundaries") {
+    assert_eq(jet_runtime_package_edition_source("2026"), "const __JET_PACKAGE_EDITION: u16 = 2026;\n\n")
+    assert_eq(jet_runtime_package_edition_source("+0002026"), "const __JET_PACKAGE_EDITION: u16 = 2026;\n\n")
+    assert_eq(jet_runtime_package_edition_source("65535"), "const __JET_PACKAGE_EDITION: u16 = 65535;\n\n")
+    invalid :: [String]{"", "+", "65536", " 2026", "-1", "2_026", "٢٠٢٦"}
+    loop text in invalid -> assert_eq(jet_runtime_package_edition_source(text), "const __JET_PACKAGE_EDITION: u16 = 2027;\n\n")
+}
+
+#Test("runtime Stream forcing follows nested canonical type declarations") {
+    stream :: Type.Apply("Stream", [Type]{Type.Int})
+    assert(jet_runtime_type_uses_stream(stream))
+    assert(jet_runtime_type_uses_stream(Type.List(stream)))
+    assert(jet_runtime_type_uses_stream(Type.Shared(Type.Option(stream))))
+    assert(jet_runtime_type_uses_stream(Type.Map(Type.String, None, Type.Result(Type.Bool, stream))))
+    assert(jet_runtime_type_uses_stream(Type.Tuple([TypeTupleField]{TypeTupleField{name: "nested", ty: stream}})))
+    assert(jet_runtime_type_uses_stream(Type.FixedList(stream, Measure.Literal("Size", 2))))
+    assert(jet_runtime_type_uses_stream(Type.Union([Type]{Type.Int, stream})))
+    assert(jet_runtime_type_uses_stream(Type.Fn([Type]{Type.Int}, Val(stream), None, None, None, None)))
+    assert(!jet_runtime_type_uses_stream(Type.Named("Stream")))
+    assert(!jet_runtime_type_uses_stream(Type.Apply("Other", [Type]{Type.Int})))
+}
+
+#Test("runtime source cursor splice and native host marker projection preserve exact source") {
+    assert_eq(jet_runtime_expand_collections_cursor("beforeinclude!(\"LoopCursor.rs\");after", "cursor"), "beforecursorafter")
+    assert_eq(jet_runtime_embedded_devtools_source("before// JET_HOST_DEVTOOLS_NATIVE_BEGINnative// JET_HOST_DEVTOOLS_NATIVE_ENDafter"), "beforeafter")
+    outcome :: "before// JET_HOST_RUNTIME_STOP_BEGINstop// JET_HOST_RUNTIME_STOP_ENDbetween// JET_HOST_RUNTIME_SENTRY_BEGINsentry// JET_HOST_RUNTIME_SENTRY_ENDafter"
+    assert_eq(jet_runtime_embedded_outcome_source(outcome, "projected"), "beforebetweenafterprojected")
+    assert_eq(jet_runtime_portable_embedded_hardware_source("portable// JET_EMBEDDED_HARDWARE_HOST_BEGIN:host"), "portable")
+}
+
+#Test("runtime emitted-source nested query and data imports use complete supplied kernels") {
+    assert_eq(jet_runtime_data_query_prelude_source("before\n    include!(\"../../Core/SqlQuery.rs\");\nafter", "kernel\n"), "before\nkernel\nafter")
+    assert_eq(jet_runtime_data_plot_prelude_body("use std::collections::{{BTreeMap, BTreeSet}};\nuse std::sync::Arc as JetDataPlotArc;\nbody"), "body")
+    traits :: jet_runtime_cached_runtime_traits_source()
+    assert(traits.contains("pub enum __jet_Ordering"))
+    assert(traits.contains("pub enum __jet_RemoveBy"))
+    assert(traits.contains("pub trait __jet_Close"))
+    assert(traits.contains("fn next(&mut self) -> JetOutcome<Self::__jet_Item, JetAbsent>"))
+    assert(traits.contains("impl __jet_Equatable for f64"))
+    assert(!jet_runtime_comparable_primitive_source().contains("impl __jet_Comparable for f64"))
+}

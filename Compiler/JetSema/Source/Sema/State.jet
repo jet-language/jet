@@ -1,0 +1,228 @@
+// Rust Sema/State.rs:60-544,1196-1441. All metadata erases before codegen.
+use jet_foundation.[Diagnostic, Expr, FactKind, FactRegistry, Func, Item, NamedSpan, Span, StateGraph, StructDef, TextEdit, Type, diagnostic_from_registry, diagnostic_registry_row, diagnostic_with_edit, fact_registry_declare, fact_registry_declare_state, fact_registry_from_state_items, fact_registry_get, fact_registry_set_state_graph]
+
+pub struct SemaStateTransitionRow { pub from: String?, pub to: String }
+pub struct SemaStateTable {
+    pub requires: [String:String]
+    pub transitions: [String:SemaStateTransitionRow]
+    pub fn_requires: [String:String]
+    pub fn_transitions: [String:SemaStateTransitionRow]
+    pub entry_ctors: [String:String]
+    pub declared: [String:[NamedSpan]]
+}
+pub fn sema_state_table_new(registry: &FactRegistry) -> SemaStateTable Never! {
+    table := SemaStateTable{requires: [String:String]{}, transitions: [String:SemaStateTransitionRow]{}, fn_requires: [String:String]{}, fn_transitions: [String:SemaStateTransitionRow]{}, entry_ctors: [String:String]{}, declared: [String:[NamedSpan]]{}}
+    fact_registry_declare(&registry, FactKind.State, "Task.State", [String]{"Running", "Joined", "Detached"})
+    table.transitions["Task::join"] = SemaStateTransitionRow{from: Val("Running"), to: "Joined"}
+    table.transitions["Task::detach"] = SemaStateTransitionRow{from: Val("Running"), to: "Detached"}
+    table
+}
+pub fn sema_state_declaration_facts(items: [Item]) -> FactRegistry Never! { fact_registry_from_state_items(items) }
+pub fn sema_state_for_owner(owner: String?, state: String) -> String Never! {
+    if owner == .Val(name) -> return sema_state_graph_leaf(name, state) ?? ~state
+    ~state
+}
+fn sema_state_nominal_type(ty: Type) -> String? {
+    if ty == {
+        .Named(name) | .Apply(name, _) -> Val(name)
+        .Tagged(_, inner) -> sema_state_nominal_type(inner)
+        else -> None
+    }
+}
+fn sema_state_free_owner(func: Func, entry: Bool) -> String? {
+    parameter := String?{None}
+    returned := String?{None}
+    if func.params.len() > 0 -> parameter = sema_state_nominal_type(func.params[0].ty)
+    if func.return_type == .Val(ty) -> returned = sema_state_nominal_type(ty)
+    if entry {
+        if returned != None -> return returned
+        return parameter
+    }
+    if parameter != None -> return parameter
+    returned
+}
+fn sema_state_add_method(table: &SemaStateTable, owner: String, func: Func) Never! {
+    key :: "{owner}::{func.name}"
+    if func.state_requires == .Val(required) {
+        if sema_state_graph_leaf(owner, required.name) == .Val(leaf) -> table.requires[key] = leaf
+    }
+    if func.state_transition == .Val(transition) {
+        from := String?{None}
+        if transition.from == .Val(raw) -> from = sema_state_graph_leaf(owner, raw)
+        to :: sema_state_graph_leaf(owner, transition.to) ?? return
+        table.transitions[key] = SemaStateTransitionRow{from: from, to: to}
+        if from == None -> table.entry_ctors[key] = to
+    }
+}
+fn sema_state_add_free(table: &SemaStateTable, func: Func) Never! {
+    if func.state_requires == .Val(required) -> table.fn_requires[func.name] = sema_state_for_owner(sema_state_free_owner(func, false), required.name)
+    if func.state_transition == .Val(transition) {
+        owner :: sema_state_free_owner(func, transition.from == None)
+        from := String?{None}
+        if transition.from == .Val(raw) -> from = Val(sema_state_for_owner(owner, raw))
+        table.fn_transitions[func.name] = SemaStateTransitionRow{from: from, to: sema_state_for_owner(owner, transition.to)}
+    }
+}
+fn sema_state_add_item(table: &SemaStateTable, item: Item, registry: &FactRegistry) Never! {
+    if item == {
+        .Func(func) -> sema_state_add_free(&table, func)
+        .Impl(implementation) -> loop method in implementation.methods -> sema_state_add_method(&table, implementation.type_name, method)
+        .Struct(definition) -> {
+            if definition.state == .Val(declaration) {
+                table.declared[definition.name] = declaration.states
+                members :: loop state in declaration.states -> state.name
+                fact_registry_declare_state(&registry, definition.name, members)
+            }
+            loop method in definition.methods -> sema_state_add_method(&table, definition.name, method)
+            loop block in definition.trait_impls { loop method in block.methods -> sema_state_add_method(&table, definition.name, method) }
+        }
+        .Enum(definition) -> loop method in definition.methods -> sema_state_add_method(&table, definition.name, method)
+        else -> {}
+    }
+}
+pub fn sema_state_add_items(table: &SemaStateTable, items: [Item], registry: &FactRegistry) Never! {
+    loop item in items -> sema_state_add_item(&table, item, &registry)
+}
+fn sema_state_row(code: String, span: Span, bindings: [String:String]) -> Diagnostic Never! {
+    row :: diagnostic_registry_row(code) ?? panic("unregistered state diagnostic")
+    what := row.what
+    why := row.why
+    fix := row.fix
+    loop (key, value) in bindings {
+        needle :: "{{{key}}}"
+        what = what.replace(needle, value)
+        why = why.replace(needle, value)
+        fix = fix.replace(needle, value)
+    }
+    diagnostic_from_registry(code, Val(span), what, why, fix)
+}
+pub fn sema_state_unknown(state: String, owner: String, candidates: [String], span: Span) -> Diagnostic Never! {
+    parts :: state.split(".").to_list()
+    name :: parts[parts.len() - 1]
+    best := String?{None}
+    best_distance := 3
+    ambiguous := false
+    loop candidate in candidates {
+        distance :: sema_taint_edit_distance(name, candidate)
+        if distance == 0 || distance > 2 -> next
+        if {
+            distance < best_distance -> {
+                best = Val(candidate)
+                best_distance = distance
+                ambiguous = false
+            }
+            distance == best_distance -> {
+                if best != Val(candidate) -> ambiguous = true
+            }
+            else -> {}
+        }
+    }
+    if ambiguous -> best = None
+    fix := "add `{state}` inside `struct {owner} {{ state {{ … }} }}`, or correct the spelling"
+    if best == .Val(candidate) -> fix = "did you mean `{candidate}`? Check the `struct {owner} {{ state {{ … }} }}` declaration for valid names"
+    diagnostic := sema_error("E0151", span, "`{state}` is not a declared state of `{owner}`", "typestate (D-STATE-HOME1=A): `struct {owner} {{ state {{ … }} }}` defines the valid state labels; `{state}` is not among them — a typo here would silently create a phantom state that no transition reaches", fix)
+    if best == .Val(candidate) -> diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: candidate})
+    diagnostic
+}
+fn sema_state_validate_marker(owner: String, state: String, span: Span, names: [String:Bool], diagnostics: &[Diagnostic]) Never! {
+    leaf :: sema_state_graph_leaf(owner, state)
+    if leaf == .Val(value) && names.get(value) != None -> return
+    candidate_name :: leaf ?? state
+    candidates := [String]{}
+    loop (name, _) in names { if sema_taint_edit_distance(candidate_name, name) <= 2 -> &candidates.push(name) }
+    &diagnostics.push(sema_state_unknown(state, owner, candidates, span))
+}
+fn sema_state_validate_methods(owner: String, methods: [SemaStateMethodFact], names: [String:Bool], diagnostics: &[Diagnostic]) Never! {
+    loop method in methods {
+        if method.requires == .Val(required) -> sema_state_validate_marker(owner, required.name, required.span, names, &diagnostics)
+        if method.transition == .Val(transition) {
+            if transition.from == .Val(from) -> sema_state_validate_marker(owner, from, transition.span, names, &diagnostics)
+            sema_state_validate_marker(owner, transition.to, transition.span, names, &diagnostics)
+        }
+    }
+}
+fn sema_state_validate_metadata(table: SemaStateTable, metadata: SemaStateMetadata, registry: &FactRegistry, diagnostics: &[Diagnostic]) Never! {
+    loop owner in metadata.declaration_order {
+        declaration :: metadata.declarations.get(owner) ?? next
+        declared :: table.declared.get(owner) ?? next
+        if declared.len() == 0 -> &diagnostics.push(sema_state_row("E0169", declaration.span, [String:String]{"type": owner}))
+        seen := [String:Bool]{}
+        spans := [String:Span]{}
+        members :: metadata.members.get(owner) ?? [String:Bool]{}
+        loop state in declared {
+            bindings :: [String:String]{"type": owner, "state": state.name}
+            if seen.get(state.name) != None -> &diagnostics.push(sema_state_row("E0166", state.span, bindings))
+            if seen.get(state.name) == None -> spans[state.name] = state.span
+            seen[state.name] = true
+            if members.get(state.name) != None -> &diagnostics.push(sema_state_row("E0167", state.span, bindings))
+        }
+        names := [String:Bool]{}
+        if fact_registry_get(registry, FactKind.State, "{owner}.State") == .Val(fact) {
+            loop name in fact.members -> names[name] = true
+        }
+        methods :: metadata.methods.get(owner) ?? [SemaStateMethodFact]{}
+        sema_state_validate_methods(owner, methods, names, &diagnostics)
+        graph :: sema_state_graph_for_declaration(declaration, methods)
+        loop node in graph.states {
+            if node.reachable != Val(false) -> next
+            span :: spans.get(node.name) ?? Span{start: 0, end: 0}
+            &diagnostics.push(sema_state_row("L0153", span, [String:String]{"type": owner, "state": node.name}))
+        }
+        fact_registry_set_state_graph(&registry, "{owner}.State", StateGraph{states: graph.states, transitions: graph.transitions})
+    }
+    loop (owner, methods) in metadata.methods {
+        if owner == "Task" || table.declared.get(owner) != None -> next
+        loop method in methods {
+            if method.requires != None || method.transition != None -> &diagnostics.push(sema_state_row("E0159", method.span, [String:String]{"type": owner}))
+        }
+    }
+}
+pub fn sema_state_validate_declarations(table: SemaStateTable, items: [Item], registry: &FactRegistry, diagnostics: &[Diagnostic]) Never! {
+    metadata := sema_state_metadata_new()
+    sema_state_metadata_add(&metadata, items)
+    sema_state_validate_metadata(table, metadata, &registry, &diagnostics)
+}
+// Registration, not display-name parsing, resolves checked callee IDs.
+pub struct SemaStateCallable { pub owner: String?, pub name: String }
+fn sema_state_callable_add(rows: &[String:SemaStateCallable], function: SemaRegistrationFunction, owner: String?) Never! {
+    rows[function.symbol.id.key] = SemaStateCallable{owner: owner, name: function.declaration.name}
+}
+pub fn sema_state_check_graph(registration: SemaRegistrationGraph, modules: [SemaGraphModuleResult], call_facts: [SemaCallSiteFact], registry: &FactRegistry, diagnostics: &[Diagnostic]) Never! {
+    table := sema_state_table_new(&registry)
+    metadata := sema_state_metadata_new()
+    symbols := [String:SemaStateCallable]{}
+    loop module in registration.modules {
+        loop item in module.program.items {
+            sema_state_metadata_add_item(&metadata, item)
+            sema_state_add_item(&table, item, &registry)
+        }
+        loop function in module.functions -> sema_state_callable_add(&symbols, function, None)
+        loop nominal in module.nominals { loop function in nominal.methods -> sema_state_callable_add(&symbols, function, Val(nominal.symbol.name)) }
+        loop implementation in module.impls { loop function in implementation.methods -> sema_state_callable_add(&symbols, function, Val(implementation.target_type_name)) }
+    }
+    sema_state_validate_metadata(table, metadata, &registry, &diagnostics)
+    // One context owns the collected table for the whole bundle. Function
+    // checks reset only their small flow plane, never copy these maps/ASTs.
+    context := sema_state_context(^table, [Int:SemaStateCallable]{}, [Diagnostic]{})
+    checked_positions := [String:Int]{}
+    loop (index, module) in modules -> checked_positions[module.module_identity] = index
+    loop module in registration.modules {
+        index :: checked_positions.get(module.module_identity) ?? next
+        context.existing = [Diagnostic]{}
+        loop diagnostic in modules[index].diagnostics {
+            if diagnostic.code == "E0307" -> &context.existing.push(diagnostic)
+        }
+        calls := [Int:SemaStateCallable]{}
+        // Module-local spans may overlap; only that module's retained checked
+        // call rows participate. The aggregate is passed for publication ABI,
+        // not used as an unqualified span lookup across files.
+        loop call in modules[index].call_facts {
+            callee :: call.callee ?? next
+            target :: symbols.get(callee.key) ?? next
+            calls[call.span.start] = target
+        }
+        context.calls = ^calls
+        sema_state_check_items(&context, module.program.items)
+    }
+    &diagnostics.extend(context.diagnostics)
+}

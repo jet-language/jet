@@ -73,54 +73,57 @@ pub struct BuiltinNumericSource {
     pub source: String
 }
 
-fn builtin_static(owner: String, method: String, parameters: [Type], return_type: Type, lowering: BuiltinStaticLowering) -> BuiltinStaticRow Never! {
+// Rust Collections::builtin_static_return rows own their checked metadata.
+// Consume construction inputs, including lowering, rather than cloning a
+// borrowed operation into the owned row (the tools S16 E0120 witness).
+fn builtin_static(owner: ^String, method: ^String, parameters: ^[Type], return_type: ^Type, lowering: ^BuiltinStaticLowering) -> BuiltinStaticRow Never! {
     BuiltinStaticRow{
         module_name: "",
-        owner: owner,
-        method: method,
+        owner: ^owner,
+        method: ^method,
         type_params: [String]{},
         owner_type_params: 0,
         owner_rule: BuiltinStaticOwnerRule.Inferred,
-        parameters: parameters,
+        parameters: ^parameters,
         parameter_convention: AccessConvention.Read,
-        return_type: return_type,
-        lowering: lowering,
+        return_type: ^return_type,
+        lowering: ^lowering,
         arity_code: "E0104",
     }
 }
 
-fn builtin_static_in(module_name: String, row: ^BuiltinStaticRow) -> BuiltinStaticRow Never! {
-    updated := row
-    updated.module_name = module_name
-    updated
+fn builtin_static_in(module_name: ^String, row: ^BuiltinStaticRow) -> BuiltinStaticRow Never! {
+    updated := ^row
+    updated.module_name = ^module_name
+    ^updated
 }
 
-fn builtin_static_generic(row: ^BuiltinStaticRow, type_params: [String], owner_type_params: Int) -> BuiltinStaticRow Never! {
-    updated := row
-    updated.type_params = type_params
+fn builtin_static_generic(row: ^BuiltinStaticRow, type_params: ^[String], owner_type_params: Int) -> BuiltinStaticRow Never! {
+    updated := ^row
+    updated.type_params = ^type_params
     updated.owner_type_params = owner_type_params
-    updated
+    ^updated
 }
 
 fn builtin_static_atomic(row: ^BuiltinStaticRow) -> BuiltinStaticRow Never! {
-    updated := row
+    updated := ^row
     updated.type_params = [String]{"T"}
     updated.owner_type_params = 1
     updated.owner_rule = BuiltinStaticOwnerRule.AtomicScalar
-    updated
+    ^updated
 }
 
-fn builtin_static_arity_code(row: ^BuiltinStaticRow, arity_code: String) -> BuiltinStaticRow Never! {
-    updated := row
-    updated.arity_code = arity_code
-    updated
+fn builtin_static_arity_code(row: ^BuiltinStaticRow, arity_code: ^String) -> BuiltinStaticRow Never! {
+    updated := ^row
+    updated.arity_code = ^arity_code
+    ^updated
 }
 
 // The row owns its arguments: each one moves into the constructed value.
 fn builtin_static_owned(row: ^BuiltinStaticRow) -> BuiltinStaticRow Never! {
-    updated := row
+    updated := ^row
     updated.parameter_convention = AccessConvention.Move
-    updated
+    ^updated
 }
 
 fn builtin_static_u8_list() -> Type Never! {
@@ -132,20 +135,20 @@ fn builtin_static_owner_t() -> [TPreludeArg] Never! {
     [TPreludeArg]{TPreludeArg.Jet{ty: Type.Named{name: "T"}}}
 }
 
-fn builtin_static_crypto_secret(name: String) -> Type Never! {
-    Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: Type.Named{name: name}}
+fn builtin_static_crypto_secret(name: ^String) -> Type Never! {
+    Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: Type.Named{name: ^name}}
 }
 
-fn builtin_static_crypto(module_name: String, owner: String, method: String, parameters: [Type], return_type: Type, member: String) -> BuiltinStaticRow Never! {
-    builtin_static_in(module_name, builtin_static(owner, method, parameters, return_type, BuiltinStaticLowering.CoreCall{module_name: "core.crypto", member: member}))
+fn builtin_static_crypto(module_name: ^String, owner: ^String, method: ^String, parameters: ^[Type], return_type: ^Type, member: ^String) -> BuiltinStaticRow Never! {
+    builtin_static_in(^module_name, builtin_static(^owner, ^method, ^parameters, ^return_type, BuiltinStaticLowering.CoreCall{module_name: "core.crypto", member: ^member}))
 }
 
-fn builtin_static_duration(method: String, unit: String) -> BuiltinStaticRow Never! {
-    builtin_static("Duration", method, [Type]{Type.Union{members: [Type]{Type.Int, Type.Float}}}, Type.Result{ok: Type.Named{name: "Duration"}, err: Type.Named{name: "RangeError"}}, BuiltinStaticLowering.DurationNew{unit: unit})
+fn builtin_static_duration(method: ^String, unit: ^String) -> BuiltinStaticRow Never! {
+    builtin_static("Duration", ^method, [Type]{Type.Union{members: [Type]{Type.Int, Type.Float}}}, Type.Result{ok: Type.Named{name: "Duration"}, err: Type.Named{name: "RangeError"}}, BuiltinStaticLowering.DurationNew{unit: ^unit})
 }
 
-fn builtin_static_precise(owner: String, method: String, source: Type, target: Type, type_name: String, function: String) -> BuiltinStaticRow Never! {
-    builtin_static(owner, method, [Type]{source}, target, BuiltinStaticLowering.Precise{type_name: type_name, function: function})
+fn builtin_static_precise(owner: ^String, method: ^String, source: ^Type, target: ^Type, type_name: ^String, function: ^String) -> BuiltinStaticRow Never! {
+    builtin_static(^owner, ^method, [Type]{^source}, ^target, BuiltinStaticLowering.Precise{type_name: ^type_name, function: ^function})
 }
 
 BUILTIN_STATIC_ROWS :: prep { [BuiltinStaticRow]{
@@ -184,18 +187,6 @@ BUILTIN_STATIC_ROWS :: prep { [BuiltinStaticRow]{
     builtin_static_generic(builtin_static("Map", "new", [Type]{}, Type.Map{key: Type.Named{name: "K"}, key_span: None, value: Type.Named{name: "V"}}, BuiltinStaticLowering.EmptyMap), [String]{"K", "V"}, 2),
     builtin_static_generic(builtin_static("Map", "from_keys", [Type]{Type.List{element: Type.Named{name: "K"}}, Type.Named{name: "V"}}, Type.Map{key: Type.Named{name: "K"}, key_span: None, value: Type.Named{name: "V"}}, BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.MapFromKeys}), [String]{"K", "V"}, 2),
     builtin_static_generic(builtin_static("Map", "fromkeys", [Type]{Type.List{element: Type.Named{name: "K"}}, Type.Named{name: "V"}}, Type.Map{key: Type.Named{name: "K"}, key_span: None, value: Type.Named{name: "V"}}, BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.MapFromKeys}), [String]{"K", "V"}, 2),
-    builtin_static_precise("Decimal", "from_int", Type.Int, Type.Named{name: "Decimal"}, "Decimal", "from_int"),
-    builtin_static_precise("Decimal", "from_float", Type.Float, Type.Named{name: "Decimal"}, "Decimal", "from_float"),
-    builtin_static_precise("Decimal", "from_fraction", Type.Named{name: "Fraction"}, Type.Named{name: "Decimal"}, "Decimal", "from_fraction"),
-    builtin_static_precise("Fraction", "from_int", Type.Int, Type.Named{name: "Fraction"}, "Fraction", "from_int"),
-    builtin_static_precise("Fraction", "from_float", Type.Float, Type.Named{name: "Fraction"}, "Fraction", "from_float"),
-    builtin_static_precise("Fraction", "from_decimal", Type.Named{name: "Decimal"}, Type.Named{name: "Fraction"}, "Fraction", "from_decimal"),
-    builtin_static_precise("Float", "from_decimal", Type.Named{name: "Decimal"}, Type.Float, "Decimal", "to_float"),
-    builtin_static_precise("Float", "from_fraction", Type.Named{name: "Fraction"}, Type.Float, "Fraction", "to_float"),
-    builtin_static_precise("F64", "from_decimal", Type.Named{name: "Decimal"}, Type.Float, "Decimal", "to_float"),
-    builtin_static_precise("F64", "from_fraction", Type.Named{name: "Fraction"}, Type.Float, "Fraction", "to_float"),
-    builtin_static_precise("Int", "from_decimal", Type.Named{name: "Decimal"}, Type.Int, "Decimal", "to_int"),
-    builtin_static_precise("Int", "from_fraction", Type.Named{name: "Fraction"}, Type.Int, "Fraction", "to_int"),
     builtin_static_arity_code(builtin_static_in("core.compute.solve", builtin_static_generic(builtin_static("Solver", "new", [Type]{Type.Named{name: "T"}}, Type.Named{name: "Solver"}, BuiltinStaticLowering.ArgumentHandle{operation: THandleOp.SolverNew}), [String]{"T"}, 0)), "E0101"),
     builtin_static_crypto("core.crypto", "WrappedVaultKey", "from_bytes", [Type]{builtin_static_u8_list()}, Type.Result{ok: Type.Named{name: "WrappedVaultKey"}, err: Type.Named{name: "KeyWrapError"}}, "__vault_wrapped_from_bytes"),
     builtin_static_crypto("core.crypto", "KeyUnlock", "Recipient", [Type]{builtin_static_crypto_secret("X25519SecretKey")}, Type.Named{name: "KeyUnlock"}, "__vault_unlock_recipient"),
@@ -238,6 +229,16 @@ BUILTIN_NUMERIC_SOURCES :: prep { [BuiltinNumericSource]{
     BuiltinNumericSource{method: "from_fraction", source: "Fraction"}
 } }
 
+// Rust Syntax::NUMERIC_CONVERSION_SOURCES and numeric owner names. These are
+// projections of the checker/lowering tables, including precise source suffixes.
+pub fn numeric_conversion_sources() -> [BuiltinNumericSource] Never! {
+    ~BUILTIN_NUMERIC_SOURCES
+}
+
+pub fn numeric_conversion_catalog_targets() -> [BuiltinNumericKind] Never! {
+    ~BUILTIN_NUMERIC_KINDS
+}
+
 fn builtin_numeric_kind(name: String) -> BuiltinNumericKind? {
     loop kind in BUILTIN_NUMERIC_KINDS {
         if kind.name == name -> return Val(kind)
@@ -254,22 +255,9 @@ fn builtin_numeric_source(method: String) -> String? {
 
 // The target's value range contains every source value.
 fn builtin_numeric_widening(source: BuiltinNumericKind, target: BuiltinNumericKind) -> Bool Never! {
-    if source.signed && !target.signed -> return false
-    if !source.signed && target.signed -> return source.bits < target.bits
-    source.bits <= target.bits
+    numeric_conversion_widening(source.signed, source.bits, target.signed, target.bits)
 }
 
-fn builtin_numeric_return(source: BuiltinNumericKind, target: BuiltinNumericKind) -> Type Never! {
-    checked := Type.Result{ok: target.ty, err: Type.String}
-    if source.name == "Int" && target.fixed -> return checked
-    if source.fixed && target.name == "Int" -> return target.ty
-    if !source.integer && target.integer -> return checked
-    if source.fixed && target.fixed {
-        return if builtin_numeric_widening(source, target) -> target.ty else -> checked
-    }
-    if source.ty == Type.Float && target.ty == Type.Float32 -> return checked
-    target.ty
-}
 
 fn builtin_numeric_host_kind(kind: BuiltinNumericKind) -> Int Never! {
     offset := if kind.signed -> 0 else -> 4
@@ -314,10 +302,18 @@ fn builtin_numeric_operation(source: BuiltinNumericKind, target: BuiltinNumericK
 }
 
 fn builtin_static_numeric_row(owner: String, method: String) -> BuiltinStaticRow? {
-    target :: builtin_numeric_kind(owner) ?? return None
     source_name :: builtin_numeric_source(method) ?? return None
+    target_name :: if owner == "F64" -> "Float" else -> owner
+    if numeric_precise_conversion_route_index(target_name, source_name) == .Val(index) {
+        route :: NUMERIC_PRECISE_ROUTES[index]
+        source_type :: if source_name == "Decimal" || source_name == "Fraction" -> Type.Named{name: ~source_name} else -> (builtin_numeric_kind(source_name) ?? panic("registered precise source")).ty
+        target_type :: if owner == "Decimal" || owner == "Fraction" -> Type.Named{name: ~owner} else -> (builtin_numeric_kind(owner) ?? panic("registered precise target")).ty
+        return Val(builtin_static_precise(~owner, ~method, ^source_type, ^target_type, ~route.owner, ~route.function))
+    }
+    target :: builtin_numeric_kind(owner) ?? return None
     source :: builtin_numeric_kind(source_name) ?? return None
-    Val(builtin_static(owner, method, [Type]{source.ty}, builtin_numeric_return(source, target), BuiltinStaticLowering.Numeric{operation: builtin_numeric_operation(source, target)}))
+    result :: numeric_conversion_return(target.ty, method, 1) ?? return None
+    Val(builtin_static(~owner, ~method, [Type]{~source.ty}, ^result, BuiltinStaticLowering.Numeric{operation: builtin_numeric_operation(source, target)}))
 }
 
 // Every row for `owner.method`, across modules; the caller admits the one

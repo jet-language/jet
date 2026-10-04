@@ -1,0 +1,2000 @@
+// PORT-PENDING 0411 crates-jet-sema-src-sema-checkerinfer-expr-slice-5846: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5846-7841
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     fn byte_text_elements(parts: &[crate::AST::ByteTextPart], span: Span) -> Option<Vec<Expr>> {
+//RS         let bytes = TypedLitBody::byte_text_bytes(parts)?;
+//RS         Some(
+//RS             bytes
+//RS                 .into_iter()
+//RS                 .map(|byte| Expr::Int(byte as i64, span, None, Some(byte.to_string())))
+//RS                 .collect(),
+//RS         )
+//RS     }
+//RS 
+//RS     /// #3739: probe whether a one-expression list body is a whole value of
+//RS     /// `head`. The probe checks the body where a `head` parameter would, then
+//RS     /// discards its diagnostics and flow facts; the caller re-checks the chosen
+//RS     /// reading so every diagnostic is reported once. Spreads and inferred-head
+//RS     /// literals (`{…}`, `.{…}`) always use element notation.
+//RS     fn typed_lit_whole_value(&mut self, head: &Type, body: &Expr) -> bool {
+//RS         match body {
+//RS             Expr::Spread(..) => return false,
+//RS             Expr::TypedLit { head: None, .. } => return false,
+//RS             Expr::StructLit { inferred: true, .. } => return false,
+//RS             _ => {}
+//RS         }
+//RS         let saved_expected = self.expected_type.replace(head.clone());
+//RS         let diagnostics_start = self.diags.len();
+//RS         let flow = self.flow.clone();
+//RS         let mut probe = body.clone();
+//RS         let whole = match self.infer(&mut probe) {
+//RS             Some(got) => {
+//RS                 self.diags.len() == diagnostics_start
+//RS                     && self.check_type_assignable(head, &got, probe.span())
+//RS                     && self.diags.len() == diagnostics_start
+//RS             }
+//RS             None => false,
+//RS         };
+//RS         self.diags.truncate(diagnostics_start);
+//RS         self.flow = flow;
+//RS         self.expected_type = saved_expected;
+//RS         whole
+//RS     }
+//RS 
+//RS     /// D-DOTCTOR3=A: elaborate `Type.{ body }` / inferred `.{ body }` against the
+//RS     /// head (or expected type), rewrite to ListLit / MapLit / StructLit / value,
+//RS     /// then re-infer. Runtime exact-Int fixed-width scalar construction records
+//RS     /// the existing checked conversion seam for TIR lowering.
+//RS     pub(crate) fn elaborate_typed_lit(&mut self, e: &mut Expr) -> Option<Type> {
+//RS         let Expr::TypedLit { head, body, span } =
+//RS             std::mem::replace(e, Expr::Absent(Span::new(0, 0)))
+//RS         else {
+//RS             unreachable!("elaborate_typed_lit only for TypedLit");
+//RS         };
+//RS         let span = span;
+//RS         let head = match head.or_else(|| self.expected_type.clone()) {
+//RS             Some(h) => h,
+//RS             None => {
+//RS                 *e = Expr::TypedLit {
+//RS                     head: None,
+//RS                     body,
+//RS                     span,
+//RS                 };
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0119",
+//RS                     "`.{ … }` needs a known type here".to_string(),
+//RS                     "an inferred typed literal needs an expected type from the surrounding context"
+//RS                         .to_string(),
+//RS                     "add a type head, e.g. `[U8].{ 1, 2 }`, or annotate the binding".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         // D-BOUND-HEAD1=A / D-UNIFYLIT1=A: a builtin typed head dispatches on
+//RS         // its canonical SOURCE spelling, but `resolve_type` rewrites `URL` to
+//RS         // the internal `Url` nominal. Read the descriptor from the written
+//RS         // head first: resolving before the match erased `URL`'s head and left
+//RS         // the body as a bare String, which then bound to a `Url` slot.
+//RS         let head_kind = match &head {
+//RS             Type::Named(name) => Syntax::typed_head_kind(name),
+//RS             _ => None,
+//RS         };
+//RS         // `Regex{"…"}` is the compile-checked pattern literal. Importing
+//RS         // `core.regex` loads its source-owned `Regex` record, which the bare
+//RS         // name would otherwise resolve to; the literal still builds the
+//RS         // builtin compiled-pattern handle whose methods the checker knows.
+//RS         let regex_head = matches!(&head, Type::Named(name) if name == Syntax::TYPE_REGEX);
+//RS         let head = self.resolve_type(head);
+//RS 
+//RS         // An empty list or map literal has no element to recover its type from
+//RS         // once the head is gone. Inference below runs on the ordinary empty
+//RS         // literal shape, then the head goes back on the node so TIR lowering
+//RS         // reads `[T]` / `[K:V]` from `Expr::TypedLit` in every position.
+//RS         let mut keep_head = false;
+//RS         match (head.clone(), body) {
+//RS             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::ByteText(parts)) => {
+//RS                 let Some(elems) = Self::byte_text_elements(&parts, span) else {
+//RS                     *e = Expr::TypedLit {
+//RS                         head: Some(head.clone()),
+//RS                         body: TypedLitBody::ByteText(parts),
+//RS                         span,
+//RS                     };
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0119",
+//RS                         format!(
+//RS                             "this body doesn't match typed-literal head `{}`",
+//RS                             head.name()
+//RS                         ),
+//RS                         "a typed literal body uses the head type's own literal shape".to_string(),
+//RS                         "use ASCII text or numeric elements for a byte list".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return Some(head);
+//RS                 };
+//RS                 *e = Expr::ListLit(elems, span);
+//RS             }
+//RS             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Empty) => {
+//RS                 *e = Expr::ListLit(Vec::new(), span);
+//RS                 keep_head = true;
+//RS             }
+//RS             // #3739 (amends D-DOTCTOR3=A): a lone expression that is already a
+//RS             // value of the head type, or that the head accepts the way a
+//RS             // parameter of that type would, is the whole value. Otherwise it
+//RS             // is the literal's single element.
+//RS             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Elements(mut elems))
+//RS                 if elems.len() == 1 && self.typed_lit_whole_value(&head, &elems[0]) =>
+//RS             {
+//RS                 *e = elems.pop().expect("guard saw one element");
+//RS             }
+//RS             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Elements(elems)) => {
+//RS                 *e = Expr::ListLit(elems, span);
+//RS             }
+//RS             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Value(inner)) => {
+//RS                 *e = if self.typed_lit_whole_value(&head, &inner) {
+//RS                     *inner
+//RS                 } else {
+//RS                     Expr::ListLit(vec![*inner], span)
+//RS                 };
+//RS             }
+//RS             // A map body without `:` can only be the whole value.
+//RS             (Type::Map { .. }, TypedLitBody::Value(inner)) => {
+//RS                 *e = *inner;
+//RS             }
+//RS             (Type::Map { .. }, TypedLitBody::Empty) => {
+//RS                 *e = Expr::MapLit(Vec::new(), span);
+//RS                 keep_head = true;
+//RS             }
+//RS             (Type::Map { .. }, TypedLitBody::Entries(entries)) => {
+//RS                 *e = Expr::MapLit(entries, span);
+//RS             }
+//RS             (Type::Named(name), TypedLitBody::Fields(fields)) => {
+//RS                 *e = Expr::StructLit {
+//RS                     type_name: name,
+//RS                     type_args: Vec::new(),
+//RS                     import_ns: None,
+//RS                     as_trait: None,
+//RS                     fields,
+//RS                     inferred: false,
+//RS                     span,
+//RS                 };
+//RS             }
+//RS             (Type::Apply { name, args }, TypedLitBody::Fields(fields)) => {
+//RS                 *e = Expr::StructLit {
+//RS                     type_name: name,
+//RS                     type_args: args,
+//RS                     import_ns: None,
+//RS                     as_trait: None,
+//RS                     fields,
+//RS                     inferred: false,
+//RS                     span,
+//RS                 };
+//RS             }
+//RS             (Type::Named(name), TypedLitBody::Empty) => {
+//RS                 *e = Expr::StructLit {
+//RS                     type_name: name,
+//RS                     type_args: Vec::new(),
+//RS                     import_ns: None,
+//RS                     as_trait: None,
+//RS                     fields: Vec::new(),
+//RS                     inferred: false,
+//RS                     span,
+//RS                 };
+//RS             }
+//RS             (Type::Apply { name, args }, TypedLitBody::Empty) => {
+//RS                 *e = Expr::StructLit {
+//RS                     type_name: name,
+//RS                     type_args: args,
+//RS                     import_ns: None,
+//RS                     as_trait: None,
+//RS                     fields: Vec::new(),
+//RS                     inferred: false,
+//RS                     span,
+//RS                 };
+//RS             }
+//RS             // D-UNIFYLIT1=A: `SQL.{"…"}` / `HTML.{"…"}` / `Sh.{"…"}` — typed head
+//RS             // is the sole domain-text spelling (no silent bare-quote rewrite).
+//RS             (Type::Named(_), TypedLitBody::Value(inner))
+//RS                 if head_kind.is_some_and(|kind| kind.is_typed_text()) =>
+//RS             {
+//RS                 let kind = head_kind.expect("guard read the head descriptor");
+//RS                 *e = *inner;
+//RS                 return self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span);
+//RS             }
+//RS             (Type::Named(ref type_name), TypedLitBody::Value(inner))
+//RS                 if regex_head || type_name == Syntax::TYPE_REGEX =>
+//RS             {
+//RS                 *e = *inner;
+//RS                 return self.rewrite_regex_literal(e, span);
+//RS             }
+//RS             // D-BOUND-HEAD1=A: `URL`/`Path`/`DateTime` construct their carrier
+//RS             // here. Keyed on the source descriptor so `URL` still reaches
+//RS             // `jet_typed_url_literal` after the head resolved to `Url`.
+//RS             (Type::Named(_), TypedLitBody::Value(inner))
+//RS                 if head_kind.is_some_and(|kind| kind.is_boundary()) =>
+//RS             {
+//RS                 let kind = head_kind.expect("guard read the head descriptor");
+//RS                 *e = *inner;
+//RS                 return self.rewrite_typed_boundary_literal(
+//RS                     e,
+//RS                     kind.source_name().to_string(),
+//RS                     span,
+//RS                 );
+//RS             }
+//RS             (Type::Named(type_name), TypedLitBody::Value(inner))
+//RS                 if self.checked_text_type_name(&type_name).is_some() =>
+//RS             {
+//RS                 *e = *inner;
+//RS                 return self.rewrite_checked_text_literal(e, type_name, span);
+//RS             }
+//RS             (_, TypedLitBody::Value(inner)) => {
+//RS                 *e = *inner;
+//RS             }
+//RS             (_, TypedLitBody::Elements(elems)) if elems.len() == 1 => {
+//RS                 *e = elems.into_iter().next().unwrap();
+//RS             }
+//RS             (_, body) => {
+//RS                 *e = Expr::TypedLit {
+//RS                     head: Some(head.clone()),
+//RS                     body,
+//RS                     span,
+//RS                 };
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0119",
+//RS                     format!("this body doesn't match typed-literal head `{}`", head.name()),
+//RS                     "a typed literal body uses the head type's own literal shape".to_string(),
+//RS                     "use elements for lists, entries for maps, fields for records, or one expression for scalars"
+//RS                         .to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 return Some(head);
+//RS             }
+//RS         }
+//RS 
+//RS         let saved = self.expected_type.replace(head.clone());
+//RS         let ty = self.infer(e);
+//RS         self.expected_type = saved;
+//RS         if keep_head {
+//RS             *e = Expr::TypedLit {
+//RS                 head: Some(head.clone()),
+//RS                 body: TypedLitBody::Empty,
+//RS                 span,
+//RS             };
+//RS         }
+//RS         // Head wins as the expression's type when inference produced something
+//RS         // assignable; mismatches already diagnosed by infer/check_type_assignable.
+//RS         match ty {
+//RS             Some(got) => {
+//RS                 if got != head {
+//RS                     // A lossless fixed-width widening (`U64{byte}` with
+//RS                     // `byte: U8`) takes the canonical numeric widening every
+//RS                     // other widened operand uses; the head alone would leave
+//RS                     // the narrower carrier in a wider slot.
+//RS                     if matches!(got, Type::IntN { .. })
+//RS                         && matches!(head, Type::IntN { .. })
+//RS                         && got.numeric_widening_to(&head).is_some()
+//RS                     {
+//RS                         self.widen_numeric_expr(e, &got, &head);
+//RS                         return Some(head);
+//RS                     }
+//RS                     // Preserve the checked conversion when a scalar head
+//RS                     // changes an integer's runtime representation. A type
+//RS                     // annotation alone cannot turn integer bits into a float.
+//RS                     if (got == Type::Int && matches!(head, Type::IntN { .. }))
+//RS                         || (matches!(got, Type::Int | Type::IntN { .. })
+//RS                             && matches!(head, Type::Float | Type::Float32))
+//RS                     {
+//RS                         let source_span = e.span();
+//RS                         let source = std::mem::replace(e, Expr::Absent(source_span));
+//RS                         *e = Expr::MethodCall {
+//RS                             receiver: Box::new(Expr::Ident(head.name(), source_span)),
+//RS                             method: Syntax::conversion_method_for_source(&got.name()),
+//RS                             method_span: source_span,
+//RS                             owner_type_args: Vec::new(),
+//RS                             type_args: Vec::new(),
+//RS                             args: vec![crate::AST::CallArg {
+//RS                                 convention: crate::AST::AccessConvention::Read,
+//RS                                 expr: source,
+//RS                                 span: source_span,
+//RS                                 flags: crate::AST::CallArgFlags::default(),
+//RS                                 label: None,
+//RS                                 spread: false,
+//RS                             }],
+//RS                             recv_type: None,
+//RS                             resolved_ret: Some(head.clone()),
+//RS                             operator_rhs: None,
+//RS                             checked_widen: true,
+//RS                         };
+//RS                         return Some(head);
+//RS                     }
+//RS                     // D-OPT-LIFT1=A: a `T?{value}` head is an optional slot.
+//RS                     if self.lift_optional_slot(&head, &got, e).is_some() {
+//RS                         return Some(head);
+//RS                     }
+//RS                     // A numeric head over a numeric body is the checked scalar
+//RS                     // retag; any other mismatch is an error, never a silent
+//RS                     // re-typing of the body.
+//RS                     let numeric = |ty: &Type| {
+//RS                         matches!(
+//RS                             ty.without_user_tags(),
+//RS                             Type::Int
+//RS                                 | Type::IntN { .. }
+//RS                                 | Type::Float
+//RS                                 | Type::Float32
+//RS                                 | Type::InlineRange { .. }
+//RS                         )
+//RS                     };
+//RS                     if !self.check_type_assignable(&head, &got, e.span())
+//RS                         && !(numeric(&head) && numeric(&got))
+//RS                     {
+//RS                         let distinct = match &head {
+//RS                             Type::Named(name) if self.registry.is_distinct(name) => {
+//RS                                 Some(name.clone())
+//RS                             }
+//RS                             _ => None,
+//RS                         };
+//RS                         if let Some(name) = distinct {
+//RS                             // D-DIST1/D-DIST3 (E0128): a distinct head never
+//RS                             // re-types its base value; the destination owns
+//RS                             // the explicit conversion.
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0128",
+//RS                                 format!(
+//RS                                     "a `{}` can't be used where a `{name}` is expected",
+//RS                                     got.name()
+//RS                                 ),
+//RS                                 format!(
+//RS                                     "`{name}` and `{}` are different types — even though `{name}` is built on `{}`, one is never accepted in place of the other",
+//RS                                     got.name(),
+//RS                                     self.registry
+//RS                                         .distinct_base(&name)
+//RS                                         .map(|base| base.name())
+//RS                                         .unwrap_or_default()
+//RS                                 ),
+//RS                                 format!(
+//RS                                     "convert explicitly: `{name}.{}(expr)`",
+//RS                                     Syntax::conversion_method_for_source(&got.name())
+//RS                                 ),
+//RS                                 Some(e.span()),
+//RS                             ));
+//RS                         } else {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0108",
+//RS                                 format!(
+//RS                                     "this needs {}, but the value is {}",
+//RS                                     head.show(),
+//RS                                     got.show()
+//RS                                 ),
+//RS                                 "the value here does not have the type required by this declaration"
+//RS                                     .to_string(),
+//RS                                 "use a value of the required type or convert it explicitly"
+//RS                                     .to_string(),
+//RS                                 Some(e.span()),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Some(head)
+//RS             }
+//RS             None => Some(head),
+//RS         }
+//RS     }
+//RS     /// Keep expected collection slots strict. `check_type_assignable` reports
+//RS     /// specialized diagnostics, but returns `false` for a plain mismatch so
+//RS     /// callers can choose their context. An expected list used to ignore that
+//RS     /// result and silently adopt its element type, which let `[String]` cross a
+//RS     /// `List<SQL>` database sink.
+//RS     fn check_list_element_assignable(&mut self, want: &Type, got: &Type, span: Span) {
+//RS         let reported = self.check_type_assignable(want, got, span);
+//RS         let fixed_widens = matches!(
+//RS             (want, got),
+//RS             (
+//RS                 Type::List(want_elem),
+//RS                 Type::FixedList {
+//RS                     elem: got_elem, ..
+//RS                 }
+//RS             ) if want_elem == got_elem && Type::obligations_satisfy(want_elem, got_elem)
+//RS         );
+//RS         let union_widens = matches!(
+//RS             want,
+//RS             Type::Union(members)
+//RS                 if members
+//RS                     .iter()
+//RS                     .any(|member| member == got && Type::obligations_satisfy(member, got))
+//RS         );
+//RS         let trait_box = self.trait_slot_accepts(want, got);
+//RS         if !reported
+//RS             && got != want
+//RS             && !fixed_widens
+//RS             && got.numeric_widening_to(want).is_none()
+//RS             && !union_widens
+//RS             && !trait_box
+//RS         {
+//RS             if let Some(diag) = typed_text_mismatch(want, got, span) {
+//RS                 self.diags.push(diag);
+//RS             } else {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0112",
+//RS                     format!(
+//RS                         "a list item needs {}, but this is {}",
+//RS                         want.show(),
+//RS                         got.show()
+//RS                     ),
+//RS                     "every list item must match the list's element type".to_string(),
+//RS                     type_fix_hint(want, got),
+//RS                     Some(span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn infer_owned_list_element(&mut self, elem: &mut Expr) -> Option<Type> {
+//RS         let ty = self.infer_aggregate_value(elem, None);
+//RS         if ty.is_some() {
+//RS             self.note_move_if_direct_ident(elem, "the list literal");
+//RS         }
+//RS         ty
+//RS     }
+//RS 
+//RS     fn list_elem_needs_expected_type(elem: &Expr) -> bool {
+//RS         match elem {
+//RS             Expr::StructLit { inferred: true, .. } | Expr::TypedLit { head: None, .. } => true,
+//RS             // `[["41"], [], ["x"]]`: an empty item takes its type from a sibling.
+//RS             Expr::ListLit(elems, _) => elems.is_empty(),
+//RS             Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+//RS                 Self::list_elem_needs_expected_type(inner)
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn infer_list_lit(&mut self, elems: &mut [Expr], span: Span) -> Option<Type> {
+//RS         for elem in elems.iter() {
+//RS             self.reject_fixed_storage(elem, "be stored in a list");
+//RS         }
+//RS         if self.no_os {
+//RS             self.diags.push(e3303(span));
+//RS         }
+//RS         if elems.is_empty() {
+//RS             if let Some(expected) = self.expected_type.clone() {
+//RS                 if let Type::List(inner) = expected {
+//RS                     return Some(Type::List(inner));
+//RS                 }
+//RS             }
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0501",
+//RS                 "an empty list needs a type".to_string(),
+//RS                 "write `[]` only where the list type is already known from around it".to_string(),
+//RS                 "name the element type on the literal, such as `[Int]{}`".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         // D-FIXARR1: a list literal in a `[T#N]` binding context keeps the fixed-size type.
+//RS         // Sema validates element types and count, codegen emits a Rust array `[e1, …]`.
+//RS         if let Some(Type::FixedList {
+//RS             elem: expected_inner,
+//RS             len,
+//RS             ..
+//RS         }) = self.expected_type.clone()
+//RS         {
+//RS             if elems.iter().any(|e| matches!(e, Expr::Spread(..))) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E1311",
+//RS                     "list spread can't build a fixed-size `[T#N]` list".to_string(),
+//RS                     "spread expands a growable list — a `[T#N]` has a fixed compile-time length"
+//RS                         .to_string(),
+//RS                     "use a growable `[T]` binding (`::`/`:=`) instead of `[T#N]`".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 return None;
+//RS             }
+//RS             if let Some(expected_len) = len.literal_value() {
+//RS                 if elems.len() as u64 != expected_len {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0963",
+//RS                         format!(
+//RS                             "this list has {} element{}, but `[T#{}]` expects exactly {}",
+//RS                             elems.len(),
+//RS                             if elems.len() == 1 { "" } else { "s" },
+//RS                             len.expression(),
+//RS                             expected_len,
+//RS                         ),
+//RS                         "a fixed-size list `[T#N]` requires exactly N elements".to_string(),
+//RS                         format!(
+//RS                             "provide exactly {} element{}",
+//RS                             expected_len,
+//RS                             if expected_len == 1 { "" } else { "s" }
+//RS                         ),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return None;
+//RS                 }
+//RS             }
+//RS             let saved = self.expected_type.clone();
+//RS             self.expected_type = Some((*expected_inner).clone());
+//RS             for e in elems.iter_mut() {
+//RS                 if let Some(t) = self.infer_owned_list_element(e) {
+//RS                     self.check_list_element_assignable(&expected_inner, &t, e.span());
+//RS                 }
+//RS             }
+//RS             self.expected_type = saved;
+//RS             return Some(Type::FixedList {
+//RS                 elem: expected_inner,
+//RS                 len,
+//RS             });
+//RS         }
+//RS         if let Some(Type::List(expected_inner)) = self.expected_type.clone() {
+//RS             if let Type::TraitObject(trait_names) = expected_inner.as_ref() {
+//RS                 // D-ANY-JAI1: coercion to a struct-literal's blessed single trait name
+//RS                 // (`as_trait`) only applies to the S48 single-trait-object shape — a
+//RS                 // multi-trait `TraitObject` (only ever produced for a variadic loop
+//RS                 // element, never a list-literal's declared element type) has no one
+//RS                 // trait to coerce toward, so it falls through to the ordinary
+//RS                 // `check_type_assignable` path below (which checks every bound).
+//RS                 let trait_name = trait_names.first().filter(|_| trait_names.len() == 1);
+//RS                 for e in elems.iter_mut() {
+//RS                     if let Some(t) = self.infer_owned_list_element(e) {
+//RS                         match (&t, trait_name) {
+//RS                             (Type::Named(n), Some(trait_name))
+//RS                                 if self.trait_reg.implements_trait(n, trait_name) =>
+//RS                             {
+//RS                                 if let Expr::StructLit { as_trait, .. } = e {
+//RS                                     *as_trait = Some(trait_name.clone());
+//RS                                 }
+//RS                             }
+//RS                             (Type::Apply { name, .. }, Some(trait_name))
+//RS                                 if self.trait_reg.implements_trait(name, trait_name) =>
+//RS                             {
+//RS                                 if let Expr::StructLit { as_trait, .. } = e {
+//RS                                     *as_trait = Some(trait_name.clone());
+//RS                                 }
+//RS                             }
+//RS                             _ => {
+//RS                                 self.check_list_element_assignable(&expected_inner, &t, e.span());
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 return Some(Type::List(expected_inner));
+//RS             }
+//RS             // D-DOTCTOR2/3 + D-SG9: any expected element type elaborates each
+//RS             // list element against it (nested `[U8]` lists, struct `.{}` forms,
+//RS             // and fixed-width scalars with range checks).
+//RS             let saved = self.expected_type.clone();
+//RS             let saved_string_view_read = self.allow_string_view_read;
+//RS             let string_view_elements = matches!(
+//RS                 expected_inner.as_ref(),
+//RS                 Type::Apply { name, args }
+//RS                     if name == "View"
+//RS                         && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
+//RS             );
+//RS             if string_view_elements {
+//RS                 self.allow_string_view_read = true;
+//RS             }
+//RS             self.expected_type = Some(expected_inner.as_ref().clone());
+//RS             for e in elems.iter_mut() {
+//RS                 match e {
+//RS                     Expr::Spread(inner, spread_span) => {
+//RS                         let t = self.infer_owned_list_element(inner);
+//RS                         match t {
+//RS                             Some(Type::List(spread_elem)) => {
+//RS                                 self.check_list_element_assignable(
+//RS                                     &expected_inner,
+//RS                                     &spread_elem,
+//RS                                     *spread_span,
+//RS                                 );
+//RS                             }
+//RS                             Some(other) => {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E1311",
+//RS                                     format!("spread needs a list, not `{}`", other.name()),
+//RS                                     "list spread `[...xs, y]` expands a list's elements in place"
+//RS                                         .to_string(),
+//RS                                     "spread a `[T]` value here".to_string(),
+//RS                                     Some(*spread_span),
+//RS                                 ));
+//RS                             }
+//RS                             None => {}
+//RS                         }
+//RS                     }
+//RS                     _ => {
+//RS                         if let Some(t) = self.infer_owned_list_element(e) {
+//RS                             // D-OPT-LIFT1=A: a plain payload fills a `[T?]` item.
+//RS                             let t = self.lift_optional_slot(&expected_inner, &t, e).unwrap_or(t);
+//RS                             if plain_used_where_result_expected(&expected_inner, &t)
+//RS                                 && !matches!(e.without_parens(), Expr::Ok(..) | Expr::Err(..))
+//RS                             {
+//RS                                 let span = e.span();
+//RS                                 let inner = std::mem::replace(e, Expr::Absent(span));
+//RS                                 *e = Expr::Ok(Box::new(inner), span);
+//RS                             } else {
+//RS                                 let string_view_compatible = string_view_elements
+//RS                                     && t == Type::String
+//RS                                     && (matches!(
+//RS                                         e,
+//RS                                         Expr::Ident(name, _) if self.is_string_view(name)
+//RS                                     ) || self.string_view_call_source(e).is_some());
+//RS                                 if !string_view_compatible {
+//RS                                     self.check_list_element_assignable(
+//RS                                         &expected_inner,
+//RS                                         &t,
+//RS                                         e.span(),
+//RS                                     );
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             self.expected_type = saved;
+//RS             self.allow_string_view_read = saved_string_view_read;
+//RS             self.check_list_view_element_aliases(elems, &expected_inner);
+//RS             return Some(Type::List(expected_inner));
+//RS         }
+//RS         let mut elem_types = vec![None; elems.len()];
+//RS         let mut deferred = Vec::new();
+//RS         for (index, e) in elems.iter_mut().enumerate() {
+//RS             if Self::list_elem_needs_expected_type(e) {
+//RS                 deferred.push(index);
+//RS                 continue;
+//RS             }
+//RS             let ty = match e {
+//RS                 Expr::Spread(inner, spread_span) => {
+//RS                     let t = self.infer_owned_list_element(inner);
+//RS                     match t {
+//RS                         Some(Type::List(spread_elem)) => Some((*spread_elem).clone()),
+//RS                         Some(other) => {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E1311",
+//RS                                 format!("spread needs a list, not `{}`", other.name()),
+//RS                                 "list spread `[...xs, y]` expands a list's elements in place"
+//RS                                     .to_string(),
+//RS                                 "spread a `[T]` value here".to_string(),
+//RS                                 Some(*spread_span),
+//RS                             ));
+//RS                             None
+//RS                         }
+//RS                         None => None,
+//RS                     }
+//RS                 }
+//RS                 _ => self.infer_owned_list_element(e),
+//RS             };
+//RS             elem_types[index] = ty;
+//RS         }
+//RS         // D-NUMJOIN1=A: numeric elements widen to one element type.
+//RS         let Some(mut first) = elem_types.iter().flatten().next().cloned() else {
+//RS             for index in deferred {
+//RS                 elem_types[index] = self.infer_owned_list_element(&mut elems[index]);
+//RS             }
+//RS             return None;
+//RS         };
+//RS         for t in elem_types.iter().flatten().skip(1) {
+//RS             if *t != first {
+//RS                 if let Some(joined) = first.numeric_join(t) {
+//RS                     first = joined;
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-DOTCTOR2: a bare dot construction can use an element type supplied
+//RS         // by another list item, regardless of which item appears first.
+//RS         for index in deferred {
+//RS             let saved = self.expected_type.replace(first.clone());
+//RS             elem_types[index] = self.infer_owned_list_element(&mut elems[index]);
+//RS             self.expected_type = saved;
+//RS         }
+//RS         for (i, (elem, ty)) in elems.iter().zip(&elem_types).enumerate() {
+//RS             let Some(t) = ty else { continue };
+//RS             let spread_needs_conversion = matches!(elem, Expr::Spread(..)) && *t != first;
+//RS             if spread_needs_conversion || (*t != first && t.numeric_widening_to(&first).is_none()) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0504",
+//RS                     format!(
+//RS                         "this list resolves to `{}` but item {} is `{}`",
+//RS                         first.name(),
+//RS                         i + 1,
+//RS                         t.name()
+//RS                     ),
+//RS                     "every item in a list literal must have the same type".to_string(),
+//RS                     "make every element the same type, or build the list in steps".to_string(),
+//RS                     Some(elems[i].span()),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         for (elem, source) in elems.iter_mut().zip(&elem_types) {
+//RS             if let Some(source) = source {
+//RS                 if !matches!(elem, Expr::Spread(..)) {
+//RS                     self.widen_numeric_expr(elem, source, &first);
+//RS                 }
+//RS             }
+//RS         }
+//RS         self.check_list_view_element_aliases(elems, &first);
+//RS         Some(Type::List(Box::new(first)))
+//RS     }
+//RS 
+//RS     pub(crate) fn infer_tuple_lit(
+//RS         &mut self,
+//RS         fields: &mut [(String, Expr)],
+//RS         _span: Span,
+//RS     ) -> Option<Type> {
+//RS         let mut seen = HashSet::new();
+//RS         let mut typed = Vec::with_capacity(fields.len());
+//RS         for (name, expr) in fields.iter_mut() {
+//RS             self.reject_fixed_storage(expr, "be stored in a tuple");
+//RS             if !seen.insert(name.clone()) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0003",
+//RS                     format!("tuple member `{}` appears more than once", name),
+//RS                     "each named member in a tuple must have a unique name".to_string(),
+//RS                     "rename or remove the duplicate member".to_string(),
+//RS                     Some(expr.span()),
+//RS                 ));
+//RS             }
+//RS             let expected_field = match self.expected_type.as_ref() {
+//RS                 Some(Type::Tuple(expected_fields)) => expected_fields
+//RS                     .iter()
+//RS                     .find(|(expected_name, _)| expected_name == name)
+//RS                     .map(|(_, expected_ty)| (**expected_ty).clone()),
+//RS                 _ => None,
+//RS             };
+//RS             let ty = self
+//RS                 .infer_aggregate_value(expr, expected_field.as_ref())
+//RS                 .unwrap_or(Type::Int);
+//RS             typed.push((name.clone(), ty));
+//RS         }
+//RS         let canonical = crate::AST::canonicalize_tuple_fields(typed);
+//RS         let tuple_ty = Type::Tuple(
+//RS             canonical
+//RS                 .iter()
+//RS                 .map(|(n, t)| (n.clone(), Box::new(t.clone())))
+//RS                 .collect(),
+//RS         );
+//RS         Some(tuple_ty)
+//RS     }
+//RS 
+//RS     pub(crate) fn infer_map_lit(
+//RS         &mut self,
+//RS         entries: &mut [(Expr, Expr)],
+//RS         span: Span,
+//RS     ) -> Option<Type> {
+//RS         if self.no_os {
+//RS             self.diags.push(e3303(span));
+//RS         }
+//RS         if entries.is_empty() {
+//RS             // D-EMPTYLIT1: the parser never produces an empty `Expr::MapLit`
+//RS             // directly anymore (`[:]` is retired) — this only runs if some
+//RS             // other rewrite reaches here without first resolving a Map
+//RS             // expected type. Kept as a defensive fallback with `[]` wording.
+//RS             if let Some(expected) = self.expected_type.clone() {
+//RS                 if let Type::Map {
+//RS                     key,
+//RS                     key_span,
+//RS                     value,
+//RS                 } = expected
+//RS                 {
+//RS                     if !self.map_key_type_eligible(&key) {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0502",
+//RS                             format!("`{}` can't be a map key type (D-MAP-KEY1)", key.name()),
+//RS                             "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow D-MAP-KEY1; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible".to_string(),
+//RS                             "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately".to_string(),
+//RS                             Some(key_span.unwrap_or(span)),
+//RS                         ));
+//RS                     }
+//RS                     return Some(Type::Map {
+//RS                         key,
+//RS                         key_span,
+//RS                         value,
+//RS                     });
+//RS                 }
+//RS             }
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0501",
+//RS                 "an empty map needs a type".to_string(),
+//RS                 "write `[]` only where the map type is already known from around it".to_string(),
+//RS                 "name the key and value types on the literal: `[String:Int].{}`".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         let mut key_ty = None;
+//RS         let mut val_ty = None;
+//RS         let expected_map = self.expected_type.as_ref().and_then(|expected| {
+//RS             if let Type::Map { key, value, .. } = expected {
+//RS                 Some(((**key).clone(), (**value).clone()))
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         });
+//RS         // A map literal is one owning destination, but its entries are checked
+//RS         // independently. Track repeated owned locals here so lowering does not
+//RS         // emit several moves from one `String`/record value (I2/E0382).
+//RS         let mut remaining_value_idents = std::collections::HashMap::<String, usize>::new();
+//RS         for (_, value) in entries.iter() {
+//RS             if let Expr::Ident(name, _) = value {
+//RS                 *remaining_value_idents.entry(name.clone()).or_default() += 1;
+//RS             }
+//RS         }
+//RS         for (k, v) in entries.iter_mut() {
+//RS             let value_name = match v {
+//RS                 Expr::Ident(name, _) => Some(name.clone()),
+//RS                 _ => None,
+//RS             };
+//RS             let repeated_owned_value = value_name.as_ref().is_some_and(|name| {
+//RS                 let remaining = remaining_value_idents.entry(name.clone()).or_default();
+//RS                 let repeated = *remaining > 1;
+//RS                 *remaining = remaining.saturating_sub(1);
+//RS                 repeated
+//RS             });
+//RS             self.reject_fixed_storage(k, "be stored in a map");
+//RS             self.reject_fixed_storage(v, "be stored in a map");
+//RS             let Some(kt) = expected_map
+//RS                 .as_ref()
+//RS                 .map(|(expected_key, _)| self.infer_aggregate_value(k, Some(expected_key)))
+//RS                 .unwrap_or_else(|| self.infer_aggregate_value(k, None))
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             let Some(vt) = expected_map
+//RS                 .as_ref()
+//RS                 .map(|(_, expected_value)| self.infer_aggregate_value(v, Some(expected_value)))
+//RS                 .unwrap_or_else(|| self.infer_aggregate_value(v, None))
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             // An owned local also needs one implicit copy when the map is not
+//RS             // its last use in the enclosing block. Borrowed parameters already
+//RS             // follow the ordinary owning-slot path; only owned locals are
+//RS             // handled here.
+//RS             let copy_owned_value = value_name.as_ref().is_some_and(|name| {
+//RS                 self.lookup(name).is_some_and(|info| {
+//RS                     info.param_conv.is_none()
+//RS                         && !type_is_copy(&info.ty)
+//RS                         && (repeated_owned_value || self.is_name_live_after(name))
+//RS                 })
+//RS             });
+//RS             if copy_owned_value && self.is_cloneable_type(&vt) {
+//RS                 self.insert_implicit_copy(v, &vt, &vt);
+//RS             }
+//RS             // D-OPT-LIFT1=A: a plain payload fills a `[K: V?]` value slot.
+//RS             let vt = match expected_map.as_ref() {
+//RS                 Some((_, expected_value)) => {
+//RS                     self.lift_optional_slot(expected_value, &vt, v).unwrap_or(vt)
+//RS                 }
+//RS                 None => vt,
+//RS             };
+//RS             if !self.map_key_type_eligible(&kt) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                 "E0502",
+//RS                 format!("`{}` can't be a map key (D-MAP-KEY1)", kt.name()),
+//RS                 "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow D-MAP-KEY1; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible".to_string(),
+//RS                 "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately".to_string(),
+//RS                 Some(k.span()),
+//RS             ));
+//RS             }
+//RS             if let Some(ref fk) = key_ty {
+//RS                 if kt != *fk {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0504",
+//RS                         format!(
+//RS                             "this map started with `{}` keys but another key is `{}`",
+//RS                             fk.name(),
+//RS                             kt.name()
+//RS                         ),
+//RS                         "every key in a map literal must have the same type".to_string(),
+//RS                         "use the same key type throughout".to_string(),
+//RS                         Some(k.span()),
+//RS                     ));
+//RS                 }
+//RS             } else {
+//RS                 key_ty = Some(kt);
+//RS             }
+//RS             if let Some(ref fv) = val_ty {
+//RS                 if vt != *fv {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0504",
+//RS                         format!(
+//RS                             "this map started with `{}` values but another value is `{}`",
+//RS                             fv.name(),
+//RS                             vt.name()
+//RS                         ),
+//RS                         "every value in a map literal must have the same type".to_string(),
+//RS                         "use the same value type throughout".to_string(),
+//RS                         Some(v.span()),
+//RS                     ));
+//RS                 }
+//RS             } else {
+//RS                 val_ty = Some(vt);
+//RS             }
+//RS         }
+//RS         match (key_ty, val_ty) {
+//RS             (Some(k), Some(v)) => Some(Type::Map {
+//RS                 key: Box::new(k),
+//RS                 key_span: None,
+//RS                 value: Box::new(v),
+//RS             }),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-TYPE2-REFINE1/D-OOBPROOF1: fold the interval known for an index
+//RS     /// expression. The interval comes from the existing type knowledge vector;
+//RS     /// arithmetic only widens it, so a proof can never claim fewer values than
+//RS     /// the expression may produce.
+//RS     fn proven_type_integer_interval(&self, ty: &Type) -> Option<IntegerInterval> {
+//RS         let ty = ty.without_user_tags();
+//RS         ty.integer_range()
+//RS             .or_else(|| self.registry.integer_interval(ty))
+//RS             .map(IntegerInterval::from_bounds)
+//RS     }
+//RS 
+//RS     fn proven_integer_interval(&self, expr: &Expr) -> Option<IntegerInterval> {
+//RS         match expr {
+//RS             Expr::Int(value, _, _, raw) => {
+//RS                 let value = super::exact_integer_literal(*value, raw.as_deref()).try_i128()?;
+//RS                 Some(IntegerInterval::new(value, value))
+//RS             }
+//RS             Expr::Paren(inner, _) => self.proven_integer_interval(inner),
+//RS             Expr::Ident(name, _) => self
+//RS                 .lookup(name)
+//RS                 .and_then(|local| self.proven_type_integer_interval(&local.ty)),
+//RS             Expr::MethodCall {
+//RS                 receiver,
+//RS                 method,
+//RS                 args,
+//RS                 ..
+//RS             } if method == "raw" && args.is_empty() => self.proven_integer_interval(receiver),
+//RS             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+//RS                 self.proven_integer_interval(inner)?.negated()
+//RS             }
+//RS             Expr::Binary(op, lhs, rhs, _) => {
+//RS                 let left = self.proven_integer_interval(lhs)?;
+//RS                 let right = self.proven_integer_interval(rhs)?;
+//RS                 match op {
+//RS                     crate::AST::BinOp::Add => left.add(right),
+//RS                     crate::AST::BinOp::Sub => left.sub(right),
+//RS                     crate::AST::BinOp::Mul => left.mul(right),
+//RS                     _ => None,
+//RS                 }
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn infer_index(
+//RS         &mut self,
+//RS         base: &mut Box<Expr>,
+//RS         index: &mut Box<Expr>,
+//RS         span: &Span,
+//RS         kind: &mut IndexKind,
+//RS     ) -> Option<Type> {
+//RS         // Keep the sema-to-TIR contract total even when an earlier expression
+//RS         // error prevents either operand from producing a type. Diagnostics
+//RS         // compilation still lowers the surrounding function, so an unknown
+//RS         // index kind here would turn the user's real error into an ICE.
+//RS         *kind = IndexKind::List;
+//RS         self.borrow_ctx = true;
+//RS         let base_ty = self.infer(base)?;
+//RS         if let Expr::Ident(name, selector_span) = index.as_ref() {
+//RS             if let Some(field) = crate::Syntax::layout_selector_name(name) {
+//RS                 if base_ty != Type::Named(crate::Syntax::TYPE_LAYOUT_INFO.to_string()) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0302",
+//RS                         format!(
+//RS                             "layout field selector `.{field}` needs a `{}` value",
+//RS                             crate::Syntax::TYPE_LAYOUT_INFO
+//RS                         ),
+//RS                         "typed `[.field]` selection is only defined on `T.$layout`".to_string(),
+//RS                         "use `T.$layout[.field]` for a reflected field fact".to_string(),
+//RS                         Some(*selector_span),
+//RS                     ));
+//RS                 }
+//RS                 *kind = IndexKind::LayoutField(field.to_string());
+//RS                 return Some(Type::Named(crate::Syntax::TYPE_LAYOUT_FIELD.to_string()));
+//RS             }
+//RS         }
+//RS         // Index operands are checked from the indexed value, never from an
+//RS         // enclosing result slot. Positional storage has canonical `Int`
+//RS         // indices; keyed/index-trait storage supplies its declared key.
+//RS         let index_expected = match base_ty.without_user_tags() {
+//RS             Type::List(_) | Type::FixedList { .. } | Type::String => Some(Type::Int),
+//RS             Type::Apply { name, args }
+//RS                 if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+//RS             {
+//RS                 Some(Type::Int)
+//RS             }
+//RS             Type::Apply { name, args } if name == "Pool" && args.len() == 1 => Some(Type::Apply {
+//RS                 name: "ID".to_string(),
+//RS                 args: vec![args[0].clone()],
+//RS             }),
+//RS             ty if ty.is_compute_tensor_family() => {
+//RS                 Some(Type::Named(crate::Syntax::TYPE_RANGE.to_string()))
+//RS             }
+//RS             Type::Map { key, .. } => Some((**key).clone()),
+//RS             Type::Named(n) if is_simd_lane_type(n) && !self.registry.contains(n) => Some(Type::Int),
+//RS             Type::Named(n) => self
+//RS                 .trait_reg
+//RS                 .index_types
+//RS                 .get(n)
+//RS                 .map(|(key, _)| key.clone()),
+//RS             _ => None,
+//RS         };
+//RS         let idx_ty = if let Some(expected) = index_expected {
+//RS             self.infer_with_expected(index, &expected)?
+//RS         } else {
+//RS             let saved_expected = self.expected_type.take();
+//RS             let result = self.infer(index);
+//RS             self.expected_type = saved_expected;
+//RS             result?
+//RS         };
+//RS         // D-QUAL4: user tags are transparent facts, so a tag around a refined
+//RS         // distinct integer must not hide the interval proof from fixed-list
+//RS         // indexing. Preserve compiler-owned tags; some carry nominal or
+//RS         // access policy that is not a user refinement.
+//RS         let index_value_ty = idx_ty.without_user_tags();
+//RS         let collection_ty = base_ty.without_user_tags();
+//RS         match collection_ty {
+//RS             Type::List(inner) => {
+//RS                 *kind = IndexKind::List;
+//RS                 if index_value_ty == &Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
+//RS                     *kind = IndexKind::Range;
+//RS                     return Some(Type::List(inner.clone()));
+//RS                 }
+//RS                 if !index_value_ty.is_integer() {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0505",
+//RS                         format!(
+//RS                             "list indexes must be {}, not {}",
+//RS                             Type::Int.show(),
+//RS                             idx_ty.show()
+//RS                         ),
+//RS                         "count positions with a whole number starting at 0".to_string(),
+//RS                         "use an Int index, like `items[0]`".to_string(),
+//RS                         Some(index.span()),
+//RS                     ));
+//RS                 }
+//RS                 Some((**inner).clone())
+//RS             }
+//RS             // S76: [T#N] supports indexing; E0965 if the index is a literal >= N.
+//RS             Type::FixedList { elem, len, .. } => {
+//RS                 let len = len.require_literal();
+//RS                 *kind = IndexKind::List;
+//RS                 if let Some(proven) = self.proven_integer_interval(index) {
+//RS                     let valid = IntegerInterval::fixed_list_indexes(len);
+//RS                     if valid.is_some_and(|valid| valid.contains_interval(proven)) {
+//RS                         *kind = IndexKind::FixedListProof;
+//RS                         return Some((**elem).clone());
+//RS                     }
+//RS                     let (what, why, fix) = match index.as_ref() {
+//RS                         Expr::Int(value, ..) => (
+//RS                             format!(
+//RS                                 "index {} is out of range for a fixed-size list of {} element{}",
+//RS                                 value,
+//RS                                 len,
+//RS                                 if len == 1 { "" } else { "s" }
+//RS                             ),
+//RS                             "the valid indexes for `[T#N]` are 0 through N-1".to_string(),
+//RS                             format!("use an index between 0 and {}", len.saturating_sub(1)),
+//RS                         ),
+//RS                         Expr::Ident(name, ..) => (
+//RS                             format!(
+//RS                                 "`{}` proves {}..{}, which is not inside this fixed-size list's indexes",
+//RS                                 name, proven.lo, proven.hi
+//RS                             ),
+//RS                             format!(
+//RS                                 "this `[T#{}]` value only has proven indexes 0 through {}",
+//RS                                 len,
+//RS                                 len.saturating_sub(1)
+//RS                             ),
+//RS                             "use a refinement whose invariant fits the list length".to_string(),
+//RS                         ),
+//RS                         _ => (
+//RS                             format!(
+//RS                                 "the index interval {}..{} is not inside this fixed-size list's indexes",
+//RS                                 proven.lo, proven.hi
+//RS                             ),
+//RS                             format!(
+//RS                                 "this `[T#{}]` value only has proven indexes 0 through {}",
+//RS                                 len,
+//RS                                 len.saturating_sub(1)
+//RS                             ),
+//RS                             "use an index whose proven interval fits the list length".to_string(),
+//RS                         ),
+//RS                     };
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0965",
+//RS                         what,
+//RS                         why,
+//RS                         fix,
+//RS                         Some(index.span()),
+//RS                     ));
+//RS                 } else if !index_value_ty.is_integer() {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0505",
+//RS                         format!(
+//RS                             "list indexes must be {}, not {}",
+//RS                             Type::Int.show(),
+//RS                             idx_ty.show()
+//RS                         ),
+//RS                         "count positions with a whole number starting at 0".to_string(),
+//RS                         "use an Int index, like `items[0]`".to_string(),
+//RS                         Some(index.span()),
+//RS                     ));
+//RS                 }
+//RS                 Some((**elem).clone())
+//RS             }
+//RS             // D-MEM1 S6 (D-POOLID-API1=A): `pool[id]` — generation-checked read,
+//RS             // panics at runtime on a stale `Id<T>` (mirrors the array-oob panic
+//RS             // precedent, not a new diagnostic code — see `jet_pool_get`).
+//RS             Type::Apply { name, args } if name == "Pool" && args.len() == 1 => {
+//RS                 *kind = IndexKind::Pool;
+//RS                 let is_matching_id = matches!(&idx_ty, Type::Apply { name, args: id_args } if name == "ID" && id_args.first() == args.first());
+//RS                 if !is_matching_id {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0112",
+//RS                         format!(
+//RS                             "`Pool` indexes need a matching `ID<T>`, not {}",
+//RS                             idx_ty.show()
+//RS                         ),
+//RS                         "a pool slot is only reached through the `ID<T>` its own `.add()` returned"
+//RS                             .to_string(),
+//RS                         "index with the `ID<T>` handle from `.add(...)`".to_string(),
+//RS                         Some(index.span()),
+//RS                     ));
+//RS                 }
+//RS                 Some(args[0].clone())
+//RS             }
+//RS             // D-DYNARRAY1: `window[i]` on a `View<T>` — read-only, same bounds
+//RS             // discipline as list indexing (runtime panic on out-of-range).
+//RS             Type::Apply { name, args }
+//RS                 if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+//RS             {
+//RS                 *kind = IndexKind::List;
+//RS                 if !matches!(&idx_ty, Type::Int | Type::InlineRange { .. }) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0505",
+//RS                         format!(
+//RS                             "list indexes must be {}, not {}",
+//RS                             Type::Int.show(),
+//RS                             idx_ty.show()
+//RS                         ),
+//RS                         "count positions with a whole number starting at 0".to_string(),
+//RS                         "use an Int index, like `items[0]`".to_string(),
+//RS                         Some(index.span()),
+//RS                     ));
+//RS                 }
+//RS                 Some(args[0].clone())
+//RS             }
+//RS             // D-COMPUTE-TENSOR-SLICE: Tensor bracket access is a first-axis
+//RS             // window. Keep the range fact explicit so TIR can select the
+//RS             // owned-copy or mutable-view Prelude path; scalar indexing has no
+//RS             // one-axis result type and is not part of this surface.
+//RS             ty if ty.is_compute_tensor_family() => {
+//RS                 if idx_ty == Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
+//RS                     *kind = IndexKind::Range;
+//RS                     Some(Type::Named("Tensor".to_string()))
+//RS                 } else {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0505",
+//RS                         format!("Tensor indexes must be Range, not {}", idx_ty.show()),
+//RS                         "Tensor brackets select a first-axis window with an inclusive or exclusive Range".to_string(),
+//RS                         "use `tensor[start..end]` or `tensor[window]`".to_string(),
+//RS                         Some(index.span()),
+//RS                     ));
+//RS                     None
+//RS                 }
+//RS             }
+//RS             Type::Map { key, value, .. } => {
+//RS                 *kind = IndexKind::Map;
+//RS                 let key_compatible = idx_ty == **key
+//RS                     || matches!((&**key, &idx_ty), (Type::Int, Type::InlineRange { .. }));
+//RS                 if !key_compatible {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0505",
+//RS                         format!(
+//RS                             "this map holds keys of type {}, not {}",
+//RS                             key.show(),
+//RS                             idx_ty.show()
+//RS                         ),
+//RS                         "the key in `map[key]` must match the map's key type".to_string(),
+//RS                         format!("use a {} key here", key.name()),
+//RS                         Some(index.span()),
+//RS                     ));
+//RS                 }
+//RS                 Some((**value).clone())
+//RS             }
+//RS             // D-SIMD2: `v[i]` lane access on a SIMD lane type returns the lane scalar.
+//RS             // (A user type sharing the name `F32x4` would be a non-indexable struct,
+//RS             // falling to the default E0505 arm.)
+//RS             Type::Named(n) if is_simd_lane_type(n) && !self.registry.contains(n) => {
+//RS                 let lane_name = n.clone();
+//RS                 *kind = IndexKind::Lane(lane_name.clone());
+//RS                 if !matches!(&idx_ty, Type::Int | Type::InlineRange { .. }) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0505",
+//RS                         format!(
+//RS                             "lane indexes must be {}, not {}",
+//RS                             Type::Int.show(),
+//RS                             idx_ty.show()
+//RS                         ),
+//RS                         "a SIMD lane is read by position with a whole-number index starting at 0"
+//RS                             .to_string(),
+//RS                         "use an Int index, like `v[0]`".to_string(),
+//RS                         Some(index.span()),
+//RS                     ));
+//RS                 } else if let Expr::Int(num, _, _, _) = index.as_ref() {
+//RS                     let lanes = math_arity(&lane_name) as i64;
+//RS                     if *num < 0 || *num >= lanes {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0965",
+//RS                             format!(
+//RS                                 "lane {} is out of range for `{}` ({} lanes)",
+//RS                                 num, lane_name, lanes
+//RS                             ),
+//RS                             format!(
+//RS                                 "the valid lanes for `{}` are 0 through {}",
+//RS                                 lane_name,
+//RS                                 lanes - 1
+//RS                             ),
+//RS                             format!("use a lane index between 0 and {}", lanes - 1),
+//RS                             Some(index.span()),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 Some(math_scalar_ty(&lane_name))
+//RS             }
+//RS             Type::Named(n) if self.trait_reg.index_types.contains_key(n) => {
+//RS                 let (key_ty, value_ty) = self.trait_reg.index_types.get(n).unwrap();
+//RS                 *kind = IndexKind::User(n.clone());
+//RS                 if idx_ty != *key_ty {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0505",
+//RS                         format!(
+//RS                             "this value indexes with {}, not {}",
+//RS                             key_ty.show(),
+//RS                             idx_ty.show()
+//RS                         ),
+//RS                         "the key in `value[key]` must match the type's `Index` key".to_string(),
+//RS                         format!("use a {} key here", key_ty.name()),
+//RS                         Some(index.span()),
+//RS                     ));
+//RS                 }
+//RS                 Some(value_ty.clone())
+//RS             }
+//RS             Type::String => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0503",
+//RS                     "strings aren't indexed with `[ ]`".to_string(),
+//RS                     "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
+//RS                     "e.g. `loop c in s.chars() { }` or `s.slice(0..2)`".to_string(),
+//RS                     Some(*span),
+//RS                 ));
+//RS                 None
+//RS             }
+//RS             _ => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0505",
+//RS                     format!("only lists and maps can be indexed, not {}", base_ty.show()),
+//RS                     "use `[ ]` on a `List` or `Map` value".to_string(),
+//RS                     "check the value before `[`".to_string(),
+//RS                     Some(*span),
+//RS                 ));
+//RS                 None
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn infer_slice(
+//RS         &mut self,
+//RS         base: &mut Box<Expr>,
+//RS         start: &mut Box<Expr>,
+//RS         end: &mut Box<Expr>,
+//RS         span: Span,
+//RS     ) -> Option<Type> {
+//RS         if self.loop_depth > 0 {
+//RS             self.diags.push(Diagnostic::lint(
+//RS                 "L0501",
+//RS                 "slicing inside a loop copies every time".to_string(),
+//RS                 "each slice makes a fresh copy of the range — that adds up in a loop".to_string(),
+//RS                 "build indices outside the loop, or collect into one list".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS         }
+//RS         self.borrow_ctx = true;
+//RS         let base_ty = self.infer(base)?;
+//RS         for e in [start.as_mut(), end.as_mut()] {
+//RS             let t = self.infer(e)?;
+//RS             if !matches!(&t, Type::Int | Type::InlineRange { .. }) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0505",
+//RS                     format!(
+//RS                         "slice bounds must be {}, not {}",
+//RS                         Type::Int.show(),
+//RS                         t.show()
+//RS                     ),
+//RS                     "both ends of `a..b` must be whole numbers (S22, inclusive)".to_string(),
+//RS                     "use Int positions".to_string(),
+//RS                     Some(e.span()),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         match base_ty {
+//RS             Type::List(inner) => {
+//RS                 // D-SOA1: slicing a columnar list is deferred (v1 core surface is
+//RS                 // index/field/len/push/iterate); reject rather than miscompile.
+//RS                 if let Type::Named(elem) = inner.as_ref() {
+//RS                     if self.registry.is_columnar(elem) {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E1108",
+//RS                             format!(
+//RS                                 "slicing isn't supported on a columnar list `{}` yet",
+//RS                                 Type::List(inner.clone()).show()
+//RS                             ),
+//RS                             "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
+//RS                             format!(
+//RS                                 "drop `#Layout(columnar)` from `{}` to slice, or index the elements you need in a loop",
+//RS                                 elem
+//RS                             ),
+//RS                             Some(span),
+//RS                         ));
+//RS                         return None;
+//RS                     }
+//RS                 }
+//RS                 Some(Type::List(inner))
+//RS             }
+//RS             Type::String => Some(Type::String),
+//RS             ty if ty.is_compute_tensor_family() => Some(Type::Named("Tensor".to_string())),
+//RS             other => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0505",
+//RS                     format!("only lists and strings can be sliced, not {}", other.show()),
+//RS                     "a Range can project a window only from indexed storage".to_string(),
+//RS                     "use `xs[a..b]` on a list or a text range operation on String".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 None
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn infer_range(
+//RS         &mut self,
+//RS         start: &mut Box<Expr>,
+//RS         end: &mut Box<Expr>,
+//RS         _span: Span,
+//RS     ) -> Option<Type> {
+//RS         let mut valid = true;
+//RS         for bound in [start.as_mut(), end.as_mut()] {
+//RS             if !matches!(&self.infer(bound)?, Type::Int | Type::InlineRange { .. }) {
+//RS                 valid = false;
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0505",
+//RS                     "range bounds must be Int".to_string(),
+//RS                     "a Range stores whole-number start and end bounds".to_string(),
+//RS                     "use Int values on both sides of the range operator".to_string(),
+//RS                     Some(bound.span()),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         valid.then(|| Type::Named(crate::Syntax::TYPE_RANGE.to_string()))
+//RS     }
+//RS 
+//RS     pub(crate) fn infer_field(
+//RS         &mut self,
+//RS         inner: &mut Box<Expr>,
+//RS         member: &str,
+//RS         span: Span,
+//RS     ) -> Option<Type> {
+//RS         let field_expr = Expr::Field(inner.clone(), member.to_string(), span);
+//RS         if self.reject_moved_expr_use(&field_expr, span) {
+//RS             return None;
+//RS         }
+//RS         self.check_place_read(&field_expr, span);
+//RS         if let Some(path) = field_path(inner) {
+//RS             if let Some(alias) = path.split('.').next() {
+//RS                 if self
+//RS                     .core_imports
+//RS                     .get(alias)
+//RS                     .is_some_and(|module| module.starts_with("board."))
+//RS                 {
+//RS                     if let Expr::Ident(alias, alias_span) = &**inner {
+//RS                         self.record_import_alias_reference(alias, *alias_span);
+//RS                     }
+//RS                     return Some(Type::Named("__JetHardwareField".to_string()));
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Expr::Field(base, leaf, _) = &**inner {
+//RS             if let Expr::Ident(alias, alias_span) = &**base {
+//RS                 self.record_import_alias_reference(alias, *alias_span);
+//RS                 if self.core_imports.get(alias).map(String::as_str) == Some("core.compiler.lang")
+//RS                     && crate::Policy::rule_arg_declaration(leaf).is_some()
+//RS                 {
+//RS                     let enum_name = leaf.clone();
+//RS                     **inner = Expr::Ident(enum_name.clone(), span);
+//RS                     let mut empty = Vec::new();
+//RS                     return Some(self.check_enum_lit(
+//RS                         &enum_name,
+//RS                         member,
+//RS                         &mut empty,
+//RS                         span,
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
+//RS                     let enum_name = match leaf.as_str() {
+//RS                         "DataEvent" => Some("DataEvent"),
+//RS                         "EncodingErrorKind" => Some("EncodingErrorKind"),
+//RS                         "EncodingFormat" => Some("EncodingFormat"),
+//RS                         _ => None,
+//RS                     };
+//RS                     if let Some(enum_name) = enum_name {
+//RS                         **inner = Expr::Ident(enum_name.to_string(), span);
+//RS                         let mut empty = Vec::new();
+//RS                         return Some(self.check_enum_lit(
+//RS                             enum_name,
+//RS                             member,
+//RS                             &mut empty,
+//RS                             span,
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 if leaf == "State" {
+//RS                     let is_declared_state = self
+//RS                         .state_fact_registry(alias)
+//RS                         .and_then(|facts| facts.state_members(alias))
+//RS                         .is_some_and(|states| states.iter().any(|state| state == member));
+//RS                     if is_declared_state {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0302",
+//RS                             format!("`{alias}.State.{member}` is not a runtime value"),
+//RS                             "the reserved `.State` plane contains compile-time facts"
+//RS                                 .to_string(),
+//RS                             format!(
+//RS                                 "use it in `#State({alias}.State.{member})`, `#Transition`, or type reflection"
+//RS                             ),
+//RS                             Some(span),
+//RS                         ));
+//RS                         return None;
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Expr::Ident(root, _) = &**inner {
+//RS             if root == Syntax::FOREIGN_OS && member == "environ" {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0039",
+//RS                     "`os.environ` is written `env.get` in Jet".to_string(),
+//RS                     "environment access lives in the `core.sys` module".to_string(),
+//RS                     "import `core.sys as env` and call `env.get(name)`".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 return None;
+//RS             }
+//RS         }
+//RS         if let Expr::Ident(alias, alias_span) = &**inner {
+//RS             if self.lookup(alias).is_none() {
+//RS                 if let Some(module) = self.core_imports.get(alias).cloned() {
+//RS                     return self.infer_core_field(alias, &module, member, *alias_span, span);
+//RS                 }
+//RS                 if let (Some(modules), Some(module_idx)) = (self.modules, self.imports.get(alias)) {
+//RS                     if let Some(sig) = modules[*module_idx].funcs.get(member) {
+//RS                         if sig.c_abi_name.is_some() {
+//RS                             let ty = Type::Fn {
+//RS                                 params: sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
+//RS                                 ret: sig.return_type.clone().map(Box::new),
+//RS                                 effect_bound: None,
+//RS                                 return_view_provenance: None,
+//RS                                 param_contract: None,
+//RS                                 call_metadata: None,
+//RS                             };
+//RS                             self.record_import_alias_reference(alias, *alias_span);
+//RS                             self.diags.push(crate::Sema::FFI::e3203(&ty, span));
+//RS                             return Some(ty);
+//RS                         }
+//RS                     }
+//RS                     if let Some(ty) = modules[*module_idx].consts.get(member).cloned() {
+//RS                         let definition_span = self
+//RS                             .name_ledger
+//RS                             .declaration(*module_idx, member)
+//RS                             .filter(|declaration| declaration.kind == "const")
+//RS                             .map(|declaration| declaration.span);
+//RS                         if let Some(definition_span) = definition_span {
+//RS                             if !self
+//RS                                 .name_ledger
+//RS                                 .visible(self.module_idx, *module_idx, member)
+//RS                             {
+//RS                                 self.diags
+//RS                                     .push(crate::Sema::Diagnostics::private_item(member, span));
+//RS                                 return None;
+//RS                             }
+//RS                             let target_path = self
+//RS                                 .name_ledger
+//RS                                 .module_path(*module_idx)
+//RS                                 .expect("name ledger must track every imported module")
+//RS                                 .to_string();
+//RS                             self.record_import_alias_reference(alias, *alias_span);
+//RS                             if *module_idx != self.module_idx
+//RS                                 && Syntax::classify_identifier(member)
+//RS                                     == Syntax::IdentifierClass::SoftPublic
+//RS                             {
+//RS                                 self.diags.push(soft_public_use(member, span));
+//RS                             }
+//RS                             self.record_reference_anchor(
+//RS                                 span,
+//RS                                 &target_path,
+//RS                                 "const",
+//RS                                 definition_span,
+//RS                             );
+//RS                             return Some(ty);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Expr::Ident(type_name, type_span) = &**inner {
+//RS             let display_type_name = self.display_type_name(type_name, None);
+//RS             // D-SERDE13=B: `Data.Null` etc. — retired spelling, point at `DataTree`.
+//RS             if type_name == "Data" {
+//RS                 self.diags.push(data_renamed_to_datatree(*type_span));
+//RS                 return Some(json_ty());
+//RS             }
+//RS             if is_json_type_name(type_name) {
+//RS                 if let Some(ret) = self.check_core_json_lit(member, &mut [], span) {
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS             // D-DBDRIVER1: `DBValue.Null` — the only zero-arg `DBValue` variant,
+//RS             // reaching sema as a `Field` (mirrors `Data.Null` just above).
+//RS             if type_name == crate::Syntax::TYPE_DB_VALUE {
+//RS                 if let Some(ret) = self.check_core_dbvalue_lit(member, &mut [], span) {
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS             // D-NUMOPS1: numeric type constants — `U8.MAX`, `Int.MIN`,
+//RS             // `Float.INFINITY`/`NAN`/`EPSILON`.
+//RS             if let Some(nt) = crate::AST::numeric_type_from_name(type_name) {
+//RS                 if let Some(cty) = numeric_const_type(&nt, member) {
+//RS                     return Some(cty);
+//RS                 }
+//RS             }
+//RS             // D-LAYOUT-FACTS1=B / D-META-STAGE1=B: the compiler-owned facts a
+//RS             // type carries. `T.$layout`, `T.$name` and `T.$fields` are one
+//RS             // spelling, and each projects the matching `TypeInfo` member, so
+//RS             // the fact answers the same type reflection already answers.
+//RS             if let Some(projected) = crate::Syntax::compiler_fact_member(member) {
+//RS                 if self.is_known_enum(type_name)
+//RS                     || self.struct_owner_module(type_name, None).is_some()
+//RS                 {
+//RS                     if let Some(ty) = core_struct_field(crate::Syntax::TYPE_TYPE_INFO, projected) {
+//RS                         return Some(ty);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if self.is_known_enum(type_name) {
+//RS                 let mut empty = Vec::new();
+//RS                 return Some(self.check_enum_lit(type_name, member, &mut empty, span, Some(span)));
+//RS             }
+//RS             if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
+//RS                 let is_declared_state = self
+//RS                     .modules
+//RS                     .and_then(|modules| modules.get(owner_mod))
+//RS                     .and_then(|module| module.fact_registry.state_members(type_name))
+//RS                     .is_some_and(|states| states.iter().any(|state| state == member));
+//RS                 let (what, why, fix) = if is_declared_state {
+//RS                     (
+//RS                         format!("`{display_type_name}.{member}` is not a value"),
+//RS                         "struct fields need a value before the dot; typestate names are compile-time facts, not runtime values"
+//RS                             .to_string(),
+//RS                         format!(
+//RS                             "use a `{display_type_name}` value before a field, or call a static method on `{display_type_name}`"
+//RS                         ),
+//RS                     )
+//RS                 } else {
+//RS                     (
+//RS                         format!("`{display_type_name}` has no static member `{member}`"),
+//RS                         format!(
+//RS                             "`{display_type_name}` names a struct type; fields need a value before the dot"
+//RS                         ),
+//RS                         format!(
+//RS                             "use a `{display_type_name}` value before an instance field, or call a static method that exists on `{display_type_name}`"
+//RS                         ),
+//RS                     )
+//RS                 };
+//RS                 self.diags
+//RS                     .push(Diagnostic::error("E0302", what, why, fix, Some(span)));
+//RS                 return None;
+//RS             }
+//RS         }
+//RS         // Numeric field spelling already emitted E0049 in the parser. The
+//RS         // recovery member cannot name a Jet field, so do not add E0302.
+//RS         if member == "0" {
+//RS             return None;
+//RS         }
+//RS         self.borrow_ctx = true;
+//RS         let suppress = self.suppress_partial_move_root_read;
+//RS         self.suppress_partial_move_root_read = true;
+//RS         let t = self.infer(inner);
+//RS         self.suppress_partial_move_root_read = suppress;
+//RS         let t = t?;
+//RS         // D-ONCE-AT1=D / D-META-CODE1=A: compiler facts are typed
+//RS         // projections on every reflected value, not only on the root
+//RS         // `TypeInfo` value.  A derive loop commonly binds one `FieldInfo`
+//RS         // and then reads `field.$name`.
+//RS         if let Some(projected) = crate::Syntax::compiler_fact_member(member) {
+//RS             if let Type::Named(type_name) = &t {
+//RS                 if let Some(fty) = core_struct_field(type_name, projected) {
+//RS                     return Some(fty);
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-CRYPTO-API1: reading a secret-bearing value's raw bytes is an
+//RS         // exposure. Outside Core source it needs an audited `#Unsafe` region,
+//RS         // exactly like the `core.crypto.expert` exposure functions.
+//RS         if member == "bytes"
+//RS             && !self.in_unsafe
+//RS             && crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t)
+//RS             && !self.name_ledger.module_alias(self.module_idx).is_some_and(|alias| {
+//RS                 jet_foundation::CoreModuleExports::core_source_module_by_alias(alias).is_some()
+//RS             })
+//RS         {
+//RS             let exposure =
+//RS                 crate::Sema::Diagnostics::secret_exposure_function(&t).unwrap_or("secret_bytes");
+//RS             let shown = t.show().trim_matches('`').to_string();
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0510",
+//RS                 format!("reading `{shown}.bytes` exposes secret key material"),
+//RS                 "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate (D-CRYPTO-API1)".to_string(),
+//RS                 format!(
+//RS                     "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"
+//RS                 ),
+//RS                 Some(span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         self.field_type(&t, member, span)
+//RS     }
+//RS 
+//RS     fn is_core_files_handle_path(&self, ty: &Type, member: &str) -> bool {
+//RS         if member != "path" {
+//RS             return false;
+//RS         }
+//RS         let type_name = match ty {
+//RS             Type::Named(name) => name.as_str(),
+//RS             Type::Apply { name, .. } => name.as_str(),
+//RS             _ => return false,
+//RS         };
+//RS         let (owner_import_ns, leaf) = self.struct_type_name_parts(type_name);
+//RS         if !matches!(
+//RS             leaf,
+//RS             "FileReader" | "FileWriter" | "FileLock" | "TempDir" | "TempFile"
+//RS         ) {
+//RS             return false;
+//RS         }
+//RS         if let Some(owner) = self.struct_owner_module(leaf, owner_import_ns) {
+//RS             let Some(modules) = self.modules else {
+//RS                 return false;
+//RS             };
+//RS             let Some(files) = jet_foundation::CoreModuleExports::core_source_modules()
+//RS                 .iter()
+//RS                 .find(|source| source.module == "core.files")
+//RS             else {
+//RS                 return false;
+//RS             };
+//RS             modules
+//RS                 .get(owner)
+//RS                 .is_some_and(|module| module.module_alias == files.alias)
+//RS         } else {
+//RS             owner_import_ns.is_none()
+//RS                 && crate::Sema::CheckerCoreLib::core_struct_field_type(leaf, "path", &[]).is_some()
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-FIELDPOL1: true when `member` is a computed field on struct type `t`
+//RS     /// (`Named` or `Apply`) — used at every WRITE site (`x.field = …`,
+//RS     /// `x.field++`) to reject with E0339 before `field_type` would otherwise
+//RS     /// resolve it as a normal (settable) field.
+//RS     pub(crate) fn field_is_computed(&self, t: &Type, member: &str) -> bool {
+//RS         if self.is_core_files_handle_path(t, member) {
+//RS             return true;
+//RS         }
+//RS         let type_name = match t {
+//RS             Type::Named(n) => n.as_str(),
+//RS             Type::Apply { name, .. } => name.as_str(),
+//RS             _ => return false,
+//RS         };
+//RS         let (owner_import_ns, lookup_name) = self.struct_type_name_parts(type_name);
+//RS         let Some(owner_mod) = self.struct_owner_module(lookup_name, owner_import_ns) else {
+//RS             return false;
+//RS         };
+//RS         self.computed_field_types_of(owner_mod, lookup_name)
+//RS             .is_some_and(|c| c.contains_key(member))
+//RS     }
+//RS 
+//RS     /// Resolve the type of `member` on the struct type `t` (S71 reuses this for
+//RS     /// `?.` chaining). Emits E0302 and returns `None` when there's no such field.
+//RS     pub(crate) fn field_type(&mut self, t: &Type, member: &str, span: Span) -> Option<Type> {
+//RS         if let Type::Tagged {
+//RS             marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
+//RS             inner,
+//RS         } = t
+//RS         {
+//RS             return self.field_type(inner, member, span);
+//RS         }
+//RS         // D-PIN2=A / D-PIN3=A: reaching a field through `Pin<T>` resolves against
+//RS         // `T`. The field's own declared type is the mark: a `Pin<U>` field comes
+//RS         // back as `Pin<U>` and keeps the no-move promise, every other field comes
+//RS         // back as an ordinary view. No second projection rule.
+//RS         if let Type::Apply { name, args } = t {
+//RS             if name == crate::Syntax::TYPE_PIN && args.len() == 1 {
+//RS                 return self.field_type(&args[0], member, span);
+//RS             }
+//RS         }
+//RS         if self.is_core_files_handle_path(t, member) {
+//RS             return Some(Type::String);
+//RS         }
+//RS         // D-SHAREDGUARD2=A: the guard's held value is a compiler-known place,
+//RS         // not a stored public struct field. The hidden tag records whether the
+//RS         // place is read-only or editable while diagnostics show one public
+//RS         // `SharedGuard<T>` type.
+//RS         if member == "value" {
+//RS             if let Type::Apply { name, args } = t {
+//RS                 if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+//RS                     return Some(args[0].clone());
+//RS                 }
+//RS             }
+//RS             if let Type::Tagged { marker, inner } = t {
+//RS                 if matches!(
+//RS                     marker,
+//RS                     crate::AST::TagMarker::Internal(
+//RS                         crate::AST::InternalTag::SharedGuardRead
+//RS                             | crate::AST::InternalTag::SharedGuardEdit
+//RS                     )
+//RS                 ) {
+//RS                     if let Type::Apply { name, args } = inner.as_ref() {
+//RS                         if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+//RS                             return Some(args[0].clone());
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Type::Named(type_name) = t {
+//RS             let display_type_name = self.display_type_name(type_name, None);
+//RS             // D-SWIZZLE1: named lane swizzles on vector/SIMD types (not matrices).
+//RS             if is_swizzleable_math_type(type_name) && !self.registry.contains(type_name) {
+//RS                 match parse_swizzle_member(member, type_name) {
+//RS                     SwizzleParse::Ok(lanes) => {
+//RS                         return Some(swizzle_read_type(type_name, lanes.len()));
+//RS                     }
+//RS                     SwizzleParse::InvalidLane { lane } => {
+//RS                         let valid = match math_arity(type_name) {
+//RS                             2 => "x and y",
+//RS                             3 => "x, y, and z",
+//RS                             4 => "x, y, z, and w",
+//RS                             _ => "x/y/z/w",
+//RS                         };
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E3110",
+//RS                             format!("lane `{}` isn't valid on `{}`", lane, display_type_name),
+//RS                             format!(
+//RS                                 "swizzle members name lanes with x/y/z/w — `{}` only has {}",
+//RS                                 display_type_name, valid
+//RS                             ),
+//RS                             format!("use only the lanes defined for `{}`", display_type_name),
+//RS                             Some(span),
+//RS                         ));
+//RS                         return None;
+//RS                     }
+//RS                     SwizzleParse::NotSwizzle => {}
+//RS                 }
+//RS             }
+//RS             // `check_struct_lit` names a value built through an import namespace
+//RS             // `alias.Type.{ … }` as `Type::Named("alias.Type")` (disambiguates
+//RS             // same-named structs across modules), but the type registry itself
+//RS             // is keyed by the bare struct name in its owning module. Split the
+//RS             // qualified name back apart so field lookups resolve the same way
+//RS             // construction did — otherwise every field read on a foreign-module
+//RS             // struct value falls through to "only works on struct and tuple
+//RS             // values" (E0302) even though the value genuinely is a struct.
+//RS             let (owner_import_ns, lookup_name) = self.struct_type_name_parts(type_name);
+//RS             if let Some(owner_mod) = self.struct_owner_module(lookup_name, owner_import_ns) {
+//RS                 let display_type_name = self.display_type_name(lookup_name, Some(owner_mod));
+//RS                 if let Some(fields) = self.struct_fields_of(owner_mod, lookup_name) {
+//RS                     if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
+//RS                         let fty = fty.clone();
+//RS                         if owner_mod != self.module_idx
+//RS                             && !self.field_is_pub_in(owner_mod, lookup_name, member)
+//RS                         {
+//RS                             self.diags.push(private_item(member, span));
+//RS                             return None;
+//RS                         } else if owner_mod != self.module_idx
+//RS                             && Syntax::classify_identifier(member)
+//RS                                 == Syntax::IdentifierClass::SoftPublic
+//RS                         {
+//RS                             self.diags.push(soft_public_use(member, span));
+//RS                         }
+//RS                         self.record_field_reference(owner_mod, lookup_name, member, span);
+//RS                         let fty = self.owner_trait_values(owner_mod, fty);
+//RS                         return Some(self.owner_type_for_reader(owner_mod, lookup_name, fty));
+//RS                     }
+//RS                     // D-FIELDPOL1: a computed field is never in `fields` (it's
+//RS                     // not stored) but a *read* still resolves its declared
+//RS                     // type — only the write side (assignment/incdec/struct-lit)
+//RS                     // rejects it with E0339.
+//RS                     if let Some(computed) = self.computed_field_types_of(owner_mod, lookup_name) {
+//RS                         if let Some((_, cty)) = computed.get(member) {
+//RS                             return Some(cty.clone());
+//RS                         }
+//RS                     }
+//RS                     let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
+//RS                     let suggestion = suggest_field(member, &field_names);
+//RS                     let fix = suggestion.as_ref().map_or_else(
+//RS                         || format!("check the field names on `{}`", display_type_name),
+//RS                         |suggest| format!("did you mean `{}`?", suggest),
+//RS                     );
+//RS                     let mut diagnostic = Diagnostic::error(
+//RS                         "E0302",
+//RS                         format!("`{}` has no field `{}`", display_type_name, member),
+//RS                         "field access only works on names declared in the struct".to_string(),
+//RS                         fix,
+//RS                         Some(span),
+//RS                     );
+//RS                     if let Some(suggest) = suggestion {
+//RS                         diagnostic = diagnostic.with_edit(TextEdit {
+//RS                             span,
+//RS                             new_text: suggest,
+//RS                         });
+//RS                     }
+//RS                     self.diags.push(diagnostic);
+//RS                     return None;
+//RS                 }
+//RS             }
+//RS             if let Some(fty) = core_struct_field(type_name, member) {
+//RS                 return Some(fty);
+//RS             }
+//RS             // D-TIME-INSTANT1=A: the compiler-owned `Instant` is a monotonic
+//RS             // Time point with no epoch and no fields; the wall clock is its
+//RS             // own read.
+//RS             if type_name == "Instant" && member == "unix_ns" {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0302",
+//RS                     "`Instant` has no field `unix_ns`".to_string(),
+//RS                     "`Instant` is a monotonic Time point with no epoch; wall-clock Unix nanoseconds are a separate clock read".to_string(),
+//RS                     "call `time.unix_ns()` for wall-clock Unix nanoseconds".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 return None;
+//RS             }
+//RS         }
+//RS         if let Type::Apply { name, args } = t {
+//RS             let (owner_import_ns, leaf) = Self::split_type_name(name);
+//RS             // An applied type names a declaration with that many type
+//RS             // parameters: the reserved generic `VjpRun<T>` is not the
+//RS             // non-generic source-owned `core.compute` record of the same leaf.
+//RS             let owner = self.struct_owner_module(leaf, owner_import_ns);
+//RS             if owner_import_ns.is_none()
+//RS                 && owner.is_some_and(|owner| self.struct_type_param_count(owner, leaf) != args.len())
+//RS             {
+//RS                 if let Some(fty) = core_generic_struct_field(leaf, member, args) {
+//RS                     return Some(fty);
+//RS                 }
+//RS             }
+//RS             if let Some(owner_mod) = owner {
+//RS                 if let Some(fields) = self.struct_fields_of(owner_mod, leaf) {
+//RS                     let subst = self.struct_subst_for_owner(owner_mod, leaf, args);
+//RS                     if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
+//RS                         let fty = fty.clone();
+//RS                         if owner_mod != self.module_idx
+//RS                             && !self.field_is_pub_in(owner_mod, leaf, member)
+//RS                         {
+//RS                             self.diags.push(private_item(member, span));
+//RS                             return None;
+//RS                         } else if owner_mod != self.module_idx
+//RS                             && Syntax::classify_identifier(member)
+//RS                                 == Syntax::IdentifierClass::SoftPublic
+//RS                         {
+//RS                             self.diags.push(soft_public_use(member, span));
+//RS                         }
+//RS                         self.record_field_reference(owner_mod, leaf, member, span);
+//RS                         let fty = self.owner_trait_values(owner_mod, fty);
+//RS                         let fty = self.owner_type_for_reader(owner_mod, leaf, fty);
+//RS                         return Some(self.instantiate_type_for_owner(owner_mod, &fty, &subst));
+//RS                     }
+//RS                     // D-FIELDPOL1: see the `Type::Named` branch above — a
+//RS                     // computed field resolves for reads even though it's
+//RS                     // absent from `fields`.
+//RS                     if let Some(computed) = self.computed_field_types_of(owner_mod, leaf) {
+//RS                         if let Some((_, cty)) = computed.get(member) {
+//RS                             return Some(self.instantiate_type_for_owner(owner_mod, cty, &subst));
+//RS                         }
+//RS                     }
+//RS                     let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
+//RS                     let suggestion = suggest_field(member, &field_names);
+//RS                     let fix = suggestion.as_ref().map_or_else(
+//RS                         || format!("check the field names on `{}`", name),
+//RS                         |suggest| format!("did you mean `{}`?", suggest),
+//RS                     );
+//RS                     let mut diagnostic = Diagnostic::error(
+//RS                         "E0302",
+//RS                         format!("`{}` has no field `{}`", name, member),
+//RS                         "field access only works on names declared in the struct".to_string(),
+//RS                         fix,
+//RS                         Some(span),
+//RS                     );
+//RS                     if let Some(suggest) = suggestion {
+//RS                         diagnostic = diagnostic.with_edit(TextEdit {
+//RS                             span,
+//RS                             new_text: suggest,
+//RS                         });
+//RS                     }
+//RS                     self.diags.push(diagnostic);
+//RS                     return None;
+//RS                 }
+//RS             } else if owner_import_ns.is_none() {
+//RS                 if let Some(fty) = core_generic_struct_field(leaf, member, args) {
+//RS                     // Reserved core generic field lookup runs only after the
+//RS                     // user-type-wins guard above.
+//RS                     return Some(fty);
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Type::Tuple(fields) = t {
+//RS             for (fname, fty) in fields {
+//RS                 if fname == member {
+//RS                     return Some((**fty).clone());
+//RS                 }
+//RS             }
+//RS             let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+//RS             let suggestion = suggest_field(member, &field_names);
+//RS             let fix = suggestion.as_ref().map_or_else(
+//RS                 || "check the member names in this tuple".to_string(),
+//RS                 |suggest| format!("did you mean `{}`?", suggest),
+//RS             );
+//RS             let mut diagnostic = Diagnostic::error(
+//RS                 "E0302",
+//RS                 format!("this tuple has no member `{}`", member),
+//RS                 "field access only works on names declared in the tuple".to_string(),
+//RS                 fix,
+//RS                 Some(span),
+//RS             );
+//RS             if let Some(suggest) = suggestion {
+//RS                 diagnostic = diagnostic.with_edit(TextEdit {
+//RS                     span,
+//RS                     new_text: suggest,
+//RS                 });
+//RS             }
+//RS             self.diags.push(diagnostic);
+//RS             return None;
+//RS         }
+//RS         // D-OUTCOME-SHAPE1=A: a missing value never leaves the function by
+//RS         // itself, so a field read on `T?` is refused with the ways to handle
+//RS         // absence rather than unwrapping or returning early.
+//RS         if let Type::Option(inner) = t {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0310",
+//RS                 format!(
+//RS                     "`.{member}` needs a `{}`, but this value is `{}` and might be missing",
+//RS                     inner.show(),
+//RS                     t.show()
+//RS                 ),
+//RS                 "a missing value never leaves the function by itself; it stays an ordinary value until the code handles it (D-OUTCOME-SHAPE1=A)".to_string(),
+//RS                 format!(
+//RS                     "write `?.{member}` to keep the result optional, add `?? fallback` for a default, or match `.Val(x)` / `.None`"
+//RS                 ),
+//RS                 Some(span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         self.diags.push(Diagnostic::error(
+//RS             "E0302",
+//RS             format!("`.{}` only works on struct and tuple values", member),
+//RS             "enums and other values use methods or pattern tests instead".to_string(),
+//RS             format!("use a struct or tuple value before `.{}`", member),
+//RS             Some(span),
+//RS         ));
+//RS         None
+//RS     }
+//RS }
+// END-PORT-PENDING 0411 crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5846-7841
+

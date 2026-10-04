@@ -1,0 +1,2266 @@
+// PORT-PENDING 0388 crates-jet-sema-src-sema-checkercorelib-fixed-sigs-slice-4202: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:4202-6463
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         | "unescape_and_strip" | "attr_escape" | "text_escape") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::String)))
+//RS         }
+//RS         ("core.text.html", "escape_quote") => Some((
+//RS             vec![(read, Type::String), (read, Type::Bool)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.time.calendar", "isleap") => {
+//RS             Some((vec![(read, Type::Int)], Some(Type::Bool)))
+//RS         }
+//RS         ("core.time.calendar", "leapdays") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.time.calendar", "weekday") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.time.calendar", "monthrange") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::Tuple(vec![
+//RS                 ("days".to_string(), Box::new(Type::Int)),
+//RS                 ("weekday".to_string(), Box::new(Type::Int)),
+//RS             ])),
+//RS         )),
+//RS         ("core.time.calendar", "monthcalendar") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::List(Box::new(Type::List(Box::new(Type::Int))))),
+//RS         )),
+//RS         ("core.time.calendar", "monthcalendar_start") => Some((
+//RS             vec![
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::List(Box::new(Type::List(Box::new(Type::Int))))),
+//RS         )),
+//RS         ("core.time.calendar", "yearcalendar") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::List(Box::new(Type::List(Box::new(
+//RS                 Type::List(Box::new(Type::Int)),
+//RS             ))))),
+//RS         )),
+//RS         ("core.time.calendar", "weekheader") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.time.calendar", "formatmonth") => Some((
+//RS             vec![
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.time.calendar", "formatyear") => {
+//RS             Some((vec![(read, Type::Int)], Some(Type::String)))
+//RS         }
+//RS         ("core.time.calendar", "day_name" | "day_abbr" | "month_name" | "month_abbr") => {
+//RS             Some((vec![(read, Type::Int)], Some(Type::String)))
+//RS         }
+//RS         ("core.time.calendar", "timegm") => Some((
+//RS             vec![
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.time.expiring", "expired") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.time.expiring", "remaining_ms") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         // core.log: structured logging, typed fields, spans, sinks.
+//RS         ("core.log", "info" | "warn" | "error" | "debug" | "critical" | "fatal") => {
+//RS             Some((vec![(read, string.clone())], None))
+//RS         }
+//RS         ("core.log", "field") => Some((
+//RS             vec![(read, string.clone()), (read, string.clone())],
+//RS             Some(Type::Named("LogField".to_string())),
+//RS         )),
+//RS         ("core.log", "int") => Some((
+//RS             vec![(read, string.clone()), (read, Type::Int)],
+//RS             Some(Type::Named("LogField".to_string())),
+//RS         )),
+//RS         ("core.log", "float") => Some((
+//RS             vec![(read, string.clone()), (read, Type::Float)],
+//RS             Some(Type::Named("LogField".to_string())),
+//RS         )),
+//RS         ("core.log", "bool") => Some((
+//RS             vec![(read, string.clone()), (read, Type::Bool)],
+//RS             Some(Type::Named("LogField".to_string())),
+//RS         )),
+//RS         ("core.log", "redact") => Some((
+//RS             vec![(read, string.clone())],
+//RS             Some(Type::Named("LogField".to_string())),
+//RS         )),
+//RS         ("core.log", "info_fields" | "warn_fields" | "error_fields" | "debug_fields") => Some((
+//RS             vec![
+//RS                 (read, string.clone()),
+//RS                 (
+//RS                     read,
+//RS                     Type::List(Box::new(Type::Named("LogField".to_string()))),
+//RS                 ),
+//RS             ],
+//RS             None,
+//RS         )),
+//RS         ("core.log", "span") => Some((
+//RS             vec![(read, string.clone())],
+//RS             Some(Type::Named("LogSpan".to_string())),
+//RS         )),
+//RS         ("core.log", "enter" | "close") => {
+//RS             Some((vec![(read, Type::Named("LogSpan".to_string()))], None))
+//RS         }
+//RS         ("core.log", "set_sink") => {
+//RS             Some((vec![(read, string.clone()), (read, string.clone())], None))
+//RS         }
+//RS         ("core.log", "sample_every") => Some((vec![(read, Type::Int)], None)),
+//RS         ("core.log", "counter") => Some((
+//RS             vec![(read, string.clone()), (read, Type::Int)],
+//RS             Some(Type::Named("LogField".to_string())),
+//RS         )),
+//RS         ("core.log", "otlp_file") => Some((vec![(read, string.clone())], None)),
+//RS         ("core.log", "set_level") => Some((vec![(read, Type::String)], None)),
+//RS         ("core.log", "disable" | "flush") => Some((vec![], None)),
+//RS         ("core.log", "enabled") => Some((vec![(read, Type::String)], Some(bool_))),
+//RS         // D-OBS3: set OTel trace_id for all subsequent log entries on this thread.
+//RS         ("core.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
+//RS         // D-LOGFMT1=A: override log output format ("json" | "text").
+//RS         ("core.log", "setup") => Some((vec![(read, Type::String)], None)),
+//RS         // core.crypto: vetted hash functions (D-LR3).
+//RS         ("core.crypto", "sha256") => Some((
+//RS             vec![(read, Type::List(Box::new(u8_ty())))],
+//RS             Some(Type::Named("Digest256".into())),
+//RS         )),
+//RS         (
+//RS             "core.crypto",
+//RS             "sha1" | "sha224" | "sha384" | "sha3_224" | "sha3_256" | "sha3_384" | "sha3_512",
+//RS         ) => Some((
+//RS             vec![(read, Type::List(Box::new(u8_ty())))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.crypto", "hmac_sha256") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(Type::List(Box::new(u8_ty()))),
+//RS         )),
+//RS         ("core.crypto", "pbkdf2_hmac") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::List(Box::new(u8_ty()))),
+//RS         )),
+//RS         ("core.crypto", "constant_time_equal_bytes") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.crypto", "hkdf_sha256") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Secret".into())),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Secret".into()),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto", "x25519_public") => Some((
+//RS             vec![(read, Type::List(Box::new(u8_ty())))],
+//RS             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+//RS         )),
+//RS         ("core.crypto", "x25519_shared") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+//RS         )),
+//RS         ("core.crypto", "password_hash") => Some((
+//RS             vec![(read, Type::Named("Secret".into()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("PasswordHash".into()),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto", "password_hash_with_salt") => Some((
+//RS             vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))],
+//RS             Some(result_ty(Type::String, Type::String)),
+//RS         )),
+//RS         ("core.crypto", "password_verify") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Secret".into())),
+//RS                 (read, Type::Named("PasswordHash".into())),
+//RS             ],
+//RS             Some(result_ty(Type::Bool, Type::Named("CryptoError".into()))),
+//RS         )),
+//RS         // D-CRYPTOENV1=A: misuse-resistant envelope (RustCrypto via FFI bridge).
+//RS         ("core.crypto", "seal") => Some((
+//RS             vec![
+//RS                 (
+//RS                     read,
+//RS                     Type::List(Box::new(Type::Named("X25519PublicKey".into()))),
+//RS                 ),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Sealed".into()),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto", "open") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("X25519SecretKey".into())),
+//RS                 (read, Type::Named("Sealed".into())),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(u8_ty())),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto", "file_seal") => Some((
+//RS             vec![
+//RS                 (
+//RS                     read,
+//RS                     Type::List(Box::new(Type::Named("X25519PublicKey".into()))),
+//RS                 ),
+//RS                 (read, Type::Named("Path".into())),
+//RS                 (read, Type::Named("Path".into())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("FileCryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto", "file_open") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("X25519SecretKey".into())),
+//RS                 (read, Type::Named("Path".into())),
+//RS                 (read, Type::Named("Path".into())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("FileCryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto", "sign") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SigningKey".into())),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Signature".into()),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto", "verify") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("VerifyKey".into())),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::Named("Signature".into())),
+//RS             ],
+//RS             Some(result_ty(Type::Bool, Type::Named("CryptoError".into()))),
+//RS         )),
+//RS         // D-CRYPTO-API1=A typed safe surface. Existing edition-2026 raw calls
+//RS         // are diagnosed/migrated separately; these signatures are nominal.
+//RS         ("core.crypto", "wrap") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Secret".into())),
+//RS                 (read, Type::Named("X25519PublicKey".into())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("WrappedKey".into()),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto", "unwrap") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("X25519SecretKey".into())),
+//RS                 (read, Type::Named("WrappedKey".into())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Secret".into()),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto", "x25519") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("X25519SecretKey".into())),
+//RS                 (read, Type::Named("X25519PublicKey".into())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("SharedSecret".into()),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto", "constant_time_equal") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Secret".into())),
+//RS                 (read, Type::Named("Secret".into())),
+//RS             ],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.crypto", "blake3") => Some((
+//RS             vec![(read, Type::List(Box::new(u8_ty())))],
+//RS             Some(Type::Named("Digest256".into())),
+//RS         )),
+//RS         ("core.crypto", "sha512") => Some((
+//RS             vec![(read, Type::List(Box::new(u8_ty())))],
+//RS             Some(Type::Named("Digest512".into())),
+//RS         )),
+//RS         // D-CRYPTO-API1=A: exact #Unsafe expert API. Bounds remain runtime
+//RS         // checked; lexical gating never waives memory safety or cleanup.
+//RS         ("core.crypto.expert", "xchacha20poly1305_seal" | "aes256gcm_seal") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(u8_ty())),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto.expert", "xchacha20poly1305_open" | "aes256gcm_open") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(u8_ty())),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto.expert", "open_v1") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(u8_ty())),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto.expert", "migrate_v1") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::Named("Path".into())),
+//RS                 (
+//RS                     read,
+//RS                     Type::List(Box::new(Type::Named("X25519PublicKey".into()))),
+//RS                 ),
+//RS                 (read, Type::Named("Path".into())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("FileCryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto.expert", "ed25519_sign") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Signature".into()),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto.expert", "ed25519_verify_strict") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(Type::Bool, Type::Named("CryptoError".into()))),
+//RS         )),
+//RS         ("core.crypto.expert", "x25519_raw") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Secret".into()),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto.expert", "hkdf_sha256_raw") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Secret".into()),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto.expert", "argon2id") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Secret".into())),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Secret".into()),
+//RS                 Type::Named("CryptoError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto.expert", "secret_bytes") => Some((
+//RS             vec![(read, Type::Named("Secret".into()))],
+//RS             Some(Type::List(Box::new(u8_ty()))),
+//RS         )),
+//RS         ("core.crypto.expert", "signing_key_bytes") => Some((
+//RS             vec![(read, Type::Named("SigningKey".into()))],
+//RS             Some(Type::List(Box::new(u8_ty()))),
+//RS         )),
+//RS         ("core.crypto.expert", "x25519_secret_bytes") => Some((
+//RS             vec![(read, Type::Named("X25519SecretKey".into()))],
+//RS             Some(Type::List(Box::new(u8_ty()))),
+//RS         )),
+//RS         ("core.crypto.expert", "shared_secret_bytes") => Some((
+//RS             vec![(read, Type::Named("SharedSecret".into()))],
+//RS             Some(Type::List(Box::new(u8_ty()))),
+//RS         )),
+//RS         ("core.crypto.vault", "prepare_import_signing") => Some((
+//RS             vec![(read, Type::String), (moved, Type::List(Box::new(u8_ty())))],
+//RS             Some(result_ty(
+//RS                 Type::Apply {
+//RS                     name: "MutationPlan".into(),
+//RS                     args: vec![Type::Named("SigningKey".into())],
+//RS                 },
+//RS                 Type::Named("VaultError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto.vault", "prepare_import_x25519") => Some((
+//RS             vec![(read, Type::String), (moved, Type::List(Box::new(u8_ty())))],
+//RS             Some(result_ty(
+//RS                 Type::Apply {
+//RS                     name: "MutationPlan".into(),
+//RS                     args: vec![Type::Named("X25519SecretKey".into())],
+//RS                 },
+//RS                 Type::Named("VaultError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto.vault", "commit_import_signing") => Some((
+//RS             vec![
+//RS                 (
+//RS                     moved,
+//RS                     Type::Apply {
+//RS                         name: "VaultWrite".into(),
+//RS                         args: vec![Type::Named("SigningKey".into())],
+//RS                     },
+//RS                 ),
+//RS                 (
+//RS                     moved,
+//RS                     Type::Apply {
+//RS                         name: "MutationPlan".into(),
+//RS                         args: vec![Type::Named("SigningKey".into())],
+//RS                     },
+//RS                 ),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Apply {
+//RS                     name: "KeyRef".into(),
+//RS                     args: vec![Type::Named("SigningKey".into())],
+//RS                 },
+//RS                 Type::Named("VaultError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.crypto.vault", "commit_import_x25519") => Some((
+//RS             vec![
+//RS                 (
+//RS                     moved,
+//RS                     Type::Apply {
+//RS                         name: "VaultWrite".into(),
+//RS                         args: vec![Type::Named("X25519SecretKey".into())],
+//RS                     },
+//RS                 ),
+//RS                 (
+//RS                     moved,
+//RS                     Type::Apply {
+//RS                         name: "MutationPlan".into(),
+//RS                         args: vec![Type::Named("X25519SecretKey".into())],
+//RS                     },
+//RS                 ),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Apply {
+//RS                     name: "KeyRef".into(),
+//RS                     args: vec![Type::Named("X25519SecretKey".into())],
+//RS                 },
+//RS                 Type::Named("VaultError".into()),
+//RS             )),
+//RS         )),
+//RS         // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
+//RS         ("core.net", "gethostname") => Some((vec![], Some(Type::String))),
+//RS         ("core.net", "tcp_listen") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("TCPListener".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "ip_addr") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("IPAddr".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "ip_to_string") => Some((
+//RS             vec![(read, Type::Named("IPAddr".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.net", "ip_is_ipv4") => Some((
+//RS             vec![(read, Type::Named("IPAddr".to_string()))],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.net", "socket_addr") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(result_ty(
+//RS                 Type::Named("SocketAddr".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "socket_addr_parse") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("SocketAddr".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "socket_host" | "socket_to_string") => Some((
+//RS             vec![(read, Type::Named("SocketAddr".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.net", "socket_port") => Some((
+//RS             vec![(read, Type::Named("SocketAddr".to_string()))],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.net", "tcp_listen_addr") => Some((
+//RS             vec![(read, Type::Named("SocketAddr".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("TCPListener".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "tcp_accept") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Read,
+//RS                 Type::Named("TCPListener".to_string()),
+//RS             )],
+//RS             Some(result_ty(
+//RS                 Type::Named("TCPStream".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "tcp_connect") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("TCPStream".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "tcp_connect_addr") => Some((
+//RS             vec![(read, Type::Named("SocketAddr".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("TCPStream".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "tcp_connect_timeout") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SocketAddr".to_string())),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("TCPStream".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "tcp_connect_happy") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+//RS             Some(result_ty(
+//RS                 Type::Named("TCPStream".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "tcp_read") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Write,
+//RS                 Type::Named("TCPStream".to_string()),
+//RS             )],
+//RS             Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "tcp_write") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "tcp_read_bytes") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(u8_ty())),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "tcp_read_text") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "tcp_write_bytes") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "tcp_write_all_bytes") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "tcp_write_text") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "tcp_shutdown") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Named("NetShutdown".to_string())),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "tcp_close") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Write,
+//RS                 Type::Named("TCPStream".to_string()),
+//RS             )],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "tcp_ready") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Named("NetReadyInterest".to_string())),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("NetReady".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "ready_readable" | "ready_writable") => Some((
+//RS             vec![(read, Type::Named("NetReady".to_string()))],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.net", "error_operation" | "error_message") => Some((
+//RS             vec![(read, Type::Named("NetError".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.net", "error_address" | "error_name") => Some((
+//RS             vec![(read, Type::Named("NetError".to_string()))],
+//RS             Some(Type::Option(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.net", "error_os_code") => Some((
+//RS             vec![(read, Type::Named("NetError".to_string()))],
+//RS             Some(Type::Option(Box::new(Type::Int))),
+//RS         )),
+//RS         ("core.net", "tcp_local_addr" | "tcp_peer_addr") => Some((
+//RS             vec![(read, Type::Named("TCPStream".to_string()))],
+//RS             Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "tcp_local_socket_addr" | "tcp_peer_socket_addr") => Some((
+//RS             vec![(read, Type::Named("TCPStream".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("SocketAddr".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "listener_local_socket_addr") => Some((
+//RS             vec![(read, Type::Named("TCPListener".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("SocketAddr".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "set_timeout") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "set_read_timeout" | "set_write_timeout") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "nodelay") => Some((
+//RS             vec![(read, Type::Named("TCPStream".to_string()))],
+//RS             Some(result_ty(Type::Bool, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "set_nodelay") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Bool),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "ttl") => Some((
+//RS             vec![(read, Type::Named("TCPStream".to_string()))],
+//RS             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "set_ttl") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "socket_type") => Some((
+//RS             vec![(read, Type::Named("TCPStream".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.net", "sendfile") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TCPStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         // Convenience: send a complete HTTP/1.1 response and close the stream.
+//RS         ("core.net", "tcp_reply") => Some((
+//RS             vec![
+//RS                 (AccessConvention::Move, Type::Named("TCPStream".to_string())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "udp_bind") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("UDPSocket".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "udp_bind_addr") => Some((
+//RS             vec![(read, Type::Named("SocketAddr".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("UDPSocket".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "udp_local_addr") => Some((
+//RS             vec![(read, Type::Named("UDPSocket".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("SocketAddr".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "udp_set_timeout") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("UDPSocket".to_string())),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "udp_send_to") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("UDPSocket".to_string())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("SocketAddr".to_string())),
+//RS             ],
+//RS             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "udp_recv_from") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("UDPSocket".to_string())),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("UDPPacket".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "udp_send_bytes_to") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("UDPSocket".to_string())),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::Named("SocketAddr".to_string())),
+//RS             ],
+//RS             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "udp_receive") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("UDPSocket".to_string())),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("UDPPacket".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "udp_packet_data") => Some((
+//RS             vec![(read, Type::Named("UDPPacket".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.net", "udp_packet_addr") => Some((
+//RS             vec![(read, Type::Named("UDPPacket".to_string()))],
+//RS             Some(Type::Named("SocketAddr".to_string())),
+//RS         )),
+//RS         ("core.net", "udp_packet_bytes") => Some((
+//RS             vec![(read, Type::Named("UDPPacket".to_string()))],
+//RS             Some(Type::List(Box::new(u8_ty()))),
+//RS         )),
+//RS         ("core.net", "udp_packet_original_len") => Some((
+//RS             vec![(read, Type::Named("UDPPacket".to_string()))],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.net", "udp_packet_truncated") => Some((
+//RS             vec![(read, Type::Named("UDPPacket".to_string()))],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.net", "unix_listen") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("UnixListener".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "unix_accept") => Some((
+//RS             vec![(read, Type::Named("UnixListener".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("UnixStream".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "unix_connect") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("UnixStream".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "unix_read") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Write,
+//RS                 Type::Named("UnixStream".to_string()),
+//RS             )],
+//RS             Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "unix_write") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("UnixStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "unix_read_bytes") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("UnixStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(u8_ty())),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "unix_write_all_bytes") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("UnixStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "unix_shutdown") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("UnixStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Named("NetShutdown".to_string())),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "unix_close") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Write,
+//RS                 Type::Named("UnixStream".to_string()),
+//RS             )],
+//RS             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "dns_a" | "dns_aaaa") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::Named("IPAddr".to_string()))),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "dns_a_at" | "dns_aaaa_at") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::Named("IPAddr".to_string()))),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "dns_txt") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::String)),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "dns_txt_at") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::String)),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "dns_ptr") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::String)),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "getservbyname") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "getservbyport") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
+//RS         )),
+//RS         ("core.net", "dns_srv") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::Named("DNSSRV".to_string()))),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "dns_srv_at") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::Named("DNSSRV".to_string()))),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "dns_srv_target") => Some((
+//RS             vec![(read, Type::Named("DNSSRV".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.net", "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight") => Some((
+//RS             vec![(read, Type::Named("DNSSRV".to_string()))],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.net", "tls_connect") => Some((
+//RS             vec![
+//RS                 (AccessConvention::Move, Type::Named("TCPStream".to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("TLSStream".to_string()),
+//RS                 Type::Named("NetError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "tls_read") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Write,
+//RS                 Type::Named("TLSStream".to_string()),
+//RS             )],
+//RS             Some(result_ty(
+//RS                 Type::String,
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "tls_write") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TLSStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 unit_ty(),
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net", "tls_close") => Some((
+//RS             vec![(AccessConvention::Move, Type::Named("TLSStream".to_string()))],
+//RS             Some(result_ty(
+//RS                 unit_ty(),
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net.tls", "client") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(result_ty(
+//RS                 Type::Named("TLSStream".to_string()),
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net.tls", "read") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TLSStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(u8_ty())),
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net.tls", "read_text") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TLSStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::String,
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net.tls", "write") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TLSStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Int,
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net.tls", "write_all") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TLSStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 unit_ty(),
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net.tls", "write_text") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("TLSStream".to_string()),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 unit_ty(),
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net.tls", "close") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Move,
+//RS                 Type::Named("TLSStream".to_string()),
+//RS             )],
+//RS             Some(result_ty(
+//RS                 unit_ty(),
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net.tls", "peer_port") => Some((
+//RS             vec![(read, Type::Named("TLSStream".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Int,
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.net.tls", "unwrap") => Some((
+//RS             vec![(read, Type::Named("TLSStream".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("TCPStream".to_string()),
+//RS                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.http", "reason_phrase") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.http", "basic_auth") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.http", "bearer_auth") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         // E2-M10: core.http — HTTP client/server over blocking I/O.
+//RS         // GET / HEAD / DELETE requests (no body sent).
+//RS         ("core.http", "get") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("HTTPResponse".to_string()),
+//RS                 Type::Named("HTTPError".to_string()),
+//RS             )),
+//RS         )),
+//RS         // POST / PUT / PATCH requests (body sent).
+//RS         ("core.http", "post") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("HTTPResponse".to_string()),
+//RS                 Type::Named("HTTPError".to_string()),
+//RS             )),
+//RS         )),
+//RS         // HTTP server bind/serve carry Jet optional controls, while their
+//RS         // native non-direct rows consume Rust `Option` values.
+//RS         ("core.http.server", "bind") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("HTTPMux".to_string())),
+//RS                 (
+//RS                     read,
+//RS                     Type::Option(Box::new(Type::Named("HTTPServerTLS".to_string()))),
+//RS                 ),
+//RS                 (
+//RS                     read,
+//RS                     Type::Option(Box::new(Type::Named("Duration".to_string()))),
+//RS                 ),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("HTTPServer".to_string()),
+//RS                 Type::Named("HTTPError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.http.server", "serve") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("HTTPMux".to_string())),
+//RS                 (
+//RS                     read,
+//RS                     Type::Option(Box::new(Type::Named("HTTPServerTLS".to_string()))),
+//RS                 ),
+//RS                 (
+//RS                     read,
+//RS                     Type::Option(Box::new(Type::Named("Duration".to_string()))),
+//RS                 ),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), Type::Named("HTTPError".to_string()))),
+//RS         )),
+//RS         // D-REGEXENGINE1=A / D-REGEX-LIT1=D: runtime compilation stays
+//RS         // fallible; one-shot calls take a compile-checked Regex value.
+//RS         ("core.regex", "flags") => Some((
+//RS             vec![(read, Type::Bool), (read, Type::Bool), (read, Type::Bool)],
+//RS             Some(Type::Named("RegexFlags".to_string())),
+//RS         )),
+//RS         ("core.regex", "escape") => Some((vec![(read, Type::String)], Some(Type::String))),
+//RS         ("core.regex", "compile") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::Named("Regex".to_string()), Type::String)),
+//RS         )),
+//RS         ("core.regex", "compile_with") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("RegexFlags".to_string())),
+//RS             ],
+//RS             Some(result_ty(Type::Named("Regex".to_string()), Type::String)),
+//RS         )),
+//RS         ("core.regex", "is_match") => Some((
+//RS             vec![
+//RS                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.regex", "full_match" | "fullmatch") => Some((
+//RS             vec![
+//RS                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         // First match anywhere: `Match?` (none when nothing matches).
+//RS         ("core.regex", "match" | "search") => Some((
+//RS             vec![
+//RS                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Option(Box::new(Type::Named("Match".to_string())))),
+//RS         )),
+//RS         // First matched substring, or none.
+//RS         ("core.regex", "find") => Some((
+//RS             vec![
+//RS                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Option(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.regex", "find_all" | "findall" | "split") => Some((
+//RS             vec![
+//RS                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.regex", "matches" | "finditer") => Some((
+//RS             vec![
+//RS                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::List(Box::new(Type::Named("Match".to_string())))),
+//RS         )),
+//RS         ("core.regex", "split_limit") => Some((
+//RS             vec![
+//RS                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.regex", "replace" | "replace_first" | "sub") => Some((
+//RS             vec![
+//RS                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         // Jet owns archive containers and keeps malformed-input paths typed.
+//RS         ("core.archive", "zip_decompress") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(result_ty(list_u8.clone(), archive_error.clone())),
+//RS         )),
+//RS         ("core.archive", "crc32" | "adler32") => {
+//RS             Some((vec![(read, list_u8.clone())], Some(Type::Int)))
+//RS         }
+//RS         ("core.archive", "deflate" | "create") => Some((
+//RS             if name == "deflate" {
+//RS                 vec![(read, list_u8.clone())]
+//RS             } else {
+//RS                 vec![(read, string.clone()), (read, list_u8.clone())]
+//RS             },
+//RS             Some(result_ty(list_u8.clone(), archive_error.clone())),
+//RS         )),
+//RS         ("core.archive", "compress") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(result_ty(list_u8.clone(), archive_error.clone())),
+//RS         )),
+//RS         ("core.archive", "decompress" | "gunzip" | "inflate" | "zip_open" | "zip_close") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(result_ty(list_u8.clone(), archive_error.clone())),
+//RS         )),
+//RS         ("core.archive", "zip_names_json" | "tar_names_json") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(result_ty(string.clone(), archive_error.clone())),
+//RS         )),
+//RS         ("core.archive", "list") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(result_ty(list_string.clone(), archive_error.clone())),
+//RS         )),
+//RS         ("core.archive", "zip_next") => Some((
+//RS             vec![(read, list_u8.clone()), (read, int)],
+//RS             Some(result_ty(string.clone(), archive_error.clone())),
+//RS         )),
+//RS         ("core.archive", "zip_read") => Some((
+//RS             vec![(read, list_u8.clone()), (read, string.clone())],
+//RS             Some(result_ty(list_u8.clone(), archive_error.clone())),
+//RS         )),
+//RS         ("core.archive", "zip_write") => Some((
+//RS             vec![
+//RS                 (read, list_u8.clone()),
+//RS                 (read, string.clone()),
+//RS                 (read, list_u8.clone()),
+//RS             ],
+//RS             Some(result_ty(list_u8.clone(), archive_error.clone())),
+//RS         )),
+//RS         ("core.archive", "zip_extract" | "unzip" | "tar_get") => Some((
+//RS             if name == "tar_get" {
+//RS                 vec![(read, list_u8.clone()), (read, string.clone())]
+//RS             } else {
+//RS                 vec![(read, list_u8.clone()), (read, string.clone())]
+//RS             },
+//RS             Some(result_ty(list_u8.clone(), archive_error.clone())),
+//RS         )),
+//RS         ("core.archive", "tar_add") => Some((
+//RS             vec![
+//RS                 (read, list_u8.clone()),
+//RS                 (read, string.clone()),
+//RS                 (read, list_u8.clone()),
+//RS             ],
+//RS             Some(result_ty(list_u8.clone(), archive_error.clone())),
+//RS         )),
+//RS         // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: first bounded `core.game.raylib`
+//RS         // bridge. The surface is intentionally tiny and display-gated.
+//RS         ("core.game.raylib", "window_open") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int), (read, Type::String)],
+//RS             Some(Type::Named("RaylibWindow".to_string())),
+//RS         )),
+//RS         ("core.game.raylib", "window_should_close") => Some((
+//RS             vec![(read, Type::Named("RaylibWindow".to_string()))],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.game.raylib", "window_ready") => Some((
+//RS             vec![(read, Type::Named("RaylibWindow".to_string()))],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.game.raylib", "begin_drawing") => {
+//RS             Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
+//RS         }
+//RS         ("core.game.raylib", "clear_background") => {
+//RS             Some((vec![(read, Type::Named("RaylibColor".to_string()))], None))
+//RS         }
+//RS         ("core.game.raylib", "draw_rectangle") => Some((
+//RS             vec![
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Named("RaylibColor".to_string())),
+//RS             ],
+//RS             None,
+//RS         )),
+//RS         ("core.game.raylib", "draw_text") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Named("RaylibColor".to_string())),
+//RS             ],
+//RS             None,
+//RS         )),
+//RS         ("core.game.raylib", "end_drawing") => Some((vec![], None)),
+//RS         ("core.game.raylib", "close_window") => {
+//RS             Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
+//RS         }
+//RS         ("core.game.raylib", "key_down") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+//RS         ("core.game.raylib", "set_target_fps") => Some((vec![(read, Type::Int)], None)),
+//RS         ("core.game.raylib", "color") => Some((
+//RS             vec![
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::Named("RaylibColor".to_string())),
+//RS         )),
+//RS         ("core.game.raylib", "load_sound") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Named("RaylibSound".to_string())),
+//RS         )),
+//RS         ("core.game.raylib", "play_sound") => Some((
+//RS             vec![(read, Type::Named("RaylibSound".to_string()))],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.game.raylib", "gamepad_down") => Some((
+//RS             vec![(read, Type::Int), (read, Type::String)],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.game.raylib", "gamepad_axis") => Some((
+//RS             vec![(read, Type::Int), (read, Type::String)],
+//RS             Some(Type::Float),
+//RS         )),
+//RS         ("core.game.raylib", "load_texture_atlas") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Named("RaylibTextureAtlas".to_string())),
+//RS         )),
+//RS         ("core.game.raylib", "draw_sprite") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("RaylibTextureAtlas".to_string())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             None,
+//RS         )),
+//RS         ("core.archive.gzip", "compress") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(result_ty(list_u8.clone(), gzip_error.clone())),
+//RS         )),
+//RS         ("core.archive.zstd", "compress") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(result_ty(list_u8.clone(), zstd_error.clone())),
+//RS         )),
+//RS         ("core.archive.gzip", "compress_text") => Some((
+//RS             vec![(read, string.clone())],
+//RS             Some(result_ty(list_u8.clone(), gzip_error.clone())),
+//RS         )),
+//RS         ("core.archive.zstd", "compress_text") => Some((
+//RS             vec![(read, string.clone())],
+//RS             Some(result_ty(list_u8.clone(), zstd_error.clone())),
+//RS         )),
+//RS         ("core.archive.gzip", "decompress") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(result_ty(list_u8.clone(), gzip_error.clone())),
+//RS         )),
+//RS         ("core.archive.zstd", "decompress") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(result_ty(list_u8.clone(), zstd_error.clone())),
+//RS         )),
+//RS         ("core.archive.gzip", "decompress_text") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(result_ty(string.clone(), gzip_error.clone())),
+//RS         )),
+//RS         ("core.archive.zstd", "decompress_text") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(result_ty(string.clone(), zstd_error.clone())),
+//RS         )),
+//RS         ("core.archive.gzip", "compress_file") => Some((
+//RS             vec![(read, string.clone()), (read, string.clone())],
+//RS             Some(result_ty(Type::Bool, gzip_error.clone())),
+//RS         )),
+//RS         ("core.archive.gzip", "decompress_file") => Some((
+//RS             vec![(read, string.clone()), (read, string.clone())],
+//RS             Some(result_ty(Type::Bool, gzip_error)),
+//RS         )),
+//RS         ("core.archive.zstd", "compress_file") => Some((
+//RS             vec![(read, string.clone()), (read, string.clone())],
+//RS             Some(result_ty(Type::Bool, zstd_error.clone())),
+//RS         )),
+//RS         ("core.archive.zstd", "decompress_file") => Some((
+//RS             vec![(read, string.clone()), (read, string.clone())],
+//RS             Some(result_ty(Type::Bool, zstd_error)),
+//RS         )),
+//RS         // D-DBPOLICY-BIND1: core.db — SQLite via rusqlite (bundled). `open`/`open_memory`
+//RS         // produce an unscoped `DBConnection`; `policy` creates a typed policy
+//RS         // and `with_policy` produces the only row-capable `DBScope`.
+//RS         // handle (mirrors `core.files`'s `open`/`create` producing a `FileReader`/
+//RS         // `FileWriter`). Every other operation — `query`/`query_one`/`execute`/
+//RS         // `begin`/`commit`/`rollback`/`close` — is an INSTANCE method dispatched
+//RS         // by the receiver's `DBConnection` type (see `check_db_connection_method`
+//RS         // below), not a second module-call surface. There is no raw-string
+//RS         // `execute(sql)` escape (D-DBDRIVER1's build plan: "must not expose a
+//RS         // generic `execute_raw(sql)` escape").
+//RS         ("core.db", "open") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Named("DBConnection".to_string())),
+//RS         )),
+//RS         ("core.db", "open_memory") => Some((vec![], Some(Type::Named("DBConnection".to_string())))),
+//RS         ("core.db", "pool") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(result_ty(
+//RS                 Type::Named("DBPool".to_string()),
+//RS                 db_error_ty(),
+//RS             )),
+//RS         )),
+//RS         // D-DBPOLICY1: policy compilation and row reads report on the module's
+//RS         // one failure domain, `DBError`, like pool/transaction/migrate.
+//RS         ("core.db", "policy") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("RowPolicy".to_string()),
+//RS                 db_error_ty(),
+//RS             )),
+//RS         )),
+//RS         // D-DBPOLICY1: audit is scoped to the active DBScope, so it cannot
+//RS         // inspect or manufacture authority for another connection.
+//RS         ("core.db", "policy_audit") => Some((
+//RS             vec![(read, Type::Named("DBScope".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.db", "row_value") => Some((
+//RS             vec![(read, db_row_ty()), (read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
+//RS                 db_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.db", "row_int") => Some((
+//RS             vec![(read, db_row_ty()), (read, Type::String)],
+//RS             Some(result_ty(Type::Int, db_error_ty())),
+//RS         )),
+//RS         ("core.db", "row_float") => Some((
+//RS             vec![(read, db_row_ty()), (read, Type::String)],
+//RS             Some(result_ty(Type::Float, db_error_ty())),
+//RS         )),
+//RS         ("core.db", "row_text") => Some((
+//RS             vec![(read, db_row_ty()), (read, Type::String)],
+//RS             Some(result_ty(Type::String, db_error_ty())),
+//RS         )),
+//RS         ("core.db", "row_bool") => Some((
+//RS             vec![(read, db_row_ty()), (read, Type::String)],
+//RS             Some(result_ty(Type::Bool, db_error_ty())),
+//RS         )),
+//RS         ("core.db", "transaction") | ("core.db", "migrate") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("DBScope".to_string())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::List(Box::new(Type::Named("SQL".to_string())))),
+//RS             ],
+//RS             Some(result_ty(Type::Int, db_error_ty())),
+//RS         )),
+//RS         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `core.plugin` — sandboxed WASM
+//RS         // Component Model plugin loader. `load(path, authority)` is the one
+//RS         // authority-bearing boundary; the host never supplies an ambient
+//RS         // policy when the second argument is omitted.
+//RS         ("core.plugin", "load") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("Authority".to_string())),
+//RS             ],
+//RS             Some(Type::Named("Plugin".to_string())),
+//RS         )),
+//RS         // D-LIB-CALLGRANT1=A: the grant is label-only so the load site cannot
+//RS         // accidentally swap path and authority by position.
+//RS         ("core.mod", "load") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("ModGrant".to_string())),
+//RS             ],
+//RS             Some(result_ty(Type::Named("Mod".to_string()), Type::String)),
+//RS         )),
+//RS         ("core.encoding.binary", "pack_u8" | "pack_i8" | "pack_u16le" | "pack_u16be"
+//RS             | "pack_u32le" | "pack_u32be" | "pack_u64le" | "pack_u64be") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(list_u8.clone()),
+//RS         )),
+//RS         ("core.encoding.binary", "unpack_u8" | "unpack_u16le" | "unpack_u16be"
+//RS             | "unpack_u32le" | "unpack_u32be" | "unpack_u64le" | "unpack_u64be") => Some((
+//RS             vec![(read, list_u8.clone()), (read, Type::Int)],
+//RS             Some(Type::Option(Box::new(Type::Int))),
+//RS         )),
+//RS         ("core.encoding.binary", "sign_extend") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.encoding.binary", "pack_f64le" | "pack_f64be") => Some((
+//RS             vec![(read, Type::Float)],
+//RS             Some(list_u8.clone()),
+//RS         )),
+//RS         ("core.encoding.binary", "unpack_f64le" | "unpack_f64be") => Some((
+//RS             vec![(read, list_u8.clone()), (read, Type::Int)],
+//RS             Some(Type::Option(Box::new(Type::Float))),
+//RS         )),
+//RS         ("core.encoding.binary", "calcsize") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::Int, Type::String)),
+//RS         )),
+//RS         ("core.encoding.binary", "pack") => Some((
+//RS             vec![(read, Type::String), (read, Type::List(Box::new(Type::Int)))],
+//RS             Some(result_ty(list_u8.clone(), Type::String)),
+//RS         )),
+//RS         ("core.encoding.binary", "unpack") => Some((
+//RS             vec![(read, Type::String), (read, list_u8.clone())],
+//RS             Some(result_ty(Type::List(Box::new(Type::Int)), Type::String)),
+//RS         )),
+//RS         ("core.encoding.binary", "iter_unpack") => Some((
+//RS             vec![(read, Type::String), (read, list_u8.clone())],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::List(Box::new(Type::Int)))),
+//RS                 Type::String,
+//RS             )),
+//RS         )),
+//RS         // D-UUIDENC1=A: hex and base64 codecs. `encode` is infallible; `decode`
+//RS         // returns `[Byte] !String` (invalid input → Err).
+//RS         ("core.encoding.hex", "encode" | "hexlify" | "b2a_hex" | "encode_upper" | "encode_prefixed") => {
+//RS             Some((vec![(read, list_u8.clone())], Some(Type::String)))
+//RS         }
+//RS         ("core.encoding.hex", "is_hex") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::Bool)))
+//RS         }
+//RS         ("core.encoding.hex", "encode_sep") => Some((
+//RS             vec![(read, list_u8.clone()), (read, Type::String)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.encoding.hex", "dump") => {
+//RS             Some((vec![(read, list_u8.clone())], Some(Type::String)))
+//RS         }
+//RS         ("core.encoding.hex", "decode" | "unhexlify" | "a2b_hex") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(list_u8.clone(), Type::String)),
+//RS         )),
+//RS         ("core.encoding.hex", "crc_hqx") => Some((
+//RS             vec![(read, list_u8.clone()), (read, Type::Int)],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.encoding.hex", "crc32") => Some((
+//RS             vec![(read, list_u8.clone())],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.encoding.hex", "b2a_base64") => {
+//RS             Some((vec![(read, list_u8.clone())], Some(Type::String)))
+//RS         }
+//RS         ("core.encoding.hex", "a2b_base64") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(list_u8.clone(), Type::String)),
+//RS         )),
+//RS         ("core.encoding.hex", "b2a_qp" | "b2a_uu") => {
+//RS             Some((vec![(read, list_u8.clone())], Some(Type::String)))
+//RS         }
+//RS         ("core.encoding.hex", "a2b_qp" | "a2b_uu") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(list_u8.clone(), Type::String)),
+//RS         )),
+//RS         ("core.encoding.base64", "encode" | "encode_url" | "b64encode" | "standard_b64encode" | "urlsafe_b64encode" | "b32encode" | "b32hexencode" | "a85encode" | "b85encode" | "z85encode" | "encodebytes" | "b2a_base64") => {
+//RS             Some((vec![(read, list_u8.clone())], Some(Type::String)))
+//RS         }
+//RS         ("core.encoding.base64", "b16encode") => {
+//RS             Some((vec![(read, list_u8.clone())], Some(Type::String)))
+//RS         }
+//RS         ("core.encoding.base64", "b16decode") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(list_u8.clone(), Type::String)),
+//RS         )),
+//RS         ("core.encoding.base64", "decode" | "b64decode" | "standard_b64decode" | "b32decode" | "b32hexdecode" | "a85decode" | "b85decode" | "z85decode" | "decodebytes" | "a2b_base64") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(list_u8.clone(), Type::String)),
+//RS         )),
+//RS         ("core.encoding.base64", "encode_url_padded") => {
+//RS             Some((vec![(read, list_u8.clone())], Some(Type::String)))
+//RS         }
+//RS         ("core.encoding.base64", "decode_padded") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(list_u8.clone(), Type::String)),
+//RS         )),
+//RS         ("core.encoding.base64", "pad" | "unpad") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::String)))
+//RS         }
+//RS         ("core.encoding.base64", "is_base64") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::Bool)))
+//RS         }
+//RS         ("core.encoding.base32", "is_base32") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::Bool)))
+//RS         }
+//RS         ("core.encoding.base64", "decode_url" | "urlsafe_b64decode") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(list_u8.clone(), Type::String)),
+//RS         )),
+//RS         ("core.encoding.base32", "encode" | "b32encode" | "b32hexencode") => {
+//RS             Some((vec![(read, list_u8.clone())], Some(Type::String)))
+//RS         }
+//RS         ("core.encoding.base32", "decode" | "b32decode" | "b32hexdecode") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(list_u8.clone(), Type::String)),
+//RS         )),
+//RS         // D-UUIDENC1=A: UUID v4 (system CSPRNG) and v7 (injectable Clock).
+//RS         // `v4()` reads /dev/urandom; `v7(clock)` extracts the timestamp from the
+//RS         // injected Clock so tests can produce a deterministic UUID.
+//RS         ("core.crypto.uuid", "v4") => Some((vec![], Some(Type::String))),
+//RS         // #1481: `v5` is the deterministic namespace+name sibling (RFC 4122
+//RS         // SHA-1); `parse` validates/normalizes a UUID string. Both fail on a
+//RS         // malformed UUID rather than panic (fallible input, D-FAIL-*).
+//RS         ("core.crypto.uuid", "v5") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(result_ty(Type::String, Type::String)),
+//RS         )),
+//RS         ("core.crypto.uuid", "parse") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::String, Type::String)),
+//RS         )),
+//RS         ("core.crypto.uuid", "v7") => Some((
+//RS             vec![(read, Type::Named(crate::Syntax::CLOCK_TYPE.to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.args", "spec") => Some((vec![], Some(Type::Named("ArgsSpec".to_string())))),
+//RS         // D-TERM1 (ratified 2026-06-22): terminal direct-input.
+//RS         // `term.read_key()` → `Key` (the key-event enum). No arguments.
+//RS         ("core.term", "read_key") => Some((
+//RS             vec![],
+//RS             Some(Type::Named(crate::Syntax::TYPE_KEY.to_string())),
+//RS         )),
+//RS         // D-FIDELITY-API1=A: runtime-global fidelity signal.
+//RS         ("core.perf", "fidelity") => Some((vec![], Some(float))),
+//RS         ("core.perf", "default_fidelity") => Some((vec![], Some(float.clone()))),
+//RS         ("core.perf", "override_fidelity") => Some((
+//RS             vec![(read, float)],
+//RS             Some(result_ty(unit.clone(), Type::String)),
+//RS         )),
+//RS         ("core.perf", "reset_fidelity") => Some((vec![], Some(unit))),
+//RS         // D-DECIMAL1: exact decimal parse from string.
+//RS         ("core.math", "decimal") => Some((
+//RS             vec![(read, string.clone())],
+//RS             Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string())),
+//RS         )),
+//RS         // Exact whole-number math keeps the native i64 boundary explicit.
+//RS         ("core.math", "isqrt" | "factorial") => Some((
+//RS             vec![(read, int.clone())],
+//RS             Some(Type::Option(Box::new(int.clone()))),
+//RS         )),
+//RS         // D-NUMTYPE1=A: exact ratio, or nothing when the bottom is zero.
+//RS         ("core.math", "fraction") => Some((
+//RS             vec![(read, int.clone()), (read, int.clone())],
+//RS             Some(Type::Option(Box::new(Type::Named(
+//RS                 crate::Syntax::TYPE_FRACTION.to_string(),
+//RS             )))),
+//RS         )),
+//RS         // D-NAMEDPREVIEW1=A: registry-free named preview values share one
+//RS         // typed callback tree and use an optional viewport label.
+//RS         ("core.ui", "phone" | "tablet" | "desktop") => Some((
+//RS             vec![],
+//RS             Some(Type::Named("UIPreviewViewport".to_string())),
+//RS         )),
+//RS         ("core.ui", "preview" | "playground") => Some((
+//RS             vec![
+//RS                 (read, string.clone()),
+//RS                 (read, Type::Option(Box::new(Type::Named("UIPreviewViewport".to_string())))),
+//RS                 (read, ui_node_callback),
+//RS             ],
+//RS             Some(ui_preview),
+//RS         )),
+//RS         // D-RENDERTGT2=A (c133 M1): UI geometry constructors.
+//RS         ("core.ui", "null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
+//RS         ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TUIBackend".to_string())))),
+//RS         // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend constructor.
+//RS         ("core.ui", "gtk_backend") => Some((vec![], Some(Type::Named("GtkBackend".to_string())))),
+//RS         ("core.ui", "point") => Some((
+//RS             vec![(read, float.clone()), (read, float)],
+//RS             Some(Type::Named("Point".to_string())),
+//RS         )),
+//RS         ("core.ui", "size") => Some((
+//RS             vec![(read, float.clone()), (read, float)],
+//RS             Some(Type::Named("Size".to_string())),
+//RS         )),
+//RS         ("core.ui", "rect") => Some((
+//RS             vec![
+//RS                 (read, float.clone()),
+//RS                 (read, float.clone()),
+//RS                 (read, float.clone()),
+//RS                 (read, float),
+//RS             ],
+//RS             Some(Type::Named("Rect".to_string())),
+//RS         )),
+//RS         ("core.ui", "constraint") => Some((
+//RS             vec![
+//RS                 (read, float.clone()),
+//RS                 (read, float.clone()),
+//RS                 (read, float.clone()),
+//RS                 (read, float),
+//RS             ],
+//RS             Some(Type::Named("SizeConstraint".to_string())),
+//RS         )),
+//RS         ("core.ui", "node") => Some((
+//RS             vec![(read, string.clone()), (read, float.clone()), (read, float)],
+//RS             Some(Type::Named("UINode".to_string())),
+//RS         )),
+//RS         // D-UITREE1=A: canonical typed constructors. These are plain Core
+//RS         // functions returning the same UiNode tree consumed by each backend.
+//RS         // `button` is bespoke in core_call (arity 1, or 2 with `on_click:`).
+//RS         ("core.ui", "text") => Some((
+//RS             vec![(read, string.clone())],
+//RS             Some(Type::Named("UINode".to_string())),
+//RS         )),
+//RS         ("core.ui", "box") => Some((
+//RS             vec![(
+//RS                 read,
+//RS                 Type::List(Box::new(Type::Named("UINode".to_string()))),
+//RS             )],
+//RS             Some(Type::Named("UINode".to_string())),
+//RS         )),
+//RS         ("core.ui", "key_event") => Some((
+//RS             vec![(read, string)],
+//RS             Some(Type::Named("InputEvent".to_string())),
+//RS         )),
+//RS         ("core.ui", "resize_event") => Some((
+//RS             vec![(read, float.clone()), (read, float)],
+//RS             Some(Type::Named("InputEvent".to_string())),
+//RS         )),
+//RS         // D-A11YGATE1=B (c134 Phase 6): accessible-role node constructor + role
+//RS         // constants. `node_role` is the a11y-checked sibling of `node` — it's the
+//RS         // only UiNode constructor that carries a role, so it's the only one E2930
+//RS         // (unlabeled interactive control) needs to watch.
+//RS         ("core.ui", "node_role") => Some((
+//RS             vec![
+//RS                 (read, string),
+//RS                 (read, float.clone()),
+//RS                 (read, float),
+//RS                 (read, Type::Named("UIAriaRole".to_string())),
+//RS             ],
+//RS             Some(Type::Named("UINode".to_string())),
+//RS         )),
+//RS         // D-STYLESHAPE1=A wiring: a node with an explicit fill color (a `#RRGGBB`
+//RS         // string, matching `JetPaintCmd::FillRect`'s existing color representation —
+//RS         // no new opaque type needed, this just makes the field settable from Jet).
+//RS         ("core.ui", "node_color") => Some((
+//RS             vec![
+//RS                 (read, string.clone()),
+//RS                 (read, float.clone()),
+//RS                 (read, float),
+//RS                 (read, string),
+//RS             ],
+//RS             Some(Type::Named("UINode".to_string())),
+//RS         )),
+//RS         (
+//RS             "core.ui",
+//RS             "aria_role_button" | "aria_role_text_input" | "aria_role_label" | "aria_role_container",
+//RS         ) => Some((vec![], Some(Type::Named("UIAriaRole".to_string())))),
+//RS         // D-FOUND-PLATFORM1=A: shared font model and scoped host service
+//RS         // surface. Result aliases retain Completed/Cancelled/Failed as one
+//RS         // typed value instead of collapsing cancellation into an I/O error.
+//RS         ("core.font", "system") => Some((
+//RS             vec![(read, Type::Named("FontStyle".to_string()))],
+//RS             Some(Type::Named("FontFace".to_string())),
+//RS         )),
+//RS         ("core.font", "shape") => Some((
+//RS             vec![
+//RS                 (read, string.clone()),
+//RS                 (read, Type::Named("FontFace".to_string())),
+//RS             ],
+//RS             Some(Type::Named("GlyphRun".to_string())),
+//RS         )),
+//RS         ("core.ui", "node_accessibility") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("UINode".to_string())),
+//RS                 (read, Type::Named("UIAccessibility".to_string())),
+//RS             ],
+//RS             Some(Type::Named("UINode".to_string())),
+//RS         )),
+//RS         ("core.ui", "node_shortcut") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("UINode".to_string())),
+//RS                 (read, Type::Named("UIShortcut".to_string())),
+//RS             ],
+//RS             Some(Type::Named("UINode".to_string())),
+//RS         )),
+//RS         ("core.ui", "text_input") => Some((
+//RS             vec![
+//RS                 (read, string.clone()),
+//RS                 (read, Type::Named("UIIMEMode".to_string())),
+//RS             ],
+//RS             Some(Type::Named("UINode".to_string())),
+//RS         )),
+//RS         // D-DX-TUIKIT1=A: one typed model/update/view support vocabulary. The
+//RS         // constructors stay ordinary Core calls; the shared Prelude owns
+//RS         // event, style, constraint, and widget semantics for every tier.
+//RS         ("core.tui", "capabilities") => Some((
+//RS             vec![],
+//RS             Some(Type::Named("TUICapabilities".to_string())),
+//RS         )),
+//RS         ("core.tui", "key_event") => Some((
+//RS             vec![(read, string.clone())],
+//RS             Some(Type::Named("TUIEvent".to_string())),
+//RS         )),
+//RS         ("core.tui", "key_event_modifiers") => Some((
+//RS             vec![(read, string.clone()), (read, int.clone())],
+//RS             Some(Type::Named("TUIEvent".to_string())),
+//RS         )),
+//RS         ("core.tui", "resize_event") => Some((
+//RS             vec![(read, float.clone()), (read, float.clone())],
+//RS             Some(Type::Named("TUIEvent".to_string())),
+//RS         )),
+//RS         ("core.tui", "timer_event") => Some((
+//RS             vec![(read, string.clone()), (read, int.clone())],
+//RS             Some(Type::Named("TUIEvent".to_string())),
+//RS         )),
+//RS         ("core.tui", "io_event") => Some((
+//RS             vec![
+//RS                 (read, string.clone()),
+//RS                 (moved, list_u8.clone()),
+//RS             ],
+//RS             Some(Type::Named("TUIEvent".to_string())),
+//RS         )),
+//RS         ("core.tui", "focus_event") => Some((
+//RS             vec![(read, bool_)],
+//RS             Some(Type::Named("TUIEvent".to_string())),
+//RS         )),
+//RS         ("core.tui", "interrupt_event" | "close_event") => {
+//RS             Some((vec![], Some(Type::Named("TUIEvent".to_string()))))
+//RS         }
+//RS         ("core.tui", "color_ansi16" | "color_ansi256") => Some((
+//RS             vec![(read, int.clone())],
+//RS             Some(Type::Named("TUIColor".to_string())),
+//RS         )),
+//RS         ("core.tui", "color_rgb") => Some((
+//RS             vec![
+//RS                 (read, int.clone()),
+//RS                 (read, int.clone()),
+//RS                 (read, int.clone()),
+//RS             ],
+//RS             Some(Type::Named("TUIColor".to_string())),
+//RS         )),
+//RS         ("core.tui", "style") => Some((
+//RS             vec![],
+//RS             Some(Type::Named("TUIStyle".to_string())),
+//RS         )),
+//RS         ("core.tui", "style_foreground" | "style_background") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("TUIStyle".to_string())),
+//RS                 (read, Type::Named("TUIColor".to_string())),
+//RS             ],
+//RS             Some(Type::Named("TUIStyle".to_string())),
+//RS         )),
+//RS         ("core.tui", "style_bold" | "style_dim" | "style_underline") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("TUIStyle".to_string())),
+//RS                 (read, bool_),
+//RS             ],
+//RS             Some(Type::Named("TUIStyle".to_string())),
+//RS         )),
+//RS         ("core.tui", "style_text") => Some((
+//RS             vec![
+//RS                 (read, string.clone()),
+//RS                 (read, Type::Named("TUIStyle".to_string())),
+//RS                 (read, Type::Named("TUICapabilities".to_string())),
+//RS             ],
+//RS             Some(string.clone()),
+//RS         )),
+//RS         ("core.tui", "ascii") => Some((
+//RS             vec![(read, string.clone())],
+//RS             Some(string.clone()),
+//RS         )),
+//RS         ("core.tui", "display_width") => Some((
+//RS             vec![(read, string.clone())],
+//RS             Some(int.clone()),
+//RS         )),
+//RS         ("core.tui", "length" | "min" | "max" | "percent" | "fill") => Some((
+//RS             vec![(read, float.clone())],
+//RS             Some(Type::Named("TUIConstraint".to_string())),
+//RS         )),
+//RS         ("core.tui", "horizontal" | "vertical") => Some((
+//RS             vec![],
+//RS             Some(Type::Named("TUIDirection".to_string())),
+//RS         )),
+//RS         ("core.tui", "layout") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Rect".to_string())),
+//RS                 (read, Type::Named("TUIDirection".to_string())),
+//RS                 (
+//RS                     moved,
+//RS                     Type::List(Box::new(Type::Named("TUIConstraint".to_string()))),
+//RS                 ),
+//RS             ],
+//RS             Some(Type::List(Box::new(Type::Named("Rect".to_string())))),
+//RS         )),
+//RS         ("core.tui", "list") => Some((
+//RS             vec![(
+//RS                 moved,
+//RS                 Type::List(Box::new(string.clone())),
+//RS             )],
+//RS             Some(Type::Named("UINode".to_string())),
+//RS         )),
+//RS         ("core.tui", "table") => Some((
+//RS             vec![
+//RS                 (moved, Type::List(Box::new(string.clone()))),
+//RS                 (
+//RS                     moved,
+//RS                     Type::List(Box::new(Type::List(Box::new(string.clone())))),
+//RS                 ),
+//RS             ],
+//RS             Some(Type::Named("UINode".to_string())),
+//RS         )),
+//RS         ("core.tui", "list_state") => Some((
+//RS             vec![],
+//RS             Some(Type::Named("TUIListState".to_string())),
+//RS         )),
+//RS         ("core.tui", "list_state_select" | "list_state_offset") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("TUIListState".to_string())),
+//RS                 (read, int.clone()),
+//RS             ],
+//RS             Some(Type::Named("TUIListState".to_string())),
+//RS         )),
+//RS         ("core.tui", "list_state_selected") => Some((
+//RS             vec![(read, Type::Named("TUIListState".to_string()))],
+//RS             Some(int),
+//RS         )),
+//RS         ("core.ui.host", "capabilities") => Some((
+//RS             vec![],
+//RS             Some(Type::Named("UICapabilityFacts".to_string())),
+//RS         )),
+//RS         ("core.ui.host", "file_filter") => Some((
+//RS             vec![
+//RS                 (read, string.clone()),
+//RS                 (read, Type::List(Box::new(string.clone()))),
+//RS                 (read, Type::List(Box::new(string.clone()))),
+//RS             ],
+//RS             Some(ui_result(Type::Named("UIFileFilter".to_string()))),
+//RS         )),
+//RS         ("core.ui.host", "file_filter_text") => Some((
+//RS             vec![],
+//RS             Some(Type::Named("UIFileFilter".to_string())),
+//RS         )),
+//RS         ("core.ui.host", "fs_rights_read" | "fs_rights_write" | "fs_rights_read_write") => {
+//RS             Some((vec![], Some(Type::Named("UIFSRights".to_string()))))
+//RS         }
+//RS         ("core.ui.host", "fs_grant") => Some((
+//RS             vec![
+//RS                 (read, string.clone()),
+//RS                 (read, Type::Named("UIFSRights".to_string())),
+//RS             ],
+//RS             Some(ui_result(Type::Named("UIFSGrant".to_string()))),
+//RS         )),
+//RS         ("core.ui.host", "open_request" | "save_request") => Some((
+//RS             vec![(read, Type::Named("UIFSGrant".to_string()))],
+//RS             Some(Type::Named("UIFileDialogRequest".to_string())),
+//RS         )),
+//RS         ("core.ui.host", "open_file" | "save_file") => Some((
+//RS             vec![(read, Type::Named("UIFileDialogRequest".to_string()))],
+//RS             Some(ui_result(Type::Named("UIFileDialogSelection".to_string()))),
+//RS         )),
+//RS         ("core.ui.host", "shortcut") => Some((
+//RS             vec![
+//RS                 (read, string.clone()),
+//RS                 (read, Type::Named("UIShortcutModifiers".to_string())),
+//RS             ],
+//RS             Some(ui_result(Type::Named("UIShortcut".to_string()))),
+//RS         )),
+//RS         ("core.ui.host", "accessibility") => Some((
+//RS             vec![(read, string.clone()), (read, string.clone())],
+//RS             Some(ui_result(Type::Named("UIAccessibility".to_string()))),
+//RS         )),
+//RS         ("core.ui.host.clipboard", "read_text") => Some((
+//RS             vec![],
+//RS             Some(ui_result(Type::Named("UIClipboardText".to_string()))),
+//RS         )),
+//RS         ("core.ui.host.clipboard", "write_text") => Some((
+//RS             vec![(read, string.clone())],
+//RS             Some(ui_result(Type::Named("UIClipboardWrite".to_string()))),
+//RS         )),
+//RS         ("core.ui.host.ime", "poll") => Some((
+//RS             vec![],
+//RS             Some(ui_result(Type::Option(Box::new(Type::Named(
+//RS                 "UIIMEEvent".to_string(),
+//RS             ))))),
+//RS         )),
+//RS         ("core.ui.host.drag_drop", "poll") => Some((
+//RS             vec![],
+//RS             Some(ui_result(Type::Option(Box::new(Type::Named(
+//RS                 "UIDragEvent".to_string(),
+//RS             ))))),
+//RS         )),
+//RS         ("core.ui.host.shortcuts", "binding") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("UIShortcut".to_string())),
+//RS                 (read, string.clone()),
+//RS             ],
+//RS             Some(ui_result(Type::Named("UIShortcutBinding".to_string()))),
+//RS         )),
+//RS         ("core.ui.host.shortcuts", "register") => Some((
+//RS             vec![(read, Type::Named("UIShortcutBinding".to_string()))],
+//RS             Some(ui_result(Type::Named("UIShortcutBinding".to_string()))),
+//RS         )),
+//RS         ("core.ui.host.shortcuts", "dispatch") => Some((
+//RS             vec![(read, Type::Named("UIShortcut".to_string()))],
+//RS             Some(ui_result(Type::Named("UIShortcutDispatch".to_string()))),
+//RS         )),
+//RS         ("core.ui.host.accessibility", "attach") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("UINode".to_string())),
+//RS                 (read, Type::Named("UIAccessibility".to_string())),
+//RS             ],
+//RS             Some(ui_result(unit.clone())),
+//RS         )),
+//RS         ("core.ui.host.accessibility", "project") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("UINode".to_string())),
+//RS                 (read, Type::Named("UINodeID".to_string())),
+//RS             ],
+//RS             Some(ui_result(Type::Option(Box::new(Type::Named(
+//RS                 "UIAccessibilityProjection".to_string(),
+//RS             ))))),
+//RS         )),
+//RS         // D-FLAGSHIP-WEBAPI1=A: first-party browser API for web flagship slices.
+//RS         ("core.web", "on") => Some((
+//RS             vec![
+//RS                 (read, string.clone()),
+//RS                 (read, string.clone()),
+//RS                 (
+//RS                     read,
+//RS                     Type::Fn {
+//RS                         params: vec![Type::Named("WebEvent".to_string())],
+//RS                         ret: None,
+//RS                         effect_bound: None,
+//RS                         return_view_provenance: None,
+//RS                         param_contract: None,
+//RS                         call_metadata: None,
+//RS                     },
+//RS                 ),
+//RS             ],
+//RS             None,
+//RS         )),
+//RS         ("core.web", "value") => Some((vec![(read, string.clone())], Some(Type::String))),
+//RS         // D-WEBAPP1=D: `web.app()` → App builder; `web.page(title, body)` → WebPage.
+//RS         ("core.web", "app") => Some((vec![], Some(Type::Named("App".to_string())))),
+//RS         ("core.web", "page") => Some((
+//RS             vec![(read, string.clone()), (read, string)],
+//RS             Some(Type::Named("WebPage".to_string())),
+//RS         )),
+//RS         ("app" | "core.web", "live") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(Type::Named("LiveQuery".to_string())),
+//RS         )),
+//RS         ("app" | "core.web", "subscribe") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Named("LiveQuery".to_string())),
+//RS         )),
+//RS         ("app" | "core.web", "invalidate" | "transact_invalidate") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::Int)))
+//RS         }
+//RS         ("app" | "core.web", "signal_push") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("LiveQuery".to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Named("LiveQuery".to_string())),
+//RS         )),
+//RS         ("app" | "core.web", "live_get" | "live_show") => Some((
+//RS             vec![(read, Type::Named("LiveQuery".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("app" | "core.web", "live_stats") => Some((vec![], Some(Type::String))),
+//RS         ("app" | "core.web", "auth") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Named("Auth".to_string())),
+//RS         )),
+//RS         ("app" | "core.web", "auth_oauth") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Auth".to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Named("Auth".to_string())),
+//RS         )),
+//RS         ("app" | "core.web", "auth_routes" | "auth_show") => Some((
+//RS             vec![(read, Type::Named("Auth".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("app" | "core.web", "sync") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.web.storage.local" | "core.web.storage.session", "get") => Some((
+//RS             vec![(read, string.clone())],
+//RS             Some(Type::Option(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.web.storage.local" | "core.web.storage.session", "set") => {
+//RS             Some((vec![(read, string.clone()), (read, string.clone())], None))
+//RS         }
+//RS         ("core.web.storage.local" | "core.web.storage.session", "remove") => {
+//RS             Some((vec![(read, string)], None))
+//RS         }
+//RS         ("core.web.storage.local" | "core.web.storage.session", "clear") => Some((vec![], None)),
+//RS         // c-devserver (owner-directed 2026-07-01): `devserver.for_app(file)` —
+//RS         // the constructor for a configurable `jet dev` server value. The
+//RS         // builder methods (`.html`/`.port`/`.serve`) are instance methods on
+//RS         // `DevServer`, dispatched through `devserver_method_return` (mirrors
+//RS         // `ui_backend_method_return`), not module-level names here.
+//RS         ("core.web.devserver", "for_app") => Some((
+//RS             vec![(read, string)],
+//RS             Some(Type::Named("DevServer".to_string())),
+//RS         )),
+//RS         // `devserver.app()` — zero-arg: watch the file `jet dev` launched
+//RS         // (passed to the running program via JET_DEV_FILE). The common case:
+//RS         // the file defining `fn dev()` is the file to watch, so no path is
+//RS         // spelled out at all.
+//RS         ("core.web.devserver", "app") => Some((vec![], Some(Type::Named("DevServer".to_string())))),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Project the typed sema signature for a foundation Core-call row.
+//RS ///
+//RS /// The foundation owns the erased ABI and the sema owns Jet `Type` values.
+//RS /// Keeping this adapter here makes the dependency boundary explicit while
+//RS /// rejecting a row whose typed parameter count has drifted from its ABI.
+// END-PORT-PENDING 0388 crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:4202-6463
+

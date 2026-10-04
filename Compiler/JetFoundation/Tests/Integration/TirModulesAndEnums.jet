@@ -1,0 +1,1182 @@
+// PORT-PENDING 1175 tests-tir-modules-and-enums: tests/tir_modules_and_enums.rs:1-1178
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! TIR modules and enums integration tests.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS 
+//RS use tir_support::{
+//RS     assert_tiers_agree, build_and_run, build_and_run_multi, have_rustc, run_default_multi,
+//RS     run_interpret_multi,
+//RS };
+//RS 
+//RS #[test]
+//RS fn grouped_nested_core_import_binds_dotted_leaf() {
+//RS     let source = r#"
+//RS use core.[encoding.json]
+//RS 
+//RS fn run() {
+//RS     print(json.to_string(json.parse("[42]") ?? panic("bad")))
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("grouped_nested_core_import", source, "[42]\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn soft_public_imports_warn_once_per_outside_use() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_soft_public_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     fs::write(
+//RS         dir.join("note.jet"),
+//RS         "pub struct Note {\n    pub _title: String\n}\nimpl Note {\n    pub fn _length(self) -> Int { return 1 }\n}\npub fn _legacy() -> Int { return 2 }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let source = "use \"note\"\nuse note._legacy\nfn run() {\n    n :: note.Note{ _title: \"hi\" }\n    print(n._title)\n    print(n._length())\n    print(note._legacy())\n    print(_legacy())\n}\n";
+//RS     let main = dir.join("main.jet");
+//RS     fs::write(&main, source).unwrap();
+//RS 
+//RS     let diagnostics = jet::check_with_path(main.to_str().unwrap());
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+//RS         "{diagnostics:#?}"
+//RS     );
+//RS     assert_eq!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .filter(|diagnostic| diagnostic.code == "L0601")
+//RS             .count(),
+//RS         5,
+//RS         "{diagnostics:#?}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn soft_public_reexports_warn_on_the_exported_spelling_once() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_soft_public_reexport_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(dir.join("api")).unwrap();
+//RS     fs::write(
+//RS         dir.join("api/module.jet"),
+//RS         "pub use implementation.[_raw as stable, supported as _preview]\nmodule implementation\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         dir.join("api/implementation.jet"),
+//RS         "pub fn _raw() -> Int { return 1 }\npub fn supported() -> Int { return 2 }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let main = dir.join("main.jet");
+//RS     fs::write(
+//RS         &main,
+//RS         "module api\nfn run() {\n    print(api.stable())\n    print(api._preview())\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let diagnostics = jet::check_with_path(main.to_str().unwrap());
+//RS     let lints = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "L0601")
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(lints.len(), 1, "{diagnostics:#?}");
+//RS     assert_eq!(lints[0].what, "`_preview` is a soft-public API");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn imported_soft_public_declared_types_warn_once_per_occurrence() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_soft_public_types_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     fs::write(
+//RS         dir.join("models.jet"),
+//RS         "pub struct _Cell<T> { pub value: T }\npub trait _Readable { fn read(self) -> Int }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let main = dir.join("main.jet");
+//RS     fs::write(
+//RS         &main,
+//RS         "use \"models\"\nfn adapt<T: _Readable>(value: ^models._Cell<Int>) -> models._Cell<Int> { return value }\nfn local(value: ^models._Cell<Int>) { cell := value }\nfn run() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let diagnostics = jet::check_with_path(main.to_str().unwrap());
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+//RS         "{diagnostics:#?}"
+//RS     );
+//RS     assert_eq!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .filter(|diagnostic| diagnostic.code == "L0601")
+//RS             .count(),
+//RS         4,
+//RS         "{diagnostics:#?}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn local_soft_public_types_win_over_imported_name_collisions() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_soft_public_type_collision_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     fs::write(
+//RS         dir.join("library.jet"),
+//RS         "pub struct _Thing { pub value: Int }\npub trait _Shape { fn size(self) -> Int }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let main = dir.join("main.jet");
+//RS     fs::write(
+//RS         &main,
+//RS         "use \"library\"\nstruct _Thing { value: Int }\ntrait _Shape { fn size(self) -> Int }\nfn keep<T: _Shape>(value: ^_Thing) -> _Thing { return value }\nfn run() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let diagnostics = jet::check_with_path(main.to_str().unwrap());
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+//RS         "{diagnostics:#?}"
+//RS     );
+//RS     assert_eq!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .filter(|diagnostic| diagnostic.code == "L0601")
+//RS             .count(),
+//RS         0,
+//RS         "{diagnostics:#?}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// Imported public adapters may carry core.data containers across a module
+//RS /// boundary. Their signatures are ordinary TIR types; codegen must not fall out
+//RS /// of the typed-IR seam merely because the row is dynamic or generic.
+//RS #[test]
+//RS fn imported_public_table_adapters_stay_in_tir() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let main_src = "\
+//RS module adapter
+//RS fn run() {
+//RS     print(\"ok\")
+//RS }
+//RS ";
+//RS     let adapter_src = "\
+//RS pub fn concrete(table: ^Table<DataTree>) -> Table<DataTree> {
+//RS     return table
+//RS }
+//RS pub fn generic<T>(table: ^Table<T>) -> Table<T> {
+//RS     return table
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run_multi(
+//RS         "tir_imported_table_adapter",
+//RS         "main.jet",
+//RS         &[("main.jet", main_src), ("adapter.jet", adapter_src)],
+//RS     );
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "ok\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn explicit_internal_project_module_alias_runs() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let (code, stdout) = build_and_run_multi(
+//RS         "tir_internal_project_alias",
+//RS         "main.jet",
+//RS         &[
+//RS             (
+//RS                 "main.jet",
+//RS                 "use project._bench as bench\nfn run() { print(bench.fixture()) }\n",
+//RS             ),
+//RS             (
+//RS                 "arbitrary.jet",
+//RS                 "module _bench { }\npub fn fixture() -> Int { return 42 }\n",
+//RS             ),
+//RS         ],
+//RS     );
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "42\n");
+//RS }
+//RS 
+//RS /// c109 Phase 14: a qualified inline code-module call `math.double(5)` (D-MOD2).
+//RS /// `main` routes through the TIR (`ModuleCall::InlineMangled` → `__jet_math__double`),
+//RS /// as do the module's own functions. rustc accepting proves byte-parity.
+//RS #[test]
+//RS fn inline_code_module_qualified_call() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS module math {
+//RS     pub fn double(n: Int) -> Int {
+//RS         return (n * 2)
+//RS     }
+//RS     pub fn add(a: Int, b: Int) -> Int {
+//RS         return (a + b)
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(math.double(5))
+//RS     print(math.add(b: 4, a: 3))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_inline_mod", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "10\n7\n");
+//RS }
+//RS 
+//RS /// c109 Phase 14: an unqualified inline-module import `use math.double` (D-MOD3).
+//RS /// The bare `double(7)` lowers via `emit_call`'s `unqualified_inline` arm
+//RS /// (`ModuleCall::InlineMangled`). `main` routes through the TIR.
+//RS #[test]
+//RS fn unqualified_inline_module_call() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use math.double
+//RS module math {
+//RS     pub fn double(n: Int) -> Int {
+//RS         return (n * 2)
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(double(7))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_unqual_inline", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "14\n");
+//RS }
+//RS 
+//RS /// D-NAME-WALK1=A: imports inside an inline module use that module's scope.
+//RS /// The grouped list, alias, public re-export, AOT, default `jet run`, and the
+//RS /// forced interpreter all exercise the same source meaning.
+//RS #[test]
+//RS fn inline_module_use_list_and_pub_reexport_match_all_tiers() {
+//RS     let src = "\
+//RS module math {
+//RS     pub fn double(n: Int) -> Int {
+//RS         return (n * 2)
+//RS     }
+//RS }
+//RS module api {
+//RS     use math.[double as twice]
+//RS     pub use math.[double as exported]
+//RS     pub fn local(n: Int) -> Int {
+//RS         return twice(n)
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(api.local(4))
+//RS     print(api.exported(5))
+//RS }
+//RS ";
+//RS     if have_rustc() {
+//RS         let (code, stdout) = build_and_run("tir_inline_use_list", src);
+//RS         assert_eq!(code, 0);
+//RS         assert_eq!(stdout, "8\n10\n");
+//RS     }
+//RS     let (code, stdout, stderr) =
+//RS         run_default_multi("inline_use_list", "main.jet", &[("main.jet", src)]);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert_eq!(stdout, "8\n10\n");
+//RS     assert!(stderr.contains("tier1 native"), "{stderr}");
+//RS     assert!(!stderr.contains("tier0 interp"), "{stderr}");
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_inline_use_interp_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     let outcome = jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true);
+//RS     match outcome {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout, exit_code, ..
+//RS         } => {
+//RS             assert_eq!(exit_code, 0);
+//RS             assert_eq!(stdout, "8\n10\n");
+//RS         }
+//RS         jet::Interpreter::RunOutcome::Problems(diags) => {
+//RS             panic!("forced interpreter rejected inline imports: {diags:?}")
+//RS         }
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// D-NAME-WALK1=A: an inline module gets the same Core member walk as the
+//RS /// enclosing file. This covers both dotted-prefix body lists and a Core item
+//RS /// re-exported through the inline module's public surface.
+//RS #[test]
+//RS fn inline_module_core_use_list_and_pub_reexport_match_all_tiers() {
+//RS     let src = "\
+//RS use core.math.[abs, min, max, clamp]
+//RS module api {
+//RS     use core.[math.abs]
+//RS     pub use core.[math.abs as exported]
+//RS     pub fn local(n: Int) -> Int {
+//RS         return abs(n)
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(abs(-3))
+//RS     print(min(9, 4))
+//RS     print(max(9, 4))
+//RS     print(clamp(12, 0, 10))
+//RS     print(min(9.0, 4.0))
+//RS     print(max(9.0, 4.0))
+//RS     print(clamp(12.0, 0.0, 10.0))
+//RS     print(api.local(-7))
+//RS     print(api.exported(-5))
+//RS }
+//RS ";
+//RS     if have_rustc() {
+//RS         let (code, stdout) = build_and_run("tir_inline_core_use_list", src);
+//RS         assert_eq!(code, 0);
+//RS         assert_eq!(stdout, "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n");
+//RS     }
+//RS     let (code, stdout, stderr) =
+//RS         run_default_multi("inline_core_use_list", "main.jet", &[("main.jet", src)]);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert_eq!(stdout, "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n");
+//RS     assert!(stderr.contains("tier1 native"), "{stderr}");
+//RS     assert!(!stderr.contains("tier0 interp"), "{stderr}");
+//RS 
+//RS     let dir =
+//RS         std::env::temp_dir().join(format!("jet_inline_core_use_interp_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     let outcome = jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true);
+//RS     match outcome {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout, exit_code, ..
+//RS         } => {
+//RS             assert_eq!(exit_code, 0);
+//RS             assert_eq!(stdout, "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n");
+//RS         }
+//RS         jet::Interpreter::RunOutcome::Problems(diags) => {
+//RS             panic!("forced interpreter rejected inline Core imports: {diags:?}")
+//RS         }
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// The same body-local import law applies when the prefix is a file module.
+//RS /// This catches codegen's local signature/return maps, not only sema lookup.
+//RS #[test]
+//RS fn inline_module_file_use_list_matches_all_tiers() {
+//RS     let main_src = r#"
+//RS module math
+//RS module api {
+//RS     use math.[label as decorate]
+//RS     pub use math.[label as exported]
+//RS     pub fn local(n: Int) -> String {
+//RS         return decorate("x", n)
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(api.local(7))
+//RS     print(api.exported("y", 8))
+//RS }
+//RS "#;
+//RS     let math_src = r#"
+//RS pub fn label(prefix: String, n: Int) -> String {
+//RS     return "{prefix}:{n}"
+//RS }
+//RS "#;
+//RS     let files = [("main.jet", main_src), ("math.jet", math_src)];
+//RS     if have_rustc() {
+//RS         let (code, stdout) = build_and_run_multi("tir_inline_file_use", "main.jet", &files);
+//RS         assert_eq!(code, 0);
+//RS         assert_eq!(stdout, "x:7\ny:8\n");
+//RS     }
+//RS     let (code, stdout, stderr) = run_default_multi("inline_file_use", "main.jet", &files);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert_eq!(stdout, "x:7\ny:8\n");
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_inline_file_interp_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     fs::write(dir.join("main.jet"), main_src).unwrap();
+//RS     fs::write(dir.join("math.jet"), math_src).unwrap();
+//RS     let outcome =
+//RS         jet::Interpreter::dev_iteration(dir.join("main.jet").to_str().unwrap(), false, true);
+//RS     match outcome {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout, exit_code, ..
+//RS         } => {
+//RS             assert_eq!(exit_code, 0);
+//RS             assert_eq!(stdout, "x:7\ny:8\n");
+//RS         }
+//RS         jet::Interpreter::RunOutcome::Problems(diags) => {
+//RS             panic!("forced interpreter rejected inline file imports: {diags:?}")
+//RS         }
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// c109 Phase 14: a qualified file-module call `math.clamp(...)` (D-MOD1). `main`
+//RS /// routes through the TIR (`ModuleCall::Qualified` → `__jet_math::__jet_clamp`); the
+//RS /// imported module's `clamp` routes too. A String-arg module call also exercises the
+//RS /// `&(...)` Read-borrow arg form.
+//RS #[test]
+//RS fn file_module_qualified_call() {
+//RS     let main_src = "\
+//RS module math
+//RS fn run() {
+//RS     print(math.clamp(15, 0, 10))
+//RS     print(math.label(n: 5, prefix: \"x\"))
+//RS     print(math.checked(7) ?? -1)
+//RS     print(math.checked(-1) ?? -2)
+//RS     print(math.ready() ?? false)
+//RS }
+//RS ";
+//RS     let math_src = "\
+//RS pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+//RS     if (x < lo) {
+//RS         return lo
+//RS     }
+//RS     if (x > hi) {
+//RS         return hi
+//RS     }
+//RS     return x
+//RS }
+//RS pub fn label(prefix: String, n: Int) -> String {
+//RS     return \"{prefix}:{n}\"
+//RS }
+//RS pub fn checked(value: Int) -> Int Err! {
+//RS     if value < 0 {
+//RS         return Err(message(value))
+//RS     }
+//RS     return Ok(value)
+//RS }
+//RS fn message(value: Int) -> String {
+//RS     return \"bad {value}\"
+//RS }
+//RS pub fn ready() -> Bool -> true
+//RS ";
+//RS     let files = [("main.jet", main_src), ("math.jet", math_src)];
+//RS     let expected = "10\nx:5\n7\n-2\ntrue\n";
+//RS     if have_rustc() {
+//RS         let (code, stdout) = build_and_run_multi("tir_file_mod", "main.jet", &files);
+//RS         assert_eq!(code, 0);
+//RS         assert_eq!(stdout, expected);
+//RS     }
+//RS     let (code, stdout, stderr) = run_default_multi("tir_file_mod", "main.jet", &files);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert_eq!(stdout, expected, "{stderr}");
+//RS     let (code, stdout, stderr) = run_interpret_multi("tir_file_mod", "main.jet", &files);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert_eq!(stdout, expected, "{stderr}");
+//RS }
+//RS 
+//RS /// A direct result handler must preserve the imported module's Result carrier
+//RS /// and canonical error identity on every execution tier.
+//RS #[test]
+//RS fn imported_module_direct_result_match_uses_error_identity() {
+//RS     let main_src = "\
+//RS module worker
+//RS fn run() {
+//RS     if worker.checked(-1) == {
+//RS         .Ok(value) -> print(\"unexpected:{value}\")
+//RS         .Err(error) -> print(\"failure:{error.message}\")
+//RS     }
+//RS     if worker.checked(7) == {
+//RS         .Ok(value) -> print(\"success:{value}\")
+//RS         .Err(error) -> print(\"unexpected:{error.message}\")
+//RS     }
+//RS }
+//RS ";
+//RS     let worker_src = "\
+//RS #Error
+//RS pub struct WorkerError {
+//RS     pub message: String
+//RS }
+//RS pub fn checked(value: Int) -> Int WorkerError! {
+//RS     if value < 0 {
+//RS         return Err(WorkerError{message: \"negative\"})
+//RS     }
+//RS     return Ok(value)
+//RS }
+//RS ";
+//RS     let files = [("main.jet", main_src), ("worker.jet", worker_src)];
+//RS     let expected = "failure:negative\nsuccess:7\n";
+//RS     let (code, stdout, stderr) =
+//RS         run_default_multi("imported_direct_result_match", "main.jet", &files);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert_eq!(stdout, expected, "{stderr}");
+//RS     let (code, stdout, stderr) =
+//RS         run_interpret_multi("imported_direct_result_match", "main.jet", &files);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert_eq!(stdout, expected, "{stderr}");
+//RS     if have_rustc() {
+//RS         let (code, stdout) =
+//RS             build_and_run_multi("tir_imported_direct_result_match", "main.jet", &files);
+//RS         assert_eq!(code, 0);
+//RS         assert_eq!(stdout, expected);
+//RS     }
+//RS }
+//RS 
+//RS /// Returning a second fallible call from a `?? {}` handler must flatten that
+//RS /// call's carrier. Otherwise the caller can select `.Ok` with an `Err` payload
+//RS /// and fail later as an invalid struct field receiver.
+//RS #[test]
+//RS fn imported_fallible_handler_return_flattens_before_result_match() {
+//RS     let main_src = "\
+//RS module worker
+//RS fn wire(value: worker.Value) -> String {
+//RS     return value.id
+//RS }
+//RS fn run() {
+//RS     if worker.checked() == {
+//RS         .Err(error) -> print(\"failure:{error.message}\")
+//RS         .Ok(value) -> print(wire(value))
+//RS     }
+//RS }
+//RS ";
+//RS     let worker_src = "\
+//RS #Error
+//RS pub struct WorkerError {
+//RS     pub message: String
+//RS }
+//RS pub struct Value {
+//RS     pub id: String
+//RS }
+//RS fn inner() -> Bool WorkerError! {
+//RS     return Err(WorkerError{message: \"inner\"})
+//RS }
+//RS fn fail_after(error: WorkerError) -> Value WorkerError! {
+//RS     return Err(error)
+//RS }
+//RS pub fn checked() -> Value WorkerError! {
+//RS     inner() ?? {
+//RS         return fail_after(err)
+//RS     }
+//RS     return Ok(Value{id: \"unreachable\"})
+//RS }
+//RS ";
+//RS     let files = [("main.jet", main_src), ("worker.jet", worker_src)];
+//RS     let expected = "failure:inner\n";
+//RS     let (code, stdout, stderr) =
+//RS         run_default_multi("imported_fallible_handler_return", "main.jet", &files);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert_eq!(stdout, expected, "{stderr}");
+//RS     let (code, stdout, stderr) =
+//RS         run_interpret_multi("imported_fallible_handler_return", "main.jet", &files);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert_eq!(stdout, expected, "{stderr}");
+//RS     if have_rustc() {
+//RS         let (code, stdout) =
+//RS             build_and_run_multi("tir_imported_fallible_handler_return", "main.jet", &files);
+//RS         assert_eq!(code, 0);
+//RS         assert_eq!(stdout, expected);
+//RS     }
+//RS }
+//RS 
+//RS /// Imported-module AOT must qualify generated root helpers from the nested
+//RS /// emitter scope. This combines String trimming, outcome fallback/recovery,
+//RS /// and an assertion inside a helper with a declared Jet error family.
+//RS #[test]
+//RS fn imported_module_aot_root_helpers() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let main_src = "\
+//RS module helper
+//RS struct Count { value: Int }
+//RS impl Count.Add {
+//RS     fn add(self, rhs: Count) -> Count {
+//RS         total :: helper.sum(self.value, rhs.value)
+//RS         return Count{value: total}
+//RS     }
+//RS }
+//RS fn run() {
+//RS     trimmed :: helper.trimmed(\"  ok  \")
+//RS     print(trimmed)
+//RS     print(helper.checked(7) ?? -1)
+//RS     print(helper.failed(-1) ?? -2)
+//RS     recovered :: helper.recover()
+//RS     print(recovered)
+//RS     empty :: helper.empty_strings()
+//RS     print(empty.len())
+//RS     reset :: helper.reset_strings()
+//RS     print(reset.len())
+//RS     total :: Count{value: 1} + Count{value: 2}
+//RS     print(total.value)
+//RS }
+//RS ";
+//RS     let helper_src = "\
+//RS pub fn sum(left: Int, right: Int) -> Int -> left + right
+//RS #Error
+//RS pub enum HelperError {
+//RS     Negative
+//RS }
+//RS pub fn trimmed(value: String) -> String {
+//RS     return value.trim()
+//RS }
+//RS pub fn checked(value: Int) -> Int HelperError! {
+//RS     assert(value >= 0)
+//RS     return Ok(value)
+//RS }
+//RS pub fn failed(value: Int) -> Int HelperError! {
+//RS     if value < 0 {
+//RS         return Err(HelperError.Negative)
+//RS     }
+//RS     return Ok(value)
+//RS }
+//RS fn fallback_message() -> String {
+//RS     return \"recovered\"
+//RS }
+//RS pub fn recover() -> String {
+//RS     values := \"\".split(\",\").to_list()
+//RS     return values.get(1) ?? fallback_message()
+//RS }
+//RS pub fn empty_strings() -> [String] {
+//RS     return [String]{}
+//RS }
+//RS pub fn reset_strings() -> [String] {
+//RS     values := [String]{}
+//RS     values = [String]{}
+//RS     return values
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run_multi(
+//RS         "tir_imported_module_aot_root_helpers",
+//RS         "main.jet",
+//RS         &[("main.jet", main_src), ("helper.jet", helper_src)],
+//RS     );
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "ok\n7\n-2\nrecovered\n0\n0\n3\n");
+//RS }
+//RS 
+//RS /// A taken `?? panic(...)` in an imported module must compile with the nested
+//RS /// emitter's root-helper prefix and reach Jet's runtime stop.
+//RS #[test]
+//RS fn imported_module_aot_panic_fallback_uses_root_helper() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let main_src = "\
+//RS module helper
+//RS fn run() {
+//RS     print(helper.panic_fallback())
+//RS }
+//RS ";
+//RS     let helper_src = "\
+//RS pub fn panic_fallback() -> String {
+//RS     values := \"\".split(\",\").to_list()
+//RS     return values.get(1) ?? panic(\"imported fallback\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run_multi(
+//RS         "tir_imported_module_aot_panic_fallback",
+//RS         "main.jet",
+//RS         &[("main.jet", main_src), ("helper.jet", helper_src)],
+//RS     );
+//RS     assert_eq!(code, 70);
+//RS     assert!(stdout.is_empty());
+//RS }
+//RS 
+//RS #[test]
+//RS fn fallible_string_call_chain_dispatches_split() {
+//RS     let source = r#"
+//RS fn text() -> String Err! {
+//RS     return Ok("a,b")
+//RS }
+//RS fn run() Err! {
+//RS     print(text().split(",").to_list())
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_fallible_string_split_chain", source, "[a, b]\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fallible_string_explicit_try_chain_dispatches_split() {
+//RS     let source = r#"
+//RS fn text() -> String Err! {
+//RS     return Ok("a,b")
+//RS }
+//RS fn run() Err! {
+//RS     print((text()?).split(",").to_list())
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_fallible_string_explicit_try_split_chain",
+//RS         source,
+//RS         "[a, b]\n",
+//RS     );
+//RS }
+//RS 
+//RS /// c109 Phase 14: an unqualified file-module import `use mathlib.[clamp, lo, hi]`
+//RS /// (D-MOD3). The bare calls lower via `emit_call`'s `unqualified_file` arm
+//RS /// (`ModuleCall::Qualified` → `__jet_mathlib::__jet_*`). `main` routes through the TIR.
+//RS #[test]
+//RS fn unqualified_file_module_call() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let main_src = "\
+//RS use mathlib.clamp
+//RS use mathlib.[lo, hi]
+//RS module mathlib
+//RS fn run() {
+//RS     print(clamp(200, lo(), hi()))
+//RS }
+//RS ";
+//RS     let mathlib_src = "\
+//RS pub fn clamp(n: Int, lo: Int, hi: Int) -> Int {
+//RS     if (n < lo) {
+//RS         return lo
+//RS     }
+//RS     if (n > hi) {
+//RS         return hi
+//RS     }
+//RS     return n
+//RS }
+//RS pub fn lo() -> Int {
+//RS     return 0
+//RS }
+//RS pub fn hi() -> Int {
+//RS     return 100
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run_multi(
+//RS         "tir_unqual_file",
+//RS         "main.jet",
+//RS         &[("main.jet", main_src), ("mathlib.jet", mathlib_src)],
+//RS     );
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "100\n");
+//RS }
+//RS 
+//RS /// c109 Phase 14: a `pub use` re-export (D-MOD4). `text.wrap(...)` resolves through
+//RS /// the directory module's `pub use wrap.wrap` and lowers via `reexport_calls`
+//RS /// (`ModuleCall::Qualified` → `__jet_wrap::__jet_wrap`). The String arg exercises the
+//RS /// Read-borrow form (`&(...)`). `main` + the submodule fns route through the TIR.
+//RS #[test]
+//RS fn reexport_module_call() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let main_src = "\
+//RS module text
+//RS fn run() {
+//RS     print(text.wrap(\"hi\"))
+//RS }
+//RS ";
+//RS     let module_src = "\
+//RS pub use wrap.wrap
+//RS module wrap
+//RS ";
+//RS     let wrap_src = "\
+//RS pub fn wrap(s: String) -> String {
+//RS     return \"[{decorate(s)}]\"
+//RS }
+//RS fn decorate(s: String) -> String {
+//RS     return \"{s}\"
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run_multi(
+//RS         "tir_reexport",
+//RS         "main.jet",
+//RS         &[
+//RS             ("main.jet", main_src),
+//RS             ("text/module.jet", module_src),
+//RS             ("text/wrap.jet", wrap_src),
+//RS         ],
+//RS     );
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "[hi]\n");
+//RS }
+//RS 
+//RS /// c109 Phase 15: a resolved comptime-if (`@if … { } else { }`). Sema selects
+//RS /// the branch; codegen emits ONLY that branch's statements inline (no `if`). Here
+//RS /// `debug` is `false`, so the `else` branch is emitted; the `then` branch is dropped.
+//RS #[test]
+//RS fn comptime_if_selected_branch() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS DEBUG :: prep { false }
+//RS fn pick(x: Int) -> Int {
+//RS     prep if DEBUG {
+//RS         return x + 100
+//RS     } else {
+//RS         return x + 1
+//RS     }
+//RS     return 0
+//RS }
+//RS fn run() {
+//RS     print(\"{pick(5)}\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_comptime_if", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "6\n");
+//RS }
+//RS 
+//RS /// c109 Phase 15 / D-IF3: a MIXED value+range dispatch — the general `emit_mixed_switch`
+//RS /// `if/else if … else` chain (shape D). A bare-value arm (`100 ->` ≡ `score == 100`)
+//RS /// sits next to range arms (`90..99 ->`), which lower to `score >= lo && score <= hi`;
+//RS /// the body picks the first matching band. (Q4 retired free-predicate arm heads; a
+//RS /// value+range mix is the surviving way to reach the mixed if/else chain.)
+//RS #[test]
+//RS fn mixed_comparison_switch() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn grade(score: Int) -> String {
+//RS     if score == {
+//RS         100 -> { return \"A+\" }
+//RS         90..99 -> { return \"A\" }
+//RS         80..89 -> { return \"B\" }
+//RS         else -> { return \"F\" }
+//RS     }
+//RS     return \"?\"
+//RS }
+//RS fn run() {
+//RS     print(grade(85))
+//RS     print(grade(95))
+//RS     print(grade(100))
+//RS     print(grade(50))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_mixed_switch", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "B\nA\nA+\nF\n");
+//RS }
+//RS 
+//RS /// c109 Phase 15: a DELEGATION trait method (`impl T.Trait using field`). The
+//RS /// forwarding method routes through the TIR's `Delegation` kind — `(self).<field>.<m>(…)`
+//RS /// with the bare trait method name.
+//RS #[test]
+//RS fn delegation_trait_method() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS trait Speaker {
+//RS     fn say(self, msg: String) -> String
+//RS }
+//RS struct Voice {
+//RS     prefix: String
+//RS }
+//RS impl Voice.Speaker {
+//RS     fn say(self, msg: String) -> String {
+//RS         p :: self.prefix
+//RS         return \"{p}: {msg}\"
+//RS     }
+//RS }
+//RS struct Megaphone {
+//RS     inner: Voice
+//RS }
+//RS impl Megaphone.Speaker using inner
+//RS fn run() {
+//RS     v := Voice{ prefix: \"HEY\" }
+//RS     m := Megaphone{ inner: v }
+//RS     print(m.say(\"go\"))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_delegation", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "HEY: go\n");
+//RS }
+//RS 
+//RS /// c109 Phase 15: the `a ?? panic(…)` fallback form. The panic message + the sorted
+//RS /// scalar-locals snapshot (`safe_locals_expr`) is reproduced from the lexical lowering
+//RS /// environment. On the success path the fallback is never taken; the program returns the
+//RS /// unwrapped value.
+//RS #[test]
+//RS fn or_fallback_panic_form() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn maybe(n: Int) -> Int? {
+//RS     if n > 0 {
+//RS         return Val(n)
+//RS     }
+//RS     return None
+//RS }
+//RS fn risky(count: Int, ratio: Float) -> Int {
+//RS     base := count + 1
+//RS     got :: maybe(count) ?? panic(\"no value at {count}\")
+//RS     return got + base
+//RS }
+//RS fn run() {
+//RS     print(\"{risky(5, 1.5)}\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_panic_fallback", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "11\n");
+//RS }
+//RS 
+//RS /// c109 Phase 16: a String-payload enum. The construction `Msg.Text(~s)` explicitly
+//RS /// copies the read-only String parameter into the owning payload; the match binds the
+//RS /// payload value and returns it (owning).
+//RS #[test]
+//RS fn string_payload_enum() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS enum Msg {
+//RS     Text(String)
+//RS     Code(Int)
+//RS }
+//RS fn wrap(s: String) -> Msg {
+//RS     return Msg.Text(~s)
+//RS }
+//RS fn render(m: Msg) -> String {
+//RS     if m == {
+//RS         .Text(s) -> { return s }
+//RS         .Code(n) -> { return \"code\" }
+//RS     }
+//RS     return \"?\"
+//RS }
+//RS fn run() {
+//RS     m :: wrap(\"hi\")
+//RS     print(render(m))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_string_payload_enum", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "hi\n");
+//RS }
+//RS 
+//RS /// c109 Phase 16: a recursive (boxed) enum. Constructing `Tree.Node(~inner)` explicitly
+//RS /// copies the read-only `inner: Tree` parameter before the recursive boxed edge. The
+//RS /// match traverses it (Rust auto-derefs the `Box`).
+//RS #[test]
+//RS fn recursive_boxed_enum() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS enum Tree {
+//RS     Leaf(Int)
+//RS     Node(Tree)
+//RS }
+//RS fn wrap(inner: Tree) -> Tree {
+//RS     return Tree.Node(~inner)
+//RS }
+//RS fn leaf_val(t: Tree) -> Int {
+//RS     if t == {
+//RS         .Leaf(n) -> { return n }
+//RS         .Node(inner) -> { return 0 }
+//RS     }
+//RS     return 0
+//RS }
+//RS fn run() {
+//RS     a :: Tree.Leaf(7)
+//RS     b :: wrap(a)
+//RS     print(\"{leaf_val(b)}\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_recursive_boxed_enum", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "0\n");
+//RS }
+//RS 
+//RS /// A recursive enum may use named payload fields at both construction and
+//RS /// pattern sites. TIR keeps `left`/`right` canonical until MIRRust mangles
+//RS /// those names for Rust.
+//RS #[test]
+//RS fn recursive_named_payload_enum() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS enum Kind {
+//RS     Leaf
+//RS     Pair(left: Kind, right: Kind)
+//RS }
+//RS fn run() {
+//RS     k :: Kind.Pair{ left: Kind.Leaf, right: Kind.Leaf }
+//RS     if k == .Pair(left, right) -> print(\"yes\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_recursive_named_payload_enum", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "yes\n");
+//RS }
+//RS 
+//RS /// c109 Phase 16: an enum variant carrying a covered struct payload. The struct flows
+//RS /// through the variant construction and the pattern binding; reading `p.x` from the
+//RS /// bound struct is an owning field read (sema rewrites it to `.clone()`).
+//RS #[test]
+//RS fn struct_payload_enum() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Point {
+//RS     x: Int
+//RS     y: Int
+//RS }
+//RS enum Shape {
+//RS     Dot(Point)
+//RS     Line(Int)
+//RS }
+//RS fn mk(p: Point) -> Shape {
+//RS     return Shape.Dot(~p)
+//RS }
+//RS fn first(s: Shape) -> Int {
+//RS     if s == {
+//RS         .Dot(p) -> { return p.x }
+//RS         .Line(n) -> { return n }
+//RS     }
+//RS     return 0
+//RS }
+//RS fn run() {
+//RS     pt :: Point{ x: 3, y: 4 }
+//RS     sh :: mk(pt)
+//RS     print(\"{first(sh)}\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_struct_payload_enum", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "3\n");
+//RS }
+//RS 
+//RS /// c109 Phase 16: a struct with a covered collection field, and an enum variant
+//RS /// carrying a covered collection payload. The payload is copied explicitly from
+//RS /// the read-only parameter before it fills the owning enum slot.
+//RS #[test]
+//RS fn collection_field_and_payload() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Crate {
+//RS     items: [Int]
+//RS     label: String
+//RS }
+//RS enum Holder {
+//RS     Nums([Int])
+//RS     One(Int)
+//RS }
+//RS fn mk(xs: [Int]) -> Holder {
+//RS     return Holder.Nums(~xs)
+//RS }
+//RS fn run() {
+//RS     b :: Crate{ items: [1, 2, 3], label: \"x\" }
+//RS     d :: mk([4, 5])
+//RS     print(b.label)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_collection_field_payload", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "x\n");
+//RS }
+//RS 
+//RS /// c109 Phase 17: a GENERIC free function. The `<T: Clone>` clause renders at lowering
+//RS /// (every type param carries an extra `Clone` bound, exactly `emit_func`), a type-var
+//RS /// param/return is by-value (`__jet_x: T`), and the body returns the type-var value. A
+//RS /// generic `[T]` list param/return is covered too (`Vec<T>`).
+//RS #[test]
+//RS fn generic_free_fns() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn id<T>(x: ^T) -> T {
+//RS     return x
+//RS }
+//RS fn pick<T>(a: ^T, b: ^T, first: Bool) -> T {
+//RS     if first {
+//RS         return a
+//RS     }
+//RS     return b
+//RS }
+//RS fn firstof<T>(xs: ^[T]) -> T {
+//RS     return ~xs[0]
+//RS }
+//RS fn wrap<T>(x: ^T) -> [T] {
+//RS     return [x]
+//RS }
+//RS fn run() {
+//RS     print(\"{id(5)}\")
+//RS     print(\"{pick(1, 2, true)}\")
+//RS     print(\"{firstof([10, 20, 30])}\")
+//RS     ys :: wrap(7)
+//RS     print(\"{ys[0]}\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_generic_free_fns", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "5\n1\n10\n7\n");
+//RS }
+//RS 
+//RS /// c109 Phase 17: prelude HTTP values use their canonical Core constructors. The
+//RS /// prelude types live in `jet_std`, which a standalone `rustc` here can't link, so
+//RS /// this asserts the emitted Rust dispatches through the shared helper symbols.
+//RS #[test]
+//RS fn prelude_struct_construction() {
+//RS     let src = "\
+//RS use core.http.client as client
+//RS use core.http.server as server
+//RS fn build_resp(body: String) -> HTTPResponse {
+//RS     return server.response(200, body)
+//RS }
+//RS fn build_req() -> HTTPRequest {
+//RS     return client.request(\"GET\", \"http://localhost/\")
+//RS }
+//RS fn run() {
+//RS     r :: build_resp(\"hi\")
+//RS     q :: build_req()
+//RS     print(\"built\")
+//RS }
+//RS ";
+//RS     // `compile_with_path` loads the entry from disk, so write the .jet first.
+//RS     let dir = std::env::temp_dir().join(format!("jet_tir_prelude_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let jet_path = dir.join("prelude.jet");
+//RS     fs::write(&jet_path, src).unwrap();
+//RS     let shown = jet_path.to_string_lossy().into_owned();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     // HTTPResponse: the shared server constructor helper.
+//RS     assert!(
+//RS         out.rust
+//RS             .contains(r#"return jet_http_srv_response(200i64, &((*__jet_body)));"#),
+//RS         "HTTPResponse constructor helper missing:\n{}",
+//RS         out.rust
+//RS     );
+//RS     // HTTPRequest: the shared client request helper.
+//RS     assert!(
+//RS         out.rust.contains(r#"return jet_http_client_request_new(&("GET".to_string()), &("http://localhost/".to_string()));"#),
+//RS         "HTTPRequest constructor helper missing:\n{}",
+//RS         out.rust
+//RS     );
+//RS }
+// END-PORT-PENDING 1175 tests/tir_modules_and_enums.rs:1-1178
+

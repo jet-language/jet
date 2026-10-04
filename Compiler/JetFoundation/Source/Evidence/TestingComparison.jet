@@ -1,0 +1,543 @@
+// Canonical tier-neutral comparison evidence; Rust TestingComparison.rs:1–897.
+// An equal finite sample is never a universal proof. Receipts carry to_json's
+// complete payload through the existing RecordCodec; identity uses CanonicalJSON.
+// #4483 / D-USIZE-TARGET1: core.sys.usize_max() must return the execution
+// target's native usize::MAX as U64; never infer it from the compiler host
+// or from the selected MIR target. This API is a capability gate, not a fallback.
+use core.sys as comparison_target_facts
+pub TEST_COMPARISON_SCHEMA_VERSION :: U16{1}
+pub enum ComparisonStatus {
+    Matched
+    Mismatch
+    Empty
+    Unsupported
+    Unavailable
+    Timeout
+    Cancelled
+    InvalidOracle
+    Contaminated
+}
+pub enum ObservationRelation {
+    TypedEquality
+    OrderedEffects
+    TypedFailure
+    Custom(String)
+}
+pub struct ComparisonObservation {
+    pub raw: String
+    pub typed_failure: String?
+    pub mutation: String?
+    pub ordered_effects: [String]
+    pub cleanup: [String]
+}
+pub struct ComparisonIdentity {
+    pub case_id: String
+    pub input_id: String
+    pub seed: U64?
+    pub source: String
+    pub tool: String
+    pub target: String
+}
+pub struct ComparisonSample {
+    pub identity: ComparisonIdentity
+    pub reference: ComparisonObservation
+    pub candidate: ComparisonObservation
+    pub reference_replay: ComparisonObservation?
+    pub candidate_replay: ComparisonObservation?
+    pub declared_equal: Bool?
+}
+pub struct ComparisonRecord {
+    pub schema_version: U16
+    pub status: ComparisonStatus
+    pub relation: ObservationRelation
+    pub samples: [ComparisonSample]
+    pub discarded_cases: Int
+    pub first_difference: Int?
+    pub reduced_counterexample: ComparisonSample?
+    pub contamination: String?
+    pub reason: String?
+    pub universal_proof: Bool
+}
+#Error
+pub struct ComparisonCodecError { pub message: String }
+#Error
+pub struct ComparisonAssertionError { pub status: ComparisonStatus, pub reason: String }
+fn comparison_codec_error(message: String) -> ComparisonCodecError Never! { ComparisonCodecError{message: message} }
+// Rust ComparisonStatus::{as_str,is_success,Display}.
+pub fn comparison_status_as_str(status: ComparisonStatus) -> String Never! {
+    if status == {
+        .Matched -> "matched"
+        .Mismatch -> "mismatch"
+        .Empty -> "empty"
+        .Unsupported -> "unsupported"
+        .Unavailable -> "unavailable"
+        .Timeout -> "timeout"
+        .Cancelled -> "cancelled"
+        .InvalidOracle -> "invalid_oracle"
+        .Contaminated -> "contaminated"
+    }
+}
+pub fn comparison_status_is_success(status: ComparisonStatus) -> Bool Never! { status == ComparisonStatus.Matched }
+// Rust ObservationRelation::{as_str,supports_plain_callable,compares}.
+pub fn observation_relation_as_str(relation: ObservationRelation) -> String Never! {
+    if relation == {
+        .TypedEquality -> "typed_equality"
+        .OrderedEffects -> "ordered_effects"
+        .TypedFailure -> "typed_failure"
+        .Custom(name) -> ~name
+    }
+}
+pub fn observation_relation_supports_plain_callable(relation: ObservationRelation) -> Bool Never! { relation == ObservationRelation.TypedEquality }
+fn comparison_relation_compares(relation: ObservationRelation, reference: ComparisonObservation, candidate: ComparisonObservation, declared_equal: Bool?) -> Bool? Never! {
+    if relation == {
+        .TypedEquality -> Val(reference.raw == candidate.raw)
+        .OrderedEffects -> Val(reference.raw == candidate.raw && reference.ordered_effects == candidate.ordered_effects && reference.cleanup == candidate.cleanup && reference.mutation == candidate.mutation)
+        .TypedFailure -> Val(reference.typed_failure == candidate.typed_failure && reference.raw == candidate.raw)
+        .Custom(_) -> declared_equal
+    }
+}
+// Rust ComparisonObservation constructors/builders.
+pub fn comparison_observation_value(raw: String) -> ComparisonObservation Never! {
+    ComparisonObservation{raw: raw, typed_failure: None, mutation: None, ordered_effects: [String]{}, cleanup: [String]{}}
+}
+pub fn comparison_observation_failure(raw: String, failure: String) -> ComparisonObservation Never! {
+    result := comparison_observation_value(raw)
+    result.typed_failure = Val(failure)
+    result
+}
+pub fn comparison_observation_with_effects(observation: ^ComparisonObservation, effects: [String]) -> ComparisonObservation Never! {
+    result := observation
+    result.ordered_effects = effects
+    result
+}
+pub fn comparison_observation_with_cleanup(observation: ^ComparisonObservation, cleanup: [String]) -> ComparisonObservation Never! {
+    result := observation
+    result.cleanup = cleanup
+    result
+}
+pub fn comparison_observation_with_mutation(observation: ^ComparisonObservation, mutation: String) -> ComparisonObservation Never! {
+    result := observation
+    result.mutation = Val(mutation)
+    result
+}
+// Rust ComparisonIdentity::{new,is_complete}.
+pub fn comparison_identity_new(case_id: String, input_id: String, source: String, tool: String, target: String) -> ComparisonIdentity Never! {
+    ComparisonIdentity{case_id: case_id, input_id: input_id, seed: None, source: source, tool: tool, target: target}
+}
+pub fn comparison_identity_is_complete(identity: ComparisonIdentity) -> Bool Never! {
+    identity.case_id.len() != 0 && identity.input_id.len() != 0 && identity.source.len() != 0 && identity.tool.len() != 0 && identity.target.len() != 0
+}
+// Rust ComparisonSample::{new,with_replays,with_declared_equal}.
+pub fn comparison_sample_new(identity: ComparisonIdentity, reference: ComparisonObservation, candidate: ComparisonObservation) -> ComparisonSample Never! {
+    ComparisonSample{identity: identity, reference: reference, candidate: candidate, reference_replay: None, candidate_replay: None, declared_equal: None}
+}
+pub fn comparison_sample_with_replays(sample: ^ComparisonSample, reference: ComparisonObservation, candidate: ComparisonObservation) -> ComparisonSample Never! {
+    result := sample
+    result.reference_replay = Val(reference)
+    result.candidate_replay = Val(candidate)
+    result
+}
+pub fn comparison_sample_with_declared_equal(sample: ^ComparisonSample, equal: Bool) -> ComparisonSample Never! {
+    result := sample
+    result.declared_equal = Val(equal)
+    result
+}
+// Rust ComparisonRecord::terminal. Concrete status is caller-supplied, not inferred.
+pub fn comparison_record_terminal(relation: ObservationRelation, status: ComparisonStatus, reason: String) -> ComparisonRecord Never! {
+    ComparisonRecord{schema_version: TEST_COMPARISON_SCHEMA_VERSION, status: status, relation: relation, samples: [ComparisonSample]{}, discarded_cases: 0, first_difference: None, reduced_counterexample: None, contamination: None, reason: Val(reason), universal_proof: false}
+}
+// Rust validate_comparison_sample: validation is transitive even for terminals.
+fn comparison_sample_validate(sample: ComparisonSample) ComparisonCodecError! {
+    if !comparison_identity_is_complete(sample.identity) -> return Err(comparison_codec_error("comparison sample identity is incomplete"))
+    if (sample.reference_replay != None) != (sample.candidate_replay != None) -> return Err(comparison_codec_error("comparison sample replay fields must be paired"))
+    return
+}
+// Rust ComparisonRecord::validate, preserving order and exact diagnostics.
+pub fn comparison_record_validate(record: ComparisonRecord) ComparisonCodecError! {
+    if record.schema_version != TEST_COMPARISON_SCHEMA_VERSION -> return Err(comparison_codec_error("unsupported comparison schema version {record.schema_version}"))
+    if record.universal_proof -> return Err(comparison_codec_error("comparison records cannot claim universal proof"))
+    // Rust fields are usize; reject values outside the execution target domain.
+    usize_max :: Int.from_u64(comparison_target_facts.usize_max())
+    if record.discarded_cases < 0 || record.discarded_cases > usize_max -> return Err(comparison_codec_error("comparison discarded_cases is not a valid usize"))
+    if record.status == ComparisonStatus.Matched && (record.samples.len() == 0 || record.discarded_cases != 0) -> return Err(comparison_codec_error("matched comparison records require non-empty samples and no discarded cases"))
+    if record.first_difference == {
+        .Val(index) -> {
+            if index < 0 || index > usize_max -> return Err(comparison_codec_error("comparison first_difference is not a valid usize"))
+            if index >= record.samples.len() -> return Err(comparison_codec_error("comparison first_difference is outside samples"))
+        }
+        .None -> {}
+    }
+    if record.reduced_counterexample != None && record.status != ComparisonStatus.Mismatch -> return Err(comparison_codec_error("comparison reduced_counterexample is only valid for a mismatch"))
+    loop sample in record.samples -> comparison_sample_validate(sample)
+    if record.reduced_counterexample == {
+        .Val(sample) -> comparison_sample_validate(sample)
+        .None -> {}
+    }
+    return
+}
+// Rust ComparisonRecord::{assert_equal,first_mismatch}; assertion intentionally
+// tests the verdict, not structural validity (which belongs at persistence).
+pub fn comparison_record_assert_equal(record: ComparisonRecord) ComparisonAssertionError! {
+    if comparison_status_is_success(record.status) && record.samples.len() != 0 && record.discarded_cases == 0 -> return
+    return Err(ComparisonAssertionError{status: record.status, reason: record.reason ?? "comparison did not establish equality"})
+}
+pub fn comparison_assertion_error_text(error: ComparisonAssertionError) -> String Never! { "comparison {comparison_status_as_str(error.status)}: {error.reason}" }
+pub fn comparison_record_first_mismatch(record: ComparisonRecord) -> ComparisonSample? Never! {
+    if record.reduced_counterexample != None -> return record.reduced_counterexample
+    index :: record.first_difference ?? return None
+    if index < 0 || index >= record.samples.len() -> return None
+    Val(record.samples[index])
+}
+// Rust compare_samples delegates to the sole verdict engine.
+pub fn testing_compare_samples(relation: ObservationRelation, samples: ^[ComparisonSample]) -> ComparisonRecord Never! { testing_compare_samples_with_discarded(relation, ^samples, 0) }
+// Rust compare_samples_with_discarded: ordered observations and replay checks.
+pub fn testing_compare_samples_with_discarded(relation: ObservationRelation, samples: ^[ComparisonSample], discarded_cases: Int) -> ComparisonRecord Never! {
+    // Infallible for the Rust usize domain; wider Jet callers must not create invalid evidence.
+    if discarded_cases < 0 || discarded_cases > Int.from_u64(comparison_target_facts.usize_max()) -> panic("comparison discarded_cases is not a valid usize")
+    record := ComparisonRecord{schema_version: TEST_COMPARISON_SCHEMA_VERSION, status: ComparisonStatus.Empty, relation: relation, samples: samples, discarded_cases: discarded_cases, first_difference: None, reduced_counterexample: None, contamination: None, reason: None, universal_proof: false}
+    if record.samples.len() == 0 {
+        record.reason = Val(if discarded_cases == 0 -> "comparison corpus is empty" else -> "all comparison cases were discarded")
+        return record
+    }
+    loop sample in record.samples {
+        if !comparison_identity_is_complete(sample.identity) {
+            record.status = ComparisonStatus.InvalidOracle
+            record.reason = Val("comparison sample identity is incomplete")
+            return record
+        }
+    }
+    loop (index, sample) in record.samples {
+        if sample.reference_replay == { .Val(replay) -> {
+            if replay != sample.reference {
+                record.status = ComparisonStatus.Contaminated
+                record.contamination = Val("reference observation changed on replay for case `{sample.identity.case_id}`")
+                record.reason = record.contamination
+                return record
+            }
+        }
+        .None -> {}
+        }
+        if sample.candidate_replay == { .Val(replay) -> {
+            if replay != sample.candidate {
+                record.status = ComparisonStatus.Contaminated
+                record.contamination = Val("candidate observation changed on replay for case `{sample.identity.case_id}`")
+                record.reason = record.contamination
+                return record
+            }
+        }
+        .None -> {}
+        }
+        equal :: comparison_relation_compares(record.relation, sample.reference, sample.candidate, sample.declared_equal) ?? {
+            record.status = ComparisonStatus.InvalidOracle
+            record.reason = Val("custom comparison relation did not declare an observation result")
+            return record
+        }
+        if !equal {
+            record.status = ComparisonStatus.Mismatch
+            record.first_difference = Val(index)
+            record.reduced_counterexample = Val(~sample)
+            record.reason = Val("first differing observation is case `{sample.identity.case_id}`")
+            return record
+        }
+    }
+    if discarded_cases > 0 {
+        record.status = ComparisonStatus.InvalidOracle
+        record.reason = Val("comparison discarded cases and cannot claim equality")
+    } else {
+        record.status = ComparisonStatus.Matched
+        record.reason = Val("{record.samples.len()} observed case(s) matched under {observation_relation_as_str(record.relation)}")
+    }
+    record
+}
+// Rust reduce_mismatch accepts only reductions mismatching under the same relation.
+pub fn testing_reduce_mismatch(record: ComparisonRecord, candidates: ^[[ComparisonSample]]) -> ComparisonSample? Never! {
+    if record.status != ComparisonStatus.Mismatch -> return None
+    loop candidate in candidates {
+        reduced :: testing_compare_samples(record.relation, ^candidate)
+        if reduced.status == ComparisonStatus.Mismatch -> return reduced.reduced_counterexample
+    }
+    record.reduced_counterexample
+}
+// Rust optional_string_json and comparison_{observation,identity,sample}_json.
+fn comparison_optional_string_json(value: String?) -> CanonicalJSON Never! {
+    if value == {
+        .None -> CanonicalJSON.Null
+        .Val(text) -> CanonicalJSON.String(text)
+    }
+}
+fn comparison_optional_integer_json(value: Int?) -> CanonicalJSON Never! {
+    if value == {
+        .None -> CanonicalJSON.Null
+        .Val(number) -> CanonicalJSON.Integer("{number}")
+    }
+}
+fn comparison_strings_json(values: [String]) -> CanonicalJSON Never! {
+    result := [CanonicalJSON]{}
+    loop value in values -> &result.push(CanonicalJSON.String(value))
+    CanonicalJSON.Array(result)
+}
+fn comparison_json_object(fields: [CanonicalJSONField]) -> CanonicalJSON ComparisonCodecError! {
+    if canonical_json_object(fields) == {
+        .Ok(value) -> Ok(value)
+        .Err(error) -> Err(comparison_codec_error(error.message))
+    }
+}
+fn comparison_observation_json(observation: ComparisonObservation) -> CanonicalJSON ComparisonCodecError! {
+    comparison_json_object([CanonicalJSONField]{
+        CanonicalJSONField{key: "cleanup", value: comparison_strings_json(observation.cleanup)},
+        CanonicalJSONField{key: "mutation", value: comparison_optional_string_json(observation.mutation)},
+        CanonicalJSONField{key: "ordered_effects", value: comparison_strings_json(observation.ordered_effects)},
+        CanonicalJSONField{key: "raw", value: CanonicalJSON.String(observation.raw)},
+        CanonicalJSONField{key: "typed_failure", value: comparison_optional_string_json(observation.typed_failure)}
+    })
+}
+fn comparison_identity_json(identity: ComparisonIdentity) -> CanonicalJSON ComparisonCodecError! {
+    seed := CanonicalJSON.Null
+    if identity.seed == {
+        .Val(number) -> seed = CanonicalJSON.Integer("{number}")
+        .None -> {}
+    }
+    comparison_json_object([CanonicalJSONField]{
+        CanonicalJSONField{key: "case_id", value: CanonicalJSON.String(identity.case_id)},
+        CanonicalJSONField{key: "input_id", value: CanonicalJSON.String(identity.input_id)},
+        CanonicalJSONField{key: "seed", value: seed},
+        CanonicalJSONField{key: "source", value: CanonicalJSON.String(identity.source)},
+        CanonicalJSONField{key: "target", value: CanonicalJSON.String(identity.target)},
+        CanonicalJSONField{key: "tool", value: CanonicalJSON.String(identity.tool)}
+    })
+}
+fn comparison_optional_observation_json(observation: ComparisonObservation?) -> CanonicalJSON ComparisonCodecError! {
+    if observation == {
+        .None -> Ok(CanonicalJSON.Null)
+        .Val(value) -> comparison_observation_json(value)
+    }
+}
+fn comparison_sample_json(sample: ComparisonSample) -> CanonicalJSON ComparisonCodecError! {
+    declared := CanonicalJSON.Null
+    if sample.declared_equal == {
+        .Val(flag) -> declared = CanonicalJSON.Bool(flag)
+        .None -> {}
+    }
+    comparison_json_object([CanonicalJSONField]{
+        CanonicalJSONField{key: "candidate", value: comparison_observation_json(sample.candidate)},
+        CanonicalJSONField{key: "candidate_replay", value: comparison_optional_observation_json(sample.candidate_replay)},
+        CanonicalJSONField{key: "declared_equal", value: declared},
+        CanonicalJSONField{key: "identity", value: comparison_identity_json(sample.identity)},
+        CanonicalJSONField{key: "reference", value: comparison_observation_json(sample.reference)},
+        CanonicalJSONField{key: "reference_replay", value: comparison_optional_observation_json(sample.reference_replay)}
+    })
+}
+// Rust ComparisonRecord::{to_json,artifact_id}: A-canonical LF and SHA256
+// are the shared CanonicalJSON semantics, not a comparison-specific encoder.
+pub fn comparison_record_to_json(record: ComparisonRecord) -> CanonicalJSON ComparisonCodecError! {
+    comparison_record_validate(record)
+    samples := [CanonicalJSON]{}
+    loop sample in record.samples -> &samples.push(comparison_sample_json(sample))
+    reduced := CanonicalJSON.Null
+    if record.reduced_counterexample == {
+        .Val(sample) -> reduced = comparison_sample_json(sample)
+        .None -> {}
+    }
+    comparison_json_object([CanonicalJSONField]{
+        CanonicalJSONField{key: "contamination", value: comparison_optional_string_json(record.contamination)},
+        CanonicalJSONField{key: "discarded_cases", value: CanonicalJSON.Integer("{record.discarded_cases}")},
+        CanonicalJSONField{key: "first_difference", value: comparison_optional_integer_json(record.first_difference)},
+        CanonicalJSONField{key: "reason", value: comparison_optional_string_json(record.reason)},
+        CanonicalJSONField{key: "reduced_counterexample", value: reduced},
+        CanonicalJSONField{key: "relation", value: CanonicalJSON.String(observation_relation_as_str(record.relation))},
+        CanonicalJSONField{key: "samples", value: CanonicalJSON.Array(samples)},
+        CanonicalJSONField{key: "schema_version", value: CanonicalJSON.Integer("{record.schema_version}")},
+        CanonicalJSONField{key: "status", value: CanonicalJSON.String(comparison_status_as_str(record.status))},
+        CanonicalJSONField{key: "universal_proof", value: CanonicalJSON.Bool(record.universal_proof)}
+    })
+}
+pub fn comparison_record_artifact_id(record: ComparisonRecord) -> String ComparisonCodecError! { Ok(canonical_json_sha256(comparison_record_to_json(record))) }
+// Rust json_object/json_field and typed field readers. Unknown fields are
+// retained by CanonicalJSON but ignored on typed decode, as in the reference.
+fn comparison_json_field(value: CanonicalJSON, key: String) -> CanonicalJSON ComparisonCodecError! {
+    if value == { .Object(fields) -> {
+        // CanonicalJSON's constructor sorts keys, just as Rust's BTreeMap
+        // does. Search the shared representation without cloning the object
+        // or scanning every unknown field for each requested field.
+        lower := 0
+        upper := fields.len()
+        loop lower < upper {
+            middle :: lower + (upper - lower) /% 2
+            if fields[middle].key == key -> return Ok(fields[middle].value)
+            if fields[middle].key < key -> lower = middle + 1
+            else -> upper = middle
+        }
+        Err(comparison_codec_error("comparison value is missing `{key}`"))
+    }
+    else -> Err(comparison_codec_error("comparison value must be an object"))
+    }
+}
+fn comparison_json_text(value: CanonicalJSON, key: String) -> String ComparisonCodecError! {
+    if comparison_json_field(value, key) == {
+        .String(text) -> Ok(text)
+        else -> Err(comparison_codec_error("comparison field `{key}` must be a string"))
+    }
+}
+fn comparison_json_integer(value: CanonicalJSON, key: String) -> String ComparisonCodecError! {
+    if comparison_json_field(value, key) == {
+        .Integer(text) -> Ok(text)
+        else -> Err(comparison_codec_error("comparison field `{key}` must be an integer"))
+    }
+}
+fn comparison_json_bool(value: CanonicalJSON, key: String) -> Bool ComparisonCodecError! {
+    if comparison_json_field(value, key) == {
+        .Bool(flag) -> Ok(flag)
+        else -> Err(comparison_codec_error("comparison field `{key}` must be a boolean"))
+    }
+}
+fn comparison_json_array(value: CanonicalJSON, key: String) -> [CanonicalJSON] ComparisonCodecError! {
+    if comparison_json_field(value, key) == {
+        .Array(values) -> Ok(values)
+        else -> Err(comparison_codec_error("comparison field `{key}` must be an array"))
+    }
+}
+fn comparison_json_optional_value(value: CanonicalJSON, key: String) -> CanonicalJSON? ComparisonCodecError! {
+    child :: comparison_json_field(value, key)
+    if child == CanonicalJSON.Null -> return Ok(None)
+    Ok(Val(child))
+}
+fn comparison_json_optional_string(value: CanonicalJSON, key: String) -> String? ComparisonCodecError! {
+    child :: comparison_json_optional_value(value, key) ?? return Ok(None)
+    if child == {
+        .String(text) -> Ok(Val(text))
+        else -> Err(comparison_codec_error("comparison field `{key}` must be a string or null"))
+    }
+}
+fn comparison_json_optional_integer(value: CanonicalJSON, key: String) -> String? ComparisonCodecError! {
+    child :: comparison_json_optional_value(value, key) ?? return Ok(None)
+    if child == {
+        .Integer(text) -> Ok(Val(text))
+        else -> Err(comparison_codec_error("comparison field `{key}` must be an integer or null"))
+    }
+}
+// Rust parse::<u16/u64/usize>: bounded decimal accumulation rejects overflow
+// before creating an arbitrarily large Int, retaining Rust's leading '+' law.
+fn comparison_parse_unsigned(text: String, maximum: Int, message: String) -> Int ComparisonCodecError! {
+    bytes :: text.bytes()
+    start :: if bytes.len() > 0 && bytes[0] == (U8{43}) -> 1 else -> 0
+    if start == bytes.len() -> return Err(comparison_codec_error(message))
+    number := 0
+    loop index in start..<bytes.len() {
+        if bytes[index] < (U8{48}) || bytes[index] > (U8{57}) -> return Err(comparison_codec_error(message))
+        digit :: Int.from_u8(bytes[index]) - 48
+        if number > (maximum - digit) /% 10 -> return Err(comparison_codec_error(message))
+        number = number * 10 + digit
+    }
+    Ok(number)
+}
+// Rust parse_comparison_status/parse_observation_relation.
+fn comparison_parse_status(value: String) -> ComparisonStatus ComparisonCodecError! {
+    if value == {
+        "matched" -> Ok(ComparisonStatus.Matched)
+        "mismatch" -> Ok(ComparisonStatus.Mismatch)
+        "empty" -> Ok(ComparisonStatus.Empty)
+        "unsupported" -> Ok(ComparisonStatus.Unsupported)
+        "unavailable" -> Ok(ComparisonStatus.Unavailable)
+        "timeout" -> Ok(ComparisonStatus.Timeout)
+        "cancelled" -> Ok(ComparisonStatus.Cancelled)
+        "invalid_oracle" -> Ok(ComparisonStatus.InvalidOracle)
+        "contaminated" -> Ok(ComparisonStatus.Contaminated)
+        else -> Err(comparison_codec_error("unknown comparison status `{value}`"))
+    }
+}
+fn comparison_parse_relation(value: String) -> ObservationRelation ComparisonCodecError! {
+    if value.len() == 0 -> return Err(comparison_codec_error("comparison relation cannot be empty"))
+    Ok(if value == {
+        "typed_equality" -> ObservationRelation.TypedEquality
+        "ordered_effects" -> ObservationRelation.OrderedEffects
+        "typed_failure" -> ObservationRelation.TypedFailure
+        else -> ObservationRelation.Custom(value)
+    })
+}
+// Rust json_strings/comparison_observation_from_json.
+fn comparison_json_strings(value: CanonicalJSON, key: String) -> [String] ComparisonCodecError! {
+    values :: comparison_json_array(value, key)
+    result := [String]{}
+    loop child in values {
+        if child == {
+            .String(text) -> &result.push(text)
+            else -> return Err(comparison_codec_error("comparison field `{key}` entries must be strings"))
+        }
+    }
+    Ok(result)
+}
+fn comparison_observation_from_json(value: CanonicalJSON, label: String) -> ComparisonObservation ComparisonCodecError! {
+    raw :: comparison_json_text(value, "raw")
+    typed_failure :: comparison_json_optional_string(value, "typed_failure")
+    mutation :: comparison_json_optional_string(value, "mutation")
+    ordered_effects :: comparison_json_strings(value, "ordered_effects")
+    cleanup :: comparison_json_strings(value, "cleanup")
+    if raw.len() == 0 && label.len() == 0 -> return Err(comparison_codec_error("comparison observation raw value cannot be empty"))
+    Ok(ComparisonObservation{raw: raw, typed_failure: typed_failure, mutation: mutation, ordered_effects: ordered_effects, cleanup: cleanup})
+}
+// Rust comparison_identity_from_json.
+fn comparison_identity_from_json(value: CanonicalJSON) -> ComparisonIdentity ComparisonCodecError! {
+    case_id :: comparison_json_text(value, "case_id")
+    input_id :: comparison_json_text(value, "input_id")
+    source :: comparison_json_text(value, "source")
+    target :: comparison_json_text(value, "target")
+    tool :: comparison_json_text(value, "tool")
+    seed :: if comparison_json_optional_integer(value, "seed") == {
+        .Val(text) -> Val(U64{comparison_parse_unsigned(text, 18446744073709551615, "comparison identity seed is not a valid u64")})
+        .None -> None
+    }
+    Ok(ComparisonIdentity{case_id: case_id, input_id: input_id, seed: seed, source: source, tool: tool, target: target})
+}
+// Rust comparison_sample_from_json (including index-specific replay errors).
+fn comparison_sample_from_json(value: CanonicalJSON, index: Int) -> ComparisonSample ComparisonCodecError! {
+    identity :: comparison_identity_from_json(comparison_json_field(value, "identity"))
+    reference :: comparison_observation_from_json(comparison_json_field(value, "reference"), "sample {index} reference")
+    candidate :: comparison_observation_from_json(comparison_json_field(value, "candidate"), "sample {index} candidate")
+    sample := comparison_sample_new(identity, reference, candidate)
+    if comparison_json_optional_value(value, "reference_replay") == {
+        .Val(child) -> sample.reference_replay = Val(comparison_observation_from_json(child, "reference replay"))
+        .None -> {}
+    }
+    if comparison_json_optional_value(value, "candidate_replay") == {
+        .Val(child) -> sample.candidate_replay = Val(comparison_observation_from_json(child, "candidate replay"))
+        .None -> {}
+    }
+    if (sample.reference_replay != None) != (sample.candidate_replay != None) -> return Err(comparison_codec_error("comparison sample {index} must provide both replays"))
+    if comparison_json_optional_value(value, "declared_equal") == {
+        .Val(child) -> {
+            if child == {
+                .Bool(flag) -> sample.declared_equal = Val(flag)
+                else -> return Err(comparison_codec_error("comparison sample {index} declared_equal must be bool or null"))
+            }
+        }
+        .None -> {}
+    }
+    Ok(sample)
+}
+// Rust ComparisonRecord::from_json: schema first, decode all observations,
+// then transitive structural validation before indexing/attaching to receipts.
+pub fn comparison_record_from_json(value: CanonicalJSON) -> ComparisonRecord ComparisonCodecError! {
+    schema :: comparison_parse_unsigned(comparison_json_integer(value, "schema_version"), 65535, "comparison schema_version is not a valid u16")
+    if schema != TEST_COMPARISON_SCHEMA_VERSION -> return Err(comparison_codec_error("unsupported comparison schema version {schema}"))
+    status :: comparison_parse_status(comparison_json_text(value, "status"))
+    relation :: comparison_parse_relation(comparison_json_text(value, "relation"))
+    samples := [ComparisonSample]{}
+    values :: comparison_json_array(value, "samples")
+    loop (index, child) in values -> &samples.push(comparison_sample_from_json(child, index))
+    usize_max :: Int.from_u64(comparison_target_facts.usize_max())
+    discarded :: comparison_parse_unsigned(comparison_json_integer(value, "discarded_cases"), usize_max, "comparison discarded_cases is not a valid usize")
+    first :: if comparison_json_optional_integer(value, "first_difference") == {
+        .Val(text) -> Val(comparison_parse_unsigned(text, usize_max, "comparison first_difference is not a valid usize"))
+        .None -> None
+    }
+    reduced :: if comparison_json_optional_value(value, "reduced_counterexample") == {
+        .Val(child) -> Val(comparison_sample_from_json(child, 0))
+        .None -> None
+    }
+    contamination :: comparison_json_optional_string(value, "contamination")
+    reason :: comparison_json_optional_string(value, "reason")
+    universal :: comparison_json_bool(value, "universal_proof")
+    record :: ComparisonRecord{schema_version: U16{schema}, status: status, relation: relation, samples: samples, discarded_cases: discarded, first_difference: first, reduced_counterexample: reduced, contamination: contamination, reason: reason, universal_proof: universal}
+    comparison_record_validate(record)
+    Ok(record)
+}

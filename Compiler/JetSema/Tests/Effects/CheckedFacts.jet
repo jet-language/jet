@@ -1,0 +1,355 @@
+use jet_foundation.[AccessConvention, EffectRowEntry, FunctionDefaultRef, ParamZone, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span, Stmt, SymbolID, TCallArg, TEffectFacts, TEffectSpan, TExpr, TExprKind, TFailureCarrier, TFunc, TFuncKind, TGenericParam, TMethodRef, TParameter, TStmt, TTargetApplicability, TVisibility, TWebParamReconstruction, Type, ast_func, tir_user_local]
+use jet_sema.[MemoryEventKind, MemoryFact, MemoryProjection, SemaAutodiffObligation, SemaCallFacts, SemaCallSiteFact, SemaComputeCallFact, SemaComputeFunctionFacts, SemaEffectFunctionSource, SemaEffectFxRegion, SemaEffectGraphResult, SemaEffectMemoryRegion, SemaEffectModuleInput, SemaEffectTraitContract, SemaFunctionFailureFacts, SemaSourceSegment, sema_effect_source_from_function, sema_effects_check_modules]
+
+fn effect_test_span(start: Int) -> Span Never! { Span{start: start, end: start + 1} }
+fn effect_test_expr(kind: TExprKind, start: Int) -> TExpr Never! {
+    TExpr{ty: Type.Named{name: "Unit"}, kind: kind, span: effect_test_span(start), integer_bounds: None, cost: None}
+}
+fn effect_test_function(module_name: String, name: String, body: [TExpr]) -> TFunc Never! {
+    TFunc{
+        name: name, module_name: module_name, module_identity: module_name, key: "{module_name}::{name}",
+        source_file: "{module_name}.jet", source_span: Span{start: 0, end: 100},
+        failure_carrier: TFailureCarrier.Infallible,
+        effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
+        target_applicability: TTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: true},
+        web_bucket: None, web_marker: None, visibility: TVisibility.Public, foreign: None,
+        params: [TParameter]{}, web_param_reconstructions: [TWebParamReconstruction]{},
+        ret: None, gc_return: false, gc_scope: false, return_view_provenance: None,
+        generic_params: [TGenericParam]{}, clone_types: [Type]{}, is_main: name == "run",
+        line: 1, synthetic: false, is_unsafe: false, unsafe_gate: None, is_pure: false,
+        memo_bound: None, memo_unbounded: false, is_reactive: false, reactive_upgrades: [String]{},
+        is_inline: false, is_inline_always: false, is_scalar: false, kernel_proof: None,
+        memo_field: None, uses_stack_sentry: false,
+        body: loop expression in body -> TStmt.ExprStmt{value: expression, span: expression.span},
+        kind: TFuncKind.TopLevel,
+    }
+}
+fn effect_test_source(function: TFunc, row: [EffectRowEntry]?) -> SemaEffectFunctionSource Never! {
+    SemaEffectFunctionSource{key: function.key, name: function.name, span: function.source_span,
+        declared_effects: row, is_pure: false, is_replayable: false, is_unsafe: false,
+        unsafe_reason: None, unsafe_span: None, replayable_span: None, effect_via: None}
+}
+fn effect_test_call(callee: String, start: Int, args: [TCallArg]) -> TExpr Never! {
+    effect_test_expr(TExprKind.Call{callee: SymbolID{key: callee}, type_args: [Type]{}, args: args}, start)
+}
+fn effect_test_fact(caller: String, callee: String?, start: Int, row: [EffectRowEntry]?) -> SemaCallSiteFact Never! {
+    SemaCallSiteFact{span: effect_test_span(start), caller_key: caller,
+        callee: callee.map((key) -> SymbolID{key: key}), discarded: false,
+        facts: SemaCallFacts{return_type: Type.Named{name: "Unit"}, failure_carrier: TFailureCarrier.Infallible,
+            effect_bound: row, type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}}
+}
+fn effect_test_input(module_name: String, functions: [TFunc], sources: [SemaEffectFunctionSource], facts: [SemaCallSiteFact]) -> SemaEffectModuleInput Never! {
+    SemaEffectModuleInput{module_identity: module_name, functions: functions, sources: sources,
+        call_facts: facts, source_segments: [SemaSourceSegment]{}}
+}
+fn effect_test_io(start: Int) -> TExpr Never! {
+    effect_test_expr(TExprKind.Print{value: effect_test_expr(TExprKind.Unit, start + 1)}, start)
+}
+fn effect_test_row(name: String, start: Int) -> [EffectRowEntry] Never! {
+    [EffectRowEntry]{EffectRowEntry{name: name, span: effect_test_span(start)}}
+}
+fn effect_test_arg(value: TExpr) -> TCallArg Never! {
+    TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false,
+        clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false,
+        widen_to_union: None, box_as_trait: None, label: None, spread: false}
+}
+
+#Test("checked_facts_direct_and_transitive_provenance_are_not_display_rows") {
+    helper :: effect_test_function("main", "helper", [TExpr]{effect_test_io(10)})
+    caller :: effect_test_function("main", "run", [TExpr]{effect_test_call(helper.key, 20, [TCallArg]{})})
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{effect_test_input("main", [TFunc]{helper, caller}, [SemaEffectFunctionSource]{}, [SemaCallSiteFact]{effect_test_fact(helper.key, None, 10, Val(effect_test_row("IO", 10))), effect_test_fact(caller.key, Val(helper.key), 20, None)})})
+    summary :: result.summaries.get(helper.key) ?? panic("helper facts missing")
+    assert(summary.direct == [String]{"IO"})
+    assert(summary.direct_spans == [TEffectSpan]{TEffectSpan{name: "IO", span: effect_test_span(10)}})
+    assert(!summary.maximal && summary.maximal_span == None)
+    caller_summary :: result.summaries.get(caller.key) ?? panic("caller facts missing")
+    assert(caller_summary.direct.len() == 0)
+    assert(caller_summary.edges == [String]{helper.key})
+    assert((result.solved.get(caller.key) ?? panic("caller solved row missing")) == [String]{"IO"})
+    assert(caller_summary.memory.calls[0].callee == helper.key)
+    assert(caller_summary.memory.calls[0].span == effect_test_span(20))
+    assert(caller_summary.memory.calls[0].source == "main.jet")
+}
+
+// Original effects.rs cross_module_same_name_effects_keep_qualified_rows.
+#Test("checked_facts_cross_module_same_name_effects_keep_qualified_rows") {
+    left_helper :: effect_test_function("left", "helper", [TExpr]{effect_test_io(10)})
+    left :: effect_test_function("left", "same", [TExpr]{effect_test_call(left_helper.key, 20, [TCallArg]{})})
+    right_helper :: effect_test_function("right", "helper", [TExpr]{})
+    right :: effect_test_function("right", "same", [TExpr]{effect_test_call(right_helper.key, 20, [TCallArg]{})})
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{
+        effect_test_input("left", [TFunc]{left_helper, left}, [SemaEffectFunctionSource]{}, [SemaCallSiteFact]{effect_test_fact(left_helper.key, None, 10, Val(effect_test_row("IO", 10))), effect_test_fact(left.key, Val(left_helper.key), 20, None)}),
+        effect_test_input("right", [TFunc]{right_helper, right}, [SemaEffectFunctionSource]{}, [SemaCallSiteFact]{effect_test_fact(right.key, Val(right_helper.key), 20, None)}),
+    })
+    assert((result.solved.get(left.key) ?? panic("left solved row missing")) == [String]{"IO"})
+    assert((result.solved.get(right.key) ?? panic("right solved row missing")) == [String]{})
+    assert(result.solved.get("same") == None)
+}
+
+#Test("checked_facts_recursive_graph_closes_once_and_keeps_direct_sites") {
+    a :: effect_test_function("main", "a", [TExpr]{effect_test_call("main::b", 10, [TCallArg]{})})
+    b :: effect_test_function("main", "b", [TExpr]{effect_test_call(a.key, 20, [TCallArg]{}), effect_test_io(30)})
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{effect_test_input("main", [TFunc]{a, b}, [SemaEffectFunctionSource]{}, [SemaCallSiteFact]{effect_test_fact(a.key, Val(b.key), 10, None), effect_test_fact(b.key, Val(a.key), 20, None), effect_test_fact(b.key, None, 30, Val(effect_test_row("IO", 30)))})})
+    assert((result.solved.get(a.key) ?? panic("a solved row missing")) == [String]{"IO"})
+    assert((result.solved.get(b.key) ?? panic("b solved row missing")) == [String]{"IO"})
+    assert((result.summaries.get(a.key) ?? panic("a facts missing")).direct.len() == 0)
+    assert((result.summaries.get(b.key) ?? panic("b facts missing")).direct_spans[0].span == effect_test_span(30))
+}
+
+#Test("checked_facts_foreign_and_missing_body_preserve_maximal_witness") {
+    foreign :: effect_test_function("main", "foreign", [TExpr]{effect_test_expr(TExprKind.ExternCall{symbol: "foreign", c_abi: true, args: []}, 10), effect_test_expr(TExprKind.ExternCall{symbol: "second", c_abi: true, args: []}, 30)})
+    missing :: effect_test_function("main", "missing", [TExpr]{effect_test_call("dep::missing", 20, [TCallArg]{})})
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{effect_test_input("main", [TFunc]{foreign, missing}, [SemaEffectFunctionSource]{}, [SemaCallSiteFact]{effect_test_fact(foreign.key, None, 10, None), effect_test_fact(missing.key, Val("dep::missing"), 20, None)})})
+    foreign_facts :: result.summaries.get(foreign.key) ?? panic("foreign facts missing")
+    assert(foreign_facts.maximal && (foreign_facts.maximal_span ?? panic("foreign witness missing")) == effect_test_span(10))
+    assert(foreign_facts.direct == [String]{"FFI"})
+    assert(foreign_facts.memory.open_dispatches.len() > 0)
+    missing_facts :: result.summaries.get(missing.key) ?? panic("missing facts missing")
+    assert(missing_facts.maximal && (missing_facts.maximal_span ?? panic("missing witness absent")) == effect_test_span(20))
+    assert(missing_facts.edges == [String]{"dep::missing"})
+}
+
+#Test("checked_facts_fx_region_retains_direct_and_edges_before_solve") {
+    helper :: effect_test_function("main", "helper", [TExpr]{effect_test_io(10)})
+    caller :: effect_test_function("main", "run", [TExpr]{effect_test_call(helper.key, 20, [TCallArg]{})})
+    source := effect_test_source(caller, None)
+    source.fx_regions = [SemaEffectFxRegion]{SemaEffectFxRegion{caps: [String]{"IO"}, caps_span: effect_test_span(15), span: Span{start: 15, end: 30}}}
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{effect_test_input("main", [TFunc]{helper, caller}, [SemaEffectFunctionSource]{source}, [SemaCallSiteFact]{effect_test_fact(helper.key, None, 10, Val(effect_test_row("IO", 10))), effect_test_fact(caller.key, Val(helper.key), 20, None)})})
+    regions :: (result.summaries.get(caller.key) ?? panic("caller facts missing")).regions
+    assert(regions.len() == 1)
+    assert(regions[0].caps == [String]{"IO"})
+    assert(regions[0].direct.len() == 0 && regions[0].edges == [String]{helper.key})
+    assert(regions[0].caps_span == effect_test_span(15))
+}
+
+// Original callback_pure_bound_impure_arg_is_e0747, at the real graph boundary.
+#Test("checked_facts_named_callback_bound_uses_solved_row") {
+    callback :: effect_test_function("main", "show", [TExpr]{effect_test_io(10)})
+    invoke := effect_test_function("main", "invoke", [TExpr]{})
+    fn_type :: Type.Fn{params: [Type]{}, ret: None, effect_bound: Val([EffectRowEntry]{}), param_contract: None, call_metadata: None, return_view_provenance: None}
+    invoke.params = [TParameter]{TParameter{local: tir_user_local("f", effect_test_span(5)), name: "f", span: effect_test_span(5), ty: fn_type, convention: AccessConvention.Read, public_label: "f", zone: ParamZone.Either, default: None, variadic: false}}
+    value := effect_test_expr(TExprKind.ConstRef{symbol: SymbolID{key: callback.key}}, 21)
+    value.ty = fn_type
+    caller :: effect_test_function("main", "run", [TExpr]{effect_test_call(invoke.key, 20, [TCallArg]{effect_test_arg(value)})})
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{effect_test_input("main", [TFunc]{callback, invoke, caller}, [SemaEffectFunctionSource]{}, [SemaCallSiteFact]{effect_test_fact(callback.key, None, 10, Val(effect_test_row("IO", 10))), effect_test_fact(caller.key, Val(invoke.key), 20, None)})})
+    summary :: result.summaries.get(caller.key) ?? panic("caller facts missing")
+    assert(summary.callback_obligations.len() == 1)
+    assert(summary.callback_obligations[0].edges == [String]{callback.key})
+    assert(summary.callback_obligations[0].span == effect_test_span(21))
+    assert(summary.memory.calls[1].executions == None)
+    assert((result.solved.get(caller.key) ?? panic("caller solved row missing")) == [String]{"IO"})
+    assert(loop diagnostic in result.diagnostics { if diagnostic.code == "E0747" -> break true } ?? false)
+}
+
+#Test("checked_facts_compute_and_failure_are_original_body_products") {
+    function :: effect_test_function("main", "f", [TExpr]{})
+    input := effect_test_input("main", [TFunc]{function}, [SemaEffectFunctionSource]{}, [SemaCallSiteFact]{})
+    input.compute_facts = [SemaComputeFunctionFacts]{SemaComputeFunctionFacts{function_key: function.key, compute_calls: [SemaComputeCallFact]{SemaComputeCallFact{method: "grad", span: effect_test_span(10)}}, autodiff_obligations: [SemaAutodiffObligation]{SemaAutodiffObligation{method: "grad", target: function.key, span: effect_test_span(10)}}, autodiff_safe_panic: true, autodiff_unsafe_panic: false}}
+    input.failure_facts = [SemaFunctionFailureFacts]{SemaFunctionFailureFacts{function_key: function.key, direct: true, edges: [String]{}}}
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{input})
+    summary :: result.summaries.get(function.key) ?? panic("body facts missing")
+    assert(summary.compute_calls == input.compute_facts[0].compute_calls)
+    assert(summary.autodiff_obligations == input.compute_facts[0].autodiff_obligations)
+    assert(summary.autodiff_safe_panic && !summary.autodiff_unsafe_panic && summary.failure_direct)
+}
+
+#Test("checked_facts_memory_projection_keeps_source_provenance") {
+    allocated :: effect_test_function("dep", "allocate", [TExpr]{effect_test_expr(TExprKind.ListLit{values: [TExpr]{effect_test_expr(TExprKind.IntLit{value: 1, width: None}, 11)}}, 10)})
+    caller :: effect_test_function("main", "run", [TExpr]{effect_test_call(allocated.key, 20, [TCallArg]{})})
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{effect_test_input("dep", [TFunc]{allocated}, [SemaEffectFunctionSource]{}, [SemaCallSiteFact]{}), effect_test_input("main", [TFunc]{caller}, [SemaEffectFunctionSource]{effect_test_source(caller, Val(effect_test_row("!Mem.Alloc", 5)))}, [SemaCallSiteFact]{effect_test_fact(caller.key, Val(allocated.key), 20, None)})})
+    events :: (result.summaries.get(allocated.key) ?? panic("memory facts missing")).memory.events
+    assert(events.len() == 1 && events[0].kind == MemoryEventKind.Allocation)
+    assert(events[0].span == effect_test_span(10) && events[0].source == "dep.jet")
+    assert(events[0].provenance == "allocate in dep.jet")
+    assert(result.memory_declarations[0].roots == [String]{caller.key})
+    assert(result.memory_declarations[0].fact == MemoryFact.MemAllocDenied)
+    assert(result.memory_declarations[0].source == "main.jet")
+    assert(result.memory_projections[0].root == caller.key)
+    assert(result.memory_projections[0].projection == MemoryProjection.Violated{call_path: [String]{caller.key, allocated.key}, operation: "list construction allocates backing storage"})
+}
+
+// Original MemoryFacts.rs arena_bound_counts_each_call_site: two 4-byte
+// reservations prove 8, but violate 7. The inputs are real checked call sites.
+#Test("checked_facts_arena_bound_counts_each_call_site") {
+    reserve :: effect_test_expr(TExprKind.AllocNew{ctor: .Arena, args: [TCallArg]{effect_test_arg(effect_test_expr(TExprKind.IntLit{value: 4, width: None}, 11))}}, 10)
+    dep :: effect_test_function("dep", "reserve", [TExpr]{reserve})
+    root :: effect_test_function("main", "run", [TExpr]{effect_test_call(dep.key, 30, [TCallArg]{}), effect_test_call(dep.key, 50, [TCallArg]{})})
+    dep_input :: effect_test_input("dep", [TFunc]{dep}, [SemaEffectFunctionSource]{}, [SemaCallSiteFact]{effect_test_fact(dep.key, None, 10, Val([EffectRowEntry]{}))})
+    root_input := effect_test_input("main", [TFunc]{root}, [SemaEffectFunctionSource]{effect_test_source(root, Val(effect_test_row("!Mem.Alloc(above: 8)", 5)))}, [SemaCallSiteFact]{effect_test_fact(root.key, Val(dep.key), 30, None), effect_test_fact(root.key, Val(dep.key), 50, None)})
+    proved :: sema_effects_check_modules([SemaEffectModuleInput]{dep_input, root_input})
+    assert(proved.memory_projections[0].projection == MemoryProjection.Proven)
+    assert((proved.summaries.get(root.key) ?? panic("root facts missing")).memory.calls.len() == 2)
+    root_input.sources = [SemaEffectFunctionSource]{effect_test_source(root, Val(effect_test_row("!Mem.Alloc(above: 7)", 5)))}
+    violated :: sema_effects_check_modules([SemaEffectModuleInput]{dep_input, root_input})
+    assert(if violated.memory_projections[0].projection == {
+        .Violated(path, _) -> path == [String]{root.key, dep.key}
+        else -> false
+    })
+}
+
+// Original MemoryFacts.rs missing_or_recursive_body_never_proves_a_strict_fact.
+#Test("checked_facts_missing_and_recursive_memory_are_open_world") {
+    missing :: effect_test_function("main", "missing", [TExpr]{effect_test_call("dep::missing", 20, [TCallArg]{})})
+    recursive :: effect_test_function("main", "recursive", [TExpr]{effect_test_call("main::recursive", 30, [TCallArg]{})})
+    input :: effect_test_input("main", [TFunc]{missing, recursive}, [SemaEffectFunctionSource]{effect_test_source(missing, Val(effect_test_row("!Mem.Alloc", 5))), effect_test_source(recursive, Val(effect_test_row("!Mem.Alloc(above: 8)", 6)))}, [SemaCallSiteFact]{effect_test_fact(missing.key, Val("dep::missing"), 20, None), effect_test_fact(recursive.key, Val(recursive.key), 30, None)})
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{input})
+    assert(if result.memory_projections[0].projection == {
+        .OpenWorld(path, reason) -> path == [String]{missing.key} && reason == "callee body is unavailable and has no verified signed memory summary"
+        else -> false
+    })
+    assert(if result.memory_projections[1].projection == {
+        .OpenWorld(path, reason) -> path == [String]{recursive.key, recursive.key} && reason == "recursive call multiplicity is not statically bounded for arena accounting"
+        else -> false
+    })
+}
+
+#Test("checked_facts_loops_preserve_unbounded_multiplicity") {
+    reserve :: effect_test_expr(TExprKind.AllocNew{ctor: .Arena, args: [TCallArg]{effect_test_arg(effect_test_expr(TExprKind.IntLit{value: 4, width: None}, 11))}}, 10)
+    root :: effect_test_function("main", "run", [TExpr]{reserve})
+    source := effect_test_source(root, Val(effect_test_row("!Mem.Alloc(above: 8)", 5)))
+    source.loop_spans = [Span]{Span{start: 9, end: 15}}
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{effect_test_input("main", [TFunc]{root}, [SemaEffectFunctionSource]{source}, [SemaCallSiteFact]{effect_test_fact(root.key, None, 10, Val([EffectRowEntry]{}))})})
+    memory :: (result.summaries.get(root.key) ?? panic("root facts missing")).memory
+    assert(memory.unbounded_control == source.loop_spans)
+    assert(memory.events[0].executions == None)
+    assert(if result.memory_projections[0].projection == {
+        .OpenWorld(_, reason) -> reason == "loop iteration count is not statically bounded for arena accounting"
+        else -> false
+    })
+}
+
+fn effect_test_policy(value: PolicyValue, start: Int) -> PolicyDeclaration Never! {
+    PolicyDeclaration{key: PolicyKey.ScopedGC, value: value, scope: PolicyScope.Block,
+        span: effect_test_span(start), target: None, source: "main.jet"}
+}
+
+#Test("checked_facts_memory_policy_source_inherits_declarations_in_order") {
+    outer :: effect_test_policy(PolicyValue.Enabled, 5)
+    inner :: effect_test_policy(PolicyValue.Forbid, 10)
+    function := ast_func("run", effect_test_span(0), Span{start: 0, end: 100})
+    function.body = [Stmt]{Stmt.Policy{declarations: [PolicyDeclaration]{outer}, body: [Stmt]{Stmt.Policy{declarations: [PolicyDeclaration]{inner}, body: [], span: Span{start: 10, end: 20}}}, span: Span{start: 5, end: 30}}}
+    source :: sema_effect_source_from_function(function, "main")
+    assert(source.memory_regions.len() == 2)
+    assert(source.memory_regions[0].declarations == [PolicyDeclaration]{outer, inner})
+    assert(source.memory_regions[0].span == Span{start: 10, end: 20})
+    assert(source.memory_regions[1].declarations == [PolicyDeclaration]{outer})
+    assert(source.memory_regions[1].span == Span{start: 5, end: 30})
+}
+
+#Test("checked_facts_memory_policy_region_retains_checked_events_and_calls") {
+    allocated :: effect_test_expr(TExprKind.ListLit{values: [TExpr]{effect_test_expr(TExprKind.IntLit{value: 1, width: None}, 16)}}, 15)
+    root :: effect_test_function("main", "run", [TExpr]{allocated, effect_test_call("main::helper", 20, [TCallArg]{})})
+    helper :: effect_test_function("main", "helper", [TExpr]{})
+    source := effect_test_source(root, None)
+    policy :: effect_test_policy(PolicyValue.Enabled, 10)
+    source.memory_regions = [SemaEffectMemoryRegion]{SemaEffectMemoryRegion{declarations: [PolicyDeclaration]{policy}, span: Span{start: 10, end: 30}}}
+    source.loop_spans = [Span]{Span{start: 14, end: 17}}
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{effect_test_input("main", [TFunc]{root, helper}, [SemaEffectFunctionSource]{source}, [SemaCallSiteFact]{effect_test_fact(root.key, Val(helper.key), 20, None)})})
+    regions :: (result.summaries.get(root.key) ?? panic("root facts missing")).memory.regions
+    assert(regions.len() == 1 && regions[0].declarations == [PolicyDeclaration]{policy})
+    assert(regions[0].events[0].span == effect_test_span(15))
+    assert(regions[0].events[0].executions == None)
+    assert(regions[0].edges == [String]{helper.key})
+    assert(regions[0].calls[0].callee == helper.key)
+    assert(regions[0].calls[0].span == effect_test_span(20))
+    assert(regions[0].unbounded_control == source.loop_spans)
+}
+
+fn effect_test_trait_contract(key: String, row: [EffectRowEntry]?, pure: Bool, implementations: [String], unresolved: Bool) -> SemaEffectTraitContract Never! {
+    SemaEffectTraitContract{key: key, name: "Worker::work", name_span: effect_test_span(5),
+        parameter_types: [], declared_effects: row, is_pure: pure,
+        implementation_keys: implementations, unresolved_implementations: unresolved}
+}
+fn effect_test_trait_call(contract: String, receiver_type: Type, start: Int) -> TExpr Never! {
+    receiver := effect_test_expr(TExprKind.Unit, start + 1)
+    receiver.ty = receiver_type
+    effect_test_expr(TExprKind.MethodCall{receiver: receiver,
+        method: TMethodRef{symbol: SymbolID{key: contract}, name: "work", mangled: false,
+            trait_owner: Val(SymbolID{key: "main::Worker"}), operator_identity: None},
+        type_args: [], args: []}, start)
+}
+
+// Rust seed_trait_dispatch_effects: the flag belongs to the synthetic trait
+// contract, never the real caller or the statically selected impl union.
+#Test("checked_facts_trait_contract_flag_is_not_a_caller_dispatch_flag") {
+    implementation :: effect_test_function("main", "operation", [TExpr]{effect_test_io(10)})
+    contract_key :: "main::Worker::work"
+    dynamic :: effect_test_function("main", "dynamic", [TExpr]{effect_test_trait_call(contract_key, Type.TraitObject{bounds: [String]{"Worker"}}, 20)})
+    selected :: effect_test_function("main", "selected", [TExpr]{effect_test_trait_call(contract_key, Type.Named{name: "WorkerImpl"}, 30)})
+    input := effect_test_input("main", [TFunc]{implementation, dynamic, selected},
+        [SemaEffectFunctionSource]{effect_test_source(dynamic, Val([EffectRowEntry]{}))},
+        [SemaCallSiteFact]{effect_test_fact(implementation.key, None, 10, Val(effect_test_row("IO", 10))),
+            effect_test_fact(dynamic.key, Val(contract_key), 20, None),
+            effect_test_fact(selected.key, Val(contract_key), 30, None)})
+    input.trait_contracts = [SemaEffectTraitContract]{effect_test_trait_contract(contract_key, None, false, [String]{implementation.key}, false)}
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{input})
+    dynamic_summary :: result.summaries.get(contract_key) ?? panic("trait contract missing")
+    static_summary :: result.summaries.get("{contract_key}::<static>") ?? panic("static contract missing")
+    caller_summary :: result.summaries.get(dynamic.key) ?? panic("caller summary missing")
+    assert(dynamic_summary.unbounded_trait_dispatch && dynamic_summary.maximal)
+    assert((dynamic_summary.maximal_span ?? panic("contract witness missing")) == effect_test_span(5))
+    assert(!static_summary.unbounded_trait_dispatch && !static_summary.maximal)
+    assert(static_summary.direct == [String]{"IO"})
+    assert(static_summary.direct_spans == [TEffectSpan]{TEffectSpan{name: "IO", span: effect_test_span(10)}})
+    assert(!caller_summary.unbounded_trait_dispatch && !caller_summary.maximal)
+    assert(caller_summary.edges == [String]{contract_key})
+    assert((result.summaries.get(selected.key) ?? panic("static caller missing")).edges == [String]{"{contract_key}::<static>"})
+    assert((result.solved.get(selected.key) ?? panic("static solved row missing")) == [String]{"IO"})
+    assert(loop diagnostic in result.diagnostics { if diagnostic.code == "E0743" -> break true } ?? false)
+}
+
+#Test("checked_facts_trait_contracts_preserve_declared_pure_and_unresolved_static_rows") {
+    input := effect_test_input("main", [], [], [])
+    input.trait_contracts = [SemaEffectTraitContract]{
+        effect_test_trait_contract("main::Bounded::work", Val(effect_test_row("IO", 7)), false, [], true),
+        effect_test_trait_contract("main::Pure::work", None, true, [], true),
+        effect_test_trait_contract("main::Unknown::work", None, false, [String]{"main::missing"}, false),
+    }
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{input})
+    bounded :: result.summaries.get("main::Bounded::work") ?? panic("bounded contract missing")
+    pure :: result.summaries.get("main::Pure::work") ?? panic("pure contract missing")
+    unresolved :: result.summaries.get("main::Unknown::work::<static>") ?? panic("unresolved static contract missing")
+    assert(!bounded.maximal && !bounded.unbounded_trait_dispatch && bounded.direct == [String]{"IO"})
+    assert(!pure.maximal && !pure.unbounded_trait_dispatch && pure.direct.len() == 0)
+    assert(unresolved.maximal && !unresolved.unbounded_trait_dispatch)
+    assert((unresolved.maximal_span ?? panic("unresolved witness missing")) == effect_test_span(5))
+}
+
+#Test("checked_facts_static_owner_order_keeps_first_maximal_and_last_direct_witness") {
+    alpha :: effect_test_function("main", "Alpha::work", [TExpr]{effect_test_io(10), effect_test_expr(TExprKind.ExternCall{symbol: "alpha_foreign", c_abi: true, args: []}, 11)})
+    zulu :: effect_test_function("main", "Zulu::work", [TExpr]{effect_test_io(20), effect_test_expr(TExprKind.ExternCall{symbol: "zulu_foreign", c_abi: true, args: []}, 21)})
+    // The actual registration producer orders these identities by OWNER.
+    // Real function input order is deliberately the opposite.
+    input := effect_test_input("main", [TFunc]{zulu, alpha}, [], [SemaCallSiteFact]{
+        effect_test_fact(alpha.key, None, 10, Val(effect_test_row("IO", 10))),
+        effect_test_fact(zulu.key, None, 20, Val(effect_test_row("IO", 20))),
+    })
+    input.trait_contracts = [SemaEffectTraitContract]{effect_test_trait_contract("main::Worker::work", None, false, [String]{alpha.key, zulu.key}, false)}
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{input})
+    summary :: result.summaries.get("main::Worker::work::<static>") ?? panic("static contract missing")
+    assert(summary.maximal && !summary.unbounded_trait_dispatch)
+    assert((summary.maximal_span ?? panic("maximal witness missing")) == effect_test_span(11))
+    io := Span?{None}
+    loop witness in summary.direct_spans {
+        if witness.name == "IO" -> io = Val(witness.span)
+    }
+    assert((io ?? panic("IO witness missing")) == effect_test_span(20))
+}
+
+#Test("checked_facts_effect_named_owner_does_not_rank_before_Alpha_witness") {
+    alpha :: effect_test_function("main", "Alpha::work", [TExpr]{effect_test_io(40), effect_test_expr(TExprKind.ExternCall{symbol: "alpha_foreign", c_abi: true, args: []}, 41)})
+    io_owner :: effect_test_function("main", "IO::work", [TExpr]{effect_test_io(50), effect_test_expr(TExprKind.ExternCall{symbol: "io_foreign", c_abi: true, args: []}, 51)})
+    input := effect_test_input("main", [TFunc]{io_owner, alpha}, [], [SemaCallSiteFact]{
+        effect_test_fact(alpha.key, None, 40, Val(effect_test_row("IO", 40))),
+        effect_test_fact(io_owner.key, None, 50, Val(effect_test_row("IO", 50))),
+    })
+    input.trait_contracts = [SemaEffectTraitContract]{effect_test_trait_contract("main::Worker::work", None, false, [String]{alpha.key, io_owner.key}, false)}
+    result :: sema_effects_check_modules([SemaEffectModuleInput]{input})
+    summary :: result.summaries.get("main::Worker::work::<static>") ?? panic("static contract missing")
+    assert((summary.maximal_span ?? panic("maximal witness missing")) == effect_test_span(41))
+    io := Span?{None}
+    loop witness in summary.direct_spans {
+        if witness.name == "IO" -> io = Val(witness.span)
+    }
+    assert((io ?? panic("IO witness missing")) == effect_test_span(50))
+}

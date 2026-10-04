@@ -1,0 +1,327 @@
+// Rust AST/comptime.rs::CtKey::to_value and CtValue::to_json.
+// Ordered compiler-value projection, not sorted/canonical/status JSON.
+// Main's tandem correction shares Foundation escaping and wraps mixed labels.
+// All adapters borrow their carriers; only key_value creates an owned value.
+trait ComptimeWireNode {
+    fn write(self, out: &[U8]) Never!
+}
+trait ComptimeWireField {
+    fn labeled(self) -> Bool Never!
+    fn memo(self) -> Bool Never!
+    fn write_name(self, out: &[U8]) Never!
+    fn write_value(self, out: &[U8]) Never!
+}
+trait ComptimeWireEntry {
+    fn write_key(self, out: &[U8]) Never!
+    fn write_value(self, out: &[U8]) Never!
+}
+fn comptime_wire_append(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+// Rust CtFloat::render uses the native-width Debug scalar producer.
+pub fn comptime_float_render(value: Float, bits: Int) -> String Never! {
+    if bits == 32 {
+        narrow :: if {
+            value == Float.INFINITY -> F32.INFINITY
+            value == Float.NEG_INFINITY -> F32.NEG_INFINITY
+            value != value -> F32.NAN
+            else -> F32.from_float(value) ?? panic("checked F32 carrier retains a representable float")
+        }
+        return "{narrow:Debug}"
+    }
+    "{value:Debug}"
+}
+pub fn comptime_float_json(value: Float, bits: Int) -> String Never! {
+    rendered :: comptime_float_render(value, bits)
+    if rendered.contains(".") || rendered.contains("e") || rendered.contains("E") -> return rendered
+    "{rendered}.0"
+}
+// Moved from CLI projection: TIR's checked Char is a Unicode scalar Int.
+pub fn comptime_character(code: Int) -> String Never! {
+    bytes := [U8]{}
+    if {
+        code < 128 -> &bytes.push(U8{code})
+        code < 2048 -> {
+            &bytes.push(U8{192 + (code >> 6)})
+            &bytes.push(U8{128 + (code & 63)})
+        }
+        code < 65536 -> {
+            &bytes.push(U8{224 + (code >> 12)})
+            &bytes.push(U8{128 + ((code >> 6) & 63)})
+            &bytes.push(U8{128 + (code & 63)})
+        }
+        else -> {
+            &bytes.push(U8{240 + (code >> 18)})
+            &bytes.push(U8{128 + ((code >> 12) & 63)})
+            &bytes.push(U8{128 + ((code >> 6) & 63)})
+            &bytes.push(U8{128 + (code & 63)})
+        }
+    }
+    String.from_bytes(bytes) ?? panic("checked Char is not a Unicode scalar")
+}
+fn comptime_wire_list<V: ComptimeWireNode>(out: &[U8], values: [V]) Never! {
+    &out.push(U8{91})
+    index := 0
+    loop value in values {
+        if index > 0 -> &out.push(U8{44})
+        value.write(&out)
+        index += 1
+    }
+    &out.push(U8{93})
+}
+fn comptime_wire_bytes(out: &[U8], values: [U8]) Never! {
+    &out.push(U8{91})
+    index := 0
+    loop value in values {
+        if index > 0 -> &out.push(U8{44})
+        comptime_wire_append(&out, "{Int.from_u8(value)}")
+        index += 1
+    }
+    &out.push(U8{93})
+}
+fn comptime_wire_fields<F: ComptimeWireField>(out: &[U8], fields: [F], omit_memo: Bool) Never! {
+    index := 0
+    loop field in fields {
+        if omit_memo && field.memo() -> next
+        if index > 0 -> &out.push(U8{44})
+        if field.labeled() {
+            field.write_name(&out)
+            &out.push(U8{58})
+        }
+        field.write_value(&out)
+        index += 1
+    }
+}
+fn comptime_wire_struct<F: ComptimeWireField>(out: &[U8], fields: [F]) Never! {
+    &out.push(U8{123})
+    comptime_wire_fields<F>(&out, fields, true)
+    &out.push(U8{125})
+}
+fn comptime_wire_enum<F: ComptimeWireField>(out: &[U8], variant: String, args: [F]) Never! {
+    if args.len() == 0 {
+        foundation_json_write_quote(&out, variant)
+        return
+    }
+    labeled := true
+    loop arg in args { if !arg.labeled() -> labeled = false }
+    &out.push(U8{123})
+    foundation_json_write_quote(&out, variant)
+    &out.push(U8{58})
+    &out.push(U8{if labeled -> 123 else -> 91})
+    if labeled {
+        comptime_wire_fields<F>(&out, args, false)
+    } else {
+        index := 0
+        loop arg in args {
+            if index > 0 -> &out.push(U8{44})
+            if arg.labeled() {
+                &out.push(U8{123})
+                arg.write_name(&out)
+                &out.push(U8{58})
+                arg.write_value(&out)
+                &out.push(U8{125})
+            } else {
+                arg.write_value(&out)
+            }
+            index += 1
+        }
+    }
+    &out.push(U8{if labeled -> 125 else -> 93})
+    &out.push(U8{125})
+}
+fn comptime_wire_map<E: ComptimeWireEntry>(out: &[U8], entries: [E]) Never! {
+    &out.push(U8{123})
+    index := 0
+    loop entry in entries {
+        if index > 0 -> &out.push(U8{44})
+        entry.write_key(&out)
+        &out.push(U8{58})
+        entry.write_value(&out)
+        index += 1
+    }
+    &out.push(U8{125})
+}
+impl NamedCtValue.ComptimeWireField {
+    fn labeled(self) -> Bool Never! { true }
+    fn memo(self) -> Bool Never! { is_memo_storage_name(self.name) }
+    fn write_name(self, out: &[U8]) Never! { foundation_json_write_quote(&out, self.name) }
+    fn write_value(self, out: &[U8]) Never! { self.value.write(&out) }
+}
+impl NamedCtKey.ComptimeWireField {
+    fn labeled(self) -> Bool Never! { true }
+    fn memo(self) -> Bool Never! { is_memo_storage_name(self.name) }
+    fn write_name(self, out: &[U8]) Never! { foundation_json_write_quote(&out, self.name) }
+    fn write_value(self, out: &[U8]) Never! { self.value.write(&out) }
+}
+impl TComptimeField.ComptimeWireField {
+    fn labeled(self) -> Bool Never! { true }
+    fn memo(self) -> Bool Never! { is_memo_storage_name(self.name) }
+    fn write_name(self, out: &[U8]) Never! { foundation_json_write_quote(&out, self.name) }
+    fn write_value(self, out: &[U8]) Never! { self.value.write(&out) }
+}
+impl TComptimeKeyField.ComptimeWireField {
+    fn labeled(self) -> Bool Never! { true }
+    fn memo(self) -> Bool Never! { is_memo_storage_name(self.name) }
+    fn write_name(self, out: &[U8]) Never! { foundation_json_write_quote(&out, self.name) }
+    fn write_value(self, out: &[U8]) Never! { self.key.write(&out) }
+}
+impl CtEnumArg.ComptimeWireField {
+    fn labeled(self) -> Bool Never! { self.label != None }
+    fn memo(self) -> Bool Never! { false }
+    fn write_name(self, out: &[U8]) Never! {
+        if self.label == .Val(name) -> foundation_json_write_quote(&out, name)
+    }
+    fn write_value(self, out: &[U8]) Never! { self.value.write(&out) }
+}
+impl TComptimeEnumArg.ComptimeWireField {
+    fn labeled(self) -> Bool Never! { self.name != None }
+    fn memo(self) -> Bool Never! { false }
+    fn write_name(self, out: &[U8]) Never! {
+        if self.name == .Val(name) -> foundation_json_write_quote(&out, name)
+    }
+    fn write_value(self, out: &[U8]) Never! { self.value.write(&out) }
+}
+impl CtMapEntry.ComptimeWireEntry {
+    fn write_key(self, out: &[U8]) Never! { self.key.write(&out) }
+    fn write_value(self, out: &[U8]) Never! { self.value.write(&out) }
+}
+impl TComptimeMapEntry.ComptimeWireEntry {
+    fn write_key(self, out: &[U8]) Never! { self.key.write(&out) }
+    fn write_value(self, out: &[U8]) Never! { self.value.write(&out) }
+}
+impl CtKey.ComptimeWireNode {
+    fn write(self, out: &[U8]) Never! {
+        if self == {
+            .Int(value) -> comptime_wire_append(&out, "{value}")
+            .Str(value) -> foundation_json_write_quote(&out, value)
+            .Bool(value) -> comptime_wire_append(&out, "{value}")
+            .Char(value) -> foundation_json_write_quote(&out, "{value}")
+            .Tuple(fields) | .Struct(_, fields) -> comptime_wire_struct<NamedCtKey>(&out, fields)
+            .Enum(_, variant) -> foundation_json_write_quote(&out, variant)
+        }
+    }
+}
+impl TComptimeKey.ComptimeWireNode {
+    fn write(self, out: &[U8]) Never! {
+        if self == {
+            .Int(value) -> comptime_wire_append(&out, "{value}")
+            .String(value) -> foundation_json_write_quote(&out, value)
+            .Bool(value) -> comptime_wire_append(&out, "{value}")
+            .Char(value) -> foundation_json_write_quote(&out, comptime_character(value))
+            .Tuple(fields) | .Struct(_, fields) -> comptime_wire_struct<TComptimeKeyField>(&out, fields)
+            .Enum(_, variant) -> foundation_json_write_quote(&out, variant)
+        }
+    }
+}
+impl CtValue.ComptimeWireNode {
+    fn write(self, out: &[U8]) Never! {
+        if self == {
+            .Int(value) -> comptime_wire_append(&out, "{value}")
+            .Float(value) -> if value == {
+                .F32(number) -> comptime_wire_append(&out, comptime_float_json(number, 32))
+                .F64(number) -> comptime_wire_append(&out, comptime_float_json(number, 64))
+            }
+            .Bool(value) -> comptime_wire_append(&out, "{value}")
+            .Char(value) -> foundation_json_write_quote(&out, "{value}")
+            .Str(value) -> foundation_json_write_quote(&out, value)
+            .BigInt(value) -> foundation_json_write_quote(&out, value)
+            .Bytes(values) -> comptime_wire_bytes(&out, values)
+            .List(values) -> comptime_wire_list<CtValue>(&out, values)
+            .Map(entries) -> comptime_wire_map<CtMapEntry>(&out, entries)
+            .Struct(_, fields) -> comptime_wire_struct<NamedCtValue>(&out, fields)
+            .Enum(_, variant, args) -> comptime_wire_enum<CtEnumArg>(&out, variant, args)
+            .Present(value) -> value.write(&out)
+            .Failed(report) -> if report == {
+                .Clean(_) -> comptime_wire_append(&out, "null")
+                .Told(value) -> {
+                    comptime_wire_append(&out, "{{\"err\":")
+                    value.write(&out)
+                    &out.push(U8{125})
+                }
+            }
+            .Unit | .Closure(_) -> comptime_wire_append(&out, "null")
+        }
+    }
+}
+impl TComptimeValue.ComptimeWireNode {
+    fn write(self, out: &[U8]) Never! {
+        if self == {
+            .Int(value) -> comptime_wire_append(&out, "{value}")
+            .Float(value, bits) -> comptime_wire_append(&out, comptime_float_json(value, bits))
+            .Bool(value) -> comptime_wire_append(&out, "{value}")
+            .Char(value) -> foundation_json_write_quote(&out, comptime_character(value))
+            .String(value) -> foundation_json_write_quote(&out, value)
+            .BigInt(value) -> foundation_json_write_quote(&out, value)
+            .Bytes(values) -> comptime_wire_bytes(&out, values)
+            .List(values) -> comptime_wire_list<TComptimeValue>(&out, values)
+            .Map(entries) -> comptime_wire_map<TComptimeMapEntry>(&out, entries)
+            .Struct(_, fields) -> comptime_wire_struct<TComptimeField>(&out, fields)
+            .Enum(_, variant, args) -> comptime_wire_enum<TComptimeEnumArg>(&out, variant, args)
+            .Present(value) -> value.write(&out)
+            .Failed(report) -> if report == {
+                .Clean(_) -> comptime_wire_append(&out, "null")
+                .Told(value) -> {
+                    comptime_wire_append(&out, "{{\"err\":")
+                    value.write(&out)
+                    &out.push(U8{125})
+                }
+            }
+            .Unit | .Closure(_) -> comptime_wire_append(&out, "null")
+        }
+    }
+}
+pub fn ast_comptime_value_bytes(value: CtValue) -> [U8] Never! {
+    out := [U8]{}
+    value.write(&out)
+    out
+}
+pub fn ast_comptime_value_text(value: CtValue) -> String Never! {
+    String.from_bytes(ast_comptime_value_bytes(value)) ?? panic("compiler value text retains valid UTF-8")
+}
+pub fn tir_comptime_value_bytes(value: TComptimeValue) -> [U8] Never! {
+    out := [U8]{}
+    value.write(&out)
+    out
+}
+pub fn tir_comptime_value_text(value: TComptimeValue) -> String Never! {
+    String.from_bytes(tir_comptime_value_bytes(value)) ?? panic("compiler value text retains valid UTF-8")
+}
+// Owned conversion, moved inward from Eval's private iterator converter.
+pub fn tir_comptime_key_value(key: TComptimeKey) -> TComptimeValue Never! {
+    if key == {
+        .Int(value) -> TComptimeValue.Int{value: value}
+        .String(value) -> TComptimeValue.String{value: ~value}
+        .Bool(value) -> TComptimeValue.Bool{value: value}
+        .Char(value) -> TComptimeValue.Char{value: value}
+        .Tuple(fields) -> {
+            output := [TComptimeField]{}
+            loop field in fields -> &output.push(TComptimeField{name: ~field.name, value: tir_comptime_key_value(field.key)})
+            TComptimeValue.Struct{type_name: "tuple", fields: output}
+        }
+        .Struct(type_name, fields) -> {
+            output := [TComptimeField]{}
+            loop field in fields -> &output.push(TComptimeField{name: ~field.name, value: tir_comptime_key_value(field.key)})
+            TComptimeValue.Struct{type_name: ~type_name, fields: output}
+        }
+        .Enum(type_name, variant) -> TComptimeValue.Enum{type_name: ~type_name, variant: ~variant, args: [TComptimeEnumArg]{}}
+    }
+}
+pub fn ast_comptime_key_value(key: CtKey) -> CtValue Never! {
+    if key == {
+        .Int(value) -> CtValue.Int{value: value}
+        .Str(value) -> CtValue.Str{value: ~value}
+        .Bool(value) -> CtValue.Bool{value: value}
+        .Char(value) -> CtValue.Char{value: value}
+        .Tuple(fields) -> {
+            output := [NamedCtValue]{}
+            loop field in fields -> &output.push(NamedCtValue{name: ~field.name, value: ast_comptime_key_value(field.value)})
+            CtValue.Struct{type_name: "tuple", fields: output}
+        }
+        .Struct(type_name, fields) -> {
+            output := [NamedCtValue]{}
+            loop field in fields -> &output.push(NamedCtValue{name: ~field.name, value: ast_comptime_key_value(field.value)})
+            CtValue.Struct{type_name: ~type_name, fields: output}
+        }
+        .Enum(type_name, variant) -> CtValue.Enum{type_name: ~type_name, variant: ~variant, args: [CtEnumArg]{}}
+    }
+}

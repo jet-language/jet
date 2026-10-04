@@ -1505,7 +1505,7 @@ fn parser_starts_expression(kind: Int) -> Bool Never! {
 // on an `OptField`.
 fn parser_named_line_does_work(state: &JetParserState, expr: Expr) -> Bool Never! {
     works :: if expr == {
-        .Call(_) | .Field(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _) | .ComptimeName(_, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
+        .Call(_) | .Field(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _, _) | .ComptimeName(_, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
         .CallValue(callee, _, _) -> callee == .OptField(_, _, _, _, _)
         .If(_, _, _, _, _, _) -> parser_is_result_handler_expr(expr)
         else -> false
@@ -1564,7 +1564,7 @@ fn parser_refutable_test_binding(expr: Expr) -> Binding? {
             names :: pattern_binding_names(pattern)
             if names.len() == 0 -> return None
             binding := ast_binding("", pattern_span, false, subject, None)
-            binding.pattern = Val(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names, span: span})
+            binding.pattern = Val(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names, span: span, synthesized: false})
             return Val(binding)
         }
     }

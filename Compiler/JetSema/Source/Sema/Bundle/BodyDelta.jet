@@ -1,0 +1,1033 @@
+// PORT-PENDING 0351 crates-jet-sema-src-sema-bundle-bodydelta: crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:1-1029
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #2517 stage S3R: the checked-body delta of one function.
+//RS //!
+//RS //! Body checking rewrites a function in place: it elaborates value-block
+//RS //! tails, fills receiver, binding and literal types, and inserts `Ok`,
+//RS //! `Place` and `Copy` wrappers. Item reuse therefore stores the parts of a
+//RS //! function the checker rewrites (parameters, return type, body statements,
+//RS //! reactive upgrade lines) as they were after the check, and installs them on
+//RS //! a reused function instead of checking it again.
+//RS //!
+//RS //! The encoding is lossless for the node kinds it lists and refuses every
+//RS //! other kind; a sema-filled field it does not carry must be empty. A delta is
+//RS //! recorded only when applying it to the parsed function rebuilds the checked
+//RS //! function exactly (`Debug` equality, see `ItemReuse::record`), so a missing
+//RS //! node kind costs reuse and never changes a result.
+//RS //!
+//RS //! Spans are stored relative to the function's start, so they move with the
+//RS //! item. Only spans the parser gave this function may be stored: a span sema
+//RS //! copied from another declaration (a callee's default argument, a type from
+//RS //! its signature) belongs to another item or file and would not move with
+//RS //! this one, so a delta holding one is refused. The synthesized empty span at
+//RS //! offset 0 is position independent and stored as it is.
+//RS //!
+//RS //! The same codec carries compile-time values (`encode_value`), which
+//RS //! `ComptimeReuse` stores for evaluated constants.
+//RS 
+//RS use crate::Diagnostics::Span;
+//RS use crate::Numeric::CtBigInt;
+//RS use crate::AST::{
+//RS     AccessConvention, ArithmeticMode, ArithmeticOperation, ArithmeticPolicyFact, BinOp, BindName,
+//RS     BindPattern, Binding, ByteTextPart, Call, CallArg, CallArgFlags, CtFloat, CtKey, CtReport,
+//RS     CtValue, EnumLitArg, Expr, ForKind, Func, IndexKind, InternalTag, LValue, OrFallback, Param,
+//RS     ParamZone, PatSlot, Pattern, PlaceAccess, Stmt, StrFormat, StrPart, StructPatField, SwitchArm,
+//RS     TagMarker, TryConvert, Type, TypedLitBody, UnOp, UnitFormat,
+//RS };
+//RS use std::collections::{BTreeMap, HashSet};
+//RS 
+//RS /// Why a checked function cannot be stored as a delta.
+//RS pub(super) type Refusal = &'static str;
+//RS 
+//RS /// The rewritable parts of `checked`, relative to its start. `pristine` is
+//RS /// the function as parsed; it names the spans the delta may hold.
+//RS pub(super) fn encode(pristine: &Func, checked: &Func) -> Result<Vec<u8>, Refusal> {
+//RS     // Publishing a view provenance also writes the shared signature table,
+//RS     // which a reused body would skip.
+//RS     if checked.return_view_provenance.is_some() {
+//RS         return Err("view provenance");
+//RS     }
+//RS     let mut authored = Writer {
+//RS         bytes: Vec::new(),
+//RS         start: pristine.span.start,
+//RS         end: pristine.span.end,
+//RS         spans: Spans::Collect(HashSet::new()),
+//RS     };
+//RS     pristine.params.put(&mut authored)?;
+//RS     pristine.return_type.put(&mut authored)?;
+//RS     pristine.body.put(&mut authored)?;
+//RS     let authored = match authored.spans {
+//RS         Spans::Collect(spans) | Spans::Require(spans) => spans,
+//RS     };
+//RS     let mut writer = Writer {
+//RS         bytes: Vec::new(),
+//RS         start: checked.span.start,
+//RS         end: checked.span.end,
+//RS         spans: Spans::Require(authored),
+//RS     };
+//RS     checked.params.put(&mut writer)?;
+//RS     checked.return_type.put(&mut writer)?;
+//RS     checked.body.put(&mut writer)?;
+//RS     checked.reactive_upgrades.put(&mut writer)?;
+//RS     Ok(writer.bytes)
+//RS }
+//RS 
+//RS /// Install a stored delta on `function`. `None`, with `function` untouched,
+//RS /// when the bytes do not decode completely.
+//RS pub(super) fn apply(function: &mut Func, bytes: &[u8]) -> Option<()> {
+//RS     let mut reader = Reader {
+//RS         bytes,
+//RS         at: 0,
+//RS         start: function.span.start,
+//RS     };
+//RS     let params = Vec::<Param>::get(&mut reader)?;
+//RS     let return_type = Option::<Type>::get(&mut reader)?;
+//RS     let body = Vec::<Stmt>::get(&mut reader)?;
+//RS     let reactive_upgrades = Vec::<String>::get(&mut reader)?;
+//RS     if reader.at != bytes.len() {
+//RS         return None;
+//RS     }
+//RS     function.params = params;
+//RS     function.return_type = return_type;
+//RS     function.body = body;
+//RS     function.reactive_upgrades = reactive_upgrades;
+//RS     Some(())
+//RS }
+//RS 
+//RS /// A compile-time value, or why it cannot be stored. A value holding a
+//RS /// source span (a map type's key span) is refused: spans are positions the
+//RS /// value's reuse key does not cover. Closures and told reports are refused.
+//RS pub(super) fn encode_value(value: &CtValue) -> Result<Vec<u8>, Refusal> {
+//RS     // No span passes the bounds `1..=1` but the empty `(1, 1)`, and no
+//RS     // span is authored, so only the position-free empty span is stored.
+//RS     let mut writer = Writer {
+//RS         bytes: Vec::new(),
+//RS         start: 1,
+//RS         end: 1,
+//RS         spans: Spans::Require(HashSet::new()),
+//RS     };
+//RS     value.put(&mut writer)?;
+//RS     Ok(writer.bytes)
+//RS }
+//RS 
+//RS /// The value `encode_value` stored, or `None` when the bytes do not decode
+//RS /// completely.
+//RS pub(super) fn decode_value(bytes: &[u8]) -> Option<CtValue> {
+//RS     let mut reader = Reader {
+//RS         bytes,
+//RS         at: 0,
+//RS         start: 1,
+//RS     };
+//RS     let value = CtValue::get(&mut reader)?;
+//RS     (reader.at == bytes.len()).then_some(value)
+//RS }
+//RS 
+//RS struct Writer {
+//RS     bytes: Vec<u8>,
+//RS     /// The function's span: stored spans are relative to `start`.
+//RS     start: usize,
+//RS     end: usize,
+//RS     spans: Spans,
+//RS }
+//RS 
+//RS /// Item spans the parser authored, as `(start, end)`.
+//RS enum Spans {
+//RS     /// Encoding the parsed function: collect its spans.
+//RS     Collect(HashSet<(usize, usize)>),
+//RS     /// Encoding the checked function: every span must be one of these.
+//RS     Require(HashSet<(usize, usize)>),
+//RS }
+//RS 
+//RS impl Writer {
+//RS     fn byte(&mut self, value: u8) {
+//RS         self.bytes.push(value);
+//RS     }
+//RS 
+//RS     fn uint(&mut self, mut value: u64) {
+//RS         loop {
+//RS             let low = (value & 0x7f) as u8;
+//RS             value >>= 7;
+//RS             if value == 0 {
+//RS                 self.bytes.push(low);
+//RS                 return;
+//RS             }
+//RS             self.bytes.push(low | 0x80);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct Reader<'a> {
+//RS     bytes: &'a [u8],
+//RS     at: usize,
+//RS     /// Start of the function the spans are installed on.
+//RS     start: usize,
+//RS }
+//RS 
+//RS impl Reader<'_> {
+//RS     fn byte(&mut self) -> Option<u8> {
+//RS         let value = *self.bytes.get(self.at)?;
+//RS         self.at += 1;
+//RS         Some(value)
+//RS     }
+//RS 
+//RS     fn take(&mut self, count: usize) -> Option<&[u8]> {
+//RS         let end = self.at.checked_add(count)?;
+//RS         let slice = self.bytes.get(self.at..end)?;
+//RS         self.at = end;
+//RS         Some(slice)
+//RS     }
+//RS 
+//RS     fn uint(&mut self) -> Option<u64> {
+//RS         let mut value = 0u64;
+//RS         let mut shift = 0u32;
+//RS         loop {
+//RS             let byte = self.byte()?;
+//RS             if shift >= 64 {
+//RS                 return None;
+//RS             }
+//RS             value |= u64::from(byte & 0x7f) << shift;
+//RS             if byte & 0x80 == 0 {
+//RS                 return Some(value);
+//RS             }
+//RS             shift += 7;
+//RS         }
+//RS     }
+//RS 
+//RS     fn size(&mut self) -> Option<usize> {
+//RS         usize::try_from(self.uint()?).ok()
+//RS     }
+//RS 
+//RS     /// An element count. Every element takes at least one byte, so a count
+//RS     /// beyond the remaining bytes is corrupt, never a huge allocation.
+//RS     fn count(&mut self) -> Option<usize> {
+//RS         let count = self.size()?;
+//RS         (count <= self.bytes.len() - self.at).then_some(count)
+//RS     }
+//RS }
+//RS 
+//RS trait Codec: Sized {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal>;
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self>;
+//RS }
+//RS 
+//RS /// A sema-filled field the delta does not carry: it must be empty in the
+//RS /// checked body and is empty after decoding.
+//RS trait Absent {
+//RS     fn is_absent(&self) -> bool;
+//RS     fn absent() -> Self;
+//RS }
+//RS 
+//RS impl<T> Absent for Option<T> {
+//RS     fn is_absent(&self) -> bool {
+//RS         self.is_none()
+//RS     }
+//RS 
+//RS     fn absent() -> Self {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS impl<T> Absent for Vec<T> {
+//RS     fn is_absent(&self) -> bool {
+//RS         self.is_empty()
+//RS     }
+//RS 
+//RS     fn absent() -> Self {
+//RS         Vec::new()
+//RS     }
+//RS }
+//RS 
+//RS impl Codec for bool {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         writer.byte(u8::from(*self));
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         match reader.byte()? {
+//RS             0 => Some(false),
+//RS             1 => Some(true),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Codec for u8 {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         writer.byte(*self);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         reader.byte()
+//RS     }
+//RS }
+//RS 
+//RS impl Codec for u32 {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         writer.uint(u64::from(*self));
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         u32::try_from(reader.uint()?).ok()
+//RS     }
+//RS }
+//RS 
+//RS impl Codec for usize {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         writer.uint(*self as u64);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         reader.size()
+//RS     }
+//RS }
+//RS 
+//RS impl Codec for i64 {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         writer.uint(((*self << 1) ^ (*self >> 63)) as u64);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         let value = reader.uint()?;
+//RS         Some(((value >> 1) as i64) ^ -((value & 1) as i64))
+//RS     }
+//RS }
+//RS 
+//RS impl Codec for f64 {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         writer.bytes.extend_from_slice(&self.to_bits().to_le_bytes());
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         let bytes: [u8; 8] = reader.take(8)?.try_into().ok()?;
+//RS         Some(f64::from_bits(u64::from_le_bytes(bytes)))
+//RS     }
+//RS }
+//RS 
+//RS impl Codec for char {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         writer.uint(u64::from(u32::from(*self)));
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         char::from_u32(u32::try_from(reader.uint()?).ok()?)
+//RS     }
+//RS }
+//RS 
+//RS impl Codec for String {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         writer.uint(self.len() as u64);
+//RS         writer.bytes.extend_from_slice(self.as_bytes());
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         let len = reader.size()?;
+//RS         String::from_utf8(reader.take(len)?.to_vec()).ok()
+//RS     }
+//RS }
+//RS 
+//RS impl Codec for Span {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         if self.start == 0 && self.end == 0 {
+//RS             // At offset 0 a synthesized empty span and an empty span at the
+//RS             // item's start cannot be told apart.
+//RS             if writer.start == 0 {
+//RS                 return Err("ambiguous empty span");
+//RS             }
+//RS             writer.byte(0);
+//RS             return Ok(());
+//RS         }
+//RS         if self.start < writer.start || self.end < self.start || self.end > writer.end {
+//RS             return Err("span outside the item");
+//RS         }
+//RS         match &mut writer.spans {
+//RS             Spans::Collect(spans) => {
+//RS                 spans.insert((self.start, self.end));
+//RS             }
+//RS             Spans::Require(spans) => {
+//RS                 if !spans.contains(&(self.start, self.end)) {
+//RS                     return Err("span not authored by the item");
+//RS                 }
+//RS             }
+//RS         }
+//RS         writer.byte(1);
+//RS         writer.uint((self.start - writer.start) as u64);
+//RS         writer.uint((self.end - self.start) as u64);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         match reader.byte()? {
+//RS             0 => Some(Span::new(0, 0)),
+//RS             1 => {
+//RS                 let start = reader.start.checked_add(reader.size()?)?;
+//RS                 let end = start.checked_add(reader.size()?)?;
+//RS                 Some(Span::new(start, end))
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Codec> Codec for Box<T> {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         (**self).put(writer)
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         T::get(reader).map(Box::new)
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Codec> Codec for Option<T> {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         match self {
+//RS             None => {
+//RS                 writer.byte(0);
+//RS                 Ok(())
+//RS             }
+//RS             Some(value) => {
+//RS                 writer.byte(1);
+//RS                 value.put(writer)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         match reader.byte()? {
+//RS             0 => Some(None),
+//RS             1 => T::get(reader).map(Some),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Codec> Codec for Vec<T> {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         writer.uint(self.len() as u64);
+//RS         for item in self {
+//RS             item.put(writer)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         let count = reader.count()?;
+//RS         let mut items = Vec::with_capacity(count);
+//RS         for _ in 0..count {
+//RS             items.push(T::get(reader)?);
+//RS         }
+//RS         Some(items)
+//RS     }
+//RS }
+//RS 
+//RS impl<A: Codec, B: Codec> Codec for (A, B) {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         self.0.put(writer)?;
+//RS         self.1.put(writer)
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         let first = A::get(reader)?;
+//RS         Some((first, B::get(reader)?))
+//RS     }
+//RS }
+//RS 
+//RS impl<A: Codec, B: Codec, C: Codec> Codec for (A, B, C) {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         self.0.put(writer)?;
+//RS         self.1.put(writer)?;
+//RS         self.2.put(writer)
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         let first = A::get(reader)?;
+//RS         let second = B::get(reader)?;
+//RS         Some((first, second, C::get(reader)?))
+//RS     }
+//RS }
+//RS 
+//RS impl<K: Codec + Ord, V: Codec> Codec for BTreeMap<K, V> {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         writer.uint(self.len() as u64);
+//RS         for (key, value) in self {
+//RS             key.put(writer)?;
+//RS             value.put(writer)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         let count = reader.count()?;
+//RS         let mut map = BTreeMap::new();
+//RS         for _ in 0..count {
+//RS             let key = K::get(reader)?;
+//RS             if map.insert(key, V::get(reader)?).is_some() {
+//RS                 return None;
+//RS             }
+//RS         }
+//RS         Some(map)
+//RS     }
+//RS }
+//RS 
+//RS /// Encode one field, or require an uncarried (`= absent`) field to be empty.
+//RS macro_rules! put_field {
+//RS     ($writer:ident, $value:ident) => {
+//RS         Codec::put($value, $writer)?
+//RS     };
+//RS     ($writer:ident, $value:ident, absent) => {
+//RS         if !Absent::is_absent($value) {
+//RS             return Err(concat!("sema-filled `", stringify!($value), "`"));
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS macro_rules! get_field {
+//RS     ($reader:ident, $value:ident) => {
+//RS         Codec::get($reader)?
+//RS     };
+//RS     ($reader:ident, $value:ident, absent) => {
+//RS         Absent::absent()
+//RS     };
+//RS }
+//RS 
+//RS /// A struct codec. Destructuring names every field, so a field added to
+//RS /// the AST fails to compile here until it is carried or marked `= absent`.
+//RS macro_rules! codec_struct {
+//RS     ($ty:ident { $($field:ident $(= $mark:ident)?),* $(,)? }) => {
+//RS         impl Codec for $ty {
+//RS             fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS                 let $ty { $($field),* } = self;
+//RS                 $( put_field!(writer, $field $(, $mark)?); )*
+//RS                 Ok(())
+//RS             }
+//RS 
+//RS             fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS                 Some($ty { $( $field: get_field!(reader, $field $(, $mark)?) ),* })
+//RS             }
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS /// An enum codec over the listed variants; any other variant is refused.
+//RS /// A listed variant names every field, as `codec_struct` does.
+//RS macro_rules! codec_enum {
+//RS     ($ty:ident {
+//RS         $( $tag:literal => $variant:ident
+//RS             $( ( $($item:ident),* ) )?
+//RS             $( { $($field:ident $(= $mark:ident)?),* } )?
+//RS         ),* $(,)?
+//RS     }) => {
+//RS         impl Codec for $ty {
+//RS             #[allow(unreachable_patterns)]
+//RS             fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS                 match self {
+//RS                     $(
+//RS                         $ty::$variant $( ( $($item),* ) )? $( { $($field),* } )? => {
+//RS                             writer.byte($tag);
+//RS                             $( $( put_field!(writer, $item); )* )?
+//RS                             $( $( put_field!(writer, $field $(, $mark)?); )* )?
+//RS                         }
+//RS                     )*
+//RS                     _ => return Err(concat!("unsupported ", stringify!($ty), " node")),
+//RS                 }
+//RS                 Ok(())
+//RS             }
+//RS 
+//RS             fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS                 Some(match reader.byte()? {
+//RS                     $(
+//RS                         $tag => $ty::$variant
+//RS                             $( ( $( get_field!(reader, $item) ),* ) )?
+//RS                             $( { $( $field: get_field!(reader, $field $(, $mark)?) ),* } )?,
+//RS                     )*
+//RS                     _ => return None,
+//RS                 })
+//RS             }
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS codec_struct!(Param {
+//RS     convention,
+//RS     root,
+//RS     name,
+//RS     name_span,
+//RS     public_label,
+//RS     zone,
+//RS     ty,
+//RS     ty_span,
+//RS     default,
+//RS     variadic,
+//RS     variadic_bound_list,
+//RS     declared_view_from_names,
+//RS });
+//RS 
+//RS codec_enum!(ParamZone {
+//RS     0 => PositionalOnly,
+//RS     1 => Either,
+//RS     2 => LabelOnly,
+//RS });
+//RS 
+//RS codec_enum!(AccessConvention {
+//RS     0 => Read,
+//RS     1 => Write,
+//RS     2 => Move,
+//RS });
+//RS 
+//RS codec_enum!(PlaceAccess {
+//RS     0 => Read,
+//RS     1 => Write,
+//RS     2 => Take,
+//RS });
+//RS 
+//RS codec_enum!(Type {
+//RS     0 => Int,
+//RS     1 => Float,
+//RS     2 => Bool,
+//RS     3 => String,
+//RS     4 => Char,
+//RS     5 => List(elem),
+//RS     6 => Map { key, key_span, value },
+//RS     7 => Shared(inner),
+//RS     8 => Option(inner),
+//RS     9 => Result { ok, err },
+//RS     10 => Fn {
+//RS         params,
+//RS         ret,
+//RS         effect_bound,
+//RS         param_contract,
+//RS         call_metadata = absent,
+//RS         return_view_provenance = absent
+//RS     },
+//RS     11 => Named(name),
+//RS     12 => Apply { name, args },
+//RS     13 => TraitObject(names),
+//RS     14 => Tuple(fields),
+//RS     15 => IntN { signed, bits },
+//RS     16 => InlineRange { base, lo, hi },
+//RS     17 => Float32,
+//RS     18 => Tagged { marker, inner },
+//RS     19 => Union(members),
+//RS });
+//RS 
+//RS codec_enum!(TagMarker {
+//RS     0 => User(name),
+//RS     1 => Internal(tag),
+//RS });
+//RS 
+//RS codec_enum!(InternalTag {
+//RS     0 => CoreCryptoNominal,
+//RS     1 => DeterministicClock,
+//RS     2 => SystemClock,
+//RS     3 => ExpiringSecretLoan,
+//RS     4 => SharedGuardRead,
+//RS     5 => SharedGuardEdit,
+//RS     6 => TerminalFactSet,
+//RS     7 => CppCallbackAbi,
+//RS     8 => AllocatorView,
+//RS });
+//RS 
+//RS codec_enum!(Stmt {
+//RS     0 => Expr(value),
+//RS     1 => Val(binding),
+//RS     2 => Assign { target, op, op_span, value },
+//RS     3 => Return(value, span),
+//RS     4 => While { cond, body, span, arrow_body, label },
+//RS     5 => For {
+//RS         var,
+//RS         var_span,
+//RS         var2,
+//RS         kind,
+//RS         body,
+//RS         span,
+//RS         arrow_body,
+//RS         label,
+//RS         auto_vectorization = absent
+//RS     },
+//RS     6 => Switch { subject, arms, else_body, span },
+//RS     7 => Break(span),
+//RS     8 => BreakValue(value, span),
+//RS     9 => Continue(span),
+//RS     10 => BreakLabel(label, span),
+//RS     11 => BreakLabelValue(label, label_span, value, span),
+//RS     12 => ContinueLabel(label, span),
+//RS     13 => Loop { body, span, arrow_body, label },
+//RS     14 => CountedLoop { init, cond, step, body, span, arrow_body, label },
+//RS     15 => Unsafe { audit, audit_expr, body, span },
+//RS     16 => Impure { reason, reason_expr, body, span },
+//RS     17 => Reactive { body, span },
+//RS     18 => Shield { body, span },
+//RS     19 => Region { name, name_span, body, span },
+//RS     20 => TaskGroup { name, name_span, limit, body, span },
+//RS     21 => Layout { name, name_span, body, span },
+//RS     22 => AuthorityScope { caps, caps_span, binding, binding_span, body, span },
+//RS     23 => ComptimeIf { cond, cond_span, then_body, else_body, span, selected_then },
+//RS     24 => ComptimeSwitch { subject, arms, else_body, span },
+//RS     25 => ComptimeBlock { body, is_template_loop, span },
+//RS     26 => ContextBlock { fields, body, span },
+//RS     27 => Live { body, span },
+//RS     28 => AssumeDet { reason, reason_expr, body, span },
+//RS     29 => Transact { name, name_span, body, implicit, span },
+//RS     30 => Yield(value, span),
+//RS     31 => ScopeMember { name, name_span, args, args_span, body, dsl, dot_span, span },
+//RS     32 => DeferClose { close, span },
+//RS });
+//RS 
+//RS codec_struct!(SwitchArm { cond, body, span });
+//RS 
+//RS codec_struct!(Binding {
+//RS     mutable,
+//RS     markers = absent,
+//RS     reactive_upgrade,
+//RS     meta = absent,
+//RS     name,
+//RS     name_span,
+//RS     sigil_span,
+//RS     pattern,
+//RS     ty,
+//RS     ty_span,
+//RS     init,
+//RS     is_comptime,
+//RS     ct = absent,
+//RS     uninit,
+//RS     arena_view,
+//RS     string_view,
+//RS     gc_promotion = absent,
+//RS     gc_transferred,
+//RS });
+//RS 
+//RS codec_enum!(LValue {
+//RS     0 => Local { name, name_span },
+//RS     1 => Index { base, index, span, kind },
+//RS     2 => Field { base, field, span },
+//RS });
+//RS 
+//RS codec_enum!(IndexKind {
+//RS     0 => Unknown,
+//RS     1 => List,
+//RS     2 => Range,
+//RS     3 => FixedListProof,
+//RS     4 => Map,
+//RS     5 => Lane(name),
+//RS     6 => User(name),
+//RS     7 => LayoutField(name),
+//RS     8 => Pool,
+//RS });
+//RS 
+//RS codec_enum!(ForKind {
+//RS     0 => Range { start, end, step, exclusive },
+//RS     1 => In { collection, step },
+//RS });
+//RS 
+//RS codec_enum!(BindPattern {
+//RS     0 => Struct { type_name, type_span, fields, rest, span },
+//RS     1 => List { elems, span },
+//RS     2 => Tuple { elems, span },
+//RS     3 => Refutable { pattern, fallback, names, span, synthesized },
+//RS });
+//RS 
+//RS codec_struct!(BindName { name, span, rename });
+//RS 
+//RS codec_enum!(BinOp {
+//RS     0 => Add,
+//RS     1 => Sub,
+//RS     2 => Mul,
+//RS     3 => Div,
+//RS     4 => FloorDiv,
+//RS     5 => Mod,
+//RS     6 => Rem,
+//RS     7 => Pow,
+//RS     8 => BitAnd,
+//RS     9 => BitOr,
+//RS     10 => BitXor,
+//RS     11 => Shl,
+//RS     12 => Shr,
+//RS     13 => Eq,
+//RS     14 => Ne,
+//RS     15 => Lt,
+//RS     16 => Gt,
+//RS     17 => Le,
+//RS     18 => Ge,
+//RS     19 => Compare,
+//RS     20 => And,
+//RS     21 => Or,
+//RS });
+//RS 
+//RS codec_enum!(UnOp {
+//RS     0 => Neg,
+//RS     1 => Not,
+//RS });
+//RS 
+//RS codec_enum!(Expr {
+//RS     0 => Str(parts, span),
+//RS     1 => Int(value, span, width, suffix),
+//RS     2 => Float(value, span, narrow, suffix),
+//RS     3 => Bool(value, span),
+//RS     4 => Unit(span),
+//RS     5 => Char(value, span),
+//RS     6 => ListLit(items, span),
+//RS     7 => MemberSpread { base, members, span },
+//RS     8 => Spread(value, span),
+//RS     9 => MapLit(entries, span),
+//RS     10 => Index { base, index, span, kind },
+//RS     11 => Slice { base, start, end, range, span },
+//RS     12 => Range { start, end, exclusive, span },
+//RS     13 => Ident(name, span),
+//RS     14 => Call(call),
+//RS     15 => Unary(op, value, span),
+//RS     16 => Binary(op, left, right, span),
+//RS     17 => CompareChain { operands, ops, hooks, span },
+//RS     18 => UnitLit { raw, int, float, suffix, suffix_span, span },
+//RS     19 => Deref(value, span),
+//RS     20 => RawOf(value, span),
+//RS     21 => Copy(value, span),
+//RS     22 => Place(value, access, span),
+//RS     23 => Field(base, name, span),
+//RS     24 => OptField { base, member, member_span, flatten, span },
+//RS     25 => MethodCall {
+//RS         receiver,
+//RS         method,
+//RS         method_span,
+//RS         owner_type_args,
+//RS         type_args,
+//RS         args,
+//RS         recv_type,
+//RS         resolved_ret,
+//RS         operator_rhs,
+//RS         checked_widen
+//RS     },
+//RS     26 => StructLit { type_name, type_args, import_ns, as_trait, fields, inferred, span },
+//RS     27 => TypedLit { head, body, span },
+//RS     28 => EnumLit { type_name, variant, variant_span, args, leading_dot, span },
+//RS     29 => Tainted(value, tag, span),
+//RS     30 => Present(value, span),
+//RS     31 => Absent(span),
+//RS     32 => Todo { span, expected_type },
+//RS     33 => NoElse(span),
+//RS     34 => ReduceMarker(name, span),
+//RS     35 => PatternTest { subject, pattern, span },
+//RS     36 => Ok(value, span),
+//RS     37 => Err(value, span),
+//RS     38 => Try(value, span, convert, context),
+//RS     39 => OrFallback { value, fallback, is_option, span },
+//RS     40 => If { cond, then_body, then_value, else_body, else_value, span },
+//RS     41 => TupleLit(fields, span, ty),
+//RS     42 => CallValue { callee, args, span },
+//RS     43 => PtrFromAddr { alias, alias_span, elem, addr, span },
+//RS     44 => Paren(value, span),
+//RS });
+//RS 
+//RS codec_enum!(StrPart {
+//RS     0 => Lit(text),
+//RS     1 => Interp(value, format),
+//RS });
+//RS 
+//RS codec_enum!(StrFormat {
+//RS     0 => Display,
+//RS     1 => Debug,
+//RS     2 => Pretty,
+//RS     3 => Fixed(digits),
+//RS     4 => Grouped(digits),
+//RS     5 => Hex(digits),
+//RS     6 => Pad { width, fill },
+//RS     7 => PadLeft { width, fill },
+//RS     8 => Sci(digits),
+//RS     9 => Percent(digits),
+//RS     10 => Bin,
+//RS     11 => Oct,
+//RS     12 => Unit(unit),
+//RS });
+//RS 
+//RS codec_enum!(UnitFormat {
+//RS     0 => Symbol,
+//RS     1 => Name,
+//RS     2 => Bare,
+//RS });
+//RS 
+//RS codec_enum!(TypedLitBody {
+//RS     0 => Fields(fields),
+//RS     1 => Elements(items),
+//RS     2 => Entries(entries),
+//RS     3 => Value(value),
+//RS     4 => ByteText(parts),
+//RS     5 => Empty,
+//RS });
+//RS 
+//RS codec_enum!(ByteTextPart {
+//RS     0 => Lit(text),
+//RS     1 => Byte(value),
+//RS });
+//RS 
+//RS codec_struct!(Call {
+//RS     name,
+//RS     name_span,
+//RS     type_args,
+//RS     args,
+//RS     resolved_ret,
+//RS     range_checked,
+//RS     widen_approx,
+//RS });
+//RS 
+//RS codec_struct!(CallArg { convention, expr, span, flags, label, spread });
+//RS 
+//RS codec_struct!(CallArgFlags {
+//RS     implicit_clone,
+//RS     shared_auto_clone,
+//RS     owned_last_use,
+//RS     shared_access_desugar,
+//RS     is_trailing_block,
+//RS     template_items = absent,
+//RS     c_callback_symbol,
+//RS     c_callback_function_key,
+//RS     c_callback_managed,
+//RS     c_callback_plan_digest,
+//RS     c_callback_identity,
+//RS     trusted_html,
+//RS     source_index,
+//RS     binder_slot,
+//RS     binder_label,
+//RS     binder_refs,
+//RS     binder_site,
+//RS     callable_policy = absent,
+//RS     authority_boundary,
+//RS     arithmetic_policy,
+//RS });
+//RS 
+//RS codec_struct!(ArithmeticPolicyFact { mode, scope_span, operation_span, operation });
+//RS 
+//RS codec_enum!(ArithmeticMode {
+//RS     0 => Checked,
+//RS     1 => Wrapping,
+//RS     2 => Saturating,
+//RS });
+//RS 
+//RS codec_enum!(ArithmeticOperation {
+//RS     0 => Add,
+//RS     1 => Sub,
+//RS     2 => Mul,
+//RS     3 => Neg,
+//RS     4 => Pow,
+//RS });
+//RS 
+//RS codec_enum!(EnumLitArg {
+//RS     0 => Positional(expr),
+//RS     1 => Named { label, expr },
+//RS });
+//RS 
+//RS codec_enum!(Pattern {
+//RS     0 => Variant { variant, bindings, leading_dot, span },
+//RS     1 => Present { binding, binding_span, inner, span },
+//RS     2 => Absent(span),
+//RS     3 => Ok { binding, binding_span, inner, span },
+//RS     4 => Err { binding, binding_span, inner, span },
+//RS     5 => Range { lo, hi, span },
+//RS     6 => Or(alternatives, span),
+//RS     7 => Struct { fields, rest, span },
+//RS });
+//RS 
+//RS codec_enum!(PatSlot {
+//RS     0 => Wildcard,
+//RS     1 => Bind { name, span },
+//RS     2 => Range { lo, hi },
+//RS     3 => Nested(pattern),
+//RS     4 => Named { field, field_span, slot },
+//RS     5 => Rest(span),
+//RS });
+//RS 
+//RS codec_enum!(StructPatField {
+//RS     0 => Bind { field, field_span, local, local_span },
+//RS     1 => Value { field, field_span, value },
+//RS });
+//RS 
+//RS codec_enum!(OrFallback {
+//RS     0 => Value(value),
+//RS     1 => Block { body, value, span },
+//RS     2 => Return(value, span),
+//RS     3 => Panic { name_span, args },
+//RS     4 => Break(span),
+//RS     5 => Continue(span),
+//RS     6 => BreakLabel(label, span),
+//RS     7 => ContinueLabel(label, span),
+//RS });
+//RS 
+//RS codec_enum!(TryConvert {
+//RS     0 => None,
+//RS     1 => Never,
+//RS     2 => DefaultErr,
+//RS     3 => Typed { fn_name, source, target },
+//RS     4 => WidenUnion { enum_name, tag },
+//RS });
+//RS 
+//RS // Compile-time values (`encode_value`).
+//RS 
+//RS impl Codec for CtFloat {
+//RS     fn put(&self, writer: &mut Writer) -> Result<(), Refusal> {
+//RS         match self {
+//RS             CtFloat::F32(value) => {
+//RS                 writer.byte(0);
+//RS                 writer.bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+//RS             }
+//RS             CtFloat::F64(value) => {
+//RS                 writer.byte(1);
+//RS                 value.put(writer)?;
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn get(reader: &mut Reader<'_>) -> Option<Self> {
+//RS         match reader.byte()? {
+//RS             0 => {
+//RS                 let bytes: [u8; 4] = reader.take(4)?.try_into().ok()?;
+//RS                 Some(CtFloat::F32(f32::from_bits(u32::from_le_bytes(bytes))))
+//RS             }
+//RS             1 => Some(CtFloat::F64(f64::get(reader)?)),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS codec_struct!(CtBigInt { negative, limbs });
+//RS 
+//RS codec_enum!(CtKey {
+//RS     0 => Int(value),
+//RS     1 => Str(value),
+//RS     2 => Bool(value),
+//RS     3 => Char(value),
+//RS     4 => Tuple(fields),
+//RS     5 => Struct { type_name, fields },
+//RS     6 => Enum { type_name, variant },
+//RS });
+//RS 
+//RS // A told report is refused: an error value can carry the source line of
+//RS // its context frames.
+//RS codec_enum!(CtReport {
+//RS     0 => Clean(ty),
+//RS });
+//RS 
+//RS codec_enum!(CtValue {
+//RS     0 => Int(value),
+//RS     1 => Float(value),
+//RS     2 => Bool(value),
+//RS     3 => Char(value),
+//RS     4 => Str(value),
+//RS     5 => BigInt(value),
+//RS     6 => Bytes(value),
+//RS     7 => List(values),
+//RS     8 => Map(entries),
+//RS     9 => Struct { type_name, fields },
+//RS     10 => Enum { type_name, variant, args },
+//RS     11 => Present(value),
+//RS     12 => Failed(report),
+//RS     13 => Unit,
+//RS });
+// END-PORT-PENDING 0351 crates/jet-sema/src/Sema/Bundle/BodyDelta.rs:1-1029
+

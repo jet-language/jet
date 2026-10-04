@@ -1,0 +1,232 @@
+// Originals: PackageIdentity.rs::key_framing_is_pinned and
+// crates/jet-parser/tests/package_fingerprints.rs:91-196.
+// Parsing uses the real parser and fingerprinting the sole CanonicalAST codec.
+use jet_parser.[parse_source]
+use core.files.runtime.kernel_path_components as package_identity_fixture_paths
+fn package_identity_test_program(source: String) -> Program {
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    parsed.program
+}
+fn package_identity_test_item(source: String) -> Item {
+    program :: package_identity_test_program(source)
+    assert_eq(program.items.len(), 1)
+    program.items[0]
+}
+fn package_identity_test_interface(source: String, pub_file: Bool) -> String? {
+    package_identity_item_interface_fingerprint<CanonicalASTParsedDefaults>(package_identity_test_item(source), CanonicalASTParsedDefaults.Parsed, pub_file)
+}
+#Test("key_framing_is_pinned") {
+    framed :: [U8]{3, 97, 98, 99, 0}
+    assert_eq(record_key_digest([String]{"abc", ""}), record_blob_key(framed.view(0..<framed.len())))
+    a :: PackageKeySourceFile{relative_path: "a.jet", source: "1".bytes()}
+    b :: PackageKeySourceFile{relative_path: "b.jet", source: "2".bytes()}
+    assert_eq(package_key_source_digest([PackageKeySourceFile]{b, a}, None), package_key_source_digest([PackageKeySourceFile]{a, b}, None))
+    assert(package_key_source_digest([PackageKeySourceFile]{a}, None) != package_key_source_digest([PackageKeySourceFile]{a}, Val([U8]{})))
+    da :: PackageKeyDependency{identity: "pkg:a", interface_digest: "1".repeat(64)}
+    db :: PackageKeyDependency{identity: "pkg:b", interface_digest: "2".repeat(64)}
+    assert_eq(package_key_check_key("c", "t", "pkg:.", "s", [PackageKeyDependency]{da, db}), package_key_check_key("c", "t", "pkg:.", "s", [PackageKeyDependency]{db, da}))
+    assert(package_key_check_key("c", "t", "pkg:.", "s", [PackageKeyDependency]{da}) != package_key_check_key("c", "t", "pkg:.", "s", [PackageKeyDependency]{da, db}))
+}
+#Test("source_digest hashes raw non-UTF8 manifest bytes without recovery") {
+    manifest :: [U8]{0, 255, 128, 10}
+    expected :: record_key_digest([String]{"jet.pkg-source/v1", "files", "0", "manifest", record_blob_key(manifest.view(0..<manifest.len()))})
+    assert_eq(package_key_source_digest([PackageKeySourceFile]{}, Val(manifest)), expected)
+    assert(package_key_source_digest([PackageKeySourceFile]{}, Val(manifest)) != package_key_source_digest([PackageKeySourceFile]{}, None))
+    bytes :: [U8]{255, 0, 128, 10}
+    file :: PackageKeySourceFile{relative_path: "binary.jet", source: bytes}
+    file_expected :: record_key_digest([String]{"jet.pkg-source/v1", "files", "1", "binary.jet", record_blob_key(bytes.view(0..<bytes.len())), "manifest", record_blob_key(manifest.view(0..<manifest.len()))})
+    assert_eq(package_key_source_digest([PackageKeySourceFile]{file}, Val(manifest)), file_expected)
+}
+#Test("item_fingerprints_ignore_whitespace_and_comments") {
+    plain :: package_identity_test_item("pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n")
+    spaced :: package_identity_test_item("// adds two numbers\n\n\npub fn add(a: Int,   b: Int) -> Int {\n\n    // the sum\n    a  +  b\n}\n")
+    defaults :: CanonicalASTParsedDefaults.Parsed
+    assert_eq(package_identity_item_source_fingerprint<CanonicalASTParsedDefaults>(plain, defaults), package_identity_item_source_fingerprint<CanonicalASTParsedDefaults>(spaced, defaults))
+    assert_eq(package_identity_item_interface_fingerprint<CanonicalASTParsedDefaults>(plain, defaults, false), package_identity_item_interface_fingerprint<CanonicalASTParsedDefaults>(spaced, defaults, false))
+}
+#Test("body_edit_keeps_interface_fingerprint_and_signature_edit_changes_it") {
+    plain :: package_identity_test_item("pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n")
+    body :: package_identity_test_item("pub fn add(a: Int, b: Int) -> Int {\n    b + a\n}\n")
+    signature :: package_identity_test_item("pub fn add(a: Int, b: Int, c: Int) -> Int {\n    a + b\n}\n")
+    defaults :: CanonicalASTParsedDefaults.Parsed
+    assert(package_identity_item_source_fingerprint<CanonicalASTParsedDefaults>(plain, defaults) != package_identity_item_source_fingerprint<CanonicalASTParsedDefaults>(body, defaults))
+    assert_eq(package_identity_item_interface_fingerprint<CanonicalASTParsedDefaults>(plain, defaults, false), package_identity_item_interface_fingerprint<CanonicalASTParsedDefaults>(body, defaults, false))
+    assert(package_identity_item_interface_fingerprint<CanonicalASTParsedDefaults>(plain, defaults, false) != package_identity_item_interface_fingerprint<CanonicalASTParsedDefaults>(signature, defaults, false))
+    assert(package_identity_test_interface("pub fn same<T>(x: T) -> T {\n    x\n}\n", false) != package_identity_test_interface("pub fn same<T>(x: T) -> T {\n    y :: x\n    y\n}\n", false))
+    assert_eq(package_identity_test_interface("fn hidden() -> Int {\n    1\n}\n", false), None)
+}
+#Test("interface projection preserves public-file generic inline and trait-default bodies") {
+    private_a :: "fn hidden() -> Int { 1 }"
+    private_b :: "fn hidden() -> Int { 2 }"
+    assert(package_identity_test_interface(private_a, true) != None)
+    assert_eq(package_identity_test_interface(private_a, true), package_identity_test_interface(private_b, true))
+    assert(package_identity_test_interface("#Inline(Always)\npub fn f() -> Int { 1 }", false) != package_identity_test_interface("#Inline(Always)\npub fn f() -> Int { 2 }", false))
+    assert(package_identity_test_interface("pub trait T { fn f(self) -> Int { 1 } }", false) != package_identity_test_interface("pub trait T { fn f(self) -> Int { 2 } }", false))
+}
+#Test("interface projection removes private inherent methods and recurses code modules") {
+    first :: "pub struct S { pub fn read(self) -> Int { 1 } fn hidden(self) -> Int { 3 } }"
+    changed :: "pub struct S { pub fn read(self) -> Int { 2 } fn hidden(self) -> Int { 4 } fn extra(self) -> Int { 5 } }"
+    assert_eq(package_identity_test_interface(first, false), package_identity_test_interface(changed, false))
+    assert(package_identity_test_interface(first, false) != package_identity_test_interface(changed, true))
+    assert_eq(package_identity_test_interface("pub module M { pub fn f() -> Int { 1 } fn p() -> Int { 3 } }", false), package_identity_test_interface("pub module M { pub fn f() -> Int { 2 } fn p() -> Int { 4 } }", false))
+}
+// Original graph witness. Caller supplies the REAL loaded four-module fixture
+// from package_fingerprints.rs:52-87 through the canonical path/loader provider.
+// This is not counted as an exercised #Test until that provider is integrated.
+fn package_identity_test_partition<H: PackageIdentityPathProvider>(bundle: PackageIdentityBundle, paths: H) {
+    graph :: compiler_package_graph<H>(bundle, paths)
+    assert_eq(graph.packages.len(), 3)
+    assert_eq(graph.packages[0].identity, "core")
+    assert_eq(graph.packages[0].kind, CompilerPackageKind.Core)
+    assert_eq(graph.packages[0].modules, [Int]{3})
+    assert_eq(graph.packages[1].identity, "file:main.jet")
+    assert_eq(graph.packages[1].kind, CompilerPackageKind.File)
+    assert_eq(graph.packages[1].modules, [Int]{0})
+    assert_eq(graph.packages[2].identity, "pkg:lib")
+    assert_eq(graph.packages[2].kind, CompilerPackageKind.Manifest)
+    assert_eq(graph.packages[2].modules, [Int]{1, 2})
+    assert_eq(graph.packages[1].dependencies, [Int]{0, 2})
+    assert_eq(graph.packages[2].dependencies, [Int]{0})
+    assert(compiler_package_is_acyclic(graph))
+    assert_eq(compiler_package_components(graph), [[Int]]{[Int]{0}, [Int]{2}, [Int]{1}})
+    assert_eq(compiler_package_member_label<H>(graph, bundle, 2, paths), "b.jet")
+}
+// Original cutoff/checkout witness. Inputs are six real loaded fixture bundles:
+// original, other checkout, comment, private-body+new-private, signature, new-public.
+fn package_identity_test_cutoffs<H: PackageIdentityPathProvider>(bundles: View<PackageIdentityBundle>, paths: H) {
+    assert_eq(bundles.len(), 6)
+    source_digests := [String]{}
+    interfaces := [String]{}
+    loop bundle in bundles {
+        graph :: compiler_package_graph<H>(bundle, paths)
+        lib := -1
+        loop (index, package) in graph.packages {
+            if package.identity == "pkg:lib" -> lib = index
+        }
+        assert(lib >= 0)
+        &source_digests.push(compiler_package_source_digest<H>(graph, bundle, lib, Val("package { name: \"lib\" }\n".bytes()), paths))
+        &interfaces.push(compiler_package_interface_digest<H>(graph, bundle, lib, [String:String]{}, paths))
+        if source_digests.len() == 1 {
+            summary :: [String:String]{"pkg:lib::a.jet::add": "effects:FS"}
+            assert(compiler_package_interface_digest<H>(graph, bundle, lib, summary, paths) != interfaces[0])
+        }
+    }
+    assert_eq(source_digests[0], source_digests[1])
+    assert_eq(interfaces[0], interfaces[1])
+    assert(source_digests[2] != source_digests[0])
+    assert_eq(interfaces[2], interfaces[0])
+    assert_eq(interfaces[3], interfaces[0])
+    assert(interfaces[4] != interfaces[0])
+    assert(interfaces[5] != interfaces[0])
+}
+#Test("Tarjan handles package cycles and empty graphs in dependency order") {
+    nodes :: [CompilerPackageNode]{
+        CompilerPackageNode{identity: "a", kind: CompilerPackageKind.File, root: None, modules: [Int]{0}, dependencies: [Int]{1}},
+        CompilerPackageNode{identity: "b", kind: CompilerPackageKind.File, root: None, modules: [Int]{1}, dependencies: [Int]{0, 2}},
+        CompilerPackageNode{identity: "c", kind: CompilerPackageKind.Core, root: None, modules: [Int]{2}, dependencies: [Int]{}},
+    }
+    graph :: CompilerPackageGraph{packages: nodes, module_package: [Int]{0, 1, 2}, dependency_order: [Int]{}}
+    assert_eq(compiler_package_components(graph), [[Int]]{[Int]{2}, [Int]{0, 1}})
+    assert(!compiler_package_is_acyclic(graph))
+    assert_eq(compiler_package_of(graph, 1), Val(1))
+    assert_eq(compiler_package_of(graph, 3), None)
+    empty :: CompilerPackageGraph{packages: [CompilerPackageNode]{}, module_package: [Int]{}, dependency_order: [Int]{}}
+    assert_eq(compiler_package_components(empty), [[Int]]{})
+    assert(compiler_package_is_acyclic(empty))
+}
+
+// Exact original package_fingerprints.rs:52-87 fixture; ASCII fixture path
+// spellings are explicit test inputs, NOT reconstruction of native loader paths.
+struct PackageIdentityTestFixture {
+    root: package_identity_fixture_paths.OsPath
+    modules: [PackageIdentityLoadedModule]
+    interfaces: [PackageIdentityModuleInterface]
+    dependencies: [PackageIdentityDependencyRoot]
+    namespaces: [Int:package_identity_fixture_paths.OsPath]
+    imports: [PackageIdentityImportEdge]
+}
+fn package_identity_test_fixture(root: String, lib_a: String) -> PackageIdentityTestFixture {
+    sources :: [String]{"fn run() {\n    print(\"hi\")\n}\n", lib_a, "pub fn b() -> Int {\n    2\n}\n", "pub fn len() -> Int {\n    0\n}\n"}
+    names :: [String]{"{root}/main.jet", "{root}/lib/a.jet", "{root}/lib/b.jet", "<corelib>/text.jet"}
+    modules := [PackageIdentityLoadedModule]{}
+    interfaces := [PackageIdentityModuleInterface]{}
+    loop index in 0..<sources.len() {
+        &modules.push(PackageIdentityLoadedModule{path: package_identity_fixture_paths.from_text(names[index], package_identity_fixture_paths.PathPlatform.Unix), source_digest: mir_sha256_hex(sources[index]), is_core_source: index == 3})
+        &interfaces.push(package_identity_project_module<CanonicalASTParsedDefaults>(package_identity_test_program(sources[index]), CanonicalASTParsedDefaults.Parsed))
+    }
+    lib_root :: package_identity_fixture_paths.from_text("{root}/lib", package_identity_fixture_paths.PathPlatform.Unix)
+    PackageIdentityTestFixture{root: package_identity_fixture_paths.from_text(root, package_identity_fixture_paths.PathPlatform.Unix), modules: modules, interfaces: interfaces, dependencies: [], namespaces: [Int:package_identity_fixture_paths.OsPath]{1: lib_root, 2: lib_root}, imports: [PackageIdentityImportEdge]{PackageIdentityImportEdge{from: 0, to: 1}}}
+}
+fn package_identity_test_bundle(fixture: PackageIdentityTestFixture) -> PackageIdentityBundle from fixture {
+    PackageIdentityBundle{project_root: fixture.root, dependency_roots: fixture.dependencies[0..<fixture.dependencies.len()], modules: fixture.modules[0..<fixture.modules.len()], interfaces: fixture.interfaces[0..<fixture.interfaces.len()], ledger: PackageIdentityLedger{namespaces: fixture.namespaces, imports: fixture.imports[0..<fixture.imports.len()]}}
+}
+#Test("package_graph_partitions_by_namespace_and_orders_dependencies_first") {
+    fixture :: package_identity_test_fixture("/work/a/project", "pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n\nfn helper() -> Int {\n    1\n}\n")
+    package_identity_test_partition<PackageIdentityOsPaths>(package_identity_test_bundle(fixture), PackageIdentityOsPaths.Components)
+}
+#Test("digests_are_equal_across_checkout_paths_and_edits_cut_off_correctly") {
+    source :: "pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n\nfn helper() -> Int {\n    1\n}\n"
+    original :: package_identity_test_fixture("/work/a/project", source)
+    checkout :: package_identity_test_fixture("/elsewhere/b/project", source)
+    comment :: package_identity_test_fixture("/work/a/project", source.replace("fn helper", "// the helper\nfn helper"))
+    private_body :: package_identity_test_fixture("/work/a/project", "{source.replace("    1\n", "    2\n")}\nfn other() -> Int {\n    3\n}\n")
+    signature :: package_identity_test_fixture("/work/a/project", source.replace("b: Int) -> Int", "b: Int) -> Float"))
+    new_public :: package_identity_test_fixture("/work/a/project", "{source}\npub fn more() -> Int {\n    4\n}\n")
+    bundles :: [PackageIdentityBundle]{package_identity_test_bundle(original), package_identity_test_bundle(checkout), package_identity_test_bundle(comment), package_identity_test_bundle(private_body), package_identity_test_bundle(signature), package_identity_test_bundle(new_public)}
+    package_identity_test_cutoffs<PackageIdentityOsPaths>(bundles[0..<bundles.len()], PackageIdentityOsPaths.Components)
+}
+#Test("dependency labels use name order component boundaries and ignore invalid edges") {
+    fixture := package_identity_test_fixture("/work/project", "pub fn add(a: Int, b: Int) -> Int { a + b }")
+    dependency :: package_identity_fixture_paths.from_text("/work/vendor", package_identity_fixture_paths.PathPlatform.Unix)
+    fixture.modules[1].path = package_identity_fixture_paths.from_text("/work/vendor/lib/a.jet", package_identity_fixture_paths.PathPlatform.Unix)
+    fixture.modules[2].path = package_identity_fixture_paths.from_text("/work/vendor/lib/b.jet", package_identity_fixture_paths.PathPlatform.Unix)
+    fixture.namespaces[1] = package_identity_fixture_paths.from_text("/work/vendor/lib", package_identity_fixture_paths.PathPlatform.Unix)
+    fixture.namespaces[2] = fixture.namespaces[1]
+    fixture.dependencies = [PackageIdentityDependencyRoot]{PackageIdentityDependencyRoot{name: "z", path: dependency}, PackageIdentityDependencyRoot{name: "a", path: dependency}}
+    &fixture.imports.push(PackageIdentityImportEdge{from: -1, to: 0})
+    &fixture.imports.push(PackageIdentityImportEdge{from: 0, to: 99})
+    &fixture.imports.push(PackageIdentityImportEdge{from: 1, to: 2})
+    bundle :: package_identity_test_bundle(fixture)
+    graph :: compiler_package_graph<PackageIdentityOsPaths>(bundle, PackageIdentityOsPaths.Components)
+    assert_eq(graph.packages[1].identity, "dep:a/lib")
+    assert_eq(graph.packages[1].modules, [Int]{1, 2})
+    assert_eq(graph.packages[1].dependencies, [Int]{0})
+    assert_eq(graph.packages[2].dependencies, [Int]{0, 1})
+    assert_eq(compiler_package_member_label<PackageIdentityOsPaths>(graph, bundle, 2, PackageIdentityOsPaths.Components), "b.jet")
+    assert_eq(package_identity_fixture_paths.strip_prefix(package_identity_fixture_paths.from_text("/pkg2/a.jet", package_identity_fixture_paths.PathPlatform.Unix), package_identity_fixture_paths.from_text("/pkg", package_identity_fixture_paths.PathPlatform.Unix)), None)
+}
+#Test("module interface fingerprints retain visible reexports and package visibility") {
+    defaults :: CanonicalASTParsedDefaults.Parsed
+    private :: package_identity_project_module<CanonicalASTParsedDefaults>(package_identity_test_program("use \"a\" as a\n"), defaults)
+    visible :: package_identity_project_module<CanonicalASTParsedDefaults>(package_identity_test_program("pub use \"a\" as a\n"), defaults)
+    changed :: package_identity_project_module<CanonicalASTParsedDefaults>(package_identity_test_program("pub use \"b\" as a\n"), defaults)
+    package_visible :: package_identity_project_module<CanonicalASTParsedDefaults>(package_identity_test_program("pub(package) use \"a\" as a\n"), defaults)
+    assert_eq(private.reexports.len(), 0)
+    assert_eq(visible.reexports.len(), 1)
+    assert(visible.reexports != changed.reexports)
+    assert_eq(package_visible.reexports.len(), 1)
+    assert(package_identity_test_interface("pub(package) fn f() -> Int { 1 }", false) != None)
+}
+
+// Algorithm witness only: actual synthetic C-loader composition is a native gate.
+#Test("synthetic loaded members remain alongside Core manifest and loose files") {
+    fixture := package_identity_test_fixture("/work/project", "pub fn add(a: Int, b: Int) -> Int { a + b }")
+    source :: "pub fn bridge() -> Int { return 1 }\n"
+    synthetic_label :: "foreign:c.lib#root0#aggregate"
+    &fixture.modules.push(PackageIdentityLoadedModule{path: package_identity_fixture_paths.from_text(synthetic_label, package_identity_fixture_paths.PathPlatform.Unix), source_digest: mir_sha256_hex(source), is_core_source: false})
+    &fixture.interfaces.push(package_identity_project_module<CanonicalASTParsedDefaults>(package_identity_test_program(source), CanonicalASTParsedDefaults.Parsed))
+    &fixture.imports.push(PackageIdentityImportEdge{from: 0, to: 4})
+    &fixture.imports.push(PackageIdentityImportEdge{from: 4, to: 1})
+    bundle :: package_identity_test_bundle(fixture)
+    graph :: compiler_package_graph<PackageIdentityOsPaths>(bundle, PackageIdentityOsPaths.Components)
+    assert_eq(graph.packages.len(), 4)
+    assert_eq(graph.packages[1].identity, "file:{synthetic_label}")
+    assert_eq(graph.packages[1].modules, [Int]{4})
+    assert_eq(graph.packages[1].dependencies, [Int]{0, 3})
+    assert_eq(graph.packages[2].modules, [Int]{0})
+    assert_eq(graph.packages[2].dependencies, [Int]{0, 1, 3})
+    assert_eq(graph.packages[3].kind, CompilerPackageKind.Manifest)
+    assert_eq(compiler_package_member_label<PackageIdentityOsPaths>(graph, bundle, 4, PackageIdentityOsPaths.Components), synthetic_label)
+    assert_eq(compiler_package_components(graph), [[Int]]{[Int]{0}, [Int]{3}, [Int]{1}, [Int]{2}})
+}

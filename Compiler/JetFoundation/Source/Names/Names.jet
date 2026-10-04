@@ -1,0 +1,529 @@
+// Rust Syntax/predicates.rs:333-407 and Names.rs:879-881,897-904.
+// One byte-injective generated path law, shared by semantic lowering/codegen.
+fn foundation_name_ascii_alphanumeric(code: Int) -> Bool Never! {
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
+fn foundation_name_hex_digit(value: Int) -> U8 Never! {
+    U8{if value < 10 -> value + 48 else -> value + 87}
+}
+pub fn foundation_generated_path(name: String) -> String Never! {
+    out := [U8]{95, 95, 106, 101, 116, 95}
+    loop byte in name.bytes() {
+        code :: Int.from_u8(byte)
+        if foundation_name_ascii_alphanumeric(code) {
+            &out.push(byte)
+            next
+        }
+        &out.push(U8{95})
+        if {
+            code == 95 -> &out.push(U8{117})
+            code == 46 -> &out.push(U8{100})
+            code == 58 -> &out.push(U8{99})
+            code == 47 -> &out.push(U8{115})
+            code == 92 -> &out.push(U8{98})
+            code == 45 -> &out.push(U8{104})
+            else -> {
+                &out.push(U8{120})
+                &out.push(foundation_name_hex_digit(code /% 16))
+                &out.push(foundation_name_hex_digit(code % 16))
+            }
+        }
+    }
+    String.from_bytes(out) ?? panic("generated path consists of ASCII bytes")
+}
+fn foundation_name_hex_value(code: Int) -> Int Never! {
+    if {
+        code >= 48 && code <= 57 -> code - 48
+        code >= 97 && code <= 102 -> code - 87
+        code >= 65 && code <= 70 -> code - 55
+        else -> -1
+    }
+}
+pub fn foundation_decode_generated_path_suffix(suffix: String) -> String? Never! {
+    bytes :: suffix.bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if foundation_name_ascii_alphanumeric(code) {
+            &out.push(bytes[index])
+            index += 1
+            next
+        }
+        if code != 95 || index + 1 >= bytes.len() -> return None
+        escape :: Int.from_u8(bytes[index + 1])
+        if {
+            escape == 117 -> &out.push(U8{95})
+            escape == 100 -> &out.push(U8{46})
+            escape == 99 -> &out.push(U8{58})
+            escape == 115 -> &out.push(U8{47})
+            escape == 98 -> &out.push(U8{92})
+            escape == 104 -> &out.push(U8{45})
+            escape == 120 && index + 3 < bytes.len() -> {
+                high :: foundation_name_hex_value(Int.from_u8(bytes[index + 2]))
+                low :: foundation_name_hex_value(Int.from_u8(bytes[index + 3]))
+                if high < 0 || low < 0 -> return None
+                &out.push(U8{high * 16 + low})
+                index += 2
+            }
+            else -> return None
+        }
+        index += 2
+    }
+    decoded :: String.from_bytes(out) ?? return None
+    Val(decoded)
+}
+pub fn foundation_member_name(module_name: String, name: String) -> String Never! {
+    stripped := if module_name.starts_with("__jet_") -> module_name.slice(6, module_name.len()) else -> module_name // #4303
+    decoded := foundation_decode_generated_path_suffix(stripped) ?? stripped // #4303
+    foundation_generated_path("{decoded}.{name}")
+}
+
+// Checked NameLedger projections (Rust Names.rs:351-808). Presentation never
+// changes a declaration's semantic key or its package/path-qualified identity.
+fn name_facts_leaf(name: String) -> String Never! {
+    bytes :: name.bytes()
+    start := bytes.len()
+    loop start > 0 && Int.from_u8(bytes[start - 1]) != 46 { start -= 1 }
+    leaf := name.slice(start, name.len()) // #4303
+    leaf
+}
+
+
+// Rust Names.rs:51-204. MIR owns the value records; this owner supplies the
+// mutable indexed ledger. Tuple keys retain each component, never text encodings.
+// Map copies use the language's copy-on-write storage, so a body snapshot shares
+// a fixed number of lookup spines rather than copying every declaration.
+// #4494 parity gate: current [K:V] uses an Arc<BTreeMap>, not Rust's HashMap.
+// Constant-count COW snapshots are preserved, but exact expected-O(1) table
+// operations require the canonical native hash-map substrate before retirement.
+struct NameTables {
+    imports: [(module_index: Int, start: Int, end: Int):Int]
+    modules: [Int:MIRNameModule]
+    declarations: [(module_index: Int, name: String):MIRNameDeclaration]
+    declaration_names: [String:[(module_index: Int, name: String)]]
+    display_paths: [(module_index: Int, name: String):String]
+    aliases: [(module_index: Int, name: String):MIRNameAlias]
+    alias_names: [String:[(module_index: Int, name: String)]]
+    loader_alias_uses: [(module_index: Int, start: Int, end: Int):Bool]
+    namespaces: [Int:String]
+}
+pub struct NameLedger {
+    tables: NameTables
+    alias_uses: Set<(module_index: Int, start: Int, end: Int)>
+    references: [(source: String, start: Int, end: Int):MIRNameReference]
+    structure_facts: [MIRStructureFact]
+}
+fn name_tables_new() -> NameTables Never! {
+    NameTables{imports: [:], modules: [:], declarations: [:], declaration_names: [:], display_paths: [:], aliases: [:], alias_names: [:], loader_alias_uses: [:], namespaces: [:]}
+}
+pub fn name_ledger_new() -> NameLedger Never! {
+    NameLedger{tables: name_tables_new(), alias_uses: Set.new<(module_index: Int, start: Int, end: Int)>(), references: [:], structure_facts: []}
+}
+pub fn name_visibility_from_flags(is_pub: Bool, is_package_pub: Bool) -> MIRNameVisibility Never! {
+    if is_pub && !is_package_pub -> MIRNameVisibility.Public else -> if is_package_pub -> MIRNameVisibility.Package else -> MIRNameVisibility.Private
+}
+pub fn name_visibility_is_exported(visibility: MIRNameVisibility) -> Bool Never! {
+    visibility != MIRNameVisibility.Private
+}
+pub fn structure_fact_kind_name(kind: MIRStructureFactKind) -> String Never! {
+    if kind == {
+        .Liveness -> "liveness"
+        .Lifecycle -> "lifecycle"
+        .ImportEdge -> "import-edge"
+    }
+}
+pub fn structure_fact_new(kind: MIRStructureFactKind, subject: String, source: String, span: Span, status: String, detail: String, gate: String?) -> MIRStructureFact Never! {
+    MIRStructureFact{kind: kind, subject: subject, source: source, span: span, status: status, detail: detail, gate: gate}
+}
+pub fn name_ledger_with_imports(imports: [(module_index: Int, start: Int, end: Int):Int]) -> NameLedger Never! {
+    ledger := name_ledger_new()
+    ledger.tables.imports = imports
+    ledger
+}
+pub fn name_ledger_import_target(ledger: NameLedger, module_index: Int, span: Span) -> Int? Never! {
+    ledger.tables.imports.get((module_index: module_index, start: span.start, end: span.end))
+}
+pub fn name_ledger_record_import_target(ledger: &NameLedger, module_index: Int, span: Span, target: Int) Never! {
+    ledger.tables.imports[(module_index: module_index, start: span.start, end: span.end)] = target
+}
+pub fn name_ledger_set_module(ledger: &NameLedger, module_index: Int, alias: String, path: String, package: String) Never! {
+    ledger.tables.modules[module_index] = MIRNameModule{alias: alias, path: path, package: package}
+}
+pub fn name_ledger_module(ledger: NameLedger, module_index: Int) -> MIRNameModule? Never! {
+    ledger.tables.modules.get(module_index)
+}
+pub fn name_ledger_set_module_namespace(ledger: &NameLedger, module_index: Int, root: String) Never! {
+    ledger.tables.namespaces[module_index] = root
+}
+pub fn name_ledger_module_namespace(ledger: NameLedger, module_index: Int) -> String? Never! {
+    ledger.tables.namespaces.get(module_index)
+}
+pub fn name_ledger_same_namespace(ledger: NameLedger, from_module: Int, target_module: Int) -> Bool Never! {
+    if from_module == target_module -> return true
+    root :: name_ledger_module_namespace(ledger, from_module) ?? return false
+    name_ledger_module_namespace(ledger, target_module) == Val(root)
+}
+pub fn name_ledger_namespace_siblings(ledger: NameLedger, module_index: Int) -> [Int] Never! {
+    root :: name_ledger_module_namespace(ledger, module_index) ?? return []
+    siblings := [Int]{}
+    loop (other, other_root) in ledger.tables.namespaces {
+        if other != module_index && other_root == root -> &siblings.push(other)
+    }
+    &siblings.sort_by((left: Int, right: Int) -> left <=> right)
+    siblings
+}
+pub fn name_ledger_import_edges(ledger: NameLedger) -> [(from_module: Int, target_module: Int)] Never! {
+    edges := [(from_module: Int, target_module: Int)]{}
+    loop (site, target) in ledger.tables.imports -> &edges.push((from_module: site.module_index, target_module: target))
+    &edges.sort_by((left: (from_module: Int, target_module: Int), right: (from_module: Int, target_module: Int)) -> if left.from_module != right.from_module -> left.from_module <=> right.from_module else -> left.target_module <=> right.target_module)
+    unique := [(from_module: Int, target_module: Int)]{}
+    loop edge in edges {
+        if unique.len() == 0 || unique[unique.len() - 1] != edge -> &unique.push(edge)
+    }
+    unique
+}
+pub fn name_ledger_module_path(ledger: NameLedger, module_index: Int) -> String? Never! {
+    row :: name_ledger_module(ledger, module_index) ?? return None
+    Val(row.path)
+}
+pub fn name_ledger_module_alias(ledger: NameLedger, module_index: Int) -> String? Never! {
+    row :: name_ledger_module(ledger, module_index) ?? return None
+    Val(row.alias)
+}
+pub fn name_ledger_module_identity(ledger: NameLedger, module_index: Int) -> String? Never! {
+    row :: name_ledger_module(ledger, module_index) ?? return None
+    Val("{row.package}::{row.path}")
+}
+pub fn name_ledger_declare(ledger: &NameLedger, module_index: Int, name: String, path: String, kind: String, span: Span, visibility: MIRNameVisibility) Never! {
+    key :: (module_index: module_index, name: name)
+    fresh :: ledger.tables.declarations.get(key) == None
+    ledger.tables.declarations[key] = MIRNameDeclaration{module_index: module_index, name: name, path: path, kind: kind, span: span, visibility: visibility}
+    if fresh {
+        leaf :: name_facts_leaf(name)
+        if ledger.tables.declaration_names.get(leaf) == None -> ledger.tables.declaration_names[leaf] = []
+        &ledger.tables.declaration_names[leaf].push(key)
+    }
+}
+pub fn name_ledger_declaration(ledger: NameLedger, module_index: Int, name: String) -> MIRNameDeclaration? Never! {
+    ledger.tables.declarations.get((module_index: module_index, name: name))
+}
+pub fn name_ledger_declarations(ledger: NameLedger) -> Iter<MIRNameDeclaration> Never! {
+    ledger.tables.declarations.values()
+}
+pub fn name_ledger_declaration_path(ledger: NameLedger, module_index: Int, name: String) -> String? Never! {
+    row :: name_ledger_declaration(ledger, module_index, name) ?? return None
+    Val(row.path)
+}
+fn name_ledger_display_declaration_path(ledger: NameLedger, module_index: Int, name: String) -> String? Never! {
+    row :: name_ledger_declaration(ledger, module_index, name) ?? return None
+    Val(ledger.tables.display_paths.get((module_index: module_index, name: row.path)) ?? row.path)
+}
+pub fn name_ledger_record_display_path(ledger: &NameLedger, module_index: Int, internal_path: String, display_path: String) Never! {
+    ledger.tables.display_paths[(module_index: module_index, name: internal_path)] = display_path
+}
+fn name_ledger_declaration_at(ledger: NameLedger, module_index: Int, start: Int, end: Int, key: String?) -> MIRNameDeclaration? Never! {
+    if key == .Val(name) {
+        if name_ledger_declaration(ledger, module_index, name) == .Val(row) {
+            if row.span.start == start && row.span.end == end -> return Val(row)
+        }
+    }
+    only := MIRNameDeclaration?{None}
+    loop (_, row) in ledger.tables.declarations {
+        if row.module_index != module_index || row.span.start != start || row.span.end != end -> next
+        if only != None -> return None
+        only = Val(row)
+    }
+    only
+}
+pub fn name_ledger_nominal_identity(ledger: NameLedger, module_index: Int, name: String) -> String? Never! {
+    identity :: name_ledger_module_identity(ledger, module_index) ?? return None
+    Val("{identity}::{name}")
+}
+pub fn name_ledger_nominal_module(ledger: NameLedger, identity: String) -> Int? Never! {
+    bytes :: identity.bytes()
+    end := bytes.len() - 2
+    loop end >= 0 {
+        if bytes[end] == U8{58} && bytes[end + 1] == U8{58} -> break
+        end -= 1
+    }
+    if end < 0 -> return None
+    namespace := identity.slice(0, end) // #4303
+    loop (module_index, row) in ledger.tables.modules {
+        if "{row.package}::{row.path}" == namespace -> return Val(module_index)
+    }
+    None
+}
+pub fn name_ledger_canonical_path_at(ledger: NameLedger, module_index: Int, start: Int, end: Int) -> String? Never! {
+    row :: name_ledger_declaration_at(ledger, module_index, start, end, None) ?? return None
+    Val(row.path)
+}
+pub fn name_ledger_canonical_path(ledger: NameLedger, module_index: Int, name: String) -> String? Never! {
+    if name_ledger_declaration_path(ledger, module_index, name) == .Val(path) -> return Val(path)
+    alias :: name_ledger_effective_alias(ledger, module_index, name) ?? return None
+    if alias.target_module == .Val(target) {
+        if name_ledger_declaration_path(ledger, target, name_facts_leaf(alias.target)) == .Val(path) -> return Val(path)
+    }
+    if alias.target.contains(".") -> Val(alias.target) else -> None
+}
+pub fn name_ledger_record_alias(ledger: &NameLedger, module_index: Int, name: String, target: String, target_module: Int?, span: Span, visibility: MIRNameVisibility) Never! {
+    key :: (module_index: module_index, name: name)
+    fresh :: ledger.tables.aliases.get(key) == None
+    ledger.tables.aliases[key] = MIRNameAlias{module_index: module_index, name: name, target: target, target_module: target_module, span: span, visibility: visibility}
+    if fresh {
+        leaf :: name_facts_leaf(name)
+        if ledger.tables.alias_names.get(leaf) == None -> ledger.tables.alias_names[leaf] = []
+        &ledger.tables.alias_names[leaf].push(key)
+    }
+}
+pub fn name_ledger_record_alias_use(ledger: &NameLedger, module_index: Int, span: Span) Never! {
+    _ :: &ledger.alias_uses.add((module_index: module_index, start: span.start, end: span.end))
+}
+pub fn name_ledger_record_loader_alias_use(ledger: &NameLedger, module_index: Int, span: Span) Never! {
+    ledger.tables.loader_alias_uses[(module_index: module_index, start: span.start, end: span.end)] = true
+    name_ledger_record_alias_use(&ledger, module_index, span)
+}
+pub fn name_ledger_alias_used(ledger: NameLedger, module_index: Int, alias: MIRNameAlias) -> Bool Never! {
+    ledger.alias_uses.contains((module_index: module_index, start: alias.span.start, end: alias.span.end))
+}
+pub fn name_ledger_alias_uses(ledger: NameLedger) -> Set<(module_index: Int, start: Int, end: Int)> Never! {
+    ledger.alias_uses
+}
+pub fn name_ledger_loader_alias_use(ledger: NameLedger, module_index: Int, span: Span) -> Bool Never! {
+    ledger.tables.loader_alias_uses.get((module_index: module_index, start: span.start, end: span.end)) != None
+}
+pub fn name_ledger_alias_identity(ledger: NameLedger, module_index: Int, span: Span) -> String? Never! {
+    loop (_, alias) in ledger.tables.aliases {
+        if alias.module_index == module_index && alias.span == span {
+            path :: name_ledger_module_path(ledger, module_index) ?? ""
+            return Val("import:{path}::{span.start}..{span.end}")
+        }
+    }
+    None
+}
+pub fn name_ledger_alias(ledger: NameLedger, module_index: Int, name: String) -> MIRNameAlias? Never! {
+    ledger.tables.aliases.get((module_index: module_index, name: name))
+}
+pub fn name_ledger_aliases(ledger: NameLedger) -> Iter<MIRNameAlias> Never! {
+    ledger.tables.aliases.values()
+}
+pub fn name_ledger_effective_alias(ledger: NameLedger, module_index: Int, name: String) -> MIRNameAlias? Never! {
+    name_ledger_alias(ledger, module_index, name)
+}
+fn name_ledger_visibility(ledger: NameLedger, module_index: Int, name: String) -> MIRNameVisibility? Never! {
+    if name_ledger_declaration(ledger, module_index, name) == .Val(row) -> return Val(row.visibility)
+    if name_ledger_effective_alias(ledger, module_index, name) == .Val(row) -> return Val(row.visibility)
+    None
+}
+pub fn name_ledger_visible(ledger: NameLedger, from_module: Int, target_module: Int, name: String) -> Bool Never! {
+    visibility := name_ledger_visibility(ledger, target_module, name)
+    if visibility == None {
+        loop sibling in name_ledger_namespace_siblings(ledger, target_module) {
+            if name_ledger_declaration(ledger, sibling, name) == .Val(row) {
+                visibility = Val(row.visibility)
+                break
+            }
+        }
+    }
+    mode :: visibility ?? return false
+    if mode == MIRNameVisibility.Public -> return true
+    if name_ledger_same_namespace(ledger, from_module, target_module) -> return true
+    if mode != MIRNameVisibility.Package -> return false
+    from :: name_ledger_module(ledger, from_module) ?? return false
+    target :: name_ledger_module(ledger, target_module) ?? return false
+    from.package == target.package
+}
+pub fn name_ledger_exported(ledger: NameLedger, module_index: Int, name: String) -> Bool Never! {
+    name_visibility_is_exported(name_ledger_visibility(ledger, module_index, name) ?? return false)
+}
+pub fn name_ledger_public(ledger: NameLedger, module_index: Int, name: String) -> Bool Never! {
+    (name_ledger_visibility(ledger, module_index, name) ?? return false) == MIRNameVisibility.Public
+}
+pub fn name_ledger_record_reference(ledger: &NameLedger, source: String, start: Int, end: Int, reference: MIRNameReference) Never! {
+    ledger.references[(source: source, start: start, end: end)] = reference
+}
+pub fn name_ledger_reference(ledger: NameLedger, source: String, start: Int, end: Int) -> MIRNameReference? Never! {
+    ledger.references.get((source: source, start: start, end: end))
+}
+pub fn name_ledger_references(ledger: NameLedger) -> [(source: String, start: Int, end: Int):MIRNameReference] Never! {
+    ledger.references
+}
+pub fn name_ledger_record_structure_fact(ledger: &NameLedger, fact: MIRStructureFact) Never! {
+    if !ledger.structure_facts.contains(fact) -> &ledger.structure_facts.push(fact)
+}
+pub fn name_ledger_structure_facts(ledger: NameLedger) -> View<MIRStructureFact> Never! {
+    ledger.structure_facts.view(0..<ledger.structure_facts.len())
+}
+pub fn name_ledger_merge_structure_facts(ledger: &NameLedger, other: NameLedger) Never! {
+    loop fact in other.structure_facts -> name_ledger_record_structure_fact(&ledger, fact)
+}
+pub fn name_ledger_merge_references(ledger: &NameLedger, other: NameLedger) Never! {
+    loop site in other.alias_uses -> _ :: &ledger.alias_uses.add(site)
+    loop (site, reference) in other.references -> ledger.references[site] = reference
+}
+pub fn name_ledger_body_snapshot(ledger: NameLedger) -> NameLedger Never! {
+    NameLedger{tables: ~ledger.tables, alias_uses: Set.from(loop (site, _) in ledger.tables.loader_alias_uses -> site), references: [:], structure_facts: []}
+}
+pub fn name_ledger_clear_sema_facts(ledger: &NameLedger) Never! {
+    ledger.tables.modules = [:]
+    ledger.tables.declarations = [:]
+    ledger.tables.declaration_names = [:]
+    ledger.tables.display_paths = [:]
+    ledger.tables.aliases = [:]
+    ledger.tables.alias_names = [:]
+    ledger.alias_uses = Set.from(loop (site, _) in ledger.tables.loader_alias_uses -> site)
+    ledger.references = [:]
+    // Stable linear compaction. #4494: native move/swap of retained records is
+    // needed to eliminate copies until Core exposes an in-place retain loan.
+    write_index := 0
+    loop read_index in 0..<ledger.structure_facts.len() {
+        if ledger.structure_facts[read_index].kind != MIRStructureFactKind.ImportEdge -> next
+        if write_index != read_index -> ledger.structure_facts[write_index] = ledger.structure_facts[read_index]
+        write_index += 1
+    }
+    loop ledger.structure_facts.len() > write_index -> (&ledger.structure_facts.pop()).drop("discard sema-owned structure observations")
+}
+
+// Rust Names.rs:481-550. Leaf indices bound the search to matching names.
+pub fn name_ledger_display_path(ledger: NameLedger, from_module: Int, name: String, resolved_module: Int?) -> String? Never! {
+    leaf :: name_facts_leaf(name)
+    least := String?{None}
+    ambiguous := false
+    projected := false
+    loop key in ledger.tables.declaration_names.get(leaf) ?? [] {
+        if !name_ledger_visible(ledger, from_module, key.module_index, leaf) -> next
+        path :: name_ledger_display_declaration_path(ledger, key.module_index, key.name) ?? next
+        if least == .Val(previous) {
+            if path != previous -> ambiguous = true
+            if path < previous -> least = Val(path)
+        } else { least = Val(path) }
+        declaration :: name_ledger_declaration(ledger, key.module_index, key.name) ?? next
+        if ledger.tables.display_paths.get((module_index: key.module_index, name: declaration.path)) != None -> projected = true
+    }
+    loop key in ledger.tables.alias_names.get(leaf) ?? [] {
+        alias :: name_ledger_alias(ledger, key.module_index, key.name) ?? next
+        if !name_ledger_visible(ledger, from_module, key.module_index, leaf) -> next
+        path := String?{None}
+        if alias.target_module == .Val(target) -> path = name_ledger_display_declaration_path(ledger, target, name_facts_leaf(alias.target))
+        if path == None && alias.target.contains(".") -> path = Val(alias.target)
+        candidate :: path ?? next
+        if least == .Val(previous) {
+            if previous != candidate -> ambiguous = true
+            if candidate < previous -> least = Val(candidate)
+        } else { least = Val(candidate) }
+    }
+    resolved := String?{None}
+    if resolved_module == .Val(target) -> resolved = name_ledger_display_declaration_path(ledger, target, leaf)
+    if resolved == None -> resolved = name_ledger_display_declaration_path(ledger, from_module, leaf)
+    if resolved == None -> resolved = name_ledger_canonical_path(ledger, from_module, name)
+    path :: resolved ?? (least ?? return None)
+    if !ambiguous && !name.contains(".") && !name.starts_with("__jet_") && !projected -> return Val(leaf)
+    Val(path)
+}
+pub fn name_ledger_display_path_at(ledger: NameLedger, from_module: Int, start: Int, end: Int, name: String, owner: String?, resolved_module: Int?) -> String? Never! {
+    key := name
+    if owner == .Val(value) -> key = "{value}.{name}"
+    declaration :: name_ledger_declaration_at(ledger, from_module, start, end, Val(key))
+    canonical := String?{None}
+    if declaration == .Val(row) -> canonical = Val(name_ledger_display_declaration_path(ledger, from_module, row.name) ?? row.path)
+    if owner == .Val(value) {
+        if name_ledger_display_path(ledger, from_module, value, resolved_module) == .Val(path) -> return Val("{path}.{name}")
+        return canonical
+    }
+    if declaration == .Val(row) {
+        if row.name.starts_with("__jet_") -> return canonical
+    }
+    projected :: name_ledger_display_path(ledger, from_module, name, resolved_module)
+    if projected == .Val(path) -> return Val(path)
+    canonical
+}
+pub fn name_ledger_canonical_paths(ledger: NameLedger, module_index: Int) -> [MIRNameCanonicalPath] Never! {
+    paths := [MIRNameCanonicalPath]{}
+    loop (_, declaration) in ledger.tables.declarations {
+        if declaration.module_index != module_index -> next
+        name_facts_add_canonical(&paths, declaration.name, declaration.path)
+        if declaration.kind == "type" {
+            if name_ledger_nominal_identity(ledger, module_index, declaration.name) == .Val(identity) -> name_facts_add_canonical(&paths, identity, declaration.path)
+        }
+        if declaration.path != declaration.name -> name_facts_add_canonical(&paths, declaration.path, declaration.path)
+    }
+    loop (_, alias) in ledger.tables.aliases {
+        if alias.module_index != module_index -> next
+        if name_ledger_canonical_path(ledger, module_index, alias.name) == .Val(path) -> name_facts_add_canonical(&paths, alias.name, path)
+        target :: alias.target_module ?? next
+        if alias.target.contains(".") -> next
+        target_alias :: name_ledger_module_alias(ledger, target) ?? next
+        prefix :: "{target_alias}."
+        loop (_, declaration) in ledger.tables.declarations {
+            if declaration.module_index != target || !declaration.path.starts_with(prefix) -> next
+            suffix := declaration.path.slice(prefix.len(), declaration.path.len()) // #4303
+            name_facts_add_canonical(&paths, "{alias.name}.{suffix}", declaration.path)
+        }
+    }
+    &paths.sort_by((left: MIRNameCanonicalPath, right: MIRNameCanonicalPath) -> if left.name != right.name -> left.name <=> right.name else -> left.path <=> right.path)
+    unique := [MIRNameCanonicalPath]{}
+    loop row in paths {
+        if unique.len() == 0 || unique[unique.len() - 1] != row -> &unique.push(row)
+    }
+    unique
+}
+pub fn name_ledger_semantic_identity(ledger: NameLedger, module_index: Int, name: String) -> String? Never! {
+    name_ledger_nominal_identity(ledger, module_index, name)
+}
+
+
+// Rust artifact_plan.rs::lower_names: native projection excludes source keys
+// and presentation tables, retaining every resolved origin in canonical order.
+pub fn name_ledger_mir_facts(ledger: NameLedger) -> MIRNameFacts Never! {
+    modules := [MIRNameModule]{}
+    loop (_, row) in ledger.tables.modules -> &modules.push(row)
+    declarations := loop (_, row) in ledger.tables.declarations -> row
+    aliases := loop (_, row) in ledger.tables.aliases -> row
+    references := loop (_, row) in ledger.references -> row
+    structure_facts := ~ledger.structure_facts
+    &declarations.sort_by((left: MIRNameDeclaration, right: MIRNameDeclaration) -> if left.module_index != right.module_index -> left.module_index <=> right.module_index else -> if left.name != right.name -> left.name <=> right.name else -> left.path <=> right.path)
+    &aliases.sort_by((left: MIRNameAlias, right: MIRNameAlias) -> if left.module_index != right.module_index -> left.module_index <=> right.module_index else -> if left.name != right.name -> left.name <=> right.name else -> left.target <=> right.target)
+    &references.sort_by((left: MIRNameReference, right: MIRNameReference) -> if left.module_path != right.module_path -> left.module_path <=> right.module_path else -> if left.kind != right.kind -> left.kind <=> right.kind else -> if left.def_span.start != right.def_span.start -> left.def_span.start <=> right.def_span.start else -> left.def_span.end <=> right.def_span.end)
+    &structure_facts.sort_by((left: MIRStructureFact, right: MIRStructureFact) -> if left.subject != right.subject -> left.subject <=> right.subject else -> if left.source != right.source -> left.source <=> right.source else -> if left.span.start != right.span.start -> left.span.start <=> right.span.start else -> left.span.end <=> right.span.end)
+    MIRNameFacts{modules: modules, declarations: declarations, aliases: aliases, references: references, structure_facts: structure_facts}
+}
+// Rust Names.rs:870-894. Foundation owns the projection; the emitter's private
+// jet_rust_emit_mangle has this same mangle law (Main owns its caller cutover).
+pub fn foundation_mangle(name: String) -> String Never! {
+    plain := name // #4303
+    if name.starts_with("$") {
+        suffix := name.slice(1, name.len()) // #4303
+        plain = "ct_{suffix}"
+    }
+    if plain.starts_with("__jet_") -> plain else -> "__jet_{plain}"
+}
+pub fn foundation_mangle_generated(name: String) -> String Never! {
+    stem := name // #4303
+    if stem.starts_with("__jet_") -> stem = stem.slice(6, stem.len())
+    if stem.starts_with("__") -> stem = stem.slice(2, stem.len())
+    foundation_mangle("__{stem}")
+}
+
+// Rust Names.rs:15-45. Core's opaque platform component owner is integrated
+// from port-runtime by Main; textual Path.collapse has different parent laws.
+use core.files.runtime.kernel_path_components as names_os_path
+use core.files.runtime.kernel_path_components.[OSPath]
+pub fn names_normalize_path(path: OSPath) -> OSPath Never! {
+    names_os_path.normalize_identity(path)
+}
+pub fn names_package_scope_for(path: OSPath, project_root: OSPath) -> String Never! {
+    normalized :: names_normalize_path(path)
+    root :: names_normalize_path(project_root)
+    if names_os_path.strip_prefix_span(normalized, root) == .Val(relative) {
+        cursor := names_os_path.components_span(normalized, relative)
+        if names_os_path.next_back(normalized, &cursor) == .Val(last) {
+            if last.kind != names_os_path.ComponentKind.Prefix && last.kind != names_os_path.ComponentKind.RootDir {
+                parent :: names_os_path.remaining_span(normalized, cursor)
+                if parent.end > parent.start -> return names_os_path.display_span(normalized, parent)
+            }
+        }
+        return "."
+    }
+    if names_os_path.parent_span(normalized) == .Val(extent) -> return names_os_path.display(names_normalize_path(names_os_path.owned_span(normalized, extent)))
+    names_os_path.display(normalized)
+}

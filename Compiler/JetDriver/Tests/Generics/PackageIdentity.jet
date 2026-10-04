@@ -1,0 +1,49 @@
+// Original GenericModules/InstanceCollisionTests package and lock identities.
+use jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, jet_driver_generic_module_package_identity]
+use jet_sema.[sema_genmod_definition_full_key, sema_genmod_application_bytes]
+use jet_foundation.[record_blob_key]
+use core.files.runtime.kernel_path_components as genmod_identity_path
+
+fn genmod_identity_file(root: String, relative: String, source: String) -> JetDriverAuthorizedSourceFile Never! {
+    JetDriverAuthorizedSourceFile{path: genmod_identity_path.from_text("{root}/{relative}", genmod_identity_path.PathPlatform.Unix), relative_path: genmod_identity_path.from_text(relative, genmod_identity_path.PathPlatform.Unix), identity: "identity:{relative}", source: source}
+}
+fn genmod_identity_sources(project: String, dependency: String, manifest_name: String, manifest: String, lock: String) -> JetDriverAuthorizedSourceSnapshot Never! {
+    JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: genmod_identity_path.from_text(project, genmod_identity_path.PathPlatform.Unix), identity: "identity-project", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{genmod_identity_file(project, ".jet/lock", lock)}, foreign_cache_files: []}, JetDriverAuthorizedSourceRoot{canonical_path: genmod_identity_path.from_text(dependency, genmod_identity_path.PathPlatform.Unix), identity: "identity-dependency", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{genmod_identity_file(dependency, manifest_name, manifest)}, foreign_cache_files: []}}, entry_root_identity: "identity-project", entry_path: genmod_identity_path.from_text("{project}/main.jet", genmod_identity_path.PathPlatform.Unix)}
+}
+fn genmod_identity_digest(bytes: [U8]) -> String Never! { record_blob_key(bytes.view(0..<bytes.len())) }
+
+#Test("package_identity_uses_canonical_source_not_credentials_paths_or_formatting") {
+    first :: genmod_identity_sources("/checkout-a/project", "/private-a/dependency", "pkg.jet", "payload: { name: \"demo\", version: \"1.2.3\" }", "version=1\n[[package]]\nname=\"demo\"\nversion=\"1.2.3\"\nsource={ git=\"https://alice:secret@example.com/acme/demo.git?token=one\", rev=\"main\" }\nlocked={ rev=\"abc\", tree-hash=\"tree\", last-modified=1 }\n")
+    second := genmod_identity_sources("/checkout-b/project", "/private-b/dependency", "pkg.jet", "payload: {\n  version: \"1.2.3\",\n  name: \"demo\"\n}\n", "version = 1\n\n[[package]]\nsource = { git = \"https://bob:other@example.com/acme/demo.git#credential\", rev = \"main\" }\nname = \"demo\"\nlocked = { tree-hash = \"tree\", rev = \"abc\", last-modified = 99 }\nversion = \"1.2.3\"\n")
+    a :: jet_driver_generic_module_package_identity(first, 1, Val("demo"))
+    b :: jet_driver_generic_module_package_identity(second, 1, Val("demo"))
+    assert_eq(a, b)
+    second.roots[0].files[0].source = "version=1\n[[package]]\nname=\"demo\"\nversion=\"1.2.3\"\nsource={ git=\"https://example.com/acme/demo.git\", rev=\"main\" }\nlocked={ rev=\"different\", tree-hash=\"tree\" }\n"
+    assert(a != jet_driver_generic_module_package_identity(second, 1, Val("demo")))
+}
+#Test("same_template_path_in_different_packages_has_distinct_definition_identity") {
+    first :: genmod_identity_sources("/root", "/root/first", "pkg.jet", "payload: { name: \"first\", version: \"1.0.0\" }", "")
+    second :: genmod_identity_sources("/root", "/root/second", "pkg.jet", "payload: { name: \"second\", version: \"1.0.0\" }", "")
+    a :: sema_genmod_definition_full_key(jet_driver_generic_module_package_identity(first, 1, Val("first")), "src/template.jet", "", "Boxed")
+    b :: sema_genmod_definition_full_key(jet_driver_generic_module_package_identity(second, 1, Val("second")), "src/template.jet", "", "Boxed")
+    assert(a != b)
+    assert(!(String.from_bytes(a) ?? "").contains("/root"))
+}
+#Test("path_lock_content_changes_definition_and_instance_identity_but_host_path_does_not") {
+    source := genmod_identity_sources("/project", "/dependency", "pkg.jet", "payload: { name: \"dep\", version: \"1.2.3\" }", "version=1\n[[package]]\nname=\"dep\"\nversion=\"1.2.3\"\nsource={path=\"/host/a/dep\"}\ncontent-hash=\"tree-a\"\n")
+    a :: jet_driver_generic_module_package_identity(source, 1, Val("dep"))
+    source.roots[0].files[0].source = "version=1\n[[package]]\nname=\"dep\"\nversion=\"1.2.3\"\nsource={path=\"/host/b/dep\"}\ncontent-hash=\"tree-a\"\n"
+    assert_eq(a, jet_driver_generic_module_package_identity(source, 1, Val("dep")))
+    source.roots[0].files[0].source = "version=1\n[[package]]\nname=\"dep\"\nversion=\"1.2.3\"\nsource={path=\"/host/b/dep\"}\ncontent-hash=\"tree-b\"\n"
+    b :: jet_driver_generic_module_package_identity(source, 1, Val("dep"))
+    definition_a :: sema_genmod_definition_full_key(a, "template.jet", "", "Boxed")
+    definition_b :: sema_genmod_definition_full_key(b, "template.jet", "", "Boxed")
+    assert(genmod_identity_digest(definition_a) != genmod_identity_digest(definition_b))
+    assert(genmod_identity_digest(sema_genmod_application_bytes(definition_a, [U8]{U8{1}}, [[U8]]{[U8]{U8{2}}})) != genmod_identity_digest(sema_genmod_application_bytes(definition_b, [U8]{U8{1}}, [[U8]]{[U8]{U8{2}}})))
+}
+#Test("retained canonical manifest wins over pkg and ignores longer field names") {
+    sources := genmod_identity_sources("/project", "/dependency", "pkg.jet", "payload: { name: \"ignored\", version: \"9.9.9\" }", "")
+    &sources.roots[1].files.push(genmod_identity_file("/dependency", "package.jet", "long_name: \"wrong\"\nname: \"right\"\nversion: \"1.2.3\"\n"))
+    canonical :: genmod_identity_sources("/project", "/dependency", "package.jet", "name: \"right\"\nversion: \"1.2.3\"\n", "")
+    assert_eq(jet_driver_generic_module_package_identity(sources, 1, Val("dep")), jet_driver_generic_module_package_identity(canonical, 1, Val("dep")))
+}

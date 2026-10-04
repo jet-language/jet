@@ -1,0 +1,702 @@
+// PORT-PENDING 0587 crates-jet-comptime-src-comptime-jsoninterp-module-group: crates/jet-comptime/src/Comptime/SequenceParity.rs:1-698
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #392 packet A: effect-free List/FixedList/View/ViewMut method parity.
+//RS 
+//RS use std::cmp::Ordering;
+//RS use std::collections::{BTreeMap, HashMap};
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::AST::{BinOp, CtFloat, CtKey, CtReport, CtValue, Type};
+//RS 
+//RS use super::super::super::Builtins::{as_bool, as_int, cmp};
+//RS use super::super::super::Diagnostics::{comptime_panic, unsupported};
+//RS use super::super::super::Interpreter::Interp;
+//RS 
+//RS #[allow(dead_code, unused_imports)]
+//RS mod parallel_policy {
+//RS     include!("../../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/ParallelKernel.rs");
+//RS }
+//RS 
+//RS 
+//RS pub(super) enum SequenceOutcome {
+//RS     Value(CtValue),
+//RS     WriteBack(CtValue),
+//RS }
+//RS 
+//RS pub(super) fn eval_sequence_method(
+//RS     interp: &mut Interp<'_>,
+//RS     recv: &CtValue,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     arg_labels: &[Option<String>],
+//RS     resolved_ret: Option<&Type>,
+//RS     span: Span,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Option<Result<SequenceOutcome, Diagnostic>> {
+//RS     let CtValue::List(xs) = recv else {
+//RS         return None;
+//RS     };
+//RS     if !matches!(
+//RS         method,
+//RS         "all"
+//RS             | "any"
+//RS             | "chunks"
+//RS             | "count_by"
+//RS             | "counts"
+//RS             | "dedup"
+//RS             | "indexed"
+//RS             | "indexes"
+//RS             | "filter_map"
+//RS             | "first"
+//RS             | "flat_map"
+//RS             | "flatten"
+//RS             | "fold"
+//RS             | "group_by"
+//RS             | "index_of"
+//RS             | "insert"
+//RS             | "intersperse"
+//RS             | "last"
+//RS             | "max"
+//RS             | "max_by"
+//RS             | "min"
+//RS             | "min_by"
+//RS             | "para_filter"
+//RS             | "para_fold"
+//RS             | "para_map"
+//RS             | "para_partition"
+//RS             | "partition"
+//RS             | "position"
+//RS             | "product"
+//RS             | "reduce"
+//RS             | "scan"
+//RS             | "skip"
+//RS             | "skip_while"
+//RS             | "step_by"
+//RS             | "sum"
+//RS             | "take"
+//RS             | "take_while"
+//RS             | "try_collect"
+//RS             | "unzip"
+//RS             | "windows"
+//RS             | "zip"
+//RS             | "zip_short"
+//RS             | "zip_pad"
+//RS     ) {
+//RS         return None;
+//RS     }
+//RS     if method == "insert" {
+//RS         return Some((|| {
+//RS             let mut out = xs.to_vec();
+//RS             super::super::super::CollectionEval::list_insert_args(&mut out, args, span)?;
+//RS             Ok(SequenceOutcome::WriteBack(CtValue::List(out)))
+//RS         })());
+//RS     }
+//RS     Some(
+//RS         eval(
+//RS             interp,
+//RS             xs,
+//RS             method,
+//RS             args,
+//RS             arg_labels,
+//RS             resolved_ret,
+//RS             span,
+//RS             scope,
+//RS         )
+//RS         .map(SequenceOutcome::Value),
+//RS     )
+//RS }
+//RS 
+//RS fn eval(
+//RS     interp: &mut Interp<'_>,
+//RS     xs: &[CtValue],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     arg_labels: &[Option<String>],
+//RS     resolved_ret: Option<&Type>,
+//RS     span: Span,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let value = match (method, args) {
+//RS         ("all", [f]) => {
+//RS             for x in xs {
+//RS                 if !as_bool(
+//RS                     &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+//RS                     span,
+//RS                 )? {
+//RS                     return Ok(CtValue::Bool(false));
+//RS                 }
+//RS             }
+//RS             CtValue::Bool(true)
+//RS         }
+//RS         ("any", [f]) => {
+//RS             for x in xs {
+//RS                 if as_bool(
+//RS                     &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+//RS                     span,
+//RS                 )? {
+//RS                     return Ok(CtValue::Bool(true));
+//RS                 }
+//RS             }
+//RS             CtValue::Bool(false)
+//RS         }
+//RS         ("chunks", [n]) => {
+//RS             let n = as_int(n, span)?;
+//RS             if let Some(message) =
+//RS                 crate::Comptime::CollectionEval::sequence_argument_message("chunks", n)
+//RS             {
+//RS                 return Err(comptime_panic(message, span));
+//RS             }
+//RS             let n = n as usize;
+//RS             CtValue::List(
+//RS                 xs.chunks(n)
+//RS                     .map(|chunk| CtValue::List(chunk.to_vec()))
+//RS                     .collect(),
+//RS             )
+//RS         }
+//RS         ("count_by", [f]) => {
+//RS             let mut out = BTreeMap::new();
+//RS             for x in xs {
+//RS                 let key = key(
+//RS                     interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+//RS                     span,
+//RS                 )?;
+//RS                 let count = out.entry(key).or_insert(CtValue::Int(0));
+//RS                 let CtValue::Int(count) = count else {
+//RS                     unreachable!()
+//RS                 };
+//RS                 *count += 1;
+//RS             }
+//RS             CtValue::Map(out)
+//RS         }
+//RS         ("counts", []) => {
+//RS             let mut out = BTreeMap::new();
+//RS             for x in xs {
+//RS                 let key = key(x.clone(), span)?;
+//RS                 let count = out.entry(key).or_insert(CtValue::Int(0));
+//RS                 let CtValue::Int(count) = count else {
+//RS                     unreachable!()
+//RS                 };
+//RS                 *count += 1;
+//RS             }
+//RS             CtValue::Map(out)
+//RS         }
+//RS         ("dedup", []) => {
+//RS             let mut out = Vec::new();
+//RS             for x in xs {
+//RS                 if out.last() != Some(x) {
+//RS                     out.push(x.clone());
+//RS                 }
+//RS             }
+//RS             CtValue::List(out)
+//RS         }
+//RS         ("indexed", []) => CtValue::List(
+//RS             xs.iter()
+//RS                 .enumerate()
+//RS                 .map(|(idx, item)| {
+//RS                     tuple(vec![
+//RS                         ("idx", CtValue::Int(idx as i64)),
+//RS                         ("item", item.clone()),
+//RS                     ])
+//RS                 })
+//RS                 .collect(),
+//RS         ),
+//RS         ("indexes", []) => {
+//RS             CtValue::List((0..xs.len()).map(|idx| CtValue::Int(idx as i64)).collect())
+//RS         }
+//RS         ("filter_map", [f]) => {
+//RS             let mut out = Vec::new();
+//RS             for x in xs {
+//RS                 match interp.call_inline_closure(f, vec![x.clone()], span, scope)? {
+//RS                     CtValue::Present(value) => out.push(*value),
+//RS                     CtValue::Failed(CtReport::Told(_)) => {}
+//RS                     _ => {
+//RS                         return Err(unsupported(
+//RS                             "filter_map callback returning a non-Result",
+//RS                             span,
+//RS                         ))
+//RS                     }
+//RS                 }
+//RS             }
+//RS             CtValue::List(out)
+//RS         }
+//RS         ("first", []) => option(crate::Comptime::CollectionEval::iter_first(xs.to_vec()), xs),
+//RS         ("flat_map", [f]) => {
+//RS             let mut out = Vec::new();
+//RS             for x in xs {
+//RS                 let CtValue::List(values) =
+//RS                     interp.call_inline_closure(f, vec![x.clone()], span, scope)?
+//RS                 else {
+//RS                     return Err(unsupported("flat_map callback returning a non-list", span));
+//RS                 };
+//RS                 out.extend(values);
+//RS             }
+//RS             CtValue::List(out)
+//RS         }
+//RS         ("flatten", []) => {
+//RS             let mut out = Vec::new();
+//RS             for x in xs {
+//RS                 let CtValue::List(values) = x else {
+//RS                     return Err(unsupported("flatten on a non-nested list", span));
+//RS                 };
+//RS                 out.extend(values.iter().cloned());
+//RS             }
+//RS             CtValue::List(out)
+//RS         }
+//RS         ("para_fold", [seed, step, merge]) => {
+//RS             if xs.is_empty() {
+//RS                 interp.call_closure(seed, vec![], span)?
+//RS             } else {
+//RS                 let indexed = parallel_policy::jet_list_para_chunks_serial_kernel(
+//RS                     xs.len(),
+//RS                     |range| {
+//RS                         let mut acc = interp.call_closure(seed, vec![], span)?;
+//RS                         for x in &xs[range] {
+//RS                             acc = interp.call_closure(step, vec![acc, x.clone()], span)?;
+//RS                         }
+//RS                         Ok(acc)
+//RS                     },
+//RS                 );
+//RS                 let partials = indexed
+//RS                     .into_iter()
+//RS                     .map(|(_, result)| result)
+//RS                     .collect::<Result<Vec<_>, Diagnostic>>()?;
+//RS                 parallel_policy::jet_list_para_merge_tree(partials, |left, right| {
+//RS                     interp.call_closure(merge, vec![left, right], span)
+//RS                 })?
+//RS             }
+//RS         }
+//RS         ("group_by", [f]) => {
+//RS             let mut out = BTreeMap::new();
+//RS             for x in xs {
+//RS                 let key = key(
+//RS                     interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+//RS                     span,
+//RS                 )?;
+//RS                 match out.entry(key).or_insert_with(|| CtValue::List(Vec::new())) {
+//RS                     CtValue::List(group) => group.push(x.clone()),
+//RS                     _ => unreachable!(),
+//RS                 }
+//RS             }
+//RS             CtValue::Map(out)
+//RS         }
+//RS         ("index_of", [needle]) => option(
+//RS             xs.iter()
+//RS                 .position(|x| x == needle)
+//RS                 .map(|index| CtValue::Int(index as i64)),
+//RS             &[],
+//RS         ),
+//RS         ("intersperse", [separator]) => {
+//RS             let mut out = Vec::with_capacity(xs.len().saturating_mul(2).saturating_sub(1));
+//RS             for (index, x) in xs.iter().enumerate() {
+//RS                 if index != 0 {
+//RS                     out.push(separator.clone());
+//RS                 }
+//RS                 out.push(x.clone());
+//RS             }
+//RS             CtValue::List(out)
+//RS         }
+//RS         ("last", []) => option(xs.last().cloned(), xs),
+//RS         ("min", []) => option(extreme(xs, false, span)?, xs),
+//RS         ("max", []) => option(extreme(xs, true, span)?, xs),
+//RS         ("min_by", [f]) => option(extreme_by(interp, xs, f, false, span, scope)?, xs),
+//RS         ("max_by", [f]) => option(extreme_by(interp, xs, f, true, span, scope)?, xs),
+//RS         ("para_filter", [f]) => {
+//RS             let mut out = Vec::new();
+//RS             for x in xs {
+//RS                 if as_bool(&interp.call_closure(f, vec![x.clone()], span)?, span)? {
+//RS                     out.push(x.clone());
+//RS                 }
+//RS             }
+//RS             CtValue::List(out)
+//RS         }
+//RS         ("para_map", [f, ..]) => {
+//RS             let mut out = Vec::with_capacity(xs.len());
+//RS             for x in xs {
+//RS                 out.push(interp.call_closure(f, vec![x.clone()], span)?);
+//RS             }
+//RS             CtValue::List(out)
+//RS         }
+//RS         ("partition" | "para_partition", [f]) => {
+//RS             let mut no = Vec::new();
+//RS             let mut yes = Vec::new();
+//RS             for x in xs {
+//RS                 if as_bool(
+//RS                     &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+//RS                     span,
+//RS                 )? {
+//RS                     yes.push(x.clone());
+//RS                 } else {
+//RS                     no.push(x.clone());
+//RS                 }
+//RS             }
+//RS             tuple(vec![
+//RS                 ("false_", CtValue::List(no)),
+//RS                 ("true_", CtValue::List(yes)),
+//RS             ])
+//RS         }
+//RS         ("position", [f]) => {
+//RS             let mut found = None;
+//RS             for (index, x) in xs.iter().enumerate() {
+//RS                 if as_bool(
+//RS                     &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+//RS                     span,
+//RS                 )? {
+//RS                     found = Some(CtValue::Int(index as i64));
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             option(found, &[])
+//RS         }
+//RS         ("sum", []) => aggregate(xs, false, resolved_ret, span)?,
+//RS         ("product", []) => aggregate(xs, true, resolved_ret, span)?,
+//RS         ("scan", [initial, f]) => {
+//RS             let mut acc = initial.clone();
+//RS             let mut out = Vec::with_capacity(xs.len());
+//RS             for x in xs {
+//RS                 acc = interp.call_inline_closure(f, vec![acc, x.clone()], span, scope)?;
+//RS                 out.push(acc.clone());
+//RS             }
+//RS             CtValue::List(out)
+//RS         }
+//RS         ("take", [n]) => {
+//RS             let n = as_int(n, span)?;
+//RS             if let Some(message) =
+//RS                 crate::Comptime::CollectionEval::sequence_argument_message("take", n)
+//RS             {
+//RS                 return Err(comptime_panic(message, span));
+//RS             }
+//RS             let n = n as usize;
+//RS             CtValue::List(xs.iter().take(n).cloned().collect())
+//RS         }
+//RS         ("skip", [n]) => {
+//RS             let n = as_int(n, span)?;
+//RS             if let Some(message) =
+//RS                 crate::Comptime::CollectionEval::sequence_argument_message("skip", n)
+//RS             {
+//RS                 return Err(comptime_panic(message, span));
+//RS             }
+//RS             let n = n as usize;
+//RS             CtValue::List(crate::Comptime::CollectionEval::iter_skip(
+//RS                 xs.to_vec(),
+//RS                 n as i64,
+//RS             ))
+//RS         }
+//RS         ("step_by", [n]) => {
+//RS             let n = as_int(n, span)?;
+//RS             if let Some(message) =
+//RS                 crate::Comptime::CollectionEval::sequence_argument_message("step_by", n)
+//RS             {
+//RS                 return Err(comptime_panic(message, span));
+//RS             }
+//RS             CtValue::List(xs.iter().step_by(n as usize).cloned().collect())
+//RS         }
+//RS         ("take_while", [f]) => {
+//RS             let mut out = Vec::new();
+//RS             for x in xs {
+//RS                 if !as_bool(
+//RS                     &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+//RS                     span,
+//RS                 )? {
+//RS                     break;
+//RS                 }
+//RS                 out.push(x.clone());
+//RS             }
+//RS             CtValue::List(out)
+//RS         }
+//RS         ("skip_while", [f]) => {
+//RS             let mut skipping = true;
+//RS             let mut out = Vec::new();
+//RS             for x in xs {
+//RS                 if skipping {
+//RS                     skipping = as_bool(
+//RS                         &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+//RS                         span,
+//RS                     )?;
+//RS                 }
+//RS                 if !skipping {
+//RS                     out.push(x.clone());
+//RS                 }
+//RS             }
+//RS             CtValue::List(out)
+//RS         }
+//RS         ("try_collect", []) => {
+//RS             let mut out = Vec::with_capacity(xs.len());
+//RS             for x in xs {
+//RS                 match x {
+//RS                     CtValue::Present(value) => out.push((**value).clone()),
+//RS                     CtValue::Failed(CtReport::Told(error)) => {
+//RS                         return Ok(CtValue::failed(error.clone()))
+//RS                     }
+//RS                     _ => return Err(unsupported("try_collect on a non-Result list", span)),
+//RS                 }
+//RS             }
+//RS             CtValue::Present(Box::new(CtValue::List(out)))
+//RS         }
+//RS         ("unzip", []) => {
+//RS             let mut left = Vec::with_capacity(xs.len());
+//RS             let mut right = Vec::with_capacity(xs.len());
+//RS             for x in xs {
+//RS                 let CtValue::Struct { fields, .. } = x else {
+//RS                     return Err(unsupported("unzip on a non-tuple list", span));
+//RS                 };
+//RS                 let a = fields
+//RS                     .iter()
+//RS                     .find(|(name, _)| name == "a")
+//RS                     .map(|(_, v)| v.clone());
+//RS                 let b = fields
+//RS                     .iter()
+//RS                     .find(|(name, _)| name == "b")
+//RS                     .map(|(_, v)| v.clone());
+//RS                 match (a, b) {
+//RS                     (Some(a), Some(b)) => {
+//RS                         left.push(a);
+//RS                         right.push(b);
+//RS                     }
+//RS                     _ => return Err(unsupported("unzip on a tuple without `a` and `b`", span)),
+//RS                 }
+//RS             }
+//RS             tuple(vec![
+//RS                 ("a", CtValue::List(left)),
+//RS                 ("b", CtValue::List(right)),
+//RS             ])
+//RS         }
+//RS         ("windows", [n]) => {
+//RS             let n = as_int(n, span)?;
+//RS             if let Some(message) =
+//RS                 crate::Comptime::CollectionEval::sequence_argument_message("windows", n)
+//RS             {
+//RS                 return Err(comptime_panic(message, span));
+//RS             }
+//RS             let n = n as usize;
+//RS             CtValue::List(if n > xs.len() {
+//RS                 Vec::new()
+//RS             } else {
+//RS                 xs.windows(n)
+//RS                     .map(|window| CtValue::List(window.to_vec()))
+//RS                     .collect()
+//RS             })
+//RS         }
+//RS         ("zip" | "zip_short" | "zip_pad", _) => eval_zip(xs, method, args, arg_labels, span)?,
+//RS         _ => {
+//RS             return Err(unsupported(
+//RS                 &format!("the method `.{method}` with these arguments"),
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     };
+//RS     Ok(value)
+//RS }
+//RS 
+//RS fn eval_zip(
+//RS     first: &[CtValue],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     arg_labels: &[Option<String>],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let mut columns = vec![first.to_vec()];
+//RS     let mut common_fill = None;
+//RS     let mut column_fills = None;
+//RS     for (index, value) in args.iter().enumerate() {
+//RS         match arg_labels.get(index).and_then(Option::as_deref) {
+//RS             Some("fill") => common_fill = Some(value.clone()),
+//RS             Some("fills") => column_fills = Some(value.clone()),
+//RS             _ => match value {
+//RS                 CtValue::List(values) => columns.push(values.clone()),
+//RS                 _ => return Err(unsupported("zip with a non-list argument", span)),
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     let mode = match method {
+//RS         "zip" => 1,
+//RS         "zip_pad" => 2,
+//RS         _ => 0,
+//RS     };
+//RS     let Some(row_count) = crate::Comptime::CollectionEval::zip_row_count(
+//RS         &columns.iter().map(Vec::len).collect::<Vec<_>>(),
+//RS         mode,
+//RS     ) else {
+//RS         return Err(Diagnostic::error(
+//RS             "E0128",
+//RS             "zip inputs have different lengths".to_string(),
+//RS             "strict `zip` requires every input to end on the same row".to_string(),
+//RS             "use `zip_short` or `zip_pad` when lengths may differ".to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     };
+//RS     if columns.len() == 1 {
+//RS         return Ok(CtValue::List(columns.pop().unwrap_or_default()));
+//RS     }
+//RS     let fields = (0..columns.len())
+//RS         .map(|index| zip_field_name(index).to_string())
+//RS         .collect::<Vec<_>>();
+//RS     let fill_for = |index: usize| -> CtValue {
+//RS         if let Some(value) = &common_fill {
+//RS             return value.clone();
+//RS         }
+//RS         if let Some(CtValue::Struct { fields, .. }) = &column_fills {
+//RS             let field = zip_field_name(index);
+//RS             if let Some((_, value)) = fields.iter().find(|(name, _)| {
+//RS                 name == &field
+//RS                     || name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+//RS                         == Some(field.as_str())
+//RS             }) {
+//RS                 return value.clone();
+//RS             }
+//RS         }
+//RS         CtValue::absent(
+//RS             columns[index]
+//RS                 .first()
+//RS                 .map(CtValue::jet_type)
+//RS                 .unwrap_or(Type::Int),
+//RS         )
+//RS     };
+//RS     let rows = (0..row_count)
+//RS         .map(|row| {
+//RS             tuple(
+//RS                 fields
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(index, field)| {
+//RS                         (
+//RS                             field.as_str(),
+//RS                             columns[index]
+//RS                                 .get(row)
+//RS                                 .cloned()
+//RS                                 .unwrap_or_else(|| fill_for(index)),
+//RS                         )
+//RS                     })
+//RS                     .collect(),
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     Ok(CtValue::List(rows))
+//RS }
+//RS 
+//RS fn zip_field_name(index: usize) -> String {
+//RS     match index {
+//RS         0 => "a".to_string(),
+//RS         1 => "b".to_string(),
+//RS         2 => "c".to_string(),
+//RS         3 => "d".to_string(),
+//RS         4 => "e".to_string(),
+//RS         5 => "f".to_string(),
+//RS         n => format!("column_{}", n + 1),
+//RS     }
+//RS }
+//RS 
+//RS fn tuple(fields: Vec<(&str, CtValue)>) -> CtValue {
+//RS     let type_name = format!(
+//RS         "({})",
+//RS         fields
+//RS             .iter()
+//RS             .map(|(name, _)| *name)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",")
+//RS     );
+//RS     CtValue::Struct {
+//RS         type_name,
+//RS         fields: fields
+//RS             .into_iter()
+//RS             .map(|(name, value)| (name.to_string(), value))
+//RS             .collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn key(value: CtValue, span: Span) -> Result<CtKey, Diagnostic> {
+//RS     CtKey::from_value(value).ok_or_else(|| unsupported("this map key type", span))
+//RS }
+//RS 
+//RS fn option(value: Option<CtValue>, xs: &[CtValue]) -> CtValue {
+//RS     value.map_or_else(
+//RS         || CtValue::absent(xs.first().map(CtValue::jet_type).unwrap_or(Type::Int)),
+//RS         |value| CtValue::Present(Box::new(value)),
+//RS     )
+//RS }
+//RS 
+//RS fn extreme(xs: &[CtValue], maximum: bool, span: Span) -> Result<Option<CtValue>, Diagnostic> {
+//RS     let Some(mut best) = xs.first().cloned() else {
+//RS         return Ok(None);
+//RS     };
+//RS     for candidate in &xs[1..] {
+//RS         let order = cmp(best.clone(), candidate.clone(), span)?;
+//RS         if (maximum && order != Ordering::Greater) || (!maximum && order == Ordering::Greater) {
+//RS             best = candidate.clone();
+//RS         }
+//RS     }
+//RS     Ok(Some(best))
+//RS }
+//RS 
+//RS fn extreme_by(
+//RS     interp: &mut Interp<'_>,
+//RS     xs: &[CtValue],
+//RS     f: &CtValue,
+//RS     maximum: bool,
+//RS     span: Span,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<Option<CtValue>, Diagnostic> {
+//RS     let Some(mut best) = xs.first().cloned() else {
+//RS         return Ok(None);
+//RS     };
+//RS     let mut best_key = interp.call_inline_closure(f, vec![best.clone()], span, scope)?;
+//RS     for candidate in &xs[1..] {
+//RS         let candidate_key = interp.call_inline_closure(f, vec![candidate.clone()], span, scope)?;
+//RS         let order = cmp(best_key.clone(), candidate_key.clone(), span)?;
+//RS         if (maximum && order != Ordering::Greater) || (!maximum && order != Ordering::Less) {
+//RS             best = candidate.clone();
+//RS             best_key = candidate_key;
+//RS         }
+//RS     }
+//RS     Ok(Some(best))
+//RS }
+//RS 
+//RS fn aggregate(
+//RS     xs: &[CtValue],
+//RS     product: bool,
+//RS     resolved_ret: Option<&Type>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let Some(first) = xs.first() else {
+//RS         return Ok(match resolved_ret {
+//RS             Some(Type::Float) => CtValue::Float(CtFloat::f64(if product { 1.0 } else { 0.0 })),
+//RS             Some(Type::Float32) => CtValue::Float(CtFloat::f32(if product { 1.0 } else { 0.0 })),
+//RS             _ => CtValue::Int(if product { 1 } else { 0 }),
+//RS         });
+//RS     };
+//RS     match first {
+//RS         CtValue::Int(_) | CtValue::BigInt(_) => {
+//RS             let mut acc = crate::Numeric::CtBigInt::from_int(if product { 1 } else { 0 });
+//RS             for x in xs {
+//RS                 let Some(value) = crate::Comptime::Builtins::exact_big(x) else {
+//RS                     return Err(unsupported("sum/product on mixed numeric types", span));
+//RS                 };
+//RS                 acc = if product {
+//RS                     acc.mul(&value)
+//RS                 } else {
+//RS                     acc.add(&value)
+//RS                 };
+//RS             }
+//RS             Ok(crate::Comptime::Builtins::exact_int_value(acc))
+//RS         }
+//RS         CtValue::Float(first) => {
+//RS             let mut acc = match first {
+//RS                 CtFloat::F32(_) => CtFloat::f32(if product { 1.0 } else { 0.0 }),
+//RS                 CtFloat::F64(_) => CtFloat::f64(if product { 1.0 } else { 0.0 }),
+//RS             };
+//RS             for x in xs {
+//RS                 let CtValue::Float(value) = x else {
+//RS                     return Err(unsupported("sum/product on mixed numeric types", span));
+//RS                 };
+//RS                 acc = acc
+//RS                     .binop(if product { BinOp::Mul } else { BinOp::Add }, *value)
+//RS                     .ok_or_else(|| unsupported("sum/product on mixed float widths", span))?;
+//RS             }
+//RS             Ok(CtValue::Float(acc))
+//RS         }
+//RS         _ => Err(unsupported("sum/product on non-numeric values", span)),
+//RS     }
+//RS }
+// END-PORT-PENDING 0587 crates/jet-comptime/src/Comptime/SequenceParity.rs:1-698
+

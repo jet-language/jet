@@ -1,0 +1,216 @@
+// PORT-PENDING 0406 crates-jet-sema-src-sema-checkerinfer-calls-method-calls-module-group-slice-6582: crates/jet-sema/src/Sema/CheckerInfer/calls/variadic.rs:1-212
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::helpers::e1313;
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Sema::Checker;
+//RS use crate::Sema::Diagnostics::type_fix_hint;
+//RS use crate::AST::{Call, Expr, Type};
+//RS impl<'a> Checker<'a> {
+//RS     /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): check each trait-bounded variadic
+//RS     /// call-site argument against `bounds` (E1313) and infer its type. `tail`
+//RS     /// is the already-split-off trailing slice of `call.args`; the caller
+//RS     /// re-attaches it once the rest of `check_call`'s per-index checking (which
+//RS     /// only understands one shared element type) has run past it.
+//RS     pub(super) fn check_variadic_bound_tail(
+//RS         &mut self,
+//RS         call: &Call,
+//RS         sig: &crate::AST::FuncSig,
+//RS         tail: &mut [crate::AST::CallArg],
+//RS         bounds: &[String],
+//RS     ) {
+//RS         let param_name = sig
+//RS             .param_info
+//RS             .last()
+//RS             .map(|(n, _)| n.clone())
+//RS             .unwrap_or_default();
+//RS         for arg in tail.iter_mut() {
+//RS             if arg.spread {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E1312",
+//RS                     format!("`{}` doesn't accept a spread argument", call.name),
+//RS                     "a trait-bounded variadic (`...Trait` / `...[A, B]`) takes each argument as \
+//RS                          its own type — spread would need one shared list type"
+//RS                         .to_string(),
+//RS                     "pass arguments individually".to_string(),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 self.infer(&mut arg.expr);
+//RS                 continue;
+//RS             }
+//RS             let Some(ty) = self.infer(&mut arg.expr) else {
+//RS                 continue;
+//RS             };
+//RS             // D-LIN1: a rest parameter collects by value (S61 defaults/D-VARIADIC1
+//RS             // give it no other convention today), matching the ordinary
+//RS             // homogeneous variadic's move semantics. Mark moved *after*
+//RS             // inferring (inference itself checks "already moved") — same order
+//RS             // the ordinary per-index arg loop below uses.
+//RS             if !ty.is_scalar() {
+//RS                 if let Expr::Ident(name, span) = &arg.expr {
+//RS                     self.mark_moved_by(name.clone(), *span, call.name.clone());
+//RS                 }
+//RS             }
+//RS             let arg_name = ty.name();
+//RS             for b in bounds {
+//RS                 if !self.trait_reg.implements_trait(&arg_name, b) {
+//RS                     self.diags.push(e1313(
+//RS                         &arg_name,
+//RS                         b,
+//RS                         &param_name,
+//RS                         &call.name,
+//RS                         arg.expr.span(),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-VARIADIC1: pack trailing call arguments (and spreads) into the final list
+//RS     /// parameter so codegen sees a normal fixed-arity call.
+//RS     pub(crate) fn normalize_variadic_call(&mut self, call: &mut Call, sig: &crate::AST::FuncSig) {
+//RS         let fixed = sig.params.len().saturating_sub(1);
+//RS         let Some((variadic_conv, variadic_ty)) = sig.params.last().cloned() else {
+//RS             return;
+//RS         };
+//RS         let elem_ty = match &variadic_ty {
+//RS             Type::List(inner) => (**inner).clone(),
+//RS             _ => return,
+//RS         };
+//RS 
+//RS         if call.args.len() < fixed {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0104",
+//RS                 format!(
+//RS                     "`{}` expects at least {} argument{}, got {}",
+//RS                     call.name,
+//RS                     fixed,
+//RS                     if fixed == 1 { "" } else { "s" },
+//RS                     call.args.len()
+//RS                 ),
+//RS                 "every fixed parameter must receive a value before the variadic tail".to_string(),
+//RS                 format!("check the definition of `{}`", call.name),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             return;
+//RS         }
+//RS 
+//RS         let tail = call.args.split_off(fixed);
+//RS         // D-APILABEL1=A: the packed list stands in for the whole tail, so it
+//RS         // inherits the earliest place the caller wrote any of its elements.
+//RS         // Without this the tail loses its order mark and a reordered call
+//RS         // whose rest arguments have effects runs them last.
+//RS         let packed_source_index = tail.iter().filter_map(|arg| arg.flags.source_index).min();
+//RS         let mut packed_elems: Vec<Expr> = Vec::new();
+//RS         let mut pack_span = call.name_span;
+//RS         for mut arg in tail {
+//RS             if arg.spread {
+//RS                 let spread_span = arg.expr.span();
+//RS                 let got = self.infer(&mut arg.expr);
+//RS                 pack_span = Span::new(pack_span.start, spread_span.end);
+//RS                 match got {
+//RS                     Some(Type::List(inner)) => {
+//RS                         if *inner != elem_ty {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E1311",
+//RS                                 format!(
+//RS                                     "spread list is `[{}]`, but `{}` expects `[{}]`",
+//RS                                     inner.name(),
+//RS                                     call.name,
+//RS                                     elem_ty.name()
+//RS                                 ),
+//RS                                 "call spread expands a list into the callee's variadic tail"
+//RS                                     .to_string(),
+//RS                                 format!(
+//RS                                     "pass a `[{}]` list, or change the element types",
+//RS                                     elem_ty.name()
+//RS                                 ),
+//RS                                 Some(arg.expr.span()),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                     Some(other) => {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                                 "E1311",
+//RS                                 format!("spread needs a list, not `{}`", other.name()),
+//RS                                 "call spread `f(...xs)` expands a list into the remaining parameter slots".to_string(),
+//RS                                 format!("pass a `[{}]` value here", elem_ty.name()),
+//RS                                 Some(arg.expr.span()),
+//RS                             ));
+//RS                     }
+//RS                     None => {}
+//RS                 }
+//RS                 packed_elems.push(Expr::Spread(Box::new(arg.expr), spread_span));
+//RS             } else {
+//RS                 let saved = self.expected_type.replace(elem_ty.clone());
+//RS                 let got = self.infer(&mut arg.expr);
+//RS                 self.expected_type = saved;
+//RS                 if let Some(got) = got {
+//RS                     let got =
+//RS                         self.widen_numeric_argument(&mut arg.expr, got, &elem_ty, variadic_conv);
+//RS                     let got =
+//RS                         self.lift_optional_argument(&mut arg.expr, got, &elem_ty, variadic_conv);
+//RS                     let loan = crate::Sema::Diagnostics::contains_expiring_secret_loan(&got);
+//RS                     if loan {
+//RS                         if let Expr::Ident(name, span) = &arg.expr {
+//RS                             self.mark_moved_by(name.clone(), *span, call.name.clone());
+//RS                         }
+//RS                     } else {
+//RS                         let boxes_as_trait = self.trait_slot_accepts(&elem_ty, &got);
+//RS                         if boxes_as_trait {
+//RS                             self.note_move_if_direct_ident(&arg.expr, &format!("`{}`", call.name));
+//RS                         }
+//RS                         if got == elem_ty || boxes_as_trait {
+//RS                             pack_span = Span::new(pack_span.start, arg.expr.span().end);
+//RS                             packed_elems.push(arg.expr);
+//RS                             continue;
+//RS                         }
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0112",
+//RS                             format!(
+//RS                                 "variadic argument should be {}, not {}",
+//RS                                 elem_ty.show(),
+//RS                                 got.show()
+//RS                             ),
+//RS                             "each trailing argument is collected into the rest parameter's list"
+//RS                                 .to_string(),
+//RS                             type_fix_hint(&elem_ty, &got),
+//RS                             Some(arg.expr.span()),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 pack_span = Span::new(pack_span.start, arg.expr.span().end);
+//RS                 packed_elems.push(arg.expr);
+//RS             }
+//RS         }
+//RS 
+//RS         let packed_expr = if packed_elems.is_empty() {
+//RS             Expr::ListLit(Vec::new(), pack_span)
+//RS         } else if packed_elems.len() == 1 {
+//RS             match packed_elems.pop().unwrap() {
+//RS                 // Spread already expands a list into the rest slot.
+//RS                 Expr::Spread(inner, _span) => *inner,
+//RS                 // One concrete rest arg still packs into a one-element list.
+//RS                 other => Expr::ListLit(vec![other], pack_span),
+//RS             }
+//RS         } else {
+//RS             Expr::ListLit(packed_elems, pack_span)
+//RS         };
+//RS 
+//RS         call.args.push(crate::AST::CallArg {
+//RS             convention: variadic_conv,
+//RS             expr: packed_expr,
+//RS             span: pack_span,
+//RS             flags: crate::AST::CallArgFlags {
+//RS                 source_index: packed_source_index,
+//RS                 ..Default::default()
+//RS             },
+//RS             label: None,
+//RS             spread: false,
+//RS         });
+//RS     }
+//RS }
+// END-PORT-PENDING 0406 crates/jet-sema/src/Sema/CheckerInfer/calls/variadic.rs:1-212
+

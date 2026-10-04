@@ -1,0 +1,1044 @@
+// PORT-PENDING 0602 crates-jet-comptime-src-comptime-synclite: crates/jet-comptime/src/Comptime/SyncLite.rs:1-1040
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-SYNC1=A / D-DBPOLICY1=A / I9: `core.sync` ambient includes Prelude `Sync.rs`.
+//RS 
+//RS use super::Diagnostics::unsupported;
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::AST::{CtKey, CtValue, Type};
+//RS 
+//RS // `Sync.rs` is shared verbatim with the AOT Prelude.  The comptime tier
+//RS // supplies the same small host boundary that the emitted module gets from
+//RS // `CoreLib/JetStd`: canonical DataTree values, FieldError lists, and Codable
+//RS // traits.  The CRDT and policy algorithms themselves remain in the included
+//RS // Prelude source.
+//RS trait JetShow {
+//RS     fn jet_show(&self) -> String;
+//RS }
+//RS 
+//RS trait JetDebug {
+//RS     fn jet_debug(&self) -> String;
+//RS }
+//RS 
+//RS /// D-FAIL-CONV2=A: included error fragments render failure text through this
+//RS /// seam, the same one `crate::JetDisplay` names for the other comptime mirrors.
+//RS trait JetDisplay {
+//RS     fn jet_display(&self) -> String;
+//RS }
+//RS 
+//RS #[allow(non_camel_case_types)]
+//RS trait __jet_Encode {
+//RS     fn jet_encode(&self) -> jet_std::DataTree;
+//RS }
+//RS 
+//RS #[allow(non_camel_case_types)]
+//RS trait __jet_Decode: Sized {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+//RS }
+//RS 
+//RS #[path = "SyncJetStd.rs"]
+//RS mod jet_std;
+//RS // Values.rs is shared with the standalone AOT Prelude. Re-export only the
+//RS // canonical formatter needed by that shared fragment.
+//RS pub(crate) use self::jet_std::jet_int_to_string;
+//RS // The Foundation carrier's tier-side accessors are a trait (`DataTree.rs`);
+//RS // the included `Sync.rs` and the marshalling below call them by method syntax.
+//RS use self::jet_std::JetDataTreeAccess;
+//RS 
+//RS fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
+//RS     fn object_pairs(
+//RS         fields: impl IntoIterator<Item = (String, CtValue)>,
+//RS     ) -> Option<Vec<(String, jet_std::DataTree)>> {
+//RS         fields
+//RS             .into_iter()
+//RS             .map(|(key, value)| Some((key, datatree_from_ct(&value)?)))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     fn map_pairs(
+//RS         fields: &std::collections::BTreeMap<CtKey, CtValue>,
+//RS     ) -> Option<Vec<(String, CtValue)>> {
+//RS         let mut pairs = Vec::with_capacity(fields.len());
+//RS         for (key, value) in fields {
+//RS             let CtKey::Str(key) = key else {
+//RS                 return None;
+//RS             };
+//RS             pairs.push((key.clone(), value.clone()));
+//RS         }
+//RS         Some(pairs)
+//RS     }
+//RS 
+//RS     // Map iteration lowers to a list of named tuple records before the
+//RS     // enclosing DataTree object is built. Normalize that carrier here so the
+//RS     // comptime renderer sees the same ordered object as AOT/JIT.
+//RS     fn list_object_pairs(values: &[CtValue]) -> Option<Vec<(String, CtValue)>> {
+//RS         values
+//RS             .iter()
+//RS             .map(|value| {
+//RS                 let CtValue::Struct { fields, .. } = value else {
+//RS                     return None;
+//RS                 };
+//RS                 if fields.len() != 2 {
+//RS                     return None;
+//RS                 }
+//RS                 let key = fields
+//RS                     .iter()
+//RS                     .find(|(name, _)| name == "key")
+//RS                     .map(|(_, value)| value)?;
+//RS                 let value = fields
+//RS                     .iter()
+//RS                     .find(|(name, _)| name == "value")
+//RS                     .map(|(_, value)| value)?;
+//RS                 let CtValue::Str(key) = key else {
+//RS                     return None;
+//RS                 };
+//RS                 Some((key.clone(), value.clone()))
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     match value {
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if matches!(
+//RS             type_name.as_str(),
+//RS             "DataTree" | "TOML" | "YAML" | "CSV"
+//RS         ) =>
+//RS         {
+//RS             let payload = args.first().map(|(_, value)| value);
+//RS             match variant.as_str() {
+//RS                 "Null" => Some(jet_std::DataTree::Null),
+//RS                 "Bool" => match payload {
+//RS                     Some(CtValue::Bool(value)) => Some(jet_std::DataTree::Bool(*value)),
+//RS                     _ => None,
+//RS                 },
+//RS                 "Int" => match payload {
+//RS                     Some(CtValue::Int(value)) => Some(jet_std::DataTree::Int(*value)),
+//RS                     Some(CtValue::BigInt(value)) => value
+//RS                         .try_i64()
+//RS                         .map(jet_std::DataTree::Int)
+//RS                         .or_else(|| Some(jet_std::DataTree::Number(value.to_string_rep()))),
+//RS                     _ => None,
+//RS                 },
+//RS                 "Float" => match payload {
+//RS                     Some(CtValue::Float(value)) => Some(jet_std::DataTree::Float(value.as_f64())),
+//RS                     _ => None,
+//RS                 },
+//RS                 "Number" => match payload {
+//RS                     Some(CtValue::Str(value)) => Some(jet_std::DataTree::Number(value.clone())),
+//RS                     _ => None,
+//RS                 },
+//RS                 "TypedText" => match payload {
+//RS                     Some(CtValue::Str(value)) => Some(jet_std::DataTree::TypedText(value.clone())),
+//RS                     _ => None,
+//RS                 },
+//RS                 "Text" => match payload {
+//RS                     Some(CtValue::Str(value)) => Some(jet_std::DataTree::Text(value.clone())),
+//RS                     _ => None,
+//RS                 },
+//RS                 "Bytes" => match payload {
+//RS                     Some(CtValue::Bytes(value)) => Some(jet_std::DataTree::Bytes(value.clone())),
+//RS                     _ => None,
+//RS                 },
+//RS                 "Array" => match payload {
+//RS                     Some(CtValue::List(values)) => values
+//RS                         .iter()
+//RS                         .map(datatree_from_ct)
+//RS                         .collect::<Option<Vec<_>>>()
+//RS                         .map(jet_std::DataTree::Array),
+//RS                     _ => None,
+//RS                 },
+//RS                 "Object" => match payload {
+//RS                     Some(CtValue::Map(fields)) => map_pairs(fields)
+//RS                         .and_then(object_pairs)
+//RS                         .map(jet_std::DataTree::Object),
+//RS                     Some(CtValue::List(values)) => list_object_pairs(values)
+//RS                         .and_then(object_pairs)
+//RS                         .map(jet_std::DataTree::Object),
+//RS                     Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => {
+//RS                         object_pairs(fields.clone()).map(jet_std::DataTree::Object)
+//RS                     }
+//RS                     _ => None,
+//RS                 },
+//RS                 _ => None,
+//RS             }
+//RS         }
+//RS         CtValue::Int(value) => Some(jet_std::DataTree::Int(*value)),
+//RS         CtValue::BigInt(value) => value
+//RS             .try_i64()
+//RS             .map(jet_std::DataTree::Int)
+//RS             .or_else(|| Some(jet_std::DataTree::Number(value.to_string_rep()))),
+//RS         CtValue::Float(value) => Some(jet_std::DataTree::Float(value.as_f64())),
+//RS         CtValue::Bool(value) => Some(jet_std::DataTree::Bool(*value)),
+//RS         CtValue::Str(value) => Some(jet_std::DataTree::Text(value.clone())),
+//RS         CtValue::Bytes(value) => Some(jet_std::DataTree::Bytes(value.clone())),
+//RS         CtValue::List(values) => values
+//RS             .iter()
+//RS             .map(datatree_from_ct)
+//RS             .collect::<Option<Vec<_>>>()
+//RS             .map(jet_std::DataTree::Array),
+//RS         CtValue::Map(fields) => map_pairs(fields)
+//RS             .and_then(object_pairs)
+//RS             .map(jet_std::DataTree::Object),
+//RS         CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
+//RS             object_pairs(fields.clone()).map(jet_std::DataTree::Object)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn field_errors_to_ct(errors: Vec<jet_std::FieldError>) -> CtValue {
+//RS     CtValue::List(
+//RS         errors
+//RS             .into_iter()
+//RS             .map(|error| CtValue::Struct {
+//RS                 type_name: "FieldError".to_string(),
+//RS                 fields: vec![
+//RS                     ("path".to_string(), CtValue::Str(error.path)),
+//RS                     ("reason".to_string(), CtValue::Str(error.reason)),
+//RS                 ],
+//RS             })
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// The evaluator marshals values; scalar projection policy stays on DataTree.
+//RS pub fn datatree_to_text(value: &CtValue) -> Option<String> {
+//RS     datatree_from_ct(value).and_then(|tree| tree.to_text())
+//RS }
+//RS 
+//RS /// Recursive comparison uses the same Prelude DataTree policy on every tier.
+//RS pub fn datatree_equal_unordered(left: &CtValue, right: &CtValue) -> bool {
+//RS     match (datatree_from_ct(left), datatree_from_ct(right)) {
+//RS         (Some(left), Some(right)) => left.equal_unordered(&right),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// Route comptime Int decoding through the shared Prelude coercion policy.
+//RS pub(super) fn decode_int_ct(value: &CtValue) -> Result<CtValue, CtValue> {
+//RS     let Some(tree) = datatree_from_ct(value) else {
+//RS         return Err(field_errors_to_ct(jet_std::FieldError::one(
+//RS             "expected Int, found value",
+//RS         )));
+//RS     };
+//RS     jet_std::decode_int_with(
+//RS         &tree,
+//RS         crate::Numeric::CtBigInt::from_int,
+//RS         |text| {
+//RS             crate::Numeric::CtBigInt::from_str(text).map_err(|error| error.to_string())
+//RS         },
+//RS     )
+//RS     .map(super::Builtins::exact_int_value)
+//RS     .map_err(field_errors_to_ct)
+//RS }
+//RS 
+//RS /// Route fixed-width comptime integer decoding through the shared Prelude
+//RS /// coercion and bounds policy.
+//RS pub(super) fn decode_int_n_ct(
+//RS     value: &CtValue,
+//RS     signed: bool,
+//RS     bits: u8,
+//RS     type_name: &str,
+//RS ) -> Result<CtValue, CtValue> {
+//RS     let Some(tree) = datatree_from_ct(value) else {
+//RS         return Err(field_errors_to_ct(jet_std::FieldError::one(
+//RS             "expected Int, found value",
+//RS         )));
+//RS     };
+//RS     jet_std::jet_datatree_decode_fixed_integer(&tree, signed, bits, type_name)
+//RS         .map(|value| {
+//RS             let exact = if let Ok(value) = i64::try_from(value) {
+//RS                 crate::Numeric::CtBigInt::from_int(value)
+//RS             } else if let Ok(value) = u64::try_from(value) {
+//RS                 crate::Numeric::CtBigInt::from_u64(value)
+//RS             } else {
+//RS                 unreachable!("fixed integer kernel returned an unrepresentable value")
+//RS             };
+//RS             super::Builtins::exact_int_value(exact)
+//RS         })
+//RS         .map_err(field_errors_to_ct)
+//RS }
+//RS 
+//RS 
+//RS impl __jet_Encode for String {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Text(self.clone())
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Decode for String {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::decode_string(tree)
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Encode for i64 {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Int(*self)
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Decode for i64 {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::decode_int_with(
+//RS             tree,
+//RS             |value| value,
+//RS             |text| {
+//RS                 text.parse::<i64>()
+//RS                     .map_err(|_| "exact Int is outside i64".to_owned())
+//RS             },
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Encode for u64 {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Int(*self as i64)
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Decode for u64 {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::decode_int_with(
+//RS             tree,
+//RS             |value| value,
+//RS             |text| {
+//RS                 text.parse::<i64>()
+//RS                     .map_err(|_| "exact Int is outside i64".to_owned())
+//RS             },
+//RS         )
+//RS         .and_then(|value| {
+//RS             u64::try_from(value)
+//RS                 .map_err(|_| jet_std::FieldError::one("expected non-negative integer"))
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Encode for bool {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Bool(*self)
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Decode for bool {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::decode_bool(tree)
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Encode for f64 {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Float(*self)
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Decode for f64 {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::decode_float(tree)
+//RS     }
+//RS }
+//RS 
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS fn jet_live_publish_transport(topic: String, event: String) {
+//RS     super::AppLite::jet_live_publish_transport(topic, event);
+//RS }
+//RS #[path = "../../../jet-codegen/src/Prelude/CoreLib/Top/Sync.rs"]
+//RS mod sync;
+//RS pub(crate) use sync::*;
+//RS 
+//RS fn text_to_ct(doc: &JetSyncText) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "SyncText".to_string(),
+//RS         fields: vec![
+//RS             ("show".to_string(), CtValue::Str(jet_sync_text_show(doc))),
+//RS             ("valid".to_string(), CtValue::Bool(doc.valid)),
+//RS             (
+//RS                 "atoms".to_string(),
+//RS                 CtValue::List(
+//RS                     doc.atoms
+//RS                         .iter()
+//RS                         .map(|atom| CtValue::Struct {
+//RS                             type_name: "SyncTextAtom".to_string(),
+//RS                             fields: vec![
+//RS                                 ("replica".to_string(), CtValue::Str(atom.replica.clone())),
+//RS                                 (
+//RS                                     "counter".to_string(),
+//RS                                     CtValue::Str(atom.counter.to_string()),
+//RS                                 ),
+//RS                                 (
+//RS                                     "after".to_string(),
+//RS                                     CtValue::Str(match &atom.after {
+//RS                                         Some((replica, counter)) => {
+//RS                                             format!("{replica}:{counter}")
+//RS                                         }
+//RS                                         None => String::new(),
+//RS                                     }),
+//RS                                 ),
+//RS                                 ("ch".to_string(), CtValue::Str(atom.ch.to_string())),
+//RS                                 (
+//RS                                     "deleted".to_string(),
+//RS                                     CtValue::Str(atom.deleted.to_string()),
+//RS                                 ),
+//RS                             ],
+//RS                         })
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn counter_to_ct(c: &JetSyncCounter) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "SyncCounter".to_string(),
+//RS         fields: vec![
+//RS             ("valid".to_string(), CtValue::Bool(c.valid)),
+//RS             (
+//RS                 "counts".to_string(),
+//RS                 CtValue::List(
+//RS                     c.counts
+//RS                         .iter()
+//RS                         .map(|(replica, positive, negative)| CtValue::Struct {
+//RS                             type_name: "SyncCounterEntry".to_string(),
+//RS                             fields: vec![
+//RS                                 ("replica".to_string(), CtValue::Str(replica.clone())),
+//RS                                 ("positive".to_string(), CtValue::Str(positive.to_string())),
+//RS                                 ("negative".to_string(), CtValue::Str(negative.to_string())),
+//RS                             ],
+//RS                         })
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn map_to_ct(m: &JetSyncMap) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "SyncMap".to_string(),
+//RS         fields: vec![
+//RS             ("show".to_string(), CtValue::Str(jet_sync_map_show(m))),
+//RS             ("valid".to_string(), CtValue::Bool(m.valid)),
+//RS             (
+//RS                 "entries".to_string(),
+//RS                 CtValue::List(
+//RS                     m.entries
+//RS                         .iter()
+//RS                         .map(|(key, value, clock, writer)| CtValue::Struct {
+//RS                             type_name: "SyncMapEntry".to_string(),
+//RS                             fields: vec![
+//RS                                 ("key".to_string(), CtValue::Str(key.clone())),
+//RS                                 ("value".to_string(), CtValue::Str(value.clone())),
+//RS                                 ("clock".to_string(), CtValue::Str(clock.to_string())),
+//RS                                 ("writer".to_string(), CtValue::Str(writer.clone())),
+//RS                             ],
+//RS                         })
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn list_to_ct(l: &JetSyncList) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "SyncList".to_string(),
+//RS         fields: vec![
+//RS             ("show".to_string(), CtValue::Str(jet_sync_list_show(l))),
+//RS             ("valid".to_string(), CtValue::Bool(l.valid)),
+//RS             (
+//RS                 "items".to_string(),
+//RS                 CtValue::List(
+//RS                     l.items
+//RS                         .iter()
+//RS                         .map(|(replica, item)| CtValue::Struct {
+//RS                             type_name: "SyncListItem".to_string(),
+//RS                             fields: vec![
+//RS                                 ("replica".to_string(), CtValue::Str(replica.clone())),
+//RS                                 ("item".to_string(), CtValue::Str(item.clone())),
+//RS                             ],
+//RS                         })
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn policy_to_ct(p: &JetRowPolicy) -> CtValue {
+//RS     let compiled = jet_db_policy_compiled(p);
+//RS     CtValue::Struct {
+//RS         type_name: "RowPolicy".to_string(),
+//RS         fields: vec![
+//RS             ("table".to_string(), CtValue::Str(p.table.clone())),
+//RS             ("expression".to_string(), CtValue::Str(p.expression.clone())),
+//RS             (
+//RS                 "compiled".to_string(),
+//RS                 CtValue::Int(match compiled {
+//RS                     jet_std::JetRowPolicyExpr::AllowAll => 0,
+//RS                     jet_std::JetRowPolicyExpr::OwnerEqualsUser => 1,
+//RS                 }),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS /// D-SYNC1: one read of a carrier's validity for every `ct_to_*` parser.
+//RS /// Absent or non-Bool means the value did not come from a Prelude carrier, so it
+//RS /// is denied rather than assumed sound — the four parsers previously defaulted to
+//RS /// `true` in four places, which let a malformed compatibility shape enter as
+//RS /// valid. Every producer above emits this field.
+//RS fn ct_carrier_valid(fields: &[(String, CtValue)]) -> bool {
+//RS     matches!(
+//RS         fields.iter().find(|(name, _)| name == "valid"),
+//RS         Some((_, CtValue::Bool(true)))
+//RS     )
+//RS }
+//RS 
+//RS fn ct_to_text(v: &CtValue, span: Span) -> Result<JetSyncText, Diagnostic> {
+//RS     match v {
+//RS         CtValue::Struct { type_name, fields }
+//RS             if type_name == "SyncText" || type_name == "JetSyncText" =>
+//RS         {
+//RS             let Some(value) = fields.iter().find(|(n, _)| n == "atoms").map(|(_, v)| v) else {
+//RS                 return Err(unsupported("SyncText atoms", span));
+//RS             };
+//RS             let valid = ct_carrier_valid(fields);
+//RS             let CtValue::List(entries) = value else {
+//RS                 return Err(unsupported("SyncText atoms", span));
+//RS             };
+//RS             if entries.len() > MAX_SYNC_ATOMS {
+//RS                 return Err(unsupported("SyncText atom limit", span));
+//RS             }
+//RS             let mut atoms = Vec::with_capacity(entries.len());
+//RS             let mut seen: std::collections::BTreeSet<(String, u64)> =
+//RS                 std::collections::BTreeSet::new();
+//RS             for entry in entries {
+//RS                 let CtValue::Struct { type_name, fields } = entry else {
+//RS                     return Err(unsupported("SyncText atom", span));
+//RS                 };
+//RS                 if type_name != "SyncTextAtom" {
+//RS                     return Err(unsupported("SyncText atom", span));
+//RS                 }
+//RS                 let field = |name: &str| {
+//RS                     fields
+//RS                         .iter()
+//RS                         .find(|(n, _)| n == name)
+//RS                         .map(|(_, v)| v)
+//RS                         .ok_or_else(|| unsupported("SyncText atom field", span))
+//RS                 };
+//RS                 let text = |name: &str| match field(name)? {
+//RS                     CtValue::Str(s) => Ok(s.clone()),
+//RS                     _ => Err(unsupported("SyncText atom field", span)),
+//RS                 };
+//RS                 let replica = text("replica")?;
+//RS                 let counter = match field("counter")? {
+//RS                     CtValue::Int(n) if *n >= 0 => {
+//RS                         u64::try_from(*n).map_err(|_| unsupported("SyncText atom counter", span))?
+//RS                     }
+//RS                     CtValue::Str(value) => value
+//RS                         .parse::<u64>()
+//RS                         .map_err(|_| unsupported("SyncText atom counter", span))?,
+//RS                     _ => return Err(unsupported("SyncText atom counter", span)),
+//RS                 };
+//RS                 let after = text("after")?;
+//RS                 let after = if after.is_empty() {
+//RS                     None
+//RS                 } else {
+//RS                     let (replica, counter) = after
+//RS                         .rsplit_once(':')
+//RS                         .ok_or_else(|| unsupported("SyncText atom anchor", span))?;
+//RS                     let counter = counter
+//RS                         .parse::<u64>()
+//RS                         .map_err(|_| unsupported("SyncText atom anchor", span))?;
+//RS                     if !jet_sync_token_is_valid(replica) {
+//RS                         return Err(unsupported("SyncText atom anchor", span));
+//RS                     }
+//RS                     Some((replica.to_string(), counter))
+//RS                 };
+//RS                 let ch = text("ch")?;
+//RS                 let mut chars = ch.chars();
+//RS                 let (Some(ch), None) = (chars.next(), chars.next()) else {
+//RS                     return Err(unsupported("SyncText atom character", span));
+//RS                 };
+//RS                 let deleted = match text("deleted")?.as_str() {
+//RS                     "true" => true,
+//RS                     "false" => false,
+//RS                     _ => return Err(unsupported("SyncText atom tombstone", span)),
+//RS                 };
+//RS                 if !jet_sync_token_is_valid(&replica) {
+//RS                     return Err(unsupported("SyncText atom replica", span));
+//RS                 }
+//RS                 if counter == 0 || !seen.insert((replica.clone(), counter)) {
+//RS                     return Err(unsupported("SyncText atom identity", span));
+//RS                 }
+//RS                 atoms.push(JetSyncTextAtom {
+//RS                     replica,
+//RS                     counter,
+//RS                     after,
+//RS                     ch,
+//RS                     deleted,
+//RS                 });
+//RS             }
+//RS             // I9: refuse here exactly what the Prelude decode refuses, so the
+//RS             // comptime tier cannot evaluate a document AOT would reject.
+//RS             let doc = JetSyncText { atoms, valid };
+//RS             if !doc.valid {
+//RS                 return Ok(doc);
+//RS             }
+//RS             if jet_sync_text_order(&doc).len() != doc.atoms.len() {
+//RS                 return Err(unsupported("SyncText reachability", span));
+//RS             }
+//RS             Ok(doc)
+//RS         }
+//RS         _ => Err(unsupported("SyncText", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn ct_to_counter(v: &CtValue, span: Span) -> Result<JetSyncCounter, Diagnostic> {
+//RS     match v {
+//RS         CtValue::Struct { type_name, fields }
+//RS             if type_name == "SyncCounter" || type_name == "JetSyncCounter" =>
+//RS         {
+//RS             let valid = ct_carrier_valid(fields);
+//RS             if let Some(value) = fields.iter().find(|(n, _)| n == "counts").map(|(_, v)| v) {
+//RS                 let CtValue::List(entries) = value else {
+//RS                     return Err(unsupported("SyncCounter counts", span));
+//RS                 };
+//RS                 if entries.len() > MAX_SYNC_REPLICAS {
+//RS                     return Err(unsupported("SyncCounter replica limit", span));
+//RS                 }
+//RS                 let mut counts = Vec::new();
+//RS                 for entry in entries {
+//RS                     match entry {
+//RS                         CtValue::Struct {
+//RS                             type_name,
+//RS                             fields: entry_fields,
+//RS                         } if type_name == "SyncCounterEntry" => {
+//RS                             let replica = entry_fields
+//RS                                 .iter()
+//RS                                 .find(|(n, _)| n == "replica")
+//RS                                 .and_then(|(_, v)| match v {
+//RS                                     CtValue::Str(s) => Some(s.clone()),
+//RS                                     _ => None,
+//RS                                 })
+//RS                                 .ok_or_else(|| unsupported("SyncCounter replica", span))?;
+//RS                             let positive = entry_fields
+//RS                                 .iter()
+//RS                                 .find(|(n, _)| n == "positive")
+//RS                                 .and_then(|(_, v)| match v {
+//RS                                     CtValue::Int(n) if *n >= 0 => u64::try_from(*n).ok(),
+//RS                                     CtValue::Str(value) => value.parse::<u64>().ok(),
+//RS                                     _ => None,
+//RS                                 })
+//RS                                 .ok_or_else(|| unsupported("SyncCounter positive", span))?;
+//RS                             let negative = entry_fields
+//RS                                 .iter()
+//RS                                 .find(|(n, _)| n == "negative")
+//RS                                 .and_then(|(_, v)| match v {
+//RS                                     CtValue::Int(n) if *n >= 0 => u64::try_from(*n).ok(),
+//RS                                     CtValue::Str(value) => value.parse::<u64>().ok(),
+//RS                                     _ => None,
+//RS                                 })
+//RS                                 .ok_or_else(|| unsupported("SyncCounter negative", span))?;
+//RS                             if !jet_sync_token_is_valid(&replica) {
+//RS                                 return Err(unsupported("SyncCounter replica", span));
+//RS                             }
+//RS                             counts.push((replica, positive, negative));
+//RS                         }
+//RS                         CtValue::List(parts) if parts.len() == 3 => {
+//RS                             let replica = match &parts[0] {
+//RS                                 CtValue::Str(s) => s.clone(),
+//RS                                 _ => return Err(unsupported("SyncCounter replica", span)),
+//RS                             };
+//RS                             let positive = match &parts[1] {
+//RS                                 CtValue::Int(n) if *n >= 0 => u64::try_from(*n)
+//RS                                     .map_err(|_| unsupported("SyncCounter positive", span))?,
+//RS                                 _ => return Err(unsupported("SyncCounter positive", span)),
+//RS                             };
+//RS                             let negative = match &parts[2] {
+//RS                                 CtValue::Int(n) if *n >= 0 => u64::try_from(*n)
+//RS                                     .map_err(|_| unsupported("SyncCounter negative", span))?,
+//RS                                 _ => return Err(unsupported("SyncCounter negative", span)),
+//RS                             };
+//RS                             if !jet_sync_token_is_valid(&replica) {
+//RS                                 return Err(unsupported("SyncCounter replica", span));
+//RS                             }
+//RS                             counts.push((replica, positive, negative));
+//RS                         }
+//RS                         CtValue::List(parts) if parts.len() == 2 => {
+//RS                             let replica = match &parts[0] {
+//RS                                 CtValue::Str(s) => s.clone(),
+//RS                                 _ => return Err(unsupported("SyncCounter replica", span)),
+//RS                             };
+//RS                             let value = match &parts[1] {
+//RS                                 CtValue::Int(n) => *n,
+//RS                                 _ => return Err(unsupported("SyncCounter value", span)),
+//RS                             };
+//RS                             if !jet_sync_token_is_valid(&replica) {
+//RS                                 return Err(unsupported("SyncCounter replica", span));
+//RS                             }
+//RS                             counts.push((
+//RS                                 replica,
+//RS                                 if value >= 0 { value as u64 } else { 0 },
+//RS                                 if value < 0 { value.unsigned_abs() } else { 0 },
+//RS                             ));
+//RS                         }
+//RS                         _ => return Err(unsupported("SyncCounter entry", span)),
+//RS                     }
+//RS                 }
+//RS                 return Ok(JetSyncCounter { counts, valid });
+//RS             }
+//RS             // Legacy ambient shape stored only the summed value.
+//RS             let value = match fields.iter().find(|(n, _)| n == "value") {
+//RS                 Some((_, CtValue::Int(n))) => *n,
+//RS                 Some(_) => return Err(unsupported("SyncCounter value", span)),
+//RS                 None => return Err(unsupported("SyncCounter counts", span)),
+//RS             };
+//RS             Ok(JetSyncCounter {
+//RS                 counts: vec![(
+//RS                     "ambient".to_string(),
+//RS                     if value >= 0 { value as u64 } else { 0 },
+//RS                     if value < 0 { value.unsigned_abs() } else { 0 },
+//RS                 )],
+//RS                 valid,
+//RS             })
+//RS         }
+//RS         _ => Err(unsupported("SyncCounter", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn ct_to_map(v: &CtValue, span: Span) -> Result<JetSyncMap, Diagnostic> {
+//RS     match v {
+//RS         CtValue::Struct { type_name, fields }
+//RS             if type_name == "SyncMap" || type_name == "JetSyncMap" =>
+//RS         {
+//RS             let valid = ct_carrier_valid(fields);
+//RS             if let Some(value) = fields.iter().find(|(n, _)| n == "entries").map(|(_, v)| v) {
+//RS                 let CtValue::List(entries) = value else {
+//RS                     return Err(unsupported("SyncMap entries", span));
+//RS                 };
+//RS                 if entries.len() > MAX_SYNC_ENTRIES {
+//RS                     return Err(unsupported("SyncMap entry limit", span));
+//RS                 }
+//RS                 let mut map_entries = Vec::with_capacity(entries.len());
+//RS                 for entry in entries {
+//RS                     let CtValue::Struct { type_name, fields } = entry else {
+//RS                         return Err(unsupported("SyncMap entry", span));
+//RS                     };
+//RS                     if type_name != "SyncMapEntry" {
+//RS                         return Err(unsupported("SyncMap entry", span));
+//RS                     }
+//RS                     let field = |name: &str| {
+//RS                         fields
+//RS                             .iter()
+//RS                             .find(|(n, _)| n == name)
+//RS                             .map(|(_, v)| v)
+//RS                             .ok_or_else(|| unsupported("SyncMap entry field", span))
+//RS                     };
+//RS                     let key = match field("key")? {
+//RS                         CtValue::Str(s) => s.clone(),
+//RS                         _ => return Err(unsupported("SyncMap key", span)),
+//RS                     };
+//RS                     let value = match field("value")? {
+//RS                         CtValue::Str(s) => s.clone(),
+//RS                         _ => return Err(unsupported("SyncMap value", span)),
+//RS                     };
+//RS                     let clock = match field("clock")? {
+//RS                         CtValue::Int(n) if *n >= 0 => {
+//RS                             u64::try_from(*n).map_err(|_| unsupported("SyncMap clock", span))?
+//RS                         }
+//RS                         CtValue::Str(value) => value
+//RS                             .parse::<u64>()
+//RS                             .map_err(|_| unsupported("SyncMap clock", span))?,
+//RS                         _ => return Err(unsupported("SyncMap clock", span)),
+//RS                     };
+//RS                     let writer = match field("writer")? {
+//RS                         CtValue::Str(s) => s.clone(),
+//RS                         _ => return Err(unsupported("SyncMap writer", span)),
+//RS                     };
+//RS                     if !jet_sync_token_is_valid(&key)
+//RS                         || !jet_sync_token_is_valid(&writer)
+//RS                         || value.len() > MAX_SYNC_TEXT
+//RS                     {
+//RS                         return Err(unsupported("SyncMap entry value", span));
+//RS                     }
+//RS                     map_entries.push((key, value, clock, writer));
+//RS                 }
+//RS                 return Ok(JetSyncMap {
+//RS                     entries: map_entries,
+//RS                     valid,
+//RS                 });
+//RS             }
+//RS             let show = match fields.iter().find(|(n, _)| n == "show") {
+//RS                 Some((_, CtValue::Str(s))) => s.clone(),
+//RS                 Some(_) => return Err(unsupported("SyncMap show", span)),
+//RS                 None => return Err(unsupported("SyncMap entries", span)),
+//RS             };
+//RS             let body = show
+//RS                 .strip_prefix("SyncMap(")
+//RS                 .and_then(|s| s.strip_suffix(')'))
+//RS                 .ok_or_else(|| unsupported("SyncMap show", span))?;
+//RS             let mut map = JetSyncMap {
+//RS                 entries: Vec::new(),
+//RS                 valid,
+//RS             };
+//RS             if !body.is_empty() {
+//RS                 for part in body.split(',') {
+//RS                     let (k, val) = part
+//RS                         .split_once('=')
+//RS                         .ok_or_else(|| unsupported("SyncMap show", span))?;
+//RS                     if !jet_sync_token_is_valid(k) || val.len() > MAX_SYNC_TEXT {
+//RS                         return Err(unsupported("SyncMap show", span));
+//RS                     }
+//RS                     map.entries
+//RS                         .push((k.to_string(), val.to_string(), 1, "ambient".to_string()));
+//RS                 }
+//RS             }
+//RS             if map.entries.len() > MAX_SYNC_ENTRIES {
+//RS                 return Err(unsupported("SyncMap entry limit", span));
+//RS             }
+//RS             Ok(map)
+//RS         }
+//RS         _ => Err(unsupported("SyncMap", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn ct_to_list(v: &CtValue, span: Span) -> Result<JetSyncList, Diagnostic> {
+//RS     match v {
+//RS         CtValue::Struct { type_name, fields }
+//RS             if type_name == "SyncList" || type_name == "JetSyncList" =>
+//RS         {
+//RS             let valid = ct_carrier_valid(fields);
+//RS             if let Some(items) = fields.iter().find(|(n, _)| n == "items").map(|(_, v)| v) {
+//RS                 let CtValue::List(items) = items else {
+//RS                     return Err(unsupported("SyncList items", span));
+//RS                 };
+//RS                 if items.len() > MAX_SYNC_ENTRIES {
+//RS                     return Err(unsupported("SyncList item limit", span));
+//RS                 }
+//RS                 let mut list = JetSyncList {
+//RS                     items: Vec::with_capacity(items.len()),
+//RS                     valid,
+//RS                 };
+//RS                 for item in items {
+//RS                     let CtValue::Struct { type_name, fields } = item else {
+//RS                         return Err(unsupported("SyncList item", span));
+//RS                     };
+//RS                     if type_name != "SyncListItem" {
+//RS                         return Err(unsupported("SyncList item", span));
+//RS                     }
+//RS                     let field = |name: &str| {
+//RS                         fields
+//RS                             .iter()
+//RS                             .find(|(n, _)| n == name)
+//RS                             .map(|(_, v)| v)
+//RS                             .ok_or_else(|| unsupported("SyncList item field", span))
+//RS                     };
+//RS                     let replica = match field("replica")? {
+//RS                         CtValue::Str(value) => value.clone(),
+//RS                         _ => return Err(unsupported("SyncList replica", span)),
+//RS                     };
+//RS                     let value = match field("item")? {
+//RS                         CtValue::Str(value) => value.clone(),
+//RS                         _ => return Err(unsupported("SyncList item value", span)),
+//RS                     };
+//RS                     if !jet_sync_token_is_valid(&replica) || value.len() > MAX_SYNC_TEXT {
+//RS                         return Err(unsupported("SyncList item value", span));
+//RS                     }
+//RS                     list.items.push((replica, value));
+//RS                 }
+//RS                 return Ok(list);
+//RS             }
+//RS             let show = match fields.iter().find(|(n, _)| n == "show") {
+//RS                 Some((_, CtValue::Str(s))) => s.clone(),
+//RS                 Some(_) => return Err(unsupported("SyncList show", span)),
+//RS                 None => return Err(unsupported("SyncList items", span)),
+//RS             };
+//RS             let body = show
+//RS                 .strip_prefix("SyncList(")
+//RS                 .and_then(|s| s.strip_suffix(')'))
+//RS                 .ok_or_else(|| unsupported("SyncList show", span))?;
+//RS             let mut list = JetSyncList {
+//RS                 items: Vec::new(),
+//RS                 valid,
+//RS             };
+//RS             if !body.is_empty() {
+//RS                 for part in body.split('|') {
+//RS                     let (r, i) = part
+//RS                         .split_once(':')
+//RS                         .ok_or_else(|| unsupported("SyncList show", span))?;
+//RS                     if !jet_sync_token_is_valid(r) || i.len() > MAX_SYNC_TEXT {
+//RS                         return Err(unsupported("SyncList show", span));
+//RS                     }
+//RS                     list.items.push((r.to_string(), i.to_string()));
+//RS                 }
+//RS             }
+//RS             if list.items.len() > MAX_SYNC_ENTRIES {
+//RS                 return Err(unsupported("SyncList item limit", span));
+//RS             }
+//RS             Ok(list)
+//RS         }
+//RS         _ => Err(unsupported("SyncList", span)),
+//RS     }
+//RS }
+//RS 
+//RS /// I9: the resident adapter marshals a sync carrier into the same Prelude
+//RS /// `JetShow` implementation used by the evaluator and AOT emitter.
+//RS pub fn sync_show_value(value: &CtValue) -> Option<String> {
+//RS     let span = Span::new(0, 0);
+//RS     let CtValue::Struct { type_name, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     match type_name.as_str() {
+//RS         "SyncText" | "JetSyncText" => Some(ct_to_text(value, span).ok()?.jet_show()),
+//RS         "SyncCounter" | "JetSyncCounter" => Some(ct_to_counter(value, span).ok()?.jet_show()),
+//RS         "SyncMap" | "JetSyncMap" => Some(ct_to_map(value, span).ok()?.jet_show()),
+//RS         "SyncList" | "JetSyncList" => Some(ct_to_list(value, span).ok()?.jet_show()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn ct_to_policy(v: &CtValue, span: Span) -> Result<JetRowPolicy, Diagnostic> {
+//RS     let CtValue::Struct { type_name, fields } = v else {
+//RS         return Err(unsupported("RowPolicy", span));
+//RS     };
+//RS     if type_name != "RowPolicy" && type_name != "JetRowPolicy" {
+//RS         return Err(unsupported("RowPolicy", span));
+//RS     }
+//RS     let table = fields
+//RS         .iter()
+//RS         .find(|(n, _)| n == "table")
+//RS         .and_then(|(_, v)| match v {
+//RS             CtValue::Str(s) => Some(s.clone()),
+//RS             _ => None,
+//RS         })
+//RS         .ok_or_else(|| unsupported("table", span))?;
+//RS     let code = fields
+//RS         .iter()
+//RS         .find(|(n, _)| n == "compiled")
+//RS         .and_then(|(_, v)| match v {
+//RS             CtValue::Int(code) => Some(*code),
+//RS             _ => None,
+//RS         })
+//RS         .ok_or_else(|| unsupported("compiled row policy", span))?;
+//RS     let compiled = match code {
+//RS         0 => jet_std::JetRowPolicyExpr::AllowAll,
+//RS         1 => jet_std::JetRowPolicyExpr::OwnerEqualsUser,
+//RS         _ => return Err(unsupported("compiled row policy", span)),
+//RS     };
+//RS     jet_db_policy_from_compiled(table, compiled)
+//RS         .map_err(|_| unsupported("unsupported row policy", span))
+//RS }
+//RS 
+//RS pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+//RS     let one = |i: usize| {
+//RS         args.get(i)
+//RS             .ok_or_else(|| unsupported(&format!("core.sync.{method} arg {i}"), span))
+//RS     };
+//RS     let as_str = |i: usize| match one(i)? {
+//RS         CtValue::Str(s) => Ok(s.clone()),
+//RS         _ => Err(unsupported("String", span)),
+//RS     };
+//RS     let as_int = |i: usize| match one(i)? {
+//RS         CtValue::Int(n) => Ok(*n),
+//RS         _ => Err(unsupported("Int", span)),
+//RS     };
+//RS     match method {
+//RS         "text_new" => Ok(text_to_ct(&jet_sync_text_new(as_str(0)?, as_str(1)?))),
+//RS         "text_set" => Ok(text_to_ct(&jet_sync_text_set(
+//RS             ct_to_text(one(0)?, span)?,
+//RS             as_str(1)?,
+//RS             as_str(2)?,
+//RS         ))),
+//RS         "text_merge" => Ok(text_to_ct(&jet_sync_text_merge(
+//RS             &ct_to_text(one(0)?, span)?,
+//RS             &ct_to_text(one(1)?, span)?,
+//RS         ))),
+//RS         "text_show" => Ok(CtValue::Str(jet_sync_text_show(&ct_to_text(
+//RS             one(0)?,
+//RS             span,
+//RS         )?))),
+//RS         "text_edit" => Ok(text_to_ct(&jet_sync_text_edit(
+//RS             ct_to_text(one(0)?, span)?,
+//RS             as_str(1)?,
+//RS             as_int(2)?,
+//RS             as_int(3)?,
+//RS             as_str(4)?,
+//RS         ))),
+//RS         "text_metadata" => Ok(CtValue::Str(jet_sync_text_metadata(&ct_to_text(
+//RS             one(0)?,
+//RS             span,
+//RS         )?))),
+//RS         "counter_new" => Ok(counter_to_ct(&jet_sync_counter_new(as_str(0)?, as_int(1)?))),
+//RS         "counter_inc" => Ok(counter_to_ct(&jet_sync_counter_inc(
+//RS             ct_to_counter(one(0)?, span)?,
+//RS             as_str(1)?,
+//RS             as_int(2)?,
+//RS         ))),
+//RS         "counter_merge" => Ok(counter_to_ct(&jet_sync_counter_merge(
+//RS             &ct_to_counter(one(0)?, span)?,
+//RS             &ct_to_counter(one(1)?, span)?,
+//RS         ))),
+//RS         "counter_value" => Ok(CtValue::Int(jet_sync_counter_value(&ct_to_counter(
+//RS             one(0)?,
+//RS             span,
+//RS         )?))),
+//RS         "map_new" => Ok(map_to_ct(&jet_sync_map_new())),
+//RS         "map_set" => Ok(map_to_ct(&jet_sync_map_set(
+//RS             ct_to_map(one(0)?, span)?,
+//RS             as_str(1)?,
+//RS             as_str(2)?,
+//RS         ))),
+//RS         "map_get" => Ok(
+//RS             match jet_sync_map_get(&ct_to_map(one(0)?, span)?, &as_str(1)?) {
+//RS                 Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+//RS                 None => CtValue::absent(Type::String),
+//RS             },
+//RS         ),
+//RS         "map_merge" => Ok(map_to_ct(&jet_sync_map_merge(
+//RS             &ct_to_map(one(0)?, span)?,
+//RS             &ct_to_map(one(1)?, span)?,
+//RS         ))),
+//RS         "map_show" => Ok(CtValue::Str(jet_sync_map_show(&ct_to_map(one(0)?, span)?))),
+//RS         "list_new" => Ok(list_to_ct(&jet_sync_list_new())),
+//RS         "list_push" => Ok(list_to_ct(&jet_sync_list_push(
+//RS             ct_to_list(one(0)?, span)?,
+//RS             as_str(1)?,
+//RS             as_str(2)?,
+//RS         ))),
+//RS         "list_merge" => Ok(list_to_ct(&jet_sync_list_merge(
+//RS             &ct_to_list(one(0)?, span)?,
+//RS             &ct_to_list(one(1)?, span)?,
+//RS         ))),
+//RS         "list_show" => Ok(CtValue::Str(jet_sync_list_show(&ct_to_list(
+//RS             one(0)?,
+//RS             span,
+//RS         )?))),
+//RS         "policy_new" => Ok(match jet_db_policy_new(as_str(0)?, as_str(1)?) {
+//RS             Ok(p) => CtValue::Present(Box::new(policy_to_ct(&p))),
+//RS             Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
+//RS         }),
+//RS         "policy_allows" => Ok(CtValue::Bool(jet_db_policy_allows(
+//RS             &ct_to_policy(one(0)?, span)?,
+//RS             &as_str(1)?,
+//RS             &as_str(2)?,
+//RS         ))),
+//RS         "policy_show" => Ok(CtValue::Str(jet_db_policy_show(&ct_to_policy(
+//RS             one(0)?,
+//RS             span,
+//RS         )?))),
+//RS         "sync" => Ok(CtValue::Str(jet_app_sync(as_str(0)?, as_str(1)?))),
+//RS         _ => Err(unsupported(&format!("`core.sync.{method}()`"), span)),
+//RS     }
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS fn _type_anchor() -> Type {
+//RS     Type::Named("SyncText".to_string())
+//RS }
+// END-PORT-PENDING 0602 crates/jet-comptime/src/Comptime/SyncLite.rs:1-1040
+

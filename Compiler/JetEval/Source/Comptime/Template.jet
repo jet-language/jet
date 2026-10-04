@@ -1,0 +1,301 @@
+// PORT-PENDING 0601 crates-jet-comptime-src-comptime-syncjetstd-module-group: crates/jet-comptime/src/Comptime/Template.rs:1-297
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::AST::{CtReport, CtValue};
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use std::collections::HashMap;
+//RS 
+//RS /// One checked item-template body. The expression parameter is the owning
+//RS /// tier's typed expression node (`TExpr` for TIR); this module never retains
+//RS /// parser nodes or a pre-rendered generated module.
+//RS #[derive(Clone)]
+//RS pub struct TemplateBody<E> {
+//RS     pub items: Vec<Box<TemplateItem<E>>>,
+//RS     pub span: Span,
+//RS }
+//RS 
+//RS /// A template item keeps static source bytes and typed splice/control facts.
+//RS #[derive(Clone)]
+//RS pub enum TemplateItem<E> {
+//RS     Item(TemplateSource<E>),
+//RS     Statement(TemplateStatement<E>),
+//RS     Loop {
+//RS         var: String,
+//RS         source: Box<E>,
+//RS         body: Vec<Box<TemplateItem<E>>>,
+//RS         span: Span,
+//RS     },
+//RS     If {
+//RS         condition: Box<E>,
+//RS         then_body: Vec<Box<TemplateItem<E>>>,
+//RS         else_body: Vec<Box<TemplateItem<E>>>,
+//RS         /// Sema's selected arm, when the condition was already folded.
+//RS         /// `None` means the owning evaluator must evaluate the typed condition.
+//RS         selected: Option<bool>,
+//RS         span: Span,
+//RS     },
+//RS     /// A checked shape that cannot be represented because its source span is malformed.
+//RS     /// It remains explicit so no renderer invents an empty source fallback.
+//RS     Invalid { construct: String, span: Span },
+//RS }
+//RS 
+//RS /// A compile-time statement which changes template scope but emits no source.
+//RS #[derive(Clone)]
+//RS pub enum TemplateStatement<E> {
+//RS     Binding {
+//RS         name: String,
+//RS         value: Box<E>,
+//RS         span: Span,
+//RS     },
+//RS     Expr {
+//RS         value: Box<E>,
+//RS         span: Span,
+//RS     },
+//RS }
+//RS 
+//RS /// Static source for one item, with byte ranges for every dynamic splice.
+//RS #[derive(Clone)]
+//RS pub struct TemplateSource<E> {
+//RS     pub source: String,
+//RS     pub holes: Vec<TemplateHole<E>>,
+//RS     pub span: Span,
+//RS }
+//RS 
+//RS /// One typed dynamic splice into static template source.
+//RS #[derive(Clone)]
+//RS pub struct TemplateHole<E> {
+//RS     /// Byte range relative to [`TemplateSource::source`].
+//RS     pub start: usize,
+//RS     pub end: usize,
+//RS     pub expr: Box<E>,
+//RS     pub kind: TemplateHoleKind,
+//RS     pub span: Span,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS pub enum TemplateHoleKind {
+//RS     /// The value is substituted as a Jet expression literal.
+//RS     Value,
+//RS     /// The value is substituted as an item/type/member name.
+//RS     Name,
+//RS }
+//RS 
+//RS /// Render one checked template body. The owning evaluator supplies the only
+//RS /// operation over its typed expression node; loop and binding scope changes
+//RS /// stay in this shared model so every tier applies one control law.
+//RS pub fn format_tir_template_body<E, F>(
+//RS     body: &TemplateBody<E>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS     mut eval: F,
+//RS ) -> Result<String, Diagnostic>
+//RS where
+//RS     F: FnMut(&E, &mut HashMap<String, CtValue>) -> Result<CtValue, Diagnostic>,
+//RS {
+//RS     let mut template_scope = scope.clone();
+//RS     render_items(&body.items, &mut template_scope, &mut eval)
+//RS }
+//RS 
+//RS fn render_items<E, F>(
+//RS     items: &[Box<TemplateItem<E>>],
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS     eval: &mut F,
+//RS ) -> Result<String, Diagnostic>
+//RS where
+//RS     F: FnMut(&E, &mut HashMap<String, CtValue>) -> Result<CtValue, Diagnostic>,
+//RS {
+//RS     let mut rendered = Vec::new();
+//RS     for item in items {
+//RS         match item.as_ref() {
+//RS             TemplateItem::Item(source) => rendered.push(render_source(source, scope, eval)?),
+//RS             TemplateItem::Invalid { construct, span } => {
+//RS                 return Err(template_error(
+//RS                     construct,
+//RS                     "checked template source must remain attached to its source span",
+//RS                     "report the malformed generated template to the compiler",
+//RS                     *span,
+//RS                 ));
+//RS             }
+//RS             TemplateItem::Statement(statement) => match statement {
+//RS                 TemplateStatement::Binding { name, value, .. } => {
+//RS                     let value = eval(value, scope)?;
+//RS                     scope.insert(name.clone(), value.clone());
+//RS                     scope.insert(format!("${name}"), value);
+//RS                 }
+//RS                 TemplateStatement::Expr { value, .. } => {
+//RS                     let _ = eval(value, scope)?;
+//RS                 }
+//RS             },
+//RS             TemplateItem::Loop {
+//RS                 var,
+//RS                 source,
+//RS                 body,
+//RS                 span,
+//RS             } => {
+//RS                 let value = eval(source, scope)?;
+//RS                 let CtValue::List(values) = value else {
+//RS                     return Err(template_error(
+//RS                         "a `prep loop` source is not a compile-time list",
+//RS                         "`prep loop` expands one item template for each value in its source list",
+//RS                         "use a reflected/comptime list or a closed type list",
+//RS                         *span,
+//RS                     ));
+//RS                 };
+//RS                 let marked_var = format!("${var}");
+//RS                 let previous = scope.get(var).cloned();
+//RS                 let previous_marked = scope.get(&marked_var).cloned();
+//RS                 for value in values {
+//RS                     scope.insert(var.clone(), value.clone());
+//RS                     scope.insert(marked_var.clone(), value);
+//RS                     let expansion = render_items(body, scope, eval)?;
+//RS                     if !expansion.is_empty() {
+//RS                         rendered.push(expansion);
+//RS                     }
+//RS                 }
+//RS                 restore_scope(scope, var, previous);
+//RS                 restore_scope(scope, &marked_var, previous_marked);
+//RS             }
+//RS             TemplateItem::If {
+//RS                 condition,
+//RS                 then_body,
+//RS                 else_body,
+//RS                 selected,
+//RS                 span,
+//RS             } => {
+//RS                 let selected = match selected {
+//RS                     Some(selected) => *selected,
+//RS                     None => {
+//RS                         let value = eval(condition, scope)?;
+//RS                         let CtValue::Bool(selected) = value else {
+//RS                             return Err(template_error(
+//RS                                 "a template condition is not Bool",
+//RS                                 "compile-time template control requires a checked boolean expression",
+//RS                                 "use a Bool-valued condition",
+//RS                                 *span,
+//RS                             ));
+//RS                         };
+//RS                         selected
+//RS                     }
+//RS                 };
+//RS                 let selected = if selected { then_body } else { else_body };
+//RS                 let expansion = render_items(selected, scope, eval)?;
+//RS                 if !expansion.is_empty() {
+//RS                     rendered.push(expansion);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(rendered.join("\n"))
+//RS }
+//RS 
+//RS fn restore_scope(scope: &mut HashMap<String, CtValue>, name: &str, previous: Option<CtValue>) {
+//RS     if let Some(previous) = previous {
+//RS         scope.insert(name.to_string(), previous);
+//RS     } else {
+//RS         scope.remove(name);
+//RS     }
+//RS }
+//RS 
+//RS fn render_source<E, F>(
+//RS     source: &TemplateSource<E>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS     eval: &mut F,
+//RS ) -> Result<String, Diagnostic>
+//RS where
+//RS     F: FnMut(&E, &mut HashMap<String, CtValue>) -> Result<CtValue, Diagnostic>,
+//RS {
+//RS     let mut holes = source.holes.iter().collect::<Vec<_>>();
+//RS     holes.sort_by_key(|hole| hole.start);
+//RS     let mut rendered = String::with_capacity(source.source.len());
+//RS     let mut cursor = 0usize;
+//RS     for hole in holes {
+//RS         if hole.start < cursor
+//RS             || hole.end < hole.start
+//RS             || hole.end > source.source.len()
+//RS             || !source.source.is_char_boundary(hole.start)
+//RS             || !source.source.is_char_boundary(hole.end)
+//RS         {
+//RS             return Err(template_error(
+//RS                 "template splice range is invalid",
+//RS                 "checked template spans must remain byte-aligned with their static source",
+//RS                 "report the malformed generated template to the compiler",
+//RS                 hole.span,
+//RS             ));
+//RS         }
+//RS         rendered.push_str(&source.source[cursor..hole.start]);
+//RS         let value = eval(&hole.expr, scope)?;
+//RS         let replacement = match hole.kind {
+//RS             TemplateHoleKind::Value => template_value_source(&value, hole.span)?,
+//RS             TemplateHoleKind::Name => template_name_source(&value, hole.span)?,
+//RS         };
+//RS         rendered.push_str(&replacement);
+//RS         cursor = hole.end;
+//RS     }
+//RS     rendered.push_str(&source.source[cursor..]);
+//RS     Ok(rendered)
+//RS }
+//RS 
+//RS fn template_name_source(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Str(name) if !name.is_empty() => Ok(name.clone()),
+//RS         CtValue::Struct { fields, .. } => fields
+//RS             .iter()
+//RS             .find_map(|(field, value)| {
+//RS                 (field == "name").then_some(value).and_then(|value| match value {
+//RS                     CtValue::Str(name) if !name.is_empty() => Some(Ok(name.clone())),
+//RS                     _ => None,
+//RS                 })
+//RS             })
+//RS             .unwrap_or_else(|| Err(template_error(
+//RS                 "a generated item name needs text",
+//RS                 "item and type splices use the reflected name fact",
+//RS                 "bind the name to a non-empty String value",
+//RS                 span,
+//RS             ))),
+//RS         _ => Err(template_error(
+//RS             "a generated item name needs text",
+//RS             "item and type splices use a String value",
+//RS             "bind the name to a String value",
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn template_value_source(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Bool(value) => Ok(value.to_string()),
+//RS         CtValue::Int(value) => Ok(value.to_string()),
+//RS         CtValue::Float(value) => Ok(value.render()),
+//RS         CtValue::Char(value) => Ok(format!("{value:?}")),
+//RS         CtValue::Str(value) => Ok(format!("{value:?}")),
+//RS         CtValue::BigInt(value) => Ok(value.to_string_rep()),
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if args.is_empty() => {
+//RS             if type_name.is_empty() {
+//RS                 Ok(variant.clone())
+//RS             } else {
+//RS                 Ok(format!("{type_name}.{variant}"))
+//RS             }
+//RS         }
+//RS         CtValue::Present(value) => Ok(format!("value({})", template_value_source(value, span)?)),
+//RS         CtValue::Failed(CtReport::Clean(_)) => Ok("null".to_string()),
+//RS         _ => Err(template_error(
+//RS             "a template value has no source literal",
+//RS             "dynamic template values must be representable Jet literals",
+//RS             "convert the value to Bool, Int, Float, Char, String, or a closed enum",
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn template_error(
+//RS     message: &str,
+//RS     detail: &str,
+//RS     hint: &str,
+//RS     span: Span,
+//RS ) -> Diagnostic {
+//RS     Diagnostic::error("E0956", message.to_string(), detail.to_string(), hint.to_string(), Some(span))
+//RS }
+// END-PORT-PENDING 0601 crates/jet-comptime/src/Comptime/Template.rs:1-297
+

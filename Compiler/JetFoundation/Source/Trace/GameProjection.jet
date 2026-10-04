@@ -1,0 +1,39 @@
+// JetTrace.rs:585-676,1129-1137. Typed projection, no kind/payload reparsing.
+fn trace_game_function(value: JetDevtoolsFunctionIdentity) -> TraceGameFunction Never! {
+    TraceGameFunction{function_id: ~value.function_id, name: ~value.name, source: TraceGameFunctionSource{
+        source_id: ~value.source.source_id, file: ~value.source.file,
+        start_line: U64.from_u32(value.source.start_line), start_column: U64.from_u32(value.source.start_column),
+        end_line: U64.from_u32(value.source.end_line), end_column: U64.from_u32(value.source.end_column)}}
+}
+fn trace_game_project_into(bodies: [JetDevtoolsEventBody], frames: &[TraceGameFrame], draws: &[TraceGameDrawEvent]) Never! {
+    loop body in bodies {
+        if body == {
+            .GameFrameSample(sequence, frame_id, scene, frame_index, build, revision, id, start_ns, cpu_ns, gpu_ns, responsible) -> {
+                function :: if responsible == {
+                    .Val(value) -> Val(trace_game_function(value))
+                    else -> None
+                }
+                &frames.push(TraceGameFrame{sequence: sequence, frame_id: frame_id, scene: ~scene, frame_index: frame_index,
+                    build: ~build, revision: ~revision, trace_id: ~id, start_ns: start_ns, cpu_ns: cpu_ns,
+                    gpu_ns: gpu_ns, responsible_function: function})
+            }
+            .GameDrawEvent(sequence, frame_id, scene, frame_index, build, revision, id, event_index, event_id, function, phase, domain, start_ns, duration_ns, object_id, resource_id) -> {
+                &draws.push(TraceGameDrawEvent{sequence: sequence, frame_id: frame_id, scene: ~scene, frame_index: frame_index,
+                    build: ~build, revision: ~revision, trace_id: ~id, event_index: event_index, event_id: event_id,
+                    function: trace_game_function(function), phase: ~phase, domain: ~domain, start_ns: start_ns,
+                    duration_ns: duration_ns, object_id: ~object_id, resource_id: ~resource_id})
+            }
+            else -> {}
+        }
+    }
+}
+pub fn project_game_devtools_bodies(bodies: [JetDevtoolsEventBody]) -> (frames: [TraceGameFrame], draws: [TraceGameDrawEvent]) JetTraceError! {
+    frames := [TraceGameFrame]{}
+    draws := [TraceGameDrawEvent]{}
+    trace_game_project_into(bodies, &frames, &draws)
+    Ok((frames: ^frames, draws: ^draws))
+}
+pub fn trace_skeleton_add_game_devtools_bodies(skeleton: &TraceSkeleton, bodies: [JetDevtoolsEventBody]) JetTraceError! {
+    trace_game_project_into(bodies, &skeleton.game_frames, &skeleton.game_draw_events)
+    return
+}

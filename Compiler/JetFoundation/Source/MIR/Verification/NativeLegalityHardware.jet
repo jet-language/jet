@@ -1,0 +1,53 @@
+// MIROptimization.rs:2603-2725. Debug text uses the canonical native carrier
+// formatter so nested DMA types retain their full source representation.
+fn mir_native_verify_hardware_call(call: MIRPreludeCallID, op: MIRHardwareOp, receiver: MIRValueID?, args: [MIRCallArg], span: Span, function: MIRFunction, index: MIRNativeFunctionIndex, program: MIRProgram, tables: MIRNativeProgramIndex) MIRLegalityError! {
+    if op == .DMAStart(_, _, buffer) | .DMAWait(_, _, buffer) -> mir_native_verify_type(buffer, span, function.id)
+    position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+    route :: program.prelude_calls[position]
+    if (receiver != None) != (op == .DMAWait(_, _, _)) -> return Err(mir_native_reference(function.id, "hardware operation {mir_hardware_op_debug(op)} has an invalid receiver", span))
+    if receiver == .Val(receiver) {
+        if index.definitions.values.get(receiver.value) == None -> return Err(mir_native_reference(function.id, "hardware receiver MirValueId({receiver.value})", span))
+    }
+    expected :: if op == {
+        .RegisterRead(_, _, _, _) | .DMAWait(_, _, _) -> None
+        .RegisterWrite(_, _, _, _) -> Val(MIRAccess.Read)
+        .DMAStart(_, _, _) -> Val(MIRAccess.Move)
+    }
+    if expected == .Val(access) {
+        if args.len() == 0 -> return Err(mir_native_reference(function.id, "hardware operation {mir_hardware_op_debug(op)} is missing its value argument", span))
+        if args.len() != 1 || args[0].access != access || args[0].place != None -> return Err(mir_native_reference(function.id, "hardware operation {mir_hardware_op_debug(op)} has an invalid value argument", span))
+    } else {
+        if args.len() != 0 -> return Err(mir_native_reference(function.id, "hardware operation {mir_hardware_op_debug(op)} has unexpected arguments", span))
+    }
+    if op == {
+        .DMAStart(_, _, buffer) -> {
+            if args.len() == 0 -> return Err(mir_native_reference(function.id, "DMA start has no buffer argument", span))
+            value :: args[0].value
+            ty :: mir_native_definition_type(function, index, value) ?? return Err(mir_native_reference(function.id, "DMA buffer argument MirValueId({value.value}) has no definition", span))
+            if !mir_type_same_checked_type(ty, buffer) -> return Err(mir_native_reference(function.id, "DMA start buffer type disagrees with its moved argument", span))
+        }
+        .DMAWait(_, _, buffer) -> {
+            value :: receiver ?? return Err(mir_native_reference(function.id, "DMA wait has no transfer receiver", span))
+            ty :: mir_native_definition_type(function, index, value) ?? return Err(mir_native_reference(function.id, "DMA transfer receiver MirValueId({value.value}) has no definition", span))
+            valid :: if ty.kind == .Apply(name, types) -> name.name == "__JetDmaTransfer" && types.len() == 1 && mir_type_same_checked_type(types[0], buffer) else -> false
+            if !valid -> return Err(mir_native_reference(function.id, "DMA wait receiver is not the checked typed transfer", span))
+        }
+        else -> {}
+    }
+    mir_native_verify_call_args(args, function, index, tables.types, span)
+    bad_mask := route.signature.borrow_mask.len() != args.len()
+    loop borrowed in route.signature.borrow_mask { if borrowed -> bad_mask = true }
+    if route.signature.arity != args.len() || route.signature.max_arity != args.len() || bad_mask || route.abi != .Value -> return Err(mir_native_reference(function.id, "hardware route MirPreludeCallId({call.value}) has invalid argument metadata", span))
+    if op == {
+        .RegisterRead(profile, block, register, _) | .RegisterWrite(profile, block, register, _) -> {
+            if profile.len() == 0 -> return Err(mir_native_reference(function.id, "hardware profile ID is empty", span))
+            if block.len() == 0 -> return Err(mir_native_reference(function.id, "hardware register block is empty", span))
+            if register.len() == 0 -> return Err(mir_native_reference(function.id, "hardware register is empty", span))
+        }
+        .DMAStart(profile, channel, _) | .DMAWait(profile, channel, _) -> {
+            if profile.len() == 0 -> return Err(mir_native_reference(function.id, "hardware profile ID is empty", span))
+            if channel.len() == 0 -> return Err(mir_native_reference(function.id, "hardware DMA channel is empty", span))
+        }
+    }
+    return
+}

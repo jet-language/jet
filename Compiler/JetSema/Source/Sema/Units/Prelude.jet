@@ -1,0 +1,77 @@
+use jet_foundation.[Diagnostic, Item, UnitDimensionDecl, UnitFamilyDef, foundation_embedded_core, unit_family_distinct_defs, unit_family_type_name, Span]
+use jet_parser.[parse_generated_source]
+
+// Rust Bundle/Units.rs::inject_units_prelude: the only catalog is ordinary
+// Prelude/Units.jet, published by Foundation's canonical source generator.
+// This stage changes AST items only; it never adds a physical/loaded module.
+pub fn sema_units_catalog(diagnostics: &[Diagnostic]) -> [UnitFamilyDef] {
+    source :: foundation_embedded_core().unit_source()
+    parsed :: parse_generated_source(source.bytes())
+    loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic)
+    if sema_has_error_since(parsed.diagnostics, 0) -> return [UnitFamilyDef]{}
+    families := [UnitFamilyDef]{}
+    loop item in parsed.program.items { if item == .UnitFamily(family) -> &families.push(family) }
+    sema_units_resolve_standard(&families)
+    families
+}
+pub fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef]) Never! {
+    if input.program.no_prelude -> return
+    occupied := [String:Bool]{}
+    local_families := [String:Bool]{}
+    loop item in input.program.items {
+        if item == {
+            .UnitFamily(family) -> {
+                local_families[family.family] = true
+                loop definition in unit_family_distinct_defs(family) -> occupied[definition.name] = true
+            }
+            .Distinct(definition) -> occupied[definition.name] = true
+            .Struct(definition) -> occupied[definition.name] = true
+            .Enum(definition) -> occupied[definition.name] = true
+            .TypeAlias(definition) -> occupied[definition.name] = true
+            else -> {}
+        }
+    }
+    mentions :: sema_units_source_mentions(input.unit_source)
+    rows := [String:Int]{}
+    selected := [String:Bool]{}
+    queue := [Int]{}
+    loop (index, family) in catalog {
+        rows[family.family] = index
+        used := sema_units_identifier(mentions, family.family)
+        if !used { loop member in family.members { if sema_units_member(mentions, member.name) -> used = true } }
+        if used { selected[family.family] = true; &queue.push(index) }
+    }
+    // Transitive dimension dependencies, visiting each selected family once.
+    at := 0
+    loop at < queue.len() {
+        family :: catalog[queue[at]]
+        at += 1
+        if family.dimension == .Val(claim) {
+            if claim == .Derived(expression) {
+                dependencies := [String]{}
+                sema_units_dimension_dependencies(expression, &dependencies)
+                loop dependency in dependencies {
+                    if selected.get(dependency) != None -> next
+                    selected[dependency] = true
+                    if rows.get(dependency) == .Val(index) -> &queue.push(index)
+                }
+            }
+        }
+    }
+    loop standard in catalog {
+        if local_families.get(standard.family) != None || selected.get(standard.family) == None -> next
+        family := ~standard
+        members := loop member in family.members {
+            base :: if family.base == .Val(value) -> value.name == member.name else -> false
+            if (base || sema_units_member(mentions, member.name)) && occupied.get(unit_family_type_name(member.name)) == None -> member
+        }
+        family.members = members
+        anchor := Span?{None}
+        loop member in family.members {
+            if sema_units_member_span(mentions, member.name) == .Val(span) { anchor = Val(span); break }
+        }
+        family_anchor :: anchor ?? sema_units_identifier_span(mentions, family.family) ?? Span{start: 0, end: 0}
+        loop index in 0..<family.members.len() -> family.members[index].name_span = sema_units_member_span(mentions, family.members[index].name) ?? family_anchor
+        &input.program.items.push(Item.UnitFamily{value: family})
+    }
+}

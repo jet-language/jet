@@ -1,0 +1,26 @@
+// Outcome.rs:2445-2452 has no local unit tests; these pin its format! contract.
+#Test("list bounds preserves empty and nonempty wording") {
+    assert(jet_list_bounds_message("0", I64{0}) == "the list has 0 items, so position 0 doesn't exist")
+    assert(jet_list_bounds_message("1", I64{1}) == "the list has 1 items, so position 1 doesn't exist")
+    assert(jet_list_bounds_message("7", I64{7}) == "the list has 7 items, so position 7 doesn't exist")
+}
+
+#Test("list bounds preserves negative and extreme i64 indices") {
+    assert(jet_list_bounds_message("0", I64{-1}) == "the list has 0 items, so position -1 doesn't exist")
+    assert(jet_list_bounds_message("3", I64{-17}) == "the list has 3 items, so position -17 doesn't exist")
+    assert(jet_list_bounds_message("3", I64.MIN) == "the list has 3 items, so position -9223372036854775808 doesn't exist")
+    assert(jet_list_bounds_message("3", I64.MAX) == "the list has 3 items, so position 9223372036854775807 doesn't exist")
+}
+
+#Test("list bounds preserves arbitrary precision length displays") {
+    assert(jet_list_bounds_message("9223372036854775808", I64.MAX) == "the list has 9223372036854775808 items, so position 9223372036854775807 doesn't exist")
+    assert(jet_list_bounds_message("18446744073709551615", I64{0}) == "the list has 18446744073709551615 items, so position 0 doesn't exist")
+    assert(jet_list_bounds_message("1234567890123456789012345678901234567890", I64{-1}) == "the list has 1234567890123456789012345678901234567890 items, so position -1 doesn't exist")
+}
+
+#Test("list bounds preserves exact UTF-8 bytes without rewriting display") {
+    expected :: "the list has ０١é🚀 items, so position -2 doesn't exist"
+    actual :: jet_list_bounds_message("０١é🚀", I64{-2})
+    assert(actual.bytes() == expected.bytes())
+    assert(jet_list_bounds_message("0", I64{0}).bytes() == "the list has 0 items, so position 0 doesn't exist".bytes())
+}

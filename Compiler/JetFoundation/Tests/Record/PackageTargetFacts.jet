@@ -1,0 +1,218 @@
+// PackageIdentity::target_fact_pairs has no native inline test. These witnesses
+// pin the complete called projection; real Driver fold witnesses are in Queries/
+// PackageIdentity.jet. Native differential fixture generation remains Main's gate.
+fn package_target_test_dossier() -> MIRTargetDossier Never! {
+    MIRTargetDossier{machine: None, layer: MIRRuntimeLayer.Std, provider_identity: "hosted-default", closure_identity: "prelude-hosted-v1", linker_identity: "hosted-default", tier_identity: "dev", compiler_identity: "0.1.0", environment_identity: "hosted", dependency_identity: "none"}
+}
+fn package_target_test_snapshot() -> BuildFactSnapshot Never! {
+    BuildFactSnapshot{package_name: "demo", package_version: "1.2.3", os: MIROSTarget.Linux, target_triple: "x86_64-unknown-linux-gnu", target_dossier: package_target_test_dossier(), profile: "dev", artifact_build: false, stamp: BuildStamp{git: Val("abc"), dirty: false, toolchain: "0.1.0", at: "clock"}, contributions: [String:EffectiveFact]{}, settings: [String:BuildSettingFact]{}, setting_provenance: [String:[String]]{}}
+}
+fn package_target_test_bundle(snapshot: BuildFactSnapshot) -> PackageTargetFactBundle Never! {
+    PackageTargetFactBundle{active_os: snapshot.os, edition: "2026", web_partition_enforced: false, layer_ceiling: None, build_facts: snapshot}
+}
+#Test("target fact pairs preserve native order names and complete snapshot Debug bytes") {
+    snapshot :: package_target_test_snapshot()
+    expected :: "BuildFactSnapshot {{ package_name: \"demo\", package_version: \"1.2.3\", os: Linux, target_triple: \"x86_64-unknown-linux-gnu\", target_dossier: TargetDossier {{ machine: None, layer: Std, provider_identity: \"hosted-default\", closure_identity: \"prelude-hosted-v1\", linker_identity: \"hosted-default\", tier_identity: \"dev\", compiler_identity: \"0.1.0\", environment_identity: \"hosted\", dependency_identity: \"none\" }}, profile: \"dev\", artifact_build: false, stamp: BuildStamp {{ git: Some(\"abc\"), dirty: false, toolchain: \"0.1.0\", at: \"\" }}, contributions: {{}}, settings: {{}}, setting_provenance: {{}} }}"
+    expected_bytes :: expected.bytes()
+    assert_eq(build_snapshot_check_debug_bytes(snapshot), expected_bytes)
+    pairs :: package_identity_target_fact_pairs(package_target_test_bundle(snapshot))
+    assert_eq(pairs.map(pair -> pair.name), [String]{"os", "edition", "web_partition", "layer_ceiling", "build_facts"})
+    assert_eq(pairs.map(pair -> pair.value), [String]{"Linux", "2026", "false", "None", record_blob_key(expected_bytes.view(0..<expected_bytes.len()))})
+}
+#Test("target snapshot excludes only clock contribution and setting provenance") {
+    base := package_target_test_snapshot()
+    base.settings["cache_slots"] = BuildSettingFact{ty: "Int", value: BuildFactValue.Int(3)}
+    baseline :: package_identity_target_fact_pairs(package_target_test_bundle(base))
+    changed := ~base
+    changed.stamp.at = "different clock"
+    fact :: fact_resolve(fact_key_new("Build.Stamp.At"), [FactContribution]{fact_contribution_new("Build.Stamp.At", FactValue.Text("different clock"), SourceScope.Package, ContributionLayer.Declaration, "/checkout/other/.jet/lock")}) ?? panic("clock fixture resolution failed")
+    changed.contributions["Build.Stamp.At"] = fact ?? panic("clock writer absent")
+    changed.setting_provenance["cache_slots"] = [String]{"/other/checkout/package.jet"}
+    assert_eq(package_identity_target_fact_pairs(package_target_test_bundle(changed)), baseline)
+    assert_eq(package_key_target_facts_digest(package_identity_target_fact_pairs(package_target_test_bundle(changed))), package_key_target_facts_digest(baseline))
+    changed.settings["cache_slots"] = BuildSettingFact{ty: "Int", value: BuildFactValue.Int(4)}
+    assert(package_identity_target_fact_pairs(package_target_test_bundle(changed))[4].value != baseline[4].value)
+    assert_eq(base.stamp.at, "clock")
+}
+#Test("target snapshot BTreeMap order all native setting variants and quoted spans") {
+    snapshot := package_target_test_snapshot()
+    snapshot.settings["z"] = BuildSettingFact{ty: "Mode", value: BuildFactValue.Enum("Mode", "Fast")}
+    snapshot.settings["d"] = BuildSettingFact{ty: "Char", value: BuildFactValue.Char('\n')}
+    snapshot.settings["c"] = BuildSettingFact{ty: "Int", value: BuildFactValue.Int(-9223372036854775808)}
+    snapshot.settings["b"] = BuildSettingFact{ty: "Bool", value: BuildFactValue.Bool(true)}
+    snapshot.settings["a"] = BuildSettingFact{ty: "String", value: BuildFactValue.Text("Span {{ start: 4, end: 9 }}\n\"\\")}
+    snapshot.settings["e"] = BuildSettingFact{ty: "String?", value: BuildFactValue.OptionalText(Val("é"))}
+    snapshot.settings["f"] = BuildSettingFact{ty: "String?", value: BuildFactValue.OptionalText(None)}
+    rendered :: String.from_bytes(build_snapshot_check_debug_bytes(snapshot)) ?? panic("Debug UTF-8")
+    expected :: "settings: {{\"a\": BuildSettingFact {{ ty: \"String\", value: Text(\"Span {{ start: 4, end: 9 }}\\n\\\"\\\\\") }}, \"b\": BuildSettingFact {{ ty: \"Bool\", value: Bool(true) }}, \"c\": BuildSettingFact {{ ty: \"Int\", value: Int(-9223372036854775808) }}, \"d\": BuildSettingFact {{ ty: \"Char\", value: Char('\\n') }}, \"e\": BuildSettingFact {{ ty: \"String?\", value: OptionalText(Some(\"é\")) }}, \"f\": BuildSettingFact {{ ty: \"String?\", value: OptionalText(None) }}, \"z\": BuildSettingFact {{ ty: \"Mode\", value: Enum {{ type_name: \"Mode\", variant: \"Fast\" }} }}}}"
+    assert(rendered.contains(expected))
+    assert_eq(canonical_ast_strip_spans(rendered), build_snapshot_check_debug_bytes(snapshot))
+    reordered := package_target_test_snapshot()
+    keys :: [String]{"a", "b", "c", "d", "e", "f", "z"}
+    loop key in keys -> reordered.settings[key] = snapshot.settings[key]
+    assert_eq(build_snapshot_check_debug_bytes(reordered), build_snapshot_check_debug_bytes(snapshot))
+}
+#Test("every nonexcluded native snapshot field changes build fact digest") {
+    original :: package_target_test_snapshot()
+    baseline :: package_identity_target_fact_pairs(package_target_test_bundle(original))[4].value
+    loop field in 0..<12 {
+        snapshot := ~original
+        if field == {
+            0 -> snapshot.package_name = "other"
+            1 -> snapshot.package_version = "1.2.4"
+            2 -> snapshot.os = MIROSTarget.Windows
+            3 -> snapshot.target_triple = "aarch64-unknown-linux-gnu"
+            4 -> snapshot.target_dossier.provider_identity = "other provider"
+            5 -> snapshot.profile = "release"
+            6 -> snapshot.artifact_build = true
+            7 -> snapshot.stamp.git = None
+            8 -> snapshot.stamp.dirty = true
+            9 -> snapshot.stamp.toolchain = "other toolchain"
+            10 -> snapshot.settings["new"] = BuildSettingFact{ty: "Bool", value: BuildFactValue.Bool(false)}
+            11 -> snapshot.target_dossier.layer = MIRRuntimeLayer.Core
+            else -> panic("snapshot input case outside fixture domain")
+        }
+        assert(package_identity_target_fact_pairs(package_target_test_bundle(snapshot))[4].value != baseline)
+    }
+    bundle := package_target_test_bundle(original)
+    bundle.active_os = MIROSTarget.MacOS
+    bundle.edition = "next"
+    bundle.web_partition_enforced = true
+    bundle.layer_ceiling = Val(MIRRuntimeLayer.Alloc)
+    pairs :: package_identity_target_fact_pairs(bundle)
+    assert_eq(pairs[0].value, "MacOS")
+    assert_eq(pairs[1].value, "next")
+    assert_eq(pairs[2].value, "true")
+    assert_eq(pairs[3].value, "Some(Alloc)")
+    assert_eq(pairs[4].value, baseline)
+}
+// Original Facts.rs:821-840, including full profile/artifact/layout framing.
+#Test("target_dossier_identity_is_framed_and_profile_sensitive") {
+    hosted :: package_target_test_snapshot()
+    core := ~hosted
+    core.target_dossier.layer = MIRRuntimeLayer.Core
+    core.target_dossier.provider_identity = "board.uart"
+    core.target_dossier.closure_identity = "prelude-core-v1"
+    assert((build_snapshot_artifact_identity_bytes(hosted) ?? panic("hosted native artifact identity")) != (build_snapshot_artifact_identity_bytes(core) ?? panic("core native artifact identity")))
+    left := ~core.target_dossier
+    left.provider_identity = "ab"
+    left.closure_identity = "c"
+    right := ~core.target_dossier
+    right.provider_identity = "a"
+    right.closure_identity = "bc"
+    assert(mir_digest_target_dossier_bytes(left, "test-target") != mir_digest_target_dossier_bytes(right, "test-target"))
+}
+
+fn package_target_test_provider() -> MIRProviderContract Never! {
+    MIRProviderContract{provider: "device", sha256: "sha256:abc", provenance: "fixture", abi: MIRProviderABI{calling_convention: "C", version: "1"}, limits: MIRProviderLimits{max_request_bytes: Val(18446744073709551615), max_response_bytes: None, max_calls: Val(0)}}
+}
+#Test("native target Debug closure preserves selected machine hardware policy and option fields") {
+    provider :: package_target_test_provider()
+    machine := jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0")
+    machine.no_os = true
+    machine.memory = [MIRMemoryRegion]{MIRMemoryRegion{name: "registers", origin: 18446744073709551615, size: MIRByteSize{bytes: 16}, kind: MIRMemoryKind.MMIO, access: MIRMemoryAccess.Rw}}
+    machine.linker = MIRLinkerInput.File("script.ld", "sha256:ld")
+    machine.allocator = MIRAllocatorPolicy.Provider(provider)
+    machine.panic = MIRPanicPolicy.Report(provider)
+    machine.mmio = MIRMMIOPolicy.Provider(provider)
+    machine.wall_clock = MIRClockPolicy.NoClock
+    machine.monotonic_clock = MIRClockPolicy.Provider(provider)
+    machine.zone_data = MIRClockPolicy.Unspecified
+    machine.sleep = MIRClockPolicy.HostedDefault
+    machine.entropy = MIREntropyPolicy.Provider(provider)
+    machine.scheduler = MIRSchedulerPolicy.InterruptDriven(provider)
+    machine.byte_sink = MIRByteSinkPolicy.Provider(None, Val(provider), None)
+    machine.startup = MIRStartupPolicy.Generated(provider)
+    machine.startup_entry = "run"
+    machine.startup_vectors = "vectors"
+    machine.startup_abi = provider.abi
+    machine.startup_placement = "flash"
+    machine.hardware = MIRTargetHardwareFacts{
+        svd: Val(MIRSVDProvenance{source: "board.svd", sha256: "sha256:svd"}),
+        register_blocks: [MIRTargetRegisterBlockFact]{MIRTargetRegisterBlockFact{name: "UART", base: 4096, size: MIRByteSize{bytes: 32}, registers: [MIRTargetRegisterFact]{MIRTargetRegisterFact{name: "DR", offset: 0, width: MIRRegisterWidth.U32, access: MIRTargetRegisterAccessMode.ReadWrite, volatile: true}}}},
+        interrupts: [MIRTargetInterruptFact]{MIRTargetInterruptFact{name: "UART", vector: 65535, forbidden_effects: [String]{"Time.Wait", "Mem.Alloc", "Time.Wait"}, bounded: true}},
+        dma_channels: [MIRTargetDMAChannelFact]{MIRTargetDMAChannelFact{name: "TX", channel: 65535, transfer_width: MIRRegisterWidth.U8, ownership: MIRTargetDMAOwnership.Transfer, max_transfer_bytes: Val(18446744073709551615)}},
+    }
+    machine.programmers = [MIRTargetProgrammerFacts]{MIRTargetProgrammerFacts{adapter: MIRTargetProgrammerAdapter.ProbeRs, executable: "probe-rs", chip: Val("chip"), interface: None, config: [String]{"z", "a"}, speed_khz: Val(4294967295), reset: false, machine: None, cpu: Val("cpu")}}
+    machine.audit = MIRAuditPolicy{build_artifact: true, dossier_lens: false}
+    dossier := package_target_test_dossier()
+    dossier.machine = Val(machine)
+    bytes := [U8]{}
+    build_snapshot_write_target_dossier<[U8], CanonicalDebugBytes>(CanonicalDebugBytes.Writer, &bytes, dossier)
+    text :: String.from_bytes(bytes) ?? panic("typed target Debug UTF-8")
+    native_head :: "TargetDossier {{ machine: Some(TargetMachine {{ name: \"hosted\", triple: \"x86_64-unknown-linux-gnu\", layout: LayoutCapabilityFacts {{"
+    assert(text.starts_with(native_head))
+    native_memory :: "MemoryRegion {{ name: \"registers\", origin: 18446744073709551615, size: ByteSize {{ bytes: 16 }}, kind: Mmio, access: Rw }}"
+    assert(text.contains(native_memory))
+    native_linker :: "linker: File {{ path: \"script.ld\", sha256: \"sha256:ld\" }}"
+    assert(text.contains(native_linker))
+    native_provider :: "ProviderContract {{ provider: \"device\", sha256: \"sha256:abc\", provenance: \"fixture\", abi: ProviderAbi {{ calling_convention: \"C\", version: \"1\" }}, limits: ProviderLimits {{ max_request_bytes: Some(18446744073709551615), max_response_bytes: None, max_calls: Some(0) }} }}"
+    assert(text.contains(native_provider))
+    native_clock :: "wall_clock: None, monotonic_clock: Provider {{"
+    assert(text.contains(native_clock))
+    native_hardware :: "TargetHardwareFacts {{ svd: Some(SvdProvenance {{ source: \"board.svd\", sha256: \"sha256:svd\" }})"
+    assert(text.contains(native_hardware))
+    native_effects :: "forbidden_effects: {{\"Mem.Alloc\", \"Time.Wait\"}}"
+    assert(text.contains(native_effects))
+    native_dma :: "TargetDmaChannelFact {{ name: \"TX\", channel: 65535, transfer_width: U8, ownership: Transfer, max_transfer_bytes: Some(18446744073709551615) }}"
+    assert(text.contains(native_dma))
+    native_programmer :: "TargetProgrammerFacts {{ adapter: ProbeRs, executable: \"probe-rs\", chip: Some(\"chip\"), interface: None, config: [\"z\", \"a\"], speed_khz: Some(4294967295), reset: false, machine: None, cpu: Some(\"cpu\") }}"
+    assert(text.contains(native_programmer))
+    hash := mir_sha256_new()
+    build_snapshot_write_target_dossier<MIRSHA256, CanonicalDebugSHA256>(CanonicalDebugSHA256.Writer, &hash, dossier)
+    digest :: mir_sha256_finish(^hash)
+    assert_eq(mir_sha256_hex_bytes(digest.view(0..<digest.len())), record_blob_key(bytes.view(0..<bytes.len())))
+    snapshot := package_target_test_snapshot()
+    snapshot.target_dossier = dossier
+    all_bytes :: build_snapshot_check_debug_bytes(snapshot)
+    assert_eq(package_identity_target_fact_pairs(package_target_test_bundle(snapshot))[4].value, record_blob_key(all_bytes.view(0..<all_bytes.len())))
+}
+#Test("native target Debug covers every allocator policy variant without Jet enum aliases") {
+    provider :: package_target_test_provider()
+    values :: [MIRAllocatorPolicy]{MIRAllocatorPolicy.HostedDefault, MIRAllocatorPolicy.Unspecified, MIRAllocatorPolicy.NoAllocator, MIRAllocatorPolicy.Provider(provider), MIRAllocatorPolicy.Fixed("ram", MIRByteSize{bytes: 64}), MIRAllocatorPolicy.Counting(None), MIRAllocatorPolicy.Counting(Val(MIRByteSize{bytes: 128}))}
+    expected :: [String]{"HostedDefault", "Unspecified", "None", "Provider {{", "Fixed {{ region: \"ram\", size: ByteSize {{ bytes: 64 }} }}", "Counting {{ cap: None }}", "Counting {{ cap: Some(ByteSize {{ bytes: 128 }}) }}"}
+    loop (index, value) in values {
+        bytes := [U8]{}
+        target_debug_allocator<[U8], CanonicalDebugBytes>(CanonicalDebugBytes.Writer, &bytes, value)
+        text :: String.from_bytes(bytes) ?? panic("allocator Debug UTF-8")
+        if index == 3 -> assert(text.starts_with(expected[index])) else -> assert_eq(text, expected[index])
+    }
+}
+
+#Test("every native target dossier input independently invalidates checked target pairs") {
+    baseline :: package_target_test_snapshot()
+    pairs :: package_identity_target_fact_pairs(package_target_test_bundle(baseline))
+    loop field in 0..<8 {
+        snapshot := ~baseline
+        if field == {
+            0 -> snapshot.target_dossier.layer = MIRRuntimeLayer.Core
+            1 -> snapshot.target_dossier.provider_identity = "target-providers-v1:sha256:provider-b"
+            2 -> snapshot.target_dossier.closure_identity = "prelude-hosted-v2:sha256:closure-b"
+            3 -> snapshot.target_dossier.linker_identity = "lld:sha256:linker-b"
+            4 -> snapshot.target_dossier.tier_identity = "aot"
+            5 -> snapshot.target_dossier.compiler_identity = "jet@next"
+            6 -> snapshot.target_dossier.environment_identity = "wasi"
+            7 -> snapshot.target_dossier.dependency_identity = "deps:sha256:dependency-b"
+            else -> panic("dossier fixture field outside native shape")
+        }
+        changed :: package_identity_target_fact_pairs(package_target_test_bundle(snapshot))
+        assert_eq(changed[0..<4], pairs[0..<4])
+        assert(changed[4].value != pairs[4].value)
+    }
+}
+#Test("artifact identity append retains native mode order selected layout and missing-triple gate") {
+    snapshot := package_target_test_snapshot()
+    machine := jet_target_machine_hosted(snapshot.target_triple, "0.1.0")
+    machine.layout.execution_modes = [String]{"z", "dev", "z", "a"}
+    snapshot.target_dossier.machine = Val(machine)
+    bytes :: build_snapshot_artifact_identity_bytes(snapshot) ?? panic("selected artifact bytes")
+    appended := [U8]{9, 8, 7}
+    build_snapshot_append_artifact_identity_bytes(snapshot, &appended) ?? panic("selected artifact append")
+    assert_eq(appended[0..<3], [U8]{9, 8, 7})
+    assert_eq(appended[3..<appended.len()], bytes)
+    other := ~snapshot
+    other.target_dossier.tier_identity = "jit"
+    assert((build_snapshot_artifact_identity_bytes(other) ?? panic("tier artifact bytes")) != bytes)
+    other.target_triple = ""
+    assert_eq(build_snapshot_artifact_identity_bytes(other), Err(BuildFactSnapshotIdentityError.MissingNativeTargetTriple))
+}

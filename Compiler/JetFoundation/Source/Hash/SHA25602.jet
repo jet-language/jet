@@ -1,0 +1,491 @@
+// SHA256.rs:85–885,963–1258. Assemble into the existing Foundation SHA256
+// owner; MIRSHA256 is the sole compression and incremental-state mechanism.
+// Native resources are the published retained descriptor ABI, NOT Rust bridges.
+// Activation is gated by #4494 (native resources/loans/exception cleanup),
+// #4483 (checked target selection), #4409 (IOError kind fidelity), #4500
+// (private source retention). Scope exit must drop retained owners on EVERY
+// return/error/panic rail, just as std File; happy-path close is not a substitute.
+use core.files.runtime.kernel_path_components as sha256_paths
+use core.files.runtime.descriptor_metadata as sha256_metadata
+use core.files.host.retained_descriptor as sha256_io
+use core.sys.target as sha256_target
+use core.sys.host.os_path_ingress as sha256_ingress
+use core.sys.host.retained_clock as sha256_clock
+use core.process.host.native_process as sha256_process
+use core.time.runtime.kernel_wide_time as sha256_wide
+
+// MAX_TREE_* are canonical Foundation Syntax/Spellings.jet constants; Main
+// moves the existing Jetpack Syntax values there, no duplicate constant owner.
+fn sha256_io_context(operation: IOOperation, path: sha256_paths.OSPath, cause: String) -> IOContext Never! {
+    IOContext{operation: operation, resource: Val(sha256_paths.display(path)), os_code: None, cause: Val(cause)}
+}
+fn sha256_invalid_input(path: sha256_paths.OSPath, cause: String) -> IOError Never! {
+    IOError.InvalidInput(sha256_io_context(.Read, path, cause))
+}
+fn sha256_permission(path: sha256_paths.OSPath, cause: String) -> IOError Never! {
+    IOError.PermissionDenied(sha256_io_context(.Read, path, cause))
+}
+fn sha256_other(path: sha256_paths.OSPath, cause: String) -> IOError Never! {
+    IOError.Other(sha256_io_context(.Read, path, cause))
+}
+fn sha256_same_modified(left: sha256_metadata.NativeModifiedTime?, right: sha256_metadata.NativeModifiedTime?) -> Bool Never! {
+    if left == {
+        .None -> right == None
+        .Val(a) -> {
+            b :: right ?? return false
+            if a == {
+                .Unix(seconds, nanos) -> if b == .Unix(other_seconds, other_nanos) -> seconds == other_seconds && nanos == other_nanos else -> false
+                .Windows(time) -> if b == .Windows(other_time) -> time == other_time else -> false
+            }
+        }
+    }
+}
+fn same_file_identity(left: sha256_metadata.DescriptorStat, right: sha256_metadata.DescriptorStat) -> Bool Never! {
+    if left.size != right.size || !sha256_same_modified(left.modified(), right.modified()) -> return false
+    if sha256_target.selected_family() == .Unix -> return sha256_metadata.file_id_equal(left.file_id, right.file_id)
+    // Exact std FileType equality; no boolean/mtime/hash identity substitute.
+    sha256_metadata.file_type_equal(left, right)
+}
+fn is_single_link(metadata: sha256_metadata.DescriptorStat) -> Bool Never! {
+    family :: sha256_target.selected_family()
+    if family != .Unix && family != .Windows -> return false
+    metadata.nlink == (U64{1})
+}
+fn sha256_rooted_available() -> Bool Never! {
+    os :: sha256_target.selected_os()
+    os == .Linux || os == .Android || os == .MacOS || os == .IOS
+}
+fn add_nofollow_flags(options: &sha256_io.OpenOptions) -> Bool Never! {
+    if sha256_target.selected_os() == {
+        .Linux -> { options.custom_flags = Val(U32{0o2400000}); options.nofollow = true; options.cloexec = true; true }
+        .Android -> { options.custom_flags = Val(U32{0o2400000}); options.nofollow = true; options.cloexec = true; true }
+        .MacOS -> { options.custom_flags = Val(U32{0x01000100}); options.nofollow = true; options.cloexec = true; true }
+        .IOS -> { options.custom_flags = Val(U32{0x01000100}); options.nofollow = true; options.cloexec = true; true }
+        .Windows -> { options.custom_flags = Val(U32{0x00200000}); options.open_reparse_point = true; true }
+        else -> false
+    }
+}
+fn sha256_read_options() -> sha256_io.OpenOptions Never! {
+    sha256_io.OpenOptions{nofollow: false, cloexec: false, open_reparse_point: false, read: Val(true), write: None, share_mode: None, custom_flags: None}
+}
+struct SHA256NofollowFile {
+    file: sha256_io.FileReader
+    expected: sha256_metadata.DescriptorStat
+}
+fn open_regular_nofollow(path: sha256_paths.OSPath) -[FS.Read]> SHA256NofollowFile IOError! {
+    expected :: sha256_io.symlink_metadata(path)
+    if expected.is_symlink || !expected.is_file -> return Err(IOError.InvalidData(sha256_io_context(.Read, path, "file is not a regular file")))
+    options := sha256_read_options()
+    if !add_nofollow_flags(&options) -> return Err(IOError.Unsupported(sha256_io_context(.Read, path, "no-follow regular-file reads are unavailable on this platform")))
+    file :: sha256_io.open_reader(path, options)
+    opened :: file.stat()
+    if !opened.is_file || !same_file_identity(expected, opened) -> return Err(sha256_other(path, "file changed before reading"))
+    Ok(SHA256NofollowFile{file: file, expected: expected})
+}
+fn sha256_buffer() -> [U8] Never! {
+    buffer := [U8]{}
+    loop _ in 0..<65536 -> &buffer.push(U8{0})
+    buffer
+}
+pub fn sha256_file_hex(path: sha256_paths.OSPath) -[FS.Read]> String IOError! {
+    opened :: open_regular_nofollow(path)
+    if opened.expected.size > MAX_TREE_FILE_BYTES -> return Err(IOError.InvalidData(sha256_io_context(.Read, path, "file exceeds the tree hashing bound")))
+    hasher := mir_sha256_new()
+    buffer := sha256_buffer()
+    actual := U64{0}
+    remaining := MAX_TREE_FILE_BYTES.saturating_add(U64{1})
+    loop remaining != (U64{0}) {
+        limit :: if remaining < (U64{65536}) -> Int.from_u64(remaining) else -> 65536
+        count :: opened.file.read_into(&buffer, limit)
+        if count == 0 -> break
+        actual = actual.saturating_add(U64{count})
+        remaining -= U64{count}
+        if actual > MAX_TREE_FILE_BYTES -> return Err(IOError.InvalidData(sha256_io_context(.Read, path, "file grew beyond the tree hashing bound")))
+        mir_sha256_update(&hasher, buffer[0..<count])
+    }
+    after :: opened.file.stat()
+    path_after :: sha256_io.symlink_metadata(path)
+    if actual != opened.expected.size || !same_file_identity(opened.expected, after) || !same_file_identity(opened.expected, path_after) -> return Err(sha256_other(path, "file changed while hashing"))
+    digest :: mir_sha256_finish(^hasher)
+    Ok(mir_sha256_hex_bytes(digest[0..<digest.len()]))
+}
+pub fn read_file_nofollow(path: sha256_paths.OSPath, max_bytes: U64) -[FS.Read]> [U8] IOError! {
+    if max_bytes > MAX_TREE_FILE_BYTES -> return Err(sha256_invalid_input(path, "file read bound exceeds the tree hashing bound"))
+    opened :: open_regular_nofollow(path)
+    if opened.expected.size > max_bytes -> return Err(IOError.InvalidData(sha256_io_context(.Read, path, "file exceeds its read bound")))
+    content :: opened.file.read_bounded(max_bytes.saturating_add(U64{1}))
+    if U64{content.len()} > max_bytes -> return Err(IOError.InvalidData(sha256_io_context(.Read, path, "file exceeds its read bound")))
+    after :: opened.file.stat()
+    path_after :: sha256_io.symlink_metadata(path)
+    if U64{content.len()} != opened.expected.size || !same_file_identity(opened.expected, after) || !same_file_identity(opened.expected, path_after) -> return Err(sha256_other(path, "file changed while reading"))
+    Ok(content)
+}
+
+#Error
+pub enum TreeHashError {
+    Io(path: sha256_paths.OSPath, detail: String)
+    Symlink(sha256_paths.OSPath)
+    Special(sha256_paths.OSPath)
+    InvalidName(sha256_paths.OSPath)
+    TooLarge(path: sha256_paths.OSPath, limit: U64)
+
+    pub fn message(self) -> String Never! {
+        if self == {
+            .Io(path, detail) -> "could not read `{sha256_paths.display(path)}`: {detail}"
+            .Symlink(path) -> "`{sha256_paths.display(path)}` is a symlink"
+            .Special(path) -> "`{sha256_paths.display(path)}` is not a regular file or directory"
+            .InvalidName(path) -> "`{sha256_paths.display(path)}` has a non-UTF-8 name"
+            .TooLarge(path, limit) -> "`{sha256_paths.display(path)}` exceeds the {limit}-byte tree hashing bound"
+        }
+    }
+}
+struct TreeFile {
+    relative: String
+    path: sha256_paths.OSPath
+    metadata: sha256_metadata.DescriptorStat
+}
+fn sha256_tree_io(path: sha256_paths.OSPath, error: IOError) -> TreeHashError Never! {
+    TreeHashError.Io{path: path, detail: "{error}"}
+}
+fn sha256_path_utf8(path: sha256_paths.OSPath, span: sha256_paths.PathSpan) -> String? Never! {
+    // Checked original raw encoding; no display/lossy conversion in identity.
+    String.from_bytes(path.encoded[span.start..<span.end])
+}
+fn collect_tree_files(dir: sha256_paths.OSPath, root: sha256_paths.OSPath, out: &[TreeFile], depth: Int, node_count: &Int) -[FS.Read]> TreeHashError! {
+    rd :: sha256_io.read_dir(dir) ?? return Err(sha256_tree_io(dir, err))
+    loop {
+        entry :: (rd.next() ?? return Err(sha256_tree_io(dir, err))) ?? break
+        path :: entry.path()
+        if node_count >= MAX_TREE_NODES -> return Err(TreeHashError.TooLarge{path: path, limit: U64{MAX_TREE_NODES}})
+        node_count += 1
+        span :: sha256_paths.file_name_span(path) ?? return Err(TreeHashError.InvalidName(path))
+        name := sha256_path_utf8(path, span) ?? return Err(TreeHashError.InvalidName(path)) // #4303
+        metadata :: sha256_io.symlink_metadata(path) ?? return Err(sha256_tree_io(path, err))
+        if metadata.is_symlink -> return Err(TreeHashError.Symlink(path))
+        if !metadata.is_dir && !metadata.is_file -> return Err(TreeHashError.Special(path))
+        if name.starts_with(".") || name == "build" || name == "target" -> next
+        if metadata.is_dir {
+            if depth >= MAX_TREE_DEPTH -> return Err(TreeHashError.TooLarge{path: path, limit: U64{MAX_TREE_DEPTH}})
+            collect_tree_files(path, root, &out, depth + 1, &node_count)
+        } else {
+            if out.len() >= MAX_TREE_FILES -> return Err(TreeHashError.TooLarge{path: root, limit: U64{MAX_TREE_FILES}})
+            relative_span :: sha256_paths.strip_prefix_span(path, root) ?? return Err(TreeHashError.InvalidName(path))
+            relative := sha256_path_utf8(path, relative_span) ?? return Err(TreeHashError.InvalidName(path)) // #4303
+            &out.push(TreeFile{relative: relative.replace("\\", "/"), path: path, metadata: metadata})
+        }
+    }
+}
+fn hash_regular_nofollow(path: sha256_paths.OSPath, expected: sha256_metadata.DescriptorStat, hasher: &MIRSHA256, total_bytes: &U64) -[FS.Read]> TreeHashError! {
+    options := sha256_read_options()
+    if !add_nofollow_flags(&options) -> return Err(TreeHashError.Io{path: path, detail: "no-follow regular-file reads are unavailable on this platform"})
+    file :: sha256_io.open_reader(path, options) ?? return Err(sha256_tree_io(path, err))
+    opened :: file.stat() ?? return Err(sha256_tree_io(path, err))
+    if !opened.is_file || !same_file_identity(expected, opened) -> return Err(TreeHashError.Io{path: path, detail: "file changed before hashing"})
+    if opened.size > MAX_TREE_FILE_BYTES -> return Err(TreeHashError.TooLarge{path: path, limit: MAX_TREE_FILE_BYTES})
+    next_total :: total_bytes.checked_add(opened.size) ?? return Err(TreeHashError.TooLarge{path: path, limit: MAX_TREE_TOTAL_BYTES})
+    if next_total > MAX_TREE_TOTAL_BYTES -> return Err(TreeHashError.TooLarge{path: path, limit: MAX_TREE_TOTAL_BYTES})
+    length := [U8]{}
+    loop shift in [Int]{56, 48, 40, 32, 24, 16, 8, 0} -> &length.push(U8.from_u64((opened.size >> shift) & U64{255}) ?? panic("masked byte"))
+    mir_sha256_update(&hasher, length[0..<8])
+    buffer := sha256_buffer()
+    actual := U64{0}
+    remaining := opened.size.saturating_add(U64{1})
+    loop remaining != (U64{0}) {
+        limit :: if remaining < (U64{65536}) -> Int.from_u64(remaining) else -> 65536
+        count :: file.read_into(&buffer, limit) ?? return Err(sha256_tree_io(path, err))
+        if count == 0 -> break
+        actual = actual.saturating_add(U64{count})
+        remaining -= U64{count}
+        mir_sha256_update(&hasher, buffer[0..<count])
+        if actual > opened.size -> return Err(TreeHashError.Io{path: path, detail: "file grew while hashing"})
+    }
+    after :: file.stat() ?? return Err(sha256_tree_io(path, err))
+    if !same_file_identity(expected, after) || after.size != actual -> return Err(TreeHashError.Io{path: path, detail: "file changed while hashing"})
+    total_bytes = next_total
+}
+pub fn try_tree_hash(root: sha256_paths.OSPath) -[FS.Read]> String TreeHashError! {
+    entries := [TreeFile]{}
+    metadata :: sha256_io.symlink_metadata(root) ?? return Err(sha256_tree_io(root, err))
+    if metadata.is_symlink -> return Err(TreeHashError.Symlink(root))
+    if !metadata.is_dir -> return Err(TreeHashError.Special(root))
+    nodes := 0
+    collect_tree_files(root, root, &entries, 0, &nodes)
+    &entries.sort_by(entry -> entry.relative)
+    hasher := mir_sha256_new()
+    total := U64{0}
+    nul :: TEXT_NUL.bytes()
+    loop entry in entries {
+        relative :: entry.relative.bytes()
+        mir_sha256_update(&hasher, relative[0..<relative.len()])
+        mir_sha256_update(&hasher, nul[0..<nul.len()])
+        hash_regular_nofollow(entry.path, entry.metadata, &hasher, &total)
+    }
+    digest :: mir_sha256_finish(^hasher)
+    Ok("sha256-{mir_sha256_hex_bytes(digest[0..<digest.len()])}")
+}
+pub fn tree_hash(root: sha256_paths.OSPath) -[FS.Read]> String Never! {
+    try_tree_hash(root) ?? panic("cannot hash source tree `{sha256_paths.display(root)}`: {err.message()}")
+}
+
+// Rooted authority deliberately differs from ordinary file hashing: every
+// ancestor is held, root/relative ParentDir is forbidden, and nlink must be one.
+struct SHA256Authority {
+    directories: [sha256_io.Directory]
+    directory_paths: [sha256_paths.OSPath]
+    file: sha256_io.FileReader
+    file_path: sha256_paths.OSPath
+    identity: sha256_metadata.DescriptorStat
+}
+struct SHA256Root {
+    directories: [sha256_io.Directory]
+    paths: [sha256_paths.OSPath]
+}
+fn same_directory(left: sha256_metadata.DescriptorStat, right: sha256_metadata.DescriptorStat) -> Bool Never! {
+    left.is_dir && right.is_dir && sha256_metadata.file_id_equal(left.file_id, right.file_id)
+}
+fn same_identity(left: sha256_metadata.DescriptorStat, right: sha256_metadata.DescriptorStat) -> Bool Never! {
+    sha256_metadata.file_id_equal(left.file_id, right.file_id) && left.size == right.size && left.nlink == right.nlink && sha256_same_modified(left.modified(), right.modified())
+}
+fn normal_components(relative: sha256_paths.OSPath) -> [sha256_paths.PathComponent] IOError! {
+    values := [sha256_paths.PathComponent]{}
+    cursor := sha256_paths.components(relative)
+    loop {
+        component :: sha256_paths.next(relative, &cursor) ?? break
+        if component.kind == .Normal -> &values.push(component)
+        else if component.kind != .CurDir -> return Err(sha256_invalid_input(relative, "file authority path must be relative and normalized"))
+    }
+    Ok(values)
+}
+fn sha256_validate_name(path: sha256_paths.OSPath, name: sha256_paths.PathComponent) IOError! {
+    loop i in name.span.start..<name.span.end {
+        if path.encoded[i] == (U8{0}) -> return Err(sha256_invalid_input(path, "file authority path contains NUL"))
+    }
+}
+fn sha256_rooted_options(directory: Bool) -> sha256_io.OpenOptions Never! {
+    os :: sha256_target.selected_os()
+    linux :: os == .Linux || os == .Android
+    flags :: if directory -> if linux -> U32{0o2600000} else -> U32{0x01100100}
+             else -> if linux -> U32{0o2404000} else -> U32{0x01000104}
+    sha256_io.OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true), write: None, share_mode: None, custom_flags: Val(flags)}
+}
+fn sha256_rooted_open_error(path: sha256_paths.OSPath, error: IOError) -> IOError Never! {
+    // Raw ELOOP is captured by the sole IOError producer BEFORE any other call.
+    code :: if error == {
+        .InvalidInput(context) -> context.os_code
+        .InvalidData(context) -> context.os_code
+        .NotFound(context) -> context.os_code
+        .PermissionDenied(context) -> context.os_code
+        .AlreadyExists(context) -> context.os_code
+        .Unsupported(context) -> context.os_code
+        .TimedOut(context) -> context.os_code
+        .Cancelled(context) -> context.os_code
+        .Closed(context) -> context.os_code
+        .Protocol(context) -> context.os_code
+        .Other(context) -> context.os_code
+        .ResourceLimit(_) -> None
+    }
+    os :: sha256_target.selected_os()
+    loop_code :: if os == .Linux || os == .Android -> I64{40} else -> I64{62}
+    if code == Val(loop_code) -> return sha256_permission(path, "file authority path contains a symlink")
+    error
+}
+fn open_at(parent: &sha256_io.Directory, path: sha256_paths.OSPath, name: sha256_paths.PathComponent) -[FS.Read]> sha256_io.Directory IOError! {
+    sha256_validate_name(path, name)
+    parent.open_directory(path, name, sha256_rooted_options(true)) ?? return Err(sha256_rooted_open_error(path, err))
+}
+fn sha256_open_child_reader(parent: &sha256_io.Directory, path: sha256_paths.OSPath, name: sha256_paths.PathComponent) -[FS.Read]> sha256_io.FileReader IOError! {
+    sha256_validate_name(path, name)
+    parent.open_reader(path, name, sha256_rooted_options(false)) ?? return Err(sha256_rooted_open_error(path, err))
+}
+fn open_root(root: sha256_paths.OSPath) -[FS.Read]> SHA256Root IOError! {
+    initial_path :: sha256_paths.from_text(if sha256_paths.is_absolute(root) -> "/" else -> ".", root.platform)
+    initial :: sha256_io.open_directory(initial_path, sha256_rooted_options(true))
+    directories := [sha256_io.Directory]{initial}
+    paths := [sha256_paths.OSPath]{initial_path}
+    current := initial_path
+    cursor := sha256_paths.components(root)
+    loop {
+        component :: sha256_paths.next(root, &cursor) ?? break
+        if component.kind == .RootDir || component.kind == .CurDir -> next
+        if component.kind != .Normal -> return Err(sha256_invalid_input(root, "file authority root must not contain parent components"))
+        child :: open_at(&directories[directories.len() - 1], root, component)
+        if !child.stat().is_dir -> return Err(sha256_permission(root, "file authority root component is not a directory"))
+        sha256_paths.push_span(&current, root, component.span)
+        &directories.push(child)
+        &paths.push(current)
+    }
+    Ok(SHA256Root{directories: directories, paths: paths})
+}
+fn sha256_authority_open(root: sha256_paths.OSPath, relative: sha256_paths.OSPath) -[FS.Read]> SHA256Authority IOError! {
+    components :: normal_components(relative)
+    held := open_root(root)
+    if components.is_empty() -> return Err(sha256_invalid_input(relative, "file authority path is empty"))
+    current := held.paths[held.paths.len() - 1]
+    loop i in 0..<components.len() - 1 {
+        child :: open_at(&held.directories[held.directories.len() - 1], relative, components[i])
+        if !child.stat().is_dir -> return Err(sha256_permission(relative, "file authority path component is not a directory"))
+        sha256_paths.push_span(&current, relative, components[i].span)
+        &held.directories.push(child)
+        &held.paths.push(current)
+    }
+    final :: components[components.len() - 1]
+    file :: sha256_open_child_reader(&held.directories[held.directories.len() - 1], relative, final)
+    metadata :: file.stat()
+    if !metadata.is_file -> return Err(sha256_permission(relative, "file authority input is not a regular file"))
+    if !is_single_link(metadata) -> return Err(sha256_permission(relative, "file authority input has multiple hard links"))
+    sha256_paths.push_span(&current, relative, final.span)
+    Ok(SHA256Authority{directories: held.directories, directory_paths: held.paths, file: file, file_path: current, identity: metadata})
+}
+fn ensure_paths_current(authority: &SHA256Authority) -[FS.Read]> IOError! {
+    loop i in 0..<authority.directories.len() {
+        path :: authority.directory_paths[i]
+        path_metadata :: sha256_io.symlink_metadata(path)
+        held_metadata :: authority.directories[i].stat()
+        if !same_directory(path_metadata, held_metadata) -> return Err(sha256_other(path, "file authority directory moved while it was held"))
+    }
+    path_metadata :: sha256_io.symlink_metadata(authority.file_path)
+    if !path_metadata.is_file -> return Err(sha256_other(authority.file_path, "file authority input is not a regular file"))
+    if !is_single_link(path_metadata) -> return Err(sha256_other(authority.file_path, "file authority input has multiple hard links"))
+    if !same_identity(authority.identity, path_metadata) -> return Err(sha256_other(authority.file_path, "file authority input moved while it was held"))
+}
+fn sha256_authority_read_bounded(authority: ^SHA256Authority, max_bytes: U64) -[FS.Read]> [U8] IOError! {
+    held := ^authority
+    ensure_paths_current(&held)
+    if held.identity.size > max_bytes -> return Err(IOError.InvalidData(sha256_io_context(.Read, held.file_path, "file exceeds its read bound")))
+    bytes :: held.file.read_bounded(max_bytes.saturating_add(U64{1}))
+    if U64{bytes.len()} > max_bytes -> return Err(IOError.InvalidData(sha256_io_context(.Read, held.file_path, "file exceeds its read bound")))
+    final :: held.file.stat()
+    // Rust intentionally normalizes ANY final path-recheck failure to Other.
+    current :: if ensure_paths_current(&held) == { .Ok(_) -> true; .Err(_) -> false }
+    if !current || !final.is_file || !is_single_link(final) || !same_identity(held.identity, final) || final.size != (U64{bytes.len()}) -> return Err(sha256_other(held.file_path, "file changed while it was being read"))
+    Ok(bytes)
+}
+pub fn read_file_nofollow_at_root(root: sha256_paths.OSPath, relative: sha256_paths.OSPath, max_bytes: U64) -[FS.Read]> [U8] IOError! {
+    if !sha256_rooted_available() -> return Err(IOError.Unsupported(sha256_io_context(.Read, relative, "descriptor-relative no-follow file access is unavailable on this platform")))
+    if max_bytes > MAX_TREE_FILE_BYTES -> return Err(sha256_invalid_input(relative, "file read bound exceeds the tree hashing bound"))
+    authority :: sha256_authority_open(root, relative)
+    sha256_authority_read_bounded(^authority, max_bytes)
+}
+fn inspect_destination(parent: &sha256_io.Directory, path: sha256_paths.OSPath, name: sha256_paths.PathComponent) -[FS.Read]> sha256_metadata.FileID? IOError! {
+    file :: sha256_open_child_reader(parent, path, name) ?? {
+        if err == .NotFound(_) -> return Ok(None)
+        return Err(err)
+    }
+    metadata :: file.stat()
+    if !metadata.is_file -> return Err(sha256_permission(path, "file authority publication target is not a regular file"))
+    if !is_single_link(metadata) -> return Err(sha256_permission(path, "file authority publication target has multiple hard links"))
+    Ok(Val(metadata.file_id))
+}
+fn sha256_optional_id_equal(left: sha256_metadata.FileID?, right: sha256_metadata.FileID?) -> Bool Never! {
+    if left == {
+        .None -> right == None
+        .Val(value) -> { other :: right ?? return false; sha256_metadata.file_id_equal(value, other) }
+    }
+}
+fn ensure_directories_current(root: sha256_paths.OSPath, relative: sha256_paths.OSPath, components: View<sha256_paths.PathComponent>, root_count: Int, directories: View<sha256_io.Directory>) -[FS.Read]> IOError! {
+    strict :: open_root(root)
+    if strict.directories.is_empty() -> return Err(sha256_other(root, "file authority root is empty"))
+    if root_count == 0 -> return Err(sha256_other(root, "file authority root has no held directory"))
+    if root_count > directories.len() -> return Err(sha256_other(root, "file authority root depth changed"))
+    strict_root :: strict.directories[strict.directories.len() - 1].stat()
+    held_root :: directories[root_count - 1].stat()
+    if !same_directory(strict_root, held_root) -> return Err(sha256_other(root, "file authority root moved while it was held"))
+    current := strict.directories[strict.directories.len() - 1].dup()
+    loop i in 0..<components.len() - 1 {
+        next :: open_at(&current, relative, components[i])
+        current = next
+        if root_count + i >= directories.len() -> return Err(sha256_other(relative, "file authority parent depth changed"))
+        found :: current.stat()
+        held :: directories[root_count + i].stat()
+        if !same_directory(found, held) -> return Err(sha256_other(relative, "file authority publication parent moved while it was held"))
+    }
+}
+fn create_child_file(parent: &sha256_io.Directory, path: sha256_paths.OSPath, name: sha256_paths.PathComponent) -[FS.Write]> sha256_io.FileWriter IOError! {
+    sha256_validate_name(path, name)
+    os :: sha256_target.selected_os()
+    linux :: os == .Linux || os == .Android
+    // Main owner ruling: correct the latent Rust Darwin O_CREAT/O_EXCL bug
+    // in tandem, rather than perpetuating Linux constants on macOS/iOS.
+    flags :: if linux -> U32{0o2400301} else -> U32{0x01000701}
+    options :: sha256_io.CreateOptions{read: false, write: true, access_mode: None, share_mode: None, mode: Val(U32{0o600}), delete_on_close: false, open_reparse_point: false, custom_flags: Val(flags)}
+    // Exact descriptor-relative raw flags; native create_file must not OR an
+    // additional guessed flag set over this supplied original operation.
+    parent.create_file(path, name, options)
+}
+fn rename_replace(parent: &sha256_io.Directory, temporary: sha256_paths.OSPath, temporary_name: sha256_paths.PathComponent, relative: sha256_paths.OSPath, final: sha256_paths.PathComponent) -[FS.Write]> IOError! {
+    sha256_validate_name(temporary, temporary_name)
+    sha256_validate_name(relative, final)
+    parent.rename(temporary, temporary_name, parent, relative, final)
+}
+fn unlink_child(parent: &sha256_io.Directory, path: sha256_paths.OSPath, name: sha256_paths.PathComponent) -[FS.Write]> IOError! {
+    sha256_validate_name(path, name)
+    parent.remove_file(path, name)
+}
+fn sha256_stage_publication(root: sha256_paths.OSPath, relative: sha256_paths.OSPath, components: View<sha256_paths.PathComponent>, contents: View<U8>, root_count: Int, directories: View<sha256_io.Directory>, temporary: sha256_paths.OSPath, temporary_name: sha256_paths.PathComponent, file: ^sha256_io.FileWriter, expected: sha256_metadata.FileID?, published: &Bool) -[FS]> IOError! {
+    staged := ^file
+    staged.write_all(contents)
+    staged.sync_all()
+    metadata :: staged.stat()
+    if !is_single_link(metadata) -> return Err(sha256_permission(relative, "file authority temporary has multiple hard links"))
+    temporary_identity :: metadata.file_id
+    // Rust drop ignores close errors. Consuming close must not double-close.
+    _ :: staged.close(^staged)
+    ensure_directories_current(root, relative, components, root_count, directories)
+    final :: components[components.len() - 1]
+    parent :: &directories[directories.len() - 1]
+    current :: inspect_destination(parent, relative, final)
+    if !sha256_optional_id_equal(current, expected) -> return Err(sha256_other(relative, "file authority publication target changed while staging"))
+    rename_replace(parent, temporary, temporary_name, relative, final)
+    published = true
+    loop directory in directories -> directory.sync_all()
+    ensure_directories_current(root, relative, components, root_count, directories)
+    final_identity :: inspect_destination(parent, relative, final) ?? return Err(sha256_other(relative, "file authority publication target disappeared after rename"))
+    if !sha256_metadata.file_id_equal(final_identity, temporary_identity) -> return Err(sha256_other(relative, "file authority publication target changed after rename"))
+}
+pub fn write_file_nofollow_at_root(root: sha256_paths.OSPath, relative: sha256_paths.OSPath, contents: View<U8>) -[FS,Exec,Time]> IOError! {
+    if !sha256_rooted_available() -> return Err(IOError.Unsupported(sha256_io_context(.Write, relative, "descriptor-relative no-follow file access is unavailable on this platform")))
+    components :: normal_components(relative)
+    if components.is_empty() -> return Err(sha256_invalid_input(relative, "file authority publication path is empty"))
+    held := open_root(root)
+    root_count :: held.directories.len()
+    loop i in 0..<components.len() - 1 {
+        name :: components[i]
+        parent :: &held.directories[held.directories.len() - 1]
+        child :: open_at(parent, relative, name) ?? {
+            if err != .NotFound(_) -> return Err(err)
+            if parent.create_dir(relative, name, U32{0o700}) == {
+                .Ok(_) -> parent.sync_all()
+                .Err(error) -> if error != .AlreadyExists(_) -> return Err(error)
+            }
+            open_at(parent, relative, name)
+        }
+        if !child.stat().is_dir -> return Err(sha256_permission(relative, "file authority publication parent is not a directory"))
+        &held.directories.push(child)
+    }
+    parent :: &held.directories[held.directories.len() - 1]
+    final :: components[components.len() - 1]
+    expected :: inspect_destination(parent, relative, final)
+    pid :: sha256_process.id()
+    time :: sha256_clock.system_time_now()
+    stamp :: sha256_wide.decimal(sha256_metadata.modified_nanoseconds(&time) ?? sha256_wide.UInt128Parts{hi: U64{0}, lo: U64{0}})
+    loop attempt in 0..<128 {
+        temporary :: sha256_paths.from_text(".jet-lock-{pid}-{stamp}-{attempt}", relative.platform)
+        cursor := sha256_paths.components(temporary)
+        name :: sha256_paths.next(temporary, &cursor) ?? panic("temporary authority name")
+        file :: create_child_file(parent, temporary, name) ?? {
+            if err == .AlreadyExists(_) -> next
+            return Err(err)
+        }
+        published := false
+        // Observe the Result explicitly, so failure cannot propagate past
+        // temporary unlink. Original unlink errors are intentionally ignored.
+        if sha256_stage_publication(root, relative, components[0..<components.len()], contents, root_count, held.directories[0..<held.directories.len()], temporary, name, ^file, expected, &published) == {
+            .Ok(_) -> return
+            .Err(error) -> {
+                if !published -> _ :: unlink_child(parent, temporary, name)
+                return Err(error)
+            }
+        }
+    }
+    Err(IOError.AlreadyExists(sha256_io_context(.Write, relative, "could not reserve a temporary authority file")))
+}

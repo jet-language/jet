@@ -36,6 +36,9 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     diagnostic_with_detail,
     expr_span,
+    failure_contract_source,
+    failure_contract_from_return_type,
+    func_failure_contract,
     symbol_id,
     tir_symbol_local,
     type_identity_equal,
@@ -406,7 +409,7 @@ fn sema_failure_call_provenance(expr: Expr?, environment: SemaScopeEnvironment, 
                 symbol :: scopes.bindings[index].symbol
                 definition = sema_failure_definition_location(environment, symbol) ?? fallback
                 if sema_scope_resolve_declaration(environment, symbol.id) == .Val(item) {
-                    if item == .Func(func) -> contract = sema_failure_contract_source(func.return_type)
+                    if item == .Func(func) -> contract = failure_contract_source(func_failure_contract(func))
                 }
             }
             return SemaFailureProvenance{callee: call.name, definition: definition, contract: contract}
@@ -434,7 +437,7 @@ fn sema_failure_callee(expr: Expr?, environment: SemaScopeEnvironment, scopes: S
             symbol :: scopes.bindings[index].symbol
             if symbol.kind != SymbolKind.Function -> return None
             item :: sema_scope_resolve_declaration(environment, symbol.id) ?? return None
-            if item == .Func(func) -> return Val(SemaFailureCallee{key: symbol.id.key, inferable: func.inline_foreign == None && sema_failure_contract_source(func.return_type) == "implicit default !Err"})
+            if item == .Func(func) -> return Val(SemaFailureCallee{key: symbol.id.key, inferable: func.inline_foreign == None && failure_contract_source(failure_contract_from_return_type(func.return_type)) == "implicit default !Err"})
             return None
         }
         else -> return None

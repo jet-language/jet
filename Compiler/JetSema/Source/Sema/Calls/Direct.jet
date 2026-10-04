@@ -128,7 +128,7 @@ fn sema_call_debug_traceable(ty: Type, environment: SemaScopeEnvironment) -> Boo
         .Result(ok, err) | .Map(ok, _, err) -> sema_call_debug_traceable(ok, environment) && sema_call_debug_traceable(err, environment)
         .Named(name) -> {
             if sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
-            if environment.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None -> return true
+            if environment.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty, environment.module_identity) != None -> return true
             sema_call_debug_implemented(ty, environment)
         }
         .Apply(name, args) -> {

@@ -1,0 +1,438 @@
+// Canonical, tier-neutral data-loader lifecycle and identity kernel.
+// Prelude adapters translate local carriers into these facts, not a second lifecycle.
+use Hash.SHA256.[mir_sha256_bytes, mir_sha256_hex_bytes]
+
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:8
+pub const MAX_PUBLIC_TEXT: Int = 4096
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:9
+pub const MAX_STATUS_TEXT: Int = 1024
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:12
+pub enum LoaderKind { File URL Database Value }
+impl LoaderKind {
+    // Rust: crates/jet-foundation/src/PreludeDataFlow.rs:20
+    pub fn debug_name(self) -> String Never! {
+        if self == { .File -> "File"; .URL -> "URL"; .Database -> "Database"; .Value -> "Value" }
+    }
+    // Rust: crates/jet-foundation/src/PreludeDataFlow.rs:29
+    pub fn is_provider(self) -> Bool Never! { self == .URL || self == .Database }
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:35
+pub enum Freshness { Pending Fresh Stale Error Offline Cancelled }
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:45
+pub enum InvalidationCause { NoCause Loader Input ArchiveMember Parameters Credential Capability Manual }
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:57
+pub enum ErrorKind { InvalidArgument Limit State Bridge }
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:65
+#Error
+pub struct KernelError {
+    pub kind: ErrorKind
+    pub operation: String
+    pub reason: String
+}
+impl KernelError {
+    // Rust: crates/jet-foundation/src/PreludeDataFlow.rs:72
+    fn new(kind: ErrorKind, operation: String, reason: String) -> KernelError Never! {
+        KernelError{kind: kind, operation: ~operation, reason: bounded_text(reason, MAX_STATUS_TEXT)}
+    }
+    // Rust: crates/jet-foundation/src/PreludeDataFlow.rs:82
+    pub fn fmt(self) -> String Never! { "{self.operation}: {self.reason}" }
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:88
+pub struct Authority { pub scope: String, pub revision: String }
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:94
+pub struct SourceIdentity {
+    pub kind: LoaderKind
+    pub locator: String
+    pub member: String
+    pub parameters: [String]
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:102
+pub struct Limits {
+    pub buffer_bytes: I64
+    pub max_depth: I64
+    pub max_item_bytes: I64
+    pub max_total_bytes: I64?
+    pub max_expansion_depth: I64
+    pub max_expansion_bytes: I64
+    pub max_groups: I64
+    pub max_sort_rows: I64
+    pub max_join_rows: I64
+    pub max_output_rows: I64
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:117
+pub struct Status {
+    pub identity: String
+    pub freshness: Freshness
+    pub invalidated_by: InvalidationCause
+    pub error: String
+    pub cleanup: String
+    pub buffered_bytes: I64
+    pub backpressure: Bool
+    pub last_good: Bool
+}
+impl Status {
+    // Rust: crates/jet-foundation/src/PreludeDataFlow.rs:128
+    pub fn pending() -> Status Never! {
+        Status{identity: "", freshness: .Pending, invalidated_by: .NoCause, error: "", cleanup: "none", buffered_bytes: I64{0}, backpressure: false, last_good: false}
+    }
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:145
+// Owned adapter carrier. Payload and last_good remain distinct by design.
+pub struct LoaderState {
+    pub source: SourceIdentity
+    pub format: String
+    pub authority: Authority
+    pub limits: Limits
+    pub payload: [U8]?
+    pub last_good: [U8]?
+    pub cancelled: Bool
+    pub offline: Bool
+    pub status: Status
+    pub raw_locator: String
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:159
+pub struct SnapshotFacts {
+    pub snapshot_id: String
+    pub source_id: String
+    pub content_id: String
+    pub schema_id: String
+    pub status: Status
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:167
+pub fn bounded_text(value: String, max_bytes: Int) -> String Never! {
+    if value.bytes().len() <= max_bytes -> return ~value
+    suffix :: "...<truncated>"
+    if max_bytes <= suffix.bytes().len() {
+        prefix := suffix[0..<max_bytes] // #4303
+        return prefix.to_string()
+    }
+    prefix_limit :: max_bytes - suffix.bytes().len()
+    end := 0
+    loop character in value.chars() {
+        next :: end + character.len_utf8()
+        if next > prefix_limit -> break
+        end = next
+    }
+    output := String.with_capacity(max_bytes)
+    prefix := value[0..<end] // #4303
+    &output.push_str(prefix)
+    &output.push_str(suffix)
+    output
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:190
+pub fn sensitive_key(key: String) -> Bool Never! {
+    lowered :: key.to_ascii_lowercase()
+    loop marker in [String]{"password", "passwd", "pwd", "secret", "token", "credential", "authorization", "auth", "api_key", "apikey", "access_key", "access-token", "signature", "cookie", "session", "private_key", "private-key", "bearer"} {
+        if lowered.contains(marker) -> return true
+    }
+    false
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:216
+pub fn sensitive_value(value: String) -> Bool Never! {
+    trimmed := value.trim() // #4303
+    lowered :: trimmed.to_ascii_lowercase()
+    loop marker in [String]{"bearer ", "basic ", "-----begin", "password=", "secret=", "token=", "credential=", "authorization="} {
+        if lowered.starts_with(marker) -> return true
+    }
+    false
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:232
+pub fn status_text(value: String) -> String Never! {
+    lowered :: value.to_ascii_lowercase()
+    loop marker in [String]{"password=", "password:", "passwd=", "passwd:", "secret=", "secret:", "token=", "token:", "credential=", "credential:", "authorization=", "authorization:", "api_key=", "api_key:", "access_key=", "access_key:", "cookie=", "cookie:", "session=", "session:", "bearer ", "basic ", "-----begin"} {
+        if lowered.contains(marker) -> return "<redacted>"
+    }
+    bounded_text(value, MAX_STATUS_TEXT)
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:265
+pub fn public_parameter(parameter: String) -> String Never! {
+    trimmed := parameter.trim() // #4303
+    pair :: if trimmed.split_once('=') == {
+        .Val(pair) -> pair
+        .None -> return "value-{digest(trimmed.bytes())}"
+    }
+    key := pair.0.trim() // #4303
+    if key.is_empty() || sensitive_key(key) || sensitive_value(pair.1) {
+        if key.is_empty() -> return "value-{digest(trimmed.bytes())}"
+        return "{bounded_text(key, MAX_PUBLIC_TEXT)}=<redacted>"
+    }
+    bounded_text(trimmed, MAX_PUBLIC_TEXT)
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:280
+pub fn public_member(member: String) -> String Never! { bounded_text(member, MAX_PUBLIC_TEXT) }
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:284
+pub fn public_locator(locator: String) -> String Never! {
+    without_fragment := locator.split('#').next() ?? locator // #4303
+    base := without_fragment // #4303
+    query: String? = None
+    if without_fragment.split_once('?') == {
+        .Val(pair) -> { base = pair.0; query = Val(pair.1.to_string()) }
+        .None -> {}
+    }
+    public_base := base.to_string()
+    if base.find("://") == {
+        .Val(scheme) -> {
+            authority_start :: scheme + 3
+            rest := base[authority_start..] // #4303
+            if rest.find('@') == {
+                .Val(at) -> {
+                    head := base[0..<authority_start] // #4303
+                    tail := base[authority_start + at + 1..] // #4303
+                    public_base = "{head}{tail}"
+                }
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+    if query == {
+        .None -> return public_base
+        .Val(query) -> {
+            parameters := [String]{}
+            loop parameter in query.split('&') -> &parameters.push(public_parameter(parameter))
+            return "{public_base}?{parameters.join("&")}"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:310
+pub fn validate_public_text(label: String, value: String, allow_empty: Bool) -> Void KernelError! {
+    trimmed := value.trim() // #4303
+    blank :: trimmed.is_empty()
+    control := false
+    loop character in value.chars() { if character.is_control() -> { control = true; break } }
+    if (blank && !(allow_empty && value.is_empty())) || control || value.bytes().len() > MAX_PUBLIC_TEXT {
+        return err(KernelError.new(.InvalidArgument, "data.loader", "{label} must be non-empty, contain no control characters, and be at most {MAX_PUBLIC_TEXT} bytes"))
+    }
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:331
+pub fn authority(scope: String, revision: String) -> Authority KernelError! {
+    validate_public_text("authority scope", scope, false)
+    validate_public_text("authority revision", revision, true)
+    if scope.contains('=') || scope.contains('&') || revision.contains('=') || revision.contains('&') || sensitive_value(scope) || sensitive_value(revision) {
+        return err(KernelError.new(.InvalidArgument, "data.loader", "authority identity cannot carry credential material"))
+    }
+    Authority{scope: ~scope, revision: ~revision}
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:353
+pub fn source(kind: LoaderKind, locator: String, member: String, parameters: [String]) -> SourceIdentity Never! {
+    public_parameters := [String].with_capacity(parameters.len())
+    loop value in parameters -> &public_parameters.push(public_parameter(value))
+    public_location :: if kind == .Database -> "query-{digest(locator.bytes())}" else -> public_locator(locator)
+    SourceIdentity{kind: kind, locator: ^public_location, member: public_member(member), parameters: ^public_parameters}
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:373
+pub fn validate_limits(limits: Limits) -> Void KernelError! {
+    invalid: String? = None
+    if limits.buffer_bytes < I64{4096} || limits.buffer_bytes > I64{16777216} {
+        invalid = Val("buffer_bytes {limits.buffer_bytes} is outside 4096..16777216")
+    } else if limits.max_depth < I64{1} || limits.max_depth > I64{4096} {
+        invalid = Val("max_depth {limits.max_depth} is outside 1..4096")
+    } else if limits.max_item_bytes < I64{1} || limits.max_item_bytes > I64{1073741824} {
+        invalid = Val("max_item_bytes {limits.max_item_bytes} is outside 1..1073741824")
+    } else if (limits.max_total_bytes ?? I64{0}) < I64{0} {
+        invalid = Val("max_total_bytes {limits.max_total_bytes ?? I64{0}} is outside 0..Int.max")
+    } else if limits.max_expansion_depth < I64{0} || limits.max_expansion_depth > I64{256} {
+        invalid = Val("max_expansion_depth {limits.max_expansion_depth} is outside 0..256")
+    } else if limits.max_expansion_bytes < I64{0} || limits.max_expansion_bytes > I64{1073741824} {
+        invalid = Val("max_expansion_bytes {limits.max_expansion_bytes} is outside 0..1073741824")
+    }
+    if invalid == { .Val(reason) -> return err(KernelError.new(.Limit, "DataLimits", reason)); .None -> {} }
+    loop pair in [(name: String, value: I64)]{("max_groups", limits.max_groups), ("max_sort_rows", limits.max_sort_rows), ("max_join_rows", limits.max_join_rows), ("max_output_rows", limits.max_output_rows)} {
+        if pair.value < I64{1} -> return err(KernelError.new(.InvalidArgument, "DataLimits", "{pair.name} must be positive"))
+    }
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:427
+pub fn new_loader(kind: LoaderKind, locator: ^String, member: ^String, parameters: ^[String], format: ^String, limits: ^Limits, authority: Authority) -> LoaderState KernelError! {
+    validate_limits(limits)
+    validate_public_text("source locator", locator, false)
+    if !member.is_empty() -> validate_public_text("archive member", member, false)
+    loop parameter in parameters -> validate_public_text("loader parameter", parameter, true)
+    checked_authority :: PreludeDataFlow.authority(authority.scope, authority.revision)
+    LoaderState{source: source(kind, locator, member, parameters), format: ^format, authority: ^checked_authority, limits: ^limits, payload: None, last_good: None, cancelled: false, offline: false, status: Status.pending(), raw_locator: ^locator}
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:459
+pub fn validate_loader(state: LoaderState) -> Void KernelError! {
+    validate_public_text("source identity locator", state.source.locator, false)
+    if !state.source.member.is_empty() -> validate_public_text("source identity member", state.source.member, false)
+    loop parameter in state.source.parameters -> validate_public_text("source identity parameter", parameter, true)
+    if state.source.kind != .File && !state.source.member.is_empty() {
+        return err(KernelError.new(.InvalidArgument, "data.loader", "only file loaders may carry an archive member identity"))
+    }
+    _ :: authority(state.authority.scope, state.authority.revision)
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:477
+pub fn check_payload(limits: Limits, bytes: Int, operation: String) -> Void KernelError! {
+    count :: I64{bytes.min(Int{I64.max})}
+    if count > limits.max_item_bytes {
+        return err(KernelError.new(.Limit, operation, "payload is {count} bytes; max_item_bytes is {limits.max_item_bytes}"))
+    }
+    if limits.max_total_bytes == {
+        .Val(limit) -> {
+            if count > limit -> return err(KernelError.new(.Limit, operation, "payload is {count} bytes; max_total_bytes is {limit}"))
+        }
+        .None -> {}
+    }
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:500
+pub fn set_authority(state: &LoaderState, scope: String, revision: String) -> Void KernelError! {
+    checked_authority :: authority(scope, revision)
+    if state.authority == checked_authority -> return
+    state.authority = ^checked_authority
+    state.status.invalidated_by = .Capability
+    state.status.freshness = .Stale
+    &state.status.error.clear()
+    state.status.buffered_bytes = I64{0}
+    state.status.backpressure = false
+    state.status.cleanup = if state.last_good.is_some() -> "retained" else -> "none"
+    state.status.last_good = state.last_good.is_some()
+    if state.source.kind != .Value -> state.payload = None
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:527
+pub fn bind(state: &LoaderState, payload: ^[U8]) -> Void KernelError! {
+    if state.cancelled -> return err(KernelError.new(.State, "data.loader.bind", "loader was cancelled"))
+    validate_loader(state)
+    if !state.source.kind.is_provider() && (state.source.kind != .File || state.source.member.is_empty()) {
+        return err(KernelError.new(.InvalidArgument, "data.loader.bind", "only URL, database, or archive-member loaders accept provider payloads"))
+    }
+    check_payload(state.limits, payload.len(), "data.loader.bind")
+    bytes :: I64{payload.len().min(Int{I64.max})}
+    state.payload = Val(^payload)
+    state.status.freshness = .Pending
+    &state.status.error.clear()
+    state.status.cleanup = if state.last_good.is_some() -> "retained" else -> "none"
+    state.status.last_good = state.last_good.is_some()
+    state.status.buffered_bytes = bytes
+    state.status.backpressure = bytes > state.limits.buffer_bytes
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:561
+pub fn cancel(state: &LoaderState) -> Void Never! {
+    state.cancelled = true
+    if state.source.kind != .Value -> state.payload = None
+    state.status.freshness = .Cancelled
+    state.status.error = bounded_text("loader was cancelled", MAX_STATUS_TEXT)
+    state.status.cleanup = if state.source.kind == .Value -> "retained" else -> "payload-released"
+    state.status.buffered_bytes = I64{0}
+    state.status.backpressure = false
+    state.status.last_good = state.last_good.is_some()
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:578
+pub fn set_offline(state: &LoaderState, enabled: Bool) -> Void Never! {
+    state.offline = enabled
+    if enabled {
+        if state.payload.is_none() && state.last_good.is_some() -> state.status.freshness = .Offline
+    } else if state.status.freshness == .Offline {
+        state.status.freshness = if state.payload.is_some() -> .Pending
+            else if state.last_good.is_some() && state.status.invalidated_by == .NoCause -> .Fresh
+            else if state.last_good.is_some() -> .Stale
+            else -> .Pending
+    }
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:599
+pub fn invalidate(state: &LoaderState, cause: InvalidationCause) -> Void Never! {
+    state.status.invalidated_by = cause
+    state.status.freshness = .Stale
+    &state.status.error.clear()
+    if state.source.kind != .Value -> state.payload = None
+    state.status.cleanup = if state.last_good.is_some() -> "retained" else -> "none"
+    state.status.buffered_bytes = I64{0}
+    state.status.backpressure = false
+    state.status.last_good = state.last_good.is_some()
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:616
+pub fn needs_refresh(state: LoaderState) -> Bool Never! {
+    state.status.freshness != .Fresh && state.status.freshness != .Offline && state.status.freshness != .Cancelled
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:623
+pub fn ready(state: LoaderState) -> Bool Never! { !state.cancelled && !state.status.backpressure }
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:627
+pub fn status(state: LoaderState) -> Status Never! {
+    out := ~state.status
+    out.identity = bounded_text(out.identity, MAX_STATUS_TEXT)
+    out.error = status_text(out.error)
+    out.cleanup = bounded_text(out.cleanup, MAX_STATUS_TEXT)
+    out.buffered_bytes = out.buffered_bytes.max(I64{0})
+    out
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:636
+pub fn payload(state: LoaderState) -> (bytes: [U8], offline: Bool)? KernelError! {
+    if state.payload == {
+        .Val(bytes) -> {
+            check_payload(state.limits, bytes.len(), "data.loader")
+            return Val((~bytes, state.offline))
+        }
+        .None -> {}
+    }
+    if state.offline || state.source.kind == .Value {
+        if state.last_good == {
+            .Val(bytes) -> {
+                check_payload(state.limits, bytes.len(), "data.loader.offline")
+                return Val((~bytes, state.offline))
+            }
+            .None -> {}
+        }
+    }
+    if state.offline && (state.source.kind != .File || !state.source.member.is_empty()) {
+        return err(KernelError.new(.Bridge, "data.loader.offline", "offline mode has no last-good snapshot"))
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:658
+pub fn fail(state: &LoaderState, error: KernelError) -> Void Never! {
+    freshness :: if state.cancelled -> Freshness.Cancelled else -> Freshness.Error
+    last_good :: state.last_good.is_some()
+    cleanup :: if state.source.kind == .Value -> "retained" else -> {
+        state.payload = None
+        "payload-released"
+    }
+    state.status = Status{identity: ~state.status.identity, freshness: freshness, invalidated_by: state.status.invalidated_by, error: status_text(error.fmt()), cleanup: cleanup, buffered_bytes: I64{0}, backpressure: false, last_good: last_good}
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:683
+pub fn commit_snapshot(state: &LoaderState, payload: ^[U8], canonical: [U8], schema_id: String, offline: Bool) -> SnapshotFacts KernelError! {
+    check_payload(state.limits, canonical.len(), "data.snapshot")
+    content_id :: digest(canonical)
+    source_material := ""
+    identity_part(&source_material, state.source.kind.debug_name())
+    identity_part(&source_material, state.source.locator)
+    identity_part(&source_material, state.source.member)
+    loop parameter in state.source.parameters -> identity_part(&source_material, parameter)
+    identity_part(&source_material, state.authority.scope)
+    identity_part(&source_material, state.authority.revision)
+    source_id :: digest(source_material.bytes())
+    snapshot_material := ""
+    identity_part(&snapshot_material, source_id)
+    identity_part(&snapshot_material, content_id)
+    identity_part(&snapshot_material, schema_id)
+    identity_part(&snapshot_material, state.format)
+    snapshot_id :: digest(snapshot_material.bytes())
+    status :: Status{identity: "snapshot-{snapshot_id}", freshness: if offline -> .Offline else -> .Fresh, invalidated_by: if offline -> state.status.invalidated_by else -> .NoCause, error: "", cleanup: "retained", buffered_bytes: I64{0}, backpressure: false, last_good: true}
+    state.last_good = Val(^payload)
+    state.payload = None
+    state.status = ~status
+    SnapshotFacts{snapshot_id: ^snapshot_id, source_id: ^source_id, content_id: ^content_id, schema_id: ~schema_id, status: ^status}
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:738
+pub fn digest(bytes: [U8]) -> String Never! {
+    hash :: mir_sha256_bytes(bytes[0..<bytes.len()])
+    "sha256-{mir_sha256_hex_bytes(hash[0..<hash.len()])}"
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:746
+// The existing key is the length-delimited name:type spelling.
+pub fn column_identity(name: String, type_name: String) -> String Never! {
+    key :: "{name.bytes().len()}:{type_name}"
+    hash := U64{0xcbf29ce484222325}
+    loop byte in key.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(U64{0x100000001b3})
+    digits :: "0123456789abcdef"
+    output := "column-"
+    loop index in 0..<16 {
+        nibble :: Int{(hash >> ((15 - index) * 4)) & U64{15}}
+        &output.push(digits.chars().nth(nibble).unwrap())
+    }
+    output
+}
+// Rust: crates/jet-foundation/src/PreludeDataFlow.rs:756
+pub fn identity_part(output: &String, value: String) -> Void Never! {
+    &output.push_str(value.bytes().len().to_string())
+    &output.push(':')
+    &output.push_str(value)
+    &output.push(';')
+}

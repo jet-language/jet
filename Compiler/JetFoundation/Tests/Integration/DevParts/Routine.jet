@@ -1,0 +1,1850 @@
+// PORT-PENDING 1031 tests-dev-parts-routine-slice-1: tests/dev_parts/routine.rs:1-1846
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Routine `jet dev` tests: one fixture program each (#2020).
+//RS //
+//RS // The whole-corpus batteries live in the sibling `dev_parts` slices, each with
+//RS // its own target and its own 900s guard, because they cannot share one budget.
+//RS 
+//RS #[test]
+//RS fn stdin_filter_default_dev_reports_jit_gap() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_dev_stdin_boundary_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = example_path("io/stdin_filter");
+//RS     // #2017: NOT in `common::example_stdin`, deliberately. That table holds the
+//RS     // answers a checked-in golden was recorded with, and every harness that
+//RS     // walks stems feeds whatever it finds there. `io/stdin_filter`'s golden is
+//RS     // the no-input case, so an entry would make those harnesses feed the wrong
+//RS     // thing. These three lines are this test's own input for the filter, stated
+//RS     // as bytes like every other harness states them.
+//RS     let compiled = compiled_binary_output_with_stdin(
+//RS         &dir,
+//RS         "stdin_filter_aot",
+//RS         0,
+//RS         "io/stdin_filter",
+//RS         &file,
+//RS         Some("jet one\nnope\njet two\n"),
+//RS     );
+//RS     assert_eq!(compiled.stdout.trim(), "jet one\njet two");
+//RS     assert_default_dev_jit_gap("io/stdin_filter", &file);
+//RS }
+//RS 
+//RS #[test]
+//RS fn former_parity_divergences_report_jit_gap_on_default_dev() {
+//RS     for stem in ["errors/typed_error_families", "serde/json_coerce"] {
+//RS         let file = example_path(stem);
+//RS         // Coverage gaps must silent-deopt or stop at a named boundary — never E2211.
+//RS         // AOT compile of these stems is out of scope for the gap assertion (deep
+//RS         // rustc stack); parity lives in the corpus gate.
+//RS         assert_default_dev_jit_gap(stem, &file);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn previously_manifested_execution_reports_jit_gap_or_boundary() {
+//RS     let dir =
+//RS         std::env::temp_dir().join(format!("jet_dev_unmasked_fallbacks_{}", std::process::id()));
+//RS     let rejected = frontend_rejected_stems();
+//RS     for (i, stem) in ["io/db_checked_sql", "io/path", "tooling/data_pipeline"]
+//RS         .into_iter()
+//RS         .enumerate()
+//RS     {
+//RS         if rejected.contains(stem) {
+//RS             continue;
+//RS         }
+//RS         let stats = check_dev_default_stem(i, stem, &dir, &[]);
+//RS         assert!(
+//RS             stats.ran == 1 || stats.boundary == 1,
+//RS             "{stem} must deopt-run or stop at a named boundary under tiered dev"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn data_schema_empty_and_generic_rows_report_jit_gap_on_default_dev() {
+//RS     let file = example_path("tooling/data_json");
+//RS     assert_default_dev_jit_gap("tooling/data_json", &file);
+//RS }
+//RS 
+//RS #[test]
+//RS fn hidden_generic_constructor_default_dev_matches_aot() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_dev_generic_constructor_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let stats = check_dev_default_stem(0, "types/generic_constructor_inference", &dir, &[]);
+//RS     // Sema E0501 (hidden constructor) is a named boundary; not a coverage wall.
+//RS     assert!(
+//RS         stats.ran == 1 || stats.boundary == 1,
+//RS         "expected ran or named boundary, got ran={} boundary={} manifested={}",
+//RS         stats.ran,
+//RS         stats.boundary,
+//RS         stats.manifested
+//RS     );
+//RS     assert_eq!(stats.manifested, 0);
+//RS }
+//RS 
+//RS #[test]
+//RS fn job_runner_named_jobs_match_expected_golden() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     check_job_runner_interpreter(&root, &example_path("devloop/job_runner"));
+//RS }
+//RS 
+//RS /// E2202 fuel stop: a program whose top-level `loop` never breaks exhausts the
+//RS /// dev interpreter's step budget and stops with E2202 (an honest boundary, not
+//RS /// a hang). Driven through the comptime engine with a tiny fuel cap so the test
+//RS /// hits the same `burn()` path the watch loop uses in without burning the full
+//RS /// billion-step production budget.
+//RS #[test]
+//RS fn infinite_loop_hits_e2202_fuel_stop() {
+//RS     use std::collections::HashMap;
+//RS     jet::boot_mir_eval();
+//RS     let src = "fn run() {\n    n := 0\n    loop {\n        n = n + 1\n    }\n}\n";
+//RS     let prog = jet::Parser::parse(&jet::Lexer::lex(src).0).expect("fixture should parse");
+//RS     let mut funcs: HashMap<String, &jet::AST::Func> = HashMap::new();
+//RS     for item in &prog.items {
+//RS         if let jet::AST::Item::Func(f) = item {
+//RS             funcs.insert(f.name.clone(), f);
+//RS         }
+//RS     }
+//RS     let run = funcs.get("run").copied().expect("fixture has run");
+//RS     let mut sink = jet::Comptime::DevSink::new();
+//RS     let err = jet::Comptime::run_main_with_fuel(
+//RS         run,
+//RS         &funcs,
+//RS         std::path::Path::new("."),
+//RS         &mut sink,
+//RS         10_000,
+//RS     )
+//RS     .expect_err("an unbounded loop must exhaust the step budget");
+//RS     assert_eq!(
+//RS         err.code, "E2202",
+//RS         "an unbounded loop must stop with E2202, got: {}",
+//RS         err.code
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fluent_method_chain_preserves_fuel_order_and_spans() {
+//RS     use std::collections::HashMap;
+//RS     jet::boot_mir_eval();
+//RS 
+//RS     let run_chain = |links: usize, fuel: u64| {
+//RS         let src = format!(
+//RS             "fn run() {{\n    print(\" x \"{})\n}}\n",
+//RS             ".trim()".repeat(links)
+//RS         );
+//RS         let prog = jet::Parser::parse(&jet::Lexer::lex(&src).0).expect("fixture should parse");
+//RS         let mut funcs: HashMap<String, &jet::AST::Func> = HashMap::new();
+//RS         for item in &prog.items {
+//RS             if let jet::AST::Item::Func(f) = item {
+//RS                 funcs.insert(f.name.clone(), f);
+//RS             }
+//RS         }
+//RS         let run = funcs.get("run").copied().expect("fixture has run");
+//RS         let argument = match run.body.first() {
+//RS             Some(jet::AST::Stmt::Expr(jet::AST::Expr::Call(call))) => &call.args[0].expr,
+//RS             other => panic!("expected print call, got {other:?}"),
+//RS         };
+//RS         let mut method_spans = Vec::new();
+//RS         let mut cursor = argument;
+//RS         while let jet::AST::Expr::MethodCall {
+//RS             receiver,
+//RS             method_span,
+//RS             ..
+//RS         } = cursor
+//RS         {
+//RS             method_spans.push(*method_span);
+//RS             cursor = receiver;
+//RS         }
+//RS         let expected_exhaustion_span = method_spans.get(2).copied();
+//RS         let mut sink = jet::Comptime::DevSink::new();
+//RS         let result = jet::Comptime::run_main_with_fuel(
+//RS             run,
+//RS             &funcs,
+//RS             std::path::Path::new("."),
+//RS             &mut sink,
+//RS             fuel,
+//RS         );
+//RS         (result, sink.stdout, expected_exhaustion_span)
+//RS     };
+//RS 
+//RS     let (one, stdout, _) = run_chain(1, 4);
+//RS     one.expect("one method link should fit exactly inside four fuel steps");
+//RS     assert_eq!(stdout, "x\n");
+//RS 
+//RS     for links in [3, 100] {
+//RS         let (result, _, _expected_span) = run_chain(links, 3);
+//RS         let err = result.expect_err("the chain should exhaust three fuel steps");
+//RS         assert_eq!(err.code, "E2202");
+//RS         // #777: TIR evaluator fuel stops carry a synthetic span today (TExpr has
+//RS         // no source span). Source-accurate E2202 spans are a follow-up for #778.
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn task_programs_run_in_the_canonical_tir_interpreter() {
+//RS     let file = "Examples/features/concurrency/tasks.jet";
+//RS     match dev_iteration(file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(stdout, "5050\npaused=false,cancel=false\n");
+//RS             assert!(stderr.is_empty());
+//RS             assert_eq!(exit_code, 0);
+//RS         }
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("supported spawn/join must run in the TIR interpreter: {diags:?}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn debug_keeps_the_impure_files_boundary_while_dev_reaches_the_shared_prelude() {
+//RS     let path = std::env::temp_dir().join(format!(
+//RS         "jet_interpreter_boundary_files_{}.jet",
+//RS         std::process::id()
+//RS     ));
+//RS     let data_path = path.with_extension("txt");
+//RS     fs::write(&data_path, "shared-prelude").unwrap();
+//RS     let data_path = data_path.to_string_lossy().replace('\\', "/");
+//RS     fs::write(
+//RS         &path,
+//RS         format!(
+//RS             "use core.files as files\nfn run() {{\n    text :: files.read(\"{data_path}\") ?? panic(\"read\")\n    print(text == \"shared-prelude\")\n}}\n"
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let shown = path.to_string_lossy().into_owned();
+//RS     let bundle = jet::Loader::load_entry(&shown).expect("files boundary fixture should load");
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     match dev_iteration(&shown, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(stdout, "true\n", "dev shared-Prelude output drifted");
+//RS             assert!(
+//RS                 stderr.is_empty(),
+//RS                 "dev shared Prelude emitted stderr: {stderr}"
+//RS             );
+//RS             assert_eq!(exit_code, 0, "dev shared Prelude exited {exit_code}");
+//RS             assert!(
+//RS                 jet_jit::jit_executed_for_test(),
+//RS                 "default dev must execute the shared Prelude through resident JIT"
+//RS             );
+//RS             assert!(
+//RS                 !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS                 "default dev must not deopt or fall back around the shared Prelude"
+//RS             );
+//RS         }
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("dev must execute core.files through the shared Prelude: {diags:?}")
+//RS         }
+//RS     }
+//RS     let debug = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle)
+//RS         .expect("source debug must retain the impurity gate");
+//RS     assert_eq!(debug.code, "E2203");
+//RS     // The feature slot is a NOUN PHRASE because the boundary wrapper owns
+//RS     // the sentence: a verb phrase like "reads or writes files" would produce
+//RS     // "it uses reads or writes files".
+//RS     assert!(
+//RS         debug.what.contains("a file read or write"),
+//RS         "debug must still name the impure files boundary: {}",
+//RS         debug.what
+//RS     );
+//RS     let _ = fs::remove_file(path.with_extension("txt"));
+//RS     let _ = fs::remove_file(path);
+//RS }
+//RS 
+//RS /// c139 M4: task programs inside `resident_jit_safe` run via default `jet dev` (Cranelift).
+//RS #[test]
+//RS fn task_program_runs_via_jit() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let file = "Examples/features/concurrency/tasks.jet";
+//RS     let mut bundle = jet::Loader::load_entry(file).expect("tasks bundle should load");
+//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     let errors: Vec<_> = diags
+//RS         .into_iter()
+//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(errors.is_empty(), "tasks must type-check");
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "tasks must be resident-safe: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS         .unwrap_or_else(|e| panic!("tasks JIT compile failed: {e}"));
+//RS 
+//RS     let policy = common::development_policy();
+//RS     let mut backend = CraneliftBackend::new();
+//RS     let jit = match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+//RS         RunOutcome::Ran { stdout, .. } => stdout,
+//RS         RunOutcome::Problems(ds) => panic!("tasks must run via JIT backend, got: {ds:?}"),
+//RS     };
+//RS 
+//RS     let got = match dev_iteration(file, false, false) {
+//RS         RunOutcome::Ran { stdout, .. } => stdout,
+//RS         RunOutcome::Problems(ds) => panic!("tasks must run via default dev/JIT, got: {ds:?}"),
+//RS     };
+//RS     assert_eq!(
+//RS         got, "5050\npaused=false,cancel=false\n",
+//RS         "tasks expected output"
+//RS     );
+//RS     assert_eq!(jit, got, "JIT output drifted from dev_iteration");
+//RS }
+//RS 
+//RS /// #1685: the canonical task surface stays resident when its result is a
+//RS /// non-`Int` handle, and child failures remain typed at the JIT boundary.
+//RS ///
+//RS /// D-FAIL-EXIT1=A — fallible entry and one exit law *(ratified 2026-08-06,
+//RS /// card #1533)*: "`fn run()` is fallible by default." Entry `fn run` is
+//RS /// therefore stamped `Unit !Err`, and a `return` inside a `task { … }` body
+//RS /// belongs to the *enclosing* function — `Examples/features/net/http_get.jet`
+//RS /// relies on exactly that, where `?? return` inside `task { … }` leaves `run`.
+//RS /// So `task { return "child" }` handed a `String` back from `run`: E0113 from
+//RS /// the moment D-FAIL-EXIT1 landed, and this fixture (added 2026-08-11,
+//RS /// 5e40d7454) was never migrated. `return` is not how a task body yields a
+//RS /// value:
+//RS ///
+//RS /// * A ONE-EXPRESSION brace body folds to `LambdaBody::Expr` — "`task { e }`
+//RS ///   and `task e` become the same body"
+//RS ///   (`crates/jet-parser/src/Parser/Expressions/primary.rs:768-795`). Any
+//RS ///   expression is fine there, so `task { "child" }` is accepted.
+//RS /// * A MULTI-STATEMENT brace body takes the `block_stmts` path
+//RS ///   (primary.rs:796-802) and has NO tail-value form: the parser never sets
+//RS ///   `callable_tail_block_depth` for it, so the tail carve-out at
+//RS ///   `Parser/Statements/control.rs:2547-2550` cannot fire, and a bare
+//RS ///   expression statement is admitted only when it is `Expr::Call`, `Field`,
+//RS ///   `MethodCall`, `ComptimeName`, `Try`, `OrFallback`, or `IncDec`
+//RS ///   (control.rs:2528-2537). `concurrency/freeze_capture.jet:13` and
+//RS ///   `scoped_borrow_bands.jet:35` only look like tail values because
+//RS ///   `Expr::Field` is in that set. A bare literal is not, and a `Str` token
+//RS ///   never even reaches that match (control.rs:2585) — hence E0003. No shipped
+//RS ///   example gives a task a literal result, so the form is unexercised.
+//RS ///
+//RS /// So a delayed String result uses the corpus shape: a named helper called from
+//RS /// the folded one-expression body, exactly as `concurrency/race_cancel.jet:13`
+//RS /// and `all_failfast.jet:30-33` spell their slow children.
+//RS ///
+//RS /// The `return` also drove the E0107 cascade over every later binding in the
+//RS /// `task.group` block: `check_stmt` marks the block unreachable after a
+//RS /// `Stmt::Return` and then rolls `self.flow` back for each following statement
+//RS /// (`crates/jet-sema/src/Sema/CheckerCore/statements.rs:366-372`), discarding
+//RS /// their declarations. Nothing restores that flag around a lambda body
+//RS /// (`CheckerInfer/calls/lambdas.rs:609`), so the task body's `return` leaked out.
+//RS ///
+//RS /// The two claims below were unverified until the fixture above was migrated,
+//RS /// and both were wrong on first run.
+//RS ///
+//RS /// 1. `print(all_result[0], all_result[1])` writes TWO lines, not one.
+//RS ///    D-VERDICT-1321-1 *(ratified 2026-07-30, amends S9 print arity;
+//RS ///    `Docs/spec/syntax-decisions.md:6147-6150`)*: `print` "accept[s] one or
+//RS ///    more arguments and write[s] each argument on its own line, in order, with
+//RS ///    a trailing newline after the last." The shipped corpus prints a
+//RS ///    `task.all` result in exactly this spelling — `task_all.jet:16` is
+//RS ///    `print(results[0], results[1], results[2])` and its golden
+//RS ///    `expected/concurrency/task_all.out` is three lines. So the fixture is
+//RS ///    corpus-shaped and the old one-line `"left right"` expectation, written
+//RS ///    2026-08-11 (twelve days after the decision) and never once executed, was
+//RS ///    the defect. The fixture is NOT reshaped to interpolate a joined line:
+//RS ///    that would stop covering variadic `print` over a task-combinator result.
+//RS ///
+//RS /// 2. `panic("boom")`, not `panic("child")`. Both strings were `"child"`, so
+//RS ///    the child's re-raised panic message was indistinguishable from the
+//RS ///    `task { "child" }` result value in any runtime evidence. They are
+//RS ///    separate slots — `RICH_PANIC_REASON` (`jet-jit/src/Concurrency.rs`) has
+//RS ///    one writer, `jet_jit_rich_panic` (`jit/runtime_host.rs`), which stores a
+//RS ///    panic message and never a task result — but the fixture should not make
+//RS ///    that take a proof to see.
+//RS #[test]
+//RS fn task_surface_runs_resident_with_string_results_and_typed_failures() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let source = r#"
+//RS use core.time as time
+//RS 
+//RS fn slow_text() -> String {
+//RS     time.sleep(25ms)
+//RS     return "slow"
+//RS }
+//RS 
+//RS fn late_text() -> String {
+//RS     time.sleep(1000ms)
+//RS     return "late"
+//RS }
+//RS 
+//RS fn failure_label(error: TaskFailure) -> String {
+//RS     if error == {
+//RS         .Cancelled -> { return "cancelled" }
+//RS         .DeadlineBlown -> { return "deadline" }
+//RS         .Panicked(_) -> { return "panicked" }
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     task.group workers {
+//RS         child :: task { "child" }
+//RS         print(child.join() ?? "child-fallback")
+//RS 
+//RS         all_result :: task.all { "left", "right" } ?? []
+//RS         print(all_result[0], all_result[1])
+//RS         print((task.race { slow_text(), "race" }) ?? "race-fallback")
+//RS         print((task.any { slow_text(), "any" }) ?? "any-fallback")
+//RS 
+//RS         cancelled :: task late_text()
+//RS         cancelled.cancel()
+//RS         cancelled_result :: cancelled.join()
+//RS         if cancelled_result == {
+//RS             .Err(error) -> { print(failure_label(error)) }
+//RS             .Ok(_) -> { print("wrong cancellation") }
+//RS         }
+//RS 
+//RS         failed :: task { panic("boom") }
+//RS         failed_result :: failed.join()
+//RS         if failed_result == {
+//RS             .Err(error) -> { print(failure_label(error)) }
+//RS             .Ok(_) -> { print("wrong panic") }
+//RS         }
+//RS     }
+//RS }
+//RS "#;
+//RS     let path =
+//RS         std::env::temp_dir().join(format!("jet_dev_task_surface_{}.jet", std::process::id()));
+//RS     fs::write(&path, source).unwrap();
+//RS     let shown = path.to_string_lossy().into_owned();
+//RS     let bundle = checked_bundle_from_path(&shown);
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "task surface must stay resident-safe: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let RunOutcome::Ran {
+//RS         stdout,
+//RS         stderr,
+//RS         exit_code,
+//RS     } = run_cranelift_outcome_without_fallback(source, "task_surface_string")
+//RS     else {
+//RS         panic!("resident task surface must run through Cranelift")
+//RS     };
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "child\nleft\nright\nrace\nany\ncancelled\npanicked\n"
+//RS     );
+//RS     assert!(
+//RS         stderr.is_empty(),
+//RS         "resident task surface reported to the program's stderr: {stderr:?}"
+//RS     );
+//RS     assert_eq!(exit_code, 0);
+//RS     assert!(jet_jit::jit_executed_for_test());
+//RS     assert!(!jet_jit::deopt_invoked_for_test());
+//RS     assert!(!jet_jit::fallback_invoked_for_test());
+//RS }
+//RS 
+//RS /// Scheduler workers catch user-task panics. Parallel tasks must never race by
+//RS /// swapping Rust's process-global panic hook and leak a raw worker panic line.
+//RS #[test]
+//RS fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping scheduler panic-hook regression");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_dev_scheduler_panic_hook_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let file = "Examples/features/concurrency/all_failfast.jet";
+//RS     // I9 / #1685: AOT prints the same typed TaskFailure panic as the golden.
+//RS     let expected_stderr =
+//RS         fs::read_to_string("Examples/features/expected/concurrency/all_failfast.err.out")
+//RS             .expect("all_failfast.err.out");
+//RS     let expected = ProgramOutput::ran(String::new(), expected_stderr, 70);
+//RS     let first = compiled_binary_output(&dir, "scheduler_panic_hook", 0, "all_failfast", file);
+//RS     assert_eq!(first, expected);
+//RS 
+//RS     // Strict JIT no longer AOT-fallbacks all_failfast; parallel AOT runs keep
+//RS     // the typed-failure panic-hook regression signal.
+//RS 
+//RS     let binary = Arc::new(compiled_binary_path(
+//RS         &aot_scratch_dir("scheduler_panic_hook", "all_failfast"),
+//RS         "scheduler_panic_hook",
+//RS         0,
+//RS         file,
+//RS     ));
+//RS     let failures = Arc::new(Mutex::new(Vec::new()));
+//RS     let mut workers = Vec::new();
+//RS     for worker in 0..8 {
+//RS         let binary = Arc::clone(&binary);
+//RS         let failures = Arc::clone(&failures);
+//RS         let expected = expected.clone();
+//RS         workers.push(std::thread::spawn(move || {
+//RS             for iteration in 0..8 {
+//RS                 let mut last = None;
+//RS                 for _attempt in 0..4 {
+//RS                     let run = command_output_with_timeout(
+//RS                         Command::new(binary.as_ref()),
+//RS                         *DEV_DIFF_TIMEOUT,
+//RS                         &format!("scheduler panic run {worker}/{iteration}"),
+//RS                     );
+//RS                     let got = ProgramOutput::ran(
+//RS                         String::from_utf8_lossy(&run.stdout).into_owned(),
+//RS                         String::from_utf8_lossy(&run.stderr).into_owned(),
+//RS                         run.status.code().unwrap_or(1),
+//RS                     );
+//RS                     if got == expected {
+//RS                         last = None;
+//RS                         break;
+//RS                     }
+//RS                     // Parallel AOT runs can race the panic hook and lose stderr
+//RS                     // while keeping exit 70 — retry before recording a failure.
+//RS                     if got.exit_code == 70 && got.stderr.is_empty() && got.stdout.is_empty() {
+//RS                         last = Some(got);
+//RS                         continue;
+//RS                     }
+//RS                     last = Some(got);
+//RS                     break;
+//RS                 }
+//RS                 if let Some(got) = last {
+//RS                     lock_recovered(&failures, "panic-hook drift report").push(format!(
+//RS                         "run {worker}/{iteration}: expected {expected:?}, got {got:?}"
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }));
+//RS     }
+//RS     for worker in workers {
+//RS         worker
+//RS             .join()
+//RS             .expect("panic-hook regression worker panicked");
+//RS     }
+//RS     let failures = judged_report(&failures, "panic-hook drift report");
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "caught task panic stderr drifted:\n{}",
+//RS         failures.join("\n")
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// c728/#778: uncovered effectful programs deopt under default dev.
+//RS #[test]
+//RS fn dev_default_reports_jit_gap_for_env_program() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_dev_jit_gap_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("env_gap.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     match dev_iteration(&shown, false, false) {
+//RS         RunOutcome::Ran { stdout, .. } => {
+//RS             assert!(
+//RS                 jet_jit::deopt_invoked_for_test(),
+//RS                 "default dev must deopt env programs to the interpreter"
+//RS             );
+//RS             assert!(
+//RS                 !stdout.is_empty(),
+//RS                 "deopted env.current_dir() should print a path"
+//RS             );
+//RS         }
+//RS         RunOutcome::Problems(diags) => {
+//RS             assert!(
+//RS                 !diags.iter().any(|d| d.code == "E2211"),
+//RS                 "E2211 is retired: {diags:?}"
+//RS             );
+//RS             panic!("default tiered run should deopt-run core.sys, got {diags:?}");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// c728 C3: strict Cranelift traces JIT execution and never invokes tier-0 fallback.
+//RS #[test]
+//RS fn strict_jit_traces_execution_without_fallback() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let file = example_path("basics/hello");
+//RS     match dev_iteration(&file, false, false) {
+//RS         RunOutcome::Ran { .. } => {}
+//RS         other => panic!("hello must run via strict JIT: {other:?}"),
+//RS     }
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "strict path must execute JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::fallback_invoked_for_test(),
+//RS         "strict path must not invoke interpreter fallback"
+//RS     );
+//RS }
+//RS 
+//RS /// D-ONELINE-BODY1=B — one body rule *(ratified 2026-08-13, cards #1453 and
+//RS /// #1454)*: "An effect-only `if` or `loop` may put `->` before one adjacent
+//RS /// statement; braces are required for multiple statements and scoped marker
+//RS /// blocks." This fixture predates that (added 2026-07-27, f71f39648) and wrote
+//RS /// brace-less, arrow-less `if cond stmt`, which is E0372.
+//RS ///
+//RS /// D-LOOP-HEADER3=D — one three-slot header meaning *(ratified 2026-07-31,
+//RS /// card #1325)*: "slots are binding; source; step rule … The C-style counter
+//RS /// form retires with a teaching diagnostic." `counted_init_exit` used
+//RS /// `loop i := init, cond, step {}`, which is E0376 (the retired three-slot form)
+//RS /// plus E0376; E0376's own fix names the replacement kept here: "keep
+//RS /// `loop name := value, condition { … }` for mutable state."
+//RS #[test]
+//RS fn yielding_and_result_loops_run_in_native_jit_without_fallback() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let dir = common::unique_tmp("jet_dev_loop_values");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("loop_values.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"fn find(xs: [Int]) -> Int {
+//RS     found :: loop {
+//RS         loop x in xs {
+//RS             if x > 2 -> break(found, x)
+//RS         }
+//RS         break -1
+//RS     }
+//RS     found
+//RS }
+//RS 
+//RS fn outer_result() -> Int {
+//RS     result :: loop {
+//RS         ignored :: loop {
+//RS             break(result, 9)
+//RS         }
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn identity(value: Int) -> Int -> value
+//RS 
+//RS fn nested_binary_exit() -> Int {
+//RS     result :: loop {
+//RS         ignored :: (loop {
+//RS             break(result, 11)
+//RS             break 1
+//RS         }) + 2
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn nested_call_exit() -> Int {
+//RS     result :: loop {
+//RS         ignored :: identity(loop {
+//RS             break(result, 12)
+//RS             break 1
+//RS         })
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn nested_condition_exit() -> Int {
+//RS     result :: loop {
+//RS         if (loop {
+//RS             break(result, 13)
+//RS             break 1
+//RS         }) > 0 {
+//RS             break 0
+//RS         }
+//RS         break -1
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn counted_init_exit() -> Int {
+//RS     result :: loop {
+//RS         loop i := (loop {
+//RS             break(result, 14)
+//RS             break 0
+//RS         }), i < 1 {
+//RS             i += 1
+//RS         }
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn counted_step_exit() -> Int {
+//RS     result :: loop {
+//RS         loop i := 0, i < 2 {
+//RS             i = (loop {
+//RS                 break(result, 15)
+//RS                 break 0
+//RS             })
+//RS         }
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn value_if_exit() -> Int {
+//RS     result :: loop {
+//RS         ignored :: if true -> {
+//RS             break(result, 16)
+//RS             0
+//RS         } else -> 0
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn run() {
+//RS     xs :: [Int]{ 1, 2, 3, 4 }
+//RS     doubled :: loop x in xs -> x * 2
+//RS     outer :: loop x in xs {
+//RS         ignored :: loop {
+//RS             if x == 1 -> next(outer)
+//RS             if x == 2 -> break(outer)
+//RS             break 0
+//RS         }
+//RS         print(ignored)
+//RS     }
+//RS     print(find(xs))
+//RS     print(doubled)
+//RS     print(outer_result())
+//RS     print(nested_binary_exit())
+//RS     print(nested_call_exit())
+//RS     print(nested_condition_exit())
+//RS     print(counted_init_exit())
+//RS     print(counted_step_exit())
+//RS     print(value_if_exit())
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let mut bundle =
+//RS         jet::Loader::load_entry(file.to_str().unwrap()).expect("loop-value bundle should load");
+//RS     let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+//RS         .into_iter()
+//RS         .filter(|diag| matches!(diag.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect::<Vec<_>>();
+//RS     assert!(
+//RS         errors.is_empty(),
+//RS         "loop-value bundle must type-check: {errors:?}"
+//RS     );
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "loop values must be resident-safe: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS     match dev_iteration(file.to_str().unwrap(), false, true) {
+//RS         RunOutcome::Ran { stdout, .. } => {
+//RS             assert_eq!(stdout, "3\n[2, 4, 6, 8]\n9\n11\n12\n13\n14\n15\n16\n")
+//RS         }
+//RS         other => panic!("loop values must run in the interpreter: {other:?}"),
+//RS     }
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS         .unwrap_or_else(|error| panic!("loop-value JIT compile failed: {error}"));
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     match dev_iteration(file.to_str().unwrap(), false, false) {
+//RS         RunOutcome::Ran { stdout, .. } => {
+//RS             assert_eq!(stdout, "3\n[2, 4, 6, 8]\n9\n11\n12\n13\n14\n15\n16\n")
+//RS         }
+//RS         other => panic!("loop values must run via native JIT: {other:?}"),
+//RS     }
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "loop values must execute JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "loop values must not use interpreter fallback"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn value_loop_named_routes_match_interpreter_default_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let dir = common::unique_tmp("jet_dev_value_loop_routes");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("value_loop_routes.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"fn run() {
+//RS     attempts := 0
+//RS     retry :: loop {
+//RS         attempts += 1
+//RS         found :: loop value in [1] {
+//RS             if attempts == 2 { break value }
+//RS         } ?? next(retry)
+//RS         print(found)
+//RS         break(retry)
+//RS     }
+//RS     stop :: loop {
+//RS         ignored :: loop value in [1] {
+//RS             if value == 2 { break value }
+//RS         } ?? break(stop)
+//RS         print(ignored)
+//RS     }
+//RS     print("done")
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().into_owned();
+//RS     let expected = ProgramOutput::ran("1\ndone\n".into(), String::new(), 0);
+//RS 
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("value-loop interpreter failed: {diags:?}"),
+//RS     };
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let default = match dev_iteration(&shown, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("value-loop default run failed: {diags:?}"),
+//RS     };
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "value-loop routes must execute JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "value-loop routes must not use interpreter fallback"
+//RS     );
+//RS     let aot = compiled_binary_output(&dir, "value_loop_routes", 0, "value_loop_routes", &shown);
+//RS 
+//RS     assert_eq!(interpreted, expected, "interpreter value-loop route drift");
+//RS     assert_eq!(default, expected, "default JIT value-loop route drift");
+//RS     assert_eq!(aot, expected, "AOT value-loop route drift");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// E0956 regression: String field `+=` uses one owned concat operation on the
+//RS /// evaluator, resident JIT, and AOT paths.
+//RS #[test]
+//RS fn string_field_compound_append_matches_interpreter_default_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let dir = common::unique_tmp("jet_dev_string_field_compound");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("string_field_compound.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         "struct Packet {\n    source: String\n    fn append(&self) {\n        self.source += \"AAA\"\n    }\n}\nfn run() {\n    p := Packet{ source: \"base\" }\n    p.append()\n    print(p.source)\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().into_owned();
+//RS     let expected = ProgramOutput::ran("baseAAA\n".into(), String::new(), 0);
+//RS 
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("String field interpreter failed: {diags:?}"),
+//RS     };
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let default = match dev_iteration(&shown, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("String field default run failed: {diags:?}"),
+//RS     };
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "String field compound append must execute in the resident JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "String field compound append must not raise E0956 through interpreter fallback"
+//RS     );
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "string_field_compound",
+//RS         0,
+//RS         "string_field_compound",
+//RS         &shown,
+//RS     );
+//RS 
+//RS     assert_eq!(
+//RS         interpreted, expected,
+//RS         "String field interpreter route drift"
+//RS     );
+//RS     assert_eq!(default, expected, "String field default JIT route drift");
+//RS     assert_eq!(aot, expected, "String field AOT route drift");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// c728 C6: one-shot `jet dev` deopts on a JIT gap and exits 0.
+//RS #[test]
+//RS fn one_shot_dev_deopts_on_jit_gap() {
+//RS     let dir = common::unique_tmp("jet_dev_one_shot_deopt");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("gap.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["dev", file.to_str().unwrap(), "--watch=off"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("one-shot jet dev");
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(0),
+//RS         "stderr={}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let combined = format!(
+//RS         "{}{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         !combined.contains("E2211"),
+//RS         "retired E2211 must not appear: {combined}"
+//RS     );
+//RS     assert!(
+//RS         !String::from_utf8_lossy(&output.stdout).trim().is_empty(),
+//RS         "deopted env.current_dir() should print a path: {combined}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// c728 C6: watching `jet dev` deopts on a gap edit and accepts a later valid edit.
+//RS #[test]
+//RS fn watching_dev_deopts_on_gap_edit_and_recovers() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     // Same shape as `watching_dev_reruns_on_jit_gap_and_recovers`: silent deopt
+//RS     // (no E2211), recover after gap edit. Do not require the watch banner —
+//RS     // WatchService timing is covered by UL6/native watch tests.
+//RS     let dir = std::env::temp_dir().join(format!("jet_watch_deopt_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("watch_gap.jet");
+//RS     fs::write(&file, "fn run() {\n    print(\"ok1\")\n}\n").unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS 
+//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["dev", &shown])
+//RS         .env("NO_COLOR", "1")
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .expect("spawn watching jet dev");
+//RS 
+//RS     std::thread::sleep(Duration::from_millis(800));
+//RS     fs::write(
+//RS         &file,
+//RS         "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::thread::sleep(Duration::from_millis(800));
+//RS     fs::write(&file, "fn run() {\n    print(\"ok2\")\n}\n").unwrap();
+//RS     std::thread::sleep(Duration::from_millis(800));
+//RS 
+//RS     let _ = child.kill();
+//RS     let out = child.wait_with_output().expect("watching jet dev output");
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stdout.contains("ok1"), "stdout:\n{stdout}");
+//RS     assert!(
+//RS         !stderr.contains("E2211") && !stdout.contains("E2211"),
+//RS         "retired E2211 must not appear\nstdout:\n{stdout}\nstderr:\n{stderr}"
+//RS     );
+//RS     assert!(stdout.contains("ok2"), "stdout:\n{stdout}");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// D-PERSIST1: the shipped teaching example shows mutation, compatible reload,
+//RS /// and shape-reset behavior through a real watching `jet dev` process.
+//RS #[test]
+//RS fn persist_example_survives_hot_reload() {
+//RS     use std::io::{BufRead, BufReader};
+//RS 
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let source = root.join("Examples/features/devloop/persist.jet");
+//RS     let dir = common::unique_tmp("jet_dev_persist_example");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("persist.jet");
+//RS     let original = fs::read(&source).unwrap();
+//RS     fs::write(&file, &original).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS 
+//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["dev", &shown, "--swap"])
+//RS         .env("NO_COLOR", "1")
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .expect("spawn persist example jet dev");
+//RS     let stdout = child.stdout.take().unwrap();
+//RS     let (lines_tx, lines_rx) = std::sync::mpsc::channel();
+//RS     std::thread::spawn(move || {
+//RS         for line in BufReader::new(stdout).lines() {
+//RS             if lines_tx.send(line).is_err() {
+//RS                 break;
+//RS             }
+//RS         }
+//RS     });
+//RS     let wait_for = |expected: &str| loop {
+//RS         let line = lines_rx
+//RS             .recv_timeout(Duration::from_secs(30))
+//RS             .expect("persist example output")
+//RS             .expect("persist example stdout line");
+//RS         if line == expected {
+//RS             break;
+//RS         }
+//RS     };
+//RS 
+//RS     wait_for("1");
+//RS     let compatible = String::from_utf8(original.clone())
+//RS         .unwrap()
+//RS         .replace("print(\"{counter}\")", "print(\"count={counter}\")");
+//RS     fs::write(&file, compatible).unwrap();
+//RS     wait_for("count=2");
+//RS 
+//RS     let shape_changed = String::from_utf8(original)
+//RS         .unwrap()
+//RS         .replace("#Persist counter := 0", "#Persist counter := 0.0")
+//RS         .replace("print(\"{counter}\")", "print(\"count={counter}\")");
+//RS     fs::write(&file, shape_changed).unwrap();
+//RS     wait_for("count=1.0");
+//RS 
+//RS     let _ = child.kill();
+//RS     let _ = child
+//RS         .wait_with_output()
+//RS         .expect("stop persist example jet dev");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// D-AUTH-TOKENPOLICY1=A: auth verification stays resident in the default JIT;
+//RS /// forced interpretation uses the same ambient Prelude adapter.
+//RS #[test]
+//RS fn dev_default_runs_auth_verification_resident() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_dev_auth_resident_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("auth_resident.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"use core.auth as auth
+//RS 
+//RS fn run() {
+//RS     key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
+//RS     token := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB9.3gbnbn_u-GjiQuGusiLrnMUzlo5c9rPeqAO0iWZxhrY"
+//RS     claims :: auth.verify_jwt(token, key: key, audience: "gateway") ?? panic("verification failed")
+//RS     print(claims.audience)
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     match dev_iteration_with_timeout("auth_resident_interpreter", &shown, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(stdout.trim(), "gateway");
+//RS             assert_eq!(stderr, "");
+//RS             assert_eq!(exit_code, 0);
+//RS             assert!(!jet_jit::jit_executed_for_test());
+//RS             assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+//RS         }
+//RS         RunOutcome::Problems(diags) => panic!("forced auth interpreter failed: {diags:?}"),
+//RS     }
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     match dev_iteration_with_timeout("auth_resident", &shown, false) {
+//RS         RunOutcome::Ran { stdout, .. } => {
+//RS             assert!(
+//RS                 jet_jit::jit_executed_for_test(),
+//RS                 "default dev must execute core.auth in resident JIT"
+//RS             );
+//RS             assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+//RS             assert_eq!(stdout.trim(), "gateway");
+//RS         }
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("default resident JIT failed: {diags:?}");
+//RS         }
+//RS     }
+//RS 
+//RS     let expected = compiled_binary_output(&dir, "auth_resident", 0, "auth_resident", &shown);
+//RS     assert_eq!(expected.stdout.trim(), "gateway");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// D-SHAPE-PLACE1=A (#613): safe structural splitting follows the sema-proved
+//RS /// place identity and live range, not adjacent AST bindings. AOT and default
+//RS /// dev must preserve intervening effects and nested-field owner identity.
+//RS #[test]
+//RS fn place_split_planner_preserves_order_and_nested_owners() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping place split AOT/dev regression");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_place_split_planner_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("place_split.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"struct Holder { values: [Int] }
+//RS fn run() {
+//RS     values := [1, 2, 3, 4]
+//RS     first :: &values[0]
+//RS     print("between root")
+//RS     last :: &values[3]
+//RS     first = 8
+//RS     last = 9
+//RS     print("root: {first},{last}")
+//RS 
+//RS     adjacent := Holder{ values: [10, 11, 12, 13] }
+//RS     adjacent_first :: &adjacent.values[0..1]
+//RS     adjacent_last :: &adjacent.values[2..3]
+//RS     adjacent_first[0] = 18
+//RS     adjacent_last[0] = 19
+//RS     print("nested adjacent: {adjacent_first[0]},{adjacent_last[0]}")
+//RS 
+//RS     interleaved := Holder{ values: [20, 21, 22, 23] }
+//RS     interleaved_first :: &interleaved.values[0..1]
+//RS     print("between nested")
+//RS     interleaved_last :: &interleaved.values[2..3]
+//RS     interleaved_first[0] = 28
+//RS     interleaved_last[0] = 29
+//RS     print("nested interleaved: {interleaved_first[0]},{interleaved_last[0]}")
+//RS 
+//RS     reused := [30, 31]
+//RS     reused_first :: &reused[0]
+//RS     reused_bridge :: &reused[1]
+//RS     print("reuse first: {reused_first}")
+//RS     reused_again :: &reused[0]
+//RS     reused_bridge = 38
+//RS     reused_again = 39
+//RS     print("reuse final: {reused_again},{reused_bridge}")
+//RS 
+//RS     replaced := [40, 41]
+//RS     before_replace :: &replaced[0]
+//RS     print("before replace: {before_replace}")
+//RS     replaced = [42, 43]
+//RS     after_replace :: &replaced[1]
+//RS     #DebugOnly { print("unrelated debug") }
+//RS     after_replace = 49
+//RS     print("after replace: {after_replace}")
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let expected = compiled_binary_output(&dir, "place_split", 0, "place_split", &shown);
+//RS     assert_eq!(
+//RS         expected.stdout,
+//RS         "between root\nroot: 8,9\nnested adjacent: 18,19\nbetween nested\nnested interleaved: 28,29\nreuse first: 30\nreuse final: 39,38\nbefore replace: 40\nunrelated debug\nafter replace: 49\n"
+//RS     );
+//RS     assert_default_dev_jit_gap("place_split", &shown);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn returned_parameter_view_matches_aot_and_default_dev() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping returned-view AOT/dev regression");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_returned_parameter_view_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("returned_parameter_view.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"fn first(left: [Int], right: [Int]) -> View<Int> {
+//RS     return left[0..1]
+//RS }
+//RS 
+//RS fn run() {
+//RS     left := [7, 8]
+//RS     right := [9, 10]
+//RS     result :: first(left, right)
+//RS     print(result[0])
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "returned_parameter_view",
+//RS         0,
+//RS         "returned_parameter_view",
+//RS         &shown,
+//RS     );
+//RS     assert_eq!(aot.stdout, "7\n");
+//RS     assert_default_dev_jit_gap("returned_parameter_view", &shown);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn returned_view_field_matches_aot_and_default_dev() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping returned-view-field AOT/dev regression");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_returned_view_field_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("returned_view_field.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"struct Window { values: View<Int> }
+//RS 
+//RS fn window(values: [Int]) -> Window {
+//RS     selected :: values[0..1]
+//RS     return Window{ values: selected }
+//RS }
+//RS 
+//RS fn run() {
+//RS     values := [7, 8]
+//RS     result :: window(values)
+//RS     print(result.values[0])
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "returned_view_field",
+//RS         0,
+//RS         "returned_view_field",
+//RS         &shown,
+//RS     );
+//RS     assert_eq!(aot.stdout, "7\n");
+//RS     assert_default_dev_jit_gap("returned_view_field", &shown);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn nested_returned_view_field_matches_aot_and_default_dev() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping nested returned-view AOT/dev regression");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_nested_returned_view_field_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("nested_returned_view_field.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"struct Inner { values: View<Int> }
+//RS struct Outer { inner: Inner }
+//RS 
+//RS fn outer(values: [Int]) -> Outer {
+//RS     selected :: values[0..1]
+//RS     return Outer{ inner: Inner{ values: selected } }
+//RS }
+//RS 
+//RS fn run() {
+//RS     values := [7, 8]
+//RS     result :: outer(values)
+//RS     print(result.inner.values[0])
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "nested_returned_view_field",
+//RS         0,
+//RS         "nested_returned_view_field",
+//RS         &shown,
+//RS     );
+//RS     assert_eq!(aot.stdout, "7\n");
+//RS     assert_default_dev_jit_gap("nested_returned_view_field", &shown);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn wrapped_returned_view_fields_match_aot_and_default_dev() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping wrapped returned-view AOT/dev regression");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_wrapped_returned_view_fields_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("wrapped_returned_view_fields.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"struct Window { values: View<Int> }
+//RS struct Holder { maybe: Window? }
+//RS struct GenericHolder<T> { value: T, maybe: Window? }
+//RS struct Node { next: Node?, values: View<Int> }
+//RS 
+//RS fn maybe(values: [Int]) -> (Window?) {
+//RS     selected :: values[0..1]
+//RS     return Val(Window{ values: selected })
+//RS }
+//RS 
+//RS fn result(values: [Int]) -> Window String! {
+//RS     selected :: values[0..1]
+//RS     return Ok(Window{ values: selected })
+//RS }
+//RS 
+//RS fn tuple(values: [Int]) -> (window: Window, count: Int) {
+//RS     selected :: values[0..1]
+//RS     return (window: Window{ values: selected }, count: 1)
+//RS }
+//RS 
+//RS fn node(values: [Int]) -> Node {
+//RS     selected :: values[0..1]
+//RS     return Node{ next: None, values: selected }
+//RS }
+//RS 
+//RS fn run() { print(0) }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "wrapped_returned_view_fields",
+//RS         0,
+//RS         "wrapped_returned_view_fields",
+//RS         &shown,
+//RS     );
+//RS     assert_eq!(aot.stdout, "0\n");
+//RS     assert_default_dev_jit_gap("wrapped_returned_view_fields", &shown);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn returned_string_view_field_matches_all_execution_tiers() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping returned-string-view AOT/dev regression");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_returned_string_view_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("returned_string_view.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"struct Parsed { source: String, head: View<str> }
+//RS 
+//RS fn parse(source: String) -> Parsed {
+//RS     head :: source.before(":")
+//RS     return Parsed{ source: source, head: head }
+//RS }
+//RS 
+//RS fn run() {
+//RS     left := "name"
+//RS     right := "value"
+//RS     source := "{left}:{right}"
+//RS     result :: parse(source)
+//RS     print(result.head)
+//RS     print("wrapped: {result.head}")
+//RS     expected :: "name"
+//RS     print("wrapped: {expected}")
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "returned_string_view",
+//RS         0,
+//RS         "returned_string_view",
+//RS         &shown,
+//RS     );
+//RS     let expected = ProgramOutput::ran(
+//RS         "name\nwrapped: name\nwrapped: name\n".to_string(),
+//RS         String::new(),
+//RS         0,
+//RS     );
+//RS     assert_eq!(
+//RS         aot, expected,
+//RS         "AOT View<str> interpolation drifted from String"
+//RS     );
+//RS     for (tier, use_interpreter) in [("default dev", false), ("interpreter", true)] {
+//RS         let output =
+//RS             match dev_iteration_with_timeout("returned_string_view", &shown, use_interpreter) {
+//RS                 RunOutcome::Ran {
+//RS                     stdout,
+//RS                     stderr,
+//RS                     exit_code,
+//RS                 } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS                 RunOutcome::Problems(diags) => {
+//RS                     panic!("{tier} returned diagnostics for stored View<str>: {diags:?}")
+//RS                 }
+//RS             };
+//RS         assert_eq!(
+//RS             output, expected,
+//RS             "{tier} View<str> interpolation drifted from String"
+//RS         );
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn returned_view_trait_method_matches_aot_and_default_dev() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping returned-view-trait AOT/dev regression");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_returned_view_trait_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("returned_view_trait.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"trait Select {
+//RS     fn select(self, left: [Int], right: [Int]) -> View<Int>
+//RS }
+//RS 
+//RS struct First { marker: Int }
+//RS impl First.Select {
+//RS     fn select(self, left: [Int], right: [Int]) -> View<Int> {
+//RS         return left[0..1]
+//RS     }
+//RS }
+//RS 
+//RS fn wrapper(selector: First, left: [Int], right: [Int]) -> View<Int> {
+//RS     return selector.select(left, right)
+//RS }
+//RS 
+//RS fn run() {
+//RS     selector :: First{ marker: 0 }
+//RS     left := [7, 8]
+//RS     right := [9, 10]
+//RS     result :: wrapper(selector, left, right)
+//RS     print(result[0])
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "returned_view_trait",
+//RS         0,
+//RS         "returned_view_trait",
+//RS         &shown,
+//RS     );
+//RS     assert_eq!(aot.stdout, "7\n");
+//RS     assert_default_dev_jit_gap("returned_view_trait", &shown);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping aggregate trait-return AOT/dev regression");
+//RS         return;
+//RS     }
+//RS     let template = r#"struct Pair { left: View<Int>, right: View<Int> }
+//RS struct Envelope<T> { value: T, marker: Int }
+//RS 
+//RS trait Select {
+//RS     fn select(self, left: [Int], right: [Int]) -> Pair
+//RS     fn optional(self, left: [Int], right: [Int]) -> (Pair?)
+//RS     fn fallible(self, left: [Int], right: [Int]) -> Pair String!
+//RS     fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int)
+//RS     fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair>
+//RS }
+//RS 
+//RS fn wrapper(selector: First, left: [Int], right: [Int]) -> Pair {
+//RS     return selector.select(left, right)
+//RS }
+//RS 
+//RS $IMPLS
+//RS 
+//RS fn run() {
+//RS     left := [7, 8]
+//RS     right := [9, 10]
+//RS     pair :: wrapper(First{ marker: 0 }, left, right)
+//RS     print(pair.left[0])
+//RS     print(pair.right[0])
+//RS }
+//RS "#;
+//RS     let implementation = |name: &str| {
+//RS         r#"struct $TYPE { marker: Int }
+//RS impl $TYPE.Select {
+//RS     fn select(self, left: [Int], right: [Int]) -> Pair {
+//RS         left_view :: left[0..1]
+//RS         right_view :: right[0..1]
+//RS         return Pair{ left: left_view, right: right_view }
+//RS     }
+//RS     fn optional(self, left: [Int], right: [Int]) -> (Pair?) {
+//RS         left_view :: left[0..1]
+//RS         right_view :: right[0..1]
+//RS         return Val(Pair{ left: left_view, right: right_view })
+//RS     }
+//RS     fn fallible(self, left: [Int], right: [Int]) -> Pair String! {
+//RS         left_view :: left[0..1]
+//RS         right_view :: right[0..1]
+//RS         return Ok(Pair{ left: left_view, right: right_view })
+//RS     }
+//RS     fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int) {
+//RS         left_view :: left[0..1]
+//RS         right_view :: right[0..1]
+//RS         return (pair: Pair{ left: left_view, right: right_view }, count: 1)
+//RS     }
+//RS     fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair> {
+//RS         left_view :: left[0..1]
+//RS         right_view :: right[0..1]
+//RS         return Envelope<Pair>{
+//RS             value: Pair{ left: left_view, right: right_view },
+//RS             marker: 0,
+//RS         }
+//RS     }
+//RS }
+//RS "#
+//RS         .replace("$TYPE", name)
+//RS     };
+//RS     let first = implementation("First");
+//RS     let last = implementation("Last");
+//RS     for (index, implementations) in [format!("{first}{last}"), format!("{last}{first}")]
+//RS         .into_iter()
+//RS         .enumerate()
+//RS     {
+//RS         let dir = std::env::temp_dir().join(format!(
+//RS             "jet_aggregate_trait_returns_{}_{}",
+//RS             std::process::id(),
+//RS             index
+//RS         ));
+//RS         fs::create_dir_all(&dir).unwrap();
+//RS         let file = dir.join("aggregate_trait_returns.jet");
+//RS         fs::write(&file, template.replace("$IMPLS", &implementations)).unwrap();
+//RS         let shown = file.to_string_lossy().to_string();
+//RS         let stem = format!("aggregate_trait_returns_{index}");
+//RS         let aot = compiled_binary_output(&dir, &stem, 0, &stem, &shown);
+//RS         let expected = ProgramOutput::ran("7\n9\n".to_string(), String::new(), 0);
+//RS         assert_eq!(aot, expected, "AOT aggregate trait return drifted");
+//RS         jet_jit::reset_jit_trace_for_test();
+//RS         let dev = match dev_iteration_with_timeout(&stem, &shown, false) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert!(
+//RS                     jet_jit::jit_executed_for_test() || jet_jit::deopt_invoked_for_test(),
+//RS                     "{stem} must run via tiered JIT or interpreter deopt"
+//RS                 );
+//RS                 ProgramOutput::ran(stdout, stderr, exit_code)
+//RS             }
+//RS             RunOutcome::Problems(diags) => {
+//RS                 panic!("default dev returned diagnostics for {stem}: {diags:?}")
+//RS             }
+//RS         };
+//RS         assert_eq!(dev, expected, "default dev aggregate trait return drifted");
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn json_coerce_audit_reports_jit_gap_on_default_dev() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_dev_json_coerce_fallback_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let stem = "serde/json_coerce";
+//RS     let file = example_path(stem);
+//RS 
+//RS     // `dev_iteration` returns `Problems` for a front-end rejection and for an
+//RS     // interpreter boundary alike, so the boundary assertion below cannot tell
+//RS     // "the interpreter refused to drop the audit effect" from "the fixture never
+//RS     // type-checked". Separate them here: this stem's whole point is the UNTYPED
+//RS     // D-JSON3 lenient `json.decode(text)` form, so if sema rejects that call the
+//RS     // failure is the stdlib surface, not the interpreter.
+//RS     let front_end: Vec<_> = jet::check_with_path(&file)
+//RS         .into_iter()
+//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(
+//RS         front_end.is_empty(),
+//RS         "`{stem}` must type-check before the interpreter boundary means anything; \
+//RS          untyped `json.decode(text)` is the ratified D-JSON3 lenient form \
+//RS          (`module_items.rs` exports `decode`, `core_fixed_sig_impl` types it as \
+//RS          `Result<Data, JSONError>`, AOT lowers it to `jet_std_json_decode_lenient`): \
+//RS          {front_end:?}"
+//RS     );
+//RS 
+//RS     assert_default_dev_jit_gap(stem, &file);
+//RS     let expected = normalize_for_parity(
+//RS         stem,
+//RS         compiled_binary_output(&dir, "json_coerce_aot", 0, stem, &file),
+//RS     );
+//RS     assert_eq!(expected.stdout, "8081\napi\ntrue\n");
+//RS     assert_eq!(expected.exit_code, 0);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn dev_default_socket_echo_reports_jit_gap() {
+//RS     let file = "Examples/features/net/socket_echo.jet";
+//RS     assert_default_dev_jit_gap("net/socket_echo", file);
+//RS }
+//RS 
+//RS #[test]
+//RS fn dev_default_tls_peer_identity_matches_aot_and_interpreter() {
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     // A private package root keeps this transport fixture's authority scan out
+//RS     // of the shared scratch project and is removed when the test scope ends.
+//RS     let scratch = common::Scratch::new("tls-peer-identity");
+//RS     let dir = scratch.path.as_path();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"tls_peer_identity\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Net, Time.Wait] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let ca_cert = root.join("tests/fixtures/tls/localhost.cert.pem");
+//RS     let ca_key = root.join("tests/fixtures/tls/localhost.key.pem");
+//RS     let serial = dir.join("ca.srl");
+//RS     let server_cert = dir.join("server.cert.pem");
+//RS     let server_key = dir.join("server.key.pem");
+//RS     let csr = dir.join("server.csr.pem");
+//RS     let ext = dir.join("server.ext");
+//RS     fs::write(
+//RS         &ext,
+//RS         "basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth\n",
+//RS     )
+//RS     .unwrap();
+//RS     let req = Command::new("openssl")
+//RS         .args([
+//RS             "req",
+//RS             "-new",
+//RS             "-newkey",
+//RS             "rsa:2048",
+//RS             "-nodes",
+//RS             "-subj",
+//RS             "/CN=localhost",
+//RS             "-keyout",
+//RS         ])
+//RS         .arg(&server_key)
+//RS         .arg("-out")
+//RS         .arg(&csr)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         req.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&req.stderr)
+//RS     );
+//RS     let sign = Command::new("openssl")
+//RS         .args(["x509", "-req", "-days", "1", "-CAcreateserial", "-CAserial"])
+//RS         .arg(&serial)
+//RS         .arg("-CA")
+//RS         .arg(&ca_cert)
+//RS         .arg("-CAkey")
+//RS         .arg(&ca_key)
+//RS         .arg("-extfile")
+//RS         .arg(&ext)
+//RS         .arg("-in")
+//RS         .arg(&csr)
+//RS         .arg("-out")
+//RS         .arg(&server_cert)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         sign.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&sign.stderr)
+//RS     );
+//RS     let root_bytes = fs::read(&ca_cert).unwrap();
+//RS     let jet_bytes = |bytes: &[u8]| {
+//RS         bytes
+//RS             .iter()
+//RS             .map(u8::to_string)
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ")
+//RS     };
+//RS     let source_for = |port: u16| {
+//RS         format!(
+//RS             r#"use core.net as net
+//RS use core.net.tls as tls
+//RS 
+//RS fn run() {{
+//RS     roots :: tls.RootCertificates.from_pem([U8]{{ {roots} }}) ?? panic("roots")
+//RS     cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust")
+//RS     cfg2 :: cfg.with_version_bounds(min: .TLS13, max: .TLS13) ?? panic("versions")
+//RS     tcp :: net.tcp_connect("127.0.0.1:{port}") ?? panic("tcp")
+//RS     budget :: Duration.seconds(2) ?? panic("deadline")
+//RS     secure := tls.client(^tcp, server_name: "localhost", config: cfg2, deadline: budget) ?? panic("tls")
+//RS     peer :: secure.peer_identity()
+//RS     if peer.verified_server_name != "localhost" {{ panic("server name") }}
+//RS     print(peer.verified_server_name)
+//RS     print(peer.cipher_suite)
+//RS     print(peer.tls_version)
+//RS     if !peer.cipher_suite.starts_with("TLS13_") {{ panic("cipher") }}
+//RS     if peer.tls_version != .TLS13 {{ panic("version") }}
+//RS     crlf :: String.from_bytes([U8]{{13, 10}}) ?? panic("CRLF")
+//RS     secure.write_text("GET / HTTP/1.0{{crlf}}Host: localhost{{crlf}}{{crlf}}") ?? panic("request")
+//RS     // At most 8 * 512 bytes; preserve the marker across TLS read boundaries.
+//RS     response := ""
+//RS     response_reads := 0
+//RS     loop response_reads < 8 && !response.contains("<HTML>") {{
+//RS         chunk :: secure.read_text(512) ?? panic("response")
+//RS         if chunk == "" -> break
+//RS         response = "{{response}}{{chunk}}"
+//RS         response_reads = response_reads + 1
+//RS     }}
+//RS     if !response.contains("<HTML>") {{ panic("response body") }}
+//RS     print("tls-response-ok")
+//RS     secure.close() ?? panic("close")
+//RS }}
+//RS "#,
+//RS             roots = jet_bytes(&root_bytes),
+//RS         )
+//RS     };
+//RS     struct TlsServer(std::process::Child);
+//RS     impl Drop for TlsServer {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS 
+//RS     let wait_ready = |port: u16| {
+//RS         for _ in 0..50 {
+//RS             if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+//RS                 return;
+//RS             }
+//RS             std::thread::sleep(Duration::from_millis(50));
+//RS         }
+//RS         panic!("openssl TLS 1.3 server did not accept on 127.0.0.1:{port}");
+//RS     };
+//RS     let start_server = |port: u16| {
+//RS         let server = TlsServer(
+//RS             Command::new("openssl")
+//RS                 .args([
+//RS                     "s_server",
+//RS                     "-quiet",
+//RS                     "-www",
+//RS                     "-tls1_3",
+//RS                     "-accept",
+//RS                     &port.to_string(),
+//RS                     "-cert",
+//RS                 ])
+//RS                 .arg(&server_cert)
+//RS                 .arg("-key")
+//RS                 .arg(&server_key)
+//RS                 .arg("-cert_chain")
+//RS                 .arg(&ca_cert)
+//RS                 .stdout(Stdio::null())
+//RS                 .stderr(Stdio::null())
+//RS                 .spawn()
+//RS                 .expect("openssl TLS 1.3 server"),
+//RS         );
+//RS         wait_ready(port);
+//RS         server
+//RS     };
+//RS     let fresh_port = || {
+//RS         let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS         let port = probe.local_addr().unwrap().port();
+//RS         drop(probe);
+//RS         port
+//RS     };
+//RS 
+//RS     let aot_port = fresh_port();
+//RS     let file = dir.join("tls_peer_identity.jet");
+//RS     fs::write(&file, source_for(aot_port)).unwrap();
+//RS     let server = start_server(aot_port);
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let aot = compiled_binary_output(
+//RS         dir,
+//RS         "tls_peer_identity_aot",
+//RS         0,
+//RS         "tls_peer_identity",
+//RS         &shown,
+//RS     );
+//RS     drop(server);
+//RS     assert_eq!(aot.exit_code, 0, "AOT stderr: {}", aot.stderr);
+//RS 
+//RS     let dev_port = fresh_port();
+//RS     fs::write(&file, source_for(dev_port)).unwrap();
+//RS     let server = start_server(dev_port);
+//RS     let dev = run_default_dev_resident(&shown, "tls_peer_identity");
+//RS     drop(server);
+//RS 
+//RS     let interpreter_port = fresh_port();
+//RS     fs::write(&file, source_for(interpreter_port)).unwrap();
+//RS     let server = start_server(interpreter_port);
+//RS     let interpreted = match dev_iteration_with_timeout("tls_peer_identity", &shown, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("interpreter TLS peer identity failed: {diags:?}"),
+//RS     };
+//RS     drop(server);
+//RS 
+//RS     let mut aot_lines = aot.stdout.lines();
+//RS     assert_eq!(aot_lines.next(), Some("localhost"));
+//RS     assert!(aot_lines
+//RS         .next()
+//RS         .is_some_and(|cipher| cipher.starts_with("TLS13_")));
+//RS     assert_eq!(aot_lines.next(), Some("TLS13"));
+//RS     assert_eq!(aot_lines.next(), Some("tls-response-ok"));
+//RS     assert_eq!(aot_lines.next(), None);
+//RS     assert_eq!(dev.stdout, aot.stdout);
+//RS     assert_eq!(interpreted.stdout, aot.stdout);
+//RS     assert_eq!(dev.stderr, aot.stderr, "default dev stderr differed from AOT");
+//RS     assert_eq!(
+//RS         interpreted.stderr, aot.stderr,
+//RS         "interpreter stderr differed from AOT"
+//RS     );
+//RS     assert_eq!(dev.exit_code, 0, "default dev stderr: {}", dev.stderr);
+//RS     assert_eq!(
+//RS         interpreted.exit_code, 0,
+//RS         "interpreter stderr: {}",
+//RS         interpreted.stderr
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1031 tests/dev_parts/routine.rs:1-1846
+

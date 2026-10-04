@@ -1,0 +1,145 @@
+// Rust FactsDerivation.rs::DerivationRecord::invalidate_if_identity_changed.
+fn derivation_test_record() -> DerivationRecord Never! {
+    derivation_record("subject", "claim", "producer", MIRDerivationMethod.StaticDerivation, "rule", [String]{}, derivation_identity("source", "build", "run", "target"))
+}
+
+#Test("derivation identical identity retains Current") {
+    record := derivation_test_record()
+    id :: record.id
+    assert(!derivation_record_invalidate_if_identity_changed(&record, derivation_identity("source", "build", "run", "target")))
+    assert(record.disposition == MIRDerivationDisposition.Current)
+    assert(record.id == id)
+}
+
+#Test("derivation every identity component invalidates Current once") {
+    identities :: [DerivationIdentity]{
+        derivation_identity("changed", "build", "run", "target"),
+        derivation_identity("source", "changed", "run", "target"),
+        derivation_identity("source", "build", "changed", "target"),
+        derivation_identity("source", "build", "run", "changed")
+    }
+    loop current in identities {
+        record := derivation_test_record()
+        id :: record.id
+        assert(derivation_record_invalidate_if_identity_changed(&record, current))
+        assert(record.disposition == MIRDerivationDisposition.Stale)
+        assert(record.id == id)
+        assert(!derivation_record_invalidate_if_identity_changed(&record, current))
+    }
+}
+
+#Test("derivation noncurrent dispositions are never promoted or rewritten") {
+    dispositions :: [MIRDerivationDisposition]{MIRDerivationDisposition.Stale, MIRDerivationDisposition.Expired, MIRDerivationDisposition.Redacted, MIRDerivationDisposition.Unavailable, MIRDerivationDisposition.Unsupported, MIRDerivationDisposition.BudgetExhausted, MIRDerivationDisposition.Unknown}
+    loop disposition in dispositions {
+        record := derivation_test_record()
+        record.disposition = disposition
+        assert(!derivation_record_invalidate_if_identity_changed(&record, derivation_identity("changed", "changed", "changed", "changed")))
+        assert(record.disposition == disposition)
+    }
+}
+
+// FactsDerivation.rs::to_json typed record: nulls, field order and arrays are
+// preserved, not derived from parsing a rendered record.
+#Test("typed derivation record preserves full null wire and observation values") {
+    record := derivation_test_record()
+    record.id = "record"
+    record.assumptions = [String]{"second", "first", "second"}
+    record.premises = [String]{"p2", "p1", "p2"}
+    expected :: `{"assumptions":["second","first","second"],"claim":"claim","disposition":"current","id":"record","identity":{"build":"build","run":"run","source":"source","target":"target"},"method":"static_derivation","observation":null,"payload":null,"premises":["p2","p1","p2"],"producer":"producer","rule":"rule","subject":"subject"}`
+    assert_eq(derivation_record_status_value(record).json(), expected)
+    record.observation = Val(DerivationObservation{counterexample_id: Val("counter"), event_id: Val("event")})
+    assert_eq(derivation_record_status_value(record).json(), derivation_record_json(record))
+    record.observation = Val(DerivationObservation{counterexample_id: None, event_id: Val("event")})
+    assert(derivation_record_status_value(record).json().contains(`"observation":{"counterexample":null,"event":"event"}`))
+    record.observation = Val(DerivationObservation{counterexample_id: Val("counter"), event_id: None})
+    assert(derivation_record_status_value(record).json().contains(`"observation":{"counterexample":"counter","event":null}`))
+    record.observation = Val(DerivationObservation{counterexample_id: None, event_id: None})
+    assert(derivation_record_status_value(record).json().contains(`"observation":{"counterexample":null,"event":null}`))
+}
+
+fn derivation_status_test_schedule() -> MIRFrameSchedule Never! {
+    MIRFrameSchedule{
+        operations: [MIRFrameOperation]{
+            MIRFrameOperation{name: "sync", source_index: 0, accesses: [MIRResourceAccess]{
+                MIRResourceAccess{resource: MIRResourceIdentity.Named{name: "buffer"}, mode: MIRResourceAccessMode.Read,
+                    region: MIRResourceRegion.Bytes{start: 4, length: 8},
+                    layout: Val(MIRResourceLayout{size: 16, align: 8, layout: "rgba", device: "cpu"}), temporary: true},
+                MIRResourceAccess{resource: MIRResourceIdentity.Unknown, mode: MIRResourceAccessMode.Write,
+                    region: MIRResourceRegion.Whole, layout: None, temporary: false},
+                MIRResourceAccess{resource: MIRResourceIdentity.Named{name: "opaque"}, mode: MIRResourceAccessMode.Move,
+                    region: MIRResourceRegion.Unknown, layout: None, temporary: false},
+            }, completion: MIRFrameCompletion.Synchronous, completion_provider: None, external_effect: false},
+            MIRFrameOperation{name: "pending", source_index: 1, accesses: [MIRResourceAccess]{},
+                completion: MIRFrameCompletion.Pending{token: "token"}, completion_provider: Val("gpu"), external_effect: true},
+            MIRFrameOperation{name: "event", source_index: 2, accesses: [MIRResourceAccess]{},
+                completion: MIRFrameCompletion.Event{token: "token"}, completion_provider: Val("gpu"), external_effect: false},
+        },
+        dependencies: [MIRFrameDependency]{MIRFrameDependency{before: 0, after: 1, resource: "buffer", reason: "write"}},
+        transfers: [MIRFrameTransfer]{MIRFrameTransfer{before: 0, after: 1, resource: "buffer", from_device: "cpu", to_device: "gpu"}},
+        reuse: [MIRFrameReuse]{
+            MIRFrameReuse{previous_resource: "a", next_resource: "b", previous_last_use: 0, next_first_use: 2, legal: true, reason: "disjoint"},
+            MIRFrameReuse{previous_resource: "b", next_resource: "c", previous_last_use: 2, next_first_use: 2, legal: false, reason: "live"},
+        },
+        retentions: [MIRFrameRetention]{
+            MIRFrameRetention{resource: "buffer", operation: 1, owner: "gpu", completion_token: Val("token"), completed: false},
+            MIRFrameRetention{resource: "opaque", operation: 2, owner: "cpu", completion_token: None, completed: true},
+        },
+        conservative: [String]{"unknown region", "external effect", "unknown region"},
+    }
+}
+
+// ResourceSchedule.rs::canonical_json/encode_*: include every nested variant
+// and optional provider/token/layout; decimal index/layout fields are STRINGS.
+#Test("typed derivation FrameSchedule preserves every nested field and omission") {
+    record := derivation_test_record()
+    record.payload = Val(DerivationPayload.FrameSchedule{schedule: derivation_status_test_schedule()})
+    typed :: derivation_record_status_value(record).json()
+    assert_eq(typed, derivation_record_json(record))
+    assert(typed.contains(`"source_index":"0"`))
+    assert(typed.contains(`"region":{"kind":"bytes","start":"4","length":"8"}`))
+    assert(typed.contains(`"layout":{"size":"16","align":"8","layout":"rgba","device":"cpu"}`))
+    assert(typed.contains(`"external_effect":false},{"name":"pending"`))
+    assert(typed.contains(`"completion":{"kind":"pending","token":"token"},"external_effect":true,"completion_provider":"gpu"`))
+    assert(typed.contains(`"completion":{"kind":"event","token":"token"}`))
+    assert(typed.contains(`"completion_token":null,"completed":true`))
+    assert(typed.contains(`"conservative":["unknown region","external effect","unknown region"]`))
+    empty := derivation_status_test_schedule()
+    empty.operations = [MIRFrameOperation]{}
+    empty.dependencies = [MIRFrameDependency]{}
+    empty.transfers = [MIRFrameTransfer]{}
+    empty.reuse = [MIRFrameReuse]{}
+    empty.retentions = [MIRFrameRetention]{}
+    empty.conservative = [String]{}
+    record.payload = Val(DerivationPayload.FrameSchedule{schedule: empty})
+    assert(derivation_record_status_value(record).json().contains(`"payload":{"schema":"jet.frame_schedule/v1","operations":[],"dependencies":[],"transfers":[],"reuse":[],"retentions":[],"conservative":[]}`))
+}
+
+#Test("typed derivation uses actual method disposition strings and Report quote law") {
+    methods :: [MIRDerivationMethod]{MIRDerivationMethod.StaticDerivation, MIRDerivationMethod.FormalProof, MIRDerivationMethod.RecordedExecution, MIRDerivationMethod.SampledAgreement, MIRDerivationMethod.ExternalAssumption}
+    method_names :: [String]{"static_derivation", "formal_proof", "recorded_execution", "sampled_agreement", "external_assumption"}
+    dispositions :: [MIRDerivationDisposition]{MIRDerivationDisposition.Current, MIRDerivationDisposition.Stale, MIRDerivationDisposition.Expired, MIRDerivationDisposition.Redacted, MIRDerivationDisposition.Unavailable, MIRDerivationDisposition.Unsupported, MIRDerivationDisposition.BudgetExhausted, MIRDerivationDisposition.Unknown}
+    disposition_names :: [String]{"current", "stale", "expired", "redacted", "unavailable", "unsupported", "budget_exhausted", "unknown"}
+    record := derivation_test_record()
+    loop (index, method) in methods {
+        record.method = method
+        expected :: "\"method\":\"{method_names[index]}\""
+        assert(derivation_record_status_value(record).json().contains(expected))
+    }
+    loop (index, disposition) in dispositions {
+        record.disposition = disposition
+        expected :: "\"disposition\":\"{disposition_names[index]}\""
+        assert(derivation_record_status_value(record).json().contains(expected))
+    }
+    control :: String.from_bytes([U8]{U8{127}, U8{194}, U8{133}}) ?? panic("valid control scalars")
+    record.claim = control
+    expected :: "\"claim\":\"{control}\""
+    assert(derivation_record_status_value(record).json().contains(expected))
+    record.payload = Val(DerivationPayload.FrameSchedule{schedule: MIRFrameSchedule{
+        operations: [MIRFrameOperation]{}, dependencies: [MIRFrameDependency]{},
+        transfers: [MIRFrameTransfer]{}, reuse: [MIRFrameReuse]{}, retentions: [MIRFrameRetention]{},
+        conservative: [String]{control},
+    }})
+    expected_payload :: "\"conservative\":[\"{control}\"]"
+    assert(derivation_record_status_value(record).json().contains(expected_payload))
+    assert(derivation_record_json(record).contains(`"conservative":["\u007f\u0085"]`))
+}

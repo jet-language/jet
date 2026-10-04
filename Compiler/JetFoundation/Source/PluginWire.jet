@@ -1,0 +1,281 @@
+// One Component Model value wire for AOT, JIT, and interpreter adapters.
+use std.box.[Box]
+use std.num.[usize] // GATE #4483: selected-target usize parsing limits.
+
+// Rust: crates/jet-foundation/src/PluginWire.rs:4
+pub enum PluginValue {
+    Int(I64)
+    Float(F64)
+    Bool(Bool)
+    Text(String)
+    List([PluginValue])
+    Record([(name: String, value: PluginValue)])
+    Tuple([PluginValue])
+    Option(Box<PluginValue>?)
+    ResultOk(Box<PluginValue>?)
+    ResultErr(Box<PluginValue>?)
+    Variant(name: String, value: Box<PluginValue>?)
+    Enum(String)
+    Flags([String])
+}
+// Rust: crates/jet-foundation/src/PluginWire.rs:22
+pub const PLUGIN_MAX_PARAMS: Int = 1024
+// Rust: crates/jet-foundation/src/PluginWire.rs:23
+const PLUGIN_MAX_VALUE_DEPTH: Int = 64
+// Rust: crates/jet-foundation/src/PluginWire.rs:25
+fn plugin_write_tagged(out: &String, tag: Char, payload: String) -> Void Never! {
+    &out.push_str("{tag}{payload.bytes().len()}:")
+    &out.push_str(payload)
+}
+// Rust: crates/jet-foundation/src/PluginWire.rs:30
+fn plugin_write_value(out: &String, value: PluginValue) -> Void Never! {
+    if value == {
+        .Int(number) -> plugin_write_tagged(&out, 'I', number.to_string())
+        .Float(number) -> plugin_write_tagged(&out, 'F', number.to_string())
+        .Bool(boolean) -> plugin_write_tagged(&out, 'B', if boolean -> "true" else -> "false")
+        .Text(text) -> plugin_write_tagged(&out, 'T', text)
+        .List(values) -> {
+            &out.push_str("L{values.len()}:")
+            loop item in values -> plugin_write_value(&out, item)
+        }
+        .Tuple(values) -> {
+            &out.push_str("Q{values.len()}:")
+            loop item in values -> plugin_write_value(&out, item)
+        }
+        .Record(fields) -> {
+            &out.push_str("R{fields.len()}:")
+            loop field in fields {
+                plugin_write_tagged(&out, 'F', field.name)
+                plugin_write_value(&out, field.value)
+            }
+        }
+        .Option(payload) -> {
+            if payload == {
+                .None -> &out.push('N')
+                .Val(item) -> { &out.push('P'); plugin_write_value(&out, item.get()) }
+            }
+        }
+        .ResultOk(payload) -> {
+            &out.push('K')
+            if payload == {
+                .None -> &out.push('N')
+                .Val(item) -> { &out.push('P'); plugin_write_value(&out, item.get()) }
+            }
+        }
+        .ResultErr(payload) -> {
+            &out.push('X')
+            if payload == {
+                .None -> &out.push('N')
+                .Val(item) -> { &out.push('P'); plugin_write_value(&out, item.get()) }
+            }
+        }
+        .Variant(name, payload) -> {
+            plugin_write_tagged(&out, 'V', name)
+            if payload == {
+                .None -> &out.push('N')
+                .Val(item) -> { &out.push('P'); plugin_write_value(&out, item.get()) }
+            }
+        }
+        .Enum(name) -> plugin_write_tagged(&out, 'E', name)
+        .Flags(names) -> {
+            &out.push_str("G{names.len()}:")
+            loop name in names -> plugin_write_tagged(&out, 'F', name)
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/PluginWire.rs:75
+pub fn plugin_encode_value(value: PluginValue) -> String Never! {
+    out := ""
+    plugin_write_value(&out, value)
+    out
+}
+// Rust: crates/jet-foundation/src/PluginWire.rs:81
+pub fn plugin_encode_params(values: [PluginValue]) -> String Never! {
+    out := "{values.len()}:"
+    loop value in values -> plugin_write_value(&out, value)
+    out
+}
+// Rust: crates/jet-foundation/src/PluginWire.rs:88
+pub fn plugin_decode_result(wire: String) -> PluginValue Err! {
+    if wire.strip_prefix("E:") == {
+        .Val(message) -> return err(message.to_string())
+        .None -> {}
+    }
+    body :: if wire.strip_prefix("O:") == {
+        .Val(body) -> body
+        .None -> return err("plugin returned malformed component value")
+    }
+    if plugin_decode_value(body.bytes()) == {
+        .Ok(value) -> return value
+        .Err(_) -> return err("plugin returned malformed component value")
+    }
+}
+// Rust: crates/jet-foundation/src/PluginWire.rs:98
+fn plugin_read_number(bytes: [U8], pos: &Int) -> Int? Never! {
+    start :: pos
+    loop pos < bytes.len() {
+        byte :: bytes[pos]
+        if byte == U8{58} {
+            text :: if String.from_utf8(bytes[start..pos]) == {
+                .Ok(text) -> text
+                .Err(_) -> return None
+            }
+            number :: if usize.parse(text) == {
+                .Ok(number) -> Int{number}
+                .Err(_) -> return None
+            }
+            pos += 1
+            return Val(number)
+        }
+        if !byte.is_ascii_digit() -> return None
+        pos += 1
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/PluginWire.rs:117
+fn plugin_read_payload(bytes: [U8], pos: &Int) -> String? Never! {
+    len :: if plugin_read_number(bytes, &pos) == { .Val(len) -> len; .None -> return None }
+    // The subtraction bounds check also prevents selected-target usize addition overflow.
+    if len > bytes.len() - pos -> return None
+    end :: pos + len
+    text :: if String.from_utf8(bytes[pos..end]) == { .Ok(text) -> text; .Err(_) -> return None }
+    pos = end
+    Val(^text)
+}
+// Rust: crates/jet-foundation/src/PluginWire.rs:125
+fn plugin_read_value(bytes: [U8], pos: &Int, depth: Int) -> PluginValue? Never! {
+    if depth > PLUGIN_MAX_VALUE_DEPTH || pos >= bytes.len() -> return None
+    tag :: bytes[pos]
+    pos += 1
+    return if tag == {
+        U8{73} -> {
+            text :: if plugin_read_payload(bytes, &pos) == { .Val(text) -> text; .None -> return None }
+            number :: if I64.parse(text) == { .Ok(number) -> number; .Err(_) -> return None }
+            Val(.Int(number))
+        }
+        U8{70} -> {
+            text :: if plugin_read_payload(bytes, &pos) == { .Val(text) -> text; .None -> return None }
+            number :: if F64.parse(text) == { .Ok(number) -> number; .Err(_) -> return None }
+            Val(.Float(number))
+        }
+        U8{66} -> {
+            text :: if plugin_read_payload(bytes, &pos) == { .Val(text) -> text; .None -> return None }
+            return if text == { "true" -> Val(.Bool(true)); "false" -> Val(.Bool(false)); else -> None }
+        }
+        U8{84} -> {
+            text :: if plugin_read_payload(bytes, &pos) == { .Val(text) -> text; .None -> return None }
+            Val(.Text(^text))
+        }
+        U8{76} | U8{81} -> {
+            count :: if plugin_read_number(bytes, &pos) == { .Val(count) -> count; .None -> return None }
+            if count > bytes.len() - pos -> return None
+            values := [PluginValue].with_capacity(count)
+            loop _ in 0..count {
+                item :: if plugin_read_value(bytes, &pos, depth + 1) == { .Val(item) -> item; .None -> return None }
+                &values.push(^item)
+            }
+            if tag == U8{76} -> Val(.List(^values)) else -> Val(.Tuple(^values))
+        }
+        U8{82} -> {
+            count :: if plugin_read_number(bytes, &pos) == { .Val(count) -> count; .None -> return None }
+            if count > (bytes.len() - pos) / 4 -> return None
+            fields := [(name: String, value: PluginValue)].with_capacity(count)
+            loop _ in 0..count {
+                if pos >= bytes.len() || bytes[pos] != U8{70} -> return None
+                pos += 1
+                name :: if plugin_read_payload(bytes, &pos) == { .Val(name) -> name; .None -> return None }
+                item :: if plugin_read_value(bytes, &pos, depth + 1) == { .Val(item) -> item; .None -> return None }
+                &fields.push((^name, ^item))
+            }
+            Val(.Record(^fields))
+        }
+        U8{78} -> Val(.Option(None))
+        U8{80} -> {
+            item :: if plugin_read_value(bytes, &pos, depth + 1) == { .Val(item) -> item; .None -> return None }
+            Val(.Option(Val(Box.new(^item))))
+        }
+        U8{75} | U8{88} -> {
+            if pos >= bytes.len() -> return None
+            marker :: bytes[pos]
+            pos += 1
+            payload :: if marker == {
+                U8{78} -> None
+                U8{80} -> {
+                    item :: if plugin_read_value(bytes, &pos, depth + 1) == { .Val(item) -> item; .None -> return None }
+                    Val(Box.new(^item))
+                }
+                else -> return None
+            }
+            if tag == U8{75} -> Val(.ResultOk(^payload)) else -> Val(.ResultErr(^payload))
+        }
+        U8{86} -> {
+            name :: if plugin_read_payload(bytes, &pos) == { .Val(name) -> name; .None -> return None }
+            if pos >= bytes.len() -> return None
+            marker :: bytes[pos]
+            pos += 1
+            payload :: if marker == {
+                U8{78} -> None
+                U8{80} -> {
+                    item :: if plugin_read_value(bytes, &pos, depth + 1) == { .Val(item) -> item; .None -> return None }
+                    Val(Box.new(^item))
+                }
+                else -> return None
+            }
+            Val(.Variant(^name, ^payload))
+        }
+        U8{69} -> {
+            name :: if plugin_read_payload(bytes, &pos) == { .Val(name) -> name; .None -> return None }
+            Val(.Enum(^name))
+        }
+        U8{71} -> {
+            count :: if plugin_read_number(bytes, &pos) == { .Val(count) -> count; .None -> return None }
+            if count > (bytes.len() - pos) / 3 -> return None
+            names := [String].with_capacity(count)
+            loop _ in 0..count {
+                if pos >= bytes.len() || bytes[pos] != U8{70} -> return None
+                pos += 1
+                name :: if plugin_read_payload(bytes, &pos) == { .Val(name) -> name; .None -> return None }
+                &names.push(^name)
+            }
+            Val(.Flags(^names))
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/PluginWire.rs:227
+pub fn plugin_decode_value(bytes: [U8]) -> PluginValue PluginParamDecodeError! {
+    pos := 0
+    value :: if plugin_read_value(bytes, &pos, 0) == {
+        .Val(value) -> value
+        .None -> return err(.Malformed)
+    }
+    if pos != bytes.len() -> return err(.Malformed)
+    value
+}
+// Rust: crates/jet-foundation/src/PluginWire.rs:237
+#Error
+pub enum PluginParamDecodeError { Malformed TooMany(count: Int) }
+impl PluginParamDecodeError {
+    // Rust: crates/jet-foundation/src/PluginWire.rs:244
+    pub fn fmt(self) -> String Never! {
+        return if self == {
+            .Malformed -> "malformed plugin call argument frame"
+            .TooMany(count) -> "plugin call argument frame contains {count} parameters; maximum is {PLUGIN_MAX_PARAMS}"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/PluginWire.rs:257
+pub fn plugin_decode_params(wire: String) -> [PluginValue] PluginParamDecodeError! {
+    bytes :: wire.bytes()
+    pos := 0
+    count :: if plugin_read_number(bytes, &pos) == { .Val(count) -> count; .None -> return err(.Malformed) }
+    if count > PLUGIN_MAX_PARAMS -> return err(.TooMany(count))
+    out := [PluginValue].with_capacity(count)
+    loop _ in 0..count {
+        item :: if plugin_read_value(bytes, &pos, 0) == { .Val(item) -> item; .None -> return err(.Malformed) }
+        &out.push(^item)
+    }
+    if pos != bytes.len() -> return err(.Malformed)
+    out
+}
+

@@ -1,0 +1,548 @@
+// Rust QueryService.rs:663–1458, with host disk writes represented by exact
+// sealed authority snapshots. Run against the frozen compiler source package.
+// No fixture replaces QueryEngine, Driver, Sema, canonical JSON, or Eval.
+use jet_driver.[JetDriverCompilerQueries, JetDriverCompilerQueryStats, JetDriverCheckedQuery, JetDriverQueryMemo, JetDriverQuerySnapshot, JetDriverQueryExternalFile, JetDriverQueryFileState, JetDriverCompileRequest, JetDriverCompileTarget, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverHostFacts, JetDriverCoreSource, JetDriverReverdictReceipt, JetDriverCallableContractReceipt, jet_driver_query_edit_bytes, jet_driver_query_external_fingerprint, jet_driver_query_state_fingerprint, jet_driver_query_frame]
+use jet_eval.[jet_eval_default_config]
+use jet_queries.[QueryEngine, QueryKey, FileKey]
+use jet_lexer.[Token]
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_parse, canonical_json_bytes, canonical_json_sha256]
+use jet_sema.[BudgetQuantity, BudgetRawQuantity, BudgetAxis]
+use core.text as query_test_text
+use core.files.runtime.kernel_path_components as query_test_os_path
+use jet_foundation.[BuildStamp]
+
+fn query_test_file(relative: String, source: String) -> JetDriverAuthorizedSourceFile Never! {
+    JetDriverAuthorizedSourceFile{path: query_test_os_path.from_text("/query/{relative}", query_test_os_path.PathPlatform.Unix), relative_path: query_test_os_path.from_text(relative, query_test_os_path.PathPlatform.Unix), identity: "fixture-file:{relative}", source: source}
+}
+fn query_test_snapshot(source: String, extras: [JetDriverAuthorizedSourceFile]) -> JetDriverQuerySnapshot Never! {
+    files := [JetDriverAuthorizedSourceFile]{query_test_file("Main.jet", source)}
+    loop file in extras -> &files.push(file)
+    root_path :: query_test_os_path.from_text("/query", query_test_os_path.PathPlatform.Unix)
+    request :: JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root_path, identity: "fixture-root", allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}, entry_root_identity: "fixture-root", entry_path: query_test_os_path.from_text("/query/Main.jet", query_test_os_path.PathPlatform.Unix)},
+        canonical_effect_source: "effect Net $irreversible\neffect FS\neffect FS.Read\neffect FS.Write $irreversible\neffect IO\neffect DB\neffect Time\neffect Rand\neffect Env\neffect Exec $irreversible\neffect Log\neffect GPU\neffect FFI $irreversible\neffect Browser\neffect Secret\n",
+        core_sources: [JetDriverCoreSource]{},
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("query-fixture"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
+        eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
+        record_store: None, trace_sink: None, mir_lint_every_pass: false,
+    }
+    JetDriverQuerySnapshot{request: request, external_files: [JetDriverQueryExternalFile]{}, cwd: root_path}
+}
+fn query_test_key(is_lsp: Bool) -> QueryKey Never! {
+    QueryKey.for_file(if is_lsp -> "checked.lsp" else -> "checked", FileKey.new("/query/Main.jet"))
+}
+fn query_test_clean(checked: Shared<JetDriverCheckedQuery>) Never! {
+    permit :: checked.guard_read()
+    assert_eq(permit.value.result.diagnostics.len(), 0)
+    assert(permit.value.result.complete)
+    assert_eq(permit.value.result.internal_problem, None)
+}
+fn query_test_summary(checked: Shared<JetDriverCheckedQuery>) -> [String] Never! {
+    permit :: checked.guard_read()
+    loop diagnostic in permit.value.result.diagnostics -> "{diagnostic.code:Debug}:{diagnostic.what:Debug}:{diagnostic.why:Debug}:{diagnostic.fix:Debug}:{diagnostic.span:Debug}"
+}
+fn query_test_codes(checked: Shared<JetDriverCheckedQuery>) -> [String] Never! {
+    permit :: checked.guard_read()
+    loop diagnostic in permit.value.result.diagnostics -> diagnostic.code
+}
+fn query_test_parity(snapshot: JetDriverQuerySnapshot, source: String, changed: Shared<JetDriverCheckedQuery>, is_lsp: Bool) Never! {
+    fresh := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    expected :: if is_lsp -> &fresh.check_text_lsp(snapshot, main_path, source) else -> &fresh.check_text(snapshot, main_path, source)
+    assert_eq(query_test_summary(changed), query_test_summary(expected))
+}
+fn query_test_cone(count: Int) -> String Never! {
+    rows := [String]{}
+    loop index in 0..<count -> &rows.push("fn _helper_{index}() Int -> {{ return {index} }}\n")
+    &rows.push("fn target() -> Int { return 1 }\nfn run() { print(target()) }\n")
+    rows.join("")
+}
+fn query_test_json_field(value: CanonicalJSON, name: String) -> CanonicalJSON Never! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == name -> return field.value
+        }
+    }
+    panic("missing canonical receipt field {name}")
+}
+
+#Test("check_and_lsp_share_one_authoritative_query") {
+    source :: "fn beta() -> Int { return 1 }\nfn alpha() -> String { return beta() }\n"
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    check :: &service.check_text_lsp(snapshot, main_path, source)
+    lsp :: &service.check_text_lsp(snapshot, main_path, source)
+    assert(check.same(lsp))
+    assert_eq(query_test_summary(check), query_test_summary(lsp))
+    assert(query_test_codes(check).len() > 0)
+    assert_eq(service.recompute_count(query_test_key(true)), 1)
+    assert_eq(service.stats().hits, 1)
+}
+#Test("batch_and_lsp_are_distinct_queries_with_one_resident_item_cache") {
+    source :: "fn beta() -> Int { return 1 }\n"
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    batch :: &service.check_text(snapshot, main_path, source)
+    lsp :: &service.check_text_lsp(snapshot, main_path, source)
+    assert(!batch.same(lsp))
+    assert_eq(service.recompute_count(query_test_key(false)), 1)
+    assert_eq(service.recompute_count(query_test_key(true)), 1)
+    assert_eq(service.stats().item_recomputes, 1)
+    assert_eq(service.stats().item_hits, 1)
+}
+#Test("changed_import_invalidates_cached_importer") {
+    source :: "module b\nfn run() { print(b.value() + 0) }\n"
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{query_test_file("b.jet", "pub fn value() -> Int { return 1 }\n")})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    query_test_clean(&service.check_disk_lsp(snapshot, main_path))
+    changed := ~snapshot
+    changed.request.authorized_sources.roots[0].files[1].source = "pub fn value() -> String { return \"changed\" }\n"
+    checked :: &service.check_disk_lsp(changed, main_path)
+    assert(query_test_codes(checked).len() > 0)
+    assert_eq(service.recompute_count(query_test_key(true)), 2)
+    query_test_parity(changed, source, checked, true)
+}
+#Test("batch_disk_interface_change_keeps_unrelated_module_warm") {
+    source :: "module b\nmodule c\nfn run() { print(b.value() + c.other()) }\n"
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{query_test_file("b.jet", "pub fn value() -> Int { return 1 }\n"), query_test_file("c.jet", "pub fn other() -> Int { return 2 }\n")})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    query_test_clean(&service.check_disk(snapshot, main_path))
+    assert_eq(service.recompute_count(query_test_key(false)), 1)
+    query_test_clean(&service.check_disk(snapshot, main_path))
+    assert_eq(service.recompute_count(query_test_key(false)), 2)
+    cold :: service.stats()
+    query_test_clean(&service.check_disk(snapshot, main_path))
+    assert_eq(service.recompute_count(query_test_key(false)), 2)
+    assert(service.stats().hits > cold.hits)
+    before :: service.stats()
+    changed := ~snapshot
+    changed.request.authorized_sources.roots[0].files[1].source = "pub fn value() -> String { return \"changed\" }\n"
+    checked :: &service.check_disk(changed, main_path)
+    assert(query_test_codes(checked).len() > 0)
+    warm :: service.stats()
+    assert_eq(warm.item_recomputes - before.item_recomputes, 2)
+    assert(warm.item_hits > cold.item_hits)
+    query_test_parity(changed, source, checked, false)
+}
+#Test("hostile_world_edit_rechecks_only_changed_module") {
+    names := [String]{"changed"}
+    loop index in 0..<31 -> &names.push("stable{index}")
+    declarations := [String]{}
+    calls := [String]{}
+    files := [JetDriverAuthorizedSourceFile]{}
+    loop (index, name) in names {
+        &declarations.push("module {name}\n")
+        &calls.push("{name}.value()")
+        &files.push(query_test_file("{name}.jet", "pub fn value() -> Int {{ return {index + 1} }}\n"))
+    }
+    source :: "{declarations.join("")}fn run() {{ print({calls.join(" + ")}) }}\n"
+    snapshot :: query_test_snapshot(source, files)
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    query_test_clean(&service.check_disk(snapshot, main_path))
+    query_test_clean(&service.check_disk(snapshot, main_path))
+    changed := ~snapshot
+    changed.request.authorized_sources.roots[0].files[1].source = "pub fn value() -> Int { return 99 }\n"
+    measured :: &service.check_text_with_receipt(changed, main_path, source, false)
+    query_test_clean(measured.checked)
+    assert_eq(measured.receipt.program_items, 33)
+    assert_eq(measured.receipt.item_recomputes, 1)
+    assert_eq(measured.receipt.blast_radius(), 1)
+    assert(measured.receipt.item_hits >= 32)
+}
+#Test("local_body_edit_rechecks_only_changed_item") {
+    before :: "fn alpha() -> Int { return 1 }\nfn beta() -> Int { return 2 }\nfn run() { print(alpha() + beta()) }\n"
+    after :: before.replace("return 2", "return 3")
+    snapshot :: query_test_snapshot(before, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    query_test_clean(&service.check_text_lsp(snapshot, main_path, before))
+    cold :: service.stats()
+    assert_eq(cold.item_hits, 0)
+    assert_eq(cold.item_recomputes, 3)
+    assert_eq(cold.live_items, 3)
+    query_test_clean(&service.check_text_lsp(snapshot, main_path, after))
+    warm :: service.stats()
+    assert_eq(warm.item_hits, 2)
+    assert_eq(warm.item_recomputes, 4)
+    assert_eq(warm.live_items, 3)
+    assert(warm.live_item_bytes > before.bytes().len())
+}
+#Test("cached_caller_observes_changed_callee_effects") {
+    before :: "fn alpha() -[]> Int { return beta() }\nfn beta() -> Int { return 2 }\nfn run() { print(alpha()) }\n"
+    after :: "fn alpha() -[]> Int { return beta() }\nfn beta() -> Int { print(\"x\")\nreturn 2 }\nfn run() { print(alpha()) }\n"
+    snapshot :: query_test_snapshot(before, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    query_test_clean(&service.check_text_lsp(snapshot, main_path, before))
+    checked :: &service.check_text_lsp(snapshot, main_path, after)
+    query_test_parity(snapshot, after, checked, true)
+    assert(query_test_codes(checked).contains("E3401"))
+    assert_eq(service.stats().item_hits, 2)
+    assert_eq(service.stats().item_recomputes, 4)
+}
+fn query_test_nonce_source(body: String, marker: Int) -> String Never! {
+    "use core.crypto.expert as expert\n\nfn protect() -[]> Int CryptoError! {{\n    #Unsafe(\"fixed interop vector\") {{\n        _sealed :: expert.xchacha20poly1305_seal(\n            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],\n            [next_byte()],\n            [],\n            []\n        )\n    }}\n    return 0\n}}\n\nfn next_byte() -> U8 {{\n    {body}\n    return 0\n}}\n\nfn _marker() -> Int {{ return {marker} }}\nfn run() {{ print(protect() ?? 0) }}\n"
+}
+#Test("cached_nonce_diagnostic_tracks_callee_effect_precedence") {
+    pure :: "               "
+    before :: query_test_nonce_source(pure, 0)
+    snapshot :: query_test_snapshot(before, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    assert_eq(query_test_codes(&service.check_text_lsp(snapshot, main_path, before)), [String]{"E2702"})
+    cold :: service.stats()
+    warm_source :: query_test_nonce_source(pure, 1)
+    warm :: &service.check_text_lsp(snapshot, main_path, warm_source)
+    query_test_parity(snapshot, warm_source, warm, true)
+    assert_eq(query_test_codes(warm), [String]{"E2702"})
+    assert_eq(service.stats().item_hits - cold.item_hits, 3)
+    impure_source :: query_test_nonce_source("print(\"effect\")", 1)
+    impure :: &service.check_text_lsp(snapshot, main_path, impure_source)
+    query_test_parity(snapshot, impure_source, impure, true)
+    assert_eq(query_test_codes(impure), [String]{"E3401"})
+    impure_stats :: service.stats()
+    restored_source :: query_test_nonce_source(pure, 2)
+    restored :: &service.check_text_lsp(snapshot, main_path, restored_source)
+    query_test_parity(snapshot, restored_source, restored, true)
+    assert_eq(query_test_codes(restored), [String]{"E2702"})
+    assert_eq(service.stats().item_hits - impure_stats.item_hits, 2)
+    assert_eq(service.stats().live_items, 4)
+}
+#Test("whitespace_edit_recomputes_span_bearing_diagnostics") {
+    before :: "fn beta() -> Int { return \"x\" }\n"
+    after :: "fn beta() -> Int {  return \"x\" }\n"
+    snapshot :: query_test_snapshot(before, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    _ := &service.check_text_lsp(snapshot, main_path, before)
+    checked :: &service.check_text_lsp(snapshot, main_path, after)
+    query_test_parity(snapshot, after, checked, true)
+    assert_eq(service.stats().item_hits, 0)
+    assert_eq(service.stats().item_recomputes, 2)
+}
+#Test("unrelated_roots_remain_warm") {
+    left_source :: "fn left() -> Int { return 1 }\n"
+    right_source :: "fn right() -> Int { return 3 }\n"
+    snapshot :: query_test_snapshot(left_source, [JetDriverAuthorizedSourceFile]{query_test_file("right.jet", right_source)})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    right_path :: query_test_os_path.from_text("right.jet", query_test_os_path.PathPlatform.Unix)
+    _ := &service.check_text_lsp(snapshot, main_path, left_source)
+    right :: &service.check_text_lsp(snapshot, right_path, right_source)
+    _ := &service.check_text_lsp(snapshot, main_path, left_source.replace("1", "2"))
+    hits :: service.stats().hits
+    assert(right.same(&service.check_text_lsp(snapshot, right_path, right_source)))
+    assert_eq(service.recompute_count(query_test_key(true)), 2)
+    assert_eq(service.recompute_count(QueryKey.for_file("checked.lsp", FileKey.new("/query/right.jet"))), 1)
+    assert_eq(service.stats().hits, hits + 1)
+}
+#Test("overlay_tracks_imported_disk_inputs") {
+    source :: "module b\nfn run() { print(b.value() + 0) }\n"
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{query_test_file("b.jet", "pub fn value() -> Int { return 1 }\n")})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    query_test_clean(&service.check_text_lsp(snapshot, main_path, source))
+    changed := ~snapshot
+    changed.request.authorized_sources.roots[0].files[1].source = "pub fn value() -> String { return \"changed\" }\n"
+    assert(query_test_codes(&service.check_text_lsp(changed, main_path, source)).len() > 0)
+    assert_eq(service.recompute_count(query_test_key(true)), 2)
+}
+#Test("repaired_import_invalidates_cached_load_failure") {
+    source :: "module b\nfn run() { print(b.value() + 0) }\n"
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{query_test_file("b.jet", "pub fn value() -> Int { return 1 }\n")})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    query_test_clean(&service.check_text_lsp(snapshot, main_path, source))
+    missing := ~snapshot
+    _ := &missing.request.authorized_sources.roots[0].files.pop()
+    missing.external_files = [JetDriverQueryExternalFile]{JetDriverQueryExternalFile{path: query_test_os_path.from_text("/query/b.jet", query_test_os_path.PathPlatform.Unix), state: JetDriverQueryFileState.Missing}, JetDriverQueryExternalFile{path: query_test_os_path.from_text("/query/b/module.jet", query_test_os_path.PathPlatform.Unix), state: JetDriverQueryFileState.Missing}}
+    assert(query_test_codes(&service.check_text_lsp(missing, main_path, source)).contains("E0607"))
+    repaired :: &service.check_text_lsp(snapshot, main_path, source)
+    query_test_clean(repaired)
+    query_test_parity(snapshot, source, repaired, true)
+}
+#Test("first_load_failure_tracks_import_for_repair") {
+    source :: "module b\nfn run() { print(b.value() + 0) }\n"
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{query_test_file("b.jet", "pub fn value() -> Int { return 1 }\n::\n")})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    assert(query_test_codes(&service.check_text_lsp(snapshot, main_path, source)).contains("E0003"))
+    repaired_snapshot := ~snapshot
+    repaired_snapshot.request.authorized_sources.roots[0].files[1].source = "pub fn value() -> Int { return 1 }\n"
+    repaired :: &service.check_text_lsp(repaired_snapshot, main_path, source)
+    query_test_clean(repaired)
+    query_test_parity(repaired_snapshot, source, repaired, true)
+}
+#Test("missing_first_import_tracks_both_module_candidates") {
+    loop nested in [Bool]{false, true} {
+        source :: "module b\nfn run() { print(b.value() + 0) }\n"
+        snapshot := query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{})
+        snapshot.external_files = [JetDriverQueryExternalFile]{JetDriverQueryExternalFile{path: query_test_os_path.from_text("/query/b.jet", query_test_os_path.PathPlatform.Unix), state: JetDriverQueryFileState.Missing}, JetDriverQueryExternalFile{path: query_test_os_path.from_text("/query/b/module.jet", query_test_os_path.PathPlatform.Unix), state: JetDriverQueryFileState.Missing}}
+        service := JetDriverCompilerQueries.new()
+        main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+        assert(query_test_codes(&service.check_text_lsp(snapshot, main_path, source)).contains("E0607"))
+        repaired_snapshot := ~snapshot
+        relative :: if nested -> "b/module.jet" else -> "b.jet"
+        &repaired_snapshot.request.authorized_sources.roots[0].files.push(query_test_file(relative, "pub fn value() -> Int { return 1 }\n"))
+        repaired :: &service.check_text_lsp(repaired_snapshot, main_path, source)
+        query_test_clean(repaired)
+        query_test_parity(repaired_snapshot, source, repaired, true)
+    }
+}
+#Test("comptime_local_disables_replay") {
+    source :: "fn run() {\n    _value :: prep { 1 }\n}\n"
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    query_test_clean(&service.check_text_lsp(snapshot, main_path, source))
+    query_test_clean(&service.check_text_lsp(snapshot, main_path, source))
+    assert_eq(service.recompute_count(query_test_key(true)), 2)
+    assert_eq(service.stats().item_hits, 0)
+    assert_eq(service.stats().live_items, 0)
+}
+#Test("changed_embed_input_is_never_replayed") {
+    source :: "MESSAGE :: prep { embed_file(\"message.txt\") }\nfn run() { print(\"{MESSAGE}\") }\n"
+    snapshot := query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{query_test_file("message.txt", "first")})
+    snapshot.external_files = [JetDriverQueryExternalFile]{JetDriverQueryExternalFile{path: query_test_os_path.from_text("/query/message.txt", query_test_os_path.PathPlatform.Unix), state: JetDriverQueryFileState.Present{bytes: "first".bytes()}}}
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    first :: &service.check_text_lsp(snapshot, main_path, source)
+    query_test_clean(first)
+    first_permit :: first.guard_read()
+    assert("{first_permit.value.result.graph:Debug}".contains("first"))
+    changed := ~snapshot
+    changed.request.authorized_sources.roots[0].files[1].source = "second"
+    changed.external_files[0].state = JetDriverQueryFileState.Present{bytes: "second".bytes()}
+    second :: &service.check_text_lsp(changed, main_path, source)
+    query_test_clean(second)
+    second_permit :: second.guard_read()
+    assert("{second_permit.value.result.graph:Debug}".contains("second"))
+    assert_eq(service.recompute_count(query_test_key(true)), 2)
+}
+#Test("retained_item_bytes_grow_with_retained_payloads") {
+    one :: "fn alpha() -> Int { return 1 }\n"
+    two :: "{one}fn beta() -> Int {{ return \"a deliberately long wrong value\" }}\n"
+    snapshot :: query_test_snapshot(one, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    _ := &service.check_text_lsp(snapshot, main_path, one)
+    before :: service.stats()
+    _ := &service.check_text_lsp(snapshot, main_path, two)
+    after :: service.stats()
+    assert_eq(after.live_items, 2)
+    assert(after.live_item_bytes >= before.live_item_bytes + two.bytes().len() - one.bytes().len())
+}
+#Test("hostile_no_change_corpus_reuses_every_item") {
+    source :: query_test_cone(256)
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    cold :: &service.check_text_with_receipt(snapshot, main_path, source, false)
+    query_test_clean(cold.checked)
+    assert_eq(cold.receipt.program_items, 258)
+    assert_eq(cold.receipt.item_recomputes, 258)
+    warm :: &service.check_text_with_receipt(snapshot, main_path, source, false)
+    query_test_clean(warm.checked)
+    assert_eq(warm.receipt.edit_bytes, 0)
+    assert_eq(warm.receipt.query_recomputes, 0)
+    assert_eq(warm.receipt.item_recomputes, 0)
+    assert_eq(warm.receipt.blast_radius(), 0)
+    assert_eq(warm.receipt.program_items, cold.receipt.program_items)
+    assert(service.stats().hits > 0)
+}
+fn query_test_nested_source(depth: Int, leaf: String) -> String Never! {
+    expression := leaf
+    loop _ in 0..<depth -> expression = "id({expression})"
+    "fn id(value: Int) -> Int {{ return value }}\nfn run() {{\n    print({expression})\n}}\n"
+}
+#Test("hostile_typecheck_cliff_keeps_pinpoint_fresh_diagnostic") {
+    before :: query_test_nested_source(96, "1")
+    after :: query_test_nested_source(96, "\"bad\"")
+    snapshot :: query_test_snapshot(before, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    query_test_clean(&service.check_text(snapshot, main_path, before))
+    changed :: &service.check_text(snapshot, main_path, after)
+    query_test_parity(snapshot, after, changed, false)
+    permit :: changed.guard_read()
+    found := false
+    loop diagnostic in permit.value.result.diagnostics {
+        if diagnostic.code != "E0112" -> next
+        found = true
+        span :: diagnostic.span ?? panic("wrong argument has no source span")
+        assert_eq(String.from_bytes(after.bytes()[span.start..<span.end]), Val("\"bad\""))
+        assert(diagnostic.what.contains("Int"))
+        assert(diagnostic.what.contains("String"))
+        assert(diagnostic.why != "")
+        assert(diagnostic.fix != "")
+        assert(!query_test_text.lower(diagnostic.what).contains("guess"))
+        assert(!query_test_text.lower(diagnostic.what).contains("reasonable time"))
+    }
+    assert(found)
+}
+#Test("reverdict_receipt_reports_the_edited_function_and_is_canonical") {
+    before :: query_test_cone(8)
+    after :: before.replace("fn target() -> Int { return 1 }", "fn target() -> Int { return 2 }")
+    snapshot :: query_test_snapshot(before, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    cold :: &service.check_text_with_receipt(snapshot, main_path, before, true)
+    query_test_clean(cold.checked)
+    measured :: &service.check_text_with_receipt(snapshot, main_path, after, true)
+    query_test_clean(measured.checked)
+    receipt :: measured.receipt
+    assert_eq(receipt.program_items, 10)
+    assert_eq(receipt.item_recomputes, 1)
+    assert_eq(receipt.blast_radius(), 1)
+    assert(receipt.reverified_items[0].contains("fn:target"))
+    implicit :: loop contract in receipt.callable_contracts {
+        if contract.failure_source == "implicit default !Err" -> break true
+    } ?? false
+    assert(implicit)
+    assert_eq(receipt.edit_bytes, 2)
+    json :: receipt.to_json()
+    envelope :: canonical_json_parse(json.bytes()) ?? panic("reverdict envelope must be canonical")
+    assert_eq(canonical_json_bytes(envelope), json.bytes())
+    assert_eq(query_test_json_field(envelope, "schema"), CanonicalJSON.String("jet.reverdict-receipt"))
+    content :: query_test_json_field(envelope, "content")
+    assert_eq(query_test_json_field(envelope, "receipt_id"), CanonicalJSON.String(canonical_json_sha256(content)))
+    assert_eq(query_test_json_field(content, "claim"), CanonicalJSON.String("D-DEVR-CONE1=A"))
+    assert_eq(query_test_json_field(query_test_json_field(content, "dependency_scope"), "kind"), CanonicalJSON.String("checked_semantic"))
+    assert_eq(query_test_json_field(query_test_json_field(content, "blast_radius"), "count"), CanonicalJSON.Integer("1"))
+}
+#Test("cone_benchmark_keeps_one_function_edit_flat_as_program_grows") {
+    work := [String]{}
+    loop count in [Int]{16, 128} {
+        before :: query_test_cone(count)
+        after :: before.replace("fn target() -> Int { return 1 }", "fn target() -> Int { return 2 }")
+        snapshot :: query_test_snapshot(before, [JetDriverAuthorizedSourceFile]{})
+        service := JetDriverCompilerQueries.new()
+        main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+        query_test_clean((&service.check_text_with_receipt(snapshot, main_path, before, true)).checked)
+        measured :: &service.check_text_with_receipt(snapshot, main_path, after, true)
+        query_test_clean(measured.checked)
+        assert_eq(measured.receipt.program_items, count + 2)
+        assert_eq(measured.receipt.item_recomputes, 1)
+        assert_eq(measured.receipt.blast_radius(), 1)
+        &work.push(measured.receipt.reverified_items[0])
+    }
+    assert_eq(work[0], work[1])
+}
+#Test("typed_shared_result_discriminator_mismatch_recomputes") {
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    source :: "fn beta() -> Int { return 1 }\n"
+    checked :: &service.check_text(query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{}), main_path, source)
+    engine := QueryEngine<JetDriverQueryMemo>.new()
+    key :: QueryKey.new("carrier", "same-subject")
+    assert_eq(&engine.query(key, "tokens"), None)
+    tokens :: shared [Token]{}
+    _ := &engine.finish_query(key, "tokens", ^JetDriverQueryMemo.Tokens{value: tokens})
+    // Metadata validity alone cannot admit a mismatched typed payload.
+    assert_eq(&engine.query(key, "checked"), None)
+    _ := &engine.finish_query(key, "checked", ^JetDriverQueryMemo.Checked{value: checked})
+    assert_eq(engine.recompute_count(key), 2)
+    memo :: (&engine.query(key, "checked")) ?? panic("checked memo should hit")
+    if memo == .Checked(hit) -> assert(hit.same(checked)) else -> panic("wrong memo carrier")
+}
+#Test("remove_document_releases_resident_payloads_and_recovers") {
+    source :: "fn beta() -> Int { return 1 }\n"
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    _ := &service.check_text_lsp(snapshot, main_path, source)
+    _ := &service.lex_text(snapshot.cwd, main_path, source)
+    &service.remove_document(snapshot.cwd, main_path)
+    removed :: service.stats()
+    assert_eq(removed.live_items, 0)
+    assert_eq(removed.live_memos, 0)
+    assert_eq(removed.live_inputs, 0)
+    query_test_clean(&service.check_text_lsp(snapshot, main_path, source))
+    assert_eq(service.stats().live_items, 1)
+}
+#Test("source_authority_and_read_error_state_invalidate_exact_snapshot") {
+    source :: "fn beta() -> Int { return 1 }\n"
+    snapshot := query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{})
+    snapshot.external_files = [JetDriverQueryExternalFile]{JetDriverQueryExternalFile{path: query_test_os_path.from_text("/query/.jet/lock", query_test_os_path.PathPlatform.Unix), state: JetDriverQueryFileState.Missing}}
+    paths :: [query_test_os_path.OsPath]{query_test_os_path.from_text("/query/.jet/lock", query_test_os_path.PathPlatform.Unix)}
+    root_path :: query_test_os_path.from_text("/query/Main.jet", query_test_os_path.PathPlatform.Unix)
+    missing :: jet_driver_query_external_fingerprint(snapshot, root_path, paths, [query_test_os_path.OsPath:String]{})
+    denied := ~snapshot
+    denied.external_files[0].state = JetDriverQueryFileState.ReadFailed{kind: "PermissionDenied"}
+    assert(missing != jet_driver_query_external_fingerprint(denied, root_path, paths, [query_test_os_path.OsPath:String]{}))
+    empty := ~snapshot
+    empty.external_files[0].state = JetDriverQueryFileState.Present{bytes: [U8]{}}
+    assert(missing != jet_driver_query_external_fingerprint(empty, root_path, paths, [query_test_os_path.OsPath:String]{}))
+    assert_eq(jet_driver_query_edit_bytes(Val("é"), "ê"), 2)
+    assert_eq(jet_driver_query_edit_bytes(None, "🚀"), 4)
+    assert("{jet_driver_query_frame("a")}{jet_driver_query_frame("bc")}" != "{jet_driver_query_frame("ab")}{jet_driver_query_frame("c")}")
+}
+
+// CP-BUDGET-SPECS: the real checked query owns canonical facts. The warm query
+// is the same resident Shared snapshot, not another collection/graph copy.
+#Test("checked_budget_facts_are_canonical_and_reused_on_query_cache_hit") {
+    source :: "module perf.release {{ budgets: [Budget{{ name: \"café\", metric: .BinarySize, limit: .AtMost(2MiB) }}] }}\nfn beta() -> Int {{ return 1 }}\n"
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    cold :: &service.check_text_lsp(snapshot, main_path, source)
+    query_test_clean(cold)
+    warm :: &service.check_text_lsp(snapshot, main_path, source)
+    assert(cold.same(warm))
+    assert_eq(service.recompute_count(query_test_key(true)), 1)
+    permit :: warm.guard_read()
+    specs :: permit.value.result.budget_specs ?? panic("complete checked query must retain collected budgets")
+    assert(specs.len() == 1)
+    assert(specs[0].module_index == 0)
+    spec :: specs[0].spec
+    assert(spec.name == "café")
+    assert(spec.role == "release")
+    assert(spec.limit_fact.quantity == BudgetQuantity.Bytes{value: 2097152})
+    assert(spec.limit_fact.raw == BudgetRawQuantity.Scalar{digits: "2", suffix: Val("MiB")})
+    assert(spec.applicability.targets == BudgetAxis.Current)
+    assert(spec.applicability.profiles == BudgetAxis.Current)
+    metric_span :: spec.field_spans.get("metric") ?? panic("checked budget has no metric source span")
+    assert_eq(String.from_bytes(~source.bytes()[metric_span.start..<metric_span.end]), Val("metric"))
+}
+#Test("changed_budget_limit_invalidates_the_checked_facts_not_a_shadow_spec") {
+    before :: "module perf.release {{ budgets: [Budget{{ name: \"binary\", metric: .BinarySize, limit: .AtMost(2MiB) }}] }}\nfn beta() -> Int {{ return 1 }}\n"
+    after :: before.replace(".AtMost(2MiB)", ".AtMost(3MiB)")
+    snapshot :: query_test_snapshot(before, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    first :: &service.check_text_lsp(snapshot, main_path, before)
+    query_test_clean(first)
+    second :: &service.check_text_lsp(snapshot, main_path, after)
+    query_test_clean(second)
+    assert(!first.same(second))
+    assert_eq(service.recompute_count(query_test_key(true)), 2)
+    permit :: second.guard_read()
+    specs :: permit.value.result.budget_specs ?? panic("edited checked budget must remain available")
+    assert(specs[0].spec.limit_fact.quantity == BudgetQuantity.Bytes{value: 3145728})
+    assert(specs[0].spec.limit_fact.raw == BudgetRawQuantity.Scalar{digits: "3", suffix: Val("MiB")})
+}
+#Test("malformed_budget_fails_ordinary_check_and_never_publishes_checked_facts") {
+    source :: "module perf.release {{ budgets: [Budget{{ name: \"binary\", metric: .BinarySize, limit: .AtMost(2s) }}] }}\nfn beta() -> Int {{ return 1 }}\n"
+    snapshot :: query_test_snapshot(source, [JetDriverAuthorizedSourceFile]{})
+    service := JetDriverCompilerQueries.new()
+    main_path :: query_test_os_path.from_text("Main.jet", query_test_os_path.PathPlatform.Unix)
+    checked :: &service.check_text_lsp(snapshot, main_path, source)
+    permit :: checked.guard_read()
+    assert(!permit.value.result.complete)
+    assert(permit.value.result.budget_specs == None)
+    found := false
+    loop diagnostic in permit.value.result.diagnostics {
+        if diagnostic.code == "E2903" {
+            assert(diagnostic.what == "performance budget binary is not valid")
+            assert(diagnostic.why == "`BinarySize` requires one of these units: B, KiB, MiB, GiB")
+            assert_eq(diagnostic.source_path, Val("/query/Main.jet"))
+            found = true
+        }
+    }
+    assert(found)
+}

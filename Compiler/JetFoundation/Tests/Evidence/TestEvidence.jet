@@ -1,0 +1,73 @@
+// Canonical TestEvidence.rs boundary acceptance (typed records, never text).
+#Test("test evidence insertion is idempotent and contradictory outcomes rejected") {
+    report := evidence_report_new("run", EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
+    record :: evidence_record_with_report_id(evidence_test_record(0, 0, "case", "test.jet", 1), "run")
+    record_test_case(&report, ~record) ?? panic("record")
+    record_test_case(&report, ~record) ?? panic("duplicate")
+    assert_eq(report.records.len(), 1)
+    changed := ~record
+    changed.outcome = EvidenceOutcome.Failed
+    assert(if record_test_case(&report, ^changed) == {
+        .Err(.ContradictoryOutcome(claim, existing, found)) -> claim == "case" && existing == EvidenceOutcome.Passed && found == EvidenceOutcome.Failed
+        else -> false
+    })
+    final :: finalize_test_report(^report) ?? panic("finalize")
+    rows :: query_test_evidence(final, Val("case")) ?? panic("query")
+    assert_eq(rows.len(), 1)
+    assert_eq(rows[0].outcome, EvidenceOutcome.Passed)
+    assert_eq(query_test_evidence(final, Val("absent")) ?? panic("absent"), [EvidenceProjection]{})
+}
+#Test("test evidence query validates directly constructed reports") {
+    base :: evidence_report_new("run", EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
+    schema := ~base
+    schema.schema_version = U16{4}
+    assert(if query_test_evidence(schema, None) == {
+        .Err(.SchemaConflict(expected, found)) -> expected == 3 && found == 4
+        else -> false
+    })
+    producer := ~base
+    producer.producer = EvidenceProducerKind.Prove
+    assert(if query_test_evidence(producer, None) == {
+        .Err(.ProducerConflict(_, _)) -> true
+        else -> false
+    })
+    empty := ~base
+    empty.identity.report_id = ""
+    assert(if query_test_evidence(empty, None) == {
+        .Err(.EmptyReportID) -> true
+        else -> false
+    })
+    unchecked := ~base
+    record := evidence_record_with_report_id(evidence_test_record(0, 0, "case", "test.jet", 1), "run")
+    record.outcome = EvidenceOutcome.Checked
+    &unchecked.records.push(record)
+    assert(if query_test_evidence(unchecked, None) == {
+        .Err(.InvalidOutcome(.Checked)) -> true
+        else -> false
+    })
+}
+#Test("test evidence preserves raw runtime unavailable and generated input grade") {
+    property :: evidence_record_with_report_id(evidence_test_record(3, 0, "property", "seed:12", 27), "run")
+    assert_eq(property.outcome, EvidenceOutcome.Generated)
+    assert_eq(property.count, U64{27})
+    assert_eq(property.source.line, U32{0})
+    report := evidence_report_new("run", EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
+    record_test_case(&report, ^property) ?? panic("property")
+    record_test_case(&report, evidence_record_with_report_id(evidence_test_record(2, 1, "E4001", "test.jet", 1), "run")) ?? panic("raw")
+    record_test_case(&report, evidence_record_with_report_id(evidence_test_record(0, 3, "unavailable", "test.jet", 2), "run")) ?? panic("unavailable")
+    final :: finalize_test_report(^report) ?? panic("finalize")
+    assert_eq(final.records.len(), 3)
+    assert(!evidence_report_is_complete(final))
+    assert_eq(query_test_evidence(final, None) ?? panic("query"), evidence_report_query(final, None))
+}
+#Test("test evidence error report parts preserve multiline golden detail") {
+    parts :: test_evidence_report_parts(TestEvidenceError.GoldenMismatch{path: "expected.out", diff: "-old\n+new"})
+    assert_eq(parts.message, "golden file differs: expected.out")
+    assert_eq(parts.detail, "path: expected.out\n-old\n+new")
+    unicode_parts :: test_evidence_report_parts(TestEvidenceError.GoldenMismatch{path: "🧪.out", diff: "résumé\n二"})
+    assert_eq(unicode_parts.message, "golden file differs: 🧪.out")
+    assert_eq(unicode_parts.detail, "path: 🧪.out\nrésumé\n二")
+    plain_parts :: test_evidence_report_parts(TestEvidenceError.EmptyClaimID)
+    assert_eq(plain_parts.message, "test evidence claim id must not be empty")
+    assert_eq(plain_parts.detail, "")
+}

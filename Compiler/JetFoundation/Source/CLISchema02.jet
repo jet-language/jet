@@ -1,0 +1,486 @@
+// Continuation of the canonical CLISchema module.
+use Syntax
+use AST.[CtFloat, CtValue, Expr, Field, Func, Item, JobScope, Marker, StrPart, StructDef, Type, CLICommandBinding]
+use Shape.[ShapeFieldNames, ShapeProjectionKind]
+use CLISchema.[CLICommandSchema, CLISubcommandSchema, CLIInputSchema, CLIInputShape, CLIValueKind, CLIDefault, MetadataError, JobFact, JobRegistry, MACH_SECTION, WASM_SECTION, bounds, read_num, usize_num, c_name, command_payload_params]
+// GATE #4494: native pointer-width unsigned arithmetic (Rust usize).
+use std.[USize]
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:1798
+fn is_mach(bytes: View<U8>) -> Bool Never! {
+    if bytes.len() < 4 -> return false
+    ((bytes[0] == U8{206} || bytes[0] == U8{207}) && bytes[1] == U8{250}
+        && bytes[2] == U8{237} && bytes[3] == U8{254}) || is_fat_mach(bytes)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1810
+fn is_fat_mach(bytes: View<U8>) -> Bool Never! {
+    if bytes.len() < 4 -> return false
+    (bytes[0] == U8{202} && bytes[1] == U8{254} && bytes[2] == U8{186}
+        && (bytes[3] == U8{190} || bytes[3] == U8{191}))
+        || ((bytes[0] == U8{190} || bytes[0] == U8{191}) && bytes[1] == U8{186}
+            && bytes[2] == U8{254} && bytes[3] == U8{202})
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1820
+fn mach_sections(bytes: View<U8>) -> [View<U8>] MetadataError! {
+    if is_fat_mach(bytes) -> return fat_mach_sections(bytes)
+    is_64 :: bytes.len() >= 4 && bytes[0] == U8{207} && bytes[1] == U8{250}
+        && bytes[2] == U8{237} && bytes[3] == U8{254}
+    header :: if is_64 -> 32 else -> 28
+    _ :: bounds(bytes, 0, header)
+    count :: usize_num(read_num(bytes, 16, 4, true))
+    command := header
+    found := [View<U8>]{}
+    loop _ in 0..<count {
+        kind :: U32{read_num(bytes, command, 4, true)}
+        size :: usize_num(read_num(bytes, command + 4, 4, true))
+        if size < 8 -> return Err(.Malformed("invalid Mach-O load command size"))
+        _ :: bounds(bytes, command, size)
+        segment_kind :: if is_64 -> U32{25} else -> U32{1}
+        if kind == segment_kind {
+            nsects_at :: if is_64 -> 64 else -> 48
+            sections_at :: if is_64 -> 72 else -> 56
+            section_size :: if is_64 -> 80 else -> 68
+            file_offset_at :: if is_64 -> 48 else -> 40
+            section_len_at :: if is_64 -> 40 else -> 36
+            section_len_width :: if is_64 -> 8 else -> 4
+            nsects :: usize_num(read_num(bytes, command + nsects_at, 4, true))
+            // Preserve native usize checked arithmetic at the file-format boundary.
+            if nsects > (Int{USize.max} - sections_at) /% section_size ->
+                return Err(.Malformed("Mach-O section count overflow"))
+            needed :: sections_at + nsects * section_size
+            if needed > size -> return Err(.Malformed("Mach-O sections outside load command"))
+            loop index in 0..<nsects {
+                section :: command + sections_at + index * section_size
+                if c_name(bounds(bytes, section, 16)) == MACH_SECTION {
+                    offset :: usize_num(read_num(bytes, section + file_offset_at, 4, true))
+                    len :: usize_num(read_num(bytes, section + section_len_at, section_len_width, true))
+                    &found.push(bounds(bytes, offset, len))
+                }
+            }
+        }
+        if command > Int{USize.max} - size -> return Err(.Malformed("Mach-O load command overflow"))
+        command += size
+    }
+    Ok(^found)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1885
+fn fat_mach_sections(bytes: View<U8>) -> [View<U8>] MetadataError! {
+    magic :: bounds(bytes, 0, 4)
+    little :: (magic[0] == U8{190} || magic[0] == U8{191}) && magic[1] == U8{186}
+        && magic[2] == U8{254} && magic[3] == U8{202}
+    is_64 :: (magic[0] == U8{202} && magic[1] == U8{254} && magic[2] == U8{186} && magic[3] == U8{191})
+        || (magic[0] == U8{191} && magic[1] == U8{186} && magic[2] == U8{254} && magic[3] == U8{202})
+    count :: usize_num(read_num(bytes, 4, 4, little))
+    if count == 0 || count > 64 -> return Err(.Malformed("invalid universal Mach-O architecture count"))
+    entry_size :: if is_64 -> 32 else -> 20
+    if count > Int{USize.max} /% entry_size -> return Err(.Malformed("universal Mach-O table overflow"))
+    _ :: bounds(bytes, 8, count * entry_size)
+    canonical := None as View<U8>?
+    loop index in 0..<count {
+        arch :: 8 + index * entry_size
+        width :: if is_64 -> 8 else -> 4
+        offset :: usize_num(read_num(bytes, arch + 8, width, little))
+        size :: usize_num(read_num(bytes, arch + 8 + width, width, little))
+        slice :: bounds(bytes, offset, size)
+        if is_fat_mach(slice) -> return Err(.Malformed("nested universal Mach-O slice"))
+        sections :: mach_sections(slice)
+        if sections.len() != 1 {
+            if sections.is_empty() -> return Err(.Missing)
+            return Err(.Duplicate)
+        }
+        if canonical == {
+            .None -> canonical = Val(sections[0])
+            .Val(record) -> if record != sections[0] -> return Err(.Malformed("universal Mach-O slices disagree"))
+        }
+    }
+    Ok([View<U8>]{canonical.unwrap()})
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1930
+fn wasm_leb(bytes: View<U8>, at: &Int) -> Int MetadataError! {
+    value := USize{0}
+    shift := 0
+    loop shift < 35 {
+        if at >= bytes.len() -> return Err(.Malformed("truncated Wasm LEB"))
+        byte :: bytes[at]
+        at += 1
+        if shift >= USize.bits -> return Err(.Malformed("Wasm LEB overflow"))
+        value |= USize{Int.from_u8(byte & U8{127})} << shift
+        if byte & U8{128} == U8{0} -> return Ok(Int{value})
+        shift += 7
+    }
+    Err(.Malformed("Wasm LEB too long"))
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1947
+fn wasm_sections(bytes: View<U8>) -> [View<U8>] MetadataError! {
+    header :: bounds(bytes, 0, 8)
+    if header[0] != U8{0} || header[1] != U8{97} || header[2] != U8{115}
+        || header[3] != U8{109} || header[4] != U8{1} || header[5] != U8{0}
+        || header[6] != U8{0} || header[7] != U8{0} ->
+        return Err(.Malformed("unsupported Wasm header"))
+    at := 8
+    found := [View<U8>]{}
+    loop at < bytes.len() {
+        id :: bytes[at]
+        at += 1
+        size :: wasm_leb(bytes, &at)
+        payload :: bounds(bytes, at, size)
+        at += size
+        if id == U8{0} {
+            name_at := 0
+            name_len :: wasm_leb(payload, &name_at)
+            name :: bounds(payload, name_at, name_len)
+            name_at += name_len
+            if name == WASM_SECTION.bytes() -> &found.push(payload[name_at..<payload.len()])
+        }
+    }
+    Ok(^found)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1972
+fn put_wasm_leb(out: &[U8], value: Int) Never! {
+    remaining := value
+    loop {
+        byte := U8{remaining & 127}
+        remaining >>= 7
+        if remaining != 0 -> byte |= U8{128}
+        &out.push(byte)
+        if remaining == 0 -> break
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1987
+// Add the canonical Wasm custom section before publication.
+pub fn embed_wasm_record(wasm: &[U8], record: View<U8>) MetadataError! {
+    _ :: wasm_sections(wasm.view())
+    payload := [U8]{}
+    put_wasm_leb(&payload, WASM_SECTION.bytes().len())
+    loop byte in WASM_SECTION.bytes() -> &payload.push(byte)
+    loop byte in record -> &payload.push(byte)
+    &wasm.push(U8{0})
+    put_wasm_leb(&wasm, payload.len())
+    loop byte in payload -> &wasm.push(byte)
+    return
+}
+impl CLICommandSchema {
+    // Rust: crates/jet-foundation/src/CLISchema.rs:2000
+    pub fn standard_completion_words(self) -> [String] Never! {
+        if !self.standard -> return [String]{}
+        words := [String]{"--verbose", "-v", "--quiet", "-q", "--color"}
+        if self.version != None -> &words.push("--version")
+        ^words
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:2018
+    fn input_words(inputs: [CLIInputSchema]) -> [String] Never! {
+        words := [String]{}
+        positionals := [Int]{}
+        loop index in 0..<inputs.len() {
+            if inputs[index].positional != None -> &positionals.push(index)
+        }
+        &positionals.sort_by(fn(a, b) { inputs[a].positional.unwrap().cmp(inputs[b].positional.unwrap()) })
+        loop index in positionals -> &words.push(~inputs[index].flag)
+        loop input in inputs -> &words.push("--{input.flag}")
+        loop input in inputs {
+            if input.short == .Val(short) -> &words.push("-{short}")
+        }
+        ^words
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:2039
+    pub fn command_inputs(self, command: CLISubcommandSchema) -> [CLIInputSchema] Never! { ~command.inputs }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:2044
+    pub fn command_completion_words(self, command: CLISubcommandSchema) -> [String] Never! {
+        words := [String]{"--help"}
+        loop word in CLICommandSchema.input_words(command.inputs) -> &words.push(^word)
+        ^words
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:2050
+    pub fn job_completion_words(self) -> [String] Never! {
+        words := [String]{}
+        loop job in self.jobs {
+            if job.scope != .Internal -> &words.push(~job.name)
+        }
+        ^words
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:2059
+    pub fn job(self, name: String) -> JobFact? Never! {
+        loop job in self.jobs {
+            if job.name == name && job.scope != .Internal -> return Val(job)
+        }
+        None
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:2067
+    pub fn root_completion_words(self) -> [String] Never! {
+        words := [String]{"--help"}
+        loop word in self.standard_completion_words() -> &words.push(^word)
+        loop word in CLICommandSchema.input_words(self.inputs) -> &words.push(^word)
+        ^words
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:2075
+    pub fn completion_words(self) -> [String] Never! {
+        words := self.root_completion_words()
+        loop command in self.commands -> &words.push(~command.name)
+        loop word in self.job_completion_words() -> &words.push(^word)
+        ^words
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2088
+// One marker fold for all Shape and CLI public field spellings.
+pub fn shape_field_names(structure: StructDef, field: Field) -> ShapeFieldNames Never! {
+    rename :: marker(field.serde_markers, Syntax.MARKER_RENAME)
+    style :: shape_rename_all_style(structure)
+    shared := None as String?
+    if rename == .Val(rename_marker) -> shared = shape_marker_string(rename_marker, None)
+    resolved :: if shared == {
+        .Val(value) -> ^value
+        .None -> shape_rename_all_name(style, field.name)
+    }
+    names := ShapeFieldNames.from_source(resolved)
+    if rename == .Val(rename_marker) {
+        if shape_marker_string(rename_marker, Val("json")) == .Val(value) -> names = names.json(value)
+        if shape_marker_string(rename_marker, Val("cbor")) == .Val(value) -> names = names.cbor(value)
+        if shape_marker_string(rename_marker, Val("csv")) == .Val(value) -> names = names.csv(value)
+        if shape_marker_string(rename_marker, Val("toml")) == .Val(value) -> names = names.toml(value)
+        if shape_marker_string(rename_marker, Val("yaml")) == .Val(value) -> names = names.yaml(value)
+        if shape_marker_string(rename_marker, Val("xml")) == .Val(value) -> names = names.xml(value)
+        if shape_marker_string(rename_marker, Val("args")) == .Val(value) -> names = names.args(value)
+        if shape_marker_string(rename_marker, Val("env")) == .Val(value) -> names = names.env(value)
+        if shape_marker_string(rename_marker, Val("db")) == .Val(value) -> names = names.db(value)
+        if shape_marker_string(rename_marker, Val("layout")) == .Val(value) -> names = names.layout(value)
+    }
+    if marker(field.serde_markers, Syntax.MARKER_ENV) == .Val(env_marker) {
+        if shape_marker_string(env_marker, None) == .Val(value) -> names = names.env(value)
+    }
+    ^names
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2138
+fn shape_marker_string(marker: Marker, label: String?) -> String? Never! {
+    expression := None as Expr?
+    if label == {
+        .Val(label) -> {
+            loop index in 0..<marker.arg_labels.len() {
+                if marker.arg_labels[index] == .Val(named) {
+                    if named.0 == label {
+                        if index < marker.args.len() -> expression = marker.args[index].as_expr()
+                        break
+                    }
+                }
+            }
+        }
+        .None -> expression = marker.expr_arg(0)
+    }
+    expr :: expression ?? return None
+    if expr == .Str(parts, _) {
+        if !parts.is_empty() {
+            if parts[0] == .Lit(value) -> return Val(~value)
+        }
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2158
+fn shape_rename_all_style(structure: StructDef) -> String? Never! {
+    rename :: marker(structure.serde_markers, Syntax.MARKER_RENAME_ALL) ?? return None
+    expression :: rename.expr_arg(0) ?? return None
+    if expression == .Ident(name, _) -> return Val(name)
+    None
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2170
+fn shape_rename_all_name(style: String?, name: String) -> String Never! {
+    if style == {
+        .Val("camel") -> Syntax.to_camel_acronym(name)
+        .Val("kebab") -> Syntax.to_snake_acronym(name).replace("_", "-")
+        .Val("screaming") -> Syntax.to_shouty_acronym(name)
+        .Val("pascal") -> Syntax.to_pascal_acronym(name)
+        .Val("snake") -> Syntax.to_snake_acronym(name)
+        else -> ~name
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2181
+pub fn command_schema(structure: StructDef) -> CLICommandSchema? Never! {
+    command_schema_with_items([Item]{}, structure)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2188
+pub fn command_schema_with_items(items: [Item], structure: StructDef) -> CLICommandSchema? Never! {
+    derives_cli := false
+    loop derive in structure.derives {
+        if derive.0 == Syntax.MARKER_CLI -> derives_cli = true
+    }
+    if !derives_cli -> return None
+    positional_order := U16{0}
+    inputs := [CLIInputSchema]{}
+    computed := [String:Bool]{}
+    loop field in structure.fields {
+        if field.computed != None {
+            computed[field.name] = true
+            next
+        }
+        names :: shape_field_names(structure, field)
+        flag :: names.name_for(ShapeProjectionKind.Args).expect("checked CLI field is missing its Args shape name")
+        short := None as String?
+        env := None as String?
+        help := "value for --{flag}"
+        if marker(field.serde_markers, Syntax.MARKER_SHORT) == .Val(value) -> short = marker_string(value)
+        if marker(field.serde_markers, Syntax.MARKER_ENV) == .Val(value) -> env = marker_string(value)
+        if marker(field.serde_markers, Syntax.MARKER_DOC) == .Val(value) {
+            if marker_string(value) == .Val(text) -> help = ^text
+        }
+        metavar :: flag.replace("-", "_").to_uppercase()
+        flag_only :: marker(field.serde_markers, Syntax.MARKER_FLAG) != None
+        shape :: if field.ty == {
+            .Bool -> CLIInputShape.Flag
+            .Option(inner) -> CLIInputShape.Value(
+                scalar_kind(inner).expect("sema permits only scalar Option fields on a CLI struct"), true, None)
+            ty -> CLIInputShape.Value(
+                scalar_kind(ty).expect("sema permits only scalar fields on a CLI struct"), false, field_default(field))
+        }
+        positional := None as U16?
+        if shape == .Value(_, false, .None) {
+            if !flag_only {
+                positional = Val(positional_order)
+                if positional_order < U16.max -> positional_order += U16{1}
+            }
+        }
+        &inputs.push(CLIInputSchema(~field.name, ~flag, ^short, ^env, ^help,
+            if shape == .Flag -> None else -> Val(metavar), shape, positional))
+    }
+    commands := [CLISubcommandSchema]{}
+    loop function in structure.methods {
+        if computed.contains_key(function.name) -> next
+        if function_inputs(function) == .Val(command_inputs) {
+            description := None as String?
+            if marker(function.markers, Syntax.MARKER_DOC) == .Val(value) -> description = marker_string(value)
+            &commands.push(CLISubcommandSchema(function.name.to_lowercase(), ^description, ^command_inputs))
+        }
+    }
+    loop binding in structure.cli_bindings {
+        target :: binding_target_name(binding) ?? next
+        function := None as Func?
+        loop item in items {
+            if item == .Func(candidate) {
+                if candidate.name == target { function = Val(candidate); break }
+            }
+        }
+        resolved :: function ?? next
+        command_inputs :: function_inputs_for_binding(resolved, structure.name) ?? next
+        description := None as String?
+        if marker(binding.markers, Syntax.MARKER_DOC) == .Val(value) -> description = marker_string(value)
+        &commands.push(CLISubcommandSchema(binding.name.to_lowercase(), ^description, ^command_inputs))
+    }
+    description := None as String?
+    if marker(structure.type_markers, Syntax.MARKER_DOC) == .Val(value) -> description = marker_string(value)
+    Val(CLICommandSchema(~structure.name, ^description, ^inputs, ^commands,
+        JobRegistry.from_items(items).into_jobs(), cli_standard(structure.type_markers), None))
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2309
+fn binding_target_name(binding: CLICommandBinding) -> String? Never! {
+    if binding.target.without_parens() == .Ident(name, _) -> return Val(name)
+    None
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2316
+fn function_inputs_for_binding(function: Func, shared_type: String) -> [CLIInputSchema]? Never! {
+    command := ~function
+    command.params = command_payload_params(function, shared_type, true)
+    function_inputs(command)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2322
+fn function_schema(function: Func) -> CLICommandSchema? Never! {
+    inputs :: function_inputs(function) ?? return None
+    description := None as String?
+    if marker(function.markers, Syntax.MARKER_DOC) == .Val(value) -> description = marker_string(value)
+    Val(CLICommandSchema("run", ^description, ^inputs, [CLISubcommandSchema]{}, [JobFact]{},
+        cli_standard(function.markers), None))
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2334
+fn function_inputs(function: Func) -> [CLIInputSchema]? Never! {
+    positional_order := U16{0}
+    inputs := [CLIInputSchema]{}
+    loop param in function.params {
+        if param.name == Syntax.KW_SELF -> next
+        flag :: param.call_label().replace("_", "-")
+        shape :: if param.ty == {
+            .Bool -> CLIInputShape.Flag
+            .Option(inner) -> {
+                kind :: scalar_kind(inner) ?? return None
+                CLIInputShape.Value(kind, true, None)
+            }
+            ty -> {
+                default := None as CLIDefault?
+                if param.default == .Val(expression) {
+                    default = expr_default(expression)
+                    if default == None -> return None
+                }
+                kind :: scalar_kind(ty) ?? return None
+                CLIInputShape.Value(kind, false, ^default)
+            }
+        }
+        positional := None as U16?
+        if shape == .Value(_, false, .None) {
+            positional = Val(positional_order)
+            if positional_order < U16.max -> positional_order += U16{1}
+        }
+        metavar :: if shape == .Flag -> None else -> Val(param.call_label().replace("-", "_").to_uppercase())
+        &inputs.push(CLIInputSchema(~param.name, ~flag, None, None, "value for --{flag}", metavar, shape, positional))
+    }
+    Val(^inputs)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2388
+fn expr_default(expr: Expr) -> CLIDefault? Never! {
+    if expr.without_parens() == {
+        .Int(value, _, _, _) -> Val(.Value(CtValue.Int(value)))
+        .Float(value, _, is_f32, _) -> Val(.Value(CtValue.Float(
+            if is_f32 -> CtFloat.f32(F32{value}) else -> CtFloat.f64(value))))
+        .Bool(value, _) -> Val(.Value(CtValue.Bool(value)))
+        .Str(parts, _) -> {
+            if parts.len() == 1 {
+                if parts[0] == .Lit(value) -> return Val(.Value(CtValue.Str(~value)))
+            }
+            None
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2405
+fn cli_standard(markers: [Marker]) -> Bool Never! {
+    cli :: marker(markers, Syntax.MARKER_CLI) ?? return false
+    loop arg in cli.expr_args() {
+        if arg == .Ident(name, _) {
+            if name == "Standard" -> return true
+        }
+    }
+    false
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2413
+fn scalar_kind(ty: Type) -> CLIValueKind? Never! {
+    if ty == {
+        .Bool -> Val(.Bool)
+        .Int | .InlineRange(_) -> Val(.Int)
+        .Float -> Val(.Float)
+        .String -> Val(.String)
+        .Named(name) -> if name == "Path" -> Val(.Path) else -> None
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2424
+fn marker(markers: [Marker], name: String) -> Marker? Never! {
+    loop candidate in markers {
+        if candidate.name == name -> return Val(candidate)
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2428
+fn marker_string(marker: Marker) -> String? Never! {
+    expression :: marker.expr_arg(0) ?? return None
+    if expression == .Str(parts, _) {
+        if parts.len() == 1 {
+            if parts[0] == .Lit(value) -> return Val(~value)
+        }
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:2438
+fn field_default(field: Field) -> CLIDefault? Never! {
+    if field.default_ct == .Val(value) -> return Val(.Value(~value))
+    if field.default != None -> return Val(.TypeDefault)
+    default_marker :: marker(field.serde_markers, Syntax.MARKER_DEFAULT) ?? return None
+    if !default_marker.args.is_empty() {
+        if default_marker.ct == .Val(value) -> return Val(.Value(~value))
+    }
+    Val(.TypeDefault)
+}
+

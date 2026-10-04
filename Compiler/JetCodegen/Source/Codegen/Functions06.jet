@@ -1,0 +1,1803 @@
+// PORT-PENDING 0507 crates-jet-codegen-src-codegen-tir-mod-slice-5030: crates/jet-codegen/src/Codegen/TIR/mod.rs:5030-6828
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn lower_checked_tir_program_on_stack(
+//RS     bundle: &ProgramBundle,
+//RS     request: MirArtifactRequest,
+//RS     debug_linemap: bool,
+//RS ) -> Result<TirProgram, LowerError> {
+//RS     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
+//RS         let module = bundle.modules.get(bundle.entry).ok_or_else(|| {
+//RS             LowerError::new(crate::Diagnostics::Span::new(0, 0), "missing entry module")
+//RS         })?;
+//RS         let extern_funcs = bundle_extern_funcs(bundle);
+//RS         let mut cx = build_cx_items(
+//RS             &module.items,
+//RS             &module.source,
+//RS             &module.display,
+//RS             None,
+//RS             &extern_funcs,
+//RS             &bundle.edition,
+//RS         );
+//RS         cx.debug_linemap = debug_linemap;
+//RS         populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
+//RS         register_own_struct_shapes(&mut cx, bundle, bundle.entry);
+//RS         crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
+//RS         let type_shapes = collect_type_shapes(&module.items);
+//RS         let mut funcs = Vec::new();
+//RS         let include_tests = matches!(
+//RS             request.kind,
+//RS             jet_foundation::MIR::MirArtifactKind::TestExecutable
+//RS                 | jet_foundation::MIR::MirArtifactKind::FuzzExecutable
+//RS                 | jet_foundation::MIR::MirArtifactKind::TestOverride
+//RS         );
+//RS         let entry_module_identity = artifact_plan::module_identity(bundle, bundle.entry);
+//RS         let mut boxed_edges_by_module = std::collections::BTreeMap::new();
+//RS         boxed_edges_by_module.insert(entry_module_identity.clone(), cx.boxed_edges.clone());
+//RS         let mut auto_printable_by_module = std::collections::BTreeMap::new();
+//RS         auto_printable_by_module.insert(entry_module_identity.clone(), cx.auto_printable.clone());
+//RS         let mut auto_debug_by_module = std::collections::BTreeMap::new();
+//RS         auto_debug_by_module.insert(entry_module_identity.clone(), cx.auto_debug.clone());
+//RS         let (entry_name, cli_schema) = if matches!(
+//RS             request.kind,
+//RS             jet_foundation::MIR::MirArtifactKind::NativeLibrary
+//RS                 | jet_foundation::MIR::MirArtifactKind::SandboxPlugin
+//RS                 | jet_foundation::MIR::MirArtifactKind::TestExecutable
+//RS                 | jet_foundation::MIR::MirArtifactKind::FuzzExecutable
+//RS         ) {
+//RS             (None, None)
+//RS         } else {
+//RS             let zero_arg_entry = selected_test_override_tir_entry(bundle, &request)
+//RS                 .or_else(|| selected_zero_arg_tir_entry(bundle));
+//RS             let cli_schema = zero_arg_entry
+//RS                 .is_none()
+//RS                 .then(|| jet_foundation::CLISchema::entry_schema_for_bundle(bundle))
+//RS                 .flatten();
+//RS             let cli_run = cli_schema.as_ref().and_then(|_| {
+//RS                 module.items.iter().find_map(|item| match item {
+//RS                     Item::Func(function) if function.name == "run" => Some(function.name.clone()),
+//RS                     Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
+//RS                         (output.selected
+//RS                             && output.module == bundle.entry
+//RS                             && output.params.len() == 1)
+//RS                             .then(|| output.semantic_name.clone())
+//RS                     }),
+//RS                     _ => None,
+//RS                 })
+//RS             });
+//RS             let entry_name = match (zero_arg_entry, cli_run, cli_schema.is_some()) {
+//RS                 (Some(name), _, _) => name,
+//RS                 (None, Some(_), _) | (None, None, true) => super::mangle_generated("cli_main"),
+//RS                 (None, None, false) => {
+//RS                     return Err(LowerError::new(
+//RS                         crate::Diagnostics::Span::new(0, 0),
+//RS                         NO_RUNNABLE_ENTRY,
+//RS                     ));
+//RS                 }
+//RS             };
+//RS             (Some(entry_name), cli_schema)
+//RS         };
+//RS         let core_source_modules = core_source_module_indices(bundle);
+//RS         let reachable_core_bodies = if core_source_modules.is_empty() {
+//RS             std::collections::HashSet::new()
+//RS         } else {
+//RS             let app_graph = crate::Sema::extract_app_graph(bundle).0;
+//RS             let callables = cost_callables(bundle, app_graph.as_ref());
+//RS             let reachable = reachable_core_source_callables(
+//RS                 bundle,
+//RS                 &callables,
+//RS                 &core_source_modules,
+//RS                 include_tests,
+//RS                 &request,
+//RS                 entry_name.as_deref(),
+//RS             );
+//RS             reachable_core_source_bodies(&callables, &core_source_modules, &reachable)
+//RS         };
+//RS         cx.jit_spawn_lambdas.borrow_mut().clear();
+//RS         cx.jit_spawn_sites.borrow_mut().clear();
+//RS         cx.jit_method_calls.borrow_mut().clear();
+//RS         cx.jit_generic_calls.borrow_mut().clear();
+//RS         cx.jit_core_source_generic_calls.borrow_mut().clear();
+//RS         cx.jit_canonical_deopt.borrow_mut().clear();
+//RS         cx.jit_canonical_calls.borrow_mut().clear();
+//RS         // #2502: the canonical contract sampling plan this walk records and
+//RS         // artifact discovery replays.
+//RS         let mut http_route_handlers = std::collections::HashSet::new();
+//RS         collect_http_route_handlers(&module.items, &mut http_route_handlers);
+//RS         let mut contract_rows = artifact_plan::ContractSamplingPlan::new();
+//RS         let mut uncovered_entry_reason = None;
+//RS         for item in &module.items {
+//RS             match item {
+//RS                 Item::Func(f) if crate::Sema::is_guest_import(f) => {
+//RS                     // `#Import(c)` is a declaration backed by the generated C
+//RS                     // ABI wrapper, not a Jet body. Its calls lower as ExternCall.
+//RS                     continue;
+//RS                 }
+//RS                 Item::Func(f) => {
+//RS                     // Named HTTP callbacks are checked at the route boundary and must
+//RS                     // still get a TFunc row even when the enclosing route helper is
+//RS                     // outside the broad resident subset.
+//RS                     let covered = f.inline_foreign.is_none()
+//RS                         && (tir_covers(f, &cx) || http_route_handlers.contains(&f.name));
+//RS                     if !covered
+//RS                         && matches!(entry_name.as_deref(), Some(name) if name == f.name || name.ends_with(&format!("::{}", f.name)))
+//RS                     {
+//RS                         uncovered_entry_reason = Some(refusal::describe(&cx));
+//RS                     }
+//RS                     materialize_contract_sampling(
+//RS                         f,
+//RS                         &entry_module_identity,
+//RS                         covered,
+//RS                         &f.name,
+//RS                         &cx,
+//RS                         &mut funcs,
+//RS                         &mut contract_rows,
+//RS                     );
+//RS                     if f.inline_foreign.is_some() || !f.type_params.is_empty() {
+//RS                         continue;
+//RS                     }
+//RS                     // Resident `jet run` has no AST fallback. Lower sibling
+//RS                     // functions even when a conservative subset gate said no
+//RS                     // (`mark_ready`, `produce`, `async_check`).
+//RS                     let lowered = lower_func(f, &cx);
+//RS                     funcs.push(lowered);
+//RS                 }
+//RS                 // A named test always lowers. There is no AST fallback, so a
+//RS                 // subset gate here would drop the test without a report.
+//RS                 Item::Test(test) if include_tests && test.name.is_some() =>
+//RS                 {
+//RS                     funcs.push(lower_test_item(test, &entry_module_identity, &cx));
+//RS                 }
+//RS                 Item::ErrorConv(ec) => {
+//RS                     if !tir_covers_error_conv_body(&ec.body, &cx) {
+//RS                         continue;
+//RS                     }
+//RS                     funcs.push(lower_error_conv(ec, &cx));
+//RS                 }
+//RS                 Item::Struct(s) => {
+//RS                     if s.type_params.is_empty() {
+//RS                         for m in &s.methods {
+//RS                             let mut lowered = lower_method(m, &s.name, &cx);
+//RS                             lowered.name = format!("{}::{}", s.name, m.name);
+//RS                             funcs.push(lowered);
+//RS                         }
+//RS                         for implementation in &s.trait_impls {
+//RS                             if matches!(
+//RS                                 implementation.trait_name.as_str(),
+//RS                                 crate::Generics::ENCODE | crate::Generics::DECODE
+//RS                             ) {
+//RS                                 continue;
+//RS                             }
+//RS                             for method in &implementation.methods {
+//RS                                 if !trait_method_binders_lower_in_place(
+//RS                                     method,
+//RS                                     &s.name,
+//RS                                     &cx,
+//RS                                     &implementation.trait_name,
+//RS                                 ) {
+//RS                                     continue;
+//RS                                 }
+//RS                                 let mut lowered = lower_trait_method(
+//RS                                     method,
+//RS                                     &s.name,
+//RS                                     &cx,
+//RS                                     &implementation.trait_name,
+//RS                                     implementation.compiler_generated && method.compiler_generated,
+//RS                                     implementation.operator_rhs.as_ref(),
+//RS                                 );
+//RS                                 set_lowered_method_name(&mut lowered, || {
+//RS                                     format!("{}::{}", s.name, method.name)
+//RS                                 });
+//RS                                 funcs.push(lowered);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Enum(e) => {
+//RS                     if e.type_params.is_empty() {
+//RS                         for method in &e.methods {
+//RS                             let mut lowered = lower_method(method, &e.name, &cx);
+//RS                             lowered.name = format!("{}::{}", e.name, method.name);
+//RS                             funcs.push(lowered);
+//RS                         }
+//RS                         for implementation in &e.trait_impls {
+//RS                             if matches!(
+//RS                                 implementation.trait_name.as_str(),
+//RS                                 crate::Generics::ENCODE | crate::Generics::DECODE
+//RS                             ) {
+//RS                                 continue;
+//RS                             }
+//RS                             for method in &implementation.methods {
+//RS                                 if !trait_method_binders_lower_in_place(
+//RS                                     method,
+//RS                                     &e.name,
+//RS                                     &cx,
+//RS                                     &implementation.trait_name,
+//RS                                 ) {
+//RS                                     continue;
+//RS                                 }
+//RS                                 let mut lowered = lower_trait_method(
+//RS                                     method,
+//RS                                     &e.name,
+//RS                                     &cx,
+//RS                                     &implementation.trait_name,
+//RS                                     implementation.compiler_generated && method.compiler_generated,
+//RS                                     implementation.operator_rhs.as_ref(),
+//RS                                 );
+//RS                                 set_lowered_method_name(&mut lowered, || {
+//RS                                     format!("{}::{}", e.name, method.name)
+//RS                                 });
+//RS                                 funcs.push(lowered);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Impl(imp) => {
+//RS                     let owner_module = impl_owner_module(bundle, bundle.entry, &imp.type_name);
+//RS                     let owner_params = bundle.modules[owner_module]
+//RS                         .items
+//RS                         .iter()
+//RS                         .find_map(|item| match item {
+//RS                             Item::Struct(s) if s.name == imp.type_name => {
+//RS                                 Some(s.type_params.as_slice())
+//RS                             }
+//RS                             Item::Enum(e) if e.name == imp.type_name => {
+//RS                                 Some(e.type_params.as_slice())
+//RS                             }
+//RS                             _ => None,
+//RS                         })
+//RS                         .unwrap_or(&[]);
+//RS                     let owners = if imp.trait_name.is_none() && !owner_params.is_empty() {
+//RS                         Vec::new()
+//RS                     } else {
+//RS                         vec![Type::Named(imp.type_name.clone())]
+//RS                     };
+//RS                     for owner_ty in owners {
+//RS                         let subst = match &owner_ty {
+//RS                             Type::Apply { args, .. } => owner_params
+//RS                                 .iter()
+//RS                                 .zip(args)
+//RS                                 .map(|(param, arg)| (param.name.clone(), arg.clone()))
+//RS                                 .collect(),
+//RS                             _ => std::collections::HashMap::new(),
+//RS                         };
+//RS                         for method in &imp.methods {
+//RS                             let specialized = if subst.is_empty() {
+//RS                                 method.clone()
+//RS                             } else {
+//RS                                 crate::Sema::specialize_function_types(method.clone(), &subst)
+//RS                             };
+//RS                             if !specialized.type_params.is_empty() {
+//RS                                 continue;
+//RS                             }
+//RS                             let mut lowered = if let Some(trait_name) = &imp.trait_name {
+//RS                                 lower_trait_method(
+//RS                                     &specialized,
+//RS                                     &imp.type_name,
+//RS                                     &cx,
+//RS                                     trait_name,
+//RS                                     (imp.is_generated_serde && specialized.compiler_generated)
+//RS                                         || (specialized.compiler_generated
+//RS                                             && specialized.state_transition.is_some()
+//RS                                             && specialized.return_type.is_some()
+//RS                                             && specialized.failure_contract().is_default()),
+//RS                                     imp.operator_rhs.as_ref(),
+//RS                                 )
+//RS                             } else {
+//RS                                 lower_method_for_owner(
+//RS                                     &specialized,
+//RS                                     &imp.type_name,
+//RS                                     owner_ty.clone(),
+//RS                                     &cx,
+//RS                                     specialized.compiler_generated
+//RS                                         && specialized.state_transition.is_some()
+//RS                                         && specialized.return_type.is_some()
+//RS                                         && specialized.failure_contract().is_default(),
+//RS                                 )
+//RS                             };
+//RS                             set_lowered_method_name(&mut lowered, || {
+//RS                                 format!("{}::{}", owner_ty.name(), method.name)
+//RS                             });
+//RS                             funcs.push(lowered);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::CodeModule(cm) => {
+//RS                     let Some(body) = &cm.body else { continue };
+//RS                     let member_prefix = jet_foundation::Names::member_name(&cm.name, "");
+//RS                     for inner in body {
+//RS                         match inner {
+//RS                             Item::Func(f) => {
+//RS                                 let covered = tir_covers(f, &cx);
+//RS                                 let child = child_module_identity(&entry_module_identity, &cm.name);
+//RS                                 let previous_prefix = cx.jit_local_call_prefix.clone();
+//RS                                 cx.jit_local_call_prefix = Some(format!("{}::", mangle(&cm.name)));
+//RS                                 materialize_contract_sampling(
+//RS                                     f,
+//RS                                     &child,
+//RS                                     covered,
+//RS                                     &f.name,
+//RS                                     &cx,
+//RS                                     &mut funcs,
+//RS                                     &mut contract_rows,
+//RS                                 );
+//RS                                 cx.jit_local_call_prefix = previous_prefix;
+//RS                                 if f.inline_foreign.is_some() || !f.type_params.is_empty() {
+//RS                                     continue;
+//RS                                 }
+//RS                                 // Match the AOT inline-module path: lower against the
+//RS                                 // emitted module-qualified function name so body-local
+//RS                                 // import scopes select `cm__function` while preserving
+//RS                                 // the same canonical TIR call form for tier 0.
+//RS                                 let member = jet_foundation::Names::member_name(&cm.name, &f.name);
+//RS                                 let mut mangled_f = f.clone();
+//RS                                 mangled_f.name = member.clone();
+//RS                                 let mut lowered = lower_func(&mangled_f, &cx);
+//RS                                 lowered.name = member;
+//RS                                 funcs.push(lowered);
+//RS                             }
+//RS                             Item::Test(test) if include_tests && test.name.is_some() =>
+//RS                             {
+//RS                                 let child = child_module_identity(&entry_module_identity, &cm.name);
+//RS                                 funcs.push(lower_test_item(test, &child, &cx));
+//RS                             }
+//RS                             Item::Struct(s) => {
+//RS                                 let type_name = if s.name.starts_with(&member_prefix) {
+//RS                                     s.name.clone()
+//RS                                 } else {
+//RS                                     jet_foundation::Names::member_name(&cm.name, &s.name)
+//RS                                 };
+//RS                                 for method in &s.methods {
+//RS                                     let mut lowered = lower_method(method, &type_name, &cx);
+//RS                                     set_lowered_method_name(&mut lowered, || {
+//RS                                         format!("{}::{}", type_name, method.name)
+//RS                                     });
+//RS                                     funcs.push(lowered);
+//RS                                 }
+//RS                             }
+//RS                             Item::Impl(imp) => {
+//RS                                 let type_name = if imp.type_name.starts_with(&member_prefix) {
+//RS                                     imp.type_name.clone()
+//RS                                 } else {
+//RS                                     jet_foundation::Names::member_name(&cm.name, &imp.type_name)
+//RS                                 };
+//RS                                 for method in &imp.methods {
+//RS                                     let mut lowered = if let Some(trait_name) = &imp.trait_name {
+//RS                                         // D-SERDE2=A / I9: a generated codec's provenance
+//RS                                         // admits its binders in every execution tier.
+//RS                                         if !imp.is_generated_serde
+//RS                                             && !trait_method_binders_lower_in_place(
+//RS                                                 method, &type_name, &cx, trait_name,
+//RS                                             )
+//RS                                         {
+//RS                                             continue;
+//RS                                         }
+//RS                                         lower_trait_method(
+//RS                                             method,
+//RS                                             &type_name,
+//RS                                             &cx,
+//RS                                             trait_name,
+//RS                                             imp.is_generated_serde && method.compiler_generated,
+//RS                                             imp.operator_rhs.as_ref(),
+//RS                                         )
+//RS                                     } else {
+//RS                                         lower_method(method, &type_name, &cx)
+//RS                                     };
+//RS                                     set_lowered_method_name(&mut lowered, || {
+//RS                                         format!("{}::{}", type_name, method.name)
+//RS                                     });
+//RS                                     funcs.push(lowered);
+//RS                                 }
+//RS                             }
+//RS                             _ => {}
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         lower_demanded_generic_methods(&module.items, &cx, &mut funcs)?;
+//RS         specialize_generic_free_functions(&module.items, &cx, &mut funcs);
+//RS         let mut spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
+//RS         let mut reflect_paths = cx.reflect_paths.clone();
+//RS         let mut memo_dependencies = memo_dependency_facts(&cx);
+//RS         // File-module calls carry their already-resolved Rust path in TIR. Give the
+//RS         // resident JIT the same qualified target instead of forcing the whole
+//RS         // program through the interpreter, which cannot execute foreign binders.
+//RS         for (module_idx, imported) in bundle.modules.iter().enumerate() {
+//RS             if module_idx == bundle.entry {
+//RS                 continue;
+//RS             }
+//RS             let imported_owner = bundle
+//RS                 .name_ledger
+//RS                 .module_identity(module_idx)
+//RS                 .expect("name ledger must contain every loaded module");
+//RS             let mut imported_cx = build_cx_items(
+//RS                 &imported.items,
+//RS                 &imported.source,
+//RS                 &imported.display,
+//RS                 None,
+//RS                 &extern_funcs,
+//RS                 &bundle.edition,
+//RS             );
+//RS             imported_cx.debug_linemap = debug_linemap;
+//RS             populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+//RS             boxed_edges_by_module.insert(imported_owner.clone(), imported_cx.boxed_edges.clone());
+//RS             auto_printable_by_module
+//RS                 .insert(imported_owner.clone(), imported_cx.auto_printable.clone());
+//RS             auto_debug_by_module.insert(imported_owner.clone(), imported_cx.auto_debug.clone());
+//RS             // #2252: this pass lowers the module's OWN items under their
+//RS             // canonical owner (`{owner}::{Leaf}::{method}` below), so the
+//RS             // context needs the same canonical shape rows a consumer context
+//RS             // already holds. `populate_cx_from_bundle` registers only what this
+//RS             // module imports, leaving its own nominals keyed by bare leaf: the
+//RS             // structural gate then refused every method whose owner is the
+//RS             // qualified name, and the default tier deopted (E0956) on methods
+//RS             // and generated codecs the program plainly declares.
+//RS             register_own_struct_shapes(&mut imported_cx, bundle, module_idx);
+//RS             crate::Codegen::Context::collect_iterable_hooks(&mut imported_cx, &imported.items);
+//RS             imported_cx.jit_local_call_prefix = Some(format!("{}::", mangle(&imported.alias)));
+//RS             lower_imported_generated_codecs(
+//RS                 bundle,
+//RS                 module_idx,
+//RS                 &core_source_modules,
+//RS                 &reachable_core_bodies,
+//RS                 &imported_cx,
+//RS                 &mut funcs,
+//RS             );
+//RS             for (owner, sources) in memo_dependency_facts(&imported_cx) {
+//RS                 let target = memo_dependencies.entry(owner).or_default();
+//RS                 for (source, fields) in sources {
+//RS                     target.entry(source).or_insert(fields);
+//RS                 }
+//RS             }
+//RS             for (name, path) in imported_cx.reflect_paths.iter() {
+//RS                 reflect_paths
+//RS                     .entry(name.clone())
+//RS                     .or_insert_with(|| path.clone());
+//RS             }
+//RS             imported_cx.jit_spawn_site_base = spawn_lambdas.len();
+//RS             for item in &imported.items {
+//RS                 match item {
+//RS                     Item::Func(function) => {
+//RS                         let covered =
+//RS                             function.type_params.is_empty() && tir_covers(function, &imported_cx);
+//RS                         imported_cx.jit_local_call_prefix =
+//RS                             Some(format!("{}::", mangle(&imported.alias)));
+//RS                         // Only imported Core source bodies receive the checked-callable gate.
+//RS                         // All other module bodies remain available for their resident callers.
+//RS                         if function.inline_foreign.is_none()
+//RS                             && function.type_params.is_empty()
+//RS                             && !should_lower_imported_core_body(
+//RS                                 &core_source_modules,
+//RS                                 &reachable_core_bodies,
+//RS                                 module_idx,
+//RS                                 function,
+//RS                             )
+//RS                         {
+//RS                             continue;
+//RS                         }
+//RS                         if function.inline_foreign.is_none() && function.type_params.is_empty() {
+//RS                             let mut lowered = lower_func(function, &imported_cx);
+//RS                             let binders = qualification_binders(&[], Some(function));
+//RS                             for (_, ty, _) in &mut lowered.params {
+//RS                                 *ty = qualify_imported_type(
+//RS                                     bundle,
+//RS                                     module_idx,
+//RS                                     &imported_owner,
+//RS                                     &binders,
+//RS                                     ty,
+//RS                                 );
+//RS                             }
+//RS                             lowered.ret = lowered.ret.as_ref().map(|ty| {
+//RS                                 qualify_imported_type(
+//RS                                     bundle,
+//RS                                     module_idx,
+//RS                                     &imported_owner,
+//RS                                     &binders,
+//RS                                     ty,
+//RS                                 )
+//RS                             });
+//RS                             lowered.name =
+//RS                                 format!("{}::{}", mangle(&imported.alias), mangle(&function.name));
+//RS                             funcs.push(lowered);
+//RS                         }
+//RS                         materialize_contract_sampling(
+//RS                             function,
+//RS                             &imported_owner,
+//RS                             covered,
+//RS                             &function.name,
+//RS                             &imported_cx,
+//RS                             &mut funcs,
+//RS                             &mut contract_rows,
+//RS                         );
+//RS                     }
+//RS                     Item::Test(test) if include_tests && test.name.is_some() =>
+//RS                     {
+//RS                         imported_cx.jit_local_call_prefix =
+//RS                             Some(format!("{}::", mangle(&imported.alias)));
+//RS                         funcs.push(lower_test_item(test, &imported_owner, &imported_cx));
+//RS                     }
+//RS                     Item::CodeModule(code_module) => {
+//RS                         let Some(body) = &code_module.body else {
+//RS                             continue;
+//RS                         };
+//RS                         for inner in body {
+//RS                             if let Item::Test(test) = inner {
+//RS                                 if include_tests && test.name.is_some()
+//RS                                 {
+//RS                                     let child =
+//RS                                         child_module_identity(&imported_owner, &code_module.name);
+//RS                                     funcs.push(lower_test_item(test, &child, &imported_cx));
+//RS                                 }
+//RS                                 continue;
+//RS                             }
+//RS                             let Item::Func(function) = inner else {
+//RS                                 continue;
+//RS                             };
+//RS                             let covered = function.type_params.is_empty()
+//RS                                 && tir_covers(function, &imported_cx);
+//RS                             let child = child_module_identity(&imported_owner, &code_module.name);
+//RS                             imported_cx.jit_local_call_prefix =
+//RS                                 Some(format!("{}::", mangle(&code_module.name)));
+//RS                             materialize_contract_sampling(
+//RS                                 function,
+//RS                                 &child,
+//RS                                 covered,
+//RS                                 &function.name,
+//RS                                 &imported_cx,
+//RS                                 &mut funcs,
+//RS                                 &mut contract_rows,
+//RS                             );
+//RS                             if !function.type_params.is_empty() {
+//RS                                 continue;
+//RS                             }
+//RS                             if !should_lower_imported_core_body(
+//RS                                 &core_source_modules,
+//RS                                 &reachable_core_bodies,
+//RS                                 module_idx,
+//RS                                 function,
+//RS                             ) {
+//RS                                 continue;
+//RS                             }
+//RS                             // Keep inline body-local import lookup aligned with the
+//RS                             // emitted `code_module__function` name. The final TIR
+//RS                             // symbol remains the imported module's Rust-qualified ABI.
+//RS                             let mut mangled_function = function.clone();
+//RS                             mangled_function.name = jet_foundation::Names::member_name(
+//RS                                 &code_module.name,
+//RS                                 &function.name,
+//RS                             );
+//RS                             let mut lowered = lower_func(&mangled_function, &imported_cx);
+//RS                             let binders = qualification_binders(&[], Some(function));
+//RS                             for (_, ty, _) in &mut lowered.params {
+//RS                                 *ty = qualify_imported_type(
+//RS                                     bundle,
+//RS                                     module_idx,
+//RS                                     &imported_owner,
+//RS                                     &binders,
+//RS                                     ty,
+//RS                                 );
+//RS                             }
+//RS                             lowered.ret = lowered.ret.as_ref().map(|ty| {
+//RS                                 qualify_imported_type(
+//RS                                     bundle,
+//RS                                     module_idx,
+//RS                                     &imported_owner,
+//RS                                     &binders,
+//RS                                     ty,
+//RS                                 )
+//RS                             });
+//RS                             lowered.name = format!(
+//RS                                 "{}::{}",
+//RS                                 mangle(&code_module.name),
+//RS                                 mangle(&function.name)
+//RS                             );
+//RS                             funcs.push(lowered);
+//RS                         }
+//RS                     }
+//RS                     item @ (Item::Struct(_) | Item::Enum(_)) => {
+//RS                         let (name, type_params, methods, trait_impls) = match item {
+//RS                             Item::Struct(definition) => (
+//RS                                 &definition.name,
+//RS                                 &definition.type_params,
+//RS                                 &definition.methods,
+//RS                                 &definition.trait_impls,
+//RS                             ),
+//RS                             Item::Enum(definition) => (
+//RS                                 &definition.name,
+//RS                                 &definition.type_params,
+//RS                                 &definition.methods,
+//RS                                 &definition.trait_impls,
+//RS                             ),
+//RS                             _ => unreachable!("nominal item gate"),
+//RS                         };
+//RS                         if !type_params.is_empty() {
+//RS                             continue;
+//RS                         }
+//RS                         imported_cx.jit_local_call_prefix =
+//RS                             Some(format!("{}::", mangle(&imported.alias)));
+//RS                         for owner in imported_type_owners(bundle, module_idx) {
+//RS                             let qualified = imported_type_name(&owner, name);
+//RS                             for method in methods {
+//RS                                 if !should_lower_imported_core_body(
+//RS                                     &core_source_modules,
+//RS                                     &reachable_core_bodies,
+//RS                                     module_idx,
+//RS                                     method,
+//RS                                 ) {
+//RS                                     continue;
+//RS                                 }
+//RS                                 let mut lowered = lower_method_for_owner(
+//RS                                     method,
+//RS                                     &qualified,
+//RS                                     Type::Named(qualified.clone()),
+//RS                                     &imported_cx,
+//RS                                     false,
+//RS                                 );
+//RS                                 let binders = qualification_binders(type_params, Some(method));
+//RS                                 lowered.ret = lowered.ret.as_ref().map(|ty| {
+//RS                                     qualify_imported_type(bundle, module_idx, &owner, &binders, ty)
+//RS                                 });
+//RS                                 set_lowered_method_name(&mut lowered, || {
+//RS                                     format!("{}::{}", qualified, method.name)
+//RS                                 });
+//RS                                 funcs.push(lowered);
+//RS                             }
+//RS                             for implementation in trait_impls {
+//RS                                 if matches!(
+//RS                                     implementation.trait_name.as_str(),
+//RS                                     crate::Generics::ENCODE | crate::Generics::DECODE
+//RS                                 ) {
+//RS                                     continue;
+//RS                                 }
+//RS                                 for method in &implementation.methods {
+//RS                                     if !should_lower_imported_core_body(
+//RS                                         &core_source_modules,
+//RS                                         &reachable_core_bodies,
+//RS                                         module_idx,
+//RS                                         method,
+//RS                                     ) {
+//RS                                         continue;
+//RS                                     }
+//RS                                     if !trait_method_binders_lower_in_place(
+//RS                                         method,
+//RS                                         &qualified,
+//RS                                         &imported_cx,
+//RS                                         &implementation.trait_name,
+//RS                                     ) {
+//RS                                         continue;
+//RS                                     }
+//RS                                     let mut lowered = lower_trait_method(
+//RS                                         method,
+//RS                                         &qualified,
+//RS                                         &imported_cx,
+//RS                                         &implementation.trait_name,
+//RS                                         implementation.compiler_generated
+//RS                                             && method.compiler_generated,
+//RS                                         implementation.operator_rhs.as_ref(),
+//RS                                     );
+//RS                                     let binders = qualification_binders(type_params, Some(method));
+//RS                                     lowered.ret = lowered.ret.as_ref().map(|ty| {
+//RS                                         qualify_imported_type(
+//RS                                             bundle, module_idx, &owner, &binders, ty,
+//RS                                         )
+//RS                                     });
+//RS                                     set_lowered_method_name(&mut lowered, || {
+//RS                                         format!("{}::{}", qualified, method.name)
+//RS                                     });
+//RS                                     funcs.push(lowered);
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     Item::Impl(implementation) if implementation.trait_name.is_none() => {
+//RS                         let owner_module =
+//RS                             impl_owner_module(bundle, module_idx, &implementation.type_name);
+//RS                         let owner_items = &bundle.modules[owner_module].items;
+//RS                         let owner_is_generic = owner_items.iter().any(|item| match item {
+//RS                             Item::Struct(definition) => {
+//RS                                 definition.name == implementation.type_name
+//RS                                     && !definition.type_params.is_empty()
+//RS                             }
+//RS                             Item::Enum(definition) => {
+//RS                                 definition.name == implementation.type_name
+//RS                                     && !definition.type_params.is_empty()
+//RS                             }
+//RS                             _ => false,
+//RS                         });
+//RS                         if owner_is_generic || implementation.is_generated_serde {
+//RS                             continue;
+//RS                         }
+//RS                         imported_cx.jit_local_call_prefix =
+//RS                             Some(format!("{}::", mangle(&imported.alias)));
+//RS                         for owner in imported_type_owners(bundle, owner_module) {
+//RS                             let qualified = imported_type_name(&owner, &implementation.type_name);
+//RS                             for method in &implementation.methods {
+//RS                                 if !should_lower_imported_core_body(
+//RS                                     &core_source_modules,
+//RS                                     &reachable_core_bodies,
+//RS                                     module_idx,
+//RS                                     method,
+//RS                                 ) {
+//RS                                     continue;
+//RS                                 }
+//RS                                 if !method.type_params.is_empty() {
+//RS                                     continue;
+//RS                                 }
+//RS                                 let name = format!("{qualified}::{}", method.name);
+//RS                                 if funcs.iter().any(|function| function.name == name) {
+//RS                                     continue;
+//RS                                 }
+//RS                                 let mut lowered = lower_method_for_owner(
+//RS                                     method,
+//RS                                     &qualified,
+//RS                                     Type::Named(qualified.clone()),
+//RS                                     &imported_cx,
+//RS                                     false,
+//RS                                 );
+//RS                                 let binders = qualification_binders(&[], Some(method));
+//RS                                 lowered.ret = lowered.ret.as_ref().map(|ty| {
+//RS                                     qualify_imported_type(bundle, module_idx, &owner, &binders, ty)
+//RS                                 });
+//RS                                 lowered.name = name;
+//RS                                 funcs.push(lowered);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     Item::Impl(implementation)
+//RS                         if implementation.trait_name.as_deref()
+//RS                             == Some(crate::Syntax::TRAIT_DISPLAY)
+//RS                             && imported_cx
+//RS                                 .unit_labels
+//RS                                 .contains_key(&implementation.type_name) =>
+//RS                     {
+//RS                         for method in &implementation.methods {
+//RS                             if !should_lower_imported_core_body(
+//RS                                 &core_source_modules,
+//RS                                 &reachable_core_bodies,
+//RS                                 module_idx,
+//RS                                 method,
+//RS                             ) {
+//RS                                 continue;
+//RS                             }
+//RS                             if !trait_method_binders_lower_in_place(
+//RS                                 method,
+//RS                                 &implementation.type_name,
+//RS                                 &imported_cx,
+//RS                                 crate::Syntax::TRAIT_DISPLAY,
+//RS                             ) {
+//RS                                 continue;
+//RS                             }
+//RS                             let mut lowered = lower_trait_method(
+//RS                                 method,
+//RS                                 &implementation.type_name,
+//RS                                 &imported_cx,
+//RS                                 crate::Syntax::TRAIT_DISPLAY,
+//RS                                 false,
+//RS                                 implementation.operator_rhs.as_ref(),
+//RS                             );
+//RS                             set_lowered_method_name(&mut lowered, || {
+//RS                                 format!(
+//RS                                     "{}::{}::{}",
+//RS                                     imported_owner, implementation.type_name, method.name
+//RS                                 )
+//RS                             });
+//RS                             funcs.push(lowered);
+//RS                         }
+//RS                     }
+//RS                     Item::Impl(implementation) => {
+//RS                         // #2252: an imported module's `impl` blocks are ordinary
+//RS                         // top-level items, exactly as in the entry module, but
+//RS                         // this loop only lowered the methods written INSIDE the
+//RS                         // struct or enum. An `impl Type { ... }` method was
+//RS                         // therefore absent from the program while the consumer's
+//RS                         // projected key named it correctly, so the resident tier
+//RS                         // reported a missing method and the whole program
+//RS                         // deopted to the interpreter. Generated codecs stay with
+//RS                         // `lower_imported_generated_codecs`, the one pass that
+//RS                         // owns their provenance.
+//RS                         if implementation.is_generated_serde {
+//RS                             continue;
+//RS                         }
+//RS                         let owner_module =
+//RS                             impl_owner_module(bundle, module_idx, &implementation.type_name);
+//RS                         let owner_params = bundle.modules[owner_module]
+//RS                             .items
+//RS                             .iter()
+//RS                             .find_map(|item| match item {
+//RS                                 Item::Struct(definition)
+//RS                                     if definition.name == implementation.type_name =>
+//RS                                 {
+//RS                                     Some(definition.type_params.as_slice())
+//RS                                 }
+//RS                                 Item::Enum(definition)
+//RS                                     if definition.name == implementation.type_name =>
+//RS                                 {
+//RS                                     Some(definition.type_params.as_slice())
+//RS                                 }
+//RS                                 _ => None,
+//RS                             })
+//RS                             .unwrap_or(&[]);
+//RS                         if !owner_params.is_empty() {
+//RS                             continue;
+//RS                         }
+//RS                         imported_cx.jit_local_call_prefix =
+//RS                             Some(format!("{}::", mangle(&imported.alias)));
+//RS                         for owner in imported_type_owners(bundle, owner_module) {
+//RS                             let qualified = imported_type_name(&owner, &implementation.type_name);
+//RS                             for method in &implementation.methods {
+//RS                                 if !should_lower_imported_core_body(
+//RS                                     &core_source_modules,
+//RS                                     &reachable_core_bodies,
+//RS                                     module_idx,
+//RS                                     method,
+//RS                                 ) {
+//RS                                     continue;
+//RS                                 }
+//RS                                 if !method.type_params.is_empty() {
+//RS                                     continue;
+//RS                                 }
+//RS                                 let mut lowered =
+//RS                                     if let Some(trait_name) = &implementation.trait_name {
+//RS                                         lower_trait_method(
+//RS                                             method,
+//RS                                             &qualified,
+//RS                                             &imported_cx,
+//RS                                             trait_name,
+//RS                                             false,
+//RS                                             implementation.operator_rhs.as_ref(),
+//RS                                         )
+//RS                                     } else {
+//RS                                         lower_method_for_owner(
+//RS                                             method,
+//RS                                             &qualified,
+//RS                                             Type::Named(qualified.clone()),
+//RS                                             &imported_cx,
+//RS                                             false,
+//RS                                         )
+//RS                                     };
+//RS                                 let binders = qualification_binders(owner_params, Some(method));
+//RS                                 lowered.ret = lowered.ret.as_ref().map(|ty| {
+//RS                                     qualify_imported_type(bundle, module_idx, &owner, &binders, ty)
+//RS                                 });
+//RS                                 set_lowered_method_name(&mut lowered, || {
+//RS                                     format!("{}::{}", qualified, method.name)
+//RS                                 });
+//RS                                 funcs.push(lowered);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS             }
+//RS             spawn_lambdas.extend(std::mem::take(
+//RS                 &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
+//RS             ));
+//RS             merge_core_source_generic_calls(&cx, &imported_cx);
+//RS         }
+//RS         specialize_checked_core_source_generics(
+//RS             bundle,
+//RS             &extern_funcs,
+//RS             debug_linemap,
+//RS             &cx,
+//RS             &mut funcs,
+//RS             &mut spawn_lambdas,
+//RS         )?;
+//RS         apply_checked_web_partitions(bundle, &mut funcs);
+//RS         if let Some(entry_name) = entry_name {
+//RS             let entry_ok = if entry_name == super::mangle_generated("cli_main") {
+//RS                 // A checked CLI schema selects its callable at execution time.
+//RS                 cli_schema.is_some()
+//RS                     || funcs.iter().any(|function| {
+//RS                         function.name == "run" && matches!(&function.kind, TFuncKind::TopLevel)
+//RS                     })
+//RS             } else {
+//RS                 funcs.iter().any(|function| {
+//RS                     function.key == entry_name && matches!(&function.kind, TFuncKind::TopLevel)
+//RS                 })
+//RS             };
+//RS             if !entry_ok {
+//RS                 let reason = if entry_name == super::mangle_generated("cli_main") {
+//RS                     CLI_ENTRY_MISSING_RUN.to_string()
+//RS                 } else if let Some(detail) = uncovered_entry_reason {
+//RS                     format!("selected entry is not a top-level function ({detail})")
+//RS                 } else {
+//RS                     "selected entry is not a top-level function".to_string()
+//RS                 };
+//RS                 return Err(LowerError::new(crate::Diagnostics::Span::new(0, 0), reason));
+//RS             }
+//RS         }
+//RS         let mut struct_fields = std::collections::HashMap::new();
+//RS         let mut struct_field_types = std::collections::HashMap::new();
+//RS         let mut reflection_fields = std::collections::HashMap::new();
+//RS         let mut struct_type_params = std::collections::HashMap::new();
+//RS         let mut enum_variants = std::collections::HashMap::new();
+//RS         let mut enum_variant_payload_types = std::collections::HashMap::new();
+//RS         enum_variants.insert(
+//RS             crate::Syntax::TYPE_ORDERING.to_string(),
+//RS             tir_to_mir_types::compiler_owned_enum_variants(crate::Syntax::TYPE_ORDERING)
+//RS                 .expect("Ordering is a compiler-owned enum")
+//RS                 .iter()
+//RS                 .map(|variant| mangle(variant))
+//RS                 .collect(),
+//RS         );
+//RS         // D-CONC-FAIL1=A: `TaskFailure` is a Prelude enum, so register its
+//RS         // packed JIT/AOT shape even when the source only reaches it through
+//RS         // `Task<T>.join()` and never constructs a variant explicitly.
+//RS         enum_variants.insert(
+//RS             crate::Syntax::TYPE_TASK_FAILURE.to_string(),
+//RS             ["Cancelled", "DeadlineBlown", "Panicked"]
+//RS                 .into_iter()
+//RS                 .map(str::to_string)
+//RS                 .collect(),
+//RS         );
+//RS         enum_variant_payload_types.insert(
+//RS             format!("{}::Panicked", crate::Syntax::TYPE_TASK_FAILURE),
+//RS             vec![Type::String],
+//RS         );
+//RS         // D-SERVICE-WORKFLOW1=D / D-CONC-OUTCOME1: workflow activity calls carry
+//RS         // the service result/status enums even though their Prelude definitions
+//RS         // are emitted only for programs that use the service surface.
+//RS         enum_variants.insert(
+//RS             "TaskOutcome".to_string(),
+//RS             ["Finished", "Panicked", "Cancelled", "DeadlineBlown"]
+//RS                 .into_iter()
+//RS                 .map(str::to_string)
+//RS                 .collect(),
+//RS         );
+//RS         enum_variant_payload_types.insert("TaskOutcome::Panicked".to_string(), vec![Type::String]);
+//RS         enum_variants.insert(
+//RS             "TaskStatus".to_string(),
+//RS             ["Running", "Paused", "CancelRequested"]
+//RS                 .into_iter()
+//RS                 .map(str::to_string)
+//RS                 .collect(),
+//RS         );
+//RS         // stdlib-api-laws D4 (#2055): `WatchEvent.domain`/`.kind` are Prelude enums
+//RS         // reached only through `core.watcher` polling, never constructed in source —
+//RS         // register their packed JIT/AOT shape for the same reason as `TaskFailure`.
+//RS         // Declaration order must match `Prelude/CoreLib/JetStd/CommonTypes.rs`.
+//RS         enum_variants.insert(
+//RS             "WatchDomain".to_string(),
+//RS             ["File", "Process", "Port"]
+//RS                 .into_iter()
+//RS                 .map(str::to_string)
+//RS                 .collect(),
+//RS         );
+//RS         enum_variants.insert(
+//RS             "WatchKind".to_string(),
+//RS             ["Created", "Modified", "Removed", "Error", "Exited", "Ready"]
+//RS                 .into_iter()
+//RS                 .map(str::to_string)
+//RS                 .collect(),
+//RS         );
+//RS         let mut int_constants = std::collections::HashMap::new();
+//RS         let mut constants = std::collections::HashMap::new();
+//RS         // D-PERSIST1: shared-heap overrides for `#Persist` bindings (tier-0 + tier-1).
+//RS         let persist_prep = jet_foundation::Persist::prepare_bundle(bundle);
+//RS         let persist_overrides = persist_prep.by_name;
+//RS         for item in &module.items {
+//RS             match item {
+//RS                 Item::Struct(s) => {
+//RS                     struct_type_params.insert(
+//RS                         s.name.clone(),
+//RS                         s.type_params
+//RS                             .iter()
+//RS                             .map(|param| param.name.clone())
+//RS                             .collect(),
+//RS                     );
+//RS                     struct_fields.insert(s.name.clone(), {
+//RS                         let mut fields = s
+//RS                             .reflection_fields()
+//RS                             .map(|f| mangle(&f.name))
+//RS                             .collect::<Vec<_>>();
+//RS                         add_published_schema_field(s, &mut fields);
+//RS                         fields
+//RS                     });
+//RS                     struct_field_types.insert(s.name.clone(), {
+//RS                         let mut types = s
+//RS                             .reflection_fields()
+//RS                             .map(|f| f.ty.clone())
+//RS                             .collect::<Vec<_>>();
+//RS                         add_published_schema_field_type(s, &mut types);
+//RS                         types
+//RS                     });
+//RS                     reflection_fields.insert(s.name.clone(), jet_foundation::Reflection::fields(s));
+//RS                     for field in &s.fields {
+//RS                         register_union_type(
+//RS                             &field.ty,
+//RS                             &mut enum_variants,
+//RS                             &mut enum_variant_payload_types,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS                 Item::Enum(e) if e.type_params.is_empty() => {
+//RS                     register_enum_variants(
+//RS                         &e.name,
+//RS                         &e.variants,
+//RS                         &mut enum_variants,
+//RS                         &mut enum_variant_payload_types,
+//RS                     );
+//RS                 }
+//RS                 Item::Func(function) => {
+//RS                     for param in &function.params {
+//RS                         register_union_type(
+//RS                             &param.ty,
+//RS                             &mut enum_variants,
+//RS                             &mut enum_variant_payload_types,
+//RS                         );
+//RS                     }
+//RS                     if let Some(ret) = &function.return_type {
+//RS                         register_union_type(
+//RS                             ret,
+//RS                             &mut enum_variants,
+//RS                             &mut enum_variant_payload_types,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS                 Item::Const(c) => {
+//RS                     let persisted = c
+//RS                         .is_persist
+//RS                         .then(|| persist_overrides.get(&c.name).cloned())
+//RS                         .flatten();
+//RS                     if let Some(value) = persisted.or_else(|| source_constant_value(c)) {
+//RS                         if let crate::AST::CtValue::Int(value) = &value {
+//RS                             int_constants.insert(c.name.clone(), *value);
+//RS                         }
+//RS                         constants.insert(c.name.clone(), value);
+//RS                     }
+//RS                 }
+//RS                 Item::CodeModule(cm) => {
+//RS                     if let Some(body) = &cm.body {
+//RS                         let member_prefix = jet_foundation::Names::member_name(&cm.name, "");
+//RS                         for inner in body {
+//RS                             match inner {
+//RS                                 Item::Struct(s) if s.type_params.is_empty() => {
+//RS                                     let name = if s.name.starts_with(&member_prefix) {
+//RS                                         s.name.clone()
+//RS                                     } else {
+//RS                                         jet_foundation::Names::member_name(&cm.name, &s.name)
+//RS                                     };
+//RS                                     struct_fields.insert(name.clone(), {
+//RS                                         let mut fields = s
+//RS                                             .reflection_fields()
+//RS                                             .map(|f| mangle(&f.name))
+//RS                                             .collect::<Vec<_>>();
+//RS                                         add_published_schema_field(s, &mut fields);
+//RS                                         fields
+//RS                                     });
+//RS                                     struct_field_types.insert(name.clone(), {
+//RS                                         let mut types = s
+//RS                                             .reflection_fields()
+//RS                                             .map(|f| f.ty.clone())
+//RS                                             .collect::<Vec<_>>();
+//RS                                         add_published_schema_field_type(s, &mut types);
+//RS                                         types
+//RS                                     });
+//RS                                     reflection_fields
+//RS                                         .insert(name, jet_foundation::Reflection::fields(s));
+//RS                                 }
+//RS                                 Item::Enum(e) if e.type_params.is_empty() => {
+//RS                                     let name = if e.name.starts_with(&member_prefix) {
+//RS                                         e.name.clone()
+//RS                                     } else {
+//RS                                         jet_foundation::Names::member_name(&cm.name, &e.name)
+//RS                                     };
+//RS                                     register_enum_variants(
+//RS                                         &name,
+//RS                                         &e.variants,
+//RS                                         &mut enum_variants,
+//RS                                         &mut enum_variant_payload_types,
+//RS                                     );
+//RS                                 }
+//RS                                 Item::Const(c) => {
+//RS                                     let name =
+//RS                                         jet_foundation::Names::member_name(&cm.name, &c.name);
+//RS                                     if let Some(value) = source_constant_value(c) {
+//RS                                         if let crate::AST::CtValue::Int(value) = &value {
+//RS                                             int_constants.insert(name.clone(), *value);
+//RS                                         }
+//RS                                         constants.insert(name, value);
+//RS                                     }
+//RS                                 }
+//RS                                 _ => {}
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         for (module_idx, imported) in bundle.modules.iter().enumerate() {
+//RS             if module_idx == bundle.entry {
+//RS                 continue;
+//RS             }
+//RS             for item in &imported.items {
+//RS                 match item {
+//RS                     Item::Struct(s) => {
+//RS                         let binders = qualification_binders(&s.type_params, None);
+//RS                         for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
+//RS                             let name = crate::Codegen::TIR::imported_type_name(&owner, &s.name);
+//RS                             struct_type_params.insert(
+//RS                                 name.clone(),
+//RS                                 s.type_params
+//RS                                     .iter()
+//RS                                     .map(|param| param.name.clone())
+//RS                                     .collect(),
+//RS                             );
+//RS                             struct_fields.insert(name.clone(), {
+//RS                                 let mut fields = s
+//RS                                     .reflection_fields()
+//RS                                     .map(|field| mangle(&field.name))
+//RS                                     .collect::<Vec<_>>();
+//RS                                 add_published_schema_field(s, &mut fields);
+//RS                                 fields
+//RS                             });
+//RS                             struct_field_types.insert(name.clone(), {
+//RS                                 let mut types = s
+//RS                                     .reflection_fields()
+//RS                                     .map(|field| {
+//RS                                         crate::Codegen::TIR::qualify_imported_type(
+//RS                                             bundle, module_idx, &owner, &binders, &field.ty,
+//RS                                         )
+//RS                                     })
+//RS                                     .collect::<Vec<_>>();
+//RS                                 add_published_schema_field_type(s, &mut types);
+//RS                                 types
+//RS                             });
+//RS                             reflection_fields.insert(
+//RS                                 name,
+//RS                                 jet_foundation::Reflection::fields(s)
+//RS                                     .into_iter()
+//RS                                     .map(|mut field| {
+//RS                                         field.ty = crate::Codegen::TIR::qualify_imported_type(
+//RS                                             bundle, module_idx, &owner, &binders, &field.ty,
+//RS                                         );
+//RS                                         field
+//RS                                     })
+//RS                                     .collect(),
+//RS                             );
+//RS                         }
+//RS                         for field in &s.fields {
+//RS                             register_union_type(
+//RS                                 &field.ty,
+//RS                                 &mut enum_variants,
+//RS                                 &mut enum_variant_payload_types,
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                     Item::Enum(e) if e.type_params.is_empty() => {
+//RS                         let binders = qualification_binders(&e.type_params, None);
+//RS                         for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
+//RS                             register_imported_enum_variants(
+//RS                                 bundle,
+//RS                                 module_idx,
+//RS                                 &owner,
+//RS                                 &binders,
+//RS                                 &e.name,
+//RS                                 &e.variants,
+//RS                                 &mut enum_variants,
+//RS                                 &mut enum_variant_payload_types,
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                     Item::CodeModule(code_module) => {
+//RS                         let Some(body) = &code_module.body else {
+//RS                             continue;
+//RS                         };
+//RS                         for inner in body {
+//RS                             match inner {
+//RS                                 Item::Struct(s) if s.type_params.is_empty() => {
+//RS                                     struct_fields.insert(
+//RS                                         s.name.clone(),
+//RS                                         s.reflection_fields()
+//RS                                             .map(|field| mangle(&field.name))
+//RS                                             .collect(),
+//RS                                     );
+//RS                                     struct_field_types.insert(
+//RS                                         s.name.clone(),
+//RS                                         s.reflection_fields()
+//RS                                             .map(|field| field.ty.clone())
+//RS                                             .collect(),
+//RS                                     );
+//RS                                     reflection_fields.insert(
+//RS                                         s.name.clone(),
+//RS                                         jet_foundation::Reflection::fields(s),
+//RS                                     );
+//RS                                     for field in &s.fields {
+//RS                                         register_union_type(
+//RS                                             &field.ty,
+//RS                                             &mut enum_variants,
+//RS                                             &mut enum_variant_payload_types,
+//RS                                         );
+//RS                                     }
+//RS                                 }
+//RS                                 Item::Enum(e) if e.type_params.is_empty() => {
+//RS                                     register_enum_variants(
+//RS                                         &e.name,
+//RS                                         &e.variants,
+//RS                                         &mut enum_variants,
+//RS                                         &mut enum_variant_payload_types,
+//RS                                     );
+//RS                                 }
+//RS                                 _ => {}
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS             }
+//RS         }
+//RS         for (_, fields) in type_shapes.tuples {
+//RS             let tuple_ty = Type::Tuple(
+//RS                 fields
+//RS                     .iter()
+//RS                     .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
+//RS                     .collect(),
+//RS             );
+//RS             struct_fields.insert(
+//RS                 tuple_ty.name(),
+//RS                 fields.iter().map(|(name, _)| mangle(name)).collect(),
+//RS             );
+//RS             struct_field_types.insert(
+//RS                 tuple_ty.name(),
+//RS                 fields.iter().map(|(_, ty)| ty.clone()).collect(),
+//RS             );
+//RS         }
+//RS         let distinct_bases = cx
+//RS             .distinct_types
+//RS             .iter()
+//RS             .map(|(name, (base, _))| (name.clone(), base.clone()))
+//RS             .collect();
+//RS         let iterable_item_types = cx
+//RS             .iterable_hooks
+//RS             .iter()
+//RS             .map(|(collection, hook)| {
+//RS                 (
+//RS                     (collection.clone(), hook.iter_type.clone()),
+//RS                     hook.item_type.clone(),
+//RS                 )
+//RS             })
+//RS             .collect();
+//RS         let codec_migrations = compile_codec_migrations(&cx, &entry_module_identity, &module.items)
+//RS             .ok_or_else(|| {
+//RS                 LowerError::new(
+//RS                     crate::Diagnostics::Span::new(0, 0),
+//RS                     "checked schema migration is missing its default or conversion function",
+//RS                 )
+//RS             })?;
+//RS         let canonical_deopt = cx.jit_canonical_deopt.borrow().clone();
+//RS         let canonical_calls = cx.jit_canonical_calls.borrow().clone();
+//RS         let declarations = lower_tir_declarations(
+//RS             bundle,
+//RS             &boxed_edges_by_module,
+//RS             &auto_printable_by_module,
+//RS             &auto_debug_by_module,
+//RS         );
+//RS         let hardware_use = crate::Sema::target_hardware_use(bundle);
+//RS         let hardware_profile = crate::Sema::target_hardware_profile(bundle);
+//RS         let hardware_profile_id =
+//RS             crate::Sema::target_hardware_profile_id(bundle).unwrap_or_default();
+//RS         let hardware_capabilities = crate::Sema::target_hardware_capabilities(bundle);
+//RS         let hardware_setups = target_hardware_setups(
+//RS             bundle,
+//RS             &hardware_use,
+//RS             hardware_profile.as_ref(),
+//RS             &hardware_profile_id,
+//RS         );
+//RS         let mut used_core = bundle
+//RS             .used_core
+//RS             .iter()
+//RS             .cloned()
+//RS             .collect::<std::collections::BTreeSet<_>>();
+//RS         if hardware_profile.is_some() {
+//RS             used_core.insert("core.hardware".to_string());
+//RS         }
+//RS         let artifact_facts = lower_tir_artifact_facts_for_request(bundle, request, &contract_rows);
+//RS         let mut unreachable = Vec::new();
+//RS         for (index, source) in bundle.modules.iter().enumerate() {
+//RS             collect_item_erasures(
+//RS                 &source.items,
+//RS                 &artifact_plan::module_identity(bundle, index),
+//RS                 include_tests,
+//RS                 &mut unreachable,
+//RS             );
+//RS         }
+//RS         let mut program = TirProgram {
+//RS             package_identity: bundle.build_facts.package_name.clone(),
+//RS             entry_sibling_calls: (!bundle.name_ledger.namespace_siblings(bundle.entry).is_empty())
+//RS                 .then(|| {
+//RS                     (
+//RS                         entry_module_identity.clone(),
+//RS                         format!("{}::", mangle(&bundle.modules[bundle.entry].alias)),
+//RS                     )
+//RS                 }),
+//RS             facts: TirPackageFacts {
+//RS                 project_root: bundle.project_root.display().to_string(),
+//RS                 used_core,
+//RS                 ffi_callback_functions: bundle.ffi_callback_fns.iter().cloned().collect(),
+//RS                 active_os: format!("{:?}", bundle.active_os),
+//RS                 inferred_layer: format!("{:?}", bundle.inferred_layer),
+//RS                 allocator: format!("{:?}", bundle.program_allocator),
+//RS                 web_app: crate::Sema::extract_app_graph(bundle).0,
+//RS                 authority_needs: bundle.package_guarantees.authority_needs.clone(),
+//RS                 hardware_use,
+//RS                 hardware_profile,
+//RS                 hardware_profile_id,
+//RS                 hardware_capabilities,
+//RS                 hardware_setups,
+//RS             },
+//RS             source_file: module.display.clone(),
+//RS             source_text: module.source.clone(),
+//RS             source_files: bundle
+//RS                 .modules
+//RS                 .iter()
+//RS                 .map(|module| (module.display.clone(), module.source.clone()))
+//RS                 .collect(),
+//RS             package_hardened: bundle.package_guarantees.harden,
+//RS             application_authority: bundle.package_guarantees.application_authority.clone(),
+//RS             edition: bundle.edition.clone(),
+//RS             funcs,
+//RS             declarations,
+//RS             artifact_facts,
+//RS             core_calls: crate::Syntax::CORE_CALLS
+//RS                 .iter()
+//RS                 .chain(tir_core_call_records().iter())
+//RS                 .collect(),
+//RS             unreachable,
+//RS             spawn_lambdas,
+//RS             struct_fields,
+//RS             struct_field_types,
+//RS             memo_dependencies,
+//RS             reflection_fields,
+//RS             reflect_paths,
+//RS             nominal_identities: nominal_identity_projection(bundle),
+//RS             struct_type_params,
+//RS             enum_variants,
+//RS             enum_variant_payload_types,
+//RS             canonical_deopt,
+//RS             canonical_calls,
+//RS             int_constants,
+//RS             constants,
+//RS             distinct_bases,
+//RS             distinct_ranges: cx.distinct_ranges.clone(),
+//RS             codec_migrations,
+//RS             trait_method_traits: cx.trait_method_traits.clone(),
+//RS             iterable_item_types,
+//RS         };
+//RS         CanonicalPass::record(
+//RS             "lowering",
+//RS             "tir.lower-checked-program",
+//RS             "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+//RS             "ast",
+//RS             CanonicalPass::ast_payload(bundle),
+//RS             CanonicalPass::ast_identity(bundle),
+//RS             "tir",
+//RS             canonical_payload(&program),
+//RS             canonical_identity(&program),
+//RS             "preserve",
+//RS         );
+//RS         let tir_before_optimization = canonical_payload(&program);
+//RS         let tir_before_identity = canonical_identity(&program);
+//RS         opt::optimize_program(&mut program);
+//RS         CanonicalPass::record(
+//RS             "lowering",
+//RS             "tir.optimize-program",
+//RS             "crates/jet-codegen/src/Codegen/TIR/opt.rs",
+//RS             "tir",
+//RS             tir_before_optimization,
+//RS             tir_before_identity,
+//RS             "tir",
+//RS             canonical_payload(&program),
+//RS             canonical_identity(&program),
+//RS             "preserve",
+//RS         );
+//RS         Ok(program)
+//RS     })
+//RS }
+//RS 
+//RS /// Explicit lowering messages for a checked bundle with no runnable entry.
+//RS pub const NO_RUNNABLE_ENTRY: &str = "no runnable entry";
+//RS pub const CLI_ENTRY_MISSING_RUN: &str = "cli entry missing `run`";
+//RS 
+//RS // ---------------------------------------------------------------------------
+//RS // TIR types. Every node carries the facts codegen needs, pre-resolved (totality).
+//RS // ---------------------------------------------------------------------------
+//RS 
+//RS /// Runtime sentry metadata for one source-level `#Unsafe` gate. The metadata
+//RS /// is data in TIR; each engine only marshals it into the shared Prelude sentry.
+//RS #[derive(Clone, Debug)]
+//RS pub struct TUnsafeGate {
+//RS     pub file: String,
+//RS     pub line: u32,
+//RS     pub reason: String,
+//RS     pub enabled: bool,
+//RS     /// D-MEM-GUARANTEE1: this gate belongs to a contained dependency and
+//RS     /// must activate the same Prelude witness even in release.
+//RS     pub fenced: bool,
+//RS }
+//RS 
+//RS /// One source-level generic parameter and its checked bounds.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct TGenericParam {
+//RS     pub name: String,
+//RS     pub bounds: Vec<String>,
+//RS }
+//RS 
+//RS /// A lowered top-level function. Parameter and generic names remain Jet
+//RS /// identities; each adapter owns target-specific spelling.
+//RS #[derive(Clone)]
+//RS pub struct TFunc {
+//RS     /// Jet function name (unmangled).
+//RS     pub name: String,
+//RS     /// Canonical module identity for this checked body.
+//RS     pub module: String,
+//RS     /// Deterministic semantic key for this function, independent of allocation order.
+//RS     pub key: String,
+//RS     /// Source file identity owned by this function row.
+//RS     pub source_file: String,
+//RS     /// Source range for function-level evaluator diagnostics.
+//RS     pub source_span: crate::Diagnostics::Span,
+//RS     /// Sema-selected failure carrier; adapters must not infer it from `ret`.
+//RS     pub failure_carrier: TFailureCarrier,
+//RS     /// Direct/solved/call-edge effect facts and their source spans.
+//RS     pub effects: TEffectFacts,
+//RS     /// Target applicability fixed by the checked bundle.
+//RS     pub target_applicability: TTargetApplicability,
+//RS     /// Checked web partition facts.
+//RS     pub web_bucket: Option<crate::WebPartition::WebBucket>,
+//RS     pub web_marker: Option<crate::WebPartition::WebPartitionMarker>,
+//RS     /// Checked visibility and foreign ownership provenance.
+//RS     pub visibility: TVisibility,
+//RS     pub foreign: Option<TForeignProvenance>,
+//RS     /// `(Jet parameter name, resolved Jet type, convention)` per parameter.
+//RS     pub params: Vec<(String, Type, AccessConvention)>,
+//RS     /// Web-export boundary facts.
+//RS     pub web_param_reconstructions: Vec<TWebParamReconstruction>,
+//RS     /// Resolved return type, or `None` for a unit-returning function.
+//RS     pub ret: Option<Type>,
+//RS     /// Sema-proven hidden automatic-root return representation.
+//RS     pub gc_return: bool,
+//RS     /// Sema-selected tracing scope, including scopes with no promotions.
+//RS     pub gc_scope: bool,
+//RS     pub return_view_provenance: Option<crate::AST::ViewProvenanceMap>,
+//RS     /// Checked generic parameters; no rendered target-language clause.
+//RS     pub generic_params: Vec<TGenericParam>,
+//RS     /// Types of operands materialized with `.clone()` while lowering this body.
+//RS     /// Generic inherent impl emission unions these facts to derive minimal bounds.
+//RS     pub clone_types: Vec<Type>,
+//RS     pub is_main: bool,
+//RS     /// D-COV1: the 1-based Jet source line of this function's name, for the
+//RS     /// `jet_cov(line)` coverage probe. Only read in coverage mode.
+//RS     pub line: usize,
+//RS     /// Compiler-synthesized function (auto-derive/serde builders). The stack
+//RS     /// frame keeps its file/line/name attribution, but never embeds the raw
+//RS     /// source line — that line is a declaration the user wrote for something
+//RS     /// else (e.g. a `#UnitFamily(...)` marker), not this function.
+//RS     pub synthetic: bool,
+//RS     /// c109 Phase 18: an `#Unsafe fn` (S58, E2-M13/D-LL1) lowers to a Rust `unsafe fn`
+//RS     /// (the `unsafe ` keyword prefixes the signature), so the body may use gated pointer
+//RS     /// ops directly — calling it is already gated to an `#Unsafe` block in sema (E3103).
+//RS     /// I1: this is true ONLY when the source function was `#Unsafe fn`; no `unsafe` is
+//RS     /// ever emitted without that source gate. Applies to `TopLevel`/`Method`; a trait
+//RS     /// method carries its own `is_unsafe` on `TFuncKind::TraitMethod`.
+//RS     pub is_unsafe: bool,
+//RS     /// Function-level `#Unsafe("reason") fn` sentry scope, if present.
+//RS     pub unsafe_gate: Option<TUnsafeGate>,
+//RS     /// D-CABI-CALLBACK1: named pure, monomorphic top-level functions expose a
+//RS     /// stable C-convention symbol; sema alone decides whether it may cross C.
+//RS     pub is_pure: bool,
+//RS     /// D-MEMO1=A: sema-proved result-cache configuration. TIR carries the
+//RS     /// bound; emitters and evaluators only marshal it into the shared Prelude.
+//RS     pub memo_bound: Option<Option<usize>>,
+//RS     /// D-REACTCORE1: `#Reactive fn` — the body is emitted inside `jet_reactive_effect`.
+//RS     pub is_reactive: bool,
+//RS     /// D-DATARACE1=C: upgrade-report lines for reactive boxes that crossed a boundary.
+//RS     pub reactive_upgrades: Vec<String>,
+//RS     /// D-METHODMACRO1=A: `#Inline fn` — emits `#[inline]`. Soft hint; sema never
+//RS     /// rejects it.
+//RS     pub is_inline: bool,
+//RS     /// D-METHODMACRO1=A: `#Inline(Always) fn` — emits `#[inline(always)]`. Only ever
+//RS     /// `true` here once sema has confirmed the function can actually inline
+//RS     /// (E0917/E0918/E0919 would have failed the build otherwise) — I3: sema
+//RS     /// decides, codegen just emits.
+//RS     pub is_inline_always: bool,
+//RS     /// D-SIMD3=B: `#Scalar` is the explicit native auto-vectorization opt-out.
+//RS     /// It is a codegen boundary hint; semantics remain in the shared Prelude.
+//RS     pub is_scalar: bool,
+//RS     /// D-COMPUTE-KERNEL-SURFACE1=B: sema's complete safe-kernel proof. The
+//RS     /// emitter and interpreter carry this fact without re-deriving it.
+//RS     pub kernel_proof: Option<crate::AST::KernelProof>,
+//RS     /// D-FIELDMEMO1=A: the synthetic getter stores its result in this hidden
+//RS     /// owner field. `None` keeps ordinary functions and methods unchanged.
+//RS     pub memo_field: Option<String>,
+//RS     /// D-HARDENED1 / D-MEM-SENTRY1: lowering proved that this body mints an
+//RS     /// address from current-frame storage. Engines install one shared Prelude
+//RS     /// frame token before executing such a body.
+//RS     pub uses_stack_sentry: bool,
+//RS     pub body: Vec<TStmt>,
+//RS     /// c109 Phase 7: how this function is emitted. A top-level function gets
+//RS     /// `pub fn name(…)` at module scope; a method gets `pub fn __jet_name(<self>, …)`
+//RS     /// inside an `impl` block (indented), with the `self` receiver form per the
+//RS     /// resolved convention (or no receiver for a static method).
+//RS     pub kind: TFuncKind,
+//RS }
+//RS 
+//RS impl TFunc {
+//RS     /// Return function-level facts without copying a side bundle.
+//RS     ///
+//RS     /// `is_pure` is a sema proof, not an inference from the body. A false bit
+//RS     /// therefore remains `Unknown`, so an optimizer cannot treat an ordinary
+//RS     /// function as impure merely because no purity proof was attached.
+//RS     pub fn fact_channel(&self) -> TFactChannel<'_> {
+//RS         TFactChannel {
+//RS             ty: self.ret.as_ref(),
+//RS             integer_bounds: self.ret.as_ref().and_then(integer_bounds_for_type),
+//RS             exclusivity: TExclusivity::Unknown,
+//RS             purity: if self.is_pure {
+//RS                 TPurity::Pure
+//RS             } else {
+//RS                 TPurity::Unknown
+//RS             },
+//RS             no_cross_iteration_deps: false,
+//RS             comptime_value: None,
+//RS             cost: None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One lowered `#Pre`/`#Post` clause. `condition` and `message` share the
+//RS /// function's parameter bindings; postconditions bind `result` to the typed
+//RS /// sema-visible value selected by the enclosing `ContractScope`.
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS pub enum TContractKind {
+//RS     Pre,
+//RS     Post,
+//RS }
+//RS 
+//RS /// Why a contract node remains or disappears from executable TIR.
+//RS ///
+//RS /// `Stripped` is reserved for the ratified per-module build policy.  It is
+//RS /// deliberately distinct from `Proven`: an explicit policy choice is not a
+//RS /// proof fact and must remain auditable in TIR.
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS pub enum TContractDisposition {
+//RS     Check,
+//RS     Proven,
+//RS     Stripped,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct TContract {
+//RS     pub kind: TContractKind,
+//RS     pub condition: TExpr,
+//RS     pub message: TExpr,
+//RS     pub file: String,
+//RS     pub line: u32,
+//RS     pub span: crate::Diagnostics::Span,
+//RS     pub disposition: TContractDisposition,
+//RS }
+//RS 
+//RS /// One typed parameter reconstructed by a flattened WebAssembly export wrapper.
+//RS #[derive(Clone)]
+//RS pub struct TWebParamReconstruction {
+//RS     /// Param slot the reconstructed value binds into (matches `TFunc.params`).
+//RS     pub local: TLocal,
+//RS     /// Struct type being rebuilt from flattened ABI scalars; emit spells Rust.
+//RS     pub ty: Type,
+//RS     /// `(mangled field, flattened ABI parameter, resolved scalar type)`.
+//RS     pub fields: Vec<(String, String, Type)>,
+//RS }
+//RS 
+//RS /// D-SERDE2 (card #131 S1-bridge): which built-in codec trait a hand impl method
+//RS /// bridges to. `Encode` → `jet_encode(&self) -> jet_std::DataTree`; `Decode` →
+//RS /// the static `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<FieldError>>`.
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS pub enum SerdeCodec {
+//RS     Encode,
+//RS     Decode,
+//RS }
+//RS 
+//RS /// c109 Phase 7: the emission shape of a lowered function.
+//RS #[derive(Clone)]
+//RS pub enum TFuncKind {
+//RS     /// A module-level free function — `pub fn name(params) { … }`.
+//RS     TopLevel,
+//RS     /// An inherent method inside `impl __jet_<T> { … }`. `self_conv` is the receiver
+//RS     /// convention for an instance method (`Read`→`&self`, `Mutate`→`&mut self`,
+//RS     /// `Move`→`self`), or `None` for a STATIC (associated) method (no `self`
+//RS     /// parameter). The method name is mangled (`__jet_<name>`) and emitted with `pub`.
+//RS     Method {
+//RS         self_conv: Option<AccessConvention>,
+//RS         owner_type: Type,
+//RS     },
+//RS     /// c109 Phase 12: a trait-impl method inside `impl Trait for __jet_<T> { … }` (the
+//RS     /// caller `emit_trait_impl`/`emit_external_trait_impl` opened the block). Distinct
+//RS     /// from an inherent `Method`: the method name is BARE (the trait owns it — no
+//RS     /// `__jet_` mangle) and there is NO `pub`. `self_conv` is the receiver convention
+//RS     /// (`Read`→`&self`, `Mutate`→`&mut self`, `Move`→`self`), or `None` for a static
+//RS     /// trait method. D-MUTSELF1: a `mut self` trait method gets `&mut self` and may
+//RS     /// mutate the receiver in place. `is_unsafe` reproduces the `unsafe fn` prefix
+//RS     /// for an `#Unsafe fn` trait method (S58/D-LL1 — the body may use gated ops;
+//RS     /// calling it is already gated to an `#Unsafe` block).
+//RS     TraitMethod {
+//RS         is_unsafe: bool,
+//RS         self_conv: Option<AccessConvention>,
+//RS         /// Neutral checked owner identity; MIR lowering must not recover it
+//RS         /// from the legacy emitted signature.
+//RS         owner_type: Type,
+//RS         /// Neutral checked trait identity; MIR lowering must not recover it
+//RS         /// from the legacy emitted signature.
+//RS         trait_name: String,
+//RS         /// D-SERDE2 (card #131 S1-bridge): a hand-written `impl T.Encode` /
+//RS         /// `impl T.Decode` method. The user writes the verbs `encode`/`decode`
+//RS         /// with Jet-facing signatures, but the Rust `__jet_Encode`/`__jet_Decode`
+//RS         /// traits declare `jet_encode(&self) -> DataTree` /
+//RS         /// `jet_decode(tree: &DataTree) -> Result<Self, [FieldError]>`. This bridges
+//RS         /// the name + signature internally (I2: a sema-accepted hand impl must
+//RS         /// produce Rust rustc accepts). `None` for every ordinary trait method.
+//RS         serde: Option<SerdeCodec>,
+//RS     },
+//RS }
+//RS 
+//RS impl TFuncKind {
+//RS     /// The receiver slot of an instance method: its checked owner type and
+//RS     /// access convention. `None` for free functions and static methods.
+//RS     ///
+//RS     /// `TFunc.params` never lists the receiver; this is the one fact every
+//RS     /// MIR consumer binds it from, so the receiver is MIR parameter 0 and the
+//RS     /// declared parameters follow it in order.
+//RS     pub fn receiver(&self) -> Option<(&Type, AccessConvention)> {
+//RS         match self {
+//RS             TFuncKind::TopLevel => None,
+//RS             TFuncKind::Method {
+//RS                 self_conv,
+//RS                 owner_type,
+//RS             }
+//RS             | TFuncKind::TraitMethod {
+//RS                 self_conv,
+//RS                 owner_type,
+//RS                 ..
+//RS             } => self_conv.map(|access| (owner_type, access)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// c109 Phase 22: a special source iteration form on a `loop x in <coll>`,
+//RS /// resolved at lowering from the collection's type or method-call shape.
+//RS /// Each carries the receiver's emitted Rust string;
+//RS /// `file`/the panic line are program/source facts. The plain `.iter().cloned()` form
+//RS /// (incl. a non-special method-call collection like `.split(…)`, which `emit_for_in`
+//RS /// routes to its `else` default) is represented by `ForIn.method_kind == None`.
+//RS #[derive(Clone)]
+//RS pub enum TForInMethod {
+//RS     /// `loop c in s.chars()` — char iteration: `for __jet_c in ({recv}).chars()`,
+//RS     /// binding `let <var> = __jet_c;`.
+//RS     Chars,
+//RS     /// `loop line in reader.lines()` on a `FileReader` — streaming `BufRead::lines`
+//RS     /// over the reader's `inner`, with a mid-stream-error panic (line `0`, `cx.file`).
+//RS     LinesFile,
+//RS     /// `loop line in io.stdin().lines()` / a `StdinHandle` — the same streaming read,
+//RS     /// but the receiver is materialised into a `__jet_stdin_h` local inside an extra
+//RS     /// block (so the `io.stdin()` temporary outlives the loop body), with a matching
+//RS     /// extra closing brace.
+//RS     LinesStdin,
+//RS     /// D-PROCESS1=A: `loop line in child.stdout.lines()` / `child.stderr.lines()` —
+//RS     /// a `ProcessChild`'s streaming reader. The receiver string is the plain field
+//RS     /// access (`(child).stdout`); each iteration polls
+//RS     /// `jet_process_stream_next_line(&recv)` via a `let Some(x) = … else { break }`,
+//RS     /// so (unlike `LinesFile`/`LinesStdin`) no extra wrapper block is needed.
+//RS     LinesProcessStream,
+//RS     /// D-CONC-CHAN1=A: `loop value in receiver` pulls until the receiver closes.
+//RS     ChannelReceiver,
+//RS     /// D-ENCSTREAM-SURFACE1=A: bounded synchronous codec-reader pull source.
+//RS     EncodingReader { reader_type: String },
+//RS     /// D-ITER-HOOK: `loop x in mytype` when `mytype` implements `Iterable`.
+//RS     /// The symbol fields are canonical checked TFunc identities; MIR and
+//RS     /// adapters must not reconstruct them from the collection type.
+//RS     /// `item_type` is the hook's checked `Iterator.Item`, the loop binding's
+//RS     /// type; the collection type is never the element type.
+//RS     Iterable {
+//RS         coll_type: String,
+//RS         iter_type: String,
+//RS         iter_symbol: String,
+//RS         next_symbol: String,
+//RS         item_type: Type,
+//RS     },
+//RS }
+//RS 
+//RS /// c109 Phase 22: an `if` condition, resolved at lowering from the AST node shape
+//RS /// (`emit_if`/`if_pattern_test`, Source/Codegen/Statement.rs):
+//RS ///  - `Plain` — a boolean expression: `if {cond} {`.
+//RS ///  - `And` — a short-circuiting conjunction whose earlier pattern bindings
+//RS ///    dominate every later condition and the selected body.
+//RS ///  - `IfLet` — an optional-binding test (`x == value(b)` → `Some(b)`, `Ok(b)`/`Err(b)`,
+//RS ///    a variant `c == Active(id)`): `if let {pat_str} = {subj} {`. The bound name(s)
+//RS ///    are in scope in the then-branch (the binding's resolved type is bound at lowering,
+//RS ///    mirroring `add_pattern_bindings`).
+//RS ///  - `IsNone` — an `x == null` test (`Pattern::Absent`): `if {subj}.is_none() {`.
+//RS ///  - `Matches` — a binding-free enum variant/group test (`d == .Fire`): `if matches!(&{subj}, {pat}) {`.
+//RS ///  - `WithPrelude` — compiler-owned statements that must run immediately before
+//RS ///    the condition and remain in scope for both the condition and its selected
+//RS ///    branch. This is used when a structural pattern reads one subject in both
+//RS ///    places; the subject is evaluated once, outside the condition's expression
+//RS ///    scope.
+//RS #[derive(Clone)]
+//RS pub enum TIfCond {
+//RS     Plain(TExpr),
+//RS     /// A right-associated, short-circuiting conjunction. `left` is atomic;
+//RS     /// bindings it introduces dominate `right` and the selected body.
+//RS     And {
+//RS         left: Box<TIfCond>,
+//RS         right: Box<TIfCond>,
+//RS     },
+//RS     IfLet {
+//RS         pattern: TPattern,
+//RS         subj: TExpr,
+//RS     },
+//RS     IsNone {
+//RS         subj: TExpr,
+//RS     },
+//RS     Matches {
+//RS         pattern: TPattern,
+//RS         subj: TExpr,
+//RS     },
+//RS     WithPrelude {
+//RS         prelude: Vec<TStmt>,
+//RS         cond: Box<TIfCond>,
+//RS     },
+//RS }
+//RS 
+//RS /// D-DOTSCOPE1: which `#Test` scope member a `TStmt::ScopeMember` is.
+//RS #[derive(Clone)]
+//RS pub enum ScopeMemberKind {
+//RS     /// `.setup { … }` — the body's statements are spliced inline (bindings leak
+//RS     /// to the rest of the test), running first.
+//RS     Setup,
+//RS     /// `.expect_fail { … }` / `.expect_fail(E3010) { … }` — the region must
+//RS     /// fail, optionally with the named runtime stop code.
+//RS     ExpectFail(Option<String>),
+//RS     /// `.timeout(dur) { … }` — post-hoc budget. The region runs to completion,
+//RS     /// then its elapsed time is compared against the canonical Duration value;
+//RS     /// over budget fails the test. (v1: post-hoc — does not interrupt a hang.)
+//RS     Timeout(TExpr),
+//RS     /// `.measure { … }` — a claim selected by `jet test --measure`. Plain
+//RS     /// `jet test` still executes the body once as an ordinary correctness claim.
+//RS     Measure,
+//RS     /// `.skip { … }` — a region that is not executed. Emitted as `if false { … }`
+//RS     /// so the body still type-checks but never runs.
+//RS     Skip,
+//RS }
+//RS 
+//RS /// D-SHAPE-PLACE1: a field write through an indexed collection element.
+//RS ///
+//RS /// This remains structured through lowering so every backend mutates the
+//RS /// collection element itself instead of reconstructing the field-read
+//RS /// expression, whose list-index path returns a clone.
+//RS #[derive(Clone)]
+//RS pub struct TIndexFieldAssign {
+//RS     pub base: TExpr,
+//RS     pub index: TExpr,
+//RS     pub is_map: bool,
+//RS     pub index_proven: bool,
+//RS     /// Jet field name; emit mangles.
+//RS     pub field: String,
+//RS     pub field_ty: Type,
+//RS     pub op: Option<BinOp>,
+//RS     pub value: TExpr,
+//RS     pub clone_value: bool,
+//RS     pub line: usize,
+//RS }
+//RS 
+//RS /// Injected prelude struct fields (HTTPRequest route metadata). Emit spells lines.
+//RS #[derive(Clone)]
+//RS pub enum TStructExtra {
+//RS     /// HTTPRequest: `params: BTreeMap::new(), route_template: None`
+//RS     HTTPRequestParams,
+//RS }
+//RS 
+//RS /// A checked helper with a stable Prelude identity. The legacy `helper` spelling
+//RS /// remains only for the old emitter until #2918.
+//RS #[derive(Clone, Copy)]
+// END-PORT-PENDING 0507 crates/jet-codegen/src/Codegen/TIR/mod.rs:5030-6828
+

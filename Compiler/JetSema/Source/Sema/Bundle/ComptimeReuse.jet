@@ -1,0 +1,306 @@
+// PORT-PENDING 0352 crates-jet-sema-src-sema-bundle-comptime-module-group: crates/jet-sema/src/Sema/Bundle/ComptimeReuse.rs:1-302
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #2517: compile-time constant values reused across checks.
+//RS //!
+//RS //! Registration evaluates every `prep` and module-value constant through the
+//RS //! MIR fragment evaluator, which lowers, optimizes and verifies a program per
+//RS //! constant. In a package-record session a successful evaluation is stored
+//RS //! under a key over everything the evaluator reads, and a later check with
+//RS //! the same key installs the stored value instead of evaluating again.
+//RS //!
+//RS //! The key covers:
+//RS //! - the compiler identity and the check environment (build facts, edition,
+//RS //!   policy; the build clock only when some source reads `$build.stamp`);
+//RS //! - the loaded source of every other module of the bundle (the imported
+//RS //!   declarations and bodies the fragment may lower come from them);
+//RS //! - the evaluating module's identity, imports, and every item that is not a
+//RS //!   top-level function (types, methods, impls, constants), span-free;
+//RS //! - the top-level functions the constant can reach by name, transitively,
+//RS //!   from its initializer or from those items;
+//RS //! - the values of the constants evaluated before it, and its initializer as
+//RS //!   checked, span-free.
+//RS //!
+//RS //! A value is recorded only when its evaluation succeeded without reading
+//RS //! a file, when the value codec carries it exactly (no closure, no told
+//RS //! report, no source span), and when decoding the stored bytes rebuilds the
+//RS //! value exactly. A stored value is installed only when its digest verifies.
+//RS 
+//RS use super::BodyDelta::{decode_value, encode_value};
+//RS use super::PackageRecordStore;
+//RS use crate::Comptime::CtValue;
+//RS use crate::AST::{Expr, Func, Item, ProgramBundle};
+//RS use jet_foundation::PackageIdentity::KeyHasher;
+//RS use jet_foundation::RecordCodec::{
+//RS     encode_record, record_map, RecordReader, RecordSection, RecordValue,
+//RS };
+//RS use std::cell::{OnceCell, RefCell};
+//RS use std::collections::{BTreeMap, BTreeSet, HashMap};
+//RS use std::sync::Arc;
+//RS 
+//RS /// Schema of one stored constant value (an action record under its key).
+//RS const COMPTIME_VALUE_SCHEMA: &str = "jet.comptime-value/v1";
+//RS const SECTION_VALUE: u64 = 1;
+//RS 
+//RS /// The environment of one check's constant evaluations, and the store work
+//RS /// they leave for the end of registration.
+//RS pub(crate) struct ComptimeReuseEnv {
+//RS     store: Arc<dyn PackageRecordStore>,
+//RS     /// Compiler identity and check environment every key starts from.
+//RS     environment: String,
+//RS     /// Per module: digest of its identity and loaded source.
+//RS     modules: Vec<String>,
+//RS     pending: RefCell<Pending>,
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct Pending {
+//RS     touched: Vec<String>,
+//RS     records: Vec<(String, Vec<u8>)>,
+//RS }
+//RS 
+//RS /// The constant-evaluation environment of `bundle`, or `None` outside a
+//RS /// package-record session.
+//RS pub(crate) fn environment(bundle: &ProgramBundle) -> Option<ComptimeReuseEnv> {
+//RS     let store = super::PackageSeal::session_store()?;
+//RS     let mut hasher = KeyHasher::new(COMPTIME_VALUE_SCHEMA);
+//RS     hasher
+//RS         .field(&store.compiler_identity())
+//RS         .field(&jet_foundation::SHA256::sha256_hex(
+//RS             &super::incremental_global_environment(bundle, ""),
+//RS         ))
+//RS         .field(&jet_foundation::PackageEdition::package_edition());
+//RS     // The environment leaves the build clock out; a constant can read it
+//RS     // only through `$build.stamp`.
+//RS     if bundle
+//RS         .modules
+//RS         .iter()
+//RS         .any(|module| reads_build_stamp(&module.source))
+//RS     {
+//RS         hasher.field(&bundle.build_facts.stamp.at);
+//RS     }
+//RS     let modules = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .map(|module| {
+//RS             let mut hasher = KeyHasher::new(COMPTIME_VALUE_SCHEMA);
+//RS             hasher
+//RS                 .field(&module.display)
+//RS                 .field(&module.path.to_string_lossy())
+//RS                 .field(&module.alias)
+//RS                 .field(&jet_foundation::SHA256::sha256_hex(module.source.as_bytes()));
+//RS             hasher.finish()
+//RS         })
+//RS         .collect();
+//RS     Some(ComptimeReuseEnv {
+//RS         store,
+//RS         environment: hasher.finish(),
+//RS         modules,
+//RS         pending: RefCell::new(Pending::default()),
+//RS     })
+//RS }
+//RS 
+//RS /// Whether `source` may read a build stamp fact: `$build` followed by
+//RS /// `.stamp`, spaces allowed between.
+//RS fn reads_build_stamp(source: &str) -> bool {
+//RS     source.match_indices("$build").any(|(at, found)| {
+//RS         source[at + found.len()..]
+//RS             .trim_start()
+//RS             .strip_prefix('.')
+//RS             .is_some_and(|rest| rest.trim_start().starts_with("stamp"))
+//RS     })
+//RS }
+//RS 
+//RS impl Drop for ComptimeReuseEnv {
+//RS     /// Record the uses and the new values of this check in one store
+//RS     /// transaction.
+//RS     fn drop(&mut self) {
+//RS         let pending = std::mem::take(self.pending.get_mut());
+//RS         if !pending.touched.is_empty() || !pending.records.is_empty() {
+//RS             self.store
+//RS                 .publish_batch(COMPTIME_VALUE_SCHEMA, &pending.touched, pending.records);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl ComptimeReuseEnv {
+//RS     /// The stored value under `key`, when its digest verifies.
+//RS     pub(crate) fn load(&self, key: &str) -> Option<CtValue> {
+//RS         let bytes = self.store.load_untouched(COMPTIME_VALUE_SCHEMA, key)?;
+//RS         let reader = RecordReader::open_schema(&bytes, COMPTIME_VALUE_SCHEMA).ok()?;
+//RS         let entry = reader.element(SECTION_VALUE, 0).ok()?;
+//RS         let RecordValue::Bytes(encoded) = entry.field("value").ok()? else {
+//RS             return None;
+//RS         };
+//RS         if jet_foundation::SHA256::sha256_hex(encoded) != entry.field("checked").ok()?.as_str().ok()? {
+//RS             return None;
+//RS         }
+//RS         let value = decode_value(encoded)?;
+//RS         self.pending.borrow_mut().touched.push(key.to_string());
+//RS         Some(value)
+//RS     }
+//RS 
+//RS     /// Store `value` under `key` for the next check, when the codec carries
+//RS     /// it exactly.
+//RS     pub(crate) fn record(&self, key: String, value: &CtValue) {
+//RS         let Ok(encoded) = encode_value(value) else {
+//RS             return;
+//RS         };
+//RS         if !decode_value(&encoded).is_some_and(|decoded| super::ItemReuse::same_debug(&decoded, value)) {
+//RS             return;
+//RS         }
+//RS         let checked = jet_foundation::SHA256::sha256_hex(&encoded);
+//RS         let entry = record_map([
+//RS             ("value", RecordValue::Bytes(encoded)),
+//RS             ("checked", RecordValue::Str(checked)),
+//RS         ]);
+//RS         if let Ok(bytes) =
+//RS             encode_record(COMPTIME_VALUE_SCHEMA, &[RecordSection::new(SECTION_VALUE, vec![entry])])
+//RS         {
+//RS             self.pending.borrow_mut().records.push((key, bytes));
+//RS         }
+//RS     }
+//RS 
+//RS     /// The digest of a value a later constant may read, or `None` when the
+//RS     /// codec cannot carry it (a constant reading it is then not reused).
+//RS     pub(crate) fn value_digest(&self, value: &CtValue) -> Option<String> {
+//RS         encode_value(value)
+//RS             .ok()
+//RS             .map(|encoded| jet_foundation::SHA256::sha256_hex(&encoded))
+//RS     }
+//RS }
+//RS 
+//RS /// One module's evaluation inputs besides the constant itself.
+//RS pub(crate) struct ModuleComptime<'a> {
+//RS     /// Digest of the module's context and of every item that is not a
+//RS     /// top-level function.
+//RS     module: String,
+//RS     /// Top-level functions by name.
+//RS     by_name: HashMap<&'a str, Vec<usize>>,
+//RS     functions: Vec<(&'a Func, OnceCell<FunctionUnit>)>,
+//RS     /// Functions every constant of the module reaches through its
+//RS     /// non-function items.
+//RS     always: BTreeSet<usize>,
+//RS }
+//RS 
+//RS struct FunctionUnit {
+//RS     digest: String,
+//RS     names: Vec<String>,
+//RS }
+//RS 
+//RS impl<'a> ModuleComptime<'a> {
+//RS     /// `context` names the module's evaluation context (its import tables
+//RS     /// and base directory), rendered deterministically by the caller.
+//RS     pub(crate) fn new(
+//RS         env: &ComptimeReuseEnv,
+//RS         module_idx: usize,
+//RS         items: &'a [Item],
+//RS         context: &str,
+//RS     ) -> Self {
+//RS         let mut hasher = KeyHasher::new(COMPTIME_VALUE_SCHEMA);
+//RS         hasher.field(&env.environment).field(&module_idx.to_string()).field(context);
+//RS         for (index, module) in env.modules.iter().enumerate() {
+//RS             if index != module_idx {
+//RS                 hasher.field(module);
+//RS             }
+//RS         }
+//RS         let mut by_name = HashMap::<&str, Vec<usize>>::new();
+//RS         let mut functions = Vec::new();
+//RS         let mut seeds = Vec::new();
+//RS         for item in items {
+//RS             if let Item::Func(function) = item {
+//RS                 by_name.entry(function.name.as_str()).or_default().push(functions.len());
+//RS                 functions.push((function, OnceCell::new()));
+//RS                 continue;
+//RS             }
+//RS             let text = crate::CanonicalAST::canonical_fragment(item);
+//RS             hasher.field(&jet_foundation::SHA256::sha256_hex(&text));
+//RS             seeds.extend(quoted_names(&text));
+//RS         }
+//RS         let mut module = Self {
+//RS             module: hasher.finish(),
+//RS             by_name,
+//RS             functions,
+//RS             always: BTreeSet::new(),
+//RS         };
+//RS         module.always = module.reach(BTreeSet::new(), seeds);
+//RS         module
+//RS     }
+//RS 
+//RS     /// The reuse key of the constant `name` with checked initializer `value`,
+//RS     /// or `None` when a constant evaluated before it has no digest.
+//RS     /// `globals` are the digests of the constants evaluated before it.
+//RS     pub(crate) fn key(
+//RS         &self,
+//RS         name: &str,
+//RS         value: &Expr,
+//RS         globals: &BTreeMap<String, Option<String>>,
+//RS     ) -> Option<String> {
+//RS         let text = crate::CanonicalAST::canonical_fragment(value);
+//RS         let reached = self.reach(self.always.clone(), quoted_names(&text));
+//RS         let mut hasher = KeyHasher::new(COMPTIME_VALUE_SCHEMA);
+//RS         hasher
+//RS             .field(&self.module)
+//RS             .field(name)
+//RS             .field(&jet_foundation::SHA256::sha256_hex(&text));
+//RS         for index in reached {
+//RS             hasher.field(&self.unit(index).digest);
+//RS         }
+//RS         for (global, digest) in globals {
+//RS             hasher.field(global).field(digest.as_deref()?);
+//RS         }
+//RS         Some(hasher.finish())
+//RS     }
+//RS 
+//RS     /// `reached` plus every top-level function reachable by name from
+//RS     /// `names`.
+//RS     fn reach(&self, mut reached: BTreeSet<usize>, mut names: Vec<String>) -> BTreeSet<usize> {
+//RS         while let Some(name) = names.pop() {
+//RS             for &index in self.by_name.get(name.as_str()).into_iter().flatten() {
+//RS                 if reached.insert(index) {
+//RS                     names.extend(self.unit(index).names.iter().cloned());
+//RS                 }
+//RS             }
+//RS         }
+//RS         reached
+//RS     }
+//RS 
+//RS     fn unit(&self, index: usize) -> &FunctionUnit {
+//RS         let (function, unit) = &self.functions[index];
+//RS         unit.get_or_init(|| {
+//RS             let text = crate::CanonicalAST::canonical_fragment(*function);
+//RS             FunctionUnit {
+//RS                 digest: jet_foundation::SHA256::sha256_hex(&text),
+//RS                 names: quoted_names(&text),
+//RS             }
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// Every string literal of a `Debug` rendering: the names a node refers to
+//RS /// (calls, identifiers, fields, types). Char literals are skipped whole so a
+//RS /// quote inside one does not open a string.
+//RS fn quoted_names(text: &[u8]) -> Vec<String> {
+//RS     let mut names = Vec::new();
+//RS     let mut at = 0;
+//RS     while at < text.len() {
+//RS         let quote = text[at];
+//RS         if quote != b'"' && quote != b'\'' {
+//RS             at += 1;
+//RS             continue;
+//RS         }
+//RS         let start = at + 1;
+//RS         at = start;
+//RS         while at < text.len() && text[at] != quote {
+//RS             at += if text[at] == b'\\' { 2 } else { 1 };
+//RS         }
+//RS         if quote == b'"' {
+//RS             if let Some(name) = text.get(start..at.min(text.len())) {
+//RS                 names.push(String::from_utf8_lossy(name).into_owned());
+//RS             }
+//RS         }
+//RS         at += 1;
+//RS     }
+//RS     names
+//RS }
+// END-PORT-PENDING 0352 crates/jet-sema/src/Sema/Bundle/ComptimeReuse.rs:1-302
+

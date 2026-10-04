@@ -1,0 +1,1066 @@
+// PORT-PENDING 0323 crates-jet-parser-src-parser-expressions-collections-structs: crates/jet-parser/src/Parser/Expressions/collections_structs.rs:1-1062
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::super::{
+//RS     leading_dot_variant, Diagnostic, EnumLitArg, Expr, Parser, Pattern, Span, StrTokPart, Syntax,
+//RS     TokKind, Token, Type, TypedLitBody,
+//RS };
+//RS use crate::AST::ByteTextPart;
+//RS 
+//RS /// D-DOTCTOR3: does the brace body start like record fields / field punning?
+//RS /// `pos` points at the first token inside `{ … }` (not at `{`).
+//RS fn brace_body_looks_like_fields(toks: &[Token], pos: usize) -> bool {
+//RS     match toks.get(pos).map(|t| &t.kind) {
+//RS         Some(TokKind::RBrace) => true,
+//RS         Some(TokKind::Ident(_)) => matches!(
+//RS             toks.get(pos + 1).map(|t| &t.kind),
+//RS             Some(TokKind::Colon | TokKind::Comma | TokKind::Semi | TokKind::RBrace)
+//RS         ),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn brace_body_looks_like_record(toks: &[Token], pos: usize) -> bool {
+//RS     brace_body_looks_like_fields(toks, pos)
+//RS         || matches!(
+//RS             (
+//RS                 toks.get(pos).map(|t| &t.kind),
+//RS                 toks.get(pos + 1).map(|t| &t.kind)
+//RS             ),
+//RS             (Some(TokKind::Str(_) | TokKind::RawStr(_)), Some(TokKind::Colon))
+//RS         )
+//RS }
+//RS 
+//RS impl<'a> Parser<'a> {
+//RS     /// D-LIT-DOT1: a non-empty brace in value position is an inferred literal.
+//RS     /// Empty braces remain block syntax; `allow_struct_lit` supplies the
+//RS     /// value-position distinction at the caller.
+//RS     pub(crate) fn brace_starts_inferred_literal(&self) -> bool {
+//RS         matches!(self.peek().kind, TokKind::LBrace) && !matches!(self.peek2().kind, TokKind::RBrace)
+//RS     }
+//RS     /// Consume line-break terminators that the lexer inserts before a literal's
+//RS     /// closing brace. An authored semicolon still reports E0373 through `bump`;
+//RS     /// only the synthetic terminator is silent.
+//RS     fn consume_literal_close_terminators(&mut self) {
+//RS         while matches!(self.peek().kind, TokKind::Semi)
+//RS             && matches!(self.peek2().kind, TokKind::RBrace)
+//RS         {
+//RS             self.bump();
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     pub(in crate::Parser) fn brace_starts_record(&self) -> bool {
+//RS         brace_body_looks_like_record(&self.toks, self.pos + 1)
+//RS     }
+//RS 
+//RS     /// S37/S38: `[a, b]` or `["k": v]` or `[]`. D-EMPTYLIT1: `[]` is the one
+//RS     /// empty-collection spelling — type-directed, list or map decided by the
+//RS     /// expected-type context (sema). `[:]` is gone; `[` immediately followed
+//RS     /// by `:` falls through to an ordinary expression-expected parse error.
+//RS     /// D-DOTCTOR3: `[T]{ … }` / `[T#N]{ … }` / `[K:V]{ … }` is a typed-
+//RS     /// literal head, not a list value whose first element is a type name.
+//RS     pub(super) fn list_or_map_lit(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+//RS         if allow_struct_lit && self.bracket_starts_typed_lit() {
+//RS             if let Some(lit) = self.parse_typed_lit_from_bracket()? {
+//RS                 return Ok(lit);
+//RS             }
+//RS         }
+//RS         let open = self.bump().span;
+//RS         if matches!(self.peek().kind, TokKind::RBracket) {
+//RS             let close = self.bump().span;
+//RS             return Ok(Expr::ListLit(Vec::new(), Span::new(open.start, close.end)));
+//RS         }
+//RS         let first = self.list_elem()?;
+//RS         if matches!(self.peek().kind, TokKind::Colon) {
+//RS             self.bump();
+//RS             let value = self.expr()?;
+//RS             let mut entries = vec![(first, value)];
+//RS             while matches!(self.peek().kind, TokKind::Comma) {
+//RS                 self.bump();
+//RS                 if matches!(self.peek().kind, TokKind::RBracket) {
+//RS                     break;
+//RS                 }
+//RS                 let key = self.expr()?;
+//RS                 self.expect(TokKind::Colon, "between a map key and its value")?;
+//RS                 let val = self.expr()?;
+//RS                 entries.push((key, val));
+//RS             }
+//RS             self.expect_closer(TokKind::RBracket, "to close the map literal", "map")?;
+//RS             let close = self.toks[self.pos - 1].span;
+//RS             return Ok(Expr::MapLit(entries, Span::new(open.start, close.end)));
+//RS         }
+//RS         let mut elems = vec![first];
+//RS         while matches!(self.peek().kind, TokKind::Comma) {
+//RS             self.bump();
+//RS             if matches!(self.peek().kind, TokKind::RBracket) {
+//RS                 break;
+//RS             }
+//RS             elems.push(self.list_elem()?);
+//RS         }
+//RS         self.expect_closer(TokKind::RBracket, "to close the list literal", "list")?;
+//RS         let close = self.toks[self.pos - 1].span;
+//RS         Ok(Expr::ListLit(elems, Span::new(open.start, close.end)))
+//RS     }
+//RS 
+//RS     /// D-DOTCTOR3: find the closing `]` of a potential typed-literal head
+//RS     /// without entering the recursive type parser. Ordinary list values take
+//RS     /// this small lexical path; the larger typed-literal parser is called only
+//RS     /// after a constructor body is actually present.
+//RS     fn bracket_starts_typed_lit(&self) -> bool {
+//RS         if !matches!(self.peek().kind, TokKind::LBracket) {
+//RS             return false;
+//RS         }
+//RS         // Do not recursively parse a type for every ordinary list. Apart from
+//RS         // wasting work, that speculative descent sits on the expression
+//RS         // descent for forms such as `[call([value])]` and can exhaust a small
+//RS         // embedder stack before the actual list parser gets a chance to run.
+//RS         // A typed collection head is the only bracketed type followed by a
+//RS         // constructor body (`{`, `?{` for an optional head, or the retired `.`
+//RS         // form), so find that closing bracket with a flat token scan first.
+//RS         let mut nested = 0;
+//RS         let mut index = self.pos + 1;
+//RS         while let Some(token) = self.toks.get(index) {
+//RS             match &token.kind {
+//RS                 TokKind::LBracket => nested += 1,
+//RS                 TokKind::RBracket if nested == 0 => {
+//RS                     let body = if matches!(
+//RS                         self.toks.get(index + 1).map(|next| &next.kind),
+//RS                         Some(TokKind::Question)
+//RS                     ) {
+//RS                         index + 2
+//RS                     } else {
+//RS                         index + 1
+//RS                     };
+//RS                     return self.toks.get(body).is_some_and(|next| {
+//RS                         matches!(&next.kind, TokKind::LBrace)
+//RS                             || matches!(&next.kind, TokKind::Dot)
+//RS                                 && self
+//RS                                     .toks
+//RS                                     .get(body + 1)
+//RS                                     .is_some_and(|after_dot| {
+//RS                                         matches!(&after_dot.kind, TokKind::LBrace)
+//RS                                     })
+//RS                     });
+//RS                 }
+//RS                 TokKind::RBracket => nested -= 1,
+//RS                 TokKind::Eof => return false,
+//RS                 _ => {}
+//RS             }
+//RS             index += 1;
+//RS         }
+//RS         false
+//RS     }
+//RS 
+//RS     /// D-DOTCTOR3: parse `[Type]{` / `[Type#N]{` / `[K:V]{` after the
+//RS     /// lightweight head probe has confirmed a constructor body.
+//RS     fn parse_typed_lit_from_bracket(&mut self) -> Result<Option<Expr>, Diagnostic> {
+//RS         // Parse the whole collection type (`[T]`, `[T#N]`, `[K:V]`), not the
+//RS         // element alone — bumping `[` then `type_()` would see `U8` as a scalar.
+//RS         self.parse_typed_lit_from_type_head(|head| {
+//RS             let head = match head {
+//RS                 Type::Option(inner) => inner.as_ref(),
+//RS                 head => head,
+//RS             };
+//RS             matches!(
+//RS                 head,
+//RS                 Type::List(_) | Type::FixedList { .. } | Type::Map { .. }
+//RS             )
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-DOTCTOR3 / D-TYPE-SUFFIX1=A: `T?{ body }` is the optional
+//RS     /// typed-literal head. The head parses as a type and the body elaborates
+//RS     /// against `T?` in sema like every other head. A retired prefix `?T{`
+//RS     /// reaches here too, so the type parser teaches the suffix spelling.
+//RS     pub(super) fn parse_optional_typed_lit(&mut self) -> Result<Option<Expr>, Diagnostic> {
+//RS         self.parse_typed_lit_from_type_head(|head| matches!(head, Type::Option(_)))
+//RS     }
+//RS 
+//RS     /// D-TYPE-SUFFIX1=A: flat probe for a named optional head `Name?{`,
+//RS     /// `a.Name?{`, or `Name<…>?{` without entering the type parser.
+//RS     pub(super) fn suffix_optional_typed_head_ahead(&self) -> bool {
+//RS         let kind_at = |index: usize| self.toks.get(index).map(|token| &token.kind);
+//RS         let is_type_name = |index: usize| {
+//RS             matches!(kind_at(index), Some(TokKind::Ident(name))
+//RS                 if name.chars().next().is_some_and(char::is_uppercase))
+//RS         };
+//RS         let mut index = self.pos;
+//RS         if !matches!(kind_at(index), Some(TokKind::Ident(_))) {
+//RS             return false;
+//RS         }
+//RS         let mut last_segment = index;
+//RS         index += 1;
+//RS         while matches!(kind_at(index), Some(TokKind::Dot))
+//RS             && matches!(kind_at(index + 1), Some(TokKind::Ident(_)))
+//RS         {
+//RS             last_segment = index + 1;
+//RS             index += 2;
+//RS         }
+//RS         if !is_type_name(last_segment) {
+//RS             return false;
+//RS         }
+//RS         if matches!(kind_at(index), Some(TokKind::Lt)) {
+//RS             let mut depth = 0isize;
+//RS             loop {
+//RS                 match kind_at(index) {
+//RS                     Some(TokKind::Lt) => depth += 1,
+//RS                     Some(TokKind::Gt) => depth -= 1,
+//RS                     Some(TokKind::Shr) => depth -= 2,
+//RS                     Some(TokKind::Ident(_) | TokKind::Comma | TokKind::Dot | TokKind::Question)
+//RS                     | Some(TokKind::LBracket | TokKind::RBracket | TokKind::Colon) => {}
+//RS                     _ => return false,
+//RS                 }
+//RS                 index += 1;
+//RS                 if depth <= 0 {
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             if depth != 0 {
+//RS                 return false;
+//RS             }
+//RS         }
+//RS         matches!(kind_at(index), Some(TokKind::Question))
+//RS             && matches!(kind_at(index + 1), Some(TokKind::LBrace))
+//RS     }
+//RS 
+//RS     /// D-DOTCTOR3: parse `Type{ body }` whose head is a full type spelling.
+//RS     /// Restores the cursor and returns `None` when no accepted head is
+//RS     /// followed by a constructor body.
+//RS     fn parse_typed_lit_from_type_head(
+//RS         &mut self,
+//RS         accepts: fn(&Type) -> bool,
+//RS     ) -> Result<Option<Expr>, Diagnostic> {
+//RS         let save = self.pos;
+//RS         let save_diags = self.diags.len();
+//RS         let parsed = self.type_();
+//RS         let Ok((head, head_span)) = parsed else {
+//RS             self.pos = save;
+//RS             self.diags.truncate(save_diags);
+//RS             return Ok(None);
+//RS         };
+//RS         if !accepts(&head) {
+//RS             self.pos = save;
+//RS             self.diags.truncate(save_diags);
+//RS             return Ok(None);
+//RS         }
+//RS         let dotted = matches!(self.peek().kind, TokKind::Dot);
+//RS         if dotted {
+//RS             self.bump();
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0320",
+//RS                 "typed collection construction uses `[T]{…}`, not `[T].{…}`".to_string(),
+//RS                 "D-LIT-DOT1 drops the constructor dot from every literal head".to_string(),
+//RS                 "write `[T]{…}`".to_string(),
+//RS                 Some(self.toks[self.pos.saturating_sub(1)].span),
+//RS             ));
+//RS         } else if !matches!(self.peek().kind, TokKind::LBrace) {
+//RS             self.pos = save;
+//RS             self.diags.truncate(save_diags);
+//RS             return Ok(None);
+//RS         }
+//RS         if !matches!(self.peek().kind, TokKind::LBrace) {
+//RS             self.pos = save;
+//RS             self.diags.truncate(save_diags);
+//RS             return Ok(None);
+//RS         }
+//RS         let body = self.typed_lit_body_for_head(&head)?;
+//RS         let end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS         Ok(Some(Expr::TypedLit {
+//RS             head: Some(head),
+//RS             body,
+//RS             span: Span::new(head_span.start, end),
+//RS         }))
+//RS     }
+//RS 
+//RS     /// D-DOTCTOR3: parse `{ … }` body shaped for `head`.
+//RS     pub(in crate::Parser) fn typed_lit_body_for_head(
+//RS         &mut self,
+//RS         head: &Type,
+//RS     ) -> Result<TypedLitBody, Diagnostic> {
+//RS         self.expect(TokKind::LBrace, "to open a typed literal")?;
+//RS         if matches!(self.peek().kind, TokKind::RBrace) {
+//RS             self.bump();
+//RS             return Ok(TypedLitBody::Empty);
+//RS         }
+//RS         match head {
+//RS             Type::Map { .. } => self.finish_typed_lit_entries(),
+//RS             Type::List(_) | Type::FixedList { .. }
+//RS                 if super::patterns::is_byte_list_head(head)
+//RS                     && matches!(self.peek().kind, TokKind::Str(_) | TokKind::RawStr(_))
+//RS                     && matches!(self.peek2().kind, TokKind::RBrace) =>
+//RS             {
+//RS                 self.finish_byte_text()
+//RS             }
+//RS             Type::List(_) | Type::FixedList { .. } => self.finish_typed_lit_elements(),
+//RS             // D-LAYOUT-CTOR1: `Layout.{ … }` is an element body of
+//RS             // `Constraint`s — same comma/semi separators as `[T].{ … }`.
+//RS             Type::Named(n) if n == Syntax::LAYOUT_TYPE => self.finish_typed_lit_elements(),
+//RS             Type::Named(_) | Type::Apply { .. }
+//RS                 if brace_body_looks_like_fields(&self.toks, self.pos) =>
+//RS             {
+//RS                 let fields = self.finish_struct_fields_already_open()?;
+//RS                 Ok(TypedLitBody::Fields(fields))
+//RS             }
+//RS             _ => {
+//RS                 let value = self.expr()?;
+//RS                 self.consume_literal_close_terminators();
+//RS                 self.expect(TokKind::RBrace, "to close a typed literal")?;
+//RS                 Ok(TypedLitBody::Value(Box::new(value)))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn finish_byte_text(&mut self) -> Result<TypedLitBody, Diagnostic> {
+//RS         let token = self.bump();
+//RS         let parts = match token.kind {
+//RS             TokKind::Str(parts) => parts,
+//RS             TokKind::RawStr(text) => vec![StrTokPart::Lit(text)],
+//RS             _ => unreachable!("byte typed literal body starts with a string token"),
+//RS         };
+//RS         if parts
+//RS             .iter()
+//RS             .any(|part| matches!(part, StrTokPart::Interp(_)))
+//RS         {
+//RS             let value = self.str_expr_from_parts(parts, token.span)?;
+//RS             self.consume_literal_close_terminators();
+//RS             self.expect(TokKind::RBrace, "to close a typed literal")?;
+//RS             return Ok(TypedLitBody::Value(Box::new(value)));
+//RS         }
+//RS         let parts = parts
+//RS             .into_iter()
+//RS             .map(|part| match part {
+//RS                 StrTokPart::Lit(text) => ByteTextPart::Lit(text),
+//RS                 StrTokPart::Byte(byte) => ByteTextPart::Byte(byte),
+//RS                 StrTokPart::Interp(_) => unreachable!("interpolation handled above"),
+//RS             })
+//RS             .collect();
+//RS         self.consume_literal_close_terminators();
+//RS         self.expect(TokKind::RBrace, "to close a typed literal")?;
+//RS         Ok(TypedLitBody::ByteText(parts))
+//RS     }
+//RS 
+//RS     fn finish_typed_lit_elements(&mut self) -> Result<TypedLitBody, Diagnostic> {
+//RS         let mut elems = vec![self.list_elem()?];
+//RS         while matches!(self.peek().kind, TokKind::Comma) {
+//RS             self.bump();
+//RS             if matches!(self.peek().kind, TokKind::RBrace) {
+//RS                 break;
+//RS             }
+//RS             elems.push(self.list_elem()?);
+//RS         }
+//RS         self.consume_literal_close_terminators();
+//RS         self.expect(TokKind::RBrace, "to close a typed literal")?;
+//RS         Ok(TypedLitBody::Elements(elems))
+//RS     }
+//RS 
+//RS     fn finish_typed_lit_entries(&mut self) -> Result<TypedLitBody, Diagnostic> {
+//RS         let key = self.expr()?;
+//RS         // One expression with no `:` is a whole-value body (`[K:V]{m}`);
+//RS         // sema checks it against the head like any other one-expression body.
+//RS         if matches!(self.peek().kind, TokKind::RBrace | TokKind::Semi) {
+//RS             self.consume_literal_close_terminators();
+//RS             if matches!(self.peek().kind, TokKind::RBrace) {
+//RS                 self.bump();
+//RS                 return Ok(TypedLitBody::Value(Box::new(key)));
+//RS             }
+//RS         }
+//RS         self.expect(TokKind::Colon, "between a map key and its value")?;
+//RS         let value = self.expr()?;
+//RS         let mut entries = vec![(key, value)];
+//RS         while matches!(self.peek().kind, TokKind::Comma) {
+//RS             self.bump();
+//RS             if matches!(self.peek().kind, TokKind::RBrace) {
+//RS                 break;
+//RS             }
+//RS             let key = self.expr()?;
+//RS             self.expect(TokKind::Colon, "between a map key and its value")?;
+//RS             let val = self.expr()?;
+//RS             entries.push((key, val));
+//RS         }
+//RS         self.consume_literal_close_terminators();
+//RS         self.expect(TokKind::RBrace, "to close a typed map literal")?;
+//RS         Ok(TypedLitBody::Entries(entries))
+//RS     }
+//RS 
+//RS     pub(crate) fn finish_struct_fields_already_open(
+//RS         &mut self,
+//RS     ) -> Result<Vec<(String, Span, Expr)>, Diagnostic> {
+//RS         let mut fields = Vec::new();
+//RS         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+//RS             if matches!(self.peek().kind, TokKind::Semi) {
+//RS                 self.bump();
+//RS                 continue;
+//RS             }
+//RS             if self.at_state_section() {
+//RS                 return Err(self.reject_state_section("anonymous shape"));
+//RS             }
+//RS             let (field, field_span) =
+//RS                 if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_CONC_TASK) {
+//RS                     let token = self.bump();
+//RS                     (Syntax::KW_CONC_TASK.to_string(), token.span)
+//RS                 } else {
+//RS                     self.expect_ident("for a field name")?
+//RS                 };
+//RS             let value = if matches!(self.peek().kind, TokKind::Colon) {
+//RS                 self.bump();
+//RS                 self.expr()?
+//RS             } else {
+//RS                 Expr::Ident(field.clone(), field_span)
+//RS             };
+//RS             fields.push((field, field_span, value));
+//RS             if matches!(self.peek().kind, TokKind::Comma) {
+//RS                 self.bump();
+//RS             }
+//RS         }
+//RS         self.bump(); // RBrace
+//RS         Ok(fields)
+//RS     }
+//RS 
+//RS     /// D-DOTCTOR3: `Head{ body }` when `Head` is a type spelling (scalar,
+//RS     /// named non-field body, etc.).
+//RS     pub(super) fn typed_lit_after_type(
+//RS         &mut self,
+//RS         head: Type,
+//RS         start_span: Span,
+//RS     ) -> Result<Expr, Diagnostic> {
+//RS         let body = self.typed_lit_body_for_head(&head)?;
+//RS         let end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS         Ok(Expr::TypedLit {
+//RS             head: Some(head),
+//RS             body,
+//RS             span: Span::new(start_span.start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     /// S37 / D-VARIADIC1: one list element — either `expr` or `...expr` spread.
+//RS     fn list_elem(&mut self) -> Result<Expr, Diagnostic> {
+//RS         if matches!(self.peek().kind, TokKind::DotDotDot) {
+//RS             let start = self.bump().span.start;
+//RS             let inner = self.expr()?;
+//RS             let end = inner.span().end;
+//RS             return Ok(Expr::Spread(Box::new(inner), Span::new(start, end)));
+//RS         }
+//RS         self.expr()
+//RS     }
+//RS 
+//RS     pub(super) fn struct_lit_after_name(
+//RS         &mut self,
+//RS         type_name: String,
+//RS         type_args: Vec<Type>,
+//RS         start_span: Span,
+//RS     ) -> Result<Expr, Diagnostic> {
+//RS         // Peek is `{`. Body tokens start at pos+1.
+//RS         let body_pos = self.pos + 1;
+//RS         let head = if let Some(ty) = crate::AST::numeric_type_from_name(&type_name) {
+//RS             Some(ty)
+//RS         } else if type_name == Syntax::TYPE_BOOL {
+//RS             Some(Type::Bool)
+//RS         } else if type_name == Syntax::TYPE_STRING {
+//RS             Some(Type::String)
+//RS         } else if type_name == Syntax::TYPE_CHAR {
+//RS             Some(Type::Char)
+//RS         } else {
+//RS             None
+//RS         };
+//RS         // D-DOTCTOR3: builtin scalars always use TypedLit; named heads with a
+//RS         // non-field body are one-expression assertions.
+//RS         if head.is_some() || !brace_body_looks_like_fields(&self.toks, body_pos) {
+//RS             let head = match head {
+//RS                 Some(ty) => ty,
+//RS                 None if !type_args.is_empty() => Type::Apply {
+//RS                     name: type_name,
+//RS                     args: type_args,
+//RS                 },
+//RS                 None => Type::Named(type_name),
+//RS             };
+//RS             return self.typed_lit_after_type(head, start_span);
+//RS         }
+//RS         self.expect(TokKind::LBrace, "to open a struct literal")?;
+//RS         let fields = self.finish_struct_fields_already_open()?;
+//RS         let end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS         Ok(Expr::StructLit {
+//RS             type_name,
+//RS             type_args,
+//RS             import_ns: None,
+//RS             as_trait: None,
+//RS             fields,
+//RS             inferred: false,
+//RS             span: Span::new(start_span.start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     pub(super) fn struct_lit_after_path(
+//RS         &mut self,
+//RS         type_name: String,
+//RS         type_args: Vec<Type>,
+//RS         start_span: Span,
+//RS     ) -> Result<Expr, Diagnostic> {
+//RS         if let Some((import_ns, local_name)) = type_name.split_once('.') {
+//RS             if import_ns
+//RS                 .chars()
+//RS                 .next()
+//RS                 .is_some_and(|c| c.is_ascii_lowercase())
+//RS             {
+//RS                 return self.struct_lit_after_import(
+//RS                     import_ns.to_string(),
+//RS                     local_name.to_string(),
+//RS                     start_span.start,
+//RS                 );
+//RS             }
+//RS         }
+//RS         self.struct_lit_after_name(type_name, type_args, start_span)
+//RS     }
+//RS 
+//RS     pub(super) fn struct_lit_after_import(
+//RS         &mut self,
+//RS         alias: String,
+//RS         type_name: String,
+//RS         start: usize,
+//RS     ) -> Result<Expr, Diagnostic> {
+//RS         // D-BOUND-SINK1=A: imported library text heads use the same
+//RS         // `alias.Name.{"…"}` literal surface as local heads. A field-led
+//RS         // body remains the ordinary imported struct constructor.
+//RS         if !brace_body_looks_like_fields(&self.toks, self.pos + 1) {
+//RS             let head_name = format!("{alias}.{type_name}");
+//RS             let head = Type::Named(head_name);
+//RS             let body = self.typed_lit_body_for_head(&head)?;
+//RS             let end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS             return Ok(Expr::TypedLit {
+//RS                 head: Some(head),
+//RS                 body,
+//RS                 span: Span::new(start, end),
+//RS             });
+//RS         }
+//RS         self.expect(TokKind::LBrace, "to open a struct literal")?;
+//RS         let fields = self.finish_struct_fields_already_open()?;
+//RS         let end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS         Ok(Expr::StructLit {
+//RS             type_name,
+//RS             type_args: Vec::new(),
+//RS             import_ns: Some(alias),
+//RS             as_trait: None,
+//RS             fields,
+//RS             inferred: false,
+//RS             span: Span::new(start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-DOTCTOR1: inferred struct lit `{ field: val, … }`.
+//RS     /// D-DOTCTOR3: also `{ elems }` / `{ value }` when the body is not a
+//RS     /// record field list — elaborates against the expected type in sema.
+//RS     /// The canonical branch starts on `{`; the migration arm consumes a
+//RS     /// retired leading dot first. Both paths parse the same `{ … }` body.
+//RS     pub(super) fn struct_lit_inferred(&mut self, dot_start: usize) -> Result<Expr, Diagnostic> {
+//RS         self.expect(TokKind::LBrace, "to open an inferred struct literal")?;
+//RS         if self.at_state_section() {
+//RS             let diagnostic = self.reject_state_section("anonymous shape");
+//RS             // Consume the inferred literal's closing brace as recovery. The
+//RS             // enclosing function body must remain balanced so this forbidden
+//RS             // shape produces only its registered eligibility diagnostic.
+//RS             if matches!(self.peek().kind, TokKind::RBrace) {
+//RS                 self.bump();
+//RS             }
+//RS             return Err(diagnostic);
+//RS         }
+//RS         if matches!(self.peek().kind, TokKind::RBrace) {
+//RS             let end = self.bump().span.end;
+//RS             return Ok(Expr::StructLit {
+//RS                 type_name: String::new(),
+//RS                 type_args: Vec::new(),
+//RS                 import_ns: None,
+//RS                 as_trait: None,
+//RS                 fields: Vec::new(),
+//RS                 inferred: true,
+//RS                 span: Span::new(dot_start, end),
+//RS             });
+//RS         }
+//RS         if brace_body_looks_like_fields(&self.toks, self.pos) {
+//RS             let fields = self.finish_struct_fields_already_open()?;
+//RS             let end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS             return Ok(Expr::StructLit {
+//RS                 type_name: String::new(),
+//RS                 type_args: Vec::new(),
+//RS                 import_ns: None,
+//RS                 as_trait: None,
+//RS                 fields,
+//RS                 inferred: true,
+//RS                 span: Span::new(dot_start, end),
+//RS             });
+//RS         }
+//RS         // Non-field body: elements, a single value, or map entries.
+//RS         // Map entries start with a non-ident key then `:`, or ident keys are
+//RS         // field-shaped above. Remaining forms are element lists / values.
+//RS         let first = self.list_elem()?;
+//RS         self.consume_literal_close_terminators();
+//RS         if matches!(self.peek().kind, TokKind::Colon) {
+//RS             // Rare inferred map body `{ key: val }` where key wasn't a bare
+//RS             // Ident (e.g. string key). Parse as entries.
+//RS             self.bump();
+//RS             let value = self.expr()?;
+//RS             let mut entries = vec![(first, value)];
+//RS             while matches!(self.peek().kind, TokKind::Comma) {
+//RS                 self.bump();
+//RS                 if matches!(self.peek().kind, TokKind::RBrace) {
+//RS                     break;
+//RS                 }
+//RS                 let key = self.expr()?;
+//RS                 self.expect(TokKind::Colon, "between a map key and its value")?;
+//RS                 let val = self.expr()?;
+//RS                 entries.push((key, val));
+//RS             }
+//RS             self.consume_literal_close_terminators();
+//RS             self.expect(TokKind::RBrace, "to close an inferred map literal")?;
+//RS             let end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS             return Ok(Expr::TypedLit {
+//RS                 head: None,
+//RS                 body: TypedLitBody::Entries(entries),
+//RS                 span: Span::new(dot_start, end),
+//RS             });
+//RS         }
+//RS         if matches!(self.peek().kind, TokKind::RBrace) {
+//RS             let end = self.bump().span.end;
+//RS             return Ok(Expr::TypedLit {
+//RS                 head: None,
+//RS                 body: TypedLitBody::Value(Box::new(first)),
+//RS                 span: Span::new(dot_start, end),
+//RS             });
+//RS         }
+//RS         let mut elems = vec![first];
+//RS         while matches!(self.peek().kind, TokKind::Comma) {
+//RS             self.bump();
+//RS             if matches!(self.peek().kind, TokKind::RBrace) {
+//RS                 break;
+//RS             }
+//RS             elems.push(self.list_elem()?);
+//RS         }
+//RS         self.consume_literal_close_terminators();
+//RS         self.expect(TokKind::RBrace, "to close an inferred list literal")?;
+//RS         let end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS         Ok(Expr::TypedLit {
+//RS             head: None,
+//RS             body: TypedLitBody::Elements(elems),
+//RS             span: Span::new(dot_start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-UITREE1/D-DOTCTOR1: named-payload enum literal fields `{ field: val, … }`.
+//RS     /// The leading `.` before `{` was already consumed; parses the brace body and
+//RS     /// returns `EnumLitArg::Named` entries (S77 field punning applies, matching
+//RS     /// struct dot-construction).
+//RS     pub(crate) fn enum_lit_named_fields(&mut self) -> Result<(Vec<EnumLitArg>, usize), Diagnostic> {
+//RS         self.expect(TokKind::LBrace, "to open a named enum-variant literal")?;
+//RS         let mut args = Vec::new();
+//RS         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+//RS             if matches!(self.peek().kind, TokKind::Semi) {
+//RS                 self.bump();
+//RS                 continue;
+//RS             }
+//RS             let (label, label_span) = self.expect_ident("for a variant field name")?;
+//RS             let value = if matches!(self.peek().kind, TokKind::Colon) {
+//RS                 self.bump();
+//RS                 self.expr()?
+//RS             } else {
+//RS                 // S77: field punning — `{ name }` means `{ name: name }`.
+//RS                 Expr::Ident(label.clone(), label_span)
+//RS             };
+//RS             args.push(EnumLitArg::Named { label, expr: value });
+//RS             if matches!(self.peek().kind, TokKind::Comma) {
+//RS                 self.bump();
+//RS             }
+//RS         }
+//RS         let end = self.peek().span.end;
+//RS         self.bump();
+//RS         Ok((args, end))
+//RS     }
+//RS 
+//RS     /// S31 / D-ENUMDOT1: try to parse a pattern on the right of `==`.
+//RS     ///
+//RS     /// Leading-dot `.Variant` / `.Variant(...)`, optional `None` / `Val(n)`,
+//RS     /// and bare `Variant(...)` (E0367 + recover). A lone bare unit Ident is
+//RS     /// ordinary value equality — sema emits E0367 only when that Ident is a
+//RS     /// known variant. Bare unit Ident followed by `|` starts an or-pattern
+//RS     /// (E0367 + recover) so `.Red | Green` and `Red | Green` teach the dot.
+//RS     ///
+//RS     /// D-PAT-NAMED-NEST1=A: `allow_named_fields` admits the named payload
+//RS     /// form `.Case{field: pat, ..}` after any `{`. Where a `{` usually opens
+//RS     /// a block (an `if` condition) it is false, and the form needs a first
+//RS     /// entry no block starts with (`named_pattern_brace_ahead`).
+//RS     pub(in crate::Parser) fn try_pattern_rhs(
+//RS         &mut self,
+//RS         allow_named_fields: bool,
+//RS     ) -> Result<Option<Pattern>, Diagnostic> {
+//RS         // D-UNIFYLIT1=A: typed pattern heads before bare tokens.
+//RS         if let Some(pat) = self.try_bin_match_pattern()? {
+//RS             return Ok(Some(pat));
+//RS         }
+//RS         if let Some(pat) = self.try_string_typed_str_match_pattern()? {
+//RS             return Ok(Some(pat));
+//RS         }
+//RS         match &self.peek().kind {
+//RS             // D-PARSESTR1: an interpolation literal in pattern position —
+//RS             // `subject == "prefix-{id:Int}-suffix"`. Each hole must reduce to
+//RS             // a bare identifier with an optional `:Type` suffix; anything
+//RS             // else (an arbitrary expression) isn't part of this decision, so
+//RS             // fall through to ordinary `Expr::Str` parsing instead.
+//RS             TokKind::Str(_) => {
+//RS                 return self.try_str_match_pattern();
+//RS             }
+//RS             TokKind::KwNull => {
+//RS                 let span = self.bump().span;
+//RS                 return Ok(Some(Pattern::Variant {
+//RS                     variant: Syntax::LIT_NULL.to_string(),
+//RS                     bindings: Vec::new(),
+//RS                     leading_dot: false,
+//RS                     span,
+//RS                 }));
+//RS             }
+//RS             TokKind::Ident(name) if name == Syntax::LIT_VALUE => {
+//RS                 let start = self.bump().span;
+//RS                 self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
+//RS                 let (binding, binding_span) =
+//RS                     self.expect_ident(&format!("inside `{}(...)`", Syntax::LIT_VALUE))?;
+//RS                 self.expect(
+//RS                     TokKind::RParen,
+//RS                     &format!("after the binding in `{}(...)`", Syntax::LIT_VALUE),
+//RS                 )?;
+//RS                 return Ok(Some(Pattern::Variant {
+//RS                     variant: Syntax::LIT_VALUE.to_string(),
+//RS                     bindings: vec![crate::AST::PatSlot::Bind {
+//RS                         name: binding,
+//RS                         span: binding_span,
+//RS                     }],
+//RS                     leading_dot: false,
+//RS                     span: Span::new(start.start, binding_span.end),
+//RS                 }));
+//RS             }
+//RS             // D-LIT-DOT1: struct-shaped dispatch arm head:
+//RS             // `{ kind: "page", title, .. } -> ...`.
+//RS             TokKind::LBrace if self.brace_starts_record() => {
+//RS                 return self.struct_pattern_rhs().map(Some);
+//RS             }
+//RS             // Retired `.{ … }` pattern. Fmt rewrites; compile rejects.
+//RS             TokKind::Dot
+//RS                 if matches!(
+//RS                     self.toks.get(self.pos + 1).map(|t| &t.kind),
+//RS                     Some(TokKind::LBrace)
+//RS                 ) =>
+//RS             {
+//RS                 let dot = self.peek().span;
+//RS                 let diagnostic = Diagnostic::error(
+//RS                     "E0320",
+//RS                     "inferred record patterns use `{…}`, not `.{…}`".to_string(),
+//RS                     "D-LIT-DOT1 drops the constructor dot from every literal head".to_string(),
+//RS                     "write `{ kind: …, field, .. }`".to_string(),
+//RS                     Some(dot),
+//RS                 );
+//RS                 if !self.migration_mode {
+//RS                     return Err(diagnostic);
+//RS                 }
+//RS                 self.diags.push(diagnostic);
+//RS                 return self.struct_pattern_rhs().map(Some);
+//RS             }
+//RS             // D-ENUMDOT1: bare unit `Variant | …` starts an or-pattern (lone
+//RS             // `Variant` stays value equality so typos don't get a fake E0367).
+//RS             // An ALL_CAPS name is a constant (D-PREP-SURFACE2), so
+//RS             // `ARCH_X64 | ARCH_ARM64` stays a list of value alternates.
+//RS             TokKind::Ident(variant)
+//RS                 if variant.chars().next().is_some_and(|c| c.is_uppercase())
+//RS                     && !Syntax::is_constant_name(variant)
+//RS                     && !matches!(
+//RS                         self.toks.get(self.pos + 1).map(|t| &t.kind),
+//RS                         Some(TokKind::LParen)
+//RS                     )
+//RS                     && matches!(
+//RS                         self.toks.get(self.pos + 1).map(|t| &t.kind),
+//RS                         Some(TokKind::Pipe)
+//RS                     ) =>
+//RS             {
+//RS                 let variant = variant.clone();
+//RS                 let span = self.bump().span;
+//RS                 self.diags.push(Diagnostic::error(
+//RS                         "E0367",
+//RS                         format!("pattern `{variant}` needs a leading `.`"),
+//RS                         "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+//RS                             .to_string(),
+//RS                         format!("write `.{variant}`"),
+//RS                         Some(span),
+//RS                     ));
+//RS                 let base = Pattern::Variant {
+//RS                     variant,
+//RS                     bindings: Vec::new(),
+//RS                     leading_dot: false,
+//RS                     span,
+//RS                 };
+//RS                 let or_start = span;
+//RS                 let mut alts = vec![base];
+//RS                 while matches!(self.peek().kind, TokKind::Pipe) {
+//RS                     self.bump();
+//RS                     if let Some(alt) = self.try_or_pattern_alt(allow_named_fields)? {
+//RS                         push_or_alternative(&mut alts, alt);
+//RS                     } else {
+//RS                         return Err(Diagnostic::error(
+//RS                             "E0003",
+//RS                             "expected a variant pattern after `|` in an or-pattern".to_string(),
+//RS                             "or-patterns join two variant patterns: `.A | .B`".to_string(),
+//RS                             "write a leading-dot variant after `|`".to_string(),
+//RS                             Some(self.peek().span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 let or_end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS                 return Ok(Some(Pattern::Or(alts, Span::new(or_start.start, or_end))));
+//RS             }
+//RS             // D-ENUMDOT1: bare `Variant(...)` needs a leading `.`.
+//RS             TokKind::Ident(variant)
+//RS                 if variant.chars().next().is_some_and(|c| c.is_uppercase())
+//RS                     && matches!(
+//RS                         self.toks.get(self.pos + 1).map(|t| &t.kind),
+//RS                         Some(TokKind::LParen)
+//RS                     ) =>
+//RS             {
+//RS                 let variant = variant.clone();
+//RS                 let span = self.peek().span;
+//RS                 self.diags.push(Diagnostic::error(
+//RS                         "E0367",
+//RS                         format!("pattern `{variant}` needs a leading `.`"),
+//RS                         "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+//RS                             .to_string(),
+//RS                         format!("write `.{variant}(…)`"),
+//RS                         Some(span),
+//RS                     ));
+//RS                 self.bump();
+//RS                 self.bump();
+//RS                 let mut bindings: Vec<crate::AST::PatSlot> = Vec::new();
+//RS                 if !matches!(self.peek().kind, TokKind::RParen) {
+//RS                     loop {
+//RS                         bindings.push(self.pattern_slot()?);
+//RS                         if matches!(self.peek().kind, TokKind::RParen) {
+//RS                             break;
+//RS                         }
+//RS                         self.expect(TokKind::Comma, "between pattern bindings")?;
+//RS                         if matches!(self.peek().kind, TokKind::RParen) {
+//RS                             break;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 self.expect(TokKind::RParen, "after pattern bindings")?;
+//RS                 let end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS                 // D-PATO: check for `| AltVariant(bindings)` after this pattern.
+//RS                 let base = Pattern::Variant {
+//RS                     variant,
+//RS                     bindings,
+//RS                     leading_dot: false,
+//RS                     span: Span::new(span.start, end),
+//RS                 };
+//RS                 if matches!(self.peek().kind, TokKind::Pipe) {
+//RS                     // Collect or-pattern alternatives.
+//RS                     let or_start = span;
+//RS                     let mut alts = vec![base];
+//RS                     while matches!(self.peek().kind, TokKind::Pipe) {
+//RS                         self.bump(); // consume `|`
+//RS                                      // Parse the next alternative (must be a Variant pattern).
+//RS                         if let Some(alt) = self.try_or_pattern_alt(allow_named_fields)? {
+//RS                             push_or_alternative(&mut alts, alt);
+//RS                         } else {
+//RS                             return Err(Diagnostic::error(
+//RS                                 "E0003",
+//RS                                 "expected a variant pattern after `|` in an or-pattern".to_string(),
+//RS                                 "or-patterns join two variant patterns: `.A(x) | .B(x)`"
+//RS                                     .to_string(),
+//RS                                 "write a leading-dot variant with bindings after `|`".to_string(),
+//RS                                 Some(self.peek().span),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                     let or_end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS                     return Ok(Some(Pattern::Or(alts, Span::new(or_start.start, or_end))));
+//RS                 }
+//RS                 return Ok(Some(base));
+//RS             }
+//RS             // D-ENUMDOT1 (ratified 2026-06-26): `.Variant` or `.Variant(binding)` in
+//RS             // pattern position. Reads as "a member of the inferred enum", resolving the
+//RS             // bare-name-vs-variable ambiguity from S31. Normalises to the same
+//RS             // Pattern::Variant AST node; source form remains until sema.
+//RS             TokKind::Dot
+//RS                 if self
+//RS                     .toks
+//RS                     .get(self.pos + 1)
+//RS                     .and_then(|token| leading_dot_variant(&token.kind))
+//RS                     .is_some() =>
+//RS             {
+//RS                 let dot_span = self.bump().span; // consume `.`
+//RS                 let variant_token = self.bump();
+//RS                 let mut variant = leading_dot_variant(&variant_token.kind)
+//RS                     .expect("leading-dot variant guard and token must agree");
+//RS                 let mut variant_span = variant_token.span;
+//RS                 // D-TAG1: a dotted path in pattern position — `.Fire.Burn` names a
+//RS                 // leaf, `.Fire` alone names a group (matches its whole subtree).
+//RS                 while matches!(self.peek().kind, TokKind::Dot)
+//RS                     && matches!(&self.peek2().kind, TokKind::Ident(n) if n.chars().next().map_or(false, |c| c.is_uppercase()))
+//RS                 {
+//RS                     self.bump(); // consume `.`
+//RS                     let (seg, seg_span) = self.expect_ident("after `.` in a variant pattern")?;
+//RS                     variant = format!("{variant}.{seg}");
+//RS                     variant_span = seg_span;
+//RS                 }
+//RS                 let span_start = dot_span.start;
+//RS                 let (bindings, end) = if matches!(self.peek().kind, TokKind::LParen) {
+//RS                     self.bump(); // consume `(`
+//RS                     let mut bindings: Vec<crate::AST::PatSlot> = Vec::new();
+//RS                     if !matches!(self.peek().kind, TokKind::RParen) {
+//RS                         loop {
+//RS                             bindings.push(self.pattern_slot()?);
+//RS                             if matches!(self.peek().kind, TokKind::RParen) {
+//RS                                 break;
+//RS                             }
+//RS                             self.expect(TokKind::Comma, "between pattern bindings")?;
+//RS                             if matches!(self.peek().kind, TokKind::RParen) {
+//RS                                 break;
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     self.expect(TokKind::RParen, "after pattern bindings")?;
+//RS                     let end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS                     (bindings, end)
+//RS                 } else if matches!(self.peek().kind, TokKind::LBrace)
+//RS                     && (allow_named_fields || self.named_pattern_brace_ahead())
+//RS                 {
+//RS                     self.named_pattern_slots(&variant)?
+//RS                 } else {
+//RS                     // Unit variant with dot: `.Empty`
+//RS                     (vec![], variant_span.end)
+//RS                 };
+//RS                 let span = Span::new(span_start, end);
+//RS                 let base = Pattern::Variant {
+//RS                     variant,
+//RS                     bindings,
+//RS                     leading_dot: true,
+//RS                     span,
+//RS                 };
+//RS                 if matches!(self.peek().kind, TokKind::Pipe) {
+//RS                     let or_start = Span::new(span_start, end);
+//RS                     let mut alts = vec![base];
+//RS                     while matches!(self.peek().kind, TokKind::Pipe) {
+//RS                         self.bump(); // consume `|`
+//RS                         if let Some(alt) = self.try_or_pattern_alt(allow_named_fields)? {
+//RS                             push_or_alternative(&mut alts, alt);
+//RS                         } else {
+//RS                             return Err(Diagnostic::error(
+//RS                                 "E0003",
+//RS                                 "expected a variant pattern after `|` in an or-pattern".to_string(),
+//RS                                 "or-patterns join two variant patterns: `.A(x) | .B(x)`"
+//RS                                     .to_string(),
+//RS                                 "write a leading-dot variant with bindings after `|`".to_string(),
+//RS                                 Some(self.peek().span),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                     let or_end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS                     return Ok(Some(Pattern::Or(alts, Span::new(or_start.start, or_end))));
+//RS                 }
+//RS                 Ok(Some(base))
+//RS             }
+//RS             _ => Ok(None),
+//RS         }
+//RS     }
+//RS 
+//RS     /// One payload slot inside `.Variant(…)`: a binding name, `_` (D-PATW),
+//RS     /// an integer range `lo..hi` (D-PATR), or a nested leading-dot pattern
+//RS     /// (S31: `.Err(.Low)`, `.Val(.Rect(w, h))`).
+//RS     pub(in crate::Parser) fn pattern_slot(&mut self) -> Result<crate::AST::PatSlot, Diagnostic> {
+//RS         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::PAT_WILDCARD_SLOT) {
+//RS             self.bump();
+//RS             return Ok(crate::AST::PatSlot::Wildcard);
+//RS         }
+//RS         if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {
+//RS             let lo = *lo_val;
+//RS             self.bump();
+//RS             if !matches!(self.peek().kind, TokKind::DotDot) {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0003",
+//RS                     "expected `..` after the lower bound of a range pattern".to_string(),
+//RS                     "range patterns need `lo..hi` syntax".to_string(),
+//RS                     "write `0..100` for an inclusive range".to_string(),
+//RS                     Some(self.peek().span),
+//RS                 ));
+//RS             }
+//RS             self.bump();
+//RS             let TokKind::Int(hi_val, _) = &self.peek().kind.clone() else {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0003",
+//RS                     "expected an integer after `..` in a range pattern".to_string(),
+//RS                     "range patterns need both ends: `lo..hi`".to_string(),
+//RS                     "write `0..100` for an inclusive range".to_string(),
+//RS                     Some(self.peek().span),
+//RS                 ));
+//RS             };
+//RS             let hi = *hi_val;
+//RS             self.bump();
+//RS             return Ok(crate::AST::PatSlot::Range { lo, hi });
+//RS         }
+//RS         if matches!(self.peek().kind, TokKind::Dot)
+//RS             && self
+//RS                 .toks
+//RS                 .get(self.pos + 1)
+//RS                 .and_then(|token| leading_dot_variant(&token.kind))
+//RS                 .is_some()
+//RS         {
+//RS             if let Some(inner) = self.try_pattern_rhs(true)? {
+//RS                 return Ok(crate::AST::PatSlot::Nested(Box::new(inner)));
+//RS             }
+//RS         }
+//RS         let (name, span) = self.expect_ident("for a pattern binding")?;
+//RS         Ok(crate::AST::PatSlot::Bind { name, span })
+//RS     }
+//RS 
+//RS     /// D-ENUMDOT1 / D-PATO: one alternative after `|` in an or-pattern.
+//RS     /// Accepts a normal pattern RHS, or a bare unit PascalCase Ident (E0367).
+//RS     /// An ALL_CAPS constant is a value, never a bare variant.
+//RS     fn try_or_pattern_alt(&mut self, allow_named_fields: bool) -> Result<Option<Pattern>, Diagnostic> {
+//RS         if let Some(alt) = self.try_pattern_rhs(allow_named_fields)? {
+//RS             return Ok(Some(alt));
+//RS         }
+//RS         let TokKind::Ident(name) = &self.peek().kind else {
+//RS             return Ok(None);
+//RS         };
+//RS         if !name.chars().next().is_some_and(|c| c.is_uppercase()) || Syntax::is_constant_name(name) {
+//RS             return Ok(None);
+//RS         }
+//RS         if matches!(
+//RS             self.toks.get(self.pos + 1).map(|t| &t.kind),
+//RS             Some(TokKind::LParen)
+//RS         ) {
+//RS             // Payload shape belongs to try_pattern_rhs (already tried).
+//RS             return Ok(None);
+//RS         }
+//RS         let variant = name.clone();
+//RS         let span = self.bump().span;
+//RS         self.diags.push(Diagnostic::error(
+//RS                 "E0367",
+//RS                 format!("pattern `{variant}` needs a leading `.`"),
+//RS                 "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+//RS                     .to_string(),
+//RS                 format!("write `.{variant}`"),
+//RS                 Some(span),
+//RS             ));
+//RS         Ok(Some(Pattern::Variant {
+//RS             variant,
+//RS             bindings: Vec::new(),
+//RS             leading_dot: false,
+//RS             span,
+//RS         }))
+//RS     }
+//RS }
+//RS 
+//RS /// D-PATO: `try_or_pattern_alt` re-enters `try_pattern_rhs`, which collects
+//RS /// its own trailing `| …` alternatives. Splice that nested or-pattern into the
+//RS /// outer list so `.A | .B | .C` is one flat `Pattern::Or` with three
+//RS /// alternatives, matching the self-hosted parser.
+//RS fn push_or_alternative(alts: &mut Vec<Pattern>, alt: Pattern) {
+//RS     match alt {
+//RS         Pattern::Or(nested, _) => alts.extend(nested),
+//RS         other => alts.push(other),
+//RS     }
+//RS }
+// END-PORT-PENDING 0323 crates/jet-parser/src/Parser/Expressions/collections_structs.rs:1-1062
+

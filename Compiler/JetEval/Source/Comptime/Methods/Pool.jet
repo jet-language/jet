@@ -1,0 +1,197 @@
+// PORT-PENDING 0595 crates-jet-comptime-src-comptime-methods-pool-module-group: crates/jet-comptime/src/Comptime/Methods/pool.rs:1-193
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-POOLID-API1=A: resident tier-0 `Pool<T>` generational-arena state.
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::AST::{CtValue, Type};
+//RS 
+//RS use super::super::Diagnostics::unsupported;
+//RS 
+//RS pub(super) struct PoolOutcome {
+//RS     pub(super) value: CtValue,
+//RS     pub(super) updated: Option<CtValue>,
+//RS }
+//RS 
+//RS pub(super) fn new_value() -> CtValue {
+//RS     pool_value(Vec::new(), Vec::new())
+//RS }
+//RS 
+//RS pub(super) fn is_method(recv: &CtValue, method: &str) -> bool {
+//RS     matches!(
+//RS         (recv, method),
+//RS         (
+//RS             CtValue::Struct { type_name, .. },
+//RS             "add" | "remove" | "ids"
+//RS         ) if type_name == crate::Syntax::MEM_POOL
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn apply(
+//RS     recv: &CtValue,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     resolved_ret: Option<&Type>,
+//RS     span: Span,
+//RS ) -> Result<PoolOutcome, Diagnostic> {
+//RS     if !is_method(recv, method) {
+//RS         return Err(unsupported("this Pool method", span));
+//RS     }
+//RS     let CtValue::Struct { type_name, fields } = recv else {
+//RS         unreachable!("is_method accepted only Pool structs")
+//RS     };
+//RS     debug_assert_eq!(type_name, crate::Syntax::MEM_POOL);
+//RS     let mut slots = list_field(fields, "slots");
+//RS     let mut free = list_field(fields, "free");
+//RS     let mut changed = false;
+//RS     let value = match method {
+//RS         "add" => {
+//RS             let value = args
+//RS                 .first()
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("Pool.add without a value", span))?;
+//RS             let (index, generation) = match free.pop() {
+//RS                 Some(CtValue::Int(index)) => {
+//RS                     let index =
+//RS                         usize::try_from(index).map_err(|_| unsupported("this Pool state", span))?;
+//RS                     let generation = slots
+//RS                         .get(index)
+//RS                         .and_then(|slot| slot_generation(slot, "Vacant"))
+//RS                         .ok_or_else(|| unsupported("this Pool state", span))?;
+//RS                     slots[index] = occupied(generation, value);
+//RS                     (index, generation)
+//RS                 }
+//RS                 Some(_) => return Err(unsupported("this Pool state", span)),
+//RS                 None => {
+//RS                     let index = slots.len();
+//RS                     slots.push(occupied(0, value));
+//RS                     (index, 0)
+//RS                 }
+//RS             };
+//RS             changed = true;
+//RS             id(index, generation)
+//RS         }
+//RS         "remove" => {
+//RS             let removed = args
+//RS                 .first()
+//RS                 .and_then(id_parts)
+//RS                 .and_then(|(index, generation)| {
+//RS                     let current = slots.get(index)?;
+//RS                     (slot_generation(current, "Occupied") == Some(generation))
+//RS                         .then_some((index, generation))
+//RS                 });
+//RS             match removed {
+//RS                 Some((index, generation)) => {
+//RS                     let old =
+//RS                         std::mem::replace(&mut slots[index], vacant(generation.wrapping_add(1)));
+//RS                     free.push(CtValue::Int(index as i64));
+//RS                     changed = true;
+//RS                     let CtValue::Enum { mut args, .. } = old else {
+//RS                         unreachable!("validated occupied Pool slot")
+//RS                     };
+//RS                     CtValue::Present(Box::new(args.swap_remove(1).1))
+//RS                 }
+//RS                 None => CtValue::absent(match resolved_ret {
+//RS                     Some(Type::Option(inner)) => (**inner).clone(),
+//RS                     _ => Type::Int,
+//RS                 }),
+//RS             }
+//RS         }
+//RS         "ids" => CtValue::List(
+//RS             slots
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .filter_map(|(index, slot)| {
+//RS                     slot_generation(slot, "Occupied").map(|generation| id(index, generation))
+//RS                 })
+//RS                 .collect(),
+//RS         ),
+//RS         _ => return Err(unsupported("this Pool method", span)),
+//RS     };
+//RS     Ok(PoolOutcome {
+//RS         value,
+//RS         updated: changed.then(|| pool_value(slots, free)),
+//RS     })
+//RS }
+//RS 
+//RS fn pool_value(slots: Vec<CtValue>, free: Vec<CtValue>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: crate::Syntax::MEM_POOL.to_string(),
+//RS         fields: vec![
+//RS             ("slots".to_string(), CtValue::List(slots)),
+//RS             ("free".to_string(), CtValue::List(free)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn list_field(fields: &[(String, CtValue)], wanted: &str) -> Vec<CtValue> {
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS             (name, CtValue::List(values)) if name == wanted => Some(values.clone()),
+//RS             _ => None,
+//RS         })
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn id(index: usize, generation: u32) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "ID".to_string(),
+//RS         fields: vec![
+//RS             ("index".to_string(), CtValue::Int(index as i64)),
+//RS             (
+//RS                 "generation".to_string(),
+//RS                 CtValue::Int(i64::from(generation)),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn id_parts(value: &CtValue) -> Option<(usize, u32)> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return None;
+//RS     };
+//RS     if type_name != "ID" {
+//RS         return None;
+//RS     }
+//RS     let int_field = |wanted: &str| {
+//RS         fields.iter().find_map(|(name, value)| match value {
+//RS             CtValue::Int(value) if name == wanted => Some(*value),
+//RS             _ => None,
+//RS         })
+//RS     };
+//RS     Some((
+//RS         usize::try_from(int_field("index")?).ok()?,
+//RS         u32::try_from(int_field("generation")?).ok()?,
+//RS     ))
+//RS }
+//RS 
+//RS fn occupied(generation: u32, value: CtValue) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: "__PoolSlot".to_string(),
+//RS         variant: "Occupied".to_string(),
+//RS         args: vec![(None, CtValue::Int(i64::from(generation))), (None, value)],
+//RS     }
+//RS }
+//RS 
+//RS fn vacant(generation: u32) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: "__PoolSlot".to_string(),
+//RS         variant: "Vacant".to_string(),
+//RS         args: vec![(None, CtValue::Int(i64::from(generation)))],
+//RS     }
+//RS }
+//RS 
+//RS fn slot_generation(slot: &CtValue, wanted: &str) -> Option<u32> {
+//RS     let CtValue::Enum { variant, args, .. } = slot else {
+//RS         return None;
+//RS     };
+//RS     if variant != wanted {
+//RS         return None;
+//RS     }
+//RS     match args.first().map(|(_, value)| value) {
+//RS         Some(CtValue::Int(generation)) => u32::try_from(*generation).ok(),
+//RS         _ => None,
+//RS     }
+//RS }
+// END-PORT-PENDING 0595 crates/jet-comptime/src/Comptime/Methods/pool.rs:1-193
+

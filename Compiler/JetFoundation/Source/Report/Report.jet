@@ -1,0 +1,908 @@
+// Shared machine-report value model, ported from
+// crates/jet-foundation/src/Report.rs. Every command `--json` result is one
+// `jet.status/v1` object (`StatusEnvelope`) whose `reports` are `jet.report/v3`
+// findings (`ReportEnvelope`). CLI, LSP, Foundation JSON, and test reports all
+// serialize this envelope instead of maintaining separate protocol shapes.
+use core.files as report_files
+use core.sys as report_sys
+
+pub REPORT_NAME :: "jet.report"
+pub REPORT_VERSION :: 3
+pub REPORT_SCHEMA :: "jet.report/v3"
+pub STATUS_NAME :: "jet.status"
+pub STATUS_VERSION :: 1
+pub STATUS_SCHEMA :: "jet.status/v1"
+
+// The report model's one failure carrier; the text is the Rust error string.
+#Error
+pub struct ReportError {
+    pub message: String
+
+    fn new(message: String) -> ReportError Never! {
+        ReportError{message: message}
+    }
+}
+
+// Rust `char::is_control` over every scalar: C0, DEL, or C1 (U+0080..U+009F,
+// encoded 0xC2 0x80..0x9F).
+fn report_text_has_control(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code < 32 || code == 127 -> return true
+        if code == 0xC2 && index + 1 < raw.len() {
+            next_code :: Int.from_u8(raw[index + 1])
+            if next_code >= 0x80 && next_code <= 0x9F -> return true
+        }
+    }
+    false
+}
+
+fn report_push(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+
+fn report_bytes_text(out: [U8]) -> String Never! {
+    String.from_bytes(out) ?? panic("report JSON rendering preserves UTF-8")
+}
+
+// Report.rs:14-43 `NoFixReasonKind`.
+pub enum NoFixReasonKind {
+    Behavior
+    Design
+    Ambiguous
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Behavior -> "behavior"
+            .Design -> "design"
+            .Ambiguous -> "ambiguous"
+        }
+    }
+
+    fn parse(value: String) -> NoFixReasonKind ReportError! {
+        if value == {
+            "behavior" -> Ok(NoFixReasonKind.Behavior)
+            "design" -> Ok(NoFixReasonKind.Design)
+            "ambiguous" -> Ok(NoFixReasonKind.Ambiguous)
+            else -> Err(ReportError.new("unknown no-fix reason kind `{value}`"))
+        }
+    }
+}
+
+// Report.rs:45-76: a reviewed action for a diagnostic that cannot carry an
+// automatic edit. The next action is part of the value, never inferred.
+pub struct NoFixReason {
+    pub kind: NoFixReasonKind
+    pub next: String
+
+    fn new(kind: NoFixReasonKind, next: String) -> NoFixReason Never! {
+        NoFixReason.try_new(kind, next) ?? panic("NoFixReason::new requires a reviewed next action")
+    }
+
+    fn try_new(kind: NoFixReasonKind, next: String) -> NoFixReason ReportError! {
+        reason :: NoFixReason{kind: kind, next: next}
+        reason.validate()
+        Ok(reason)
+    }
+
+    fn validate(self) ReportError! {
+        if self.next.trim() == "" -> return Err(ReportError.new("no-fix reason next action must not be empty"))
+        if report_text_has_control(self.next) -> return Err(ReportError.new("no-fix reason next action must not contain control characters"))
+    }
+}
+
+// Report.rs:78-156: a typed JSON value accepted as an action-specific
+// status field.
+pub enum StatusValue {
+    Null
+    Bool(value: Bool)
+    Integer(value: Int)
+    Float(value: String)
+    String(value: String)
+    Array(values: [StatusValue])
+    Object(fields: StatusFields)
+
+    fn object(fields: StatusFields) -> StatusValue Never! {
+        StatusValue.Object{fields: fields}
+    }
+
+    fn array(values: [StatusValue]) -> StatusValue Never! {
+        StatusValue.Array{values: values}
+    }
+
+    fn parse(text: String) -> StatusValue ReportError! {
+        if foundation_json_parse(text) == {
+            .Ok(value) -> StatusValue.from_data_tree(value)
+            .Err(error) -> Err(ReportError.new(error.message))
+        }
+    }
+
+    fn from_data_tree(value: DataTree) -> StatusValue ReportError! {
+        if value == {
+            .Null -> Ok(StatusValue.Null)
+            .Bool(flag) -> Ok(StatusValue.Bool{value: flag})
+            .Int(number) -> Ok(StatusValue.Integer{value: number})
+            .Float(number) -> {
+                if !number.is_finite() -> return Err(ReportError.new("status fields cannot contain non-finite numbers"))
+                Ok(StatusValue.Float{value: report_float_display(number)})
+            }
+            .Text(text) -> Ok(StatusValue.String{value: text})
+            .Array(items) -> {
+                values := [StatusValue]{}
+                loop item in items -> &values.push(StatusValue.from_data_tree(item))
+                Ok(StatusValue.Array{values: values})
+            }
+            .Object(entries) -> Ok(StatusValue.Object{fields: StatusFields.from_data_tree_object(entries)})
+        }
+    }
+
+    // Report.rs::StatusValue::json: the same canonical bare-value emitter.
+    pub fn json(self) -> String Never! {
+        out := [U8]{}
+        report_status_value_json(&out, self)
+        report_bytes_text(out)
+    }
+}
+
+// Rust JSON.rs::Parser::number followed by Report.rs::from_data_tree.
+// S19 receives one lexical number atom, not a payload to reparse. Core owns
+// JSON syntax/f64 parsing; only the original producer's i64 bound lives here.
+// Raw S17 numbers and directly constructed StatusValue.Float stay lexical.
+pub fn status_value_from_json_number_atom(text: String) -> StatusValue ReportError! {
+    value :: foundation_json_parse(text) ?? return Err(ReportError.new(err.message))
+    if value == {
+        .Int(number) -> {
+            if number < -9223372036854775808 || number > 9223372036854775807 -> return Err(ReportError.new("invalid number `{text}`"))
+            Ok(StatusValue.Integer{value: number})
+        }
+        .Float(number) -> {
+            if !number.is_finite() -> return Err(ReportError.new("number `{text}` is out of range"))
+            Ok(StatusValue.Float{value: report_float_display(number)})
+        }
+        else -> Err(ReportError.new("expected a JSON number atom"))
+    }
+}
+
+fn report_status_value_json(out: &[U8], value: StatusValue) Never! {
+    if value == {
+        .Null -> report_push(&out, "null")
+        .Bool(flag) -> report_push(&out, if flag -> "true" else -> "false")
+        .Integer(number) -> report_push(&out, "{number}")
+        .Float(text) -> report_push(&out, text)
+        .String(text) -> report_json_string(&out, text)
+        .Array(values) -> {
+            &out.push(U8{91})
+            loop index in 0..<values.len() {
+                if index > 0 -> &out.push(U8{44})
+                report_status_value_json(&out, values[index])
+            }
+            &out.push(U8{93})
+        }
+        .Object(fields) -> {
+            &out.push(U8{123})
+            report_status_fields_json(&out, fields)
+            &out.push(U8{125})
+        }
+    }
+}
+
+// Rust `f64` Display: the shortest round-trip digits, never in exponent
+// form, with no `.0` on integral values. Jet Float interpolation is Rust
+// `{:?}`, which carries the same digits; only the layout differs.
+fn report_float_display(value: Float) -> String Never! {
+    debug :: "{value}"
+    bytes :: debug.bytes()
+    exponent_at := -1
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{101}) {
+            exponent_at = index
+            break
+        }
+    }
+    if exponent_at < 0 {
+        if bytes.len() < 2 || bytes[bytes.len() - 2] != (U8{46}) || bytes[bytes.len() - 1] != (U8{48}) -> return debug
+        integral := [U8]{}
+        loop index in 0..<bytes.len() - 2 -> &integral.push(bytes[index])
+        return report_bytes_text(integral)
+    }
+    negative :: bytes[0] == (U8{45})
+    mantissa_start :: if negative -> 1 else -> 0
+    digits := [U8]{}
+    point := -1
+    loop index in mantissa_start..<exponent_at {
+        if bytes[index] == (U8{46}) {
+            point = digits.len()
+            next
+        }
+        &digits.push(bytes[index])
+    }
+    if point < 0 -> point = digits.len()
+    exponent_negative :: bytes[exponent_at + 1] == (U8{45})
+    exponent_start :: if exponent_negative -> exponent_at + 2 else -> exponent_at + 1
+    exponent := 0
+    loop index in exponent_start..<bytes.len() {
+        exponent = exponent * 10 + Int.from_u8(bytes[index]) - 48
+    }
+    if exponent_negative {
+        point -= exponent
+    } else {
+        point += exponent
+    }
+    out := [U8]{}
+    if negative -> &out.push(U8{45})
+    if point <= 0 {
+        report_push(&out, "0.")
+        loop _ in 0..<(0 - point) -> &out.push(U8{48})
+        loop digit in digits -> &out.push(digit)
+        return report_bytes_text(out)
+    }
+    loop index in 0..<point {
+        if index < digits.len() {
+            &out.push(digits[index])
+        } else {
+            &out.push(U8{48})
+        }
+    }
+    if point < digits.len() {
+        &out.push(U8{46})
+        loop index in point..<digits.len() -> &out.push(digits[index])
+    }
+    report_bytes_text(out)
+}
+
+// One named status field.
+pub struct StatusField {
+    pub name: String
+    pub value: StatusValue
+}
+
+// Report.rs:212-285: ordered, typed action-specific fields for a status object.
+pub struct StatusFields {
+    pub entries: [StatusField]
+    // Membership only; entries remain the sole wire order.
+    name_indices: [String:Int]
+
+    pub fn new() -> StatusFields Never! {
+        StatusFields{entries: [StatusField]{}, name_indices: [String:Int]{}}
+    }
+
+    pub fn with(^self, name: String, value: StatusValue) -> StatusFields Never! {
+        ^self.try_with(name, value) ?? panic("status fields must have unique, non-empty names")
+    }
+
+    fn try_with(^self, name: String, value: StatusValue) -> StatusFields ReportError! {
+        fields := ^self
+        &fields.insert(name, value)
+        Ok(^fields)
+    }
+
+    pub fn insert(&self, name: String, value: StatusValue) ReportError! {
+        if name == "" || report_text_has_control(name) -> return Err(ReportError.new("status field names must be non-empty and printable"))
+        if self.name_indices.get(name) != None -> return Err(ReportError.new("duplicate status field `{name}`"))
+        self.name_indices[name] = self.entries.len()
+        &self.entries.push(StatusField{name: name, value: value})
+    }
+
+    fn extend(&self, fields: StatusFields) ReportError! {
+        loop entry in fields.entries -> &self.insert(entry.name, entry.value)
+    }
+
+    fn is_empty(self) -> Bool Never! {
+        self.entries.len() == 0
+    }
+
+    fn from_data_tree_object(value: [String: DataTree]) -> StatusFields ReportError! {
+        fields := StatusFields.new()
+        loop entry in value -> &fields.insert(entry.key, StatusValue.from_data_tree(entry.value))
+        Ok(fields)
+    }
+}
+
+fn report_status_fields_json(out: &[U8], fields: StatusFields) Never! {
+    loop index in 0..<fields.entries.len() {
+        if index > 0 -> &out.push(U8{44})
+        report_json_string(&out, fields.entries[index].name)
+        &out.push(U8{58})
+        report_status_value_json(&out, fields.entries[index].value)
+    }
+}
+
+// Report.rs:287-384: the one machine status object for every command
+// `--json` result.
+pub struct StatusEnvelope {
+    pub action: String
+    pub ok: Bool
+    pub reports: [ReportEnvelope]
+    pub fields: StatusFields
+
+    pub fn new(action: String, ok: Bool) -> StatusEnvelope Never! {
+        StatusEnvelope{action: action, ok: ok, reports: [ReportEnvelope]{}, fields: StatusFields.new()}
+    }
+
+    fn with_report(^self, report: ReportEnvelope) -> StatusEnvelope Never! {
+        envelope := ^self
+        &envelope.reports.push(report)
+        ^envelope
+    }
+
+    fn with_reports(^self, reports: [ReportEnvelope]) -> StatusEnvelope Never! {
+        envelope := ^self
+        loop report in reports -> &envelope.reports.push(report)
+        ^envelope
+    }
+
+    pub fn with_field(^self, name: String, value: StatusValue) -> StatusEnvelope Never! {
+        envelope := ^self
+        envelope.fields = ^envelope.fields.with(name, value)
+        ^envelope
+    }
+
+    fn with_fields(^self, fields: StatusFields) -> StatusEnvelope Never! {
+        ^self.try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
+    }
+
+    fn try_with_fields(^self, fields: StatusFields) -> StatusEnvelope ReportError! {
+        envelope := ^self
+        &envelope.fields.extend(fields)
+        Ok(^envelope)
+    }
+
+    fn validate(self) ReportError! {
+        if self.action == "" -> return Err(ReportError.new("status action must not be empty"))
+        if report_text_has_control(self.action) -> return Err(ReportError.new("status action must not contain control characters"))
+        loop entry in self.fields.entries {
+            if entry.name == {
+                "schema" | "action" | "ok" | "reports" -> return Err(ReportError.new("status field `{entry.name}` is reserved"))
+                else -> {}
+            }
+        }
+        loop report in self.reports -> report.validate()
+    }
+
+    pub fn json(self) -> String Never! {
+        self.validate() ?? panic("invalid jet.status/v1 envelope")
+        out := [U8]{}
+        report_push(&out, "{{\"schema\":")
+        report_json_string(&out, STATUS_SCHEMA)
+        report_push(&out, ",\"action\":")
+        report_json_string(&out, self.action)
+        report_push(&out, ",\"ok\":")
+        report_push(&out, if self.ok -> "true" else -> "false")
+        report_push(&out, ",\"reports\":[")
+        loop index in 0..<self.reports.len() {
+            if index > 0 -> &out.push(U8{44})
+            report_push(&out, self.reports[index].json())
+        }
+        &out.push(U8{93})
+        if !self.fields.is_empty() {
+            &out.push(U8{44})
+            report_status_fields_json(&out, self.fields)
+        }
+        &out.push(U8{125})
+        report_bytes_text(out)
+    }
+
+    fn json_line(self) -> String Never! {
+        "{self.json()}\n"
+    }
+}
+
+// Report.rs:385-400 `render_status`: reserved keys fail through the one
+// validator every producer shares.
+pub fn report_render_status(action: String, ok: Bool, fields: StatusFields) -> String Never! {
+    envelope :: StatusEnvelope.new(action, ok).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
+    envelope.json()
+}
+
+// Report.rs:402-414 `render_status_with_reports`.
+pub fn report_render_status_with_reports(action: String, ok: Bool, reports: [ReportEnvelope], fields: StatusFields) -> String Never! {
+    envelope :: StatusEnvelope.new(action, ok).with_reports(reports).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
+    envelope.json()
+}
+
+// Report.rs:418-442. D-REPORT-FIXGRADE1=D: closed safety classes for machine edits.
+pub enum FixSafety {
+    Formatting
+    BehaviorPreserving
+    APIChanging
+    TargetChanging
+    NeedsReview
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Formatting -> "formatting"
+            .BehaviorPreserving -> "behavior-preserving"
+            .APIChanging -> "api-changing"
+            .TargetChanging -> "target-changing"
+            .NeedsReview -> "needs-review"
+        }
+    }
+
+    fn auto_apply(self) -> Bool Never! {
+        if self == {
+            .Formatting | .BehaviorPreserving -> true
+            else -> false
+        }
+    }
+}
+
+// Report.rs:444-460. D-REPORT-FIXGRADE1=D: the promise attached to a
+// machine-applicable edit.
+pub enum FixApplicability {
+    // Applying every edit with this grade is proved to make report progress.
+    Safe
+    // Useful to show, but a person must choose whether to apply it.
+    Suggested
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Safe -> "safe"
+            .Suggested -> "suggested"
+        }
+    }
+}
+
+// Report.rs:462-539: a source identity a report consumer can open from its
+// process. Relative disk paths become absolute lexically; synthetic labels
+// such as `<cli>` stay labels.
+pub struct ReportPath {
+    value: String
+
+    pub fn from_process(value: String) -[FS, Env]> ReportPath Never! {
+        if value == "" || value.starts_with("<") -> return ReportPath{value: value}
+        ReportPath.from_path(value)
+    }
+
+    pub fn from_path(path: String) -[FS, Env]> ReportPath Never! {
+        if path == "" || path.starts_with("<") -> return ReportPath{value: path}
+        if report_files.is_abs(path) -> return ReportPath{value: report_lexically_normalize(path)}
+        if report_sys.current_dir() == {
+            .Ok(cwd) -> ReportPath{value: report_lexically_normalize(report_files.join(cwd, path))}
+            .Err(_) -> ReportPath{value: path}
+        }
+    }
+
+    pub fn as_str(self) -> String Never! {
+        self.value
+    }
+
+    pub fn is_empty(self) -> Bool Never! {
+        self.value == ""
+    }
+}
+
+// Rust `lexically_normalize`: drop `.`, pop on `..` (never above the root).
+fn report_lexically_normalize(path: String) -> String Never! {
+    absolute :: path.starts_with("/")
+    parts := [String]{}
+    loop part in path.split("/") {
+        if part == {
+            "" | "." -> {}
+            ".." -> {
+                if parts.len() > 0 {
+                    _ := &parts.pop()
+                }
+            }
+            else -> {
+                &parts.push(part)
+            }
+        }
+    }
+    joined :: parts.join("/")
+    if absolute -> return "/{joined}"
+    joined
+}
+
+pub struct ReportSpan {
+    pub start: Int
+    pub end: Int
+
+    fn new(start: Int, end: Int) -> ReportSpan Never! {
+        ReportSpan{start: start, end: end}
+    }
+}
+
+// Report.rs:553-582: one ordered cause in a `jet.report/v3` diagnostic. Every
+// location field is independent; an unknown one stays unknown instead of
+// inheriting the root report's location.
+pub struct ReportCause {
+    pub code: String
+    pub file: ReportPath?
+    pub line: Int?
+    pub col: Int?
+    pub span: ReportSpan?
+
+    fn new(code: String) -> ReportCause Never! {
+        ReportCause{code: code, file: None, line: None, col: None, span: None}
+    }
+
+    // Code-only access for non-report status projections.
+    fn as_str(self) -> String Never! {
+        self.code
+    }
+}
+
+// Report.rs:584-592: a secondary source location that explains a report,
+// such as the move a later use reaches. It lives in the report's own file.
+pub struct ReportLabel {
+    pub line: Int
+    pub col: Int
+    pub span: ReportSpan
+    pub message: String
+}
+
+pub struct ReportEdit {
+    pub file: ReportPath
+    pub span: ReportSpan
+    pub new_text: String
+    pub safety: FixSafety
+
+    fn new(file: ReportPath, span: ReportSpan, new_text: String, safety: FixSafety) -> ReportEdit Never! {
+        ReportEdit{file: file, span: span, new_text: new_text, safety: safety}
+    }
+}
+
+pub enum ReportExtension {
+    Crypto(reason: String, operation: String, expected: String?, actual: Int?)
+    BuildError(report: String)
+}
+
+// Report.rs:632-912: a `jet.report/v3` diagnostic or machine finding.
+pub struct ReportEnvelope {
+    pub schema_name: String
+    pub schema_version: Int
+    pub moment: String
+    pub severity: String
+    pub code: String
+    pub what: String
+    pub why: String
+    pub fix: String
+    pub applicability: FixApplicability?
+    pub detail: String?
+    pub file: ReportPath?
+    pub line: Int?
+    pub col: Int?
+    pub span: ReportSpan?
+    fix_edits: [ReportEdit]
+    pub cause: [ReportCause]
+    pub labels: [ReportLabel]
+    pub clears: Int
+    pub extension: ReportExtension?
+    no_fix_reason: NoFixReason?
+    pub denial_kind: String?
+    pub call_chain: [String]
+    pub scope_chain: [String]
+    pub nearest_granting_scope: String?
+
+    fn new(moment: String, severity: String, code: String, what: String, why: String, fix: String) -> ReportEnvelope Never! {
+        ReportEnvelope{
+            schema_name: REPORT_NAME,
+            schema_version: REPORT_VERSION,
+            moment: moment,
+            severity: severity,
+            code: code,
+            what: what,
+            why: why,
+            fix: fix,
+            applicability: None,
+            detail: None,
+            file: None,
+            line: None,
+            col: None,
+            span: None,
+            fix_edits: [ReportEdit]{},
+            cause: [ReportCause]{},
+            labels: [ReportLabel]{},
+            clears: 0,
+            extension: None,
+            no_fix_reason: None,
+            denial_kind: None,
+            call_chain: [String]{},
+            scope_chain: [String]{},
+            nearest_granting_scope: None
+        }
+    }
+
+    fn push_fix_edit(&self, edit: ReportEdit) ReportError! {
+        if self.no_fix_reason != None -> return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
+        &self.fix_edits.push(edit)
+    }
+
+    fn with_fix_edits(self, edits: [ReportEdit]) -> ReportEnvelope ReportError! {
+        report := self
+        loop edit in edits -> &report.push_fix_edit(edit)
+        Ok(report)
+    }
+
+    fn set_no_fix_reason(&self, reason: NoFixReason) ReportError! {
+        reason.validate()
+        if self.fix_edits.len() > 0 -> return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
+        self.no_fix_reason = Val(reason)
+    }
+
+    fn with_no_fix_reason(self, reason: NoFixReason) -> ReportEnvelope ReportError! {
+        report := self
+        &report.set_no_fix_reason(reason)
+        Ok(report)
+    }
+
+    fn validate(self) ReportError! {
+        if self.schema_name != REPORT_NAME || self.schema_version != REPORT_VERSION {
+            return Err(ReportError.new("report envelope has an unsupported schema identity"))
+        }
+        if self.no_fix_reason == {
+            .Val(reason) -> {
+                reason.validate()
+                if self.fix_edits.len() > 0 -> return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
+            }
+            .None -> {}
+        }
+    }
+
+    fn json(self) -> String Never! {
+        self.validate() ?? panic("invalid jet.report/v3 envelope")
+        out := [U8]{}
+        report_push(&out, "{{\"schema\":")
+        report_json_string(&out, "{self.schema_name}/v{self.schema_version}")
+        report_push(&out, ",\"moment\":")
+        report_json_string(&out, self.moment)
+        report_push(&out, ",\"severity\":")
+        report_json_string(&out, self.severity)
+        report_push(&out, ",\"code\":")
+        report_json_string(&out, self.code)
+        report_push(&out, ",\"what\":")
+        report_json_string(&out, self.what)
+        report_push(&out, ",\"why\":")
+        report_json_string(&out, self.why)
+        report_push(&out, ",\"fix\":")
+        report_json_string(&out, self.fix)
+        if self.applicability == .Val(applicability) {
+            report_push(&out, ",\"applicability\":")
+            report_json_string(&out, applicability.as_str())
+        }
+        report_push(&out, ",\"detail\":")
+        report_optional_string(&out, self.detail)
+        report_push(&out, ",\"denial_kind\":")
+        report_optional_string(&out, self.denial_kind)
+        report_push(&out, ",\"call_chain\":")
+        report_json_strings(&out, self.call_chain)
+        report_push(&out, ",\"scope_chain\":")
+        report_json_strings(&out, self.scope_chain)
+        report_push(&out, ",\"nearest_granting_scope\":")
+        report_optional_string(&out, self.nearest_granting_scope)
+        report_push(&out, ",\"file\":")
+        report_optional_path(&out, self.file)
+        report_push(&out, ",\"line\":")
+        report_optional_usize(&out, self.line)
+        report_push(&out, ",\"col\":")
+        report_optional_usize(&out, self.col)
+        report_push(&out, ",\"span\":")
+        report_optional_span(&out, self.span)
+        if self.fix_edits.len() > 0 {
+            report_push(&out, ",\"fix_edits\":[")
+            loop index in 0..<self.fix_edits.len() {
+                if index > 0 -> &out.push(U8{44})
+                edit :: self.fix_edits[index]
+                report_push(&out, "{{\"file\":")
+                report_json_string(&out, edit.file.as_str())
+                report_push(&out, ",\"span\":")
+                report_span(&out, edit.span)
+                report_push(&out, ",\"new_text\":")
+                report_json_string(&out, edit.new_text)
+                report_push(&out, ",\"safety\":")
+                report_json_string(&out, edit.safety.as_str())
+                &out.push(U8{125})
+            }
+            &out.push(U8{93})
+        } else {
+            if self.no_fix_reason == {
+                .Val(reason) -> {
+                    report_push(&out, ",\"no_fix_reason\":{{\"kind\":")
+                    report_json_string(&out, reason.kind.as_str())
+                    report_push(&out, ",\"next\":")
+                    report_json_string(&out, reason.next)
+                    &out.push(U8{125})
+                }
+                .None -> report_push(&out, ",\"fix_edits\":[]")
+            }
+        }
+        report_push(&out, ",\"cause\":[")
+        loop index in 0..<self.cause.len() {
+            if index > 0 -> &out.push(U8{44})
+            cause :: self.cause[index]
+            report_push(&out, "{{\"code\":")
+            report_json_string(&out, cause.code)
+            report_push(&out, ",\"file\":")
+            report_optional_path(&out, cause.file)
+            report_push(&out, ",\"line\":")
+            report_optional_usize(&out, cause.line)
+            report_push(&out, ",\"col\":")
+            report_optional_usize(&out, cause.col)
+            report_push(&out, ",\"span\":")
+            report_optional_span(&out, cause.span)
+            &out.push(U8{125})
+        }
+        &out.push(U8{93})
+        if self.labels.len() > 0 {
+            report_push(&out, ",\"labels\":[")
+            loop index in 0..<self.labels.len() {
+                if index > 0 -> &out.push(U8{44})
+                label :: self.labels[index]
+                report_push(&out, "{{\"line\":{label.line},\"col\":{label.col},\"span\":")
+                report_span(&out, label.span)
+                report_push(&out, ",\"message\":")
+                report_json_string(&out, label.message)
+                &out.push(U8{125})
+            }
+            &out.push(U8{93})
+        }
+        report_push(&out, ",\"clears\":{self.clears}")
+        if self.extension == {
+            .Val(extension) -> report_extension_json(&out, extension)
+            .None -> {}
+        }
+        &out.push(U8{125})
+        report_bytes_text(out)
+    }
+
+    fn json_line(self) -> String Never! {
+        "{self.json()}\n"
+    }
+}
+
+// The extension's fields, appended after `clears`.
+fn report_extension_json(out: &[U8], extension: ReportExtension) Never! {
+    if extension == {
+        .Crypto(reason, operation, expected, actual) -> {
+            report_push(&out, ",\"reason\":")
+            report_json_string(&out, reason)
+            report_push(&out, ",\"operation\":")
+            report_json_string(&out, operation)
+            if expected == .Val(text) {
+                report_push(&out, ",\"expected\":")
+                report_json_string(&out, text)
+            }
+            if actual == .Val(number) -> report_push(&out, ",\"actual\":{number}")
+        }
+        .BuildError(report) -> {
+            report_push(&out, ",\"build_error\":")
+            report_push(&out, report)
+        }
+    }
+}
+
+fn report_span(out: &[U8], span: ReportSpan) Never! {
+    report_push(&out, "{{\"start\":{span.start},\"end\":{span.end}}}")
+}
+
+fn report_optional_span(out: &[U8], span: ReportSpan?) Never! {
+    if span == {
+        .Val(value) -> report_span(&out, value)
+        .None -> report_push(&out, "null")
+    }
+}
+
+fn report_optional_path(out: &[U8], path: ReportPath?) Never! {
+    if path == {
+        .Val(file) -> {
+            if file.is_empty() {
+                report_push(&out, "null")
+            } else {
+                report_json_string(&out, file.as_str())
+            }
+        }
+        .None -> report_push(&out, "null")
+    }
+}
+
+fn report_optional_string(out: &[U8], value: String?) Never! {
+    if value == {
+        .Val(text) -> report_json_string(&out, text)
+        .None -> report_push(&out, "null")
+    }
+}
+
+// Report.rs:914-919 `push_optional_usize`.
+fn report_optional_usize(out: &[U8], value: Int?) Never! {
+    if value == {
+        .Val(number) -> report_push(&out, "{number}")
+        .None -> report_push(&out, "null")
+    }
+}
+
+// Report.rs:921-941 `report_json_string`: `"`, `\`, LF, CR, TAB, BS and FF use
+// short escapes; every other C0 control becomes lowercase `\u00xx`. DEL and
+// C1 controls are copied verbatim, unlike `foundation_json_quote`.
+fn report_json_string(out: &[U8], value: String) Never! {
+    hex :: "0123456789abcdef".bytes()
+    &out.push(U8{34})
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if {
+            code == 34 -> report_push(&out, "\\\"")
+            code == 92 -> report_push(&out, "\\\\")
+            code == 10 -> report_push(&out, "\\n")
+            code == 13 -> report_push(&out, "\\r")
+            code == 9 -> report_push(&out, "\\t")
+            code == 8 -> report_push(&out, "\\b")
+            code == 12 -> report_push(&out, "\\f")
+            code < 32 -> {
+                report_push(&out, "\\u00")
+                &out.push(hex[code >> 4])
+                &out.push(hex[code & 15])
+            }
+            else -> &out.push(byte)
+        }
+    }
+    &out.push(U8{34})
+}
+
+// Report.rs:943-953 `report_json_strings`.
+fn report_json_strings(out: &[U8], values: [String]) Never! {
+    &out.push(U8{91})
+    loop index in 0..<values.len() {
+        if index > 0 -> &out.push(U8{44})
+        report_json_string(&out, values[index])
+    }
+    &out.push(U8{93})
+}
+
+#Test("status private membership indices survive insert refusals") {
+    fields := StatusFields.new()
+    fields = ^fields.try_with("z", StatusValue.Integer{value: 1}) ?? panic("valid field rejected")
+    fields = ^fields.with("a", StatusValue.Integer{value: 2})
+    assert_eq(fields.name_indices.len(), 2)
+    assert_eq(fields.name_indices.get("z") ?? panic("missing z membership"), 0)
+    assert_eq(fields.name_indices.get("a") ?? panic("missing a membership"), 1)
+    duplicate :: if &fields.insert("z", StatusValue.Null) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("duplicate accepted")
+    }
+    assert_eq(duplicate, "duplicate status field `z`")
+    illegal :: if &fields.insert("", StatusValue.Null) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("empty name accepted")
+    }
+    assert_eq(illegal, "status field names must be non-empty and printable")
+    assert_eq(fields.entries.len(), 2)
+    assert_eq(fields.name_indices.len(), 2)
+    assert(fields.name_indices.get("") == None)
+    assert_eq(fields.name_indices.get("z") ?? panic("z membership lost"), 0)
+    assert_eq(fields.name_indices.get("a") ?? panic("a membership lost"), 1)
+    assert_eq(StatusValue.Object{fields: fields}.json(), `{"z":1,"a":2}`)
+    fields = ^fields.with("next", StatusValue.Bool{value: true})
+    assert_eq(fields.entries.len(), 3)
+    assert_eq(fields.name_indices.len(), 3)
+    loop (index, entry) in fields.entries {
+        assert_eq(fields.name_indices.get(entry.name) ?? panic("field membership lost"), index)
+    }
+}
+
+#Test("status consuming envelope builders retain fields and report order") {
+    fields := StatusFields.new().with("z", StatusValue.Integer{value: 1})
+    fields = ^fields.with("a", StatusValue.Integer{value: 2})
+    envelope := StatusEnvelope.new("check", true)
+    envelope = ^envelope.with_field("first", StatusValue.Null)
+    envelope = ^envelope.with_report(ReportEnvelope.new("tool", "error", "E0001", "first", "why", "fix"))
+    envelope = ^envelope.with_reports([ReportEnvelope]{ReportEnvelope.new("compile", "warning", "E0002", "second", "why", "fix")})
+    envelope = ^envelope.with_fields(fields)
+    envelope = ^envelope.try_with_fields(StatusFields.new().with("last", StatusValue.Bool{value: true})) ?? panic("valid extension rejected")
+    assert_eq(envelope.fields.entries.len(), 4)
+    assert_eq(envelope.fields.entries[0].name, "first")
+    assert_eq(envelope.fields.entries[1].name, "z")
+    assert_eq(envelope.fields.entries[2].name, "a")
+    assert_eq(envelope.fields.entries[3].name, "last")
+    assert_eq(envelope.fields.name_indices.len(), 4)
+    loop (index, entry) in envelope.fields.entries {
+        assert_eq(envelope.fields.name_indices.get(entry.name) ?? panic("extended field membership lost"), index)
+    }
+    assert_eq(envelope.reports.len(), 2)
+    assert_eq(envelope.reports[0].json(), ReportEnvelope.new("tool", "error", "E0001", "first", "why", "fix").json())
+    assert_eq(envelope.reports[1].json(), ReportEnvelope.new("compile", "warning", "E0002", "second", "why", "fix").json())
+    duplicate :: if StatusEnvelope.new("check", true).with_field("z", StatusValue.Null).try_with_fields(fields) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("envelope extension accepted duplicate")
+    }
+    assert_eq(duplicate, "duplicate status field `z`")
+}

@@ -1,0 +1,368 @@
+// Migrations.rs has no inline or included original tests. These are faithful
+// behavioral controls over the public owner and ACTUAL published FS providers.
+// Native suites remain #4494/#4483/#4409/#4500-gated, never backed by mocks.
+use jet_driver.[MigrationLock, MigrationDirection, MigrationError, MigrationTarget, MigrationCatalog, MigrationLockInfo, render_migration, read_lock_info]
+use jet_foundation.[MIGRATION_SCHEMA, MIGRATION_DIRECTORY, TEXT_NUL, mir_sha256_hex]
+use core.files.runtime.kernel_path_components as migration_test_path
+use core.files.host.retained_descriptor as migration_test_fs
+use core.sys.host.os_path_ingress as migration_test_ingress
+use core.sys.host.retained_counter as migration_test_counter
+use core.process.host.native_process as migration_test_process
+
+struct MigrationScratch { root: migration_test_path.OSPath }
+impl MigrationScratch.Close {
+    fn close(^self) -[FS.Write]> Never! {
+        migration_test_fs.remove_dir_all(self.root).drop("behavioral control scratch cleanup")
+    }
+}
+fn migration_scratch() -[Env, FS.Write]> MigrationScratch Never! {
+    base :: migration_test_ingress.temp_dir()
+    root := ~base
+    // Test scratch uses the original temp counter; production shared locks use
+    // their SEPARATE dedicated NEXT_SHARED_LOCK_ID process-static sequence.
+    id :: migration_test_counter.temp_counter_next()
+    migration_test_path.push(&root, migration_test_path.from_text("jet-migrations-{migration_test_process.id()}-{id}", base.platform))
+    migration_test_fs.create_dir(root) ?? panic("couldn't create real migration test scratch: {err}")
+    MigrationScratch{root: ^root}
+}
+fn migration_test_join(root: migration_test_path.OSPath, text: String) -> migration_test_path.OSPath Never! {
+    path := ~root
+    migration_test_path.push(&path, migration_test_path.from_text(text, root.platform))
+    path
+}
+fn migration_test_write(root: migration_test_path.OSPath, name: String, text: String) -[FS.Write]> Never! {
+    directory :: migration_test_join(root, MIGRATION_DIRECTORY)
+    migration_test_fs.create_dir_all(directory) ?? panic("couldn't create test migrations directory: {err}")
+    path :: migration_test_join(directory, name)
+    migration_test_fs.write(path, text.bytes()) ?? panic("couldn't write real migration test: {err}")
+}
+fn migration_test_target(root: migration_test_path.OSPath, lock: MigrationLock) -[FS.Read]> MigrationTarget Never! {
+    MigrationTarget.new(root, "dev", None, lock) ?? panic("couldn't construct migration target: {err}")
+}
+fn migration_test_catalog(root: migration_test_path.OSPath) -[FS.Read]> MigrationCatalog Never! {
+    MigrationCatalog.load(root) ?? panic("couldn't load real migration catalog: {err}")
+}
+fn migration_test_error(error: MigrationError, code: String, message: String, fix: String) Never! {
+    assert_eq(error.code, code)
+    assert_eq(error.message, message)
+    assert_eq(error.fix, fix)
+    assert_eq(error.display(), "{code}: {message} ({fix})")
+}
+fn migration_repeat(value: String, count: Int) -> String Never! {
+    raw :: value.bytes()
+    out := [U8]{}
+    loop _ in 0..<count -> loop byte in raw -> &out.push(byte)
+    String.from_bytes(out) ?? panic("repeated fixture preserves UTF-8")
+}
+
+#Test("migration lock policy ASCII aliases and exact usage error") {
+    assert_eq(MigrationLock.parse(" \tReAd\r\n") ?? panic("read alias"), MigrationLock.Shared)
+    assert_eq(MigrationLock.parse("WRITE") ?? panic("write alias"), MigrationLock.Exclusive)
+    assert_eq(MigrationLock.Shared.as_str(), "shared")
+    assert_eq(MigrationLock.Exclusive.as_str(), "exclusive")
+    assert_eq(MigrationDirection.Apply.as_str(), "apply")
+    assert_eq(MigrationDirection.Rollback.as_str(), "rollback")
+    if MigrationLock.parse("none") == {
+        .Ok(_) -> panic("accepted unknown lock")
+        .Err(error) -> migration_test_error(error, "E2456", "unknown migration lock policy `none`", "use `--lock shared` for inspection or `--lock exclusive` before a write")
+    }
+}
+#Test("migration renderer escaping and slug match Rust exactly") {
+    text :: render_migration(U64{7}, "createUsers", " \tCREATE TABLE t(x TEXT DEFAULT '{{a}}');\n\"quoted\"\\path\r\t ", Val(" DROP TABLE t; "), MigrationLock.Exclusive, " ") ?? panic("renderer failed")
+    expected :: "// jet db migration/v1\n// name: createUsers\n// lock: exclusive\n// risk: schema change\n// up: SQL{{CREATE TABLE t(x TEXT DEFAULT '{{{{a}}}}');\\n\\\"quoted\\\"\\\\path}}\n// down: SQL{{DROP TABLE t;}}\n// slug: create_users\n"
+    assert_eq(text, expected)
+    omitted :: render_migration(U64{1}, "A_B-c.d", " SELECT 1 ", Val(" \t "), MigrationLock.Shared, " explicit ") ?? panic("renderer failed")
+    assert(!omitted.contains("// down:"))
+    assert(omitted.contains("// slug: a_b_c_d\n"))
+    assert(omitted.contains("// risk: explicit\n"))
+}
+#Test("migration renderer validation precedence name then SQL then version") {
+    if render_migration(U64{0}, "bad name", "", None, MigrationLock.Shared, "") == {
+        .Ok(_) -> panic("accepted unsafe name")
+        .Err(error) -> migration_test_error(error, "E2456", "migration name `bad name` is not safe", "use only ASCII letters, digits, `_`, `-`, or `.` in the migration name")
+    }
+    if render_migration(U64{0}, "safe", "", None, MigrationLock.Shared, "") == {
+        .Ok(_) -> panic("accepted empty forward SQL")
+        .Err(error) -> assert_eq(error.message, "a migration needs forward SQL")
+    }
+    if render_migration(U64{0}, "safe", "SELECT 1", None, MigrationLock.Shared, "") == {
+        .Ok(_) -> panic("accepted version zero")
+        .Err(error) -> assert_eq(error.message, "migration versions start at 1")
+    }
+    // Rendering deliberately does NOT apply MigrationStep's control predicate.
+    _ :: render_migration(U64{1}, "safe", "SELECT {TEXT_NUL}", None, MigrationLock.Shared, "") ?? panic("renderer added a parser-only rejection")
+    long_name :: migration_repeat("a", 97)
+    if render_migration(U64{1}, long_name, "SELECT 1", None, MigrationLock.Shared, "") == {
+        .Ok(_) -> panic("accepted 97-byte name")
+        .Err(error) -> assert_eq(error.code, "E2456")
+    }
+}
+#Test("migration public IO details filter Cc and redact all six secret words") {
+    c1 :: String.from_bytes([U8]{U8{194}, U8{128}}) ?? panic("C1 fixture")
+    clean :: MigrationError.io("read", "a{TEXT_NUL}b\nc\rd\te{c1}f")
+    assert_eq(clean.message, "read: ab\nc\rd\tef")
+    assert_eq(clean.code, "E2105")
+    secrets :: [String]{"PASSWORD", "passwd", "TOKEN", "secret", "api_key", "apikey"}
+    loop word in secrets -> assert_eq(MigrationError.io("read", "public {word} hidden").message, "read: migration operation failed without a safe public detail")
+    long :: migration_repeat("a", 241)
+    prefix :: migration_repeat("a", 240)
+    assert_eq(MigrationError.io("read", long).message, "read: {prefix}…")
+    // Whole-byte boundary at 240: 120 two-byte scalars + one ASCII byte.
+    unicode :: migration_repeat("é", 120)
+    assert_eq(MigrationError.io("read", "{unicode}x").message, "read: {unicode}…")
+}
+
+#Test("migration target lexical path safety and framed identities") {
+    scratch :: migration_scratch()
+    target :: MigrationTarget.new(scratch.root, "dev", Val(migration_test_path.from_text("./db//state.sqlite", scratch.root.platform)), MigrationLock.Shared) ?? panic("target rejected normal components")
+    assert_eq(migration_test_path.strip_prefix(target.database, scratch.root).map(path -> migration_test_path.display(path)), Val(if scratch.root.platform == migration_test_path.PathPlatform.Windows -> "db\\state.sqlite" else -> "db/state.sqlite"))
+    relative :: migration_test_path.display(migration_test_path.strip_prefix(target.database, scratch.root) ?? panic("target escaped root"))
+    assert_eq(target.database_identity, "sha256:{mir_sha256_hex("{MIGRATION_SCHEMA}{TEXT_NUL}database{TEXT_NUL}{relative}")}")
+    assert_eq(target.identity, "sha256:{mir_sha256_hex("{MIGRATION_SCHEMA}{TEXT_NUL}target{TEXT_NUL}dev{TEXT_NUL}{relative}")}")
+    invalids :: [String]{"../db.sqlite", ".", ""}
+    messages :: [String]{"database path contains `..`", "database path is empty", "database path is empty"}
+    loop i in 0..<invalids.len() {
+        if MigrationTarget.new(scratch.root, "dev", Val(migration_test_path.from_text(invalids[i], scratch.root.platform)), MigrationLock.Shared) == {
+            .Ok(_) -> panic("accepted unsafe database path")
+            .Err(error) -> assert_eq(error.message, messages[i])
+        }
+    }
+    // Real native temp root is absolute, independent of selected platform.
+    if MigrationTarget.new(scratch.root, "dev", Val(scratch.root), MigrationLock.Shared) == {
+        .Ok(_) -> panic("accepted absolute database path")
+        .Err(error) -> assert_eq(error.message, "absolute database paths are not accepted")
+    }
+    empty :: migration_test_catalog(scratch.root)
+    assert_eq(empty.next_version(), U64{1})
+    assert_eq(empty.migrations.len(), 0)
+    assert_eq(empty.source_identity, "sha256:{mir_sha256_hex("")}")
+    assert_eq(read_lock_info(scratch.root, None) ?? panic("absent lock directory should succeed"), [MigrationLockInfo]{})
+}
+#Test("migration catalog raw digest ordering metadata aliases and reverse plan") {
+    scratch :: migration_scratch()
+    first :: "// jet db migration/v1\n// name: stale\n// name: alpha\n// lock: read\n// up_sql: SQL{{CREATE TABLE a(x TEXT DEFAULT '{{{{é}}}}');}}\n// up: \"INSERT INTO a VALUES ('x');\"\n// down_sql: DELETE FROM a;\n// down: DROP TABLE a;\n"
+    second :: render_migration(U64{10}, "beta", "CREATE INDEX b ON a(x);", Val("DROP INDEX b;"), MigrationLock.Exclusive, "index build") ?? panic("render failed")
+    migration_test_write(scratch.root, "10_beta.jet", second)
+    migration_test_write(scratch.root, "2_alpha.jet", first)
+    migration_test_write(scratch.root, "ignored.txt", "not a migration")
+    catalog :: migration_test_catalog(scratch.root)
+    assert_eq(catalog.next_version(), U64{11})
+    assert_eq(catalog.migrations.len(), 2)
+    assert_eq(catalog.migrations[0].version, U64{2})
+    assert_eq(catalog.migrations[1].version, U64{10})
+    assert_eq(catalog.migrations[0].steps[0].sql, "CREATE TABLE a(x TEXT DEFAULT '{{é}}');")
+    assert_eq(catalog.migrations[0].steps[0].lock, MigrationLock.Shared)
+    assert_eq(catalog.migrations[0].steps[0].risk, "data rewrite")
+    assert_eq(catalog.migrations[0].steps[1].ordinal, U64{2})
+    assert(catalog.migrations[0].has_rollback())
+    assert_eq(catalog.migrations[0].source_digest, "sha256:{mir_sha256_hex(first)}")
+    target :: migration_test_target(scratch.root, MigrationLock.Exclusive)
+    apply :: catalog.plan_apply(~target, U64{0}, None) ?? panic("apply failed")
+    assert_eq(apply.from_version, U64{0})
+    assert_eq(apply.to_version, U64{10})
+    assert_eq(apply.direction, MigrationDirection.Apply)
+    assert_eq(apply.steps.len(), 3)
+    assert_eq(apply.risk, "data rewrite, index build")
+    assert_eq(apply.database_identity, target.database_identity)
+    assert_eq(apply.schema_identity, "sha256:{mir_sha256_hex(MIGRATION_SCHEMA)}")
+    reverse :: catalog.plan_rollback(~target, U64{10}, Val(U64{0})) ?? panic("rollback failed")
+    assert_eq(reverse.steps.map(step -> step.sql), [String]{"DROP INDEX b;", "DROP TABLE a;", "DELETE FROM a;"})
+    assert_eq(reverse.steps.map(step -> step.ordinal), [U64]{U64{1}, U64{2}, U64{1}})
+    assert_eq(reverse.direction, MigrationDirection.Rollback)
+    loop step in reverse.steps -> assert_eq(step.inverse_sql, None)
+    one :: catalog.plan_rollback(~target, U64{10}, None) ?? panic("default previous version failed")
+    assert_eq(one.to_version, U64{2})
+    assert_eq(one.steps.len(), 1)
+    // Rust rollback permits a nondeclared lower target; do not add validation.
+    _ :: catalog.plan_rollback(~target, U64{10}, Val(U64{1})) ?? panic("added undeclared rollback-target refusal")
+    if catalog.plan_apply(~target, U64{1}, None) == {
+        .Ok(_) -> panic("accepted undeclared current version")
+        .Err(error) -> assert_eq(error.message, "migration state starts at undeclared version 1")
+    }
+    if catalog.plan_apply(~target, U64{10}, Val(U64{2})) == {
+        .Ok(_) -> panic("accepted backward apply")
+        .Err(error) -> assert_eq(error.message, "migration target 2 is behind current version 10")
+    }
+    if catalog.plan_apply(~target, U64{0}, Val(U64{3})) == {
+        .Ok(_) -> panic("accepted undeclared apply target")
+        .Err(error) -> assert_eq(error.message, "migration target version 3 is not declared")
+    }
+    if catalog.plan_rollback(~target, U64{2}, Val(U64{2})) == {
+        .Ok(_) -> panic("accepted nondecreasing rollback")
+        .Err(error) -> assert_eq(error.message, "rollback target 2 is not below current version 2")
+    }
+    // A single byte change changes both raw source and catalog identities.
+    migration_test_write(scratch.root, "2_alpha.jet", "{first}// unknown: ignored\n")
+    changed :: migration_test_catalog(scratch.root)
+    assert(changed.source_identity != catalog.source_identity)
+    assert(changed.migrations[0].source_digest != catalog.migrations[0].source_digest)
+}
+#Test("migration parser preserves refusal branches and restores positive") {
+    scratch :: migration_scratch()
+    bad :: [String]{
+        "// name: alpha\n// up: SELECT 1\n",
+        "// jet db migration/v1\n// name: beta\n// up: SELECT 1\n",
+        "// jet db migration/v1\n// name: alpha\n",
+        "// jet db migration/v1\n// name: alpha\n// up: SQL{{}}\n",
+        "// jet db migration/v1\n// name: alpha\n// up: SQL{{\\q}}\n",
+        "// jet db migration/v1\n// name: alpha\n// up: SQL{{SELECT {TEXT_NUL}}}\n",
+        "// jet db migration/v1\n// name: alpha\n// up: SELECT 1\n// rollback: inverse\n",
+        "// jet db migration/v1\n// name: alpha\n// up: SELECT 1\n// down: SELECT 2\n// down: SELECT 3\n",
+    }
+    messages :: [String]{
+        "migration `1_alpha.jet` is missing the `{MIGRATION_SCHEMA}` marker",
+        "migration `1_alpha.jet` name does not match its filename slug",
+        "migration `1_alpha.jet` has no forward SQL",
+        "migration SQL cannot be empty",
+        "unknown SQL escape `\\q`",
+        "migration SQL contains an invalid control character",
+        "migration `1_alpha.jet` has invalid rollback mode `inverse`",
+        "migration `1_alpha.jet` has more down steps than up steps",
+    }
+    loop index in 0..<bad.len() {
+        migration_test_write(scratch.root, "1_alpha.jet", bad[index])
+        if MigrationCatalog.load(scratch.root) == {
+            .Ok(_) -> panic("parser accepted failing control {index}")
+            .Err(error) -> assert_eq(error.message, messages[index])
+        }
+    }
+    positive :: render_migration(U64{1}, "alpha", "SELECT 1", None, MigrationLock.Exclusive, "") ?? panic("render failed")
+    migration_test_write(scratch.root, "1_alpha.jet", positive)
+    restored :: migration_test_catalog(scratch.root)
+    assert_eq(restored.migrations.len(), 1)
+    assert(!restored.migrations[0].has_rollback())
+    if restored.plan_rollback(migration_test_target(scratch.root, MigrationLock.Exclusive), U64{1}, None) == {
+        .Ok(_) -> panic("rollback accepted irreversible migration")
+        .Err(error) -> assert_eq(error.message, "migration 1 `alpha` has no checked rollback path")
+    }
+}
+#Test("migration incomplete inverse stays declared but rollback refuses missing inverse") {
+    scratch :: migration_scratch()
+    migration_test_write(scratch.root, "1_alpha.jet", "// jet db migration/v1\n// name: alpha\n// up: SELECT 1\n// up: SELECT 2\n// down: SELECT 3\n")
+    catalog :: migration_test_catalog(scratch.root)
+    assert(catalog.migrations[0].has_rollback())
+    if catalog.plan_rollback(migration_test_target(scratch.root, MigrationLock.Exclusive), U64{1}, None) == {
+        .Ok(_) -> panic("accepted missing second inverse")
+        .Err(error) -> assert_eq(error.message, "migration 1 `alpha` has no inverse SQL")
+    }
+}
+#Test("migration duplicate version precedes duplicate name in path order") {
+    scratch :: migration_scratch()
+    alpha :: render_migration(U64{1}, "alpha", "SELECT 1", None, MigrationLock.Exclusive, "") ?? panic("render failed")
+    beta :: render_migration(U64{1}, "beta", "SELECT 1", None, MigrationLock.Exclusive, "") ?? panic("render failed")
+    migration_test_write(scratch.root, "1_alpha.jet", alpha)
+    migration_test_write(scratch.root, "1_beta.jet", beta)
+    if MigrationCatalog.load(scratch.root) == {
+        .Ok(_) -> panic("accepted duplicate version")
+        .Err(error) -> assert_eq(error.message, "duplicate migration version 1")
+    }
+    migration_test_fs.remove(migration_test_join(migration_test_join(scratch.root, MIGRATION_DIRECTORY), "1_beta.jet")) ?? panic("remove control failed")
+    migration_test_write(scratch.root, "2_alpha.jet", alpha)
+    if MigrationCatalog.load(scratch.root) == {
+        .Ok(_) -> panic("accepted duplicate name")
+        .Err(error) -> assert_eq(error.message, "duplicate migration name `alpha`")
+    }
+}
+#Test("migration shared concurrency exclusive conflicts Close and abandon retain pathname") {
+    scratch :: migration_scratch()
+    shared :: migration_test_target(scratch.root, MigrationLock.Shared)
+    exclusive :: migration_test_target(scratch.root, MigrationLock.Exclusive)
+    first :: shared.acquire_lock() ?? panic("first shared acquire failed")
+    second :: shared.acquire_lock() ?? panic("second shared acquire failed")
+    info :: shared.list_locks() ?? panic("lock listing failed")
+    assert_eq(info.len(), 2)
+    assert(!migration_test_path.equals(info[0].path, info[1].path))
+    loop lock in info {
+        assert_eq(lock.target, "dev")
+        assert_eq(lock.target_identity, shared.identity)
+        assert_eq(lock.database_identity, shared.database_identity)
+        assert_eq(lock.lock, MigrationLock.Shared)
+        assert_eq(lock.pid, U64.from_u32(migration_test_process.id()))
+    }
+    if exclusive.acquire_lock() == {
+        .Ok(guard) -> {
+            guard.close()
+            panic("exclusive acquired while shared live")
+        }
+        .Err(error) -> assert_eq(error.message, "migration target `dev` is already locked")
+    }
+    first.close()
+    second.close()
+    assert_eq(shared.list_locks() ?? panic("post-Close listing failed"), [MigrationLockInfo]{})
+    guard :: exclusive.acquire_lock() ?? panic("exclusive after shared Close failed")
+    if shared.acquire_lock() == {
+        .Ok(unexpected) -> {
+            unexpected.close()
+            panic("shared acquired while exclusive live")
+        }
+        .Err(error) -> assert_eq(error.message, "migration target `dev` is already locked")
+    }
+    guard.abandon()
+    assert(migration_test_fs.exists(exclusive.lock_path()))
+    locks :: exclusive.list_locks() ?? panic("abandoned lock metadata lost")
+    assert_eq(locks.len(), 1)
+    migration_test_fs.remove(exclusive.lock_path()) ?? panic("explicit operator removal failed")
+    restored :: exclusive.acquire_lock() ?? panic("reacquire after explicit removal failed")
+    restored.close()
+    assert(!migration_test_fs.exists(exclusive.lock_path()))
+}
+#Test("migration lock metadata last-field pid full U64 and identity refusal") {
+    scratch :: migration_scratch()
+    target :: migration_test_target(scratch.root, MigrationLock.Exclusive)
+    guard :: target.acquire_lock() ?? panic("acquire failed")
+    guard.abandon()
+    path :: target.lock_path()
+    original :: migration_test_fs.read_text(path) ?? panic("read actual lock failed")
+    migration_test_fs.write(path, "{original}pid=18446744073709551615\n".bytes()) ?? panic("write control failed")
+    rows :: target.list_locks() ?? panic("full U64 pid rejected")
+    assert_eq(rows[0].pid, U64.MAX)
+    migration_test_fs.write(path, "{original}pid=18446744073709551616\n".bytes()) ?? panic("write control failed")
+    if target.list_locks() == {
+        .Ok(_) -> panic("accepted oversized pid")
+        .Err(error) -> assert(error.message.contains("has an invalid owner pid"))
+    }
+    migration_test_fs.write(path, "{original}target_identity=stale\n".bytes()) ?? panic("write control failed")
+    if target.list_locks() == {
+        .Ok(_) -> panic("accepted stale identity")
+        .Err(error) -> assert(error.message.contains("has stale target or database identity"))
+    }
+    migration_test_fs.write(path, original.bytes()) ?? panic("restore failed")
+    assert_eq((target.list_locks() ?? panic("restored actual lock failed")).len(), 1)
+}
+
+#Test("migration filename version refusals and full U64 saturating next version") {
+    bad_names :: [String]{"alpha.jet", "x_alpha.jet", "0_alpha.jet", "18446744073709551616_alpha.jet"}
+    messages :: [String]{
+        "migration `alpha.jet` needs `<version>_<name>.jet`",
+        "migration `x_alpha.jet` has an invalid version",
+        "migration `0_alpha.jet` starts at version zero",
+        "migration `18446744073709551616_alpha.jet` has an oversized version",
+    }
+    valid :: render_migration(U64{1}, "alpha", "SELECT 1", None, MigrationLock.Exclusive, "") ?? panic("render failed")
+    loop index in 0..<bad_names.len() {
+        scratch :: migration_scratch()
+        migration_test_write(scratch.root, bad_names[index], valid)
+        if MigrationCatalog.load(scratch.root) == {
+            .Ok(_) -> panic("accepted malformed filename")
+            .Err(error) -> assert_eq(error.message, messages[index])
+        }
+    }
+    scratch :: migration_scratch()
+    migration_test_write(scratch.root, "18446744073709551615_alpha.jet", valid)
+    catalog :: migration_test_catalog(scratch.root)
+    assert_eq(catalog.migrations[0].version, U64.MAX)
+    assert_eq(catalog.next_version(), U64.MAX)
+}
+#Test("migration source rejects invalid UTF8 without lossy recovery") {
+    scratch :: migration_scratch()
+    migration_test_write(scratch.root, "1_alpha.jet", "// jet db migration/v1\n// up: SELECT 1\n")
+    path :: migration_test_join(migration_test_join(scratch.root, MIGRATION_DIRECTORY), "1_alpha.jet")
+    migration_test_fs.write(path, [U8]{U8{255}}) ?? panic("write invalid UTF8 control failed")
+    if MigrationCatalog.load(scratch.root) == {
+        .Ok(_) -> panic("lossy source recovery")
+        .Err(error) -> assert_eq(error.message, "migration `1_alpha.jet` is not UTF-8")
+    }
+    positive :: render_migration(U64{1}, "alpha", "SELECT 1", None, MigrationLock.Exclusive, "") ?? panic("render failed")
+    migration_test_fs.write(path, positive.bytes()) ?? panic("restore UTF8 source failed")
+    assert_eq((migration_test_catalog(scratch.root)).migrations.len(), 1)
+}

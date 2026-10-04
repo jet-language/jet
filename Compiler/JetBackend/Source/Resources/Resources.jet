@@ -1,0 +1,128 @@
+// SourceResources.rs:24-273,2703-2711: exact checked capability metadata.
+// The physical arena/session/lease and its final-alias retirement require
+// #4494; metadata is not an arena, lookup clone, or retained-root substitute.
+use jet_foundation.[MIRHandleID, MIRLoopSourceKind, MIRCoreOwner, MIRType, MIROwnershipMode, MIRExecutionIdentity, MIRArtifactID, NativeLoopResourceKey, stable_id]
+
+pub fn loop_cursor_handle_id() -> MIRHandleID Never! {
+    MIRHandleID{value: stable_id("mir-handle", "core.prelude::loop_iter_cursor")}
+}
+pub fn native_binding_handle_id() -> MIRHandleID Never! {
+    MIRHandleID{value: stable_id("mir-handle", "core.prelude::native_binding")}
+}
+pub fn shared_interop_root_handle_id() -> MIRHandleID Never! {
+    MIRHandleID{value: stable_id("mir-handle", "jet.internal::source_shared_interop_root")}
+}
+pub fn shared_interop_weak_root_handle_id() -> MIRHandleID Never! {
+    MIRHandleID{value: stable_id("mir-handle", "jet.internal::source_shared_interop_weak_root")}
+}
+
+pub enum SourceResourceKind {
+    PlainStream LinesFile FileWriter LinesStdin LinesProcessStream
+    ChannelReceiver ChannelSender NativeBinding
+    SharedInteropRoot(type_identity: U64)
+    SharedInteropWeakRoot(type_identity: U64)
+    EncodingReader(reader_type: String)
+    EncodingWriter(writer_type: String)
+    NativeCursor
+}
+
+pub fn source_resource_kind_from_loop_source(source: MIRLoopSourceKind) -> SourceResourceKind Err! {
+    if source == {
+        .Plain -> Ok(SourceResourceKind.PlainStream)
+        .LinesFile -> Ok(SourceResourceKind.LinesFile)
+        .LinesStdin -> Ok(SourceResourceKind.LinesStdin)
+        .LinesProcessStream -> Ok(SourceResourceKind.LinesProcessStream)
+        .ChannelReceiver -> Ok(SourceResourceKind.ChannelReceiver)
+        .EncodingReader(reader_type) -> Ok(SourceResourceKind.EncodingReader{reader_type: ~reader_type})
+        .Chars -> Err("character iteration is not a resource slot")
+        .Iterable(_, _, _, _) -> Err("UserIterable is not a native resource slot")
+    }
+}
+
+pub fn source_resource_kind_matches_loop_source(kind: SourceResourceKind, source: MIRLoopSourceKind) -> Bool Never! {
+    if kind == {
+        .PlainStream -> source == .Plain
+        .LinesFile -> source == .LinesFile
+        .LinesStdin -> source == .LinesStdin
+        .LinesProcessStream -> source == .LinesProcessStream
+        .ChannelReceiver -> source == .ChannelReceiver
+        .EncodingReader(left) -> if source == { .EncodingReader(right) -> left == right else -> false }
+        else -> false
+    }
+}
+
+pub fn source_resource_kind_as_loop_source(kind: SourceResourceKind) -> MIRLoopSourceKind Err! {
+    if kind == {
+        .PlainStream -> Ok(MIRLoopSourceKind.Plain)
+        .LinesFile -> Ok(MIRLoopSourceKind.LinesFile)
+        .FileWriter -> Err("file writer is not a loop producer kind")
+        .LinesStdin -> Ok(MIRLoopSourceKind.LinesStdin)
+        .LinesProcessStream -> Ok(MIRLoopSourceKind.LinesProcessStream)
+        .ChannelReceiver -> Ok(MIRLoopSourceKind.ChannelReceiver)
+        .ChannelSender -> Err("channel sender is not a loop producer kind")
+        .EncodingReader(reader_type) -> Ok(MIRLoopSourceKind.EncodingReader{reader_type: ~reader_type})
+        .EncodingWriter(_) -> Err("encoding writer is not a loop producer kind")
+        .SharedInteropRoot(_) | .SharedInteropWeakRoot(_) -> Err("Source Shared owners are not loop producer kinds")
+        .NativeBinding -> Err("native binding is not a loop producer kind")
+        .NativeCursor -> Err("native cursor is not a loop producer kind")
+    }
+}
+
+pub fn source_resource_kind_from_core_owner_type(registration: MIRCoreOwner, owner_type: MIRType) -> SourceResourceKind Err! {
+    if registration.id.value == U64{0} || registration.nominal_id.value == U64{0} -> return Err("checked Core owner registration has a zero identity")
+    if registration.key.len() == 0 || registration.name.len() == 0 -> return Err("checked Core owner registration has an empty key or name")
+    if registration.ownership != .Owned && registration.ownership != .Move -> return Err("checked Core owner registration is not owned")
+    if owner_type.kind == .Apply(name, args) {
+        if name.id != registration.nominal_id -> return Err("checked Core owner `{registration.name}` identity disagrees with its nominal registration")
+        if name.name != registration.name -> return Err("checked Core owner registration `{registration.name}` disagrees with Apply name `{name.name}`")
+        selected := SourceResourceKind?{None}
+        arity := 0
+        if registration.name == {
+            "Stream" -> { selected = Val(SourceResourceKind.PlainStream); arity = 1 }
+            "FileReader" -> selected = Val(SourceResourceKind.LinesFile)
+            "FileWriter" -> selected = Val(SourceResourceKind.FileWriter)
+            "StdinHandle" -> selected = Val(SourceResourceKind.LinesStdin)
+            "ProcessStdoutStream" | "ProcessStderrStream" -> selected = Val(SourceResourceKind.LinesProcessStream)
+            "Receiver" -> { selected = Val(SourceResourceKind.ChannelReceiver); arity = 1 }
+            "Sender" -> { selected = Val(SourceResourceKind.ChannelSender); arity = 1 }
+            "JSONReader" | "JSONLReader" | "CSVReader" | "XMLReader" | "CBORReader" -> selected = Val(SourceResourceKind.EncodingReader{reader_type: ~registration.name})
+            "JSONWriter" | "JSONLWriter" | "CSVWriter" | "XMLWriter" | "CBORWriter" -> selected = Val(SourceResourceKind.EncodingWriter{writer_type: ~registration.name})
+            else -> return Err("unsupported checked Core resource owner `{registration.name}`")
+        }
+        if args.len() != arity -> return Err("checked Core resource owner `{registration.name}` has {args.len()} type arguments; expected {arity}")
+        Ok(selected ?? panic("checked Source resource kind selection lost its result"))
+    } else {
+        Err("checked Core resource owner is not a nominal Apply")
+    }
+}
+
+pub struct SourceResourceHandle {
+    pub handle: MIRHandleID
+    pub raw: I64
+    pub kind: SourceResourceKind
+    pub generation: U32
+}
+pub fn source_resource_handle_native_loop_key(handle: SourceResourceHandle) -> NativeLoopResourceKey Err! {
+    source :: source_resource_kind_as_loop_source(handle.kind)
+    Ok(NativeLoopResourceKey{handle: handle.handle, raw: handle.raw, source_kind: source})
+}
+
+// Bit-preserving split of the signed ABI word; no pointer cast or allocation.
+pub fn source_resource_decode_raw(raw: I64) -> (U32, U32) Err! {
+    low :: raw & I64{4294967295}
+    high :: (raw >> 32) & I64{4294967295}
+    if low == I64{0} || high == I64{0} -> return Err("invalid or stale Source resource capability")
+    slot :: U32.from_i64(low) ?? panic("masked Source slot does not fit U32")
+    generation :: U32.from_i64(high) ?? panic("masked Source generation does not fit U32")
+    Ok((slot, generation))
+}
+
+// SourceResources.rs:465-486. Checked identity deliberately excludes the
+// interface method; it does not claim to own a physical MirNativeOwned root.
+pub enum SourceNativeBindingIdentity {
+    Callable(identity: NativeCallableIdentity)
+    Interface(execution: MIRExecutionIdentity, artifact: MIRArtifactID, receiver_type: MIRType)
+}
+pub fn source_native_binding_identity_same_scope_and_type(left: SourceNativeBindingIdentity, right: SourceNativeBindingIdentity) -> Bool Never! {
+    left == right
+}

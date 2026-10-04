@@ -1,0 +1,1682 @@
+// PORT-PENDING 0586 crates-jet-comptime-src-comptime-eventlite: crates/jet-comptime/src/Comptime/EventLite.rs:1-1678
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Interpreter `core.event` — mirrors AOT `ReactiveEventWatch.rs` for TIR deopt.
+//RS //! parity: guard tests/event_hooks.rs::decision_hook_outcomes_transform_and_short_circuit
+//RS //!
+//RS //! Handles are `CtValue` structs with an `id` field. Handler callables stay as
+//RS //! `CtValue` (eval `__JetTirCallable`); async handlers are queued and invoked
+//RS //! by the task join transition, never as a synchronous emit substitute.
+//RS 
+//RS use std::cell::{Cell, RefCell};
+//RS use std::collections::VecDeque;
+//RS use std::rc::Rc;
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS use crate::Comptime::Diagnostics::unsupported;
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::AST::CtValue;
+//RS 
+//RS static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+//RS 
+//RS fn next_id() -> u64 {
+//RS     NEXT_ID.fetch_add(1, Ordering::Relaxed)
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct Subscription {
+//RS     active: Rc<Cell<bool>>,
+//RS     cleanup: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
+//RS }
+//RS 
+//RS impl Subscription {
+//RS     fn new() -> Self {
+//RS         Subscription {
+//RS             active: Rc::new(Cell::new(true)),
+//RS             cleanup: Rc::new(RefCell::new(None)),
+//RS         }
+//RS     }
+//RS     fn set_cleanup<F: Fn() + 'static>(&self, cleanup: F) {
+//RS         *self.cleanup.borrow_mut() = Some(Rc::new(cleanup));
+//RS     }
+//RS     fn unsubscribe(&self) {
+//RS         if self.active.replace(false) {
+//RS             if let Some(cleanup) = self.cleanup.borrow().clone() {
+//RS                 cleanup();
+//RS             }
+//RS         }
+//RS     }
+//RS     fn active(&self) -> bool {
+//RS         self.active.get()
+//RS     }
+//RS }
+//RS 
+//RS struct ScopeState {
+//RS     cancelled: bool,
+//RS     subs: Vec<Subscription>,
+//RS     hard_cancellers: Vec<Rc<dyn Fn()>>,
+//RS }
+//RS 
+//RS struct Listener {
+//RS     id: u64,
+//RS     priority: i64,
+//RS     once: bool,
+//RS     sub: Subscription,
+//RS     handler: CtValue,
+//RS }
+//RS 
+//RS struct EventState {
+//RS     listeners: Vec<Listener>,
+//RS }
+//RS 
+//RS struct HookState {
+//RS     fallback: CtValue,
+//RS     listeners: Vec<Listener>,
+//RS }
+//RS 
+//RS struct DecisionHookState {
+//RS     listeners: Vec<Listener>,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS enum AsyncOverflow {
+//RS     Block,
+//RS     DropNewest,
+//RS     DropOldest,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS enum AsyncFailurePolicy {
+//RS     StopFirst,
+//RS     Collect,
+//RS     Log,
+//RS     Ignore,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS enum AsyncPhase {
+//RS     Queued,
+//RS     Blocked,
+//RS     Running,
+//RS     Terminal,
+//RS }
+//RS 
+//RS struct AsyncTaskState {
+//RS     id: u64,
+//RS     event_id: i64,
+//RS     payload: CtValue,
+//RS     phase: AsyncPhase,
+//RS     accepted: bool,
+//RS     report: Option<CtValue>,
+//RS     joined: bool,
+//RS }
+//RS 
+//RS struct AsyncEventState {
+//RS     listeners: Vec<Listener>,
+//RS     capacity: usize,
+//RS     overflow: AsyncOverflow,
+//RS     failure_policy: AsyncFailurePolicy,
+//RS     queued: VecDeque<i64>,
+//RS     blocked: VecDeque<i64>,
+//RS     running: Option<i64>,
+//RS     closed: bool,
+//RS     cancelled: bool,
+//RS }
+//RS 
+//RS struct TraceState {
+//RS     delivered: i64,
+//RS     queued: i64,
+//RS     dropped: i64,
+//RS     summary: String,
+//RS }
+//RS 
+//RS struct ReportState {
+//RS     accepted: bool,
+//RS     state: String,
+//RS     handlers: i64,
+//RS     failures: Vec<CtValue>,
+//RS     trace: i64,
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static SCOPES: RefCell<Vec<Option<ScopeState>>> = const { RefCell::new(Vec::new()) };
+//RS     static EVENTS: RefCell<Vec<Option<EventState>>> = const { RefCell::new(Vec::new()) };
+//RS     static HOOKS: RefCell<Vec<Option<HookState>>> = const { RefCell::new(Vec::new()) };
+//RS     static DECISION_HOOKS: RefCell<Vec<Option<DecisionHookState>>> =
+//RS         const { RefCell::new(Vec::new()) };
+//RS     static ASYNC_EVENTS: RefCell<Vec<Option<AsyncEventState>>> =
+//RS         const { RefCell::new(Vec::new()) };
+//RS     static ASYNC_TASKS: RefCell<Vec<Option<AsyncTaskState>>> =
+//RS         const { RefCell::new(Vec::new()) };
+//RS     static SUBS: RefCell<Vec<Option<Subscription>>> = const { RefCell::new(Vec::new()) };
+//RS     static TRACES: RefCell<Vec<Option<TraceState>>> = const { RefCell::new(Vec::new()) };
+//RS     static REPORTS: RefCell<Vec<Option<ReportState>>> = const { RefCell::new(Vec::new()) };
+//RS }
+//RS 
+//RS /// Clear every EventLite store. Call at whole-program evaluator run entry so
+//RS /// REPL / warm-cache / test workers do not retain closures or stale ids.
+//RS pub fn reset() {
+//RS     SCOPES.with(|s| s.borrow_mut().clear());
+//RS     EVENTS.with(|s| s.borrow_mut().clear());
+//RS     HOOKS.with(|s| s.borrow_mut().clear());
+//RS     DECISION_HOOKS.with(|s| s.borrow_mut().clear());
+//RS     ASYNC_EVENTS.with(|s| s.borrow_mut().clear());
+//RS     ASYNC_TASKS.with(|s| s.borrow_mut().clear());
+//RS     SUBS.with(|s| s.borrow_mut().clear());
+//RS     TRACES.with(|s| s.borrow_mut().clear());
+//RS     REPORTS.with(|s| s.borrow_mut().clear());
+//RS     NEXT_ID.store(1, Ordering::Relaxed);
+//RS }
+//RS 
+//RS fn push_scope(state: ScopeState) -> i64 {
+//RS     SCOPES.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(state));
+//RS         v.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn push_event(state: EventState) -> i64 {
+//RS     EVENTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(state));
+//RS         v.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn push_hook(state: HookState) -> i64 {
+//RS     HOOKS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(state));
+//RS         v.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn push_decision_hook(state: DecisionHookState) -> i64 {
+//RS     DECISION_HOOKS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(state));
+//RS         v.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn push_async_event(state: AsyncEventState) -> i64 {
+//RS     ASYNC_EVENTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(state));
+//RS         v.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn push_async_task(state: AsyncTaskState) -> i64 {
+//RS     ASYNC_TASKS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(state));
+//RS         (v.len() - 1) as i64
+//RS     })
+//RS }
+//RS 
+//RS fn task_handle_value(task_id: i64) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "__JetTirTask".to_string(),
+//RS         fields: vec![("event_task".to_string(), CtValue::Int(task_id))],
+//RS     }
+//RS }
+//RS 
+//RS fn task_id(recv: &CtValue) -> Option<i64> {
+//RS     match recv {
+//RS         CtValue::Struct { type_name, fields } if type_name == "__JetTirTask" => {
+//RS             fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+//RS                 ("event_task", CtValue::Int(id)) if *id >= 0 => Some(*id),
+//RS                 _ => None,
+//RS             })
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn is_event_task(recv: &CtValue) -> bool {
+//RS     task_id(recv).is_some()
+//RS }
+//RS 
+//RS fn push_sub(sub: Subscription) -> i64 {
+//RS     SUBS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(sub));
+//RS         v.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn push_trace(trace: TraceState) -> i64 {
+//RS     TRACES.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(trace));
+//RS         v.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn push_report(report: ReportState) -> i64 {
+//RS     REPORTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         v.push(Some(report));
+//RS         v.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn handle_value(type_name: &str, id: i64) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: vec![("id".to_string(), CtValue::Int(id))],
+//RS     }
+//RS }
+//RS 
+//RS fn handle_id(recv: &CtValue, want: &str) -> Option<i64> {
+//RS     match recv {
+//RS         CtValue::Struct { type_name, fields } if type_name == want => {
+//RS             fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
+//RS                 ("id", CtValue::Int(i)) => Some(*i),
+//RS                 _ => None,
+//RS             })
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS fn scope_track_hard_cancel<F: Fn() + 'static>(scope_id: i64, cancel: F) {
+//RS     let cancel: Rc<dyn Fn()> = Rc::new(cancel);
+//RS     let accepted = SCOPES.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = scope_id.saturating_sub(1) as usize;
+//RS         let Some(Some(scope)) = v.get_mut(idx) else {
+//RS             return false;
+//RS         };
+//RS         if scope.cancelled {
+//RS             return false;
+//RS         }
+//RS         scope.hard_cancellers.push(cancel.clone());
+//RS         true
+//RS     });
+//RS     if !accepted {
+//RS         cancel();
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn recv_type(recv: &CtValue) -> Option<&str> {
+//RS     match recv {
+//RS         CtValue::Struct { type_name, .. } => Some(type_name.as_str()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn scope_track(scope_id: i64, sub: Subscription) -> Subscription {
+//RS     SCOPES.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = scope_id.saturating_sub(1) as usize;
+//RS         let Some(Some(scope)) = v.get_mut(idx) else {
+//RS             sub.unsubscribe();
+//RS             return sub;
+//RS         };
+//RS         if scope.cancelled {
+//RS             sub.unsubscribe();
+//RS             return sub;
+//RS         }
+//RS         scope.subs.retain(|s| s.active());
+//RS         scope.subs.push(sub.clone());
+//RS         sub
+//RS     })
+//RS }
+//RS 
+//RS fn scope_cancel(scope_id: i64) {
+//RS     let (subs, hard_cancellers) = SCOPES.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = scope_id.saturating_sub(1) as usize;
+//RS         let Some(Some(scope)) = v.get_mut(idx) else {
+//RS             return (Vec::new(), Vec::new());
+//RS         };
+//RS         if scope.cancelled {
+//RS             return (Vec::new(), Vec::new());
+//RS         }
+//RS         scope.cancelled = true;
+//RS         (
+//RS             std::mem::take(&mut scope.subs),
+//RS             std::mem::take(&mut scope.hard_cancellers),
+//RS         )
+//RS     });
+//RS     for sub in subs {
+//RS         sub.unsubscribe();
+//RS     }
+//RS     for cancel in hard_cancellers {
+//RS         cancel();
+//RS     }
+//RS }
+//RS 
+//RS fn scope_active_count(scope_id: i64) -> i64 {
+//RS     SCOPES.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = scope_id.saturating_sub(1) as usize;
+//RS         let Some(Some(scope)) = v.get_mut(idx) else {
+//RS             return 0;
+//RS         };
+//RS         scope.subs.retain(|s| s.active());
+//RS         scope.subs.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn store_sub(sub: Subscription) -> CtValue {
+//RS     handle_value("Subscription", push_sub(sub))
+//RS }
+//RS 
+//RS fn event_add(event_id: i64, scope_id: i64, priority: i64, once: bool, handler: CtValue) -> CtValue {
+//RS     let sub = scope_track(scope_id, Subscription::new());
+//RS     if !sub.active() {
+//RS         return store_sub(sub);
+//RS     }
+//RS     let lid = next_id();
+//RS     EVENTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = event_id.saturating_sub(1) as usize;
+//RS         if let Some(Some(event)) = v.get_mut(idx) {
+//RS             let cleanup_event = event_id;
+//RS             let cleanup_lid = lid;
+//RS             sub.set_cleanup(move || {
+//RS                 EVENTS.with(|slot| {
+//RS                     let mut v = slot.borrow_mut();
+//RS                     let idx = cleanup_event.saturating_sub(1) as usize;
+//RS                     if let Some(Some(event)) = v.get_mut(idx) {
+//RS                         event.listeners.retain(|l| l.id != cleanup_lid);
+//RS                     }
+//RS                 });
+//RS             });
+//RS             event.listeners.push(Listener {
+//RS                 id: lid,
+//RS                 priority,
+//RS                 once,
+//RS                 sub: sub.clone(),
+//RS                 handler,
+//RS             });
+//RS         }
+//RS     });
+//RS     store_sub(sub)
+//RS }
+//RS 
+//RS fn hook_add(hook_id: i64, scope_id: i64, priority: i64, once: bool, handler: CtValue) -> CtValue {
+//RS     // AOT Hook::add inserts the listener before scope.track.
+//RS     let sub = Subscription::new();
+//RS     let lid = next_id();
+//RS     HOOKS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = hook_id.saturating_sub(1) as usize;
+//RS         if let Some(Some(hook)) = v.get_mut(idx) {
+//RS             let cleanup_hook = hook_id;
+//RS             let cleanup_lid = lid;
+//RS             sub.set_cleanup(move || {
+//RS                 HOOKS.with(|slot| {
+//RS                     let mut v = slot.borrow_mut();
+//RS                     let idx = cleanup_hook.saturating_sub(1) as usize;
+//RS                     if let Some(Some(hook)) = v.get_mut(idx) {
+//RS                         hook.listeners.retain(|l| l.id != cleanup_lid);
+//RS                     }
+//RS                 });
+//RS             });
+//RS             hook.listeners.push(Listener {
+//RS                 id: lid,
+//RS                 priority,
+//RS                 once,
+//RS                 sub: sub.clone(),
+//RS                 handler,
+//RS             });
+//RS         }
+//RS     });
+//RS     let tracked = scope_track(scope_id, sub);
+//RS     store_sub(tracked)
+//RS }
+//RS 
+//RS fn decision_hook_add(
+//RS     hook_id: i64,
+//RS     scope_id: i64,
+//RS     priority: i64,
+//RS     once: bool,
+//RS     handler: CtValue,
+//RS ) -> CtValue {
+//RS     let sub = scope_track(scope_id, Subscription::new());
+//RS     if !sub.active() {
+//RS         return store_sub(sub);
+//RS     }
+//RS     let lid = next_id();
+//RS     DECISION_HOOKS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = hook_id.saturating_sub(1) as usize;
+//RS         if let Some(Some(hook)) = v.get_mut(idx) {
+//RS             let cleanup_hook = hook_id;
+//RS             let cleanup_lid = lid;
+//RS             sub.set_cleanup(move || {
+//RS                 DECISION_HOOKS.with(|slot| {
+//RS                     let mut v = slot.borrow_mut();
+//RS                     let idx = cleanup_hook.saturating_sub(1) as usize;
+//RS                     if let Some(Some(hook)) = v.get_mut(idx) {
+//RS                         hook.listeners.retain(|l| l.id != cleanup_lid);
+//RS                     }
+//RS                 });
+//RS             });
+//RS             hook.listeners.push(Listener {
+//RS                 id: lid,
+//RS                 priority,
+//RS                 once,
+//RS                 sub: sub.clone(),
+//RS                 handler,
+//RS             });
+//RS         }
+//RS     });
+//RS     store_sub(sub)
+//RS }
+//RS 
+//RS fn async_event_add(
+//RS     event_id: i64,
+//RS     scope_id: i64,
+//RS     priority: i64,
+//RS     once: bool,
+//RS     handler: CtValue,
+//RS ) -> CtValue {
+//RS     let sub = scope_track(scope_id, Subscription::new());
+//RS     if !sub.active() {
+//RS         return store_sub(sub);
+//RS     }
+//RS     let lid = next_id();
+//RS     let mut found = false;
+//RS     ASYNC_EVENTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = event_id.saturating_sub(1) as usize;
+//RS         if let Some(Some(event)) = v.get_mut(idx) {
+//RS             found = true;
+//RS             let cleanup_event = event_id;
+//RS             let cleanup_lid = lid;
+//RS             sub.set_cleanup(move || {
+//RS                 ASYNC_EVENTS.with(|slot| {
+//RS                     let mut v = slot.borrow_mut();
+//RS                     let idx = cleanup_event.saturating_sub(1) as usize;
+//RS                     if let Some(Some(event)) = v.get_mut(idx) {
+//RS                         event.listeners.retain(|l| l.id != cleanup_lid);
+//RS                     }
+//RS                 });
+//RS             });
+//RS             event.listeners.push(Listener {
+//RS                 id: lid,
+//RS                 priority,
+//RS                 once,
+//RS                 sub: sub.clone(),
+//RS                 handler,
+//RS             });
+//RS         }
+//RS     });
+//RS     if found {
+//RS         let cancel_event = event_id;
+//RS         scope_track_hard_cancel(scope_id, move || cancel_async_event(cancel_event));
+//RS     } else {
+//RS         sub.unsubscribe();
+//RS     }
+//RS     store_sub(sub)
+//RS }
+//RS 
+//RS /// Sorted active listeners for dispatch (priority desc, then id asc).
+//RS fn collect_dispatch(listeners: &[Listener]) -> Vec<(i64, u64, bool, Subscription, CtValue)> {
+//RS     let mut entries: Vec<(i64, u64, bool, Subscription, CtValue)> = listeners
+//RS         .iter()
+//RS         .filter(|l| l.sub.active())
+//RS         .map(|l| (l.priority, l.id, l.once, l.sub.clone(), l.handler.clone()))
+//RS         .collect();
+//RS     entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+//RS     entries
+//RS }
+//RS 
+//RS fn make_trace(delivered: i64) -> CtValue {
+//RS     make_trace_state(delivered, 0, 0, format!("event delivered={delivered} queued=0 dropped=0"))
+//RS }
+//RS 
+//RS fn make_trace_state(delivered: i64, queued: i64, dropped: i64, summary: String) -> CtValue {
+//RS     handle_value(
+//RS         "EventTrace",
+//RS         push_trace(TraceState {
+//RS             delivered,
+//RS             queued,
+//RS             dropped,
+//RS             summary,
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS fn make_dispatch_report(
+//RS     accepted: bool,
+//RS     state: &str,
+//RS     handlers: i64,
+//RS     failures: Vec<CtValue>,
+//RS     delivered: i64,
+//RS     queued: i64,
+//RS     dropped: i64,
+//RS ) -> CtValue {
+//RS     let trace = make_trace_state(
+//RS         delivered,
+//RS         queued,
+//RS         dropped,
+//RS         format!("event state={state} delivered={delivered} queued={queued} dropped={dropped}"),
+//RS     );
+//RS     let trace_id = handle_id(&trace, "EventTrace").unwrap_or(0);
+//RS     handle_value(
+//RS         "DispatchReport",
+//RS         push_report(ReportState {
+//RS             accepted,
+//RS             state: state.to_string(),
+//RS             handlers,
+//RS             failures,
+//RS             trace: trace_id,
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS fn policy_parts(policy: &CtValue) -> Option<(i64, AsyncOverflow)> {
+//RS     let CtValue::Struct { type_name, fields } = policy else {
+//RS         return None;
+//RS     };
+//RS     if type_name != "AsyncPolicy" && !type_name.ends_with("AsyncPolicy") {
+//RS         return None;
+//RS     }
+//RS     let capacity = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+//RS         ("capacity", CtValue::Int(value)) => Some(*value),
+//RS         _ => None,
+//RS     })?;
+//RS     let overflow = fields.iter().find_map(|(name, value)| {
+//RS         if name != "overflow" {
+//RS             return None;
+//RS         }
+//RS         match value {
+//RS             CtValue::Enum { variant, .. } => match variant.as_str() {
+//RS                 "Block" => Some(AsyncOverflow::Block),
+//RS                 "DropNewest" => Some(AsyncOverflow::DropNewest),
+//RS                 "DropOldest" => Some(AsyncOverflow::DropOldest),
+//RS                 _ => None,
+//RS             },
+//RS             _ => None,
+//RS         }
+//RS     })?;
+//RS     Some((capacity, overflow))
+//RS }
+//RS 
+//RS fn failure_policy_kind(value: &CtValue) -> Option<AsyncFailurePolicy> {
+//RS     match value {
+//RS         CtValue::Enum { variant, .. } => match variant.as_str() {
+//RS             "StopFirst" => Some(AsyncFailurePolicy::StopFirst),
+//RS             "Collect" => Some(AsyncFailurePolicy::Collect),
+//RS             "Log" => Some(AsyncFailurePolicy::Log),
+//RS             "Ignore" => Some(AsyncFailurePolicy::Ignore),
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub fn core_event_scope() -> CtValue {
+//RS     handle_value(
+//RS         "EventScope",
+//RS         push_scope(ScopeState {
+//RS             cancelled: false,
+//RS             subs: Vec::new(),
+//RS             hard_cancellers: Vec::new(),
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS pub fn core_event_new() -> CtValue {
+//RS     handle_value(
+//RS         "Event",
+//RS         push_event(EventState {
+//RS             listeners: Vec::new(),
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS pub fn core_event_with_policy(_policy: CtValue) -> CtValue {
+//RS     core_event_new()
+//RS }
+//RS 
+//RS pub fn core_event_policy_sync() -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "EventPolicy".to_string(),
+//RS         fields: vec![("kind".to_string(), CtValue::Str("sync".to_string()))],
+//RS     }
+//RS }
+//RS 
+//RS pub fn core_event_hook(fallback: CtValue) -> CtValue {
+//RS     handle_value(
+//RS         "Hook",
+//RS         push_hook(HookState {
+//RS             fallback,
+//RS             listeners: Vec::new(),
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS pub fn core_event_decision_hook(_policy: CtValue) -> CtValue {
+//RS     handle_value(
+//RS         "DecisionHook",
+//RS         push_decision_hook(DecisionHookState {
+//RS             listeners: Vec::new(),
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS pub fn core_event_async_result(
+//RS     policy: &CtValue,
+//RS     failure: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let Some((capacity, overflow)) = policy_parts(policy) else {
+//RS         let _ = span;
+//RS         return Ok(CtValue::failed(Box::new(CtValue::Enum {
+//RS             type_name: "EventConfigError".to_string(),
+//RS             variant: "InvalidCapacity".to_string(),
+//RS             args: vec![],
+//RS         })));
+//RS     };
+//RS     let Some(failure_policy) = failure_policy_kind(failure) else {
+//RS         let _ = span;
+//RS         return Ok(CtValue::failed(Box::new(CtValue::Enum {
+//RS             type_name: "EventConfigError".to_string(),
+//RS             variant: "InvalidCapacity".to_string(),
+//RS             args: vec![],
+//RS         })));
+//RS     };
+//RS     if capacity <= 0 {
+//RS         return Ok(CtValue::failed(Box::new(CtValue::Enum {
+//RS             type_name: "EventConfigError".to_string(),
+//RS             variant: "InvalidCapacity".to_string(),
+//RS             args: vec![],
+//RS         })));
+//RS     }
+//RS     Ok(CtValue::Present(Box::new(handle_value(
+//RS         "AsyncEvent",
+//RS         push_async_event(AsyncEventState {
+//RS             listeners: Vec::new(),
+//RS             capacity: capacity as usize,
+//RS             overflow,
+//RS             failure_policy,
+//RS             queued: VecDeque::new(),
+//RS             blocked: VecDeque::new(),
+//RS             running: None,
+//RS             closed: false,
+//RS             cancelled: false,
+//RS         }),
+//RS     ))))
+//RS }
+//RS 
+//RS /// Dispatch an event method. `invoke` runs stored handler callables.
+//RS pub fn eval_method(
+//RS     method: &str,
+//RS     recv: &mut CtValue,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS     invoke: &mut dyn FnMut(CtValue, Vec<CtValue>) -> Result<CtValue, Diagnostic>,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     let ty = recv_type(recv)?;
+//RS     if ty == "__JetTirTask" && !is_event_task(recv) {
+//RS         return None;
+//RS     }
+//RS     Some(eval_method_inner(ty, method, recv, args, span, invoke))
+//RS }
+//RS fn task_snapshot(
+//RS     task_id: i64,
+//RS ) -> Option<(u64, i64, CtValue, AsyncPhase, bool, Option<CtValue>, bool)> {
+//RS     ASYNC_TASKS.with(|slot| {
+//RS         let v = slot.borrow();
+//RS         let task = v.get(task_id as usize)?.as_ref()?;
+//RS         Some((
+//RS             task.id,
+//RS             task.event_id,
+//RS             task.payload.clone(),
+//RS             task.phase,
+//RS             task.accepted,
+//RS             task.report.clone(),
+//RS             task.joined,
+//RS         ))
+//RS     })
+//RS }
+//RS 
+//RS fn set_task_phase(task_id: i64, phase: AsyncPhase, accepted: Option<bool>) {
+//RS     ASYNC_TASKS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         if let Some(Some(task)) = v.get_mut(task_id as usize) {
+//RS             task.phase = phase;
+//RS             if let Some(accepted) = accepted {
+//RS                 task.accepted = accepted;
+//RS             }
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn set_task_report(task_id: i64, report: CtValue) {
+//RS     ASYNC_TASKS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         if let Some(Some(task)) = v.get_mut(task_id as usize) {
+//RS             task.phase = AsyncPhase::Terminal;
+//RS             task.report = Some(report);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn task_report(
+//RS     task_id: i64,
+//RS     state: &str,
+//RS     handlers: i64,
+//RS     failures: Vec<CtValue>,
+//RS     delivered: i64,
+//RS     queued: i64,
+//RS     dropped: i64,
+//RS ) {
+//RS     let accepted = task_snapshot(task_id).map(|(_, _, _, _, accepted, _, _)| accepted).unwrap_or(false);
+//RS     set_task_report(
+//RS         task_id,
+//RS         make_dispatch_report(accepted, state, handlers, failures, delivered, queued, dropped),
+//RS     );
+//RS }
+//RS 
+//RS fn cancel_async_event(event_id: i64) {
+//RS     let (queued, blocked, running, listeners) = ASYNC_EVENTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = event_id.saturating_sub(1) as usize;
+//RS         let Some(Some(event)) = v.get_mut(idx) else {
+//RS             return (Vec::new(), Vec::new(), None, Vec::new());
+//RS         };
+//RS         event.cancelled = true;
+//RS         (
+//RS             event.queued.drain(..).collect::<Vec<_>>(),
+//RS             event.blocked.drain(..).collect::<Vec<_>>(),
+//RS             event.running,
+//RS             event
+//RS                 .listeners
+//RS                 .iter()
+//RS                 .map(|listener| listener.sub.clone())
+//RS                 .collect::<Vec<_>>(),
+//RS         )
+//RS     });
+//RS     for sub in listeners {
+//RS         sub.unsubscribe();
+//RS     }
+//RS     for task_id in queued {
+//RS         task_report(task_id, "Cancelled", 0, Vec::new(), 0, 1, 0);
+//RS     }
+//RS     for task_id in blocked {
+//RS         task_report(task_id, "Cancelled", 0, Vec::new(), 0, 0, 0);
+//RS     }
+//RS     if let Some(task_id) = running {
+//RS         set_task_phase(task_id, AsyncPhase::Running, Some(true));
+//RS     }
+//RS }
+//RS 
+//RS fn close_async_event(event_id: i64) {
+//RS     let blocked = ASYNC_EVENTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = event_id.saturating_sub(1) as usize;
+//RS         let Some(Some(event)) = v.get_mut(idx) else {
+//RS             return Vec::new();
+//RS         };
+//RS         event.closed = true;
+//RS         event.blocked.drain(..).collect::<Vec<_>>()
+//RS     });
+//RS     for task_id in blocked {
+//RS         task_report(task_id, "Closed", 0, Vec::new(), 0, 0, 0);
+//RS     }
+//RS }
+//RS 
+//RS fn promote_blocked(event_id: i64) {
+//RS     ASYNC_EVENTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = event_id.saturating_sub(1) as usize;
+//RS         let Some(Some(event)) = v.get_mut(idx) else {
+//RS             return;
+//RS         };
+//RS         if event.closed || event.cancelled {
+//RS             return;
+//RS         }
+//RS         while event.queued.len() < event.capacity {
+//RS             let Some(task_id) = event.blocked.pop_front() else {
+//RS                 break;
+//RS             };
+//RS             set_task_phase(task_id, AsyncPhase::Queued, Some(true));
+//RS             event.queued.push_back(task_id);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn async_event_emit(event_id: i64, payload: CtValue) -> CtValue {
+//RS     let task_id = push_async_task(AsyncTaskState {
+//RS         id: next_id(),
+//RS         event_id,
+//RS         payload,
+//RS         phase: AsyncPhase::Terminal,
+//RS         accepted: false,
+//RS         report: None,
+//RS         joined: false,
+//RS     });
+//RS     let mut terminal = None;
+//RS     let mut displaced = None;
+//RS     ASYNC_EVENTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = event_id.saturating_sub(1) as usize;
+//RS         let Some(Some(event)) = v.get_mut(idx) else {
+//RS             terminal = Some(("Closed", false, 0, 0, 0));
+//RS             return;
+//RS         };
+//RS         if event.cancelled {
+//RS             terminal = Some(("Cancelled", false, 0, 0, 0));
+//RS         } else if event.closed {
+//RS             terminal = Some(("Closed", false, 0, 0, 0));
+//RS         } else if event.queued.len() < event.capacity {
+//RS             set_task_phase(task_id, AsyncPhase::Queued, Some(true));
+//RS             event.queued.push_back(task_id);
+//RS         } else {
+//RS             match event.overflow {
+//RS                 AsyncOverflow::Block => {
+//RS                     set_task_phase(task_id, AsyncPhase::Blocked, Some(false));
+//RS                     event.blocked.push_back(task_id);
+//RS                 }
+//RS                 AsyncOverflow::DropNewest => {
+//RS                     terminal = Some(("DroppedNewest", false, 0, 0, 1));
+//RS                 }
+//RS                 AsyncOverflow::DropOldest => {
+//RS                     displaced = event.queued.pop_front();
+//RS                     set_task_phase(task_id, AsyncPhase::Queued, Some(true));
+//RS                     event.queued.push_back(task_id);
+//RS                     if displaced.is_none() {
+//RS                         terminal = Some(("DroppedNewest", false, 0, 0, 1));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     });
+//RS     if let Some((state, accepted, delivered, queued, dropped)) = terminal {
+//RS         ASYNC_TASKS.with(|slot| {
+//RS             if let Some(Some(task)) = slot.borrow_mut().get_mut(task_id as usize) {
+//RS                 task.accepted = accepted;
+//RS             }
+//RS         });
+//RS         task_report(task_id, state, 0, Vec::new(), delivered, queued, dropped);
+//RS     }
+//RS     if let Some(displaced) = displaced {
+//RS         task_report(displaced, "DroppedOldest", 0, Vec::new(), 0, 1, 1);
+//RS     }
+//RS     task_handle_value(task_id)
+//RS }
+//RS 
+//RS fn handler_failure(value: CtValue) -> Option<CtValue> {
+//RS     match value {
+//RS         CtValue::Failed(crate::AST::CtReport::Told(value)) => Some(*value),
+//RS         CtValue::Failed(crate::AST::CtReport::Clean(_)) => Some(CtValue::Unit),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS fn normalize_handler_failure(value: CtValue) -> CtValue {
+//RS     match value {
+//RS         CtValue::Struct { type_name, fields } if type_name == "Err" => {
+//RS             let message = fields
+//RS                 .iter()
+//RS                 .find_map(|(name, value)| (name == "message").then_some(value.clone()));
+//RS             match message {
+//RS                 Some(CtValue::Str(message)) => CtValue::Str(message),
+//RS                 _ => CtValue::Struct { type_name, fields },
+//RS             }
+//RS         }
+//RS         value => value,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn dispatch_failure(value: CtValue) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: "DispatchFailure".to_string(),
+//RS         variant: "Handler".to_string(),
+//RS         args: vec![(None, value)],
+//RS     }
+//RS }
+//RS 
+//RS fn prepare_next_task(target: i64) -> Result<Option<(i64, i64)>, Diagnostic> {
+//RS     let Some((_, event_id, _, phase, _, report, _)) = task_snapshot(target) else {
+//RS         return Err(unsupported("EventTask.join", Span::new(0, 0)));
+//RS     };
+//RS     if report.is_some() {
+//RS         return Ok(None);
+//RS     }
+//RS     if phase == AsyncPhase::Blocked {
+//RS         promote_blocked(event_id);
+//RS     }
+//RS     let choice = ASYNC_EVENTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = event_id.saturating_sub(1) as usize;
+//RS         let Some(Some(event)) = v.get_mut(idx) else {
+//RS             return None;
+//RS         };
+//RS         if event.running.is_some() {
+//RS             return None;
+//RS         }
+//RS         let task_id = event.queued.pop_front()?;
+//RS         event.running = Some(task_id);
+//RS         set_task_phase(task_id, AsyncPhase::Running, Some(true));
+//RS         Some((task_id, event_id))
+//RS     });
+//RS     if choice.is_none() && phase == AsyncPhase::Blocked {
+//RS         let Some((_, _, _, _, _, report, _)) = task_snapshot(target) else {
+//RS             return Err(unsupported("EventTask.join", Span::new(0, 0)));
+//RS         };
+//RS         if report.is_none() {
+//RS             return Err(unsupported(
+//RS                 "EventTask.join is waiting on a running dispatch",
+//RS                 Span::new(0, 0),
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(choice)
+//RS }
+//RS 
+//RS fn run_async_task(
+//RS     task_id: i64,
+//RS     event_id: i64,
+//RS     span: Span,
+//RS     invoke: &mut dyn FnMut(CtValue, Vec<CtValue>) -> Result<CtValue, Diagnostic>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let Some((_, _, payload, _, _, _, _)) = task_snapshot(task_id) else {
+//RS         return Err(unsupported("EventTask.join", span));
+//RS     };
+//RS     let (failure_policy, listeners) = ASYNC_EVENTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = event_id.saturating_sub(1) as usize;
+//RS         let Some(Some(event)) = v.get_mut(idx) else {
+//RS             return (
+//RS                 AsyncFailurePolicy::StopFirst,
+//RS                 (Vec::new(), Vec::new()),
+//RS             );
+//RS         };
+//RS         let dispatch = collect_dispatch(&event.listeners);
+//RS         let once = dispatch
+//RS             .iter()
+//RS             .filter(|(_, _, once, _, _)| *once)
+//RS             .map(|(_, _, _, sub, _)| sub.clone())
+//RS             .collect::<Vec<_>>();
+//RS         (event.failure_policy, (dispatch, once))
+//RS     });
+//RS     let (listeners, once) = listeners;
+//RS     for sub in once {
+//RS         sub.unsubscribe();
+//RS     }
+//RS     let mut failures = Vec::new();
+//RS     let mut delivered = 0;
+//RS     let mut callback_error = None;
+//RS     for (_, _, _, _, handler) in listeners {
+//RS         if ASYNC_EVENTS.with(|slot| {
+//RS             let v = slot.borrow();
+//RS             let idx = event_id.saturating_sub(1) as usize;
+//RS             v.get(idx)
+//RS                 .and_then(|state| state.as_ref())
+//RS                 .map(|event| event.cancelled)
+//RS                 .unwrap_or(true)
+//RS         }) {
+//RS             break;
+//RS         }
+//RS         delivered += 1;
+//RS         match invoke(handler, vec![payload.clone()]) {
+//RS             Ok(value) => {
+//RS                 if let Some(error) = handler_failure(value) {
+//RS                     failures.push(dispatch_failure(normalize_handler_failure(error)));
+//RS                     if failure_policy == AsyncFailurePolicy::StopFirst {
+//RS                         break;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Err(error) => {
+//RS                 callback_error = Some(error);
+//RS                 break;
+//RS             }
+//RS         }
+//RS     }
+//RS     let cancelled = ASYNC_EVENTS.with(|slot| {
+//RS         let mut v = slot.borrow_mut();
+//RS         let idx = event_id.saturating_sub(1) as usize;
+//RS         let Some(Some(event)) = v.get_mut(idx) else {
+//RS             return true;
+//RS         };
+//RS         event.running = None;
+//RS         event.cancelled
+//RS     });
+//RS     let state = if cancelled {
+//RS         "Cancelled"
+//RS     } else if !failures.is_empty()
+//RS         && matches!(
+//RS             failure_policy,
+//RS             AsyncFailurePolicy::StopFirst | AsyncFailurePolicy::Collect
+//RS         )
+//RS     {
+//RS         "HandlerFailed"
+//RS     } else {
+//RS         "Delivered"
+//RS     };
+//RS     let report_failures = if matches!(
+//RS         failure_policy,
+//RS         AsyncFailurePolicy::Log | AsyncFailurePolicy::Ignore
+//RS     ) {
+//RS         Vec::new()
+//RS     } else {
+//RS         failures
+//RS     };
+//RS     task_report(
+//RS         task_id,
+//RS         state,
+//RS         delivered,
+//RS         report_failures,
+//RS         delivered,
+//RS         1,
+//RS         0,
+//RS     );
+//RS     promote_blocked(event_id);
+//RS     if let Some(error) = callback_error {
+//RS         return Err(error);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn join_event_task(
+//RS     recv: &CtValue,
+//RS     span: Span,
+//RS     invoke: &mut dyn FnMut(CtValue, Vec<CtValue>) -> Result<CtValue, Diagnostic>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let task_id = task_id(recv).ok_or_else(|| unsupported("EventTask.join", span))?;
+//RS     let Some((_, _, _, _, _, report, joined)) = task_snapshot(task_id) else {
+//RS         return Err(unsupported("EventTask.join", span));
+//RS     };
+//RS     if joined {
+//RS         return Err(unsupported("EventTask.join called twice", span));
+//RS     }
+//RS     ASYNC_TASKS.with(|slot| {
+//RS         if let Some(Some(task)) = slot.borrow_mut().get_mut(task_id as usize) {
+//RS             task.joined = true;
+//RS         }
+//RS     });
+//RS     let report = if let Some(report) = report {
+//RS         report
+//RS     } else {
+//RS         loop {
+//RS             let Some((next, event_id)) = prepare_next_task(task_id)? else {
+//RS                 let Some((_, _, _, _, _, report, _)) = task_snapshot(task_id) else {
+//RS                     return Err(unsupported("EventTask.join", span));
+//RS                 };
+//RS                 if let Some(report) = report {
+//RS                     break report;
+//RS                 }
+//RS                 continue;
+//RS             };
+//RS             run_async_task(next, event_id, span, invoke)?;
+//RS         }
+//RS     };
+//RS     Ok(CtValue::Present(Box::new(report)))
+//RS }
+//RS 
+//RS 
+//RS fn eval_method_inner(
+//RS     ty: &str,
+//RS     method: &str,
+//RS     recv: &CtValue,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS     invoke: &mut dyn FnMut(CtValue, Vec<CtValue>) -> Result<CtValue, Diagnostic>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     match (ty, method) {
+//RS         ("EventScope", "active_count") => {
+//RS             let id = handle_id(recv, "EventScope")
+//RS                 .ok_or_else(|| unsupported("EventScope.active_count", span))?;
+//RS             Ok(CtValue::Int(scope_active_count(id)))
+//RS         }
+//RS         ("EventScope", "cancel") => {
+//RS             let id = handle_id(recv, "EventScope")
+//RS                 .ok_or_else(|| unsupported("EventScope.cancel", span))?;
+//RS             scope_cancel(id);
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("Subscription", "unsubscribe") => {
+//RS             let id = handle_id(recv, "Subscription")
+//RS                 .ok_or_else(|| unsupported("Subscription.unsubscribe", span))?;
+//RS             SUBS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = id.saturating_sub(1) as usize;
+//RS                 if let Some(Some(sub)) = v.get(idx) {
+//RS                     sub.unsubscribe();
+//RS                 }
+//RS             });
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("Subscription", "is_active") => {
+//RS             let id = handle_id(recv, "Subscription")
+//RS                 .ok_or_else(|| unsupported("Subscription.is_active", span))?;
+//RS             let active = SUBS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = id.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|s| s.as_ref())
+//RS                     .map(|s| s.active())
+//RS                     .unwrap_or(false)
+//RS             });
+//RS             Ok(CtValue::Bool(active))
+//RS         }
+//RS         ("Event", "on") => {
+//RS             let eid = handle_id(recv, "Event").ok_or_else(|| unsupported("Event.on", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("Event.on scope", span))?;
+//RS             let handler = args
+//RS                 .get(1)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("Event.on handler", span))?;
+//RS             Ok(event_add(eid, sid, 0, false, handler))
+//RS         }
+//RS         ("Event", "once") => {
+//RS             let eid = handle_id(recv, "Event").ok_or_else(|| unsupported("Event.once", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("Event.once scope", span))?;
+//RS             let handler = args
+//RS                 .get(1)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("Event.once handler", span))?;
+//RS             Ok(event_add(eid, sid, 0, true, handler))
+//RS         }
+//RS         ("Event", "on_priority") => {
+//RS             let eid =
+//RS                 handle_id(recv, "Event").ok_or_else(|| unsupported("Event.on_priority", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("Event.on_priority scope", span))?;
+//RS             let priority = match args.get(1) {
+//RS                 Some(CtValue::Int(n)) => *n,
+//RS                 _ => return Err(unsupported("Event.on_priority priority", span)),
+//RS             };
+//RS             let handler = args
+//RS                 .get(2)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("Event.on_priority handler", span))?;
+//RS             Ok(event_add(eid, sid, priority, false, handler))
+//RS         }
+//RS         ("Event", "emit") => {
+//RS             let eid = handle_id(recv, "Event").ok_or_else(|| unsupported("Event.emit", span))?;
+//RS             let payload = args
+//RS                 .first()
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("Event.emit payload", span))?;
+//RS             let entries = EVENTS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = eid.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|e| e.as_ref())
+//RS                     .map(|e| collect_dispatch(&e.listeners))
+//RS                     .unwrap_or_default()
+//RS             });
+//RS             let mut delivered = 0i64;
+//RS             for (_priority, _id, once, sub, handler) in entries {
+//RS                 if !sub.active() {
+//RS                     continue;
+//RS                 }
+//RS                 // Consume once before invoke (nested emit must not re-fire).
+//RS                 if once {
+//RS                     sub.unsubscribe();
+//RS                 }
+//RS                 invoke(handler, vec![payload.clone()])?;
+//RS                 delivered += 1;
+//RS             }
+//RS             EVENTS.with(|slot| {
+//RS                 let mut v = slot.borrow_mut();
+//RS                 let idx = eid.saturating_sub(1) as usize;
+//RS                 if let Some(Some(event)) = v.get_mut(idx) {
+//RS                     event.listeners.retain(|l| l.sub.active());
+//RS                 }
+//RS             });
+//RS             Ok(make_trace(delivered))
+//RS         }
+//RS         ("Event", "listener_count") => {
+//RS             let eid = handle_id(recv, "Event")
+//RS                 .ok_or_else(|| unsupported("Event.listener_count", span))?;
+//RS             let n = EVENTS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = eid.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|e| e.as_ref())
+//RS                     .map(|e| e.listeners.iter().filter(|l| l.sub.active()).count() as i64)
+//RS                     .unwrap_or(0)
+//RS             });
+//RS             Ok(CtValue::Int(n))
+//RS         }
+//RS         ("Hook", "listener_count") => {
+//RS             let hid =
+//RS                 handle_id(recv, "Hook").ok_or_else(|| unsupported("Hook.listener_count", span))?;
+//RS             let n = HOOKS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = hid.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|h| h.as_ref())
+//RS                     .map(|h| h.listeners.iter().filter(|l| l.sub.active()).count() as i64)
+//RS                     .unwrap_or(0)
+//RS             });
+//RS             Ok(CtValue::Int(n))
+//RS         }
+//RS         ("DecisionHook", "listener_count") => {
+//RS             let hid = handle_id(recv, "DecisionHook")
+//RS                 .ok_or_else(|| unsupported("DecisionHook.listener_count", span))?;
+//RS             let n = DECISION_HOOKS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = hid.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|h| h.as_ref())
+//RS                     .map(|h| h.listeners.iter().filter(|l| l.sub.active()).count() as i64)
+//RS                     .unwrap_or(0)
+//RS             });
+//RS             Ok(CtValue::Int(n))
+//RS         }
+//RS         ("Event", "trace") => {
+//RS             let eid = handle_id(recv, "Event").ok_or_else(|| unsupported("Event.trace", span))?;
+//RS             let n = EVENTS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = eid.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|e| e.as_ref())
+//RS                     .map(|e| e.listeners.iter().filter(|l| l.sub.active()).count() as i64)
+//RS                     .unwrap_or(0)
+//RS             });
+//RS             Ok(CtValue::Str(format!("listeners={n} queued=0 dropped=0")))
+//RS         }
+//RS         ("EventTrace", "summary") => {
+//RS             let id = handle_id(recv, "EventTrace")
+//RS                 .ok_or_else(|| unsupported("EventTrace.summary", span))?;
+//RS             let summary = TRACES.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = id.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|t| t.as_ref())
+//RS                     .map(|t| t.summary.clone())
+//RS                     .unwrap_or_default()
+//RS             });
+//RS             Ok(CtValue::Str(summary))
+//RS         }
+//RS         ("EventTrace", "delivered") => {
+//RS             let id = handle_id(recv, "EventTrace")
+//RS                 .ok_or_else(|| unsupported("EventTrace.delivered", span))?;
+//RS             let n = TRACES.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = id.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|t| t.as_ref())
+//RS                     .map(|t| t.delivered)
+//RS                     .unwrap_or(0)
+//RS             });
+//RS             Ok(CtValue::Int(n))
+//RS         }
+//RS         ("EventTrace", "queued" | "dropped") => {
+//RS             let id = handle_id(recv, "EventTrace")
+//RS                 .ok_or_else(|| unsupported("EventTrace field", span))?;
+//RS             let n = TRACES.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = id.saturating_sub(1) as usize;
+//RS                 v.get(idx).and_then(|t| t.as_ref()).map(|t| {
+//RS                     if method == "queued" {
+//RS                         t.queued
+//RS                     } else {
+//RS                         t.dropped
+//RS                     }
+//RS                 })
+//RS             });
+//RS             Ok(CtValue::Int(n.unwrap_or(0)))
+//RS         }
+//RS         ("Hook", "on") => {
+//RS             let hid = handle_id(recv, "Hook").ok_or_else(|| unsupported("Hook.on", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("Hook.on scope", span))?;
+//RS             let handler = args
+//RS                 .get(1)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("Hook.on handler", span))?;
+//RS             Ok(hook_add(hid, sid, 0, false, handler))
+//RS         }
+//RS         ("Hook", "once") => {
+//RS             let hid = handle_id(recv, "Hook").ok_or_else(|| unsupported("Hook.once", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("Hook.once scope", span))?;
+//RS             let handler = args
+//RS                 .get(1)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("Hook.once handler", span))?;
+//RS             Ok(hook_add(hid, sid, 0, true, handler))
+//RS         }
+//RS         ("Hook", "on_priority") => {
+//RS             let hid =
+//RS                 handle_id(recv, "Hook").ok_or_else(|| unsupported("Hook.on_priority", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("Hook.on_priority scope", span))?;
+//RS             let priority = match args.get(1) {
+//RS                 Some(CtValue::Int(n)) => *n,
+//RS                 _ => return Err(unsupported("Hook.on_priority priority", span)),
+//RS             };
+//RS             let handler = args
+//RS                 .get(2)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("Hook.on_priority handler", span))?;
+//RS             Ok(hook_add(hid, sid, priority, false, handler))
+//RS         }
+//RS         ("Hook", "run") => {
+//RS             let hid = handle_id(recv, "Hook").ok_or_else(|| unsupported("Hook.run", span))?;
+//RS             let payload = args
+//RS                 .first()
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("Hook.run payload", span))?;
+//RS             let empty_fallback = args.get(1).cloned().unwrap_or(CtValue::Unit);
+//RS             let (fallback, entries) = HOOKS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = hid.saturating_sub(1) as usize;
+//RS                 match v.get(idx).and_then(|h| h.as_ref()) {
+//RS                     Some(hook) => (hook.fallback.clone(), collect_dispatch(&hook.listeners)),
+//RS                     None => (CtValue::Unit, Vec::new()),
+//RS                 }
+//RS             });
+//RS             let mut result = if entries.is_empty() {
+//RS                 empty_fallback
+//RS             } else {
+//RS                 fallback
+//RS             };
+//RS             for (_priority, _id, once, sub, handler) in entries {
+//RS                 if !sub.active() {
+//RS                     continue;
+//RS                 }
+//RS                 if once {
+//RS                     sub.unsubscribe();
+//RS                 }
+//RS                 result = invoke(handler, vec![payload.clone()])?;
+//RS             }
+//RS             HOOKS.with(|slot| {
+//RS                 let mut v = slot.borrow_mut();
+//RS                 let idx = hid.saturating_sub(1) as usize;
+//RS                 if let Some(Some(hook)) = v.get_mut(idx) {
+//RS                     hook.listeners.retain(|l| l.sub.active());
+//RS                 }
+//RS             });
+//RS             Ok(result)
+//RS         }
+//RS         ("DecisionHook", "on") => {
+//RS             let hid = handle_id(recv, "DecisionHook")
+//RS                 .ok_or_else(|| unsupported("DecisionHook.on", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("DecisionHook.on scope", span))?;
+//RS             let handler = args
+//RS                 .get(1)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("DecisionHook.on handler", span))?;
+//RS             Ok(decision_hook_add(hid, sid, 0, false, handler))
+//RS         }
+//RS         ("DecisionHook", "once") => {
+//RS             let hid = handle_id(recv, "DecisionHook")
+//RS                 .ok_or_else(|| unsupported("DecisionHook.once", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("DecisionHook.once scope", span))?;
+//RS             let handler = args
+//RS                 .get(1)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("DecisionHook.once handler", span))?;
+//RS             Ok(decision_hook_add(hid, sid, 0, true, handler))
+//RS         }
+//RS         ("DecisionHook", "on_priority") => {
+//RS             let hid = handle_id(recv, "DecisionHook")
+//RS                 .ok_or_else(|| unsupported("DecisionHook.on_priority", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("DecisionHook.on_priority scope", span))?;
+//RS             let priority = match args.get(1) {
+//RS                 Some(CtValue::Int(n)) => *n,
+//RS                 _ => return Err(unsupported("DecisionHook.on_priority priority", span)),
+//RS             };
+//RS             let handler = args
+//RS                 .get(2)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("DecisionHook.on_priority handler", span))?;
+//RS             Ok(decision_hook_add(hid, sid, priority, false, handler))
+//RS         }
+//RS         ("DecisionHook", "run") => {
+//RS             let hid = handle_id(recv, "DecisionHook")
+//RS                 .ok_or_else(|| unsupported("DecisionHook.run", span))?;
+//RS             let mut current = args
+//RS                 .first()
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("DecisionHook.run payload", span))?;
+//RS             let entries = DECISION_HOOKS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = hid.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|h| h.as_ref())
+//RS                     .map(|h| collect_dispatch(&h.listeners))
+//RS                     .unwrap_or_default()
+//RS             });
+//RS             for (_priority, _id, once, sub, handler) in entries {
+//RS                 if !sub.active() {
+//RS                     continue;
+//RS                 }
+//RS                 if once {
+//RS                     sub.unsubscribe();
+//RS                 }
+//RS                 let decision = invoke(handler, vec![current.clone()])?;
+//RS                 match decision {
+//RS                     CtValue::Enum {
+//RS                         type_name,
+//RS                         variant,
+//RS                         args: dargs,
+//RS                     } if type_name == "HookDecision" || type_name.ends_with("HookDecision") => {
+//RS                         match variant.as_str() {
+//RS                             "Continue" => {}
+//RS                             "Transform" => {
+//RS                                 if let Some((_, v)) = dargs.first() {
+//RS                                     current = v.clone();
+//RS                                 }
+//RS                             }
+//RS                             "Cancel" => {
+//RS                                 return Ok(CtValue::Enum {
+//RS                                     type_name: "HookOutcome".to_string(),
+//RS                                     variant: "Cancel".to_string(),
+//RS                                     args: vec![],
+//RS                                 });
+//RS                             }
+//RS                             "Fail" => {
+//RS                                 let err = dargs
+//RS                                     .first()
+//RS                                     .map(|(_, v)| v.clone())
+//RS                                     .unwrap_or(CtValue::Unit);
+//RS                                 return Ok(CtValue::Enum {
+//RS                                     type_name: "HookOutcome".to_string(),
+//RS                                     variant: "Fail".to_string(),
+//RS                                     args: vec![(None, err)],
+//RS                                 });
+//RS                             }
+//RS                             _ => {}
+//RS                         }
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS             }
+//RS             DECISION_HOOKS.with(|slot| {
+//RS                 let mut v = slot.borrow_mut();
+//RS                 let idx = hid.saturating_sub(1) as usize;
+//RS                 if let Some(Some(hook)) = v.get_mut(idx) {
+//RS                     hook.listeners.retain(|l| l.sub.active());
+//RS                 }
+//RS             });
+//RS             Ok(CtValue::Enum {
+//RS                 type_name: "HookOutcome".to_string(),
+//RS                 variant: "Continue".to_string(),
+//RS                 args: vec![(None, current)],
+//RS             })
+//RS         }
+//RS         ("AsyncEvent", "on") => {
+//RS             let eid =
+//RS                 handle_id(recv, "AsyncEvent").ok_or_else(|| unsupported("AsyncEvent.on", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("AsyncEvent.on scope", span))?;
+//RS             let handler = args
+//RS                 .get(1)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("AsyncEvent.on handler", span))?;
+//RS             Ok(async_event_add(eid, sid, 0, false, handler))
+//RS         }
+//RS         ("AsyncEvent", "once") => {
+//RS             let eid =
+//RS                 handle_id(recv, "AsyncEvent").ok_or_else(|| unsupported("AsyncEvent.once", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("AsyncEvent.once scope", span))?;
+//RS             let handler = args
+//RS                 .get(1)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("AsyncEvent.once handler", span))?;
+//RS             Ok(async_event_add(eid, sid, 0, true, handler))
+//RS         }
+//RS         ("AsyncEvent", "on_priority") => {
+//RS             let eid = handle_id(recv, "AsyncEvent")
+//RS                 .ok_or_else(|| unsupported("AsyncEvent.on_priority", span))?;
+//RS             let sid = args
+//RS                 .first()
+//RS                 .and_then(|a| handle_id(a, "EventScope"))
+//RS                 .ok_or_else(|| unsupported("AsyncEvent.on_priority scope", span))?;
+//RS             let priority = match args.get(1) {
+//RS                 Some(CtValue::Int(value)) => *value,
+//RS                 _ => return Err(unsupported("AsyncEvent.on_priority priority", span)),
+//RS             };
+//RS             let handler = args
+//RS                 .get(2)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("AsyncEvent.on_priority handler", span))?;
+//RS             Ok(async_event_add(eid, sid, priority, false, handler))
+//RS         }
+//RS         ("AsyncEvent", "listener_count" | "queued_count" | "running_count" | "blocked_count") => {
+//RS             let eid = handle_id(recv, "AsyncEvent")
+//RS                 .ok_or_else(|| unsupported("AsyncEvent.count", span))?;
+//RS             let n = ASYNC_EVENTS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = eid.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|e| e.as_ref())
+//RS                     .map(|event| match method {
+//RS                         "listener_count" => {
+//RS                             event.listeners.iter().filter(|l| l.sub.active()).count() as i64
+//RS                         }
+//RS                         "queued_count" => event.queued.len() as i64,
+//RS                         "running_count" => {
+//RS                             if event.running.is_some() { 1 } else { 0 }
+//RS                         }
+//RS                         "blocked_count" => event.blocked.len() as i64,
+//RS                         _ => 0,
+//RS                     })
+//RS                     .unwrap_or(0)
+//RS             });
+//RS             Ok(CtValue::Int(n))
+//RS         }
+//RS         ("AsyncEvent", "emit_async") => {
+//RS             let eid = handle_id(recv, "AsyncEvent")
+//RS                 .ok_or_else(|| unsupported("AsyncEvent.emit_async", span))?;
+//RS             let payload = args
+//RS                 .first()
+//RS                 .cloned()
+//RS                 .ok_or_else(|| unsupported("AsyncEvent.emit_async payload", span))?;
+//RS             Ok(async_event_emit(eid, payload))
+//RS         }
+//RS         ("AsyncEvent", "close") => {
+//RS             let eid = handle_id(recv, "AsyncEvent")
+//RS                 .ok_or_else(|| unsupported("AsyncEvent.close", span))?;
+//RS             close_async_event(eid);
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("__JetTirTask", "join") => join_event_task(recv, span, invoke),
+//RS         ("DispatchReport", "state") => {
+//RS             let id = handle_id(recv, "DispatchReport")
+//RS                 .ok_or_else(|| unsupported("DispatchReport.state", span))?;
+//RS             let state = REPORTS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = id.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|r| r.as_ref())
+//RS                     .map(|r| r.state.clone())
+//RS                     .unwrap_or_else(|| "Closed".to_string())
+//RS             });
+//RS             Ok(CtValue::Enum {
+//RS                 type_name: "DispatchState".to_string(),
+//RS                 variant: state,
+//RS                 args: vec![],
+//RS             })
+//RS         }
+//RS         ("DispatchReport", "delivered_handlers") => {
+//RS             let id = handle_id(recv, "DispatchReport")
+//RS                 .ok_or_else(|| unsupported("DispatchReport.delivered_handlers", span))?;
+//RS             let n = REPORTS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = id.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|r| r.as_ref())
+//RS                     .map(|r| r.handlers)
+//RS                     .unwrap_or(0)
+//RS             });
+//RS             Ok(CtValue::Int(n))
+//RS         }
+//RS         ("DispatchReport", "accepted") => {
+//RS             let id = handle_id(recv, "DispatchReport")
+//RS                 .ok_or_else(|| unsupported("DispatchReport.accepted", span))?;
+//RS             let accepted = REPORTS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = id.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|r| r.as_ref())
+//RS                     .map(|r| r.accepted)
+//RS                     .unwrap_or(false)
+//RS             });
+//RS             Ok(CtValue::Bool(accepted))
+//RS         }
+//RS         ("DispatchReport", "failures") => {
+//RS             let id = handle_id(recv, "DispatchReport")
+//RS                 .ok_or_else(|| unsupported("DispatchReport.failures", span))?;
+//RS             let failures = REPORTS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = id.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|r| r.as_ref())
+//RS                     .map(|r| r.failures.clone())
+//RS                     .unwrap_or_default()
+//RS             });
+//RS             Ok(CtValue::List(failures))
+//RS         }
+//RS         ("DispatchReport", "trace") => {
+//RS             let id = handle_id(recv, "DispatchReport")
+//RS                 .ok_or_else(|| unsupported("DispatchReport.trace", span))?;
+//RS             let trace = REPORTS.with(|slot| {
+//RS                 let v = slot.borrow();
+//RS                 let idx = id.saturating_sub(1) as usize;
+//RS                 v.get(idx)
+//RS                     .and_then(|r| r.as_ref())
+//RS                     .map(|r| r.trace)
+//RS                     .unwrap_or(0)
+//RS             });
+//RS             Ok(handle_value("EventTrace", trace))
+//RS         }
+//RS         _ => Err(unsupported(&format!("event method `{ty}.{method}`"), span)),
+//RS     }
+//RS }
+// END-PORT-PENDING 0586 crates/jet-comptime/src/Comptime/EventLite.rs:1-1678
+

@@ -39,7 +39,7 @@ fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MIRFunction, bl
             }
             &out.push("        return undefined;")
         }
-        .Yield(value, resume) -> {
+        .Yield(value, resume, _) -> {
             if {
                 function.generator == None -> {
                 jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR Yield terminator has no generator facts", "checked generator functions must retain generator metadata", Val(function.span))

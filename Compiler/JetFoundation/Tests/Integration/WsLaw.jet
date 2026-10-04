@@ -1,0 +1,1207 @@
+// PORT-PENDING 1192 tests-ws-law-module-group: tests/ws_law.rs:1-1059
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, non_camel_case_types, unexpected_cfgs)]
+//RS 
+//RS mod common;
+//RS 
+//RS struct JetTCPListener {
+//RS     inner: std::net::TcpListener,
+//RS }
+//RS 
+//RS trait JetShow {
+//RS     fn jet_show(&self) -> String;
+//RS }
+//RS 
+//RS trait JetDebug {
+//RS     fn jet_debug(&self) -> String;
+//RS }
+//RS 
+//RS /// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
+//RS trait JetDisplay {
+//RS     fn jet_display(&self) -> String;
+//RS }
+//RS 
+//RS trait __jet_Encode {}
+//RS impl<T> __jet_Encode for T {}
+//RS 
+//RS trait __jet_Decode: Sized {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+//RS }
+//RS 
+//RS fn jet_enc_json_to_string<T: __jet_Encode>(_value: &T) -> String {
+//RS     String::new()
+//RS }
+//RS 
+//RS fn jet_enc_json_decode<T: __jet_Decode>(
+//RS     _text: &str,
+//RS ) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     Err(jet_std::FieldError::one("unused test decoder"))
+//RS }
+//RS 
+//RS struct JetFileReader {
+//RS     inner: Box<dyn std::io::Read + Send>,
+//RS }
+//RS 
+//RS struct JetFileWriter {
+//RS     inner: Box<dyn std::io::Write + Send>,
+//RS }
+//RS mod jet_encoding_json {
+//RS     pub use jet_foundation::EncodingJson::*;
+//RS }
+//RS 
+//RS mod jet_json_number {
+//RS     pub use jet_foundation::JSONNumber::*;
+//RS }
+//RS 
+//RS include!("../crates/jet-foundation/src/LiveLifecycle.rs");
+//RS 
+//RS mod jet_std {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     pub use jet_foundation::DataTree::DataTree;
+//RS     use jet_foundation::Shape::ShapeProjection;
+//RS 
+//RS     include!("../crates/jet-codegen/src/Prelude/TaskGroup.rs");
+//RS 
+//RS     #[derive(Clone, Copy)]
+//RS     pub struct Duration {
+//RS         pub ms: i64,
+//RS     }
+//RS 
+//RS     impl Duration {
+//RS         // D-TIMERES1=A: mirrors CoreLib/JetStd/CommonTypes.rs Duration::as_millis
+//RS         // (this test stub stores milliseconds directly, so it's the identity read).
+//RS         pub fn as_millis(self) -> i64 {
+//RS             self.ms
+//RS         }
+//RS     }
+//RS 
+//RS     #[derive(Clone, Copy, Debug, PartialEq)]
+//RS     pub enum IOOperation {
+//RS         Read,
+//RS         Write,
+//RS         Flush,
+//RS         Connect,
+//RS         Accept,
+//RS         Close,
+//RS         Resolve,
+//RS         Codec,
+//RS     }
+//RS 
+//RS     #[derive(Clone, Debug, PartialEq)]
+//RS     pub struct IOContext {
+//RS         pub operation: IOOperation,
+//RS         pub resource: JetOutcome<String, JetAbsent>,
+//RS         pub os_code: JetOutcome<i64, JetAbsent>,
+//RS         pub cause: JetOutcome<String, JetAbsent>,
+//RS     }
+//RS 
+//RS     impl IOContext {
+//RS         pub fn new(
+//RS             operation: IOOperation,
+//RS             resource: Option<String>,
+//RS             os_code: Option<i64>,
+//RS             cause: Option<String>,
+//RS         ) -> Self {
+//RS             Self {
+//RS                 operation,
+//RS                 resource: jet_outcome_of(resource),
+//RS                 os_code: jet_outcome_of(os_code),
+//RS                 cause: jet_outcome_of(cause),
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[derive(Clone, Debug, PartialEq)]
+//RS     pub enum IOError {
+//RS         InvalidInput(IOContext),
+//RS         NotFound(IOContext),
+//RS         PermissionDenied(IOContext),
+//RS         TimedOut(IOContext),
+//RS         Cancelled(IOContext),
+//RS         Closed(IOContext),
+//RS         Protocol(IOContext),
+//RS         Other(IOContext),
+//RS     }
+//RS 
+//RS     // The canonical DataTree extension calls these exact-Int helpers. This
+//RS     // fixture does not exercise large integer ownership, so the host i64
+//RS     // carrier is sufficient while the type and decode modules stay canonical.
+//RS     pub fn jet_int_from_i64(value: i64) -> i64 {
+//RS         value
+//RS     }
+//RS     pub fn jet_int_from_str(value: &str) -> Result<i64, String> {
+//RS         value.parse::<i64>().map_err(|error| error.to_string())
+//RS     }
+//RS     pub fn jet_int_to_i64(value: i64) -> Option<i64> {
+//RS         Some(value)
+//RS     }
+//RS     pub fn jet_int_to_string(value: i64) -> String {
+//RS         value.to_string()
+//RS     }
+//RS     pub fn jet_int_to_f64(value: i64) -> f64 {
+//RS         value as f64
+//RS     }
+//RS     #[derive(Clone, Debug)]
+//RS     pub struct JetURLParts {
+//RS         pub scheme: String,
+//RS         pub username: Option<String>,
+//RS         pub password: Option<String>,
+//RS         pub host: Option<String>,
+//RS         pub port: Option<i64>,
+//RS         pub path: String,
+//RS         pub query: Vec<(String, String)>,
+//RS         pub fragment: Option<String>,
+//RS         pub typed_host: Option<Vec<(String, bool)>>,
+//RS         pub typed_path: Option<Vec<(String, bool)>>,
+//RS     }
+//RS 
+//RS     #[derive(Clone, Debug, PartialEq)]
+//RS     pub struct JetMIME {
+//RS         pub top: String,
+//RS         pub sub: String,
+//RS         pub params: Vec<(String, String)>,
+//RS     }
+//RS 
+//RS     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
+//RS 
+//RS     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
+//RS     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
+//RS     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+//RS     include!("../crates/jet-codegen/src/Prelude/Core/FieldError.rs");
+//RS     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
+//RS     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+//RS     use crate::jet_encoding_json::quote_json;
+//RS     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs");
+//RS     jet_datatree_decode_helpers!();
+//RS }
+//RS 
+//RS 
+//RS enum JetParaRuntimeFailure {
+//RS     SchedulerFatal { msg: String },
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static JET_PARA_DEFER_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS     static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS     static JET_OBSERVE_TASK_ID: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
+//RS     static TEST_DEADLINE_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS }
+//RS 
+//RS fn jet_runtime_diagnostic(rendered: String) -> ! {
+//RS     eprintln!("{rendered}");
+//RS     std::process::exit(70);
+//RS }
+//RS 
+//RS fn jet_scheduler_runtime_stop(msg: &str) -> ! {
+//RS     let report =
+//RS         jet_foundation::Outcome::jet_render_runtime_stop("E3001", "", 0, "", "", 1, 1, msg, "");
+//RS     if jet_scheduler_panic_should_unwind() {
+//RS         panic!("{}", report.rendered);
+//RS     }
+//RS     jet_runtime_diagnostic(report.rendered);
+//RS }
+//RS 
+//RS /// Mirrors `Prelude/Core.rs::jet_runtime_stop`, which the included HTTPServer
+//RS /// fragment calls. That definition lives in a fragment this test does not
+//RS /// include, so the boundary is stubbed here exactly like
+//RS /// `jet_scheduler_runtime_stop` above: render through the shared report
+//RS /// boundary, then stop. An abort is never the outcome.
+//RS fn jet_runtime_stop(code: &'static str, file: &str, line: u32, msg: &str) -> ! {
+//RS     let report =
+//RS         jet_foundation::Outcome::jet_render_runtime_stop(code, file, line, "", "", 1, 1, msg, "");
+//RS     jet_runtime_diagnostic(report.rendered);
+//RS }
+//RS 
+//RS fn jet_runtime_caught_stop(message: &str) {
+//RS     if message.starts_with("Stop [E") {
+//RS         eprint!("{message}");
+//RS         if !message.ends_with('\n') {
+//RS             eprintln!();
+//RS         }
+//RS         return;
+//RS     }
+//RS     let report =
+//RS         jet_foundation::Outcome::jet_render_runtime_stop("E3001", "", 0, "", "", 1, 1, message, "");
+//RS     eprint!("{}", report.rendered);
+//RS }
+//RS 
+//RS fn jet_scheduler_task_panic_enter() {
+//RS     JET_IN_SCHEDULER_TASK.with(|task| task.set(true));
+//RS }
+//RS fn jet_scheduler_task_panic_leave() {
+//RS     JET_IN_SCHEDULER_TASK.with(|task| task.set(false));
+//RS }
+//RS fn jet_scheduler_panic_should_unwind() -> bool {
+//RS     JET_IN_SCHEDULER_TASK.with(|task| task.get())
+//RS }
+//RS fn jet_deadline_remaining_ms() -> Option<i64> {
+//RS     TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.get().then_some(0))
+//RS }
+//RS fn jet_deadline_exceeded(wait_kind: &str) -> ! {
+//RS     std::panic::resume_unwind(Box::new(JetDeadlineUnwind {
+//RS         rendered: format!("deadline exceeded: {wait_kind}"),
+//RS     }))
+//RS }
+//RS 
+//RS fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
+//RS     panic!("{msg} (at {file}:{line})");
+//RS }
+//RS 
+//RS // D-TASK-PAUSE-TIER1: mirrors jet_foundation::StructuralDebug::jet_task_control_trace
+//RS // (the canonical AOT crate root embeds StructuralDebug.rs alongside Scheduler.rs;
+//RS // this test harness includes Scheduler.rs alone, so it needs the same symbol locally).
+//RS fn jet_task_control_trace(paused: bool, cancel: bool) -> String {
+//RS     format!("paused={paused},cancel={cancel}")
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetObserveTask {
+//RS     parent: usize,
+//RS     state: &'static str,
+//RS     wait: String,
+//RS     deadline_ms: Option<i64>,
+//RS     cancelled: bool,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetObserveChannel {
+//RS     depth: usize,
+//RS     capacity: Option<usize>,
+//RS     send_waiters: usize,
+//RS     recv_waiters: usize,
+//RS     closed: bool,
+//RS }
+//RS 
+//RS struct JetObserveRegistry {
+//RS     next_task: std::sync::atomic::AtomicUsize,
+//RS     next_channel: std::sync::atomic::AtomicUsize,
+//RS     tasks: std::sync::Mutex<std::collections::HashMap<usize, JetObserveTask>>,
+//RS     channels: std::sync::Mutex<std::collections::HashMap<usize, JetObserveChannel>>,
+//RS }
+//RS 
+//RS static JET_OBSERVE_WORKERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+//RS static JET_OBSERVE_QUEUED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+//RS 
+//RS fn jet_observe_registry() -> Option<&'static std::sync::Arc<JetObserveRegistry>> {
+//RS     None
+//RS }
+//RS fn jet_observe_task_update(_state: &'static str, _wait: &str, _deadline_ms: Option<i64>) {}
+//RS // D-OBSERVE-LIVE1: the scheduler registers each task with the shared Observe
+//RS // seam. This scope stubs that seam rather than including it, so the stubs must
+//RS // track `Prelude/Observe.rs`'s signatures.
+//RS fn jet_observe_task_register(_observe_id: &std::sync::atomic::AtomicUsize) -> usize {
+//RS     0
+//RS }
+//RS fn jet_observe_task_register_at(
+//RS     _observe_id: &std::sync::atomic::AtomicUsize,
+//RS     _spawn_site: usize,
+//RS ) -> usize {
+//RS     0
+//RS }
+//RS /// The registry links a task's cancellation control behind this trait, and the
+//RS /// scheduler hands it an exit-drain hook. Both must track `Prelude/Observe.rs`
+//RS /// because this scope stubs the Observe seam instead of including it.
+//RS trait JetObserveControl: Send + Sync {
+//RS     fn cancel(&self);
+//RS }
+//RS fn jet_observe_register_exit_drain(_drain: fn()) {}
+//RS fn jet_observe_task_register_at_with_control(
+//RS     _observe_id: &std::sync::atomic::AtomicUsize,
+//RS     _spawn_site: usize,
+//RS     _control: Option<&std::sync::Arc<JetTaskControl>>,
+//RS ) -> usize {
+//RS     0
+//RS }
+//RS fn jet_observe_task_failure_message(_id: usize, reason: String) -> String {
+//RS     reason
+//RS }
+//RS fn jet_observe_task_set_label(_id: usize, _label: &str) {}
+//RS fn jet_observe_task_identity(id: usize) -> String {
+//RS     format!("task #{id}")
+//RS }
+//RS fn jet_observe_task_failure_message_for_identity(identity: &str, reason: String) -> String {
+//RS     format!("{identity}: {reason}")
+//RS }
+//RS fn jet_observe_has_parked_tasks() -> bool {
+//RS     false
+//RS }
+//RS fn jet_observe_task_enter(_id: usize) {}
+//RS fn jet_observe_task_finish(_id: usize) {}
+//RS 
+//RS struct LogField {
+//RS     key: String,
+//RS     value: String,
+//RS }
+//RS 
+//RS fn jet_log_emit(_level: &str, _msg: &str, _fields: &[LogField]) {}
+//RS #[allow(unused_imports)]
+//RS use jet_foundation::Devtools::*;
+//RS include!("../crates/jet-codegen/src/Prelude/Core/DevtoolsRequestPanel.rs");
+//RS 
+//RS include!("../crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
+//RS include!("../crates/jet-codegen/src/Prelude/Deadline.rs");
+//RS 
+//RS thread_local! {
+//RS     static JET_DB_REQUEST_ID: std::cell::RefCell<Option<String>> =
+//RS         std::cell::RefCell::new(None);
+//RS }
+//RS 
+//RS fn jet_db_current_request_id() -> Option<String> {
+//RS     JET_DB_REQUEST_ID.with(|request_id| request_id.borrow().clone())
+//RS }
+//RS 
+//RS struct JetDbRequestScope {
+//RS     previous: Option<String>,
+//RS }
+//RS 
+//RS impl JetDbRequestScope {
+//RS     fn enter(request_id: Option<String>) -> Self {
+//RS         let previous = JET_DB_REQUEST_ID.with(|current| current.replace(request_id));
+//RS         Self { previous }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetDbRequestScope {
+//RS     fn drop(&mut self) {
+//RS         JET_DB_REQUEST_ID.with(|current| {
+//RS             let _ = current.replace(self.previous.take());
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS include!("../crates/jet-codegen/src/Prelude/Core/HttpRequestTarget.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS fn jet_std_time_duration_to_millis(ns: i64) -> i64 {
+//RS     ns
+//RS }
+//RS 
+//RS include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
+//RS 
+//RS /// D-LIVEQUERY1/D-WS1: the native transport is the shared Prelude seam. A
+//RS /// typed rerun updates its canonical sink and serialized topic, while a later
+//RS /// connection receives only the latest event for that topic.
+//RS #[test]
+//RS fn live_query_rerun_publishes_and_reconnect_replays_latest() {
+//RS     let footprint = format!("law_live_{}.rows", std::process::id());
+//RS     let frames = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+//RS     let frame_sink = frames.clone();
+//RS     let transport_id = jet_app_ws_register(std::sync::Arc::new(move |frame| {
+//RS         frame_sink.lock().unwrap().push(frame);
+//RS     }));
+//RS     assert_ne!(transport_id, 0, "live transport registration must succeed");
+//RS 
+//RS     let reruns = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+//RS     let rerun_count = reruns.clone();
+//RS     let query = jet_app_live_query(footprint.clone(), "v1".to_string(), move || {
+//RS         let call = rerun_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+//RS         Ok(format!("v{}", call + 1))
+//RS     });
+//RS     assert!(
+//RS         query.lifecycle.error.is_empty(),
+//RS         "query registration failed: {:?}",
+//RS         query.lifecycle.error
+//RS     );
+//RS 
+//RS     let delivered = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+//RS     let delivered_sink = delivered.clone();
+//RS     let query = jet_app_live_bind_sink(
+//RS         &query,
+//RS         std::sync::Arc::new(move |value| delivered_sink.lock().unwrap().push(value)),
+//RS     );
+//RS     assert!(
+//RS         query.lifecycle.error.is_empty(),
+//RS         "sink binding failed: {:?}",
+//RS         query.lifecycle.error
+//RS     );
+//RS     assert_eq!(jet_app_live_get(&query), "v1");
+//RS 
+//RS     assert_eq!(jet_app_invalidate(footprint.clone()), 1);
+//RS     assert_eq!(reruns.load(std::sync::atomic::Ordering::SeqCst), 1);
+//RS     assert_eq!(jet_app_live_get(&query), "v2");
+//RS     assert!(jet_app_live_show(&query).contains("generation=2"));
+//RS     assert_eq!(*delivered.lock().unwrap(), vec!["v2".to_string()]);
+//RS 
+//RS     let topic_prefix = format!("live:{}:", query.id);
+//RS     let published = frames
+//RS         .lock()
+//RS         .unwrap()
+//RS         .iter()
+//RS         .filter(|frame| frame.starts_with(&topic_prefix))
+//RS         .cloned()
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(published.len(), 2, "initial and rerun events must publish");
+//RS     assert!(published[0].ends_with(&format!(":{}:v1", footprint)));
+//RS     assert!(published[1].ends_with(&format!(":{}:v2", footprint)));
+//RS 
+//RS     let replayed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+//RS     let replay_sink = replayed.clone();
+//RS     let reconnect_id = jet_app_ws_register(std::sync::Arc::new(move |frame| {
+//RS         replay_sink.lock().unwrap().push(frame);
+//RS     }));
+//RS     assert_ne!(reconnect_id, 0, "reconnect registration must succeed");
+//RS     assert_eq!(
+//RS         replayed
+//RS             .lock()
+//RS             .unwrap()
+//RS             .iter()
+//RS             .filter(|frame| frame.starts_with(&topic_prefix))
+//RS             .cloned()
+//RS             .collect::<Vec<_>>(),
+//RS         vec![format!("live:{}:2:{}:v2", query.id, footprint)]
+//RS     );
+//RS 
+//RS     jet_app_ws_unregister(reconnect_id);
+//RS     jet_app_ws_unregister(transport_id);
+//RS }
+//RS 
+//RS #[test]
+//RS fn live_query_commit_delivers_to_sink_bound_during_rerun() {
+//RS     let footprint = format!("law_live_sink_{}.rows", std::process::id());
+//RS     let rerun_started = std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS     let rerun_release = std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS     let started = rerun_started.clone();
+//RS     let release = rerun_release.clone();
+//RS     let rerun: JetLiveRerun = std::sync::Arc::new(move || {
+//RS         started.wait();
+//RS         release.wait();
+//RS         Ok("v2".to_string())
+//RS     });
+//RS     let query = jet_app_live_with(footprint.clone(), "v1".to_string(), Some(rerun), None);
+//RS 
+//RS     let old_values = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+//RS     let old_values_sink = old_values.clone();
+//RS     let query = jet_app_live_bind_sink(
+//RS         &query,
+//RS         std::sync::Arc::new(move |value| old_values_sink.lock().unwrap().push(value)),
+//RS     );
+//RS     assert!(
+//RS         query.lifecycle.error.is_empty(),
+//RS         "initial sink binding failed: {:?}",
+//RS         query.lifecycle.error
+//RS     );
+//RS 
+//RS     let invalidation_footprint = footprint.clone();
+//RS     let invalidator = std::thread::spawn(move || jet_app_invalidate(invalidation_footprint));
+//RS     rerun_started.wait();
+//RS 
+//RS     let new_values = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+//RS     let new_values_sink = new_values.clone();
+//RS     let query = jet_app_live_bind_sink(
+//RS         &query,
+//RS         std::sync::Arc::new(move |value| new_values_sink.lock().unwrap().push(value)),
+//RS     );
+//RS     assert!(
+//RS         query.lifecycle.error.is_empty(),
+//RS         "canonical sink rebinding failed: {:?}",
+//RS         query.lifecycle.error
+//RS     );
+//RS 
+//RS     rerun_release.wait();
+//RS     assert_eq!(invalidator.join().unwrap(), 1);
+//RS     assert_eq!(*old_values.lock().unwrap(), Vec::<String>::new());
+//RS     assert_eq!(*new_values.lock().unwrap(), vec!["v2".to_string()]);
+//RS     assert_eq!(jet_app_live_get(&query), "v2");
+//RS }
+//RS 
+//RS #[test]
+//RS fn direct_ws_consumers_include_client_core_first() {
+//RS     fn raw_string_start(bytes: &[u8], index: usize) -> Option<(usize, usize)> {
+//RS         let mut cursor = index;
+//RS         if bytes.get(cursor) == Some(&b'b') {
+//RS             cursor += 1;
+//RS         }
+//RS         if bytes.get(cursor) != Some(&b'r') {
+//RS             return None;
+//RS         }
+//RS         cursor += 1;
+//RS         let start = cursor;
+//RS         while bytes.get(cursor) == Some(&b'#') {
+//RS             cursor += 1;
+//RS         }
+//RS         (bytes.get(cursor) == Some(&b'"')).then_some((cursor + 1, cursor - start))
+//RS     }
+//RS 
+//RS     fn include_at(bytes: &[u8], index: usize) -> Option<(usize, String)> {
+//RS         if bytes.get(index..index + "include".len()) != Some(b"include") {
+//RS             return None;
+//RS         }
+//RS         if index != 0
+//RS             && bytes
+//RS                 .get(index - 1)
+//RS                 .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+//RS         {
+//RS             return None;
+//RS         }
+//RS         let mut cursor = index + "include".len();
+//RS         while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+//RS             cursor += 1;
+//RS         }
+//RS         if bytes.get(cursor) != Some(&b'!') {
+//RS             return None;
+//RS         }
+//RS         cursor += 1;
+//RS         while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+//RS             cursor += 1;
+//RS         }
+//RS         if bytes.get(cursor) != Some(&b'(') {
+//RS             return None;
+//RS         }
+//RS         cursor += 1;
+//RS         while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+//RS             cursor += 1;
+//RS         }
+//RS         if bytes.get(cursor) != Some(&b'"') {
+//RS             return None;
+//RS         }
+//RS         cursor += 1;
+//RS         let target_start = cursor;
+//RS         while let Some(byte) = bytes.get(cursor) {
+//RS             match byte {
+//RS                 b'\\' => cursor += 2,
+//RS                 b'"' => break,
+//RS                 b'\n' | b'\r' => return None,
+//RS                 _ => cursor += 1,
+//RS             }
+//RS         }
+//RS         if bytes.get(cursor) != Some(&b'"') {
+//RS             return None;
+//RS         }
+//RS         let target = std::str::from_utf8(bytes.get(target_start..cursor)?)
+//RS             .ok()?
+//RS             .replace('\\', "/");
+//RS         cursor += 1;
+//RS         while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+//RS             cursor += 1;
+//RS         }
+//RS         if bytes.get(cursor) != Some(&b')') {
+//RS             return None;
+//RS         }
+//RS         cursor += 1;
+//RS         if bytes.get(cursor) == Some(&b';') {
+//RS             cursor += 1;
+//RS         }
+//RS         Some((cursor, target))
+//RS     }
+//RS 
+//RS     fn char_literal_end(bytes: &[u8], quote: usize) -> Option<usize> {
+//RS         if bytes.get(quote) != Some(&b'\'') {
+//RS             return None;
+//RS         }
+//RS         let mut cursor = quote + 1;
+//RS         if bytes.get(cursor) == Some(&b'\\') {
+//RS             cursor += 1;
+//RS             match *bytes.get(cursor)? {
+//RS                 b'u' if bytes.get(cursor + 1) == Some(&b'{') => {
+//RS                     cursor += 2;
+//RS                     while bytes.get(cursor).is_some_and(|byte| *byte != b'}') {
+//RS                         cursor += 1;
+//RS                     }
+//RS                     if bytes.get(cursor) != Some(&b'}') {
+//RS                         return None;
+//RS                     }
+//RS                     cursor += 1;
+//RS                 }
+//RS                 b'x' => cursor += 3,
+//RS                 _ => cursor += 1,
+//RS             }
+//RS         } else {
+//RS             let text = std::str::from_utf8(bytes.get(cursor..)?).ok()?;
+//RS             cursor += text.chars().next()?.len_utf8();
+//RS         }
+//RS         (bytes.get(cursor) == Some(&b'\'')).then_some(cursor + 1)
+//RS     }
+//RS 
+//RS     fn actual_includes(text: &str) -> Vec<(usize, String)> {
+//RS         let bytes = text.as_bytes();
+//RS         let mut includes = Vec::new();
+//RS         let mut index = 0;
+//RS         let mut line = 1;
+//RS         let mut block_depth = 0usize;
+//RS         while index < bytes.len() {
+//RS             if block_depth != 0 {
+//RS                 match bytes.get(index..index + 2) {
+//RS                     Some(b"/*") => {
+//RS                         block_depth += 1;
+//RS                         index += 2;
+//RS                     }
+//RS                     Some(b"*/") => {
+//RS                         block_depth -= 1;
+//RS                         index += 2;
+//RS                     }
+//RS                     _ => {
+//RS                         if bytes[index] == b'\n' {
+//RS                             line += 1;
+//RS                         }
+//RS                         index += 1;
+//RS                     }
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             match bytes.get(index..index + 2) {
+//RS                 Some(b"//") => {
+//RS                     while bytes.get(index).is_some_and(|byte| *byte != b'\n') {
+//RS                         index += 1;
+//RS                     }
+//RS                     continue;
+//RS                 }
+//RS                 Some(b"/*") => {
+//RS                     block_depth = 1;
+//RS                     index += 2;
+//RS                     continue;
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS             let char_quote = if bytes[index] == b'\'' {
+//RS                 Some(index)
+//RS             } else if bytes[index] == b'b' && bytes.get(index + 1) == Some(&b'\'') {
+//RS                 Some(index + 1)
+//RS             } else {
+//RS                 None
+//RS             };
+//RS             if let Some(end) = char_quote.and_then(|quote| char_literal_end(bytes, quote)) {
+//RS                 index = end;
+//RS                 continue;
+//RS             }
+//RS             if let Some((mut cursor, hashes)) = raw_string_start(bytes, index) {
+//RS                 loop {
+//RS                     let Some(byte) = bytes.get(cursor) else {
+//RS                         index = cursor;
+//RS                         break;
+//RS                     };
+//RS                     if *byte == b'\n' {
+//RS                         line += 1;
+//RS                     }
+//RS                     if *byte == b'"'
+//RS                         && (0..hashes).all(|offset| bytes.get(cursor + 1 + offset) == Some(&b'#'))
+//RS                     {
+//RS                         index = cursor + 1 + hashes;
+//RS                         break;
+//RS                     }
+//RS                     cursor += 1;
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             let quote = if bytes[index] == b'"' {
+//RS                 Some(b'"')
+//RS             } else if bytes[index] == b'b' && bytes.get(index + 1) == Some(&b'"') {
+//RS                 index += 1;
+//RS                 Some(b'"')
+//RS             } else {
+//RS                 None
+//RS             };
+//RS             if let Some(quote) = quote {
+//RS                 index += 1;
+//RS                 while let Some(byte) = bytes.get(index) {
+//RS                     if *byte == b'\\' {
+//RS                         index += 2;
+//RS                     } else {
+//RS                         if *byte == b'\n' {
+//RS                             line += 1;
+//RS                         }
+//RS                         index += 1;
+//RS                         if *byte == quote {
+//RS                             break;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             if let Some((end, target)) = include_at(bytes, index) {
+//RS                 includes.push((line, target));
+//RS                 line += bytes[index..end]
+//RS                     .iter()
+//RS                     .filter(|byte| **byte == b'\n')
+//RS                     .count();
+//RS                 index = end;
+//RS                 continue;
+//RS             }
+//RS             if bytes[index] == b'\n' {
+//RS                 line += 1;
+//RS             }
+//RS             index += 1;
+//RS         }
+//RS         includes
+//RS     }
+//RS 
+//RS     fn collect_rs(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+//RS         let boundary = std::fs::canonicalize(dir.parent().unwrap_or(dir)).unwrap();
+//RS         let mut pending = vec![dir.to_path_buf()];
+//RS         let mut visited = std::collections::HashSet::new();
+//RS         while let Some(current) = pending.pop() {
+//RS             let current_is_link = std::fs::symlink_metadata(&current)
+//RS                 .unwrap()
+//RS                 .file_type()
+//RS                 .is_symlink();
+//RS             let identity = if current_is_link {
+//RS                 let Ok(identity) = std::fs::canonicalize(&current) else {
+//RS                     // A broken link or a link cycle is not a source directory.
+//RS                     continue;
+//RS                 };
+//RS                 identity
+//RS             } else {
+//RS                 std::fs::canonicalize(&current).unwrap()
+//RS             };
+//RS             if !identity.starts_with(&boundary) {
+//RS                 continue;
+//RS             }
+//RS             if !visited.insert(identity) {
+//RS                 continue;
+//RS             }
+//RS             let mut entries = std::fs::read_dir(&current)
+//RS                 .unwrap()
+//RS                 .map(|entry| entry.unwrap().path())
+//RS                 .collect::<Vec<_>>();
+//RS             entries.sort();
+//RS             for path in entries.into_iter().rev() {
+//RS                 let link = std::fs::symlink_metadata(&path).unwrap();
+//RS                 if link.file_type().is_symlink() {
+//RS                     let Ok(target) = std::fs::metadata(&path) else {
+//RS                         continue;
+//RS                     };
+//RS                     if target.is_dir() {
+//RS                         // Follow a real source directory through a link; the
+//RS                         // canonical identity set above prevents cycles and
+//RS                         // duplicate walks.
+//RS                         pending.push(path);
+//RS                     } else if target.is_file()
+//RS                         && path.extension().and_then(|part| part.to_str()) == Some("rs")
+//RS                         && std::fs::canonicalize(&path)
+//RS                             .is_ok_and(|identity| identity.starts_with(&boundary))
+//RS                     {
+//RS                         files.push(path);
+//RS                     }
+//RS                 } else if link.is_dir() {
+//RS                     pending.push(path);
+//RS                 } else if link.is_file()
+//RS                     && path.extension().and_then(|part| part.to_str()) == Some("rs")
+//RS                 {
+//RS                     files.push(path);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let hostile = r###"
+//RS // include!("ignored/line/Ws.rs");
+//RS /* include!("ignored/block/Ws.rs"); */
+//RS const NORMAL: &str = "include!(\"ignored/normal/Ws.rs\");";
+//RS const RAW: &str = r#"include!("ignored/raw/Ws.rs");"#;
+//RS include!("kept/WsClient.rs");
+//RS include!("kept/Ws.rs");
+//RS "###;
+//RS     assert_eq!(
+//RS         actual_includes(hostile),
+//RS         [
+//RS             (6, "kept/WsClient.rs".to_string()),
+//RS             (7, "kept/Ws.rs".to_string()),
+//RS         ]
+//RS     );
+//RS 
+//RS     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let mut files = Vec::new();
+//RS     collect_rs(&root.join("crates"), &mut files);
+//RS     collect_rs(&root.join("tests"), &mut files);
+//RS     let mut consumers = Vec::new();
+//RS     for path in files {
+//RS         let text = std::fs::read_to_string(&path).unwrap();
+//RS         let includes = actual_includes(&text);
+//RS         for (index, (_line, target)) in includes.iter().enumerate() {
+//RS             if !target.ends_with("/Ws.rs") {
+//RS                 continue;
+//RS             }
+//RS             let Some((_client_line, client_target)) = index
+//RS                 .checked_sub(1)
+//RS                 .and_then(|previous| includes.get(previous))
+//RS             else {
+//RS                 panic!("{} omits WsClient.rs", path.display());
+//RS             };
+//RS             assert!(
+//RS                 client_target.ends_with("/WsClient.rs"),
+//RS                 "{} must include WsClient.rs immediately before Ws.rs",
+//RS                 path.display()
+//RS             );
+//RS             consumers.push(path.strip_prefix(root).unwrap().to_path_buf());
+//RS         }
+//RS     }
+//RS     consumers.sort();
+//RS     assert_eq!(
+//RS         consumers,
+//RS         [
+//RS             std::path::PathBuf::from("crates/jet-jit/src/net_http_rt.rs"),
+//RS             std::path::PathBuf::from("tests/http_server_lifecycle.rs"),
+//RS             std::path::PathBuf::from("tests/ws_law.rs"),
+//RS         ]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn accept_key_matches_rfc6455_example() {
+//RS     // RFC6455 section 1.3 example.
+//RS     assert_eq!(
+//RS         jet_ws_accept_key("dGhlIHNhbXBsZSBub25jZQ=="),
+//RS         "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn hostile_url_controls_are_rejected_before_handshake_serialization() {
+//RS     assert!(matches!(
+//RS         jet_ws_parse_url("ws://127.0.0.1/path\r\nInjected: yes"),
+//RS         Err(JetWsError::InvalidURL)
+//RS     ));
+//RS     assert!(matches!(
+//RS         jet_ws_parse_url("ws://127.0.0.1\r\nInjected: yes/path"),
+//RS         Err(JetWsError::InvalidURL)
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_aot_ws_connect_rejects_url_controls_before_connecting() {
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     listener.set_nonblocking(true).unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let observer = std::thread::spawn(move || {
+//RS         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+//RS         loop {
+//RS             match listener.accept() {
+//RS                 Ok(_) => return true,
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                     if std::time::Instant::now() >= deadline {
+//RS                         return false;
+//RS                     }
+//RS                     std::thread::yield_now();
+//RS                 }
+//RS                 Err(_) => return false,
+//RS             }
+//RS         }
+//RS     });
+//RS     let source = format!(
+//RS         r#"
+//RS use core.net.ws as ws
+//RS fn run() {{
+//RS     if ws.connect("ws://{addr}/live\nInjected: yes") == {{
+//RS         .Ok(_) -> print("accepted")
+//RS         .Err(error) -> {{
+//RS             if error == .InvalidURL -> print("rejected")
+//RS             else -> print("wrong error")
+//RS         }}
+//RS         else -> print("unexpected")
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) =
+//RS         common::build_and_run("jet_ws_law", "aot_hostile_url", &source);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "rejected\n");
+//RS     assert!(
+//RS         !observer.join().unwrap(),
+//RS         "hostile public ws.connect reached the socket"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn client_and_server_echo_text_over_live_sockets() {
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = listener.accept().unwrap();
+//RS         let mux = jet_http_mux_new();
+//RS         mux.add("GET", "/live", |req| {
+//RS             let sock = jet_ws_upgrade(&req).expect("upgrade");
+//RS             let message = jet_ws_recv(&sock).expect("recv");
+//RS             let text = jet_ws_message_text(&message).expect("text");
+//RS             jet_ws_send_text(&sock, &format!("echo:{text}")).expect("send");
+//RS             jet_ws_close(&sock, 1000, &String::new()).expect("close");
+//RS             Ok(jet_http_srv_response(500, &"unused".to_string()))
+//RS         });
+//RS         jet_http_server_handle_stream(
+//RS             &mut stream,
+//RS             &mux,
+//RS             &JetHTTPServerOptions::safe(),
+//RS             &std::sync::atomic::AtomicBool::new(false),
+//RS             None,
+//RS             None,
+//RS         );
+//RS     });
+//RS 
+//RS     let url = format!("ws://{addr}/live");
+//RS     let client = jet_ws_connect(&url).expect("connect");
+//RS     jet_ws_send_text(&client, &"ping".to_string()).expect("client send");
+//RS     let reply = loop {
+//RS         let message = jet_ws_recv(&client).expect("client recv");
+//RS         if jet_ws_message_is_text(&message) && jet_ws_message_text(&message).unwrap() == "echo:ping"
+//RS         {
+//RS             break message;
+//RS         }
+//RS     };
+//RS     assert_eq!(jet_ws_message_text(&reply).unwrap(), "echo:ping");
+//RS     let closed = jet_ws_recv(&client).expect("client close");
+//RS     assert!(jet_ws_message_is_close(&closed));
+//RS     server.join().unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn oversized_client_frame_is_rejected() {
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = listener.accept().unwrap();
+//RS         let mux = jet_http_mux_new();
+//RS         mux.add("GET", "/live", |req| {
+//RS             let mut sock = jet_ws_upgrade(&req).expect("upgrade");
+//RS             sock.max_message = 8;
+//RS             let err = jet_ws_recv(&sock).expect_err("must reject");
+//RS             assert!(matches!(err, JetWsError::MessageTooLarge { limit: 8 }));
+//RS             Ok(jet_http_srv_response(500, &"unused".to_string()))
+//RS         });
+//RS         jet_http_server_handle_stream(
+//RS             &mut stream,
+//RS             &mux,
+//RS             &JetHTTPServerOptions::safe(),
+//RS             &std::sync::atomic::AtomicBool::new(false),
+//RS             None,
+//RS             None,
+//RS         );
+//RS     });
+//RS 
+//RS     let url = format!("ws://{addr}/live");
+//RS     let client = jet_ws_connect(&url).expect("connect");
+//RS     let _ = jet_ws_send_text(&client, &"0123456789".to_string());
+//RS     server.join().unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn ambient_deadline_cancels_recv() {
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = listener.accept().unwrap();
+//RS         let mux = jet_http_mux_new();
+//RS         mux.add("GET", "/live", |req| {
+//RS             let sock = jet_ws_upgrade(&req).expect("upgrade");
+//RS             TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.set(true));
+//RS             let err = jet_ws_recv(&sock).expect_err("cancelled");
+//RS             assert!(matches!(err, JetWsError::Cancelled));
+//RS             TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.set(false));
+//RS             Ok(jet_http_srv_response(500, &"unused".to_string()))
+//RS         });
+//RS         jet_http_server_handle_stream(
+//RS             &mut stream,
+//RS             &mux,
+//RS             &JetHTTPServerOptions::safe(),
+//RS             &std::sync::atomic::AtomicBool::new(false),
+//RS             None,
+//RS             None,
+//RS         );
+//RS     });
+//RS 
+//RS     let url = format!("ws://{addr}/live");
+//RS     let _client = jet_ws_connect(&url).expect("connect");
+//RS     server.join().unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn hostile_handshake_missing_version_fails_closed() {
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = listener.accept().unwrap();
+//RS         let mux = jet_http_mux_new();
+//RS         mux.add("GET", "/live", |req| {
+//RS             match jet_ws_upgrade(&req) {
+//RS                 Ok(_) => panic!("expected invalid handshake"),
+//RS                 Err(err) => assert!(matches!(err, JetWsError::InvalidHandshake)),
+//RS             }
+//RS             Ok(jet_http_srv_response(400, &"bad".to_string()))
+//RS         });
+//RS         jet_http_server_handle_stream(
+//RS             &mut stream,
+//RS             &mux,
+//RS             &JetHTTPServerOptions::safe(),
+//RS             &std::sync::atomic::AtomicBool::new(false),
+//RS             None,
+//RS             None,
+//RS         );
+//RS     });
+//RS 
+//RS     use std::io::Write;
+//RS     let mut stream = std::net::TcpStream::connect(addr).unwrap();
+//RS     stream
+//RS         .write_all(
+//RS             b"GET /live HTTP/1.1\r\nHost: local\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+//RS         )
+//RS         .unwrap();
+//RS     drop(stream);
+//RS     server.join().unwrap();
+//RS }
+// END-PORT-PENDING 1192 tests/ws_law.rs:1-1059
+
+// PORT-PENDING 1192 tests-ws-law-module-group: tests/zip_family.rs:1-140
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS 
+//RS use jet::Interpreter::{dev_iteration, RunOutcome};
+//RS use tir_support::{build_and_run, build_and_run_full, have_rustc, interpreter_run, jit_run};
+//RS 
+//RS const SOURCE: &str = r#"fn run() {
+//RS     print(zip().to_list().len())
+//RS     print(zip([1, 2, 3]).to_list())
+//RS     print([1, 2, 3].zip([10, 20, 30]).unzip().a)
+//RS     print([1, 2, 3].zip_short([10, 20]).unzip().b)
+//RS     loop row in zip(a: [1, 2], b: ["x", "y"]) {
+//RS         print(row.b)
+//RS     }
+//RS     loop row in zip(a: [1, 2], b: [10, 20], c: [100, 200]) {
+//RS         print(row.c)
+//RS     }
+//RS     loop row in zip(a: [1, 2], b: [10, 20], c: [100, 200], d: [1000, 2000]) {
+//RS         print(row.d)
+//RS     }
+//RS     loop row in [1, 2, 3].zip_pad([10, 20]) {
+//RS         print(row.b)
+//RS     }
+//RS     left :: [1, 2, 3].take(3)
+//RS     right :: [10, 20].take(2)
+//RS     loop row in left.zip_pad(right) {
+//RS         print(row.b)
+//RS     }
+//RS     loop row in [1, 2, 3].zip_pad([10, 20], fill: 0) {
+//RS         print(row.b)
+//RS     }
+//RS     loop row in zip_pad(a: [1, 2, 3], b: [10, 20], fills: (a: 0, b: 9)) {
+//RS         print(row.b)
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS const EXPECTED: &str = "0\n[1, 2, 3]\n[1, 2, 3]\n[10, 20]\nx\ny\n100\n200\n1000\n2000\n10\n20\nnull\n10\n20\nnull\n10\n20\n0\n10\n20\n9\n";
+//RS 
+//RS const STRICT_MISMATCH_SOURCE: &str = r#"use core.process as process
+//RS 
+//RS fn run() {
+//RS     count :: process.args().len()
+//RS     left :: [1, 2, 3].take(count)
+//RS     right :: [10, 20].take(2)
+//RS     loop row in left.zip(right) {
+//RS         print(row.a)
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn strict_zip_mismatch_reports_e0128_across_tiers() {
+//RS     let mut results = vec![
+//RS         ("default JIT", jit_run("zip_strict_mismatch", STRICT_MISMATCH_SOURCE)),
+//RS         (
+//RS             "forced interpreter",
+//RS             interpreter_run("zip_strict_mismatch", STRICT_MISMATCH_SOURCE),
+//RS         ),
+//RS     ];
+//RS     if have_rustc() {
+//RS         results.push((
+//RS             "AOT",
+//RS             build_and_run_full(
+//RS                 "zip_strict_mismatch",
+//RS                 "zip_strict_mismatch",
+//RS                 STRICT_MISMATCH_SOURCE,
+//RS             ),
+//RS         ));
+//RS     }
+//RS 
+//RS     let mut baseline = None;
+//RS     for (tier, (code, stdout, stderr)) in results {
+//RS         assert_eq!(code, 70, "{tier} must exit with the registered runtime stop: {stderr}");
+//RS         let lower = stderr.to_ascii_lowercase();
+//RS         for needle in [
+//RS             "stop [e0128]",
+//RS             "inputs have different lengths under `strict` policy",
+//RS             "strict `zip` requires every input to end on the same row",
+//RS             "zip_short",
+//RS             "truncate",
+//RS             "zip_pad",
+//RS             "pad",
+//RS             "neither changes strictness automatically",
+//RS             "loop row in left.zip(right)",
+//RS         ] {
+//RS             assert!(lower.contains(needle), "{tier} missing {needle:?}: {stderr}");
+//RS         }
+//RS         assert!(!stderr.contains("E3001"), "{tier} regressed to E3001: {stderr}");
+//RS         assert!(
+//RS             !stderr.contains("<core.collections>:0"),
+//RS             "{tier} lost the user zip location: {stderr}"
+//RS         );
+//RS         if let Some((baseline_tier, expected)) = &baseline {
+//RS             assert_eq!(
+//RS                 &(code, stdout.clone(), stderr.clone()),
+//RS                 expected,
+//RS                 "{tier} diverged from {baseline_tier}"
+//RS             );
+//RS         } else {
+//RS             baseline = Some((tier, (code, stdout, stderr)));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn zip_family_matches_aot_default_and_forced_interpreter() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let (code, aot_stdout) = build_and_run("zip_family", SOURCE);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(aot_stdout, EXPECTED);
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_zip_family_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, SOURCE).unwrap();
+//RS     let shown = path.to_string_lossy().into_owned();
+//RS     for (tier, force_interpreter) in [("default tier", false), ("forced interpreter", true)] {
+//RS         match dev_iteration(&shown, false, force_interpreter) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(exit_code, 0, "{tier} exit");
+//RS                 assert_eq!(stderr, "", "{tier} stderr");
+//RS                 assert_eq!(stdout, EXPECTED, "{tier} output");
+//RS             }
+//RS             RunOutcome::Problems(diagnostics) => {
+//RS                 panic!("{tier} rejected zip family: {diagnostics:#?}")
+//RS             }
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 1192 tests/zip_family.rs:1-140
+

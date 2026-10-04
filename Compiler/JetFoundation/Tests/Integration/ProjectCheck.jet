@@ -1,0 +1,1490 @@
+// PORT-PENDING 1136 tests-project-check-module-group: tests/project_check.rs:1-694
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Project-check witnesses for card #2389.
+//RS //!
+//RS //! These cases drive the real `jet check` command against frozen projects.  The
+//RS //! project proof rows are snapshotted from stdout, while induced failures use
+//RS //! stderr snapshots.  Paths are scrubbed because the fixture checkout location
+//RS //! is machine-specific; proof details and content-derived Core fingerprints
+//RS //! remain byte-exact.
+//RS 
+//RS use jet_foundation::DataTree::DataTree;
+//RS use jet_foundation::JSON::{json_get, json_str, parse};
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Output};
+//RS use std::time::Instant;
+//RS 
+//RS fn fixture_root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/project_check/fixtures")
+//RS }
+//RS 
+//RS fn fixture(name: &str) -> PathBuf {
+//RS     fixture_root().join(name)
+//RS }
+//RS 
+//RS fn jet_bin() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn run_check(name: &str, args: &[&str]) -> Output {
+//RS     let dir = fixture(name);
+//RS     Command::new(jet_bin())
+//RS         .args(args)
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .env("TERM", "dumb")
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("jet check {name} failed to start: {error}"))
+//RS }
+//RS 
+//RS fn run_uncached(name: &str, args: &[&str]) -> Output {
+//RS     let dir = fixture(name);
+//RS     Command::new(jet_bin())
+//RS         .args(args)
+//RS         .current_dir(&dir)
+//RS         .env("JET_RECEIPT_BYPASS", "1")
+//RS         .env("NO_COLOR", "1")
+//RS         .env("TERM", "dumb")
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("jet {} {name} failed to start: {error}", args[0]))
+//RS }
+//RS 
+//RS fn scratch_root(name: &str) -> PathBuf {
+//RS     let stamp = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .expect("system clock before Unix epoch")
+//RS         .as_nanos();
+//RS     let base = std::env::var_os("HOME")
+//RS         .map(PathBuf::from)
+//RS         .map(|home| home.join(".cache/jet-test-scratch"))
+//RS         .unwrap_or_else(|| PathBuf::from(".cache/jet-test-scratch"));
+//RS     let root = base.join(format!(
+//RS         "project-check-{name}-{}-{stamp}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).expect("create project-check scratch root");
+//RS     root
+//RS }
+//RS 
+//RS fn copy_receipt_fixture(root: &Path) {
+//RS     for (source_relative, destination_relative) in [
+//RS         ("workspace.jet", "workspace.jet"),
+//RS         ("lock.fixture", ".jet/lock"),
+//RS         ("packages/app/package.jet", "packages/app/package.jet"),
+//RS         ("packages/app/app/main.jet", "packages/app/app/main.jet"),
+//RS         ("packages/app/lock.fixture", "packages/app/.jet/lock"),
+//RS         (
+//RS             "packages/app/fixtures/generated/input.jet",
+//RS             "packages/app/.jet/generated/input.jet",
+//RS         ),
+//RS     ] {
+//RS         let source = fixture("receipt_invalidation").join(source_relative);
+//RS         let destination = root.join(destination_relative);
+//RS         fs::create_dir_all(
+//RS             destination
+//RS                 .parent()
+//RS                 .unwrap_or_else(|| panic!("fixture destination has no parent")),
+//RS         )
+//RS         .expect("create copied fixture parent");
+//RS         fs::copy(&source, &destination).unwrap_or_else(|error| {
+//RS             panic!(
+//RS                 "copy receipt fixture {} -> {}: {error}",
+//RS                 source.display(),
+//RS                 destination.display()
+//RS             )
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn copy_fixture_tree(source: &Path, destination: &Path) {
+//RS     fs::create_dir_all(destination).unwrap_or_else(|error| {
+//RS         panic!(
+//RS             "create staged fixture {}: {error}",
+//RS             destination.display()
+//RS         )
+//RS     });
+//RS     let entries = fs::read_dir(source)
+//RS         .unwrap_or_else(|error| panic!("read fixture {}: {error}", source.display()));
+//RS     for entry in entries {
+//RS         let entry = entry.unwrap_or_else(|error| {
+//RS             panic!("read entry in fixture {}: {error}", source.display())
+//RS         });
+//RS         let source_path = entry.path();
+//RS         let destination_path = destination.join(entry.file_name());
+//RS         let file_type = entry.file_type().unwrap_or_else(|error| {
+//RS             panic!("inspect fixture entry {}: {error}", source_path.display())
+//RS         });
+//RS         if file_type.is_dir() {
+//RS             copy_fixture_tree(&source_path, &destination_path);
+//RS         } else if file_type.is_file() {
+//RS             fs::copy(&source_path, &destination_path).unwrap_or_else(|error| {
+//RS                 panic!(
+//RS                     "copy fixture {} -> {}: {error}",
+//RS                     source_path.display(),
+//RS                     destination_path.display()
+//RS                 )
+//RS             });
+//RS         } else {
+//RS             panic!("unsupported fixture entry {}", source_path.display());
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn clear_receipt_store(path: &Path) {
+//RS     match fs::remove_dir_all(path) {
+//RS         Ok(()) => {}
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS         Err(error) => panic!("clear receipt store {}: {error}", path.display()),
+//RS     }
+//RS }
+//RS 
+//RS /// Receipt replay is detected through the `ok: check current` notice, which
+//RS /// only `--verbose` prints.
+//RS fn run_project_check(dir: &Path, receipt_dir: &Path, args: &[&str]) -> Output {
+//RS     Command::new(jet_bin())
+//RS         .args(args)
+//RS         .arg("--verbose")
+//RS         .current_dir(dir)
+//RS         .env("JET_RECEIPT_DIR", receipt_dir)
+//RS         .env_remove("JET_RECEIPT_BYPASS")
+//RS         .env("NO_COLOR", "1")
+//RS         .env("TERM", "dumb")
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("jet check in {} failed to start: {error}", dir.display()))
+//RS }
+//RS 
+//RS fn assert_project_check_passed(output: &Output, context: &str) {
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{context} failed:\nstdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS }
+//RS 
+//RS fn receipt_replayed(output: &Output) -> bool {
+//RS     String::from_utf8_lossy(&output.stderr).contains("ok: check current")
+//RS }
+//RS 
+//RS fn machine_rows(output: &Output) -> Vec<DataTree> {
+//RS     assert_project_check_passed(output, "machine project check");
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     let report = parse(stdout.trim()).unwrap_or_else(|error| {
+//RS         panic!("project check --json emitted invalid JSON: {error}\n{stdout}")
+//RS     });
+//RS     assert_eq!(
+//RS         json_get(&report, "contract").and_then(json_str),
+//RS         Some("jet.check/v1"),
+//RS         "project check machine contract changed"
+//RS     );
+//RS     assert!(
+//RS         matches!(json_get(&report, "elapsed_ms"), Some(DataTree::Int(milliseconds)) if *milliseconds >= 0),
+//RS         "project check machine result must record elapsed_ms"
+//RS     );
+//RS     match json_get(&report, "rows") {
+//RS         Some(DataTree::Array(rows)) => rows.clone(),
+//RS         other => panic!("project check machine rows must be an array, got {other:?}"),
+//RS     }
+//RS }
+//RS 
+//RS fn scrub_fixture_path(text: &str, dir: &Path) -> String {
+//RS     let absolute = dir
+//RS         .canonicalize()
+//RS         .unwrap_or_else(|error| panic!("fixture {} is not canonical: {error}", dir.display()));
+//RS     text.replace(&*absolute.to_string_lossy(), "<fixture>")
+//RS }
+//RS 
+//RS fn proof_snapshot(output: &Output, dir: &Path) -> String {
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     let mut snapshot = stdout
+//RS         .lines()
+//RS         .filter(|line| line.starts_with("proof: "))
+//RS         .map(|line| scrub_fixture_path(line, dir))
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     if !snapshot.is_empty() {
+//RS         snapshot.push('\n');
+//RS     }
+//RS     snapshot
+//RS }
+//RS 
+//RS fn stderr_snapshot(output: &Output, dir: &Path) -> String {
+//RS     scrub_fixture_path(&String::from_utf8_lossy(&output.stderr), dir)
+//RS }
+//RS 
+//RS fn expected(name: &str, extension: &str) -> PathBuf {
+//RS     fixture(name).join(format!("expected.{extension}"))
+//RS }
+//RS 
+//RS fn assert_snapshot(name: &str, extension: &str, actual: &str) {
+//RS     let path = expected(name, extension);
+//RS     if std::env::var_os("UPDATE_EXPECT").is_some() {
+//RS         fs::write(&path, actual)
+//RS             .unwrap_or_else(|error| panic!("write snapshot {}: {error}", path.display()));
+//RS         return;
+//RS     }
+//RS     let want = fs::read_to_string(&path)
+//RS         .unwrap_or_else(|error| panic!("read snapshot {}: {error}", path.display()));
+//RS     assert_eq!(actual, want, "snapshot mismatch for {}", path.display());
+//RS }
+//RS 
+//RS fn assert_project_proof_rows(fixture_name: &str, proof: &str) {
+//RS     let rows = proof.lines().collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         rows.len(),
+//RS         4,
+//RS         "project check {fixture_name} must expose one row for each proof class:\n{proof}"
+//RS     );
+//RS     for (label, code) in [
+//RS         ("entry resolution", "E2389"),
+//RS         ("module graph", "E2390"),
+//RS         ("Core closure", "E2391"),
+//RS         ("tier lowering", "E2392"),
+//RS     ] {
+//RS         assert!(
+//RS             rows.iter()
+//RS                 .any(|row| row.contains(label) && row.contains(code) && row.contains("[proven]")),
+//RS             "project check {fixture_name} did not prove {label} ({code}):\n{proof}"
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         !proof.contains("absent from the checked module graph"),
+//RS         "clean project check reported an unresolved output:\n{proof}"
+//RS     );
+//RS }
+//RS 
+//RS fn assert_clean_project(name: &str) {
+//RS     let output = run_check(name, &["check", "--verbose", "."]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "project check {name} failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let proof = proof_snapshot(&output, &fixture(name));
+//RS     assert_project_proof_rows(name, &proof);
+//RS     assert_snapshot(name, "stdout", &proof);
+//RS }
+//RS 
+//RS #[test]
+//RS fn explicit_in_package_file_keeps_file_scope() {
+//RS     let output = run_check("frozen_dogfood", &["check", "--verbose", "src/cli/main.jet"]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "in-package check failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         stdout.contains("scope=explicit-file"),
+//RS         "explicit in-package check changed scope:\n{stdout}"
+//RS     );
+//RS     let proof = proof_snapshot(&output, &fixture("frozen_dogfood"));
+//RS     let rows = proof.lines().collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         rows.len(),
+//RS         4,
+//RS         "explicit-file check must expose four non-project proof rows:\n{proof}"
+//RS     );
+//RS     assert!(
+//RS         rows.iter()
+//RS             .all(|row| row.contains("output=not-applicable") && row.contains("[not applicable]")),
+//RS         "explicit-file check exposed project proof:\n{proof}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn bare_project_check_enumerates_outputs_without_writing_artifacts() {
+//RS     let dir = fixture("entry_resolution");
+//RS     let package = dir.join("package.jet");
+//RS     let lock = dir.join(".jet/lock");
+//RS     let generated = dir.join(".jet/generated");
+//RS     let package_mtime = fs::metadata(&package)
+//RS         .unwrap_or_else(|error| panic!("package fixture metadata: {error}"))
+//RS         .modified()
+//RS         .unwrap_or_else(|error| panic!("package fixture mtime: {error}"));
+//RS     let lock_mtime = fs::metadata(&lock).ok().and_then(|metadata| metadata.modified().ok());
+//RS     let generated_mtime = fs::metadata(&generated)
+//RS         .ok()
+//RS         .and_then(|metadata| metadata.modified().ok());
+//RS 
+//RS     let output = run_check("entry_resolution", &["check", "--verbose"]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "bare project check failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         stdout.contains("scope=project"),
+//RS         "bare check did not use project scope:\n{stdout}"
+//RS     );
+//RS     let proof = proof_snapshot(&output, &dir);
+//RS     assert_project_proof_rows("entry_resolution bare", &proof);
+//RS     assert!(
+//RS         proof.lines().all(|row| row.contains("output=release")),
+//RS         "bare check did not enumerate the declared runnable output:\n{proof}"
+//RS     );
+//RS 
+//RS     let after_package_mtime = fs::metadata(&package)
+//RS         .unwrap_or_else(|error| panic!("package fixture metadata after check: {error}"))
+//RS         .modified()
+//RS         .unwrap_or_else(|error| panic!("package fixture mtime after check: {error}"));
+//RS     let after_lock_mtime = fs::metadata(&lock).ok().and_then(|metadata| metadata.modified().ok());
+//RS     let after_generated_mtime = fs::metadata(&generated)
+//RS         .ok()
+//RS         .and_then(|metadata| metadata.modified().ok());
+//RS     assert_eq!(package_mtime, after_package_mtime, "project check touched package.jet");
+//RS     assert_eq!(lock_mtime, after_lock_mtime, "project check touched .jet/lock");
+//RS     assert_eq!(
+//RS         generated_mtime, after_generated_mtime,
+//RS         "project check touched .jet/generated"
+//RS     );
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn frozen_dogfood_and_each_project_proof_witness_are_snapshotted() {
+//RS     // The frozen package follows dogfood's package.jet -> nested member-file
+//RS     // entry shape.  The other fixtures isolate the four proof classes: named
+//RS     // output entry resolution, a multi-file package namespace, and a direct
+//RS     // Core call.  All four clean checks must expose all named proof rows.
+//RS     for name in [
+//RS         "frozen_dogfood",
+//RS         "entry_resolution",
+//RS         "module_graph",
+//RS         "core_closure",
+//RS     ] {
+//RS         assert_clean_project(name);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn missing_effect_facts_are_a_project_check_diagnostic() {
+//RS     let output = run_check("effect_facts", &["check", ".", "--gate=impure=allow"]);
+//RS     assert!(!output.status.success(), "E2391 witness unexpectedly passed");
+//RS     let stderr = stderr_snapshot(&output, &fixture("effect_facts"));
+//RS     assert!(stderr.contains("Error [E2391]"), "missing E2391:\n{stderr}");
+//RS     assert_snapshot("effect_facts", "stderr", &stderr);
+//RS }
+//RS 
+//RS #[test]
+//RS fn unsupported_web_tier_is_not_reported_clean() {
+//RS     let output = run_check("tier_lowering", &["check", ".", "--target=web"]);
+//RS     assert!(!output.status.success(), "E2392 witness unexpectedly passed");
+//RS     let stderr = stderr_snapshot(&output, &fixture("tier_lowering"));
+//RS     assert!(stderr.contains("Error [E2392]"), "missing E2392:\n{stderr}");
+//RS     assert_snapshot("tier_lowering", "stderr", &stderr);
+//RS }
+//RS 
+//RS #[test]
+//RS fn explicit_file_without_owning_project_context_teaches_missing_context() {
+//RS     let stamp = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .expect("system clock before Unix epoch")
+//RS         .as_nanos();
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet-project-check-missing-context-{}-{stamp}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).expect("create isolated missing-context fixture");
+//RS     let source = fs::read_to_string(fixture("missing_context").join("orphan.jet"))
+//RS         .expect("read missing-context fixture source");
+//RS     fs::write(root.join("orphan.jet"), source).expect("write isolated missing-context source");
+//RS 
+//RS     let output = Command::new(jet_bin())
+//RS         .args(["check", "orphan.jet"])
+//RS         .current_dir(&root)
+//RS         .env("JET_RECEIPT_BYPASS", "1")
+//RS         .env("NO_COLOR", "1")
+//RS         .env("TERM", "dumb")
+//RS         .output()
+//RS         .expect("jet check missing_context failed to start");
+//RS     assert!(!output.status.success(), "E2393 witness unexpectedly passed");
+//RS     let stderr = stderr_snapshot(&output, &root);
+//RS     assert!(stderr.contains("Error [E2393]"), "missing E2393:\n{stderr}");
+//RS     assert!(
+//RS         stderr.contains("Use project.<module>"),
+//RS         "missing canonical import teaching:\n{stderr}"
+//RS     );
+//RS     assert_snapshot("missing_context", "stderr", &stderr);
+//RS 
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn library_package_check_needs_no_run_entry() {
+//RS     let check = run_uncached("library_only", &["check", "."]);
+//RS     let stderr = String::from_utf8_lossy(&check.stderr);
+//RS     assert!(
+//RS         check.status.success(),
+//RS         "a .Library package check must pass without `fn run`:\n{stderr}"
+//RS     );
+//RS     assert!(!stderr.contains("E0101"), "library check demanded `fn run`:\n{stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn dependency_package_members_check_clean_and_run() {
+//RS     // D-MOD-CYCLE1=A: `use base.[...]` reaches names from every file of the
+//RS     // dependency package (an enum and a struct in Types.jet, an impl and a
+//RS     // function in its sibling Sub/Ops.jet, calls both ways). Each import is
+//RS     // read, so the check reports nothing; the run crosses both files. The
+//RS     // app's own members cover package-wide facts: a derive cycle across two
+//RS     // files, a compile-time table of a sibling enum, a failure-solve edge to
+//RS     // a sibling file, a byte-0 `use` beside three sibling bindings, and the
+//RS     // dependency's field types joining and sharing like local ones.
+//RS     let check = run_uncached("dependency_members/app", &["check", "."]);
+//RS     let report = format!(
+//RS         "{}{}",
+//RS         String::from_utf8_lossy(&check.stdout),
+//RS         String::from_utf8_lossy(&check.stderr)
+//RS     );
+//RS     assert!(check.status.success(), "dependency member check failed:\n{report}");
+//RS     for code in ["Warning", "Error", "internal"] {
+//RS         assert!(!report.contains(code), "dependency member check reported {code}:\n{report}");
+//RS     }
+//RS     let run = run_uncached("dependency_members/app", &["run"]);
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "dependency member run failed:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&run.stdout),
+//RS         "4\n5\n7\n9\n3\nwide\n4\n2\n2\ntrue\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn clean_project_check_then_default_run_and_aot_build_stay_clean() {
+//RS     for name in [
+//RS         "frozen_dogfood",
+//RS         "entry_resolution",
+//RS         "module_graph",
+//RS         "core_closure",
+//RS     ] {
+//RS         let check = run_uncached(name, &["check"]);
+//RS         assert!(
+//RS             check.status.success(),
+//RS             "project check {name} failed:\n{}",
+//RS             String::from_utf8_lossy(&check.stderr)
+//RS         );
+//RS 
+//RS         let run = run_uncached(name, &["run"]);
+//RS         assert!(
+//RS             run.status.success(),
+//RS             "default-tier run after project check {name} failed:\n{}",
+//RS             String::from_utf8_lossy(&run.stderr)
+//RS         );
+//RS 
+//RS         let build = run_uncached(name, &["build"]);
+//RS         assert!(
+//RS             build.status.success(),
+//RS             "AOT build after project check {name} failed:\n{}",
+//RS             String::from_utf8_lossy(&build.stderr)
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn explicit_file_uses_owning_project_context() {
+//RS     let output = run_uncached("owning_context", &["check", "--verbose", "src/main.jet"]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "explicit in-package project import failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         stdout.contains("scope=explicit-file"),
+//RS         "explicit owning-context check changed scope:\n{stdout}"
+//RS     );
+//RS     assert!(
+//RS         !String::from_utf8_lossy(&output.stderr).contains("E2393"),
+//RS         "owning project context was treated as absent:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let proof = proof_snapshot(&output, &fixture("owning_context"));
+//RS     assert_snapshot("owning_context", "stdout", &proof);
+//RS }
+//RS 
+//RS #[test]
+//RS fn extension_optional_check_replays_receipt() {
+//RS     let scratch = scratch_root("extension-optional-receipt");
+//RS     let dir = scratch.join("frozen_dogfood");
+//RS     copy_fixture_tree(&fixture("frozen_dogfood"), &dir);
+//RS     let receipt_dir = dir.join(".jet/receipts");
+//RS 
+//RS     let run = || {
+//RS         Command::new(jet_bin())
+//RS             .args(["check", "--verbose", "src/cli/main"])
+//RS             .current_dir(&dir)
+//RS             .env("JET_RECEIPT_DIR", &receipt_dir)
+//RS             .env_remove("JET_RECEIPT_BYPASS")
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .expect("extension-optional project check failed to start")
+//RS     };
+//RS 
+//RS     let first = run();
+//RS     assert!(
+//RS         first.status.success(),
+//RS         "extension-optional project check failed:\n{}",
+//RS         String::from_utf8_lossy(&first.stderr)
+//RS     );
+//RS     let second = run();
+//RS     assert!(
+//RS         second.status.success(),
+//RS         "replayed extension-optional project check failed:\n{}",
+//RS         String::from_utf8_lossy(&second.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         first.stdout, second.stdout,
+//RS         "receipt replay changed extension-optional check output"
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&second.stderr).contains("ok: check current"),
+//RS         "extension-optional invocation did not replay its receipt:\n{}",
+//RS         String::from_utf8_lossy(&second.stderr)
+//RS     );
+//RS     let _ = fs::remove_dir_all(&scratch);
+//RS }
+//RS 
+//RS #[test]
+//RS fn project_check_receipt_tracks_entry_and_authority_changes() {
+//RS     let root = scratch_root("receipt-invalidation");
+//RS     copy_receipt_fixture(&root);
+//RS     let package_root = root.join("packages/app");
+//RS     let receipt_dir = root.join(".jet/receipts");
+//RS     let check = || run_project_check(&package_root, &receipt_dir, &["check"]);
+//RS 
+//RS     let first = check();
+//RS     assert_project_check_passed(&first, "initial receipt project check");
+//RS     let replay = check();
+//RS     assert_project_check_passed(&replay, "unchanged receipt project check");
+//RS     assert!(
+//RS         receipt_replayed(&replay),
+//RS         "unchanged project check did not replay its receipt:\n{}",
+//RS         String::from_utf8_lossy(&replay.stderr)
+//RS     );
+//RS 
+//RS     let candidate = package_root.join("run.jet");
+//RS     fs::write(&candidate, "fn run() { print(\"candidate\") }\n")
+//RS         .expect("write higher-priority entry candidate");
+//RS     let candidate_check = check();
+//RS     assert_project_check_passed(&candidate_check, "entry-candidate project check");
+//RS     assert!(
+//RS         !receipt_replayed(&candidate_check),
+//RS         "new entry candidate reused stale receipt:\n{}",
+//RS         String::from_utf8_lossy(&candidate_check.stderr)
+//RS     );
+//RS     fs::remove_file(&candidate).expect("remove higher-priority entry candidate");
+//RS 
+//RS     let mutations = [
+//RS         (
+//RS             "workspace",
+//RS             root.join("workspace.jet"),
+//RS             "module workspace {\n    members: [\"packages/app\"]\n}\n",
+//RS         ),
+//RS         (
+//RS             "output",
+//RS             package_root.join("package.jet"),
+//RS             "name: \"receipt-probe\"\nversion: \"0.1.0\"\noutputs: { release_alt: .Executable{ entry: main.launch } }\ndefaults: { run: release_alt }\n",
+//RS         ),
+//RS         ("lock", root.join(".jet/lock"), "workspace-lock-v2\n"),
+//RS         (
+//RS             "generated",
+//RS             package_root.join(".jet/generated/input.jet"),
+//RS             "fn generated_input_v2() {}\n",
+//RS         ),
+//RS     ];
+//RS     for (label, path, replacement) in mutations {
+//RS         let original = fs::read(&path)
+//RS             .unwrap_or_else(|error| panic!("read {label} fixture {}: {error}", path.display()));
+//RS         let mutation_check =
+//RS             || run_project_check(&package_root, &receipt_dir, &["check"]);
+//RS         clear_receipt_store(&receipt_dir);
+//RS 
+//RS         let baseline = mutation_check();
+//RS         assert_project_check_passed(&baseline, &format!("baseline {label} project check"));
+//RS         let baseline_replay = mutation_check();
+//RS         assert_project_check_passed(
+//RS             &baseline_replay,
+//RS             &format!("unchanged baseline {label} project check"),
+//RS         );
+//RS         assert!(
+//RS             receipt_replayed(&baseline_replay),
+//RS             "unchanged baseline {label} check did not replay its receipt:\n{}",
+//RS             String::from_utf8_lossy(&baseline_replay.stderr)
+//RS         );
+//RS 
+//RS         fs::write(&path, replacement)
+//RS             .unwrap_or_else(|error| panic!("mutate {label} fixture {}: {error}", path.display()));
+//RS         let changed = mutation_check();
+//RS         assert_project_check_passed(&changed, &format!("changed {label} project check"));
+//RS         assert!(
+//RS             !receipt_replayed(&changed),
+//RS             "{label} change reused stale receipt:\n{}",
+//RS             String::from_utf8_lossy(&changed.stderr)
+//RS         );
+//RS 
+//RS         fs::write(&path, original)
+//RS             .unwrap_or_else(|error| panic!("restore {label} fixture {}: {error}", path.display()));
+//RS         clear_receipt_store(&receipt_dir);
+//RS     }
+//RS 
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn project_check_json_rows_are_versioned_and_warm_stable() {
+//RS     let scratch = scratch_root("json-warm");
+//RS     copy_fixture_tree(&fixture("entry_resolution"), &scratch);
+//RS     let receipt_dir = scratch.join(".jet/receipts");
+//RS     let dir = scratch.as_path();
+//RS 
+//RS     let cold_started = Instant::now();
+//RS     let cold = run_project_check(&dir, &receipt_dir, &["check", "--json"]);
+//RS     let cold_us = cold_started.elapsed().as_micros();
+//RS     let cold_rows = machine_rows(&cold);
+//RS 
+//RS     let warm_started = Instant::now();
+//RS     let warm = run_project_check(&dir, &receipt_dir, &["check", "--json"]);
+//RS     let warm_us = warm_started.elapsed().as_micros();
+//RS     let warm_rows = machine_rows(&warm);
+//RS     assert!(
+//RS         receipt_replayed(&warm),
+//RS         "warm project check did not replay its receipt:\n{}",
+//RS         String::from_utf8_lossy(&warm.stderr)
+//RS     );
+//RS 
+//RS     assert_eq!(cold_rows, warm_rows, "warm check changed machine proof rows");
+//RS     assert_eq!(cold_rows.len(), 4, "machine output must expose all proof rows");
+//RS     for (name, diagnostic) in [
+//RS         ("entry resolution", "E2389"),
+//RS         ("module graph", "E2390"),
+//RS         ("Core closure", "E2391"),
+//RS         ("tier lowering", "E2392"),
+//RS     ] {
+//RS         let row = cold_rows
+//RS             .iter()
+//RS             .find(|row| json_get(row, "name").and_then(json_str) == Some(name))
+//RS             .unwrap_or_else(|| panic!("machine output omitted {name} row"));
+//RS         assert_eq!(
+//RS             json_get(row, "status").and_then(json_str),
+//RS             Some("proven"),
+//RS             "machine output did not prove {name}"
+//RS         );
+//RS         assert_eq!(
+//RS             json_get(row, "diagnostic").and_then(json_str),
+//RS             Some(diagnostic),
+//RS             "machine output changed diagnostic code for {name}"
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         cold_us > 0 && warm_us > 0,
+//RS         "warm canary must record positive wall-clock cost: cold={cold_us}us warm={warm_us}us"
+//RS     );
+//RS     eprintln!(
+//RS         "project-check warm canary: contract=jet.check/v1 cone=D-DEVR-CONE1 rows={} cold_us={cold_us} warm_us={warm_us} rows_stable=true",
+//RS         cold_rows.len()
+//RS     );
+//RS     let _ = fs::remove_dir_all(scratch);
+//RS }
+//RS 
+// END-PORT-PENDING 1136 tests/project_check.rs:1-694
+
+// PORT-PENDING 1136 tests-project-check-module-group: tests/provider_visibility.rs:1-46
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS #[test]
+//RS fn raw_provider_backends_are_not_external_api() {
+//RS     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let scratch =
+//RS         std::env::temp_dir().join(format!("jet-provider-visibility-{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&scratch);
+//RS     fs::create_dir_all(scratch.join("src")).unwrap();
+//RS     fs::write(
+//RS         scratch.join("Cargo.toml"),
+//RS         format!(
+//RS             "[package]\nname = \"provider-visibility\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[workspace]\n\n[dependencies]\njetpack = {{ path = {:?} }}\n",
+//RS             root.join("crates/jetpack")
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         scratch.join("src/main.rs"),
+//RS         "use jetpack::Provider::{provider_for, CoreProvider, NixProvider, Provider};\nfn main() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new("cargo")
+//RS         .args(["check", "--offline"])
+//RS         .current_dir(&scratch)
+//RS         // card 1640: share the checkout's one build cache — a per-test
+//RS         // namespace inside target/ regrows forever and nothing prunes it.
+//RS         .env("CARGO_TARGET_DIR", root.join("target"))
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "raw provider API unexpectedly compiled"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     for symbol in ["provider_for", "CoreProvider", "NixProvider", "Provider"] {
+//RS         assert!(
+//RS             stderr.contains(symbol) && stderr.contains("private"),
+//RS             "stderr: {stderr}"
+//RS         );
+//RS     }
+//RS     let _ = fs::remove_dir_all(scratch);
+//RS }
+// END-PORT-PENDING 1136 tests/provider_visibility.rs:1-46
+
+// PORT-PENDING 1136 tests-project-check-module-group: tests/pure.rs:1-738
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! E2-M16 pure evaluation tests (S60, D-PURE1/D-PURE2/D-PURE3).
+//RS 
+//RS mod common;
+//RS 
+//RS use std::path::Path;
+//RS use std::sync::Mutex;
+//RS 
+//RS /// Sema's `FuncSig` publishes view provenance through a shared cell; a parsed
+//RS /// `Func` still carries the plain map.
+//RS fn provenance_cell(map: &Option<jet::AST::ViewProvenanceMap>) -> jet::AST::ViewProvenanceCell {
+//RS     let cell = jet::AST::ViewProvenanceCell::new();
+//RS     if let Some(map) = map {
+//RS         cell.set(map.clone());
+//RS     }
+//RS     cell
+//RS }
+//RS 
+//RS // Serialize all tests that mutate the process-global JET_PACKAGE_STORE_DIR to prevent
+//RS // concurrent set_var races under cargo's parallel runner.
+//RS static STORE_LOCK: Mutex<()> = Mutex::new(());
+//RS 
+//RS /// Run `f` with `JET_PACKAGE_STORE_DIR` pointed at a fresh `dir`, serializing concurrent
+//RS /// calls and restoring the prior value afterward.
+//RS fn with_store<T, F: FnOnce() -> T>(dir: &Path, f: F) -> T {
+//RS     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+//RS     let _ = std::fs::remove_dir_all(dir);
+//RS     std::fs::create_dir_all(dir).unwrap();
+//RS     let prev = std::env::var("JET_PACKAGE_STORE_DIR").ok();
+//RS     std::env::set_var("JET_PACKAGE_STORE_DIR", dir);
+//RS     let result = f();
+//RS     match prev {
+//RS         Some(v) => std::env::set_var("JET_PACKAGE_STORE_DIR", v),
+//RS         None => std::env::remove_var("JET_PACKAGE_STORE_DIR"),
+//RS     }
+//RS     let _ = std::fs::remove_dir_all(dir);
+//RS     result
+//RS }
+//RS 
+//RS /// `pure fn` parses and compiles without error.
+//RS #[test]
+//RS fn pure_fn_compiles() {
+//RS     let src = r#"
+//RS fn add(a: Int, b: Int) -[]> Int {
+//RS     return a + b
+//RS }
+//RS fn run() {
+//RS     print("{add(1, 2)}")
+//RS }
+//RS "#;
+//RS     let res = jet::compile(src);
+//RS     assert!(res.is_ok(), "#Pure fn should compile: {:?}", res.err());
+//RS }
+//RS 
+//RS /// Impure call inside `pure fn` fires E3401.
+//RS #[test]
+//RS fn pure_fn_impure_call_is_e3401() {
+//RS     let src = r#"
+//RS fn bad() -[]> Int {
+//RS     print("side effect")
+//RS     return 42
+//RS }
+//RS fn run() {
+//RS     print("{bad()}")
+//RS }
+//RS "#;
+//RS     let res = jet::compile(src);
+//RS     assert!(res.is_err(), "impure call in #Pure fn should fail");
+//RS     let diags = res.unwrap_err();
+//RS     assert!(
+//RS         diags.iter().any(|d| d.code == "E3401"),
+//RS         "expected E3401, got: {:?}",
+//RS         diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+//RS     );
+//RS }
+//RS 
+//RS /// Card #1543 merge-review finding 1: an `#Impure` body inside a `-[]>` fn
+//RS /// still fires E3401. `#Impure` records/gates the ambient call at run time,
+//RS /// it doesn't erase it — a declared-empty effect set can't silently admit
+//RS /// one just because it's fenced.
+//RS #[test]
+//RS fn pure_fn_impure_gate_still_fires_e3401() {
+//RS     let src = r#"
+//RS fn bad() -[]> Int {
+//RS     #Impure("side effect") {
+//RS         print("ambient")
+//RS     }
+//RS     return 42
+//RS }
+//RS fn run() {
+//RS     print("{bad()}")
+//RS }
+//RS "#;
+//RS     let res = jet::compile(src);
+//RS     assert!(
+//RS         res.is_err(),
+//RS         "#Impure-gated ambient call in a `-[]>` fn should still fail"
+//RS     );
+//RS     let diags = res.unwrap_err();
+//RS     assert!(
+//RS         diags.iter().any(|d| d.code == "E3401"),
+//RS         "expected E3401, got: {:?}",
+//RS         diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+//RS     );
+//RS }
+//RS 
+//RS /// Card #1543 merge-review finding 2: a `prep { ... }` comptime block inside a
+//RS /// `-[]>` fn must NOT ALSO trip a run-time-voiced E3401 on top of the real
+//RS /// build-time one — it emits no runtime code at all (I3), so the run-time
+//RS /// `-[]>` walk must not descend into it a second time. `print` here is
+//RS /// genuinely invalid at compile time (comptime can't touch stdout), so the
+//RS /// block's own build-time evaluation correctly reports E3401 once; the bug
+//RS /// was the run-time walk piling a second, run-time-voiced E3401 on top.
+//RS #[test]
+//RS fn pure_fn_comptime_block_is_excluded_from_runtime_check() {
+//RS     let src = r#"
+//RS fn good() -[]> Int {
+//RS     prep {
+//RS         print("build-time only")
+//RS     }
+//RS     return 42
+//RS }
+//RS fn run() {
+//RS     print("{good()}")
+//RS }
+//RS "#;
+//RS     let res = jet::compile(src);
+//RS     assert!(
+//RS         res.is_err(),
+//RS         "print() inside `prep {{ }}` is still build-time invalid"
+//RS     );
+//RS     let diags = res.unwrap_err();
+//RS     let e3401s: Vec<_> = diags.iter().filter(|d| d.code == "E3401").collect();
+//RS     assert_eq!(
+//RS         e3401s.len(),
+//RS         1,
+//RS         "expected exactly one E3401 (the build-time one), got: {:?}",
+//RS         e3401s
+//RS     );
+//RS     assert!(
+//RS         e3401s[0].what.contains("not allowed in comptime code"),
+//RS         "the surviving E3401 should be the build-time one, got: {:?}",
+//RS         e3401s[0]
+//RS     );
+//RS }
+//RS 
+//RS /// D-AUTHORITY-SCOPE1 / I9: comptime accepts the same named `#FX` syntax as
+//RS /// runtime tiers. The sema-only comptime block emits no separate block code.
+//RS #[test]
+//RS fn comptime_named_authority_scope_compiles() {
+//RS     let src = r#"
+//RS ANSWER :: prep { 42 }
+//RS fn run() {
+//RS     prep {
+//RS         #FX(authority: IO) {}
+//RS     }
+//RS     print("{ANSWER}")
+//RS }
+//RS "#;
+//RS     let output = jet::compile(src).expect("comptime should accept named #FX");
+//RS     assert!(
+//RS         output.rust.contains("42"),
+//RS         "comptime binding was not emitted"
+//RS     );
+//RS }
+//RS 
+//RS /// A `pure fn` calling another `pure fn` is fine.
+//RS #[test]
+//RS fn pure_fn_calling_pure_fn_is_ok() {
+//RS     let src = r#"
+//RS fn square(n: Int) -[]> Int {
+//RS     return n * n
+//RS }
+//RS fn cube(n: Int) -[]> Int {
+//RS     return n * square(n)
+//RS }
+//RS fn run() {
+//RS     print("{cube(3)}")
+//RS }
+//RS "#;
+//RS     let res = jet::compile(src);
+//RS     assert!(
+//RS         res.is_ok(),
+//RS         "pure calling pure should compile: {:?}",
+//RS         res.err()
+//RS     );
+//RS }
+//RS 
+//RS /// A public function with an explicit empty effect row compiles.
+//RS #[test]
+//RS fn pub_pure_fn_compiles() {
+//RS     let src = r#"
+//RS pub fn double(n: Int) -[]> Int {
+//RS     return n * 2
+//RS }
+//RS fn run() {
+//RS     print("{double(5)}")
+//RS }
+//RS "#;
+//RS     let res = jet::compile(src);
+//RS     assert!(
+//RS         res.is_ok(),
+//RS         "public pure fn should compile: {:?}",
+//RS         res.err()
+//RS     );
+//RS }
+//RS 
+//RS /// `pure fn` calling an impure user-defined function fires E3401.
+//RS #[test]
+//RS fn pure_fn_calling_impure_user_fn_is_e3401() {
+//RS     let src = r#"
+//RS fn read_value() -> Int {
+//RS     print("side effect")
+//RS     return 1
+//RS }
+//RS fn compute() -[]> Int {
+//RS     return read_value()
+//RS }
+//RS fn run() {
+//RS     print("{compute()}")
+//RS }
+//RS "#;
+//RS     let res = jet::compile(src);
+//RS     assert!(res.is_err(), "#Pure fn calling impure user fn should fail");
+//RS     let diags = res.unwrap_err();
+//RS     assert!(
+//RS         diags.iter().any(|d| d.code == "E3401"),
+//RS         "expected E3401, got: {:?}",
+//RS         diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn pure_fn_checks_calls_in_range_bounds() {
+//RS     let src = r#"
+//RS fn read_bound() -> Int {
+//RS     print("side effect")
+//RS     return 2
+//RS }
+//RS fn bad() -[]> Range {
+//RS     return 0..read_bound()
+//RS }
+//RS fn run() {
+//RS     print(bad())
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src).expect_err("an impure range bound must fail");
+//RS     assert!(
+//RS         diags.iter().any(|d| d.code == "E3401"),
+//RS         "expected E3401, got {diags:?}"
+//RS     );
+//RS }
+//RS 
+//RS // ── Transitive impurity traces (check_pure_program_root) ─────────────────────
+//RS 
+//RS /// 3-level transitive chain: main → a → b → print must produce E3401 showing
+//RS /// the full `main → a → b` path in the why-line.
+//RS #[test]
+//RS fn transitive_chain_3_levels() {
+//RS     use jet::AST;
+//RS     use std::collections::HashMap;
+//RS 
+//RS     let src = r#"
+//RS fn b() {
+//RS     print("side effect")
+//RS }
+//RS fn a() {
+//RS     b()
+//RS }
+//RS fn run() {
+//RS     a()
+//RS }
+//RS "#;
+//RS     let (toks, _) = jet::Lexer::lex(src);
+//RS     let prog = jet::Parser::parse(&toks).expect("parse ok");
+//RS 
+//RS     // Build maps.
+//RS     let mut funcs_sig: HashMap<String, jet::Sema::FuncSig> = HashMap::new();
+//RS     let mut ast_funcs_owned: Vec<(String, AST::Func)> = Vec::new();
+//RS     for item in &prog.items {
+//RS         if let AST::Item::Func(f) = item {
+//RS             funcs_sig.insert(
+//RS                 f.name.clone(),
+//RS                 jet::Sema::FuncSig {
+//RS                     params: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| (p.convention.clone(), p.ty.clone()))
+//RS                         .collect(),
+//RS                     root_param: f.params.first().is_some_and(|p| p.root),
+//RS                     return_type: f.return_type.clone(),
+//RS                     deprecation: None,
+//RS                     return_view_provenance: provenance_cell(&f.return_view_provenance),
+//RS                     is_extern: false,
+//RS                     is_c_abi: false,
+//RS                     c_abi_name: None,
+//RS                     callback_transport: None,
+//RS                     callback_plan_digest: None,
+//RS                     callback_identity: None,
+//RS                     foreign_effect_root: None,
+//RS                     undo: None,
+//RS                     is_unsafe: f.is_unsafe,
+//RS                     is_pure: f.is_pure,
+//RS                     memo_bound: jet::AST::memo_bound_from_markers(&f.markers),
+//RS                     is_sanitizer: f.is_sanitizer,
+//RS                     param_info: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| (p.name.clone(), p.default.is_some()))
+//RS                         .collect(),
+//RS                     param_call: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| (p.call_label().to_string(), p.zone))
+//RS                         .collect(),
+//RS                     defaults: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
+//RS                         .collect(),
+//RS                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
+//RS                     variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
+//RS                     param_view_from_names: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| p.declared_view_from_names.clone())
+//RS                         .collect(),
+//RS                     callable_policies: Default::default(),
+//RS                     is_must_use: f.is_must_use,
+//RS                     is_foreign_thread_safe: false,
+//RS                 },
+//RS             );
+//RS             ast_funcs_owned.push((f.name.clone(), f.clone()));
+//RS         }
+//RS     }
+//RS     let ast_funcs: HashMap<String, &AST::Func> = ast_funcs_owned
+//RS         .iter()
+//RS         .map(|(n, f)| (n.clone(), f))
+//RS         .collect();
+//RS 
+//RS     let diags = jet::check_pure_program_root("run", &funcs_sig, &ast_funcs);
+//RS     assert!(!diags.is_empty(), "expected E3401 for transitive impurity");
+//RS     let d = &diags[0];
+//RS     assert_eq!(d.code, "E3401", "should be E3401");
+//RS     // The why-line must contain the transitive chain.
+//RS     let why = &d.why;
+//RS     assert!(
+//RS         why.contains("run") && why.contains("a") && why.contains("b"),
+//RS         "transitive chain missing from why: {:?}",
+//RS         why
+//RS     );
+//RS     assert!(
+//RS         why.contains("→"),
+//RS         "chain separator `→` missing from why: {:?}",
+//RS         why
+//RS     );
+//RS }
+//RS 
+//RS /// Calls nested in range bounds remain visible to transitive purity analysis.
+//RS #[test]
+//RS fn transitive_range_bound_is_e3401() {
+//RS     use jet::AST;
+//RS     use std::collections::HashMap;
+//RS 
+//RS     let src = r#"
+//RS fn impure_bound() -> Int {
+//RS     print("oops")
+//RS     return 2
+//RS }
+//RS fn helper() {
+//RS     band :: 0..impure_bound()
+//RS }
+//RS fn run() {
+//RS     helper()
+//RS }
+//RS "#;
+//RS     let (toks, _) = jet::Lexer::lex(src);
+//RS     let prog = jet::Parser::parse(&toks).expect("parse ok");
+//RS 
+//RS     let mut funcs_sig: HashMap<String, jet::Sema::FuncSig> = HashMap::new();
+//RS     let mut ast_funcs_owned: Vec<(String, AST::Func)> = Vec::new();
+//RS     for item in &prog.items {
+//RS         if let AST::Item::Func(f) = item {
+//RS             funcs_sig.insert(
+//RS                 f.name.clone(),
+//RS                 jet::Sema::FuncSig {
+//RS                     params: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| (p.convention.clone(), p.ty.clone()))
+//RS                         .collect(),
+//RS                     root_param: f.params.first().is_some_and(|p| p.root),
+//RS                     return_type: f.return_type.clone(),
+//RS                     deprecation: None,
+//RS                     return_view_provenance: provenance_cell(&f.return_view_provenance),
+//RS                     is_extern: false,
+//RS                     is_c_abi: false,
+//RS                     c_abi_name: None,
+//RS                     callback_transport: None,
+//RS                     callback_plan_digest: None,
+//RS                     callback_identity: None,
+//RS                     foreign_effect_root: None,
+//RS                     undo: None,
+//RS                     is_unsafe: f.is_unsafe,
+//RS                     is_pure: f.is_pure,
+//RS                     memo_bound: jet::AST::memo_bound_from_markers(&f.markers),
+//RS                     is_sanitizer: f.is_sanitizer,
+//RS                     param_info: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| (p.name.clone(), p.default.is_some()))
+//RS                         .collect(),
+//RS                     param_call: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| (p.call_label().to_string(), p.zone))
+//RS                         .collect(),
+//RS                     defaults: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
+//RS                         .collect(),
+//RS                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
+//RS                     variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
+//RS                     param_view_from_names: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| p.declared_view_from_names.clone())
+//RS                         .collect(),
+//RS                     callable_policies: Default::default(),
+//RS                     is_must_use: f.is_must_use,
+//RS                     is_foreign_thread_safe: false,
+//RS                 },
+//RS             );
+//RS             ast_funcs_owned.push((f.name.clone(), f.clone()));
+//RS         }
+//RS     }
+//RS     let ast_funcs: HashMap<String, &AST::Func> = ast_funcs_owned
+//RS         .iter()
+//RS         .map(|(n, f)| (n.clone(), f))
+//RS         .collect();
+//RS 
+//RS     let diags = jet::check_pure_program_root("run", &funcs_sig, &ast_funcs);
+//RS     assert!(!diags.is_empty(), "expected E3401");
+//RS     let why = &diags[0].why;
+//RS     assert!(
+//RS         why.contains("run") && why.contains("helper") && why.contains("impure_bound"),
+//RS         "chain missing in why: {:?}",
+//RS         why
+//RS     );
+//RS }
+//RS 
+//RS /// Pure program with no impure calls must not produce E3401.
+//RS #[test]
+//RS fn transitive_clean_program_no_error() {
+//RS     use jet::AST;
+//RS     use std::collections::HashMap;
+//RS 
+//RS     let src = r#"
+//RS fn square(n: Int) -[]> Int {
+//RS     return n * n
+//RS }
+//RS fn run() {
+//RS     x :: square(5)
+//RS }
+//RS "#;
+//RS     let (toks, _) = jet::Lexer::lex(src);
+//RS     let prog = jet::Parser::parse(&toks).expect("parse ok");
+//RS 
+//RS     let mut funcs_sig: HashMap<String, jet::Sema::FuncSig> = HashMap::new();
+//RS     let mut ast_funcs_owned: Vec<(String, AST::Func)> = Vec::new();
+//RS     for item in &prog.items {
+//RS         if let AST::Item::Func(f) = item {
+//RS             funcs_sig.insert(
+//RS                 f.name.clone(),
+//RS                 jet::Sema::FuncSig {
+//RS                     params: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| (p.convention.clone(), p.ty.clone()))
+//RS                         .collect(),
+//RS                     root_param: f.params.first().is_some_and(|p| p.root),
+//RS                     return_type: f.return_type.clone(),
+//RS                     deprecation: None,
+//RS                     return_view_provenance: provenance_cell(&f.return_view_provenance),
+//RS                     is_extern: false,
+//RS                     is_c_abi: false,
+//RS                     c_abi_name: None,
+//RS                     callback_transport: None,
+//RS                     callback_plan_digest: None,
+//RS                     callback_identity: None,
+//RS                     foreign_effect_root: None,
+//RS                     undo: None,
+//RS                     is_unsafe: f.is_unsafe,
+//RS                     is_pure: f.is_pure,
+//RS                     memo_bound: jet::AST::memo_bound_from_markers(&f.markers),
+//RS                     is_sanitizer: f.is_sanitizer,
+//RS                     param_info: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| (p.name.clone(), p.default.is_some()))
+//RS                         .collect(),
+//RS                     param_call: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| (p.call_label().to_string(), p.zone))
+//RS                         .collect(),
+//RS                     defaults: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
+//RS                         .collect(),
+//RS                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
+//RS                     variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
+//RS                     param_view_from_names: f
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|p| p.declared_view_from_names.clone())
+//RS                         .collect(),
+//RS                     callable_policies: Default::default(),
+//RS                     is_must_use: f.is_must_use,
+//RS                     is_foreign_thread_safe: false,
+//RS                 },
+//RS             );
+//RS             ast_funcs_owned.push((f.name.clone(), f.clone()));
+//RS         }
+//RS     }
+//RS     let ast_funcs: HashMap<String, &AST::Func> = ast_funcs_owned
+//RS         .iter()
+//RS         .map(|(n, f)| (n.clone(), f))
+//RS         .collect();
+//RS 
+//RS     let diags = jet::check_pure_program_root("run", &funcs_sig, &ast_funcs);
+//RS     assert!(
+//RS         diags.is_empty(),
+//RS         "expected no diagnostics, got: {:?}",
+//RS         diags
+//RS     );
+//RS }
+//RS 
+//RS // ── CtValue pretty rendering ──────────────────────────────────────────────────
+//RS 
+//RS /// Struct pretty-renders as `Name {\n  field: value,\n}`.
+//RS #[test]
+//RS fn ctvalue_render_pretty_struct() {
+//RS     use jet::CtValue;
+//RS     let v = CtValue::Struct {
+//RS         type_name: "Point".to_string(),
+//RS         fields: vec![
+//RS             ("x".to_string(), CtValue::Int(3)),
+//RS             ("y".to_string(), CtValue::Int(4)),
+//RS         ],
+//RS     };
+//RS     let rendered = v.render_pretty();
+//RS     assert!(rendered.contains("Point"), "missing type name");
+//RS     assert!(rendered.contains("x:"), "missing field x");
+//RS     assert!(rendered.contains("y:"), "missing field y");
+//RS     assert!(rendered.contains("3"), "missing value 3");
+//RS     assert!(rendered.contains("4"), "missing value 4");
+//RS }
+//RS 
+//RS /// List pretty-renders with one item per line.
+//RS #[test]
+//RS fn ctvalue_render_pretty_list() {
+//RS     use jet::CtValue;
+//RS     let v = CtValue::List(vec![CtValue::Int(1), CtValue::Int(2), CtValue::Int(3)]);
+//RS     let rendered = v.render_pretty();
+//RS     assert!(rendered.starts_with('['), "should start with [");
+//RS     assert!(rendered.contains("1,"), "missing 1");
+//RS     assert!(rendered.contains("2,"), "missing 2");
+//RS }
+//RS 
+//RS /// Nested struct with list field.
+//RS #[test]
+//RS fn ctvalue_render_pretty_nested() {
+//RS     use jet::CtValue;
+//RS     let v = CtValue::Struct {
+//RS         type_name: "Report".to_string(),
+//RS         fields: vec![
+//RS             ("total".to_string(), CtValue::Int(42)),
+//RS             (
+//RS                 "items".to_string(),
+//RS                 CtValue::List(vec![
+//RS                     CtValue::Str("a".to_string()),
+//RS                     CtValue::Str("b".to_string()),
+//RS                 ]),
+//RS             ),
+//RS         ],
+//RS     };
+//RS     let rendered = v.render_pretty();
+//RS     assert!(rendered.contains("Report"), "missing type name");
+//RS     assert!(rendered.contains("total:"), "missing total field");
+//RS     assert!(rendered.contains("items:"), "missing items field");
+//RS     assert!(rendered.contains("\"a\""), "missing item a");
+//RS     assert!(rendered.contains("\"b\""), "missing item b");
+//RS }
+//RS 
+//RS /// `to_json()` produces compact stable JSON.
+//RS #[test]
+//RS fn ctvalue_to_json_struct() {
+//RS     use jet::CtValue;
+//RS     let v = CtValue::Struct {
+//RS         type_name: "Point".to_string(),
+//RS         fields: vec![
+//RS             ("x".to_string(), CtValue::Int(3)),
+//RS             ("y".to_string(), CtValue::Int(4)),
+//RS         ],
+//RS     };
+//RS     let json = v.to_json();
+//RS     assert_eq!(json, r#"{"x":3,"y":4}"#);
+//RS }
+//RS 
+//RS /// `to_json()` produces compact stable JSON for lists.
+//RS #[test]
+//RS fn ctvalue_to_json_list() {
+//RS     use jet::CtValue;
+//RS     let v = CtValue::List(vec![CtValue::Int(1), CtValue::Int(2)]);
+//RS     let json = v.to_json();
+//RS     assert_eq!(json, "[1,2]");
+//RS }
+//RS 
+//RS /// Store generation tracking: list_generations returns an empty list when
+//RS /// no generations are recorded (using a temp store dir).
+//RS #[test]
+//RS fn store_generations_empty() {
+//RS     let dir = std::env::temp_dir().join("jet_pure_test_gen_empty");
+//RS     with_store(&dir, || {
+//RS         // Just check it doesn't panic on a fresh store.
+//RS         let _ = jet::Store::list_generations();
+//RS     });
+//RS }
+//RS 
+//RS /// Store generation tracking: record_generation writes a record.
+//RS #[test]
+//RS fn store_record_generation() {
+//RS     let dir = std::env::temp_dir().join("jet_pure_test_gen_record");
+//RS     with_store(&dir, || {
+//RS         let gen = jet::Store::record_generation();
+//RS         assert!(gen >= 1, "generation should be at least 1");
+//RS         let gens = jet::Store::list_generations();
+//RS         assert!(
+//RS             !gens.is_empty(),
+//RS             "should have at least one generation recorded"
+//RS         );
+//RS     });
+//RS }
+//RS 
+//RS /// Store rollback: rolling back to a non-existent generation returns Err.
+//RS #[test]
+//RS fn store_rollback_invalid_gen() {
+//RS     let dir = std::env::temp_dir().join("jet_pure_test_gen_rollback_inv");
+//RS     with_store(&dir, || {
+//RS         let result = jet::Store::rollback_to(9999);
+//RS         assert!(result.is_err(), "rollback to non-existent gen should fail");
+//RS     });
+//RS }
+//RS 
+//RS // ── Eval sema regression tests ────────────────────────────────────────────────
+//RS 
+//RS /// Regression (c54 fix): `jet eval --pure` with a type error must produce a
+//RS /// precise type diagnostic (e.g. a binary-operator type mismatch), NOT E0956
+//RS /// ("this operation can't run at compile time yet"). Before the fix, the eval
+//RS /// path bypassed sema entirely and fell through to the comptime interpreter.
+//RS #[test]
+//RS fn eval_type_error_gives_precise_diagnostic_not_e0956() {
+//RS     // `"string" + 5` is a String/Int type mismatch — sema must catch this.
+//RS     let src = r#"fn run() -[]> Int { return "string" + 5 }"#;
+//RS     let diags = jet::check_for_eval(src, "test_eval_type.jet");
+//RS     assert!(
+//RS         !diags.is_empty(),
+//RS         "type error should produce diagnostics, got none"
+//RS     );
+//RS     assert!(
+//RS         diags.iter().all(|d| d.code != "E0956"),
+//RS         "must not see E0956 for a type error; got: {:?}",
+//RS         diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+//RS     );
+//RS     // Should be a type-mismatch / operator error, not a comptime limitation.
+//RS     let codes: Vec<_> = diags.iter().map(|d| d.code.as_str()).collect();
+//RS     assert!(
+//RS         codes.iter().any(|c| *c != "E0956"),
+//RS         "expected a type/operator error code, got: {:?}",
+//RS         codes
+//RS     );
+//RS }
+//RS 
+//RS /// `check_for_eval` passes for a valid typed eval program.
+//RS #[test]
+//RS fn eval_valid_typed_run_passes_sema() {
+//RS     let src = r#"fn run() -[]> Int { return 2 + 3 }"#;
+//RS     let diags = jet::check_for_eval(src, "test_eval_valid.jet");
+//RS     assert!(
+//RS         diags.is_empty(),
+//RS         "`fn run() -[]> Int ->` with correct body should pass sema, got: {:?}",
+//RS         diags
+//RS     );
+//RS }
+//RS 
+//RS /// `check_for_eval` passes for a normal `fn run() -[]>` program.
+//RS #[test]
+//RS fn eval_normal_void_run_passes_sema() {
+//RS     let src = r#"fn run() -[]> { }"#;
+//RS     let diags = jet::check_for_eval(src, "test_eval_void.jet");
+//RS     assert!(
+//RS         diags.is_empty(),
+//RS         "`fn run() -[]>` should pass eval sema, got: {:?}",
+//RS         diags
+//RS     );
+//RS }
+//RS 
+//RS /// D-REACTCORE1: `#Reactive { … }` parses in statement position.
+//RS #[test]
+//RS fn parse_reactive_block_stmt() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     #Reactive {
+//RS         print(1)
+//RS     }
+//RS }
+//RS "#;
+//RS     let (toks, lex_diags) = jet::Lexer::lex(src);
+//RS     assert!(lex_diags.is_empty(), "lex: {:?}", lex_diags);
+//RS     let prog = jet::Parser::parse(&toks).expect("parse ok");
+//RS     let run = prog
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|i| match i {
+//RS             jet::AST::Item::Func(f) if f.name == "run" => Some(f),
+//RS             _ => None,
+//RS         })
+//RS         .expect("run");
+//RS     assert!(
+//RS         run.body
+//RS             .iter()
+//RS             .any(|s| matches!(s, jet::AST::Stmt::Reactive { .. })),
+//RS         "expected Stmt::Reactive in run body, got {:?}",
+//RS         run.body
+//RS     );
+//RS }
+// END-PORT-PENDING 1136 tests/pure.rs:1-738
+

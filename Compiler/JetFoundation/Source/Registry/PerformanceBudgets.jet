@@ -1,0 +1,29 @@
+// Rust: Syntax/jetpack_config.rs:175-238. The closed Budget vocabulary and
+// normalization scales are shared by Sema, CLI and Jetpack, never private tables.
+pub PERF_BUDGET_SCOPES :: [String]{"Package", "Env", "Service", "Scene", "Test", "Target"}
+pub PERF_BUDGET_PROVIDERS :: [String]{"BuildArtifact", "CompilerFacts", "AllocationProbe", "BenchMeasurement", "ServiceProbe", "SceneProbe", "CompilerProbe"}
+pub PERF_BUDGET_METRICS :: [String]{"BinarySize", "ArtifactSize", "GeneratedUnsafe", "PublicApiItems", "DependencyCount", "EffectCount", "AllocationCount", "AllocationBytes", "StartupTime", "FrameTime", "Latency", "Throughput", "MemoryHighWater", "BenchTime", "ServiceReadiness", "SceneAssetBytes", "DrawCalls", "CompileTime"}
+pub PERF_BUDGET_PERCENTILES :: [String]{"P50", "P90", "P95", "P99", "P999"}
+pub PERF_BUDGET_COMPARISONS :: [String]{"Absolute", "AbsoluteFrom", "RelativeTo"}
+pub PERF_BUDGET_LIMITS :: [String]{"AtMost", "AtLeast", "RegressionAtMost", "ImprovementAtLeast"}
+pub PERF_BUDGET_ENFORCEMENT :: [String]{"Fail", "Warn"}
+pub PERF_BUDGET_SELECTIONS :: [String]{"Current", "All", "Only"}
+pub PERF_BUDGET_TARGET_SELECTORS :: [String]{"Class", "Triple"}
+pub PERF_BUDGET_TARGET_CLASSES :: [String]{"Native", "Web", "Freestanding", "Plugin", "OSImage"}
+pub PERF_BUDGET_PROFILES :: [String]{"Dev", "Release", "Small", "Test", "Bench", "Named"}
+pub PERF_BUDGET_UNIT_SUFFIXES :: [String]{"ns", "us", "ms", "s", "B", "KiB", "MiB", "GiB", "pct"}
+
+// Rust perf_budget_unit_scale. Jet's exact Int carries every u128 result here.
+// `pct` has no scale: percentage normalization consumes its decimal digits.
+pub fn perf_budget_unit_scale(suffix: String) -> Int? Never! {
+    if suffix == {
+        "ns" | "B" -> Val(1)
+        "us" -> Val(1000)
+        "ms" -> Val(1000000)
+        "s" -> Val(1000000000)
+        "KiB" -> Val(1024)
+        "MiB" -> Val(1048576)
+        "GiB" -> Val(1073741824)
+        else -> None
+    }
+}

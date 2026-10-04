@@ -1,0 +1,54 @@
+// One edit applier for CLI fixes, Codemod and LSP. All spans are original
+// UTF-8 byte offsets; overlap detection happens BEFORE defensive clamping.
+use jet_foundation.[Span, TextEdit]
+
+#Error
+pub enum ApplyError {
+    Overlap(first: Span, second: Span)
+}
+
+pub fn apply_edits(src: String, edits: View<TextEdit>) -> String ApplyError! {
+    if edits.len() == 0 -> return Ok(src)
+    // Sort indices, not edits/text. The final index key makes equal-span
+    // insertions stable even if the underlying sort is unstable.
+    order := loop index in 0..<edits.len() -> index
+    &order.sort_by((left: Int, right: Int) -> {
+        a :: edits[left].span
+        b :: edits[right].span
+        if a.start != b.start -> a.start <=> b.start
+        else if a.end != b.end -> a.end <=> b.end
+        else -> left <=> right
+    })
+    loop position in 1..<order.len() {
+        first :: edits[order[position - 1]].span
+        second :: edits[order[position]].span
+        if second.start < first.end -> return Err(ApplyError.Overlap{first: first, second: second})
+    }
+    // A single forward materialization is equivalent to reverse replace_range,
+    // including same-point insertion order, without repeated suffix copying.
+    bytes :: src.bytes()
+    out := [U8]{}
+    cursor := 0
+    loop index in order {
+        edit :: edits[index]
+        start :: if edit.span.start < bytes.len() -> edit.span.start else -> bytes.len()
+        bounded_end :: if edit.span.end < bytes.len() -> edit.span.end else -> bytes.len()
+        end :: if bounded_end > start -> bounded_end else -> start
+        // Source is already valid UTF-8; continuation bytes are the only
+        // non-boundaries. Constant-time checks avoid allocating/scanning slices.
+        if start < bytes.len() && (Int.from_u8(bytes[start]) & 192) == 128 -> panic("edit spans must be UTF-8 character boundaries")
+        if end < bytes.len() && (Int.from_u8(bytes[end]) & 192) == 128 -> panic("edit spans must be UTF-8 character boundaries")
+        loop position in cursor..<start -> &out.push(bytes[position])
+        loop byte in edit.new_text.bytes() -> &out.push(byte)
+        cursor = end
+    }
+    loop position in cursor..<bytes.len() -> &out.push(bytes[position])
+    Ok(String.from_bytes(out) ?? panic("edit spans must be UTF-8 character boundaries"))
+}
+
+pub fn changes_text(src: String, edits: View<TextEdit>) -> Bool Never! {
+    if apply_edits(src, edits) == {
+        .Ok(text) -> text != src
+        .Err(_) -> true
+    }
+}

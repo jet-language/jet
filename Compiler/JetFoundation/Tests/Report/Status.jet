@@ -1,0 +1,131 @@
+// Public consumer witness for Report.rs::StatusFields/StatusEnvelope builders.
+// Import the owner; no local renderer or wire-shaped surrogate.
+use jet_foundation.[StatusEnvelope, StatusFields, StatusValue, status_value_from_json_number_atom]
+
+#Test("public status builders retain ordered nested values and bare JSON") {
+    nested := StatusFields.new().with("z", StatusValue.Integer{value: 18446744073709551615})
+    &nested.insert("a", StatusValue.Array{values: [StatusValue]{StatusValue.Null, StatusValue.Bool{value: false}, StatusValue.Float{value: "1.2300e+4"}, StatusValue.String{value: "é\n\""}}}) ?? panic("valid nested field rejected")
+    value :: StatusValue.Object{fields: nested}
+    expected :: `{"z":18446744073709551615,"a":[null,false,1.2300e+4,"é\n\""]}`
+    assert_eq(value.json(), expected)
+    envelope :: StatusEnvelope.new("facts", true).with_field("payload", value).with_field("last", StatusValue.Integer{value: -1})
+    expected_envelope :: `{"schema":"jet.status/v1","action":"facts","ok":true,"reports":[],"payload":{"z":18446744073709551615,"a":[null,false,1.2300e+4,"é\n\""]},"last":-1}`
+    assert_eq(envelope.json(), expected_envelope)
+}
+
+#Test("public status insertion preserves exact name refusals without mutation") {
+    fields := StatusFields.new().with("key", StatusValue.Null)
+    duplicate :: if &fields.insert("key", StatusValue.Bool{value: true}) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("duplicate canonical field accepted")
+    }
+    assert_eq(duplicate, "duplicate status field `key`")
+    controls :: [String]{"", "\n", String.from_bytes([U8]{U8{127}}) ?? panic("DEL is valid UTF-8"), String.from_bytes([U8]{U8{194}, U8{133}}) ?? panic("C1 is valid UTF-8")}
+    loop name in controls {
+        error :: if &fields.insert(name, StatusValue.Null) == {
+            .Err(error) -> error.message
+            .Ok(_) -> panic("non-printable canonical field accepted")
+        }
+        assert_eq(error, "status field names must be non-empty and printable")
+    }
+    assert_eq(StatusValue.Object{fields: fields}.json(), `{"key":null}`)
+}
+
+// Main S19 ruling: original JSON.rs::number f64 normalization/i64 domain,
+// deliberately DISTINCT from lexical Float and Core's general exact Int.
+#Test("status JSON number atoms normalize decimals exponents and signed zero") {
+    atoms :: [String]{"1.2300e+4", "1.0", "-0.0", "1e-7", "1E+21", "-1.25e+2", "9007199254740993.0", "1e-400", "-0"}
+    outputs :: [String]{"12300", "1", "-0", "0.0000001", "1000000000000000000000", "-125", "9007199254740992", "0", "0"}
+    loop (index, atom) in atoms {
+        value :: status_value_from_json_number_atom(atom) ?? panic("finite number atom rejected")
+        assert_eq(value.json(), outputs[index])
+        if index < atoms.len() - 1 {
+            if value == .Float(_) {} else { panic("decimal/exponent atom lost Float discriminator") }
+        } else {
+            if value == .Integer(_) {} else { panic("integer atom changed discriminator") }
+        }
+    }
+    assert_eq(StatusValue.Float{value: "1.2300e+4"}.json(), "1.2300e+4")
+}
+
+#Test("status JSON number atoms keep i64 boundaries and refuse overflow") {
+    assert_eq((status_value_from_json_number_atom("9223372036854775807") ?? panic("i64 max rejected")).json(), "9223372036854775807")
+    assert_eq((status_value_from_json_number_atom("-9223372036854775808") ?? panic("i64 min rejected")).json(), "-9223372036854775808")
+    overflow :: [String]{"9223372036854775808", "-9223372036854775809", "18446744073709551615"}
+    loop atom in overflow {
+        message :: if status_value_from_json_number_atom(atom) == {
+            .Err(error) -> error.message
+            .Ok(_) -> panic("out-of-i64 status atom accepted")
+        }
+        expected :: "invalid number `{atom}`"
+        assert_eq(message, expected)
+    }
+    hostile :: [String]{"1e9999", "-1e9999", "NaN", "Infinity", "01", "+1", "1.", "1e", "-", "", "1 2", "null", "true", "\"1\"", "[1]", `{}`}
+    loop atom in hostile {
+        refused :: if status_value_from_json_number_atom(atom) == {
+            .Err(_) -> true
+            .Ok(_) -> false
+        }
+        assert(refused)
+    }
+}
+
+// Construction deliberately uses the consuming builder on a mutable named
+// receiver, not insert(), so accumulated-state copies cannot hide in the chain.
+#Test("public status consuming with builds 100000 ordered distinct fields") {
+    fields := StatusFields.new()
+    loop index in 0..<100000 {
+        fields = ^fields.with("field{index}", StatusValue.Integer{value: index})
+    }
+    assert_eq(fields.entries.len(), 100000)
+    assert_eq(fields.entries[0].name, "field0")
+    assert_eq(fields.entries[50000].name, "field50000")
+    assert_eq(fields.entries[99999].name, "field99999")
+    probes :: [Int]{0, 50000, 99999}
+    loop index in probes {
+        name :: "field{index}"
+        duplicate :: if &fields.insert(name, StatusValue.Null) == {
+            .Err(error) -> error.message
+            .Ok(_) -> panic("large builder accepted duplicate")
+        }
+        expected :: "duplicate status field `{name}`"
+        assert_eq(duplicate, expected)
+        assert_eq(fields.entries.len(), 100000)
+    }
+    illegal :: if &fields.insert("\n", StatusValue.Null) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("large builder accepted illegal name")
+    }
+    assert_eq(illegal, "status field names must be non-empty and printable")
+    fields = ^fields.with("after", StatusValue.Bool{value: true})
+    assert_eq(fields.entries.len(), 100001)
+    assert_eq(fields.entries[100000].name, "after")
+    loop index in 0..<100000 {
+        expected :: "field{index}"
+        assert_eq(fields.entries[index].name, expected)
+        if fields.entries[index].value == {
+            .Integer(value) -> assert_eq(value, index)
+            else -> panic("large builder lost existing value")
+        }
+    }
+    envelope := StatusEnvelope.new("large", true)
+    envelope = ^envelope.with_field("count", StatusValue.Integer{value: 100001})
+    envelope = ^envelope.with_field("payload", StatusValue.Object{fields: ^fields})
+    assert_eq(envelope.fields.entries.len(), 2)
+    assert_eq(envelope.fields.entries[0].name, "count")
+    assert_eq(envelope.fields.entries[1].name, "payload")
+    if envelope.fields.entries[1].value == {
+        .Object(payload) -> {
+            assert_eq(payload.entries.len(), 100001)
+            assert_eq(payload.entries[0].name, "field0")
+            assert_eq(payload.entries[50000].name, "field50000")
+            assert_eq(payload.entries[99999].name, "field99999")
+            assert_eq(payload.entries[100000].name, "after")
+            if payload.entries[100000].value == {
+                .Bool(value) -> assert(value)
+                else -> panic("post-refusal value changed")
+            }
+        }
+        else -> panic("consuming envelope lost large payload")
+    }
+}

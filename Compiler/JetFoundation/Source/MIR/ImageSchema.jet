@@ -1,0 +1,288 @@
+// Schema-only wire operations. All byte IO and interning are owned by
+// ImageCodec.jet; this layer enforces native scalar and collection contracts.
+use core.math as math
+struct MIRImageEncodedMapEntry { key: [U8], value: [U8] }
+// Signed bit carriers avoid depending on an out-of-range integer conversion.
+// Native f64::to_bits/from_bits retain every NaN payload and the sign of zero.
+fn mir_image_schema_write_f64(writer: &MIRImageWriter, value: Float) Never! {
+    bits :: math.to_bits(value)
+    low :: U64{bits & 9223372036854775807}
+    raw :: if bits < 0 -> low | U64{9223372036854775808} else -> low
+    &writer.write_fixed_u64(raw)
+}
+fn mir_image_schema_read_f64(reader: &MIRImageReader) -> Float MIRImageError! {
+    raw :: &reader.read_fixed_u64()
+    low :: Int.from_u64(raw & U64{9223372036854775807})
+    bits :: if (raw & U64{9223372036854775808}) != U64{0} -> low + -9223372036854775808 else -> low
+    Ok(math.from_bits(bits))
+}
+// The Source-to-native unsigned carrier gate is shared with the writer.
+// It is not a MIR legality rule: native u8 fields cannot contain -1 or 256.
+pub fn mir_image_schema_check_unsigned(value: Int, maximum: U64, kind: String) MIRImageError! {
+    if value < 0 -> return Err(MIRImageError{message: "native MIR {kind} exceeds {kind} range"})
+    if U64{value} > maximum -> return Err(MIRImageError{message: "native MIR {kind} exceeds {kind} range"})
+    return
+}
+fn mir_image_schema_read_bool(reader: &MIRImageReader) -> Bool MIRImageError! {
+    if &reader.read_u8() == {
+        U8{0} -> Ok(false)
+        U8{1} -> Ok(true)
+        else -> Err(MIRImageError{message: "invalid native MIR boolean"})
+    }
+}
+fn mir_image_schema_unique_bytes(seen: &[[U8]:Bool], bytes: View<U8>, message: String) MIRImageError! {
+    key :: bytes.to_list()
+    if seen.get(key) == .Val(_) -> return Err(MIRImageError{message: message})
+    seen[^key] = true
+    return
+}
+fn mir_image_schema_write_set(writer: &MIRImageWriter, input: ^[[U8]]) MIRImageError! {
+    items := ^input
+    &items.sort_by((left: [U8], right: [U8]) -> left <=> right)
+    loop index in 1..<items.len() -> if items[index - 1] == items[index] -> return Err(MIRImageError{message: "duplicate native MIR set element encoding"})
+    &writer.write_count(items.len())
+    loop item in items -> &writer.write_bytes(item.view(0..<item.len()))
+    return
+}
+fn mir_image_schema_write_map(writer: &MIRImageWriter, input: ^[MIRImageEncodedMapEntry]) MIRImageError! {
+    entries := ^input
+    &entries.sort_by((left: MIRImageEncodedMapEntry, right: MIRImageEncodedMapEntry) -> left.key <=> right.key)
+    loop index in 1..<entries.len() -> if entries[index - 1].key == entries[index].key -> return Err(MIRImageError{message: "duplicate native MIR map key encoding"})
+    &writer.write_count(entries.len())
+    loop entry in entries {
+        &writer.write_bytes(entry.key.view(0..<entry.key.len()))
+        &writer.write_bytes(entry.value.view(0..<entry.value.len()))
+    }
+    return
+}
+fn mir_image_schema_write_char(writer: &MIRImageWriter, value: Char) Never! {
+    bytes :: "{value}".bytes()
+    scalar := 0
+    if bytes.len() == 1 -> scalar = Int.from_u8(bytes[0])
+    else {
+        mask :: if bytes.len() == 2 -> U8{31} else if bytes.len() == 3 -> U8{15} else -> U8{7}
+        scalar = Int.from_u8(bytes[0] & mask)
+        loop index in 1..<bytes.len() -> scalar = scalar * 64 + Int.from_u8(bytes[index] & U8{63})
+    }
+    &writer.write_u32(U32{scalar})
+}
+fn mir_image_schema_read_char(reader: &MIRImageReader) -> Char MIRImageError! {
+    word :: &reader.read_u32()
+    if word > U32{1114111} || (word >= U32{55296} && word <= U32{57343}) -> return Err(MIRImageError{message: "invalid native MIR character"})
+    scalar :: Int.from_u32(word)
+    bytes := [U8]{}
+    if scalar < 128 -> &bytes.push(U8{scalar})
+    else if scalar < 2048 {
+        &bytes.push(U8{192 + scalar / 64})
+        &bytes.push(U8{128 + scalar % 64})
+    } else if scalar < 65536 {
+        &bytes.push(U8{224 + scalar / 4096})
+        &bytes.push(U8{128 + scalar / 64 % 64})
+        &bytes.push(U8{128 + scalar % 64})
+    } else {
+        &bytes.push(U8{240 + scalar / 262144})
+        &bytes.push(U8{128 + scalar / 4096 % 64})
+        &bytes.push(U8{128 + scalar / 64 % 64})
+        &bytes.push(U8{128 + scalar % 64})
+    }
+    text :: String.from_bytes(bytes) ?? return Err(MIRImageError{message: "invalid native MIR character"})
+    Ok(text.chars().to_list()[0])
+}
+// Native optimization seals are Option<[u8;32]>, not interned hex strings.
+// These adapters retain the established Source hexadecimal carrier without
+// validating or recomputing a whole-program digest on restore.
+fn mir_image_schema_hex_nibble(byte: U8) -> Int? Never! {
+    if byte >= U8{48} && byte <= U8{57} -> return Val(Int.from_u8(byte) - 48)
+    if byte >= U8{97} && byte <= U8{102} -> return Val(Int.from_u8(byte) - 87)
+    if byte >= U8{65} && byte <= U8{70} -> return Val(Int.from_u8(byte) - 55)
+    None
+}
+fn mir_image_schema_seal_byte(first: U8, second: U8, hex: String) -> U8 MIRImageError! {
+    // Rust checks UTF-8 separately for each two-byte radix chunk.
+    if first >= U8{128} || second >= U8{128} {
+        if first >= U8{194} && first <= U8{223} && second >= U8{128} && second <= U8{191} -> return Err(MIRImageError{message: "MIR pipeline seal `{hex}` is not hex"})
+        return Err(MIRImageError{message: "MIR pipeline seal is not ASCII hex"})
+    }
+    // u8::from_str_radix also accepts a leading '+' on a one-digit chunk.
+    high :: if first == U8{43} -> 0 else -> mir_image_schema_hex_nibble(first) ?? return Err(MIRImageError{message: "MIR pipeline seal `{hex}` is not hex"})
+    low :: mir_image_schema_hex_nibble(second) ?? return Err(MIRImageError{message: "MIR pipeline seal `{hex}` is not hex"})
+    Ok(U8{high * 16 + low})
+}
+fn mir_image_schema_write_seal(writer: &MIRImageWriter, seal: String?) MIRImageError! {
+    if seal == .Val(hex) {
+        bytes :: hex.bytes()
+        if bytes.len() != 64 -> return Err(MIRImageError{message: "MIR pipeline seal `{hex}` is not 64 hex digits"})
+        &writer.write_u8(U8{1})
+        loop index in 0..<32 {
+            &writer.write_u8(mir_image_schema_seal_byte(bytes[index * 2], bytes[index * 2 + 1], hex))
+        }
+    } else -> &writer.write_u8(U8{0})
+    return
+}
+fn mir_image_schema_read_seal(reader: &MIRImageReader) -> String? MIRImageError! {
+    tag :: &reader.read_u8()
+    if tag == U8{0} -> return Ok(None)
+    if tag != U8{1} -> return Err(MIRImageError{message: "invalid native MIR option tag"})
+    digits :: "0123456789abcdef".bytes()
+    hex := [U8]{}
+    loop _ in 0..<32 {
+        byte :: Int.from_u8(&reader.read_u8())
+        &hex.push(digits[byte / 16])
+        &hex.push(digits[byte % 16])
+    }
+    Ok(Val(String.from_bytes(hex) ?? panic("hex digits are ASCII")))
+}
+fn mir_image_schema_write_memo(writer: &MIRImageWriter, bound: Int?, unbounded: Bool) MIRImageError! {
+    if unbounded { &writer.write_u8(U8{1}); &writer.write_u8(U8{0}) }
+    else if bound == .Val(value) {
+        &writer.write_u8(U8{1})
+        &writer.write_u8(U8{1})
+        mir_image_schema_write_usize(&writer, value)
+    } else -> &writer.write_u8(U8{0})
+    return
+}
+struct MIRImageMemoBound { bound: Int?, unbounded: Bool }
+fn mir_image_schema_read_memo(reader: &MIRImageReader) -> MIRImageMemoBound MIRImageError! {
+    outer :: &reader.read_u8()
+    if outer == U8{0} -> return Ok(MIRImageMemoBound{bound: None, unbounded: false})
+    if outer != U8{1} -> return Err(MIRImageError{message: "invalid native MIR option tag"})
+    inner :: &reader.read_u8()
+    if inner == U8{0} -> return Ok(MIRImageMemoBound{bound: None, unbounded: true})
+    if inner != U8{1} -> return Err(MIRImageError{message: "invalid native MIR option tag"})
+    Ok(MIRImageMemoBound{bound: Val(mir_image_schema_read_usize(&reader)), unbounded: false})
+}
+fn mir_image_schema_write_u8(writer: &MIRImageWriter, value: Int) MIRImageError! {
+    mir_image_schema_check_unsigned(value, U64{255}, "u8")
+    &writer.write_u8(U8{value})
+    return
+}
+fn mir_image_schema_read_u8(reader: &MIRImageReader) -> Int MIRImageError! {
+    raw :: &reader.read_u8()
+    Ok(Int.from_u8(raw))
+}
+fn mir_image_schema_write_u16(writer: &MIRImageWriter, value: Int) MIRImageError! {
+    mir_image_schema_check_unsigned(value, U64{65535}, "u16")
+    &writer.write_u16(U16{value})
+    return
+}
+fn mir_image_schema_read_u16(reader: &MIRImageReader) -> Int MIRImageError! {
+    raw :: &reader.read_u16()
+    Ok(Int.from_u16(raw))
+}
+fn mir_image_schema_write_u32(writer: &MIRImageWriter, value: Int) MIRImageError! {
+    mir_image_schema_check_unsigned(value, U64{4294967295}, "u32")
+    &writer.write_u32(U32{value})
+    return
+}
+fn mir_image_schema_read_u32(reader: &MIRImageReader) -> Int MIRImageError! {
+    raw :: &reader.read_u32()
+    Ok(Int.from_u32(raw))
+}
+fn mir_image_schema_write_u64(writer: &MIRImageWriter, value: Int) MIRImageError! {
+    mir_image_schema_check_unsigned(value, U64{18446744073709551615}, "u64")
+    &writer.write_u64(U64{value})
+    return
+}
+fn mir_image_schema_read_u64(reader: &MIRImageReader) -> Int MIRImageError! {
+    raw :: &reader.read_u64()
+    Ok(Int.from_u64(raw))
+}
+fn mir_image_schema_write_usize(writer: &MIRImageWriter, value: Int) MIRImageError! {
+    if value < 0 -> return Err(MIRImageError{message: "native MIR usize exceeds u64"})
+    &writer.write_u64(U64{value})
+    return
+}
+fn mir_image_schema_read_usize(reader: &MIRImageReader) -> Int MIRImageError! {
+    raw :: &reader.read_u64()
+    if raw > reader.host_max -> return Err(MIRImageError{message: "native MIR usize exceeds host range"})
+    Ok(Int.from_u64(raw))
+}
+fn mir_image_schema_write_i8(writer: &MIRImageWriter, value: Int) MIRImageError! {
+    if value < -128 || value > 127 -> return Err(MIRImageError{message: "native MIR i8 out of range"})
+    &writer.write_u8(U8{if value < 0 -> value + 256 else -> value})
+    return
+}
+fn mir_image_schema_read_i8(reader: &MIRImageReader) -> Int MIRImageError! {
+    raw :: Int.from_u8(&reader.read_u8())
+    Ok(if raw >= 128 -> raw - 256 else -> raw)
+}
+fn mir_image_schema_write_i16(writer: &MIRImageWriter, value: Int) MIRImageError! {
+    if value < -32768 || value > 32767 -> return Err(MIRImageError{message: "native MIR i16 out of range"})
+    &writer.write_signed(value)
+    return
+}
+fn mir_image_schema_read_i16(reader: &MIRImageReader) -> Int MIRImageError! {
+    raw :: &reader.read_signed()
+    if raw < -32768 || raw > 32767 -> return Err(MIRImageError{message: "native MIR i16 out of range"})
+    Ok(raw)
+}
+fn mir_image_schema_write_i32(writer: &MIRImageWriter, value: Int) MIRImageError! {
+    if value < -2147483648 || value > 2147483647 -> return Err(MIRImageError{message: "native MIR i32 out of range"})
+    &writer.write_signed(value)
+    return
+}
+fn mir_image_schema_read_i32(reader: &MIRImageReader) -> Int MIRImageError! {
+    raw :: &reader.read_signed()
+    if raw < -2147483648 || raw > 2147483647 -> return Err(MIRImageError{message: "native MIR i32 out of range"})
+    Ok(raw)
+}
+fn mir_image_schema_write_i64(writer: &MIRImageWriter, value: Int) MIRImageError! {
+    if value < -9223372036854775808 || value > 9223372036854775807 -> return Err(MIRImageError{message: "native MIR i64 out of range"})
+    &writer.write_signed(value)
+    return
+}
+fn mir_image_schema_read_i64(reader: &MIRImageReader) -> Int MIRImageError! {
+    raw :: &reader.read_signed()
+    Ok(raw)
+}
+fn mir_image_schema_write_isize(writer: &MIRImageWriter, value: Int) MIRImageError! {
+    if value < -9223372036854775808 || value > 9223372036854775807 -> return Err(MIRImageError{message: "native MIR isize out of range"})
+    &writer.write_signed(value)
+    return
+}
+fn mir_image_schema_read_isize(reader: &MIRImageReader) -> Int MIRImageError! {
+    raw :: &reader.read_signed()
+    if reader.host_max == U64{4294967295} && (raw < -2147483648 || raw > 2147483647) -> return Err(MIRImageError{message: "native MIR isize exceeds host range"})
+    Ok(raw)
+}
+
+fn mir_image_schema_fixed_trap_member(member: String) -> Bool Never! {
+    parts :: member.split(".trap.").to_list()
+    if parts.len() != 2 -> return false
+    width := false
+    operator := false
+    loop name in [String]{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"} -> if parts[0] == name -> width = true
+    loop name in [String]{"add", "sub", "mul", "div", "pow", "shl", "shr"} -> if parts[1] == name -> operator = true
+    width && operator
+}
+fn mir_image_schema_trap_routes(program: MIRProgram) -> [U64:Bool] Never! {
+    routes := [U64:Bool]{}
+    loop row in program.prelude_calls {
+        if row.family == .Overflow && mir_image_schema_fixed_trap_member(row.member) -> routes[row.id.value] = true
+    }
+    routes
+}
+fn mir_image_schema_binary_traps(dispatch: MIRBinaryDispatch, routes: [U64:Bool]) -> Bool Never! {
+    if dispatch == {
+        .Primitive -> false
+        .Prelude(call, _) -> routes.get(call.value) != None
+    }
+}
+fn mir_image_schema_check_overflow(dispatch: MIRBinaryDispatch, overflow: MIRBinaryOverflow, routes: [U64:Bool]) MIRImageError! {
+    if mir_image_schema_binary_traps(dispatch, routes) != (overflow == .Trap) -> return Err(MIRImageError{message: "Source MIR Binary overflow disagrees with its dispatch: Trap is exactly a fixed-width trap route for an overflowing operator"})
+    return
+}
+fn mir_image_schema_restore_overflow(program: &MIRProgram) Never! {
+    routes :: mir_image_schema_trap_routes(program)
+    loop function_index in 0..<program.functions.len() {
+        loop block_index in 0..<program.functions[function_index].blocks.len() {
+            loop instruction_index in 0..<program.functions[function_index].blocks[block_index].instructions.len() {
+                operation :: program.functions[function_index].blocks[block_index].instructions[instruction_index].operation
+                if operation == .Binary(op, dispatch, _, left, right) {
+                    overflow :: if mir_image_schema_binary_traps(dispatch, routes) -> MIRBinaryOverflow.Trap else -> MIRBinaryOverflow.Unchecked
+                    program.functions[function_index].blocks[block_index].instructions[instruction_index].operation = MIROperation.Binary(op, dispatch, overflow, left, right)
+                }
+            }
+        }
+    }
+}

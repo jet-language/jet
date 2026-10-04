@@ -1,0 +1,689 @@
+// PORT-PENDING 0377 crates-jet-sema-src-sema-checkercorelib-arg-expect-module-group: crates/jet-sema/src/Sema/Registration/Derives.rs:1-685
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use crate::AST::{ImplDef, Item, TraitImplBlock, Type};
+//RS 
+//RS use std::sync::LazyLock;
+//RS 
+//RS /// D-ONCE-DERIVE1=A: built-in derive providers are ordinary Prelude
+//RS /// declarations. Parse the checked-in source through the normal lexer/parser
+//RS /// instead of maintaining a second line-oriented provider language.
+//RS pub const DERIVE_SOURCE: &str =
+//RS     include_str!("../../../../jet-codegen/src/Prelude/Derives.jet");
+//RS 
+//RS static BUILTIN_DERIVE_PROVIDERS: LazyLock<Vec<crate::AST::DeriveDef>> =
+//RS     LazyLock::new(parse_builtin_derive_source);
+//RS 
+//RS fn parse_builtin_derive_source() -> Vec<crate::AST::DeriveDef> {
+//RS     let (tokens, lex_diagnostics) = crate::Lexer::lex_generated(DERIVE_SOURCE);
+//RS     if !lex_diagnostics.is_empty() {
+//RS         panic!("invalid Prelude derive declarations: {lex_diagnostics:?}");
+//RS     }
+//RS     let program = crate::Parser::parse(&tokens)
+//RS         .unwrap_or_else(|diagnostics| panic!("invalid Prelude derive declarations: {diagnostics:?}"));
+//RS     let mut names = std::collections::HashSet::new();
+//RS     let mut providers = Vec::new();
+//RS     for item in program.items {
+//RS         let Item::UserDerive(provider) = item else {
+//RS             panic!("Prelude/Derives.jet may contain only derive provider declarations");
+//RS         };
+//RS         providers.push(provider);
+//RS     }
+//RS     if providers.is_empty() {
+//RS         panic!("Prelude/Derives.jet declares no derive providers");
+//RS     }
+//RS     for provider in &providers {
+//RS         if !names.insert(provider.trait_name.clone()) {
+//RS             panic!(
+//RS                 "Prelude/Derives.jet declares derive provider `{}` more than once",
+//RS                 provider.trait_name
+//RS             );
+//RS         }
+//RS     }
+//RS     providers
+//RS }
+//RS 
+//RS fn builtin_derive_provider_enabled(trait_name: &str) -> bool {
+//RS     BUILTIN_DERIVE_PROVIDERS
+//RS         .iter()
+//RS         .any(|provider| provider.trait_name == trait_name)
+//RS }
+//RS fn builtin_derive_provider(trait_name: &str) -> Option<&'static crate::AST::DeriveDef> {
+//RS     BUILTIN_DERIVE_PROVIDERS
+//RS         .iter()
+//RS         .find(|provider| provider.trait_name == trait_name)
+//RS }
+//RS 
+//RS /// Expand a Prelude provider through the same typed template boundary used by
+//RS /// package-authored derives. Provider functions are converted to the selected
+//RS /// capability implementation only after template expansion, so their bodies
+//RS /// remain ordinary user-template AST all the way to the sema registry.
+//RS ///
+//RS /// A failed source expansion reports its diagnostic and produces nothing;
+//RS /// the checked-in source templates are the only provider mechanism.
+//RS fn expand_builtin_provider_body(
+//RS     trait_name: &str,
+//RS     target_name: &str,
+//RS     target_span: Span,
+//RS     owner_type: &Type,
+//RS     type_info: crate::AST::CtValue,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) -> Vec<Item> {
+//RS     let Some(provider) = builtin_derive_provider(trait_name) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let expanded = match crate::Comptime::expand_derive_body(
+//RS         &provider.body,
+//RS         &provider.type_param,
+//RS         type_info,
+//RS         &std::collections::HashMap::new(),
+//RS         std::path::Path::new("."),
+//RS         None,
+//RS     ) {
+//RS         Ok(items) => items,
+//RS         Err(diagnostic) => {
+//RS             diags.push(diagnostic);
+//RS             return Vec::new();
+//RS         }
+//RS     };
+//RS     let mut ordinary = Vec::new();
+//RS     let mut methods = Vec::new();
+//RS     for item in expanded {
+//RS         match item {
+//RS             Item::Func(mut function) => {
+//RS                 // The provider signature was parsed from `Prelude/Derives.jet`,
+//RS                 // so its type spans point into that file. The only authored
+//RS                 // location a derived signature has is the target's name; a
+//RS                 // declared-type report on it must land there, never on an
+//RS                 // offset from the provider source (which renders past the end
+//RS                 // of the user's file).
+//RS                 for parameter in &mut function.params {
+//RS                     replace_provider_type(
+//RS                         &mut parameter.ty,
+//RS                         &provider.type_param,
+//RS                         owner_type,
+//RS                     );
+//RS                     parameter.ty_span = target_span;
+//RS                 }
+//RS                 if let Some(return_type) = &mut function.return_type {
+//RS                     replace_provider_type(return_type, &provider.type_param, owner_type);
+//RS                     function.return_type_span = Some(target_span);
+//RS                 }
+//RS                 function.compiler_generated = true;
+//RS                 methods.push(function);
+//RS             }
+//RS             other => ordinary.push(other),
+//RS         }
+//RS     }
+//RS     if !methods.is_empty() {
+//RS         ordinary.push(Item::Impl(ImplDef {
+//RS             span: target_span,
+//RS             type_name: target_name.to_string(),
+//RS             type_span: target_span,
+//RS             trait_name: Some(trait_name.to_string()),
+//RS             operator_marker: None,
+//RS             operator_rhs: None,
+//RS             trait_span: Some(target_span),
+//RS             methods,
+//RS             delegation_field: None,
+//RS             assoc_type_impls: Vec::new(),
+//RS             is_generated_serde: false,
+//RS             os_target: None,
+//RS         }));
+//RS     }
+//RS     ordinary
+//RS }
+//RS 
+//RS fn provider_type_info(type_info: crate::AST::CtValue, kind: &str) -> crate::AST::CtValue {
+//RS     let mut type_info = type_info;
+//RS     if let crate::AST::CtValue::Struct { fields, .. } = &mut type_info {
+//RS         if !fields.iter().any(|(name, _)| name == "kind") {
+//RS             fields.push((
+//RS                 "kind".to_string(),
+//RS                 crate::AST::CtValue::Str(kind.to_string()),
+//RS             ));
+//RS         }
+//RS     }
+//RS     type_info
+//RS }
+//RS 
+//RS fn replace_provider_type(ty: &mut Type, type_param: &str, owner_type: &Type) {
+//RS     if matches!(ty, Type::Named(name) if name == type_param) {
+//RS         *ty = owner_type.clone();
+//RS         return;
+//RS     }
+//RS     match ty {
+//RS         Type::List(inner)
+//RS         | Type::Shared(inner)
+//RS         | Type::Option(inner)
+//RS         | Type::FixedList { elem: inner, .. }
+//RS         | Type::InlineRange { base: inner, .. }
+//RS         | Type::Tagged { inner, .. }
+//RS         | Type::Quantity { base: inner, .. } => {
+//RS             replace_provider_type(inner, type_param, owner_type);
+//RS         }
+//RS         Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+//RS             replace_provider_type(key, type_param, owner_type);
+//RS             replace_provider_type(value, type_param, owner_type);
+//RS         }
+//RS         Type::Fn { params, ret, .. } => {
+//RS             for param in params {
+//RS                 replace_provider_type(param, type_param, owner_type);
+//RS             }
+//RS             if let Some(ret) = ret {
+//RS                 replace_provider_type(ret, type_param, owner_type);
+//RS             }
+//RS         }
+//RS         Type::Apply { args, .. } | Type::Union(args) => {
+//RS             for arg in args {
+//RS                 replace_provider_type(arg, type_param, owner_type);
+//RS             }
+//RS         }
+//RS         Type::Tuple(fields) => {
+//RS             for (_, field) in fields {
+//RS                 replace_provider_type(field, type_param, owner_type);
+//RS             }
+//RS         }
+//RS         Type::Int
+//RS         | Type::Float
+//RS         | Type::Bool
+//RS         | Type::String
+//RS         | Type::Char
+//RS         | Type::Named(_)
+//RS         | Type::TraitObject(_)
+//RS         | Type::IntN { .. }
+//RS         | Type::Float32
+//RS         | Type::Measure(_) => {}
+//RS     }
+//RS }
+//RS 
+//RS /// D-ONCE-DERIVE1=A / I3: compiler-owned capability requests use the same
+//RS /// typed derive-template engine as user-authored code. Reflected enum variant
+//RS /// shape supplies the same nested field primitive as struct providers.
+//RS pub(in super::super) fn expand_builtin_derive_items(
+//RS     items: &mut Vec<Item>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     normalize_recursive_enum_payloads(items);
+//RS     let auto = crate::Traits::TraitRegistry::auto_derives_for_items(items);
+//RS     expand_builtin_derive_items_with_auto(items, &auto, diags);
+//RS }
+//RS 
+//RS 
+//RS fn normalize_recursive_enum_payloads(items: &mut [Item]) {
+//RS     for item in items {
+//RS         let Item::Enum(enum_def) = item else {
+//RS             continue;
+//RS         };
+//RS         let owner = enum_def.name.as_str();
+//RS         for variant in &mut enum_def.variants {
+//RS             normalize_variant_payload(&mut variant.payload, owner);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn normalize_variant_payload(payload: &mut crate::AST::VariantPayload, owner: &str) {
+//RS     match payload {
+//RS         crate::AST::VariantPayload::Unit => {}
+//RS         crate::AST::VariantPayload::Single(ty, _) => {
+//RS             normalize_recursive_payload_type(ty, owner);
+//RS         }
+//RS         crate::AST::VariantPayload::Named(fields) => {
+//RS             for field in fields {
+//RS                 normalize_recursive_payload_type(&mut field.ty, owner);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn normalize_recursive_payload_type(ty: &mut Type, owner: &str) {
+//RS     if matches!(ty, Type::Apply { name, args } if name == owner && args.is_empty()) {
+//RS         *ty = Type::Named(owner.to_string());
+//RS         return;
+//RS     }
+//RS     match ty {
+//RS         Type::List(inner)
+//RS         | Type::Shared(inner)
+//RS         | Type::Option(inner)
+//RS         | Type::FixedList { elem: inner, .. }
+//RS         | Type::InlineRange { base: inner, .. }
+//RS         | Type::Tagged { inner, .. } => normalize_recursive_payload_type(inner, owner),
+//RS         Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+//RS             normalize_recursive_payload_type(key, owner);
+//RS             normalize_recursive_payload_type(value, owner);
+//RS         }
+//RS         Type::Fn { params, ret, .. } => {
+//RS             for param in params {
+//RS                 normalize_recursive_payload_type(param, owner);
+//RS             }
+//RS             if let Some(ret) = ret {
+//RS                 normalize_recursive_payload_type(ret, owner);
+//RS             }
+//RS         }
+//RS         Type::Apply { args, .. } | Type::Union(args) => {
+//RS             for arg in args {
+//RS                 normalize_recursive_payload_type(arg, owner);
+//RS             }
+//RS         }
+//RS         Type::Tuple(fields) => {
+//RS             for (_, field) in fields {
+//RS                 normalize_recursive_payload_type(field, owner);
+//RS             }
+//RS         }
+//RS         Type::Quantity { base, .. } => normalize_recursive_payload_type(base, owner),
+//RS         Type::Int
+//RS         | Type::Float
+//RS         | Type::Bool
+//RS         | Type::String
+//RS         | Type::Char
+//RS         | Type::Named(_)
+//RS         | Type::TraitObject(_)
+//RS         | Type::IntN { .. }
+//RS         | Type::Float32
+//RS         | Type::Measure(_) => {}
+//RS     }
+//RS }
+//RS 
+//RS pub(in super::super) fn expand_builtin_derive_items_with_auto(
+//RS     items: &mut Vec<Item>,
+//RS     auto: &crate::Traits::TraitRegistry,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     normalize_recursive_enum_payloads(items);
+//RS     let struct_equatable = builtin_derive_provider_enabled(crate::Generics::EQUATABLE);
+//RS     let struct_comparable = builtin_derive_provider_enabled(crate::Generics::COMPARABLE);
+//RS     let enum_equatable = builtin_derive_provider_enabled(crate::Generics::EQUATABLE);
+//RS     let enum_comparable = builtin_derive_provider_enabled(crate::Generics::COMPARABLE);
+//RS     let distinct_equatable = builtin_derive_provider_enabled(crate::Generics::EQUATABLE);
+//RS     let distinct_comparable = builtin_derive_provider_enabled(crate::Generics::COMPARABLE);
+//RS 
+//RS     let invalid_distinct_names: std::collections::HashSet<String> = items
+//RS         .iter()
+//RS         .filter_map(|item| {
+//RS             let Item::Distinct(d) = item else { return None };
+//RS             let Type::Named(base) = &d.base else {
+//RS                 return None;
+//RS             };
+//RS             items
+//RS                 .iter()
+//RS                 .any(|item| matches!(item, Item::Distinct(other) if other.name == *base))
+//RS                 .then(|| d.name.clone())
+//RS         })
+//RS         .collect();
+//RS 
+//RS     let mut generated = Vec::new();
+//RS     let source: &[Item] = items;
+//RS     // `attach_generated_derive_item` drops an impl whose capability the type
+//RS     // already has, so an earlier pass's output never needs re-expansion.
+//RS     let missing = |type_name: &str, trait_name: &str| !has_trait_impl(source, type_name, trait_name);
+//RS 
+//RS     for item in source {
+//RS         match item {
+//RS             Item::Struct(s) if !is_reserved_type(&s.name) => {
+//RS                 let comparable = struct_comparable
+//RS                     && (has_derive(&s.derives, crate::Generics::COMPARABLE)
+//RS                         || auto.auto_comparable.contains(&s.name));
+//RS                 let equatable = struct_equatable
+//RS                     && (has_derive(&s.derives, crate::Generics::EQUATABLE)
+//RS                         || auto.auto_equatable.contains(&s.name));
+//RS                 let owner_type = applied_owner_type(&s.name, &s.type_params);
+//RS                 if equatable && missing(&s.name, crate::Generics::EQUATABLE) {
+//RS                     generated.extend(expand_builtin_provider_body(
+//RS                         crate::Generics::EQUATABLE,
+//RS                         &s.name,
+//RS                         s.name_span,
+//RS                         &owner_type,
+//RS                         provider_type_info(crate::Comptime::build_struct_type_info(s), "struct"),
+//RS                         diags,
+//RS                     ));
+//RS                 }
+//RS                 if comparable && missing(&s.name, crate::Generics::COMPARABLE) {
+//RS                     generated.extend(expand_builtin_provider_body(
+//RS                         crate::Generics::COMPARABLE,
+//RS                         &s.name,
+//RS                         s.name_span,
+//RS                         &owner_type,
+//RS                         provider_type_info(crate::Comptime::build_struct_type_info(s), "struct"),
+//RS                         diags,
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) if !is_reserved_type(&e.name) => {
+//RS                 let comparable = enum_comparable
+//RS                     && (has_derive(&e.derives, crate::Generics::COMPARABLE)
+//RS                         || auto.auto_comparable.contains(&e.name));
+//RS                 let equatable = enum_equatable
+//RS                     && (has_derive(&e.derives, crate::Generics::EQUATABLE)
+//RS                         || auto.auto_equatable.contains(&e.name));
+//RS                 let owner_type = applied_owner_type(&e.name, &e.type_params);
+//RS                 if equatable && missing(&e.name, crate::Generics::EQUATABLE) {
+//RS                     generated.extend(expand_builtin_provider_body(
+//RS                         crate::Generics::EQUATABLE,
+//RS                         &e.name,
+//RS                         e.name_span,
+//RS                         &owner_type,
+//RS                         provider_type_info(crate::Comptime::build_enum_type_info(e), "enum"),
+//RS                         diags,
+//RS                     ));
+//RS                 }
+//RS                 if comparable && missing(&e.name, crate::Generics::COMPARABLE) {
+//RS                     generated.extend(expand_builtin_provider_body(
+//RS                         crate::Generics::COMPARABLE,
+//RS                         &e.name,
+//RS                         e.name_span,
+//RS                         &owner_type,
+//RS                         provider_type_info(crate::Comptime::build_enum_type_info(e), "enum"),
+//RS                         diags,
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             Item::Distinct(d)
+//RS                 if !is_reserved_type(&d.name) && !invalid_distinct_names.contains(&d.name) =>
+//RS             {
+//RS                 let owner_type = Type::Named(d.name.clone());
+//RS                 let type_info = provider_type_info(
+//RS                     crate::Comptime::build_distinct_type_info(d, ""),
+//RS                     "distinct",
+//RS                 );
+//RS                 if distinct_equatable && missing(&d.name, crate::Generics::EQUATABLE) {
+//RS                     generated.extend(expand_builtin_provider_body(
+//RS                         crate::Generics::EQUATABLE,
+//RS                         &d.name,
+//RS                         d.name_span,
+//RS                         &owner_type,
+//RS                         type_info.clone(),
+//RS                         diags,
+//RS                     ));
+//RS                 }
+//RS                 if distinct_comparable
+//RS                     && (has_derive(&d.derives, crate::Generics::COMPARABLE)
+//RS                         || auto.auto_comparable.contains(&d.name))
+//RS                     && missing(&d.name, crate::Generics::COMPARABLE)
+//RS                 {
+//RS                     generated.extend(expand_builtin_provider_body(
+//RS                         crate::Generics::COMPARABLE,
+//RS                         &d.name,
+//RS                         d.name_span,
+//RS                         &owner_type,
+//RS                         type_info,
+//RS                         diags,
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             Item::UnitFamily(family) => {
+//RS                 for d in family.distinct_defs() {
+//RS                     let owner_type = Type::Named(d.name.clone());
+//RS                     let type_info = provider_type_info(
+//RS                         crate::Comptime::build_distinct_type_info(&d, ""),
+//RS                         "distinct",
+//RS                     );
+//RS                     if distinct_equatable && missing(&d.name, crate::Generics::EQUATABLE) {
+//RS                         generated.extend(expand_builtin_provider_body(
+//RS                             crate::Generics::EQUATABLE,
+//RS                             &d.name,
+//RS                             d.name_span,
+//RS                             &owner_type,
+//RS                             type_info.clone(),
+//RS                             diags,
+//RS                         ));
+//RS                     }
+//RS                     if distinct_comparable
+//RS                         && (has_derive(&d.derives, crate::Generics::COMPARABLE)
+//RS                             || auto.auto_comparable.contains(&d.name))
+//RS                         && missing(&d.name, crate::Generics::COMPARABLE)
+//RS                     {
+//RS                         generated.extend(expand_builtin_provider_body(
+//RS                             crate::Generics::COMPARABLE,
+//RS                             &d.name,
+//RS                             d.name_span,
+//RS                             &owner_type,
+//RS                             type_info,
+//RS                             diags,
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     for item in generated {
+//RS         attach_generated_derive_item(items, item);
+//RS     }
+//RS }
+//RS 
+//RS fn has_derive(derives: &[(String, Span)], name: &str) -> bool {
+//RS     derives.iter().any(|(derive, _)| derive == name)
+//RS }
+//RS 
+//RS fn attach_generated_derive_item(items: &mut Vec<Item>, item: Item) {
+//RS     let Item::Impl(implementation) = item else {
+//RS         if let Item::Func(function) = item {
+//RS             if !items
+//RS                 .iter()
+//RS                 .any(|existing| matches!(existing, Item::Func(old) if old.name == function.name))
+//RS             {
+//RS                 items.push(Item::Func(function));
+//RS             }
+//RS         }
+//RS         return;
+//RS     };
+//RS     let Some(trait_name) = implementation.trait_name.clone() else {
+//RS         return;
+//RS     };
+//RS     if has_trait_impl(items, &implementation.type_name, &trait_name) {
+//RS         return;
+//RS     }
+//RS     if let Some(target) = items.iter_mut().find_map(|item| match item {
+//RS         Item::Struct(s) if s.name == implementation.type_name => Some(&mut s.trait_impls),
+//RS         Item::Enum(e) if e.name == implementation.type_name => Some(&mut e.trait_impls),
+//RS         _ => None,
+//RS     }) {
+//RS         target.push(TraitImplBlock {
+//RS             trait_name,
+//RS             trait_span: implementation
+//RS                 .trait_span
+//RS                 .unwrap_or(implementation.type_span),
+//RS             operator_rhs: implementation.operator_rhs,
+//RS             operator_marker: implementation.operator_marker,
+//RS             methods: implementation.methods,
+//RS             compiler_generated: true,
+//RS             assoc_type_impls: implementation.assoc_type_impls,
+//RS         });
+//RS     } else {
+//RS         items.push(Item::Impl(implementation));
+//RS     }
+//RS }
+//RS 
+//RS fn has_trait_impl(items: &[Item], type_name: &str, trait_name: &str) -> bool {
+//RS     items.iter().any(|item| match item {
+//RS         Item::Impl(i) => i.type_name == type_name && i.trait_name.as_deref() == Some(trait_name),
+//RS         Item::Struct(s) => {
+//RS             s.name == type_name && s.trait_impls.iter().any(|i| i.trait_name == trait_name)
+//RS         }
+//RS         Item::Enum(e) => {
+//RS             e.name == type_name && e.trait_impls.iter().any(|i| i.trait_name == trait_name)
+//RS         }
+//RS         _ => false,
+//RS     })
+//RS }
+//RS 
+//RS fn applied_owner_type(name: &str, type_params: &[crate::AST::TypeParam]) -> Type {
+//RS     if type_params.is_empty() {
+//RS         Type::Named(name.to_string())
+//RS     } else {
+//RS         Type::Apply {
+//RS             name: name.to_string(),
+//RS             args: type_params
+//RS                 .iter()
+//RS                 .map(|param| Type::Named(param.name.clone()))
+//RS                 .collect(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn reserved_nominals_generate_no_builtin_items() {
+//RS         jet_codegen::Codegen::MIREval::install_mir_bridge();
+//RS         for src in [
+//RS             "#[Comparable, Encode, Decode]\nstruct Unit { name: String }",
+//RS             "#[Comparable, Encode, Decode]\nenum Unit { Named(String) }",
+//RS             "#Comparable\nUnit :: distinct Int",
+//RS             "#[Comparable, Encode, Decode]\nstruct Cell { name: String }",
+//RS         ] {
+//RS             let (tokens, lex_diags) = crate::Lexer::lex(src);
+//RS             assert!(lex_diags.is_empty(), "{src}: {lex_diags:?}");
+//RS             let mut program = crate::Parser::parse(&tokens).expect("source parses");
+//RS             let original = crate::Formatter::format_synthetic_program(&program);
+//RS             let mut diags = Vec::new();
+//RS             expand_builtin_derive_items(&mut program.items, &mut diags);
+//RS             assert!(diags.is_empty(), "derive expansion: {src}: {diags:?}");
+//RS             assert_eq!(
+//RS                 crate::Formatter::format_synthetic_program(&program),
+//RS                 original,
+//RS                 "derive expansion must leave a rejected nominal unchanged: {src}"
+//RS             );
+//RS             crate::Sema::Registration::expand_builtin_serde_items(
+//RS                 &mut program.items,
+//RS                 &mut diags,
+//RS             );
+//RS             assert!(diags.is_empty(), "serde expansion: {src}: {diags:?}");
+//RS             assert_eq!(
+//RS                 crate::Formatter::format_synthetic_program(&program),
+//RS                 original,
+//RS                 "serde expansion must leave a rejected nominal unchanged: {src}"
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn recursive_enum_derive_compares_same_variant_payloads_only() {
+//RS         jet_codegen::Codegen::MIREval::install_mir_bridge();
+//RS         let src = "enum Expr { Num(Int)\nWrap(Expr) }";
+//RS         let (tokens, lex_diags) = crate::Lexer::lex(src);
+//RS         assert!(lex_diags.is_empty());
+//RS         let mut program = crate::Parser::parse(&tokens).expect("source parses");
+//RS         let mut diags = Vec::new();
+//RS         expand_builtin_derive_items(&mut program.items, &mut diags);
+//RS         assert!(diags.is_empty(), "built-in derive diagnostics: {diags:?}");
+//RS         let rendered = crate::Formatter::format_synthetic_program(&program);
+//RS         assert!(
+//RS             rendered.contains("left_Num_value != right_Num_value"),
+//RS             "Int payload should compare with !=, got:\n{rendered}"
+//RS         );
+//RS         assert!(
+//RS             rendered.contains("left_Wrap_value.equal(right_Wrap_value)"),
+//RS             "recursive payload should call equal, got:\n{rendered}"
+//RS         );
+//RS         assert!(
+//RS             !rendered.contains("left_Num_value != right_Wrap")
+//RS                 && !rendered.contains("left_Wrap_value.equal(right_Num"),
+//RS             "an arm must compare `self` only with the same `rhs` variant, got:\n{rendered}"
+//RS         );
+//RS         assert!(
+//RS             !rendered.contains("left_Num_value.equal"),
+//RS             "Int payload must not call equal, got:\n{rendered}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn builtin_derive_source_expands_to_ast_item() {
+//RS         jet_codegen::Codegen::MIREval::install_mir_bridge();
+//RS         let (tokens, lex_diags) = crate::Lexer::lex("#Comparable struct Point { value: Int }");
+//RS         assert!(lex_diags.is_empty());
+//RS         let mut program = crate::Parser::parse(&tokens).expect("source parses");
+//RS         let mut diags = Vec::new();
+//RS         expand_builtin_derive_items(&mut program.items, &mut diags);
+//RS         assert!(diags.is_empty(), "built-in derive diagnostics: {diags:?}");
+//RS         assert!(program.items.iter().any(|item| matches!(
+//RS             item,
+//RS             Item::Struct(s)
+//RS                 if s.trait_impls
+//RS                     .iter()
+//RS                     .any(|implementation| implementation.trait_name == Syntax::MARKER_COMPARABLE)
+//RS         )));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn register_enum_canonicalizes_recursive_payloads() {
+//RS         let src = "enum Expr { Num(Int)\nWrap(Expr) }";
+//RS         let (tokens, lex_diags) = crate::Lexer::lex(src);
+//RS         assert!(lex_diags.is_empty());
+//RS         let program = crate::Parser::parse(&tokens).expect("source parses");
+//RS         let Item::Enum(enum_def) = &program.items[0] else {
+//RS             panic!("expected enum");
+//RS         };
+//RS         let mut registry = TypeRegistry {
+//RS             types: std::collections::HashMap::new(),
+//RS             error_types: std::collections::HashSet::new(),
+//RS             unit_types: std::collections::HashSet::new(),
+//RS             unit_facts: std::collections::HashMap::new(),
+//RS             literal_facts: std::collections::HashMap::new(),
+//RS             computed_fields: std::collections::HashMap::new(),
+//RS             field_defaults: std::collections::HashMap::new(),
+//RS             receipt_sections: std::collections::HashMap::new(),
+//RS             nominal_memo: Default::default(),
+//RS         };
+//RS         let mut diags = Vec::new();
+//RS         register_enum(
+//RS             enum_def,
+//RS             &mut registry,
+//RS             &mut diags,
+//RS             &std::collections::HashMap::new(),
+//RS             &std::collections::HashMap::new(),
+//RS         );
+//RS         assert!(diags.is_empty(), "{diags:?}");
+//RS         let variants = registry.enum_variants("Expr").expect("enum registered");
+//RS         let (_, payload) = variants.get("Wrap").expect("Wrap variant");
+//RS         match payload {
+//RS             crate::AST::VariantPayload::Single(ty, _) => {
+//RS                 assert_eq!(*ty, Type::Named("Expr".to_string()));
+//RS             }
+//RS             other => panic!("expected single payload, got {other:?}"),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nested_derive_methods_register_on_the_type() {
+//RS         jet_codegen::Codegen::MIREval::install_mir_bridge();
+//RS         let src = "enum Expr { Num(Int)\nWrap(Expr) }";
+//RS         let (tokens, lex_diags) = crate::Lexer::lex(src);
+//RS         assert!(lex_diags.is_empty());
+//RS         let mut program = crate::Parser::parse(&tokens).expect("source parses");
+//RS         let mut diags = Vec::new();
+//RS         expand_builtin_derive_items(&mut program.items, &mut diags);
+//RS         assert!(diags.is_empty(), "built-in derive diagnostics: {diags:?}");
+//RS         let mut registry = TypeRegistry {
+//RS             types: std::collections::HashMap::new(),
+//RS             error_types: std::collections::HashSet::new(),
+//RS             unit_types: std::collections::HashSet::new(),
+//RS             unit_facts: std::collections::HashMap::new(),
+//RS             literal_facts: std::collections::HashMap::new(),
+//RS             computed_fields: std::collections::HashMap::new(),
+//RS             field_defaults: std::collections::HashMap::new(),
+//RS             receipt_sections: std::collections::HashMap::new(),
+//RS             nominal_memo: Default::default(),
+//RS         };
+//RS         for item in &program.items {
+//RS             if let Item::Enum(enum_def) = item {
+//RS                 register_enum(
+//RS                     enum_def,
+//RS                     &mut registry,
+//RS                     &mut diags,
+//RS                     &std::collections::HashMap::new(),
+//RS                     &std::collections::HashMap::new(),
+//RS                 );
+//RS             }
+//RS         }
+//RS         register_type_methods(&program.items, &mut registry, &mut diags);
+//RS         assert!(
+//RS             registry.method("Expr", "equal").is_some(),
+//RS             "nested Equatable.equal must be visible on the enum"
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 0377 crates/jet-sema/src/Sema/Registration/Derives.rs:1-685
+

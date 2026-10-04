@@ -1,0 +1,28 @@
+// CanonicalPass.rs:268-292. Non-pretty original Rust-derived Debug, NOT
+// canonical AST's normalized Span/default/body printer and NOT AST wire JSON.
+// Each real typed producer must implement the exact original Debug traversal.
+// Unsupported compound types are a #4494 capability/typed-closure gate; there
+// is deliberately no blanket jet_show, :Debug on a renamed Jet struct, hash,
+// ComptimeWire, or string-conversion fallback.
+pub trait CanonicalPassDebug {
+    fn write_canonical_pass_debug(self, out: &[U8]) Never!
+}
+pub fn canonical_pass_debug_payload<T: CanonicalPassDebug>(representation: String, operation_id: String, value: T) -> String Never! {
+    bytes := [U8]{}
+    value.write_canonical_pass_debug(&bytes)
+    debug :: String.from_bytes(^bytes) ?? panic("original Debug writes UTF-8")
+    "{{\"representation\":{foundation_json_quote(representation)},\"operation_id\":{foundation_json_quote(operation_id)},\"debug\":{foundation_json_quote(debug)}}}"
+}
+pub fn canonical_pass_debug_identity<T: CanonicalPassDebug>(representation: String, operation_id: String, value: T) -> String Never! {
+    bytes := [U8]{}
+    value.write_canonical_pass_debug(&bytes)
+    debug :: String.from_bytes(^bytes) ?? panic("original Debug writes UTF-8")
+    "{{\"representation\":{foundation_json_quote(representation)},\"operation_id\":{foundation_json_quote(operation_id)},\"identity\":{foundation_json_quote(debug)}}}"
+}
+// Actual tir_to_mir_expr.rs:4594-4595 callee is MirValueId(u64), not a
+// fabricated generic debug string or the Jet carrier's derived struct Debug.
+impl MIRValueID.CanonicalPassDebug {
+    fn write_canonical_pass_debug(self, out: &[U8]) Never! {
+        canonical_ast_write(&out, "MirValueId({self.value})")
+    }
+}

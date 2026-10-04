@@ -1195,3 +1195,48 @@ diagnostic registry, snapshots in
 [`tests/ui/cbor_encode_removed`](../../tests/ui/cbor_encode_removed/), and
 [`tests/encoding_edition.rs`](../../tests/encoding_edition.rs). Runtime
 parse/decode failures remain typed Core values, not compiler diagnostics.
+
+## Private compiler images
+
+`jet_bootstrap` owns the private compiler image archive. It uses the canonical
+`jet_foundation` MIR codec, not a Tools-local codec or a runtime Source-to-Rust
+bridge. Format 3 has this byte layout, in order:
+
+| Field | Encoding |
+| --- | --- |
+| Magic | `JETCIMG\0`, eight bytes |
+| Format and MIR schema versions | Two little-endian `u16` words |
+| Artifact and private factory function IDs | Two little-endian `u64` words |
+| Authorized source digest | 32 SHA-256 bytes |
+| Execution identity | Little-endian `u64` byte length, then identity bytes |
+| Complete canonical MIR | Little-endian `u64` byte length, then MIR bytes |
+| Archive checksum | 32 SHA-256 bytes covering every preceding byte |
+
+The prefix-only envelope reader intentionally does not inspect the payload or
+checksum. Full restoration checks the checksum before decoding; it then checks
+the selected Rust-AOT artifact and private `CompilerCreate` factory, obtains the
+execution identity from the existing optimizer pipeline seal, and compares the
+complete encoded identity. Restoration does not revalidate, re-digest, or
+re-encode the program. Archiving retains validation and the full canonical
+source/program byte comparison.
+
+Metadata lengths and cursor arithmetic use the actual host address-space
+limit. Metadata and MIR readers borrow byte windows from the original archive.
+The MIR codec uses canonical unsigned LEB128, zigzag signed words, fixed
+little-endian float bits, and first-encounter string and typed-value tables.
+Interned children precede their parents; every canonical field, variant tag,
+map order, set order, and optimizer seal participates in the wire. Noncanonical
+varints, unknown table entries, unsupported tags, invalid UTF-8, excess lengths,
+and trailing bytes are failures, not interoperability options.
+
+Source authority hashing consumes the same retained Driver snapshot used by
+the compiler. It frames the ordered entry-root index (or `u64::MAX`), relative
+entry path, root hardlink policy, and ordered source and foreign-cache file
+display paths and content hashes. It never reopens files or substitutes a
+path-only hash. Borrowed SHA input is not by itself a zero-copy source claim:
+owned String-to-byte materialization must also be accounted for.
+
+Unequal canonical field diagnostics use native compact Debug byte digests and
+pretty Debug only for unequal fields or sequence elements. Their iterative
+parser retains index-free class paths, occurrence counts, the first native and
+restored sample, and deterministic class order. Equal fields are not rendered.

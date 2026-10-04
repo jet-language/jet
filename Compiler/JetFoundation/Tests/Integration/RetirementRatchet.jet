@@ -1,0 +1,1782 @@
+// PORT-PENDING 1141 tests-retirement-ratchet: tests/retirement_ratchet.rs:1-1778
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-ONCE-RETIRE1=C: every retirement carries an adoption ratchet that ends at
+//RS //! zero.
+//RS //!
+//RS //! `Syntax::RETIREMENTS` says what was retired. This test says how much of the
+//RS //! repository is still written the old way, and holds that number down. It
+//RS //! counts files per canonical form, prints the adoption ratio for each row, and
+//RS //! fails when a count moves away from its recorded ceiling in either direction:
+//RS //!
+//RS //! * a count **above** the ceiling means a new file was written in a retired
+//RS //!   form, so the retirement went backwards;
+//RS //! * a count **below** the ceiling means a migration landed without lowering
+//RS //!   the ceiling, so the ratchet stopped ratcheting.
+//RS //!
+//RS //! A row is finished when its ceiling is `0`, and a ceiling of `0` then holds
+//RS //! the retired form out of the repository for good.
+//RS //!
+//RS //! Diagnostic fixtures under `tests/ui` and `tests/fuzz` are not counted for
+//RS //! the content rows: a fixture must keep the retired form to prove the error
+//RS //! that refuses it.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::collections::BTreeMap;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS use jet::Syntax::{
+//RS     law_violations, rename_target, Retirement, RetirementKind, JETPACK_TOML, REF_PROVIDERS,
+//RS     RETIREMENTS,
+//RS };
+//RS 
+//RS /// Files still written in the retired form, per row, as counted today. Lower a
+//RS /// number when a migration lands; never raise one.
+//RS const CEILINGS: &[(&str, usize)] = &[
+//RS     ("effect-flat-ffi-go", 0),
+//RS     ("effect-flat-ffi-java", 0),
+//RS     ("effect-flat-ffi-dotnet", 0),
+//RS     ("effect-flat-ffi-fortran", 0),
+//RS     ("effect-flat-ffi-cobol", 0),
+//RS     ("effect-flat-ffi-tcl", 0),
+//RS     ("effect-flat-ffi-lua", 0),
+//RS     ("effect-flat-ffi-ada", 0),
+//RS     ("effect-flat-ffi-pascal", 0),
+//RS     ("effect-flat-ffi-dart", 0),
+//RS     ("effect-flat-ffi-powershell", 0),
+//RS     ("effect-flat-ffi-perl", 0),
+//RS     ("effect-flat-ffi-ruby", 0),
+//RS     ("effect-flat-ffi-php", 0),
+//RS     ("effect-flat-ffi-r", 0),
+//RS     ("effect-flat-ffi-com", 0),
+//RS     ("effect-flat-ffi-cpp", 0),
+//RS     ("effect-flat-ffi-py", 0),
+//RS     ("effect-flat-ffi-octave", 0),
+//RS     ("entry-file", 0),
+//RS     // The two corelib archives and the seven out-of-scope engine fixtures
+//RS     // remain until their owning migration slices land.
+//RS     ("manifest-file", 2),
+//RS     ("jetpack-file", 0),
+//RS     ("manifest-identity", 7),
+//RS     ("lint-policy-code", 0),
+//RS     ("auto-derive-policy", 0),
+//RS     ("package-ref-order", 0),
+//RS     ("interpolation-selector-rail", 0),
+//RS     ("core-io-println", 0),
+//RS     ("core-io-sprint", 0),
+//RS     ("core-io-repr", 0),
+//RS     ("fact-mark", 0),
+//RS     ("set-take", 0),
+//RS     ("map-replace", 0),
+//RS     ("set-replace", 0),
+//RS     ("allow-impure", 0),
+//RS     ("freestanding-flag", 0),
+//RS     ("scope-marker-grant", 0),
+//RS     ("core-path-free-functions", 0),
+//RS     ("core-namespace-io", 0),
+//RS     ("core-namespace-path", 0),
+//RS     ("core-namespace-time-date", 0),
+//RS     ("core-namespace-time-datetime", 0),
+//RS     ("core-namespace-text-unicode", 0),
+//RS     ("core-namespace-fmt", 0),
+//RS     ("core-namespace-random", 0),
+//RS     ("core-namespace-env", 0),
+//RS     ("core-namespace-os", 0),
+//RS     ("core-namespace-tls", 0),
+//RS     ("core-namespace-ws", 0),
+//RS     ("core-namespace-url", 0),
+//RS     ("core-namespace-mime", 0),
+//RS     ("core-namespace-uuid", 0),
+//RS     ("core-namespace-vault", 0),
+//RS     ("core-namespace-raylib", 0),
+//RS     ("core-namespace-browser", 0),
+//RS     ("core-namespace-solve", 0),
+//RS     ("core-namespace-sketch", 0),
+//RS     ("core-namespace-sketch-hll", 0),
+//RS     ("core-namespace-sketch-tdigest", 0),
+//RS     ("core-namespace-sketch-reservoir", 0),
+//RS     ("core-namespace-sketch-cms", 0),
+//RS     ("core-namespace-compress", 0),
+//RS     ("core-namespace-compress-gzip", 0),
+//RS     ("core-namespace-compress-zstd", 0),
+//RS     ("core-namespace-measurement", 0),
+//RS     ("core-namespace-mem-alloc", 0),
+//RS     ("core-namespace-scope", 0),
+//RS     ("core-namespace-lang", 0),
+//RS     ("core-namespace-binary", 0),
+//RS     ("target-plugin", 0),
+//RS     ("core-container-queue", 0),
+//RS     ("core-container-rank", 0),
+//RS     ("core-container-tally", 0),
+//RS     ("core-container-bits", 0),
+//RS     ("core-container-bytes", 0),
+//RS     ("jet-time-now", 0),
+//RS     ("jet-time-format", 0),
+//RS     ("operator-plus-plus", 0),
+//RS     ("operator-minus-minus", 0),
+//RS     ("outcome-nested-ok-pattern", 0),
+//RS     ("comptime-constant-mark", 1),
+//RS     ("template-name-splice-mark", 1),
+//RS ];
+//RS 
+//RS const CONTENT_ROOTS: &[&str] = &["crates", "Examples", "tests", "Source"];
+//RS 
+//RS /// Repository content never lives in a dot directory, a build directory, or a
+//RS /// vendored package tree. Skipping all three keeps the count stable whatever a
+//RS /// working tree happens to hold: worktrees, scratch, caches and build output
+//RS /// are not the repository.
+//RS fn is_skipped_dir(path: &Path) -> bool {
+//RS     path.components().any(|component| {
+//RS         let std::path::Component::Normal(name) = component else {
+//RS             return false;
+//RS         };
+//RS         let name = name.to_string_lossy();
+//RS         name.starts_with('.')
+//RS             || name.starts_with("target")
+//RS             || name == "build"
+//RS             || name == "node_modules"
+//RS     })
+//RS }
+//RS 
+//RS fn walk(root: &Path, out: &mut Vec<PathBuf>) {
+//RS     let Ok(entries) = fs::read_dir(root) else {
+//RS         return;
+//RS     };
+//RS     for entry in entries.flatten() {
+//RS         let path = entry.path();
+//RS         let Ok(file_type) = entry.file_type() else {
+//RS             continue;
+//RS         };
+//RS         // Ratchets count repository content, not external trees linked into it.
+//RS         if file_type.is_symlink() {
+//RS             continue;
+//RS         }
+//RS         if path.is_dir() {
+//RS             let relative = path
+//RS                 .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+//RS                 .unwrap_or(&path);
+//RS             if !is_skipped_dir(relative) {
+//RS                 walk(&path, out);
+//RS             }
+//RS         } else {
+//RS             out.push(path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Every file in the repository, for the rows that count file names.
+//RS fn all_files() -> Vec<PathBuf> {
+//RS     let mut out = Vec::new();
+//RS     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     walk(root, &mut out);
+//RS     out
+//RS }
+//RS 
+//RS /// Source and corpus files, for the rows that count what a file says. Fixture
+//RS /// trees are left out; they hold retired forms on purpose.
+//RS fn content_files() -> Vec<PathBuf> {
+//RS     let mut out = Vec::new();
+//RS     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     for content_root in CONTENT_ROOTS {
+//RS         walk(&repo_root.join(content_root), &mut out);
+//RS     }
+//RS     for entry in fs::read_dir(repo_root).into_iter().flatten().flatten() {
+//RS         let path = entry.path();
+//RS         if path.is_file() && path.extension().is_some_and(|ext| ext == "jet") {
+//RS             out.push(path);
+//RS         }
+//RS     }
+//RS     out.retain(|path| {
+//RS         let text = format!("/{}", path.to_string_lossy().replace('\\', "/"));
+//RS         !text.contains("/tests/ui/") && !text.contains("/tests/fuzz/")
+//RS     });
+//RS     out
+//RS }
+//RS 
+//RS const FAILURE_SURFACE_ROOTS: &[&str] = &[
+//RS     "crates",
+//RS     "Examples",
+//RS     "tests",
+//RS     "Source",
+//RS     "corelib",
+//RS     "Docs",
+//RS     "Tools",
+//RS ];
+//RS 
+//RS const FAILURE_SURFACE_EXTENSIONS: &[&str] = &[
+//RS     "jet", "md", "rs", "js", "json", "scm", "toml", "txt", "yaml", "yml",
+//RS ];
+//RS 
+//RS /// D-FAILURE-FOUNDATION1=A: retired failure syntax has no active-source
+//RS /// allowance. Diagnostic fixtures and decision history are skipped by the
+//RS /// explicit allowlist below; every other detected spelling must be zero.
+//RS const FAILURE_RETIREMENT_CEILING: usize = 0;
+//RS 
+//RS /// The failure retirement covers source-shaped documentation and generated
+//RS /// `.jet` trees too. Unlike the older adoption rows, this walk keeps hidden
+//RS /// `.jet` directories and skips only external/build state. The Tower board
+//RS /// (`Tools/tower/.tower`, over a gigabyte of JSON card state and backups) and
+//RS /// gauntlet run output (`Tools/gauntlet/results`) are tracker data, not
+//RS /// source; scanning them blows the suite budget.
+//RS fn failure_surface_skip_dir(path: &Path) -> bool {
+//RS     path.starts_with("Tools/gauntlet/results")
+//RS         || path.components().any(|component| {
+//RS             let std::path::Component::Normal(name) = component else {
+//RS                 return false;
+//RS             };
+//RS             let name = name.to_string_lossy();
+//RS             name == ".git"
+//RS                 || name == ".claude"
+//RS                 || name == ".agent-worktrees"
+//RS                 || name == ".opencode"
+//RS                 || name == ".tower"
+//RS                 || name == "node_modules"
+//RS                 || name == "build"
+//RS                 || name.starts_with("target")
+//RS         })
+//RS }
+//RS 
+//RS fn walk_failure_surface(root: &Path, out: &mut Vec<PathBuf>) {
+//RS     let Ok(entries) = fs::read_dir(root) else {
+//RS         return;
+//RS     };
+//RS     for entry in entries.flatten() {
+//RS         let path = entry.path();
+//RS         let Ok(file_type) = entry.file_type() else {
+//RS             continue;
+//RS         };
+//RS         if file_type.is_symlink() {
+//RS             continue;
+//RS         }
+//RS         if path.is_dir() {
+//RS             let relative = path
+//RS                 .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+//RS                 .unwrap_or(&path);
+//RS             if !failure_surface_skip_dir(relative) {
+//RS                 walk_failure_surface(&path, out);
+//RS             }
+//RS         } else if path.extension().is_some_and(|extension| {
+//RS             FAILURE_SURFACE_EXTENSIONS
+//RS                 .iter()
+//RS                 .any(|allowed| extension == *allowed)
+//RS         }) {
+//RS             out.push(path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn failure_surface_files() -> Vec<PathBuf> {
+//RS     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let mut out = Vec::new();
+//RS     for relative in FAILURE_SURFACE_ROOTS {
+//RS         walk_failure_surface(&root.join(relative), &mut out);
+//RS     }
+//RS     if let Ok(entries) = fs::read_dir(root) {
+//RS         out.extend(entries.flatten().filter_map(|entry| {
+//RS             let path = entry.path();
+//RS             (path.is_file()
+//RS                 && path.extension().is_some_and(|extension| extension == "jet"))
+//RS             .then_some(path)
+//RS         }));
+//RS     }
+//RS     let readme = root.join("README.md");
+//RS     if readme.is_file() {
+//RS         out.push(readme);
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// These are the only places where old failure spellings remain useful as
+//RS /// evidence: retirement history, refusal/teaching fixtures, and the catalog
+//RS /// that emits those diagnostics. Live `.jet` source and current documentation
+//RS /// stay outside this list.
+//RS fn failure_surface_allowlisted(path: &str) -> bool {
+//RS     is_authority_history(path)
+//RS         || is_authority_diagnostic_fixture(path)
+//RS         || path == "crates/jet-codegen/src/Prelude/Diagnostics.jet"
+//RS         // These two files contain source snippets whose only purpose is to
+//RS         // exercise retired-form recovery diagnostics and formatter fixes.
+//RS         || path == "crates/jet-parser/src/Parser/mod.rs"
+//RS         || path == "tests/fmt.rs"
+//RS         // This file also constructs retired forms as detector test inputs.
+//RS         || path == "tests/retirement_ratchet.rs"
+//RS }
+//RS 
+//RS struct FailureSourceFragment {
+//RS     first_line: usize,
+//RS     source: String,
+//RS }
+//RS 
+//RS fn failure_fence(line: &str) -> Option<(u8, usize, &str)> {
+//RS     let trimmed = line.trim_start();
+//RS     let marker = *trimmed.as_bytes().first()?;
+//RS     if marker != b'`' && marker != b'~' {
+//RS         return None;
+//RS     }
+//RS     let length = trimmed.bytes().take_while(|byte| *byte == marker).count();
+//RS     (length >= 3).then_some((marker, length, &trimmed[length..]))
+//RS }
+//RS 
+//RS fn failure_inline_fragments(line: &str) -> Vec<String> {
+//RS     let bytes = line.as_bytes();
+//RS     let mut fragments = Vec::new();
+//RS     let mut cursor = 0;
+//RS     while cursor < bytes.len() {
+//RS         if bytes[cursor] != b'`' {
+//RS             cursor += 1;
+//RS             continue;
+//RS         }
+//RS         let length = bytes[cursor..]
+//RS             .iter()
+//RS             .take_while(|byte| **byte == b'`')
+//RS             .count();
+//RS         let content_start = cursor + length;
+//RS         let mut close = content_start;
+//RS         while close < bytes.len() {
+//RS             if bytes[close] != b'`' {
+//RS                 close += 1;
+//RS                 continue;
+//RS             }
+//RS             let close_length = bytes[close..]
+//RS                 .iter()
+//RS                 .take_while(|byte| **byte == b'`')
+//RS                 .count();
+//RS             if close_length == length {
+//RS                 fragments.push(line[content_start..close].to_string());
+//RS                 cursor = close + close_length;
+//RS                 break;
+//RS             }
+//RS             close += close_length;
+//RS         }
+//RS         if close >= bytes.len() {
+//RS             break;
+//RS         }
+//RS     }
+//RS     fragments
+//RS }
+//RS 
+//RS fn failure_looks_like_jet(source: &str) -> bool {
+//RS     [
+//RS         "fn ",
+//RS         "alias ",
+//RS         "struct ",
+//RS         "pub fn ",
+//RS         "->",
+//RS         "-[",
+//RS         "fallible",
+//RS         "failure",
+//RS         "optional",
+//RS     ]
+//RS     .iter()
+//RS     .any(|marker| source.contains(marker))
+//RS }
+//RS 
+//RS fn failure_embedded_fragments(text: &str) -> Vec<FailureSourceFragment> {
+//RS     let bytes = text.as_bytes();
+//RS     let mut fragments = Vec::new();
+//RS     let mut cursor = 0;
+//RS     // Fragments are found in increasing offset order, so line numbers are
+//RS     // counted incrementally instead of rescanning the prefix per fragment.
+//RS     let mut counted_to = 0;
+//RS     let mut line = 1;
+//RS     let mut line_at = |offset: usize| {
+//RS         line += bytes[counted_to..offset]
+//RS             .iter()
+//RS             .filter(|byte| **byte == b'\n')
+//RS             .count();
+//RS         counted_to = offset;
+//RS         line
+//RS     };
+//RS     while cursor < bytes.len() {
+//RS         if bytes[cursor] == b'r' {
+//RS             let mut quote = cursor + 1;
+//RS             while quote < bytes.len() && bytes[quote] == b'#' {
+//RS                 quote += 1;
+//RS             }
+//RS             if quote < bytes.len() && bytes[quote] == b'"' {
+//RS                 let hashes = &text[cursor + 1..quote];
+//RS                 let close = format!("\"{hashes}");
+//RS                 let content_start = quote + 1;
+//RS                 let Some(close_offset) = text[content_start..].find(&close) else {
+//RS                     cursor += 1;
+//RS                     continue;
+//RS                 };
+//RS                 let content_end = content_start + close_offset;
+//RS                 let source = &text[content_start..content_end];
+//RS                 if failure_looks_like_jet(source) {
+//RS                     fragments.push(FailureSourceFragment {
+//RS                         first_line: line_at(cursor),
+//RS                         source: source.to_string(),
+//RS                     });
+//RS                 }
+//RS                 cursor = content_end + close.len();
+//RS                 continue;
+//RS             }
+//RS         }
+//RS         if bytes[cursor] == b'"' {
+//RS             let content_start = cursor + 1;
+//RS             let mut end = content_start;
+//RS             while end < bytes.len() {
+//RS                 if bytes[end] == b'\\' {
+//RS                     end = end.saturating_add(2);
+//RS                 } else if bytes[end] == b'"' {
+//RS                     break;
+//RS                 } else {
+//RS                     end += 1;
+//RS                 }
+//RS             }
+//RS             if end < bytes.len() {
+//RS                 let source = &text[content_start..end];
+//RS                 if failure_looks_like_jet(source) {
+//RS                     fragments.push(FailureSourceFragment {
+//RS                         first_line: line_at(cursor),
+//RS                         source: source.to_string(),
+//RS                     });
+//RS                 }
+//RS                 cursor = end + 1;
+//RS                 continue;
+//RS             }
+//RS         }
+//RS         cursor += 1;
+//RS     }
+//RS     fragments
+//RS }
+//RS 
+//RS fn failure_source_fragments(path: &Path, text: &str) -> Vec<FailureSourceFragment> {
+//RS     if path.extension().is_some_and(|extension| extension == "jet") {
+//RS         return vec![FailureSourceFragment {
+//RS             first_line: 1,
+//RS             source: text.to_string(),
+//RS         }];
+//RS     }
+//RS 
+//RS     if relative_path(path).starts_with("Tools/editors/tree-sitter/test/corpus/") {
+//RS         let source = text.split_once("\n---").map_or(text, |(source, _)| source);
+//RS         return vec![FailureSourceFragment {
+//RS             first_line: 1,
+//RS             source: source.to_string(),
+//RS         }];
+//RS     }
+//RS 
+//RS     let markdown = path.extension().is_some_and(|extension| extension == "md");
+//RS     if !markdown {
+//RS         return failure_embedded_fragments(text);
+//RS     }
+//RS 
+//RS     let mut fragments = Vec::new();
+//RS     let mut fence: Option<(u8, usize, usize, bool, String)> = None;
+//RS     for (index, line) in text.lines().enumerate() {
+//RS         if let Some((open_marker, open_length, _, active, source)) = fence.as_mut() {
+//RS             if failure_fence(line).is_some_and(|(marker, length, rest)| {
+//RS                 marker == *open_marker && length >= *open_length && rest.trim().is_empty()
+//RS             }) {
+//RS                 let (_, _, first_line, active, source) = fence.take().expect("fence exists");
+//RS                 if active {
+//RS                     fragments.push(FailureSourceFragment { first_line, source });
+//RS                 }
+//RS             } else if *active {
+//RS                 source.push_str(line);
+//RS                 source.push('\n');
+//RS             }
+//RS         } else if let Some((marker, length, info)) = failure_fence(line) {
+//RS             let language = info.split_whitespace().next().unwrap_or("");
+//RS             fence = Some((
+//RS                 marker,
+//RS                 length,
+//RS                 index + 2,
+//RS                 matches!(language, "jet" | "Jet" | "jetlang"),
+//RS                 String::new(),
+//RS             ));
+//RS         } else {
+//RS             for source in failure_inline_fragments(line) {
+//RS                 fragments.push(FailureSourceFragment {
+//RS                     first_line: index + 1,
+//RS                     source,
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS     if let Some((_, _, first_line, active, source)) = fence {
+//RS         if active {
+//RS             fragments.push(FailureSourceFragment { first_line, source });
+//RS         }
+//RS     }
+//RS     fragments
+//RS }
+//RS 
+//RS fn collect_failure_tokens<'a>(
+//RS     tokens: &'a [jet::Lexer::Token],
+//RS     out: &mut Vec<&'a jet::Lexer::Token>,
+//RS ) {
+//RS     for token in tokens {
+//RS         match &token.kind {
+//RS             jet::Lexer::TokKind::LineComment(_) | jet::Lexer::TokKind::BlockComment(_) => {}
+//RS             jet::Lexer::TokKind::Str(parts) => {
+//RS                 out.push(token);
+//RS                 for part in parts {
+//RS                     if let jet::Lexer::StrTokPart::Interp(inner) = part {
+//RS                         collect_failure_tokens(inner, out);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             jet::Lexer::TokKind::Eof => {}
+//RS             _ => out.push(token),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn failure_is_type_atom(token: &jet::Lexer::Token) -> bool {
+//RS     matches!(
+//RS         &token.kind,
+//RS         jet::Lexer::TokKind::Ident(_)
+//RS             | jet::Lexer::TokKind::RParen
+//RS             | jet::Lexer::TokKind::RBracket
+//RS             | jet::Lexer::TokKind::Gt
+//RS             | jet::Lexer::TokKind::Shr
+//RS     )
+//RS }
+//RS 
+//RS fn failure_is_contract_position(token: &jet::Lexer::Token) -> bool {
+//RS     failure_is_type_atom(token)
+//RS         || matches!(
+//RS             &token.kind,
+//RS             jet::Lexer::TokKind::Colon
+//RS                 | jet::Lexer::TokKind::ColonColon
+//RS                 | jet::Lexer::TokKind::RParen
+//RS         )
+//RS }
+//RS 
+//RS fn failure_is_expression_end(token: &jet::Lexer::Token) -> bool {
+//RS     matches!(
+//RS         &token.kind,
+//RS         jet::Lexer::TokKind::Ident(_)
+//RS             | jet::Lexer::TokKind::Str(_)
+//RS             | jet::Lexer::TokKind::Int(..)
+//RS             | jet::Lexer::TokKind::Float(..)
+//RS             | jet::Lexer::TokKind::UnitNumber { .. }
+//RS             | jet::Lexer::TokKind::Char(_)
+//RS             | jet::Lexer::TokKind::KwTrue
+//RS             | jet::Lexer::TokKind::KwFalse
+//RS             | jet::Lexer::TokKind::KwNull
+//RS             | jet::Lexer::TokKind::KwIt
+//RS             | jet::Lexer::TokKind::KwSelf
+//RS             | jet::Lexer::TokKind::RParen
+//RS             | jet::Lexer::TokKind::RBracket
+//RS             | jet::Lexer::TokKind::RBrace
+//RS             | jet::Lexer::TokKind::PlusPlus
+//RS             | jet::Lexer::TokKind::MinusMinus
+//RS     )
+//RS }
+//RS 
+//RS fn failure_is_type_name(token: &jet::Lexer::Token) -> bool {
+//RS     matches!(
+//RS         &token.kind,
+//RS         jet::Lexer::TokKind::Ident(name)
+//RS             if name.chars().next().is_some_and(|character| character.is_ascii_uppercase())
+//RS     )
+//RS }
+//RS 
+//RS fn failure_is_adjacent(left: &jet::Lexer::Token, right: &jet::Lexer::Token) -> bool {
+//RS     left.span.end == right.span.start
+//RS }
+//RS 
+//RS fn failure_is_result_arm_separator(
+//RS     tokens: &[&jet::Lexer::Token],
+//RS     index: usize,
+//RS ) -> bool {
+//RS     let Some(previous) = index.checked_sub(1).and_then(|index| tokens.get(index)) else {
+//RS         return false;
+//RS     };
+//RS     let Some(next) = tokens.get(index + 1) else {
+//RS         return false;
+//RS     };
+//RS     let Some(after_next) = tokens.get(index + 2) else {
+//RS         return false;
+//RS     };
+//RS     matches!(
+//RS         (&previous.kind, &next.kind, &after_next.kind),
+//RS         (
+//RS             jet::Lexer::TokKind::Ident(previous),
+//RS             jet::Lexer::TokKind::Ident(next),
+//RS             jet::Lexer::TokKind::UnifiedArrow,
+//RS         ) if previous.starts_with(|character: char| character.is_ascii_lowercase() || character == '_')
+//RS             && next.starts_with(|character: char| character.is_ascii_lowercase() || character == '_')
+//RS     )
+//RS }
+//RS 
+//RS fn failure_is_infix_contract(tokens: &[&jet::Lexer::Token], index: usize) -> bool {
+//RS     let Some(previous) = index.checked_sub(1).and_then(|index| tokens.get(index)) else {
+//RS         return false;
+//RS     };
+//RS     let Some(next) = tokens.get(index + 1) else {
+//RS         return false;
+//RS     };
+//RS     if !failure_is_type_atom(previous)
+//RS         || !(failure_is_type_atom(next)
+//RS             || matches!(&next.kind, jet::Lexer::TokKind::LParen))
+//RS     {
+//RS         return false;
+//RS     }
+//RS     if failure_is_result_arm_separator(tokens, index) {
+//RS         return false;
+//RS     }
+//RS     failure_is_type_name(previous) || failure_is_type_name(next)
+//RS }
+//RS 
+//RS fn failure_is_optional_prefix(tokens: &[&jet::Lexer::Token], index: usize) -> bool {
+//RS     let Some(question) = tokens.get(index) else {
+//RS         return false;
+//RS     };
+//RS     let Some(next) = tokens.get(index + 1) else {
+//RS         return false;
+//RS     };
+//RS     let type_head = failure_is_type_name(next)
+//RS         || matches!(
+//RS             &next.kind,
+//RS             jet::Lexer::TokKind::LParen
+//RS                 | jet::Lexer::TokKind::LBracket
+//RS                 | jet::Lexer::TokKind::Star
+//RS                 | jet::Lexer::TokKind::KwFn
+//RS         );
+//RS     type_head && failure_is_adjacent(question, next)
+//RS }
+//RS 
+//RS fn failure_syntax_hits(source: &str) -> Vec<(usize, &'static str)> {
+//RS     let (lexed, _) = jet::Lexer::lex(source);
+//RS     let mut tokens = Vec::new();
+//RS     collect_failure_tokens(&lexed, &mut tokens);
+//RS     tokens.sort_by_key(|token| token.span.start);
+//RS     let line = |offset| source[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1;
+//RS     let mut hits = Vec::new();
+//RS 
+//RS     for (index, token) in tokens.iter().enumerate() {
+//RS         match &token.kind {
+//RS             jet::Lexer::TokKind::Bang => {
+//RS                 let marker_negation = index >= 2
+//RS                     && matches!(
+//RS                         &tokens[index - 2].kind,
+//RS                         jet::Lexer::TokKind::Hash
+//RS                     );
+//RS                 let canonical_prefix = tokens.get(index + 1).is_some_and(|next| {
+//RS                     failure_is_adjacent(token, next)
+//RS                         && matches!(
+//RS                             &next.kind,
+//RS                             jet::Lexer::TokKind::Ident(_)
+//RS                                 | jet::Lexer::TokKind::LParen
+//RS                                 | jet::Lexer::TokKind::LBracket
+//RS                                 | jet::Lexer::TokKind::Star
+//RS                                 | jet::Lexer::TokKind::KwFn
+//RS                         )
+//RS                 });
+//RS                 if marker_negation
+//RS                     || canonical_prefix
+//RS                     || failure_is_result_arm_separator(&tokens, index)
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 if index
+//RS                     .checked_sub(1)
+//RS                     .and_then(|index| tokens.get(index))
+//RS                     .is_some_and(|token| failure_is_contract_position(token))
+//RS                 {
+//RS                     hits.push((line(token.span.start), "retired failure contract"));
+//RS                 }
+//RS             }
+//RS             jet::Lexer::TokKind::Question => {
+//RS                 let contextual = matches!(
+//RS                     tokens.get(index + 1).map(|token| &token.kind),
+//RS                     Some(jet::Lexer::TokKind::LParen)
+//RS                 );
+//RS                 let result_handler = tokens
+//RS                     .get(index + 1)
+//RS                     .and_then(|next| tokens.get(index + 2).map(|after| (next, after)))
+//RS                     .is_some_and(|(next, after)| {
+//RS                         matches!(
+//RS                             (&next.kind, &after.kind),
+//RS                             (jet::Lexer::TokKind::Ident(name), jet::Lexer::TokKind::UnifiedArrow)
+//RS                                 if name.starts_with(|character: char| character.is_ascii_lowercase() || character == '_')
+//RS                         )
+//RS                     });
+//RS                 let expression_end = index
+//RS                     .checked_sub(1)
+//RS                     .and_then(|index| tokens.get(index))
+//RS                     .is_some_and(|token| failure_is_expression_end(*token));
+//RS                 if contextual
+//RS                     || result_handler
+//RS                     || failure_is_optional_prefix(&tokens, index)
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 if failure_is_infix_contract(&tokens, index) || expression_end {
+//RS                     hits.push((line(token.span.start), "retired failure propagation/type"));
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     hits
+//RS }
+//RS 
+//RS fn file_name(path: &Path) -> String {
+//RS     path.file_name()
+//RS         .unwrap_or_default()
+//RS         .to_string_lossy()
+//RS         .to_string()
+//RS }
+//RS 
+//RS fn read(path: &Path) -> Option<String> {
+//RS     let ext = path.extension()?.to_string_lossy().to_string();
+//RS     (ext == "rs" || ext == "jet").then(|| fs::read_to_string(path).ok())?
+//RS }
+//RS 
+//RS fn contains_word(text: &str, word: &str) -> bool {
+//RS     let is_word = |character: Option<char>| {
+//RS         character.is_some_and(|character| character.is_ascii_alphanumeric() || character == '_')
+//RS     };
+//RS     text.match_indices(word).any(|(index, _)| {
+//RS         !is_word(text[..index].chars().next_back())
+//RS             && !is_word(text[index + word.len()..].chars().next())
+//RS     })
+//RS }
+//RS 
+//RS const RETIRED_AUTHORITY_WORDS: &[&str] = &[
+//RS     concat!("Abil", "ity"),
+//RS     concat!("Abil", "ities"),
+//RS     concat!("Capabil", "ity"),
+//RS     concat!("Cap", "s"),
+//RS ];
+//RS 
+//RS const RETIRED_AUTHORITY_MARKERS: &[&str] = &[
+//RS     concat!("#", "Abil", "ities"),
+//RS     concat!("#", "Cap", "s"),
+//RS     concat!("#", "Grant"),
+//RS     concat!("#", "grant"),
+//RS ];
+//RS 
+//RS const RETIRED_AUTHORITY_IDENTIFIERS: &[&str] = &[
+//RS     concat!("KW_", "CAPS"),
+//RS     concat!("TYPE_", "ABILITIES"),
+//RS     concat!("CAP_", "HANDLE_TYPE"),
+//RS     concat!("Stmt::", "Cap", "s"),
+//RS ];
+//RS 
+//RS fn relative_path(path: &Path) -> String {
+//RS     path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
+//RS         .unwrap_or(path)
+//RS         .to_string_lossy()
+//RS         .replace('\\', "/")
+//RS }
+//RS 
+//RS fn is_authority_history(path: &str) -> bool {
+//RS     path == "Docs/spec/syntax-decisions.md"
+//RS         || path == "Docs/spec/contributing/agent-engineering.md"
+//RS         || path == "Docs/spec/reference/prior-art.md"
+//RS         || path.starts_with("Docs/audits/")
+//RS         || path.starts_with("Docs/proposals/")
+//RS         || path.starts_with("Docs/research/")
+//RS         || path.starts_with("Tools/agent-eval/domain-foundations/")
+//RS }
+//RS 
+//RS fn is_authority_diagnostic_fixture(path: &str) -> bool {
+//RS     path.starts_with("tests/ui/")
+//RS         || path.starts_with("tests/fuzz/")
+//RS         || path == "tests/syntax_reconciliation.rs"
+//RS         || path == "Tools/notebook-test/acceptance.mjs"
+//RS }
+//RS 
+//RS fn is_authority_diagnostic_producer(path: &str, line: &str) -> bool {
+//RS     if path == "crates/jet-codegen/src/Prelude/Markers.jet" {
+//RS         return line.trim_start().starts_with("marker ")
+//RS             && (line.contains(concat!("marker ", "Abil", "ities"))
+//RS                 || line.contains(concat!("marker ", "Cap", "s")));
+//RS     }
+//RS     if path == "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs" {
+//RS         return line.trim_start().starts_with(concat!("\"", "Abil"))
+//RS             || line.trim_start().starts_with(concat!("\"", "Cap"));
+//RS     }
+//RS     if path == "crates/jet-codegen/src/Prelude/Diagnostics.jet" {
+//RS         return line.starts_with("diagnostic\tE0077\t") && line.contains(concat!("#", "Grant"));
+//RS     }
+//RS     if path == "crates/jet-parser/src/Parser/Statements/control.rs" {
+//RS         return line.contains(concat!("the `#", "Grant` scope marker is retired"));
+//RS     }
+//RS     if path == "crates/jet-foundation/src/Syntax/retirements.rs" {
+//RS         return line.contains(concat!("retired: \"#", "Grant\""));
+//RS     }
+//RS     if path == "crates/jet-parser/src/Parser/mod.rs" {
+//RS         return line.contains(concat!("#", "Grant"));
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS fn is_unrelated_authority_word(path: &str, line: &str) -> bool {
+//RS     if matches!(
+//RS         path,
+//RS         "crates/jet-pkg-model/src/CompilerExtension.rs"
+//RS             | "crates/jet-driver/src/CompilerExtensionHook.rs"
+//RS             | "crates/jetpack-bin/tests/compiler_extension_e2e.rs"
+//RS     ) {
+//RS         return true;
+//RS     }
+//RS     if path.starts_with("Docs/spec/reference/surfaces/") {
+//RS         return true;
+//RS     }
+//RS     matches!(
+//RS         (path, line),
+//RS         ("crates/jet-canvas/src/js/inspector-connections.js", line)
+//RS             if line.contains(concat!("Capabil", "ity mismatch"))
+//RS     ) || matches!(
+//RS         (path, line),
+//RS         ("crates/jet-devserver/src/WebHost.rs", line)
+//RS             if line.contains(concat!("Abil", "ity check"))
+//RS     ) || matches!(
+//RS         (path, line),
+//RS         ("crates/jet-driver/src/Driver/mod.rs", line)
+//RS             if line.contains(concat!("Abil", "ity grants"))
+//RS     ) || matches!(
+//RS         (path, line),
+//RS         ("crates/jet-driver/src/Foreign.rs", line)
+//RS             if line.contains(concat!("Capabil", "ity report"))
+//RS     ) || matches!(
+//RS         (path, line),
+//RS         ("crates/jet-pkg-model/src/FFI.rs", line)
+//RS             if line.contains(concat!("Capabil", "ity-bearing"))
+//RS     ) || matches!(
+//RS         (path, line),
+//RS         ("crates/jet-repl/src/Notebook/trust.rs", line)
+//RS             if line.contains(concat!("Abil", "ity widget"))
+//RS     ) || matches!(
+//RS         (path, line),
+//RS         ("crates/jet-sema/src/Sema/mod.rs", line)
+//RS             if line.contains(concat!("Abil", "ity")) && line.contains("derive rows")
+//RS     ) || matches!(
+//RS         (path, line),
+//RS         ("crates/jetpack/src/Recipe.rs", line)
+//RS             if line.contains(concat!("Capabil", "ity-limited"))
+//RS     ) || matches!(
+//RS         (path, line),
+//RS         ("Examples/features/io/app_config.jet", line)
+//RS             if line
+//RS                 .trim_start()
+//RS                 .starts_with(concat!("// ", "Abil", "ity"))
+//RS     ) || matches!(
+//RS         (path, line),
+//RS         ("Examples/features/net/browser_cdp.jet", line)
+//RS             if line.contains(concat!("Abil", "ity-gated protocol"))
+//RS     ) || matches!(
+//RS         (path, line),
+//RS         ("Tools/canvas-test/scenario.mjs", line)
+//RS             if line.contains(concat!("Capabil", "ity mismatch"))
+//RS     ) || matches!(
+//RS         (path, line),
+//RS         ("Docs/spec/spec.md", line)
+//RS             if line.contains(concat!("Capabil", "ity parameters"))
+//RS     )
+//RS }
+//RS 
+//RS fn authority_retired_words_in_line(line: &str) -> Vec<&'static str> {
+//RS     let mut hits = Vec::new();
+//RS     for word in RETIRED_AUTHORITY_WORDS {
+//RS         if contains_word(line, word) {
+//RS             hits.push(*word);
+//RS         }
+//RS     }
+//RS     for marker in RETIRED_AUTHORITY_MARKERS {
+//RS         if line.contains(marker) {
+//RS             hits.push(*marker);
+//RS         }
+//RS     }
+//RS     for identifier in RETIRED_AUTHORITY_IDENTIFIERS {
+//RS         if line.contains(identifier) {
+//RS             hits.push(*identifier);
+//RS         }
+//RS     }
+//RS     hits
+//RS }
+//RS 
+//RS #[test]
+//RS fn retirement_walk_skips_outputs_and_nested_worktrees_but_keeps_live_source_visible() {
+//RS     assert!(is_skipped_dir(Path::new("build")));
+//RS     assert!(is_skipped_dir(Path::new(
+//RS         ".claude/worktrees/worker/examples"
+//RS     )));
+//RS     assert!(is_skipped_dir(Path::new(
+//RS         ".agent-worktrees/worker/examples"
+//RS     )));
+//RS     assert!(!is_skipped_dir(Path::new("Examples")));
+//RS     let live_type = concat!("De", "que");
+//RS     let live_source = format!("let queue: {live_type}<Int> = {live_type}.new()");
+//RS     assert!(contains_word(&live_source, live_type));
+//RS }
+//RS 
+//RS /// A manifest written with the retired `payload: { … }` identity wrapper,
+//RS /// either as a file or as manifest text a test writes out. The opener must sit
+//RS /// at the start of a line or right after a quote, so a `payload:` field on a
+//RS /// user's own type is not counted.
+//RS fn writes_retired_identity(text: &str) -> bool {
+//RS     let bytes = text.as_bytes();
+//RS     for (index, _) in text.match_indices("payload:") {
+//RS         let opens_here = index == 0
+//RS             || matches!(bytes[index - 1], b'\n' | b'"')
+//RS             || (bytes[index - 1] == b'\\' && index >= 2 && bytes[index - 2] == b'"');
+//RS         if !opens_here {
+//RS             continue;
+//RS         }
+//RS         let rest = text[index + "payload:".len()..].trim_start();
+//RS         if rest.starts_with('{') && rest.contains("name:") {
+//RS             return true;
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS /// The words either side of each `@` in a package ref, in source order.
+//RS fn ref_sides(text: &str) -> Vec<(String, String)> {
+//RS     let bytes = text.as_bytes();
+//RS     let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'-';
+//RS     let mut out = Vec::new();
+//RS     for (at, _) in text.match_indices('@') {
+//RS         let mut start = at;
+//RS         while start > 0 && word(bytes[start - 1]) {
+//RS             start -= 1;
+//RS         }
+//RS         let mut end = at + 1;
+//RS         while end < bytes.len() && word(bytes[end]) {
+//RS             end += 1;
+//RS         }
+//RS         out.push((text[start..at].to_string(), text[at + 1..end].to_string()));
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// A package ref written provider first, the order D-JPK-REF1 retired. A
+//RS /// provider name on the left is only the retired order when the right side is
+//RS /// not itself a provider: `perl@nixpkgs` is the package `perl` from `nixpkgs`,
+//RS /// written the canonical way round.
+//RS fn writes_provider_first(text: &str) -> bool {
+//RS     ref_sides(text).iter().any(|(left, right)| {
+//RS         REF_PROVIDERS.contains(&left.as_str()) && !REF_PROVIDERS.contains(&right.as_str())
+//RS     })
+//RS }
+//RS 
+//RS fn writes_canonical_ref(text: &str) -> bool {
+//RS     ref_sides(text)
+//RS         .iter()
+//RS         .any(|(_, right)| REF_PROVIDERS.contains(&right.as_str()))
+//RS }
+//RS 
+//RS /// Whether a line writes a package lint policy value or source-level lint
+//RS /// allowance, and whether its first value is a retired diagnostic code. Test
+//RS /// fixtures under `tests/ui` are excluded by `content_files`; this only counts
+//RS /// repository content that can become live package/config/source input.
+//RS fn lint_policy_value_is_code(line: &str) -> Option<bool> {
+//RS     let value = if let Some(lints) = line.find("lints") {
+//RS         let deny = line[lints..].find("deny")? + lints;
+//RS         let open = line[deny..].find('[')? + deny;
+//RS         &line[open + 1..]
+//RS     } else if let Some(allow) = line.find("#allow(") {
+//RS         &line[allow + "#allow(".len()..]
+//RS     } else {
+//RS         return None;
+//RS     }
+//RS     .trim_start();
+//RS     let token = value
+//RS         .split(|character: char| {
+//RS             character == ',' || character == ']' || character == ')' || character.is_whitespace()
+//RS         })
+//RS         .next()
+//RS         .unwrap_or("")
+//RS         .trim_matches('"');
+//RS     if token.is_empty() {
+//RS         return None;
+//RS     }
+//RS     let mut chars = token.chars();
+//RS     let code_shape = matches!(chars.next(), Some('E' | 'L' | 'W'))
+//RS         && chars.count() == 4
+//RS         && token[1..]
+//RS             .chars()
+//RS             .all(|character| character.is_ascii_digit());
+//RS     Some(code_shape)
+//RS }
+//RS 
+//RS fn lint_policy_values(text: &str) -> (bool, bool) {
+//RS     let mut retired = false;
+//RS     let mut canonical = false;
+//RS     for line in text.lines() {
+//RS         match lint_policy_value_is_code(line) {
+//RS             Some(true) => retired = true,
+//RS             Some(false) => canonical = true,
+//RS             None => {}
+//RS         }
+//RS     }
+//RS     (retired, canonical)
+//RS }
+//RS 
+//RS fn writes_interpolation_selector(text: &str, retired: bool) -> bool {
+//RS     let (tokens, lex_diags) = jet::Lexer::lex(text);
+//RS     if !lex_diags.is_empty() {
+//RS         return false;
+//RS     }
+//RS     fn scan(tokens: &[jet::Lexer::Token], retired: bool) -> bool {
+//RS         for token in tokens {
+//RS             let jet::Lexer::TokKind::Str(parts) = &token.kind else {
+//RS                 continue;
+//RS             };
+//RS             for part in parts {
+//RS                 let jet::Lexer::StrTokPart::Interp(inner) = part else {
+//RS                     continue;
+//RS                 };
+//RS                 for pair in inner.windows(2) {
+//RS                     let rail = if retired {
+//RS                         matches!(pair[0].kind, jet::Lexer::TokKind::Hash)
+//RS                     } else {
+//RS                         matches!(pair[0].kind, jet::Lexer::TokKind::Colon)
+//RS                     };
+//RS                     let selector = matches!(
+//RS                         &pair[1].kind,
+//RS                         jet::Lexer::TokKind::Ident(name)
+//RS                             if jet::Syntax::interpolation_selector(name).is_some()
+//RS                     );
+//RS                     if rail && selector {
+//RS                         return true;
+//RS                     }
+//RS                 }
+//RS                 if scan(inner, retired) {
+//RS                     return true;
+//RS                 }
+//RS             }
+//RS         }
+//RS         false
+//RS     }
+//RS     scan(&tokens, retired)
+//RS }
+//RS 
+//RS /// D-COMPILER-NS1=A: a retired `@` fact read (`T.@layout`) or fact root
+//RS /// (`@build`, `@PHASE`). `.@name` splices of a compile-time name that is not
+//RS /// a registered fact stay with D-NAME-SPLICE1 and are not counted.
+//RS fn has_retired_fact_mark(tokens: &[jet::Lexer::Token]) -> bool {
+//RS     for (index, token) in tokens.iter().enumerate() {
+//RS         if let jet::Lexer::TokKind::Ident(name) = &token.kind {
+//RS             if let Some(rest) = name.strip_prefix(jet::Syntax::RETIRED_COMPTIME_MARK) {
+//RS                 let member = index > 0
+//RS                     && matches!(tokens[index - 1].kind, jet::Lexer::TokKind::Dot)
+//RS                     && jet::Syntax::fact_read_kind(&format!("{}{rest}", jet::Syntax::COMPTIME_MARK))
+//RS                         .is_some();
+//RS                 if member || jet::Syntax::retired_fact_spelling(name).is_some() {
+//RS                     return true;
+//RS                 }
+//RS             }
+//RS         }
+//RS         let jet::Lexer::TokKind::Str(parts) = &token.kind else {
+//RS             continue;
+//RS         };
+//RS         for part in parts {
+//RS             let jet::Lexer::StrTokPart::Interp(inner) = part else {
+//RS                 continue;
+//RS             };
+//RS             if has_retired_fact_mark(inner) {
+//RS                 return true;
+//RS             }
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS /// D-INCR1 retired: a `++` or `--` token written as a step. `--[` is the
+//RS /// retired effect arrow, a different row's spelling, so it is not counted.
+//RS fn writes_step_token(tokens: &[jet::Lexer::Token], plus: bool) -> bool {
+//RS     tokens.iter().enumerate().any(|(index, token)| {
+//RS         let step = if plus {
+//RS             matches!(token.kind, jet::Lexer::TokKind::PlusPlus)
+//RS         } else {
+//RS             matches!(token.kind, jet::Lexer::TokKind::MinusMinus)
+//RS                 && !matches!(
+//RS                     tokens.get(index + 1).map(|next| &next.kind),
+//RS                     Some(jet::Lexer::TokKind::LBracket)
+//RS                 )
+//RS         };
+//RS         step || match &token.kind {
+//RS             jet::Lexer::TokKind::Str(parts) => parts.iter().any(|part| {
+//RS                 matches!(part, jet::Lexer::StrTokPart::Interp(inner) if writes_step_token(inner, plus))
+//RS             }),
+//RS             _ => false,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn writes_compound_step(tokens: &[jet::Lexer::Token], plus: bool) -> bool {
+//RS     tokens.iter().any(|token| {
+//RS         if plus {
+//RS             matches!(token.kind, jet::Lexer::TokKind::PlusEq)
+//RS         } else {
+//RS             matches!(token.kind, jet::Lexer::TokKind::MinusEq)
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn tally_collection_example(
+//RS     path_suffix: &str,
+//RS     retired_form: &str,
+//RS     canonical_form: &str,
+//RS ) -> (usize, usize) {
+//RS     content_files()
+//RS         .into_iter()
+//RS         .filter(|path| path.to_string_lossy().ends_with(path_suffix))
+//RS         .filter_map(|path| read(&path))
+//RS         .fold((0, 0), |(retired, canonical), text| {
+//RS             (
+//RS                 retired + usize::from(text.contains(retired_form)),
+//RS                 canonical + usize::from(text.contains(canonical_form)),
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS fn tally_print_family(retired_form: &str, canonical_form: &str) -> (usize, usize) {
+//RS     content_files()
+//RS         .into_iter()
+//RS         .filter(|path| path.extension().is_some_and(|ext| ext == "jet"))
+//RS         .filter_map(|path| read(&path))
+//RS         .fold((0, 0), |(retired, canonical), text| {
+//RS             (
+//RS                 retired + usize::from(text.contains(retired_form)),
+//RS                 canonical + usize::from(text.contains(canonical_form)),
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS /// Detect an effect spelling in a source surface, rather than counting a
+//RS /// language name in binder code or ordinary prose.
+//RS fn writes_effect_spelling(text: &str, spelling: &str) -> bool {
+//RS     for line in text.lines() {
+//RS         let line = line.trim();
+//RS         if let Some(name) = line
+//RS             .strip_prefix("effect ")
+//RS             .and_then(|tail| tail.split_whitespace().next())
+//RS         {
+//RS             if name == spelling {
+//RS                 return true;
+//RS             }
+//RS         }
+//RS         for marker in [":[", "=[", "#(", "allow: [", "deny: ["] {
+//RS             let mut rest = line;
+//RS             while let Some(start) = rest.find(marker) {
+//RS                 let values = &rest[start + marker.len()..];
+//RS                 let Some(end) = values.find(']') else { break };
+//RS                 if values[..end]
+//RS                     .split(',')
+//RS                     .map(str::trim)
+//RS                     .map(|value| value.strip_prefix('!').unwrap_or(value).trim())
+//RS                     .any(|value| value == spelling)
+//RS                 {
+//RS                     return true;
+//RS                 }
+//RS                 rest = &values[end + 1..];
+//RS             }
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS /// Files on the retired form and files on the canonical form, for one row.
+//RS fn tally(row: &Retirement) -> (usize, usize) {
+//RS     match row.id {
+//RS         "entry-file" | "manifest-file" => {
+//RS             let files = all_files();
+//RS             let count = |name: &str| files.iter().filter(|p| file_name(p) == name).count();
+//RS             (count(row.retired), count(row.canonical))
+//RS         }
+//RS         "jetpack-file" => {
+//RS             let files = all_files();
+//RS             let retired = files
+//RS                 .iter()
+//RS                 .filter(|path| file_name(path) == JETPACK_TOML)
+//RS                 .count();
+//RS             let canonical = files
+//RS                 .iter()
+//RS                 .filter(|path| matches!(file_name(path).as_str(), "package.jet" | "env.jet"))
+//RS                 .count();
+//RS             (retired, canonical)
+//RS         }
+//RS         "manifest-identity" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 if writes_retired_identity(&text) {
+//RS                     retired += 1;
+//RS                 } else if file_name(&path).ends_with(".jet")
+//RS                     && text.lines().any(|line| line.starts_with("name:"))
+//RS                 {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "lint-policy-code" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 let (has_retired, has_canonical) = lint_policy_values(&text);
+//RS                 if has_retired {
+//RS                     retired += 1;
+//RS                 } else if has_canonical {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "auto-derive-policy" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if path.extension().is_none_or(|ext| ext != "jet") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 if text.contains("policy: { auto_derive") {
+//RS                     retired += 1;
+//RS                 } else if text.contains("policy: { lints: { deny: [auto_derive]") {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "package-ref-order" => {
+//RS             // Jet files only. A Rust source that quotes `github@owner/repo` is
+//RS             // the E1317 test proving the order is refused, not a file written
+//RS             // in the retired order.
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if path.extension().is_none_or(|ext| ext != "jet") {
+//RS                     continue;
+//RS                 }
+//RS                 // The generated diagnostic catalog quotes the retired form in
+//RS                 // E1317's teaching text. It is evidence about the retirement,
+//RS                 // not package source written in the retired order.
+//RS                 if path.ends_with("crates/jet-codegen/src/Prelude/Diagnostics.jet") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 if writes_provider_first(&text) {
+//RS                     retired += 1;
+//RS                 } else if writes_canonical_ref(&text) {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "allow-impure" | "freestanding-flag" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if path.ends_with("crates/jet-foundation/src/Syntax/retirements.rs") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 if text.contains(row.retired) {
+//RS                     retired += 1;
+//RS                 } else if text.contains(row.canonical) {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "scope-marker-grant" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if path.ends_with("crates/jet-codegen/src/Prelude/Diagnostics.jet")
+//RS                     || path.ends_with("crates/jet-foundation/src/Syntax/retirements.rs")
+//RS                     || path.ends_with("crates/jet-parser/src/Parser/Statements/control.rs")
+//RS                     || path.ends_with("crates/jet-parser/src/Parser/mod.rs")
+//RS                     || path.ends_with("tests/retirement_ratchet.rs")
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 if text.contains(row.retired) {
+//RS                     retired += 1;
+//RS                 } else if text.contains(row.canonical) {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "interpolation-selector-rail" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if path.extension().is_none_or(|ext| ext != "jet") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 let has_retired = writes_interpolation_selector(&text, true);
+//RS                 if has_retired {
+//RS                     retired += 1;
+//RS                 } else if writes_interpolation_selector(&text, false) {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "fact-mark" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if path.extension().is_none_or(|ext| ext != "jet") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 let (tokens, lex_diags) = jet::Lexer::lex(&text);
+//RS                 if !lex_diags.is_empty() {
+//RS                     continue;
+//RS                 }
+//RS                 let old = has_retired_fact_mark(&tokens);
+//RS                 let current = tokens.iter().any(|token| {
+//RS                     matches!(&token.kind, jet::Lexer::TokKind::Ident(name) if name.starts_with(jet::Syntax::COMPTIME_MARK))
+//RS                 });
+//RS                 if old {
+//RS                     retired += 1;
+//RS                 } else if current {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "set-take" => {
+//RS             tally_collection_example("Examples/features/collections/set.jet", ".take(", ".pop(")
+//RS         }
+//RS         "map-replace" => tally_collection_example(
+//RS             "Examples/features/collections/map_surface.jet",
+//RS             ".replace(",
+//RS             ".add(",
+//RS         ),
+//RS         "set-replace" => tally_collection_example(
+//RS             "Examples/features/collections/set.jet",
+//RS             ".replace(",
+//RS             ".add(",
+//RS         ),
+//RS         "core-io-println" => tally_print_family("io.println", "io.print"),
+//RS         "core-io-sprint" => tally_print_family("io.sprint", "{value}"),
+//RS         "core-io-repr" => tally_print_family("io.repr", "{value:Debug}"),
+//RS         "core-path-free-functions" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if path.extension().is_none_or(|ext| ext != "jet") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 if text.contains("use core.path") || text.contains("core.path.") {
+//RS                     retired += 1;
+//RS                 } else if text.contains("Path.from") || text.contains("Path.home") {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         id if id.starts_with("core-namespace-") => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if path.extension().is_none_or(|ext| ext != "jet") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 if text.contains(row.retired) {
+//RS                     retired += 1;
+//RS                 } else if text.contains(row.canonical) {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "target-plugin" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if path.extension().is_none_or(|ext| ext != "jet") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 let (_, retired_targets) = jet::Package::rewrite_retired_targets(&text);
+//RS                 if retired_targets > 0 || text.contains("target: plugin") {
+//RS                     retired += 1;
+//RS                 } else if text.contains("target: sandbox")
+//RS                     || jet::Package::PackageFacts::parse(&text, &path.display().to_string())
+//RS                         .is_ok_and(|facts| {
+//RS                             facts.packages.iter().any(|package| {
+//RS                                 package.targets.iter().any(|target| {
+//RS                                     matches!(target, jet::Package::Target::Plugin { .. })
+//RS                                 })
+//RS                             })
+//RS                         })
+//RS                 {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "core-container-queue"
+//RS         | "core-container-rank"
+//RS         | "core-container-tally"
+//RS         | "core-container-bits"
+//RS         | "core-container-bytes" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 if contains_word(&text, row.retired) {
+//RS                     retired += 1;
+//RS                 } else if contains_word(&text, row.canonical) {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "operator-plus-plus" | "operator-minus-minus" => {
+//RS             let plus = row.id == "operator-plus-plus";
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if !path.extension().is_some_and(|ext| ext == "jet") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 let (tokens, _) = jet::Lexer::lex(&text);
+//RS                 if writes_step_token(&tokens, plus) {
+//RS                     retired += 1;
+//RS                 } else if writes_compound_step(&tokens, plus) {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "jet-time-now" | "jet-time-format" => {
+//RS             let files = content_files();
+//RS             let count = |needle: &str| {
+//RS                 files
+//RS                     .iter()
+//RS                     .filter_map(|path| read(path))
+//RS                     .filter(|text| text.contains(needle))
+//RS                     .count()
+//RS             };
+//RS             (count(row.retired), count(row.canonical))
+//RS         }
+//RS         id if id.starts_with("effect-flat-ffi-") => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if path.ends_with("tests/effect_roots.rs") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 if writes_effect_spelling(&text, row.retired) {
+//RS                     retired += 1;
+//RS                 } else if writes_effect_spelling(&text, row.canonical) {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "outcome-nested-ok-pattern" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if !path.extension().is_some_and(|ext| ext == "jet") {
+//RS                     continue;
+//RS                 }
+//RS                 // The E0392 registry row names the retired form it refuses.
+//RS                 if path.ends_with("crates/jet-codegen/src/Prelude/Diagnostics.jet") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 if text.contains(".Ok(.Val(") || text.contains(".Ok(.None)") {
+//RS                     retired += 1;
+//RS                 } else if text.contains(".Val(") && text.contains(".None") && text.contains(".Err(") {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "comptime-constant-mark" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if !path.extension().is_some_and(|ext| ext == "jet") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 let (tokens, _) = jet::Lexer::lex(&text);
+//RS                 let declares = |marked: bool| {
+//RS                     tokens.windows(2).any(|pair| {
+//RS                         matches!(&pair[0].kind, jet::Lexer::TokKind::Ident(name)
+//RS                             if marked == name.starts_with('@')
+//RS                                 && name.trim_start_matches('@').chars().any(char::is_uppercase)
+//RS                                 && !name.trim_start_matches('@').chars().any(char::is_lowercase))
+//RS                             && matches!(pair[1].kind, jet::Lexer::TokKind::ColonColon)
+//RS                     })
+//RS                 };
+//RS                 if declares(true) {
+//RS                     retired += 1;
+//RS                 } else if declares(false) {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         "template-name-splice-mark" => {
+//RS             let mut retired = 0;
+//RS             let mut canonical = 0;
+//RS             for path in content_files() {
+//RS                 if !path.extension().is_some_and(|ext| ext == "jet") {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(text) = read(&path) else { continue };
+//RS                 let (tokens, lex_diags) = jet::Lexer::lex(&text);
+//RS                 let spliced = tokens.windows(2).any(|pair| {
+//RS                     matches!(pair[0].kind, jet::Lexer::TokKind::KwFn | jet::Lexer::TokKind::KwImpl)
+//RS                         && matches!(&pair[1].kind, jet::Lexer::TokKind::Ident(name)
+//RS                             if name.starts_with(jet::Syntax::COMPTIME_MARK))
+//RS                 });
+//RS                 if lex_diags.iter().any(|diag| diag.code == "E0388") {
+//RS                     retired += 1;
+//RS                 } else if spliced {
+//RS                     canonical += 1;
+//RS                 }
+//RS             }
+//RS             (retired, canonical)
+//RS         }
+//RS         other => panic!("no way to count row `{other}`; teach `tally` how to count it"),
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn the_retirement_table_obeys_its_own_law() {
+//RS     assert!(law_violations().is_empty(), "{:#?}", law_violations());
+//RS }
+//RS 
+//RS #[test]
+//RS fn every_retirement_carries_a_ratchet() {
+//RS     let ceilings: BTreeMap<&str, usize> = CEILINGS.iter().copied().collect();
+//RS     assert_eq!(
+//RS         ceilings.len(),
+//RS         CEILINGS.len(),
+//RS         "two ceilings claim the same retirement id"
+//RS     );
+//RS     let rows: BTreeMap<&str, &Retirement> = RETIREMENTS.iter().map(|row| (row.id, row)).collect();
+//RS     let missing: Vec<&str> = rows
+//RS         .keys()
+//RS         .filter(|id| !ceilings.contains_key(*id))
+//RS         .copied()
+//RS         .collect();
+//RS     assert!(
+//RS         missing.is_empty(),
+//RS         "these retirements ship no adoption ratchet: {missing:?}"
+//RS     );
+//RS     let orphaned: Vec<&str> = ceilings
+//RS         .keys()
+//RS         .filter(|id| !rows.contains_key(*id))
+//RS         .copied()
+//RS         .collect();
+//RS     assert!(
+//RS         orphaned.is_empty(),
+//RS         "these ratchets name no retirement: {orphaned:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn adoption_ratchets_toward_zero() {
+//RS     let ceilings: BTreeMap<&str, usize> = CEILINGS.iter().copied().collect();
+//RS     let mut report = String::new();
+//RS     let mut failures = Vec::new();
+//RS     for row in RETIREMENTS {
+//RS         let ceiling = ceilings[row.id];
+//RS         let (retired, canonical) = tally(row);
+//RS         let total = retired + canonical;
+//RS         let adoption = if total == 0 {
+//RS             100.0
+//RS         } else {
+//RS             canonical as f64 * 100.0 / total as f64
+//RS         };
+//RS         let answer = match row.kind {
+//RS             RetirementKind::Rename => "fmt/fix rewrites",
+//RS             RetirementKind::Semantic => "refused",
+//RS         };
+//RS         report.push_str(&format!(
+//RS             "  {:<18} {:>5.1}% on `{}`  ({canonical} canonical, {retired} retired, ceiling {ceiling}, {answer}, {})\n",
+//RS             row.id, adoption, row.canonical, row.decision
+//RS         ));
+//RS         if retired > ceiling {
+//RS             failures.push(format!(
+//RS                 "{}: `{}` is written in {retired} files, above the ceiling of {ceiling}. \
+//RS                  A retired form may not gain new files.",
+//RS                 row.id, row.retired
+//RS             ));
+//RS         } else if retired < ceiling {
+//RS             failures.push(format!(
+//RS                 "{}: `{}` is down to {retired} files. Lower the ceiling from {ceiling} to \
+//RS                  {retired} in tests/retirement_ratchet.rs so the ratchet holds the gain.",
+//RS                 row.id, row.retired
+//RS             ));
+//RS         }
+//RS     }
+//RS     println!("adoption per canonical form:\n{report}");
+//RS     assert!(failures.is_empty(), "{}\n{report}", failures.join("\n"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn a_finished_retirement_stays_finished() {
+//RS     let ceilings: BTreeMap<&str, usize> = CEILINGS.iter().copied().collect();
+//RS     for row in RETIREMENTS {
+//RS         if ceilings[row.id] == 0 {
+//RS             let (retired, _) = tally(row);
+//RS             assert_eq!(retired, 0, "`{}` came back in {retired} files", row.retired);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn failure_syntax_detector_accepts_current_forms_only() {
+//RS     let current = concat!(
+//RS         "fn maybe() -> Int? -> None\n",
+//RS         "fn typed() -> Int IOError! -> 1\n",
+//RS         "fn union() -> Int (DbError | TimeoutError)! -> 1\n",
+//RS         "fn unit() IOError! {}\n",
+//RS         "struct Holder { value: !IOError }\n",
+//RS         "fn context() -> Int IOError! -> read()?(\"loading\")\n",
+//RS         "fn handled() -> Int IOError! -> value ? ok -> ok ! failure -> 0\n",
+//RS         "if !ready -> print(\"ready\")\n",
+//RS     );
+//RS     assert!(
+//RS         failure_syntax_hits(current).is_empty(),
+//RS         "current failure syntax was misclassified: {:?}",
+//RS         failure_syntax_hits(current)
+//RS     );
+//RS 
+//RS     let retired = [
+//RS         concat!("fn suffix() Int Error", "!\n"),
+//RS         concat!("fn infix_bang() Int ", "!", " Error -> 1\n"),
+//RS         concat!("fn infix_question() Int ", "?", " Error -> 1\n"),
+//RS         concat!("fn suffix_option() Int", "? -> None\n"),
+//RS         concat!("fn bare() ", "!", " {}\n"),
+//RS         concat!("alias bare :: ", "!\n"),
+//RS         concat!("fn propagated() Int Error! -> read()", "?\n"),
+//RS         concat!("fn literal_propagation() Bool -> ", "true", "?\n"),
+//RS         concat!("fn string_propagation() String -> ", "\"value\"", "?\n"),
+//RS         concat!("fn null_propagation() Null -> ", "null", "?\n"),
+//RS     ];
+//RS     for source in retired {
+//RS         assert!(
+//RS             !failure_syntax_hits(source).is_empty(),
+//RS             "retired failure syntax was missed: {source:?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn failure_surface_has_no_active_retired_spelling() {
+//RS     let mut offenders = Vec::new();
+//RS     for path in failure_surface_files() {
+//RS         let relative = relative_path(&path);
+//RS         if failure_surface_allowlisted(&relative) {
+//RS             continue;
+//RS         }
+//RS         let Ok(text) = fs::read_to_string(&path) else {
+//RS             continue;
+//RS         };
+//RS         for fragment in failure_source_fragments(&path, &text) {
+//RS             for (line, spelling) in failure_syntax_hits(&fragment.source) {
+//RS                 offenders.push(format!(
+//RS                     "{relative}:{}: {spelling}",
+//RS                     fragment.first_line + line.saturating_sub(1)
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     assert_eq!(
+//RS         offenders.len(),
+//RS         FAILURE_RETIREMENT_CEILING,
+//RS         "retired failure syntax escaped the diagnostic/history allowlist:\n{}",
+//RS         offenders.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn retired_authority_vocabulary_stays_in_fixtures_history_or_unrelated_english() {
+//RS     let mut offenders = Vec::new();
+//RS     for path in all_files() {
+//RS         let relative = relative_path(&path);
+//RS         if relative.starts_with("Tools/tower/") {
+//RS             continue;
+//RS         }
+//RS         let Ok(text) = fs::read_to_string(&path) else {
+//RS             continue;
+//RS         };
+//RS         for (line_number, line) in text.lines().enumerate() {
+//RS             let hits = authority_retired_words_in_line(line);
+//RS             if hits.is_empty()
+//RS                 || is_authority_history(&relative)
+//RS                 || is_authority_diagnostic_fixture(&relative)
+//RS                 || is_authority_diagnostic_producer(&relative, line)
+//RS                 || is_unrelated_authority_word(&relative, line)
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             offenders.push(format!(
+//RS                 "{relative}:{}: {}",
+//RS                 line_number + 1,
+//RS                 hits.join(", ")
+//RS             ));
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         offenders.is_empty(),
+//RS         "retired authority vocabulary escaped its fixture/history boundary:\n{}",
+//RS         offenders.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn retired_time_doors_map_to_the_one_clock_door() {
+//RS     assert_eq!(
+//RS         rename_target(concat!("jet", ".time", ".now")),
+//RS         Some("core.time.now")
+//RS     );
+//RS     assert_eq!(
+//RS         rename_target(concat!("jet", ".time", ".format")),
+//RS         Some("DateTime.format_rfc3339()")
+//RS     );
+//RS }
+//RS 
+//RS /// D-ONCE: `Syntax::REF_SOURCE_PROVIDERS` (`Syntax/effects_surface.rs`) is the
+//RS /// one home for "which source tokens are built-in providers" — this ratchet's
+//RS /// `REF_PROVIDERS` and `jet-pkg-model`'s `RefSpec::Source::is_builtin` both
+//RS /// read it. Fails if `is_builtin` goes back to hand-copying the `REF_SOURCE_*`
+//RS /// constants into a second list instead of calling the shared one.
+//RS #[test]
+//RS fn ref_provider_set_has_one_definition_site() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let ref_spec = fs::read_to_string(root.join("crates/jet-pkg-model/src/RefSpec.rs"))
+//RS         .expect("RefSpec.rs is readable");
+//RS     let is_builtin_body = ref_spec
+//RS         .split("pub fn is_builtin(name: &str) -> bool {")
+//RS         .nth(1)
+//RS         .and_then(|tail| tail.split_once('}').map(|(body, _)| body))
+//RS         .expect("RefSpec::Source::is_builtin body");
+//RS     assert!(
+//RS         !is_builtin_body.contains("REF_SOURCE_")
+//RS             || is_builtin_body.contains("REF_SOURCE_PROVIDERS"),
+//RS         "RefSpec::Source::is_builtin must read Syntax::REF_SOURCE_PROVIDERS, not hand-copy \
+//RS          individual REF_SOURCE_* constants into a second list:\n{is_builtin_body}"
+//RS     );
+//RS     assert!(
+//RS         is_builtin_body.contains("REF_SOURCE_PROVIDERS"),
+//RS         "RefSpec::Source::is_builtin must call Syntax::REF_SOURCE_PROVIDERS.contains(..):\n{is_builtin_body}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1141 tests/retirement_ratchet.rs:1-1778
+

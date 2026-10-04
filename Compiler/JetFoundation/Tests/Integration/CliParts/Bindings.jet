@@ -1,0 +1,1672 @@
+// PORT-PENDING 0992 tests-cli-parts-bindings: tests/cli_parts/bindings.rs:1-1668
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS 
+//RS /// A query that looks like a diagnostic code renders the verbatim I4 essay —
+//RS /// byte-identical to `jet explain <CODE>`, since both go through
+//RS /// `jet::Explain::render` over the same registry (single source of truth).
+//RS #[test]
+//RS fn question_mark_code_query_matches_explain_verbatim() {
+//RS     let via_help = Command::new(jet())
+//RS         .args(["?", "E0102"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let via_explain = Command::new(jet())
+//RS         .args(["explain", "E0102"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(via_help.status.code(), Some(0));
+//RS     assert_eq!(via_explain.status.code(), Some(0));
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&via_help.stdout),
+//RS         String::from_utf8_lossy(&via_explain.stdout),
+//RS         "`jet ! E0102` must render the same verbatim essay as `jet explain E0102` (I4)"
+//RS     );
+//RS }
+//RS 
+//RS /// A multi-word task/outcome phrase still resolves to a real command line —
+//RS /// the owner-modified default (2026-07-08): keywords are aliases on command
+//RS /// entries, never a separate goal menu, but they must still be findable.
+//RS #[test]
+//RS fn question_mark_task_phrase_resolves_to_a_real_command() {
+//RS     let out = Command::new(jet())
+//RS         .args(["?", "add", "a", "dependency"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(0));
+//RS     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+//RS     assert!(
+//RS         stdout.contains("jet add"),
+//RS         "expected `add` to surface, got:\n{}",
+//RS         stdout
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn question_mark_observe_slow_program_routes_to_observation_guide() {
+//RS     let out = Command::new(jet())
+//RS         .args(["?", "why", "is", "my", "program", "slow"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(0));
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     for surface in [
+//RS         "Live scheduler",
+//RS         "GC promotions",
+//RS         "Wall-clock session",
+//RS         "Browser rows",
+//RS     ] {
+//RS         assert!(
+//RS             stdout.contains(surface),
+//RS             "observation guide missing {surface}: {stdout}"
+//RS         );
+//RS     }
+//RS     check_snapshot("observability_guide.txt", &stdout);
+//RS }
+//RS 
+//RS #[test]
+//RS fn file_sugar_runs_without_run_subcommand() {
+//RS     let stem = std::env::temp_dir().join("jet_cli_file_sugar");
+//RS     let file = stem.with_extension("jet");
+//RS     fs::write(&file, "fn run() {\n    print(\"file-sugar\")\n}\n").unwrap();
+//RS     let out = Command::new(jet()).arg(&file).output().unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "jet <file> sugar should exit 0; stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&out.stdout).contains("file-sugar"),
+//RS         "stdout: {}",
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn file_sugar_ext_optional() {
+//RS     let stem = std::env::temp_dir().join("jet_cli_file_sugar_extopt");
+//RS     let file = stem.with_extension("jet");
+//RS     fs::write(&file, "fn run() {\n    print(\"ext-sugar\")\n}\n").unwrap();
+//RS     let out = Command::new(jet()).arg(&stem).output().unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "jet <stem> sugar should resolve .jet; stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&out.stdout).contains("ext-sugar"),
+//RS         "stdout: {}",
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn file_sugar_missing_jet_file_errors() {
+//RS     let missing = std::env::temp_dir().join("jet_cli_file_sugar_absent.jet");
+//RS     let _ = fs::remove_file(&missing);
+//RS     let out = Command::new(jet())
+//RS         .arg(&missing)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_ne!(out.status.code(), Some(0));
+//RS     let combined = format!(
+//RS         "{}{}",
+//RS         String::from_utf8_lossy(&out.stderr),
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS     assert!(
+//RS         combined.contains("jet_cli_file_sugar_absent"),
+//RS         "missing file should be named in output: {combined}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn did_you_mean_golden() {
+//RS     let out = Command::new(jet())
+//RS         .arg("buld")
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+//RS     check_snapshot("did_you_mean.txt", &stderr);
+//RS }
+//RS 
+//RS #[test]
+//RS fn unknown_flag_is_e2102() {
+//RS     let p = std::env::temp_dir().join("jet_cli_ok2.jet");
+//RS     fs::write(&p, "fn run() {\n    print(\"hi\")\n}\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .arg("check")
+//RS         .arg(&p)
+//RS         .arg("--jsn")
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2), "unknown flag should exit 2");
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("E2102"), "should cite E2102:\n{}", stderr);
+//RS     assert!(
+//RS         stderr.contains("--json"),
+//RS         "should suggest --json:\n{}",
+//RS         stderr
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn doctor_ok_golden() {
+//RS     // On a CI/dev box rustc is present; the report is deterministic except for
+//RS     // machine-specific paths and the rustc version, which we scrub.
+//RS     let out = Command::new(jet())
+//RS         .args(["self", "doctor"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let s = String::from_utf8_lossy(&out.stdout).into_owned();
+//RS     // Doctor must never emit ANSI when piped.
+//RS     assert!(
+//RS         !s.contains('\x1b'),
+//RS         "doctor output must be ANSI-free when piped"
+//RS     );
+//RS     // Structural assertions (a full golden would be machine-specific).
+//RS     assert!(s.contains("doctor"), "missing header:\n{}", s);
+//RS     assert!(s.contains("rustc"), "missing rustc check:\n{}", s);
+//RS     assert!(s.contains("pkg-config"), "missing C-FFI section:\n{}", s);
+//RS     assert!(s.contains("hangar"), "missing hangar check:\n{}", s);
+//RS }
+//RS 
+//RS #[test]
+//RS fn doctor_failure_is_l2101_snapshot() {
+//RS     let out = Command::new(jet())
+//RS         .args(["self", "doctor"])
+//RS         .env("PATH", "")
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     let start = stdout
+//RS         .find("Warning [L2101] (doctor_advisory):")
+//RS         .expect("L2101 diagnostic");
+//RS     check_snapshot("doctor_l2101.txt", &stdout[start..]);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn fake_rustc_fixture(tag: &str, target_list_action: &str) -> (PathBuf, PathBuf, PathBuf) {
+//RS     use std::os::unix::fs::PermissionsExt;
+//RS 
+//RS     let dir = isolated_cwd(tag);
+//RS     let bin = dir.join("bin");
+//RS     let sysroot = dir.join("sysroot");
+//RS     fs::create_dir_all(&bin).unwrap();
+//RS     let rustc = bin.join("rustc");
+//RS     let script = format!(
+//RS         r#"#!/bin/sh
+//RS if [ "$1" = "--version" ]; then
+//RS     printf '%s\n' 'rustc 1.97.1'
+//RS     exit 0
+//RS fi
+//RS if [ "$1" = "--print" ] && [ "$2" = "target-list" ]; then
+//RS     {target_list_action}
+//RS fi
+//RS if [ "$1" = "--print" ] && [ "$2" = "sysroot" ]; then
+//RS     printf '%s\n' "$JET_FAKE_SYSROOT"
+//RS     exit 0
+//RS fi
+//RS printf '%s\n' 'rustc-probe-sentinel' >&2
+//RS exit 79
+//RS "#
+//RS     );
+//RS     fs::write(&rustc, script).unwrap();
+//RS     let mut permissions = fs::metadata(&rustc).unwrap().permissions();
+//RS     permissions.set_mode(0o755);
+//RS     fs::set_permissions(&rustc, permissions).unwrap();
+//RS     (dir, bin, sysroot)
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn run_doctor_target(
+//RS     dir: &std::path::Path,
+//RS     bin: &std::path::Path,
+//RS     sysroot: &std::path::Path,
+//RS     target_args: &[&str],
+//RS ) -> std::process::Output {
+//RS     Command::new(jet())
+//RS         .args(["self", "doctor"])
+//RS         .args(target_args)
+//RS         .current_dir(dir)
+//RS         .env("PATH", bin)
+//RS         .env("HOME", dir)
+//RS         .env("JET_FAKE_SYSROOT", sysroot)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap()
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn doctor_web_alias_requires_wasm_std_component() {
+//RS     let (dir, bin, sysroot) = fake_rustc_fixture(
+//RS         "doctor_web_missing_std",
+//RS         "printf '%s\\n' 'wasm32-unknown-unknown'; exit 0",
+//RS     );
+//RS     let out = run_doctor_target(&dir, &bin, &sysroot, &["--target=web"]);
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     let report = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         report.contains("web: target-specific standard-library component is missing or empty"),
+//RS         "web doctor must prove the underlying wasm std component:\n{report}"
+//RS     );
+//RS     assert!(
+//RS         !report.contains("everything looks good."),
+//RS         "missing web std must not be a false-green doctor result:\n{report}"
+//RS     );
+//RS 
+//RS     fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
+//RS     let build = Command::new(jet())
+//RS         .args(["build", "main.jet", "--target=web"])
+//RS         .current_dir(&dir)
+//RS         .env("PATH", &bin)
+//RS         .env("HOME", &dir)
+//RS         .env("JET_FAKE_SYSROOT", &sysroot)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let build_report = format!(
+//RS         "{}{}",
+//RS         String::from_utf8_lossy(&build.stdout),
+//RS         String::from_utf8_lossy(&build.stderr)
+//RS     );
+//RS     assert_eq!(build.status.code(), Some(1));
+//RS     assert!(
+//RS         build_report.contains("E3302"),
+//RS         "compile admission must reject the same missing web component:\n{build_report}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn doctor_rejects_empty_target_component_directory() {
+//RS     let (dir, bin, sysroot) = fake_rustc_fixture(
+//RS         "doctor_web_empty_std",
+//RS         "printf '%s\\n' 'wasm32-unknown-unknown'; exit 0",
+//RS     );
+//RS     fs::create_dir_all(
+//RS         sysroot
+//RS             .join("lib")
+//RS             .join("rustlib")
+//RS             .join("wasm32-unknown-unknown")
+//RS             .join("lib"),
+//RS     )
+//RS     .unwrap();
+//RS     let out = run_doctor_target(&dir, &bin, &sysroot, &["--target=web"]);
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     let report = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         report.contains("web: target-specific standard-library component is missing or empty"),
+//RS         "an empty target lib directory must not pass:\n{report}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn doctor_target_probe_failure_is_problem_not_note() {
+//RS     let (dir, bin, sysroot) = fake_rustc_fixture(
+//RS         "doctor_web_probe_failure",
+//RS         "printf '%s\\n' 'rustc-probe-sentinel' >&2; exit 73",
+//RS     );
+//RS     let out = run_doctor_target(&dir, &bin, &sysroot, &["--target=web"]);
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     let report = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         report.contains("web: could not run the rustc target metadata probe"),
+//RS         "a failed target probe must be a Doctor problem:\n{report}"
+//RS     );
+//RS     assert!(
+//RS         !report.contains("[note] web:"),
+//RS         "a failed target probe must not be downgraded to a note:\n{report}"
+//RS     );
+//RS     assert!(
+//RS         !report.contains("rustc-probe-sentinel"),
+//RS         "failed probe stderr must remain hidden:\n{report}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn compile_target_probe_failure_is_e3302_without_rustc_stderr() {
+//RS     let (dir, bin, sysroot) = fake_rustc_fixture(
+//RS         "compile_target_probe_failure",
+//RS         "printf '%s\\n' 'rustc-probe-sentinel' >&2; exit 73",
+//RS     );
+//RS     fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .args(["build", "main.jet", "--target=web"])
+//RS         .current_dir(&dir)
+//RS         .env("PATH", &bin)
+//RS         .env("HOME", &dir)
+//RS         .env("JET_FAKE_SYSROOT", &sysroot)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     let report = format!(
+//RS         "{}{}",
+//RS         String::from_utf8_lossy(&out.stdout),
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(report.contains("E3302"), "probe failure must use E3302:\n{report}");
+//RS     assert!(
+//RS         !report.contains("rustc-probe-sentinel"),
+//RS         "rustc probe stderr must remain hidden:\n{report}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn doctor_accepts_spaced_target_form() {
+//RS     let (dir, bin, sysroot) = fake_rustc_fixture(
+//RS         "doctor_web_spaced_target",
+//RS         "printf '%s\\n' 'wasm32-unknown-unknown'; exit 0",
+//RS     );
+//RS     let target_lib = sysroot
+//RS         .join("lib")
+//RS         .join("rustlib")
+//RS         .join("wasm32-unknown-unknown")
+//RS         .join("lib");
+//RS     fs::create_dir_all(&target_lib).unwrap();
+//RS     fs::write(target_lib.join("libstd.rlib"), b"std").unwrap();
+//RS     let out = run_doctor_target(&dir, &bin, &sysroot, &["--target", "web"]);
+//RS     let report = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         report.contains("web: Jet web backend target"),
+//RS         "spaced --target form must reach Doctor's web target check:\n{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("wasm32-unknown-unknown/lib"),
+//RS         "Doctor must report the proven underlying wasm component:\n{report}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fetch_without_git_is_e1203_snapshot() {
+//RS     let dir = isolated_cwd("fetch_no_git");
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"app\"\nversion: \"0.1.0\"\njet: \">=0.1.0\"\ndescription: \"\"\nlicense: \"MIT\"\npackages: { app: executable }\ndeps: { tool: { git: \"https://example.invalid/tool.git\", tag: \"v1\" } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .args(["fetch"])
+//RS         .current_dir(&dir)
+//RS         .env("PATH", "")
+//RS         .env("HOME", &dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert_eq!(out.status.code(), Some(1), "unexpected stderr:\n{stderr}");
+//RS     let start = stderr.find("Error [E1203]:").expect("E1203 diagnostic");
+//RS     check_snapshot("fetch_no_git_e1203.txt", &stderr[start..]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn fortran_bind_compiles_and_runs_iso_c_binding_scalar() {
+//RS     let dir = isolated_cwd("fortran_bind_scalar");
+//RS     let source = dir.join("scalar.f90");
+//RS     fs::write(
+//RS         &source,
+//RS         r#"module scalar_math
+//RS   use iso_c_binding
+//RS contains
+//RS   function add_i64(a, b) result(value) bind(C, name="add_i64")
+//RS     integer(c_int64_t), value :: a
+//RS     integer(c_int64_t), value :: b
+//RS     integer(c_int64_t) :: value
+//RS     value = a + b
+//RS   end function add_i64
+//RS end module scalar_math
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "fortran"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "scalar"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Fortran bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     assert!(dir.join(".jet/bindings/fortran/scalar.jet").is_file());
+//RS     assert!(dir
+//RS         .join(".jet/bindings/fortran/libjet_fortran_scalar.a")
+//RS         .is_file());
+//RS 
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         "use fortran.scalar as scalar\n\nfn run() { print(scalar.add_i64(20, 22)) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "generated Fortran binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fortran_bind_runs_checked_column_major_array() {
+//RS     let dir = isolated_cwd("fortran_bind_array");
+//RS     let source = dir.join("matrix.f90");
+//RS     fs::write(
+//RS         &source,
+//RS         r#"module matrix_math
+//RS   use iso_c_binding
+//RS contains
+//RS   function probe(a) result(value) bind(C, name="probe_column_major")
+//RS     real(c_double), intent(in) :: a(2,3)
+//RS     real(c_double) :: value
+//RS     value = 100.0_c_double * a(1,2) + a(2,1)
+//RS   end function probe
+//RS end module matrix_math
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "fortran"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "matrix"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Fortran array bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     let generated = fs::read_to_string(dir.join(".jet/bindings/fortran/matrix.jet")).unwrap();
+//RS     assert!(generated.contains("fortran-layout probe.a: column-major 2x3"));
+//RS     assert!(generated.contains("a.len() != 6"));
+//RS     // D-PANICROOT1=A: the extent guard returns a fallible result; the
+//RS     // generated wrapper publishes only its FFI leaf.
+//RS     assert!(generated.contains("-[FFI.Fortran]>"));
+//RS     assert!(String::from_utf8_lossy(&bind.stdout).contains("layout: probe.a column-major 2x3"));
+//RS 
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         "use fortran.matrix as matrix\n\nfn run() { print(matrix.probe([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "generated Fortran array binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     // Fortran sees the flat input in column-major order: a(1,2)=3, a(2,1)=2.
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "302.0\n");
+//RS 
+//RS     fs::write(
+//RS         dir.join("bad.jet"),
+//RS         "use fortran.matrix as matrix\n\nfn run() { print(matrix.probe([1.0, 2.0, 3.0, 4.0, 5.0])) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let bad = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "bad.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!bad.status.success());
+//RS     assert!(
+//RS         String::from_utf8_lossy(&bad.stderr)
+//RS             .contains("a must contain exactly 6 column-major values"),
+//RS         "missing checked array length failure:\n{}",
+//RS         String::from_utf8_lossy(&bad.stderr)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn go_bind_compiles_and_runs_c_archive_scalar() {
+//RS     let dir = isolated_cwd("go_bind_scalar");
+//RS     let source = dir.join("scalar.go");
+//RS     fs::write(
+//RS         &source,
+//RS         r#"package main
+//RS 
+//RS /*
+//RS #include <stdint.h>
+//RS */
+//RS import "C"
+//RS 
+//RS //export add_i64
+//RS func add_i64(a int64, b int64) int64 {
+//RS     return a + b
+//RS }
+//RS 
+//RS func main() {}
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "go"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "scalar"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Go bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     assert!(dir.join(".jet/bindings/go/scalar.jet").is_file());
+//RS     assert!(dir.join(".jet/bindings/go/libjet_go_scalar.a").is_file());
+//RS 
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         "use go.scalar as scalar\n\nfn run() { print(scalar.add_i64(20, 22)) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "generated Go binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn go_bind_compiles_and_runs_move_only_cgo_handle() {
+//RS     let dir = isolated_cwd("go_bind_handle");
+//RS     let source = dir.join("handles.go");
+//RS     fs::write(
+//RS         &source,
+//RS         r#"package main
+//RS 
+//RS /*
+//RS #include <stdint.h>
+//RS */
+//RS import "C"
+//RS import "runtime/cgo"
+//RS 
+//RS //export new_handle
+//RS func new_handle(value int64) uintptr {
+//RS     return uintptr(cgo.NewHandle(value))
+//RS }
+//RS 
+//RS //export consume_handle
+//RS func consume_handle(handle uintptr) int64 {
+//RS     owned := cgo.Handle(handle)
+//RS     value := owned.Value().(int64)
+//RS     owned.Delete()
+//RS     return value
+//RS }
+//RS 
+//RS func main() {}
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "go"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "handles"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Go handle bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     let generated = fs::read_to_string(dir.join(".jet/bindings/go/handles.jet")).unwrap();
+//RS     assert!(generated.contains("pub struct Handle { value: Int }"));
+//RS     assert!(generated.contains("pub fn new_handle(value: Int) -> Handle ->"));
+//RS     assert!(generated.contains("pub fn consume_handle(handle: Handle) -> Int ->"));
+//RS 
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         "use go.handles as handles\n\nfn run() -[FFI.Go, IO]> {\n    handle :: handles.new_handle(42)\n    print(handles.consume_handle(handle))\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "generated Go handle binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn go_bind_launders_foreign_compiler_failure_as_e3208() {
+//RS     let dir = isolated_cwd("go_bind_failure");
+//RS     let source = dir.join("broken.go");
+//RS     fs::write(
+//RS         &source,
+//RS         r#"package main
+//RS 
+//RS import "C"
+//RS 
+//RS //export broken
+//RS func broken(a int64) int64 {
+//RS     return a +
+//RS }
+//RS 
+//RS func main() {}
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = Command::new(jet())
+//RS         .args(["inspect", "bind", "go"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "broken"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(
+//RS         stderr.contains("Error [E3208]:"),
+//RS         "missing Jet diagnostic:\n{stderr}"
+//RS     );
+//RS     assert!(stderr.contains(" Why:"), "missing reason:\n{stderr}");
+//RS     assert!(stderr.contains(" Fix:"), "missing fix:\n{stderr}");
+//RS     assert!(
+//RS         !stderr.contains("broken.go:"),
+//RS         "raw Go location leaked:\n{stderr}"
+//RS     );
+//RS     check_snapshot("bind_go_invalid_e3208.txt", &scrub(&stderr, &source));
+//RS }
+//RS 
+//RS #[test]
+//RS fn java_bind_embeds_jvm_handles_methods_and_exceptions() {
+//RS     let dir = isolated_cwd("java_bind_embedded");
+//RS     let source = dir.join("Counter.java");
+//RS     fs::write(&source, r#"public class Counter {
+//RS     private long value;
+//RS     public Counter(long value) { this.value = value; }
+//RS     public long add(long amount) { value += amount; return value; }
+//RS     public long explode(long code) { if (code < 0) throw new IllegalStateException("hidden foreign detail"); return code; }
+//RS     public static double twice(double value) { return value * 2.0; }
+//RS }
+//RS "#).unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "java"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "counter"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Java bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     assert!(dir
+//RS         .join(".jet/bindings/java/libjet_java_counter.a")
+//RS         .is_file());
+//RS     assert!(dir
+//RS         .join(".jet/bindings/java/counter.classes/Counter.class")
+//RS         .is_file());
+//RS     assert!(dir.join(".jet/bindings/java/counter.provenance").is_file());
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         r#"use java.counter as counter
+//RS 
+//RS fn run() -[FFI.Java, IO]> {
+//RS     handle :: counter.new(40) ?? panic("JVM create failed")
+//RS     print(counter.add(handle, 2) ?? -1)
+//RS     print(counter.twice(2.5) ?? -1.0)
+//RS     print(counter.explode(handle, -1) ?? -7)
+//RS     counter.close(^handle)
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "embedded JVM binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n5.0\n-7\n");
+//RS     assert!(!String::from_utf8_lossy(&run.stderr).contains("hidden foreign detail"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn java_bind_launders_javac_failure_as_e3208() {
+//RS     let dir = isolated_cwd("java_bind_failure");
+//RS     let source = dir.join("Broken.java");
+//RS     fs::write(&source,"public class Broken { public Broken(long n) { this. = n; } public long value() { return 1; } }\n").unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["inspect", "bind", "java"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "broken"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("Error [E3208]:"));
+//RS     assert!(stderr.contains(" Why:"));
+//RS     assert!(stderr.contains(" Fix:"));
+//RS     assert!(
+//RS         !stderr.contains("Broken.java:"),
+//RS         "raw javac location leaked:\n{stderr}"
+//RS     );
+//RS     check_snapshot("bind_java_invalid_e3208.txt", &scrub(&stderr, &source));
+//RS }
+//RS 
+//RS #[test]
+//RS fn dotnet_bind_embeds_coreclr_state_calls_and_errors() {
+//RS     let dir = isolated_cwd("dotnet_bind_embedded");
+//RS     let source = dir.join("Counter.cs");
+//RS     fs::write(&source,r#"public class Counter {
+//RS     private long value;
+//RS     public Counter(long value) { this.value = value; }
+//RS     public long add(long amount) { value += amount; return value; }
+//RS     public long explode(long code) { if (code < 0) throw new System.InvalidOperationException("hidden managed detail"); return code; }
+//RS     public static double twice(double value) { return value * 2.0; }
+//RS }
+//RS "#).unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "cs"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "counter"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         ".NET bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     assert!(dir.join(".jet/bindings/cs/libjet_cs_counter.a").is_file());
+//RS     assert!(dir
+//RS         .join(".jet/bindings/cs/counter.dotnet/JetBinding.dll")
+//RS         .is_file());
+//RS     assert!(dir.join(".jet/bindings/cs/counter.provenance").is_file());
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         r#"use cs.counter as counter
+//RS 
+//RS fn run() -[FFI.DotNet, IO]> {
+//RS     handle :: counter.new(40) ?? panic("CoreCLR create failed")
+//RS     print(counter.add(handle, 2) ?? -1)
+//RS     print(counter.twice(2.5) ?? -1.0)
+//RS     print(counter.explode(handle, -1) ?? -7)
+//RS     counter.close(^handle)
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "embedded CoreCLR binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n5.0\n-7\n");
+//RS     assert!(!String::from_utf8_lossy(&run.stderr).contains("hidden managed detail"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn dotnet_bind_launders_compiler_failure_as_e3208() {
+//RS     let dir = isolated_cwd("dotnet_bind_failure");
+//RS     let source = dir.join("Broken.cs");
+//RS     fs::write(
+//RS         &source,
+//RS         "public class Broken { public Broken(long n) { this. = n; } public long value() => 1; }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["inspect", "bind", "cs"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "broken"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("Error [E3208]:"));
+//RS     assert!(stderr.contains(" Why:"));
+//RS     assert!(stderr.contains(" Fix:"));
+//RS     assert!(
+//RS         !stderr.contains("Broken.cs:"),
+//RS         "raw C# source frame leaked:\n{stderr}"
+//RS     );
+//RS     check_snapshot("bind_dotnet_invalid_e3208.txt", &scrub(&stderr, &source));
+//RS }
+//RS 
+//RS #[test]
+//RS fn tcl_bind_runs_one_shot_and_persistent_typed_sessions() {
+//RS     let dir = isolated_cwd("tcl_bind_session");
+//RS     let source = dir.join("eda.tcl");
+//RS     fs::write(&source, "set counter 40\n").unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "tcl"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "eda"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Tcl bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     assert!(dir.join(".jet/bindings/tcl/libjet_tcl_eda.a").is_file());
+//RS     assert!(dir.join(".jet/bindings/tcl/eda.provenance").is_file());
+//RS     let generated = fs::read_to_string(dir.join(".jet/bindings/tcl/eda.jet")).unwrap();
+//RS     assert!(generated.contains("String !TclError -[FFI.Tcl]>"));
+//RS     assert!(generated
+//RS         .contains("pub fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }"));
+//RS     assert!(!generated.contains("=>"));
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         r#"use tcl.eda as tcl
+//RS 
+//RS fn run() -[FFI.Tcl, IO]> {
+//RS     session :: tcl.open() ?? panic("Tcl open failed")
+//RS     print(tcl.eval_int(session, "incr counter 2") ?? -1)
+//RS     print(tcl.eval_int(session, "incr counter 1") ?? -1)
+//RS     print(tcl.eval_once("expr 6 * 7") ?? "bad")
+//RS     print(tcl.eval_float(session, "expr 5.0 / 2") ?? -1.0)
+//RS     print(tcl.eval(session, "error \"foreign stack secret\"") ?? "tcl-error")
+//RS     tcl.close(^session)
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "embedded Tcl binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&run.stdout),
+//RS         "42\n43\n42\n2.5\ntcl-error\n"
+//RS     );
+//RS     assert!(!String::from_utf8_lossy(&run.stderr).contains("foreign stack secret"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn ada_bind_compiles_runs_and_rejects_range_before_call() {
+//RS     let dir = isolated_cwd("ada_bind_range");
+//RS     let spec = dir.join("geodesy.ads");
+//RS     let body = dir.join("geodesy.adb");
+//RS     fs::write(
+//RS         &spec,
+//RS         r#"with Interfaces.C;
+//RS use type Interfaces.C.double;
+//RS package Geodesy is
+//RS    subtype Latitude is Interfaces.C.double range -90.0 .. 90.0;
+//RS    function Double_Lat (Lat : IN Latitude) return Interfaces.C.double
+//RS      with Export, Convention => C, External_Name => "geo_double";
+//RS    function Calls (Unused : In Interfaces.C.long_long) return Interfaces.C.long_long
+//RS      with Export, Convention => C, External_Name => "geo_calls";
+//RS end Geodesy;
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         &body,
+//RS         r#"with Interfaces.C;
+//RS use type Interfaces.C.double;
+//RS use type Interfaces.C.long_long;
+//RS package body Geodesy is
+//RS    Calls_Count : Interfaces.C.long_long := 0;
+//RS    function Double_Lat (Lat : Latitude) return Interfaces.C.double is
+//RS    begin
+//RS       Calls_Count := Calls_Count + 1;
+//RS       return Lat * 2.0;
+//RS    end Double_Lat;
+//RS    function Calls (Unused : Interfaces.C.long_long) return Interfaces.C.long_long is
+//RS    begin
+//RS       return Calls_Count + Unused;
+//RS    end Calls;
+//RS end Geodesy;
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "ada"])
+//RS         .arg(&spec)
+//RS         .args(["--pkg", "geodesy"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Ada bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     assert!(dir.join(".jet/bindings/ada/libjet_ada_geodesy.a").is_file());
+//RS     assert!(dir.join(".jet/bindings/ada/geodesy.provenance").is_file());
+//RS     let generated = fs::read_to_string(dir.join(".jet/bindings/ada/geodesy.jet")).unwrap();
+//RS     assert!(generated.contains("pub fn double_lat(lat: Float) -[FFI.Ada]> Float AdaError!"));
+//RS     assert!(generated.contains("lat < -90.0 || lat > 90.0"));
+//RS     assert!(!generated.contains("=>"));
+//RS     let provenance = fs::read_to_string(dir.join(".jet/bindings/ada/geodesy.provenance")).unwrap();
+//RS     assert!(
+//RS         provenance.contains("source=")
+//RS             && provenance.contains("body=")
+//RS             && provenance.contains("runtime=")
+//RS     );
+//RS     assert!(provenance.contains("constraints=double_lat.lat=-90.0..90.0"));
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         r#"use ada.geodesy as geo
+//RS 
+//RS fn run() -[FFI.Ada, IO]> {
+//RS     print(geo.double_lat(95.0) ?? -1.0)
+//RS     print(geo.calls(0) ?? -1)
+//RS     print(geo.double_lat(21.0) ?? -1.0)
+//RS     print(geo.calls(0) ?? -1)
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "generated Ada binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "-1.0\n0\n42.0\n1\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn ada_bind_launders_gnat_failure_as_e3208() {
+//RS     let dir = isolated_cwd("ada_bind_failure");
+//RS     let source = dir.join("broken.ads");
+//RS     fs::write(
+//RS         &source,
+//RS         r#"with Interfaces.C;
+//RS package Broken is
+//RS    function Value (Input : Interfaces.C.long_long)
+//RS      return Interfaces.C.long_long
+//RS      with Export, Convention => C, External_Name => "broken_value";
+//RS end Broken;
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         dir.join("broken.adb"),
+//RS         r#"with Interfaces.C;
+//RS package body Broken is
+//RS    function Value (Input : Interfaces.C.long_long) return Interfaces.C.long_long is
+//RS    begin
+//RS       return Input + ;
+//RS    end Value;
+//RS end Broken;
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["inspect", "bind", "ada"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "broken"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("Error [E3208]:"));
+//RS     assert!(stderr.contains(" Why:"));
+//RS     assert!(stderr.contains(" Fix:"));
+//RS     assert!(!stderr.contains("broken.ads:"));
+//RS     check_snapshot("bind_ada_invalid_e3208.txt", &scrub(&stderr, &source));
+//RS }
+//RS 
+//RS #[test]
+//RS fn pascal_bind_runs_scalar_and_owned_class_lifecycle() {
+//RS     let dir = isolated_cwd("pascal_bind_lifecycle");
+//RS     let source = dir.join("inventory.pas");
+//RS     fs::write(
+//RS         &source,
+//RS         r#"library inventory;
+//RS type
+//RS   TCounter = class
+//RS   private
+//RS     FValue: Int64;
+//RS   public
+//RS     constructor Create(Value: Int64);
+//RS     function Add(Delta: Int64): Int64;
+//RS     destructor Destroy; override;
+//RS   end;
+//RS var Destroyed: Int64 = 0;
+//RS constructor TCounter.Create(Value: Int64);
+//RS begin inherited Create; FValue := Value; end;
+//RS function TCounter.Add(Delta: Int64): Int64;
+//RS begin FValue := FValue + Delta; Result := FValue; end;
+//RS destructor TCounter.Destroy;
+//RS begin Destroyed := Destroyed + 1; inherited Destroy; end;
+//RS function add_scalar(A, B: Int64): Int64; cdecl;
+//RS begin Result := A + B; end;
+//RS function add_float(A, B: Double): Double; cdecl;
+//RS begin Result := A + B; end;
+//RS function counter_new(Value: Int64): Pointer; cdecl;
+//RS begin Result := Pointer(TCounter.Create(Value)); end;
+//RS function counter_add(Handle: Pointer; Delta: Int64): Int64; cdecl;
+//RS begin Result := TCounter(Handle).Add(Delta); end;
+//RS procedure counter_free(Handle: Pointer); cdecl;
+//RS begin TCounter(Handle).Free; end;
+//RS function destroyed_count(): Int64; cdecl;
+//RS begin Result := Destroyed; end;
+//RS exports add_scalar, add_float, counter_new, counter_add, counter_free, destroyed_count;
+//RS begin
+//RS end.
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "pascal"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "inventory"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Pascal bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     let cache = dir.join(".jet/bindings/pascal");
+//RS     assert!(cache.join("libjet_pascal_inventory.a").is_file());
+//RS     assert!(cache.join("libjet_pascal_inventory_runtime.so").is_file());
+//RS     assert!(cache.join("inventory.provenance").is_file());
+//RS     let generated = fs::read_to_string(cache.join("inventory.jet")).unwrap();
+//RS     assert!(generated.contains("pub fn counter_new(") && generated.contains("!PascalError ->"));
+//RS     assert!(!generated.contains("=>"));
+//RS     assert!(!generated.contains(".{"));
+//RS     let provenance = fs::read_to_string(cache.join("inventory.provenance")).unwrap();
+//RS     assert!(provenance.contains("schema=jet-pascal-bind-v1\n"));
+//RS     assert!(provenance.contains("source="));
+//RS     assert!(provenance.contains("compiler="));
+//RS     assert!(provenance.contains("abi=cdecl\n"));
+//RS     assert!(provenance.contains("handles=opaque-int64-generation\n"));
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         r#"use pascal.inventory as inv
+//RS 
+//RS fn run() -[FFI.Pascal, IO]> {
+//RS     print(inv.add_scalar(20, 22))
+//RS     print(inv.add_float(1.25, 2.25))
+//RS     handle :: inv.counter_new(40) ?? panic("Pascal constructor failed")
+//RS     print(inv.counter_add(handle, 2) ?? -1)
+//RS     print(inv.destroyed_count())
+//RS     inv.close(^handle)
+//RS     print(inv.destroyed_count())
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "generated Pascal binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n3.5\n42\n0\n1\n");
+//RS     fs::write(dir.join("stale.c"),r#"#include <stdint.h>
+//RS extern int64_t jet_pascal_inventory_counter_new(int64_t);
+//RS extern void jet_pascal_inventory_counter_close(int64_t);
+//RS extern int64_t jet_pascal_inventory_take_error(void);
+//RS extern int64_t jet_pascal_inventory_destroyed_count(void);
+//RS int main(void){int64_t first=jet_pascal_inventory_counter_new(1);if(!first)return 1;jet_pascal_inventory_counter_close(first);if(jet_pascal_inventory_destroyed_count()!=1)return 2;int64_t second=jet_pascal_inventory_counter_new(2);if(!second||second==first)return 3;jet_pascal_inventory_counter_close(first);if(jet_pascal_inventory_take_error()!=1)return 4;if(jet_pascal_inventory_destroyed_count()!=1)return 5;jet_pascal_inventory_counter_close(second);if(jet_pascal_inventory_destroyed_count()!=2)return 6;return 0;}
+//RS "#).unwrap();
+//RS     let cc = Command::new("cc")
+//RS         .arg("stale.c")
+//RS         .args([
+//RS             "-L.jet/bindings/pascal",
+//RS             "-Wl,-rpath,.jet/bindings/pascal",
+//RS             "-l:libjet_pascal_inventory.a",
+//RS             "-ljet_pascal_inventory_runtime",
+//RS             "-lpthread",
+//RS             "-ldl",
+//RS             "-o",
+//RS             "stale",
+//RS         ])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         cc.status.success(),
+//RS         "stale-handle probe link failed:\n{}",
+//RS         String::from_utf8_lossy(&cc.stderr)
+//RS     );
+//RS     let stale = Command::new(dir.join("stale"))
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         stale.status.success(),
+//RS         "stale close reached Pascal destructor twice: {:?}",
+//RS         stale.status.code()
+//RS     );
+//RS     fs::write(dir.join("capacity.c"),r#"#include <stdint.h>
+//RS extern int64_t jet_pascal_inventory_counter_new(int64_t);
+//RS extern void jet_pascal_inventory_counter_close(int64_t);
+//RS extern int64_t jet_pascal_inventory_take_error(void);
+//RS int main(void){int64_t handles[64];for(int i=0;i<64;i++){handles[i]=jet_pascal_inventory_counter_new(i);if(!handles[i])return 1;}if(jet_pascal_inventory_counter_new(65)!=0||jet_pascal_inventory_take_error()!=2)return 2;for(int i=0;i<64;i++){jet_pascal_inventory_counter_close(handles[i]);if(jet_pascal_inventory_take_error()!=0)return 3;}return 0;}
+//RS "#).unwrap();
+//RS     let capacity_cc = Command::new("cc")
+//RS         .arg("capacity.c")
+//RS         .args([
+//RS             "-L.jet/bindings/pascal",
+//RS             "-Wl,-rpath,.jet/bindings/pascal",
+//RS             "-l:libjet_pascal_inventory.a",
+//RS             "-ljet_pascal_inventory_runtime",
+//RS             "-lpthread",
+//RS             "-ldl",
+//RS             "-o",
+//RS             "capacity",
+//RS         ])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         capacity_cc.status.success(),
+//RS         "capacity probe link failed:\n{}",
+//RS         String::from_utf8_lossy(&capacity_cc.stderr)
+//RS     );
+//RS     let capacity = Command::new(dir.join("capacity"))
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         capacity.status.success(),
+//RS         "64-slot Pascal handle table failed: {:?}",
+//RS         capacity.status.code()
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn pascal_bind_rejects_unsupported_abi_shape_as_e3208() {
+//RS     let dir = isolated_cwd("pascal_bind_abi_shape");
+//RS     let source = dir.join("broken.pas");
+//RS     fs::write(
+//RS         &source,
+//RS         r#"library broken;
+//RS type TCounter = class end;
+//RS function counter_new(Value: Int64): Pointer; cdecl; begin Result := nil; end;
+//RS function counter_bad(Handle: Pointer; Value: Integer): Int64; cdecl; begin Result := 0; end;
+//RS procedure counter_free(Handle: Pointer); cdecl; begin end;
+//RS exports counter_new, counter_bad, counter_free;
+//RS begin end.
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["inspect", "bind", "pascal"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "broken"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(!output.status.success());
+//RS     assert!(
+//RS         stderr.contains("Error [E3208]") && stderr.contains("unsupported parameter type `integer`"),
+//RS         "{stderr}"
+//RS     );
+//RS     assert!(!dir.join(".jet/bindings/pascal/broken.jet").exists());
+//RS     check_snapshot("bind_pascal_abi_e3208.txt", &scrub(&stderr, &source));
+//RS }
+//RS 
+//RS #[test]
+//RS fn pascal_bind_launders_fpc_failure_as_e3208() {
+//RS     let dir = isolated_cwd("pascal_bind_failure");
+//RS     let source = dir.join("broken.pas");
+//RS     fs::write(&source,"library broken; type TCounter = class end; function counter_new(Value: Int64): Pointer; cdecl; begin Result := ; end; function counter_add(Handle: Pointer; Delta: Int64): Int64; cdecl; begin Result := 0; end; procedure counter_free(Handle: Pointer); cdecl; begin end; exports counter_new, counter_add, counter_free; begin end.\n").unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["inspect", "bind", "pascal"])
+//RS         .arg(&source)
+//RS         .args(["--pkg", "broken"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("Error [E3208]:"));
+//RS     assert!(stderr.contains(" Why:"));
+//RS     assert!(stderr.contains(" Fix:"));
+//RS     assert!(!stderr.contains("broken.pas("));
+//RS     check_snapshot("bind_pascal_invalid_e3208.txt", &scrub(&stderr, &source));
+//RS }
+//RS 
+//RS #[test]
+//RS fn dart_bind_runs_jet_compute_and_dart_callback_in_process() {
+//RS     let dir = isolated_cwd("dart_bind_round_trip");
+//RS     let contract = dir.join("callbacks.dart");
+//RS     let compute = dir.join("compute.jet");
+//RS     fs::write(&contract,"@pragma('vm:entry-point')\nint dartDouble(int value) => value * 2;\n@pragma('vm:entry-point')\ndouble dartHalf(double value) => value / 2;\n").unwrap();
+//RS     fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) -[FFI.Dart]> Int {\n    return callbacks.dart_double(value) ?? -1\n}\n\npub fn compute_float(value: Float) -[FFI.Dart]> Float {\n    return callbacks.dart_half(value) ?? -1.0\n}\n").unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "dart"])
+//RS         .arg(&contract)
+//RS         .args(["--jet", compute.to_str().unwrap(), "--pkg", "callbacks"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Dart bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     let cache = dir.join(".jet/bindings/dart");
+//RS     let native = cache.join(if cfg!(target_os = "macos") {
+//RS         "libjet_dart_callbacks_compute.dylib"
+//RS     } else if cfg!(target_os = "windows") {
+//RS         "libjet_dart_callbacks_compute.dll"
+//RS     } else {
+//RS         "libjet_dart_callbacks_compute.so"
+//RS     });
+//RS     assert!(cache.join("libjet_dart_callbacks.a").is_file());
+//RS     assert!(native.is_file());
+//RS     assert!(cache.join("callbacks_host.dart").is_file());
+//RS     assert!(cache.join("callbacks.provenance").is_file());
+//RS     let generated = fs::read_to_string(cache.join("callbacks.jet")).unwrap();
+//RS     assert!(generated.contains("pub fn dart_double(value: Int) -[FFI.Dart]> Int DartError!"));
+//RS     assert!(generated.contains("pub fn dart_half(value: Float) -[FFI.Dart]> Float DartError!"));
+//RS     assert!(!generated.contains("=>"));
+//RS     let host = fs::read_to_string(cache.join("callbacks_host.dart")).unwrap();
+//RS     assert!(host.contains("NativeCallable<Int64 Function(Int64)>.isolateLocal"));
+//RS     assert!(host.find("reset();").unwrap() < host.find("callback.close();").unwrap());
+//RS     let provenance = fs::read_to_string(cache.join("callbacks.provenance")).unwrap();
+//RS     assert!(
+//RS         provenance.contains("compute=")
+//RS             && provenance.contains("contract_provenance_sha256=")
+//RS             && provenance.contains("sdk=")
+//RS     );
+//RS     let native_path = native
+//RS         .to_string_lossy()
+//RS         .replace('\\', "\\\\")
+//RS         .replace('\'', "\\'");
+//RS     fs::write(dir.join("host.dart"),format!("import 'dart:ffi';\nimport '.jet/bindings/dart/callbacks_host.dart';\ntypedef ComputeNative = Int64 Function(Int64);\ntypedef ComputeDart = int Function(int);\ntypedef ComputeFloatNative = Double Function(Double);\ntypedef ComputeFloatDart = double Function(double);\nvoid main() {{ initializeJetDart('{native_path}'); final compute = jetDartLibrary.lookupFunction<ComputeNative, ComputeDart>('compute'); final computeFloat = jetDartLibrary.lookupFunction<ComputeFloatNative, ComputeFloatDart>('compute-float'); print(compute(21)); print(computeFloat(5.0)); shutdownJetDart(); }}\n")).unwrap();
+//RS     let run = Command::new("dart")
+//RS         .args(["run", "host.dart"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "Dart host failed:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n2.5\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn dart_bind_rejects_untyped_contract_as_e3208() {
+//RS     let dir = isolated_cwd("dart_bind_invalid");
+//RS     let contract = dir.join("broken.dart");
+//RS     fs::write(
+//RS         &contract,
+//RS         "@pragma('vm:entry-point')\nString greet(String value) => value;\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["inspect", "bind", "dart"])
+//RS         .arg(&contract)
+//RS         .args(["--jet", "compute.jet", "--pkg", "broken"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("Error [E3208]:"));
+//RS     assert!(stderr.contains(" Why:"));
+//RS     assert!(stderr.contains(" Fix:"));
+//RS     check_snapshot("bind_dart_invalid_e3208.txt", &scrub(&stderr, &contract));
+//RS }
+//RS 
+//RS #[test]
+//RS fn powershell_bind_round_trips_datatree_state_and_cleans_workers() {
+//RS     if Command::new("pwsh").arg("--version").output().is_err() {
+//RS         return;
+//RS     }
+//RS     let dir = isolated_cwd("powershell_bind_round_trip");
+//RS     let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/interop/powershell");
+//RS     let script = dir.join("ops.ps1");
+//RS     fs::copy(example.join("ops.ps1"), &script).unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "pwsh"])
+//RS         .arg(&script)
+//RS         .args(["--pkg", "ops"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "PowerShell bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     let cache = dir.join(".jet/bindings/pwsh");
+//RS     assert!(cache.join("libjet_pwsh_ops.a").is_file());
+//RS     assert!(cache.join("ops_worker.ps1").is_file());
+//RS     assert!(cache.join("ops.provenance").is_file());
+//RS     fs::copy(example.join("main.jet"), dir.join("main.jet")).unwrap();
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "generated PowerShell binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&run.stdout),
+//RS         fs::read_to_string(example.join("expected.out")).unwrap()
+//RS     );
+//RS     fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
+//RS #include <stdint.h>
+//RS #include <unistd.h>
+//RS extern int64_t jet_pwsh_ops_open(void);
+//RS extern const char* jet_pwsh_ops_invoke_sleep(int64_t,const char*,int64_t);
+//RS extern void jet_pwsh_ops_cancel(int64_t);
+//RS extern void jet_pwsh_ops_close(int64_t);
+//RS extern int64_t jet_pwsh_ops_take_error(void);
+//RS static int64_t handle;static int64_t code;
+//RS static void* call(void*unused){(void)unused;jet_pwsh_ops_invoke_sleep(handle,"null",60000);code=jet_pwsh_ops_take_error();return 0;}
+//RS int main(void){handle=jet_pwsh_ops_open();if(!handle)return 1;pthread_t thread;if(pthread_create(&thread,0,call,0))return 2;usleep(100000);jet_pwsh_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 3;int64_t fresh=jet_pwsh_ops_open();if(!fresh)return 4;jet_pwsh_ops_close(fresh);return 0;}
+//RS "#).unwrap();
+//RS     let cc = Command::new("cc")
+//RS         .arg("cancel.c")
+//RS         .args([
+//RS             "-L.jet/bindings/pwsh",
+//RS             "-l:libjet_pwsh_ops.a",
+//RS             "-lpthread",
+//RS             "-o",
+//RS             "cancel",
+//RS         ])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         cc.status.success(),
+//RS         "PowerShell cancellation probe link failed:\n{}",
+//RS         String::from_utf8_lossy(&cc.stderr)
+//RS     );
+//RS     let cancel = Command::new(dir.join("cancel"))
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         cancel.status.success(),
+//RS         "PowerShell cancellation did not clean the worker: {:?}",
+//RS         cancel.status.code()
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn powershell_bind_launders_parse_failure_as_e3208() {
+//RS     if Command::new("pwsh").arg("--version").output().is_err() {
+//RS         return;
+//RS     }
+//RS     let dir = isolated_cwd("powershell_bind_invalid");
+//RS     let script = dir.join("broken.ps1");
+//RS     fs::write(&script, "function Broken { param($InputObject) if ( }\n").unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["inspect", "bind", "pwsh"])
+//RS         .arg(&script)
+//RS         .args(["--pkg", "broken"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("Error [E3208]:"));
+//RS     assert!(!stderr.contains("Unexpected token"));
+//RS     assert!(!stderr.contains("broken.ps1:"));
+//RS     check_snapshot(
+//RS         "bind_powershell_invalid_e3208.txt",
+//RS         &scrub(&stderr, &script),
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn perl_bind_does_not_execute_compile_time_code() {
+//RS     if Command::new("perl").arg("-v").output().is_err() {
+//RS         return;
+//RS     }
+//RS     let dir = isolated_cwd("perl_bind_compile_time");
+//RS     let script = dir.join("compile_time.pl");
+//RS     fs::write(
+//RS         &script,
+//RS         "BEGIN { system(\"touch compile-time-marker\") }\nsub Safe { return $_[0]; }\n1;\n",
+//RS     )
+//RS     .unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "perl"])
+//RS         .arg(&script)
+//RS         .args(["--pkg", "compile_time"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Perl bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     assert!(!dir.join("compile-time-marker").exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn perl_bind_does_not_execute_use_imports() {
+//RS     if Command::new("perl").arg("-v").output().is_err() {
+//RS         return;
+//RS     }
+//RS     let dir = isolated_cwd("perl_bind_use_import");
+//RS     let script = dir.join("use_import.pl");
+//RS     let module = dir.join("Hostile.pm");
+//RS     let marker = dir.join("use-import-marker");
+//RS     fs::write(
+//RS         &module,
+//RS         r#"package Hostile;
+//RS BEGIN {
+//RS     open my $file, '>', $ENV{PERL_BIND_USE_MARKER} or die $!;
+//RS     print $file "executed\n";
+//RS }
+//RS 1;
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         &script,
+//RS         "use Hostile;\nsub Safe { return $_[0]; }\n1;\n",
+//RS     )
+//RS     .unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "perl"])
+//RS         .arg(&script)
+//RS         .args(["--pkg", "use_import"])
+//RS         .current_dir(&dir)
+//RS         .env("PERL5LIB", &dir)
+//RS         .env("PERL_BIND_USE_MARKER", &marker)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Perl bind with a use import failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     assert!(
+//RS         !marker.exists(),
+//RS         "Perl use import executed compile-time code"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn perl_bind_round_trips_datatree_state_timeout_and_cancellation() {
+//RS     if Command::new("perl").arg("-v").output().is_err() {
+//RS         return;
+//RS     }
+//RS     let dir = isolated_cwd("perl_bind_round_trip");
+//RS     let script = dir.join("ops.pl");
+//RS     let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/interop/perl");
+//RS     fs::copy(example.join("ops.pl"), &script).unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "perl"])
+//RS         .arg(&script)
+//RS         .args(["--pkg", "ops"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Perl bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     let cache = dir.join(".jet/bindings/perl");
+//RS     assert!(cache.join("libjet_perl_ops.a").is_file());
+//RS     assert!(cache.join("ops_worker.pl").is_file());
+//RS     assert!(cache.join("ops.provenance").is_file());
+//RS     fs::copy(example.join("main.jet"), dir.join("main.jet")).unwrap();
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "generated Perl binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&run.stdout),
+//RS         fs::read_to_string(example.join("expected.out")).unwrap()
+//RS     );
+//RS     fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
+//RS #include <stdint.h>
+//RS #include <unistd.h>
+//RS extern int64_t jet_perl_ops_open(void);
+//RS extern const char* jet_perl_ops_invoke_sleep(int64_t,const char*,int64_t);
+//RS extern void jet_perl_ops_cancel(int64_t);
+//RS extern void jet_perl_ops_close(int64_t);
+//RS extern int64_t jet_perl_ops_take_error(void);
+//RS static int64_t handle;static int64_t code;
+//RS static void* call(void*unused){(void)unused;jet_perl_ops_invoke_sleep(handle,"null",60000);code=jet_perl_ops_take_error();return 0;}
+//RS int main(void){handle=jet_perl_ops_open();if(!handle)return 1;pthread_t thread;if(pthread_create(&thread,0,call,0))return 2;usleep(100000);jet_perl_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 3;int64_t fresh=jet_perl_ops_open();if(!fresh)return 4;jet_perl_ops_close(fresh);return 0;}
+//RS "#).unwrap();
+//RS     let cc = Command::new("cc")
+//RS         .arg("cancel.c")
+//RS         .args([
+//RS             "-L.jet/bindings/perl",
+//RS             "-l:libjet_perl_ops.a",
+//RS             "-lpthread",
+//RS             "-o",
+//RS             "cancel",
+//RS         ])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         cc.status.success(),
+//RS         "Perl cancellation probe link failed:\n{}",
+//RS         String::from_utf8_lossy(&cc.stderr)
+//RS     );
+//RS     let cancel = Command::new(dir.join("cancel"))
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         cancel.status.success(),
+//RS         "Perl cancellation did not clean the worker: {:?}",
+//RS         cancel.status.code()
+//RS     );
+//RS }
+// END-PORT-PENDING 0992 tests/cli_parts/bindings.rs:1-1668
+

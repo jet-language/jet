@@ -1,0 +1,214 @@
+// Rust: Compiler/Bootstrap/Tests.rs::unit_definitions, defined_unit_item,
+// unit_symbol_at, unit_symbols and strongly_connected_units. Catalog only;
+// source splitting, visibility export and sharding use their canonical owners.
+
+pub struct BootstrapSourceUnit {
+    pub name: String
+    pub source: String
+}
+
+pub struct BootstrapUnitCatalog {
+    // Source-unit indices; dependencies precede their dependents. A cycle is
+    // one component. Members retain source-section order after sorting.
+    pub components: [[Int]]
+    pub edges: [[Int]]
+    pub component_of: [Int]
+}
+
+fn bootstrap_unit_identifier(byte: U8) -> Bool Never! {
+    value :: Int.from_u8(byte)
+    (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || (value >= 48 && value <= 57) || value == 95
+}
+
+fn bootstrap_unit_space(byte: U8) -> Bool Never! {
+    value :: Int.from_u8(byte)
+    value == 32 || (value >= 9 && value <= 13)
+}
+
+fn bootstrap_unit_prefix(bytes: [U8], start: Int, end: Int, prefix: String) -> Bool Never! {
+    expected :: prefix.bytes()
+    if end - start < expected.len() -> return false
+    loop index in 0..<expected.len() {
+        if bytes[start + index] != expected[index] -> return false
+    }
+    true
+}
+
+fn bootstrap_unit_symbol_at(bytes: [U8], start: Int, end: Int) -> String? Never! {
+    if !bootstrap_unit_prefix(bytes, start, end, "__jet_") -> return None
+    stop := start
+    loop stop < end && bootstrap_unit_identifier(bytes[stop]) -> stop += 1
+    Val(String.from_bytes(bytes[start..<stop]) ?? panic("generated symbol is ASCII"))
+}
+
+fn bootstrap_defined_unit_item(bytes: [U8], start: Int, end: Int) -> String? Never! {
+    cursor := start
+    loop cursor < end && bootstrap_unit_space(bytes[cursor]) -> cursor += 1
+    visibility :: [String]{"pub(crate) ", "pub(super) ", "pub "}
+    loop prefix in visibility {
+        if bootstrap_unit_prefix(bytes, cursor, end, prefix) {
+            cursor += prefix.bytes().len()
+            break
+        }
+    }
+    qualifiers :: [String]{"unsafe ", "async ", "extern \"C\" ", "extern \"Rust\" "}
+    loop {
+        if bootstrap_unit_prefix(bytes, cursor, end, "const fn ") -> return bootstrap_unit_symbol_at(bytes, cursor + 9, end)
+        changed := false
+        loop prefix in qualifiers {
+            if bootstrap_unit_prefix(bytes, cursor, end, prefix) {
+                cursor += prefix.bytes().len()
+                changed = true
+                break
+            }
+        }
+        if !changed -> break
+    }
+    keywords :: [String]{"fn ", "struct ", "enum ", "trait ", "type ", "static mut ", "static ", "const ", "union "}
+    loop prefix in keywords {
+        if bootstrap_unit_prefix(bytes, cursor, end, prefix) -> return bootstrap_unit_symbol_at(bytes, cursor + prefix.bytes().len(), end)
+    }
+    None
+}
+
+fn bootstrap_unit_definitions(bytes: [U8]) -> [String] Never! {
+    definitions := [String]{}
+    in_foreign := false
+    start := 0
+    loop start < bytes.len() {
+        end := start
+        loop end < bytes.len() && Int.from_u8(bytes[end]) != 10 -> end += 1
+        if in_foreign {
+            in_foreign = !(start < end && Int.from_u8(bytes[start]) == 125)
+            if in_foreign {
+                if bootstrap_defined_unit_item(bytes, start, end) == .Val(name) -> &definitions.push(name)
+            }
+        } else {
+            if bootstrap_unit_prefix(bytes, start, end, "extern ") || bootstrap_unit_prefix(bytes, start, end, "unsafe extern ") {
+                stop := end
+                loop stop > start && bootstrap_unit_space(bytes[stop - 1]) -> stop -= 1
+                in_foreign = !(stop > start && Int.from_u8(bytes[stop - 1]) == 125)
+            } else {
+                if start < end && !bootstrap_unit_space(bytes[start]) {
+                    if bootstrap_defined_unit_item(bytes, start, end) == .Val(name) -> &definitions.push(name)
+                }
+            }
+        }
+        start = end + 1
+    }
+    definitions
+}
+
+fn bootstrap_unit_symbols(bytes: [U8]) -> [String] Never! {
+    symbols := [String]{}
+    cursor := 0
+    loop cursor < bytes.len() {
+        if (cursor == 0 || !bootstrap_unit_identifier(bytes[cursor - 1])) && bootstrap_unit_prefix(bytes, cursor, bytes.len(), "__jet_") {
+            stop := cursor + 6
+            loop stop < bytes.len() && bootstrap_unit_identifier(bytes[stop]) -> stop += 1
+            &symbols.push(String.from_bytes(bytes[cursor..<stop]) ?? panic("generated symbol is ASCII"))
+            cursor = stop
+        } else -> cursor += 1
+    }
+    symbols
+}
+
+struct BootstrapTarjanFrame {
+    node: Int
+    edge: Int
+}
+
+// Iterative Tarjan retains the original dependency-first traversal law without
+// recursion proportional to the number of units or copies of adjacency rows.
+pub fn bootstrap_strongly_connected_units(edges: [[Int]]) -> [[Int]] Never! {
+    indices := [Int]{}
+    lows := [Int]{}
+    on_stack := [Bool]{}
+    loop _ in edges {
+        &indices.push(-1)
+        &lows.push(0)
+        &on_stack.push(false)
+    }
+    next_index := 0
+    stack := [Int]{}
+    frames := [BootstrapTarjanFrame]{}
+    components := [[Int]]{}
+    loop root in 0..<edges.len() {
+        if indices[root] >= 0 -> next
+        indices[root] = next_index
+        lows[root] = next_index
+        next_index += 1
+        &stack.push(root)
+        on_stack[root] = true
+        &frames.push(BootstrapTarjanFrame{node: root, edge: 0})
+        loop frames.len() > 0 {
+            frame_index :: frames.len() - 1
+            node :: frames[frame_index].node
+            if frames[frame_index].edge < edges[node].len() {
+                target :: edges[node][frames[frame_index].edge]
+                frames[frame_index].edge += 1
+                if indices[target] < 0 {
+                    indices[target] = next_index
+                    lows[target] = next_index
+                    next_index += 1
+                    &stack.push(target)
+                    on_stack[target] = true
+                    &frames.push(BootstrapTarjanFrame{node: target, edge: 0})
+                } else {
+                    if on_stack[target] && indices[target] < lows[node] -> lows[node] = indices[target]
+                }
+            } else {
+                _ :: &frames.pop()
+                if lows[node] == indices[node] {
+                    members := [Int]{}
+                    loop {
+                        member :: &stack.pop() ?? panic("Tarjan stack contains its root")
+                        on_stack[member] = false
+                        &members.push(member)
+                        if member == node -> break
+                    }
+                    &members.sort()
+                    &components.push(^members)
+                }
+                if frames.len() > 0 {
+                    parent :: frames[frames.len() - 1].node
+                    if lows[node] < lows[parent] -> lows[parent] = lows[node]
+                }
+            }
+        }
+    }
+    components
+}
+
+pub fn bootstrap_unit_catalog(units: [BootstrapSourceUnit]) -> BootstrapUnitCatalog Never! {
+    owners := [String:Int]{}
+    loop index in 0..<units.len() {
+        bytes :: units[index].source.bytes()
+        loop name in bootstrap_unit_definitions(bytes) {
+            if owners.get(name) == None -> owners[name] = index
+        }
+    }
+    edges := [[Int]]{}
+    loop index in 0..<units.len() {
+        seen := [Int:Bool]{}
+        row := [Int]{}
+        bytes :: units[index].source.bytes()
+        loop name in bootstrap_unit_symbols(bytes) {
+            if owners.get(name) == .Val(owner) {
+                if owner != index && seen.get(owner) == None {
+                    seen[owner] = true
+                    &row.push(owner)
+                }
+            }
+        }
+        &row.sort()
+        &edges.push(^row)
+    }
+    components :: bootstrap_strongly_connected_units(edges)
+    component_of := [Int]{}
+    loop _ in units -> &component_of.push(0)
+    loop index in 0..<components.len() {
+        loop member in components[index] -> component_of[member] = index
+    }
+    BootstrapUnitCatalog{components: components, edges: edges, component_of: component_of}
+}

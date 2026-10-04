@@ -1,0 +1,1408 @@
+// PORT-PENDING 1164 tests-syntax-reconciliation: tests/syntax_reconciliation.rs:1-1404
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-CANON-SOURCE1 / D-RECONCILE-SCOPE1: live examples, reference surface,
+//RS //! and agent memory must not reintroduce retired syntax spellings.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::collections::BTreeSet;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS #[test]
+//RS fn identifier_prefix_contract_is_canonical() {
+//RS     use jet::Syntax::{classify_identifier, IdentifierClass};
+//RS 
+//RS     assert_eq!(classify_identifier("name"), IdentifierClass::Ordinary);
+//RS     assert_eq!(classify_identifier("_name"), IdentifierClass::SoftPublic);
+//RS     assert_eq!(classify_identifier("_name_"), IdentifierClass::SoftPublic);
+//RS     assert_eq!(classify_identifier("__name"), IdentifierClass::Reserved);
+//RS     assert_eq!(classify_identifier("__name__"), IdentifierClass::Reserved);
+//RS     assert_eq!(classify_identifier("__"), IdentifierClass::Reserved);
+//RS     assert_eq!(classify_identifier("_"), IdentifierClass::Ordinary);
+//RS }
+//RS 
+//RS #[test]
+//RS fn every_double_underscore_source_identifier_is_rejected() {
+//RS     let source = r#"
+//RS module __module
+//RS use thing as __alias
+//RS extern c { fn __ffi(__ffi_arg: Int) }
+//RS fn __call(__arg: Int) {
+//RS     __local :: __arg
+//RS     value.__field
+//RS }
+//RS trait Contract { fn __method(self) }
+//RS "#;
+//RS     let (_, diagnostics) = jet::Lexer::lex(source);
+//RS     let reserved = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "E0067")
+//RS         .count();
+//RS     assert_eq!(reserved, 10, "{diagnostics:#?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn compiler_generated_identifiers_use_the_reserved_lane() {
+//RS     let source = "fn __jet_generated() { print(\"{__jet_value}\") }";
+//RS     let (_, user_diagnostics) = jet::Lexer::lex(source);
+//RS     let (tokens, generated_diagnostics) = jet::Lexer::lex_generated(source);
+//RS     assert!(user_diagnostics
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.code == "E0067"));
+//RS     assert!(
+//RS         generated_diagnostics.is_empty(),
+//RS         "{generated_diagnostics:#?}"
+//RS     );
+//RS     assert!(jet::Parser::parse(&tokens).is_ok());
+//RS }
+//RS 
+//RS #[test]
+//RS fn generated_symbol_ladder_has_one_canonical_prefix() {
+//RS     use jet::Syntax::{generated_name, generated_path, generated_suffix};
+//RS 
+//RS     assert_eq!(generated_name("lambda_7"), "__jet_lambda_7");
+//RS     assert_eq!(generated_path("scoring.letter"), "__jet_scoring__letter");
+//RS     assert_eq!(generated_suffix("__jet_lambda_7"), "lambda_7");
+//RS }
+//RS 
+//RS #[test]
+//RS fn compiler_user_visible_enums_obey_acronym_lexicon() {
+//RS     use jet::Comptime::Build::{BuildCapability, BuildResourcePool};
+//RS     use jet::Syntax::respell_acronym_name;
+//RS 
+//RS     fn assert_variants(enum_name: &str, variants: &[(&str, &str, &str, &str)]) {
+//RS         for (retired, canonical, rendered, expected) in variants {
+//RS             assert_eq!(
+//RS                 respell_acronym_name(retired),
+//RS                 *canonical,
+//RS                 "{enum_name} variant `{retired}` has no canonical acronym respell"
+//RS             );
+//RS             assert_eq!(
+//RS                 respell_acronym_name(canonical),
+//RS                 *canonical,
+//RS                 "{enum_name} canonical variant `{canonical}` is still retired"
+//RS             );
+//RS             assert_eq!(
+//RS                 *rendered, *expected,
+//RS                 "{enum_name} variant `{canonical}` renders the wrong user-visible word"
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     assert_variants(
+//RS         "BuildCapability",
+//RS         &[
+//RS             ("Fs", "FS", BuildCapability::FS.name(), "FS"),
+//RS             ("Io", "IO", BuildCapability::IO.name(), "IO"),
+//RS             ("Db", "DB", BuildCapability::DB.name(), "DB"),
+//RS             ("Gpu", "GPU", BuildCapability::GPU.name(), "GPU"),
+//RS         ],
+//RS     );
+//RS     assert_variants(
+//RS         "BuildResourcePool",
+//RS         &[
+//RS             ("Cpu", "CPU", BuildResourcePool::CPU.as_str(), "cpu"),
+//RS             ("Gpu", "GPU", BuildResourcePool::GPU.as_str(), "gpu"),
+//RS         ],
+//RS     );
+//RS }
+//RS 
+//RS const ROOTS: &[&str] = &[
+//RS     "AGENTS.md",
+//RS     "CLAUDE.md",
+//RS     "Docs/spec",
+//RS     "Docs/spec/reference/syntax-surface.jet",
+//RS     "Source",
+//RS     "crates",
+//RS     "Examples",
+//RS     "tests/ui",
+//RS ];
+//RS 
+//RS const OLD_BINDING_SCAN_ROOTS: &[&str] = &[
+//RS     "crates/jet-foundation/src/Syntax.rs",
+//RS     "crates/jet-parser/src/Parser",
+//RS     "Source/FixEngine.rs",
+//RS     "Source/LSP",
+//RS     "Docs/spec/reference/syntax-surface.jet",
+//RS     "Tools/editors/vscode/README.md",
+//RS     "Tools/editors/zed/README.md",
+//RS     "tests/cli",
+//RS     "tests/lsp",
+//RS     "tests/ui",
+//RS ];
+//RS 
+//RS const FORBIDDEN: &[&str] = &[
+//RS     "@unsafe",
+//RS     "@audit",
+//RS     "@extern",
+//RS     "@bindgen",
+//RS     "#extern",
+//RS     "#bindgen",
+//RS     "#layout",
+//RS     "#grant",
+//RS     "#context",
+//RS     "#test",
+//RS     "#pure",
+//RS     "pure fn",
+//RS     "#todo",
+//RS     // D-CAP9 retired bare `Ptr<T>` as a standalone TYPE ANNOTATION (`x: Ptr<Int>`,
+//RS     // teaches E0210). It did NOT retire `mem.Ptr<T>.from_addr(addr)` — the
+//RS     // module-qualified generic static-call form for building a typed pointer from
+//RS     // a raw address, which is the current E2-M13 low-level-tier spelling (the
+//RS     // sema's own diagnostic text recommends writing it, `CheckerCoreLib.rs`
+//RS     // `infer_ptr_from_addr`). A blunt substring check can't tell "type position"
+//RS     // from "call position," so this list intentionally omits both `mem.Ptr<` and
+//RS     // bare `Ptr<` rather than false-flag the still-shipped call form.
+//RS     "List<",
+//RS     "List[",
+//RS     "Map<",
+//RS     "#[Serialize",
+//RS     "Serialize]",
+//RS     "#[Deserialize",
+//RS     "Deserialize]",
+//RS     "core.json",
+//RS     "use jet.",
+//RS     "use std.",
+//RS     "?continue",
+//RS     "?break",
+//RS     "?return",
+//RS     "comptime val ",
+//RS ];
+//RS 
+//RS const OLD_BINDING_CODES: &[&str] = &["E0009", "E0010", "E0985"];
+//RS const OLD_BINDING_WORDS: &[&str] = &["let", "val", "var", "set"];
+//RS const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
+//RS     "Docs/spec/syntax-decisions.md",
+//RS     "Docs/spec/encoding-decisions.md",
+//RS     "Docs/spec/reference/core-library.md",
+//RS     "Examples/features/serde/datatree_accessors.jet",
+//RS     "Examples/features/serde/encoding_breadth.jet",
+//RS     "Examples/features/serde/encoding_base.jet",
+//RS     "Examples/features/serde/encoding_base_expert/run.jet",
+//RS ];
+//RS const ACTIVE_MATURITY_DOCS: &[&str] = &["Docs/spec/reference/maturity-tags.md"];
+//RS const MARKER_CENSUS_DOC: &str = "Docs/spec/syntax-decisions.md";
+//RS const ENVIRONMENT_REFERENCE: &str = "Docs/spec/reference/environment.md";
+//RS 
+//RS #[test]
+//RS fn live_surface_has_no_retired_spellings() {
+//RS     let mut failures = Vec::new();
+//RS     for root in ROOTS {
+//RS         for path in files(Path::new(root)) {
+//RS             if should_skip(&path) {
+//RS                 continue;
+//RS             }
+//RS             let Ok(text) = fs::read_to_string(&path) else {
+//RS                 continue;
+//RS             };
+//RS             for (line_no, line) in scan_lines(&path, &text) {
+//RS                 for needle in forbidden_for_path(&path) {
+//RS                     if forbidden_occurs(line, needle) {
+//RS                         failures.push(format!(
+//RS                             "{}:{} contains `{}`",
+//RS                             path.display(),
+//RS                             line_no,
+//RS                             needle
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "retired syntax found:\n{}",
+//RS         failures.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn pipe_family_has_no_stale_flow_reservation() {
+//RS     let decision = fs::read_to_string("Docs/spec/syntax-decisions.md").unwrap();
+//RS     let decision = decision.split_whitespace().collect::<Vec<_>>().join(" ");
+//RS     assert!(decision.contains("D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow"));
+//RS     assert!(decision.contains("value-position `|` is bitwise OR"));
+//RS 
+//RS     let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax/math_layout.rs").unwrap();
+//RS     let syntax = syntax.split_whitespace().collect::<Vec<_>>().join(" ");
+//RS     assert!(syntax.contains("D-PATO / D-SHAPE-PIPE1=C / D-BITOREXPR1=A"));
+//RS     assert!(syntax.contains("`|=` remains bitwise-or-assign under S17"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn dynamic_encoding_surface_uses_datatree_name() {
+//RS     let mut failures = Vec::new();
+//RS     for relative in DATATREE_NORMATIVE_SURFACES {
+//RS         let text = fs::read_to_string(relative).unwrap_or_else(|error| {
+//RS             panic!("cannot read DataTree inventory surface {relative}: {error}")
+//RS         });
+//RS         let markdown = Path::new(relative)
+//RS             .extension()
+//RS             .is_some_and(|ext| ext == "md");
+//RS         if markdown {
+//RS             for (line_no, line) in markdown_data_name_lines(&text) {
+//RS                 if !historical_data_reference(line) {
+//RS                     failures.push(format!("{relative}:{line_no}: {}", line.trim()));
+//RS                 }
+//RS             }
+//RS         } else {
+//RS             for offset in source_identifier_offsets(&text, "Data") {
+//RS                 let line_no = text[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1;
+//RS                 let line = text.lines().nth(line_no - 1).unwrap_or("");
+//RS                 failures.push(format!("{relative}:{line_no}: {}", line.trim()));
+//RS             }
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "current dynamic-encoding surfaces must use `DataTree`; label historical `Data` references explicitly:\n{}",
+//RS         failures.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn datatree_name_check_distinguishes_prose_and_type_names() {
+//RS     for lawful in [
+//RS         "| `conn.send_text(text)` | Data frames; client frames are masked |",
+//RS         "| Data ownership | Official UCD inputs are checked in. |",
+//RS     ] {
+//RS         assert!(markdown_data_name_lines(lawful).is_empty());
+//RS     }
+//RS     for prohibited in ["`Data.Object`", "`[Data]`", "`Data?`"] {
+//RS         assert_eq!(markdown_data_name_lines(prohibited).len(), 1);
+//RS     }
+//RS 
+//RS     let tilde_fence = "~~~jet\nvalue: Data\n~~~";
+//RS     assert_eq!(markdown_data_name_lines(tilde_fence)[0].0, 2);
+//RS     let four_tick_fence = "````jet\nvalue: Data\n```\nother: Data\n````";
+//RS     assert_eq!(
+//RS         markdown_data_name_lines(four_tick_fence)
+//RS             .iter()
+//RS             .map(|(line_no, _)| *line_no)
+//RS             .collect::<Vec<_>>(),
+//RS         [2, 4]
+//RS     );
+//RS     let multiline_fence =
+//RS         "```jet\n/*\nData in a comment\n*/\ntext :: \"\"\"\nData in text\n\"\"\"\nvalue: Data\n```";
+//RS     assert_eq!(
+//RS         markdown_data_name_lines(multiline_fence)
+//RS             .iter()
+//RS             .map(|(line_no, _)| *line_no)
+//RS             .collect::<Vec<_>>(),
+//RS         [8]
+//RS     );
+//RS     assert_eq!(markdown_data_name_lines("```jet\nvalue: Data")[0].0, 2);
+//RS 
+//RS     let lawful_source = "// Data is retired\ntext :: \"Data\"\n/* Data */\nvalue: DataTree";
+//RS     assert!(source_identifier_offsets(lawful_source, "Data").is_empty());
+//RS     assert_eq!(source_identifier_offsets("value: Data", "Data").len(), 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn active_maturity_docs_use_meta_field_only() {
+//RS     let retired = [
+//RS         "#Experimental",
+//RS         "#Tested",
+//RS         "#Hardened",
+//RS         "#Experimental",
+//RS         "#Tested",
+//RS         "#Hardened",
+//RS     ];
+//RS     let mut failures = Vec::new();
+//RS     for relative in ACTIVE_MATURITY_DOCS {
+//RS         let text = fs::read_to_string(relative)
+//RS             .unwrap_or_else(|error| panic!("cannot read maturity surface {relative}: {error}"));
+//RS         for required in ["#Meta(maturity:", ".Experimental", ".Tested", ".Hardened"] {
+//RS             if !text.contains(required) {
+//RS                 failures.push(format!("{relative} does not teach `{required}`"));
+//RS             }
+//RS         }
+//RS         for line in text.lines() {
+//RS             for spelling in retired {
+//RS                 if line.contains(spelling) && !line.contains("not grammar") {
+//RS                     failures.push(format!("{relative} teaches standalone `{spelling}`"));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "active maturity docs drifted from the sole `#Meta(maturity: ...)` surface:\n{}",
+//RS         failures.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn proposal_marker_census_matches_syntax_registry() {
+//RS     let rules = jet::Policy::APPLIED_RULES
+//RS         .iter()
+//RS         .filter(|row| matches!(row.status, jet::Policy::RuleStatus::Active))
+//RS         .count();
+//RS     assert!(rules > 0, "applied-rule registry must be non-empty");
+//RS     assert_eq!(
+//RS         jet::Syntax::RULE_PREFIX,
+//RS         "#",
+//RS         "registered applied rules must use the canonical `#` plane"
+//RS     );
+//RS 
+//RS     let text = fs::read_to_string(MARKER_CENSUS_DOC).unwrap_or_else(|error| {
+//RS         panic!("cannot read marker census doc {MARKER_CENSUS_DOC}: {error}")
+//RS     });
+//RS     let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+//RS     assert!(
+//RS         normalized.contains("`#` is the sole prefix for attributes, instructions, and properties.")
+//RS             && normalized.contains("Prefix `@` is now the compile-time and fact-read mark; infix `@`")
+//RS             && normalized.contains(
+//RS                 "A leading `@Rule` in marker position produces E0063 with the canonical `#Rule` fix."
+//RS             ),
+//RS         "{MARKER_CENSUS_DOC} must teach the Syntax registry's canonical `#` applied-rule plane"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn old_binding_migration_paths_stay_removed() {
+//RS     let mut failures = Vec::new();
+//RS     for root in OLD_BINDING_SCAN_ROOTS {
+//RS         for path in files(Path::new(root)) {
+//RS             if should_skip(&path) {
+//RS                 continue;
+//RS             }
+//RS             let Ok(text) = fs::read_to_string(&path) else {
+//RS                 continue;
+//RS             };
+//RS             scan_old_binding_codes(&path, &text, &mut failures);
+//RS             scan_old_binding_examples(&path, &text, &mut failures);
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "old binding migration path found:\n{}",
+//RS         failures.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS /// The small, explicit inventory of ratified spellings that are not shipped
+//RS /// in the parser. The reference surface owns the future-facing notes; the
+//RS /// two current-spec rows cover the retired S74 form and the UI-tree spelling.
+//RS /// A new `RATIFIED, NOT YET IMPLEMENTED` note must enter this table with its
+//RS /// disposition before the corpus can claim the surface is truthful.
+//RS const RATIFIED_UNSHIPPED_SPELLINGS: &[(&str, &str, &str, &str, &str)] = &[
+//RS     (
+//RS         "S74",
+//RS         "Val(n) :: maybe_port() ?? return",
+//RS         "Docs/spec/syntax-decisions.md",
+//RS         "retires S74's pattern-left refutable binding",
+//RS         "retired by D-CHOOSE-TEST1; card #1652",
+//RS     ),
+//RS     (
+//RS         "D-ONCE-UITREE1",
+//RS         ".Button.{ label: \"OK\" }",
+//RS         "Docs/spec/syntax-decisions.md",
+//RS         "ratified-but-unbuilt `.Button.{ }` UI-tree spelling",
+//RS         "deferred to the architecture result; card #1588 via #1736",
+//RS     ),
+//RS     (
+//RS         "S56",
+//RS         "#MyTrait struct Custom",
+//RS         "Docs/spec/reference/syntax-surface.jet",
+//RS         "# RATIFIED, NOT YET IMPLEMENTED (S56)",
+//RS         "deferred to Epoch 3 typed reflection; card #756",
+//RS     ),
+//RS     (
+//RS         "D-MIGRATE2A",
+//RS         "migration ... add ...",
+//RS         "Docs/spec/reference/syntax-surface.jet",
+//RS         "# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)",
+//RS         "tracked by the imported decision ledger; card #1735",
+//RS     ),
+//RS     (
+//RS         "D-MIGRATE2D",
+//RS         "migration ... remove ...",
+//RS         "Docs/spec/reference/syntax-surface.jet",
+//RS         "# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)",
+//RS         "tracked by the imported decision ledger; card #1735",
+//RS     ),
+//RS     (
+//RS         "D-MIGRATE2E",
+//RS         "migration ... change ... via ...",
+//RS         "Docs/spec/reference/syntax-surface.jet",
+//RS         "# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)",
+//RS         "tracked by the imported decision ledger; card #1735",
+//RS     ),
+//RS ];
+//RS 
+//RS fn ratified_reference_gap_ids(source: &str) -> BTreeSet<String> {
+//RS     source
+//RS         .lines()
+//RS         .filter_map(|line| line.split_once("# RATIFIED, NOT YET IMPLEMENTED (")?.1.split_once(')'))
+//RS         .flat_map(|(ids, _)| ids.split('/').map(|id| id.trim().to_string()))
+//RS         .filter(|id| id != "<id>")
+//RS         .collect()
+//RS }
+//RS 
+//RS #[test]
+//RS fn ratified_unshipped_spellings_are_listed_and_triaged() {
+//RS     let reference = fs::read_to_string("Docs/spec/reference/syntax-surface.jet")
+//RS         .expect("read syntax reference");
+//RS     let spec = fs::read_to_string("Docs/spec/syntax-decisions.md")
+//RS         .expect("read syntax decisions");
+//RS 
+//RS     let mut expected = ratified_reference_gap_ids(&reference);
+//RS     expected.extend(
+//RS         ["S74", "D-ONCE-UITREE1"]
+//RS             .iter()
+//RS             .copied()
+//RS             .map(String::from),
+//RS     );
+//RS     let listed: BTreeSet<_> = RATIFIED_UNSHIPPED_SPELLINGS
+//RS         .iter()
+//RS         .map(|(id, ..)| (*id).to_string())
+//RS         .collect();
+//RS     assert_eq!(
+//RS         listed, expected,
+//RS         "ratified unshipped spelling inventory drifted; add or retire the row before changing the spec"
+//RS     );
+//RS 
+//RS     for (id, spelling, home, anchor, disposition) in RATIFIED_UNSHIPPED_SPELLINGS {
+//RS         let source = if *home == "Docs/spec/syntax-decisions.md" {
+//RS             &spec
+//RS         } else {
+//RS             &reference
+//RS         };
+//RS         assert!(
+//RS             source.contains(*anchor),
+//RS             "{id} ({spelling}) has no source evidence in {home}: {anchor}"
+//RS         );
+//RS         assert!(
+//RS             (*disposition).contains("card #")
+//RS                 && ((*disposition).contains("retired")
+//RS                     || (*disposition).contains("deferred")
+//RS                     || (*disposition).contains("tracked")),
+//RS             "{id} ({spelling}) has no card-backed disposition: {disposition}"
+//RS         );
+//RS     }
+//RS 
+//RS     let (tokens, lex_diags) = jet::Lexer::lex(
+//RS         "fn run() { .Ok(age) :: parse_age() ?? return }\n",
+//RS     );
+//RS     assert!(
+//RS         lex_diags.is_empty(),
+//RS         "retired S74 spelling should lex before parser rejection: {lex_diags:#?}"
+//RS     );
+//RS     assert!(
+//RS         jet::Parser::parse(&tokens).is_err(),
+//RS         "retired S74 spelling gained a parser path"
+//RS     );
+//RS 
+//RS     let (tokens, _) = jet::Lexer::lex(
+//RS         "fn run() { tree :: .Button.{ label: \"OK\" } }\n",
+//RS     );
+//RS     assert!(
+//RS         jet::Parser::parse(&tokens).is_err(),
+//RS         "ratified-but-unbuilt UI dot-construction gained a parser path"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn syntax_status_matrix_covers_unbuilt_notes() {
+//RS     // FEATURE_CLAIM: claim.syntax-law / syntax-matrix
+//RS     let spec = fs::read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions");
+//RS     assert!(spec.contains("A ratified entry may sit unbuilt **only** when gated on"));
+//RS 
+//RS     let lines: Vec<&str> = spec.lines().collect();
+//RS     let mut uncovered = Vec::new();
+//RS     for (idx, line) in lines.iter().enumerate() {
+//RS         let lower = line.to_ascii_lowercase();
+//RS         if !(lower.contains("unbuilt") || lower.contains("not yet implemented")) {
+//RS             continue;
+//RS         }
+//RS         if idx < 20 || lower.contains("have/have-not ledger") {
+//RS             continue;
+//RS         }
+//RS         // The gate law applies to explicit ratified-but-unbuilt notes. Other
+//RS         // status prose (for example, an unbuilt implementation slice) is not a
+//RS         // syntax spelling row and belongs to its own workstream.
+//RS         if !lower.contains("ratified") && !lower.contains("not yet implemented") {
+//RS             continue;
+//RS         }
+//RS         let mut start = idx;
+//RS         while start > 0 && !lines[start - 1].trim().is_empty() {
+//RS             start -= 1;
+//RS         }
+//RS         let mut end = idx + 1;
+//RS         while end < lines.len() && !lines[end].trim().is_empty() {
+//RS             end += 1;
+//RS         }
+//RS         let context = lines[start..end].join("\n");
+//RS         if !(context.contains("card #") || context.contains("cards #")) {
+//RS             uncovered.push(format!("{}: {}", idx + 1, line.trim()));
+//RS         }
+//RS     }
+//RS 
+//RS     assert!(
+//RS         uncovered.is_empty(),
+//RS         "unbuilt syntax note lacks a live card gate:\n{}",
+//RS         uncovered.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn environment_reference_is_canonical_and_navigable() {
+//RS     let reference = fs::read_to_string(ENVIRONMENT_REFERENCE)
+//RS         .expect("read canonical environment-variable reference");
+//RS     let docs_index = fs::read_to_string("Docs/README.md").expect("read docs index");
+//RS 
+//RS     assert!(
+//RS         docs_index.contains("reference/environment.md"),
+//RS         "docs index must link the canonical environment-variable reference"
+//RS     );
+//RS     for required in [
+//RS         "JET_PROP_SEED",
+//RS         "JET_RAYLIB_DISPLAY",
+//RS         "JET_UI_HEADLESS",
+//RS         "JET_ENV_DISABLE",
+//RS         "JET_TEST_JOBS",
+//RS         "JET_CANVAS_PREREQUISITES",
+//RS         "## Naming convention",
+//RS     ] {
+//RS         assert!(
+//RS             reference.contains(required),
+//RS             "environment-variable reference missing `{required}`"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn lexical_ledger_is_rendered_from_syntax() {
+//RS     let decisions =
+//RS         fs::read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions");
+//RS     let start = decisions
+//RS         .find("<!-- BEGIN GENERATED LEXICAL LEDGER -->")
+//RS         .expect("syntax decisions must render the lexical ledger");
+//RS     let end = decisions
+//RS         .find("<!-- END GENERATED LEXICAL LEDGER -->")
+//RS         .expect("syntax decisions must close the lexical ledger");
+//RS     assert!(start < end, "lexical ledger markers must be ordered");
+//RS     let block = &decisions[start..end];
+//RS     assert!(
+//RS         block.contains("Generated by `Tools/agent/lexical-ledger.mjs`"),
+//RS         "lexical ledger must identify its renderer"
+//RS     );
+//RS 
+//RS     let rendered_rows = block
+//RS         .lines()
+//RS         .filter(|line| line.starts_with("| ") && !line.starts_with("| ---"))
+//RS         .count();
+//RS     assert_eq!(
+//RS         rendered_rows,
+//RS         jet::Syntax::LEXICAL_LEDGER.len() + 1,
+//RS         "rendered ledger must contain its header plus every Syntax.rs row"
+//RS     );
+//RS     for row in jet::Syntax::LEXICAL_LEDGER {
+//RS         if row.spelling == "`" {
+//RS             assert!(
+//RS                 block.contains("<code>`</code>"),
+//RS                 "rendered ledger is missing the backtick spelling"
+//RS             );
+//RS         } else {
+//RS             assert!(
+//RS                 block.contains(row.spelling),
+//RS                 "rendered ledger is missing spelling `{}`",
+//RS                 row.spelling
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     for row in jet::Syntax::LEXICAL_LEDGER {
+//RS         assert!(
+//RS             block.contains(row.meaning),
+//RS             "rendered ledger is missing meaning `{}`",
+//RS             row.meaning
+//RS         );
+//RS         if !row.decision.is_empty() {
+//RS             assert!(
+//RS                 block.contains(row.decision),
+//RS                 "rendered ledger is missing decision `{}`",
+//RS                 row.decision
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn marker_plane_matrix_covers_current_marker_families() {
+//RS     let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax.rs").expect("read Syntax.rs");
+//RS     let decisions =
+//RS         fs::read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions");
+//RS 
+//RS     assert_eq!(
+//RS         jet::Syntax::RULE_PREFIX,
+//RS         "#",
+//RS         "the applied-rule registry must stay on the canonical `#` plane"
+//RS     );
+//RS     assert_eq!(jet::Syntax::EFFECT_ARROW_OPEN, "-[");
+//RS     assert_eq!(jet::Syntax::EFFECT_ARROW_CLOSE, "]>");
+//RS     assert!(
+//RS         decisions.contains("**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,")
+//RS             && decisions.contains("owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*:"),
+//RS         "syntax decisions must keep D-SHAPE8=A ratified, amended, and implemented"
+//RS     );
+//RS 
+//RS     let mut unique = std::collections::BTreeSet::new();
+//RS     for row in jet::Policy::APPLIED_RULES
+//RS         .iter()
+//RS         .filter(|row| matches!(row.status, jet::Policy::RuleStatus::Active))
+//RS     {
+//RS         let rule = row.name;
+//RS         assert!(
+//RS             !rule.starts_with(['#', '@']),
+//RS             "registered applied-rule names are bare; RULE_PREFIX owns the `#` plane: {rule}"
+//RS         );
+//RS         assert!(unique.insert(rule), "duplicate applied rule `{rule}`");
+//RS     }
+//RS     for rule in [
+//RS         "PubFile",
+//RS         "NoPrelude",
+//RS         "Target",
+//RS         "HTML",
+//RS         "WasmExport",
+//RS         "Layout",
+//RS         "SingleUse",
+//RS         "UnitFamily",
+//RS         "Rename",
+//RS         "Skip",
+//RS         "RenameAll",
+//RS         "Discriminant",
+//RS         "Untagged",
+//RS         "Codable",
+//RS         "Encode",
+//RS         "Decode",
+//RS         "Comparable",
+//RS         "MustUse",
+//RS         "Pre",
+//RS         "Post",
+//RS         "Inline",
+//RS         "Persist",
+//RS         "CLI",
+//RS         "Numeric",
+//RS         "Printable",
+//RS         "CodableAsBase",
+//RS         "FX",
+//RS         "Unsafe",
+//RS         "Impure",
+//RS         "Test",
+//RS         "Scrub",
+//RS         "Job",
+//RS         "Replayable",
+//RS         "State",
+//RS         "Transition",
+//RS         "Track",
+//RS         "Memo",
+//RS         "Meta",
+//RS     ] {
+//RS         assert!(
+//RS             unique.contains(rule),
+//RS             "Syntax registry missing applied-rule family member `{rule}`"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         jet::Policy::applied_rule("Default").map(|row| row.status),
+//RS         Some(jet::Policy::RuleStatus::Retired {
+//RS             replacement: "field: ...{{...}}"
+//RS         }),
+//RS         "Default must remain a diagnostic-only tombstone"
+//RS     );
+//RS 
+//RS     for syntax_anchor in [
+//RS         "MARKER_PUB_FILE",
+//RS         "MARKER_TARGET",
+//RS         "MARKER_LAYOUT",
+//RS         "MARKER_CODABLE",
+//RS         "APPLIED_RULES",
+//RS         "KW_FX",
+//RS         "KW_COMPTIME",
+//RS         "KW_DERIVE",
+//RS         "MARKER_TRACK",
+//RS         "MARKER_LOCAL",
+//RS         "MARKER_SHARED",
+//RS     ] {
+//RS         assert!(
+//RS             syntax.contains(syntax_anchor),
+//RS             "Syntax.rs must retain live marker anchor `{syntax_anchor}`"
+//RS         );
+//RS     }
+//RS 
+//RS     for decision_anchor in [
+//RS         "D-MARKER-FAMILY1",
+//RS         "D-MARKERMOVE1",
+//RS         "D-UNSAFE2",
+//RS         "D-TESTPAREN1",
+//RS         "D-BENCH1",
+//RS         "D-CAPBUNDLE1",
+//RS         "D-CTMARKER1",
+//RS     ] {
+//RS         assert!(
+//RS             decisions.contains(decision_anchor),
+//RS             "live syntax decisions must retain `{decision_anchor}`"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn authority_vocabulary_has_one_live_name_and_retired_marker_tombstones() {
+//RS     let live_surfaces = [
+//RS         "crates/jet-foundation/src/Syntax/effects_surface.rs",
+//RS         "crates/jet-foundation/src/Syntax/core_surface.rs",
+//RS         "crates/jet-foundation/src/AST/statements.rs",
+//RS         "crates/jet-parser/src/Parser/Statements/control.rs",
+//RS         "crates/jet-sema/src/Sema/CheckerCore/statements.rs",
+//RS         "crates/jet-sema/src/Sema/Effects.rs",
+//RS         "crates/jet-sema/src/Sema/GateLedger.rs",
+//RS         "crates/jet-repl/src/lib.rs",
+//RS         "crates/jet-pkg-model/src/EffectBudget.rs",
+//RS         "crates/jet-devserver/src/Canvas/graph_projection.rs",
+//RS         "Source/CmdCompile.rs",
+//RS         "Docs/spec/reference/syntax-surface.jet",
+//RS         "tests/cli/man.txt",
+//RS         "tests/cli/completions_bash.txt",
+//RS         "tests/cli/completions_fish.txt",
+//RS         "tests/cli/completions_powershell.txt",
+//RS         "tests/cli/completions_zsh.txt",
+//RS         "crates/jet-codegen/src/Codegen/TIR/lower/statements.rs",
+//RS     ];
+//RS     let retired_words = [
+//RS         concat!("Abil", "ity"),
+//RS         concat!("Abil", "ities"),
+//RS         concat!("Capabil", "ity"),
+//RS         "Caps",
+//RS         "KW_CAPS",
+//RS         "TYPE_ABILITIES",
+//RS         "CAP_HANDLE_TYPE",
+//RS         "Stmt::Caps",
+//RS     ];
+//RS     let mut failures = Vec::new();
+//RS     for relative in live_surfaces {
+//RS         let text = fs::read_to_string(relative).expect("read live authority surface");
+//RS         for retired in retired_words {
+//RS             if text.contains(retired) {
+//RS                 failures.push(format!("{relative} contains retired `{retired}`"));
+//RS             }
+//RS         }
+//RS     }
+//RS     assert!(failures.is_empty(), "live authority vocabulary drift:\n{failures:#?}");
+//RS 
+//RS     assert_eq!(jet::Syntax::KW_FX, "FX");
+//RS     assert_eq!(jet::Syntax::TYPE_AUTHORITY, "Authority");
+//RS     for retired in ["Abilities", "Caps"] {
+//RS         assert_eq!(
+//RS             jet::Policy::applied_rule(retired).map(|row| row.status),
+//RS             Some(jet::Policy::RuleStatus::Retired {
+//RS                 replacement: "#FX"
+//RS             }),
+//RS             "{retired} must remain a diagnostic-only tombstone"
+//RS         );
+//RS     }
+//RS     assert!(jet::Policy::applied_rule("Authority").is_none());
+//RS }
+//RS 
+//RS #[test]
+//RS fn retired_authority_types_and_markers_keep_exact_teaching_diagnostics() {
+//RS     for name in ["Ability", "Abilities", "Capability", "Caps"] {
+//RS         let source = format!("fn audit(value: {name}) {{ print(\"x\") }}");
+//RS         let diagnostics = jet::compile(&source).expect_err("retired Authority type must fail");
+//RS         assert!(
+//RS             diagnostics
+//RS                 .iter()
+//RS                 .any(|diagnostic| diagnostic.code == "E0119"
+//RS                     && diagnostic.what.contains(&format!("`{name}` is retired"))),
+//RS             "missing exact retirement diagnostic for {name}: {diagnostics:#?}"
+//RS         );
+//RS     }
+//RS 
+//RS     for marker in ["Abilities", "Caps"] {
+//RS         let source = format!(
+//RS             "fn run() {{ #{marker}(IO) {{ print(\"x\") }} }}"
+//RS         );
+//RS         let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
+//RS         assert!(lex_diagnostics.is_empty(), "lexer rejected retired marker: {lex_diagnostics:#?}");
+//RS         let diagnostics = jet::Parser::parse(&tokens)
+//RS             .expect_err("retired Authority marker must fail in the parser");
+//RS         assert!(
+//RS             diagnostics
+//RS                 .iter()
+//RS                 .any(|diagnostic| diagnostic.code == "E0927"
+//RS                     && diagnostic.what.contains(&format!("`#{marker}` is retired"))),
+//RS             "missing exact retirement diagnostic for #{marker}: {diagnostics:#?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn value_dispatch_accepts_range_arm_heads() {
+//RS     // #1487 / D-IFDIST1: expression-position value dispatch must parse the same
+//RS     // `lo..hi ->` range arm heads statement dispatch already accepts.
+//RS     let source = r#"
+//RS fn ordered(n: Int) -> Int {
+//RS     return if n == {
+//RS         0..9 -> 1
+//RS         10..99 -> 2
+//RS         else -> 3
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print("{ordered(40)}")
+//RS }
+//RS "#;
+//RS     let (tokens, lex_diags) = jet::Lexer::lex(source);
+//RS     assert!(lex_diags.is_empty(), "{lex_diags:#?}");
+//RS     let program = jet::Parser::parse(&tokens).expect("value-dispatch range arms must parse");
+//RS     assert!(
+//RS         !program.items.is_empty(),
+//RS         "parsed program should retain the ordered fn"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_511_census_matches_current_law() {
+//RS     let core = fs::read_to_string("crates/jet-foundation/src/Syntax/core_surface.rs")
+//RS         .expect("read core surface registry");
+//RS     let package = fs::read_to_string("crates/jet-foundation/src/Syntax/package_files.rs")
+//RS         .expect("read package surface registry");
+//RS     let markers = fs::read_to_string("crates/jet-foundation/src/Syntax/markers.rs")
+//RS         .expect("read marker registry");
+//RS     let decisions =
+//RS         fs::read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions");
+//RS 
+//RS     assert!(
+//RS         !core.contains("pub const KW_VIEW"),
+//RS         "D-MEM1 retired `view` as a keyword"
+//RS     );
+//RS     assert!(
+//RS         package.contains("pub const METHOD_VIEW"),
+//RS         "D-SHAPE-PLACE1 keeps retired `.view(a..b)` registered for E0214 teaching"
+//RS     );
+//RS     for retired in ["MARKER_WASM,", "MARKER_JS,", "MARKER_SUPPRESS,"] {
+//RS         assert!(
+//RS             !markers.contains(retired),
+//RS             "retired marker remains registered: {retired}"
+//RS         );
+//RS     }
+//RS     for value in ["MARKER_EXPERIMENTAL", "MARKER_TESTED", "MARKER_HARDENED"] {
+//RS         assert!(
+//RS             package.contains(value) && !markers.contains(value),
+//RS             "maturity value `{value}` must remain a #Meta value, not a standalone marker"
+//RS         );
+//RS     }
+//RS     for law in ["D-MARKER-FAMILY1", "D-DET1", "D-REPLAY1", "D-MARK-META1"] {
+//RS         assert!(decisions.contains(law), "current syntax law omits `{law}`");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn module_internal_is_discovery_not_access_control() {
+//RS     let syntax =
+//RS         fs::read_to_string("crates/jet-foundation/src/Syntax.rs").expect("read syntax registry");
+//RS     let config = fs::read_to_string("crates/jet-foundation/src/Syntax/jetpack_config.rs")
+//RS         .expect("read module syntax registry");
+//RS     let decisions =
+//RS         fs::read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions");
+//RS 
+//RS     assert!(syntax.contains("D-SHAPE-MODULEINTERNAL1=A"));
+//RS     assert!(config.contains("D-SHAPE-MODULEINTERNAL1=A"));
+//RS     assert!(config.contains("pub const MODULE_INTERNAL_PREFIX: &str = \"_\";"));
+//RS     assert!(config.contains("pub const PROJECT_IMPORT_PREFIX: &str = \"project.\";"));
+//RS     assert!(decisions.contains("`use project._name` remains allowed"));
+//RS     assert!(decisions.contains("underscore changes discovery, not access"));
+//RS     assert!(
+//RS         !fs::read_to_string("crates/jet-foundation/src/AST/items.rs")
+//RS             .expect("read module AST")
+//RS             .contains("pub disabled: bool")
+//RS     );
+//RS     assert!(!decisions.contains("| D-SHAPE-MODULEINTERNAL1 |"));
+//RS }
+//RS 
+//RS fn scan_old_binding_codes(path: &Path, text: &str, failures: &mut Vec<String>) {
+//RS     for (idx, line) in text.lines().enumerate() {
+//RS         for code in OLD_BINDING_CODES {
+//RS             if line.contains(code) && !allowed_old_binding_reference(path, text, line) {
+//RS                 failures.push(format!(
+//RS                     "{}:{} contains retired binding diagnostic `{}`",
+//RS                     path.display(),
+//RS                     idx + 1,
+//RS                     code
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn scan_old_binding_examples(path: &Path, text: &str, failures: &mut Vec<String>) {
+//RS     if path.extension().and_then(|x| x.to_str()) == Some("rs") {
+//RS         for (line, literal) in rust_string_literals(text) {
+//RS             if literal_has_old_binding_example(&literal)
+//RS                 && !allowed_old_binding_reference(path, text, &literal)
+//RS             {
+//RS                 failures.push(format!(
+//RS                     "{}:{} contains retired binding spelling in a Rust string literal",
+//RS                     path.display(),
+//RS                     line
+//RS                 ));
+//RS             }
+//RS         }
+//RS         return;
+//RS     }
+//RS 
+//RS     for (idx, line) in text.lines().enumerate() {
+//RS         if line_has_old_binding_start(line) && !allowed_old_binding_reference(path, text, line) {
+//RS             failures.push(format!(
+//RS                 "{}:{} contains retired binding spelling `{}`",
+//RS                 path.display(),
+//RS                 idx + 1,
+//RS                 line.trim()
+//RS             ));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn rust_string_literals(text: &str) -> Vec<(usize, String)> {
+//RS     let bytes = text.as_bytes();
+//RS     let mut out = Vec::new();
+//RS     let mut i = 0;
+//RS     let mut line = 1;
+//RS     while i < bytes.len() {
+//RS         match bytes[i] {
+//RS             b'\n' => {
+//RS                 line += 1;
+//RS                 i += 1;
+//RS             }
+//RS             b'r' => {
+//RS                 let start_line = line;
+//RS                 let mut j = i + 1;
+//RS                 while j < bytes.len() && bytes[j] == b'#' {
+//RS                     j += 1;
+//RS                 }
+//RS                 if j >= bytes.len() || bytes[j] != b'"' {
+//RS                     i += 1;
+//RS                     continue;
+//RS                 }
+//RS                 let hashes = j - (i + 1);
+//RS                 j += 1;
+//RS                 let content_start = j;
+//RS                 while j < bytes.len() {
+//RS                     if bytes[j] == b'\n' {
+//RS                         line += 1;
+//RS                     }
+//RS                     if bytes[j] == b'"' && bytes[j + 1..].starts_with(&vec![b'#'; hashes]) {
+//RS                         let content = String::from_utf8_lossy(&bytes[content_start..j]).to_string();
+//RS                         out.push((start_line, content));
+//RS                         j += 1 + hashes;
+//RS                         break;
+//RS                     }
+//RS                     j += 1;
+//RS                 }
+//RS                 i = j;
+//RS             }
+//RS             b'"' => {
+//RS                 if i > 0 && i + 1 < bytes.len() && bytes[i - 1] == b'\'' && bytes[i + 1] == b'\'' {
+//RS                     i += 1;
+//RS                     continue;
+//RS                 }
+//RS                 let start_line = line;
+//RS                 let mut j = i + 1;
+//RS                 let mut content = String::new();
+//RS                 while j < bytes.len() {
+//RS                     match bytes[j] {
+//RS                         b'\\' if j + 1 < bytes.len() => {
+//RS                             let next = bytes[j + 1] as char;
+//RS                             if next == 'n' {
+//RS                                 content.push('\n');
+//RS                             } else {
+//RS                                 content.push(next);
+//RS                             }
+//RS                             j += 2;
+//RS                         }
+//RS                         b'"' => {
+//RS                             j += 1;
+//RS                             break;
+//RS                         }
+//RS                         b'\n' => {
+//RS                             line += 1;
+//RS                             content.push('\n');
+//RS                             j += 1;
+//RS                         }
+//RS                         b => {
+//RS                             content.push(b as char);
+//RS                             j += 1;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 out.push((start_line, content));
+//RS                 i = j;
+//RS             }
+//RS             _ => {
+//RS                 i += 1;
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn literal_has_old_binding_example(literal: &str) -> bool {
+//RS     literal.lines().any(line_has_old_binding_start)
+//RS }
+//RS 
+//RS fn line_has_old_binding_start(line: &str) -> bool {
+//RS     for segment in line.split(['{', ';']) {
+//RS         let trimmed = segment.trim_start();
+//RS         for word in OLD_BINDING_WORDS {
+//RS             if let Some(rest) = trimmed.strip_prefix(word) {
+//RS                 if rest.starts_with(' ') || rest.starts_with('\t') {
+//RS                     return true;
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS fn allowed_old_binding_reference(path: &Path, text: &str, line: &str) -> bool {
+//RS     let s = path.to_string_lossy();
+//RS     if s.ends_with("tests/ui/foreign_declaration_binding.jet") {
+//RS         return line_has_old_binding_start(line);
+//RS     }
+//RS     s.ends_with("Source/LSP/mod.rs")
+//RS         && text.contains("fn old_binding_keyword_has_no_teaching_edit")
+//RS         && (line.contains("let x = 1") || line.contains("E0009") || line.contains("E0985"))
+//RS }
+//RS 
+//RS fn historical_data_reference(line: &str) -> bool {
+//RS     [
+//RS         "retired `Data`",
+//RS         "old `Data`",
+//RS         "former `Data`",
+//RS         "historical `Data`",
+//RS         "pre-`DataTree`",
+//RS         "edition 2026",
+//RS     ]
+//RS     .iter()
+//RS     .any(|label| line.contains(label))
+//RS }
+//RS 
+//RS fn source_identifier_offsets(source: &str, identifier: &str) -> Vec<usize> {
+//RS     fn collect(tokens: &[jet::Lexer::Token], identifier: &str, offsets: &mut Vec<usize>) {
+//RS         for token in tokens {
+//RS             match &token.kind {
+//RS                 jet::Lexer::TokKind::Ident(name) if name == identifier => {
+//RS                     offsets.push(token.span.start)
+//RS                 }
+//RS                 jet::Lexer::TokKind::Str(parts) => {
+//RS                     for part in parts {
+//RS                         if let jet::Lexer::StrTokPart::Interp(tokens) = part {
+//RS                             collect(tokens, identifier, offsets);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let (tokens, _) = jet::Lexer::lex(source);
+//RS     let mut offsets = Vec::new();
+//RS     collect(&tokens, identifier, &mut offsets);
+//RS     offsets
+//RS }
+//RS 
+//RS fn markdown_data_name_lines(text: &str) -> Vec<(usize, &str)> {
+//RS     let mut fence: Option<(u8, usize, usize, String)> = None;
+//RS     let mut lines = Vec::new();
+//RS     let source_lines: Vec<_> = text.lines().collect();
+//RS     for (index, line) in source_lines.iter().copied().enumerate() {
+//RS         if let Some((open_marker, open_len, _, _)) = fence.as_ref() {
+//RS             if markdown_fence(line).is_some_and(|(marker, len, rest)| {
+//RS                 marker == *open_marker && len >= *open_len && rest.trim().is_empty()
+//RS             }) {
+//RS                 let (_, _, start_line, source) = fence.take().unwrap();
+//RS                 append_fence_data_lines(&source, start_line, &source_lines, &mut lines);
+//RS             } else {
+//RS                 let (_, _, _, source) = fence.as_mut().unwrap();
+//RS                 source.push_str(line);
+//RS                 source.push('\n');
+//RS             }
+//RS         } else if let Some((marker, len, _)) = markdown_fence(line) {
+//RS             fence = Some((marker, len, index + 2, String::new()));
+//RS         } else if inline_code_has_identifier(line, "Data") {
+//RS             lines.push((index + 1, line));
+//RS         }
+//RS     }
+//RS     if let Some((_, _, start_line, source)) = fence {
+//RS         append_fence_data_lines(&source, start_line, &source_lines, &mut lines);
+//RS     }
+//RS     lines
+//RS }
+//RS 
+//RS fn append_fence_data_lines<'a>(
+//RS     source: &str,
+//RS     start_line: usize,
+//RS     source_lines: &[&'a str],
+//RS     lines: &mut Vec<(usize, &'a str)>,
+//RS ) {
+//RS     for offset in source_identifier_offsets(source, "Data") {
+//RS         let line_no = start_line
+//RS             + source[..offset]
+//RS                 .bytes()
+//RS                 .filter(|byte| *byte == b'\n')
+//RS                 .count();
+//RS         if !lines.iter().any(|(existing, _)| *existing == line_no) {
+//RS             lines.push((line_no, source_lines[line_no - 1]));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn markdown_fence(line: &str) -> Option<(u8, usize, &str)> {
+//RS     let trimmed = line.trim_start();
+//RS     let marker = *trimmed.as_bytes().first()?;
+//RS     if marker != b'`' && marker != b'~' {
+//RS         return None;
+//RS     }
+//RS     let len = trimmed.bytes().take_while(|byte| *byte == marker).count();
+//RS     (len >= 3).then_some((marker, len, &trimmed[len..]))
+//RS }
+//RS 
+//RS fn inline_code_has_identifier(line: &str, identifier: &str) -> bool {
+//RS     let bytes = line.as_bytes();
+//RS     let mut at = 0;
+//RS     while at < bytes.len() {
+//RS         if bytes[at] != b'`' {
+//RS             at += 1;
+//RS             continue;
+//RS         }
+//RS         let delimiter = bytes[at..].iter().take_while(|byte| **byte == b'`').count();
+//RS         let content_start = at + delimiter;
+//RS         let mut close = content_start;
+//RS         let mut matched = false;
+//RS         while close < bytes.len() {
+//RS             if bytes[close] != b'`' {
+//RS                 close += 1;
+//RS                 continue;
+//RS             }
+//RS             let run = bytes[close..]
+//RS                 .iter()
+//RS                 .take_while(|byte| **byte == b'`')
+//RS                 .count();
+//RS             if run == delimiter {
+//RS                 if !source_identifier_offsets(&line[content_start..close], identifier).is_empty() {
+//RS                     return true;
+//RS                 }
+//RS                 at = close + run;
+//RS                 matched = true;
+//RS                 break;
+//RS             }
+//RS             close += run;
+//RS         }
+//RS         if !matched {
+//RS             break;
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS fn files(path: &Path) -> Vec<PathBuf> {
+//RS     let Ok(metadata) = fs::symlink_metadata(path) else {
+//RS         return Vec::new();
+//RS     };
+//RS     if metadata.file_type().is_file() {
+//RS         return vec![path.to_path_buf()];
+//RS     }
+//RS     if !metadata.file_type().is_dir() {
+//RS         return Vec::new();
+//RS     }
+//RS 
+//RS     let mut pending = vec![path.to_path_buf()];
+//RS     let mut out = Vec::new();
+//RS     while let Some(directory) = pending.pop() {
+//RS         let Ok(entries) = fs::read_dir(&directory) else {
+//RS             continue;
+//RS         };
+//RS         for entry in entries.flatten() {
+//RS             let candidate = entry.path();
+//RS             let Ok(metadata) = fs::symlink_metadata(&candidate) else {
+//RS                 continue;
+//RS             };
+//RS             if metadata.file_type().is_dir() {
+//RS                 let name = candidate
+//RS                     .file_name()
+//RS                     .and_then(|name| name.to_str())
+//RS                     .unwrap_or_default();
+//RS                 if matches!(
+//RS                     name,
+//RS                     ".git"
+//RS                         | ".claude"
+//RS                         | ".opencode"
+//RS                         | ".tmp"
+//RS                         | ".jet"
+//RS                         | ".tower"
+//RS                         | ".agent-worktrees"
+//RS                         | "jit-aot-parity-report"
+//RS                         | "node_modules"
+//RS                         | "target"
+//RS                         | "build"
+//RS                         | ".cache"
+//RS                         | "cache"
+//RS                         | "dist"
+//RS                         | "result"
+//RS                 ) || name.starts_with("target-")
+//RS                     || name.starts_with("build-")
+//RS                     || name.starts_with("result-")
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 pending.push(candidate);
+//RS             } else if metadata.file_type().is_file() {
+//RS                 out.push(candidate);
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn should_skip(path: &Path) -> bool {
+//RS     let s = path.to_string_lossy();
+//RS     let name = path
+//RS         .file_name()
+//RS         .and_then(|name| name.to_str())
+//RS         .unwrap_or_default();
+//RS     s.contains("/target/")
+//RS         || name.starts_with("retired_")
+//RS         || name.contains("_retired_")
+//RS         || name.ends_with("_retired")
+//RS         || s.ends_with(".published.snapshot")
+//RS         || s.ends_with("tests/syntax_reconciliation.rs")
+//RS         || s.ends_with("Docs/spec/syntax-decisions.md")
+//RS }
+//RS 
+//RS fn scan_lines<'a>(path: &Path, text: &'a str) -> Vec<(usize, &'a str)> {
+//RS     if path.extension().and_then(|x| x.to_str()) != Some("rs") {
+//RS         return text.lines().enumerate().map(|(i, l)| (i + 1, l)).collect();
+//RS     }
+//RS     text.lines()
+//RS         .enumerate()
+//RS         .filter_map(|(i, line)| {
+//RS             if path.ends_with("crates/jet-parser/src/Parser/Items.rs")
+//RS                 && line.contains("retired_c_module_marker_diag")
+//RS             {
+//RS                 return None;
+//RS             }
+//RS             let trimmed = line.trim_start();
+//RS             if trimmed.starts_with("//")
+//RS                 || trimmed.starts_with("///")
+//RS                 || trimmed.starts_with("//!")
+//RS                 || line.contains('"')
+//RS             {
+//RS                 Some((i + 1, line))
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS #[test]
+//RS fn artifact_extensions_are_one_closed_kind_specific_family() {
+//RS     use jet_foundation::Syntax::{self, ArtifactKind};
+//RS     assert_eq!(
+//RS         Syntax::ARTIFACT_KINDS,
+//RS         &[
+//RS             (ArtifactKind::SourceMap, ".jetmap"),
+//RS             (ArtifactKind::Notebook, ".jetnb"),
+//RS             (ArtifactKind::Proof, ".jetproof"),
+//RS             (ArtifactKind::Trace, ".jettrace"),
+//RS             (ArtifactKind::GameReplay, ".jetreplay"),
+//RS             (ArtifactKind::ProofReplay, ".jetproof-replay"),
+//RS         ]
+//RS     );
+//RS     for (kind, suffix) in Syntax::ARTIFACT_KINDS {
+//RS         assert_eq!(
+//RS             Syntax::artifact_kind(&format!("artifact{suffix}")),
+//RS             Some(*kind)
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         Syntax::artifact_kind("run.jetproof-replay"),
+//RS         Some(ArtifactKind::ProofReplay)
+//RS     );
+//RS     assert_ne!(
+//RS         Syntax::artifact_kind("run.jetproof-replay"),
+//RS         Some(ArtifactKind::GameReplay)
+//RS     );
+//RS 
+//RS     for root in ["Source", "crates", "Examples", "tests", "Docs"] {
+//RS         for path in files(Path::new(root)) {
+//RS             if path.ends_with("tests/syntax_reconciliation.rs") {
+//RS                 continue;
+//RS             }
+//RS             let Ok(text) = fs::read_to_string(&path) else {
+//RS                 continue;
+//RS             };
+//RS             for (line_no, line) in text.lines().enumerate() {
+//RS                 for retired in [".jproof", ".jtrace", ".jreplay"] {
+//RS                     if line.contains(retired) && !line.contains("jet.jproof") {
+//RS                         panic!(
+//RS                             "{}:{} retains retired artifact suffix `{retired}`",
+//RS                             path.display(),
+//RS                             line_no + 1
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn forbidden_for_path(path: &Path) -> Vec<&'static str> {
+//RS     FORBIDDEN
+//RS         .iter()
+//RS         .copied()
+//RS         .filter(|needle| {
+//RS             if *needle == "pure fn" {
+//RS                 return path.starts_with("Docs");
+//RS             }
+//RS             if path.extension().and_then(|x| x.to_str()) != Some("rs") {
+//RS                 return true;
+//RS             }
+//RS             !matches!(
+//RS                 *needle,
+//RS                 "#layout"
+//RS                     | "#grant"
+//RS                     | "#context"
+//RS                     | "List<"
+//RS                     | "List["
+//RS                     | "Map<"
+//RS                     | "core.json"
+//RS                     | "use jet."
+//RS             )
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn forbidden_occurs(line: &str, needle: &str) -> bool {
+//RS     if !matches!(needle, "List<" | "List[" | "Map<") {
+//RS         return line.contains(needle);
+//RS     }
+//RS     let mut offset = 0;
+//RS     while let Some(relative) = line[offset..].find(needle) {
+//RS         let index = offset + relative;
+//RS         let preceded_by_ident = line[..index]
+//RS             .chars()
+//RS             .next_back()
+//RS             .is_some_and(|ch| ch == '_' || ch.is_ascii_alphanumeric());
+//RS         if !preceded_by_ident {
+//RS             return true;
+//RS         }
+//RS         offset = index + needle.len();
+//RS     }
+//RS     false
+//RS }
+// END-PORT-PENDING 1164 tests/syntax_reconciliation.rs:1-1404
+

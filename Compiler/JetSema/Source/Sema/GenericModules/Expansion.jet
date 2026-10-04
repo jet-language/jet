@@ -1,0 +1,552 @@
+// Rust Bundle/GenericModules/Expansion.rs and parent expand_alias/nested expansion.
+use jet_foundation.[CtValue, Func, AppliedRuleApplication, ast_comptime_value_expr, ast_comptime_value_type, ast_comptime_module_value_bytes, record_blob_key, Marker, CodeModule, Diagnostic, Expr, GenericModuleDef, GenericModuleParam, Item, ModuleAliasDef, ModuleArg, ModuleInstanceApplication, Program, Span, Type, member_import_local]
+// ---------------------------------------------------------------------------
+// Expansion (Rust `expand_generic_module_aliases` / `expand_alias`).
+//
+// `module int_cache :: cache<Int>(32)` becomes an ordinary module instance
+// before registration: the template body with every type parameter, value
+// parameter and template constant substituted, its member types and
+// constants lifted beside it under the instance's member names. Inline-module
+// lowering then gives its functions their member identities like any other
+// module. The producer diagnoses binding failures before registration.
+
+// A template an alias can name: a local `module cache<K>` or one imported
+// with `use defs.box`. The key names the defining module, so equal
+// applications of one template share one instance.
+pub struct SemaGenericModuleSource {
+    pub local: String
+    pub denied: Bool{false}
+    pub key: String
+    pub definition: GenericModuleDef
+    // An imported template's defining-module declarations: each instance
+    // carries them under its own member names.
+    pub source_items: [Item]
+    // Closed constants of the defining module.
+    pub source_values: [String:CtValue]
+    pub definition_full_key: [U8]
+    pub params: [SemaGenericModuleParam]
+    pub source_rule_facts: [AppliedRuleApplication]
+    pub build_facts: SemaBuildFacts
+    pub input: SemaRegistrationModuleInput
+}
+
+struct SemaGenericModuleBinding {
+    key: String
+    type_names: [String]
+    type_actuals: [Type]
+    value_names: [String]
+    full_key: [U8]
+    argument_keys: [[U8]]
+    argument_values: [String]
+    value_values: [CtValue]
+}
+
+struct SemaGenericModuleExpansion {
+    instance: CodeModule
+    declarations: [Item]
+    rule_facts: [AppliedRuleApplication]
+}
+
+pub struct SemaGenericModuleRegistry {
+    pub instances: [String:String]
+    pub fingerprints: [String:[U8]]
+    pub applications: [String:[ModuleInstanceApplication]]
+    pub nominals: [String:[String]]
+}
+pub fn sema_generic_modules_registry() -> SemaGenericModuleRegistry Never! {
+    SemaGenericModuleRegistry{instances: [String:String]{}, fingerprints: [String:[U8]]{}, applications: [String:[ModuleInstanceApplication]]{}, nominals: [String:[String]]{}}
+}
+pub fn sema_generic_modules_snapshots(inputs: [SemaRegistrationModuleInput], context: SemaClosedValueContext, diagnostics: &[Diagnostic]) -> [String:[SemaGenericModuleSource]] {
+    snapshots := [String:[SemaGenericModuleSource]]{}
+    loop input in inputs {
+        if !input.expand_generic_modules -> next
+        has_template := false
+        loop item in input.program.items { if item == .GenericModule(_) -> has_template = true }
+        if !has_template -> next
+        check := sema_genmod_new_check(input.module_identity, input, context, sema_closed_functions(input.program.items))
+        values :: sema_genmod_const_values(input.program.items, [String:CtValue]{}, &check)
+        enums :: sema_genmod_enums(input.program.items, [GenericModuleDef]{})
+        sources := [SemaGenericModuleSource]{}
+        loop item in input.program.items {
+            if item == .GenericModule(definition) -> &sources.push(sema_genmod_source(definition, input, values, enums, None, sema_genmod_definition_items(input.program.items), &check))
+        }
+        snapshots[input.module_identity] = sources
+        loop diagnostic in check.diagnostics -> &diagnostics.push(diagnostic)
+    }
+    snapshots
+}
+pub fn sema_generic_modules_imported(snapshots: [String:[SemaGenericModuleSource]], edges: [SemaRegistrationImportEdge], module_identity: String) -> [SemaGenericModuleSource] {
+    sources := [SemaGenericModuleSource]{}
+    loop source in snapshots.get(module_identity) ?? [SemaGenericModuleSource]{} {
+        local := source
+        local.source_items = [Item]{}
+        &sources.push(local)
+    }
+    loop edge in edges {
+        if edge.source_module_identity != module_identity -> next
+        if edge.declaration.kind == .Unqualified(_, _, imported, _, _) {
+            available :: snapshots.get(edge.target_module_identity) ?? [SemaGenericModuleSource]{}
+            loop entry in imported {
+                loop source in available {
+                    if source.definition.name == entry.original {
+                        mapped := source
+                        mapped.local = member_import_local(entry.original, entry.alias)
+                        mapped.denied = !source.definition.is_pub && !source.definition.is_package_pub
+                        &sources.push(mapped)
+                    }
+                }
+            }
+        }
+    }
+    sources
+}
+fn sema_genmod_source(definition: GenericModuleDef, input: SemaRegistrationModuleInput, values: [String:CtValue], enums: [String:Bool], enclosing: [U8]?, source_items: [Item], check: &SemaGenericModuleCheck) -> SemaGenericModuleSource {
+    full_key :: if enclosing == {
+        .Val(key) -> sema_genmod_definition_full_key("nested", "", record_blob_key(key.view(0..<key.len())), definition.name)
+        .None -> sema_genmod_definition_full_key(input.generic_package_identity ?? panic("loader omitted generic module canonical package identity"), if input.generic_definition_path != "" -> input.generic_definition_path else -> input.module_path, "", definition.name)
+    }
+    SemaGenericModuleSource{local: definition.name, key: record_blob_key(full_key.view(0..<full_key.len())), definition: definition, source_items: source_items, source_values: values, definition_full_key: full_key, params: sema_genmod_resolve_params(definition, enums, &check), source_rule_facts: input.program.rule_facts, build_facts: check.context.build_facts, input: input}
+}
+
+
+// Rust `clone_definition_items`.
+fn sema_genmod_definition_items(items: [Item]) -> [Item] {
+    kept := [Item]{}
+    loop item in items {
+        if item == {
+            .Func(_) | .Struct(_) | .Enum(_) | .Trait(_) | .Tag(_) | .Impl(_) | .ErrorConv(_) | .Test(_) | .Const(_) -> &kept.push(item)
+            else -> {}
+        }
+    }
+    kept
+}
+
+pub fn sema_generic_modules_expand(program: Program, input: SemaRegistrationModuleInput, imported: [SemaGenericModuleSource], context: SemaClosedValueContext, registry: &SemaGenericModuleRegistry, diagnostics: &[Diagnostic]) -> Program {
+    lifted := [Item]{}
+    expanded := sema_genmod_expand_scope(program, input, imported, context, &registry, &diagnostics, [String:CtValue]{}, None, "", &lifted)
+    loop item in lifted -> &expanded.items.push(item)
+    expanded
+}
+fn sema_genmod_expand_scope(program: Program, input: SemaRegistrationModuleInput, imported: [SemaGenericModuleSource], context: SemaClosedValueContext, registry: &SemaGenericModuleRegistry, diagnostics: &[Diagnostic], inherited: [String:CtValue], enclosing: [U8]?, prefix: String, lifted: &[Item]) -> Program {
+    module_identity :: if input.generic_application_module != "" -> input.generic_application_module else -> input.module_identity
+    items :: program.items
+    aliases := [ModuleAliasDef]{}
+    aliases_by_name := [String:ModuleAliasDef]{}
+    loop item in items {
+        if item == .ModuleAlias(alias) {
+            &aliases.push(alias)
+            aliases_by_name[alias.name] = alias
+        }
+    }
+    if aliases.len() == 0 -> return ~program
+    silent := sema_genmod_new_check(module_identity, input, context, sema_closed_functions(items))
+    if sema_genmod_report_cycles(items, &silent) {
+        loop diagnostic in silent.diagnostics -> &diagnostics.push(diagnostic)
+        return ~program
+    }
+    enums :: sema_genmod_enums(items, [GenericModuleDef]{})
+    values :: sema_genmod_const_values(items, inherited, &silent)
+    sources := imported
+    if enclosing != None {
+        loop item in items {
+            if item == .GenericModule(definition) -> &sources.push(sema_genmod_source(definition, input, values, enums, enclosing, [Item]{}, &silent))
+        }
+    }
+    sources_by_name := [String:SemaGenericModuleSource]{}
+    loop source in sources -> sources_by_name[source.local] = source
+    resolved_aliases := [String:ModuleAliasDef]{}
+    bindings := [String:SemaGenericModuleBinding]{}
+    invalid := [String:Bool]{}
+    projections := [String:String]{}
+    projected_names := [String]{}
+    expanded := [String:CodeModule]{}
+    expanded_names := [String]{}
+    declarations := [Item]{}
+    generated_facts := [AppliedRuleApplication]{}
+    loop alias in sema_genmod_by_depth(aliases, aliases_by_name) {
+        if invalid.get(alias.target) != None {
+            invalid[alias.name] = true
+            next
+        }
+        resolved := sema_genmod_resolve_local(alias, aliases_by_name, resolved_aliases, &silent) ?? {
+            invalid[alias.name] = true
+            next
+        }
+        resolved_aliases[alias.name] = resolved
+        if prefix != "" {
+            resolved.name = sema_genmod_value_name(prefix, alias.name)
+        }
+        source :: sources_by_name.get(resolved.target) ?? {
+            sema_genmod_push(&silent, sema_error("E0850", resolved.target_span, "generic module `{resolved.target}` not found in this scope", "check the module template name and make sure it is defined in the same file", "example: `module {alias.name} :: MyTemplate<String>`"))
+            invalid[alias.name] = true
+            next
+        }
+        if source.denied {
+            invalid[alias.name] = true
+            next
+        }
+        binding :: (if aliases_by_name.get(alias.target) != None -> bindings.get(alias.target) else -> sema_genmod_bind(resolved, source, values, enums, &silent)) ?? {
+            invalid[alias.name] = true
+            next
+        }
+        bindings[alias.name] = binding
+        identity :: sema_genmod_identity(binding, source, resolved, module_identity)
+        sema_genmod_register_fingerprint(&registry.fingerprints, identity, resolved.span)
+        applications := registry.applications.get(binding.key) ?? [ModuleInstanceApplication]{}
+        &applications.push(sema_genmod_application(resolved, module_identity, binding.key))
+        registry.applications[binding.key] = applications
+        full_key_index :: sema_genmod_hex(binding.full_key)
+        // Full bytes, not a digest or display spelling, are the reuse key.
+        if registry.instances.get(full_key_index) == .Val(canonical) {
+            projections[alias.name] = canonical
+            &projected_names.push(alias.name)
+            if prefix != "" {
+                projections[resolved.name] = canonical
+                &projected_names.push(resolved.name)
+            }
+            next
+        }
+        if prefix != "" {
+            projections[alias.name] = resolved.name
+            &projected_names.push(alias.name)
+        }
+        expansion :: sema_genmod_expand_alias(resolved, source, binding, enums, &silent, &registry)
+        registry.instances[full_key_index] = resolved.name
+        expanded[alias.name] = expansion.instance
+        &expanded_names.push(alias.name)
+        names := [String]{}
+        loop declaration in expansion.declarations {
+            if declaration == {
+                .Struct(definition) -> &names.push(definition.name)
+                .Enum(definition) -> &names.push(definition.name)
+                else -> {}
+            }
+            &declarations.push(declaration)
+        }
+        registry.nominals[resolved.name] = names
+        loop fact in expansion.rule_facts -> &generated_facts.push(fact)
+    }
+    // `three_ints.Buffer` and a projected `alias.Type` name the instance's
+    // generated nominal.
+    projection := sema_inline_rewrite_empty()
+    loop name in expanded_names {
+        canonical :: expanded.get(name) ?? next
+        sema_genmod_project_types(&projection, name, canonical.name, registry.nominals)
+    }
+    loop name in projected_names {
+        canonical :: projections.get(name) ?? next
+        sema_genmod_project_types(&projection, name, canonical, registry.nominals)
+    }
+    rewritten := [Item]{}
+    loop item in items {
+        if item == .ModuleAlias(alias) {
+            if expanded.get(alias.name) == .Val(instance) {
+                &rewritten.push(Item.CodeModule{value: instance})
+                next
+            }
+            if projections.get(alias.name) != None -> next
+        }
+        if item == .Func(function) {
+            &rewritten.push(Item.Func{value: sema_genmod_project_function(function, projections, projection)})
+            next
+        }
+        &rewritten.push(item)
+    }
+    loop declaration in declarations -> &lifted.push(declaration)
+    updated := program
+    updated.items = rewritten
+    spans := [Span]{}
+    sema_genmod_template_spans(items, &spans)
+    retained_facts := [AppliedRuleApplication]{}
+    loop fact in updated.rule_facts {
+        if !sema_genmod_inside_spans(fact.marker.span, spans) -> &retained_facts.push(fact)
+    }
+    updated.rule_facts = retained_facts
+    loop fact in generated_facts -> &updated.rule_facts.push(fact)
+    loop diagnostic in silent.diagnostics -> &diagnostics.push(diagnostic)
+    updated
+}
+
+
+fn sema_genmod_project_types(rewrite: &SemaInlineRewrite, alias: String, canonical: String, nominals: [String:[String]]) {
+    prefix :: sema_inline_type_prefix(canonical)
+    generated_names :: nominals.get(canonical) ?? [String]{}
+    loop generated in generated_names {
+        if !generated.starts_with(prefix) -> next
+        suffix :: String.from_bytes(generated.bytes()[prefix.bytes().len()..<generated.bytes().len()]) ?? next
+        rewrite.types["{alias}.{suffix}"] = Type.Named{name: generated}
+        rewrite.types[sema_inline_type_name(alias, suffix)] = Type.Named{name: generated}
+    }
+}
+
+// Rust's projection rewrite of each top-level function: a projected alias
+// reads as its canonical instance, then projected member types resolve.
+fn sema_genmod_project_function(function: Func, projections: [String:String], projection: SemaInlineRewrite) -> Func {
+    rewrite := projection
+    rewrite.module_projections = projections
+    sema_inline_rewrite_func(&rewrite, function)
+}
+
+// Resolve closed values through the canonical retained-fact/MIR evaluator.
+fn sema_genmod_bind(alias: ModuleAliasDef, source: SemaGenericModuleSource, values: [String:CtValue], enums: [String:Bool], check: &SemaGenericModuleCheck) -> SemaGenericModuleBinding? {
+    if alias.args.len() != source.params.len() {
+        names := [String]{}
+        loop param in source.definition.params {
+            if param == {
+                .Type(name, _, _) | .Value(name, _, _) -> &names.push(name)
+            }
+        }
+        expected :: source.params.len()
+        sema_genmod_push(&check, sema_error("E0851", alias.span, "module alias `{alias.name}` passes {alias.args.len()} argument(s) but `{alias.target}` expects {expected}", "the number of type/value arguments must match the template parameter list", "example: `module {alias.name} :: {alias.target}<{names.join(", ")}>` with {expected} arg(s)"))
+        return None
+    }
+    binding := SemaGenericModuleBinding{key: "", full_key: [U8]{}, argument_keys: [[U8]]{}, argument_values: [String]{}, type_names: [String]{}, type_actuals: [Type]{}, value_names: [String]{}, value_values: [CtValue]{}}
+    loop (index, param) in source.params {
+        arg :: alias.args[index]
+        if param == {
+            .Invalid -> return None
+            .Type(name, bound) -> {
+                ty := Type.Int
+                if arg == {
+                    .Type(value, _) -> ty = value
+                    .Value(expression, _) -> {
+                        if expression == .Ident(type_ident, _) -> ty = Type.Named{name: type_ident}
+                        else {
+                            sema_genmod_push(&check, sema_error("E0852", sema_genmod_arg_span(arg), "type argument for `{name}` does not satisfy its module bound", "this slot resolves to a type parameter, but the argument is a value expression", "pass a type that satisfies the declared bound"))
+                            return None
+                        }
+                    }
+                }
+                if bound == .Val(trait_name) {
+                    if check.bound_graph == None {
+                        request :: SemaClosedValueRequest{expression: Expr.Unit{span: alias.span}, functions: check.functions, globals: values, input: check.input, context: check.context}
+                        check.bound_graph = Val(sema_closed_registration(request))
+                    }
+                    graph :: check.bound_graph ?? panic("bound registration must retain its canonical graph")
+                    if !(sema_type_bound_satisfied(graph, ty, trait_name, check.input.module_identity) ?? false) {
+                        identity :: sema_genmod_type_text(ty)
+                        sema_genmod_push(&check, sema_error("E0852", sema_genmod_arg_span(arg), "type argument `{identity}` does not satisfy `{trait_name}`", "generic module parameter `{name}` requires the `{trait_name}` bound", "pass a type that implements `{trait_name}`"))
+                        return None
+                    }
+                }
+                &binding.type_names.push(name)
+                &binding.type_actuals.push(ty)
+                key := [U8]{U8{0}}
+                visiting := [String:Bool]{}
+                sema_genmod_frame(&key, sema_genmod_type_full_key(sema_genmod_normalize_type(ty, check.type_aliases, check.type_alias_names, check.type_alias_targets, &visiting)))
+                &binding.argument_keys.push(key)
+                &binding.argument_values.push("type:{sema_genmod_type_text(ty)}")
+            }
+            .Value(name, ty) -> {
+                expression :: sema_genmod_arg_expr(arg) ?? {
+                    sema_genmod_push(&check, sema_error("E0853", sema_genmod_arg_span(arg), "value argument for `{name}` has the wrong type", "this slot requires an exact `{sema_genmod_type_text(ty)}` Tier-0 value", "pass a compile-time `{sema_genmod_type_text(ty)}` value without conversion"))
+                    return None
+                }
+                evaluated :: sema_evaluate_closed_value(expression, check.functions, values, check.input, check.context)
+                if evaluated == {
+                    .Err(_) -> {
+                        sema_genmod_push(&check, sema_error("E0857", sema_genmod_arg_span(arg), "value argument for `{name}` is not known at compile time", "generic module instances need one closed, deterministic Tier-0 value", "pass a literal, a `$build.*` fact, or a comptime `{sema_genmod_type_text(ty)}` value"))
+                        return None
+                    }
+                    .Ok(value) -> {
+                        actual :: sema_genmod_value_type(value)
+                        if !sema_genmod_tier0_type(ty, enums) || actual != Val(ty) {
+                            found :: if actual == .Val(value_type) -> sema_genmod_type_text(value_type) else -> "non-Tier-0 value"
+                            sema_genmod_push(&check, sema_error("E0853", sema_genmod_arg_span(arg), "value argument for `{name}` has the wrong type", "expected exact `{sema_genmod_type_text(ty)}`, found `{found}`", "pass a compile-time `{sema_genmod_type_text(ty)}` value without conversion"))
+                            return None
+                        }
+                        &binding.value_names.push(name)
+                        &binding.value_values.push(value)
+                        key := [U8]{U8{1}}
+                        sema_genmod_frame(&key, ast_comptime_module_value_bytes(value) ?? panic("allowed Tier-0 value normalizes"))
+                        &binding.argument_keys.push(key)
+                        &binding.argument_values.push("value:{sema_genmod_value_show(value)}")
+                    }
+                }
+            }
+        }
+    }
+    binding.full_key = sema_genmod_application_bytes(source.definition_full_key, sema_genmod_parameter_bytes(source.params), binding.argument_keys)
+    binding.key = record_blob_key(binding.full_key.view(0..<binding.full_key.len()))
+    Val(binding)
+}
+
+fn sema_genmod_expand_alias(alias: ModuleAliasDef, source: SemaGenericModuleSource, binding: SemaGenericModuleBinding, enums: [String:Bool], check: &SemaGenericModuleCheck, registry: &SemaGenericModuleRegistry) -> SemaGenericModuleExpansion {
+    template :: source.definition
+    rewrite := sema_inline_rewrite_empty()
+    loop item in source.source_items {
+        name :: sema_genmod_nominal_name(item)
+        if name != "" -> rewrite.types[name] = Type.Named{name: sema_inline_type_name(alias.name, name)}
+    }
+    loop item in template.body {
+        name :: sema_genmod_nominal_name(item)
+        if name != "" -> rewrite.types[name] = Type.Named{name: sema_inline_type_name(alias.name, name)}
+    }
+    loop (index, name) in binding.type_names -> rewrite.types[name] = binding.type_actuals[index]
+    loop item in template.body {
+        if item == {
+            .CodeModule(nested) -> rewrite.types[nested.name] = Type.Named{name: sema_genmod_value_name(alias.name, nested.name)}
+            .ModuleAlias(nested) -> rewrite.types[nested.name] = Type.Named{name: sema_genmod_value_name(alias.name, nested.name)}
+            else -> {}
+        }
+    }
+    definition_values := source.source_values
+    loop (index, name) in binding.value_names -> definition_values[name] = binding.value_values[index]
+    loop (name, value) in definition_values -> rewrite.values[name] = ast_comptime_value_expr(value, alias.span)
+    rewrite.build_facts = Val(source.build_facts)
+    template_input := source.input
+    // Keep original defining-module functions available to prepared bindings.
+    template_input.generic_application_module = check.input.generic_application_module
+    definition_context := check.context
+    definition_context.build_facts = source.build_facts
+    definition_check := sema_genmod_new_check(source.input.module_identity, template_input, definition_context, sema_closed_functions(source.input.program.items))
+    declarations := [Item]{}
+    loop item in source.source_items -> sema_genmod_push_declaration(&rewrite, item, alias.name, &declarations)
+    // Template constants specialize in declaration order; each folded value
+    // is visible to later constants and to every member.
+    loop item in template.body {
+        if item == .Const(definition) {
+            value :: sema_inline_rewrite_expr(&rewrite, definition.value)
+            mapped := definition
+            mapped.name = sema_genmod_value_name(alias.name, definition.name)
+            mapped.value = value
+            mapped.ty = sema_inline_rewrite_optional_type(rewrite, definition.ty)
+            mapped.ct = None
+            if sema_evaluate_closed_value(value, definition_check.functions, definition_values, template_input, definition_context) == .Ok(closed) {
+                definition_values[definition.name] = closed
+                rewrite.values[definition.name] = ast_comptime_value_expr(closed, definition.span)
+                mapped.ct = Val(closed)
+                if mapped.ty == None -> mapped.ty = Val(ast_comptime_value_type(closed))
+            }
+            mapped.meta = sema_inline_rewrite_meta(&rewrite, definition.meta)
+            &declarations.push(Item.Const{value: mapped})
+        }
+    }
+    rule_facts := sema_genmod_specialize_rule_facts(source.source_rule_facts, template, &rewrite)
+    loop item in template.body {
+        if item == {
+            .Test(definition) -> &declarations.push(Item.Test{value: sema_genmod_specialize_test(&rewrite, definition, alias.name)})
+            .CodeModule(nested) -> {
+                mapped := nested
+                mapped.name = sema_genmod_value_name(alias.name, nested.name)
+                if nested.body == .Val(nested_body) -> mapped.body = Val(sema_genmod_specialize_nested(&rewrite, nested_body, nested.name))
+                mapped = sema_genmod_expand_plain(mapped, nested.name, binding.full_key, definition_values, template_input, definition_context, &registry, &check.diagnostics, &declarations, &rule_facts)
+                &declarations.push(Item.CodeModule{value: mapped})
+            }
+            else -> sema_genmod_push_declaration(&rewrite, item, alias.name, &declarations)
+        }
+    }
+    body := [Item]{}
+    loop item in source.source_items {
+        if item == .Func(function) -> &body.push(Item.Func{value: sema_inline_rewrite_func(&rewrite, function)})
+    }
+    loop item in template.body {
+        if item == .Func(function) -> &body.push(Item.Func{value: sema_inline_rewrite_func(&rewrite, function)})
+    }
+    // Nested aliases share the outer instance's full-key namespace and retain
+    // definition-site constants, functions, rules and build-fact snapshot.
+    nested_program := template_input.program
+    nested_program.items = [Item]{}
+    nested_program.rule_facts = [AppliedRuleApplication]{}
+    loop item in template.body {
+        if item == {
+            .GenericModule(definition) -> &nested_program.items.push(Item.GenericModule{value: sema_genmod_specialize_template(rewrite, definition)})
+            .ModuleAlias(_) -> {
+                specialized :: sema_genmod_specialize_nested(&rewrite, [Item]{item}, alias.name)
+                loop member in specialized -> &nested_program.items.push(member)
+            }
+            else -> {}
+        }
+    }
+    // Parent functions participate in projection rewriting but declarations
+    // already specialized above must not be generated a second time.
+    loop item in body -> &nested_program.items.push(item)
+    nested_program = sema_genmod_expand_scope(nested_program, template_input, [SemaGenericModuleSource]{}, definition_context, &registry, &check.diagnostics, definition_values, Val(binding.full_key), alias.name, &declarations)
+    body = [Item]{}
+    loop item in nested_program.items {
+        if item == .Func(_) -> &body.push(item)
+        if item == .CodeModule(module) && module.instance_identity != None -> &declarations.push(item)
+    }
+    loop fact in nested_program.rule_facts -> &rule_facts.push(fact)
+    identity :: sema_genmod_identity(binding, source, alias, if check.input.generic_application_module != "" -> check.input.generic_application_module else -> check.module_identity)
+    instance :: CodeModule{name: alias.name, name_span: alias.name_span, is_pub: alias.is_pub, is_package_pub: alias.is_package_pub, body: Val(body), imports: template.imports, web_target: None, instance_identity: Val(identity), span: alias.span}
+    SemaGenericModuleExpansion{instance: instance, declarations: declarations, rule_facts: rule_facts}
+}
+pub fn sema_generic_modules_finish(program: Program, registry: SemaGenericModuleRegistry) -> Program Never! {
+    updated := program
+    items := [Item]{}
+    loop item in program.items {
+        if item == .CodeModule(module) {
+            mapped := module
+            if module.instance_identity == .Val(identity) {
+                retained := identity
+                retained.applications = registry.applications.get(identity.fingerprint) ?? identity.applications
+                mapped.instance_identity = Val(retained)
+            }
+            if module.body == .Val(body) {
+                nested := program
+                nested.items = body
+                mapped.body = Val(sema_generic_modules_finish(nested, registry).items)
+            }
+            &items.push(Item.CodeModule{value: mapped})
+        } else -> &items.push(item)
+    }
+    updated.items = items
+    updated
+}
+
+fn sema_genmod_template_spans(items: [Item], spans: &[Span]) Never! {
+    loop item in items {
+        if item == {
+            .GenericModule(definition) -> {
+                &spans.push(definition.span)
+                sema_genmod_template_spans(definition.body, &spans)
+            }
+            .CodeModule(module) -> {
+                if module.body == .Val(body) -> sema_genmod_template_spans(body, &spans)
+            }
+            else -> {}
+        }
+    }
+}
+fn sema_genmod_inside_spans(span: Span, spans: [Span]) -> Bool Never! {
+    loop candidate in spans {
+        if span.start >= candidate.start && span.end <= candidate.end -> return true
+    }
+    false
+}
+fn sema_genmod_specialize_rule_facts(facts: [AppliedRuleApplication], template: GenericModuleDef, rewrite: &SemaInlineRewrite) -> [AppliedRuleApplication] {
+    nested := [Span]{}
+    sema_genmod_template_spans(template.body, &nested)
+    specialized := [AppliedRuleApplication]{}
+    loop fact in facts {
+        span :: fact.marker.span
+        if span.start < template.span.start || span.end > template.span.end || sema_genmod_inside_spans(span, nested) -> next
+        mapped := fact
+        markers :: sema_inline_rewrite_markers(&rewrite, [Marker]{fact.marker})
+        mapped.marker = markers[0]
+        &specialized.push(mapped)
+    }
+    specialized
+}
+fn sema_genmod_expand_plain(module: CodeModule, lexical_path: String, enclosing: [U8], values: [String:CtValue], input: SemaRegistrationModuleInput, context: SemaClosedValueContext, registry: &SemaGenericModuleRegistry, diagnostics: &[Diagnostic], declarations: &[Item], rule_facts: &[AppliedRuleApplication]) -> CodeModule {
+    body :: module.body ?? return module
+    scope :: sema_genmod_definition_full_key("nested", "", record_blob_key(enclosing.view(0..<enclosing.len())), lexical_path)
+    updated := module
+    mapped := [Item]{}
+    loop item in body {
+        if item == .CodeModule(child) {
+            nested := child
+            nested.name = sema_genmod_value_name(module.name, child.name)
+            nested = sema_genmod_expand_plain(nested, "{lexical_path}.{child.name}", scope, values, input, context, &registry, &diagnostics, &declarations, &rule_facts)
+            &mapped.push(Item.CodeModule{value: nested})
+        } else -> &mapped.push(item)
+    }
+    program := input.program
+    program.items = mapped
+    program.rule_facts = [AppliedRuleApplication]{}
+    expanded :: sema_genmod_expand_scope(program, input, [SemaGenericModuleSource]{}, context, &registry, &diagnostics, values, Val(scope), module.name, &declarations)
+    updated.body = Val(expanded.items)
+    loop fact in expanded.rule_facts -> &rule_facts.push(fact)
+    updated
+}

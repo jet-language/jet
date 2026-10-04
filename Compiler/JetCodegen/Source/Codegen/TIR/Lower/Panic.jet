@@ -1,0 +1,113 @@
+// PORT-PENDING 0519 crates-jet-codegen-src-codegen-tir-subset-module-group: crates/jet-codegen/src/Codegen/TIR/lower/panic.rs:1-109
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::AST::{Expr, Type};
+//RS use crate::Codegen::Cx;
+//RS use crate::Codegen::TIR::LowerEnv;
+//RS use crate::Codegen::TIR::{TExpr, TExprKind};
+//RS use crate::Codegen::TIR::TLocal;
+//RS use crate::Codegen::TIR::TPanicLoc;
+//RS use crate::Codegen::TIR::TRequireKind;
+//RS use crate::Codegen::TIR::lower_expr;
+//RS use crate::Diagnostics::Span;
+//RS 
+//RS pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
+//RS     env.clone()
+//RS }
+//RS 
+//RS pub(crate) fn fork_panic(env: &LowerEnv) -> LowerEnv {
+//RS     clone_env(env)
+//RS }
+//RS 
+//RS /// Text, 1-based line and 1-based column of the line holding `offset`;
+//RS /// `lines` indexes `src`.
+//RS pub(crate) fn tir_src_line_at<'s>(
+//RS     src: &'s str,
+//RS     lines: &jet_foundation::Diagnostics::LineIndex,
+//RS     offset: usize,
+//RS ) -> (&'s str, u32, u32) {
+//RS     let (line, col) = lines.line_col(src, offset);
+//RS     (lines.line_text(src, line), line as u32, col as u32)
+//RS }
+//RS 
+//RS fn safe_locals_snapshot(env: &LowerEnv) -> Vec<(String, TLocal)> {
+//RS     let mut parts: Vec<(String, TLocal)> = env
+//RS         .locals
+//RS         .iter()
+//RS         .filter_map(|(name, (place, jet_ty))| {
+//RS             let safe = jet_ty
+//RS                 .as_ref()
+//RS                 .is_some_and(|t| matches!(t, Type::Int | Type::Float | Type::Bool));
+//RS             if !safe {
+//RS                 return None;
+//RS             }
+//RS             Some((name.clone(), place.clone()))
+//RS         })
+//RS         .collect();
+//RS     parts.sort_by(|a, b| a.0.cmp(&b.0));
+//RS     parts
+//RS }
+//RS 
+//RS pub(crate) fn capture_panic_loc(span: &Span, cx: &Cx, env: &LowerEnv) -> TPanicLoc {
+//RS     let (src_line, line, col) = tir_src_line_at(&cx.src, cx.src_lines(), span.start);
+//RS     TPanicLoc {
+//RS         file: cx.file.clone(),
+//RS         src_line: src_line.trim_end().to_string(),
+//RS         line,
+//RS         col,
+//RS         caret: (span.end - span.start) as u32,
+//RS         fn_name: env.fn_name.clone(),
+//RS         locals: safe_locals_snapshot(env),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn lower_panic_message_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+//RS     lower_expr(e, cx, env)
+//RS }
+//RS 
+//RS pub(crate) fn lower_require_stop(
+//RS     call: &crate::AST::Call,
+//RS     cx: &Cx,
+//RS     env: &mut LowerEnv,
+//RS ) -> (TRequireKind, TPanicLoc) {
+//RS     let loc = capture_panic_loc(&call.name_span, cx, env);
+//RS     let cond = Box::new(lower_expr(&call.args[0].expr, cx, env));
+//RS     let msg = if call.args.len() == 2 {
+//RS         Some(Box::new(lower_panic_message_expr(
+//RS             &call.args[1].expr,
+//RS             cx,
+//RS             env,
+//RS         )))
+//RS     } else {
+//RS         None
+//RS     };
+//RS     (TRequireKind::Require { cond, msg }, loc)
+//RS }
+//RS 
+//RS pub(crate) fn lower_require_eq_stop(
+//RS     call: &crate::AST::Call,
+//RS     cx: &Cx,
+//RS     env: &mut LowerEnv,
+//RS ) -> (TRequireKind, TPanicLoc) {
+//RS     let loc = capture_panic_loc(&call.name_span, cx, env);
+//RS     let left = Box::new(lower_expr(&call.args[0].expr, cx, env));
+//RS     let mut right = Box::new(lower_expr(&call.args[1].expr, cx, env));
+//RS     // Sema checked a bare `None` against the left side's option type; the
+//RS     // lowered `Absent` carries only the `Int` placeholder (as `==` retypes it).
+//RS     if matches!(right.kind, TExprKind::Absent) && matches!(left.ty, Type::Option(_)) {
+//RS         right.ty = left.ty.clone();
+//RS     }
+//RS     (TRequireKind::RequireEq { left, right }, loc)
+//RS }
+//RS 
+//RS pub(crate) fn lower_panic_stop(
+//RS     name_span: &Span,
+//RS     args: &[crate::AST::CallArg],
+//RS     cx: &Cx,
+//RS     env: &mut LowerEnv,
+//RS ) -> (TRequireKind, TPanicLoc) {
+//RS     let loc = capture_panic_loc(name_span, cx, env);
+//RS     let msg = Box::new(lower_panic_message_expr(&args[0].expr, cx, env));
+//RS     (TRequireKind::Panic { msg }, loc)
+//RS }
+// END-PORT-PENDING 0519 crates/jet-codegen/src/Codegen/TIR/lower/panic.rs:1-109
+

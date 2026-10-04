@@ -1,0 +1,320 @@
+// D-MEM-SENTRY1 witness policy. Rust: jet-foundation/src/MemSentry.rs:1-869.
+// This is the canonical Foundation owner, not a second runtime registry.
+// Native registration, TLS, lifetime tokens and observational I/O remain the
+// explicit capability gates at the end. No callable below fabricates those
+// observations or substitutes a successful provider for the native kernel.
+use core.text.fmt as sentry_fmt
+
+
+// Rust 18-24: Gate. Prefix avoids the unrelated Foundation policy Gate owner.
+pub struct JetSentryGate {
+    pub enabled: Bool
+    pub file: String
+    pub line: U32
+    pub reason: String
+}
+// Rust 29-43: Allocation / StackAllocation. U64 preserves the complete usize
+// magnitude; native adapters must supply the selected target's usize maximum.
+pub struct JetSentryAllocation {
+    pub start: U64
+    pub len: U64
+    pub live: Bool
+    pub owner: U64?
+    pub seq: U64
+}
+pub struct JetSentryStackAllocation {
+    pub start: U64
+    pub len: U64
+    pub seq: U64
+}
+
+// Rust 61-64. The actual records owner lends its sequence field; there is no
+// second counter, reset, allocation or observer-dependent early return here.
+pub fn jet_sentry_next_seq(sequence: &U64) -> U64 Never! {
+    sequence += U64{1}
+    sequence
+}
+// Rust 436-449: mutation of the SAME record vectors owned under the native
+// lock. The caller performs availability/start checks and allocates sequence.
+pub fn jet_sentry_register_heap_range(heap: &[JetSentryAllocation], owner: U64?, start: U64, bytes: U64, seq: U64) Never! {
+    len :: if bytes == (U64{0}) -> U64{1} else -> bytes
+    &heap.push(JetSentryAllocation{start: start, len: len, live: true, owner: owner, seq: seq})
+}
+pub fn jet_sentry_register_frame_range(stack: &[JetSentryStackAllocation], start: U64, bytes: U64, seq: U64) Never! {
+    len :: if bytes == (U64{0}) -> U64{1} else -> bytes
+    loop index in 0..<stack.len() {
+        if stack[index].start == start && stack[index].len == len {
+            stack[index].seq = seq
+            return
+        }
+    }
+    &stack.push(JetSentryStackAllocation{start: start, len: len, seq: seq})
+}
+// Rust 460-466,495-499: mutate in place, including ALL matching heap records.
+// Stack expiration and the real raw fill are NOT replaced by these fragments.
+pub fn jet_sentry_quarantine_heap_ranges(heap: &[JetSentryAllocation], start: U64) -> Bool Never! {
+    poisoned := false
+    loop index in 0..<heap.len() {
+        if heap[index].live && heap[index].start == start {
+            heap[index].live = false
+            poisoned = true
+        }
+    }
+    poisoned
+}
+pub fn jet_sentry_quarantine_owner_ranges(heap: &[JetSentryAllocation], owner: U64) Never! {
+    loop index in 0..<heap.len() {
+        if heap[index].live && heap[index].owner == Val(owner) -> heap[index].live = false
+    }
+}
+
+// Rust 113. This is a byte limit, never a Unicode-scalar count.
+pub MAX_MEMORY_LEDGER_BYTES :: prep { U64{4194304} }
+
+// Rust 120-132: witness fields; repairs borrow a contiguous caller-owned list.
+// Native &str lifetime projection remains #4392: do not clone a fault merely
+// to assemble its observational witness, or store borrowed data past its owner.
+pub struct MemoryLedgerWitness {
+    pub kind: String
+    pub code: String
+    pub source: String
+    pub span_start: U64
+    pub span_end: U64
+    pub byte_spans: Bool
+    pub scope: String
+    pub provenance: String
+    pub detail: String
+    pub expected: String?
+    pub repairs: View<String>
+}
+
+// Rust 145-159 memory_ledger_escape maps DIRECTLY to Encoding/Json.jet's
+// json_escape / foundation_json_write_escaped. Both escape precisely Cc:
+// U+0000-001F and U+007F-009F; LF/CR/TAB use short escapes, BS/FF do not.
+// There is no MemSentry alias or second quotation implementation.
+fn jet_memory_ledger_append(out: &[U8], value: String) Never! {
+    loop byte in value.bytes() -> &out.push(byte)
+}
+// Rust 199-222. One amortized row buffer; no per-repair escaped strings,
+// collecting/joining a repair list, or repeated copying of the growing row.
+// Reuses the canonical JSON quotation owner (including its #4318/#4392
+// borrowed UTF-8 byte-provider gate), not Core's different short-control mode.
+pub fn jet_memory_ledger_row(witness: MemoryLedgerWitness) -> [U8] Never! {
+    out := [U8]{}
+    jet_memory_ledger_append(&out, "{{\"schema\":\"jet.memory.ledger\",\"version\":1,\"kind\":")
+    foundation_json_write_quote(&out, witness.kind)
+    jet_memory_ledger_append(&out, ",\"code\":")
+    foundation_json_write_quote(&out, witness.code)
+    jet_memory_ledger_append(&out, ",\"source\":")
+    foundation_json_write_quote(&out, witness.source)
+    jet_memory_ledger_append(&out, ",\"span_start\":{witness.span_start},\"span_end\":{witness.span_end},\"byte_spans\":{witness.byte_spans},\"scope\":")
+    foundation_json_write_quote(&out, witness.scope)
+    jet_memory_ledger_append(&out, ",\"provenance\":")
+    foundation_json_write_quote(&out, witness.provenance)
+    jet_memory_ledger_append(&out, ",\"detail\":")
+    foundation_json_write_quote(&out, witness.detail)
+    jet_memory_ledger_append(&out, ",\"expected\":")
+    if witness.expected == {
+        .None -> jet_memory_ledger_append(&out, "null")
+        .Val(value) -> foundation_json_write_quote(&out, value)
+    }
+    jet_memory_ledger_append(&out, ",\"repairs\":[")
+    loop (index, repair) in witness.repairs {
+        if index != 0 -> &out.push(U8{44})
+        foundation_json_write_quote(&out, repair)
+    }
+    jet_memory_ledger_append(&out, "]}}\n")
+    ^out
+}
+// Rust 223-225: mathematically equivalent to saturating_add > 4 MiB,
+// including existing=U64::MAX. Never add first and overflow.
+pub fn jet_memory_ledger_within_limit(existing: U64, row_bytes: U64) -> Bool Never! {
+    existing <= MAX_MEMORY_LEDGER_BYTES && row_bytes <= MAX_MEMORY_LEDGER_BYTES - existing
+}
+
+// Rust 251-257.
+pub fn jet_sentry_gate_name(gate: JetSentryGate) -> String Never! {
+    if gate.reason.is_empty() -> "{gate.file}:{gate.line}" else -> gate.reason
+}
+// Rust 308-310: native callers supply the actual compile configuration,
+// relaxed atomic load and current-context fence depth, never host assumptions.
+pub fn jet_sentry_runtime_available(release: Bool, hardened: Bool, fence_depth: U64) -> Bool Never! {
+    !release || hardened || fence_depth != (U64{0})
+}
+
+// Rust 83-100,619,626,630: selected-usize checked and saturating arithmetic.
+// target_max is the selected runtime usize::MAX, not the compiler-host width.
+pub fn jet_sentry_range_end(start: U64, len: U64, target_max: U64) -> U64 Never! {
+    if len > target_max - start -> target_max else -> start + len
+}
+pub fn jet_sentry_access_end(start: U64, bytes: U64, target_max: U64) -> U64? Never! {
+    count :: if bytes == (U64{0}) -> U64{1} else -> bytes
+    if count > target_max - start -> None else -> Val(start + count)
+}
+pub fn jet_sentry_live_range_contains(range_start: U64, len: U64, start: U64, end: U64, target_max: U64) -> Bool Never! {
+    start >= range_start && end <= jet_sentry_range_end(range_start, len, target_max)
+}
+pub fn jet_sentry_starts_in_live_range(range_start: U64, len: U64, start: U64, target_max: U64) -> Bool Never! {
+    // Inclusive at the end: an access starting one-past-end is a boundary fault
+    // even on a borrowed foreign edge. Expired containment below is exclusive.
+    start >= range_start && start <= jet_sentry_range_end(range_start, len, target_max)
+}
+pub fn jet_sentry_expired_range_contains(range_start: U64, len: U64, start: U64, target_max: U64) -> Bool Never! {
+    start >= range_start && start < jet_sentry_range_end(range_start, len, target_max)
+}
+// Rust 94: low endpoint of the inclusive composite-key tree query.
+pub fn jet_sentry_expired_stack_lowest(start: U64, max_expired_len: U64) -> U64 Never! {
+    reach :: if max_expired_len == (U64{0}) -> U64{0} else -> max_expired_len - U64{1}
+    if reach > start -> U64{0} else -> start - reach
+}
+// Rust 84-93: reverse registration order, not a maximum over the entire heap.
+pub fn jet_sentry_newest_expired_heap(heap: View<JetSentryAllocation>, start: U64, target_max: U64) -> U64? Never! {
+    index := heap.len()
+    loop index > 0 {
+        index -= 1
+        record :: heap[index]
+        if !record.live && jet_sentry_expired_range_contains(record.start, record.len, start, target_max) -> return Val(record.seq)
+    }
+    None
+}
+// Rust 101-106: ties belong to heap, not stack. The caller obtains stack_seq
+// from the canonical bounded BTreeMap range iterator, never a whole-table scan.
+pub fn jet_sentry_newest_expired_kind(heap_seq: U64?, stack_seq: U64?) -> Bool? Never! {
+    if heap_seq == {
+        .Val(heap) -> if stack_seq == { .Val(stack) -> Val(stack > heap) .None -> Val(false) }
+        .None -> if stack_seq == { .Val(_) -> Val(true) .None -> None }
+    }
+}
+
+// Rust 502-513.
+pub enum JetSentryObligationStatus {
+    Failed
+    pub fn as_str(self) -> String Never! {
+        if self == { .Failed -> "false" }
+    }
+}
+// Rust 515-527. The original has no error-kind/coercion surface.
+pub struct JetSentryFault {
+    pub code: String
+    pub file: String
+    pub line: U32
+    pub gate: String
+    pub operation: String
+    pub obligation: String
+    pub obligation_status: JetSentryObligationStatus
+    pub foreign_component: String?
+    pub foreign_fenced: Bool?
+    pub detail: String
+}
+
+// Rust 635-671: complete precedence after the native recorder has computed
+// live/starts_in_live/newest_expired under ONE lock. This function performs no
+// memory observation. None is absence of a fault, not an unavailable provider.
+pub fn jet_sentry_code_detail(start: U64, alignment: U64, end: U64?, live: Bool, starts_in_live: Bool, newest_expired: Bool?, require_provenance: Bool) -> (code: String, detail: String)? Never! {
+    align :: if alignment == (U64{0}) -> U64{1} else -> alignment
+    if live {
+        if start % align != (U64{0}) -> return Val((code: "R0803", detail: "address 0x{sentry_fmt.hex(Int.from_u64(start), 0)} is not aligned to {align} bytes"))
+        return None
+    }
+    if newest_expired == .Val(stack) {
+        return Val((code: "R0802", detail: if stack -> "the owning Jet frame has expired" else -> "the address belongs to quarantined storage"))
+    }
+    if starts_in_live -> return Val((code: "R0801", detail: "the foreign access extends beyond a live allocation"))
+    if require_provenance || start == (U64{0}) || end == None -> return Val((code: "R0801", detail: "no live allocation contains this address"))
+    if start % align != (U64{0}) -> return Val((code: "R0803", detail: "address 0x{sentry_fmt.hex(Int.from_u64(start), 0)} is not aligned to {align} bytes"))
+    None
+}
+// Rust 672-703. Fault assembly is separate from ledger I/O: I/O failure must
+// never suppress/replace the original R08xx fact. Fault members are moved once.
+pub fn jet_sentry_fault(gate: ^JetSentryGate, operation: ^String, obligation: ^String, foreign_component: ^String?, fence_depth: U64, code_detail: ^(code: String, detail: String)) -> JetSentryFault Never! {
+    component := ^foreign_component
+    if component == .Val(value) && value.is_empty() -> component = None
+    fenced :: if component == { .Val(_) -> Val(fence_depth != (U64{0})) .None -> None }
+    name :: jet_sentry_gate_name(gate)
+    JetSentryFault{code: ^code_detail.code, file: ^gate.file, line: gate.line,
+        gate: name, operation: ^operation, obligation: ^obligation,
+        obligation_status: JetSentryObligationStatus.Failed,
+        foreign_component: ^component, foreign_fenced: fenced, detail: ^code_detail.detail}
+}
+// Rust 678-691. Static repair lists, borrowed by the ledger writer.
+JET_SENTRY_EXPIRED_REPAIRS :: prep { [String]{"move the raw access before the storage is released", "replace the raw pointer with an owned value"} }
+JET_SENTRY_ALIGNMENT_REPAIRS :: prep { [String]{"derive an aligned pointer from the live allocation", "use the typed memory operation instead of raw address arithmetic"} }
+JET_SENTRY_PROVENANCE_REPAIRS :: prep { [String]{"derive the pointer from live storage inside this gate", "remove the raw access"} }
+pub fn jet_sentry_repairs(code: String) -> View<String> Never! {
+    if code == {
+        "R0802" -> JET_SENTRY_EXPIRED_REPAIRS.view(0..<2)
+        "R0803" -> JET_SENTRY_ALIGNMENT_REPAIRS.view(0..<2)
+        else -> JET_SENTRY_PROVENANCE_REPAIRS.view(0..<2)
+    }
+}
+
+// Native capability closure -- declarations are deliberately withheld, not
+// stubs, Rust bridges, callbacks to a fake provider, or source-parity claims.
+// #4494 / #4392:
+// 52 SentryRecords(default), 61 next_seq, 66 expire_stack, 72 live_ranges,
+// 83 newest_expired: canonical mutable hash-map frame entries and ordered
+// (usize,usize)->u64 expired map. next_seq increments once per registration;
+// expire_stack keeps max(previous,seq), then max_expired_len=max(old,len).
+// Live iterator chains live heap and every active frame without materializing
+// ranges. newest_expired_heap/kind/lowest/contains above port its scalar body.
+// #4499: composite-key equality/order + inclusive BTreeMap range iterator
+// [(lowest,0),(start,usize::MAX)]; iterate ONLY that range and maximize sequence.
+// String-key encoding and linear-array whole-expired-table scans are forbidden.
+// 110 ALLOCATIONS / 114 MEMORY_LEDGER_LOCK / 247 allocations / 725 TEST_LOCK:
+// process-global lazy Shared/SentryRecords and global unit lock; poison recovery
+// acquires the existing state, never a replacement/default registry.
+// 111 HARDENED / 112 NEXT_SENTRY_FRAME / 372 set_hardened: native inline relaxed
+// atomic bool load/store and target-usize fetch_add returning its OLD value;
+// frame counter starts at 1 and reset MUST NOT reset that counter.
+// 241-245 GATE/FENCE_DEPTH/SENTRY_FRAMES: independent native execution-context
+// TLS Option<Gate>, usize cell, and frame-id vector, not a task-id string map.
+// 259 JetSentryGuard / 265 drop / 312 scope_inner / 340 scope / 344 fenced_scope
+// / 353 policy_scope: deterministic RAII restore on EVERY exit, including fault
+// unwinding. Increment fence depth (saturating usize) BEFORE runtime_available.
+// Save previous gate (replace, not append); policy_scope clones current/default
+// gate, changes enabled only; destructor takes saved gate and restores depth.
+// 276 JetSentryFrame / 281 drop / 397 current_frame / 406 frame: atomic OLD id
+// pushed unconditionally. Drop takes Option id (idempotent), pops LIFO or retains
+// all ids != id for early-drop recovery; removes ONLY that frame's map entry,
+// expires each removed range under one poison-recovering allocation lock.
+// 376 reset: clears current TLS state + frames + hardened + records only.
+// 386 register_allocation / 390 register_owned_allocation / 415 stack_registration
+// / 422 register_inner: early-return if unavailable or start==0; active stack
+// token required. Normalize len=max(bytes,1); increment shared sequence; append
+// heap in order OR edit frame vector matching BOTH start and len in place.
+// 453 quarantine: under one record lock mark EVERY live heap matching start;
+// retain nonmatching stack entries, collect matched records then expire them.
+// Poison bytes only if some record was removed/marked AND bytes!=0. Needs
+// audited raw byte fill(start,0xDD,bytes) while lock remains held, not a Rust call.
+// 488 quarantine_owner: mark EVERY live heap whose optional owner==Some(owner),
+// no raw poisoning and no stack expiry; early return only when unavailable.
+// 529 check / 546 foreign / 565 foreign_with_component / 587 foreign_strict
+// / 607 check_inner: snapshot only an enabled TLS gate; normalize bytes/alignment;
+// one lock computes any full live containment, any inclusive starts-in-live and
+// newest expired. Raw/strict requires provenance; foreign permits unknown aligned
+// nonnull nonoverflowing storage. Empty component -> None; fenced iff nonempty
+// component and TLS depth!=0. Assemble fault, then observational ledger write:
+// kind=sentry, source=file, span_start=span_end=u64(line), byte_spans=false,
+// scope=gate, provenance="source #Unsafe gate", detail, expected=None, repairs.
+// Ignore ONLY ledger error, never the original fault. Pure branches are above.
+// 134 memory_ledger_path / 163 jet_memory_ledger_record: native var_os (nonempty)
+// JET_MEMORY_LEDGER, else fallible native current_dir joined component-wise with
+// .jet/memory/ledger-v1.jsonl; neither path may be forced through UTF-8. None
+// means successful observational absence, not a native-unavailable fallback.
+// Under MEMORY_LEDGER_LOCK: parent(nonempty) else "."; lstat parent rejects
+// non-real-directory; NotFound creates recursively, then Unix chmod 0700 ONLY
+// on that creation path. lstat file rejects anything but real regular file;
+// NotFound size=0. Build row, apply the exact 4MiB byte check, open create+append
+// (Unix creation mode 0600; do not chmod an existing file), write_all then flush.
+// Preserve errors in order: "memory ledger directory is not a real directory";
+// "cannot create memory ledger directory: {error}"; Unix "cannot secure memory
+// ledger directory: {error}"; "cannot inspect memory ledger directory: {error}";
+// "memory ledger path is not a regular file"; "cannot inspect memory ledger:
+// {error}"; "memory ledger exceeds its 4 MiB safety limit"; "cannot open memory
+// ledger: {error}"; "cannot append memory ledger: {error}". Core.files.stat,
+// text getenv, and append_all do NOT implement this no-follow/mode/flush closure.
+// #4483 applies to ALL usize operations, release cfg and Unix-only mode branches.
+// #4409: exact IOError.NotFound discrimination above; other errors never become
+// size zero or ignored directory failures. InvalidData/InvalidInput unused here.
+// Original runtime tests 728/749/772/817 remain gated in Tests/MemSentry.jet;
+// pure policy tests there are additional tests, never replacements for them.

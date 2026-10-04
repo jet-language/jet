@@ -1,0 +1,192 @@
+// Rust Names.rs:915-1063,1084-1279 plus shared-span/generated-display regressions.
+fn names_projection_facts() -> NameLedger Never! {
+    ledger := name_ledger_new()
+    name_ledger_set_module(&ledger, 0, "app", "app.jet", "pkg")
+    name_ledger_set_module(&ledger, 1, "lib", "lib.jet", "pkg")
+    name_ledger_set_module(&ledger, 2, "dep", "dep.jet", "dep")
+    ledger
+}
+fn names_projection_declare(facts: &NameLedger, module_index: Int, name: String, path: String, kind: String, start: Int, end: Int, visibility: MIRNameVisibility) Never! {
+    name_ledger_declare(&facts, module_index, name, path, kind, Span{start: start, end: end}, visibility)
+}
+fn names_projection_alias(facts: &NameLedger, module_index: Int, name: String, target: String, target_module: Int?, visibility: MIRNameVisibility) Never! {
+    name_ledger_record_alias(&facts, module_index, name, target, target_module, Span{start: 3, end: 7}, visibility)
+}
+fn names_projection_has_path(paths: [MIRNameCanonicalPath], name: String, path: String) -> Bool Never! {
+    loop row in paths { if row.name == name && row.path == path -> return true }
+    false
+}
+
+#Test("names_canonical_path_follows_declarations_and_aliases") {
+    facts := names_projection_facts()
+    names_projection_declare(&facts, 1, "Thing", "lib.Thing", "type", 3, 7, MIRNameVisibility.Public)
+    names_projection_alias(&facts, 0, "Alias", "lib.Thing", Val(1), MIRNameVisibility.Public)
+    assert_eq(name_ledger_canonical_path(facts, 1, "Thing"), Val("lib.Thing"))
+    assert(names_projection_has_path(name_ledger_canonical_paths(facts, 1), "pkg::lib.jet::Thing", "lib.Thing"))
+    assert_eq(name_ledger_canonical_path_at(facts, 1, 3, 7), Val("lib.Thing"))
+    generated :: foundation_member_name("Inner", "helper")
+    names_projection_declare(&facts, 0, generated, "app.Inner.helper", "function", 3, 7, MIRNameVisibility.Private)
+    assert_eq(name_ledger_display_path(facts, 0, generated, Val(0)), Val("app.Inner.helper"))
+    assert_eq(name_ledger_canonical_path(facts, 0, "Alias"), Val("lib.Thing"))
+    assert_eq(name_ledger_display_path(facts, 0, "Alias", Val(1)), Val("Alias"))
+    names_projection_alias(&facts, 0, "lib", "lib", Val(1), MIRNameVisibility.Public)
+    assert(names_projection_has_path(name_ledger_canonical_paths(facts, 0), "lib.Thing", "lib.Thing"))
+}
+
+#Test("names_display_path_qualifies_ambiguous_visible_leaves") {
+    facts := names_projection_facts()
+    names_projection_declare(&facts, 1, "Thing", "one.Thing", "type", 3, 7, MIRNameVisibility.Public)
+    names_projection_declare(&facts, 2, "Thing", "two.Thing", "type", 3, 7, MIRNameVisibility.Public)
+    assert_eq(name_ledger_display_path(facts, 0, "Thing", Val(2)), Val("two.Thing"))
+    // Stable BTreeSet fallback, independent of declaration insertion order.
+    assert_eq(name_ledger_display_path(facts, 0, "Thing", None), Val("one.Thing"))
+}
+
+#Test("names_display_path_at_projects_unique_and_ambiguous_definitions") {
+    facts := names_projection_facts()
+    names_projection_declare(&facts, 0, "Point", "app.Point", "type", 10, 15, MIRNameVisibility.Public)
+    assert_eq(name_ledger_display_path_at(facts, 0, 10, 15, "Point", None, Val(0)), Val("Point"))
+    names_projection_declare(&facts, 1, "Point", "one.Point", "type", 3, 7, MIRNameVisibility.Public)
+    names_projection_declare(&facts, 2, "Point", "two.Point", "type", 3, 7, MIRNameVisibility.Public)
+    assert_eq(name_ledger_display_path_at(facts, 0, 3, 7, "Point", None, Val(2)), Val("two.Point"))
+}
+
+#Test("names_display_path_at_projects_members_from_their_owner") {
+    facts := names_projection_facts()
+    names_projection_declare(&facts, 0, "Point", "app.Point", "type", 10, 15, MIRNameVisibility.Public)
+    names_projection_declare(&facts, 0, "Point.x", "app.Point.x", "field", 20, 21, MIRNameVisibility.Public)
+    assert_eq(name_ledger_display_path_at(facts, 0, 20, 21, "x", Val("Point"), Val(0)), Val("Point.x"))
+    names_projection_declare(&facts, 1, "Point", "one.Point", "type", 3, 7, MIRNameVisibility.Public)
+    assert_eq(name_ledger_display_path_at(facts, 0, 20, 21, "x", Val("Point"), Val(0)), Val("app.Point.x"))
+}
+
+#Test("names_ledger_projects_paths_and_visibility") {
+    facts := names_projection_facts()
+    names_projection_declare(&facts, 1, "Thing", "lib.Thing", "type", 3, 7, MIRNameVisibility.Package)
+    assert_eq(name_ledger_canonical_path(facts, 1, "Thing"), Val("lib.Thing"))
+    assert(name_ledger_visible(facts, 0, 1, "Thing"))
+    assert(!name_ledger_visible(facts, 2, 1, "Thing"))
+    assert(name_ledger_exported(facts, 1, "Thing"))
+    names_projection_declare(&facts, 1, "Thing", "lib.Thing", "type", 3, 7, MIRNameVisibility.Private)
+    assert(!name_ledger_visible(facts, 0, 1, "Thing"))
+    name_ledger_set_module_namespace(&facts, 0, "pkg-root")
+    name_ledger_set_module_namespace(&facts, 1, "pkg-root")
+    assert(name_ledger_visible(facts, 0, 1, "Thing"))
+    assert(!name_ledger_exported(facts, 1, "Thing"))
+}
+
+#Test("names_ledger_projects_alias_visibility") {
+    facts := names_projection_facts()
+    names_projection_alias(&facts, 0, "Thing", "lib.Thing", Val(1), MIRNameVisibility.Public)
+    assert(name_ledger_exported(facts, 0, "Thing"))
+    assert_eq((name_ledger_effective_alias(facts, 0, "Thing") ?? panic("alias")).target, "lib.Thing")
+    names_projection_declare(&facts, 0, "Thing", "app.Thing", "type", 3, 7, MIRNameVisibility.Private)
+    assert(!name_ledger_exported(facts, 0, "Thing"))
+    assert(name_ledger_effective_alias(facts, 0, "Thing") != None)
+}
+
+#Test("names_file_module_declaration_keeps_visibility_and_alias_target") {
+    facts := names_projection_facts()
+    names_projection_declare(&facts, 1, "helper", "lib.helper", "file_module", 3, 7, MIRNameVisibility.Package)
+    assert(name_ledger_exported(facts, 1, "helper"))
+    assert(name_ledger_visible(facts, 0, 1, "helper"))
+    assert(!name_ledger_visible(facts, 2, 1, "helper"))
+    names_projection_alias(&facts, 1, "helper", "helper", Val(2), MIRNameVisibility.Package)
+    assert_eq((name_ledger_effective_alias(facts, 1, "helper") ?? panic("alias")).target_module, Val(2))
+}
+
+#Test("names_shared_span_requires_unique_or_exact_key") {
+    facts := names_projection_facts()
+    names_projection_declare(&facts, 0, "Box", "app.Box", "type", 3, 7, MIRNameVisibility.Public)
+    names_projection_declare(&facts, 0, "Box.encode", "app.Box.encode", "method", 3, 7, MIRNameVisibility.Public)
+    names_projection_declare(&facts, 0, "Box.decode", "app.Box.decode", "method", 3, 7, MIRNameVisibility.Public)
+    assert_eq(name_ledger_canonical_path_at(facts, 0, 3, 7), None)
+    assert_eq((name_ledger_declaration_at(facts, 0, 3, 7, Val("Box.encode")) ?? panic("exact key")).name, "Box.encode")
+    assert_eq(name_ledger_declaration_at(facts, 0, 3, 7, Val("local")), None)
+    // Shared spans must not hand a local the type's canonical path.
+    assert_eq(name_ledger_display_path_at(facts, 0, 3, 7, "local", None, Val(0)), None)
+    assert_eq(name_ledger_display_path_at(facts, 0, 3, 7, "Box", None, Val(0)), Val("Box"))
+}
+
+#Test("names_generated_span_bridge_and_display_do_not_change_identity") {
+    facts := names_projection_facts()
+    generated :: foundation_member_name("Inner", "helper")
+    names_projection_declare(&facts, 0, generated, "app.Inner.helper", "function", 30, 40, MIRNameVisibility.Private)
+    assert_eq(name_ledger_display_path_at(facts, 0, 30, 40, "helper", None, Val(0)), Val("app.Inner.helper"))
+    names_projection_declare(&facts, 0, "M4BankAccount", "app.M4BankAccount", "type", 50, 60, MIRNameVisibility.Public)
+    before :: name_ledger_semantic_identity(facts, 0, "M4BankAccount")
+    name_ledger_record_display_path(&facts, 0, "app.M4BankAccount", "bank.Account")
+    assert_eq(name_ledger_display_path(facts, 0, "M4BankAccount", Val(0)), Val("bank.Account"))
+    assert_eq(name_ledger_canonical_path(facts, 0, "M4BankAccount"), Val("app.M4BankAccount"))
+    assert_eq(name_ledger_semantic_identity(facts, 0, "M4BankAccount"), before)
+}
+
+#Test("names_reference_key_is_source_use_site_not_definition") {
+    facts := names_projection_facts()
+    first :: MIRNameReference{module_path: "lib.jet", kind: "type", def_span: Span{start: 3, end: 7}, semantic_identity: Val("pkg::lib.jet::Thing")}
+    name_ledger_record_reference(&facts, "app.jet", 20, 25, first)
+    name_ledger_record_reference(&facts, "app.jet", 40, 45, first)
+    assert_eq((name_ledger_reference(facts, "app.jet", 20, 25) ?? panic("first use")).semantic_identity, Val("pkg::lib.jet::Thing"))
+    assert_eq((name_ledger_reference(facts, "app.jet", 40, 45) ?? panic("second use")).def_span, Span{start: 3, end: 7})
+    assert_eq(name_ledger_reference(facts, "lib.jet", 20, 25), None)
+    assert_eq(name_ledger_reference(facts, "app.jet", 3, 7), None)
+    replacement := first
+    replacement.kind = "method"
+    name_ledger_record_reference(&facts, "app.jet", 40, 45, replacement)
+    assert_eq((name_ledger_reference(facts, "app.jet", 40, 45) ?? panic("last write")).kind, "method")
+}
+
+#Test("names_canonical_paths_are_sorted_exact_pairs_and_include_import_members") {
+    facts := names_projection_facts()
+    names_projection_declare(&facts, 1, "Z", "lib.Z", "type", 3, 7, MIRNameVisibility.Public)
+    names_projection_declare(&facts, 1, "A", "lib.A", "type", 8, 9, MIRNameVisibility.Private)
+    names_projection_alias(&facts, 0, "dep", "lib", Val(1), MIRNameVisibility.Private)
+    names_projection_alias(&facts, 0, "Z", "lib.Z", Val(1), MIRNameVisibility.Public)
+    paths :: name_ledger_canonical_paths(facts, 0)
+    assert_eq(paths.len(), 3)
+    assert_eq(paths[0], MIRNameCanonicalPath{name: "Z", path: "lib.Z"})
+    assert_eq(paths[1], MIRNameCanonicalPath{name: "dep.A", path: "lib.A"})
+    assert_eq(paths[2], MIRNameCanonicalPath{name: "dep.Z", path: "lib.Z"})
+}
+
+#Test("names_display_duplicate_alias_paths_collapse_and_missing_is_none") {
+    facts := names_projection_facts()
+    names_projection_declare(&facts, 1, "Thing", "lib.Thing", "type", 3, 7, MIRNameVisibility.Public)
+    names_projection_alias(&facts, 0, "Thing", "lib.Thing", Val(1), MIRNameVisibility.Public)
+    assert_eq(name_ledger_display_path(facts, 0, "Thing", Val(1)), Val("Thing"))
+    assert_eq(name_ledger_canonical_path(facts, 0, "missing"), None)
+    assert_eq(name_ledger_display_path(facts, 0, "missing", None), None)
+    assert_eq(name_ledger_semantic_identity(facts, 99, "Thing"), None)
+    assert(!name_ledger_exported(facts, 0, "missing"))
+}
+
+#Test("names_import_identity_is_alias_definition_span_not_source_spelling") {
+    facts := names_projection_facts()
+    names_projection_alias(&facts, 0, "dep", "lib", Val(1), MIRNameVisibility.Public)
+    assert_eq(name_ledger_alias_identity(facts, 0, Span{start: 3, end: 7}), Val("import:app.jet::3..7"))
+    assert_eq(name_ledger_alias_identity(facts, 0, Span{start: 4, end: 7}), None)
+    assert_eq(name_ledger_alias_identity(facts, 1, Span{start: 3, end: 7}), None)
+    assert_eq(name_ledger_module_path(facts, 1), Val("lib.jet"))
+    assert_eq(name_ledger_module_alias(facts, 1), Val("lib"))
+    assert_eq(name_ledger_module_path(facts, -1), None)
+    assert_eq(name_ledger_module_alias(facts, 99), None)
+}
+
+#Test("native_name_projection_retains_source_ledger_metadata") {
+    ledger := names_projection_facts()
+    names_projection_declare(&ledger, 0, "Generated", "app.Generated", "type", 3, 7, MIRNameVisibility.Private)
+    name_ledger_record_display_path(&ledger, 0, "app.Generated", "source.Member")
+    name_ledger_set_module_namespace(&ledger, 0, "pkg-root")
+    name_ledger_set_module_namespace(&ledger, 1, "pkg-root")
+    reference :: MIRNameReference{module_path: "app.jet", kind: "type", def_span: Span{start: 3, end: 7}, semantic_identity: Val("pkg::app.jet::Generated")}
+    name_ledger_record_reference(&ledger, "lib.jet", 20, 25, reference)
+    name_ledger_record_reference(&ledger, "lib.jet", 30, 35, reference)
+    native :: name_ledger_mir_facts(ledger)
+    assert_eq(native.references.len(), 2)
+    assert_eq(native.references[0], reference)
+    assert_eq(native.references[1], reference)
+    assert_eq(native.declarations[0].path, "app.Generated")
+    assert_eq(name_ledger_display_path(ledger, 1, "Generated", Val(0)), Val("source.Member"))
+    assert(name_ledger_same_namespace(ledger, 0, 1))
+    assert_eq(name_ledger_reference(ledger, "lib.jet", 30, 35), Val(reference))
+}

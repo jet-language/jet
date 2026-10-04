@@ -3,15 +3,22 @@
 // vector positions are only local lookup accelerators.
 use jet_foundation.[
     AccessConvention,
+    ArithmeticPolicyFact,
     Diagnostic,
     DebugTraceSite,
     ElseArmSpan,
     Expr,
     Item,
     MIRTargetHardwareUse,
+    Marker,
     PolicyDeclaration,
     PolicyKey,
     PolicyScope,
+    GateSet,
+    PolicyValue,
+    gate_set_allows,
+    policy_key_name,
+    policy_resolve_with_gates,
     Span,
     Stmt,
     Symbol,
@@ -327,6 +334,12 @@ pub struct SemaComptimeBodyValue {
 
 pub struct SemaScopeEnvironment {
     pub registration_graph: SemaRegistrationGraph?
+    // One package vocabulary per environment; target buckets refresh whenever
+    // a module enters the live check. No graph copies or per-statement scans.
+    pub marker_registry: SemaScopeMembersMarkerRegistry?{None}
+    pub marker_target_starts: [Int:Int]{[Int:Int]{}}
+    pub marker_target_ends: [[Int:Int]]{[[Int:Int]]{}}
+    pub marker_target_buckets: [[Marker]]{[[Marker]]{}}
     pub module_identity: String
     pub package_identity: String
     pub module_name: String
@@ -356,11 +369,20 @@ pub struct SemaScopeEnvironment {
     // The enclosing named callable being checked; panic and propagation
     // locations name it (Rust `capture_panic_loc` `fn_name`).
     pub function_name: String{""}
+    // Rust IncrementalSemaCache is resident per checked root. The environment
+    // shares only its owner handle; body passes never copy the cache.
+    pub incremental_cache: Shared<SemaIncrementalSemaCache>?{None}
+    pub incremental_probe: Bool{false}
 }
  
 pub struct SemaCheckContext {
     pub exact_int_reachable: Bool
     pub unsafe_depth: Int
+    // Rust Checker::arithmetic_policy_stack.last(): lexical consumers save
+    // and restore this scalar; policies never cross a function call boundary.
+    pub arithmetic_policy: ArithmeticPolicyFact?{None}
+    // Result of the canonical Every observation, not a second type probe.
+    pub invalid_every_argument: Bool{false}
     pub borrow_ctx: Bool
     pub allow_string_view_read: Bool
     pub allow_fixed_constructor: Bool
@@ -462,6 +484,14 @@ pub struct SemaScopeModulePolicy {
     // Split the exact span key into scalar indexes, without formatting it.
     pub function_unit_starts: [Int:Int]
     pub function_unit_ends: [[Int:Bool]]
+    pub audited: Shared<SemaAuditedPolicy>
+}
+
+// Rust Checker::policy_declarations/gates: one immutable module policy plane,
+// shared by body scopes and rollback snapshots, never an AST/graph copy.
+pub struct SemaAuditedPolicy {
+    pub declarations: [PolicyDeclaration]
+    pub gates: GateSet
 }
 
 pub struct SemaScopeTable {
@@ -494,6 +524,9 @@ pub struct SemaScopeTable {
     // A new graph/module setup reseeds it, including each staging version.
     pub policy_modules: [String:Int]{[String:Int]{}}
     pub policy_rows: [SemaScopeModulePolicy]{[SemaScopeModulePolicy]{}}
+    pub audited_policy: Shared<SemaAuditedPolicy>?{None}
+    pub audited_function_span: Span?{None}
+    pub audited_blocks: [PolicyDeclaration]{[PolicyDeclaration]{}}
     // Rollback support (sema_scope_mark / sema_scope_rollback): while a mark
     // is open, an in-place edit of an existing binding first records the old
     // row here, so a rollback restores the table without a whole-table copy.
@@ -540,8 +573,14 @@ pub fn sema_scope_environment_init(graph: ^SemaRegistrationGraph?, module_identi
     }
     boxed_edges := [String:[String]]{}
     if graph == .Val(value) -> boxed_edges = sema_checked_program_boxed_edges(value)
+    marker_registry := SemaScopeMembersMarkerRegistry?{None}
+    if graph == .Val(value) && value.modules.len() > 0 {
+        first :: value.modules[0]
+        marker_registry = sema_scope_members_build_marker_registry(value, first.module_identity, first.program)
+    }
     SemaScopeEnvironment{
         registration_graph: graph,
+        marker_registry: marker_registry,
         module_identity: module_identity,
         package_identity: package_identity,
         module_name: module_name,
@@ -585,6 +624,7 @@ pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, m
     environment.comptime_body_values = comptime_body_values
     environment.else_arms = module_row.program.else_arms
     environment.debug_sites = module_row.program.debug_sites
+    sema_marker_rules_index_program_targets(&environment, module_row.program)
     environment.function_name = ""
 }
 
@@ -609,6 +649,7 @@ pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironm
         environment.else_arms = [ElseArmSpan]{}
         environment.debug_sites = [DebugTraceSite]{}
         environment.function_name = ""
+        sema_marker_rules_index_program_targets(&environment, graph.modules[module_index].program)
         return true
     }
     false
@@ -694,6 +735,8 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
     SemaCheckContext{
         exact_int_reachable: source.exact_int_reachable,
         unsafe_depth: source.unsafe_depth,
+        arithmetic_policy: source.arithmetic_policy,
+        invalid_every_argument: source.invalid_every_argument,
         borrow_ctx: source.borrow_ctx,
         allow_string_view_read: source.allow_string_view_read,
         allow_fixed_constructor: source.allow_fixed_constructor,
@@ -964,6 +1007,9 @@ pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
+        audited_policy: source.audited_policy,
+        audited_function_span: source.audited_function_span,
+        audited_blocks: ~source.audited_blocks,
         binding_undo: ~source.binding_undo,
         open_marks: source.open_marks,
     }
@@ -997,6 +1043,9 @@ pub fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
             transaction_wall_depth: table.transaction_wall_depth,
             unit_explicit_units: table.unit_explicit_units,
             copies_explicit: table.copies_explicit,
+            audited_policy: table.audited_policy,
+            audited_function_span: table.audited_function_span,
+            audited_blocks: ~table.audited_blocks,
             open_marks: table.open_marks,
         },
     }
@@ -1037,6 +1086,9 @@ pub fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     table.transaction_wall_depth = saved.transaction_wall_depth
     table.unit_explicit_units = saved.unit_explicit_units
     table.copies_explicit = saved.copies_explicit
+    table.audited_policy = saved.audited_policy
+    table.audited_function_span = saved.audited_function_span
+    table.audited_blocks = ~saved.audited_blocks
     // Exact even when a nested mark was abandoned by an early return.
     table.open_marks = saved.open_marks
 }
@@ -1283,14 +1335,23 @@ pub fn sema_scope_require_knowledge_gate(table: &SemaScopeTable, plane: SemaKnow
 // Rust: crates/jet-sema/src/Sema/mod.rs::Checker::explicit_units_enabled
 pub fn sema_scope_module_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) -> Int Never! {
     if table.policy_modules.get(module_identity) == .Val(position) -> return position
+    audited := SemaAuditedPolicy{declarations: [PolicyDeclaration]{}, gates: graph.build_facts.gates}
     policy := SemaScopeModulePolicy{
         unit_explicit_units: false,
         copies_explicit: false,
         function_unit_starts: [Int:Int]{},
         function_unit_ends: [[Int:Bool]]{},
+        audited: Shared.new(audited),
     }
     if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
         package_identity :: graph.modules[module_index].package_identity
+        package_declarations :: graph.build_facts.package_policies.get(package_identity) ?? [PolicyDeclaration]{}
+        {
+            permit := policy.audited.guard_write()
+            loop declaration in graph.build_facts.organization_policy -> &permit.value.declarations.push(declaration)
+            loop declaration in package_declarations -> &permit.value.declarations.push(declaration)
+            loop declaration in graph.modules[module_index].program.policy_declarations -> &permit.value.declarations.push(declaration)
+        }
         loop declaration in graph.modules[module_index].program.policy_declarations {
             if declaration.key != PolicyKey.ExplicitUnits || declaration.scope != PolicyScope.Function -> next
             target :: declaration.target ?? next
@@ -1308,6 +1369,10 @@ pub fn sema_scope_module_policy(table: &SemaScopeTable, graph: SemaRegistrationG
                 if declaration.scope != PolicyScope.Package && !(declaration.scope == PolicyScope.Module && graph.modules[declaration_index].module_identity == module_identity) -> next
                 if declaration.key == PolicyKey.ExplicitUnits -> policy.unit_explicit_units = true
                 if sema_string_view_copies_declaration(declaration) -> policy.copies_explicit = true
+                if declaration.scope == PolicyScope.Package {
+                    permit := policy.audited.guard_write()
+                    if graph.modules[declaration_index].module_identity != module_identity -> &permit.value.declarations.push(declaration)
+                }
             }
         }
     }
@@ -1324,12 +1389,18 @@ pub fn sema_scope_seed_unit_policy(table: &SemaScopeTable, graph: SemaRegistrati
     table.policy_rows = [SemaScopeModulePolicy]{}
     position :: sema_scope_module_policy(&table, graph, module_identity)
     table.unit_explicit_units = table.policy_rows[position].unit_explicit_units
+    table.audited_policy = Val(table.policy_rows[position].audited)
+    table.audited_function_span = None
+    table.audited_blocks = [PolicyDeclaration]{}
 }
 
 // Rust: crates/jet-sema/src/Sema/mod.rs::Checker::explicit_units_enabled
 pub fn sema_scope_apply_unit_policy_for_function(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, function_span: Span) Never! {
     position :: sema_scope_module_policy(&table, graph, module_identity)
     table.unit_explicit_units = table.policy_rows[position].unit_explicit_units
+    table.audited_policy = Val(table.policy_rows[position].audited)
+    table.audited_function_span = Val(function_span)
+    table.audited_blocks = [PolicyDeclaration]{}
     if table.policy_rows[position].function_unit_starts.get(function_span.start) == .Val(slot) {
         if table.policy_rows[position].function_unit_ends[slot].get(function_span.end) ?? false -> table.unit_explicit_units = true
     }
@@ -1485,4 +1556,38 @@ pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, id: Sym
         if declaration.symbol_id.key == id.key -> return Val(declaration.item)
     }
     None
+}
+
+// Rust Checker::audited_gate_allowed (Sema/mod.rs:3288-3335). Policy resolution
+// stays Foundation-owned; denied invocation gates never become permissive rows.
+pub fn sema_scope_audited_gate_allowed(table: SemaScopeTable, key: PolicyKey, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    declarations := [PolicyDeclaration]{}
+    gates := GateSet{bits: 0}
+    if table.audited_policy == .Val(policy) {
+        permit :: policy.guard_read()
+        gates = permit.value.gates
+        loop declaration in permit.value.declarations {
+            if declaration.key != key -> next
+            if declaration.scope == PolicyScope.Organization || declaration.scope == PolicyScope.Package || declaration.scope == PolicyScope.Module || declaration.target == table.audited_function_span || declaration.target == Val(span) -> &declarations.push(declaration)
+        }
+    }
+    loop declaration in table.audited_blocks {
+        if declaration.key == key -> &declarations.push(declaration)
+    }
+    name :: policy_key_name(key)
+    if policy_resolve_with_gates(key, declarations, gates) == {
+        .Ok(policy) -> {
+            if policy == .Val(effective) && effective.value == PolicyValue.Forbid {
+                code :: if key == PolicyKey.Unsafe -> "E3105" else -> "E3415"
+                &diagnostics.push(sema_error(code, span, "the `{name}` gate is denied by effective policy", "an organization or package policy can refuse an audited escape, including its invocation gate", "remove the `{name}` escape or change the owning policy"))
+                return false
+            }
+        }
+        .Err(_) -> {
+            code :: if gate_set_allows(gates, key) -> "E3415" else -> "E0355"
+            &diagnostics.push(sema_error(code, span, "the `{name}` gate is denied by effective policy", "an organization or package policy can refuse an audited escape, including its invocation gate", "remove `--gate {name}=allow` or change the owning policy"))
+            return false
+        }
+    }
+    true
 }

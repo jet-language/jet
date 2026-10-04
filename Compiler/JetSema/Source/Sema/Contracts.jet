@@ -36,6 +36,8 @@ use jet_foundation.[
     TStmt,
     Type,
     expr_span,
+    failure_contract_from_return_type,
+    failure_contract_effective_type,
     symbol_id,
     tir_generated_local,
     tir_call_arg_copy_fact,
@@ -71,7 +73,7 @@ fn sema_contract_result_mode(carrier: Type, binding: Type) -> TContractResultMod
 // The binding local carries the symbol `#Post` reads of `result` resolve to,
 // so lowering binds the checked return value under that identity.
 fn sema_contract_result_for_function(return_type: Type?, span: Span, environment: SemaScopeEnvironment, owner: String) -> TContractResult Never! {
-    carrier :: sema_effective_return_type(return_type)
+    carrier :: failure_contract_effective_type(failure_contract_from_return_type(return_type))
     binding :: sema_contract_success_type(return_type)
     mode :: sema_contract_result_mode(carrier, binding)
     binding_local := tir_generated_local("result", span)
@@ -178,7 +180,7 @@ fn sema_contract_result_ident_in_pattern(value: Pattern) -> Span? {
 fn sema_contract_result_ident_in_bind_pattern(value: BindPattern?) -> Span? {
     pattern :: value ?? return None
     if pattern == {
-        .Refutable(inner, fallback, _, _) -> {
+        .Refutable(inner, fallback, _, _, _) -> {
             found := sema_contract_result_ident_in_pattern(inner)
             if found != None -> return found
             sema_contract_result_ident_in_fallback(fallback)
@@ -408,7 +410,7 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
             None
         }
         .Field(base, _, _) | .OptField(base, _, _, _, _) -> sema_contract_result_ident_in_expr(base)
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _, _, _) -> {
             found := sema_contract_result_ident_in_expr(receiver)
             if found != None -> return found
             sema_contract_result_ident_in_call_args(args)

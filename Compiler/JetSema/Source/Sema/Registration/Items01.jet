@@ -1,0 +1,2349 @@
+// PORT-PENDING 0383 crates-jet-sema-src-sema-checkercorelib-core-types-slice-2187: crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:2187-4531
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn compiler_package_struct_field(type_name: &str, field: &str) -> Option<Type> {
+//RS     let string_list = || Type::List(Box::new(Type::String));
+//RS     let optional_string = || Type::Option(Box::new(Type::String));
+//RS     match type_name {
+//RS         "CompilerPackageError" => match field {
+//RS             "code" | "message" | "file" | "cause" => Some(Type::String),
+//RS             _ => None,
+//RS         },
+//RS         "CompilerDependency" => match field {
+//RS             "name" | "source" => Some(Type::String),
+//RS             _ => None,
+//RS         },
+//RS         "CompilerPackageTarget" => match field {
+//RS             "name" => Some(Type::String),
+//RS             "targets" => Some(string_list()),
+//RS             _ => None,
+//RS         },
+//RS         "CompilerPackageOutput" => match field {
+//RS             "name" | "kind" => Some(Type::String),
+//RS             "entry" => Some(optional_string()),
+//RS             _ => None,
+//RS         },
+//RS         "CompilerBuildProfile" => match field {
+//RS             "name" | "optimize" => Some(Type::String),
+//RS             "debug_info" | "small" => Some(Type::Bool),
+//RS             "panic" => Some(optional_string()),
+//RS             _ => None,
+//RS         },
+//RS         "CompilerManifest" | "CompilerPackage" => match field {
+//RS             "schema_version" => Some(Type::Int),
+//RS             "file" => Some(Type::String),
+//RS             "jet" | "edition" | "description" | "license" | "repository" | "layer" | "target" => {
+//RS                 Some(optional_string())
+//RS             }
+//RS             "dependencies" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerDependency".to_string(),
+//RS             )))),
+//RS             "packages" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerPackageTarget".to_string(),
+//RS             )))),
+//RS             "outputs" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerPackageOutput".to_string(),
+//RS             )))),
+//RS             "build_profiles" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerBuildProfile".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         },
+//RS         "CompilerLockedPackage" => match field {
+//RS             "name" | "version" | "source_kind" | "fingerprint" => Some(Type::String),
+//RS             "source" | "revision" | "content_hash" | "layer" | "inferred_layer" => {
+//RS                 Some(optional_string())
+//RS             }
+//RS             "dependencies" => Some(string_list()),
+//RS             _ => None,
+//RS         },
+//RS         "CompilerLock" => match field {
+//RS             "schema_version" | "version" => Some(Type::Int),
+//RS             "file" => Some(Type::String),
+//RS             "root_dependencies" => Some(string_list()),
+//RS             "packages" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerLockedPackage".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         },
+//RS         "CompilerKeyValue" => match field {
+//RS             "key" | "value" => Some(Type::String),
+//RS             _ => None,
+//RS         },
+//RS         "CompilerProfile" => match field {
+//RS             "name" => Some(Type::String),
+//RS             "extends" | "packages" | "sources" => Some(string_list()),
+//RS             "collisions" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerKeyValue".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         },
+//RS         "CompilerProfileSet" => match field {
+//RS             "schema_version" => Some(Type::Int),
+//RS             "file" => Some(Type::String),
+//RS             "profiles" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerProfile".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-MIGRATE3=A / card 2021: the ONE Core-struct field-type oracle every tier
+//RS /// reads. Sema owns it because sema is what typed the field read in the first
+//RS /// place (I3); AOT lowering, the Cranelift JIT and the TIR interpreter are
+//RS /// marshalling adapters that must not re-declare a Core record's shape (I9).
+//RS ///
+//RS /// `Type::Named` receivers go through [`core_struct_field`]; a reserved core
+//RS /// GENERIC (`DataJoin<L, R>`, `VjpRun<T>`, `Rotation<T>`)
+//RS /// goes through [`core_generic_struct_field`], which needs the type arguments.
+//RS /// Neither answers for a USER struct: every caller resolves its own struct
+//RS /// table first (D-SHIFT1 user-type-wins), exactly as `Checker::field_type`
+//RS /// does.
+//RS pub fn core_struct_field_type(type_name: &str, field: &str, args: &[Type]) -> Option<Type> {
+//RS     // Corelib nominal types carry a compiler-owned source identity. The
+//RS     // canonical Core record oracle is keyed by the declared type leaf.
+//RS     let type_name = type_name
+//RS         .strip_prefix("<corelib>/")
+//RS         .and_then(|identity| identity.rsplit("::").next())
+//RS         .unwrap_or(type_name);
+//RS     if args.is_empty() {
+//RS         core_struct_field(type_name, field)
+//RS     } else {
+//RS         core_generic_struct_field(type_name, field, args)
+//RS             .or_else(|| core_struct_field(type_name, field))
+//RS     }
+//RS }
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     pub(super) fn check_game_run_scene_edit(&mut self, expr: &Expr) {
+//RS         let Some(root) = expr_root_ident(expr) else {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0202",
+//RS                 "`game.run` needs a mutable scene binding".to_string(),
+//RS                 "running a scene advances its frame hooks and deterministic replay state"
+//RS                     .to_string(),
+//RS                 "store the scene in `scene := game.Scene.new(...)`, then call `game.run(scene)`"
+//RS                     .to_string(),
+//RS                 Some(expr.span()),
+//RS             ));
+//RS             return;
+//RS         };
+//RS         if let Some(info) = self.lookup(root) {
+//RS             if !info.mutable {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0202",
+//RS                     format!("`game.run` needs edit access to `{root}`"),
+//RS                     "running a scene advances its frame hooks and deterministic replay state"
+//RS                         .to_string(),
+//RS                     format!("declare `{root} := game.Scene.new(...)` before running it"),
+//RS                     Some(expr.span()),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Field access on reserved generic core values. Mirrors [`core_struct_field`]
+//RS /// for core types that carry generic type arguments (`Type::Apply`, not
+//RS /// `Type::Named`); see the `Type::Apply` arm in `CheckerInfer/expr.rs`.
+//RS pub(crate) fn core_generic_struct_field(
+//RS     type_name: &str,
+//RS     field: &str,
+//RS     args: &[Type],
+//RS ) -> Option<Type> {
+//RS     if type_name == "TypedHistoryCase" && args.len() == 1 {
+//RS         return match field {
+//RS             "case" => Some(Type::Named("HistoryCase".to_string())),
+//RS             "commands" => Some(Type::List(Box::new(args[0].clone()))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "HistoryStrategy" && args.len() == 1 {
+//RS         let command = args[0].clone();
+//RS         return match field {
+//RS             "generate" => Some(Type::Fn {
+//RS                 params: vec![
+//RS                     Type::Named("HistoryRNG".to_string()),
+//RS                     Type::Named("Count".to_string()),
+//RS                     Type::Named("Count".to_string()),
+//RS                 ],
+//RS                 ret: Some(Box::new(Type::Option(Box::new(Type::Apply {
+//RS                     name: "TypedHistoryCase".to_string(),
+//RS                     args: vec![command.clone()],
+//RS                 })))),
+//RS                 effect_bound: None,
+//RS                 param_contract: None,
+//RS                 call_metadata: None,
+//RS                 return_view_provenance: None,
+//RS             }),
+//RS             "rebuild" => Some(Type::Fn {
+//RS                 params: vec![Type::Named("HistoryCase".to_string())],
+//RS                 ret: Some(Box::new(Type::Option(Box::new(Type::Apply {
+//RS                     name: "TypedHistoryCase".to_string(),
+//RS                     args: vec![command.clone()],
+//RS                 })))),
+//RS                 effect_bound: None,
+//RS                 param_contract: None,
+//RS                 call_metadata: None,
+//RS                 return_view_provenance: None,
+//RS             }),
+//RS             "valid" => Some(Type::Fn {
+//RS                 params: vec![Type::Apply {
+//RS                     name: "TypedHistoryCase".to_string(),
+//RS                     args: vec![command],
+//RS                 }],
+//RS                 ret: Some(Box::new(Type::Bool)),
+//RS                 effect_bound: None,
+//RS                 param_contract: None,
+//RS                 call_metadata: None,
+//RS                 return_view_provenance: None,
+//RS             }),
+//RS             "bounds" => Some(Type::Named("HistoryBounds".to_string())),
+//RS             "distributions" => Some(Type::List(Box::new(Type::Named(
+//RS                 "HistoryDistribution".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "Measurement" && args.len() == 1 {
+//RS         return matches!(field, "value" | "uncertainty").then_some(args[0].clone());
+//RS     }
+//RS     if type_name == "FfiCallbackEvent" && args.len() == 1 {
+//RS         return (field == "value").then_some(args[0].clone());
+//RS     }
+//RS     // D-SPACE-GEOMETRY1=A: generic coordinate carriers have only numeric
+//RS     // payload fields; the second (and third for Transform2) arguments remain
+//RS     // compile-time nominal space identities.
+//RS     if matches!(type_name, "Point2" | "Delta2") && args.len() == 2 {
+//RS         return matches!(field, "x" | "y").then_some(args[0].clone());
+//RS     }
+//RS     if type_name == "Ray2" && args.len() == 3 {
+//RS         let output_space = args[2].clone();
+//RS         return match field {
+//RS             "origin" => Some(Type::Apply {
+//RS                 name: "Point2".to_string(),
+//RS                 args: vec![args[0].clone(), output_space.clone()],
+//RS             }),
+//RS             "direction" => Some(Type::Apply {
+//RS                 name: "Delta2".to_string(),
+//RS                 args: vec![args[0].clone(), output_space],
+//RS             }),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "Transform" && args.len() == 2 {
+//RS         return matches!(field, "m00" | "m01" | "m10" | "m11" | "tx" | "ty")
+//RS             .then_some(Type::Float);
+//RS     }
+//RS     if type_name == "Transform2" && args.len() == 3 {
+//RS         return matches!(field, "m00" | "m01" | "m10" | "m11" | "tx" | "ty")
+//RS             .then_some(args[0].clone());
+//RS     }
+//RS     if type_name == "WebTableColumn" && args.len() == 1 {
+//RS         return match field {
+//RS             "name" | "cell_type" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "WebTablePage" && args.len() <= 1 {
+//RS         let element = args.first().cloned().unwrap_or_else(|| Type::Named("T".to_string()));
+//RS         return match field {
+//RS             "rows" => Some(Type::List(Box::new(element))),
+//RS             "row_keys" => Some(Type::List(Box::new(Type::String))),
+//RS             "total_rows" | "page_index" | "page_size" | "page_count" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "WebTableRow" && args.len() == 1 {
+//RS         return match field {
+//RS             "key" => Some(Type::String),
+//RS             "value" => Some(args[0].clone()),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "WebTable" && args.len() == 1 {
+//RS         return match field {
+//RS             "name" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "WebStoreTransaction" && args.len() == 1 {
+//RS         return match field {
+//RS             "generation" => Some(Type::Int),
+//RS             "action" => Some(Type::String),
+//RS             "changed_fields" => Some(Type::List(Box::new(Type::String))),
+//RS             "before" | "after" => Some(args[0].clone()),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "WebVirtualPlan" && args.is_empty() {
+//RS         return match field {
+//RS             "total_count" | "scroll_offset" | "viewport_width" | "viewport_height"
+//RS             | "estimated_item_size" | "overscan" | "start" | "end" | "total_size"
+//RS             | "measured_count" | "anchor_index" | "anchor_offset" => Some(Type::Int),
+//RS             "measurements" => Some(Type::List(Box::new(Type::Tuple(vec![
+//RS                 ("index".to_string(), Box::new(Type::Int)),
+//RS                 ("size".to_string(), Box::new(Type::Int)),
+//RS             ])))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "WebVirtualPlanViewport" && args.is_empty() {
+//RS         return match field {
+//RS             "start" | "end" | "total_size" | "measured_count" | "anchor_index"
+//RS             | "anchor_offset" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "WebStore" && args.len() == 1 {
+//RS         return match field {
+//RS             "name" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "WebStoreInspection" && args.len() == 1 {
+//RS         return match field {
+//RS             "value" => Some(args[0].clone()),
+//RS             "generation" | "cursor" | "history_limit" => Some(Type::Int),
+//RS             "history" => Some(Type::List(Box::new(Type::Apply {
+//RS                 name: "WebStoreTransaction".to_string(),
+//RS                 args: vec![args[0].clone()],
+//RS             }))),
+//RS             "events" => Some(Type::List(Box::new(Type::Named(
+//RS                 "WebStoreEvent".to_string(),
+//RS             )))),
+//RS             "history_enabled" => Some(Type::Bool),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS 
+//RS     if type_name == "DataJoin" && args.len() == 2 {
+//RS         return match field {
+//RS             "left" => Some(args[0].clone()),
+//RS             "right" => Some(args[1].clone()),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlot" && args.len() == 1 {
+//RS         return match field {
+//RS             "rows" => Some(Type::List(Box::new(args[0].clone()))),
+//RS             "plan" => Some(Type::Named("JetDataPlotPlan".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "Group" && args.len() == 2 {
+//RS         return match field {
+//RS             "key" => Some(args[0].clone()),
+//RS             "value" => Some(args[1].clone()),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataStream" && args.len() == 1 {
+//RS         return match field {
+//RS             "items" => Some(Type::List(Box::new(args[0].clone()))),
+//RS             "index" => Some(Type::Int),
+//RS             "cancelled" => Some(Type::Bool),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataLoader" && args.len() == 1 {
+//RS         return match field {
+//RS             "source" => Some(Type::Named("DataSourceIdentity".to_string())),
+//RS             "format" => Some(Type::Named("DataFormat".to_string())),
+//RS             "authority" => Some(Type::Named("DataAuthority".to_string())),
+//RS             "limits" => Some(Type::Named("DataLimits".to_string())),
+//RS             "payload" | "last_good" => Some(Type::Option(Box::new(Type::List(Box::new(
+//RS                 u8_ty(),
+//RS             ))))),
+//RS             "cancelled" | "offline" => Some(Type::Bool),
+//RS             "status" => Some(Type::Named("DataLoaderStatus".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataSnapshot" && args.len() == 1 {
+//RS         return match field {
+//RS             "value" => Some(args[0].clone()),
+//RS             "identity" => Some(Type::Named("DataSnapshotIdentity".to_string())),
+//RS             "provenance" => Some(Type::Named("DataProvenance".to_string())),
+//RS             "schema" => Some(Type::Named("DataSchema".to_string())),
+//RS             "status" => Some(Type::Named("DataLoaderStatus".to_string())),
+//RS             "content" => Some(Type::List(Box::new(u8_ty()))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "VJPRun" && args.len() == 1 {
+//RS         return match field {
+//RS             "value" => Some(Type::Named("Tensor".to_string())),
+//RS             "pull" => Some(Type::Fn {
+//RS                 params: vec![Type::Named("Tensor".to_string())],
+//RS                 ret: Some(Box::new(args[0].clone())),
+//RS                 effect_bound: None,
+//RS                 param_contract: None,
+//RS                 call_metadata: None,
+//RS                 return_view_provenance: None,
+//RS             }),
+//RS             "grads" => Some(args[0].clone()),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "Rotation" && args.len() == 1 {
+//RS         return match field {
+//RS             "previous" | "current" => Some(Type::Apply {
+//RS                 name: "KeyRef".to_string(),
+//RS                 args: vec![args[0].clone()],
+//RS             }),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     None
+//RS }
+//RS /// D-DX-QUEUE1=A: method return contracts for the typed durable queue.
+//RS /// Arity is part of recognition so an invalid call remains a recognized queue
+//RS /// method and can receive the shared wrong-arity diagnostic in method sema.
+//RS pub(crate) fn job_queue_method_return(
+//RS     ty: &Type,
+//RS     method: &str,
+//RS     n_args: usize,
+//RS ) -> Option<Option<Type>> {
+//RS     let Type::Named(name) = ty else {
+//RS         return None;
+//RS     };
+//RS     if name != "JobQueue" {
+//RS         return None;
+//RS     }
+//RS     let service_error = || Type::Named("ServiceError".to_string());
+//RS     let result = |ok| result_ty(ok, service_error());
+//RS     let (valid, ret) = match method {
+//RS         "enqueue" => ((2..=3).contains(&n_args), result(Type::Named(
+//RS             "JobQueueReceipt".to_string(),
+//RS         ))),
+//RS         "delay" => (
+//RS             n_args == 3,
+//RS             result(Type::Named("JobQueueReceipt".to_string())),
+//RS         ),
+//RS         "receipt" => (
+//RS             n_args == 1,
+//RS             result(Type::Named("JobQueueReceipt".to_string())),
+//RS         ),
+//RS         "inspect" => (
+//RS             n_args == 2,
+//RS             result(Type::List(Box::new(Type::Named(
+//RS                 "JobQueueRecord".to_string(),
+//RS             )))),
+//RS         ),
+//RS         "events" => (
+//RS             n_args == 1,
+//RS             result(Type::List(Box::new(Type::Named(
+//RS                 "JobQueueEvent".to_string(),
+//RS             )))),
+//RS         ),
+//RS         "claim" => (
+//RS             n_args == 2,
+//RS             result(Type::List(Box::new(Type::Named(
+//RS                 "JobQueueClaim".to_string(),
+//RS             )))),
+//RS         ),
+//RS         "heartbeat" | "acknowledge" | "fail" | "cancel" | "dead_letter" => {
+//RS             let valid = match method {
+//RS                 "heartbeat" => n_args == 1,
+//RS                 "acknowledge" | "fail" => n_args == 2,
+//RS                 "cancel" | "dead_letter" => (2..=3).contains(&n_args),
+//RS                 _ => false,
+//RS             };
+//RS             (
+//RS                 valid,
+//RS                 result(Type::Named("JobQueueReceipt".to_string())),
+//RS             )
+//RS         }
+//RS         "recover_expired" => (n_args == 0, result(unit_ty())),
+//RS         "status" | "pause" | "resume" => (
+//RS             n_args == 0,
+//RS             result(Type::Named("JobQueueStatus".to_string())),
+//RS         ),
+//RS         "wait" => (n_args == 1, result(Type::Named("JobQueueStatus".to_string()))),
+//RS         "prune" => (n_args == 0, result(Type::Int)),
+//RS         _ => return None,
+//RS     };
+//RS     Some(valid.then_some(ret))
+//RS }
+//RS 
+//RS /// D-FLAGSHIP-WEBAPI1=A: instance method return types for the headless web
+//RS /// suite. Element-bearing records stay generic through their `Type::Apply`
+//RS /// arguments; argument validation remains in the method-call checker.
+//RS pub fn web_method_return(
+//RS     ty: &Type,
+//RS     method: &str,
+//RS     n_args: usize,
+//RS ) -> Option<Option<Type>> {
+//RS     let (name, args) = match ty {
+//RS         Type::Named(name) => (name.as_str(), &[][..]),
+//RS         Type::Apply { name, args } => (name.as_str(), args.as_slice()),
+//RS         _ => return None,
+//RS     };
+//RS     let element = |expected: &str| {
+//RS         (name == expected && args.len() == 1).then(|| args[0].clone())
+//RS     };
+//RS     match name {
+//RS         "JetDataPlot" => {
+//RS             let element = element("JetDataPlot")?;
+//RS             let plot = || Type::Apply {
+//RS                 name: "JetDataPlot".to_string(),
+//RS                 args: vec![element.clone()],
+//RS             };
+//RS             let fallible = || result_ty(plot(), Type::Named("DataError".to_string()));
+//RS             match method {
+//RS                 "line" | "bar" | "point" => Some(Some(plot())),
+//RS                 "x" | "y" | "color" | "size" | "text" | "detail"
+//RS                 | "with_transform" | "with_scale" | "with_axis" | "with_legend"
+//RS                 | "facet" | "with_layer" | "with_interaction" | "accessibility"
+//RS                 | "layout" | "select_indices" => Some(Some(fallible())),
+//RS                 _ => None,
+//RS             }
+//RS         }
+//RS         "WebTable" => {
+//RS             let element = element("WebTable")?;
+//RS             match method {
+//RS                 "with_column" | "paginate" => Some(Some(Type::Apply {
+//RS                     name: "WebTable".to_string(),
+//RS                     args: vec![element],
+//RS                 })),
+//RS                 "page" => Some(Some(result_ty(
+//RS                     Type::Apply {
+//RS                         name: "WebTablePage".to_string(),
+//RS                         args: vec![element],
+//RS                     },
+//RS                     Type::String,
+//RS                 ))),
+//RS                 _ => None,
+//RS             }
+//RS         }
+//RS         "WebStore" => {
+//RS             let element = element("WebStore")?;
+//RS             match method {
+//RS                 "set" => Some(Some(Type::Apply {
+//RS                     name: "WebStoreTransaction".to_string(),
+//RS                     args: vec![element.clone()],
+//RS                 })),
+//RS                 "signal" | "state_signal" => Some(Some(Type::Apply {
+//RS                     name: "Signal".to_string(),
+//RS                     args: vec![element],
+//RS                 })),
+//RS                 "facts_json" => Some(Some(Type::String)),
+//RS                 _ => None,
+//RS             }
+//RS         }
+//RS         // D-DX-QUERY1 / D-DX-FORMS1: receiver spellings project onto the same
+//RS         // Core rows as the module calls; no second dispatch table.
+//RS         "WebQuery" if args.is_empty() => match method {
+//RS             "state" => Some(Some(Type::Named("WebQueryState".to_string()))),
+//RS             "state_signal" => Some(Some(Type::Apply {
+//RS                 name: "Signal".to_string(),
+//RS                 args: vec![Type::Named("WebQueryState".to_string())],
+//RS             })),
+//RS             "mutation_state" => Some(Some(Type::Named("WebMutationState".to_string()))),
+//RS             "mutation_signal" => Some(Some(Type::Apply {
+//RS                 name: "Signal".to_string(),
+//RS                 args: vec![Type::Named("WebMutationState".to_string())],
+//RS             })),
+//RS             "invalidate" => Some(Some(Type::Int)),
+//RS             "get" | "show" | "facts" => Some(Some(Type::String)),
+//RS             "cancel" => Some(Some(Type::Bool)),
+//RS             "refresh" => Some(Some(result_ty(unit_ty(), Type::String))),
+//RS             _ => None,
+//RS         },
+//RS         "WebFormTyped" if args.is_empty() => match method {
+//RS             "validate" if n_args == 0 => Some(Some(result_ty(unit_ty(), Type::String))),
+//RS             "validate" => Some(Some(Type::Named("WebFormValidationChain".to_string()))),
+//RS             "set_async_validator" | "blur" | "set" | "focus" => {
+//RS                 Some(Some(result_ty(unit_ty(), Type::String)))
+//RS             }
+//RS             "set_action" | "cancel" => Some(None),
+//RS             "submit" | "no_script" | "post" => Some(Some(result_ty(Type::String, Type::String))),
+//RS             "state" => Some(Some(Type::Named("WebFormState".to_string()))),
+//RS             "lifecycle" => Some(Some(Type::Named("WebFormLifecycle".to_string()))),
+//RS             "errors" => Some(Some(Type::Named("WebFormErrorState".to_string()))),
+//RS             "render" | "show" => Some(Some(Type::String)),
+//RS             _ => None,
+//RS         },
+//RS         "WebFormValidationChain" if args.is_empty() => match method {
+//RS             "render" => Some(Some(Type::String)),
+//RS             _ => None,
+//RS         },
+//RS         "WebStorePatch" => {
+//RS             let element = element("WebStorePatch")?;
+//RS             match method {
+//RS                 "generation" => Some(Some(Type::Int)),
+//RS                 "transaction" | "commit" => Some(Some(Type::Apply {
+//RS                     name: "WebStoreTransaction".to_string(),
+//RS                     args: vec![element],
+//RS                 })),
+//RS                 "active" => Some(Some(Type::Bool)),
+//RS                 "rollback" => Some(Some(Type::Option(Box::new(element)))),
+//RS                 _ => None,
+//RS             }
+//RS         }
+//RS         "WebStoreSubscription" if args.is_empty() => match method {
+//RS             "unsubscribe" => Some(None),
+//RS             "active" => Some(Some(Type::Bool)),
+//RS             _ => None,
+//RS         },
+//RS         "WebVirtualWindow" if method == "facts_json" => Some(Some(Type::String)),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
+//RS     let json = json_ty();
+//RS     match variant {
+//RS         "Null" => Some(Vec::new()),
+//RS         "Bool" => Some(vec![Type::Bool]),
+//RS         "Int" => Some(vec![Type::Int]),
+//RS         "Float" => Some(vec![Type::Float]),
+//RS         "Text" => Some(vec![Type::String]),
+//RS         "Array" => Some(vec![Type::List(Box::new(json.clone()))]),
+//RS         "Object" => Some(vec![Type::Map {
+//RS             key: Box::new(Type::String),
+//RS             key_span: None,
+//RS             value: Box::new(json),
+//RS         }]),
+//RS         // `Number` is the compiler-only lexical carrier used by typed JSON
+//RS         // parsing. It is accepted in generated union decoder patterns, but
+//RS         // has no public `DataTree.Number(...)` constructor.
+//RS         "Number" => Some(vec![Type::String]),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-TERM1 (ratified 2026-06-22): pattern types for `Key` enum variants.
+//RS /// Used by the pattern checker to validate `if k == Key.Char(c)` etc.
+//RS pub(crate) fn core_key_pattern_types(variant: &str) -> Option<Vec<Type>> {
+//RS     match variant {
+//RS         // Unit variants — no payload.
+//RS         "Enter" | "Escape" | "Backspace" | "Tab" | "Delete" | "Up" | "Down" | "Left" | "Right"
+//RS         | "Unknown" => Some(Vec::new()),
+//RS         // `Key.Char(c)` — one Char payload.
+//RS         "Char" => Some(vec![Type::Char]),
+//RS         // `Key.Ctrl(c)` — one Char payload (the control character).
+//RS         "Ctrl" => Some(vec![Type::Char]),
+//RS         // `Key.F(n)` — one Int payload (function key number 1–12).
+//RS         "F" => Some(vec![Type::Int]),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-FOUND-LIFECYCLE1=A: process shutdown signals are the closed `.Term`,
+//RS /// `.Hup`, and `.Int` Core enum values.
+//RS pub(crate) fn core_process_signal_variants(
+//RS ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+//RS     use crate::AST::VariantPayload;
+//RS     use crate::Diagnostics::Span;
+//RS     let zero = Span::new(0, 0);
+//RS     ["Term", "Hup", "Int"]
+//RS         .into_iter()
+//RS         .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+//RS         .collect()
+//RS }
+//RS 
+//RS /// D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum (`.Stream`,
+//RS /// `.Inherit`, `.Capture` — exactly the three ratified stream modes), not in
+//RS /// the user registry. Mirrors `core_key_variants`.
+//RS pub(crate) fn core_process_stream_mode_variants(
+//RS ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     let mut m = std::collections::HashMap::new();
+//RS     for name in &["Stream", "Inherit", "Capture"] {
+//RS         m.insert((*name).to_string(), (zero, VariantPayload::Unit));
+//RS     }
+//RS     m
+//RS }
+//RS 
+//RS /// D-PROCESS-RESOURCE1=A: process resource exhaustion is a closed core enum,
+//RS /// resolved through the same dot-literal path as `ProcessStreamMode`.
+//RS pub(crate) fn core_process_resource_limit_variants(
+//RS ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS
+//RS         .iter()
+//RS         .map(|name| ((*name).to_string(), (zero, VariantPayload::Unit)))
+//RS         .collect()
+//RS }
+//RS 
+//RS /// D-PROCESS-SESSION2=D: expert terminal mode has the two owner-ratified
+//RS /// variants. The portable default is Cooked; Raw is explicit.
+//RS pub(crate) fn core_terminal_mode_variants(
+//RS ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     ["Raw", "Cooked"]
+//RS         .into_iter()
+//RS         .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+//RS         .collect()
+//RS }
+//RS 
+//RS pub(crate) fn core_env_error_variants(
+//RS ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     ["InvalidName", "InvalidValue", "NonUnicode"]
+//RS         .into_iter()
+//RS         .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+//RS         .collect()
+//RS }
+//RS 
+//RS pub(crate) fn core_net_control_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let names: &[&str] = match enum_name {
+//RS         "NetShutdown" => &["Read", "Write", "Both"],
+//RS         "NetReadyInterest" => &["Read", "Write", "ReadWrite"],
+//RS         _ => return None,
+//RS     };
+//RS     let zero = Span::new(0, 0);
+//RS     let mut variants = std::collections::HashMap::new();
+//RS     for name in names {
+//RS         variants.insert((*name).to_string(), (zero, VariantPayload::Unit));
+//RS     }
+//RS     Some(variants)
+//RS }
+//RS 
+//RS pub fn core_net_error_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     let mut variants = std::collections::HashMap::new();
+//RS     if enum_name == "NetDnsError" {
+//RS         for name in ["NotFound", "Failure"] {
+//RS             variants.insert(
+//RS                 name.to_string(),
+//RS                 (zero, VariantPayload::Single(Type::String, zero)),
+//RS             );
+//RS         }
+//RS         return Some(variants);
+//RS     }
+//RS     if enum_name != "NetError" {
+//RS         return None;
+//RS     }
+//RS     for name in [
+//RS         "InvalidInput",
+//RS         "PermissionDenied",
+//RS         "AddressInUse",
+//RS         "AddressUnavailable",
+//RS         "ConnectionRefused",
+//RS         "ConnectionReset",
+//RS         "NotConnected",
+//RS         "Closed",
+//RS         "Timeout",
+//RS         "Cancelled",
+//RS         "Unsupported",
+//RS         "TLS",
+//RS         "Protocol",
+//RS         "Other",
+//RS     ] {
+//RS         variants.insert(
+//RS             name.to_string(),
+//RS             (
+//RS                 zero,
+//RS                 VariantPayload::Single(Type::Named("NetErrorDetail".to_string()), zero),
+//RS             ),
+//RS         );
+//RS     }
+//RS     variants.insert(
+//RS         "DNS".to_string(),
+//RS         (
+//RS             zero,
+//RS             VariantPayload::Single(Type::Named("NetDnsError".to_string()), zero),
+//RS         ),
+//RS     );
+//RS     Some(variants)
+//RS }
+//RS 
+//RS /// D-HTTP-CORE2=A / D-HTTP-UNSUPPORTED1=A: the one closed HTTP error tree.
+//RS pub(crate) fn core_http_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::{VariantField, VariantPayload};
+//RS     let zero = Span::new(0, 0);
+//RS     let mut variants = std::collections::HashMap::new();
+//RS     if enum_name == "HTTPOperation" {
+//RS         for name in ["ClientConnect", "ServerBind", "ServeListener"] {
+//RS             variants.insert(name.to_string(), (zero, VariantPayload::Unit));
+//RS         }
+//RS         return Some(variants);
+//RS     }
+//RS     // D-HTTP-CORS1=A: a CORS policy names either every origin or a list.
+//RS     if enum_name == "HTTPCorsOrigins" {
+//RS         variants.insert("Any".to_string(), (zero, VariantPayload::Unit));
+//RS         variants.insert(
+//RS             "List".to_string(),
+//RS             (
+//RS                 zero,
+//RS                 VariantPayload::Single(Type::List(Box::new(Type::String)), zero),
+//RS             ),
+//RS         );
+//RS         return Some(variants);
+//RS     }
+//RS     if enum_name == "HTTPProxy" {
+//RS         variants.insert("FromEnvironment".to_string(), (zero, VariantPayload::Unit));
+//RS         variants.insert("None".to_string(), (zero, VariantPayload::Unit));
+//RS         variants.insert(
+//RS             "URL".to_string(),
+//RS             (zero, VariantPayload::Single(Type::String, zero)),
+//RS         );
+//RS         return Some(variants);
+//RS     }
+//RS     if enum_name == "HTTPRedirectPolicy" {
+//RS         // D-HTTP-CLIENT2=A: `.Follow(max:, same_origin_credentials:)`.
+//RS         variants.insert(
+//RS             "Follow".to_string(),
+//RS             (
+//RS                 zero,
+//RS                 VariantPayload::Named(vec![
+//RS                     VariantField {
+//RS                         name: "max".to_string(),
+//RS                         name_span: zero,
+//RS                         ty: Type::Int,
+//RS                         ty_span: zero,
+//RS                     },
+//RS                     VariantField {
+//RS                         name: "same_origin_credentials".to_string(),
+//RS                         name_span: zero,
+//RS                         ty: Type::Bool,
+//RS                         ty_span: zero,
+//RS                     },
+//RS                 ]),
+//RS             ),
+//RS         );
+//RS         return Some(variants);
+//RS     }
+//RS     if enum_name == "HTTPRetryPolicy" {
+//RS         // D-HTTP-CLIENT2=A: `.None` / `.Safe` / `.Idempotent`.
+//RS         for name in ["None", "Safe", "Idempotent"] {
+//RS             variants.insert(name.to_string(), (zero, VariantPayload::Unit));
+//RS         }
+//RS         return Some(variants);
+//RS     }
+//RS     if enum_name == "HTTPCookieJar" {
+//RS         variants.insert("Memory".to_string(), (zero, VariantPayload::Unit));
+//RS         return Some(variants);
+//RS     }
+//RS     if enum_name == "HTTPCompressEncoding" {
+//RS         variants.insert("Gzip".to_string(), (zero, VariantPayload::Unit));
+//RS         return Some(variants);
+//RS     }
+//RS     if enum_name == "WsError" {
+//RS         for name in [
+//RS             "InvalidURL",
+//RS             "InvalidHandshake",
+//RS             "Protocol",
+//RS             "Timeout",
+//RS             "Closed",
+//RS             "Cancelled",
+//RS             "UnsupportedTarget",
+//RS         ] {
+//RS             variants.insert(name.to_string(), (zero, VariantPayload::Unit));
+//RS         }
+//RS         variants.insert(
+//RS             "MessageTooLarge".to_string(),
+//RS             (
+//RS                 zero,
+//RS                 VariantPayload::Named(vec![VariantField {
+//RS                     name: "limit".to_string(),
+//RS                     name_span: zero,
+//RS                     ty: Type::Int,
+//RS                     ty_span: zero,
+//RS                 }]),
+//RS             ),
+//RS         );
+//RS         variants.insert(
+//RS             "IO".to_string(),
+//RS             (
+//RS                 zero,
+//RS                 VariantPayload::Named(vec![VariantField {
+//RS                     name: "operation".to_string(),
+//RS                     name_span: zero,
+//RS                     ty: Type::String,
+//RS                     ty_span: zero,
+//RS                 }]),
+//RS             ),
+//RS         );
+//RS         return Some(variants);
+//RS     }
+//RS     if enum_name != "HTTPError" {
+//RS         return None;
+//RS     }
+//RS     for name in [
+//RS         "InvalidMethod",
+//RS         "InvalidURL",
+//RS         "InvalidHeader",
+//RS         "InvalidStatus",
+//RS         "BodyConsumed",
+//RS         "InvalidFraming",
+//RS         "UnsupportedEncoding",
+//RS         "Cancelled",
+//RS     ] {
+//RS         variants.insert(name.to_string(), (zero, VariantPayload::Unit));
+//RS     }
+//RS     for (name, field, ty) in [
+//RS         ("BodyTooLarge", "limit", Type::Int),
+//RS         ("Resolve", "host", Type::String),
+//RS         ("Connect", "address", Type::String),
+//RS         ("TLS", "stage", Type::String),
+//RS         ("Timeout", "phase", Type::String),
+//RS         ("Proxy", "stage", Type::String),
+//RS         ("Redirect", "reason", Type::String),
+//RS         ("Protocol", "version", Type::String),
+//RS         ("IO", "operation", Type::String),
+//RS         // D-HTTP-CORS1=A: a policy value was refused when it was built.
+//RS         ("Policy", "reason", Type::String),
+//RS         ("ResourceUnavailable", "resource", Type::String),
+//RS         ("Internal", "incident_id", Type::String),
+//RS         (
+//RS             "UnsupportedTarget",
+//RS             "operation",
+//RS             Type::Named("HTTPOperation".to_string()),
+//RS         ),
+//RS     ] {
+//RS         variants.insert(
+//RS             name.to_string(),
+//RS             (
+//RS                 zero,
+//RS                 VariantPayload::Named(vec![VariantField {
+//RS                     name: field.to_string(),
+//RS                     name_span: zero,
+//RS                     ty,
+//RS                     ty_span: zero,
+//RS                 }]),
+//RS             ),
+//RS         );
+//RS     }
+//RS     Some(variants)
+//RS }
+//RS 
+//RS pub(crate) fn core_io_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     let mut variants = std::collections::HashMap::new();
+//RS     if enum_name == Syntax::TYPE_IO_OPERATION {
+//RS         for name in Syntax::IO_OPERATION_VARIANTS {
+//RS             variants.insert((*name).to_string(), (zero, VariantPayload::Unit));
+//RS         }
+//RS         return Some(variants);
+//RS     }
+//RS     if !is_io_error_type_name(enum_name) {
+//RS         return None;
+//RS     }
+//RS     for name in Syntax::IO_ERROR_VARIANTS {
+//RS         let payload = if *name == "ResourceLimit" {
+//RS             VariantPayload::Single(
+//RS                 Type::Named(Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string()),
+//RS                 zero,
+//RS             )
+//RS         } else {
+//RS             VariantPayload::Single(Type::Named(Syntax::TYPE_IO_CONTEXT.to_string()), zero)
+//RS         };
+//RS         variants.insert((*name).to_string(), (zero, payload));
+//RS     }
+//RS     Some(variants)
+//RS }
+//RS 
+//RS /// D-TEXTWIDTH1=B: the two `TextWidth` field enums (`.Narrow`/`.Wide`,
+//RS /// `.Zero`/`.Reject`) — synthesised the same way as `ProcessStreamMode`.
+//RS pub(crate) fn core_text_width_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     let names: &[&str] = match enum_name {
+//RS         "TextWidthAmbiguous" => &["Narrow", "Wide"],
+//RS         "TextWidthControls" => &["Zero", "Reject"],
+//RS         _ => return None,
+//RS     };
+//RS     let mut m = std::collections::HashMap::new();
+//RS     for name in names {
+//RS         m.insert((*name).to_string(), (zero, VariantPayload::Unit));
+//RS     }
+//RS     Some(m)
+//RS }
+//RS 
+//RS /// stdlib-api-laws D4 (#2055): `WatchEvent`'s two closed field enums
+//RS /// (`.File`/`.Process`/`.Port`, `.Created`/`.Modified`/`.Removed`/`.Error`/
+//RS /// `.Exited`/`.Ready`) — synthesised the same way as `TextWidth`'s pair, so a
+//RS /// switch over `ev.domain`/`ev.kind` is exhaustive without a wildcard.
+//RS pub(crate) fn core_watch_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     let names: &[&str] = match enum_name {
+//RS         "WatchDomain" => &["File", "Process", "Port"],
+//RS         "WatchKind" => &["Created", "Modified", "Removed", "Error", "Exited", "Ready"],
+//RS         _ => return None,
+//RS     };
+//RS     let mut m = std::collections::HashMap::new();
+//RS     for name in names {
+//RS         m.insert((*name).to_string(), (zero, VariantPayload::Unit));
+//RS     }
+//RS     Some(m)
+//RS }
+//RS 
+//RS /// D-SHAPE-DURATIONCONVERT1=A: the closed unit list accepted by
+//RS /// `duration.in(unit)`.
+//RS pub(crate) fn core_duration_unit_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     if enum_name != Syntax::DURATION_UNIT_TYPE {
+//RS         return None;
+//RS     }
+//RS     let zero = Span::new(0, 0);
+//RS     Some(
+//RS         Syntax::DURATION_UNITS
+//RS             .iter()
+//RS             .map(|name| ((*name).to_string(), (zero, VariantPayload::Unit)))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS /// D-FOUND-COREAPI1 / #2853: the closed late-event disposition policy used by
+//RS /// `Stream.window`.
+//RS pub(crate) fn core_late_event_disposition_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::AST::VariantPayload;
+//RS     use crate::Diagnostics::Span;
+//RS     if enum_name != "LateEventDisposition" {
+//RS         return None;
+//RS     }
+//RS     let zero = Span::new(0, 0);
+//RS     Some(
+//RS         ["Drop", "SideOutput"]
+//RS             .into_iter()
+//RS             .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn core_event_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     let unit = |names: &[&str]| {
+//RS         names
+//RS             .iter()
+//RS             .map(|name| ((*name).to_string(), (zero, VariantPayload::Unit)))
+//RS             .collect()
+//RS     };
+//RS     match enum_name {
+//RS         "Overflow" => Some(unit(&["Block", "DropNewest", "DropOldest"])),
+//RS         "FailurePolicy" => Some(unit(&["StopFirst", "Collect", "Log", "Ignore"])),
+//RS         "DispatchState" => Some(unit(&[
+//RS             "Delivered",
+//RS             "HandlerFailed",
+//RS             "DroppedNewest",
+//RS             "DroppedOldest",
+//RS             "Closed",
+//RS             "Cancelled",
+//RS             "DeadlineExceeded",
+//RS         ])),
+//RS         "HookPolicy" => Some(unit(&["FirstCancelElseTransform"])),
+//RS         "HookDecision" => Some(
+//RS             [
+//RS                 ("Continue".to_string(), (zero, VariantPayload::Unit)),
+//RS                 (
+//RS                     "Transform".to_string(),
+//RS                     (
+//RS                         zero,
+//RS                         VariantPayload::Single(Type::Named("Unknown".to_string()), zero),
+//RS                     ),
+//RS                 ),
+//RS                 ("Cancel".to_string(), (zero, VariantPayload::Unit)),
+//RS                 (
+//RS                     "Fail".to_string(),
+//RS                     (
+//RS                         zero,
+//RS                         VariantPayload::Single(Type::Named("Unknown".to_string()), zero),
+//RS                     ),
+//RS                 ),
+//RS             ]
+//RS             .into_iter()
+//RS             .collect(),
+//RS         ),
+//RS         "HookOutcome" => Some(
+//RS             [
+//RS                 (
+//RS                     "Continue".to_string(),
+//RS                     (
+//RS                         zero,
+//RS                         VariantPayload::Single(Type::Named("Unknown".to_string()), zero),
+//RS                     ),
+//RS                 ),
+//RS                 ("Cancel".to_string(), (zero, VariantPayload::Unit)),
+//RS                 (
+//RS                     "Fail".to_string(),
+//RS                     (
+//RS                         zero,
+//RS                         VariantPayload::Single(Type::Named("Unknown".to_string()), zero),
+//RS                     ),
+//RS                 ),
+//RS             ]
+//RS             .into_iter()
+//RS             .collect(),
+//RS         ),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-REDUCE-VALUE1=A: the closed Core enum passed to SIMD `reduce`.
+//RS pub(crate) fn core_reduce_op_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     if enum_name != Syntax::TYPE_REDUCE_OP {
+//RS         return None;
+//RS     }
+//RS     let zero = Span::new(0, 0);
+//RS     Some(
+//RS         ["Add", "Mul", "Min", "Max", "Avg"]
+//RS             .into_iter()
+//RS             .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// D-TERM1 (ratified 2026-06-22): synthesised variant table for the `Key` enum.
+//RS /// Used by `resolve_enum_variants_cloned` so `Key.Char(c)` / `Key.Enter` literals
+//RS /// pass type-checking without `Key` being in the user type registry.
+//RS pub(crate) fn core_key_variants(
+//RS ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     let mut m = std::collections::HashMap::new();
+//RS     // Unit variants.
+//RS     for name in &[
+//RS         "Enter",
+//RS         "Escape",
+//RS         "Backspace",
+//RS         "Tab",
+//RS         "Delete",
+//RS         "Up",
+//RS         "Down",
+//RS         "Left",
+//RS         "Right",
+//RS         "Unknown",
+//RS     ] {
+//RS         m.insert((*name).to_string(), (zero, VariantPayload::Unit));
+//RS     }
+//RS     // Single-payload variants.
+//RS     m.insert(
+//RS         "Char".to_string(),
+//RS         (zero, VariantPayload::Single(Type::Char, zero)),
+//RS     );
+//RS     m.insert(
+//RS         "Ctrl".to_string(),
+//RS         (zero, VariantPayload::Single(Type::Char, zero)),
+//RS     );
+//RS     m.insert(
+//RS         "F".to_string(),
+//RS         (zero, VariantPayload::Single(Type::Int, zero)),
+//RS     );
+//RS     m
+//RS }
+//RS 
+//RS /// D-SERVICE-RECEIPT2=A: lifecycle is the only public delivery sum. Attempts,
+//RS /// retention, deadlines, idempotency, and authority generation are facts on
+//RS /// the handle's signed receipt, not additional variants.
+//RS pub(crate) fn core_delivery_state_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     if enum_name != "DeliveryState" {
+//RS         return None;
+//RS     }
+//RS     let zero = Span::new(0, 0);
+//RS     Some(
+//RS         [
+//RS             "Pending",
+//RS             "Accepted",
+//RS             "Delivering",
+//RS             "Delivered",
+//RS             "DeadLettered",
+//RS             "Cancelled",
+//RS         ]
+//RS         .into_iter()
+//RS         .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+//RS         .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// D-SERVICE-WORKFLOW1=D / D-CONC-OUTCOME1: recorded workflow attempts use
+//RS /// the same closed result and wait-state names on every execution tier.
+//RS pub(crate) fn core_workflow_outcome_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     let variants = match enum_name {
+//RS         "TaskOutcome" => vec![
+//RS             ("Finished", VariantPayload::Unit),
+//RS             ("Panicked", VariantPayload::Single(Type::String, zero)),
+//RS             ("Cancelled", VariantPayload::Unit),
+//RS             ("DeadlineBlown", VariantPayload::Unit),
+//RS         ],
+//RS         "TaskStatus" => vec![
+//RS             ("Running", VariantPayload::Unit),
+//RS             ("Paused", VariantPayload::Unit),
+//RS             ("CancelRequested", VariantPayload::Unit),
+//RS         ],
+//RS         _ => return None,
+//RS     };
+//RS     Some(
+//RS         variants
+//RS             .into_iter()
+//RS             .map(|(name, payload)| (name.to_string(), (zero, payload)))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// D-SERVICE1=D: service failures remain a typed closed sum across AOT,
+//RS /// ambient, and persisted/comptime boundaries.
+//RS pub(crate) fn core_service_error_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     if enum_name != "ServiceError" {
+//RS         return None;
+//RS     }
+//RS     let zero = Span::new(0, 0);
+//RS     Some(
+//RS         [
+//RS             "Full",
+//RS             "Ambiguous",
+//RS             "Unknown",
+//RS             "NotStarted",
+//RS             "Policy",
+//RS             "Unavailable",
+//RS             "Partitioned",
+//RS             "Revoked",
+//RS             "Stale",
+//RS             "Expired",
+//RS         ]
+//RS         .into_iter()
+//RS         .map(|name| {
+//RS             (
+//RS                 name.to_string(),
+//RS                 (zero, VariantPayload::Single(Type::String, zero)),
+//RS             )
+//RS         })
+//RS         .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// D-FOUND-REALTIME1=A: typed lifecycle methods on the callback stream.
+//RS pub fn realtime_stream_method_return(
+//RS     method: &str,
+//RS     n_args: usize,
+//RS ) -> Option<Option<Type>> {
+//RS     match (method, n_args) {
+//RS         ("next_deadline", 0) => Some(Some(Type::Named("Instant".to_string()))),
+//RS         ("receipt", 0) => Some(Some(Type::Named("RealtimeReceipt".to_string()))),
+//RS         ("cancel", 0) => Some(Some(unit_ty())),
+//RS         ("is_cancelled", 0) => Some(Some(Type::Bool)),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-CALLVALUE1=B: does a Core handle type own a method under this name?
+//RS ///
+//RS /// The plugin method set is interface-specific and is resolved by
+//RS /// `check_plugin_method`; it must not be treated as a closed Core handle table.
+//RS /// Keeping it out of this predicate prevents a stale compatibility alias from
+//RS /// hijacking ordinary function-value projection.
+//RS pub fn core_handle_owns_method(handle_ty: &str, method: &str) -> bool {
+//RS     match handle_ty {
+//RS         "Mod" => super::mod_method_return_ty(method).is_some(),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// Project only the stream-handle identities owned by `core.files` and
+//RS /// `core.term` onto the existing leaf-keyed method tables. Bare spellings are
+//RS /// retained for the pre-existing core handle representation; qualified types
+//RS /// require the one canonical source identity so unrelated same-leaf imports
+//RS /// stay distinct.
+//RS #[doc(hidden)]
+//RS pub fn core_file_handle_dispatch_name(handle_ty: &str) -> Option<&'static str> {
+//RS     match handle_ty {
+//RS         "FileReader" | "<corelib>/Core/files::Core/files/files.jet::FileReader" => {
+//RS             Some("FileReader")
+//RS         }
+//RS         "FileWriter" | "<corelib>/Core/files::Core/files/files.jet::FileWriter" => {
+//RS             Some("FileWriter")
+//RS         }
+//RS         "StdinHandle" | "<corelib>/Core/term::Core/term/term.jet::StdinHandle" => {
+//RS             Some("StdinHandle")
+//RS         }
+//RS         "Stdout" | "<corelib>/Core/term::Core/term/term.jet::Stdout" => Some("Stdout"),
+//RS         "Stderr" | "<corelib>/Core/term::Core/term/term.jet::Stderr" => Some("Stderr"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// E2-M7: type-check a method call on a FileReader or FileWriter handle (D-IO2).
+//RS /// Returns `Some(return_type)` when the method is valid, or emits E2501 and
+//RS /// returns `None` for an invalid method / wrong-direction call.
+//RS pub fn file_handle_method_return(
+//RS     handle_ty: &str,
+//RS     method: &str,
+//RS     n_args: usize,
+//RS     span: Span,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) -> Option<Option<Type>> {
+//RS     let handle_ty = core_file_handle_dispatch_name(handle_ty).unwrap_or(handle_ty);
+//RS     let io = io_error_ty();
+//RS     let unit = unit_ty();
+//RS     match handle_ty {
+//RS         "MappedFile" => match (method, n_args) {
+//RS             ("window" | "window_len", 2) => Some(Some(result_ty(
+//RS                 Type::Apply {
+//RS                     name: "View".to_string(),
+//RS                     args: vec![Type::List(Box::new(u8_ty()))],
+//RS                 },
+//RS                 io.clone(),
+//RS             ))),
+//RS             ("lines", 0) => Some(Some(crate::Collections::view_iter_ty(Type::Apply {
+//RS                 name: "View".to_string(),
+//RS                 args: vec![Type::List(Box::new(u8_ty()))],
+//RS             }))),
+//RS             ("len", 0) => Some(Some(Type::Int)),
+//RS             ("is_empty", 0) => Some(Some(Type::Bool)),
+//RS             _ => None,
+//RS         },
+//RS         "FileScope" => match (method, n_args) {
+//RS             ("read", 1) => Some(Some(result_ty(Type::String, io))),
+//RS             _ => None,
+//RS         },
+//RS         "FileReader" => match method {
+//RS             // We encode the return as `Named("FileLines")` so the loop body knows
+//RS             // the element type is `String`.
+//RS             "lines" if n_args == 0 => Some(Some(Type::Named("FileLines".to_string()))),
+//RS             // `.read_line()` — returns one line or `None` at EOF.
+//RS             "read_line" if n_args == 0 => {
+//RS                 Some(Some(result_ty(Type::Option(Box::new(Type::String)), io)))
+//RS             }
+//RS             // Wrong direction: writing to a reader.
+//RS             "write_line" | "flush" => {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E2501",
+//RS                     format!("`{}` is not available on a read-only file handle", method),
+//RS                     "`files.open` returns a read-only handle; it can only read lines or bytes"
+//RS                         .to_string(),
+//RS                     "use `files.create` or `files.append` to get a writable handle".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 Some(None)
+//RS             }
+//RS             _ => None,
+//RS         },
+//RS         "FileWriter" => match method {
+//RS             // `.write_line(text)` — writes a line followed by a newline.
+//RS             "write_line" if n_args == 1 => Some(Some(result_ty(unit.clone(), io.clone()))),
+//RS             // `.flush()` — ensure buffered bytes reach disk.
+//RS             "flush" if n_args == 0 => Some(Some(result_ty(unit, io))),
+//RS             // Wrong direction: reading from a writer.
+//RS             "lines" | "read_line" => {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E2501",
+//RS                     format!("`{}` is not available on a write-only file handle", method),
+//RS                     "`files.create` returns a write-only handle; it can only write lines"
+//RS                         .to_string(),
+//RS                     "use `files.open` to get a readable handle".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 Some(None)
+//RS             }
+//RS             _ => None,
+//RS         },
+//RS         // D-STDIN1=A: StdinHandle methods.
+//RS         "StdinHandle" => match method {
+//RS             "lines" if n_args == 0 => Some(Some(Type::Named("StdinLines".to_string()))),
+//RS             "read_line" if n_args == 0 => {
+//RS                 Some(Some(result_ty(Type::Option(Box::new(Type::String)), io)))
+//RS             }
+//RS             _ => None,
+//RS         },
+//RS         // D-COREIO1=A: stdout/stderr stream methods.
+//RS         "Stdout" | "Stderr" => match method {
+//RS             "write" | "write_line" if n_args == 1 => {
+//RS                 Some(Some(result_ty(unit.clone(), io.clone())))
+//RS             }
+//RS             "write_bytes" if n_args == 1 => Some(Some(result_ty(unit.clone(), io.clone()))),
+//RS             "flush" if n_args == 0 => Some(Some(result_ty(unit.clone(), io))),
+//RS             "is_tty" if n_args == 0 => Some(Some(Type::Bool)),
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-ENCSTREAM-SURFACE1=A: mutable opaque codec-handle methods.
+//RS pub fn encoding_handle_method_return(
+//RS     handle_ty: &str,
+//RS     method: &str,
+//RS     n_args: usize,
+//RS ) -> Option<Option<Type>> {
+//RS     let error = encoding_error_ty();
+//RS     let unit = unit_ty();
+//RS     match (handle_ty, method, n_args) {
+//RS         ("JSONReader", "next", 0) => Some(Some(result_ty(
+//RS             Type::Option(Box::new(Type::Named("DataEvent".to_string()))),
+//RS             error,
+//RS         ))),
+//RS         ("JSONWriter", "write", 1) | ("JSONWriter", "flush" | "finish", 0) => {
+//RS             Some(Some(result_ty(unit, error)))
+//RS         }
+//RS         ("JSONLReader", "next", 0) => Some(Some(result_ty(
+//RS             Type::Option(Box::new(Type::Named("DataTree".to_string()))),
+//RS             error,
+//RS         ))),
+//RS         ("JSONLWriter", "write", 1) | ("JSONLWriter", "flush" | "finish", 0) => {
+//RS             Some(Some(result_ty(unit, error)))
+//RS         }
+//RS         ("CSVReader", "next", 0) => Some(Some(result_ty(
+//RS             Type::Option(Box::new(Type::Named("CSVRow".to_string()))),
+//RS             error,
+//RS         ))),
+//RS         // DataStream<T>.next is handled specially in method_calls (needs T).
+//RS         ("CSVWriter", "write", 1) | ("CSVWriter", "flush" | "finish", 0) => {
+//RS             Some(Some(result_ty(unit, error)))
+//RS         }
+//RS         ("XMLReader", "next", 0) => Some(Some(result_ty(
+//RS             Type::Option(Box::new(Type::Named("DataTree".to_string()))),
+//RS             error,
+//RS         ))),
+//RS         ("XMLWriter", "write", 1) | ("XMLWriter", "flush" | "finish", 0) => {
+//RS             Some(Some(result_ty(unit, error)))
+//RS         }
+//RS         ("CBORReader", "next", 0) => Some(Some(result_ty(
+//RS             Type::Option(Box::new(Type::Named("DataEvent".to_string()))),
+//RS             error,
+//RS         ))),
+//RS         ("CBORWriter", "write", 1) | ("CBORWriter", "flush" | "finish", 0) => {
+//RS             Some(Some(result_ty(unit, error)))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// E2-M10: field definitions for compiler-known constructable struct types.
+//RS /// Returns `Some(fields)` when the named type is a prelude struct users can construct.
+//RS pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, Type)>> {
+//RS     let str_ty = Type::String;
+//RS     match type_name {
+//RS         // D-COMPUTE1=D: Tensor is a Core-exported struct whose source
+//RS         // declaration is owned by `core.compute`; keep its field shape here
+//RS         // so imported values and `Tensor{ ... }` literals share one oracle.
+//RS         "Tensor" => Some(vec![
+//RS             ("shape".to_string(), Type::List(Box::new(Type::Int))),
+//RS             ("data".to_string(), Type::List(Box::new(Type::Float))),
+//RS             ("device".to_string(), Type::String),
+//RS             ("numeric_profile".to_string(), Type::String),
+//RS         ]),
+//RS         // D-FAIL-ERROR1=A: constructor calls normalize to this private shape.
+//RS         name if name == Syntax::TYPE_ERR => Some(vec![
+//RS             ("message".to_string(), Type::String),
+//RS             ("code".to_string(), Type::Option(Box::new(Type::String))),
+//RS             (
+//RS                 "cause".to_string(),
+//RS                 Type::Option(Box::new(Type::Named(Syntax::TYPE_ERR.to_string()))),
+//RS             ),
+//RS         ]),
+//RS         "HandleID" | "TaskID" | "EventID" => Some(vec![("value".to_string(), Type::Named("Count".to_string()))]),
+//RS         "HistoryCase" => Some(vec![
+//RS             ("case_id".to_string(), Type::String),
+//RS             ("seed".to_string(), Type::Named("Count".to_string())),
+//RS             ("operations".to_string(), Type::List(Box::new(Type::Named("HistoryOperation".to_string())))),
+//RS             ("schedule".to_string(), Type::List(Box::new(Type::Named("HistoryScheduleChoice".to_string())))),
+//RS         ]),
+//RS         "HistoryOperation" => Some(vec![
+//RS             ("index".to_string(), Type::Named("Count".to_string())),
+//RS             ("name".to_string(), Type::String),
+//RS             ("arguments".to_string(), Type::List(Box::new(Type::Named("HistoryValue".to_string())))),
+//RS             ("creates".to_string(), Type::List(Box::new(Type::Named("HandleID".to_string())))),
+//RS             ("consumes".to_string(), Type::List(Box::new(Type::Named("HandleID".to_string())))),
+//RS             ("preconditions".to_string(), Type::List(Box::new(Type::Named("HistoryPrecondition".to_string())))),
+//RS             ("depends_on".to_string(), Type::List(Box::new(Type::Named("Count".to_string())))),
+//RS             ("task".to_string(), Type::Option(Box::new(Type::Named("TaskID".to_string())))),
+//RS             ("event".to_string(), Type::Option(Box::new(Type::Named("EventID".to_string())))),
+//RS         ]),
+//RS         "HistoryScheduleChoice" => Some(vec![
+//RS             ("operation".to_string(), Type::Named("Count".to_string())),
+//RS             ("task".to_string(), Type::Option(Box::new(Type::Named("TaskID".to_string())))),
+//RS             ("event".to_string(), Type::Option(Box::new(Type::Named("EventID".to_string())))),
+//RS             ("choice".to_string(), Type::String),
+//RS         ]),
+//RS         "HistoryBounds" => Some(vec![
+//RS             ("max_steps".to_string(), Type::Named("Count".to_string())),
+//RS             ("max_resources".to_string(), Type::Named("Count".to_string())),
+//RS             ("max_shrink_attempts".to_string(), Type::Named("Count".to_string())),
+//RS             ("max_discarded_cases".to_string(), Type::Named("Count".to_string())),
+//RS         ]),
+//RS         "HistoryDistribution" => Some(vec![
+//RS             ("operation".to_string(), Type::String),
+//RS             ("weight".to_string(), Type::Named("Count".to_string())),
+//RS         ]),
+//RS         "HistoryRNG" => Some(vec![]),
+//RS         "TypedHistoryCase" => None,
+//RS         "HistoryStrategy" => None,
+//RS         "TestComparison" => Some(vec![
+//RS             ("status".to_string(), Type::String),
+//RS             ("relation".to_string(), Type::String),
+//RS             ("source".to_string(), Type::String),
+//RS             ("tool".to_string(), Type::String),
+//RS             ("target".to_string(), Type::String),
+//RS             ("seed".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             (
+//RS                 "case_ids".to_string(),
+//RS                 Type::List(Box::new(Type::String)),
+//RS             ),
+//RS             (
+//RS                 "inputs".to_string(),
+//RS                 Type::List(Box::new(Type::Named("DataTree".to_string()))),
+//RS             ),
+//RS             (
+//RS                 "reference".to_string(),
+//RS                 Type::List(Box::new(Type::Named("DataTree".to_string()))),
+//RS             ),
+//RS             (
+//RS                 "candidate".to_string(),
+//RS                 Type::List(Box::new(Type::Named("DataTree".to_string()))),
+//RS             ),
+//RS             ("first_difference".to_string(), Type::Int),
+//RS             ("reason".to_string(), Type::String),
+//RS             ("universal_proof".to_string(), Type::Bool),
+//RS         ]),
+//RS         // D-LIB-CALLGRANT1=A: host policy is explicit and path-scoped.
+//RS         "ModGrant" => Some(vec![(
+//RS             "read".to_string(),
+//RS             Type::List(Box::new(Type::String)),
+//RS         )]),
+//RS         // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: explicit terminal
+//RS         // controls use named fields so misspellings fail in sema.
+//RS         "TerminalSize" => Some(vec![
+//RS             ("cols".to_string(), Type::Int),
+//RS             ("rows".to_string(), Type::Int),
+//RS         ]),
+//RS         "TerminalPolicy" => Some(vec![
+//RS             (
+//RS                 "size".to_string(),
+//RS                 Type::Named(Syntax::TYPE_TERMINAL_SIZE.to_string()),
+//RS             ),
+//RS             (
+//RS                 "mode".to_string(),
+//RS                 Type::Named(Syntax::TYPE_TERMINAL_MODE.to_string()),
+//RS             ),
+//RS         ]),
+//RS         // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }`
+//RS         // — the two dot-literal enum fields resolve via `resolve_enum_variants_cloned`
+//RS         // (below), the same "core enum, not in the user registry" mechanism as
+//RS         // `ProcessStreamMode`.
+//RS         "TextWidth" => Some(vec![
+//RS             (
+//RS                 "ambiguous".to_string(),
+//RS                 Type::Named("TextWidthAmbiguous".to_string()),
+//RS             ),
+//RS             (
+//RS                 "controls".to_string(),
+//RS                 Type::Named("TextWidthControls".to_string()),
+//RS             ),
+//RS         ]),
+//RS         "IOContext" => Some(vec![
+//RS             (
+//RS                 "operation".to_string(),
+//RS                 Type::Named(Syntax::TYPE_IO_OPERATION.to_string()),
+//RS             ),
+//RS             ("resource".to_string(), Type::Option(Box::new(Type::String))),
+//RS             ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             ("cause".to_string(), Type::Option(Box::new(Type::String))),
+//RS         ]),
+//RS         "AsyncPolicy" => Some(vec![
+//RS             ("capacity".to_string(), Type::Int),
+//RS             ("overflow".to_string(), Type::Named("Overflow".to_string())),
+//RS         ]),
+//RS         // D-DX-FORM1=A: generated field descriptors are compiler-known
+//RS         // records. `web.form(Model, action: handler)` constructs these
+//RS         // literals after projecting the model fields, so they must use the
+//RS         // same core-record path as explicit prelude struct literals.
+//RS         "WebFormFieldSpec" => Some(vec![
+//RS             ("name".to_string(), str_ty.clone()),
+//RS             (
+//RS                 "value_type".to_string(),
+//RS                 Type::Named("WebFormValueType".to_string()),
+//RS             ),
+//RS             ("required".to_string(), Type::Bool),
+//RS             (
+//RS                 "default".to_string(),
+//RS                 Type::Option(Box::new(Type::String)),
+//RS             ),
+//RS             ("label".to_string(), str_ty.clone()),
+//RS             (
+//RS                 "control".to_string(),
+//RS                 Type::Named("WebFormControl".to_string()),
+//RS             ),
+//RS             ("group".to_string(), Type::Option(Box::new(Type::String))),
+//RS             ("wire_name".to_string(), str_ty),
+//RS         ]),
+//RS         // D-VALIDATE1 / D-VALIDATE-DECODE1: `FieldError.{ path: …, reason: … }`.
+//RS         "FieldError" => Some(vec![
+//RS             ("path".to_string(), str_ty.clone()),
+//RS             ("reason".to_string(), str_ty),
+//RS         ]),
+//RS         "EncodingLimits" => Some(vec![
+//RS             ("buffer_bytes".to_string(), Type::Int),
+//RS             ("max_depth".to_string(), Type::Int),
+//RS             ("max_item_bytes".to_string(), Type::Int),
+//RS             (
+//RS                 "max_total_bytes".to_string(),
+//RS                 Type::Option(Box::new(Type::Int)),
+//RS             ),
+//RS             ("max_expansion_depth".to_string(), Type::Int),
+//RS             ("max_expansion_bytes".to_string(), Type::Int),
+//RS         ]),
+//RS         "CSVRow" => Some(vec![
+//RS             ("fields".to_string(), Type::List(Box::new(Type::String))),
+//RS             ("line".to_string(), Type::Int),
+//RS         ]),
+//RS         "DataLimits" => Some(vec![
+//RS             (
+//RS                 "encoding".to_string(),
+//RS                 Type::Named("EncodingLimits".to_string()),
+//RS             ),
+//RS             ("max_groups".to_string(), Type::Int),
+//RS             ("max_sort_rows".to_string(), Type::Int),
+//RS             ("max_join_rows".to_string(), Type::Int),
+//RS             ("max_output_rows".to_string(), Type::Int),
+//RS         ]),
+//RS         "DataLineOptions" => Some(vec![
+//RS             ("title".to_string(), Type::String),
+//RS             ("x_label".to_string(), Type::String),
+//RS             ("y_label".to_string(), Type::String),
+//RS             ("markers".to_string(), Type::Bool),
+//RS             ("reference".to_string(), Type::Option(Box::new(Type::Float))),
+//RS             ("style".to_string(), Type::String),
+//RS             ("color".to_string(), Type::String),
+//RS             ("legend".to_string(), Type::String),
+//RS         ]),
+//RS         "DataError" => Some(vec![
+//RS             ("kind".to_string(), Type::Named("DataErrorKind".to_string())),
+//RS             ("operation".to_string(), Type::String),
+//RS             ("row".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             ("column".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             ("index".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             ("reason".to_string(), Type::String),
+//RS             (
+//RS                 "cause".to_string(),
+//RS                 Type::Option(Box::new(Type::Named("EncodingError".to_string()))),
+//RS             ),
+//RS         ]),
+//RS         "DataPivotCell" => Some(vec![
+//RS             ("row_key".to_string(), Type::String),
+//RS             ("column_key".to_string(), Type::String),
+//RS             ("count".to_string(), Type::Int),
+//RS             ("sum".to_string(), Type::Float),
+//RS             ("mean".to_string(), Type::Float),
+//RS         ]),
+//RS         "DataSummary" => Some(vec![
+//RS             ("count".to_string(), Type::Int),
+//RS             ("sum".to_string(), Type::Float),
+//RS             ("mean".to_string(), Type::Float),
+//RS             ("min".to_string(), Type::Float),
+//RS             ("max".to_string(), Type::Float),
+//RS             ("median".to_string(), Type::Float),
+//RS             ("variance".to_string(), Type::Float),
+//RS             ("stddev".to_string(), Type::Float),
+//RS         ]),
+//RS         "JetDataPlotField" => Some(vec![
+//RS             ("name".to_string(), Type::String),
+//RS             ("kind".to_string(), Type::Named("JetDataPlotValue".to_string())),
+//RS         ]),
+//RS         "JetDataPlotSchema" => Some(vec![(
+//RS             "fields".to_string(),
+//RS             Type::List(Box::new(Type::Named("JetDataPlotField".to_string()))),
+//RS         )]),
+//RS         "JetDataPlotSourceFacts" => Some(vec![
+//RS             ("rows".to_string(), Type::Int),
+//RS             ("columns".to_string(), Type::Int),
+//RS         ]),
+//RS         "JetDataPlotEncoding" => Some(vec![
+//RS             ("x".to_string(), Type::String),
+//RS             ("y".to_string(), Type::String),
+//RS             ("mark".to_string(), Type::Named("JetDataPlotMark".to_string())),
+//RS         ]),
+//RS         "JetDataPlotScale" => Some(vec![
+//RS             (
+//RS                 "kind".to_string(),
+//RS                 Type::Named("JetDataPlotScaleKind".to_string()),
+//RS             ),
+//RS             ("field".to_string(), Type::String),
+//RS         ]),
+//RS         "JetDataPlotAxis" => Some(vec![
+//RS             ("field".to_string(), Type::String),
+//RS             ("title".to_string(), Type::String),
+//RS         ]),
+//RS         "JetDataPlotLegend" => Some(vec![(
+//RS             "position".to_string(),
+//RS             Type::Named("JetDataPlotLegendPosition".to_string()),
+//RS         )]),
+//RS         "JetDataPlotFacet" => Some(vec![
+//RS             (
+//RS                 "kind".to_string(),
+//RS                 Type::Named("JetDataPlotFacetKind".to_string()),
+//RS             ),
+//RS             ("field".to_string(), Type::String),
+//RS         ]),
+//RS         "JetDataPlotLayer" => Some(vec![
+//RS             ("mark".to_string(), Type::Named("JetDataPlotMark".to_string())),
+//RS             (
+//RS                 "encoding".to_string(),
+//RS                 Type::Named("JetDataPlotEncoding".to_string()),
+//RS             ),
+//RS         ]),
+//RS         "JetDataPlotAccessibility" => Some(vec![
+//RS             ("title".to_string(), Type::String),
+//RS             ("summary".to_string(), Type::String),
+//RS         ]),
+//RS         "JetDataPlotLayout" => Some(vec![
+//RS             ("width".to_string(), Type::Int),
+//RS             ("height".to_string(), Type::Int),
+//RS         ]),
+//RS         "JetDataPlotCapability" => Some(vec![
+//RS             (
+//RS                 "backend".to_string(),
+//RS                 Type::Named("JetDataPlotBackend".to_string()),
+//RS             ),
+//RS             (
+//RS                 "support".to_string(),
+//RS                 Type::Named("JetDataPlotSupport".to_string()),
+//RS             ),
+//RS         ]),
+//RS         "JetDataPlotError" => Some(vec![
+//RS             (
+//RS                 "kind".to_string(),
+//RS                 Type::Named("JetDataPlotErrorKind".to_string()),
+//RS             ),
+//RS             ("message".to_string(), Type::String),
+//RS         ]),
+//RS         "JetDataPlotColumn" => Some(vec![
+//RS             ("name".to_string(), Type::String),
+//RS             (
+//RS                 "values".to_string(),
+//RS                 Type::List(Box::new(Type::String)),
+//RS             ),
+//RS         ]),
+//RS         "JetDataPlotSelectedRow" => Some(vec![("index".to_string(), Type::Int)]),
+//RS         "JetDataPlotInspection" => Some(vec![("text".to_string(), Type::String)]),
+//RS         "JetDataPlotRender" => Some(vec![
+//RS             (
+//RS                 "format".to_string(),
+//RS                 Type::Named("JetDataPlotRenderFormat".to_string()),
+//RS             ),
+//RS             ("body".to_string(), Type::String),
+//RS         ]),
+//RS         "JetDataPlotProjection" => Some(vec![
+//RS             ("start".to_string(), Type::Int),
+//RS             ("end".to_string(), Type::Int),
+//RS         ]),
+//RS         "JetDataPlotPlan" => Some(vec![
+//RS             ("mark".to_string(), Type::Named("JetDataPlotMark".to_string())),
+//RS             (
+//RS                 "labels".to_string(),
+//RS                 Type::List(Box::new(Type::String)),
+//RS             ),
+//RS             (
+//RS                 "values".to_string(),
+//RS                 Type::List(Box::new(Type::Float)),
+//RS             ),
+//RS             (
+//RS                 "layout".to_string(),
+//RS                 Type::Named("JetDataPlotLayout".to_string()),
+//RS             ),
+//RS             (
+//RS                 "encoding".to_string(),
+//RS                 Type::Named("JetDataPlotEncoding".to_string()),
+//RS             ),
+//RS             (
+//RS                 "schema".to_string(),
+//RS                 Type::Named("JetDataPlotSchema".to_string()),
+//RS             ),
+//RS         ]),
+//RS         "Limits" => Some(vec![
+//RS             ("max_reply_line_bytes".to_string(), Type::Int),
+//RS             ("max_reply_lines".to_string(), Type::Int),
+//RS             ("max_capabilities".to_string(), Type::Int),
+//RS             ("max_recipients".to_string(), Type::Int),
+//RS             ("max_message_bytes".to_string(), Type::Int),
+//RS             ("max_auth_challenge_bytes".to_string(), Type::Int),
+//RS         ]),
+//RS         "SMTPConfig" => Some(vec![
+//RS             ("host".to_string(), Type::String),
+//RS             ("port".to_string(), Type::Int),
+//RS             (
+//RS                 "security".to_string(),
+//RS                 Type::Named("SMTPSecurity".to_string()),
+//RS             ),
+//RS             ("auth".to_string(), Type::Named("SMTPAuth".to_string())),
+//RS             (
+//RS                 "recipient_policy".to_string(),
+//RS                 Type::Named("RecipientPolicy".to_string()),
+//RS             ),
+//RS             ("trust".to_string(), Type::Named("TLSTrust".to_string())),
+//RS             ("limits".to_string(), Type::Named("Limits".to_string())),
+//RS             (
+//RS                 "dkim".to_string(),
+//RS                 Type::Option(Box::new(Type::Named("DKIMConfig".to_string()))),
+//RS             ),
+//RS         ]),
+//RS         "DKIMConfig" => Some(vec![
+//RS             ("domain".to_string(), Type::String),
+//RS             ("selector".to_string(), Type::String),
+//RS             (
+//RS                 "private_key".to_string(),
+//RS                 crate::Sema::Diagnostics::core_crypto_nominal(Type::Named("Secret".to_string())),
+//RS             ),
+//RS             (
+//RS                 "signed_headers".to_string(),
+//RS                 Type::List(Box::new(Type::String)),
+//RS             ),
+//RS         ]),
+//RS         "EncodingCause" => Some(vec![
+//RS             ("kind".to_string(), Type::String),
+//RS             ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             ("message".to_string(), Type::String),
+//RS         ]),
+//RS         "EncodingError" => Some(vec![
+//RS             (
+//RS                 "format".to_string(),
+//RS                 Type::Named("EncodingFormat".to_string()),
+//RS             ),
+//RS             (
+//RS                 "kind".to_string(),
+//RS                 Type::Named("EncodingErrorKind".to_string()),
+//RS             ),
+//RS             ("byte_offset".to_string(), Type::Int),
+//RS             ("line".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             ("column".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             ("path".to_string(), Type::String),
+//RS             ("reason".to_string(), Type::String),
+//RS             (
+//RS                 "cause".to_string(),
+//RS                 Type::Option(Box::new(Type::Named("EncodingCause".to_string()))),
+//RS             ),
+//RS         ]),
+//RS         "CBOROptions" => Some(vec![
+//RS             ("max_depth".to_string(), Type::Int),
+//RS             ("max_items".to_string(), Type::Int),
+//RS             ("max_bytes".to_string(), Type::Int),
+//RS             ("require_canonical".to_string(), Type::Bool),
+//RS         ]),
+//RS         "CBORError" => Some(vec![
+//RS             ("kind".to_string(), Type::Named("CBORErrorKind".to_string())),
+//RS             ("byte_offset".to_string(), Type::Int),
+//RS             ("path".to_string(), Type::String),
+//RS             ("reason".to_string(), Type::String),
+//RS         ]),
+//RS         "XMLLimits" => Some(vec![
+//RS             ("max_depth".to_string(), Type::Int),
+//RS             ("max_nodes".to_string(), Type::Int),
+//RS             ("max_attributes_per_element".to_string(), Type::Int),
+//RS             ("max_name_bytes".to_string(), Type::Int),
+//RS             ("max_text_bytes".to_string(), Type::Int),
+//RS             ("max_entity_declarations".to_string(), Type::Int),
+//RS             ("max_entity_depth".to_string(), Type::Int),
+//RS             ("max_entity_replacement_bytes".to_string(), Type::Int),
+//RS         ]),
+//RS         "XMLParseOptions" => Some(vec![
+//RS             (
+//RS                 "entities".to_string(),
+//RS                 Type::Named("XMLEntityPolicy".to_string()),
+//RS             ),
+//RS             ("limits".to_string(), Type::Named("XMLLimits".to_string())),
+//RS         ]),
+//RS         "XMLRenderOptions" => Some(vec![
+//RS             (
+//RS                 "encoding".to_string(),
+//RS                 Type::Named("XMLEncoding".to_string()),
+//RS             ),
+//RS             (
+//RS                 "lexical".to_string(),
+//RS                 Type::Named("XMLLexicalPolicy".to_string()),
+//RS             ),
+//RS         ]),
+//RS         "XMLCanonical" => Some(vec![
+//RS             (
+//RS                 "mode".to_string(),
+//RS                 Type::Named("XMLCanonicalMode".to_string()),
+//RS             ),
+//RS             ("comments".to_string(), Type::Bool),
+//RS             (
+//RS                 "inclusive_prefixes".to_string(),
+//RS                 Type::List(Box::new(Type::String)),
+//RS             ),
+//RS         ]),
+//RS         "XMLError" => Some(vec![
+//RS             ("kind".to_string(), Type::Named("XMLReason".to_string())),
+//RS             ("byte_offset".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             ("line".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             ("column".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             ("path".to_string(), Type::String),
+//RS             ("reason".to_string(), Type::String),
+//RS         ]),
+//RS         "RecipientReport" => Some(vec![
+//RS             ("address".to_string(), Type::Named("Address".to_string())),
+//RS             ("accepted".to_string(), Type::Bool),
+//RS             ("code".to_string(), Type::Int),
+//RS             ("message".to_string(), Type::String),
+//RS         ]),
+//RS         "SendReport" => Some(vec![
+//RS             ("server".to_string(), Type::String),
+//RS             (
+//RS                 "accepted".to_string(),
+//RS                 Type::List(Box::new(Type::Named("RecipientReport".to_string()))),
+//RS             ),
+//RS             (
+//RS                 "rejected".to_string(),
+//RS                 Type::List(Box::new(Type::Named("RecipientReport".to_string()))),
+//RS             ),
+//RS             ("response_code".to_string(), Type::Int),
+//RS             ("response".to_string(), Type::String),
+//RS             ("accepted_at".to_string(), Type::String),
+//RS         ]),
+//RS "MIME" => Some(vec![
+//RS     ("top".to_string(), Type::String),
+//RS     ("sub".to_string(), Type::String),
+//RS ]),
+//RS         "NetErrorDetail" => Some(vec![
+//RS             ("operation".to_string(), Type::String),
+//RS             ("address".to_string(), Type::Option(Box::new(Type::String))),
+//RS             ("name".to_string(), Type::Option(Box::new(Type::String))),
+//RS             ("message".to_string(), Type::String),
+//RS             ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
+//RS         ]),
+//RS         "Duration" => Some(vec![("ns".to_string(), Type::Int)]),
+//RS         "Stopwatch" => Some(vec![("start_ns".to_string(), Type::Int)]),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Constructable fields for generic compiler-owned records. The ordinary
+//RS /// constructable table intentionally has no type arguments, so callers with a
+//RS /// `Type::Apply` resolve these shapes here.
+//RS pub(crate) fn core_generic_constructable_fields(
+//RS     type_name: &str,
+//RS     args: &[Type],
+//RS ) -> Option<Vec<(String, Type)>> {
+//RS     if type_name == "DataJoin" && args.len() == 2 {
+//RS         return Some(vec![
+//RS             ("left".to_string(), args[0].clone()),
+//RS             ("right".to_string(), args[1].clone()),
+//RS         ]);
+//RS     }
+//RS     if type_name == "JetDataPlot" && args.len() == 1 {
+//RS         return Some(vec![
+//RS             (
+//RS                 "rows".to_string(),
+//RS                 Type::List(Box::new(args[0].clone())),
+//RS             ),
+//RS             (
+//RS                 "plan".to_string(),
+//RS                 Type::Named("JetDataPlotPlan".to_string()),
+//RS             ),
+//RS         ]);
+//RS     }
+//RS     if type_name == "DataStream" && args.len() == 1 {
+//RS         return Some(vec![
+//RS             (
+//RS                 "items".to_string(),
+//RS                 Type::List(Box::new(args[0].clone())),
+//RS             ),
+//RS             ("index".to_string(), Type::Int),
+//RS             ("cancelled".to_string(), Type::Bool),
+//RS         ]);
+//RS     }
+//RS     if args.len() != 1 {
+//RS         return None;
+//RS     }
+//RS     let command = args[0].clone();
+//RS     let typed_case = || Type::Apply {
+//RS         name: "TypedHistoryCase".to_string(),
+//RS         args: vec![command.clone()],
+//RS     };
+//RS     match type_name {
+//RS         "TypedHistoryCase" => Some(vec![
+//RS             ("case".to_string(), Type::Named("HistoryCase".to_string())),
+//RS             ("commands".to_string(), Type::List(Box::new(command))),
+//RS         ]),
+//RS         "HistoryStrategy" => {
+//RS             let typed_case = typed_case();
+//RS             Some(vec![
+//RS                 (
+//RS                     "generate".to_string(),
+//RS                     Type::Fn {
+//RS                         params: vec![
+//RS                             Type::Named("HistoryRNG".to_string()),
+//RS                             Type::Named("Count".to_string()),
+//RS                             Type::Named("Count".to_string()),
+//RS                         ],
+//RS                         ret: Some(Box::new(Type::Option(Box::new(typed_case.clone())))),
+//RS                         effect_bound: None,
+//RS                         return_view_provenance: None,
+//RS                         param_contract: None,
+//RS                         call_metadata: None,
+//RS                     },
+//RS                 ),
+//RS                 (
+//RS                     "rebuild".to_string(),
+//RS                     Type::Fn {
+//RS                         params: vec![Type::Named("HistoryCase".to_string())],
+//RS                         ret: Some(Box::new(Type::Option(Box::new(typed_case.clone())))),
+//RS                         effect_bound: None,
+//RS                         return_view_provenance: None,
+//RS                         param_contract: None,
+//RS                         call_metadata: None,
+//RS                     },
+//RS                 ),
+//RS                 (
+//RS                     "valid".to_string(),
+//RS                     Type::Fn {
+//RS                         params: vec![typed_case],
+//RS                         ret: Some(Box::new(Type::Bool)),
+//RS                         effect_bound: None,
+//RS                         return_view_provenance: None,
+//RS                         param_contract: None,
+//RS                         call_metadata: None,
+//RS                     },
+//RS                 ),
+//RS                 (
+//RS                     "bounds".to_string(),
+//RS                     Type::Named("HistoryBounds".to_string()),
+//RS                 ),
+//RS                 (
+//RS                     "distributions".to_string(),
+//RS                     Type::List(Box::new(Type::Named("HistoryDistribution".to_string()))),
+//RS                 ),
+//RS             ])
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-EMAIL-SMTP-SURFACE1=A: closed ungated email policy and error enums.
+//RS pub(crate) fn core_email_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+//RS     let zero = Span::new(0, 0);
+//RS     let mut variants = std::collections::HashMap::new();
+//RS     let units: &[&str] = match enum_name {
+//RS         "SMTPSecurity" => &["StartTLS", "TLS"],
+//RS         "RecipientPolicy" => &["RequireAll", "DeliverAccepted"],
+//RS         "EmailError" | "SMTPAuth" | "TLSTrust" => &[],
+//RS         _ => return None,
+//RS     };
+//RS     for name in units {
+//RS         variants.insert((*name).to_string(), (zero, VariantPayload::Unit));
+//RS     }
+//RS     if enum_name == "EmailError" {
+//RS         for name in [
+//RS             "Configuration",
+//RS             "DNS",
+//RS             "Connect",
+//RS             "TLS",
+//RS             "Auth",
+//RS             "Protocol",
+//RS             "Rejected",
+//RS             "Transient",
+//RS             "TimedOut",
+//RS             "Cancelled",
+//RS             "DeliveryUnknown",
+//RS         ] {
+//RS             let fields = [
+//RS                 ("operation", Type::String),
+//RS                 ("server", Type::Option(Box::new(Type::String))),
+//RS                 ("code", Type::Option(Box::new(Type::Int))),
+//RS                 ("reason", Type::String),
+//RS             ]
+//RS             .into_iter()
+//RS             .map(|(field, ty)| VariantField {
+//RS                 name: field.to_string(),
+//RS                 name_span: zero,
+//RS                 ty,
+//RS                 ty_span: zero,
+//RS             })
+//RS             .collect();
+//RS             variants.insert(name.to_string(), (zero, VariantPayload::Named(fields)));
+//RS         }
+//RS     } else if enum_name == "SMTPAuth" {
+//RS         variants.insert("None".to_string(), (zero, VariantPayload::Unit));
+//RS         variants.insert(
+//RS             "Password".to_string(),
+//RS             (
+//RS                 zero,
+//RS                 VariantPayload::Named(vec![
+//RS                     VariantField {
+//RS                         name: "username".to_string(),
+//RS                         name_span: zero,
+//RS                         ty: Type::String,
+//RS                         ty_span: zero,
+//RS                     },
+//RS                     VariantField {
+//RS                         name: "password".to_string(),
+//RS                         name_span: zero,
+//RS                         ty: crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(
+//RS                             "Secret".to_string(),
+//RS                         )),
+//RS                         ty_span: zero,
+//RS                     },
+//RS                 ]),
+//RS             ),
+//RS         );
+//RS     } else if enum_name == "TLSTrust" {
+//RS         variants.insert("System".to_string(), (zero, VariantPayload::Unit));
+//RS         variants.insert(
+//RS             "SystemPlusCa".to_string(),
+//RS             (
+//RS                 zero,
+//RS                 VariantPayload::Named(vec![VariantField {
+//RS                     name: "pem".to_string(),
+//RS                     name_span: zero,
+//RS                     ty: Type::List(Box::new(Type::IntN {
+//RS                         signed: false,
+//RS                         bits: 8,
+//RS                     })),
+//RS                     ty_span: zero,
+//RS                 }]),
+//RS             ),
+//RS         );
+//RS     }
+//RS     Some(variants)
+//RS }
+//RS 
+//RS pub(crate) fn core_tls_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+//RS     let zero = Span::new(0, 0);
+//RS     let roots = Type::Named("TLSRootCertificates".to_string());
+//RS     let mut variants = std::collections::HashMap::new();
+//RS     match enum_name {
+//RS         "TLSVersion" => {
+//RS             variants.insert("TLS12".to_string(), (zero, VariantPayload::Unit));
+//RS             variants.insert("TLS13".to_string(), (zero, VariantPayload::Unit));
+//RS         }
+//RS         "TLSClientTrust" => {
+//RS             variants.insert("System".to_string(), (zero, VariantPayload::Unit));
+//RS             variants.insert(
+//RS                 "SystemPlus".to_string(),
+//RS                 (zero, VariantPayload::Single(roots.clone(), zero)),
+//RS             );
+//RS             variants.insert(
+//RS                 "CustomOnly".to_string(),
+//RS                 (zero, VariantPayload::Single(roots, zero)),
+//RS             );
+//RS         }
+//RS         _ => return None,
+//RS     }
+//RS     Some(variants)
+//RS }
+//RS 
+//RS /// D-ENCSTREAM-SURFACE1=A: closed shared stream enums.
+//RS pub(crate) fn core_encoding_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::VariantPayload;
+//RS     let zero = Span::new(0, 0);
+//RS     let mut variants = std::collections::HashMap::new();
+//RS     let units: &[&str] = match enum_name {
+//RS         "EncodingFormat" => &["JSON", "JSONL", "CSV", "TOML", "YAML", "XML", "CBOR"],
+//RS         "DataErrorKind" => &[
+//RS             "Decode",
+//RS             "Limit",
+//RS             "IO",
+//RS             "Empty",
+//RS             "InvalidArgument",
+//RS             "NonFinite",
+//RS             "Overflow",
+//RS             "State",
+//RS             "Bridge",
+//RS             "Unsupported",
+//RS             "DuplicateKey",
+//RS             "MissingKey",
+//RS             "WrongOwner",
+//RS             "StaleRevision",
+//RS             "InvalidValue",
+//RS         ],
+//RS         "DataEvent" => &["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"],
+//RS         "DataFormat" => &["CSV", "JSON", "JSONL", "Parquet", "Arrow"],
+//RS         "DataLoaderKind" => &["File", "URL", "Database", "Value"],
+//RS         "DataFreshness" => &["Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"],
+//RS         "DataInvalidationCause" => &[
+//RS             "NoCause",
+//RS             "Loader",
+//RS             "Input",
+//RS             "ArchiveMember",
+//RS             "Parameters",
+//RS             "Credential",
+//RS             "Capability",
+//RS             "Manual",
+//RS         ],
+//RS         "JobQueueState" => &[
+//RS             "Queued",
+//RS             "Running",
+//RS             "Retrying",
+//RS             "Completed",
+//RS             "Failed",
+//RS             "DeadLettered",
+//RS             "Cancelled",
+//RS         ],
+//RS         "JobQueueDeliveryPolicy" => &["AtLeastOnce"],
+//RS         "JetDataPlotMark" => &["Bar", "Line", "Point"],
+//RS         "JetDataPlotChannel" => &["X", "Y", "Color", "Size"],
+//RS         "JetDataPlotAggregate" => &["Sum", "Mean", "Count", "Min", "Max"],
+//RS         "JetDataPlotFilterOp" => &["Eq", "Ne", "Lt", "Le", "Gt", "Ge"],
+//RS         "JetDataPlotValue" => &["Number", "Text", "Bool"],
+//RS         "JetDataPlotTransform" => &["Identity", "Filter", "Aggregate"],
+//RS         "JetDataPlotScaleKind" => &["Linear", "Log", "Band"],
+//RS         "JetDataPlotDomain" => &["Auto", "Explicit"],
+//RS         "JetDataPlotLegendPosition" => &["Top", "Bottom", "Left", "Right"],
+//RS         "JetDataPlotFacetKind" => &["Wrap", "Grid"],
+//RS         "JetDataPlotInteraction" => &["Hover", "Select", "Pan"],
+//RS         "JetDataPlotBackend" => &["SVG", "Text"],
+//RS         "JetDataPlotSupport" => &["Full", "Partial", "Unsupported"],
+//RS         "JetDataPlotErrorKind" => &["Schema", "Encoding", "Render"],
+//RS         "JetDataPlotRenderFormat" => &["SVG", "Text", "JSON"],
+//RS         "CBORErrorKind" => &[
+//RS             "Syntax",
+//RS             "Truncated",
+//RS             "Unsupported",
+//RS             "Limit",
+//RS             "TypeMismatch",
+//RS             "TrailingData",
+//RS             "NonCanonical",
+//RS         ],
+//RS         "XMLReason" => &["Syntax", "Truncated", "ForbiddenDTD", "UnknownEntity"],
+//RS         "XMLEntityPolicy" => &["PredefinedOnly", "Reject"],
+//RS         "XMLEncoding" => &["UTF8", "UTF16"],
+//RS         "XMLCanonicalMode" => &["Inclusive", "Exclusive"],
+//RS         _ => return None,
+//RS     };
+//RS     for name in units {
+//RS         variants.insert((*name).to_string(), (zero, VariantPayload::Unit));
+//RS     }
+//RS     if enum_name == "DataEvent" {
+//RS         for (name, ty) in [
+//RS             ("Bool", Type::Bool),
+//RS             ("Int", Type::Int),
+//RS             ("Float", Type::Float),
+//RS             ("Text", Type::String),
+//RS             (Syntax::TYPE_BYTES, Type::List(Box::new(u8_ty()))),
+//RS             ("Key", Type::String),
+//RS         ] {
+//RS             variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));
+//RS         }
+//RS     }
+//RS     Some(variants)
+//RS }
+//RS 
+//RS /// D-AUTH-TOKENPOLICY1=A: inspectable verifier failures.
+//RS pub(crate) fn core_auth_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+//RS {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::{VariantField, VariantPayload};
+//RS     if enum_name != "AuthError" {
+//RS         return None;
+//RS     }
+//RS     let zero = Span::new(0, 0);
+//RS     let field = |name: &str, ty: Type| VariantField {
+//RS         name: name.to_string(),
+//RS         name_span: zero,
+//RS         ty,
+//RS         ty_span: zero,
+//RS     };
+//RS     let mut variants = std::collections::HashMap::new();
+//RS     for name in ["InvalidSignature", "WeakKey", "TokenExpired"] {
+//RS         variants.insert(name.to_string(), (zero, VariantPayload::Unit));
+//RS     }
+//RS     for name in [
+//RS         "MalformedToken",
+//RS         "UnsupportedToken",
+//RS         "MissingClaim",
+//RS         "DecodeError",
+//RS     ] {
+//RS         variants.insert(
+//RS             name.to_string(),
+//RS             (zero, VariantPayload::Single(Type::String, zero)),
+//RS         );
+//RS     }
+//RS     variants.insert(
+//RS         "WrongAudience".to_string(),
+//RS         (
+//RS             zero,
+//RS             VariantPayload::Named(vec![
+//RS                 field("expected", Type::String),
+//RS                 field("actual", Type::String),
+//RS             ]),
+//RS         ),
+//RS     );
+//RS     variants.insert(
+//RS         "WrongIssuer".to_string(),
+//RS         (
+//RS             zero,
+//RS             VariantPayload::Named(vec![
+//RS                 field("expected", Type::String),
+//RS                 field("actual", Type::Option(Box::new(Type::String))),
+//RS             ]),
+//RS         ),
+//RS     );
+//RS     variants.insert("TokenNotYetValid".to_string(), (zero, VariantPayload::Unit));
+//RS     Some(variants)
+//RS }
+// END-PORT-PENDING 0383 crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:2187-4531
+

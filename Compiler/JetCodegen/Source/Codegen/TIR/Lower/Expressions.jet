@@ -1,0 +1,1806 @@
+// PORT-PENDING 0475 crates-jet-codegen-src-codegen-tir-lower-expressions-slice-1: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1-1802
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::AST::{
+//RS     AccessConvention, BinOp, Call, CallArg, ContractClause, CtValue, EnumLitArg, Expr, IndexKind,
+//RS     OrFallback, Pattern, Stmt, StrPart, TryConvert, Type, TypedLitBody, UnOp,
+//RS };
+//RS use crate::Codegen::Cx;
+//RS use crate::Codegen::TIR::ListSpreadPart;
+//RS use crate::Codegen::TIR::LowerEnv;
+//RS use crate::Codegen::TIR::TAddressLifetime;
+//RS use crate::Codegen::TIR::TBuiltinOp;
+//RS use crate::Codegen::TIR::TCallArg;
+//RS use crate::Codegen::TIR::TCoreClosureKind;
+//RS use crate::Codegen::TIR::TEnumPayload;
+//RS use crate::Codegen::TIR::TExpr;
+//RS use crate::Codegen::TIR::TExprKind;
+//RS use crate::Codegen::TIR::TExternArg;
+//RS use crate::Codegen::TIR::TFailureCarrier;
+//RS use crate::Codegen::TIR::TFnValueKind;
+//RS use crate::Codegen::TIR::THostCall;
+//RS use crate::Codegen::TIR::TIfCond;
+//RS use crate::Codegen::TIR::TLambda;
+//RS use crate::Codegen::TIR::TLambdaBody;
+//RS use crate::Codegen::TIR::TLocal;
+//RS use crate::Codegen::TIR::TMethodRef;
+//RS use crate::Codegen::TIR::TModuleCallForm;
+//RS use crate::Codegen::TIR::TNumericOp;
+//RS use crate::Codegen::TIR::TOptionProbe;
+//RS use crate::Codegen::TIR::TOrFallback;
+//RS use crate::Codegen::TIR::TPreludeArg;
+//RS use crate::Codegen::TIR::TPattern;
+//RS use crate::Codegen::TIR::TPatternPosition;
+//RS use crate::Codegen::TIR::TRequireKind;
+//RS use crate::Codegen::TIR::TStaticOwner;
+//RS use crate::Codegen::TIR::TStmt;
+//RS use crate::Codegen::TIR::TStrPart;
+//RS use crate::Codegen::TIR::TTryConvert;
+//RS use crate::Codegen::TIR::TirWorklist;
+//RS use crate::Codegen::TIR::ambient_err_local;
+//RS use crate::Codegen::TIR::ast_operand_is_integer;
+//RS use crate::Codegen::TIR::clone_env;
+//RS use crate::Codegen::TIR::data_plan_for_core_call;
+//RS use crate::Codegen::TIR::extern_call_return_type;
+//RS use crate::Codegen::TIR::imported_module_call_target_return;
+//RS use crate::Codegen::TIR::int_lit_type;
+//RS use crate::Codegen::TIR::is_numeric_bounds_const;
+//RS use crate::Codegen::TIR::lower::contract_expr_proven;
+//RS use crate::Codegen::TIR::lower::core_module_path_from_receiver;
+//RS use crate::Codegen::TIR::lower::lower_binding_free_variant_pattern_test;
+//RS use crate::Codegen::TIR::lower::lower_comptime_scalar;
+//RS use crate::Codegen::TIR::lower_enum_arg;
+//RS use crate::Codegen::TIR::lower_extern_call_arg;
+//RS use crate::Codegen::TIR::lower_lambda;
+//RS use crate::Codegen::TIR::lower_method_call_with_sig;
+//RS use crate::Codegen::TIR::lower_one_call_arg;
+//RS use crate::Codegen::TIR::lower_panic_stop;
+//RS use crate::Codegen::TIR::lower_require_eq_stop;
+//RS use crate::Codegen::TIR::lower_require_stop;
+//RS use crate::Codegen::TIR::lower_stmts;
+//RS use crate::Codegen::TIR::module_call_source_return_type;
+//RS use crate::Codegen::TIR::preserve_typed_list_shape;
+//RS use crate::Codegen::TIR::solve_new_type;
+//RS use crate::Codegen::TIR::struct_field_type;
+//RS use crate::Codegen::TIR::tir_address_lifetime;
+//RS use crate::Codegen::TIR::unit_type;
+//RS use crate::Codegen::TIR::view_copy_owned_type;
+//RS use crate::Codegen::TIR::{TContract, TContractDisposition, TContractKind};
+//RS use crate::Codegen::TIR::{
+//RS     THandleOp, call_return_type, call_return_type_with_args, demand_generic_free_function,
+//RS };
+//RS use crate::Codegen::escape_rust_str;
+//RS use crate::Codegen::is_db_value_type_name;
+//RS use crate::Codegen::is_json_type_name;
+//RS use crate::Codegen::mangle;
+//RS use crate::Codegen::mangle_generated;
+//RS use crate::Codegen::net_handle_rust_type;
+//RS use crate::Codegen::tuple_fields_plain;
+//RS use crate::Codegen::tuple_struct_name;
+//RS use crate::Diagnostics::Span;
+//RS use crate::Syntax;
+//RS use crate::jet_generated_format as jet_format;
+//RS use jet_foundation::CanonicalPass;
+//RS use std::cell::{Cell, RefCell};
+//RS use std::collections::HashSet;
+//RS use std::collections::{HashMap, VecDeque};
+//RS 
+//RS /// Run one branch body in its own stack frame.
+//RS ///
+//RS /// At `opt-level=0` rustc emits no `llvm.lifetime` markers, so LLVM's
+//RS /// StackColoring pass never runs and one giant `match`/gate chain reserves the
+//RS /// SUM of every branch's locals in a single frame instead of the maximum.
+//RS /// `lower_expr` -> `lower_expr_inner` -> `lower_method_call_impl` ->
+//RS /// `lower_expr` is a recursive cycle, so that sum is multiplied by source
+//RS /// nesting depth and a debug-built test binary overflowed libtest's 2 MiB
+//RS /// worker stack after two levels. Wrapping a branch body here keeps its locals
+//RS /// in the closure's own frame, so one nesting level costs the ONE branch it
+//RS /// takes rather than all of them.
+//RS ///
+//RS /// `#[inline(never)]` keeps the call boundary at every optimization level; at
+//RS /// `opt-level=0`, where the overflow lives, the closure is a plain call.
+//RS #[inline(never)]
+//RS pub(crate) fn in_own_frame<R>(body: impl FnOnce() -> R) -> R {
+//RS     body()
+//RS }
+//RS 
+//RS /// D-LINALG1 / D-SIMD2: scalar splat `Vec3 * 2.0` / `2.0 * Vec3` is a math
+//RS /// builtin, not primitive f64/i64 arithmetic on a handle.
+//RS fn math_scalar_builtin(
+//RS     op: crate::AST::BinOp,
+//RS     left: &Type,
+//RS     right: &Type,
+//RS ) -> Option<(String, String)> {
+//RS     use crate::AST::BinOp;
+//RS     let op_name = match op {
+//RS         BinOp::Mul => "mul",
+//RS         BinOp::Div => "div",
+//RS         _ => return None,
+//RS     };
+//RS     match (left, right) {
+//RS         (Type::Named(ln), _)
+//RS             if crate::Sema::is_math_type(ln)
+//RS                 && crate::Sema::math_scalar_binop_result(op, ln, right).is_some() =>
+//RS         {
+//RS             Some((ln.clone(), op_name.to_string()))
+//RS         }
+//RS         (_, Type::Named(rn))
+//RS             if crate::Sema::is_math_type(rn)
+//RS                 && crate::Sema::math_scalar_binop_result(op, rn, left).is_some() =>
+//RS         {
+//RS             Some(("Float".to_string(), format!("{op_name}_{rn}")))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn coerce_math_scalar_to_float(scalar: TExpr, line: u32) -> TExpr {
+//RS     match &scalar.ty {
+//RS         Type::Float | Type::Float32 => scalar,
+//RS         Type::Named(name) if name == Syntax::TYPE_DECIMAL || name == Syntax::TYPE_FRACTION => {
+//RS             TExpr {
+//RS                 ty: Type::Float,
+//RS                 kind: TExprKind::PreciseBuiltin {
+//RS                     type_name: name.clone(),
+//RS                     func: "to_float".to_string(),
+//RS                     args: vec![scalar],
+//RS                 },
+//RS             }
+//RS         }
+//RS         Type::Int | Type::IntN { .. } => {
+//RS             let source_signed = match scalar.ty {
+//RS                 Type::IntN { signed: false, .. } => false,
+//RS                 _ => true,
+//RS             };
+//RS             TExpr {
+//RS                 ty: Type::Float,
+//RS                 kind: TExprKind::NumericMethod {
+//RS                     recv: Box::new(scalar),
+//RS                     op: TNumericOp::CheckedIntToFloat {
+//RS                         source_signed,
+//RS                         target_f32: false,
+//RS                         line,
+//RS                     },
+//RS                 },
+//RS             }
+//RS         }
+//RS         _ => scalar,
+//RS     }
+//RS }
+//RS 
+//RS /// D-PLACE1: sema checks an `Atomic<T>` field initializer as `T`; construct
+//RS /// the private carrier only after that checked scalar reaches TIR.
+//RS fn lower_atomic_initializer(value: TExpr, field_ty: &Type) -> TExpr {
+//RS     let Type::Apply { name, args } = field_ty else {
+//RS         return value;
+//RS     };
+//RS     let [inner] = args.as_slice() else {
+//RS         return value;
+//RS     };
+//RS     if name != "Atomic" || !jet_foundation::Layout::atomic_scalar_type(inner) {
+//RS         return value;
+//RS     }
+//RS     TExpr {
+//RS         ty: field_ty.clone(),
+//RS         kind: TExprKind::StaticCall {
+//RS             owner: TStaticOwner::Prelude {
+//RS                 rooted: true,
+//RS                 path: "JetAtomic".to_string(),
+//RS                 generics: vec![TPreludeArg::Jet(inner.clone())],
+//RS             },
+//RS             owner_type: None,
+//RS             method: TMethodRef::bare("new"),
+//RS             type_args: Vec::new(),
+//RS             args: vec![TCallArg {
+//RS                 value,
+//RS                 template_items: None,
+//RS                 borrow: false,
+//RS                 mut_borrow: false,
+//RS                 clone: false,
+//RS                 arc_clone: false,
+//RS                 fn_coerce: None,
+//RS                 widen_to_vec: false,
+//RS                 widen_to_union: None,
+//RS                 box_as_trait: None,
+//RS             }],
+//RS         },
+//RS     }
+//RS }
+//RS /// A propagated call owns the only ABI-carrier projection. Argument-order
+//RS /// preservation and foreign undo registration may put the call in a terminal
+//RS /// `InlineBlock`, but the surrounding `Try` still performs the projection.
+//RS /// Clear the module-call adapter in that shape so it cannot emit a second `?`.
+//RS pub(super) fn suppress_module_call_target_return(expr: &mut TExpr) {
+//RS     let next_ty = match &mut expr.kind {
+//RS         TExprKind::ModuleCall { target_return, .. } => target_return.take(),
+//RS         TExprKind::InlineBlock(stmts) => {
+//RS             if let Some(TStmt::ExprStmt(tail)) = stmts.last_mut() {
+//RS                 suppress_module_call_target_return(tail);
+//RS                 Some(tail.ty.clone())
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         }
+//RS         _ => None,
+//RS     };
+//RS     if let Some(ty) = next_ty {
+//RS         expr.ty = ty;
+//RS     }
+//RS }
+//RS 
+//RS fn thread_callback_ident(expr: &Expr) -> Option<&str> {
+//RS     match expr {
+//RS         Expr::Ident(name, _) => Some(name),
+//RS         Expr::Paren(inner, _) => thread_callback_ident(inner),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Lower one function-value invocation. Both the explicit AST node and sema's
+//RS /// builtin `.call(...)` method marker use this path, so argument conventions,
+//RS /// callback representation, and source-order preservation stay one mechanism.
+//RS pub(crate) fn lower_fn_value_call(
+//RS     callee_expr: Option<&Expr>,
+//RS     mut callee_t: TExpr,
+//RS     args: &[CallArg],
+//RS     site: u32,
+//RS     cx: &Cx,
+//RS     env: &mut LowerEnv,
+//RS ) -> TExpr {
+//RS     // A function-valued expression may itself be a fallible plain call. The
+//RS     // enclosing call's `?`/`??` owns the final carrier, but the callee must be
+//RS     // unwrapped before the function-value ABI is selected.
+//RS     if let Type::Result { ok, .. } | Type::Option(ok) = &callee_t.ty {
+//RS         if matches!(ok.as_ref(), Type::Fn { .. }) {
+//RS             let callee_ty = (**ok).clone();
+//RS             let (line, column) = cx.src_line_col(site as usize);
+//RS             callee_t = TExpr {
+//RS                 ty: callee_ty,
+//RS                 kind: TExprKind::Try {
+//RS                     inner: Box::new(callee_t),
+//RS                     note: None,
+//RS                     convert: TTryConvert::None,
+//RS                     file: escape_rust_str(&cx.file),
+//RS                     line,
+//RS                     column,
+//RS                     fn_name: escape_rust_str(&env.fn_name),
+//RS                 },
+//RS             };
+//RS         }
+//RS     }
+//RS     let effective_callee_ty = match &callee_t.ty {
+//RS         Type::Fn { .. } => callee_t.ty.with_effective_fn_returns(),
+//RS         _ => callee_t.ty.clone(),
+//RS     };
+//RS     let (source_ret_ty, effective_ret_ty, needs_carrier) =
+//RS         match (&callee_t.ty, &effective_callee_ty) {
+//RS             (
+//RS                 Type::Fn {
+//RS                     ret: Some(source_ret),
+//RS                     ..
+//RS                 },
+//RS                 Type::Fn {
+//RS                     ret: Some(effective_ret),
+//RS                     ..
+//RS                 },
+//RS             ) => {
+//RS                 let source_ret = (**source_ret).clone();
+//RS                 let effective_ret = (**effective_ret).clone();
+//RS                 let source_is_carrier =
+//RS                     matches!(&source_ret, Type::Result { .. } | Type::Option(_))
+//RS                         || matches!(
+//RS                             &source_ret,
+//RS                             Type::Named(name) if name == Syntax::TYPE_NEVER
+//RS                         );
+//RS                 let needs_carrier = !source_is_carrier && source_ret != effective_ret;
+//RS                 (source_ret, effective_ret, needs_carrier)
+//RS             }
+//RS             _ => (unit_type(), unit_type(), false),
+//RS         };
+//RS     let effective_params = match &effective_callee_ty {
+//RS         Type::Fn { params, .. } => Some(params.as_slice()),
+//RS         _ => None,
+//RS     };
+//RS     let conventions = match &effective_callee_ty {
+//RS         Type::Fn {
+//RS             call_metadata: Some(metadata),
+//RS             ..
+//RS         } => Some(metadata.conventions.as_slice()),
+//RS         _ => None,
+//RS     };
+//RS     if callee_expr
+//RS         .and_then(thread_callback_ident)
+//RS         .is_some_and(|name| env.is_send_fn(name))
+//RS         && matches!(&callee_t.ty, Type::Fn { .. })
+//RS     {
+//RS         // A callback-safe local is stored in the canonical callback
+//RS         // representation. Mark call-through uses too, so the JIT invokes its
+//RS         // `(function, environment)` record instead of treating the record
+//RS         // handle as a raw function address.
+//RS         let ty = callee_t.ty.clone();
+//RS         callee_t = TExpr {
+//RS             ty,
+//RS             kind: TExprKind::FnValue {
+//RS                 kind: TFnValueKind::Send {
+//RS                     value: Box::new(callee_t),
+//RS                 },
+//RS             },
+//RS         };
+//RS     }
+//RS     let targs = args
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(index, arg)| {
+//RS             let conv = effective_params
+//RS                 .and_then(|params| params.get(index))
+//RS                 .cloned()
+//RS                 .map(|ty| {
+//RS                     (
+//RS                         conventions
+//RS                             .and_then(|row| row.get(index))
+//RS                             .copied()
+//RS                             .unwrap_or(AccessConvention::Read),
+//RS                         ty,
+//RS                     )
+//RS                 });
+//RS             lower_one_call_arg(arg, conv, env, cx)
+//RS         })
+//RS         .collect();
+//RS     let call = TExpr {
+//RS         ty: source_ret_ty,
+//RS         kind: TExprKind::FnValue {
+//RS             kind: TFnValueKind::Call {
+//RS                 callee: Box::new(callee_t),
+//RS                 args: targs,
+//RS             },
+//RS         },
+//RS     };
+//RS     let call = match source_arg_order(args) {
+//RS         Some(order) => preserve_source_arg_order(call, &order, args.len(), site),
+//RS         None => call,
+//RS     };
+//RS     if needs_carrier {
+//RS         TExpr {
+//RS             ty: effective_ret_ty,
+//RS             kind: TExprKind::Ok(Box::new(call)),
+//RS         }
+//RS     } else {
+//RS         TExpr {
+//RS             ty: effective_ret_ty,
+//RS             kind: call.kind,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Recover the canonical layout selector spelling from either AST carrier used
+//RS /// across the compile-time boundary.  Parser-created selectors are identifiers;
+//RS /// fact-folding may retain the same sentinel in a `ComptimeName`.
+//RS fn layout_selector_name(index: &Expr) -> Option<&str> {
+//RS     match index {
+//RS         Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => {
+//RS             Syntax::layout_selector_name(name)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// A layout value keeps its nominal owner in both its checked type and its
+//RS /// compile-time literal carrier.  The carrier check is needed only for a
+//RS /// pre-sema fragment whose local type has not been copied onto the TIR node;
+//RS /// it still requires the exact canonical `LayoutInfo` owner.
+//RS fn is_layout_info_expr(expr: &TExpr) -> bool {
+//RS     matches!(
+//RS         expr.ty.without_user_tags(),
+//RS         Type::Named(name) if name == Syntax::TYPE_LAYOUT_INFO
+//RS     ) || matches!(
+//RS         &expr.kind,
+//RS         TExprKind::CtLit(CtValue::Struct { type_name, .. })
+//RS             if type_name == Syntax::TYPE_LAYOUT_INFO
+//RS     )
+//RS }
+//RS 
+//RS /// Recover the canonical index route when a pre-sema fragment still carries
+//RS /// the parser's `IndexKind::Unknown`. Normal checked functions already carry
+//RS /// this fact from sema; fragment lowering can instead use the lowered operand
+//RS /// types, which are the same canonical collection identities.
+//RS pub(crate) fn resolve_unknown_index_kind(
+//RS     base_t: &TExpr,
+//RS     index_t: &TExpr,
+//RS     index: &Expr,
+//RS     cx: &Cx,
+//RS ) -> Option<IndexKind> {
+//RS     if let Some(field) = layout_selector_name(index) {
+//RS         return is_layout_info_expr(base_t).then(|| IndexKind::LayoutField(field.to_string()));
+//RS     }
+//RS 
+//RS     let base_ty = base_t.ty.without_user_tags();
+//RS     let index_ty = index_t.ty.without_user_tags();
+//RS     let is_range = matches!(index_ty, Type::Named(name) if name == Syntax::TYPE_RANGE);
+//RS     match base_ty {
+//RS         Type::List(_) => Some(if is_range {
+//RS             IndexKind::Range
+//RS         } else {
+//RS             IndexKind::List
+//RS         }),
+//RS         Type::FixedList { .. } => Some(IndexKind::List),
+//RS         Type::Apply { name, args }
+//RS             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+//RS                 && args.len() == 1 =>
+//RS         {
+//RS             Some(IndexKind::List)
+//RS         }
+//RS         Type::Apply { name, args } if name == "Pool" && args.len() == 1 => Some(IndexKind::Pool),
+//RS         ty if ty.is_compute_tensor_family() && is_range => Some(IndexKind::Range),
+//RS         Type::Map { .. } => Some(IndexKind::Map),
+//RS         Type::Named(name) if Syntax::is_simd_lane_type(name) && !cx.type_names.contains(name) => {
+//RS             Some(IndexKind::Lane(name.clone()))
+//RS         }
+//RS         Type::Named(name) if cx.index_hooks.contains_key(name) => {
+//RS             Some(IndexKind::User(name.clone()))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-MEM1 S6: lower `e` for use as a MUTATING method's receiver (`.push()`,
+//RS /// `.insert()`, …). Ordinarily identical to `lower_expr`; indexed collections
+//RS /// and their fields must retain a recursive place shape, while a Pool index
+//RS /// uses its generation-checked mutable accessor instead of the read clone.
+//RS fn shared_guard_type_name(name: &str) -> bool {
+//RS     let leaf = name
+//RS         .rsplit("::")
+//RS         .next()
+//RS         .and_then(|part| part.rsplit('.').next())
+//RS         .unwrap_or(name);
+//RS     leaf == Syntax::TYPE_SHARED_GUARD
+//RS }
+//RS 
+//RS fn shared_guard_projection(ty: &Type) -> Option<(Type, bool)> {
+//RS     match ty.without_user_tags() {
+//RS         Type::Apply { name, args } if shared_guard_type_name(name) && args.len() == 1 => {
+//RS             Some((args[0].clone(), false))
+//RS         }
+//RS         Type::Tagged { marker, inner }
+//RS             if matches!(
+//RS                 marker,
+//RS                 crate::AST::TagMarker::Internal(
+//RS                     crate::AST::InternalTag::SharedGuardRead
+//RS                         | crate::AST::InternalTag::SharedGuardEdit
+//RS                 )
+//RS             ) =>
+//RS         {
+//RS             match inner.without_user_tags() {
+//RS                 Type::Apply { name, args } if shared_guard_type_name(name) && args.len() == 1 => {
+//RS                     Some((
+//RS                         args[0].clone(),
+//RS                         matches!(
+//RS                             marker,
+//RS                             crate::AST::TagMarker::Internal(
+//RS                                 crate::AST::InternalTag::SharedGuardEdit
+//RS                             )
+//RS                         ),
+//RS                     ))
+//RS                 }
+//RS                 _ => shared_guard_projection(inner),
+//RS             }
+//RS         }
+//RS         Type::Tagged { inner, .. } => shared_guard_projection(inner),
+//RS         Type::Shared(inner) | Type::Option(inner) => shared_guard_projection(inner),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn shared_guard_value_field(recv: TExpr, member: &str) -> Option<TExpr> {
+//RS     if member != "value" {
+//RS         return None;
+//RS     }
+//RS     let (inner, editable) = shared_guard_projection(&recv.ty)?;
+//RS     Some(TExpr {
+//RS         ty: inner,
+//RS         kind: TExprKind::SharedGuardValue {
+//RS             guard: Box::new(recv),
+//RS             editable,
+//RS         },
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+//RS     fn pool_mut_place(
+//RS         pool_expr: &Expr,
+//RS         id_expr: &Expr,
+//RS         idx_span: Span,
+//RS         field: Option<&str>,
+//RS         cx: &Cx,
+//RS         env: &mut LowerEnv,
+//RS     ) -> TExpr {
+//RS         let line = cx.src_line_col(idx_span.start).0;
+//RS         let src_line = cx.src_line_text(line).to_string();
+//RS         let pool_t = lower_expr(pool_expr, cx, env);
+//RS         let id_t = lower_expr(id_expr, cx, env);
+//RS         let elem_ty = match &pool_t.ty {
+//RS             Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+//RS             _ => Type::Int,
+//RS         };
+//RS         match field {
+//RS             None => TExpr {
+//RS                 ty: elem_ty,
+//RS                 kind: TExprKind::PoolSlot {
+//RS                     pool: Box::new(pool_t),
+//RS                     id: Box::new(id_t),
+//RS                     mutable: true,
+//RS                     field: None,
+//RS                     line,
+//RS                     src_line: src_line.clone(),
+//RS                 },
+//RS             },
+//RS             Some(f) => {
+//RS                 let field_ty = struct_field_type(cx, &elem_ty, f).unwrap_or(Type::Int);
+//RS                 TExpr {
+//RS                     ty: field_ty,
+//RS                     kind: TExprKind::PoolSlot {
+//RS                         pool: Box::new(pool_t),
+//RS                         id: Box::new(id_t),
+//RS                         mutable: true,
+//RS                         field: Some(f.to_string()),
+//RS                         line,
+//RS                         src_line,
+//RS                     },
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     match e {
+//RS         Expr::Index {
+//RS             base,
+//RS             index,
+//RS             span,
+//RS             kind: IndexKind::Pool,
+//RS         } => pool_mut_place(base, index, *span, None, cx, env),
+//RS         Expr::Index {
+//RS             base,
+//RS             index,
+//RS             span,
+//RS             kind,
+//RS         } => {
+//RS             let base_t = lower_expr_as_mut_place(base, cx, env);
+//RS             let index_t = lower_expr(index, cx, env);
+//RS             let base_ty = base_t.ty.without_user_tags();
+//RS             let is_map = match kind {
+//RS                 IndexKind::Map => true,
+//RS                 IndexKind::List | IndexKind::FixedListProof => false,
+//RS                 IndexKind::Unknown => matches!(&base_ty, Type::Map { .. }),
+//RS                 _ => return lower_expr(e, cx, env),
+//RS             };
+//RS             let ty = match base_ty {
+//RS                 Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
+//RS                 Type::Map { value, .. } => (**value).clone(),
+//RS                 _ => return lower_expr(e, cx, env),
+//RS             };
+//RS             let line = cx.src_line_col(span.start).0;
+//RS             TExpr {
+//RS                 ty,
+//RS                 kind: TExprKind::Index {
+//RS                     base: Box::new(base_t),
+//RS                     index: Box::new(index_t),
+//RS                     is_map,
+//RS                     uninit_fixed: matches!(
+//RS                         base.as_ref(),
+//RS                         Expr::Ident(name, _) if env.is_uninit_fixed(name)
+//RS                     ),
+//RS                     line,
+//RS                 },
+//RS             }
+//RS         }
+//RS         Expr::Field(base, field, _) => {
+//RS             if let Expr::Index {
+//RS                 base: pool_expr,
+//RS                 index: id_expr,
+//RS                 span: idx_span,
+//RS                 kind: IndexKind::Pool,
+//RS             } = base.as_ref()
+//RS             {
+//RS                 pool_mut_place(pool_expr, id_expr, *idx_span, Some(field), cx, env)
+//RS             } else {
+//RS                 let recv = lower_expr_as_mut_place(base, cx, env);
+//RS                 if let Some(guard_value) = shared_guard_value_field(recv.clone(), field) {
+//RS                     return guard_value;
+//RS                 }
+//RS                 let field_ty = struct_field_type(cx, &recv.ty, field).unwrap_or(Type::Int);
+//RS                 let boxed = match &recv.ty {
+//RS                     Type::Named(n) => cx.boxed_edges.contains(&(n.clone(), field.to_string())),
+//RS                     _ => false,
+//RS                 };
+//RS                 TExpr {
+//RS                     ty: field_ty,
+//RS                     kind: TExprKind::Field {
+//RS                         recv: Box::new(recv),
+//RS                         field: field.to_string(),
+//RS                         boxed,
+//RS                     },
+//RS                 }
+//RS             }
+//RS         }
+//RS         Expr::Paren(inner, _) => lower_expr_as_mut_place(inner, cx, env),
+//RS         _ => lower_expr(e, cx, env),
+//RS     }
+//RS }
+//RS /// Canonicalize an operator's sema identity against the lowered receiver.
+//RS ///
+//RS /// Sema records operator identities from source type names (`Vec2`, `FileErr`,
+//RS /// ...), while a local struct literal carries the module-qualified TIR type.
+//RS /// The MIR lookup already prefixes a bare operator key with the lowered owner,
+//RS /// so leaving the source owner in place would produce `Owner::Owner::Trait::op`.
+//RS /// Keep the trait/RHS suffix (which is part of the checked dispatch contract)
+//RS /// and replace only that source owner with the canonical lowered owner.
+//RS fn canonicalize_operator_method_identity(expr: &mut TExpr, cx: &Cx) {
+//RS     let TExprKind::MethodCall { recv, method, .. } = &mut expr.kind else {
+//RS         return;
+//RS     };
+//RS     let Some(identity) = method.operator_identity.clone() else {
+//RS         return;
+//RS     };
+//RS     let Some(trait_name) = method.trait_owner.as_deref() else {
+//RS         return;
+//RS     };
+//RS     let owner = match recv.ty.without_user_tags() {
+//RS         Type::Named(name) | Type::Apply { name, .. } => {
+//RS             crate::Codegen::TIR::canonical_enum_owner(cx, name)
+//RS         }
+//RS         _ => return,
+//RS     };
+//RS     let marker = format!("::{trait_name}::");
+//RS     let Some(marker_start) = identity.find(&marker) else {
+//RS         return;
+//RS     };
+//RS     let Some(suffix) = identity.get(marker_start + 2..) else {
+//RS         return;
+//RS     };
+//RS     if identity.starts_with(&format!("{owner}::")) {
+//RS         return;
+//RS     }
+//RS     method.operator_identity = Some(format!("{owner}::{suffix}"));
+//RS }
+//RS /// Recover checked return facts that sema normally attaches to special method
+//RS /// calls. These routes deliberately remain total: an absent AST annotation must
+//RS /// not turn a known checked root/handle operation into an unresolved MIR call.
+//RS fn fallback_checked_method_return(
+//RS     receiver: &Expr,
+//RS     method: &str,
+//RS     recv_type: Option<&str>,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS ) -> Option<Type> {
+//RS     let is_root = match recv_type {
+//RS         Some(name) => {
+//RS             name == Syntax::INTERNAL_ROOT_CALL_LOCAL
+//RS                 || name.starts_with(Syntax::INTERNAL_ROOT_CALL_IMPORT_PREFIX)
+//RS                 || name.starts_with(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX)
+//RS         }
+//RS         None => false,
+//RS     };
+//RS     if recv_type.and_then(|name| name.strip_prefix(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX))
+//RS         == Some("core.term")
+//RS         && method == Syntax::BUILTIN_PRINT
+//RS     {
+//RS         return Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+//RS     }
+//RS     if is_root {
+//RS         if let Some(Type::Fn { ret: Some(ret), .. }) = cx.fn_source_types.get(method) {
+//RS             return Some(cx.expand_type_aliases(ret));
+//RS         }
+//RS     }
+//RS     if recv_type == Some(Syntax::TXN_HANDLE_TYPE)
+//RS         && matches!(method, Syntax::TXN_ON_COMMIT | Syntax::TXN_ON_ROLLBACK)
+//RS     {
+//RS         return Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+//RS     }
+//RS     if method == Syntax::MEM_ALLOC_NEW || method == "new" {
+//RS         let locals = env.locals.keys().cloned().collect::<HashSet<_>>();
+//RS         if solve_new_type(receiver, method, cx, &locals).is_some() {
+//RS             return Some(Type::Named(Syntax::SOLVER_TYPE.to_string()));
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS /// Lower a fluent method receiver from the innermost call outward.
+//RS ///
+//RS /// Method-call ASTs nest through `receiver`. Walking that spine iteratively
+//RS /// keeps long fluent APIs off the Rust call stack while preserving the normal
+//RS /// method dispatcher for every link.
+//RS fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+//RS     let mut calls = TirWorklist::new();
+//RS     let mut cursor = e;
+//RS     while let Expr::MethodCall { receiver, .. } = cursor {
+//RS         calls.push(cursor);
+//RS         cursor = receiver;
+//RS     }
+//RS 
+//RS     let mut lowered_receiver = None;
+//RS     while let Some(call) = calls.pop() {
+//RS         let Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             method_span,
+//RS             owner_type_args,
+//RS             type_args,
+//RS             args,
+//RS             recv_type,
+//RS             operator_rhs,
+//RS             resolved_ret,
+//RS             checked_widen,
+//RS         } = call
+//RS         else {
+//RS             unreachable!("method chain contains only method calls")
+//RS         };
+//RS         let resolved_ret = resolved_ret.clone().or_else(|| {
+//RS             fallback_checked_method_return(receiver, method, recv_type.as_deref(), cx, env)
+//RS         });
+//RS         // A field receiver does not persist `recv_type` on the AST method
+//RS         // node, and a specialized generic operator (`left < right` under
+//RS         // `T: Comparable`) keeps the bound as its `recv_type`. Pre-lower
+//RS         // precise/string conversion and operator-method receivers so the
+//RS         // receiver's checked TIR type can still select the canonical builtin
+//RS         // operation instead of the user-method or collection fallback.
+//RS         let mut call_receiver = lowered_receiver;
+//RS         if call_receiver.is_none()
+//RS             && (matches!(method.as_str(), "to_string" | "to_float" | "to_int")
+//RS                 || (matches!(method.as_str(), "compare" | "equal") && args.len() == 1))
+//RS         {
+//RS             call_receiver = Some(lower_expr(receiver, cx, env));
+//RS         }
+//RS         let receiver_type = call_receiver.as_ref().and_then(|recv| match &recv.ty {
+//RS             Type::String => Some("String".to_string()),
+//RS             Type::List(_) | Type::FixedList { .. } => Some("List".to_string()),
+//RS             Type::Named(name) if matches!(name.as_str(), "Decimal" | "Fraction" | "String") => {
+//RS                 Some(name.clone())
+//RS             }
+//RS             _ => None,
+//RS         });
+//RS         let dispatch_recv_type = receiver_type.or_else(|| recv_type.clone());
+//RS         let method_sig = expr_cache_take_method_sig(call, cx);
+//RS         let precise_method = matches!(
+//RS             (dispatch_recv_type.as_deref(), method.as_str(), args.len()),
+//RS             (
+//RS                 Some("Decimal"),
+//RS                 "add" | "sub" | "mul" | "div" | "equal" | "compare",
+//RS                 1
+//RS             ) | (
+//RS                 Some("Decimal"),
+//RS                 "round" | "floor" | "ceil" | "to_string" | "to_float",
+//RS                 0
+//RS             ) | (Some("Fraction"), "add" | "sub" | "mul" | "div" | "equal", 1)
+//RS                 | (
+//RS                     Some("Fraction"),
+//RS                     "numerator" | "denominator" | "to_string" | "to_float" | "is_zero",
+//RS                     0
+//RS                 )
+//RS         );
+//RS         let mut lowered = if precise_method {
+//RS             let recv = call_receiver
+//RS                 .take()
+//RS                 .unwrap_or_else(|| lower_expr(receiver, cx, env));
+//RS             let mut value_args = vec![recv];
+//RS             value_args.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
+//RS             let ty = match method.as_str() {
+//RS                 "to_string" => Type::String,
+//RS                 "div" => Type::Named("Fraction".to_string()),
+//RS                 "numerator" | "denominator" => Type::Int,
+//RS                 "to_float" => Type::Float,
+//RS                 "compare" => Type::Named(Syntax::TYPE_ORDERING.to_string()),
+//RS                 "is_zero" | "equal" => Type::Bool,
+//RS                 _ => Type::Named(
+//RS                     dispatch_recv_type
+//RS                         .as_deref()
+//RS                         .unwrap_or("Decimal")
+//RS                         .to_string(),
+//RS                 ),
+//RS             };
+//RS             TExpr {
+//RS                 ty: resolved_ret.clone().unwrap_or(ty),
+//RS                 kind: TExprKind::PreciseBuiltin {
+//RS                     type_name: dispatch_recv_type
+//RS                         .clone()
+//RS                         .unwrap_or_else(|| "Decimal".to_string()),
+//RS                     func: method.to_string(),
+//RS                     args: value_args,
+//RS                 },
+//RS             }
+//RS         } else if method == "to_float"
+//RS             && args.is_empty()
+//RS             && dispatch_recv_type.as_deref() == Some("String")
+//RS         {
+//RS             let recv = call_receiver
+//RS                 .take()
+//RS                 .unwrap_or_else(|| lower_expr(receiver, cx, env));
+//RS             TExpr {
+//RS                 ty: resolved_ret.clone().unwrap_or_else(|| Type::Result {
+//RS                     ok: Box::new(Type::Float),
+//RS                     err: Box::new(Type::Named("ParseError".to_string())),
+//RS                 }),
+//RS                 kind: TExprKind::BuiltinMethod {
+//RS                     recv: Box::new(recv),
+//RS                     op: TBuiltinOp::ParseFloat,
+//RS                     args: Vec::new(),
+//RS                 },
+//RS             }
+//RS         } else {
+//RS             lower_method_call_with_sig(
+//RS                 receiver,
+//RS                 method,
+//RS                 *method_span,
+//RS                 owner_type_args,
+//RS                 type_args,
+//RS                 args,
+//RS                 &dispatch_recv_type,
+//RS                 operator_rhs.as_ref(),
+//RS                 resolved_ret.as_ref(),
+//RS                 *checked_widen,
+//RS                 cx,
+//RS                 env,
+//RS                 call_receiver,
+//RS                 method_sig.as_deref(),
+//RS             )
+//RS         };
+//RS         canonicalize_operator_method_identity(&mut lowered, cx);
+//RS         // D-VALIDATE1: `check` is synthesized after sema's ordinary call
+//RS         // propagation pass. Its callable still uses the default Result carrier,
+//RS         // so project that carrier here before the next method in the chain
+//RS         // receives the builder value.
+//RS         if method == "check"
+//RS             && recv_type.as_deref() == Some(Syntax::TYPE_VALIDATE_BUILDER)
+//RS             && !matches!(lowered.ty, Type::Result { .. } | Type::Option(_))
+//RS         {
+//RS             let success = lowered.ty.clone();
+//RS             lowered.ty = Type::Result {
+//RS                 ok: Box::new(success.clone()),
+//RS                 err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+//RS             };
+//RS             let (line, column) = cx.src_line_col(method_span.start);
+//RS             lowered = TExpr {
+//RS                 ty: success,
+//RS                 kind: TExprKind::Try {
+//RS                     inner: Box::new(lowered),
+//RS                     note: None,
+//RS                     convert: TTryConvert::None,
+//RS                     file: escape_rust_str(&cx.file),
+//RS                     line,
+//RS                     column,
+//RS                     fn_name: escape_rust_str(&env.fn_name),
+//RS                 },
+//RS             };
+//RS         }
+//RS         // D-MAPTYPE1: `shared [K:V]{}` is elaborated to an untyped empty
+//RS         // `MapLit` before TIR lowering. Its `Shared<T>` return still carries
+//RS         // the exact payload, so restore that context before Rust infers `V`.
+//RS         let shared_payload = resolved_ret.as_ref().and_then(|ty| match ty {
+//RS             Type::Shared(inner) => Some((**inner).clone()),
+//RS             _ => None,
+//RS         });
+//RS         if let Some(shared_payload) = shared_payload {
+//RS             let retagged = match &mut lowered.kind {
+//RS                 TExprKind::StaticCall { owner, args, .. } => {
+//RS                     if let TStaticOwner::Prelude { path, generics, .. } = owner {
+//RS                         if path == "jet_std::JetShared" {
+//RS                             if let Some(TPreludeArg::Jet(ty)) = generics.first_mut() {
+//RS                                 *ty = shared_payload.clone();
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     args.first_mut()
+//RS                         .map(|arg| {
+//RS                             let empty_collection = matches!(
+//RS                                 &arg.value.kind,
+//RS                                 TExprKind::MapLit(entries) if entries.is_empty()
+//RS                             ) || matches!(
+//RS                                 &arg.value.kind,
+//RS                                 TExprKind::ListLit(items) if items.is_empty()
+//RS                             );
+//RS                             if empty_collection {
+//RS                                 arg.value.ty = shared_payload.clone();
+//RS                             }
+//RS                             empty_collection
+//RS                         })
+//RS                         .unwrap_or(false)
+//RS                 }
+//RS                 _ => false,
+//RS             };
+//RS             if retagged {
+//RS                 lowered.ty = resolved_ret
+//RS                     .clone()
+//RS                     .unwrap_or_else(|| Type::Shared(Box::new(shared_payload)));
+//RS             }
+//RS         }
+//RS         // A cross-module call's executable carrier is separate from the
+//RS         // source-visible success type. Inline code modules register their
+//RS         // callable return in `fn_types` as the effective `Result`/`Option`
+//RS         // ABI, while sema records the source type on `resolved_ret`. Keep
+//RS         // the carrier for inline modules: generic module instances lift
+//RS         // nominal return types to their generated identity, and restoring
+//RS         // the defining module's bare source leaf reintroduces ambiguity.
+//RS         if let Some(resolved_ret) = resolved_ret.as_ref() {
+//RS             let preserve_inline_carrier = matches!(
+//RS                 &lowered.kind,
+//RS                 TExprKind::ModuleCall {
+//RS                     form: TModuleCallForm::InlineMangled { .. },
+//RS                     ..
+//RS                 }
+//RS             );
+//RS             if matches!(&lowered.kind, TExprKind::ModuleCall { .. }) && !preserve_inline_carrier {
+//RS                 lowered.ty = resolved_ret.clone();
+//RS             }
+//RS         }
+//RS         let lowered = lower_method_pre_contracts(call, lowered, cx, env);
+//RS         // D-APILABEL1=A: a method whose labels reordered its arguments keeps
+//RS         // the same source evaluation order as a free call.
+//RS         lowered_receiver = Some(match source_arg_order(args) {
+//RS             Some(order) => {
+//RS                 preserve_source_arg_order(lowered, &order, args.len(), method_span.start as u32)
+//RS             }
+//RS             None => lowered,
+//RS         });
+//RS     }
+//RS 
+//RS     lowered_receiver.expect("method chain is non-empty")
+//RS }
+//RS 
+//RS struct ExprWorklistCache {
+//RS     active: bool,
+//RS     values: HashMap<(usize, usize), VecDeque<TExpr>>,
+//RS     types: HashMap<(usize, usize), Type>,
+//RS     method_sigs: HashMap<(usize, usize), VecDeque<Vec<(AccessConvention, Type)>>>,
+//RS }
+//RS 
+//RS impl Default for ExprWorklistCache {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             active: false,
+//RS             values: HashMap::new(),
+//RS             types: HashMap::new(),
+//RS             method_sigs: HashMap::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static EXPR_WORKLIST_CACHE: RefCell<ExprWorklistCache> =
+//RS         RefCell::new(ExprWorklistCache::default());
+//RS     static EXPR_COMPTIME_CACHE_DEPTH: Cell<usize> = const { Cell::new(0) };
+//RS }
+//RS 
+//RS fn expr_key(expr: &Expr, cx: &Cx) -> (usize, usize) {
+//RS     (expr as *const Expr as usize, cx as *const Cx as usize)
+//RS }
+//RS 
+//RS fn strip_expr_parens(mut expr: &Expr) -> &Expr {
+//RS     while let Expr::Paren(inner, _) = expr {
+//RS         expr = inner;
+//RS     }
+//RS     expr
+//RS }
+//RS 
+//RS fn lower_list_lit(elems: &[Expr], cx: &Cx, env: &mut LowerEnv) -> TExpr {
+//RS     let has_spread = elems.iter().any(|e| matches!(e, Expr::Spread(..)));
+//RS     if has_spread {
+//RS         let mut parts = Vec::new();
+//RS         for e in elems {
+//RS             match e {
+//RS                 Expr::Spread(inner, _) => {
+//RS                     parts.push(ListSpreadPart::Spread(lower_expr(inner, cx, env)));
+//RS                 }
+//RS                 other => {
+//RS                     parts.push(ListSpreadPart::Elem(lower_expr(other, cx, env)));
+//RS                 }
+//RS             }
+//RS         }
+//RS         let elem_ty = parts
+//RS             .iter()
+//RS             .find_map(|p| match p {
+//RS                 ListSpreadPart::Elem(t) => Some(t.ty.clone()),
+//RS                 ListSpreadPart::Spread(t) => match &t.ty {
+//RS                     Type::List(inner) => Some((**inner).clone()),
+//RS                     _ => Some(t.ty.clone()),
+//RS                 },
+//RS             })
+//RS             .unwrap_or(Type::Int);
+//RS         return TExpr {
+//RS             ty: Type::List(Box::new(elem_ty)),
+//RS             kind: TExprKind::ListSpread { parts },
+//RS         };
+//RS     }
+//RS     let telems: Vec<TExpr> = elems.iter().map(|e| lower_expr(e, cx, env)).collect();
+//RS     // A bare `[]` has no element to read a type from; the binding or argument
+//RS     // position restores its sema-expected type (`preserve_typed_list_shape`).
+//RS     // A typed head (`[U8]{}`) never reaches here: sema keeps it on
+//RS     // `Expr::TypedLit`, whose arm below carries the head as the list type.
+//RS     // A bare `None` element carries only the `Int` placeholder; take the type of
+//RS     // the first element that has one, and give each `None` that option type.
+//RS     let elem_ty = telems
+//RS         .iter()
+//RS         .find(|e| !matches!(e.kind, TExprKind::Absent))
+//RS         .or_else(|| telems.first())
+//RS         .map(|e| e.ty.clone())
+//RS         .unwrap_or(Type::Int);
+//RS     let mut telems = telems;
+//RS     if matches!(elem_ty, Type::Option(_)) {
+//RS         for el in telems.iter_mut() {
+//RS             if matches!(el.kind, TExprKind::Absent) {
+//RS                 el.ty = elem_ty.clone();
+//RS             }
+//RS         }
+//RS     }
+//RS     if let Some(columns_ty) = cx.columnar_list_type(&elem_ty) {
+//RS         return TExpr {
+//RS             ty: Type::List(Box::new(elem_ty)),
+//RS             kind: TExprKind::ColumnarListLit {
+//RS                 columns_ty,
+//RS                 elems: telems,
+//RS             },
+//RS         };
+//RS     }
+//RS     TExpr {
+//RS         ty: Type::List(Box::new(elem_ty)),
+//RS         kind: TExprKind::ListLit(telems),
+//RS     }
+//RS }
+//RS 
+//RS /// D-PATCH2: a compiler-generated `T.Patch` field may already be an optional
+//RS /// carrier, but lowering an `if` value has no field expectation to type a bare
+//RS /// `None`. Reconcile that carrier at the Patch boundary so every branch and
+//RS /// its phi use the declared `Option<T>` exactly once. This is deliberately
+//RS /// structural: it preserves lowered bodies and ownership facts, retagging only
+//RS /// the sema-proven carrier shape or adding the one missing `Present`.
+//RS fn fit_patch_field_value(value: TExpr, expected: &Type) -> TExpr {
+//RS     match value {
+//RS         TExpr {
+//RS             kind:
+//RS                 TExprKind::IfExpr {
+//RS                     cond,
+//RS                     then_body,
+//RS                     then_value,
+//RS                     else_body,
+//RS                     else_value,
+//RS                 },
+//RS             ..
+//RS         } => TExpr {
+//RS             ty: expected.clone(),
+//RS             kind: TExprKind::IfExpr {
+//RS                 cond,
+//RS                 then_body,
+//RS                 then_value: Box::new(fit_patch_field_value(*then_value, expected)),
+//RS                 else_body,
+//RS                 else_value: Box::new(fit_patch_field_value(*else_value, expected)),
+//RS             },
+//RS         },
+//RS         TExpr {
+//RS             kind: TExprKind::Absent,
+//RS             ..
+//RS         } if matches!(expected, Type::Option(_)) => TExpr {
+//RS             ty: expected.clone(),
+//RS             kind: TExprKind::Absent,
+//RS         },
+//RS         TExpr {
+//RS             kind: TExprKind::Present(payload),
+//RS             ..
+//RS         } => match expected {
+//RS             Type::Option(inner) => TExpr {
+//RS                 ty: expected.clone(),
+//RS                 kind: TExprKind::Present(Box::new(fit_patch_field_value(*payload, inner))),
+//RS             },
+//RS             _ => TExpr {
+//RS                 ty: Type::Option(Box::new(payload.ty.clone())),
+//RS                 kind: TExprKind::Present(payload),
+//RS             },
+//RS         },
+//RS         value => {
+//RS             if value.ty == *expected {
+//RS                 return value;
+//RS             }
+//RS             let Type::Option(inner) = expected else {
+//RS                 return value;
+//RS             };
+//RS             if matches!(&value.ty, Type::Option(_)) {
+//RS                 return value;
+//RS             }
+//RS             TExpr {
+//RS                 ty: expected.clone(),
+//RS                 kind: TExprKind::Present(Box::new(fit_patch_field_value(value, inner))),
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Lower a `??` expression. Its fallback value is itself a potentially
+//RS /// fallible expression, so it must be lowered under the carrier-specific
+//RS /// environment before being joined with the subject.
+//RS ///
+//RS pub(super) fn lower_or_fallback(
+//RS     value: &Expr,
+//RS     fallback: &OrFallback,
+//RS     cx: &Cx,
+//RS     env: &mut LowerEnv,
+//RS ) -> TExpr {
+//RS     fn return_value(value: TExpr, env: &LowerEnv, cx: &Cx) -> TExpr {
+//RS         let Some(return_ty) = env.ret_ty.clone() else {
+//RS             return value;
+//RS         };
+//RS         // A typed empty list is rewritten by sema to `ListLit([])`, so its
+//RS         // element type is absent from the AST by the time TIR lowers it.
+//RS         // Restore the enclosing return payload before constructing the carrier.
+//RS         let payload_ty = match &return_ty {
+//RS             Type::Result { ok, .. } | Type::Option(ok) => ok.as_ref(),
+//RS             other => other,
+//RS         };
+//RS         let value = if matches!(&value.kind, TExprKind::Absent)
+//RS             && matches!(&return_ty, Type::Option(_))
+//RS         {
+//RS             TExpr {
+//RS                 ty: return_ty.clone(),
+//RS                 kind: TExprKind::Absent,
+//RS             }
+//RS         } else if matches!(&value.ty, Type::Result { .. } | Type::Option(_)) {
+//RS             value
+//RS         } else {
+//RS             preserve_typed_list_shape(value, payload_ty, cx)
+//RS         };
+//RS         // An explicit `Err(...)`/`Ok(...)` (or any carrier-typed expression)
+//RS         // already IS the failure carrier; wrapping it again emits the invalid
+//RS         // double carrier `Ok(Err(...))` (leaked rustc E0308 on every
+//RS         // `?? return Err(...)` inside a fallible callable).
+//RS         let kind = match &return_ty {
+//RS             Type::Result { .. } if !matches!(&value.ty, Type::Result { .. }) => {
+//RS                 TExprKind::Ok(Box::new(value))
+//RS             }
+//RS             Type::Option(_) if !matches!(&value.ty, Type::Option(_)) => {
+//RS                 TExprKind::Present(Box::new(value))
+//RS             }
+//RS             _ => return value,
+//RS         };
+//RS         TExpr {
+//RS             ty: return_ty,
+//RS             kind,
+//RS         }
+//RS     }
+//RS     fn fit_fallback_value(value: TExpr, result_ty: &Type, cx: &Cx) -> TExpr {
+//RS         let value = preserve_typed_list_shape(value, result_ty, cx);
+//RS         match result_ty {
+//RS             // A nested fallible/optional value is the successful payload of
+//RS             // the outer `??`. Lift a bare fallback once so both match arms
+//RS             // produce the same carrier.
+//RS             Type::Result { .. } if !matches!(&value.ty, Type::Result { .. }) => TExpr {
+//RS                 ty: result_ty.clone(),
+//RS                 kind: TExprKind::Ok(Box::new(value)),
+//RS             },
+//RS             Type::Option(_) if !matches!(&value.ty, Type::Option(_)) => TExpr {
+//RS                 ty: result_ty.clone(),
+//RS                 kind: TExprKind::Present(Box::new(value)),
+//RS             },
+//RS             _ => value,
+//RS         }
+//RS     }
+//RS 
+//RS     fn lower_fallback(
+//RS         fallback: &OrFallback,
+//RS         result_ty: &Type,
+//RS         cx: &Cx,
+//RS         env: &LowerEnv,
+//RS         fallback_env: &mut LowerEnv,
+//RS     ) -> TOrFallback {
+//RS         // Fallback identifiers are resolved against the carrier-specific
+//RS         // environment below. Do not replay an expression lowered under the
+//RS         // enclosing environment, where the ambient `err` slot is absent.
+//RS         let _fallback_cache_scope = ExprCacheScope::enter();
+//RS         match fallback {
+//RS             OrFallback::Value(e) => {
+//RS                 let value = lower_expr(e, cx, fallback_env);
+//RS                 let value = fit_fallback_value(value, result_ty, cx);
+//RS                 TOrFallback::Value(Box::new(value))
+//RS             }
+//RS             OrFallback::Block { body, value, .. } => {
+//RS                 let mut stmts = lower_stmts(body, cx, fallback_env);
+//RS                 if let Some(value) = value {
+//RS                     let value = lower_expr(value, cx, fallback_env);
+//RS                     let value = fit_fallback_value(value, result_ty, cx);
+//RS                     stmts.push(TStmt::ExprStmt(value));
+//RS                 }
+//RS                 TOrFallback::Value(Box::new(TExpr {
+//RS                     ty: result_ty.clone(),
+//RS                     kind: TExprKind::InlineBlock(stmts),
+//RS                 }))
+//RS             }
+//RS             OrFallback::Return(None, _) => {
+//RS                 if matches!(
+//RS                     &env.ret_ty,
+//RS                     Some(Type::Result { ok, .. })
+//RS                         if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::INTERNAL_UNIT_TYPE)
+//RS                 ) {
+//RS                     let ret_ty = env.ret_ty.clone().expect("fallible void return");
+//RS                     let unit = TExpr {
+//RS                         ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+//RS                         kind: TExprKind::Unit,
+//RS                     };
+//RS                     TOrFallback::Return(Some(Box::new(TExpr {
+//RS                         ty: ret_ty,
+//RS                         kind: TExprKind::Ok(Box::new(unit)),
+//RS                     })))
+//RS                 } else {
+//RS                     TOrFallback::Return(None)
+//RS                 }
+//RS             }
+//RS             OrFallback::Return(Some(e), _) => {
+//RS                 // A return fallback is checked against the enclosing carrier, so
+//RS                 // sema intentionally leaves a direct Jet call unwrapped. Lower
+//RS                 // that call through the same traced Try path as ordinary value
+//RS                 // propagation before return_value restores the outer Ok.
+//RS                 let value = if matches!(e.without_parens(), Expr::Call(..)) {
+//RS                     let wrapped = Expr::Try(e.clone(), e.span(), TryConvert::None, None);
+//RS                     lower_temporary_expr(&wrapped, cx, fallback_env)
+//RS                 } else {
+//RS                     lower_expr(e, cx, fallback_env)
+//RS                 };
+//RS                 TOrFallback::Return(Some(Box::new(return_value(value, env, cx))))
+//RS             }
+//RS             OrFallback::Panic { name_span, args } => {
+//RS                 let (kind, loc) = lower_panic_stop(name_span, args, cx, fallback_env);
+//RS                 let TRequireKind::Panic { msg } = kind else {
+//RS                     unreachable!()
+//RS                 };
+//RS                 TOrFallback::Panic { msg, loc }
+//RS             }
+//RS             OrFallback::Break(_) => TOrFallback::Break,
+//RS             OrFallback::Continue(_) => TOrFallback::Continue,
+//RS             OrFallback::BreakLabel(name, _) => TOrFallback::BreakLabel(name.clone()),
+//RS             OrFallback::ContinueLabel(name, _) => TOrFallback::ContinueLabel(name.clone()),
+//RS         }
+//RS     }
+//RS 
+//RS     fn lift_value_fallback_to_option(fallback: TOrFallback, payload: &Type) -> TOrFallback {
+//RS         match fallback {
+//RS             TOrFallback::Value(value) => TOrFallback::Value(Box::new(TExpr {
+//RS                 ty: Type::Option(Box::new(payload.clone())),
+//RS                 kind: TExprKind::Present(value),
+//RS             })),
+//RS             other => other,
+//RS         }
+//RS     }
+//RS 
+//RS     // The subject may already have a cache entry from a type probe under a
+//RS     // different carrier context. Re-lower it in a private memo.
+//RS     let mut value_t = {
+//RS         let _fallback_subject_cache_scope = ExprCacheScope::enter();
+//RS         let fallback_subject = env.fallback_subject;
+//RS         env.fallback_subject = true;
+//RS         let value_t = lower_owned_expr(value, cx, env);
+//RS         env.fallback_subject = fallback_subject;
+//RS         value_t
+//RS     };
+//RS     suppress_module_call_target_return(&mut value_t);
+//RS     // Void module calls (for example `time.sleep`) have no Result/Option
+//RS     // carrier. Sema still accepts `sleep(...) ?? return` as a local handler;
+//RS     // MIR cannot switch on Unit, so keep the effectful call and drop `??`.
+//RS     if !matches!(&value_t.ty, Type::Option(_) | Type::Result { .. }) {
+//RS         return value_t;
+//RS     }
+//RS     // D-NEVER2=B: a `Result<Never, E>` has no success branch. Lower a value
+//RS     // fallback as the expression's real type instead of manufacturing a
+//RS     // `Never` merge that would reject `f() ?? x` in Rust.
+//RS     if matches!(&value_t.ty, Type::Result { ok, .. } if ok.is_never()) {
+//RS         let mut fallback_env = clone_env(env);
+//RS         if let Type::Result { err, .. } = &value_t.ty {
+//RS             fallback_env.bind(
+//RS                 Syntax::AMBIENT_ERR,
+//RS                 ambient_err_local(),
+//RS                 Some((**err).clone()),
+//RS             );
+//RS         }
+//RS         match fallback {
+//RS             OrFallback::Value(e) => {
+//RS                 let fallback_t = lower_expr(e, cx, &mut fallback_env);
+//RS                 let result_ty = fallback_t.ty.clone();
+//RS                 return TExpr {
+//RS                     ty: result_ty,
+//RS                     kind: TExprKind::OrFallback {
+//RS                         value: Box::new(value_t),
+//RS                         fallback: TOrFallback::Value(Box::new(fallback_t)),
+//RS                     },
+//RS                 };
+//RS             }
+//RS             OrFallback::Block { body, value, .. } => {
+//RS                 let mut stmts = lower_stmts(body, cx, &mut fallback_env);
+//RS                 let Some(value) = value else {
+//RS                     return TExpr {
+//RS                         ty: Type::Named(Syntax::TYPE_NEVER.to_string()),
+//RS                         kind: TExprKind::OrFallback {
+//RS                             value: Box::new(value_t),
+//RS                             fallback: TOrFallback::Value(Box::new(TExpr {
+//RS                                 ty: Type::Named(Syntax::TYPE_NEVER.to_string()),
+//RS                                 kind: TExprKind::InlineBlock(stmts),
+//RS                             })),
+//RS                         },
+//RS                     };
+//RS                 };
+//RS                 let fallback_t = lower_expr(value, cx, &mut fallback_env);
+//RS                 let result_ty = fallback_t.ty.clone();
+//RS                 stmts.push(TStmt::ExprStmt(fallback_t));
+//RS                 return TExpr {
+//RS                     ty: result_ty.clone(),
+//RS                     kind: TExprKind::OrFallback {
+//RS                         value: Box::new(value_t),
+//RS                         fallback: TOrFallback::Value(Box::new(TExpr {
+//RS                             ty: result_ty,
+//RS                             kind: TExprKind::InlineBlock(stmts),
+//RS                         })),
+//RS                     },
+//RS                 };
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     // D-FAILURE-FOUNDATION1=A / D-FAIL-BIND1=A: a mixed `?T !E` carrier has
+//RS     // three routes. First consume its Result route, making an `Err(e)` fallback
+//RS     // carry `Present(fallback)`; then consume the remaining Option route. The
+//RS     // fallback is lowered in both branch environments but only one branch runs,
+//RS     // so `err` is visible on the failure route without evaluating the fallback
+//RS     // twice.
+//RS     let mixed_payload = match &value_t.ty {
+//RS         Type::Result { ok, .. } => match ok.as_ref() {
+//RS             Type::Option(inner) => Some((**inner).clone()),
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     };
+//RS     if let Some(payload) = mixed_payload {
+//RS         let option_ty = Type::Option(Box::new(payload.clone()));
+//RS         let mut failure_env = clone_env(env);
+//RS         if let Type::Result { err, .. } = &value_t.ty {
+//RS             failure_env.bind(
+//RS                 Syntax::AMBIENT_ERR,
+//RS                 ambient_err_local(),
+//RS                 Some((**err).clone()),
+//RS             );
+//RS         }
+//RS         let failure_fallback = lower_fallback(fallback, &payload, cx, env, &mut failure_env);
+//RS         let failure_fallback = lift_value_fallback_to_option(failure_fallback, &payload);
+//RS         let after_result = TExpr {
+//RS             ty: option_ty,
+//RS             kind: TExprKind::OrFallback {
+//RS                 value: Box::new(value_t),
+//RS                 fallback: failure_fallback,
+//RS             },
+//RS         };
+//RS         let mut absence_env = clone_env(env);
+//RS         let absence_fallback = lower_fallback(fallback, &payload, cx, env, &mut absence_env);
+//RS         return TExpr {
+//RS             ty: payload,
+//RS             kind: TExprKind::OrFallback {
+//RS                 value: Box::new(after_result),
+//RS                 fallback: absence_fallback,
+//RS             },
+//RS         };
+//RS     }
+//RS 
+//RS     // `??` removes exactly one carrier. A plain Result or Option reaches this
+//RS     // path; the mixed Result<Option<T>, E> shape was normalized above.
+//RS     let result_ty = match &value_t.ty {
+//RS         Type::Option(inner) => (**inner).clone(),
+//RS         Type::Result { ok, .. } => ok.as_ref().clone(),
+//RS         other => other.clone(),
+//RS     };
+//RS     let optional_success = matches!(&value_t.ty, Type::Option(_));
+//RS     let mut fallback_env = clone_env(env);
+//RS     if let Type::Result { err, .. } = &value_t.ty {
+//RS         // Only a direct Option has no error carrier. A Result<Option<T>, E>
+//RS         // mixed carrier is handled above, and its failure branch binds E.
+//RS         if !optional_success {
+//RS             fallback_env.bind(
+//RS                 Syntax::AMBIENT_ERR,
+//RS                 ambient_err_local(),
+//RS                 Some((**err).clone()),
+//RS             );
+//RS         }
+//RS     }
+//RS     let tfallback = lower_fallback(fallback, &result_ty, cx, env, &mut fallback_env);
+//RS     TExpr {
+//RS         ty: result_ty,
+//RS         kind: TExprKind::OrFallback {
+//RS             value: Box::new(value_t),
+//RS             fallback: tfallback,
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn lower_expr_node(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+//RS     canonicalize_pre_tier_expr(match e {
+//RS         Expr::MethodCall { .. } => lower_method_chain(e, cx, env),
+//RS         Expr::ListLit(elems, _) => lower_list_lit(elems, cx, env),
+//RS         Expr::OrFallback {
+//RS             value, fallback, ..
+//RS         } => lower_or_fallback(value, fallback, cx, env),
+//RS         _ => lower_expr_inner(e, cx, env),
+//RS     })
+//RS }
+//RS 
+//RS /// Lower callee preconditions at the call site.  The argument values are
+//RS /// pinned once into compiler-owned locals, then both the condition and the
+//RS /// eventual call read those locals.  Borrowed arguments stay borrowed through
+//RS /// the temp, so this does not turn a read/write convention into an ownership
+//RS /// move.
+//RS fn lower_pre_contracts_for_args(
+//RS     call_span: Span,
+//RS     args: &mut [TCallArg],
+//RS     param_names: &[String],
+//RS     sig: Option<&[(AccessConvention, Type)]>,
+//RS     clauses: &[ContractClause],
+//RS     cx: &Cx,
+//RS     caller_env: &LowerEnv,
+//RS ) -> (Vec<TStmt>, Vec<TContract>) {
+//RS     if clauses.is_empty() {
+//RS         return (Vec::new(), Vec::new());
+//RS     }
+//RS     let mut contract_env = LowerEnv::new(caller_env.fn_name.clone());
+//RS     contract_env.sentries_fenced = caller_env.sentries_fenced;
+//RS     // Preconditions execute at this call site. Share the enclosing lowering
+//RS     // fact so an address minted while evaluating the condition receives the
+//RS     // same current-frame token as the call body.
+//RS     contract_env.stack_sentry_needed = caller_env.stack_sentry_needed.clone();
+//RS     let mut proof_bindings = HashMap::new();
+//RS     let mut bindings = Vec::new();
+//RS     for (index, arg) in args.iter_mut().enumerate() {
+//RS         let Some(param_name) = param_names.get(index) else {
+//RS             break;
+//RS         };
+//RS         let ty = sig
+//RS             .and_then(|params| params.get(index))
+//RS             .map(|(_, ty)| ty.clone())
+//RS             .unwrap_or_else(|| arg.value.ty.clone());
+//RS         let temp = format!(
+//RS             "{}contract_arg_{}_{}",
+//RS             crate::Syntax::GENERATED_NAME_PREFIX,
+//RS             call_span.start,
+//RS             index
+//RS         );
+//RS         let moves_value = matches!(
+//RS             arg.fact_channel().exclusivity,
+//RS             crate::Codegen::TIR::TExclusivity::Move
+//RS         );
+//RS         let original = std::mem::replace(
+//RS             &mut arg.value,
+//RS             TExpr {
+//RS                 ty: ty.clone(),
+//RS                 kind: TExprKind::Unit,
+//RS             },
+//RS         );
+//RS         let mut init = original;
+//RS         let actual_ty = init.ty.clone();
+//RS         if arg.clone || arg.arc_clone {
+//RS             init = TExpr {
+//RS                 ty: init.ty.clone(),
+//RS                 kind: TExprKind::Clone(
+//RS                     Box::new(init),
+//RS                     crate::Codegen::TIR::call_arg_copy_fact(arg.arc_clone),
+//RS                 ),
+//RS             };
+//RS             arg.clone = false;
+//RS             arg.arc_clone = false;
+//RS         }
+//RS         let local = if arg.borrow || arg.mut_borrow {
+//RS             let mutable = arg.mut_borrow;
+//RS             init = TExpr {
+//RS                 ty: init.ty.clone(),
+//RS                 kind: TExprKind::Borrow {
+//RS                     place: Box::new(init),
+//RS                     mutable,
+//RS                 },
+//RS             };
+//RS             TLocal::user(&temp).through_ref()
+//RS         } else {
+//RS             TLocal::user(&temp)
+//RS         };
+//RS         let replacement = TExpr {
+//RS             ty: ty.clone(),
+//RS             kind: TExprKind::Local(local.clone()),
+//RS         };
+//RS         arg.value = if moves_value {
+//RS             TExpr {
+//RS                 ty: ty.clone(),
+//RS                 kind: TExprKind::Move(Box::new(replacement)),
+//RS             }
+//RS         } else {
+//RS             replacement
+//RS         };
+//RS         contract_env.bind(param_name, local, Some(ty.clone()));
+//RS         proof_bindings.insert(param_name.clone(), actual_ty);
+//RS         bindings.push(TStmt::Let {
+//RS             name: temp,
+//RS             kw: "let",
+//RS             let_ty: crate::Codegen::TIR::TLetTy::inferred(),
+//RS             init,
+//RS             gc_promotion: None,
+//RS             gc_transferred: false,
+//RS         });
+//RS     }
+//RS     let (_, line, _) =
+//RS         crate::Codegen::TIR::tir_src_line_at(&cx.src, cx.src_lines(), call_span.start);
+//RS     let mut lowered = Vec::with_capacity(clauses.len());
+//RS     for clause in clauses {
+//RS         let condition = lower_expr(&clause.cond, cx, &mut contract_env);
+//RS         let message = lower_expr(&clause.message_expr, cx, &mut contract_env);
+//RS         lowered.push(TContract {
+//RS             kind: TContractKind::Pre,
+//RS             condition,
+//RS             message,
+//RS             file: cx.file.clone(),
+//RS             line,
+//RS             span: call_span,
+//RS             disposition: if contract_expr_proven(&clause.cond, &proof_bindings, cx) {
+//RS                 TContractDisposition::Proven
+//RS             } else {
+//RS                 TContractDisposition::Check
+//RS             },
+//RS         });
+//RS     }
+//RS     (bindings, lowered)
+//RS }
+//RS 
+//RS fn lower_call_pre_contracts(
+//RS     call: &Call,
+//RS     args: &mut [TCallArg],
+//RS     clauses: &[ContractClause],
+//RS     cx: &Cx,
+//RS     caller_env: &LowerEnv,
+//RS ) -> (Vec<TStmt>, Vec<TContract>) {
+//RS     let Some(param_names) = cx.fn_param_names.get(&call.name) else {
+//RS         return (Vec::new(), Vec::new());
+//RS     };
+//RS     lower_pre_contracts_for_args(
+//RS         call.name_span,
+//RS         args,
+//RS         param_names,
+//RS         cx.sigs.get(&call.name).map(Vec::as_slice),
+//RS         clauses,
+//RS         cx,
+//RS         caller_env,
+//RS     )
+//RS }
+//RS 
+//RS /// Pin a user method's receiver and arguments before checking its preconditions.
+//RS /// The method lowering already resolved dispatch and argument ownership; this
+//RS /// pass only replaces each evaluated value with a local so the contract and the
+//RS /// eventual call observe one value on every tier.
+//RS fn lower_method_pre_contracts(
+//RS     call: &Expr,
+//RS     mut lowered: TExpr,
+//RS     cx: &Cx,
+//RS     caller_env: &LowerEnv,
+//RS ) -> TExpr {
+//RS     let Expr::MethodCall {
+//RS         method,
+//RS         method_span,
+//RS         recv_type,
+//RS         ..
+//RS     } = call
+//RS     else {
+//RS         return lowered;
+//RS     };
+//RS     let owner = recv_type
+//RS         .as_deref()
+//RS         .map(|name| name.rsplit_once('.').map_or(name, |(_, leaf)| leaf));
+//RS     let (owner, clauses, param_names) = match &lowered.kind {
+//RS         TExprKind::MethodCall { .. } => {
+//RS             let Some(owner) = owner else {
+//RS                 return lowered;
+//RS             };
+//RS             let key = format!("{owner}::{method}");
+//RS             let Some((pre, _)) = cx.contract_sigs.get(&key) else {
+//RS                 return lowered;
+//RS             };
+//RS             let Some(param_names) = cx.fn_param_names.get(&key) else {
+//RS                 return lowered;
+//RS             };
+//RS             (key, pre.clone(), param_names.clone())
+//RS         }
+//RS         TExprKind::StaticCall {
+//RS             owner: TStaticOwner::User(owner),
+//RS             ..
+//RS         } => {
+//RS             let key = format!("{owner}::{method}");
+//RS             let Some((pre, _)) = cx.contract_sigs.get(&key) else {
+//RS                 return lowered;
+//RS             };
+//RS             let Some(param_names) = cx.fn_param_names.get(&key) else {
+//RS                 return lowered;
+//RS             };
+//RS             (key, pre.clone(), param_names.clone())
+//RS         }
+//RS         _ => return lowered,
+//RS     };
+//RS     if clauses.is_empty() {
+//RS         return lowered;
+//RS     }
+//RS 
+//RS     let (bindings, contracts) = match &mut lowered.kind {
+//RS         TExprKind::MethodCall { recv, args, .. } => {
+//RS             let recv_value = std::mem::replace(
+//RS                 recv,
+//RS                 Box::new(TExpr {
+//RS                     ty: unit_type(),
+//RS                     kind: TExprKind::Unit,
+//RS                 }),
+//RS             );
+//RS             let type_name = owner
+//RS                 .split_once("::")
+//RS                 .map_or(owner.as_str(), |(type_name, _)| type_name);
+//RS             let self_conv = cx
+//RS                 .method_self_convs
+//RS                 .get(&(type_name.to_string(), method.to_string()))
+//RS                 .copied()
+//RS                 .unwrap_or(AccessConvention::Read);
+//RS             let self_ty = recv_value.ty.clone();
+//RS             let receiver = TCallArg {
+//RS                 borrow: self_conv == AccessConvention::Read && !self_ty.is_scalar(),
+//RS                 mut_borrow: self_conv == AccessConvention::Write,
+//RS                 value: *recv_value,
+//RS                 template_items: None,
+//RS                 clone: false,
+//RS                 arc_clone: false,
+//RS                 fn_coerce: None,
+//RS                 widen_to_vec: false,
+//RS                 widen_to_union: None,
+//RS                 box_as_trait: None,
+//RS             };
+//RS             let method_sig = cx
+//RS                 .method_sigs
+//RS                 .get(&(type_name.to_string(), method.to_string()));
+//RS             let mut sig = Vec::with_capacity(method_sig.map_or(0, |sig| sig.len()) + 1);
+//RS             sig.push((self_conv, self_ty));
+//RS             if let Some(method_sig) = method_sig {
+//RS                 sig.extend(method_sig.iter().cloned());
+//RS             }
+//RS             let mut all_args = Vec::with_capacity(args.len() + 1);
+//RS             all_args.push(receiver);
+//RS             all_args.append(args);
+//RS             let result = lower_pre_contracts_for_args(
+//RS                 *method_span,
+//RS                 &mut all_args,
+//RS                 &param_names,
+//RS                 Some(&sig),
+//RS                 &clauses,
+//RS                 cx,
+//RS                 caller_env,
+//RS             );
+//RS             let receiver = all_args.remove(0);
+//RS             *recv = Box::new(receiver.value);
+//RS             *args = all_args;
+//RS             result
+//RS         }
+//RS         TExprKind::StaticCall { args, .. } => {
+//RS             let type_name = owner
+//RS                 .split_once("::")
+//RS                 .map_or(owner.as_str(), |(type_name, _)| type_name);
+//RS             let method_sig = cx
+//RS                 .method_sigs
+//RS                 .get(&(type_name.to_string(), method.to_string()));
+//RS             lower_pre_contracts_for_args(
+//RS                 *method_span,
+//RS                 args,
+//RS                 &param_names,
+//RS                 method_sig.map(Vec::as_slice),
+//RS                 &clauses,
+//RS                 cx,
+//RS                 caller_env,
+//RS             )
+//RS         }
+//RS         _ => unreachable!("method contract dispatch changed during lowering"),
+//RS     };
+//RS     if contracts.is_empty() {
+//RS         return lowered;
+//RS     }
+//RS     let ty = lowered.ty.clone();
+//RS     let mut stmts = bindings;
+//RS     stmts.extend(
+//RS         contracts
+//RS             .into_iter()
+//RS             .map(|contract| TStmt::Contract { contract }),
+//RS     );
+//RS     stmts.push(TStmt::ExprStmt(lowered));
+//RS     TExpr {
+//RS         ty,
+//RS         kind: TExprKind::InlineBlock(stmts),
+//RS     }
+//RS }
+//RS 
+//RS /// D-QUAL4/I9: user tags are compile-time facts. Remove them at the shared TIR
+//RS /// boundary, but retain compiler-owned tags except for `Range`, whose adapters
+//RS /// all require the exact nominal carrier.
+//RS fn canonicalize_pre_tier_expr(mut expr: TExpr) -> TExpr {
+//RS     let ty = expr.ty.without_user_tags().erased_inline_ranges();
+//RS     expr.ty = if matches!(ty.erased_carrier(), Type::Named(name) if name == Syntax::TYPE_RANGE) {
+//RS         Type::Named(Syntax::TYPE_RANGE.to_string())
+//RS     } else {
+//RS         ty
+//RS     };
+//RS     expr
+//RS }
+//RS 
+//RS fn expr_cache_begin() -> bool {
+//RS     EXPR_WORKLIST_CACHE.with(|cache| {
+//RS         let mut cache = cache.borrow_mut();
+//RS         if cache.active {
+//RS             false
+//RS         } else {
+//RS             cache.active = true;
+//RS             cache.values.clear();
+//RS             cache.types.clear();
+//RS             cache.method_sigs.clear();
+//RS             true
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn expr_cache_end() {
+//RS     EXPR_WORKLIST_CACHE.with(|cache| {
+//RS         let mut cache = cache.borrow_mut();
+//RS         cache.active = false;
+//RS         cache.values.clear();
+//RS         cache.types.clear();
+//RS         cache.method_sigs.clear();
+//RS     });
+//RS }
+//RS 
+//RS struct ExprCacheOwner {
+//RS     owns_cache: bool,
+//RS }
+//RS 
+//RS /// Run `body` on its own AST-pointer expression memo.
+//RS ///
+//RS /// The memo below is keyed by node identity alone, so it is only sound while
+//RS /// one `LowerEnv` is in force. Two lowerings cross that line:
+//RS ///
+//RS ///   * comptime re-entry, which lowers under a different `Cx` (D-CTCACHE1); and
+//RS ///   * a lambda body, which is lowered once per pass — the AOT closure text,
+//RS ///     the `executable` TIR, and the JIT spawn body — under a DIFFERENT env
+//RS ///     each time. The clone pack rebinds a capture to `__jet___cap_<n>` while
+//RS ///     the spawn pack keeps the source slot (`lower/lambdas.rs`), so a value
+//RS ///     memoized under one pass replays a `TLocal` the other pass never binds.
+//RS ///
+//RS /// One mechanism serves both: take the memo, restore it on the way out.
+//RS pub(crate) struct ExprCacheScope {
+//RS     saved: ExprWorklistCache,
+//RS }
+//RS 
+//RS impl ExprCacheScope {
+//RS     pub(crate) fn enter() -> Self {
+//RS         Self {
+//RS             saved: EXPR_WORKLIST_CACHE.with(|cache| std::mem::take(&mut *cache.borrow_mut())),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for ExprCacheScope {
+//RS     fn drop(&mut self) {
+//RS         let saved = std::mem::take(&mut self.saved);
+//RS         EXPR_WORKLIST_CACHE.with(|cache| *cache.borrow_mut() = saved);
+//RS     }
+//RS }
+//RS 
+//RS /// Lower one lambda body on its own memo (see [`ExprCacheScope`]). Every pass
+//RS /// that re-lowers the same body under its own env goes through here.
+//RS pub(crate) fn with_lambda_body_expr_cache<R>(body: impl FnOnce() -> R) -> R {
+//RS     let _scope = ExprCacheScope::enter();
+//RS     body()
+//RS }
+//RS 
+//RS /// Lower a synthesized temporary expression on its own memo. The worklist memo
+//RS /// is keyed by node address, and a node's children can stay unconsumed (an
+//RS /// enum path's receiver). Entries for a temporary would outlive its nodes, and
+//RS /// a later allocation at a recycled address would replay them.
+//RS fn lower_temporary_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+//RS     let _scope = ExprCacheScope::enter();
+//RS     lower_expr(e, cx, env)
+//RS }
+//RS 
+//RS // D-CTCACHE1: comptime lowering can recursively invoke TIR while an outer
+//RS // executable lowering worklist is active. Keep the two AST-pointer caches
+//RS // separate; otherwise a comptime-shaped expression can be consumed later by
+//RS // runtime lowering under a different Cx and environment.
+// END-PORT-PENDING 0475 crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1-1802
+

@@ -1,0 +1,197 @@
+// MIROptimization.rs:3919-4088. Three-state Bool facts; unknown is absence,
+// not false. Only unaliased scalar locals and cross-block known SSA values
+// cross edges. Joins remove disagreement, including loop/backedge facts.
+struct MIRNativeBoolValue { value: MIRValueID, known: Bool }
+struct MIRNativeBoolFacts { places: [Bool?], values: [MIRNativeBoolValue], positions: [U64:Int] }
+struct MIRNativeGraphFrame { block: Int, cursor: Int }
+fn mir_native_bool_fact_set(facts: &MIRNativeBoolFacts, value: MIRValueID, known: Bool?) Never! {
+    if known == .Val(known) {
+        if facts.positions.get(value.value) == .Val(position) -> facts.values[position].known = known
+        else {
+            facts.positions[value.value] = facts.values.len()
+            &facts.values.push(MIRNativeBoolValue{value: value, known: known})
+        }
+    } else {
+        position :: facts.positions.get(value.value) ?? return
+        _ :: &facts.positions.remove(value.value)
+        last :: &facts.values.pop() ?? panic("indexed Bool value")
+        if position < facts.values.len() {
+            facts.values[position] = last
+            facts.positions[last.value.value] = position
+        }
+    }
+}
+fn mir_native_bool_fact_get(facts: MIRNativeBoolFacts, value: MIRValueID) -> Bool? Never! {
+    position :: facts.positions.get(value.value) ?? return None
+    Val(facts.values[position].known)
+}
+fn mir_native_heap_push(heap: &[Int], queued: &[Bool], rank: Int) Never! {
+    if queued[rank] -> return
+    queued[rank] = true
+    at := heap.len()
+    &heap.push(rank)
+    loop at > 0 {
+        parent :: (at - 1) / 2
+        if heap[parent] <= rank -> break
+        heap[at] = heap[parent]
+        at = parent
+    }
+    heap[at] = rank
+}
+fn mir_native_heap_pop(heap: &[Int], queued: &[Bool]) -> Int Never! {
+    result :: heap[0]
+    last :: &heap.pop() ?? panic("nonempty ranked worklist")
+    if heap.len() != 0 {
+        at := 0
+        loop {
+            child := at * 2 + 1
+            if child >= heap.len() -> break
+            if child + 1 < heap.len() && heap[child + 1] < heap[child] -> child += 1
+            if last <= heap[child] -> break
+            heap[at] = heap[child]
+            at = child
+        }
+        heap[at] = last
+    }
+    queued[result] = false
+    result
+}
+fn mir_native_reachable_with_boolean_locals(function: MIRFunction, index: MIRNativeFunctionIndex) -> [U64:Bool] Never! {
+    borrowed := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            loop usage in mir_native_operation_place_uses(instruction.operation) {
+                if usage.kind != .Borrow -> next
+                place :: index.definitions.places.get(usage.place.value) ?? next
+                if function.places[place].base == .Local(local) -> borrowed[local.value] = true
+            }
+        }
+    }
+    locals := [U64:Int]{}
+    tracked := [U64:Int]{}
+    loop place in function.places {
+        if place.base == .Local(local) {
+            if !mir_type_is_bool(place.ty) || place.projections.len() != 0 || borrowed.get(local.value) != None -> next
+            slot := locals.get(local.value) ?? -1
+            if slot < 0 { slot = locals.len(); locals[local.value] = slot }
+            tracked[place.id.value] = slot
+        }
+    }
+    if tracked.len() == 0 {
+        reachable := [U64:Bool]{}
+        loop block in mir_pass_reachable(function) -> reachable[block.value] = true
+        return reachable
+    }
+    defined := [U64:U64]{}
+    loop block in function.blocks { loop instruction in block.instructions { if instruction.result == .Val(value) -> defined[value.value] = block.id.value } }
+    crosses := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions { loop value in mir_operation_value_uses(instruction.operation) { if defined.get(value.value) != Val(block.id.value) -> crosses[value.value] = true } }
+        loop value in mir_terminator_value_uses(block.terminator) { if defined.get(value.value) != Val(block.id.value) -> crosses[value.value] = true }
+    }
+    roots := [Int]{}
+    if index.blocks.get(function.entry.value) == .Val(position) -> &roots.push(position)
+    loop drop in function.drops {
+        if drop.edge == .Failure(target) | .Unwind(target) {
+            if index.blocks.get(target.value) == .Val(position) -> &roots.push(position)
+        }
+    }
+    targets := [[Int]]{}
+    incoming := [MIRNativeBoolFacts?]{}
+    ranks := [Int]{}
+    seen := [Bool]{}
+    loop block in function.blocks {
+        rows := [Int]{}
+        loop target in mir_terminator_targets(block.terminator) { if index.blocks.get(target.value) == .Val(position) -> &rows.push(position) }
+        &targets.push(rows)
+        &incoming.push(None)
+        &ranks.push(-1)
+        &seen.push(false)
+    }
+    postorder := [Int]{}
+    stack := [MIRNativeGraphFrame]{}
+    loop root in roots {
+        places := [Bool?]{}
+        loop slot in 0..<locals.len() -> &places.push(None)
+        incoming[root] = Val(MIRNativeBoolFacts{places: places, values: [MIRNativeBoolValue]{}, positions: [U64:Int]{}})
+        if seen[root] -> next
+        seen[root] = true
+        &stack.push(MIRNativeGraphFrame{block: root, cursor: 0})
+        loop stack.len() > 0 {
+            top :: stack.len() - 1
+            frame :: stack[top]
+            if frame.cursor < targets[frame.block].len() {
+                target :: targets[frame.block][frame.cursor]
+                stack[top].cursor += 1
+                if !seen[target] { seen[target] = true; &stack.push(MIRNativeGraphFrame{block: target, cursor: 0}) }
+            } else {
+                &postorder.push(frame.block)
+                _ :: &stack.pop()
+            }
+        }
+    }
+    order := [Int]{}
+    queued := [Bool]{}
+    cursor := postorder.len()
+    loop cursor > 0 { cursor -= 1; ranks[postorder[cursor]] = order.len(); &order.push(postorder[cursor]); &queued.push(false) }
+    work := [Int]{}
+    loop root in roots -> mir_native_heap_push(&work, &queued, ranks[root])
+    loop work.len() > 0 {
+        rank :: mir_native_heap_pop(&work, &queued)
+        position :: order[rank]
+        block :: function.blocks[position]
+        facts := incoming[position] ?? panic("queued block has incoming facts")
+        loop instruction in block.instructions {
+            known :: if instruction.operation == {
+                .Constant(.Bool(value)) -> Val(value)
+                .ReadPlace(place) -> { if tracked.get(place.value) == .Val(slot) -> facts.places[slot] else -> None }
+                .Copy(value, _) | .Move(value) -> mir_native_bool_fact_get(facts, value)
+                .Unary(.Not, value) -> { if mir_native_bool_fact_get(facts, value) == .Val(known) -> Val(!known) else -> None }
+                else -> None
+            }
+            if instruction.result == .Val(value) -> mir_native_bool_fact_set(&facts, value, known)
+            if instruction.operation == {
+                .WritePlace(place, value) | .ReplacePlace(place, value) -> { if tracked.get(place.value) == .Val(slot) -> facts.places[slot] = mir_native_bool_fact_get(facts, value) }
+                .MovePlace(place) | .InitializeUninit(place) -> { if tracked.get(place.value) == .Val(slot) -> facts.places[slot] = None }
+                else -> {}
+            }
+        }
+        selected := targets[position]
+        if block.terminator == .Branch(condition, then_target, else_target) {
+            if mir_native_bool_fact_get(facts, condition) == .Val(value) {
+                target :: if value -> then_target else -> else_target
+                selected = [Int]{}
+                if index.blocks.get(target.value) == .Val(position) -> &selected.push(position)
+            }
+        }
+        at := 0
+        loop at < facts.values.len() {
+            value :: facts.values[at].value
+            if crosses.get(value.value) == None -> mir_native_bool_fact_set(&facts, value, None)
+            else -> at += 1
+        }
+        loop target in selected {
+            if incoming[target] == .Val(previous) {
+                merged := previous
+                narrowed := false
+                loop slot in 0..<merged.places.len() {
+                    if merged.places[slot] != None && merged.places[slot] != facts.places[slot] { merged.places[slot] = None; narrowed = true }
+                }
+                at := 0
+                loop at < merged.values.len() {
+                    value :: merged.values[at]
+                    if mir_native_bool_fact_get(facts, value.value) != Val(value.known) { mir_native_bool_fact_set(&merged, value.value, None); narrowed = true }
+                    else -> at += 1
+                }
+                incoming[target] = Val(merged)
+                if narrowed -> mir_native_heap_push(&work, &queued, ranks[target])
+            } else {
+                incoming[target] = Val(facts)
+                mir_native_heap_push(&work, &queued, ranks[target])
+            }
+        }
+    }
+    reachable := [U64:Bool]{}
+    loop (position, row) in incoming { if row != None -> reachable[function.blocks[position].id.value] = true }
+    reachable
+}

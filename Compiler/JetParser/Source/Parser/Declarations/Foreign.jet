@@ -152,7 +152,7 @@ fn parser_c_module_callback_metadata(function: ^ExternFn, lib: String) -> Extern
     &digest_bytes.push(U8{0})
     loop byte in identity.bytes() -> &digest_bytes.push(byte)
     updated.callback_transport = Val(transport)
-    updated.callback_plan_digest = Val(mir_sha256_hex_bytes(digest_bytes))
+    updated.callback_plan_digest = Val(mir_sha256_hex_bytes(digest_bytes[0..<digest_bytes.len()]))
     updated.callback_identity = Val(identity)
     updated
 }

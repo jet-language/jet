@@ -1,0 +1,1310 @@
+// PORT-PENDING 0317 crates-jet-lexer-src-lexer-scan: crates/jet-lexer/src/Lexer/Scan.rs:1-1306
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Raw scanning: `lex_raw` (no terminator insertion), the main `run` loop, and
+//RS //! number/char/digit scanning.
+//RS 
+//RS use super::Tokens::{TokKind, Token};
+//RS use super::{keyword, Lexer};
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Syntax;
+//RS 
+//RS fn describe_unrecognized_character(character: char) -> String {
+//RS     match character {
+//RS         '\0' => "\\0".to_string(),
+//RS         '\t' => "\\t".to_string(),
+//RS         character
+//RS             if character.is_control() || crate::Diagnostics::display_char_width(character) == 0 =>
+//RS         {
+//RS             format!("U+{:04X}", character as u32)
+//RS         }
+//RS         character => character.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS /// D-FENCE2=A: a retired `@[` / `]@` fence digraph. The edit respells the one
+//RS /// digraph, so applying every edit in a file migrates each fence. A space
+//RS /// keeps an adjacent `:` or `<` from gluing onto the new digraph.
+//RS fn retired_fence_digraph(span: Span, previous: char, old: &str, new: &str) -> Diagnostic {
+//RS     let new_text = if matches!(previous, ':' | '<') {
+//RS         format!(" {new}")
+//RS     } else {
+//RS         new.to_string()
+//RS     };
+//RS     Diagnostic::from_row("E-FENCE-SPELLING", &[("old", old), ("new", new)], Some(span))
+//RS         .with_edit(crate::Diagnostics::TextEdit { span, new_text })
+//RS }
+//RS 
+//RS /// D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A:
+//RS /// compiler facts and declaration metadata moved from `@` to `$`. One retired
+//RS /// spelling, the text that replaces it, and E0003 with a machine-applicable
+//RS /// edit (`respelled` is `None` for a removed query with no mechanical
+//RS /// respelling).
+//RS fn retired_fact_mark(span: Span, old: &str, respelled: Option<&str>) -> Diagnostic {
+//RS     let why = "compiler facts and declaration metadata carry `$`; prefix `@` in code now marks a live link (D-COMPILER-NS1=A)".to_string();
+//RS     match respelled {
+//RS         Some(new) => Diagnostic::error(
+//RS             "E0003",
+//RS             format!("`{old}` is retired; write `{new}`"),
+//RS             why,
+//RS             format!("replace `{old}` with `{new}`"),
+//RS             Some(span),
+//RS         )
+//RS         .with_edit(crate::Diagnostics::TextEdit { span, new_text: new.to_string() }),
+//RS         None => Diagnostic::error(
+//RS             "E0003",
+//RS             format!("`{old}(…)` is retired"),
+//RS             format!("{why}; a fact is a `$` member of the thing it describes (D-META-ROOT3=A)"),
+//RS             "read the fact on its subject, such as `T.$fields`, `f.$effects` or `value.$origin`"
+//RS                 .to_string(),
+//RS             Some(span),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS /// D-NAME-SPLICE1=B: a template name splice carries the fact sigil,
+//RS /// `fn $method`, `impl $type_name`, `self.$field`, `.$left`. The retired `@`
+//RS /// splice teaches E0388 with a machine-applicable edit and reads as the `$`
+//RS /// word, so prefix `@` in code marks only a live link.
+//RS fn retired_name_splice(span: Span, old: &str, new: &str) -> Diagnostic {
+//RS     Diagnostic::from_row("E0388", &[("old", old), ("new", new)], Some(span)).with_edit(
+//RS         crate::Diagnostics::TextEdit {
+//RS             span,
+//RS             new_text: new.to_string(),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS /// Declaration heads whose name may be a template splice (`fn $method`).
+//RS const SPLICED_DECLARATION_HEADS: &[&str] = &["fn", "impl", "struct", "enum", "trait", "type"];
+//RS 
+//RS /// Declaration metadata names written `$name: value` in a `marker` or `fact`
+//RS /// parameter list (D-DECL-META1=A).
+//RS const DECL_METADATA: &[&str] = &[
+//RS     "sites", "repeatable", "holds", "safe", "gates", "decision", "retired", "proved_by",
+//RS     "inherits", "companion", "scopes", "resolution", "owns_menu", "identity", "name",
+//RS ];
+//RS 
+//RS /// Fact and reflection members written `subject.$member` (D-META-ROOT3=A)
+//RS /// that are not registered fact planes: template reflection members and the
+//RS /// retired `track_origin`, which the parser teaches separately. Any other
+//RS /// `@name` after `.` is a retired template name splice (D-NAME-SPLICE1=B).
+//RS const REFLECTED_MEMBERS: &[&str] = &[
+//RS     "name", "fields", "index", "kind", "ty", "base", "unknown", "track_origin", "profile",
+//RS ];
+//RS 
+//RS /// Raw lex with no S6-R terminator insertion. Used for interpolation
+//RS /// sub-streams (`{expr}`), which are single expressions and need no terminator.
+//RS pub fn lex_raw(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
+//RS     lex_raw_with_policy_at_depth(src, false, false, 0)
+//RS }
+//RS 
+//RS pub(super) fn lex_raw_at_depth(
+//RS     src: &str,
+//RS     interpolation_depth: usize,
+//RS ) -> (Vec<Token>, Vec<Diagnostic>) {
+//RS     lex_raw_with_policy_at_depth(src, false, false, interpolation_depth)
+//RS }
+//RS 
+//RS pub(super) fn lex_raw_generated(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
+//RS     lex_raw_with_policy_at_depth(src, true, false, 0)
+//RS }
+//RS 
+//RS pub(super) fn lex_raw_generated_at_depth(
+//RS     src: &str,
+//RS     interpolation_depth: usize,
+//RS ) -> (Vec<Token>, Vec<Diagnostic>) {
+//RS     lex_raw_with_policy_at_depth(src, true, false, interpolation_depth)
+//RS }
+//RS 
+//RS pub(super) fn lex_raw_config(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
+//RS     lex_raw_with_policy_at_depth(src, false, true, 0)
+//RS }
+//RS 
+//RS fn lex_raw_with_policy_at_depth(
+//RS     src: &str,
+//RS     allow_reserved_identifiers: bool,
+//RS     config_surface: bool,
+//RS     interpolation_depth: usize,
+//RS ) -> (Vec<Token>, Vec<Diagnostic>) {
+//RS     let mut lx = Lexer {
+//RS         chars: src.char_indices().collect(),
+//RS         end: src.len(),
+//RS         src,
+//RS         i: 0,
+//RS         diags: Vec::new(),
+//RS         allow_reserved_identifiers,
+//RS         config_surface,
+//RS         interpolation_depth,
+//RS     };
+//RS     // D-SCRIPT-ENTRY1=A: the operating system owns a byte-zero `#!/...` line.
+//RS     // Advance the real source cursor so every later token keeps its original
+//RS     // byte span and line number.
+//RS     if src.as_bytes().starts_with(b"#!/") {
+//RS         while lx.i < lx.chars.len() && lx.at(lx.i) != '\n' {
+//RS             lx.i += 1;
+//RS         }
+//RS         if lx.i < lx.chars.len() {
+//RS             lx.i += 1;
+//RS         }
+//RS     }
+//RS     let mut toks = lx.run();
+//RS     toks.push(Token {
+//RS         kind: TokKind::Eof,
+//RS         span: Span::new(src.len(), src.len()),
+//RS     });
+//RS     (toks, lx.diags)
+//RS }
+//RS 
+//RS impl<'a> Lexer<'a> {
+//RS     /// D-TIME-IN1=C: `in` stays a keyword everywhere except immediately after
+//RS     /// a postfix dot. Reclassifying only that position keeps the parser's
+//RS     /// source-loop diagnostic while making `value.in(...)` an ordinary member
+//RS     /// token for lexer clients and downstream parsers.
+//RS     fn after_postfix_dot(toks: &[Token]) -> bool {
+//RS         toks.iter()
+//RS             .rev()
+//RS             .find(|token| {
+//RS                 !matches!(
+//RS                     &token.kind,
+//RS                     TokKind::LineComment(_) | TokKind::BlockComment(_)
+//RS                 )
+//RS             })
+//RS             .is_some_and(|token| matches!(&token.kind, TokKind::Dot | TokKind::QuestionDot))
+//RS     }
+//RS     fn significant_lookbehind<const N: usize>(toks: &[Token]) -> [Option<&Token>; N] {
+//RS         let mut lookbehind: [Option<&Token>; N] = [None; N];
+//RS         let mut count = 0;
+//RS         for token in toks.iter().rev() {
+//RS             if matches!(
+//RS                 &token.kind,
+//RS                 TokKind::LineComment(_) | TokKind::BlockComment(_)
+//RS             ) {
+//RS                 continue;
+//RS             }
+//RS             if count == N {
+//RS                 break;
+//RS             }
+//RS             lookbehind[count] = Some(token);
+//RS             count += 1;
+//RS         }
+//RS         lookbehind
+//RS     }
+//RS 
+//RS     /// D-BOUND-RAW1=A: the quote immediately follows the opening brace of a
+//RS     /// typed head body. Only that body's literal substream changes the
+//RS     /// backslash rule; brace lexing and interpolation substreams remain
+//RS     /// ordinary Jet lexer input.
+//RS     ///
+//RS     /// D-LIT-DOT1=B spells that head `Regex{"\d+"}`, so the `.{` that used to
+//RS     /// mark it is gone and the head name itself is the signal. A PascalCase
+//RS     /// identifier before the brace is always a type, never a value: S54 /
+//RS     /// D-SHAPE-CASE1=C makes casing a machine-enforced law with zero
+//RS     /// exceptions, so a block subject like `if flag {` is snake_case and
+//RS     /// cannot reach this rule. The `Dot` arm reads the retired spelling and
+//RS     /// leaves with the rest of the migration shim.
+//RS     fn starts_typed_head_body(toks: &[Token]) -> bool {
+//RS         let [last, previous] = Self::significant_lookbehind::<2>(toks);
+//RS         matches!(
+//RS             last.map(|token| &token.kind),
+//RS             Some(TokKind::LBrace)
+//RS         ) && match previous.map(|token| &token.kind) {
+//RS             Some(TokKind::Dot) => true,
+//RS             Some(TokKind::Ident(name)) => {
+//RS                 name.starts_with(|first: char| first.is_ascii_uppercase())
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-BYTELIT1=B: `[U8]{ "..." }` and `[U8#N]{ "..." }` use the same
+//RS     /// quoted token as ordinary text, but their body grammar owns `\xNN`.
+//RS     fn starts_byte_typed_lit_body(toks: &[Token]) -> bool {
+//RS         let lookbehind = Self::significant_lookbehind::<6>(toks);
+//RS         if !matches!(
+//RS             lookbehind[0].map(|token| &token.kind),
+//RS             Some(TokKind::LBrace)
+//RS         ) || !matches!(
+//RS             lookbehind[1].map(|token| &token.kind),
+//RS             Some(TokKind::RBracket)
+//RS         ) {
+//RS             return false;
+//RS         }
+//RS         let is_u8 = |token: Option<&Token>| {
+//RS             matches!(
+//RS                 token,
+//RS                 Some(token)
+//RS                     if matches!(&token.kind, TokKind::Ident(name) if name == Syntax::TYPE_U8)
+//RS             )
+//RS         };
+//RS         if matches!(
+//RS             lookbehind[3].map(|token| &token.kind),
+//RS             Some(TokKind::LBracket)
+//RS         ) && is_u8(lookbehind[2])
+//RS         {
+//RS             return true;
+//RS         }
+//RS         matches!(
+//RS             lookbehind[5].map(|token| &token.kind),
+//RS             Some(TokKind::LBracket)
+//RS         ) && is_u8(lookbehind[4])
+//RS             && matches!(
+//RS                 lookbehind[3].map(|token| &token.kind),
+//RS                 Some(TokKind::Hash)
+//RS             )
+//RS     }
+//RS 
+//RS     fn starts_inline_foreign_body(toks: &[Token]) -> bool {
+//RS         if !matches!(toks.last().map(|t| &t.kind), Some(TokKind::LBrace)) {
+//RS             return false;
+//RS         }
+//RS         let Some(fn_pos) = toks.iter().rposition(|t| matches!(t.kind, TokKind::KwFn)) else {
+//RS             return false;
+//RS         };
+//RS         let significant = toks[..fn_pos]
+//RS             .iter()
+//RS             .filter(|token| {
+//RS                 !matches!(
+//RS                     token.kind,
+//RS                     TokKind::LineComment(_)
+//RS                         | TokKind::BlockComment(_)
+//RS                         | TokKind::KwPub
+//RS                         | TokKind::Semi
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let is_marker_name = |token: &&Token| matches!(token.kind, TokKind::Ident(_));
+//RS         let is_ffi = |token: &&Token| matches!(&token.kind, TokKind::Ident(name) if jet_foundation::Registry::is_inline_foreign_marker(name));
+//RS         let mut cursor = significant.len();
+//RS         let mut saw_ffi = false;
+//RS         loop {
+//RS             if cursor >= 2
+//RS                 && matches!(significant[cursor - 2].kind, TokKind::Hash)
+//RS                 && is_marker_name(&significant[cursor - 1])
+//RS             {
+//RS                 saw_ffi |= is_ffi(&significant[cursor - 1]);
+//RS                 cursor -= 2;
+//RS                 continue;
+//RS             }
+//RS             if cursor > 0 && matches!(significant[cursor - 1].kind, TokKind::RParen) {
+//RS                 let mut depth = 0usize;
+//RS                 let mut open = None;
+//RS                 for index in (0..cursor).rev() {
+//RS                     match significant[index].kind {
+//RS                         TokKind::RParen => depth += 1,
+//RS                         TokKind::LParen => {
+//RS                             depth -= 1;
+//RS                             if depth == 0 {
+//RS                                 open = Some(index);
+//RS                                 break;
+//RS                             }
+//RS                         }
+//RS                         _ => {}
+//RS                     }
+//RS                 }
+//RS                 if let Some(open) = open {
+//RS                     if open >= 2
+//RS                         && matches!(significant[open - 2].kind, TokKind::Hash)
+//RS                         && is_marker_name(&significant[open - 1])
+//RS                     {
+//RS                         saw_ffi |= is_ffi(&significant[open - 1]);
+//RS                         cursor = open - 2;
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if cursor > 0 && matches!(significant[cursor - 1].kind, TokKind::RBracket) {
+//RS                 let mut depth = 0usize;
+//RS                 let mut open = None;
+//RS                 for index in (0..cursor).rev() {
+//RS                     match significant[index].kind {
+//RS                         TokKind::RBracket => depth += 1,
+//RS                         TokKind::LBracket => {
+//RS                             depth -= 1;
+//RS                             if depth == 0 {
+//RS                                 open = Some(index);
+//RS                                 break;
+//RS                             }
+//RS                         }
+//RS                         _ => {}
+//RS                     }
+//RS                 }
+//RS                 if let Some(open) = open {
+//RS                     if open > 0 && matches!(significant[open - 1].kind, TokKind::Hash) {
+//RS                         let mut paren_depth = 0usize;
+//RS                         let mut bracket_depth = 0usize;
+//RS                         let mut expects_name = true;
+//RS                         for token in &significant[open + 1..cursor - 1] {
+//RS                             if expects_name && paren_depth == 0 && bracket_depth == 0 {
+//RS                                 saw_ffi |= is_ffi(token);
+//RS                                 expects_name = false;
+//RS                             }
+//RS                             match token.kind {
+//RS                                 TokKind::LParen => paren_depth += 1,
+//RS                                 TokKind::RParen => paren_depth = paren_depth.saturating_sub(1),
+//RS                                 TokKind::LBracket => bracket_depth += 1,
+//RS                                 TokKind::RBracket => {
+//RS                                     bracket_depth = bracket_depth.saturating_sub(1);
+//RS                                 }
+//RS                                 TokKind::Comma if paren_depth == 0 && bracket_depth == 0 => {
+//RS                                     expects_name = true;
+//RS                                 }
+//RS                                 _ => {}
+//RS                             }
+//RS                         }
+//RS                         cursor = open - 1;
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             break;
+//RS         }
+//RS         saw_ffi
+//RS     }
+//RS 
+//RS     pub(super) fn at(&self, i: usize) -> char {
+//RS         if i < self.chars.len() {
+//RS             self.chars[i].1
+//RS         } else {
+//RS             '\0'
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn pos(&self, i: usize) -> usize {
+//RS         if i < self.chars.len() {
+//RS             self.chars[i].0
+//RS         } else {
+//RS             self.end
+//RS         }
+//RS     }
+//RS 
+//RS     fn run(&mut self) -> Vec<Token> {
+//RS         let mut toks = Vec::new();
+//RS         while self.i < self.chars.len() {
+//RS             let c = self.at(self.i);
+//RS 
+//RS             if c.is_whitespace() {
+//RS                 self.i += 1;
+//RS                 continue;
+//RS             }
+//RS 
+//RS             // D-SCRIPT-ENTRY1=A: only a `#!/...` line is launch metadata. The
+//RS             // existing `#!Name` type-marker form remains Jet syntax.
+//RS             if c == '#' && self.at(self.i + 1) == '!' && self.at(self.i + 2) == '/' {
+//RS                 let start = self.pos(self.i);
+//RS                 self.diags.push(Diagnostic::from_row(
+//RS                     "E0042",
+//RS                     &[],
+//RS                     Some(Span::new(start, self.pos(self.i + 2))),
+//RS                 ));
+//RS                 while self.i < self.chars.len() && self.at(self.i) != '\n' {
+//RS                     self.i += 1;
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS 
+//RS             // Line comments (decision S5) — retained for fmt (M6/S44).
+//RS             if c == '/'
+//RS                 && self.at(self.i + 1) == '/'
+//RS                 && !(self.config_surface
+//RS                     && self.pos(self.i) > 0
+//RS                     && self.src.as_bytes().get(self.pos(self.i) - 1) == Some(&b':'))
+//RS             {
+//RS                 let comment_start = self.pos(self.i);
+//RS                 while self.i < self.chars.len() && self.at(self.i) != '\n' {
+//RS                     self.i += 1;
+//RS                 }
+//RS                 let text = self.src[comment_start..self.pos(self.i)].to_string();
+//RS                 toks.push(Token {
+//RS                     kind: TokKind::LineComment(text),
+//RS                     span: Span::new(comment_start, self.pos(self.i)),
+//RS                 });
+//RS                 continue;
+//RS             }
+//RS 
+//RS             // Config templates may use an unquoted URL such as
+//RS             // `postgres://{USER}@{HOST}`. In that one config lexer mode, the
+//RS             // adjacent slashes after a scheme colon are URL punctuation, not
+//RS             // the ordinary line-comment opener.
+//RS             if c == '/' && self.at(self.i + 1) == '/' && self.config_surface {
+//RS                 let start = self.pos(self.i);
+//RS                 let middle = self.pos(self.i + 1);
+//RS                 let end = self.pos(self.i + 2);
+//RS                 toks.push(Token {
+//RS                     kind: TokKind::Slash,
+//RS                     span: Span::new(start, middle),
+//RS                 });
+//RS                 toks.push(Token {
+//RS                     kind: TokKind::Slash,
+//RS                     span: Span::new(middle, end),
+//RS                 });
+//RS                 self.i += 2;
+//RS                 continue;
+//RS             }
+//RS 
+//RS             // Block comments (decision S5) — nest, so a region containing other
+//RS             // comments can always be commented out. Retained for fmt (M6/S44).
+//RS             if c == '/' && self.at(self.i + 1) == '*' {
+//RS                 let comment_start = self.pos(self.i);
+//RS                 self.i += 2;
+//RS                 let mut depth = 1usize;
+//RS                 while self.i < self.chars.len() && depth > 0 {
+//RS                     if self.at(self.i) == '/' && self.at(self.i + 1) == '*' {
+//RS                         depth += 1;
+//RS                         self.i += 2;
+//RS                     } else if self.at(self.i) == '*' && self.at(self.i + 1) == '/' {
+//RS                         depth -= 1;
+//RS                         self.i += 2;
+//RS                     } else {
+//RS                         self.i += 1;
+//RS                     }
+//RS                 }
+//RS                 let end = self.pos(self.i);
+//RS                 if depth > 0 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0002",
+//RS                         "this `/*` comment never gets a closing `*/`".to_string(),
+//RS                         "a block comment starts with `/*` and runs until a matching `*/`"
+//RS                             .to_string(),
+//RS                         "add a `*/` to close the comment".to_string(),
+//RS                         Some(Span::new(comment_start, end)),
+//RS                     ));
+//RS                 }
+//RS                 let text = self.src[comment_start..end].to_string();
+//RS                 toks.push(Token {
+//RS                     kind: TokKind::BlockComment(text),
+//RS                     span: Span::new(comment_start, end),
+//RS                 });
+//RS                 continue;
+//RS             }
+//RS 
+//RS             let start = self.pos(self.i);
+//RS             let simple = |lx: &mut Self, kind: TokKind, len: usize| {
+//RS                 let tok = Token {
+//RS                     kind,
+//RS                     span: Span::new(start, lx.pos(lx.i + len)),
+//RS                 };
+//RS                 lx.i += len;
+//RS                 tok
+//RS             };
+//RS 
+//RS             let next = self.at(self.i + 1);
+//RS             let next2 = self.at(self.i + 2);
+//RS             match c {
+//RS                 '(' => toks.push(simple(self, TokKind::LParen, 1)),
+//RS                 ')' => toks.push(simple(self, TokKind::RParen, 1)),
+//RS                 '{' => toks.push(simple(self, TokKind::LBrace, 1)),
+//RS                 '}' => toks.push(simple(self, TokKind::RBrace, 1)),
+//RS                 '[' => toks.push(simple(self, TokKind::LBracket, 1)),
+//RS                 // D-FENCE2=A: the retired `]@` fence close teaches `:>` and
+//RS                 // still closes the fence so parsing recovers.
+//RS                 ']' if next == '@' => {
+//RS                     self.diags.push(retired_fence_digraph(
+//RS                         Span::new(start, self.pos(self.i + 2)),
+//RS                         self.at(self.i.saturating_sub(1)),
+//RS                         Syntax::RETIRED_FENCE_CLOSE,
+//RS                         Syntax::SIGIL_FENCE_CLOSE,
+//RS                     ));
+//RS                     toks.push(simple(self, TokKind::FenceClose, 2))
+//RS                 }
+//RS                 ']' => toks.push(simple(self, TokKind::RBracket, 1)),
+//RS                 // D-FENCE2=A: `:>` closes a statement-expansion fence
+//RS                 // (longest match before `::`, `:=`, and `:`). D-BIND4: `:=`
+//RS                 // mutable binding sigil.
+//RS                 ':' if next == '>' => toks.push(simple(self, TokKind::FenceClose, 2)),
+//RS                 ':' if next == ':' => toks.push(simple(self, TokKind::ColonColon, 2)),
+//RS                 ':' if next == '=' => toks.push(simple(self, TokKind::ColonEq, 2)),
+//RS                 ':' => toks.push(simple(self, TokKind::Colon, 1)),
+//RS                 ',' => toks.push(simple(self, TokKind::Comma, 1)),
+//RS                 ';' => toks.push(simple(self, TokKind::Semi, 1)),
+//RS                 // D-ONCE-AT1=D: prefix `@name` is one marked identifier, but
+//RS                 // an adjacent `name@source` remains the package-source ref.
+//RS                 // D-FENCE2=A: the retired `@[` fence open teaches `<:`.
+//RS                 '@' if next == '[' => {
+//RS                     self.diags.push(retired_fence_digraph(
+//RS                         Span::new(start, self.pos(self.i + 2)),
+//RS                         self.at(self.i.saturating_sub(1)),
+//RS                         Syntax::RETIRED_FENCE_OPEN,
+//RS                         Syntax::SIGIL_FENCE_OPEN,
+//RS                     ));
+//RS                     toks.push(simple(self, TokKind::FenceOpen, 2))
+//RS                 }
+//RS                 '@' if (next.is_alphabetic() || next == '_')
+//RS                     && !self.at(self.i.saturating_sub(1)).is_alphanumeric()
+//RS                     && self.at(self.i.saturating_sub(1)) != '_' =>
+//RS                 {
+//RS                     let mut j = self.i + 1;
+//RS                     let mut name = String::from("@");
+//RS                     while j < self.chars.len() {
+//RS                         let ch = self.at(j);
+//RS                         if ch.is_alphanumeric() || ch == '_' {
+//RS                             name.push(ch);
+//RS                             j += 1;
+//RS                         } else {
+//RS                             break;
+//RS                         }
+//RS                     }
+//RS                     if keyword(&name[1..]).is_some() {
+//RS                         toks.push(simple(self, TokKind::At, 1));
+//RS                     } else {
+//RS                         let rest = name[1..].to_string();
+//RS                         let prev = self.at(self.i.saturating_sub(1));
+//RS                         let prev2 = self.at(self.i.saturating_sub(2));
+//RS                         let member = self.i > 0
+//RS                             && prev == '.'
+//RS                             && prev2 != '.'
+//RS                             && (REFLECTED_MEMBERS.contains(&rest.as_str())
+//RS                                 || Syntax::fact_read_kind(&format!(
+//RS                                     "{}{rest}",
+//RS                                     Syntax::COMPTIME_MARK
+//RS                                 ))
+//RS                                 .is_some());
+//RS                         let mut colon = j;
+//RS                         while self.at(colon) == ' ' {
+//RS                             colon += 1;
+//RS                         }
+//RS                         let metadata = DECL_METADATA.contains(&rest.as_str())
+//RS                             && self.at(colon) == ':'
+//RS                             && self.at(colon + 1) != ':';
+//RS                         let word_ends = |at: char| !(at.is_alphanumeric() || at == '_');
+//RS                         let package_member = rest == "build"
+//RS                             && ".package".chars().enumerate().all(|(k, ch)| self.at(j + k) == ch)
+//RS                             && word_ends(self.at(j + 8));
+//RS                         let empty_call = self.at(j) == '(' && self.at(j + 1) == ')';
+//RS                         // D-NAME-SPLICE1=B: `@name` after `.` that is not a
+//RS                         // fact (`self.@field`, `.@left`), or naming a
+//RS                         // declaration (`fn @method`, `impl @type_name`), is
+//RS                         // a retired template name splice.
+//RS                         let mut head_end = self.i;
+//RS                         while head_end > 0 && self.at(head_end - 1) == ' ' {
+//RS                             head_end -= 1;
+//RS                         }
+//RS                         let mut head_start = head_end;
+//RS                         while head_start > 0 && !word_ends(self.at(head_start - 1)) {
+//RS                             head_start -= 1;
+//RS                         }
+//RS                         let head: String = (head_start..head_end).map(|k| self.at(k)).collect();
+//RS                         let splice = !member
+//RS                             && ((self.i > 0 && prev == '.' && prev2 != '.')
+//RS                                 || (head_end < self.i
+//RS                                     && SPLICED_DECLARATION_HEADS.contains(&head.as_str())));
+//RS                         // (end of the retired text, its respelling)
+//RS                         let respelled: Option<(usize, String)> =
+//RS                             if member || metadata || rest == "irreversible" {
+//RS                                 Some((j, format!("{}{rest}", Syntax::COMPTIME_MARK)))
+//RS                             } else if splice {
+//RS                                 None
+//RS                             } else {
+//RS                                 match Syntax::retired_fact_spelling(&name) {
+//RS                                     Some(Syntax::RetiredFactSpelling::Root(_)) if package_member => {
+//RS                                         Some((j + 8, Syntax::FACT_ROOT_PACKAGE.to_string()))
+//RS                                     }
+//RS                                     Some(Syntax::RetiredFactSpelling::Root(root))
+//RS                                         if rest != "build" && empty_call =>
+//RS                                     {
+//RS                                         Some((j + 2, root.to_string()))
+//RS                                     }
+//RS                                     Some(Syntax::RetiredFactSpelling::Root(root)) => {
+//RS                                         Some((j, root.to_string()))
+//RS                                     }
+//RS                                     Some(Syntax::RetiredFactSpelling::SubjectMember) => {
+//RS                                         self.diags.push(retired_fact_mark(
+//RS                                             Span::new(start, self.pos(j)),
+//RS                                             &name,
+//RS                                             None,
+//RS                                         ));
+//RS                                         None
+//RS                                     }
+//RS                                     None => None,
+//RS                                 }
+//RS                             };
+//RS                         let (end, text) = match respelled {
+//RS                             Some((end, new)) => {
+//RS                                 let span = Span::new(start, self.pos(end));
+//RS                                 let old: String = (self.i..end).map(|k| self.at(k)).collect();
+//RS                                 self.diags.push(retired_fact_mark(span, &old, Some(&new)));
+//RS                                 (end, new)
+//RS                             }
+//RS                             None if splice => {
+//RS                                 let new = format!("{}{rest}", Syntax::COMPTIME_MARK);
+//RS                                 self.diags.push(retired_name_splice(
+//RS                                     Span::new(start, self.pos(j)),
+//RS                                     &name,
+//RS                                     &new,
+//RS                                 ));
+//RS                                 (j, new)
+//RS                             }
+//RS                             None => (j, name),
+//RS                         };
+//RS                         self.i = end;
+//RS                         let span = Span::new(start, self.pos(self.i));
+//RS                         toks.push(Token {
+//RS                             kind: TokKind::Ident(text),
+//RS                             span,
+//RS                         });
+//RS                     }
+//RS                 }
+//RS                 '@' => toks.push(simple(self, TokKind::At, 1)),
+//RS                 '#' => toks.push(simple(self, TokKind::Hash, 1)),
+//RS                 // D-COMPILER-NS1=A: prefix `$name` is one compiler-fact
+//RS                 // identifier (`$build`, `T.$layout`, `$sites:`). Config
+//RS                 // surfaces read the same token as a `$NAME` environment read
+//RS                 // (D-ONCE-DOLLAR1=B). A lone `$` stays its own token.
+//RS                 '$' if (next.is_alphabetic() || next == '_')
+//RS                     && !self.at(self.i.saturating_sub(1)).is_alphanumeric()
+//RS                     && self.at(self.i.saturating_sub(1)) != '_' =>
+//RS                 {
+//RS                     let mut j = self.i + 1;
+//RS                     let mut name = String::from(Syntax::COMPTIME_MARK);
+//RS                     while j < self.chars.len() {
+//RS                         let ch = self.at(j);
+//RS                         if ch.is_alphanumeric() || ch == '_' {
+//RS                             name.push(ch);
+//RS                             j += 1;
+//RS                         } else {
+//RS                             break;
+//RS                         }
+//RS                     }
+//RS                     self.i = j;
+//RS                     let span = Span::new(start, self.pos(self.i));
+//RS                     toks.push(Token {
+//RS                         kind: TokKind::Ident(name),
+//RS                         span,
+//RS                     });
+//RS                 }
+//RS                 '$' => toks.push(simple(self, TokKind::Dollar, 1)),
+//RS                 '?' if next == '?' => toks.push(simple(self, TokKind::QuestionQuestion, 2)),
+//RS                 '?' if next == '.' => toks.push(simple(self, TokKind::QuestionDot, 2)),
+//RS                 '?' => toks.push(simple(self, TokKind::Question, 1)),
+//RS                 '.' if next == '.' && next2 == '.' => {
+//RS                     toks.push(simple(self, TokKind::DotDotDot, 3))
+//RS                 }
+//RS                 // D-RANGE-EXCL1=C: `..<` before plain `..` (longest match).
+//RS                 '.' if next == '.' && next2 == '<' => toks.push(simple(self, TokKind::DotDotLt, 3)),
+//RS                 '.' if next == '.' => toks.push(simple(self, TokKind::DotDot, 2)),
+//RS                 '.' => toks.push(simple(self, TokKind::Dot, 1)),
+//RS                 '=' if next == '=' => toks.push(simple(self, TokKind::EqEq, 2)),
+//RS                 '=' if next == '>' => toks.push(simple(self, TokKind::LambdaArrow, 2)),
+//RS                 '=' => toks.push(simple(self, TokKind::Eq, 1)),
+//RS                 '!' if next == '=' => toks.push(simple(self, TokKind::NotEq, 2)),
+//RS                 '!' => toks.push(simple(self, TokKind::Bang, 1)),
+//RS                 '+' if next == '+' => toks.push(simple(self, TokKind::PlusPlus, 2)),
+//RS                 '+' if next == '=' => toks.push(simple(self, TokKind::PlusEq, 2)),
+//RS                 '+' => toks.push(simple(self, TokKind::Plus, 1)),
+//RS                 // D-ARROW-RESPELL1=A: canonical callable/control arrow.
+//RS                 '-' if next == '>' => toks.push(simple(self, TokKind::UnifiedArrow, 2)),
+//RS                 '-' if next == '-' => toks.push(simple(self, TokKind::MinusMinus, 2)),
+//RS                 '-' if next == '=' => toks.push(simple(self, TokKind::MinusEq, 2)),
+//RS                 '-' => toks.push(simple(self, TokKind::Minus, 1)),
+//RS                 '*' if next == '=' => toks.push(simple(self, TokKind::StarEq, 2)),
+//RS                 '*' => toks.push(simple(self, TokKind::Star, 1)),
+//RS                 // D-FLOORDIV1=A: `/%=` before `/%` before `/=` before `/`
+//RS                 // (longest match). Comments are consumed earlier, so `//` and
+//RS                 // `/*` never reach here.
+//RS                 '/' if next == '%' && next2 == '=' => {
+//RS                     toks.push(simple(self, TokKind::SlashPercentEq, 3))
+//RS                 }
+//RS                 '/' if next == '%' => toks.push(simple(self, TokKind::SlashPercent, 2)),
+//RS                 '/' if next == '=' => toks.push(simple(self, TokKind::SlashEq, 2)),
+//RS                 '/' => toks.push(simple(self, TokKind::Slash, 1)),
+//RS                 // D-MODSEM1=A: `%%=` before `%%` before `%=` before `%`
+//RS                 // (longest match).
+//RS                 '%' if next == '%' && next2 == '=' => {
+//RS                     toks.push(simple(self, TokKind::PercentPercentEq, 3))
+//RS                 }
+//RS                 '%' if next == '%' => toks.push(simple(self, TokKind::PercentPercent, 2)),
+//RS                 '%' if next == '=' => toks.push(simple(self, TokKind::PercentEq, 2)),
+//RS                 '%' => toks.push(simple(self, TokKind::Percent, 1)),
+//RS                 '^' if next == '=' => toks.push(simple(self, TokKind::CaretEq, 2)),
+//RS                 '^' => toks.push(simple(self, TokKind::Caret, 1)),
+//RS                 // D-SHAPE-COPY1=A: `~` is the copy sigil. `~~` is longest-match
+//RS                 // lexed first so the parser can still emit the retired
+//RS                 // external-method connector diagnostic (E0325).
+//RS                 '~' if next == '~' => toks.push(simple(self, TokKind::TildeTilde, 2)),
+//RS                 // D-XORSPELL1=A: `~|=` before `~|` before `~` (longest match).
+//RS                 '~' if next == '|' && next2 == '=' => {
+//RS                     toks.push(simple(self, TokKind::TildePipeEq, 3))
+//RS                 }
+//RS                 '~' if next == '|' => toks.push(simple(self, TokKind::TildePipe, 2)),
+//RS                 '~' => toks.push(simple(self, TokKind::Tilde, 1)),
+//RS                 '&' if next == '&' => toks.push(simple(self, TokKind::AndAnd, 2)),
+//RS                 '&' if next == '=' => toks.push(simple(self, TokKind::AmpEq, 2)),
+//RS                 '&' => toks.push(simple(self, TokKind::Amp, 1)),
+//RS                 '|' if next == '|' => toks.push(simple(self, TokKind::OrOr, 2)),
+//RS                 '|' if next == '=' => toks.push(simple(self, TokKind::PipeEq, 2)),
+//RS                 '|' => toks.push(simple(self, TokKind::Pipe, 1)),
+//RS                 '<' if next == '<' && next2 == '=' => toks.push(simple(self, TokKind::ShlEq, 3)),
+//RS                 '<' if next == '<' => toks.push(simple(self, TokKind::Shl, 2)),
+//RS                 // D-CMP3WAY1=B: `<=>` must win over `<=` (longest match).
+//RS                 '<' if next == '=' && next2 == '>' => toks.push(simple(self, TokKind::Compare, 3)),
+//RS                 '<' if next == '=' => toks.push(simple(self, TokKind::Le, 2)),
+//RS                 // D-FENCE2=A: `<:` opens a statement-expansion fence.
+//RS                 '<' if next == ':' => toks.push(simple(self, TokKind::FenceOpen, 2)),
+//RS                 '<' => toks.push(simple(self, TokKind::Lt, 1)),
+//RS                 '>' if next == '>' && next2 == '=' => toks.push(simple(self, TokKind::ShrEq, 3)),
+//RS                 '>' if next == '>' => toks.push(simple(self, TokKind::Shr, 2)),
+//RS                 '>' if next == '=' => toks.push(simple(self, TokKind::Ge, 2)),
+//RS                 '>' => toks.push(simple(self, TokKind::Gt, 1)),
+//RS                 '"' => {
+//RS                     let raw_head = Self::starts_typed_head_body(&toks);
+//RS                     let byte_head = Self::starts_byte_typed_lit_body(&toks);
+//RS                     let tok = if next == '"' && next2 == '"' {
+//RS                         if Self::starts_inline_foreign_body(&toks) {
+//RS                             self.raw_foreign_string(start)
+//RS                         } else {
+//RS                             self.triple_string(start, raw_head, byte_head)
+//RS                         }
+//RS                     } else {
+//RS                         self.string(start, raw_head, byte_head)
+//RS                     };
+//RS                     if let Some(tok) = tok {
+//RS                         toks.push(tok);
+//RS                     }
+//RS                 }
+//RS                 '`' => {
+//RS                     if let Some(tok) = self.raw_string(start) {
+//RS                         toks.push(tok);
+//RS                     }
+//RS                 }
+//RS                 '\'' => {
+//RS                     if let Some(tok) = self.char_lit(start) {
+//RS                         toks.push(tok);
+//RS                     }
+//RS                 }
+//RS                 c if c.is_ascii_digit() => toks.push(self.number(start)),
+//RS                 c if c.is_alphabetic() || c == '_' => {
+//RS                     let mut name = String::new();
+//RS                     while self.i < self.chars.len() {
+//RS                         let ch = self.at(self.i);
+//RS                         if ch.is_alphanumeric() || ch == '_' {
+//RS                             name.push(ch);
+//RS                             self.i += 1;
+//RS                         } else {
+//RS                             break;
+//RS                         }
+//RS                     }
+//RS                     let span = Span::new(start, self.pos(self.i));
+//RS                     if matches!(name.as_str(), "r" | "raw") && self.at(self.i) == '"' {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0003",
+//RS                             format!("`{name}\"…\"` is not a Jet raw-string prefix"),
+//RS                             "backtick fences are the one raw ordinary-String spelling; `r` and `raw` are ordinary names"
+//RS                                 .to_string(),
+//RS                             "write the text as ``…`` instead".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                     if !self.allow_reserved_identifiers
+//RS                         && Syntax::classify_identifier(&name) == Syntax::IdentifierClass::Reserved
+//RS                     {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0067",
+//RS                             format!("`{name}` is reserved for Jet"),
+//RS                             "double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools"
+//RS                                 .to_string(),
+//RS                             "rename it without the second leading underscore".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                     let kind = if name == Syntax::KW_IN && Self::after_postfix_dot(&toks) {
+//RS                         TokKind::Ident(name)
+//RS                     } else {
+//RS                         keyword(&name).unwrap_or(TokKind::Ident(name))
+//RS                     };
+//RS                     toks.push(Token { kind, span });
+//RS                 }
+//RS                 other => {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0001",
+//RS                         format!(
+//RS                             "the character `{}` doesn't mean anything here (yet)",
+//RS                             describe_unrecognized_character(other)
+//RS                         ),
+//RS                         "unprintable characters are shown as `\\0`, `\\t`, or `U+XXXX` so you can identify them"
+//RS                             .to_string(),
+//RS                         "remove it, or use supported syntax".to_string(),
+//RS                         Some(Span::new(start, self.pos(self.i + 1))),
+//RS                     ));
+//RS                     self.i += 1; // skip it and keep lexing (error recovery)
+//RS                 }
+//RS             }
+//RS         }
+//RS         toks
+//RS     }
+//RS 
+//RS     /// Lex digits, with an optional decimal part (S11 Float).
+//RS     /// S34: `_` digit separators (stripped), `0x`/`0o`/`0b` base prefixes, and
+//RS     /// a `e`/`E` exponent on floats. `1..10` stays Int DotDot Int: a `.` only
+//RS     /// starts the decimal part when a digit follows it.
+//RS     fn number(&mut self, start: usize) -> Token {
+//RS         // Base-prefixed integers: 0x / 0o / 0b (S34).
+//RS         if self.at(self.i) == '0' {
+//RS             let radix = match self.at(self.i + 1) {
+//RS                 'x' | 'X' => Some(16u32),
+//RS                 'o' | 'O' => Some(8),
+//RS                 'b' | 'B' => Some(2),
+//RS                 _ => None,
+//RS             };
+//RS             if let Some(radix) = radix {
+//RS                 self.i += 2; // consume `0x` / `0o` / `0b`
+//RS                 let mut digits = String::new();
+//RS                 while self.i < self.chars.len() {
+//RS                     let ch = self.at(self.i);
+//RS                     if ch == Syntax::DIGIT_SEPARATOR {
+//RS                         self.i += 1;
+//RS                     } else if ch.to_digit(radix).is_some() {
+//RS                         digits.push(ch);
+//RS                         self.i += 1;
+//RS                     } else {
+//RS                         break;
+//RS                     }
+//RS                 }
+//RS                 let span = Span::new(start, self.pos(self.i));
+//RS                 if digits.is_empty() {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0001",
+//RS                         "this number prefix has no digits after it".to_string(),
+//RS                         "`0x`, `0o`, and `0b` must be followed by digits, e.g. `0xFF`, `0o17`, `0b1010`"
+//RS                             .to_string(),
+//RS                         "add digits after the base prefix".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return Token {
+//RS                         kind: TokKind::Int(0, self.src[span.start..span.end].to_string()),
+//RS                         span,
+//RS                     };
+//RS                 }
+//RS                 return match i64::from_str_radix(&digits, radix) {
+//RS                     Ok(n) => Token {
+//RS                         kind: TokKind::Int(n, self.src[span.start..span.end].to_string()),
+//RS                         span,
+//RS                     },
+//RS                     Err(_) => Token {
+//RS                         kind: TokKind::Int(0, self.src[span.start..span.end].to_string()),
+//RS                         span,
+//RS                     },
+//RS                 };
+//RS             }
+//RS         }
+//RS 
+//RS         let mut text = String::new();
+//RS         self.lex_digits(&mut text);
+//RS         let mut is_float = false;
+//RS         if self.at(self.i) == '.' && self.at(self.i + 1).is_ascii_digit() {
+//RS             is_float = true;
+//RS             text.push('.');
+//RS             self.i += 1;
+//RS             self.lex_digits(&mut text);
+//RS         }
+//RS         // Exponent (S34): `e`/`E`, an optional sign, then digits — makes a Float.
+//RS         if matches!(self.at(self.i), 'e' | 'E') {
+//RS             let after = self.at(self.i + 1);
+//RS             let exp_ok = after.is_ascii_digit()
+//RS                 || ((after == '+' || after == '-') && self.at(self.i + 2).is_ascii_digit());
+//RS             if exp_ok {
+//RS                 is_float = true;
+//RS                 text.push('e');
+//RS                 self.i += 1;
+//RS                 if matches!(self.at(self.i), '+' | '-') {
+//RS                     text.push(self.at(self.i));
+//RS                     self.i += 1;
+//RS                 }
+//RS                 self.lex_digits(&mut text);
+//RS             }
+//RS         }
+//RS         // D-UNITLIT1: a trailing identifier run right after the number is a
+//RS         // unit-suffix candidate — `500ms`, `12.50usd`. The `e`/`E`+digits
+//RS         // exponent form was already consumed above (`UNIT_SUFFIX_EXPONENT_RESERVED`),
+//RS         // so anything reaching here is never a float exponent; a bare `e`/`E`
+//RS         // with no following digit falls through and IS eligible as a suffix.
+//RS         let suffix = self.lex_unit_suffix();
+//RS 
+//RS         if is_float {
+//RS             // digits '.' digits (with optional exponent) always parses as f64.
+//RS             let v: f64 = text.parse().unwrap_or(0.0);
+//RS             if let Some(suffix) = suffix {
+//RS                 let span = Span::new(start, self.pos(self.i));
+//RS                 return Token {
+//RS                     kind: TokKind::UnitNumber {
+//RS                         raw: text,
+//RS                         int: None,
+//RS                         float: Some(v),
+//RS                         suffix,
+//RS                     },
+//RS                     span,
+//RS                 };
+//RS             }
+//RS             let span = Span::new(start, self.pos(self.i));
+//RS             return Token {
+//RS                 kind: TokKind::Float(v, text),
+//RS                 span,
+//RS             };
+//RS         }
+//RS         match text.parse::<i64>() {
+//RS             Ok(n) => {
+//RS                 if let Some(suffix) = suffix {
+//RS                     let span = Span::new(start, self.pos(self.i));
+//RS                     return Token {
+//RS                         kind: TokKind::UnitNumber {
+//RS                             raw: text,
+//RS                             int: Some(n),
+//RS                             float: None,
+//RS                             suffix,
+//RS                         },
+//RS                         span,
+//RS                     };
+//RS                 }
+//RS                 let span = Span::new(start, self.pos(self.i));
+//RS                 Token {
+//RS                     kind: TokKind::Int(n, self.src[span.start..span.end].to_string()),
+//RS                     span,
+//RS                 }
+//RS             }
+//RS             Err(_) => {
+//RS                 let span = Span::new(start, self.pos(self.i));
+//RS                 Token {
+//RS                     kind: TokKind::Int(0, self.src[span.start..span.end].to_string()),
+//RS                     span,
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-UNITLIT1: greedily read a trailing identifier run (ASCII letter/`_`
+//RS     /// start, alphanumeric/`_` continue) right after a numeric literal, with
+//RS     /// no space between. Returns `None` when the next char doesn't start an
+//RS     /// identifier (the common case — a plain number).
+//RS     fn lex_unit_suffix(&mut self) -> Option<String> {
+//RS         let c = self.at(self.i);
+//RS         if !(c.is_ascii_alphabetic() || c == '_') {
+//RS             return None;
+//RS         }
+//RS         let mut suffix = String::new();
+//RS         while self.i < self.chars.len() {
+//RS             let ch = self.at(self.i);
+//RS             if ch.is_alphanumeric() || ch == '_' {
+//RS                 suffix.push(ch);
+//RS                 self.i += 1;
+//RS             } else {
+//RS                 break;
+//RS             }
+//RS         }
+//RS         Some(suffix)
+//RS     }
+//RS 
+//RS     /// Consume a run of decimal digits, skipping `_` separators (S34).
+//RS     fn lex_digits(&mut self, text: &mut String) {
+//RS         while self.i < self.chars.len() {
+//RS             let ch = self.at(self.i);
+//RS             if ch.is_ascii_digit() {
+//RS                 text.push(ch);
+//RS                 self.i += 1;
+//RS             } else if ch == Syntax::DIGIT_SEPARATOR {
+//RS                 self.i += 1;
+//RS             } else {
+//RS                 break;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// S41: `'a'` or `'\n'` — exactly one Unicode scalar.
+//RS     fn char_lit(&mut self, start: usize) -> Option<Token> {
+//RS         self.i += 1; // opening quote
+//RS         if self.i >= self.chars.len() {
+//RS             return None;
+//RS         }
+//RS         let mut ch = self.at(self.i);
+//RS         if ch == '\\' {
+//RS             let esc = self.at(self.i + 1);
+//RS             if let Some(&(_, decoded)) = Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
+//RS                 ch = decoded;
+//RS                 self.i += 2;
+//RS             } else {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0001",
+//RS                     format!("`\\{}` isn't an escape Jet knows", esc),
+//RS                     "inside a character literal, `\\` starts an escape: `\\n`, `\\t`, `\\'`, `\\\\`"
+//RS                         .to_string(),
+//RS                     "use a supported escape or a plain character".to_string(),
+//RS                     Some(Span::new(self.pos(self.i), self.pos(self.i + 2))),
+//RS                 ));
+//RS                 self.i += 2;
+//RS                 ch = '?';
+//RS             }
+//RS         } else {
+//RS             self.i += 1;
+//RS         }
+//RS         if self.at(self.i) != '\'' {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0002",
+//RS                 "a character literal must be exactly one character".to_string(),
+//RS                 "write `'x'` with a single character between the quotes".to_string(),
+//RS                 "use a String for longer text".to_string(),
+//RS                 Some(Span::new(start, self.pos(self.i))),
+//RS             ));
+//RS             while self.i < self.chars.len() && self.at(self.i) != '\'' {
+//RS                 self.i += 1;
+//RS             }
+//RS         }
+//RS         if self.at(self.i) == '\'' {
+//RS             self.i += 1;
+//RS         }
+//RS         Some(Token {
+//RS             kind: TokKind::Char(ch),
+//RS             span: Span::new(start, self.pos(self.i)),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::lex_raw;
+//RS     use crate::Lexer::{StrTokPart, TokKind};
+//RS 
+//RS     #[test]
+//RS     fn raw_foreign_body_marker_does_not_capture_a_later_function() {
+//RS         let source = r#"#FFI(c) fn foreign() -> Int {
+//RS     """int64_t foreign(void) { return 1; }"""
+//RS }
+//RS 
+//RS fn ordinary(value: Int) {
+//RS     text :: """
+//RS value={value}
+//RS """
+//RS }"#;
+//RS         let (tokens, diagnostics) = lex_raw(source);
+//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS         let strings = tokens
+//RS             .iter()
+//RS             .filter_map(|token| match &token.kind {
+//RS                 TokKind::Str(parts) => Some(parts),
+//RS                 _ => None,
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         assert_eq!(strings.len(), 2);
+//RS         assert!(matches!(strings[0].as_slice(), [StrTokPart::Lit(_)]));
+//RS         assert!(
+//RS             strings[1]
+//RS                 .iter()
+//RS                 .any(|part| matches!(part, StrTokPart::Interp(_))),
+//RS             "{strings:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn grouped_ffi_marker_keeps_foreign_body_raw() {
+//RS         let source = r#"#[Unsafe("scalar registers"), FFI(asm)]
+//RS fn add(a: Int, b: Int) -> Int {
+//RS     """add {a}, {b} ; -> return"""
+//RS }"#;
+//RS         let (tokens, diagnostics) = lex_raw(source);
+//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS         let body = tokens.iter().find_map(|token| match &token.kind {
+//RS             TokKind::Str(parts)
+//RS                 if matches!(parts.as_slice(), [StrTokPart::Lit(text)] if text.contains("-> return")) =>
+//RS             {
+//RS                 Some(parts)
+//RS             }
+//RS             _ => None,
+//RS         });
+//RS         assert!(body.is_some(), "{tokens:?}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn adjacent_ffi_markers_keep_foreign_body_raw_in_both_orders() {
+//RS         for source in [
+//RS             "#Unsafe(\"registers\") #FFI(asm) fn add() { \"\"\"add {a}, {b}\"\"\" }",
+//RS             "#FFI(asm) #Unsafe(\"registers\") fn add() { \"\"\"add {a}, {b}\"\"\" }",
+//RS         ] {
+//RS             let (tokens, diagnostics) = lex_raw(source);
+//RS             assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS             assert!(tokens.iter().any(|token| matches!(
+//RS                 &token.kind,
+//RS                 TokKind::Str(parts)
+//RS                     if matches!(parts.as_slice(), [StrTokPart::Lit(text)] if text == "add {a}, {b}")
+//RS             )), "{tokens:?}");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn grouped_ffi_argument_name_does_not_make_an_ordinary_body_raw() {
+//RS         let source =
+//RS             "#[Meta(category: FFI(asm)), Task] fn work() { text :: \"\"\"\nvalue={value}\n\"\"\" }";
+//RS         let (tokens, diagnostics) = lex_raw(source);
+//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS         assert!(
+//RS             tokens.iter().any(|token| matches!(
+//RS                 &token.kind,
+//RS                 TokKind::Str(parts)
+//RS                     if parts.iter().any(|part| matches!(part, StrTokPart::Interp(_)))
+//RS             )),
+//RS             "{tokens:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_head_bodies_keep_backslashes_and_shared_holes_but_plain_strings_decode_them() {
+//RS         let source = r#"plain :: "\n"
+//RS pattern :: Regex.{"\n{{literal}}-{value}"}
+//RS multiline :: Path.{"""
+//RS \logs\app
+//RS """}"#;
+//RS         let (tokens, diagnostics) = lex_raw(source);
+//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS         let strings = tokens
+//RS             .iter()
+//RS             .filter_map(|token| match &token.kind {
+//RS                 TokKind::Str(parts) => Some(parts),
+//RS                 _ => None,
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         assert_eq!(strings.len(), 3);
+//RS         assert!(matches!(
+//RS             strings[0].as_slice(),
+//RS             [StrTokPart::Lit(text)] if text == "\n"
+//RS         ));
+//RS         assert!(matches!(
+//RS             strings[1].as_slice(),
+//RS             [StrTokPart::Lit(text), StrTokPart::Interp(_)] if text == "\\n{literal}-"
+//RS         ));
+//RS         assert!(matches!(
+//RS             strings[2].as_slice(),
+//RS             [StrTokPart::Lit(text)] if text == "\\logs\\app"
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_head_lookbehind_preserves_comments_incomplete_and_byte_heads() {
+//RS         let prefix_count = 128;
+//RS         let mut source = String::new();
+//RS         for index in 0..prefix_count {
+//RS             source.push_str(&format!("prefix{index} :: \"prefix\"; "));
+//RS         }
+//RS         source.push_str(
+//RS             r#"
+//RS ordinary :: "\n"
+//RS raw_dot :: Regex /* block */ . // line comment
+//RS { /* block */ "\n" }
+//RS raw_name :: Regex /* block */ { // line comment
+//RS "\n" }
+//RS ordinary_lower :: regex /* block */ { /* block */ "\n" }
+//RS incomplete_raw :: Regex /* block */ . /* block */ "\n"
+//RS byte :: [ /* block */ U8 // line comment
+//RS ] /* block */ { /* block */ "\x41" }
+//RS byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* block */ { /* block */ "\x42" }
+//RS "#,
+//RS         );
+//RS         let (tokens, diagnostics) = lex_raw(&source);
+//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS         let strings = tokens
+//RS             .iter()
+//RS             .filter_map(|token| match &token.kind {
+//RS                 TokKind::Str(parts) => Some(parts),
+//RS                 _ => None,
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         assert_eq!(strings.len(), prefix_count + 7);
+//RS         let tail = &strings[prefix_count..];
+//RS         assert!(matches!(
+//RS             tail[0].as_slice(),
+//RS             [StrTokPart::Lit(text)] if text == "\n"
+//RS         ));
+//RS         assert!(matches!(
+//RS             tail[1].as_slice(),
+//RS             [StrTokPart::Lit(text)] if text == "\\n"
+//RS         ));
+//RS         assert!(matches!(
+//RS             tail[2].as_slice(),
+//RS             [StrTokPart::Lit(text)] if text == "\\n"
+//RS         ));
+//RS         assert!(matches!(
+//RS             tail[3].as_slice(),
+//RS             [StrTokPart::Lit(text)] if text == "\n"
+//RS         ));
+//RS         assert!(matches!(
+//RS             tail[4].as_slice(),
+//RS             [StrTokPart::Lit(text)] if text == "\n"
+//RS         ));
+//RS         assert!(matches!(tail[5].as_slice(), [StrTokPart::Byte(0x41)]));
+//RS         assert!(matches!(tail[6].as_slice(), [StrTokPart::Byte(0x42)]));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn at_distinguishes_prefix_package_ref_and_fence() {
+//RS         let (tokens, diagnostics) =
+//RS             lex_raw("foo@bar @baz T.@layout <:0, 1:> $build T.$layout a$b $[x]$");
+//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS         let kinds = tokens
+//RS             .into_iter()
+//RS             .map(|token| token.kind)
+//RS             .collect::<Vec<_>>();
+//RS         assert!(matches!(kinds[0], TokKind::Ident(ref name) if name == "foo"));
+//RS         assert!(matches!(kinds[1], TokKind::At));
+//RS         assert!(matches!(kinds[2], TokKind::Ident(ref name) if name == "bar"));
+//RS         assert!(matches!(kinds[3], TokKind::Ident(ref name) if name == "@baz"));
+//RS         assert!(matches!(kinds[4], TokKind::Ident(ref name) if name == "T"));
+//RS         assert!(matches!(kinds[5], TokKind::Dot));
+//RS         assert!(matches!(kinds[6], TokKind::Ident(ref name) if name == "@layout"));
+//RS         assert!(matches!(kinds[7], TokKind::FenceOpen));
+//RS         assert!(matches!(kinds[11], TokKind::FenceClose));
+//RS         assert!(matches!(kinds[12], TokKind::Ident(ref name) if name == "$build"));
+//RS         assert!(matches!(kinds[13], TokKind::Ident(ref name) if name == "T"));
+//RS         assert!(matches!(kinds[14], TokKind::Dot));
+//RS         assert!(matches!(kinds[15], TokKind::Ident(ref name) if name == "$layout"));
+//RS         // An adjacent `a$b` is not a fact read: `$` stays its own token.
+//RS         assert!(matches!(kinds[16], TokKind::Ident(ref name) if name == "a"));
+//RS         assert!(matches!(kinds[17], TokKind::Dollar));
+//RS         assert!(matches!(kinds[18], TokKind::Ident(ref name) if name == "b"));
+//RS         assert!(matches!(kinds[19], TokKind::Dollar));
+//RS         assert!(matches!(kinds[20], TokKind::LBracket));
+//RS         assert!(matches!(kinds[22], TokKind::RBracket));
+//RS         assert!(matches!(kinds[23], TokKind::Dollar));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn fence_digraphs_are_longest_match_beside_comparisons_and_generics() {
+//RS         let (tokens, diagnostics) =
+//RS             lex_raw("<: a :> x < y x <= y x <=> y x > y List<Int> a::b c:=d e:f");
+//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS         let kinds = tokens
+//RS             .into_iter()
+//RS             .map(|token| token.kind)
+//RS             .filter(|kind| !matches!(kind, TokKind::Ident(_) | TokKind::Eof))
+//RS             .collect::<Vec<_>>();
+//RS         assert!(
+//RS             matches!(
+//RS                 kinds.as_slice(),
+//RS                 [
+//RS                     TokKind::FenceOpen,
+//RS                     TokKind::FenceClose,
+//RS                     TokKind::Lt,
+//RS                     TokKind::Le,
+//RS                     TokKind::Compare,
+//RS                     TokKind::Gt,
+//RS                     TokKind::Lt,
+//RS                     TokKind::Gt,
+//RS                     TokKind::ColonColon,
+//RS                     TokKind::ColonEq,
+//RS                     TokKind::Colon,
+//RS                 ]
+//RS             ),
+//RS             "{kinds:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn retired_fence_digraphs_teach_the_new_spelling_with_edits() {
+//RS         let (tokens, diagnostics) = lex_raw("print(@[ a, b ]@) x:]@");
+//RS         let edits = diagnostics
+//RS             .iter()
+//RS             .map(|diagnostic| {
+//RS                 assert_eq!(diagnostic.code, "E-FENCE-SPELLING");
+//RS                 diagnostic.edit.as_ref().expect("fence respelling edit").new_text.clone()
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         assert_eq!(edits, ["<:", ":>", " :>"]);
+//RS         assert!(matches!(tokens[2].kind, TokKind::FenceOpen));
+//RS         assert!(matches!(tokens[6].kind, TokKind::FenceClose));
+//RS     }
+//RS }
+// END-PORT-PENDING 0317 crates/jet-lexer/src/Lexer/Scan.rs:1-1306
+

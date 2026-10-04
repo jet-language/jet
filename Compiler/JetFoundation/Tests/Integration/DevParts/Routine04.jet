@@ -1,0 +1,2056 @@
+// PORT-PENDING 1034 tests-dev-parts-routine-slice-5441: tests/dev_parts/routine.rs:5441-7492
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn resident_jit_safety_detail_smoke() {
+//RS     for stem in [
+//RS         "basics/compound",
+//RS         "basics/value_dispatch",
+//RS         "types/structs",
+//RS         "types/enums",
+//RS         "basics/branches",
+//RS         "concurrency/task_group",
+//RS     ] {
+//RS         let file = format!("Examples/features/{stem}.jet");
+//RS         let mut bundle = jet::Loader::load_entry(&file).expect("load");
+//RS         jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS         let detail = common::cranelift_resident_safe_detail(&bundle);
+//RS         let stmts = common::cranelift_main_stmts(&bundle);
+//RS         let funcs = common::cranelift_func_names(&bundle);
+//RS         eprintln!("{stem}: {detail}");
+//RS         if stem == "basics/value_dispatch" {
+//RS             eprintln!(
+//RS                 "  compile: {:?}",
+//RS                 common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS             );
+//RS         }
+//RS         if stem == "concurrency/task_group" {
+//RS             let (sites, lams) = common::cranelift_spawn_stats(&bundle);
+//RS             eprintln!("  spawn: {sites} sites / {lams} lambdas");
+//RS             eprintln!(
+//RS                 "  uncovered: {:?}",
+//RS                 common::cranelift_uncovered_detail(&bundle)
+//RS             );
+//RS         }
+//RS         eprintln!("  funcs: {}", funcs.join(", "));
+//RS         eprintln!("  main: {}", stmts.join(", "));
+//RS         for c in common::cranelift_mixed_switch_conds(&bundle) {
+//RS             eprintln!("  mixed: {c}");
+//RS         }
+//RS         for fn_name in ["show", "next", "label", "describe"] {
+//RS             match common::cranelift_func_safety(&bundle, fn_name) {
+//RS                 jet_jit::ResidentJitSafety::Covered => {}
+//RS                 jet_jit::ResidentJitSafety::Gap(d) | jet_jit::ResidentJitSafety::Unavailable(d) => {
+//RS                     eprintln!("  {fn_name}: {d}");
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Err(e) = common::compile_cranelift_bundle(&bundle, &common::development_policy()) {
+//RS             eprintln!("  compile: {e}");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_safe_labeled_loop_control() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     outer :: loop i in 0..<2 {
+//RS         loop {
+//RS             if i == 0 {
+//RS                 next(outer)
+//RS             }
+//RS             break(outer)
+//RS         }
+//RS     }
+//RS     print("done")
+//RS }
+//RS "#;
+//RS     assert_eq!(
+//RS         run_cranelift_without_fallback(src, "labeled_loop_control"),
+//RS         ProgramOutput::ran("done\n".into(), "".into(), 0)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_named_or_fallback_loop_control() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     values := [7]
+//RS     outer :: loop i in 0..<2 {
+//RS         loop {
+//RS             value :: values.get(1 - i) ?? next(outer)
+//RS             print(value)
+//RS             values.get(99) ?? break(outer)
+//RS         }
+//RS     }
+//RS     print("done")
+//RS }
+//RS "#;
+//RS     assert_eq!(
+//RS         run_cranelift_without_fallback(src, "named_or_fallback_loop_control"),
+//RS         ProgramOutput::ran("7\ndone\n".into(), "".into(), 0)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_safe_increment_decrement() {
+//RS     // Front-end work belongs on Jet's canonical compiler worker
+//RS     // (`jet_foundation::CompilerStack::COMPILER_STACK_SIZE`, 64 MiB), the same
+//RS     // hop `with_jit_test_scope` makes. TIR lowering is a mutually recursive
+//RS     // descent whose debug frames are enormous — `lower_method_call_impl`
+//RS     // 528 KiB, `lower_expr_inner` 272 KiB, `lower_stmt_plan` 256 KiB — so
+//RS     // roughly two levels of method nesting exhaust libtest's 2 MiB worker
+//RS     // stack. Reaching the front end straight from a test thread aborts the
+//RS     // whole binary (SIGABRT), which reports every other in-flight test in
+//RS     // this file as failed.
+//RS     jet::run_compiler_work(|| {
+//RS         let file = "Examples/features/basics/increment.jet";
+//RS         let mut bundle = jet::Loader::load_entry(file).expect("load");
+//RS         let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS         let errors: Vec<_> = diags
+//RS             .into_iter()
+//RS             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS             .collect();
+//RS         assert!(errors.is_empty(), "increment example must type-check");
+//RS         assert!(
+//RS             common::cranelift_resident_safe(&bundle),
+//RS             "prefix/postfix ++/-- should stay JIT-covered: {}",
+//RS             common::cranelift_resident_safe_detail(&bundle)
+//RS         );
+//RS     });
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_safe_named_tuples() {
+//RS     // Compiler worker required; see `resident_jit_safe_increment_decrement`.
+//RS     jet::run_compiler_work(|| {
+//RS         let file = "Examples/features/basics/tuples.jet";
+//RS         let mut bundle = jet::Loader::load_entry(file).expect("load");
+//RS         let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS         let errors: Vec<_> = diags
+//RS             .into_iter()
+//RS             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS             .collect();
+//RS         assert!(errors.is_empty(), "tuple example must type-check");
+//RS         assert!(
+//RS             common::cranelift_resident_safe(&bundle),
+//RS             "named tuple literal/access/equality/destructure should stay JIT-covered: {}",
+//RS             common::cranelift_resident_safe_detail(&bundle)
+//RS         );
+//RS     });
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_safe_zip_family() {
+//RS     // Compiler worker required; see `resident_jit_safe_increment_decrement`.
+//RS     jet::run_compiler_work(|| {
+//RS         let file = "Examples/features/collections/zip_family.jet";
+//RS         let mut bundle = jet::Loader::load_entry(file).expect("zip family example");
+//RS         let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS         let errors: Vec<_> = diags
+//RS             .into_iter()
+//RS             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS             .collect();
+//RS         assert!(
+//RS             errors.is_empty(),
+//RS             "zip family example must type-check: {errors:#?}"
+//RS         );
+//RS         assert!(
+//RS             common::cranelift_resident_safe(&bundle),
+//RS             "zip family must stay resident-safe: {}",
+//RS             common::cranelift_resident_safe_detail(&bundle)
+//RS         );
+//RS         common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS             .unwrap_or_else(|reason| panic!("zip family must JIT-compile: {reason}"));
+//RS     });
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_safe_chained_comparison() {
+//RS     // Compiler worker required; see `resident_jit_safe_increment_decrement`.
+//RS     jet::run_compiler_work(|| {
+//RS         let file = "Examples/features/operators/chained_comparison.jet";
+//RS         let mut bundle = jet::Loader::load_entry(file).expect("load");
+//RS         let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS         let errors: Vec<_> = diags
+//RS             .into_iter()
+//RS             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS             .collect();
+//RS         assert!(
+//RS             errors.is_empty(),
+//RS             "chained comparison example must type-check"
+//RS         );
+//RS         assert!(
+//RS             common::cranelift_resident_safe(&bundle),
+//RS             "same-direction chained comparisons should stay JIT-covered: {}",
+//RS             common::cranelift_resident_safe_detail(&bundle)
+//RS         );
+//RS     });
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_safe_user_operator_traits() {
+//RS     let file = "Examples/features/operators/user_defined.jet";
+//RS     let mut bundle = jet::Loader::load_entry(file).expect("load");
+//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     let errors: Vec<_> = diags
+//RS         .into_iter()
+//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(
+//RS         errors.is_empty(),
+//RS         "user operator example must type-check: {errors:#?}"
+//RS     );
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "user operators should stay JIT-covered: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS     let src = fs::read_to_string(file).expect("operator example");
+//RS     let output = run_cranelift_without_fallback(&src, "user_operator_traits");
+//RS     assert_eq!(
+//RS         output,
+//RS         ProgramOutput::ran("4,6 4,6 true true false\n".into(), "".into(), 0)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_safe_string_method_chain() {
+//RS     let file = "Examples/features/basics/method_chain.jet";
+//RS     let mut bundle = jet::Loader::load_entry(file).expect("load");
+//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     let errors: Vec<_> = diags
+//RS         .into_iter()
+//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(errors.is_empty(), "method-chain example must type-check");
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "pure string method chains should stay JIT-covered: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS }
+//RS 
+//RS /// The corpus gate has no live run-tier parity failures.
+//RS #[test]
+//RS fn run_tier_parity_guard() {
+//RS     let run_gaps = corpus_gate_run_gaps(&parse_corpus_gate_manifest());
+//RS     assert!(
+//RS         run_gaps.is_empty(),
+//RS         "JIT run-tier parity has {} gap(s):\n{}",
+//RS         run_gaps.len(),
+//RS         run_gaps.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS /// #1760: the two serde stems stay green — and each pin claims only what a
+//RS /// ledger can actually prove about that stem.
+//RS ///
+//RS /// The old run-tier pin demanded `resident_jit:` for BOTH stems. That was true
+//RS /// the day it was written (`af3201409`) and is not true now, and neither half of
+//RS /// the change was a regression this test could have caught:
+//RS ///
+//RS /// * `d1aaf936e` rewrote error handling across 39 net and serde examples one day
+//RS ///   AFTER the gate last moved, so the `resident_jit:` rows for those stems were
+//RS ///   never re-observed. `f7aab7bf8` re-derived the ledger from an observed run
+//RS ///   (374 -> 496 rows, 122 stems previously in no section at all) and recorded
+//RS ///   what the tiers actually do: `serde/encoding_breadth` is `frontend_rejected:`
+//RS ///   on the E2402 error-conversion family, and `serde/serde_generic` is an
+//RS ///   `deopt_interp:` row.
+//RS /// * Nothing ran this test in between. `dev` belonged to no named target set
+//RS ///   until `tests/suites.txt` landed, so the pin went stale silently — the same
+//RS ///   shape as the `compile_covered` claim described below.
+//RS ///
+//RS /// So the pin is re-stated against the OBSERVED classification, and only in the
+//RS /// directions the gate's own ratchet allows. `run_tier_broken:` and
+//RS /// `tier_divergent:` are shrink-only and both are currently EMPTY, so "neither
+//RS /// stem may be a refusal or a divergence" can only ever get easier to satisfy —
+//RS /// it is a real parity claim, not a restatement of today's row. A bare
+//RS /// `deopt_interp:` row is a TIER CHOICE; the gate treats a detail-carrying one as
+//RS /// FAILING, so the empty-detail pin below is the
+//RS /// assertion that actually catches a `serde/serde_generic` regression, and it is
+//RS /// stricter than the class pin it replaces.
+//RS ///
+//RS /// Compile coverage is owned by `jit_coverage_audit`; this test only pins the
+//RS /// two serde rows' observed run-tier classification.
+//RS #[test]
+//RS fn serde_jit_parity_manifest_pins() {
+//RS     let gate = parse_corpus_gate_manifest();
+//RS     for stem in ["serde/encoding_breadth", "serde/serde_generic"] {
+//RS         // Accounted for exactly once. A ghost row, a duplicate, or a stem that
+//RS         // dropped out of the file entirely would otherwise make every claim
+//RS         // below vacuously true.
+//RS         let rows: Vec<_> = gate.iter().filter(|record| record.stem == stem).collect();
+//RS         assert_eq!(
+//RS             rows.len(),
+//RS             1,
+//RS             "{stem} must carry exactly one corpus-gate row, found {}",
+//RS             rows.len()
+//RS         );
+//RS         let record = rows[0];
+//RS         // The parity claim, on the two sections that mean a tier disagreed.
+//RS         assert!(
+//RS             !matches!(
+//RS                 record.class,
+//RS                 CorpusGateClass::RunTierBroken | CorpusGateClass::TierDivergent
+//RS             ),
+//RS             "{stem} became a run-tier refusal or a tier divergence: {:?} {}",
+//RS             record.class,
+//RS             record.detail
+//RS         );
+//RS         // A tier choice carries no diagnostic; a failure does.
+//RS         if record.class == CorpusGateClass::DeoptInterp {
+//RS             assert!(
+//RS                 record.detail.is_empty(),
+//RS                 "{stem} deopts to the interpreter CARRYING a diagnostic: {}",
+//RS                 record.detail
+//RS             );
+//RS         }
+//RS         // #2018: E2402 is repaired — the core-error family ships one
+//RS         // `impl <CoreError> => Err` on the D-FAIL-CONV2=A rail — so this branch
+//RS         // retires exactly as its previous note said it would. It used to ALLOW a
+//RS         // `frontend_rejected:` row for this stem as long as the reason was the
+//RS         // known E2402 error-conversion gap. There is no longer a known reason to
+//RS         // allow, so the allowance becomes the flat law: a shipped example that
+//RS         // the front end rejects is a defect, and naming it here is stronger than
+//RS         // the conditional it replaces.
+//RS         assert!(
+//RS             record.class != CorpusGateClass::FrontendRejected,
+//RS             "{stem} is frontend-rejected: {}. The E2402 error-conversion gap that \
+//RS              once excused this row is fixed (D-FAIL-CONV2=A), so a rejection here \
+//RS              is a live defect, not the known one",
+//RS             record.detail
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// c139 M3: string interpolation builds the same stdout as the interpreter.
+//RS #[test]
+//RS fn cranelift_covers_string_interpolation() {
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn run() {\n    n := 7\n    print(\"value {n}\")\n}\n",
+//RS         "str_interp",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn cranelift_covers_shield_region() {
+//RS     let out = run_cranelift_without_fallback(
+//RS         "fn run() {\n    #Shield {\n        print(7)\n    }\n}\n",
+//RS         "shield_region",
+//RS     );
+//RS     assert_eq!(out.stdout, "7\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
+//RS     // Prefer resident JIT; silent deopt to the interpreter is still I9-legal
+//RS     // when a nested Shield/channel shape is outside the resident subset.
+//RS     // `ch`/`ack_sender` cross into the task as bare captures, so they must be
+//RS     // `::` bindings: a `:=` binding is a changeable alias the owner could still
+//RS     // write, and D-CONC-FREEZE1=A refuses that crossing with E1101 before the
+//RS     // program ever runs. `::` is what every `Examples/features/concurrency`
+//RS     // channel fixture uses; `^`/`freeze` are for values that really are owned
+//RS     // away or snapshotted, which is not what this test is about.
+//RS     with_jit_test_scope(|| {
+//RS         let out = run_cranelift_outcome(
+//RS             r#"use core.tasks as tasks
+//RS fn run() {
+//RS     (sender, ch) :: channel<Int>()
+//RS     (ack_sender, ack) :: channel<Int>()
+//RS     slow :: task {
+//RS                #Shield {
+//RS                    value :: ch.receive() ?? panic("closed")
+//RS                    print(value)
+//RS                    ack_sender.send(1)
+//RS                }
+//RS                print(99)
+//RS        }
+//RS     slow.cancel()
+//RS     slow.detach()
+//RS     sender.send(42)
+//RS     ack.receive() ?? panic("closed")
+//RS }
+//RS "#,
+//RS             "shield_cancel",
+//RS         );
+//RS         assert_eq!(out.stdout, "42\n");
+//RS     });
+//RS }
+//RS 
+//RS #[test]
+//RS fn cranelift_unshielded_receive_cancel_does_not_unwind_native_frame() {
+//RS     let out = run_cranelift_without_fallback(
+//RS         r#"use core.tasks as tasks
+//RS fn run() {
+//RS     (ready_sender, ready) :: channel<Int>()
+//RS     (sender, ch) :: channel<Int>()
+//RS     slow :: task {
+//RS         ready_sender.send(1)
+//RS         ch.receive() ?? panic("closed")
+//RS         print(99)
+//RS     }
+//RS     ready.receive() ?? panic("closed")
+//RS     slow.cancel()
+//RS     slow.detach()
+//RS     sender.send(42)
+//RS }
+//RS "#,
+//RS         "unshielded_receive_cancel",
+//RS     );
+//RS     assert_eq!(out.stdout, "");
+//RS }
+//RS 
+//RS #[test]
+//RS fn cranelift_unshielded_sleep_cancel_does_not_unwind_native_frame() {
+//RS     let out = run_cranelift_without_fallback(
+//RS         r#"use core.tasks as tasks
+//RS use core.time as time
+//RS fn run() {
+//RS     (ready_sender, ready) :: channel<Int>()
+//RS     slow :: task {
+//RS         ready_sender.send(1)
+//RS         time.sleep(200ms)
+//RS         print(99)
+//RS     }
+//RS     ready.receive() ?? panic("closed")
+//RS     slow.cancel()
+//RS     slow.detach()
+//RS }
+//RS "#,
+//RS         "unshielded_sleep_cancel",
+//RS     );
+//RS     assert_eq!(out.stdout, "");
+//RS }
+//RS 
+//RS #[test]
+//RS fn cranelift_unshielded_select_cancel_does_not_unwind_native_frame() {
+//RS     let out = run_cranelift_without_fallback(
+//RS         r#"use core.tasks as tasks
+//RS fn select_cancel_worker(ready_sender: Sender<Int>) {
+//RS     task.group worker {
+//RS         (_sender, ch) :: channel<Int>()
+//RS         ready_sender.send(1)
+//RS         if {
+//RS             value, ch -> print(value)
+//RS         }
+//RS         print(99)
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     task.group g {
+//RS     (ready_sender, ready) :: channel<Int>()
+//RS         slow :: task select_cancel_worker(ready_sender)
+//RS         ready.receive() ?? panic("closed")
+//RS         slow.cancel()
+//RS     }
+//RS }
+//RS "#,
+//RS         "unshielded_select_cancel",
+//RS     );
+//RS     assert_eq!(out.stdout, "");
+//RS }
+//RS 
+//RS #[test]
+//RS fn cranelift_wait_failures_recover_as_typed_task_failures() {
+//RS     let join_cancelled = r#"use core.time as time
+//RS fn failure_label(error: TaskFailure) -> String {
+//RS     if error == {
+//RS         .Cancelled -> { return "cancelled" }
+//RS         .DeadlineBlown -> { return "deadline" }
+//RS         .Panicked(_) -> { return "panicked" }
+//RS     }
+//RS }
+//RS fn run() {
+//RS     child :: task {
+//RS         time.sleep(200ms)
+//RS     }
+//RS     child.cancel()
+//RS     result :: child.join()
+//RS     if result == {
+//RS         .Err(error) -> { print(failure_label(error)) }
+//RS         .Ok(_) -> { print("wrong cancellation") }
+//RS     }
+//RS }
+//RS "#;
+//RS     let RunOutcome::Ran {
+//RS         stdout,
+//RS         stderr,
+//RS         exit_code,
+//RS     } = run_cranelift_outcome_without_fallback(join_cancelled, "join_cancelled")
+//RS     else {
+//RS         panic!("joining a cancelled task must recover as TaskFailure.Cancelled")
+//RS     };
+//RS     assert_eq!(stdout, "cancelled\n");
+//RS     assert!(stderr.is_empty());
+//RS     assert_eq!(exit_code, 0);
+//RS }
+//RS 
+//RS /// #1486 / I9: task-group rich panic under default jet run must match AOT golden
+//RS /// stderr (full panic block + typed TaskFailure panic), including after a warm
+//RS /// re-invoke that reinstalls compile-time string handles.
+//RS #[test]
+//RS fn all_failfast_jit_stderr_matches_aot_golden() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let file = "Examples/features/concurrency/all_failfast.jet";
+//RS     let expected =
+//RS         fs::read_to_string("Examples/features/expected/concurrency/all_failfast.err.out")
+//RS             .expect("all_failfast.err.out");
+//RS     // Two invokes: first compiles; second proves reset_run_heap still resolves
+//RS     // rich-panic string handles on the same resident module.
+//RS     for _ in 0..2 {
+//RS         let got = match dev_iteration(file, false, false) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS             RunOutcome::Problems(ds) => panic!("all_failfast must Ran via JIT, got: {ds:?}"),
+//RS         };
+//RS         assert_eq!(got.exit_code, 70, "exit");
+//RS         assert_eq!(got.stderr, expected, "stderr");
+//RS         assert!(got.stdout.is_empty(), "stdout");
+//RS     }
+//RS }
+//RS 
+//RS /// c139 M3: checked integer arithmetic with overflow traps.
+//RS #[test]
+//RS fn cranelift_covers_checked_arithmetic() {
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn run() {\n    a := 10\n    b := 3\n    print(a + b)\n    print(a * b)\n    print(a - b)\n}\n",
+//RS         "arith",
+//RS     );
+//RS }
+//RS 
+//RS /// c139 M3: `let` chains and plain `if`/`else`.
+//RS #[test]
+//RS fn cranelift_covers_let_and_if() {
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn run() {\n    n := 5\n    if n > 3 {\n        print(1)\n    } else {\n        print(0)\n    }\n    m := n + 1\n    print(m)\n}\n",
+//RS         "let_if",
+//RS     );
+//RS }
+//RS 
+//RS /// c139 M3: calls between JIT-covered helper functions.
+//RS #[test]
+//RS fn cranelift_covers_function_calls() {
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn double(n: Int) -> Int {\n    return n * 2\n}\nfn run() {\n    print(double(3))\n    print(double(0))\n}\n",
+//RS         "calls",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn multi_head_functions_match_interpreter_resident_jit_and_aot() {
+//RS     require_multi_head_parity_prereqs();
+//RS     let src = "\
+//RS enum Shape {
+//RS     Circle(Float)
+//RS     Rect(left_1: Float, right_1: Float)
+//RS }
+//RS fn area(Circle(r: Float)) -> Float { return r * r }
+//RS fn area(Rect(left_1: Float, right_1: Float)) -> Float { return left_1 * right_1 }
+//RS fn run() {
+//RS     print(area(Shape.Circle(3.0)))
+//RS     print(area(.Rect{ left_1: 2.0, right_1: 4.0 }))
+//RS }
+//RS ";
+//RS     let dir = std::env::temp_dir().join(format!("jet_multi_head_parity_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("multi_head.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS 
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("interpreter failed multi-head functions: {diags:?}"),
+//RS     };
+//RS     let jit = run_cranelift_resident(src, "multi_head_functions");
+//RS     let default_dev = run_default_dev_resident(&shown, "multi_head_default_dev");
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "multi_head_functions",
+//RS         0,
+//RS         "multi_head_functions",
+//RS         &shown,
+//RS     );
+//RS     let cli_run = run_cli_default_resident("run", &shown, "multi_head_cli_run");
+//RS     let cli_dev = run_cli_default_resident("dev", &shown, "multi_head_cli_dev");
+//RS     assert_eq!(
+//RS         default_dev, interpreted,
+//RS         "default dev/JIT drifted from interpreter"
+//RS     );
+//RS     assert_eq!(jit, interpreted, "resident JIT drifted from interpreter");
+//RS     assert_eq!(aot, interpreted, "AOT drifted from interpreter");
+//RS     assert_eq!(
+//RS         cli_run, interpreted,
+//RS         "default `jet run` drifted from interpreter"
+//RS     );
+//RS     assert_eq!(
+//RS         cli_dev, interpreted,
+//RS         "default `jet dev` drifted from interpreter"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn value_position_enum_patterns_match_all_execution_tiers() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     for stem in [
+//RS         "tooling/branch_dispatch_bench",
+//RS         "types/enum_dot",
+//RS         "types/enum_dot_patterns",
+//RS         "types/enums",
+//RS     ] {
+//RS         let file = example_path(stem);
+//RS         let expected = golden_program_output(stem);
+//RS         let interpreted = match dev_iteration(&file, false, true) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS             RunOutcome::Problems(diags) => {
+//RS                 panic!("{stem} must run in the TIR interpreter: {diags:?}")
+//RS             }
+//RS         };
+//RS         let default_dev = run_default_dev_resident(&file, &format!("{stem}_default"));
+//RS         let cli_run = run_cli_default_resident("run", &file, &format!("{stem}_cli"));
+//RS         let dir = common::unique_tmp(&format!("jet_{stem}_aot"));
+//RS         let aot = compiled_binary_output(&dir, "value_pattern", 0, stem, &file);
+//RS 
+//RS         assert_eq!(interpreted, expected, "interpreter drifted for {stem}");
+//RS         assert_eq!(
+//RS             default_dev, expected,
+//RS             "default resident JIT drifted for {stem}"
+//RS         );
+//RS         assert_eq!(cli_run, expected, "default `jet run` drifted for {stem}");
+//RS         assert_eq!(aot, expected, "AOT drifted for {stem}");
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn multi_head_payload_range_checks_each_slot_across_runtime_tiers() {
+//RS     require_multi_head_parity_prereqs();
+//RS     let src = r#"enum Pair {
+//RS     Values(left: Int, right: Int)
+//RS     Empty
+//RS }
+//RS fn classify(pair: Pair) -> String {
+//RS     if pair == {
+//RS         .Values(_, 10..19) -> { return "range" }
+//RS         .Values(_, _) -> { return "other" }
+//RS         .Empty -> { return "empty" }
+//RS     }
+//RS     return "unknown"
+//RS }
+//RS fn run() {
+//RS     print(classify(.Values{ left: 1, right: 15 }))
+//RS     print(classify(.Values{ left: 1, right: 25 }))
+//RS }
+//RS "#;
+//RS     let dir = common::unique_tmp("jet_multi_head_payload_range");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("multi_head_payload_range.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let shown = file.to_string_lossy().into_owned();
+//RS 
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("interpreter failed payload-range fixture: {diags:?}")
+//RS         }
+//RS     };
+//RS     let jit = run_cranelift_resident(src, "multi_head_payload_range");
+//RS     let default_dev = run_default_dev_resident(&shown, "multi_head_payload_range_default_dev");
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "multi_head_payload_range",
+//RS         0,
+//RS         "multi_head_payload_range",
+//RS         &shown,
+//RS     );
+//RS     let expected = ProgramOutput::ran("range\nother\n".into(), String::new(), 0);
+//RS     assert_eq!(
+//RS         interpreted, expected,
+//RS         "interpreter payload-range slot drifted"
+//RS     );
+//RS     assert_eq!(jit, expected, "resident JIT payload-range slot drifted");
+//RS     assert_eq!(
+//RS         default_dev, expected,
+//RS         "default dev/JIT payload-range slot drifted"
+//RS     );
+//RS     assert_eq!(aot, expected, "AOT payload-range slot drifted");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn multi_head_missing_head_e0307_reaches_all_diagnostic_entries() {
+//RS     let file =
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/multi_head_not_exhaustive.jet");
+//RS     let shown = file.to_string_lossy().into_owned();
+//RS     let src = fs::read_to_string(&file).unwrap();
+//RS     let snapshot = fs::read_to_string(
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/multi_head_not_exhaustive.stderr"),
+//RS     )
+//RS     .unwrap();
+//RS     const SNAPSHOT_FILE: &str = "tests/ui/multi_head_not_exhaustive.jet";
+//RS 
+//RS     require_multi_head_parity_prereqs();
+//RS     let entries = multi_head_diagnostic_entries(&shown, &src);
+//RS     let expected = diagnostic_shapes(&entries.sema);
+//RS     assert_eq!(
+//RS         expected.len(),
+//RS         1,
+//RS         "missing-head fixture must produce exactly one diagnostic: {expected:?}"
+//RS     );
+//RS     assert_eq!(expected[0].code, "E0307");
+//RS     assert_eq!(
+//RS         jet::render_diagnostics(SNAPSHOT_FILE, &src, &entries.sema),
+//RS         snapshot,
+//RS         "the sema diagnostic must match the checked-in UI snapshot"
+//RS     );
+//RS     for command in ["run", "dev"] {
+//RS         assert_cli_diagnostic_snapshot(command, SNAPSHOT_FILE, &snapshot);
+//RS     }
+//RS 
+//RS     for (tier, diags) in [
+//RS         ("sema", RunOutcome::Problems(entries.sema)),
+//RS         ("AOT", RunOutcome::Problems(entries.aot)),
+//RS         ("resident JIT", entries.jit),
+//RS         ("default dev", entries.default_dev),
+//RS         (
+//RS             "forced interpreter diagnostic gate",
+//RS             entries.interpreter_gate,
+//RS         ),
+//RS     ] {
+//RS         let RunOutcome::Problems(diags) = diags else {
+//RS             panic!("{tier} entry must reject missing multi-head coverage")
+//RS         };
+//RS         assert_eq!(
+//RS             diagnostic_shapes(&diags),
+//RS             expected,
+//RS             "{tier} diagnostic code/text/span drifted from sema"
+//RS         );
+//RS         assert_eq!(
+//RS             jet::render_diagnostics(SNAPSHOT_FILE, &src, &diags),
+//RS             snapshot,
+//RS             "{tier} rendered diagnostic drifted from the UI snapshot"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         entries.forced_interpreter,
+//RS         ProgramOutput::ran("first\n".into(), String::new(), 0),
+//RS         "successful forced interpreter entry must reach InterpreterBackend and keep first-head order"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn multi_head_duplicate_head_l0301_keeps_first_match_across_runtime_tiers() {
+//RS     require_multi_head_parity_prereqs();
+//RS     let file =
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui_lint/multi_head_unreachable.jet");
+//RS     let shown = file.to_string_lossy().into_owned();
+//RS     let src = fs::read_to_string(&file).unwrap();
+//RS     let dir = common::unique_tmp("jet_multi_head_duplicate_head");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS 
+//RS     let mut bundle = jet::Loader::load_entry(&shown).expect("duplicate-head fixture should load");
+//RS     let sema = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         sema.iter().any(|diagnostic| diagnostic.code == "L0301"),
+//RS         "sema must retain duplicate-head lint: {sema:?}"
+//RS     );
+//RS     let compiled = jet::compile_with_path(&src, &shown)
+//RS         .expect("duplicate-head lint must not block AOT compilation");
+//RS     assert!(
+//RS         compiled
+//RS             .lints
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "L0301"),
+//RS         "AOT entry lost duplicate-head lint: {:?}",
+//RS         compiled.lints
+//RS     );
+//RS 
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("interpreter rejected duplicate-head fixture: {diags:?}")
+//RS         }
+//RS     };
+//RS     let jit = run_cranelift_resident(&src, "multi_head_duplicate_head");
+//RS     let default_dev = run_default_dev_resident(&shown, "multi_head_duplicate_head_default_dev");
+//RS     let aot = compiled_binary_output(&dir, "multi_head_duplicate_head", 0, "multi_head", &shown);
+//RS     let cli_run = run_cli_default_resident("run", &shown, "multi_head_duplicate_head_cli_run");
+//RS     let cli_dev = run_cli_default_resident("dev", &shown, "multi_head_duplicate_head_cli_dev");
+//RS     let expected = ProgramOutput::ran("first\n".into(), String::new(), 0);
+//RS     assert_eq!(
+//RS         interpreted, expected,
+//RS         "interpreter first-head order drifted"
+//RS     );
+//RS     assert_eq!(jit, expected, "resident JIT first-head order drifted");
+//RS     assert_eq!(
+//RS         default_dev, expected,
+//RS         "default dev/JIT first-head order drifted"
+//RS     );
+//RS     assert_eq!(aot, expected, "AOT first-head order drifted");
+//RS     assert_eq!(
+//RS         cli_run, expected,
+//RS         "default `jet run` first-head order drifted"
+//RS     );
+//RS     assert_eq!(
+//RS         cli_dev, expected,
+//RS         "default `jet dev` first-head order drifted"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// The three plain parameter modes across a call boundary: `read` (by value),
+//RS /// `&` (write-back), and `^` (take).
+//RS ///
+//RS /// This was an `assert_cranelift_deopts_on_gap` case from the era when the
+//RS /// resident tier had no user-call write-back at all. It has one now — the
+//RS /// interpreter-side boundary right below this test only stays honest because
+//RS /// resolved user calls DO carry write-back — so the tier compiles this whole
+//RS /// body natively and correctly declines to deopt. The assertion follows the
+//RS /// coverage.
+//RS ///
+//RS /// The tier assertions are the point, not decoration (the `float_lists`
+//RS /// lesson): a re-opened write-back gap is silent, because the deopt still
+//RS /// prints the right answer. `jit_executed_for_test` proves the resident engine
+//RS /// ran it, the deopt/fallback pair proves no arm went back to the interpreter,
+//RS /// and the helper compares stdout against the pure-interpreter baseline, so a
+//RS /// write-back that lands in the wrong slot fails too.
+//RS #[test]
+//RS fn cranelift_matches_plain_parameter_read_write_and_take_modes() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     // The interpreter baseline inside the helper runs on `InterpreterBackend`,
+//RS     // which never touches these thread-local flags, so resetting here is safe.
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn read(text: String) { print(text) }\nfn edit(values: &[Int]) { values[0] = 9 }\nfn consume(text: ^String) { print(text) }\nfn run() {\n    text :: \"hello\"\n    values := [1, 2]\n    read(text)\n    edit(&values)\n    print(values[0])\n    consume(^text)\n}\n",
+//RS         "plain_parameter_modes",
+//RS     );
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "plain_parameter_modes must reach the resident Cranelift tier"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "plain_parameter_modes must stay native: a deopt here means read/&/^ \
+//RS          parameter passing left the resident tier"
+//RS     );
+//RS }
+//RS 
+//RS 
+//RS /// A fixed `&` write-back parameter beside a variadic pack, read inside the
+//RS /// callee (`extras.len()`).
+//RS ///
+//RS /// Same stale premise as `cranelift_matches_plain_parameter_read_write_and_take_modes`
+//RS /// above: this was an `assert_cranelift_deopts_on_gap` case from the era with
+//RS /// no resident user-call write-back, and the tier now compiles the whole body
+//RS /// natively, so it correctly declines to deopt. Native execution plus stdout
+//RS /// equality against the pure interpreter is strictly stronger than the old
+//RS /// deopt check, which never compared output at all: it catches both a
+//RS /// re-opened gap and a variadic count that arrives wrong in the callee.
+//RS #[test]
+//RS fn cranelift_matches_variadic_fixed_writeback() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn edit(values: &[Int], extras: ...Int) { values[0] = extras.len() }\nfn run() {\n    values := [0]\n    edit(&values, 7, 8)\n    print(values[0])\n}\n",
+//RS         "variadic_fixed_writeback",
+//RS     );
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "variadic_fixed_writeback must reach the resident Cranelift tier"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "variadic_fixed_writeback must stay native: a deopt here means variadic \
+//RS          calls with a write-back parameter left the resident tier"
+//RS     );
+//RS }
+//RS 
+//RS /// c139 M3+: range `loop i in source` with a compound assign in its body.
+//RS #[test]
+//RS fn cranelift_covers_counted_loop() {
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn run() {\n    sum := 0\n    loop i in 0..<5 {\n        sum += i\n    }\n    print(sum)\n}\n",
+//RS         "counted_loop",
+//RS     );
+//RS }
+//RS 
+//RS /// c139 M3+: `loop cond` while-form and compound assign.
+//RS #[test]
+//RS fn cranelift_covers_while_loop() {
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn run() {\n    fuel := 3\n    loop fuel > 0 {\n        print(fuel)\n        fuel -= 1\n    }\n}\n",
+//RS         "while_loop",
+//RS     );
+//RS }
+//RS 
+//RS /// c139 M3+: inclusive range loop.
+//RS #[test]
+//RS fn cranelift_covers_range_loop() {
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn run() {\n    loop n in 1..3 {\n        print(n)\n    }\n}\n",
+//RS         "range_loop",
+//RS     );
+//RS }
+//RS 
+//RS /// c139 M3+: short-circuit && / ||.
+//RS #[test]
+//RS fn cranelift_covers_logic_ops() {
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn run() {\n    a := true\n    b := false\n    if a && !b {\n        print(1)\n    }\n    if b || a {\n        print(2)\n    }\n}\n",
+//RS         "logic_ops",
+//RS     );
+//RS }
+//RS 
+//RS /// c139 M3: string literals and locals passed to `print`.
+//RS #[test]
+//RS fn cranelift_covers_string_print() {
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn run() {\n    msg := \"hello, jit\"\n    print(msg)\n    print(\"done\")\n}\n",
+//RS         "strings",
+//RS     );
+//RS }
+//RS 
+//RS /// c125 Phase 2 / #1995: Float list values use the shared JetArena list path.
+//RS ///
+//RS /// This was an `assert_cranelift_deopts_on_gap` case for as long as `xs[1..2]`
+//RS /// on a `[Float]` reached the int-only `jet_jit_list_slice`, which cloned
+//RS /// through `clone_int_list` and `.expect`ed inside its own `extern "C"` frame
+//RS /// — aborting the process. 9623985d0 made the window element-kind preserving,
+//RS /// which CLOSED that gap: the tier now compiles this whole body natively, so
+//RS /// it correctly declines to deopt. The assertion follows the coverage.
+//RS ///
+//RS /// The tier assertions are the point, not decoration. This defect class is
+//RS /// silent — Cranelift declines a function, the tier deopts, and the program
+//RS /// still prints the right answer — so an output-only check would pass again
+//RS /// the moment the gap re-opened. `jit_executed_for_test` proves the resident
+//RS /// engine ran it, and the deopt/fallback pair proves no arm of it went back
+//RS /// to the interpreter.
+//RS #[test]
+//RS fn cranelift_covers_float_lists() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     // The interpreter baseline inside the helper runs on `InterpreterBackend`,
+//RS     // which never touches these thread-local flags, so resetting here is safe.
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     assert_cranelift_matches_interpreter(
+//RS         "fn run() {\n    xs := [Float]{ 1.5, 2.5 }\n    xs.push(3.5)\n    print(xs.len())\n    print(xs[0])\n    xs[1] = 4.5\n    print(xs[1])\n    mid :: xs[1..2]\n    print(mid[0])\n}\n",
+//RS         "float_lists",
+//RS     );
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "float_lists must reach the resident Cranelift tier"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "float_lists must stay native: a deopt here means the float list gap re-opened"
+//RS     );
+//RS }
+//RS 
+//RS /// c125 Phase 2: records keep mixed scalar/String fields in JetArena.
+//RS #[test]
+//RS fn cranelift_covers_mixed_record_fields() {
+//RS     assert_cranelift_matches_interpreter(
+//RS         "struct Card {\n    name: String\n    score: Float\n    ready: Bool\n    mark: Char\n}\nfn run() {\n    c :: Card{name: \"jet\", score: 2.5, ready: true, mark: 'J'}\n    print(c.name)\n    print(c.score)\n    print(c.ready)\n    print(c.mark)\n}\n",
+//RS         "mixed_record_fields",
+//RS     );
+//RS }
+//RS 
+//RS /// c139 M2: type-stable hot_swap re-links in the resident JIT and preserves
+//RS /// live runtime state; restart tears it down.
+//RS #[test]
+//RS fn cranelift_hot_swap_preserves_live_state() {
+//RS     // One session, one thread. The resident module, the live heap and the
+//RS     // `#Persist` store are scoped to the thread, not to the call or to the
+//RS     // backend value (D-HOTSWAP1 / D-PERSIST1) -- `backend2` below re-links the
+//RS     // very session `backend` started. So the sized stack goes around the whole
+//RS     // session; `CraneliftBackend::run`'s own boundary then runs inline.
+//RS     with_jit_test_scope(cranelift_hot_swap_preserves_live_state_inner);
+//RS }
+//RS 
+//RS /// c125 P0 regression guard: a runtime stop under the default JIT backend
+//RS /// (list index OOB here; the same trapped-flag mechanism covers checked-arith
+//RS /// overflow and the two concurrency panic sites) must report cleanly — not
+//RS /// kill the resident process. The next hot-reload iteration in the SAME
+//RS /// process must then run cleanly, proving the trap didn't leak into the next
+//RS /// run's heap and the process is still alive to serve it. Before the fix,
+//RS /// every one of these host shims called `std::process::exit(70)` directly,
+//RS /// which took the whole `jet dev` server down with it.
+//RS ///
+//RS /// The reported shape is `Ran { exit_code: 70 }` carrying the registered
+//RS /// `Stop [E3010]`, NOT `Problems`. #1483 (0a291f5bb) retired the old
+//RS /// `Problems(E0953)` route precisely because a live-program trap is not a
+//RS /// comptime build failure; `jit_1216_adversarial_regressions` and
+//RS /// `uninit_fixed_dynamic_oob_uses_the_resident_jit_trap_path` pin the same
+//RS /// contract for the same OOB shape, and AOT `jet_panic` agrees (I9).
+//RS #[test]
+//RS fn cranelift_trap_then_hot_swap_continues() {
+//RS     // Session-scoped boundary; see `cranelift_hot_swap_preserves_live_state`.
+//RS     with_jit_test_scope(cranelift_trap_then_hot_swap_continues_inner);
+//RS }
+//RS 
+//RS /// The dev iteration surfaces front-end errors identically to batch
+//RS /// compilation (D-DEV: same diagnostics).
+//RS #[test]
+//RS fn front_end_errors_surface_in_dev_iteration() {
+//RS     // Write a broken program to a temp file.
+//RS     let dir = std::env::temp_dir();
+//RS     let file = dir.join("jet_dev_broken.jet");
+//RS     fs::write(&file, "fn run() {\n    print(nope)\n}\n").unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Problems(diags) => {
+//RS             assert!(!diags.is_empty(), "broken program must report problems");
+//RS             assert!(
+//RS                 diags
+//RS                     .iter()
+//RS                     .all(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
+//RS                 "dev should surface errors"
+//RS             );
+//RS         }
+//RS         RunOutcome::Ran { .. } => panic!("a broken program must not run"),
+//RS     }
+//RS }
+//RS 
+//RS /// A body-only edit keeps the type surface stable → swap (Ok).
+//RS #[test]
+//RS fn body_only_edit_is_type_stable() {
+//RS     let old = bundle_of(STRUCT_OLD, "stable_old");
+//RS     let new = bundle_of(
+//RS         "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x + 1\n}\nfn run() {\n    print(f(P{x: 2}))\n}\n",
+//RS         "stable_new",
+//RS     );
+//RS     let decision = jet::Sema::HotSwap::type_stable_decision(&old, &new, "run")
+//RS         .expect("body-only edit must produce a hot-swap decision");
+//RS     assert!(
+//RS         decision.is_compatible(),
+//RS         "a body-only edit must be type-stable (swap path): {decision:?}"
+//RS     );
+//RS }
+//RS 
+//RS /// Adding a struct field changes the surface → restart, with E2210 naming it.
+//RS #[test]
+//RS fn struct_field_change_emits_e2210() {
+//RS     let old = bundle_of(STRUCT_OLD, "field_old");
+//RS     let new = bundle_of(
+//RS         "struct P {\n    x: Int\n    y: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn run() {\n    print(f(P{x: 1, y: 2}))\n}\n",
+//RS         "field_new",
+//RS     );
+//RS     let decision = jet::Sema::HotSwap::type_stable_decision(&old, &new, "run")
+//RS         .expect("struct field change must produce a hot-swap decision");
+//RS     assert!(
+//RS         decision.requires_restart(),
+//RS         "adding a struct field must force a restart: {decision:?}"
+//RS     );
+//RS     let reason = decision
+//RS         .compatibility
+//RS         .reason()
+//RS         .expect("an incompatible decision must carry a restart reason");
+//RS     let diagnostic = jet::Sema::HotSwap::e2210(reason);
+//RS     assert_eq!(diagnostic.code, "E2210");
+//RS     assert!(
+//RS         diagnostic.what.contains("struct `P`"),
+//RS         "E2210 should name the changed struct, got: {}",
+//RS         diagnostic.what
+//RS     );
+//RS }
+//RS 
+//RS /// Changing a function's return type changes the surface → E2210.
+//RS #[test]
+//RS fn fn_signature_change_emits_e2210() {
+//RS     let old = bundle_of(
+//RS         "fn g(a: Int) -> Int {\n    return a\n}\nfn run() {\n    print(g(1))\n}\n",
+//RS         "sig_old",
+//RS     );
+//RS     let new = bundle_of(
+//RS         "fn g(a: Int) -> Bool {\n    return a == 0\n}\nfn run() {\n    print(g(1))\n}\n",
+//RS         "sig_new",
+//RS     );
+//RS     let decision = jet::Sema::HotSwap::type_stable_decision(&old, &new, "run")
+//RS         .expect("function signature change must produce a hot-swap decision");
+//RS     assert!(
+//RS         decision.requires_restart(),
+//RS         "a return-type change must force a restart: {decision:?}"
+//RS     );
+//RS     let reason = decision
+//RS         .compatibility
+//RS         .reason()
+//RS         .expect("an incompatible decision must carry a restart reason");
+//RS     let diagnostic = jet::Sema::HotSwap::e2210(reason);
+//RS     assert_eq!(diagnostic.code, "E2210");
+//RS     assert!(diagnostic.what.contains("return type"));
+//RS }
+//RS 
+//RS /// Adding an enum variant changes the surface → E2210.
+//RS #[test]
+//RS fn enum_variant_change_emits_e2210() {
+//RS     let old = bundle_of(
+//RS         "enum E {\n    A\n    B\n}\nfn run() {\n    print(1)\n}\n",
+//RS         "enum_old",
+//RS     );
+//RS     let new = bundle_of(
+//RS         "enum E {\n    A\n    B\n    C\n}\nfn run() {\n    print(1)\n}\n",
+//RS         "enum_new",
+//RS     );
+//RS     let decision = jet::Sema::HotSwap::type_stable_decision(&old, &new, "run")
+//RS         .expect("enum variant change must produce a hot-swap decision");
+//RS     assert!(
+//RS         decision.requires_restart(),
+//RS         "adding an enum variant must force a restart: {decision:?}"
+//RS     );
+//RS     let reason = decision
+//RS         .compatibility
+//RS         .reason()
+//RS         .expect("an incompatible decision must carry a restart reason");
+//RS     let diagnostic = jet::Sema::HotSwap::e2210(reason);
+//RS     assert_eq!(diagnostic.code, "E2210");
+//RS     assert!(diagnostic.what.contains("enum `E`"));
+//RS }
+//RS 
+//RS /// D-PERSIST-DEVSTATE1=A: release codegen lowers a writable `#Persist` binding
+//RS /// to the safe interior-mutable Prelude cell. The storage mechanism is shared
+//RS /// with dev-tier reload state; generated Rust only marshals reads and writes
+//RS /// through that cell.
+//RS #[test]
+//RS fn persist_binding_codegen_uses_safe_prelude_cell() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_persist_parity_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("counter.jet");
+//RS     let src = "#Persist counter := 0\nfn run() {\n    counter += 1\n    print(counter)\n}\n";
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy().to_string();
+//RS     let rust = jet::compile_with_path(src, &shown)
+//RS         .unwrap_or_else(|diags| {
+//RS             panic!(
+//RS                 "front end rejected fixture:\n{}",
+//RS                 jet::render_diagnostics(&shown, src, &diags)
+//RS             )
+//RS         })
+//RS         .rust;
+//RS     // The binding under test is `counter`. It reaches Rust through the single
+//RS     // naming law: `mangle("counter")` prefixes `GENERATED_NAME_PREFIX` (`__jet_`,
+//RS     // crates/jet-foundation/src/Syntax/predicates.rs:367) and `emit_const`
+//RS     // uppercases the result, so the generated slot is `__JET_COUNTER`. Name the
+//RS     // binding in the message because the dump also contains unconditional
+//RS     // harness statics.
+//RS     assert!(
+//RS         rust.contains("static __JET_COUNTER: JetPersistCell<i64> = JetPersistCell::new(0i64);"),
+//RS         "`#Persist counter := 0` must lower to a Prelude `JetPersistCell`:\n{rust}"
+//RS     );
+//RS     assert!(
+//RS         rust.contains("(__JET_COUNTER).set(jet_std::jet_int_add_hot(((__JET_COUNTER).get()), (1i64))!);"),
+//RS         "writes to `#Persist counter` must use the Prelude cell:\n{rust}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// D-MEM-COPYSEM1: a read of a folded list constant borrows its one shared
+//RS /// table (`JetSharedSlot`); passing it to a read parameter, indexing it or
+//RS /// taking its length never copies the rows.
+//RS #[test]
+//RS fn list_constant_reads_borrow_the_shared_table() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_shared_constant_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("table.jet");
+//RS     let rows = (0..400)
+//RS         .map(|index| {
+//RS             format!(
+//RS                 "    Row{{code: \"E{index:04}\", meaning: \"meaning number {index} padded so the table is large\"}},"
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     let src = [
+//RS         "struct Row {\n    code: String\n    meaning: String\n}\n\nROWS :: prep { [Row]{\n",
+//RS         rows.as_str(),
+//RS         "\n} }\n\nfn find_in(rows: [Row], code: String) -> Bool {\n    loop row in rows {\n        if row.code == code -> return true\n    }\n    false\n}\n\nfn run() {\n    if find_in(ROWS, \"E0399\") -> print(ROWS[3].meaning)\n    print(\"{ROWS.len()}\")\n}\n",
+//RS     ]
+//RS     .concat();
+//RS     fs::write(&path, &src).unwrap();
+//RS     let shown = path.to_string_lossy().to_string();
+//RS     let rust = jet::compile_with_path(&src, &shown)
+//RS         .unwrap_or_else(|diags| {
+//RS             panic!(
+//RS                 "front end rejected fixture:\n{}",
+//RS                 jet::render_diagnostics(&shown, &src, &diags)
+//RS             )
+//RS         })
+//RS         .rust;
+//RS     assert!(
+//RS         rust.contains("JetSharedSlot::new(std::rc::Rc::clone(value))"),
+//RS         "a list constant must hand reads its shared value:\n{rust}"
+//RS     );
+//RS     assert!(
+//RS         rust.contains("JetSharedSlot::empty()"),
+//RS         "a read of a list constant must hold the shared table, not a copy:\n{rust}"
+//RS     );
+//RS     assert!(
+//RS         rust.contains("ROWS_shared();"),
+//RS         "each read of a list constant must take the shared value, not a copy:\n{rust}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// The body of the emitted Jet function whose mangled name ends with `name`.
+//RS fn emitted_body<'a>(rust: &'a str, name: &str) -> &'a str {
+//RS     let start = rust
+//RS         .find(&format!("{name}(__jet_"))
+//RS         .unwrap_or_else(|| panic!("`{name}` was not emitted:\n{rust}"));
+//RS     let rest = &rust[start..];
+//RS     &rest[..rest.find("\n}\n").expect("emitted function has a closing brace")]
+//RS }
+//RS 
+//RS fn emitted_rust(file: &str, src: &str) -> String {
+//RS     let dir = std::env::temp_dir().join(format!("jet_{file}_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join(format!("{file}.jet"));
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy().to_string();
+//RS     let rust = jet::compile_with_path(src, &shown)
+//RS         .unwrap_or_else(|diags| {
+//RS             panic!(
+//RS                 "front end rejected fixture:\n{}",
+//RS                 jet::render_diagnostics(&shown, src, &diags)
+//RS             )
+//RS         })
+//RS         .rust;
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     rust
+//RS }
+//RS 
+//RS /// An indexed field read (`g.mods[i].id`) lowers to one index-then-field place
+//RS /// read, and a field read of a value slot borrows the slot: neither copies the
+//RS /// whole element (`M` owns a large `big` list) to reach one field.
+//RS #[test]
+//RS fn indexed_field_read_never_copies_the_element() {
+//RS     let src = "struct M {\n    id: String\n    big: [String]\n}\n\nstruct G {\n    mods: [M]\n}\n\nfn find_mod(g: G, id: String) -> Int? {\n    loop i in 0..<g.mods.len() {\n        if g.mods[i].id == id -> return Val(i)\n    }\n    None\n}\n\nfn make(id: String) -> M {\n    M{id: id, big: [String]{\"x\"}}\n}\n\nfn made_id(id: String) -> String {\n    make(id).id\n}\n\nfn run() {\n    g :: G{mods: [M]{M{id: \"a\", big: [String]{\"x\"}}, M{id: \"b\", big: [String]{\"y\"}}}}\n    print(find_mod(g, \"b\") ?? -1)\n    print(made_id(\"c\"))\n}\n";
+//RS     let rust = emitted_rust("index_field", src);
+//RS     let find = emitted_body(&rust, "find_umod");
+//RS     assert!(
+//RS         find.contains("u32)).__jet_id"),
+//RS         "`g.mods[i].id` must read `id` through the element place:\n{find}"
+//RS     );
+//RS     assert!(
+//RS         !find.lines().any(|line| line.contains("jet_index_vec_ref(") && line.contains("u32)).clone()")),
+//RS         "`g.mods[i].id` must not copy the whole element:\n{find}"
+//RS     );
+//RS     assert!(
+//RS         !find.contains(".clone()).__jet_"),
+//RS         "a field read must not copy its whole receiver:\n{find}"
+//RS     );
+//RS     let made = emitted_body(&rust, "made_uid");
+//RS     assert!(
+//RS         !made.contains(".clone()).__jet_id"),
+//RS         "`make(id).id` must borrow the result slot and copy only `id`:\n{made}"
+//RS     );
+//RS }
+//RS 
+//RS /// #4318: a Copy-ABI value (`Bool`) is read bitwise (`(*slot)` or the plain
+//RS /// slot), never through `.clone()`: branch conditions copy no slot.
+//RS #[test]
+//RS fn bool_branch_conditions_never_clone_their_slot() {
+//RS     let src = "fn count_hits(flags: [Bool], limit: Int) -> Int {\n    hits := 0\n    loop i in 0..<flags.len() {\n        if flags[i] && i < limit -> hits += 1\n    }\n    hits\n}\n\nfn run() {\n    print(count_hits([Bool]{true, false, true}, 2))\n}\n";
+//RS     let rust = emitted_rust("bool_branch", src);
+//RS     let body = emitted_body(&rust, "count_uhits");
+//RS     assert!(body.contains("if "), "`count_hits` must branch:\n{body}");
+//RS     assert!(
+//RS         !body.contains(".clone() {"),
+//RS         "a Bool branch condition must be read bitwise, not cloned:\n{body}"
+//RS     );
+//RS }
+//RS 
+//RS /// #4318: an interpolation hole is shown, never consumed, so it borrows its
+//RS /// value (`jet_show(&self)`) instead of cloning it first.
+//RS #[test]
+//RS fn interpolation_holes_borrow_their_values() {
+//RS     let src = "fn greet(name: String, n: Int) -> String {\n    \"hi {name}, you are {n}\"\n}\n\nfn run() {\n    print(greet(\"ann\", 3))\n}\n";
+//RS     let rust = emitted_rust("interpolation_borrow", src);
+//RS     let body = emitted_body(&rust, "greet");
+//RS     assert_eq!(
+//RS         body.matches(".jet_show()").count(),
+//RS         2,
+//RS         "both holes of `greet` must be shown:\n{body}"
+//RS     );
+//RS     assert!(
+//RS         !body.contains(".clone()).jet_show()") && !body.contains(".clone().jet_show()"),
+//RS         "an interpolation hole must borrow its value, not clone it:\n{body}"
+//RS     );
+//RS }
+//RS 
+//RS /// #4318: a read-only binding of a stable place holds a shared reference to
+//RS /// it (`Option<&T>`), never a copy: an or-pattern payload binding over a read
+//RS /// parameter, and a `::` let of a read parameter's field.
+//RS #[test]
+//RS fn read_only_bindings_borrow_their_payload() {
+//RS     let src = "enum Shape {\n    Circle(label: String)\n    Rect(label: String, parts: [String])\n    Dot\n}\n\nstruct Bag {\n    name: String\n    tags: [String]\n}\n\nfn label_len(shape: Shape) -> Int {\n    if shape == {\n        .Circle(label) | .Rect(label, _) -> return label.len()\n        .Dot -> return 0\n    }\n    0\n}\n\nfn tag_count(bag: Bag) -> Int {\n    tags :: bag.tags\n    tags.len()\n}\n\nfn run() {\n    print(label_len(Shape.Rect{label: \"ab\", parts: [String]{\"x\"}}))\n    print(tag_count(Bag{name: \"b\", tags: [String]{\"x\", \"y\"}}))\n}\n";
+//RS     let rust = emitted_rust("ref_bindings", src);
+//RS     let label = emitted_body(&rust, "label_ulen");
+//RS     assert!(
+//RS         label.contains("Option<&String>"),
+//RS         "an or-pattern binding of a read parameter's payload must hold a reference:\n{label}"
+//RS     );
+//RS     assert!(
+//RS         !label.contains("payload.clone()") && !label.contains("payload.as_ref().clone()"),
+//RS         "an or-pattern binding must not copy its payload:\n{label}"
+//RS     );
+//RS     let tags = emitted_body(&rust, "tag_ucount");
+//RS     assert!(
+//RS         !tags.contains("__jet_tags).clone()"),
+//RS         "a `::` let of a read parameter's field must not copy it:\n{tags}"
+//RS     );
+//RS }
+//RS 
+//RS /// D-PERSIST1: `#Persist` module bindings survive a real hot reload when the
+//RS /// shape is compatible; an incompatible shape reset reports the exact reason
+//RS /// and reseeds from the new initializer. Shared store is consulted by both
+//RS /// Cranelift and interpreter tiers.
+//RS #[test]
+//RS fn persist_binding_survives_hot_swap_and_resets_on_shape_change() {
+//RS     // `jet_foundation::Persist` is a thread-local store, so run/hot_swap/
+//RS     // restart must share one thread; see
+//RS     // `cranelift_hot_swap_preserves_live_state`.
+//RS     with_jit_test_scope(persist_binding_survives_hot_swap_and_resets_on_shape_change_inner);
+//RS }
+//RS 
+//RS // ── card #131 S1-bridge (D-SERDE2): hand codec dev-tier parity (R12) ──────────
+//RS // A hand `impl T.Encode`/`impl T.Decode` uses the same typed TIR codec dispatch
+//RS // as a derived codec. The dev tier must execute the round trip, not preserve the
+//RS // retired interpreter coverage gap.
+//RS #[test]
+//RS fn hand_written_codec_dev_tier_matches_native_shape() {
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     const SRC: &str = r#"
+//RS use core.encoding.json as json
+//RS 
+//RS struct Email { addr: String }
+//RS 
+//RS impl Email.Encode {
+//RS     fn encode(self) -> DataTree {
+//RS         m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
+//RS         return DataTree.Object(m)
+//RS     }
+//RS }
+//RS 
+//RS impl Email.Decode {
+//RS     fn decode(tree: DataTree) -> Email [FieldError]! {
+//RS         f := &tree.field("email") ?? DataTree.Text("")
+//RS         s := f.text() ?? ""
+//RS         return Ok(Email{addr: s})
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     e := Email{addr: "a@b.com"}
+//RS     s := json.to_string(e)
+//RS     print(s)
+//RS     back := json.decode<Email>(s) ?? panic("decode failed")
+//RS     print(back.addr)
+//RS }
+//RS "#;
+//RS     let dir = std::env::temp_dir().join(format!("jet_hand_codec_dev_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("hand_codec.jet");
+//RS     fs::write(&file, SRC).unwrap();
+//RS     let outcome = dev_iteration_with_timeout("hand_codec", file.to_str().unwrap(), true);
+//RS     match outcome {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(stdout, "{\"email\":\"a@b.com\"}\na@b.com\n");
+//RS             assert!(stderr.is_empty(), "hand codec wrote stderr: {stderr}");
+//RS             assert_eq!(exit_code, 0);
+//RS         }
+//RS         RunOutcome::Problems(diags) => panic!("hand codec interpreter failed: {diags:?}"),
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `jet dev`'s due-job tick
+//RS /// consumer. `scheduled_jobs` must enumerate every `#Job #Every(…)` fn
+//RS /// with its resolved schedule (and skip a plain `#Job fn` with no
+//RS /// `run_interpreter_named_job` must actually execute one by name through the
+//RS /// same interpreter tier `dev_iteration` uses — golden-testing the loop's
+//RS /// per-tick logic without the long-running file watcher, same spirit as
+//RS /// `dev_iteration` itself (see the module doc above).
+//RS #[test]
+//RS fn schedule_every_dev_loop_consumer() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let file = root.join("Examples/features/devloop/schedule_every.jet");
+//RS     let src = fs::read_to_string(&file).unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap())
+//RS         .unwrap_or_else(|diags| panic!("schedule_every.jet failed to load: {diags:?}"));
+//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     let errors: Vec<_> = diags
+//RS         .iter()
+//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(
+//RS         errors.is_empty(),
+//RS         "schedule_every.jet must compile clean:\n{}",
+//RS         jet::render_diagnostics("schedule_every.jet", &src, &diags)
+//RS     );
+//RS 
+//RS     let mut jobs = jet::Interpreter::scheduled_jobs(&bundle);
+//RS     jobs.sort_by(|a, b| a.0.cmp(&b.0));
+//RS     let names: Vec<&str> = jobs.iter().map(|(n, _)| n.as_str()).collect();
+//RS     assert_eq!(
+//RS         names,
+//RS         vec![
+//RS             "compact_archive",
+//RS             "nightly_backup",
+//RS             "prune_sessions",
+//RS             "refresh_indexes",
+//RS         ],
+//RS         "scheduled_jobs must list every #Job fn carrying #Every(…), and skip the \
+//RS          #Every(…)-less `manual_only` job"
+//RS     );
+//RS     let schedules: std::collections::HashMap<&str, &jet::AST::EverySchedule> =
+//RS         jobs.iter().map(|(n, s)| (n.as_str(), s)).collect();
+//RS     assert_eq!(
+//RS         *schedules["prune_sessions"],
+//RS         jet::AST::EverySchedule::Duration {
+//RS             nanos: 5 * 60 * 1_000_000_000
+//RS         },
+//RS         "`#Every(5min)` must resolve to a 5-minute interval"
+//RS     );
+//RS     assert_eq!(
+//RS         *schedules["nightly_backup"],
+//RS         jet::AST::EverySchedule::WallClockTime { hour: 3, minute: 0 },
+//RS         "`#Every(\"03:00\")` must resolve to 03:00 daily"
+//RS     );
+//RS     assert_eq!(
+//RS         *schedules["refresh_indexes"],
+//RS         jet::AST::EverySchedule::Duration {
+//RS             nanos: 2 * 60 * 60 * 1_000_000_000
+//RS         },
+//RS         "`#Every(2h)` must resolve through the canonical Time family"
+//RS     );
+//RS     assert_eq!(
+//RS         *schedules["compact_archive"],
+//RS         jet::AST::EverySchedule::Duration {
+//RS             nanos: 24 * 60 * 60 * 1_000_000_000
+//RS         },
+//RS         "`#Every(1d)` must resolve through the canonical Time family"
+//RS     );
+//RS 
+//RS     // This example's `fn run()` intentionally calls every job for its
+//RS     // ordinary run golden. Exercise private named dispatch against the same
+//RS     // declarations with an inert entry function so that the receipt proves
+//RS     // one selected job rather than the example's unrelated run body.
+//RS     let dispatch_file = root.join(format!(
+//RS         ".jet-schedule-dispatch-{}.jet",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_file(&dispatch_file);
+//RS     let dispatch_src = src.replace(
+//RS         "fn run() {\n    prune_sessions()\n    refresh_indexes()\n    compact_archive()\n    nightly_backup()\n    manual_only()\n}",
+//RS         "fn run() {}",
+//RS     );
+//RS     assert_ne!(dispatch_src, src, "dispatch fixture must isolate fn run");
+//RS     fs::write(&dispatch_file, &dispatch_src).unwrap();
+//RS     let mut dispatch_bundle = jet::Loader::load_entry(dispatch_file.to_str().unwrap())
+//RS         .unwrap_or_else(|diags| panic!("dispatch fixture failed to load: {diags:?}"));
+//RS     let dispatch_diags =
+//RS         jet::Sema::check_bundle(&mut dispatch_bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         dispatch_diags
+//RS             .iter()
+//RS             .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+//RS         "dispatch fixture must compile clean:\n{}",
+//RS         jet::render_diagnostics("schedule_every-dispatch.jet", &dispatch_src, &dispatch_diags)
+//RS     );
+//RS     let policy = common::development_policy();
+//RS     match common::run_interpreter_named_job(
+//RS         &dispatch_bundle,
+//RS         dispatch_file.to_str().unwrap(),
+//RS         "prune_sessions",
+//RS         false,
+//RS         &policy,
+//RS     ) {
+//RS         RunOutcome::Ran {
+//RS             stdout, exit_code, ..
+//RS         } => {
+//RS             assert_eq!(exit_code, 0);
+//RS             assert_eq!(stdout, "pruning sessions\n");
+//RS         }
+//RS         RunOutcome::Problems(diags) => panic!("named job failed: {diags:?}"),
+//RS     }
+//RS     let _ = fs::remove_file(dispatch_file);
+//RS 
+//RS }
+//RS /// D-SCHEDULE1: the local schedule clock uses UTC Unix-day windows, fires
+//RS /// duration schedules once per interval, and does not replay a missed wall-clock
+//RS /// window after a process-local restart.
+//RS #[test]
+//RS fn schedule_clock_records_window_and_missed_tick_behavior() {
+//RS     let mut clock = jet_jit::Job::JetJobClock::new();
+//RS     let interval = [(
+//RS         "interval",
+//RS         jet_jit::Job::JetJobSchedule::Duration {
+//RS             nanos: 5 * 60 * 1_000_000_000,
+//RS         },
+//RS     )];
+//RS     assert_eq!(clock.due_at(&interval, 0), vec!["interval".to_string()]);
+//RS     assert!(
+//RS         clock.due_at(&interval, 0).is_empty(),
+//RS         "a local interval must not overlap itself before its duration elapses"
+//RS     );
+//RS 
+//RS     let wall_clock = [(
+//RS         "cron",
+//RS         jet_jit::Job::JetJobSchedule::WallClockTime { hour: 3, minute: 0 },
+//RS     )];
+//RS     let missed_window = 3 * 3_600 + 61;
+//RS     assert!(
+//RS         clock.due_at(&wall_clock, missed_window).is_empty(),
+//RS         "a 03:00 UTC wall-clock schedule must not fire after its one-minute window"
+//RS     );
+//RS     let next_day = missed_window + 86_400 - 61;
+//RS     assert_eq!(
+//RS         clock.due_at(&wall_clock, next_day),
+//RS         vec!["cron".to_string()],
+//RS         "the next UTC day gets one fresh local tick, not a replay of the missed one"
+//RS     );
+//RS     assert!(
+//RS         clock.due_at(&wall_clock, next_day + 30).is_empty(),
+//RS         "a wall-clock schedule fires at most once in a UTC day"
+//RS     );
+//RS }
+//RS /// c728 C6: a watching `jet dev` session deopts on a JIT-gap edit and accepts a
+//RS /// later valid edit; one-shot dev exits 0.
+//RS #[test]
+//RS fn watching_dev_reruns_on_jit_gap_and_recovers() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_dev_watch_c6_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("app.jet");
+//RS     fs::write(&file, "fn run() {\n    print(\"good-v1\")\n}\n").unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS 
+//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS     child
+//RS         .arg("dev")
+//RS         .arg(&shown)
+//RS         .env("NO_COLOR", "1")
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped());
+//RS     let mut child = child.spawn().expect("spawn watching jet dev");
+//RS 
+//RS     std::thread::sleep(Duration::from_millis(800));
+//RS     fs::write(
+//RS         &file,
+//RS         "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::thread::sleep(Duration::from_millis(800));
+//RS     fs::write(&file, "fn run() {\n    print(\"good-v2\")\n}\n").unwrap();
+//RS     std::thread::sleep(Duration::from_millis(800));
+//RS 
+//RS     let _ = child.kill();
+//RS     let out = child.wait_with_output().expect("watching jet dev output");
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stdout.contains("good-v1"), "stdout:\n{stdout}");
+//RS     assert!(
+//RS         !stderr.contains("E2211") && !stdout.contains("E2211"),
+//RS         "retired E2211 must not appear\nstdout:\n{stdout}\nstderr:\n{stderr}"
+//RS     );
+//RS     assert!(stdout.contains("good-v2"), "stdout:\n{stdout}");
+//RS 
+//RS     fs::write(
+//RS         &file,
+//RS         "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let once = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["dev", &shown, "--watch=off"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let once_stdout = String::from_utf8_lossy(&once.stdout);
+//RS     let once_stderr = String::from_utf8_lossy(&once.stderr);
+//RS     assert_eq!(once.status.code(), Some(0), "stderr={once_stderr}");
+//RS     assert!(
+//RS         !once_stderr.contains("E2211") && !once_stdout.contains("E2211"),
+//RS         "retired E2211 must not appear: stdout={once_stdout} stderr={once_stderr}"
+//RS     );
+//RS     assert!(
+//RS         !once_stdout.trim().is_empty(),
+//RS         "deopted one-shot dev should print output: stdout={once_stdout} stderr={once_stderr}"
+//RS     );
+//RS }
+//RS 
+//RS /// #439 / E3-UL6: native matrix — dependency-aware WatchSession invalidates
+//RS /// the exact closure, meets edit-to-visible budget, and recovers after a
+//RS /// simulated crash/reconnect. AOT rebuild semantics match the prior run.
+//RS #[test]
+//RS fn ul6_native_watch_matrix_budget_and_reconnect() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_ul6_native_{}_{}",
+//RS         std::process::id(),
+//RS         Instant::now().elapsed().as_nanos()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let entry = dir.join("app.jet");
+//RS     let lib = dir.join("lib.jet");
+//RS     let asset = dir.join("app.css");
+//RS     fs::write(&lib, "// helper module\n").unwrap();
+//RS     fs::write(&asset, "body{}\n").unwrap();
+//RS     fs::write(&entry, "fn run() {\n    print(\"v1\")\n}\n").unwrap();
+//RS 
+//RS     let mut graph = jet_devserver::WatchGraph::from_entry(&entry, &[lib.clone()]).unwrap();
+//RS     graph.upsert(asset.clone(), jet_devserver::RootKind::Style);
+//RS     graph.link(
+//RS         std::fs::canonicalize(&entry).unwrap_or(entry.clone()),
+//RS         asset.clone(),
+//RS     );
+//RS     let mut session = jet_devserver::WatchSession::from_graph(graph);
+//RS     assert!(session.graph().node_count() >= 3);
+//RS     let kinds: std::collections::BTreeSet<_> = session.graph().nodes().map(|n| n.kind).collect();
+//RS     assert!(kinds.contains(&jet_devserver::RootKind::Import));
+//RS     assert!(kinds.contains(&jet_devserver::RootKind::Style));
+//RS 
+//RS     std::thread::sleep(Duration::from_millis(30));
+//RS     fs::write(&lib, "// helper module v2\n").unwrap();
+//RS     let started = Instant::now();
+//RS     let receipt = session.poll().expect("lib invalidation");
+//RS     let visible_ms = started.elapsed().as_millis();
+//RS     assert!(
+//RS         receipt
+//RS             .closure
+//RS             .iter()
+//RS             .any(|p| p.ends_with("lib.jet") || p.ends_with("app.jet")),
+//RS         "closure={:?}",
+//RS         receipt.closure
+//RS     );
+//RS     assert!(
+//RS         visible_ms <= jet_devserver::EDIT_TO_VISIBLE_BUDGET_MS
+//RS             || jet_devserver::within_budget(&receipt),
+//RS         "edit-to-visible {visible_ms}ms receipt={:?}",
+//RS         receipt.edit_to_visible_ms
+//RS     );
+//RS     assert!(receipt.render().contains("\"generation\":"));
+//RS     session.acknowledge(&receipt).unwrap();
+//RS 
+//RS     // Crash/reconnect: recover stamps, then a fresh edit still fires once.
+//RS     std::thread::sleep(Duration::from_millis(30));
+//RS     fs::write(&lib, "// helper module v3\n").unwrap();
+//RS     session.recover();
+//RS     assert!(session.poll().is_none(), "recover must clear pending drift");
+//RS     std::thread::sleep(Duration::from_millis(30));
+//RS     fs::write(&entry, "fn run() {\n    print(\"v4\")\n}\n").unwrap();
+//RS     let again = session.poll().expect("post-reconnect edit");
+//RS     session.acknowledge(&again).unwrap();
+//RS 
+//RS     // AOT parity: one-shot run of the final source.
+//RS     let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", &entry.to_string_lossy()])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("jet run");
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr={}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "v4");
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// #439 / E3-UL6: `jet run --watch` and `jet dev` share WatchSession receipts.
+//RS #[test]
+//RS fn ul6_run_watch_and_dev_share_engine() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_ul6_share_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("app.jet");
+//RS     fs::write(&file, "fn run() {\n    print(\"v1\")\n}\n").unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS 
+//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", &shown, "--watch"])
+//RS         .env("NO_COLOR", "1")
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .expect("spawn jet run --watch");
+//RS 
+//RS     std::thread::sleep(Duration::from_millis(900));
+//RS     fs::write(&file, "fn run() {\n    print(\"v2\")\n}\n").unwrap();
+//RS     std::thread::sleep(Duration::from_millis(900));
+//RS     let _ = child.kill();
+//RS     let out = child.wait_with_output().expect("run --watch output");
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         stdout.contains("watching") || stdout.contains("v1") || stdout.contains("v2"),
+//RS         "stdout:\n{stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("v1") || stdout.contains("changed") || stdout.contains("v2"),
+//RS         "expected watch activity\nstdout:\n{stdout}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn package_callable_survives_dev_and_run_watch_reload() {
+//RS     use std::io::{BufRead, BufReader};
+//RS 
+//RS     for command in ["dev", "run"] {
+//RS         let scratch = common::Scratch::new("package-callable-reload");
+//RS         fs::write(
+//RS             scratch.join("package.jet"),
+//RS             "name: \"callable_reload\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\noutputs: { app: .Executable{ entry: launch } }\n",
+//RS         )
+//RS         .unwrap();
+//RS         let file = scratch.join("entry.jet");
+//RS         fs::write(
+//RS             &file,
+//RS             "fn run() { print(\"wrong callable\") }\npub fn launch() { print(\"selected-1\") }\n",
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS         let mut args = vec![command, scratch.path.to_str().unwrap()];
+//RS         if command == "run" {
+//RS             args.push("--watch");
+//RS         }
+//RS         let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .args(&args)
+//RS             .env("NO_COLOR", "1")
+//RS             .stdout(Stdio::piped())
+//RS             .stderr(Stdio::piped())
+//RS             .spawn()
+//RS             .unwrap_or_else(|error| panic!("spawn package {command}: {error}"));
+//RS         let stdout = child.stdout.take().unwrap();
+//RS         let (lines_tx, lines_rx) = std::sync::mpsc::channel();
+//RS         std::thread::spawn(move || {
+//RS             for line in BufReader::new(stdout).lines() {
+//RS                 if lines_tx.send(line).is_err() {
+//RS                     break;
+//RS                 }
+//RS             }
+//RS         });
+//RS         let wait_for = |expected: &str| loop {
+//RS             let line = lines_rx
+//RS                 .recv_timeout(Duration::from_secs(30))
+//RS                 .unwrap_or_else(|error| panic!("package {command} output {expected}: {error}"))
+//RS                 .expect("package callable stdout line");
+//RS             if line == expected {
+//RS                 break;
+//RS             }
+//RS             assert_ne!(line, "wrong callable", "package execution fell back to run");
+//RS         };
+//RS 
+//RS         wait_for("selected-1");
+//RS         fs::write(
+//RS             &file,
+//RS             "fn run() { print(\"wrong callable\") }\npub fn launch() { print(\"selected-2\") }\n",
+//RS         )
+//RS         .unwrap();
+//RS         wait_for("selected-2");
+//RS 
+//RS         let _ = child.kill();
+//RS         let output = child
+//RS             .wait_with_output()
+//RS             .unwrap_or_else(|error| panic!("stop package {command}: {error}"));
+//RS         let stderr = String::from_utf8_lossy(&output.stderr);
+//RS         assert!(
+//RS             !stderr.contains("Error [") && !stderr.contains("E2211"),
+//RS             "package {command} reload failed:\n{stderr}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// #778 C1–C3: per-function tiers, cross-tier host-shim calls, and --trace-tiers.
+//RS ///
+//RS /// The fixture needs one function the planner keeps native AND one it binds to
+//RS /// the canonical TIR interpreter; a program that is native end to end cannot
+//RS /// demonstrate per-function selection at all. This test used to get its split
+//RS /// from `[a, b] :: doubled`, which the resident subset did not cover. Commit
+//RS /// 3211b6944 ("fix(#729): JIT list destructure + is_empty") lowered list
+//RS /// destructure natively (`crates/jet-jit/src/jit/safety.rs`
+//RS /// `resident_safe_stmt`'s `TStmt::ListDestructure` arm, plus the matching
+//RS /// `lower_ctx.rs` lowering), so that split closed for the right reason and the
+//RS /// old "gap must be interpreter-bound" assertion went stale in the GOOD
+//RS /// direction. Reintroducing a lowering gap to keep it would be an I9 violation,
+//RS /// so the split now comes from the one that is architectural rather than a
+//RS /// missing lowering: D-MEMO1=A keeps the memo store in the Prelude and makes the
+//RS /// resident engine an adapter, so a `#Memo` function crosses the deopt boundary
+//RS /// by design (`crates/jet-jit/src/jit/tiers.rs` `plan_tiers`, and the
+//RS /// `DEOPT_MEMOS` carrier in `crates/jet-jit/src/jit/deopt.rs` that exists only
+//RS /// to serve this cross-tier call). `native_sum` keeps the destructure so the
+//RS /// closed #729 gap stays pinned as native coverage instead of being deleted.
+//RS #[test]
+//RS fn tiered_run_selects_per_function_tiers_and_cross_calls() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let dir = common::unique_tmp("jet_778_tiers");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("mixed.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"#Memo fn cached(n: Int) -[]> Int -> n * 2
+//RS 
+//RS fn add1(n: Int) -> Int {
+//RS     return n + 1
+//RS }
+//RS 
+//RS fn native_sum() -> Int {
+//RS     doubled :: [add1(40), add1(1)]
+//RS     [a, b] :: doubled
+//RS     return a + b
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(native_sum())
+//RS     print(cached(21) + add1(0))
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let bundle = checked_bundle_from_path(&shown);
+//RS     let plan = common::cranelift_tier_plan(&bundle);
+//RS     let run_id = plan
+//RS         .rows
+//RS         .iter()
+//RS         .find(|row| row.function_name == "run")
+//RS         .map(|row| row.function)
+//RS         .expect("tier plan must identify run");
+//RS     let cached_id = plan
+//RS         .rows
+//RS         .iter()
+//RS         .find(|row| row.function_name == "cached")
+//RS         .map(|row| row.function)
+//RS         .expect("tier plan must identify cached");
+//RS     for name in ["run", "add1", "native_sum"] {
+//RS         assert!(
+//RS             plan.native.contains(name),
+//RS             "`{name}` must select the native tier; native={:?} deopt={:?} whole={}",
+//RS             plan.native,
+//RS             plan.deopt,
+//RS             plan.whole_interp
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         !plan.whole_interp,
+//RS         "a per-function split must not collapse into whole-program interpretation; \
+//RS          native={:?} deopt={:?}",
+//RS         plan.native, plan.deopt
+//RS     );
+//RS     let interp_bound: Vec<&str> = plan.deopt.iter().map(|(name, _)| name.as_str()).collect();
+//RS     assert_eq!(
+//RS         interp_bound,
+//RS         ["cached"],
+//RS         "only the memoized function is interpreter-bound; native={:?} deopt={:?}",
+//RS         plan.native,
+//RS         plan.deopt
+//RS     );
+//RS     assert!(
+//RS         plan.deopt
+//RS             .iter()
+//RS             .any(|(_, reason)| reason.contains("canonical Prelude cache")),
+//RS         "the deopt must name D-MEMO1=A's shared Prelude cache, not an incidental \
+//RS          lowering gap; deopt={:?}",
+//RS         plan.deopt
+//RS     );
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     jet_jit::set_trace_tiers(true);
+//RS     let policy = common::development_policy();
+//RS     let mut backend = CraneliftBackend::new();
+//RS     let stdout = match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+//RS         RunOutcome::Ran { stdout, .. } => stdout,
+//RS         RunOutcome::Problems(ds) => panic!("mixed/deopt program must run: {ds:?}"),
+//RS     };
+//RS     jet_jit::set_trace_tiers(false);
+//RS     assert_eq!(
+//RS         stdout.trim(),
+//RS         "43\n43",
+//RS         "mixed-tier run should print the native sum then the cross-tier sum, got {stdout:?}"
+//RS     );
+//RS     // Both tiers must actually have executed: the native entry, and the host
+//RS     // shim that re-entered the canonical interpreter for `cached`.
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "the native tier must have run"
+//RS     );
+//RS     assert!(
+//RS         jet_jit::deopt_invoked_for_test(),
+//RS         "the cross-tier host shim must have entered the interpreter"
+//RS     );
+//RS     let trace = jet_jit::take_last_trace();
+//RS     assert!(!trace.is_empty(), "trace-tiers must record rows");
+//RS     assert!(
+//RS         trace
+//RS             .iter()
+//RS             .any(|row| row.function == run_id && !row.function_name.is_empty()),
+//RS         "trace run row needs a function identity and name: {trace:?}"
+//RS     );
+//RS     assert!(
+//RS         trace
+//RS             .iter()
+//RS             .any(|row| matches!(row.tier, jet_jit::Tier::Native) && row.function == run_id),
+//RS         "trace must record the native entry: {trace:?}"
+//RS     );
+//RS     assert!(
+//RS         trace.iter().any(|row| {
+//RS             matches!(row.tier, jet_jit::Tier::Interp)
+//RS                 && row.function == cached_id
+//RS                 && !row.reason.is_empty()
+//RS         }),
+//RS         "trace must name the interpreter-bound function and its reason: {trace:?}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn tracked_origin_fact_matches_aot_in_default_dev() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let dir = common::unique_tmp("jet_origin_fact_dev");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("origin_fact.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         "fn run() {\n    #Track speed :: Float{3.5}\n    plain :: Float{3.5}\n    copied :: speed\n    speed_origin :: prep { speed.$origin }\n    plain_origin :: prep { plain.$origin }\n    copied_origin :: prep { copied.$origin }\n    print(speed_origin?.tracked ?? false)\n    print(speed_origin?.source ?? \"missing\")\n    print(speed_origin?.line ?? 0)\n    print(speed_origin?.column ?? 0)\n    print(plain_origin == None)\n    print(copied_origin == None)\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let expected_stdout = "true\nspeed\n2\n12\ntrue\ntrue\n".to_string();
+//RS     let aot = compiled_binary_output(&dir, "origin_fact", 0, "origin_fact", &shown);
+//RS     let resident = run_cranelift_resident_file(&shown, "origin_fact");
+//RS     let dev = match dev_iteration_with_timeout("origin_fact", &shown, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("default dev failed origin fact: {diags:?}"),
+//RS     };
+//RS 
+//RS     assert_eq!(aot, ProgramOutput::ran(expected_stdout, String::new(), 0));
+//RS     assert_eq!(resident, aot);
+//RS     assert_eq!(dev, aot);
+//RS 
+//RS     let interpreted = match dev_iteration_with_timeout("origin_fact", &shown, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("forced interpreter failed origin fact: {diags:?}"),
+//RS     };
+//RS     assert_eq!(interpreted, aot);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// Tower #1754: keep the repaired collection surface on a small, explicit
+//RS /// three-way parity lens. The existing corpus battery is intentionally broad;
+//RS /// this test makes the card's four rows independently runnable.
+//RS #[test]
+//RS fn tower_1754_collection_parity_focus() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     with_jit_test_scope(|| {
+//RS         let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS         for stem in [
+//RS             "collections/iter_adapters",
+//RS             "collections/iter_tools_audit",
+//RS             "collections/list_remove_selector",
+//RS             "collections/list_surface",
+//RS             "effects/taint",
+//RS         ] {
+//RS             assert_cranelift_three_way(&example_path(stem), stem);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// #2020: every `tests/dev_parts/*.rs` slice is wired into a real cargo test
+//RS /// target.
+//RS ///
+//RS /// The suite was split because one binary could not run its own declared tests
+//RS /// inside the 900s guard, and a split has exactly one silent failure mode: a
+//RS /// slice that no `tests/dev*.rs` target `include!`s compiles nowhere and runs
+//RS /// nowhere, so its tests stop existing without anything going red. That is the
+//RS /// shape that let five `jit_run` failures sit unrecorded for a whole session —
+//RS /// the tests were not in a routine set and nothing said so.
+//RS ///
+//RS /// Naming the target is all it takes to be routine: cargo makes a test binary
+//RS /// out of every `tests/*.rs` file by itself, and `Tools/ci/test-shards.sh`
+//RS /// enumerates the whole target inventory fresh on every run (D-CI1=A). So the
+//RS /// only thing left to check is that no slice is orphaned.
+//RS #[test]
+//RS fn every_dev_slice_is_wired_into_a_test_target() {
+//RS     let tests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
+//RS     let mut wired = String::new();
+//RS     for entry in fs::read_dir(&tests_dir).expect("tests dir").flatten() {
+//RS         let name = entry.file_name().to_string_lossy().into_owned();
+//RS         if name.starts_with("dev") && name.ends_with(".rs") {
+//RS             wired.push_str(&fs::read_to_string(entry.path()).expect("dev target source"));
+//RS         }
+//RS     }
+//RS     let mut orphans = Vec::new();
+//RS     for entry in fs::read_dir(tests_dir.join("dev_parts"))
+//RS         .expect("dev_parts dir")
+//RS         .flatten()
+//RS     {
+//RS         let name = entry.file_name().to_string_lossy().into_owned();
+//RS         if name.ends_with(".rs") && !wired.contains(&format!("dev_parts/{name}")) {
+//RS             orphans.push(name);
+//RS         }
+//RS     }
+//RS     orphans.sort();
+//RS     assert!(
+//RS         orphans.is_empty(),
+//RS         "no tests/dev*.rs target includes these slices, so every test in them runs \
+//RS          nowhere: {orphans:?}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1034 tests/dev_parts/routine.rs:5441-7492
+

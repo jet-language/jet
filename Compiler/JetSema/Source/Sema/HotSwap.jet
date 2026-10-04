@@ -1,0 +1,583 @@
+// PORT-PENDING 0434 crates-jet-sema-src-sema-hotswap-module-group: crates/jet-sema/src/Sema/HotSwap.rs:1-579
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-HOTSWAP1 — type-surface stability check for `jet dev` (incl.
+//RS //! `jet dev --swap`, D-CLI-DEVSERVE1=A: was `jet serve`).
+//RS //!
+//RS //! The hot-reload unit is a MODULE. When a resident program's file changes,
+//RS //! the watch loop asks this pass whether the edit is *type-stable*: a change
+//RS //! that touches only function *bodies* / statements keeps the same type
+//RS //! surface and takes the fast swap path; a change to a struct field, an enum
+//RS //! variant, or a function signature changes the surface and forces a clean,
+//RS //! announced restart (E2210).
+//RS //!
+//RS //! This is a pure sema walk over the two parsed bundles' declared types — it
+//RS //! NEVER asks rustc whether the layout changed (I3: all checking lives in
+//RS //! sema). State retention is emitted per canonical `#Persist` binding, so an
+//RS //! unrelated module-surface change cannot reset an unchanged value.
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::AST::{
+//RS     EnumDef, Func, Item, LoadedModule, MigrationOp, ProgramBundle, StructDef, Type,
+//RS     VariantPayload,
+//RS };
+//RS use crate::Sema::Schema::{canonical_migration_shape, load_snapshot};
+//RS use jet_foundation::HotSwap::{
+//RS     HotSwapCompatibility, HotSwapDecision, StateRetentionFact,
+//RS };
+//RS use jet_foundation::SchemaMigration::{
+//RS     SchemaMigrationOp, SchemaMigrationPlan, SchemaMigrationStep,
+//RS };
+//RS 
+//RS 
+//RS /// E2210: a hot-swap edit changed a type surface, so `jet dev` must restart
+//RS /// rather than swap. `what_changed` is the human summary the
+//RS /// caller also prints on the `[restart]` line.
+//RS pub fn e2210(what_changed: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2210",
+//RS         format!(
+//RS             "this edit changed a type, so `jet dev` is restarting instead of swapping — {}",
+//RS             what_changed
+//RS         ),
+//RS         "a hot swap re-applies code while the program's types stay the same; \
+//RS          changing a struct field, an enum variant, or a function signature \
+//RS          changes the shape of your data, so the running code is rebuilt cleanly \
+//RS          from the new types"
+//RS             .to_string(),
+//RS         "nothing to fix — `jet dev` restarted with the new types; this note just \
+//RS          explains why the swap became a restart. Type-stable edits (function \
+//RS          bodies, statements) swap without a restart"
+//RS 
+//RS             .to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS fn canonical_migration_plans(
+//RS     bundle: &ProgramBundle,
+//RS     module: &LoadedModule,
+//RS ) -> Vec<SchemaMigrationPlan> {
+//RS     let mut plans = Vec::new();
+//RS     for item in &module.items {
+//RS         let Item::Struct(structure) = item else { continue };
+//RS         let published = structure.is_published_schema
+//RS             || structure
+//RS                 .derives
+//RS                 .iter()
+//RS                 .any(|(marker, _)| marker == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
+//RS         if !published {
+//RS             continue;
+//RS         }
+//RS         let Some(_snapshot) = load_snapshot(&bundle.project_root, &structure.name) else {
+//RS             continue;
+//RS         };
+//RS         let migrations = module
+//RS             .items
+//RS             .iter()
+//RS             .filter_map(|item| match item {
+//RS                 Item::Migration(m) if m.type_name == structure.name => Some(m.clone()),
+//RS                 _ => None,
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         if migrations.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let Ok(canonical) =
+//RS             canonical_migration_shape(&module.display, structure, &migrations)
+//RS         else {
+//RS             continue;
+//RS         };
+//RS         let mut steps = Vec::with_capacity(migrations.len());
+//RS         for (block_index, migration) in migrations.iter().enumerate() {
+//RS             let ops = migration
+//RS                 .ops
+//RS                 .iter()
+//RS                 .map(|op| match op {
+//RS                     MigrationOp::Rename { from, to, .. } => SchemaMigrationOp::Rename {
+//RS                         from_key: canonical.json_key(from),
+//RS                         to_key: canonical.json_key(to),
+//RS                     },
+//RS                     MigrationOp::Remove { field, .. } => SchemaMigrationOp::Remove {
+//RS                         key: canonical.json_key(field),
+//RS                     },
+//RS                     MigrationOp::Add {
+//RS                         field,
+//RS                         ty,
+//RS                         default_fn,
+//RS                         ..
+//RS                     } => SchemaMigrationOp::Add {
+//RS                         key: canonical.json_key(field),
+//RS                         type_name: ty.name(),
+//RS                         default_fn: default_fn.clone().unwrap_or_default(),
+//RS                     },
+//RS                     MigrationOp::Change {
+//RS                         field,
+//RS                         from_ty,
+//RS                         to_ty,
+//RS                         conv_fn,
+//RS                         ..
+//RS                     } => SchemaMigrationOp::Change {
+//RS                         key: canonical.json_key(field),
+//RS                         from_type: from_ty.name(),
+//RS                         to_type: to_ty.name(),
+//RS                         converter_fn: conv_fn.clone().unwrap_or_default(),
+//RS                     },
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             steps.push(SchemaMigrationStep::new(
+//RS                 format!("v{}", block_index + 1),
+//RS                 format!("v{}", block_index + 2),
+//RS                 ops,
+//RS             ));
+//RS         }
+//RS         if steps.iter().all(|step| step.ops.is_empty())
+//RS             || steps.iter().flat_map(|step| step.ops.iter()).any(|op| {
+//RS                 matches!(
+//RS                     op,
+//RS                     SchemaMigrationOp::Add { default_fn, .. }
+//RS                         if default_fn.is_empty()
+//RS                 ) || matches!(
+//RS                     op,
+//RS                     SchemaMigrationOp::Change { converter_fn, .. }
+//RS                         if converter_fn.is_empty()
+//RS                 )
+//RS             })
+//RS         {
+//RS             continue;
+//RS         }
+//RS         plans.push(SchemaMigrationPlan::new(
+//RS             structure.name.clone(),
+//RS             canonical.historical,
+//RS             steps,
+//RS         ));
+//RS     }
+//RS     plans
+//RS }
+//RS 
+//RS /// Compare the type surface of the named module across two bundles and emit
+//RS /// the one backend-neutral decision every live adapter consumes.
+//RS ///
+//RS /// The decision is successful even when the edit is incompatible: an
+//RS /// incompatible edit is a normal semantic verdict that carries its restart
+//RS /// reason and fresh-state facts. `Err` remains reserved for future semantic
+//RS /// failures that prevent a verdict from being produced.
+//RS ///
+//RS /// `module_name` matches a module by `display` path or import `alias`; if
+//RS /// neither bundle has it, the entry module is compared (the common single-file
+//RS /// dev case).
+//RS pub fn type_stable_decision(
+//RS     old: &ProgramBundle,
+//RS     new: &ProgramBundle,
+//RS     module_name: &str,
+//RS ) -> Result<HotSwapDecision, Vec<Diagnostic>> {
+//RS     let old_mod = pick_module(old, module_name);
+//RS     let new_mod = pick_module(new, module_name);
+//RS     let changed = match (old_mod, new_mod) {
+//RS         (Some(o), Some(n)) => surface_changes(o, n),
+//RS         // A module that appeared or vanished is itself a surface change.
+//RS         (Some(_), None) | (None, Some(_)) => {
+//RS             vec![format!("the module `{}` was added or removed", module_name)]
+//RS         }
+//RS         (None, None) => Vec::new(),
+//RS     };
+//RS     let changed_functions = match (old_mod, new_mod) {
+//RS         (Some(o), Some(n)) => changed_function_ids(o, n),
+//RS         (Some(o), None) => callable_functions(o).into_keys().collect(),
+//RS         (None, Some(n)) => callable_functions(n).into_keys().collect(),
+//RS         (None, None) => Vec::new(),
+//RS     };
+//RS     let compatibility = if changed.is_empty() {
+//RS         HotSwapCompatibility::Compatible
+//RS     } else {
+//RS         HotSwapCompatibility::Incompatible {
+//RS             reason: changed.join("; "),
+//RS         }
+//RS     };
+//RS     let state = persistent_state_facts(old_mod, new_mod, compatibility.reason());
+//RS     let schema_migrations = new_mod
+//RS         .map(|module| canonical_migration_plans(new, module))
+//RS         .unwrap_or_default();
+//RS     Ok(HotSwapDecision {
+//RS         module: module_name.to_string(),
+//RS         compatibility,
+//RS         changed,
+//RS         changed_functions,
+//RS         state,
+//RS         schema_migrations,
+//RS         rechecked_items: Vec::new(),
+//RS         change_facts: Vec::new(),
+//RS     })
+//RS }
+//RS 
+//RS /// Find the module to diff: by `display` path, else by import `alias`, else the
+//RS /// entry module.
+//RS fn pick_module<'a>(bundle: &'a ProgramBundle, name: &str) -> Option<&'a LoadedModule> {
+//RS     if let Some(m) = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .find(|m| m.display == name || m.alias == name)
+//RS     {
+//RS         return Some(m);
+//RS     }
+//RS     bundle.modules.get(bundle.entry)
+//RS }
+//RS 
+//RS /// All type-surface differences between two modules, in deterministic
+//RS /// declaration order. An empty vector means the edit is type-stable.
+//RS fn surface_changes(old: &LoadedModule, new: &LoadedModule) -> Vec<String> {
+//RS     let mut changes = Vec::new();
+//RS     let old_structs = structs(old);
+//RS     let new_structs = structs(new);
+//RS     for (name, s) in &old_structs {
+//RS         match new_structs.get(name) {
+//RS             None => changes.push(format!("struct `{}` was removed", name)),
+//RS             Some(n) => {
+//RS                 if let Some(change) = struct_diff(name, s, n) {
+//RS                     changes.push(change);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     for name in new_structs.keys() {
+//RS         if !old_structs.contains_key(name) {
+//RS             changes.push(format!("struct `{}` was added", name));
+//RS         }
+//RS     }
+//RS 
+//RS     let old_enums = enums(old);
+//RS     let new_enums = enums(new);
+//RS     for (name, e) in &old_enums {
+//RS         match new_enums.get(name) {
+//RS             None => changes.push(format!("enum `{}` was removed", name)),
+//RS             Some(n) => {
+//RS                 if let Some(change) = enum_diff(name, e, n) {
+//RS                     changes.push(change);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     for name in new_enums.keys() {
+//RS         if !old_enums.contains_key(name) {
+//RS             changes.push(format!("enum `{}` was added", name));
+//RS         }
+//RS     }
+//RS 
+//RS     let old_functions = callable_functions(old);
+//RS     let new_functions = callable_functions(new);
+//RS     for (identity, old_function) in &old_functions {
+//RS         match new_functions.get(identity) {
+//RS             None => changes.push(format!("function `{}` was removed", old_function.name)),
+//RS             Some(new_function) => {
+//RS                 if let Some(change) = fn_sig_diff(&old_function.name, old_function, new_function) {
+//RS                     changes.push(change);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     for (identity, new_function) in &new_functions {
+//RS         if !old_functions.contains_key(identity) {
+//RS             changes.push(format!("function `{}` was added", new_function.name));
+//RS         }
+//RS     }
+//RS 
+//RS     changes
+//RS }
+//RS 
+//RS fn structs(m: &LoadedModule) -> std::collections::BTreeMap<&str, &StructDef> {
+//RS     let mut out = std::collections::BTreeMap::new();
+//RS     for item in &m.items {
+//RS         if let Item::Struct(definition) = item {
+//RS             out.insert(definition.name.as_str(), definition);
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn enums(m: &LoadedModule) -> std::collections::BTreeMap<&str, &EnumDef> {
+//RS     let mut out = std::collections::BTreeMap::new();
+//RS     for item in &m.items {
+//RS         if let Item::Enum(definition) = item {
+//RS             out.insert(definition.name.as_str(), definition);
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn changed_function_ids(old: &LoadedModule, new: &LoadedModule) -> Vec<String> {
+//RS     let old_functions = callable_functions(old);
+//RS     let new_functions = callable_functions(new);
+//RS     let mut changed = Vec::new();
+//RS     for (identity, old_function) in &old_functions {
+//RS         match new_functions.get(identity) {
+//RS             None => changed.push(identity.clone()),
+//RS             Some(new_function)
+//RS                 if fn_sig_diff(&old_function.name, old_function, new_function).is_some()
+//RS                     || function_body_changed(old, old_function, new, new_function) =>
+//RS             {
+//RS                 changed.push(identity.clone());
+//RS             }
+//RS             Some(_) => {}
+//RS         }
+//RS     }
+//RS     for identity in new_functions.keys() {
+//RS         if !old_functions.contains_key(identity) {
+//RS             changed.push(identity.clone());
+//RS         }
+//RS     }
+//RS     changed
+//RS }
+//RS 
+//RS fn function_body_changed(
+//RS     old_module: &LoadedModule,
+//RS     old: &Func,
+//RS     new_module: &LoadedModule,
+//RS     new: &Func,
+//RS ) -> bool {
+//RS     let old_source = old_module.source.get(old.span.start..old.span.end);
+//RS     let new_source = new_module.source.get(new.span.start..new.span.end);
+//RS     old_source != new_source || format!("{:?}", old.body) != format!("{:?}", new.body)
+//RS }
+//RS 
+//RS 
+//RS // ── callable identity collection ────────────────────────────────────
+//RS 
+//RS fn callable_functions(m: &LoadedModule) -> std::collections::BTreeMap<String, &Func> {
+//RS     let module = module_identity(m);
+//RS     let mut out = std::collections::BTreeMap::new();
+//RS     for item in &m.items {
+//RS         match item {
+//RS             Item::Func(function) => {
+//RS                 out.insert(format!("{module}::fn:{}", function.name), function);
+//RS             }
+//RS             Item::Struct(definition) => {
+//RS                 for function in &definition.methods {
+//RS                     out.insert(
+//RS                         format!("{module}::struct:{}::method:{}", definition.name, function.name),
+//RS                         function,
+//RS                     );
+//RS                 }
+//RS                 for implementation in &definition.trait_impls {
+//RS                     for function in &implementation.methods {
+//RS                         out.insert(
+//RS                             format!(
+//RS                                 "{module}::struct:{}::trait:{}::method:{}",
+//RS                                 definition.name, implementation.trait_name, function.name
+//RS                             ),
+//RS                             function,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(definition) => {
+//RS                 for function in &definition.methods {
+//RS                     out.insert(
+//RS                         format!("{module}::enum:{}::method:{}", definition.name, function.name),
+//RS                         function,
+//RS                     );
+//RS                 }
+//RS                 for implementation in &definition.trait_impls {
+//RS                     for function in &implementation.methods {
+//RS                         out.insert(
+//RS                             format!(
+//RS                                 "{module}::enum:{}::trait:{}::method:{}",
+//RS                                 definition.name, implementation.trait_name, function.name
+//RS                             ),
+//RS                             function,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Impl(implementation) => {
+//RS                 for function in &implementation.methods {
+//RS                     out.insert(
+//RS                         format!(
+//RS                             "{module}::impl:{}::{}::method:{}",
+//RS                             implementation.type_name,
+//RS                             implementation.trait_name.as_deref().unwrap_or("inherent"),
+//RS                             function.name
+//RS                         ),
+//RS                         function,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn persistent_state_facts(
+//RS     old: Option<&LoadedModule>,
+//RS     new: Option<&LoadedModule>,
+//RS     reason: Option<&str>,
+//RS ) -> Vec<StateRetentionFact> {
+//RS     let old_bindings = persistent_bindings(old);
+//RS     let new_bindings = persistent_bindings(new);
+//RS     let mut keys = old_bindings
+//RS         .keys()
+//RS         .cloned()
+//RS         .collect::<std::collections::BTreeSet<_>>();
+//RS     keys.extend(new_bindings.keys().cloned());
+//RS     let fresh_reason = reason.unwrap_or("persistent state key was added or removed");
+//RS     keys.into_iter()
+//RS         .map(|key| {
+//RS             let old_present = old_bindings.contains_key(&key);
+//RS             let new_present = new_bindings.contains_key(&key);
+//RS             let old_ty = old_bindings.get(&key).copied().flatten();
+//RS             let new_ty = new_bindings.get(&key).copied().flatten();
+//RS             match (old_present, new_present, old_ty, new_ty) {
+//RS                 (true, true, Some(old_ty), Some(new_ty)) if types_eq(old_ty, new_ty) => {
+//RS                     StateRetentionFact::preserve(key)
+//RS                 }
+//RS                 (true, true, Some(_), Some(_)) => StateRetentionFact::fresh(
+//RS                     key,
+//RS                     "persistent binding type changed; reset to the new declaration",
+//RS                 ),
+//RS                 (true, true, _, _) => {
+//RS                     StateRetentionFact::fresh(key, "persistent binding type is unavailable")
+//RS                 }
+//RS                 (true, false, _, _) | (false, true, _, _) => {
+//RS                     StateRetentionFact::fresh(key, fresh_reason)
+//RS                 }
+//RS                 (false, false, _, _) => unreachable!("persistent key came from neither bundle"),
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn persistent_bindings<'a>(
+//RS     module: Option<&'a LoadedModule>,
+//RS ) -> std::collections::BTreeMap<String, Option<&'a Type>> {
+//RS     let Some(module) = module else {
+//RS         return std::collections::BTreeMap::new();
+//RS     };
+//RS     module
+//RS         .items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             Item::Const(constant) if constant.is_persist => Some((
+//RS                 format!("{}::{}", module.alias, constant.name),
+//RS                 constant.ty.as_ref(),
+//RS             )),
+//RS             _ => None,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn module_identity(module: &LoadedModule) -> &str {
+//RS     if module.display.is_empty() {
+//RS         module.alias.as_str()
+//RS     } else {
+//RS         module.display.as_str()
+//RS     }
+//RS }
+//RS 
+//RS // ── per-declaration diffs ───────────────────────────────────────────
+//RS 
+//RS fn struct_diff(name: &str, old: &StructDef, new: &StructDef) -> Option<String> {
+//RS     if !type_params_eq(&old.type_params, &new.type_params) {
+//RS         return Some(format!("struct `{}` changed its type parameters", name));
+//RS     }
+//RS     if old.layout != new.layout {
+//RS         return Some(format!("struct `{}` changed its layout", name));
+//RS     }
+//RS     if old.fields.len() != new.fields.len() {
+//RS         return Some(format!("struct `{}` changed its fields", name));
+//RS     }
+//RS     for (o, n) in old.fields.iter().zip(&new.fields) {
+//RS         if o.name != n.name {
+//RS             return Some(format!(
+//RS                 "struct `{}` renamed field `{}` to `{}`",
+//RS                 name, o.name, n.name
+//RS             ));
+//RS         }
+//RS         if !types_eq(&o.ty, &n.ty) {
+//RS             return Some(format!("struct `{}` retyped field `{}`", name, o.name));
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn enum_diff(name: &str, old: &EnumDef, new: &EnumDef) -> Option<String> {
+//RS     if !type_params_eq(&old.type_params, &new.type_params) {
+//RS         return Some(format!("enum `{}` changed its type parameters", name));
+//RS     }
+//RS     if old.c_layout_tag() != new.c_layout_tag() {
+//RS         return Some(format!("enum `{}` changed its layout", name));
+//RS     }
+//RS     if old.variants.len() != new.variants.len() {
+//RS         return Some(format!("enum `{}` changed its variants", name));
+//RS     }
+//RS     for (o, n) in old.variants.iter().zip(&new.variants) {
+//RS         if o.name != n.name {
+//RS             return Some(format!(
+//RS                 "enum `{}` renamed variant `{}` to `{}`",
+//RS                 name, o.name, n.name
+//RS             ));
+//RS         }
+//RS         if o.discriminant != n.discriminant {
+//RS             return Some(format!(
+//RS                 "enum `{}` changed the discriminant of variant `{}`",
+//RS                 name, o.name
+//RS             ));
+//RS         }
+//RS         if !payload_eq(&o.payload, &n.payload) {
+//RS             return Some(format!(
+//RS                 "enum `{}` changed the payload of variant `{}`",
+//RS                 name, o.name
+//RS             ));
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn fn_sig_diff(name: &str, old: &Func, new: &Func) -> Option<String> {
+//RS     if !type_params_eq(&old.type_params, &new.type_params) {
+//RS         return Some(format!("function `{}` changed its type parameters", name));
+//RS     }
+//RS     if old.params.len() != new.params.len() {
+//RS         return Some(format!("function `{}` changed its parameters", name));
+//RS     }
+//RS     for (o, n) in old.params.iter().zip(&new.params) {
+//RS         if !types_eq(&o.ty, &n.ty) || o.convention != n.convention {
+//RS             return Some(format!("function `{}` changed a parameter type", name));
+//RS         }
+//RS     }
+//RS     if !opt_types_eq(&old.return_type, &new.return_type) {
+//RS         return Some(format!("function `{}` changed its return type", name));
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn type_params_eq(old: &[crate::AST::TypeParam], new: &[crate::AST::TypeParam]) -> bool {
+//RS     old.len() == new.len()
+//RS         && old.iter().zip(new).all(|(left, right)| {
+//RS             left.name == right.name && left.bounds == right.bounds
+//RS         })
+//RS }
+//RS 
+//RS // ── structural type equality ────────────────────────────────────────
+//RS 
+//RS fn types_eq(a: &Type, b: &Type) -> bool {
+//RS     a == b
+//RS }
+//RS 
+//RS fn opt_types_eq(a: &Option<Type>, b: &Option<Type>) -> bool {
+//RS     a == b
+//RS }
+//RS 
+//RS fn payload_eq(a: &VariantPayload, b: &VariantPayload) -> bool {
+//RS     match (a, b) {
+//RS         (VariantPayload::Unit, VariantPayload::Unit) => true,
+//RS         (VariantPayload::Single(ta, _), VariantPayload::Single(tb, _)) => types_eq(ta, tb),
+//RS         (VariantPayload::Named(fa), VariantPayload::Named(fb)) => {
+//RS             fa.len() == fb.len()
+//RS                 && fa
+//RS                     .iter()
+//RS                     .zip(fb)
+//RS                     .all(|(x, y)| x.name == y.name && types_eq(&x.ty, &y.ty))
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+// END-PORT-PENDING 0434 crates/jet-sema/src/Sema/HotSwap.rs:1-579
+

@@ -513,7 +513,7 @@ fn mir_pass_loop_has_early_exit(function: MIRFunction, analysis: MIRPassLoopAnal
     loop block_id in body {
         block :: mir_pass_loop_block(function, analysis, block_id) ?? return true
         if block.terminator == {
-            .Return(_) | .Yield(_, _) | .Break(_, _) | .Unreachable(_) -> return true
+            .Return(_) | .Yield(_, _, _) | .Break(_, _) | .Unreachable(_) -> return true
             else -> {}
         }
         loop successor in mir_terminator_targets(block.terminator) {

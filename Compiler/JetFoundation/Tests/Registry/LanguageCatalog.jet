@@ -1,0 +1,155 @@
+fn language_catalog_expect_return(target: Type, method: String, expected: Type) Never! {
+    actual :: numeric_conversion_return(target, method, 1) ?? panic("missing numeric conversion")
+    assert(type_identity_equal(actual, expected))
+}
+
+#Test("language catalogs preserve frozen order and exclude teaching words") {
+    keywords :: jet_keyword_names()
+    types :: jet_type_names()
+    assert(keywords.len() == 55)
+    assert(types.len() == 39)
+    assert(keywords[0] == "fn")
+    assert(keywords[keywords.len() - 1] == "it")
+    assert(!keywords.contains("comptime"))
+    assert(!keywords.contains("copy"))
+    assert(!keywords.contains("match"))
+    assert(!keywords.contains("Val"))
+    assert(types[4] == "()")
+    assert(types[types.len() - 1] == "F64")
+    assert(!types.contains("Result"))
+    assert(!types.contains("Unit"))
+    assert(types.contains("Shared.Weak"))
+}
+
+#Test("fact_read_members round trips all typed and registered planes") {
+    members :: fact_read_members()
+    assert(members.len() == 22)
+    assert(members[0] == "$layout")
+    assert(members[18] == "$profile")
+    assert(members[19] == "$flow")
+    assert(members[21] == "$duty")
+    loop member in members -> assert(fact_read_kind(member) != None)
+    assert(fact_read_kind("$unknown") == None)
+    assert(fact_read_kind("layout") == None)
+    assert(fact_read_kind("$build.profile") == None)
+    assert(fact_read_source_member(FactRead.RegisteredPlane{name: "Flow"}) == None)
+    assert((fact_read_reflection_kind(FactRead.RegisteredPlane{name: "Type.Interval"}) ?? panic("range reflection")) == "Range")
+    assert(fact_read_reflection_kind(FactRead.RegisteredPlane{name: "unknown"}) == None)
+    assert(fact_read_reflection_kind(FactRead.BuildProfile) == None)
+    assert((fact_read_public_read_type(FactRead.Origin) ?? panic("Origin public carrier")) == "OriginInfo?")
+    assert(fact_read_public_read_type(FactRead.Range) == None)
+    assert((fact_read_detail_field(FactRead.States) ?? panic("States detail")) == "state")
+    assert(fact_read_source_member(FactRead.BuildStampGit) == None)
+}
+
+#Test("numeric catalogs preserve twelve targets and precise source suffixes") {
+    targets :: numeric_conversion_catalog_targets()
+    sources :: numeric_conversion_sources()
+    names := [String]{}
+    loop target in targets -> &names.push(~target.name)
+    assert(names == [String]{"Int", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "Float", "F64", "F32"})
+    assert(sources.len() == 13)
+    assert(sources[1].method == "from_i64")
+    assert(sources[11].source == "Decimal")
+    assert(sources[12].source == "Fraction")
+}
+
+#Test("numeric conversion arity narrowing widening and precise routes") {
+    u8 :: Type.IntN{signed: false, bits: 8}
+    i16 :: Type.IntN{signed: true, bits: 16}
+    checked_u8 :: Type.Result{ok: u8, err: Type.String}
+    language_catalog_expect_return(u8, "from_int", checked_u8)
+    language_catalog_expect_return(u8, "from_u64", checked_u8)
+    language_catalog_expect_return(u8, "from_i8", checked_u8)
+    language_catalog_expect_return(i16, "from_u8", i16)
+    language_catalog_expect_return(Type.Int, "from_u64", Type.Int)
+    language_catalog_expect_return(Type.Int, "from_float", Type.Result{ok: Type.Int, err: Type.String})
+    language_catalog_expect_return(Type.Float32, "from_float", Type.Result{ok: Type.Float32, err: Type.String})
+    language_catalog_expect_return(Type.Float, "from_f32", Type.Float)
+    decimal :: Type.Named{name: "Decimal"}
+    fraction :: Type.Named{name: "Fraction"}
+    language_catalog_expect_return(decimal, "from_fraction", decimal)
+    language_catalog_expect_return(fraction, "from_decimal", fraction)
+    language_catalog_expect_return(Type.Int, "from_decimal", Type.Int)
+    language_catalog_expect_return(Type.Float, "from_fraction", Type.Float)
+    assert(numeric_conversion_return(decimal, "from_u8", 1) == None)
+    assert(numeric_conversion_return(Type.Float32, "from_decimal", 1) == None)
+    assert(numeric_conversion_return(Type.Int, "from_int", 0) == None)
+    assert(numeric_conversion_return(Type.Int, "from_int", 2) == None)
+    assert(numeric_conversion_return(Type.Int, "to_float", 1) == None)
+    assert(numeric_conversion_return(Type.Bool, "from_int", 1) == None)
+    range :: Type.InlineRange{base: Type.Int, lo: 0, hi: 9}
+    language_catalog_expect_return(range, "from_i8", Type.Result{ok: range, err: Type.String})
+}
+
+#Test("numeric lowering preserves unsigned exclusive bounds") {
+    rows :: builtin_static_rows("U64", "from_float")
+    assert(rows.len() == 1)
+    if rows[0].lowering == {
+        .Numeric(.FloatToInt(_, _, _, lower, upper)) -> {
+            assert(lower == "0.0")
+            assert(upper == "18446744073709551616.0")
+        }
+        else -> panic("missing float to unsigned conversion")
+    }
+    parsed :: builtin_static_rows("Int", "parse")
+    assert(parsed.len() == 1)
+    assert(parsed[0].lowering == BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ParseInt})
+}
+
+// Rust Policy::generated_rule_argument_variants_match_canonical_surface.
+// Canonical Core leaf projection, including the exceptional surface spellings.
+#Test("generated_rule_argument_variants_match_canonical_surface") {
+    abi :: foundation_core_menu_variants("ABI", CoreLeafKind.Enum{variants: [String]{"System", "Cdecl", "Stdcall", "Fastcall", "Win64", "Sysv64"}}, [String]{}, [String]{}) ?? panic("ABI menu")
+    assert(abi == [String]{"system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"})
+    ffi :: foundation_core_menu_variants("FFILanguage", CoreLeafKind.Enum{variants: [String]{"C", "Cpp", "Asm"}}, [String]{}, [String]{}) ?? panic("FFI menu")
+    assert(ffi == [String]{"c", "cpp", "asm"})
+    policy :: foundation_core_menu_variants("PolicySetting", CoreLeafKind.Enum{variants: [String]{"Allow", "Deny", "Unsafe", "GC", "ExplicitUnits", "Copies", "Sentries", "Explicit", "On", "Off"}}, [String]{}, [String]{}) ?? panic("policy menu")
+    assert(policy == [String]{"unsafe", "gc", "explicit_units", "copies", "sentries", "Explicit", "On", "Off"})
+    assert((foundation_core_menu_variant("MemoBound", "Unset") ?? panic("MemoBound")) == "none")
+    assert((foundation_core_menu_variant("ObligationMode", "Unspecified") ?? panic("ObligationMode")) == "None")
+    menus :: [TAppliedRuleArgumentMenu]{TAppliedRuleArgumentMenu{name: "ABI", variants: abi, first_variant_segment: false}}
+    menu :: rule_arg_declaration("ABI", menus) ?? panic("lookup ABI")
+    assert(menu.variants == [String]{"system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"})
+    assert(rule_arg_declaration("Value", menus) == None)
+}
+
+// Exact frozen Prelude/Core.jet core.compiler.lang declaration, as a behavioral
+// fixture for the existing declaration parser and canonical menu projection.
+#Test("rule argument lookup consumes canonical embedded Core menus") {
+    source :: "module core.compiler.lang exports {{ ABI, ArithmeticMode, Effect, FFILanguage, InlineMode, JobScope, KernelMode, Layout, Maturity, MemoBound, NamingCase, ObligationMode, Path, PolicySetting, Site, State, TaintKind, Target, Track }} types {{ ABI:plain(System|Cdecl|Stdcall|Fastcall|Win64|Sysv64), ArithmeticMode:plain(Checked|Wrapping|Saturating), Effect:plain(FS|Net|Crypto|Time|Random|Env|Proc|IO|DB|Exec|Browser|Secret), FFILanguage:plain(C|Cpp|Asm), InlineMode:plain(Hint|Always|Never), JobScope:plain(Dev|Ship|Internal), KernelMode:plain(Parallel), Layout:plain(C|Columnar), Maturity:plain(Experimental|Tested|Hardened), MemoBound:plain(Default|Unset), NamingCase:plain(Camel|Snake|Pascal|Kebab|Screaming), ObligationMode:plain(Unspecified|GateOnly|Obligations|PerSite|Track|Skip), Path:plain, PolicySetting:plain(Allow|Deny|Unsafe|GC|ExplicitUnits|Copies|Sentries|Explicit|On|Off), Site:plain(Package|File|Module|Function|Method|Block|Statement|Expression|Type|Impl|Declaration|Constant|Field|Variant|Parameter|Test|Operation|Text), State:plain, TaintKind:plain(Input|PII|Secret|Credential), Target:plain(Native|Web|Wasm|JS|Freestanding|OS), Track:plain(Frontend|Backend|Runtime|Tooling) }} depends_on [core.compiler]"
+    roots :: [String]{"FS", "Net"}
+    tags :: [String]{"Input", "Secret"}
+    menus :: foundation_core_argument_menus_from_source(source, roots, tags) ?? panic("canonical embedded menus")
+    effect_menu :: rule_arg_declaration("Effect", menus) ?? panic("Effect menu")
+    assert(effect_menu.variants == roots)
+    assert(effect_menu.first_variant_segment)
+    target :: rule_arg_declaration("Target", menus) ?? panic("Target menu")
+    assert(target.first_variant_segment)
+    naming :: rule_arg_declaration("NamingCase", menus) ?? panic("NamingCase menu")
+    assert(!naming.first_variant_segment)
+    assert(naming.variants == [String]{"camel", "snake", "pascal", "kebab", "screaming"})
+    layout :: rule_arg_declaration("Layout", menus) ?? panic("Layout menu")
+    assert(layout.variants == [String]{"c", "columnar"})
+    memo :: rule_arg_declaration("MemoBound", menus) ?? panic("MemoBound menu")
+    assert(memo.variants == [String]{"Default", "none"})
+    ints :: rule_arg_declaration("IntType", menus) ?? panic("IntType menu")
+    assert(ints.variants == [String]{"I8", "I16", "I32", "I64", "I128", "U8", "U16", "U32", "U64", "U128"})
+    assert(rule_arg_declaration("Unknown", menus) == None)
+}
+
+// The exact S16 E0120 ownership seam, using the real constructor and decorators.
+#Test("builtin static construction consumes lowering metadata") {
+    owner := "Int"
+    method := "parse"
+    parameters := [Type]{Type.String}
+    return_type := Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}
+    lowering := BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ParseInt}
+    row := builtin_static(^owner, ^method, ^parameters, ^return_type, ^lowering)
+    decorated := builtin_static_in("core.compiler.lang", builtin_static_arity_code(builtin_static_generic(^row, [String]{"T"}, 0), "E0101"))
+    assert(decorated.owner == "Int")
+    assert(decorated.module_name == "core.compiler.lang")
+    assert(decorated.arity_code == "E0101")
+    assert(decorated.type_params == [String]{"T"})
+    assert(decorated.lowering == BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ParseInt})
+}

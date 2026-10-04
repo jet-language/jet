@@ -1,0 +1,1102 @@
+// PORT-PENDING 0448 crates-jet-sema-src-sema-unsafeobligations: crates/jet-sema/src/Sema/UnsafeObligations.rs:1-1098
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-UNSAFE-OBLIG1=A: policy-resolved, typed unsafe operation obligations.
+//RS //!
+//RS //! Assertions are parser-only pseudo calls. This sema pass validates and removes
+//RS //! them before TIR, keeping codegen dumb and preserving AOT/dev parity.
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Policy::{self, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue};
+//RS use crate::Syntax;
+//RS use crate::AST::{EnumLitArg, Expr, Func, Item, LValue, OrFallback, ProgramBundle, Stmt, StrPart};
+//RS use std::collections::BTreeSet;
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub struct UnsafeInspection {
+//RS     pub gates: Vec<UnsafeGateInspection>,
+//RS     pub diagnostics: Vec<UnsafeDiagnostic>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub struct UnsafeDiagnostic {
+//RS     pub source: String,
+//RS     pub diagnostic: Diagnostic,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub struct UnsafeGateInspection {
+//RS     pub source: String,
+//RS     pub span: Span,
+//RS     pub reason: Option<String>,
+//RS     pub mode: String,
+//RS     pub provenance: Vec<String>,
+//RS     pub operations: Vec<UnsafeOperationInspection>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub struct UnsafeOperationInspection {
+//RS     pub kind: String,
+//RS     pub span: Span,
+//RS     pub required: Vec<String>,
+//RS     pub asserted: Vec<String>,
+//RS     pub discharged: bool,
+//RS }
+//RS 
+//RS pub fn inspect(bundle: &ProgramBundle) -> UnsafeInspection {
+//RS     inspect_with_gates(bundle, Policy::GateSet::default())
+//RS }
+//RS 
+//RS pub fn inspect_with_gates(bundle: &ProgramBundle, gates: Policy::GateSet) -> UnsafeInspection {
+//RS     let mut result = UnsafeInspection {
+//RS         gates: Vec::new(),
+//RS         diagnostics: Vec::new(),
+//RS     };
+//RS     for module in &bundle.modules {
+//RS         for item in &module.items {
+//RS             visit_item(
+//RS                 item,
+//RS                 &module.display,
+//RS                 &module.policy_declarations,
+//RS                 &module.rule_facts,
+//RS                 gates,
+//RS                 &mut result,
+//RS             );
+//RS         }
+//RS     }
+//RS     apply_package_surface_policy(bundle, &mut result);
+//RS     result.gates.sort_by(|a, b| {
+//RS         (&a.source, a.span.start, a.span.end).cmp(&(&b.source, b.span.start, b.span.end))
+//RS     });
+//RS     result
+//RS }
+//RS 
+//RS pub(crate) fn check_and_strip_with_gates(
+//RS     bundle: &mut ProgramBundle,
+//RS     gates: Policy::GateSet,
+//RS ) -> Vec<Diagnostic> {
+//RS     let result = inspect_with_gates(bundle, gates);
+//RS     for module in &mut bundle.modules {
+//RS         for item in &mut module.items {
+//RS             strip_item(item);
+//RS         }
+//RS     }
+//RS     result
+//RS         .diagnostics
+//RS         .into_iter()
+//RS         .map(|entry| entry.diagnostic)
+//RS         .collect()
+//RS }
+//RS fn apply_package_surface_policy(bundle: &ProgramBundle, result: &mut UnsafeInspection) {
+//RS     if let Some(allowed_paths) = &bundle.package_guarantees.unsafe_paths {
+//RS         let gates = result
+//RS             .gates
+//RS             .iter()
+//RS             .map(|gate| (gate.source.clone(), gate.span))
+//RS             .collect::<Vec<_>>();
+//RS         for (source, span) in gates {
+//RS             let Some(module) = bundle
+//RS                 .modules
+//RS                 .iter()
+//RS                 .find(|module| module.display == source || module.path.to_string_lossy() == source)
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             let Some(path) = crate::Sema::package_policy_source_path(bundle, module) else {
+//RS                 continue;
+//RS             };
+//RS             if !allowed_paths
+//RS                 .iter()
+//RS                 .any(|allowed| crate::Sema::package_policy_path_covers(allowed, &path))
+//RS             {
+//RS                 push_diagnostic(
+//RS                     result,
+//RS                     &source,
+//RS                     Diagnostic::from_row(
+//RS                         "E2960",
+//RS                         &[
+//RS                             ("rule", "policy.unsafe"),
+//RS                             ("subject", "#Unsafe"),
+//RS                             ("path", &path),
+//RS                         ],
+//RS                         Some(span),
+//RS                     ),
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS     if bundle.package_guarantees.expert == Some(false) {
+//RS         for module in &bundle.modules {
+//RS             let Some(path) = crate::Sema::package_policy_source_path(bundle, module) else {
+//RS                 continue;
+//RS             };
+//RS             if module.no_prelude {
+//RS                 push_diagnostic(
+//RS                     result,
+//RS                     &module.display,
+//RS                     expert_policy_diagnostic("#NoPrelude", &path, None),
+//RS                 );
+//RS             }
+//RS             for item in &module.items {
+//RS                 if let Some((subject, span)) = expert_item(item) {
+//RS                     push_diagnostic(
+//RS                         result,
+//RS                         &module.display,
+//RS                         expert_policy_diagnostic(&subject, &path, Some(span)),
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS fn expert_policy_diagnostic(subject: &str, path: &str, span: Option<Span>) -> Diagnostic {
+//RS     Diagnostic::from_row(
+//RS         "E2960",
+//RS         &[
+//RS             ("rule", "policy.expert"),
+//RS             ("subject", subject),
+//RS             ("path", path),
+//RS         ],
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS fn expert_item(item: &Item) -> Option<(String, Span)> {
+//RS     match item {
+//RS         Item::Func(function) => {
+//RS             if function.is_replayable {
+//RS                 return Some((
+//RS                     "#Replayable".to_string(),
+//RS                     function.replayable_span.unwrap_or(function.name_span),
+//RS                 ));
+//RS             }
+//RS             expert_body(&function.body)
+//RS         }
+//RS         Item::Struct(definition) => {
+//RS             definition
+//RS                 .methods
+//RS                 .iter()
+//RS                 .find_map(expert_function)
+//RS                 .or_else(|| {
+//RS                     definition
+//RS                         .trait_impls
+//RS                         .iter()
+//RS                         .flat_map(|implementation| implementation.methods.iter())
+//RS                         .find_map(expert_function)
+//RS                 })
+//RS         }
+//RS         Item::Enum(definition) => {
+//RS             definition
+//RS                 .methods
+//RS                 .iter()
+//RS                 .find_map(expert_function)
+//RS                 .or_else(|| {
+//RS                     definition
+//RS                         .trait_impls
+//RS                         .iter()
+//RS                         .flat_map(|implementation| implementation.methods.iter())
+//RS                         .find_map(expert_function)
+//RS                 })
+//RS         }
+//RS         Item::Impl(implementation) => implementation.methods.iter().find_map(expert_function),
+//RS         Item::Test(test) => expert_body(&test.body),
+//RS         Item::CodeModule(module) => module
+//RS             .body
+//RS             .as_ref()
+//RS             .and_then(|items| items.iter().find_map(expert_item)),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn expert_function(function: &Func) -> Option<(String, Span)> {
+//RS     if function.is_replayable {
+//RS         Some((
+//RS             "#Replayable".to_string(),
+//RS             function.replayable_span.unwrap_or(function.name_span),
+//RS         ))
+//RS     } else {
+//RS         expert_body(&function.body)
+//RS     }
+//RS }
+//RS 
+//RS fn expert_body(body: &[Stmt]) -> Option<(String, Span)> {
+//RS     for statement in body {
+//RS         let found = match statement {
+//RS             Stmt::Impure { span, .. } => Some(("#Impure".to_string(), *span)),
+//RS             Stmt::Shield { span, .. } => Some(("#Shield".to_string(), *span)),
+//RS             Stmt::Region { span, .. } => Some(("#Region".to_string(), *span)),
+//RS             Stmt::AuthorityScope { span, .. } => Some(("#FX".to_string(), *span)),
+//RS             Stmt::ContextBlock { span, .. } => Some(("#Context".to_string(), *span)),
+//RS             Stmt::Transact { span, .. } => Some(("#Transact".to_string(), *span)),
+//RS             Stmt::Live { span, .. } => Some(("#Live".to_string(), *span)),
+//RS             Stmt::AssumeDet { span, .. } => Some(("assume_deterministic".to_string(), *span)),
+//RS             Stmt::Val(binding) if binding.uninit => Some(("uninit".to_string(), binding.name_span)),
+//RS             _ => nested_bodies(statement).into_iter().find_map(expert_body),
+//RS         };
+//RS         if found.is_some() {
+//RS             return found;
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn push_diagnostic(result: &mut UnsafeInspection, source: &str, diagnostic: Diagnostic) {
+//RS     result.diagnostics.push(UnsafeDiagnostic {
+//RS         source: source.to_string(),
+//RS         diagnostic,
+//RS     });
+//RS }
+//RS 
+//RS fn visit_item(
+//RS     item: &Item,
+//RS     source: &str,
+//RS     declarations: &[PolicyDeclaration],
+//RS     rule_facts: &[crate::AST::AppliedRuleApplication],
+//RS     gates: Policy::GateSet,
+//RS     result: &mut UnsafeInspection,
+//RS ) {
+//RS     match item {
+//RS         Item::Func(function) => {
+//RS             visit_function(function, source, declarations, rule_facts, gates, result)
+//RS         }
+//RS         Item::Struct(definition) => {
+//RS             for function in &definition.methods {
+//RS                 visit_function(function, source, declarations, rule_facts, gates, result);
+//RS             }
+//RS             for implementation in &definition.trait_impls {
+//RS                 for function in &implementation.methods {
+//RS                     visit_function(function, source, declarations, rule_facts, gates, result);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Item::Enum(definition) => {
+//RS             for function in &definition.methods {
+//RS                 visit_function(function, source, declarations, rule_facts, gates, result);
+//RS             }
+//RS             for implementation in &definition.trait_impls {
+//RS                 for function in &implementation.methods {
+//RS                     visit_function(function, source, declarations, rule_facts, gates, result);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Item::Impl(implementation) => {
+//RS             for function in &implementation.methods {
+//RS                 visit_function(function, source, declarations, rule_facts, gates, result);
+//RS             }
+//RS         }
+//RS         Item::Test(test) => visit_plain_body(&test.body, source, declarations, gates, result),
+//RS         Item::CodeModule(module) => {
+//RS             if let Some(items) = &module.body {
+//RS                 for item in items {
+//RS                     visit_item(item, source, declarations, rule_facts, gates, result);
+//RS                 }
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn visit_function(
+//RS     function: &Func,
+//RS     source: &str,
+//RS     declarations: &[PolicyDeclaration],
+//RS     rule_facts: &[crate::AST::AppliedRuleApplication],
+//RS     gates: Policy::GateSet,
+//RS     result: &mut UnsafeInspection,
+//RS ) {
+//RS     if function.is_unsafe {
+//RS         let source_has_reason = rule_facts.iter().any(|application| {
+//RS             application.target == Some(function.span)
+//RS                 && application.marker.name == Syntax::KW_UNSAFE
+//RS                 && !application.marker.args.is_empty()
+//RS         });
+//RS         visit_gate(
+//RS             function.span,
+//RS             function.unsafe_span.unwrap_or(function.span),
+//RS             true,
+//RS             function.unsafe_reason.as_deref(),
+//RS             source_has_reason,
+//RS             &function.body,
+//RS             source,
+//RS             declarations,
+//RS             gates,
+//RS             result,
+//RS         );
+//RS     } else {
+//RS         visit_plain_body(&function.body, source, declarations, gates, result);
+//RS     }
+//RS }
+//RS 
+//RS fn visit_plain_body(
+//RS     body: &[Stmt],
+//RS     source: &str,
+//RS     declarations: &[PolicyDeclaration],
+//RS     gates: Policy::GateSet,
+//RS     result: &mut UnsafeInspection,
+//RS ) {
+//RS     visit_nested_gates(body, source, declarations, gates, result);
+//RS     reject_assertions_outside_gate(body, source, result);
+//RS }
+//RS 
+//RS fn visit_nested_gates(
+//RS     body: &[Stmt],
+//RS     source: &str,
+//RS     declarations: &[PolicyDeclaration],
+//RS     gates: Policy::GateSet,
+//RS     result: &mut UnsafeInspection,
+//RS ) {
+//RS     for statement in body {
+//RS         match statement {
+//RS             Stmt::Unsafe {
+//RS                 audit,
+//RS                 audit_expr,
+//RS                 body,
+//RS                 span,
+//RS             } => visit_gate(
+//RS                 *span,
+//RS                 *span,
+//RS                 false,
+//RS                 audit.as_deref(),
+//RS                 audit_expr.is_some(),
+//RS                 body,
+//RS                 source,
+//RS                 declarations,
+//RS                 gates,
+//RS                 result,
+//RS             ),
+//RS             _ => {
+//RS                 for nested in nested_bodies(statement) {
+//RS                     visit_nested_gates(nested, source, declarations, gates, result);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn visit_gate(
+//RS     target: Span,
+//RS     gate_span: Span,
+//RS     is_function: bool,
+//RS     reason: Option<&str>,
+//RS     source_has_reason: bool,
+//RS     body: &[Stmt],
+//RS     source: &str,
+//RS     declarations: &[PolicyDeclaration],
+//RS     gates: Policy::GateSet,
+//RS     result: &mut UnsafeInspection,
+//RS ) {
+//RS     let outer = declarations
+//RS         .iter()
+//RS         .filter(|declaration| {
+//RS             declaration.key == PolicyKey::Unsafe
+//RS                 && matches!(
+//RS                     declaration.scope,
+//RS                     PolicyScope::Organization | PolicyScope::Package | PolicyScope::Module
+//RS                 )
+//RS         })
+//RS         .cloned()
+//RS         .collect::<Vec<_>>();
+//RS     let site = declarations
+//RS         .iter()
+//RS         .filter(|declaration| {
+//RS             declaration.key == PolicyKey::Unsafe && declaration.target == Some(target)
+//RS         })
+//RS         .cloned()
+//RS         .collect::<Vec<_>>();
+//RS     let outer_policy = Policy::resolve_with_gates(PolicyKey::Unsafe, outer.clone(), &gates)
+//RS         .ok()
+//RS         .flatten();
+//RS     let mut chain = outer;
+//RS     chain.extend(site.clone());
+//RS     let effective = match Policy::resolve_with_gates(PolicyKey::Unsafe, chain, &gates) {
+//RS         Ok(policy) => policy,
+//RS         Err(_error) => {
+//RS             let code = if gates.allows(PolicyKey::Unsafe) {
+//RS                 "E3415"
+//RS             } else {
+//RS                 "E0355"
+//RS             };
+//RS             push_diagnostic(result, source, Diagnostic::error(code, "audited gate denied by effective policy".to_string(), "an organization or package policy can refuse an audited escape, including its invocation gate".to_string(), "remove `--gate unsafe=allow` or change the owning policy".to_string(), Some(gate_span)));
+//RS             None
+//RS         }
+//RS     };
+//RS     let mut value = effective
+//RS         .as_ref()
+//RS         .map(|policy| policy.value)
+//RS         .unwrap_or(Policy::default_gate_value(PolicyKey::Unsafe));
+//RS     if matches!(value, PolicyValue::PerSite) {
+//RS         push_diagnostic(
+//RS             result,
+//RS             source,
+//RS             Diagnostic::error(
+//RS                 "E3106",
+//RS                 "this unsafe gate must choose an obligation mode".to_string(),
+//RS                 "the effective `.PerSite` policy requires every gate to select `.Track` or `.Skip`"
+//RS                     .to_string(),
+//RS                 "add `obligations: .Track` (or `.Skip` when organization policy permits it)"
+//RS                     .to_string(),
+//RS                 Some(gate_span),
+//RS             ),
+//RS         );
+//RS         value = PolicyValue::Track;
+//RS     }
+//RS     if site
+//RS         .iter()
+//RS         .any(|declaration| declaration.value == PolicyValue::Skip)
+//RS         && !matches!(
+//RS             outer_policy.as_ref().map(|policy| policy.value),
+//RS             Some(PolicyValue::PerSite)
+//RS         )
+//RS     {
+//RS         push_diagnostic(result, source, Diagnostic::error("E3106", "this unsafe gate cannot skip obligations".to_string(), "`.Skip` is site control for an effective `.PerSite` package policy; it is not ambient authorization".to_string(), "set package policy to `.PerSite`, or remove `.Skip`".to_string(), Some(gate_span)));
+//RS         value = PolicyValue::Track;
+//RS     }
+//RS     if value == PolicyValue::Forbid {
+//RS         push_diagnostic(
+//RS             result,
+//RS             source,
+//RS             Diagnostic::error(
+//RS                 "E3105",
+//RS                 "organization or package policy forbids unsafe code".to_string(),
+//RS                 "a lexical `#Unsafe` gate cannot widen the effective safety floor".to_string(),
+//RS                 "remove the low-level operation or change the outer policy through its owner"
+//RS                     .to_string(),
+//RS                 Some(gate_span),
+//RS             ),
+//RS         );
+//RS     } else if reason.is_none() && !source_has_reason && value != PolicyValue::Relaxed {
+//RS         let (what, why, fix) = if is_function {
+//RS             (
+//RS                 "this `#Unsafe` function has no reason",
+//RS                 "every gated function records why callers can rely on its unsafe contract",
+//RS                 "add the reason: `#Unsafe(\"why this is safe\") fn ...`",
+//RS             )
+//RS         } else {
+//RS             (
+//RS                 "this `#Unsafe` block has no reason",
+//RS                 "every gated region records why it can't break memory safety",
+//RS                 "add the reason: `#Unsafe(\"why this is safe\") { … }`",
+//RS             )
+//RS         };
+//RS         push_diagnostic(
+//RS             result,
+//RS             source,
+//RS             Diagnostic::error(
+//RS                 "E3112",
+//RS                 what.to_string(),
+//RS                 why.to_string(),
+//RS                 fix.to_string(),
+//RS                 Some(gate_span),
+//RS             ),
+//RS         );
+//RS     }
+//RS 
+//RS     let mut gate = UnsafeGateInspection {
+//RS         source: source.to_string(),
+//RS         span: gate_span,
+//RS         reason: reason.map(str::to_string),
+//RS         mode: mode_name(value).to_string(),
+//RS         provenance: effective
+//RS             .as_ref()
+//RS             .map(|policy| {
+//RS                 policy
+//RS                     .provenance
+//RS                     .iter()
+//RS                     .map(|declaration| {
+//RS                         format!(
+//RS                             "{}:{}:{}..{}={}",
+//RS                             declaration.scope.name(),
+//RS                             declaration.source,
+//RS                             declaration.span.start,
+//RS                             declaration.span.end,
+//RS                             declaration.value.display()
+//RS                         )
+//RS                     })
+//RS                     .collect()
+//RS             })
+//RS             .unwrap_or_default(),
+//RS         operations: Vec::new(),
+//RS     };
+//RS     scan_sequence(
+//RS         body,
+//RS         requires_obligations(value),
+//RS         &mut gate,
+//RS         source,
+//RS         &mut result.diagnostics,
+//RS     );
+//RS     result.gates.push(gate);
+//RS     visit_nested_gates(body, source, declarations, gates, result);
+//RS }
+//RS 
+//RS fn mode_name(value: PolicyValue) -> &'static str {
+//RS     match value {
+//RS         PolicyValue::Obligations | PolicyValue::Track => "Obligations",
+//RS         PolicyValue::Relaxed => "Relaxed",
+//RS         PolicyValue::PerSite => "PerSite",
+//RS         PolicyValue::Skip | PolicyValue::Default | PolicyValue::GateOnly => "GateOnly",
+//RS         PolicyValue::Forbid => "Forbid",
+//RS         _ => "GateOnly",
+//RS     }
+//RS }
+//RS 
+//RS fn requires_obligations(value: PolicyValue) -> bool {
+//RS     matches!(value, PolicyValue::Obligations | PolicyValue::Track)
+//RS }
+//RS 
+//RS fn scan_sequence(
+//RS     body: &[Stmt],
+//RS     track: bool,
+//RS     gate: &mut UnsafeGateInspection,
+//RS     source: &str,
+//RS     diagnostics: &mut Vec<UnsafeDiagnostic>,
+//RS ) {
+//RS     let mut pending_operations = Vec::new();
+//RS     for statement in body {
+//RS         if let Some((names, span)) = assertion(statement) {
+//RS             if pending_operations.is_empty() {
+//RS                 diagnostics.push(UnsafeDiagnostic { source: source.to_string(), diagnostic: Diagnostic::error("E3108", "this unsafe assertion has no preceding operation".to_string(), "typed obligations attach only to the immediately preceding low-level operation statement".to_string(), "move the assertion directly after the operation it proves".to_string(), Some(span)) });
+//RS                 continue;
+//RS             }
+//RS             let mut asserted = BTreeSet::new();
+//RS             for name in names {
+//RS                 if matches!(
+//RS                     name.as_str(),
+//RS                     Syntax::UNSAFE_OBLIGATION_VALID_PTR
+//RS                         | Syntax::UNSAFE_OBLIGATION_ALIGNED
+//RS                         | Syntax::UNSAFE_OBLIGATION_NO_ALIAS
+//RS                 ) {
+//RS                     asserted.insert(name);
+//RS                 } else {
+//RS                     diagnostics.push(UnsafeDiagnostic { source: source.to_string(), diagnostic: Diagnostic::error("E3108", format!("`{name}` is not an unsafe obligation"), "unsafe proofs use the closed typed set `valid_ptr`, `aligned`, and `no_alias`".to_string(), "fix the obligation name".to_string(), Some(span)) });
+//RS                 }
+//RS             }
+//RS             discharge_operations(
+//RS                 &pending_operations,
+//RS                 &asserted,
+//RS                 track,
+//RS                 gate,
+//RS                 source,
+//RS                 diagnostics,
+//RS             );
+//RS             pending_operations.clear();
+//RS             continue;
+//RS         }
+//RS         discharge_operations(
+//RS             &pending_operations,
+//RS             &BTreeSet::new(),
+//RS             track,
+//RS             gate,
+//RS             source,
+//RS             diagnostics,
+//RS         );
+//RS         pending_operations.clear();
+//RS         if matches!(statement, Stmt::Unsafe { .. }) {
+//RS             continue;
+//RS         }
+//RS         let mut operations = Vec::new();
+//RS         collect_shallow_operations(statement, &mut operations);
+//RS         pending_operations.extend(operations);
+//RS         for nested in nested_bodies(statement) {
+//RS             scan_sequence(nested, track, gate, source, diagnostics);
+//RS         }
+//RS     }
+//RS     discharge_operations(
+//RS         &pending_operations,
+//RS         &BTreeSet::new(),
+//RS         track,
+//RS         gate,
+//RS         source,
+//RS         diagnostics,
+//RS     );
+//RS }
+//RS 
+//RS fn discharge_operations(
+//RS     operations: &[(&'static str, Span, Vec<&'static str>)],
+//RS     asserted: &BTreeSet<String>,
+//RS     track: bool,
+//RS     gate: &mut UnsafeGateInspection,
+//RS     source: &str,
+//RS     diagnostics: &mut Vec<UnsafeDiagnostic>,
+//RS ) {
+//RS     for (kind, span, required) in operations {
+//RS         let missing = required
+//RS             .iter()
+//RS             .filter(|name| !asserted.contains(**name))
+//RS             .copied()
+//RS             .collect::<Vec<_>>();
+//RS         let discharged = !track || missing.is_empty();
+//RS         if track && !missing.is_empty() {
+//RS             diagnostics.push(UnsafeDiagnostic { source: source.to_string(), diagnostic: Diagnostic::error("E3107", format!("`{kind}` is missing unsafe obligations: {}", missing.join(", ")), "the effective `.Obligations` policy requires a typed proof immediately after each low-level operation".to_string(), format!("add `assert {}` immediately after this operation", required.join(", ")), Some(*span)) });
+//RS         }
+//RS         gate.operations.push(UnsafeOperationInspection {
+//RS             kind: (*kind).to_string(),
+//RS             span: *span,
+//RS             required: required.iter().map(|name| (*name).to_string()).collect(),
+//RS             asserted: asserted.iter().cloned().collect(),
+//RS             discharged,
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn assertion(statement: &Stmt) -> Option<(Vec<String>, Span)> {
+//RS     let Stmt::Expr(Expr::Call(call)) = statement else {
+//RS         return None;
+//RS     };
+//RS     if call.name != Syntax::INTERNAL_UNSAFE_ASSERT {
+//RS         return None;
+//RS     }
+//RS     Some((
+//RS         call.args
+//RS             .iter()
+//RS             .filter_map(|argument| match &argument.expr {
+//RS                 Expr::Ident(name, _) => Some(name.clone()),
+//RS                 _ => None,
+//RS             })
+//RS             .collect(),
+//RS         call.name_span,
+//RS     ))
+//RS }
+//RS 
+//RS fn collect_shallow_operations(
+//RS     statement: &Stmt,
+//RS     out: &mut Vec<(&'static str, Span, Vec<&'static str>)>,
+//RS ) {
+//RS     match statement {
+//RS         Stmt::Expr(expression)
+//RS         | Stmt::DeferClose {
+//RS             close: expression, ..
+//RS         }
+//RS         | Stmt::Return(Some(expression), _) => collect_expr_operations(expression, out),
+//RS         Stmt::Val(binding) => collect_expr_operations(&binding.init, out),
+//RS         Stmt::Assign { target, value, .. } => {
+//RS             collect_lvalue_operations(target, out);
+//RS             collect_expr_operations(value, out);
+//RS         }
+//RS         Stmt::While { cond, .. } => collect_expr_operations(cond, out),
+//RS         Stmt::CountedLoop {
+//RS             init, cond, step, ..
+//RS         } => {
+//RS             collect_expr_operations(&init.init, out);
+//RS             collect_expr_operations(cond, out);
+//RS             if let Some(step) = step {
+//RS                 collect_shallow_operations(step, out);
+//RS             }
+//RS         }
+//RS         Stmt::For { kind, .. } => match kind {
+//RS             crate::AST::ForKind::Range {
+//RS                 start,
+//RS                 end,
+//RS                 step,
+//RS                 exclusive: _,
+//RS             } => {
+//RS                 collect_expr_operations(start, out);
+//RS                 collect_expr_operations(end, out);
+//RS                 if let Some(step) = step {
+//RS                     collect_expr_operations(step, out);
+//RS                 }
+//RS             }
+//RS             crate::AST::ForKind::In { collection, step } => {
+//RS                 collect_expr_operations(collection, out);
+//RS                 if let Some(step) = step {
+//RS                     collect_expr_operations(step, out);
+//RS                 }
+//RS             }
+//RS         },
+//RS         Stmt::Switch { subject, .. } => collect_expr_operations(subject, out),
+//RS         Stmt::ComptimeIf { cond, .. } => collect_expr_operations(cond, out),
+//RS         Stmt::ComptimeSwitch { subject, .. } => collect_expr_operations(subject, out),
+//RS         Stmt::ContextBlock { fields, .. } => {
+//RS             for (_, value, _) in fields {
+//RS                 collect_expr_operations(value, out);
+//RS             }
+//RS         }
+//RS         Stmt::ScopeMember { args, .. } => {
+//RS             for argument in args {
+//RS                 collect_expr_operations(argument, out);
+//RS             }
+//RS         }
+//RS         Stmt::Yield(value, _) => collect_expr_operations(value, out),
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn collect_lvalue_operations(
+//RS     value: &LValue,
+//RS     out: &mut Vec<(&'static str, Span, Vec<&'static str>)>,
+//RS ) {
+//RS     match value {
+//RS         LValue::Local { .. } => {}
+//RS         LValue::Index { base, index, .. } => {
+//RS             collect_expr_operations(base, out);
+//RS             collect_expr_operations(index, out);
+//RS         }
+//RS         LValue::Field { base, .. } => collect_expr_operations(base, out),
+//RS     }
+//RS }
+//RS 
+//RS fn collect_expr_operations(
+//RS     expression: &Expr,
+//RS     out: &mut Vec<(&'static str, Span, Vec<&'static str>)>,
+//RS ) {
+//RS     match expression {
+//RS         Expr::PtrFromAddr { addr, span, .. } => {
+//RS             out.push((
+//RS                 "pointer_from_address",
+//RS                 *span,
+//RS                 vec![
+//RS                     Syntax::UNSAFE_OBLIGATION_VALID_PTR,
+//RS                     Syntax::UNSAFE_OBLIGATION_ALIGNED,
+//RS                 ],
+//RS             ));
+//RS             collect_expr_operations(addr, out);
+//RS         }
+//RS         Expr::Deref(inner, span) => {
+//RS             out.push((
+//RS                 "dereference",
+//RS                 *span,
+//RS                 vec![
+//RS                     Syntax::UNSAFE_OBLIGATION_VALID_PTR,
+//RS                     Syntax::UNSAFE_OBLIGATION_ALIGNED,
+//RS                 ],
+//RS             ));
+//RS             collect_expr_operations(inner, out);
+//RS         }
+//RS         Expr::RawOf(inner, span) => {
+//RS             out.push((
+//RS                 "raw_pointer",
+//RS                 *span,
+//RS                 vec![Syntax::UNSAFE_OBLIGATION_NO_ALIAS],
+//RS             ));
+//RS             collect_expr_operations(inner, out);
+//RS         }
+//RS         Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             method_span,
+//RS             ..
+//RS         } => {
+//RS             let required = match method.as_str() {
+//RS                 "volatile_read" => Some((
+//RS                     "volatile_read",
+//RS                     vec![
+//RS                         Syntax::UNSAFE_OBLIGATION_VALID_PTR,
+//RS                         Syntax::UNSAFE_OBLIGATION_ALIGNED,
+//RS                     ],
+//RS                 )),
+//RS                 "volatile_write" => Some((
+//RS                     "volatile_write",
+//RS                     vec![
+//RS                         Syntax::UNSAFE_OBLIGATION_VALID_PTR,
+//RS                         Syntax::UNSAFE_OBLIGATION_ALIGNED,
+//RS                         Syntax::UNSAFE_OBLIGATION_NO_ALIAS,
+//RS                     ],
+//RS                 )),
+//RS                 "cast_ptr" => Some((
+//RS                     "pointer_cast",
+//RS                     vec![
+//RS                         Syntax::UNSAFE_OBLIGATION_VALID_PTR,
+//RS                         Syntax::UNSAFE_OBLIGATION_ALIGNED,
+//RS                     ],
+//RS                 )),
+//RS                 _ => None,
+//RS             };
+//RS             if let Some((kind, obligations)) = required {
+//RS                 out.push((kind, *method_span, obligations));
+//RS             }
+//RS             collect_expr_operations(receiver, out);
+//RS             for argument in args {
+//RS                 collect_expr_operations(&argument.expr, out);
+//RS             }
+//RS         }
+//RS         Expr::Call(call) => {
+//RS             for argument in &call.args {
+//RS                 collect_expr_operations(&argument.expr, out);
+//RS             }
+//RS         }
+//RS         Expr::Str(parts, _) => {
+//RS             for part in parts {
+//RS                 if let StrPart::Interp(value, _) = part {
+//RS                     collect_expr_operations(value, out);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Expr::Binary(_, left, right, _) => {
+//RS             collect_expr_operations(left, out);
+//RS             collect_expr_operations(right, out);
+//RS         }
+//RS         Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
+//RS             for operand in operands {
+//RS                 collect_expr_operations(operand, out);
+//RS             }
+//RS         }
+//RS         Expr::Index { base, index, .. } => {
+//RS             collect_expr_operations(base, out);
+//RS             collect_expr_operations(index, out);
+//RS         }
+//RS         Expr::Slice {
+//RS             base,
+//RS             start,
+//RS             end,
+//RS             range,
+//RS             ..
+//RS         } => {
+//RS             collect_expr_operations(base, out);
+//RS             if let Some(range) = range {
+//RS                 collect_expr_operations(range, out);
+//RS             } else {
+//RS                 collect_expr_operations(start, out);
+//RS                 collect_expr_operations(end, out);
+//RS             }
+//RS         }
+//RS         Expr::Range { start, end, .. } => {
+//RS             collect_expr_operations(start, out);
+//RS             collect_expr_operations(end, out);
+//RS         }
+//RS         Expr::Unary(_, inner, _)
+//RS         | Expr::Copy(inner, _)
+//RS         | Expr::Place(inner, _, _)
+//RS         | Expr::Field(inner, _, _)
+//RS         | Expr::OptField { base: inner, .. }
+//RS         | Expr::Paren(inner, _)
+//RS         | Expr::Spread(inner, _) => collect_expr_operations(inner, out),
+//RS         Expr::StructLit { fields, .. } => {
+//RS             for (_, _, value) in fields {
+//RS                 collect_expr_operations(value, out);
+//RS             }
+//RS         }
+//RS         Expr::TypedLit { body, .. } => {
+//RS             body.for_each_expr(|value| collect_expr_operations(value, out))
+//RS         }
+//RS         Expr::EnumLit { args, .. } => {
+//RS             for argument in args {
+//RS                 match argument {
+//RS                     EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => {
+//RS                         collect_expr_operations(value, out)
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         Expr::MapLit(entries, _) => {
+//RS             for (key, value) in entries {
+//RS                 collect_expr_operations(key, out);
+//RS                 collect_expr_operations(value, out);
+//RS             }
+//RS         }
+//RS         Expr::TupleLit(fields, _, _) => {
+//RS             for (_, value) in fields {
+//RS                 collect_expr_operations(value, out);
+//RS             }
+//RS         }
+//RS         Expr::CallValue { callee, args, .. } => {
+//RS             collect_expr_operations(callee, out);
+//RS             for argument in args {
+//RS                 collect_expr_operations(&argument.expr, out);
+//RS             }
+//RS         }
+//RS         Expr::Tainted(inner, _, _)
+//RS         | Expr::Present(inner, _)
+//RS         | Expr::Ok(inner, _)
+//RS         | Expr::Err(inner, _) => collect_expr_operations(inner, out),
+//RS         Expr::Try(inner, _, _, note) => {
+//RS             collect_expr_operations(inner, out);
+//RS             if let Some(note) = note {
+//RS                 collect_expr_operations(note, out);
+//RS             }
+//RS         }
+//RS         Expr::PatternTest { subject, .. } => collect_expr_operations(subject, out),
+//RS         Expr::OrFallback {
+//RS             value, fallback, ..
+//RS         } => {
+//RS             collect_expr_operations(value, out);
+//RS             match fallback {
+//RS                 OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
+//RS                     collect_expr_operations(value, out)
+//RS                 }
+//RS                 OrFallback::Block { body, value, .. } => {
+//RS                     for statement in body {
+//RS                         collect_shallow_operations(statement, out);
+//RS                     }
+//RS                     if let Some(value) = value {
+//RS                         collect_expr_operations(value, out);
+//RS                     }
+//RS                 }
+//RS                 OrFallback::Panic { args, .. } => {
+//RS                     for argument in args {
+//RS                         collect_expr_operations(&argument.expr, out);
+//RS                     }
+//RS                 }
+//RS                 OrFallback::Return(None, _)
+//RS                 | OrFallback::Break(_)
+//RS                 | OrFallback::Continue(_)
+//RS                 | OrFallback::BreakLabel(..)
+//RS                 | OrFallback::ContinueLabel(..) => {}
+//RS             }
+//RS         }
+//RS         Expr::If {
+//RS             cond,
+//RS             then_value,
+//RS             else_value,
+//RS             ..
+//RS         } => {
+//RS             collect_expr_operations(cond, out);
+//RS             collect_expr_operations(then_value, out);
+//RS             collect_expr_operations(else_value, out);
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn nested_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
+//RS     match statement {
+//RS         Stmt::While { body, .. }
+//RS         | Stmt::For { body, .. }
+//RS         | Stmt::Loop { body, .. }
+//RS         | Stmt::CountedLoop { body, .. }
+//RS         | Stmt::Impure { body, .. }
+//RS         | Stmt::Reactive { body, .. }
+//RS         | Stmt::Shield { body, .. }
+//RS         | Stmt::Switched { body, .. }
+//RS         | Stmt::Region { body, .. }
+//RS         | Stmt::Policy { body, .. }
+//RS         | Stmt::TaskGroup { body, .. }
+//RS         | Stmt::Layout { body, .. }
+//RS         | Stmt::AuthorityScope { body, .. }
+//RS         | Stmt::Transact { body, .. }
+//RS         | Stmt::ContextBlock { body, .. }
+//RS         | Stmt::Live { body, .. }
+//RS         | Stmt::AssumeDet { body, .. } => vec![body],
+//RS         Stmt::Switch {
+//RS             arms, else_body, ..
+//RS         } => arms
+//RS             .iter()
+//RS             .map(|arm| arm.body.as_slice())
+//RS             .chain(else_body.iter().map(Vec::as_slice))
+//RS             .collect(),
+//RS         Stmt::ComptimeIf {
+//RS             then_body,
+//RS             else_body,
+//RS             ..
+//RS         } => std::iter::once(then_body.as_slice())
+//RS             .chain(else_body.iter().map(Vec::as_slice))
+//RS             .collect(),
+//RS         Stmt::ComptimeSwitch {
+//RS             arms, else_body, ..
+//RS         } => arms
+//RS             .iter()
+//RS             .map(|arm| arm.body.as_slice())
+//RS             .chain(else_body.iter().map(Vec::as_slice))
+//RS             .collect(),
+//RS         Stmt::ComptimeBlock { body, .. } | Stmt::ScopeMember { body, .. } => vec![body],
+//RS         _ => Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn reject_assertions_outside_gate(body: &[Stmt], source: &str, result: &mut UnsafeInspection) {
+//RS     for statement in body {
+//RS         if let Some((_, span)) = assertion(statement) {
+//RS             push_diagnostic(result, source, Diagnostic::error("E3108", "unsafe obligations can only be asserted inside `#Unsafe`".to_string(), "the assertion discharges one tracked low-level operation and has no ambient meaning".to_string(), "move it immediately after an operation inside the audited gate".to_string(), Some(span)));
+//RS         }
+//RS         if !matches!(statement, Stmt::Unsafe { .. }) {
+//RS             for nested in nested_bodies(statement) {
+//RS                 reject_assertions_outside_gate(nested, source, result);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn strip_item(item: &mut Item) {
+//RS     match item {
+//RS         Item::Func(function) => strip_body(&mut function.body),
+//RS         Item::Struct(definition) => {
+//RS             for function in &mut definition.methods {
+//RS                 strip_body(&mut function.body);
+//RS             }
+//RS             for implementation in &mut definition.trait_impls {
+//RS                 for function in &mut implementation.methods {
+//RS                     strip_body(&mut function.body);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Item::Enum(definition) => {
+//RS             for function in &mut definition.methods {
+//RS                 strip_body(&mut function.body);
+//RS             }
+//RS             for implementation in &mut definition.trait_impls {
+//RS                 for function in &mut implementation.methods {
+//RS                     strip_body(&mut function.body);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Item::Impl(implementation) => {
+//RS             for function in &mut implementation.methods {
+//RS                 strip_body(&mut function.body);
+//RS             }
+//RS         }
+//RS         Item::Test(test) => strip_body(&mut test.body),
+//RS         Item::CodeModule(module) => {
+//RS             if let Some(items) = &mut module.body {
+//RS                 for item in items {
+//RS                     strip_item(item);
+//RS                 }
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn strip_body(body: &mut Vec<Stmt>) {
+//RS     body.retain(|statement| assertion(statement).is_none());
+//RS     for statement in body {
+//RS         for nested in nested_bodies_mut(statement) {
+//RS             strip_body(nested);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn nested_bodies_mut(statement: &mut Stmt) -> Vec<&mut Vec<Stmt>> {
+//RS     match statement {
+//RS         Stmt::Unsafe { body, .. }
+//RS         | Stmt::While { body, .. }
+//RS         | Stmt::For { body, .. }
+//RS         | Stmt::Loop { body, .. }
+//RS         | Stmt::CountedLoop { body, .. }
+//RS         | Stmt::Impure { body, .. }
+//RS         | Stmt::Reactive { body, .. }
+//RS         | Stmt::Shield { body, .. }
+//RS         | Stmt::Switched { body, .. }
+//RS         | Stmt::Region { body, .. }
+//RS         | Stmt::Policy { body, .. }
+//RS         | Stmt::TaskGroup { body, .. }
+//RS         | Stmt::Layout { body, .. }
+//RS         | Stmt::AuthorityScope { body, .. }
+//RS         | Stmt::Transact { body, .. }
+//RS         | Stmt::ContextBlock { body, .. }
+//RS         | Stmt::Live { body, .. }
+//RS         | Stmt::AssumeDet { body, .. } => vec![body],
+//RS         Stmt::Switch {
+//RS             arms, else_body, ..
+//RS         } => arms
+//RS             .iter_mut()
+//RS             .map(|arm| &mut arm.body)
+//RS             .chain(else_body.iter_mut())
+//RS             .collect(),
+//RS         Stmt::ComptimeIf {
+//RS             then_body,
+//RS             else_body,
+//RS             ..
+//RS         } => std::iter::once(then_body)
+//RS             .chain(else_body.iter_mut())
+//RS             .collect(),
+//RS         Stmt::ComptimeSwitch {
+//RS             arms, else_body, ..
+//RS         } => arms
+//RS             .iter_mut()
+//RS             .map(|arm| &mut arm.body)
+//RS             .chain(else_body.iter_mut())
+//RS             .collect(),
+//RS         Stmt::ComptimeBlock { body, .. } | Stmt::ScopeMember { body, .. } => vec![body],
+//RS         _ => Vec::new(),
+//RS     }
+//RS }
+// END-PORT-PENDING 0448 crates/jet-sema/src/Sema/UnsafeObligations.rs:1-1098
+

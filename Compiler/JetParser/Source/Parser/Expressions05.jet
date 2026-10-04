@@ -1,0 +1,843 @@
+// PORT-PENDING 0326 crates-jet-parser-src-parser-expressions-providers-module-group: crates/jet-parser/src/Parser/Expressions/providers.rs:1-223
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::super::{AccessConvention, Diagnostic, Expr, Parser, Span, Syntax, TokKind};
+//RS 
+//RS impl<'a> Parser<'a> {
+//RS     pub(super) fn looks_like_provider_ref_value(&self) -> bool {
+//RS         matches!(self.peek().kind, TokKind::Ident(_)) && matches!(self.peek2().kind, TokKind::At)
+//RS     }
+//RS 
+//RS     pub(super) fn provider_ref_placeholder(&mut self) -> Expr {
+//RS         let start = self.peek().span.start;
+//RS         let mut end = self.peek().span.end;
+//RS         self.bump(); // provider
+//RS         if matches!(self.peek().kind, TokKind::At) {
+//RS             end = self.bump().span.end;
+//RS         }
+//RS         while matches!(
+//RS             self.peek().kind,
+//RS             TokKind::Ident(_)
+//RS                 | TokKind::Int(_, _)
+//RS                 | TokKind::Dot
+//RS                 | TokKind::Slash
+//RS                 | TokKind::Minus
+//RS                 | TokKind::Star
+//RS                 | TokKind::Question
+//RS                 | TokKind::Eq
+//RS         ) {
+//RS             end = self.bump().span.end;
+//RS         }
+//RS         Expr::Str(
+//RS             vec![crate::AST::StrPart::Lit(String::new())],
+//RS             Span { start, end },
+//RS         )
+//RS     }
+//RS 
+//RS     /// D-MEM1: consume a leading capability sigil `&`/`^` → Write/Move. `~`
+//RS     /// (D-SHAPE-COPY1=A copy sigil) has no arm here — a parameter/argument
+//RS     /// convention position doesn't take a copy sigil (D-SHAPE-PLACE1, place
+//RS     /// precedence at any position, is a separate pending ballot). Returns
+//RS     /// `None` when no sigil is present.
+//RS     /// Position-disambiguated: infix `^` (power, D-EXPOP1) and `&` (BitAnd) are
+//RS     /// parsed inside expressions and never reach the start of a parameter or
+//RS     /// argument, or a type. `*` (raw) is D-CAP9, handled apart.
+//RS     pub(in crate::Parser) fn parse_capability_sigil(&mut self) -> Option<AccessConvention> {
+//RS         let cap = match self.peek().kind {
+//RS             TokKind::Amp => AccessConvention::Write,
+//RS             TokKind::Caret => AccessConvention::Move,
+//RS             _ => return None,
+//RS         };
+//RS         self.bump();
+//RS         Some(cap)
+//RS     }
+//RS 
+//RS     pub(in crate::Parser) fn parse_access_prefix(&mut self) -> AccessConvention {
+//RS         // D-MEM1 sigils take precedence over the retired keyword forms.
+//RS         if let Some(cap) = self.parse_capability_sigil() {
+//RS             return cap;
+//RS         }
+//RS         if let TokKind::Ident(name) = self.peek().kind.clone() {
+//RS             match name.as_str() {
+//RS                 Syntax::FOREIGN_READ if false => {
+//RS                     let span = self.peek().span;
+//RS                     self.bump();
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0017",
+//RS                         format!(
+//RS                             "shared access is written with no word in front — not `{}`",
+//RS                             Syntax::FOREIGN_READ
+//RS                         ),
+//RS                         "Jet has exactly one spelling for each thing, so all code reads the same"
+//RS                             .to_string(),
+//RS                         format!("remove `{}` and write `name: Type`", Syntax::FOREIGN_READ),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return AccessConvention::Read;
+//RS                 }
+//RS                 Syntax::FOREIGN_WRITE if false => {
+//RS                     let span = self.peek().span;
+//RS                     self.bump();
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0018",
+//RS                         format!(
+//RS                             "{} is written `{}`, not `{}`",
+//RS                             Syntax::WRITE_ACCESS_LABEL,
+//RS                             Syntax::SIGIL_WRITE,
+//RS                             Syntax::FOREIGN_WRITE
+//RS                         ),
+//RS                         "Jet has exactly one spelling for each thing, so all code reads the same"
+//RS                             .to_string(),
+//RS                         format!(
+//RS                             "replace `{}` with {} (`{}`)",
+//RS                             Syntax::FOREIGN_WRITE,
+//RS                             Syntax::WRITE_ACCESS_LABEL,
+//RS                             Syntax::SIGIL_WRITE
+//RS                         ),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return AccessConvention::Write;
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         match self.peek().kind {
+//RS             // D-S14-PAUSE: `mut` teaching is paused.
+//RS             TokKind::KwMutate if false => {
+//RS                 let span = self.bump().span;
+//RS                 self.push_cap_keyword_teach("E0056", Syntax::KW_MUTATE, Syntax::SIGIL_WRITE, span);
+//RS                 AccessConvention::Write
+//RS             }
+//RS             TokKind::KwMove if false => {
+//RS                 // `take(names) () ->` is a lambda take-prefix, not an arg convention.
+//RS                 // Only treat bare `take name` as the retired move keyword.
+//RS                 let is_lambda_take = matches!(
+//RS                     self.toks.get(self.pos + 1).map(|t| &t.kind),
+//RS                     Some(TokKind::LParen)
+//RS                 );
+//RS                 if is_lambda_take {
+//RS                     // `take(names)` lambda prefix is not a capability marker — the value
+//RS                     // here is unmarked, so it's `Read` (D-MEM1/S2).
+//RS                     AccessConvention::Read
+//RS                 } else {
+//RS                     // D-S14-PAUSE: bare `take` teaching is paused.
+//RS                     let span = self.bump().span;
+//RS                     self.push_cap_keyword_teach("E0057", Syntax::KW_MOVE, Syntax::SIGIL_MOVE, span);
+//RS                     AccessConvention::Move
+//RS                 }
+//RS             }
+//RS             // D-MEM1/S2 ("signatures can't lie"): an unmarked parameter/argument
+//RS             // is `Read`, decided here at parse time — no body-usage inference.
+//RS             _ => AccessConvention::Read,
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-S14-PAUSE keeps retired capability-word teaching disabled. This helper
+//RS     /// remains for any future explicit teaching mode.
+//RS     pub(super) fn push_cap_keyword_teach(
+//RS         &mut self,
+//RS         code: &'static str,
+//RS         keyword: &str,
+//RS         sigil: &str,
+//RS         span: Span,
+//RS     ) {
+//RS         self.diags.push(Diagnostic::error(
+//RS             code,
+//RS             format!(
+//RS                 "`{}` is now {} (`{}`)",
+//RS                 keyword,
+//RS                 Syntax::access_label(sigil),
+//RS                 sigil
+//RS             ),
+//RS             "access is written with a sigil on the type, not a word — so all \
+//RS                  code reads the same"
+//RS                 .to_string(),
+//RS             format!(
+//RS                 "write {} (`{}`) in place of `{}`",
+//RS                 Syntax::access_label(sigil),
+//RS                 sigil,
+//RS                 keyword
+//RS             ),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS 
+//RS     /// Lexical candidates for `expr()`. Keep this inventory aligned with the
+//RS     /// prefix arms in `expr_unary_inner`/`expr_primary`; `TokKind` cannot
+//RS     /// derive it because several starts are contextual (`KwMove`, `Dot`,
+//RS     /// `Hash`, `Dollar`, and `LBrace`). The expression parser still enforces
+//RS     /// those contexts after this shared lookahead gate.
+//RS     pub(in crate::Parser) fn starts_expr(&self, kind: &TokKind) -> bool {
+//RS         matches!(
+//RS             kind,
+//RS             TokKind::Ident(_)
+//RS                 | TokKind::Int(_, _)
+//RS                 | TokKind::Float(..)
+//RS                 | TokKind::UnitNumber { .. }
+//RS                 | TokKind::RawStr(_)
+//RS                 | TokKind::Str(_)
+//RS                 | TokKind::Char(_)
+//RS                 | TokKind::KwTrue
+//RS                 | TokKind::KwFalse
+//RS                 | TokKind::KwNull
+//RS                 | TokKind::KwIt
+//RS                 | TokKind::KwSelf
+//RS                 | TokKind::KwLoop
+//RS                 | TokKind::KwIf
+//RS                 | TokKind::KwMove
+//RS                 | TokKind::KwCopy
+//RS                 | TokKind::LParen
+//RS                 | TokKind::LBrace
+//RS                 | TokKind::LBracket
+//RS                 | TokKind::Hash
+//RS                 | TokKind::Dollar
+//RS                 | TokKind::Dot
+//RS                 | TokKind::Minus
+//RS                 | TokKind::Bang
+//RS                 | TokKind::Tilde
+//RS                 | TokKind::Star
+//RS                 | TokKind::Amp
+//RS                 // D-CAP-RECEIVER1=D: `^buf.seal()` marks a taken receiver.
+//RS                 | TokKind::Caret
+//RS                 | TokKind::PlusPlus
+//RS                 | TokKind::MinusMinus
+//RS         )
+//RS     }
+//RS 
+//RS     pub(super) fn foreign_logic_error(&mut self, foreign: &str, canonical: &str) {
+//RS         self.diags.push(Diagnostic::error(
+//RS             "E0012",
+//RS             format!(
+//RS                 "{} writes \"{}\" as `{}`",
+//RS                 Syntax::LANG_NAME,
+//RS                 foreign,
+//RS                 canonical
+//RS             ),
+//RS             format!(
+//RS                 "logic uses the symbols `{}`, `{}`, and `{}`",
+//RS                 Syntax::OP_AND,
+//RS                 Syntax::OP_OR,
+//RS                 Syntax::OP_NOT
+//RS             ),
+//RS             format!("replace `{}` with `{}`", foreign, canonical),
+//RS             Some(self.peek().span),
+//RS         ));
+//RS     }
+//RS }
+// END-PORT-PENDING 0326 crates/jet-parser/src/Parser/Expressions/providers.rs:1-223
+
+// PORT-PENDING 0326 crates-jet-parser-src-parser-expressions-providers-module-group: crates/jet-parser/src/Parser/Expressions/ptr_tuple.rs:1-612
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::super::{Diagnostic, Expr, Parser, Span, Syntax, TokKind};
+//RS 
+//RS impl<'a> Parser<'a> {
+//RS     /// S58 (E2-M13): parse the tail of `alias.Ptr<T>.from_addr(addr)`, with the
+//RS     /// cursor at the `<`. The `alias`/`alias_span` are the already-parsed
+//RS     /// module alias and `.Ptr` member.
+//RS     pub(super) fn ptr_from_addr(
+//RS         &mut self,
+//RS         alias: String,
+//RS         alias_span: Span,
+//RS     ) -> Result<Expr, Diagnostic> {
+//RS         self.expect_type_args_open(Syntax::TYPE_PTR)?;
+//RS         let (elem, _) = self.type_()?;
+//RS         if matches!(self.peek().kind, TokKind::Comma) {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0003",
+//RS                 format!("`{}<…>` takes exactly one element type", Syntax::TYPE_PTR),
+//RS                 "a pointer points at a single element type".to_string(),
+//RS                 format!(
+//RS                     "write `{}.{}<Int>.{}(addr)`",
+//RS                     alias,
+//RS                     Syntax::TYPE_PTR,
+//RS                     Syntax::MEM_FROM_ADDR
+//RS                 ),
+//RS                 Some(self.peek().span),
+//RS             ));
+//RS         }
+//RS         self.expect_type_args_close(&format!("after `{}<…>`", Syntax::TYPE_PTR))?;
+//RS         self.expect(TokKind::Dot, &format!("after `{}<…>`", Syntax::TYPE_PTR))?;
+//RS         let (method, method_span) = self.expect_field_name()?;
+//RS         if method != Syntax::MEM_FROM_ADDR {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0003",
+//RS                 format!(
+//RS                     "`{}<…>` has no static method `{}`",
+//RS                     Syntax::TYPE_PTR,
+//RS                     method
+//RS                 ),
+//RS                 "a typed pointer is built from an address".to_string(),
+//RS                 format!(
+//RS                     "write `{}.{}<Int>.{}(addr)`",
+//RS                     alias,
+//RS                     Syntax::TYPE_PTR,
+//RS                     Syntax::MEM_FROM_ADDR
+//RS                 ),
+//RS                 Some(method_span),
+//RS             ));
+//RS         }
+//RS         self.expect(
+//RS             TokKind::LParen,
+//RS             &format!("after `{}`", Syntax::MEM_FROM_ADDR),
+//RS         )?;
+//RS         let addr = self.expr()?;
+//RS         self.expect_closer(TokKind::RParen, "to finish the call", "call")?;
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         Ok(Expr::PtrFromAddr {
+//RS             alias,
+//RS             alias_span,
+//RS             elem,
+//RS             addr: Box::new(addr),
+//RS             span: Span::new(alias_span.start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     /// S73: `( name :: … )` — named tuple literal or type, not grouping.
+//RS     /// When `lparen_consumed` is true, `self.pos` is already on the first member name.
+//RS     pub(in crate::Parser) fn looks_like_named_tuple(&self, lparen_consumed: bool) -> bool {
+//RS         let i = if lparen_consumed {
+//RS             self.pos
+//RS         } else {
+//RS             self.pos + 1
+//RS         };
+//RS         matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Ident(_)))
+//RS             && matches!(self.toks.get(i + 1).map(|t| &t.kind), Some(TokKind::Colon))
+//RS     }
+//RS 
+//RS     fn emit_positional_tuple_error(&mut self, span: Span) {
+//RS         self.diags.push(Diagnostic::error(
+//RS                 "E0048",
+//RS                 format!(
+//RS                     "{} tuples name every member — positional `(1, 2)` isn't allowed (S73)",
+//RS                     Syntax::LANG_NAME
+//RS                 ),
+//RS                 "named members make field access obvious and avoid `.0`, which collides with decimal numbers"
+//RS                     .to_string(),
+//RS                 "write named members: `(x: 1, y: 2)` and use `p.x`, not `p.0`".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS     }
+//RS 
+//RS     fn emit_numeric_field_error(&mut self, span: Span) {
+//RS         self.diags.push(Diagnostic::error(
+//RS             "E0049",
+//RS             format!(
+//RS                 "{} doesn't use numeric field access like `.0` (S73)",
+//RS                 Syntax::LANG_NAME
+//RS             ),
+//RS             "`.0` looks like the start of a decimal number, so tuple members must have names"
+//RS                 .to_string(),
+//RS             "name the members when you build the tuple: `(x: 1, y: 2)`, then read `p.x`"
+//RS                 .to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS 
+//RS     /// S73: reject `.0` / `.1` field access before `expect_ident`.
+//RS     pub(super) fn expect_field_name(&mut self) -> Result<(String, Span), Diagnostic> {
+//RS         if matches!(self.peek().kind, TokKind::Int(_, _) | TokKind::Float(..)) {
+//RS             let span = self.peek().span;
+//RS             self.bump();
+//RS             self.emit_numeric_field_error(span);
+//RS             return Ok(("0".to_string(), span));
+//RS         }
+//RS         // D-FACT-READ1=A / D-META-ROOT3=A: a `$` member after `.` is a
+//RS         // compiler-owned fact, and the registry is closed. Derive-template
+//RS         // bodies are the one typed exception: reflected members (`T.$kind`,
+//RS         // `left.$index`) and name splices (`self.$field`, D-NAME-SPLICE1=B)
+//RS         // expand before sema.
+//RS         if matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n)) {
+//RS             let (member, member_span) = self.expect_ident("in a compiler fact")?;
+//RS             if member == "$track_origin" {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0302",
+//RS                     "`$track_origin` is retired".to_string(),
+//RS                     "`#Track` origin is read through the typed `$origin` fact".to_string(),
+//RS                     "write `value.$origin`".to_string(),
+//RS                     Some(member_span),
+//RS                 ));
+//RS             }
+//RS             if self.derive_template_depth > 0 {
+//RS                 return Ok((member, member_span));
+//RS             }
+//RS             if Syntax::fact_read_kind(&member).is_none() {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0302",
+//RS                     format!("`{member}` is not a compiler-owned fact"),
+//RS                     format!(
+//RS                         "the compiler-owned facts are {}",
+//RS                         Syntax::fact_read_members()
+//RS                             .map(|name| format!("`{name}`"))
+//RS                             .collect::<Vec<_>>()
+//RS                             .join(", ")
+//RS                     ),
+//RS                     format!(
+//RS                         "write a registered fact read such as `T.{}`",
+//RS                         Syntax::COMPILER_FACT_LAYOUT
+//RS                     ),
+//RS                     Some(member_span),
+//RS                 ));
+//RS             }
+//RS             return Ok((member, member_span));
+//RS         }
+//RS         // `task` starts structured concurrency in expression-head position,
+//RS         // but remains a valid Core record field/member name.
+//RS         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_CONC_TASK) {
+//RS             let span = self.peek().span;
+//RS             self.bump();
+//RS             return Ok((Syntax::KW_CONC_TASK.to_string(), span));
+//RS         }
+//RS         // D-TIME-IN1=C: the lexer reclassifies `in` after `.` as an ordinary
+//RS         // identifier. Accept the keyword too for parser clients that provide
+//RS         // tokens directly (`duration.in(.Seconds)`).
+//RS         if matches!(self.peek().kind, TokKind::KwIn) {
+//RS             let span = self.peek().span;
+//RS             self.bump();
+//RS             return Ok((Syntax::KW_IN.to_string(), span));
+//RS         }
+//RS         // U20: `Recipe.copy()` uses the ordinary dot-member form, while `copy`
+//RS         // is also the retired copy keyword (D-SHAPE-COPY1, now `~x`) in value
+//RS         // position. Keep the keyword reserved everywhere else; permit it only
+//RS         // after `.`.
+//RS         if matches!(self.peek().kind, TokKind::KwCopy) {
+//RS             let span = self.peek().span;
+//RS             self.bump();
+//RS             return Ok((Syntax::KW_COPY.to_string(), span));
+//RS         }
+//RS         // D-ITER-METHOD1: the retired `take` capture keyword remains reserved
+//RS         // in ordinary expression positions, but iterator APIs use `.take(...)`
+//RS         // as a normal member spelling.
+//RS         if matches!(self.peek().kind, TokKind::KwMove) {
+//RS             let span = self.peek().span;
+//RS             self.bump();
+//RS             return Ok((Syntax::KW_MOVE.to_string(), span));
+//RS         }
+//RS         // D-EFFECT-DECL1=A: `effect` is a declaration keyword in item
+//RS         // position, but existing APIs such as `reactive.effect()` keep
+//RS         // their ordinary qualified member spelling.
+//RS         if matches!(self.peek().kind, TokKind::KwEffect) {
+//RS             let span = self.peek().span;
+//RS             self.bump();
+//RS             return Ok((Syntax::KW_EFFECT_DECL.to_string(), span));
+//RS         };
+//RS         self.expect_ident("after `.`")
+//RS     }
+//RS 
+//RS     fn sync_to_rparen(&mut self) {
+//RS         let mut depth = 0;
+//RS         while self.pos < self.toks.len() {
+//RS             match self.peek().kind {
+//RS                 TokKind::LParen => depth += 1,
+//RS                 TokKind::RParen if depth == 0 => {
+//RS                     self.bump();
+//RS                     return;
+//RS                 }
+//RS                 TokKind::RParen => depth -= 1,
+//RS                 TokKind::Semi | TokKind::RBrace if depth == 0 => return,
+//RS                 _ => {}
+//RS             }
+//RS             self.bump();
+//RS         }
+//RS     }
+//RS 
+//RS     /// S73: `(x: expr, y: expr)` after the opening `(`.
+//RS     fn parse_tuple_lit(&mut self, open: Span) -> Result<Expr, Diagnostic> {
+//RS         let mut fields = Vec::new();
+//RS         if !matches!(self.peek().kind, TokKind::RParen) {
+//RS             loop {
+//RS                 let (name, _) = self.expect_ident("for a tuple member name")?;
+//RS                 self.expect(TokKind::Colon, "after each tuple member name")?;
+//RS                 let value = self.expr()?;
+//RS                 fields.push((name, value));
+//RS                 if matches!(self.peek().kind, TokKind::Comma) {
+//RS                     self.bump();
+//RS                     if matches!(self.peek().kind, TokKind::RParen) {
+//RS                         break;
+//RS                     }
+//RS                     continue;
+//RS                 }
+//RS                 break;
+//RS             }
+//RS         }
+//RS         let close = self.peek().span;
+//RS         self.expect(TokKind::RParen, "to close this tuple")?;
+//RS         if fields.len() < 2 {
+//RS             return Err(Diagnostic::error(
+//RS                     "E0003",
+//RS                     "a tuple needs at least two named members".to_string(),
+//RS                     "a single `(name: value)` would be ambiguous with grouping — use a one-field `struct` instead"
+//RS                         .to_string(),
+//RS                     "add another member: `(x: 1, y: 2)`".to_string(),
+//RS                     Some(Span::new(open.start, close.end)),
+//RS                 ));
+//RS         }
+//RS         Ok(Expr::TupleLit(
+//RS             fields,
+//RS             Span::new(open.start, close.end),
+//RS             None,
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn parse_paren_primary(
+//RS         &mut self,
+//RS         _allow_struct_lit: bool,
+//RS     ) -> Result<Expr, Diagnostic> {
+//RS         let open = self.bump().span;
+//RS         // D-VOID1=A: `()` is the unit value in expression position. The
+//RS         // lambda lookahead runs before this parser, so `() -> ...` remains an
+//RS         // empty-parameter lambda rather than becoming a unit literal.
+//RS         if matches!(self.peek().kind, TokKind::RParen) {
+//RS             let close = self.bump().span;
+//RS             return Ok(Expr::Unit(Span::new(open.start, close.end)));
+//RS         }
+//RS         if self.looks_like_named_tuple(true) {
+//RS             return self.parse_tuple_lit(open);
+//RS         }
+//RS         if self.after_lparen_is_positional_tuple() {
+//RS             self.emit_positional_tuple_error(open);
+//RS             self.sync_to_rparen();
+//RS             return Ok(Expr::Int(0, open, None, None));
+//RS         }
+//RS         let pos_after_first_open = self.pos;
+//RS 
+//RS         // Collect every immediately-consecutive `(` that opens a bare nested
+//RS         // group (not a lambda param list or named tuple) so purely redundant
+//RS         // nesting (`((((expr))))`) can fold into one `expr()` call below and
+//RS         // cost one nesting level, not N (#1319).
+//RS         let mut opens = vec![open];
+//RS         while matches!(self.peek().kind, TokKind::LParen)
+//RS             && !self.after_lparen_is_lambda()
+//RS             && !self.looks_like_named_tuple(false)
+//RS         {
+//RS             let candidate_pos = self.pos;
+//RS             let candidate = self.bump().span;
+//RS             if self.after_lparen_is_positional_tuple() {
+//RS                 self.pos = candidate_pos;
+//RS                 break;
+//RS             }
+//RS             opens.push(candidate);
+//RS         }
+//RS 
+//RS         if opens.len() > 1 {
+//RS             let diags_before = self.diags.len();
+//RS             if let Some(folded) = self.try_fold_paren_run(&opens) {
+//RS                 return Ok(folded);
+//RS             }
+//RS             // Not pure nesting after all — e.g. `((a + b) + c)`, where the
+//RS             // inner `(a + b)` closes but the group keeps growing before the
+//RS             // outer `)`. Discard whatever the failed attempt parsed/recorded
+//RS             // and fall through to ordinary one-level-at-a-time recursion,
+//RS             // which handles this correctly (still bounded by
+//RS             // MAX_SOURCE_NESTING via `expr()`'s `with_nesting`).
+//RS             self.diags.truncate(diags_before);
+//RS             self.pos = pos_after_first_open;
+//RS         }
+//RS 
+//RS         let inner = self.expr()?;
+//RS         if matches!(self.peek().kind, TokKind::Comma) {
+//RS             self.emit_positional_tuple_error(open);
+//RS             self.sync_to_rparen();
+//RS             return Ok(Expr::Int(0, open, None, None));
+//RS         }
+//RS         self.expect(TokKind::RParen, "to close this `(`")?;
+//RS         let close_span = self.toks[self.pos - 1].span;
+//RS         let span = Span::new(open.start, close_span.end);
+//RS         // D-FMTPARENS1=A: preserve author parens as a distinct AST node so
+//RS         // the formatter can always re-emit them, even when redundant.
+//RS         Ok(Expr::Paren(Box::new(inner), span))
+//RS     }
+//RS 
+//RS     /// Fast path for `opens.len()` immediately-consecutive `(` tokens: parse
+//RS     /// exactly one inner expression, then require that many `)` back to
+//RS     /// back. Returns `None` the moment a close doesn't immediately follow —
+//RS     /// the caller rewinds `self.pos` and falls back to naive recursion.
+//RS     fn try_fold_paren_run(&mut self, opens: &[Span]) -> Option<Expr> {
+//RS         let mut inner = self.expr().ok()?;
+//RS         if matches!(self.peek().kind, TokKind::Comma) {
+//RS             return None;
+//RS         }
+//RS         for &open in opens.iter().rev() {
+//RS             if !matches!(self.peek().kind, TokKind::RParen) {
+//RS                 return None;
+//RS             }
+//RS             self.bump();
+//RS             let close_span = self.toks[self.pos - 1].span;
+//RS             let span = Span::new(open.start, close_span.end);
+//RS             // D-FMTPARENS1=A: preserve author parens as distinct AST nodes so
+//RS             // the formatter can always re-emit them, even when redundant.
+//RS             inner = Expr::Paren(Box::new(inner), span);
+//RS         }
+//RS         Some(inner)
+//RS     }
+//RS 
+//RS     /// True when `(` starts `( expr , … )` without member names — rejected (S73).
+//RS     /// Call with `self.pos` on the first token inside `(`.
+//RS     fn after_lparen_is_positional_tuple(&self) -> bool {
+//RS         let mut i = self.pos;
+//RS         if i >= self.toks.len() {
+//RS             return false;
+//RS         }
+//RS         if matches!(self.toks[i].kind, TokKind::RParen) {
+//RS             return false;
+//RS         }
+//RS         if matches!(self.toks[i].kind, TokKind::Ident(_))
+//RS             && self
+//RS                 .toks
+//RS                 .get(i + 1)
+//RS                 .is_some_and(|t| matches!(t.kind, TokKind::Colon))
+//RS         {
+//RS             return false;
+//RS         }
+//RS         loop {
+//RS             match &self.toks[i].kind {
+//RS                 TokKind::RParen => return false,
+//RS                 TokKind::Comma => return true,
+//RS                 TokKind::Colon => return false,
+//RS                 TokKind::LParen | TokKind::LBrace | TokKind::LBracket => {
+//RS                     i += 1;
+//RS                     let mut depth = 1;
+//RS                     while i < self.toks.len() && depth > 0 {
+//RS                         match self.toks[i].kind {
+//RS                             TokKind::LParen | TokKind::LBrace | TokKind::LBracket => depth += 1,
+//RS                             TokKind::RParen | TokKind::RBrace | TokKind::RBracket => depth -= 1,
+//RS                             _ => {}
+//RS                         }
+//RS                         i += 1;
+//RS                     }
+//RS                 }
+//RS                 _ => i += 1,
+//RS             }
+//RS             if i >= self.toks.len() {
+//RS                 return false;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub(in crate::Parser) fn expr(&mut self) -> Result<Expr, Diagnostic> {
+//RS         let span = self.peek().span;
+//RS         self.with_nesting(span, |p| {
+//RS             if let Some(result) = p.try_primary_expr() {
+//RS                 return result;
+//RS             }
+//RS             p.expr_or_fallback(true)
+//RS         })
+//RS     }
+//RS 
+//RS     /// Most expression values are one primary plus an optional postfix
+//RS     /// chain. Sending those values through the full postfix layer creates
+//RS     /// a large stack frame at each nesting level, even when no operator is
+//RS     /// present. Probe the primary alone first; a continuation restores the
+//RS     /// parser and uses the canonical postfix/precedence path below.
+//RS     fn try_primary_expr(&mut self) -> Option<Result<Expr, Diagnostic>> {
+//RS         if !self.can_start_primary_expr() {
+//RS             return None;
+//RS         }
+//RS 
+//RS         let state = ExprProbeState::save(self);
+//RS         match self.expr_primary(true) {
+//RS             Ok(expr)
+//RS                 if !self.has_expr_infix_continuation()
+//RS                     && !self.has_expr_postfix_continuation() =>
+//RS             {
+//RS                 Some(Ok(expr))
+//RS             }
+//RS             Ok(_) | Err(_) => {
+//RS                 state.restore(self);
+//RS                 None
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn can_start_primary_expr(&self) -> bool {
+//RS         // D-CONC-SHARE1=A (card #1561): `shared <value>` is a prefix
+//RS         // construction, and its arm lives in the unary layer. The fast
+//RS         // path below would take the bare `shared` as a whole primary
+//RS         // (nothing after it is an infix token), leave the operand
+//RS         // unconsumed, and report E0003 at the statement terminator. So a
+//RS         // contextual `shared` never starts a primary; send it down the
+//RS         // precedence chain. A `shared` that is an ordinary name still
+//RS         // does, because `starts_shared_operand` rejects the tokens that
+//RS         // follow a name (`::`, `:=`, `.`, `,`, `)`, an operator).
+//RS         if matches!(&self.peek().kind, TokKind::Ident(word) if word == Syntax::KW_SHARED)
+//RS             && super::binary_unary::starts_shared_operand(&self.peek2().kind)
+//RS         {
+//RS             return false;
+//RS         }
+//RS         matches!(
+//RS             self.peek().kind,
+//RS             TokKind::KwLoop
+//RS                 | TokKind::KwIt
+//RS                 | TokKind::KwNull
+//RS                 | TokKind::Hash
+//RS                 | TokKind::RawStr(_)
+//RS                 | TokKind::Str(_)
+//RS                 | TokKind::Float(..)
+//RS                 | TokKind::UnitNumber { .. }
+//RS                 | TokKind::Char(_)
+//RS                 | TokKind::LBracket
+//RS                 | TokKind::KwTrue
+//RS                 | TokKind::KwFalse
+//RS                 | TokKind::KwSelf
+//RS                 | TokKind::KwIf
+//RS                 | TokKind::KwMove
+//RS                 | TokKind::LParen
+//RS                 | TokKind::Ident(_)
+//RS         )
+//RS     }
+//RS 
+//RS     fn has_expr_infix_continuation(&self) -> bool {
+//RS         match self.peek().kind {
+//RS             TokKind::QuestionQuestion
+//RS             | TokKind::DotDot
+//RS             | TokKind::DotDotLt
+//RS             | TokKind::OrOr
+//RS             | TokKind::Pipe
+//RS             | TokKind::AndAnd
+//RS             | TokKind::EqEq
+//RS             | TokKind::NotEq
+//RS             | TokKind::Lt
+//RS             | TokKind::Le
+//RS             | TokKind::Ge
+//RS             | TokKind::Compare
+//RS             | TokKind::TildePipe
+//RS             | TokKind::Amp
+//RS             | TokKind::Shl
+//RS             | TokKind::Shr
+//RS             | TokKind::Plus
+//RS             | TokKind::Minus
+//RS             | TokKind::Star
+//RS             | TokKind::Slash
+//RS             | TokKind::SlashPercent
+//RS             | TokKind::Percent
+//RS             | TokKind::PercentPercent
+//RS             | TokKind::Caret
+//RS             | TokKind::KwIn => true,
+//RS             TokKind::Gt => self.module_arg_expr_depth != Some(self.depth),
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(in crate::Parser) fn module_arg_expr(&mut self) -> Result<Expr, Diagnostic> {
+//RS         let previous = self.module_arg_expr_depth;
+//RS         self.module_arg_expr_depth = Some(self.depth + 1);
+//RS         let result = self.expr();
+//RS         self.module_arg_expr_depth = previous;
+//RS         result
+//RS     }
+//RS 
+//RS     pub(in crate::Parser) fn expr_no_struct_lit(&mut self) -> Result<Expr, Diagnostic> {
+//RS         let span = self.peek().span;
+//RS         self.with_nesting(span, |p| p.expr_or_fallback(false))
+//RS     }
+//RS 
+//RS     /// D-IF3: parse a subject expression that stops *below* comparison
+//RS     /// precedence, so a trailing `==` is left for `if_or_dispatch` to detect as
+//RS     /// the dispatch marker (`if subject == { … }`). `expr_cmp` would otherwise
+//RS     /// consume the `==` (as a comparison or a `PatternTest`) and then choke on
+//RS     /// the `{`. Struct literals are disallowed, like `expr_no_struct_lit`, so
+//RS     /// `if subject {` never reads `subject { … }` as a struct value.
+//RS     pub(in crate::Parser) fn expr_no_struct_lit_no_cmp(&mut self) -> Result<Expr, Diagnostic> {
+//RS         let span = self.peek().span;
+//RS         self.with_nesting(span, |p| {
+//RS             let expr = p.expr_bitor(false)?;
+//RS             if matches!(p.peek().kind, TokKind::KwIn) {
+//RS                 let span = p.bump().span;
+//RS                 return Err(Diagnostic::from_row("E0384", &[], Some(span)));
+//RS             }
+//RS             Ok(expr)
+//RS         })
+//RS     }
+//RS 
+//RS     fn has_expr_postfix_continuation(&self) -> bool {
+//RS         matches!(
+//RS             self.peek().kind,
+//RS             TokKind::Dot
+//RS                 | TokKind::Question
+//RS                 | TokKind::QuestionDot
+//RS                 | TokKind::LParen
+//RS                 | TokKind::LBracket
+//RS                 | TokKind::LBrace
+//RS                 | TokKind::PlusPlus
+//RS                 | TokKind::MinusMinus
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS struct ExprProbeState {
+//RS     pos: usize,
+//RS     diags_len: usize,
+//RS     pending_type_gt: bool,
+//RS     depth: usize,
+//RS     type_generic_depth: usize,
+//RS     type_generic_chain_len: usize,
+//RS     type_generic_truncated: bool,
+//RS     in_layout_body: usize,
+//RS     adjacent_if_body_depth: usize,
+//RS     block_depth: usize,
+//RS     callable_tail_block_depth: Option<usize>,
+//RS     callable_tail_expects_value: bool,
+//RS     lambda_tail_block_depth: Option<usize>,
+//RS     module_arg_expr_depth: Option<usize>,
+//RS     allow_lowercase_leading_dot: bool,
+//RS     derive_template_depth: usize,
+//RS     policy_declarations_len: usize,
+//RS     applied_rules_len: usize,
+//RS     rule_facts_len: usize,
+//RS     block_spans_len: usize,
+//RS }
+//RS 
+//RS impl ExprProbeState {
+//RS     fn save(parser: &Parser<'_>) -> Self {
+//RS         Self {
+//RS             pos: parser.pos,
+//RS             diags_len: parser.diags.len(),
+//RS             pending_type_gt: parser.pending_type_gt,
+//RS             depth: parser.depth,
+//RS             type_generic_depth: parser.type_generic_depth,
+//RS             type_generic_chain_len: parser.type_generic_chain.len(),
+//RS             type_generic_truncated: parser.type_generic_truncated,
+//RS             in_layout_body: parser.in_layout_body,
+//RS             adjacent_if_body_depth: parser.adjacent_if_body_depth,
+//RS             block_depth: parser.block_depth,
+//RS             callable_tail_block_depth: parser.callable_tail_block_depth,
+//RS             callable_tail_expects_value: parser.callable_tail_expects_value,
+//RS             lambda_tail_block_depth: parser.lambda_tail_block_depth,
+//RS             module_arg_expr_depth: parser.module_arg_expr_depth,
+//RS             allow_lowercase_leading_dot: parser.allow_lowercase_leading_dot,
+//RS             derive_template_depth: parser.derive_template_depth,
+//RS             policy_declarations_len: parser.policy_declarations.len(),
+//RS             applied_rules_len: parser.applied_rules.len(),
+//RS             rule_facts_len: parser.rule_facts.len(),
+//RS             block_spans_len: parser.block_spans.len(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn restore(self, parser: &mut Parser<'_>) {
+//RS         parser.pos = self.pos;
+//RS         parser.diags.truncate(self.diags_len);
+//RS         parser.pending_type_gt = self.pending_type_gt;
+//RS         parser.depth = self.depth;
+//RS         parser.type_generic_depth = self.type_generic_depth;
+//RS         parser
+//RS             .type_generic_chain
+//RS             .truncate(self.type_generic_chain_len);
+//RS         parser.type_generic_truncated = self.type_generic_truncated;
+//RS         parser.in_layout_body = self.in_layout_body;
+//RS         parser.adjacent_if_body_depth = self.adjacent_if_body_depth;
+//RS         parser.block_depth = self.block_depth;
+//RS         parser.callable_tail_block_depth = self.callable_tail_block_depth;
+//RS         parser.callable_tail_expects_value = self.callable_tail_expects_value;
+//RS         parser.lambda_tail_block_depth = self.lambda_tail_block_depth;
+//RS         parser.module_arg_expr_depth = self.module_arg_expr_depth;
+//RS         parser.allow_lowercase_leading_dot = self.allow_lowercase_leading_dot;
+//RS         parser.derive_template_depth = self.derive_template_depth;
+//RS         parser
+//RS             .policy_declarations
+//RS             .truncate(self.policy_declarations_len);
+//RS         parser.applied_rules.truncate(self.applied_rules_len);
+//RS         parser.rule_facts.truncate(self.rule_facts_len);
+//RS         parser.block_spans.truncate(self.block_spans_len);
+//RS     }
+//RS }
+// END-PORT-PENDING 0326 crates/jet-parser/src/Parser/Expressions/ptr_tuple.rs:1-612
+

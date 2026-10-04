@@ -1,0 +1,128 @@
+// Rust AST/program_imports.rs:594-816. One inward owner of loaded AST facts.
+use core.files.runtime.kernel_path_components as ast_program_paths
+
+pub struct ProgramBundle {
+    pub entry: Int
+    pub project_root: ast_program_paths.OsPath
+    pub modules: [LoadedModule]
+    pub devtools_registry: DevtoolsRegistry
+    pub parse_teaching: [Diagnostic]
+    pub used_core: Set<String>
+    pub ffi_callback_fns: Set<String>
+    pub cffi: CFfi
+    pub comptime_inputs: [ComptimeInput]
+    pub name_ledger: NameLedger
+    pub layer_ceiling: MIRRuntimeLayer?
+    pub inferred_layer: MIRRuntimeLayer
+    pub web_partitions: [String:WebBucket]
+    pub web_partition_enforced: Bool
+    pub web_partition_report: String?
+    pub dep_roots: [String:ast_program_paths.OsPath]
+    pub package_guarantees: PackageGuarantees
+    pub program_allocator: MIRAllocatorPolicy
+    pub active_os: MIROSTarget
+    pub build_facts: BuildFactSnapshot
+    pub edition: String
+}
+impl ProgramBundle {
+    // Host facts are supplied by the real native capture (or explicit pure
+    // fixture); Foundation neither inspects the host nor invents a target.
+    pub fn new(project_root: ast_program_paths.OsPath, active_os: MIROSTarget, build_facts: BuildFactSnapshot, edition: String) -> ProgramBundle Never! {
+        ProgramBundle{entry: 0, project_root: project_root, modules: [], devtools_registry: DevtoolsRegistry.default(), parse_teaching: [], used_core: Set.new<String>(), ffi_callback_fns: Set.new<String>(), cffi: CFfi.empty(), comptime_inputs: [], name_ledger: name_ledger_new(), layer_ceiling: None, inferred_layer: MIRRuntimeLayer.Core, web_partitions: [:], web_partition_enforced: false, web_partition_report: None, dep_roots: [:], package_guarantees: PackageGuarantees.default(), program_allocator: MIRAllocatorPolicy.HostedDefault, active_os: active_os, build_facts: build_facts, edition: edition}
+    }
+}
+
+// Sorted membership and iteration use the existing ordered collection owner.
+// In particular None and an explicit empty rule are different authority facts.
+pub struct PackageGuarantees {
+    pub contain: Rank<String>
+    pub harden: Bool
+    pub dependency_names: Rank<String>
+    pub effects: [String:Rank<String>]
+    pub unsafe_paths: [String]?
+    pub expert: Bool?
+    pub deps: [String]?
+    pub lints_deny: [String]?
+    pub memory_denials: [String]
+    pub authority_needs: [String]
+    pub application_authority: ApplicationAuthority
+}
+impl PackageGuarantees {
+    pub fn default() -> PackageGuarantees Never! {
+        PackageGuarantees{contain: Rank.from([String]{}), harden: false, dependency_names: Rank.from([String]{}), effects: [:], unsafe_paths: None, expert: None, deps: None, lints_deny: None, memory_denials: [], authority_needs: [], application_authority: ApplicationAuthority.ambient_basics()}
+    }
+}
+
+pub struct LoadedModule {
+    pub path: ast_program_paths.OsPath
+    pub display: String
+    pub source: String
+    pub alias: String
+    pub imports: [ImportDecl]
+    pub items: [Item]
+    pub script_body: [Stmt]
+    pub block_spans: [Span]
+    pub web_target_ceiling: WebBucket?
+    pub pub_file: Bool
+    pub no_prelude: Bool
+    pub default_target: String?
+    pub html_path: String?
+    pub policy_declarations: [PolicyDeclaration]
+    pub user_policy_declarations: [UserPolicyDecl]
+    pub rule_facts: [AppliedRuleApplication]
+}
+impl LoadedModule {
+    pub fn from_program(path: ast_program_paths.OsPath, display: String, source: String, alias: String, program: ^Program) -> LoadedModule Never! {
+        LoadedModule{path: path, display: display, source: source, alias: alias, imports: ^program.imports, items: ^program.items, script_body: ^program.script_body, block_spans: ^program.block_spans, web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude, default_target: ^program.default_target, html_path: ^program.html_path, policy_declarations: ^program.policy_declarations, user_policy_declarations: ^program.user_policy_declarations, rule_facts: ^program.rule_facts}
+    }
+    pub fn is_core_source(self) -> Bool Never! {
+        ast_program_paths.starts_with(self.path, ast_program_paths.from_text(CORE_SOURCE_ROOT, self.path.platform))
+    }
+}
+
+// Each row borrows the declaration and scope from the original loaded AST.
+// A singleton view is the existing typed loan carrier, not a cloned ImportDecl.
+pub struct LoadedImport {
+    pub namespace: View<str>?
+    pub declaration: View<ImportDecl>
+}
+fn loaded_module_code_imports(module: CodeModule, imports: &[LoadedImport]) Never! {
+    loop index in 0..<module.imports.len() {
+        &imports.push(LoadedImport{namespace: Val(module.name.after("")), declaration: module.imports[index..<(index + 1)]})
+    }
+    if module.body == .Val(body) {
+        loop item in body {
+            if item == .CodeModule(child) -> loaded_module_code_imports(child, &imports)
+        }
+    }
+}
+// Original order: file imports, then each item's scopes; aliases expand only
+// the generic module's own imports, never its nested CodeModule imports twice.
+pub fn walk_imports(module: LoadedModule) -> [LoadedImport] from module {
+    imports := [LoadedImport]{}
+    loop index in 0..<module.imports.len() {
+        &imports.push(LoadedImport{namespace: None, declaration: module.imports[index..<(index + 1)]})
+    }
+    loop item in module.items {
+        if item == {
+            .CodeModule(code_module) -> loaded_module_code_imports(code_module, &imports)
+            .GenericModule(generic_module) -> {
+                loop index in 0..<generic_module.imports.len() {
+                    &imports.push(LoadedImport{namespace: Val(generic_module.name.after("")), declaration: generic_module.imports[index..<(index + 1)]})
+                }
+                loop alias in module.items {
+                    if alias == .ModuleAlias(application) && application.target == generic_module.name {
+                        loop index in 0..<generic_module.imports.len() {
+                            &imports.push(LoadedImport{namespace: Val(application.name.after("")), declaration: generic_module.imports[index..<(index + 1)]})
+                        }
+                    }
+                }
+                loop child in generic_module.body {
+                    if child == .CodeModule(code_module) -> loaded_module_code_imports(code_module, &imports)
+                }
+            }
+            else -> {}
+        }
+    }
+    imports
+}

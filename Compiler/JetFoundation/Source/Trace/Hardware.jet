@@ -1,0 +1,8 @@
+use core.sys as jettrace_sys
+
+// JetTrace.rs:105-115. Main-owned canonical Core native provider supplies build
+// arch/OS/target and affinity/quota-aware available parallelism, not host guesses.
+pub fn trace_hardware_current() -[Env]> TraceHardware Never! {
+    facts :: jettrace_sys.hardware_facts()
+    TraceHardware{cpu_arch: ^facts.cpu_arch, logical_cpus: facts.logical_cpus, os: ^facts.os, target: ^facts.build_target}
+}

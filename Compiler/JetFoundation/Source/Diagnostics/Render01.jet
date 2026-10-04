@@ -1,0 +1,175 @@
+// PORT-PENDING 0083 crates-jet-foundation-src-outcome-module-group-slice-1800: crates/jet-foundation/src/Terminal.rs:1-171
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Shared terminal color policy and semantic style roles.
+//RS 
+//RS /// How a user asked terminal color to be resolved.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ColorChoice {
+//RS     Auto,
+//RS     Always,
+//RS     Never,
+//RS }
+//RS 
+//RS impl Default for ColorChoice {
+//RS     fn default() -> Self {
+//RS         Self::Auto
+//RS     }
+//RS }
+//RS 
+//RS impl ColorChoice {
+//RS     pub fn parse(value: &str) -> Self {
+//RS         match value {
+//RS             "always" => Self::Always,
+//RS             "never" => Self::Never,
+//RS             _ => Self::Auto,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Explicit choice > `NO_COLOR` presence > `FORCE_COLOR` presence > TTY.
+//RS     ///
+//RS     /// The `Auto` ladder itself lives in `Outcome.rs`: that file is emitted
+//RS     /// verbatim into every generated program and this one is not, so a running
+//RS     /// program's breach report can only share this ladder if the ladder lives
+//RS     /// there. One owner, both surfaces.
+//RS     pub fn resolve(self, is_tty: bool) -> bool {
+//RS         match self {
+//RS             Self::Always => true,
+//RS             Self::Never => false,
+//RS             Self::Auto => crate::Outcome::jet_terminal_auto_color(is_tty),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One palette vocabulary shared by every Rust terminal surface.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct Theme {
+//RS     color: bool,
+//RS }
+//RS 
+//RS impl Theme {
+//RS     pub const ACCENT_SGR: &'static str = "1;96";
+//RS     pub const DIM_SGR: &'static str = "2;37";
+//RS     pub const SUCCESS_SGR: &'static str = "32";
+//RS     pub const WARN_SGR: &'static str = "33";
+//RS     pub const ERROR_SGR: &'static str = "31";
+//RS     pub const INVERT_SGR: &'static str = "48;5;24;97;1";
+//RS     pub const BORDER_SGR: &'static str = "90";
+//RS 
+//RS     pub const fn new(color: bool) -> Self {
+//RS         Self { color }
+//RS     }
+//RS 
+//RS     pub fn resolve(choice: ColorChoice, is_tty: bool) -> Self {
+//RS         Self::new(choice.resolve(is_tty))
+//RS     }
+//RS 
+//RS     pub const fn color(self) -> bool {
+//RS         self.color
+//RS     }
+//RS 
+//RS     pub fn paint(self, sgr: &str, text: &str) -> String {
+//RS         if self.color {
+//RS             format!("\x1b[{sgr}m{text}\x1b[0m")
+//RS         } else {
+//RS             text.to_string()
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn accent(self, text: &str) -> String {
+//RS         self.paint(Self::ACCENT_SGR, text)
+//RS     }
+//RS     pub fn dim(self, text: &str) -> String {
+//RS         self.paint(Self::DIM_SGR, text)
+//RS     }
+//RS     pub fn success(self, text: &str) -> String {
+//RS         self.paint(Self::SUCCESS_SGR, text)
+//RS     }
+//RS     pub fn warn(self, text: &str) -> String {
+//RS         self.paint(Self::WARN_SGR, text)
+//RS     }
+//RS     pub fn error(self, text: &str) -> String {
+//RS         self.paint(Self::ERROR_SGR, text)
+//RS     }
+//RS     pub fn invert(self, text: &str) -> String {
+//RS         self.paint(Self::INVERT_SGR, text)
+//RS     }
+//RS     pub fn border(self, text: &str) -> String {
+//RS         self.paint(Self::BORDER_SGR, text)
+//RS     }
+//RS     pub fn bold(self, text: &str) -> String {
+//RS         self.paint("1", text)
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn roles_are_semantic_and_plain_mode_is_byte_stable() {
+//RS         let plain = Theme::new(false);
+//RS         let color = Theme::new(true);
+//RS         for role in [
+//RS             Theme::accent,
+//RS             Theme::dim,
+//RS             Theme::success,
+//RS             Theme::warn,
+//RS             Theme::error,
+//RS             Theme::invert,
+//RS             Theme::border,
+//RS         ] {
+//RS             assert_eq!(role(plain, "x"), "x");
+//RS             assert!(role(color, "x").starts_with("\x1b["));
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn color_precedence_is_proved_in_isolated_children() {
+//RS         const CHILD: &str = "JET_THEME_POLICY_CHILD";
+//RS         if let Ok(case) = std::env::var(CHILD) {
+//RS             let (choice, tty, expected) = match case.as_str() {
+//RS                 "always-over-no" => (ColorChoice::Always, false, true),
+//RS                 "never-over-force" => (ColorChoice::Never, true, false),
+//RS                 "empty-no-over-force" => (ColorChoice::Auto, true, false),
+//RS                 "force-off-tty" => (ColorChoice::Auto, false, true),
+//RS                 "auto-tty" => (ColorChoice::Auto, true, true),
+//RS                 _ => panic!("unknown child case"),
+//RS             };
+//RS             assert_eq!(choice.resolve(tty), expected);
+//RS             return;
+//RS         }
+//RS 
+//RS         for case in [
+//RS             "always-over-no",
+//RS             "never-over-force",
+//RS             "empty-no-over-force",
+//RS             "force-off-tty",
+//RS             "auto-tty",
+//RS         ] {
+//RS             let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+//RS             child
+//RS                 .args([
+//RS                     "--exact",
+//RS                     "Terminal::tests::color_precedence_is_proved_in_isolated_children",
+//RS                 ])
+//RS                 .env(CHILD, case)
+//RS                 .env_remove("NO_COLOR")
+//RS                 .env_remove("FORCE_COLOR");
+//RS             if matches!(case, "always-over-no" | "empty-no-over-force") {
+//RS                 child.env("NO_COLOR", "");
+//RS             }
+//RS             if matches!(
+//RS                 case,
+//RS                 "never-over-force" | "empty-no-over-force" | "force-off-tty"
+//RS             ) {
+//RS                 child.env("FORCE_COLOR", "1");
+//RS             }
+//RS             assert!(
+//RS                 child.status().unwrap().success(),
+//RS                 "policy child failed: {case}"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0083 crates/jet-foundation/src/Terminal.rs:1-171
+

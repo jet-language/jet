@@ -1,0 +1,1682 @@
+// PORT-PENDING 0387 crates-jet-sema-src-sema-checkercorelib-fixed-sigs-slice-2524: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2524-4201
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         | ("core.time", "from_unix_nanoseconds") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::Named("DateTime".to_string())),
+//RS         )),
+//RS         ("core.time", "today") => Some((vec![], Some(Type::Named("LocalDate".to_string())))),
+//RS         ("core.time", "parse" | "parse_iso_week_date") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("LocalDate".to_string()),
+//RS                 time_error.clone(),
+//RS             )),
+//RS         )),
+//RS         ("core.time", "parse_rfc3339") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("DateTime".to_string()),
+//RS                 time_error.clone(),
+//RS             )),
+//RS         )),
+//RS         ("core.time", "from_iso_week") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
+//RS             Some(result_ty(
+//RS                 Type::Named("LocalDate".to_string()),
+//RS                 time_error.clone(),
+//RS             )),
+//RS         )),
+//RS         ("core.time", "parse_zoned") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("ZonedDateTime".to_string()),
+//RS                 time_error.clone(),
+//RS             )),
+//RS         )),
+//RS         ("core.time", "datetime") => Some((
+//RS             vec![
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::Named("DateTime".to_string())),
+//RS         )),
+//RS         ("core.time", "time") | ("core.time", "local_time") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::Named("LocalTime".to_string())),
+//RS         )),
+//RS         ("core.time", "days_in_month") => {
+//RS             Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Int)))
+//RS         }
+//RS         ("core.time", "is_leap_year") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
+//RS         ("core.time", "parse_time") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("LocalTime".to_string()),
+//RS                 time_error.clone(),
+//RS             )),
+//RS         )),
+//RS         ("core.time", "period") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::Named("Period".to_string())),
+//RS         )),
+//RS         ("core.time", "period_days" | "period_months" | "period_years") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::Named("Period".to_string())),
+//RS         )),
+//RS         ("core.time", "zone") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::Named("Zone".to_string()), time_error.clone())),
+//RS         )),
+//RS         ("core.time", "utc") => Some((vec![], Some(Type::Named("Zone".to_string())))),
+//RS         ("core.time", "zoned") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("DateTime".to_string())),
+//RS                 (read, Type::Named("Zone".to_string())),
+//RS             ],
+//RS             Some(Type::Named("ZonedDateTime".to_string())),
+//RS         )),
+//RS         ("core.time", "zoned_local") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("LocalDate".to_string())),
+//RS                 (read, Type::Named("LocalTime".to_string())),
+//RS                 (read, Type::Named("Zone".to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("ZonedDateTime".to_string()),
+//RS                 time_error,
+//RS             )),
+//RS         )),
+//RS         ("core.game", "run") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("GameScene".to_string())),
+//RS                 (read, Type::Named("GameReplay".to_string())),
+//RS                 (read, Type::Named("GameBackend".to_string())),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         // D-ENC1 + D-JSONVERB1: unified encoding. `parse` → dynamic JSON value; `decode`
+//RS         // → lenient typed decode (D-JSON3); `to_string`/`to_string_pretty` → serialize.
+//RS         ("core.encoding.json", "parse" | "loads") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(json.clone(), encoding_error_ty())),
+//RS         )),
+//RS         ("core.encoding.json", "decode") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(json.clone(), encoding_error_ty())),
+//RS         )),
+//RS         ("core.encoding.json", "to_string" | "to_string_pretty" | "dumps") => {
+//RS             Some((vec![(read, json)], Some(Type::String)))
+//RS         }
+//RS         // D-JSONCANON1=A: edition 2026 keeps the infallible prototype; 2027 is
+//RS         // fallible RFC 8785 JCS with optional EncodingLimits.
+//RS         ("core.encoding.json", "canonical") => {
+//RS             if super::super::Edition::edition_at_least("2027") {
+//RS                 Some((
+//RS                     vec![
+//RS                         (read, json.clone()),
+//RS                         (read, Type::Named("EncodingLimits".to_string())),
+//RS                     ],
+//RS                     Some(result_ty(Type::String, encoding_error_ty())),
+//RS                 ))
+//RS             } else {
+//RS                 Some((vec![(read, json.clone())], Some(Type::String)))
+//RS             }
+//RS         }
+//RS         ("core.encoding.json", "events") => Some((vec![(read, json.clone())], Some(Type::String))),
+//RS         ("core.encoding.json", "reader") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("FileReader".to_string())),
+//RS                 (read, Type::Named("EncodingLimits".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("JSONReader".to_string()),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.json", "writer") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("FileWriter".to_string())),
+//RS                 (read, Type::Named("EncodingLimits".to_string())),
+//RS                 (read, Type::Bool),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("JSONWriter".to_string()),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.jsonl", "parse") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(json.clone())),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.jsonl", "to_string") => Some((
+//RS             vec![(read, Type::List(Box::new(json.clone())))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.encoding.jsonl", "loads") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(json.clone())),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.jsonl", "dumps") => Some((
+//RS             vec![(read, Type::List(Box::new(json.clone())))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.encoding.jsonl", "count_rows") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::Int)))
+//RS         }
+//RS         ("core.encoding.jsonl", "append_line") => Some((
+//RS             vec![(read, Type::String), (read, json.clone())],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.encoding.jsonl", "first") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Option(Box::new(json.clone())),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.jsonl", "reader") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("FileReader".to_string())),
+//RS                 (read, Type::Named("EncodingLimits".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("JSONLReader".to_string()),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.jsonl", "writer") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("FileWriter".to_string())),
+//RS                 (read, Type::Named("EncodingLimits".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("JSONLWriter".to_string()),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         // jet.csv → core.encoding.csv: parse text into field rows. `rows`
+//RS         // exposes the same records with their physical opening line.
+//RS         ("core.encoding.csv", "parse") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Bool),
+//RS                 (read, Type::Bool),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::List(Box::new(Type::String)))),
+//RS                 Type::String,
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.csv", "rows") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Bool),
+//RS                 (read, Type::Bool),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::Named("CSVRow".to_string()))),
+//RS                 Type::String,
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.csv", "to_string") => Some((
+//RS             vec![(
+//RS                 read,
+//RS                 Type::List(Box::new(Type::List(Box::new(Type::String)))),
+//RS             )],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.encoding.csv", "reader") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("FileReader".to_string())),
+//RS                 (read, Type::Named("EncodingLimits".to_string())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Bool),
+//RS                 (read, Type::Bool),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("CSVReader".to_string()),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.csv", "writer") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("FileWriter".to_string())),
+//RS                 (read, Type::Named("EncodingLimits".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("CSVWriter".to_string()),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         // D-DX-QUEUE1=A: `jobs.queue()` validates authority and opens the
+//RS         // provider, so the public factory preserves its Result.
+//RS         ("core.jobs", "queue") => Some((
+//RS             vec![],
+//RS             Some(result_ty(
+//RS                 Type::Named("JobQueue".to_string()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.data.loader", "snapshot_reusable") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("DataSnapshotIdentity".to_string())),
+//RS                 (read, Type::Named("DataSnapshotIdentity".to_string())),
+//RS             ],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         // D-DATA-SURFACE1=A / D-DATA-PLOT1=A / D-DATA-STATUS1=A: core.data
+//RS         // facade fixed-shape calls. Generic typed-list calls are handled in
+//RS         // infer_core_call so selectors stay typed by sema.
+//RS         ("core.data", "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev") => {
+//RS             let args = vec![(read, Type::List(Box::new(Type::Float)))];
+//RS             Some((
+//RS                 args,
+//RS                 Some(result_ty(Type::Float, Type::Named("DataError".to_string()))),
+//RS             ))
+//RS         }
+//RS         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D (#443): Tensor storage and aliases.
+//RS         ("core.compute", "zeros" | "ones") => Some((
+//RS             vec![(read, Type::List(Box::new(Type::Int)))],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "full") => Some((
+//RS             vec![(read, Type::List(Box::new(Type::Int))), (read, Type::Float)],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "from_list") => Some((
+//RS             vec![(read, Type::List(Box::new(Type::Float)))],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "matrix") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int), (read, Type::Float)],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "vec") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Float)],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "add" | "mul" | "matmul") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "reshape") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::List(Box::new(Type::Int))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "get") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::List(Box::new(Type::Int))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Float,
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "set") => Some((
+//RS             vec![
+//RS                 (AccessConvention::Write, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::List(Box::new(Type::Int))),
+//RS                 (read, Type::Float),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "shape") => Some((
+//RS             vec![(read, Type::Named("Tensor".to_string()))],
+//RS             Some(Type::List(Box::new(Type::Int))),
+//RS         )),
+//RS         ("core.compute", "to_list") => Some((
+//RS             vec![(read, Type::Named("Tensor".to_string()))],
+//RS             Some(Type::List(Box::new(Type::Float))),
+//RS         )),
+//RS         ("core.compute", "rank" | "numel") => Some((
+//RS             vec![(read, Type::Named("Tensor".to_string()))],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.compute", "device" | "placement") => Some((
+//RS             vec![(read, Type::Named("Tensor".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         (
+//RS             "core.compute",
+//RS             "device_cpu" | "device_auto" | "device_metal" | "device_cuda" | "device_vulkan"
+//RS             | "device_webgpu",
+//RS         ) => Some((vec![], Some(Type::Named("ComputeDevice".to_string())))),
+//RS         ("core.compute", "on_device") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::Named("ComputeDevice".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         // #1136 ndarray ops — same Tensor substrate (D-COMPUTE-TYPE1).
+//RS         ("core.compute", "broadcast_to") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::List(Box::new(Type::Int))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "transpose" | "negate" | "abs" | "exp" | "log" | "sqrt") => Some((
+//RS             vec![(read, Type::Named("Tensor".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "sum_axis") => Some((
+//RS             vec![(read, Type::Named("Tensor".to_string())), (read, Type::Int)],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "sub" | "div" | "maximum" | "minimum") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "eye") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "det") => Some((
+//RS             vec![(read, Type::Named("Tensor".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Float,
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "inv" | "fft") => Some((
+//RS             vec![(read, Type::Named("Tensor".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "solve") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "stream_new") => {
+//RS             Some((vec![], Some(Type::Named("ComputeStream".to_string()))))
+//RS         }
+//RS         ("core.compute", "stream_new_on") => Some((
+//RS             vec![(read, Type::Named("ComputeDevice".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("ComputeStream".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "stream_sync") => Some((
+//RS             vec![(read, Type::Named("ComputeStream".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "stream_show") => Some((
+//RS             vec![(read, Type::Named("ComputeStream".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.compute", "transfer_show") => Some((
+//RS             vec![(read, Type::Named("Tensor".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.compute", "transfer") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::Named("ComputeDevice".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "kernel_bounds_ok") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(Type::Int))),
+//RS                 (read, Type::List(Box::new(Type::Int))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Bool,
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "sparse_show") => Some((
+//RS             vec![(read, Type::Named("SparseTensor".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.compute", "serialize") => Some((
+//RS             vec![(read, Type::Named("Tensor".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::String,
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "mse_loss") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "sgd_step") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::Float),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "deserialize") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "to_sparse") => Some((
+//RS             vec![(read, Type::Named("Tensor".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("SparseTensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "sparse_nnz") => Some((
+//RS             vec![(read, Type::Named("SparseTensor".to_string()))],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.compute", "sparse_mv") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SparseTensor".to_string())),
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "matmul_f32_tile") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS                 (read, Type::Named("Tensor".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Tensor".to_string()),
+//RS                 Type::Named("ComputeError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.compute", "profile_f32_strict" | "profile_show") => {
+//RS             Some((vec![], Some(Type::String)))
+//RS         }
+//RS         // D-SERVICE1=D (#444): the typed tree value is the public topology
+//RS         // surface; worker declarations are methods on that value.
+//RS         ("core.service", "tree") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Named("ServiceTree".to_string())),
+//RS         )),
+//RS         ("core.service", "tree_show") => Some((
+//RS             vec![(read, Type::Named("ServiceTree".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         // The rows below are retained as private Prelude contracts while the
+//RS         // typed builder migrates the rest of the service tree. They are not in
+//RS         // `core_module_items`, so no old string-keyed surface is user-visible.
+//RS         ("core.service", "runtime") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("Duration".to_string())),
+//RS             ],
+//RS             Some(Type::Named("ServiceRuntime".to_string())),
+//RS         )),
+//RS         ("core.service", "state_store") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("ServiceStateStore".to_string()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         (
+//RS             "core.service",
+//RS             "restart_one_for_one" | "restart_one_for_all" | "restart_rest_for_one",
+//RS         ) => Some((vec![], Some(Type::Named("ServiceRestart".to_string())))),
+//RS         ("core.service", "delivery_at_most_once" | "delivery_durable") => {
+//RS             Some((vec![], Some(Type::Named("ServiceDelivery".to_string()))))
+//RS         }
+//RS         ("core.service", "set_restart") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::Named("ServiceRestart".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "set_delivery") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::Named("ServiceDelivery".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "worker") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS                 (
+//RS                     read,
+//RS                     Type::Fn {
+//RS                         params: Vec::new(),
+//RS                         ret: None,
+//RS                         effect_bound: None,
+//RS                         param_contract: None,
+//RS                         call_metadata: None,
+//RS                         return_view_provenance: None,
+//RS                     },
+//RS                 ),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("ServiceEndpoint".to_string()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "group") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS                 (read, Type::List(Box::new(Type::String))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "start" | "stop") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Write,
+//RS                 Type::Named("ServiceTree".to_string()),
+//RS             )],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "send") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::Named("ServiceEndpoint".to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "send_durable") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::Named("ServiceEndpoint".to_string())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Delivery".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "receive") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::Named("ServiceEndpoint".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::String,
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "mailbox_depth" | "restarts") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("ServiceTree".to_string())),
+//RS                 (read, Type::Named("ServiceEndpoint".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Int,
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         (
+//RS             "core.service",
+//RS             "fail_worker" | "drain_worker" | "partition_worker" | "reconcile_worker",
+//RS         ) => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::Named("ServiceEndpoint".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "dead_letter_count" | "event_count" | "directory_generation") => Some((
+//RS             vec![(read, Type::Named("ServiceTree".to_string()))],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.service", "drain_dead_letters") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Write,
+//RS                 Type::Named("ServiceTree".to_string()),
+//RS             )],
+//RS             Some(result_ty(
+//RS                 Type::Int,
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "set_state_empty") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Write,
+//RS                 Type::Named("ServiceTree".to_string()),
+//RS             )],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "set_state_snapshot" | "set_state_event_log") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::Named("ServiceStateStore".to_string())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS                 // The migration policy the adapter is opened under. It decides
+//RS                 // whether a later rollback is possible, so it is written at the
+//RS                 // call rather than defaulted out of sight.
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "commit_snapshot" | "append_event") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "restore_snapshot") => Some((
+//RS             vec![(read, Type::Named("ServiceTree".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::String,
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "replay_events" | "observe") => Some((
+//RS             vec![(read, Type::Named("ServiceTree".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.service", "workflow_start") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("ServiceWorkflow".to_string()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "workflow_sleep") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("ServiceWorkflow".to_string())),
+//RS                 (read, Type::Named("Duration".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "workflow_activity_wait") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("ServiceWorkflow".to_string())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::String,
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "workflow_all") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("ServiceWorkflow".to_string())),
+//RS                 (read, Type::List(Box::new(Type::String))),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::String)),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "workflow_step") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "workflow_activity") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("TaskStatus".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "workflow_activity_retry") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("TaskOutcome".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("TaskStatus".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "workflow_activity_complete") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("TaskOutcome".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("TaskOutcome".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "workflow_history") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("ServiceTree".to_string())),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::String,
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "workflow_outcome") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("ServiceTree".to_string())),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("TaskOutcome".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "directory_register") => Some((
+//RS             vec![
+//RS                 (
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("ServiceTree".to_string()),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("ServiceEndpoint".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Unit".into()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "directory_resolve") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("ServiceTree".to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("ServiceEndpoint".to_string()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "handoff_generation" | "rollback_generation" | "chaos_fail") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Write,
+//RS                 Type::Named("ServiceTree".to_string()),
+//RS             )],
+//RS             Some(result_ty(
+//RS                 Type::Int,
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "upgrade_receipt") => Some((
+//RS             vec![(read, Type::Named("ServiceTree".to_string()))],
+//RS             Some(result_ty(
+//RS                 Type::Named("ServiceUpgradeReceipt".to_string()),
+//RS                 Type::Named("ServiceError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.service", "endpoint_show") => Some((
+//RS             vec![(read, Type::Named("ServiceEndpoint".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.service", "delivery_state_show") => Some((
+//RS             vec![(read, Type::Named("DeliveryState".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.data", "quantile") => {
+//RS             let args = vec![
+//RS                 (read, Type::List(Box::new(Type::Float))),
+//RS                 (read, Type::Float),
+//RS             ];
+//RS             Some((
+//RS                 args,
+//RS                 Some(result_ty(Type::Float, Type::Named("DataError".to_string()))),
+//RS             ))
+//RS         }
+//RS         ("core.data", "rolling_mean") => {
+//RS             let args = vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Int)];
+//RS             Some((
+//RS                 args,
+//RS                 Some(result_ty(
+//RS                     Type::List(Box::new(Type::Float)),
+//RS                     Type::Named("DataError".to_string()),
+//RS                 )),
+//RS             ))
+//RS         }
+//RS         ("core.data", "describe") => {
+//RS             let args = vec![(read, Type::List(Box::new(Type::Float)))];
+//RS             Some((
+//RS                 args,
+//RS                 Some(result_ty(
+//RS                     Type::Named("DataSummary".to_string()),
+//RS                     Type::Named("DataError".to_string()),
+//RS                 )),
+//RS             ))
+//RS         }
+//RS         ("core.data", "status") => Some((
+//RS             vec![],
+//RS             Some(Type::List(Box::new(Type::Named("DataStatus".to_string())))),
+//RS         )),
+//RS         ("core.data", "require_bridge") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(unit_ty(), Type::Named("DataError".to_string()))),
+//RS         )),
+//RS         // D-QUERY-RETAIN1=A: plot reducers consume ordinary `[Group<K, V>]`
+//RS         // lists. The fixed surface uses string keys; the runtime adapter
+//RS         // accepts and preserves the nominal key value.
+//RS         ("core.data", "bar_text" | "bar_svg") => {
+//RS             let args = vec![(
+//RS                 read,
+//RS                 Type::List(Box::new(Type::Apply {
+//RS                     name: "Group".to_string(),
+//RS                     args: vec![Type::String, Type::Int],
+//RS                 })),
+//RS             )];
+//RS             Some((
+//RS                 args,
+//RS                 Some(result_ty(
+//RS                     Type::String,
+//RS                     Type::Named("DataError".to_string()),
+//RS                 )),
+//RS             ))
+//RS         }
+//RS         ("core.data", "line_text" | "line_svg") => {
+//RS             let args = vec![
+//RS                 (
+//RS                     read,
+//RS                     Type::List(Box::new(Type::Apply {
+//RS                         name: "Group".to_string(),
+//RS                         args: vec![Type::String, Type::Float],
+//RS                     })),
+//RS                 ),
+//RS                 (read, Type::Named("DataLineOptions".to_string())),
+//RS             ];
+//RS             Some((
+//RS                 args,
+//RS                 Some(result_ty(
+//RS                     Type::String,
+//RS                     Type::Named("DataError".to_string()),
+//RS                 )),
+//RS             ))
+//RS         }
+//RS         ("core.text.fmt", "number" | "bytes" | "duration" | "ordinal") => {
+//RS             Some((vec![(read, Type::Int)], Some(Type::String)))
+//RS         }
+//RS         ("core.text.fmt", "decimal" | "grouped" | "percent" | "sci") => Some((
+//RS             vec![(read, Type::Float), (read, Type::Int)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.fmt", "hex") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.fmt", "bin" | "oct") => Some((vec![(read, Type::Int)], Some(Type::String))),
+//RS         ("core.text.fmt", "plural") => Some((
+//RS             vec![
+//RS                 (read, Type::Int),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.fmt", "pad_left" | "pad_right" | "pad_center") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.fmt", "pad") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         // D-ENC-DYN1=A+ (c152): TOML is a full adapter over the rich `Data` value —
+//RS         // `parse` returns `TOML` (= `Data`); `to_string` takes any encodable value.
+//RS         ("core.encoding.toml", "parse" | "load" | "loads") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(json.clone(), encoding_error_ty())),
+//RS         )),
+//RS         ("core.encoding.toml", "to_string") => {
+//RS             Some((vec![(read, json.clone())], Some(Type::String)))
+//RS         }
+//RS         // D-ENC-YAML1 = A (c152): YAML is a full adapter over the rich `Data` value.
+//RS         ("core.encoding.yaml", "parse") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(json.clone(), encoding_error_ty())),
+//RS         )),
+//RS         ("core.encoding.yaml", "to_string") => {
+//RS             Some((vec![(read, json.clone())], Some(Type::String)))
+//RS         }
+//RS         ("core.encoding.xml", "parse") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
+//RS         )),
+//RS         ("core.encoding.xml", "parse_with") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("XMLParseOptions".to_string())),
+//RS             ],
+//RS             Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
+//RS         )),
+//RS         ("core.encoding.xml", "parse_bytes") => Some((
+//RS             vec![
+//RS                 (read, list_u8.clone()),
+//RS                 (read, Type::Named("XMLParseOptions".to_string())),
+//RS             ],
+//RS             Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
+//RS         )),
+//RS         ("core.encoding.xml", "to_string") => {
+//RS             Some((vec![(read, json.clone())], Some(Type::String)))
+//RS         }
+//RS         ("core.encoding.xml", "to_bytes") => Some((
+//RS             vec![
+//RS                 (read, json.clone()),
+//RS                 (read, Type::Named("XMLRenderOptions".to_string())),
+//RS             ],
+//RS             Some(result_ty(list_u8, Type::Named("XMLError".to_string()))),
+//RS         )),
+//RS         ("core.encoding.xml", "canonical") => Some((
+//RS             vec![
+//RS                 (read, json.clone()),
+//RS                 (read, Type::Named("XMLCanonical".to_string())),
+//RS             ],
+//RS             Some(result_ty(Type::String, Type::Named("XMLError".to_string()))),
+//RS         )),
+//RS         // D-ENCXML-PROJECTION1=A: focused helpers. `decode`/`decode_bytes`/`expanded_name`
+//RS         // return types come from core_call (turbofish / named tuple).
+//RS         ("core.encoding.xml", "root") => Some((
+//RS             vec![(read, json.clone())],
+//RS             Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
+//RS         )),
+//RS         ("core.encoding.xml", "attribute") => Some((
+//RS             vec![(read, json.clone()), (read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Option(Box::new(Type::String)),
+//RS                 Type::Named("XMLError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.xml", "content") => Some((
+//RS             vec![(read, json.clone())],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(json.clone())),
+//RS                 Type::Named("XMLError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.xml", "reader") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("FileReader".to_string())),
+//RS                 (read, Type::Named("EncodingLimits".to_string())),
+//RS                 (read, Type::Named("XMLParseOptions".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("XMLReader".to_string()),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.xml", "writer") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("FileWriter".to_string())),
+//RS                 (read, Type::Named("EncodingLimits".to_string())),
+//RS                 (read, Type::Named("XMLRenderOptions".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("XMLWriter".to_string()),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.cbor", "reader") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("FileReader".to_string())),
+//RS                 (read, Type::Named("EncodingLimits".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("CBORReader".to_string()),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.encoding.cbor", "writer") => Some((
+//RS             vec![
+//RS                 (moved, Type::Named("FileWriter".to_string())),
+//RS                 (read, Type::Named("EncodingLimits".to_string())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("CBORWriter".to_string()),
+//RS                 encoding_error_ty(),
+//RS             )),
+//RS         )),
+//RS         // E2-M7: streaming file handles (D-IO2).
+//RS         ("core.files", "open") => Some((
+//RS             vec![(read, path.clone())],
+//RS             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
+//RS         )),
+//RS         ("core.files", "append" | "create") => Some((
+//RS             vec![(read, path)],
+//RS             Some(result_ty(Type::Named("FileWriter".to_string()), io.clone())),
+//RS         )),
+//RS         // D-URL1=A: typed URLs, query strings, component escaping, and MIME values.
+//RS         ("core.net.url", "parse") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::Named("URL".to_string()), Type::String)),
+//RS         )),
+//RS         ("core.net.url", "from_parts") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (
+//RS                     read,
+//RS                     Type::List(Box::new(Type::List(Box::new(Type::String)))),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(Type::Named("URL".to_string()), Type::String)),
+//RS         )),
+//RS         ("core.net.url", "file") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Named("URL".to_string())),
+//RS         )),
+//RS         ("core.net.url", "data") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("MIME".to_string())),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Named("URL".to_string())),
+//RS         )),
+//RS         ("core.net.url", "query") => Some((
+//RS             vec![(
+//RS                 read,
+//RS                 Type::List(Box::new(Type::List(Box::new(Type::String)))),
+//RS             )],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.net.url", "percent_encode") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::String)))
+//RS         }
+//RS         ("core.net.url", "percent_decode") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::String, Type::String)),
+//RS         )),
+//RS         ("core.net.url", "geturl" | "unparse" | "urlunparse" | "urlunsplit") => Some((
+//RS             vec![(read, Type::Named("URL".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.net.url", "urljoin") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.net.url", "parse_qsl" | "parse_qs") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::List(Box::new(Type::List(Box::new(Type::String))))),
+//RS         )),
+//RS         ("core.net.url", "urlencode") => Some((
+//RS             vec![(
+//RS                 read,
+//RS                 Type::List(Box::new(Type::List(Box::new(Type::String)))),
+//RS             )],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.net.url", "split_fragment") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Tuple(vec![
+//RS                 ("fragment".to_string(), Box::new(Type::String)),
+//RS                 ("url".to_string(), Box::new(Type::String)),
+//RS             ])),
+//RS         )),
+//RS         ("core.net.url", "quote" | "quote_plus") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::String)))
+//RS         }
+//RS         ("core.net.url", "quote_from_bytes") => {
+//RS             Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::String)))
+//RS         }
+//RS         ("core.net.url", "unquote" | "unquote_plus") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::String, Type::String)),
+//RS         )),
+//RS         ("core.net.url", "unquote_to_bytes") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+//RS         )),
+//RS         ("core.net.url", "urlparse" | "urlsplit") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::Named("URL".to_string()), Type::String)),
+//RS         )),
+//RS         ("core.net.url", "urldefrag") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Tuple(vec![
+//RS                 ("url".to_string(), Box::new(Type::String)),
+//RS                 ("fragment".to_string(), Box::new(Type::String)),
+//RS             ])),
+//RS         )),
+//RS         ("core.net.mime", "parse") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::Named("MIME".to_string()), Type::String)),
+//RS         )),
+//RS         ("core.net.mime", "from_extension" | "extension") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Option(Box::new(Type::String))),
+//RS         )),
+//RS         // D-EMAIL1=A: one bounded native message/MIME construction path.
+//RS         ("core.email", "address") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("Address".to_string()),
+//RS                 Type::Named("EmailError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.email", "attachment") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, list_u8.clone()),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Attachment".to_string()),
+//RS                 Type::Named("EmailError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.email", "message") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Address".to_string())),
+//RS                 (
+//RS                     read,
+//RS                     Type::List(Box::new(Type::Named("Address".to_string()))),
+//RS                 ),
+//RS                 (
+//RS                     read,
+//RS                     Type::List(Box::new(Type::Named("Address".to_string()))),
+//RS                 ),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("HTML".to_string())),
+//RS                 (
+//RS                     read,
+//RS                     Type::List(Box::new(Type::Named("Attachment".to_string()))),
+//RS                 ),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Message".to_string()),
+//RS                 Type::Named("EmailError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.email", "envelope") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("Address".to_string())),
+//RS                 (
+//RS                     read,
+//RS                     Type::List(Box::new(Type::Named("Address".to_string()))),
+//RS                 ),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Envelope".to_string()),
+//RS                 Type::Named("EmailError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.email", "serialize") => Some((
+//RS             vec![(read, Type::Named("Message".to_string()))],
+//RS             Some(result_ty(list_u8, Type::Named("EmailError".to_string()))),
+//RS         )),
+//RS         ("core.email", "smtp") => Some((
+//RS             vec![(
+//RS                 AccessConvention::Read,
+//RS                 Type::Named("SMTPConfig".to_string()),
+//RS             )],
+//RS             Some(result_ty(
+//RS                 Type::Named("Mailer".to_string()),
+//RS                 Type::Named("EmailError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.email", "smtp_from_env") => Some((
+//RS             vec![],
+//RS             Some(result_ty(
+//RS                 Type::Named("Mailer".to_string()),
+//RS                 Type::Named("EmailError".to_string()),
+//RS             )),
+//RS         )),
+//RS         // D-TEXTUNICODE1: std-only Unicode scalar helpers.
+//RS         ("core.text", "scalar_count" | "byte_count") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::Int)))
+//RS         }
+//RS         ("core.text", "is_ascii") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+//RS         ("core.text", "lower" | "upper") => Some((vec![(read, Type::String)], Some(Type::String))),
+//RS         ("core.text", "scalars") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.text", "nfc" | "nfd" | "nfkc" | "nfkd" | "casefold") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::String)))
+//RS         }
+//RS         ("core.text", "graphemes" | "words" | "sentences" | "inspect") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.text", "grapheme_views" | "word_views" | "line_views") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(crate::Collections::view_iter_ty(Type::Apply {
+//RS                 name: "View".to_string(),
+//RS                 args: vec![Type::Named("str".to_string())],
+//RS             })),
+//RS         )),
+//RS         ("core.text", "byte_views") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(crate::Collections::view_iter_ty(Type::Apply {
+//RS                 name: "View".to_string(),
+//RS                 args: vec![Type::List(Box::new(u8_ty()))],
+//RS             })),
+//RS         )),
+//RS         ("core.text", "is_alphabetic" | "is_numeric" | "is_whitespace") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::Bool)))
+//RS         }
+//RS         ("core.text", "splitn" | "rsplitn") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.text", "trim" | "trim_start" | "trim_end") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::String)))
+//RS         }
+//RS         ("core.text", "pad_start" | "pad_end" | "center") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text", "starts_any" | "ends_any") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::List(Box::new(Type::String))),
+//RS             ],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.text.parse", "parse_kv") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Tuple(vec![
+//RS                 ("key".to_string(), Box::new(Type::String)),
+//RS                 ("ok".to_string(), Box::new(Type::Bool)),
+//RS                 ("value".to_string(), Box::new(Type::String)),
+//RS             ])),
+//RS         )),
+//RS         ("core.text", "char_indices") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.text.parse", "rsplit") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.text.parse", "split_once") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Tuple(vec![
+//RS                 ("found".to_string(), Box::new(Type::Bool)),
+//RS                 ("head".to_string(), Box::new(Type::String)),
+//RS                 ("tail".to_string(), Box::new(Type::String)),
+//RS             ])),
+//RS         )),
+//RS         ("core.text.parse", "partition" | "rpartition") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Tuple(vec![
+//RS                 ("head".to_string(), Box::new(Type::String)),
+//RS                 ("sep".to_string(), Box::new(Type::String)),
+//RS                 ("tail".to_string(), Box::new(Type::String)),
+//RS             ])),
+//RS         )),
+//RS         ("core.text.parse", "split_ws") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.text.parse", "parse_bool") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Option(Box::new(Type::Bool))),
+//RS         )),
+//RS         ("core.text.parse", "parse" | "parse_int") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Option(Box::new(Type::Int))),
+//RS         )),
+//RS         ("core.text.parse", "parse_int_base") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(Type::Option(Box::new(Type::Int))),
+//RS         )),
+//RS         ("core.text.parse", "parse_float") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Option(Box::new(Type::Float))),
+//RS         )),
+//RS         ("core.text.parse", "split") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.text.parse", "find" | "rfind" | "count" | "index") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.text.parse", "replace") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.parse", "join") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(Type::String))),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.parse", "splitlines") => Some((
+//RS             vec![(read, Type::String), (read, Type::Bool)],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.text.parse", "capwords" | "lstrip" | "rstrip" | "strip"
+//RS         | "escape_c" | "unescape_c") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.parse", "find_from" | "rfind_from") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.text.parse", "contains") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.text.parse", "capitalize" | "lower" | "swapcase" | "title" | "upper") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.parse", "startswith" | "endswith" | "starts_with" | "ends_with"
+//RS         | "removeprefix" | "removesuffix" | "strip_prefix" | "strip_suffix" | "rindex") => {
+//RS             let result = match name {
+//RS                 "rindex" => Type::Int,
+//RS                 "startswith" | "endswith" | "starts_with" | "ends_with" => Type::Bool,
+//RS                 _ => Type::String,
+//RS             };
+//RS             Some((vec![(read, Type::String), (read, Type::String)], Some(result)))
+//RS         }
+//RS         ("core.text.parse", "encode") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::List(Box::new(u8_ty()))),
+//RS         )),
+//RS         ("core.text.parse", "isalpha" | "isdecimal" | "isnumeric" | "isalnum" | "isascii"
+//RS         | "is_digit" | "isdigit" | "is_alnum" | "isidentifier" | "is_identifier"
+//RS         | "islower" | "is_lower" | "isspace" | "is_space" | "istitle" | "is_title"
+//RS         | "isprintable" | "isupper" | "is_upper" | "is_ascii") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::Bool)))
+//RS         }
+//RS         ("core.text.parse", "expandtabs") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.parse", "center" | "ljust" | "rjust") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.parse", "zfill") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.wrap", "wrap") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.text.wrap", "fill") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.wrap", "shorten") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.wrap", "indent") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.wrap", "dedent") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::String)))
+//RS         }
+//RS         ("core.text.wrap", "expand_tabs") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.wrap", "html_escape") => Some((
+//RS             vec![(read, Type::String), (read, Type::Bool)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.wrap", "html_unescape") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::String)))
+//RS         }
+//RS         ("core.text.wrap", "indent_with") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Bool),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.wrap", "wrap_paragraphs") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.wrap", "hanging_indent") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.text.html", "escape" | "unescape" | "strip_tags"
+// END-PORT-PENDING 0387 crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:2524-4201
+

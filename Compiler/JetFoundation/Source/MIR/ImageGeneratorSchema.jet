@@ -1,0 +1,387 @@
+// MirImageCodec.rs:68-159,313-594,768-1053. Native definitions, imports,
+// aliases and public paths are resolved before any typed source is emitted.
+pub struct MIRImageGeneratorSource { pub relative_path: String, pub text: String }
+pub fn mir_image_generator_module_path(relative_path: String) -> String Never! {
+    parts := relative_path.replace("\\", "/").split("/").to_list()
+    if parts.len() != 0 {
+        last :: parts[parts.len() - 1]
+        if last == "mod.rs" || last == "lib.rs" -> &parts.pop()
+        else if last.ends_with(".rs") -> parts[parts.len() - 1] = last.slice(0, last.len() - 3)
+    }
+    if parts.len() == 0 -> "crate" else -> "crate::{parts.join("::")}"
+}
+pub fn mir_image_generator_normalize_path(module_name: String, input: String) -> String Never! {
+    path :: mir_image_gen_trim(input)
+    if path == "crate" || path.starts_with("crate::") || path.starts_with("std::") || path.starts_with("core::") -> return path
+    parts := module_name.split("::").to_list()
+    if path.starts_with("self::") {
+        loop part in path.slice(6, path.len()).split("::") -> &parts.push(part)
+    } else if path.starts_with("super::") {
+        loop parts.len() > 1 && parts[parts.len() - 1] == "super" -> &parts.pop()
+        if parts.len() != 0 -> &parts.pop()
+        loop part in path.slice(7, path.len()).split("::") -> &parts.push(part)
+    } else -> loop part in path.split("::") -> &parts.push(part)
+    if parts.len() != 0 && parts[0] != "crate" {
+        result := [String]{"crate"}
+        loop part in parts -> &result.push(part)
+        return result.join("::")
+    }
+    parts.join("::")
+}
+fn mir_image_gen_alias(input: String) -> (String, String?) Never! {
+    if mir_image_gen_find(input, " as ", 0) == .Val(index) -> return (mir_image_gen_trim(input.slice(0, index)), Val(mir_image_gen_trim(input.slice(index + 4, input.len()))))
+    (mir_image_gen_trim(input), None)
+}
+fn mir_image_gen_last_path(path: String) -> String Never! {
+    parts :: path.split("::").to_list()
+    parts[parts.len() - 1]
+}
+pub fn mir_image_generator_insert_use(statement: String, module_name: String, imports: &[String:String]) Never! {
+    if mir_image_generator_top_level(statement, U8{123}) == .Val(open) {
+        prefix := mir_image_gen_trim(statement.slice(0, open))
+        loop prefix.ends_with(":") -> prefix = prefix.slice(0, prefix.len() - 1)
+        close :: mir_image_generator_matching(statement, open, U8{123}, U8{125}) ?? return
+        loop raw in mir_image_generator_split(statement.slice(open + 1, close), U8{44}) {
+            item :: mir_image_gen_trim(raw)
+            if item == "" || item == "*" -> continue
+            alias :: mir_image_gen_alias(item)
+            path :: mir_image_generator_normalize_path(module_name, "{prefix}::{alias.0}")
+            name :: alias.1 ?? mir_image_gen_last_path(alias.0)
+            imports[name] = path
+        }
+    } else {
+        alias :: mir_image_gen_alias(statement)
+        path :: mir_image_generator_normalize_path(module_name, alias.0)
+        name :: alias.1 ?? mir_image_gen_last_path(path)
+        imports[name] = path
+    }
+}
+pub fn mir_image_generator_public_use(statement: String, module_name: String, schema: &MIRImageSchema) Never! {
+    if mir_image_generator_top_level(statement, U8{123}) == .Val(open) {
+        prefix := mir_image_gen_trim(statement.slice(0, open))
+        loop prefix.ends_with(":") -> prefix = prefix.slice(0, prefix.len() - 1)
+        close :: mir_image_generator_matching(statement, open, U8{123}, U8{125}) ?? return
+        loop raw in mir_image_generator_split(statement.slice(open + 1, close), U8{44}) {
+            item :: mir_image_gen_trim(raw)
+            if item == "" -> continue
+            if item == "*" {
+                &schema.wildcards.push(MIRImageSchemaWildcard{public_module: module_name, target_module: mir_image_generator_normalize_path(module_name, prefix)})
+                continue
+            }
+            alias :: mir_image_gen_alias(item)
+            name :: alias.1 ?? mir_image_gen_last_path(alias.0)
+            schema.aliases["{module_name}::{name}"] = mir_image_generator_normalize_path(module_name, "{prefix}::{alias.0}")
+        }
+    } else if mir_image_gen_trim(statement).ends_with("::*") {
+        text :: mir_image_gen_trim(statement)
+        &schema.wildcards.push(MIRImageSchemaWildcard{public_module: module_name, target_module: mir_image_generator_normalize_path(module_name, text.slice(0, text.len() - 3))})
+    } else {
+        alias :: mir_image_gen_alias(statement)
+        name :: alias.1 ?? mir_image_gen_last_path(alias.0)
+        schema.aliases["{module_name}::{name}"] = mir_image_generator_normalize_path(module_name, alias.0)
+    }
+}
+fn mir_image_gen_parse_uses(text: String, module_name: String, schema: &MIRImageSchema) -> [String:String] Never! {
+    imports := [String:String]{}
+    bytes :: text.bytes()
+    cursor := 0
+    depth := 0
+    loop cursor < bytes.len() {
+        if bytes[cursor] == U8{123} -> depth += 1
+        else if bytes[cursor] == U8{125} -> depth = if depth > 0 -> depth - 1 else -> 0
+        else if depth == 0 && mir_image_gen_token(text, cursor, "pub use") {
+            start :: cursor + 7
+            end :: mir_image_gen_find(text, ";", start) ?? break
+            mir_image_generator_public_use(mir_image_gen_trim(text.slice(start, end)), module_name, &schema)
+        } else if depth == 0 && mir_image_gen_token(text, cursor, "use") {
+            start :: cursor + 3
+            end :: mir_image_gen_find(text, ";", start) ?? break
+            statement :: mir_image_gen_trim(text.slice(start, end))
+            if !statement.starts_with("=") -> mir_image_generator_insert_use(statement, module_name, &imports)
+            cursor = end + 1
+            continue
+        }
+        cursor += 1
+    }
+    imports
+}
+fn mir_image_gen_next_definition(text: String, from: Int) -> (String, Int)? Never! {
+    next := (String, Int)?{None}
+    loop kind in [String]{"struct", "enum", "type"} {
+        if mir_image_gen_keyword(text, "pub {kind}", from) == .Val(position) {
+            if next == .Val(current) { if position < current.1 -> next = Val((kind, position)) }
+            else -> next = Val((kind, position))
+        }
+    }
+    next
+}
+fn mir_image_gen_skip_macro(text: String, start: Int) -> Int Never! {
+    bytes :: text.bytes()
+    cursor := start
+    depth := 0
+    loop cursor < bytes.len() {
+        byte :: bytes[cursor]
+        if byte == U8{40} || byte == U8{91} || byte == U8{123} || byte == U8{60} -> depth += 1
+        else if byte == U8{62} && cursor > 0 && bytes[cursor - 1] == U8{45} {}
+        else if byte == U8{41} || byte == U8{93} || byte == U8{125} || byte == U8{62} -> depth = if depth > 0 -> depth - 1 else -> 0
+        else if byte == U8{59} && depth == 0 -> return cursor + 1
+        cursor += 1
+    }
+    bytes.len()
+}
+pub fn mir_image_generator_definitions(text: String, module_name: String, imports: [String:String]) -> [MIRImageSchemaDefinition] MIRImageError! {
+    definitions := [MIRImageSchemaDefinition]{}
+    cursor := 0
+    loop {
+        next :: mir_image_gen_next_definition(text, cursor) ?? break
+        position := mir_image_gen_skip_space(text, next.1 + 4 + next.0.len())
+        if mir_image_gen_byte(text, position) == .Val(U8{36}) {
+            cursor = mir_image_gen_skip_macro(text, position)
+            continue
+        }
+        id :: mir_image_gen_identifier(text, position)
+        name :: id.0
+        position = mir_image_gen_skip_space(text, id.1)
+        generic :: mir_image_gen_byte(text, position) == .Val(U8{60})
+        if generic {
+            end :: mir_image_generator_matching(text, position, U8{60}, U8{62}) ?? return Err(MIRImageError{message: "unclosed generic parameter list for `{name}`"})
+            position = mir_image_gen_skip_space(text, end + 1)
+        }
+        body := MIRImageSchemaBody.Unit
+        if next.0 == "type" {
+            equals :: mir_image_generator_top_level(text.slice(position, text.len()), U8{61}) ?? return Err(MIRImageError{message: "type alias `{name}` has no right-hand side"})
+            start :: position + equals + 1
+            end :: mir_image_generator_top_level(text.slice(start, text.len()), U8{59}) ?? return Err(MIRImageError{message: "type alias `{name}` has no terminating semicolon"})
+            body = MIRImageSchemaBody.Alias(mir_image_generator_parse_type(text.slice(start, start + end)))
+            position = start + end + 1
+        } else if mir_image_gen_byte(text, position) == .Val(U8{123}) {
+            end :: mir_image_generator_matching(text, position, U8{123}, U8{125}) ?? return Err(MIRImageError{message: "unclosed declaration body for `{name}`"})
+            inner :: text.slice(position + 1, end)
+            body = if next.0 == "struct" -> MIRImageSchemaBody.Struct(mir_image_generator_fields(inner)) else -> MIRImageSchemaBody.Enum(mir_image_generator_variants(inner))
+            position = end + 1
+        } else if next.0 == "struct" && mir_image_gen_byte(text, position) == .Val(U8{40}) {
+            end :: mir_image_generator_matching(text, position, U8{40}, U8{41}) ?? return Err(MIRImageError{message: "unclosed tuple struct `{name}`"})
+            fields := [MIRImageSchemaField]{}
+            loop raw in mir_image_generator_split(text.slice(position + 1, end), U8{44}) {
+                field :: mir_image_gen_trim(raw)
+                if field == "" -> continue
+                index :: fields.len()
+                &fields.push(MIRImageSchemaField{name: "{index}", ty: mir_image_generator_parse_type(mir_image_gen_visibility(field)), public: field.starts_with("pub ") || field.starts_with("pub(")})
+            }
+            body = MIRImageSchemaBody.Tuple(fields)
+            position = end + 1
+        } else if next.0 == "struct" && mir_image_gen_byte(text, position) == .Val(U8{59}) -> position += 1
+        else -> return Err(MIRImageError{message: "unsupported body for `{name}`"})
+        key :: "{module_name}::{name}"
+        &definitions.push(MIRImageSchemaDefinition{key: key, path: key, module_name: module_name, name: name, imports: imports, body: body, generic: generic})
+        cursor = position
+    }
+    Ok(definitions)
+}
+fn mir_image_gen_is_identifier(text: String) -> Bool Never! {
+    bytes :: text.bytes()
+    if bytes.len() == 0 -> return false
+    if bytes[0] != U8{95} && !(bytes[0] >= U8{65} && bytes[0] <= U8{90}) && !(bytes[0] >= U8{97} && bytes[0] <= U8{122}) -> return false
+    loop byte in bytes -> if !mir_image_gen_identifier_byte(byte) -> return false
+    true
+}
+fn mir_image_gen_id_macros(text: String) -> [String] Never! {
+    result := [String]{}
+    cursor := 0
+    loop {
+        index :: mir_image_gen_find(text, "mir_id!", cursor) ?? break
+        open :: mir_image_gen_find(text, "(", index + 7) ?? break
+        close :: mir_image_generator_matching(text, open, U8{40}, U8{41}) ?? break
+        name :: mir_image_gen_trim(text.slice(open + 1, close))
+        if mir_image_gen_is_identifier(name) -> &result.push(name)
+        cursor = close + 1
+    }
+    result
+}
+pub fn mir_image_generator_schema(sources: [MIRImageGeneratorSource]) -> MIRImageSchema MIRImageError! {
+    files := ~sources
+    &files.sort_by((left: MIRImageGeneratorSource, right: MIRImageGeneratorSource) -> left.relative_path <=> right.relative_path)
+    schema := mir_image_schema_new()
+    loop file in files {
+        module_name :: mir_image_generator_module_path(file.relative_path)
+        masked :: mir_image_generator_mask(file.text)
+        imports :: mir_image_gen_parse_uses(masked, module_name, &schema)
+        definitions :: mir_image_generator_definitions(masked, module_name, imports)
+        loop definition in definitions -> schema.definitions[definition.key] = definition
+        if file.relative_path == "MIR.rs" {
+            loop name in mir_image_gen_id_macros(masked) {
+                key :: "{module_name}::{name}"
+                schema.definitions[key] = MIRImageSchemaDefinition{key: key, path: key, module_name: module_name, name: name, imports: imports, body: MIRImageSchemaBody.Tuple([MIRImageSchemaField]{MIRImageSchemaField{name: "0", ty: MIRImageSchemaType.Named("u64"), public: true}}), generic: false}
+            }
+        }
+    }
+    loop wildcard in schema.wildcards {
+        targets := [MIRImageSchemaDefinition]{}
+        loop (_, definition) in schema.definitions -> if definition.module_name == wildcard.target_module -> &targets.push(definition)
+        loop definition in targets -> schema.aliases["{wildcard.public_module}::{definition.name}"] = definition.key
+    }
+    mir_image_generator_assign_paths(&schema)
+    Ok(schema)
+}
+pub fn mir_image_generator_resolve_alias(schema: MIRImageSchema, path: String) -> String MIRImageError! {
+    current := path
+    seen := [String:Bool]{}
+    loop {
+        if seen.get(current) == .Val(_) -> return Err(MIRImageError{message: "cyclic native MIR type alias `{path}`"})
+        seen[current] = true
+        if schema.definitions.get(current) == .Val(_) -> return Ok(current)
+        if schema.aliases.get(current) == .Val(next) -> current = next
+        else -> return Err(MIRImageError{message: "unknown native MIR type path `{current}`"})
+    }
+}
+fn mir_image_gen_generic_base(name: String) -> String? Never! {
+    open :: mir_image_generator_top_level(name, U8{60}) ?? return None
+    close :: mir_image_generator_matching(name, open, U8{60}, U8{62}) ?? return None
+    if close + 1 != name.len() -> return None
+    base :: mir_image_gen_trim(name.slice(0, open))
+    if base == "" -> None else -> Val(base)
+}
+pub fn mir_image_generator_resolve_type(schema: MIRImageSchema, definition: MIRImageSchemaDefinition, name: String) -> String MIRImageError! {
+    if mir_image_gen_generic_base(name) == .Val(base) {
+        if !mir_image_gen_builtin(base) {
+            key :: mir_image_generator_resolve_type(schema, definition, base) ?? return Err(MIRImageError{message: "unsupported generic native MIR type `{name}` referenced by `{definition.key}`"})
+            target :: schema.definitions[key]
+            if target.generic {
+                kind :: if target.body == .Alias(_) -> "type alias" else -> "type"
+                return Err(MIRImageError{message: "generic native MIR {kind} `{key}` needs an explicit instantiated wire schema"})
+            }
+        }
+        return Err(MIRImageError{message: "unsupported generic native MIR type `{name}` referenced by `{definition.key}`"})
+    }
+    if name == "Self" -> return Ok(definition.key)
+    local :: "{definition.module_name}::{name}"
+    if schema.definitions.get(local) == .Val(_) -> return Ok(local)
+    if definition.imports.get(name) == .Val(imported) -> return mir_image_generator_resolve_alias(schema, imported)
+    normalized :: mir_image_generator_normalize_path(definition.module_name, name)
+    if schema.definitions.get(normalized) == .Val(_) || schema.aliases.get(normalized) == .Val(_) -> return mir_image_generator_resolve_alias(schema, normalized)
+    candidate := String?{None}
+    loop (_, other) in schema.definitions {
+        if other.name != name -> continue
+        if candidate == .Val(_) -> return Err(MIRImageError{message: "ambiguous native MIR type `{name}` referenced by `{definition.key}`"})
+        candidate = Val(other.key)
+    }
+    Ok(candidate ?? return Err(MIRImageError{message: "unknown native MIR type `{name}` referenced by `{definition.key}`"}))
+}
+fn mir_image_gen_builtin(name: String) -> Bool Never! {
+    loop builtin in [String]{"String", "bool", "u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "i64", "isize", "f32", "f64", "char", "str", "PathBuf", "std::path::PathBuf"} -> if name == builtin -> return true
+    false
+}
+fn mir_image_gen_collect_type(ty: MIRImageSchemaType, names: &[String]) Never! {
+    if ty == {
+        .Named(name) -> &names.push(name)
+        .Optional(inner) -> mir_image_gen_collect_type(inner, &names)
+        .Sequence(inner) -> mir_image_gen_collect_type(inner, &names)
+        .Set(inner, _) -> mir_image_gen_collect_type(inner, &names)
+        .Map(key, value, _) -> { mir_image_gen_collect_type(key, &names); mir_image_gen_collect_type(value, &names) }
+        .Boxed(inner) -> mir_image_gen_collect_type(inner, &names)
+        .Shared(inner) -> mir_image_gen_collect_type(inner, &names)
+        .Tuple(items) -> loop item in items -> mir_image_gen_collect_type(item, &names)
+        .Array(inner, _) -> mir_image_gen_collect_type(inner, &names)
+        .StaticString -> {}
+    }
+}
+fn mir_image_gen_body_fields(body: MIRImageSchemaBody) -> [MIRImageSchemaField] Never! {
+    if body == {
+        .Struct(fields) -> fields
+        .Tuple(fields) -> fields
+        .Enum(variants) -> {
+            fields := [MIRImageSchemaField]{}
+            loop variant in variants -> if variant.body == .Struct(items) -> loop item in items -> &fields.push(item)
+            fields
+        }
+        else -> [MIRImageSchemaField]{}
+    }
+}
+fn mir_image_gen_body_names(body: MIRImageSchemaBody) -> [String] Never! {
+    names := [String]{}
+    if body == {
+        .Struct(fields) -> loop field in fields -> mir_image_gen_collect_type(field.ty, &names)
+        .Tuple(fields) -> loop field in fields -> mir_image_gen_collect_type(field.ty, &names)
+        .Alias(ty) -> mir_image_gen_collect_type(ty, &names)
+        .Enum(variants) -> loop variant in variants {
+            if variant.body == {
+                .Tuple(fields) -> loop field in fields -> mir_image_gen_collect_type(field, &names)
+                .Struct(fields) -> loop field in fields -> mir_image_gen_collect_type(field.ty, &names)
+                else -> {}
+            }
+        }
+        .Unit -> {}
+    }
+    names
+}
+fn mir_image_gen_check_alias_cycle(schema: MIRImageSchema, input: String, visiting: &[String], checked: &[String:Bool]) MIRImageError! {
+    key :: mir_image_generator_resolve_alias(schema, input)
+    definition :: schema.definitions.get(key) ?? return Err(MIRImageError{message: "missing declaration for `{key}`"})
+    if definition.generic {
+        kind :: if definition.body == .Alias(_) -> "type alias" else -> "type"
+        return Err(MIRImageError{message: "generic native MIR {kind} `{key}` needs an explicit instantiated wire schema"})
+    }
+    if definition.body != .Alias(_) || checked.get(key) == .Val(_) -> return
+    loop index in 0..<visiting.len() {
+        if visiting[index] == key {
+            cycle := [String]{}
+            loop part in visiting[index..<visiting.len()] -> &cycle.push(part)
+            &cycle.push(key)
+            return Err(MIRImageError{message: "cyclic native MIR type aliases: {cycle.join(" -> ")}"})
+        }
+    }
+    &visiting.push(key)
+    loop name in mir_image_gen_body_names(definition.body) {
+        if mir_image_gen_builtin(name) -> continue
+        target :: mir_image_generator_resolve_type(schema, definition, name)
+        mir_image_gen_check_alias_cycle(schema, target, &visiting, &checked)
+    }
+    &visiting.pop()
+    checked[key] = true
+    return
+}
+pub fn mir_image_generator_reachable(schema: MIRImageSchema, root: String) -> [String] MIRImageError! {
+    pending := [String]{root}
+    seen := [String:Bool]{}
+    visiting := [String]{}
+    checked := [String:Bool]{}
+    loop pending.len() != 0 {
+        input :: &pending.pop() ?? panic("nonempty pending worklist")
+        key :: mir_image_generator_resolve_alias(schema, input)
+        if seen.get(key) == .Val(_) -> continue
+        seen[key] = true
+        definition :: schema.definitions.get(key) ?? return Err(MIRImageError{message: "missing declaration for `{key}`"})
+        if definition.generic {
+            kind :: if definition.body == .Alias(_) -> "type alias" else -> "type"
+            return Err(MIRImageError{message: "generic native MIR {kind} `{key}` needs an explicit instantiated wire schema"})
+        }
+        if definition.body == .Alias(_) -> mir_image_gen_check_alias_cycle(schema, key, &visiting, &checked)
+        if definition.body == .Enum(variants) {
+            loop variant in variants -> if variant.body == .Unsupported(reason) -> return Err(MIRImageError{message: "enum `{definition.key}` variant `{variant.name}` has unsupported wire syntax `{reason}`"})
+        }
+        if definition.module_name != "crate::MIR" {
+            loop field in mir_image_gen_body_fields(definition.body) -> if !field.public -> return Err(MIRImageError{message: "native MIR image cannot access private field `{field.name}` in `{definition.key}`"})
+        }
+        loop name in mir_image_gen_body_names(definition.body) -> if !mir_image_gen_builtin(name) -> &pending.push(mir_image_generator_resolve_type(schema, definition, name))
+    }
+    reachable := [String]{}
+    loop (key, _) in seen -> &reachable.push(key)
+    &reachable.sort_by((left: String, right: String) -> left <=> right)
+    Ok(reachable)
+}
+fn mir_image_gen_path_rank(path: String) -> Int Never! { path.split("::").to_list().len() }
+pub fn mir_image_generator_assign_paths(schema: &MIRImageSchema) Never! {
+    paths := [String:String]{}
+    loop (key, _) in schema.definitions -> paths[key] = key
+    loop (export, _) in schema.aliases {
+        key :: mir_image_generator_resolve_alias(schema, export) ?? continue
+        current :: paths[key]
+        rank :: mir_image_gen_path_rank(export)
+        old_rank :: mir_image_gen_path_rank(current)
+        if rank < old_rank || (rank == old_rank && export < current) -> paths[key] = export
+    }
+    loop (key, path) in paths -> schema.definitions[key].path = path
+}
+pub fn mir_image_generator_interned_definitions() -> [String] Never! {
+    [String]{"crate::MIR::MirType", "crate::Diagnostics::Span", "crate::MIR::MirOwnership", "crate::Names::NameReference", "crate::MIR::MirValueId", "crate::MIR::MirBlockId", "crate::MIR::MirPlaceId"}
+}

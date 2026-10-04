@@ -1,0 +1,1502 @@
+// PORT-PENDING 0418 crates-jet-sema-src-sema-checkermarkers: crates/jet-sema/src/Sema/CheckerMarkers.rs:1-1498
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! E0927 (card #518): the closed marker vocabulary.
+//RS //!
+//RS //! `#Name` rules are structurally accepted by the parser for any PascalCase
+//RS //! identifier (including the `#[…]` bracket-list path) — the parser
+//RS //! only knows "this looks like a marker," not "this is a marker Jet knows
+//RS //! about." An unregistered name used to silently do nothing (I3: codegen
+//RS //! never saw it, so nothing rejected it either). This module is the one
+//RS //! place that closes the vocabulary: every marker name is checked against
+//RS //! the registered applied-rule vocabulary plus any `derive T.Name { … }` provider
+//RS //! visible in this build (D-METADERIVE1=A user derives are a legal, dynamic
+//RS //! addition to the contract vocabulary, not typos).
+//RS //!
+//RS //! D-AUTODERIVE-SYNTAX1=D restored `Debug` as an active signed type-site
+//RS //! auto-derive control. It follows the same closed-vocabulary checks as
+//RS //! `Printable` and `Equatable`.
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Syntax;
+//RS use crate::AST::{Item, Marker, ProgramBundle};
+//RS use std::collections::{HashMap, HashSet, VecDeque};
+//RS 
+//RS /// D-APP-UNIFY1=B: resolve the target fact used by App capability checks. The
+//RS /// module/file marker is the narrowest fact; the driver or manifest selects
+//RS /// the broad web backend bit; a no-OS target is explicit.
+//RS pub(crate) fn resolved_app_target(
+//RS     bundle: &ProgramBundle,
+//RS     module_idx: usize,
+//RS     no_os: bool,
+//RS ) -> &'static str {
+//RS     if no_os {
+//RS         return "NoOs";
+//RS     }
+//RS     let module = &bundle.modules[module_idx];
+//RS     if let Some(bucket) = module.web_target_ceiling {
+//RS         return bucket.name();
+//RS     }
+//RS     if bundle.web_partition_enforced
+//RS         || module.default_target.as_deref() == Some(Syntax::BUILD_TARGET_WEB)
+//RS     {
+//RS         return "Web";
+//RS     }
+//RS     "Native"
+//RS }
+//RS 
+//RS pub(crate) struct ValidatedRuleArguments {
+//RS     pub(crate) bindings: Vec<crate::Policy::RuleArgumentBinding>,
+//RS     pub(crate) types: Vec<Option<crate::AST::Type>>,
+//RS     pub(crate) constants: Vec<Option<crate::Comptime::CtValue>>,
+//RS }
+//RS 
+//RS impl ValidatedRuleArguments {
+//RS     pub(crate) fn type_for_source(&self, source_index: usize) -> Option<crate::AST::Type> {
+//RS         self.bindings
+//RS             .iter()
+//RS             .position(|binding| binding.source_index == source_index)
+//RS             .and_then(|index| self.types.get(index))
+//RS             .cloned()
+//RS             .flatten()
+//RS     }
+//RS 
+//RS     pub(crate) fn constant_for_source(
+//RS         &self,
+//RS         source_index: usize,
+//RS     ) -> Option<&crate::Comptime::CtValue> {
+//RS         self.bindings
+//RS             .iter()
+//RS             .position(|binding| binding.source_index == source_index)
+//RS             .and_then(|index| self.constants.get(index))
+//RS             .and_then(Option::as_ref)
+//RS     }
+//RS 
+//RS     pub(crate) fn constant_for_parameter(
+//RS         &self,
+//RS         parameter_index: usize,
+//RS     ) -> Option<&crate::Comptime::CtValue> {
+//RS         self.bindings
+//RS             .iter()
+//RS             .position(|binding| binding.parameter_index == Some(parameter_index))
+//RS             .and_then(|index| self.constants.get(index))
+//RS             .and_then(Option::as_ref)
+//RS     }
+//RS }
+//RS 
+//RS fn rule_signature_bindings(
+//RS     marker: &Marker,
+//RS ) -> Result<Vec<crate::Policy::RuleArgumentBinding>, Diagnostic> {
+//RS     let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
+//RS         return Ok(Vec::new());
+//RS     };
+//RS     if marker.name == Syntax::KW_UNSAFE && marker.args.is_empty() {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     rule.signature
+//RS         .marker_argument_bindings(marker)
+//RS         .ok_or_else(|| crate::Policy::marker_argument_shape_error(&marker.name, marker.span))
+//RS }
+//RS 
+//RS struct RuleArgumentObservation {
+//RS     ty: Option<crate::AST::Type>,
+//RS     constant: Option<crate::Comptime::CtValue>,
+//RS }
+//RS 
+//RS fn validate_rule_arguments(
+//RS     marker: &mut Marker,
+//RS     mut observe: impl FnMut(
+//RS         crate::Policy::RuleArgType,
+//RS         &mut crate::AST::Expr,
+//RS     ) -> RuleArgumentObservation,
+//RS ) -> Result<ValidatedRuleArguments, Diagnostic> {
+//RS     let bindings = rule_signature_bindings(marker)?;
+//RS     let marker_name = marker.name.clone();
+//RS     let marker_span = marker.span;
+//RS     let rule = crate::Policy::applied_rule(&marker_name);
+//RS     let mut types = Vec::with_capacity(bindings.len());
+//RS     let mut constants = Vec::with_capacity(bindings.len());
+//RS     let mut mismatch = false;
+//RS     for binding in &bindings {
+//RS         if marker.args[binding.source_index].as_expr().is_none() {
+//RS             if marker.name == Syntax::MARKER_INTERRUPT && binding.source_index == 1 {
+//RS                 types.push(None);
+//RS                 constants.push(None);
+//RS                 continue;
+//RS             }
+//RS             mismatch = true;
+//RS             types.push(None);
+//RS             constants.push(None);
+//RS             continue;
+//RS         }
+//RS         let argument = marker.args[binding.source_index]
+//RS             .as_expr_mut()
+//RS             .expect("marker expression checked above");
+//RS         let source_type = binding
+//RS             .parameter_index
+//RS             .and_then(|index| rule.and_then(|rule| rule.signature.params.get(index)))
+//RS             .map(|parameter| parameter.source_type)
+//RS             .or_else(|| rule.and_then(|rule| rule.signature.variadic_source_type));
+//RS         if let Some(declaration) = source_type.and_then(crate::Policy::rule_arg_declaration) {
+//RS             let path = match argument {
+//RS                 crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+//RS                 crate::AST::Expr::Field(base, member, _) => {
+//RS                     fn path(expression: &crate::AST::Expr) -> Option<String> {
+//RS                         match expression {
+//RS                             crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+//RS                             crate::AST::Expr::Field(base, member, _) => {
+//RS                                 Some(format!("{}.{}", path(base)?, member))
+//RS                             }
+//RS                             _ => None,
+//RS                         }
+//RS                     }
+//RS                     path(base).map(|base| format!("{base}.{member}"))
+//RS                 }
+//RS                 crate::AST::Expr::EnumLit { variant, .. } => Some(variant.clone()),
+//RS                 _ => None,
+//RS             };
+//RS             let candidate = path.as_deref().map(|path| {
+//RS                 let segments: Vec<&str> = path.split('.').collect();
+//RS                 let variant_segments = segments
+//RS                     .iter()
+//RS                     .position(|segment| *segment == declaration.name)
+//RS                     .and_then(|index| segments.get(index + 1..))
+//RS                     .filter(|segments| !segments.is_empty())
+//RS                     .unwrap_or(&segments);
+//RS                 match declaration.variant_segment {
+//RS                     crate::Policy::VariantSegment::First => {
+//RS                         variant_segments.first().copied().unwrap_or(path)
+//RS                     }
+//RS                     crate::Policy::VariantSegment::Last => {
+//RS                         variant_segments.last().copied().unwrap_or(path)
+//RS                     }
+//RS                 }
+//RS             });
+//RS             // A rule that teaches its own menu downstream (E3220 / E2409) says
+//RS             // so in its registry row; a generic signature error here would
+//RS             // preempt the product diagnostic.
+//RS             let owns_its_menu =
+//RS                 crate::Policy::applied_rule(&marker_name).is_some_and(|row| row.owns_menu);
+//RS             if !owns_its_menu && !declaration.variants.is_empty() {
+//RS                 if let Some(written) =
+//RS                     candidate.filter(|candidate| !declaration.variants.contains(candidate))
+//RS                 {
+//RS                     return Err(crate::Policy::marker_argument_unknown_variant(
+//RS                         &marker_name,
+//RS                         *declaration,
+//RS                         written,
+//RS                         marker_span,
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         let observation = if binding.ty == crate::Policy::RuleArgType::Ident
+//RS             || binding.ty == crate::Policy::RuleArgType::Any
+//RS                 && marker_name != Syntax::MARKER_DEFAULT
+//RS             || binding.ty == crate::Policy::RuleArgType::DurationOrString
+//RS                 && matches!(argument, crate::AST::Expr::UnitLit { .. })
+//RS             || binding.ty == crate::Policy::RuleArgType::EffectRoots
+//RS         {
+//RS             RuleArgumentObservation {
+//RS                 ty: None,
+//RS                 constant: None,
+//RS             }
+//RS         } else if binding.ty == crate::Policy::RuleArgType::Bool
+//RS             && marker_name == Syntax::MARKER_META
+//RS             && matches!(argument, crate::AST::Expr::Ident(name, _)
+//RS                 if name == Syntax::META_FIELD_TUNABLE)
+//RS         {
+//RS             RuleArgumentObservation {
+//RS                 ty: Some(crate::AST::Type::Bool),
+//RS                 constant: None,
+//RS             }
+//RS         } else {
+//RS             observe(binding.ty, argument)
+//RS         };
+//RS         let matches = match binding.ty {
+//RS             crate::Policy::RuleArgType::Any => true,
+//RS             crate::Policy::RuleArgType::String => {
+//RS                 matches!(observation.ty, Some(crate::AST::Type::String))
+//RS             }
+//RS             crate::Policy::RuleArgType::Path => {
+//RS                 matches!(
+//RS                     &observation.ty,
+//RS                     Some(crate::AST::Type::Named(name))
+//RS                         if name == crate::Syntax::TYPE_PATH
+//RS                 )
+//RS             }
+//RS             crate::Policy::RuleArgType::Ident => matches!(
+//RS                 argument,
+//RS                 crate::AST::Expr::Ident(..)
+//RS                     | crate::AST::Expr::Field(..)
+//RS                     | crate::AST::Expr::EnumLit { .. }
+//RS             ),
+//RS             crate::Policy::RuleArgType::Bool => {
+//RS                 matches!(observation.ty, Some(crate::AST::Type::Bool))
+//RS             }
+//RS             crate::Policy::RuleArgType::Int => {
+//RS                 matches!(observation.ty, Some(crate::AST::Type::Int))
+//RS             }
+//RS             crate::Policy::RuleArgType::DurationOrString => {
+//RS                 matches!(argument, crate::AST::Expr::UnitLit { .. })
+//RS                     || matches!(observation.ty, Some(crate::AST::Type::String))
+//RS                     || matches!(
+//RS                         &observation.ty,
+//RS                         Some(crate::AST::Type::Named(name))
+//RS                             if name == crate::Syntax::DURATION_TYPE
+//RS                     )
+//RS             }
+//RS             crate::Policy::RuleArgType::EffectRoots => {
+//RS                 matches!(argument, crate::AST::Expr::ListLit(..))
+//RS             }
+//RS         };
+//RS         mismatch |= !matches;
+//RS         types.push(observation.ty);
+//RS         constants.push(observation.constant);
+//RS     }
+//RS     if mismatch {
+//RS         return Err(crate::Policy::marker_argument_shape_error(
+//RS             &marker_name,
+//RS             marker_span,
+//RS         ));
+//RS     }
+//RS     Ok(ValidatedRuleArguments {
+//RS         bindings,
+//RS         types,
+//RS         constants,
+//RS     })
+//RS }
+//RS 
+//RS /// Static products need an actual compile-time value (for example `#HTML` or
+//RS /// `#Test`). Other sites still run through the same comptime evaluator below,
+//RS /// but their arguments may name locals or parameters, so signature diagnostics
+//RS /// remain in the ordinary sema pass where those bindings exist.
+//RS fn static_product_site(site: crate::Policy::RuleSite) -> bool {
+//RS     matches!(
+//RS         site,
+//RS         crate::Policy::RuleSite::Package
+//RS             | crate::Policy::RuleSite::File
+//RS             | crate::Policy::RuleSite::Module
+//RS             | crate::Policy::RuleSite::Type
+//RS             | crate::Policy::RuleSite::Constant
+//RS             | crate::Policy::RuleSite::Field
+//RS             | crate::Policy::RuleSite::Variant
+//RS             | crate::Policy::RuleSite::Test
+//RS     )
+//RS }
+//RS 
+//RS fn rule_allows_fact(
+//RS     application: &crate::AST::AppliedRuleApplication,
+//RS     facts: &[crate::AST::AppliedRuleApplication],
+//RS ) -> bool {
+//RS     let Some(site) = application.site else {
+//RS         return true;
+//RS     };
+//RS     let companions = application.target.into_iter().flat_map(|target| {
+//RS         facts
+//RS             .iter()
+//RS             .filter(move |other| other.target == Some(target))
+//RS             .map(|other| other.marker.name.as_str())
+//RS     });
+//RS     crate::Policy::rule_allows_with_companions(&application.marker.name, site, companions)
+//RS }
+//RS 
+//RS fn materialize_static_marker_values(
+//RS     items: &mut [Item],
+//RS     validated: &HashMap<usize, ValidatedRuleArguments>,
+//RS     invalid: &HashSet<usize>,
+//RS ) {
+//RS     fn apply(marker: &mut Marker, validated: &HashMap<usize, ValidatedRuleArguments>) {
+//RS         let Some(arguments) = validated.get(&marker.name_span.start) else {
+//RS             // Some function markers carry a parser-seeded compile-time fact.
+//RS             // Keep it when the static-rule pass has no replacement value.
+//RS             return;
+//RS         };
+//RS         marker.ct = arguments.constant_for_source(0).cloned();
+//RS     }
+//RS     fn apply_all(
+//RS         markers: &mut Vec<Marker>,
+//RS         validated: &HashMap<usize, ValidatedRuleArguments>,
+//RS         invalid: &HashSet<usize>,
+//RS     ) {
+//RS         markers.retain(|marker| !invalid.contains(&marker.name_span.start));
+//RS         for marker in markers {
+//RS             apply(marker, validated);
+//RS         }
+//RS     }
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Struct(item) => {
+//RS                 apply_all(&mut item.type_markers, validated, invalid);
+//RS                 apply_all(&mut item.serde_markers, validated, invalid);
+//RS                 for field in &mut item.fields {
+//RS                     apply_all(&mut field.serde_markers, validated, invalid);
+//RS                 }
+//RS                 for function in &mut item.methods {
+//RS                     apply_all(&mut function.markers, validated, invalid);
+//RS                 }
+//RS                 for implementation in &mut item.trait_impls {
+//RS                     for function in &mut implementation.methods {
+//RS                         apply_all(&mut function.markers, validated, invalid);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(item) => {
+//RS                 apply_all(&mut item.type_markers, validated, invalid);
+//RS                 apply_all(&mut item.serde_markers, validated, invalid);
+//RS                 for variant in &mut item.variants {
+//RS                     apply_all(&mut variant.serde_markers, validated, invalid);
+//RS                 }
+//RS                 for function in &mut item.methods {
+//RS                     apply_all(&mut function.markers, validated, invalid);
+//RS                 }
+//RS                 for implementation in &mut item.trait_impls {
+//RS                     for function in &mut implementation.methods {
+//RS                         apply_all(&mut function.markers, validated, invalid);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Distinct(item) => apply_all(&mut item.type_markers, validated, invalid),
+//RS             Item::Func(item) => apply_all(&mut item.markers, validated, invalid),
+//RS             Item::Impl(item) => {
+//RS                 for function in &mut item.methods {
+//RS                     apply_all(&mut function.markers, validated, invalid);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-TESTFAULT1=A: resolve a test's closed effect-root selector list once in
+//RS /// sema. Codegen receives canonical paths only; engines never validate or
+//RS /// reinterpret the user's marker argument.
+//RS fn materialize_test_faults(items: &mut [Item], diags: &mut Vec<Diagnostic>) {
+//RS     fn path(expression: &crate::AST::Expr) -> Option<(String, crate::Diagnostics::Span)> {
+//RS         match expression {
+//RS             crate::AST::Expr::Ident(name, span) => Some((name.clone(), *span)),
+//RS             crate::AST::Expr::Field(base, member, _) => {
+//RS                 let (base, root_span) = path(base)?;
+//RS                 Some((format!("{base}.{member}"), root_span))
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     for item in items {
+//RS         let Item::Test(test) = item else { continue };
+//RS         let Some(crate::AST::Expr::ListLit(values, _)) = test.faults_expr.as_ref() else {
+//RS             continue;
+//RS         };
+//RS         let mut faults = Vec::new();
+//RS         for value in values {
+//RS             let Some((written, root_span)) = path(value) else {
+//RS                 diags.push(crate::Policy::marker_argument_shape_error(
+//RS                     Syntax::KW_TEST,
+//RS                     value.span(),
+//RS                 ));
+//RS                 continue;
+//RS             };
+//RS             let (root, tail) = written
+//RS                 .split_once('.')
+//RS                 .map_or((written.as_str(), None), |(root, tail)| (root, Some(tail)));
+//RS             let canonical_root = Syntax::respell_acronym_name(root);
+//RS             let canonical = tail
+//RS                 .map(|tail| format!("{canonical_root}.{tail}"))
+//RS                 .unwrap_or(canonical_root);
+//RS             if crate::Sema::Effects::parse_effect_name(&canonical).is_none() {
+//RS                 diags.push(crate::Sema::Effects::unknown_effect(root, root_span));
+//RS                 continue;
+//RS             }
+//RS             if !faults.contains(&canonical) {
+//RS                 faults.push(canonical);
+//RS             }
+//RS         }
+//RS         test.faults = faults;
+//RS     }
+//RS }
+//RS 
+//RS fn push_diagnostic_once(diags: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
+//RS     if diags.iter().any(|existing| {
+//RS         existing.code == diagnostic.code
+//RS             && existing.span == diagnostic.span
+//RS             && existing.what == diagnostic.what
+//RS     }) {
+//RS         return;
+//RS     }
+//RS     diags.push(diagnostic);
+//RS }
+//RS 
+//RS pub(crate) fn resolve_static_rule_products(
+//RS     module: &mut crate::AST::LoadedModule,
+//RS     base_dir: &std::path::Path,
+//RS     core_imports: &std::collections::HashMap<String, String>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     let (funcs_owned, externs, globals) =
+//RS         crate::Sema::Registration::comptime_context_from_items(&module.items);
+//RS     let funcs = funcs_owned
+//RS         .iter()
+//RS         .map(|(name, function)| (name.clone(), function))
+//RS         .collect::<std::collections::HashMap<_, _>>();
+//RS     let structs_owned = module
+//RS         .items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             Item::Struct(definition) => Some((definition.name.clone(), definition.clone())),
+//RS             _ => None,
+//RS         })
+//RS         .collect::<std::collections::HashMap<_, _>>();
+//RS     let structs = structs_owned
+//RS         .iter()
+//RS         .map(|(name, definition)| (name.clone(), definition))
+//RS         .collect::<std::collections::HashMap<_, _>>();
+//RS     let mut facts = module
+//RS         .rule_facts
+//RS         .iter()
+//RS         .filter(|application| !matches!(application.marker.name.as_str(), Syntax::KW_TEST))
+//RS         .cloned()
+//RS         .collect::<Vec<_>>();
+//RS     for item in &module.items {
+//RS         let (name, args, arg_labels, span) = match item {
+//RS             Item::Test(test) => {
+//RS                 let mut args = Vec::new();
+//RS                 let mut arg_labels = Vec::new();
+//RS                 if let Some(expression) = &test.name_expr {
+//RS                     args.push(crate::AST::MarkerCallArg::Expr(expression.clone()));
+//RS                     arg_labels.push(None);
+//RS                 }
+//RS                 if let Some(expression) = &test.faults_expr {
+//RS                     args.push(crate::AST::MarkerCallArg::Expr(expression.clone()));
+//RS                     arg_labels.push(Some((
+//RS                         Syntax::TEST_FAULTS_PARAM.to_string(),
+//RS                         expression.span(),
+//RS                     )));
+//RS                 }
+//RS                 if let Some(expression) = &test.expected_fail_expr {
+//RS                     args.push(crate::AST::MarkerCallArg::Expr(expression.clone()));
+//RS                     arg_labels.push(Some((
+//RS                         Syntax::TEST_EXPECTED_FAIL_PARAM.to_string(),
+//RS                         expression.span(),
+//RS                     )));
+//RS                 }
+//RS                 if args.is_empty() {
+//RS                     continue;
+//RS                 }
+//RS                 (Syntax::KW_TEST, args, arg_labels, test.span)
+//RS             }
+//RS             _ => continue,
+//RS         };
+//RS         facts.push(crate::AST::AppliedRuleApplication {
+//RS             marker: Marker {
+//RS                 name: name.to_string(),
+//RS                 negated: false,
+//RS                 name_span: span,
+//RS                 args,
+//RS                 arg_labels,
+//RS                 span,
+//RS                 ct: None,
+//RS             },
+//RS             target: Some(span),
+//RS             site: Some(crate::Policy::RuleSite::Test),
+//RS         });
+//RS     }
+//RS     let mut validated = HashMap::new();
+//RS     let mut invalid = HashSet::new();
+//RS     let mut static_strings = Vec::new();
+//RS     for application in &facts {
+//RS         let marker = &application.marker;
+//RS         if crate::Policy::applied_rule(&marker.name).is_none() {
+//RS             continue;
+//RS         }
+//RS         let Some(site) = application.site else {
+//RS             continue;
+//RS         };
+//RS         if !rule_allows_fact(application, &facts) {
+//RS             diags.push(crate::Policy::marker_wrong_site_error(
+//RS                 &marker.name,
+//RS                 site,
+//RS                 marker.span,
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         if !static_product_site(site) {
+//RS             // D-VERDICT-1455-1: site binding is no longer optional. Run the
+//RS             // comptime evaluator for dynamic sites too, but defer any type
+//RS             // error until ordinary sema can see locals and parameters.
+//RS             for expression in marker.expr_args() {
+//RS                 let mut expression = expression.clone();
+//RS                 let _ = crate::Comptime::evaluate_with_imports_opts_collecting_structs(
+//RS                     &mut expression,
+//RS                     &funcs,
+//RS                     &externs,
+//RS                     base_dir,
+//RS                     &globals,
+//RS                     core_imports,
+//RS                     crate::Policy::GateSet::default(),
+//RS                     0,
+//RS                     &structs,
+//RS                     None,
+//RS                 );
+//RS             }
+//RS             continue;
+//RS         }
+//RS         let mut evaluated_marker = marker.clone();
+//RS         let arguments = match validate_rule_arguments(&mut evaluated_marker, |_, expression| {
+//RS             let value = crate::Comptime::evaluate_with_imports_opts_collecting_structs(
+//RS                 expression,
+//RS                 &funcs,
+//RS                 &externs,
+//RS                 base_dir,
+//RS                 &globals,
+//RS                 core_imports,
+//RS                 crate::Policy::GateSet::default(),
+//RS                 0,
+//RS                 &structs,
+//RS                 None,
+//RS             );
+//RS             let Ok((value, _)) = value else {
+//RS                 return RuleArgumentObservation {
+//RS                     ty: None,
+//RS                     constant: None,
+//RS                 };
+//RS             };
+//RS             let ty = match &value {
+//RS                 crate::Comptime::CtValue::Str(_) => Some(crate::AST::Type::String),
+//RS                 crate::Comptime::CtValue::Bool(_) => Some(crate::AST::Type::Bool),
+//RS                 crate::Comptime::CtValue::Int(_) => Some(crate::AST::Type::Int),
+//RS                 crate::Comptime::CtValue::Struct { type_name, .. }
+//RS                     if type_name == crate::Syntax::TYPE_PATH =>
+//RS                 {
+//RS                     Some(crate::AST::Type::Named(crate::Syntax::TYPE_PATH.to_string()))
+//RS                 }
+//RS                 _ => None,
+//RS             };
+//RS             RuleArgumentObservation {
+//RS                 ty,
+//RS                 constant: Some(value),
+//RS             }
+//RS         }) {
+//RS             Ok(arguments) => arguments,
+//RS             Err(diagnostic) => {
+//RS                 push_diagnostic_once(diags, diagnostic);
+//RS                 invalid.insert(marker.name_span.start);
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         let static_text = arguments.constant_for_source(0).and_then(|value| match value {
+//RS             crate::Comptime::CtValue::Str(text) => Some(text.clone()),
+//RS             crate::Comptime::CtValue::Struct {
+//RS                 type_name,
+//RS                 fields,
+//RS             } if marker.name == Syntax::MARKER_HTML && type_name == Syntax::TYPE_PATH => fields
+//RS                 .iter()
+//RS                 .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                     ("inner", crate::Comptime::CtValue::Str(text)) => Some(text.clone()),
+//RS                     _ => None,
+//RS                 }),
+//RS             _ => None,
+//RS         });
+//RS         if let Some(text) = static_text {
+//RS             static_strings.push((marker.name.clone(), marker.span, text));
+//RS         }
+//RS         validated.insert(marker.name_span.start, arguments);
+//RS     }
+//RS     materialize_static_marker_values(&mut module.items, &validated, &invalid);
+//RS     materialize_test_faults(&mut module.items, diags);
+//RS     materialize_test_expected_fail(&mut module.items, &validated);
+//RS     // D-DEFAULT-SHAPE1=B: promote retired `#Default(expr)` into `field: T{expr}`.
+//RS     // Then sweep whatever retired spellings are left on the field: the field
+//RS     // attachment point had no reader at all, so the registry's `$retired`
+//RS     // column was true and silent there — `#Uninit label: String` parsed,
+//RS     // applied nothing, and said nothing (D-UNINIT-SENTINEL2=A: `uninit` is
+//RS     // legal only as the whole body of a `Type.{ }` head, "anywhere else it is
+//RS     // the ordinary error"). `Policy::marker_unknown_error` is that ordinary
+//RS     // error and the one text every other site prints (I8); `#Default` has
+//RS     // already left the list above under its own registered code E0375.
+//RS     for item in &mut module.items {
+//RS         let Item::Struct(item) = item else { continue };
+//RS         for field in &mut item.fields {
+//RS             if let Some(idx) = field
+//RS                 .serde_markers
+//RS                 .iter()
+//RS                 .position(|m| m.name == Syntax::MARKER_DEFAULT)
+//RS             {
+//RS                 let marker = field.serde_markers.remove(idx);
+//RS                 if field.default.is_none() {
+//RS                     if let Some(arg) = marker.expr_arg(0) {
+//RS                         field.default = Some(Box::new(arg.clone()));
+//RS                     }
+//RS                 }
+//RS                 if field.default_ct.is_none() {
+//RS                     field.default_ct = marker.ct.clone();
+//RS                 }
+//RS                 diags.push(Diagnostic::from_row("E0375", &[], Some(marker.span)));
+//RS             }
+//RS             field.serde_markers.retain(|marker| {
+//RS                 if !matches!(
+//RS                     crate::Policy::applied_rule(&marker.name).map(|rule| rule.status),
+//RS                     Some(crate::Policy::RuleStatus::Retired { .. })
+//RS                 ) {
+//RS                     return true;
+//RS                 }
+//RS                 diags.push(crate::Policy::marker_unknown_error(
+//RS                     &marker.name,
+//RS                     &crate::Policy::active_rule_names(),
+//RS                     marker.name_span,
+//RS                 ));
+//RS                 false
+//RS             });
+//RS         }
+//RS     }
+//RS     // Evaluate `field: T{expr}` defaults to compile-time values (D-SERDE5).
+//RS     for item in &mut module.items {
+//RS         let Item::Struct(item) = item else { continue };
+//RS         let needs_baked_default = item.derives.iter().any(|(t, _)| {
+//RS             matches!(
+//RS                 t.as_str(),
+//RS                 Syntax::MARKER_CODABLE
+//RS                     | Syntax::MARKER_DECODE
+//RS                     | Syntax::MARKER_ENCODE
+//RS                     | Syntax::MARKER_CLI
+//RS             )
+//RS         });
+//RS         for field in &mut item.fields {
+//RS             let Some(expr) = field.default.clone() else {
+//RS                 continue;
+//RS             };
+//RS             if field.default_ct.is_some() {
+//RS                 continue;
+//RS             }
+//RS             let mut expr = (*expr).clone();
+//RS             match crate::Comptime::evaluate_with_imports_opts_collecting_structs(
+//RS                 &mut expr,
+//RS                 &funcs,
+//RS                 &externs,
+//RS                 base_dir,
+//RS                 &globals,
+//RS                 core_imports,
+//RS                 crate::Policy::GateSet::default(),
+//RS                 0,
+//RS                 &structs,
+//RS                 None,
+//RS             ) {
+//RS                 Ok((value, _)) => field.default_ct = Some(value),
+//RS                 Err(_) if needs_baked_default => {
+//RS                     push_diagnostic_once(diags, crate::Sema::e2414(&field.name, expr.span()));
+//RS                 }
+//RS                 Err(_) => {}
+//RS             }
+//RS         }
+//RS     }
+//RS     for (name, _marker_span, text) in &static_strings {
+//RS         match name.as_str() {
+//RS             Syntax::MARKER_HTML => module.html_path = Some(text.clone()),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     let mut test_names: VecDeque<_> = static_strings
+//RS         .iter()
+//RS         .filter(|(name, _, _)| name == Syntax::KW_TEST)
+//RS         .map(|(_, _, text)| text.clone())
+//RS         .collect();
+//RS     for item in &mut module.items {
+//RS         let (name, prefix, text) = match item {
+//RS             Item::Test(test) => {
+//RS                 if test.name_expr.is_none() {
+//RS                     continue;
+//RS                 }
+//RS                 (
+//RS                     &mut test.name,
+//RS                     test.name_prefix.as_deref(),
+//RS                     test_names.pop_front(),
+//RS                 )
+//RS             }
+//RS             _ => continue,
+//RS         };
+//RS         let Some(text) = text else {
+//RS             continue;
+//RS         };
+//RS         *name = Some(match prefix {
+//RS             Some(prefix) => format!(
+//RS                 "{}_{}",
+//RS                 prefix.trim_end_matches('_'),
+//RS                 text.trim_start_matches('_')
+//RS             ),
+//RS             None => text,
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS /// D-TEST-XFAIL1=A: materialize the typed marker flag once in sema. The test
+//RS /// harness receives only this checked boolean and never interprets marker text.
+//RS fn materialize_test_expected_fail(
+//RS     items: &mut [Item],
+//RS     validated: &HashMap<usize, ValidatedRuleArguments>,
+//RS ) {
+//RS     for item in items {
+//RS         let Item::Test(test) = item else { continue };
+//RS         test.expected_fail = validated
+//RS             .get(&test.marker_name_span.start)
+//RS             .and_then(|arguments| arguments.constant_for_parameter(2))
+//RS             .and_then(|value| match value {
+//RS                 crate::Comptime::CtValue::Bool(value) => Some(*value),
+//RS                 _ => None,
+//RS             })
+//RS             .unwrap_or(false);
+//RS     }
+//RS }
+//RS 
+//RS impl<'a> crate::Sema::Checker<'a> {
+//RS     /// D-STRUCT-POLICY1=A: validate a callable policy chain against the one
+//RS     /// bundle-local setting table. Built-ins keep their existing typed-value
+//RS     /// path; user declarations add only a name, parameter contract, and
+//RS     /// checked wrapper body.
+//RS     pub(crate) fn validate_callable_policy_values(
+//RS         &mut self,
+//RS         expressions: &[crate::AST::Expr],
+//RS         span: crate::Diagnostics::Span,
+//RS     ) -> bool {
+//RS         let mut valid = true;
+//RS         for expression in expressions {
+//RS             let crate::AST::Expr::Call(call) = expression else {
+//RS                 continue;
+//RS             };
+//RS             if crate::AST::CallablePolicyChain::is_builtin(&call.name) {
+//RS                 continue;
+//RS             }
+//RS             let key = (self.package_scope.to_string(), call.name.clone());
+//RS             let Some((_declaring_module, declaration)) =
+//RS                 self.callable_policy_declarations.get(&key)
+//RS             else {
+//RS                 let declaring_package = self
+//RS                     .callable_policy_declarations
+//RS                     .iter()
+//RS                     .find(|((_, name), _)| name == &call.name)
+//RS                     .map(|((package, _), _)| package.as_str());
+//RS                 let package_detail = declaring_package.map_or_else(
+//RS                     || format!("policy lookup package: {}", self.package_scope),
+//RS                     |package| {
+//RS                         format!(
+//RS                             "policy `{}` is declared in package `{package}`, not `{}`",
+//RS                             call.name, self.package_scope
+//RS                         )
+//RS                     },
+//RS                 );
+//RS                 self.diags.push(
+//RS                     Diagnostic::error(
+//RS                         "E0355",
+//RS                         format!("unknown callable policy setting `{}`", call.name),
+//RS                         "a callable policy name must be a compiler-owned setting or a public policy declared in this package"
+//RS                             .to_string(),
+//RS                         format!("declare `pub policy {}(...) {{ wrap(call) {{ … }} }}" , call.name),
+//RS                         Some(call.name_span),
+//RS                     )
+//RS                     .with_detail(format!("{package_detail}\nmodule: {}", self.module_path)),
+//RS                 );
+//RS                 valid = false;
+//RS                 continue;
+//RS             };
+//RS             let required = declaration
+//RS                 .params
+//RS                 .iter()
+//RS                 .filter(|param| param.default.is_none() && !param.variadic)
+//RS                 .count();
+//RS             let fixed = declaration
+//RS                 .params
+//RS                 .iter()
+//RS                 .filter(|param| !param.variadic)
+//RS                 .count();
+//RS             let has_variadic = declaration.params.iter().any(|param| param.variadic);
+//RS             if call.args.len() < required || (!has_variadic && call.args.len() > fixed) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0104",
+//RS                     format!(
+//RS                         "policy `{}` expects {} argument{}, got {}",
+//RS                         call.name,
+//RS                         if has_variadic { required } else { fixed },
+//RS                         if has_variadic || fixed != 1 { "s" } else { "" },
+//RS                         call.args.len()
+//RS                     ),
+//RS                     "policy arguments use the declaration's typed/defaulted parameter contract"
+//RS                         .to_string(),
+//RS                     format!("check the declaration of `{}`", call.name),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 valid = false;
+//RS             }
+//RS             for (index, argument) in call.args.iter().enumerate() {
+//RS                 let Some(parameter) = declaration
+//RS                     .params
+//RS                     .get(index)
+//RS                     .or_else(|| declaration.params.last().filter(|param| param.variadic))
+//RS                 else {
+//RS                     continue;
+//RS                 };
+//RS                 let expected = self.resolve_type(parameter.ty.clone());
+//RS                 self.check_declared_type(&expected, parameter.ty_span);
+//RS                 let mut value = argument.expr.clone();
+//RS                 let Some(actual) = self.infer(&mut value) else {
+//RS                     valid = false;
+//RS                     continue;
+//RS                 };
+//RS                 let reported = self.check_type_assignable(&expected, &actual, argument.expr.span());
+//RS                 if !reported && actual != expected {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0112",
+//RS                         format!(
+//RS                             "policy argument {} needs {}, but this is {}",
+//RS                             index + 1,
+//RS                             expected.show(),
+//RS                             actual.show()
+//RS                         ),
+//RS                         "a policy argument must satisfy its declared parameter type".to_string(),
+//RS                         format!("pass a value of type {}", expected.show()),
+//RS                         Some(argument.expr.span()),
+//RS                     ));
+//RS                     valid = false;
+//RS                 }
+//RS             }
+//RS         }
+//RS         let _ = span;
+//RS         valid
+//RS     }
+//RS 
+//RS     /// D-MEMO1=A: prove the marker's result-cache contract before TIR lowers
+//RS     /// the function. The collection hashability gate lives here; purity is
+//RS     /// judged by the solved effect row (D-EFFECT-OMIT1=A), so a declared
+//RS     /// `-[]>` and an inferred empty row are both accepted (E0938 in
+//RS     /// `Effects::check_inferred_purity`). Engines never repeat these checks.
+//RS     pub(crate) fn check_memoized_function(&mut self, f: &crate::AST::Func) {
+//RS         let Some(marker) = f
+//RS             .markers
+//RS             .iter()
+//RS             .find(|marker| marker.name == Syntax::MARKER_MEMO)
+//RS         else {
+//RS             return;
+//RS         };
+//RS         for parameter in &f.params {
+//RS             let ty = self.resolve_type(if parameter.variadic {
+//RS                 crate::AST::Type::List(Box::new(parameter.ty.clone()))
+//RS             } else {
+//RS                 parameter.ty.clone()
+//RS             });
+//RS             if is_lazy_memo_iter(&ty) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0940",
+//RS                     format!("`#Memo` cannot cache lazy `{}` values", Syntax::TYPE_ITER),
+//RS                     "a lazy iterator carries live computation state instead of one completed result".to_string(),
+//RS                     "materialize the iterator before the memoized boundary".to_string(),
+//RS                     Some(marker.span),
+//RS                 ));
+//RS                 return;
+//RS             }
+//RS             if matches!(ty, crate::AST::Type::List(_)) || !self.hashable_type_eligible(&ty) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0939",
+//RS                     format!("`#Memo` parameter `{}` is not hashable", parameter.name),
+//RS                     "memoization keys are the function's argument tuple, so every argument must pass the existing hashability rule".to_string(),
+//RS                     "use an Int, Bool, Char, String, or named hashable value as the argument".to_string(),
+//RS                     Some(marker.span),
+//RS                 ));
+//RS                 return;
+//RS             }
+//RS         }
+//RS         if f.return_type
+//RS             .as_ref()
+//RS             .map(|ty| self.resolve_type(ty.clone()))
+//RS             .is_some_and(|ty| is_lazy_memo_iter(&ty))
+//RS         {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0940",
+//RS                 format!("`#Memo` cannot cache a lazy `{}` result", Syntax::TYPE_ITER),
+//RS                 "a lazy iterator carries live computation state instead of one completed result"
+//RS                     .to_string(),
+//RS                 "materialize the iterator before returning from the memoized function".to_string(),
+//RS                 Some(marker.span),
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn validate_rule_signature(
+//RS         &mut self,
+//RS         marker: &mut Marker,
+//RS     ) -> Option<ValidatedRuleArguments> {
+//RS         crate::Policy::applied_rule(&marker.name)?;
+//RS         match validate_rule_arguments(marker, |ty, argument| {
+//RS             let inferred = self.infer(argument);
+//RS             let constant = if matches!(
+//RS                 ty,
+//RS                 crate::Policy::RuleArgType::String
+//RS                     | crate::Policy::RuleArgType::Bool
+//RS                     | crate::Policy::RuleArgType::Int
+//RS             ) {
+//RS                 self.evaluate_constant(argument)
+//RS             } else {
+//RS                 None
+//RS             };
+//RS             RuleArgumentObservation {
+//RS                 ty: inferred,
+//RS                 constant,
+//RS             }
+//RS         }) {
+//RS             Ok(arguments) => Some(arguments),
+//RS             Err(diagnostic) => {
+//RS                 self.diags.push(diagnostic);
+//RS                 None
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn take_rule_fact(
+//RS         &mut self,
+//RS         name: &str,
+//RS         target: crate::Diagnostics::Span,
+//RS     ) -> Option<Marker> {
+//RS         let index = self.rule_facts.iter().position(|application| {
+//RS             application.marker.name == name
+//RS                 && (application.target == Some(target)
+//RS                     || application.marker.span == target
+//RS                     || target.start <= application.marker.name_span.start
+//RS                         && application.marker.name_span.end <= target.end)
+//RS         })?;
+//RS         Some(self.rule_facts.remove(index).marker)
+//RS     }
+//RS 
+//RS     pub(crate) fn take_targeted_rule_facts(
+//RS         &mut self,
+//RS         target: crate::Diagnostics::Span,
+//RS     ) -> Vec<Marker> {
+//RS         let mut out = Vec::new();
+//RS         let mut index = 0;
+//RS         while index < self.rule_facts.len() {
+//RS             if self.rule_facts[index].target == Some(target) {
+//RS                 out.push(self.rule_facts.remove(index).marker);
+//RS             } else {
+//RS                 index += 1;
+//RS             }
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     pub(crate) fn take_statement_rule_fact(
+//RS         &mut self,
+//RS         target: crate::Diagnostics::Span,
+//RS     ) -> Option<Marker> {
+//RS         let index = self.rule_facts.iter().position(|application| {
+//RS             matches!(
+//RS                 application.site,
+//RS                 Some(crate::Policy::RuleSite::Block | crate::Policy::RuleSite::Statement)
+//RS             ) && (application.target == Some(target)
+//RS                 || application.target.is_none()
+//RS                     && application.marker.span.start <= target.start.saturating_add(1)
+//RS                     && target.start <= application.marker.span.start)
+//RS                 && !matches!(
+//RS                     application.marker.name.as_str(),
+//RS                     Syntax::MARKER_META | Syntax::CTX_BLOCK
+//RS                 )
+//RS         })?;
+//RS         Some(self.rule_facts.remove(index).marker)
+//RS     }
+//RS }
+//RS 
+//RS fn is_lazy_memo_iter(ty: &crate::AST::Type) -> bool {
+//RS     matches!(
+//RS         ty,
+//RS         crate::AST::Type::Apply { name, args }
+//RS             if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
+//RS                 && args.len() == 1
+//RS     )
+//RS }
+//RS 
+//RS /// E0927: `name` isn't a registered applied rule. `vocab` supplies nearest
+//RS /// spelling suggestions. The text itself lives in the registry so the parser's
+//RS /// function-site check and this type-site check cannot drift apart.
+//RS /// Every marker name written on `items`, wherever it sits: on the type
+//RS /// (`s.type_markers` / `e.type_markers`, the full pre-classification list, so
+//RS /// plane info from `Marker.sigil` survives) and on a field or a variant
+//RS /// (`f.serde_markers` / `v.serde_markers`, which keep their `Marker`s whole;
+//RS /// only `#Redact` is pulled out into `f.redact` upstream). One walk, so a new
+//RS /// marker position is checked the moment it is read.
+//RS fn markers_in(items: &[Item]) -> impl Iterator<Item = &Marker> {
+//RS     items.iter().flat_map(|item| {
+//RS         let (type_markers, member_markers): (&[Marker], Vec<&Marker>) = match item {
+//RS             Item::Struct(s) => {
+//RS                 let mut members = s
+//RS                     .fields
+//RS                     .iter()
+//RS                     .flat_map(|field| field.serde_markers.iter())
+//RS                     .collect::<Vec<_>>();
+//RS                 members.extend(
+//RS                     s.methods
+//RS                         .iter()
+//RS                         .flat_map(|function| function.markers.iter()),
+//RS                 );
+//RS                 members.extend(s.trait_impls.iter().flat_map(|implementation| {
+//RS                     implementation
+//RS                         .methods
+//RS                         .iter()
+//RS                         .flat_map(|function| function.markers.iter())
+//RS                 }));
+//RS                 (&s.type_markers, members)
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 let mut members = e
+//RS                     .variants
+//RS                     .iter()
+//RS                     .flat_map(|variant| variant.serde_markers.iter())
+//RS                     .collect::<Vec<_>>();
+//RS                 members.extend(
+//RS                     e.methods
+//RS                         .iter()
+//RS                         .flat_map(|function| function.markers.iter()),
+//RS                 );
+//RS                 members.extend(e.trait_impls.iter().flat_map(|implementation| {
+//RS                     implementation
+//RS                         .methods
+//RS                         .iter()
+//RS                         .flat_map(|function| function.markers.iter())
+//RS                 }));
+//RS                 (&e.type_markers, members)
+//RS             }
+//RS             Item::Distinct(d) => (&d.type_markers, Vec::new()),
+//RS             Item::Func(f) => (&f.markers, Vec::new()),
+//RS             Item::Impl(i) => (
+//RS                 &[],
+//RS                 i.methods.iter().flat_map(|f| f.markers.iter()).collect(),
+//RS             ),
+//RS             _ => (&[], Vec::new()),
+//RS         };
+//RS         type_markers.iter().chain(member_markers)
+//RS     })
+//RS }
+//RS 
+//RS fn check_deprecated_marker_visibility(
+//RS     markers: &[Marker],
+//RS     is_public: bool,
+//RS     diagnostics: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     if is_public {
+//RS         return;
+//RS     }
+//RS     for marker in markers {
+//RS         if marker.name == Syntax::MARKER_DEPRECATED {
+//RS             diagnostics.push(Diagnostic::from_row("E0932", &[], Some(marker.span)));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-STRUCT-LIFE1=A: the retiring rung is a public-item contract. Keep this
+//RS /// check beside the marker vocabulary pass so every package and every item
+//RS /// family uses the same registry spelling and diagnostic row.
+//RS pub(crate) fn check_deprecated_visibility(items: &[Item]) -> Vec<Diagnostic> {
+//RS     let mut diagnostics = Vec::new();
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(function) => check_deprecated_marker_visibility(
+//RS                 &function.markers,
+//RS                 function.is_pub && !function.is_package_pub,
+//RS                 &mut diagnostics,
+//RS             ),
+//RS             Item::Struct(definition) => {
+//RS                 check_deprecated_marker_visibility(
+//RS                     &definition.type_markers,
+//RS                     definition.is_pub && !definition.is_package_pub,
+//RS                     &mut diagnostics,
+//RS                 );
+//RS                 for method in &definition.methods {
+//RS                     check_deprecated_marker_visibility(
+//RS                         &method.markers,
+//RS                         method.is_pub && !method.is_package_pub,
+//RS                         &mut diagnostics,
+//RS                     );
+//RS                 }
+//RS                 for implementation in &definition.trait_impls {
+//RS                     for method in &implementation.methods {
+//RS                         check_deprecated_marker_visibility(
+//RS                             &method.markers,
+//RS                             method.is_pub && !method.is_package_pub,
+//RS                             &mut diagnostics,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(definition) => {
+//RS                 check_deprecated_marker_visibility(
+//RS                     &definition.type_markers,
+//RS                     definition.is_pub && !definition.is_package_pub,
+//RS                     &mut diagnostics,
+//RS                 );
+//RS                 for method in &definition.methods {
+//RS                     check_deprecated_marker_visibility(
+//RS                         &method.markers,
+//RS                         method.is_pub && !method.is_package_pub,
+//RS                         &mut diagnostics,
+//RS                     );
+//RS                 }
+//RS                 for implementation in &definition.trait_impls {
+//RS                     for method in &implementation.methods {
+//RS                         check_deprecated_marker_visibility(
+//RS                             &method.markers,
+//RS                             method.is_pub && !method.is_package_pub,
+//RS                             &mut diagnostics,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Distinct(definition) => check_deprecated_marker_visibility(
+//RS                 &definition.type_markers,
+//RS                 definition.is_pub && !definition.is_package_pub,
+//RS                 &mut diagnostics,
+//RS             ),
+//RS             Item::Impl(implementation) => {
+//RS                 for method in &implementation.methods {
+//RS                     check_deprecated_marker_visibility(
+//RS                         &method.markers,
+//RS                         method.is_pub && !method.is_package_pub,
+//RS                         &mut diagnostics,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     diagnostics.extend(check_deprecated_visibility(body));
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     diagnostics
+//RS }
+//RS 
+//RS /// D-MARK-VOCAB1 (card #518) + D-META-ONE1=A: validate every marker name on
+//RS /// `items` against the one vocabulary (E0927). `vocabulary` is the registry
+//RS /// read from `Prelude/Markers.jet` plus the `derive T.Name { … }` providers
+//RS /// visible to this build (bundle-wide in `Bundle.rs`, so a cross-module user
+//RS /// derive is never a false unknown).
+//RS pub(crate) fn check_marker_vocabulary(
+//RS     items: &[Item],
+//RS     rule_facts: &[crate::AST::AppliedRuleApplication],
+//RS     vocabulary: &crate::Policy::MarkerVocabulary,
+//RS ) -> Vec<Diagnostic> {
+//RS     let mut diagnostics = Vec::new();
+//RS     let mut seen = HashSet::new();
+//RS     for marker in markers_in(items).chain(
+//RS         rule_facts
+//RS             .iter()
+//RS             .filter(|fact| fact.target.is_some())
+//RS             .map(|fact| &fact.marker),
+//RS     ) {
+//RS         if !seen.insert(marker.name_span.start) {
+//RS             continue;
+//RS         }
+//RS         // A retired row already received its teaching diagnostic in the
+//RS         // parser's shared marker reader. The sema vocabulary walk must not
+//RS         // echo it when the retained AST/fact is still present for recovery.
+//RS         if crate::Policy::applied_rule(&marker.name)
+//RS             .is_some_and(|row| matches!(row.status, crate::Policy::RuleStatus::Retired { .. }))
+//RS         {
+//RS             continue;
+//RS         }
+//RS         let marker_site = rule_facts
+//RS             .iter()
+//RS             .find(|fact| fact.marker.name_span == marker.name_span)
+//RS             .and_then(|fact| fact.site);
+//RS         // D-ADOPT-GUEST1=A: these existing decision-ID spellings are sema's
+//RS         // guest boundary, not Prelude marker rules. Only the exact C form at
+//RS         // its callable/module site bypasses the closed-rule lookup; malformed
+//RS         // arguments and other attachment sites stay unknown diagnostics.
+//RS         if super::Guest::is_guest_marker_at(marker, marker_site) {
+//RS             continue;
+//RS         }
+//RS         // D-PLACE1=A: retain the retired spelling as a dedicated teaching
+//RS         // row rather than routing it through generic unknown-marker E0927.
+//RS         if marker.name == crate::Syntax::MARKER_ALIGN_LEGACY {
+//RS             diagnostics.push(Diagnostic::from_row("E1118", &[], Some(marker.span)));
+//RS             continue;
+//RS         }
+//RS         // A name known on the OTHER plane already got E0062/E0063 from the
+//RS         // parser's shared marker reader — never double-report.
+//RS         if !vocabulary.knows(&marker.name) {
+//RS             diagnostics.push(vocabulary.unknown(&marker.name, marker.name_span));
+//RS             continue;
+//RS         }
+//RS         // D-MARK-VOCAB1: a user derive provider contributes a dynamic marker
+//RS         // name, not a closed Prelude rule row. Its request is checked by the
+//RS         // ordinary derive/trait path; there is no registry attachment-site
+//RS         // row to apply here.
+//RS         if crate::Policy::applied_rule(&marker.name).is_none() {
+//RS             continue;
+//RS         }
+//RS         if let Some(site) = rule_facts
+//RS             .iter()
+//RS             .find(|fact| fact.marker.name_span == marker.name_span)
+//RS             .and_then(|fact| fact.site)
+//RS         {
+//RS             let application = rule_facts
+//RS                 .iter()
+//RS                 .find(|fact| fact.marker.name_span == marker.name_span)
+//RS                 .expect("marker fact found by site lookup");
+//RS             // A visible `derive T.Name { … }` provider is the open half of
+//RS             // the vocabulary. Its `#Name` request is legal at the provider's
+//RS             // target sites even though it has no compiler-owned
+//RS             // `APPLIED_RULES` row to query; closed compiler rows still use
+//RS             // the authoritative site matrix below.
+//RS             if crate::Policy::applied_rule(&marker.name).is_some()
+//RS                 && !rule_allows_fact(application, rule_facts)
+//RS             {
+//RS                 diagnostics.push(crate::Policy::marker_wrong_site_error(
+//RS                     &marker.name,
+//RS                     site,
+//RS                     marker.span,
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     diagnostics
+//RS }
+//RS 
+//RS /// Validate the four declaration checks for source-authored marker rules. The
+//RS /// parser can only consult compiler rows while it reads one file; this bundle
+//RS /// pass sees declarations from every loaded module and applies the same site,
+//RS /// signature, and repeat rules to them.
+//RS pub(crate) fn check_declared_rule_facts(
+//RS     facts: &[crate::AST::AppliedRuleApplication],
+//RS     vocabulary: &crate::Policy::MarkerVocabulary,
+//RS ) -> Vec<Diagnostic> {
+//RS     let mut diagnostics = Vec::new();
+//RS     let mut seen: HashMap<(Option<crate::Diagnostics::Span>, String), crate::Diagnostics::Span> =
+//RS         HashMap::new();
+//RS     for application in facts {
+//RS         let Some(declaration) = vocabulary.declaration(&application.marker.name) else {
+//RS             // D-ADOPT-GUEST1=A: the guest C-FFI boundary markers
+//RS             // (`#Import(c)` fn, `#Import module`) are sema's guest surface,
+//RS             // not Prelude marker rules, exactly as `check_marker_vocabulary`
+//RS             // already treats them. Without this, the `#Import module` form
+//RS             // that `#Extern` retired in its favor reads as an unregistered
+//RS             // marker here even though its sibling check accepts it.
+//RS             if super::Guest::is_guest_marker_at(&application.marker, application.site) {
+//RS                 continue;
+//RS             }
+//RS             if crate::Policy::applied_rule(&application.marker.name).is_none()
+//RS                 && !matches!(
+//RS                     application.site,
+//RS                     Some(
+//RS                         crate::Policy::RuleSite::Type
+//RS                             | crate::Policy::RuleSite::Field
+//RS                             | crate::Policy::RuleSite::Variant
+//RS                             | crate::Policy::RuleSite::Function
+//RS                             | crate::Policy::RuleSite::Method
+//RS                     )
+//RS                 )
+//RS             {
+//RS                 diagnostics.push(
+//RS                     vocabulary.unknown(&application.marker.name, application.marker.name_span),
+//RS                 );
+//RS             }
+//RS             continue;
+//RS         };
+//RS         if !declared_rule_arguments_match(&application.marker, declaration) {
+//RS             diagnostics.push(declared_rule_argument_shape_error(
+//RS                 &application.marker.name,
+//RS                 declaration,
+//RS                 application.marker.span,
+//RS             ));
+//RS         }
+//RS         let sites = declared_rule_sites(declaration);
+//RS         if application.site.is_some_and(|site| !sites.contains(&site)) {
+//RS             diagnostics.push(Diagnostic::error(
+//RS                 "E0355",
+//RS                 format!("`#{}` cannot attach at this site", application.marker.name),
+//RS                 format!(
+//RS                     "the declared rule allows only these sites: {}",
+//RS                     sites
+//RS                         .iter()
+//RS                         .map(|site| format!(".{:?}", site))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ")
+//RS                 ),
+//RS                 "remove the marker or move it to one of its declared sites".to_string(),
+//RS                 Some(application.marker.span),
+//RS             ));
+//RS         }
+//RS         if !declared_rule_repeatable(declaration) {
+//RS             let key = (application.target, application.marker.name.clone());
+//RS             if let Some(previous) = seen.insert(key, application.marker.span) {
+//RS                 diagnostics.push(
+//RS                     crate::Policy::marker_repeated_error(
+//RS                         &application.marker.name,
+//RS                         "target",
+//RS                         application.marker.span,
+//RS                     )
+//RS                     .with_detail(format!(
+//RS                         "first application span: {}..{}\nsecond application span: {}..{}",
+//RS                         previous.start,
+//RS                         previous.end,
+//RS                         application.marker.span.start,
+//RS                         application.marker.span.end,
+//RS                     )),
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS     diagnostics
+//RS }
+//RS 
+//RS fn declared_rule_arguments_match(marker: &Marker, declaration: &crate::AST::MarkerDecl) -> bool {
+//RS     let params: Vec<_> = declaration
+//RS         .params
+//RS         .iter()
+//RS         .filter(|param| !crate::Syntax::is_comptime_name(&param.name))
+//RS         .collect();
+//RS     let mut supplied = vec![false; params.len()];
+//RS     let mut next_positional = 0usize;
+//RS     let mut saw_named = false;
+//RS     for (index, _argument) in marker.args.iter().enumerate() {
+//RS         let parameter =
+//RS             if let Some((label, _)) = marker.arg_labels.get(index).and_then(Option::as_ref) {
+//RS                 saw_named = true;
+//RS                 params.iter().position(|param| param.name == *label)
+//RS             } else if saw_named {
+//RS                 return false;
+//RS             } else if next_positional < params.len() {
+//RS                 let position = next_positional;
+//RS                 next_positional += 1;
+//RS                 Some(position)
+//RS             } else if params.iter().any(|param| param.variadic) {
+//RS                 Some(params.len().saturating_sub(1))
+//RS             } else {
+//RS                 None
+//RS             };
+//RS         let Some(parameter) = parameter else {
+//RS             return false;
+//RS         };
+//RS         if supplied[parameter] && !params[parameter].variadic {
+//RS             return false;
+//RS         }
+//RS         let Some(argument) = marker.expr_arg(index) else {
+//RS             return false;
+//RS         };
+//RS         if declared_argument_type_mismatch(argument, params[parameter]) {
+//RS             return false;
+//RS         }
+//RS         supplied[parameter] = true;
+//RS     }
+//RS     params.iter().enumerate().all(|(index, parameter)| {
+//RS         supplied[index] || parameter.value.is_some() || parameter.variadic
+//RS     })
+//RS }
+//RS 
+//RS fn declared_rule_argument_shape_error(
+//RS     name: &str,
+//RS     declaration: &crate::AST::MarkerDecl,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Diagnostic {
+//RS     let expected = declaration
+//RS         .params
+//RS         .iter()
+//RS         .filter(|parameter| !crate::Syntax::is_comptime_name(&parameter.name))
+//RS         .map(|parameter| {
+//RS             let ty = parameter
+//RS                 .ty
+//RS                 .as_ref()
+//RS                 .map(crate::AST::Type::name)
+//RS                 .unwrap_or_else(|| "Value".to_string());
+//RS             let variadic = parameter.variadic.then_some("...").unwrap_or("");
+//RS             let default = parameter
+//RS                 .value
+//RS                 .as_deref()
+//RS                 .map(|_| "{…}".to_string())
+//RS                 .unwrap_or_default();
+//RS             format!("{}: {variadic}{ty}{default}", parameter.name)
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     Diagnostic::error(
+//RS         "E0930",
+//RS         format!("`#{name}` arguments do not match `{name}({expected})`"),
+//RS         "marker arguments use the same call grammar and typed signature as function arguments"
+//RS             .to_string(),
+//RS         format!("match the declared signature `{name}({expected})`"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// Reject only a type mismatch that the source expression proves by itself.
+//RS /// Names and calls stay open for ordinary sema inference; this pass owns the
+//RS /// declaration contract, not a second expression type checker.
+//RS fn declared_argument_type_mismatch(
+//RS     expression: &crate::AST::Expr,
+//RS     parameter: &crate::AST::MarkerDeclParam,
+//RS ) -> bool {
+//RS     let Some(expected) = parameter.ty.as_ref() else {
+//RS         return false;
+//RS     };
+//RS     let actual = match expression {
+//RS         crate::AST::Expr::Str(..) => Some("String"),
+//RS         crate::AST::Expr::Int(..) => Some("Int"),
+//RS         crate::AST::Expr::Float(..) => Some("Float"),
+//RS         crate::AST::Expr::Bool(..) => Some("Bool"),
+//RS         crate::AST::Expr::Char(..) => Some("Char"),
+//RS         crate::AST::Expr::ListLit(..) => Some("List"),
+//RS         crate::AST::Expr::MapLit(..) => Some("Map"),
+//RS         _ => None,
+//RS     };
+//RS     let expected = match expected {
+//RS         crate::AST::Type::String => Some("String"),
+//RS         crate::AST::Type::Int => Some("Int"),
+//RS         crate::AST::Type::Float => Some("Float"),
+//RS         crate::AST::Type::Bool => Some("Bool"),
+//RS         crate::AST::Type::Char => Some("Char"),
+//RS         crate::AST::Type::List(..) => Some("List"),
+//RS         crate::AST::Type::Map { .. } => Some("Map"),
+//RS         _ => None,
+//RS     };
+//RS     expected
+//RS         .zip(actual)
+//RS         .is_some_and(|(expected, actual)| expected != actual)
+//RS }
+//RS 
+//RS fn declared_rule_sites(declaration: &crate::AST::MarkerDecl) -> Vec<crate::Policy::RuleSite> {
+//RS     declaration
+//RS         .params
+//RS         .iter()
+//RS         .find(|param| param.name == "$sites")
+//RS         .and_then(|param| param.value.as_deref())
+//RS         .and_then(|value| match value {
+//RS             crate::AST::Expr::ListLit(values, _) => Some(values.as_slice()),
+//RS             _ => None,
+//RS         })
+//RS         .map(|values| {
+//RS             values
+//RS                 .iter()
+//RS                 .filter_map(declared_site)
+//RS                 .filter_map(|name| {
+//RS                     crate::Policy::RuleSite::ALL
+//RS                         .iter()
+//RS                         .copied()
+//RS                         .find(|site| site.name() == name)
+//RS                 })
+//RS                 .collect()
+//RS         })
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn declared_site(value: &crate::AST::Expr) -> Option<String> {
+//RS     match value {
+//RS         crate::AST::Expr::Ident(name, _) => Some(name.trim_start_matches('.').to_string()),
+//RS         crate::AST::Expr::Field(_, member, _) => Some(member.clone()),
+//RS         crate::AST::Expr::EnumLit { variant, .. } => Some(variant.clone()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn declared_rule_repeatable(declaration: &crate::AST::MarkerDecl) -> bool {
+//RS     declaration
+//RS         .params
+//RS         .iter()
+//RS         .find(|param| param.name == "$repeatable")
+//RS         .and_then(|param| param.value.as_deref())
+//RS         .is_some_and(|value| matches!(value, crate::AST::Expr::Bool(true, _)))
+//RS }
+// END-PORT-PENDING 0418 crates/jet-sema/src/Sema/CheckerMarkers.rs:1-1498
+

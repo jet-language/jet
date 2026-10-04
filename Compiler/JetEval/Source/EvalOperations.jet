@@ -1463,17 +1463,19 @@ fn jet_eval_value_type(machine: &JetEvalMachine, frame_index: Int, value: MIRVal
 fn jet_eval_build_string(machine: &JetEvalMachine, parts: [MIRStringPart], frame_index: Int, span: Span) -> JetEvalRuntimeValue? {
     output := ""
     loop part in parts {
-        if part.kind == {
+        if part == {
             .Literal(text) -> output = "{output}{text}"
-            .Interpolation(value, format) -> {
+            .Value(value) -> {
                 runtime_value :: machine.frames[frame_index].values.get(value.value) ?? {
                     jet_eval_compiler_fail(&machine, span, "MIR string interpolation value is unavailable")
                     return None
                 }
                 value_data :: jet_eval_data(runtime_value, &machine, span) ?? return None
-                value_ty :: jet_eval_value_type(&machine, frame_index, value, span) ?? return None
-                rendered :: jet_eval_format_string_value_full(&machine, value_data, format, value_ty, span) ?? return None
-                output = "{output}{rendered}"
+                if value_data == .String(text) -> output = "{output}{text}"
+                else {
+                    jet_eval_compiler_fail(&machine, span, "MIR BuildString value was not formatted to String")
+                    return None
+                }
             }
         }
     }

@@ -1,0 +1,79 @@
+use jet_foundation.[AccessConvention, CtValue, Expr, Func, Marker, MarkerCallArg, Param, ParamZone, Span, Type, ast_func, foundation_generated_path]
+use jet_sema.[SemaGuestDirection, SemaGuestScalar, sema_guest_export_native_symbol, sema_guest_import_function_signature, sema_guest_import_symbol, sema_guest_import_wrapper_name, sema_is_guest_export_marker, sema_is_guest_import_marker, sema_plugin_snapshot_signature_source]
+
+// Original Guest.rs:900 and :908 fixtures and substantive assertions.
+#Test("snapshot_source_inserts_return_arrow") {
+    assert(sema_plugin_snapshot_signature_source("fn gcd(a: Int, b: Int) -> Int") == Val("fn gcd(a: Int, b: Int) -> Int {}"))
+}
+#Test("snapshot_source_handles_nested_function_types") {
+    assert(sema_plugin_snapshot_signature_source("fn apply(callback: fn(Int) -> Int) -> Int") == Val("fn apply(callback: fn(Int) -> Int) -> Int {}"))
+}
+#Test("guest snapshot omitted return arrow and malformed delimiters") {
+    assert(sema_plugin_snapshot_signature_source("fn gcd(a: Int, b: Int) Int") == Val("fn gcd(a: Int, b: Int) -> Int {}"))
+    assert(sema_plugin_snapshot_signature_source("fn apply(callback: fn(Int) -> Int) Int") == Val("fn apply(callback: fn(Int) -> Int) -> Int {}"))
+    assert(sema_plugin_snapshot_signature_source("fn ping()") == Val("fn ping() {}"))
+    assert(sema_plugin_snapshot_signature_source("fn broken(callback: fn(Int)") == None)
+    assert(sema_plugin_snapshot_signature_source("fn no_delimiter") == None)
+}
+fn guest_test_span() -> Span Never! { Span{start: 0, end: 1} }
+fn guest_test_marker(name: String, symbol: String?) -> Marker Never! {
+    fact := CtValue?{None}
+    if symbol == .Val(value) -> fact = Val(CtValue.Str{value: value})
+    Marker{name: name, negated: false, name_span: guest_test_span(), args: [MarkerCallArg]{MarkerCallArg.Expr{value: Expr.Ident{name: "c", span: guest_test_span()}}}, arg_labels: [], span: guest_test_span(), ct: fact}
+}
+fn guest_test_function() -> Func Never! {
+    function := ast_func("same_local", guest_test_span(), guest_test_span())
+    function.markers = [Marker]{guest_test_marker("Import", Val("native_symbol"))}
+    function.params = [Param]{Param{convention: AccessConvention.Read, root: false, name: "value", name_span: guest_test_span(), public_label: None, zone: ParamZone.Either, ty: Type.Int, ty_span: guest_test_span(), default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None}}
+    function.return_type = Val(Type.Int)
+    function
+}
+#Test("per callable guest row retains exact symbol convention and homogeneous shape") {
+    function :: guest_test_function()
+    row :: sema_guest_import_function_signature(function) ?? panic("valid Import(c) must produce its row")
+    assert(row.direction == SemaGuestDirection.Import)
+    assert(row.library == None)
+    assert(row.name == "same_local")
+    assert(row.symbol == "native_symbol")
+    assert(row.params.len() == 1)
+    assert(row.params[0].convention == AccessConvention.Read)
+    assert(row.params[0].ty == Type.Int)
+    assert(row.return_type == Val(Type.Int))
+    assert(row.scalar == Val(SemaGuestScalar.Int))
+}
+#Test("first guest marker decides invalid symbol and negative marker is not guest") {
+    function := guest_test_function()
+    function.markers = [Marker]{guest_test_marker("Import", None), guest_test_marker("Import", Val("later"))}
+    assert(sema_guest_import_symbol(function) == None)
+    assert(sema_guest_import_function_signature(function) == None)
+    function.markers = [Marker]{guest_test_marker("Import", Val(""))}
+    assert(sema_guest_import_function_signature(function) == None)
+    marker := guest_test_marker("Import", Val("symbol"))
+    marker.negated = true
+    assert(!sema_is_guest_import_marker(marker))
+    marker = guest_test_marker("Export", None)
+    assert(sema_is_guest_export_marker(marker))
+    marker.args = []
+    assert(!sema_is_guest_export_marker(marker))
+}
+#Test("guest scalar shape requires a return and homogeneous primitive types") {
+    function := guest_test_function()
+    function.return_type = None
+    row :: sema_guest_import_function_signature(function) ?? panic("missing return must not erase import")
+    assert(row.scalar == None)
+    function.return_type = Val(Type.Float)
+    mixed :: sema_guest_import_function_signature(function) ?? panic("mixed primitive import must remain a row")
+    assert(mixed.scalar == None)
+    function.params = []
+    scalar :: sema_guest_import_function_signature(function) ?? panic("zero params are permitted")
+    assert(scalar.scalar == Val(SemaGuestScalar.Float))
+}
+#Test("guest wrapper owner and Unicode native symbol identity") {
+    assert(sema_guest_import_wrapper_name("", "call") == foundation_generated_path("jet_ffi_guest.root.call"))
+    assert(sema_guest_import_wrapper_name("a", "call") == foundation_generated_path("jet_ffi_guest.a.call"))
+    assert(sema_guest_import_wrapper_name("a", "call") != sema_guest_import_wrapper_name("b", "call"))
+    assert(sema_guest_export_native_symbol("") == "_")
+    assert(sema_guest_export_native_symbol("4call") == "_4call")
+    assert(sema_guest_export_native_symbol("a.b") == "a_b")
+    assert(sema_guest_export_native_symbol("aé🙂b") == "a__b")
+}

@@ -1,0 +1,120 @@
+// MIROptimization.rs:2727-2788. The arrays are borrowed from the operation.
+enum MIRNativeCallbackConsumer { CallArgs(args: View<MIRCallArg>) Values(values: View<MIRValueID>) }
+fn mir_native_host_callback_consumer(operation: MIROperation, program: MIRProgram, tables: MIRNativeProgramIndex) -> MIRNativeCallbackConsumer? Never! {
+    if operation == {
+        .Semantic(semantic) -> {
+            if semantic == {
+                .HandleMethod(call, _, args, _, _) | .PluginInvoke(call, _, _, _, args) -> {
+                    position :: tables.prelude.get(call.value) ?? return None
+                    if program.prelude_calls[position].family != .HandleMethod -> return None
+                    Val(MIRNativeCallbackConsumer.Values{values: args})
+                }
+                .BuiltinMethod(call, _, _, args, _) -> {
+                    position :: tables.prelude.get(call.value) ?? return None
+                    if program.prelude_calls[position].family != .BuiltinMethod -> return None
+                    Val(MIRNativeCallbackConsumer.Values{values: args})
+                }
+                .StaticPreludeCall(call, args, _, _) -> mir_native_callback_args_consumer(program, tables, call, args, Val(MIRPreludeFamily.StaticPrelude))
+                .ClosureMethod(_, args, call) -> mir_native_callback_args_consumer(program, tables, call, args, Val(MIRPreludeFamily.ClosureMethod))
+                .HostCall(call, args) -> mir_native_callback_args_consumer(program, tables, call, args, Val(MIRPreludeFamily.Host))
+                else -> None
+            }
+        }
+        .Call(.Prelude(call), args, _) -> mir_native_callback_args_consumer(program, tables, call, args, None)
+        .CoreCall(_, route, args, _, _, _) -> mir_native_callback_args_consumer(program, tables, route, args, Val(MIRPreludeFamily.StaticPrelude))
+        else -> None
+    }
+}
+fn mir_native_callback_args_consumer(program: MIRProgram, tables: MIRNativeProgramIndex, call: MIRPreludeCallID, args: View<MIRCallArg>, family: MIRPreludeFamily?) -> MIRNativeCallbackConsumer? Never! {
+    position :: tables.prelude.get(call.value) ?? return None
+    if family == .Val(family) { if program.prelude_calls[position].family != family -> return None }
+    Val(MIRNativeCallbackConsumer.CallArgs{args: args})
+}
+struct MIRNativeCallbackProducer { value: MIRValueID, block: MIRBlockID, index: Int, span: Span }
+struct MIRNativeCallbackUse { block: MIRBlockID, index: Int, span: Span, direct: Int, consumer: Int, valid_consumer: Bool, terminator: Bool }
+
+// MIROptimization.rs:2790-2912. Native traverses every operation once per
+// producer. Bucket uses in one traversal instead, preserving producer order
+// and each producer's original instruction/terminator first-error order.
+fn mir_native_verify_host_borrow_callback_uses(function: MIRFunction, index: MIRNativeFunctionIndex, program: MIRProgram, tables: MIRNativeProgramIndex) MIRLegalityError! {
+    producers := [MIRNativeCallbackProducer]{}
+    producer_slots := [U64:Int]{}
+    buckets := [[MIRNativeCallbackUse]]{}
+    loop block in function.blocks {
+        loop (position, instruction) in block.instructions {
+            if instruction.operation != .Semantic(.HostBorrowCallback(_, _)) -> next
+            result :: instruction.result ?? return Err(mir_native_reference(function.id, "HostBorrowCallback has no representation result", instruction.span))
+            ty :: instruction.ty ?? return Err(mir_native_reference(function.id, "HostBorrowCallback has no representation type", instruction.span))
+            if !mir_type_is_function(ty) -> return Err(mir_native_reference(function.id, "HostBorrowCallback result is not a checked callable", instruction.span))
+            producer_slots[result.value] = producers.len()
+            &producers.push(MIRNativeCallbackProducer{value: result, block: block.id, index: position, span: instruction.span})
+            &buckets.push([MIRNativeCallbackUse]{})
+        }
+    }
+    if producers.len() == 0 -> return
+    loop block in function.blocks {
+        loop (position, instruction) in block.instructions {
+            touched := [Int:Int]{}
+            slots := [Int]{}
+            uses := [MIRNativeCallbackUse]{}
+            loop value in mir_operation_value_uses(instruction.operation) {
+                slot :: producer_slots.get(value.value) ?? next
+                at :: mir_native_callback_touch(&touched, &slots, &uses, slot, block.id, position, instruction.span, false)
+                uses[at].direct += 1
+            }
+            loop place in mir_pass_operation_place_refs(instruction.operation) {
+                loop value in mir_pass_place_value_uses(function.places, index.definitions.places, place) {
+                    slot :: producer_slots.get(value.value) ?? next
+                    _ :: mir_native_callback_touch(&touched, &slots, &uses, slot, block.id, position, instruction.span, false)
+                }
+            }
+            if mir_native_host_callback_consumer(instruction.operation, program, tables) == .Val(consumer) {
+                loop at in 0..<uses.len() -> uses[at].valid_consumer = true
+                if consumer == {
+                    .CallArgs(args) -> {
+                        loop arg in args {
+                            slot :: producer_slots.get(arg.value.value) ?? next
+                            at :: touched.get(slot) ?? next
+                            uses[at].consumer += 1
+                        }
+                    }
+                    .Values(values) -> {
+                        loop value in values {
+                            slot :: producer_slots.get(value.value) ?? next
+                            at :: touched.get(slot) ?? next
+                            uses[at].consumer += 1
+                        }
+                    }
+                }
+            }
+            loop at in 0..<slots.len() -> &buckets[slots[at]].push(uses[at])
+        }
+        touched := [Int:Bool]{}
+        loop value in mir_terminator_value_uses(block.terminator) {
+            slot :: producer_slots.get(value.value) ?? next
+            if touched.get(slot) != None -> next
+            touched[slot] = true
+            &buckets[slot].push(MIRNativeCallbackUse{block: block.id, index: block.instructions.len(), span: block.span, direct: 1, consumer: 0, valid_consumer: false, terminator: true})
+        }
+    }
+    loop (slot, producer) in producers {
+        consumed := false
+        loop use in buckets[slot] {
+            if use.terminator -> return Err(mir_native_reference(function.id, "HostBorrowCallback result escaped through a block terminator", use.span))
+            if use.block != producer.block || use.index != producer.index + 1 -> return Err(mir_native_reference(function.id, "HostBorrowCallback result must be consumed by the next host/Prelude call", use.span))
+            if !use.valid_consumer -> return Err(mir_native_reference(function.id, "HostBorrowCallback result escaped its direct host/Prelude call argument", use.span))
+            if use.direct != 1 || use.consumer != 1 -> return Err(mir_native_reference(function.id, "HostBorrowCallback result must appear exactly once as a call argument", use.span))
+            consumed = true
+        }
+        if !consumed -> return Err(mir_native_reference(function.id, "HostBorrowCallback result has no direct host/Prelude call consumer", producer.span))
+    }
+    return
+}
+fn mir_native_callback_touch(touched: &[Int:Int], slots: &[Int], uses: &[MIRNativeCallbackUse], slot: Int, block: MIRBlockID, position: Int, span: Span, terminator: Bool) -> Int Never! {
+    if touched.get(slot) == .Val(at) -> return at
+    at :: uses.len()
+    touched[slot] = at
+    &slots.push(slot)
+    &uses.push(MIRNativeCallbackUse{block: block, index: position, span: span, direct: 0, consumer: 0, valid_consumer: false, terminator: terminator})
+    at
+}

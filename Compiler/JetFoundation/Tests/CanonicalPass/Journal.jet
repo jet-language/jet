@@ -1,0 +1,99 @@
+// New faithful journal-law regressions. CanonicalPass.rs has zero embedded
+// tests. Native TLS/environment activation is #4494; run each environment
+// fixture in an isolated process, not concurrent mutation of process env.
+use core.sys as canonical_pass_test_env
+
+fn canonical_pass_test_emit(stage: String, operation: String) Never! {
+    items :: [Item]{}
+    canonical_pass_record(stage, operation, "journal.jet", "ast", canonical_pass_ast_items_payload(items), canonical_pass_ast_items_identity(items), "ast", canonical_pass_ast_items_payload(items), canonical_pass_ast_items_identity(items), "preserve")
+}
+fn canonical_pass_test_enable(ids: String) Never! -[Env]> {
+    canonical_pass_test_env.set("JET_ADAPTER_MODE", "journal-test")
+    canonical_pass_test_env.set("JET_ADAPTER_OPERATION_IDS", ids)
+    canonical_pass_clear()
+}
+#Test("canonical pass 100k indexed occurrence law across stages") {
+    canonical_pass_test_enable("a,b,c,d")
+    loop index in 0..<100000 {
+        operation :: if index % 4 == { 0 -> "a" 1 -> "b" 2 -> "c" else -> "d" }
+        stage :: if index % 2 == 0 -> "lowering" else -> "optimization"
+        canonical_pass_test_emit(stage, operation)
+    }
+    records :: canonical_pass_take()
+    assert_eq(records.len(), 100000)
+    loop (index, record) in records {
+        assert_eq(record.order, index + 1)
+        assert_eq(record.occurrence, index /% 4 + 1)
+        assert_eq(record.premises, CANONICAL_PASS_BASE_PREMISES)
+    }
+    canonical_pass_test_emit("optimization", "a")
+    fresh :: canonical_pass_take()
+    assert_eq(fresh[0].order, 1)
+    assert_eq(fresh[0].occurrence, 1)
+}
+#Test("canonical pass selection is exact comma split without trimming") {
+    canonical_pass_test_enable("a, b,a-prefix,*")
+    canonical_pass_test_emit("lowering", "a")
+    canonical_pass_test_emit("lowering", "b")
+    canonical_pass_test_emit("lowering", "a-suffix")
+    canonical_pass_test_emit("optimization", "a")
+    canonical_pass_test_emit("optimization", " b")
+    records :: canonical_pass_take()
+    assert_eq(records.len(), 3)
+    assert_eq(records[0].occurrence, 1)
+    assert_eq(records[1].occurrence, 2)
+    assert_eq(records[1].order, 2)
+    assert_eq(records[2].operation_id, " b")
+}
+#Test("canonical pass disabled capture does not mutate records") {
+    canonical_pass_test_enable("a")
+    canonical_pass_test_emit("lowering", "a")
+    canonical_pass_test_env.set("JET_ADAPTER_MODE", "")
+    canonical_pass_test_emit("optimization", "a")
+    records :: canonical_pass_take()
+    assert_eq(records.len(), 1)
+    assert_eq(records[0].stage, "lowering")
+}
+#Test("canonical pass clear and move take reset both indexes") {
+    canonical_pass_test_enable("a")
+    canonical_pass_test_emit("lowering", "a")
+    canonical_pass_clear()
+    canonical_pass_test_emit("optimization", "a")
+    records :: canonical_pass_take()
+    assert_eq(records[0].order, 1)
+    assert_eq(records[0].occurrence, 1)
+    assert_eq(canonical_pass_take().len(), 0)
+    canonical_pass_test_emit("lowering", "a")
+    next :: canonical_pass_take()
+    assert_eq(next[0].order, 1)
+    assert_eq(next[0].occurrence, 1)
+}
+#Test("canonical pass producer retains raw JSON and canonical Unicode escaping") {
+    canonical_pass_test_enable("quote")
+    canonical_pass_record("lower\n界", "quote", "p\"\\é.jet", "ast", "[1, true]", "null", "mir", "{\"x\":\"界\"}", "42", "checked")
+    records :: canonical_pass_take()
+    text :: canonical_pass_record_json(records[0])
+    assert(text.contains("\"canonical_payload\":[1, true],\"identity\":null"))
+    assert(text.contains("\"canonical_payload\":{\"x\":\"界\"},\"identity\":42"))
+    assert(text.contains("\"stage\":\"lower\\n界\""))
+    assert(text.contains("\"source\":{\"path\":\"p\\\"\\\\é.jet\"}"))
+    process :: canonical_pass_process_json("em\"it", records)
+    assert(process.ends_with("]}\n"))
+    assert(!text.contains("\"process\""))
+}
+#Test("canonical pass typed MirValueId Debug is original tuple Debug") {
+    value :: MIRValueID{value: 37}
+    assert_eq(canonical_pass_debug_payload("mir", "id", value), "{\"representation\":\"mir\",\"operation_id\":\"id\",\"debug\":\"MirValueId(37)\"}")
+    assert_eq(canonical_pass_debug_identity("mir", "id", value), "{\"representation\":\"mir\",\"operation_id\":\"id\",\"identity\":\"MirValueId(37)\"}")
+}
+#Test("canonical pass snapshots true ordered AST before and after mutation") {
+    span :: Span{start: 0, end: 1}
+    items := [Item]{Item.TypeAlias{value: TypeAliasDef{is_pub: false, is_package_pub: false, name: "A", name_span: span, type_params: [TypeParam]{}, target: Type.Int, target_span: span, span: span}}}
+    before :: canonical_pass_ast_items_payload(items)
+    before_identity :: canonical_pass_ast_items_identity(items)
+    &items.push(Item.EffectDecl{value: EffectDecl{name: "E", name_span: span, span: span, irreversible: false}})
+    after :: canonical_pass_ast_items_payload(items)
+    assert_eq(before, "{\"representation\":\"ast\",\"items\":[{\"index\":0,\"kind\":\"TypeAlias\"}]}")
+    assert_eq(before_identity, "{\"representation\":\"ast\",\"item_count\":1}")
+    assert_eq(after, "{\"representation\":\"ast\",\"items\":[{\"index\":0,\"kind\":\"TypeAlias\"},{\"index\":1,\"kind\":\"EffectDecl\"}]}")
+}

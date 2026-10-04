@@ -571,7 +571,7 @@ fn sema_expression_typed_literal_printable(ty: Type, environment: SemaScopeEnvir
         .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Measure(_) -> return false
         .Named(name) -> {
             if name == "Unit" -> return true
-            if environment.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None -> return true
+            if environment.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty, environment.module_identity) != None -> return true
             loop row in sema_scope_checked_type_name_rows(environment, name) {
                 if environment.checked_types[row].single_use -> return false
                 if environment.checked_types[row].auto_printable -> return true

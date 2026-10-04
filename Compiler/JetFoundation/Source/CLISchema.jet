@@ -1,0 +1,982 @@
+// Checked command-schema projection shared by codegen and inspection.
+use core.sys as cli_metadata_target
+use core.sys.host.os_path_ingress as cli_schema_env
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:15
+RECORD_MAGIC :: prep { [U8]{74, 69, 84, 67, 77, 68, 0, 0} }
+// Rust: crates/jet-foundation/src/CLISchema.rs:19
+pub RECORD_VERSION :: U16{8}
+// Rust: crates/jet-foundation/src/CLISchema.rs:20
+pub ELF_SECTION :: ".jet_command"
+// Rust: crates/jet-foundation/src/CLISchema.rs:21
+pub PE_SECTION :: ".jetcmd"
+// Rust: crates/jet-foundation/src/CLISchema.rs:22
+pub MACH_SECTION :: "__jetcmd"
+// Rust: crates/jet-foundation/src/CLISchema.rs:23
+pub WASM_SECTION :: "jet.command"
+// Rust: crates/jet-foundation/src/CLISchema.rs:24
+MAX_RECORD_BYTES :: 1024 * 1024
+// Rust: crates/jet-foundation/src/CLISchema.rs:25
+MAX_INPUTS :: 4096
+// Rust: crates/jet-foundation/src/CLISchema.rs:26
+MAX_JOBS :: 4096
+// Rust: crates/jet-foundation/src/CLISchema.rs:27
+MAX_STRING_BYTES :: 64 * 1024
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:30
+pub enum CLIValueKind { Bool Int Float String Path }
+impl CLIValueKind {
+    // Rust: crates/jet-foundation/src/CLISchema.rs:39
+    pub fn as_str(self) -> String Never! {
+        if self == { .Bool -> "Bool" .Int -> "Int" .Float -> "Float" .String -> "String" .Path -> "Path" }
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:51
+pub enum CLIDefault { TypeDefault Value(value: CtValue) Recorded(value: String) }
+impl CLIDefault {
+    // Rust: crates/jet-foundation/src/CLISchema.rs:59
+    pub fn display(self) -> String Never! {
+        if self == { .TypeDefault -> "type default" .Value(value) -> value.jet_show() .Recorded(value) -> value }
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:69
+pub enum CLIInputShape { Flag Value(kind: CLIValueKind, optional: Bool, default: CLIDefault?) }
+// Rust: crates/jet-foundation/src/CLISchema.rs:79
+pub struct CLIInputSchema {
+    pub field: String
+    pub flag: String
+    pub short: String?
+    pub env: String?
+    pub help: String
+    pub metavar: String?
+    pub shape: CLIInputShape
+    pub positional: U16?
+}
+impl CLIInputSchema {
+    // Rust: crates/jet-foundation/src/CLISchema.rs:96
+    pub fn required(self) -> Bool Never! {
+        if self.shape == { .Value(_, optional, default) -> !optional && default == None else -> false }
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:107
+    pub fn value_kind(self) -> CLIValueKind Never! {
+        if self.shape == { .Flag -> CLIValueKind.Bool .Value(kind, _, _) -> kind }
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:114
+    pub fn default_display(self) -> String? Never! {
+        if self.shape == {
+            .Flag -> Val("false")
+            .Value(_, _, default) -> if default == { .Val(value) -> Val(value.display()) None -> None }
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:123
+pub struct CLICommandSchema {
+    pub entry_type: String
+    pub description: String?
+    pub inputs: [CLIInputSchema]
+    pub commands: [CLISubcommandSchema]
+    pub jobs: [JobFact]
+    pub standard: Bool
+    pub version: String?
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:139
+pub struct CLISubcommandSchema { pub name: String, pub description: String?, pub inputs: [CLIInputSchema] }
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:151
+// JobArgumentSchema -> CLISchema/Jobs.jet::JobArgumentSchema.
+// Rust: crates/jet-foundation/src/CLISchema.rs:162
+// display -> JobArgumentSchema.display.
+// Rust: crates/jet-foundation/src/CLISchema.rs:170
+// JobFact -> CLISchema/Jobs.jet::JobFact (limits use StringMapEntry canonical carrier).
+// Rust: crates/jet-foundation/src/CLISchema.rs:198
+// from_function -> JobFact.from_function (self filter, metadata defaults, doc/schedule).
+// Rust: crates/jet-foundation/src/CLISchema.rs:238
+// metadata -> JobFact.metadata (all execution metadata retained).
+// Rust: crates/jet-foundation/src/CLISchema.rs:253
+// scope_name -> JobFact.scope_name.
+// Rust: crates/jet-foundation/src/CLISchema.rs:263
+// from_param -> JobArgumentSchema.from_param (zone, variadic, Bool/Option requiredness).
+// Rust: crates/jet-foundation/src/CLISchema.rs:287
+// JobRegistry -> CLISchema/Jobs.jet::JobRegistry.
+// Rust: crates/jet-foundation/src/CLISchema.rs:292
+// from_items -> JobRegistry.from_items.
+// Rust: crates/jet-foundation/src/CLISchema.rs:306
+// from_program -> JobRegistry.from_program.
+// Rust: crates/jet-foundation/src/CLISchema.rs:313
+// from_modules -> JobRegistry.from_modules (stable display/native path ordering).
+// Rust: crates/jet-foundation/src/CLISchema.rs:327
+// from_bundle -> JobRegistry.from_bundle.
+// Rust: crates/jet-foundation/src/CLISchema.rs:334
+// for_entry -> JobRegistry.for_entry (entry-only namespace).
+// Rust: crates/jet-foundation/src/CLISchema.rs:341
+// append -> JobRegistry.append.
+// Rust: crates/jet-foundation/src/CLISchema.rs:345
+// into_jobs -> JobRegistry.into_jobs.
+// Rust: crates/jet-foundation/src/CLISchema.rs:349
+// jobs -> JobRegistry.jobs.
+// Rust: crates/jet-foundation/src/CLISchema.rs:353
+// visible_jobs -> JobRegistry.visible_jobs.
+// Rust: crates/jet-foundation/src/CLISchema.rs:360
+// find -> JobRegistry.find.
+// Rust: crates/jet-foundation/src/CLISchema.rs:364
+// find_visible -> JobRegistry.find_visible.
+// Rust: crates/jet-foundation/src/CLISchema.rs:373
+// dependency_closure -> JobRegistry.dependency_closure.
+// Rust: crates/jet-foundation/src/CLISchema.rs:374
+// visit -> CLISchema/Jobs.jet::job_registry_visit, same cycle path/errors/order;
+// indexed iterative DFS avoids repeated declaration scans and payload copies.
+// Rust: crates/jet-foundation/src/CLISchema.rs:427
+// validate_graph -> JobRegistry.validate_graph (sorted unique roots).
+// Rust: crates/jet-foundation/src/CLISchema.rs:443
+// completion_words -> JobRegistry.completion_words (first visible name order).
+// Rust: crates/jet-foundation/src/CLISchema.rs:448
+fn completion_words(jobs: [JobFact]) -> [String] Never! {
+    words := [String]{}
+    seen := [String:Bool]{}
+    loop job in jobs {
+        if job.scope == JobScope.Internal || seen.get(job.name) != None -> next
+        seen[job.name] = true
+        &words.push(job.name)
+    }
+    words
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:459
+// schedule_text -> CLISchema/Jobs.jet::job_schedule_text (duration/day/expression).
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:481
+pub struct CLICommandTarget {
+    pub function: Func
+    pub is_method: Bool
+    pub is_binding: Bool
+    pub bound_shared: Bool
+    pub function_name: String
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:489
+fn command_payload_params(function: Func, shared_type: String, bound_shared: Bool) -> [Param] Never! {
+    params := [Param]{}
+    loop param in function.params {
+        if param.name == "self" -> next
+        if bound_shared && param.ty == .Named(name) {
+            if cli_schema_last_component(name, ".") == shared_type -> next
+        }
+        &params.push(param)
+    }
+    params
+}
+impl CLICommandTarget {
+    // Rust: crates/jet-foundation/src/CLISchema.rs:503
+    pub fn payload_params(self, shared_type: String) -> [Param] Never! {
+        command_payload_params(self.function, shared_type, self.bound_shared)
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:513
+pub fn command_target(structure: StructDef, command: CLISubcommandSchema, items: [Item], function_owner: String) -> CLICommandTarget? Never! {
+    computed := [String:Bool]{}
+    loop field in structure.fields {
+        if field.computed != None -> computed[field.name] = true
+    }
+    function := Func?{None}
+    is_binding := false
+    loop method in structure.methods {
+        if method.name.to_lowercase() == command.name && computed.get(method.name) == None {
+            function = Val(method)
+            break
+        }
+    }
+    if function == None {
+        binding := CLICommandBinding?{None}
+        loop candidate in structure.cli_bindings {
+            if candidate.name.to_lowercase() == command.name { binding = Val(candidate); break }
+        }
+        selected :: binding ?? return None
+        target_name :: binding_target_name(selected) ?? return None
+        loop item in items {
+            if item == .Func(candidate) && candidate.name == target_name { function = Val(candidate); break }
+        }
+        if function == None -> return None
+        is_binding = true
+    }
+    selected :: function ?? return None
+    is_method := false
+    loop param in selected.params { if param.name == "self" -> is_method = true }
+    bound_shared := false
+    if is_binding && selected.params.len() > 0 && selected.params[0].ty == .Named(name) {
+        bound_shared = cli_schema_last_component(name, ".") == structure.name
+    }
+    function_name := selected.name
+    if is_method -> function_name = "{function_owner}::{selected.name}"
+    else if function_owner.rsplit_once("::") == .Val((module, _)) -> function_name = "{module}::{selected.name}"
+    Val(CLICommandTarget{function: selected, is_method: is_method, is_binding: is_binding,
+        bound_shared: bound_shared, function_name: function_name})
+}
+// Borrowed slice is promoted to a String only at the canonical text boundary.
+fn cli_schema_last_component(text: String, separator: String) -> String Never! {
+    if text.rsplit_once(separator) == .Val((_, leaf)) { result := leaf // #4303
+        return result
+    }
+    text
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:570
+pub fn executable_schema(bundle: ProgramBundle) -> CLICommandSchema Never! {
+    schema := entry_schema_for_bundle(bundle) ?? CLICommandSchema{entry_type: "", description: None,
+        inputs: [CLIInputSchema]{}, commands: [CLISubcommandSchema]{}, jobs: [JobFact]{}, standard: false, version: None}
+    schema.jobs = JobRegistry.for_entry(bundle).into_jobs()
+    schema
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:584
+fn selected_entry_type(items: [Item]) -> String? Never! {
+    loop item in items {
+        if item == .Const(value) && value.resolved_output == .Val(output) {
+            if output.selected && output.kind == OutputKind.Executable && output.params.len() == 1 {
+                if output.params[0].1 == .Named(name) -> return Val(name)
+            }
+        }
+    }
+    loop item in items {
+        function :: if item == { .Func(function) -> function else -> next }
+        if function.name != "run" -> next
+        if function.params.len() == 1 && function.params[0].ty == .Named(name) {
+            if cli_schema_local_struct(items, name) || name.contains(".") || name.contains("::") -> return Val(name)
+            if direct_run_function(items) == None -> return Val(name)
+        }
+        if direct_run_function(items) != None -> return Val("run")
+    }
+    None
+}
+fn cli_schema_local_struct(items: [Item], name: String) -> Bool Never! {
+    loop item in items { if item == .Struct(value) && value.name == name -> return true }
+    false
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:632
+fn direct_run_function(items: [Item]) -> Func? Never! {
+    loop item in items {
+        function :: if item == { .Func(function) -> function else -> next }
+        if function.name != "run" || function.params.len() == 0 || function_inputs(function) == None -> next
+        if function.params.len() == 1 && function.params[0].ty == .Named(name) {
+            if cli_schema_local_struct(items, name) || name.contains(".") -> next
+        }
+        return Val(function)
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:657
+pub fn is_direct_run_entry(items: [Item]) -> Bool Never! {
+    loop item in items {
+        if item == .Const(value) && value.resolved_output == .Val(output) {
+            if output.selected && output.kind == OutputKind.Executable -> return false
+        }
+    }
+    direct_run_function(items) != None
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:670
+fn selected_entry_type_source(bundle: ProgramBundle) -> (Int, String)? Never! {
+    entry :: bundle.modules[bundle.entry]
+    loop item in entry.items {
+        if item == .Const(value) && value.resolved_output == .Val(output) {
+            if output.selected && output.kind == OutputKind.Executable && output.params.len() == 1 {
+                if output.params[0].1 == .Named(name) -> return Val((output.module, name))
+            }
+        }
+    }
+    loop item in entry.items {
+        function :: if item == { .Func(function) -> function else -> next }
+        if function.name != "run" -> next
+        if function.params.len() == 1 && function.params[0].ty == .Named(name) {
+            if cli_schema_local_struct(entry.items, name) || name.contains(".") || name.contains("::") -> return Val((bundle.entry, name))
+            if direct_run_function(entry.items) == None -> return Val((bundle.entry, name))
+        }
+        if direct_run_function(entry.items) != None -> return Val((bundle.entry, "run"))
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:715
+pub fn schema_for_type(items: [Item], name: String) -> CLICommandSchema? Never! {
+    loop item in items {
+        if item == .Struct(structure) && structure.name == name {
+            schema :: command_schema_with_items(items, structure)
+            if schema != None -> return schema
+        }
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:729
+pub fn entry_type_module(bundle: ProgramBundle) -> Int? Never! {
+    (source, name) :: selected_entry_type_source(bundle) ?? return None
+    // GATE #4494: real process environment/stderr; no simulated logging.
+    debug :: cli_schema_env.var_os("JET_DEBUG_CLI") != None
+    if debug -> std.eprintln("cli-debug entry_type_module source={source} name={name} entry={bundle.entry}")
+    entry :: bundle.modules[source]
+    if name == "run" {
+        loop item in entry.items { if item == .Func(function) && function.name == "run" -> return Val(source) }
+    }
+    if name_ledger_nominal_module(bundle.name_ledger, name) == .Val(owner) {
+        leaf :: cli_schema_last_component(name, "::")
+        if name_ledger_visible(bundle.name_ledger, source, owner, leaf) -> return Val(owner) else -> return None
+    }
+    wanted_alias := String?{None}
+    leaf := name
+    if name.split_once(".") == .Val((alias, suffix)) {
+        alias_text := alias // #4303
+        suffix_text := suffix // #4303
+        wanted_alias = Val(alias_text)
+        leaf = suffix_text
+    }
+    if wanted_alias == None && cli_schema_local_struct(entry.items, leaf) -> return Val(source)
+    candidates := [Int]{}
+    loop import in entry.imports {
+        if wanted_alias == .Val(alias) && import_alias(import) != alias -> next
+        target :: name_ledger_import_target(bundle.name_ledger, source, import.span) ?? next
+        if name_ledger_visible(bundle.name_ledger, source, target, leaf) -> &candidates.push(target)
+    }
+    if debug -> std.eprintln("cli-debug candidates={candidates:Debug}")
+    &candidates.sort()
+    kept := 0
+    loop index in 0..<candidates.len() {
+        if kept > 0 && candidates[index] == candidates[kept - 1] -> next
+        if kept != index -> candidates[kept] = candidates[index]
+        kept += 1
+    }
+    loop candidates.len() > kept -> &candidates.pop().drop("discard duplicate visible module")
+    if candidates.len() == 1 -> Val(candidates[0]) else -> None
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:791
+pub fn entry_schema_for_bundle(bundle: ProgramBundle) -> CLICommandSchema? Never! {
+    (source, name) :: selected_entry_type_source(bundle) ?? return None
+    leaf :: cli_schema_last_component(name, ".")
+    module :: entry_type_module(bundle) ?? return None
+    schema := CLICommandSchema?{None}
+    if leaf == "run" && source == bundle.entry && is_direct_run_entry(bundle.modules[source].items) {
+        function :: direct_run_function(bundle.modules[source].items) ?? panic("direct run entry has a canonical function schema")
+        schema = Val(function_schema(function) ?? panic("direct run entry has a canonical function schema"))
+    } else -> schema = schema_for_type(bundle.modules[module].items, leaf)
+    result := schema ?? return None
+    if result.standard -> result.version = Val(bundle.build_facts.package_version)
+    result.jobs = JobRegistry.for_entry(bundle).into_jobs()
+    Val(result)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:813
+pub fn entry_schema(items: [Item]) -> CLICommandSchema? Never! {
+    name :: selected_entry_type(items) ?? return None
+    leaf :: cli_schema_last_component(name, ".")
+    schema := CLICommandSchema?{None}
+    if leaf == "run" && is_direct_run_entry(items) {
+        function :: direct_run_function(items) ?? return None
+        schema = function_schema(function)
+    } else -> schema = schema_for_type(items, leaf)
+    result := schema ?? return None
+    result.jobs = JobRegistry.from_items(items.view(0..<items.len())).into_jobs()
+    Val(result)
+}
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:832
+pub fn encode_record(schema: CLICommandSchema) -> [U8] Never! {
+    payload := [U8]{}
+    put_string(&payload, schema.entry_type)
+    put_optional_string(&payload, schema.description)
+    &payload.push(if schema.standard -> U8{1} else -> U8{0})
+    put_optional_string(&payload, schema.version)
+    put_u32(&payload, schema.inputs.len())
+    loop input in schema.inputs -> encode_input(&payload, input)
+    put_u32(&payload, schema.commands.len())
+    loop command in schema.commands {
+        put_string(&payload, command.name)
+        put_optional_string(&payload, command.description)
+        put_u32(&payload, command.inputs.len())
+        loop input in command.inputs -> encode_input(&payload, input)
+    }
+    put_u32(&payload, schema.jobs.len())
+    loop job in schema.jobs -> encode_job(&payload, job)
+    finish_record(^payload)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:858
+fn finish_record(payload: ^[U8]) -> [U8] Never! {
+    record := [U8].with_capacity(46 + payload.len())
+    loop byte in RECORD_MAGIC -> &record.push(byte)
+    &record.push(U8{Int.from_u16(RECORD_VERSION) & 255})
+    &record.push(U8{Int.from_u16(RECORD_VERSION) >> 8})
+    put_u32(&record, payload.len())
+    digest :: mir_sha256_bytes(payload.view(0..<payload.len()))
+    loop byte in digest -> &record.push(byte)
+    &record.extend(^payload)
+    record
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:873
+pub fn encode_mir_record(entry_type: String, description: String?, standard: Bool, version: String?, inputs: [MIRCLIInput], commands: [MIRCLICommand], jobs: [MIRJob]) -> [U8] Never! {
+    payload := [U8]{}
+    put_string(&payload, entry_type)
+    put_optional_string(&payload, description)
+    &payload.push(if standard -> U8{1} else -> U8{0})
+    put_optional_string(&payload, version)
+    put_u32(&payload, inputs.len())
+    loop input in inputs -> encode_mir_input(&payload, input)
+    put_u32(&payload, commands.len())
+    loop command in commands {
+        put_string(&payload, command.name)
+        put_optional_string(&payload, command.description)
+        put_u32(&payload, command.inputs.len())
+        loop input in command.inputs -> encode_mir_input(&payload, input)
+    }
+    put_u32(&payload, jobs.len())
+    loop job in jobs -> encode_mir_job(&payload, job)
+    finish_record(^payload)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:907
+fn encode_mir_input(payload: &[U8], input: MIRCLIInput) Never! {
+    put_string(&payload, input.name)
+    put_string(&payload, input.label)
+    put_optional_string(&payload, input.short)
+    put_optional_string(&payload, input.env)
+    put_string(&payload, input.help)
+    put_optional_string(&payload, input.metavar)
+    if input.shape == {
+        .Flag -> &payload.push(U8{0})
+        .Value(kind, optional, default) -> {
+            &payload.push(U8{1})
+            &payload.push(if kind == { .Bool -> U8{0} .Int -> U8{1} .Float -> U8{2} .String -> U8{3} .Path -> U8{4} })
+            &payload.push(if optional -> U8{1} else -> U8{0})
+            if default == {
+                None -> &payload.push(U8{0})
+                .Val(value) -> if value == {
+                    .TypeDefault -> &payload.push(U8{1})
+                    .Value(value) -> { &payload.push(U8{2}); put_string(&payload, mir_constant_display(value)) }
+                }
+            }
+        }
+    }
+    if input.positional == {
+        None -> &payload.push(U8{0})
+        .Val(order) -> { &payload.push(U8{1}); put_u32(&payload, order) }
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:949
+fn encode_mir_job(payload: &[U8], job: MIRJob) Never! {
+    put_string(&payload, job.name)
+    &payload.push(if job.scope == { .Dev -> U8{0} .Ship -> U8{1} .Internal -> U8{2} })
+    put_optional_string(&payload, None)
+    schedule :: if job.schedule == { .Val(value) -> Val(mir_job_schedule_display(value)) None -> None }
+    put_optional_string(&payload, schedule)
+    put_u32(&payload, job.after.len())
+    loop dependency in job.after -> put_string(&payload, dependency)
+    put_u32(&payload, job.input_paths.len())
+    loop input in job.input_paths -> put_string(&payload, input)
+    put_u32(&payload, job.output_paths.len())
+    loop output in job.output_paths -> put_string(&payload, output)
+    put_u32(&payload, job.parallel)
+    put_u32(&payload, job.inputs.len())
+    loop input in job.inputs {
+        put_string(&payload, input.name)
+        put_string(&payload, input.label)
+        put_string(&payload, mir_type_display_name(input.ty))
+        &payload.push(if mir_cli_input_required(input) -> U8{1} else -> U8{0})
+        default :: if input.shape == {
+            .Value(_, _, value) -> if value == {
+                .Val(value) -> if value == { .TypeDefault -> Val("type default") .Value(value) -> Val(mir_constant_display(value)) }
+                None -> None
+            }
+            .Flag -> None
+        }
+        put_optional_string(&payload, default)
+        &payload.push(if input.variadic -> U8{1} else -> U8{0})
+        &payload.push(if input.zone == { .PositionalOnly -> U8{0} .Either -> U8{1} .LabelOnly -> U8{2} })
+    }
+    put_u32(&payload, job.packages.len())
+    loop package in job.packages -> put_string(&payload, package)
+    put_optional_string(&payload, job.working_directory)
+    encode_mir_job_skip(&payload, job.skip)
+    &payload.push(if job.cache == { .Uncached -> U8{0} .Local -> U8{1} .Shared -> U8{2} })
+    put_u32(&payload, job.limits.len())
+    order := loop index in 0..<job.limits.len() -> index
+    &order.sort_by((a: Int, b: Int) -> job.limits[a].name <=> job.limits[b].name)
+    loop index in order {
+        put_string(&payload, job.limits[index].name)
+        put_string(&payload, job.limits[index].value)
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1020
+fn encode_mir_job_skip(payload: &[U8], skip: MIRJobSkip?) Never! {
+    if skip == {
+        None -> &payload.push(U8{0})
+        .Val(value) -> if value == {
+            .Always(reason) -> { &payload.push(U8{1}); put_string(&payload, reason) }
+            .UnlessPlatform(platform) -> { &payload.push(U8{2}); put_string(&payload, platform) }
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1037
+fn mir_cli_input_required(input: MIRCLIInput) -> Bool Never! {
+    if input.shape == { .Value(_, optional, default) -> !optional && default == None else -> false }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1048
+fn mir_job_schedule_display(schedule: MIRJobSchedule) -> String Never! {
+    if schedule == { .Duration(nanos) -> "{nanos}ns" .WallClockTime(hour, minute) -> "day {hour:02}:{minute:02}" }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1057
+fn mir_constant_display(value: MIRConstant) -> String Never! {
+    if value == {
+        .Int(value, _, _) -> "{value}"
+        .Float(value, _, _) -> "{value:Debug}"
+        .Bool(value) -> "{value}"
+        .Char(value) -> "{Char{value}}"
+        .String(value) -> value
+        .Bytes(values) -> {
+            rendered :: loop byte in values -> "{byte}"
+            "[{rendered.join(", ")}]"
+        }
+        .Unit -> "()"
+        .BigInt(value) -> value
+        .List(values) -> {
+            rendered :: loop child in values -> mir_constant_display(child)
+            "[{rendered.join(", ")}]"
+        }
+        .Map(values) -> {
+            // GATE #4499: MIR canonical composite-key ordering; the integration
+            // owner restores this carrier's BTreeMap order before projection.
+            rendered :: loop entry in values -> "{mir_const_key_display(entry.key)}: {mir_constant_display(entry.value)}"
+            "[{rendered.join(", ")}]"
+        }
+        .Struct(type_name, fields) -> {
+            rendered :: loop field in fields -> "{field.name}: {mir_constant_display(field.value)}"
+            "{type_name} {{ {rendered.join(", ")} }}"
+        }
+        .Enum(type_name, variant, args) -> {
+            rendered :: loop arg in args -> if arg.name == {
+                .Val(label) -> "{label}: {mir_constant_display(arg.value)}"
+                None -> mir_constant_display(arg.value)
+            }
+            text :: rendered.join(", ")
+            if text == "" -> "{type_name}::{variant}" else -> "{type_name}::{variant}({text})"
+        }
+        .Present(value) -> mir_constant_display(value)
+        .Failed(report) -> if report == { .Clean(_) -> "null" .Told(_) -> "err" }
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1120
+fn mir_const_key_display(value: MIRConstKey) -> String Never! {
+    if value == {
+        .Int(value) -> "{value}"
+        .String(value) -> value
+        .Bool(value) -> "{value}"
+        .Char(value) -> "{Char{value}}"
+        .Tuple(fields) -> {
+            rendered :: loop field in fields -> "{field.name}: {mir_const_key_display(field.key)}"
+            "({rendered.join(", ")})"
+        }
+        .Struct(type_name, fields) -> {
+            rendered :: loop field in fields -> "{field.name}: {mir_const_key_display(field.key)}"
+            "{type_name} {{ {rendered.join(", ")} }}"
+        }
+        .Enum(type_name, variant) -> "{type_name}::{variant}"
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1151
+#Error
+pub enum MetadataError { UnknownFormat Missing Duplicate Malformed(why: String) UnsupportedVersion(version: U16) }
+impl MetadataError {
+    // Rust: crates/jet-foundation/src/CLISchema.rs:1160
+    pub fn display(self) -> String Never! {
+        if self == {
+            .UnknownFormat -> "the file is not an ELF, PE, Mach-O, or Wasm executable"
+            .Missing -> "the executable has no JetCommandSchema metadata"
+            .Duplicate -> "the executable contains more than one JetCommandSchema record"
+            .Malformed(why) -> "the JetCommandSchema record is malformed ({why})"
+            .UnsupportedVersion(version) -> "JetCommandSchema version {version} is not supported"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1180
+pub fn read_executable(bytes: View<U8>) -> CLICommandSchema MetadataError! {
+    sections :: if {
+        cli_schema_bytes_start(bytes, [U8]{127, 69, 76, 70}) -> elf_sections(bytes)
+        cli_schema_bytes_start(bytes, [U8]{77, 90}) -> pe_sections(bytes)
+        cli_schema_bytes_start(bytes, [U8]{0, 97, 115, 109}) -> wasm_sections(bytes)
+        is_mach(bytes) -> mach_sections(bytes)
+        else -> return Err(MetadataError.UnknownFormat)
+    }
+    if sections.len() == 0 -> return Err(MetadataError.Missing)
+    if sections.len() != 1 -> return Err(MetadataError.Duplicate)
+    decode_record(sections[0])
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1201
+pub fn decode_record(record: View<U8>) -> CLICommandSchema MetadataError! {
+    if record.len() < 46 || !cli_schema_bytes_start(record, RECORD_MAGIC) -> return Err(MetadataError.Malformed{why: "bad record header"})
+    version :: U16{Int.from_u8(record[8]) | (Int.from_u8(record[9]) << 8)}
+    if version != RECORD_VERSION -> return Err(MetadataError.UnsupportedVersion{version: version})
+    length :: Int.from_u64(read_num(record, 10, 4, true))
+    if length > MAX_RECORD_BYTES || cli_schema_size_add(46, length) != Val(record.len()) -> return Err(MetadataError.Malformed{why: "invalid record length"})
+    payload :: record[46..<record.len()]
+    digest :: mir_sha256_bytes(payload)
+    loop index in 0..<32 { if digest[index] != record[14 + index] -> return Err(MetadataError.Malformed{why: "digest mismatch"}) }
+    cursor := Cursor.new(payload)
+    entry_type :: &cursor.string()
+    description :: &cursor.optional_string()
+    standard :: if &cursor.byte() == { U8{0} -> false U8{1} -> true else -> return Err(MetadataError.Malformed{why: "invalid standard bit"}) }
+    version_text :: &cursor.optional_string()
+    count :: &cursor.u32()
+    if count > MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many inputs"})
+    inputs := [CLIInputSchema].with_capacity(count)
+    loop _ in 0..<count -> &inputs.push(decode_input(&cursor))
+    command_count :: &cursor.u32()
+    if command_count > MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many commands"})
+    commands := [CLISubcommandSchema].with_capacity(command_count)
+    loop _ in 0..<command_count {
+        name :: &cursor.string()
+        description :: &cursor.optional_string()
+        input_count :: &cursor.u32()
+        if input_count > MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many command inputs"})
+        command_inputs := [CLIInputSchema].with_capacity(input_count)
+        loop _ in 0..<input_count -> &command_inputs.push(decode_input(&cursor))
+        &commands.push(CLISubcommandSchema{name: name, description: description, inputs: ^command_inputs})
+    }
+    job_count :: &cursor.u32()
+    if job_count > MAX_JOBS -> return Err(MetadataError.Malformed{why: "too many jobs"})
+    jobs := [JobFact].with_capacity(job_count)
+    loop _ in 0..<job_count -> &jobs.push(decode_job(&cursor))
+    if !cursor.done() -> return Err(MetadataError.Malformed{why: "trailing payload bytes"})
+    Ok(CLICommandSchema{entry_type: entry_type, description: description,
+        inputs: ^inputs, commands: ^commands, jobs: ^jobs, standard: standard, version: version_text})
+}
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:1278
+fn encode_job(payload: &[U8], job: JobFact) Never! {
+    put_string(&payload, job.name)
+    &payload.push(if job.scope == { .Dev -> U8{0} .Ship -> U8{1} .Internal -> U8{2} })
+    put_optional_string(&payload, job.doc)
+    put_optional_string(&payload, job.schedule)
+    put_u32(&payload, job.after.len())
+    loop dependency in job.after -> put_string(&payload, dependency)
+    put_u32(&payload, job.inputs.len())
+    loop input in job.inputs -> put_string(&payload, input)
+    put_u32(&payload, job.outputs.len())
+    loop output in job.outputs -> put_string(&payload, output)
+    put_u32(&payload, job.parallel)
+    put_u32(&payload, job.arguments.len())
+    loop argument in job.arguments {
+        put_string(&payload, argument.name)
+        put_string(&payload, argument.label)
+        put_string(&payload, argument.ty)
+        &payload.push(if argument.required -> U8{1} else -> U8{0})
+        put_optional_string(&payload, argument.default)
+        &payload.push(if argument.variadic -> U8{1} else -> U8{0})
+        &payload.push(if argument.zone == { .PositionalOnly -> U8{0} .Either -> U8{1} .LabelOnly -> U8{2} })
+    }
+    put_u32(&payload, job.packages.len())
+    loop package in job.packages -> put_string(&payload, package)
+    put_optional_string(&payload, job.cwd)
+    encode_job_skip(&payload, job.skip)
+    &payload.push(if job.cache == { .Uncached -> U8{0} .Local -> U8{1} .Shared -> U8{2} })
+    put_u32(&payload, job.limits.len())
+    order := loop index in 0..<job.limits.len() -> index
+    &order.sort_by((a: Int, b: Int) -> job.limits[a].key <=> job.limits[b].key)
+    loop index in order {
+        put_string(&payload, job.limits[index].key)
+        put_string(&payload, job.limits[index].value)
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1332
+fn encode_job_skip(payload: &[U8], skip: JobSkip?) Never! {
+    if skip == {
+        None -> &payload.push(U8{0})
+        .Val(value) -> if value == {
+            .Always(reason) -> { &payload.push(U8{1}); put_string(&payload, reason) }
+            .UnlessPlatform(platform) -> { &payload.push(U8{2}); put_string(&payload, platform) }
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1346
+fn decode_job(cursor: &Cursor) -> JobFact MetadataError! {
+    name :: &cursor.string()
+    scope :: if &cursor.byte() == { U8{0} -> JobScope.Dev U8{1} -> JobScope.Ship U8{2} -> JobScope.Internal else -> return Err(MetadataError.Malformed{why: "unknown job scope"}) }
+    doc :: &cursor.optional_string()
+    schedule :: &cursor.optional_string()
+    after_count :: &cursor.u32()
+    if after_count > MAX_JOBS -> return Err(MetadataError.Malformed{why: "too many job dependencies"})
+    after := [String].with_capacity(after_count)
+    loop _ in 0..<after_count -> &after.push(&cursor.string())
+    input_count :: &cursor.u32()
+    if input_count > MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many job inputs"})
+    inputs := [String].with_capacity(input_count)
+    loop _ in 0..<input_count -> &inputs.push(&cursor.string())
+    output_count :: &cursor.u32()
+    if output_count > MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many job outputs"})
+    outputs := [String].with_capacity(output_count)
+    loop _ in 0..<output_count -> &outputs.push(&cursor.string())
+    parallel :: &cursor.u32()
+    if parallel == 0 -> return Err(MetadataError.Malformed{why: "job parallel bound must be positive"})
+    argument_count :: &cursor.u32()
+    if argument_count > MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many job arguments"})
+    arguments := [JobArgumentSchema].with_capacity(argument_count)
+    loop _ in 0..<argument_count {
+        name :: &cursor.string()
+        label :: &cursor.string()
+        ty :: &cursor.string()
+        required :: if &cursor.byte() == { U8{0} -> false U8{1} -> true else -> return Err(MetadataError.Malformed{why: "invalid job argument required bit"}) }
+        default :: &cursor.optional_string()
+        variadic :: if &cursor.byte() == { U8{0} -> false U8{1} -> true else -> return Err(MetadataError.Malformed{why: "invalid job argument variadic bit"}) }
+        zone :: if &cursor.byte() == { U8{0} -> ParamZone.PositionalOnly U8{1} -> ParamZone.Either U8{2} -> ParamZone.LabelOnly else -> return Err(MetadataError.Malformed{why: "unknown job argument zone"}) }
+        &arguments.push(JobArgumentSchema{name: name, label: label, ty: ty,
+            required: required, default: default, variadic: variadic, zone: zone})
+    }
+    package_count :: &cursor.u32()
+    if package_count > MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many job packages"})
+    packages := [String].with_capacity(package_count)
+    loop _ in 0..<package_count -> &packages.push(&cursor.string())
+    cwd :: &cursor.optional_string()
+    skip :: decode_job_skip(&cursor)
+    cache :: if &cursor.byte() == { U8{0} -> JobCachePolicy.Uncached U8{1} -> JobCachePolicy.Local U8{2} -> JobCachePolicy.Shared else -> return Err(MetadataError.Malformed{why: "unknown job cache policy"}) }
+    limit_count :: &cursor.u32()
+    if limit_count > MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many job limits"})
+    limit_map := [String:String]{}
+    loop _ in 0..<limit_count {
+        key :: &cursor.string()
+        value :: &cursor.string()
+        limit_map[key] = value
+    }
+    names := limit_map.keys().to_list()
+    &names.sort()
+    limits :: loop key in names -> StringMapEntry{key: key, value: limit_map[key]}
+    Ok(JobFact{name: name, scope: scope, doc: doc, arguments: ^arguments,
+        after: ^after, packages: ^packages, cwd: cwd, inputs: ^inputs,
+        outputs: ^outputs, skip: skip, cache: cache, parallel: parallel,
+        limits: limits, schedule: schedule})
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1462
+fn decode_job_skip(cursor: &Cursor) -> JobSkip? MetadataError! {
+    if &cursor.byte() == {
+        U8{0} -> Ok(None)
+        U8{1} -> Ok(Val(JobSkip.Always{reason: &cursor.string()}))
+        U8{2} -> Ok(Val(JobSkip.UnlessPlatform{platform: &cursor.string()}))
+        else -> Err(MetadataError.Malformed{why: "unknown job skip rule"})
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1473
+fn encode_input(payload: &[U8], input: CLIInputSchema) Never! {
+    put_string(&payload, input.field)
+    put_string(&payload, input.flag)
+    put_optional_string(&payload, input.short)
+    put_optional_string(&payload, input.env)
+    put_string(&payload, input.help)
+    put_optional_string(&payload, input.metavar)
+    if input.shape == {
+        .Flag -> &payload.push(U8{0})
+        .Value(kind, optional, default) -> {
+            &payload.push(U8{1})
+            &payload.push(if kind == { .Bool -> U8{0} .Int -> U8{1} .Float -> U8{2} .String -> U8{3} .Path -> U8{4} })
+            &payload.push(if optional -> U8{1} else -> U8{0})
+            if default == {
+                None -> &payload.push(U8{0})
+                .Val(value) -> if value == {
+                    .TypeDefault -> &payload.push(U8{1})
+                    else -> { &payload.push(U8{2}); put_string(&payload, value.display()) }
+                }
+            }
+        }
+    }
+    if input.positional == {
+        None -> &payload.push(U8{0})
+        .Val(order) -> { &payload.push(U8{1}); put_u32(&payload, Int.from_u16(order)) }
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1516
+fn decode_input(cursor: &Cursor) -> CLIInputSchema MetadataError! {
+    field :: &cursor.string()
+    flag :: &cursor.string()
+    short :: &cursor.optional_string()
+    env :: &cursor.optional_string()
+    help :: &cursor.string()
+    metavar :: &cursor.optional_string()
+    shape :: if &cursor.byte() == {
+        U8{0} -> CLIInputShape.Flag
+        U8{1} -> {
+            kind :: if &cursor.byte() == { U8{0} -> CLIValueKind.Bool U8{1} -> CLIValueKind.Int U8{2} -> CLIValueKind.Float U8{3} -> CLIValueKind.String U8{4} -> CLIValueKind.Path else -> return Err(MetadataError.Malformed{why: "unknown input kind"}) }
+            optional :: if &cursor.byte() == { U8{0} -> false U8{1} -> true else -> return Err(MetadataError.Malformed{why: "invalid optional bit"}) }
+            default :: if &cursor.byte() == { U8{0} -> None U8{1} -> Val(CLIDefault.TypeDefault) U8{2} -> Val(CLIDefault.Recorded{value: &cursor.string()}) else -> return Err(MetadataError.Malformed{why: "unknown default kind"}) }
+            CLIInputShape.Value{kind: kind, optional: optional, default: default}
+        }
+        else -> return Err(MetadataError.Malformed{why: "unknown input shape"})
+    }
+    positional :: if &cursor.byte() == {
+        U8{0} -> None
+        U8{1} -> {
+            order :: &cursor.u32()
+            if order > 65535 -> return Err(MetadataError.Malformed{why: "positional order out of range"})
+            Val(U16{order})
+        }
+        else -> return Err(MetadataError.Malformed{why: "invalid positional bit"})
+    }
+    Ok(CLIInputSchema{field: field, flag: flag, short: short, env: env,
+        help: help, metavar: metavar, shape: shape, positional: positional})
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1576
+fn put_u32(out: &[U8], value: Int) Never! {
+    loop index in 0..<4 -> &out.push(U8{(value >> (index * 8)) & 255})
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1579
+fn put_string(out: &[U8], value: String) Never! {
+    bytes :: value.bytes()
+    put_u32(&out, bytes.len())
+    loop byte in bytes -> &out.push(byte)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1583
+fn put_optional_string(out: &[U8], value: String?) Never! {
+    if value == {
+        None -> &out.push(U8{0})
+        .Val(value) -> { &out.push(U8{1}); put_string(&out, value) }
+    }
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1590
+struct Cursor { bytes: View<U8>, at: Int }
+impl Cursor {
+    // Rust: crates/jet-foundation/src/CLISchema.rs:1595
+    fn new(bytes: View<U8>) -> Cursor Never! { Cursor{bytes: bytes, at: 0} }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:1598
+    fn byte(&self) -> U8 MetadataError! {
+        if self.at >= self.bytes.len() -> return Err(MetadataError.Malformed{why: "truncated payload"})
+        value :: self.bytes[self.at]
+        self.at += 1
+        Ok(value)
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:1606
+    fn u32(&self) -> Int MetadataError! {
+        end :: cli_schema_size_add(self.at, 4) ?? return Err(MetadataError.Malformed{why: "length overflow"})
+        if end > self.bytes.len() -> return Err(MetadataError.Malformed{why: "truncated payload"})
+        value := 0
+        loop index in 0..<4 -> value = value | (Int.from_u8(self.bytes[self.at + index]) << (8 * index))
+        self.at = end
+        Ok(value)
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:1618
+    fn string(&self) -> String MetadataError! {
+        length :: &self.u32()
+        if length > MAX_STRING_BYTES -> return Err(MetadataError.Malformed{why: "string too long"})
+        end :: cli_schema_size_add(self.at, length) ?? return Err(MetadataError.Malformed{why: "length overflow"})
+        if end > self.bytes.len() -> return Err(MetadataError.Malformed{why: "truncated string"})
+        bytes :: self.bytes[self.at..<end]
+        self.at = end
+        Ok(String.from_bytes(bytes) ?? return Err(MetadataError.Malformed{why: "string is not UTF-8"}))
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:1635
+    fn optional_string(&self) -> String? MetadataError! {
+        if &self.byte() == {
+            U8{0} -> Ok(None)
+            U8{1} -> Ok(Val(&self.string()))
+            else -> Err(MetadataError.Malformed{why: "invalid optional string bit"})
+        }
+    }
+    // Rust: crates/jet-foundation/src/CLISchema.rs:1642
+    fn done(self) -> Bool Never! { self.at == self.bytes.len() }
+}
+// Selected execution-target usize arithmetic, not the inspected file's width.
+// GATE #4483: core.sys.usize_max.
+fn cli_schema_size_add(left: Int, right: Int) -> Int? Never! {
+    maximum :: Int.from_u64(cli_metadata_target.usize_max())
+    if left < 0 || right < 0 || right > maximum || left > maximum - right -> None else -> Val(left + right)
+}
+fn cli_schema_size_mul(left: Int, right: Int) -> Int? Never! {
+    maximum :: Int.from_u64(cli_metadata_target.usize_max())
+    if left < 0 || right < 0 || left > maximum || right > maximum -> return None
+    if right != 0 && left > maximum /% right -> None else -> Val(left * right)
+}
+fn cli_schema_bytes_start(bytes: View<U8>, prefix: [U8]) -> Bool Never! {
+    if bytes.len() < prefix.len() -> return false
+    loop index in 0..<prefix.len() { if bytes[index] != prefix[index] -> return false }
+    true
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1647
+fn bounds(bytes: View<U8>, at: Int, length: Int) -> View<U8> MetadataError! from bytes {
+    end :: cli_schema_size_add(at, length) ?? return Err(MetadataError.Malformed{why: "section range overflow"})
+    if end > bytes.len() -> return Err(MetadataError.Malformed{why: "section outside file"})
+    Ok(bytes[at..<end])
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1656
+fn read_num(bytes: View<U8>, at: Int, width: Int, little: Bool) -> U64 MetadataError! {
+    value :: bounds(bytes, at, width)
+    if width != 2 && width != 4 && width != 8 -> return Err(MetadataError.Malformed{why: "invalid integer width"})
+    number := U64{0}
+    loop index in 0..<width {
+        shift :: if little -> index * 8 else -> (width - index - 1) * 8
+        number = number | (U64.from_u8(value[index]) << shift)
+    }
+    Ok(number)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1669
+fn usize_num(value: U64) -> Int MetadataError! {
+    if value > cli_metadata_target.usize_max() -> return Err(MetadataError.Malformed{why: "file offset overflow"})
+    Ok(Int.from_u64(value))
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1673
+fn c_name(bytes: View<U8>) -> String MetadataError! {
+    end := bytes.len()
+    loop index in 0..<bytes.len() { if bytes[index] == U8{0} { end = index; break } }
+    // GATE #4494: validated borrowed UTF-8, no section-name allocation/copy.
+    Ok(std.str.from_utf8(bytes[0..<end]) ?? return Err(MetadataError.Malformed{why: "section name is not UTF-8"}))
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1682
+fn elf_sections(bytes: View<U8>) -> [View<U8>] MetadataError! from bytes {
+    if bytes.len() <= 4 -> return Err(MetadataError.Malformed{why: "truncated ELF header"})
+    class :: bytes[4]
+    if bytes.len() <= 5 -> return Err(MetadataError.Malformed{why: "invalid ELF byte order"})
+    little :: if bytes[5] == { U8{1} -> true U8{2} -> false else -> return Err(MetadataError.Malformed{why: "invalid ELF byte order"}) }
+    (header, shoff_at, shentsize_at, shnum_at, shstr_at, shoff_width, sh_offset_at, sh_size_at, value_width) :: if class == {
+        U8{1} -> (52, 32, 46, 48, 50, 4, 16, 20, 4)
+        U8{2} -> (64, 40, 58, 60, 62, 8, 24, 32, 8)
+        else -> return Err(MetadataError.Malformed{why: "unsupported ELF class"})
+    }
+    _ :: bounds(bytes, 0, header)
+    shoff :: usize_num(read_num(bytes, shoff_at, shoff_width, little))
+    entsize :: usize_num(read_num(bytes, shentsize_at, 2, little))
+    count :: usize_num(read_num(bytes, shnum_at, 2, little))
+    names_index :: usize_num(read_num(bytes, shstr_at, 2, little))
+    if count == 0 || entsize < sh_size_at + value_width || names_index >= count -> return Err(MetadataError.Malformed{why: "invalid ELF section table"})
+    table_length :: cli_schema_size_mul(entsize, count) ?? return Err(MetadataError.Malformed{why: "ELF section count overflow"})
+    _ :: bounds(bytes, shoff, table_length)
+    (_, names_at, names_len) :: cli_schema_elf_section(bytes, names_index, shoff, entsize, sh_offset_at, sh_size_at, value_width, little)
+    names :: bounds(bytes, names_at, names_len)
+    found := [View<U8>]{}
+    loop index in 0..<count {
+        (name_at, offset, size) :: cli_schema_elf_section(bytes, index, shoff, entsize, sh_offset_at, sh_size_at, value_width, little)
+        if name_at > names.len() -> return Err(MetadataError.Malformed{why: "ELF section name outside string table"})
+        if c_name(names[name_at..<names.len()]) == ELF_SECTION -> &found.push(bounds(bytes, offset, size))
+    }
+    Ok(found)
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1721
+fn cli_schema_elf_section(bytes: View<U8>, index: Int, shoff: Int, entsize: Int, sh_offset_at: Int, sh_size_at: Int, value_width: Int, little: Bool) -> (Int, Int, Int) MetadataError! {
+    relative :: cli_schema_size_mul(index, entsize) ?? return Err(MetadataError.Malformed{why: "ELF section offset overflow"})
+    base :: cli_schema_size_add(shoff, relative) ?? return Err(MetadataError.Malformed{why: "ELF section offset overflow"})
+    name :: usize_num(read_num(bytes, base, 4, little))
+    offset :: usize_num(read_num(bytes, base + sh_offset_at, value_width, little))
+    size :: usize_num(read_num(bytes, base + sh_size_at, value_width, little))
+    Ok((name, offset, size))
+}
+// Rust: crates/jet-foundation/src/CLISchema.rs:1749
+fn pe_sections(bytes: View<U8>) -> [View<U8>] MetadataError! from bytes {
+    pe :: usize_num(read_num(bytes, 0x3c, 4, true))
+    signature :: bounds(bytes, pe, 4)
+    if !cli_schema_bytes_start(signature, [U8]{80, 69, 0, 0}) -> return Err(MetadataError.Malformed{why: "bad PE signature"})
+    count :: usize_num(read_num(bytes, pe + 6, 2, true))
+    optional :: usize_num(read_num(bytes, pe + 20, 2, true))
+    base_table :: cli_schema_size_add(pe, 24) ?? return Err(MetadataError.Malformed{why: "PE section table overflow"})
+    table :: cli_schema_size_add(base_table, optional) ?? return Err(MetadataError.Malformed{why: "PE section table overflow"})
+    table_length :: cli_schema_size_mul(count, 40) ?? return Err(MetadataError.Malformed{why: "PE section count overflow"})
+    _ :: bounds(bytes, table, table_length)
+    found := [View<U8>]{}
+    loop index in 0..<count {
+        base :: table + index * 40
+        if c_name(bounds(bytes, base, 8)) != PE_SECTION -> next
+        size :: usize_num(read_num(bytes, base + 16, 4, true))
+        offset :: usize_num(read_num(bytes, base + 20, 4, true))
+        raw :: bounds(bytes, offset, size)
+        if raw.len() < 14 -> return Err(MetadataError.Malformed{why: "truncated PE metadata section"})
+        payload_len :: Int.from_u64(read_num(raw, 10, 4, true))
+        record_len :: cli_schema_size_add(46, payload_len) ?? return Err(MetadataError.Malformed{why: "record length overflow"})
+        record :: bounds(raw, 0, record_len)
+        trailing :: raw[record_len..<raw.len()]
+        if cli_schema_bytes_start(trailing, RECORD_MAGIC) -> return Err(MetadataError.Duplicate)
+        loop byte in trailing { if byte != U8{0} -> return Err(MetadataError.Malformed{why: "nonzero bytes after PE metadata record"}) }
+        &found.push(record)
+    }
+    Ok(found)
+}
+// Mach-O/Wasm and field/marker projection functions continue in CLISchema02.jet
+// (Rust CLISchema.rs:1798-2649), the same canonical owner module, not shims.
+// #4409 does not apply: the complete assigned window reads supplied bytes only.

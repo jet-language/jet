@@ -1,0 +1,915 @@
+// PORT-PENDING 0090 crates-jet-foundation-src-recordcodec: crates/jet-foundation/src/RecordCodec.rs:1-911
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! The one std-only binary record codec for compiler records (#2517).
+//RS //!
+//RS //! Every persisted compiler record (package checks, interfaces, typed
+//RS //! diagnostics, item graphs, program records, and the invocation Receipt)
+//RS //! uses this byte format. I6 rules out serde; the layout follows Go's Unified
+//RS //! IR shape so a reader can decode one element without decoding the rest.
+//RS //!
+//RS //! Layout (all integers are unsigned LEB128 `uvarint`s in their minimal form):
+//RS //!
+//RS //! ```text
+//RS //! "JETR"                         magic, 4 bytes
+//RS //! uvarint format                 RECORD_FORMAT (1)
+//RS //! str schema                     for example "jet.iface/v1"
+//RS //! uvarint n, n × str             string table, first-use order
+//RS //! uvarint sections               section count
+//RS //! per section, ascending tag:
+//RS //!   uvarint tag
+//RS //!   uvarint elements
+//RS //!   elements × uvarint length    element index
+//RS //!   element bytes, concatenated
+//RS //! 32 bytes                       SHA-256 of every preceding byte
+//RS //! ```
+//RS //!
+//RS //! `str` is a uvarint byte length followed by UTF-8. The string table is
+//RS //! interned by walking sections in tag order, elements in order, and each
+//RS //! value depth-first (a map key before its value). Values are self-describing:
+//RS //!
+//RS //! | tag | value |
+//RS //! |---|---|
+//RS //! | 0 | null |
+//RS //! | 1 | false |
+//RS //! | 2 | true |
+//RS //! | 3 | integer, zigzag-encoded `i64` as a uvarint |
+//RS //! | 4 | string, uvarint string-table index |
+//RS //! | 5 | bytes, uvarint length and raw bytes |
+//RS //! | 6 | list, uvarint count and values |
+//RS //! | 7 | map, uvarint count and (uvarint key index, value) pairs sorted by key bytes |
+//RS //! | 8 | digest, 32 raw bytes |
+//RS //!
+//RS //! The encoding is canonical: one value has exactly one byte form. The
+//RS //! decoder rejects anything else (overlong varints, unsorted or duplicate map
+//RS //! keys or section tags, out-of-range string indexes, trailing bytes, and a
+//RS //! checksum mismatch). A caller treats every decode error as a cache miss.
+//RS //! JetFoundation implements the same bytes; a conformance test compares them.
+//RS 
+//RS use std::collections::{BTreeMap, HashMap};
+//RS use std::fmt;
+//RS 
+//RS use crate::SHA256::sha256;
+//RS 
+//RS pub const RECORD_MAGIC: [u8; 4] = *b"JETR";
+//RS pub const RECORD_FORMAT: u64 = 1;
+//RS const CHECKSUM_BYTES: usize = 32;
+//RS /// Nesting bound so a hostile record cannot exhaust the decoder's stack.
+//RS const MAX_DEPTH: usize = 128;
+//RS 
+//RS const TAG_NULL: u8 = 0;
+//RS const TAG_FALSE: u8 = 1;
+//RS const TAG_TRUE: u8 = 2;
+//RS const TAG_INT: u8 = 3;
+//RS const TAG_STR: u8 = 4;
+//RS const TAG_BYTES: u8 = 5;
+//RS const TAG_LIST: u8 = 6;
+//RS const TAG_MAP: u8 = 7;
+//RS const TAG_DIGEST: u8 = 8;
+//RS 
+//RS /// One self-describing record value.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum RecordValue {
+//RS     Null,
+//RS     Bool(bool),
+//RS     Int(i64),
+//RS     Str(String),
+//RS     Bytes(Vec<u8>),
+//RS     List(Vec<RecordValue>),
+//RS     Map(BTreeMap<String, RecordValue>),
+//RS     Digest([u8; 32]),
+//RS }
+//RS 
+//RS impl RecordValue {
+//RS     pub fn str(value: impl Into<String>) -> Self {
+//RS         Self::Str(value.into())
+//RS     }
+//RS 
+//RS     pub fn optional_str(value: Option<&str>) -> Self {
+//RS         value.map_or(Self::Null, Self::str)
+//RS     }
+//RS 
+//RS     pub fn list_of_str<'a>(values: impl IntoIterator<Item = &'a String>) -> Self {
+//RS         Self::List(values.into_iter().map(|value| Self::Str(value.clone())).collect())
+//RS     }
+//RS 
+//RS     pub fn is_null(&self) -> bool {
+//RS         matches!(self, Self::Null)
+//RS     }
+//RS 
+//RS     pub fn as_str(&self) -> Result<&str, RecordError> {
+//RS         match self {
+//RS             Self::Str(value) => Ok(value),
+//RS             other => Err(RecordError::shape("string", other)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn as_optional_str(&self) -> Result<Option<&str>, RecordError> {
+//RS         match self {
+//RS             Self::Null => Ok(None),
+//RS             other => other.as_str().map(Some),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn as_int(&self) -> Result<i64, RecordError> {
+//RS         match self {
+//RS             Self::Int(value) => Ok(*value),
+//RS             other => Err(RecordError::shape("integer", other)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn as_usize(&self) -> Result<usize, RecordError> {
+//RS         usize::try_from(self.as_int()?)
+//RS             .map_err(|_| RecordError::Malformed("negative or oversized count".to_string()))
+//RS     }
+//RS 
+//RS     pub fn as_bool(&self) -> Result<bool, RecordError> {
+//RS         match self {
+//RS             Self::Bool(value) => Ok(*value),
+//RS             other => Err(RecordError::shape("boolean", other)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn as_list(&self) -> Result<&[RecordValue], RecordError> {
+//RS         match self {
+//RS             Self::List(values) => Ok(values),
+//RS             other => Err(RecordError::shape("list", other)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn as_map(&self) -> Result<&BTreeMap<String, RecordValue>, RecordError> {
+//RS         match self {
+//RS             Self::Map(fields) => Ok(fields),
+//RS             other => Err(RecordError::shape("map", other)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn as_digest(&self) -> Result<[u8; 32], RecordError> {
+//RS         match self {
+//RS             Self::Digest(digest) => Ok(*digest),
+//RS             other => Err(RecordError::shape("digest", other)),
+//RS         }
+//RS     }
+//RS 
+//RS     /// A required map field.
+//RS     pub fn field(&self, name: &str) -> Result<&RecordValue, RecordError> {
+//RS         self.as_map()?
+//RS             .get(name)
+//RS             .ok_or_else(|| RecordError::Malformed(format!("field `{name}` is missing")))
+//RS     }
+//RS 
+//RS     pub fn str_list(&self) -> Result<Vec<String>, RecordError> {
+//RS         self.as_list()?
+//RS             .iter()
+//RS             .map(|value| value.as_str().map(str::to_string))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     fn kind(&self) -> &'static str {
+//RS         match self {
+//RS             Self::Null => "null",
+//RS             Self::Bool(_) => "boolean",
+//RS             Self::Int(_) => "integer",
+//RS             Self::Str(_) => "string",
+//RS             Self::Bytes(_) => "bytes",
+//RS             Self::List(_) => "list",
+//RS             Self::Map(_) => "map",
+//RS             Self::Digest(_) => "digest",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Build a map value from `(name, value)` pairs.
+//RS pub fn record_map<const N: usize>(fields: [(&str, RecordValue); N]) -> RecordValue {
+//RS     RecordValue::Map(
+//RS         fields
+//RS             .into_iter()
+//RS             .map(|(name, value)| (name.to_string(), value))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// One tagged section: an indexed list of elements.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct RecordSection {
+//RS     pub tag: u64,
+//RS     pub elements: Vec<RecordValue>,
+//RS }
+//RS 
+//RS impl RecordSection {
+//RS     pub fn new(tag: u64, elements: Vec<RecordValue>) -> Self {
+//RS         Self { tag, elements }
+//RS     }
+//RS }
+//RS 
+//RS /// A fully decoded record.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct Record {
+//RS     pub schema: String,
+//RS     pub sections: Vec<RecordSection>,
+//RS     /// The trailing SHA-256; it is the record's content digest.
+//RS     pub digest: [u8; 32],
+//RS }
+//RS 
+//RS impl Record {
+//RS     pub fn section(&self, tag: u64) -> Option<&RecordSection> {
+//RS         self.sections.iter().find(|section| section.tag == tag)
+//RS     }
+//RS 
+//RS     /// The elements of a section, or an error naming the missing tag.
+//RS     pub fn elements(&self, tag: u64) -> Result<&[RecordValue], RecordError> {
+//RS         self.section(tag)
+//RS             .map(|section| section.elements.as_slice())
+//RS             .ok_or(RecordError::MissingSection(tag))
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum RecordError {
+//RS     Truncated,
+//RS     BadMagic,
+//RS     UnsupportedFormat(u64),
+//RS     Checksum,
+//RS     DuplicateSection(u64),
+//RS     MissingSection(u64),
+//RS     Schema { expected: String, found: String },
+//RS     Malformed(String),
+//RS }
+//RS 
+//RS impl RecordError {
+//RS     fn shape(expected: &str, found: &RecordValue) -> Self {
+//RS         Self::Malformed(format!("expected {expected}, found {}", found.kind()))
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Display for RecordError {
+//RS     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::Truncated => f.write_str("record is truncated"),
+//RS             Self::BadMagic => f.write_str("record magic is not `JETR`"),
+//RS             Self::UnsupportedFormat(format) => write!(f, "record format {format} is not supported"),
+//RS             Self::Checksum => f.write_str("record checksum does not match its bytes"),
+//RS             Self::DuplicateSection(tag) => write!(f, "record section {tag} is duplicated or out of order"),
+//RS             Self::MissingSection(tag) => write!(f, "record section {tag} is missing"),
+//RS             Self::Schema { expected, found } => {
+//RS                 write!(f, "record schema is `{found}`, expected `{expected}`")
+//RS             }
+//RS             Self::Malformed(reason) => write!(f, "record is malformed: {reason}"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for RecordError {}
+//RS 
+//RS // ---------------------------------------------------------------- encoding
+//RS 
+//RS fn put_uvarint(out: &mut Vec<u8>, mut value: u64) {
+//RS     loop {
+//RS         let byte = (value & 0x7f) as u8;
+//RS         value >>= 7;
+//RS         if value == 0 {
+//RS             out.push(byte);
+//RS             return;
+//RS         }
+//RS         out.push(byte | 0x80);
+//RS     }
+//RS }
+//RS 
+//RS fn zigzag(value: i64) -> u64 {
+//RS     ((value << 1) ^ (value >> 63)) as u64
+//RS }
+//RS 
+//RS fn unzigzag(value: u64) -> i64 {
+//RS     ((value >> 1) as i64) ^ -((value & 1) as i64)
+//RS }
+//RS 
+//RS fn put_str(out: &mut Vec<u8>, value: &str) {
+//RS     put_uvarint(out, value.len() as u64);
+//RS     out.extend_from_slice(value.as_bytes());
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct StringTable<'a> {
+//RS     order: Vec<&'a str>,
+//RS     index: HashMap<&'a str, u64>,
+//RS }
+//RS 
+//RS impl<'a> StringTable<'a> {
+//RS     fn intern(&mut self, value: &'a str) {
+//RS         if !self.index.contains_key(value) {
+//RS             self.index.insert(value, self.order.len() as u64);
+//RS             self.order.push(value);
+//RS         }
+//RS     }
+//RS 
+//RS     fn intern_value(&mut self, value: &'a RecordValue) {
+//RS         match value {
+//RS             RecordValue::Str(text) => self.intern(text),
+//RS             RecordValue::List(values) => values.iter().for_each(|value| self.intern_value(value)),
+//RS             RecordValue::Map(fields) => {
+//RS                 for (name, value) in fields {
+//RS                     self.intern(name);
+//RS                     self.intern_value(value);
+//RS                 }
+//RS             }
+//RS             RecordValue::Null
+//RS             | RecordValue::Bool(_)
+//RS             | RecordValue::Int(_)
+//RS             | RecordValue::Bytes(_)
+//RS             | RecordValue::Digest(_) => {}
+//RS         }
+//RS     }
+//RS 
+//RS     fn put_ref(&self, out: &mut Vec<u8>, value: &str) {
+//RS         put_uvarint(out, self.index[value]);
+//RS     }
+//RS 
+//RS     fn put_value(&self, out: &mut Vec<u8>, value: &RecordValue) {
+//RS         match value {
+//RS             RecordValue::Null => out.push(TAG_NULL),
+//RS             RecordValue::Bool(false) => out.push(TAG_FALSE),
+//RS             RecordValue::Bool(true) => out.push(TAG_TRUE),
+//RS             RecordValue::Int(number) => {
+//RS                 out.push(TAG_INT);
+//RS                 put_uvarint(out, zigzag(*number));
+//RS             }
+//RS             RecordValue::Str(text) => {
+//RS                 out.push(TAG_STR);
+//RS                 self.put_ref(out, text);
+//RS             }
+//RS             RecordValue::Bytes(bytes) => {
+//RS                 out.push(TAG_BYTES);
+//RS                 put_uvarint(out, bytes.len() as u64);
+//RS                 out.extend_from_slice(bytes);
+//RS             }
+//RS             RecordValue::List(values) => {
+//RS                 out.push(TAG_LIST);
+//RS                 put_uvarint(out, values.len() as u64);
+//RS                 values.iter().for_each(|value| self.put_value(out, value));
+//RS             }
+//RS             RecordValue::Map(fields) => {
+//RS                 out.push(TAG_MAP);
+//RS                 put_uvarint(out, fields.len() as u64);
+//RS                 for (name, value) in fields {
+//RS                     self.put_ref(out, name);
+//RS                     self.put_value(out, value);
+//RS                 }
+//RS             }
+//RS             RecordValue::Digest(digest) => {
+//RS                 out.push(TAG_DIGEST);
+//RS                 out.extend_from_slice(digest);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Encode a record. Sections may be passed in any order; they are written in
+//RS /// ascending tag order. A repeated tag is an error.
+//RS pub fn encode_record(schema: &str, sections: &[RecordSection]) -> Result<Vec<u8>, RecordError> {
+//RS     let mut ordered = sections.iter().collect::<Vec<_>>();
+//RS     ordered.sort_by_key(|section| section.tag);
+//RS     for pair in ordered.windows(2) {
+//RS         if pair[0].tag == pair[1].tag {
+//RS             return Err(RecordError::DuplicateSection(pair[0].tag));
+//RS         }
+//RS     }
+//RS     let mut table = StringTable::default();
+//RS     for section in &ordered {
+//RS         section.elements.iter().for_each(|value| table.intern_value(value));
+//RS     }
+//RS     let mut out = Vec::new();
+//RS     out.extend_from_slice(&RECORD_MAGIC);
+//RS     put_uvarint(&mut out, RECORD_FORMAT);
+//RS     put_str(&mut out, schema);
+//RS     put_uvarint(&mut out, table.order.len() as u64);
+//RS     for text in &table.order {
+//RS         put_str(&mut out, text);
+//RS     }
+//RS     put_uvarint(&mut out, ordered.len() as u64);
+//RS     let mut element = Vec::new();
+//RS     for section in ordered {
+//RS         put_uvarint(&mut out, section.tag);
+//RS         put_uvarint(&mut out, section.elements.len() as u64);
+//RS         let mut body = Vec::new();
+//RS         for value in &section.elements {
+//RS             element.clear();
+//RS             table.put_value(&mut element, value);
+//RS             put_uvarint(&mut out, element.len() as u64);
+//RS             body.extend_from_slice(&element);
+//RS         }
+//RS         out.extend_from_slice(&body);
+//RS     }
+//RS     let checksum = sha256(&out);
+//RS     out.extend_from_slice(&checksum);
+//RS     Ok(out)
+//RS }
+//RS 
+//RS /// The content digest a record would have, without keeping the bytes.
+//RS pub fn record_digest(schema: &str, sections: &[RecordSection]) -> Result<[u8; 32], RecordError> {
+//RS     let bytes = encode_record(schema, sections)?;
+//RS     let mut digest = [0u8; 32];
+//RS     digest.copy_from_slice(&bytes[bytes.len() - CHECKSUM_BYTES..]);
+//RS     Ok(digest)
+//RS }
+//RS 
+//RS // ---------------------------------------------------------------- decoding
+//RS 
+//RS struct Cursor<'a> {
+//RS     bytes: &'a [u8],
+//RS     at: usize,
+//RS }
+//RS 
+//RS impl<'a> Cursor<'a> {
+//RS     fn new(bytes: &'a [u8]) -> Self {
+//RS         Self { bytes, at: 0 }
+//RS     }
+//RS 
+//RS     fn take(&mut self, len: usize) -> Result<&'a [u8], RecordError> {
+//RS         let end = self.at.checked_add(len).ok_or(RecordError::Truncated)?;
+//RS         let slice = self.bytes.get(self.at..end).ok_or(RecordError::Truncated)?;
+//RS         self.at = end;
+//RS         Ok(slice)
+//RS     }
+//RS 
+//RS     fn byte(&mut self) -> Result<u8, RecordError> {
+//RS         Ok(self.take(1)?[0])
+//RS     }
+//RS 
+//RS     fn uvarint(&mut self) -> Result<u64, RecordError> {
+//RS         let mut value = 0u64;
+//RS         let mut shift = 0u32;
+//RS         loop {
+//RS             let byte = self.byte()?;
+//RS             let low = u64::from(byte & 0x7f);
+//RS             if shift == 63 && low > 1 {
+//RS                 return Err(RecordError::Malformed("varint overflows u64".to_string()));
+//RS             }
+//RS             value |= low << shift;
+//RS             if byte & 0x80 == 0 {
+//RS                 if byte == 0 && shift > 0 {
+//RS                     return Err(RecordError::Malformed("varint is not minimal".to_string()));
+//RS                 }
+//RS                 return Ok(value);
+//RS             }
+//RS             shift += 7;
+//RS             if shift > 63 {
+//RS                 return Err(RecordError::Malformed("varint overflows u64".to_string()));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn len(&mut self) -> Result<usize, RecordError> {
+//RS         let value = self.uvarint()?;
+//RS         let len = usize::try_from(value).map_err(|_| RecordError::Truncated)?;
+//RS         // Every counted thing occupies at least one byte, so a count larger
+//RS         // than the remaining input is truncation, never an allocation request.
+//RS         if len > self.bytes.len() - self.at {
+//RS             return Err(RecordError::Truncated);
+//RS         }
+//RS         Ok(len)
+//RS     }
+//RS 
+//RS     fn str(&mut self) -> Result<&'a str, RecordError> {
+//RS         let len = self.len()?;
+//RS         std::str::from_utf8(self.take(len)?)
+//RS             .map_err(|_| RecordError::Malformed("string is not UTF-8".to_string()))
+//RS     }
+//RS 
+//RS     fn done(&self) -> bool {
+//RS         self.at == self.bytes.len()
+//RS     }
+//RS }
+//RS 
+//RS /// A verified record whose elements decode on demand.
+//RS pub struct RecordReader<'a> {
+//RS     schema: &'a str,
+//RS     strings: Vec<&'a str>,
+//RS     /// `(tag, element slices)` in ascending tag order.
+//RS     sections: Vec<(u64, Vec<&'a [u8]>)>,
+//RS     digest: [u8; 32],
+//RS }
+//RS 
+//RS impl<'a> RecordReader<'a> {
+//RS     /// Verify the checksum and framing and index every section. Element
+//RS     /// payloads are not decoded until asked for.
+//RS     pub fn open(bytes: &'a [u8]) -> Result<Self, RecordError> {
+//RS         if bytes.len() < RECORD_MAGIC.len() + CHECKSUM_BYTES {
+//RS             return Err(RecordError::Truncated);
+//RS         }
+//RS         let (body, checksum) = bytes.split_at(bytes.len() - CHECKSUM_BYTES);
+//RS         if body[..RECORD_MAGIC.len()] != RECORD_MAGIC {
+//RS             return Err(RecordError::BadMagic);
+//RS         }
+//RS         if sha256(body)[..] != checksum[..] {
+//RS             return Err(RecordError::Checksum);
+//RS         }
+//RS         let mut digest = [0u8; 32];
+//RS         digest.copy_from_slice(checksum);
+//RS         let mut cursor = Cursor::new(body);
+//RS         cursor.take(RECORD_MAGIC.len())?;
+//RS         let format = cursor.uvarint()?;
+//RS         if format != RECORD_FORMAT {
+//RS             return Err(RecordError::UnsupportedFormat(format));
+//RS         }
+//RS         let schema = cursor.str()?;
+//RS         let count = cursor.len()?;
+//RS         let mut strings = Vec::with_capacity(count);
+//RS         for _ in 0..count {
+//RS             strings.push(cursor.str()?);
+//RS         }
+//RS         let section_count = cursor.len()?;
+//RS         let mut sections: Vec<(u64, Vec<&'a [u8]>)> = Vec::with_capacity(section_count);
+//RS         for _ in 0..section_count {
+//RS             let tag = cursor.uvarint()?;
+//RS             if sections.last().is_some_and(|(previous, _)| *previous >= tag) {
+//RS                 return Err(RecordError::DuplicateSection(tag));
+//RS             }
+//RS             let elements = cursor.len()?;
+//RS             let mut lengths = Vec::with_capacity(elements);
+//RS             for _ in 0..elements {
+//RS                 lengths.push(cursor.len()?);
+//RS             }
+//RS             let mut slices = Vec::with_capacity(elements);
+//RS             for len in lengths {
+//RS                 slices.push(cursor.take(len)?);
+//RS             }
+//RS             sections.push((tag, slices));
+//RS         }
+//RS         if !cursor.done() {
+//RS             return Err(RecordError::Malformed("trailing bytes before the checksum".to_string()));
+//RS         }
+//RS         Ok(Self {
+//RS             schema,
+//RS             strings,
+//RS             sections,
+//RS             digest,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Open and require `schema`.
+//RS     pub fn open_schema(bytes: &'a [u8], schema: &str) -> Result<Self, RecordError> {
+//RS         let reader = Self::open(bytes)?;
+//RS         if reader.schema != schema {
+//RS             return Err(RecordError::Schema {
+//RS                 expected: schema.to_string(),
+//RS                 found: reader.schema.to_string(),
+//RS             });
+//RS         }
+//RS         Ok(reader)
+//RS     }
+//RS 
+//RS     pub fn schema(&self) -> &'a str {
+//RS         self.schema
+//RS     }
+//RS 
+//RS     pub fn digest(&self) -> [u8; 32] {
+//RS         self.digest
+//RS     }
+//RS 
+//RS     fn slices(&self, tag: u64) -> Option<&[&'a [u8]]> {
+//RS         self.sections
+//RS             .binary_search_by_key(&tag, |(section, _)| *section)
+//RS             .ok()
+//RS             .map(|index| self.sections[index].1.as_slice())
+//RS     }
+//RS 
+//RS     /// Number of elements in a section; `None` when the section is absent.
+//RS     pub fn element_count(&self, tag: u64) -> Option<usize> {
+//RS         self.slices(tag).map(<[_]>::len)
+//RS     }
+//RS 
+//RS     /// Decode one element of one section.
+//RS     pub fn element(&self, tag: u64, index: usize) -> Result<RecordValue, RecordError> {
+//RS         let slices = self.slices(tag).ok_or(RecordError::MissingSection(tag))?;
+//RS         let bytes = slices
+//RS             .get(index)
+//RS             .ok_or_else(|| RecordError::Malformed(format!("section {tag} has no element {index}")))?;
+//RS         let mut cursor = Cursor::new(bytes);
+//RS         let value = self.value(&mut cursor, 0)?;
+//RS         if !cursor.done() {
+//RS             return Err(RecordError::Malformed("element has trailing bytes".to_string()));
+//RS         }
+//RS         Ok(value)
+//RS     }
+//RS 
+//RS     /// Decode every element of one section.
+//RS     pub fn elements(&self, tag: u64) -> Result<Vec<RecordValue>, RecordError> {
+//RS         let count = self.element_count(tag).ok_or(RecordError::MissingSection(tag))?;
+//RS         (0..count).map(|index| self.element(tag, index)).collect()
+//RS     }
+//RS 
+//RS     /// Decode the whole record.
+//RS     pub fn decode(&self) -> Result<Record, RecordError> {
+//RS         let sections = self
+//RS             .sections
+//RS             .iter()
+//RS             .map(|(tag, _)| {
+//RS                 Ok(RecordSection {
+//RS                     tag: *tag,
+//RS                     elements: self.elements(*tag)?,
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, RecordError>>()?;
+//RS         Ok(Record {
+//RS             schema: self.schema.to_string(),
+//RS             sections,
+//RS             digest: self.digest,
+//RS         })
+//RS     }
+//RS 
+//RS     fn string(&self, cursor: &mut Cursor<'_>) -> Result<&'a str, RecordError> {
+//RS         let index = cursor.uvarint()?;
+//RS         usize::try_from(index)
+//RS             .ok()
+//RS             .and_then(|index| self.strings.get(index).copied())
+//RS             .ok_or_else(|| RecordError::Malformed(format!("string index {index} is out of range")))
+//RS     }
+//RS 
+//RS     fn value(&self, cursor: &mut Cursor<'_>, depth: usize) -> Result<RecordValue, RecordError> {
+//RS         if depth > MAX_DEPTH {
+//RS             return Err(RecordError::Malformed("value nesting is too deep".to_string()));
+//RS         }
+//RS         Ok(match cursor.byte()? {
+//RS             TAG_NULL => RecordValue::Null,
+//RS             TAG_FALSE => RecordValue::Bool(false),
+//RS             TAG_TRUE => RecordValue::Bool(true),
+//RS             TAG_INT => RecordValue::Int(unzigzag(cursor.uvarint()?)),
+//RS             TAG_STR => RecordValue::Str(self.string(cursor)?.to_string()),
+//RS             TAG_BYTES => {
+//RS                 let len = cursor.len()?;
+//RS                 RecordValue::Bytes(cursor.take(len)?.to_vec())
+//RS             }
+//RS             TAG_LIST => {
+//RS                 let count = cursor.len()?;
+//RS                 let mut values = Vec::with_capacity(count);
+//RS                 for _ in 0..count {
+//RS                     values.push(self.value(cursor, depth + 1)?);
+//RS                 }
+//RS                 RecordValue::List(values)
+//RS             }
+//RS             TAG_MAP => {
+//RS                 let count = cursor.len()?;
+//RS                 let mut fields = BTreeMap::new();
+//RS                 let mut previous: Option<&str> = None;
+//RS                 for _ in 0..count {
+//RS                     let name = self.string(cursor)?;
+//RS                     if previous.is_some_and(|previous| previous.as_bytes() >= name.as_bytes()) {
+//RS                         return Err(RecordError::Malformed(format!(
+//RS                             "map key `{name}` is duplicated or out of order"
+//RS                         )));
+//RS                     }
+//RS                     previous = Some(name);
+//RS                     fields.insert(name.to_string(), self.value(cursor, depth + 1)?);
+//RS                 }
+//RS                 RecordValue::Map(fields)
+//RS             }
+//RS             TAG_DIGEST => {
+//RS                 let mut digest = [0u8; 32];
+//RS                 digest.copy_from_slice(cursor.take(32)?);
+//RS                 RecordValue::Digest(digest)
+//RS             }
+//RS             other => return Err(RecordError::Malformed(format!("unknown value tag {other}"))),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// Decode a whole record.
+//RS pub fn decode_record(bytes: &[u8]) -> Result<Record, RecordError> {
+//RS     RecordReader::open(bytes)?.decode()
+//RS }
+//RS 
+//RS /// Lowercase hex of a digest.
+//RS pub fn digest_hex(digest: &[u8; 32]) -> String {
+//RS     use std::fmt::Write;
+//RS     digest.iter().fold(String::with_capacity(64), |mut text, byte| {
+//RS         let _ = write!(text, "{byte:02x}");
+//RS         text
+//RS     })
+//RS }
+//RS 
+//RS /// Parse a 64-character lowercase hex digest.
+//RS pub fn parse_digest_hex(text: &str) -> Option<[u8; 32]> {
+//RS     if text.len() != 64 || !text.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) {
+//RS         return None;
+//RS     }
+//RS     let mut digest = [0u8; 32];
+//RS     for (index, byte) in digest.iter_mut().enumerate() {
+//RS         *byte = u8::from_str_radix(&text[index * 2..index * 2 + 2], 16).ok()?;
+//RS     }
+//RS     Some(digest)
+//RS }
+//RS 
+//RS /// Render any record as JSON for tests and debugging. This is not a user
+//RS /// surface: a record view command needs its own ballot.
+//RS pub fn record_json(bytes: &[u8]) -> Result<String, RecordError> {
+//RS     let record = decode_record(bytes)?;
+//RS     let mut out = format!(
+//RS         "{{\"schema\":\"{}\",\"digest\":\"{}\",\"sections\":{{",
+//RS         crate::JSON::json_escape(&record.schema),
+//RS         digest_hex(&record.digest)
+//RS     );
+//RS     for (index, section) in record.sections.iter().enumerate() {
+//RS         if index > 0 {
+//RS             out.push(',');
+//RS         }
+//RS         out.push_str(&format!("\"{}\":[", section.tag));
+//RS         for (element, value) in section.elements.iter().enumerate() {
+//RS             if element > 0 {
+//RS                 out.push(',');
+//RS             }
+//RS             value_json(&mut out, value);
+//RS         }
+//RS         out.push(']');
+//RS     }
+//RS     out.push_str("}}");
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn value_json(out: &mut String, value: &RecordValue) {
+//RS     match value {
+//RS         RecordValue::Null => out.push_str("null"),
+//RS         RecordValue::Bool(flag) => out.push_str(if *flag { "true" } else { "false" }),
+//RS         RecordValue::Int(number) => out.push_str(&number.to_string()),
+//RS         RecordValue::Str(text) => {
+//RS             out.push('"');
+//RS             out.push_str(&crate::JSON::json_escape(text));
+//RS             out.push('"');
+//RS         }
+//RS         RecordValue::Bytes(bytes) => {
+//RS             out.push_str("{\"bytes\":\"");
+//RS             for byte in bytes {
+//RS                 out.push_str(&format!("{byte:02x}"));
+//RS             }
+//RS             out.push_str("\"}");
+//RS         }
+//RS         RecordValue::List(values) => {
+//RS             out.push('[');
+//RS             for (index, value) in values.iter().enumerate() {
+//RS                 if index > 0 {
+//RS                     out.push(',');
+//RS                 }
+//RS                 value_json(out, value);
+//RS             }
+//RS             out.push(']');
+//RS         }
+//RS         RecordValue::Map(fields) => {
+//RS             out.push('{');
+//RS             for (index, (name, value)) in fields.iter().enumerate() {
+//RS                 if index > 0 {
+//RS                     out.push(',');
+//RS                 }
+//RS                 out.push('"');
+//RS                 out.push_str(&crate::JSON::json_escape(name));
+//RS                 out.push_str("\":");
+//RS                 value_json(out, value);
+//RS             }
+//RS             out.push('}');
+//RS         }
+//RS         RecordValue::Digest(digest) => {
+//RS             out.push_str("{\"digest\":\"");
+//RS             out.push_str(&digest_hex(digest));
+//RS             out.push_str("\"}");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn sample() -> Vec<RecordSection> {
+//RS         vec![
+//RS             RecordSection::new(
+//RS                 7,
+//RS                 vec![
+//RS                     record_map([
+//RS                         ("name", RecordValue::str("core.text")),
+//RS                         ("count", RecordValue::Int(-3)),
+//RS                         ("digest", RecordValue::Digest([7; 32])),
+//RS                     ]),
+//RS                     RecordValue::List(vec![
+//RS                         RecordValue::Null,
+//RS                         RecordValue::Bool(true),
+//RS                         RecordValue::Bool(false),
+//RS                         RecordValue::Bytes(vec![0, 255, 16]),
+//RS                         RecordValue::Int(i64::MIN),
+//RS                         RecordValue::Int(i64::MAX),
+//RS                     ]),
+//RS                 ],
+//RS             ),
+//RS             RecordSection::new(1, vec![RecordValue::str("core.text"), RecordValue::str("é")]),
+//RS             RecordSection::new(3, Vec::new()),
+//RS         ]
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn record_codec_round_trips_every_value_kind() {
+//RS         let bytes = encode_record("jet.test/v1", &sample()).expect("encodes");
+//RS         let record = decode_record(&bytes).expect("decodes");
+//RS         assert_eq!(record.schema, "jet.test/v1");
+//RS         assert_eq!(record.sections.iter().map(|s| s.tag).collect::<Vec<_>>(), [1, 3, 7]);
+//RS         let mut expected = sample();
+//RS         expected.sort_by_key(|section| section.tag);
+//RS         assert_eq!(record.sections, expected);
+//RS         assert_eq!(encode_record("jet.test/v1", &record.sections).unwrap(), bytes);
+//RS         assert_eq!(record.digest, record_digest("jet.test/v1", &sample()).unwrap());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn record_codec_reads_one_element_lazily() {
+//RS         let bytes = encode_record("jet.test/v1", &sample()).unwrap();
+//RS         let reader = RecordReader::open_schema(&bytes, "jet.test/v1").unwrap();
+//RS         assert_eq!(reader.element_count(7), Some(2));
+//RS         assert_eq!(reader.element_count(2), None);
+//RS         assert_eq!(
+//RS             reader.element(7, 0).unwrap().field("name").unwrap().as_str().unwrap(),
+//RS             "core.text"
+//RS         );
+//RS         assert!(matches!(
+//RS             RecordReader::open_schema(&bytes, "jet.other/v1"),
+//RS             Err(RecordError::Schema { .. })
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn record_codec_bytes_are_pinned() {
+//RS         let bytes = encode_record(
+//RS             "s",
+//RS             &[RecordSection::new(
+//RS                 2,
+//RS                 vec![record_map([("k", RecordValue::Int(-1)), ("a", RecordValue::str("k"))])],
+//RS             )],
+//RS         )
+//RS         .unwrap();
+//RS         // magic, format 1, schema "s", strings ["a","k"] (map keys in byte
+//RS         // order, first use), one section tag 2 with one 8-byte element.
+//RS         let body = [
+//RS             b'J', b'E', b'T', b'R', 1, 1, b's', 2, 1, b'a', 1, b'k', 1, 2, 1, 8, TAG_MAP, 2, 0,
+//RS             TAG_STR, 1, 1, TAG_INT, 1,
+//RS         ];
+//RS         assert_eq!(&bytes[..bytes.len() - 32], &body);
+//RS         assert_eq!(&bytes[bytes.len() - 32..], &sha256(&body));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn record_codec_rejects_every_non_canonical_or_damaged_form() {
+//RS         let bytes = encode_record("jet.test/v1", &sample()).unwrap();
+//RS         let mut flipped = bytes.clone();
+//RS         flipped[10] ^= 1;
+//RS         assert_eq!(decode_record(&flipped), Err(RecordError::Checksum));
+//RS         assert_eq!(decode_record(&bytes[..bytes.len() - 1]), Err(RecordError::Checksum));
+//RS         assert_eq!(decode_record(b"JET"), Err(RecordError::Truncated));
+//RS         assert!(matches!(
+//RS             encode_record("x", &[RecordSection::new(1, vec![]), RecordSection::new(1, vec![])]),
+//RS             Err(RecordError::DuplicateSection(1))
+//RS         ));
+//RS         let reseal = |body: &[u8]| {
+//RS             let mut out = body.to_vec();
+//RS             out.extend_from_slice(&sha256(body));
+//RS             out
+//RS         };
+//RS         // Overlong varint for the format number.
+//RS         assert!(matches!(
+//RS             decode_record(&reseal(&[b'J', b'E', b'T', b'R', 0x81, 0x00, 0, 0, 0])),
+//RS             Err(RecordError::Malformed(_))
+//RS         ));
+//RS         // Unsupported format.
+//RS         assert_eq!(
+//RS             decode_record(&reseal(&[b'J', b'E', b'T', b'R', 2, 0, 0, 0])),
+//RS             Err(RecordError::UnsupportedFormat(2))
+//RS         );
+//RS         // Map keys out of order: strings ["k","a"], map {k, a}.
+//RS         let unsorted = reseal(&[
+//RS             b'J', b'E', b'T', b'R', 1, 1, b's', 2, 1, b'k', 1, b'a', 1, 2, 1, 6, TAG_MAP, 2, 0,
+//RS             TAG_NULL, 1, TAG_NULL,
+//RS         ]);
+//RS         assert!(matches!(decode_record(&unsorted), Err(RecordError::Malformed(_))));
+//RS         // Sections out of order.
+//RS         let sections = reseal(&[b'J', b'E', b'T', b'R', 1, 1, b's', 0, 2, 5, 0, 4, 0]);
+//RS         assert_eq!(decode_record(&sections), Err(RecordError::DuplicateSection(4)));
+//RS         // String index out of range.
+//RS         let index = reseal(&[b'J', b'E', b'T', b'R', 1, 1, b's', 0, 1, 1, 1, 2, TAG_STR, 0]);
+//RS         assert!(matches!(decode_record(&index), Err(RecordError::Malformed(_))));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn record_json_renders_the_decoded_tree() {
+//RS         let bytes = encode_record(
+//RS             "jet.test/v1",
+//RS             &[RecordSection::new(
+//RS                 1,
+//RS                 vec![record_map([
+//RS                     ("b", RecordValue::Bytes(vec![1, 2])),
+//RS                     ("n", RecordValue::Null),
+//RS                     ("s", RecordValue::str("q\"")),
+//RS                 ])],
+//RS             )],
+//RS         )
+//RS         .unwrap();
+//RS         let json = record_json(&bytes).unwrap();
+//RS         assert!(json.ends_with(
+//RS             "\"sections\":{\"1\":[{\"b\":{\"bytes\":\"0102\"},\"n\":null,\"s\":\"q\\\"\"}]}}"
+//RS         ));
+//RS     }
+//RS }
+// END-PORT-PENDING 0090 crates/jet-foundation/src/RecordCodec.rs:1-911
+

@@ -1,0 +1,1806 @@
+// PORT-PENDING 0577 crates-jet-comptime-src-comptime-corepureparity-slice-1848: crates/jet-comptime/src/Comptime/CorePureParity.rs:1848-3649
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn io_error_display(value: &CtValue) -> Option<String> {
+//RS     let CtValue::Enum {
+//RS         type_name,
+//RS         variant,
+//RS         args,
+//RS     } = value
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     let type_name = type_name
+//RS         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+//RS         .unwrap_or(type_name);
+//RS     if type_name != "IOError" {
+//RS         return None;
+//RS     }
+//RS     let variant_name = variant
+//RS         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+//RS         .unwrap_or(variant.as_str());
+//RS     if variant_name == "ResourceLimit" {
+//RS         let Some((
+//RS             _,
+//RS             CtValue::Enum {
+//RS                 type_name: limit_type,
+//RS                 variant: limit_variant,
+//RS                 ..
+//RS             },
+//RS         )) = args.first()
+//RS         else {
+//RS             return None;
+//RS         };
+//RS         let limit_type = limit_type
+//RS             .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+//RS             .unwrap_or(limit_type);
+//RS         if limit_type != "ProcessResourceLimit" {
+//RS             return None;
+//RS         }
+//RS         let limit_variant = limit_variant
+//RS             .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+//RS             .unwrap_or(limit_variant.as_str());
+//RS         let limit = jet_foundation::Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS
+//RS             .iter()
+//RS             .position(|name| *name == limit_variant)?;
+//RS         return Some(format!(
+//RS             "process resource limit exceeded: {}",
+//RS             jet_foundation::StructuralDebug::jet_show_process_resource_limit(limit as i64)
+//RS         ));
+//RS     }
+//RS     let variant = match variant_name {
+//RS         "InvalidInput" => 0,
+//RS         "NotFound" => 1,
+//RS         "PermissionDenied" => 2,
+//RS         "TimedOut" => 3,
+//RS         "Cancelled" => 4,
+//RS         "Closed" => 5,
+//RS         "Protocol" => 6,
+//RS         "Other" => 7,
+//RS         _ => return None,
+//RS     };
+//RS     let Some((_, CtValue::Struct { type_name, fields })) = args.first() else {
+//RS         return None;
+//RS     };
+//RS     let type_name = type_name
+//RS         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+//RS         .unwrap_or(type_name);
+//RS     if type_name != "IOContext" {
+//RS         return None;
+//RS     }
+//RS     let field = |wanted: &str| {
+//RS         fields.iter().find_map(|(name, value)| {
+//RS             (name == wanted
+//RS                 || name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX) == Some(wanted))
+//RS             .then_some(value)
+//RS         })
+//RS     };
+//RS     let CtValue::Enum {
+//RS         variant: operation_variant,
+//RS         ..
+//RS     } = field("operation")?
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     let operation = match operation_variant
+//RS         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+//RS         .unwrap_or(operation_variant.as_str())
+//RS     {
+//RS         "Read" => 0,
+//RS         "Write" => 1,
+//RS         "Flush" => 2,
+//RS         "Connect" => 3,
+//RS         "Accept" => 4,
+//RS         "Close" => 5,
+//RS         "Resolve" => 6,
+//RS         "Codec" => 7,
+//RS         _ => return None,
+//RS     };
+//RS     let optional_text = |wanted: &str| {
+//RS         field(wanted).and_then(|value| match value {
+//RS             CtValue::Present(inner) => match inner.as_ref() {
+//RS                 CtValue::Str(text) => Some(Some(text.as_str())),
+//RS                 _ => None,
+//RS             },
+//RS             CtValue::Failed(CtReport::Clean(_)) => Some(None),
+//RS             CtValue::Str(text) => Some(Some(text.as_str())),
+//RS             _ => None,
+//RS         })
+//RS     };
+//RS     Some(jet_foundation::StructuralDebug::jet_show_io_error(
+//RS         variant,
+//RS         operation,
+//RS         optional_text("resource")?,
+//RS         optional_text("cause")?,
+//RS     ))
+//RS }
+//RS 
+//RS fn path_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+//RS     let CtValue::Struct { fields, .. } = value else {
+//RS         return Err(unsupported("malformed Path value", span));
+//RS     };
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS             ("inner", CtValue::Str(path)) => Some(path.clone()),
+//RS             _ => None,
+//RS         })
+//RS         .ok_or_else(|| unsupported("malformed Path value", span))
+//RS }
+//RS 
+//RS fn one<'a>(
+//RS     args: &'a [CtValue],
+//RS     index: usize,
+//RS     module: &str,
+//RS     method: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a CtValue, Diagnostic> {
+//RS     args.get(index)
+//RS         .ok_or_else(|| unsupported(&format!("{module}.{method}(): missing arg {index}"), span))
+//RS }
+//RS 
+//RS fn string_arg<'a>(args: &'a [CtValue], index: usize, span: Span) -> Result<&'a str, Diagnostic> {
+//RS     match args.get(index) {
+//RS         Some(CtValue::Str(value)) => Ok(value),
+//RS         _ => Err(unsupported("Core call expected a String argument", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn int_arg(args: &[CtValue], index: usize, span: Span) -> Result<i64, Diagnostic> {
+//RS     let value = args
+//RS         .get(index)
+//RS         .ok_or_else(|| unsupported("Core call is missing an Int argument", span))?;
+//RS     as_int(value, span)
+//RS }
+//RS 
+//RS fn float_arg(args: &[CtValue], index: usize, span: Span) -> Result<f64, Diagnostic> {
+//RS     let value = args
+//RS         .get(index)
+//RS         .ok_or_else(|| unsupported("Core call is missing a Float argument", span))?;
+//RS     as_float(value, span)
+//RS }
+//RS 
+//RS fn structure(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: fields
+//RS             .into_iter()
+//RS             .map(|(name, value)| (name.to_string(), value))
+//RS             .collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn ui_role(variant: &str) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: "UIAriaRole".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn ui_kind(variant: &str) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: "UINodeKind".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn ui_point(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(structure(
+//RS         "Point",
+//RS         vec![
+//RS             ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
+//RS             ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
+//RS         ],
+//RS     ))
+//RS }
+//RS 
+//RS fn ui_size(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(structure(
+//RS         "Size",
+//RS         vec![
+//RS             (
+//RS                 "width",
+//RS                 CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?)),
+//RS             ),
+//RS             (
+//RS                 "height",
+//RS                 CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?)),
+//RS             ),
+//RS         ],
+//RS     ))
+//RS }
+//RS 
+//RS fn ui_rect(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(structure(
+//RS         "Rect",
+//RS         vec![
+//RS             ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
+//RS             ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
+//RS             (
+//RS                 "width",
+//RS                 CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?)),
+//RS             ),
+//RS             (
+//RS                 "height",
+//RS                 CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?)),
+//RS             ),
+//RS         ],
+//RS     ))
+//RS }
+//RS 
+//RS fn ui_constraint(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(structure(
+//RS         "SizeConstraint",
+//RS         vec![
+//RS             (
+//RS                 "min_width",
+//RS                 CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?)),
+//RS             ),
+//RS             (
+//RS                 "min_height",
+//RS                 CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?)),
+//RS             ),
+//RS             (
+//RS                 "max_width",
+//RS                 CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?)),
+//RS             ),
+//RS             (
+//RS                 "max_height",
+//RS                 CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?)),
+//RS             ),
+//RS         ],
+//RS     ))
+//RS }
+//RS 
+//RS fn ui_node_value_with_metadata(
+//RS     label: String,
+//RS     width: f64,
+//RS     height: f64,
+//RS     role: Option<CtValue>,
+//RS     color: Option<String>,
+//RS     kind: &str,
+//RS     children: Vec<CtValue>,
+//RS     accessibility: Option<CtValue>,
+//RS     shortcut: Option<CtValue>,
+//RS ) -> CtValue {
+//RS     structure(
+//RS         "UINode",
+//RS         vec![
+//RS             ("label", CtValue::Str(label)),
+//RS             ("width", CtValue::Float(CtFloat::f64(width))),
+//RS             ("height", CtValue::Float(CtFloat::f64(height))),
+//RS             (
+//RS                 "role",
+//RS                 role.map_or(
+//RS                     CtValue::absent(Type::Named("UIAriaRole".to_string())),
+//RS                     |role| CtValue::Present(Box::new(role)),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "accessibility",
+//RS                 accessibility.map_or(
+//RS                     CtValue::absent(Type::Named("UIAccessibility".to_string())),
+//RS                     |metadata| CtValue::Present(Box::new(metadata)),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "ime",
+//RS                 CtValue::absent(Type::Named("UIIMEMode".to_string())),
+//RS             ),
+//RS             (
+//RS                 "color",
+//RS                 color.map_or(CtValue::absent(Type::String), |color| {
+//RS                     CtValue::Present(Box::new(CtValue::Str(color)))
+//RS                 }),
+//RS             ),
+//RS             ("kind", ui_kind(kind)),
+//RS             ("children", CtValue::List(children)),
+//RS             (
+//RS                 "shortcut",
+//RS                 shortcut.map_or(
+//RS                     CtValue::absent(Type::Named("UIShortcut".to_string())),
+//RS                     |shortcut| CtValue::Present(Box::new(shortcut)),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ui_node_value(
+//RS     label: String,
+//RS     width: f64,
+//RS     height: f64,
+//RS     role: Option<CtValue>,
+//RS     color: Option<String>,
+//RS     kind: &str,
+//RS     children: Vec<CtValue>,
+//RS ) -> CtValue {
+//RS     ui_node_value_with_metadata(
+//RS         label,
+//RS         width,
+//RS         height,
+//RS         role,
+//RS         color,
+//RS         kind,
+//RS         children,
+//RS         None,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn ui_node(
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS     role: Option<CtValue>,
+//RS     color: Option<String>,
+//RS     kind: &str,
+//RS ) -> EvalResult {
+//RS     Ok(ui_node_value(
+//RS         string_arg(args, 0, span)?.to_string(),
+//RS         float_arg(args, 1, span)?,
+//RS         float_arg(args, 2, span)?,
+//RS         role,
+//RS         color,
+//RS         kind,
+//RS         Vec::new(),
+//RS     ))
+//RS }
+//RS 
+//RS fn ui_node_role(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let role = args
+//RS         .get(3)
+//RS         .cloned()
+//RS         .ok_or_else(|| unsupported("core.ui.node_role(): missing role", span))?;
+//RS     let kind = match &role {
+//RS         CtValue::Enum { variant, .. } if variant == "Button" => "Button",
+//RS         CtValue::Enum { variant, .. } if variant == "TextInput" => "TextInput",
+//RS         _ => "Custom",
+//RS     };
+//RS     ui_node(args, span, Some(role), None, kind)
+//RS }
+//RS 
+//RS fn ui_node_color(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let color = string_arg(args, 3, span)?.to_string();
+//RS     ui_node(args, span, Some(ui_role("Label")), Some(color), "Custom")
+//RS }
+//RS 
+//RS fn ui_text(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let text = string_arg(args, 0, span)?.to_string();
+//RS     Ok(ui_node_value(
+//RS         text.clone(),
+//RS         text.chars().count() as f64,
+//RS         1.0,
+//RS         Some(ui_role("Label")),
+//RS         None,
+//RS         "Text",
+//RS         Vec::new(),
+//RS     ))
+//RS }
+//RS 
+//RS fn ui_button(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let label = string_arg(args, 0, span)?.to_string();
+//RS     let shortcut = match args.get(1) {
+//RS         Some(CtValue::Present(inner)) => Some(inner.as_ref().clone()),
+//RS         _ => None,
+//RS     };
+//RS     let accessible_label = match args.get(2) {
+//RS         Some(CtValue::Present(inner)) => match inner.as_ref() {
+//RS             CtValue::Str(value) => Some(value.clone()),
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     };
+//RS     let accessibility = accessible_label.map(|name| {
+//RS         structure(
+//RS             "UIAccessibility",
+//RS             vec![
+//RS                 (
+//RS                     "name",
+//RS                     CtValue::Present(Box::new(CtValue::Str(name))),
+//RS                 ),
+//RS                 (
+//RS                     "description",
+//RS                     CtValue::absent(Type::String),
+//RS                 ),
+//RS                 ("states", CtValue::List(Vec::new())),
+//RS             ],
+//RS         )
+//RS     });
+//RS     Ok(ui_node_value_with_metadata(
+//RS         label.clone(),
+//RS         label.chars().count() as f64 + 4.0,
+//RS         1.0,
+//RS         Some(ui_role("Button")),
+//RS         None,
+//RS         "Button",
+//RS         Vec::new(),
+//RS         accessibility,
+//RS         shortcut,
+//RS     ))
+//RS }
+//RS 
+//RS fn ui_box(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let children = match args.first() {
+//RS         Some(CtValue::List(children)) => children.clone(),
+//RS         _ => return Err(unsupported("core.ui.box() needs [UINode]", span)),
+//RS     };
+//RS     let mut width = 0.0_f64;
+//RS     let mut height = 0.0_f64;
+//RS     for child in &children {
+//RS         width = width.max(as_float(
+//RS             field(child, "UINode", "width")
+//RS                 .ok_or_else(|| unsupported("core.ui.box() needs UINode children", span))?,
+//RS             span,
+//RS         )?);
+//RS         height += as_float(
+//RS             field(child, "UINode", "height")
+//RS                 .ok_or_else(|| unsupported("core.ui.box() needs UINode children", span))?,
+//RS             span,
+//RS         )?;
+//RS     }
+//RS     Ok(ui_node_value(
+//RS         String::new(),
+//RS         width,
+//RS         height,
+//RS         Some(ui_role("Container")),
+//RS         None,
+//RS         "Box",
+//RS         children,
+//RS     ))
+//RS }
+//RS 
+//RS fn ui_key_event(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(CtValue::Enum {
+//RS         type_name: "InputEvent".to_string(),
+//RS         variant: "Key".to_string(),
+//RS         args: vec![(
+//RS             Some("code".to_string()),
+//RS             CtValue::Str(string_arg(args, 0, span)?.to_string()),
+//RS         )],
+//RS     })
+//RS }
+//RS 
+//RS fn ui_resize_event(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(CtValue::Enum {
+//RS         type_name: "InputEvent".to_string(),
+//RS         variant: "Resize".to_string(),
+//RS         args: vec![(Some("size".to_string()), ui_size(args, span)?)],
+//RS     })
+//RS }
+//RS 
+//RS fn tui_event(variant: &str, args: Vec<(Option<String>, CtValue)>) -> EvalResult {
+//RS     Ok(CtValue::Enum {
+//RS         type_name: "TUIEvent".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args,
+//RS     })
+//RS }
+//RS 
+//RS fn tui_enum(type_name: &str, variant: &str) -> EvalResult {
+//RS     tui_event_for_type(type_name, variant, Vec::new())
+//RS }
+//RS 
+//RS fn tui_event_for_type(
+//RS     type_name: &str,
+//RS     variant: &str,
+//RS     args: Vec<(Option<String>, CtValue)>,
+//RS ) -> EvalResult {
+//RS     Ok(CtValue::Enum {
+//RS         type_name: type_name.to_string(),
+//RS         variant: variant.to_string(),
+//RS         args,
+//RS     })
+//RS }
+//RS 
+//RS fn bool_value(args: &[CtValue], index: usize, span: Span) -> Result<CtValue, Diagnostic> {
+//RS     match args.get(index) {
+//RS         Some(CtValue::Bool(value)) => Ok(CtValue::Bool(*value)),
+//RS         _ => Err(unsupported("Core call expected a Bool argument", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn tui_key_event_modifiers(args: &[CtValue], span: Span) -> EvalResult {
+//RS     tui_event(
+//RS         "Key",
+//RS         vec![
+//RS             (Some("code".to_string()), CtValue::Str(string_arg(args, 0, span)?.to_string())),
+//RS             (Some("modifiers".to_string()), CtValue::Int(int_arg(args, 1, span)?.clamp(0, 255))),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn tui_io_event(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let payload = match one(args, 1, "core.tui", "io_event", span)? {
+//RS         CtValue::List(values) => CtValue::List(values.clone()),
+//RS         CtValue::Bytes(values) => CtValue::Bytes(values.clone()),
+//RS         _ => return Err(unsupported("core.tui.io_event() needs [Byte]", span)),
+//RS     };
+//RS     tui_event(
+//RS         "IO",
+//RS         vec![
+//RS             (Some("channel".to_string()), CtValue::Str(string_arg(args, 0, span)?.to_string())),
+//RS             (Some("payload".to_string()), payload),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn tui_timer_event(args: &[CtValue], span: Span) -> EvalResult {
+//RS     tui_event(
+//RS         "Timer",
+//RS         vec![
+//RS             (Some("id".to_string()), CtValue::Str(string_arg(args, 0, span)?.to_string())),
+//RS             (Some("elapsed_ms".to_string()), CtValue::Int(int_arg(args, 1, span)?)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn tui_color(args: &[CtValue], span: Span, variant: &str, arity: usize) -> EvalResult {
+//RS     let values = (0..arity)
+//RS         .map(|index| int_arg(args, index, span))
+//RS         .collect::<Result<Vec<_>, Diagnostic>>()?;
+//RS     let color = match (variant, values.as_slice()) {
+//RS         ("ANSI16", [index]) => tui_kernel::color_ansi16(*index),
+//RS         ("ANSI256", [index]) => tui_kernel::color_ansi256(*index),
+//RS         ("RGB", [red, green, blue]) => tui_kernel::color_rgb(*red, *green, *blue),
+//RS         _ => return Err(unsupported("malformed TUIColor value", span)),
+//RS     };
+//RS     Ok(tui_kernel_color_value(color))
+//RS }
+//RS fn tui_enum_parts<'a>(
+//RS     value: &'a CtValue,
+//RS     expected: &str,
+//RS     span: Span,
+//RS ) -> Result<(&'a str, &'a [(Option<String>, CtValue)]), Diagnostic> {
+//RS     let CtValue::Enum {
+//RS         type_name,
+//RS         variant,
+//RS         args,
+//RS     } = value
+//RS     else {
+//RS         return Err(unsupported(
+//RS             &format!("core.tui expected {expected}"),
+//RS             span,
+//RS         ));
+//RS     };
+//RS     if type_name != expected {
+//RS         return Err(unsupported(
+//RS             &format!("core.tui expected {expected}"),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     Ok((variant, args))
+//RS }
+//RS 
+//RS fn tui_kernel_profile(value: &CtValue, span: Span) -> Result<tui_kernel::ColorProfile, Diagnostic> {
+//RS     let (variant, args) = tui_enum_parts(value, "TUIColorProfile", span)?;
+//RS     if !args.is_empty() {
+//RS         return Err(unsupported("core.tui color profile takes no arguments", span));
+//RS     }
+//RS     match variant {
+//RS         "ANSI16" => Ok(tui_kernel::ColorProfile::Ansi16),
+//RS         "ANSI256" => Ok(tui_kernel::ColorProfile::Ansi256),
+//RS         "TrueColor" => Ok(tui_kernel::ColorProfile::TrueColor),
+//RS         "ASCII" => Ok(tui_kernel::ColorProfile::Ascii),
+//RS         _ => Err(unsupported("unknown TUIColorProfile variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn tui_kernel_color(value: &CtValue, span: Span) -> Result<tui_kernel::Color, Diagnostic> {
+//RS     let (variant, args) = tui_enum_parts(value, "TUIColor", span)?;
+//RS     let values = args
+//RS         .iter()
+//RS         .map(|(_, value)| as_int(value, span))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     match (variant, values.as_slice()) {
+//RS         ("ANSI16", [index]) => Ok(tui_kernel::color_ansi16(*index)),
+//RS         ("ANSI256", [index]) => Ok(tui_kernel::color_ansi256(*index)),
+//RS         ("RGB", [red, green, blue]) => Ok(tui_kernel::color_rgb(*red, *green, *blue)),
+//RS         _ => Err(unsupported("malformed TUIColor value", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn tui_kernel_color_value(color: tui_kernel::Color) -> CtValue {
+//RS     let (variant, values) = match color {
+//RS         tui_kernel::Color::Ansi16(index) => ("ANSI16", vec![i64::from(index)]),
+//RS         tui_kernel::Color::Ansi256(index) => ("ANSI256", vec![i64::from(index)]),
+//RS         tui_kernel::Color::Rgb(red, green, blue) => (
+//RS             "RGB",
+//RS             vec![i64::from(red), i64::from(green), i64::from(blue)],
+//RS         ),
+//RS     };
+//RS     CtValue::Enum {
+//RS         type_name: "TUIColor".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: values
+//RS             .into_iter()
+//RS             .map(|value| (None, CtValue::Int(value)))
+//RS             .collect(),
+//RS     }
+//RS }
+//RS fn tui_kernel_bool_field(value: &CtValue, name: &str, span: Span) -> Result<bool, Diagnostic> {
+//RS     match field(value, "TUICapabilities", name).or_else(|| field(value, "TUIStyle", name)) {
+//RS         Some(CtValue::Bool(value)) => Ok(*value),
+//RS         _ => Err(unsupported(
+//RS             &format!("malformed core.tui boolean field `{name}`"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn tui_kernel_int_field(value: &CtValue, type_name: &str, name: &str, span: Span) -> Result<i64, Diagnostic> {
+//RS     as_int(
+//RS         field(value, type_name, name)
+//RS             .ok_or_else(|| unsupported(&format!("malformed {type_name}.{name} value"), span))?,
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS fn tui_kernel_capabilities(value: &CtValue, span: Span) -> Result<tui_kernel::Capabilities, Diagnostic> {
+//RS     let profile = tui_kernel_profile(
+//RS         field(value, "TUICapabilities", "profile")
+//RS             .ok_or_else(|| unsupported("malformed TUICapabilities.profile value", span))?,
+//RS         span,
+//RS     )?;
+//RS     Ok(tui_kernel::Capabilities {
+//RS         profile,
+//RS         color: tui_kernel_bool_field(value, "color", span)?,
+//RS         unicode: tui_kernel_bool_field(value, "unicode", span)?,
+//RS         mouse: tui_kernel_bool_field(value, "mouse", span)?,
+//RS         resize: tui_kernel_bool_field(value, "resize", span)?,
+//RS         clipboard: tui_kernel_bool_field(value, "clipboard", span)?,
+//RS         width: tui_kernel_int_field(value, "TUICapabilities", "width", span)?
+//RS             .max(1) as usize,
+//RS         height: tui_kernel_int_field(value, "TUICapabilities", "height", span)?
+//RS             .max(1) as usize,
+//RS     })
+//RS }
+//RS 
+//RS fn tui_kernel_capabilities_value(capabilities: tui_kernel::Capabilities) -> CtValue {
+//RS     let profile = match capabilities.profile {
+//RS         tui_kernel::ColorProfile::Ansi16 => tui_profile("ANSI16"),
+//RS         tui_kernel::ColorProfile::Ansi256 => tui_profile("ANSI256"),
+//RS         tui_kernel::ColorProfile::TrueColor => tui_profile("TrueColor"),
+//RS         tui_kernel::ColorProfile::Ascii => tui_profile("ASCII"),
+//RS     };
+//RS     structure(
+//RS         "TUICapabilities",
+//RS         vec![
+//RS             ("profile", profile),
+//RS             ("color", CtValue::Bool(capabilities.color)),
+//RS             ("unicode", CtValue::Bool(capabilities.unicode)),
+//RS             ("mouse", CtValue::Bool(capabilities.mouse)),
+//RS             ("resize", CtValue::Bool(capabilities.resize)),
+//RS             ("clipboard", CtValue::Bool(capabilities.clipboard)),
+//RS             ("width", CtValue::Int(capabilities.width as i64)),
+//RS             ("height", CtValue::Int(capabilities.height as i64)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn tui_kernel_optional_color(
+//RS     value: &CtValue,
+//RS     name: &str,
+//RS     span: Span,
+//RS ) -> Result<Option<tui_kernel::Color>, Diagnostic> {
+//RS     match field(value, "TUIStyle", name) {
+//RS         Some(CtValue::Present(inner)) => tui_kernel_color(inner, span).map(Some),
+//RS         Some(CtValue::Failed(CtReport::Clean(_))) => Ok(None),
+//RS         _ => Err(unsupported(
+//RS             &format!("malformed TUIStyle.{name} value"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn tui_kernel_style(value: &CtValue, span: Span) -> Result<tui_kernel::Style, Diagnostic> {
+//RS     Ok(tui_kernel::Style {
+//RS         foreground: tui_kernel_optional_color(value, "foreground", span)?,
+//RS         background: tui_kernel_optional_color(value, "background", span)?,
+//RS         bold: tui_kernel_bool_field(value, "bold", span)?,
+//RS         dim: tui_kernel_bool_field(value, "dim", span)?,
+//RS         underline: tui_kernel_bool_field(value, "underline", span)?,
+//RS     })
+//RS }
+//RS 
+//RS fn tui_kernel_constraint(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<tui_kernel::Constraint, Diagnostic> {
+//RS     let (variant, args) = tui_enum_parts(value, "TUIConstraint", span)?;
+//RS     let amount = args
+//RS         .first()
+//RS         .map(|(_, value)| as_float(value, span))
+//RS         .transpose()?
+//RS         .unwrap_or(1.0);
+//RS     match variant {
+//RS         "Length" => Ok(tui_kernel::length(amount)),
+//RS         "Min" => Ok(tui_kernel::min(amount)),
+//RS         "Max" => Ok(tui_kernel::max(amount)),
+//RS         "Percent" => Ok(tui_kernel::percent(amount)),
+//RS         "Fill" => Ok(tui_kernel::fill(amount)),
+//RS         _ => Err(unsupported("unknown TUIConstraint variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn tui_kernel_rect(value: &CtValue, span: Span) -> Result<tui_kernel::Rect, Diagnostic> {
+//RS     Ok(tui_kernel::Rect {
+//RS         x: as_float(
+//RS             field(value, "Rect", "x")
+//RS                 .ok_or_else(|| unsupported("core.tui.layout() needs Rect", span))?,
+//RS             span,
+//RS         )?,
+//RS         y: as_float(
+//RS             field(value, "Rect", "y")
+//RS                 .ok_or_else(|| unsupported("core.tui.layout() needs Rect", span))?,
+//RS             span,
+//RS         )?,
+//RS         width: as_float(
+//RS             field(value, "Rect", "width")
+//RS                 .ok_or_else(|| unsupported("core.tui.layout() needs Rect", span))?,
+//RS             span,
+//RS         )?,
+//RS         height: as_float(
+//RS             field(value, "Rect", "height")
+//RS                 .ok_or_else(|| unsupported("core.tui.layout() needs Rect", span))?,
+//RS             span,
+//RS         )?,
+//RS     })
+//RS }
+//RS 
+//RS fn tui_profile(variant: &str) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: "TUIColorProfile".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn tui_capabilities() -> CtValue {
+//RS     tui_kernel_capabilities_value(tui_kernel::capabilities(
+//RS         tui_kernel::ColorProfile::Ascii,
+//RS         80,
+//RS         24,
+//RS     ))
+//RS }
+//RS 
+//RS fn tui_constraint(args: &[CtValue], span: Span, variant: &str) -> EvalResult {
+//RS     let amount = float_arg(args, 0, span)?;
+//RS     let constraint = match variant {
+//RS         "Length" => tui_kernel::length(amount),
+//RS         "Min" => tui_kernel::min(amount),
+//RS         "Max" => tui_kernel::max(amount),
+//RS         "Percent" => tui_kernel::percent(amount),
+//RS         "Fill" => tui_kernel::fill(amount),
+//RS         _ => return Err(unsupported("unknown TUIConstraint variant", span)),
+//RS     };
+//RS     let amount = match constraint {
+//RS         tui_kernel::Constraint::Length(value)
+//RS         | tui_kernel::Constraint::Min(value)
+//RS         | tui_kernel::Constraint::Max(value)
+//RS         | tui_kernel::Constraint::Percent(value) => value,
+//RS         tui_kernel::Constraint::Fill(weight) => f64::from(weight),
+//RS     };
+//RS     tui_event_for_type(
+//RS         "TUIConstraint",
+//RS         variant,
+//RS         vec![(None, CtValue::Float(CtFloat::f64(amount)))],
+//RS     )
+//RS }
+//RS 
+//RS fn tui_style_default() -> CtValue {
+//RS     structure(
+//RS         "TUIStyle",
+//RS         vec![
+//RS             (
+//RS                 "foreground",
+//RS                 CtValue::absent(Type::Named("TUIColor".to_string())),
+//RS             ),
+//RS             (
+//RS                 "background",
+//RS                 CtValue::absent(Type::Named("TUIColor".to_string())),
+//RS             ),
+//RS             ("bold", CtValue::Bool(false)),
+//RS             ("dim", CtValue::Bool(false)),
+//RS             ("underline", CtValue::Bool(false)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn tui_style_color(args: &[CtValue], span: Span, background: bool) -> EvalResult {
+//RS     let mut style = structure_fields(args, 0, "TUIStyle", span)?;
+//RS     let color = tui_kernel_color(one(args, 1, "core.tui", "style_color", span)?, span)?;
+//RS     let field_name = if background {
+//RS         "background"
+//RS     } else {
+//RS         "foreground"
+//RS     };
+//RS     set_structure_field(
+//RS         &mut style,
+//RS         field_name,
+//RS         CtValue::Present(Box::new(tui_kernel_color_value(color))),
+//RS         span,
+//RS     )?;
+//RS     Ok(style)
+//RS }
+//RS 
+//RS fn tui_style_flag(args: &[CtValue], span: Span, field_name: &str) -> EvalResult {
+//RS     let mut style = structure_fields(args, 0, "TUIStyle", span)?;
+//RS     let value = bool_value(args, 1, span)?;
+//RS     set_structure_field(&mut style, field_name, value, span)?;
+//RS     Ok(style)
+//RS }
+//RS fn tui_style_text(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let text = string_arg(args, 0, span)?;
+//RS     let style = tui_kernel_style(one(args, 1, "core.tui", "style_text", span)?, span)?;
+//RS     let capabilities =
+//RS         tui_kernel_capabilities(one(args, 2, "core.tui", "style_text", span)?, span)?;
+//RS     Ok(CtValue::Str(tui_kernel::style_text(
+//RS         text,
+//RS         &style,
+//RS         &capabilities,
+//RS     )))
+//RS }
+//RS 
+//RS fn structure_fields(
+//RS     args: &[CtValue],
+//RS     index: usize,
+//RS     type_name: &str,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     match one(args, index, "core.tui", type_name, span)? {
+//RS         CtValue::Struct {
+//RS             type_name: actual,
+//RS             fields,
+//RS         } if actual == type_name => Ok(CtValue::Struct {
+//RS             type_name: actual.clone(),
+//RS             fields: fields.clone(),
+//RS         }),
+//RS         _ => Err(unsupported(
+//RS             &format!("core.tui expected {type_name}"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn set_structure_field(
+//RS     value: &mut CtValue,
+//RS     wanted: &str,
+//RS     replacement: CtValue,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let CtValue::Struct { fields, .. } = value else {
+//RS         return Err(unsupported("core.tui expected a structure", span));
+//RS     };
+//RS     if let Some((_, field)) = fields.iter_mut().find(|(name, _)| name == wanted) {
+//RS         *field = replacement;
+//RS         Ok(())
+//RS     } else {
+//RS         Err(unsupported(
+//RS             &format!("core.tui structure has no `{wanted}` field"),
+//RS             span,
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn tui_ascii(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let text = string_arg(args, 0, span)?;
+//RS     Ok(CtValue::Str(tui_kernel::ascii(text)))
+//RS }
+//RS 
+//RS fn tui_display_width(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let text = string_arg(args, 0, span)?;
+//RS     Ok(CtValue::Int(tui_kernel::display_width(text) as i64))
+//RS }
+//RS 
+//RS fn tui_rect_value(x: f64, y: f64, width: f64, height: f64) -> CtValue {
+//RS     structure(
+//RS         "Rect",
+//RS         vec![
+//RS             ("x", CtValue::Float(CtFloat::f64(x))),
+//RS             ("y", CtValue::Float(CtFloat::f64(y))),
+//RS             ("width", CtValue::Float(CtFloat::f64(width))),
+//RS             ("height", CtValue::Float(CtFloat::f64(height))),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS fn tui_layout(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let rect = one(args, 0, "core.tui", "layout", span)?;
+//RS     let direction = one(args, 1, "core.tui", "layout", span)?;
+//RS     let constraints = match one(args, 2, "core.tui", "layout", span)? {
+//RS         CtValue::List(values) => values,
+//RS         _ => return Err(unsupported("core.tui.layout() needs [TUIConstraint]", span)),
+//RS     };
+//RS     let direction = match tui_enum_parts(direction, "TUIDirection", span)?.0 {
+//RS         "Horizontal" => tui_kernel::Direction::Horizontal,
+//RS         "Vertical" => tui_kernel::Direction::Vertical,
+//RS         _ => return Err(unsupported("unknown TUIDirection variant", span)),
+//RS     };
+//RS     let constraints = constraints
+//RS         .iter()
+//RS         .map(|constraint| tui_kernel_constraint(constraint, span))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let rects = tui_kernel::layout(tui_kernel_rect(rect, span)?, direction, &constraints);
+//RS     Ok(CtValue::List(
+//RS         rects
+//RS             .into_iter()
+//RS             .map(|rect| tui_rect_value(rect.x, rect.y, rect.width, rect.height))
+//RS             .collect(),
+//RS     ))
+//RS }
+//RS 
+//RS fn tui_list_state(selected: i64, offset: i64) -> CtValue {
+//RS     structure(
+//RS         "TUIListState",
+//RS         vec![
+//RS             ("selected", CtValue::Int(selected.max(0))),
+//RS             ("offset", CtValue::Int(offset.max(0))),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn tui_list_state_update(args: &[CtValue], span: Span, selected: bool) -> EvalResult {
+//RS     let state = structure_fields(args, 0, "TUIListState", span)?;
+//RS     let value = int_arg(args, 1, span)?.max(0);
+//RS     let field_name = if selected { "selected" } else { "offset" };
+//RS     let mut updated = state;
+//RS     set_structure_field(&mut updated, field_name, CtValue::Int(value), span)?;
+//RS     Ok(updated)
+//RS }
+//RS 
+//RS fn tui_list(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let items = match one(args, 0, "core.tui", "list", span)? {
+//RS         CtValue::List(values) => values,
+//RS         _ => return Err(unsupported("core.tui.list() needs [String]", span)),
+//RS     };
+//RS     let children = items
+//RS         .iter()
+//RS         .map(|item| {
+//RS             let text = match item {
+//RS                 CtValue::Str(value) => value.clone(),
+//RS                 _ => return Err(unsupported("core.tui.list() needs [String]", span)),
+//RS             };
+//RS             ui_text(&[CtValue::Str(text)], span)
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     ui_box(&[CtValue::List(children)], span)
+//RS }
+//RS 
+//RS fn tui_table(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let headers = match one(args, 0, "core.tui", "table", span)? {
+//RS         CtValue::List(values) => values,
+//RS         _ => return Err(unsupported("core.tui.table() needs [String] headers", span)),
+//RS     };
+//RS     let rows = match one(args, 1, "core.tui", "table", span)? {
+//RS         CtValue::List(values) => values,
+//RS         _ => return Err(unsupported("core.tui.table() needs [[String]] rows", span)),
+//RS     };
+//RS     let mut lines = Vec::with_capacity(rows.len() + 1);
+//RS     let join = |row: &[CtValue]| -> Result<CtValue, Diagnostic> {
+//RS         let mut line = String::new();
+//RS         for (index, value) in row.iter().enumerate() {
+//RS             if index != 0 {
+//RS                 line.push_str(" | ");
+//RS             }
+//RS             line.push_str(string_arg(std::slice::from_ref(value), 0, span)?);
+//RS         }
+//RS         Ok(CtValue::Str(line))
+//RS     };
+//RS     lines.push(join(headers)?);
+//RS     for row in rows {
+//RS         let CtValue::List(values) = row else {
+//RS             return Err(unsupported("core.tui.table() needs [[String]] rows", span));
+//RS         };
+//RS         lines.push(join(values)?);
+//RS     }
+//RS     tui_list(&[CtValue::List(lines)], span)
+//RS }
+//RS 
+//RS fn io_style_force(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let style = string_arg(args, 0, span)?;
+//RS     let text = string_arg(args, 1, span)?;
+//RS     Ok(CtValue::Str(super::term_semantics::jet_term_style_force(
+//RS         style, text,
+//RS     )))
+//RS }
+//RS 
+//RS fn net_error(operation: &str, address: Option<String>, message: String) -> CtValue {
+//RS     structure(
+//RS         "NetError",
+//RS         vec![
+//RS             ("operation", CtValue::Str(operation.to_string())),
+//RS             (
+//RS                 "address",
+//RS                 address.map_or(CtValue::absent(Type::String), |value| {
+//RS                     CtValue::Present(Box::new(CtValue::Str(value)))
+//RS                 }),
+//RS             ),
+//RS             ("name", CtValue::absent(Type::String)),
+//RS             ("message", CtValue::Str(message)),
+//RS             ("os_code", CtValue::absent(Type::Int)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn net_ip_addr(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let text = string_arg(args, 0, span)?;
+//RS     let input = text.to_string();
+//RS     Ok(
+//RS         match super::net_pure_kernel::jet_net_pure_parse_ip(&input) {
+//RS             Ok(address) => CtValue::Present(Box::new(structure(
+//RS                 "IPAddr",
+//RS                 vec![("text", CtValue::Str(address.to_string()))],
+//RS             ))),
+//RS             Err(error) => CtValue::failed(Box::new(net_error(
+//RS                 "parse IP address",
+//RS                 Some(text.to_string()),
+//RS                 format!("invalid IP address `{text}`: {error}"),
+//RS             ))),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn net_ip_is_ipv4(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let text = match field(
+//RS         one(args, 0, "core.net", "ip_is_ipv4", span)?,
+//RS         "IPAddr",
+//RS         "text",
+//RS     ) {
+//RS         Some(CtValue::Str(text)) => text,
+//RS         _ => return Err(unsupported("malformed IPAddr value", span)),
+//RS     };
+//RS     let input = text.to_string();
+//RS     let address = match super::net_pure_kernel::jet_net_pure_parse_ip(&input) {
+//RS         Ok(address) => address,
+//RS         Err(_) => return Ok(CtValue::Bool(false)),
+//RS     };
+//RS     Ok(CtValue::Bool(
+//RS         super::net_pure_kernel::jet_net_pure_ip_is_ipv4(&address),
+//RS     ))
+//RS }
+//RS 
+//RS fn net_socket_addr_parse(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let text = string_arg(args, 0, span)?;
+//RS     let input = text.to_string();
+//RS     Ok(
+//RS         match super::net_pure_kernel::jet_net_pure_parse_socket_addr(&input) {
+//RS             Ok(address) => CtValue::Present(Box::new(structure(
+//RS                 "SocketAddr",
+//RS                 vec![
+//RS                     (
+//RS                         "host",
+//RS                         CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_host(&address)),
+//RS                     ),
+//RS                     (
+//RS                         "port",
+//RS                         CtValue::Int(super::net_pure_kernel::jet_net_pure_socket_port(&address)),
+//RS                     ),
+//RS                     (
+//RS                         "text",
+//RS                         CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_to_string(
+//RS                             &address,
+//RS                         )),
+//RS                     ),
+//RS                 ],
+//RS             ))),
+//RS             Err(error) => CtValue::failed(Box::new(net_error(
+//RS                 "parse socket address",
+//RS                 Some(text.to_string()),
+//RS                 format!("invalid socket address `{text}`: {error}"),
+//RS             ))),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn net_value_field(args: &[CtValue], type_name: &str, name: &str, span: Span) -> EvalResult {
+//RS     field(one(args, 0, "core.net", name, span)?, type_name, name)
+//RS         .cloned()
+//RS         .ok_or_else(|| unsupported(&format!("malformed {type_name}.{name} value"), span))
+//RS }
+//RS 
+//RS fn net_string_field(args: &[CtValue], type_name: &str, name: &str, span: Span) -> EvalResult {
+//RS     match net_value_field(args, type_name, name, span)? {
+//RS         CtValue::Str(value) => Ok(CtValue::Str(value)),
+//RS         _ => Err(unsupported(
+//RS             &format!("malformed {type_name}.{name} value"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn net_udp_packet_data(args: &[CtValue], span: Span) -> EvalResult {
+//RS     match net_value_field(args, "UDPPacket", "data", span)? {
+//RS         CtValue::Bytes(value) => Ok(CtValue::Str(String::from_utf8_lossy(&value).into_owned())),
+//RS         _ => Err(unsupported("malformed UDPPacket.data value", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn crypto_secret(type_name: &str, bytes: Vec<u8>) -> CtValue {
+//RS     structure(type_name, vec![("bytes", CtValue::Bytes(bytes))])
+//RS }
+//RS 
+//RS fn crypto_error(reason: &str) -> CtValue {
+//RS     structure(
+//RS         "CryptoError",
+//RS         vec![("reason", CtValue::Str(reason.to_string()))],
+//RS     )
+//RS }
+//RS 
+//RS fn crypto_hkdf(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let length = int_arg(args, 3, span)?;
+//RS     if !(0..=8_160).contains(&length) {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(
+//RS             "HKDF-SHA256 output length must be 0..8160",
+//RS         ))));
+//RS     }
+//RS     let bytes = crate::Comptime::CryptoLite::hkdf_sha256(
+//RS         &as_bytes(
+//RS             one(args, 0, "core.crypto.expert", "hkdf_sha256_raw", span)?,
+//RS             span,
+//RS         )?,
+//RS         &as_bytes(
+//RS             one(args, 1, "core.crypto.expert", "hkdf_sha256_raw", span)?,
+//RS             span,
+//RS         )?,
+//RS         &as_bytes(
+//RS             one(args, 2, "core.crypto.expert", "hkdf_sha256_raw", span)?,
+//RS             span,
+//RS         )?,
+//RS         length as usize,
+//RS     );
+//RS     Ok(CtValue::Present(Box::new(crypto_secret("Secret", bytes))))
+//RS }
+//RS 
+//RS fn crypto_ed25519_verify(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let public = as_bytes(
+//RS         one(args, 0, "core.crypto.expert", "ed25519_verify_strict", span)?,
+//RS         span,
+//RS     )?;
+//RS     let message = as_bytes(
+//RS         one(args, 1, "core.crypto.expert", "ed25519_verify_strict", span)?,
+//RS         span,
+//RS     )?;
+//RS     let signature = as_bytes(
+//RS         one(args, 2, "core.crypto.expert", "ed25519_verify_strict", span)?,
+//RS         span,
+//RS     )?;
+//RS     if public.len() != 32 {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "expert.ed25519_verify_strict: public must be exactly 32; got {}",
+//RS             public.len()
+//RS         )))));
+//RS     }
+//RS     if signature.len() != 64 {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "expert.ed25519_verify_strict: signature must be exactly 64; got {}",
+//RS             signature.len()
+//RS         )))));
+//RS     }
+//RS     if message.len() > 1_073_741_824 {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "expert.ed25519_verify_strict: message must be at most 1073741824; got {}",
+//RS             message.len()
+//RS         )))));
+//RS     }
+//RS     let public: [u8; 32] = public.try_into().expect("length checked");
+//RS     let signature: [u8; 64] = signature.try_into().expect("length checked");
+//RS     match crate::Comptime::CryptoLite::ed25519_verify_strict(&public, &message, &signature) {
+//RS         Ok(valid) => Ok(CtValue::Present(Box::new(CtValue::Bool(valid)))),
+//RS         Err(()) => Ok(CtValue::failed(Box::new(crypto_error(
+//RS             "expert.ed25519_verify_strict: Ed25519 public key is not canonical",
+//RS         )))),
+//RS     }
+//RS }
+//RS 
+//RS fn crypto_ed25519_sign(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let seed = as_bytes(
+//RS         one(args, 0, "core.crypto.expert", "ed25519_sign", span)?,
+//RS         span,
+//RS     )?;
+//RS     let message = as_bytes(
+//RS         one(args, 1, "core.crypto.expert", "ed25519_sign", span)?,
+//RS         span,
+//RS     )?;
+//RS     if seed.len() != 32 {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "expert.ed25519_sign: seed must be exactly 32; got {}",
+//RS             seed.len()
+//RS         )))));
+//RS     }
+//RS     if message.len() > 1_073_741_824 {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "expert.ed25519_sign: message must be at most 1073741824; got {}",
+//RS             message.len()
+//RS         )))));
+//RS     }
+//RS     let seed: [u8; 32] = seed.try_into().expect("length checked");
+//RS     let signature = crate::Comptime::CryptoLite::ed25519_sign(&seed, &message);
+//RS     Ok(CtValue::Present(Box::new(crypto_secret(
+//RS         "Signature",
+//RS         signature.to_vec(),
+//RS     ))))
+//RS }
+//RS 
+//RS fn crypto_aead_lengths(
+//RS     operation: &str,
+//RS     key: &[u8],
+//RS     nonce: &[u8],
+//RS     nonce_length: usize,
+//RS     input: &[u8],
+//RS     aad: &[u8],
+//RS     opening: bool,
+//RS ) -> Option<CtValue> {
+//RS     if key.len() != 32 {
+//RS         return Some(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "{operation}: key must be exactly 32; got {}",
+//RS             key.len()
+//RS         )))));
+//RS     }
+//RS     let nonce_expected = if nonce_length == 24 {
+//RS         "exactly 24"
+//RS     } else {
+//RS         "exactly 12"
+//RS     };
+//RS     if nonce.len() != nonce_length {
+//RS         return Some(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "{operation}: nonce must be {nonce_expected}; got {}",
+//RS             nonce.len()
+//RS         )))));
+//RS     }
+//RS     let (minimum, maximum, label, expected) = if opening {
+//RS         (16usize, 1_073_741_840usize, "ciphertext", "16..=1073741840")
+//RS     } else {
+//RS         (
+//RS             0usize,
+//RS             1_073_741_824usize,
+//RS             "plaintext",
+//RS             "at most 1073741824",
+//RS         )
+//RS     };
+//RS     if input.len() < minimum || input.len() > maximum {
+//RS         return Some(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "{operation}: {label} must be {expected}; got {}",
+//RS             input.len()
+//RS         )))));
+//RS     }
+//RS     if aad.len() > 16_777_216 {
+//RS         return Some(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "{operation}: aad must be at most 16777216; got {}",
+//RS             aad.len()
+//RS         )))));
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn crypto_aead_seal(
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS     operation: &str,
+//RS     nonce_length: usize,
+//RS     aes: bool,
+//RS ) -> EvalResult {
+//RS     let key = as_bytes(one(args, 0, "core.crypto.expert", operation, span)?, span)?;
+//RS     let nonce = as_bytes(one(args, 1, "core.crypto.expert", operation, span)?, span)?;
+//RS     let plaintext = as_bytes(one(args, 2, "core.crypto.expert", operation, span)?, span)?;
+//RS     let aad = as_bytes(one(args, 3, "core.crypto.expert", operation, span)?, span)?;
+//RS     if let Some(error) = crypto_aead_lengths(
+//RS         operation,
+//RS         &key,
+//RS         &nonce,
+//RS         nonce_length,
+//RS         &plaintext,
+//RS         &aad,
+//RS         false,
+//RS     ) {
+//RS         return Ok(error);
+//RS     }
+//RS     let sealed = if aes {
+//RS         crate::Comptime::CryptoLite::aes256gcm_seal(&key, &nonce, &plaintext, &aad)
+//RS     } else {
+//RS         crate::Comptime::CryptoLite::xchacha20poly1305_seal(&key, &nonce, &plaintext, &aad)
+//RS     };
+//RS     match sealed {
+//RS         Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
+//RS         Err(()) => Ok(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "Jet could not preserve a cryptographic invariant; incident expert-{}-seal",
+//RS             if aes { "aes" } else { "xchacha" }
+//RS         ))))),
+//RS     }
+//RS }
+//RS 
+//RS fn crypto_aead_open(
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS     operation: &str,
+//RS     nonce_length: usize,
+//RS ) -> EvalResult {
+//RS     let key = as_bytes(one(args, 0, "core.crypto.expert", operation, span)?, span)?;
+//RS     let nonce = as_bytes(one(args, 1, "core.crypto.expert", operation, span)?, span)?;
+//RS     let ciphertext = as_bytes(one(args, 2, "core.crypto.expert", operation, span)?, span)?;
+//RS     let aad = as_bytes(one(args, 3, "core.crypto.expert", operation, span)?, span)?;
+//RS     if let Some(error) = crypto_aead_lengths(
+//RS         operation,
+//RS         &key,
+//RS         &nonce,
+//RS         nonce_length,
+//RS         &ciphertext,
+//RS         &aad,
+//RS         true,
+//RS     ) {
+//RS         return Ok(error);
+//RS     }
+//RS     let opened = if nonce_length == 12 {
+//RS         crate::Comptime::CryptoLite::aes256gcm_open(&key, &nonce, &ciphertext, &aad)
+//RS     } else {
+//RS         crate::Comptime::CryptoLite::xchacha20poly1305_open(&key, &nonce, &ciphertext, &aad)
+//RS     };
+//RS     match opened {
+//RS         Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
+//RS         Err(()) => Ok(CtValue::failed(Box::new(crypto_error(
+//RS             "encrypted data could not be opened",
+//RS         )))),
+//RS     }
+//RS }
+//RS 
+//RS fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let password = match field(
+//RS         one(args, 0, "core.crypto.expert", "argon2id", span)?,
+//RS         "Secret",
+//RS         "bytes",
+//RS     ) {
+//RS         Some(CtValue::Bytes(bytes)) => bytes.clone(),
+//RS         Some(CtValue::List(bytes)) => as_bytes(&CtValue::List(bytes.clone()), span)?,
+//RS         _ => {
+//RS             return Err(unsupported(
+//RS                 "core.crypto.expert.argon2id() needs a Secret password",
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     };
+//RS     let salt = as_bytes(one(args, 1, "core.crypto.expert", "argon2id", span)?, span)?;
+//RS     let memory_kib = int_arg(args, 2, span)?;
+//RS     let iterations = int_arg(args, 3, span)?;
+//RS     let lanes = int_arg(args, 4, span)?;
+//RS     let output_length = int_arg(args, 5, span)?;
+//RS     if password.len() > 1_048_576 {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(
+//RS             "password hash is outside Jet's accepted policy",
+//RS         ))));
+//RS     }
+//RS     if !(8..=64).contains(&salt.len()) {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "expert.argon2id: salt must be 8..=64; got {}",
+//RS             salt.len()
+//RS         )))));
+//RS     }
+//RS     if !(8_192..=262_144).contains(&memory_kib)
+//RS         || !(1..=10).contains(&iterations)
+//RS         || !(1..=8).contains(&lanes)
+//RS         || memory_kib < 8 * lanes
+//RS         || memory_kib
+//RS             .checked_mul(iterations)
+//RS             .is_none_or(|value| value > 1_048_576)
+//RS     {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(
+//RS             "password hash is outside Jet's accepted policy",
+//RS         ))));
+//RS     }
+//RS     if !(16..=64).contains(&output_length) {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(&format!(
+//RS             "expert.argon2id: output length must be 16..64; got {output_length}"
+//RS         )))));
+//RS     }
+//RS     match crate::Comptime::CryptoLite::argon2id(
+//RS         &password,
+//RS         &salt,
+//RS         memory_kib as u32,
+//RS         iterations as u32,
+//RS         lanes as u32,
+//RS         output_length as usize,
+//RS     ) {
+//RS         Ok(bytes) => Ok(CtValue::Present(Box::new(crypto_secret("Secret", bytes)))),
+//RS         Err(()) => Ok(CtValue::failed(Box::new(crypto_error(
+//RS             "password hash is outside Jet's accepted policy",
+//RS         )))),
+//RS     }
+//RS }
+//RS 
+//RS fn crypto_x25519(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let secret = as_bytes(
+//RS         one(args, 0, "core.crypto.expert", "x25519_raw", span)?,
+//RS         span,
+//RS     )?;
+//RS     let public = as_bytes(
+//RS         one(args, 1, "core.crypto.expert", "x25519_raw", span)?,
+//RS         span,
+//RS     )?;
+//RS     if secret.len() != 32 || public.len() != 32 {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(
+//RS             "X25519 keys must contain exactly 32 bytes",
+//RS         ))));
+//RS     }
+//RS     let shared = crate::Comptime::CryptoLite::x25519(&secret, &public).expect("length checked");
+//RS     if shared == [0; 32] {
+//RS         return Ok(CtValue::failed(Box::new(crypto_error(
+//RS             "X25519 peer key does not contribute to a shared secret",
+//RS         ))));
+//RS     }
+//RS     Ok(CtValue::Present(Box::new(crypto_secret(
+//RS         "Secret",
+//RS         shared.to_vec(),
+//RS     ))))
+//RS }
+//RS 
+//RS fn crypto_extract(args: &[CtValue], index: usize, type_name: &str, span: Span) -> EvalResult {
+//RS     let value = one(args, index, "core.crypto.expert", "secret_bytes", span)?;
+//RS     match field(value, type_name, "bytes") {
+//RS         Some(CtValue::Bytes(bytes)) => Ok(CtValue::Bytes(bytes.clone())),
+//RS         Some(CtValue::List(bytes)) => {
+//RS             as_bytes(&CtValue::List(bytes.clone()), span).map(CtValue::Bytes)
+//RS         }
+//RS         _ => Err(unsupported(&format!("malformed {type_name} value"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn field<'a>(value: &'a CtValue, type_name: &str, name: &str) -> Option<&'a CtValue> {
+//RS     match value {
+//RS         CtValue::Struct {
+//RS             type_name: actual,
+//RS             fields,
+//RS         } if actual == type_name => fields
+//RS             .iter()
+//RS             .find(|(field_name, _)| field_name == name)
+//RS             .map(|(_, value)| value),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn value_field(value: &CtValue, type_name: &str, name: &str, span: Span) -> EvalResult {
+//RS     field(value, type_name, name)
+//RS         .cloned()
+//RS         .ok_or_else(|| unsupported(&format!("malformed {type_name}.{name} value"), span))
+//RS }
+//RS 
+//RS fn int_field(value: &CtValue, type_name: &str, name: &str, span: Span) -> Result<i64, Diagnostic> {
+//RS     as_int(
+//RS         field(value, type_name, name)
+//RS             .ok_or_else(|| unsupported(&format!("malformed {type_name}.{name} value"), span))?,
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS fn string_field(value: &CtValue, type_name: &str, name: &str, span: Span) -> EvalResult {
+//RS     match field(value, type_name, name) {
+//RS         Some(CtValue::Str(value)) => Ok(CtValue::Str(value.clone())),
+//RS         _ => Err(unsupported(
+//RS             &format!("malformed {type_name}.{name} value"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS // ── MIME: the `core.net.mime.MIME` record layout (`top`, `sub`, `parameters`) ──
+//RS 
+//RS fn parse_mime(input: &str) -> Result<CtValue, String> {
+//RS     let parts = mime_kernel::jet_mime_parse_parts(input)?;
+//RS     let params = parts
+//RS         .params
+//RS         .into_iter()
+//RS         .map(|(key, value)| CtValue::List(vec![CtValue::Str(key), CtValue::Str(value)]))
+//RS         .collect();
+//RS     Ok(structure(
+//RS         "MIME",
+//RS         vec![
+//RS             ("top", CtValue::Str(parts.top)),
+//RS             ("sub", CtValue::Str(parts.sub)),
+//RS             ("parameters", CtValue::List(params)),
+//RS         ],
+//RS     ))
+//RS }
+//RS 
+//RS fn mime_parts(value: &CtValue, span: Span) -> Result<mime_kernel::JetMimeParts, Diagnostic> {
+//RS     let CtValue::Str(top) =
+//RS         field(value, "MIME", "top").ok_or_else(|| unsupported("malformed MIME.top value", span))?
+//RS     else {
+//RS         return Err(unsupported("malformed Mime.top value", span));
+//RS     };
+//RS     let CtValue::Str(sub) =
+//RS         field(value, "MIME", "sub").ok_or_else(|| unsupported("malformed MIME.sub value", span))?
+//RS     else {
+//RS         return Err(unsupported("malformed Mime.sub value", span));
+//RS     };
+//RS     let Some(CtValue::List(values)) = field(value, "MIME", "parameters") else {
+//RS         return Err(unsupported("malformed MIME.parameters value", span));
+//RS     };
+//RS     let mut params = Vec::with_capacity(values.len());
+//RS     for value in values {
+//RS         let CtValue::List(pair) = value else {
+//RS             return Err(unsupported("malformed Mime parameter", span));
+//RS         };
+//RS         let [CtValue::Str(key), CtValue::Str(value)] = pair.as_slice() else {
+//RS             return Err(unsupported("malformed Mime parameter", span));
+//RS         };
+//RS         params.push((key.clone(), value.clone()));
+//RS     }
+//RS     Ok(mime_kernel::JetMimeParts {
+//RS         top: top.clone(),
+//RS         sub: sub.clone(),
+//RS         params,
+//RS     })
+//RS }
+//RS 
+//RS fn mime_essence(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+//RS     let parts = mime_parts(value, span)?;
+//RS     Ok(mime_kernel::jet_mime_essence(&parts.top, &parts.sub))
+//RS }
+//RS 
+//RS fn mime_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+//RS     let parts = mime_parts(value, span)?;
+//RS     Ok(mime_kernel::jet_mime_to_string(
+//RS         &parts.top,
+//RS         &parts.sub,
+//RS         parts.params.iter().map(|(key, value)| (key.as_str(), value.as_str())),
+//RS     ))
+//RS }
+//RS 
+//RS fn mime_param(value: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
+//RS     let parts = mime_parts(value, span)?;
+//RS     Ok(option_string(mime_kernel::jet_mime_param(
+//RS         parts.params.iter().map(|(key, value)| (key.as_str(), value.as_str())),
+//RS         string_arg(args, 0, span)?,
+//RS     )))
+//RS }
+//RS 
+//RS fn mime_parse(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(match parse_mime(string_arg(args, 0, span)?) {
+//RS         Ok(value) => CtValue::Present(Box::new(value)),
+//RS         Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+//RS     })
+//RS }
+//RS 
+//RS fn mime_from_extension(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(option_string(mime_kernel::jet_mime_from_extension(
+//RS         string_arg(args, 0, span)?,
+//RS     )))
+//RS }
+//RS 
+//RS fn mime_extension(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(option_string(mime_kernel::jet_extension_from_mime(
+//RS         string_arg(args, 0, span)?,
+//RS     )))
+//RS }
+//RS 
+//RS fn option_string(value: Option<&str>) -> CtValue {
+//RS     value.map_or(CtValue::absent(Type::String), |value| {
+//RS         CtValue::Present(Box::new(CtValue::Str(value.to_string())))
+//RS     })
+//RS }
+//RS 
+//RS fn option_int(value: Option<i64>) -> CtValue {
+//RS     value.map_or(CtValue::absent(Type::Int), |value| {
+//RS         CtValue::Present(Box::new(CtValue::Int(value)))
+//RS     })
+//RS }
+//RS 
+//RS // ── Civil time: CtValue adapters for the shared Prelude kernel ──────────────
+//RS 
+//RS #[derive(Clone)]
+//RS struct Date {
+//RS     inner: super::time_kernel::JetDate,
+//RS     year: i64,
+//RS     month: i64,
+//RS     day: i64,
+//RS }
+//RS 
+//RS impl Date {
+//RS     fn from_inner(inner: super::time_kernel::JetDate) -> Self {
+//RS         Self {
+//RS             year: inner.year(),
+//RS             month: inner.month(),
+//RS             day: inner.day(),
+//RS             inner,
+//RS         }
+//RS     }
+//RS 
+//RS     fn is_leap(year: i64) -> bool {
+//RS         super::time_kernel::JetDate::is_leap(year)
+//RS     }
+//RS 
+//RS     fn days_in_month(year: i64, month: i64) -> i64 {
+//RS         super::time_kernel::JetDate::days_in_month_of(year, month)
+//RS     }
+//RS 
+//RS     fn new(year: i64, month: i64, day: i64) -> Self {
+//RS         Self::from_inner(super::time_kernel::JetDate::new(year, month, day))
+//RS     }
+//RS 
+//RS     fn parse(value: &str) -> Result<Self, String> {
+//RS         super::time_kernel::JetDate::parse(value).map(Self::from_inner)
+//RS     }
+//RS 
+//RS     fn day_number(&self) -> i64 {
+//RS         self.inner.to_day_number()
+//RS     }
+//RS 
+//RS     fn from_day_number(day: i64) -> Self {
+//RS         Self::from_inner(super::time_kernel::JetDate::from_day_number(day))
+//RS     }
+//RS 
+//RS     fn add_days(&self, days: i64) -> Self {
+//RS         Self::from_inner(self.inner.add_days(days))
+//RS     }
+//RS 
+//RS     fn add_months(&self, months: i64) -> Self {
+//RS         Self::from_inner(self.inner.add_months(months))
+//RS     }
+//RS 
+//RS     fn to_string_fmt(&self) -> String {
+//RS         self.inner.to_string_fmt()
+//RS     }
+//RS 
+//RS     fn value(self) -> CtValue {
+//RS         structure(
+//RS             "LocalDate",
+//RS             vec![
+//RS                 ("year", CtValue::Int(self.year)),
+//RS                 ("month", CtValue::Int(self.month)),
+//RS                 ("day", CtValue::Int(self.day)),
+//RS             ],
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct LocalTime {
+//RS     inner: super::time_kernel::JetLocalTime,
+//RS     hour: i64,
+//RS     minute: i64,
+//RS     second: i64,
+//RS     millisecond: i64,
+//RS     microsecond: i64,
+//RS     nanosecond: i64,
+//RS }
+//RS 
+//RS impl LocalTime {
+//RS     fn from_inner(inner: super::time_kernel::JetLocalTime) -> Self {
+//RS         Self {
+//RS             hour: inner.hour(),
+//RS             minute: inner.minute(),
+//RS             second: inner.second(),
+//RS             millisecond: inner.millisecond(),
+//RS             microsecond: inner.microsecond(),
+//RS             nanosecond: inner.nanosecond(),
+//RS             inner,
+//RS         }
+//RS     }
+//RS 
+//RS     fn new(hour: i64, minute: i64, second: i64) -> Self {
+//RS         Self::from_inner(super::time_kernel::JetLocalTime::new(hour, minute, second))
+//RS     }
+//RS 
+//RS     fn parse(value: &str) -> Result<Self, String> {
+//RS         super::time_kernel::JetLocalTime::parse(value).map(Self::from_inner)
+//RS     }
+//RS 
+//RS     fn seconds(&self) -> i64 {
+//RS         self.inner.to_seconds()
+//RS     }
+//RS 
+//RS     fn to_string_fmt(&self) -> String {
+//RS         self.inner.to_string_fmt()
+//RS     }
+//RS 
+//RS     fn value(self) -> CtValue {
+//RS         structure(
+//RS             "LocalTime",
+//RS             vec![
+//RS                 ("hour", CtValue::Int(self.hour)),
+//RS                 ("minute", CtValue::Int(self.minute)),
+//RS                 ("second", CtValue::Int(self.second)),
+//RS                 ("millisecond", CtValue::Int(self.millisecond)),
+//RS                 ("microsecond", CtValue::Int(self.microsecond)),
+//RS                 ("nanosecond", CtValue::Int(self.nanosecond)),
+//RS             ],
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct DateTime {
+//RS     inner: super::time_kernel::JetDateTime,
+//RS     seconds: i64,
+//RS     nanos: u32,
+//RS     leap_second: bool,
+//RS }
+//RS 
+//RS impl DateTime {
+//RS     fn from_inner(inner: super::time_kernel::JetDateTime) -> Self {
+//RS         Self {
+//RS             seconds: inner.unix_seconds_anchor(),
+//RS             nanos: inner.nanosecond() as u32,
+//RS             leap_second: inner.is_leap_second(),
+//RS             inner,
+//RS         }
+//RS     }
+//RS 
+//RS     fn from_timestamp_ns(seconds: i64, nanos: u32) -> Self {
+//RS         Self::from_inner(super::time_kernel::JetDateTime::from_timestamp_ns_with_leap(
+//RS             seconds, nanos, false,
+//RS         ))
+//RS     }
+//RS     fn from_timestamp_ns_with_leap(seconds: i64, nanos: u32, leap_second: bool) -> Self {
+//RS         Self::from_inner(super::time_kernel::JetDateTime::from_timestamp_ns_with_leap(
+//RS             seconds, nanos, leap_second,
+//RS         ))
+//RS     }
+//RS 
+//RS     fn from_parts(
+//RS         year: i64,
+//RS         month: i64,
+//RS         day: i64,
+//RS         hour: i64,
+//RS         minute: i64,
+//RS         second: i64,
+//RS         nanos: u32,
+//RS     ) -> Self {
+//RS         Self::from_inner(super::time_kernel::JetDateTime::from_parts(
+//RS             year, month, day, hour, minute, second, nanos,
+//RS         ))
+//RS     }
+//RS 
+//RS     fn date(&self) -> Date {
+//RS         Date::from_inner(self.inner.date())
+//RS     }
+//RS 
+//RS     fn time(&self) -> LocalTime {
+//RS         LocalTime::from_inner(self.inner.time_for_output())
+//RS     }
+//RS 
+//RS     fn total_ns(&self) -> i64 {
+//RS         self.inner
+//RS             .total_nanoseconds()
+//RS             .clamp(i64::MIN as i128, i64::MAX as i128) as i64
+//RS     }
+//RS 
+//RS     fn plus_ns(&self, ns: i64) -> Self {
+//RS         Self::from_inner(self.inner.plus_duration_ns(ns))
+//RS     }
+//RS 
+//RS     fn align(&self, unit: &str, method: &str) -> Self {
+//RS         let unit = unit.to_string();
+//RS         let inner = match method {
+//RS             "round" => self.inner.round(&unit),
+//RS             "ceil" => self.inner.ceil(&unit),
+//RS             "floor" => self.inner.floor(&unit),
+//RS             _ => self.inner.truncate(&unit),
+//RS         };
+//RS         Self::from_inner(inner)
+//RS     }
+//RS 
+//RS     fn value(self) -> CtValue {
+//RS         datetime_value(self.seconds, self.nanos, self.leap_second)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct Zone {
+//RS     inner: super::time_kernel::JetZone,
+//RS     name: String,
+//RS     offset: i64,
+//RS }
+//RS 
+//RS impl Zone {
+//RS     fn from_inner(inner: super::time_kernel::JetZone) -> Self {
+//RS         let name = inner.name();
+//RS         let offset = inner.offset_at_utc(0);
+//RS         Self {
+//RS             inner,
+//RS             name,
+//RS             offset,
+//RS         }
+//RS     }
+//RS 
+// END-PORT-PENDING 0577 crates/jet-comptime/src/Comptime/CorePureParity.rs:1848-3649
+

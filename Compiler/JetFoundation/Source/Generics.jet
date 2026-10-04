@@ -1,0 +1,426 @@
+// Rust crates/jet-foundation/src/Generics.rs:1-952. Canonical generic type,
+// inference, trait-contract, derive and diagnostic policy.
+// This private compiler fragment is assembled with Types/Types.jet,
+// AST/Items.jet, Syntax/Spellings.jet, Registry/InterpolationSelectors.jet and
+// Registry/Diagnostics.jet. Shared declarations remain at those owners.
+
+pub PRINTABLE :: "Printable"
+pub DISPLAY :: "Display"
+pub DEBUG :: "Debug"
+pub EQUATABLE :: "Equatable"
+pub COMPARABLE :: "Comparable"
+pub SERIALIZE :: "Serialize"
+pub ENCODE :: "Encode"
+pub DECODE :: "Decode"
+// Renderable is the existing interpolation bound, not another user trait.
+pub RENDERABLE :: "Renderable"
+pub IO_READER :: "Reader"
+pub IO_WRITER :: "Writer"
+pub DRIVER :: "Driver"
+pub SUB :: "Sub"
+pub DIV :: "Div"
+pub CHECKED_TEXT :: "CheckedText"
+pub BUILTIN_TRAITS :: [String]{PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE, RENDERABLE, TRAIT_CLOSE, TRAIT_ADD, SUB, TRAIT_MUL, DIV, TRAIT_NUMERIC, CHECKED_TEXT}
+pub MAX_GENERIC_DEPTH :: 64
+
+pub fn is_literal_capability(name: String) -> Bool Never! {
+    name == TRAIT_LITERAL_INT || name == TRAIT_LITERAL_FLOAT
+}
+
+pub fn quantity_bound(dimension: String, kind: String) -> String Never! {
+    "{BOUND_QUANTITY}<{dimension}, .{kind}>"
+}
+
+// #4465/#4318/#4392: Rust returns two owner-tied &str windows. Until the
+// canonical byte-bounded String subview is available, this complete parser
+// returns owned fields; validation/content match, allocation/borrow parity is gated.
+pub fn parse_quantity_bound(bound: String) -> (dimension: String, kind: String)? Never! {
+    if !bound.starts_with("Quantity<") || !bound.ends_with(">") -> return None
+    body := bound.slice(9, bound.len() - 1) // #4303
+    if !body.contains(", .") -> return None
+    dimension := body.before(", .") // #4303
+    kind := body.after(", .") // #4303
+    if dimension == "" || kind == "" -> return None
+    Val((dimension: dimension, kind: kind))
+}
+
+pub fn is_builtin_trait(name: String) -> Bool Never! { BUILTIN_TRAITS.contains(name) }
+
+pub fn rust_trait_bound(trait_name: String) -> String? Never! {
+    if trait_name == {
+        PRINTABLE -> Val("JetShow")
+        DISPLAY -> Val("__jet_Display")
+        DEBUG -> Val("JetDebug")
+        EQUATABLE -> Val("__jet_Equatable")
+        COMPARABLE -> Val("__jet_Comparable")
+        SERIALIZE -> Val("__jet_Serialize")
+        ENCODE -> Val("__jet_Encode")
+        DECODE -> Val("__jet_Decode")
+        RENDERABLE -> Val("JetDisplay")
+        IO_READER -> Val("JetIOReader")
+        IO_WRITER -> Val("JetIOWriter")
+        DRIVER -> Val("JetDBDriver")
+        TRAIT_CLOSE -> Val("__jet_Close")
+        TRAIT_ADD -> Val("__jet_Add")
+        SUB -> Val("__jet_Sub")
+        TRAIT_MUL -> Val("__jet_Mul")
+        DIV -> Val("__jet_Div")
+        CHECKED_TEXT -> Val("CheckedText")
+        else -> None
+    }
+}
+
+// Rust 109-192: substitution deliberately is one lookup, not recursive chasing
+// of a replacement. Callable annotations and internal tags survive unchanged.
+pub fn substitute_type(ty: Type, subst: [String:Type]) -> Type Never! {
+    if ty == {
+        .Named(name) -> subst.get(name) ?? Type.Named{name: ~name}
+        .Apply(name, args) -> Type.Apply{name: ~name, args: loop arg in args -> substitute_type(arg, subst)}
+        .List(inner) -> Type.List{element: substitute_type(inner, subst)}
+        .FixedList(elem, len) -> Type.FixedList{elem: substitute_type(elem, subst), len: ~len}
+        .Map(key, key_span, value) -> Type.Map{key: substitute_type(key, subst), key_span: key_span, value: substitute_type(value, subst)}
+        .Shared(inner) -> Type.Shared{inner: substitute_type(inner, subst)}
+        .Option(inner) -> Type.Option{inner: substitute_type(inner, subst)}
+        .Result(ok, err) -> Type.Result{ok: substitute_type(ok, subst), err: substitute_type(err, subst)}
+        .Fn(params, ret, effects, contract, metadata, provenance) -> {
+            output_ret := Type?{None}
+            if ret == .Val(value) -> output_ret = Val(substitute_type(value, subst))
+            Type.Fn{params: loop param in params -> substitute_type(param, subst), ret: output_ret, effect_bound: ~effects, param_contract: ~contract, call_metadata: ~metadata, return_view_provenance: ~provenance}
+        }
+        .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: ~field.name, ty: substitute_type(field.ty, subst)}}
+        .TraitObject(bounds) -> Type.TraitObject{bounds: ~bounds}
+        .Tagged(marker, inner) -> {
+            output_marker := ~marker
+            if marker == .User(name) {
+                if subst.get(name) == .Val(replacement) {
+                    if replacement == .Named(sub_name) -> output_marker = TagMarker.User{name: sub_name}
+                }
+            }
+            Type.Tagged{marker: output_marker, inner: substitute_type(inner, subst)}
+        }
+        .Union(members) -> canonicalize_union(loop member in members -> substitute_type(member, subst))
+        .Quantity(base, dimension) -> Type.Quantity{base: substitute_type(base, subst), dimension: ~dimension}
+        .InlineRange(base, lo, hi) -> Type.InlineRange{base: substitute_type(base, subst), lo: lo, hi: hi}
+        else -> ~ty
+    }
+}
+
+// Rust 194-237: the nominal Apply name matters for inference, unlike the
+// structural composite walk used to check callable obligations.
+fn unify_composite_pair(expected: Type, found: Type, subst: &[String:Type], type_params: Set<String>) -> Bool Never! {
+    if expected == {
+        .Apply(expected_name, expected_args) -> {
+            if found == .Apply(found_name, found_args) {
+                if expected_name != found_name || expected_args.len() != found_args.len() -> return false
+                loop (index, arg) in expected_args {
+                    if !unify_types(arg, found_args[index], &subst, type_params) -> return false
+                }
+                return true
+            }
+        }
+        .List(expected_inner) -> if found == .List(found_inner) -> return unify_types(expected_inner, found_inner, &subst, type_params)
+        .Option(expected_inner) -> if found == .Option(found_inner) -> return unify_types(expected_inner, found_inner, &subst, type_params)
+        .Result(expected_ok, expected_err) -> if found == .Result(found_ok, found_err) -> return unify_types(expected_ok, found_ok, &subst, type_params) && unify_types(expected_err, found_err, &subst, type_params)
+        else -> {}
+    }
+    unify_types(expected, found, &subst, type_params)
+}
+
+pub fn unify_types(expected: Type, found: Type, subst: &[String:Type], type_params: Set<String>) -> Bool Never! {
+    resolved_expected :: substitute_type(expected, subst)
+    resolved_found :: substitute_type(found, subst)
+    if type_identity_equal(resolved_expected, resolved_found) -> return true
+    // Preserve Rust's pattern precedence: when both sides are Named, the
+    // expected side binds if it is a variable; otherwise try the found side.
+    if resolved_expected == .Named(param) {
+        if is_type_var_name(param) || type_params.has(param) -> return generic_bind_type(param, resolved_found, &subst)
+    }
+    if resolved_found == .Named(param) {
+        if is_type_var_name(param) || type_params.has(param) -> return generic_bind_type(param, resolved_expected, &subst)
+    }
+    if resolved_expected == {
+        .Apply(_, _) -> if resolved_found == .Apply(_, _) -> return unify_composite_pair(resolved_expected, resolved_found, &subst, type_params)
+        .List(_) -> if resolved_found == .List(_) -> return unify_composite_pair(resolved_expected, resolved_found, &subst, type_params)
+        .Option(_) -> if resolved_found == .Option(_) -> return unify_composite_pair(resolved_expected, resolved_found, &subst, type_params)
+        .Result(_, _) -> if resolved_found == .Result(_, _) -> return unify_composite_pair(resolved_expected, resolved_found, &subst, type_params)
+        .Map(expected_key, _, expected_value) -> if resolved_found == .Map(found_key, _, found_value) -> return unify_types(expected_key, found_key, &subst, type_params) && unify_types(expected_value, found_value, &subst, type_params)
+        .Shared(expected_inner) -> if resolved_found == .Shared(found_inner) -> return unify_types(expected_inner, found_inner, &subst, type_params)
+        .TraitObject(expected_bounds) -> if resolved_found == .TraitObject(found_bounds) -> return expected_bounds == found_bounds
+        .Quantity(expected_base, expected_dimension) -> if resolved_found == .Quantity(found_base, found_dimension) {
+            if expected_dimension == found_dimension -> return unify_types(expected_base, found_base, &subst, type_params)
+        }
+        .InlineRange(expected_base, expected_lo, expected_hi) -> if resolved_found == .InlineRange(found_base, found_lo, found_hi) {
+            if expected_lo == found_lo && expected_hi == found_hi -> return unify_types(expected_base, found_base, &subst, type_params)
+        }
+        else -> {}
+    }
+    false
+}
+
+fn generic_bind_type(param: String, concrete: Type, subst: &[String:Type]) -> Bool Never! {
+    if subst.get(param) == .Val(existing) -> return type_identity_equal(existing, concrete)
+    subst[param] = ~concrete
+    true
+}
+
+pub fn is_type_var_name(name: String) -> Bool Never! {
+    if name.len() != 1 -> return false
+    name >= "A" && name <= "Z"
+}
+
+pub fn free_type_params(ty: Type) -> Set<String> Never! {
+    out := Set.from([String]{})
+    collect_free(ty, &out)
+    out
+}
+
+fn collect_free(ty: Type, out: &Set<String>) Never! {
+    if ty == {
+        .Named(name) -> if is_type_var_name(name) -> { _ := &out.add(name) }
+        .Apply(_, args) -> loop arg in args -> collect_free(arg, &out)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .Quantity(inner, _) | .InlineRange(inner, _, _) -> collect_free(inner, &out)
+        .Map(key, _, value) | .Result(key, value) -> { collect_free(key, &out); collect_free(value, &out) }
+        .Fn(params, ret, _, _, _, _) -> {
+            loop param in params -> collect_free(param, &out)
+            if ret == .Val(value) -> collect_free(value, &out)
+        }
+        .Tuple(fields) -> loop field in fields -> collect_free(field.ty, &out)
+        .Union(members) -> loop member in members -> collect_free(member, &out)
+        else -> {}
+    }
+}
+
+pub fn sig_matches_trait(params: [(convention: AccessConvention, ty: Type)], ret: Type?, expected: TraitMethodSig, assoc: [String:Type]) -> Bool Never! {
+    if params.len() != expected.params.len() -> return false
+    loop (index, param) in params {
+        if !types_equal_modulo_self(substitute_type(param.ty, assoc), substitute_type(expected.params[index].ty, assoc)) -> return false
+    }
+    if ret == {
+        .None -> expected.return_type == None
+        .Val(value) -> if expected.return_type == {
+            .Val(expected_value) -> types_equal_modulo_self(substitute_type(value, assoc), substitute_type(expected_value, assoc))
+            .None -> false
+        }
+    }
+}
+
+fn types_equal_modulo_self(a: Type, b: Type) -> Bool Never! {
+    if a == .Named(name) { if name == "" -> return true }
+    if b == .Named(name) { if name == "" -> return true }
+    type_identity_equal(a, b)
+}
+
+fn generic_concrete_type(owner: String, ty: Type, assoc: [String:Type]) -> String Never! {
+    concrete :: substitute_type(ty, assoc)
+    if concrete == .Named(name) { if name == "" -> return ~owner }
+    type_name(concrete)
+}
+
+pub fn trait_method_expected_signature(owner: String, sig: TraitMethodSig, assoc: [String:Type]) -> String Never! {
+    params := [String]{}
+    loop param in sig.params {
+        if param.name == KW_SELF {
+            &params.push("{access_sigil(param.convention)}self")
+        } else {
+            &params.push("{param.name}: {access_sigil(param.convention)}{generic_concrete_type(owner, param.ty, assoc)}")
+        }
+    }
+    pieces := [String]{"fn {sig.name}({params.join(", ")})"}
+    success_value := false
+    if sig.return_type == .Val(ret) {
+        success_value = true
+        if ret == {
+            .Result(ok, _) -> if ok == .Named(name) -> success_value = name != INTERNAL_UNIT_TYPE
+            .Named(name) -> success_value = name != INTERNAL_UNIT_TYPE
+            else -> {}
+        }
+    }
+    if sig.declared_effects == .Val(effects) {
+        names :: loop effect in effects -> effect.name
+        &pieces.push(" -[{names.join(", ")}]>")
+    } else if sig.is_pure {
+        &pieces.push(" -[]>")
+    } else if success_value {
+        &pieces.push(" ->")
+    }
+    if sig.return_type == .Val(ret) -> &pieces.push(" {generic_concrete_type(owner, ret, assoc)}")
+    "`{pieces.join("")}`"
+}
+
+pub fn e0904(span: Span, param: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E0904", Val(span), "can't figure out what `{param}` should be here", "generic calls need enough context to pick a concrete type", "add a type annotation on a binding, like `p: Pair<Int> :: …`")
+}
+pub fn e0905(type_name_text: String, trait_name: String, span: Span, needs_derive: Bool) -> Diagnostic Never! {
+    fix :: if {
+        trait_name == COMPARABLE && type_name_text == TYPE_FLOAT -> "use explicit Float comparisons or sort by a total key that handles NaN"
+        needs_derive && (trait_name == COMPARABLE || trait_name == SERIALIZE) -> "write `#{trait_name}` before `{type_name_text}`, or use a different approach"
+        trait_name == COMPARABLE -> "write `#Comparable` before `{type_name_text}`, or use `sort_by` with a key"
+        trait_name == TRAIT_NUMERIC -> "write `#Numeric` on a distinct number type, or `impl {type_name_text}.Numeric {{ … }}` with `zero` and `one` on a struct that implements Add, Sub, Mul, and Comparable"
+        else -> "write `impl {type_name_text}.{trait_name} {{ … }}` with every required method"
+    }
+    diagnostic_from_registry("E0905", Val(span), "`{type_name_text}` isn't `{trait_name}`", "`{type_name_text}` would need to implement `{trait_name}` before it can be used here", fix)
+}
+pub fn e0906(trait_name: String, missing: [String], span: Span) -> Diagnostic Never! {
+    names :: loop name in missing -> "`{name}`"
+    diagnostic_from_registry("E0906", Val(span), "`impl …: {trait_name}` is missing {names.join(", ")}", "every `{trait_name}` method must appear in the impl block", "add the missing method signatures and bodies")
+}
+pub fn e0907(trait_name: String, method: String, expected: String, span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0907", Val(span), "`{method}` doesn't match the `{trait_name}` contract", "a trait implementation must use the trait method's receiver, parameters, return type, and effects", "write {expected}, matching the `{trait_name}` declaration exactly, including `self`, types, labels, return type, and effects")
+}
+pub fn e0908(type_name_text: String, trait_name: String, span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0908", Val(span), "`{type_name_text}` already implements `{trait_name}`", "each type may implement a trait only once", "remove the duplicate `impl` block")
+}
+pub fn e0913(trait_name: String, missing: [String], span: Span) -> Diagnostic Never! {
+    names :: loop name in missing -> "`type {name}`"
+    definitions :: loop name in missing -> "`type {name} = …`"
+    diagnostic_from_registry("E0913", Val(span), "`impl …: {trait_name}` doesn't set {names.join(", ")}", "`{trait_name}` declares an associated type each impl must define", "add {definitions.join(", ")} inside the impl block")
+}
+fn join_with_or(items: [String]) -> String Never! {
+    if items.len() == 0 -> return ""
+    if items.len() == 1 -> return ~items[0]
+    prefix := items.view(0..<items.len() - 1)
+    "{prefix.join(", ")}, or {items[items.len() - 1]}"
+}
+pub fn e0914(selector: String, span: Span) -> Diagnostic Never! {
+    valid_items := [String]{}
+    fixes := [String]{}
+    loop row in INTERPOLATION_SELECTORS {
+        if row.arguments == {
+            .NoArguments -> {
+                &valid_items.push("`:{row.name}`")
+                &fixes.push("`{{value:{row.name}}}`")
+            }
+            .Precision | .Width -> {
+                &valid_items.push("`:{row.name}(n)`")
+                &fixes.push("`{{value:{row.name}(2)}}`")
+            }
+            .WidthFill -> {
+                &valid_items.push("`:{row.name}(n[, \"fill\"])`")
+                &fixes.push("`{{value:{row.name}(2, \" \")}}`")
+            }
+            .UnitStyle(styles) -> {
+                &valid_items.push("`:{row.name}({styles.join("|")})`")
+                examples :: loop style in styles -> "`{{value:{row.name}({style})}}`"
+                &fixes.push(examples.join(" or "))
+            }
+        }
+    }
+    diagnostic_from_registry("E0914", Val(span), "unknown interpolation selector `:{selector}`", "string interpolation supports a closed selector set — use {join_with_or(valid_items)}", "write {fixes.join(", ")}, or `{{value}}`")
+}
+pub fn e0915(type_show: String, span: Span) -> Diagnostic Never! {
+    selector :: interpolation_selector_for_kind(InterpolationSelectorKind.Debug)
+    diagnostic_from_registry("E0915", Val(span), "`{type_show}` has no `Display` implementation", "bare {{value}} interpolation calls `Display` — there is no default for user types", "add `impl {type_show}.Display {{ fn display(self) -> String {{ … }} }}`, or use `{{value:{selector.name}}}` for debug output")
+}
+pub fn e0922(span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0922", Val(span), "`derive Debug` inside a type body is retired", "signed type markers are the one control for compiler-generated Debug implementations", "write `#Debug` before the type to opt in, `#!Debug` to opt out, or implement `Debug` by hand")
+}
+pub fn e0929(trait_name: String, span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0929", Val(span), "`derive {trait_name}` inside a type body is retired", "a derive request has one spelling: the marker before the type; `derive` defines providers", "write `#{trait_name}` before the type")
+}
+pub fn e0916(type_show: String, field: String, span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0916", Val(span), "`{type_show}` can't auto-derive `Debug` because field `{field}` isn't debuggable", "auto-derived `Debug` requires every non-`#[Redact]` field to be debuggable", "mark `{field}` with `#[Redact]`, change its type, or implement `Debug` manually for `{type_show}`")
+}
+pub fn e0732(tag_name: String, method: String, span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0732", Val(span), "the tag `{tag_name}` declares a method `{method}`, but tags have no methods", "a `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches", "make `{tag_name}` a `trait` if `{method}` should dispatch, or remove the method to keep `{tag_name}` a marker tag")
+}
+pub fn e0731(tag_name: String, context: String, span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0731", Val(span), "`{tag_name}` is a tag, but {context} needs a trait", "a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`", "declare `{tag_name}` as a `trait` with the method(s) it should provide")
+}
+pub fn e0901(method: String, bound: String, span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0901", Val(span), "calling `{method}` needs `{bound}`", "methods on a type parameter require that bound", "add `<T: {bound}>` to the generic parameter list")
+}
+pub fn e0902(span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0902", Val(span), "this `impl` can't live here", "at least one of the trait or the type must be defined in this program (orphan rule)", "define the trait or type in this file, or move the impl")
+}
+pub fn e0324(span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0324", Val(span), "a type alias needs type parameters — write `{KW_ALIAS} Name<T> :: …`", "transparent `{KW_ALIAS}` is only for shortening generic spellings (D-TYPEALIAS1)", "for a distinct type name over a primitive, use `{KW_STRUCT} Name(BaseType)` instead")
+}
+pub fn e0036(keyword: String, span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0036", Val(span), "{LANG_NAME} uses the trait name directly, not `{keyword}`", "a trait in type position means dynamic dispatch — Jet handles the details for you", "write the trait name, like `Shape`")
+}
+pub fn e0909(chain: String, span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0909", Val(span), "generic instantiation goes too deep", "nested generic types hit a depth limit to prevent runaway monomorphization", "simplify the types involved: {chain}")
+}
+
+// The active path replaces Rust's cloned path on every stack item. Traverse
+// siblings in reverse order, matching the original LIFO stack's first failure.
+// Deliberately do not count or traverse the variants Rust leaves opaque here.
+// #4500: Main-authorized interim DFS; uncounted Map/Result/Fn chains use the
+// call stack. Ratified @Type live links will enable the original iterative
+// [(@Type, chain)] traversal without copying recursive Type values.
+pub fn generic_depth_exceeded(ty: Type) -> String? Never! {
+    chain := [String]{}
+    generic_depth_visit(ty, &chain)
+}
+fn generic_depth_counted(ty: Type, name: String, chain: &[String]) -> String? Never! {
+    &chain.push(name)
+    if chain.len() > MAX_GENERIC_DEPTH -> return Val(chain.join(" → "))
+    result :: generic_depth_children(ty, &chain)
+    _ := &chain.pop()
+    result
+}
+fn generic_depth_visit(ty: Type, chain: &[String]) -> String? Never! {
+    if ty == {
+        .Apply(name, _) -> generic_depth_counted(ty, name, &chain)
+        .List(_) -> generic_depth_counted(ty, "List", &chain)
+        .Option(_) -> generic_depth_counted(ty, "T?", &chain)
+        .Shared(_) -> generic_depth_counted(ty, "Shared", &chain)
+        else -> generic_depth_children(ty, &chain)
+    }
+}
+fn generic_depth_children(ty: Type, chain: &[String]) -> String? Never! {
+    if ty == {
+        .Apply(_, args) -> {
+            index := args.len()
+            loop index > 0 {
+                index -= 1
+                if generic_depth_visit(args[index], &chain) == .Val(exceeded) -> return Val(exceeded)
+            }
+        }
+        .List(inner) | .Option(inner) | .Shared(inner) -> return generic_depth_visit(inner, &chain)
+        .Map(key, _, value) | .Result(key, value) -> {
+            if generic_depth_visit(value, &chain) == .Val(exceeded) -> return Val(exceeded)
+            return generic_depth_visit(key, &chain)
+        }
+        .Fn(params, ret, _, _, _, _) -> {
+            if ret == .Val(value) {
+                if generic_depth_visit(value, &chain) == .Val(exceeded) -> return Val(exceeded)
+            }
+            index := params.len()
+            loop index > 0 {
+                index -= 1
+                if generic_depth_visit(params[index], &chain) == .Val(exceeded) -> return Val(exceeded)
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+pub fn collect_clone_type_param_mentions(ty: Type, param_names: Set<String>, out: &Set<String>) Never! {
+    if ty == {
+        .Named(name) -> if param_names.has(name) -> { _ := &out.add(name) }
+        .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Measure(_) -> {}
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Quantity(inner, _) | .InlineRange(inner, _, _) -> collect_clone_type_param_mentions(inner, param_names, &out)
+        .Union(members) -> loop member in members -> collect_clone_type_param_mentions(member, param_names, &out)
+        .Map(key, _, value) | .Result(key, value) -> { collect_clone_type_param_mentions(key, param_names, &out); collect_clone_type_param_mentions(value, param_names, &out) }
+        .Apply(_, args) -> loop arg in args -> collect_clone_type_param_mentions(arg, param_names, &out)
+        .Tuple(fields) -> loop field in fields -> collect_clone_type_param_mentions(field.ty, param_names, &out)
+        else -> {}
+    }
+}
+pub fn collect_type_param_mentions(ty: Type, param_names: Set<String>, out: &Set<String>) Never! {
+    if ty == {
+        .Named(name) -> if param_names.has(name) -> { _ := &out.add(name) }
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .Quantity(inner, _) | .InlineRange(inner, _, _) -> collect_type_param_mentions(inner, param_names, &out)
+        .Union(members) -> loop member in members -> collect_type_param_mentions(member, param_names, &out)
+        .Map(key, _, value) | .Result(key, value) -> { collect_type_param_mentions(key, param_names, &out); collect_type_param_mentions(value, param_names, &out) }
+        .Apply(_, args) -> loop arg in args -> collect_type_param_mentions(arg, param_names, &out)
+        .Tuple(fields) -> loop field in fields -> collect_type_param_mentions(field.ty, param_names, &out)
+        .Fn(params, ret, _, _, _, _) -> {
+            loop param in params -> collect_type_param_mentions(param, param_names, &out)
+            if ret == .Val(value) -> collect_type_param_mentions(value, param_names, &out)
+        }
+        else -> {}
+    }
+}

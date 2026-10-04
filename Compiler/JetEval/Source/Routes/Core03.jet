@@ -1,0 +1,1030 @@
+// PORT-PENDING 0578 crates-jet-comptime-src-comptime-corepureparity-slice-3650: crates/jet-comptime/src/Comptime/CorePureParity.rs:3650-4675
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     fn utc() -> Self {
+//RS         Self::from_inner(super::time_kernel::JetZone::utc())
+//RS     }
+//RS 
+//RS     fn parse_name(name: &str) -> Result<Self, String> {
+//RS         super::time_kernel::JetZone::named(&name.to_string()).map(Self::from_inner)
+//RS     }
+//RS 
+//RS     fn value(self) -> CtValue {
+//RS         structure(
+//RS             "Zone",
+//RS             vec![
+//RS                 ("name", CtValue::Str(self.name)),
+//RS                 ("offset", CtValue::Int(self.offset)),
+//RS             ],
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ZonedDateTime {
+//RS     inner: super::time_kernel::JetZonedDateTime,
+//RS     instant: DateTime,
+//RS     zone: Zone,
+//RS }
+//RS 
+//RS impl ZonedDateTime {
+//RS     fn from_inner(inner: super::time_kernel::JetZonedDateTime) -> Self {
+//RS         let instant = DateTime::from_inner(inner.to_datetime());
+//RS         let zone = Zone::from_inner(inner.zone());
+//RS         Self {
+//RS             inner,
+//RS             instant,
+//RS             zone,
+//RS         }
+//RS     }
+//RS 
+//RS     fn from_datetime(instant: DateTime, zone: Zone) -> Self {
+//RS         Self::from_inner(instant.inner.in_zone(&zone.inner))
+//RS     }
+//RS 
+//RS     fn from_local(date: Date, time: LocalTime, zone: Zone) -> Self {
+//RS         Self::from_inner(super::time_kernel::JetZonedDateTime::from_local(
+//RS             &date.inner,
+//RS             &time.inner,
+//RS             &zone.inner,
+//RS         ))
+//RS     }
+//RS 
+//RS     fn offset_seconds(&self) -> i64 {
+//RS         self.inner.offset_seconds()
+//RS     }
+//RS 
+//RS     fn is_dst(&self) -> bool {
+//RS         self.inner.is_dst()
+//RS     }
+//RS 
+//RS     fn date(&self) -> Date {
+//RS         Date::from_inner(self.inner.date())
+//RS     }
+//RS 
+//RS     fn time(&self) -> LocalTime {
+//RS         LocalTime::from_inner(self.inner.time())
+//RS     }
+//RS 
+//RS     fn to_string_fmt(&self) -> String {
+//RS         self.inner.to_string_fmt()
+//RS     }
+//RS 
+//RS     fn value(self) -> CtValue {
+//RS         structure(
+//RS             "ZonedDateTime",
+//RS             vec![
+//RS                 ("instant", self.instant.value()),
+//RS                 ("zone", self.zone.value()),
+//RS             ],
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS fn zone_utc() -> CtValue {
+//RS     Zone::utc().value()
+//RS }
+//RS 
+//RS fn decimal_from_str(args: &[CtValue], span: Span) -> EvalResult {
+//RS     match crate::Numeric::CtDecimal::from_str(string_arg(args, 0, span)?) {
+//RS         Ok(decimal) => Ok(decimal.to_value()),
+//RS         Err(error) => Err(unsupported(&error, span)),
+//RS     }
+//RS }
+//RS 
+//RS fn fraction_new(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let numerator = crate::Comptime::Builtins::exact_big(
+//RS         args.first()
+//RS             .ok_or_else(|| unsupported("a ratio top that is not a whole number", span))?,
+//RS     )
+//RS     .ok_or_else(|| unsupported("a ratio top that is not a whole number", span))?;
+//RS     let denominator = crate::Comptime::Builtins::exact_big(
+//RS         args.get(1)
+//RS             .ok_or_else(|| unsupported("a ratio bottom that is not a whole number", span))?,
+//RS     )
+//RS     .ok_or_else(|| unsupported("a ratio bottom that is not a whole number", span))?;
+//RS     Ok(
+//RS         match crate::Numeric::CtFraction::from_bigints(numerator, denominator) {
+//RS             Some(value) => CtValue::Present(Box::new(value.to_value())),
+//RS             None => CtValue::absent(crate::AST::Type::Named(
+//RS                 crate::Syntax::TYPE_FRACTION.to_string(),
+//RS             )),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn fraction_from_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<crate::Numeric::CtFraction, Diagnostic> {
+//RS     crate::Numeric::CtFraction::from_value(value).map_err(|error| unsupported(&error, span))
+//RS }
+//RS 
+//RS fn decimal_from_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<crate::Numeric::CtDecimal, Diagnostic> {
+//RS     crate::Numeric::CtDecimal::from_value(value).map_err(|error| unsupported(&error, span))
+//RS }
+//RS 
+//RS fn zone_named(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(match Zone::parse_name(string_arg(args, 0, span)?) {
+//RS         Ok(zone) => CtValue::Present(Box::new(zone.value())),
+//RS         Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+//RS     })
+//RS }
+//RS 
+//RS fn zone_from_value(value: &CtValue, span: Span) -> Result<Zone, Diagnostic> {
+//RS     let name = match field(value, "Zone", "name") {
+//RS         Some(CtValue::Str(name)) => name,
+//RS         _ => return Err(unsupported("malformed Zone.name value", span)),
+//RS     };
+//RS     let _ = int_field(value, "Zone", "offset", span)?;
+//RS     Zone::parse_name(name).map_err(|error| unsupported(&error, span))
+//RS }
+//RS 
+//RS fn zoned_from_value(value: &CtValue, span: Span) -> Result<ZonedDateTime, Diagnostic> {
+//RS     let instant = match field(value, "ZonedDateTime", "instant") {
+//RS         Some(instant) => datetime_from_value(instant, span)?,
+//RS         None => {
+//RS             return Err(unsupported("malformed ZonedDateTime.instant value", span));
+//RS         }
+//RS     };
+//RS     let zone = match field(value, "ZonedDateTime", "zone") {
+//RS         Some(zone) => zone_from_value(zone, span)?,
+//RS         None => {
+//RS             return Err(unsupported("malformed ZonedDateTime.zone value", span));
+//RS         }
+//RS     };
+//RS     Ok(ZonedDateTime::from_datetime(instant, zone))
+//RS }
+//RS 
+//RS fn zoned_from_datetime(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let instant = datetime_from_value(
+//RS         args.get(0)
+//RS             .ok_or_else(|| unsupported("time.zoned expects a DateTime", span))?,
+//RS         span,
+//RS     )?;
+//RS     let zone = zone_from_value(
+//RS         args.get(1)
+//RS             .ok_or_else(|| unsupported("time.zoned expects a Zone", span))?,
+//RS         span,
+//RS     )?;
+//RS     Ok(ZonedDateTime::from_datetime(instant, zone).value())
+//RS }
+//RS 
+//RS fn zoned_from_local(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let date = date_from_value(
+//RS         args.get(0)
+//RS             .ok_or_else(|| unsupported("time.zoned_local expects a LocalDate", span))?,
+//RS         "LocalDate",
+//RS         span,
+//RS     )?;
+//RS     let time = local_time_from_value(
+//RS         args.get(1)
+//RS             .ok_or_else(|| unsupported("time.zoned_local expects a LocalTime", span))?,
+//RS         span,
+//RS     )?;
+//RS     let zone = zone_from_value(
+//RS         args.get(2)
+//RS             .ok_or_else(|| unsupported("time.zoned_local expects a Zone", span))?,
+//RS         span,
+//RS     )?;
+//RS     let disambiguation = args
+//RS         .get(3)
+//RS         .map(|value| match value {
+//RS             CtValue::Str(value) => Ok(value.as_str()),
+//RS             _ => Err(unsupported(
+//RS                 "time.zoned_local expects a disambiguation String",
+//RS                 span,
+//RS             )),
+//RS         })
+//RS         .transpose()?
+//RS         .unwrap_or("compatible");
+//RS     Ok(
+//RS         match super::time_kernel::JetZonedDateTime::from_local_with_disambiguation(
+//RS             &date.inner,
+//RS             &time.inner,
+//RS             &zone.inner,
+//RS             disambiguation,
+//RS         ) {
+//RS             Ok(zoned) => CtValue::Present(Box::new(ZonedDateTime::from_inner(zoned).value())),
+//RS             Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn zoned_parse(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(
+//RS         match super::time_kernel::jet_time_parse_zoned(&string_arg(args, 0, span)?.to_string()) {
+//RS             Ok(zoned) => CtValue::Present(Box::new(ZonedDateTime::from_inner(zoned).value())),
+//RS             Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn format_zoned_pattern(pattern: &str, zoned: ZonedDateTime) -> String {
+//RS     zoned.inner.format_pattern(&pattern.to_string())
+//RS }
+//RS 
+//RS fn date_from_value(value: &CtValue, type_name: &str, span: Span) -> Result<Date, Diagnostic> {
+//RS     let field_type_name = match value {
+//RS         CtValue::Struct {
+//RS             type_name: actual, ..
+//RS         } => {
+//RS             let actual = actual
+//RS                 .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+//RS                 .unwrap_or(actual.as_str());
+//RS             if matches!(type_name, "Date" | "LocalDate") && matches!(actual, "Date" | "LocalDate") {
+//RS                 actual
+//RS             } else {
+//RS                 type_name
+//RS             }
+//RS         }
+//RS         _ => type_name,
+//RS     };
+//RS     Ok(Date::new(
+//RS         int_field(value, field_type_name, "year", span)?,
+//RS         int_field(value, field_type_name, "month", span)?,
+//RS         int_field(value, field_type_name, "day", span)?,
+//RS     ))
+//RS }
+//RS 
+//RS fn local_time_from_value(value: &CtValue, span: Span) -> Result<LocalTime, Diagnostic> {
+//RS     let nanos = match field(value, "LocalTime", "nanosecond") {
+//RS         Some(value) => as_int(value, span)?
+//RS             .clamp(0, 999_999_999)
+//RS             .try_into()
+//RS             .unwrap_or(0),
+//RS         None => 0,
+//RS     };
+//RS     Ok(LocalTime::from_inner(
+//RS         super::time_kernel::JetLocalTime::with_nanosecond(
+//RS             int_field(value, "LocalTime", "hour", span)?,
+//RS             int_field(value, "LocalTime", "minute", span)?,
+//RS             int_field(value, "LocalTime", "second", span)?,
+//RS             nanos,
+//RS         ),
+//RS     ))
+//RS }
+//RS 
+//RS fn datetime_from_value(value: &CtValue, span: Span) -> Result<DateTime, Diagnostic> {
+//RS     let leap_second = match field(value, "DateTime", "leap_second") {
+//RS         Some(CtValue::Bool(value)) => *value,
+//RS         _ => {
+//RS             return Err(unsupported(
+//RS                 "malformed DateTime.leap_second value",
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     };
+//RS     Ok(DateTime::from_timestamp_ns_with_leap(
+//RS         int_field(value, "DateTime", "secs", span)?,
+//RS         int_field(value, "DateTime", "nanos", span)? as u32,
+//RS         leap_second,
+//RS     ))
+//RS }
+//RS 
+//RS /// One decode of a `Period` struct value into the Prelude kernel's carrier.
+//RS fn period_from_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<super::time_kernel::JetPeriod, Diagnostic> {
+//RS     Ok(super::time_kernel::JetPeriod::new(
+//RS         int_field(value, "Period", "years", span)?,
+//RS         int_field(value, "Period", "months", span)?,
+//RS         int_field(value, "Period", "days", span)?,
+//RS     ))
+//RS }
+//RS 
+//RS fn date_truncate(date: Date, unit: &str) -> Date {
+//RS     Date::from_inner(date.inner.truncate(&unit.to_string()))
+//RS }
+//RS 
+//RS fn format_time_pattern(pattern: &str, date: Date, time: LocalTime) -> String {
+//RS     super::time_kernel::jet_time_format_pattern(
+//RS         &pattern.to_string(),
+//RS         &date.inner,
+//RS         &time.inner,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn period_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+//RS     Ok(period_from_value(value, span)?.to_string_fmt())
+//RS }
+//RS 
+//RS fn datetime_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+//RS     Ok(datetime_from_value(value, span)?.inner.to_string_fmt())
+//RS }
+//RS 
+//RS fn date_value(year: i64, month: i64, day: i64) -> CtValue {
+//RS     Date::new(year, month, day).value()
+//RS }
+//RS 
+//RS fn date_new_call(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(date_value(
+//RS         int_arg(args, 0, span)?,
+//RS         int_arg(args, 1, span)?,
+//RS         int_arg(args, 2, span)?,
+//RS     ))
+//RS }
+//RS 
+//RS fn date_parse_call(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(match Date::parse(string_arg(args, 0, span)?) {
+//RS         Ok(date) => CtValue::Present(Box::new(date.value())),
+//RS         Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+//RS     })
+//RS }
+//RS 
+//RS fn period_value(years: i64, months: i64, days: i64) -> CtValue {
+//RS     let period = super::time_kernel::JetPeriod::new(years, months, days);
+//RS     period_value_from_inner(period)
+//RS }
+//RS 
+//RS fn period_value_from_inner(period: super::time_kernel::JetPeriod) -> CtValue {
+//RS     let (years, months, days) = period.components();
+//RS     structure(
+//RS         "Period",
+//RS         vec![
+//RS             ("years", CtValue::Int(years)),
+//RS             ("months", CtValue::Int(months)),
+//RS             ("days", CtValue::Int(days)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn period(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(period_value(
+//RS         int_arg(args, 0, span)?,
+//RS         int_arg(args, 1, span)?,
+//RS         int_arg(args, 2, span)?,
+//RS     ))
+//RS }
+//RS 
+//RS fn period_unit(args: &[CtValue], span: Span, field_index: usize) -> EvalResult {
+//RS     let mut fields = [0_i64; 3];
+//RS     fields[field_index] = int_arg(args, 0, span)?;
+//RS     Ok(period_value(fields[0], fields[1], fields[2]))
+//RS }
+//RS 
+//RS fn datetime_value(seconds: i64, nanos: u32, leap_second: bool) -> CtValue {
+//RS     structure(
+//RS         "DateTime",
+//RS         vec![
+//RS             ("secs", CtValue::Int(seconds)),
+//RS             ("nanos", CtValue::Int(nanos as i64)),
+//RS             ("leap_second", CtValue::Bool(leap_second)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn instant_start_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
+//RS     int_field(value, "Instant", "start_ns", span)
+//RS }
+//RS 
+//RS fn instant_elapsed_millis(value: &CtValue, span: Span) -> EvalResult {
+//RS     Ok(CtValue::Int(
+//RS         super::time_kernel::jet_time_instant_elapsed_ns(
+//RS             super::time_kernel::jet_time_monotonic_now_ns(),
+//RS             instant_start_ns(value, span)?,
+//RS         )
+//RS         .saturating_div(1_000_000),
+//RS     ))
+//RS }
+//RS 
+//RS fn instant_elapsed(value: &CtValue, span: Span) -> EvalResult {
+//RS     Ok(duration_value(
+//RS         super::time_kernel::jet_time_instant_elapsed_ns(
+//RS             super::time_kernel::jet_time_monotonic_now_ns(),
+//RS             instant_start_ns(value, span)?,
+//RS         ),
+//RS     ))
+//RS }
+//RS 
+//RS fn duration_value(ns: i64) -> CtValue {
+//RS     structure(crate::Syntax::DURATION_TYPE, vec![("ns", CtValue::Int(ns))])
+//RS }
+//RS 
+//RS fn duration_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
+//RS     int_field(value, crate::Syntax::DURATION_TYPE, "ns", span)
+//RS }
+//RS 
+//RS fn datetime_from_timestamp(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(
+//RS         DateTime::from_inner(super::time_kernel::JetDateTime::from_timestamp(int_arg(
+//RS             args, 0, span,
+//RS         )?))
+//RS         .value(),
+//RS     )
+//RS }
+//RS 
+//RS fn datetime_from_unix_ms(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(
+//RS         DateTime::from_inner(super::time_kernel::JetDateTime::from_unix_ms(int_arg(
+//RS             args, 0, span,
+//RS         )?))
+//RS         .value(),
+//RS     )
+//RS }
+//RS 
+//RS fn datetime_from_unix_seconds(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(
+//RS         DateTime::from_inner(super::time_kernel::JetDateTime::from_unix_seconds(int_arg(
+//RS             args, 0, span,
+//RS         )?))
+//RS         .value(),
+//RS     )
+//RS }
+//RS 
+//RS fn datetime_from_unix_microseconds(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(
+//RS         DateTime::from_inner(super::time_kernel::JetDateTime::from_unix_microseconds(
+//RS             int_arg(args, 0, span)?,
+//RS         ))
+//RS         .value(),
+//RS     )
+//RS }
+//RS 
+//RS fn datetime_from_unix_nanoseconds(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(
+//RS         DateTime::from_inner(super::time_kernel::JetDateTime::from_unix_nanoseconds(
+//RS             int_arg(args, 0, span)?,
+//RS         ))
+//RS         .value(),
+//RS     )
+//RS }
+//RS 
+//RS fn date_iso_week_parse(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(
+//RS         match super::time_kernel::JetDate::parse_iso_week_date(string_arg(args, 0, span)?) {
+//RS             Ok(date) => CtValue::Present(Box::new(Date::from_inner(date).value())),
+//RS             Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn date_from_iso_week(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(
+//RS         match super::time_kernel::jet_time_from_iso_week(
+//RS             int_arg(args, 0, span)?,
+//RS             int_arg(args, 1, span)?,
+//RS             int_arg(args, 2, span)?,
+//RS         ) {
+//RS             Ok(date) => CtValue::Present(Box::new(Date::from_inner(date).value())),
+//RS             Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn datetime_parse(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let text = string_arg(args, 0, span)?.to_string();
+//RS     Ok(match super::time_kernel::jet_time_parse_rfc3339(&text) {
+//RS         Ok(datetime) => CtValue::Present(Box::new(DateTime::from_inner(datetime).value())),
+//RS         Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+//RS     })
+//RS }
+//RS 
+//RS fn datetime_parts(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(DateTime::from_parts(
+//RS         int_arg(args, 0, span)?,
+//RS         int_arg(args, 1, span)?,
+//RS         int_arg(args, 2, span)?,
+//RS         int_arg(args, 3, span)?,
+//RS         int_arg(args, 4, span)?,
+//RS         int_arg(args, 5, span)?,
+//RS         0,
+//RS     )
+//RS     .value())
+//RS }
+//RS 
+//RS fn local_time_parts(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(LocalTime::new(
+//RS         int_arg(args, 0, span)?,
+//RS         int_arg(args, 1, span)?,
+//RS         int_arg(args, 2, span)?,
+//RS     )
+//RS     .value())
+//RS }
+//RS 
+//RS fn time_days_in_month(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(CtValue::Int(Date::days_in_month(
+//RS         int_arg(args, 0, span)?,
+//RS         int_arg(args, 1, span)?,
+//RS     )))
+//RS }
+//RS 
+//RS fn time_is_leap_year(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(CtValue::Bool(Date::is_leap(int_arg(args, 0, span)?)))
+//RS }
+//RS 
+//RS fn local_time_parse(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(match LocalTime::parse(string_arg(args, 0, span)?) {
+//RS         Ok(time) => CtValue::Present(Box::new(time.value())),
+//RS         Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+//RS     })
+//RS }
+//RS 
+//RS fn measurement(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let (value, uncertainty) = super::measurement_kernel::jet_measurement_kernel_new(
+//RS         float_arg(args, 0, span)?,
+//RS         float_arg(args, 1, span)?,
+//RS     );
+//RS     Ok(structure(
+//RS         "Measurement",
+//RS         vec![
+//RS             ("value", CtValue::Float(CtFloat::f64(value))),
+//RS             ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
+//RS         ],
+//RS     ))
+//RS }
+//RS 
+//RS fn measurement_arithmetic(left: &CtValue, method: &str, right: &CtValue, span: Span) -> EvalResult {
+//RS     let left_value = match field(left, "Measurement", "value") {
+//RS         Some(CtValue::Float(value)) => value.as_f64(),
+//RS         _ => return Err(unsupported("malformed Measurement.value value", span)),
+//RS     };
+//RS     let left_uncertainty = match field(left, "Measurement", "uncertainty") {
+//RS         Some(CtValue::Float(value)) => value.as_f64(),
+//RS         _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
+//RS     };
+//RS     let right_value = match field(right, "Measurement", "value") {
+//RS         Some(CtValue::Float(value)) => value.as_f64(),
+//RS         _ => return Err(unsupported("malformed Measurement.value value", span)),
+//RS     };
+//RS     let right_uncertainty = match field(right, "Measurement", "uncertainty") {
+//RS         Some(CtValue::Float(value)) => value.as_f64(),
+//RS         _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
+//RS     };
+//RS     let left = (left_value, left_uncertainty);
+//RS     let right = (right_value, right_uncertainty);
+//RS     let (value, uncertainty) = match method {
+//RS         "add" => super::measurement_kernel::jet_measurement_kernel_add(left, right),
+//RS         "sub" => super::measurement_kernel::jet_measurement_kernel_sub(left, right),
+//RS         "mul" => super::measurement_kernel::jet_measurement_kernel_mul(left, right),
+//RS         "div" => super::measurement_kernel::jet_measurement_kernel_div(left, right),
+//RS         _ => unreachable!(),
+//RS     };
+//RS     Ok(structure(
+//RS         "Measurement",
+//RS         vec![
+//RS             ("value", CtValue::Float(CtFloat::f64(value))),
+//RS             ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
+//RS         ],
+//RS     ))
+//RS }
+//RS fn measurement_sqrt(value: &CtValue, span: Span) -> EvalResult {
+//RS     let measured = match field(value, "Measurement", "value") {
+//RS         Some(CtValue::Float(value)) => value.as_f64(),
+//RS         _ => return Err(unsupported("malformed Measurement.value value", span)),
+//RS     };
+//RS     let uncertainty = match field(value, "Measurement", "uncertainty") {
+//RS         Some(CtValue::Float(value)) => value.as_f64(),
+//RS         _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
+//RS     };
+//RS     let (value, uncertainty) =
+//RS         super::measurement_kernel::jet_measurement_kernel_sqrt((measured, uncertainty));
+//RS     Ok(structure(
+//RS         "Measurement",
+//RS         vec![
+//RS             ("value", CtValue::Float(CtFloat::f64(value))),
+//RS             ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
+//RS         ],
+//RS     ))
+//RS }
+//RS 
+//RS // ── XML canonicalization ───────────────────────────────────────────────────
+//RS 
+//RS fn xml_canonical(args: &[CtValue], span: Span) -> EvalResult {
+//RS     let tree = one(args, 0, "core.encoding.xml", "canonical", span)?;
+//RS     let options = one(args, 1, "core.encoding.xml", "canonical", span)?;
+//RS     let value = match crate::Comptime::EncodingLite::xml_from_ct(tree) {
+//RS         Ok(value) => value,
+//RS         Err(_) => {
+//RS             return Ok(CtValue::failed(Box::new(xml_shape_error(
+//RS                 "XML tree cannot contain Float or Bytes values",
+//RS             ))))
+//RS         }
+//RS     };
+//RS     let (mode, comments, inclusive_prefixes) = xml_canonical_options(options, span)?;
+//RS     let canonical = jet_foundation::XmlKernel::canonical_document(
+//RS         &value,
+//RS         &jet_foundation::XmlPull::CanonicalOptions {
+//RS             mode,
+//RS             comments,
+//RS             inclusive_prefixes,
+//RS         },
+//RS     );
+//RS     Ok(match canonical {
+//RS         Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+//RS         Err(error) => CtValue::failed(Box::new(crate::Comptime::EncodingLite::xml_error_value(
+//RS             error,
+//RS         ))),
+//RS     })
+//RS }
+//RS 
+//RS fn xml_canonical_options(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<(jet_foundation::XmlPull::CanonicalMode, bool, Vec<String>), Diagnostic> {
+//RS     let mode = match field(value, "XMLCanonical", "mode") {
+//RS         Some(CtValue::Enum { variant, .. }) if variant == "Inclusive11" => {
+//RS             jet_foundation::XmlPull::CanonicalMode::Inclusive11
+//RS         }
+//RS         Some(CtValue::Enum { variant, .. }) if variant == "Exclusive10" => {
+//RS             jet_foundation::XmlPull::CanonicalMode::Exclusive10
+//RS         }
+//RS         _ => return Err(unsupported("XML canonical mode is invalid", span)),
+//RS     };
+//RS     let comments = match field(value, "XMLCanonical", "comments") {
+//RS         Some(CtValue::Bool(value)) => *value,
+//RS         _ => return Err(unsupported("XML canonical comments flag is invalid", span)),
+//RS     };
+//RS     let inclusive_prefixes = match field(value, "XMLCanonical", "inclusive_prefixes") {
+//RS         Some(CtValue::List(values)) => values
+//RS             .iter()
+//RS             .map(|value| match value {
+//RS                 CtValue::Str(value) => Ok(value.clone()),
+//RS                 _ => Err(unsupported("XML canonical prefix must be String", span)),
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?,
+//RS         _ => return Err(unsupported("XML canonical prefixes are invalid", span)),
+//RS     };
+//RS     Ok((mode, comments, inclusive_prefixes))
+//RS }
+//RS 
+//RS fn xml_shape_error(reason: &str) -> CtValue {
+//RS     crate::Comptime::EncodingLite::xml_shape_error_value(reason.to_string())
+//RS }
+//RS 
+//RS 
+//RS // Email uses the shared Prelude kernel through `EmailAdapter`.
+//RS 
+//RS // ── D-APPROX1=A: CtValue adapters for the shared Prelude kernel ──────────────
+//RS 
+//RS fn hll_from_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<super::sketch_kernel::JetHyperLogLog, Diagnostic> {
+//RS     let CtValue::List(registers) = field(value, "HyperLogLog", "registers")
+//RS         .ok_or_else(|| unsupported("malformed HyperLogLog.registers value", span))?
+//RS     else {
+//RS         return Err(unsupported("malformed HyperLogLog.registers value", span));
+//RS     };
+//RS     let registers = registers
+//RS         .iter()
+//RS         .map(|value| match value {
+//RS             CtValue::Int(value) if (0..=255).contains(value) => Ok(*value as u8),
+//RS             _ => Err(unsupported("malformed HyperLogLog register", span)),
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     Ok(super::sketch_kernel::JetHyperLogLog::from_registers(
+//RS         registers,
+//RS     ))
+//RS }
+//RS 
+//RS fn hll_value(sketch: &super::sketch_kernel::JetHyperLogLog) -> CtValue {
+//RS     structure(
+//RS         "HyperLogLog",
+//RS         vec![(
+//RS             "registers",
+//RS             CtValue::List(
+//RS                 sketch
+//RS                     .registers()
+//RS                     .into_iter()
+//RS                     .map(|value| CtValue::Int(value as i64))
+//RS                     .collect(),
+//RS             ),
+//RS         )],
+//RS     )
+//RS }
+//RS 
+//RS fn hll_new() -> CtValue {
+//RS     hll_value(&super::sketch_kernel::JetHyperLogLog::new())
+//RS }
+//RS 
+//RS fn hll_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+//RS     let sketch = hll_from_value(recv, span)?;
+//RS     sketch.add(string_arg(args, 0, span)?);
+//RS     Ok(hll_value(&sketch))
+//RS }
+//RS 
+//RS fn hll_count(recv: &CtValue, span: Span) -> EvalResult {
+//RS     Ok(CtValue::Int(hll_from_value(recv, span)?.count()))
+//RS }
+//RS 
+//RS fn tdigest_from_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<super::sketch_kernel::JetTDigest, Diagnostic> {
+//RS     let CtValue::List(items) = field(value, "TDigest", "centroids")
+//RS         .ok_or_else(|| unsupported("malformed TDigest.centroids value", span))?
+//RS     else {
+//RS         return Err(unsupported("malformed TDigest.centroids value", span));
+//RS     };
+//RS     let centroids = items
+//RS         .iter()
+//RS         .map(|item| match item {
+//RS             CtValue::List(pair) if pair.len() == 2 => {
+//RS                 Ok((as_float(&pair[0], span)?, as_float(&pair[1], span)?))
+//RS             }
+//RS             _ => Err(unsupported("malformed TDigest centroid", span)),
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     Ok(super::sketch_kernel::JetTDigest::from_centroids(centroids))
+//RS }
+//RS 
+//RS fn tdigest_value(sketch: &super::sketch_kernel::JetTDigest) -> CtValue {
+//RS     structure(
+//RS         "TDigest",
+//RS         vec![(
+//RS             "centroids",
+//RS             CtValue::List(
+//RS                 sketch
+//RS                     .centroids()
+//RS                     .into_iter()
+//RS                     .map(|(mean, weight)| {
+//RS                         CtValue::List(vec![
+//RS                             CtValue::Float(CtFloat::f64(mean)),
+//RS                             CtValue::Float(CtFloat::f64(weight)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         )],
+//RS     )
+//RS }
+//RS 
+//RS fn tdigest_new() -> CtValue {
+//RS     tdigest_value(&super::sketch_kernel::JetTDigest::new())
+//RS }
+//RS 
+//RS fn tdigest_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+//RS     let sketch = tdigest_from_value(recv, span)?;
+//RS     sketch.add(float_arg(args, 0, span)?);
+//RS     Ok(tdigest_value(&sketch))
+//RS }
+//RS 
+//RS fn tdigest_quantile(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
+//RS     let sketch = tdigest_from_value(recv, span)?;
+//RS     Ok(CtValue::Float(CtFloat::f64(
+//RS         sketch.quantile(float_arg(args, 0, span)?),
+//RS     )))
+//RS }
+//RS 
+//RS fn cms_from_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<super::sketch_kernel::JetCountMinSketch, Diagnostic> {
+//RS     let CtValue::List(rows) = field(value, "CountMinSketch", "rows")
+//RS         .ok_or_else(|| unsupported("malformed CountMinSketch.rows value", span))?
+//RS     else {
+//RS         return Err(unsupported("malformed CountMinSketch.rows value", span));
+//RS     };
+//RS     if rows.len() != 4 {
+//RS         return Err(unsupported("malformed CountMinSketch.rows value", span));
+//RS     }
+//RS     let mut out = [[0; super::sketch_kernel::JET_CMS_COLS]; 4];
+//RS     for (row_index, row) in rows.iter().enumerate() {
+//RS         let CtValue::List(columns) = row else {
+//RS             return Err(unsupported("malformed CountMinSketch row", span));
+//RS         };
+//RS         if columns.len() != super::sketch_kernel::JET_CMS_COLS {
+//RS             return Err(unsupported("malformed CountMinSketch row", span));
+//RS         }
+//RS         for (column_index, cell) in columns.iter().enumerate() {
+//RS             let CtValue::Int(value) = cell else {
+//RS                 return Err(unsupported("malformed CountMinSketch cell", span));
+//RS             };
+//RS             if !(0..=u32::MAX as i64).contains(value) {
+//RS                 return Err(unsupported("malformed CountMinSketch cell", span));
+//RS             }
+//RS             out[row_index][column_index] = *value as u32;
+//RS         }
+//RS     }
+//RS     Ok(super::sketch_kernel::JetCountMinSketch::from_rows(out))
+//RS }
+//RS 
+//RS fn cms_value(sketch: &super::sketch_kernel::JetCountMinSketch) -> CtValue {
+//RS     structure(
+//RS         "CountMinSketch",
+//RS         vec![(
+//RS             "rows",
+//RS             CtValue::List(
+//RS                 sketch
+//RS                     .rows()
+//RS                     .into_iter()
+//RS                     .map(|row| {
+//RS                         CtValue::List(
+//RS                             row.into_iter()
+//RS                                 .map(|value| CtValue::Int(value as i64))
+//RS                                 .collect(),
+//RS                         )
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         )],
+//RS     )
+//RS }
+//RS 
+//RS fn cms_new() -> CtValue {
+//RS     cms_value(&super::sketch_kernel::JetCountMinSketch::new())
+//RS }
+//RS 
+//RS fn cms_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+//RS     let sketch = cms_from_value(recv, span)?;
+//RS     sketch.add(string_arg(args, 0, span)?);
+//RS     Ok(cms_value(&sketch))
+//RS }
+//RS 
+//RS fn cms_count(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
+//RS     let sketch = cms_from_value(recv, span)?;
+//RS     Ok(CtValue::Int(sketch.count(string_arg(args, 0, span)?)))
+//RS }
+//RS 
+//RS fn reservoir_from_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<super::sketch_kernel::JetReservoirSampler, Diagnostic> {
+//RS     let capacity = int_field(value, "ReservoirSampler", "capacity", span)?;
+//RS     let count = int_field(value, "ReservoirSampler", "count", span)?;
+//RS     let rng = int_field(value, "ReservoirSampler", "rng", span)?;
+//RS     let CtValue::List(items) = value_field(value, "ReservoirSampler", "reservoir", span)? else {
+//RS         return Err(unsupported(
+//RS             "malformed ReservoirSampler.reservoir value",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     let reservoir = items
+//RS         .into_iter()
+//RS         .map(|item| match item {
+//RS             CtValue::Str(item) => Ok(item),
+//RS             _ => Err(unsupported("malformed ReservoirSampler item", span)),
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     Ok(super::sketch_kernel::JetReservoirSampler::from_parts(
+//RS         capacity as usize,
+//RS         reservoir,
+//RS         count as u64,
+//RS         rng as u64,
+//RS     ))
+//RS }
+//RS 
+//RS fn reservoir_value(sketch: &super::sketch_kernel::JetReservoirSampler) -> CtValue {
+//RS     let (capacity, reservoir, count, rng) = sketch.parts();
+//RS     structure(
+//RS         "ReservoirSampler",
+//RS         vec![
+//RS             ("capacity", CtValue::Int(capacity as i64)),
+//RS             ("count", CtValue::Int(count as i64)),
+//RS             ("rng", CtValue::Int(rng as i64)),
+//RS             (
+//RS                 "reservoir",
+//RS                 CtValue::List(reservoir.into_iter().map(CtValue::Str).collect()),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn reservoir_new(args: &[CtValue], span: Span) -> EvalResult {
+//RS     Ok(reservoir_value(
+//RS         &super::sketch_kernel::JetReservoirSampler::new(int_arg(args, 0, span)?),
+//RS     ))
+//RS }
+//RS 
+//RS fn reservoir_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+//RS     let sketch = reservoir_from_value(recv, span)?;
+//RS     sketch.add(string_arg(args, 0, span)?.to_string());
+//RS     Ok(reservoir_value(&sketch))
+//RS }
+//RS 
+//RS fn reservoir_sample(recv: &CtValue, span: Span) -> EvalResult {
+//RS     Ok(CtValue::List(
+//RS         reservoir_from_value(recv, span)?
+//RS             .sample()
+//RS             .into_iter()
+//RS             .map(CtValue::Str)
+//RS             .collect(),
+//RS     ))
+//RS }
+//RS 
+//RS // ── D-SOLVER-LIB1=A: CtValue adapter for the shared Prelude kernel ──────────
+//RS 
+//RS fn solver_from_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<super::solver_kernel::jet_std::Solver, Diagnostic> {
+//RS     Ok(super::solver_kernel::jet_std::Solver {
+//RS         seed: int_field(value, crate::Syntax::SOLVER_TYPE, "seed", span)?,
+//RS         checked: int_field(value, crate::Syntax::SOLVER_TYPE, "checked", span)?,
+//RS         failures: int_field(value, crate::Syntax::SOLVER_TYPE, "failures", span)?,
+//RS     })
+//RS }
+//RS 
+//RS fn solver_value(solver: super::solver_kernel::jet_std::Solver) -> CtValue {
+//RS     structure(
+//RS         crate::Syntax::SOLVER_TYPE,
+//RS         vec![
+//RS             ("seed", CtValue::Int(solver.seed)),
+//RS             ("checked", CtValue::Int(solver.checked)),
+//RS             ("failures", CtValue::Int(solver.failures)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn solver_require_update(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
+//RS     let mut solver = solver_from_value(recv, span)?;
+//RS     let ok = as_bool(one(args, 0, "Solver", "require", span)?, span)?;
+//RS     super::solver_kernel::jet_solver_require(&mut solver, ok);
+//RS     Ok(solver_value(solver))
+//RS }
+//RS 
+//RS fn solver_failure_count(recv: &CtValue, span: Span) -> EvalResult {
+//RS     let solver = solver_from_value(recv, span)?;
+//RS     Ok(CtValue::Int(
+//RS         super::solver_kernel::jet_solver_failure_count(&solver),
+//RS     ))
+//RS }
+//RS 
+//RS fn solver_status(recv: &CtValue, span: Span) -> EvalResult {
+//RS     let solver = solver_from_value(recv, span)?;
+//RS     Ok(CtValue::Str(super::solver_kernel::jet_solver_status(
+//RS         &solver,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn xml_canonical_rejects_internal_bytes_with_aot_shape_reason() {
+//RS         let options = structure(
+//RS             "XMLCanonical",
+//RS             vec![
+//RS                 (
+//RS                     "mode",
+//RS                     CtValue::Enum {
+//RS                         type_name: "XMLCanonicalMode".to_string(),
+//RS                         variant: "Inclusive11".to_string(),
+//RS                         args: Vec::new(),
+//RS                     },
+//RS                 ),
+//RS                 ("comments", CtValue::Bool(false)),
+//RS                 ("inclusive_prefixes", CtValue::List(Vec::new())),
+//RS             ],
+//RS         );
+//RS         let actual = xml_canonical(&[CtValue::Bytes(vec![1, 2, 3]), options], Span::new(0, 0))
+//RS             .expect("invalid DataTree is a user Result error");
+//RS         assert_eq!(
+//RS             actual,
+//RS             CtValue::failed(Box::new(xml_shape_error(
+//RS                 "XML tree cannot contain Float or Bytes values",
+//RS             )))
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn service_lifecycle_display_and_json_use_typed_facts() {
+//RS         let receipt = CtValue::Struct {
+//RS             type_name: "DeliveryReceipt".to_string(),
+//RS             fields: vec![
+//RS                 ("id".to_string(), CtValue::Str("d-1".to_string())),
+//RS                 (
+//RS                     "state".to_string(),
+//RS                     CtValue::Enum {
+//RS                         type_name: "DeliveryState".to_string(),
+//RS                         variant: "Accepted".to_string(),
+//RS                         args: Vec::new(),
+//RS                     },
+//RS                 ),
+//RS                 ("attempts".to_string(), CtValue::Int(1)),
+//RS                 ("retention_until".to_string(), CtValue::Int(20)),
+//RS                 ("deadline".to_string(), CtValue::Int(30)),
+//RS                 (
+//RS                     "idempotency_key".to_string(),
+//RS                     CtValue::Str("order-1".to_string()),
+//RS                 ),
+//RS                 ("duplicate".to_string(), CtValue::Bool(false)),
+//RS                 ("authority".to_string(), CtValue::Str("orders".to_string())),
+//RS                 ("generation".to_string(), CtValue::Int(2)),
+//RS                 ("signature".to_string(), CtValue::Str("sig".to_string())),
+//RS             ],
+//RS         };
+//RS         assert_eq!(
+//RS             display(&receipt),
+//RS             Some("DeliveryReceipt(id=d-1, state=Accepted, attempts=1, retention_until=20, deadline=30, key=order-1, duplicate=false, authority=orders, generation=2, signature=sig)".to_string())
+//RS         );
+//RS         assert_eq!(
+//RS             receipt.to_json(),
+//RS             "{\"id\":\"d-1\",\"state\":\"Accepted\",\"attempts\":1,\"retention_until\":20,\"deadline\":30,\"idempotency_key\":\"order-1\",\"duplicate\":false,\"authority\":\"orders\",\"generation\":2,\"signature\":\"sig\"}"
+//RS         );
+//RS         let error = CtValue::Enum {
+//RS             type_name: "ServiceError".to_string(),
+//RS             variant: "Partitioned".to_string(),
+//RS             args: vec![(None, CtValue::Str("authority partitioned".to_string()))],
+//RS         };
+//RS         assert_eq!(display(&error), Some("authority partitioned".to_string()));
+//RS     }
+//RS }
+// END-PORT-PENDING 0578 crates/jet-comptime/src/Comptime/CorePureParity.rs:3650-4675
+

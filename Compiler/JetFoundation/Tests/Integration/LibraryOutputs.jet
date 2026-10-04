@@ -1,0 +1,966 @@
+// PORT-PENDING 1106 tests-library-outputs: tests/library_outputs.rs:1-962
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-LIB-EXPORT1=C / D-LIB-NAME1=A end-to-end proof.
+//RS //!
+//RS //! The fixture is deliberately copied into a scratch Package. The test then
+//RS //! builds the loadable/native projection, calls the generated C surface, and
+//RS //! runs the same host through the default JIT and release AOT lenses.
+//RS 
+//RS #![cfg(unix)]
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Output, Stdio};
+//RS 
+//RS mod common;
+//RS use common::{have_rustc, Scratch};
+//RS 
+//RS fn copy_tree(source: &Path, target: &Path) {
+//RS     fs::create_dir_all(target).unwrap();
+//RS     for entry in fs::read_dir(source).unwrap() {
+//RS         let entry = entry.unwrap();
+//RS         let from = entry.path();
+//RS         let to = target.join(entry.file_name());
+//RS         if from.is_dir() {
+//RS             copy_tree(&from, &to);
+//RS         } else {
+//RS             fs::copy(&from, &to).unwrap();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_bin() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn expected_output() -> String {
+//RS     fs::read_to_string(
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS             .join("Examples/features/expected/packages/library_loadable.out"),
+//RS     )
+//RS     .unwrap()
+//RS }
+//RS 
+//RS fn expected_cpp_output() -> String {
+//RS     fs::read_to_string(
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS             .join("Examples/features/expected/packages/library_loadable_cpp.out"),
+//RS     )
+//RS     .unwrap()
+//RS }
+//RS 
+//RS fn run_jet_with_pid(root: &Path, args: &[&str]) -> (u32, Output) {
+//RS     let mut child = Command::new(jet_bin())
+//RS         .args(args)
+//RS         .current_dir(root)
+//RS         .env("NO_COLOR", "1")
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap_or_else(|error| panic!("jet {:?} could not start: {error}", args));
+//RS     let pid = child.id();
+//RS     let output = child
+//RS         .wait_with_output()
+//RS         .unwrap_or_else(|error| panic!("jet {:?} could not finish: {error}", args));
+//RS     (pid, output)
+//RS }
+//RS 
+//RS fn run_jet(root: &Path, args: &[&str]) -> Output {
+//RS     run_jet_with_pid(root, args).1
+//RS }
+//RS 
+//RS fn compiler_text(output: &Output) -> String {
+//RS     format!(
+//RS         "stdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     )
+//RS }
+//RS 
+//RS fn staged_loader_files(pid: u32) -> BTreeSet<String> {
+//RS     let prefix = format!("jet-mod-{pid}-");
+//RS     fs::read_dir(std::env::temp_dir())
+//RS         .unwrap()
+//RS         .filter_map(Result::ok)
+//RS         .filter_map(|entry| {
+//RS             let name = entry.file_name().to_string_lossy().into_owned();
+//RS             name.starts_with(&prefix).then_some(name)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn all_staged_loader_files() -> BTreeSet<String> {
+//RS     fs::read_dir(std::env::temp_dir())
+//RS         .unwrap()
+//RS         .filter_map(Result::ok)
+//RS         .filter_map(|entry| {
+//RS             let name = entry.file_name().to_string_lossy().into_owned();
+//RS             name.starts_with("jet-mod-").then_some(name)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn cc() -> Option<&'static str> {
+//RS     ["cc", "gcc", "clang"]
+//RS         .into_iter()
+//RS         .find(|candidate| Command::new(candidate).arg("--version").output().is_ok())
+//RS }
+//RS 
+//RS fn cxx() -> Option<&'static str> {
+//RS     ["c++", "g++", "clang++"]
+//RS         .into_iter()
+//RS         .find(|candidate| Command::new(candidate).arg("--version").output().is_ok())
+//RS }
+//RS 
+//RS #[test]
+//RS fn native_and_component_exports_share_one_typed_surface() {
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/packages/library_loadable");
+//RS     let scratch = Scratch::new("embedding-parity");
+//RS     copy_tree(&fixture, &scratch.path);
+//RS     let source = scratch.path.join("library.jet");
+//RS     let source = source.to_string_lossy();
+//RS 
+//RS     let library = jet::compile_library(&source, None)
+//RS         .expect("native Library codegen should accept the fixture")
+//RS         .library
+//RS         .expect("native Library artifacts");
+//RS     let plugin = jet::compile_plugin(&source)
+//RS         .expect("sandbox Component codegen should accept the fixture")
+//RS         .plugin
+//RS         .expect("sandbox Component artifacts");
+//RS 
+//RS     assert!(
+//RS         plugin.exports.iter().all(|export| export.scalar.is_some()),
+//RS         "the scalar library fixture must expose a concrete scalar for every Component export"
+//RS     );
+//RS     let library_rows: Vec<_> = library
+//RS         .exports
+//RS         .iter()
+//RS         .map(|export| {
+//RS             (
+//RS                 export.name.clone(),
+//RS                 Some(export.scalar),
+//RS                 export.conventions.clone(),
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     let plugin_rows: Vec<_> = plugin
+//RS         .exports
+//RS         .iter()
+//RS         .map(|export| (export.name.clone(), export.scalar, export.params.clone()))
+//RS         .collect();
+//RS     assert_eq!(library_rows, plugin_rows);
+//RS     assert_eq!(
+//RS         plugin.exported_fns,
+//RS         library
+//RS             .exports
+//RS             .iter()
+//RS             .map(|export| export.name.clone())
+//RS             .collect::<Vec<_>>()
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn guest_import_library_calls_native_c_and_cpp_hosts() {
+//RS     assert!(have_rustc(), "guest import proof requires rustc");
+//RS     let cc = cc().expect("guest import C proof requires a C compiler");
+//RS     let cxx = cxx().expect("guest import C++ proof requires a C++ compiler");
+//RS 
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("tests/fixtures/guest_import_library");
+//RS     let scratch = Scratch::new("guest-import-library");
+//RS     copy_tree(&fixture, &scratch.path);
+//RS     let build = run_jet(&scratch.path, &["build", "--lib", "library.jet"]);
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "guest import Library build failed:\n{}",
+//RS         compiler_text(&build)
+//RS     );
+//RS 
+//RS     let target = scratch.path.join(".jet/build");
+//RS     let archive = target.join("libguestimport.a");
+//RS     let header = target.join("guestimport.h");
+//RS     assert!(archive.is_file(), "guest import build missed {}", archive.display());
+//RS     assert!(header.is_file(), "guest import build missed {}", header.display());
+//RS 
+//RS     let c_source = scratch.path.join("foreign.c");
+//RS     let c_binary = scratch.path.join("foreign-c");
+//RS     let mut c_build = Command::new(cc);
+//RS     c_build
+//RS         .args(["-std=c11", "-I"])
+//RS         .arg(&target)
+//RS         .arg(&c_source)
+//RS         .arg(&archive)
+//RS         .arg("-o")
+//RS         .arg(&c_binary);
+//RS     if cfg!(target_os = "linux") {
+//RS         c_build.args(["-ldl", "-lpthread", "-lm"]);
+//RS     }
+//RS     let c_result = c_build.output().unwrap();
+//RS     assert!(
+//RS         c_result.status.success(),
+//RS         "guest import C host failed to compile:\n{}",
+//RS         compiler_text(&c_result)
+//RS     );
+//RS     let c = Command::new(&c_binary).output().unwrap();
+//RS     assert!(
+//RS         c.status.success(),
+//RS         "guest import C host failed at runtime:\n{}",
+//RS         compiler_text(&c)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&c.stdout), "42\n");
+//RS 
+//RS     let cpp_source = scratch.path.join("foreign.cpp");
+//RS     let cpp_binary = scratch.path.join("foreign-cpp");
+//RS     let mut cpp_build = Command::new(cxx);
+//RS     cpp_build
+//RS         .args(["-std=c++17", "-I"])
+//RS         .arg(&target)
+//RS         .arg(&cpp_source)
+//RS         .arg(&archive)
+//RS         .arg("-o")
+//RS         .arg(&cpp_binary)
+//RS         .arg("-pthread");
+//RS     if cfg!(target_os = "linux") {
+//RS         cpp_build.args(["-ldl", "-lpthread", "-lm"]);
+//RS     }
+//RS     let cpp_result = cpp_build.output().unwrap();
+//RS     assert!(
+//RS         cpp_result.status.success(),
+//RS         "guest import C++ host failed to compile:\n{}",
+//RS         compiler_text(&cpp_result)
+//RS     );
+//RS     let cpp = Command::new(&cpp_binary).output().unwrap();
+//RS     assert!(
+//RS         cpp.status.success(),
+//RS         "guest import C++ host failed at runtime:\n{}",
+//RS         compiler_text(&cpp)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&cpp.stdout), "42\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn library_build_load_and_foreign_call_are_one_surface() {
+//RS     assert!(have_rustc(), "Library end-to-end proof requires rustc");
+//RS     let cc = cc().expect("Library end-to-end proof requires a C compiler");
+//RS 
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/packages/library_loadable");
+//RS     let scratch = Scratch::new("library-loadable");
+//RS     copy_tree(&fixture, &scratch.path);
+//RS     let package = fs::read_to_string(scratch.path.join("package.jet")).unwrap();
+//RS     assert!(package.contains("outputs: {"));
+//RS     fs::write(
+//RS         scratch.path.join("package.jet"),
+//RS         package.replacen(
+//RS             "outputs: {",
+//RS             "authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\noutputs: {",
+//RS             1,
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let expected = expected_output();
+//RS 
+//RS     let build = run_jet(&scratch.path, &["build", "--lib", "library.jet"]);
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "Library build failed:\n{}",
+//RS         compiler_text(&build)
+//RS     );
+//RS 
+//RS     let target = scratch.path.join(".jet/build");
+//RS     let shared = if cfg!(target_os = "macos") {
+//RS         target.join("libloadable.dylib")
+//RS     } else if cfg!(target_os = "windows") {
+//RS         target.join("libloadable.dll")
+//RS     } else {
+//RS         target.join("libloadable.so")
+//RS     };
+//RS     for path in [
+//RS         target.join("libloadable.a"),
+//RS         target.join("loadable.h"),
+//RS         target.join("loadable.jetlib"),
+//RS         target.join("bindings/loadable.h"),
+//RS         target.join("bindings/loadable.py"),
+//RS         target.join("bindings/loadable.swift"),
+//RS     ] {
+//RS         assert!(path.is_file(), "Library build missed {}", path.display());
+//RS     }
+//RS     assert!(shared.is_file(), "Library build missed {}", shared.display());
+//RS     let artifact = jet::JetLibArtifact::decode(&fs::read(target.join("loadable.jetlib")).unwrap())
+//RS         .expect("loadable Library metadata should decode");
+//RS     assert_eq!(artifact.stamp.library_name, "loadable");
+//RS     assert_eq!(artifact.stamp.abi_version, jet::JetLib::ABI_VERSION);
+//RS     assert_eq!(
+//RS         artifact.stamp.exports,
+//RS         vec![
+//RS             jet::JetLibExport::new("greet", jet::JetLibScalar::Text, 1),
+//RS             jet::JetLibExport::new("is_enabled", jet::JetLibScalar::Bool, 1),
+//RS             jet::JetLibExport::new("on_tick", jet::JetLibScalar::Int, 1),
+//RS         ]
+//RS     );
+//RS     jet::JetLib::validate_load_metadata(&artifact.stamp)
+//RS         .expect("generated Library metadata should match the loader ABI");
+//RS     let completion = fs::read_to_string(target.join(".loadable.jet-library.complete")).unwrap();
+//RS     assert!(completion.starts_with("jet-library-set-v1\n"));
+//RS     for (name, path) in [
+//RS         ("libloadable.a", target.join("libloadable.a")),
+//RS         ("loadable.h", target.join("loadable.h")),
+//RS         ("loadable.jetlib", target.join("loadable.jetlib")),
+//RS     ] {
+//RS         let digest = jet::SHA256::sha256_hex(&fs::read(path).unwrap());
+//RS         assert!(
+//RS             completion.contains(&format!("{name}\tsha256-{digest}\n")),
+//RS             "completion marker missed {name}"
+//RS         );
+//RS     }
+//RS     let header_text = fs::read_to_string(target.join("loadable.h")).unwrap();
+//RS     assert!(header_text.contains("int64_t on_tick(int64_t p0);"));
+//RS     assert!(header_text.contains("bool is_enabled(bool p0);"));
+//RS     assert!(header_text.contains("JetText greet(JetText p0);"));
+//RS     assert!(header_text.contains("void jet_text_free(JetText value);"));
+//RS 
+//RS     let c_source = scratch.path.join("foreign.c");
+//RS     assert!(c_source.is_file(), "missing checked-in C host example");
+//RS     let c_binary = scratch.path.join("foreign");
+//RS     let mut c_build = Command::new(cc);
+//RS     c_build
+//RS         .arg("-std=c11")
+//RS         .arg("-I")
+//RS         .arg(&target)
+//RS         .arg(&c_source)
+//RS         .arg(target.join("libloadable.a"))
+//RS         .arg("-o")
+//RS         .arg(&c_binary);
+//RS     if cfg!(target_os = "linux") {
+//RS         c_build.args(["-ldl", "-lpthread", "-lm"]);
+//RS     }
+//RS     let c_result = c_build.output().unwrap();
+//RS     assert!(
+//RS         c_result.status.success(),
+//RS         "foreign C caller failed:\n{}",
+//RS         compiler_text(&c_result)
+//RS     );
+//RS     let foreign = Command::new(&c_binary).output().unwrap();
+//RS     assert!(
+//RS         foreign.status.success(),
+//RS         "foreign C caller failed at runtime"
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&foreign.stdout), expected.as_str());
+//RS 
+//RS     let deterministic_paths = [
+//RS         target.join("libloadable.a"),
+//RS         shared.clone(),
+//RS         target.join("loadable.jetlib"),
+//RS         target.join("loadable.h"),
+//RS         target.join("bindings/loadable.h"),
+//RS         target.join("bindings/loadable.py"),
+//RS         target.join("bindings/loadable.swift"),
+//RS     ];
+//RS     let deterministic_before: Vec<_> = deterministic_paths
+//RS         .iter()
+//RS         .map(|path| fs::read(path).unwrap())
+//RS         .collect();
+//RS     let rebuild = run_jet(&scratch.path, &["build", "--lib", "library.jet"]);
+//RS     assert!(
+//RS         rebuild.status.success(),
+//RS         "repeat Library build failed:\n{}",
+//RS         compiler_text(&rebuild)
+//RS     );
+//RS     for (path, before) in deterministic_paths.iter().zip(deterministic_before) {
+//RS         assert_eq!(fs::read(path).unwrap(), before, "non-deterministic {}", path.display());
+//RS     }
+//RS 
+//RS     let cxx = cxx().expect("C++ Library host proof requires a C++ compiler");
+//RS     let cpp_source = scratch.path.join("foreign.cpp");
+//RS     assert!(cpp_source.is_file(), "missing checked-in C++ host example");
+//RS     let cpp_binary = scratch.path.join("foreign-cpp");
+//RS     let mut cpp_build = Command::new(cxx);
+//RS     cpp_build
+//RS         .arg("-std=c++17")
+//RS         .arg("-I")
+//RS         .arg(&target)
+//RS         .arg(&cpp_source)
+//RS         .arg("-o")
+//RS         .arg(&cpp_binary)
+//RS         .arg("-pthread");
+//RS     if cfg!(target_os = "linux") {
+//RS         cpp_build.arg("-ldl");
+//RS     }
+//RS     let cpp_result = cpp_build.output().unwrap();
+//RS     assert!(
+//RS         cpp_result.status.success(),
+//RS         "foreign C++ host failed to compile:\n{}",
+//RS         compiler_text(&cpp_result)
+//RS     );
+//RS     let cpp = Command::new(&cpp_binary)
+//RS         .arg(&shared)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         cpp.status.success(),
+//RS         "foreign C++ host failed at runtime:\n{}",
+//RS         compiler_text(&cpp)
+//RS     );
+//RS     let expected_cpp = expected_cpp_output();
+//RS     assert_eq!(String::from_utf8_lossy(&cpp.stdout), expected_cpp.as_str());
+//RS 
+//RS     let panic_scratch = Scratch::new("library-panic");
+//RS     copy_tree(&fixture, &panic_scratch.path);
+//RS     fs::write(
+//RS         panic_scratch.path.join("library.jet"),
+//RS         "#Export(c) pub fn panic_now(value: Int) -> Int { panic(\"foreign panic {value}\")\nreturn 0 }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let panic_build = run_jet(&panic_scratch.path, &["build", "--lib", "library.jet"]);
+//RS     assert!(
+//RS         panic_build.status.success(),
+//RS         "panic Library build failed:\n{}",
+//RS         compiler_text(&panic_build)
+//RS     );
+//RS     let panic_shared = if cfg!(target_os = "macos") {
+//RS         panic_scratch.path.join(".jet/build/libloadable.dylib")
+//RS     } else if cfg!(target_os = "windows") {
+//RS         panic_scratch.path.join(".jet/build/libloadable.dll")
+//RS     } else {
+//RS         panic_scratch.path.join(".jet/build/libloadable.so")
+//RS     };
+//RS     assert!(
+//RS         panic_shared.is_file(),
+//RS         "panic Library build missed {}",
+//RS         panic_shared.display()
+//RS     );
+//RS     let panic = Command::new(&cpp_binary)
+//RS         .args(["--panic", panic_shared.to_str().unwrap()])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         !panic.status.success(),
+//RS         "panic crossed the C ABI as a successful C++ call"
+//RS     );
+//RS     let panic_text = compiler_text(&panic);
+//RS     assert!(
+//RS         panic_text.contains("Stop [E3001]: `panic: foreign panic 0`"),
+//RS         "panic did not report a runtime panic:\n{panic_text}"
+//RS     );
+//RS 
+//RS     let jit = run_jet(&scratch.path, &["run", "host.jet"]);
+//RS     assert!(
+//RS         jit.status.success(),
+//RS         "default jet run failed:\n{}",
+//RS         compiler_text(&jit)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&jit.stdout), expected.as_str());
+//RS 
+//RS     let aot = run_jet(&scratch.path, &["run", "--release", "host.jet"]);
+//RS     assert!(
+//RS         aot.status.success(),
+//RS         "AOT jet run failed:\n{}",
+//RS         compiler_text(&aot)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&aot.stdout), expected.as_str());
+//RS 
+//RS     let jetlib = target.join("loadable.jetlib");
+//RS     let original = fs::read(&jetlib).unwrap();
+//RS     let mut artifact = jet::JetLibArtifact::decode(&original).unwrap();
+//RS     artifact.stamp.compiler_version = "0.0.1-foreign".to_string();
+//RS     artifact.stamp.declared_effects.insert("Net".to_string());
+//RS     artifact.payload = b"not a shared object".to_vec();
+//RS     fs::write(&jetlib, artifact.encode()).unwrap();
+//RS     let mismatched = run_jet(&scratch.path, &["run", "host.jet"]);
+//RS     assert!(
+//RS         !mismatched.status.success(),
+//RS         "mismatched .jetlib unexpectedly loaded"
+//RS     );
+//RS     let mismatched_text = compiler_text(&mismatched);
+//RS     assert!(
+//RS         mismatched_text.contains("E1338"),
+//RS         "missing identity refusal:\n{mismatched_text}"
+//RS     );
+//RS     assert!(
+//RS         !mismatched_text.contains("cannot map library payload"),
+//RS         "identity refusal happened after mapping:\n{mismatched_text}"
+//RS     );
+//RS 
+//RS     artifact.stamp.compiler_version = jet::Manifest::COMPILER_VERSION.to_string();
+//RS     fs::write(&jetlib, artifact.encode()).unwrap();
+//RS     let over_granted = run_jet(&scratch.path, &["run", "host.jet"]);
+//RS     assert!(
+//RS         !over_granted.status.success(),
+//RS         "ungranted .jetlib unexpectedly loaded"
+//RS     );
+//RS     let over_granted_text = compiler_text(&over_granted);
+//RS     assert!(
+//RS         over_granted_text.contains("E1339"),
+//RS         "missing effect refusal:\n{over_granted_text}"
+//RS     );
+//RS     assert!(
+//RS         !over_granted_text.contains("cannot map library payload"),
+//RS         "effect refusal happened after mapping:\n{over_granted_text}"
+//RS     );
+//RS 
+//RS     let mut malformed = jet::JetLibArtifact::decode(&original).unwrap();
+//RS     malformed.payload = b"not a shared object".to_vec();
+//RS     fs::write(&jetlib, malformed.encode()).unwrap();
+//RS     let before_staging = all_staged_loader_files();
+//RS     let (loader_pid, invalid_payload) = run_jet_with_pid(&scratch.path, &["run", "host.jet"]);
+//RS     assert!(!invalid_payload.status.success());
+//RS     let invalid_payload_text = compiler_text(&invalid_payload);
+//RS     assert!(
+//RS         invalid_payload_text.contains("cannot map library payload"),
+//RS         "missing native mapping diagnostic:\n{invalid_payload_text}"
+//RS     );
+//RS     assert_eq!(
+//RS         staged_loader_files(loader_pid),
+//RS         before_staging
+//RS             .into_iter()
+//RS             .filter(|name| name.starts_with(&format!("jet-mod-{loader_pid}-")))
+//RS             .collect(),
+//RS         "failed native mapping left a staged payload behind"
+//RS     );
+//RS 
+//RS     malformed = jet::JetLibArtifact::decode(&original).unwrap();
+//RS     malformed.stamp.target = "foreign-target".to_string();
+//RS     fs::write(&jetlib, malformed.encode()).unwrap();
+//RS     let wrong_target = run_jet(&scratch.path, &["run", "host.jet"]);
+//RS     assert!(!wrong_target.status.success());
+//RS     let wrong_target_text = compiler_text(&wrong_target);
+//RS     assert!(
+//RS         wrong_target_text.contains("E1341") && wrong_target_text.contains("targets"),
+//RS         "missing target diagnostic:\n{wrong_target_text}"
+//RS     );
+//RS     assert!(
+//RS         !wrong_target_text.contains("cannot map library payload"),
+//RS         "target refusal happened after mapping:\n{wrong_target_text}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic() {
+//RS     assert!(have_rustc(), "guest embedding proof requires rustc");
+//RS     let cxx = cxx().expect("guest embedding proof requires a C++ compiler");
+//RS 
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/interop/guest_library");
+//RS     let scratch = Scratch::new("guest-embedding-contract");
+//RS     copy_tree(&fixture, &scratch.path);
+//RS     let build = run_jet(&scratch.path, &["build", "--lib", "library.jet"]);
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "guest embedding Library build failed:\n{}",
+//RS         compiler_text(&build)
+//RS     );
+//RS 
+//RS     let target = scratch.path.join(".jet/build");
+//RS     let shared = if cfg!(target_os = "macos") {
+//RS         target.join("libembedding.dylib")
+//RS     } else if cfg!(target_os = "windows") {
+//RS         target.join("libembedding.dll")
+//RS     } else {
+//RS         target.join("libembedding.so")
+//RS     };
+//RS     assert!(shared.is_file(), "guest embedding build missed {}", shared.display());
+//RS     let header = target.join("embedding.h");
+//RS     assert!(header.is_file(), "guest embedding build missed {}", header.display());
+//RS     let header_text = fs::read_to_string(&header).unwrap();
+//RS     assert!(header_text.contains("int64_t on_tick(int64_t p0);"));
+//RS     assert!(header_text.contains("int64_t reenter(int64_t p0);"));
+//RS     assert!(header_text.contains("void jet_text_free(JetText value);"));
+//RS 
+//RS     let cpp_source = scratch.path.join("foreign.cpp");
+//RS     let cpp_binary = scratch.path.join("foreign");
+//RS     let mut cpp_build = Command::new(cxx);
+//RS     cpp_build
+//RS         .args(["-std=c++17", "-I"])
+//RS         .arg(&target)
+//RS         .arg(&cpp_source)
+//RS         .arg("-o")
+//RS         .arg(&cpp_binary)
+//RS         .arg("-pthread");
+//RS     if cfg!(target_os = "linux") {
+//RS         cpp_build.args(["-ldl", "-rdynamic"]);
+//RS     } else if cfg!(target_os = "macos") {
+//RS         cpp_build.args(["-ldl", "-Wl,-export_dynamic"]);
+//RS     }
+//RS     let cpp_result = cpp_build.output().unwrap();
+//RS     assert!(
+//RS         cpp_result.status.success(),
+//RS         "guest embedding host failed to compile:\n{}",
+//RS         compiler_text(&cpp_result)
+//RS     );
+//RS 
+//RS     // Initialization, shutdown, thread entry, TLS, re-entry, signals, allocator
+//RS     // ownership, panic containment, and repeated load/unload are named table
+//RS     // rows; the checked-in host exercises each row in one process.
+//RS     // Deliberate double-free and post-dlclose calls are not executed: the
+//RS     // allocator row documents those invalid C operations as UB-by-C.
+//RS     let host = Command::new(&cpp_binary)
+//RS         .arg(&shared)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         host.status.success(),
+//RS         "guest embedding host failed at runtime:\n{}",
+//RS         compiler_text(&host)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&host.stdout), "embedding-ok\n");
+//RS     assert!(
+//RS         String::from_utf8_lossy(&host.stderr).contains("Stop [E3001]"),
+//RS         "panic child did not emit the E3001 report:\n{}",
+//RS         compiler_text(&host)
+//RS     );
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn component_build_load_and_foreign_call_are_one_surface() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: skipping Component end-to-end proof (need rustc)");
+//RS         return;
+//RS     }
+//RS     if Command::new("wasm-tools")
+//RS         .arg("--version")
+//RS         .output()
+//RS         .is_err()
+//RS     {
+//RS         eprintln!("note: skipping Component end-to-end proof (need wasm-tools)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/packages/library_loadable");
+//RS     let scratch = Scratch::new("component-loadable");
+//RS     copy_tree(&fixture, &scratch.path);
+//RS     let package = fs::read_to_string(scratch.path.join("package.jet")).unwrap();
+//RS     assert!(package.contains("outputs: {"));
+//RS     fs::write(
+//RS         scratch.path.join("package.jet"),
+//RS         package.replacen(
+//RS             "outputs: {",
+//RS             "authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\noutputs: {",
+//RS             1,
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let build = run_jet(&scratch.path, &["build", "--target=sandbox", "library.jet"]);
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "Component build failed:\n{}",
+//RS         compiler_text(&build)
+//RS     );
+//RS     let component = scratch.path.join(".jet/build/library.wasm");
+//RS     assert!(
+//RS         component.is_file(),
+//RS         "Component build missed {}",
+//RS         component.display()
+//RS     );
+//RS 
+//RS     let host = run_jet(&scratch.path, &["run", "component_host.jet"]);
+//RS     assert!(
+//RS         host.status.success(),
+//RS         "sandboxed Component host failed:\n{}",
+//RS         compiler_text(&host)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&host.stdout),
+//RS         "42|true|hello, Ada!\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn library_rejects_colliding_c_symbols_before_codegen() {
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/packages/library_loadable");
+//RS     let scratch = Scratch::new("library-symbol-collision");
+//RS     copy_tree(&fixture, &scratch.path);
+//RS     fs::write(
+//RS         scratch.path.join("library.jet"),
+//RS         "#Export(c) pub fn café() -> Int -> 1\n#Export(c) pub fn cafö() -> Int -> 2\n#Export(c) pub fn jet_text_free() -> String -> \"bad\"\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let source = scratch.path.join("library.jet");
+//RS     let source = source.to_string_lossy();
+//RS     let errors = jet::compile_library(&source, None).expect_err("colliding C symbols accepted");
+//RS     assert!(
+//RS         errors.iter().any(|error| {
+//RS             error.code == "E1341" && error.what.contains("same C symbol")
+//RS         }),
+//RS         "missing C symbol collision diagnostic: {errors:?}"
+//RS     );
+//RS     assert!(
+//RS         errors
+//RS             .iter()
+//RS             .any(|error| error.code == "E1341" && error.what.contains("generated C symbol")),
+//RS         "missing generated allocator symbol diagnostic: {errors:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn guest_import_rejects_invalid_signature_and_duplicate_native_symbol() {
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("tests/fixtures/guest_import_library");
+//RS     let scratch = Scratch::new("guest-import-negative");
+//RS     copy_tree(&fixture, &scratch.path);
+//RS     let source = scratch.path.join("library.jet");
+//RS 
+//RS     fs::write(
+//RS         &source,
+//RS         "#Import(c) fn bad(values: [Int]) -> Int = \"guest_bad\"\n#Export(c) pub fn call_host(value: Int) -> Int -> value\n",
+//RS     )
+//RS     .unwrap();
+//RS     let source_text = source.to_string_lossy();
+//RS     let invalid = jet::compile_library(&source_text, None)
+//RS         .expect_err("non-C-safe guest import signature accepted");
+//RS     assert!(
+//RS         invalid.iter().any(|error| error.code == "E3203"),
+//RS         "missing invalid guest import signature diagnostic: {invalid:?}"
+//RS     );
+//RS 
+//RS     fs::write(
+//RS         &source,
+//RS         "#Import(c) fn mutate(value: &Int) -> Int = \"guest_mutate\"\n#Export(c) pub fn call_host(value: Int) -> Int -> value\n",
+//RS     )
+//RS     .unwrap();
+//RS     let capability = jet::compile_library(&source_text, None)
+//RS         .expect_err("capability guest import accepted by the hidden bridge");
+//RS     assert!(
+//RS         capability.iter().any(|error| {
+//RS             error.code == "E1341" && error.what.contains("hidden C bridge")
+//RS         }),
+//RS         "missing capability bridge diagnostic: {capability:?}"
+//RS     );
+//RS 
+//RS     fs::write(
+//RS         &source,
+//RS         "#Layout(c)\nstruct Pair {\n    value: Int\n}\n#Import(c) fn use_pair(value: Pair) -> Int = \"guest_pair\"\n#Export(c) pub fn call_host(value: Int) -> Int -> value\n",
+//RS     )
+//RS     .unwrap();
+//RS     let layout = jet::compile_library(&source_text, None)
+//RS         .expect_err("C-layout guest import accepted by the hidden bridge");
+//RS     assert!(
+//RS         layout.iter().any(|error| {
+//RS             error.code == "E1341" && error.what.contains("hidden C bridge")
+//RS         }),
+//RS         "missing C-layout bridge diagnostic: {layout:?}"
+//RS     );
+//RS 
+//RS     fs::write(
+//RS         &source,
+//RS         "#Import(c) fn first(value: Int) -> Int = \"call_host\"\n#Export(c) pub fn call_host(value: Int) -> Int -> value\n",
+//RS     )
+//RS     .unwrap();
+//RS     let duplicate = jet::compile_library(&source_text, None)
+//RS         .expect_err("duplicate guest native symbol accepted");
+//RS     // D-CASE-PROSE1=A: diagnostic prose uses sentence case for the subject.
+//RS     assert!(
+//RS         duplicate.iter().any(|error| {
+//RS             error.code == "E1341"
+//RS                 && error.what.contains("Guest imports")
+//RS                 && error.what.contains("same C symbol")
+//RS         }),
+//RS         "missing duplicate guest import symbol diagnostic: {duplicate:?}"
+//RS     );
+//RS 
+//RS     fs::write(
+//RS         &source,
+//RS         "#Import module c.fake {\n    fn module_host(value: Int) -> Int = \"call_host\"\n}\n#Import(c) fn first(value: Int) -> Int = \"call_host\"\n#Export(c) pub fn call_host(value: Int) -> Int -> value\n",
+//RS     )
+//RS     .unwrap();
+//RS     let c_module = jet::compile_library(&source_text, None)
+//RS         .expect_err("C-module and guest import symbol collision accepted");
+//RS     assert!(
+//RS         c_module.iter().any(|error| {
+//RS             error.code == "E1341"
+//RS                 && error.what.contains("C module imports")
+//RS                 && error.what.contains("same C symbol")
+//RS         }),
+//RS         "missing C-module symbol collision diagnostic: {c_module:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn library_output_selection_is_named_and_fail_closed() {
+//RS     let scratch = Scratch::new("library-output-selection");
+//RS     fs::write(
+//RS         scratch.path.join("package.jet"),
+//RS         "name: \"library-selection\"\nversion: \"0.1.0\"\noutputs: {\n    alpha: .Library{ name: \"alpha\", entry: run, native: true }\n    beta: .Library{ name: \"beta\", entry: run, native: true }\n    app: .Executable{ name: \"app\", entry: run }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         scratch.path.join("library.jet"),
+//RS         "#Export(c) pub fn on_tick(dt: Int) -> Int -> dt + 1\nfn run() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let source = scratch.path.join("library.jet");
+//RS     let source = source.to_string_lossy();
+//RS 
+//RS     let ambiguous = jet::compile_library(&source, None).expect_err("ambiguous Library accepted");
+//RS     // D-CASE-PROSE1=A: diagnostic prose uses sentence case for the subject.
+//RS     assert!(
+//RS         ambiguous.iter().any(|error| {
+//RS             error.code == "E1341"
+//RS                 && error.what.contains("Multiple Library outputs")
+//RS                 && error.fix.contains("alpha, beta")
+//RS         }),
+//RS         "missing ambiguous Library diagnostic: {ambiguous:?}"
+//RS     );
+//RS 
+//RS     let selected = jet::compile_library(&source, Some("beta"))
+//RS         .expect("named Library output should compile");
+//RS     let selected_config = selected.library_config.unwrap();
+//RS     assert_eq!(selected_config.name, "beta");
+//RS     assert_eq!(selected_config.entry.as_deref(), Some("run"));
+//RS 
+//RS     let missing = jet::compile_library(&source, Some("missing"))
+//RS         .expect_err("missing Library output accepted");
+//RS     // D-CASE-PROSE1=A: diagnostic prose uses sentence case for the subject.
+//RS     assert!(
+//RS         missing.iter().any(|error| {
+//RS             error.code == "E1341" && error.what.contains("Library output `missing`")
+//RS         }),
+//RS         "missing named Library diagnostic: {missing:?}"
+//RS     );
+//RS 
+//RS     let non_library = jet::compile_library(&source, Some("app"))
+//RS         .expect_err("non-Library output accepted");
+//RS     // D-CASE-PROSE1=A: diagnostic prose uses sentence case for the subject.
+//RS     assert!(non_library.iter().any(|error| {
+//RS         error.code == "E1341" && error.what.contains("Output `app` is not a Library")
+//RS     }));
+//RS }
+//RS 
+//RS #[test]
+//RS fn locked_library_compile_requires_the_lock_stamp() {
+//RS     let scratch = Scratch::new("library-locked");
+//RS     fs::write(
+//RS         scratch.path.join("package.jet"),
+//RS         "name: \"locked-library\"\nversion: \"0.1.0\"\noutputs: { core: .Library{ name: \"core\", native: true } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         scratch.path.join("library.jet"),
+//RS         "#Export(c) pub fn on_tick(dt: Int) -> Int -> dt + 1\n",
+//RS     )
+//RS     .unwrap();
+//RS     let source = scratch.path.join("library.jet");
+//RS     let source = source.to_string_lossy();
+//RS     let errors = jet::compile_library_with_gates_and_settings(
+//RS         &source,
+//RS         None,
+//RS         jet::Policy::GateSet::default(),
+//RS         true,
+//RS         &BTreeMap::new(),
+//RS     )
+//RS     .expect_err("locked Library compile accepted a missing lock stamp");
+//RS     assert!(errors.iter().any(|error| error.code == "E3512"));
+//RS }
+//RS 
+//RS fn library_build_scratch(tag: &str) -> Scratch {
+//RS     let mut scratch = Scratch::new(tag);
+//RS     let checkout = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
+//RS     if fs::canonicalize(&scratch.path)
+//RS         .unwrap()
+//RS         .starts_with(&checkout)
+//RS     {
+//RS         fs::remove_dir_all(&scratch.path).unwrap();
+//RS         let home = fs::canonicalize(
+//RS             std::env::var_os("HOME")
+//RS                 .map(PathBuf::from)
+//RS                 .expect("HOME is required for test scratch"),
+//RS         )
+//RS         .expect("canonicalize HOME");
+//RS         let fallback_root = home.join(".cache/jet-test-scratch/scratch");
+//RS         assert!(
+//RS             !fallback_root.starts_with(&checkout),
+//RS             "HOME disk scratch must be outside the repository: {}",
+//RS             fallback_root.display()
+//RS         );
+//RS         common::assert_test_path_on_disk(&fallback_root, "library build scratch");
+//RS         fs::create_dir_all(&fallback_root).unwrap();
+//RS         let nanos = std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .unwrap()
+//RS             .as_nanos();
+//RS         let path = fallback_root.join(format!(
+//RS             "jet-it-{tag}-{}-{nanos}-{:?}",
+//RS             std::process::id(),
+//RS             std::thread::current().id()
+//RS         ));
+//RS         fs::create_dir(&path).unwrap();
+//RS         #[cfg(unix)]
+//RS         {
+//RS             use std::os::unix::fs::PermissionsExt;
+//RS             fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+//RS         }
+//RS         let path = fs::canonicalize(path).unwrap();
+//RS         assert!(
+//RS             !path.starts_with(&checkout),
+//RS             "HOME disk scratch resolved inside the repository: {}",
+//RS             path.display()
+//RS         );
+//RS         scratch.path = path;
+//RS     }
+//RS     scratch
+//RS }
+//RS 
+//RS #[test]
+//RS fn locked_named_library_build_selects_the_requested_output() {
+//RS     assert!(have_rustc(), "locked Library build proof requires rustc");
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("tests/fixtures/foreign_build_hosts/cmake");
+//RS     let scratch = library_build_scratch("library-locked-build");
+//RS     copy_tree(&fixture, &scratch.path);
+//RS     let jet_dir = scratch.path.join(".jet");
+//RS     fs::create_dir_all(&jet_dir).unwrap();
+//RS     fs::copy(fixture.join("lock.fixture"), jet_dir.join("lock")).unwrap();
+//RS     let build = run_jet(
+//RS         &scratch.path,
+//RS         &["build", "--lib", "--locked", "--output", "core", "library.jet"],
+//RS     );
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "locked named Library build failed:\n{}",
+//RS         compiler_text(&build)
+//RS     );
+//RS     assert!(scratch.path.join(".jet/build/libloadable.a").is_file());
+//RS     assert!(scratch.path.join(".jet/build/loadable.h").is_file());
+//RS     assert!(scratch.path.join(".jet/build/loadable.jetlib").is_file());
+//RS }
+//RS 
+//RS #[test]
+//RS fn default_library_rejects_cross_target_before_publication() {
+//RS     assert!(have_rustc(), "Library target diagnostic proof requires rustc");
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/packages/library_loadable");
+//RS     let scratch = Scratch::new("library-target");
+//RS     copy_tree(&fixture, &scratch.path);
+//RS     let target = format!("--target={}", env!("JET_BUILD_TARGET"));
+//RS     let rejected = run_jet(&scratch.path, &["build", target.as_str(), "library.jet"]);
+//RS     assert!(
+//RS         !rejected.status.success(),
+//RS         "cross-target Library build unexpectedly succeeded:\n{}",
+//RS         compiler_text(&rejected)
+//RS     );
+//RS     let text = compiler_text(&rejected);
+//RS     assert!(text.contains("E1341"), "missing unsupported-target diagnostic:\n{text}");
+//RS     let shared = if cfg!(target_os = "macos") {
+//RS         scratch.path.join(".jet/build/libloadable.dylib")
+//RS     } else if cfg!(target_os = "windows") {
+//RS         scratch.path.join(".jet/build/libloadable.dll")
+//RS     } else {
+//RS         scratch.path.join(".jet/build/libloadable.so")
+//RS     };
+//RS     assert!(
+//RS         !scratch.path.join(".jet/build/libloadable.a").exists()
+//RS             && !scratch.path.join(".jet/build/loadable.h").exists()
+//RS             && !scratch.path.join(".jet/build/loadable.jetlib").exists()
+//RS             && !shared.exists(),
+//RS         "unsupported Library target published artifacts"
+//RS     );
+//RS }
+// END-PORT-PENDING 1106 tests/library_outputs.rs:1-962
+

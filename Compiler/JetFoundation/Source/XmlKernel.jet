@@ -1,0 +1,86 @@
+// PORT-PENDING 0110 crates-jet-foundation-src-wasmdebug-module-group: crates/jet-foundation/src/XmlKernel.rs:1-82
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! One XML operation kernel for AOT, JIT, comptime, and interpreter adapters.
+//RS 
+//RS use crate::XmlPull as xml;
+//RS 
+//RS fn without_untrusted_lexical_evidence(mut value: xml::Value) -> xml::Value {
+//RS     xml::invalidate_untrusted_lexical_evidence(&mut value);
+//RS     value
+//RS }
+//RS 
+//RS fn checked(value: &xml::Value) -> xml::Value {
+//RS     without_untrusted_lexical_evidence(value.clone())
+//RS }
+//RS 
+//RS pub fn parse_document(text: &str) -> Result<xml::Value, xml::Error> {
+//RS     xml::parse_document(text).map(without_untrusted_lexical_evidence)
+//RS }
+//RS 
+//RS pub fn parse_document_with(
+//RS     text: &str,
+//RS     options: &xml::ParseOptions,
+//RS ) -> Result<xml::Value, xml::Error> {
+//RS     xml::parse_document_with(text, options).map(without_untrusted_lexical_evidence)
+//RS }
+//RS 
+//RS pub fn parse_document_bytes_with(
+//RS     bytes: &[u8],
+//RS     options: &xml::ParseOptions,
+//RS ) -> Result<xml::Value, xml::Error> {
+//RS     xml::parse_document_bytes_with(bytes, options).map(without_untrusted_lexical_evidence)
+//RS }
+//RS 
+//RS pub fn parse_document_bytes(bytes: &[u8]) -> Result<xml::Value, xml::Error> {
+//RS     parse_document_bytes_with(bytes, &xml::ParseOptions::safe())
+//RS }
+//RS 
+//RS pub fn render_document(value: &xml::Value) -> Result<String, xml::Error> {
+//RS     xml::render_document(&checked(value)).map_err(|reason| xml::Error {
+//RS         kind: xml::Reason::Shape,
+//RS         offset: 0,
+//RS         line: None,
+//RS         column: None,
+//RS         path: String::new(),
+//RS         reason,
+//RS     })
+//RS }
+//RS 
+//RS pub fn render_document_bytes(
+//RS     value: &xml::Value,
+//RS     encoding: xml::RenderEncoding,
+//RS     lexical: xml::LexicalPolicy,
+//RS ) -> Result<Vec<u8>, xml::Error> {
+//RS     xml::render_document_bytes(&checked(value), encoding, lexical)
+//RS }
+//RS 
+//RS pub fn canonical_document(
+//RS     value: &xml::Value,
+//RS     options: &xml::CanonicalOptions,
+//RS ) -> Result<String, xml::Error> {
+//RS     xml::canonical_document(&checked(value), options)
+//RS }
+//RS 
+//RS pub fn document_root(value: &xml::Value) -> Result<xml::Value, xml::Error> {
+//RS     xml::document_root(&checked(value))
+//RS }
+//RS 
+//RS pub fn expanded_name_parts(
+//RS     value: &xml::Value,
+//RS ) -> Result<(String, Option<String>, String, Option<String>), xml::Error> {
+//RS     xml::expanded_name_parts(&checked(value))
+//RS }
+//RS 
+//RS pub fn lookup_attribute(value: &xml::Value, name: &str) -> Result<Option<String>, xml::Error> {
+//RS     xml::lookup_attribute(&checked(value), name)
+//RS }
+//RS 
+//RS pub fn element_content(value: &xml::Value) -> Result<Vec<xml::Value>, xml::Error> {
+//RS     xml::element_content(&checked(value))
+//RS }
+//RS 
+//RS pub fn project_document_for_decode(value: &xml::Value) -> Result<xml::Value, xml::Error> {
+//RS     xml::project_document_for_decode(&checked(value))
+//RS }
+// END-PORT-PENDING 0110 crates/jet-foundation/src/XmlKernel.rs:1-82
+

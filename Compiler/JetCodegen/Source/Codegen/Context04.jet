@@ -1,0 +1,2290 @@
+// PORT-PENDING 0457 crates-jet-codegen-src-codegen-context-slice-5283: crates/jet-codegen/src/Codegen/Context.rs:5283-7568
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub(crate) fn build_cx_items(
+//RS     items: &[Item],
+//RS     src: &str,
+//RS     file: &str,
+//RS     link: Option<&FfiLink>,
+//RS     extern_funcs: &HashMap<String, ExternFn>,
+//RS     package_edition: &str,
+//RS ) -> Cx {
+//RS     let mut cx = Cx {
+//RS         sigs: HashMap::new(),
+//RS         contract_sigs: HashMap::new(),
+//RS         fn_types: HashMap::new(),
+//RS         diverging_functions: HashSet::new(),
+//RS         fn_source_types: HashMap::new(),
+//RS         fn_bodies: HashMap::new(),
+//RS         fn_param_names: HashMap::new(),
+//RS         method_sigs: HashMap::new(),
+//RS         method_type_params: HashMap::new(),
+//RS         method_self_convs: HashMap::new(),
+//RS         method_rets: HashMap::new(),
+//RS         consts: HashMap::new(),
+//RS         const_types: HashMap::new(),
+//RS         persist_types: HashMap::new(),
+//RS         const_values: HashMap::new(),
+//RS         const_ref_keys: HashMap::new(),
+//RS         type_names: HashSet::new(),
+//RS         const_ref_types: HashMap::new(),
+//RS         checked_const_ref_sites: HashMap::new(),
+//RS         local_type_names: HashSet::new(),
+//RS         local_type_identities: HashMap::new(),
+//RS         distinct_types: HashMap::new(),
+//RS         distinct_ranges: HashMap::new(),
+//RS         unit_facts: HashMap::new(),
+//RS         unit_labels: HashMap::new(),
+//RS         type_aliases: HashMap::new(),
+//RS         trait_names: HashSet::new(),
+//RS         struct_fields: HashMap::new(),
+//RS         reflection_fields: HashMap::new(),
+//RS         published_schemas: HashSet::new(),
+//RS         codable_types: HashSet::new(),
+//RS         reflect_paths: HashMap::new(),
+//RS         serde_wire_params: HashMap::new(),
+//RS         enum_variants: HashMap::new(),
+//RS         variant_owner: HashMap::new(),
+//RS         boxed_edges: HashSet::new(),
+//RS         cloneable: HashSet::new(),
+//RS         migrations: HashMap::new(),
+//RS         columnar: HashSet::new(),
+//RS         auto_printable: HashSet::new(),
+//RS         auto_debug: HashSet::new(),
+//RS         auto_equatable: HashSet::new(),
+//RS         hashable: HashSet::new(),
+//RS         patchable: HashSet::new(),
+//RS         computed_fields: HashMap::new(),
+//RS         memo_fields: HashMap::new(),
+//RS         memo_dependencies: HashMap::new(),
+//RS         src: src.to_string(),
+//RS         src_line_index: std::sync::OnceLock::new(),
+//RS         file: file.to_string(),
+//RS         module_alias: String::new(),
+//RS         module_identity: String::new(),
+//RS         core_source_modules: HashMap::new(),
+//RS         core_source_sigs: HashMap::new(),
+//RS         import_mods: HashMap::new(),
+//RS         trait_method_traits: HashMap::new(),
+//RS         operator_methods: HashMap::new(),
+//RS         direct_c_functions: HashSet::new(),
+//RS         foreign_call_keys: HashMap::new(),
+//RS         opaque_handles: HashSet::new(),
+//RS         foreign_types: HashMap::new(),
+//RS         reexport_calls: HashMap::new(),
+//RS         import_sigs: HashMap::new(),
+//RS         import_rets: HashMap::new(),
+//RS         core_imports: HashMap::new(),
+//RS         used_core: HashSet::new(),
+//RS         ffi_callback_fns: HashSet::new(),
+//RS         root_prefix: String::new(),
+//RS         ffi_crate: link.map(|l| l.crate_name.clone()),
+//RS         extern_funcs: extern_funcs.clone(),
+//RS         foreign_undos: foreign_undo_map(items),
+//RS         code_modules: items
+//RS             .iter()
+//RS             .filter_map(|item| match item {
+//RS                 Item::CodeModule(module) if module.body.is_some() => Some(module.name.clone()),
+//RS                 _ => None,
+//RS             })
+//RS             .collect(),
+//RS         unqualified_inline: HashMap::new(),
+//RS         unqualified_file: HashMap::new(),
+//RS         inline_unqualified: HashMap::new(),
+//RS         inline_unqualified_file: HashMap::new(),
+//RS         inline_core_imports: HashMap::new(),
+//RS         inline_foreign_imports: HashMap::new(),
+//RS         inline_foreign_sigs: HashMap::new(),
+//RS         inline_foreign_rets: HashMap::new(),
+//RS         inline_foreign_reexport_sigs: HashMap::new(),
+//RS         inline_foreign_reexport_rets: HashMap::new(),
+//RS         inline_import_names: HashSet::new(),
+//RS         inline_reexport_inline: HashMap::new(),
+//RS         inline_reexport_core: HashMap::new(),
+//RS         receipt_sections: HashMap::new(),
+//RS         devtools_package: String::new(),
+//RS         devtools_module: String::new(),
+//RS         devtools_registry: jet_foundation::AST::DevtoolsRegistry::default(),
+//RS         inline_reexport_foreign: HashMap::new(),
+//RS         trait_methods: HashSet::new(),
+//RS         imported_traits: HashSet::new(),
+//RS         rollback_types: HashSet::new(),
+//RS         display_types: HashSet::new(),
+//RS         debug_types: HashSet::new(),
+//RS         close_types: HashSet::new(),
+//RS         iterable_hooks: HashMap::new(),
+//RS         index_hooks: HashMap::new(),
+//RS         current_fn: std::cell::RefCell::new(String::new()),
+//RS         policy_declarations: Vec::new(),
+//RS         package_hardened: false,
+//RS         dependency_fenced: false,
+//RS         struct_type_params: HashMap::new(),
+//RS         struct_type_param_order: HashMap::new(),
+//RS         current_type_params: std::cell::RefCell::new(HashSet::new()),
+//RS         jit_spawn_lambdas: std::cell::RefCell::new(Vec::new()),
+//RS         jit_spawn_sites: std::cell::RefCell::new(HashMap::new()),
+//RS         jit_spawn_site_base: 0,
+//RS         jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+//RS         jit_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+//RS         jit_core_source_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+//RS         jit_canonical_deopt: std::cell::RefCell::new(HashSet::new()),
+//RS         jit_canonical_calls: std::cell::RefCell::new(HashSet::new()),
+//RS         jit_local_call_prefix: None,
+//RS         fn_type_params: HashMap::new(),
+//RS         fn_type_param_order: HashMap::new(),
+//RS         debug_linemap: false,
+//RS         variadic_bound_fns: HashMap::new(),
+//RS         active_os: crate::Syntax::OSTarget::host(),
+//RS         web_wasm_noncopy_int: false,
+//RS         package_edition: package_edition.to_string(),
+//RS         preview_build_id: "unbound".to_string(),
+//RS         preview_revision: "unbound".to_string(),
+//RS         in_stm_transact: std::cell::Cell::new(false),
+//RS         stm_touched: std::cell::Cell::new(false),
+//RS         hardware_profile: None,
+//RS         hardware_profile_id: None,
+//RS     };
+//RS 
+//RS     let io_context = Type::Named(Syntax::TYPE_IO_CONTEXT.to_string());
+//RS     let process_resource_limit = Type::Named(Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string());
+//RS     // D-TYPE2-TIME1=A: Duration/Instant are the core delta/point of the
+//RS     // canonical Time family. They carry unit facts for dimensional lowering,
+//RS     // but never enter the generated Float-family trait path.
+//RS     let time_dimension = Some(crate::AST::Dimension::base("core.units::Time"));
+//RS     for (name, kind) in [
+//RS         (Syntax::DURATION_TYPE, crate::AST::QuantityKind::Delta),
+//RS         (Syntax::TYPE_INSTANT, crate::AST::QuantityKind::Point),
+//RS     ] {
+//RS         cx.unit_facts.insert(
+//RS             name.to_string(),
+//RS             UnitFact {
+//RS                 family: "Time".to_string(),
+//RS                 dimension: time_dimension.clone(),
+//RS                 kind,
+//RS                 scale: crate::AST::UnitRatio::integer(1),
+//RS                 offset: crate::AST::UnitRatio::zero(),
+//RS                 scale_provenance: crate::AST::UnitScaleProvenance::Rational,
+//RS             },
+//RS         );
+//RS     }
+//RS     cx.struct_fields.insert(
+//RS         Syntax::TYPE_IO_CONTEXT.to_string(),
+//RS         vec![
+//RS             (
+//RS                 "operation".to_string(),
+//RS                 Type::Named(Syntax::TYPE_IO_OPERATION.to_string()),
+//RS             ),
+//RS             ("resource".to_string(), Type::Option(Box::new(Type::String))),
+//RS             ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
+//RS             ("cause".to_string(), Type::Option(Box::new(Type::String))),
+//RS         ],
+//RS     );
+//RS     cx.cloneable.insert(Syntax::TYPE_IO_CONTEXT.to_string());
+//RS     cx.enum_variants.insert(
+//RS         Syntax::TYPE_IO_ERROR.to_string(),
+//RS         Syntax::IO_ERROR_VARIANTS
+//RS             .iter()
+//RS             .map(|name| {
+//RS                 let payload = if *name == "ResourceLimit" {
+//RS                     VariantPayload::Single(process_resource_limit.clone(), Span::new(0, 0))
+//RS                 } else {
+//RS                     VariantPayload::Single(io_context.clone(), Span::new(0, 0))
+//RS                 };
+//RS                 ((*name).to_string(), payload)
+//RS             })
+//RS             .collect(),
+//RS     );
+//RS     cx.enum_variants.insert(
+//RS         Syntax::TYPE_IO_OPERATION.to_string(),
+//RS         Syntax::IO_OPERATION_VARIANTS
+//RS             .iter()
+//RS             .map(|name| ((*name).to_string(), VariantPayload::Unit))
+//RS             .collect(),
+//RS     );
+//RS     cx.enum_variants.insert(
+//RS         Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string(),
+//RS         Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS
+//RS             .iter()
+//RS             .map(|name| ((*name).to_string(), VariantPayload::Unit))
+//RS             .collect(),
+//RS     );
+//RS     for name in Syntax::IO_ERROR_VARIANTS {
+//RS         cx.variant_owner
+//RS             .insert((*name).to_string(), Syntax::TYPE_IO_ERROR.to_string());
+//RS     }
+//RS     for name in Syntax::IO_OPERATION_VARIANTS {
+//RS         cx.variant_owner
+//RS             .insert((*name).to_string(), Syntax::TYPE_IO_OPERATION.to_string());
+//RS     }
+//RS     for name in Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS {
+//RS         cx.variant_owner.insert(
+//RS             (*name).to_string(),
+//RS             Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string(),
+//RS         );
+//RS     }
+//RS     cx.cloneable.insert(Syntax::TYPE_IO_ERROR.to_string());
+//RS     cx.cloneable.insert(Syntax::TYPE_IO_OPERATION.to_string());
+//RS     cx.cloneable
+//RS         .insert(Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string());
+//RS     let net_error_detail_fields = ["operation", "address", "name", "message", "os_code"]
+//RS         .into_iter()
+//RS         .map(|field| {
+//RS             (
+//RS                 field.to_string(),
+//RS                 crate::Sema::core_struct_field_type("NetErrorDetail", field, &[])
+//RS                     .unwrap_or_else(|| panic!("missing canonical NetErrorDetail field {field}")),
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     cx.struct_fields
+//RS         .insert("NetErrorDetail".to_string(), net_error_detail_fields);
+//RS     cx.cloneable.insert("NetErrorDetail".to_string());
+//RS     for enum_name in ["NetDnsError", "NetError"] {
+//RS         let mut variant_payloads = crate::Sema::core_net_error_variants(enum_name)
+//RS             .unwrap_or_else(|| panic!("missing canonical Core enum {enum_name}"));
+//RS         let ordered_names =
+//RS             crate::Codegen::TIR::tir_to_mir_types::compiler_owned_enum_variants(enum_name)
+//RS                 .unwrap_or_else(|| panic!("missing canonical MIR enum {enum_name}"));
+//RS         let variants = ordered_names
+//RS             .iter()
+//RS             .map(|variant| {
+//RS                 let (_, payload) = variant_payloads.remove(*variant).unwrap_or_else(|| {
+//RS                     panic!("missing canonical Core variant {enum_name}.{variant}")
+//RS                 });
+//RS                 ((*variant).to_string(), payload)
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         assert!(
+//RS             variant_payloads.is_empty(),
+//RS             "Core/MIR variant rows disagree for {enum_name}"
+//RS         );
+//RS         for (variant, _) in &variants {
+//RS             cx.variant_owner
+//RS                 .entry(variant.clone())
+//RS                 .or_insert_with(|| enum_name.to_string());
+//RS         }
+//RS         cx.enum_variants
+//RS             .entry(enum_name.to_string())
+//RS             .or_insert(variants);
+//RS         cx.cloneable.insert(enum_name.to_string());
+//RS     }
+//RS     let zero = Span::new(0, 0);
+//RS     let http_operations = ["ClientConnect", "ServerBind", "ServeListener"];
+//RS     cx.enum_variants.insert(
+//RS         "HTTPOperation".to_string(),
+//RS         http_operations
+//RS             .iter()
+//RS             .map(|name| ((*name).to_string(), VariantPayload::Unit))
+//RS             .collect(),
+//RS     );
+//RS     for name in http_operations {
+//RS         cx.variant_owner
+//RS             .insert(name.to_string(), "HTTPOperation".to_string());
+//RS     }
+//RS     let http_proxy = vec![
+//RS         ("FromEnvironment".to_string(), VariantPayload::Unit),
+//RS         ("None".to_string(), VariantPayload::Unit),
+//RS         (
+//RS             "URL".to_string(),
+//RS             VariantPayload::Single(Type::String, zero),
+//RS         ),
+//RS     ];
+//RS     for (variant, _) in &http_proxy {
+//RS         cx.variant_owner
+//RS             .insert(variant.clone(), "HTTPProxy".to_string());
+//RS     }
+//RS     cx.enum_variants.insert("HTTPProxy".to_string(), http_proxy);
+//RS     cx.cloneable.insert("HTTPProxy".to_string());
+//RS     let http_redirect_policy = vec![(
+//RS         "Follow".to_string(),
+//RS         VariantPayload::Named(vec![
+//RS             VariantField {
+//RS                 name: "max".to_string(),
+//RS                 name_span: zero,
+//RS                 ty: Type::Int,
+//RS                 ty_span: zero,
+//RS             },
+//RS             VariantField {
+//RS                 name: "same_origin_credentials".to_string(),
+//RS                 name_span: zero,
+//RS                 ty: Type::Bool,
+//RS                 ty_span: zero,
+//RS             },
+//RS         ]),
+//RS     )];
+//RS     for (variant, _) in &http_redirect_policy {
+//RS         cx.variant_owner
+//RS             .insert(variant.clone(), "HTTPRedirectPolicy".to_string());
+//RS     }
+//RS     cx.enum_variants
+//RS         .insert("HTTPRedirectPolicy".to_string(), http_redirect_policy);
+//RS     cx.cloneable.insert("HTTPRedirectPolicy".to_string());
+//RS     let http_retry_policy = vec![
+//RS         ("None".to_string(), VariantPayload::Unit),
+//RS         ("Safe".to_string(), VariantPayload::Unit),
+//RS         ("Idempotent".to_string(), VariantPayload::Unit),
+//RS     ];
+//RS     for (variant, _) in &http_retry_policy {
+//RS         cx.variant_owner
+//RS             .insert(variant.clone(), "HTTPRetryPolicy".to_string());
+//RS     }
+//RS     cx.enum_variants
+//RS         .insert("HTTPRetryPolicy".to_string(), http_retry_policy);
+//RS     cx.cloneable.insert("HTTPRetryPolicy".to_string());
+//RS     let http_cookie_jar = vec![("Memory".to_string(), VariantPayload::Unit)];
+//RS     cx.variant_owner
+//RS         .insert("Memory".to_string(), "HTTPCookieJar".to_string());
+//RS     cx.enum_variants
+//RS         .insert("HTTPCookieJar".to_string(), http_cookie_jar);
+//RS     cx.cloneable.insert("HTTPCookieJar".to_string());
+//RS     let http_compress_encoding = vec![("Gzip".to_string(), VariantPayload::Unit)];
+//RS     cx.variant_owner
+//RS         .insert("Gzip".to_string(), "HTTPCompressEncoding".to_string());
+//RS     cx.enum_variants
+//RS         .insert("HTTPCompressEncoding".to_string(), http_compress_encoding);
+//RS     cx.cloneable.insert("HTTPCompressEncoding".to_string());
+//RS     cx.cloneable.insert("HTTPCorsPolicy".to_string());
+//RS     // D-HTTP-CORS1=A: `.Any` or `.List([...])` origins.
+//RS     let http_cors_origins = vec![
+//RS         ("Any".to_string(), VariantPayload::Unit),
+//RS         (
+//RS             "List".to_string(),
+//RS             VariantPayload::Single(Type::List(Box::new(Type::String)), zero),
+//RS         ),
+//RS     ];
+//RS     for (variant, _) in &http_cors_origins {
+//RS         cx.variant_owner
+//RS             .insert(variant.clone(), "HTTPCorsOrigins".to_string());
+//RS     }
+//RS     cx.enum_variants
+//RS         .insert("HTTPCorsOrigins".to_string(), http_cors_origins);
+//RS     cx.cloneable.insert("HTTPCorsOrigins".to_string());
+//RS     let mut http_errors = [
+//RS         "InvalidMethod",
+//RS         "InvalidURL",
+//RS         "InvalidHeader",
+//RS         "InvalidStatus",
+//RS         "BodyConsumed",
+//RS         "InvalidFraming",
+//RS         "UnsupportedEncoding",
+//RS         "Cancelled",
+//RS     ]
+//RS     .into_iter()
+//RS     .map(|name| (name.to_string(), VariantPayload::Unit))
+//RS     .collect::<Vec<_>>();
+//RS     for (name, field, ty) in [
+//RS         ("BodyTooLarge", "limit", Type::Int),
+//RS         ("Resolve", "host", Type::String),
+//RS         ("Connect", "address", Type::String),
+//RS         ("TLS", "stage", Type::String),
+//RS         ("Timeout", "phase", Type::String),
+//RS         ("Proxy", "stage", Type::String),
+//RS         ("Redirect", "reason", Type::String),
+//RS         ("Protocol", "version", Type::String),
+//RS         ("IO", "operation", Type::String),
+//RS         ("Policy", "reason", Type::String),
+//RS         ("ResourceUnavailable", "resource", Type::String),
+//RS         ("Internal", "incident_id", Type::String),
+//RS         (
+//RS             "UnsupportedTarget",
+//RS             "operation",
+//RS             Type::Named("HTTPOperation".to_string()),
+//RS         ),
+//RS     ] {
+//RS         http_errors.push((
+//RS             name.to_string(),
+//RS             VariantPayload::Named(vec![VariantField {
+//RS                 name: field.to_string(),
+//RS                 name_span: zero,
+//RS                 ty,
+//RS                 ty_span: zero,
+//RS             }]),
+//RS         ));
+//RS     }
+//RS     for (name, _) in &http_errors {
+//RS         cx.variant_owner
+//RS             .insert(name.clone(), "HTTPError".to_string());
+//RS     }
+//RS     cx.enum_variants
+//RS         .insert("HTTPError".to_string(), http_errors);
+//RS     cx.cloneable.insert("HTTPError".to_string());
+//RS     cx.cloneable.insert("HTTPOperation".to_string());
+//RS     // D-WS1=B
+//RS     let mut ws_errors: Vec<(String, VariantPayload)> = [
+//RS         "InvalidURL",
+//RS         "InvalidHandshake",
+//RS         "Protocol",
+//RS         "Timeout",
+//RS         "Closed",
+//RS         "Cancelled",
+//RS         "UnsupportedTarget",
+//RS     ]
+//RS     .into_iter()
+//RS     .map(|name| (name.to_string(), VariantPayload::Unit))
+//RS     .collect();
+//RS     ws_errors.push((
+//RS         "MessageTooLarge".to_string(),
+//RS         VariantPayload::Named(vec![VariantField {
+//RS             name: "limit".to_string(),
+//RS             name_span: zero,
+//RS             ty: Type::Int,
+//RS             ty_span: zero,
+//RS         }]),
+//RS     ));
+//RS     ws_errors.push((
+//RS         "IO".to_string(),
+//RS         VariantPayload::Named(vec![VariantField {
+//RS             name: "operation".to_string(),
+//RS             name_span: zero,
+//RS             ty: Type::String,
+//RS             ty_span: zero,
+//RS         }]),
+//RS     ));
+//RS     for (name, _) in &ws_errors {
+//RS         cx.variant_owner.insert(name.clone(), "WsError".to_string());
+//RS     }
+//RS     cx.enum_variants.insert("WsError".to_string(), ws_errors);
+//RS     cx.cloneable.insert("WsError".to_string());
+//RS     cx.cloneable.insert("WsConn".to_string());
+//RS     cx.cloneable.insert("WsMessage".to_string());
+//RS     for name in [
+//RS         "Browser",
+//RS         "BrowserContext",
+//RS         "BrowserPage",
+//RS         "BrowserFrame",
+//RS         "BrowserLocator",
+//RS         "BrowserIntercept",
+//RS         "BrowserEvent",
+//RS         "BrowserTrace",
+//RS         "BrowserReceipt",
+//RS         "BrowserPrivacy",
+//RS         "BrowserError",
+//RS         "BrowserAbilities",
+//RS         "BrowserProfile",
+//RS         "BrowserTimeout",
+//RS         "BrowserProtocol",
+//RS     ] {
+//RS         cx.cloneable.insert(name.to_string());
+//RS     }
+//RS     // Bare Ordering remains this generated module's nominal; explicit
+//RS     // canonical identities select an imported module through foreign_types.
+//RS     cx.local_type_names
+//RS         .insert(Syntax::TYPE_ORDERING.to_string());
+//RS     cx.enum_variants.insert(
+//RS         Syntax::TYPE_ORDERING.to_string(),
+//RS         ["Less", "Equal", "Greater"]
+//RS             .into_iter()
+//RS             .map(|name| (name.to_string(), VariantPayload::Unit))
+//RS             .collect(),
+//RS     );
+//RS     for name in ["Less", "Equal", "Greater"] {
+//RS         cx.variant_owner
+//RS             .insert(name.to_string(), Syntax::TYPE_ORDERING.to_string());
+//RS     }
+//RS     cx.cloneable.insert(Syntax::TYPE_ORDERING.to_string());
+//RS     cx.enum_variants.insert(
+//RS         Syntax::TYPE_REMOVE_BY.to_string(),
+//RS         ["Val", "Slot"]
+//RS             .into_iter()
+//RS             .map(|name| (name.to_string(), VariantPayload::Unit))
+//RS             .collect(),
+//RS     );
+//RS     for name in ["Val", "Slot"] {
+//RS         cx.variant_owner
+//RS             .insert(name.to_string(), Syntax::TYPE_REMOVE_BY.to_string());
+//RS     }
+//RS     cx.cloneable.insert(Syntax::TYPE_REMOVE_BY.to_string());
+//RS 
+//RS     // Inline foreign declarations keep their source return as the bridge ABI.
+//RS     // D-STREAMYIELD1: a generator keeps its raw `Stream<T>` protocol return,
+//RS     // exactly as its lowered TFunc does (`lower_func_with_web_boundary`), so a
+//RS     // call's value type is the stream and never a `Result`-wrapped stream.
+//RS     // Ordinary Jet functions use the implicit failure carrier instead.
+//RS     fn callable_return_type(function: &Func) -> Type {
+//RS         if function.inline_foreign.is_some() {
+//RS             return function
+//RS                 .return_type
+//RS                 .clone()
+//RS                 .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+//RS         }
+//RS         match &function.return_type {
+//RS             Some(stream @ Type::Apply { name, args })
+//RS                 if name == Syntax::TYPE_STREAM && args.len() == 1 =>
+//RS             {
+//RS                 stream.clone()
+//RS             }
+//RS             _ => function.effective_return_type(),
+//RS         }
+//RS     }
+//RS 
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(f) => {
+//RS                 if f.diverges {
+//RS                     cx.diverging_functions.insert(f.name.clone());
+//RS                 }
+//RS                 cx.contract_sigs
+//RS                     .insert(f.name.clone(), (f.pre.clone(), f.post.clone()));
+//RS                 cx.fn_param_names.insert(
+//RS                     f.name.clone(),
+//RS                     f.params.iter().map(|param| param.name.clone()).collect(),
+//RS                 );
+//RS                 cx.fn_type_params.insert(
+//RS                     f.name.clone(),
+//RS                     f.type_params.iter().map(|param| param.name.clone()).collect(),
+//RS                 );
+//RS                 cx.fn_type_param_order.insert(
+//RS                     f.name.clone(),
+//RS                     f.type_params.iter().map(|param| param.name.clone()).collect(),
+//RS                 );
+//RS                 cx.sigs.insert(
+//RS                     f.name.clone(),
+//RS                     f.params
+//RS                         .iter()
+//RS                         .map(|p| {
+//RS                             let conv = p.convention;
+//RS                             let ty = if p.variadic {
+//RS                                 Type::List(Box::new(p.ty.clone()))
+//RS                             } else {
+//RS                                 p.ty.clone()
+//RS                             };
+//RS                             (conv, ty.with_effective_fn_returns())
+//RS                         })
+//RS                         .collect(),
+//RS                 );
+//RS                 cx.fn_types.insert(
+//RS                     f.name.clone(),
+//RS                     Type::Fn {
+//RS                         params: f
+//RS                             .params
+//RS                             .iter()
+//RS                             .map(|p| {
+//RS                                 let ty = if p.variadic {
+//RS                                     Type::List(Box::new(p.ty.clone()))
+//RS                                 } else {
+//RS                                     p.ty.clone()
+//RS                                 };
+//RS                                 ty.with_effective_fn_returns()
+//RS                             })
+//RS                             .collect(),
+//RS                         ret: Some(Box::new(callable_return_type(f))),
+//RS                         effect_bound: None,
+//RS                         param_contract: (!f.params.is_empty()).then(|| {
+//RS                             f.params
+//RS                                 .iter()
+//RS                                 .map(|p| (p.call_label().to_string(), p.zone))
+//RS                                 .collect()
+//RS                         }),
+//RS                         call_metadata: Some(crate::AST::FunctionCallMetadata {
+//RS                             names: f.params.iter().map(|p| p.name.clone()).collect(),
+//RS                             defaults: f
+//RS                                 .params
+//RS                                 .iter()
+//RS                                 .map(|p| p.default.as_deref().cloned())
+//RS                                 .collect(),
+//RS                             variadic: f.params.iter().map(|p| p.variadic).collect(),
+//RS                             conventions: f.params.iter().map(|p| p.convention).collect(),
+//RS                             policies: f
+//RS                                 .markers
+//RS                                 .iter()
+//RS                                 .find(|marker| marker.name == crate::Syntax::MARKER_POLICY)
+//RS                                 .and_then(|marker| {
+//RS                                     crate::AST::CallablePolicyChain::parse(
+//RS                                         &marker.expr_args_owned(),
+//RS                                     )
+//RS                                     .ok()
+//RS                                 })
+//RS                                 .unwrap_or_default(),
+//RS                         }),
+//RS                         return_view_provenance: f.return_view_provenance.clone(),
+//RS                     },
+//RS                 );
+//RS                 cx.fn_bodies.insert(f.name.clone(), f.body.clone());
+//RS                 let source_fn_type = cx.fn_types.get(&f.name).cloned().map(|mut ty| {
+//RS                     if let Type::Fn { ret, .. } = &mut ty {
+//RS                         *ret = f.return_type.clone().map(Box::new);
+//RS                     }
+//RS                     ty
+//RS                 });
+//RS                 if let Some(source_fn_type) = source_fn_type {
+//RS                     cx.fn_source_types
+//RS                         .insert(f.name.clone(), source_fn_type);
+//RS                 }
+//RS                 // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic
+//RS                 // (`...Trait` / `...[A, B]`) has no single Rust signature — record
+//RS                 // it so call-site lowering routes to the per-arity function
+//RS                 // `Codegen/VariadicBound.rs` synthesizes instead of a normal call.
+//RS                 if let Some(last) = f.params.last() {
+//RS                     if let Some(bounds) =
+//RS                         last.variadic_trait_bounds(|n| crate::Generics::is_builtin_trait(n))
+//RS                     {
+//RS                         cx.variadic_bound_fns
+//RS                             .insert(f.name.clone(), (f.params.len() - 1, bounds));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 cx.type_names.insert(s.name.clone());
+//RS                 cx.local_type_names.insert(s.name.clone());
+//RS                 let encode = s.derives.iter().any(|(name, _)| {
+//RS                     matches!(name.as_str(), Syntax::MARKER_CODABLE | Generics::ENCODE)
+//RS                 });
+//RS                 let decode = s.derives.iter().any(|(name, _)| {
+//RS                     matches!(name.as_str(), Syntax::MARKER_CODABLE | Generics::DECODE)
+//RS                 });
+//RS                 if encode && decode {
+//RS                     cx.codable_types.insert(s.name.clone());
+//RS                 }
+//RS                 if s.is_published_schema {
+//RS                     cx.published_schemas.insert(s.name.clone());
+//RS                 }
+//RS                 let param_names = s.type_params.iter().map(|p| p.name.as_str()).collect::<HashSet<_>>();
+//RS                 let mut wire = HashSet::new();
+//RS                 for field in s.fields.iter().filter(|f| f.computed.is_none()
+//RS                     && !f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP)) {
+//RS                     for name in crate::Generics::free_type_params(&field.ty) {
+//RS                         if param_names.contains(name.as_str()) { wire.insert(name); }
+//RS                     }
+//RS                 }
+//RS                 cx.serde_wire_params.insert(s.name.clone(), wire);
+//RS                 if s.layout == Some(crate::AST::StructLayout::Columnar) {
+//RS                     cx.columnar.insert(s.name.clone());
+//RS                 }
+//RS                 cx.struct_fields.insert(
+//RS                     s.name.clone(),
+//RS                     s.reflection_fields()
+//RS                         .map(|f| (f.name.clone(), f.ty.clone()))
+//RS                         .collect(),
+//RS                 );
+//RS                 if let Some(marker) = s
+//RS                     .type_markers
+//RS                     .iter()
+//RS                     .find(|marker| marker.name == crate::Syntax::MARKER_RECEIPT && !marker.negated)
+//RS                 {
+//RS                     if let Some(crate::AST::CtValue::Str(name)) = marker.ct.as_ref() {
+//RS                         let fields = s
+//RS                             .reflection_fields()
+//RS                             .map(|field| (field.name.clone(), field.ty.clone()))
+//RS                             .collect::<Vec<_>>();
+//RS                         cx.receipt_sections.insert(
+//RS                             s.name.clone(),
+//RS                             ReceiptSectionFact {
+//RS                                 name: name.clone(),
+//RS                                 type_name: s.name.clone(),
+//RS                                 schema_digest: receipt_schema_digest(&s.name, &fields),
+//RS                             },
+//RS                         );
+//RS                     }
+//RS                 }
+//RS                 cx.reflection_fields.insert(
+//RS                     s.name.clone(),
+//RS                     jet_foundation::Reflection::fields(s),
+//RS                 );
+//RS                 // D-FIELDPOL1: computed field names, so TIR lowering routes a
+//RS                 // read of one to a getter call instead of a member access.
+//RS                 let computed: HashSet<String> = s
+//RS                     .fields
+//RS                     .iter()
+//RS                     .filter(|f| f.computed.is_some())
+//RS                     .map(|f| f.name.clone())
+//RS                     .collect();
+//RS                 if !computed.is_empty() {
+//RS                     cx.computed_fields.insert(s.name.clone(), computed);
+//RS                 }
+//RS                 let (memo_fields, memo_dependencies) = memo_facts_for_struct(s);
+//RS                 if !memo_fields.is_empty() {
+//RS                     cx.memo_fields.insert(s.name.clone(), memo_fields);
+//RS                 }
+//RS                 if !memo_dependencies.is_empty() {
+//RS                     cx.memo_dependencies
+//RS                         .insert(s.name.clone(), memo_dependencies);
+//RS                 }
+//RS                 // c148: record the declared type params so multi-char names are
+//RS                 // recognized everywhere (struct_is_generic, field_type_cloneable, …).
+//RS                 cx.struct_type_params.insert(
+//RS                     s.name.clone(),
+//RS                     s.type_params.iter().map(|p| p.name.clone()).collect(),
+//RS                 );
+//RS                 cx.struct_type_param_order.insert(
+//RS                     s.name.clone(),
+//RS                     s.type_params.iter().map(|p| p.name.clone()).collect(),
+//RS                 );
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 cx.type_names.insert(e.name.clone());
+//RS                 cx.local_type_names.insert(e.name.clone());
+//RS                 cx.enum_variants.insert(
+//RS                     e.name.clone(),
+//RS                     e.variants
+//RS                         .iter()
+//RS                         .map(|v| (v.name.clone(), v.payload.clone()))
+//RS                         .collect(),
+//RS                 );
+//RS                 for v in &e.variants {
+//RS                     cx.variant_owner.insert(v.name.clone(), e.name.clone());
+//RS                 }
+//RS                 // D-TAG1: group names resolve to their owning enum too, so a
+//RS                 // group pattern (`.Fire ->`) finds its Rust type prefix.
+//RS                 for g in &e.groups {
+//RS                     cx.variant_owner.insert(g.path.clone(), e.name.clone());
+//RS                 }
+//RS             }
+//RS             Item::Const(c) => {
+//RS                 let ty = super::TIR::source_constant_type(c);
+//RS                 if let Some(ty) = ty {
+//RS                     cx.const_types.insert(c.name.clone(), ty.clone());
+//RS                     if c.is_persist || c.mutable {
+//RS                         cx.persist_types.insert(c.name.clone(), ty);
+//RS                     }
+//RS                 }
+//RS                 if c.is_comptime && !matches!(c.rust_kind, crate::AST::RustConstKind::Static) {
+//RS                     // Inline the evaluated literal at every reference.
+//RS                     // `CtValue::serialize()` renders an empty `List([])` as a bare
+//RS                     // `vec![]` — fine when the splice site supplies a type (a `let`
+//RS                     // binding's annotation, a struct field, a typed param), but a
+//RS                     // comptime const inlines directly at a bare use site (e.g.
+//RS                     // `PATHS.join(sep)`), where nothing pins the element type and
+//RS                     // rustc rejects the untyped `vec![]` as E0282 (I2). `c.ty` (set
+//RS                     // by sema alongside `c.ct` — see `ConstDef::ty`) carries the
+//RS                     // binding's real Jet type even when the value has no elements to
+//RS                     // sample it from, so an empty list renders as a typed
+//RS                     // `Vec::<T>::new()` instead.
+//RS                     let serialized = match (c.ct.as_ref(), c.ty.as_ref()) {
+//RS                         (Some(CtValue::List(xs)), Some(Type::List(inner))) if xs.is_empty() => {
+//RS                             format!("Vec::<{}>::new()", cx.rust_type(inner))
+//RS                         }
+//RS                         (Some(v), _) => v.serialize(),
+//RS                         (None, _) => "Default::default()".to_string(),
+//RS                     };
+//RS                     cx.consts.insert(c.name.clone(), serialized);
+//RS                     if let Some(value) = c.ct.as_ref() {
+//RS                         cx.const_values.insert(c.name.clone(), value.clone());
+//RS                     }
+//RS                 } else {
+//RS                     cx.consts
+//RS                         .insert(c.name.clone(), mangle(&c.name).to_uppercase());
+//RS                 }
+//RS             }
+//RS             Item::ExternRust(block) => {
+//RS                 for ef in &block.functions {
+//RS                     cx.sigs.insert(
+//RS                         ef.name.clone(),
+//RS                         ef.params
+//RS                             .iter()
+//RS                             .map(|p| {
+//RS                                 let ty = if p.variadic {
+//RS                                     Type::List(Box::new(p.ty.clone()))
+//RS                                 } else {
+//RS                                     p.ty.clone()
+//RS                                 };
+//RS                                 (p.convention, ty)
+//RS                             })
+//RS                             .collect(),
+//RS                     );
+//RS                     // Foreign declarations keep their source return in fn_types:
+//RS                     // the bridge wrapper has a raw ABI, not Jet's implicit Result
+//RS                     // carrier. #Import(c) functions are ordinary Jet items and differ.
+//RS                     cx.fn_types.insert(
+//RS                         ef.name.clone(),
+//RS                         Type::Fn {
+//RS                             params: ef
+//RS                                 .params
+//RS                                 .iter()
+//RS                                 .map(|p| {
+//RS                                     if p.variadic {
+//RS                                         Type::List(Box::new(p.ty.clone()))
+//RS                                     } else {
+//RS                                         p.ty.clone()
+//RS                                     }
+//RS                                 })
+//RS                                 .collect(),
+//RS                             ret: ef.return_type.clone().map(Box::new),
+//RS                             effect_bound: None, return_view_provenance: None,
+//RS                             param_contract: (!ef.params.is_empty()).then(|| {
+//RS                                 ef.params
+//RS                                     .iter()
+//RS                                     .map(|p| (p.call_label().to_string(), p.zone))
+//RS                                     .collect()
+//RS                             }),
+//RS                             call_metadata: Some(crate::AST::FunctionCallMetadata {
+//RS                                 names: ef.params.iter().map(|p| p.name.clone()).collect(),
+//RS                                 // `extern_to_sig` owns the foreign contract and
+//RS                                 // deliberately has no Jet default bodies.
+//RS                                 defaults: ef.params.iter().map(|_| None).collect(),
+//RS                                 variadic: ef.params.iter().map(|p| p.variadic).collect(),
+//RS                                 conventions: ef.params.iter().map(|p| p.convention).collect(),
+//RS                                 policies: crate::AST::CallablePolicyChain::default(),
+//RS                             }),
+//RS                         },
+//RS                     );
+//RS                 }
+//RS             }
+//RS             Item::CModule(cm) => {
+//RS                 // S59: C boundary functions register like extern rust so that
+//RS                 // cross-module call sites resolve argument conventions; their
+//RS                 // foreign wrapper retains the declared raw ABI in fn_types.
+//RS                 for ef in &cm.functions {
+//RS                     cx.sigs.insert(
+//RS                         ef.name.clone(),
+//RS                         ef.params
+//RS                             .iter()
+//RS                             .map(|p| {
+//RS                                 let ty = if p.variadic {
+//RS                                     Type::List(Box::new(p.ty.clone()))
+//RS                                 } else {
+//RS                                     p.ty.clone()
+//RS                                 };
+//RS                                 (p.convention, ty)
+//RS                             })
+//RS                             .collect(),
+//RS                     );
+//RS                     cx.fn_types.insert(
+//RS                         ef.name.clone(),
+//RS                         Type::Fn {
+//RS                             params: ef
+//RS                                 .params
+//RS                                 .iter()
+//RS                                 .map(|p| {
+//RS                                     if p.variadic {
+//RS                                         Type::List(Box::new(p.ty.clone()))
+//RS                                     } else {
+//RS                                         p.ty.clone()
+//RS                                     }
+//RS                                 })
+//RS                                 .collect(),
+//RS                             ret: ef.return_type.clone().map(Box::new),
+//RS                             effect_bound: None, return_view_provenance: None,
+//RS                             param_contract: (!ef.params.is_empty()).then(|| {
+//RS                                 ef.params
+//RS                                     .iter()
+//RS                                     .map(|p| (p.call_label().to_string(), p.zone))
+//RS                                     .collect()
+//RS                             }),
+//RS                             call_metadata: Some(crate::AST::FunctionCallMetadata {
+//RS                                 names: ef.params.iter().map(|p| p.name.clone()).collect(),
+//RS                                 defaults: ef.params.iter().map(|_| None).collect(),
+//RS                                 variadic: ef.params.iter().map(|p| p.variadic).collect(),
+//RS                                 conventions: ef.params.iter().map(|p| p.convention).collect(),
+//RS                                 policies: crate::AST::CallablePolicyChain::default(),
+//RS                             }),
+//RS                         },
+//RS                     );
+//RS                 }
+//RS             }
+//RS             Item::Trait(t) => {
+//RS                 cx.trait_names.insert(t.name.clone());
+//RS                 for m in &t.methods {
+//RS                     if let Some(self_param) = m.params.iter().find(|p| p.name == Syntax::KW_SELF) {
+//RS                         cx.method_self_convs
+//RS                             .insert((t.name.clone(), m.name.clone()), self_param.convention);
+//RS                     }
+//RS                     cx.method_sigs.insert(
+//RS                         (t.name.clone(), m.name.clone()),
+//RS                         m.params
+//RS                             .iter()
+//RS                             .filter(|p| p.name != Syntax::KW_SELF)
+//RS                             .map(|p| {
+//RS                                 let ty = if p.variadic {
+//RS                                     Type::List(Box::new(p.ty.clone()))
+//RS                                 } else {
+//RS                                     p.ty.clone()
+//RS                                 };
+//RS                                 (p.convention, ty)
+//RS                             })
+//RS                             .collect(),
+//RS                     );
+//RS                     cx.method_rets
+//RS                         .insert((t.name.clone(), m.name.clone()), m.return_type.clone());
+//RS                 }
+//RS             }
+//RS             // D-QUAL2: a tag erases — it contributes no codegen names.
+//RS             Item::Tag(_) => {}
+//RS             // D-MIGRATE4: collect migration blocks per type (source order = the
+//RS             // chain, oldest step first) so `emit_struct_migration` can emit the
+//RS             // runtime step functions + chain-walker for decodable
+//RS             // `#PublishedSchema` types. Types without blocks get nothing.
+//RS             Item::Migration(m) => {
+//RS                 cx.migrations
+//RS                     .entry(m.type_name.clone())
+//RS                     .or_default()
+//RS                     .push(m.clone());
+//RS             }
+//RS             Item::EffectDecl(_)
+//RS             | Item::MarkerDecl(_)
+//RS             | Item::FactDecl(_)
+//RS             | Item::Impl(_) | Item::Test(_) | Item::Module(_) | Item::ErrorConv(_)
+//RS             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
+//RS             | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)
+//RS             | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before codegen
+//RS             | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
+//RS             | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
+//RS             Item::TypeAlias(a) => {
+//RS                 cx.type_aliases.insert(
+//RS                     a.name.clone(),
+//RS                     (a.type_params.clone(), a.target.clone()),
+//RS                 );
+//RS             }
+//RS             Item::Distinct(d) => {
+//RS                 cx.type_names.insert(d.name.clone());
+//RS                 cx.local_type_names.insert(d.name.clone());
+//RS                 cx.distinct_types
+//RS                     .insert(
+//RS                         d.name.clone(),
+//RS                         (
+//RS                             d.base.clone(),
+//RS                             d.derives
+//RS                                 .iter()
+//RS                                 .any(|(name, _)| name == crate::Syntax::MARKER_NUMERIC),
+//RS                         ),
+//RS                     );
+//RS                 if let Some((lo, hi, _)) = d.range {
+//RS                     cx.distinct_ranges.insert(d.name.clone(), (lo, hi));
+//RS                 }
+//RS             }
+//RS             // D-QUAL3: each unit-family member registers as a `#Numeric` distinct
+//RS             // type erasing to `Float`.
+//RS             Item::UnitFamily(uf) => {
+//RS                 let dimension = uf.resolved_dimension.clone();
+//RS                 let affine = uf.base.is_some()
+//RS                     && uf
+//RS                         .members
+//RS                         .iter()
+//RS                         .any(|member| member.offset != crate::AST::UnitRatio::zero());
+//RS                 for d in uf.distinct_defs() {
+//RS                     cx.type_names.insert(d.name.clone());
+//RS                     cx.local_type_names.insert(d.name.clone());
+//RS                     cx.distinct_types
+//RS                         .insert(
+//RS                             d.name.clone(),
+//RS                             (
+//RS                                 d.base.clone(),
+//RS                                 d.derives
+//RS                                     .iter()
+//RS                                     .any(|(name, _)| name == crate::Syntax::MARKER_NUMERIC),
+//RS                             ),
+//RS                         );
+//RS                     // Mirror sema `unit_fact`: derive Point/Delta from the type
+//RS                     // name when `quantity` is unset (affine families).
+//RS                     let kind = d
+//RS                         .quantity
+//RS                         .as_ref()
+//RS                         .map(|(_, kind)| *kind)
+//RS                         .or_else(|| {
+//RS                             if !affine {
+//RS                                 return Some(crate::AST::QuantityKind::Linear);
+//RS                             }
+//RS                             uf.members.iter().find_map(|member| {
+//RS                                 let stem = crate::AST::UnitFamilyDef::type_name(&member.name);
+//RS                                 if d.name == format!("{stem}Point") {
+//RS                                     Some(crate::AST::QuantityKind::Point)
+//RS                                 } else if d.name == format!("{stem}Delta") {
+//RS                                     Some(crate::AST::QuantityKind::Delta)
+//RS                                 } else {
+//RS                                     None
+//RS                                 }
+//RS                             })
+//RS                         })
+//RS                         .unwrap_or(crate::AST::QuantityKind::Linear);
+//RS                     if let Some(member) = unit_family_member_for_type(uf, &d.name, kind) {
+//RS                         cx.unit_labels
+//RS                             .insert(d.name.clone(), unit_label(uf, member));
+//RS                     }
+//RS                     if uf.base.is_some() || dimension.is_some() {
+//RS                         if let Some(member) = unit_family_member_for_type(uf, &d.name, kind) {
+//RS                             cx.unit_facts.insert(
+//RS                                 d.name.clone(),
+//RS                                 unit_fact(uf, member, dimension.clone(), kind),
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::CodeModule(cm) => {
+//RS                 // D-MOD2: register inline module alias and add mangled function sigs.
+//RS                 if let Some(body) = &cm.body {
+//RS                     cx.code_modules.insert(cm.name.clone());
+//RS                     for inner in body {
+//RS                         if let Item::Func(f) = inner {
+//RS                             let mangled = jet_foundation::Names::member_name(&cm.name, &f.name);
+//RS                             if f.diverges {
+//RS                                 cx.diverging_functions.insert(mangled.clone());
+//RS                             }
+//RS                             cx.contract_sigs
+//RS                                 .insert(mangled.clone(), (f.pre.clone(), f.post.clone()));
+//RS                             cx.fn_type_params.insert(
+//RS                                 mangled.clone(),
+//RS                                 f.type_params.iter().map(|param| param.name.clone()).collect(),
+//RS                             );
+//RS                             cx.fn_type_param_order.insert(
+//RS                                 mangled.clone(),
+//RS                                 f.type_params.iter().map(|param| param.name.clone()).collect(),
+//RS                             );
+//RS                             cx.sigs.insert(
+//RS                                 mangled.clone(),
+//RS                                 f.params
+//RS                                     .iter()
+//RS                                     .map(|p| {
+//RS                                         let ty = if p.variadic {
+//RS                                             Type::List(Box::new(p.ty.clone()))
+//RS                                         } else {
+//RS                                             p.ty.clone()
+//RS                                         };
+//RS                                         (p.convention, ty.with_effective_fn_returns())
+//RS                                     })
+//RS                                     .collect(),
+//RS                             );
+//RS                             cx.fn_types.insert(
+//RS                                 mangled.clone(),
+//RS                                 Type::Fn {
+//RS                                     params: f
+//RS                                         .params
+//RS                                         .iter()
+//RS                                         .map(|p| {
+//RS                                             let ty = if p.variadic {
+//RS                                                 Type::List(Box::new(p.ty.clone()))
+//RS                                             } else {
+//RS                                                 p.ty.clone()
+//RS                                             };
+//RS                                             ty.with_effective_fn_returns()
+//RS                                         })
+//RS                                         .collect(),
+//RS                                     ret: Some(Box::new(callable_return_type(f))),
+//RS                                     effect_bound: None,
+//RS                                     return_view_provenance: f.return_view_provenance.clone(),
+//RS                                     param_contract: (!f.params.is_empty()).then(|| {
+//RS                                         f.params
+//RS                                             .iter()
+//RS                                             .map(|p| (p.call_label().to_string(), p.zone))
+//RS                                             .collect()
+//RS                                     }),
+//RS                                     call_metadata: Some(crate::AST::FunctionCallMetadata {
+//RS                                         names: f.params.iter().map(|p| p.name.clone()).collect(),
+//RS                                         defaults: f
+//RS                                             .params
+//RS                                             .iter()
+//RS                                             .map(|p| p.default.as_deref().cloned())
+//RS                                             .collect(),
+//RS                                         variadic: f.params.iter().map(|p| p.variadic).collect(),
+//RS                                         conventions: f.params.iter().map(|p| p.convention).collect(),
+//RS                                         policies: crate::AST::CallablePolicyChain::default(),
+//RS                                     }),
+//RS                                 },
+//RS                             );
+//RS                             cx.fn_param_names.insert(
+//RS                                 mangled,
+//RS                                 f.params.iter().map(|param| param.name.clone()).collect(),
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // Nothing below reads `boxed_edges`, so the full set is computed once.
+//RS     let boxed_edges = find_box_edges(items, &cx);
+//RS     cx.boxed_edges.extend(boxed_edges);
+//RS     // Both questions below are asked for every declared type; answer them
+//RS     // once instead of walking the type graph or rescanning `items` per type.
+//RS     let secret = cx.secret_containing_types();
+//RS     let trait_impls = items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             Item::Impl(i) => i
+//RS                 .trait_name
+//RS                 .as_deref()
+//RS                 .map(|trait_name| (i.type_name.as_str(), trait_name)),
+//RS             _ => None,
+//RS         })
+//RS         .collect::<HashSet<_>>();
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Struct(s) => {
+//RS                 if type_is_cloneable_struct(s, &cx.type_names) && !secret.contains(&s.name) {
+//RS                     cx.cloneable.insert(s.name.clone());
+//RS                 }
+//RS                 if crate::Traits::struct_auto_derive_ok(s) {
+//RS                     for (trait_name, selected) in [
+//RS                         (Generics::PRINTABLE, &mut cx.auto_printable),
+//RS                         (Generics::DEBUG, &mut cx.auto_debug),
+//RS                         (Generics::EQUATABLE, &mut cx.auto_equatable),
+//RS                     ] {
+//RS                         if crate::Traits::auto_derive_requested(
+//RS                             &s.type_markers,
+//RS                             trait_name,
+//RS                             s.auto_derive_default,
+//RS                         ) && !trait_impls.contains(&(s.name.as_str(), trait_name))
+//RS                             && !s
+//RS                             .trait_impls
+//RS                             .iter()
+//RS                             .any(|block| block.trait_name == trait_name)
+//RS                         {
+//RS                             selected.insert(s.name.clone());
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 for m in &s.methods {
+//RS                     register_method(&mut cx, &s.name, m, None, None);
+//RS                 }
+//RS                 for implementation in &s.trait_impls {
+//RS                     for m in &implementation.methods {
+//RS                         register_method(
+//RS                             &mut cx,
+//RS                             &s.name,
+//RS                             m,
+//RS                             Some(implementation.trait_name.as_str()),
+//RS                             implementation.operator_rhs.as_ref(),
+//RS                         );
+//RS                     }
+//RS                 }
+//RS                 if s.derives.iter().any(|(t, _)| t == Syntax::MARKER_PATCHABLE) {
+//RS                     cx.patchable.insert(s.name.clone());
+//RS                     let patch = format!("{}.Patch", s.name);
+//RS                     let base_ty = Type::Named(s.name.clone());
+//RS                     let patch_ty = Type::Named(patch.clone());
+//RS                     cx.method_sigs.insert(
+//RS                         (s.name.clone(), "apply".to_string()),
+//RS                         vec![(AccessConvention::Move, patch_ty.clone())],
+//RS                     );
+//RS                     cx.method_rets
+//RS                         .insert((s.name.clone(), "apply".to_string()), Some(base_ty.clone()));
+//RS                     cx.method_sigs.insert(
+//RS                         (s.name.clone(), "diff".to_string()),
+//RS                         vec![
+//RS                             (AccessConvention::Move, base_ty.clone()),
+//RS                             (AccessConvention::Move, base_ty),
+//RS                         ],
+//RS                     );
+//RS                     cx.method_rets
+//RS                         .insert((s.name.clone(), "diff".to_string()), Some(patch_ty.clone()));
+//RS                     cx.method_sigs.insert(
+//RS                         (patch.clone(), "merge".to_string()),
+//RS                         vec![(AccessConvention::Move, patch_ty.clone())],
+//RS                     );
+//RS                     cx.method_rets
+//RS                         .insert((patch, "merge".to_string()), Some(patch_ty));
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 if type_is_cloneable_enum(e, &cx.type_names) && !secret.contains(&e.name) {
+//RS                     cx.cloneable.insert(e.name.clone());
+//RS                 }
+//RS                 if crate::Traits::enum_auto_derive_ok(e) {
+//RS                     for (trait_name, selected) in [
+//RS                         (Generics::PRINTABLE, &mut cx.auto_printable),
+//RS                         (Generics::DEBUG, &mut cx.auto_debug),
+//RS                         (Generics::EQUATABLE, &mut cx.auto_equatable),
+//RS                     ] {
+//RS                         if crate::Traits::auto_derive_requested(
+//RS                             &e.type_markers,
+//RS                             trait_name,
+//RS                             e.auto_derive_default,
+//RS                         ) && !trait_impls.contains(&(e.name.as_str(), trait_name))
+//RS                             && !e
+//RS                             .trait_impls
+//RS                             .iter()
+//RS                             .any(|block| block.trait_name == trait_name)
+//RS                         {
+//RS                             selected.insert(e.name.clone());
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 for m in &e.methods {
+//RS                     register_method(&mut cx, &e.name, m, None, None);
+//RS                 }
+//RS                 for implementation in &e.trait_impls {
+//RS                     for m in &implementation.methods {
+//RS                         register_method(
+//RS                             &mut cx,
+//RS                             &e.name,
+//RS                             m,
+//RS                             Some(implementation.trait_name.as_str()),
+//RS                             implementation.operator_rhs.as_ref(),
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Impl(i) => {
+//RS                 for m in &i.methods {
+//RS                     register_method(
+//RS                         &mut cx,
+//RS                         &i.type_name,
+//RS                         m,
+//RS                         i.trait_name.as_deref(),
+//RS                         i.operator_rhs.as_ref(),
+//RS                     );
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     // D-OPMIX1: Core's typed vector/scalar operator rows use the same
+//RS     // complete identity as source operator implementations. The ordinary
+//RS     // method tables remain compatibility metadata for non-operator callers;
+//RS     // operator lowering reads `operator_methods` exclusively.
+//RS     for (owner, trait_name, method, rhs, result) in [
+//RS         (
+//RS             "Vec3",
+//RS             Syntax::TRAIT_MUL,
+//RS             "mul",
+//RS             Type::Float,
+//RS             Type::Named("Vec3".to_string()),
+//RS         ),
+//RS         (
+//RS             "Vec3",
+//RS             Syntax::TRAIT_DIV,
+//RS             "div",
+//RS             Type::Float,
+//RS             Type::Named("Vec3".to_string()),
+//RS         ),
+//RS         (
+//RS             "Float",
+//RS             Syntax::TRAIT_DIV,
+//RS             "div",
+//RS             Type::Named("Vec3".to_string()),
+//RS             Type::Named("Vec3".to_string()),
+//RS         ),
+//RS     ] {
+//RS         let sig = vec![(AccessConvention::Read, rhs.clone())];
+//RS         let key = crate::Traits::operator_method_identity(owner, trait_name, method, &rhs);
+//RS         cx.operator_methods.insert(
+//RS             key,
+//RS             OperatorMethod {
+//RS                 trait_name: trait_name.to_string(),
+//RS                 sig: sig.clone(),
+//RS                 ret: Some(result.clone()),
+//RS             },
+//RS         );
+//RS         cx.trait_methods
+//RS             .insert((owner.to_string(), method.to_string()));
+//RS         cx.method_sigs
+//RS             .insert((owner.to_string(), method.to_string()), sig);
+//RS         cx.method_rets
+//RS             .insert((owner.to_string(), method.to_string()), Some(result));
+//RS     }
+//RS 
+//RS     // D-TAG1: `hashable` (unlike `comparable`) can't trust "field type is a
+//RS     // known type name" — a `Named` field is only Eq+Hash-capable if THAT type
+//RS     // is itself hashable (e.g. it has no Float fields). Fixed-point over the
+//RS     // (monotonically growing) hashable set until nothing new is added.
+//RS     let mut hashable_changed = true;
+//RS     while hashable_changed {
+//RS         hashable_changed = false;
+//RS         for item in items {
+//RS             match item {
+//RS                 Item::Struct(s) if !cx.hashable.contains(&s.name) => {
+//RS                     if type_is_hashable_struct(s, &cx.hashable) {
+//RS                         cx.hashable.insert(s.name.clone());
+//RS                         hashable_changed = true;
+//RS                     }
+//RS                 }
+//RS                 Item::Enum(e) if !cx.hashable.contains(&e.name) => {
+//RS                     if type_is_hashable_enum(e, &cx.hashable) {
+//RS                         cx.hashable.insert(e.name.clone());
+//RS                         hashable_changed = true;
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // D-TXN-ROLLBACK layer 2: collect types that implement `Rollback` so the
+//RS     // TIR lowerer can use snapshot_custom instead of snapshot for those roots.
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_ROLLBACK) => {
+//RS                 cx.rollback_types.insert(i.type_name.clone());
+//RS             }
+//RS             Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY) => {
+//RS                 cx.display_types.insert(i.type_name.clone());
+//RS             }
+//RS             Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_DEBUG) => {
+//RS                 cx.debug_types.insert(i.type_name.clone());
+//RS             }
+//RS             Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_CLOSE) => {
+//RS                 cx.close_types.insert(i.type_name.clone());
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 for block in &s.trait_impls {
+//RS                     if block.trait_name == Syntax::TRAIT_ROLLBACK {
+//RS                         cx.rollback_types.insert(s.name.clone());
+//RS                     }
+//RS                     if block.trait_name == Syntax::TRAIT_DISPLAY {
+//RS                         cx.display_types.insert(s.name.clone());
+//RS                     }
+//RS                     if block.trait_name == Syntax::TRAIT_DEBUG {
+//RS                         cx.debug_types.insert(s.name.clone());
+//RS                     }
+//RS                     if block.trait_name == Syntax::TRAIT_CLOSE {
+//RS                         cx.close_types.insert(s.name.clone());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 for block in &e.trait_impls {
+//RS                     if block.trait_name == Syntax::TRAIT_ROLLBACK {
+//RS                         cx.rollback_types.insert(e.name.clone());
+//RS                     }
+//RS                     if block.trait_name == Syntax::TRAIT_DISPLAY {
+//RS                         cx.display_types.insert(e.name.clone());
+//RS                     }
+//RS                     if block.trait_name == Syntax::TRAIT_DEBUG {
+//RS                         cx.debug_types.insert(e.name.clone());
+//RS                     }
+//RS                     if block.trait_name == Syntax::TRAIT_CLOSE {
+//RS                         cx.close_types.insert(e.name.clone());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     collect_iter_index_hooks(&mut cx, items);
+//RS     register_core_event_enums(&mut cx);
+//RS     let auto_derives = crate::Traits::TraitRegistry::auto_derives_for_items(items);
+//RS     apply_auto_derives(&mut cx, &auto_derives);
+//RS     cx
+//RS }
+//RS 
+//RS pub(crate) fn apply_auto_derives(cx: &mut Cx, auto_derives: &crate::Traits::TraitRegistry) {
+//RS     cx.auto_printable = auto_derives.auto_printable.clone();
+//RS     cx.auto_debug = auto_derives.auto_debug.clone();
+//RS     cx.auto_equatable = auto_derives.auto_equatable.clone();
+//RS }
+//RS 
+//RS fn register_core_event_enums(cx: &mut Cx) {
+//RS     const ENUMS: &[(&str, &[&str])] = &[
+//RS         ("Overflow", &["Block", "DropNewest", "DropOldest"]),
+//RS         ("FailurePolicy", &["StopFirst", "Collect", "Log", "Ignore"]),
+//RS         ("HookPolicy", &["FirstCancelElseTransform"]),
+//RS         ("HookOutcome", &["Continue", "Cancel", "Fail"]),
+//RS         ("HookDecision", &["Continue", "Transform", "Cancel", "Fail"]),
+//RS         (
+//RS             "DispatchState",
+//RS             &[
+//RS                 "Delivered",
+//RS                 "HandlerFailed",
+//RS                 "DroppedNewest",
+//RS                 "DroppedOldest",
+//RS                 "Closed",
+//RS                 "Cancelled",
+//RS                 "DeadlineExceeded",
+//RS             ],
+//RS         ),
+//RS     ];
+//RS     for (enum_name, variants) in ENUMS {
+//RS         cx.enum_variants
+//RS             .entry((*enum_name).to_string())
+//RS             .or_insert_with(|| {
+//RS                 variants
+//RS                     .iter()
+//RS                     .map(|variant| {
+//RS                         let payload = match (*enum_name, *variant) {
+//RS                             ("HookOutcome", "Continue" | "Fail")
+//RS                             | ("HookDecision", "Transform" | "Fail") => VariantPayload::Single(
+//RS                                 Type::Named("Unknown".to_string()),
+//RS                                 Span::new(0, 0),
+//RS                             ),
+//RS                             _ => VariantPayload::Unit,
+//RS                         };
+//RS                         ((*variant).to_string(), payload)
+//RS                     })
+//RS                     .collect()
+//RS             });
+//RS         for variant in *variants {
+//RS             // User/imported variants keep their owner. Pattern lowering resolves
+//RS             // the subject type first, so a same-named core variant remains exact.
+//RS             cx.variant_owner
+//RS                 .entry((*variant).to_string())
+//RS                 .or_insert_with(|| (*enum_name).to_string());
+//RS         }
+//RS     }
+//RS     let task_failure = vec![
+//RS         ("Cancelled".to_string(), VariantPayload::Unit),
+//RS         ("DeadlineBlown".to_string(), VariantPayload::Unit),
+//RS         (
+//RS             "Panicked".to_string(),
+//RS             VariantPayload::Single(Type::String, Span::new(0, 0)),
+//RS         ),
+//RS     ];
+//RS     cx.enum_variants
+//RS         .entry(Syntax::TYPE_TASK_FAILURE.to_string())
+//RS         .or_insert(task_failure);
+//RS     for variant in ["Cancelled", "DeadlineBlown", "Panicked"] {
+//RS         cx.variant_owner
+//RS             .entry(variant.to_string())
+//RS             .or_insert_with(|| Syntax::TYPE_TASK_FAILURE.to_string());
+//RS     }
+//RS }
+//RS 
+//RS fn assoc_type_impl<'a>(assoc: &'a [(String, Span, Type)], name: &str) -> Option<&'a Type> {
+//RS     assoc.iter().find(|(n, _, _)| n == name).map(|(_, _, t)| t)
+//RS }
+//RS 
+//RS fn trait_impl_assoc(
+//RS     items: &[Item],
+//RS     type_name: &str,
+//RS     trait_name: &str,
+//RS     assoc_name: &str,
+//RS ) -> Option<Type> {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Impl(i)
+//RS                 if i.type_name == type_name && i.trait_name.as_deref() == Some(trait_name) =>
+//RS             {
+//RS                 return assoc_type_impl(&i.assoc_type_impls, assoc_name).cloned();
+//RS             }
+//RS             Item::Struct(s) if s.name == type_name => {
+//RS                 for block in &s.trait_impls {
+//RS                     if block.trait_name == trait_name {
+//RS                         return assoc_type_impl(&block.assoc_type_impls, assoc_name).cloned();
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) if e.name == type_name => {
+//RS                 for block in &e.trait_impls {
+//RS                     if block.trait_name == trait_name {
+//RS                         return assoc_type_impl(&block.assoc_type_impls, assoc_name).cloned();
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS /// Return an associated type only when its trait implementation also contains
+//RS /// the named method.  Iterable lowering must consume confirmed implementation
+//RS /// facts rather than infer backend symbols from a type name.
+//RS fn trait_impl_assoc_method(
+//RS     items: &[Item],
+//RS     type_name: &str,
+//RS     trait_name: &str,
+//RS     assoc_name: &str,
+//RS     method_name: &str,
+//RS ) -> Option<Type> {
+//RS     for item in items {
+//RS         let implementation = match item {
+//RS             Item::Impl(i)
+//RS                 if i.type_name == type_name && i.trait_name.as_deref() == Some(trait_name) =>
+//RS             {
+//RS                 Some((&i.assoc_type_impls, &i.methods))
+//RS             }
+//RS             Item::Struct(s) if s.name == type_name => s
+//RS                 .trait_impls
+//RS                 .iter()
+//RS                 .find(|block| block.trait_name == trait_name)
+//RS                 .map(|block| (&block.assoc_type_impls, &block.methods)),
+//RS             Item::Enum(e) if e.name == type_name => e
+//RS                 .trait_impls
+//RS                 .iter()
+//RS                 .find(|block| block.trait_name == trait_name)
+//RS                 .map(|block| (&block.assoc_type_impls, &block.methods)),
+//RS             _ => None,
+//RS         };
+//RS         if let Some((assoc_type_impls, methods)) = implementation {
+//RS             if methods.iter().any(|method| method.name == method_name) {
+//RS                 if let Some(assoc_type) = assoc_type_impl(assoc_type_impls, assoc_name) {
+//RS                     return Some(assoc_type.clone());
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS pub(crate) fn collect_iterable_hooks(cx: &mut Cx, items: &[Item]) {
+//RS     let mut iterable_pairs: Vec<(String, String)> = Vec::new();
+//RS     for item in items {
+//RS         let coll_type = match item {
+//RS             Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_ITERABLE) => {
+//RS                 Some(&i.type_name)
+//RS             }
+//RS             Item::Struct(s) => Some(&s.name),
+//RS             Item::Enum(e) => Some(&e.name),
+//RS             _ => None,
+//RS         };
+//RS         let Some(coll_type) = coll_type else {
+//RS             continue;
+//RS         };
+//RS         if let Some(Type::Named(iter_type)) =
+//RS             trait_impl_assoc_method(items, coll_type, Syntax::TRAIT_ITERABLE, "Iter", "iter")
+//RS         {
+//RS             iterable_pairs.push((coll_type.clone(), iter_type));
+//RS         }
+//RS     }
+//RS 
+//RS     for (coll_type, iter_type) in iterable_pairs {
+//RS         let Some(item_type) =
+//RS             trait_impl_assoc_method(items, &iter_type, Syntax::TRAIT_ITERATOR, "Item", "next")
+//RS         else {
+//RS             continue;
+//RS         };
+//RS         let coll_identity = crate::Codegen::TIR::canonical_enum_owner(cx, &coll_type);
+//RS         let iter_identity = crate::Codegen::TIR::canonical_enum_owner(cx, &iter_type);
+//RS         let iter_symbol = format!("{coll_identity}::{}::iter", Syntax::TRAIT_ITERABLE);
+//RS         let next_symbol = format!("{iter_identity}::{}::next", Syntax::TRAIT_ITERATOR);
+//RS         cx.iterable_hooks.insert(
+//RS             coll_type,
+//RS             IterableHook {
+//RS                 iter_type,
+//RS                 item_type,
+//RS                 iter_symbol,
+//RS                 next_symbol,
+//RS             },
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn collect_iter_index_hooks(cx: &mut Cx, items: &[Item]) {
+//RS     collect_iterable_hooks(cx, items);
+//RS 
+//RS     let mut index_types: HashSet<String> = HashSet::new();
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_INDEX) => {
+//RS                 index_types.insert(i.type_name.clone());
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 for block in &s.trait_impls {
+//RS                     if block.trait_name == Syntax::TRAIT_INDEX {
+//RS                         index_types.insert(s.name.clone());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 for block in &e.trait_impls {
+//RS                     if block.trait_name == Syntax::TRAIT_INDEX {
+//RS                         index_types.insert(e.name.clone());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     for type_name in index_types {
+//RS         let value_type = trait_impl_assoc(items, &type_name, Syntax::TRAIT_INDEX, "Value");
+//RS         if let (Some(_key_type), Some(value_type)) = (
+//RS             trait_impl_assoc(items, &type_name, Syntax::TRAIT_INDEX, "Key"),
+//RS             value_type,
+//RS         ) {
+//RS             cx.index_hooks
+//RS                 .insert(type_name.clone(), IndexHook { value_type });
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Register one method surface for sema/codegen call lookup. Nested and
+//RS /// top-level trait impls use the same table so lowering cannot lose a method
+//RS /// merely because derive generation chose a different AST container.
+//RS fn register_operator_method(
+//RS     cx: &mut Cx,
+//RS     owner: &str,
+//RS     method: &str,
+//RS     trait_name: &str,
+//RS     operator_rhs: Option<&Type>,
+//RS     sig: Vec<(AccessConvention, Type)>,
+//RS     ret: Option<Type>,
+//RS ) {
+//RS     if !matches!(
+//RS         trait_name,
+//RS         Syntax::TRAIT_ADD
+//RS             | Syntax::TRAIT_SUB
+//RS             | Syntax::TRAIT_MUL
+//RS             | Syntax::TRAIT_DIV
+//RS             | Syntax::TRAIT_EQUATABLE
+//RS             | Syntax::TRAIT_COMPARABLE
+//RS     ) {
+//RS         return;
+//RS     }
+//RS     let Some(rhs) = operator_rhs else { return };
+//RS     let key = crate::Traits::operator_method_identity(owner, trait_name, method, rhs);
+//RS     cx.operator_methods.insert(
+//RS         key,
+//RS         OperatorMethod {
+//RS             trait_name: trait_name.to_string(),
+//RS             sig,
+//RS             ret,
+//RS         },
+//RS     );
+//RS }
+//RS 
+//RS fn register_method(
+//RS     cx: &mut Cx,
+//RS     owner: &str,
+//RS     method: &Func,
+//RS     trait_name: Option<&str>,
+//RS     operator_rhs: Option<&Type>,
+//RS ) {
+//RS     let key = (owner.to_string(), method.name.clone());
+//RS     if let Some(self_param) = method.params.iter().find(|p| p.name == Syntax::KW_SELF) {
+//RS         cx.method_self_convs
+//RS             .insert(key.clone(), self_param.convention);
+//RS     }
+//RS     let sig = method_sig_params(method);
+//RS     cx.method_sigs.insert(key.clone(), sig.clone());
+//RS     cx.method_type_params
+//RS         .insert(key.clone(), method.type_params.clone());
+//RS     cx.method_rets
+//RS         .insert(key.clone(), method.return_type.clone());
+//RS     cx.contract_sigs.insert(
+//RS         format!("{}::{}", owner, method.name),
+//RS         (method.pre.clone(), method.post.clone()),
+//RS     );
+//RS     cx.fn_param_names.insert(
+//RS         format!("{}::{}", owner, method.name),
+//RS         method
+//RS             .params
+//RS             .iter()
+//RS             .map(|param| param.name.clone())
+//RS             .collect(),
+//RS     );
+//RS     // S62: track trait-impl methods so call sites know not to mangle and retain
+//RS     // the checked trait identity for static associated calls.
+//RS     if let Some(trait_name) = trait_name {
+//RS         cx.trait_methods.insert(key.clone());
+//RS         cx.trait_method_traits.insert(key, trait_name.to_string());
+//RS         register_operator_method(
+//RS             cx,
+//RS             owner,
+//RS             &method.name,
+//RS             trait_name,
+//RS             operator_rhs,
+//RS             sig,
+//RS             method.return_type.clone(),
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn method_sig_params(f: &Func) -> Vec<(AccessConvention, Type)> {
+//RS     f.params
+//RS         .iter()
+//RS         .filter(|p| p.name != Syntax::KW_SELF)
+//RS         .map(|p| {
+//RS             let ty = if p.variadic {
+//RS                 Type::List(Box::new(p.ty.clone()))
+//RS             } else {
+//RS                 p.ty.clone()
+//RS             };
+//RS             (p.convention, ty)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS pub(crate) fn type_is_cloneable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
+//RS     // c148: pass the struct's declared type-param names so multi-char params are
+//RS     // recognized everywhere (struct_is_generic, field_type_cloneable, …).
+//RS     let param_names: HashSet<String> = s.type_params.iter().map(|p| p.name.clone()).collect();
+//RS     s.fields
+//RS         .iter()
+//RS         .all(|field| field_type_cloneable(&field.ty, types, &param_names))
+//RS }
+//RS pub(crate) fn type_is_cloneable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
+//RS     let param_names: HashSet<String> = e.type_params.iter().map(|p| p.name.clone()).collect();
+//RS     e.variants.iter().all(|variant| match &variant.payload {
+//RS         VariantPayload::Unit => true,
+//RS         VariantPayload::Single(ty, _) => field_type_cloneable(ty, types, &param_names),
+//RS         VariantPayload::Named(fields) => fields
+//RS             .iter()
+//RS             .all(|field| field_type_cloneable(&field.ty, types, &param_names)),
+//RS     })
+//RS }
+//RS 
+//RS /// Core nominal values are emitted by the Prelude rather than registered in
+//RS /// `Cx::type_names`. Most of those carriers derive `Clone`; these are the
+//RS /// stateful stream/reader handles whose single-use state intentionally does not.
+//RS fn core_type_cloneable(name: &str) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         "Counter" | "OrderedMap" | "Layer" | "Chain" | "StringSet"
+//RS     ) || (core_rust_type_name(name).is_some()
+//RS         && !matches!(
+//RS             name,
+//RS             "JobQueue"
+//RS                 | "Clock"
+//RS                 | "Match"
+//RS                 | "DataStream"
+//RS                 | "JSONReader"
+//RS                 | "JSONWriter"
+//RS                 | "JSONLReader"
+//RS                 | "JSONLWriter"
+//RS                 | "CSVReader"
+//RS                 | "CSVWriter"
+//RS                 | "XMLReader"
+//RS                 | "XMLWriter"
+//RS                 | "CBORReader"
+//RS                 | "CBORWriter"
+//RS         ))
+//RS }
+//RS 
+//RS pub(crate) fn field_type_cloneable(
+//RS     ty: &Type,
+//RS     types: &HashSet<String>,
+//RS     param_names: &HashSet<String>,
+//RS ) -> bool {
+//RS     match ty {
+//RS         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
+//RS         Type::IntN { .. } | Type::Float32 => true,
+//RS         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+//RS             field_type_cloneable(inner, types, param_names)
+//RS         }
+//RS         Type::Map { key, value, .. } => {
+//RS             field_type_cloneable(key, types, param_names)
+//RS                 && field_type_cloneable(value, types, param_names)
+//RS         }
+//RS         Type::Result { ok, err } => {
+//RS             field_type_cloneable(ok, types, param_names)
+//RS                 && field_type_cloneable(err, types, param_names)
+//RS         }
+//RS         // c148: recognize both single-char heuristic and declared multi-char params.
+//RS         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
+//RS         // D-SERDE: the dynamic data surface is the Clone-backed DataTree in
+//RS         // every canonical spelling, so records containing it can satisfy the
+//RS         // generated decoder's existing result-retention path.
+//RS         Type::Named(n) if is_json_type_name(n) || n == "Tensor" => true,
+//RS         // D-TEST-WORLD1=A: the world is an Arc-backed scoped capability.
+//RS         Type::Named(n) if n == Syntax::DETERMINISTIC_WORLD_TYPE => true,
+//RS         Type::Named(n) => core_type_cloneable(n) || types.contains(n),
+//RS         // `JetTask` implements no `Clone`: a handle owns one join slot.
+//RS         // D-PIN1=A: a pin is an exclusive window, so it is no more cloneable
+//RS         // than `ViewMut` — duplicating it would hand out a second no-move claim.
+//RS         // `JetSharedSnapshot` owns a single-use publication ticket; cloning
+//RS         // it would create two winners for one revision.
+//RS         Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_SNAPSHOT => false,
+//RS         Type::Apply { name, .. }
+//RS             if matches!(
+//RS                 name.as_str(),
+//RS                 "ViewMut" | "ComputeViewMut" | "Task" | Syntax::TYPE_PIN
+//RS             ) || name == Syntax::TYPE_SHARED_GUARD =>
+//RS         {
+//RS             false
+//RS         }
+//RS         Type::Apply { name, .. } if name == "View" => true,
+//RS         Type::Apply { args, .. } => args
+//RS             .iter()
+//RS             .all(|a| field_type_cloneable(a, types, param_names)),
+//RS         Type::Tuple(fields) => fields
+//RS             .iter()
+//RS             .all(|(_, t)| field_type_cloneable(t, types, param_names)),
+//RS         Type::TraitObject(_) | Type::Fn { .. } => false,
+//RS         Type::FixedList { elem, .. } => field_type_cloneable(elem, types, param_names),
+//RS         Type::Tagged {
+//RS             marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
+//RS             ..
+//RS         } => false,
+//RS         Type::Tagged { inner, .. } => field_type_cloneable(inner, types, param_names),
+//RS         Type::InlineRange { base, .. } => field_type_cloneable(base, types, param_names),
+//RS         Type::Union(members) => members
+//RS             .iter()
+//RS             .all(|m| field_type_cloneable(m, types, param_names)),
+//RS         // Runtime values carry no dimension metadata (I3): cloneable iff the
+//RS         // erased base numeric type is.
+//RS         Type::Quantity { base, .. } => field_type_cloneable(base, types, param_names),
+//RS         // Same as the retired `\0compute.dimension.N` string encoding: it
+//RS         // never matched the `Type::Named` user-type-registry lookup above
+//RS         // (only ever reached as an `Apply` arg via the fallback above it).
+//RS         Type::Measure(_) => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn type_is_hashable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
+//RS     // D-BOUND-EVOLVE1=A: published records carry an ordered DataTree holder.
+//RS     // DataTree intentionally has no Eq/Hash contract (it can contain Float),
+//RS     // so the hidden holder must not make the source record claim those Rust
+//RS     // storage traits.
+//RS     if s.is_published_schema {
+//RS         return false;
+//RS     }
+//RS     let param_names: HashSet<String> = s.type_params.iter().map(|p| p.name.clone()).collect();
+//RS     s.fields
+//RS         .iter()
+//RS         .all(|f| field_type_hashable(&f.ty, types, &param_names))
+//RS }
+//RS 
+//RS pub(crate) fn type_is_hashable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
+//RS     let param_names: HashSet<String> = e.type_params.iter().map(|p| p.name.clone()).collect();
+//RS     e.variants.iter().all(|v| match &v.payload {
+//RS         VariantPayload::Unit => true,
+//RS         VariantPayload::Single(t, _) => field_type_hashable(t, types, &param_names),
+//RS         VariantPayload::Named(fs) => fs
+//RS             .iter()
+//RS             .all(|f| field_type_hashable(&f.ty, types, &param_names)),
+//RS     })
+//RS }
+//RS 
+//RS /// Same recursive shape as the sema hashability walk, minus `Float`/`Float32`
+//RS /// — Rust's `f64`/`f32` don't implement `Eq`/`Hash` (NaN breaks both laws).
+//RS pub(crate) fn field_type_hashable(
+//RS     ty: &Type,
+//RS     types: &HashSet<String>,
+//RS     param_names: &HashSet<String>,
+//RS ) -> bool {
+//RS     match ty {
+//RS         Type::Float | Type::Float32 => false,
+//RS         Type::Int | Type::Bool | Type::String | Type::Char => true,
+//RS         Type::IntN { .. } => true,
+//RS         Type::Option(inner) => field_type_hashable(inner, types, param_names),
+//RS         Type::Result { ok, err } => {
+//RS             field_type_hashable(ok, types, param_names)
+//RS                 && field_type_hashable(err, types, param_names)
+//RS         }
+//RS         Type::List(inner) => field_type_hashable(inner, types, param_names),
+//RS         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
+//RS         Type::Named(n) => types.contains(n),
+//RS         // D-TUPLE-DESTRUCT1: same opaque-handle exclusion as the backend
+//RS         // equality compatibility walk above.
+//RS         Type::Apply { name, .. }
+//RS             if matches!(
+//RS                 name.as_str(),
+//RS                 "Task" | "Sender" | "Receiver" | Syntax::TYPE_SHARED_GUARD
+//RS             ) =>
+//RS         {
+//RS             false
+//RS         }
+//RS         // D-MEM1 S6: same `Pool`/`Id` split as the backend equality walk above.
+//RS         Type::Apply { name, .. } if name == "Pool" => false,
+//RS         Type::Apply { name, .. } if name == "ID" => true,
+//RS         Type::Apply { args, .. } => args
+//RS             .iter()
+//RS             .all(|a| field_type_hashable(a, types, param_names)),
+//RS         Type::Tuple(fields) => fields
+//RS             .iter()
+//RS             .all(|(_, t)| field_type_hashable(t, types, param_names)),
+//RS         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
+//RS         Type::FixedList { elem, .. } => field_type_hashable(elem, types, param_names),
+//RS         Type::Tagged { inner, .. } => field_type_hashable(inner, types, param_names),
+//RS         Type::InlineRange { base, .. } => field_type_hashable(base, types, param_names),
+//RS         Type::Union(members) => members
+//RS             .iter()
+//RS             .all(|m| field_type_hashable(m, types, param_names)),
+//RS         // Runtime values carry no dimension metadata (I3): hashable iff the
+//RS         // erased base numeric type is (a `Quantity<Float, _>` is never
+//RS         // hashable, same as bare `Float`).
+//RS         Type::Quantity { base, .. } => field_type_hashable(base, types, param_names),
+//RS         // Same as the retired `\0compute.dimension.N` string encoding: it
+//RS         // never matched the `Type::Named` user-type-registry lookup above
+//RS         // (only ever reached as an `Apply` arg via the fallback above it).
+//RS         Type::Measure(_) => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-MAP-KEY1: the backend's key walk mirrors sema's ratified eligibility
+//RS /// rule. It only supplies the fact needed to emit the shared key adapter;
+//RS /// comparison itself remains in `Prelude/Core/MapKey.rs`.
+//RS 
+//RS /// Recursive-type edges that need a box, for every struct and enum root.
+//RS ///
+//RS /// This is exactly the union over roots of `find_struct_box_edges` and
+//RS /// `find_enum_box_edges`, which enumerate every simple path and mark an edge
+//RS /// whose target is already on the path. That enumeration is exponential on a
+//RS /// richly recursive type graph. When every multi-type cycle is made of roots,
+//RS /// the union is: an edge `owner --field--> target` is boxed iff `target` can
+//RS /// reach `owner` (same strongly connected component, or a self-loop on a type
+//RS /// reachable from a root). Other shapes fall back to the path enumeration.
+//RS pub(crate) fn find_box_edges(items: &[Item], cx: &Cx) -> HashSet<(String, String)> {
+//RS     fn targets(ty: &Type, cx: &Cx, out: &mut Vec<String>) {
+//RS         match ty {
+//RS             Type::Named(n) if cx.type_names.contains(n) => out.push(n.clone()),
+//RS             Type::Option(inner) | Type::List(inner) => targets(inner, cx, out),
+//RS             Type::Map { key, value, .. }
+//RS             | Type::Result {
+//RS                 ok: key,
+//RS                 err: value,
+//RS             } => {
+//RS                 targets(key, cx, out);
+//RS                 targets(value, cx, out);
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     fn field_edges(fields: &[(String, Type)], cx: &Cx) -> Vec<(String, Vec<String>)> {
+//RS         fields
+//RS             .iter()
+//RS             .map(|(name, ty)| {
+//RS                 let mut out = Vec::new();
+//RS                 targets(ty, cx, &mut out);
+//RS                 (name.clone(), out)
+//RS             })
+//RS             .collect()
+//RS     }
+//RS     fn variant_edges(variants: &[(String, VariantPayload)], cx: &Cx) -> Vec<(String, Vec<String>)> {
+//RS         let mut edges = Vec::new();
+//RS         for (name, payload) in variants {
+//RS             match payload {
+//RS                 VariantPayload::Unit => {}
+//RS                 VariantPayload::Single(ty, _) => {
+//RS                     let mut out = Vec::new();
+//RS                     targets(ty, cx, &mut out);
+//RS                     edges.push((name.clone(), out));
+//RS                 }
+//RS                 VariantPayload::Named(fields) => {
+//RS                     for field in fields {
+//RS                         let mut out = Vec::new();
+//RS                         targets(&field.ty, cx, &mut out);
+//RS                         edges.push((format!("{}.{}", name, field.name), out));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         edges
+//RS     }
+//RS     // Out-edges of a type reached by name: the same maps `walk_type_edge` reads.
+//RS     let named_edges = |name: &str| -> Vec<(String, Vec<String>)> {
+//RS         let mut edges = cx
+//RS             .struct_fields
+//RS             .get(name)
+//RS             .map(|fields| field_edges(fields, cx))
+//RS             .unwrap_or_default();
+//RS         if let Some(variants) = cx.enum_variants.get(name) {
+//RS             edges.extend(variant_edges(variants, cx));
+//RS         }
+//RS         edges
+//RS     };
+//RS     let mut roots: Vec<(String, Vec<(String, Vec<String>)>)> = Vec::new();
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Struct(s) => {
+//RS                 let fields = s
+//RS                     .fields
+//RS                     .iter()
+//RS                     .map(|field| (field.name.clone(), field.ty.clone()))
+//RS                     .collect::<Vec<_>>();
+//RS                 roots.push((s.name.clone(), field_edges(&fields, cx)));
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 let variants = e
+//RS                     .variants
+//RS                     .iter()
+//RS                     .map(|variant| (variant.name.clone(), variant.payload.clone()))
+//RS                     .collect::<Vec<_>>();
+//RS                 roots.push((e.name.clone(), variant_edges(&variants, cx)));
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     let exact = || {
+//RS         let mut boxed = HashSet::new();
+//RS         for item in items {
+//RS             match item {
+//RS                 Item::Struct(s) => boxed.extend(find_struct_box_edges(s, cx)),
+//RS                 Item::Enum(e) => boxed.extend(find_enum_box_edges(e, cx)),
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         boxed
+//RS     };
+//RS     let root_names = roots
+//RS         .iter()
+//RS         .map(|(name, _)| name.clone())
+//RS         .collect::<HashSet<_>>();
+//RS     // A root walks its own definition first, then later visits by name use
+//RS     // the maps; the SCC shortcut assumes the two agree.
+//RS     for (name, edges) in &roots {
+//RS         if cx.type_names.contains(name) && named_edges(name) != *edges {
+//RS             return exact();
+//RS         }
+//RS     }
+//RS 
+//RS     // Graph over every type reachable from a root.
+//RS     let mut index: HashMap<String, usize> = HashMap::new();
+//RS     let mut nodes: Vec<String> = Vec::new();
+//RS     let mut adjacency: Vec<Vec<(String, Vec<String>)>> = Vec::new();
+//RS     let mut pending: Vec<usize> = Vec::new();
+//RS     for (name, edges) in &roots {
+//RS         if index.contains_key(name) {
+//RS             continue;
+//RS         }
+//RS         index.insert(name.clone(), nodes.len());
+//RS         pending.push(nodes.len());
+//RS         nodes.push(name.clone());
+//RS         adjacency.push(edges.clone());
+//RS     }
+//RS     while let Some(node) = pending.pop() {
+//RS         let successors = adjacency[node]
+//RS             .iter()
+//RS             .flat_map(|(_, targets)| targets.iter().cloned())
+//RS             .collect::<Vec<_>>();
+//RS         for target in successors {
+//RS             if index.contains_key(&target) {
+//RS                 continue;
+//RS             }
+//RS             index.insert(target.clone(), nodes.len());
+//RS             pending.push(nodes.len());
+//RS             adjacency.push(named_edges(&target));
+//RS             nodes.push(target);
+//RS         }
+//RS     }
+//RS 
+//RS     // Iterative Tarjan strongly connected components.
+//RS     let count = nodes.len();
+//RS     let mut order = vec![usize::MAX; count];
+//RS     let mut low = vec![0usize; count];
+//RS     let mut on_stack = vec![false; count];
+//RS     let mut component = vec![usize::MAX; count];
+//RS     let mut stack: Vec<usize> = Vec::new();
+//RS     let mut next_order = 0usize;
+//RS     let mut components = 0usize;
+//RS     let successors = |node: usize| -> Vec<usize> {
+//RS         adjacency[node]
+//RS             .iter()
+//RS             .flat_map(|(_, targets)| targets.iter().map(|target| index[target]))
+//RS             .collect()
+//RS     };
+//RS     for start in 0..count {
+//RS         if order[start] != usize::MAX {
+//RS             continue;
+//RS         }
+//RS         let mut frames: Vec<(usize, Vec<usize>, usize)> = vec![(start, successors(start), 0)];
+//RS         order[start] = next_order;
+//RS         low[start] = next_order;
+//RS         next_order += 1;
+//RS         stack.push(start);
+//RS         on_stack[start] = true;
+//RS         while let Some((node, next, cursor)) = frames.last_mut() {
+//RS             if *cursor < next.len() {
+//RS                 let child = next[*cursor];
+//RS                 *cursor += 1;
+//RS                 if order[child] == usize::MAX {
+//RS                     order[child] = next_order;
+//RS                     low[child] = next_order;
+//RS                     next_order += 1;
+//RS                     stack.push(child);
+//RS                     on_stack[child] = true;
+//RS                     let child_next = successors(child);
+//RS                     frames.push((child, child_next, 0));
+//RS                 } else if on_stack[child] {
+//RS                     let node = *node;
+//RS                     low[node] = low[node].min(order[child]);
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             let node = *node;
+//RS             frames.pop();
+//RS             if let Some((parent, _, _)) = frames.last() {
+//RS                 let parent = *parent;
+//RS                 low[parent] = low[parent].min(low[node]);
+//RS             }
+//RS             if low[node] == order[node] {
+//RS                 while let Some(member) = stack.pop() {
+//RS                     on_stack[member] = false;
+//RS                     component[member] = components;
+//RS                     if member == node {
+//RS                         break;
+//RS                     }
+//RS                 }
+//RS                 components += 1;
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut sizes = vec![0usize; components];
+//RS     for &id in &component {
+//RS         sizes[id] += 1;
+//RS     }
+//RS     // A multi-type cycle through a non-root makes the union depend on which
+//RS     // roots reach it; keep the exact path enumeration for that shape.
+//RS     for (node, name) in nodes.iter().enumerate() {
+//RS         if sizes[component[node]] > 1 && !root_names.contains(name) {
+//RS             return exact();
+//RS         }
+//RS     }
+//RS     let mut boxed = HashSet::new();
+//RS     for (node, owner) in nodes.iter().enumerate() {
+//RS         for (edge, targets) in &adjacency[node] {
+//RS             if targets.iter().any(|target| {
+//RS                 target == owner || component[index[target]] == component[node]
+//RS             }) {
+//RS                 boxed.insert((owner.clone(), edge.clone()));
+//RS             }
+//RS         }
+//RS     }
+//RS     // Debug builds prove the shortcut against the definition on graphs small
+//RS     // enough to enumerate.
+//RS     #[cfg(debug_assertions)]
+//RS     if count <= 64 {
+//RS         debug_assert_eq!(boxed, exact(), "SCC box edges differ from path enumeration");
+//RS     }
+//RS     boxed
+//RS }
+//RS 
+//RS pub(crate) fn find_struct_box_edges(s: &StructDef, cx: &Cx) -> HashSet<(String, String)> {
+//RS     let mut boxed = HashSet::new();
+//RS     for f in &s.fields {
+//RS         walk_type_edge(
+//RS             &s.name,
+//RS             &f.name,
+//RS             &f.ty,
+//RS             &mut vec![s.name.clone()],
+//RS             cx,
+//RS             &mut boxed,
+//RS         );
+//RS     }
+//RS     boxed
+//RS }
+//RS 
+//RS fn find_enum_box_edges(e: &EnumDef, cx: &Cx) -> HashSet<(String, String)> {
+//RS     let mut boxed = HashSet::new();
+//RS     for v in &e.variants {
+//RS         match &v.payload {
+//RS             VariantPayload::Unit => {}
+//RS             VariantPayload::Single(t, _) => walk_type_edge(
+//RS                 &e.name,
+//RS                 &v.name,
+//RS                 t,
+//RS                 &mut vec![e.name.clone()],
+//RS                 cx,
+//RS                 &mut boxed,
+//RS             ),
+//RS             VariantPayload::Named(fs) => {
+//RS                 for f in fs {
+//RS                     let key = format!("{}.{}", v.name, f.name);
+//RS                     walk_type_edge(
+//RS                         &e.name,
+//RS                         &key,
+//RS                         &f.ty,
+//RS                         &mut vec![e.name.clone()],
+//RS                         cx,
+//RS                         &mut boxed,
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     boxed
+//RS }
+//RS 
+//RS fn walk_type_edge(
+//RS     owner: &str,
+//RS     edge: &str,
+//RS     ty: &Type,
+//RS     stack: &mut Vec<String>,
+//RS     cx: &Cx,
+//RS     boxed: &mut HashSet<(String, String)>,
+//RS ) {
+//RS     match ty {
+//RS         Type::Named(n) if cx.type_names.contains(n) => {
+//RS             if stack.iter().any(|s| s == n) {
+//RS                 boxed.insert((owner.to_string(), edge.to_string()));
+//RS                 return;
+//RS             }
+//RS             stack.push(n.clone());
+//RS             if let Some(fields) = cx.struct_fields.get(n) {
+//RS                 for (fname, fty) in fields {
+//RS                     walk_type_edge(n, fname, fty, stack, cx, boxed);
+//RS                 }
+//RS             }
+//RS             if let Some(vars) = cx.enum_variants.get(n) {
+//RS                 for (vname, payload) in vars {
+//RS                     match payload {
+//RS                         VariantPayload::Unit => {}
+//RS                         VariantPayload::Single(t, _) => {
+//RS                             walk_type_edge(n, vname, t, stack, cx, boxed);
+//RS                         }
+//RS                         VariantPayload::Named(fs) => {
+//RS                             for f in fs {
+//RS                                 let key = format!("{}.{}", vname, f.name);
+//RS                                 walk_type_edge(n, &key, &f.ty, stack, cx, boxed);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             stack.pop();
+//RS         }
+//RS         // D-SHARED-CYCLE1=C: `Shared<T>` is already a sized Arc handle. Do not
+//RS         // invent recursive `Box` edges through Shared — strong Shared cycles are
+//RS         // rejected in sema (E0221); expert cycles use `Shared.Weak<T>`.
+//RS         Type::Option(inner) | Type::List(inner) => {
+//RS             walk_type_edge(owner, edge, inner, stack, cx, boxed);
+//RS         }
+//RS         Type::Map { key, value, .. }
+//RS         | Type::Result {
+//RS             ok: key,
+//RS             err: value,
+//RS         } => {
+//RS             walk_type_edge(owner, edge, key, stack, cx, boxed);
+//RS             walk_type_edge(owner, edge, value, stack, cx, boxed);
+//RS         }
+//RS         Type::Char => {}
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn source_file_handles_use_the_native_owned_carriers() {
+//RS         let prefix = "<corelib>/Core/files::Core/files/files.jet::";
+//RS         for (leaf, rust) in [
+//RS             ("FileReader", "JetFileReader"),
+//RS             ("FileWriter", "JetFileWriter"),
+//RS             ("FileScope", "JetFileScope"),
+//RS         ] {
+//RS             assert_eq!(file_handle_rust_type(&format!("{prefix}{leaf}")), Some(rust));
+//RS         }
+//RS         assert_eq!(file_handle_rust_type("user::FileReader"), None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_owned_router_enums_are_not_elided_as_native_enums() {
+//RS         let prefix = "<corelib>/Core/web::Core/web/router.jet::";
+//RS         for leaf in [
+//RS             "WebNavigationStatus",
+//RS             "WebRouterCacheStatus",
+//RS             "WebRouterSearchCodec",
+//RS             "WebRouterValueType",
+//RS             "WebRouterError",
+//RS         ] {
+//RS             assert!(!crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(
+//RS                 &format!("{prefix}{leaf}")
+//RS             ));
+//RS         }
+//RS         assert!(crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(
+//RS             "<corelib>/Core/process::Core/process/process.jet::ProcessStreamMode"
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn raylib_skeleton_types_lower_to_core_prelude_types() {
+//RS         assert_eq!(core_rust_type_name("RaylibWindow"), Some("RaylibWindow"));
+//RS         assert_eq!(core_rust_type_name("RaylibColor"), Some("RaylibColor"));
+//RS         assert_eq!(
+//RS             raylib_handle_rust_type("RaylibWindow"),
+//RS             Some("RaylibWindow")
+//RS         );
+//RS         assert_eq!(raylib_handle_rust_type("RaylibColor"), Some("RaylibColor"));
+//RS     }
+//RS     #[test]
+//RS     fn memo_stats_lowers_to_the_generated_root_record() {
+//RS         let source = "fn run() {}\n";
+//RS         let (tokens, lex_diags) = crate::Lexer::lex(source);
+//RS         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+//RS         let program = crate::Parser::parse(&tokens).expect("parse failed");
+//RS         let cx = build_cx(&program, source, "test.jet");
+//RS         assert_eq!(
+//RS             cx.rust_type(&Type::Named(Syntax::TYPE_MEMO_STATS.to_string())),
+//RS             "JetMemoStats"
+//RS         );
+//RS         assert_eq!(core_rust_type_name(Syntax::TYPE_MEMO_STATS), None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn type_alias_expansion_preserves_function_parameter_contract() {
+//RS         let source = "alias Callback<T> :: fn(*, force: T) -> Int\nfn run() {}\n";
+//RS         let (tokens, lex_diags) = crate::Lexer::lex(source);
+//RS         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+//RS         let program = crate::Parser::parse(&tokens).expect("parse failed");
+//RS         let cx = build_cx(&program, source, "test.jet");
+//RS 
+//RS         let expanded = cx.expand_type_aliases(&Type::Apply {
+//RS             name: "Callback".to_string(),
+//RS             args: vec![Type::Bool],
+//RS         });
+//RS         assert_eq!(expanded.name(), "fn(*, force: Bool) -> Int");
+//RS     }
+//RS }
+// END-PORT-PENDING 0457 crates/jet-codegen/src/Codegen/Context.rs:5283-7568
+

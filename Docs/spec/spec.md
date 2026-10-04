@@ -784,6 +784,13 @@ without writing a return annotation. Pin an entry to an application error with
 `fn run() !StoreError { ... }` when that distinction is part of the interface.
 (D-FAILURE-FOUNDATION1, D-FAIL-EXIT1)
 
+Callable facts retain both the effective carrier and its origin. An inferred
+empty failure set and a written `Never!` have the same carrier but distinct
+provenance; inferred error unions likewise remain distinct from written
+contracts. Tools read the canonical function or trait failure projection,
+including Output's retained checked contract, rather than testing a rendered
+return type. A span-less defaulted entry `Err!` remains explicit.
+
 Construct the two sides with `Ok(value)` and `Err(error)`. These are contextual
 calls: a user declaration named `Ok` or `Err` takes precedence. `Ok()` supplies
 the unit success value when the expected result has unit success. Leading-dot
@@ -836,6 +843,32 @@ code. An unhandled error returned by the entry function is rendered as a full
 report and exits 1. E3002 records the trail of `?(text)` frames, while E3003
 reports an expired wait or I/O deadline. See [diagnostics.md](diagnostics.md)
 for the complete report shape and fixes. (S36)
+
+The structured error boundary carries `jet.err/v1`, not terminal text.
+`JetErrorReport` in `Compiler/JetFoundation/Source/Outcome/ErrorReport.jet`
+owns the wire; a compiler diagnostic embeds that same object through its
+canonical `ReportExtension.BuildError`. The required fields are ordered
+`schema`, `message`, `code`, `cause`. No cause is `null`, one cause is an
+object, and multiple causes are an ordered array. Optional identity, context,
+origin, journey, conversions, and typed details follow in that order; absent
+options and empty collections are omitted. An origin is separate from the
+origin-first journey, and both retain the actual character column. Adapters
+marshal those facts without inventing a zero column or dropping the origin.
+
+Typed detail field values are raw JSON values, not quoted display strings.
+Protocol strings use the shared Foundation JSON quote policy, including
+Unicode control escapes; this is distinct from the terminal report quote and
+from sorted-key RFC 8785 JSON. Reading uses Core's one strict JSON parser,
+rejects duplicate names, validates the typed shape and integer bounds, then
+requires exact recursive re-encoding equality with the input bytes. Whitespace,
+reordered fields, explicit empty optional collections, unknown fields, and
+noncanonical cause forms therefore cannot change a cached report on replay.
+Journey/context integers are u32. The source span carrier retains usize facts;
+the frozen reference decoder accepts only u32 span offsets, so larger written
+offsets are refused rather than truncated. Wire tests retain the original
+read witnesses under the frozen bootstrap's missing bounded-parser export
+(#3598) and the ordered Core object carrier decision (#4306/#4456). Neither
+gate authorizes a fallback parser or a private ordered-map representation.
 
 ### Cleanup at a process stop
 
@@ -1076,8 +1109,11 @@ compatible non-scalar argument live.
 
 Public API snapshots publish each relation canonically. One source is
 `source;access:...;path:...`; a union is
-`one_of(source;path:...,source;path:...);access:...`, sorted by stable source
-identity. Adding, removing, or changing a possible source changes the API digest
+`one_of(source;path:...,source;path:...);access:...`. Ordering is structural:
+receiver, numeric parameter index, then static module/name; projections use
+field-name, index, range order. Output-slot paths sort lexicographically by
+segments, not by their dotted rendering. Adding, removing, or changing a
+possible source changes the API digest
 and is a breaking provenance change. TIR receives only sema-approved provenance
 and lowering flags; it does not infer owners, overlaps, lifetimes, or escapes.
 
@@ -1866,6 +1902,15 @@ value kinds and types, scope, and cycles with **E0850**–**E0853** and
 **E0855**–**E0857**; a specialization identity collision is **E0859**. The
 value-argument example is `Examples/features/modules/fact_value_arguments.jet`.
 
+Build-setting reads, including reads inside a prepared binding, use the same
+retained typed snapshot as the definition evaluator. Instance metadata keeps
+the normalized argument values, setting/profile provenance and each source
+application; provenance explains a value but is not part of its semantic key.
+The defining package's manifest and canonical locked source, its relative
+module path, and the enclosing lexical instance distinguish definitions.
+Credentials, checkout paths and lock formatting do not distinguish packages.
+Full binary keys decide instance reuse; the digest is only their stable name.
+
 ## Composable configuration modules
 
 A `module` declaration can contribute typed values to reserved configuration
@@ -2443,6 +2488,26 @@ provider, cache suffix, and capability set. Every generated artifact carries
 the `jet-ffi-descriptor-v1` stamp, and a stale stamp is rejected before a
 foreign call. Foreign-interface routing and cache validation read the same
 descriptor table. (D-FFI-UNIFY1)
+
+The C producer retains two different loaded modules. The physical generated
+cache keeps its checked source bytes, parsed imports and non-C declarations,
+file flags, and `__c_cache_<lib>` alias. Its C declarations are drained into an
+actual merged module whose path is `<c.<lib>>`, display is `c.<lib>`, alias is
+`__c_<lib>`, and loaded source is empty. That module has no file-public or
+no-prelude flag, imports, policy declarations, or rule facts. Private generated
+span coordinates do not replace either module's original source identity.
+Even an import without a declared surface creates an actual empty C module so
+the alias resolves and native link discovery still records the library.
+
+Cache imports run through the ordinary authorized-source import closure.
+New cache imports are discovered incrementally until the closure stops growing;
+cycles and duplicate imports do not parse or retain a second copy of a cache.
+The metadata and provenance sidecars have one canonical decoder each, shared by
+captured-source and native acquisition. Artifact checks hash the captured byte
+record, never a re-encoding of source text, and diagnostic display paths cannot
+reconstruct physical authority. A generated status-returning close function
+uses one real compiler-generated close adapter per handle; every constructor
+with that handle's close contract names the same adapter.
 
 A binder is not an unchecked symbol lookup. It must reject an unsupported
 signature before emitting a callable surface, record the declaration and tool
@@ -3478,6 +3543,37 @@ related inspect actions; it has no dossier route. Tools consume the checked
 index and command/output schemas rather than reconstructing field mappings. LSP
 scattered-method breadcrumbs are editor overlays with source links and do not
 edit source.
+
+Compiler-owned syntax projections borrow the retained AST. Optional method
+calls have the structural shape `CallValue(OptField(receiver, method), args)`:
+the field extent runs from the actual parsed receiver start to the method-name
+end, while the call extent is exactly the opening through closing parenthesis.
+Neither a guessed receiver span nor an allocated replacement AST supplies these
+facts. Binding names and statement anchors retain their original source spans.
+Marker applicability reads the catalog produced from the canonical marker
+declarations, including same-target companions; tooling does not keep a second
+site registry.
+Callable policy projections preserve parser failures: a policy must be a call
+with unlabelled, unspread arguments, and its textual argument order is retained.
+Unit-family projections use declaration order and authored member spans. Affine
+families mint Point before Delta for each member; canonical Time remains the
+Prelude's existing family rather than a newly minted distinct family.
+
+Effect consumers share the facts retained by the checker’s existing graph
+solve: direct source witnesses and call edges remain distinct from solved
+transitive rows. Open-world operations retain their maximal witness, and
+memory projections retain the same finding used for the source diagnostic.
+An unbounded trait-dispatch marker belongs to the synthetic trait-method
+contract, not to its real callers. Statically selected contract nodes retain
+the registered implementation summaries without that marker; both node kinds
+participate in the same existing effect solve.
+Implementation identities are deduplicated and lexically ordered by owner name; selected
+trait-block methods join their actual registered declaration identities, never
+unrelated inherent or other-trait members. That owner order governs retained
+maximal and direct-effect witnesses.
+Formatting a checked function is not a way to recover these facts. The name
+ledger owns identity-to-display projections; package authority policy stays
+at the package-model boundary rather than growing another compiler solver.
 
 The codemod commands use one replay engine:
 

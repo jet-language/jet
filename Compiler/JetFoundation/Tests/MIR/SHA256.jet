@@ -1,0 +1,40 @@
+// SHA256.rs:1259-1298: every original pure hash/streaming witness.
+#Test("sha256_empty") {
+    assert_eq(mir_sha256_hex(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+}
+#Test("sha256_abc") {
+    assert_eq(mir_sha256_hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+}
+#Test("streaming_matches_one_shot_across_block_boundaries") {
+    data := [U8]{}
+    loop value in 0..<10000 -> &data.push(U8{value % 251})
+    hash := mir_sha256_new()
+    offset := 0
+    loop offset < data.len() {
+        end :: if offset + 73 < data.len() -> offset + 73 else -> data.len()
+        mir_sha256_update(&hash, data[offset..<end])
+        offset = end
+    }
+    assert_eq(mir_sha256_finish(^hash), mir_sha256_bytes(data[0..<data.len()]))
+}
+#Test("streaming_preserves_partial_blocks_across_small_updates") {
+    hash := mir_sha256_new()
+    data :: "abc".bytes()
+    loop index in 0..<data.len() -> mir_sha256_update(&hash, data[index..<index + 1])
+    digest :: mir_sha256_finish(^hash)
+    assert_eq(mir_sha256_hex_bytes(digest[0..<digest.len()]), mir_sha256_hex("abc"))
+}
+#Test("SHA256 borrowed subrange and every padding boundary preserve input owner") {
+    data := [U8]{}
+    loop index in 0..<257 -> &data.push(U8{index % 251})
+    before :: ~data
+    loop size in 0..<129 {
+        hash := mir_sha256_new()
+        loop position in 0..<size {
+            mir_sha256_update(&hash, data[position + 3..<position + 4])
+            mir_sha256_update(&hash, data[0..<0])
+        }
+        assert_eq(mir_sha256_finish(^hash), mir_sha256_bytes(data[3..<3 + size]))
+    }
+    assert_eq(data, before)
+}

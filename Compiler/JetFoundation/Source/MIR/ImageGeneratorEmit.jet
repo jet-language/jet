@@ -1,0 +1,361 @@
+// MirImageCodec.rs1290-1592: typed source emitter. All recursive codecs are
+// emitted once per (native definition, actual Source carrier) specialization.
+// This handles nominal/trait pair records without reinterpreting either type.
+struct MIRImageGeneratorExpression { encode: String, decode: String }
+struct MIRImageGeneratorEmission {
+    schema: MIRImageSchema
+    mapping: MIRImageGeneratorMapping
+    pending: [(String, String)]
+    seen: [(String, String):Bool]
+    next_temporary: Int
+    debug_fallible: [String:Bool]
+}
+fn mir_image_gen_fresh(state: &MIRImageGeneratorEmission, prefix: String) -> String Never! {
+    index :: state.next_temporary
+    state.next_temporary += 1
+    "__{prefix}_{index}"
+}
+fn mir_image_gen_function(prefix: String, key: String, carrier: String) -> String Never! {
+    suffix := [U8]{}
+    loop byte in key.bytes() -> &suffix.push(if mir_image_gen_identifier_byte(byte) -> byte else -> U8{95})
+    &suffix.push(U8{95})
+    &suffix.push(U8{97})
+    &suffix.push(U8{115})
+    &suffix.push(U8{95})
+    loop byte in carrier.bytes() -> &suffix.push(if mir_image_gen_identifier_byte(byte) -> byte else -> U8{95})
+    name :: String.from_bytes(suffix) ?? panic("ASCII schema function name")
+    "mir_image_{prefix}_{name}"
+}
+fn mir_image_gen_enqueue(state: &MIRImageGeneratorEmission, key: String, carrier: String) Never! {
+    pair :: (key, carrier)
+    if state.seen.get(pair) == .Val(_) -> return
+    state.seen[pair] = true
+    &state.pending.push(pair)
+}
+fn mir_image_gen_type_text(ty: MIRImageSchemaType) -> String MIRImageError! {
+    if ty == {
+        .Named(name) -> Ok(name)
+        .Optional(inner) -> Ok("{mir_image_gen_type_text(inner)}?")
+        .Sequence(inner) -> Ok("[{mir_image_gen_type_text(inner)}]")
+        .Map(key, value, _) -> Ok("[{mir_image_gen_type_text(key)}:{mir_image_gen_type_text(value)}]")
+        else -> Err(MIRImageError{message: "Source carrier has unsupported container syntax"})
+    }
+}
+fn mir_image_gen_named_source(ty: MIRImageSchemaType) -> String MIRImageError! {
+    if ty == .Named(name) -> return Ok(name)
+    Err(MIRImageError{message: "native named definition requires a typed Source carrier"})
+}
+fn mir_image_gen_expr(encode: String, decode: String) -> MIRImageGeneratorExpression Never! { MIRImageGeneratorExpression{encode: encode, decode: decode} }
+fn mir_image_gen_primitive(name: String, source: MIRImageSchemaType, expression: String, writer: String, reader: String) -> MIRImageGeneratorExpression? MIRImageError! {
+    if name == "String" || name == "PathBuf" || name == "std::path::PathBuf" || name == "str" {
+        return Ok(Val(mir_image_gen_expr("mir_image_write_string(&{writer}, &interner, {expression})\n", "&{reader}.read_string(tables.strings.view(0..<tables.strings.len()))")))
+    }
+    if name == "bool" -> return Ok(Val(mir_image_gen_expr("&{writer}.write_u8(if {expression} -> U8{{1}} else -> U8{{0}})\n", "mir_image_schema_read_bool(&{reader})")))
+    loop builtin in [String]{"u8", "u16", "u32", "u64", "usize"} {
+        if builtin != name -> continue
+        method :: if name == "usize" -> "u64" else -> name
+        if source == .Named("Int") -> return Ok(Val(mir_image_gen_expr("mir_image_schema_write_{name}(&{writer}, {expression})\n", "mir_image_schema_read_{name}(&{reader})")))
+        return Ok(Val(mir_image_gen_expr("&{writer}.write_{method}({expression})\n", "&{reader}.read_{method}()")))
+    }
+    loop builtin in [String]{"i8", "i16", "i32", "i64", "isize"} -> if builtin == name -> return Ok(Val(mir_image_gen_expr("mir_image_schema_write_{name}(&{writer}, {expression})\n", "mir_image_schema_read_{name}(&{reader})")))
+    if name == "f64" -> return Ok(Val(mir_image_gen_expr("mir_image_schema_write_f64(&{writer}, {expression})\n", "mir_image_schema_read_f64(&{reader})")))
+    if name == "char" -> return Ok(Val(mir_image_gen_expr("mir_image_schema_write_char(&{writer}, {expression})\n", "mir_image_schema_read_char(&{reader})")))
+    Ok(None)
+}
+fn mir_image_gen_codec_expression(state: &MIRImageGeneratorEmission, context: MIRImageSchemaDefinition, native: MIRImageSchemaType, source: MIRImageSchemaType, expression: String, writer: String, reader: String) -> MIRImageGeneratorExpression MIRImageError! {
+    if native == {
+        .Boxed(inner) -> mir_image_gen_codec_expression(&state, context, inner, source, expression, writer, reader)
+        .Shared(inner) -> mir_image_gen_codec_expression(&state, context, inner, source, expression, writer, reader)
+        .StaticString -> Ok(mir_image_gen_expr("mir_image_write_string(&{writer}, &interner, {expression})\n", "&{reader}.read_string(tables.strings.view(0..<tables.strings.len()))"))
+        .Named(name) -> {
+            primitive :: mir_image_gen_primitive(name, source, expression, writer, reader)
+            if primitive == .Val(value) -> return Ok(value)
+            key :: mir_image_generator_resolve_type(state.schema, context, name)
+            definition :: state.schema.definitions[key]
+            alias :: definition.body == .Alias(_)
+            carrier :: if alias -> mir_image_gen_type_text(source) else -> mir_image_gen_named_source(source)
+            if !alias && state.mapping.source.get(carrier) == None -> return Err(MIRImageError{message: "Source MIR carrier `{carrier}` is not declared"})
+            mir_image_gen_enqueue(&state, key, carrier)
+            encoder :: mir_image_gen_function("encode", key, carrier)
+            decoder :: mir_image_gen_function("decode", key, carrier)
+            Ok(mir_image_gen_expr("{encoder}({expression}, &{writer}, &interner, traps)\n", "{decoder}(&{reader}, tables)"))
+        }
+        .Optional(inner) -> {
+            source_inner :: if source == .Optional(value) -> value else -> return Err(MIRImageError{message: "native optional field has a nonoptional Source carrier"})
+            item :: mir_image_gen_fresh(&state, "item")
+            body :: mir_image_gen_codec_expression(&state, context, inner, source_inner, item, writer, reader)
+            Ok(mir_image_gen_expr("if {expression} == .Val({item}) {{ &{writer}.write_u8(U8{{1}})\n{body.encode}}} else -> &{writer}.write_u8(U8{{0}})\n", "if &{reader}.read_u8() == {{ U8{{0}} -> None U8{{1}} -> Val({body.decode}) else -> return Err(MIRImageError{{message: \"invalid native MIR option tag\"}}) }}"))
+        }
+        .Sequence(inner) -> mir_image_gen_sequence_expression(&state, context, inner, None, source, expression, writer, reader)
+        .Array(inner, length) -> mir_image_gen_sequence_expression(&state, context, inner, Val(length), source, expression, writer, reader)
+        .Tuple(items) -> {
+            carrier :: mir_image_gen_named_source(source)
+            definition :: state.mapping.source.get(carrier) ?? return Err(MIRImageError{message: "Source tuple record `{carrier}` is not declared"})
+            fields :: if definition.body == .Struct(value) -> value else -> return Err(MIRImageError{message: "Source tuple carrier `{carrier}` is not a record"})
+            if fields.len() != items.len() -> return Err(MIRImageError{message: "Source tuple record `{carrier}` changes native tuple arity"})
+            encodes := [String]{}
+            decodes := [String]{}
+            loop index in 0..<items.len() {
+                field :: fields[index]
+                body :: mir_image_gen_codec_expression(&state, context, items[index], mir_image_generator_source_type(field.ty), "{expression}.{field.name}", writer, reader)
+                &encodes.push(body.encode)
+                &decodes.push("{field.name}: {body.decode}")
+            }
+            Ok(mir_image_gen_expr(encodes.join(""), "{carrier}{{{decodes.join(", ")}}}"))
+        }
+        .Set(inner, hash) -> mir_image_gen_set_expression(&state, context, inner, hash, source, expression, writer, reader)
+        .Map(key, value, hash) -> mir_image_gen_map_expression(&state, context, key, value, hash, source, expression, writer, reader)
+    }
+}
+fn mir_image_gen_sequence_expression(state: &MIRImageGeneratorEmission, context: MIRImageSchemaDefinition, native_inner: MIRImageSchemaType, length: Int?, source: MIRImageSchemaType, expression: String, writer: String, reader: String) -> MIRImageGeneratorExpression MIRImageError! {
+    inner :: if source == .Sequence(value) -> value else -> return Err(MIRImageError{message: "native sequence has a nonsequence Source carrier"})
+    item :: mir_image_gen_fresh(&state, "item")
+    count :: mir_image_gen_fresh(&state, "count")
+    output :: mir_image_gen_fresh(&state, "items")
+    body :: mir_image_gen_codec_expression(&state, context, native_inner, inner, item, writer, reader)
+    ty :: mir_image_gen_type_text(inner)
+    encode := [String]{}
+    if length == .Val(value) -> &encode.push("if {expression}.len() != {value} -> return Err(MIRImageError{{message: \"native MIR fixed array has the wrong length\"}})\n")
+    else -> &encode.push("&{writer}.write_count({expression}.len())\n")
+    &encode.push("loop {item} in {expression} {{\n{body.encode}}}\n")
+    count_expression :: if length == .Val(value) -> "{value}" else -> "&{reader}.read_count()"
+    Ok(mir_image_gen_expr(encode.join(""), "{{ {count} :: {count_expression}\n{output} := [{ty}]{{}}\nloop _ in 0..<{count} -> &{output}.push({body.decode})\n{output} }}"))
+}
+fn mir_image_gen_set_expression(state: &MIRImageGeneratorEmission, context: MIRImageSchemaDefinition, native_inner: MIRImageSchemaType, hash: Bool, source: MIRImageSchemaType, expression: String, writer: String, reader: String) -> MIRImageGeneratorExpression MIRImageError! {
+    inner :: if source == .Sequence(value) -> value else -> return Err(MIRImageError{message: "native set has a nonsequence Source carrier"})
+    ty :: mir_image_gen_type_text(inner)
+    item :: mir_image_gen_fresh(&state, "item")
+    order :: mir_image_gen_fresh(&state, "order")
+    encoded :: mir_image_gen_fresh(&state, "encoded")
+    child_writer :: mir_image_gen_fresh(&state, "writer")
+    child_reader :: mir_image_gen_fresh(&state, "reader")
+    bytes :: mir_image_gen_fresh(&state, "bytes")
+    count :: mir_image_gen_fresh(&state, "count")
+    seen :: mir_image_gen_fresh(&state, "seen")
+    values :: mir_image_gen_fresh(&state, "values")
+    output :: mir_image_gen_fresh(&state, "items")
+    body :: mir_image_gen_codec_expression(&state, context, native_inner, inner, item, child_writer, child_reader)
+    // Both native BTreeSet and HashSet walk in value order before encoding;
+    // only after the walk (and all interning) are entry bytes ordered.
+    encode :: "{{ {order} := ~{expression}\n&{order}.sort_by((left: {ty}, right: {ty}) -> left <=> right)\n{encoded} := [[U8]]{{}}\nloop {item} in {order} {{ {child_writer} := MIRImageWriter.new()\n{body.encode}&{encoded}.push({child_writer}.finish()) }}\nmir_image_schema_write_set(&{writer}, ^{encoded}) }}\n"
+    decode :: "{{ {count} :: &{reader}.read_count()\n{seen} := [[U8]:Bool]{{}}\n{values} := [{ty}:Bool]{{}}\n{output} := [{ty}]{{}}\nloop _ in 0..<{count} {{ {bytes} :: &{reader}.read_bytes()\nmir_image_schema_unique_bytes(&{seen}, {bytes}, \"duplicate native MIR set element\")\n{child_reader} := MIRImageReader{{bytes: {bytes}, cursor: 0, host_max: {reader}.host_max}}\n{item} :: {body.decode}\n{child_reader}.finish()\nif {values}.get({item}) == .Val(_) -> return Err(MIRImageError{{message: \"duplicate native MIR set element\"}})\n{values}[{item}] = true\n&{output}.push({item}) }}\n&{output}.sort_by((left: {ty}, right: {ty}) -> left <=> right)\n{output} }}"
+    Ok(mir_image_gen_expr(encode, decode))
+}
+fn mir_image_gen_map_expression(state: &MIRImageGeneratorEmission, context: MIRImageSchemaDefinition, native_key: MIRImageSchemaType, native_value: MIRImageSchemaType, hash: Bool, source: MIRImageSchemaType, expression: String, writer: String, reader: String) -> MIRImageGeneratorExpression MIRImageError! {
+    source_key := MIRImageSchemaType.Named("")
+    source_value := MIRImageSchemaType.Named("")
+    record := String?{None}
+    fields := [MIRImageSourceField]{}
+    if source == .Map(key, value, _) { source_key = key; source_value = value }
+    else if source == .Sequence(inner) {
+        carrier :: mir_image_gen_named_source(inner)
+        definition :: state.mapping.source.get(carrier) ?? return Err(MIRImageError{message: "Source map record `{carrier}` is not declared"})
+        fields = if definition.body == .Struct(value) -> value else -> return Err(MIRImageError{message: "Source map entry `{carrier}` is not a record"})
+        if fields.len() != 2 -> return Err(MIRImageError{message: "Source MIR record `{carrier}` stands for a native map entry but has {fields.len()} fields"})
+        record = Val(carrier)
+        source_key = mir_image_generator_source_type(fields[0].ty)
+        source_value = mir_image_generator_source_type(fields[1].ty)
+    } else -> return Err(MIRImageError{message: "native map has no typed Source map or pair-record carrier"})
+    key_ty :: mir_image_gen_type_text(source_key)
+    value_ty :: mir_image_gen_type_text(source_value)
+    entry :: mir_image_gen_fresh(&state, "entry")
+    order :: mir_image_gen_fresh(&state, "order")
+    rows :: mir_image_gen_fresh(&state, "rows")
+    key :: mir_image_gen_fresh(&state, "key")
+    value :: mir_image_gen_fresh(&state, "value")
+    key_writer :: mir_image_gen_fresh(&state, "key_writer")
+    value_writer :: mir_image_gen_fresh(&state, "value_writer")
+    key_reader :: mir_image_gen_fresh(&state, "key_reader")
+    value_reader :: mir_image_gen_fresh(&state, "value_reader")
+    key_bytes :: mir_image_gen_fresh(&state, "key_bytes")
+    value_bytes :: mir_image_gen_fresh(&state, "value_bytes")
+    count :: mir_image_gen_fresh(&state, "count")
+    seen_bytes :: mir_image_gen_fresh(&state, "seen_bytes")
+    seen_keys :: mir_image_gen_fresh(&state, "seen_keys")
+    output :: mir_image_gen_fresh(&state, "output")
+    key_expression :: if record == .Val(_) -> "{entry}.{fields[0].name}" else -> entry
+    value_expression :: if record == .Val(_) -> "{entry}.{fields[1].name}" else -> "{expression}[{entry}]"
+    key_body :: mir_image_gen_codec_expression(&state, context, native_key, source_key, key_expression, key_writer, key_reader)
+    value_body :: mir_image_gen_codec_expression(&state, context, native_value, source_value, value_expression, value_writer, value_reader)
+    walk := ""
+    initialize := ""
+    insert := ""
+    finish := ""
+    if record == .Val(carrier) {
+        walk = "{order} := ~{expression}\n&{order}.sort_by((left: {carrier}, right: {carrier}) -> left.{fields[0].name} <=> right.{fields[0].name})\n"
+        initialize = "[{carrier}]{{}}"
+        insert = "&{output}.push({carrier}{{{fields[0].name}: {key}, {fields[1].name}: {value}}})\n"
+        finish = "&{output}.sort_by((left: {carrier}, right: {carrier}) -> left.{fields[0].name} <=> right.{fields[0].name})\n"
+    } else {
+        walk = "{order} := [{key_ty}]{{}}\nloop (key, _) in {expression} -> &{order}.push(key)\n&{order}.sort_by((left: {key_ty}, right: {key_ty}) -> left <=> right)\n"
+        initialize = "[{key_ty}:{value_ty}]{{}}"
+        insert = "{output}[{key}] = {value}\n"
+    }
+    encode :: "{{ {rows} := [MIRImageEncodedMapEntry]{{}}\n{walk}loop {entry} in {order} {{ {key_writer} := MIRImageWriter.new()\n{key_body.encode}{value_writer} := MIRImageWriter.new()\n{value_body.encode}&{rows}.push(MIRImageEncodedMapEntry{{key: {key_writer}.finish(), value: {value_writer}.finish()}}) }}\nmir_image_schema_write_map(&{writer}, ^{rows}) }}\n"
+    decode :: "{{ {count} :: &{reader}.read_count()\n{seen_bytes} := [[U8]:Bool]{{}}\n{seen_keys} := [{key_ty}:Bool]{{}}\n{output} := {initialize}\nloop _ in 0..<{count} {{ {key_bytes} :: &{reader}.read_bytes()\n{key_reader} := MIRImageReader{{bytes: {key_bytes}, cursor: 0, host_max: {reader}.host_max}}\n{key} :: {key_body.decode}\n{key_reader}.finish()\nmir_image_schema_unique_bytes(&{seen_bytes}, {key_bytes}, \"duplicate native MIR map key\")\nif {seen_keys}.get({key}) == .Val(_) -> return Err(MIRImageError{{message: \"duplicate native MIR map key\"}})\n{seen_keys}[{key}] = true\n{value_bytes} :: &{reader}.read_bytes()\n{value_reader} := MIRImageReader{{bytes: {value_bytes}, cursor: 0, host_max: {reader}.host_max}}\n{value} :: {value_body.decode}\n{value_reader}.finish()\n{insert}}}\n{finish}{output} }}"
+    Ok(mir_image_gen_expr(encode, decode))
+}
+
+fn mir_image_gen_struct_codec(state: &MIRImageGeneratorEmission, definition: MIRImageSchemaDefinition, carrier: String, native_fields: [MIRImageSchemaField], source_fields: [MIRImageSourceField], tuple: Bool) -> MIRImageGeneratorExpression MIRImageError! {
+    if !tuple -> mir_image_generator_check_struct(carrier, source_fields, native_fields)
+    if tuple && native_fields.len() != source_fields.len() -> return Err(MIRImageError{message: "Source MIR tuple carrier `{carrier}` changes native tuple arity"})
+    encode := [String]{}
+    decode_prefix := [String]{}
+    decode_fields := [String]{}
+    loop index in 0..<native_fields.len() {
+        native :: native_fields[index]
+        source_index :: if tuple -> index else -> mir_image_gen_source_field_index(source_fields, mir_image_generator_source_field(carrier, native.name)) ?? return Err(MIRImageError{message: "native MIR field `{carrier}.{native.name}` has no lossless Source-MIR field"})
+        source :: source_fields[source_index]
+        if carrier == "MIRFunction" && native.name == "memo_bound" {
+            &encode.push("mir_image_schema_write_memo(&writer, value.memo_bound, value.memo_unbounded)\n")
+            &decode_prefix.push("__memo :: mir_image_schema_read_memo(&reader)\n")
+            &decode_fields.push("memo_bound: __memo.bound")
+            &decode_fields.push("memo_unbounded: __memo.unbounded")
+        } else if carrier == "MIROptimizationFacts" && native.name == "derived_from_digest" {
+            &encode.push("mir_image_schema_write_seal(&writer, value.derived_from_digest)\n")
+            &decode_prefix.push("__seal :: mir_image_schema_read_seal(&reader)\n")
+            &decode_fields.push("derived_from_digest: __seal")
+        } else {
+            body :: mir_image_gen_codec_expression(&state, definition, native.ty, mir_image_generator_source_type(source.ty), "value.{source.name}", "writer", "reader")
+            &encode.push(body.encode)
+            local :: mir_image_gen_fresh(&state, "field")
+            &decode_prefix.push("{local} :: {body.decode}\n")
+            &decode_fields.push("{source.name}: {local}")
+        }
+    }
+    Ok(mir_image_gen_expr(encode.join(""), "{decode_prefix.join("")}Ok({carrier}{{{decode_fields.join(", ")}}})\n"))
+}
+fn mir_image_gen_source_variant(source: [MIRImageSourceVariant], owner: String, name: String) -> MIRImageSourceVariant MIRImageError! {
+    loop variant in source -> if mir_image_gen_same_name(mir_image_generator_native_variant(owner, variant.name), name) -> return Ok(variant)
+    Err(MIRImageError{message: "native MIR variant `{owner}::{name}` has no lossless Source-MIR variant"})
+}
+fn mir_image_gen_enum_codec(state: &MIRImageGeneratorEmission, definition: MIRImageSchemaDefinition, carrier: String, variants: [MIRImageSchemaVariant], source: [MIRImageSourceVariant]) -> MIRImageGeneratorExpression MIRImageError! {
+    encode_arms := [String]{}
+    decode_arms := [String]{}
+    used := [String:Bool]{}
+    loop tag in 0..<variants.len() {
+        native :: variants[tag]
+        variant :: mir_image_gen_source_variant(source, carrier, native.name)
+        used[variant.name] = true
+        aligned :: mir_image_generator_align_variant(carrier, variant, native)
+        fields :: mir_image_gen_variant_fields(native.body)
+        bindings := [String]{}
+        source_decode := [String]{}
+        loop index in 0..<variant.fields.len() {
+            &bindings.push("__field_{index}")
+            &source_decode.push("")
+        }
+        bodies := [String]{}
+        decode_prefix := [String]{}
+        loop index in 0..<fields.len() {
+            source_index :: aligned[index] ?? return Err(MIRImageError{message: "native MIR variant `{carrier}::{native.name}` has an unmapped field"})
+            source_field :: variant.fields[source_index]
+            body :: mir_image_gen_codec_expression(&state, definition, fields[index].ty, mir_image_generator_source_type(source_field.ty), bindings[source_index], "writer", "reader")
+            &bodies.push(body.encode)
+            local :: mir_image_gen_fresh(&state, "field")
+            &decode_prefix.push("{local} :: {body.decode}\n")
+            source_decode[source_index] = local
+        }
+        if carrier == "MIROperation" && variant.name == "Binary" {
+            dispatch :: mir_image_gen_source_field_index(variant.fields, "dispatch") ?? return Err(MIRImageError{message: "MIR Binary has no dispatch field"})
+            overflow :: mir_image_gen_source_field_index(variant.fields, "overflow") ?? return Err(MIRImageError{message: "MIR Binary has no overflow field"})
+            &bodies.push("mir_image_schema_check_overflow({bindings[dispatch]}, {bindings[overflow]}, traps)\n")
+            source_decode[overflow] = "MIRBinaryOverflow.Unchecked"
+        }
+        loop index in 0..<source_decode.len() -> if source_decode[index] == "" -> return Err(MIRImageError{message: "Source MIR enum field `{carrier}::{variant.name}.{variant.fields[index].name}` has no native MIR source"})
+        pattern :: if bindings.len() == 0 -> ".{variant.name}" else -> ".{variant.name}({bindings.join(", ")})"
+        constructor :: if source_decode.len() == 0 -> "{carrier}.{variant.name}" else -> "{carrier}.{variant.name}({source_decode.join(", ")})"
+        &encode_arms.push("{pattern} -> {{ &writer.write_u32(U32{{{tag}}})\n{bodies.join("")}return }}\n")
+        &decode_arms.push("U32{{{tag}}} -> {{ {decode_prefix.join("")}Ok({constructor}) }}\n")
+    }
+    loop variant in source -> if used.get(variant.name) == None -> return Err(MIRImageError{message: "Source MIR variant `{carrier}::{variant.name}` has no native MIR destination"})
+    Ok(mir_image_gen_expr("if value == {{\n{encode_arms.join("")}}}\n", "if &reader.read_u32() == {{\n{decode_arms.join("")}else -> Err(MIRImageError{{message: \"unknown native MIR enum tag\"}})\n}}\n"))
+}
+fn mir_image_gen_definition_codec(state: &MIRImageGeneratorEmission, key: String, carrier: String, interned: [String]) -> String MIRImageError! {
+    definition :: state.schema.definitions[key]
+    source :: state.mapping.source.get(carrier)
+    body := mir_image_gen_expr("", "")
+    if definition.body == {
+        .Struct(fields) -> {
+            source_definition :: source ?? return Err(MIRImageError{message: "Source MIR carrier `{carrier}` is not declared"})
+            source_fields :: if source_definition.body == .Struct(value) -> value else -> return Err(MIRImageError{message: "native MIR struct `{key}` has a nonrecord Source carrier"})
+            body = mir_image_gen_struct_codec(&state, definition, carrier, fields, source_fields, false)
+        }
+        .Tuple(fields) -> {
+            source_definition :: source ?? return Err(MIRImageError{message: "Source MIR carrier `{carrier}` is not declared"})
+            source_fields :: if source_definition.body == .Struct(value) -> value else -> return Err(MIRImageError{message: "native MIR tuple `{key}` has a nonrecord Source carrier"})
+            body = mir_image_gen_struct_codec(&state, definition, carrier, fields, source_fields, true)
+        }
+        .Enum(variants) -> {
+            source_definition :: source ?? return Err(MIRImageError{message: "Source MIR carrier `{carrier}` is not declared"})
+            source_variants :: if source_definition.body == .Enum(value) -> value else -> return Err(MIRImageError{message: "native MIR enum `{key}` has a nonenum Source carrier"})
+            body = mir_image_gen_enum_codec(&state, definition, carrier, variants, source_variants)
+        }
+        .Unit -> body = mir_image_gen_expr("return\n", "Ok({carrier}{{}})\n")
+        .Alias(ty) -> {
+            expression :: mir_image_gen_codec_expression(&state, definition, ty, mir_image_generator_source_type(carrier), "value", "writer", "reader")
+            body = mir_image_gen_expr(expression.encode, "Ok({expression.decode})\n")
+        }
+    }
+    kind := Int?{None}
+    loop index in 0..<interned.len() -> if interned[index] == key -> kind = Val(index)
+    encoder :: mir_image_gen_function(if kind == None -> "encode" else -> "encode_entry", key, carrier)
+    decoder :: mir_image_gen_function(if kind == None -> "decode" else -> "decode_entry", key, carrier)
+    fragments := [String]{}
+    &fragments.push("fn {encoder}(value: {carrier}, writer: &MIRImageWriter, interner: &MIRImageInterner, traps: [U64:Bool]) MIRImageError! {{\n{body.encode}return\n}}\n")
+    &fragments.push("fn {decoder}(reader: &MIRImageReader, tables: MIRImageSchemaTables) -> {carrier} MIRImageError! {{\n{body.decode}}}\n")
+    if kind == .Val(index) {
+        wrapper_encode :: mir_image_gen_function("encode", key, carrier)
+        wrapper_decode :: mir_image_gen_function("decode", key, carrier)
+        table :: "kind_{index}"
+        &fragments.push("fn {wrapper_encode}(value: {carrier}, writer: &MIRImageWriter, interner: &MIRImageInterner, traps: [U64:Bool]) MIRImageError! {{\nentry := MIRImageWriter.new()\n{encoder}(value, &entry, &interner, traps)\nbytes :: entry.finish()\nmir_image_write_entry(&writer, &interner, {index}, ^bytes)\nreturn\n}}\n")
+        &fragments.push("fn {wrapper_decode}(reader: &MIRImageReader, tables: MIRImageSchemaTables) -> {carrier} MIRImageError! {{\nindex :: &reader.read_index()\nif index >= U64{{tables.{table}.len()}} -> return Err(MIRImageError{{message: \"native MIR image references an unknown interned value\"}})\nOk(~tables.{table}[Int.from_u64(index)])\n}}\n")
+    }
+    Ok(fragments.join(""))
+}
+fn mir_image_gen_tables(schema: MIRImageSchema, mapping: MIRImageGeneratorMapping, interned: [String]) -> String MIRImageError! {
+    fields := [String]{"strings: [String]\n"}
+    initializers := [String]{"strings: [String]{}"}
+    arms := [String]{}
+    loop index in 0..<interned.len() {
+        key :: interned[index]
+        carrier :: mapping.native_to_source.get(key) ?? return Err(MIRImageError{message: "interned native MIR definition `{key}` has no Source carrier"})
+        &fields.push("kind_{index}: [{carrier}]\n")
+        &initializers.push("kind_{index}: [{carrier}]{{}}")
+        decoder :: mir_image_gen_function("decode_entry", key, carrier)
+        &arms.push("U64{{{index}}} -> {{ value :: {decoder}(&reader, tables)\n&tables.kind_{index}.push(value) }}\n")
+    }
+    Ok("struct MIRImageSchemaTables {{\n{fields.join("")}}}\nfn mir_image_schema_tables_new() -> MIRImageSchemaTables Never! {{ MIRImageSchemaTables{{{initializers.join(", ")}}} }}\nfn mir_image_schema_read_tables(reader: &MIRImageReader, tables: &MIRImageSchemaTables) MIRImageError! {{\nstring_count :: &reader.read_count()\nloop _ in 0..<string_count {{ bytes :: &reader.read_bytes()\ntext :: String.from_bytes(bytes.to_list()) ?? return Err(MIRImageError{{message: \"native MIR image string is not UTF-8\"}})\n&tables.strings.push(text) }}\nentry_count :: &reader.read_count()\nloop _ in 0..<entry_count {{ if &reader.read_u64() == {{\n{arms.join("")}else -> return Err(MIRImageError{{message: \"unknown native MIR image table entry kind\"}})\n}} }}\nreturn\n}}\n")
+}
+pub fn mir_image_generator_emit_codec(schema: MIRImageSchema, mapping: MIRImageGeneratorMapping, root: String, interned: [String]) -> String MIRImageError! {
+    reachable :: mir_image_generator_reachable(schema, root)
+    reachable_keys := [String:Bool]{}
+    loop key in reachable -> reachable_keys[key] = true
+    loop key in interned -> if reachable_keys.get(key) == None -> return Err(MIRImageError{message: "interned native MIR definition `{key}` is outside the codec closure"})
+    root_carrier :: mapping.native_to_source.get(root) ?? return Err(MIRImageError{message: "native MIR root `{root}` has no Source carrier"})
+    effects :: mir_image_gen_debug_effects(schema, reachable)
+    state := MIRImageGeneratorEmission{schema: schema, mapping: mapping, pending: [(String, String)]{}, seen: [(String, String):Bool]{}, next_temporary: 0, debug_fallible: effects}
+    mir_image_gen_enqueue(&state, root, root_carrier)
+    loop key in interned -> mir_image_gen_enqueue(&state, key, mapping.native_to_source[key])
+    differences :: if root_carrier == "MIRProgram" -> mir_image_gen_debug_differences(&state, root) else -> ""
+    codecs := [String]{}
+    // Discovery follows stable declaration/field order; never re-sort the
+    // growing queue per item (that makes closure emission quadratic).
+    cursor := 0
+    loop cursor < state.pending.len() {
+        pair :: state.pending[cursor]
+        cursor += 1
+        &codecs.push(mir_image_gen_definition_codec(&state, pair.0, pair.1, interned))
+        &codecs.push(mir_image_gen_debug_definition(&state, pair.0, pair.1))
+    }
+    tables :: mir_image_gen_tables(schema, mapping, interned)
+    encoder :: mir_image_gen_function("encode", root, root_carrier)
+    decoder :: mir_image_gen_function("decode", root, root_carrier)
+    fragments := [String]{"// Generated by ImageGenerator.jet from the complete native typed MIR closure.\n// Do not edit this output; declaration drift gates regeneration.\nuse core.math as math\nuse core.collections.runtime.kernel_siphash13 as image_debug_sip\n", tables}
+    loop codec in codecs -> &fragments.push(codec)
+    &fragments.push(differences)
+    if root_carrier == "MIRProgram" {
+        &fragments.push("pub fn mir_image_encode_program(value: MIRProgram, writer: &MIRImageWriter) MIRImageError! {{\ninterner := mir_image_interner_new()\nbody := MIRImageWriter.new()\ntraps :: mir_image_schema_trap_routes(value)\n{encoder}(value, &body, &interner, traps)\nencoded :: mir_image_assemble(^interner, ^body.finish())\n&writer.write_raw(encoded.view(0..<encoded.len()))\nreturn\n}}\npub fn mir_image_decode_program(reader: &MIRImageReader) -> MIRProgram MIRImageError! {{\ntables := mir_image_schema_tables_new()\nmir_image_schema_read_tables(&reader, &tables)\nvalue := {decoder}(&reader, tables)\nmir_image_schema_restore_overflow(&value)\nOk(value)\n}}\npub fn mir_program_image_bytes(program: MIRProgram, host: JetTargetLayout) -> [U8] MIRImageError! {{\nwriter := MIRImageWriter.new()\nmir_image_encode_program(program, &writer)\nOk(writer.finish())\n}}\npub fn mir_program_from_image_bytes(payload: View<U8>, host: JetTargetLayout) -> MIRProgram MIRImageError! {{\nreader := MIRImageReader.new(payload, host)\nvalue :: mir_image_decode_program(&reader)\nreader.finish()\nOk(value)\n}}\n")
+    }
+    Ok(fragments.join(""))
+}

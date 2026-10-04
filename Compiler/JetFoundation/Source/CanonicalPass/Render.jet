@@ -1,0 +1,11 @@
+// CanonicalPass.rs:109-134. Field order and raw JSON insertion are observable.
+pub fn canonical_pass_record_json(record: CanonicalPassRecord) -> String Never! {
+    premises :: loop premise in record.premises -> foundation_json_quote(premise)
+    "{{\"schema\":{foundation_json_quote(CANONICAL_PASS_SCHEMA)},\"protocol\":{foundation_json_quote(CANONICAL_PASS_PROTOCOL)},\"stage\":{foundation_json_quote(record.stage)},\"operation_id\":{foundation_json_quote(record.operation_id)},\"occurrence\":{record.occurrence},\"order\":{record.order},\"source\":{{\"path\":{foundation_json_quote(record.source)}}},\"input\":{{\"representation\":{foundation_json_quote(record.input_representation)},\"canonical_payload\":{record.input_payload},\"identity\":{record.input_identity}}},\"output\":{{\"representation\":{foundation_json_quote(record.output_representation)},\"canonical_payload\":{record.output_payload},\"identity\":{record.output_identity}}},\"premises\":[{premises.join(",")}],\"disposition\":{foundation_json_quote(record.disposition)}}}"
+}
+
+// CanonicalPass.rs:151-157: exactly one LF, no CLI-only source.process field.
+fn canonical_pass_process_json(process: String, records: [CanonicalPassRecord]) -> String Never! {
+    rows :: loop record in records -> canonical_pass_record_json(record)
+    "{{\"schema\":\"jet.canonical-pass-journal.v1\",\"protocol\":{foundation_json_quote(CANONICAL_PASS_PROTOCOL)},\"process\":{foundation_json_quote(process)},\"records\":[{rows.join(",")}]}}\n"
+}

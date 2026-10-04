@@ -1,0 +1,371 @@
+// Rust tests/fmt.rs statement/control regressions and Formatter/mod.rs tests.
+// Fixtures are source programs, checked through the real parser/formatter SCC.
+use jet_parser.[JetFormatOptions, jet_format_canonical_program, jet_format_source, jet_format_source_with_options, parse_for_fmt]
+use jet_lexer.[lex]
+use jet_foundation.[Expr, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span, Stmt, block_marker]
+
+fn stmt_test_format(source: String, simplify: Bool) -> String Never! {
+    result :: jet_format_source_with_options(source, JetFormatOptions{simplify: simplify})
+    result.source ?? panic("statement fixture did not format")
+}
+fn stmt_test_identity(source: String) -> [U8] Never! {
+    tokens :: lex(source.bytes())
+    assert_eq(tokens.diagnostics.len(), 0)
+    parsed :: parse_for_fmt(tokens.tokens)
+    jet_format_canonical_program(parsed.program ?? panic("statement fixture did not parse"))
+}
+fn stmt_test_stable(source: String, simplify: Bool) -> String Never! {
+    once :: stmt_test_format(source, simplify)
+    assert_eq(stmt_test_identity(source), stmt_test_identity(once))
+    assert_eq(once, stmt_test_format(once, simplify))
+    once
+}
+fn stmt_test_keeps(source: String, needles: [String]) Never! {
+    output :: stmt_test_stable(source, false)
+    loop needle in needles -> assert(output.contains(needle))
+}
+
+// tests/fmt.rs:469-558; mod.rs:2518-2551.
+#Test("fmt_off_debug_only_statement_attributes_stability") {
+    stmt_test_keeps("fn run() {{\n    #Off print(\"off\")\n    #DebugOnly print(\"debug\")\n    #Off if true {{\n        print(\"off block\")\n    }}\n}}\n", ["#Off print(\"off\")", "#DebugOnly print(\"debug\")", "#Off if true {{", "print(\"off block\")"])
+}
+#Test("fmt_meta_attribute_stability") {
+    stmt_test_keeps("#Meta(category: \"Movement\", tunable)\nfn step_speed(speed: Int) -> Int {{\n    #Meta(category: \"Movement\", tunable)\n    next :: speed + 1\n    return next\n}}\n", ["#Meta(category: \"Movement\", tunable)", "fn step_speed(speed: Int) -> Int {{", "next :: speed + 1"])
+}
+#Test("fmt_preserves_block_comments") {
+    stmt_test_keeps("/* a leading block comment */\nfn run() {{\n    /* explains the next line, /* with a nested comment */ inside */\n    x :: 5\n    print(\"{{x}}\")\n}}\n", ["/* a leading block comment */", "/* with a nested comment */ inside */"])
+}
+#Test("fmt_keeps_transaction_comment_inside_transaction_block") {
+    output :: stmt_test_stable("fn transfer(from: Shared<Account>, amount: Int) {{\n    #Transact(tx) {{\n        from.balance -= amount  // both land, or neither\n    }}\n}}\n", false)
+    comment :: output.find("// both land, or neither") ?? panic("comment lost")
+    close :: output.rfind("}}") ?? panic("block lost")
+    assert(comment < close)
+}
+#Test("inner_comment_stays_before_enclosing_block_close") {
+    output :: stmt_test_stable("fn run() {{\n    if ready {{ launch() /* go */ }}\n}}\n", false)
+    assert((output.find("/* go */") ?? panic("comment lost")) < (output.find("}}") ?? panic("block lost")))
+}
+
+// tests/fmt.rs:600-802.
+#Test("fmt_comptime_os_dispatch_round_trips") {
+    stmt_test_keeps("fn run() {{\n    prep if $build.os == {{\n        .Linux -> {{\n            b :: LinuxBackend{{ name: \"gtk\" }}\n            print(b.label())\n        }}\n        .MacOS -> print(\"mac\")\n        else -> print(\"other\")\n    }}\n}}\n", ["prep if $build.os == {{", ".Linux -> {{", ".MacOS -> {{ print(\"mac\") }}", "print(b.label())", "else -> {{ print(\"other\") }}"])
+}
+#Test("fmt_preserves_concise_dispatch_arms") {
+    _ :: stmt_test_stable("fn run() {{\n    value :: 2\n    if value == {{\n        1 -> print(\"one\")\n        2 -> {{ print(\"two\") }}\n        else -> print(\"other\")\n    }}\n}}\n", false)
+}
+#Test("fmt_keeps_dispatch_return_arms_parseable_before_leading_dot_arms") {
+    stmt_test_keeps("fn run() {{\n    if result == {{\n        .Err(error) -> return error_result(error.message)\n        .Ok(value) -> {{\n            if nested == {{\n                .Err(error) -> return error_result(error.message)\n                .Ok(inner) -> print(inner)\n            }}\n        }}\n    }}\n}}\n", [".Err(error) -> return error_result(error.message)"])
+}
+#Test("fmt_keeps_empty_dispatch_arms_compact_and_stable") {
+    stmt_test_keeps("fn run() {{\n    if \"ready\" == {{\n        \"ready\" -> print(\"ready\")\n        else -> {{}}\n    }}\n    print(\"done\")\n}}\n", ["else -> {{}}"])
+}
+#Test("fmt_preserves_predicate_arms_under_eq_table") {
+    stmt_test_keeps("fn handle(code: Int) {{\n    if code == {{\n        200 -> print(\"ok\")\n        code >= 500 -> print(\"retry\")\n        else -> print(\"other\")\n    }}\n}}\n\nfn run() {{\n    handle(503)\n}}\n", ["if code ==", "code >= 500"])
+}
+#Test("fmt_keeps_trailing_dispatch_arm_comments_attached") {
+    stmt_test_keeps("fn run() {{\n    value :: 1\n    if value == {{\n        1 -> print(\"one\") // The common case.\n        else -> print(\"other\")\n    }}\n}}\n", ["print(\"one\")  // The common case."])
+}
+#Test("fmt_expands_multiline_lambda_dispatch_arms_without_losing_comments") {
+    stmt_test_keeps("fn run() {{\n    value :: 1\n    if value == {{\n        1 -> apply(x -> {{\n            // Keep this explanation with the lambda.\n            return x + 1\n        }})\n        else -> print(\"other\")\n    }}\n}}\n", ["// Keep this explanation with the lambda."])
+}
+
+// tests/fmt.rs:904-940: section boundaries are independent of comment groups.
+#Test("fmt_preserves_blank_lines_between_statement_sections") {
+    source :: "fn run() {{\n    first()\n\n    // Second phase.\n    second()\n\n    third()\n}}\n"
+    assert_eq(stmt_test_stable(source, false), source)
+}
+#Test("fmt_keeps_section_break_after_leading_comment") {
+    source :: "fn run() {{\n    first()\n    // First phase is complete.\n\n    second()\n}}\n"
+    assert_eq(stmt_test_stable(source, false), source)
+}
+#Test("fmt_keeps_section_break_between_leading_comment_groups") {
+    source :: "fn run() {{\n    first()\n    // First phase is complete.\n\n    // Second phase starts here.\n    second()\n}}\n"
+    assert_eq(stmt_test_stable(source, false), source)
+}
+
+// tests/fmt.rs:1385-1435,1464-1478,1538-1550.
+#Test("fmt_simplify_rewrites_listed_fence_integers_to_a_range") {
+    output :: stmt_test_stable("fn run() {{\n    print(<:0, 1, 2, 3:>)\n}}\n", true)
+    assert(output.contains("<: 0..3 :>"))
+    assert(!output.contains("0, 1, 2, 3"))
+}
+#Test("fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table") {
+    output :: stmt_test_stable("fn grade(score: Int) -> String {{\n    if score >= 90 {{\n        return \"a\"\n    }} else if score >= 80 {{\n        return \"b\"\n    }} else {{\n        return \"c\"\n    }}\n}}\n", true)
+    assert(output.contains("if {{"))
+    assert(!output.contains("else if"))
+}
+#Test("fmt_output_for_a_classic_else_if_chain_parses_again") {
+    _ :: stmt_test_stable("fn grade(score: Int) -> String {{\n    if score >= 90 {{\n        return \"a\"\n    }} else if score >= 80 {{\n        return \"b\"\n    }} else {{\n        return \"c\"\n    }}\n}}\n", false)
+}
+#Test("fmt_canonicalizes_subject_first_refutable_test_bind") {
+    output :: stmt_test_stable("fn run(){{\n    (parse()) == .Ok(value) ?? return\n    ((left + right).parse()) == .Ok(other) ?? return\n    print(value)\n    print(other)\n}}\n", false)
+    assert(output.contains("parse() == .Ok(value) ?? return"))
+    assert(output.contains("(left + right).parse() == .Ok(other) ?? return"))
+    assert(!output.contains("((left + right).parse())"))
+}
+
+// tests/fmt.rs:1839-2022: simple body, comment, width and nested-control gates.
+#Test("fmt_shield_block_stability") {
+    output :: stmt_test_stable("fn run() {{\n    #Shield {{\n        print(\"committed\")\n    }}\n}}\n", false)
+    assert_eq(output, "fn run() {{\n    #Shield {{ print(\"committed\") }}\n}}\n")
+}
+#Test("fmt_shield_block_keeps_comment_and_over_width_multiline") {
+    commented :: "fn run() {{\n    #Shield {{\n        // keep this comment\n        print(\"committed\")\n    }}\n}}\n"
+    assert_eq(stmt_test_stable(commented, false), commented)
+    body :: "x".repeat(80)
+    wide :: "fn run() {{\n    #Shield {{\n        print(\"{body}\")\n    }}\n}}\n"
+    assert_eq(stmt_test_stable(wide, false), wide)
+}
+#Test("fmt_preserves_single_line_if") {
+    _ :: stmt_test_stable("fn run() {{\n    ready :: true\n    if ready -> launch()\n}}\n", false)
+}
+#Test("fmt_preserves_multiline_if") {
+    assert_eq(stmt_test_stable("fn run() {{\n    ready :: true\n    if ready {{\n        launch()\n    }}\n}}\n", false), "fn run() {{\n    ready :: true\n    if ready -> launch()\n}}\n")
+}
+#Test("fmt_classic_if_ignores_braces_inside_leading_trivia") {
+    assert_eq(stmt_test_stable("fn run() {{\n    ready :: true\n    if /* {{ trivia */ ready {{ launch() }}\n}}\n", false), "fn run() {{\n    ready :: true\n    if /* {{ trivia */ ready -> launch()\n}}\n")
+}
+#Test("fmt_classic_if_does_not_mix_braced_then_with_arrow_else") {
+    output :: stmt_test_stable("fn run() {{\n    if flag {{\n        print(\"then-a\")\n        print(\"then-b\")\n    }} else {{\n        print(\"else-only\")\n    }}\n}}\n", true)
+    assert(!output.contains("}} else ->"))
+    assert(output.contains("else {{"))
+}
+#Test("fmt_if_else_chain_collapses_when_every_branch_fits") {
+    assert_eq(stmt_test_stable("fn run() {{\n    if a {{ x() }} else {{\n        y()\n    }}\n}}\n", false), "fn run() {{\n    if a -> x() else -> y()\n}}\n")
+}
+#Test("fmt_single_line_comment_forces_expand") {
+    stmt_test_keeps("fn run() {{\n    if ready {{ launch() /* go */ }}\n}}\n", ["if ready {{\n"])
+}
+#Test("fmt_single_line_over_width_forces_expand") {
+    long :: "x".repeat(120)
+    stmt_test_keeps("fn run() {{\n    if ready {{ print(\"{long}\") }}\n}}\n", ["if ready {{\n"])
+}
+#Test("fmt_single_line_nested_forces_expand") {
+    stmt_test_keeps("fn run() {{\n    if a {{ if b {{ x() }} }}\n}}\n", ["if a {{\n", "if b -> x()"])
+}
+#Test("fmt_preserves_single_line_loops_and_fn") {
+    sources :: [String]{"fn run() {{\n    n :: 0\n    loop n < 3 -> n += 1\n}}\n", "fn run() {{\n    loop -> break\n}}\n", "fn run() {{\n    loop i := 0, i < 3 -> i += 1\n}}\n", "fn run() {{\n    loop i in 0..3 -> print(\"{{i}}\")\n}}\n", "fn run() {{\n    loop i in 0..<3 -> print(\"{{i}}\")\n}}\n", "fn run() {{\n    loop (i, x) in xs -> print(\"{{i}}\")\n}}\n", "fn one() -> Int -> 1\n", "fn noop() {{}}\n"}
+    loop source in sources {
+        _ :: stmt_test_stable(source, false)
+    }
+    retired :: stmt_test_format("fn one() => Int = 1\n", false)
+    assert(retired.contains("fn one() -> Int -> 1"))
+}
+#Test("fmt_preserves_single_line_if_expr_branch") {
+    _ :: stmt_test_stable("fn run() {{\n    a :: true\n    n :: if a -> 1 else -> 2\n    print(\"{{n}}\")\n}}\n", false)
+}
+
+// tests/fmt.rs:2463-2547,2827-2895.
+#Test("fmt_impure_block_round_trips") {
+    assert_eq(stmt_test_stable("fn run() {{\n    #Impure(\"reading build config\") {{\n        print(\"inside\")\n    }}\n}}\n", false), "fn run() {{\n    #Impure(\"reading build config\") {{ print(\"inside\") }}\n}}\n")
+}
+#Test("fmt_impure_block_no_reason_round_trips") {
+    stmt_test_keeps("fn run() {{\n    #Impure {{\n        print(\"inside\")\n    }}\n}}\n", ["#Impure {{"])
+}
+#Test("fmt_unsafe_reasons_escape_strings") {
+    stmt_test_keeps("use core.mem\n\n#Unsafe(\"caller says \\\"ok\\\"\") fn raw() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    #Unsafe(\"path C:\\\\tmp\") {{\n        print(\"{{raw()}}\")\n    }}\n}}\n", ["#Unsafe(\"caller says \\\"ok\\\"\")", "#Unsafe(\"path C:\\\\tmp\")"])
+}
+#Test("fmt_prep_block_is_idempotent") {
+    stmt_test_keeps("LIMIT :: prep {{ 1000 }}\n\nfn run() {{\n    prep {{\n        ratio :: LIMIT / 10\n        if ratio < 1 {{ panic(\"bad\") }}\n    }}\n    print(\"ok\")\n}}\n", ["    prep {{\n"])
+}
+#Test("fmt_scope_members_stability") {
+    _ :: stmt_test_stable("fn run() {{\n\n}}\n\n#Test(\"members\") {{\n    .setup {{\n        base :: 1\n    }}\n    .expect_fail {{\n        assert(false)\n    }}\n    .timeout(500ms) {{\n        assert((base == 1))\n    }}\n    .skip(\"later\") {{\n        assert(false)\n    }}\n}}\n", false)
+}
+#Test("fmt_bare_binding_d_bind_bare1_stability") {
+    stmt_test_keeps("fn run() {{\n    x :: 42\n    s := \"hi\"\n    print(\"{{x}} {{s}}\")\n}}\n", ["x :: 42", "s := \"hi\""])
+}
+#Test("fmt_preserves_track_binding_marker") {
+    _ :: stmt_test_stable("fn run() {{\n    #Track count :: 1\n    #Track total := 2\n    #Track label :: \"ok\"\n    print(\"{{count}} {{total}} {{label}}\")\n}}\n", false)
+}
+#Test("fmt_preserves_local_and_shared_reactive_pins") {
+    _ :: stmt_test_stable("use core.reactive as reactive\n\nfn run() {{\n    #Local pending := reactive.signal(0)\n    #Shared shared := reactive.signal(1)\n    print(\"{{pending.get()}} {{shared.get()}}\")\n}}\n", false)
+}
+
+// tests/fmt.rs:3004-3248: labels, value loops, clauses, exits and wrapping.
+#Test("fmt_loop_label_d_looplabel3_stability") {
+    stmt_test_keeps("fn run() {{\n    outer :: loop i in [1, 2] {{\n        loop j in [1, 2] {{\n            if i == j {{\n                value() ?? next(outer)\n                break(outer)\n            }}\n        }}\n    }}\n    print(\"done\")\n}}\n", ["outer :: loop", "next(outer)", "break(outer)"])
+}
+#Test("fmt_loop_values_and_yielding_loops_are_idempotent") {
+    source :: "fn find(xs: [Int]) -> Int {{\n    found :: loop {{\n        loop x in xs {{\n            if x > 2 {{ break(found, x) }}\n        }}\n        break -1\n    }}\n    found\n}}\n\nfn run() {{\n    xs :: [Int]{{ 1, 2, 3, 4 }}\n    values :: loop x in xs -> {{\n        if x > 3 {{ break }}\n        x * 2\n    }}\n    print(values)\n}}\n"
+    output :: stmt_test_stable(source, false)
+    assert(output.contains("found :: loop"))
+    assert(output.contains("break(found, x)"))
+    assert(output.contains("values :: loop x in xs ->"))
+    assert(!output.contains("__jet_"))
+    guarded :: "fn run() {{\n    values :: loop u in users if u.active -> u.name\n}}\n"
+    assert_eq(stmt_test_stable(guarded, false), guarded)
+}
+#Test("fmt_counted_loop_d_loop_semicolon1_stability") {
+    stmt_test_keeps("fn run() {{\n    sum := 0\n    loop i in 0..<5 {{\n        sum += i\n    }}\n    print(sum)\n}}\n", ["loop i in 0..<5"])
+}
+#Test("fmt_unified_loop_headers_and_next_stability") {
+    stmt_test_keeps("fn next() -> Int {{ return 7 }}\n\nfn run() {{\n    next()\n    cursor.next()\n    saved :: Int.parse(\"1\") ?? (next)\n    loop item in [1, 2, 3], 2 {{\n        value :: Int.parse(\"1\") ?? next\n        if value == 1 {{ next }}\n    }}\n}}\n", ["fn next()", "next()", ".next()", "?? (next)", "loop item in [1, 2, 3], 2", "?? next", "if value == 1 -> next"])
+    retired :: [String]{"fn run() {{ loop i in 0..2 step 1 {{}} }}\n", "fn run() {{ loop {{ continue }} }}\n", "fn run() {{ loop i :: 0, true {{}} }}\n", "fn run() {{ loop [i] := [0], true {{}} }}\n", "fn run() {{ loop i := 0 true {{}} }}\n", "fn run() {{ loop i := 0, true, i += 1, i += 2 {{}} }}\n", "fn run() {{ loop i := 0, i < 3, i += 1 {{}} }}\n"}
+    loop source in retired -> assert(jet_format_source(source).source == None)
+}
+#Test("control_bodies_use_arrows_when_they_fit") {
+    stmt_test_keeps("fn run() {{\n    if true {{\n        print(\"yes\")\n    }}\n    loop false print(\"no\")\n}}\n", ["if true -> print(\"yes\")", "loop false -> print(\"no\")"])
+}
+#Test("effect_control_arrows_format_as_one_statement_bodies") {
+    stmt_test_keeps("fn run() {{\n    if true -> print(\"yes\") else -> print(\"no\")\n    loop false -> print(\"again\")\n    loop -> print(\"forever\")\n    loop item in [1, 2] -> print(item)\n    loop i := 0, i < 2 -> i += 1\n}}\n", ["if true -> print(\"yes\") else -> print(\"no\")", "loop false -> print(\"again\")", "loop -> print(\"forever\")", "loop item in [1, 2] -> print(item)", "loop i := 0, i < 2 -> i += 1"])
+}
+#Test("fmt_preserves_braced_loop_value_drop_and_is_stable") {
+    output :: stmt_test_stable("fn value() -> String -> \"value\"\n\nfn run() {{\n    values := [1, 2]\n    loop v in values {{ value() }}\n}}\n", false)
+    assert(output.contains("loop v in values {{ value() }}"))
+    assert(!output.contains("loop v in values ->"))
+}
+#Test("fmt_canonicalizes_explicit_drop_to_arrow_loop_body") {
+    stmt_test_keeps("fn value() -> String -> \"value\"\n\nfn run() {{\n    values := [1, 2]\n    loop v in values {{ value().drop(\"checked\") }}\n}}\n", ["loop v in values -> value().drop(\"checked\")"])
+}
+#Test("loop_headers_use_in_binding_and_comma_clauses") {
+    stmt_test_keeps("fn run() {{\n    loop item in [1, 2, 3], 2 {{ print(item) }}\n    loop (key, value) in counts {{ print(key) }}\n    loop i in 0..<3 {{ print(i) }}\n}}\n", ["loop item in [1, 2, 3], 2 {{ print(item) }}", "loop (key, value) in counts {{ print(key) }}", "loop i in 0..<3 {{ print(i) }}"])
+}
+#Test("fmt_long_loop_headers_wrap_at_clause_boundaries_stability") {
+    stmt_test_keeps("fn run() {{\n    loop item in // source clause\n        [1000000000000000000, 2000000000000000000, 3000000000000000000, 4000000000000000000], // stride clause\n        2 {{\n        next\n    }}\n    loop cursor in // start\n        0..<9000000000000000000, // end\n        1000000000000000000 {{\n        print(cursor)\n    }}\n    loop ready := true, ready {{\n        break\n    }}\n}}\n", ["loop item in", "// source clause", "],", "// stride clause", "loop cursor in", "0..<9000000000000000000,", "1000000000000000000", "loop ready := true, ready {{"])
+}
+
+// tests/fmt.rs:3308-3391,3587-3604,3817-3830,3887-3907.
+#Test("fmt_layout_block_round_trips_byte_for_byte") {
+    source :: "fn run() {{\n    form :: Layout{{\n        label.width >= 80.0,\n        label.right + 16.0 == input.left,\n        label.width + 16.0 + input.width == self.width\n    }}\n    w :: form.value(form.h(\"label\", \"width\"))\n    print(w)\n}}\n"
+    assert_eq(stmt_test_stable(source, false), source)
+}
+#Test("fmt_preserves_destructuring_targets") {
+    stmt_test_keeps("struct Point {{ x: Int, y: Int }}\n\nfn run() {{\n    Point.{{ x, y }} :: make()\n    [a, b, c] := nums()\n    print(\"{{x}}{{y}}{{a}}{{b}}{{c}}\")\n}}\n", ["Point{{x, y}} :: make()", "[a, b, c] := nums()"])
+}
+#Test("fmt_preserves_destructure_rest") {
+    _ :: stmt_test_stable("struct Incident {{\n    id: Int\n    severity: Int\n    title: String\n}}\n\nfn run() {{\n    Incident{{id, severity: sev, ..}} :: Incident{{id: 1, severity: 5, title: \"boom\"}}\n    print(\"{{id}} {{sev}}\")\n}}\n", false)
+}
+#Test("fmt_preserves_named_tuples") {
+    stmt_test_keeps("fn bounds() -> (min: Int, max: Int) {{\n    return (min: 0, max: 10)\n}}\n\nfn run() {{\n    p :: (x: 1, y: 2)\n    (a, b) :: p\n    print(\"{{p.x}}{{a}}{{b}}\")\n}}\n", ["p :: (x: 1, y: 2)", "fn bounds() -> (max: Int, min: Int) {{", "(a, b) :: p"])
+}
+#Test("fmt_preserves_yield") {
+    _ :: stmt_test_stable("fn count(n: Int) -> Stream<Int> {{\n    i := 0\n    loop i < n {{\n        yield i\n        i = i + 1\n    }}\n}}\n\nfn run() {{\n    loop x in count(3) {{ print(\"{{x}}\") }}\n}}\n", false)
+}
+#Test("fmt_preserves_uninit_sentinel") {
+    source :: "use core.mem\n\nfn run() {{\n    n := Int{{ uninit }}\n    n = 99\n    print(n)\n}}\n"
+    assert_eq(stmt_test_stable(source, false), source)
+}
+#Test("fmt_preserves_unsafe_site_modes_and_postfix_obligations") {
+    stmt_test_keeps("use core.mem\n\n#Unsafe(\"caller keeps address live\", obligations: .Track)\nfn read(address: Int) -> Int {{\n    pointer :: mem.Ptr<Int>.from_addr(address)\n    assert valid_ptr, aligned\n    value :: mem.volatile_read(pointer)\n    assert valid_ptr, aligned\n    return value\n}}\n\nfn run() {{\n    #Unsafe(\"calling audited reader\", obligations: .Skip) {{\n        print(read(1))\n    }}\n}}\n", ["obligations: .Track", "obligations: .Skip", "assert valid_ptr, aligned"])
+}
+
+// tests/fmt.rs:4250-4310 and fmt_wave_a preservation-matrix Unicode witnesses.
+#Test("subjectless_guards_preserve_tokens_and_are_byte_stable") {
+    source :: "fn run() {{\n    ready :: true\n    if ready -> print(\"inline\")\n    if {{\n        ready -> print(\"ready\")\n        false -> print(\"never\")\n    }}\n    label :: if {{\n        ready -> \"ready\"\n        else -> \"waiting\"\n    }}\n    print(label)\n}}\n"
+    assert_eq(stmt_test_stable(source, false), source)
+}
+#Test("overwide_inline_guard_widens_once") {
+    source :: "fn run() {{\n    if this_condition_name_is_deliberately_longer_than_the_formatter_width_limit && another_deliberately_long_condition_name print(\"wide\")\n}}\n"
+    expected :: "fn run() {{\n    if this_condition_name_is_deliberately_longer_than_the_formatter_width_limit && another_deliberately_long_condition_name {{\n        print(\"wide\")\n    }}\n}}\n"
+    assert_eq(stmt_test_stable(source, false), expected)
+}
+#Test("arrow_in_block_if_comment_does_not_create_inline_guard") {
+    output :: stmt_test_stable("fn run() {{\n    ready :: true\n    if ready {{ // -> explains the branch\n        print(\"ready\")\n    }}\n}}\n", false)
+    assert(output.contains("if ready {{"))
+    assert(output.contains("// -> explains the branch"))
+    assert(!output.contains("if ready ->"))
+}
+#Test("statement_gaps_use_utf8_byte_offsets") {
+    source :: "fn run() {{\n    print(\"雪\")\n    // ╔═ phase one\n\n    // λ phase two\n    print(\"é\")\n}}\n"
+    assert_eq(stmt_test_stable(source, false), source)
+}
+#Test("fenced_rhs_literals_and_comments_keep_authored_layout") {
+    source :: "fn run() {{\n    <: café, neige :> :: \"雪  space\"\n    print(<: café, neige :>) // λ after fence\n}}\n"
+    stmt_test_keeps(source, ["<: café, neige :>", "\"雪  space\"", "// λ after fence"])
+}
+#Test("fenced_integer_range_reemits_once") {
+    output :: stmt_test_stable("fn run() {{\n    print(<:0..3:>)\n}}\n", false)
+    assert(output.contains("<: 0..3 :>"))
+    assert(!output.contains("print(0)"))
+}
+#Test("fenced_simplify_does_not_merge_gaps_or_comments") {
+    output :: stmt_test_stable("fn run() {{\n    print(<:0, 2, 3:>)\n    print(<:0, /* keep */ 1:>)\n}}\n", true)
+    assert(output.contains("0, 2, 3"))
+    assert(output.contains("/* keep */"))
+    assert(!output.contains("0..3"))
+}
+#Test("dispatch_call_arguments_are_not_elided_by_anchor_spans") {
+    // Card #4400 STATIC tandem repro: Rust Statements.rs:1462-1470.
+    stmt_test_keeps("fn subject(value: Int) -> Int -> value\nfn run() {{\n    if subject(1) == {{\n        1 -> print(\"one\")\n        subject(2) == 3 -> print(\"predicate\")\n        else -> print(\"other\")\n    }}\n}}\n", ["if subject(1) == {{", "subject(2) == 3 ->"])
+}
+
+#Test("control_inline_width_is_100_unicode_scalars") {
+    exact :: "雪".repeat(75)
+    wide :: "雪".repeat(76)
+    fitting :: stmt_test_stable("fn run() {{\n    if ready -> print(\"{exact}\")\n}}\n", false)
+    assert(fitting.contains("if ready ->"))
+    expanded :: stmt_test_stable("fn run() {{\n    if ready -> print(\"{wide}\")\n}}\n", false)
+    assert(expanded.contains("if ready {{\n"))
+    assert(!expanded.contains("if ready ->"))
+}
+
+#Test("all_dedicated_block_headers_retain_their_arguments") {
+    // Real AST metadata projection, not a formatter replacement or mock.
+    span :: Span{start: 0, end: 1}
+    reason :: Expr.Str{parts: [.Lit("audit")], span: span}
+    policies :: [PolicyDeclaration]{PolicyDeclaration{key: PolicyKey.Unsafe, value: PolicyValue.Skip, scope: PolicyScope.Block, span: span, target: Val(span), source: ""}}
+    statement :: Stmt.Unsafe{audit: Val("ignored authored fallback"), audit_expr: Val(reason), body: [Stmt]{}, span: span}
+    projected :: block_marker(statement, policies) ?? panic("unsafe marker lost")
+    assert_eq(projected.name, "Unsafe")
+    assert_eq(projected.negated, false)
+    assert_eq(projected.args.len(), 2)
+    if projected.args[0] == {
+        .Expr(label, value) -> {
+            assert_eq(label, None)
+            if value == {
+                .Str(parts, found_span) -> {
+                    assert_eq(found_span, span)
+                    assert_eq(parts.len(), 1)
+                    if parts[0] == .Lit(text) -> assert_eq(text, "audit") else -> panic("reason literal lost")
+                }
+                else -> panic("reason expression changed")
+            }
+        }
+        else -> panic("reason expression lost")
+    }
+    if projected.args[1] == {
+        .Expr(label, value) -> {
+            assert_eq(label, Val("obligations"))
+            if value == {
+                .Ident(name, found_span) -> {
+                    assert_eq(name, ".Skip")
+                    assert_eq(found_span, span)
+                }
+                else -> panic("obligation identifier changed")
+            }
+        }
+        else -> panic("obligation site mode lost")
+    }
+    sources :: [String]{
+        "fn run() {{ #Reactive {{ print(1) }} }}\n",
+        "fn run() {{ #Shield {{ print(1) }} }}\n",
+        "fn run() {{ #Region(arena) {{ print(1) }} }}\n",
+        "fn run() {{ #Policy(copies: .Explicit) {{ print(1) }} }}\n",
+        "fn run() {{ #FX(IO) {{ print(1) }} }}\n",
+        "fn run() {{ #Context(deadline: 20) {{ print(1) }} }}\n",
+        "fn run() {{ #Live {{ print(1) }} }}\n",
+        "fn run() {{ #Nondeterministic(\"external order\") {{ print(1) }} }}\n",
+        "fn run() {{ #Transact {{ print(1) }} }}\n",
+        "fn run() {{ #Transact(tx) {{ print(1) }} }}\n",
+        "fn run() {{ task.group workers(limit: 3) {{ print(1) }} }}\n",
+        "fn run() {{ prep if true {{ print(1) }} else {{ print(2) }} }}\n",
+    }
+    loop source in sources {
+        _ :: stmt_test_stable(source, false)
+    }
+}
+
+// tests/fmt.rs:125-142,319-344,1502-1508.
+#Test("fmt_arithmetic_policy_scope_is_canonical_and_idempotent") {
+    output :: stmt_test_stable("\nfn run() {{\n    #Arithmetic(.Wrapping) {{\n        value :: U8{{250}} + U8{{10}}\n        print(value)\n    }}\n}}\n", false)
+    assert(output.contains("#Arithmetic(.Wrapping)"))
+    assert(!output.contains("wrapping("))
+}
+#Test("bar_formatting_is_stable") {
+    stmt_test_keeps("enum State {{ Ready Waiting }}\n\nfn run() {{\n    state :: State.Ready\n    if state == {{\n        .Ready | .Waiting -> print(\"known\")\n    }}\n}}\n", [".Ready | .Waiting ->"])
+    stmt_test_keeps("fn run() {{ value :: 1 | 2 }}", ["value :: 1 | 2"])
+    assert(jet_format_source("fn run() {{ value :: 1 |> print }}").source == None)
+}
+#Test("fmt_still_errors_on_real_parse_problems") {
+    assert(jet_format_source("fn run() {{ x :: ; }}\n").source == None)
+}

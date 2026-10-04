@@ -1,0 +1,58 @@
+// CanonicalPass.rs:217-245: exhaustive match against the sole Foundation Item.
+// Original has 25 variants (the brief's "24" is not the source denominator).
+pub fn canonical_pass_item_kind(item: Item) -> String Never! {
+    if item == {
+        .Func(_) -> "Func"
+        .Struct(_) -> "Struct"
+        .Enum(_) -> "Enum"
+        .Distinct(_) -> "Distinct"
+        .TypeAlias(_) -> "TypeAlias"
+        .UnitFamily(_) -> "UnitFamily"
+        .Trait(_) -> "Trait"
+        .Tag(_) -> "Tag"
+        .EffectDecl(_) -> "EffectDecl"
+        .Impl(_) -> "Impl"
+        .Const(_) -> "Const"
+        .Test(_) -> "Test"
+        .ExternRust(_) -> "ExternRust"
+        .Module(_) -> "Module"
+        .CModule(_) -> "CModule"
+        .CodeModule(_) -> "CodeModule"
+        .ErrorConv(_) -> "ErrorConv"
+        .Migration(_) -> "Migration"
+        .ProtocolDecl(_) -> "ProtocolDecl"
+        .UserDerive(_) -> "UserDerive"
+        .TemplateLoop(_) -> "TemplateLoop"
+        .GenericModule(_) -> "GenericModule"
+        .ModuleAlias(_) -> "ModuleAlias"
+        .MarkerDecl(_) -> "MarkerDecl"
+        .FactDecl(_) -> "FactDecl"
+    }
+}
+fn canonical_pass_ast_item_rows(items: [Item]) -> String Never! {
+    rows :: loop (index, item) in items -> "{{\"index\":{index},\"kind\":{foundation_json_quote(canonical_pass_item_kind(item))}}}"
+    rows.join(",")
+}
+// CanonicalPass.rs:246-266: authored Item order, not registration symbol rows.
+pub fn canonical_pass_ast_items_payload(items: [Item]) -> String Never! {
+    "{{\"representation\":\"ast\",\"items\":[{canonical_pass_ast_item_rows(items)}]}}"
+}
+pub fn canonical_pass_ast_items_identity(items: [Item]) -> String Never! {
+    "{{\"representation\":\"ast\",\"item_count\":{items.len()}}}"
+}
+
+// CanonicalPass.rs:165-215. ProgramBundle and LoadedModule must be the actual
+// inward AST owner. Its carrier/loader cutover is a source-owner prerequisite,
+// not a native #4494 gate. No local snapshot bundle, SemaRegistry
+// reconstruction or PackageIdentityBundle substitutes for those fields.
+pub fn canonical_pass_ast_payload(bundle: ProgramBundle) -> String Never! {
+    rows := [String]{}
+    loop module in bundle.modules {
+        &rows.push("{{\"display\":{foundation_json_quote(module.display)},\"alias\":{foundation_json_quote(module.alias)},\"source_length\":{module.source.bytes().len()},\"items\":[{canonical_pass_ast_item_rows(module.items)}]}}")
+    }
+    "{{\"representation\":\"ast\",\"entry\":{bundle.entry},\"modules\":[{rows.join(",")}]}}"
+}
+pub fn canonical_pass_ast_identity(bundle: ProgramBundle) -> String Never! {
+    rows :: loop module in bundle.modules -> "{{\"display\":{foundation_json_quote(module.display)},\"items\":{module.items.len()}}}"
+    "{{\"representation\":\"ast\",\"entry\":{bundle.entry},\"modules\":[{rows.join(",")}]}}"
+}

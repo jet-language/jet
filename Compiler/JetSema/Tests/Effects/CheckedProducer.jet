@@ -1,0 +1,127 @@
+// Integrated original producer witness. This intentionally includes the real
+// parser/registration/body/effect graph and embedded canonical Prelude. A
+// narrower graph test cannot stand in for this check.
+use core.files.host.retained_descriptor as effect_test_native
+use core.files.runtime.kernel_path_components as effect_test_path
+use jet_foundation.[DIAGNOSTIC_ERROR, Program, TFunc, foundation_embedded_core, jet_target_machine_hosted]
+use jet_parser.[parse_source]
+use jet_sema.[SemaBuildFacts, SemaGraphResult, SemaRegistrationGraph, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_effect_trait_contracts, sema_finalize_registration_graph, sema_registration_prepare_graph]
+
+fn effect_producer_module(program: ^Program, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
+    SemaRegistrationModuleInput{package_identity: package, module_identity: identity,
+        module_name: identity, module_path: path, source_file: path,
+        source_segments: [], source_origin: SemaSourceOrigin.Snapshot,
+        program: program, foreign_handles: []}
+}
+fn effect_producer_registration(source: String) -> SemaRegistrationGraph Never! {
+    original :: parse_source(source.bytes())
+    assert(original.diagnostics.len() == 0)
+    canonical :: parse_source(foundation_embedded_core().effect_source().bytes())
+    assert(canonical.diagnostics.len() == 0)
+    inputs :: [SemaRegistrationModuleInput]{
+        effect_producer_module(^original.program, "main", "facts.jet", "facts"),
+        effect_producer_module(^canonical.program, "effects", "Prelude/Effects.jet", "jet:canonical-prelude"),
+    }
+    build :: SemaBuildFacts{package_name: "facts", package_version: "1.0.0", os: "linux", profile: "test",
+        stamp_git: None, stamp_dirty: false, stamp_toolchain: "effect-test", stamp_at: "", artifact_build: false}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    registration :: sema_registration_prepare_graph(inputs, [], "facts", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+    registration
+}
+fn effect_producer_checked(source: String, inspect: Bool) -> SemaGraphResult Never! {
+    registration :: effect_producer_registration(source)
+    stage :: sema_collect_comptime_declarations(registration, [], None)
+    project_root :: effect_test_native.canonicalize(effect_test_path.from_text(".", effect_test_path.PathPlatform.Unix)) ?? panic("cannot read effect fixture cwd")
+    checked :: sema_finalize_registration_graph(registration, stage, [], [], None, None, project_root)
+    if inspect {
+        // Poison only display rows. The real retained direct and solved facts
+        // must still be consumed; returning the original checked graph lets
+        // the producer witness compare those facts with the original rows.
+        display := checked
+        loop (module_position, module_row) in display.modules {
+            loop (function_position, _) in module_row.functions {
+                display.modules[module_position].functions[function_position].effects.direct = [String]{"bogus_display"}
+                display.modules[module_position].functions[function_position].effects.solved = [String]{"bogus_display"}
+            }
+        }
+        // Sema owns the checked facts, not a competing partial index. Driver's
+        // captured-source full-index witness covers the downstream projection.
+        direct_count := 0
+        inferred_count := 0
+        loop (_, summary) in display.effect_facts.summaries {
+            loop effect in summary.direct {
+                assert(effect != "bogus_display")
+                if effect == "IO" -> direct_count += 1
+            }
+        }
+        loop (_, inferred) in display.effect_facts.solved {
+            loop effect in inferred {
+                assert(effect != "bogus_display")
+                if effect == "IO" -> inferred_count += 1
+            }
+        }
+        assert(direct_count == 1 && inferred_count == 2)
+    }
+    checked
+}
+
+#Test("checked_original_source_producer_retains_same_effect_facts") {
+    checked :: effect_producer_checked("fn helper() {{ print(\"io\") }}\nfn run() {{ helper() }}", true)
+    assert(checked.complete)
+    helper := TFunc?{None}
+    loop module_row in checked.modules {
+        if module_row.module_identity != "main" -> next
+        loop function in module_row.functions {
+            if function.name == "helper" -> helper = Val(function)
+        }
+    }
+    function :: helper ?? panic("checked helper missing")
+    summary :: checked.effect_facts.summaries.get(function.key) ?? panic("retained helper missing")
+    assert(summary.direct == [String]{"IO"})
+    assert(summary.direct_spans.len() == 1)
+    assert(summary.direct_spans[0].name == "IO")
+    assert(summary.direct_spans[0].span.start > 0)
+    assert((checked.effect_facts.solved.get(function.key) ?? panic("solved row missing")) == function.effects.solved)
+    assert(checked.effect_facts.name_ledger == checked.names)
+}
+
+// Original effects.rs callback_pure_bound_impure_arg_is_e0747, same source
+// and exact error-code list. The graph-boundary test is not its replacement.
+#Test("checked_original_callback_pure_bound_impure_arg_is_e0747") {
+    checked :: effect_producer_checked("fn transform(items: [Int], f: fn(Int) -[]> Int) -> [Int] {{\n    return items.map((x) -> f(x)).to_list()\n}}\nfn noisy(n: Int) -> Int {{\n    print(\"{{n}}\")\n    return n\n}}\nfn run() {{ print(\"{{transform([1, 2], noisy)}}\") }}\n", false)
+    errors := [String]{}
+    loop diagnostic in checked.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic.code)
+    }
+    assert(errors == [String]{"E0747"})
+}
+
+#Test("checked_original_trait_contracts_sort_dedup_owners_and_join_selected_blocks") {
+    // Reverse source order, an effect-named IO owner, repeated Alpha owner,
+    // and a missing Embedded.Worker method that unrelated methods cannot fill.
+    source :: "trait Worker {{ fn work(self) }}\ntrait Other {{ fn work(self) }}\nstruct Zulu {{}}\nstruct IO {{}}\nstruct Alpha {{}}\nimpl Zulu.Worker {{ fn work(self) {{}} }}\nimpl IO.Worker {{ fn work(self) {{}} }}\nimpl Alpha.Worker {{ fn work(self) {{}} }}\nimpl Alpha.Worker {{ fn work(self) {{}} }}\nstruct Embedded {{ fn work(self) {{}} impl Other {{ fn work(self) {{}} }} impl Worker {{}} }}\n"
+    registration :: effect_producer_registration(source)
+    checked_owner_law := false
+    loop module_row in registration.modules {
+        if module_row.module_identity != "main" -> next
+        alpha := String?{None}
+        zulu := String?{None}
+        io := String?{None}
+        loop implementation in module_row.impls {
+            if implementation.trait_name != Val("Worker") -> next
+            loop method in implementation.methods {
+                if method.symbol.name != "work" -> next
+                if implementation.target_type_name == "Alpha" -> alpha = Val(method.symbol.id.key)
+                if implementation.target_type_name == "Zulu" -> zulu = Val(method.symbol.id.key)
+                if implementation.target_type_name == "IO" -> io = Val(method.symbol.id.key)
+            }
+        }
+        loop contract in sema_effect_trait_contracts(module_row) {
+            if contract.name != "Worker::work" -> next
+            assert(contract.implementation_keys == [String]{alpha ?? panic("Alpha registration missing"), io ?? panic("IO registration missing"), zulu ?? panic("Zulu registration missing")})
+            assert(contract.unresolved_implementations)
+            checked_owner_law = true
+        }
+    }
+    assert(checked_owner_law)
+}

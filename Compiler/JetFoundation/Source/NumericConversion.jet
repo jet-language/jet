@@ -1,0 +1,104 @@
+// D-NUMWIDEN-CROSS1=E: checked integer-to-float widening shared by execution tiers.
+// Rust: crates/jet-foundation/src/NumericConversion.rs:7
+pub fn jet_numeric_checked_widen_parts(significant: Int, trailing: Int, value: F64, target_f32: Bool) -> F64? Never! {
+    precision :: if target_f32 -> 24 else -> 53
+    if significant > precision && trailing < significant - precision -> return None
+    if !value.is_finite() -> return None
+    if target_f32 {
+        narrowed :: F32{value}
+        if !narrowed.is_finite() -> return None
+        return Val(F64{narrowed})
+    }
+    Val(value)
+}
+// Rust: crates/jet-foundation/src/NumericConversion.rs:28
+pub const JET_NUMERIC_WIDEN_TRAP: String = "whole number cannot cross into the decimal without losing precision"
+// Rust: crates/jet-foundation/src/NumericConversion.rs:31
+pub fn jet_numeric_checked_widen(raw: U64, signed: Bool, target_f32: Bool) -> F64? Never! {
+    signed_value :: I64.from_bits(raw)
+    magnitude :: if signed -> signed_value.unsigned_abs() else -> raw
+    significant :: if magnitude == U64{0} -> 0 else -> 64 - Int{magnitude.leading_zeros()}
+    trailing :: if magnitude == U64{0} -> 0 else -> Int{magnitude.trailing_zeros()}
+    value :: if signed -> F64{signed_value} else -> F64{raw}
+    jet_numeric_checked_widen_parts(significant, trailing, value, target_f32)
+}
+// Rust: crates/jet-foundation/src/NumericConversion.rs:60
+pub fn jet_numeric_bit_count(value: I64, operation: I64, width: I64) -> I64 Never! {
+    assert(width >= I64{1} && width <= I64{64}, "checked integer width")
+    bits :: value.to_bits() & (U64.max >> (I64{64} - width))
+    ones :: I64{bits.count_ones()}
+    return if operation == {
+        I64{0} -> ones
+        I64{1} -> width - ones
+        I64{2} -> I64{bits.leading_zeros()} - (I64{64} - width)
+        I64{3} -> I64{bits.trailing_zeros()}.min(width)
+        I64{4} -> I64{value.unsigned_abs().count_ones()}
+        I64{5} -> {
+            magnitude :: value.unsigned_abs()
+            if magnitude == U64{0} -> I64{0} else -> I64{64} - I64{magnitude.leading_zeros()}
+        }
+        else -> panic("checked integer population operation")
+    }
+}
+// Rust: crates/jet-foundation/src/NumericConversion.rs:86
+fn jet_numeric_integer_bounds(kind: I64) -> (lower: Int, upper: Int)? Never! {
+    return if kind == {
+        I64{0} -> Val((Int{I8.min}, Int{I8.max}))
+        I64{1} -> Val((Int{I16.min}, Int{I16.max}))
+        I64{2} -> Val((Int{I32.min}, Int{I32.max}))
+        I64{3} -> Val((Int{I64.min}, Int{I64.max}))
+        I64{4} -> Val((Int{U8.min}, Int{U8.max}))
+        I64{5} -> Val((Int{U16.min}, Int{U16.max}))
+        I64{6} -> Val((Int{U32.min}, Int{U32.max}))
+        I64{7} -> Val((Int{U64.min}, Int{U64.max}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/NumericConversion.rs:103
+pub fn jet_numeric_fixed_from_i128(value: Int, kind: I64) -> Int? Never! {
+    if jet_numeric_integer_bounds(kind) == {
+        .Val(bounds) -> {
+            if value >= bounds.lower && value <= bounds.upper -> return Val(value)
+        }
+        .None -> return None
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/NumericConversion.rs:110
+fn jet_numeric_float_bounds(kind: I64) -> (lower: F64, upper: F64)? Never! {
+    if jet_numeric_integer_bounds(kind) == {
+        .Val(bounds) -> return Val((F64{bounds.lower}, F64{bounds.upper + 1}))
+        .None -> return None
+    }
+}
+// Rust: crates/jet-foundation/src/NumericConversion.rs:115
+pub const JET_NUMERIC_CONVERSION_ERROR: String = "value doesn't fit in destination type"
+// Rust: crates/jet-foundation/src/NumericConversion.rs:116
+pub const JET_NUMERIC_CONVERSION_TRAP: String = "Value doesn't fit in destination type"
+// Rust: crates/jet-foundation/src/NumericConversion.rs:117
+pub const JET_NUMERIC_F32_CONVERSION_ERROR: String = "value doesn't fit in F32"
+// Rust: crates/jet-foundation/src/NumericConversion.rs:121
+pub fn jet_numeric_float_to_int(value: F64, kind: I64) -> Int Err! {
+    bounds :: if jet_numeric_float_bounds(kind) == {
+        .Val(bounds) -> bounds
+        .None -> return err(JET_NUMERIC_CONVERSION_ERROR)
+    }
+    if !value.is_finite() || value < bounds.lower || value >= bounds.upper -> return err(JET_NUMERIC_CONVERSION_ERROR)
+    Int{value.trunc()}
+}
+// Rust: crates/jet-foundation/src/NumericConversion.rs:133
+pub fn jet_numeric_float_narrow(value: F64) -> F32 Err! {
+    if !value.is_finite() || value < -F64{F32.max} || value > F64{F32.max} -> return err(JET_NUMERIC_F32_CONVERSION_ERROR)
+    narrowed :: F32{value}
+    if !narrowed.is_finite() -> return err(JET_NUMERIC_F32_CONVERSION_ERROR)
+    narrowed
+}
+// Rust: crates/jet-foundation/src/NumericConversion.rs:147
+pub fn jet_numeric_try_from_fixed(raw: U64, signed: Bool, kind: I64) -> Int Err! {
+    value :: if signed -> Int{I64.from_bits(raw)} else -> Int{raw}
+    if jet_numeric_fixed_from_i128(value, kind) == {
+        .Val(value) -> return value
+        .None -> return err(JET_NUMERIC_CONVERSION_ERROR)
+    }
+}
+

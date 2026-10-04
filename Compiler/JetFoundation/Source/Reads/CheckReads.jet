@@ -1,0 +1,190 @@
+// Rust Foundation/CheckReads.rs: the sole audited check-input reader.
+// Native-gated: core.compiler.host.check_reads is the Main-owned tandem seam.
+// It owns the process mutex, sorted shared recorder and idempotent SessionId
+// drop guard, never TLS. end_session atomically snapshots ACTUAL reads and
+// decrements depth. No caller map can stand in for that snapshot.
+// Raw path tokens are Unix bytes / Windows WTF-8; valid UTF-8 String bytes are
+// the common subset. Native OS conversion is not a pathname reopen in Jet.
+use core.compiler.host.check_reads as check_reads_native
+use core.files as check_reads_files
+use core.files.runtime.kernel_path_components as check_reads_os_path
+
+pub CHECK_READS_MISSING :: prep { "missing" }
+pub CHECK_READS_INJECT_ENV :: prep { "JET_CHECK_READS_INJECT" }
+
+pub struct CheckRead {
+    pub label: String
+    pub digest: String
+}
+pub struct ReadSession {
+    native: check_reads_native.SessionId
+}
+
+// Rust ReadSession::begin/finish/Drop. The native resource drops even if the
+// caller exits before finish; begin clears only at depth zero. Overlaps share
+// one recording, including reads made on checking worker threads.
+pub fn check_reads_begin_session() -[Env, FS.Read]> ReadSession Never! {
+    session :: ReadSession{native: check_reads_native.begin_session()}
+    if check_reads_native.raw_env_read(CHECK_READS_INJECT_ENV) == .Val(value) {
+        // Injection's env lookup itself is deliberately NOT recorded.
+        // Do not turn the raw pathname into a lossy String before opening it.
+        _ := check_reads_read_os(value.0)
+    }
+    session
+}
+pub fn check_reads_finish_session(session: ^ReadSession) -> [CheckRead] Never! {
+    rows :: check_reads_native.end_session(^session.native)
+    loop row in rows -> CheckRead{label: row.0, digest: row.1}
+}
+
+pub fn check_reads_file_label(path: String) -> String Never! { "file:{path}" }
+pub fn check_reads_dir_label(path: String) -> String Never! { "dir:{path}" }
+pub fn check_reads_env_label(name: String) -> String Never! { "env:{name}" }
+
+// EXACT UNMET NATIVE HOOK (Main disposition pending): Rust PathBuf::join's
+// platform display semantics, not Core's portable separator approximation.
+// This is a private check-reader seam requirement, not an OS-path carrier.
+pub fn check_reads_joined_display(root: String, relative: String) -> String Never! {
+    check_reads_native.joined_display(root, relative)
+}
+
+// Rust digest_io: ErrorKind is the OS error classification, not the display
+// text, errno, or a reduced IOError variant inferred by the caller.
+pub fn check_reads_error_digest(kind: String) -> String Never! {
+    if kind == "NotFound" -> CHECK_READS_MISSING else -> "unreadable:{kind}"
+}
+pub fn check_reads_bytes_digest(bytes: View<U8>) -> String Never! {
+    digest :: mir_sha256_bytes(bytes)
+    mir_sha256_hex_bytes(digest[0..<digest.len()])
+}
+// #4409: io_error_kind preserves the ORIGINAL OS classification; its native
+// export cannot be implemented by inspecting today's reduced Core IOError.
+fn check_reads_result_digest(result: [U8] IOError!) -> String Never! {
+    if result == {
+        .Ok(bytes) -> check_reads_bytes_digest(bytes)
+        .Err(error) -> check_reads_error_digest(check_reads_native.io_error_kind(error))
+    }
+}
+// Rust listing_digest: incoming entries are sorted by native PathBuf order,
+// BEFORE lossy basename conversion. A trailing newline is not added.
+pub fn check_reads_listing_digest(names: [String]) -> String Never! {
+    mir_sha256_hex(names.join("\n"))
+}
+
+// Rust read/read_nofollow_at_root/read_to_string. Failed UTF-8 conversion
+// records the original successful byte read, not an InvalidData reread.
+pub fn check_reads_read(path: String) -[FS.Read]> [U8] IOError! {
+    result :: check_reads_files.read_bytes(path)
+    check_reads_native.record(check_reads_file_label(path), check_reads_result_digest(result))
+    result
+}
+pub fn check_reads_read_os(raw: [U8]) -[FS.Read]> (String, [U8] IOError!) Never! {
+    opened :: check_reads_native.raw_env_path_read(raw)
+    check_reads_native.record(check_reads_file_label(opened.0), check_reads_result_digest(opened.1))
+    opened
+}
+// Canonical platform-carrying physical reads. The sole retained native provider
+// opens the original encoded path; display is returned only for the read label.
+pub fn check_reads_read_path(path: check_reads_os_path.OsPath) -[FS.Read]> (String, [U8] IOError!) Never! {
+    opened :: check_reads_native.path_read(path)
+    check_reads_native.record(check_reads_file_label(opened.0), check_reads_result_digest(opened.1))
+    opened
+}
+pub fn check_reads_read_nofollow_at_root(root: String, relative: String, max_bytes: U64) -[FS.Read]> [U8] IOError! {
+    result :: check_reads_native.read_file_nofollow_at_root(root, relative, max_bytes)
+    check_reads_native.record(check_reads_file_label(check_reads_joined_display(root, relative)), check_reads_result_digest(result))
+    result
+}
+// #4409: invalid_data_error is gated on the actual InvalidData owner ruling.
+pub fn check_reads_read_to_string(path: String) -[FS.Read]> String IOError! {
+    bytes :: check_reads_read(path)
+    if String.from_bytes(bytes) == {
+        .Ok(text) -> Ok(text)
+        .Err(error) -> Err(check_reads_native.invalid_data_error("{error}"))
+    }
+}
+
+// Native read_dir enumerates all entries (including per-entry errors) and
+// sorts the raw paths. Keep the raw token for reopening non-Unicode entries.
+// EXACT UNMET NATIVE FIELD (Main disposition pending): fourth tuple field
+// name_is_unicode is Rust file_name().to_str().is_some(), before loss conversion.
+pub fn check_reads_read_dir_sorted(path: String) -[FS.Read]> [(String, [U8], Bool, Bool)] IOError! {
+    check_reads_read_dir_sorted_os(path.bytes(), path)
+}
+pub fn check_reads_read_dir_sorted_os(raw: [U8], display_path: String) -[FS.Read]> [(String, [U8], Bool, Bool)] IOError! {
+    result :: check_reads_native.raw_env_dir_list(raw)
+    digest :: if result == {
+        .Ok(entries) -> check_reads_listing_digest(loop entry in entries -> entry.0)
+        .Err(error) -> check_reads_error_digest(check_reads_native.io_error_kind(error))
+    }
+    check_reads_native.record(check_reads_dir_label(display_path), digest)
+    result
+}
+pub fn check_reads_read_dir_sorted_path(path: check_reads_os_path.OsPath) -[FS.Read]> [(String, check_reads_os_path.OsPath, Bool, Bool)] IOError! {
+    result :: check_reads_native.path_dir_list(path)
+    digest :: if result == {
+        .Ok(entries) -> check_reads_listing_digest(loop entry in entries -> entry.0)
+        .Err(error) -> check_reads_error_digest(check_reads_native.io_error_kind(error))
+    }
+    check_reads_native.record(check_reads_dir_label(check_reads_os_path.display(path)), digest)
+    result
+}
+
+// Rust env_var_os/env_var/env_digest. raw_env_read has an OUTER Option:
+// unset differs from set-empty and set-non-Unicode. OS loss conversion is a
+// native leaf; Jet decides to hash that display while text reads stay unset.
+pub fn check_reads_env_digest(value: String?) -> String Never! {
+    if value == {
+        .Val(text) -> mir_sha256_hex(text)
+        .None -> CHECK_READS_MISSING
+    }
+}
+pub fn check_reads_env_var_os(name: String) -[Env]> ([U8], String, String?)? Never! {
+    value :: check_reads_native.raw_env_read(name)
+    display :: if value == {
+        .Val(entry) -> Val(entry.1)
+        .None -> None
+    }
+    check_reads_native.record(check_reads_env_label(name), check_reads_env_digest(display))
+    value
+}
+pub fn check_reads_env_var(name: String) -[Env]> String? Never! {
+    if check_reads_env_var_os(name) == {
+        .Val(value) -> value.2
+        .None -> None
+    }
+}
+
+// Rust current_digest: deliberately bypass every recording wrapper.
+pub fn check_reads_current_digest(label: String) -[Env, FS.Read]> String? Never! {
+    if label.starts_with("file:") {
+        path := label.after("file:") // #4303
+        return Val(check_reads_result_digest(check_reads_files.read_bytes(path)))
+    }
+    if label.starts_with("dir:") {
+        path := label.after("dir:") // #4303
+        result :: check_reads_native.raw_env_dir_list(path.bytes())
+        return Val(if result == {
+            .Ok(entries) -> check_reads_listing_digest(loop entry in entries -> entry.0)
+            .Err(error) -> check_reads_error_digest(check_reads_native.io_error_kind(error))
+        })
+    }
+    if label.starts_with("env:") {
+        name := label.after("env:") // #4303
+        value :: check_reads_native.raw_env_read(name)
+        return Val(check_reads_env_digest(if value == {
+            .Val(entry) -> Val(entry.1)
+            .None -> None
+        }))
+    }
+    None
+}
+
+// Rust undeclared preserves the snapshot order and includes digest changes.
+pub fn check_reads_undeclared(reads: [CheckRead], declared: [String:String]) -> [CheckRead] Never! {
+    missing := [CheckRead]{}
+    loop read in reads {
+        if declared.get(read.label) != Val(read.digest) -> &missing.push(read)
+    }
+    missing
+}

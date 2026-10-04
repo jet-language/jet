@@ -1,0 +1,96 @@
+// PORT-PENDING 0319 crates-jet-lexer-src-lib: crates/jet-lexer/src/lib.rs:1-92
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(non_snake_case)]
+//RS #![deny(warnings)]
+//RS // Re-export foundation so `crate::AST`, `crate::Syntax` etc. work in all Lexer source files.
+//RS pub use jet_foundation::{
+//RS     CanonicalAST, Collections, Diagnostics, Generics, Numeric, Policy, Registry, Syntax,
+//RS     TargetMachine, Traits, AST, SHA256,
+//RS };
+//RS pub mod Lexer;
+//RS 
+//RS #[cfg(test)]
+//RS mod compare_tests {
+//RS     use super::Lexer::{self, TokKind};
+//RS 
+//RS     #[test]
+//RS     fn spaceship_is_one_longest_match_before_le() {
+//RS         let (tokens, diagnostics) = Lexer::lex("a <=> b <= c");
+//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS         let code = Lexer::without_comments(&tokens);
+//RS         assert!(matches!(&code[1].kind, TokKind::Compare));
+//RS         assert_eq!(code[1].span.end - code[1].span.start, 3);
+//RS         assert!(matches!(&code[3].kind, TokKind::Le));
+//RS         assert_eq!(code[3].span.end - code[3].span.start, 2);
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod raw_head_tests {
+//RS     use super::Lexer::{self, StrTokPart, TokKind};
+//RS 
+//RS     fn first_string_lit(src: &str) -> String {
+//RS         let (tokens, diagnostics) = Lexer::lex(src);
+//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS         for token in Lexer::without_comments(&tokens) {
+//RS             if let TokKind::Str(parts) = token.kind {
+//RS                 match parts.as_slice() {
+//RS                     [StrTokPart::Lit(text)] => return text.clone(),
+//RS                     _ => panic!("expected one literal string part, got {parts:?}"),
+//RS                 }
+//RS             }
+//RS         }
+//RS         panic!("no string token in {src:?}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_head_keeps_backslash_literal() {
+//RS         assert_eq!(first_string_lit(r#"Regex.{"\d+"}"#), r"\d+");
+//RS         assert_eq!(first_string_lit(r#"Regex.{"a\nb"}"#), r"a\nb");
+//RS         assert_eq!(first_string_lit("\"a\\nb\""), "a\nb");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_head_quote_stays_in_body_when_slashed() {
+//RS         assert_eq!(first_string_lit(r#"Regex.{"a\"b"}"#), r#"a\"b"#);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_head_doubled_braces_stay_literal() {
+//RS         assert_eq!(first_string_lit(r#"Regex.{"\d{{2}}"}"#), r"\d{2}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_head_holes_still_split_interpolation() {
+//RS         let (tokens, diagnostics) = Lexer::lex(r#"URL.{"https://x/{name}"}"#);
+//RS         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS         let parts = Lexer::without_comments(&tokens)
+//RS             .into_iter()
+//RS             .find_map(|token| match token.kind {
+//RS                 TokKind::Str(parts) => Some(parts),
+//RS                 _ => None,
+//RS             })
+//RS             .expect("typed head string");
+//RS         assert!(
+//RS             matches!(
+//RS                 parts.as_slice(),
+//RS                 [StrTokPart::Lit(prefix), StrTokPart::Interp(_)]
+//RS                     if prefix == "https://x/"
+//RS             ),
+//RS             "{parts:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn plain_string_still_rejects_unknown_escapes() {
+//RS         let (_tokens, diagnostics) = Lexer::lex(r#""C:\path""#);
+//RS         assert!(
+//RS             diagnostics
+//RS                 .iter()
+//RS                 .any(|d| d.what.contains("isn't an escape")),
+//RS             "{diagnostics:?}"
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 0319 crates/jet-lexer/src/lib.rs:1-92
+

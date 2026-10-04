@@ -1,0 +1,1735 @@
+// PORT-PENDING 1160 tests-support-corpus-policy-slice-1961: tests/support/corpus_policy.rs:1961-3691
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn program_expressions<'a>(program: &'a Program) -> Vec<&'a Expr> {
+//RS     let mut expressions = Vec::new();
+//RS     for_each_statement_expr(&program.script_body, |expr| expressions.push(expr));
+//RS     for item in &program.items {
+//RS         match item {
+//RS             Item::Func(function) => {
+//RS                 for_each_statement_expr(&function.body, |expr| expressions.push(expr))
+//RS             }
+//RS             Item::Struct(structure) => {
+//RS                 for method in &structure.methods {
+//RS                     for_each_statement_expr(&method.body, |expr| expressions.push(expr));
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     expressions
+//RS }
+//RS 
+//RS #[derive(Debug, Default)]
+//RS struct StatementFacts {
+//RS     task_groups: Vec<(Span, bool)>,
+//RS     counted_loops: Vec<(Span, bool)>,
+//RS     manual_counter_loops: Vec<Span>,
+//RS     file_walks: Vec<Span>,
+//RS }
+//RS 
+//RS fn collect_program_statement_facts(
+//RS     program: &Program,
+//RS     aliases: &BTreeMap<String, String>,
+//RS     facts: &mut StatementFacts,
+//RS ) {
+//RS     collect_statement_facts(&program.script_body, aliases, facts);
+//RS     for item in &program.items {
+//RS         match item {
+//RS             Item::Func(function) => collect_statement_facts(&function.body, aliases, facts),
+//RS             Item::Struct(structure) => {
+//RS                 for method in &structure.methods {
+//RS                     collect_statement_facts(&method.body, aliases, facts);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Collect statement-level facts once with an explicit body stack. Expression
+//RS /// facts use the corpus walk above; neither traversal consumes call-stack depth
+//RS /// proportional to the maintained source shape.
+//RS fn collect_statement_facts<'a>(
+//RS     body: &'a [Stmt],
+//RS     aliases: &BTreeMap<String, String>,
+//RS     facts: &mut StatementFacts,
+//RS ) {
+//RS     let mut bodies = vec![body];
+//RS     while let Some(body) = bodies.pop() {
+//RS         for pair in body.windows(2) {
+//RS             let Some(binding) = (match &pair[0] {
+//RS                 Stmt::Val(binding) => Some(binding),
+//RS                 _ => None,
+//RS             }) else {
+//RS                 continue;
+//RS             };
+//RS             let Stmt::For {
+//RS                 kind: ForKind::In { .. },
+//RS                 body: loop_body,
+//RS                 span,
+//RS                 ..
+//RS             } = &pair[1]
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             if binding.mutable
+//RS                 && matches!(binding.init.without_parens(), Expr::Int(value, ..) if *value == 0)
+//RS                 && manual_counter_body(&binding.name, loop_body)
+//RS             {
+//RS                 facts.manual_counter_loops.push(*span);
+//RS             }
+//RS         }
+//RS 
+//RS         if let Some(span) = body_file_walk_filter(body, aliases) {
+//RS             facts.file_walks.push(span);
+//RS         }
+//RS 
+//RS         for statement in body.iter().rev() {
+//RS             match statement {
+//RS                 Stmt::TaskGroup {
+//RS                     span,
+//RS                     body: task_body,
+//RS                     ..
+//RS                 } => {
+//RS                     let task_combinator_count = task_body
+//RS                         .iter()
+//RS                         .filter(|statement| is_task_combinator_statement(statement))
+//RS                         .count();
+//RS                     let has_task_all = task_body.iter().any(is_task_all_statement);
+//RS                     let is_single_combinator = task_combinator_count == 1 && !has_task_all;
+//RS                     facts.task_groups.push((*span, is_single_combinator));
+//RS                     bodies.push(task_body);
+//RS                 }
+//RS                 Stmt::CountedLoop {
+//RS                     span,
+//RS                     init,
+//RS                     step,
+//RS                     body,
+//RS                     ..
+//RS                 } => {
+//RS                     facts
+//RS                         .counted_loops
+//RS                         .push((*span, counted_loop_indexes_sequence(init, body)));
+//RS                     bodies.push(body);
+//RS                     if let Some(step) = step {
+//RS                         bodies.push(std::slice::from_ref(step.as_ref()));
+//RS                     }
+//RS                 }
+//RS                 Stmt::While { body, .. }
+//RS                 | Stmt::For { body, .. }
+//RS                 | Stmt::Loop { body, .. }
+//RS                 | Stmt::Unsafe { body, .. }
+//RS                 | Stmt::Impure { body, .. }
+//RS                 | Stmt::Reactive { body, .. }
+//RS                 | Stmt::Shield { body, .. }
+//RS                 | Stmt::Switched { body, .. }
+//RS                 | Stmt::Region { body, .. }
+//RS                 | Stmt::Policy { body, .. }
+//RS                 | Stmt::Layout { body, .. }
+//RS                 | Stmt::AuthorityScope { body, .. }
+//RS                 | Stmt::ComptimeBlock { body, .. }
+//RS                 | Stmt::ContextBlock { body, .. }
+//RS                 | Stmt::Live { body, .. }
+//RS                 | Stmt::AssumeDet { body, .. }
+//RS                 | Stmt::Transact { body, .. }
+//RS                 | Stmt::ScopeMember { body, .. } => bodies.push(body),
+//RS                 Stmt::Switch {
+//RS                     arms, else_body, ..
+//RS                 }
+//RS                 | Stmt::ComptimeSwitch {
+//RS                     arms, else_body, ..
+//RS                 } => {
+//RS                     if let Some(body) = else_body {
+//RS                         bodies.push(body);
+//RS                     }
+//RS                     for arm in arms.iter().rev() {
+//RS                         bodies.push(&arm.body);
+//RS                     }
+//RS                 }
+//RS                 Stmt::ComptimeIf {
+//RS                     then_body,
+//RS                     else_body,
+//RS                     ..
+//RS                 } => {
+//RS                     if let Some(body) = else_body {
+//RS                         bodies.push(body);
+//RS                     }
+//RS                     bodies.push(then_body);
+//RS                 }
+//RS                 Stmt::Expr(_)
+//RS                 | Stmt::Val(_)
+//RS                 | Stmt::Assign { .. }
+//RS                 | Stmt::Return(..)
+//RS                 | Stmt::Break(..)
+//RS                 | Stmt::BreakValue(..)
+//RS                 | Stmt::Continue(..)
+//RS                 | Stmt::BreakLabel(..)
+//RS                 | Stmt::BreakLabelValue(..)
+//RS                 | Stmt::ContinueLabel(..)
+//RS                 | Stmt::Yield(..)
+//RS                 | Stmt::DeferClose { .. } => {}
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn proof_matches(proof: &str, gate: &str) -> bool {
+//RS     gate == "all"
+//RS         || proof == gate
+//RS         || (gate == "golden" && proof == "golden-and-dev-corpus")
+//RS         || (gate == "dev-corpus" && proof == "golden-and-dev-corpus")
+//RS         || (gate == "suite" && proof == "suite-goldens")
+//RS         || (gate == "package" && proof == "package-template-gate")
+//RS         || (gate == "dogfood" && proof == "dogfood-gates")
+//RS         || (gate == "dogfood" && proof == "dogfood/jetpack and workload gates")
+//RS         || (gate == "fixture" && proof == "ui-snapshot-gate")
+//RS         || (gate == "fixture" && proof == "fuzz-gate")
+//RS         || (gate == "docs" && proof == "doc-gate")
+//RS         || (gate == "site" && proof == "site-gate")
+//RS         || (gate == "bindgen" && proof == "generator-IR-renderer-registry")
+//RS         || (gate == "bindgen" && proof == "bindgen-registry")
+//RS         || (gate == "conformance" && proof == "conformance-gate")
+//RS         || (gate == "workload" && proof == "compiled-workload-gate")
+//RS         || (gate == "workload" && proof == "workload-gate")
+//RS }
+//RS 
+//RS fn skip_directory(name: &str) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         ".git"
+//RS             | ".claude"
+//RS             | ".opencode"
+//RS             | ".tmp"
+//RS             | ".jet"
+//RS             | ".tower"
+//RS             | ".cache"
+//RS             | ".agent-worktrees"
+//RS             | "plugins"
+//RS             | "node_modules"
+//RS             | "target"
+//RS             | "build"
+//RS             | "cache"
+//RS             | "dist"
+//RS             | "result"
+//RS     ) || name.starts_with("target-")
+//RS         || name.starts_with("build-")
+//RS         || name.starts_with("result-")
+//RS }
+//RS 
+//RS /// Package `ConfigFacts` files use the package model's record parser, not the
+//RS /// ordinary Jet AST parser. Exclude only a `config/` directory explicitly
+//RS /// named by its sibling `package.jet`; an ordinary directory with that name
+//RS /// remains in the corpus.
+//RS fn is_declared_package_config_dir(path: &Path) -> bool {
+//RS     if path.file_name().and_then(|name| name.to_str()) != Some("config") {
+//RS         return false;
+//RS     }
+//RS     let Some(package_root) = path.parent() else {
+//RS         return false;
+//RS     };
+//RS     let manifest_path = package_root.join("package.jet");
+//RS     let Ok(source) = fs::read_to_string(&manifest_path) else {
+//RS         return false;
+//RS     };
+//RS     let Ok(facts) =
+//RS         jet::Package::PackageFacts::parse_uncomposed(&source, manifest_path.display().to_string())
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     facts
+//RS         .configs
+//RS         .iter()
+//RS         .any(|config| config == "config" || config.starts_with("config/"))
+//RS }
+//RS 
+//RS fn discover_manifest_files(
+//RS     root: &Path,
+//RS     manifest: &CorpusManifest,
+//RS     out: &mut Vec<String>,
+//RS ) -> Result<(), String> {
+//RS     for source in &manifest.sources {
+//RS         if let Some(path) = source.selector.strip_prefix("root:") {
+//RS             discover_files(root, &root.join(path), out)?;
+//RS         } else if let Some(path) = source.selector.strip_prefix("file:") {
+//RS             if root.join(path).is_file() {
+//RS                 out.push(path.to_string());
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn discover_files(root: &Path, current: &Path, out: &mut Vec<String>) -> Result<(), String> {
+//RS     // Keep directory traversal off the call stack. Symlinked directories are
+//RS     // excluded before they can re-enter a manifest root.
+//RS     let mut pending = vec![current.to_path_buf()];
+//RS     while let Some(directory) = pending.pop() {
+//RS         let metadata = fs::symlink_metadata(&directory)
+//RS             .map_err(|error| format!("stat {}: {error}", directory.display()))?;
+//RS         if metadata.file_type().is_symlink() {
+//RS             continue;
+//RS         }
+//RS         let entries = fs::read_dir(&directory)
+//RS             .map_err(|error| format!("read {}: {error}", directory.display()))?;
+//RS         for entry in entries {
+//RS             let entry = entry.map_err(|error| format!("read directory entry: {error}"))?;
+//RS             let path = entry.path();
+//RS             let file_type = entry
+//RS                 .file_type()
+//RS                 .map_err(|error| format!("stat {}: {error}", path.display()))?;
+//RS             if file_type.is_symlink() {
+//RS                 continue;
+//RS             }
+//RS             if file_type.is_dir() {
+//RS                 if is_declared_package_config_dir(&path)
+//RS                     || path
+//RS                         .file_name()
+//RS                         .and_then(|name| name.to_str())
+//RS                         .is_some_and(skip_directory)
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 pending.push(path);
+//RS             } else if file_type.is_file()
+//RS                 && path.extension().and_then(|ext| ext.to_str()) == Some("jet")
+//RS             {
+//RS                 let relative = path
+//RS                     .strip_prefix(root)
+//RS                     .map_err(|error| format!("relative path {}: {error}", path.display()))?
+//RS                     .to_str()
+//RS                     .ok_or_else(|| format!("non-UTF8 corpus path: {}", path.display()))?
+//RS                     .to_string();
+//RS                 out.push(relative);
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn is_jet_program(path: &Path) -> bool {
+//RS     path.file_name().and_then(|name| name.to_str()) != Some("package.jet")
+//RS }
+//RS 
+//RS fn jet_fences(source: &str) -> Vec<String> {
+//RS     markdown_fences(source, "jet")
+//RS }
+//RS 
+//RS fn shell_fences(source: &str) -> Vec<String> {
+//RS     let mut fences = markdown_fences(source, "bash");
+//RS     fences.extend(markdown_fences(source, "sh"));
+//RS     fences.extend(markdown_fences(source, "shell"));
+//RS     fences
+//RS }
+//RS 
+//RS fn markdown_fences(source: &str, language: &str) -> Vec<String> {
+//RS     let mut fences = Vec::new();
+//RS     let mut current = None;
+//RS     let opener = format!("```{language}");
+//RS     for line in source.lines() {
+//RS         let trimmed = line.trim();
+//RS         if current.is_none() {
+//RS             if trimmed == opener.as_str() {
+//RS                 current = Some(String::new());
+//RS             }
+//RS         } else if trimmed == "```" {
+//RS             fences.push(current.take().unwrap_or_default());
+//RS         } else if let Some(code) = &mut current {
+//RS             code.push_str(line);
+//RS             code.push('\n');
+//RS         }
+//RS     }
+//RS     fences
+//RS }
+//RS 
+//RS fn has_jet_run_command(source: &str) -> bool {
+//RS     shell_fences(source).iter().any(|fence| {
+//RS         fence.lines().any(|line| {
+//RS             let line = line.trim();
+//RS             if line.is_empty() || line.starts_with('#') {
+//RS                 return false;
+//RS             }
+//RS             let mut words = line.split_whitespace().take_while(|word| *word != "#");
+//RS             while let Some(word) = words.next() {
+//RS                 if word == "jet" && words.next() == Some("run") {
+//RS                     return true;
+//RS                 }
+//RS             }
+//RS             false
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn parse_program(source_label: &str, source: &str) -> Result<Program, String> {
+//RS     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+//RS         let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
+//RS         if !lexer_diagnostics.is_empty() {
+//RS             return Err(format!(
+//RS                 "Jet lexer rejected corpus source `{source_label}`: {lexer_diagnostics:?}"
+//RS             ));
+//RS         }
+//RS         let parse_source = strip_inline_package(source, &tokens);
+//RS         let (parse_tokens, parse_diagnostics) = jet::Lexer::lex(parse_source);
+//RS         if !parse_diagnostics.is_empty() {
+//RS             return Err(format!(
+//RS                 "Jet lexer rejected corpus source `{source_label}`: {parse_diagnostics:?}"
+//RS             ));
+//RS         }
+//RS         jet::Parser::parse(&parse_tokens).map_err(|diagnostics| {
+//RS             format!("Jet parser rejected corpus source `{source_label}`: {diagnostics:?}")
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn strip_inline_package<'a>(source: &'a str, tokens: &[Token]) -> &'a str {
+//RS     let Some((package_index, package_token)) = tokens.iter().enumerate().find(|(_, token)| {
+//RS         !matches!(
+//RS             &token.kind,
+//RS             TokKind::LineComment(_) | TokKind::BlockComment(_)
+//RS         )
+//RS     }) else {
+//RS         return source;
+//RS     };
+//RS     if !matches!(&package_token.kind, TokKind::Ident(name) if name == "package") {
+//RS         return source;
+//RS     }
+//RS     let Some(open_index) = tokens
+//RS         .iter()
+//RS         .enumerate()
+//RS         .skip(package_index + 1)
+//RS         .find_map(|(index, token)| matches!(&token.kind, TokKind::LBrace).then_some(index))
+//RS     else {
+//RS         return source;
+//RS     };
+//RS     let mut depth = 0usize;
+//RS     for token in tokens.iter().skip(open_index) {
+//RS         match &token.kind {
+//RS             TokKind::LBrace => depth += 1,
+//RS             TokKind::RBrace => {
+//RS                 depth = depth.saturating_sub(1);
+//RS                 if depth == 0 {
+//RS                     return &source[token.span.end..];
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     source
+//RS }
+//RS 
+//RS fn evaluate_program(
+//RS     manifest: &CorpusManifest,
+//RS     path: &str,
+//RS     row: &SourceRow,
+//RS     program: &Program,
+//RS ) -> Vec<SemanticViolation> {
+//RS     let mut violations = Vec::new();
+//RS     let aliases = module_aliases(program);
+//RS     let expressions = program_expressions(program);
+//RS     let mut statement_facts = StatementFacts::default();
+//RS     collect_program_statement_facts(program, &aliases, &mut statement_facts);
+//RS     let mut argv_sites = Vec::new();
+//RS     let mut functions = Vec::new();
+//RS     let mut structures = Vec::new();
+//RS     for item in &program.items {
+//RS         match item {
+//RS             Item::Func(function) => {
+//RS                 functions.push(function);
+//RS             }
+//RS             Item::Struct(structure) => {
+//RS                 structures.push(structure);
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     if applies(manifest, path, row, "first-hour-doc-recipe")
+//RS         && path == "Examples/features/types/typed_literal_forms.jet"
+//RS     {
+//RS         if let Some(expression) = expressions
+//RS             .iter()
+//RS             .find(|expr| is_build_command_literal(expr))
+//RS         {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "first-hour-doc-recipe",
+//RS                 site("literal:jet-build", expression.span()),
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     for expr in &expressions {
+//RS         if is_process_input(expr, &aliases) {
+//RS             argv_sites.push(expr.span());
+//RS         }
+//RS         if applies(manifest, path, row, "raw-cli-fixed-shape") && is_process_input(expr, &aliases) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "raw-cli-fixed-shape",
+//RS                 site("call:process.argv", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "raw-cli-builder-shape")
+//RS             && is_process_argv_view(expr, &aliases)
+//RS         {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "raw-cli-builder-shape",
+//RS                 site("call:process.argv.skip", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "duration-constant-safe")
+//RS             && is_constant_duration_constructor(expr, &aliases)
+//RS         {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "duration-constant-safe",
+//RS                 site("call:Duration.constructor", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "unit-scalar-rewrap")
+//RS             && is_unit_scalar_rewrap(expr, &aliases)
+//RS         {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "unit-scalar-rewrap",
+//RS                 site("call:unit-rewrap", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "readonly-copy") && is_readonly_copy(expr, &aliases) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "readonly-copy",
+//RS                 site("call:readonly-copy", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "error-identity") && is_identity_fallback(expr, &aliases) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "error-identity",
+//RS                 site("expr:error-propagation", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "http-wrapper-json") && is_http_ceremony(expr, &functions) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "http-wrapper-json",
+//RS                 site("call:http-wrapper", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "http-message-text") && is_http_message_text(expr) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "http-message-text",
+//RS                 site("call:response.text", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "http-typed-json")
+//RS             && is_raw_http_json_body(expr, &functions)
+//RS         {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "http-typed-json",
+//RS                 site("call:request.body", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "delimited-reader-config") && is_raw_delimited_split(expr) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "delimited-reader-config",
+//RS                 site("call:delimited-split", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "plain-format-fact") && is_redundant_fixed_cleanup(expr) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "plain-format-fact",
+//RS                 site("call:Fixed.replace", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "dogfood-path-containment")
+//RS             && is_string_prefix_containment(expr)
+//RS         {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "dogfood-path-containment",
+//RS                 site("call:path.starts_with", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "dogfood-json") && is_hand_json_wire(expr) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "dogfood-json",
+//RS                 site("literal:json-wire", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "dogfood-url-query") && is_url_query_reparse(expr) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "dogfood-url-query",
+//RS                 site("call:url.query.split", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "dogfood-list-equality") && is_named_list_equality(expr) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "dogfood-list-equality",
+//RS                 site("fn:same_strings", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "dogfood-directory-setup")
+//RS             && is_non_idempotent_directory_call(expr, &aliases)
+//RS         {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "dogfood-directory-setup",
+//RS                 site("call:fs.create_dir", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "dogfood-ascii") && is_ascii_replacement_chain(expr) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "dogfood-ascii",
+//RS                 site("call:String.replace", expr.span()),
+//RS             ));
+//RS         }
+//RS         if applies(manifest, path, row, "crypto-naming-fact")
+//RS             && is_legacy_digest_call(expr, &aliases)
+//RS         {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "crypto-naming-fact",
+//RS                 site("call:crypto.sha256_bytes", expr.span()),
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     if applies(manifest, path, row, "raw-cli-process-boundary") && argv_sites.len() > 1 {
+//RS         for span in argv_sites.into_iter().skip(1) {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "raw-cli-process-boundary",
+//RS                 site("call:process.argv", span),
+//RS             ));
+//RS         }
+//RS     }
+//RS     if applies(manifest, path, row, "entry-implicit")
+//RS         && program
+//RS             .items
+//RS             .iter()
+//RS             .any(|item| matches!(item, Item::Func(function) if function.name == "run"))
+//RS     {
+//RS         let span = program
+//RS             .items
+//RS             .iter()
+//RS             .find_map(|item| match item {
+//RS                 Item::Func(function) if function.name == "run" => Some(function.span),
+//RS                 _ => None,
+//RS             })
+//RS             .unwrap_or(Span { start: 0, end: 0 });
+//RS         violations.push(SemanticViolation::new(
+//RS             path,
+//RS             "entry-implicit",
+//RS             site("fn:run", span),
+//RS         ));
+//RS     }
+//RS     if applies(manifest, path, row, "codable-structural") {
+//RS         for structure in structures {
+//RS             if bare_structural_codable(structure) {
+//RS                 violations.push(SemanticViolation::new(
+//RS                     path,
+//RS                     "codable-structural",
+//RS                     site(&format!("type:{}", structure.name), structure.name_span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     if applies(manifest, path, row, "effect-row-inference") {
+//RS         for function in &functions {
+//RS             if function.name == "run" && redundant_effect_row(function, &aliases) {
+//RS                 violations.push(SemanticViolation::new(
+//RS                     path,
+//RS                     "effect-row-inference",
+//RS                     site(&format!("fn:{}", function.name), function.span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     if applies(manifest, path, row, "task-one-child") {
+//RS         for (span, is_single_combinator) in statement_facts.task_groups {
+//RS             if is_single_combinator {
+//RS                 violations.push(SemanticViolation::new(
+//RS                     path,
+//RS                     "task-one-child",
+//RS                     site("stmt:task.group", span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     if applies(manifest, path, row, "indexed-sequence") {
+//RS         for span in statement_facts.manual_counter_loops {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "indexed-sequence",
+//RS                 site("loop:manual-counter", span),
+//RS             ));
+//RS         }
+//RS         for (span, is_sequence_index) in statement_facts.counted_loops {
+//RS             if is_sequence_index {
+//RS                 violations.push(SemanticViolation::new(
+//RS                     path,
+//RS                     "indexed-sequence",
+//RS                     site("loop:counted-sequence", span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     if applies(manifest, path, row, "datatree-domain-policy") {
+//RS         violations.extend(datatree_domain_policy_violations(path, program));
+//RS     }
+//RS     if applies(manifest, path, row, "walk-files-filter") {
+//RS         if let Some(span) = statement_facts.file_walks.first().copied() {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "walk-files-filter",
+//RS                 site("call:fs.walk", span),
+//RS             ));
+//RS         }
+//RS     }
+//RS     if applies(manifest, path, row, "regex-capture-recipe")
+//RS         && !has_anchored_regex_capture(program, &aliases)
+//RS     {
+//RS         let span = functions
+//RS             .first()
+//RS             .map_or(Span { start: 0, end: 0 }, |function| function.span);
+//RS         violations.push(SemanticViolation::new(
+//RS             path,
+//RS             "regex-capture-recipe",
+//RS             site("recipe:regex-capture", span),
+//RS         ));
+//RS     }
+//RS     if applies(manifest, path, row, "http-unused-request") {
+//RS         for function in &functions {
+//RS             if function.params.iter().any(|parameter| {
+//RS                 matches!(&parameter.ty, Type::Named(name) if name == "HTTPRequest")
+//RS                     && has_unused_parameter(function, &parameter.name)
+//RS             }) {
+//RS                 violations.push(SemanticViolation::new(
+//RS                     path,
+//RS                     "http-unused-request",
+//RS                     site("param:req", function.span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     violations
+//RS }
+//RS 
+//RS fn applies(manifest: &CorpusManifest, path: &str, row: &SourceRow, rule: &str) -> bool {
+//RS     if !semantic_role(row.role) {
+//RS         return false;
+//RS     }
+//RS     if matches!(rule, "raw-cli-fixed-shape" | "raw-cli-builder-shape")
+//RS         && !matches!(row.profile.as_str(), "typed-cli" | "typed-cli-doc")
+//RS     {
+//RS         return false;
+//RS     }
+//RS     manifest
+//RS         .scopes
+//RS         .iter()
+//RS         .any(|scope| scope.rule == rule && selector_matches(&scope.selector, path))
+//RS }
+//RS 
+//RS fn maintained_guidance_lint(name: &str) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         "process_args_view"
+//RS             | "message_text"
+//RS             | "redundant_fixed_cleanup"
+//RS             | "unit_scalar_rewrap"
+//RS             | "path_containment_string_prefix"
+//RS             | "complete_ascii_case_ladder"
+//RS             | "walk_files_filter"
+//RS     )
+//RS }
+//RS 
+//RS fn redundant_effect_row(function: &jet::AST::Func, aliases: &BTreeMap<String, String>) -> bool {
+//RS     let Some(declared) = function.declared_effects.as_ref() else {
+//RS         return false;
+//RS     };
+//RS     if declared.is_empty() {
+//RS         return false;
+//RS     }
+//RS     let mut inferred = BTreeSet::new();
+//RS     for_each_statement_expr(&function.body, |expr| {
+//RS         if let Some(effect) = expression_effect(expr, aliases) {
+//RS             inferred.insert(effect);
+//RS         }
+//RS     });
+//RS     !inferred.is_empty()
+//RS         && declared.iter().all(|(name, _)| {
+//RS             inferred
+//RS                 .iter()
+//RS                 .any(|effect| effect.eq_ignore_ascii_case(name))
+//RS         })
+//RS         && inferred.len() == declared.len()
+//RS }
+//RS 
+//RS fn expression_effect(expr: &Expr, aliases: &BTreeMap<String, String>) -> Option<&'static str> {
+//RS     match expr.without_parens() {
+//RS         Expr::Call(call) => {
+//RS             if matches!(
+//RS                 call.name.as_str(),
+//RS                 "print" | "println" | "eprint" | "eprintln"
+//RS             ) {
+//RS                 return Some("IO");
+//RS             }
+//RS             let (module, _) = call.name.rsplit_once('.')?;
+//RS             effect_for_module(module, aliases)
+//RS         }
+//RS         Expr::MethodCall { receiver, .. } => {
+//RS             let module = match receiver.without_parens() {
+//RS                 Expr::Ident(name, _) => name.as_str(),
+//RS                 _ => return None,
+//RS             };
+//RS             effect_for_module(module, aliases)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn effect_for_module(module: &str, aliases: &BTreeMap<String, String>) -> Option<&'static str> {
+//RS     let resolved = aliases.get(module).map(String::as_str).unwrap_or(module);
+//RS     match resolved {
+//RS         "core.files" | "core.fs" => Some("FS"),
+//RS         "core.process" | "core.exec" => Some("Exec"),
+//RS         "core.time" => Some("Time"),
+//RS         "core.net" | "core.net.url" | "core.http" | "core.http.client" => Some("Net"),
+//RS         "core.io" => Some("IO"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn module_aliases(program: &Program) -> BTreeMap<String, String> {
+//RS     program
+//RS         .imports
+//RS         .iter()
+//RS         .filter_map(|import| {
+//RS             import
+//RS                 .core_module_path()
+//RS                 .map(|module| (import.import_alias(), module))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn counted_loop_indexes_sequence(init: &jet::AST::Binding, body: &[Stmt]) -> bool {
+//RS     let mut indexes_sequence = false;
+//RS     for_each_statement_expr(body, |expr| {
+//RS         if let Expr::Index { index, .. } = expr.without_parens() {
+//RS             if matches!(index.without_parens(), Expr::Ident(name, _) if name == &init.name) {
+//RS                 indexes_sequence = true;
+//RS             }
+//RS         }
+//RS     });
+//RS     indexes_sequence
+//RS }
+//RS 
+//RS fn manual_counter_body(counter: &str, body: &[Stmt]) -> bool {
+//RS     let mut increments = 0;
+//RS     let mut used = false;
+//RS     for statement in body {
+//RS         if matches!(
+//RS             statement,
+//RS             Stmt::Assign {
+//RS                 target: jet::AST::LValue::Local { name, .. },
+//RS                 op: Some(BinOp::Add),
+//RS                 value,
+//RS                 ..
+//RS             } if name == counter
+//RS                 && matches!(value.without_parens(), Expr::Int(value, ..) if *value == 1)
+//RS         ) {
+//RS             increments += 1;
+//RS             continue;
+//RS         }
+//RS         for_each_statement_expr(std::slice::from_ref(statement), |expr| {
+//RS             if matches!(expr.without_parens(), Expr::Ident(name, _) if name == counter) {
+//RS                 used = true;
+//RS             }
+//RS         });
+//RS     }
+//RS     increments == 1 && used
+//RS }
+//RS 
+//RS fn named_type(ty: &Type, expected: &str) -> bool {
+//RS     matches!(ty, Type::Named(name) if name == expected)
+//RS         || matches!(
+//RS             (ty, expected),
+//RS             (Type::Bool, "Bool") | (Type::String, "String") | (Type::Int, "Int")
+//RS         )
+//RS }
+//RS 
+//RS fn datatree_domain_policy_violations(path: &str, program: &Program) -> Vec<SemanticViolation> {
+//RS     let mut violations = Vec::new();
+//RS     for item in &program.items {
+//RS         let Item::Func(function) = item else {
+//RS             continue;
+//RS         };
+//RS         if is_named_tower_truthiness_policy(path, &function.name) {
+//RS             continue;
+//RS         }
+//RS         let returns_bool = function
+//RS             .return_type
+//RS             .as_ref()
+//RS             .is_some_and(|ty| named_type(ty, "Bool"));
+//RS         let data_tree_pair = function.params.len() == 2
+//RS             && function
+//RS                 .params
+//RS                 .iter()
+//RS                 .all(|parameter| data_tree_domain_value(&parameter.ty));
+//RS         if returns_bool
+//RS             && data_tree_pair
+//RS             && (body_returns_constant_bool(&function.body) || compares_parameter_pair(function))
+//RS         {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "datatree-domain-policy",
+//RS                 site(&format!("fn:{}", function.name), function.span),
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         if function.params.len() == 1
+//RS             && returns_bool
+//RS             && named_type(&function.params[0].ty, "DataTree")
+//RS             && body_returns_constant_bool(&function.body)
+//RS         {
+//RS             violations.push(SemanticViolation::new(
+//RS                 path,
+//RS                 "datatree-domain-policy",
+//RS                 site(&format!("fn:{}", function.name), function.span),
+//RS             ));
+//RS         }
+//RS     }
+//RS     violations
+//RS }
+//RS 
+//RS /// This is the one occurrence-scoped domain reason: Tower preserves its
+//RS /// JavaScript truthiness policy in these exact named functions.
+//RS fn is_named_tower_truthiness_policy(path: &str, name: &str) -> bool {
+//RS     path == "dogfood/tower/run.jet"
+//RS         && matches!(
+//RS             name,
+//RS             "javascript_truthy"
+//RS                 | "javascript_truthy_null"
+//RS                 | "javascript_truthy_bool"
+//RS                 | "javascript_truthy_int"
+//RS                 | "javascript_truthy_float"
+//RS                 | "javascript_truthy_text"
+//RS                 | "javascript_truthy_array"
+//RS                 | "javascript_truthy_object"
+//RS         )
+//RS }
+//RS 
+//RS fn body_returns_constant_bool(body: &[Stmt]) -> bool {
+//RS     body.len() == 1
+//RS         && match &body[0] {
+//RS             Stmt::Return(Some(expr), _) | Stmt::Expr(expr) => {
+//RS                 matches!(expr.without_parens(), Expr::Bool(..))
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS }
+//RS 
+//RS fn data_tree_domain_value(ty: &Type) -> bool {
+//RS     named_type(ty, "DataTree") || matches!(ty, Type::List(inner) if named_type(inner, "DataTree"))
+//RS }
+//RS 
+//RS fn compares_parameter_pair(function: &jet::AST::Func) -> bool {
+//RS     let Some(left_name) = function.params.first().map(|param| param.name.as_str()) else {
+//RS         return false;
+//RS     };
+//RS     let Some(right_name) = function.params.get(1).map(|param| param.name.as_str()) else {
+//RS         return false;
+//RS     };
+//RS     let mut found = false;
+//RS     for_each_statement_expr(&function.body, |expr| {
+//RS         let Expr::Binary(BinOp::Eq, left, right, _) = expr.without_parens() else {
+//RS             return;
+//RS         };
+//RS         let direct = |value: &Expr, expected: &str| matches!(value.without_parens(), Expr::Ident(name, _) if name == expected);
+//RS         if (direct(left, left_name) && direct(right, right_name))
+//RS             || (direct(left, right_name) && direct(right, left_name))
+//RS         {
+//RS             found = true;
+//RS         }
+//RS     });
+//RS     found
+//RS }
+//RS 
+//RS fn receiver_is(expr: &Expr, expected: &str, aliases: &BTreeMap<String, String>) -> bool {
+//RS     match expr.without_parens() {
+//RS         Expr::Ident(name, _) if name == expected => true,
+//RS         Expr::Ident(name, _) => aliases
+//RS             .get(name)
+//RS             .is_some_and(|module| module == &format!("core.{expected}")),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn is_process_input(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+//RS     matches!(
+//RS         expr.without_parens(),
+//RS         Expr::MethodCall { receiver, method, .. }
+//RS             if matches!(method.as_str(), "argv" | "args") && receiver_is(receiver, "process", aliases)
+//RS     )
+//RS }
+//RS 
+//RS fn is_process_argv(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+//RS     matches!(
+//RS         expr.without_parens(),
+//RS         Expr::MethodCall { receiver, method, .. } if method == "argv" && receiver_is(receiver, "process", aliases)
+//RS     )
+//RS }
+//RS 
+//RS fn is_process_argv_view(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+//RS     let Expr::MethodCall {
+//RS         receiver,
+//RS         method,
+//RS         args,
+//RS         ..
+//RS     } = expr.without_parens()
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     method == "skip"
+//RS         && args.first().is_some_and(
+//RS             |arg| matches!(arg.expr.without_parens(), Expr::Int(value, ..) if *value == 1),
+//RS         )
+//RS         && is_process_argv(receiver, aliases)
+//RS }
+//RS 
+//RS fn is_legacy_digest_call(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+//RS     let Expr::MethodCall {
+//RS         receiver, method, ..
+//RS     } = expr.without_parens()
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     method == "sha256_bytes"
+//RS         && matches!(
+//RS             receiver.without_parens(),
+//RS             Expr::Ident(name, _) if aliases
+//RS                 .get(name)
+//RS                 .is_some_and(|module| module == "core.crypto")
+//RS         )
+//RS }
+//RS 
+//RS fn is_constant_duration_constructor(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+//RS     let Expr::MethodCall {
+//RS         receiver,
+//RS         method,
+//RS         args,
+//RS         ..
+//RS     } = expr.without_parens()
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     if !receiver_is(receiver, "Duration", aliases)
+//RS         || !matches!(
+//RS             method.as_str(),
+//RS             "nanoseconds"
+//RS                 | "microseconds"
+//RS                 | "milliseconds"
+//RS                 | "seconds"
+//RS                 | "minutes"
+//RS                 | "hours"
+//RS                 | "days"
+//RS         )
+//RS     {
+//RS         return false;
+//RS     }
+//RS     let Some(argument) = args.first() else {
+//RS         return false;
+//RS     };
+//RS     is_nonnegative_numeric_literal(&argument.expr) && is_constant_expr(&argument.expr)
+//RS }
+//RS 
+//RS fn is_nonnegative_numeric_literal(expr: &Expr) -> bool {
+//RS     match expr.without_parens() {
+//RS         Expr::Int(value, ..) => *value >= 0 && *value < i64::MAX,
+//RS         Expr::Float(value, ..) => value.is_finite() && *value >= 0.0 && *value < i64::MAX as f64,
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn is_constant_expr(expr: &Expr) -> bool {
+//RS     let mut expressions = vec![expr];
+//RS     while let Some(expr) = expressions.pop() {
+//RS         match expr.without_parens() {
+//RS             Expr::Str(parts, _) if parts.iter().all(|part| matches!(part, StrPart::Lit(_))) => {}
+//RS             Expr::Int(..)
+//RS             | Expr::Float(..)
+//RS             | Expr::Bool(..)
+//RS             | Expr::Char(..)
+//RS             | Expr::UnitLit { .. } => {}
+//RS             Expr::ListLit(items, _) => expressions.extend(items),
+//RS             Expr::TupleLit(items, _, _) => {
+//RS                 expressions.extend(items.iter().map(|(_, item)| item));
+//RS             }
+//RS             Expr::MapLit(entries, _) => {
+//RS                 for (key, value) in entries {
+//RS                     expressions.push(key);
+//RS                     expressions.push(value);
+//RS                 }
+//RS             }
+//RS             Expr::Unary(_, inner, _) => expressions.push(inner),
+//RS             Expr::Binary(_, left, right, _) => {
+//RS                 expressions.push(left);
+//RS                 expressions.push(right);
+//RS             }
+//RS             _ => return false,
+//RS         }
+//RS     }
+//RS     true
+//RS }
+//RS 
+//RS fn is_redundant_fixed_cleanup(expr: &Expr) -> bool {
+//RS     let Expr::MethodCall {
+//RS         receiver,
+//RS         method,
+//RS         args,
+//RS         ..
+//RS     } = expr.without_parens()
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     method == "replace"
+//RS         && args.len() == 2
+//RS         && is_literal_string(&args[0].expr, ",")
+//RS         && is_literal_string(&args[1].expr, "")
+//RS         && is_plain_fixed_projection(receiver)
+//RS }
+//RS 
+//RS fn is_plain_fixed_projection(expr: &Expr) -> bool {
+//RS     matches!(
+//RS         expr.without_parens(),
+//RS         Expr::Str(parts, _)
+//RS             if parts.len() == 1
+//RS                 && matches!(&parts[0], StrPart::Interp(_, StrFormat::Fixed(_)))
+//RS     )
+//RS }
+//RS 
+//RS fn is_literal_string(expr: &Expr, expected: &str) -> bool {
+//RS     matches!(
+//RS         expr.without_parens(),
+//RS         Expr::Str(parts, _)
+//RS             if parts.len() == 1 && matches!(&parts[0], StrPart::Lit(text) if text == expected)
+//RS     )
+//RS }
+//RS 
+//RS fn is_unit_scalar_rewrap(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+//RS     let Expr::MethodCall {
+//RS         receiver,
+//RS         method,
+//RS         args,
+//RS         ..
+//RS     } = expr.without_parens()
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     let is_constructor = method.starts_with("from_")
+//RS         || (receiver_is(receiver, "Duration", aliases)
+//RS             && matches!(
+//RS                 method.as_str(),
+//RS                 "nanoseconds"
+//RS                     | "microseconds"
+//RS                     | "milliseconds"
+//RS                     | "seconds"
+//RS                     | "minutes"
+//RS                     | "hours"
+//RS                     | "days"
+//RS             ));
+//RS     if !is_constructor || args.len() != 1 {
+//RS         return false;
+//RS     }
+//RS     let Expr::Binary(operator, left, right, _) = args[0].expr.without_parens() else {
+//RS         return false;
+//RS     };
+//RS     if !matches!(operator, BinOp::Mul | BinOp::Div) {
+//RS         return false;
+//RS     }
+//RS     (is_unit_projection(left) && is_direct_scalar(right))
+//RS         || (matches!(operator, BinOp::Mul) && is_direct_scalar(left) && is_unit_projection(right))
+//RS }
+//RS 
+//RS fn is_unit_projection(expr: &Expr) -> bool {
+//RS     matches!(
+//RS         expr.without_parens(),
+//RS         Expr::MethodCall { method, args, .. }
+//RS             if args.is_empty() && method == "raw"
+//RS     ) || matches!(
+//RS         expr.without_parens(),
+//RS         Expr::MethodCall { method, .. } if method == "in"
+//RS     )
+//RS }
+//RS 
+//RS fn is_direct_scalar(expr: &Expr) -> bool {
+//RS     let mut current = expr;
+//RS     loop {
+//RS         match current.without_parens() {
+//RS             Expr::Int(..) | Expr::Float(..) | Expr::Ident(..) => return true,
+//RS             Expr::Unary(UnOp::Neg, inner, _) => {
+//RS                 return matches!(inner.without_parens(), Expr::Int(..) | Expr::Float(..));
+//RS             }
+//RS             Expr::MethodCall {
+//RS                 receiver,
+//RS                 method,
+//RS                 args,
+//RS                 ..
+//RS             } if matches!(receiver.without_parens(), Expr::Ident(name, _) if name == "Float")
+//RS                 && method == "from_int"
+//RS                 && args.len() == 1 =>
+//RS             {
+//RS                 current = &args[0].expr
+//RS             }
+//RS             _ => return false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn is_readonly_copy(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+//RS     let (module, method, args) = match expr.without_parens() {
+//RS         Expr::Call(call) => {
+//RS             let Some((module, method)) = call.name.rsplit_once('.') else {
+//RS                 return false;
+//RS             };
+//RS             (module, method, &call.args)
+//RS         }
+//RS         Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             ..
+//RS         } if receiver_is(receiver, "files", aliases) => ("files", method.as_str(), args),
+//RS         _ => return false,
+//RS     };
+//RS     let module_is_files = module == "fs"
+//RS         || module == "files"
+//RS         || aliases.get(module).is_some_and(|path| path == "core.files");
+//RS     module_is_files
+//RS         && matches!(
+//RS             method,
+//RS             "read" | "read_bytes" | "read_at" | "read_link" | "stat" | "list_dir"
+//RS         )
+//RS         && args.iter().any(|arg| {
+//RS             arg.convention == AccessConvention::Read
+//RS                 && matches!(arg.expr.without_parens(), Expr::Copy(_, _))
+//RS         })
+//RS }
+//RS 
+//RS fn is_identity_fallback(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+//RS     let Expr::OrFallback {
+//RS         value, fallback, ..
+//RS     } = expr.without_parens()
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     let jet::AST::OrFallback::Return(error, _) = fallback else {
+//RS         return false;
+//RS     };
+//RS     let unchanged_error = error.as_deref().is_none_or(is_err_constructor);
+//RS     unchanged_error && is_io_call(value, aliases)
+//RS }
+//RS 
+//RS fn is_err_constructor(expr: &Expr) -> bool {
+//RS     matches!(
+//RS         expr.without_parens(),
+//RS         Expr::Call(call) if call.name == "Err"
+//RS     ) || matches!(
+//RS         expr.without_parens(),
+//RS         Expr::EnumLit { variant, .. } if variant == "Err"
+//RS     ) || matches!(expr.without_parens(), Expr::Err(_, _))
+//RS }
+//RS 
+//RS fn is_io_call(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+//RS     match expr.without_parens() {
+//RS         Expr::Call(call) => {
+//RS             let Some((module, _)) = call.name.rsplit_once('.') else {
+//RS                 return false;
+//RS             };
+//RS             is_io_module(module, aliases)
+//RS         }
+//RS         Expr::MethodCall { receiver, .. } => {
+//RS             receiver_is(receiver, "files", aliases)
+//RS                 || receiver_is(receiver, "io", aliases)
+//RS                 || receiver_is(receiver, "env", aliases)
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn is_io_module(module: &str, aliases: &BTreeMap<String, String>) -> bool {
+//RS     matches!(module, "fs" | "files" | "io" | "env")
+//RS         || aliases
+//RS             .get(module)
+//RS             .is_some_and(|path| matches!(path.as_str(), "core.files" | "core.io" | "core.env"))
+//RS }
+//RS 
+//RS fn is_http_ceremony(expr: &Expr, functions: &[&jet::AST::Func]) -> bool {
+//RS     matches!(
+//RS         expr.without_parens(),
+//RS         Expr::MethodCall { receiver, method, args, .. }
+//RS             if method == "body" && !args.is_empty() && is_http_request_value(receiver, functions)
+//RS     )
+//RS }
+//RS 
+//RS fn is_http_message_text(expr: &Expr) -> bool {
+//RS     let Expr::MethodCall {
+//RS         receiver,
+//RS         method,
+//RS         args,
+//RS         ..
+//RS     } = expr.without_parens()
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     method == "text"
+//RS         && !args.is_empty()
+//RS         && matches!(
+//RS             receiver.without_parens(),
+//RS             Expr::MethodCall { method, .. } if method == "body"
+//RS         )
+//RS }
+//RS 
+//RS fn is_raw_http_json_body(expr: &Expr, functions: &[&jet::AST::Func]) -> bool {
+//RS     let Expr::MethodCall {
+//RS         receiver,
+//RS         method,
+//RS         args,
+//RS         ..
+//RS     } = expr.without_parens()
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     method == "body" && !args.is_empty() && is_http_request_value(receiver, functions)
+//RS }
+//RS 
+//RS fn is_http_request_value(expr: &Expr, functions: &[&jet::AST::Func]) -> bool {
+//RS     let Expr::Ident(name, _) = expr.without_parens() else {
+//RS         return false;
+//RS     };
+//RS     functions.iter().any(|function| {
+//RS         function
+//RS             .params
+//RS             .iter()
+//RS             .any(|parameter| parameter.name == *name && named_type(&parameter.ty, "HTTPRequest"))
+//RS     })
+//RS }
+//RS 
+//RS fn is_raw_delimited_split(expr: &Expr) -> bool {
+//RS     let Expr::MethodCall { method, args, .. } = expr.without_parens() else {
+//RS         return false;
+//RS     };
+//RS     if method != "split" {
+//RS         return false;
+//RS     }
+//RS     args.first().is_some_and(|arg| matches!(arg.expr.without_parens(), Expr::Str(parts, _) if parts.len() == 1 && matches!(&parts[0], StrPart::Lit(text) if text == "\t")))
+//RS }
+//RS 
+//RS fn is_build_command_literal(expr: &Expr) -> bool {
+//RS     let Expr::Str(parts, _) = expr.without_parens() else {
+//RS         return false;
+//RS     };
+//RS     parts
+//RS         .iter()
+//RS         .any(|part| matches!(part, StrPart::Lit(text) if text.contains("jet build")))
+//RS }
+//RS 
+//RS fn is_hand_json_wire(expr: &Expr) -> bool {
+//RS     let Expr::Str(parts, _) = expr.without_parens() else {
+//RS         return false;
+//RS     };
+//RS     let has_interpolation = parts
+//RS         .iter()
+//RS         .any(|part| matches!(part, StrPart::Interp(_, _)));
+//RS     let has_object_shape = parts
+//RS         .iter()
+//RS         .any(|part| matches!(part, StrPart::Lit(text) if text.contains('{') && text.contains(':')));
+//RS     has_interpolation && has_object_shape
+//RS }
+//RS 
+//RS fn is_string_prefix_containment(expr: &Expr) -> bool {
+//RS     let Expr::MethodCall { method, args, .. } = expr.without_parens() else {
+//RS         return false;
+//RS     };
+//RS     method == "starts_with"
+//RS         && args.first().is_some_and(|arg| {
+//RS             matches!(
+//RS                 arg.expr.without_parens(),
+//RS                 Expr::Str(parts, _)
+//RS                     if parts.iter().any(|part| {
+//RS                         matches!(part, StrPart::Interp(_, _))
+//RS                             || matches!(part, StrPart::Lit(text) if text.len() > 1 && text.ends_with('/'))
+//RS                     })
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS fn is_url_query_reparse(expr: &Expr) -> bool {
+//RS     let Expr::MethodCall { method, args, .. } = expr.without_parens() else {
+//RS         return false;
+//RS     };
+//RS     method == "split"
+//RS         && args.first().is_some_and(|arg| {
+//RS             matches!(
+//RS                 arg.expr.without_parens(),
+//RS                 Expr::Str(parts, _)
+//RS                     if parts.len() == 1
+//RS                         && matches!(&parts[0], StrPart::Lit(text) if text == "&" || text == "=")
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS fn is_named_list_equality(expr: &Expr) -> bool {
+//RS     matches!(expr.without_parens(), Expr::Call(call) if call.name == "same_strings")
+//RS         || matches!(
+//RS             expr.without_parens(),
+//RS             Expr::MethodCall { method, .. } if method == "same_strings"
+//RS         )
+//RS }
+//RS 
+//RS fn is_non_idempotent_directory_call(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+//RS     match expr.without_parens() {
+//RS         Expr::Call(call) => {
+//RS             let Some((module, method)) = call.name.rsplit_once('.') else {
+//RS                 return false;
+//RS             };
+//RS             method == "create_dir"
+//RS                 && (module == "fs"
+//RS                     || module == "files"
+//RS                     || aliases.get(module).is_some_and(|path| path == "core.files"))
+//RS         }
+//RS         Expr::MethodCall {
+//RS             receiver, method, ..
+//RS         } => method == "create_dir" && receiver_is(receiver, "files", aliases),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn is_ascii_replacement_chain(expr: &Expr) -> bool {
+//RS     let Some(pairs) = replacement_chain_pairs(expr) else {
+//RS         return false;
+//RS     };
+//RS     if pairs.len() != 26 {
+//RS         return false;
+//RS     }
+//RS     let lower = ('A'..='Z').zip('a'..='z').collect::<BTreeSet<_>>();
+//RS     let upper = ('a'..='z').zip('A'..='Z').collect::<BTreeSet<_>>();
+//RS     let actual = pairs.into_iter().collect::<BTreeSet<_>>();
+//RS     actual == lower || actual == upper
+//RS }
+//RS 
+//RS fn replacement_chain_pairs(expr: &Expr) -> Option<Vec<(char, char)>> {
+//RS     let mut current = expr;
+//RS     let mut pairs = Vec::new();
+//RS     loop {
+//RS         let Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             ..
+//RS         } = current.without_parens()
+//RS         else {
+//RS             pairs.reverse();
+//RS             return Some(pairs);
+//RS         };
+//RS         if method != "replace"
+//RS             || args.len() != 2
+//RS             || !args.iter().all(|arg| is_single_ascii_literal(&arg.expr))
+//RS         {
+//RS             pairs.reverse();
+//RS             return Some(pairs);
+//RS         }
+//RS         pairs.push((
+//RS             single_ascii_literal(&args[0].expr)?,
+//RS             single_ascii_literal(&args[1].expr)?,
+//RS         ));
+//RS         current = receiver;
+//RS     }
+//RS }
+//RS 
+//RS fn is_single_ascii_literal(expr: &Expr) -> bool {
+//RS     single_ascii_literal(expr).is_some()
+//RS }
+//RS 
+//RS fn single_ascii_literal(expr: &Expr) -> Option<char> {
+//RS     let Expr::Str(parts, _) = expr.without_parens() else {
+//RS         return None;
+//RS     };
+//RS     if parts.len() != 1 {
+//RS         return None;
+//RS     }
+//RS     let StrPart::Lit(text) = &parts[0] else {
+//RS         return None;
+//RS     };
+//RS     let mut chars = text.chars();
+//RS     let character = chars.next()?;
+//RS     (chars.next().is_none() && character.is_ascii()).then_some(character)
+//RS }
+//RS 
+//RS fn is_file_walk(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+//RS     matches!(
+//RS         expr.without_parens(),
+//RS         Expr::MethodCall { receiver, method, .. }
+//RS             if method == "walk" && receiver_is(receiver, "files", aliases)
+//RS     )
+//RS }
+//RS 
+//RS fn body_file_walk_filter(body: &[Stmt], aliases: &BTreeMap<String, String>) -> Option<Span> {
+//RS     for (index, statement) in body.iter().enumerate() {
+//RS         if let Stmt::Val(binding) = statement {
+//RS             if let Some(Stmt::For {
+//RS                 kind: ForKind::In { collection, .. },
+//RS                 body: loop_body,
+//RS                 ..
+//RS             }) = body.get(index + 1)
+//RS             {
+//RS                 let same_collection = matches!(
+//RS                     collection.without_parens(),
+//RS                     Expr::Ident(name, _) if name == &binding.name
+//RS                 );
+//RS                 if same_collection
+//RS                     && is_file_walk(&binding.init, aliases)
+//RS                     && body_has_negative_directory_filter(loop_body)
+//RS                 {
+//RS                     return Some(binding.init.span());
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Stmt::For {
+//RS             kind: ForKind::In { collection, .. },
+//RS             body: loop_body,
+//RS             ..
+//RS         } = statement
+//RS         {
+//RS             if is_file_walk(collection, aliases) && body_has_negative_directory_filter(loop_body) {
+//RS                 return Some(collection.span());
+//RS             }
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn body_has_negative_directory_filter(body: &[Stmt]) -> bool {
+//RS     let mut found = false;
+//RS     for_each_statement_expr(body, |expr| {
+//RS         if is_negative_directory_filter(expr) {
+//RS             found = true;
+//RS         }
+//RS     });
+//RS     found
+//RS }
+//RS 
+//RS fn is_negative_directory_filter(expr: &Expr) -> bool {
+//RS     matches!(
+//RS         expr.without_parens(),
+//RS         Expr::Unary(UnOp::Not, value, _) if is_directory_field(value)
+//RS     )
+//RS }
+//RS 
+//RS fn is_directory_field(expr: &Expr) -> bool {
+//RS     matches!(
+//RS         expr.without_parens(),
+//RS         Expr::Field(_, field, _) if field == "is_dir"
+//RS     )
+//RS }
+//RS 
+//RS fn has_anchored_regex_capture(program: &Program, aliases: &BTreeMap<String, String>) -> bool {
+//RS     if body_has_anchored_regex_capture(&program.script_body, aliases) {
+//RS         return true;
+//RS     }
+//RS     for item in &program.items {
+//RS         match item {
+//RS             Item::Func(function) if body_has_anchored_regex_capture(&function.body, aliases) => {
+//RS                 return true;
+//RS             }
+//RS             Item::Struct(structure) => {
+//RS                 if structure
+//RS                     .methods
+//RS                     .iter()
+//RS                     .any(|method| body_has_anchored_regex_capture(&method.body, aliases))
+//RS                 {
+//RS                     return true;
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS fn body_has_anchored_regex_capture(body: &[Stmt], aliases: &BTreeMap<String, String>) -> bool {
+//RS     let mut expressions = Vec::new();
+//RS     for_each_statement_expr(body, |expr| expressions.push(expr));
+//RS     let anchored_pattern = expressions
+//RS         .iter()
+//RS         .copied()
+//RS         .any(|expr| match expr.without_parens() {
+//RS             Expr::StructLit {
+//RS                 type_name, fields, ..
+//RS             } if type_name == "Regex" => fields
+//RS                 .first()
+//RS                 .is_some_and(|(_, _, value)| is_anchored_literal(value)),
+//RS             Expr::TypedLit { body, .. } => match body {
+//RS                 jet::AST::TypedLitBody::Value(value) => is_anchored_literal(value),
+//RS                 _ => false,
+//RS             },
+//RS             _ => false,
+//RS         });
+//RS     let matched = expressions.iter().copied().any(|expr| {
+//RS         matches!(expr.without_parens(), Expr::Call(call) if call.name == "re.match")
+//RS             || matches!(
+//RS                 expr.without_parens(),
+//RS                 Expr::MethodCall { receiver, method, .. }
+//RS                     if method == "match"
+//RS                         && aliases
+//RS                             .get(match receiver.without_parens() {
+//RS                                 Expr::Ident(name, _) => name.as_str(),
+//RS                                 _ => "",
+//RS                             })
+//RS                             .is_some_and(|module| module == "core.regex")
+//RS             )
+//RS     });
+//RS     let captured = expressions.iter().copied().any(|expr| {
+//RS         matches!(
+//RS             expr.without_parens(),
+//RS             Expr::MethodCall { method, .. } if method == "group"
+//RS         )
+//RS     });
+//RS     anchored_pattern && matched && captured
+//RS }
+//RS 
+//RS fn is_anchored_literal(expr: &Expr) -> bool {
+//RS     let Expr::Str(parts, _) = expr.without_parens() else {
+//RS         return false;
+//RS     };
+//RS     let Some(StrPart::Lit(text)) = parts.first() else {
+//RS         return false;
+//RS     };
+//RS     parts.len() == 1 && text.starts_with('^') && text.ends_with('$')
+//RS }
+//RS 
+//RS fn has_unused_parameter(function: &jet::AST::Func, parameter: &str) -> bool {
+//RS     if !function.params.iter().any(|param| param.name == parameter) {
+//RS         return false;
+//RS     }
+//RS     let mut used = false;
+//RS     for_each_statement_expr(&function.body, |expr| {
+//RS         if matches!(expr.without_parens(), Expr::Ident(name, _) if name == parameter) {
+//RS             used = true;
+//RS         }
+//RS     });
+//RS     !used
+//RS }
+//RS 
+//RS fn is_task_combinator_statement(statement: &Stmt) -> bool {
+//RS     match statement {
+//RS         Stmt::Expr(expr) => is_task_combinator_expr(expr),
+//RS         Stmt::Val(binding) => is_task_combinator_expr(&binding.init),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn is_task_all_statement(statement: &Stmt) -> bool {
+//RS     match statement {
+//RS         Stmt::Expr(expr) => is_task_all_expr(expr),
+//RS         Stmt::Val(binding) => is_task_all_expr(&binding.init),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn is_task_all_expr(expr: &Expr) -> bool {
+//RS     let mut current = expr;
+//RS     loop {
+//RS         match current.without_parens() {
+//RS             Expr::Call(call) => {
+//RS                 return matches!(
+//RS                     call.name.as_str(),
+//RS                     jet::Syntax::TASK_ALL | jet::Syntax::INTERNAL_TASK_ALL_METHOD
+//RS                 );
+//RS             }
+//RS             Expr::MethodCall {
+//RS                 receiver, method, ..
+//RS             } => {
+//RS                 return matches!(receiver.without_parens(), Expr::Ident(name, _)
+//RS                     if name == "task" || name == jet::Syntax::INTERNAL_TASK_RECEIVER)
+//RS                     && matches!(
+//RS                         method.as_str(),
+//RS                         "all" | jet::Syntax::INTERNAL_TASK_ALL_METHOD
+//RS                     );
+//RS             }
+//RS             Expr::OrFallback { value, .. } => current = value,
+//RS             _ => return false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn is_task_combinator_expr(expr: &Expr) -> bool {
+//RS     let mut current = expr;
+//RS     loop {
+//RS         match current.without_parens() {
+//RS             Expr::Call(call) => {
+//RS                 return matches!(
+//RS                     call.name.as_str(),
+//RS                     jet::Syntax::TASK_ALL
+//RS                         | jet::Syntax::TASK_RACE
+//RS                         | jet::Syntax::TASK_ANY
+//RS                         | jet::Syntax::INTERNAL_TASK_ALL_METHOD
+//RS                         | jet::Syntax::INTERNAL_TASK_RACE_METHOD
+//RS                         | jet::Syntax::INTERNAL_TASK_ANY_METHOD
+//RS                 );
+//RS             }
+//RS             Expr::MethodCall {
+//RS                 receiver, method, ..
+//RS             } => {
+//RS                 return matches!(receiver.without_parens(), Expr::Ident(name, _)
+//RS                     if name == "task" || name == jet::Syntax::INTERNAL_TASK_RECEIVER)
+//RS                     && matches!(
+//RS                         method.as_str(),
+//RS                         "all"
+//RS                             | "race"
+//RS                             | "any"
+//RS                             | jet::Syntax::INTERNAL_TASK_ALL_METHOD
+//RS                             | jet::Syntax::INTERNAL_TASK_RACE_METHOD
+//RS                             | jet::Syntax::INTERNAL_TASK_ANY_METHOD
+//RS                     );
+//RS             }
+//RS             Expr::OrFallback { value, .. } => current = value,
+//RS             _ => return false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn bare_structural_codable(structure: &jet::AST::StructDef) -> bool {
+//RS     structure.type_params.is_empty()
+//RS         && structure.type_markers.len() == 1
+//RS         && structure
+//RS             .type_markers
+//RS             .first()
+//RS             .is_some_and(|marker| marker.name == "Codable" && !marker.negated)
+//RS         && structure.fields.iter().all(|field| {
+//RS             field.serde_markers.is_empty() && field.computed.is_none() && field.default.is_none()
+//RS         })
+//RS         && !structure.is_published_schema
+//RS }
+//RS 
+//RS fn site(kind: &str, span: Span) -> String {
+//RS     format!("{}@{}..{}", kind, span.start, span.end)
+//RS }
+//RS 
+//RS fn inventory_error(message: &str, file: &str, site_kind: &str) -> String {
+//RS     format!(
+//RS         "{message}: {file}; {}",
+//RS         SemanticViolation::new(file, "corpus-inventory", site(site_kind, Span::new(0, 0)),)
+//RS     )
+//RS }
+// END-PORT-PENDING 1160 tests/support/corpus_policy.rs:1961-3691
+

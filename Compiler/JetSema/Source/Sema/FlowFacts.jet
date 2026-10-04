@@ -1,0 +1,127 @@
+// Rust Sema/FlowFacts.rs:31-341: one lexical row store and join boundary.
+// This slice installs the equality proof plane used by State; other semantic
+// planes still own their existing carriers and must migrate their join rules
+// here before claiming the complete Rust FlowFacts cutover.
+use jet_foundation.[Diagnostic, Span, SwitchArm]
+
+pub struct SemaFlowRow<F> { pub depth: Int, pub fact: F? }
+pub struct SemaFlowFacts<F> { pub rows: [String:[SemaFlowRow<F>]], pub depth: Int, pub reachable: Bool }
+pub struct SemaFlowDivergence<F> { pub name: String, pub left: F, pub right: F }
+pub fn sema_flow_new<F>() -> SemaFlowFacts<F> Never! {
+    SemaFlowFacts<F>{rows: [String:[SemaFlowRow<F>]]{}, depth: 0, reachable: true}
+}
+pub fn sema_flow_get<F>(facts: SemaFlowFacts<F>, name: String) -> F? {
+    rows :: facts.rows.get(name) ?? return None
+    if rows.len() == 0 -> return None
+    rows[rows.len() - 1].fact
+}
+pub fn sema_flow_get_at<F>(facts: SemaFlowFacts<F>, name: String, depth: Int) -> F? {
+    rows :: facts.rows.get(name) ?? return None
+    loop row in rows { if row.depth == depth -> return row.fact }
+    None
+}
+pub fn sema_flow_set_at<F>(facts: &SemaFlowFacts<F>, name: String, depth: Int, value: F?) Never! {
+    rows := &facts.rows.remove(name) ?? [SemaFlowRow<F>]{}
+    index := 0
+    loop index < rows.len() && rows[index].depth < depth -> index += 1
+    row :: SemaFlowRow<F>{depth: depth, fact: value}
+    if index < rows.len() && rows[index].depth == depth -> rows[index] = row
+    else -> &rows.insert(index, row)
+    facts.rows[name] = ^rows
+}
+pub fn sema_flow_set<F>(facts: &SemaFlowFacts<F>, name: String, value: F) Never! {
+    rows :: facts.rows.get(name) ?? [SemaFlowRow<F>]{}
+    depth :: if rows.len() == 0 -> facts.depth else -> rows[rows.len() - 1].depth
+    sema_flow_set_at<F>(&facts, name, depth, Val(value))
+}
+pub fn sema_flow_forget<F>(facts: &SemaFlowFacts<F>, name: String) Never! {
+    rows :: facts.rows.get(name) ?? return
+    if rows.len() == 0 -> return
+    sema_flow_set_at<F>(&facts, name, rows[rows.len() - 1].depth, None)
+}
+pub fn sema_flow_enter<F>(facts: &SemaFlowFacts<F>) Never! { facts.depth += 1 }
+pub fn sema_flow_leave<F>(facts: &SemaFlowFacts<F>) Never! {
+    names := [String]{}
+    loop (name, _) in facts.rows -> &names.push(name)
+    loop name in names {
+        rows := &facts.rows.remove(name) ?? next
+        loop rows.len() > 0 && rows[rows.len() - 1].depth >= facts.depth -> _ := &rows.pop()
+        if rows.len() > 0 -> facts.rows[name] = ^rows
+    }
+    facts.depth -= 1
+}
+// Rust Facts::join_paths. Unknown on either side drops a proof. Unequal known
+// values alone produce divergence; missing facts do not invent a warning.
+pub fn sema_flow_join<F: Equatable>(left: SemaFlowFacts<F>, right: SemaFlowFacts<F>, diverged: &[SemaFlowDivergence<F>]) -> SemaFlowFacts<F> Never! {
+    out := sema_flow_new<F>()
+    out.depth = left.depth
+    out.reachable = left.reachable || right.reachable
+    names := [String:Bool]{}
+    loop (name, _) in left.rows -> names[name] = true
+    loop (name, _) in right.rows -> names[name] = true
+    loop (name, _) in names {
+        depths := [Int:Bool]{}
+        left_rows :: left.rows.get(name) ?? [SemaFlowRow<F>]{}
+        right_rows :: right.rows.get(name) ?? [SemaFlowRow<F>]{}
+        loop row in left_rows -> depths[row.depth] = true
+        loop row in right_rows -> depths[row.depth] = true
+        ordered := [Int]{}
+        loop (depth, _) in depths -> &ordered.push(depth)
+        &ordered.sort()
+        loop depth in ordered {
+            a :: sema_flow_get_at<F>(left, name, depth)
+            b :: sema_flow_get_at<F>(right, name, depth)
+            if a == .Val(one) && b == .Val(other) {
+                if one == other -> sema_flow_set_at<F>(&out, name, depth, Val(one))
+                else {
+                    &diverged.push(SemaFlowDivergence<F>{name: name, left: one, right: other})
+                    sema_flow_set_at<F>(&out, name, depth, None)
+                }
+            } else {
+                sema_flow_set_at<F>(&out, name, depth, None)
+            }
+        }
+    }
+    out
+}
+// Rust FlowFacts::merge_paths_with_state_diagnostics: only reaching paths
+// count; the pre-branch path counts only when the walker explicitly adds it.
+pub fn sema_flow_merge<F: Equatable>(before: SemaFlowFacts<F>, paths: [SemaFlowFacts<F>], diverged: &[SemaFlowDivergence<F>]) -> SemaFlowFacts<F> Never! {
+    if !before.reachable -> return ~before
+    result := SemaFlowFacts<F>?{None}
+    loop path in paths {
+        if !path.reachable -> next
+        if result == {
+            .None -> result = Val(~path)
+            .Val(current) -> result = Val(sema_flow_join<F>(current, path, &diverged))
+        }
+    }
+    if result == .Val(value) -> return value
+    exited := ~before
+    exited.reachable = false
+    exited
+}
+pub fn sema_flow_after_loop<F: Equatable>(before: SemaFlowFacts<F>, after: SemaFlowFacts<F>, diverged: &[SemaFlowDivergence<F>]) -> SemaFlowFacts<F> Never! {
+    if !before.reachable || !after.reachable -> return ~before
+    sema_flow_join<F>(before, after, &diverged)
+}
+// Rust FlowFacts::switch_proven_exhaustive; canonical satellite verdict.
+pub fn sema_flow_same_span(left: Span?, right: Span?) -> Bool Never! {
+    if left == {
+        .Val(a) -> if right == {
+            .Val(b) -> a.start == b.start && a.end == b.end
+            .None -> false
+        }
+        .None -> right == None
+    }
+}
+pub fn sema_flow_switch_exhaustive(arms: [SwitchArm], diagnostics: [Diagnostic], span: Span) -> Bool Never! {
+    if arms.len() == 0 -> return false
+    loop arm in arms {
+        if arm.cond == { .PatternTest(_, _, _) -> {} else -> return false }
+    }
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0307" && sema_flow_same_span(diagnostic.span, Val(span)) -> return false
+    }
+    true
+}

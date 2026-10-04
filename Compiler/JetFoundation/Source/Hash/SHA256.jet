@@ -21,11 +21,11 @@ MIR_SHA256_H0 :: prep { [Int]{
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
 } }
 
-fn mir_sha256_word(bytes: [U8], offset: Int) -> U32 Never! {
+fn mir_sha256_word(bytes: View<U8>, offset: Int) -> U32 Never! {
     (U32.from_u8(bytes[offset]) << 24) | (U32.from_u8(bytes[offset + 1]) << 16) | (U32.from_u8(bytes[offset + 2]) << 8) | U32.from_u8(bytes[offset + 3])
 }
 
-fn mir_sha256_compress(state: &[U32], words: &[U32], k: [U32], block: [U8]) Never! {
+fn mir_sha256_compress(state: &[U32], words: &[U32], k: View<U32>, block: View<U8>) Never! {
     loop index in 0..<16 -> words[index] = mir_sha256_word(block, index * 4)
     loop index in 16..<64 {
         s0 :: words[index - 15].rotate_right(7) ~| words[index - 15].rotate_right(18) ~| (words[index - 15] >> 3)
@@ -67,60 +67,98 @@ fn mir_sha256_compress(state: &[U32], words: &[U32], k: [U32], block: [U8]) Neve
     state[7] = state[7].wrapping_add(h)
 }
 
-fn mir_sha256_bytes(data: [U8]) -> [U8] Never! {
+// SHA256.rs::sha256: one compression owner for whole inputs and incremental
+// framing. Storage is bounded independently of input length.
+pub struct MIRSHA256 {
+    state: [U32]
+    words: [U32]
+    constants: [U32]
+    block: [U8]
+    used: Int
+    length: U64
+}
+
+pub fn mir_sha256_new() -> MIRSHA256 Never! {
     state := [U32]{}
     loop word in MIR_SHA256_H0 -> &state.push(U32{word})
-    k := [U32]{}
-    loop word in MIR_SHA256_K -> &k.push(U32{word})
+    constants := [U32]{}
+    loop word in MIR_SHA256_K -> &constants.push(U32{word})
     words := [U32]{}
     loop _ in 0..<64 -> &words.push(U32{0})
-    msg := [U8]{}
-    loop byte in data -> &msg.push(byte)
-    &msg.push(U8{128})
-    loop msg.len() % 64 != 56 -> &msg.push(U8{0})
-    bit_length :: (data.len() * 8) & MIR_SHA256_LENGTH_MASK
-    index := 7
-    loop index >= 0 {
-        length_byte :: (bit_length >> (8 * index)) & 255
-        &msg.push(U8{length_byte})
-        index -= 1
-    }
+    block := [U8]{}
+    loop _ in 0..<64 -> &block.push(U8{0})
+    MIRSHA256{state: state, words: words, constants: constants, block: block, used: 0, length: U64{0}}
+}
+
+pub fn mir_sha256_update(hash: &MIRSHA256, data: View<U8>) Never! {
+    hash.length = hash.length.wrapping_add(U64{data.len()})
     offset := 0
-    loop offset < msg.len() {
-        block :: loop position in 0..<64 -> msg[offset + position]
-        mir_sha256_compress(&state, &words, k, block)
+    if hash.used != 0 {
+        loop offset < data.len() && hash.used < 64 {
+            hash.block[hash.used] = data[offset]
+            hash.used += 1
+            offset += 1
+        }
+        if hash.used == 64 {
+            mir_sha256_compress(&hash.state, &hash.words, hash.constants[0..<hash.constants.len()], hash.block[0..<64])
+            hash.used = 0
+        }
+    }
+    loop data.len() - offset >= 64 {
+        mir_sha256_compress(&hash.state, &hash.words, hash.constants[0..<hash.constants.len()], data[offset..<offset + 64])
         offset += 64
     }
+    loop offset < data.len() {
+        hash.block[hash.used] = data[offset]
+        hash.used += 1
+        offset += 1
+    }
+}
+
+pub fn mir_sha256_finish(state: ^MIRSHA256) -> [U8] Never! {
+    hash := ^state
+    hash.block[hash.used] = U8{128}
+    hash.used += 1
+    loop index in hash.used..<64 -> hash.block[index] = U8{0}
+    if hash.used > 56 {
+        mir_sha256_compress(&hash.state, &hash.words, hash.constants[0..<hash.constants.len()], hash.block[0..<64])
+        loop index in 0..<64 -> hash.block[index] = U8{0}
+    }
+    bit_length :: hash.length.wrapping_mul(U64{8})
+    loop index in 0..<8 -> hash.block[56 + index] = U8.from_u64((bit_length >> (8 * (7 - index))) & U64{255}) ?? U8{0}
+    mir_sha256_compress(&hash.state, &hash.words, hash.constants[0..<hash.constants.len()], hash.block[0..<64])
     output := [U8]{}
-    loop lane in state {
+    loop lane in hash.state {
         word :: Int.from_u32(lane)
-        first :: (word >> 24) & 255
-        second :: (word >> 16) & 255
-        third :: (word >> 8) & 255
-        fourth :: word & 255
-        &output.push(U8{first})
-        &output.push(U8{second})
-        &output.push(U8{third})
-        &output.push(U8{fourth})
+        &output.push(U8{(word >> 24) & 255})
+        &output.push(U8{(word >> 16) & 255})
+        &output.push(U8{(word >> 8) & 255})
+        &output.push(U8{word & 255})
     }
     output
 }
 
-fn mir_sha256_hex_digit(value: Int) -> String Never! {
-    if value < 10 -> String.from_bytes([U8{48 + value}]) ?? "0"
-    else -> String.from_bytes([U8{87 + value}]) ?? "0"
+pub fn mir_sha256_bytes(data: View<U8>) -> [U8] Never! {
+    hash := mir_sha256_new()
+    mir_sha256_update(&hash, data)
+    mir_sha256_finish(^hash)
 }
 
-pub fn mir_sha256_hex_bytes(bytes: [U8]) -> String Never! {
-    output := ""
+pub fn mir_sha256_hex_bytes(bytes: View<U8>) -> String Never! {
+    output := [U8]{}
     loop byte in bytes {
         value :: Int.from_u8(byte)
-        output = "{output}{mir_sha256_hex_digit((value >> 4) & 15)}{mir_sha256_hex_digit(value & 15)}"
+        high :: (value >> 4) & 15
+        low :: value & 15
+        &output.push(U8{if high < 10 -> 48 + high else -> 87 + high})
+        &output.push(U8{if low < 10 -> 48 + low else -> 87 + low})
     }
-    output
+    String.from_bytes(output) ?? panic("hexadecimal is ASCII")
 }
 
 pub fn mir_sha256_hex(value: String) -> String Never! {
-    mir_sha256_hex_bytes(mir_sha256_bytes(value.bytes()))
+    bytes :: value.bytes()
+    digest :: mir_sha256_bytes(bytes[0..<bytes.len()])
+    mir_sha256_hex_bytes(digest[0..<digest.len()])
 }
 

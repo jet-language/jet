@@ -1,0 +1,1442 @@
+// PORT-PENDING 0408 crates-jet-sema-src-sema-checkerinfer-expr-slice-1832: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:1832-3269
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     pub(crate) fn rewrite_typed_boundary_literal(
+//RS         &mut self,
+//RS         e: &mut Expr,
+//RS         type_name: String,
+//RS         span: Span,
+//RS     ) -> Option<Type> {
+//RS         let Some(kind) = Syntax::typed_head_kind(&type_name).filter(|kind| kind.is_boundary())
+//RS         else {
+//RS             return None;
+//RS         };
+//RS         let Expr::Str(parts, literal_span) = e else {
+//RS             return self
+//RS                 .rewrite_typed_text_literal(e, kind.source_name().to_string(), span)
+//RS                 .map(|_| Type::Named(kind.internal_type_name().to_string()));
+//RS         };
+//RS         let has_holes = parts.iter().any(|part| matches!(part, StrPart::Interp(..)));
+//RS         if kind.forbids_holes() && has_holes {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0155",
+//RS                 "a `DateTime` literal cannot contain interpolation".to_string(),
+//RS                 "DateTime values are checked as complete RFC3339 literals before the program runs"
+//RS                     .to_string(),
+//RS                 "write a complete `DateTime{\"…\"}` literal, or parse a runtime String explicitly"
+//RS                     .to_string(),
+//RS                 Some(*literal_span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         let mut literals = vec![String::new()];
+//RS         for part in parts.iter() {
+//RS             match part {
+//RS                 StrPart::Lit(text) => literals.last_mut().unwrap().push_str(text),
+//RS                 StrPart::Interp(..) => literals.push(String::new()),
+//RS             }
+//RS         }
+//RS         let validation = crate::Comptime::validate_typed_boundary_literal(kind, &literals);
+//RS         if let Err(reason) = validation {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0155",
+//RS                 format!("this `{type_name}` literal is invalid"),
+//RS                 reason,
+//RS                 format!(
+//RS                     "fix the literal, or parse a runtime String with the ordinary `{type_name}` constructor"
+//RS                 ),
+//RS                 Some(*literal_span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span)
+//RS             .map(|_| Type::Named(kind.internal_type_name().to_string()))
+//RS     }
+//RS 
+//RS     /// D-REGEX-LIT1=D: validate `Regex.{"…"}` / inferred `.{"…"}` with the
+//RS     /// same grammar gate used by the generated linear runtime.
+//RS     pub(crate) fn rewrite_regex_literal(&mut self, e: &mut Expr, span: Span) -> Option<Type> {
+//RS         let old = std::mem::replace(e, Expr::Absent(span));
+//RS         let Expr::Str(parts, literal_span) = old else {
+//RS             *e = old;
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0152",
+//RS                 "`Regex.{ … }` needs one quoted pattern".to_string(),
+//RS                 "a regex typed literal contains pattern text, not another expression shape"
+//RS                     .to_string(),
+//RS                 "write `Regex.{\"...\"}`".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS             return None;
+//RS         };
+//RS         let [StrPart::Lit(pattern)] = parts.as_slice() else {
+//RS             *e = Expr::Str(parts, literal_span);
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0152",
+//RS                 "a `Regex` literal cannot contain interpolation".to_string(),
+//RS                 "the compiler must know the complete pattern before the program runs".to_string(),
+//RS                 "use a fixed `Regex.{\"...\"}` pattern, or build text and call `re.compile(text)`"
+//RS                     .to_string(),
+//RS                 Some(literal_span),
+//RS             ));
+//RS             return None;
+//RS         };
+//RS         if let Err(error) = jet_foundation::RegexSyntax::validate(pattern) {
+//RS             *e = Expr::Str(parts, literal_span);
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0152",
+//RS                 format!("this regex pattern is invalid at position {}", error.offset),
+//RS                 error.reason,
+//RS                 "fix the pattern at the reported position".to_string(),
+//RS                 Some(literal_span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         *e = Expr::Call(Call {
+//RS             name: Syntax::TYPE_REGEX.to_string(),
+//RS             name_span: span,
+//RS             type_args: Vec::new(),
+//RS             args: vec![CallArg {
+//RS                 convention: AccessConvention::Read,
+//RS                 expr: Expr::Str(parts, literal_span),
+//RS                 span: literal_span,
+//RS                 flags: CallArgFlags::default(),
+//RS                 label: None,
+//RS                 spread: false,
+//RS             }],
+//RS             resolved_ret: None,
+//RS             range_checked: false,
+//RS             widen_approx: false,
+//RS         });
+//RS         Some(Type::Named(Syntax::TYPE_REGEX.to_string()))
+//RS     }
+//RS 
+//RS     /// Statement inference has a special direct-call path for valueless
+//RS     /// functions. Keep that path shared with ordinary expression propagation.
+//RS     pub(crate) fn infer_statement_expr(&mut self, expr: &mut Expr) -> Option<Type> {
+//RS         self.normalize_imported_core_expr(expr);
+//RS         self.normalize_prelude_expr(expr);
+//RS         let saved_statement_expr_inference = self.statement_expr_inference;
+//RS         let saved_statement_expr_root_depth = self.statement_expr_root_depth;
+//RS         self.statement_expr_inference = true;
+//RS         // `infer_statement_expr` is called for a Stmt::Expr after the
+//RS         // statement checker has entered its source depth. `infer` enters one
+//RS         // more depth for the root expression; nested argument/value
+//RS         // expressions enter still deeper levels and must retain their value
+//RS         // tails. Parentheses are transparent, but their inference wrapper
+//RS         // still consumes one source-nesting slot per wrapper.
+//RS         let mut paren_depth = 0;
+//RS         let mut root: &Expr = &*expr;
+//RS         while let Expr::Paren(inner, _) = root {
+//RS             paren_depth += 1;
+//RS             root = inner;
+//RS         }
+//RS         let direct_call_root = matches!(root, Expr::Call(..));
+//RS         self.statement_expr_root_depth =
+//RS             Some(self.source_nesting + paren_depth + if direct_call_root { 0 } else { 1 });
+//RS         let result = self.infer_fallible_stmt(expr);
+//RS         self.statement_expr_inference = saved_statement_expr_inference;
+//RS         self.statement_expr_root_depth = saved_statement_expr_root_depth;
+//RS         result
+//RS     }
+//RS 
+//RS     /// Infer and check an expression. Returns None when a problem was
+//RS     /// already reported (avoids error cascades).
+//RS     ///
+//RS     /// This wrapper owns the rule that depends on *where* the expression
+//RS     /// appears (`borrow_ctx`): a struct-field read in owning position is
+//RS     /// rewritten to `.clone()` so the generated Rust never moves a field out
+//RS     /// of its struct.
+//RS     /// D-FAILURE-FOUNDATION1=A: a call is a value-producing expression at the
+//RS     /// source level, but its Result carrier is transparent in ordinary value
+//RS     /// positions. Elaborate that one rule into the existing `Try` node so
+//RS     /// lowering, conversion, context frames, and all engines keep one path.
+//RS     pub(crate) fn auto_propagate_call(
+//RS         &mut self,
+//RS         e: &mut Expr,
+//RS         result: Option<Type>,
+//RS     ) -> Option<Type> {
+//RS         // An open callback has no return row yet. If its callee does, retain
+//RS         // that row as the callback's carrier; applying the enclosing function's
+//RS         // `?` here would put a raw Result-returning closure in the wrong row.
+//RS         // A nested callee is checked under its argument's success type, so the
+//RS         // carrier is recorded for both the direct callback root and that
+//RS         // nested success-position call. A real Result expectation remains a
+//RS         // carrier position and must not be reinterpreted as callback failure.
+//RS         //
+//RS         // A statement-root call can itself have a value-producing call nested
+//RS         // in one of its arguments (`print(f())`). When the enclosing callback
+//RS         // slot is already a Result, that nested call is still a source value:
+//RS         // consume its carrier once here, rather than handing Result<T, E> to
+//RS         // the outer display/argument checker.
+//RS         // Before propagation is decided, both direct and method calls retain
+//RS         // the callee's declared return contract on `resolved_ret`; their
+//RS         // checker result may be the effective Result-shaped ABI carrier.
+//RS         let declared_call_return = match e.without_parens() {
+//RS             Expr::Call(call) => call.resolved_ret.as_ref(),
+//RS             Expr::MethodCall { resolved_ret, .. } => resolved_ret.as_ref(),
+//RS             _ => None,
+//RS         };
+//RS         // D-STREAMYIELD1: a generator's declared `Stream<T>` is its executable
+//RS         // protocol, not a failure carrier. Its callable keeps that raw return
+//RS         // in every tier (TIR `lower_func` and `consume_plain_helper_route`), so
+//RS         // a generator call is a stream value and never enters the failure rail.
+//RS         if let Some(stream @ Type::Apply { name, args }) = declared_call_return {
+//RS             if name == Syntax::TYPE_STREAM && args.len() == 1 {
+//RS                 return Some(stream.clone());
+//RS             }
+//RS         }
+//RS         // D-FAILURE-FOUNDATION1=A: `!Never` is a proven-unreachable
+//RS         // failure rail. Ordinary value positions still need the existing
+//RS         // `Try` node so every backend unwraps the shared Result carrier once;
+//RS         // only an explicit Result expectation keeps the carrier.
+//RS         let declared_never_failure = matches!(
+//RS             declared_call_return,
+//RS             Some(Type::Result { err, .. }) if err.is_never()
+//RS         );
+//RS         if declared_never_failure && matches!(self.expected_type.as_ref(), Some(Type::Result { .. })) {
+//RS             return result;
+//RS         }
+//RS         if !declared_never_failure {
+//RS             if let Some(ret) = declared_call_return.filter(|ty| !ty.is_fallible()) {
+//RS                 // The call node retains its declared return, while `result`
+//RS                 // carries the effective failure contract. Keep the declared
+//RS                 // success type only when no carrier was produced or an open
+//RS                 // callback owns that carrier; ordinary value positions must
+//RS                 // propagate an implicit `!Err` just like an explicit `!E`.
+//RS                 if self.failure_carrier_inference
+//RS                     && result
+//RS                         .as_ref()
+//RS                         .is_some_and(|ty| matches!(ty, Type::Result { .. } | Type::Option(_)))
+//RS                 {
+//RS                     if self.failure_carrier.is_none() {
+//RS                         self.failure_carrier = result.clone();
+//RS                     }
+//RS                     self.task_body_propagates = true;
+//RS                     return Some(ret.clone());
+//RS                 }
+//RS                 if !result.as_ref().is_some_and(Type::is_fallible) {
+//RS                     return Some(ret.clone());
+//RS                 }
+//RS             }
+//RS         }
+//RS         let propagation_result = match e.without_parens() {
+//RS             Expr::MethodCall {
+//RS                 resolved_ret: Some(carrier),
+//RS                 ..
+//RS             } if carrier.is_fallible() => Some(carrier.clone()),
+//RS             _ => result.clone(),
+//RS         };
+//RS         // D-CHOOSE-FIND1=A: a finite value/collecting loop is an
+//RS         // immediately evaluated expression, not a fallible function-value
+//RS         // call. Preserve its CallValue shape so the exhaustion route can
+//RS         // attach to the generated loop before ordinary propagation.
+//RS         let inline_loop_call = matches!(
+//RS             e.without_parens(),
+//RS             Expr::CallValue { callee, args, .. }
+//RS                 if args.is_empty()
+//RS                     && matches!(
+//RS                         callee.as_ref(),
+//RS                         Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop
+//RS                     )
+//RS         );
+//RS         let nested_statement_value = self.statement_expr_inference
+//RS             && self
+//RS                 .statement_expr_root_depth
+//RS                 .is_some_and(|root| self.source_nesting > root)
+//RS             && (self.failure_carrier_inference
+//RS                 || matches!(self.ret.as_ref(), Some(Type::Result { .. })));
+//RS         // A `Never` failure is not a callback failure row: an open callback
+//RS         // that reaches a `T Never!` callee still produces plain `T`, so the
+//RS         // call falls through to the `Try` below, which unwraps it directly
+//RS         // (`TryConvert::Never`) wherever it sits in the callback body.
+//RS         let never_carrier = matches!(
+//RS             propagation_result.as_ref(),
+//RS             Some(Type::Result { err, .. }) if err.is_never()
+//RS         );
+//RS         if self.failure_carrier_inference
+//RS             && !never_carrier
+//RS             && matches!(propagation_result, Some(Type::Result { .. }))
+//RS             && (!matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))
+//RS                 || nested_statement_value)
+//RS         {
+//RS             if self.failure_carrier.is_none() {
+//RS                 self.failure_carrier = propagation_result.clone();
+//RS             }
+//RS             if nested_statement_value {
+//RS                 self.ret = self
+//RS                     .expected_type
+//RS                     .clone()
+//RS                     .or_else(|| propagation_result.clone());
+//RS             } else if self.ret.is_none() {
+//RS                 self.ret = propagation_result.clone();
+//RS             }
+//RS             self.task_body_propagates = true;
+//RS             if self.expected_type.is_none() && !nested_statement_value {
+//RS                 return result;
+//RS             }
+//RS         }
+//RS         if inline_loop_call || self.compiler_generated
+//RS             || !matches!(
+//RS                 e.without_parens(),
+//RS                 Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
+//RS             )
+//RS             || !matches!(propagation_result, Some(Type::Result { .. }))
+//RS             || self.expected_type.as_ref().is_some_and(|expected| {
+//RS                 matches!(
+//RS                     expected,
+//RS                     Type::Result { err, .. }
+//RS                         if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
+//RS                 )
+//RS             })
+//RS         {
+//RS             // D-FAIL-CARRIER1=A: a `T !E` expectation is the carrier itself.
+//RS             // That includes a statement-nested argument (`report(import_rows())`).
+//RS             // `print(f())` still unwraps, because print does not expect Result.
+//RS             return result;
+//RS         }
+//RS         // `infer_try_with_inner_type` owns the compatibility check and E2404
+//RS         // provenance. Returning the unchecked carrier here bypasses that
+//RS         // contract for nested calls whose failure cannot reach this return.
+//RS         let span = e.span();
+//RS         let inner = std::mem::replace(e, Expr::Absent(span));
+//RS         let mut wrapped = Expr::Try(Box::new(inner), span, TryConvert::None, None);
+//RS         let result = match &mut wrapped {
+//RS             Expr::Try(inner, try_span, convert, note) => {
+//RS                 self.infer_try_with_inner_type(inner, *try_span, convert, note, propagation_result)
+//RS             }
+//RS             _ => unreachable!("automatic failure propagation builds a Try node"),
+//RS         };
+//RS         *e = wrapped;
+//RS         result
+//RS     }
+//RS 
+//RS     pub(crate) fn infer(&mut self, e: &mut Expr) -> Option<Type> {
+//RS         let suppress_auto = self.failure_auto_root_suppression > 0;
+//RS         // Grouping is semantically transparent. Keep the one-shot token alive
+//RS         // until it reaches the carrier-owned expression beneath any number of
+//RS         // parentheses; otherwise `(fallible())` would acquire a second `Try`
+//RS         // while the unparenthesized form did not.
+//RS         if suppress_auto && !matches!(e, Expr::Paren(..)) {
+//RS             self.failure_auto_root_suppression -= 1;
+//RS         }
+//RS         if !self.enter_source_nesting(e.span()) {
+//RS             return None;
+//RS         }
+//RS         self.check_scoped_loan_read(e);
+//RS         // A callable's Result contract is the carrier at its boundary, but
+//RS         // ordinary composite expressions consume the success value. Keep the
+//RS         // carrier expectation for direct calls and explicit constructors so
+//RS         // `return fallible()` and `return Ok/Err(...)` stay intact; expose the
+//RS         // success type to everything else so a nested call can propagate at
+//RS         // its own expression boundary.
+//RS         let saved_expected = self.expected_type.clone();
+//RS         let preserves_result_carrier = matches!(
+//RS             e.without_parens(),
+//RS             Expr::Call(..)
+//RS                 | Expr::MethodCall { .. }
+//RS                 | Expr::CallValue { .. }
+//RS                 | Expr::Lambda(..)
+//RS                 | Expr::Ok(..)
+//RS                 | Expr::Err(..)
+//RS                 | Expr::Try(..)
+//RS                 | Expr::If { .. }
+//RS         ) || matches!(
+//RS             e.without_parens(),
+//RS             Expr::EnumLit {
+//RS                 type_name,
+//RS                 variant,
+//RS                 leading_dot: true,
+//RS                 ..
+//RS             } if type_name.is_empty()
+//RS                 && matches!(
+//RS                     contextual_literal(variant),
+//RS                     Some(ContextualLiteral::Ok | ContextualLiteral::Err)
+//RS                 )
+//RS         );
+//RS         if !preserves_result_carrier {
+//RS             if let Some(Type::Result { ok, .. }) = saved_expected.as_ref() {
+//RS                 self.expected_type = Some((**ok).clone());
+//RS             }
+//RS         }
+//RS         if matches!(e, Expr::If { .. }) {
+//RS             self.note_carrier_chain_subject(e);
+//RS         }
+//RS         // Card #1440: an else-less all-pattern dispatch chain proves coverage
+//RS         // once (E0307) before ordinary per-level inference walks its arms. A
+//RS         // pattern table with an `else` arm gets the L0303 check (#3716).
+//RS         if matches!(e, Expr::If { cond, .. } if matches!(cond.as_ref(), Expr::PatternTest { .. }))
+//RS             || (matches!(e, Expr::If { .. }) && noelse_terminated(e))
+//RS         {
+//RS             self.check_noelse_dispatch_chain(e);
+//RS         }
+//RS         let result = if let Some(result) = self.fold_reflect_call(e) {
+//RS             result
+//RS         } else {
+//RS             // Nested `id(id(...))` must not inherit infer_inner's match-arm
+//RS             // frame: a 96-deep cliff overflowed the compiler stack while still
+//RS             // under MAX_SOURCE_NESTING. Keep that Call shortcut. Contextual
+//RS             // `Ok`/`Err`/`Val`/`None` constructors parse as Calls and must be
+//RS             // rewritten first; otherwise they take the function-lookup path
+//RS             // and surface E0102.
+//RS             if matches!(e, Expr::Call(_)) {
+//RS                 self.normalize_contextual_expr(e);
+//RS             }
+//RS             if self.implicit_loop_subject_depth > 0
+//RS                 || self
+//RS                     .expected_type
+//RS                     .as_ref()
+//RS                     .is_some_and(|ty| {
+//RS                         matches!(ty, Type::Fn { .. })
+//RS                             || matches!(ty, Type::Named(name) if name == "UIShortcut")
+//RS                     })
+//RS             {
+//RS                 // CallValue dispatch skips infer_inner; canonicalize a bare
+//RS                 // method head before it can be mistaken for a field projection.
+//RS                 normalize_bare_method_head(e);
+//RS             }
+//RS             if matches!(e, Expr::Call(_) | Expr::CallValue { .. }) {
+//RS                 self.infer_call_like(e)
+//RS             } else {
+//RS                 self.infer_checked(e)
+//RS             }
+//RS         };
+//RS         self.expected_type = saved_expected;
+//RS         let result = if suppress_auto {
+//RS             result
+//RS         } else {
+//RS             self.auto_propagate_call(e, result)
+//RS         };
+//RS         if self.expr_definitely_diverges(e)
+//RS             || result
+//RS                 .as_ref()
+//RS                 .is_some_and(|ty| matches!(ty, Type::Named(name) if name == Syntax::TYPE_NEVER))
+//RS         {
+//RS             self.flow.reachable = false;
+//RS         }
+//RS         if result
+//RS             .as_ref()
+//RS             .is_some_and(crate::Sema::type_uses_default_int)
+//RS         {
+//RS             self.uses_exact_int = true;
+//RS         }
+//RS         self.leave_source_nesting();
+//RS         result
+//RS     }
+//RS 
+//RS     /// Infer one carrier-owned root while leaving child expressions eligible
+//RS     /// for the same automatic propagation rule.
+//RS     pub(crate) fn infer_without_auto_propagation(&mut self, e: &mut Expr) -> Option<Type> {
+//RS         let previous = self.failure_auto_root_suppression;
+//RS         self.failure_auto_root_suppression += 1;
+//RS         let result = self.infer(e);
+//RS         // A nesting-limit failure can return before the token reaches the
+//RS         // expression below transparent grouping. Do not let that failed root
+//RS         // suppress a later, unrelated expression.
+//RS         if self.failure_auto_root_suppression > previous {
+//RS             self.failure_auto_root_suppression = previous;
+//RS         }
+//RS         result
+//RS     }
+//RS 
+//RS     pub(crate) fn infer_with_expected(&mut self, e: &mut Expr, expected: &Type) -> Option<Type> {
+//RS         if crate::Sema::type_uses_default_int(expected) {
+//RS             self.uses_exact_int = true;
+//RS         }
+//RS         let saved = self.expected_type.replace(expected.clone());
+//RS         let result = self.infer(e);
+//RS         self.expected_type = saved;
+//RS         result
+//RS     }
+//RS     /// Infer a value that is being placed into an aggregate slot.
+//RS     ///
+//RS     /// A lambda in a list/tuple/map (or another owning literal) is retained
+//RS     /// after the current expression, so its captures must use the escaping
+//RS     /// ownership path even when the aggregate element has an expected type.
+//RS     /// Keep this context local: `infer_owning_value` also serves direct local
+//RS     /// bindings, where a non-escaping `FnMut` may borrow its captures.
+//RS     fn infer_aggregate_value(
+//RS         &mut self,
+//RS         e: &mut Expr,
+//RS         expected: Option<&Type>,
+//RS     ) -> Option<Type> {
+//RS         let escapes = matches!(e.without_parens(), Expr::Lambda(_));
+//RS         let saved_escapes = self.lambda_escapes;
+//RS         if escapes {
+//RS             self.lambda_escapes = true;
+//RS         }
+//RS         let result = match expected {
+//RS             Some(expected) => self.infer_with_expected(e, expected),
+//RS             None => self.infer_owning_value(e),
+//RS         };
+//RS         self.lambda_escapes = saved_escapes;
+//RS         result
+//RS     }
+//RS 
+//RS     pub(super) fn implicit_copy_target(&mut self, e: &Expr, ty: &Type) -> Option<Type> {
+//RS         if let Some(target) = owned_type_for_read_view(ty) {
+//RS             return Some(target);
+//RS         }
+//RS         if matches!(e, Expr::Ident(name, _) if self.is_string_view(name))
+//RS             && matches!(ty, Type::String)
+//RS         {
+//RS             return Some(Type::String);
+//RS         }
+//RS         // Read-only list, buffer, and matrix windows keep the selected
+//RS         // element's surface type when indexed (for example, `window[0]` is a
+//RS         // `String`, not a `View<String>`). Their borrow shape lives in the
+//RS         // provenance graph, so the owning-copy rule must consult that graph
+//RS         // instead of looking only for the explicit `View<T>` type. A mutable
+//RS         // window is never an implicit copy source: its `Write` fact keeps the
+//RS         // existing refusal path live. Keep the path empty so a struct
+//RS         // containing a declared view field is not copied wholesale.
+//RS         let sources = self.view_call_sources(e);
+//RS         if !sources.is_empty()
+//RS             && sources.iter().all(|(path, _, kind, access)| {
+//RS                 path.is_empty()
+//RS                     && *access == crate::Sema::ViewAccess::Read
+//RS                     && matches!(
+//RS                         kind,
+//RS                         crate::Sema::ViewKind::List
+//RS                             | crate::Sema::ViewKind::Buffer
+//RS                             | crate::Sema::ViewKind::Matrix
+//RS                     )
+//RS             })
+//RS         {
+//RS             return Some(ty.clone());
+//RS         }
+//RS         if !type_is_copy(ty)
+//RS             && matches!(e, Expr::Ident(..) | Expr::Field(..) | Expr::Index { .. })
+//RS             && expr_root_ident(e).is_some_and(|root| {
+//RS                 self.lookup(root).is_some_and(|info| {
+//RS                     matches!(
+//RS                         info.param_conv,
+//RS                         Some(AccessConvention::Read) | Some(AccessConvention::Write)
+//RS                     )
+//RS                 })
+//RS             })
+//RS         {
+//RS             return Some(ty.clone());
+//RS         }
+//RS         None
+//RS     }
+//RS 
+//RS     /// Infer an expression that is about to occupy an owning aggregate slot.
+//RS     ///
+//RS     /// Most owning positions provide an expected type, so `infer_checked` can
+//RS     /// insert the copy while it is checking that type. Collection literals,
+//RS     /// tuple/map entries, and unannotated payloads do not always have that
+//RS     /// context. Give those positions the same default materialization rule,
+//RS     /// with the same `Expr::Copy` node and the same policy gate.
+//RS     pub(crate) fn infer_owning_value(&mut self, e: &mut Expr) -> Option<Type> {
+//RS         let owns_if_arms = matches!(e.without_parens(), Expr::If { .. })
+//RS             && !matches!(
+//RS                 self.expected_type.as_ref(),
+//RS                 Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
+//RS             );
+//RS         let saved_if_depth = self.owning_if_value_depth;
+//RS         if owns_if_arms {
+//RS             self.owning_if_value_depth += 1;
+//RS         }
+//RS         let result = self.infer_owning_value_inner(e);
+//RS         self.owning_if_value_depth = saved_if_depth;
+//RS         result
+//RS     }
+//RS 
+//RS     fn infer_owning_value_inner(&mut self, e: &mut Expr) -> Option<Type> {
+//RS         let default_copy = !self.copies_explicit();
+//RS         let borrowed_param_place = matches!(e, Expr::Field(..) | Expr::Index { .. })
+//RS             && crate::Sema::Diagnostics::expr_root_ident(e).is_some_and(|root| {
+//RS                 self.lookup(root).is_some_and(|info| {
+//RS                     matches!(
+//RS                         info.param_conv,
+//RS                         Some(AccessConvention::Read) | Some(AccessConvention::Write)
+//RS                     )
+//RS                 })
+//RS             });
+//RS         let saved_borrow_ctx = self.borrow_ctx;
+//RS         let saved_string_view_read = self.allow_string_view_read;
+//RS         if default_copy && borrowed_param_place {
+//RS             // A borrowed parameter projection is readable here because this
+//RS             // caller is an owning slot; defer the ownership decision until the
+//RS             // source type is known, then materialize it below.
+//RS             self.borrow_ctx = true;
+//RS         }
+//RS         if default_copy && matches!(e, Expr::Ident(name, _) if self.is_string_view(name)) {
+//RS             // String views keep `String` as their Jet type. Allow the read long
+//RS             // enough to turn it into the shared owning-copy node.
+//RS             self.allow_string_view_read = true;
+//RS         }
+//RS         let ty = self.infer(e);
+//RS         self.borrow_ctx = saved_borrow_ctx;
+//RS         self.allow_string_view_read = saved_string_view_read;
+//RS         let Some(ty) = ty else {
+//RS             return None;
+//RS         };
+//RS         if !default_copy
+//RS             || matches!(
+//RS                 self.expected_type.as_ref(),
+//RS                 Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
+//RS             )
+//RS         {
+//RS             return Some(ty);
+//RS         }
+//RS         let Some(target) = self.implicit_copy_target(e, &ty) else {
+//RS             return Some(ty);
+//RS         };
+//RS         if self
+//RS             .expected_type
+//RS             .as_ref()
+//RS             .is_some_and(|expected| expected != &target)
+//RS         {
+//RS             return Some(ty);
+//RS         }
+//RS         if self.is_cloneable_type(&target) {
+//RS             Some(self.insert_implicit_copy(e, &ty, &target))
+//RS         } else {
+//RS             Some(ty)
+//RS         }
+//RS     }
+//RS     /// Materialize a plain owned local read when it is the value of an
+//RS     /// owning `if` arm. Direct list/tuple/map elements retain their existing
+//RS     /// move semantics; only this conditional arm boundary needs the extra
+//RS     /// copy because the conditional itself is the owning value.
+//RS     fn materialize_if_arm_local_read(&mut self, e: &mut Expr, ty: &Type) {
+//RS         let Expr::Ident(name, name_span) = e else {
+//RS             return;
+//RS         };
+//RS         if type_is_copy(ty) {
+//RS             return;
+//RS         }
+//RS         if self.copies_explicit() {
+//RS             let diagnostic = Diagnostic::error(
+//RS                 "E0120",
+//RS                 format!("`{name}` was not copied here, so it cannot fill an owned conditional value"),
+//RS                 "this arm supplies a non-Copy value to an owning conditional result under `copies: .Explicit`"
+//RS                     .to_string(),
+//RS                 format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+//RS                 Some(*name_span),
+//RS             );
+//RS             self.diags
+//RS                 .push(self.with_ownership_copy_edit(diagnostic, *name_span, Some(ty)));
+//RS             return;
+//RS         }
+//RS         if self.type_is_single_use(ty) || !self.is_cloneable_type(ty) {
+//RS             return;
+//RS         }
+//RS         let span = e.span();
+//RS         let old = std::mem::replace(e, Expr::Absent(span));
+//RS         *e = Expr::Copy(Box::new(old), span);
+//RS     }
+//RS 
+//RS     fn active_arithmetic_policy(
+//RS         &self,
+//RS         operation: crate::AST::ArithmeticOperation,
+//RS         operation_span: Span,
+//RS     ) -> Option<crate::AST::ArithmeticPolicyFact> {
+//RS         self.arithmetic_policy_stack
+//RS             .last()
+//RS             .copied()
+//RS             .map(|mut fact| {
+//RS                 fact.operation_span = operation_span;
+//RS                 fact.operation = Some(operation);
+//RS                 fact
+//RS             })
+//RS     }
+//RS 
+//RS     fn policy_call(
+//RS         &self,
+//RS         mode: crate::AST::ArithmeticMode,
+//RS         inner: Expr,
+//RS         fact: crate::AST::ArithmeticPolicyFact,
+//RS     ) -> Expr {
+//RS         let span = fact.operation_span;
+//RS         Expr::Call(Call {
+//RS             name: mode.builtin().to_string(),
+//RS             name_span: span,
+//RS             type_args: Vec::new(),
+//RS             args: vec![crate::AST::CallArg {
+//RS                 convention: AccessConvention::Read,
+//RS                 expr: inner,
+//RS                 span,
+//RS                 flags: CallArgFlags {
+//RS                     arithmetic_policy: Some(fact),
+//RS                     ..CallArgFlags::default()
+//RS                 },
+//RS                 label: None,
+//RS                 spread: false,
+//RS             }],
+//RS             resolved_ret: None,
+//RS             range_checked: false,
+//RS             widen_approx: false,
+//RS         })
+//RS     }
+//RS 
+//RS     fn push_hidden_cost_lint(
+//RS         &mut self,
+//RS         operation: &str,
+//RS         fix: &str,
+//RS         span: Span,
+//RS         edit: TextEdit,
+//RS     ) {
+//RS         let diagnostic = Diagnostic::from_row(
+//RS             "L2510",
+//RS             &[("operation", operation), ("fix", fix)],
+//RS             Some(span),
+//RS         )
+//RS         .with_edit(edit);
+//RS         if !self.diags.iter().any(|previous| {
+//RS             previous.code == diagnostic.code
+//RS                 && previous.span == diagnostic.span
+//RS                 && previous.what == diagnostic.what
+//RS         }) {
+//RS             self.diags.push(diagnostic);
+//RS         }
+//RS     }
+//RS 
+//RS     fn report_hidden_cost_in_loop(&mut self, e: &Expr, source: &Type, target: &Type) {
+//RS         if self.loop_depth == 0 || !type_owns_heap(target, self.registry) {
+//RS             return;
+//RS         }
+//RS         let view_source = owned_type_for_read_view(source).is_some()
+//RS             || (matches!(source, Type::String)
+//RS                 && matches!(e, Expr::Ident(name, _) if self.is_string_view(name)))
+//RS             || (matches!(source, Type::List(_)) && {
+//RS                 let sources = self.view_call_sources(e);
+//RS                 !sources.is_empty()
+//RS                     && sources.into_iter().all(|(_, _, kind, access)| {
+//RS                         access == crate::Sema::ViewAccess::Read
+//RS                             && matches!(
+//RS                                 kind,
+//RS                                 crate::Sema::ViewKind::List
+//RS                                     | crate::Sema::ViewKind::Buffer
+//RS                                     | crate::Sema::ViewKind::Matrix
+//RS                             )
+//RS                     })
+//RS             });
+//RS         // A generic owning clone has no safe local rewrite that reduces its
+//RS         // cost. Keep this lint for view materialization only, where the
+//RS         // explicit `~` source edit is concrete and applicable.
+//RS         if !view_source {
+//RS             return;
+//RS         }
+//RS         let Some(edit) = super::stdlib_lints::explicit_copy_edit(self, e) else {
+//RS             return;
+//RS         };
+//RS         let operation = format!("this copy of `{}` view into an owned slot", target.show());
+//RS         self.push_hidden_cost_lint(
+//RS             &operation,
+//RS             Syntax::SIGIL_COPY,
+//RS             e.span(),
+//RS             edit,
+//RS         );
+//RS     }
+//RS 
+//RS     pub(crate) fn insert_implicit_copy(
+//RS         &mut self,
+//RS         e: &mut Expr,
+//RS         source: &Type,
+//RS         target: &Type,
+//RS     ) -> Type {
+//RS         let span = e.span();
+//RS         self.report_hidden_cost_in_loop(e, source, target);
+//RS         let old = std::mem::replace(e, Expr::Absent(span));
+//RS         *e = Expr::Copy(Box::new(old), span);
+//RS         if matches!(target, Type::Shared(_)) {
+//RS             self.record_memory_event(crate::Sema::MemoryEvent::new(
+//RS                 crate::Sema::MemoryEventKind::RetainRelease,
+//RS                 span,
+//RS                 format!(
+//RS                     "implicit copy of `{}` retains a shared reference",
+//RS                     target.show()
+//RS                 ),
+//RS             ));
+//RS         } else if type_owns_heap(target, self.registry) {
+//RS             self.record_memory_event(crate::Sema::MemoryEvent::new(
+//RS                 crate::Sema::MemoryEventKind::Allocation,
+//RS                 span,
+//RS                 format!(
+//RS                     "implicit copy of `{}` allocates owned heap data",
+//RS                     target.show()
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         target.clone()
+//RS     }
+//RS 
+//RS     /// D-FOUND-LITERAL1=A (card #2789): an expected nominal type may opt into
+//RS     /// the existing `Int`/`Float` literal carriers through one validated
+//RS     /// compile-time constructor. This rewrites only the typed tree; all
+//RS     /// backends continue to lower an ordinary resolved method call.
+//RS     fn rewrite_contextual_literal(&mut self, e: &mut Expr) {
+//RS         let expected = match self.expected_type.clone() {
+//RS             Some(Type::Tagged { inner, .. }) => *inner,
+//RS             Some(expected) => expected,
+//RS             None => return,
+//RS         };
+//RS         let (type_name, owner_type_args) = match &expected {
+//RS             Type::Named(name) => (name.clone(), Vec::new()),
+//RS             Type::Apply { name, args } => (name.clone(), args.clone()),
+//RS             _ => return,
+//RS         };
+//RS         let (capability, source) = match e {
+//RS             Expr::Int(..) => (crate::Generics::LITERAL_INT, true),
+//RS             Expr::Float(..) => (crate::Generics::LITERAL_FLOAT, false),
+//RS             _ => return,
+//RS         };
+//RS         if !self.type_implements_trait_for_name(&type_name, capability) {
+//RS             return;
+//RS         }
+//RS         let span = e.span();
+//RS         let original = std::mem::replace(e, Expr::Absent(span));
+//RS         let argument = match (source, original) {
+//RS             (true, literal @ Expr::Int(..)) => literal,
+//RS             (false, Expr::Float(value, _, _, raw)) => Expr::Str(
+//RS                 vec![StrPart::Lit(raw.unwrap_or_else(|| value.to_string()))],
+//RS                 span,
+//RS             ),
+//RS             (_, original) => {
+//RS                 *e = original;
+//RS                 return;
+//RS             }
+//RS         };
+//RS         *e = Expr::MethodCall {
+//RS             receiver: Box::new(Expr::Ident(type_name, span)),
+//RS             method: crate::Generics::LITERAL_FROM_LITERAL.to_string(),
+//RS             method_span: span,
+//RS             owner_type_args,
+//RS             type_args: Vec::new(),
+//RS             args: vec![CallArg {
+//RS                 convention: AccessConvention::Read,
+//RS                 expr: argument,
+//RS                 span,
+//RS                 flags: CallArgFlags::default(),
+//RS                 label: None,
+//RS                 spread: false,
+//RS             }],
+//RS             recv_type: None,
+//RS             resolved_ret: None,
+//RS             operator_rhs: None,
+//RS             checked_widen: false,
+//RS         };
+//RS     }
+//RS 
+//RS     fn infer_call_like(&mut self, e: &mut Expr) -> Option<Type> {
+//RS         if super::optional_chain::is_optional_method_call(e) {
+//RS             return self.infer_optional_method_call(e);
+//RS         }
+//RS         match e {
+//RS             Expr::Call(call) => {
+//RS                 let span = call.name_span;
+//RS                 self.clear_uninit_mut_args(&call.args);
+//RS                 match self.check_call(call, true) {
+//RS                     Some(Some(t)) => Some(t),
+//RS                     Some(None) => {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0116",
+//RS                             format!("`{}` doesn't hand back a value", call.name),
+//RS                             "a call is a value only when its function declares a result after the parameter list"
+//RS                                 .to_string(),
+//RS                             format!(
+//RS                                 "inside an arm, wrap the call in `{{ … }}`; otherwise put `{}` on its own line, or declare it as `fn {}(…) Type -> …`",
+//RS                                 call.name, call.name
+//RS                             ),
+//RS                             Some(span),
+//RS                         ));
+//RS                         None
+//RS                     }
+//RS                     None => None,
+//RS                 }
+//RS             }
+//RS             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
+//RS             other => {
+//RS                 jet_foundation::ice!(
+//RS                     Some(other.span()),
+//RS                     "infer_call_like requires Call or CallValue, got {other:?}"
+//RS                 )
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn infer_checked(&mut self, e: &mut Expr) -> Option<Type> {
+//RS         if super::optional_chain::is_optional_method_call(e) {
+//RS             return self.infer_optional_method_call(e);
+//RS         }
+//RS         self.rewrite_contextual_literal(e);
+//RS         if matches!(
+//RS             e,
+//RS             Expr::Field(..) | Expr::Index { .. } | Expr::MethodCall { .. }
+//RS         ) {
+//RS             if let Some(ty) = self.fold_comptime_struct_field(e) {
+//RS                 return Some(ty);
+//RS             }
+//RS         }
+//RS         // D-QUANTITY-CONVERT1=B: destination-owned exact conversion is
+//RS         // fallible at runtime; the explicit `_rounded` spelling carries the
+//RS         // ratified mode and destination decimal precision. Codegen emits these
+//RS         // real methods on the concrete destination type from the same UnitFact
+//RS         // coefficients.
+//RS         let conversion_span = e.span();
+//RS         let explicit_unit_conversion = if let Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             resolved_ret,
+//RS             ..
+//RS         } = &mut *e
+//RS         {
+//RS             if matches!(args.len(), 1 | 3) && method.starts_with("from_") {
+//RS                 if let Expr::Ident(destination_name, _) = receiver.as_ref() {
+//RS                     if let Some((destination_name, destination_fact)) =
+//RS                         self.unit_fact_for_type(&Type::Named(destination_name.clone()))
+//RS                     {
+//RS                         let source_ty = self.infer(&mut args[0].expr);
+//RS                         if let Some((source_name, source_fact)) = source_ty
+//RS                             .as_ref()
+//RS                             .and_then(|ty| self.unit_fact_for_type(ty))
+//RS                         {
+//RS                             let source_leaf =
+//RS                                 source_name.rsplit('.').next().unwrap_or(&source_name);
+//RS                             let expected = Syntax::conversion_method_for_source(source_leaf);
+//RS                             let exact = args.len() == 1 && method == &expected;
+//RS                             let rounded = args.len() == 3
+//RS                                 && method == &format!("{expected}_rounded")
+//RS                                 && matches!(
+//RS                                     &args[1].expr,
+//RS                                     Expr::EnumLit { type_name, variant, args, .. }
+//RS                                         if type_name.is_empty()
+//RS                                             && Syntax::unit_rounding_mode(variant).is_some()
+//RS                                             && args.is_empty()
+//RS                                 )
+//RS                                 && matches!(
+//RS                                     args[2].label.as_ref(),
+//RS                                     Some((label, _)) if label == "digits"
+//RS                                 );
+//RS                             let measured_crossing =
+//RS                                 source_fact.is_measured() || destination_fact.is_measured();
+//RS                             let rounded_gate = rounded
+//RS                                 && crate::Sema::knowledge_gate_allows(
+//RS                                     crate::Sema::KnowledgePlane::Unit,
+//RS                                     crate::Sema::KnowledgeGate::RoundedConversion,
+//RS                                 );
+//RS                             if ((exact && !measured_crossing) || rounded_gate)
+//RS                                 && source_fact.package == destination_fact.package
+//RS                                 && source_fact.family == destination_fact.family
+//RS                                 && source_fact.dimension == destination_fact.dimension
+//RS                                 && source_fact.kind == destination_fact.kind
+//RS                             {
+//RS                                 if !source_fact.conversion_is_finite_to(&destination_fact) {
+//RS                                     self.diags.push(
+//RS                                         self.unit_conversion_overflow_diagnostic(conversion_span),
+//RS                                     );
+//RS                                     return Some(Type::Named(destination_name));
+//RS                                 }
+//RS                                 if rounded {
+//RS                                     self.expect_core_arg(method, 2, &Type::Int, &mut args[2]);
+//RS                                     if matches!(
+//RS                                         &args[2].expr,
+//RS                                         Expr::Unary(
+//RS                                             crate::AST::UnOp::Neg,
+//RS                                             inner,
+//RS                                             _
+//RS                                         ) if matches!(inner.as_ref(), Expr::Int(..))
+//RS                                     ) {
+//RS                                         self.diags.push(Diagnostic::error(
+//RS                                             "E0127",
+//RS                                             "rounded unit conversion needs nonnegative digits"
+//RS                                                 .to_string(),
+//RS                                             "digits counts destination decimal places".to_string(),
+//RS                                             "write `digits: 0` or another nonnegative Int"
+//RS                                                 .to_string(),
+//RS                                             Some(args[2].expr.span()),
+//RS                                         ));
+//RS                                     }
+//RS                                 }
+//RS                                 let converted = if measured_crossing {
+//RS                                     Type::Apply {
+//RS                                         name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+//RS                                         args: vec![Type::Float],
+//RS                                     }
+//RS                                 } else {
+//RS                                     Type::Named(destination_name)
+//RS                                 };
+//RS                                 let ty = Type::Result {
+//RS                                     ok: Box::new(converted),
+//RS                                     err: Box::new(Type::String),
+//RS                                 };
+//RS                                 *resolved_ret = Some(ty.clone());
+//RS                                 Some(ty)
+//RS                             } else {
+//RS                                 None
+//RS                             }
+//RS                         } else {
+//RS                             None
+//RS                         }
+//RS                     } else {
+//RS                         None
+//RS                     }
+//RS                 } else {
+//RS                     None
+//RS                 }
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         } else {
+//RS             None
+//RS         };
+//RS         if let Some(ty) = explicit_unit_conversion {
+//RS             return Some(ty);
+//RS         }
+//RS 
+//RS         let borrowed = std::mem::take(&mut self.borrow_ctx);
+//RS         let implicit_string_view_copy = !borrowed
+//RS             && !self.copies_explicit()
+//RS             && matches!(self.expected_type.as_ref(), Some(Type::String))
+//RS             && matches!(e, Expr::Ident(name, _) if self.is_string_view(name));
+//RS         let saved_string_view_read = self.allow_string_view_read;
+//RS         if implicit_string_view_copy {
+//RS             self.allow_string_view_read = true;
+//RS         }
+//RS         // D-FMTPARENS1=A: grouping is transparent, so a borrow position stays
+//RS         // a borrow position for the parenthesized expression.
+//RS         if borrowed && matches!(e, Expr::Paren(..)) {
+//RS             self.borrow_ctx = true;
+//RS         }
+//RS         let ty = self.infer_inner(e);
+//RS         self.allow_string_view_read = saved_string_view_read;
+//RS         if let Some(aggregate_ty) = ty.as_ref() {
+//RS             let constructs_value = matches!(
+//RS                 e,
+//RS                 Expr::ListLit(..)
+//RS                     | Expr::MapLit(..)
+//RS                     | Expr::TupleLit(..)
+//RS                     | Expr::Call(..)
+//RS                     | Expr::MethodCall { .. }
+//RS                     | Expr::CallValue { .. }
+//RS                     | Expr::StructLit { .. }
+//RS                     | Expr::EnumLit { .. }
+//RS                     | Expr::Present(..)
+//RS                     | Expr::Ok(..)
+//RS                     | Expr::Err(..)
+//RS             );
+//RS             if constructs_value && self.cell_guard_storage_is_unsupported(aggregate_ty) {
+//RS                 self.report_cell_guard_storage(
+//RS                     format!(
+//RS                         "a Cell guard cannot be stored inside `{}`",
+//RS                         aggregate_ty.show()
+//RS                     ),
+//RS                     e.span(),
+//RS                 );
+//RS             }
+//RS         }
+//RS         if !borrowed {
+//RS             if !self.copies_explicit() {
+//RS                 if let Some((source, target)) = ty.as_ref().and_then(|source| {
+//RS                     self.implicit_copy_target(e, source)
+//RS                         .map(|target| (source.clone(), target))
+//RS                 }) {
+//RS                     if self
+//RS                         .expected_type
+//RS                         .as_ref()
+//RS                         .is_some_and(|expected| self.nominal_type_identity(expected, &target))
+//RS                         && self.is_cloneable_type(&target)
+//RS                     {
+//RS                         return Some(self.insert_implicit_copy(e, &source, &target));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if let Some(t) = &ty {
+//RS                 let borrowed_param_place = !type_is_copy(t)
+//RS                     && matches!(e, Expr::Field(..) | Expr::Index { .. })
+//RS                     && expr_root_ident(e).is_some_and(|root| {
+//RS                         self.lookup(root).is_some_and(|info| {
+//RS                             matches!(
+//RS                                 info.param_conv,
+//RS                                 Some(AccessConvention::Read) | Some(AccessConvention::Write)
+//RS                             )
+//RS                         })
+//RS                     });
+//RS                 // D-MEM-COPYSEM1=A: a borrowed window (`View`/`ViewMut`/`Pin`)
+//RS                 // is not a value to duplicate. An `Expr::Copy` over a read view
+//RS                 // MEANS "materialize an owned value", so it erases the window's
+//RS                 // owner relation (`view_call_sources`' `Expr::Copy` arm) — the
+//RS                 // returned/bound window would then prove no source (E2307) and
+//RS                 // a later owner replacement would go unreported. The one place a
+//RS                 // read view becomes owned is the `implicit_copy_target` branch
+//RS                 // above, which fires only when the destination type IS the owned
+//RS                 // target (`View<T>` -> `[T]`, `View<str>` -> `String`).
+//RS                 if !borrowed_param_place
+//RS                     && !type_is_copy(t)
+//RS                     && !crate::Sema::CheckerCore::is_core_view_generic(t)
+//RS                     && field_read_to_clone(e, self.registry, self.imports)
+//RS                 {
+//RS                     if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(e) {
+//RS                         let borrowed_param = self.lookup(root).is_some_and(|info| {
+//RS                             matches!(
+//RS                                 info.param_conv,
+//RS                                 Some(AccessConvention::Read) | Some(AccessConvention::Write)
+//RS                             )
+//RS                         });
+//RS                         if borrowed_param {
+//RS                             let path = field_path(e).unwrap_or_else(|| root.to_string());
+//RS                             let diagnostic = Diagnostic::error(
+//RS                                 "E0120",
+//RS                                 format!(
+//RS                                     "`{path}` is borrowed, so it cannot escape as an owned value"
+//RS                                 ),
+//RS                                 format!(
+//RS                                     "`{root}` is a parameter with read access; its fields are borrowed with it"
+//RS                                 ),
+//RS                                 format!(
+//RS                                     "copy it explicitly with `{}{path}`, or take `{root}` with the move marker `^` (`^{root}`)",
+//RS                                     Syntax::SIGIL_COPY
+//RS                                 ),
+//RS                                 Some(e.span()),
+//RS                             );
+//RS                             self.diags.push(self.with_ownership_copy_edit(
+//RS                                 diagnostic,
+//RS                                 crate::Sema::CheckerOwnership::copy_edit_anchor(e),
+//RS                                 Some(t),
+//RS                             ));
+//RS                             return ty;
+//RS                         }
+//RS                     }
+//RS                     // Only auto-copy when the field type is actually cloneable.
+//RS                     // A task-handle list (and other non-cloneable fields) must
+//RS                     // partial-move; wrapping them in `Copy` skips the E0211
+//RS                     // check and becomes a rustc rejection the user sees as an
+//RS                     // ICE (I2).
+//RS                     if self.is_cloneable_type(t) {
+//RS                         // D-CAP2 (D-MEM1/S4): the same `copy` node the user can write
+//RS                         // explicitly — one mechanism for "duplicate this value",
+//RS                         // whether the compiler inserts it or the user spells it.
+//RS                         let span = e.span();
+//RS                         let old = std::mem::replace(e, Expr::Absent(span));
+//RS                         *e = Expr::Copy(Box::new(old), span);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         ty
+//RS     }
+//RS 
+//RS     pub(crate) fn normalize_imported_core_expr(&mut self, e: &mut Expr) {
+//RS         let name = match &*e {
+//RS             Expr::Call(call) => call.name.clone(),
+//RS             _ => return,
+//RS         };
+//RS         if self.funcs.contains_key(&name) && !self.core_item_imports.contains_key(&name) {
+//RS             return;
+//RS         }
+//RS         let Some(item) = self.core_item_imports.get(&name).cloned() else {
+//RS             return;
+//RS         };
+//RS         crate::AST::rewrite_core_item_call(e, &item);
+//RS     }
+//RS 
+//RS     pub(crate) fn normalize_prelude_expr(&mut self, e: &mut Expr) {
+//RS         let (name, span) = match &*e {
+//RS             Expr::Call(call) => (call.name.clone(), call.name_span),
+//RS             _ => return,
+//RS         };
+//RS         if self.no_prelude
+//RS             || self.core_item_imports.contains_key(&name)
+//RS             || self.funcs.contains_key(&name)
+//RS             || self.lookup(&name).is_some()
+//RS         {
+//RS             return;
+//RS         }
+//RS         let Some(entry) = CorePrelude::entry(&name) else {
+//RS             return;
+//RS         };
+//RS         match entry.target {
+//RS             Target::Core { module, item } => {
+//RS                 let Some(alias) = crate::Sema::Prelude::core_alias_for(self.core_imports, module)
+//RS                     .map(str::to_owned)
+//RS                 else {
+//RS                     return;
+//RS                 };
+//RS                 let old = std::mem::replace(e, Expr::Absent(span));
+//RS                 let Expr::Call(call) = old else {
+//RS                     unreachable!("prelude normalization only replaces calls");
+//RS                 };
+//RS                 *e = Expr::MethodCall {
+//RS                     receiver: Box::new(Expr::Ident(alias.to_string(), call.name_span)),
+//RS                     method: item.to_string(),
+//RS                     method_span: call.name_span,
+//RS                     owner_type_args: Vec::new(),
+//RS                     type_args: call.type_args,
+//RS                     args: call.args,
+//RS                     recv_type: None,
+//RS                     resolved_ret: call.resolved_ret,
+//RS                     operator_rhs: None,
+//RS                     checked_widen: false,
+//RS                 };
+//RS             }
+//RS             // The existing assertion kernel is shared by AOT, JIT, and the
+//RS             // interpreter. These readable names only select that kernel.
+//RS             Target::Builtin if name == "assert" => {
+//RS                 if let Expr::Call(call) = e {
+//RS                     call.name = Syntax::BUILTIN_ASSERT.to_string();
+//RS                 }
+//RS             }
+//RS             Target::Builtin if name == "assert_eq" => {
+//RS                 if let Expr::Call(call) = e {
+//RS                     call.name = Syntax::BUILTIN_ASSERT_EQ.to_string();
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     fn normalize_contextual_expr(&mut self, e: &mut Expr) {
+//RS         self.normalize_imported_core_expr(e);
+//RS         self.normalize_prelude_expr(e);
+//RS         // D-FAIL-ERROR1=A: labels make the default-error constructor
+//RS         // unambiguous. Outside a Result expectation, the one-message form is
+//RS         // also the constructor. In a Result expectation, one positional value
+//RS         // remains the existing typed `Err(e)` arm until sema sees its type.
+//RS         let err_constructor = match e {
+//RS             Expr::Call(call)
+//RS                 if call.name == Syntax::LIT_ERR
+//RS                     && !self.funcs.contains_key(&call.name)
+//RS                     && (call.args.len() != 1
+//RS                         || call.args.first().is_some_and(|arg| arg.label.is_some())
+//RS                         || !matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))) =>
+//RS             {
+//RS                 let wrap = matches!(self.expected_type.as_ref(), Some(Type::Result { .. }));
+//RS                 let placeholder = Expr::Absent(call.name_span);
+//RS                 let Expr::Call(call) = std::mem::replace(e, placeholder) else {
+//RS                     unreachable!()
+//RS                 };
+//RS                 Some(self.default_err_value(call, wrap))
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS         if let Some(replacement) = err_constructor {
+//RS             *e = replacement;
+//RS         }
+//RS 
+//RS         // D-SHAPE3b: contextual Optional/Result spellings share one generic
+//RS         // literal path before sema lowers them to the existing dedicated nodes.
+//RS         // A user function still wins for bare `Ok`/`Err` calls.
+//RS         let contextual_result = match &mut *e {
+//RS             Expr::Call(call)
+//RS                 if !self.funcs.contains_key(&call.name)
+//RS                     && contextual_literal(&call.name) == Some(ContextualLiteral::Ok)
+//RS                     && call.args.is_empty()
+//RS                     && matches!(
+//RS                         self.expected_type.as_ref(),
+//RS                         Some(Type::Result { ok, .. })
+//RS                             if matches!(
+//RS                                 ok.as_ref(),
+//RS                                 Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE
+//RS                             )
+//RS                     ) =>
+//RS             {
+//RS                 let span = call.name_span;
+//RS                 Some(Expr::Ok(Box::new(Expr::Unit(span)), span))
+//RS             }
+//RS             Expr::Call(call)
+//RS                 if !self.funcs.contains_key(&call.name)
+//RS                     && matches!(
+//RS                         contextual_literal(&call.name),
+//RS                         Some(ContextualLiteral::Ok) | Some(ContextualLiteral::Err)
+//RS                     )
+//RS                     && call.args.len() == 1
+//RS                     && call.args[0].label.is_none() =>
+//RS             {
+//RS                 let is_ok = matches!(contextual_literal(&call.name), Some(ContextualLiteral::Ok));
+//RS                 let arg = call.args.pop().unwrap().expr;
+//RS                 let span = Span::new(call.name_span.start, arg.span().end);
+//RS                 Some(if is_ok {
+//RS                     Expr::Ok(Box::new(arg), span)
+//RS                 } else {
+//RS                     Expr::Err(Box::new(arg), span)
+//RS                 })
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS         if let Some(replacement) = contextual_result {
+//RS             *e = replacement;
+//RS         }
+//RS 
+//RS         let contextual_variant = match (&mut *e, self.expected_type.as_ref()) {
+//RS             (
+//RS                 Expr::EnumLit {
+//RS                     type_name,
+//RS                     variant,
+//RS                     args,
+//RS                     leading_dot,
+//RS                     span,
+//RS                     variant_span: _,
+//RS                 },
+//RS                 expected,
+//RS             ) if type_name.is_empty() => {
+//RS                 let kind = contextual_literal(variant);
+//RS                 let allowed = if !*leading_dot {
+//RS                     matches!(
+//RS                         kind,
+//RS                         Some(ContextualLiteral::Value) | Some(ContextualLiteral::Null)
+//RS                     )
+//RS                 } else {
+//RS                     match (kind, expected) {
+//RS                         (
+//RS                             Some(ContextualLiteral::Value) | Some(ContextualLiteral::Null),
+//RS                             Some(Type::Option(_)),
+//RS                         )
+//RS                         | (
+//RS                             Some(ContextualLiteral::Ok) | Some(ContextualLiteral::Err),
+//RS                             Some(Type::Result { .. }),
+//RS                         ) => true,
+//RS                         _ => false,
+//RS                     }
+//RS                 };
+//RS                 if !allowed {
+//RS                     None
+//RS                 } else {
+//RS                     match (kind, args.len()) {
+//RS                         (Some(ContextualLiteral::Null), 0) => Some(Expr::Absent(*span)),
+//RS                         (Some(ContextualLiteral::Value), 1) => match args.pop().unwrap() {
+//RS                             EnumLitArg::Positional(inner) => {
+//RS                                 Some(Expr::Present(Box::new(inner), *span))
+//RS                             }
+//RS                             named @ EnumLitArg::Named { .. } => {
+//RS                                 args.push(named);
+//RS                                 None
+//RS                             }
+//RS                         },
+//RS                         (Some(ContextualLiteral::Ok), 1) => match args.pop().unwrap() {
+//RS                             EnumLitArg::Positional(inner) => Some(Expr::Ok(Box::new(inner), *span)),
+//RS                             named @ EnumLitArg::Named { .. } => {
+//RS                                 args.push(named);
+//RS                                 None
+//RS                             }
+//RS                         },
+//RS                         (Some(ContextualLiteral::Err), 1) => match args.pop().unwrap() {
+//RS                             EnumLitArg::Positional(inner) => {
+//RS                                 Some(Expr::Err(Box::new(inner), *span))
+//RS                             }
+//RS                             named @ EnumLitArg::Named { .. } => {
+//RS                                 args.push(named);
+//RS                                 None
+//RS                             }
+//RS                         },
+//RS                         _ => None,
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS         if let Some(replacement) = contextual_variant {
+//RS             *e = replacement;
+//RS         }
+//RS     }
+//RS 
+//RS     /// A direct valueless call is a legal effectful Result-handler branch when
+//RS     /// the handler itself is used as a statement. Ordinary expression calls
+//RS     /// still use `infer`, so a value-producing call keeps its normal type and
+//RS     /// ownership checks. This is the same call checker used by statement
+//RS     /// position; the handler adds no carrier or runtime operation.
+//RS     fn infer_pattern_branch_value(&mut self, cond: &Expr, value: &mut Expr) -> Option<Type> {
+//RS         // A value-if checked under a callable's Result contract still has
+//RS         // success-valued branches. Keep explicit `Ok`/`Err` constructors on
+//RS         // the carrier path, but let every other branch call use the normal
+//RS         // automatic propagation rule.
+//RS         let saved_expected = self.expected_type.clone();
+//RS         self.normalize_contextual_expr(value);
+//RS         if let Some(Type::Result { ok, .. }) = saved_expected.as_ref() {
+//RS             // A nested value-if (the next arm of a decision table) keeps the
+//RS             // carrier: its own arms decide between `Ok`/`Err` and plain values.
+//RS             if !matches!(
+//RS                 value.without_parens(),
+//RS                 Expr::Ok(..) | Expr::Err(..) | Expr::If { .. }
+//RS             ) {
+//RS                 self.expected_type = Some((**ok).clone());
+//RS             }
+//RS         }
+//RS         let result_pattern = matches!(
+//RS             cond,
+//RS             Expr::PatternTest {
+//RS                 pattern: crate::AST::Pattern::Ok { .. } | crate::AST::Pattern::Err { .. },
+//RS                 ..
+//RS             }
+//RS         );
+//RS         if !result_pattern {
+//RS             let branch_diverges = self.expr_definitely_diverges(value);
+//RS             let owning_arm = self.owning_if_value_depth > 0;
+//RS             if owning_arm {
+//RS                 // Consume one level while inferring the arm itself. A nested
+//RS                 // value-if gets its own level from `infer_owning_value`;
+//RS                 // ordinary reads inside this arm must keep their own mode.
+//RS                 self.owning_if_value_depth -= 1;
+//RS             }
+//RS             // Only a dispatch that is itself the statement root has statement
+//RS             // arms. A value-if nested in a statement's argument
+//RS             // (`print(if c -> f() else -> g())`) is an ordinary value, so its
+//RS             // arm calls unwrap their carriers like any other value position.
+//RS             let statement_arm = self.statement_expr_inference
+//RS                 && self.statement_expr_root_depth == Some(self.source_nesting);
+//RS             let saved_statement_root = self.statement_expr_root_depth;
+//RS             if statement_arm && matches!(value, Expr::If { .. }) {
+//RS                 // The next arm of a statement decision table continues the
+//RS                 // same statement root one source level deeper.
+//RS                 self.statement_expr_root_depth = Some(self.source_nesting + 1);
+//RS             }
+//RS             let result = if statement_arm || branch_diverges {
+//RS                 // A braced dispatch arm is a statement arm when the whole
+//RS                 // dispatch is used as a statement. Use the statement call
+//RS                 // checker for its tail so `print(...)` contributes Unit
+//RS                 // instead of entering value-only call inference (E0116).
+//RS                 // A diverging tail is also statement-shaped: it cannot
+//RS                 // contribute a value to the surrounding branch.
+//RS                 self.infer_fallible_stmt(value)
+//RS             } else if owning_arm {
+//RS                 self.infer_owning_value(value)
+//RS             } else {
+//RS                 self.infer(value)
+//RS             };
+//RS             self.statement_expr_root_depth = saved_statement_root;
+//RS             if owning_arm {
+//RS                 self.owning_if_value_depth += 1;
+//RS                 if let Some(arm_ty) = result.clone() {
+//RS                     self.materialize_if_arm_local_read(value, &arm_ty);
+//RS                 }
+//RS             }
+//RS             self.expected_type = saved_expected;
+//RS             return result;
+//RS         }
+//RS         let owning_arm = self.owning_if_value_depth > 0;
+//RS         if owning_arm {
+//RS             self.owning_if_value_depth -= 1;
+//RS         }
+//RS         self.normalize_contextual_expr(value);
+//RS         let Expr::Call(call) = value else {
+//RS             let result = if owning_arm {
+//RS                 self.infer_owning_value(value)
+//RS             } else {
+//RS                 self.infer(value)
+//RS             };
+//RS             if owning_arm {
+//RS                 self.owning_if_value_depth += 1;
+//RS                 if let Some(arm_ty) = result.clone() {
+//RS                     self.materialize_if_arm_local_read(value, &arm_ty);
+//RS                 }
+//RS             }
+//RS             self.expected_type = saved_expected;
+//RS             return result;
+//RS         };
+//RS         self.clear_uninit_mut_args(&call.args);
+//RS         let result = match self.check_call(call, true) {
+//RS             Some(Some(ty)) => self.auto_propagate_call(value, Some(ty)),
+//RS             Some(None) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+//RS             None => None,
+//RS         };
+//RS         if owning_arm {
+//RS             self.owning_if_value_depth += 1;
+//RS         }
+//RS         self.expected_type = saved_expected;
+//RS         result
+//RS     }
+//RS 
+// END-PORT-PENDING 0408 crates/jet-sema/src/Sema/CheckerInfer/expr.rs:1832-3269
+

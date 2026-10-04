@@ -1,0 +1,194 @@
+// SourceInterfaces.rs:26-184,2345-2458,2487-2533,3143-3149,3298-3312.
+// Checked metadata is independent of native roots; actual registration,
+// escrow, dispatch, and activation remain #4494 lifecycle/carrier gates.
+use jet_foundation.[MIRExecutionIdentity, MIRArtifactID, MIRTraitRef, MIRTraitID, MIRTraitMethodID, MIRType, MIRTypeKind, MIRTypeID, MIRAccess, MIRParam, MIRFailureCarrier, MIRProgram, mir_type_has_valid_layout, mir_execution_identity, mir_identity_error_text, stable_id]
+
+pub struct NativeInterfaceIdentity {
+    pub execution: MIRExecutionIdentity
+    pub artifact: MIRArtifactID
+    pub trait_ref: MIRTraitRef
+    pub method_id: MIRTraitMethodID
+    pub method_name: String
+    pub receiver_type: MIRType
+}
+pub struct NativeInterfaceSignature {
+    pub receiver_access: MIRAccess
+    pub parameters: [MIRParam]
+    pub return_type: MIRType
+    pub failure: MIRFailureCarrier
+}
+pub struct NativeCallableIdentity {
+    pub execution: MIRExecutionIdentity
+    pub artifact: MIRArtifactID
+    pub key: String
+    pub callable_type: MIRType
+}
+pub struct NativeCallableParameter { pub ty: MIRType, pub access: MIRAccess }
+pub struct NativeCallableSignature { pub parameters: [NativeCallableParameter], pub return_type: MIRType? }
+pub struct NativeInterfaceObjectID { value: U64 }
+pub struct NativeCallableBindingDescriptor { pub identity: NativeCallableIdentity, pub signature: NativeCallableSignature, pub object: NativeInterfaceObjectID }
+pub struct NativeInterfaceBindingDescriptor { pub identity: NativeInterfaceIdentity, pub signature: NativeInterfaceSignature, pub object: NativeInterfaceObjectID }
+pub struct NativeInterfaceMethod { pub identity: NativeInterfaceIdentity, pub signature: NativeInterfaceSignature }
+
+#Error
+pub enum NativeInterfaceError {
+    InvalidMetadata(detail: String)
+    InvalidCall(detail: String)
+    MissingBinding DuplicateBinding AmbiguousBinding
+    CallableRootCollision(key: String, object: NativeInterfaceObjectID)
+    ReceiverMismatch SignatureMismatch ExecutionMismatch IdentityExhausted
+    UnresolvedTransfers(arguments: [Int])
+    Handler(detail: String)
+    HandlerPanicked(detail: String)
+}
+pub fn native_interface_error_text(error: NativeInterfaceError) -> String Never! {
+    if error == {
+        .InvalidMetadata(detail) -> "invalid native interface metadata: {detail}"
+        .InvalidCall(detail) -> "invalid native interface call: {detail}"
+        .MissingBinding -> "no native interface binding is active for this checked receiver"
+        .DuplicateBinding -> "native interface method binding is duplicated"
+        .AmbiguousBinding -> "native interface receiver matches more than one checked binding"
+        .CallableRootCollision(key, object) -> "native callable `{key}` shares a carrier root (NativeInterfaceObjectId({object.value})) and checked signature with an existing function value; bind it on its own root"
+        .ReceiverMismatch -> "native interface receiver does not carry the retained binding root"
+        .SignatureMismatch -> "native interface signature does not match its checked MIR method"
+        .ExecutionMismatch -> "native interface binding belongs to a different checked execution or artifact"
+        .IdentityExhausted -> "native interface object identity space is exhausted"
+        .UnresolvedTransfers(arguments) -> {
+            parts := [String]{}
+            loop argument in arguments -> &parts.push("{argument}")
+            "native interface call has unresolved owned transfers for arguments [{parts.join(", ")}]"
+        }
+        .Handler(detail) -> "native interface handler failed: {detail}"
+        .HandlerPanicked(detail) -> "native interface handler panicked: {detail}"
+    }
+}
+
+// Identity preflight checks the same type without constructing and discarding
+// an owned parameter vector. Signature construction is only for actual output.
+fn native_callable_signature_check_type(callable_type: MIRType) NativeInterfaceError! {
+    if !mir_type_has_valid_layout(callable_type) -> return Err(NativeInterfaceError.InvalidMetadata{detail: "native callable type has an invalid MIR layout"})
+    if callable_type.kind == {
+        .Fn(_) -> return
+        .SendFn(params, _, conventions) -> {
+            if params.len() != conventions.len() -> return Err(NativeInterfaceError.InvalidMetadata{detail: "native SendFn conventions do not cover every checked parameter"})
+            return
+        }
+        else -> return Err(NativeInterfaceError.InvalidMetadata{detail: "native callable binding requires a checked Fn or SendFn type"})
+    }
+}
+
+pub fn native_callable_signature_checked(callable_type: MIRType) -> NativeCallableSignature NativeInterfaceError! {
+    native_callable_signature_check_type(callable_type)
+    parameters := [NativeCallableParameter]{}
+    if callable_type.kind == {
+        .Fn(signature) -> {
+            loop (index, ty) in signature.params {
+                access := MIRAccess.Read
+                if signature.call_metadata == .Val(metadata) {
+                    if index < metadata.conventions.len() -> access = metadata.conventions[index]
+                }
+                &parameters.push(NativeCallableParameter{ty: ~ty, access: access})
+            }
+            Ok(NativeCallableSignature{parameters: parameters, return_type: ~signature.ret})
+        }
+        .SendFn(params, ret, conventions) -> {
+            loop (index, ty) in params -> &parameters.push(NativeCallableParameter{ty: ~ty, access: conventions[index]})
+            Ok(NativeCallableSignature{parameters: parameters, return_type: ~ret})
+        }
+        else -> panic("validated native callable kind changed before signature projection")
+    }
+}
+
+// Preflight precedes execution-identity hashing, preserving rejection priority.
+fn native_callable_identity_preflight(key: String, callable_type: MIRType) NativeInterfaceError! {
+    canonical := key.trim() // #4303: String-backed trimmed view at ABI boundary.
+    if key.len() == 0 || canonical != key -> return Err(NativeInterfaceError.InvalidMetadata{detail: "native callable key must be a non-empty canonical string"})
+    native_callable_signature_check_type(callable_type)
+    return
+}
+pub fn native_callable_identity_checked(program: MIRProgram, artifact: MIRArtifactID, key: ^String, callable_type: ^MIRType) -> NativeCallableIdentity NativeInterfaceError! {
+    native_callable_identity_preflight(key, callable_type)
+    execution :: mir_execution_identity(program, Val(artifact)) ?? return Err(NativeInterfaceError.InvalidMetadata{detail: mir_identity_error_text(err)})
+    Ok(NativeCallableIdentity{execution: execution, artifact: artifact, key: key, callable_type: callable_type})
+}
+pub fn native_callable_identity_checked_for_execution(execution: ^MIRExecutionIdentity, artifact: MIRArtifactID, key: ^String, callable_type: ^MIRType) -> NativeCallableIdentity NativeInterfaceError! {
+    native_callable_identity_preflight(key, callable_type)
+    Ok(NativeCallableIdentity{execution: execution, artifact: artifact, key: key, callable_type: callable_type})
+}
+
+// Returns borrowed-row indices so the full MIR graph is never copied or
+// re-digested per sealed-image method. Only output signature metadata is owned.
+fn native_interface_method_preflight(program: MIRProgram, artifact: MIRArtifactID, trait_id: MIRTraitID, method_id: MIRTraitMethodID, receiver_type: MIRType) -> (Int, Int, MIRAccess) NativeInterfaceError! {
+    artifact_index := -1
+    loop (index, row) in program.artifacts {
+        if row.id == artifact { artifact_index = index; break }
+    }
+    if artifact_index < 0 -> return Err(NativeInterfaceError.InvalidMetadata{detail: "MIR artifact MirArtifactId({artifact.value}) is missing"})
+    trait_index := -1
+    ambiguous := false
+    loop (index, row) in program.traits {
+        if row.id == trait_id {
+            if trait_index >= 0 -> ambiguous = true
+            else -> trait_index = index
+        }
+    }
+    if trait_index < 0 -> return Err(NativeInterfaceError.InvalidMetadata{detail: "MIR trait MirTraitId({trait_id.value}) is missing"})
+    contained := false
+    loop module_id in program.artifacts[artifact_index].modules {
+        if module_id == program.traits[trait_index].module_id -> contained = true
+    }
+    if ambiguous || !contained -> return Err(NativeInterfaceError.InvalidMetadata{detail: "native interface trait identity is ambiguous or outside the selected artifact"})
+    method_index := -1
+    ambiguous = false
+    loop (index, row) in program.traits[trait_index].methods {
+        if row.id == method_id {
+            if method_index >= 0 -> ambiguous = true
+            else -> method_index = index
+        }
+    }
+    if method_index < 0 -> return Err(NativeInterfaceError.InvalidMetadata{detail: "MIR trait method MirTraitMethodId({method_id.value}) is missing"})
+    if ambiguous -> return Err(NativeInterfaceError.InvalidMetadata{detail: "native interface method identity is ambiguous"})
+    method :: program.traits[trait_index].methods[method_index]
+    access :: method.self_access ?? return Err(NativeInterfaceError.InvalidMetadata{detail: "native interface method has no checked receiver access"})
+    if receiver_type.kind == .TraitObject(bounds) {
+        name :: program.traits[trait_index].name
+        expected :: MIRTraitID{value: stable_id("mir-trait", name)}
+        present := false
+        loop bound in bounds { if bound.id == expected && bound.name == name -> present = true }
+        if !present -> return Err(NativeInterfaceError.InvalidMetadata{detail: "native interface receiver type does not carry the exact checked trait bound"})
+    } else {
+        return Err(NativeInterfaceError.InvalidMetadata{detail: "native interface receiver type is not a checked trait object"})
+    }
+    loop parameter in method.params {
+        if !mir_type_has_valid_layout(parameter.ty) -> return Err(NativeInterfaceError.InvalidMetadata{detail: "native interface signature contains an invalid MIR layout"})
+    }
+    if !mir_type_has_valid_layout(method.return_type) -> return Err(NativeInterfaceError.InvalidMetadata{detail: "native interface signature contains an invalid MIR layout"})
+    Ok((trait_index, method_index, access))
+}
+fn native_interface_method_from_rows(program: MIRProgram, execution: ^MIRExecutionIdentity, artifact: MIRArtifactID, trait_id: MIRTraitID, method_id: MIRTraitMethodID, receiver_type: ^MIRType, rows: (Int, Int, MIRAccess)) -> NativeInterfaceMethod Never! {
+    trait_row :: program.traits[rows.0]
+    method :: trait_row.methods[rows.1]
+    NativeInterfaceMethod{
+        identity: NativeInterfaceIdentity{execution: execution, artifact: artifact, trait_ref: MIRTraitRef{id: trait_id, name: ~trait_row.name}, method_id: method_id, method_name: ~method.name, receiver_type: receiver_type},
+        signature: NativeInterfaceSignature{receiver_access: rows.2, parameters: ~method.params, return_type: ~method.return_type, failure: ~method.failure},
+    }
+}
+pub fn native_interface_method_checked(program: MIRProgram, artifact: MIRArtifactID, trait_id: MIRTraitID, method_id: MIRTraitMethodID, receiver_type: ^MIRType) -> NativeInterfaceMethod NativeInterfaceError! {
+    rows :: native_interface_method_preflight(program, artifact, trait_id, method_id, receiver_type)
+    execution :: mir_execution_identity(program, Val(artifact)) ?? return Err(NativeInterfaceError.InvalidMetadata{detail: mir_identity_error_text(err)})
+    Ok(native_interface_method_from_rows(program, ^execution, artifact, trait_id, method_id, ^receiver_type, rows))
+}
+pub fn native_interface_method_checked_for_execution(program: MIRProgram, execution: ^MIRExecutionIdentity, artifact: MIRArtifactID, trait_id: MIRTraitID, method_id: MIRTraitMethodID, receiver_type: ^MIRType) -> NativeInterfaceMethod NativeInterfaceError! {
+    rows :: native_interface_method_preflight(program, artifact, trait_id, method_id, receiver_type)
+    Ok(native_interface_method_from_rows(program, ^execution, artifact, trait_id, method_id, ^receiver_type, rows))
+}
+
+pub fn native_interface_validate_writeback_access(access: MIRAccess, writeback: Bool) -> Bool Never! {
+    writeback == (access == .Write)
+}
+pub fn native_interface_same_method(left: NativeInterfaceIdentity, right: NativeInterfaceIdentity) -> Bool Never! {
+    left.execution == right.execution && left.artifact == right.artifact && left.trait_ref == right.trait_ref && left.method_id == right.method_id && left.method_name == right.method_name && left.receiver_type == right.receiver_type
+}
+pub fn native_interface_same_callable(left: NativeCallableIdentity, right: NativeCallableIdentity) -> Bool Never! {
+    left.execution == right.execution && left.artifact == right.artifact && left.key == right.key && left.callable_type == right.callable_type
+}

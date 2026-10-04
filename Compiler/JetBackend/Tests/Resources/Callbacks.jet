@@ -1,0 +1,29 @@
+#Test("source_callback_transport_errors_are_not_semantic_outcomes") {
+    errors :: [SourceCallbackError]{.Closed, .Retiring, .UnknownCallback, .ReleaseNotReady, .PayloadBusy, .ReplyClosed, .ReplyValueBusy, .PayloadPoisoned, .IdExhausted, .ExecutionFailed{detail: "checked entry rejected"}}
+    texts :: [String]{"Source callback session is closed", "Source callback session is retiring", "unknown Source callback lease", "Source callback release is not ready", "Source callback payload is temporarily owned", "Source callback reply receiver is closed", "Source callback reply value is still owned", "Source callback payload lock is poisoned", "Source callback identity space is exhausted", "Source callback execution failed: checked entry rejected"}
+    loop (index, error) in errors -> assert_eq(source_callback_error_text(error), texts[index])
+}
+#Test("source_callback_drain_requires_all_five_obligations_to_be_zero") {
+    assert(source_callback_drain_status_drained(source_callback_drain_status_default()))
+    cases :: [SourceCallbackDrainStatus]{
+        SourceCallbackDrainStatus{producers: 1, inflight: 0, pending: 0, borrows: 0, releases: 0},
+        SourceCallbackDrainStatus{producers: 0, inflight: 1, pending: 0, borrows: 0, releases: 0},
+        SourceCallbackDrainStatus{producers: 0, inflight: 0, pending: 1, borrows: 0, releases: 0},
+        SourceCallbackDrainStatus{producers: 0, inflight: 0, pending: 0, borrows: 1, releases: 0},
+        SourceCallbackDrainStatus{producers: 0, inflight: 0, pending: 0, borrows: 0, releases: 1},
+    }
+    loop status in cases -> assert(!source_callback_drain_status_drained(status))
+    status :: SourceCallbackDrainStatus{producers: 1, inflight: 2, pending: 3, borrows: 4, releases: 5}
+    assert_eq(source_callback_retire_error_text(.NotDrained{status: status}), "Source callback session is not drained (producers=1, inflight=2, pending=3, borrows=4, releases=5)")
+}
+#Test("source_callback_rejected_packets_return_complete_owned_fields") {
+    packet :: SourceCallbackEnqueueError<String, [Int]>{error: .Retiring, command: "original command", context: [Int]{1, 2, 3}}
+    parts :: source_callback_enqueue_error_into_parts(^packet)
+    assert_eq(parts.0, SourceCallbackError.Retiring)
+    assert_eq(parts.1, "original command")
+    assert_eq(parts.2, [Int]{1, 2, 3})
+    rejected :: SourceCallbackRegisterError<[String]>{error: .IdExhausted, payload: [String]{"first", "second"}}
+    registered :: source_callback_register_error_into_parts(^rejected)
+    assert_eq(registered.0, SourceCallbackError.IdExhausted)
+    assert_eq(registered.1, [String]{"first", "second"})
+}

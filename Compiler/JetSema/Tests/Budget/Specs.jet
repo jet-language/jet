@@ -1,0 +1,364 @@
+use jet_foundation.[Program, Diagnostic, Span, Type, Expr, ExprField, EnumLitArg, StrPart, BudgetDecl, BudgetField, CompileWorkloadDecl, PerfLit, Contribution, ContribValue, Namespace, ModuleDecl, SourceDecl, Item, ast_program]
+use jet_parser.[parse_source]
+use jet_sema.[BudgetSpec, BudgetAxis, BudgetQuantity, BudgetRawQuantity, CompileWorkloadFact, SemaRegistrationModuleInput, SemaRegistrationForeignHandleFacts, SemaSourceSegment, SemaSourceOrigin, sema_collect_budget_specs, sema_collect_located_budget_specs_bundle]
+use core.files.runtime.kernel_path_components as budget_test_path
+
+// Original Rust tests/modules.rs performance-budget witnesses use the canonical
+// parser, then the real Sema collector; no mock facts or textual shape checks.
+fn budget_test_program(source: String) -> Program Never! {
+    parsed :: parse_source(source.bytes())
+    assert(parsed.diagnostics.len() == 0, "budget fixture must parse")
+    parsed.program
+}
+fn budget_test_specs(source: String) -> [BudgetSpec] Never! {
+    if sema_collect_budget_specs(budget_test_program(source)) == {
+        .Ok(specs) -> specs
+        .Err(error) -> panic("budget fixture must elaborate: {error.diagnostics[0].why}")
+    }
+}
+fn budget_test_errors(source: String) -> [Diagnostic] Never! {
+    if sema_collect_budget_specs(budget_test_program(source)) == {
+        .Ok(_) -> panic("invalid budget fixture was accepted")
+        .Err(error) -> error.diagnostics
+    }
+}
+fn budget_test_source_span(source: String, span: Span) -> String Never! {
+    bytes :: source.bytes()
+    String.from_bytes(~bytes[span.start..<span.end]) ?? panic("budget source span must be UTF-8")
+}
+fn budget_test_binary(name: String, metric: String, limit: String, extra: String) -> String Never! {
+    "Budget{{ name: \"{name}\", metric: .{metric}, limit: {limit}, {extra} }}"
+}
+fn budget_test_role(entries: String) -> String Never! { "module perf.release {{ budgets: [{entries}] }}\n" }
+
+// Rust tests/modules.rs::perf_budget_sema_elaborates_defaults_and_field_spans.
+#Test("perf_budget_sema_elaborates_defaults_and_field_spans") {
+    source :: "module perf.release {{\n    budgets: [Budget{{\n        name: \"binary\",\n        metric: .BinarySize,\n        limit: .AtMost(2MiB),\n    }}]\n}}\n\n"
+    specs :: budget_test_specs(source)
+    assert(specs.len() == 1)
+    spec :: specs[0]
+    assert(spec.role == "release")
+    assert(spec.name == "binary")
+    assert(spec.metric == "BinarySize")
+    assert(spec.scope == "Package")
+    assert(spec.provider == "BuildArtifact(Package)")
+    assert(spec.comparison == "Absolute")
+    assert(spec.limit == "AtMost")
+    assert(spec.enforcement == "Fail")
+    assert(spec.applicability.targets == BudgetAxis.Current)
+    assert(spec.applicability.profiles == BudgetAxis.Current)
+    assert(spec.limit_fact.quantity == BudgetQuantity.Bytes{value: 2097152})
+    assert(spec.limit_fact.raw == BudgetRawQuantity.Scalar{digits: "2", suffix: Val("MiB")})
+    expected :: "Budget{{\n        name: \"binary\",\n        metric: .BinarySize,\n        limit: .AtMost(2MiB),\n    }}"
+    assert(budget_test_source_span(source, spec.span) == expected)
+    fields :: [String]{"name", "metric", "limit"}
+    loop field in fields -> assert(budget_test_source_span(source, spec.field_spans.get(field) ?? panic("field span missing")) == field)
+}
+
+// Rust tests/modules.rs::perf_budget_sema_rejects_duplicate_identity_and_effective_overlap.
+#Test("perf_budget_sema_rejects_duplicate_identity_and_effective_overlap") {
+    first :: budget_test_binary("binary", "BinarySize", ".AtMost(2MiB)", "")
+    duplicate :: budget_test_binary("binary", "ArtifactSize", ".AtMost(3MiB)", "")
+    diagnostics :: budget_test_errors(budget_test_role("{first}, {duplicate}"))
+    assert(diagnostics[diagnostics.len() - 1].code == "E2904")
+    assert(diagnostics[0].why == "their containing package, perf role, and name form the same budget identity")
+    second :: budget_test_binary("shipping", "BinarySize", ".AtMost(3MiB)", "")
+    overlap :: budget_test_errors(budget_test_role("{first}, {second}"))
+    assert(overlap[overlap.len() - 1].code == "E2904")
+    assert(overlap[0].what == "performance budgets binary and shipping overlap")
+    assert(overlap[0].why == "their scope, metric, provider, and intersecting applicability form the same effective key")
+}
+
+// Rust tests/modules.rs::perf_budget_sema_accepts_disjoint_target_applicability.
+#Test("perf_budget_sema_accepts_disjoint_target_applicability") {
+    linux :: budget_test_binary("linux", "BinarySize", ".AtMost(2MiB)", "applies: BudgetApplies{{ targets: .Only([.Triple(\"x86_64-unknown-linux-gnu\")]), profiles: .All }}")
+    windows :: budget_test_binary("windows", "BinarySize", ".AtMost(2MiB)", "applies: BudgetApplies{{ targets: .Only([.Triple(\"x86_64-pc-windows-msvc\")]), profiles: .All }}")
+    specs :: budget_test_specs(budget_test_role("{linux}, {windows}"))
+    assert(specs.len() == 2)
+    assert(specs[0].applicability.profiles == BudgetAxis.All)
+    selected :: Val(true)
+    if specs[0].applicability.targets == .Only(selectors) -> assert(selectors.get("Triple(x86_64-unknown-linux-gnu)") == selected) else -> panic("typed target applicability missing")
+}
+
+// Rust tests/modules.rs::perf_budget_sema_resolves_service_scope_and_provider.
+#Test("perf_budget_sema_resolves_service_scope_and_provider") {
+    source :: "module env.dev {{ services: {{ api: {{ enable: true }} }} }}\nmodule perf.release {{ budgets: [Budget{{ name: \"ready\", scope: .Service(\"api\"), metric: .ServiceReadiness, provider: .ServiceProbe(\"api\"), comparison: .AbsoluteFrom(\"ci/linux-x64\"), limit: .AtMost(2s), enforcement: .Warn }}] }}\n"
+    specs :: budget_test_specs(source)
+    assert(specs[0].scope == "Service(api)")
+    assert(specs[0].provider == "ServiceProbe(api)")
+    assert(specs[0].enforcement == "Warn")
+    assert(specs[0].limit_fact.quantity == BudgetQuantity.DurationNs{value: 2000000000})
+}
+
+// Rust tests/modules.rs::perf_budget_sema_rejects_statistical_budget_without_provider.
+#Test("perf_budget_sema_rejects_statistical_budget_without_provider") {
+    source :: "module perf.release {{ budgets: [Budget{{ name: \"startup\", scope: .Target(\"cli\"), metric: .StartupTime, comparison: .AbsoluteFrom(\"ci/linux-x64\"), limit: .AtMost(500ms) }}] }}\n"
+    diagnostics :: budget_test_errors(source)
+    diagnostic :: diagnostics[diagnostics.len() - 1]
+    assert(diagnostic.code == "E2903")
+    assert(diagnostic.what == "performance budget startup is not valid")
+    assert(diagnostic.why == "`StartupTime` has no unambiguous measurement provider")
+    assert(diagnostic.fix == "add the metric's explicit typed `provider`")
+}
+
+// Rust tests/modules.rs::perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes.
+#Test("perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes") {
+    bad_percentile :: "module perf.release {{ budgets: [Budget{{ name: \"frame\", scope: .Scene(\"menu\"), metric: .FrameTime(.P42), provider: .SceneProbe(\"menu\"), comparison: .AbsoluteFrom(\"ci/linux-x64\"), limit: .AtMost(16ms) }}] }}\n"
+    percentile_error :: budget_test_errors(bad_percentile)[0]
+    assert(percentile_error.code == "E2903")
+    assert(percentile_error.why == "`.P42` is not a supported percentile")
+    bad_baseline :: "module perf.release {{ budgets: [Budget{{ name: \"startup\", scope: .Target(\"cli\"), metric: .StartupTime, provider: .BuildArtifact(\"cli\"), comparison: .AbsoluteFrom(\"CI//linux\"), limit: .AtMost(500ms) }}] }}\n"
+    assert(budget_test_errors(bad_baseline)[0].code == "E2903")
+    wrong_axis :: budget_test_role(budget_test_binary("binary", "BinarySize", ".AtMost(2MiB)", "applies: BudgetApplies{{ profiles: .Only([.Triple(\"x86_64-unknown-linux-gnu\")]) }}"))
+    selector_error :: budget_test_errors(wrong_axis)[0]
+    assert(selector_error.code == "E2903")
+    assert(selector_error.why == "profile applicability contains a non-profile selector")
+}
+
+fn budget_test_rate_source(baseline: String, count: String, seconds: Int) -> String Never! {
+    "module env.dev {{ services: {{ api: {{ enable: true }} }} }}\nmodule perf.release {{ budgets: [Budget{{ name: \"throughput\", scope: .Service(\"api\"), metric: .Throughput, provider: .ServiceProbe(\"api\"), comparison: .AbsoluteFrom(\"{baseline}\"), limit: .AtLeast(Rate{{ count: {count}, per: {seconds}s }}), enforcement: .Warn }}] }}\n"
+}
+// Rust tests/modules.rs::perf_budget_sema_normalizes_rate_and_retains_canonical_facts.
+#Test("perf_budget_sema_normalizes_rate_and_retains_canonical_facts") {
+    first :: budget_test_specs(budget_test_rate_source("ci/linux-x64", "100", 2))[0]
+    assert(first.comparison == "AbsoluteFrom")
+    expected_baseline :: Val("ci/linux-x64")
+    assert(first.comparison_fact.baseline == expected_baseline)
+    assert(first.limit_fact.quantity == BudgetQuantity.Rate{numerator: 1, denominator_ns: 20000000})
+    assert(first.limit_fact.raw == BudgetRawQuantity.Rate{count_digits: "100", per_digits: "2", per_suffix: "s"})
+    second :: budget_test_specs(budget_test_rate_source("ci/macos-arm64", "75", 1))[0]
+    assert(first.comparison_fact != second.comparison_fact)
+    assert(first.limit_fact != second.limit_fact)
+    hostile :: budget_test_specs(budget_test_rate_source("ci/linux-x64", "000_100", 2))[0]
+    assert(hostile.limit_fact.quantity == BudgetQuantity.Rate{numerator: 1, denominator_ns: 20000000})
+    assert(hostile.limit_fact.raw == BudgetRawQuantity.Rate{count_digits: "000_100", per_digits: "2", per_suffix: "s"})
+}
+
+// Rust tests/modules.rs::perf_budget_sema_rejects_named_and_extra_limit_arguments.
+#Test("perf_budget_sema_rejects_named_and_extra_limit_arguments") {
+    cases :: [BudgetTestLimitCase]{
+        BudgetTestLimitCase{metric: "BinarySize", scope: "", provider: "", comparison: "Absolute", constructor: "AtMost", value: "2MiB"},
+        BudgetTestLimitCase{metric: "StartupTime", scope: "scope: .Service(\"api\"),", provider: "provider: .ServiceProbe(\"api\"),", comparison: "RelativeTo(\"ci/linux-x64\")", constructor: "RegressionAtMost", value: "3pct"},
+        BudgetTestLimitCase{metric: "Throughput", scope: "scope: .Service(\"api\"),", provider: "provider: .ServiceProbe(\"api\"),", comparison: "RelativeTo(\"ci/linux-x64\")", constructor: "ImprovementAtLeast", value: "3pct"},
+        BudgetTestLimitCase{metric: "Throughput", scope: "scope: .Service(\"api\"),", provider: "provider: .ServiceProbe(\"api\"),", comparison: "AbsoluteFrom(\"ci/linux-x64\")", constructor: "AtLeast", value: "Rate{{ count: 100, per: 1s }}"},
+    }
+    loop row in cases {
+        limits :: [String]{".{row.constructor}{{ value: {row.value} }}", ".{row.constructor}({row.value}, {row.value})"}
+        loop limit in limits {
+            source :: "module env.dev {{ services: {{ api: {{ enable: true }} }} }}\nmodule perf.release {{ budgets: [Budget{{ name: \"hostile\", {row.scope} metric: .{row.metric}, {row.provider} comparison: .{row.comparison}, limit: {limit}, enforcement: .Fail }}] }}\n"
+            diagnostics :: budget_test_errors(source)
+            assert(diagnostics[0].code == "E2903")
+            assert(diagnostics[0].why.contains("exactly one positional"))
+        }
+    }
+}
+struct BudgetTestLimitCase { metric: String, scope: String, provider: String, comparison: String, constructor: String, value: String }
+
+fn budget_test_module(identity: String, path: String, source: String) -> SemaRegistrationModuleInput Never! {
+    segment :: SemaSourceSegment{generated: Span{start: 0, end: source.bytes().len()}, source_file: path, source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    SemaRegistrationModuleInput{package_identity: identity, module_identity: path, module_name: path, module_path: path, source_file: path, source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: budget_test_program(source), foreign_handles: [SemaRegistrationForeignHandleFacts]{}}
+}
+#Test("budget bundle resolves across modules only within the owning package") {
+    service_source :: "module env.dev {{ services: {{ api: {{ enable: true }} }} }}\n"
+    budget_source :: "module perf.release {{ budgets: [Budget{{ name: \"ready\", scope: .Service(\"api\"), metric: .ServiceReadiness, provider: .ServiceProbe(\"api\"), comparison: .AbsoluteFrom(\"ci/linux-x64\"), limit: .AtMost(2s) }}] }}\n"
+    roots :: [String:budget_test_path.OsPath]{"app": budget_test_path.from_text("/app", budget_test_path.PathPlatform.Unix), "dep": budget_test_path.from_text("/deps/dep", budget_test_path.PathPlatform.Unix)}
+    modules :: [SemaRegistrationModuleInput]{budget_test_module("app", "/app/budget.jet", budget_source), budget_test_module("app", "/app/env.jet", service_source)}
+    if sema_collect_located_budget_specs_bundle(modules, roots) == {
+        .Ok(specs) -> {
+            assert(specs.len() == 1)
+            assert(specs[0].module_index == 0)
+            assert(specs[0].spec.name == "ready")
+        }
+        .Err(_) -> panic("same-package attachment must resolve across modules")
+    }
+    separate :: [SemaRegistrationModuleInput]{modules[0], budget_test_module("dep", "/deps/dep/env.jet", service_source)}
+    if sema_collect_located_budget_specs_bundle(separate, roots) == {
+        .Ok(_) -> panic("dependency attachment must not resolve in app")
+        .Err(error) -> {
+            assert(error.diagnostics.len() == 1)
+            assert(error.diagnostics[0].code == "E2905")
+            assert(error.diagnostics[0].what == "performance budget ready cannot resolve scope")
+            expected_path :: Val("/app/budget.jet")
+            zero :: Val(0)
+            assert(error.diagnostics[0].source_path == expected_path)
+            assert(error.diagnostics[0].source_offset == zero)
+            assert(error.diagnostics[0].source_start == zero)
+        }
+    }
+}
+#Test("budget bundle retains module order and validates groups in root path order") {
+    missing_a :: "module perf.release {{ budgets: [Budget{{ name: \"a\", scope: .Target(\"missing_a\"), metric: .BinarySize, limit: .AtMost(2MiB) }}] }}\n"
+    missing_z :: "module perf.release {{ budgets: [Budget{{ name: \"z\", scope: .Target(\"missing_z\"), metric: .BinarySize, limit: .AtMost(2MiB) }}] }}\n"
+    roots :: [String:budget_test_path.OsPath]{"first_identity": budget_test_path.from_text("/z", budget_test_path.PathPlatform.Unix), "last_identity": budget_test_path.from_text("/a", budget_test_path.PathPlatform.Unix)}
+    modules :: [SemaRegistrationModuleInput]{budget_test_module("first_identity", "/z/main.jet", missing_z), budget_test_module("last_identity", "/a/main.jet", missing_a)}
+    if sema_collect_located_budget_specs_bundle(modules, roots) == {
+        .Ok(_) -> panic("missing attachments must fail")
+        .Err(error) -> {
+            assert(error.diagnostics.len() == 2)
+            assert(error.diagnostics[0].what == "performance budget a cannot resolve scope")
+            assert(error.diagnostics[1].what == "performance budget z cannot resolve scope")
+        }
+    }
+    valid :: [SemaRegistrationModuleInput]{budget_test_module("first_identity", "/z/main.jet", budget_test_role(budget_test_binary("z", "BinarySize", ".AtMost(2MiB)", ""))), budget_test_module("last_identity", "/a/main.jet", budget_test_role(budget_test_binary("a", "BinarySize", ".AtMost(3MiB)", "")))}
+    if sema_collect_located_budget_specs_bundle(valid, roots) == {
+        .Ok(specs) -> {
+            assert(specs.len() == 2)
+            assert(specs[0].module_index == 0)
+            assert(specs[0].spec.name == "z")
+            assert(specs[1].module_index == 1)
+            assert(specs[1].spec.name == "a")
+        }
+        .Err(_) -> panic("distinct-package identities must not collide")
+    }
+}
+#Test("budget compile workloads resolve once and retain the declared patch") {
+    source :: "module perf.release {{ compile_workloads: {{ edit_body: CompilerWorkload.Edit{{ target: \"cli\", patch: \"patches/body.patch\" }} }}, budgets: [Budget{{ name: \"compile\", scope: .Target(\"cli\"), metric: .CompileTime(.P99), provider: .CompilerProbe(.Edit(\"edit_body\")), comparison: .AbsoluteFrom(\"ci/linux-x64\"), limit: .AtMost(2s) }}] }}\n"
+    specs :: budget_test_specs(source)
+    assert(specs[0].provider == "CompilerProbe(Edit(edit_body))")
+    expected_edit :: Val(CompileWorkloadFact{mode: "Edit", name: Val("edit_body"), target: "cli", patch: Val("patches/body.patch")})
+    assert(specs[0].compile_workload == expected_edit)
+    clean :: "module perf.release {{ budgets: [Budget{{ name: \"clean\", scope: .Target(\"cli\"), metric: .CompileTime(.P99), provider: .CompilerProbe(.Clean), comparison: .AbsoluteFrom(\"ci/linux-x64\"), limit: .AtMost(2s) }}] }}\n"
+    expected_clean :: Val(CompileWorkloadFact{mode: "Clean", name: None, target: "cli", patch: None})
+    assert(budget_test_specs(clean)[0].compile_workload == expected_clean)
+    missing :: "module perf.release {{ budgets: [Budget{{ name: \"missing\", scope: .Target(\"cli\"), metric: .CompileTime(.P99), provider: .CompilerProbe(.Edit(\"edit_body\")), comparison: .AbsoluteFrom(\"ci/linux-x64\"), limit: .AtMost(2s) }}] }}\n"
+    assert(budget_test_errors(missing)[0].why == "compile edit workload `edit_body` is not declared")
+}
+#Test("budget quantities preserve u128 boundaries and relative basis points") {
+    max :: "340282366920938463463374607431768211455"
+    assert(budget_test_specs(budget_test_role(budget_test_binary("max", "BinarySize", ".AtMost({max}B)", "")))[0].limit_fact.quantity == BudgetQuantity.Bytes{value: 340282366920938463463374607431768211455})
+    overflow :: "340282366920938463463374607431768211456"
+    assert(budget_test_errors(budget_test_role(budget_test_binary("overflow", "BinarySize", ".AtMost({overflow}B)", "")))[0].why == "limit value is not a nonnegative integer in range")
+    assert(budget_test_errors(budget_test_role(budget_test_binary("overflow", "BinarySize", ".AtMost({max}KiB)", "")))[0].why == "limit value is not a nonnegative integer in range")
+    source :: "module env.dev {{ services: {{ api: {{ enable: true }} }} }}\nmodule perf.release {{ budgets: [Budget{{ name: \"relative\", scope: .Service(\"api\"), metric: .Throughput, provider: .ServiceProbe(\"api\"), comparison: .RelativeTo(\"ci/linux-x64\"), limit: .ImprovementAtLeast(0.25pct) }}] }}\n"
+    assert(budget_test_specs(source)[0].limit_fact.quantity == BudgetQuantity.PercentBasisPoints{value: 25})
+    zero :: budget_test_specs(budget_test_rate_source("ci/linux-x64", "0", 2))[0]
+    assert(zero.limit_fact.quantity == BudgetQuantity.Rate{numerator: 0, denominator_ns: 1})
+    assert(budget_test_errors(budget_test_rate_source("ci/linux-x64", "100", 0))[0].why == "Rate per must normalize to a positive Duration")
+}
+
+#Test("budget names and field spans retain UTF-8 source byte identity") {
+    source :: budget_test_role(budget_test_binary("café", "BinarySize", ".AtMost(2MiB)", ""))
+    spec :: budget_test_specs(source)[0]
+    assert(spec.name == "café")
+    assert(budget_test_source_span(source, spec.field_spans.get("metric") ?? panic("metric span missing")) == "metric")
+    assert(budget_test_source_span(source, spec.span).starts_with("Budget{{"))
+}
+#Test("budget malformed fields select exact first diagnostic and source span") {
+    unknown :: budget_test_role(budget_test_binary("binary", "BinarySize", ".AtMost(2MiB)", "unexpected: .Fail,"))
+    unknown_error :: budget_test_errors(unknown)[0]
+    assert(unknown_error.code == "E2903")
+    assert(unknown_error.what == "performance budget entry is not valid")
+    assert(unknown_error.why == "`unexpected` is not a Budget field")
+    assert(unknown_error.fix == "use one of: name, scope, metric, provider, comparison, limit, enforcement, applies")
+    assert(budget_test_source_span(unknown, unknown_error.span ?? panic("diagnostic span missing")) == "unexpected")
+    duplicate :: budget_test_role(budget_test_binary("binary", "BinarySize", ".AtMost(2MiB)", "name: \"second\","))
+    assert(budget_test_errors(duplicate)[0].why == "`name` is written more than once")
+    deterministic_warn :: budget_test_role(budget_test_binary("binary", "BinarySize", ".AtMost(2MiB)", "enforcement: .Warn,"))
+    assert(budget_test_errors(deterministic_warn)[0].why == "deterministic budgets must use `.Fail` enforcement")
+    wrong_unit :: budget_test_role(budget_test_binary("binary", "BinarySize", ".AtMost(2s)", ""))
+    assert(budget_test_errors(wrong_unit)[0].why == "`BinarySize` requires one of these units: B, KiB, MiB, GiB")
+    empty_selectors :: budget_test_role(budget_test_binary("binary", "BinarySize", ".AtMost(2MiB)", "applies: BudgetApplies{{ targets: .Only([]) }},"))
+    assert(budget_test_errors(empty_selectors)[0].why == "applicability `targets` Only list cannot be empty")
+    built_in_named :: budget_test_role(budget_test_binary("binary", "BinarySize", ".AtMost(2MiB)", "applies: BudgetApplies{{ profiles: .Only([.Named(\"dev\")]) }},"))
+    assert(budget_test_errors(built_in_named)[0].why == "`dev` is not a legal named profile")
+}
+#Test("budget selector sets deduplicate and retain both applicability axes") {
+    first :: budget_test_binary("native", "BinarySize", ".AtMost(2MiB)", "applies: BudgetApplies{{ targets: .Only([.Class(.Native), .Class(.Native)]), profiles: .Only([.Release]) }}")
+    second :: budget_test_binary("web", "BinarySize", ".AtMost(3MiB)", "applies: BudgetApplies{{ targets: .Only([.Class(.Web)]), profiles: .Only([.Named(\"shipping\")]) }}")
+    specs :: budget_test_specs(budget_test_role("{first}, {second}"))
+    assert(specs.len() == 2)
+    if specs[0].applicability.targets == .Only(selectors) -> assert(selectors.len() == 1) else -> panic("Only target set missing")
+    selected :: Val(true)
+    if specs[0].applicability.profiles == .Only(selectors) -> assert(selectors.get("Release") == selected) else -> panic("Only profile set missing")
+    if specs[1].applicability.profiles == .Only(selectors) -> assert(selectors.get("Named(shipping)") == selected) else -> panic("named profile set missing")
+}
+
+// Direct annotated AST witnesses also exercise the actual collector without
+// making parser-prerequisite failures look like budget behavior failures.
+fn budget_ast_span() -> Span Never! { Span{start: 10, end: 20} }
+fn budget_ast_enum(variant: String, args: [EnumLitArg]) -> Expr Never! {
+    Expr.EnumLit{type_name: "", variant: variant, variant_span: Val(budget_ast_span()), args: args, leading_dot: true, span: budget_ast_span()}
+}
+fn budget_ast_string(text: String) -> Expr Never! { Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: budget_ast_span()} }
+fn budget_ast_unit(digits: String, suffix: String) -> Expr Never! { Expr.UnitLit{raw: digits, int: None, float: None, suffix: suffix, suffix_span: budget_ast_span(), span: budget_ast_span()} }
+fn budget_ast_field(name: String, value: Expr) -> BudgetField Never! { BudgetField{name: name, name_span: budget_ast_span(), value: value, span: budget_ast_span()} }
+fn budget_ast_binary(name: String, digits: String) -> BudgetDecl Never! {
+    BudgetDecl{fields: [BudgetField]{
+        budget_ast_field("name", budget_ast_string(name)),
+        budget_ast_field("metric", budget_ast_enum("BinarySize", [EnumLitArg]{})),
+        budget_ast_field("limit", budget_ast_enum("AtMost", [EnumLitArg]{EnumLitArg.Positional{value: budget_ast_unit(digits, "MiB")}})),
+    }, span: budget_ast_span()}
+}
+fn budget_ast_program(budgets: [BudgetDecl]) -> Program Never! {
+    program := ast_program()
+    perf :: PerfLit{budgets: budgets, budgets_span: budget_ast_span(), compile_workloads: [CompileWorkloadDecl]{}, compile_workloads_span: None, list_span: budget_ast_span(), span: budget_ast_span()}
+    contribution :: Contribution{namespace: Namespace.Perf, path: "release", path_span: budget_ast_span(), value: ContribValue.Perf{value: perf}, span: budget_ast_span()}
+    module_decl :: ModuleDecl{name: "perf.release", name_span: budget_ast_span(), auto_discovered: true, sources: [SourceDecl]{}, imports: [Expr]{}, members: [Expr]{}, contributions: [Contribution]{contribution}, span: budget_ast_span()}
+    &program.items.push(Item.Module{value: module_decl})
+    program
+}
+fn budget_ast_module(identity: String, program: Program) -> SemaRegistrationModuleInput Never! {
+    SemaRegistrationModuleInput{package_identity: identity, module_identity: identity, module_name: identity, module_path: identity, source_file: identity, source_segments: [SemaSourceSegment]{}, source_origin: SemaSourceOrigin.Snapshot, program: program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}}
+}
+#Test("budget AST collector elaborates real declarations and preserves canonical facts") {
+    program :: budget_ast_program([BudgetDecl]{budget_ast_binary("binary", "2")})
+    if sema_collect_budget_specs(program) == {
+        .Ok(specs) -> {
+            assert(specs.len() == 1)
+            assert(specs[0].role == "release")
+            assert(specs[0].name == "binary")
+            assert(specs[0].limit_fact.quantity == BudgetQuantity.Bytes{value: 2097152})
+            assert(specs[0].limit_fact.raw == BudgetRawQuantity.Scalar{digits: "2", suffix: Val("MiB")})
+            assert(specs[0].scope == "Package")
+            assert(specs[0].provider == "BuildArtifact(Package)")
+            assert(specs[0].field_spans.get("metric") != None)
+        }
+        .Err(_) -> panic("annotated AST budget must elaborate")
+    }
+    duplicate :: budget_ast_program([BudgetDecl]{budget_ast_binary("binary", "2"), budget_ast_binary("binary", "3")})
+    if sema_collect_budget_specs(duplicate) == {
+        .Ok(_) -> panic("duplicate AST identity must fail")
+        .Err(error) -> {
+            assert(error.diagnostics.len() == 1)
+            assert(error.diagnostics[0].code == "E2904")
+            assert(error.diagnostics[0].what == "performance budgets binary and binary overlap")
+        }
+    }
+}
+#Test("budget AST collector bundles preserve module indices without cross-package collisions") {
+    roots :: [String:budget_test_path.OsPath]{"a": budget_test_path.from_text("/z", budget_test_path.PathPlatform.Unix), "b": budget_test_path.from_text("/a", budget_test_path.PathPlatform.Unix)}
+    modules :: [SemaRegistrationModuleInput]{
+        budget_ast_module("a", budget_ast_program([BudgetDecl]{budget_ast_binary("binary", "2")})),
+        budget_ast_module("b", budget_ast_program([BudgetDecl]{budget_ast_binary("binary", "3")})),
+    }
+    if sema_collect_located_budget_specs_bundle(modules, roots) == {
+        .Ok(specs) -> {
+            assert(specs.len() == 2)
+            assert(specs[0].module_index == 0)
+            assert(specs[1].module_index == 1)
+            assert(specs[0].spec.limit_fact.quantity == BudgetQuantity.Bytes{value: 2097152})
+            assert(specs[1].spec.limit_fact.quantity == BudgetQuantity.Bytes{value: 3145728})
+        }
+        .Err(_) -> panic("different-package AST identities must not collide")
+    }
+}
+#Test("budget AST typed quantities reject overflow and normalize rate and percentage") {
+    max :: "340282366920938463463374607431768211455"
+    assert(sema_budget_scaled_u128(max, 1) != None)
+    assert(sema_budget_scaled_u128(max, 1024) == None)
+    assert(sema_budget_scaled_u128("340282366920938463463374607431768211456", 1) == None)
+    percent :: sema_budget_normalize_percent(budget_ast_unit("0.25", "pct")) ?? panic("basis points must normalize")
+    assert(percent.quantity == 25)
+    assert(sema_budget_normalize_percent(budget_ast_unit("0.251", "pct")) == None)
+    rate :: Expr.StructLit{type_name: "Rate", type_args: [Type]{}, import_ns: None, as_trait: None, fields: [ExprField]{
+        ExprField{name: "count", name_span: budget_ast_span(), value: Expr.Int{value: 100, span: budget_ast_span(), width: None, raw: Val("000_100")}},
+        ExprField{name: "per", name_span: budget_ast_span(), value: budget_ast_unit("2", "s")},
+    }, inferred: false, span: budget_ast_span()}
+    if sema_budget_normalize_rate("throughput", rate) == {
+        .Ok(normalized) -> {
+            assert(normalized.quantity == BudgetQuantity.Rate{numerator: 1, denominator_ns: 20000000})
+            assert(normalized.raw == BudgetRawQuantity.Rate{count_digits: "000_100", per_digits: "2", per_suffix: "s"})
+        }
+        .Err(_) -> panic("typed rate must normalize")
+    }
+}

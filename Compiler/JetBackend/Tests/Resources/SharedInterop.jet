@@ -1,0 +1,9 @@
+use jet_foundation.[MIRTypeID, MIRTypeKind, mir_type_from_kind, mir_type_canonical_key, stable_id]
+
+#Test("source_shared_descriptor_id_prefers_checked_identity_without_physical_bits") {
+    ty := mir_type_from_kind(.Int)
+    ty.identity = Val(MIRTypeID{value: U64{123}})
+    assert_eq(source_shared_interop_checked_type_id(ty), U64{123})
+    structural :: mir_type_from_kind(.Shared{inner: mir_type_from_kind(.Int)})
+    assert_eq(source_shared_interop_checked_type_id(structural), stable_id("jit-runtime-type", mir_type_canonical_key(structural)) | U64{9223372036854775808})
+}

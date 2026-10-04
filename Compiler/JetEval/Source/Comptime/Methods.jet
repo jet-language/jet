@@ -1,0 +1,119 @@
+// PORT-PENDING 0587 crates-jet-comptime-src-comptime-jsoninterp-module-group: crates/jet-comptime/src/Comptime/Methods.rs:1-115
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Comptime and REPL call dispatch split by runtime ownership.
+//RS 
+//RS #[path = "Methods/core_calls.rs"]
+//RS mod core_calls;
+//RS #[path = "Methods/dispatch.rs"]
+//RS mod dispatch;
+//RS #[path = "Methods/pool.rs"]
+//RS mod pool;
+//RS #[path = "Methods/repl_process.rs"]
+//RS mod repl_process;
+//RS #[path = "Methods/time_deadline.rs"]
+//RS mod time_deadline_kernel;
+//RS 
+//RS pub(crate) use core_calls::as_string;
+//RS pub(crate) use core_calls::data_plot_rt;
+//RS pub use core_calls::{
+//RS     apply_core_call, apply_core_call_with_type, apply_core_call_without_ambient,
+//RS     apply_core_call_without_ambient_with_type, apply_core_call_without_ambient_with_type_args,
+//RS     apply_core_pure_call, apply_core_pure_method,
+//RS     apply_core_call_without_ambient_with_type_args_and_history_schema,
+//RS     apply_data_line_call, apply_history_rng_method, apply_impure_core_call,
+//RS     apply_impure_core_call_with_type, apply_impure_core_call_with_type_args,
+//RS     apply_raylib_ambient_core_call, data_status_rows, history_callback_fingerprint,
+//RS     history_command_schema_from_mir, set_trace_id, sketch_add, with_world_rng_provider,
+//RS     HistoryCommandSchema,
+//RS };
+//RS pub(crate) use core_calls::eval_data_describe;
+//RS pub(super) use core_calls::{apply_regex_method, as_float, solver_require};
+//RS // I9: the MIR evaluator calls this fake-data kernel too, so it
+//RS // must be reachable from outside this crate. One kernel, every tier.
+//RS pub use core_calls::apply_fake_method;
+//RS /// Public host entry for the MIR evaluator (#777).
+//RS pub use core_calls::{
+//RS     display_core_pure_value, eval_regex_replace_all_with, jet_crypto_zeroize,
+//RS };
+//RS pub(crate) use core_calls::{
+//RS     eval_data_pivot_sum, evaluate_typed_datetime_literal, url_parts_to_ct,
+//RS     validate_datetime_literal,
+//RS };
+//RS /// Public for MirBridge `Rng.shuffle(&list)` write-back (#777).
+//RS pub use dispatch::apply_seeded_rng_method;
+//RS pub use dispatch::apply_seeded_rng_method_with_type;
+//RS pub(crate) use dispatch::{arg_string_literal, check_literal_embed_path, embed_path_err};
+//RS pub(super) use dispatch::{
+//RS     invoke_standalone_closure, invoke_standalone_closure_mut, invoke_standalone_closure_mut_args,
+//RS };
+//RS pub use dispatch::{
+//RS     eval_build_embed, eval_build_time_io, eval_locked_find, eval_net_fetch, is_tier2_core_call,
+//RS     project_rejection, vault_comptime_denied,
+//RS };
+//RS pub use repl_process::{
+//RS     apply_repl_authorized_core_call, apply_repl_authorized_core_call_with_type,
+//RS };
+//RS 
+//RS pub(super) fn apply_pool(
+//RS     recv: &crate::AST::CtValue,
+//RS     method: &str,
+//RS     args: &[crate::AST::CtValue],
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Option<
+//RS     Result<(crate::AST::CtValue, Option<crate::AST::CtValue>), crate::Diagnostics::Diagnostic>,
+//RS > {
+//RS     if !pool::is_method(recv, method) {
+//RS         return None;
+//RS     }
+//RS     Some(pool::apply(recv, method, args, None, span).map(|o| (o.value, o.updated)))
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod structure_tests {
+//RS     #[test]
+//RS     fn method_modules_stay_below_the_split_threshold() {
+//RS         for (name, source) in [
+//RS             ("dispatch", include_str!("Methods/dispatch.rs")),
+//RS             (
+//RS                 "eval_method",
+//RS                 include_str!("Methods/dispatch/eval_method.rs"),
+//RS             ),
+//RS             ("repl_process", include_str!("Methods/repl_process.rs")),
+//RS             ("core_calls", include_str!("Methods/core_calls.rs")),
+//RS             (
+//RS                 "core_calls/regex",
+//RS                 include_str!("Methods/core_calls/regex.rs"),
+//RS             ),
+//RS             (
+//RS                 "core_calls/data",
+//RS                 include_str!("Methods/core_calls/data.rs"),
+//RS             ),
+//RS             (
+//RS                 "core_calls/impure",
+//RS                 include_str!("Methods/core_calls/impure.rs"),
+//RS             ),
+//RS             (
+//RS                 "core_calls/random",
+//RS                 include_str!("Methods/core_calls/random.rs"),
+//RS             ),
+//RS             (
+//RS                 "core_calls/history",
+//RS                 include_str!("Methods/core_calls/history.rs"),
+//RS             ),
+//RS             (
+//RS                 "core_calls/plain_calls",
+//RS                 include_str!("Methods/core_calls/plain_calls.rs"),
+//RS             ),
+//RS             ("pool", include_str!("Methods/pool.rs")),
+//RS         ] {
+//RS             let lines = source.lines().count();
+//RS             assert!(
+//RS                 lines < 2_500,
+//RS                 "{name}.rs regrew to {lines} lines; split it along semantic ownership \
+//RS                  without changing the 2,500-line module cap"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0587 crates/jet-comptime/src/Comptime/Methods.rs:1-115
+

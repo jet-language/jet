@@ -281,7 +281,6 @@ pub(crate) fn append_runtime_mir_codec(
         });
     }
     emit_special_host_to_source_converters(out, symbols)?;
-    emit_string_part_converters(out, symbols)?;
     for definition in &source {
         if id_newtype(definition) {
             keep(emit_id_from_host_converter(out, symbols, &host_by_name, &definition.name));
@@ -677,10 +676,6 @@ fn emit_enum_from_host_converter(
                 definition.name, host_variant.name
             )));
         };
-        if let Some(reason) = unrepresentable_host_field(&definition.name, source_variant, host_variant, &aligned) {
-            arms.push(format!("        {pattern} => Err({reason:?}.to_string()),"));
-            continue;
-        }
         let mut values = Vec::with_capacity(source_variant.fields.len());
         for (source_index, source_field) in source_variant.fields.iter().enumerate() {
             let value = match aligned.iter().position(|aligned| *aligned == Some(source_index)) {
@@ -776,18 +771,13 @@ fn custom_source_converter(name: &str) -> bool {
             | "MIRType"
             | "MIRViewProvenanceEntry"
             | "MIRJobLimit"
-            | "MIRStringPart"
-            | "MIRStringPartKind"
     )
 }
 
-/// Source-only enums with no native MIR type. Their values never cross on
-/// their own: `MIRBinaryOverflow` is derived from the Binary dispatch (see
-/// `derived_source_variant_field`), and string formats are carried only as the
-/// display interpolation the string-part converter accepts. So they get no
-/// converters, which would name a native type that does not exist.
+/// Source binary overflow is derived from dispatch and has no standalone
+/// native carrier. A converter may not name a nonexistent native type.
 fn source_only_type(name: &str) -> bool {
-    matches!(name, "MIRBinaryOverflow" | "MIRStringFormat" | "MIRUnitFormat")
+    name == "MIRBinaryOverflow"
 }
 
 /// A Source definition with no native type of its own: absent from the parsed
@@ -819,27 +809,6 @@ fn into_source_field(source_type: &str, value: &str) -> String {
     }
 }
 
-/// Source MIR keeps a string part as a record over a kind that also carries
-/// the interpolation format; native MIR has a bare literal/value enum and
-/// lowers formatting before `BuildString`. Only display interpolation crosses.
-fn emit_string_part_converters(
-    out: &mut String,
-    symbols: &BootstrapCodecSymbols<'_>,
-) -> Result<(), BootstrapHostCodecError> {
-    let part = symbols.type_symbol("MIRStringPart")?;
-    let kind = symbols.field_symbol("MIRStringPart", "kind")?;
-    let literal = symbols.variant_path("MIRStringPartKind", "Literal")?;
-    let interpolation = symbols.variant_path("MIRStringPartKind", "Interpolation")?;
-    let display = symbols.variant_path("MIRStringFormat", "Display")?;
-    let text = symbols.field_symbol("MIRStringPartKind", "text")?;
-    let interpolated = symbols.field_symbol("MIRStringPartKind", "value")?;
-    let format = symbols.field_symbol("MIRStringPartKind", "format")?;
-    writeln!(
-        out,
-        "fn __jet_bootstrap_mir_MIRStringPart_to_host(value: &{part}) -> Result<::jet_foundation::MIR::MirStringPart, String> {{\n    match &value.{kind} {{\n        {literal} {{ {text}: __text }} => Ok(::jet_foundation::MIR::MirStringPart::Literal(__text.clone())),\n        {interpolation} {{ {interpolated}: __value, {format}: {display} }} => Ok(::jet_foundation::MIR::MirStringPart::Value(__jet_bootstrap_mir_MIRValueID_to_host(__value)?)),\n        {interpolation} {{ .. }} => Err(\"Source MIR string interpolation with a format has no native MIR string part\".to_string()),\n    }}\n}}\n\nfn __jet_bootstrap_mir_MIRStringPart_from_host(value: &::jet_foundation::MIR::MirStringPart) -> Result<{part}, String> {{\n    Ok({part} {{\n        {kind}: match value {{\n            ::jet_foundation::MIR::MirStringPart::Literal(__text) => {literal} {{ {text}: __text.clone() }},\n            ::jet_foundation::MIR::MirStringPart::Value(__value) => {interpolation} {{ {interpolated}: __jet_bootstrap_mir_MIRValueID_from_host(__value)?, {format}: {display} }},\n        }},\n    }})\n}}\n"
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
-}
 
 
 
@@ -1013,10 +982,6 @@ fn emit_enum_converter(
             .map(|index| format!("__field_{index}"))
             .collect::<Vec<_>>();
         let pattern = source_variant_shape(symbols, &definition.name, source_variant, source_path.clone(), &bindings)?;
-        if let Some(reason) = unrepresentable_host_field(&definition.name, source_variant, host_variant, &aligned) {
-            arms.push(format!("        {pattern} => Err({reason:?}.to_string()),"));
-            continue;
-        }
         let values = host_variant
             .fields
             .iter()
@@ -1813,19 +1778,13 @@ fn source_field_is_host_derived(owner: &str, field: &str) -> bool {
     matches!((owner, field), ("MIRFunction", "memo_unbounded"))
 }
 
-/// Native fields that no single Source field maps onto: a fact the native
-/// compiler derives itself (absent in Source MIR), the one-variant kernel
-/// mode, and the memo bound Source MIR splits into bound + unbounded.
+/// Native memo bound is represented losslessly by Source bound + unbounded.
 fn custom_struct_field_to_host(
     symbols: &BootstrapCodecSymbols<'_>,
     owner: &str,
     host_field: &str,
 ) -> Result<Option<String>, BootstrapHostCodecError> {
     Ok(match (owner, host_field) {
-        ("MIRCaptureFacts", "frame_schedule" | "frame_schedule_derivation") => {
-            Some("None".to_string())
-        }
-        ("MIRKernelFacts", "mode") => Some("::jet_foundation::MIR::MirKernelMode::Parallel".to_string()),
         ("MIRFunction", "memo_bound") => {
             let bound = symbols.field_symbol(owner, "memo_bound")?;
             let unbounded = symbols.field_symbol(owner, "memo_unbounded")?;
@@ -1901,7 +1860,7 @@ fn align_variant_fields(
     for host_field in &host.fields {
         let name = host_field.name.as_deref().ok_or_else(arity)?;
         let index = source.fields.iter().position(|field| field.name.as_deref() == Some(name));
-        if index.is_none() && host_only_variant_field(owner, &source.name, name).is_none() {
+        if index.is_none() {
             return Err(arity());
         }
         aligned.push(index);
@@ -1918,33 +1877,6 @@ fn align_variant_fields(
     Ok(aligned)
 }
 
-/// Why a variant cannot cross the boundary, when a native-only payload field
-/// has no Source counterpart.
-fn unrepresentable_host_field(
-    owner: &str,
-    source: &Variant,
-    host: &Variant,
-    aligned: &[Option<usize>],
-) -> Option<&'static str> {
-    host.fields
-        .iter()
-        .zip(aligned)
-        .find_map(|(field, source_index)| match source_index {
-            Some(_) => None,
-            None => host_only_variant_field(owner, &source.name, field.name.as_deref()?),
-        })
-}
-
-/// Native-only payload fields Source MIR does not carry, with the reason the
-/// variant is refused in both directions.
-fn host_only_variant_field(owner: &str, variant: &str, field: &str) -> Option<&'static str> {
-    match (owner, variant, field) {
-        ("MIRTerminator", "Yield", "cancel") => Some(
-            "Source MIR generator yield has no cancel target; generator cancellation (D-CANCELMODEL1) is not in Source MIR",
-        ),
-        _ => None,
-    }
-}
 
 /// Source-only payload fields native MIR derives from the variant's other
 /// fields. `Binary.overflow` is `Trap` exactly when the dispatch is a

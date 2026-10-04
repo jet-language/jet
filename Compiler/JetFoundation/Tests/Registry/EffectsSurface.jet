@@ -1,0 +1,141 @@
+// Rust Syntax/effects_surface.rs:401-426. Uses the canonical selector owner,
+// not a test-owned lookup table. The other tests pin ported constant payloads.
+#Test("the_registry_is_the_closed_selector_vocabulary") {
+    names :: [String]{
+        "Debug", "Pretty", "Fixed", "Grouped", "Hex", "Pad", "PadLeft", "Sci",
+        "Percent", "Bin", "Oct", "Unit",
+    }
+    assert(INTERPOLATION_SELECTORS.len() == names.len())
+    loop index in 0..<names.len() -> assert(INTERPOLATION_SELECTORS[index].name == names[index])
+    unit :: interpolation_selector("Unit") ?? panic("Unit is registered")
+    if unit.arguments == {
+        .UnitStyle(styles) -> {
+            assert(styles.len() == 2)
+            assert(styles[0] == "name")
+            assert(styles[1] == "bare")
+        }
+        else -> panic("Unit requires its two style names")
+    }
+    hex :: interpolation_selector("Hex") ?? panic("Hex is registered")
+    assert(hex.arguments == .Width)
+    pad :: interpolation_selector("Pad") ?? panic("Pad is registered")
+    assert(pad.arguments == .WidthFill)
+    assert(interpolation_selector("Repr") == None)
+}
+
+// Rust:275-394. Both lookup functions must project the same closed rows.
+#Test("effect surface selector kinds round trip through the canonical owner") {
+    kinds :: [InterpolationSelectorKind]{
+        .Debug, .Pretty, .Fixed, .Grouped, .Hex, .Pad, .PadLeft, .Sci,
+        .Percent, .Bin, .Oct, .Unit,
+    }
+    arguments :: [InterpolationSelectorArguments]{
+        .NoArguments, .NoArguments, .Precision, .Precision, .Width, .WidthFill,
+        .WidthFill, .Precision, .Precision, .NoArguments, .NoArguments,
+        .UnitStyle{styles: [String]{"name", "bare"}},
+    }
+    assert(kinds.len() == INTERPOLATION_SELECTORS.len())
+    loop index in 0..<kinds.len() {
+        row :: interpolation_selector_for_kind(kinds[index])
+        assert(row.name == INTERPOLATION_SELECTORS[index].name)
+        assert(row.kind == kinds[index])
+        assert(row.arguments == arguments[index])
+        by_name :: interpolation_selector(row.name) ?? panic("registered name")
+        assert(by_name.kind == row.kind)
+        assert(by_name.arguments == row.arguments)
+    }
+    assert(interpolation_selector("debug") == None)
+    assert(interpolation_selector("Unit ") == None)
+    assert(interpolation_selector("") == None)
+    assert(INTERPOLATION_SELECTOR_RAIL == ":")
+    assert(RETIRED_INTERPOLATION_SELECTOR_RAIL == "#")
+    assert(INTERPOLATION_SELECTOR_EXAMPLE == "{{value:Selector}}")
+    assert(RETIRED_INTERPOLATION_SELECTOR_EXAMPLE == "{{value#Selector}}")
+}
+
+// Rust:5-87. The builtin tags accessor must read the same declaration order.
+#Test("effect surface punctuation leaves and tags retain exact payloads") {
+    assert(KW_TODO == "Todo")
+    assert(KW_PURE == "Pure")
+    assert(EFFECT_ARROW_OPEN == "-[")
+    assert(EFFECT_ARROW_CLOSE == "]>")
+    assert(KW_EFFECT_DECL == "effect")
+    assert(EFFECT_LEAF_EXEC_ARGS == "Exec.Args")
+    assert(BUILTIN_EFFECT_LEAVES == [String]{
+        "DB.Read", "DB.Write", "FS.Read", "FS.Write", "Rand.Draw", "Exec.Exit",
+        "Exec.Args", "Time.Wait", "FFI.Go", "FFI.Java", "FFI.DotNet",
+        "FFI.Fortran", "FFI.Cobol", "FFI.Tcl", "FFI.Lua", "FFI.Ada", "FFI.Pascal",
+        "FFI.Dart", "FFI.PowerShell", "FFI.Perl", "FFI.Ruby", "FFI.Php", "FFI.R",
+        "FFI.Com", "FFI.C", "FFI.Cpp", "FFI.Asm", "FFI.Py", "FFI.Octave",
+    })
+    assert(foundation_embedded_core().builtin_tags() == [String]{"Input", "PII", "Secret", "Credential"})
+    assert(KW_TAINTED == "Tainted" && KW_SANITIZER == "Sanitizer")
+    assert(KW_SCRUB == "Scrub" && KW_CREDENTIAL == "Credential")
+}
+
+// Rust:165-203. Preserve the leading NUL byte, not a printable escape spelling.
+#Test("effect surface task dispatch identities preserve their private NUL prefix") {
+    receiver :: INTERNAL_TASK_RECEIVER.bytes()
+    assert(receiver == [U8]{0, 106, 101, 116, 46, 116, 97, 115, 107})
+    assert(INTERNAL_TASK_SURFACE_TYPE == "\x00jet.task.surface")
+    assert(INTERNAL_TASK_GROUP_SURFACE_TYPE == "\x00jet.task.group.surface")
+    assert(INTERNAL_TASK_SPAWN_METHOD == "\x00jet.task.spawn")
+    assert(INTERNAL_TASK_TIMEOUT_METHOD == "\x00jet.task.timeout")
+    assert(INTERNAL_TASK_ALL_METHOD == "\x00jet.task.all")
+    assert(INTERNAL_TASK_RACE_METHOD == "\x00jet.task.race")
+    assert(INTERNAL_TASK_ANY_METHOD == "\x00jet.task.any")
+    assert(TYPE_TASKGROUP == "Group" && TASK_TIMEOUT_SELECTOR == "timeout")
+    assert(METHOD_TASK_PAUSE == "pause" && METHOD_TASK_RESUME == "resume" && METHOD_TASK_CANCEL == "cancel")
+}
+
+// Rust:235-271. Reused Generics and Spellings declarations retain one meaning.
+#Test("effect surface nominal hooks and numeric menus retain Rust order") {
+    assert(DISPLAY == "Display" && DEBUG == "Debug")
+    assert(TRAIT_ITERABLE == "Iterable" && TRAIT_ITERATOR == "Iterator")
+    assert(TRAIT_INDEX == "Index" && TRAIT_INDEX_MUT == "IndexMut")
+    assert(TRAIT_ADD == "Add" && SUB == "Sub" && TRAIT_MUL == "Mul" && DIV == "Div")
+    assert(EQUATABLE == "Equatable" && COMPARABLE == "Comparable")
+    assert(TYPE_ORDERING == "Ordering" && TRAIT_NUMERIC == "Numeric")
+    assert(NUMERIC_SUPERTRAITS == [String]{"Add", "Sub", "Mul", "Comparable"})
+    assert(NUMERIC_STATIC_MEMBERS == [String]{"zero", "one"})
+    assert(ORDERING_VARIANTS == [String]{"Less", "Equal", "Greater"})
+    assert(IO_READER == "Reader" && IO_WRITER == "Writer" && DRIVER == "Driver")
+}
+
+// Rust:602-662. Do not alphabetize the provider or verb registries.
+#Test("effect surface package providers and commands retain original closed order") {
+    assert(REF_SOURCE_PROVIDERS == [String]{
+        "jetpack", "nixpkgs", "github", "path", "cran", "luarocks", "ruby", "perl",
+        "php", "jet-registry", "npm", "cargo", "pypi", "swiftpm", "releases",
+    })
+    assert(JETPACK_VERBS == [String]{
+        "doctor", "env", "use", "hangar", "audit", "add", "remove", "update", "lock",
+        "outdated", "search", "info", "explain", "why", "import", "logs", "override", "push",
+        "trust", "os", "config", "bridge", "services", "secrets", "image", "user", "tool", "profile", "browser",
+    })
+    assert(JETPACK_BINARY_NAME == "jetpack" && JETOS_BINARY_NAME == "jetos")
+    assert(REF_SEPARATOR == ":" && REF_CHANNEL_MARKER == "#")
+    assert(REF_CHANNEL_LATEST == "latest" && REF_CHANNEL_MAIN == "main" && REF_CHANNEL_AUTO == "auto")
+    assert(ENV_FLAG_PACKAGE == "-p" && ENV_FLAG_PREP == "--prep" && ENV_FLAG_PREP_RETIRED == "--prepare")
+    assert(WS_FLAG_AFFECTED == "--affected" && WS_FLAG_AFFECTED_SINCE == "--affected-since")
+    assert(ENV_HOOK_SHELLS == [String]{"bash", "zsh", "fish"})
+    assert(ENV_REPORT_JOBS_KEY == "jobs" && ENV_REPORT_CHECKS_KEY == "checks")
+}
+
+// Rust:796-923. Ordered library menus and error/default spellings.
+#Test("effect surface tool profile browser trust service and secret menus are exact") {
+    assert(TOOL_VERBS == [String]{"install", "list", "uninstall"})
+    assert(TOOL_EXTERNAL_PROVIDERS == [String]{"npm", "pypi", "cargo", "crates", "brew", "go", "gem"})
+    assert(TOOL_DIAG_COLLIDE == "E1297" && TOOL_DIAG_PROVIDER == "E1298")
+    assert(PROFILE_VERBS == [String]{"plan", "build", "switch", "rollback", "generations"})
+    assert(BROWSER_VERBS == [String]{"lock", "provision", "resolve", "list"})
+    assert(BROWSER_ENGINES == [String]{"chromium", "firefox", "webkit"})
+    assert(BROWSER_DEFAULT_PROTOCOL == "bidi-2025.5")
+    assert(TRUST_VERBS == [String]{"grant", "list", "explain", "revoke"})
+    assert(TRUST_FLAG_SCOPE == "--scope" && TRUST_SCOPE_USER == "user" && TRUST_SCOPE_REPO == "repo")
+    assert(SERVICES_VERBS == [String]{"up", "down", "health", "logs", "restart", "wait", "watch"})
+    assert(SERVICES_STATE_DIR == "services")
+    assert(SECRETS_VERBS == [String]{"keygen", "set", "get", "unset", "list", "import", "recipients"})
+    assert(SECRETS_RECIPIENTS_VERBS == [String]{"add", "list"})
+    assert(SECRETS_FLAG_FORCE == "--force" && SECRETS_DEFAULT_IMPORT_FILE == ".env")
+}

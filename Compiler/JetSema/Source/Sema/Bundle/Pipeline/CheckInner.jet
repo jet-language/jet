@@ -1,0 +1,2498 @@
+// PORT-PENDING 0356 crates-jet-sema-src-sema-bundle-pipeline-checkinner: crates/jet-sema/src/Sema/Bundle/Pipeline/CheckInner.rs:1-2494
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS 
+//RS pub(super) fn check_bundle_opts_for_output_inner(
+//RS     bundle: &mut ProgramBundle,
+//RS     mode: CompileMode,
+//RS     no_os: bool,
+//RS     gates: crate::Policy::GateSet,
+//RS     explicit_output: Option<&str>,
+//RS     incremental: Option<&mut IncrementalSemaCache>,
+//RS     allow_compiler_api: bool,
+//RS ) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
+//RS     guard_fact_registry_law();
+//RS     let foreign_diags = validate_foreign_imports(bundle);
+//RS     if !foreign_diags.is_empty() {
+//RS         return (
+//RS             foreign_diags,
+//RS             super::super::Effects::SemIndexEffectFacts::default(),
+//RS         );
+//RS     }
+//RS     let mut diags = Vec::new();
+//RS     diags.extend(validate_script_entries(bundle));
+//RS     default_entry_return(bundle);
+//RS     diags.extend(inject_units_prelude(bundle));
+//RS     super::super::Prelude::inject(bundle);
+//RS     diags.extend(super::super::Casing::validate_bundle(bundle));
+//RS     // D-OSTARGET2=B (ratified 2026-07-03): fold every `prep if $build.os == {
+//RS     // … }` switch to the arm matching this build's active OS *before* any other
+//RS     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
+//RS     // meet the taken arm. Rewrites into an `@if` chain (reuses D-WHEN1).
+//RS     let os_switches_before = CanonicalPass::ast_payload(bundle);
+//RS     let os_switches_identity_before = CanonicalPass::ast_identity(bundle);
+//RS     diags.extend(super::super::desugar_os_switches(bundle));
+//RS     CanonicalPass::record(
+//RS         "lowering",
+//RS         "sema.desugar-os-switches",
+//RS         "crates/jet-sema/src/Sema/OSTarget.rs",
+//RS         "ast",
+//RS         os_switches_before,
+//RS         os_switches_identity_before,
+//RS         "ast",
+//RS         CanonicalPass::ast_payload(bundle),
+//RS         CanonicalPass::ast_identity(bundle),
+//RS         "preserve",
+//RS     );
+//RS     let migrations_before = CanonicalPass::ast_payload(bundle);
+//RS     let migrations_identity_before = CanonicalPass::ast_identity(bundle);
+//RS     super::super::desugar_migrations(bundle);
+//RS     CanonicalPass::record(
+//RS         "lowering",
+//RS         "sema.desugar-migrations",
+//RS         "crates/jet-sema/src/Sema/SchemaMigration.rs",
+//RS         "ast",
+//RS         migrations_before,
+//RS         migrations_identity_before,
+//RS         "ast",
+//RS         CanonicalPass::ast_payload(bundle),
+//RS         CanonicalPass::ast_identity(bundle),
+//RS         "preserve",
+//RS     );
+//RS     let spreads_before = CanonicalPass::ast_payload(bundle);
+//RS     let spreads_identity_before = CanonicalPass::ast_identity(bundle);
+//RS     super::super::desugar_member_spreads(bundle);
+//RS     CanonicalPass::record(
+//RS         "lowering",
+//RS         "sema.desugar-member-spreads",
+//RS         "crates/jet-sema/src/Sema/MemberSpread.rs",
+//RS         "ast",
+//RS         spreads_before,
+//RS         spreads_identity_before,
+//RS         "ast",
+//RS         CanonicalPass::ast_payload(bundle),
+//RS         CanonicalPass::ast_identity(bundle),
+//RS         "preserve",
+//RS     );
+//RS     // D-CONF-GENSPELL1=A: expand module aliases into concrete CodeModules before any
+//RS     // sibling-call mangling or registration sees the items.
+//RS     expand_generic_module_aliases(bundle, &mut diags);
+//RS     // D-CHOOSE-HEADS1=A: fold ordered multi-head declarations into one
+//RS     // ordinary enum pattern table before registration and body checking.
+//RS     let multi_head_before = CanonicalPass::ast_payload(bundle);
+//RS     let multi_head_identity_before = CanonicalPass::ast_identity(bundle);
+//RS     desugar_multi_head_functions(bundle, &mut diags);
+//RS     CanonicalPass::record(
+//RS         "lowering",
+//RS         "sema.desugar-multi-head-functions",
+//RS         "crates/jet-sema/src/Sema/Bundle.rs",
+//RS         "ast",
+//RS         multi_head_before,
+//RS         multi_head_identity_before,
+//RS         "ast",
+//RS         CanonicalPass::ast_payload(bundle),
+//RS         CanonicalPass::ast_identity(bundle),
+//RS         "preserve",
+//RS     );
+//RS     // Lift each inline module's member TYPES to their mangled
+//RS     // member identity beside the module, so registration, checking and every
+//RS     // engine see them the same way they see a generic module's members
+//RS     // (card #2054). Runs after generic expansion (instances are already
+//RS     // lifted) and before sibling-call mangling and registration.
+//RS     hoist_inline_module_member_types(bundle);
+//RS     // D-IMPLDOT1=A: an `impl` head that names a declaration through a module
+//RS     // alias splits at the alias, not at the last segment.
+//RS     let qualified_impl_traits = normalize_qualified_impl_heads(bundle);
+//RS     // Rewrite inline-module sibling calls to their mangled names before any
+//RS     // registration/checking/codegen sees the bodies.
+//RS     mangle_inline_sibling_calls(bundle);
+//RS     // D-UNSAFE-OBLIG1=A: run after compile-time branch selection and generic
+//RS     // module expansion, but before registration/TIR. Assertions are checked and
+//RS     // erased here so no generated or untaken body bypasses the policy.
+//RS     diags.extend(super::super::UnsafeObligations::check_and_strip_with_gates(
+//RS         bundle, gates,
+//RS     ));
+//RS     // D-STRUCT-POLICY1=A: collect the one package-local setting vocabulary
+//RS     // before any function signature or body is checked. Built-in callable
+//RS     // names remain owned by `CallablePolicyChain`; user names are nominal and
+//RS     // duplicate declarations are rejected at the declaration boundary. The
+//RS     // package scope is part of the key: dependency packages may independently
+//RS     // own the same setting name.
+//RS     let mut callable_policy_declarations =
+//RS         std::collections::BTreeMap::<(String, String), (usize, crate::AST::UserPolicyDecl)>::new();
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         let package_scope =
+//RS             jet_foundation::Names::package_scope_for(&module.path, &bundle.project_root);
+//RS         for declaration in &module.user_policy_declarations {
+//RS             if crate::AST::CallablePolicyChain::is_builtin(&declaration.name) {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E0105",
+//RS                     format!(
+//RS                         "policy setting `{}` redeclares a compiler-owned setting",
+//RS                         declaration.name
+//RS                     ),
+//RS                     "built-in callable policies and package settings share one nominal vocabulary"
+//RS                         .to_string(),
+//RS                     "choose a different policy setting name".to_string(),
+//RS                     Some(declaration.name_span),
+//RS                 ));
+//RS                 continue;
+//RS             }
+//RS             let key = (package_scope.clone(), declaration.name.clone());
+//RS             if let Some((first_module, first)) =
+//RS                 callable_policy_declarations.insert(key.clone(), (module_idx, declaration.clone()))
+//RS             {
+//RS                 // Restore the first declaration as the lookup winner. The
+//RS                 // duplicate still gets reported exactly once.
+//RS                 callable_policy_declarations.insert(key, (first_module, first.clone()));
+//RS                 diags.push(
+//RS                     Diagnostic::error(
+//RS                         "E0105",
+//RS                         format!(
+//RS                             "policy setting `{}` is declared twice (spans {}..{} and {}..{})",
+//RS                             declaration.name,
+//RS                             first.name_span.start,
+//RS                             first.name_span.end,
+//RS                             declaration.name_span.start,
+//RS                             declaration.name_span.end,
+//RS                         ),
+//RS                         "one package-owned policy name must resolve to one checked wrapper"
+//RS                             .to_string(),
+//RS                         "rename or remove one of the policy declarations".to_string(),
+//RS                         Some(declaration.name_span),
+//RS                     )
+//RS                     .with_detail(format!(
+//RS                         "first declaration: module {first_module}, span {}..{}\nsecond declaration: module {module_idx}, span {}..{}",
+//RS                         first.span.start,
+//RS                         first.span.end,
+//RS                         declaration.span.start,
+//RS                         declaration.span.end,
+//RS                     )));
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut states: Vec<ModuleState> = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(module_idx, m)| {
+//RS             let fact_registry = crate::Sema::StateTable::declaration_facts(&m.items);
+//RS             ModuleState {
+//RS                 module_path: m.display.clone(),
+//RS                 source: m.source.clone(),
+//RS                 package_scope: jet_foundation::Names::package_scope_for(
+//RS                     &m.path,
+//RS                     &bundle.project_root,
+//RS                 ),
+//RS                 module_alias: m.alias.clone(),
+//RS                 items: m.items.clone(),
+//RS                 build_facts: bundle.build_facts.clone(),
+//RS                 allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
+//RS                 exact_int_reachable: Default::default(),
+//RS                 diverging_functions: HashSet::new(),
+//RS                 fixed_length_write_params: HashSet::new(),
+//RS                 funcs: HashMap::new(),
+//RS                 registry: builtin_type_registry(),
+//RS                 consts: HashMap::new(),
+//RS                 imports: HashMap::new(),
+//RS                 inline_foreign_imports: HashMap::new(),
+//RS                 inline_reexport_foreign: HashMap::new(),
+//RS                 core_imports: HashMap::new(),
+//RS                 tests: HashMap::new(),
+//RS                 trait_reg: TraitRegistry::default(),
+//RS                 fact_registry,
+//RS                 policy_declarations: m.policy_declarations.clone(),
+//RS                 callable_policy_declarations: callable_policy_declarations.clone(),
+//RS                 rule_facts: m.rule_facts.clone(),
+//RS                 code_modules: HashMap::new(),
+//RS                 code_module_identities: HashMap::new(),
+//RS                 unqualified: HashMap::new(),
+//RS                 unqualified_file: HashMap::new(),
+//RS                 core_item_imports: HashMap::new(),
+//RS                 reexports: HashMap::new(),
+//RS                 inline_unqualified: HashMap::new(),
+//RS                 inline_unqualified_file: HashMap::new(),
+//RS                 inline_core_imports: HashMap::new(),
+//RS                 inline_core_items: HashMap::new(),
+//RS                 inline_reexport_inline: HashMap::new(),
+//RS                 inline_reexport_file: HashMap::new(),
+//RS                 inline_reexport_core: HashMap::new(),
+//RS             }
+//RS         })
+//RS         .collect();
+//RS     // Early comptime folds and every module checker see the same bundle-wide
+//RS     // state rows. Graphs are attached before top-level `Type.reflect()` folds,
+//RS     // so no consumer needs a source-side typestate table.
+//RS     let initial_items = || bundle.modules.iter().flat_map(|module| module.items.iter());
+//RS     let mut initial_fact_registry = crate::Sema::StateTable::declaration_facts(initial_items());
+//RS     for (type_name, graph) in crate::Sema::checked_state_graphs(initial_items()) {
+//RS         initial_fact_registry.set_state_graph(format!("{type_name}.State"), graph);
+//RS     }
+//RS     for state in &mut states {
+//RS         state.fact_registry = initial_fact_registry.clone();
+//RS     }
+//RS     let mut name_ledger = std::mem::take(&mut bundle.name_ledger);
+//RS     name_ledger.clear_sema_facts();
+//RS 
+//RS     // Generic-instance declarations have one AST/codegen owner, while every
+//RS     // consumer registry receives the same nominal metadata. This is not a
+//RS     // declaration clone: generated Rust/TIR still sees the owner item once.
+//RS     let shared_instance_nominals: Vec<(usize, Item)> = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .enumerate()
+//RS         .flat_map(|(owner, module)| {
+//RS             let prefixes: Vec<String> = module
+//RS                 .items
+//RS                 .iter()
+//RS                 .filter_map(|item| match item {
+//RS                     Item::CodeModule(cm) if cm.instance_identity.is_some() => {
+//RS                         Some(GenericModules::module_type_prefix(&cm.name))
+//RS                     }
+//RS                     _ => None,
+//RS                 })
+//RS                 .collect();
+//RS             module.items.iter().filter_map(move |item| match item {
+//RS                 Item::Struct(def) if prefixes.iter().any(|prefix| def.name.starts_with(prefix)) => {
+//RS                     Some((owner, Item::Struct(clone_struct(def))))
+//RS                 }
+//RS                 Item::Enum(def) if prefixes.iter().any(|prefix| def.name.starts_with(prefix)) => {
+//RS                     Some((owner, Item::Enum(clone_enum(def))))
+//RS                 }
+//RS                 _ => None,
+//RS             })
+//RS         })
+//RS         .collect();
+//RS     for (owner, item) in &shared_instance_nominals {
+//RS         for (consumer, st) in states.iter_mut().enumerate() {
+//RS             if consumer == *owner {
+//RS                 continue;
+//RS             }
+//RS             match item {
+//RS                 Item::Struct(def) => {
+//RS                     register_struct(
+//RS                         def,
+//RS                         &mut st.registry,
+//RS                         &mut diags,
+//RS                         &st.funcs,
+//RS                         &st.consts,
+//RS                         &jet_foundation::Layout::TargetLayout::from_build_facts(&st.build_facts),
+//RS                     );
+//RS                 }
+//RS                 Item::Enum(def) => {
+//RS                     register_enum(def, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+//RS                 }
+//RS                 _ => unreachable!(),
+//RS             }
+//RS             let module_alias = bundle.modules[consumer].alias.clone();
+//RS             declare_item_names(&mut name_ledger, consumer, &module_alias, item);
+//RS             let generated_name = match item {
+//RS                 Item::Struct(definition) => Some(definition.name.as_str()),
+//RS                 Item::Enum(definition) => Some(definition.name.as_str()),
+//RS                 _ => None,
+//RS             };
+//RS             if let Some(generated_name) = generated_name {
+//RS                 if let Some(display) = bundle.modules[*owner].items.iter().find_map(|item| {
+//RS                     let Item::CodeModule(instance) = item else {
+//RS                         return None;
+//RS                     };
+//RS                     if instance.instance_identity.is_none() {
+//RS                         return None;
+//RS                     }
+//RS                     GenericModules::top_level_instance_display_paths(
+//RS                         instance,
+//RS                         &bundle.modules[*owner].items,
+//RS                     )
+//RS                     .into_iter()
+//RS                     .find_map(|(internal, display)| (internal == generated_name).then_some(display))
+//RS                 }) {
+//RS                     name_ledger.record_display_path(
+//RS                         consumer,
+//RS                         format!("{}.{}", module_alias, generated_name),
+//RS                         display,
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // Derive bodies receive the same canonical path that later reflection and
+//RS     // tooling projections read. The final population pass remains below for
+//RS     // aliases and references discovered during registration.
+//RS     populate_name_ledger(bundle, &states, &mut name_ledger);
+//RS     bundle.name_ledger = std::mem::take(&mut name_ledger);
+//RS     diags.extend(resolve_unit_dimensions(bundle));
+//RS     name_ledger = std::mem::take(&mut bundle.name_ledger);
+//RS 
+//RS     // D-METADERIVE1=A orphan law needs a bundle-wide provider view: a derive
+//RS     // may be supplied by the entry module for an imported type, or imported
+//RS     // for an entry-local type.  Clone provider bodies/helpers before mutating
+//RS     // modules so expansion can attach generated items beside the target type.
+//RS     let derive_providers: Vec<(
+//RS         usize,
+//RS         String,
+//RS         String,
+//RS         Vec<crate::AST::DeriveBodyItem>,
+//RS         HashMap<String, Func>,
+//RS     )> = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .enumerate()
+//RS         .flat_map(|(origin, module)| {
+//RS             let helpers: HashMap<String, Func> = module
+//RS                 .items
+//RS                 .iter()
+//RS                 .filter_map(|item| match item {
+//RS                     Item::Func(f) => Some((f.name.clone(), f.clone())),
+//RS                     _ => None,
+//RS                 })
+//RS                 .collect();
+//RS             module.items.iter().filter_map(move |item| match item {
+//RS                 Item::UserDerive(d) => Some((
+//RS                     origin,
+//RS                     d.trait_name.clone(),
+//RS                     d.type_param.clone(),
+//RS                     d.body.clone(),
+//RS                     helpers.clone(),
+//RS                 )),
+//RS                 _ => None,
+//RS             })
+//RS         })
+//RS         .collect();
+//RS 
+//RS     // D-META-REG1=A / D-META-USER1=A: source marker declarations join the
+//RS     // same bundle-local registry as compiler rows and derive providers. Keep
+//RS     // the first declaration for lookup, but report every duplicate with both
+//RS     // source spans before any body can run.
+//RS     let mut marker_declarations = Vec::new();
+//RS     let mut marker_declaration_spans = HashMap::<String, (usize, Span)>::new();
+//RS     let mut fact_declaration_spans = HashMap::<String, (usize, Span, String)>::new();
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         for item in &module.items {
+//RS             match item {
+//RS                 Item::MarkerDecl(declaration) => {
+//RS                     if let Some((first_module, first_span)) = marker_declaration_spans.insert(
+//RS                         declaration.name.clone(),
+//RS                         (module_idx, declaration.name_span),
+//RS                     ) {
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E0105",
+//RS                             format!(
+//RS                                 "marker `{}` is declared twice (spans {}..{} and {}..{})",
+//RS                                 declaration.name,
+//RS                                 first_span.start,
+//RS                                 first_span.end,
+//RS                                 declaration.name_span.start,
+//RS                                 declaration.name_span.end,
+//RS                             ),
+//RS                             "one rule name must resolve to one declaration in the loaded bundle"
+//RS                                 .to_string(),
+//RS                             "rename or remove one of the marker declarations".to_string(),
+//RS                             Some(declaration.name_span),
+//RS                         ).with_detail(format!(
+//RS                             "first declaration: module {first_module}, span {}..{}\nsecond declaration: module {module_idx}, span {}..{}",
+//RS                             first_span.start,
+//RS                             first_span.end,
+//RS                             declaration.name_span.start,
+//RS                             declaration.name_span.end,
+//RS                         )));
+//RS                     } else {
+//RS                         marker_declarations.push(declaration.clone());
+//RS                     }
+//RS                 }
+//RS                 Item::FactDecl(declaration) => register_fact_declaration(
+//RS                     declaration,
+//RS                     module_idx,
+//RS                     &mut fact_declaration_spans,
+//RS                     &mut diags,
+//RS                 ),
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS     let marker_vocabulary = jet_foundation::Policy::MarkerVocabulary::with_derives_and_declarations(
+//RS         derive_providers
+//RS             .iter()
+//RS             .map(|(_, name, _, _, _)| name.clone()),
+//RS         marker_declarations,
+//RS     );
+//RS     let ct_core_imports: Vec<HashMap<String, String>> = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .map(|module| crate::AST::core_import_maps(&module.imports).0)
+//RS         .collect();
+//RS     let ct_core_item_imports: Vec<HashMap<String, String>> = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .map(|module| crate::AST::core_import_maps(&module.imports).1)
+//RS         .collect();
+//RS 
+//RS     for module in bundle.modules.iter_mut() {
+//RS         super::super::Protocol::expand_module_protocols(&mut module.items, &mut diags);
+//RS         // D-FIELDPOL1: computed-field cycle check (E0338) + `self.field`
+//RS         // rewrite + synthesized getter methods, before anything else.
+//RS         process_computed_fields(&mut module.items, &mut diags);
+//RS         // D-VALIDATE1 (card #506): `validate { … }` block shape check +
+//RS         // synthesized `Type.validate(value)`, same pre-registration timing.
+//RS         process_validate_blocks(&mut module.items, &mut diags);
+//RS         // D-PATCH1: synthetic `T.Patch` before struct registration.
+//RS         inject_patchable_types(&mut module.items, &mut diags);
+//RS     }
+//RS 
+//RS     let plugin_interfaces = PluginInterfaceRegistry::from_bundle(bundle);
+//RS     let mut devtools_registry = jet_foundation::AST::DevtoolsRegistry::default();
+//RS     let needs_comptime_checking = bundle.modules.iter().any(|module| {
+//RS         module.items.iter().any(|item| {
+//RS             matches!(item, Item::Const(constant)
+//RS                 if super::super::Registration::const_evaluated_at_build(constant))
+//RS         })
+//RS     });
+//RS     // The comptime rows receive their own item snapshot below; park the
+//RS     // checker items while cloning so the bundle AST is not copied twice.
+//RS     let mut comptime_states = if needs_comptime_checking {
+//RS         let parked_items: Vec<Vec<Item>> = states
+//RS             .iter_mut()
+//RS             .map(|state| std::mem::take(&mut state.items))
+//RS             .collect();
+//RS         let comptime_states = states.clone();
+//RS         for (state, items) in states.iter_mut().zip(parked_items) {
+//RS             state.items = items;
+//RS         }
+//RS         comptime_states
+//RS     } else {
+//RS         Vec::new()
+//RS     };
+//RS     for idx in 0..comptime_states.len() {
+//RS         let module = &bundle.modules[idx];
+//RS         comptime_states[idx].items = module.items.clone();
+//RS         comptime_states[idx].core_imports = ct_core_imports[idx].clone();
+//RS         comptime_states[idx].core_item_imports = ct_core_item_imports[idx].clone();
+//RS         for import in &module.imports {
+//RS             if let Some(target) = name_ledger.import_target(idx, import.span) {
+//RS                 comptime_states[idx]
+//RS                     .imports
+//RS                     .insert(import.import_alias(), target);
+//RS             }
+//RS         }
+//RS         super::super::Registration::register_comptime_declarations(
+//RS             &module.items,
+//RS             &mut comptime_states[idx],
+//RS             !module.no_prelude,
+//RS         );
+//RS     }
+//RS     // A `prep` initializer calls a member-imported function (`use b.[f]`)
+//RS     // exactly as body code does. Every module's functions are registered
+//RS     // above, so bind those names for the comptime rows; a package member
+//RS     // lives in whichever of its files declares it (D-MOD-CYCLE1=A).
+//RS     for idx in 0..comptime_states.len() {
+//RS         for import in &bundle.modules[idx].imports {
+//RS             let ImportKind::Unqualified { module_alias, .. } = &import.kind else {
+//RS                 continue;
+//RS             };
+//RS             let Some(&target) = comptime_states[idx].imports.get(module_alias.as_str()) else {
+//RS                 continue;
+//RS             };
+//RS             for binding in import.walk_bindings() {
+//RS                 let Some(original) = binding.original else {
+//RS                     continue;
+//RS                 };
+//RS                 let owner = std::iter::once(target)
+//RS                     .chain(name_ledger.namespace_siblings(target))
+//RS                     .find(|&candidate| comptime_states[candidate].funcs.contains_key(original));
+//RS                 if let Some(owner) = owner {
+//RS                     comptime_states[idx]
+//RS                         .unqualified_file
+//RS                         .insert(binding.local.clone(), (original.to_string(), owner));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // D-MOD2: a trait named in a member import (`use types.[Named]`) is known
+//RS     // to the importing module's trait registry before its impls validate.
+//RS     // D-MOD-CYCLE1=A: a trait from another file of the same package counts
+//RS     // as local for the orphan rule, because the package is the orphan unit.
+//RS     let imported_traits: Vec<Vec<(String, crate::AST::TraitDef, bool)>> = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(idx, module)| {
+//RS             let package = jet_foundation::Names::package_scope_for(&module.path, &bundle.project_root);
+//RS             let mut traits = Vec::new();
+//RS             for imp in &module.imports {
+//RS                 let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
+//RS                     continue;
+//RS                 };
+//RS                 let Some(target) = module
+//RS                     .imports
+//RS                     .iter()
+//RS                     .filter(|candidate| {
+//RS                         !matches!(candidate.kind, ImportKind::Unqualified { .. })
+//RS                             && candidate.import_alias() == *module_alias
+//RS                     })
+//RS                     .find_map(|candidate| name_ledger.import_target(idx, candidate.span))
+//RS                 else {
+//RS                     continue;
+//RS                 };
+//RS                 let target_module = &bundle.modules[target];
+//RS                 let same_package =
+//RS                     jet_foundation::Names::package_scope_for(&target_module.path, &bundle.project_root)
+//RS                         == package;
+//RS                 // D-MOD-CYCLE1=A: a package is one namespace, so a sibling
+//RS                 // file's private trait is visible by bare name.
+//RS                 let same_namespace = name_ledger.same_namespace(idx, target);
+//RS                 for binding in imp.walk_bindings() {
+//RS                     let Some(original) = binding.original else {
+//RS                         continue;
+//RS                     };
+//RS                     let definition = target_module.items.iter().find_map(|item| match item {
+//RS                         Item::Trait(definition)
+//RS                             if definition.name == original
+//RS                                 && (definition.is_pub
+//RS                                     || same_namespace
+//RS                                     || (definition.is_package_pub && same_package)) =>
+//RS                         {
+//RS                             Some(definition)
+//RS                         }
+//RS                         _ => None,
+//RS                     });
+//RS                     if let Some(definition) = definition {
+//RS                         traits.push((binding.local.clone(), definition.clone(), same_package));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             // D-IMPLDOT1=A: a trait named through an alias in an impl head.
+//RS             for qualified in qualified_impl_traits.get(idx).into_iter().flatten() {
+//RS                 let same_package = name_ledger.same_namespace(idx, qualified.target);
+//RS                 let definition = bundle.modules[qualified.target].items.iter().find_map(|item| {
+//RS                     match item {
+//RS                         Item::Trait(definition)
+//RS                             if definition.name == qualified.leaf
+//RS                                 && (same_package || definition.is_pub) =>
+//RS                         {
+//RS                             Some(definition)
+//RS                         }
+//RS                         _ => None,
+//RS                     }
+//RS                 });
+//RS                 if let Some(definition) = definition {
+//RS                     traits.push((qualified.key.clone(), definition.clone(), same_package));
+//RS                 }
+//RS             }
+//RS             traits
+//RS         })
+//RS         .collect();
+//RS 
+//RS     // D-MOD-CYCLE1=A: a package is one namespace, so an `impl` may extend a
+//RS     // type declared in another file of the same package.
+//RS     let mut namespace_type_owners: HashMap<String, Vec<usize>> = HashMap::new();
+//RS     for (idx, module) in bundle.modules.iter().enumerate() {
+//RS         if name_ledger.namespace_siblings(idx).is_empty() {
+//RS             continue;
+//RS         }
+//RS         for item in &module.items {
+//RS             let name = match item {
+//RS                 Item::Struct(definition) => &definition.name,
+//RS                 Item::Enum(definition) => &definition.name,
+//RS                 Item::Distinct(definition) => &definition.name,
+//RS                 _ => continue,
+//RS             };
+//RS             namespace_type_owners.entry(name.clone()).or_default().push(idx);
+//RS         }
+//RS     }
+//RS     let sibling_type_owner =
+//RS         |ledger: &jet_foundation::Names::NameLedger, idx: usize, type_name: &str| {
+//RS             namespace_type_owners.get(type_name).and_then(|owners| {
+//RS                 owners
+//RS                     .iter()
+//RS                     .copied()
+//RS                     .find(|&owner| owner != idx && ledger.same_namespace(idx, owner))
+//RS             })
+//RS         };
+//RS     let mut top_level_embed_inputs = Vec::new();
+//RS     let module_count = bundle.modules.len();
+//RS     // #2517: constant values stored by earlier checks; the store work is
+//RS     // done when this is dropped.
+//RS     let comptime_reuse = super::super::ComptimeReuse::environment(bundle);
+//RS     // Build-time constants fold first, for every module, in
+//RS     // `comptime_module_order`: a `prep` initializer that reads a sibling
+//RS     // file's constant evaluates after that file. The comptime registries and
+//RS     // item snapshots are released before the rest of registration and body
+//RS     // checking.
+//RS     let mut module_comptime_types = vec![HashMap::new(); module_count];
+//RS     if needs_comptime_checking {
+//RS         for idx in comptime_module_order(bundle, &name_ledger) {
+//RS             let module_diag_start = diags.len();
+//RS             let module = &mut bundle.modules[idx];
+//RS             let base = module
+//RS                 .path
+//RS                 .parent()
+//RS                 .map(|path| path.to_path_buf())
+//RS                 .unwrap_or_else(|| std::path::PathBuf::from("."));
+//RS             eval_comptime_items(
+//RS                 &mut module.items,
+//RS                 &mut module_comptime_types[idx],
+//RS                 &base,
+//RS                 &mut diags,
+//RS                 idx,
+//RS                 &mut name_ledger,
+//RS                 &ct_core_imports[idx],
+//RS                 &ct_core_item_imports[idx],
+//RS                 &bundle.build_facts,
+//RS                 &mut comptime_states,
+//RS                 &plugin_interfaces,
+//RS                 &devtools_registry,
+//RS                 no_os,
+//RS                 gates,
+//RS                 module.no_prelude,
+//RS                 Some(&mut top_level_embed_inputs),
+//RS                 comptime_reuse.as_ref(),
+//RS             );
+//RS             // Build-time evaluation reports against this module's source (its
+//RS             // initializer checks and evaluator failures).
+//RS             attach_module_origin(module, idx == bundle.entry, &mut diags[module_diag_start..]);
+//RS             drop_core_source_lints(module, &mut diags, module_diag_start);
+//RS         }
+//RS     }
+//RS     drop(comptime_states);
+//RS     for (idx, module) in bundle.modules.iter_mut().enumerate() {
+//RS         // Registration and expansion below push bundle-level reports without
+//RS         // a module origin. They belong to this module: a non-entry module's
+//RS         // reports carry it as their origin at the end of the iteration. Core
+//RS         // is library source: its lints are not the user's to act on, so they
+//RS         // are dropped there too.
+//RS         let module_diag_start = diags.len();
+//RS         let base = module
+//RS             .path
+//RS             .parent()
+//RS             .map(|path| path.to_path_buf())
+//RS             .unwrap_or_else(|| std::path::PathBuf::from("."));
+//RS         let comptime_types = std::mem::take(&mut module_comptime_types[idx]);
+//RS         expand_item_template_loops(&mut module.items, &base, &mut diags);
+//RS         // Checker references use the state snapshot; refresh it after root
+//RS         // expansion so generated nominal declarations are visible there too.
+//RS         states[idx].items.clone_from(&module.items);
+//RS         super::super::Registration::resolve_comptime_declaration_values(
+//RS             &mut module.items,
+//RS             &base,
+//RS             &ct_core_imports[idx],
+//RS             &mut diags,
+//RS         );
+//RS         super::super::CheckerMarkers::resolve_static_rule_products(
+//RS             module,
+//RS             &base,
+//RS             &ct_core_imports[idx],
+//RS             &mut diags,
+//RS         );
+//RS         // Card #436: `CFFI::assemble` (jetpack crate) drains every
+//RS         // `#Extern`/`#Bindgen module` out of its declaring file and re-homes
+//RS         // it in a synthetic per-lib module (`<c.lib>`) with an empty
+//RS         // registry of its own — so a struct/enum/distinct declared in an
+//RS         // ordinary file was NEVER visible to `guest_c_abi_type_is_safe`'s `Type::Named`
+//RS         // lookup (`c_named_type_ok`, Sema/FFI.rs), and every named type was
+//RS         // silently rejected at the C boundary regardless of its shape. Real
+//RS         // modules are always processed before any synthetic one (assemble
+//RS         // only appends), so by this iteration every preceding module's
+//RS         // registry is already fully populated; merge them once here so a
+//RS         // same-project named type resolves. Type names are unique
+//RS         // program-wide (a duplicate definition is its own error elsewhere),
+//RS         // so this union is sound.
+//RS         let ffi_named_types: Option<HashMap<String, TypeDef>> =
+//RS             if module.items.iter().any(|i| matches!(i, Item::CModule(_))) {
+//RS                 Some(
+//RS                     states[..idx]
+//RS                         .iter()
+//RS                         .flat_map(|s| s.registry.types.iter())
+//RS                         .map(|(k, v)| (k.clone(), v.clone()))
+//RS                         .collect(),
+//RS                 )
+//RS             } else {
+//RS                 None
+//RS             };
+//RS         let mut st = &mut states[idx];
+//RS         for item in module.items
+//RS             .iter()
+//RS             .filter(|item| !matches!(item, Item::MarkerDecl(_) | Item::FactDecl(_)))
+//RS         {
+//RS             match item {
+//RS                 Item::Func(f) => register_func_item(f, st, &mut diags, !module.no_prelude),
+//RS                 Item::Struct(s) => {
+//RS                     register_struct(
+//RS                         s,
+//RS                         &mut st.registry,
+//RS                         &mut diags,
+//RS                         &st.funcs,
+//RS                         &st.consts,
+//RS                         &jet_foundation::Layout::TargetLayout::from_build_facts(&st.build_facts),
+//RS                     );
+//RS                 }
+//RS                 Item::Enum(e) => {
+//RS                     register_enum(e, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+//RS                 }
+//RS                 Item::Impl(i) => {
+//RS                     if !i.type_name.contains('.')
+//RS                         && !st.registry.contains(&i.type_name)
+//RS                         && sibling_type_owner(&name_ledger, idx, &i.type_name).is_none()
+//RS                         && !super::opmix_allows_builtin_impl(i, &module.items)
+//RS                     {
+//RS                         diags.push(e0301_impl_target(i));
+//RS                     }
+//RS                 }
+//RS                 Item::Const(c) => {
+//RS                     if let Some(meta) = &c.meta {
+//RS                         diags.extend(CheckerCore::check_meta_attr_fields(meta));
+//RS                     }
+//RS                     register_const(c, &mut st.consts, &mut diags, &st.funcs, &st.registry)
+//RS                 }
+//RS                 Item::Distinct(d) => {
+//RS                     register_distinct(d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+//RS                 }
+//RS                 Item::TypeAlias(a) => {
+//RS                     register_type_alias(a, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+//RS                 }
+//RS                 Item::Tag(_) => {}
+//RS                 // D-QUAL3: a unit family lowers to one `#Numeric` distinct type
+//RS                 // per member, each erasing to `Float`.
+//RS                 Item::UnitFamily(uf) => {
+//RS                     let dimension = uf.resolved_dimension.clone();
+//RS                     for d in uf.distinct_defs() {
+//RS                         register_distinct(&d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+//RS                         st.registry.unit_types.insert(d.name.clone());
+//RS                         // D-DIMENSION-OPEN1=D: a family that names a base
+//RS                         // unit relates its members by scale, dimension or not.
+//RS                         // Without a base — currency, plain tags — members stay
+//RS                         // unrelated nominal types with no conversion.
+//RS                         if let Some(owner) = uf
+//RS                             .resolved_owner
+//RS                             .as_deref()
+//RS                             .filter(|_| uf.base.is_some() || dimension.is_some())
+//RS                         {
+//RS                             if let Some(fact) =
+//RS                                 unit_fact(uf, &d.name, dimension.clone(), PathBuf::from(owner))
+//RS                             {
+//RS                                 st.registry.unit_facts.insert(d.name.clone(), fact);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     // D-TYPE2-TIME1=A / D-TYPE2-PLANE1=A: the canonical Time
+//RS                     // family owns these literal facts. Register them only
+//RS                     // after Prelude injection has selected the family, so
+//RS                     // `#NoPrelude` remains genuinely unscoped.
+//RS                     if uf.is_canonical_time() {
+//RS                         for member in &uf.members {
+//RS                             st.registry.literal_facts.insert(
+//RS                                 format!("{}::{}", uf.family, member.name),
+//RS                                 UnitFact {
+//RS                                     package: PathBuf::from(
+//RS                                         uf.resolved_owner.as_deref().unwrap_or("core.units"),
+//RS                                     ),
+//RS                                     family: uf.family.clone(),
+//RS                                     member: member.name.clone(),
+//RS                                     dimension: dimension.clone(),
+//RS                                     scale: member.scale.clone(),
+//RS                                     scale_provenance: member.scale_provenance.clone(),
+//RS                                     offset: crate::AST::UnitRatio::zero(),
+//RS                                     kind: crate::AST::QuantityKind::Delta,
+//RS                                 },
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Test(t) => {
+//RS                     register_test_item(t, st, &mut diags);
+//RS                 }
+//RS                 Item::ExternRust(block) => {
+//RS                     if check_extern_block(block, &st.registry, &mut diags) {
+//RS                         register_foreign_close_impls(&block.functions, &mut st.trait_reg);
+//RS                         for ef in &block.functions {
+//RS                             register_extern_fn(
+//RS                                 ef,
+//RS                                 &mut st.funcs,
+//RS                                 &st.registry,
+//RS                                 &st.consts,
+//RS                                 &mut diags,
+//RS                                 false,
+//RS                                 !module.no_prelude,
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::CModule(cm) => {
+//RS                     // Card #436: check named C-ABI types (struct/enum/distinct)
+//RS                     // against the merged cross-file view built above, not the
+//RS                     // synthetic module's own (empty) registry. See the comment
+//RS                     // at `ffi_named_types`'s construction.
+//RS                     let merged_registry = ffi_named_types.as_ref().map(|extra| {
+//RS                         let mut types = st.registry.types.clone();
+//RS                         for (k, v) in extra {
+//RS                             types.entry(k.clone()).or_insert_with(|| v.clone());
+//RS                         }
+//RS                         TypeRegistry {
+//RS                             types,
+//RS                             error_types: st.registry.error_types.clone(),
+//RS                             unit_types: st.registry.unit_types.clone(),
+//RS                             unit_facts: st.registry.unit_facts.clone(),
+//RS                             literal_facts: st.registry.literal_facts.clone(),
+//RS                             computed_fields: st.registry.computed_fields.clone(),
+//RS                             field_defaults: st.registry.field_defaults.clone(),
+//RS                             receipt_sections: st.registry.receipt_sections.clone(),
+//RS                             nominal_memo: Default::default(),
+//RS                         }
+//RS                     });
+//RS                     let check_registry = merged_registry.as_ref().unwrap_or(&st.registry);
+//RS                     let handle_facts = bundle
+//RS                         .cffi
+//RS                         .handle_facts
+//RS                         .iter()
+//RS                         .filter(|fact| fact.lib == cm.lib)
+//RS                         .cloned()
+//RS                         .collect::<Vec<_>>();
+//RS                     let close_adapters = bundle
+//RS                         .cffi
+//RS                         .close_adapters
+//RS                         .iter()
+//RS                         .filter(|adapter| adapter.lib == cm.lib)
+//RS                         .cloned()
+//RS                         .collect::<Vec<_>>();
+//RS                     if check_c_module_with_facts(
+//RS                         cm,
+//RS                         check_registry,
+//RS                         &handle_facts,
+//RS                         &close_adapters,
+//RS                         bundle.cffi.boundary_for(&cm.lib),
+//RS                         &mut diags,
+//RS                     ) {
+//RS                         register_foreign_close_impls(&cm.functions, &mut st.trait_reg);
+//RS                         for ef in &cm.functions {
+//RS                             register_extern_fn(
+//RS                                 ef,
+//RS                                 &mut st.funcs,
+//RS                                 check_registry,
+//RS                                 &st.consts,
+//RS                                 &mut diags,
+//RS                                 true,
+//RS                                 !module.no_prelude,
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Trait(_) => {}
+//RS                 Item::Module(_) => {}
+//RS                 Item::CodeModule(cm) => {
+//RS                     if let Some(body) = &cm.body {
+//RS                         // Register inline module functions under mangled names
+//RS                         // (`__jet_math__double`) so call-site sema can check them.
+//RS                         st.code_modules.insert(cm.name.clone(), cm.name.clone());
+//RS                         st.code_module_identities.insert(
+//RS                             cm.name.clone(),
+//RS                             cm.instance_identity
+//RS                                 .as_ref()
+//RS                                 .map(|identity| format!("instance:{}", identity.fingerprint))
+//RS                                 .unwrap_or_else(|| {
+//RS                                     format!("module:{}::{}", st.module_path, cm.name)
+//RS                                 }),
+//RS                         );
+//RS                         for inner in body {
+//RS                             if let Item::Func(f) = inner {
+//RS                                 let mangled = jet_foundation::Names::member_name(&cm.name, &f.name);
+//RS                                 st.funcs.insert(mangled.clone(), func_to_sig(f));
+//RS                                 if !f.type_params.is_empty() {
+//RS                                     st.trait_reg
+//RS                                         .fn_params
+//RS                                         .insert(mangled.clone(), f.type_params.clone());
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::ErrorConv(_) => {}
+//RS                 // D-MIGRATE1: migration decls are handled by the schema diff pass; no registration needed.
+//RS                 Item::Migration(_) => {}
+//RS                 // D-PROTO1/D-PROTO2: expanded before registration; declaration erases.
+//RS                 Item::ProtocolDecl(_) => {}
+//RS                 // D-METADERIVE1=A: user-authored derive blocks are expanded below; skip here.
+//RS                 Item::UserDerive(_) => {}
+//RS                 // D-STRUCT-ONCE1=A: root loops are expanded before registration.
+//RS                 Item::TemplateLoop(_) => {}
+//RS                 // D-META-USER1=A: declaration rows were consumed by the
+//RS                 // bundle-local marker registry before ordinary registration.
+//RS                 Item::EffectDecl(_) | Item::GenericModule(_) | Item::ModuleAlias(_) => {}
+//RS                 Item::MarkerDecl(_) | Item::FactDecl(_) => {
+//RS                     unreachable!("declaration items are consumed by the bundle registry")
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-METADERIVE1=A: user-derive expansion — run after struct/func registration so
+//RS         // derive bodies can call helper functions and access TypeInfo. The expanded typed
+//RS         // items are appended to the ordinary sema stream; no source string is re-lexed.
+//RS         let mut generated_test_spans = Vec::new();
+//RS         {
+//RS             if !derive_providers.is_empty() {
+//RS                 let struct_infos: Vec<&crate::AST::StructDef> = module
+//RS                     .items
+//RS                     .iter()
+//RS                     .filter_map(|i| {
+//RS                         if let Item::Struct(s) = i {
+//RS                             Some(s)
+//RS                         } else {
+//RS                             None
+//RS                         }
+//RS                     })
+//RS                     .collect();
+//RS 
+//RS                 let mut new_items: Vec<Item> = Vec::new();
+//RS                 let checked_nominals =
+//RS                     CheckerCore::checked_comptime_nominals_for_context(&states, idx, &name_ledger);
+//RS                 st = &mut states[idx];
+//RS 
+//RS                 for s in &struct_infos {
+//RS                     let mut existing_member_sites: HashMap<String, (String, Span)> = HashMap::new();
+//RS                     for item in &module.items {
+//RS                         match item {
+//RS                             Item::Struct(candidate) if candidate.name == s.name => {
+//RS                                 for field in &candidate.fields {
+//RS                                     existing_member_sites.insert(
+//RS                                         field.name.clone(),
+//RS                                         (
+//RS                                             format!("existing field `{}.{}`", s.name, field.name),
+//RS                                             field.name_span,
+//RS                                         ),
+//RS                                     );
+//RS                                 }
+//RS                                 for method in &candidate.methods {
+//RS                                     existing_member_sites.insert(
+//RS                                         method.name.clone(),
+//RS                                         (
+//RS                                             format!("existing method `{}.{}`", s.name, method.name),
+//RS                                             method.name_span,
+//RS                                         ),
+//RS                                     );
+//RS                                 }
+//RS                             }
+//RS                             Item::Impl(candidate) if candidate.type_name == s.name => {
+//RS                                 for method in &candidate.methods {
+//RS                                     existing_member_sites.insert(
+//RS                                         method.name.clone(),
+//RS                                         (
+//RS                                             format!("existing method `{}.{}`", s.name, method.name),
+//RS                                             method.name_span,
+//RS                                         ),
+//RS                                     );
+//RS                                 }
+//RS                             }
+//RS                             _ => {}
+//RS                         }
+//RS                     }
+//RS                     let mut generated_method_spans: HashMap<String, (String, Span)> =
+//RS                         HashMap::new();
+//RS                     for (derive_name, _derive_span) in &s.derives {
+//RS                         // Prefer an entry-local provider, then one beside the target.
+//RS                         // Remaining imported/imported pairs violate the orphan law:
+//RS                         // either provider or target must be entry-local.
+//RS                         let provider = derive_providers
+//RS                             .iter()
+//RS                             .filter(|(_, name, _, _, _)| name == derive_name)
+//RS                             .min_by_key(|(origin, _, _, _, _)| {
+//RS                                 if *origin == 0 {
+//RS                                     0
+//RS                                 } else if *origin == idx {
+//RS                                     1
+//RS                                 } else {
+//RS                                     2
+//RS                                 }
+//RS                             });
+//RS                         let Some((provider_idx, _, type_param, body, helper_funcs)) = provider
+//RS                         else {
+//RS                             continue;
+//RS                         };
+//RS                         if idx > 0 && *provider_idx > 0 {
+//RS                             diags.push(Diagnostic::error(
+//RS                                 "E2711",
+//RS                                 format!(
+//RS                                     "derive orphan rule: neither `derive T.{}` nor `{}` is local",
+//RS                                     derive_name, s.name
+//RS                                 ),
+//RS                                 "a generated implementation is owned locally only when the derive provider or target type lives in the entry module".to_string(),
+//RS                                 format!(
+//RS                                     "define `derive T.{}` or `{}` in the entry module",
+//RS                                     derive_name, s.name
+//RS                                 ),
+//RS                                 // The violating marker belongs to an imported source file;
+//RS                                 // the bundled diagnostic currently renders against the entry
+//RS                                 // file, so omit a misleading entry-file caret.
+//RS                                 None,
+//RS                             ));
+//RS                             continue;
+//RS                         }
+//RS                         let actual_funcs: HashMap<String, &Func> = helper_funcs
+//RS                             .iter()
+//RS                             .map(|(name, func)| (name.clone(), func))
+//RS                             .collect();
+//RS                         let states = initial_fact_registry
+//RS                             .state_members(&s.name)
+//RS                             .map_or_else(Vec::new, |states| states.to_vec());
+//RS                         let type_path = name_ledger
+//RS                             .canonical_path(idx, &s.name)
+//RS                             .expect("derive target missing from the name ledger");
+//RS                         let layout_engine = jet_foundation::Layout::TargetLayoutEngine::new(
+//RS                             module.items.iter(),
+//RS                             jet_foundation::Layout::TargetLayout::from_build_facts(
+//RS                                 &bundle.build_facts,
+//RS                             ),
+//RS                         );
+//RS                         let type_info = crate::Comptime::build_struct_type_info_with_path_and_vocabulary_and_engine(
+//RS                             s,
+//RS                             &states,
+//RS                             &type_path,
+//RS                             None,
+//RS                             &layout_engine,
+//RS                         );
+//RS 
+//RS                         match crate::Comptime::expand_derive_body(
+//RS                             body,
+//RS                             type_param,
+//RS                             type_info,
+//RS                             &actual_funcs,
+//RS                             &bundle.project_root,
+//RS                             checked_nominals.clone(),
+//RS                         ) {
+//RS                             Ok(expanded) => {
+//RS                                 let mut methods = Vec::new();
+//RS                                 for item in expanded {
+//RS                                     match item {
+//RS                                         Item::Func(function) => {
+//RS                                             if let Some((existing_site, existing_span)) =
+//RS                                                 existing_member_sites.get(&function.name)
+//RS                                             {
+//RS                                                 diags.push(derive_member_collision(
+//RS                                                     derive_name,
+//RS                                                     &s.name,
+//RS                                                     &function,
+//RS                                                     existing_site,
+//RS                                                     *existing_span,
+//RS                                                 ));
+//RS                                                 continue;
+//RS                                             }
+//RS                                             if let Some((generated_derive, generated_span)) =
+//RS                                                 generated_method_spans.get(&function.name)
+//RS                                             {
+//RS                                                 let existing_site = format!(
+//RS                                                     "generated member `{}` from `derive T.{}`",
+//RS                                                     function.name, generated_derive
+//RS                                                 );
+//RS                                                 diags.push(derive_member_collision(
+//RS                                                     derive_name,
+//RS                                                     &s.name,
+//RS                                                     &function,
+//RS                                                     &existing_site,
+//RS                                                     *generated_span,
+//RS                                                 ));
+//RS                                                 continue;
+//RS                                             }
+//RS                                             generated_method_spans.insert(
+//RS                                                 function.name.clone(),
+//RS                                                 (derive_name.clone(), function.name_span),
+//RS                                             );
+//RS                                             methods.push(function)
+//RS                                         }
+//RS                                         other => new_items.push(other),
+//RS                                     }
+//RS                                 }
+//RS                                 if !methods.is_empty() {
+//RS                                     new_items.push(Item::Impl(crate::AST::ImplDef {
+//RS                                         span: s.span,
+//RS                                         type_name: s.name.clone(),
+//RS                                         type_span: s.name_span,
+//RS                                         // A derive provider names the
+//RS                                         // capability that selects it; its
+//RS                                         // body supplies ordinary members
+//RS                                         // on the target. The provider name
+//RS                                         // is not a Rust/Jet trait
+//RS                                         // conformance requirement.
+//RS                                         trait_name: None,
+//RS                                         trait_span: None,
+//RS                                         operator_rhs: None,
+//RS                                         operator_marker: None,
+//RS                                         methods,
+//RS                                         delegation_field: None,
+//RS                                         assoc_type_impls: Vec::new(),
+//RS                                         is_generated_serde: false,
+//RS                                         os_target: None,
+//RS                                     }));
+//RS                                 }
+//RS                             }
+//RS                             Err(inner) => {
+//RS                                 diags.push(inner);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS 
+//RS                 // Register new items before synthesis so they go through
+//RS                 // the normal sema pipeline.
+//RS                 for item in &new_items {
+//RS                     match item {
+//RS                         Item::Func(f) => register_func_item(f, st, &mut diags, !module.no_prelude),
+//RS                         Item::Struct(s) => {
+//RS                             register_struct(
+//RS                                 s,
+//RS                                 &mut st.registry,
+//RS                                 &mut diags,
+//RS                                 &st.funcs,
+//RS                                 &st.consts,
+//RS                                 &jet_foundation::Layout::TargetLayout::from_build_facts(
+//RS                                     &st.build_facts,
+//RS                                 ),
+//RS                             );
+//RS                         }
+//RS                         Item::Enum(e) => {
+//RS                             register_enum(e, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+//RS                         }
+//RS                         Item::Tag(_) => {}
+//RS                         Item::Impl(_) => {}
+//RS                         Item::Test(_) => {}
+//RS                         _ => {}
+//RS                     }
+//RS                 }
+//RS                 generated_test_spans.extend(new_items.iter().filter_map(|item| match item {
+//RS                     Item::Test(test) => Some(test.name_span),
+//RS                     _ => None,
+//RS                 }));
+//RS                 module.items.extend(new_items);
+//RS             }
+//RS         }
+//RS 
+//RS         // D-META-USER1=A: a declared marker body uses the same typed
+//RS         // comptime expansion path as a derive body. The target TypeInfo is
+//RS         // immutable input; generated items re-enter ordinary registration.
+//RS         {
+//RS             let declared_targets: Vec<(
+//RS                 crate::AST::StructDef,
+//RS                 crate::AST::Marker,
+//RS                 crate::AST::MarkerDecl,
+//RS             )> = module
+//RS                 .items
+//RS                 .iter()
+//RS                 .flat_map(|item| {
+//RS                     let Item::Struct(def) = item else { return None };
+//RS                     Some(def.type_markers.iter().filter_map(|marker| {
+//RS                         let declaration = marker_vocabulary.declaration(&marker.name)?.clone();
+//RS                         declaration.body.as_ref()?;
+//RS                         Some((def.clone(), marker.clone(), declaration))
+//RS                     }))
+//RS                 })
+//RS                 .flatten()
+//RS                 .collect();
+//RS             let helper_funcs_owned: HashMap<String, Func> = module
+//RS                 .items
+//RS                 .iter()
+//RS                 .filter_map(|item| match item {
+//RS                     Item::Func(function) => Some((function.name.clone(), function.clone())),
+//RS                     _ => None,
+//RS                 })
+//RS                 .collect();
+//RS             let actual_funcs: HashMap<String, &Func> = helper_funcs_owned
+//RS                 .iter()
+//RS                 .map(|(name, function)| (name.clone(), function))
+//RS                 .collect();
+//RS             let mut new_items = Vec::new();
+//RS             let checked_nominals =
+//RS                 CheckerCore::checked_comptime_nominals_for_context(&states, idx, &name_ledger);
+//RS             st = &mut states[idx];
+//RS 
+//RS             for (target, marker, declaration) in declared_targets {
+//RS                 if marker.negated {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(body) = declaration.body.as_ref() else {
+//RS                     continue;
+//RS                 };
+//RS                 let states = initial_fact_registry
+//RS                     .state_members(&target.name)
+//RS                     .map_or_else(Vec::new, |states| states.to_vec());
+//RS                 let type_path = name_ledger
+//RS                     .canonical_path(idx, &target.name)
+//RS                     .expect("declared rule target missing from the name ledger");
+//RS                 let layout_engine = jet_foundation::Layout::TargetLayoutEngine::new(
+//RS                     module.items.iter(),
+//RS                     jet_foundation::Layout::TargetLayout::from_build_facts(
+//RS                         &bundle.build_facts,
+//RS                     ),
+//RS                 );
+//RS                 let type_info =
+//RS                     crate::Comptime::build_struct_type_info_with_path_and_vocabulary_and_engine(
+//RS                         &target,
+//RS                         &states,
+//RS                         &type_path,
+//RS                         Some(&marker_vocabulary),
+//RS                         &layout_engine,
+//RS                     );
+//RS                 match crate::Comptime::expand_derive_body(
+//RS                     body,
+//RS                     "target",
+//RS                     type_info,
+//RS                     &actual_funcs,
+//RS                     &bundle.project_root,
+//RS                     checked_nominals.clone(),
+//RS                 ) {
+//RS                     Ok(expanded) => {
+//RS                         for item in expanded {
+//RS                             let Item::Impl(implementation) = &item else {
+//RS                                 new_items.push(item);
+//RS                                 continue;
+//RS                             };
+//RS                             let mut accepted = implementation.clone();
+//RS                             accepted.methods.retain(|method| {
+//RS                                 let existing = existing_member_span(
+//RS                                     &module.items,
+//RS                                     &accepted.type_name,
+//RS                                     &method.name,
+//RS                                 )
+//RS                                 .or_else(|| {
+//RS                                     existing_member_span(
+//RS                                         &new_items,
+//RS                                         &accepted.type_name,
+//RS                                         &method.name,
+//RS                                     )
+//RS                                 });
+//RS                                 let Some(existing) = existing else {
+//RS                                     return true;
+//RS                                 };
+//RS                                 diags.push(
+//RS                                     Diagnostic::error(
+//RS                                         "E0105",
+//RS                                         format!(
+//RS                                             "generated member `{}` would change or shadow `{}` on `{}`",
+//RS                                             method.name, method.name, accepted.type_name
+//RS                                         ),
+//RS                                         "a rule may add a member but cannot change or shadow a written member".to_string(),
+//RS                                         "rename the generated member or remove the existing member".to_string(),
+//RS                                         Some(method.name_span),
+//RS                                     )
+//RS                                     .with_detail(format!(
+//RS                                         "generated member `{}` from rule `{}` at span {}..{}\nexisting member `{}.{}` at span {}..{}",
+//RS                                         method.name,
+//RS                                         declaration.name,
+//RS                                         method.name_span.start,
+//RS                                         method.name_span.end,
+//RS                                         accepted.type_name,
+//RS                                         method.name,
+//RS                                         existing.start,
+//RS                                         existing.end,
+//RS                                     )),
+//RS                                 );
+//RS                                 false
+//RS                             });
+//RS                             if !accepted.methods.is_empty() {
+//RS                                 new_items.push(Item::Impl(accepted));
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     Err(inner) => diags.push(inner),
+//RS                 }
+//RS             }
+//RS 
+//RS             // Function-site rules use the same typed body expansion. Their
+//RS             // target projection is a FunctionInfo, and a body may reject the
+//RS             // declaration or emit ordinary top-level Jet items.
+//RS             let declared_function_targets: Vec<(
+//RS                 crate::AST::Func,
+//RS                 crate::AST::Marker,
+//RS                 crate::AST::MarkerDecl,
+//RS             )> = module
+//RS                 .items
+//RS                 .iter()
+//RS                 .flat_map(|item| {
+//RS                     let Item::Func(function) = item else {
+//RS                         return None;
+//RS                     };
+//RS                     Some(function.markers.iter().filter_map(|marker| {
+//RS                         let declaration = marker_vocabulary.declaration(&marker.name)?.clone();
+//RS                         declaration.body.as_ref()?;
+//RS                         Some((function.clone(), marker.clone(), declaration))
+//RS                     }))
+//RS                 })
+//RS                 .flatten()
+//RS                 .collect();
+//RS 
+//RS             for (target, marker, declaration) in declared_function_targets {
+//RS                 if marker.negated {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(body) = declaration.body.as_ref() else {
+//RS                     continue;
+//RS                 };
+//RS                 let target_info = crate::Comptime::build_function_type_info(&target);
+//RS                 match crate::Comptime::expand_derive_body(
+//RS                     body,
+//RS                     "target",
+//RS                     target_info,
+//RS                     &actual_funcs,
+//RS                     &bundle.project_root,
+//RS                     checked_nominals.clone(),
+//RS                 ) {
+//RS                     Ok(expanded) => new_items.extend(expanded),
+//RS                     Err(inner) => diags.push(inner),
+//RS                 }
+//RS             }
+//RS 
+//RS             // D-META-DSL1=A: a `.Block` rule receives the text inside Jet's
+//RS             // closed braces as its `target` value. The library body can check
+//RS             // that text and emit ordinary Jet items through the same typed
+//RS             // path as a type or function rule.
+//RS             let mut declared_text_blocks = Vec::new();
+//RS             for item in &module.items {
+//RS                 collect_item_declared_text_blocks(
+//RS                     item,
+//RS                     &module.source,
+//RS                     &module.block_spans,
+//RS                     &mut declared_text_blocks,
+//RS                 );
+//RS             }
+//RS             for (block_name, block_text, _block_span) in declared_text_blocks {
+//RS                 let Some(declaration) = marker_vocabulary.declaration(&block_name) else {
+//RS                     continue;
+//RS                 };
+//RS                 let Some(body) = declaration.body.as_ref() else {
+//RS                     continue;
+//RS                 };
+//RS                 match crate::Comptime::expand_derive_body(
+//RS                     body,
+//RS                     "target",
+//RS                     crate::AST::CtValue::Str(block_text),
+//RS                     &actual_funcs,
+//RS                     &bundle.project_root,
+//RS                     checked_nominals.clone(),
+//RS                 ) {
+//RS                     Ok(expanded) => new_items.extend(expanded),
+//RS                     Err(inner) => diags.push(inner),
+//RS                 }
+//RS             }
+//RS 
+//RS             for item in &new_items {
+//RS                 match item {
+//RS                     Item::Func(function) => {
+//RS                         register_func_item(function, st, &mut diags, !module.no_prelude)
+//RS                     }
+//RS                     Item::Struct(def) => {
+//RS                         register_struct(
+//RS                             def,
+//RS                             &mut st.registry,
+//RS                             &mut diags,
+//RS                             &st.funcs,
+//RS                             &st.consts,
+//RS                             &jet_foundation::Layout::TargetLayout::from_build_facts(
+//RS                                 &st.build_facts,
+//RS                             ),
+//RS                         )
+//RS                     }
+//RS                     Item::Enum(def) => {
+//RS                         register_enum(def, &mut st.registry, &mut diags, &st.funcs, &st.consts)
+//RS                     }
+//RS                     Item::Tag(_) => {}
+//RS                     Item::Impl(_) => {}
+//RS                     Item::Test(_) => {}
+//RS                     _ => {}
+//RS                 }
+//RS             }
+//RS             generated_test_spans.extend(new_items.iter().filter_map(|item| match item {
+//RS                 Item::Test(test) => Some(test.name_span),
+//RS                 _ => None,
+//RS             }));
+//RS             module.items.extend(new_items);
+//RS         }
+//RS 
+//RS         // Marker/derive expansion can append `#Test` items after the first
+//RS         // static-product pass. Resolve their interpolated names and measured
+//RS         // marker facts before the ordinary test registry and body checker see
+//RS         // them; the pass is idempotent for items handled earlier.
+//RS         super::super::CheckerMarkers::resolve_static_rule_products(
+//RS             module,
+//RS             &base,
+//RS             &ct_core_imports[idx],
+//RS             &mut diags,
+//RS         );
+//RS         for item in &module.items {
+//RS             if let Item::Test(test) = item {
+//RS                 if generated_test_spans.contains(&test.name_span) {
+//RS                     register_test_item(test, st, &mut diags);
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         st.consts.extend(comptime_types);
+//RS         // D-UNIONTYPE1=A / R11: materialize every anonymous union seen after
+//RS         // typed derive/marker expansion as a sema-owned hidden enum. Its
+//RS         // representation remains backend sugar; its codec members are normal
+//RS         // checked Jet impl items, just like named serde types.
+//RS         let union_item_start = module.items.len();
+//RS         super::super::Registration::inject_anonymous_union_items(&mut module.items);
+//RS         for item in module.items.iter().skip(union_item_start) {
+//RS             if let Item::Enum(definition) = item {
+//RS                 register_enum(
+//RS                     definition,
+//RS                     &mut st.registry,
+//RS                     &mut diags,
+//RS                     &st.funcs,
+//RS                     &st.consts,
+//RS                 );
+//RS             }
+//RS         }
+//RS         // D-ONCE-DERIVE1=A / I3: built-in capability requests re-enter as
+//RS         // ordinary Jet impl blocks before the final trait registration pass.
+//RS         let known_functions: HashSet<String> = module
+//RS             .items
+//RS             .iter()
+//RS             .filter_map(|item| match item {
+//RS                 Item::Func(function) => Some(function.name.clone()),
+//RS                 _ => None,
+//RS             })
+//RS             .collect();
+//RS         super::super::Registration::expand_builtin_derive_items(&mut module.items, &mut diags);
+//RS         for item in &module.items {
+//RS             if let Item::Func(function) = item {
+//RS                 if !known_functions.contains(&function.name) {
+//RS                     register_func_item(function, st, &mut diags, !module.no_prelude);
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-SERDE2=A/R11: built-in codecs re-enter as ordinary Jet source in
+//RS         // bundle builds too; this is the production multi-file path.
+//RS         super::super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);
+//RS         // Anonymous union declarations are synthesized by the same serde pass
+//RS         // as their typed codec impls. Register the new enum names before any
+//RS         // generated method body is checked.
+//RS         register_generated_union_enums(&module.items, st, &mut diags);
+//RS 
+//RS         // S62 + D-LIB2: synthesis must happen before registration so the
+//RS         // synthesised Func nodes appear in both registries.
+//RS         synthesize_impls(&mut module.items);
+//RS         // D-TXN-ROLLBACK layer 2: ensure Rollback is known before user impl blocks.
+//RS         st.trait_reg.register_synthetic_rollback();
+//RS         st.trait_reg.register_synthetic_display_debug();
+//RS         st.trait_reg.register_synthetic_close();
+//RS         st.trait_reg.register_synthetic_operators();
+//RS         st.trait_reg.register_synthetic_iter_index();
+//RS         st.trait_reg.register_synthetic_io();
+//RS         st.trait_reg.register_synthetic_driver();
+//RS         for (local, definition, same_package) in &imported_traits[idx] {
+//RS             st.trait_reg
+//RS                 .register_imported_trait(local, definition, *same_package);
+//RS         }
+//RS         st.trait_reg.register_items(&module.items, &mut diags);
+//RS         // Registration validates source spelling before this sema-owned
+//RS         // normalization turns bare operator RHS into the canonical owner type.
+//RS         super::super::Registration::normalize_operator_rhs(&mut module.items);
+//RS         register_type_methods(&module.items, &mut st.registry, &mut diags);
+//RS         register_patchable_methods(&module.items, &mut st.registry);
+//RS         register_cli_merge_methods(&module.items, &mut st.registry);
+//RS         register_impl_methods(&module.items, &mut st.registry, &mut diags);
+//RS         for type_name in &st.registry.unit_types {
+//RS             st.trait_reg
+//RS                 .trait_impls
+//RS                 .insert((type_name.clone(), crate::Generics::DISPLAY.to_string()));
+//RS         }
+//RS         for (type_name, fact) in &st.registry.unit_facts {
+//RS             {
+//RS                 st.trait_reg.trait_impls.insert((
+//RS                     type_name.clone(),
+//RS                     crate::Generics::quantity_bound(&fact.family, fact.kind.name()),
+//RS                 ));
+//RS                 for capability in [crate::Generics::ENCODE, crate::Generics::DECODE] {
+//RS                     st.trait_reg
+//RS                         .derives
+//RS                         .entry(type_name.clone())
+//RS                         .or_default()
+//RS                         .insert(capability.to_string());
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-SERDE: validate `#[Codable]`/`#[Encode]`/`#[Decode]` markers (E2407–E2412)
+//RS         // now that the trait registry resolves field/variant types — keeps the emitted
+//RS         // `impl`s rustc-clean (I2).
+//RS         diags.extend(validate_serde_items(&module.items, &st.trait_reg));
+//RS         // D-MARK-VOCAB1 (card #518): a marker name outside the registered
+//RS         // `@`/`#` plane vocabulary is E0927, instead of silently doing
+//RS         // nothing (the parser accepts any PascalCase name structurally).
+//RS         diags.extend(check_marker_vocabulary(
+//RS             &module.items,
+//RS             &module.rule_facts,
+//RS             &marker_vocabulary,
+//RS         ));
+//RS         diags.extend(check_deprecated_visibility(&module.items));
+//RS         diags.extend(check_declared_rule_facts(
+//RS             &module.rule_facts,
+//RS             &marker_vocabulary,
+//RS         ));
+//RS         // D-CLIFLAG1: validate `#[CLI]`-derived structs (E1305/E1306), same
+//RS         // timing as the serde pass above (trait registry must be built so
+//RS         // `CLI` is visible on `s.derives`).
+//RS         diags.extend(validate_cli_items(&module.items, &st.trait_reg));
+//RS         // D-MIGRATE1: schema diff pass (E0910) — runs after struct registration (I3).
+//RS         diags.extend(check_schema_migrations(
+//RS             &module.items,
+//RS             &bundle.project_root,
+//RS             &st.trait_reg,
+//RS         ));
+//RS         attach_module_origin(module, idx == bundle.entry, &mut diags[module_diag_start..]);
+//RS         drop_core_source_lints(module, &mut diags, module_diag_start);
+//RS     }
+//RS     // D-MOD-CYCLE1=A: attach each package-sibling `impl` to the file that
+//RS     // declares its type, where method lookup for that type reads.
+//RS     for idx in 0..bundle.modules.len() {
+//RS         for item in &bundle.modules[idx].items {
+//RS             let Item::Impl(implementation) = item else {
+//RS                 continue;
+//RS             };
+//RS             if implementation.type_name.contains('.')
+//RS                 || states[idx].registry.contains(&implementation.type_name)
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             if let Some(owner) = sibling_type_owner(&name_ledger, idx, &implementation.type_name) {
+//RS                 register_impl_methods(
+//RS                     std::slice::from_ref(item),
+//RS                     &mut states[owner].registry,
+//RS                     &mut diags,
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS     // D-ADOPT-GUEST1=A: both directions use the same C-safe type law. Artifact
+//RS     // paths consume the rows exposed by `guest_surface` after these checks;
+//RS     // no backend rechecks the source shape.
+//RS     for (module, state) in bundle.modules.iter().zip(states.iter()) {
+//RS         check_guest_import_surface(&module.items, &state.registry, &mut diags);
+//RS     }
+//RS     if let (Some(module), Some(state)) =
+//RS         (bundle.modules.get(bundle.entry), states.get(bundle.entry))
+//RS     {
+//RS         check_guest_export_surface(&module.items, &state.registry, &mut diags);
+//RS     }
+//RS     check_guest_symbol_collisions(bundle, &mut diags);
+//RS     // D-BOUND-UNDO1=A: an inverse belongs to the module that owns the foreign
+//RS     // binding. CFFI re-homes C declarations into a shared synthetic module, so
+//RS     // use the import links to recover that owner rather than consulting a
+//RS     // bundle-wide bare-name table.
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         let importers = bundle
+//RS             .cffi
+//RS             .import_links
+//RS             .iter()
+//RS             .filter(|link| link.target_idx == module_idx)
+//RS             .map(|link| link.importing_idx)
+//RS             .collect::<std::collections::BTreeSet<_>>();
+//RS         if importers.is_empty() {
+//RS             validate_foreign_undo_contracts(&module.items, &states[module_idx].funcs, &mut diags);
+//RS             continue;
+//RS         }
+//RS 
+//RS         for contract in foreign_undo_contracts(&module.items) {
+//RS             let owners = importers
+//RS                 .iter()
+//RS                 .copied()
+//RS                 .filter(|owner| states[*owner].funcs.contains_key(contract.inverse))
+//RS                 .collect::<Vec<_>>();
+//RS             match owners.as_slice() {
+//RS                 [owner] => {
+//RS                     validate_foreign_undo_contract(&contract, &states[*owner].funcs, &mut diags)
+//RS                 }
+//RS                 [] => {
+//RS                     validate_foreign_undo_contract(&contract, &states[module_idx].funcs, &mut diags)
+//RS                 }
+//RS                 _ => {
+//RS                     let modules = owners
+//RS                         .iter()
+//RS                         .map(|owner| bundle.modules[*owner].display.as_str())
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ");
+//RS                     diags.push(Diagnostic::error(
+//RS                         "E0105",
+//RS                         format!(
+//RS                             "undo function `{}` is ambiguous for foreign binding `{}`",
+//RS                             contract.inverse, contract.forward_name
+//RS                         ),
+//RS                         format!(
+//RS                             "the shared C binding is imported by more than one module that defines `{}`: {modules}",
+//RS                             contract.inverse
+//RS                         ),
+//RS                         "give the foreign binding one uniquely named inverse in one defining module"
+//RS                             .to_string(),
+//RS                         Some(contract.inverse_span),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     // D-META-AUTO1: the bundle projection is the canonical answer for local
+//RS     // shapes that contain imported nominal types. The early item-local pass
+//RS     // handles explicit requests and declarations produced while processing one
+//RS     // module; complete any missing structural implementations from this shared
+//RS     // fixed point before body checking and codegen consume the finished AST.
+//RS     let bundle_auto_derives = TraitRegistry::bundle_auto_derives(bundle, &name_ledger);
+//RS     for idx in 0..states.len() {
+//RS         let module_diag_start = diags.len();
+//RS         let auto_derives = &bundle_auto_derives[idx];
+//RS         states[idx].trait_reg.merge_auto_derives(auto_derives);
+//RS 
+//RS         let module = &mut bundle.modules[idx];
+//RS         super::super::Registration::expand_builtin_derive_items_with_auto(
+//RS             &mut module.items,
+//RS             auto_derives,
+//RS             &mut diags,
+//RS         );
+//RS         for item in &module.items {
+//RS             if let Item::Func(function) = item {
+//RS                 if !states[idx].funcs.contains_key(&function.name) {
+//RS                     register_func_item(function, &mut states[idx], &mut diags, !module.no_prelude);
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         let serde_item_start = module.items.len();
+//RS         super::super::Registration::expand_builtin_serde_items_with_auto(
+//RS             &mut module.items,
+//RS             auto_derives,
+//RS             &mut diags,
+//RS         );
+//RS         register_generated_union_enums(&module.items, &mut states[idx], &mut diags);
+//RS         // Auto-derived items are appended after the first registration pass;
+//RS         // normalize their bare operator RHS before any later consumer sees them.
+//RS         super::super::Registration::normalize_operator_rhs(&mut module.items);
+//RS         register_impl_methods(
+//RS             &module.items[serde_item_start..],
+//RS             &mut states[idx].registry,
+//RS             &mut diags,
+//RS         );
+//RS         // Bundle auto-derives attach nested Equatable/Comparable methods after
+//RS         // the first TypeRegistry pass. Insert only methods that are still missing.
+//RS         register_missing_type_methods(
+//RS             &module.items,
+//RS             &mut states[idx].registry,
+//RS             &mut diags,
+//RS         );
+//RS         attach_module_origin(module, idx == bundle.entry, &mut diags[module_diag_start..]);
+//RS         drop_core_source_lints(module, &mut diags, module_diag_start);
+//RS     }
+//RS     bundle.comptime_inputs.extend(top_level_embed_inputs);
+//RS     diags.extend(super::super::BudgetSpecs::validate_bundle(bundle));
+//RS 
+//RS     // S62 E2401: delegation validation — check field exists and implements trait.
+//RS     // Runs after all m9 registrations so implements_trait is populated.
+//RS     for (idx, module) in bundle.modules.iter().enumerate() {
+//RS         let st = &states[idx];
+//RS         for item in &module.items {
+//RS             if let Item::Impl(i) = item {
+//RS                 if let (Some(trait_name), Some(field_name)) = (&i.trait_name, &i.delegation_field) {
+//RS                     if let Some(fields) = st.registry.struct_fields(&i.type_name) {
+//RS                         if let Some((_, _, field_ty)) =
+//RS                             fields.iter().find(|(n, _, _)| n == field_name)
+//RS                         {
+//RS                             let field_type_name = field_ty.name();
+//RS                             if !st.trait_reg.implements_trait(&field_type_name, trait_name) {
+//RS                                 diags.push(Diagnostic::error(
+//RS                                     "E2401",
+//RS                                     format!(
+//RS                                         "`{}` doesn't implement `{}`, so it can't delegate",
+//RS                                         field_type_name, trait_name
+//RS                                     ),
+//RS                                     format!(
+//RS                                         "`impl {}.{} using {}` forwards `{}` methods to the `{}` field, but `{}` doesn't implement `{}`",
+//RS                                         i.type_name, trait_name, field_name,
+//RS                                         trait_name, field_name,
+//RS                                         field_type_name, trait_name
+//RS                                     ),
+//RS                                     format!(
+//RS                                         "implement `impl {}: {}` on the field's type, or choose a different field",
+//RS                                         field_type_name, trait_name
+//RS                                     ),
+//RS                                     Some(i.type_span),
+//RS                                 ));
+//RS                             }
+//RS                         } else {
+//RS                             diags.push(Diagnostic::error(
+//RS                                 "E2401",
+//RS                                 format!("`{}` has no field `{}`", i.type_name, field_name),
+//RS                                 format!(
+//RS                                     "`impl {}.{} using {}` needs `{}` to have a field named `{}`",
+//RS                                     i.type_name, trait_name, field_name, i.type_name, field_name
+//RS                                 ),
+//RS                                 format!("add `{}: Type` to `struct {}`", field_name, i.type_name),
+//RS                                 Some(i.type_span),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // D-NAME-TREE1=A: registration is complete, so publish declarations and
+//RS     // visibility before any import or body pass consults them. The later
+//RS     // unqualified-import pass adds alias rows to this same ledger.
+//RS     populate_name_ledger(bundle, &states, &mut name_ledger);
+//RS 
+//RS     // D-MOD3/4: Unqualified imports (`use alias.Item`) are processed in a
+//RS     // dedicated pass *after* file-module aliases land in `st.imports` below.
+//RS 
+//RS     for (idx, module) in bundle.modules.iter().enumerate() {
+//RS         let st = &mut states[idx];
+//RS         for imp in &module.imports {
+//RS             // Foreign member lists retain the ordinary unqualified AST shape,
+//RS             // but bind mounted namespaces here as one transactional group.
+//RS             if matches!(&imp.kind, ImportKind::Unqualified { .. }) {
+//RS                 let foreign = foreign_imports_after_validation(imp);
+//RS                 if foreign.is_empty() {
+//RS                     continue;
+//RS                 }
+//RS                 let mut group_failed = false;
+//RS                 let mut resolved = Vec::new();
+//RS                 let mut names = HashSet::new();
+//RS                 for (namespace, alias) in foreign {
+//RS                     if st.imports.contains_key(&alias)
+//RS                         || st.core_imports.contains_key(&alias)
+//RS                         || !names.insert(alias.clone())
+//RS                     {
+//RS                         group_failed = true;
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E0105",
+//RS                             format!("the import name `{alias}` is used twice"),
+//RS                             "each import needs a unique namespace name in this file".to_string(),
+//RS                             format!("rename one with `{} alias`", Syntax::KW_AS),
+//RS                             Some(imp.alias_span),
+//RS                         ));
+//RS                         continue;
+//RS                     }
+//RS                     let target = if namespace.language == crate::AST::ForeignLanguage::C {
+//RS                         bundle.cffi.target_for(idx, &alias)
+//RS                     } else {
+//RS                         bundle
+//RS                             .modules
+//RS                             .iter()
+//RS                             .position(|candidate| candidate.display == namespace.display())
+//RS                     };
+//RS                     if let Some(target) = target {
+//RS                         resolved.push((alias, target));
+//RS                     } else {
+//RS                         group_failed = true;
+//RS                         let root = namespace.language.root();
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E1002",
+//RS                             format!("`{root}` is reserved for first-party or foreign packages"),
+//RS                             "a foreign namespace must resolve to a mounted library before it can be imported".to_string(),
+//RS                             format!("make the `{root}` binding available or rename the import"),
+//RS                             Some(imp.alias_span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 if !group_failed {
+//RS                     for (alias, target) in resolved {
+//RS                         st.imports.insert(alias, target);
+//RS                     }
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             let alias = imp.import_alias();
+//RS             if st.imports.contains_key(&alias) {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E0105",
+//RS                     format!("the import name `{}` is used twice", alias),
+//RS                     "each import needs a unique namespace name in this file".to_string(),
+//RS                     format!("rename one with `{} alias`", Syntax::KW_AS),
+//RS                     Some(imp.alias_span),
+//RS                 ));
+//RS                 continue;
+//RS             }
+//RS             if st.core_imports.contains_key(&alias) {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E0105",
+//RS                     format!("the import name `{}` is used twice", alias),
+//RS                     "each import needs a unique namespace name in this file".to_string(),
+//RS                     format!("rename one with `{} alias`", Syntax::KW_AS),
+//RS                     Some(imp.alias_span),
+//RS                 ));
+//RS                 continue;
+//RS             }
+//RS             if let ImportKind::Module(name, _) = &imp.kind {
+//RS                 if crate::Syntax::is_legacy_std_import(name) {
+//RS                     diags.push(Diagnostic::error(
+//RS                         "E0019",
+//RS                         format!("`{name}` is the old standard-library import spelling"),
+//RS                         "the standard library module was renamed to `core`".to_string(),
+//RS                         format!(
+//RS                             "use `import {}` or `import {}.fs as fs`",
+//RS                             Syntax::CORE_SHORT,
+//RS                             Syntax::CORE_SHORT
+//RS                         ),
+//RS                         Some(imp.span),
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS                 // D-CORENS1 / E0341: old `jet.<ring>` spelling → teach the new `core.<ring>`.
+//RS                 if let Some(ring) = name.strip_prefix("jet.") {
+//RS                     if crate::Syntax::is_ring_module(ring) {
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E0341",
+//RS                             format!("`use jet.{ring}` is the old first-party library spelling"),
+//RS                             "first-party libraries moved to the `core.*` namespace (D-CORENS1)"
+//RS                                 .to_string(),
+//RS                             format!(
+//RS                                 "write `use {}` instead",
+//RS                                 crate::Syntax::canonical_ring_module(ring)
+//RS                             ),
+//RS                             Some(imp.span),
+//RS                         ));
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if let Some(profile) = crate::AST::target_profile_path(imp) {
+//RS                 st.core_imports.insert(alias, profile);
+//RS                 continue;
+//RS             }
+//RS             if let Some(module) = imp.core_module_path() {
+//RS                 if !crate::Syntax::is_known_core_module(&module) {
+//RS                     diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(
+//RS                         &module, imp.span,
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS                 // Infer minimum layer and enforce optional ceiling.
+//RS                 if let Some(mod_layer) = crate::Syntax::core_module_layer(&module) {
+//RS                     if let Some(ceiling) = bundle.layer_ceiling {
+//RS                         if mod_layer > ceiling {
+//RS                             diags.push(crate::Syntax::layer_ceiling_exceeded(
+//RS                                 &module,
+//RS                                 mod_layer,
+//RS                                 ceiling,
+//RS                                 Some(imp.span),
+//RS                                 Some(&format!("`use {module}`")),
+//RS                             ));
+//RS                             continue;
+//RS                         }
+//RS                     }
+//RS                     if mod_layer > bundle.inferred_layer {
+//RS                         bundle.inferred_layer = mod_layer;
+//RS                     }
+//RS                 }
+//RS                 st.core_imports.insert(alias, module);
+//RS                 continue;
+//RS             }
+//RS             if matches!(&imp.kind, ImportKind::File(path, _) if path.ends_with(".h")) {
+//RS                 let target = bundle.cffi.target_for(idx, &alias).unwrap_or_else(|| {
+//RS                     unreachable!(
+//RS                         "C header import target missing after CFFI assembly: module={} alias={alias}",
+//RS                         idx
+//RS                     )
+//RS                 });
+//RS                 st.imports.insert(alias.clone(), target);
+//RS                 name_ledger.record_import_target(idx, imp.span, target);
+//RS                 continue;
+//RS             }
+//RS             let foreign = foreign_imports_after_validation(imp);
+//RS             if !foreign.is_empty() {
+//RS                 let mut group_failed = false;
+//RS                 let mut resolved = Vec::new();
+//RS                 for (namespace, foreign_alias) in foreign {
+//RS                     let target = if namespace.language == crate::AST::ForeignLanguage::C {
+//RS                         bundle.cffi.target_for(idx, &foreign_alias)
+//RS                     } else {
+//RS                         bundle
+//RS                             .modules
+//RS                             .iter()
+//RS                             .position(|candidate| candidate.display == namespace.display())
+//RS                     };
+//RS                     if let Some(target) = target {
+//RS                         resolved.push((foreign_alias, target));
+//RS                     } else {
+//RS                         group_failed = true;
+//RS                         let root = namespace.language.root();
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E1002",
+//RS                             format!("`{root}` is reserved for first-party or foreign packages"),
+//RS                             "a foreign namespace must resolve to a mounted library before it can be imported".to_string(),
+//RS                             format!("make the `{root}` binding available or rename the import"),
+//RS                             Some(imp.alias_span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 if !group_failed {
+//RS                     for (foreign_alias, target) in resolved {
+//RS                         st.imports.insert(foreign_alias, target);
+//RS                     }
+//RS                     if let Some(target) = st.imports.get(&alias).copied() {
+//RS                         name_ledger.record_import_target(idx, imp.span, target);
+//RS                     }
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             // S59 (E2-M14): C `use` forms bind to a synthetic merged module
+//RS             // resolved by `CFFI::assemble` (E3204 already reported there).
+//RS             if is_c_import_after_validation(imp) {
+//RS                 if let Some(target) = bundle.cffi.target_for(idx, &alias) {
+//RS                     st.imports.insert(alias.clone(), target);
+//RS                     name_ledger.record_import_target(idx, imp.span, target);
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             if let Some(target) = name_ledger.import_target(idx, imp.span) {
+//RS                 st.imports.insert(alias, target);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // D-FFI-CAP1: CFFI re-homes foreign declarations into synthetic modules,
+//RS     // but a returned `#Close` handle is consumed in the importing module's
+//RS     // body. Copy the checked nominal fact across that import edge before body
+//RS     // checking, so imported C handles use the same Close protocol as local
+//RS     // foreign declarations.
+//RS     for link in &bundle.cffi.import_links {
+//RS         let Some(target_state) = states.get(link.target_idx) else {
+//RS             continue;
+//RS         };
+//RS         let close_impls = target_state
+//RS             .trait_reg
+//RS             .trait_impls
+//RS             .iter()
+//RS             .filter(|(_, trait_name)| trait_name == Syntax::TRAIT_CLOSE)
+//RS             .cloned()
+//RS             .collect::<Vec<_>>();
+//RS         for close_impl in close_impls {
+//RS             states[link.importing_idx]
+//RS                 .trait_reg
+//RS                 .trait_impls
+//RS                 .insert(close_impl);
+//RS         }
+//RS     }
+//RS 
+//RS     // D-MOD3/4: process `use alias.Item` unqualified imports now that file-module
+//RS     // aliases are registered in `st.imports`. `pub use` additionally re-exports the
+//RS     // item onto this module's public surface (`reexports`).
+//RS     for (idx, module) in bundle.modules.iter().enumerate() {
+//RS         let module_diag_start = diags.len();
+//RS         for imp in &module.imports {
+//RS             let ImportKind::Unqualified {
+//RS                 module_alias,
+//RS                 module_alias_span,
+//RS                 ..
+//RS             } = &imp.kind
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             if !foreign_imports_after_validation(imp).is_empty() {
+//RS                 continue;
+//RS             }
+//RS             let bindings = imp.walk_bindings();
+//RS             let group_diagnostics = diags.len();
+//RS             let mut inserted_unqualified = Vec::new();
+//RS             let mut inserted_reexports = Vec::new();
+//RS             let mut inserted_core = Vec::new();
+//RS             let mut inserted_core_items = Vec::new();
+//RS             let mut inserted_file = Vec::new();
+//RS             let mut inserted_imports = Vec::new();
+//RS             let mut pending_item_aliases = Vec::new();
+//RS             if let Some(canonical) = states[idx].code_modules.get(module_alias.as_str()).cloned() {
+//RS                 // Inline module: items are mangled as `__jet_{alias}__{item}`.
+//RS                 let st = &mut states[idx];
+//RS                 for binding in &bindings {
+//RS                     let orig = binding
+//RS                         .original
+//RS                         .expect("member walker returned a binding without a member");
+//RS                     let local = binding.local.clone();
+//RS                     let mangled = jet_foundation::Names::member_name(&canonical, orig);
+//RS                     if st.unqualified.contains_key(&local)
+//RS                         || st.unqualified_file.contains_key(&local)
+//RS                         || st.core_imports.contains_key(&local)
+//RS                     {
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E0105",
+//RS                             format!("the import name `{local}` is used twice"),
+//RS                             "each import needs a unique namespace name in this file".to_string(),
+//RS                             format!("rename one with `{} alias`", Syntax::KW_AS),
+//RS                             Some(imp.alias_span),
+//RS                         ));
+//RS                     } else if !st.funcs.contains_key(&mangled) {
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E0611",
+//RS                             format!("`{}` is not defined in module `{}`", orig, module_alias),
+//RS                             "check the module body for the item you're importing".to_string(),
+//RS                             "make sure the name is spelled correctly".to_string(),
+//RS                             Some(*module_alias_span),
+//RS                         ));
+//RS                     } else if !name_ledger.exported(idx, &mangled) {
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E0609",
+//RS                             format!("`{}` is private in module `{}`", orig, module_alias),
+//RS                             "only `pub` items can be brought into scope with `use`".to_string(),
+//RS                             format!(
+//RS                                 "add `pub` before `fn {}` in module `{}`",
+//RS                                 orig, module_alias
+//RS                             ),
+//RS                             Some(*module_alias_span),
+//RS                         ));
+//RS                     } else {
+//RS                         st.unqualified.insert(local.clone(), mangled.clone());
+//RS                         inserted_unqualified.push(local.clone());
+//RS                         if imp.is_pub {
+//RS                             st.reexports.insert(local.clone(), (mangled, idx));
+//RS                             inserted_reexports.push(local);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             } else if let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) {
+//RS                 // D-CORE-USELIST1=A: a list member may name either a Core
+//RS                 // submodule (`core.encoding.[json]`) or an item in the
+//RS                 // longest known module prefix (`core.math.[abs]`).
+//RS                 let st = &mut states[idx];
+//RS                 for binding in &bindings {
+//RS                     let orig = binding
+//RS                         .original
+//RS                         .expect("member walker returned a binding without a member");
+//RS                     let local = binding.local.clone();
+//RS                     let full = format!("{core_prefix}.{orig}");
+//RS                     let target = match crate::AST::core_list_path(module_alias, orig) {
+//RS                         Some(crate::AST::CoreListPath::Module(module)) => Some((module, None)),
+//RS                         Some(crate::AST::CoreListPath::Item { module, item })
+//RS                             if crate::Sema::CheckerCoreLib::core_module_items(&module)
+//RS                                 .iter()
+//RS                                 .any(|known| known == &item) =>
+//RS                         {
+//RS                             Some((module, Some(item)))
+//RS                         }
+//RS                         _ => None,
+//RS                     };
+//RS                     let Some((module, item)) = target else {
+//RS                         if crate::Syntax::is_known_core_module(&core_prefix) {
+//RS                             diags.push(crate::Sema::CheckerCoreLib::unknown_core_item(
+//RS                                 &core_prefix,
+//RS                                 orig,
+//RS                                 binding.item_span.unwrap_or(*module_alias_span),
+//RS                             ));
+//RS                         } else {
+//RS                             diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(
+//RS                                 &full,
+//RS                                 *module_alias_span,
+//RS                             ));
+//RS                         }
+//RS                         continue;
+//RS                     };
+//RS                     if st.core_imports.contains_key(&local)
+//RS                         || st.unqualified.contains_key(&local)
+//RS                         || st.unqualified_file.contains_key(&local)
+//RS                     {
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E0105",
+//RS                             format!("the import name `{}` is used twice", local),
+//RS                             "each import needs a unique namespace name in this file".to_string(),
+//RS                             format!("rename one with `{} alias`", Syntax::KW_AS),
+//RS                             Some(imp.alias_span),
+//RS                         ));
+//RS                     } else {
+//RS                         // Unqualified `use core.X` obeys the same layer rules.
+//RS                         if let Some(mod_layer) = crate::Syntax::core_module_layer(&module) {
+//RS                             if let Some(ceiling) = bundle.layer_ceiling {
+//RS                                 if mod_layer > ceiling {
+//RS                                     diags.push(crate::Syntax::layer_ceiling_exceeded(
+//RS                                         &module,
+//RS                                         mod_layer,
+//RS                                         ceiling,
+//RS                                         Some(*module_alias_span),
+//RS                                         Some(&format!("`use {core_prefix}.{orig}`")),
+//RS                                     ));
+//RS                                     continue;
+//RS                                 }
+//RS                             }
+//RS                             if mod_layer > bundle.inferred_layer {
+//RS                                 bundle.inferred_layer = mod_layer;
+//RS                             }
+//RS                         }
+//RS                         st.core_imports.insert(local.clone(), module);
+//RS                         inserted_core.push(local.clone());
+//RS                         if let Some(item) = item {
+//RS                             st.core_item_imports.insert(local.clone(), item);
+//RS                             inserted_core_items.push(local);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             } else if states[idx].imports.contains_key(module_alias.as_str()) {
+//RS                 // File module: look up items in the target module's state.
+//RS                 let imported_idx = states[idx].imports[module_alias.as_str()];
+//RS                 let is_reexport = imp.is_pub;
+//RS                 for binding in &bindings {
+//RS                     let orig = binding
+//RS                         .original
+//RS                         .expect("member walker returned a binding without a member");
+//RS                     let local = binding.local.clone();
+//RS                     // D-MOD-CYCLE1=A: an imported package is one namespace;
+//RS                     // the member is declared by whichever of its files owns it.
+//RS                     let declares = |candidate: usize| {
+//RS                         states[candidate].funcs.contains_key(orig)
+//RS                             || name_ledger.declaration(candidate, orig).is_some()
+//RS                     };
+//RS                     let target_idx = if declares(imported_idx) {
+//RS                         imported_idx
+//RS                     } else {
+//RS                         name_ledger
+//RS                             .namespace_siblings(imported_idx)
+//RS                             .into_iter()
+//RS                             .find(|&candidate| declares(candidate))
+//RS                             .unwrap_or(imported_idx)
+//RS                     };
+//RS                     let is_pub = name_ledger.visible(idx, target_idx, orig);
+//RS                     let file_module_target =
+//RS                         states[target_idx].imports.get(orig).copied().filter(|_| {
+//RS                             name_ledger
+//RS                                 .declaration(target_idx, orig)
+//RS                                 .is_some_and(|declaration| declaration.kind == "file_module")
+//RS                         });
+//RS                     if states[idx].unqualified.contains_key(&local)
+//RS                         || states[idx].unqualified_file.contains_key(&local)
+//RS                         || states[idx].core_imports.contains_key(&local)
+//RS                     {
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E0105",
+//RS                             format!("the import name `{local}` is used twice"),
+//RS                             "each import needs a unique namespace name in this file".to_string(),
+//RS                             format!("rename one with `{} alias`", Syntax::KW_AS),
+//RS                             Some(imp.alias_span),
+//RS                         ));
+//RS                     } else if let Some(file_module_target) = file_module_target {
+//RS                         if !is_pub {
+//RS                             diags.push(Diagnostic::error(
+//RS                                 "E0609",
+//RS                                 format!("`{}` is private in module `{}`", orig, module_alias),
+//RS                                 "only public modules can be brought into scope with `use`"
+//RS                                     .to_string(),
+//RS                                 format!("add `pub` before `module {}` in the imported file", orig),
+//RS                                 Some(*module_alias_span),
+//RS                             ));
+//RS                         } else {
+//RS                             states[idx]
+//RS                                 .imports
+//RS                                 .insert(local.clone(), file_module_target);
+//RS                             inserted_imports.push(local.clone());
+//RS                         }
+//RS                         continue;
+//RS                     }
+//RS                     // D-MOD2: a member import names any top-level declaration
+//RS                     // of the target module. Functions bind for calls through
+//RS                     // `unqualified_file`; types, enums, traits and constants
+//RS                     // bind as NameLedger aliases, the table nominal lookup
+//RS                     // (`struct_owner_module`) already consults.
+//RS                     let is_function = states[target_idx].funcs.contains_key(orig);
+//RS                     let declaration_kind = name_ledger
+//RS                         .declaration(target_idx, orig)
+//RS                         .map(|declaration| declaration.kind.as_str());
+//RS                     let is_other_item = !is_function
+//RS                         && matches!(
+//RS                             declaration_kind,
+//RS                             Some("type" | "trait" | "const" | "tag" | "protocol")
+//RS                         );
+//RS                     if !is_function && !is_other_item {
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E0611",
+//RS                             format!("`{}` is not defined in module `{}`", orig, module_alias),
+//RS                             "check the module for the item you're importing".to_string(),
+//RS                             "make sure the name is spelled correctly".to_string(),
+//RS                             Some(*module_alias_span),
+//RS                         ));
+//RS                     } else if !is_pub {
+//RS                         diags.push(Diagnostic::error(
+//RS                             "E0609",
+//RS                             format!("`{}` is private in module `{}`", orig, module_alias),
+//RS                             "only `pub` items can be brought into scope with `use`".to_string(),
+//RS                             if is_function {
+//RS                                 format!("add `pub` before `fn {}` in the imported file", orig)
+//RS                             } else {
+//RS                                 format!(
+//RS                                     "add `pub` before the declaration of `{}` in the imported file",
+//RS                                     orig
+//RS                                 )
+//RS                             },
+//RS                             Some(*module_alias_span),
+//RS                         ));
+//RS                     } else if is_other_item {
+//RS                         pending_item_aliases.push((
+//RS                             local,
+//RS                             format!("{}.{}", bundle.modules[target_idx].alias, orig),
+//RS                             target_idx,
+//RS                             binding.local_span,
+//RS                         ));
+//RS                     } else {
+//RS                         states[idx]
+//RS                             .unqualified_file
+//RS                             .insert(local.clone(), (orig.to_string(), target_idx));
+//RS                         inserted_file.push(local.clone());
+//RS                         if is_reexport {
+//RS                             states[idx]
+//RS                                 .reexports
+//RS                                 .insert(local.clone(), (orig.to_string(), target_idx));
+//RS                             inserted_reexports.push(local);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             } else {
+//RS                 // Module alias not found — E0610.
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E0610",
+//RS                     format!("no module named `{}` in scope", module_alias),
+//RS                     "the alias must refer to a module imported earlier in this file".to_string(),
+//RS                     format!("add `import … as {}`  before this `use`", module_alias),
+//RS                     Some(*module_alias_span),
+//RS                 ));
+//RS             }
+//RS             if diags.len() == group_diagnostics {
+//RS                 let visibility = jet_foundation::Names::NameVisibility::from_flags(
+//RS                     imp.is_pub,
+//RS                     imp.is_package_pub,
+//RS                 );
+//RS                 for (local, target, target_idx, span) in pending_item_aliases {
+//RS                     name_ledger.record_alias(
+//RS                         idx,
+//RS                         local,
+//RS                         target,
+//RS                         Some(target_idx),
+//RS                         span,
+//RS                         visibility,
+//RS                     );
+//RS                 }
+//RS             } else {
+//RS                 let st = &mut states[idx];
+//RS                 for name in inserted_unqualified {
+//RS                     st.unqualified.remove(&name);
+//RS                 }
+//RS                 for name in inserted_reexports {
+//RS                     st.reexports.remove(&name);
+//RS                 }
+//RS                 for name in inserted_core {
+//RS                     st.core_imports.remove(&name);
+//RS                 }
+//RS                 for name in inserted_core_items {
+//RS                     st.core_item_imports.remove(&name);
+//RS                 }
+//RS                 for name in inserted_file {
+//RS                     st.unqualified_file.remove(&name);
+//RS                 }
+//RS                 for name in inserted_imports {
+//RS                     st.imports.remove(&name);
+//RS                 }
+//RS             }
+//RS         }
+//RS         attach_module_origin(module, idx == bundle.entry, &mut diags[module_diag_start..]);
+//RS     }
+//RS 
+//RS     // D-DOTSCOPE1 / D-STRUCT-ONCE1: validate contextual `.member { … }`
+//RS     // statements after every typed template expansion. Generated tests and
+//RS     // methods must receive the same structural diagnostics as written items;
+//RS     // the marker vocabulary remains the single source of truth.
+//RS     for (idx, module) in bundle.modules.iter().enumerate() {
+//RS         let module_diag_start = diags.len();
+//RS         diags.extend(super::super::ScopeMembers::check(
+//RS             &module.items,
+//RS             &marker_vocabulary,
+//RS         ));
+//RS         attach_module_origin(module, idx == bundle.entry, &mut diags[module_diag_start..]);
+//RS     }
+//RS 
+//RS     resolve_inline_module_imports(bundle, &mut states, &mut name_ledger, &mut diags);
+//RS 
+//RS     // D-STATE-TERMINAL1: freeze the checked graph snapshot before body
+//RS     // reflection and every downstream semantic consumer read it. The graph is
+//RS     // bundle-wide so a separate impl file contributes edges to the same
+//RS     // struct-owned `Type.State` row.
+//RS     let all_items = || bundle.modules.iter().flat_map(|module| module.items.iter());
+//RS     let all_state_graphs = super::super::checked_state_graphs(all_items());
+//RS     let mut final_fact_registry = crate::Sema::StateTable::declaration_facts(all_items());
+//RS     for (type_name, graph) in &all_state_graphs {
+//RS         final_fact_registry.set_state_graph(format!("{type_name}.State"), graph.clone());
+//RS     }
+//RS     for (state, module) in states.iter_mut().zip(&bundle.modules) {
+//RS         state.items.clone_from(&module.items);
+//RS         state.fact_registry = final_fact_registry.clone();
+//RS     }
+//RS     let diverging_functions = super::Validation::collect_diverging_functions(&states);
+//RS     super::Validation::project_divergence_facts(bundle, &diverging_functions);
+//RS     let fixed_length_write_params =
+//RS         super::Validation::collect_fixed_length_write_params(&states);
+//RS     for state in &mut states {
+//RS         state.diverging_functions = diverging_functions.clone();
+//RS         state.fixed_length_write_params = fixed_length_write_params.clone();
+//RS     }
+//RS     // D-DX-PLUGIN1=D: finish panel discovery after every explicit and
+//RS     // auto-derived registration has populated the package AST. Grouping by
+//RS     // the stable package scope lets one panel state span multiple source
+//RS     // modules while keeping dependency packages distinct.
+//RS     let mut devtools_items =
+//RS         std::collections::BTreeMap::<&str, Vec<(&str, &[Item])>>::new();
+//RS     for (module, state) in bundle.modules.iter().zip(&states) {
+//RS         devtools_items
+//RS             .entry(state.package_scope.as_str())
+//RS             .or_default()
+//RS             .push((state.module_path.as_str(), module.items.as_slice()));
+//RS     }
+//RS     for (package, modules) in devtools_items {
+//RS         let package_items = modules
+//RS             .iter()
+//RS             .flat_map(|&(_, items)| items.iter())
+//RS             .collect::<Vec<_>>();
+//RS         for (module, items) in modules {
+//RS             super::super::check_devtools_panels(
+//RS                 package,
+//RS                 module,
+//RS                 &package_items,
+//RS                 items,
+//RS                 &mut devtools_registry,
+//RS                 &mut diags,
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     // Publication facts are collected by each body checker in its existing
+//RS     // TypeRegistry. Completion projects those typed rows into this shared panel
+//RS     // registry before emitting unfed-field diagnostics.
+//RS     complete_bundle_check(
+//RS         bundle,
+//RS         &mut states,
+//RS         &plugin_interfaces,
+//RS         &mut devtools_registry,
+//RS         mode,
+//RS         no_os,
+//RS         gates,
+//RS         explicit_output,
+//RS         incremental,
+//RS         allow_compiler_api,
+//RS         name_ledger,
+//RS         diags,
+//RS     )
+//RS }
+//RS 
+//RS /// Core is library source, not the user's program. Reports pushed without a
+//RS /// module origin while one Core module is registered or expanded keep their
+//RS /// errors, but its lints are not the user's to act on and would otherwise
+//RS /// render at a Core byte offset inside the entry file.
+//RS fn drop_core_source_lints(
+//RS     module: &crate::AST::LoadedModule,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     module_diag_start: usize,
+//RS ) {
+//RS     if module.is_core_source() {
+//RS         let module_diags = diags.split_off(module_diag_start);
+//RS         diags.extend(
+//RS             module_diags
+//RS                 .into_iter()
+//RS                 .filter(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Lint),
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// Reports pushed while one module is processed belong to that module. A
+//RS /// non-entry module's located reports carry it as their origin, so they render
+//RS /// against its own file instead of at a byte offset of the entry file.
+//RS fn attach_module_origin(
+//RS     module: &crate::AST::LoadedModule,
+//RS     is_entry: bool,
+//RS     diags: &mut [Diagnostic],
+//RS ) {
+//RS     let unowned = |diagnostic: &Diagnostic| diagnostic.origin().is_none() && diagnostic.span.is_some();
+//RS     if is_entry || !diags.iter().any(|diagnostic| unowned(diagnostic)) {
+//RS         return;
+//RS     }
+//RS     let origin = std::sync::Arc::new(jet_foundation::Diagnostics::DiagnosticOrigin::new(
+//RS         module.display.clone(),
+//RS         module.path.to_string_lossy().into_owned(),
+//RS         module.source.clone(),
+//RS     ));
+//RS     for diagnostic in diags {
+//RS         if unowned(&*diagnostic) {
+//RS             diagnostic.set_origin(origin.clone());
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-MOD-CYCLE1=A: a package is one namespace, so a build-time constant may
+//RS /// read a sibling file's constant by bare name. Each module's constants fold
+//RS /// after those of the sibling files they read; bundle order breaks ties and
+//RS /// cycles.
+//RS fn comptime_module_order(
+//RS     bundle: &ProgramBundle,
+//RS     name_ledger: &jet_foundation::Names::NameLedger,
+//RS ) -> Vec<usize> {
+//RS     let module_count = bundle.modules.len();
+//RS     let declared: Vec<std::collections::HashSet<&str>> = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .map(|module| {
+//RS             module
+//RS                 .items
+//RS                 .iter()
+//RS                 .filter_map(|item| match item {
+//RS                     Item::Const(constant)
+//RS                         if super::super::Registration::const_evaluated_at_build(constant) =>
+//RS                     {
+//RS                         Some(constant.name.as_str())
+//RS                     }
+//RS                     _ => None,
+//RS                 })
+//RS                 .collect()
+//RS         })
+//RS         .collect();
+//RS     let mut reads: Vec<Vec<usize>> = vec![Vec::new(); module_count];
+//RS     for (idx, module) in bundle.modules.iter().enumerate() {
+//RS         if declared[idx].is_empty() {
+//RS             continue;
+//RS         }
+//RS         let siblings = name_ledger.namespace_siblings(idx);
+//RS         if siblings.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let mut names = std::collections::HashSet::new();
+//RS         for item in &module.items {
+//RS             if let Item::Const(constant) = item {
+//RS                 if super::super::Registration::const_evaluated_at_build(constant) {
+//RS                     constant.value.for_each_expr(|expr| {
+//RS                         if let crate::AST::Expr::Ident(name, _) = expr {
+//RS                             names.insert(name.clone());
+//RS                         }
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS         for name in &names {
+//RS             if declared[idx].contains(name.as_str()) {
+//RS                 continue;
+//RS             }
+//RS             if let Some(&owner) = siblings
+//RS                 .iter()
+//RS                 .find(|&&sibling| declared[sibling].contains(name.as_str()))
+//RS             {
+//RS                 if !reads[idx].contains(&owner) {
+//RS                     reads[idx].push(owner);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     // Depth-first post-order: a module follows every module it reads.
+//RS     let mut order = Vec::with_capacity(module_count);
+//RS     let mut visited = vec![false; module_count];
+//RS     for root in 0..module_count {
+//RS         if visited[root] {
+//RS             continue;
+//RS         }
+//RS         visited[root] = true;
+//RS         let mut stack = vec![(root, 0usize)];
+//RS         while let Some((module, next)) = stack.pop() {
+//RS             if let Some(&read) = reads[module].get(next) {
+//RS                 stack.push((module, next + 1));
+//RS                 if !visited[read] {
+//RS                     visited[read] = true;
+//RS                     stack.push((read, 0));
+//RS                 }
+//RS             } else {
+//RS                 order.push(module);
+//RS             }
+//RS         }
+//RS     }
+//RS     order
+//RS }
+// END-PORT-PENDING 0356 crates/jet-sema/src/Sema/Bundle/Pipeline/CheckInner.rs:1-2494
+

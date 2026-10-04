@@ -1,0 +1,239 @@
+// Original marker_rule_signatures.rs:57-102,453-483,521-548 and the
+// schedule_every_dev_loop_consumer producer assertions (routine.rs:6853-6911).
+// Runs the real parser, registration, body checker and bundle finalizer.
+use jet_foundation.[ArithmeticMode, ArithmeticOperation, Diagnostic, EverySchedule, Item, JobScope, Program, Span, TExpr, TFunc, TJobFact, TStmt, Type, foundation_embedded_core, jet_target_machine_hosted]
+use jet_parser.[parse_source]
+use core.files.host.retained_descriptor as job_headers_native
+use core.files.runtime.kernel_path_components as job_headers_path
+
+fn job_headers_module(program: ^Program, source: String, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
+    starts := [Int]{0}
+    loop (index, byte) in source.bytes() { if Int.from_u8(byte) == 10 -> &starts.push(index + 1) }
+    segment :: SemaSourceSegment{generated: Span{start: 0, end: source.bytes().len()}, source_file: path, source_start: 0, line_starts: starts, origin: SemaSourceOrigin.Snapshot}
+    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: program, unit_source: source, foreign_handles: []}
+}
+
+fn job_headers_registration(source: String) -> SemaRegistrationGraph Never! {
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    effects_source :: foundation_embedded_core().effect_source()
+    effects :: parse_source(effects_source.bytes())
+    assert_eq(effects.diagnostics.len(), 0)
+    inputs :: [SemaRegistrationModuleInput]{
+        job_headers_module(^parsed.program, source, "main", "jobs.jet", "jobs"),
+        job_headers_module(^effects.program, effects_source, "effects", "Prelude/Effects.jet", "jet:canonical-prelude"),
+    }
+    build :: SemaBuildFacts{package_name: "jobs", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "jobs-header-test", stamp_at: "", artifact_build: false}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    // The canonical unit-plane producer must supply Prelude Time facts;
+    // this witness never substitutes a handwritten/constant Time registry.
+    sema_registration_prepare_graph(inputs, [], "jobs", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+}
+
+fn job_headers_checked(source: String) -> SemaGraphResult Never! {
+    registration :: job_headers_registration(source)
+    // The authored test package has no dependency declarations or roots.
+    policy :: SemaRegistrationPackagePolicy{package_identity: "jobs", authority_allow: None, authority_deny: None, authority_needs: [], runtime_ceiling: None, edition: "2026", dependency_names: [String:Bool]{}, dep_roots: [String:job_headers_path.OsPath]{}, dependency_allowlist: None}
+    stage :: sema_collect_comptime_declarations(registration, [SemaRegistrationPackagePolicy]{policy}, None)
+    root :: job_headers_native.canonicalize(job_headers_path.from_text(".", job_headers_path.PathPlatform.Unix)) ?? panic("cannot read original fixture working directory")
+    sema_finalize_registration_graph(registration, stage, [], [], None, None, root)
+}
+
+fn job_headers_diagnostics(source: String) -> [Diagnostic] Never! {
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() > 0 -> return parsed.diagnostics
+    job_headers_checked(source).diagnostics
+}
+
+fn job_headers_count(diagnostics: [Diagnostic], code: String) -> Int Never! {
+    count := 0
+    loop diagnostic in diagnostics { if diagnostic.code == code -> count += 1 }
+    count
+}
+
+#Test("duration_rule_arguments_use_function_parameter_types") {
+    valid :: job_headers_diagnostics("#[Job, Every(schedule)]\nfn tick(schedule: Duration) {{}}\nfn run() {{}}\n")
+    assert_eq(job_headers_count(valid, "E0930"), 0)
+    assert_eq(job_headers_count(valid, "E3112"), 0)
+    assert_eq(job_headers_count(valid, "L3102"), 0)
+    assert(job_headers_count(valid, "E0926") > 0)
+    wrong :: job_headers_diagnostics("#[Job, Every(schedule)]\nfn tick(schedule: Int) {{}}\nfn run() {{}}\n")
+    assert_eq(job_headers_count(wrong, "E0930"), 1)
+    assert_eq(job_headers_count(wrong, "E0926"), 0)
+}
+
+#Test("contract_messages_use_function_parameter_types") {
+    valid :: job_headers_diagnostics("#[Pre(value > 0, message), Post(result > 0, message)]\nfn positive(value: Int, message: String) -> Int {{\n return value\n}}\nfn run() {{}}\n")
+    assert_eq(job_headers_count(valid, "E0930"), 0)
+    wrong :: job_headers_diagnostics("#[Pre(value > 0, message), Post(result > 0, message)]\nfn positive(value: Int, message: Int) -> Int {{\n return value\n}}\nfn run() {{}}\n")
+    assert_eq(job_headers_count(wrong, "E0930"), 2)
+}
+
+#Test("arithmetic_policy_accepts_only_declared_sites_and_modes") {
+    valid :: job_headers_diagnostics("#Arithmetic(.Checked) fn checked() {{}}\nstruct Accumulator {{ value: U8 }}\nimpl Accumulator {{\n #Arithmetic(.Wrapping) fn step(self) {{}}\n}}\nfn run() {{\n #Arithmetic(.Saturating) {{}}\n}}\n")
+    assert_eq(valid.len(), 0)
+    wrong_site :: job_headers_diagnostics("#Arithmetic(.Wrapping) struct Bad {{ value: U8 }}\nfn run() {{}}\n")
+    assert(job_headers_count(wrong_site, "E0355") > 0)
+    wrong_mode :: job_headers_diagnostics("#Arithmetic(.Other) fn bad() {{}}\nfn run() {{}}\n")
+    assert(job_headers_count(wrong_mode, "E0930") > 0)
+}
+
+#Test("job_scope_and_reserved_names_use_the_job_diagnostic") {
+    valid :: job_headers_diagnostics("#Job(.Ship) fn ship() {{}}\n#Job(.Internal) fn inspect_job() {{}}\n#Job fn output() {{}}\n#Job fn serve() {{}}\n#Job fn lint() {{}}\nfn run() {{}}\n")
+    assert_eq(valid.len(), 0)
+    names :: [String]{"run", "dev", "build", "test", "help", "version"}
+    loop name in names {
+        diagnostics :: job_headers_diagnostics("#Job fn {name}() {{}}\nfn main() {{}}\n")
+        assert(job_headers_count(diagnostics, "E0928") > 0)
+    }
+}
+
+fn job_headers_job(checked: SemaGraphResult, name: String) -> TJobFact Never! {
+    loop module in checked.modules {
+        loop job in module.jobs { if job.name == name -> return job }
+    }
+    panic("missing checked job {name}")
+}
+
+#Test("schedule_every_dev_loop_consumer_checked_producer") {
+    // Complete original example, including ordinary calls to all five jobs.
+    source :: "#[Job(.Dev), Every(5min)]\nfn prune_sessions() {{ print(\"pruning sessions\") }}\n#[Job(.Dev), Every(2h)]\nfn refresh_indexes() {{ print(\"refreshing indexes\") }}\n#[Job(.Dev), Every(1d)]\nfn compact_archive() {{ print(\"compacting archive\") }}\n#[Job(.Dev), Every(\"03:00\")]\nfn nightly_backup() {{ print(\"running nightly backup\") }}\n#Job(.Ship) fn manual_only() {{ print(\"ran manually\") }}\nfn run() {{\n prune_sessions()\n refresh_indexes()\n compact_archive()\n nightly_backup()\n manual_only()\n}}\n"
+    checked :: job_headers_checked(source)
+    assert_eq(checked.diagnostics.len(), 0)
+    assert(checked.complete)
+    names := [String]{}
+    loop module in checked.modules {
+        loop job in module.jobs { if job.schedule != None -> &names.push(job.name) }
+    }
+    &names.sort()
+    assert_eq(names, [String]{"compact_archive", "nightly_backup", "prune_sessions", "refresh_indexes"})
+    assert_eq(job_headers_job(checked, "prune_sessions").schedule, Val(EverySchedule.Duration{nanos: 300000000000}))
+    assert_eq(job_headers_job(checked, "nightly_backup").schedule, Val(EverySchedule.WallClockTime{hour: 3, minute: 0}))
+    assert_eq(job_headers_job(checked, "refresh_indexes").schedule, Val(EverySchedule.Duration{nanos: 7200000000000}))
+    assert_eq(job_headers_job(checked, "compact_archive").schedule, Val(EverySchedule.Duration{nanos: 86400000000000}))
+    assert_eq(job_headers_job(checked, "manual_only").schedule, None)
+    // routine.rs:6913-6957 separately invokes the retired Interpreter/JIT
+    // named-job engine. That engine witness is D-EXEC1; these checked producer
+    // and ordinary-call assertions are not retired or narrowed with it.
+}
+
+#Test("schedule_original_ui_bad_values") {
+    // Exact four original UI inputs, retaining ordinary calls in fn run.
+    arguments :: [String]{"5px", "0ms", "\"3:00\"", "\"25:00\""}
+    loop argument in arguments {
+        source :: "#[Job, Every({argument})] fn prune_sessions() {{\n print(\"pruning\")\n}}\nfn run() {{\n prune_sessions()\n}}\n"
+        diagnostics :: job_headers_diagnostics(source)
+        assert_eq(job_headers_count(diagnostics, "E0926"), 1)
+        assert_eq(job_headers_count(diagnostics, "E0930"), 0)
+    }
+    assert(job_headers_count(job_headers_diagnostics("#Every(5min) fn tick() {{}}\nfn run() {{}}\n"), "E0925") > 0)
+}
+
+#Test("checked_job_retains_doc_argument_defaults_scope_and_ordinary_calls") {
+    checked :: job_headers_checked("#[Job(.Ship), Doc(\"Ship artifacts\"), Every(\"03:00\")]\nfn ship(path: String, verbose: Bool, optional: Int?, count: Int{3}) {{}}\nfn run() {{ ship(\"out\", false, None, 3) }}\n")
+    assert(checked.complete)
+    job :: job_headers_job(checked, "ship")
+    assert(job.function != None)
+    assert_eq(job.scope, JobScope.Ship)
+    assert_eq(job.doc, Val("Ship artifacts"))
+    assert_eq(job.arguments.len(), 4)
+    assert(job.arguments[0].required)
+    assert(!job.arguments[1].required)
+    assert(!job.arguments[2].required)
+    assert(!job.arguments[3].required)
+    assert_eq(job.arguments[3].default, Val("3"))
+    assert_eq(job.schedule, Val(EverySchedule.WallClockTime{hour: 3, minute: 0}))
+}
+
+#Test("job_graph_checks_names_cycles_and_package_authority") {
+    unknown :: job_headers_diagnostics("#Job(after: [\"missing\"]) fn work() {{}}\nfn run() {{}}\n")
+    assert(job_headers_count(unknown, "E1331") > 0)
+    cycle :: job_headers_diagnostics("#Job(after: [\"second\"]) fn first() {{}}\n#Job(after: [\"first\"]) fn second() {{}}\nfn run() {{}}\n")
+    assert(job_headers_count(cycle, "E1331") > 0)
+    unauthorized :: job_headers_diagnostics("#Job(packages: [\"missing\"]) fn work() {{}}\nfn run() {{}}\n")
+    assert_eq(job_headers_count(unauthorized, "E1332"), 1)
+}
+
+fn job_headers_function(checked: SemaGraphResult, name: String) -> TFunc Never! {
+    loop module in checked.modules {
+        loop function in module.functions { if function.name == name -> return function }
+    }
+    panic("missing checked function {name}")
+}
+
+fn job_headers_return(function: TFunc) -> TExpr Never! {
+    loop statement in function.body {
+        if statement == .Return(value, _) -> return value ?? panic("missing return expression")
+    }
+    panic("missing checked return")
+}
+
+#Test("arithmetic_policy_is_consumed_by_typed_operations_not_metadata_only") {
+    checked :: job_headers_checked("#Arithmetic(.Wrapping) fn wrapped(a: U8, b: U8) -> U8 Never! {{ return a + b }}\n#Arithmetic(.Saturating) fn saturated(a: U8, b: U8) -> U8 Never! {{ return a * b }}\n#Arithmetic(.Checked) fn checked(a: U8, b: U8) -> U8 Never! {{ return a ^ b }}\n#Arithmetic(.Wrapping) fn negated(a: I8) -> I8 Never! {{ return -a }}\nfn run() {{}}\n")
+    assert(checked.complete)
+    wrapped :: job_headers_return(job_headers_function(checked, "wrapped"))
+    if wrapped.kind == .OverflowOpt(prefix, operation, _, policy, _, _) {
+        assert_eq(prefix, "wrapping")
+        assert_eq(operation, "add")
+        fact :: policy ?? panic("lost lexical policy")
+        assert_eq(fact.mode, ArithmeticMode.Wrapping)
+        assert_eq(fact.operation, Val(ArithmeticOperation.Add))
+        assert_eq(fact.operation_span, wrapped.span)
+    } else -> panic("wrapping policy was ignored")
+    saturated :: job_headers_return(job_headers_function(checked, "saturated"))
+    if saturated.kind == .OverflowOpt(prefix, operation, _, _, _, _) { assert_eq(prefix, "saturating"); assert_eq(operation, "mul") } else -> panic("saturating policy was ignored")
+    checked_value :: job_headers_return(job_headers_function(checked, "checked"))
+    if checked_value.kind == .OverflowOpt(prefix, operation, _, _, _, _) { assert_eq(prefix, "checked_policy"); assert_eq(operation, "pow") } else -> panic("checked policy was ignored")
+    negated :: job_headers_return(job_headers_function(checked, "negated"))
+    if negated.kind == .OverflowOpt(_, operation, _, policy, _, _) { assert_eq(operation, "sub"); assert_eq((policy ?? panic("lost negation policy")).operation, Val(ArithmeticOperation.Neg)) } else -> panic("negation policy was ignored")
+}
+
+#Test("contract_headers_retain_checked_post_and_call_site_pre_expressions") {
+    checked :: job_headers_checked("#[Pre(value > 0, message), Post(result > 0, message)]\nfn positive(value: Int, message: String) -> Int Never! {{ return value }}\nfn invoke() -> Int Never! {{ return positive(1, \"positive\") }}\nfn run() {{}}\n")
+    assert(checked.complete)
+    positive :: job_headers_function(checked, "positive")
+    assert_eq(positive.body.len(), 1)
+    if positive.body[0] == .ContractScope(pre, _, post, result, _) {
+        assert_eq(pre.len(), 0)
+        assert_eq(post.len(), 1)
+        assert_eq(post[0].condition.ty, Type.Bool)
+        assert_eq(post[0].message.ty, Type.String)
+        assert_eq(result.binding_ty, Type.Int)
+    } else -> panic("checked postcondition was not retained")
+    invoked :: job_headers_return(job_headers_function(checked, "invoke"))
+    if invoked.kind == .InlineBlock(body) {
+        count := 0
+        loop statement in body {
+            if statement == .Contract(contract) {
+                assert_eq(contract.condition.ty, Type.Bool)
+                assert_eq(contract.message.ty, Type.String)
+                count += 1
+            }
+        }
+        assert_eq(count, 1)
+    } else -> panic("call-site precondition was not retained")
+}
+
+#Test("arithmetic_innermost_block_wins_and_does_not_cross_a_call_boundary") {
+    checked :: job_headers_checked("fn plain(a: U8, b: U8) -> U8 Never! {{ return a + b }}\n#Arithmetic(.Wrapping) fn region(a: U8, b: U8) -> U8 Never! {{\n #Arithmetic(.Saturating) {{\n  #Arithmetic(.Checked) {{ inner :: a + b }}\n  middle :: a + b\n }}\n return plain(a, b)\n}}\nfn run() {{}}\n")
+    assert(checked.complete)
+    plain :: job_headers_return(job_headers_function(checked, "plain"))
+    assert(plain.kind == .Binary(_, true, _, _, _))
+    region :: job_headers_function(checked, "region")
+    if region.body[0] == .Inline(middle, _) {
+        if middle[0] == .Inline(inner, _) {
+            if inner[0] == .Let(_, _, value, _, _, _) {
+                if value.kind == .OverflowOpt(prefix, _, _, policy, _, _) {
+                    assert_eq(prefix, "checked_policy")
+                    assert_eq((policy ?? panic("lost checked island")).mode, ArithmeticMode.Checked)
+                } else -> panic("checked island ignored")
+            } else -> panic("checked island lost its binding")
+        } else -> panic("checked island lost its lexical scope")
+        if middle[1] == .Let(_, _, value, _, _, _) {
+            if value.kind == .OverflowOpt(prefix, _, _, policy, _, _) {
+                assert_eq(prefix, "saturating")
+                assert_eq((policy ?? panic("lost enclosing policy")).mode, ArithmeticMode.Saturating)
+            } else -> panic("enclosing policy was not restored")
+        } else -> panic("enclosing scope lost its binding")
+    } else -> panic("arithmetic region was not retained")
+}

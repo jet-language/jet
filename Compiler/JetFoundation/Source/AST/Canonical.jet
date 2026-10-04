@@ -1,0 +1,267 @@
+// Rust: crates/jet-foundation/src/CanonicalAST.rs::strip_spans.
+// The typed canonical codec supplies native structural rendering. This shared
+// low-level helper removes coordinates only outside quoted string/char literals.
+pub fn canonical_ast_strip_spans(debug_text: String) -> [U8] Never! {
+    bytes :: debug_text.bytes()
+    mark :: "Span {{ start: ".bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        byte :: bytes[index]
+        if byte == (U8{34}) || byte == (U8{39}) {
+            quote :: byte
+            &out.push(byte)
+            index += 1
+            loop index < bytes.len() {
+                current :: bytes[index]
+                &out.push(current)
+                index += 1
+                if current == (U8{92}) {
+                    if index < bytes.len() {
+                        &out.push(bytes[index])
+                        index += 1
+                    }
+                    next
+                }
+                if current == quote -> break
+            }
+            next
+        }
+        matches := index + mark.len() <= bytes.len()
+        if matches {
+            loop offset in 0..<mark.len() {
+                if bytes[index + offset] != mark[offset] {
+                    matches = false
+                    break
+                }
+            }
+        }
+        if matches {
+            loop value in "Span".bytes() -> &out.push(value)
+            index += mark.len()
+            loop index < bytes.len() && bytes[index] != (U8{125}) -> index += 1
+            if index < bytes.len() -> index += 1
+        } else {
+            &out.push(byte)
+            index += 1
+        }
+    }
+    out
+}
+
+// Rust Formatter/mod.rs:37–52: no user policies or block layout metadata.
+pub fn canonical_ast_formatter_program(program: Program) -> [U8] Never! {
+    out := [U8]{}
+    defaults :: CanonicalASTParsedDefaults.Parsed
+    canonical_ast_write(&out, "(")
+    canonical_ast_write(&out, "[")
+    i2 := 0
+    loop v1 in program.imports {
+        if i2 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_import_decl<CanonicalASTParsedDefaults>(&out, defaults, v1, false)
+        i2 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "[")
+    i4 := 0
+    loop v3 in program.items {
+        if i4 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_item<CanonicalASTParsedDefaults>(&out, defaults, v3, false)
+        i4 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "[")
+    i6 := 0
+    loop v5 in program.script_body {
+        if i6 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_stmt<CanonicalASTParsedDefaults>(&out, defaults, v5, false)
+        i6 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "[")
+    i8 := 0
+    loop v7 in program.fenced_statements {
+        if i8 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_fenced_statement<CanonicalASTParsedDefaults>(&out, defaults, v7, false)
+        i8 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ", ")
+    if program.web_target_ceiling == {
+        .Val(v9) -> {
+            canonical_ast_write(&out, "Some(")
+            canonical_ast_write_web_bucket<CanonicalASTParsedDefaults>(&out, defaults, v9, false)
+            canonical_ast_write(&out, ")")
+        }
+        .None -> canonical_ast_write(&out, "None")
+    }
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "{program.pub_file:Debug}")
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "{program.no_prelude:Debug}")
+    canonical_ast_write(&out, ", ")
+    if program.default_target == {
+        .Val(v10) -> {
+            canonical_ast_write(&out, "Some(")
+            canonical_ast_write_string(&out, v10)
+            canonical_ast_write(&out, ")")
+        }
+        .None -> canonical_ast_write(&out, "None")
+    }
+    canonical_ast_write(&out, ", ")
+    if program.html_path == {
+        .Val(v11) -> {
+            canonical_ast_write(&out, "Some(")
+            canonical_ast_write_string(&out, v11)
+            canonical_ast_write(&out, ")")
+        }
+        .None -> canonical_ast_write(&out, "None")
+    }
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "(")
+    canonical_ast_write(&out, "[")
+    i13 := 0
+    loop v12 in program.policy_declarations {
+        if i13 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_policy_declaration<CanonicalASTParsedDefaults>(&out, defaults, v12, false)
+        i13 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "[")
+    i15 := 0
+    loop v14 in program.applied_rules {
+        if i15 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_applied_rule_application<CanonicalASTParsedDefaults>(&out, defaults, v14, false)
+        i15 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "[")
+    i17 := 0
+    loop v16 in program.rule_facts {
+        if i17 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_applied_rule_application<CanonicalASTParsedDefaults>(&out, defaults, v16, false)
+        i17 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ")")
+    canonical_ast_write(&out, ")")
+    canonical_ast_strip_spans((String.from_bytes(out) ?? panic("AST structural encoding is UTF-8")))
+}
+// Rust CanonicalAST.rs::canonical_fragment. The read-only body projection is
+// exactly Sema/Bundle.rs::clear_callable_bodies; it never copies an Item graph.
+pub fn canonical_ast_fragment<P: CanonicalASTDefaultProvider>(item: Item, defaults: P, clear_callable_bodies: Bool) -> [U8] Never! {
+    out := [U8]{}
+    canonical_ast_write_item<P>(&out, defaults, item, clear_callable_bodies)
+    canonical_ast_strip_spans((String.from_bytes(out) ?? panic("AST structural encoding is UTF-8")))
+}
+
+// Rust PackageIdentity.rs::interface_item, projected through the one borrowed codec.
+pub fn canonical_ast_interface_fragment<P: CanonicalASTDefaultProvider>(item: Item, defaults: P, pub_file: Bool) -> [U8]? Never! {
+    if !package_identity_exported_item(item, pub_file) -> return None
+    out := [U8]{}
+    canonical_ast_write_item<P>(&out, defaults, item, true, Val(pub_file))
+    Val(canonical_ast_strip_spans(String.from_bytes(out) ?? panic("AST structural encoding is UTF-8")))
+}
+
+// Rust Sema/Bundle.rs:982–1002: concatenate both metadata tuples, without items.
+pub fn canonical_ast_incremental_module_metadata<P: CanonicalASTDefaultProvider>(path: String, display: String, alias: String, program: Program, defaults: P) -> [U8] Never! {
+    out := [U8]{}
+    canonical_ast_write(&out, "(")
+    canonical_ast_write_string(&out, path)
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write_string(&out, display)
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write_string(&out, alias)
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "[")
+    i19 := 0
+    loop v18 in program.imports {
+        if i19 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_import_decl<P>(&out, defaults, v18, false)
+        i19 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ", ")
+    if program.web_target_ceiling == {
+        .Val(v20) -> {
+            canonical_ast_write(&out, "Some(")
+            canonical_ast_write_web_bucket<P>(&out, defaults, v20, false)
+            canonical_ast_write(&out, ")")
+        }
+        .None -> canonical_ast_write(&out, "None")
+    }
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "{program.pub_file:Debug}")
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "{program.no_prelude:Debug}")
+    canonical_ast_write(&out, ", ")
+    if program.default_target == {
+        .Val(v21) -> {
+            canonical_ast_write(&out, "Some(")
+            canonical_ast_write_string(&out, v21)
+            canonical_ast_write(&out, ")")
+        }
+        .None -> canonical_ast_write(&out, "None")
+    }
+    canonical_ast_write(&out, ", ")
+    if program.html_path == {
+        .Val(v22) -> {
+            canonical_ast_write(&out, "Some(")
+            canonical_ast_write_string(&out, v22)
+            canonical_ast_write(&out, ")")
+        }
+        .None -> canonical_ast_write(&out, "None")
+    }
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "[")
+    i24 := 0
+    loop v23 in program.policy_declarations {
+        if i24 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_policy_declaration<P>(&out, defaults, v23, false)
+        i24 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ")")
+    canonical_ast_write(&out, "(")
+    canonical_ast_write(&out, "[")
+    i26 := 0
+    loop v25 in program.user_policy_declarations {
+        if i26 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_user_policy_decl<P>(&out, defaults, v25, false)
+        i26 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "[")
+    i28 := 0
+    loop v27 in program.rule_facts {
+        if i28 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_applied_rule_application<P>(&out, defaults, v27, false)
+        i28 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write(&out, "[")
+    i30 := 0
+    loop v29 in program.script_body {
+        if i30 > 0 -> canonical_ast_write(&out, ", ")
+        canonical_ast_write_stmt<P>(&out, defaults, v29, false)
+        i30 += 1
+    }
+    canonical_ast_write(&out, "]")
+    canonical_ast_write(&out, ")")
+    canonical_ast_strip_spans((String.from_bytes(out) ?? panic("AST structural encoding is UTF-8")))
+}
+
+// Stable structural Type text for diagnostics; source positions are not type
+// meaning. Reuse the canonical codec rather than a second Type pretty printer.
+pub fn canonical_ast_type_text(ty: Type) -> String Never! {
+    out := [U8]{}
+    canonical_ast_write_type<CanonicalASTParsedDefaults>(&out, CanonicalASTParsedDefaults.Parsed, ty, false)
+    String.from_bytes(out) ?? panic("canonical Type encoding is UTF-8")
+}

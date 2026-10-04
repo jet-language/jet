@@ -1,0 +1,1161 @@
+// PORT-PENDING 0370 crates-jet-sema-src-sema-checkercore-statements-slice-1: crates/jet-sema/src/Sema/CheckerCore/statements.rs:1-1157
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
+//RS use crate::Sema::CheckerCoreLib::{
+//RS     core_struct_field_type, is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps,
+//RS     SwizzleParse,
+//RS };
+//RS use crate::Sema::CheckerTaskGroup::{TaskGroupCtx, TaskGroupOrigin};
+//RS use crate::Sema::Diagnostics::{
+//RS     aliasing_while_mut, collection_changed_in_loop, collection_root_name,
+//RS     computed_field_not_settable, expr_root_ident, is_task_type, loop_control_outside,
+//RS     type_fix_hint, type_requires_owned_iteration, undefined_loop_label,
+//RS };
+//RS use crate::Sema::Effects::{grant_handle_escape, unknown_effect};
+//RS use crate::Sema::Registration::already_defined;
+//RS use crate::Sema::{type_is_copy, Checker, LocalInfo, LoopValueFrame, LoopValueKind, ViewAccess};
+//RS use crate::Syntax;
+//RS use crate::AST::{AccessConvention, Expr, ForKind, IndexKind, LValue, Stmt, StrPart, Type};
+//RS 
+//RS /// D-INTDIV1=A: `/` answers the true quotient, so it hands back a Float even
+//RS /// for two whole numbers. When that Float is being stored into a whole-number
+//RS /// binding, the useful advice is the operator that keeps a whole number — not
+//RS /// the generic "drop the decimal part". `n /= 2` reaches here as `n = n / 2`,
+//RS /// because compound assignment is desugared before checking, so both spellings
+//RS /// get the same fix.
+//RS fn division_fix_hint(want: &Type, got: &Type, value: &Expr) -> String {
+//RS     let divides = matches!(value, Expr::Binary(crate::AST::BinOp::Div, _, _, _));
+//RS     let exact_quotient = matches!(got, Type::Float | Type::Float32)
+//RS         || matches!(got, Type::Named(name) if name == Syntax::TYPE_FRACTION);
+//RS     if divides && *want == Type::Int && exact_quotient {
+//RS         // `n /= 2` and `n = n / 2` both reach here, and the two spellings want
+//RS         // different repairs, so name each one.
+//RS         return "use `/%` to divide and round down (`/%=` in place), \
+//RS                 or make the binding a Float"
+//RS             .to_string();
+//RS     }
+//RS     type_fix_hint(want, got)
+//RS }
+//RS 
+//RS /// D-DISCARD1=A (owner ruling): when a return type is written, a mismatched
+//RS /// value is most likely the wrong type or shape of the value itself. The fix
+//RS /// names the conversion or wrap for the value and never suggests changing the
+//RS /// declared return type.
+//RS fn return_value_fix(want: &Type, got: &Type) -> String {
+//RS     let want = want.without_user_tags();
+//RS     let got = got.without_user_tags();
+//RS     match (want, got) {
+//RS         (Type::Int, Type::Named(name)) if name == Syntax::TYPE_FRACTION => {
+//RS             "`/` on whole numbers makes an exact Fraction; divide with `/%` to get a whole number rounded down"
+//RS                 .to_string()
+//RS         }
+//RS         (Type::List(item), got) if **item == *got => {
+//RS             "wrap the value in a list: `[value]`".to_string()
+//RS         }
+//RS         (want, Type::List(item)) if **item == *want => {
+//RS             "this is a whole list; hand back one element, or combine the elements into one value"
+//RS                 .to_string()
+//RS         }
+//RS         (want, Type::Option(item)) if **item == *want => {
+//RS             "the value may be missing; supply a fallback with `?? default`, or leave early when it is `None`"
+//RS                 .to_string()
+//RS         }
+//RS         (want, _) if want.name() == "String" => {
+//RS             "put the value in text with interpolation: \"{value}\"".to_string()
+//RS         }
+//RS         _ => {
+//RS             let hint = type_fix_hint(want, got);
+//RS             if hint.starts_with("use ") && hint.ends_with(" here") {
+//RS                 format!(
+//RS                     "hand back a {} value: convert this value to {}, or return the value you meant",
+//RS                     want.name(),
+//RS                     want.name()
+//RS                 )
+//RS             } else {
+//RS                 hint
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn encoding_reader_item_type(name: &str) -> Option<Type> {
+//RS     match name {
+//RS         "JSONReader" | "CBORReader" => Some(Type::Named("DataEvent".to_string())),
+//RS         "JSONLReader" | "XMLReader" => Some(Type::Named("DataTree".to_string())),
+//RS         "CSVReader" => Some(Type::Named("CSVRow".to_string())),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn stream_element_type(ty: Option<&Type>) -> Option<Type> {
+//RS     match ty {
+//RS         Some(Type::Apply { name, args }) if name == Syntax::TYPE_STREAM && args.len() == 1 => {
+//RS             Some(args[0].clone())
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS use super::helpers::layout_constraint_fingerprint;
+//RS use std::collections::HashSet;
+//RS 
+//RS fn exits_current_block(stmt: &Stmt) -> bool {
+//RS     matches!(
+//RS         stmt,
+//RS         Stmt::Return(..)
+//RS             | Stmt::Break(..)
+//RS             | Stmt::BreakValue(..)
+//RS             | Stmt::BreakLabel(..)
+//RS             | Stmt::BreakLabelValue(..)
+//RS             | Stmt::Continue(..)
+//RS             | Stmt::ContinueLabel(..)
+//RS     ) || matches!(
+//RS         stmt,
+//RS         Stmt::Expr(expr)
+//RS             if matches!(expr.without_parens(), Expr::Todo { .. })
+//RS                 || matches!(
+//RS                     expr.without_parens(),
+//RS                     Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
+//RS                 )
+//RS     )
+//RS }
+//RS 
+//RS /// A canonical `while handles.len() > 0` drain proves a linear collection is
+//RS /// empty when control reaches the next statement. Keep this proof structural:
+//RS /// the first body statement must pop that same collection, and neither its
+//RS /// fallback nor any later straight-line statement may touch the collection.
+//RS fn drained_collection<'a>(
+//RS     cond: &'a Expr,
+//RS     body: &'a [Stmt],
+//RS ) -> Option<(&'a str, crate::Diagnostics::Span)> {
+//RS     let Expr::Binary(crate::AST::BinOp::Gt, lhs, rhs, _) = cond.without_parens() else {
+//RS         return None;
+//RS     };
+//RS     let Expr::MethodCall {
+//RS         receiver,
+//RS         method,
+//RS         args,
+//RS         ..
+//RS     } = lhs.without_parens()
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     let Expr::Ident(name, name_span) = receiver.without_parens() else {
+//RS         return None;
+//RS     };
+//RS     if method != "len"
+//RS         || !args.is_empty()
+//RS         || !matches!(rhs.without_parens(), Expr::Int(0, ..))
+//RS         || !body
+//RS             .iter()
+//RS             .all(|stmt| matches!(stmt, Stmt::Val(_) | Stmt::Expr(_)))
+//RS         || body
+//RS             .iter()
+//RS             .skip(1)
+//RS             .any(|stmt| crate::Sema::Captures::stmt_refs_name(stmt, name))
+//RS     {
+//RS         return None;
+//RS     }
+//RS     let Stmt::Val(binding) = body.first()? else {
+//RS         return None;
+//RS     };
+//RS     let value = match binding.init.without_parens() {
+//RS         Expr::OrFallback {
+//RS             value, fallback, ..
+//RS         } => {
+//RS             if crate::Sema::Captures::fallback_refs_name(fallback, name) {
+//RS                 return None;
+//RS             }
+//RS             value.without_parens()
+//RS         }
+//RS         value => value,
+//RS     };
+//RS     let Expr::MethodCall {
+//RS         receiver: popped,
+//RS         method,
+//RS         args,
+//RS         ..
+//RS     } = value
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     if method == "pop"
+//RS         && args.is_empty()
+//RS         && matches!(popped.without_parens(), Expr::Ident(popped, _) if popped == name)
+//RS     {
+//RS         Some((name, *name_span))
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     fn push_loop_value_frame(&mut self, label: Option<&(String, crate::Diagnostics::Span)>) {
+//RS         let (kind, pending_label) = self
+//RS             .pending_loop_value
+//RS             .take()
+//RS             .unwrap_or((LoopValueKind::Effect, None));
+//RS         self.loop_value_frames.push(LoopValueFrame {
+//RS             label: pending_label.or_else(|| label.map(|(name, _)| name.clone())),
+//RS             kind,
+//RS             ty: None,
+//RS         });
+//RS     }
+//RS 
+//RS     /// A loop header operand (source, range bound, stride) has no slot type,
+//RS     /// so an enclosing value expectation must not reach it: a Result tail
+//RS     /// expectation would keep a `T Never!` call's carrier instead of
+//RS     /// unwrapping it to the value the loop walks.
+//RS     fn infer_loop_header(&mut self, e: &mut Expr) -> Option<Type> {
+//RS         let saved_expected = self.expected_type.take();
+//RS         let ty = self.infer(e);
+//RS         self.expected_type = saved_expected;
+//RS         ty
+//RS     }
+//RS 
+//RS     fn pop_loop_value_frame(&mut self) {
+//RS         if let Some(frame) = self.loop_value_frames.pop() {
+//RS             if frame.kind == LoopValueKind::Result {
+//RS                 self.last_loop_result_type = frame.ty.map(|ty| ty.erased_carrier());
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn push_loop_break_frame(&mut self) {
+//RS         self.loop_break_flows.push(Vec::new());
+//RS     }
+//RS 
+//RS     fn record_break_flow(&mut self, frame_index: usize) {
+//RS         let flow = self.flow.clone();
+//RS         if let Some(paths) = self.loop_break_flows.get_mut(frame_index) {
+//RS             paths.push(flow);
+//RS         }
+//RS     }
+//RS 
+//RS     fn join_loop_flow(
+//RS         &mut self,
+//RS         before_loop: &crate::Sema::FlowFacts::FlowFacts,
+//RS         after_body: &crate::Sema::FlowFacts::FlowFacts,
+//RS         may_skip: bool,
+//RS     ) {
+//RS         let mut break_paths = self
+//RS             .loop_break_flows
+//RS             .pop()
+//RS             .expect("loop break frame matches loop value frame");
+//RS         let depth = self.flow.depth;
+//RS         for path in &mut break_paths {
+//RS             while path.depth > depth {
+//RS                 path.leave_scope();
+//RS             }
+//RS             // A recorded break is a loop-local exit. The body's terminal
+//RS             // reachability must not erase the path that leaves this loop.
+//RS             path.reachable = true;
+//RS         }
+//RS         if may_skip {
+//RS             self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop_with_breaks(
+//RS                 before_loop,
+//RS                 after_body,
+//RS                 &break_paths,
+//RS             );
+//RS         } else {
+//RS             self.flow = if break_paths.is_empty() {
+//RS                 let mut exited = before_loop.clone();
+//RS                 exited.reachable = false;
+//RS                 exited
+//RS             } else {
+//RS                 crate::Sema::FlowFacts::FlowFacts::merge_paths(before_loop, &break_paths)
+//RS             };
+//RS         }
+//RS     }
+//RS     fn check_break_value(
+//RS         &mut self,
+//RS         target: Option<(&str, crate::Diagnostics::Span)>,
+//RS         value: &mut Expr,
+//RS         span: crate::Diagnostics::Span,
+//RS     ) {
+//RS         let frame_index = match target {
+//RS             Some((name, name_span)) => {
+//RS                 let found = self
+//RS                     .loop_value_frames
+//RS                     .iter()
+//RS                     .rposition(|frame| frame.label.as_deref() == Some(name));
+//RS                 if found.is_none() {
+//RS                     self.diags
+//RS                         .push(undefined_loop_label(name, &self.loop_labels, name_span));
+//RS                     self.infer(value);
+//RS                     return;
+//RS                 }
+//RS                 found
+//RS             }
+//RS             None => self.loop_value_frames.len().checked_sub(1),
+//RS         };
+//RS         let Some(frame_index) = frame_index else {
+//RS             self.diags
+//RS                 .push(loop_control_outside(Syntax::KW_BREAK, span));
+//RS             self.infer(value);
+//RS             return;
+//RS         };
+//RS         let kind = self.loop_value_frames[frame_index].kind;
+//RS         let got = self.infer(value).map(|ty| self.resolve_type(ty));
+//RS         self.note_move_if_direct_ident(value, "the loop result");
+//RS         match kind {
+//RS                 LoopValueKind::Collecting => self.diags.push(Diagnostic::error(
+//RS                     "E0075",
+//RS                     "this collecting loop cannot use a break payload".to_string(),
+//RS                     "its result is already the accumulated List, so a second payload would give one exit two result channels".to_string(),
+//RS                     "write `break` to return the accumulated list".to_string(),
+//RS                     Some(span),
+//RS                 )),
+//RS                 LoopValueKind::Effect => self.diags.push(Diagnostic::error(
+//RS                     "E0079",
+//RS                     "this effect-only loop uses a result exit".to_string(),
+//RS                     "a break payload makes an effect-only loop a value expression".to_string(),
+//RS                     "bind the loop with `::`, or remove the payload".to_string(),
+//RS                     Some(span),
+//RS                 )),
+//RS                 LoopValueKind::Result => {
+//RS                     if let Some(got) = got {
+//RS                         let frame = &mut self.loop_value_frames[frame_index];
+//RS                         if let Some(expected) = &frame.ty {
+//RS                             if expected != &got {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0076",
+//RS                                     format!(
+//RS                                         "this loop breaks with {}, but another exit uses {}",
+//RS                                         got.show(),
+//RS                                         expected.show()
+//RS                                     ),
+//RS                                     "an ordinary loop has one final result type".to_string(),
+//RS                                     "make every break payload use the same type".to_string(),
+//RS                                     Some(value.span()),
+//RS                                 ));
+//RS                             }
+//RS                         } else {
+//RS                             frame.ty = Some(got);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         self.record_break_flow(frame_index);
+//RS     }
+//RS 
+//RS     pub(in crate::Sema) fn check_break_without_value(
+//RS         &mut self,
+//RS         target: Option<(&str, crate::Diagnostics::Span)>,
+//RS         span: crate::Diagnostics::Span,
+//RS     ) {
+//RS         let frame_index = match target {
+//RS             Some((name, name_span)) => {
+//RS                 let found = self
+//RS                     .loop_value_frames
+//RS                     .iter()
+//RS                     .rposition(|frame| frame.label.as_deref() == Some(name));
+//RS                 if found.is_none() {
+//RS                     self.diags
+//RS                         .push(undefined_loop_label(name, &self.loop_labels, name_span));
+//RS                     return;
+//RS                 }
+//RS                 found
+//RS             }
+//RS             None => self.loop_value_frames.len().checked_sub(1),
+//RS         };
+//RS         let Some(frame_index) = frame_index else {
+//RS             self.diags
+//RS                 .push(loop_control_outside(Syntax::KW_BREAK, span));
+//RS             return;
+//RS         };
+//RS         let frame = &self.loop_value_frames[frame_index];
+//RS         if frame.kind == LoopValueKind::Result {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0076",
+//RS                 "this result loop exits without a value".to_string(),
+//RS                 "every exit from a loop used as a value must provide the same result type"
+//RS                     .to_string(),
+//RS                 "add a break payload, or target an inner effect-only loop".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS         }
+//RS         self.record_break_flow(frame_index);
+//RS     }
+//RS 
+//RS     fn compound_owner_field_type(&self, owner: &Type, field: &str) -> Option<Type> {
+//RS         // D-SHAREDGUARD2=A: `guard.value` is a compiler-known place, not a
+//RS         // stored struct field; it has the guarded payload type, exactly as
+//RS         // `field_type` reads it.
+//RS         if let Type::Apply { name, args } = owner {
+//RS             if field == "value" && name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+//RS                 return Some(args[0].clone());
+//RS             }
+//RS         }
+//RS         let (owner_name, args) = match owner {
+//RS             Type::Named(name) => (name.as_str(), &[][..]),
+//RS             Type::Apply { name, args } => (name.as_str(), args.as_slice()),
+//RS             Type::Tagged { inner, .. } => return self.compound_owner_field_type(inner, field),
+//RS             _ => return None,
+//RS         };
+//RS         let (import_ns, leaf) = self.struct_type_name_parts(owner_name);
+//RS         let Some(owner_mod) = self.struct_owner_module(leaf, import_ns) else {
+//RS             return import_ns
+//RS                 .is_none()
+//RS                 .then(|| core_struct_field_type(leaf, field, args))
+//RS                 .flatten();
+//RS         };
+//RS         let fields = self.struct_fields_of(owner_mod, leaf)?;
+//RS         let subst = self.struct_subst_for_owner(owner_mod, leaf, args);
+//RS         fields
+//RS             .iter()
+//RS             .find(|(name, _, _)| name == field)
+//RS             .map(|(_, _, ty)| self.instantiate_type_for_owner(owner_mod, ty, &subst))
+//RS     }
+//RS 
+//RS     pub(in crate::Sema) fn compound_expr_type(&self, expr: &Expr) -> Option<Type> {
+//RS         match expr {
+//RS             Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
+//RS             Expr::Field(base, field, _) => self.compound_field_type(base, field),
+//RS             Expr::Index { base, .. } => match self.compound_expr_type(base)? {
+//RS                 Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
+//RS                 Type::Map { value, .. } => Some(*value),
+//RS                 _ => None,
+//RS             },
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Place type for assignment expected-type flow (`holder.value = .{…}`).
+//RS     fn lvalue_type(&self, target: &LValue) -> Option<Type> {
+//RS         match target {
+//RS             LValue::Local { name, .. } => {
+//RS                 self.lookup(name).map(|info| info.ty.clone()).or_else(|| {
+//RS                     self.is_global_mutable_binding(name)
+//RS                         .then(|| self.consts.get(name).cloned())
+//RS                         .flatten()
+//RS                 })
+//RS             }
+//RS             LValue::Field { base, field, .. } => self.compound_field_type(base, field),
+//RS             LValue::Index { base, .. } => match self.compound_expr_type(base)? {
+//RS                 Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
+//RS                 Type::Map { value, .. } => Some(*value),
+//RS                 _ => None,
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     fn compound_field_type(&self, base: &Expr, field: &str) -> Option<Type> {
+//RS         let owner = self.compound_expr_type(base)?;
+//RS         self.compound_owner_field_type(&owner, field)
+//RS     }
+//RS 
+//RS     fn compound_type_implements(&self, ty: &Type, trait_name: &str) -> bool {
+//RS         self.trait_reg.type_implements_trait(ty, trait_name)
+//RS             || matches!(ty, Type::Named(name)
+//RS             if self.type_param_scope.iter().any(|param| {
+//RS                 param.name == *name && param.bounds.iter().any(|bound| bound == trait_name)
+//RS             }))
+//RS     }
+//RS 
+//RS     /// E0362: a compound update of a nested field whose type dispatches the
+//RS     /// operator through a hook trait. Builtin numerics update natively, so a
+//RS     /// nested numeric field (`guard.value.count += 1`) is never a hook place.
+//RS     fn compound_nested_hook(&self, base: &Expr, field: &str, op: crate::AST::BinOp) -> bool {
+//RS         let trait_name = match op {
+//RS             crate::AST::BinOp::Add => Syntax::TRAIT_ADD,
+//RS             crate::AST::BinOp::Sub => Syntax::TRAIT_SUB,
+//RS             crate::AST::BinOp::Mul => Syntax::TRAIT_MUL,
+//RS             crate::AST::BinOp::Div => Syntax::TRAIT_DIV,
+//RS             _ => return false,
+//RS         };
+//RS         self.compound_field_type(base, field).is_some_and(|ty| {
+//RS             !ty.is_numeric()
+//RS                 && self.compound_type_implements(&ty, trait_name)
+//RS                 && match base {
+//RS                     Expr::Ident(..) => false,
+//RS                     Expr::Index { .. } => matches!(ty, Type::Named(_) | Type::Apply { .. }),
+//RS                     _ => true,
+//RS                 }
+//RS         })
+//RS     }
+//RS 
+//RS     /// True when compound assign on `target` is rejected (E0164 / E0362), so
+//RS     /// L0503 must not recommend it.
+//RS     fn compound_assign_rejected(&self, target: &LValue, op: crate::AST::BinOp) -> bool {
+//RS         match target {
+//RS             LValue::Index { .. } => true,
+//RS             LValue::Local { .. } => false,
+//RS             LValue::Field { base, field, .. } => self.compound_nested_hook(base, field, op),
+//RS         }
+//RS     }
+//RS 
+//RS     /// E0433 candidate: this statement drops the non-Unit result of a direct
+//RS     /// or method call. The solved effect phase reports it when the callee's
+//RS     /// row is empty and the call cannot fail. A call under an automatic or
+//RS     /// written `?` whose declared contract is not `T Never!` still carries a
+//RS     /// failure; the fact records that, and the bundle failure solve (#3708)
+//RS     /// decides it. Sites where the call can still matter stay quiet: a
+//RS     /// write-marked or taken place, a callback argument (its effects belong
+//RS     /// to the call site, not the callee's row), or an error already reported
+//RS     /// on the statement.
+//RS     fn record_discarded_result(
+//RS         &mut self,
+//RS         expr: &Expr,
+//RS         ty: &Type,
+//RS         calls_start: usize,
+//RS         diagnostics_start: usize,
+//RS     ) {
+//RS         if matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE) || ty.is_never()
+//RS         {
+//RS             return;
+//RS         }
+//RS         if self.diags[diagnostics_start..]
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.severity == Severity::Error)
+//RS         {
+//RS             return;
+//RS         }
+//RS         let (expr, under_try) = match expr.without_parens() {
+//RS             Expr::Try(inner, ..) => (inner.without_parens(), true),
+//RS             other => (other, false),
+//RS         };
+//RS         let (callee_spans, callee_name, args, receiver, declared_return) = match expr {
+//RS             Expr::Call(call) => (
+//RS                 [call.name_span, call.name_span],
+//RS                 call.name.clone(),
+//RS                 &call.args,
+//RS                 None,
+//RS                 call.resolved_ret.as_ref(),
+//RS             ),
+//RS             Expr::MethodCall {
+//RS                 receiver,
+//RS                 method,
+//RS                 method_span,
+//RS                 args,
+//RS                 resolved_ret,
+//RS                 ..
+//RS             } => (
+//RS                 [*method_span, expr.span()],
+//RS                 method.clone(),
+//RS                 args,
+//RS                 Some(receiver.as_ref()),
+//RS                 resolved_ret.as_ref(),
+//RS             ),
+//RS             _ => return,
+//RS         };
+//RS         let failure_open = under_try
+//RS             && !matches!(declared_return, Some(Type::Result { err, .. }) if err.is_never());
+//RS         let marks_place = |value: &Expr| {
+//RS             matches!(
+//RS                 value,
+//RS                 Expr::Place(_, crate::AST::PlaceAccess::Write | crate::AST::PlaceAccess::Take, _)
+//RS             )
+//RS         };
+//RS         if receiver.is_some_and(marks_place) {
+//RS             return;
+//RS         }
+//RS         let effectful_argument = args.iter().any(|arg| {
+//RS             arg.convention == AccessConvention::Write
+//RS                 || marks_place(&arg.expr)
+//RS                 || match &arg.expr {
+//RS                     Expr::Lambda(_) => true,
+//RS                     // A bare name that is not a local is a named function (or
+//RS                     // a module value); a local may hold a function value.
+//RS                     Expr::Ident(name, _) => self
+//RS                         .lookup(name)
+//RS                         .map_or(true, |info| matches!(info.ty, Type::Fn { .. })),
+//RS                     _ => false,
+//RS                 }
+//RS         });
+//RS         if effectful_argument {
+//RS             return;
+//RS         }
+//RS         let Some(callee) = self.fx_memory_calls[calls_start..]
+//RS             .iter()
+//RS             .find(|call| callee_spans.contains(&call.span))
+//RS             .map(|call| call.callee.clone())
+//RS         else {
+//RS             return;
+//RS         };
+//RS         let span = expr.span();
+//RS         let call_text = self
+//RS             .source
+//RS             .get(span.start..span.end)
+//RS             .map(str::trim)
+//RS             .filter(|text| !text.is_empty() && !text.contains('\n'))
+//RS             .map_or_else(|| format!("{callee_name}(…)"), str::to_string);
+//RS         self.fx_discarded_results
+//RS             .push(crate::Sema::Effects::DiscardedResultFact {
+//RS                 callee,
+//RS                 callee_name,
+//RS                 call_text,
+//RS                 span,
+//RS                 failure_open,
+//RS             });
+//RS     }
+//RS 
+//RS     /// Check two alternative branches with independent move states, then
+//RS     /// keep the union (a value moved in either branch counts as gone).
+//RS     pub(crate) fn check_stmt(&mut self, stmt: &mut Stmt) {
+//RS         if !self.enter_source_nesting(stmt.span()) {
+//RS             return;
+//RS         }
+//RS         // #3708: statement forms whose failure routes are owned by their own
+//RS         // runtime protocol (task groups, transactions, live/reactive scopes,
+//RS         // generators, deferred closes) keep the enclosing default route.
+//RS         if !self.in_lambda_body
+//RS             && matches!(
+//RS                 stmt,
+//RS                 Stmt::TaskGroup { .. }
+//RS                     | Stmt::Transact { .. }
+//RS                     | Stmt::Live { .. }
+//RS                     | Stmt::Reactive { .. }
+//RS                     | Stmt::Shield { .. }
+//RS                     | Stmt::Switched { .. }
+//RS                     | Stmt::ScopeMember { .. }
+//RS                     | Stmt::Yield(..)
+//RS                     | Stmt::DeferClose { .. }
+//RS             )
+//RS         {
+//RS             self.failure_direct_source = true;
+//RS         }
+//RS         let before = self.flow.clone();
+//RS         let before_direct = self.fx_direct.clone();
+//RS         let before_edges = self.fx_edges.clone();
+//RS         let before_maximal = self.fx_maximal;
+//RS         let diagnostics_start = self.diags.len();
+//RS         let allows_start = self.statement_lint_allows.len();
+//RS         let effect_free = if before.reachable {
+//RS             self.check_stmt_inner(stmt);
+//RS             self.fx_direct == before_direct
+//RS                 && self.fx_edges == before_edges
+//RS                 && self.fx_maximal == before_maximal
+//RS         } else {
+//RS             // An unreachable statement is still checked for diagnostics, but
+//RS             // its semantic facts must not leak into a later join. Reuse the
+//RS             // erased-scope boundary so every fact plane follows one gate.
+//RS             self.with_erased_scope(|checker| {
+//RS                 checker.check_stmt_inner(stmt);
+//RS                 checker.fx_direct == before_direct
+//RS                     && checker.fx_edges == before_edges
+//RS                     && checker.fx_maximal == before_maximal
+//RS             })
+//RS         };
+//RS         self.emit_stdlib_lints_for_stmt(stmt);
+//RS         self.emit_loop_liveness_lints_for_stmt(stmt, before.reachable, effect_free);
+//RS         let allows = self.statement_lint_allows.split_off(allows_start);
+//RS         if !allows.is_empty() {
+//RS             let retained = self.diags.split_off(diagnostics_start);
+//RS             self.diags.extend(retained.into_iter().filter(|diagnostic| {
+//RS                 diagnostic.severity != Severity::Lint
+//RS                     || allows.iter().all(|name| {
+//RS                         jet_foundation::LintPolicy::name_for_code(&diagnostic.code)
+//RS                             != Some(name.as_str())
+//RS                     })
+//RS             }));
+//RS         }
+//RS         if !before.reachable {
+//RS             // Unreachable source is still checked for diagnostics, but it
+//RS             // is not a path that may contribute facts to a later join.
+//RS             self.flow = before;
+//RS         } else if exits_current_block(stmt) {
+//RS             self.flow.reachable = false;
+//RS         }
+//RS         self.leave_source_nesting();
+//RS     }
+//RS 
+//RS     pub(crate) fn check_return_expr(
+//RS         &mut self,
+//RS         expr: &mut Option<Expr>,
+//RS         span: &crate::Diagnostics::Span,
+//RS         return_type: Option<Type>,
+//RS     ) {
+//RS         // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
+//RS         // (`JSON`/`TOML`/…); canonicalize it so it unifies with the returned value.
+//RS         let resolved_ret = return_type
+//RS             .clone()
+//RS             .or_else(|| self.ret.clone())
+//RS             .map(|t| self.resolve_type(t));
+//RS         // D-STREAMYIELD1: a generator (`Stream<T> ->`) yields values; `return`
+//RS         // only ever ends the stream early — bare `return;` is fine, `return
+//RS         // value;` is E0806 (a generator body yields, it doesn't return a value).
+//RS         if stream_element_type(return_type.as_ref().or(self.declared_return_type.as_ref()))
+//RS             .is_some()
+//RS         {
+//RS             if let Some(e) = expr {
+//RS                 self.infer(e);
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0806",
+//RS                     format!(
+//RS                         "`{}` yields values, so `return` can't carry one",
+//RS                         self.fn_name
+//RS                     ),
+//RS                     "a generator body produces values with `yield`; `return` only ends the stream early".to_string(),
+//RS                     "write `yield ...;` to hand back a value, or a bare `return;` to end the stream".to_string(),
+//RS                     Some(e.span()),
+//RS                 ));
+//RS             }
+//RS             return;
+//RS         }
+//RS         // D-NEVER2=B: a declared `Never` success slot has no successful
+//RS         // return. The one legal exit in a fallible `Never !E` function is an
+//RS         // explicit `Err(...)`; bare and value returns get their own verdict
+//RS         // instead of the generic return-type mismatch.
+//RS         let declared_never_type = if self.in_lambda_body {
+//RS             // A lambda temporarily replaces `ret` with its own interface.
+//RS             // Prefer an explicit tail expectation, then that callable
+//RS             // contract, without letting the enclosing function's declaration
+//RS             // leak into the nested body.
+//RS             return_type.as_ref().or(self.ret.as_ref())
+//RS         } else {
+//RS             self.declared_return_type
+//RS                 .as_ref()
+//RS                 .or(return_type.as_ref())
+//RS         };
+//RS         if declared_never_type.is_some_and(Type::has_never_success) {
+//RS             let allows_failure = declared_never_type.is_some_and(|ty| {
+//RS                 matches!(ty, Type::Result { ok, .. } if ok.is_never())
+//RS             });
+//RS             match expr {
+//RS                 None => {
+//RS                     self.diags.push(Diagnostic::from_row(
+//RS                         "E2424",
+//RS                         &[("function", self.fn_name.as_str())],
+//RS                         Some(*span),
+//RS                     ));
+//RS                     return;
+//RS                 }
+//RS                 Some(e) => {
+//RS                     let is_err = matches!(e.without_parens(), Expr::Err(..))
+//RS                         || matches!(
+//RS                             e.without_parens(),
+//RS                             Expr::Call(call)
+//RS                                 if !self.funcs.contains_key(&call.name)
+//RS                                     && call.name == Syntax::LIT_ERR
+//RS                         );
+//RS                     if !allows_failure || !is_err {
+//RS                         self.diags.push(Diagnostic::from_row(
+//RS                             "E2425",
+//RS                             &[("function", self.fn_name.as_str())],
+//RS                             Some(e.span()),
+//RS                         ));
+//RS                         return;
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         match (&mut *expr, resolved_ret) {
+//RS             (Some(e), Some(rt)) => {
+//RS                 // A direct `return value?` in a fallible function returns
+//RS                 // the propagated success value. Desugar it through the
+//RS                 // existing `Ok` constructor so inference checks the success
+//RS                 // payload while `infer_try` still records the error conversion.
+//RS                 if matches!(&rt, Type::Result { .. }) && matches!(e.without_parens(), Expr::Try(..))
+//RS                 {
+//RS                     let span = e.span();
+//RS                     let inner = std::mem::replace(e, Expr::Absent(span));
+//RS                     *e = Expr::Ok(Box::new(inner), span);
+//RS                 }
+//RS                 let return_value_type = match &rt {
+//RS                     Type::Result { ok, .. } => ok.as_ref(),
+//RS                     _ => &rt,
+//RS                 };
+//RS                 let string_view_return = matches!(
+//RS                     return_value_type,
+//RS                     Type::Apply { name, args }
+//RS                         if name == "View"
+//RS                             && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
+//RS                 );
+//RS                 // D-SHAPE-PLACE1=A: a bare maximal place is a read window at
+//RS                 // a named `View<T>` return boundary. Keep the source
+//RS                 // acquisition explicit before inference so the returned type
+//RS                 // remains a view instead of being materialized as a list.
+//RS                 let bare_place_return = {
+//RS                     let transparent = e.without_parens();
+//RS                     matches!(return_value_type, Type::Apply { name, .. } if name == "View")
+//RS                         && !string_view_return
+//RS                         && !matches!(transparent, Expr::Copy(..) | Expr::Place(..))
+//RS                         && (self.place_from_expr(transparent).is_some()
+//RS                             || matches!(transparent, Expr::Slice { .. }))
+//RS                 };
+//RS                 if bare_place_return {
+//RS                     let span = e.span();
+//RS                     let inner = std::mem::replace(e, Expr::Absent(span));
+//RS                     *e = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
+//RS                 }
+//RS                 let saved_expected = self.expected_type.clone();
+//RS                 // D-FAILURE-FOUNDATION1=A: a direct fallible call in a return
+//RS                 // position uses the ordinary transparent-carrier route. Give
+//RS                 // the call its success expectation so `infer` elaborates the
+//RS                 // existing `Try` node and applies the declared error
+//RS                 // conversion, then the return checker lifts that success
+//RS                 // value back into the caller's carrier.
+//RS                 let contextual_result_constructor = matches!(
+//RS                     e.without_parens(),
+//RS                     Expr::Call(call)
+//RS                         if !self.funcs.contains_key(&call.name)
+//RS                             && matches!(call.name.as_str(), Syntax::LIT_OK | Syntax::LIT_ERR)
+//RS                 );
+//RS                 let call_success_type = (!contextual_result_constructor
+//RS                     && matches!(
+//RS                         e.without_parens(),
+//RS                         Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
+//RS                     ))
+//RS                 .then(|| match &rt {
+//RS                     Type::Result { ok, .. } => ok.as_ref().clone(),
+//RS                     _ => rt.clone(),
+//RS                 });
+//RS                 self.expected_type = Some(call_success_type.unwrap_or_else(|| rt.clone()));
+//RS                 // Spawned task returns are checked separately by E1102.
+//RS                 self.borrow_ctx = self.is_task_spawn;
+//RS                 let saved_string_view_read = self.allow_string_view_read;
+//RS                 if string_view_return {
+//RS                     self.allow_string_view_read = true;
+//RS                 }
+//RS                 // D-ALLOC2 / E0631: capture the returned name BEFORE inferring.
+//RS                 // An arena view carries an allocator-view type, so returning it
+//RS                 // where the declared type is the payload rewrites `e` through
+//RS                 // a deref coercion and it stops being an `Ident`.
+//RS                 let returned_ident = match &*e {
+//RS                     Expr::Ident(name, span) => Some((name.clone(), *span)),
+//RS                     _ => None,
+//RS                 };
+//RS                 let mut et = self.infer(e);
+//RS                 let payload_matches = if let (Type::Result { ok, .. }, Some(actual)) =
+//RS                     (&rt, et.as_ref())
+//RS                 {
+//RS                     !matches!(actual, Type::Result { .. })
+//RS                         && (actual == ok.as_ref()
+//RS                             || self.nominal_type_identity(ok.as_ref(), actual)
+//RS                             || matches!(ok.as_ref(), Type::Union(members) if members.iter().any(|member| member == actual))
+//RS                             || actual.numeric_widening_to(ok).is_some()
+//RS                             // String-backed `View<str>` values keep `String` as
+//RS                             // their semantic type; the view boundary is a
+//RS                             // representation contract, not a second carrier.
+//RS                             || (string_view_return && matches!(actual, Type::String))
+//RS                             // S48: a concrete value meets a single-trait
+//RS                             // success slot (`-> Adapter`) and is boxed.
+//RS                             || self.trait_slot_accepts(ok.as_ref(), actual))
+//RS                 } else {
+//RS                     false
+//RS                 };
+//RS                 self.report_lending_view_escape(e, "be returned");
+//RS                 self.allow_string_view_read = saved_string_view_read;
+//RS                 self.expected_type = saved_expected;
+//RS                 if let Some(source) = et.clone() {
+//RS                     if let Some(widened) = self.widen_numeric_return(e, &source, &rt) {
+//RS                         et = Some(widened);
+//RS                     }
+//RS                 }
+//RS                 // #1164: direct `View`/`ViewMut` returns use the dedicated
+//RS                 // path below. Aggregates that contain view fields need the
+//RS                 // walk. Non-view returns must not re-check string-view idents
+//RS                 // as view escapes.
+//RS                 let direct_view_return = matches!(
+//RS                     return_value_type,
+//RS                     Type::Apply { name, .. }
+//RS                         if matches!(name.as_str(), "View" | "ViewMut")
+//RS                 );
+//RS                 if !direct_view_return && self.type_contains_view_boundary(&rt) {
+//RS                     self.check_aggregate_view_return(e);
+//RS                 }
+//RS                 // D-ALLOC2: E0631 — returning an arena `view` would let it
+//RS                 // outlive the arena (the arena drops at scope end).
+//RS                 if let Some((n, nspan)) = &returned_ident {
+//RS                     if self.is_arena_view(n) || self.is_fixed_backing_view(n) {
+//RS                         self.report_view_escape(n, "be returned", *nspan);
+//RS                     }
+//RS                 }
+//RS                 // D-DYNARRAY1: E2305 — returning a `View<T>` whose owner
+//RS                 // list is local to this function would outlive it.
+//RS                 if string_view_return {
+//RS                     if let Expr::Ident(n, nspan) = &*e {
+//RS                         if self.is_string_view(n) {
+//RS                             self.check_named_string_view_binding_return(n, *nspan);
+//RS                         } else {
+//RS                             self.report_string_view_boundary(e.span());
+//RS                         }
+//RS                     } else {
+//RS                         let sources: Vec<_> = self
+//RS                             .view_call_sources(e)
+//RS                             .into_iter()
+//RS                             .filter(|(path, ..)| path.is_empty())
+//RS                             .collect();
+//RS                         if sources.is_empty() {
+//RS                             self.report_string_view_boundary(e.span());
+//RS                         } else {
+//RS                             for (_, place, _, access) in sources {
+//RS                                 self.check_named_view_return(&place, access, Vec::new(), e.span());
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 } else if matches!(
+//RS                     return_value_type,
+//RS                     Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")
+//RS                 ) {
+//RS                     if let Expr::Ident(n, nspan) = &*e {
+//RS                         if self.is_list_view(n) {
+//RS                             self.check_named_view_binding_return(n, *nspan);
+//RS                         } else {
+//RS                             self.report_view_return_boundary(e.span());
+//RS                         }
+//RS                     } else {
+//RS                         let sources: Vec<_> = self
+//RS                             .view_call_sources(e)
+//RS                             .into_iter()
+//RS                             .filter(|(path, ..)| path.is_empty())
+//RS                             .collect();
+//RS                         if sources.is_empty() {
+//RS                             self.report_view_return_boundary(e.span());
+//RS                         } else {
+//RS                             for (_, place, _, access) in sources {
+//RS                                 self.check_named_view_return(&place, access, Vec::new(), e.span());
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 // D-MEM-COPYSEM1: default owning returns have already become
+//RS                 // `Expr::Copy` in `self.infer(e)`. Declared view returns still
+//RS                 // use the boundary checks above; explicit-copy policy keeps
+//RS                 // the original read so its E2307 refusal remains.
+//RS                 // Returning a borrowed parameter would move out of a borrow
+//RS                 // in the generated Rust (I2) — require a copy.
+//RS                 self.reject_borrowed_param_subplace(
+//RS                     e,
+//RS                     et.as_ref(),
+//RS                     "be returned as an owned value",
+//RS                 );
+//RS                 // The source success value is checked for ownership and view
+//RS                 // provenance before this carrier lift. Otherwise `Ok(...)`
+//RS                 // would hide the original place from both checks.
+//RS                 if payload_matches {
+//RS                     let value_span = e.span();
+//RS                     let value = std::mem::replace(e, Expr::Absent(value_span));
+//RS                     *e = Expr::Ok(Box::new(value), value_span);
+//RS                     et = Some(rt.clone());
+//RS                 }
+//RS                 // #3708: a fallible value returned as-is (not the success
+//RS                 // payload lifted into `Ok`) is this body's own failure source.
+//RS                 // An `Err(...)` node is read from the checked AST instead, so
+//RS                 // the failure-union probe records its typed value.
+//RS                 if !self.in_lambda_body
+//RS                     && !matches!(e.without_parens(), Expr::Ok(..) | Expr::Err(..))
+//RS                     && et
+//RS                         .as_ref()
+//RS                         .is_some_and(|ty| matches!(ty, Type::Result { err, .. } if !err.is_never()))
+//RS                 {
+//RS                     self.failure_direct_source = true;
+//RS                 }
+//RS                 // D-OPT-LIFT1=A: a plain payload fills a `T?` return slot,
+//RS                 // including the `T?` success slot of a `T? E!` contract.
+//RS                 if let Some(actual) = et.clone() {
+//RS                     if let Some(lifted) = self.lift_optional_slot(&rt, &actual, e) {
+//RS                         et = Some(lifted);
+//RS                     } else if let Type::Result { ok, .. } = &rt {
+//RS                         if self.lift_optional_slot(ok, &actual, e).is_some() {
+//RS                             let value_span = e.span();
+//RS                             let value = std::mem::replace(e, Expr::Absent(value_span));
+//RS                             *e = Expr::Ok(Box::new(value), value_span);
+//RS                             et = Some(rt.clone());
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 if et
+//RS                     .as_ref()
+//RS                     .is_some_and(crate::Sema::Diagnostics::contains_expiring_secret_loan)
+//RS                 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0201",
+//RS                         "an ExpiringSecret loan cannot be returned".to_string(),
+//RS                         "the callback parameter is valid only while `.with` is running".to_string(),
+//RS                         "return a non-secret result computed from the loan".to_string(),
+//RS                         Some(e.span()),
+//RS                     ));
+//RS                 }
+//RS                 let ownership_ident = match &*e {
+//RS                     Expr::Ident(name, span) => Some((name.as_str(), *span)),
+//RS                     _ => returned_ident
+//RS                         .as_ref()
+//RS                         .map(|(name, span)| (name.as_str(), *span)),
+//RS                 };
+//RS                 if let Some((n, nspan)) = ownership_ident {
+//RS                     if let Some(info) = self.lookup(n) {
+//RS                         if !info.ty.is_scalar()
+//RS                             && !matches!(
+//RS                                 &info.ty,
+//RS                                 Type::Named(name)
+//RS                                     if self
+//RS                                         .type_param_scope
+//RS                                         .iter()
+//RS                                         .any(|param| &param.name == name)
+//RS                             )
+//RS                             && matches!(
+//RS                                 info.param_conv,
+//RS                                 Some(AccessConvention::Read) | Some(AccessConvention::Write)
+//RS                             )
+//RS                         {
+//RS                             let source_ty = info.ty.clone();
+//RS                             let display_type = self.display_type(&source_ty).name();
+//RS                             let diagnostic = Diagnostic::error(
+//RS                                 "E0120",
+//RS                                 format!(
+//RS                                     "`{}` was not moved here, so it cannot be returned as-is",
+//RS                                     n
+//RS                                 ),
+//RS                                 "this function has read access only and does not own the value"
+//RS                                     .to_string(),
+//RS                                 format!(
+//RS                                     "return a copy: `return {}{};` — or take ownership with the move marker `^`: `{}: {}{}`. \
+//RS                                      There's no borrow-return in v1 — to share the value without a full \
+//RS                                      copy, store an owned field, or reach for `Shared<T>`/`ID<T>` \
+//RS                                      once a real program needs shared ownership",
+//RS                                     Syntax::SIGIL_COPY,
+//RS                                     n,
+//RS                                     n,
+//RS                                     Syntax::SIGIL_MOVE,
+//RS                                     display_type
+//RS                                 ),
+//RS                                 Some(nspan),
+//RS                             );
+//RS                             self.diags.push(self.with_ownership_copy_edit(
+//RS                                 diagnostic,
+//RS                                 nspan,
+//RS                                 Some(&source_ty),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 if !string_view_return {
+//RS                     self.note_move_if_direct_ident(e, "`return`");
+//RS                 }
+//RS                 if let Some(et) = et {
+//RS                     let http_handler_lambda = if matches!(
+//RS                         rt.without_user_tags(),
+//RS                         Type::Named(name) if name.rsplit('.').next() == Some("HTTPHandler")
+//RS                     ) {
+//RS                         match et.without_user_tags() {
+//RS                             Type::Fn {
+//RS                                 params,
+//RS                                 ret: Some(ret),
+//RS                                 effect_bound,
+//RS                                 ..
+//RS                             } => {
+//RS                                 let returns_http_handler = match ret.without_user_tags() {
+//RS                                     Type::Result { ok, err } => {
+//RS                                         matches!(
+//RS                                             ok.without_user_tags(),
+//RS                                             Type::Named(name)
+//RS                                                 if name.rsplit('.').next() == Some("HTTPResponse")
+//RS                                         ) && matches!(
+//RS                                             err.without_user_tags(),
+//RS                                             Type::Named(name)
+//RS                                                 if name.rsplit('.').next() == Some("HTTPError")
+//RS                                         )
+//RS                                     }
+//RS                                     Type::Named(name)
+//RS                                         if name.rsplit('.').next() == Some("HTTPResponse") =>
+//RS                                     {
+//RS                                         effect_bound.as_ref().is_some_and(|effects| {
+//RS                                             effects.iter().any(|(name, _)| {
+//RS                                                 name.trim()
+//RS                                                     .trim_start_matches('!')
+//RS                                                     .rsplit('.')
+//RS                                                     .next()
+//RS                                                     == Some("HTTPError")
+//RS                                             })
+//RS                                         })
+//RS                                     }
+//RS                                     _ => false,
+//RS                                 };
+//RS                                 params.len() == 1
+//RS                                     && matches!(
+//RS                                         params[0].without_user_tags(),
+//RS                                         Type::Named(name)
+//RS                                             if name.rsplit('.').next() == Some("HTTPRequest")
+//RS                                     )
+//RS                                     && returns_http_handler
+//RS                             }
+//RS                             _ => false,
+//RS                         }
+//RS                     } else {
+//RS                         false
+//RS                     };
+//RS                     let string_view_compatible = string_view_return && et == Type::String;
+//RS                     let union_member_widen = matches!(
+//RS                         &rt,
+//RS                         Type::Union(members) if members.iter().any(|m| m == &et)
+//RS                     );
+//RS                     // D-APILABEL1=A: every return contract uses shared
+//RS                     // assignability, including qualified nominal types.
+//RS                     let reported = self.check_type_assignable(&rt, &et, e.span());
+//RS                     if et != rt
+//RS                         && !reported
+//RS                         && !http_handler_lambda
+//RS                         && !string_view_compatible
+//RS                         && !union_member_widen
+//RS                     {
+//RS                         let display_return = self.display_type(&rt);
+//RS                         let display_actual = self.display_type(&et);
+//RS                         // D-DISCARD1=A (owner ruling): a written return type
+//RS                         // is the contract, so the mismatch is taught as a
+//RS                         // fault in the returned value, never as a prompt to
+//RS                         // change the declaration.
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0113",
+//RS                             format!(
+//RS                                 "this value is {}, but `{}` returns {}",
+//RS                                 display_actual.show(),
+//RS                                 self.fn_name,
+//RS                                 display_return.name()
+//RS                             ),
+//RS                             format!(
+//RS                                 "`{}` declares {} as its result, so the value it hands back must be {}",
+//RS                                 self.fn_name,
+//RS                                 display_return.name(),
+//RS                                 display_return.name()
+//RS                             ),
+//RS                             return_value_fix(&display_return, &display_actual),
+//RS                             Some(e.span()),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             (Some(e), None) => {
+//RS                 let ty_name = self.infer_name_or(e, "Int");
+//RS                 self.diags.push(Diagnostic::error(
+//RS                                 "E0113",
+//RS                                 format!("`{}` doesn't return a value", self.fn_name),
+//RS                                 "a function hands back a value only when it declares a return type".to_string(),
+//RS                                 format!(
+//RS                                     "remove the value (a bare `return`), or write `-> {}` after the parameter list",
+//RS                                     ty_name
+//RS                                 ),
+//RS                                 Some(e.span()),
+//RS                             ));
+//RS             }
+//RS             (None, Some(rt)) => {
+//RS                 // D-FAIL-EXIT1: implicit `fn run` has unit success and the
+//RS                 // default `Err` failure contract.
+//RS                 // A bare `return` is successful exit, same as falling off
+//RS                 // the end of the body.
+//RS                 let fallible_void = matches!(
+//RS                     rt,
+//RS                     Type::Result { ref ok, .. }
+//RS                         if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
+//RS                 );
+//RS                 if !fallible_void {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0113",
+//RS                         format!(
+//RS                             "`{}` promises to return {}, but this `return` is empty",
+//RS                             self.fn_name,
+//RS                             rt.show()
+//RS                         ),
+//RS                         "the value handed back must match the declared return type".to_string(),
+//RS                         "add the value: `return ...;`".to_string(),
+//RS                         Some(*span),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             (None, None) => {}
+//RS         }
+//RS     }
+//RS 
+// END-PORT-PENDING 0370 crates/jet-sema/src/Sema/CheckerCore/statements.rs:1-1157
+

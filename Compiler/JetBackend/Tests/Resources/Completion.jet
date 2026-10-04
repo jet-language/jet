@@ -1,0 +1,46 @@
+use jet_foundation.[MIRTypeKind, mir_type_from_kind, JetTaskFailure]
+
+// Original jit/backend.rs:2869-2885.
+#Test("native_entry_integer_words_reject_checked_range_overflow") {
+    signed :: MIRTypeKind.IntN{signed: true, bits: 8}
+    assert(source_helper_integer_fits(signed, I64{-128}))
+    assert(source_helper_integer_fits(signed, I64{127}))
+    assert(!source_helper_integer_fits(signed, I64{128}))
+    unsigned :: MIRTypeKind.IntN{signed: false, bits: 8}
+    assert(source_helper_integer_fits(unsigned, I64{255}))
+    assert(!source_helper_integer_fits(unsigned, I64{-1}))
+    assert(!source_helper_integer_fits(unsigned, I64{256}))
+}
+// Original jit/backend.rs:2887-2904.
+#Test("source_only_helper_policy_never_attempts_native") {
+    assert(!source_native_attempt_allowed(true, true, .SourceOnly, true, true, true))
+    assert(source_native_attempt_allowed(true, true, .JitWithSourceFallback, true, true, true))
+}
+#Test("source_helper_native_admission_requires_every_original_guard") {
+    assert(!source_native_attempt_allowed(false, true, .JitWithSourceFallback, true, true, true))
+    assert(!source_native_attempt_allowed(true, true, .JitWithSourceFallback, false, true, true))
+    assert(!source_native_attempt_allowed(true, true, .JitWithSourceFallback, true, false, true))
+    assert(!source_native_attempt_allowed(true, true, .JitWithSourceFallback, true, true, false))
+    assert(source_native_attempt_allowed(true, false, .SourceOnly, true, true, true))
+}
+#Test("source_helper_integer_word_checks_do_not_overflow_at_64_bits") {
+    assert(source_helper_integer_fits(.IntN{signed: true, bits: 64}, I64{-9223372036854775808}))
+    assert(source_helper_integer_fits(.IntN{signed: true, bits: 64}, I64{9223372036854775807}))
+    assert(source_helper_integer_fits(.IntN{signed: false, bits: 63}, I64{9223372036854775807}))
+    assert(source_helper_integer_fits(.IntN{signed: false, bits: 64}, I64{9223372036854775807}))
+    assert(!source_helper_integer_fits(.IntN{signed: false, bits: 64}, I64{-1}))
+    assert(!source_helper_integer_fits(.IntN{signed: true, bits: 0}, I64{0}))
+    assert(!source_helper_integer_fits(.IntN{signed: true, bits: 65}, I64{0}))
+    range :: MIRTypeKind.InlineRange{base: mir_type_from_kind(.IntN{signed: true, bits: 8}), lo: 10, hi: 20}
+    assert(source_helper_integer_fits(range, I64{10}))
+    assert(source_helper_integer_fits(range, I64{20}))
+    assert(!source_helper_integer_fits(range, I64{9}))
+    assert(!source_helper_integer_fits(range, I64{21}))
+}
+#Test("source_deopt_errors_preserve_missing_outcome_cleanup_evidence") {
+    assert_eq(source_deopt_error_text(.MissingOutcome{cleanup: None}), "Source entry callback returned no terminal outcome")
+    assert_eq(source_deopt_error_text(.MissingOutcome{cleanup: Val("still owns roots")}), "Source entry callback returned no terminal outcome; cleanup evidence: still owns roots")
+    assert_eq(source_deopt_error_text(.CallbackJob{failure: JetTaskFailure.Cancelled}), "Source callback owner job failed: Cancelled")
+    assert_eq(source_deopt_error_text(.CallbackJob{failure: JetTaskFailure.Panicked{reason: "boom\n"}}), "Source callback owner job failed: Panicked(\"boom\\n\")")
+    assert_eq(source_deopt_error_text(.NativeInterface{error: .SignatureMismatch}), "Source native interface scope failed: native interface signature does not match its checked MIR method")
+}

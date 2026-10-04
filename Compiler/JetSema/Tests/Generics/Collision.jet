@@ -1,0 +1,28 @@
+// Original GenericModules/InstanceCollisionTests.rs: fail closed before codegen.
+use jet_sema.[sema_genmod_register_fingerprint, sema_inline_type_name]
+use jet_foundation.[ModuleInstanceIdentity, Span]
+
+fn genmod_collision_identity(bytes: [U8]) -> ModuleInstanceIdentity Never! {
+    ModuleInstanceIdentity{full_key: bytes, fingerprint: "forced-digest", definition_id: "def", argument_keys: [], argument_values: [], argument_provenance: [], template_span: Span{start: 0, end: 0}, applications: []}
+}
+#Test("different_full_keys_with_same_digest_fail_closed_before_codegen", expected_fail: true) {
+    registry := [String:[U8]]{}
+    first :: genmod_collision_identity([U8]{U8{1}})
+    second :: genmod_collision_identity([U8]{U8{2}})
+    sema_genmod_register_fingerprint(&registry, first, Span{start: 1, end: 2})
+    // Original should_panic expected: internal compiler error: E0859 generic module instance fingerprint collision
+    // Gate: Main's expected-stop-message harness card; expected_fail cannot assert text.
+    sema_genmod_register_fingerprint(&registry, second, Span{start: 3, end: 4})
+}
+#Test("same_digest_same_full_key_is_not_a_collision") {
+    registry := [String:[U8]]{}
+    first :: genmod_collision_identity([U8]{U8{1}})
+    sema_genmod_register_fingerprint(&registry, first, Span{start: 1, end: 2})
+    sema_genmod_register_fingerprint(&registry, first, Span{start: 3, end: 4})
+    assert_eq(registry["forced-digest"], first.full_key)
+}
+#Test("generated_nominal_names_encode_module_alias_boundaries") {
+    assert(sema_inline_type_name("foo", "BarBaz") != sema_inline_type_name("foo_bar", "Baz"))
+    assert(sema_inline_type_name("foo_bar", "Baz") != sema_inline_type_name("fo_obar", "Baz"))
+    assert_eq(sema_inline_type_name("_cache", "Item"), "_M5CacheItem")
+}

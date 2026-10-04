@@ -1,0 +1,108 @@
+// Sole loaded AST ownership seam. Driver identity/provenance stays outside
+// Foundation; Program snapshots are immutable parser/check lookup products.
+use jet_foundation.[ApplicationAuthority, AppliedRuleApplication, BuildFactSnapshot, CFfi, DebugTraceSite, DevtoolsRegistry, ElseArmSpan, FencedStatement, LoadedModule, MIROSTarget, PackageGuarantees, Program, ProgramBundle, ast_program, name_ledger_new, name_ledger_record_import_target, name_ledger_set_module, name_ledger_set_module_namespace]
+
+struct JetDriverParseMetadata {
+    fenced_statements: [FencedStatement]
+    applied_rules: [AppliedRuleApplication]
+    else_arms: [ElseArmSpan]
+    used_import_names: [String]
+    debug_sites: [DebugTraceSite]
+}
+fn jet_driver_parse_metadata(program: Program) -> JetDriverParseMetadata Never! {
+    JetDriverParseMetadata{fenced_statements: program.fenced_statements, applied_rules: program.applied_rules, else_arms: program.else_arms, used_import_names: program.used_import_names, debug_sites: program.debug_sites}
+}
+fn jet_driver_loaded_ast(unit: JetDriverSourceUnit, source: String, program: ^Program) -> LoadedModule Never! {
+    path :: unit.physical_path ?? compiler_driver_os_path.from_text(unit.path, compiler_driver_os_path.PathPlatform.Unix)
+    LoadedModule.from_program(path, if unit.source_origin == SemaSourceOrigin.CompilerGenerated -> unit.relative_path else -> unit.path, source, unit.alias, ^program)
+}
+// Read-only COW view of the retained object for existing parser metadata
+// consumers. This function does not parse, synthesize checked facts, or mutate.
+fn jet_driver_module_program(load: JetDriverLoadResult, row: JetDriverModuleFacts) -> Program Never! {
+    permit :: load.bundle.guard_read()
+    jet_driver_program_snapshot(permit.value, row)
+}
+fn jet_driver_program_snapshot(bundle: ProgramBundle, row: JetDriverModuleFacts) -> Program Never! {
+    index :: row.bundle_index ?? return ast_program()
+    module :: bundle.modules[index]
+    metadata :: row.parse_metadata
+    Program{imports: module.imports, items: module.items, script_body: module.script_body, block_spans: module.block_spans, fenced_statements: metadata.fenced_statements, web_target_ceiling: module.web_target_ceiling, pub_file: module.pub_file, no_prelude: module.no_prelude, default_target: module.default_target, html_path: module.html_path, policy_declarations: module.policy_declarations, user_policy_declarations: module.user_policy_declarations, applied_rules: metadata.applied_rules, rule_facts: module.rule_facts, else_arms: metadata.else_arms, used_import_names: metadata.used_import_names, debug_sites: metadata.debug_sites}
+}
+// CLI keeps the read guard alive around app_entry_run_fn; it never receives
+// another parsed Program or an owned item list.
+pub fn jet_driver_loaded_bundle(load: JetDriverLoadResult) -> Shared<ProgramBundle> Never! { load.bundle }
+
+fn jet_driver_empty_bundle(request: JetDriverCompileRequest, project_root: compiler_driver_os_path.OsPath) -> Shared<ProgramBundle> Never! {
+    os :: request.host_facts.loader_host_os ?? panic("native capture omitted the original Loader host OS")
+    triple :: request.host_facts.loader_host_triple ?? panic("native capture omitted the original Loader host triple")
+    shared ProgramBundle.new(project_root, os, BuildFactSnapshot.for_host(os, triple), JET_DRIVER_LATEST_EDITION)
+}
+fn jet_driver_seed_bundle(load: JetDriverLoadResult, roots: View<JetDriverAuthorizedSourceRoot>) Never! {
+    permit := load.bundle.guard_edit()
+    loop row in load.modules {
+        index :: row.bundle_index ?? next
+        unit :: load.source_units[row.source_unit_index]
+        if row.module_identity == load.entry_module_identity -> permit.value.entry = index
+        name_ledger_set_module(&permit.value.name_ledger, index, unit.alias, unit.path, row.package_identity)
+        if load.package_namespaces.get(row.module_identity) == .Val(root) -> name_ledger_set_module_namespace(&permit.value.name_ledger, index, compiler_driver_os_path.display(root))
+    }
+    indices := [String:Int]{}
+    loop row in load.modules { if row.bundle_index == .Val(index) -> indices[row.module_identity] = index }
+    loop edge in load.imports {
+        source :: indices.get(edge.source_module_identity) ?? next
+        target :: indices.get(edge.target_module_identity) ?? next
+        name_ledger_record_import_target(&permit.value.name_ledger, source, edge.declaration.span, target)
+    }
+    loop root in jet_driver_package_dependency_roots(load, roots) -> permit.value.dep_roots[root.name] = root.path
+    loop package in load.packages {
+        if package.identity != load.package_identity -> next
+        permit.value.layer_ceiling = package.runtime_ceiling
+        permit.value.program_allocator = package.allocator_policy
+        permit.value.edition = package.edition
+        guarantees := PackageGuarantees.default()
+        names := [String]{}
+        loop dependency in package.dependencies -> &names.push(dependency.name)
+        if package.manifest_facts == .Val(manifest) {
+            loop (name, _) in manifest.deps -> &names.push(name)
+            policy :: manifest.policy
+            guarantees.contain = Rank.from(policy.contain)
+            guarantees.harden = policy.harden
+            loop (path, effects) in policy.effects -> guarantees.effects[path] = Rank.from(effects)
+            guarantees.unsafe_paths = policy.unsafe_paths
+            guarantees.expert = policy.expert
+            guarantees.deps = policy.deps
+            guarantees.lints_deny = policy.lints_deny
+        }
+        guarantees.dependency_names = Rank.from(names)
+        guarantees.memory_denials = loop right in package.authority_deny ?? [String]{} { if right.starts_with("Mem.") -> right }
+        guarantees.authority_needs = package.authority_needs
+        guarantees.application_authority = if package.manifest_path == None -> ApplicationAuthority.ambient_basics() else -> ApplicationAuthority.from_policy(package.authority_allow, package.authority_deny, "package.jet")
+        permit.value.package_guarantees = guarantees
+        break
+    }
+}
+
+fn jet_driver_append_loaded_module(bundle: &ProgramBundle, unit: JetDriverSourceUnit, unit_index: Int, source: String, program: ^Program) -> JetDriverModuleFacts Never! {
+    metadata :: jet_driver_parse_metadata(program)
+    index := Int?{None}
+    if unit.bundle_module {
+        index = Val(bundle.modules.len())
+        &bundle.modules.push(jet_driver_loaded_ast(unit, source, ^program))
+    }
+    JetDriverModuleFacts{source_unit_index: unit_index, source_identity: jet_driver_source_identity(unit.package_identity, jet_driver_source_unit_identity_label(unit)), package_identity: unit.package_identity, module_identity: jet_driver_unit_module_identity(unit), module_name: unit.module_name, bundle_index: index, parse_metadata: metadata}
+}
+// Move each module once when Core's native load order is finalized. The
+// positional identity rows follow the same permutation, never an AST clone.
+fn jet_driver_reorder_bundle(load: &JetDriverLoadResult) Never! {
+    permit := load.bundle.guard_edit()
+    pending := [Int:LoadedModule]{}
+    original := permit.value.modules
+    permit.value.modules = []
+    loop (index, module) in ^original -> pending[index] = ^module
+    loop index in 0..<load.modules.len() {
+        old :: load.modules[index].bundle_index ?? next
+        module :: &pending.remove(old) ?? panic("loaded module permutation lost its original AST owner")
+        load.modules[index].bundle_index = Val(permit.value.modules.len())
+        &permit.value.modules.push(^module)
+    }
+}

@@ -1,0 +1,376 @@
+// Devtools.rs:7-206,337-425,802-947,1043-1417. Sole Foundation protocol owner.
+pub JET_DEVTOOLS_PROTOCOL :: "jet.devtools.v1"
+pub JET_DEVTOOLS_VERSION :: U32{1}
+pub JET_DEVTOOLS_LOOPBACK_ONLY :: true
+pub JET_DEVTOOLS_PAYLOAD_FREE_BY_DEFAULT :: true
+pub JET_DEVTOOLS_MAX_EVENTS :: 256
+pub JET_DEVTOOLS_MAX_HISTORY :: 256
+pub JET_DEVTOOLS_MAX_TEXT_BYTES :: 16384
+pub JET_DEVTOOLS_MAX_ENVELOPE_BYTES :: 1048576
+pub fn jet_devtools_protocol() -> String Never! { JET_DEVTOOLS_PROTOCOL }
+pub fn jet_devtools_version() -> U32 Never! { JET_DEVTOOLS_VERSION }
+pub enum JetDevtoolsLifecycleState { Starting, Building, Ready, Error, Unavailable, Stopped }
+impl JetDevtoolsLifecycleState {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Starting -> "starting", .Building -> "building", .Ready -> "ready", .Error -> "error", .Unavailable -> "unavailable", .Stopped -> "stopped" }
+    }
+}
+pub enum JetDevtoolsFreshnessState { Fresh, Stale, Unknown }
+impl JetDevtoolsFreshnessState {
+    pub fn as_str(self) -> String Never! { if self == { .Fresh -> "fresh", .Stale -> "stale", .Unknown -> "unknown" } }
+}
+pub struct JetDevtoolsFreshnessFact { pub state: JetDevtoolsFreshnessState, pub observed_at_ms: U64 }
+impl JetDevtoolsFreshnessFact {
+    pub fn fresh(observed_at_ms: U64) -> JetDevtoolsFreshnessFact Never! { JetDevtoolsFreshnessFact{state: .Fresh, observed_at_ms: observed_at_ms} }
+    pub fn stale(observed_at_ms: U64) -> JetDevtoolsFreshnessFact Never! { JetDevtoolsFreshnessFact{state: .Stale, observed_at_ms: observed_at_ms} }
+    pub fn unknown(observed_at_ms: U64) -> JetDevtoolsFreshnessFact Never! { JetDevtoolsFreshnessFact{state: .Unknown, observed_at_ms: observed_at_ms} }
+    pub fn default() -> JetDevtoolsFreshnessFact Never! { JetDevtoolsFreshnessFact.unknown(U64{0}) }
+}
+// U64 retains Rust usize magnitudes before bounded Int indexing (#4483).
+pub struct JetDevtoolsPolicy {
+    pub loopback_only: Bool
+    pub payload_free_by_default: Bool
+    pub max_events: U64
+    pub max_history: U64
+    pub max_text_bytes: U64
+    pub max_envelope_bytes: U64
+}
+impl JetDevtoolsPolicy {
+    pub fn development() -> JetDevtoolsPolicy Never! {
+        JetDevtoolsPolicy{loopback_only: true, payload_free_by_default: true, max_events: U64{256}, max_history: U64{256}, max_text_bytes: U64{16384}, max_envelope_bytes: U64{1048576}}
+    }
+    pub fn default() -> JetDevtoolsPolicy Never! { JetDevtoolsPolicy.development() }
+}
+pub struct JetDevtoolsPrivacy { pub loopback_only: Bool, pub payload_free_by_default: Bool, pub published_payloads: Bool }
+impl JetDevtoolsPrivacy {
+    pub fn from_policy(policy: JetDevtoolsPolicy) -> JetDevtoolsPrivacy Never! { JetDevtoolsPrivacy{loopback_only: policy.loopback_only, payload_free_by_default: policy.payload_free_by_default, published_payloads: false} }
+    pub fn default() -> JetDevtoolsPrivacy Never! { JetDevtoolsPrivacy.from_policy(JetDevtoolsPolicy.development()) }
+}
+pub struct JetDevtoolsSourceIdentityFact { pub source_id: String?, pub build_id: String?, pub revision: String?, pub world_id: String? }
+impl JetDevtoolsSourceIdentityFact {
+    pub fn new(source_id: ^String?, build_id: ^String?, revision: ^String?, world_id: ^String?) -> JetDevtoolsSourceIdentityFact Never! {
+        JetDevtoolsSourceIdentityFact{source_id: ^source_id, build_id: ^build_id, revision: ^revision, world_id: ^world_id}
+    }
+    pub fn default() -> JetDevtoolsSourceIdentityFact Never! { JetDevtoolsSourceIdentityFact.new(None, None, None, None) }
+    pub fn validate(self) Err! {
+        if self.source_id == .Val(text) -> jet_devtools_validate_text(text, "source_id")
+        if self.build_id == .Val(text) -> jet_devtools_validate_text(text, "build_id")
+        if self.revision == .Val(text) -> jet_devtools_validate_text(text, "revision")
+        if self.world_id == .Val(text) -> jet_devtools_validate_text(text, "world_id")
+        return
+    }
+}
+pub enum JetDevtoolsValue { Bool(Bool), Int(I64), Float(F64), Text(String) }
+impl JetDevtoolsValue {
+    pub fn text(value: ^String) -> JetDevtoolsValue Never! { .Text(^value) }
+    pub fn validate(self) Err! {
+        if self == {
+            .Float(number) -> if !number.is_finite() -> return Err("jet.devtools.v1 payload float must be finite")
+            .Text(text) -> if text.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES -> return Err("jet.devtools.v1 payload text exceeds the Prelude limit")
+            else -> {}
+        }
+        return
+    }
+}
+pub struct JetDevtoolsField { pub key: String, pub value: JetDevtoolsValue }
+impl JetDevtoolsField {
+    pub fn new(key: ^String, value: ^JetDevtoolsValue) -> JetDevtoolsField Never! { JetDevtoolsField{key: ^key, value: ^value} }
+}
+pub struct JetDevtoolsPayload { fields: [JetDevtoolsField] }
+impl JetDevtoolsPayload {
+    pub fn new(fields: ^[JetDevtoolsField]) -> JetDevtoolsPayload Never! { JetDevtoolsPayload{fields: ^fields} }
+    pub fn one(key: ^String, value: ^JetDevtoolsValue) -> JetDevtoolsPayload Never! { JetDevtoolsPayload.new([JetDevtoolsField]{JetDevtoolsField.new(^key, ^value)}) }
+    pub fn fields(self) -> View<JetDevtoolsField> Never! from self { self.fields.view(0..<self.fields.len()) }
+    fn validate(self) Err! {
+        if self.fields.len() > JET_DEVTOOLS_MAX_HISTORY -> return Err("jet.devtools.v1 payload has too many fields")
+        // Count once; keep Rust's first-error precedence without suffix scans.
+        counts := [String:Int]{}
+        loop field in self.fields -> counts[field.key] = (counts.get(field.key) ?? 0) + 1
+        loop (index, field) in self.fields {
+            if field.key.len() == 0 -> return Err("jet.devtools.v1 payload field {index} has an empty key")
+            if field.key.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES -> return Err("jet.devtools.v1 payload field key exceeds the Prelude limit")
+            field.value.validate()
+            if (counts.get(field.key) ?? 0) > 1 -> return Err("jet.devtools.v1 payload contains duplicate field `{field.key}`")
+        }
+        return
+    }
+}
+pub struct JetDevtoolsEvent {
+    sequence: U64
+    pub timestamp_ms: U64
+    pub source: String
+    pub kind: String
+    pub entity: String
+    fields: String
+    payload: String?
+    body: JetDevtoolsEventBody?
+}
+impl JetDevtoolsEvent {
+    pub fn try_new(timestamp_ms: U64, source: ^String, body: ^JetDevtoolsEventBody) -> JetDevtoolsEvent Err! {
+        kind :: jet_devtools_event_body_family(body)
+        entity :: jet_devtools_event_body_entity(body)
+        fields :: jet_devtools_render_body_fields(body)
+        event := JetDevtoolsEvent.from_parts(timestamp_ms, ^source, ~kind, ~entity, fields)
+        event.body = Val(^body)
+        Ok(event)
+    }
+    pub fn from_wire(sequence: U64, timestamp_ms: U64, source: ^String, body: ^JetDevtoolsEventBody, fields_json: ^String, payload_json: ^String?) -> JetDevtoolsEvent Err! {
+        if sequence == (U64{0}) -> return Err("jet.devtools.v1 event sequence must be positive")
+        event := JetDevtoolsEvent.try_new(timestamp_ms, ^source, ^body)
+        jet_devtools_validate_json_object(fields_json, "fields")
+        // Rust 848-849 accepts any framed fields, not only rendered body fields.
+        event.fields = ^fields_json
+        if payload_json == .Val(text) -> jet_devtools_validate_json_object(text, "payload")
+        event.sequence = sequence
+        event.payload = ^payload_json
+        Ok(event)
+    }
+    pub fn from_parts(timestamp_ms: U64, source: ^String, kind: ^String, entity: ^String, fields_json: ^String) -> JetDevtoolsEvent Err! {
+        JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, ^source, ^kind, ^entity, ^fields_json, None)
+    }
+    pub fn from_parts_with_payload(timestamp_ms: U64, source: ^String, kind: ^String, entity: ^String, fields_json: ^String, payload_json: ^String?) -> JetDevtoolsEvent Err! {
+        jet_devtools_validate_text(source, "source")
+        jet_devtools_validate_text(kind, "kind")
+        jet_devtools_validate_text(entity, "entity")
+        jet_devtools_validate_json_object(fields_json, "fields")
+        if payload_json == .Val(text) -> jet_devtools_validate_json_object(text, "payload")
+        Ok(JetDevtoolsEvent{sequence: U64{0}, timestamp_ms: timestamp_ms, source: ^source, kind: ^kind, entity: ^entity, fields: ^fields_json, payload: ^payload_json, body: None})
+    }
+    pub fn publish(^self, payload: JetDevtoolsPayload) -> JetDevtoolsEvent Err! {
+        out := [U8]{}
+        jet_devtools_render_payload(payload, &out)
+        self.payload = Val(String.from_bytes(out) ?? panic("devtools writer preserves UTF-8"))
+        Ok(^self)
+    }
+    pub fn sequence(self) -> U64 Never! { self.sequence }
+    pub fn fields_json(self) -> @String Never! from self { @self.fields }
+    pub fn payload_json(self) -> (@String)? Never! from self { if self.payload == .Val(text) -> return Val(@text); None }
+    pub fn source(self) -> @String Never! from self { @self.source }
+    pub fn kind(self) -> @String Never! from self { @self.kind }
+    pub fn entity(self) -> @String Never! from self { @self.entity }
+    pub fn body(self) -> (@JetDevtoolsEventBody)? Never! from self { if self.body == .Val(body) -> return Val(@body); None }
+}
+// JetDevtoolsTimeCursor (Rust type alias = u64) -> U64, no nominal wrapper.
+pub struct JetDevtoolsSelection { pub panel_id: String, pub item_key: String? }
+impl JetDevtoolsSelection {
+    pub fn new(panel_id: ^String, item_key: ^String?) -> JetDevtoolsSelection Never! { JetDevtoolsSelection{panel_id: ^panel_id, item_key: ^item_key} }
+    pub fn default() -> JetDevtoolsSelection Never! { JetDevtoolsSelection.new("", None) }
+}
+pub struct JetDevtoolsViewState { pub selection: JetDevtoolsSelection?, pub cursor: U64? }
+impl JetDevtoolsViewState {
+    pub fn new(selection: ^JetDevtoolsSelection?, cursor: U64?) -> JetDevtoolsViewState Never! { JetDevtoolsViewState{selection: ^selection, cursor: cursor} }
+    pub fn default() -> JetDevtoolsViewState Never! { JetDevtoolsViewState.new(None, None) }
+    pub fn selection(self) -> (@JetDevtoolsSelection)? Never! from self { if self.selection == .Val(selection) -> return Val(@selection); None }
+    pub fn cursor(self) -> U64? Never! { self.cursor }
+    pub fn set_selection(&self, selection: ^JetDevtoolsSelection?) Never! { self.selection = ^selection }
+    pub fn set_cursor(&self, cursor: U64?) Never! { self.cursor = cursor }
+}
+pub struct JetDevtoolsStateEntry { pub key: String, pub state: String, pub revision: U64, pub published: JetDevtoolsValue? }
+impl JetDevtoolsStateEntry {
+    pub fn new(key: ^String, state: ^String, revision: U64) -> JetDevtoolsStateEntry Never! { JetDevtoolsStateEntry{key: ^key, state: ^state, revision: revision, published: None} }
+    pub fn publish(^self, value: ^JetDevtoolsValue) -> JetDevtoolsStateEntry Never! { self.published = Val(^value); ^self }
+}
+pub struct JetDevtoolsStateSnapshot { pub cursor: U64, pub store: [JetDevtoolsStateEntry], pub query_cache: [JetDevtoolsStateEntry] }
+impl JetDevtoolsStateSnapshot {
+    pub fn new(cursor: U64, store: ^[JetDevtoolsStateEntry], query_cache: ^[JetDevtoolsStateEntry]) -> JetDevtoolsStateSnapshot Never! { JetDevtoolsStateSnapshot{cursor: cursor, store: ^store, query_cache: ^query_cache} }
+    fn validate(self) Err! { jet_devtools_validate_state_entries(self.store, "store"); jet_devtools_validate_state_entries(self.query_cache, "query_cache") }
+}
+fn jet_devtools_validate_state_entries(entries: [JetDevtoolsStateEntry], label: String) Err! {
+    if entries.len() > JET_DEVTOOLS_MAX_HISTORY -> return Err("jet.devtools.v1 {label} snapshot exceeds the Prelude limit")
+    counts := [String:Int]{}
+    loop entry in entries -> counts[entry.key] = (counts.get(entry.key) ?? 0) + 1
+    loop (index, entry) in entries {
+        jet_devtools_validate_text(entry.key, "state key")
+        jet_devtools_validate_text(entry.state, "state name")
+        if entry.key.len() == 0 -> return Err("jet.devtools.v1 {label} entry {index} has an empty key")
+        if entry.published == .Val(value) -> value.validate()
+        if (counts.get(entry.key) ?? 0) > 1 -> return Err("jet.devtools.v1 {label} snapshot contains duplicate key `{entry.key}`")
+    }
+    return
+}
+fn jet_devtools_clamp_capacity(capacity: U64) -> Int Never! {
+    if capacity == (U64{0}) -> return 1
+    if capacity >= (U64{256}) -> return 256
+    Int.from_u64(capacity)
+}
+// Fixed circular slots: replace one value, never shift retained history.
+pub struct JetDevtoolsStateRing { capacity: Int, head: Int, count: Int, snapshots: [JetDevtoolsStateSnapshot?] }
+impl JetDevtoolsStateRing {
+    pub fn new() -> JetDevtoolsStateRing Never! { JetDevtoolsStateRing.with_capacity(U64{256}) }
+    pub fn with_capacity(capacity: U64) -> JetDevtoolsStateRing Never! {
+        bounded :: jet_devtools_clamp_capacity(capacity)
+        slots := [JetDevtoolsStateSnapshot?]{}
+        loop _ in 0..<bounded -> &slots.push(None)
+        JetDevtoolsStateRing{capacity: bounded, head: 0, count: 0, snapshots: slots}
+    }
+    pub fn len(self) -> Int Never! { self.count }
+    pub fn is_empty(self) -> Bool Never! { self.count == 0 }
+    pub fn push(&self, snapshot: ^JetDevtoolsStateSnapshot) Err! {
+        snapshot.validate()
+        if self.count > 0 {
+            last :: (self.head + self.count - 1) % self.capacity
+            previous :: self.snapshots[last] ?? panic("occupied state ring slot")
+            if snapshot.cursor < previous.cursor -> return Err("jet.devtools.v1 state cursor must be monotonic")
+        }
+        slot :: (self.head + self.count) % self.capacity
+        self.snapshots[slot] = Val(^snapshot)
+        if self.count == self.capacity -> self.head = (self.head + 1) % self.capacity else -> self.count += 1
+        return
+    }
+    pub fn latest(self) -> (@JetDevtoolsStateSnapshot)? Never! from self {
+        if self.count == 0 -> return None
+        slot :: (self.head + self.count - 1) % self.capacity
+        if self.snapshots[slot] == .Val(snapshot) -> return Val(@snapshot)
+        panic("occupied state ring slot")
+    }
+    pub fn at(self, cursor: U64) -> (@JetDevtoolsStateSnapshot)? Never! from self {
+        offset := self.count
+        loop offset > 0 {
+            offset -= 1
+            slot :: (self.head + offset) % self.capacity
+            if self.snapshots[slot] == .Val(snapshot) { if snapshot.cursor <= cursor -> return Val(@snapshot) }
+        }
+        None
+    }
+    pub fn store_at(self, cursor: U64) -> View<JetDevtoolsStateEntry>? Never! from self {
+        snapshot :: self.at(cursor) ?? return None
+        Val(snapshot.store.view(0..<snapshot.store.len()))
+    }
+    pub fn query_cache_at(self, cursor: U64) -> View<JetDevtoolsStateEntry>? Never! from self {
+        snapshot :: self.at(cursor) ?? return None
+        Val(snapshot.query_cache.view(0..<snapshot.query_cache.len()))
+    }
+}
+pub struct JetDevtoolsEnvelope {
+    pub session_id: String
+    pub started_at_ms: U64
+    pub view: JetDevtoolsViewState
+    pub lifecycle: JetDevtoolsLifecycleState
+    pub freshness: JetDevtoolsFreshnessFact
+    pub privacy: JetDevtoolsPrivacy
+    pub source_identity: JetDevtoolsSourceIdentityFact?
+    pub reset: Bool
+    pub truncated: Bool
+    events: [JetDevtoolsEvent?]
+    head: Int
+    count: Int
+    next_sequence: U64
+    max_events: Int
+}
+fn jet_devtools_saturating_next(value: U64) -> U64 Never! { if value == (U64{18446744073709551615}) -> value else -> value + U64{1} }
+impl JetDevtoolsEnvelope {
+    pub fn new(session_id: ^String, started_at_ms: U64) -> JetDevtoolsEnvelope Never! { JetDevtoolsEnvelope.with_policy(^session_id, started_at_ms, JetDevtoolsPolicy.development()) }
+    pub fn with_policy(session_id: ^String, started_at_ms: U64, policy: JetDevtoolsPolicy) -> JetDevtoolsEnvelope Never! {
+        bounded :: jet_devtools_clamp_capacity(policy.max_events)
+        slots := [JetDevtoolsEvent?]{}
+        loop _ in 0..<bounded -> &slots.push(None)
+        JetDevtoolsEnvelope{session_id: ^session_id, started_at_ms: started_at_ms, view: JetDevtoolsViewState.default(), lifecycle: .Starting, freshness: JetDevtoolsFreshnessFact.default(), privacy: JetDevtoolsPrivacy.from_policy(policy), source_identity: None, reset: false, truncated: false, events: slots, head: 0, count: 0, next_sequence: U64{1}, max_events: bounded}
+    }
+    pub fn push(&self, event: ^JetDevtoolsEvent) -> U64 Never! {
+        event.sequence = self.next_sequence
+        self.next_sequence = jet_devtools_saturating_next(self.next_sequence)
+        if event.payload != None -> self.privacy.published_payloads = true
+        sequence :: event.sequence
+        slot :: (self.head + self.count) % self.max_events
+        self.events[slot] = Val(^event)
+        if self.count == self.max_events {
+            self.head = (self.head + 1) % self.max_events
+            self.truncated = true
+        } else -> self.count += 1
+        self.view.cursor = Val(sequence)
+        sequence
+    }
+    pub fn ingest(&self, incoming: JetDevtoolsEnvelope) -> Int Err! {
+        if incoming.session_id != self.session_id -> return Err("jet.devtools.v1 envelope session identity mismatch")
+        if incoming.source_identity == .Val(identity) -> identity.validate()
+        loop event in incoming.events() -> _ :: &self.push(~event)
+        if incoming.view.selection != None -> self.view.selection = ~incoming.view.selection
+        if incoming.view.cursor != None -> self.view.cursor = incoming.view.cursor
+        self.lifecycle = incoming.lifecycle
+        self.freshness = incoming.freshness
+        self.privacy.loopback_only = incoming.privacy.loopback_only
+        self.privacy.payload_free_by_default = incoming.privacy.payload_free_by_default
+        self.privacy.published_payloads = self.privacy.published_payloads || incoming.privacy.published_payloads
+        self.source_identity = ~incoming.source_identity
+        self.reset = self.reset || incoming.reset
+        self.truncated = self.truncated || incoming.truncated
+        Ok(incoming.count)
+    }
+    pub fn events_since(self, cursor: U64?) -> JetDevtoolsEvents Never! from self { JetDevtoolsEvents{envelope: @self, at: 0, cursor: cursor} }
+    pub fn events(self) -> JetDevtoolsEvents Never! from self { self.events_since(None) }
+    pub fn oldest_sequence(self) -> U64? Never! {
+        if self.count == 0 -> return None
+        if self.events[self.head] == .Val(event) -> return Val(event.sequence)
+        panic("occupied event ring slot")
+    }
+    pub fn latest_sequence(self) -> U64? Never! {
+        if self.count == 0 -> return None
+        slot :: (self.head + self.count - 1) % self.max_events
+        if self.events[slot] == .Val(event) -> return Val(event.sequence)
+        panic("occupied event ring slot")
+    }
+    pub fn game_trace_bodies(self) -> [JetDevtoolsEventBody] Never! {
+        result := [JetDevtoolsEventBody]{}
+        loop event in self.events() {
+            if event.body == .Val(body) {
+                if body == { .GameFrameSample(_, _, _, _, _, _, _, _, _, _, _) | .GameDrawEvent(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> &result.push(~body), else -> {} }
+            }
+        }
+        result
+    }
+    pub fn event_count(self) -> Int Never! { self.count }
+    pub fn view(self) -> @JetDevtoolsViewState Never! from self { @self.view }
+    pub fn selection(self) -> (@JetDevtoolsSelection)? Never! from self { self.view.selection() }
+    pub fn cursor(self) -> U64? Never! { self.view.cursor }
+    pub fn set_selection(&self, selection: ^JetDevtoolsSelection?) Never! { &self.view.set_selection(^selection) }
+    pub fn set_cursor(&self, cursor: U64?) Never! { self.view.cursor = cursor }
+    pub fn set_lifecycle(&self, lifecycle: JetDevtoolsLifecycleState) Never! { self.lifecycle = lifecycle }
+    pub fn set_freshness(&self, freshness: JetDevtoolsFreshnessFact) Never! { self.freshness = freshness }
+    pub fn set_source_identity(&self, identity: ^JetDevtoolsSourceIdentityFact?) Err! {
+        if identity == .Val(fact) -> fact.validate()
+        self.source_identity = ^identity
+        return
+    }
+    pub fn serialize(self) -> String Err! { jet_devtools_serialize(self) }
+}
+// #4392/#4500: borrowed iteration retains envelope owner, allocates no events.
+pub struct JetDevtoolsEvents { envelope: @JetDevtoolsEnvelope, at: Int, cursor: U64? }
+impl JetDevtoolsEvents.Iterator {
+    type Item = @JetDevtoolsEvent
+    fn next(&self) -> (@JetDevtoolsEvent)? from self {
+        loop self.at < self.envelope.count {
+            slot :: (self.envelope.head + self.at) % self.envelope.max_events
+            self.at += 1
+            if self.envelope.events[slot] == .Val(event) {
+                if self.cursor == .Val(cursor) { if event.sequence <= cursor -> next }
+                return Val(@event)
+            }
+        }
+        None
+    }
+}
+// Foundation admission/redaction; native snapshot/registration lifetime #4494.
+fn jet_live_value_text_valid(value: String) -> Bool Never! { value.bytes().len() <= JET_DEVTOOLS_MAX_TEXT_BYTES && !jet_devtools_text_has_control(value) }
+fn jet_live_value_identity_valid(value: String) -> Bool Never! { value.len() != 0 && jet_live_value_text_valid(value) }
+fn jet_live_value_sensitive(value: String) -> Bool Never! {
+    lowered := [U8]{}
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        &lowered.push(U8{if code >= 65 && code <= 90 -> code + 32 else -> code})
+    }
+    text :: String.from_bytes(lowered) ?? panic("ASCII lowercase preserves UTF-8")
+    text.contains("credential") || text.contains("secret") || text.contains("pii")
+}
+pub fn jet_devtools_live_value_decision(key: String, type_identity: String, rendered: String?) -> JetLiveValueDecision? Never! {
+    if !jet_live_value_identity_valid(key) || !jet_live_value_identity_valid(type_identity) -> return None
+    rendered_value := None
+    reason := "runtime assignment"
+    if rendered == .Val(value) {
+        if {
+            !jet_live_value_text_valid(value) -> reason = "rendered value rejected by policy"
+            jet_live_value_sensitive(key) || jet_live_value_sensitive(type_identity) -> reason = "rendered value redacted by policy"
+            else -> rendered_value = Val(~value)
+        }
+    }
+    Val(JetLiveValueDecision{value_id: ~key, type_identity: ~type_identity, disposition: "kept", reason: reason, rendered_value: rendered_value})
+}

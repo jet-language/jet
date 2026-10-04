@@ -1,0 +1,93 @@
+use jet_foundation.[JetTaskFailure]
+
+// SourceCallbacks.rs:13-33,35-79,109-187,260-280.
+// Generic rejected packets retain their original moved values. This metadata
+// does not implement or impersonate the lifecycle-gated callback session.
+pub struct SourceCallbackID { value: U64 }
+pub struct SourceCallbackRequestID { value: U64 }
+pub fn source_callback_id_get(id: SourceCallbackID) -> U64 Never! { id.value }
+pub fn source_callback_request_id_get(id: SourceCallbackRequestID) -> U64 Never! { id.value }
+
+#Error
+pub enum SourceCallbackError {
+    Closed Retiring UnknownCallback ReleaseNotReady PayloadBusy ReplyClosed
+    ReplyValueBusy PayloadPoisoned IdExhausted ExecutionFailed(detail: String)
+}
+pub fn source_callback_error_text(error: SourceCallbackError) -> String Never! {
+    if error == {
+        .Closed -> "Source callback session is closed"
+        .Retiring -> "Source callback session is retiring"
+        .UnknownCallback -> "unknown Source callback lease"
+        .ReleaseNotReady -> "Source callback release is not ready"
+        .PayloadBusy -> "Source callback payload is temporarily owned"
+        .ReplyClosed -> "Source callback reply receiver is closed"
+        .ReplyValueBusy -> "Source callback reply value is still owned"
+        .PayloadPoisoned -> "Source callback payload lock is poisoned"
+        .IdExhausted -> "Source callback identity space is exhausted"
+        .ExecutionFailed(detail) -> "Source callback execution failed: {detail}"
+    }
+}
+
+// SourceCallbacks.rs:83-104. AlreadySent owns the exact rejected result;
+// Disconnected means its real pump owns ReplyCleanup (no result is dropped).
+#Error
+pub enum SourceCallbackReplyError<R> {
+    AlreadySent(result: R SourceCallbackError!)
+    Disconnected
+}
+pub fn source_callback_reply_error_text<R>(error: SourceCallbackReplyError<R>) -> String Never! {
+    if error == {
+        .AlreadySent(_) -> "Source callback reply was already sent"
+        .Disconnected -> "Source callback reply receiver is disconnected"
+    }
+}
+
+pub struct SourceCallbackEnqueueError<C, X> {
+    pub error: SourceCallbackError
+    pub command: C
+    pub context: X
+}
+pub fn source_callback_enqueue_error_into_parts<C, X>(packet: ^SourceCallbackEnqueueError<C, X>) -> (SourceCallbackError, C, X) Never! {
+    (^packet.error, ^packet.command, ^packet.context)
+}
+pub struct SourceCallbackRegisterError<P> {
+    pub error: SourceCallbackError
+    pub payload: P
+}
+pub fn source_callback_register_error_into_parts<P>(packet: ^SourceCallbackRegisterError<P>) -> (SourceCallbackError, P) Never! {
+    (^packet.error, ^packet.payload)
+}
+
+pub struct SourceCallbackDrainStatus {
+    pub producers: Int
+    pub inflight: Int
+    pub pending: Int
+    pub borrows: Int
+    pub releases: Int
+}
+pub fn source_callback_drain_status_default() -> SourceCallbackDrainStatus Never! {
+    SourceCallbackDrainStatus{producers: 0, inflight: 0, pending: 0, borrows: 0, releases: 0}
+}
+pub fn source_callback_drain_status_drained(status: SourceCallbackDrainStatus) -> Bool Never! {
+    status.producers == 0 && status.inflight == 0 && status.pending == 0 && status.borrows == 0 && status.releases == 0
+}
+#Error
+pub enum SourceCallbackRetireError { NotDrained(status: SourceCallbackDrainStatus) }
+pub fn source_callback_retire_error_text(error: SourceCallbackRetireError) -> String Never! {
+    if error == .NotDrained(status) -> "Source callback session is not drained (producers={status.producers}, inflight={status.inflight}, pending={status.pending}, borrows={status.borrows}, releases={status.releases})"
+}
+
+// SourceCallbacks.rs:194-206. Counts describe actual outstanding owner jobs;
+// this carrier alone never claims to perform a join or finish a session.
+pub enum SourceCallbackJobDrainOutcome {
+    Pending(open_callback_sessions: Int, pending_jobs: Int)
+    Complete(failures: [JetTaskFailure])
+}
+
+// SourceCallbacks.rs:650-668. A detached abandonment packet owns all original
+// generic values; the lifecycle-gated session must emit it, not drop them.
+pub enum SourceCallbackAbandonedEvent<C, X, R> {
+    Invoke(callback: SourceCallbackID, request: SourceCallbackRequestID, command: C, context: X)
+    Cleanup(callback: SourceCallbackID, request: SourceCallbackRequestID, command: C?, context: X?)
+    ReplyCleanup(callback: SourceCallbackID, request: SourceCallbackRequestID, result: R SourceCallbackError!)
+}

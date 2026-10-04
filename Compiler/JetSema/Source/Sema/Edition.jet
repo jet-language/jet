@@ -1,0 +1,167 @@
+// PORT-PENDING 0428 crates-jet-sema-src-sema-edition-module-group: crates/jet-sema/src/Sema/Edition.rs:1-163
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-REL3 / D-STRUCT-LIFE1=A: package-edition state and the one lifecycle
+//RS // diagnostic path. The payload comes from a user marker or a synthetic Core
+//RS // marker application; this module does not own a deprecation registry.
+//RS #![allow(dead_code)]
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+//RS use crate::Syntax;
+//RS use crate::AST::Deprecation;
+//RS 
+//RS pub(crate) fn with_package_edition<R>(edition: &str, f: impl FnOnce() -> R) -> R {
+//RS     jet_foundation::PackageEdition::with_package_edition(edition, f)
+//RS }
+//RS 
+//RS pub(crate) fn package_edition() -> String {
+//RS     jet_foundation::PackageEdition::package_edition()
+//RS }
+//RS 
+//RS pub(crate) fn edition_at_least(baseline: &str) -> bool {
+//RS     jet_foundation::PackageEdition::package_edition_at_least(baseline)
+//RS }
+//RS 
+//RS fn is_edition_label(label: &str) -> bool {
+//RS     let trimmed = label.trim();
+//RS     trimmed.len() == 4 && trimmed.bytes().all(|byte| byte.is_ascii_digit())
+//RS }
+//RS 
+//RS fn version_phrase(label: &str) -> String {
+//RS     if is_edition_label(label) {
+//RS         format!("edition {label}")
+//RS     } else {
+//RS         label.to_string()
+//RS     }
+//RS }
+//RS 
+//RS /// `jet fix` owns the mechanical part of a lifecycle migration: replace the
+//RS /// used member with the final path's leaf. The diagnostic span is the call
+//RS /// member/name, so replacing `encode` with `to_bytes` keeps `cbor.to_bytes`
+//RS /// well-formed while a plain `use: "parse"` remains a plain rename.
+//RS fn replacement_edit(dep: &Deprecation, span: Option<Span>) -> Option<TextEdit> {
+//RS     let span = span?;
+//RS     let replacement = dep.replacement.rsplit('.').next()?.trim();
+//RS     if replacement.is_empty()
+//RS         || !replacement.bytes().enumerate().all(|(index, byte)| {
+//RS             byte == b'_'
+//RS                 || (byte.is_ascii_alphanumeric()
+//RS                     && (index > 0 || byte.is_ascii_alphabetic() || byte == b'_'))
+//RS         })
+//RS     {
+//RS         return None;
+//RS     }
+//RS     Some(TextEdit {
+//RS         span,
+//RS         new_text: replacement.to_string(),
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn deprecation_phase(dep: &Deprecation) -> DeprecationPhase {
+//RS     let edition = package_edition();
+//RS     if dep.removed_in.as_deref().is_some_and(|removed| {
+//RS         is_edition_label(removed)
+//RS             && jet_foundation::PackageEdition::edition_at_least(&edition, removed)
+//RS     }) {
+//RS         return DeprecationPhase::Removed;
+//RS     }
+//RS     if is_edition_label(&dep.since)
+//RS         && !jet_foundation::PackageEdition::edition_at_least(&edition, &dep.since)
+//RS     {
+//RS         DeprecationPhase::Active
+//RS     } else {
+//RS         DeprecationPhase::Deprecated
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub(crate) enum DeprecationPhase {
+//RS     Active,
+//RS     Deprecated,
+//RS     Removed,
+//RS }
+//RS 
+//RS pub(crate) fn e2002(item: &str, dep: &Deprecation, span: Option<Span>) -> Diagnostic {
+//RS     let removed_in = dep.removed_in.as_deref().unwrap_or("this edition");
+//RS     let diagnostic = Diagnostic::error(
+//RS         "E2002",
+//RS         format!("`{item}` was removed in {}", version_phrase(removed_in)),
+//RS         format!(
+//RS             "`{item}` was deprecated in {} and no longer exists in this edition; it has reached the end of its migration window.",
+//RS             version_phrase(&dep.since),
+//RS         ),
+//RS         format!(
+//RS             "use `{}` instead, or run `{} fix` to migrate automatically.",
+//RS             dep.replacement,
+//RS             Syntax::BINARY_NAME,
+//RS         ),
+//RS         span,
+//RS     );
+//RS     replacement_edit(dep, span)
+//RS         .map(|edit| diagnostic.clone().with_edit(edit))
+//RS         .unwrap_or(diagnostic)
+//RS }
+//RS 
+//RS pub(crate) fn l2001(item: &str, dep: &Deprecation, span: Option<Span>) -> Diagnostic {
+//RS     let why = match dep.removed_in.as_deref() {
+//RS         Some(removed_in) => format!(
+//RS             "`{item}` was deprecated in {} and will be removed in {}; it still works for now but should be migrated.",
+//RS             version_phrase(&dep.since),
+//RS             version_phrase(removed_in),
+//RS         ),
+//RS         None => format!(
+//RS             "`{item}` was deprecated in {}; it still works for now but should be migrated.",
+//RS             version_phrase(&dep.since),
+//RS         ),
+//RS     };
+//RS     let diagnostic = Diagnostic::lint(
+//RS         "L2001",
+//RS         format!("`{item}` is deprecated"),
+//RS         why,
+//RS         format!(
+//RS             "use `{}` instead, or run `{} fix` to migrate automatically.",
+//RS             dep.replacement,
+//RS             Syntax::BINARY_NAME,
+//RS         ),
+//RS         span,
+//RS     );
+//RS     replacement_edit(dep, span)
+//RS         .map(|edit| diagnostic.clone().with_edit(edit))
+//RS         .unwrap_or(diagnostic)
+//RS }
+//RS 
+//RS impl<'a> super::Checker<'a> {
+//RS     /// Emit the lifecycle result for one resolved item. Every user and Core
+//RS     /// call site enters here, so severity and copy cannot drift by caller.
+//RS     pub(crate) fn check_deprecation(&mut self, item: &str, dep: &Deprecation, span: Span) {
+//RS         let phase = deprecation_phase(dep);
+//RS         let status = match phase {
+//RS             DeprecationPhase::Active => "active",
+//RS             DeprecationPhase::Deprecated => "deprecated",
+//RS             DeprecationPhase::Removed => "removed",
+//RS         };
+//RS         let detail = match dep.removed_in.as_deref() {
+//RS             Some(removed_in) => format!(
+//RS                 "since {}; use `{}`; removed in {}",
+//RS                 dep.since, dep.replacement, removed_in
+//RS             ),
+//RS             None => format!("since {}; use `{}`", dep.since, dep.replacement),
+//RS         };
+//RS         self.name_ledger
+//RS             .record_structure_fact(jet_foundation::Names::StructureFact::new(
+//RS                 jet_foundation::Names::StructureFactKind::Lifecycle,
+//RS                 item,
+//RS                 self.module_path,
+//RS                 span,
+//RS                 status,
+//RS                 detail,
+//RS                 None,
+//RS             ));
+//RS         match phase {
+//RS             DeprecationPhase::Removed => self.diags.push(e2002(item, dep, Some(span))),
+//RS             DeprecationPhase::Deprecated => self.diags.push(l2001(item, dep, Some(span))),
+//RS             DeprecationPhase::Active => {}
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0428 crates/jet-sema/src/Sema/Edition.rs:1-163
+

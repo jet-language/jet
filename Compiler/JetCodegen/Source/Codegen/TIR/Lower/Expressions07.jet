@@ -1,0 +1,1111 @@
+// PORT-PENDING 0481 crates-jet-codegen-src-codegen-tir-lower-expressions-slice-8960: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8960-10066
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn pattern_binds_nothing(pattern: &Pattern) -> bool {
+//RS     let variants_only = match pattern {
+//RS         Pattern::Variant { .. } => true,
+//RS         Pattern::Or(alternatives, _) => alternatives
+//RS             .iter()
+//RS             .all(|alternative| matches!(alternative, Pattern::Variant { .. })),
+//RS         _ => false,
+//RS     };
+//RS     variants_only && pattern.binding_names().iter().all(|name| name.name == "_")
+//RS }
+//RS 
+//RS /// Retag a lowered scalar typed-literal body with the head's numeric width.
+//RS /// Nested float unary/binary operands inherit the same width so MirBridge
+//RS /// doesn't mix F32/F64 in `F32.{ -0.0 }` / `F32.{ max + max }`.
+//RS fn retag_numeric_width(expr: &mut TExpr, head: &Type, line: u32) {
+//RS     let mut work = TirWorklist::new();
+//RS     work.push(expr);
+//RS     while let Some(expr) = work.pop() {
+//RS         if matches!(head, Type::Float | Type::Float32)
+//RS             && matches!(expr.ty, Type::Int | Type::IntN { .. })
+//RS         {
+//RS             let source_signed = !matches!(expr.ty, Type::IntN { signed: false, .. });
+//RS             let source = std::mem::replace(
+//RS                 expr,
+//RS                 TExpr {
+//RS                     ty: head.clone(),
+//RS                     kind: TExprKind::Unit,
+//RS                 },
+//RS             );
+//RS             expr.kind = TExprKind::NumericMethod {
+//RS                 recv: Box::new(source),
+//RS                 op: TNumericOp::CheckedIntToFloat {
+//RS                     source_signed,
+//RS                     target_f32: *head == Type::Float32,
+//RS                     line,
+//RS                 },
+//RS             };
+//RS             continue;
+//RS         }
+//RS         let source_ty = expr.ty.without_user_tags();
+//RS         let head_ty = head.without_user_tags();
+//RS         // A fixed-width operand of another width (`U64{byte}` with `byte: U8`)
+//RS         // is a value conversion, not a retag: keep the checked numeric cast so
+//RS         // every tier widens the same carrier. Exact `Int` sources do the same.
+//RS         let widen_fixed = matches!(
+//RS             (source_ty, head_ty),
+//RS             (Type::IntN { .. }, Type::IntN { .. }) if source_ty != head_ty
+//RS         ) && !matches!(expr.kind, TExprKind::IntLit(..));
+//RS         if widen_fixed || (matches!(head_ty, Type::Int) && matches!(source_ty, Type::IntN { .. })) {
+//RS             let source = std::mem::replace(
+//RS                 expr,
+//RS                 TExpr {
+//RS                     ty: head.clone(),
+//RS                     kind: TExprKind::Unit,
+//RS                 },
+//RS             );
+//RS             expr.kind = TExprKind::NumericMethod {
+//RS                 recv: Box::new(source),
+//RS                 op: TNumericOp::CastAs {
+//RS                     dst_rust: String::new(),
+//RS                 },
+//RS             };
+//RS             continue;
+//RS         }
+//RS         expr.ty = head.clone();
+//RS         if !matches!(head, Type::Float | Type::Float32) {
+//RS             continue;
+//RS         }
+//RS         // The raw-fragment path deliberately lowers an untyped decimal token
+//RS         // through `Decimal.from_str`. A scalar `Float{ ... }` or `Float32{ ... }`
+//RS         // supplies the missing context only here, after the body has been
+//RS         // lowered, so convert that carrier back to the machine-float literal
+//RS         // before evaluation or AOT emission.
+//RS         let raw_float = match &expr.kind {
+//RS             TExprKind::PreciseBuiltin {
+//RS                 type_name,
+//RS                 func,
+//RS                 args,
+//RS             } if type_name == Syntax::TYPE_DECIMAL && func == "from_str" => match args.as_slice() {
+//RS                 [
+//RS                     TExpr {
+//RS                         kind: TExprKind::StrLit(parts),
+//RS                         ..
+//RS                     },
+//RS                 ] => match parts.as_slice() {
+//RS                     [TStrPart::Lit(raw)] => raw.replace('_', "").parse::<f64>().ok(),
+//RS                     _ => None,
+//RS                 },
+//RS                 _ => None,
+//RS             },
+//RS             _ => None,
+//RS         };
+//RS         if let Some(value) = raw_float {
+//RS             expr.kind = TExprKind::FloatLit(value);
+//RS             continue;
+//RS         }
+//RS         match &mut expr.kind {
+//RS             TExprKind::Unary { operand, .. } => work.push(operand),
+//RS             TExprKind::Binary { lhs, rhs, .. } => {
+//RS                 work.push(rhs);
+//RS                 work.push(lhs);
+//RS             }
+//RS             TExprKind::Clone(inner, _)
+//RS             | TExprKind::ExplicitCopy(inner)
+//RS             | TExprKind::MaterializeView(inner)
+//RS             | TExprKind::Move(inner) => work.push(inner),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-UNITLIT1 / D-TYPE2-IMAG1=A: the rewrite sema's `Expr::UnitLit` arm
+//RS /// performs (`Sema/CheckerInfer/expr.rs`), reproduced for the raw AST that
+//RS /// comptime items and MirBridge fragments lower before sema elaborates them.
+//RS /// An in-scope unit member wins over the imaginary suffix here too, so a user
+//RS /// `#UnitFamily` member named `i` shadows it exactly like any other unit.
+//RS ///
+//RS /// A canonical Time literal (`500ms`) is absent on purpose: sema resolves it
+//RS /// against the Time family's literal facts, which a lowering `Cx` does not
+//RS /// carry, so a member of that family keeps refusing here instead of being
+//RS /// mistaken for an ordinary unit member and folded to the wrong value.
+//RS fn unit_lit_elaborated(e: &Expr, cx: &Cx) -> Option<Expr> {
+//RS     let Expr::UnitLit {
+//RS         int,
+//RS         float,
+//RS         suffix,
+//RS         suffix_span,
+//RS         span,
+//RS         ..
+//RS     } = e
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     let value = float.unwrap_or_else(|| int.unwrap_or(0) as f64);
+//RS     let read_arg = |expr: Expr| CallArg {
+//RS         convention: AccessConvention::Read,
+//RS         expr,
+//RS         span: *span,
+//RS         flags: crate::AST::CallArgFlags::default(),
+//RS         label: None,
+//RS         spread: false,
+//RS     };
+//RS     let type_name = crate::AST::UnitFamilyDef::type_name(suffix);
+//RS     // Sema's `unit_literal("Time", suffix)` lookup, from the one fact a
+//RS     // lowering `Cx` does carry: the minted type's family name.
+//RS     let canonical_time = cx
+//RS         .unit_facts
+//RS         .get(&type_name)
+//RS         .is_some_and(|fact| fact.family == "Time");
+//RS     if !canonical_time
+//RS         && cx
+//RS             .distinct_types
+//RS             .get(&type_name)
+//RS             .is_some_and(|(base, numeric)| *numeric && *base == Type::Float)
+//RS     {
+//RS         return Some(Expr::MethodCall {
+//RS             receiver: Box::new(Expr::Ident(type_name, *suffix_span)),
+//RS             method: Syntax::numeric_conversion_method("Float")
+//RS                 .expect("Float has a canonical conversion method")
+//RS                 .to_string(),
+//RS             method_span: *suffix_span,
+//RS             owner_type_args: Vec::new(),
+//RS             type_args: Vec::new(),
+//RS             args: vec![read_arg(Expr::Float(value, *span, false, None))],
+//RS             recv_type: None,
+//RS             resolved_ret: None,
+//RS             operator_rhs: None,
+//RS             checked_widen: false,
+//RS         });
+//RS     }
+//RS     if suffix != Syntax::UNIT_SUFFIX_IMAGINARY {
+//RS         return None;
+//RS     }
+//RS     // `4i` is a pure imaginary value: zero real part, the literal imaginary.
+//RS     Some(Expr::Call(Call {
+//RS         name: Syntax::TYPE_COMPLEX.to_string(),
+//RS         name_span: *suffix_span,
+//RS         type_args: Vec::new(),
+//RS         args: vec![
+//RS             read_arg(Expr::Float(0.0, *span, false, None)),
+//RS             read_arg(Expr::Float(value, *span, false, None)),
+//RS         ],
+//RS         resolved_ret: None,
+//RS         range_checked: false,
+//RS         widen_approx: false,
+//RS     }))
+//RS }
+//RS 
+//RS /// D-TYPE2-IMAG1=A: `Checker::complexize_operand` for lowered operands. Only
+//RS /// the four arithmetic operators the precise `Complex` rule defines promote; a
+//RS /// comparison stays untouched so it keeps refusing instead of inventing an
+//RS /// operation sema rejects.
+//RS fn complexize_operands(op: BinOp, lhs: TExpr, rhs: TExpr, cx: &Cx) -> (TExpr, TExpr) {
+//RS     if !matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+//RS         || cx.type_names.contains(Syntax::TYPE_COMPLEX)
+//RS     {
+//RS         return (lhs, rhs);
+//RS     }
+//RS     let is_complex = |ty: &Type| matches!(ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX);
+//RS     let is_scalar = |ty: &Type| {
+//RS         matches!(
+//RS             ty,
+//RS             Type::Int | Type::IntN { .. } | Type::Float | Type::Float32
+//RS         )
+//RS     };
+//RS     match (is_complex(&lhs.ty), is_complex(&rhs.ty)) {
+//RS         (true, false) if is_scalar(&rhs.ty) => (lhs, complex_from_scalar(rhs)),
+//RS         (false, true) if is_scalar(&lhs.ty) => (complex_from_scalar(lhs), rhs),
+//RS         _ => (lhs, rhs),
+//RS     }
+//RS }
+//RS 
+//RS /// The shared `Complex` carrier is two `f64` parts on every tier, so an integer
+//RS /// or `F32` operand widens through the same numeric conversion op
+//RS /// `Float.from_int(…)` lowers to before it becomes the real part.
+//RS fn complex_from_scalar(value: TExpr) -> TExpr {
+//RS     let real = if matches!(value.ty, Type::Float) {
+//RS         value
+//RS     } else {
+//RS         let source = value.ty.name();
+//RS         let op = crate::Codegen::TIR::resolve_numeric_conversion_op("Float", &source)
+//RS             .expect("a complex scalar is a registered numeric conversion source");
+//RS         TExpr {
+//RS             ty: Type::Float,
+//RS             kind: TExprKind::NumericMethod {
+//RS                 recv: Box::new(value),
+//RS                 op,
+//RS             },
+//RS         }
+//RS     };
+//RS     TExpr {
+//RS         ty: Type::Named(Syntax::TYPE_COMPLEX.to_string()),
+//RS         kind: TExprKind::PreciseBuiltin {
+//RS             type_name: Syntax::TYPE_COMPLEX.to_string(),
+//RS             func: "from_parts".to_string(),
+//RS             args: vec![
+//RS                 real,
+//RS                 TExpr {
+//RS                     ty: Type::Float,
+//RS                     kind: TExprKind::FloatLit(0.0),
+//RS                 },
+//RS             ],
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS /// D-FAILURE-FOUNDATION1=A: sema types a call to a plain helper (`fn f() T`)
+//RS /// as its declared success value — `call.resolved_ret` is `T`, not the
+//RS /// carrier — and never wraps it in `Try` (a plain helper does not enter the
+//RS /// failure rail). The callable still returns the shared default route
+//RS /// `Result<T, Err>`, which is the type `lower_expr` gives the call. Consume
+//RS /// that route here through the one `Try` node sema itself elaborates for a
+//RS /// fallible callee, so every backend sees `T` in value position and the
+//RS /// default route still propagates. A `??` subject keeps the carrier: the
+//RS /// fallback consumes it itself.
+//RS pub(crate) fn consume_plain_helper_route(
+//RS     resolved_ret: Option<&Type>,
+//RS     name_span: Span,
+//RS     lowered: TExpr,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS ) -> TExpr {
+//RS     if env.fallback_subject
+//RS         || !resolved_ret.is_some_and(|declared| !declared.is_fallible())
+//RS         || resolved_ret.is_some_and(|declared| {
+//RS             matches!(
+//RS                 declared,
+//RS                 Type::Apply { name, args }
+//RS                     if name == Syntax::TYPE_STREAM && args.len() == 1
+//RS             )
+//RS         })
+//RS     {
+//RS         return lowered;
+//RS     }
+//RS     let Type::Result { ok, err } = &lowered.ty else {
+//RS         return lowered;
+//RS     };
+//RS     let convert = if matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER) {
+//RS         TTryConvert::Never
+//RS     } else if env.raw_protocol_return {
+//RS         TTryConvert::ProtocolExit
+//RS     } else {
+//RS         TTryConvert::None
+//RS     };
+//RS     let (line, column) = cx.src_line_col(name_span.start);
+//RS     TExpr {
+//RS         ty: (**ok).clone(),
+//RS         kind: TExprKind::Try {
+//RS             inner: Box::new(lowered),
+//RS             note: None,
+//RS             convert,
+//RS             file: escape_rust_str(&cx.file),
+//RS             line,
+//RS             column,
+//RS             fn_name: escape_rust_str(&env.fn_name),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS /// c109 Phase 8: `Val(x)` → `Some(x)`. The result type is `T?` where `T` is
+//RS /// the inner's resolved type (totality). The constructor owns its payload, so
+//RS /// resource locals transfer through `ResourceTake`, not a dereference of the
+//RS /// cleanup guard.
+//RS fn lower_present(inner: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+//RS     let mut t = lower_owned_expr(inner, cx, env);
+//RS     // The return type shapes only a list payload (`return Val([…])` in a
+//RS     // `-> [T]?` function). Any other payload keeps its own checked type: a
+//RS     // `Val(Label{…})` stored in a field must not be retagged as the list.
+//RS     if let Some(Type::Option(want)) = &env.ret_ty {
+//RS         if matches!(t.ty.without_user_tags(), Type::List(_) | Type::FixedList { .. }) {
+//RS             t = preserve_typed_list_shape(t, want, cx);
+//RS         }
+//RS     }
+//RS     TExpr {
+//RS         ty: Type::Option(Box::new(t.ty.clone())),
+//RS         kind: TExprKind::Present(Box::new(t)),
+//RS     }
+//RS }
+//RS 
+//RS /// Lower an expression whose result is stored or returned as an owned value.
+//RS /// A `Read`/`Write` non-scalar parameter is represented by a dereferenced Rust
+//RS /// borrow; moving that place would leak E0507 from rustc. Jet generic functions
+//RS /// record the clone's type so generic emission adds the required bound, then
+//RS /// materialize the owned value at this semantic boundary.
+//RS pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+//RS     fn reads_borrowed_place(e: &Expr, env: &LowerEnv) -> bool {
+//RS         let mut current = e;
+//RS         loop {
+//RS             match current {
+//RS                 Expr::Ident(name, _) => return env.is_borrowed(name),
+//RS                 Expr::Field(base, _, _) | Expr::Index { base, .. } | Expr::Paren(base, _) => {
+//RS                     current = base
+//RS                 }
+//RS                 _ => return false,
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let lowered = lower_expr(e, cx, env);
+//RS     if matches!(e, Expr::Ident(name, _) if env.is_resource(name)) {
+//RS         let Expr::Ident(name, _) = e else {
+//RS             unreachable!()
+//RS         };
+//RS         TExpr {
+//RS             ty: lowered.ty,
+//RS             kind: TExprKind::ResourceTake(env.resource_take_place(name)),
+//RS         }
+//RS     } else if reads_borrowed_place(e, env) && !lowered.ty.is_scalar() {
+//RS         let ty = lowered.ty.clone();
+//RS         env.note_clone(&ty);
+//RS         TExpr {
+//RS             ty,
+//RS             kind: TExprKind::Clone(Box::new(lowered), jet_foundation::MIR::MirCopyFact::Materialize),
+//RS         }
+//RS     } else {
+//RS         lowered
+//RS     }
+//RS }
+//RS 
+//RS /// D-APILABEL1=A: keep the ratified evaluation order across a label reorder.
+//RS ///
+//RS /// The binder rewrote the argument list into declaration order, so lowering
+//RS /// it straight through would run the supplied expressions in declaration
+//RS /// order too. `order` lists the argument slots in the order the caller wrote
+//RS /// them; each is evaluated into a temporary first, and the call then reads
+//RS /// the temporaries in declaration order.
+//RS ///
+//RS /// The result is an ordinary `InlineBlock`, so AOT emit, the interpreter, and
+//RS /// the JIT all keep the same meaning without an engine-specific rule.
+//RS /// `order` lists the *lowered* argument slots in the order the caller wrote
+//RS /// them, taken from each source argument's `flags.source_index`. Slots the
+//RS /// caller did not write (a filled default) are absent — a default runs after
+//RS /// every supplied argument anyway, in the declaration order the rewritten list
+//RS /// already has.
+//RS pub(crate) fn source_arg_order(args: &[crate::AST::CallArg]) -> Option<Vec<usize>> {
+//RS     let has_default = args
+//RS         .iter()
+//RS         .any(|arg| arg.flags.binder_slot.is_some() && arg.flags.source_index.is_none());
+//RS     if !has_default && !args.iter().any(|arg| arg.flags.source_index.is_some()) {
+//RS         return None;
+//RS     }
+//RS     let mut slots: Vec<usize> = (0..args.len())
+//RS         .filter(|slot| args[*slot].flags.source_index.is_some())
+//RS         .collect();
+//RS     slots.sort_by_key(|slot| args[*slot].flags.source_index);
+//RS     if has_default {
+//RS         let mut defaults: Vec<usize> = (0..args.len())
+//RS             .filter(|slot| {
+//RS                 args[*slot].flags.binder_slot.is_some() && args[*slot].flags.source_index.is_none()
+//RS             })
+//RS             .collect();
+//RS         defaults.sort_by_key(|slot| args[*slot].flags.binder_slot);
+//RS         slots.extend(defaults);
+//RS     }
+//RS     Some(slots)
+//RS }
+//RS 
+//RS /// D-BOUND-UNDO1=A: turn a proven foreign undo contract into the existing
+//RS /// transaction rollback hook. The foreign expression remains the only bridge
+//RS /// call; this helper only captures its arguments and registers an ordinary
+//RS /// `on_rollback` closure before evaluating it.
+//RS pub(crate) fn wrap_foreign_undo(
+//RS     lowered: TExpr,
+//RS     inverse: Option<&str>,
+//RS     site: u32,
+//RS     cx: &Cx,
+//RS     env: &mut LowerEnv,
+//RS ) -> TExpr {
+//RS     let Some(inverse) = inverse else {
+//RS         return lowered;
+//RS     };
+//RS     let Some(handle) = env.txn_handle.clone() else {
+//RS         return lowered;
+//RS     };
+//RS     let result_ty = lowered.ty.clone();
+//RS     let (mut prefix, foreign) = match lowered.kind {
+//RS         TExprKind::InlineBlock(mut stmts) => {
+//RS             let Some(last) = stmts.pop() else {
+//RS                 return TExpr {
+//RS                     ty: result_ty,
+//RS                     kind: TExprKind::InlineBlock(stmts),
+//RS                 };
+//RS             };
+//RS             let TStmt::ExprStmt(expr) = last else {
+//RS                 stmts.push(last);
+//RS                 return TExpr {
+//RS                     ty: result_ty,
+//RS                     kind: TExprKind::InlineBlock(stmts),
+//RS                 };
+//RS             };
+//RS             (stmts, expr)
+//RS         }
+//RS         kind => (
+//RS             Vec::new(),
+//RS             TExpr {
+//RS                 ty: result_ty.clone(),
+//RS                 kind,
+//RS             },
+//RS         ),
+//RS     };
+//RS     enum Forward {
+//RS         Extern {
+//RS             symbol: String,
+//RS             c_abi: bool,
+//RS         },
+//RS         Module {
+//RS             form: TModuleCallForm,
+//RS             target_return: Option<Type>,
+//RS             type_args: Vec<Type>,
+//RS         },
+//RS     }
+//RS     enum Arg {
+//RS         Extern(TExternArg),
+//RS         Module(TCallArg),
+//RS     }
+//RS     let (forward, args) = match foreign.kind {
+//RS         TExprKind::ExternCall {
+//RS             symbol,
+//RS             c_abi,
+//RS             args,
+//RS         } => (
+//RS             Forward::Extern { symbol, c_abi },
+//RS             args.into_iter().map(Arg::Extern).collect::<Vec<_>>(),
+//RS         ),
+//RS         TExprKind::ModuleCall {
+//RS             form,
+//RS             target_return,
+//RS             type_args,
+//RS             args,
+//RS         } => (
+//RS             Forward::Module {
+//RS                 form,
+//RS                 target_return,
+//RS                 type_args,
+//RS             },
+//RS             args.into_iter().map(Arg::Module).collect::<Vec<_>>(),
+//RS         ),
+//RS         kind => {
+//RS             prefix.push(TStmt::ExprStmt(TExpr {
+//RS                 ty: result_ty.clone(),
+//RS                 kind,
+//RS             }));
+//RS             return TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::InlineBlock(prefix),
+//RS             };
+//RS         }
+//RS     };
+//RS 
+//RS     if let Some(flag) = &env.txn_undo_needed {
+//RS         flag.set(true);
+//RS     }
+//RS     let inverse_params = cx.sigs.get(inverse).cloned().unwrap_or_default();
+//RS     let mut forward_extern_args = Vec::with_capacity(args.len());
+//RS     let mut forward_module_args = Vec::with_capacity(args.len());
+//RS     let mut inverse_args = Vec::with_capacity(args.len());
+//RS     let mut captures = Vec::with_capacity(args.len());
+//RS     for (index, arg) in args.into_iter().enumerate() {
+//RS         let (value, module_arg, extern_mut_borrow) = match arg {
+//RS             Arg::Extern(arg) => (arg.value, None, arg.mut_borrow),
+//RS             Arg::Module(arg) => {
+//RS                 let TCallArg {
+//RS                     value,
+//RS                     borrow,
+//RS                     mut_borrow,
+//RS                     fn_coerce,
+//RS                     widen_to_vec,
+//RS                     widen_to_union,
+//RS                     box_as_trait,
+//RS                     ..
+//RS                 } = arg;
+//RS                 (
+//RS                     value,
+//RS                     Some((
+//RS                         borrow,
+//RS                         mut_borrow,
+//RS                         fn_coerce,
+//RS                         widen_to_vec,
+//RS                         widen_to_union,
+//RS                         box_as_trait,
+//RS                     )),
+//RS                     false,
+//RS                 )
+//RS             }
+//RS         };
+//RS         let temp = jet_name_format!("{name_prefix}undo_arg_{site}_{index}");
+//RS         let ty = value.ty.clone();
+//RS         env.note_clone(&ty);
+//RS         captures.push((
+//RS             temp.clone(),
+//RS             crate::Codegen::TIR::local_place(&temp),
+//RS             ty.clone(),
+//RS         ));
+//RS         prefix.push(TStmt::Let {
+//RS             name: temp.clone(),
+//RS             kw: "let",
+//RS             let_ty: crate::Codegen::TIR::TLetTy::inferred(),
+//RS             init: TExpr {
+//RS                 ty: ty.clone(),
+//RS                 kind: TExprKind::Clone(Box::new(value), jet_foundation::MIR::MirCopyFact::Materialize),
+//RS             },
+//RS             gc_promotion: None,
+//RS             gc_transferred: false,
+//RS         });
+//RS         let local_for_forward = TExpr {
+//RS             ty: ty.clone(),
+//RS             kind: TExprKind::Local(TLocal::user(temp.clone())),
+//RS         };
+//RS         match module_arg {
+//RS             Some((borrow, mut_borrow, fn_coerce, widen_to_vec, widen_to_union, box_as_trait)) => {
+//RS                 // The capture owns the snapshot. Keep the module-call's boundary
+//RS                 // conversions, but do not clone a second time before the forward call.
+//RS                 forward_module_args.push(TCallArg {
+//RS                     value: local_for_forward,
+//RS                     template_items: None,
+//RS                     borrow,
+//RS                     mut_borrow,
+//RS                     clone: false,
+//RS                     arc_clone: false,
+//RS                     fn_coerce,
+//RS                     widen_to_vec,
+//RS                     widen_to_union,
+//RS                     box_as_trait,
+//RS                 });
+//RS             }
+//RS             None => {
+//RS                 // A non-scalar foreign parameter is already passed as a clone by the
+//RS                 // normal FFI lowering. Clone the captured slot for the forward call so
+//RS                 // the rollback closure keeps its copy alive.
+//RS                 forward_extern_args.push(TExternArg {
+//RS                     value: local_for_forward,
+//RS                     clone: !ty.is_scalar(),
+//RS                     mut_borrow: extern_mut_borrow,
+//RS                 });
+//RS             }
+//RS         }
+//RS         let (convention, inverse_ty) = inverse_params
+//RS             .get(index)
+//RS             .cloned()
+//RS             .unwrap_or((AccessConvention::Read, ty.clone()));
+//RS         inverse_args.push(TCallArg {
+//RS             value: TExpr {
+//RS                 ty: ty.clone(),
+//RS                 kind: TExprKind::Local(TLocal::user(temp)),
+//RS             },
+//RS             template_items: None,
+//RS             borrow: convention == AccessConvention::Read && !inverse_ty.is_scalar(),
+//RS             mut_borrow: convention == AccessConvention::Write,
+//RS             clone: false,
+//RS             arc_clone: false,
+//RS             fn_coerce: None,
+//RS             widen_to_vec: false,
+//RS             widen_to_union: None,
+//RS             box_as_trait: None,
+//RS         });
+//RS     }
+//RS     let inverse_expr = TExpr {
+//RS         ty: call_return_type(cx, inverse),
+//RS         kind: TExprKind::Call {
+//RS             name: inverse.to_string(),
+//RS             type_args: Vec::new(),
+//RS             args: inverse_args,
+//RS         },
+//RS     };
+//RS     let inverse_ret = (!matches!(
+//RS         &inverse_expr.ty,
+//RS         Type::Named(name) if name == "Unit"
+//RS     ))
+//RS     .then(|| inverse_expr.ty.clone());
+//RS     let inverse_failure = TFailureCarrier::from_checked_type(&inverse_expr.ty);
+//RS     let capture_facts = crate::Codegen::TIR::TCaptureFacts {
+//RS         escapes: true,
+//RS         moved: captures.iter().map(|(name, _, _)| name.clone()).collect(),
+//RS         ..Default::default()
+//RS     };
+//RS     let lambda = TLambda {
+//RS         executable: TLambdaBody::Expr(Box::new(inverse_expr)),
+//RS         source_span: Span::new(site as usize, site as usize),
+//RS         frame_schedule: None,
+//RS         frame_schedule_derivation: None,
+//RS         capture_facts,
+//RS         host_param_conventions: None,
+//RS         failure_carrier: inverse_failure,
+//RS         effects: crate::Codegen::TIR::TEffectFacts::default(),
+//RS         source_params: Vec::new(),
+//RS         jit_name: mangle_generated(&format!("undo_{site}")),
+//RS         param_types: Vec::new(),
+//RS         ret: inverse_ret,
+//RS         is_move: true,
+//RS         boxed: false,
+//RS         rc: false,
+//RS         arc: false,
+//RS         captures,
+//RS         capture_origins: Default::default(),
+//RS         materialized_captures: Vec::new(),
+//RS         frozen_captures: Vec::new(),
+//RS         uses_stack_sentry: false,
+//RS     };
+//RS     let registration = TExpr {
+//RS         ty: Type::Named("TransactionGuard".to_string()),
+//RS         kind: TExprKind::CoreClosureCall {
+//RS             kind: TCoreClosureKind::OnRollback {
+//RS                 handle_name: handle.name.clone(),
+//RS                 executable: Box::new(lambda),
+//RS             },
+//RS         },
+//RS     };
+//RS     prefix.push(TStmt::ExprStmt(registration));
+//RS     let forward_kind = match forward {
+//RS         Forward::Extern { symbol, c_abi } => TExprKind::ExternCall {
+//RS             symbol,
+//RS             c_abi,
+//RS             args: forward_extern_args,
+//RS         },
+//RS         Forward::Module {
+//RS             form,
+//RS             target_return,
+//RS             type_args,
+//RS         } => TExprKind::ModuleCall {
+//RS             form,
+//RS             target_return,
+//RS             type_args,
+//RS             args: forward_module_args,
+//RS         },
+//RS     };
+//RS     prefix.push(TStmt::ExprStmt(TExpr {
+//RS         ty: result_ty.clone(),
+//RS         kind: forward_kind,
+//RS     }));
+//RS     TExpr {
+//RS         ty: result_ty,
+//RS         kind: TExprKind::InlineBlock(prefix),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn preserve_source_arg_order(
+//RS     mut call: TExpr,
+//RS     order: &[usize],
+//RS     ast_arg_count: usize,
+//RS     site: u32,
+//RS ) -> TExpr {
+//RS     let mut stmts = match &mut call.kind {
+//RS         TExprKind::Call { args, .. }
+//RS         | TExprKind::MethodCall { args, .. }
+//RS         | TExprKind::StaticCall { args, .. }
+//RS         | TExprKind::ModuleCall { args, .. }
+//RS         | TExprKind::FnValue {
+//RS             kind: crate::Codegen::TIR::TFnValueKind::Call { args, .. },
+//RS         } => bind_arg_temporaries(args, order, ast_arg_count, site),
+//RS         TExprKind::CoreCall { args, .. } => bind_arg_temporaries(args, order, ast_arg_count, site),
+//RS         TExprKind::ExternCall { args, .. } => {
+//RS             bind_arg_temporaries(args, order, ast_arg_count, site)
+//RS         }
+//RS         TExprKind::HandleMethod { args, .. } => {
+//RS             bind_arg_temporaries(args, order, ast_arg_count, site)
+//RS         }
+//RS         _ => return call,
+//RS     };
+//RS     if stmts.is_empty() {
+//RS         return call;
+//RS     }
+//RS     let ty = call.ty.clone();
+//RS     stmts.push(TStmt::ExprStmt(call));
+//RS     TExpr {
+//RS         ty,
+//RS         kind: TExprKind::InlineBlock(stmts),
+//RS     }
+//RS }
+//RS 
+//RS trait OrderedArg {
+//RS     fn value(&self) -> &TExpr;
+//RS     /// A by-reference place must remain a place: moving it into a temporary
+//RS     /// changes ownership, while sema has already proved its read/write timing.
+//RS     /// Other arguments can be pinned in source order.
+//RS     fn can_bind(&self) -> bool {
+//RS         true
+//RS     }
+//RS     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr;
+//RS }
+//RS 
+//RS impl OrderedArg for crate::Codegen::TIR::TCallArg {
+//RS     fn value(&self) -> &TExpr {
+//RS         &self.value
+//RS     }
+//RS 
+//RS     fn can_bind(&self) -> bool {
+//RS         !self.mut_borrow && (!self.borrow || self.clone || self.arc_clone)
+//RS     }
+//RS 
+//RS     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
+//RS         // Materializing the expression must not turn a checked move into a
+//RS         // shared read of the argument temporary at the eventual call.
+//RS         let replacement = if matches!(
+//RS             self.fact_channel().exclusivity,
+//RS             crate::Codegen::TIR::TExclusivity::Move
+//RS         ) {
+//RS             TExpr {
+//RS                 ty: replacement.ty.clone(),
+//RS                 kind: TExprKind::Move(Box::new(replacement)),
+//RS             }
+//RS         } else {
+//RS             replacement
+//RS         };
+//RS         let mut value = std::mem::replace(&mut self.value, replacement);
+//RS         // Cloning is part of evaluating the supplied expression, so perform it
+//RS         // in source order rather than leaving the wrapper on the later call.
+//RS         if self.clone || self.arc_clone {
+//RS             value = TExpr {
+//RS                 ty: value.ty.clone(),
+//RS                 kind: TExprKind::Clone(
+//RS                     Box::new(value),
+//RS                     crate::Codegen::TIR::call_arg_copy_fact(self.arc_clone),
+//RS                 ),
+//RS             };
+//RS             self.clone = false;
+//RS             self.arc_clone = false;
+//RS         }
+//RS         if self.borrow || self.mut_borrow {
+//RS             value = TExpr {
+//RS                 ty: value.ty.clone(),
+//RS                 kind: TExprKind::Borrow {
+//RS                     place: Box::new(value),
+//RS                     mutable: self.mut_borrow,
+//RS                 },
+//RS             };
+//RS             self.borrow = false;
+//RS             self.mut_borrow = false;
+//RS         }
+//RS         value
+//RS     }
+//RS }
+//RS 
+//RS impl OrderedArg for crate::Codegen::TIR::TExternArg {
+//RS     fn value(&self) -> &TExpr {
+//RS         &self.value
+//RS     }
+//RS 
+//RS     fn can_bind(&self) -> bool {
+//RS         !self.mut_borrow
+//RS     }
+//RS 
+//RS     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
+//RS         let mut value = std::mem::replace(&mut self.value, replacement);
+//RS         if self.clone {
+//RS             value = TExpr {
+//RS                 ty: value.ty.clone(),
+//RS                 kind: TExprKind::Clone(Box::new(value), jet_foundation::MIR::MirCopyFact::Materialize),
+//RS             };
+//RS             self.clone = false;
+//RS         }
+//RS         if self.mut_borrow {
+//RS             value = TExpr {
+//RS                 ty: value.ty.clone(),
+//RS                 kind: TExprKind::Borrow {
+//RS                     place: Box::new(value),
+//RS                     mutable: true,
+//RS                 },
+//RS             };
+//RS             self.mut_borrow = false;
+//RS         }
+//RS         value
+//RS     }
+//RS }
+//RS 
+//RS impl OrderedArg for TExpr {
+//RS     fn value(&self) -> &TExpr {
+//RS         self
+//RS     }
+//RS 
+//RS     fn can_bind(&self) -> bool {
+//RS         // Raw Core args do not carry the signature's Read/Move convention.
+//RS         // A scalar place is Copy; a computed owning value is safe to move into
+//RS         // the source-order temporary. Keep non-scalar places in the call so a
+//RS         // later Core emit borrow cannot turn the temporary into an accidental
+//RS         // move.
+//RS         self.ty.is_scalar()
+//RS             || matches!(
+//RS                 &self.kind,
+//RS                 TExprKind::Call { .. }
+//RS                     | TExprKind::MethodCall { .. }
+//RS                     | TExprKind::StaticCall { .. }
+//RS                     | TExprKind::ModuleCall { .. }
+//RS                     | TExprKind::FnValue { .. }
+//RS                     | TExprKind::CoreCall { .. }
+//RS                     | TExprKind::ExternCall { .. }
+//RS                     | TExprKind::HostCall(_)
+//RS                     | TExprKind::InlineBlock(_)
+//RS                     | TExprKind::Clone(..)
+//RS                     | TExprKind::StrLit(_)
+//RS                     | TExprKind::Print(_)
+//RS             )
+//RS     }
+//RS 
+//RS     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
+//RS         std::mem::replace(self, replacement)
+//RS     }
+//RS }
+//RS 
+//RS /// Replace each listed argument with an access to a fresh temporary, and return
+//RS /// the `let` statements that bind them — emitted in `order`, which is source
+//RS /// order, not declaration order.
+//RS fn bind_arg_temporaries<A: OrderedArg>(
+//RS     args: &mut [A],
+//RS     order: &[usize],
+//RS     ast_arg_count: usize,
+//RS     site: u32,
+//RS ) -> Vec<TStmt> {
+//RS     // A `#Root` dot call (D-CALLDUAL1=E) lowers its receiver into slot 0 of the
+//RS     // TIR argument list, while `order` was computed over the AST list the
+//RS     // receiver was stripped from. Recover the offset from the two lengths.
+//RS     let offset = args.len().saturating_sub(ast_arg_count);
+//RS     let mut order: Vec<usize> = order.iter().map(|slot| slot + offset).collect();
+//RS     if offset > 0 {
+//RS         // `#Root` dot calls keep the receiver in TIR slot zero even though
+//RS         // sema stripped it from the AST argument list. Materialize that slot
+//RS         // before the written arguments: later defaults may refer to the root
+//RS         // parameter, and the reference must read the same once-evaluated temp.
+//RS         order.splice(0..0, 0..offset);
+//RS     }
+//RS     // Every bindable slot in the binder's source order is evaluated exactly
+//RS     // once. A borrowed place stays in the call, where its access wrapper is
+//RS     // emitted against the original place instead of moving it into a temp.
+//RS     if order.is_empty() {
+//RS         return Vec::new();
+//RS     }
+//RS     let bindable: Vec<usize> = order
+//RS         .into_iter()
+//RS         .filter(|slot| args.get(*slot).is_some_and(OrderedArg::can_bind))
+//RS         .collect();
+//RS     if bindable.is_empty() {
+//RS         return Vec::new();
+//RS     }
+//RS     let mut stmts: Vec<TStmt> = Vec::with_capacity(bindable.len() + 1);
+//RS     for slot in bindable {
+//RS         let arg = args
+//RS             .get_mut(slot)
+//RS             .expect("binder source-order slot must have a lowered argument");
+//RS         // The name has to be unique across nesting: a nested reordered call is
+//RS         // lowered as the initialiser of one of these very temporaries, and the
+//RS         // interpreter shares one scope with it. `site` is the call's source
+//RS         // offset, so two calls can never collide and the name stays stable
+//RS         // across runs.
+//RS         let ast_slot = slot.saturating_sub(offset);
+//RS         let temp_slot = if offset > 0 { slot } else { ast_slot };
+//RS         let temp = jet_format!("{jet_prefix}arg{site}_{temp_slot}");
+//RS         let ty = arg.value().ty.clone();
+//RS         let bound = arg.take_for_binding(TExpr {
+//RS             ty: ty.clone(),
+//RS             // A `user` slot, not `generated`: `TStmt::Let` spells its name
+//RS             // through `mangle`, and only `TLocal::user` reads it back the
+//RS             // same way. The name itself is unspellable in Jet source.
+//RS             kind: TExprKind::Local(TLocal::user(&temp)),
+//RS         });
+//RS         stmts.push(TStmt::Let {
+//RS             name: temp,
+//RS             kw: "let",
+//RS             // Keep the raw expression's Rust type here. Call-boundary
+//RS             // conversions (Fn boxing, fixed-list widening, union injection,
+//RS             // and borrows) still belong to the original argument wrapper,
+//RS             // which now reads this temporary.
+//RS             let_ty: crate::Codegen::TIR::TLetTy::inferred(),
+//RS             init: bound,
+//RS             gc_promotion: None,
+//RS             gc_transferred: false,
+//RS         });
+//RS     }
+//RS     stmts
+//RS }
+//RS 
+//RS /// D-LAYOUT-FACTS1=B / D-META-STAGE1=B: the type a compiler fact answers.
+//RS ///
+//RS /// Each fact projects one `TypeInfo` member, so its type is that member's type
+//RS /// and the three facts stay one spelling with one table behind them.
+//RS fn compiler_fact_type(fact: &str) -> Type {
+//RS     match fact {
+//RS         f if f == Syntax::COMPILER_FACT_NAME => Type::String,
+//RS         f if f == Syntax::COMPILER_FACT_FIELDS => {
+//RS             Type::List(Box::new(Type::Named("FieldInfo".to_string())))
+//RS         }
+//RS         f if f == Syntax::COMPILER_FACT_RANGE => Type::Named(Syntax::TYPE_RANGE.to_string()),
+//RS         f if f == Syntax::COMPILER_FACT_DIMENSION => Type::Named("DimensionInfo".to_string()),
+//RS         f if f == Syntax::COMPILER_FACT_STATES => {
+//RS             Type::List(Box::new(Type::Named("StateInfo".to_string())))
+//RS         }
+//RS         f if f == Syntax::COMPILER_FACT_EFFECTS => Type::Named("EffectInfo".to_string()),
+//RS         f if f == Syntax::COMPILER_BUILD_FACT_PROFILE => Type::String,
+//RS         _ => Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod source_order_tests {
+//RS     use super::*;
+//RS     use crate::AST::BinOp;
+//RS     use crate::Codegen::TIR::TExternArg;
+//RS 
+//RS     fn int(value: i64) -> TExpr {
+//RS         TExpr {
+//RS             ty: Type::Int,
+//RS             kind: TExprKind::IntLit(value, None),
+//RS         }
+//RS     }
+//RS 
+//RS     fn division() -> TExpr {
+//RS         TExpr {
+//RS             ty: Type::Int,
+//RS             kind: TExprKind::Binary {
+//RS                 op: BinOp::Div,
+//RS                 overflow: true,
+//RS                 line: 1,
+//RS                 lhs: Box::new(int(1)),
+//RS                 rhs: Box::new(int(0)),
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     fn print() -> TExpr {
+//RS         TExpr {
+//RS             ty: unit_type(),
+//RS             kind: TExprKind::Print(Box::new(int(1))),
+//RS         }
+//RS     }
+//RS 
+//RS     fn bump() -> TExpr {
+//RS         TExpr {
+//RS             ty: Type::Int,
+//RS             kind: TExprKind::Call {
+//RS                 name: "bump".to_string(),
+//RS                 type_args: Vec::new(),
+//RS                 args: Vec::new(),
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     fn assert_division_then_print(lowered: TExpr) {
+//RS         let TExprKind::InlineBlock(stmts) = lowered.kind else {
+//RS             panic!("reordered call needs argument temporaries");
+//RS         };
+//RS         assert!(matches!(
+//RS             &stmts[0],
+//RS             TStmt::Let {
+//RS                 init: TExpr {
+//RS                     kind: TExprKind::Binary { op: BinOp::Div, .. },
+//RS                     ..
+//RS                 },
+//RS                 ..
+//RS             }
+//RS         ));
+//RS         assert!(matches!(
+//RS             &stmts[1],
+//RS             TStmt::Let {
+//RS                 init: TExpr {
+//RS                     kind: TExprKind::Print(_),
+//RS                     ..
+//RS                 },
+//RS                 ..
+//RS             }
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn core_call_keeps_panicking_arithmetic_in_written_order() {
+//RS         // The first source expression sits in slot 1 and widens at the call
+//RS         // site. Its raw value must still be evaluated first.
+//RS         let call = core_call_expr(
+//RS             unit_type(),
+//RS             "core.math",
+//RS             "pow",
+//RS             vec![print(), division()],
+//RS             Span::new(0, 1),
+//RS             vec![false, true],
+//RS         );
+//RS         assert_division_then_print(preserve_source_arg_order(call, &[1, 0], 2, 7));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn extern_call_uses_the_same_written_order_wrapper() {
+//RS         let call = TExpr {
+//RS             ty: unit_type(),
+//RS             kind: TExprKind::ExternCall {
+//RS                 symbol: "ordered".to_string(),
+//RS                 c_abi: false,
+//RS                 args: vec![
+//RS                     TExternArg {
+//RS                         value: print(),
+//RS                         clone: false,
+//RS                         mut_borrow: false,
+//RS                     },
+//RS                     TExternArg {
+//RS                         value: division(),
+//RS                         clone: false,
+//RS                         mut_borrow: false,
+//RS                     },
+//RS                 ],
+//RS             },
+//RS         };
+//RS         assert_division_then_print(preserve_source_arg_order(call, &[1, 0], 2, 9));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn core_call_pins_a_local_read_after_an_earlier_call() {
+//RS         let call = core_call_expr(
+//RS             unit_type(),
+//RS             "core.math",
+//RS             "pow",
+//RS             vec![
+//RS                 TExpr {
+//RS                     ty: Type::Int,
+//RS                     kind: TExprKind::Local(TLocal::user("x")),
+//RS                 },
+//RS                 bump(),
+//RS             ],
+//RS             Span::new(0, 1),
+//RS             vec![false, false],
+//RS         );
+//RS         let lowered = preserve_source_arg_order(call, &[1, 0], 2, 11);
+//RS         let TExprKind::InlineBlock(stmts) = lowered.kind else {
+//RS             panic!("reordered call needs argument temporaries");
+//RS         };
+//RS         assert!(matches!(
+//RS             &stmts[0],
+//RS             TStmt::Let { init: TExpr { kind: TExprKind::Call { name, .. }, .. }, .. }
+//RS                 if name == "bump"
+//RS         ));
+//RS         assert!(matches!(
+//RS             &stmts[1],
+//RS             TStmt::Let {
+//RS                 init: TExpr {
+//RS                     kind: TExprKind::Local(_),
+//RS                     ..
+//RS                 },
+//RS                 ..
+//RS             }
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn core_call_does_not_move_a_read_borrowed_string_place() {
+//RS         let call = core_call_expr(
+//RS             unit_type(),
+//RS             "core.math",
+//RS             "pow",
+//RS             vec![
+//RS                 TExpr {
+//RS                     ty: Type::String,
+//RS                     kind: TExprKind::Local(TLocal::user("key")),
+//RS                 },
+//RS                 bump(),
+//RS             ],
+//RS             Span::new(0, 1),
+//RS             vec![false, false],
+//RS         );
+//RS         let lowered = preserve_source_arg_order(call, &[1, 0], 2, 13);
+//RS         let TExprKind::InlineBlock(stmts) = lowered.kind else {
+//RS             panic!("earlier call still needs an argument temporary");
+//RS         };
+//RS         assert_eq!(stmts.len(), 2);
+//RS         let TStmt::ExprStmt(TExpr {
+//RS             kind: TExprKind::CoreCall { args, .. },
+//RS             ..
+//RS         }) = &stmts[1]
+//RS         else {
+//RS             panic!("last statement must remain the Core call");
+//RS         };
+//RS         assert!(matches!(&args[0].kind, TExprKind::Local(local) if local.name == "key"));
+//RS     }
+//RS }
+// END-PORT-PENDING 0481 crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8960-10066
+

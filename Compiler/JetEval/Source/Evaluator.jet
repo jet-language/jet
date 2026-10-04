@@ -60,7 +60,7 @@ use jet_foundation.[
     MIRSelectKind,
     MIRSemanticOp,
     MIRSiteID,
-    MIRStringFormat,
+    TStrFormat,
     MIRTaskGroupKind,
     MIRTerminator,
     MIRTraitMethod,
@@ -95,6 +95,7 @@ use jet_foundation.[
     mir_type_with_identity,
     mir_view_copy_kind,
     mir_view_copy_target_matches,
+    tir_comptime_key_value,
 ]
 
 enum JetEvalStep { Continue Return(value: JetEvalRuntimeValue) }
@@ -2370,25 +2371,6 @@ fn jet_eval_initialize_range(machine: &JetEvalMachine, frame_index: Int, start_i
     Val(JetEvalRuntimeValue.RangeCursor{start: start, end: end, current: start, step: step, exclusive: exclusive})
 }
 
-fn jet_eval_iterator_key_value(key: TComptimeKey) -> TComptimeValue Never! {
-    if key == {
-        .Int(value) -> return TComptimeValue.Int{value: value}
-        .String(value) -> return TComptimeValue.String{value: value}
-        .Bool(value) -> return TComptimeValue.Bool{value: value}
-        .Char(value) -> return TComptimeValue.Char{value: value}
-        .Tuple(fields) -> {
-            output := [TComptimeField]{}
-            loop field in fields -> &output.push(TComptimeField{name: field.name, value: jet_eval_iterator_key_value(field.key)})
-            return TComptimeValue.Struct{type_name: "Tuple", fields: output}
-        }
-        .Struct(type_name, fields) -> {
-            output := [TComptimeField]{}
-            loop field in fields -> &output.push(TComptimeField{name: field.name, value: jet_eval_iterator_key_value(field.key)})
-            return TComptimeValue.Struct{type_name: type_name, fields: output}
-        }
-        .Enum(type_name, variant) -> return TComptimeValue.Enum{type_name: type_name, variant: variant, args: [TComptimeEnumArg]{}}
-    }
-}
 
 fn jet_eval_loop_source_wire(source_kind: MIRLoopSourceKind) -> String Never! {
     if source_kind == MIRLoopSourceKind.Plain -> return "plain"
@@ -2555,7 +2537,7 @@ fn jet_eval_initialize_iterator_from(machine: &JetEvalMachine, frame_index: Int,
         values := [JetEvalRuntimeValue]{}
         loop entry in entries {
             pair := TComptimeValue.Struct{type_name: "Tuple", fields: [TComptimeField]{
-                TComptimeField{name: "key", value: jet_eval_iterator_key_value(entry.key)},
+                TComptimeField{name: "key", value: tir_comptime_key_value(entry.key)},
                 TComptimeField{name: "value", value: entry.value},
             }}
             &values.push(JetEvalRuntimeValue.Data{value: pair})
@@ -8186,7 +8168,7 @@ fn jet_eval_typed_text_interp(machine: &JetEvalMachine, frame_index: Int, call: 
             }
             else -> {
                 ty :: jet_eval_value_type(&machine, frame_index, hole, span) ?? return None
-                shown :: jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Display, Val(ty), span) ?? return None
+                shown :: jet_eval_format_string_value_full(&machine, data, TStrFormat.Display, Val(ty), span) ?? return None
                 &hole_values.push(TComptimeValue.String{value: shown})
             }
         }
@@ -8266,13 +8248,13 @@ fn jet_eval_semantic_display(machine: &JetEvalMachine, frame_index: Int, value: 
     runtime :: jet_eval_value(&machine, frame_index, value, span) ?? return None
     data :: jet_eval_data(runtime, &machine, span) ?? return None
     ty :: jet_eval_value_type(&machine, frame_index, value, span) ?? return None
-    jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Display, Val(ty), span)
+    jet_eval_format_string_value_full(&machine, data, TStrFormat.Display, Val(ty), span)
 }
 fn jet_eval_semantic_debug(machine: &JetEvalMachine, frame_index: Int, value: MIRValueID, span: Span) -> String? {
     runtime :: jet_eval_value(&machine, frame_index, value, span) ?? return None
     data :: jet_eval_data(runtime, &machine, span) ?? return None
     ty :: jet_eval_value_type(&machine, frame_index, value, span) ?? return None
-    jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Debug, Val(ty), span)
+    jet_eval_format_string_value_full(&machine, data, TStrFormat.Debug, Val(ty), span)
 }
 
 fn jet_eval_require_locals(machine: &JetEvalMachine, frame_index: Int, context: MIRPanicContext, span: Span) -> String? {
@@ -8298,7 +8280,7 @@ fn jet_eval_require_locals(machine: &JetEvalMachine, frame_index: Int, context: 
             return None
         }
         data :: jet_eval_data(runtime, &machine, span) ?? return None
-        debug :: jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Debug, Val(local_definition.ty), span) ?? return None
+        debug :: jet_eval_format_string_value_full(&machine, data, TStrFormat.Debug, Val(local_definition.ty), span) ?? return None
         &output.push("{local.name} = {debug}")
     }
     output.join(", ")
@@ -9507,7 +9489,7 @@ fn jet_eval_terminator(machine: &JetEvalMachine, frame_index: Int, terminator: M
             result :: jet_eval_value(&machine, frame_index, id, jet_eval_empty_span()) ?? return None
             return Val(JetEvalStep.Return{value: result})
         }
-        .Yield(_, _) -> {
+        .Yield(_, _, _) -> {
             if !jet_eval_run_drops(&machine, frame_index, MIRDropEdge.Normal, jet_eval_empty_span()) -> return None
             jet_eval_unsupported(&machine, jet_eval_empty_span(), "MIR generator yield")
             return None

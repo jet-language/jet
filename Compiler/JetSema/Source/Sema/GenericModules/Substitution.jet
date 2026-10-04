@@ -1,0 +1,134 @@
+// Generic-module specialization uses the sole InlineModules AST substitution walk.
+use jet_foundation.[Expr, GenericModuleDef, GenericModuleParam, Item, ModuleArg, TestDef, Type]
+fn sema_genmod_normalize_type(ty: Type, aliases: [String:Type], names: [String], targets: [Type], visiting: &[String:Bool]) -> Type Never! {
+    if ty == .Named(name) {
+        if visiting.get(name) != None -> return ty
+        if aliases.get(name) == .Val(target) {
+            visiting[name] = true
+            resolved :: sema_genmod_normalize_type(target, aliases, names, targets, &visiting)
+            _ := &visiting.remove(name)
+            return resolved
+        }
+    }
+    sema_inference_substitute_type(ty, names, targets)
+}
+// Rust `specialize_struct` / `specialize_enum` (renamed to the instance's
+// member name), `specialize_trait`, `specialize_tag`, `specialize_impl` and
+// `specialize_error_conv`.
+fn sema_genmod_push_declaration(rewrite: &SemaInlineRewrite, item: Item, alias: String, declarations: &[Item]) {
+    if item == {
+        .Struct(definition) -> &declarations.push(Item.Struct{value: sema_inline_rewrite_struct(&rewrite, definition, alias)})
+        .Enum(definition) -> &declarations.push(Item.Enum{value: sema_inline_rewrite_enum(&rewrite, definition, alias)})
+        .Trait(definition) -> &declarations.push(Item.Trait{value: sema_inline_rewrite_trait(&rewrite, definition)})
+        .Tag(definition) -> {
+            mapped := definition
+            mapped.name = sema_inline_mapped_name(rewrite, definition.name)
+            &declarations.push(Item.Tag{value: mapped})
+        }
+        .Impl(definition) -> &declarations.push(Item.Impl{value: sema_inline_rewrite_impl(&rewrite, definition)})
+        .ErrorConv(definition) -> &declarations.push(Item.ErrorConv{value: sema_inline_rewrite_error_conv(&rewrite, definition)})
+        else -> {}
+    }
+}
+
+// Rust `specialize_nested_code_module`: the members of a plain module inside
+// a template, under the instance's arguments, keeping their own names.
+fn sema_genmod_specialize_nested(rewrite: &SemaInlineRewrite, body: [Item], module_name: String) -> [Item] {
+    mapped := [Item]{}
+    loop item in body {
+        if item == {
+            .Func(function) -> &mapped.push(Item.Func{value: sema_inline_rewrite_func(&rewrite, function)})
+            .Struct(definition) -> &mapped.push(Item.Struct{value: sema_inline_rewrite_struct(&rewrite, definition, "")})
+            .Enum(definition) -> &mapped.push(Item.Enum{value: sema_inline_rewrite_enum(&rewrite, definition, "")})
+            .Const(definition) -> {
+                updated := definition
+                updated.value = sema_inline_rewrite_expr(&rewrite, definition.value)
+                updated.ty = sema_inline_rewrite_optional_type(rewrite, definition.ty)
+                updated.meta = sema_inline_rewrite_meta(&rewrite, definition.meta)
+                &mapped.push(Item.Const{value: updated})
+            }
+            .CodeModule(child) -> {
+                updated := child
+                if child.body == .Val(child_body) -> updated.body = Val(sema_genmod_specialize_nested(&rewrite, child_body, child.name))
+                &mapped.push(Item.CodeModule{value: updated})
+            }
+            .Trait(definition) -> &mapped.push(Item.Trait{value: sema_inline_rewrite_trait(&rewrite, definition)})
+            .Tag(definition) -> {
+                updated := definition
+                updated.name = sema_inline_mapped_name(rewrite, definition.name)
+                &mapped.push(Item.Tag{value: updated})
+            }
+            .Impl(definition) -> &mapped.push(Item.Impl{value: sema_inline_rewrite_impl(&rewrite, definition)})
+            .ErrorConv(definition) -> &mapped.push(Item.ErrorConv{value: sema_inline_rewrite_error_conv(&rewrite, definition)})
+            .Test(definition) -> &mapped.push(Item.Test{value: sema_genmod_specialize_test(&rewrite, definition, module_name)})
+            .GenericModule(definition) -> &mapped.push(Item.GenericModule{value: sema_genmod_specialize_template(rewrite, definition)})
+            .ModuleAlias(alias) -> {
+                updated := alias
+                arguments := [ModuleArg]{}
+                loop arg in alias.args {
+                    if arg == {
+                        .Type(ty, span) -> &arguments.push(ModuleArg.Type{ty: sema_inline_rewrite_type(rewrite, ty), span: span})
+                        .Value(expression, span) -> &arguments.push(ModuleArg.Value{expr: sema_inline_rewrite_expr(&rewrite, expression), span: span})
+                    }
+                }
+                updated.args = arguments
+                &mapped.push(Item.ModuleAlias{value: updated})
+            }
+            else -> {}
+        }
+    }
+    mapped
+}
+
+// Rust `specialize_test`.
+fn sema_genmod_specialize_test(rewrite: &SemaInlineRewrite, definition: TestDef, alias: String) -> TestDef {
+    updated := definition
+    if definition.name_expr == .Val(expression) {
+        updated.name_expr = Val(sema_inline_rewrite_expr(&rewrite, expression))
+        updated.name = None
+        updated.name_prefix = Val(alias)
+    } else if definition.name == .Val(name) {
+        updated.name = Val(sema_genmod_value_name(alias, name))
+    }
+    updated.faults_expr = sema_inline_rewrite_optional_expr(&rewrite, definition.faults_expr)
+    updated.expected_fail_expr = sema_inline_rewrite_optional_expr(&rewrite, definition.expected_fail_expr)
+    updated.expected_fail = false
+    updated.faults = [String]{}
+    saved :: rewrite.locals.len()
+    updated.params = sema_inline_rewrite_params(&rewrite, definition.params)
+    updated.body = sema_inline_rewrite_stmts(&rewrite, definition.body)
+    sema_inline_restore_locals(&rewrite, saved)
+    updated
+}
+
+
+fn sema_genmod_specialize_template(rewrite: SemaInlineRewrite, definition: GenericModuleDef) -> GenericModuleDef {
+    masked := rewrite
+    loop param in definition.params {
+        if param == {
+            .Type(name, _, _) | .Value(name, _, _) -> {
+                _ := &masked.types.remove(name)
+                _ := &masked.values.remove(name)
+            }
+        }
+    }
+    updated := definition
+    params := [GenericModuleParam]{}
+    loop param in definition.params {
+        if param == {
+            .Type(name, span, bound) -> &params.push(GenericModuleParam.Type{name: name, name_span: span, bound: sema_inline_rewrite_optional_type(masked, bound)})
+            .Value(name, span, ty) -> &params.push(GenericModuleParam.Value{name: name, name_span: span, ty: sema_inline_rewrite_type(masked, ty)})
+        }
+    }
+    updated.params = params
+    updated.body = sema_genmod_specialize_nested(&masked, definition.body, definition.name)
+    updated
+}
+
+fn sema_genmod_arg_expr(arg: ModuleArg) -> Expr? Never! {
+    if arg == {
+        .Value(expression, _) -> Val(expression)
+        .Type(.Named(name), span) -> Val(Expr.Ident{name: name, span: span})
+        else -> None
+    }
+}

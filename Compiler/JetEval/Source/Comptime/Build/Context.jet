@@ -1,0 +1,1196 @@
+// PORT-PENDING 0562 crates-jet-comptime-src-comptime-build-context: crates/jet-comptime/src/Comptime/Build/context.rs:1-1192
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::actions_policy::{
+//RS     ActionKind, ActionSpec, BuildAction, BuildCapability, BuildPolicy, BuildResourcePool,
+//RS     LegacyWrapperKind, PolicyExplanation, PolicySetting,
+//RS };
+//RS use super::cache_cas::ContentDigest;
+//RS use super::errors_keys::{closed_cycle, BuildError, NameKind};
+//RS use super::handles::{
+//RS     ActionHandle, ActionId, AssetBundleTarget, DocTarget, ExecutableTarget, GeneratedModuleHandle,
+//RS     GeneratedModuleId, InstallTarget, LibraryTarget, PackageTarget, PluginHandle, PluginId,
+//RS     ProbeHandle, ProbeId, PublishTarget, SigningIdentityHandle, SigningIdentityId, TargetId,
+//RS     TargetRef, TestTarget, ToolchainHandle, ToolchainId,
+//RS };
+//RS use super::plan_graph::{BuildPlan, MAX_ACTIONS};
+//RS use super::plugins_modules::{
+//RS     BuildGeneratedModule, BuildPlugin, GeneratedModuleSpec, PackagedPluginContribution,
+//RS     PackagedPluginTarget, PluginApplication, PluginContribution, PluginTargetSpec,
+//RS     WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
+//RS };
+//RS use super::provenance_toolchains::{
+//RS     BuildProbe, BuildProvenance, BuildSigningIdentity, BuildToolchain, ProbeSpec,
+//RS     SigningIdentitySpec, ToolchainRole, ToolchainSpec,
+//RS };
+//RS use super::targets::{BuildPath, BuildTarget, TargetKind, TargetSpec};
+//RS use super::validation::{
+//RS     cap_name, check_name, validate_action, validate_action_output_owners,
+//RS     validate_generated_module, validate_identity, validate_paths, validate_plugin_spec,
+//RS     validate_probe, validate_toolchain,
+//RS };
+//RS use super::NEXT_CONTEXT;
+//RS use std::collections::{BTreeMap, BTreeSet, HashSet};
+//RS use std::path::Path;
+//RS use std::sync::atomic::Ordering;
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub struct BuildContext {
+//RS     pub(super) context: u64,
+//RS     targets: Vec<BuildTarget>,
+//RS     actions: Vec<BuildAction>,
+//RS     toolchains: Vec<BuildToolchain>,
+//RS     signing_identities: Vec<BuildSigningIdentity>,
+//RS     probes: Vec<BuildProbe>,
+//RS     plugins: Vec<BuildPlugin>,
+//RS     generated_modules: Vec<BuildGeneratedModule>,
+//RS     target_names: HashSet<String>,
+//RS     action_names: HashSet<String>,
+//RS     toolchain_names: HashSet<String>,
+//RS     signing_identity_names: HashSet<String>,
+//RS     probe_names: HashSet<String>,
+//RS     default_toolchain: ToolchainHandle,
+//RS     /// Policy captured at build-session creation. Every typed bridge method
+//RS     /// observes this same policy; no method silently widens it.
+//RS     policy: BuildPolicy,
+//RS     /// D-CONF-SPLIT1=A: computed writers collected by the same build session
+//RS     /// that owns actions and generated modules.
+//RS     fact_contributions: Vec<jet_foundation::Policy::FactContribution>,
+//RS }
+//RS 
+//RS impl BuildContext {
+//RS     pub fn new() -> Self {
+//RS         Self::new_with_policy(BuildPolicy::local_default())
+//RS     }
+//RS 
+//RS     pub fn new_with_policy(policy: BuildPolicy) -> Self {
+//RS         let context = NEXT_CONTEXT.fetch_add(1, Ordering::Relaxed);
+//RS         let default_toolchain = ToolchainHandle {
+//RS             id: ToolchainId(0),
+//RS             context,
+//RS         };
+//RS         let mut toolchain_names = HashSet::new();
+//RS         toolchain_names.insert("host".to_string());
+//RS         BuildContext {
+//RS             context,
+//RS             targets: Vec::new(),
+//RS             actions: Vec::new(),
+//RS             toolchains: vec![BuildToolchain {
+//RS                 id: ToolchainId(0),
+//RS                 name: "host".to_string(),
+//RS                 role: ToolchainRole::Host,
+//RS                 host_triple: "host".to_string(),
+//RS                 target_triple: "host".to_string(),
+//RS                 sdk: None,
+//RS                 linker: None,
+//RS                 sysroot: None,
+//RS                 tools: std::collections::BTreeMap::new(),
+//RS                 resolution: super::provenance_toolchains::ToolchainResolution::Ambient,
+//RS                 mounts: Vec::new(),
+//RS                 provenance: BuildProvenance::inferred_host(),
+//RS             }],
+//RS             signing_identities: Vec::new(),
+//RS             probes: Vec::new(),
+//RS             plugins: Vec::new(),
+//RS             generated_modules: Vec::new(),
+//RS             target_names: HashSet::new(),
+//RS             action_names: HashSet::new(),
+//RS             toolchain_names,
+//RS             signing_identity_names: HashSet::new(),
+//RS             probe_names: HashSet::new(),
+//RS             default_toolchain,
+//RS             policy,
+//RS             fact_contributions: Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn policy(&self) -> &BuildPolicy {
+//RS         &self.policy
+//RS     }
+//RS 
+//RS     /// Record one computed build-fact writer. The driver applies the manifest
+//RS     /// declaration and shared contribution resolver after the build returns;
+//RS     /// this method only keeps the writer on the typed build plan.
+//RS     pub fn contribute(&mut self, contribution: jet_foundation::Policy::FactContribution) {
+//RS         self.fact_contributions.push(contribution);
+//RS     }
+//RS 
+//RS     pub fn default_host_toolchain(&self) -> ToolchainHandle {
+//RS         self.default_toolchain
+//RS     }
+//RS 
+//RS     pub fn toolchain(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: ToolchainSpec,
+//RS     ) -> Result<ToolchainHandle, BuildError> {
+//RS         let name = check_name(name.into(), NameKind::Toolchain)?;
+//RS         if self.toolchain_names.contains(&name) {
+//RS             return Err(BuildError::DuplicateToolchainName(name));
+//RS         }
+//RS         validate_toolchain(&name, &spec)?;
+//RS         self.toolchain_names.insert(name.clone());
+//RS         let id = ToolchainId(self.toolchains.len());
+//RS         self.toolchains.push(BuildToolchain {
+//RS             id,
+//RS             name,
+//RS             role: spec.role,
+//RS             host_triple: spec.host_triple,
+//RS             target_triple: spec.target_triple,
+//RS             sdk: spec.sdk,
+//RS             linker: spec.linker,
+//RS             sysroot: spec.sysroot,
+//RS             tools: spec.tools,
+//RS             resolution: spec.resolution,
+//RS             mounts: spec.mounts,
+//RS             provenance: spec.provenance,
+//RS         });
+//RS         Ok(ToolchainHandle {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn signing_identity(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: SigningIdentitySpec,
+//RS     ) -> Result<SigningIdentityHandle, BuildError> {
+//RS         let name = check_name(name.into(), NameKind::SigningIdentity)?;
+//RS         if self.signing_identity_names.contains(&name) {
+//RS             return Err(BuildError::DuplicateSigningIdentityName(name));
+//RS         }
+//RS         validate_identity(&name, &spec.label, &spec.provenance)?;
+//RS         self.signing_identity_names.insert(name.clone());
+//RS         let id = SigningIdentityId(self.signing_identities.len());
+//RS         self.signing_identities.push(BuildSigningIdentity {
+//RS             id,
+//RS             name,
+//RS             label: spec.label,
+//RS             provenance: spec.provenance,
+//RS         });
+//RS         Ok(SigningIdentityHandle {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn probe(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: ProbeSpec,
+//RS     ) -> Result<ProbeHandle, BuildError> {
+//RS         let name = check_name(name.into(), NameKind::Probe)?;
+//RS         if self.probe_names.contains(&name) {
+//RS             return Err(BuildError::DuplicateProbeName(name));
+//RS         }
+//RS         let toolchain = spec.toolchain.unwrap_or(self.default_toolchain);
+//RS         self.check_toolchain_ref(toolchain)?;
+//RS         validate_probe(&name, &spec)?;
+//RS         self.probe_names.insert(name.clone());
+//RS         let id = ProbeId(self.probes.len());
+//RS         self.probes.push(BuildProbe {
+//RS             id,
+//RS             name,
+//RS             kind: spec.kind,
+//RS             reproducibility: spec.reproducibility,
+//RS             provenance: spec.provenance,
+//RS             toolchain,
+//RS         });
+//RS         Ok(ProbeHandle {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn find_program(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         program: impl Into<String>,
+//RS     ) -> Result<ProbeHandle, BuildError> {
+//RS         self.probe(name, ProbeSpec::find_program(program))
+//RS     }
+//RS 
+//RS     pub fn pkg_config(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         package: impl Into<String>,
+//RS     ) -> Result<ProbeHandle, BuildError> {
+//RS         self.probe(name, ProbeSpec::pkg_config(package))
+//RS     }
+//RS 
+//RS     pub fn header_check(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         header: impl Into<String>,
+//RS     ) -> Result<ProbeHandle, BuildError> {
+//RS         self.probe(name, ProbeSpec::header_check(header))
+//RS     }
+//RS 
+//RS     pub fn compile_check(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         check_name: impl Into<String>,
+//RS         includes: impl IntoIterator<Item = impl Into<String>>,
+//RS         code: impl Into<String>,
+//RS     ) -> Result<ProbeHandle, BuildError> {
+//RS         self.probe(name, ProbeSpec::compile_check(check_name, includes, code))
+//RS     }
+//RS 
+//RS     pub fn add_executable(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: TargetSpec,
+//RS     ) -> Result<ExecutableTarget, BuildError> {
+//RS         let id = self.push_target(name, TargetKind::Executable, spec)?;
+//RS         Ok(ExecutableTarget {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn add_library(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: TargetSpec,
+//RS     ) -> Result<LibraryTarget, BuildError> {
+//RS         let id = self.push_target(name, TargetKind::Library, spec)?;
+//RS         Ok(LibraryTarget {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn add_test(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: TargetSpec,
+//RS     ) -> Result<TestTarget, BuildError> {
+//RS         let id = self.push_target(name, TargetKind::Test, spec)?;
+//RS         Ok(TestTarget {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn add_asset_bundle(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: TargetSpec,
+//RS     ) -> Result<AssetBundleTarget, BuildError> {
+//RS         let id = self.push_target(name, TargetKind::AssetBundle, spec)?;
+//RS         Ok(AssetBundleTarget {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn add_doc(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: TargetSpec,
+//RS     ) -> Result<DocTarget, BuildError> {
+//RS         let id = self.push_target(name, TargetKind::Doc, spec)?;
+//RS         Ok(DocTarget {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn add_install(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: TargetSpec,
+//RS     ) -> Result<InstallTarget, BuildError> {
+//RS         let id = self.push_target(name, TargetKind::Install, spec)?;
+//RS         Ok(InstallTarget {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn add_package(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: TargetSpec,
+//RS     ) -> Result<PackageTarget, BuildError> {
+//RS         let id = self.push_target(name, TargetKind::Package, spec)?;
+//RS         Ok(PackageTarget {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn add_publish(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: TargetSpec,
+//RS     ) -> Result<PublishTarget, BuildError> {
+//RS         let id = self.push_target(name, TargetKind::Publish, spec)?;
+//RS         Ok(PublishTarget {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn action(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: ActionSpec,
+//RS     ) -> Result<ActionHandle, BuildError> {
+//RS         self.push_action(name, spec, None)
+//RS     }
+//RS 
+//RS     /// D-BUILDGEN1: register one additive generated Jet module. Materializing
+//RS     /// and re-checking it belongs to the driver; the graph stores source and
+//RS     /// digest so cache/query/provenance use the same canonical value.
+//RS     pub fn generate(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         path: impl Into<String>,
+//RS         source: impl Into<String>,
+//RS     ) -> Result<GeneratedModuleHandle, BuildError> {
+//RS         let module = GeneratedModuleSpec::new(name, path, source);
+//RS         validate_generated_module(&module)?;
+//RS         self.push_generated_module(module, None)
+//RS     }
+//RS 
+//RS     fn push_generated_module(
+//RS         &mut self,
+//RS         module: GeneratedModuleSpec,
+//RS         plugin: Option<PluginHandle>,
+//RS     ) -> Result<GeneratedModuleHandle, BuildError> {
+//RS         if self
+//RS             .actions
+//RS             .iter()
+//RS             .any(|action| action.outputs.iter().any(|output| output == &module.path))
+//RS         {
+//RS             return Err(BuildError::GeneratedModuleCycle {
+//RS                 module: module.name.clone(),
+//RS                 path: module.path.as_str().to_string(),
+//RS             });
+//RS         }
+//RS         if self
+//RS             .generated_modules
+//RS             .iter()
+//RS             .any(|old| old.name == module.name)
+//RS         {
+//RS             return Err(BuildError::DuplicateGeneratedModuleName(module.name));
+//RS         }
+//RS         if self
+//RS             .generated_modules
+//RS             .iter()
+//RS             .any(|old| old.path == module.path)
+//RS         {
+//RS             return Err(BuildError::DuplicateGeneratedModulePath(
+//RS                 module.path.as_str().to_string(),
+//RS             ));
+//RS         }
+//RS         let id = GeneratedModuleId(self.generated_modules.len());
+//RS         self.generated_modules.push(BuildGeneratedModule {
+//RS             id,
+//RS             name: module.name,
+//RS             path: module.path,
+//RS             source_digest: ContentDigest::from_bytes(module.source.as_bytes()),
+//RS             source: module.source,
+//RS             plugin,
+//RS         });
+//RS         Ok(GeneratedModuleHandle {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn apply_wasm_component_plugin(
+//RS         &mut self,
+//RS         spec: WasmComponentPluginSpec,
+//RS         contribution: PluginContribution,
+//RS         policy: &BuildPolicy,
+//RS     ) -> Result<PluginApplication, BuildError> {
+//RS         let snapshot = self.clone();
+//RS         let result = self.apply_wasm_component_plugin_inner(spec, contribution, policy);
+//RS         if result.is_err() {
+//RS             *self = snapshot;
+//RS         }
+//RS         result
+//RS     }
+//RS 
+//RS     pub fn apply_packaged_wasm_component_plugin(
+//RS         &mut self,
+//RS         manifest_path: impl AsRef<Path>,
+//RS         component_path: impl AsRef<Path>,
+//RS         contribution: PluginContribution,
+//RS         policy: &BuildPolicy,
+//RS     ) -> Result<PluginApplication, BuildError> {
+//RS         let spec = WasmComponentPluginSpec::load_packaged(manifest_path, component_path)
+//RS             .map_err(BuildError::PackagedPlugin)?;
+//RS         self.apply_wasm_component_plugin(spec, contribution, policy)
+//RS     }
+//RS 
+//RS     /// Production packaged-plugin path. The sibling jetpack host instantiates
+//RS     /// the verified Component Model guest and returns only the bounded wire
+//RS     /// contribution; this method resolves symbolic references and then uses
+//RS     /// the same transactional graph application as the in-memory seam.
+//RS     pub fn apply_packaged_wasm_component_plugin_from_host(
+//RS         &mut self,
+//RS         manifest_path: impl AsRef<Path>,
+//RS         component_path: impl AsRef<Path>,
+//RS         policy: &BuildPolicy,
+//RS     ) -> Result<PluginApplication, BuildError> {
+//RS         let manifest_path = manifest_path.as_ref();
+//RS         let component_path = component_path.as_ref();
+//RS         let (spec, manifest_digest) = WasmComponentPluginSpec::load_packaged_with_manifest_digest(
+//RS             manifest_path,
+//RS             component_path,
+//RS         )
+//RS         .map_err(BuildError::PackagedPlugin)?;
+//RS         // Do this before instantiation. A denied component must not run guest
+//RS         // code merely to discover that its requested capability is forbidden.
+//RS         self.validate_plugin_policy(&spec, policy)?;
+//RS         let wire = super::plugins_modules::run_packaged_plugin(
+//RS             manifest_path,
+//RS             component_path,
+//RS             &spec,
+//RS             &manifest_digest,
+//RS         )
+//RS         .map_err(BuildError::PackagedPlugin)?;
+//RS         let contribution = self.resolve_packaged_contribution(wire)?;
+//RS         self.apply_wasm_component_plugin(spec, contribution, policy)
+//RS     }
+//RS 
+//RS     fn resolve_packaged_contribution(
+//RS         &self,
+//RS         wire: PackagedPluginContribution,
+//RS     ) -> Result<PluginContribution, BuildError> {
+//RS         if wire.actions.len() > MAX_ACTIONS.saturating_sub(self.actions.len()) {
+//RS             return Err(BuildError::PackagedPlugin(format!(
+//RS                 "action graph exceeds {MAX_ACTIONS} actions"
+//RS             )));
+//RS         }
+//RS         let action_names = wire
+//RS             .actions
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(index, action)| {
+//RS                 if self.action_names.contains(&action.name) {
+//RS                     return Err(BuildError::DuplicateActionName(action.name.clone()));
+//RS                 }
+//RS                 Ok((
+//RS                     action.name.clone(),
+//RS                     ActionHandle {
+//RS                         id: ActionId(self.actions.len() + index),
+//RS                         context: self.context,
+//RS                     },
+//RS                 ))
+//RS             })
+//RS             .collect::<Result<BTreeMap<_, _>, _>>()?;
+//RS         if action_names.len() != wire.actions.len() {
+//RS             return Err(BuildError::PackagedPlugin(
+//RS                 "packaged plugin declares a duplicate action name".to_string(),
+//RS             ));
+//RS         }
+//RS         // Resolve guest targets in dependency order. The wire contract permits
+//RS         // a target to name a later target, but BuildContext handles are only
+//RS         // valid after their target has been inserted. A stable DFS gives those
+//RS         // references real ids without mutating the context during validation;
+//RS         // the outer transactional apply still rolls back any later failure.
+//RS         let mut target_indices = BTreeMap::new();
+//RS         for (index, target) in wire.targets.iter().enumerate() {
+//RS             if self.target_names.contains(&target.name) {
+//RS                 return Err(BuildError::DuplicateTargetName(target.name.clone()));
+//RS             }
+//RS             if target_indices.insert(target.name.clone(), index).is_some() {
+//RS                 return Err(BuildError::PackagedPlugin(
+//RS                     "packaged plugin declares a duplicate target name".to_string(),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         let mut target_states = vec![0u8; wire.targets.len()];
+//RS         let mut target_order = Vec::with_capacity(wire.targets.len());
+//RS         fn visit_packaged_target(
+//RS             index: usize,
+//RS             targets: &[PackagedPluginTarget],
+//RS             target_indices: &BTreeMap<String, usize>,
+//RS             existing_targets: &HashSet<String>,
+//RS             states: &mut [u8],
+//RS             visiting: &mut Vec<usize>,
+//RS             order: &mut Vec<usize>,
+//RS         ) -> Result<(), BuildError> {
+//RS             match states[index] {
+//RS                 2 => return Ok(()),
+//RS                 1 => {
+//RS                     let cycle =
+//RS                         closed_cycle(visiting, index, |node: usize| targets[node].name.clone());
+//RS                     return Err(BuildError::PackagedPlugin(format!(
+//RS                         "packaged plugin target dependency cycle: {}",
+//RS                         cycle.chain()
+//RS                     )));
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS             states[index] = 1;
+//RS             visiting.push(index);
+//RS             for dependency in &targets[index].deps {
+//RS                 if let Some(&dependency_index) = target_indices.get(dependency) {
+//RS                     visit_packaged_target(
+//RS                         dependency_index,
+//RS                         targets,
+//RS                         target_indices,
+//RS                         existing_targets,
+//RS                         states,
+//RS                         visiting,
+//RS                         order,
+//RS                     )?;
+//RS                 } else if !existing_targets.contains(dependency) {
+//RS                     return Err(BuildError::PackagedPlugin(format!(
+//RS                         "target {} references unknown target {dependency}",
+//RS                         targets[index].name
+//RS                     )));
+//RS                 }
+//RS             }
+//RS             visiting.pop();
+//RS             states[index] = 2;
+//RS             order.push(index);
+//RS             Ok(())
+//RS         }
+//RS         let mut target_visiting = Vec::new();
+//RS         for index in 0..wire.targets.len() {
+//RS             visit_packaged_target(
+//RS                 index,
+//RS                 &wire.targets,
+//RS                 &target_indices,
+//RS                 &self.target_names,
+//RS                 &mut target_states,
+//RS                 &mut target_visiting,
+//RS                 &mut target_order,
+//RS             )?;
+//RS         }
+//RS         let mut target_names = BTreeMap::new();
+//RS         for (order_index, &target_index) in target_order.iter().enumerate() {
+//RS             target_names.insert(
+//RS                 wire.targets[target_index].name.clone(),
+//RS                 TargetRef {
+//RS                     id: TargetId(self.targets.len() + order_index),
+//RS                     context: self.context,
+//RS                 },
+//RS             );
+//RS         }
+//RS 
+//RS         let actions = wire
+//RS             .actions
+//RS             .into_iter()
+//RS             .map(|action| {
+//RS                 let name = action.name.clone();
+//RS                 let toolchain = action
+//RS                     .toolchain
+//RS                     .as_deref()
+//RS                     .map(|name| self.named_toolchain(name))
+//RS                     .transpose()?;
+//RS                 let probes = action
+//RS                     .probes
+//RS                     .iter()
+//RS                     .map(|name| self.named_probe(name))
+//RS                     .collect::<Result<Vec<_>, _>>()?;
+//RS                 let signing_identity = action
+//RS                     .signing_identity
+//RS                     .as_deref()
+//RS                     .map(|name| self.named_signing_identity(name))
+//RS                     .transpose()?;
+//RS                 let cache = match action.cache.as_str() {
+//RS                     "cached" => super::actions_policy::ActionCache::Cached,
+//RS                     "phony" | "uncached-phony" => super::actions_policy::ActionCache::UncachedPhony,
+//RS                     other => {
+//RS                         return Err(BuildError::PackagedPlugin(format!(
+//RS                             "action {name} has unknown cache mode {other}"
+//RS                         )))
+//RS                     }
+//RS                 };
+//RS                 let kind = parse_packaged_action_kind(&action.kind)?;
+//RS                 let caps = action
+//RS                     .caps
+//RS                     .iter()
+//RS                     .map(|cap_name| {
+//RS                         BuildCapability::parse(cap_name).ok_or_else(|| {
+//RS                             BuildError::PackagedPlugin(format!(
+//RS                                 "action {name} declares unknown ability {cap_name}"
+//RS                             ))
+//RS                         })
+//RS                     })
+//RS                     .collect::<Result<BTreeSet<_>, _>>()?;
+//RS                 let resource_pools = action
+//RS                     .resource_pools
+//RS                     .iter()
+//RS                     .map(|pool| parse_packaged_resource_pool(pool))
+//RS                     .collect::<BTreeSet<_>>();
+//RS                 let legacy_wrapper = action
+//RS                     .legacy_wrapper
+//RS                     .as_deref()
+//RS                     .map(parse_packaged_legacy_wrapper)
+//RS                     .transpose()?;
+//RS                 let spec = ActionSpec {
+//RS                     inputs: packaged_paths(&action.inputs)?,
+//RS                     outputs: packaged_paths(&action.outputs)?,
+//RS                     argv: action.argv,
+//RS                     env: action.env,
+//RS                     env_allowlist: action.env_allowlist,
+//RS                     caps,
+//RS                     cache,
+//RS                     kind,
+//RS                     toolchain,
+//RS                     probes,
+//RS                     signing_identity,
+//RS                     labels: action.labels,
+//RS                     helper_versions: action.helper_versions,
+//RS                     resource_pools,
+//RS                     legacy_wrapper,
+//RS                     variant_identity: action.variant_identity,
+//RS                 };
+//RS                 Ok((name, spec))
+//RS             })
+//RS             .collect::<Result<Vec<_>, BuildError>>()?;
+//RS 
+//RS         let targets = target_order
+//RS             .into_iter()
+//RS             .map(|target_index| wire.targets[target_index].clone())
+//RS             .map(|target| {
+//RS                 let deps = target
+//RS                     .deps
+//RS                     .iter()
+//RS                     .map(|name| {
+//RS                         target_names
+//RS                             .get(name)
+//RS                             .copied()
+//RS                             .or_else(|| self.named_target(name).ok())
+//RS                             .ok_or_else(|| {
+//RS                                 BuildError::PackagedPlugin(format!(
+//RS                                     "target {} references unknown target {name}",
+//RS                                     target.name
+//RS                                 ))
+//RS                             })
+//RS                     })
+//RS                     .collect::<Result<Vec<_>, _>>()?;
+//RS                 let actions = target
+//RS                     .actions
+//RS                     .iter()
+//RS                     .map(|name| {
+//RS                         action_names
+//RS                             .get(name)
+//RS                             .copied()
+//RS                             .or_else(|| self.named_action(name).ok())
+//RS                             .ok_or_else(|| {
+//RS                                 BuildError::PackagedPlugin(format!(
+//RS                                     "target {} references unknown action {name}",
+//RS                                     target.name
+//RS                                 ))
+//RS                             })
+//RS                     })
+//RS                     .collect::<Result<Vec<_>, _>>()?;
+//RS                 let probes = target
+//RS                     .probes
+//RS                     .iter()
+//RS                     .map(|name| self.named_probe(name))
+//RS                     .collect::<Result<Vec<_>, _>>()?;
+//RS                 let toolchain = target
+//RS                     .toolchain
+//RS                     .as_deref()
+//RS                     .map(|name| self.named_toolchain(name))
+//RS                     .transpose()?;
+//RS                 let signing_identity = target
+//RS                     .signing_identity
+//RS                     .as_deref()
+//RS                     .map(|name| self.named_signing_identity(name))
+//RS                     .transpose()?;
+//RS                 let spec = TargetSpec {
+//RS                     sources: packaged_paths(&target.sources)?,
+//RS                     inputs: packaged_paths(&target.inputs)?,
+//RS                     outputs: packaged_paths(&target.outputs)?,
+//RS                     deps,
+//RS                     actions,
+//RS                     probes,
+//RS                     toolchain,
+//RS                     signing_identity,
+//RS                     metadata: target.metadata,
+//RS                 };
+//RS                 Ok(PluginTargetSpec {
+//RS                     kind: parse_packaged_target_kind(&target.kind)?,
+//RS                     name: target.name,
+//RS                     spec,
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, BuildError>>()?;
+//RS         Ok(PluginContribution {
+//RS             actions,
+//RS             targets,
+//RS             generated_modules: wire.generated_modules,
+//RS         })
+//RS     }
+//RS 
+//RS     fn named_action(&self, name: &str) -> Result<ActionHandle, BuildError> {
+//RS         self.actions
+//RS             .iter()
+//RS             .find(|action| action.name == name)
+//RS             .map(|action| ActionHandle {
+//RS                 id: action.id,
+//RS                 context: self.context,
+//RS             })
+//RS             .ok_or_else(|| BuildError::PackagedPlugin(format!("unknown action {name}")))
+//RS     }
+//RS 
+//RS     fn named_target(&self, name: &str) -> Result<TargetRef, BuildError> {
+//RS         self.targets
+//RS             .iter()
+//RS             .find(|target| target.name == name)
+//RS             .map(|target| TargetRef {
+//RS                 id: target.id,
+//RS                 context: self.context,
+//RS             })
+//RS             .ok_or_else(|| BuildError::PackagedPlugin(format!("unknown target {name}")))
+//RS     }
+//RS 
+//RS     fn named_toolchain(&self, name: &str) -> Result<ToolchainHandle, BuildError> {
+//RS         self.toolchains
+//RS             .iter()
+//RS             .find(|toolchain| toolchain.name == name)
+//RS             .map(|toolchain| ToolchainHandle {
+//RS                 id: toolchain.id,
+//RS                 context: self.context,
+//RS             })
+//RS             .ok_or_else(|| BuildError::PackagedPlugin(format!("unknown toolchain {name}")))
+//RS     }
+//RS 
+//RS     fn named_probe(&self, name: &str) -> Result<ProbeHandle, BuildError> {
+//RS         self.probes
+//RS             .iter()
+//RS             .find(|probe| probe.name == name)
+//RS             .map(|probe| ProbeHandle {
+//RS                 id: probe.id,
+//RS                 context: self.context,
+//RS             })
+//RS             .ok_or_else(|| BuildError::PackagedPlugin(format!("unknown probe {name}")))
+//RS     }
+//RS 
+//RS     fn named_signing_identity(&self, name: &str) -> Result<SigningIdentityHandle, BuildError> {
+//RS         self.signing_identities
+//RS             .iter()
+//RS             .find(|identity| identity.name == name)
+//RS             .map(|identity| SigningIdentityHandle {
+//RS                 id: identity.id,
+//RS                 context: self.context,
+//RS             })
+//RS             .ok_or_else(|| BuildError::PackagedPlugin(format!("unknown signing identity {name}")))
+//RS     }
+//RS 
+//RS     fn validate_plugin_policy(
+//RS         &self,
+//RS         spec: &WasmComponentPluginSpec,
+//RS         policy: &BuildPolicy,
+//RS     ) -> Result<BTreeSet<BuildCapability>, BuildError> {
+//RS         validate_plugin_spec(spec)?;
+//RS         if spec.api_version != BUILD_PLUGIN_API_VERSION {
+//RS             return Err(BuildError::PluginVersionMismatch {
+//RS                 plugin: spec.name.clone(),
+//RS                 expected: BUILD_PLUGIN_API_VERSION.to_string(),
+//RS                 actual: spec.api_version.clone(),
+//RS             });
+//RS         }
+//RS         if let PolicySetting::Deny(reason) = &policy.wasm_plugins {
+//RS             return Err(BuildError::PolicyDenied(PolicyExplanation::denied(
+//RS                 format!("wasm build plugin {}", spec.name),
+//RS                 reason,
+//RS                 spec.requested_caps.iter().cloned().collect(),
+//RS             )));
+//RS         }
+//RS         let grants = policy
+//RS             .plugin_grants
+//RS             .get(&spec.name)
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         for cap in &spec.requested_caps {
+//RS             if !grants.contains(cap) {
+//RS                 return Err(BuildError::PolicyDenied(PolicyExplanation::denied(
+//RS                     format!("wasm build plugin {}", spec.name),
+//RS                     format!("missing ability grant {}", cap_name(cap)),
+//RS                     spec.requested_caps.iter().cloned().collect(),
+//RS                 )));
+//RS             }
+//RS         }
+//RS         Ok(grants)
+//RS     }
+//RS 
+//RS     fn apply_wasm_component_plugin_inner(
+//RS         &mut self,
+//RS         spec: WasmComponentPluginSpec,
+//RS         contribution: PluginContribution,
+//RS         policy: &BuildPolicy,
+//RS     ) -> Result<PluginApplication, BuildError> {
+//RS         let grants = self.validate_plugin_policy(&spec, policy)?;
+//RS         for (_, action) in &contribution.actions {
+//RS             for cap in &action.caps {
+//RS                 if !spec.requested_caps.contains(cap) || !grants.contains(cap) {
+//RS                     let reason = if !spec.requested_caps.contains(cap) {
+//RS                         format!(
+//RS                             "contributed action uses ability {} not declared by the plugin manifest",
+//RS                             cap_name(cap)
+//RS                         )
+//RS                     } else {
+//RS                         format!(
+//RS                             "contributed action uses ungranted ability {}",
+//RS                             cap_name(cap)
+//RS                         )
+//RS                     };
+//RS                     return Err(BuildError::PolicyDenied(PolicyExplanation::denied(
+//RS                         format!("wasm build plugin {}", spec.name),
+//RS                         reason,
+//RS                         action.caps.iter().cloned().collect(),
+//RS                     )));
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         let plugin_id = PluginId(self.plugins.len());
+//RS         let plugin = PluginHandle {
+//RS             id: plugin_id,
+//RS             context: self.context,
+//RS         };
+//RS         self.plugins.push(BuildPlugin {
+//RS             id: plugin_id,
+//RS             name: spec.name,
+//RS             version: spec.version,
+//RS             api_version: spec.api_version,
+//RS             component_digest: spec.component_digest,
+//RS             grants,
+//RS         });
+//RS 
+//RS         let mut action_handles = Vec::new();
+//RS         for (name, action) in contribution.actions {
+//RS             action_handles.push(self.push_action(name, action, Some(plugin))?);
+//RS         }
+//RS 
+//RS         let mut target_handles = Vec::new();
+//RS         for target in contribution.targets {
+//RS             let id =
+//RS                 self.push_target_with_plugin(target.name, target.kind, target.spec, Some(plugin))?;
+//RS             target_handles.push(TargetRef {
+//RS                 id,
+//RS                 context: self.context,
+//RS             });
+//RS         }
+//RS 
+//RS         let mut module_handles = Vec::new();
+//RS         for module in contribution.generated_modules {
+//RS             validate_generated_module(&module)?;
+//RS             let handle = self.push_generated_module(module, Some(plugin))?;
+//RS             let id = handle.id();
+//RS             module_handles.push(GeneratedModuleHandle {
+//RS                 id,
+//RS                 context: self.context,
+//RS             });
+//RS         }
+//RS 
+//RS         Ok(PluginApplication {
+//RS             plugin,
+//RS             actions: action_handles,
+//RS             targets: target_handles,
+//RS             generated_modules: module_handles,
+//RS         })
+//RS     }
+//RS 
+//RS     fn push_action(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         spec: ActionSpec,
+//RS         plugin: Option<PluginHandle>,
+//RS     ) -> Result<ActionHandle, BuildError> {
+//RS         if self.actions.len() >= MAX_ACTIONS {
+//RS             return Err(BuildError::PackagedPlugin(format!(
+//RS                 "action graph exceeds {MAX_ACTIONS} actions"
+//RS             )));
+//RS         }
+//RS         let name = check_name(name.into(), NameKind::Action)?;
+//RS         if self.action_names.contains(&name) {
+//RS             return Err(BuildError::DuplicateActionName(name));
+//RS         }
+//RS         self.validate_action_spec(&name, &spec)?;
+//RS         if let Some(module) = self
+//RS             .generated_modules
+//RS             .iter()
+//RS             .find(|module| spec.outputs.iter().any(|output| output == &module.path))
+//RS         {
+//RS             return Err(BuildError::GeneratedModuleCycle {
+//RS                 module: module.name.clone(),
+//RS                 path: module.path.as_str().to_string(),
+//RS             });
+//RS         }
+//RS         self.action_names.insert(name.clone());
+//RS         let toolchain = spec.toolchain.unwrap_or(self.default_toolchain);
+//RS         let id = ActionId(self.actions.len());
+//RS         self.actions.push(BuildAction {
+//RS             id,
+//RS             name,
+//RS             inputs: spec.inputs,
+//RS             outputs: spec.outputs,
+//RS             argv: spec.argv,
+//RS             env: spec.env,
+//RS             env_allowlist: spec.env_allowlist,
+//RS             caps: spec.caps,
+//RS             cache: spec.cache,
+//RS             kind: spec.kind,
+//RS             toolchain,
+//RS             probes: spec.probes,
+//RS             signing_identity: spec.signing_identity,
+//RS             labels: spec.labels,
+//RS             helper_versions: spec.helper_versions,
+//RS             resource_pools: spec.resource_pools,
+//RS             legacy_wrapper: spec.legacy_wrapper,
+//RS             plugin,
+//RS             variant_identity: spec.variant_identity,
+//RS             compiler_owned: false,
+//RS         });
+//RS         Ok(ActionHandle {
+//RS             id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn plan(&self) -> Result<BuildPlan, BuildError> {
+//RS         self.snapshot(None)
+//RS     }
+//RS 
+//RS     pub fn plan_with_default(
+//RS         &self,
+//RS         default: impl Into<TargetRef>,
+//RS     ) -> Result<BuildPlan, BuildError> {
+//RS         let default = default.into();
+//RS         self.check_target_ref(default)?;
+//RS         self.snapshot(Some(default))
+//RS     }
+//RS 
+//RS     fn push_target(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         kind: TargetKind,
+//RS         spec: TargetSpec,
+//RS     ) -> Result<TargetId, BuildError> {
+//RS         self.push_target_with_plugin(name, kind, spec, None)
+//RS     }
+//RS 
+//RS     fn push_target_with_plugin(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         kind: TargetKind,
+//RS         spec: TargetSpec,
+//RS         plugin: Option<PluginHandle>,
+//RS     ) -> Result<TargetId, BuildError> {
+//RS         let name = check_name(name.into(), NameKind::Target)?;
+//RS         if self.target_names.contains(&name) {
+//RS             return Err(BuildError::DuplicateTargetName(name));
+//RS         }
+//RS         self.validate_target_spec(&spec)?;
+//RS         self.target_names.insert(name.clone());
+//RS         let toolchain = spec.toolchain.unwrap_or(self.default_toolchain);
+//RS         let id = TargetId(self.targets.len());
+//RS         self.targets.push(BuildTarget {
+//RS             id,
+//RS             name,
+//RS             kind,
+//RS             sources: spec.sources,
+//RS             inputs: spec.inputs,
+//RS             outputs: spec.outputs,
+//RS             deps: spec.deps,
+//RS             actions: spec.actions,
+//RS             probes: spec.probes,
+//RS             toolchain,
+//RS             signing_identity: spec.signing_identity,
+//RS             metadata: spec.metadata,
+//RS             plugin,
+//RS         });
+//RS         Ok(id)
+//RS     }
+//RS 
+//RS     fn snapshot(&self, default: Option<TargetRef>) -> Result<BuildPlan, BuildError> {
+//RS         if self.actions.len() > MAX_ACTIONS {
+//RS             return Err(BuildError::PackagedPlugin(format!(
+//RS                 "action graph exceeds {MAX_ACTIONS} actions"
+//RS             )));
+//RS         }
+//RS         for target in &self.targets {
+//RS             self.validate_refs(&target.deps, &target.actions)?;
+//RS         }
+//RS         validate_action_output_owners(&self.actions)?;
+//RS         for module in &self.generated_modules {
+//RS             if self
+//RS                 .actions
+//RS                 .iter()
+//RS                 .any(|action| action.outputs.iter().any(|output| output == &module.path))
+//RS             {
+//RS                 return Err(BuildError::GeneratedModuleCycle {
+//RS                     module: module.name.clone(),
+//RS                     path: module.path.as_str().to_string(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         Ok(BuildPlan {
+//RS             context: self.context,
+//RS             targets: self.targets.clone(),
+//RS             actions: self.actions.clone(),
+//RS             toolchains: self.toolchains.clone(),
+//RS             signing_identities: self.signing_identities.clone(),
+//RS             probes: self.probes.clone(),
+//RS             plugins: self.plugins.clone(),
+//RS             generated_modules: self.generated_modules.clone(),
+//RS             compiler_nodes: Vec::new(),
+//RS             default,
+//RS             fact_contributions: self.fact_contributions.clone(),
+//RS         })
+//RS     }
+//RS 
+//RS     fn validate_target_spec(&self, spec: &TargetSpec) -> Result<(), BuildError> {
+//RS         validate_paths(&spec.sources)?;
+//RS         validate_paths(&spec.inputs)?;
+//RS         validate_paths(&spec.outputs)?;
+//RS         self.validate_refs(&spec.deps, &spec.actions)?;
+//RS         for probe in &spec.probes {
+//RS             self.check_probe_ref(*probe)?;
+//RS         }
+//RS         if let Some(toolchain) = spec.toolchain {
+//RS             self.check_toolchain_ref(toolchain)?;
+//RS         }
+//RS         if let Some(identity) = spec.signing_identity {
+//RS             self.check_signing_identity_ref(identity)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn validate_action_spec(&self, name: &str, spec: &ActionSpec) -> Result<(), BuildError> {
+//RS         validate_action(name, spec)?;
+//RS         if let Some(toolchain) = spec.toolchain {
+//RS             self.check_toolchain_ref(toolchain)?;
+//RS         }
+//RS         for probe in &spec.probes {
+//RS             self.check_probe_ref(*probe)?;
+//RS         }
+//RS         if let Some(identity) = spec.signing_identity {
+//RS             self.check_signing_identity_ref(identity)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn validate_refs(
+//RS         &self,
+//RS         deps: &[TargetRef],
+//RS         actions: &[ActionHandle],
+//RS     ) -> Result<(), BuildError> {
+//RS         for dep in deps {
+//RS             self.check_target_ref(*dep)?;
+//RS         }
+//RS         for action in actions {
+//RS             self.check_action_ref(*action)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn check_target_ref(&self, target: TargetRef) -> Result<(), BuildError> {
+//RS         if target.context != self.context || target.id.0 >= self.targets.len() {
+//RS             return Err(BuildError::UnknownTarget(target.id));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn check_action_ref(&self, action: ActionHandle) -> Result<(), BuildError> {
+//RS         if action.context != self.context || action.id.0 >= self.actions.len() {
+//RS             return Err(BuildError::UnknownAction(action.id));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn check_toolchain_ref(&self, toolchain: ToolchainHandle) -> Result<(), BuildError> {
+//RS         if toolchain.context != self.context || toolchain.id.0 >= self.toolchains.len() {
+//RS             return Err(BuildError::UnknownToolchain(toolchain.id));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn check_signing_identity_ref(
+//RS         &self,
+//RS         identity: SigningIdentityHandle,
+//RS     ) -> Result<(), BuildError> {
+//RS         if identity.context != self.context || identity.id.0 >= self.signing_identities.len() {
+//RS             return Err(BuildError::UnknownSigningIdentity(identity.id));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn check_probe_ref(&self, probe: ProbeHandle) -> Result<(), BuildError> {
+//RS         if probe.context != self.context || probe.id.0 >= self.probes.len() {
+//RS             return Err(BuildError::UnknownProbe(probe.id));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS impl Default for BuildContext {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS fn packaged_paths(paths: &[String]) -> Result<Vec<BuildPath>, BuildError> {
+//RS     paths
+//RS         .iter()
+//RS         .map(|path| BuildPath::new(path.clone()))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn parse_packaged_action_kind(value: &str) -> Result<ActionKind, BuildError> {
+//RS     match value {
+//RS         "compile" => Ok(ActionKind::Compile),
+//RS         "docs" => Ok(ActionKind::Docs),
+//RS         "debug" => Ok(ActionKind::Debug),
+//RS         "source-archive" => Ok(ActionKind::SourceArchive),
+//RS         "generic" => Ok(ActionKind::Generic),
+//RS         _ => Err(BuildError::PackagedPlugin(format!(
+//RS             "unknown action kind {value}"
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_packaged_resource_pool(value: &str) -> BuildResourcePool {
+//RS     match value {
+//RS         "cpu" => BuildResourcePool::CPU,
+//RS         "memory" => BuildResourcePool::Memory,
+//RS         "linker" => BuildResourcePool::Linker,
+//RS         "console" => BuildResourcePool::Console,
+//RS         "gpu" => BuildResourcePool::GPU,
+//RS         custom => BuildResourcePool::Custom(custom.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_packaged_legacy_wrapper(value: &str) -> Result<LegacyWrapperKind, BuildError> {
+//RS     match value {
+//RS         "cmake" => Ok(LegacyWrapperKind::CMake),
+//RS         "make" => Ok(LegacyWrapperKind::Make),
+//RS         "gradle" => Ok(LegacyWrapperKind::Gradle),
+//RS         "npm" => Ok(LegacyWrapperKind::Npm),
+//RS         "cargo" => Ok(LegacyWrapperKind::Cargo),
+//RS         _ => Err(BuildError::PackagedPlugin(format!(
+//RS             "unknown legacy wrapper {value}"
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_packaged_target_kind(value: &str) -> Result<TargetKind, BuildError> {
+//RS     match value {
+//RS         "executable" => Ok(TargetKind::Executable),
+//RS         "library" => Ok(TargetKind::Library),
+//RS         "test" => Ok(TargetKind::Test),
+//RS         "asset-bundle" => Ok(TargetKind::AssetBundle),
+//RS         "doc" => Ok(TargetKind::Doc),
+//RS         "install" => Ok(TargetKind::Install),
+//RS         "package" => Ok(TargetKind::Package),
+//RS         "publish" => Ok(TargetKind::Publish),
+//RS         _ => Err(BuildError::PackagedPlugin(format!(
+//RS             "unknown target kind {value}"
+//RS         ))),
+//RS     }
+//RS }
+// END-PORT-PENDING 0562 crates/jet-comptime/src/Comptime/Build/context.rs:1-1192
+

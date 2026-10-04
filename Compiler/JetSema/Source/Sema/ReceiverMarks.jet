@@ -1,0 +1,285 @@
+// PORT-PENDING 0437 crates-jet-sema-src-sema-policyfacts-module-group: crates/jet-sema/src/Sema/ReceiverMarks.rs:1-281
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-CAP-RECEIVER1=D: mark the value, not the call.
+//RS //!
+//RS //! A `&` or `^` mark sits on the named place a method call writes or takes:
+//RS //! `&buf.append(" world")`, `^buf.seal()`, `&items[i].append("!")`. The parser
+//RS //! binds the mark to the maximal place (a name plus fields, indexes, or
+//RS //! ranges) that the first call of a chain receives. Sema owns the check: the
+//RS //! MethodCall arm lifts the mark off the receiver before resolution, every
+//RS //! receiver-convention hook records the resolved convention for that
+//RS //! receiver, and the arm then compares the written mark with that
+//RS //! convention. Resolution, place evaluation, argument order, two-phase
+//RS //! borrowing, and move checks see exactly the unmarked call they always saw.
+//RS //! A write window receiver (`&values[0..1].sort()`) keeps its `&place`
+//RS //! construction (D-SHAPE-PLACE1=A) and is not re-checked here.
+//RS 
+//RS use super::*;
+//RS use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+//RS use crate::Sema::Diagnostics::type_is_copy;
+//RS use crate::Syntax;
+//RS use crate::AST::{AccessConvention, Expr, PlaceAccess, Type};
+//RS 
+//RS /// One written receiver mark, keyed in the checker by the marked place's span.
+//RS #[derive(Debug, Clone, Copy)]
+//RS pub(crate) struct ReceiverMark {
+//RS     access: PlaceAccess,
+//RS     mark_span: Span,
+//RS }
+//RS 
+//RS /// The receiver of one method call being inferred and the strongest
+//RS /// convention any receiver hook recorded for it.
+//RS #[derive(Debug, Clone)]
+//RS pub(crate) struct ReceiverMarkFrame {
+//RS     receiver: (usize, usize),
+//RS     convention: Option<AccessConvention>,
+//RS }
+//RS 
+//RS fn convention_rank(convention: AccessConvention) -> u8 {
+//RS     match convention {
+//RS         AccessConvention::Read => 0,
+//RS         AccessConvention::Write => 1,
+//RS         AccessConvention::Move => 2,
+//RS     }
+//RS }
+//RS 
+//RS /// The root name of a syntactic place: a name followed by fields, indexes,
+//RS /// or ranges. A call anywhere in the chain makes the receiver fresh.
+//RS fn place_root(expr: &Expr) -> Option<&str> {
+//RS     match expr {
+//RS         Expr::Ident(name, _) => Some(name),
+//RS         Expr::Field(base, _, _) | Expr::Index { base, .. } | Expr::Slice { base, .. } => {
+//RS             place_root(base)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// The source span of a whole syntactic place. Field, index, and range nodes
+//RS /// span only their own suffix (`.buf`, `[i]`), so the place starts at its root.
+//RS pub(crate) fn place_span(expr: &Expr) -> Span {
+//RS     fn start(expr: &Expr) -> usize {
+//RS         match expr {
+//RS             Expr::Field(base, _, _) | Expr::Index { base, .. } | Expr::Slice { base, .. } => {
+//RS                 start(base)
+//RS             }
+//RS             other => other.span().start,
+//RS         }
+//RS     }
+//RS     let span = expr.span();
+//RS     Span::new(start(expr).min(span.start), span.end)
+//RS }
+//RS 
+//RS fn is_window_type(ty: &Type) -> bool {
+//RS     match ty {
+//RS         Type::Apply { name, .. } => matches!(name.as_str(), "ViewMut" | "ComputeViewMut"),
+//RS         Type::Tagged { inner, .. } => is_window_type(inner),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     /// Lift a written receiver mark off `receiver` and open the call's frame.
+//RS     /// Must be paired with [`Checker::finish_receiver_mark`].
+//RS     pub(crate) fn begin_receiver_mark(&mut self, receiver: &mut Box<Expr>) {
+//RS         let lift = matches!(
+//RS             receiver.as_ref(),
+//RS             Expr::Place(inner, PlaceAccess::Write | PlaceAccess::Take, _)
+//RS                 if !matches!(inner.as_ref(), Expr::Slice { .. })
+//RS         );
+//RS         if lift {
+//RS             let placeholder = Expr::Absent(receiver.span());
+//RS             if let Expr::Place(inner, access, span) =
+//RS                 std::mem::replace(receiver.as_mut(), placeholder)
+//RS             {
+//RS                 let inner_span = inner.span();
+//RS                 self.receiver_marks.insert(
+//RS                     (inner_span.start, inner_span.end),
+//RS                     ReceiverMark {
+//RS                         access,
+//RS                         mark_span: Span::new(span.start, span.start + 1),
+//RS                     },
+//RS                 );
+//RS                 **receiver = *inner;
+//RS             }
+//RS         }
+//RS         let span = receiver.span();
+//RS         self.receiver_mark_frames.push(ReceiverMarkFrame {
+//RS             receiver: (span.start, span.end),
+//RS             convention: None,
+//RS         });
+//RS     }
+//RS 
+//RS     /// Receiver hooks report the convention a resolved call uses for this
+//RS     /// receiver. The strongest report wins (take over write over read).
+//RS     pub(crate) fn note_receiver_convention(&mut self, receiver: &Expr, convention: AccessConvention) {
+//RS         let span = receiver.span();
+//RS         let key = (span.start, span.end);
+//RS         if let Some(frame) = self
+//RS             .receiver_mark_frames
+//RS             .iter_mut()
+//RS             .rev()
+//RS             .find(|frame| frame.receiver == key)
+//RS         {
+//RS             let stronger = match frame.convention {
+//RS                 None => true,
+//RS                 Some(seen) => convention_rank(convention) > convention_rank(seen),
+//RS             };
+//RS             if stronger {
+//RS                 frame.convention = Some(convention);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Close the call's frame and compare the written mark with the resolved
+//RS     /// receiver convention: E0224 missing, E0225 extra, E0226 mismatched.
+//RS     pub(crate) fn finish_receiver_mark(&mut self, receiver: &Expr) {
+//RS         let Some(frame) = self.receiver_mark_frames.pop() else {
+//RS             return;
+//RS         };
+//RS         if self.compiler_generated {
+//RS             return;
+//RS         }
+//RS         let mark = self.receiver_marks.get(&frame.receiver).copied();
+//RS         let root = place_root(receiver).filter(|root| self.lookup(root).is_some());
+//RS         if let Some(mark) = mark {
+//RS             self.check_written_receiver_mark(receiver, root.is_some(), mark, frame.convention);
+//RS             return;
+//RS         }
+//RS         let Some(root) = root else {
+//RS             // A fresh receiver (a call result or literal) takes no mark.
+//RS             return;
+//RS         };
+//RS         let span = place_span(receiver);
+//RS         // Only a place the user wrote gets a missing-mark report; lowering
+//RS         // and desugaring passes synthesize receivers with borrowed spans.
+//RS         if !self
+//RS             .source
+//RS             .get(span.start..span.end)
+//RS             .is_some_and(|text| text.starts_with(root))
+//RS         {
+//RS             return;
+//RS         }
+//RS         // D-COPY-DEFAULT1=A: a taking call on a whole owned local at its last
+//RS         // use moves it with no mark; the compiler chooses and `^` stays
+//RS         // optional. A writing call still needs `&`, and a take on a field or
+//RS         // on a local read again later still needs `^`.
+//RS         let unmarked_last_use_take = matches!(receiver, Expr::Ident(name, _)
+//RS             if self.lookup(name).is_some_and(|info| {
+//RS                 matches!(info.param_conv, None | Some(AccessConvention::Move))
+//RS             }) && !self.is_name_live_after(name));
+//RS         let needed = match frame.convention {
+//RS             Some(AccessConvention::Write) => Syntax::SIGIL_WRITE,
+//RS             Some(AccessConvention::Move)
+//RS                 if !unmarked_last_use_take
+//RS                     && !self.place_expr_type(receiver).is_some_and(|ty| type_is_copy(&ty)) =>
+//RS             {
+//RS                 Syntax::SIGIL_MOVE
+//RS             }
+//RS             _ => return,
+//RS         };
+//RS         let (verb, method_decl) = if needed == Syntax::SIGIL_WRITE {
+//RS             ("writes", "&self")
+//RS         } else {
+//RS             ("takes", "^self")
+//RS         };
+//RS         let place = self
+//RS             .source
+//RS             .get(span.start..span.end)
+//RS             .unwrap_or(root)
+//RS             .to_string();
+//RS         let diagnostic = Diagnostic::error(
+//RS             "E0224",
+//RS             format!("this call {verb} `{place}`, but `{place}` has no `{needed}` mark"),
+//RS             format!(
+//RS                 "the method is declared with `{method_decl}`, so the call {verb} the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments"
+//RS             ),
+//RS             format!("write `{needed}{place}`"),
+//RS             Some(span),
+//RS         )
+//RS         .with_edit(TextEdit {
+//RS             span: Span::new(span.start, span.start),
+//RS             new_text: needed.to_string(),
+//RS         });
+//RS         self.push_receiver_mark_diagnostic(diagnostic);
+//RS     }
+//RS 
+//RS     fn check_written_receiver_mark(
+//RS         &mut self,
+//RS         receiver: &Expr,
+//RS         is_place: bool,
+//RS         mark: ReceiverMark,
+//RS         convention: Option<AccessConvention>,
+//RS     ) {
+//RS         let written = match mark.access {
+//RS             PlaceAccess::Take => Syntax::SIGIL_MOVE,
+//RS             _ => Syntax::SIGIL_WRITE,
+//RS         };
+//RS         let remove = |what: String, why: &str| {
+//RS             Diagnostic::error(
+//RS                 "E0225",
+//RS                 what,
+//RS                 why.to_string(),
+//RS                 format!("remove `{written}`"),
+//RS                 Some(mark.mark_span),
+//RS             )
+//RS             .with_edit(TextEdit {
+//RS                 span: mark.mark_span,
+//RS                 new_text: String::new(),
+//RS             })
+//RS         };
+//RS         if !is_place {
+//RS             let diagnostic = remove(
+//RS                 format!("`{written}` marks a fresh value, not a named place"),
+//RS                 "a mark binds a name plus fields, indexes, or ranges; a call result or literal is new, so the call receives it without a mark",
+//RS             );
+//RS             self.push_receiver_mark_diagnostic(diagnostic);
+//RS             return;
+//RS         }
+//RS         let Some(convention) = convention else {
+//RS             return;
+//RS         };
+//RS         let replace = |needed: &str, verb: &str| {
+//RS             Diagnostic::error(
+//RS                 "E0226",
+//RS                 format!("this call {verb} its receiver, so the mark is `{needed}`, not `{written}`"),
+//RS                 "`&` marks a place the call writes and `^` a place the call takes; the resolved method declares which one".to_string(),
+//RS                 format!("replace `{written}` with `{needed}`"),
+//RS                 Some(mark.mark_span),
+//RS             )
+//RS             .with_edit(TextEdit {
+//RS                 span: mark.mark_span,
+//RS                 new_text: needed.to_string(),
+//RS             })
+//RS         };
+//RS         let diagnostic = match (convention, mark.access) {
+//RS             (AccessConvention::Write, PlaceAccess::Take) => replace(Syntax::SIGIL_WRITE, "writes"),
+//RS             (AccessConvention::Move, PlaceAccess::Write) => replace(Syntax::SIGIL_MOVE, "takes"),
+//RS             (AccessConvention::Read, PlaceAccess::Write)
+//RS                 if self.place_expr_type(receiver).is_some_and(|ty| is_window_type(&ty)) =>
+//RS             {
+//RS                 // Calls through a stored write window mark the window name.
+//RS                 return;
+//RS             }
+//RS             (AccessConvention::Read, _) => remove(
+//RS                 format!("this call only reads its receiver, so it takes no `{written}` mark"),
+//RS                 "a mark shows that a call writes (`&`) or takes (`^`) the named place; a read call leaves the place unmarked",
+//RS             ),
+//RS             _ => return,
+//RS         };
+//RS         self.push_receiver_mark_diagnostic(diagnostic);
+//RS     }
+//RS 
+//RS     /// Re-inference may revisit a call; report each finding once.
+//RS     fn push_receiver_mark_diagnostic(&mut self, diagnostic: Diagnostic) {
+//RS         let duplicate = self
+//RS             .diags
+//RS             .iter()
+//RS             .any(|seen| seen.code == diagnostic.code && seen.span == diagnostic.span);
+//RS         if !duplicate {
+//RS             self.diags.push(diagnostic);
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0437 crates/jet-sema/src/Sema/ReceiverMarks.rs:1-281
+

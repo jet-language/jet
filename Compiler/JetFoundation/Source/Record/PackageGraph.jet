@@ -1,0 +1,232 @@
+// Rust crates/jet-foundation/src/PackageIdentity.rs:157-495.
+// OS paths remain opaque encoded values. The host-platform Core provider supplies
+// component semantics; text prefixes and Core Path.normalize are NOT substitutes.
+use core.files.runtime.kernel_path_components.[OsPath]
+pub trait PackageIdentityPathProvider {
+    fn normalize(self, path: OsPath) -> OsPath Never!
+    fn is_relative(self, path: OsPath) -> Bool Never!
+    fn strip_prefix(self, path: OsPath, root: OsPath) -> OsPath? Never!
+    fn slash(self, path: OsPath) -> String Never!
+}
+pub enum CompilerPackageKind { Core Manifest File }
+pub struct CompilerPackageNode {
+    pub identity: String
+    pub kind: CompilerPackageKind
+    pub root: OsPath?
+    pub modules: [Int]
+    pub dependencies: [Int]
+}
+pub struct CompilerPackageGraph {
+    pub packages: [CompilerPackageNode]
+    module_package: [Int]
+    dependency_order: [Int]
+}
+// These are retained LOADED modules, never a scan of registered declarations.
+pub struct PackageIdentityLoadedModule {
+    pub path: OsPath
+    pub source_digest: String
+    pub is_core_source: Bool
+}
+pub struct PackageIdentityDependencyRoot { pub name: String, pub path: OsPath }
+pub struct PackageIdentityImportEdge { pub from: Int, pub to: Int }
+pub struct PackageIdentityLedger {
+    // Exact namespace roots indexed by original loaded-module membership.
+    pub namespaces: [Int:OsPath]
+    pub imports: View<PackageIdentityImportEdge>
+}
+pub struct PackageIdentityBundle {
+    pub project_root: OsPath
+    pub dependency_roots: View<PackageIdentityDependencyRoot>
+    pub modules: View<PackageIdentityLoadedModule>
+    // Computed once from the loader-owned original AST, before registration lifting.
+    pub interfaces: View<PackageIdentityModuleInterface>
+    pub ledger: PackageIdentityLedger
+}
+// Rust stable_label. Dependency roots are examined by NAME, not load order.
+fn package_identity_stable_label<H: PackageIdentityPathProvider>(bundle: PackageIdentityBundle, path: OsPath, paths: H, dependency_order: [Int]) -> String Never! {
+    normalized :: paths.normalize(path)
+    if paths.is_relative(normalized) -> return paths.slash(normalized)
+    if paths.strip_prefix(normalized, paths.normalize(bundle.project_root)) == .Val(relative) -> return paths.slash(relative)
+    loop index in dependency_order {
+        dependency :: bundle.dependency_roots[index]
+        if paths.strip_prefix(normalized, paths.normalize(dependency.path)) == .Val(relative) -> return "dep:{dependency.name}/{paths.slash(relative)}"
+    }
+    paths.slash(normalized)
+}
+fn package_identity_dependency_order(bundle: PackageIdentityBundle) -> [Int] Never! {
+    names :: loop root in bundle.dependency_roots -> root.name
+    package_key_byte_order(names)
+}
+// Rust PackageGraph::from_bundle/from_ledger. No per-edge graph clones/scans.
+pub fn compiler_package_graph<H: PackageIdentityPathProvider>(bundle: PackageIdentityBundle, paths: H) -> CompilerPackageGraph Never! {
+    compiler_package_graph_from_ledger<H>(bundle, bundle.ledger, paths)
+}
+pub fn compiler_package_graph_from_ledger<H: PackageIdentityPathProvider>(bundle: PackageIdentityBundle, ledger: PackageIdentityLedger, paths: H) -> CompilerPackageGraph Never! {
+    dependency_order :: package_identity_dependency_order(bundle)
+    packages := [CompilerPackageNode]{}
+    group_index := [String:Int]{}
+    module_group := [Int]{}
+    loop (module_index, loaded) in bundle.modules {
+        root :: ledger.namespaces.get(module_index)
+        label :: if loaded.is_core_source -> "core" else -> package_identity_stable_label<H>(bundle, root ?? loaded.path, paths, dependency_order)
+        identity :: if {
+            loaded.is_core_source -> "core"
+            root != None -> if label.starts_with("dep:") -> label else -> "pkg:{label}"
+            else -> "file:{label}"
+        }
+        group := group_index.get(identity) ?? -1
+        if group < 0 {
+            group = packages.len()
+            group_index[identity] = group
+            kind :: if loaded.is_core_source -> CompilerPackageKind.Core else -> if root != None -> CompilerPackageKind.Manifest else -> CompilerPackageKind.File
+            &packages.push(CompilerPackageNode{identity: identity, kind: kind, root: if loaded.is_core_source -> None else -> root, modules: [Int]{}, dependencies: [Int]{}})
+        }
+        &packages[group].modules.push(module_index)
+        &module_group.push(group)
+    }
+    // Sort owned nodes in place, never clone their member/dependency vectors.
+    names :: loop package in packages -> package.identity
+    &packages.sort_by((left: CompilerPackageNode, right: CompilerPackageNode) -> left.identity <=> right.identity)
+    index_of := [String:Int]{}
+    loop (index, package) in packages -> index_of[package.identity] = index
+    sorted_index :: loop name in names -> index_of.get(name) ?? panic("package identity retained")
+    module_package :: loop group in module_group -> sorted_index[group]
+    loop edge in ledger.imports {
+        if edge.from < 0 || edge.to < 0 || edge.from >= module_package.len() || edge.to >= module_package.len() -> next
+        from :: module_package[edge.from]
+        to :: module_package[edge.to]
+        if from != to -> &packages[from].dependencies.push(to)
+    }
+    core := -1
+    if group_index.get("core") == .Val(old_index) -> core = sorted_index[old_index]
+    loop index in 0..<packages.len() {
+        if core >= 0 && core != index -> &packages[index].dependencies.push(core)
+        &packages[index].dependencies.sort_by((left: Int, right: Int) -> left <=> right)
+        unique := [Int]{}
+        loop dependency in packages[index].dependencies {
+            if unique.len() == 0 || unique[unique.len() - 1] != dependency -> &unique.push(dependency)
+        }
+        packages[index].dependencies = unique
+    }
+    CompilerPackageGraph{packages: packages, module_package: module_package, dependency_order: dependency_order}
+}
+// Rust PackageGraph::package_of.
+pub fn compiler_package_of(graph: CompilerPackageGraph, module_index: Int) -> Int? Never! {
+    if module_index < 0 || module_index >= graph.module_package.len() -> return None
+    Val(graph.module_package[module_index])
+}
+struct CompilerPackageTarjan {
+    next_index: Int
+    index: [Int]
+    low: [Int]
+    stack: [Int]
+    on_stack: [Bool]
+    components: [[Int]]
+}
+// Rust components::visit. The graph is borrowed; mutation is indexed state only.
+fn compiler_package_visit(graph: CompilerPackageGraph, state: &CompilerPackageTarjan, node: Int) Never! {
+    state.index[node] = state.next_index
+    state.low[node] = state.next_index
+    state.next_index += 1
+    &state.stack.push(node)
+    state.on_stack[node] = true
+    loop dependency in graph.packages[node].dependencies {
+        if state.index[dependency] < 0 {
+            compiler_package_visit(graph, &state, dependency)
+            state.low[node] = state.low[node].min(state.low[dependency])
+        } else {
+            if state.on_stack[dependency] -> state.low[node] = state.low[node].min(state.index[dependency])
+        }
+    }
+    if state.low[node] == state.index[node] {
+        component := [Int]{}
+        loop {
+            member :: &state.stack.pop() ?? panic("Tarjan root is on stack")
+            state.on_stack[member] = false
+            &component.push(member)
+            if member == node -> break
+        }
+        &component.sort_by((left: Int, right: Int) -> left <=> right)
+        &state.components.push(component)
+    }
+}
+// Rust PackageGraph::components/is_acyclic, O(V+E) indexed traversal before sorting.
+pub fn compiler_package_components(graph: CompilerPackageGraph) -> [[Int]] Never! {
+    indices := [Int]{}
+    lows := [Int]{}
+    active := [Bool]{}
+    loop index in 0..<graph.packages.len() {
+        &indices.push(-1)
+        &lows.push(0)
+        &active.push(false)
+    }
+    state := CompilerPackageTarjan{next_index: 0, index: indices, low: lows, stack: [Int]{}, on_stack: active, components: [[Int]]{}}
+    loop node in 0..<graph.packages.len() {
+        if state.index[node] < 0 -> compiler_package_visit(graph, &state, node)
+    }
+    state.components
+}
+pub fn compiler_package_is_acyclic(graph: CompilerPackageGraph) -> Bool Never! {
+    loop component in compiler_package_components(graph) {
+        if component.len() != 1 -> return false
+    }
+    true
+}
+// Rust PackageGraph::member_label/source_digest. Only loader-retained exact text.
+pub fn compiler_package_member_label<H: PackageIdentityPathProvider>(graph: CompilerPackageGraph, bundle: PackageIdentityBundle, module_index: Int, paths: H) -> String Never! {
+    loaded :: bundle.modules[module_index]
+    if compiler_package_of(graph, module_index) == .Val(package_index) {
+        if graph.packages[package_index].root == .Val(root) {
+            if paths.strip_prefix(paths.normalize(loaded.path), paths.normalize(root)) == .Val(relative) -> return paths.slash(relative)
+            return package_identity_stable_label<H>(bundle, loaded.path, paths, graph.dependency_order)
+        }
+    }
+    if loaded.is_core_source -> return paths.slash(loaded.path)
+    package_identity_stable_label<H>(bundle, loaded.path, paths, graph.dependency_order)
+}
+pub fn compiler_package_source_digest<H: PackageIdentityPathProvider>(graph: CompilerPackageGraph, bundle: PackageIdentityBundle, package_index: Int, manifest: [U8]?, paths: H) -> String Never! {
+    files := [PackageKeySourceFingerprint]{}
+    loop module_index in graph.packages[package_index].modules {
+        &files.push(PackageKeySourceFingerprint{relative_path: compiler_package_member_label<H>(graph, bundle, module_index, paths), digest: bundle.modules[module_index].source_digest})
+    }
+    package_key_source_fingerprints_digest(files, manifest)
+}
+struct PackageIdentityInterfaceDeclaration { module: String, name: String, fingerprint: String }
+struct PackageIdentityReexport { module: String, fingerprint: String }
+// Rust PackageGraph::interface_digest. Schema, tags, maps and sort tuples are pinned.
+pub fn compiler_package_interface_digest<H: PackageIdentityPathProvider>(graph: CompilerPackageGraph, bundle: PackageIdentityBundle, package_index: Int, summaries: [String:String], paths: H) -> String Never! {
+    node :: graph.packages[package_index]
+    declarations := [PackageIdentityInterfaceDeclaration]{}
+    reexports := [PackageIdentityReexport]{}
+    loop module_index in node.modules {
+        label :: compiler_package_member_label<H>(graph, bundle, module_index, paths)
+        loop declaration in bundle.interfaces[module_index].declarations {
+            &declarations.push(PackageIdentityInterfaceDeclaration{module: label, name: declaration.name, fingerprint: declaration.fingerprint})
+        }
+        loop fingerprint in bundle.interfaces[module_index].reexports -> &reexports.push(PackageIdentityReexport{module: label, fingerprint: fingerprint})
+    }
+    &declarations.sort_by((left: PackageIdentityInterfaceDeclaration, right: PackageIdentityInterfaceDeclaration) -> if left.module != right.module -> left.module <=> right.module else -> if left.name != right.name -> left.name <=> right.name else -> left.fingerprint <=> right.fingerprint)
+    &reexports.sort_by((left: PackageIdentityReexport, right: PackageIdentityReexport) -> if left.module != right.module -> left.module <=> right.module else -> left.fingerprint <=> right.fingerprint)
+    declaration_values := [RecordValue]{}
+    loop declaration in declarations -> &declaration_values.push(RecordValue.Map{fields: [RecordField]{RecordField{name: "module", value: RecordValue.Str{value: declaration.module}}, RecordField{name: "name", value: RecordValue.Str{value: declaration.name}}, RecordField{name: "fingerprint", value: RecordValue.Str{value: declaration.fingerprint}}}})
+    reexport_values := [RecordValue]{}
+    loop reexport in reexports -> &reexport_values.push(RecordValue.Map{fields: [RecordField]{RecordField{name: "module", value: RecordValue.Str{value: reexport.module}}, RecordField{name: "fingerprint", value: RecordValue.Str{value: reexport.fingerprint}}}})
+    summary_names := [String]{}
+    loop (identity, value) in summaries -> &summary_names.push(identity)
+    summary_values := [RecordValue]{}
+    loop index in package_key_byte_order(summary_names) {
+        identity :: summary_names[index]
+        value :: summaries.get(identity) ?? panic("summary key retained")
+        &summary_values.push(RecordValue.Map{fields: [RecordField]{RecordField{name: "identity", value: RecordValue.Str{value: identity}}, RecordField{name: "value", value: RecordValue.Str{value: value}}}})
+    }
+    sections :: [RecordSection]{
+        RecordSection{id: 1, elements: [RecordValue]{RecordValue.Map{fields: [RecordField]{RecordField{name: "package", value: RecordValue.Str{value: node.identity}}}}}},
+        RecordSection{id: 2, elements: declaration_values},
+        RecordSection{id: 3, elements: reexport_values},
+        RecordSection{id: 4, elements: summary_values},
+    }
+    encoded :: record_encode("jet.iface/v1", sections).bytes ?? panic("interface sections have distinct tags")
+    digest := [U8]{}
+    loop index in (encoded.len() - RECORD_CHECKSUM_BYTES)..<encoded.len() -> &digest.push(encoded[index])
+    mir_sha256_hex_bytes(digest[0..<digest.len()])
+}

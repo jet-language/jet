@@ -1,0 +1,771 @@
+// PORT-PENDING 0328 crates-jet-parser-src-parser-items-enums-traits-module-group: crates/jet-parser/src/Parser/Items/enums_traits.rs:1-767
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::super::{
+//RS     Diagnostic, EnumDef, ImplDef, Item, Parser, Span, Syntax, TokKind, Token, TraitImplBlock,
+//RS     Variant, VariantField, VariantPayload,
+//RS };
+//RS 
+//RS impl<'a> Parser<'a> {
+//RS     /// Parse `enum Name { … }` given that pub/is_pub was already handled. Factors
+//RS     /// out the body of `enum_def` (mirrors `struct_def_after_pub`) so the
+//RS     /// `#SingleUse enum` path can reuse it.
+//RS     pub(super) fn enum_def_after_pub(
+//RS         &mut self,
+//RS         is_pub: bool,
+//RS         is_package_pub: bool,
+//RS     ) -> Result<EnumDef, Diagnostic> {
+//RS         let item_start = self.peek().span.start;
+//RS         self.expect_kw(TokKind::KwEnum, "to start an enum definition")?;
+//RS         let (name, name_span) = self.expect_ident("after `enum`")?;
+//RS         let type_params = self.parse_opt_type_params()?;
+//RS         self.expect(TokKind::LBrace, "to open the enum body")?;
+//RS         let mut variants = Vec::new();
+//RS         let mut groups = Vec::new();
+//RS         let mut methods = Vec::new();
+//RS         let mut trait_impls = Vec::new();
+//RS         let derives = Vec::new();
+//RS         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+//RS             if matches!(self.peek().kind, TokKind::Semi) {
+//RS                 self.bump();
+//RS                 continue;
+//RS             }
+//RS             if self.at_state_section() {
+//RS                 return Err(self.reject_state_section("enum"));
+//RS             }
+//RS             if self.method_starts_here() {
+//RS                 methods.push(self.method_in_type()?);
+//RS                 continue;
+//RS             }
+//RS             // D-SERDE5/7 + D-SHAPE2: one bare marker or one multi-marker list.
+//RS             if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
+//RS                 let variant_markers = self.parse_field_markers(crate::Policy::RuleSite::Variant)?;
+//RS                 self.variant_entry("", &mut variants, &mut groups, variant_markers)?;
+//RS                 if matches!(self.peek().kind, TokKind::Semi) {
+//RS                     self.bump();
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             if matches!(self.peek().kind, TokKind::KwDerive) {
+//RS                 return Err(self.retired_derive_line());
+//RS             } else if matches!(self.peek().kind, TokKind::KwImpl) {
+//RS                 trait_impls.push(self.trait_impl_block()?);
+//RS             } else {
+//RS                 self.variant_entry("", &mut variants, &mut groups, Vec::new())?;
+//RS                 if matches!(self.peek().kind, TokKind::Semi) {
+//RS                     self.bump();
+//RS                 }
+//RS             }
+//RS         }
+//RS         let item_end = self.bump().span.end;
+//RS         Ok(EnumDef {
+//RS             span: Span::new(item_start, item_end),
+//RS             is_pub,
+//RS             is_package_pub,
+//RS             name,
+//RS             name_span,
+//RS             type_params,
+//RS             variants,
+//RS             methods,
+//RS             trait_impls,
+//RS             derives,
+//RS             auto_derive_default: true,
+//RS             is_single_use: false,
+//RS             single_use_span: None,
+//RS             is_must_use: false,
+//RS             must_use_span: None,
+//RS             serde_markers: Vec::new(),
+//RS             type_markers: Vec::new(),
+//RS             groups,
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-TAG1 (ratified 2026-07-03): parse one enum-body entry — a leaf variant
+//RS     /// or a variant group `Name { … }`. Leaves are recorded flat with their full
+//RS     /// dotted path (`prefix.Name`); each group path is recorded in `groups` so
+//RS     /// sema and the formatter see the tree. Groups nest to any depth. Payloads
+//RS     /// live on leaves only (E0331).
+//RS     fn variant_entry(
+//RS         &mut self,
+//RS         prefix: &str,
+//RS         variants: &mut Vec<crate::AST::Variant>,
+//RS         groups: &mut Vec<crate::AST::EnumGroup>,
+//RS         serde_markers: Vec<crate::AST::Marker>,
+//RS     ) -> Result<(), Diagnostic> {
+//RS         let (name, name_span) = self.expect_ident("for a variant name")?;
+//RS         for marker in &serde_markers {
+//RS             self.bind_rule_fact(
+//RS                 marker.name_span,
+//RS                 Some(name_span),
+//RS                 crate::Policy::RuleSite::Variant,
+//RS             );
+//RS         }
+//RS         let path = if prefix.is_empty() {
+//RS             name
+//RS         } else {
+//RS             format!("{prefix}.{name}")
+//RS         };
+//RS         let payload = if matches!(self.peek().kind, TokKind::LParen) {
+//RS             let payload_start = self.bump().span; // consume `(`
+//RS             let payload = self.variant_payload()?;
+//RS             self.expect(TokKind::RParen, "after a variant's payload")?;
+//RS             let payload_end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS             if matches!(self.peek().kind, TokKind::LBrace) {
+//RS                 // D-TAG1: a payload on a group name — payloads live on leaves only.
+//RS                 self.diags.push(Diagnostic::error(
+//RS                         "E0331",
+//RS                         format!("group `{}` can't carry a payload", path),
+//RS                         "a variant group only names its subtree — data lives on the leaf variants (D-TAG1)".to_string(),
+//RS                         "move the payload onto the leaf variants inside the `{ }`, or remove the `(...)`".to_string(),
+//RS                         Some(Span::new(payload_start.start, payload_end)),
+//RS                     ));
+//RS                 VariantPayload::Unit
+//RS             } else {
+//RS                 payload
+//RS             }
+//RS         } else {
+//RS             VariantPayload::Unit
+//RS         };
+//RS         let discriminant_expr = if matches!(self.peek().kind, TokKind::Eq) {
+//RS             self.bump();
+//RS             Some(self.expr()?)
+//RS         } else {
+//RS             None
+//RS         };
+//RS         if !matches!(self.peek().kind, TokKind::LBrace) {
+//RS             variants.push(Variant {
+//RS                 name: path,
+//RS                 name_span,
+//RS                 payload,
+//RS                 discriminant: None,
+//RS                 discriminant_expr,
+//RS                 serde_markers,
+//RS             });
+//RS             return Ok(());
+//RS         }
+//RS         // A variant group: `Name { entry (,|newline entry)* }`.
+//RS         self.bump(); // consume `{`
+//RS         if !serde_markers.is_empty() {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0003",
+//RS                 format!("a `#[…]` marker can't sit on group `{}`", path),
+//RS                 "serde markers rename wire names, and only leaf variants reach the wire (D-TAG1)"
+//RS                     .to_string(),
+//RS                 "move the marker onto a leaf variant inside the `{ }`".to_string(),
+//RS                 Some(name_span),
+//RS             ));
+//RS         }
+//RS         let leaves_before = variants.len();
+//RS         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+//RS             if matches!(self.peek().kind, TokKind::Semi | TokKind::Comma) {
+//RS                 self.bump();
+//RS                 continue;
+//RS             }
+//RS             let entry_markers =
+//RS                 if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
+//RS                     self.parse_field_markers(crate::Policy::RuleSite::Variant)?
+//RS                 } else {
+//RS                     Vec::new()
+//RS                 };
+//RS             self.variant_entry(&path, variants, groups, entry_markers)?;
+//RS             if matches!(self.peek().kind, TokKind::Semi | TokKind::Comma) {
+//RS                 self.bump();
+//RS             }
+//RS         }
+//RS         self.expect(TokKind::RBrace, "to close the variant group")?;
+//RS         if variants.len() == leaves_before {
+//RS             self.diags.push(Diagnostic::error(
+//RS                     "E0003",
+//RS                     format!("group `{}` has no variants", path),
+//RS                     "an empty group can never match anything — every group needs at least one leaf variant (D-TAG1)".to_string(),
+//RS                     "add a variant inside the `{ }`, or remove the group".to_string(),
+//RS                     Some(name_span),
+//RS                 ));
+//RS         }
+//RS         groups.push(crate::AST::EnumGroup { path, name_span });
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn variant_payload(&mut self) -> Result<VariantPayload, Diagnostic> {
+//RS         if matches!(self.peek().kind, TokKind::Ident(_)) {
+//RS             let peek2 = self.peek2().kind.clone();
+//RS             if matches!(peek2, TokKind::Colon) {
+//RS                 let mut fields = Vec::new();
+//RS                 loop {
+//RS                     let (name, name_span) = self.expect_ident("for a variant field name")?;
+//RS                     self.expect(TokKind::Colon, "after a variant field name")?;
+//RS                     let (ty, ty_span) = self.type_()?;
+//RS                     fields.push(VariantField {
+//RS                         name,
+//RS                         name_span,
+//RS                         ty,
+//RS                         ty_span,
+//RS                     });
+//RS                     if !matches!(self.peek().kind, TokKind::Comma) {
+//RS                         break;
+//RS                     }
+//RS                     self.bump();
+//RS                     if matches!(self.peek().kind, TokKind::RParen) {
+//RS                         break;
+//RS                     }
+//RS                 }
+//RS                 Ok(VariantPayload::Named(fields))
+//RS             } else {
+//RS                 let (ty, ty_span) = self.type_()?;
+//RS                 if matches!(self.peek().kind, TokKind::Comma) {
+//RS                     return Err(Diagnostic::error(
+//RS                             "E0003",
+//RS                             "a positional enum variant can carry only one value".to_string(),
+//RS                             "one positional payload has one type; variants with two or more values use named fields"
+//RS                                 .to_string(),
+//RS                             "name each field, for example `Hit(text: String, count: Int)`"
+//RS                                 .to_string(),
+//RS                             Some(self.peek().span),
+//RS                         ));
+//RS                 }
+//RS                 Ok(VariantPayload::Single(ty, ty_span))
+//RS             }
+//RS         } else {
+//RS             let (ty, ty_span) = self.type_()?;
+//RS             if matches!(self.peek().kind, TokKind::Comma) {
+//RS                 return Err(Diagnostic::error(
+//RS                         "E0003",
+//RS                         "a positional enum variant can carry only one value".to_string(),
+//RS                         "one positional payload has one type; variants with two or more values use named fields"
+//RS                             .to_string(),
+//RS                         "name each field, for example `Hit(text: String, count: Int)`"
+//RS                             .to_string(),
+//RS                         Some(self.peek().span),
+//RS                     ));
+//RS             }
+//RS             Ok(VariantPayload::Single(ty, ty_span))
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-FOUND-OPMIX1=A: parse the one parenthesized right-hand type allowed
+//RS     /// on an operator trait impl. A bare operator impl keeps `None`, which
+//RS     /// means `Self`.
+//RS     fn parse_operator_rhs(
+//RS         &mut self,
+//RS         trait_name: Option<&str>,
+//RS     ) -> Result<Option<crate::AST::Type>, Diagnostic> {
+//RS         if !matches!(self.peek().kind, TokKind::LParen) {
+//RS             return Ok(None);
+//RS         }
+//RS         self.expect(TokKind::LParen, "after an operator trait")?;
+//RS         let (rhs, rhs_span) = self.type_()?;
+//RS         if matches!(self.peek().kind, TokKind::Comma) {
+//RS             let comma_span = self.bump().span;
+//RS             return Err(Diagnostic::error(
+//RS                 "E0003",
+//RS                 "an operator impl accepts exactly one right-hand type".to_string(),
+//RS                 "operator dispatch has one right-hand operand; multiple type arguments would make the hook ambiguous".to_string(),
+//RS                 "write one type, for example `impl Money.Mul(Int)`".to_string(),
+//RS                 Some(comma_span),
+//RS             ));
+//RS         }
+//RS         self.expect(TokKind::RParen, "after the operator right-hand type")?;
+//RS         let Some(trait_name) = trait_name else {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0003",
+//RS                 "type arguments on an impl need an operator trait".to_string(),
+//RS                 "only Add, Sub, Mul, and Div accept an explicit right-hand operand type".to_string(),
+//RS                 "write a dotted operator impl such as `impl Money.Mul(Int)`".to_string(),
+//RS                 Some(rhs_span),
+//RS             ));
+//RS         };
+//RS         if !matches!(
+//RS             trait_name,
+//RS             Syntax::TRAIT_ADD | Syntax::TRAIT_SUB | Syntax::TRAIT_MUL | Syntax::TRAIT_DIV
+//RS         ) {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0003",
+//RS                 format!("`{trait_name}` does not accept an operator right-hand type"),
+//RS                 "only Add, Sub, Mul, and Div have a typed right-hand operand".to_string(),
+//RS                 "remove the type arguments or use an arithmetic operator trait".to_string(),
+//RS                 Some(rhs_span),
+//RS             ));
+//RS         }
+//RS         Ok(Some(rhs))
+//RS     }
+//RS 
+//RS     fn operator_marker_from_markers(
+//RS         markers: &[crate::AST::Marker],
+//RS     ) -> Option<crate::AST::OperatorMarker> {
+//RS         markers
+//RS             .iter()
+//RS             .find(|marker| marker.name == Syntax::MARKER_COMMUTATIVE)
+//RS             .map(|_| crate::AST::OperatorMarker::Commutative)
+//RS     }
+//RS 
+//RS     fn bind_operator_marker_facts(
+//RS         &mut self,
+//RS         markers: &[crate::AST::Marker],
+//RS         target: Span,
+//RS     ) {
+//RS         for marker in markers {
+//RS             self.bind_rule_fact(marker.name_span, Some(target), crate::Policy::RuleSite::Impl);
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-ERR-CONV (ratified 2026-06-19): dispatch `impl …` to either the normal
+//RS     /// `ImplDef` path or the `impl Source -> Target { body }` error-conversion path.
+//RS     pub(in crate::Parser) fn impl_or_error_conv(&mut self) -> Result<Item, Diagnostic> {
+//RS         let item_start = self.peek().span.start;
+//RS         self.expect_kw(TokKind::KwImpl, "to start an `impl` block")?;
+//RS         // D-IMPLDOT1=A: trait impl is `impl Type.Trait { … }`. D-PROTO1/D-PROTO2 add
+//RS         // inherent impl on protocol handles `impl Payment.Client { … }` / `.Server`.
+//RS         let (type_name, type_span, mut trait_name, mut trait_span) = {
+//RS             let (first, first_span) = self.expect_ident("after `impl`")?;
+//RS             let mut parts = vec![(first, first_span)];
+//RS             while matches!(self.peek().kind, TokKind::Dot) {
+//RS                 self.bump();
+//RS                 parts.push(self.expect_ident("after `.` in `impl`")?);
+//RS             }
+//RS             let is_error_conversion = self.at_unified_arrow();
+//RS             let is_protocol_impl = parts.len() == 2
+//RS                 && matches!(parts[1].0.as_str(), "Client" | "Server")
+//RS                 && matches!(self.peek().kind, TokKind::LBrace);
+//RS             // D-FOUND-LITERAL1=A (card #2789): literal capabilities reuse the
+//RS             // existing dotted impl header. Only the exact `Type.Literal.Int`
+//RS             // and `Type.Literal.Float` tails are split specially; ordinary
+//RS             // dotted type/trait headers keep the established last-segment rule.
+//RS             let literal_capability = parts.len() >= 3
+//RS                 && parts[parts.len() - 2].0 == "Literal"
+//RS                 && matches!(
+//RS                     parts[parts.len() - 1].0.as_str(),
+//RS                     "Int" | "Float"
+//RS                 );
+//RS             if parts.len() == 1 || is_error_conversion || is_protocol_impl {
+//RS                 let end = parts.last().unwrap().1.end;
+//RS                 let name = parts
+//RS                     .iter()
+//RS                     .map(|(part, _)| part.as_str())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(".");
+//RS                 (name, Span::new(first_span.start, end), None, None)
+//RS             } else if literal_capability {
+//RS                 let (carrier, carrier_span) = parts.pop().unwrap();
+//RS                 let (literal, literal_span) = parts.pop().unwrap();
+//RS                 let owner_end = parts.last().unwrap().1.end;
+//RS                 let owner = parts
+//RS                     .iter()
+//RS                     .map(|(part, _)| part.as_str())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(".");
+//RS                 (
+//RS                     owner,
+//RS                     Span::new(first_span.start, owner_end),
+//RS                     Some(format!("{literal}.{carrier}")),
+//RS                     Some(Span::new(literal_span.start, carrier_span.end)),
+//RS                 )
+//RS             } else {
+//RS                 let (last, last_span) = parts.pop().unwrap();
+//RS                 let owner_end = parts.last().unwrap().1.end;
+//RS                 let owner = parts
+//RS                     .iter()
+//RS                     .map(|(part, _)| part.as_str())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(".");
+//RS                 (
+//RS                     owner,
+//RS                     Span::new(first_span.start, owner_end),
+//RS                     Some(last),
+//RS                     Some(last_span),
+//RS                 )
+//RS             }
+//RS         };
+//RS         // Detect `impl Source -> Target { body }` — D-ERR-CONV as respelled
+//RS         // by D-ARROW-CONTROL1. Accept `->` only to emit its migration error.
+//RS         if self.at_unified_arrow() {
+//RS             self.expect_unified_arrow("before a callable result type")?;
+//RS             let (to_ty, to_span) = self.parse_type_path("after `->` in error conversion")?;
+//RS             // Peek the `{` span before consuming.
+//RS             if !matches!(self.peek().kind, TokKind::LBrace) {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0003",
+//RS                     "expected `{` to open the error-conversion body".to_string(),
+//RS                     "an error conversion body is a block: `impl Source -> Target { … }`"
+//RS                         .to_string(),
+//RS                     "add `{` after the target type".to_string(),
+//RS                     Some(self.peek().span),
+//RS                 ));
+//RS             }
+//RS             let brace_start = self.bump().span.start; // consume `{`
+//RS             if self.at_state_section() {
+//RS                 return Err(self.reject_state_section("impl"));
+//RS             }
+//RS             // block_stmts consumes statements AND the closing `}`.
+//RS             // We need to track where the `}` ended — peek first to record pos.
+//RS             let body = self.block_stmts();
+//RS             // After block_stmts, the `}` is consumed; the last consumed token is at pos-1.
+//RS             let rbrace_end = self.toks[self.pos.saturating_sub(1)].span.end;
+//RS             let body_span = Span::new(brace_start, rbrace_end);
+//RS             return Ok(Item::ErrorConv(crate::AST::ErrorConvDef {
+//RS                 from_ty: type_name,
+//RS                 from_span: type_span,
+//RS                 to_ty,
+//RS                 to_span,
+//RS                 body,
+//RS                 body_span,
+//RS             }));
+//RS         }
+//RS         // Normal `impl` path — trait_name/trait_span were parsed above.
+//RS         if trait_name.is_none() && matches!(self.peek().kind, TokKind::Colon) {
+//RS             // Teaching error: old `impl Type: Trait` form.
+//RS             let colon_span = self.peek().span;
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0321",
+//RS                 format!("trait separator is now `.`, not `:`"),
+//RS                 "the impl separator reads \"Type's Trait\", matching the dot accessor".to_string(),
+//RS                 format!("write `impl {}.Trait {{ … }}`", type_name),
+//RS                 Some(colon_span),
+//RS             ));
+//RS             self.bump(); // consume old `:`
+//RS             let (t, ts) = self.expect_ident("after `:` in `impl Type: Trait`")?;
+//RS             trait_name = Some(t);
+//RS             trait_span = Some(ts);
+//RS         }
+//RS         let operator_rhs = self.parse_operator_rhs(trait_name.as_deref())?;
+//RS         let operator_markers =
+//RS             self.parse_attached_marker_sequence(crate::Policy::RuleSite::Impl, "impl")?;
+//RS         let operator_marker = Self::operator_marker_from_markers(&operator_markers);
+//RS         // S62: `impl Type.Trait using field_name;` — delegation form.
+//RS         if let TokKind::Ident(kw) = &self.peek().kind {
+//RS             if kw == "using" && trait_name.is_some() {
+//RS                 self.bump(); // consume `using`
+//RS                 let (field, _) = self.expect_ident("after `using` for the delegation field")?;
+//RS                 self.finish_stmt()?;
+//RS                 let span =
+//RS                     Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end);
+//RS                 self.bind_operator_marker_facts(&operator_markers, span);
+//RS                 return Ok(Item::Impl(ImplDef {
+//RS                     span,
+//RS                     type_name,
+//RS                     type_span,
+//RS                     trait_name,
+//RS                     trait_span,
+//RS                     operator_rhs: operator_rhs.clone(),
+//RS                     operator_marker,
+//RS                     methods: Vec::new(),
+//RS                     delegation_field: Some(field),
+//RS                     assoc_type_impls: Vec::new(),
+//RS                     is_generated_serde: false,
+//RS                     os_target: None,
+//RS                 }));
+//RS             }
+//RS         }
+//RS         self.expect(TokKind::LBrace, "to open the `impl` body")?;
+//RS         let mut methods = Vec::new();
+//RS         let mut assoc_type_impls = Vec::new();
+//RS         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+//RS             if matches!(self.peek().kind, TokKind::Semi) {
+//RS                 self.bump();
+//RS                 continue;
+//RS             }
+//RS             if self.at_state_section() {
+//RS                 return Err(self.reject_state_section("impl"));
+//RS             }
+//RS             if let TokKind::Ident(kw) = &self.peek().kind {
+//RS                 if kw == "type" {
+//RS                     let kw_span = self.bump().span;
+//RS                     let (assoc_name, name_span) = self.expect_ident("after `type` in impl body")?;
+//RS                     self.expect(TokKind::Eq, "after associated type name")?;
+//RS                     let (assoc_ty, _) = self.type_()?;
+//RS                     self.finish_stmt()?;
+//RS                     assoc_type_impls.push((
+//RS                         assoc_name,
+//RS                         Span::new(kw_span.start, name_span.end),
+//RS                         assoc_ty,
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS             methods.push(self.method_in_type()?);
+//RS         }
+//RS         let item_end = self.bump().span.end;
+//RS         let span = Span::new(item_start, item_end);
+//RS         self.bind_operator_marker_facts(&operator_markers, span);
+//RS         Ok(Item::Impl(ImplDef {
+//RS             span,
+//RS             type_name,
+//RS             type_span,
+//RS             trait_name,
+//RS             operator_rhs,
+//RS             operator_marker,
+//RS             trait_span,
+//RS             methods,
+//RS             delegation_field: None,
+//RS             assoc_type_impls,
+//RS             is_generated_serde: false,
+//RS             os_target: None,
+//RS         }))
+//RS     }
+//RS 
+//RS     /// D-OSTARGET1=A: parse the `impl` block that must follow a `#Target(OS.X)`
+//RS     /// marker and attach `os` to it. Reuses `impl_or_error_conv` (same grammar,
+//RS     /// same `impl Type.Trait { … }` / delegation / error-conversion forms) and
+//RS     /// stamps the OS gate onto the resulting `ImplDef` afterward — no need to
+//RS     /// thread a new parameter through every `impl` parse path or its other
+//RS     /// caller (`Modules.rs`'s inline-module item loop calls this same helper).
+//RS     pub(in crate::Parser) fn os_gated_impl(
+//RS         &mut self,
+//RS         os: crate::Syntax::OSTarget,
+//RS     ) -> Result<Item, Diagnostic> {
+//RS         // S6-R: a synthetic statement-terminator `;` may follow the marker
+//RS         // line (same as the `TokKind::Semi` skip at the top of the top-level
+//RS         // item loop) — swallow it before checking what actually follows.
+//RS         while matches!(self.peek().kind, TokKind::Semi) {
+//RS             self.bump();
+//RS         }
+//RS         if !matches!(self.peek().kind, TokKind::KwImpl) {
+//RS             let span = self.peek().span;
+//RS             return Err(Diagnostic::error(
+//RS                     "E0003",
+//RS                     format!("`#Target(OS.{})` isn't valid here", os.name()),
+//RS                     "`OS.Linux`/`OS.MacOS`/`OS.Windows` gates a whole `impl` block, not a module, function, or any other item".to_string(),
+//RS                     format!("write `#Target(OS.{}) impl Type.Trait {{ … }}`", os.name()),
+//RS                     Some(span),
+//RS                 ));
+//RS         }
+//RS         match self.impl_or_error_conv()? {
+//RS                 Item::Impl(mut i) => {
+//RS                     i.os_target = Some(os);
+//RS                     Ok(Item::Impl(i))
+//RS                 }
+//RS                 Item::ErrorConv(ec) => Err(Diagnostic::error(
+//RS                     "E0003",
+//RS                     format!("`#Target(OS.{})` isn't valid on an error-conversion `impl`", os.name()),
+//RS                     "`impl Source -> Target { … }` error conversions run on every platform; OS gating only makes sense for a real trait/inherent impl".to_string(),
+//RS                     format!("remove the `#Target(OS.{})` marker", os.name()),
+//RS                     Some(ec.from_span),
+//RS                 )),
+//RS                 other => Ok(other),
+//RS         }
+//RS     }
+//RS     /// S28: `impl Trait { … }` inside a struct/enum body.
+//RS     pub(super) fn trait_impl_block(&mut self) -> Result<TraitImplBlock, Diagnostic> {
+//RS         let block_start = self.peek().span.start;
+//RS         self.expect_kw(TokKind::KwImpl, "to start a trait impl block")?;
+//RS         let (trait_name, trait_span) = self.expect_ident("after `impl`")?;
+//RS         let operator_rhs = self.parse_operator_rhs(Some(&trait_name))?;
+//RS         let operator_markers =
+//RS             self.parse_attached_marker_sequence(crate::Policy::RuleSite::Impl, "impl")?;
+//RS         let operator_marker = Self::operator_marker_from_markers(&operator_markers);
+//RS         self.expect(TokKind::LBrace, "to open the trait impl body")?;
+//RS         let mut methods = Vec::new();
+//RS         let mut assoc_type_impls = Vec::new();
+//RS         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+//RS             if matches!(self.peek().kind, TokKind::Semi) {
+//RS                 self.bump();
+//RS                 continue;
+//RS             }
+//RS             if self.at_state_section() {
+//RS                 return Err(self.reject_state_section("impl"));
+//RS             }
+//RS             // D-LIB2: `type Name = ConcreteType;`
+//RS             if let TokKind::Ident(kw) = &self.peek().kind {
+//RS                 if kw == "type" {
+//RS                     let kw_span = self.bump().span;
+//RS                     let (assoc_name, name_span) = self.expect_ident("after `type` in impl body")?;
+//RS                     self.expect(TokKind::Eq, "after associated type name")?;
+//RS                     let (assoc_ty, _) = self.type_()?;
+//RS                     self.finish_stmt()?;
+//RS                     assoc_type_impls.push((
+//RS                         assoc_name,
+//RS                         Span::new(kw_span.start, name_span.end),
+//RS                         assoc_ty,
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS             methods.push(self.method_in_type()?);
+//RS         }
+//RS         let block_end = self.bump().span.end;
+//RS         let span = Span::new(block_start, block_end);
+//RS         self.bind_operator_marker_facts(&operator_markers, span);
+//RS         Ok(TraitImplBlock {
+//RS             trait_name,
+//RS             operator_rhs,
+//RS             operator_marker,
+//RS             trait_span,
+//RS             methods,
+//RS             compiler_generated: false,
+//RS             assoc_type_impls,
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-ONCE-DERIVE1=A: body-line capability requests are retired. The
+//RS     /// `derive` keyword is reserved for provider definitions at item scope.
+//RS     pub(super) fn retired_derive_line(&mut self) -> Diagnostic {
+//RS         let derive_span = self.bump().span;
+//RS         let (trait_name, _) = match self.expect_ident("after `derive`") {
+//RS             Ok(value) => value,
+//RS             Err(diagnostic) => return diagnostic,
+//RS         };
+//RS         if let Err(diagnostic) = self.finish_stmt() {
+//RS             return diagnostic;
+//RS         }
+//RS         if trait_name == crate::Generics::DEBUG {
+//RS             crate::Generics::e0922(derive_span)
+//RS         } else {
+//RS             crate::Generics::e0929(&trait_name, derive_span)
+//RS         }
+//RS     }
+//RS 
+//RS     /// True when the cursor is at an `#[ … ]` applied-rule group (D-SHAPE2).
+//RS     pub(in crate::Parser) fn at_marker_list(&self) -> bool {
+//RS         matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LBracket)
+//RS     }
+//RS 
+//RS     /// D-ATTR1 (predates the current numbering) / D-MARKER-CANON1: a PascalCase applied rule immediately before `struct`/`enum`.
+//RS     pub(in crate::Parser) fn at_single_type_marker(&self) -> bool {
+//RS         if !matches!(self.peek().kind, TokKind::Hash) {
+//RS             return false;
+//RS         }
+//RS         let (name, after_name) = if matches!(self.peek2().kind, TokKind::Bang) {
+//RS             let TokKind::Ident(name) = &self.toks[self.pos + 2].kind else {
+//RS                 return false;
+//RS             };
+//RS             (name, self.pos + 3)
+//RS         } else {
+//RS             let TokKind::Ident(name) = &self.peek2().kind else {
+//RS                 return false;
+//RS             };
+//RS             (name, self.pos + 2)
+//RS         };
+//RS         if !Self::is_pascal_type_marker_name(name) || Self::is_reserved_item_rule_prefix(name) {
+//RS             return false;
+//RS         }
+//RS         self.type_marker_prefix_leads_to_type_def(after_name)
+//RS     }
+//RS 
+//RS     fn is_pascal_type_marker_name(name: &str) -> bool {
+//RS         name.chars().next().is_some_and(|c| c.is_uppercase())
+//RS     }
+//RS 
+//RS     /// Applied rules that own dedicated item parsers rather than the generic
+//RS     /// type-derive path.
+//RS     fn is_reserved_item_rule_prefix(name: &str) -> bool {
+//RS         matches!(
+//RS             name,
+//RS             Syntax::KW_TEST
+//RS                 | Syntax::KW_UNSAFE
+//RS                 | Syntax::KW_REACTIVE
+//RS                 | Syntax::KW_PURE
+//RS                 | Syntax::KW_SANITIZER
+//RS                 | Syntax::KW_STATE
+//RS                 | Syntax::KW_TRANSITION
+//RS                 | Syntax::MARKER_PUB_FILE
+//RS                 | Syntax::MARKER_UNIT_FAMILY
+//RS                 | Syntax::MARKER_LAYOUT
+//RS                 | Syntax::MARKER_PUBLISHED_SCHEMA
+//RS                 | Syntax::MARKER_SINGLE_USE
+//RS                 | Syntax::MARKER_MUST_USE
+//RS                 | Syntax::MARKER_IMPORT
+//RS                 | Syntax::MARKER_BINDGEN
+//RS                 | Syntax::MARKER_TARGET
+//RS                 | Syntax::MARKER_WASM_EXPORT
+//RS         )
+//RS     }
+//RS 
+//RS     /// After an applied rule (and optional `(args)`), does the next real token start a type?
+//RS     fn type_marker_prefix_leads_to_type_def(&self, mut i: usize) -> bool {
+//RS         if i >= self.toks.len() {
+//RS             return false;
+//RS         }
+//RS         // Skip this marker's own optional `(args)`.
+//RS         i = match Self::skip_balanced_parens(&self.toks, i) {
+//RS             Some(n) => n,
+//RS             None => return false,
+//RS         };
+//RS         // D-VERDICT-732-1/G2 (formerly D-MARKER-FAMILY1): a type declaration may carry several stacked
+//RS         // rule prefixes (`#[Codable, RenameAll(camel)] struct …`, or
+//RS         // `#MustUse #[Codable] struct …`) — keep skipping rule-shaped
+//RS         // prefixes (bracket groups or lone `#Name`/`#Name(args)?`) until none
+//RS         // remain, then require `pub`? `struct`/`enum`.
+//RS         loop {
+//RS             while i < self.toks.len() && matches!(self.toks[i].kind, TokKind::Semi) {
+//RS                 i += 1;
+//RS             }
+//RS             if i >= self.toks.len() {
+//RS                 return false;
+//RS             }
+//RS             let is_marker_sigil = matches!(self.toks[i].kind, TokKind::Hash);
+//RS             if !is_marker_sigil {
+//RS                 break;
+//RS             }
+//RS             match self.toks.get(i + 1).map(|t| &t.kind) {
+//RS                 Some(TokKind::LBracket) => {
+//RS                     i = match Self::skip_bracket_group(&self.toks, i + 1) {
+//RS                         Some(n) => n,
+//RS                         None => return false,
+//RS                     };
+//RS                 }
+//RS                 Some(TokKind::Ident(name)) if Self::is_pascal_type_marker_name(name) => {
+//RS                     i += 2; // `#`/`@` and the ident
+//RS                     i = match Self::skip_balanced_parens(&self.toks, i) {
+//RS                         Some(n) => n,
+//RS                         None => return false,
+//RS                     };
+//RS                 }
+//RS                 _ => break,
+//RS             }
+//RS         }
+//RS         if i < self.toks.len() && matches!(self.toks[i].kind, TokKind::KwPub) {
+//RS             i += 1;
+//RS         }
+//RS         i < self.toks.len() && matches!(self.toks[i].kind, TokKind::KwStruct | TokKind::KwEnum)
+//RS     }
+//RS 
+//RS     /// If `toks[i]` is `(`, returns the index just past its matching `)`;
+//RS     /// otherwise returns `i` unchanged. `None` on an unbalanced/unterminated
+//RS     /// paren group.
+//RS     pub(in crate::Parser) fn skip_balanced_parens(toks: &[Token], mut i: usize) -> Option<usize> {
+//RS         if i >= toks.len() || !matches!(toks[i].kind, TokKind::LParen) {
+//RS             return Some(i);
+//RS         }
+//RS         let mut depth = 0usize;
+//RS         loop {
+//RS             if i >= toks.len() {
+//RS                 return None;
+//RS             }
+//RS             match toks[i].kind {
+//RS                 TokKind::LParen => depth += 1,
+//RS                 TokKind::RParen => {
+//RS                     depth = depth.saturating_sub(1);
+//RS                     if depth == 0 {
+//RS                         return Some(i + 1);
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS             i += 1;
+//RS         }
+//RS     }
+//RS 
+//RS     /// `toks[i]` is the `[` opening a `#[…]`/`#[…]` marker-bracket group;
+//RS     /// returns the index just past its matching `]`, or `None` if
+//RS     /// unterminated.
+//RS     pub(super) fn skip_bracket_group(toks: &[Token], mut i: usize) -> Option<usize> {
+//RS         debug_assert!(matches!(toks[i].kind, TokKind::LBracket));
+//RS         let mut depth = 0usize;
+//RS         loop {
+//RS             if i >= toks.len() {
+//RS                 return None;
+//RS             }
+//RS             match toks[i].kind {
+//RS                 TokKind::LBracket => depth += 1,
+//RS                 TokKind::RBracket => {
+//RS                     depth = depth.saturating_sub(1);
+//RS                     if depth == 0 {
+//RS                         return Some(i + 1);
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS             i += 1;
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0328 crates/jet-parser/src/Parser/Items/enums_traits.rs:1-767
+

@@ -1,0 +1,88 @@
+// Persist.rs:1165-1238. Native fixture uses real canonical MIR providers.
+// #4494 gates construction of MIRNativeOwned/MIRNativeCursor; the fixture is
+// NOT replaced by a tag/id/mocked production owner when those providers lack.
+use jet_foundation.[CtValue, PersistIdentity, PersistEntry, PersistOutcome, PersistRejectReason, MIRRuntimeValue, MIRNativeCursorState, MIRNativeCursorError]
+use jet_foundation.[persist_store_new, persist_store_put, persist_store_get, persist_store_migrate, persist_store_plan_migrate, persist_store_apply_outcome, persist_store_reset, persist_store_entries, persist_store_len, persist_store_is_empty, persist_identity_new, persist_identity_is_valid, persist_identity_key, persist_entry_type_identity, persist_outcome_is_accepted, persist_outcome_reason, persist_runtime_value_matches_shape, persist_encode_payload, persist_decode_payload, mir_native_owned_new, mir_native_cursor_new]
+
+// Rust's UnusedCursor deliberately panics on EVERY call: persistence must
+// reject the capability without consulting any native cursor state.
+struct PersistUnusedCursor {}
+impl MIRNativeCursorState for PersistUnusedCursor {
+    fn has_next(&self) -> Bool MIRNativeCursorError! { panic("persistence must not inspect native cursor state") }
+    fn value(&self) -> MIRRuntimeValue MIRNativeCursorError! { panic("persistence must not inspect native cursor state") }
+    fn advance(&self) MIRNativeCursorError! { panic("persistence must not inspect native cursor state") }
+}
+#Test("runtime_shapes_reject_native_capabilities_even_inside_data") {
+    owned :: MIRRuntimeValue.NativeOwned{owner: mir_native_owned_new<U64>(U64{7})}
+    cursor :: MIRRuntimeValue.NativeCursor{cursor: mir_native_cursor_new<PersistUnusedCursor>(PersistUnusedCursor{})}
+    loop value in [MIRRuntimeValue]{owned, cursor} {
+        assert(!persist_runtime_value_matches_shape("id:42", value))
+        assert(!persist_runtime_value_matches_shape("Int", value))
+        assert(!persist_runtime_value_matches_shape("List<Int>", MIRRuntimeValue.List{values: [MIRRuntimeValue]{value}}))
+    }
+    assert(persist_runtime_value_matches_shape("Int", MIRRuntimeValue.Int{value: 7}))
+    assert(persist_runtime_value_matches_shape("List<Int>", MIRRuntimeValue.List{values: [MIRRuntimeValue]{MIRRuntimeValue.Int{value: 7}}}))
+}
+#Test("migrate_keeps_compatible_and_rejects_incompatible") {
+    store := persist_store_new()
+    persist_store_put(&store, PersistEntry{module: "app", name: "counter", shape: "Int", payload: "{{\"shape\":\"Int\",\"value\":7}}"})
+    kept :: persist_store_migrate(&store, "app", "counter", "Int", "{{\"shape\":\"Int\",\"value\":0}}")
+    assert(if kept == { .Kept(entry) -> entry.payload.contains("7"), else -> false })
+    rejected :: persist_store_migrate(&store, "app", "counter", "String", "{{\"shape\":\"String\",\"value\":\"\"}}")
+    assert(if rejected == {
+        .Rejected(reason, prior) -> if reason == { .MigrationUnavailable(from, to) -> from == "Int" && to == "String" && persist_identity_key(prior) == "app::counter", else -> false }
+        else -> false
+    })
+    assert(persist_store_get(store, "app", "counter").map(entry -> persist_entry_type_identity(entry)) == Val("Int"))
+}
+#Test("encode_decode_roundtrip_scalars") {
+    loop value in [CtValue]{CtValue.Int{value: 42}, CtValue.Bool{value: true}, CtValue.Str{value: "hi\"there"}, CtValue.Char{value: 'J'}} {
+        payload :: persist_encode_payload(value)
+        assert(persist_decode_payload(payload) == Val(value))
+    }
+}
+#Test("persist_identity_control_validation_and_key_are_exact") {
+    assert(persist_identity_key(persist_identity_new("app", "counter")) == "app::counter")
+    assert(persist_identity_is_valid(persist_identity_new("é", "名")))
+    loop identity in [PersistIdentity]{persist_identity_new("", "x"), persist_identity_new("x", ""), persist_identity_new("a\nb", "x"), persist_identity_new("app", "\u{0085}")} -> assert(!persist_identity_is_valid(identity))
+}
+#Test("persist_preflight_is_pure_and_invalid_payload_rejection_preserves_entry") {
+    store := persist_store_new()
+    initial :: PersistEntry{module: "app", name: "counter", shape: "Int", payload: "{{\"shape\":\"String\",\"value\":\"bad\"}}"}
+    persist_store_put(&store, initial)
+    outcome :: persist_store_plan_migrate(store, "app", "counter", "Int", "{{\"shape\":\"Int\",\"value\":0}}")
+    assert(!persist_outcome_is_accepted(outcome))
+    assert(persist_outcome_reason(outcome) == Val("persist payload does not match declared shape `Int`"))
+    assert(persist_store_get(store, "app", "counter") == Val(initial))
+    assert(if persist_store_apply_outcome(&store, outcome) == { .Err(reason) -> reason == PersistRejectReason.Transaction{detail: "persist payload does not match declared shape `Int`"}, else -> false })
+    assert(persist_store_get(store, "app", "counter") == Val(initial))
+}
+#Test("persist_migration_requires_explicit_shape_marker_and_reset_requires_valid_identity") {
+    store := persist_store_new()
+    persist_store_put(&store, PersistEntry{module: "app", name: "counter", shape: "Int", payload: "{{\"shape\":\"Int\",\"value\":7}}"})
+    migrated :: persist_store_migrate(&store, "app", "counter", "Int+", "{{\"shape\":\"Int\",\"value\":0}}")
+    assert(if migrated == { .Migrated(entry) -> entry.shape == "Int+" && entry.payload == "{{\"shape\":\"Int\",\"value\":7}}", else -> false })
+    before :: persist_store_entries(store)
+    rejected :: persist_store_reset(&store, "app", "counter", "bad\nshape", "fresh", "restart")
+    assert(if rejected == { .Rejected(reason, _) -> reason == PersistRejectReason.InvalidIdentity, else -> false })
+    assert(persist_store_entries(store) == before)
+    reset :: persist_store_reset(&store, "app", "counter", "String", "{{\"shape\":\"String\",\"value\":\"fresh\"}}", "restart")
+    assert(if reset == { .Reset(reason, entry) -> reason == "restart" && entry.shape == "String", else -> false })
+}
+#Test("persist_entry_iteration_matches_btree_byte_order") {
+    store := persist_store_new()
+    assert(persist_store_is_empty(store))
+    loop name in [String]{"z", "é", "a"} -> persist_store_put(&store, PersistEntry{module: "app", name: name, shape: "Int", payload: "{{\"shape\":\"Int\",\"value\":1}}"})
+    rows :: persist_store_entries(store)
+    assert(persist_store_len(store) == 3)
+    assert(rows[0].name == "a" && rows[1].name == "z" && rows[2].name == "é")
+}
+#Test("persist_scalar_decoder_keeps_the_original_narrow_field_contract") {
+    assert(persist_decode_payload("{{\"shape\": \"Int\",\"value\":7}}") == None)
+    assert(persist_decode_payload("{{\"shape\":\"Int\",\"value\":9223372036854775808}}") == None)
+    assert(persist_decode_payload("{{\"shape\":\"Int\",\"value\":-9223372036854775808}}") == Val(CtValue.Int{value: -9223372036854775808}))
+    assert(persist_decode_payload("{{\"shape\":\"Char\",\"value\":\"ab\"}}") == None)
+    assert(persist_decode_payload("{{\"shape\":\"Char\",\"value\":\"é\"}}") == Val(CtValue.Char{value: 'é'}))
+    assert(persist_decode_payload("{{\"shape\":\"String\",\"value\":\"\\q\\u0041\\uD800\"}}") == Val(CtValue.Str{value: "qA"}))
+    assert(persist_decode_payload("{{\"shape\":\"String\",\"value\":\"trailing\\\"}}") == None)
+}

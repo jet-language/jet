@@ -1,0 +1,149 @@
+// Retained semantic facts from the existing checked effect graph. These are
+// source facts, not a projection of rendered TFunc rows. Consumers keep symbol
+// keys until the canonical name ledger chooses a display spelling.
+use jet_foundation.[FactRegistry, MIRAppGraph, NameLedger, PolicyDeclaration, ReachabilityResult, Span, StateGraph, TEffectSpan, fact_registry_state_graph]
+
+pub struct RegionSummary {
+    pub caps: [String]
+    pub direct: [String]
+    pub edges: [String]
+    pub maximal: Bool
+    pub caps_span: Span
+}
+
+pub struct CallbackObligation {
+    pub bound: [String]
+    pub direct: [String]
+    pub edges: [String]
+    pub maximal: Bool
+    pub span: Span
+}
+
+pub struct DiscardedResultFact {
+    pub callee: String
+    pub callee_name: String
+    pub call_text: String
+    pub span: Span
+    pub failure_open: Bool
+}
+
+pub enum MemoryFact {
+    MemAllocDenied
+    MemRcDenied
+    MemAllocBounded(bytes: Int)
+}
+
+pub enum MemoryEventKind {
+    Allocation
+    RetainRelease
+    ArenaBytes(bytes: Int?)
+}
+
+pub struct MemoryEvent {
+    pub kind: MemoryEventKind
+    pub span: Span
+    pub source: String
+    pub operation: String
+    pub provenance: String
+    pub executions: Int?
+}
+
+pub struct OpenMemoryDispatch {
+    pub span: Span
+    pub source: String
+    pub reason: String
+}
+
+pub struct MemoryCall {
+    pub callee: String
+    pub span: Span
+    pub source: String
+    pub executions: Int?
+}
+
+pub struct MemoryPolicyRegion {
+    pub declarations: [PolicyDeclaration]
+    pub span: Span
+    pub events: [MemoryEvent]
+    pub edges: [String]
+    pub open_dispatches: [OpenMemoryDispatch]
+    pub unbounded_control: [Span]
+    pub calls: [MemoryCall]
+}
+
+pub struct MemorySummary {
+    pub events: [MemoryEvent]
+    pub open_dispatches: [OpenMemoryDispatch]
+    pub regions: [MemoryPolicyRegion]
+    pub unbounded_control: [Span]
+    pub calls: [MemoryCall]
+}
+
+pub struct MemoryFactDeclaration {
+    pub fact: MemoryFact
+    pub roots: [String]
+    pub span: Span
+    pub source: String
+    pub provenance: String
+}
+
+pub enum MemoryProjection {
+    Proven
+    Violated(call_path: [String], operation: String)
+    OpenWorld(call_path: [String], reason: String)
+}
+
+pub struct MemoryFactProjection {
+    pub root: String
+    pub fact: MemoryFact
+    pub projection: MemoryProjection
+}
+
+// Authority delegation receipts need the original checked Core-boundary
+// approval marker; their missing producer is not an empty-delegation proof.
+pub struct EffectSummary {
+    pub direct: [String]
+    pub direct_spans: [TEffectSpan]
+    pub edges: [String]
+    pub maximal: Bool
+    pub maximal_span: Span?
+    pub unbounded_trait_dispatch: Bool
+    pub regions: [RegionSummary]
+    pub callback_obligations: [CallbackObligation]
+    pub autodiff_obligations: [SemaAutodiffObligation]
+    pub compute_calls: [SemaComputeCallFact]
+    pub autodiff_safe_panic: Bool
+    pub autodiff_unsafe_panic: Bool
+    pub memory: MemorySummary
+    pub discarded_results: [DiscardedResultFact]
+    pub failure_direct: Bool
+}
+
+// Every field is required and comes from its canonical checked producer.
+// Tools borrow this packet, rather than reconstructing graphs from displays.
+pub struct SemIndexEffectFacts {
+    pub summaries: [String:EffectSummary]
+    pub solved: [String:[String]]
+    pub reachability: ReachabilityResult
+    pub memory_declarations: [MemoryFactDeclaration]
+    pub memory_projections: [MemoryFactProjection]
+    pub name_ledger: NameLedger
+    pub fact_registry: FactRegistry
+    pub web_app: MIRAppGraph?
+}
+
+pub fn effect_facts_memory_display(fact: MemoryFact) -> String Never! {
+    if fact == {
+        .MemAllocDenied -> "!Mem.Alloc"
+        .MemRcDenied -> "!Mem.Rc"
+        .MemAllocBounded(bytes) -> "!Mem.Alloc(above: {bytes})"
+    }
+}
+
+
+// Read-only S8 contract: StateGraph is Foundation's exact checked graph.
+// Key is the erased fact identity (for example "Socket.State"); no recheck,
+// display-name lookup, transition rename, or state label sorting occurs.
+pub fn sema_effect_facts_state_graph(facts: SemIndexEffectFacts, key: String) -> StateGraph? {
+    fact_registry_state_graph(facts.fact_registry, key)
+}

@@ -1,0 +1,1801 @@
+// PORT-PENDING 1059 tests-fmt-slice-1790: tests/fmt.rs:1790-3586
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn fmt_concurrency_spellings_that_parse_today() {
+//RS     // D-CONC-JOIN1=A / D-CONC-CHAN1=A / D-CONC-FAIL1=A: these spellings
+//RS     // already use parser shapes owned by existing generic/type/call/loop
+//RS     // grammar. Future task/shared/select forms stay on their implementation
+//RS     // cards and do not get parser stubs here.
+//RS     let src = r#"fn inspect(handle: Task<Int>, group: Group, rx: Receiver<Int>, tx: Sender<Int>) -> TaskFailure {
+//RS     joined :: handle.join()
+//RS     cancelled :: .Cancelled
+//RS     deadline :: .DeadlineBlown
+//RS     loop value in rx -> tx.send(value)
+//RS     return .Panicked("boom")
+//RS }
+//RS 
+//RS fn open() {
+//RS     pair :: channel<Int>(capacity: 8)
+//RS     plain :: task { 1 }
+//RS     frozen :: freeze(1)
+//RS     task.group g {
+//RS         child :: task ^frozen { frozen }
+//RS         child.join() ?? 0
+//RS     }
+//RS }
+//RS "#;
+//RS     let once = jet::format_source(src).expect("parseable concurrency spellings should format");
+//RS     for spelling in [
+//RS         "Task<Int>",
+//RS         "Group",
+//RS         "Receiver<Int>",
+//RS         "Sender<Int>",
+//RS         "TaskFailure",
+//RS         "handle.join()",
+//RS         ".Cancelled",
+//RS         ".DeadlineBlown",
+//RS         "loop value in rx",
+//RS         ".Panicked(\"boom\")",
+//RS         "channel<Int>(capacity: 8)",
+//RS         "plain :: task { 1 }",
+//RS         "freeze(1)",
+//RS         "task ^frozen",
+//RS     ] {
+//RS         assert!(once.contains(spelling), "fmt dropped {spelling:?}:\n{once}");
+//RS     }
+//RS     assert_eq!(
+//RS         once,
+//RS         jet::format_source(&once).expect("concurrency spellings should re-format")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_shield_block_stability() {
+//RS     let src = "fn run() {\n    #Shield {\n        print(\"committed\")\n    }\n}\n";
+//RS     let expected = "fn run() {\n    #Shield { print(\"committed\") }\n}\n";
+//RS     let out = jet::format_source(src).expect("#Shield block should format");
+//RS     assert_eq!(out, expected);
+//RS     assert_eq!(
+//RS         out,
+//RS         jet::format_source(&out).expect("collapsed #Shield block should re-format")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_shield_block_keeps_comment_and_over_width_multiline() {
+//RS     let commented_src =
+//RS         "fn run() {\n    #Shield {\n        // keep this comment\n        print(\"committed\")\n    }\n}\n";
+//RS     let commented_expected = "fn run() {\n    #Shield {\n        // keep this comment\n        print(\"committed\")\n    }\n}\n";
+//RS     let commented =
+//RS         jet::format_source(commented_src).expect("commented #Shield block should format");
+//RS     assert_eq!(commented, commented_expected);
+//RS 
+//RS     let body = "x".repeat(80);
+//RS     let wide_src = format!(
+//RS         "fn run() {{\n    #Shield {{\n        print(\"{body}\")\n    }}\n}}\n"
+//RS     );
+//RS     let wide_expected = format!(
+//RS         "fn run() {{\n    #Shield {{\n        print(\"{body}\")\n    }}\n}}\n"
+//RS     );
+//RS     let wide = jet::format_source(&wide_src).expect("over-width #Shield block should format");
+//RS     assert_eq!(wide, wide_expected);
+//RS     assert_eq!(
+//RS         wide,
+//RS         jet::format_source(&wide).expect("over-width #Shield block should re-format")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_single_line_if() {
+//RS     // D-ONELINE-BODY1=B: a fitting effect body uses the canonical arrow.
+//RS     let src = "fn run() {\n    ready :: true\n    if ready -> launch()\n}\n";
+//RS     assert_fmt_stable(src, "single-line if");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_multiline_if() {
+//RS     let src = "fn run() {\n    ready :: true\n    if ready {\n        launch()\n    }\n}\n";
+//RS     let expected = "fn run() {\n    ready :: true\n    if ready -> launch()\n}\n";
+//RS     let out = jet::format_source(src).expect("multiline if should format");
+//RS     assert_eq!(out, expected);
+//RS     assert_eq!(
+//RS         out,
+//RS         jet::format_source(&out).expect("collapsed if should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_classic_if_ignores_braces_inside_leading_trivia() {
+//RS     let src = "fn run() {\n    ready :: true\n    if /* { trivia */ ready { launch() }\n}\n";
+//RS     let out = jet::format_source(src).expect("commented classic if should format");
+//RS     let expected = "fn run() {\n    ready :: true\n    if /* { trivia */ ready -> launch()\n}\n";
+//RS     assert_eq!(out, expected);
+//RS     assert_eq!(
+//RS         out,
+//RS         jet::format_source(&out).expect("commented classic if should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_classic_if_does_not_mix_braced_then_with_arrow_else() {
+//RS     let source = concat!(
+//RS         "fn run() {\n",
+//RS         "    if flag {\n",
+//RS         "        print(\"then-a\")\n",
+//RS         "        print(\"then-b\")\n",
+//RS         "    } else {\n",
+//RS         "        print(\"else-only\")\n",
+//RS         "    }\n",
+//RS         "}\n",
+//RS     );
+//RS     let once =
+//RS         jet::format_source_with_options(source, jet::Formatter::FormatOptions { simplify: true })
+//RS             .expect("mixed if/else should format");
+//RS     assert!(
+//RS         !once.contains("} else ->"),
+//RS         "braced then-branch must not pair with an arrow else:\n{once}"
+//RS     );
+//RS     assert!(
+//RS         once.contains("} else {") || once.contains("else {"),
+//RS         "else should stay a braced body:\n{once}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_if_else_chain_collapses_when_every_branch_fits() {
+//RS     let src = "fn run() {\n    if a { x() } else {\n        y()\n    }\n}\n";
+//RS     let out = jet::format_source(src).expect("fmt should accept the mixed chain");
+//RS     assert_eq!(
+//RS         out, "fn run() {\n    if a -> x() else -> y()\n}\n",
+//RS         "fitting if/else branches should collapse, got:\n{out}"
+//RS     );
+//RS     let twice = jet::format_source(&out).expect("collapsed chain should re-fmt");
+//RS     assert_eq!(out, twice, "collapsed chain must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_single_line_comment_forces_expand() {
+//RS     // Gate (c): a comment inside the braces forces the body multiline.
+//RS     let src = "fn run() {\n    if ready { launch() /* go */ }\n}\n";
+//RS     let out = jet::format_source(src).expect("fmt should accept the commented body");
+//RS     assert!(
+//RS         out.contains("if ready {\n"),
+//RS         "inner comment should force expansion, got:\n{out}"
+//RS     );
+//RS     let twice = jet::format_source(&out).expect("expanded body should re-fmt");
+//RS     assert_eq!(out, twice, "comment-forced expansion must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_single_line_over_width_forces_expand() {
+//RS     // Gate (d): a one-line body whose rendered width exceeds 100 expands.
+//RS     let long = "x".repeat(120);
+//RS     let src = format!("fn run() {{\n    if ready {{ print(\"{long}\") }}\n}}\n");
+//RS     let out = jet::format_source(&src).expect("fmt should accept the wide body");
+//RS     assert!(
+//RS         out.contains("if ready {\n"),
+//RS         "over-width body should expand, got:\n{out}"
+//RS     );
+//RS     let twice = jet::format_source(&out).expect("expanded wide body should re-fmt");
+//RS     assert_eq!(out, twice, "over-width expansion must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_single_line_nested_forces_expand() {
+//RS     // Gate (b): the lone statement is itself a block (`if`), so it cannot stay
+//RS     // inline — the outer body expands.
+//RS     let src = "fn run() {\n    if a { if b { x() } }\n}\n";
+//RS     let out = jet::format_source(src).expect("fmt should accept the nested if");
+//RS     assert!(
+//RS         out.contains("if a {\n"),
+//RS         "outer body should expand around a nested block, got:\n{out}"
+//RS     );
+//RS     // The inner one-line `if` uses the canonical arrow.
+//RS     assert!(
+//RS         out.contains("if b -> x()"),
+//RS         "inner single-line if should survive as an arrow, got:\n{out}"
+//RS     );
+//RS     let twice = jet::format_source(&out).expect("nested output should re-fmt");
+//RS     assert_eq!(out, twice, "nested expansion must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_single_line_loops_and_fn() {
+//RS     // D-LOOP-STMT-ARROW1=C: the rule applies uniformly to every loop header.
+//RS     let while_src = "fn run() {\n    n :: 0\n    loop n < 3 -> n += 1\n}\n";
+//RS     assert_fmt_stable(while_src, "single-line while/loop");
+//RS 
+//RS     let infinite_src = "fn run() {\n    loop -> break\n}\n";
+//RS     assert_fmt_stable(infinite_src, "single-line infinite loop");
+//RS 
+//RS     let state_src = "fn run() {\n    loop i := 0, i < 3 -> i += 1\n}\n";
+//RS     assert_fmt_stable(state_src, "single-line state loop");
+//RS 
+//RS     let for_src = "fn run() {\n    loop i in 0..3 -> print(\"{i}\")\n}\n";
+//RS     assert_fmt_stable(for_src, "single-line for/loop");
+//RS     let excl_src = "fn run() {\n    loop i in 0..<3 -> print(\"{i}\")\n}\n";
+//RS     assert_fmt_stable(excl_src, "exclusive range loop");
+//RS     let two_bind = "fn run() {\n    loop (i, x) in xs -> print(\"{i}\")\n}\n";
+//RS     assert_fmt_stable(two_bind, "list two-binding loop");
+//RS 
+//RS     let fn_src = "fn one() -> Int -> 1\n";
+//RS     assert_fmt_stable(fn_src, "single-line fn body");
+//RS 
+//RS     let retired_fn_src = "fn one() => Int = 1\n";
+//RS     let retired_fn = jet::format_source(retired_fn_src).expect("retired fn body should be fixable");
+//RS     assert!(retired_fn.contains("fn one() -> Int -> 1"), "{retired_fn}");
+//RS 
+//RS     let empty_fn_src = "fn noop() {}\n";
+//RS     assert_fmt_stable(empty_fn_src, "empty single-line fn body");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_single_line_if_expr_branch() {
+//RS     // If-expression branches (routed through fmt_value_block) follow the rule.
+//RS     let src = "fn run() {\n    a :: true\n    n :: if a -> 1 else -> 2\n    print(\"{n}\")\n}\n";
+//RS     assert_fmt_stable(src, "single-line if-expression");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_compact_result_handler_is_one_line_when_it_fits() {
+//RS     let src = "fn pick(value: Int String!) -> String -> value ? ok -> ok ! error -> error\n";
+//RS     let out = jet::format_source(src).expect("compact Result handler should format");
+//RS     assert!(
+//RS         out.contains("value ? ok -> ok ! error -> error"),
+//RS         "fitting handler should stay on one line:\n{out}"
+//RS     );
+//RS     assert_eq!(
+//RS         out,
+//RS         jet::format_source(&out).expect("compact handler should be idempotent")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_compact_result_handler_expands_long_branches_deterministically() {
+//RS     let long_ok =
+//RS         "ok_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz";
+//RS     let long_err = "error_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz";
+//RS     let src = format!(
+//RS         "fn pick(value: Int String!) -> String -> value ? ok -> {long_ok} ! error -> {long_err}\n"
+//RS     );
+//RS     let out = jet::format_source(&src).expect("long Result handler should format");
+//RS     assert!(
+//RS         out.contains("\n! error ->"),
+//RS         "long handler should use the two-arm layout:\n{out}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("-> {"),
+//RS         "expanded handler arms need canonical arrow spacing:\n{out}"
+//RS     );
+//RS     assert!(
+//RS         !out.contains("->{"),
+//RS         "expanded handler arms must not join the arrow and brace:\n{out}"
+//RS     );
+//RS     assert_eq!(
+//RS         out,
+//RS         jet::format_source(&out).expect("expanded handler should be idempotent")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_result_handler_expands_blocked_nested_and_commented_branches() {
+//RS     let blocked = "fn pick(value: Int String!) -> String -> value ? ok -> {\n    saved :: ok\n    saved\n} ! error -> {\n    saved_error :: error\n    saved_error\n}\n";
+//RS     let nested = "fn pick(value: Int String!) -> Int -> value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0\n";
+//RS     let nested_if =
+//RS         "fn pick(value: Int String!) -> Int -> value ? ok -> if ready -> 1 else -> 2 ! error -> 0\n";
+//RS     let commented = "fn pick(value: Int String!) -> String -> value ? ok -> ok /* keep this branch readable */ ! error -> error\n";
+//RS     let commented_failure = "fn pick(value: Int String!) -> String -> value ? ok -> ok ! error -> error /* keep failure readable */\n";
+//RS 
+//RS     for (source, label) in [
+//RS         (blocked, "blocked"),
+//RS         (nested, "nested"),
+//RS         (nested_if, "nested if"),
+//RS         (commented, "commented"),
+//RS         (commented_failure, "commented failure"),
+//RS     ] {
+//RS         let out = jet::format_source(source).expect("Result handler should format");
+//RS         assert!(
+//RS             out.contains("\n! error ->"),
+//RS             "{label} handler should use the deterministic two-arm layout:\n{out}"
+//RS         );
+//RS         assert!(
+//RS             out.contains("-> {"),
+//RS             "{label} handler arms need canonical arrow spacing:\n{out}"
+//RS         );
+//RS         assert!(
+//RS             !out.contains("->{"),
+//RS             "{label} handler arms must not join the arrow and brace:\n{out}"
+//RS         );
+//RS         if label == "commented" {
+//RS             assert!(
+//RS                 out.contains("ok  /* keep this branch readable */"),
+//RS                 "comment must remain attached to its branch:\n{out}"
+//RS             );
+//RS         }
+//RS         if label == "commented failure" {
+//RS             assert!(
+//RS                 out.contains("error  /* keep failure readable */"),
+//RS                 "failure comment must remain attached to its branch:\n{out}"
+//RS             );
+//RS         }
+//RS         assert_eq!(
+//RS             out,
+//RS             jet::format_source(&out).expect("expanded handler should be idempotent"),
+//RS             "{label} handler formatting should be stable"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS // ── Marker / turbofish round-trip survival (the c-fmt data-loss regression) ──
+//RS //
+//RS // `fmt_is_idempotent_on_examples` only checks that fmt(fmt(x)) == fmt(x); it does
+//RS // NOT catch a formatter that silently drops a token on the FIRST pass (the lost
+//RS // `#Rename`/`#Codable`/turbofish bug). These tests assert that the load-bearing
+//RS // surface tokens SURVIVE one fmt pass, then that the result is stable.
+//RS 
+//RS /// Assert every needle appears in `format_source(src)`, then that fmt is stable.
+//RS fn assert_fmt_keeps(src: &str, needles: &[&str], label: &str) {
+//RS     let out = jet::format_source(src).unwrap_or_else(|d| {
+//RS         panic!(
+//RS             "fmt failed for {label}:\n{}",
+//RS             jet::render_diagnostics(label, src, &d)
+//RS         )
+//RS     });
+//RS     for needle in needles {
+//RS         assert!(
+//RS             out.contains(needle),
+//RS             "{label}: fmt dropped `{needle}`\n--- got ---\n{out}"
+//RS         );
+//RS     }
+//RS     let twice = jet::format_source(&out).expect("second fmt should succeed");
+//RS     assert_eq!(
+//RS         out, twice,
+//RS         "{label}: fmt is not idempotent\n--- got ---\n{out}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_nested_enum_groups_stability() {
+//RS     let src = "\
+//RS enum Damage {
+//RS     Physical { Blunt, Pierce }
+//RS     Fire { Burn, Scald }
+//RS     Cold
+//RS }
+//RS 
+//RS fn run() {
+//RS     d := Damage.Fire.Burn
+//RS     if d == {
+//RS         .Physical -> { print(\"physical\") }
+//RS         .Fire -> { print(\"fire\") }
+//RS         .Cold -> { print(\"cold\") }
+//RS     }
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["Physical {", "Blunt", "Pierce", ".Fire ->", "Fire {"],
+//RS         "nested enum variant groups (D-TAG1)",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_keeps_codable_and_field_rename_and_turbofish() {
+//RS     // The exact c-fmt regression: `#Codable` / `#Rename("…")`
+//RS     // (directive/serde plane, D-MARKERMOVE1=B), and a method-call turbofish
+//RS     // `decode<Order>` must all survive.
+//RS     let src = "\
+//RS #Codable
+//RS struct Order {
+//RS     id: Int
+//RS     #Rename(\"customer\") who: String
+//RS }
+//RS 
+//RS fn run() {
+//RS     raw :: \"x\"
+//RS     back :: json.decode<Order>(raw) ?? panic(\"bad\")
+//RS     print(back.who)
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["#Codable", "#Rename(\"customer\")", "decode<Order>"],
+//RS         "codable + rename + turbofish",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_rewrites_marker_stacking_to_one_shape_and_is_stable() {
+//RS     let single = jet::format_source("#[Codable]\nstruct Invoice { id: Int }\n")
+//RS         .expect("fmt should recover a single-item marker list");
+//RS     assert!(
+//RS         single.contains("#Codable\nstruct Invoice"),
+//RS         "fmt must remove brackets around one marker:\n{single}"
+//RS     );
+//RS     let single_twice = jet::format_source(&single).expect("canonical single marker should parse");
+//RS     assert_eq!(single, single_twice, "single-marker rewrite must be stable");
+//RS 
+//RS     let stacked = jet::format_source("#Job #Every(5min) fn prune() {\n}\n")
+//RS         .expect("fmt should recover a bare marker stack");
+//RS     assert!(
+//RS         stacked.contains("#[Job, Every(5min)] fn prune"),
+//RS         "fmt must combine a bare stack into one marker list:\n{stacked}"
+//RS     );
+//RS     let stacked_twice = jet::format_source(&stacked).expect("canonical marker list should parse");
+//RS     assert_eq!(stacked, stacked_twice, "marker-list rewrite must be stable");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_memo_bound_marker() {
+//RS     let src =
+//RS         "#Memo(bound: none) fn cube(value: Int) -[]> Int -> value * value * value\n\nfn run() {}\n";
+//RS     assert_fmt_stable(src, "#Memo(bound: none) marker");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_keeps_cli_doc_and_default_field_markers() {
+//RS     // D-SHAPE2: two field rules share one `#[…]` group; one stays bare.
+//RS     let src = "\
+//RS #CLI
+//RS struct ServeArgs {
+//RS     #[Doc(\"port to listen on\")] port: Int{3000}
+//RS     #Doc(\"print extra detail\") verbose: Bool
+//RS }
+//RS 
+//RS fn run(args: ServeArgs) {
+//RS     print(args.port)
+//RS     print(args.verbose)
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["#Doc(\"port to listen on\")", "port: Int{3000}", "#CLI"],
+//RS         "cli #Doc + field = default",
+//RS     );
+//RS     assert_fmt_stable(src, "cli doc/default field markers");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_keeps_cli_command_bindings() {
+//RS     let src = "\
+//RS #CLI
+//RS struct Commands {
+//RS     #Doc(\"preview changes\") plan = plan_impl
+//RS 
+//RS     fn serve(self) {}
+//RS }
+//RS 
+//RS fn plan_impl(args: Commands) {}
+//RS fn run(args: Commands) {}
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["#Doc(\"preview changes\")", "plan = plan_impl", "#CLI"],
+//RS         "cli command binding",
+//RS     );
+//RS     assert_fmt_stable(src, "cli command binding");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_keeps_container_rename_all() {
+//RS     // Derive and container serde rules share one applied-rule group.
+//RS     let src = "\
+//RS #[Codable, RenameAll(camel)]
+//RS struct Person {
+//RS     full_name: String
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["#[Codable, RenameAll(camel)]"],
+//RS         "container RenameAll",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_keeps_layout_columnar_and_codable() {
+//RS     // Two rules on the same struct share one ordered group; neither is
+//RS     // rewritten into body `derive` lines.
+//RS     let src = "\
+//RS #[Codable, Layout(columnar)]
+//RS struct Particle {
+//RS     x: Float
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["#[Codable, Layout(columnar)]"],
+//RS         "layout columnar + codable",
+//RS     );
+//RS     // And no `derive Encode`/`derive Decode` body lines leak in.
+//RS     let out = jet::format_source(src).unwrap();
+//RS     assert!(
+//RS         !out.contains("derive Encode"),
+//RS         "no leaked body derive:\n{out}"
+//RS     );
+//RS     assert!(
+//RS         !out.contains("derive Decode"),
+//RS         "no leaked body derive:\n{out}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_stable_at_marked_fn_and_struct() {
+//RS     // D-MARKER-FAMILY1/D-MARKERMOVE1: a byte-identical round-trip (not just
+//RS     // idempotence — idempotence alone misses a formatter that drops a token
+//RS     // on the FIRST pass) for an `@`-marked fn and an `@`-marked struct.
+//RS     let fn_src = "\
+//RS fn double(n: Int) -[]> Int {
+//RS     return (n * 2)
+//RS }
+//RS ";
+//RS     assert_fmt_stable(fn_src, "#Pure fn round-trip");
+//RS 
+//RS     let struct_src = "\
+//RS #[Codable, Layout(columnar)]
+//RS struct Particle {
+//RS     x: Float
+//RS }
+//RS ";
+//RS     assert_fmt_stable(struct_src, "#Codable + #Layout struct round-trip");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_stable_effect_arrows() {
+//RS     let src = "\
+//RS fn load(path: String) -[FS.Read, ..E]> String {
+//RS     return path
+//RS }
+//RS 
+//RS fn visit(callback: fn(Int) -[IO]>) -[via callback]> {
+//RS     callback(1)
+//RS }
+//RS 
+//RS // `-[]>` replaces the retired `#Pure` marker without moving this comment.
+//RS fn hash(n: Int) -[]> Int {
+//RS     return n
+//RS }
+//RS ";
+//RS     assert_fmt_stable(src, "D-SHAPE8 effect arrows");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_keeps_single_use_marker() {
+//RS     let src = "\
+//RS #SingleUse struct Lock {
+//RS     resource: String
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(src, &["#SingleUse struct Lock"], "single-use struct");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_keeps_layout_c_struct() {
+//RS     let src = "\
+//RS #Layout(c)
+//RS struct Header {
+//RS     magic: Int
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(src, &["#Layout(c)"], "layout c struct");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_rejects_retired_body_derive_line() {
+//RS     // Effect requests have one spelling: a marker before the type.
+//RS     let src = "\
+//RS struct Score {
+//RS     points: Int
+//RS 
+//RS     derive Comparable
+//RS }
+//RS ";
+//RS     assert!(jet::format_source(src).is_err());
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_keeps_enum_variant_rename_and_tag() {
+//RS     // Enum derive + container rule share one group; the variant keeps its group.
+//RS     let src = "\
+//RS #[Codable, Discriminant(\"type\")]
+//RS enum Shape {
+//RS     #Rename(\"circle\") Circle(Float)
+//RS     Square(Float)
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["#[Codable, Discriminant(\"type\")]", "#Rename(\"circle\")"],
+//RS         "enum tag + variant rename",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_keeps_replayable_marker() {
+//RS     let src = "\
+//RS #Replayable fn replay_turn(seed: Int) -> Int {
+//RS     return seed + 1
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(src, &["#Replayable fn replay_turn"], "replayable fn");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_keeps_typestate_markers() {
+//RS     // D-STATE1: the `#State(S)` require-state guard and `#Transition(From, To)`
+//RS     // transition markers (including the entry form `_, To`) must survive fmt —
+//RS     // dropping a typestate contract would silently change what the checker enforces.
+//RS     let src = "\
+//RS struct Reservation {
+//RS     state { Pending, Confirmed }
+//RS     guest: String
+//RS 
+//RS     #Transition(_, Pending) fn book(guest: String) -> Reservation {
+//RS         return Reservation{guest: ~guest}
+//RS     }
+//RS 
+//RS     #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -> Reservation {
+//RS         return self
+//RS     }
+//RS 
+//RS     #State(Confirmed) fn check_in(self) {
+//RS         print(self.guest)
+//RS     }
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &[
+//RS             "#Transition(_, Pending)",
+//RS             "#Transition(Pending, Confirmed)",
+//RS             "#State(Confirmed)",
+//RS         ],
+//RS         "typestate markers",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_box_drawing_comment_does_not_panic() {
+//RS     // c143: a comment containing multibyte box-drawing glyphs, placed on its own
+//RS     // line between two steps of a broken method chain, used to panic. The
+//RS     // chain-break path measures the output's last-newline byte offset against
+//RS     // the *source* (`is_trailing_comment_at` → `line_of`); with a multibyte
+//RS     // glyph in the source that offset could land mid-codepoint and the raw slice
+//RS     // panicked. fmt must never panic on valid input (I2). The box-drawing glyphs
+//RS     // round-trip verbatim.
+//RS     let src = "fn run() {\n    x :: foo()\n        // \u{2502}\u{250c}\u{2514}\u{2500}\n        .bar()\n    print(x)\n}\n";
+//RS     let out = jet::format_source(src).expect("fmt should not panic on box-drawing comments");
+//RS     assert!(
+//RS         out.contains('\u{250c}') && out.contains('\u{2502}'),
+//RS         "box glyphs dropped:\n{out}"
+//RS     );
+//RS     let twice = jet::format_source(&out).expect("box-drawing fmt must re-fmt");
+//RS     assert_eq!(out, twice, "box-drawing fmt must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_impure_block_round_trips() {
+//RS     // D-CTEFFECT1: preserve the reason and body while collapsing a fitting block.
+//RS     let src = "fn run() {\n    #Impure(\"reading build config\") {\n        print(\"inside\")\n    }\n}\n";
+//RS     let expected =
+//RS         "fn run() {\n    #Impure(\"reading build config\") { print(\"inside\") }\n}\n";
+//RS     let out = jet::format_source(src).expect("fmt should succeed on #Impure block");
+//RS     assert_eq!(out, expected);
+//RS     assert_eq!(out, jet::format_source(&out).expect("#Impure fmt must re-fmt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_impure_block_no_reason_round_trips() {
+//RS     // D-CTEFFECT1: `#Impure { … }` without a reason also round-trips (triggers
+//RS     // L3102 lint but is parseable).
+//RS     let src = "fn run() {\n    #Impure {\n        print(\"inside\")\n    }\n}\n";
+//RS     let out = jet::format_source(src).expect("fmt should succeed on #Impure block without reason");
+//RS     assert!(
+//RS         out.contains("#Impure {") || out.contains("#Impure{"),
+//RS         "#Impure block without reason dropped by fmt:\n{out}"
+//RS     );
+//RS     let twice = jet::format_source(&out).expect("#Impure (no reason) fmt must re-fmt");
+//RS     assert_eq!(out, twice, "#Impure (no reason) fmt must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_unsafe_reasons_escape_strings() {
+//RS     // D-UNSAFE-REASON1=A: unsafe block/function reasons are normal string
+//RS     // literals, so fmt must preserve quotes/backslashes as parseable Jet.
+//RS     let src = "use core.mem\n\n#Unsafe(\"caller says \\\"ok\\\"\") fn raw() -> Int {\n    return 1\n}\n\nfn run() {\n    #Unsafe(\"path C:\\\\tmp\") {\n        print(\"{raw()}\")\n    }\n}\n";
+//RS     let out = jet::format_source(src).expect("fmt should succeed on unsafe reasons");
+//RS     assert!(
+//RS         out.contains("#Unsafe(\"caller says \\\"ok\\\"\")")
+//RS             && out.contains("#Unsafe(\"path C:\\\\tmp\")"),
+//RS         "unsafe reason escaping broke:\n{out}"
+//RS     );
+//RS     let twice = jet::format_source(&out).expect("unsafe reason fmt must re-fmt");
+//RS     assert_eq!(out, twice, "unsafe reason fmt must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_keeps_parens_around_binary_receiver() {
+//RS     // c143(b): `(a + b).method()` must keep its parens — dropping them rebinds
+//RS     // the `.method()` to `b` alone and changes the meaning. Likewise `(a + b) * c`
+//RS     // must not become `a + b * c`.
+//RS     let src = "fn run() {\n    c :: (1 + 2).to_string()\n    d :: (1 + 2) * 3\n    print(c)\n    print(d)\n}\n";
+//RS     let out = jet::format_source(src).expect("fmt should succeed");
+//RS     assert!(
+//RS         out.contains("(1 + 2).to_string()"),
+//RS         "parens around binary method receiver dropped:\n{out}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("(1 + 2) * 3"),
+//RS         "parens around lower-prec binary operand dropped:\n{out}"
+//RS     );
+//RS     // The common case must NOT gain spurious parens.
+//RS     let plain = jet::format_source("fn run() {\n    a :: 1 + 2 * 3\n    print(a)\n}\n").unwrap();
+//RS     assert!(
+//RS         plain.contains("a :: 1 + 2 * 3"),
+//RS         "added spurious parens:\n{plain}"
+//RS     );
+//RS     let twice = jet::format_source(&out).expect("paren fmt must re-fmt");
+//RS     assert_eq!(out, twice, "paren fmt must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_prep_block_is_idempotent() {
+//RS     // D-PREP-SURFACE2=A: `prep { … }` formatting round-trips — the `prep`
+//RS     // head, brace, and body all survive a second fmt.
+//RS     let src = r#"LIMIT :: prep { 1000 }
+//RS 
+//RS fn run() {
+//RS     prep {
+//RS         ratio :: LIMIT / 10
+//RS         if ratio < 1 { panic("bad") }
+//RS     }
+//RS     print("ok")
+//RS }
+//RS "#;
+//RS     let out = jet::format_source(src).expect("fmt should accept a prep block");
+//RS     assert!(
+//RS         out.contains("    prep {\n"),
+//RS         "prep block head + open brace must survive fmt, got:\n{out}"
+//RS     );
+//RS     let twice = jet::format_source(&out).expect("second fmt should succeed");
+//RS     assert_eq!(out, twice, "comptime block formatting must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_dot_construction_d_dotctor1() {
+//RS     // D-LIT-DOT1 (ratified 2026-08-20): named struct construction Type{ … }
+//RS     // survives fmt, and retired dotted input is auto-fixed to Type{ … }.
+//RS 
+//RS     // Named head survives formatting.
+//RS     let named = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn run() {\n    p :: Pt{ x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
+//RS     let out_named = jet::format_source(named).expect("fmt should accept named Pt construction");
+//RS     assert!(
+//RS         out_named.contains("Pt{"),
+//RS         "named head Pt{{ must survive fmt, got:\n{out_named}"
+//RS     );
+//RS     assert!(
+//RS         !out_named.contains("Pt.{"),
+//RS         "fmt must not regress to dotted construction form, got:\n{out_named}"
+//RS     );
+//RS     let twice_named = jet::format_source(&out_named).expect("named form must re-fmt");
+//RS     assert_eq!(out_named, twice_named, "named form must be fmt-idempotent");
+//RS 
+//RS     // Old dotted form is auto-fixed to Type{.
+//RS     let old = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn run() {\n    p :: Pt.{ x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
+//RS     let out_old = jet::format_source(old).expect("fmt should recover retired dotted form");
+//RS     assert!(
+//RS         out_old.contains("Pt{"),
+//RS         "retired dotted form must auto-fix to Pt{{, got:\n{out_old}"
+//RS     );
+//RS     assert!(
+//RS         !out_old.contains("Pt.{"),
+//RS         "dotted construction form must not survive fmt, got:\n{out_old}"
+//RS     );
+//RS     let twice_old = jet::format_source(&out_old).expect("fixed form must re-fmt");
+//RS     assert_eq!(out_old, twice_old, "fixed form must be fmt-idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_inferred_new_stability() {
+//RS     let src = "struct Box<T> {\n    value: T\n}\n\nimpl Box {\n    fn new(value: ^T) -> Box<T> {\n        return Box<T>{ value: value }\n    }\n}\n\nfn run() {\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n    expected :: Box<Int>.new(3)\n}\n";
+//RS     let out = jet::format_source(src).expect("fmt should accept `.new(...)`");
+//RS     for spelling in ["Box.new(1)", "Box<Int>.new(2)", ".new(3)"] {
+//RS         assert!(
+//RS             out.contains(spelling),
+//RS             "formatter lost `{spelling}`:\n{out}"
+//RS         );
+//RS     }
+//RS     assert_eq!(out, jet::format_source(&out).expect("second fmt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_enum_dot_pattern_stability() {
+//RS     // D-ENUMDOT1 (ratified 2026-06-26): a leading `.` before a variant name in pattern position
+//RS     // is accepted and canonical. The formatter always emits `.` before a Pattern::Variant name,
+//RS     // so `.Circle(r)` round-trips unchanged and bare `Circle(r)` is canonicalized to `.Circle(r)`.
+//RS 
+//RS     // Dot form round-trips unchanged (stability).
+//RS     let dot_src = "\
+//RS enum Shape {
+//RS     Circle(Float)
+//RS     Square(Float)
+//RS     Empty
+//RS }
+//RS 
+//RS fn describe(s: Shape) -> String {
+//RS     if s == {
+//RS         .Circle(r) -> { return \"circle:{r}\" }
+//RS         .Square(side) -> { return \"square:{side}\" }
+//RS         .Empty -> { return \"empty\" }
+//RS     }
+//RS     return \"?\"
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(describe(Shape.Circle(2.0)))
+//RS     print(describe(Shape.Empty))
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         dot_src,
+//RS         &[".Circle(r)", ".Square(side)", ".Empty"],
+//RS         "dot-variant patterns in if-dispatch arms",
+//RS     );
+//RS 
+//RS     // Bare payload form is canonicalized to dot form by fmt.
+//RS     let bare_src = "\
+//RS enum Shape {
+//RS     Circle(Float)
+//RS     Square(Float)
+//RS }
+//RS 
+//RS fn area(s: Shape) -> Float {
+//RS     if s == {
+//RS         Circle(r) -> { return r * r }
+//RS         Square(side) -> { return side * side }
+//RS     }
+//RS     return 0.0
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(area(Shape.Circle(3.0)))
+//RS }
+//RS ";
+//RS     let out = jet::format_source(bare_src).expect("fmt should accept bare variant patterns");
+//RS     assert!(
+//RS         out.contains(".Circle(r)"),
+//RS         "bare payload variant in if-dispatch arm must gain leading dot, got:\n{out}"
+//RS     );
+//RS     assert!(
+//RS         out.contains(".Square(side)"),
+//RS         "bare payload variant `Square(side)` must gain leading dot, got:\n{out}"
+//RS     );
+//RS     let twice = jet::format_source(&out).expect("second fmt of dot-form must succeed");
+//RS     assert_eq!(
+//RS         out, twice,
+//RS         "dot-form variant patterns must be fmt-idempotent"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_comptime_splice_stability() {
+//RS     // D-NAME-SPLICE1=B: a template splice `$name` is a first-class AST node
+//RS     // (Expr::ComptimeName). The formatter must emit it as `$name` so that
+//RS     // the round-trip is stable (previously the mark could be silently dropped
+//RS     // if it reached the formatter without an AST node).
+//RS     let src = "derive T.Debug {\n    fn tag(self) -> String -> \"ok\"\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
+//RS     let once = jet::format_source(src).expect("fmt should accept a typed derive body");
+//RS     let twice = jet::format_source(&once).expect("second fmt should succeed");
+//RS     assert_eq!(once, twice, "typed derive body must be fmt-idempotent");
+//RS 
+//RS     // Standalone `$name` splice (outside emit string) round-trips as `$name`.
+//RS     let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: $tname\n    fn $tname(self) -> String -> $tname\n}\n\nfn run() {}\n";
+//RS     let splice_once = jet::format_source(splice_src).expect("fmt should accept $name splice");
+//RS     assert!(
+//RS         splice_once.contains("x :: $tname") && splice_once.contains("fn $tname(self)"),
+//RS         "`$tname` splice must survive fmt, got:\n{splice_once}"
+//RS     );
+//RS     let splice_twice = jet::format_source(&splice_once).expect("$name fmt must be idempotent");
+//RS     assert_eq!(
+//RS         splice_once, splice_twice,
+//RS         "`$name` splice must be fmt-idempotent"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_layout_compiler_fact_and_field_selector_stability() {
+//RS     let src = "derive T.LayoutFacts {\n    info :: T.$layout\n    selected :: info[.count]\n    full :: T.reflect().layout\n}\n\nfn run() {}\n";
+//RS     let once = jet::format_source(src).expect("layout compiler fact should parse");
+//RS     assert!(
+//RS         once.contains("T.$layout"),
+//RS         "fact spelling was lost:\n{once}"
+//RS     );
+//RS     assert!(
+//RS         once.contains("info[.count]"),
+//RS         "typed selector spelling was lost:\n{once}"
+//RS     );
+//RS     assert!(
+//RS         once.contains("T.reflect().layout"),
+//RS         "reflection projection was lost:\n{once}"
+//RS     );
+//RS     let twice = jet::format_source(&once).expect("formatted layout fact should parse");
+//RS     assert_eq!(once, twice, "layout fact formatting must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_origin_compiler_fact_stability() {
+//RS     let src = "fn run() {\n    #Track speed :: 3.5\n    speed_origin :: prep { speed.$origin }\n}\n";
+//RS     let once = jet::format_source(src).expect("origin compiler fact should parse");
+//RS     assert!(
+//RS         once.contains("speed.$origin"),
+//RS         "fact spelling was lost:\n{once}"
+//RS     );
+//RS     let twice = jet::format_source(&once).expect("formatted origin fact should parse");
+//RS     assert_eq!(once, twice, "origin fact formatting must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn layout_compiler_fact_rejects_unknown_and_user_owned_at_members() {
+//RS     let unknown =
+//RS         jet::Compiler::parse_source("derive T.LayoutFacts { info :: T.$unknown }\nfn run() {}\n");
+//RS     let unknown = unknown
+//RS         .diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0302")
+//RS         .expect("unknown compiler fact should have a registered diagnostic");
+//RS     assert!(unknown.message.contains("$unknown"), "{unknown:?}");
+//RS     assert!(unknown.fix.contains("$layout"), "{unknown:?}");
+//RS 
+//RS     let user_member = jet::Compiler::parse_source("struct Bad { @layout: Int }\nfn run() {}\n");
+//RS     assert!(
+//RS         user_member
+//RS             .diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0003"),
+//RS         "user declarations must not claim the compiler-owned @ member: {:?}",
+//RS         user_member.diagnostics
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_impl_dot_trait_stability() {
+//RS     // D-IMPLDOT1=A: `impl Type.Trait { … }` round-trips unchanged.
+//RS     let src = "\
+//RS trait Greet {
+//RS     fn hello(self) -> String
+//RS }
+//RS 
+//RS struct Foo {}
+//RS 
+//RS impl Foo.Greet {
+//RS     fn hello(self) -> String {
+//RS         return \"hi\"
+//RS     }
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(src, &["impl Foo.Greet"], "impl dot trait");
+//RS     let once = jet::format_source(src).expect("fmt should accept impl Type.Trait");
+//RS     let twice = jet::format_source(&once).expect("second fmt of impl Type.Trait must succeed");
+//RS     assert_eq!(once, twice, "impl Type.Trait must be fmt-idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_test_paren_name_stability() {
+//RS     // D-TESTPAREN1=A: `#Test("name") { … }` must survive fmt unchanged.
+//RS     let src = "\
+//RS fn run() {}
+//RS #Test(\"double returns twice\") {
+//RS     assert_eq(2 * 2, 4)
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(src, &["#Test(\"double returns twice\")"], "test paren name");
+//RS     // Idempotence: formatting twice produces the same output.
+//RS     let once = jet::format_source(src).expect("fmt should accept #Test(\"name\")");
+//RS     let twice = jet::format_source(&once).expect("second fmt of #Test(\"name\") must succeed");
+//RS     assert_eq!(once, twice, "#Test(\"name\") must be fmt-idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_test_measure_member_is_stable() {
+//RS     // D-CLAIM-BENCH1=A / D-DOTSCOPE1: `.measure` is a #Test member, not a
+//RS     // second marker or runner surface.
+//RS     let src = "\
+//RS fn run() {}
+//RS #Test(\"measured\") {
+//RS     .measure {
+//RS         assert_eq(2 * 2, 4)
+//RS     }
+//RS }
+//RS ";
+//RS     let once = jet::format_source(src).expect("#Test .measure should format");
+//RS     assert!(
+//RS         once.contains(".measure"),
+//RS         "formatter dropped .measure: {once}"
+//RS     );
+//RS     let twice = jet::format_source(&once).expect("formatted .measure should reformat");
+//RS     assert_eq!(once, twice, "#Test .measure formatting must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_test_faults_stability() {
+//RS     // D-TESTFAULT1=A: the typed effect-root list is part of the Test marker
+//RS     // contract and must survive both property-test formatting passes.
+//RS     let src = "\
+//RS #Test(faults: [FS.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
+//RS     assert(true)
+//RS }
+//RS fn run() {}
+//RS ";
+//RS     let once = jet::format_source(src).expect("fault-configured test should format");
+//RS     assert!(
+//RS         once.contains(
+//RS             "#Test(faults: [FS.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic()"
+//RS         ),
+//RS         "formatter dropped the fault selector: {once}"
+//RS     );
+//RS     let twice = jet::format_source(&once).expect("fault-configured test should reformat");
+//RS     assert_eq!(once, twice, "fault-configured Test must be fmt-idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_scope_members_stability() {
+//RS     // D-DOTSCOPE1: `.setup` / `.expect_fail` / `.timeout(dur)` / `.skip("why")`
+//RS     // scope-member statements must survive fmt byte-for-byte, including the
+//RS     // duration literal and the reason string — and the terminator inserted
+//RS     // between two members (`}` then `.name {`) must round-trip.
+//RS     let src = "\
+//RS fn run() {
+//RS 
+//RS }
+//RS 
+//RS #Test(\"members\") {
+//RS     .setup {
+//RS         base :: 1
+//RS     }
+//RS     .expect_fail {
+//RS         assert(false)
+//RS     }
+//RS     .timeout(500ms) {
+//RS         assert((base == 1))
+//RS     }
+//RS     .skip(\"later\") {
+//RS         assert(false)
+//RS     }
+//RS }
+//RS ";
+//RS     assert_fmt_stable(src, "scope members");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_bare_binding_d_bind_bare1_stability() {
+//RS     // D-BIND-BARE1: bare bindings must survive fmt unchanged.
+//RS     let src = "\
+//RS fn run() {
+//RS     x :: 42
+//RS     s := \"hi\"
+//RS     print(\"{x} {s}\")
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(src, &["x :: 42", "s := \"hi\""], "bare binding");
+//RS     let once = jet::format_source(src).expect("fmt should accept bare bindings");
+//RS     let twice = jet::format_source(&once).expect("second fmt of bare bindings must succeed");
+//RS     assert_eq!(once, twice, "bare binding fmt must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_track_binding_marker() {
+//RS     let src = "\
+//RS fn run() {
+//RS     #Track count :: 1
+//RS     #Track total := 2
+//RS     #Track label :: \"ok\"
+//RS     print(\"{count} {total} {label}\")
+//RS }
+//RS ";
+//RS     assert_fmt_stable(src, "#Track binding marker");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_local_and_shared_reactive_pins() {
+//RS     let src = "\
+//RS use core.reactive as reactive
+//RS 
+//RS fn run() {
+//RS     #Local pending := reactive.signal(0)
+//RS     #Shared shared := reactive.signal(1)
+//RS     print(\"{pending.get()} {shared.get()}\")
+//RS }
+//RS ";
+//RS     assert_fmt_stable(src, "#Local/#Shared reactive pins");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_write_sigil_d_mem1_stability() {
+//RS     // D-MEM1 (S1): `&T` is the write sigil (param + call-site mirror), `&self`
+//RS     // is the write receiver, `^T`/`^self` (take/move) are unchanged, and plain
+//RS     // `T`/`self` (read) carries no sigil. Must all survive fmt unchanged.
+//RS     let src = "\
+//RS struct Player {
+//RS     hp: Int
+//RS }
+//RS 
+//RS impl Player {
+//RS     fn show(self) -> Int { return self.hp }
+//RS 
+//RS     fn heal(&self, amount: Int) { self.hp = self.hp + amount }
+//RS }
+//RS 
+//RS fn damage(p: &Player, amount: Int) {
+//RS     p.hp = p.hp - amount
+//RS }
+//RS 
+//RS fn archive(p: ^Player) -> Int {
+//RS     return p.hp
+//RS }
+//RS 
+//RS fn run() {
+//RS     p := Player{hp: 100}
+//RS     damage(&p, 10)
+//RS     p.heal(5)
+//RS     print(archive(^p))
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &[
+//RS             "fn heal(&self, amount: Int)",
+//RS             "fn damage(p: &Player, amount: Int)",
+//RS             "fn archive(p: ^Player) -> Int {",
+//RS             "damage(&p, 10)",
+//RS             "archive(^p)",
+//RS         ],
+//RS         "D-MEM1 write sigil",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_memory_denial_d_authority_mem1_stability() {
+//RS     // D-AUTHORITY-MEM1: the memory floor lives on the function effect row.
+//RS     let src = "\
+//RS fn run() -[!Mem.Alloc]> {
+//RS     print(\"ok\")
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["fn run() -[!Mem.Alloc]>"],
+//RS         "D-AUTHORITY-MEM1 effect denial",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_copies_policy_d_mem_copysem1_stability() {
+//RS     let src = "\
+//RS #Policy(copies: .Explicit)
+//RS 
+//RS fn run() {
+//RS     print(\"ok\")
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["#Policy(copies: .Explicit)"],
+//RS         "D-MEM-COPYSEM1 copies policy",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_copy_sigil_d_shape_copy1_stability() {
+//RS     // D-SHAPE-COPY1=A (supersedes D-CAP2/D-MEM1/S4): `~x` is a prefix-verb
+//RS     // expression — must survive fmt unchanged in binding position, call-arg
+//RS     // position, and on a field.
+//RS     let src = "\
+//RS struct Ticket {
+//RS     id: Int
+//RS     label: String
+//RS }
+//RS 
+//RS fn archive(t: ^Ticket) -> String {
+//RS     return t.label
+//RS }
+//RS 
+//RS fn run() {
+//RS     name :: \"vault\"
+//RS     saved :: ~name
+//RS     t :: Ticket{id: 1, label: \"root\"}
+//RS     print(archive(~t))
+//RS     print(~t.label)
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["saved :: ~name", "print(archive(~t))", "print(~t.label)"],
+//RS         "D-SHAPE-COPY1 copy sigil",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_loop_label_d_looplabel3_stability() {
+//RS     // D-LOOPLABEL3=A: named loops and target-argument exits survive unchanged.
+//RS     let src = "\
+//RS fn run() {
+//RS     outer :: loop i in [1, 2] {
+//RS         loop j in [1, 2] {
+//RS             if i == j {
+//RS                 value() ?? next(outer)
+//RS                 break(outer)
+//RS             }
+//RS         }
+//RS     }
+//RS     print(\"done\")
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["outer :: loop", "next(outer)", "break(outer)"],
+//RS         "named loop target-argument exits",
+//RS     );
+//RS     let once = jet::format_source(src).expect("fmt should accept named loop dot exits");
+//RS     let twice = jet::format_source(&once).expect("second fmt of loop labels must succeed");
+//RS     assert_eq!(once, twice, "loop label fmt must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_loop_values_and_yielding_loops_are_idempotent() {
+//RS     let src = r#"fn find(xs: [Int]) -> Int {
+//RS     found :: loop {
+//RS         loop x in xs {
+//RS             if x > 2 { break(found, x) }
+//RS         }
+//RS         break -1
+//RS     }
+//RS     found
+//RS }
+//RS 
+//RS fn run() {
+//RS     xs :: [Int]{ 1, 2, 3, 4 }
+//RS     values :: loop x in xs -> {
+//RS         if x > 3 { break }
+//RS         x * 2
+//RS     }
+//RS     print(values)
+//RS }
+//RS "#;
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &[
+//RS             "found :: loop",
+//RS             "break(found, x)",
+//RS             "values :: loop x in xs ->",
+//RS         ],
+//RS         "loop values",
+//RS     );
+//RS     let once = jet::format_source(src).expect("fmt should accept loop values");
+//RS     let twice = jet::format_source(&once).expect("second loop-value fmt should succeed");
+//RS     assert_eq!(once, twice, "loop-value fmt must be idempotent");
+//RS     assert!(
+//RS         !once.contains("__jet_"),
+//RS         "formatter must hide compiler-generated machine labels: {once}"
+//RS     );
+//RS 
+//RS     let guard_src = "fn run() {\n    values :: loop u in users if u.active -> u.name\n}\n";
+//RS     let guard_once = jet::format_source(guard_src).expect("guarded loop should format");
+//RS     assert_eq!(
+//RS         guard_once, guard_src,
+//RS         "canonical guard spelling must round-trip byte-for-byte"
+//RS     );
+//RS     assert_eq!(
+//RS         jet::format_source(&guard_once).expect("formatted guarded loop should reformat"),
+//RS         guard_once,
+//RS         "canonical guard formatting must be stable"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_counted_loop_d_loop_semicolon1_stability() {
+//RS     // D-LOOP-HEADER3=D: range form is the live three-slot / counted surface.
+//RS     let src = "\
+//RS fn run() {
+//RS     sum := 0
+//RS     loop i in 0..<5 {
+//RS         sum += i
+//RS     }
+//RS     print(sum)
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(src, &["loop i in 0..<5"], "range counted loop header");
+//RS     let once = jet::format_source(src).expect("fmt should accept range counted loop");
+//RS     let twice = jet::format_source(&once).expect("second fmt of counted loop must succeed");
+//RS     assert_eq!(once, twice, "counted loop fmt must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_unified_loop_headers_and_next_stability() {
+//RS     let src = "fn next() -> Int { return 7 }\n\nfn run() {\n    next()\n    cursor.next()\n    saved :: Int.parse(\"1\") ?? (next)\n    loop item in [1, 2, 3], 2 {\n        value :: Int.parse(\"1\") ?? next\n        if value == 1 { next }\n    }\n}\n";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &[
+//RS             "fn next()",
+//RS             "next()",
+//RS             ".next()",
+//RS             "?? (next)",
+//RS             "loop item in [1, 2, 3], 2",
+//RS             "?? next",
+//RS             "if value == 1 -> next",
+//RS         ],
+//RS         "unified loop header",
+//RS     );
+//RS     let once = jet::format_source(src).expect("fmt should accept unified loop syntax");
+//RS     let twice = jet::format_source(&once).expect("formatted unified loop must parse");
+//RS     assert_eq!(once, twice, "unified loop formatting must be stable");
+//RS 
+//RS     for retired in [
+//RS         "fn run() { loop i in 0..2 step 1 {} }\n",
+//RS         "fn run() { loop { continue } }\n",
+//RS         "fn run() { loop i :: 0, true {} }\n",
+//RS         "fn run() { loop [i] := [0], true {} }\n",
+//RS         "fn run() { loop i := 0 true {} }\n",
+//RS         "fn run() { loop i := 0, true, i += 1, i += 2 {} }\n",
+//RS         "fn run() { loop i := 0, i < 3, i += 1 {} }\n",
+//RS     ] {
+//RS         assert!(
+//RS             jet::format_source(retired).is_err(),
+//RS             "retired loop spelling must take the ordinary parse-error path: {retired}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn control_bodies_use_arrows_when_they_fit() {
+//RS     let src = "fn run() {\n    if true {\n        print(\"yes\")\n    }\n    loop false print(\"no\")\n}\n";
+//RS     let once = jet::format_source(src).expect("fmt should recover the retired adjacent loop");
+//RS     assert!(once.contains("if true -> print(\"yes\")"), "{once}");
+//RS     assert!(once.contains("loop false -> print(\"no\")"), "{once}");
+//RS     let twice = jet::format_source(&once).expect("formatted controls must parse");
+//RS     assert_eq!(once, twice);
+//RS }
+//RS 
+//RS #[test]
+//RS fn effect_control_arrows_format_as_one_statement_bodies() {
+//RS     let src = "fn run() {\n    if true -> print(\"yes\") else -> print(\"no\")\n    loop false -> print(\"again\")\n    loop -> print(\"forever\")\n    loop item in [1, 2] -> print(item)\n    loop i := 0, i < 2 -> i += 1\n}\n";
+//RS     let once = jet::format_source(src).expect("effect control arrows should format");
+//RS     assert!(
+//RS         once.contains("if true -> print(\"yes\") else -> print(\"no\")"),
+//RS         "{once}"
+//RS     );
+//RS     assert!(once.contains("loop false -> print(\"again\")"), "{once}");
+//RS     assert!(once.contains("loop -> print(\"forever\")"), "{once}");
+//RS     assert!(
+//RS         once.contains("loop item in [1, 2] -> print(item)"),
+//RS         "{once}"
+//RS     );
+//RS     assert!(once.contains("loop i := 0, i < 2 -> i += 1"), "{once}");
+//RS     assert_eq!(
+//RS         once,
+//RS         jet::format_source(&once).expect("arrow controls should be stable")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_braced_loop_value_drop_and_is_stable() {
+//RS     let src = "fn value() -> String -> \"value\"\n\nfn run() {\n    values := [1, 2]\n    loop v in values { value() }\n}\n";
+//RS     let once = jet::format_source(src).expect("braced value-dropping loop should format");
+//RS     assert!(once.contains("loop v in values { value() }"), "{once}");
+//RS     assert!(!once.contains("loop v in values ->"), "{once}");
+//RS     assert_eq!(
+//RS         once,
+//RS         jet::format_source(&once).expect("braced value-dropping loop should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_canonicalizes_explicit_drop_to_arrow_loop_body() {
+//RS     let src = "fn value() -> String -> \"value\"\n\nfn run() {\n    values := [1, 2]\n    loop v in values { value().drop(\"checked\") }\n}\n";
+//RS     let once = jet::format_source(src).expect("explicit-drop loop should format");
+//RS     assert!(
+//RS         once.contains("loop v in values -> value().drop(\"checked\")"),
+//RS         "{once}"
+//RS     );
+//RS     assert_eq!(
+//RS         once,
+//RS         jet::format_source(&once).expect("explicit-drop arrow loop should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn loop_headers_use_in_binding_and_comma_clauses() {
+//RS     let src = "fn run() {\n    loop item in [1, 2, 3], 2 { print(item) }\n    loop (key, value) in counts { print(key) }\n    loop i in 0..<3 { print(i) }\n}\n";
+//RS     let once = jet::format_source(src).expect("fmt should accept canonical loop headers");
+//RS     for expected in [
+//RS         "loop item in [1, 2, 3], 2 { print(item) }",
+//RS         "loop (key, value) in counts { print(key) }",
+//RS         "loop i in 0..<3 { print(i) }",
+//RS     ] {
+//RS         assert!(once.contains(expected), "missing `{expected}`:\n{once}");
+//RS     }
+//RS     let twice = jet::format_source(&once).expect("formatted loop headers must parse");
+//RS     assert_eq!(once, twice);
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_long_loop_headers_wrap_at_clause_boundaries_stability() {
+//RS     let src = r#"fn run() {
+//RS     loop item in // source clause
+//RS         [1000000000000000000, 2000000000000000000, 3000000000000000000, 4000000000000000000], // stride clause
+//RS         2 {
+//RS         next
+//RS     }
+//RS     loop cursor in // start
+//RS         0..<9000000000000000000, // end
+//RS         1000000000000000000 {
+//RS         print(cursor)
+//RS     }
+//RS     loop ready := true, ready {
+//RS         break
+//RS     }
+//RS }
+//RS "#;
+//RS     let once = jet::format_source(src).expect("long unified loop headers should format");
+//RS     for token in [
+//RS         "loop item in",
+//RS         "// source clause",
+//RS         "],",
+//RS         "// stride clause",
+//RS         "loop cursor in",
+//RS         "0..<9000000000000000000,",
+//RS         "1000000000000000000",
+//RS         "loop ready := true, ready {",
+//RS     ] {
+//RS         assert!(
+//RS             once.contains(token),
+//RS             "fmt dropped loop token `{token}`:\n{once}"
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         once.contains("loop cursor in"),
+//RS         "long range header must keep comma clauses:\n{once}"
+//RS     );
+//RS     let twice = jet::format_source(&once).expect("formatted long loop headers must reparse");
+//RS     assert_eq!(
+//RS         once, twice,
+//RS         "long loop header formatting must be byte-stable"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_selective_import_d_selimport1_stability() {
+//RS     // D-SELIMPORT1=A: `use mod.[a, b as c]` must survive fmt unchanged.
+//RS     let src = "\
+//RS module math {
+//RS     pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+//RS         if x < lo { return lo }
+//RS         if x > hi { return hi }
+//RS         return x
+//RS     }
+//RS }
+//RS 
+//RS use math.[clamp, clamp as c2]
+//RS use core.math.[abs as absolute, min]
+//RS use core.encoding.[json, csv]
+//RS use c.[raylib as rl, sqlite3]
+//RS 
+//RS fn run() {
+//RS     print(clamp(15, 0, 10))
+//RS     print(c2(5, 0, 3))
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &[
+//RS             "use math.[clamp, clamp as c2]",
+//RS             "use core.math.[abs as absolute, min]",
+//RS             "use core.encoding.[json, csv]",
+//RS             "use c.[raylib as rl, sqlite3]",
+//RS         ],
+//RS         "selective import with alias",
+//RS     );
+//RS     let once = jet::format_source(src).expect("fmt should accept selective imports");
+//RS     let twice = jet::format_source(&once).expect("second fmt of selective imports must succeed");
+//RS     assert_eq!(once, twice, "selective import fmt must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_value_tag_type_d_qual4_stability() {
+//RS     // D-QUAL4=A: `#TagName T` in type position must survive fmt unchanged.
+//RS     let src = "\
+//RS fn process(input: #Input String) -> String {
+//RS     return \"{input}-clean\"
+//RS }
+//RS 
+//RS fn run() {
+//RS     result :: process(\"hello\")
+//RS     print(result)
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(src, &["#Input String"], "value-tag type qualifier");
+//RS     let once = jet::format_source(src).expect("fmt should accept value-tag types");
+//RS     let twice = jet::format_source(&once).expect("second fmt of value-tag types must succeed");
+//RS     assert_eq!(once, twice, "value-tag type fmt must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_layout_block_round_trips_byte_for_byte() {
+//RS     // D-LAYOUT1: the parser desugars every `box.anchor` read inside
+//RS     // `NAME :: Layout{ … }` into a `NAME.h(box, anchor)`/`NAME.v(box, anchor)`
+//RS     // method call (a purely structural rewrite, `Parser/Statements.rs`); the
+//RS     // formatter must re-sugar those calls back to `box.anchor` so `layout`
+//RS     // round-trips STABILITY, not just idempotence (memory: a prior formatter
+//RS     // change silently dropped tokens while only idempotence was checked).
+//RS     let src = "\
+//RS fn run() {
+//RS     form :: Layout{
+//RS         label.width >= 80.0,
+//RS         label.right + 16.0 == input.left,
+//RS         label.width + 16.0 + input.width == self.width
+//RS     }
+//RS     w :: form.value(form.h(\"label\", \"width\"))
+//RS     print(w)
+//RS }
+//RS ";
+//RS     let out = jet::format_source(src).expect("fmt should accept a `layout` block");
+//RS     assert_eq!(
+//RS         out, src,
+//RS         "`layout {{ … }}` must round-trip byte-for-byte, not just idempotently"
+//RS     );
+//RS     let twice = jet::format_source(&out).expect("second fmt of a layout block must succeed");
+//RS     assert_eq!(out, twice, "layout block fmt must be idempotent");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_multiline_lambda_call_arg() {
+//RS     // D-TRAILBLOCK2=A: multiline `() -> { … }` inside call parentheses is the
+//RS     // spelling for code-as-argument; fmt must round-trip it byte-for-byte and
+//RS     // must not rewrite it into retired trailing-block sugar.
+//RS     let src = "\
+//RS fn twice(f: fn()) {
+//RS     f()
+//RS     f()
+//RS }
+//RS 
+//RS fn run() {
+//RS     twice(() -> {
+//RS         print(\"HI\")
+//RS         print(\"Hello\")
+//RS     })
+//RS }
+//RS ";
+//RS     assert_fmt_stable(src, "multiline () -> call arg");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_bare_lambda_params() {
+//RS     // D-LAMBDAINFER1: fmt preserves the bare spelling and does not insert a
+//RS     // parameter type. Explicit parentheses and annotations also survive.
+//RS     let src = "\
+//RS fn run() {
+//RS     nums :: [1, 2, 3, 4, 5]
+//RS     big :: nums.filter(x -> x > 3)
+//RS     explicit :: nums.filter((x) -> x > 3)
+//RS     typed :: nums.filter((n: Int) -> n > 3)
+//RS     print(big)
+//RS     print(explicit)
+//RS     print(typed)
+//RS }
+//RS ";
+//RS     assert_fmt_stable(src, "bare lambda params");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_destructure_rest() {
+//RS     // D-DESTRUCT1: a rename (`severity: sev`) and a trailing mandatory `..`
+//RS     // must both survive byte-for-byte — this is exactly the class of drop
+//RS     // idempotence-only checks miss.
+//RS     let src = "\
+//RS struct Incident {
+//RS     id: Int
+//RS     severity: Int
+//RS     title: String
+//RS }
+//RS 
+//RS fn run() {
+//RS     Incident{id, severity: sev, ..} :: Incident{id: 1, severity: 5, title: \"boom\"}
+//RS     print(\"{id} {sev}\")
+//RS }
+//RS ";
+//RS     assert_fmt_stable(src, "destructure rename + rest");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_struct_pattern_arm_head() {
+//RS     // D-DESTRUCT1: dispatch-arm struct patterns carry both value checks and bindings.
+//RS     // The formatter must keep the anonymous head, field value, binding, and `..`.
+//RS     let src = "\
+//RS struct Incident {
+//RS     title: String
+//RS     kind: String
+//RS }
+//RS 
+//RS fn run() {
+//RS     routed :: Incident{title: \"database down\", kind: \"page\"}
+//RS     if routed == {
+//RS         { kind: \"page\", title, .. } -> print(\"page {title}\")
+//RS         else -> print(\"other\")
+//RS     }
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &["{kind: \"page\", title, ..}", "print(\"page {title}\")"],
+//RS         "struct-pattern dispatch arm",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_unit_literal() {
+//RS     // D-UNITLIT1 / D-TYPE2-TIME1: `500ms` must survive with no space inserted
+//RS     // between the number and the suffix, and the suffix itself must not be dropped.
+//RS     let src = "\
+//RS fn run() {
+//RS     a :: 500ms
+//RS     print(a)
+//RS     z :: 4i
+//RS     print(z)
+//RS }
+//RS ";
+//RS     assert_fmt_stable(src, "unit literal");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_scaled_affine_unit_declaration() {
+//RS     // D-QUANTITY-DECL1=A: STABILITY must retain every base/scale/offset token;
+//RS     // idempotence alone could bless a first pass that discarded conversion law.
+//RS     let src = "\
+//RS #UnitFamily(Temperature, base: kelvin) {
+//RS     kelvin
+//RS     celsius(scale: 1, offset: 27315/100)
+//RS }
+//RS ";
+//RS     assert_fmt_stable(src, "scaled affine #UnitFamily declaration");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_open_dimension_and_scale_provenance() {
+//RS     let src = r#"#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) {
+//RS     newton
+//RS     standard_gravity(scale: conventional(9.80665, source: "BIPM-2026"))
+//RS }
+//RS "#;
+//RS     assert_fmt_stable(src, "open dimension and scale provenance");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_rounded_unit_conversion_contract() {
+//RS     let src = r#"#UnitFamily(Length, base: meter) {
+//RS     meter
+//RS     half(scale: 1/2)
+//RS }
+//RS 
+//RS fn run() {
+//RS     source :: 5half
+//RS     Meter.from_half_rounded(source, .TowardZero, digits: 0).drop("mode")
+//RS     Meter.from_half_rounded(source, .Floor, digits: 1).drop("mode")
+//RS     Meter.from_half_rounded(source, .Ceiling, digits: 2).drop("mode")
+//RS     Meter.from_half_rounded(source, .NearestEven, digits: 3).drop("mode")
+//RS }
+//RS "#;
+//RS     assert_fmt_stable(src, "D-QUANTITY-CONVERT1 rounded conversion");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_range_constraint() {
+//RS     // D-RANGETYPE1 / D-TYPE2-REFINE1: `distinct Int(0..10)` — distinct
+//RS     // declarations are emitted verbatim, so the `(0..10)` clause survives
+//RS     // structurally; this pins it down explicitly rather than relying on that
+//RS     // being an accident.
+//RS     let src = "\
+//RS Severity :: distinct Int(0..10)
+//RS 
+//RS fn run() {
+//RS     sev :: Severity.from_int(3)
+//RS     print(\"{sev.raw()}\")
+//RS }
+//RS ";
+//RS     assert_fmt_stable(src, "range constraint");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_inline_range_in_type_positions() {
+//RS     // D-TYPE2-SPELL1: one inline range spelling survives parameters, returns,
+//RS     // fields, and the typed conversion head used by a binding.
+//RS     let src = "\
+//RS struct Brightness {
+//RS     level: Int(0..100)
+//RS }
+//RS 
+//RS fn set_brightness(level: Int(0..100)) -> Int(0..100) {
+//RS     return level
+//RS }
+//RS 
+//RS fn run() {
+//RS     value :: Int(0..100).from_int(12)
+//RS     print(\"{set_brightness(value)}\")
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &[
+//RS             "level: Int(0..100)",
+//RS             "Int(0..100) -> {",
+//RS             "Int(0..100).from_int(12)",
+//RS         ],
+//RS         "inline range type positions",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_parse_pattern() {
+//RS     // D-PARSESTR1: a str-match arm head must keep BOTH an untyped hole and a
+//RS     // typed hole's `:Type` suffix byte-for-byte — the `:Type` suffix never
+//RS     // appears on an ordinary format literal, so idempotence alone (the
+//RS     // c-fmt data-loss regression class) wouldn't catch the formatter
+//RS     // silently dropping it.
+//RS     let src = "\
+//RS fn run() {
+//RS     ticket :: \"inc-42-open\"
+//RS     if ticket == {
+//RS         \"inc-{id:Int}-{status}\" -> { print(\"incident #{id} {status}\") }
+//RS         else -> {
+//RS             print(\"not an incident id\")
+//RS         }
+//RS     }
+//RS }
+//RS ";
+//RS     assert_fmt_keeps(
+//RS         src,
+//RS         &[
+//RS             "\"inc-{id:Int}-{status}\"",
+//RS             "print(\"incident #{id} {status}\")",
+//RS         ],
+//RS         "str-match pattern arm (untyped + typed hole)",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fmt_preserves_checked_text_type() {
+//RS     // D-TEXTHEAD-TYPE1=A: the ordinary checked-text type and its audited raw
+//RS     // escape must survive byte-for-byte.
+//RS     let src = "\
+//RS enum TextError { Empty }
+//RS 
+//RS Pattern :: distinct String
+//RS 
+//RS impl Pattern.CheckedText {
+//RS     type Error = TextError
+//RS 
+//RS     fn check(text: String) Err! -[]> {
+//RS         if text == \"\" { return Err(TextError.Empty) }
+//RS         return Ok(())
+//RS     }
+//RS 
+//RS     fn encode_hole<T: Printable>(value: T) -[]> String {
+//RS         return \"[{value}]\"
+//RS     }
+//RS }
+//RS 
+//RS fn render(value: Pattern) {
+//RS     #Unsafe(\"formatter fixture\") {
+//RS         print(value.raw())
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     id :: 42
+//RS     value :: Pattern{\"value {id}\"}
+//RS     render(value)
+//RS }
+//RS ";
+//RS     assert_fmt_stable(src, "checked text type");
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1059 tests/fmt.rs:1790-3586
+

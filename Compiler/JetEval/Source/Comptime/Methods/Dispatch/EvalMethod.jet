@@ -1,0 +1,2473 @@
+// PORT-PENDING 0594 crates-jet-comptime-src-comptime-methods-dispatch-eval-method: crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs:1-2469
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::super::super::Interpreter::reborrow_repl_authorizer;
+//RS use super::*;
+//RS use crate::AST::CtReport;
+//RS use jet_foundation::Effects::core_effect;
+//RS 
+//RS fn decode_path(path: &str) -> String {
+//RS     if path == "$" {
+//RS         String::new()
+//RS     } else if let Some(path) = path.strip_prefix("$.") {
+//RS         path.to_string()
+//RS     } else {
+//RS         path.strip_prefix('$').unwrap_or(path).to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn decode_error_value(error: CtValue, fallback: &str) -> CtValue {
+//RS     let (path, reason) = match error {
+//RS         CtValue::Struct { fields, .. } => {
+//RS             let path = fields
+//RS                 .iter()
+//RS                 .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                     ("path", CtValue::Str(value)) => Some(value.as_str()),
+//RS                     _ => None,
+//RS                 })
+//RS                 .unwrap_or("");
+//RS             let reason = fields
+//RS                 .iter()
+//RS                 .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                     ("reason", CtValue::Str(value)) => Some(value.as_str()),
+//RS                     _ => None,
+//RS                 })
+//RS                 .unwrap_or(fallback);
+//RS             (decode_path(path), reason.to_string())
+//RS         }
+//RS         _ => (String::new(), fallback.to_string()),
+//RS     };
+//RS     super::super::super::TypedDecode::decode_error_at(path, reason)
+//RS }
+//RS 
+//RS fn decode_xml_error(error: jet_foundation::XmlPull::Error) -> CtValue {
+//RS     super::super::super::TypedDecode::decode_error_at(
+//RS         decode_path(&error.path),
+//RS         format!("XML {:?}: {}", error.kind, error.reason),
+//RS     )
+//RS }
+//RS 
+//RS // D-OPTION-SURFACE1: an option constructor written as `Val(x)`/`None` reaches
+//RS // the comptime and interpreter tiers as a raw enum, while lowered/runtime
+//RS // option values use the shared Present/Clean carrier. Keep both views at this
+//RS // boundary so static folding and runtime evaluation apply one option law.
+//RS fn option_surface_view(value: CtValue) -> Option<Option<CtValue>> {
+//RS     match value {
+//RS         CtValue::Present(value) => Some(Some(*value)),
+//RS         CtValue::Failed(CtReport::Clean(_)) => Some(None),
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if type_name.is_empty() && variant == "Val" => {
+//RS             args.into_iter().next().map(|(_, value)| Some(value))
+//RS         }
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if type_name.is_empty() && variant == "None" && args.is_empty() => Some(None),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS impl<'a> Interp<'a> {
+//RS     pub(in super::super::super) fn eval_method(
+//RS         &mut self,
+//RS         receiver: &Expr,
+//RS         method: &str,
+//RS         span: Span,
+//RS         type_args: &[Type],
+//RS         recv_type: Option<&str>,
+//RS         resolved_ret: Option<&Type>,
+//RS         args: &[crate::AST::CallArg],
+//RS         scope: &mut HashMap<String, CtValue>,
+//RS         mut evaluated_receiver: Option<CtValue>,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         let sequence_result_ty = resolved_ret.cloned().or_else(|| {
+//RS             if !matches!(method, "sum" | "product") {
+//RS                 return None;
+//RS             }
+//RS             let Expr::Ident(name, _) = receiver else {
+//RS                 return None;
+//RS             };
+//RS             match self.binding_types.get(name) {
+//RS                 Some(Type::List(inner) | Type::FixedList { elem: inner, .. }) => {
+//RS                     Some((**inner).clone())
+//RS                 }
+//RS                 _ => None,
+//RS             }
+//RS         });
+//RS         // D-CALLVALUE1=B: the method-shaped spelling is sema's marker for a
+//RS         // function value. Evaluate it through the existing closure seam so
+//RS         // comptime/interpreter execution has the same call meaning as TIR.
+//RS         if recv_type == Some(crate::Syntax::INTERNAL_CALL_VALUE) {
+//RS             let recv = match evaluated_receiver.take() {
+//RS                 Some(value) => value,
+//RS                 None => self.eval(receiver, scope)?,
+//RS             };
+//RS             let mut argv = Vec::with_capacity(args.len());
+//RS             for arg in args {
+//RS                 argv.push(self.eval(&arg.expr, scope)?);
+//RS             }
+//RS             return self.call_inline_closure(&recv, argv, span, scope);
+//RS         }
+//RS         // D-AUTHORITY-NAME1=A: comptime static construction uses the same
+//RS         // built-in seam as TIR interpretation.
+//RS         if let Expr::Ident(type_name, _) = receiver {
+//RS             if type_name == crate::Syntax::TYPE_AUTHORITY
+//RS                 && matches!(method, "workspace" | "from_rights")
+//RS             {
+//RS                 let mut argv = Vec::with_capacity(args.len());
+//RS                 for arg in args {
+//RS                     argv.push(self.eval(&arg.expr, scope)?);
+//RS                 }
+//RS                 return super::super::super::Builtins::apply_static_type_method(
+//RS                     "JetAuthority",
+//RS                     method,
+//RS                     argv,
+//RS                     span,
+//RS                 )
+//RS                 .expect("Authority authority constructor is registered");
+//RS             }
+//RS         }
+//RS         // D-ENC-XML-SURFACE1=A: qualified safe whole-value XML constructors.
+//RS         // D-JSONCANON1=A: EncodingLimits.safe() for edition-2027 defaults.
+//RS         if method == "safe" && args.is_empty() {
+//RS             if let Expr::Ident(type_name, _) = receiver {
+//RS                 if type_name == "EncodingLimits" {
+//RS                     return Ok(super::super::super::EncodingLite::encoding_limits_safe_value());
+//RS                 }
+//RS                 if type_name == "DataLimits" {
+//RS                     return Ok(
+//RS                         super::super::super::DataPipeline::data_limits_safe_value(),
+//RS                     );
+//RS                 }
+//RS             }
+//RS             if let Expr::Field(base, type_name, _) = receiver {
+//RS                 if let Expr::Ident(alias, _) = base.as_ref() {
+//RS                     if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml")
+//RS                     {
+//RS                         if type_name == "XMLLimits" {
+//RS                             return Ok(super::super::super::EncodingLite::xml_safe_limits_value());
+//RS                         }
+//RS                         if type_name == "XMLParseOptions" {
+//RS                             return Ok(super::super::super::EncodingLite::xml_safe_options_value());
+//RS                         }
+//RS                         if type_name == "XMLRenderOptions" {
+//RS                             return Ok(
+//RS                                 super::super::super::EncodingLite::xml_safe_render_options_value(),
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                     if self.core_imports.get(alias).map(String::as_str) == Some("core.email")
+//RS                         && type_name == "Limits"
+//RS                     {
+//RS                         return Ok(super::super::super::EmailAdapter::limits_safe_value());
+//RS                     }
+//RS                     if self.core_imports.get(alias).map(String::as_str) == Some("core.data")
+//RS                         && type_name == "DataLimits"
+//RS                     {
+//RS                         return Ok(
+//RS                             super::super::super::DataPipeline::data_limits_safe_value(),
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — module-field sentinel constructor.
+//RS         if method == "new" {
+//RS             let solver_ctor = match receiver {
+//RS                 Expr::Ident(type_name, _) if type_name == crate::Syntax::SOLVER_TYPE => true,
+//RS                 Expr::Field(base, type_name, _)
+//RS                     if type_name == crate::Syntax::SOLVER_TYPE
+//RS                         && matches!(
+//RS                             base.as_ref(),
+//RS                             Expr::Ident(alias, _)
+//RS                                 if self.core_imports.get(alias).map(String::as_str)
+//RS                                     == Some("core.compute.solve")
+//RS                         ) =>
+//RS                 {
+//RS                     true
+//RS                 }
+//RS                 _ => false,
+//RS             };
+//RS             if solver_ctor {
+//RS                 let mut argv = Vec::with_capacity(args.len());
+//RS                 for a in args {
+//RS                     argv.push(self.eval(&a.expr, scope)?);
+//RS                 }
+//RS                 return solver_new(&argv, span);
+//RS             }
+//RS         }
+//RS         // D-SHAPE-CONVERT1=A: numeric-backed distinct/unit conversion is the
+//RS         // existing distinct constructor with destination-owned spelling.
+//RS         if let Expr::Ident(type_name, _) = receiver {
+//RS             if let Some(range) = self.distinct_ranges.get(type_name).copied() {
+//RS                 if let Some(base) = self.distinct_bases.get(type_name) {
+//RS                     if !base.is_numeric()
+//RS                         && crate::Syntax::conversion_method_for_source(&base.name()) == method
+//RS                         && args.len() == 1
+//RS                     {
+//RS                         return self.eval(&args[0].expr, scope);
+//RS                     }
+//RS                 }
+//RS                 if crate::Syntax::numeric_conversion_source(method).is_some() && args.len() == 1 {
+//RS                     let base = self.distinct_bases.get(type_name).ok_or_else(|| {
+//RS                         unsupported("a distinct conversion without its base type", span)
+//RS                     })?;
+//RS                     let value = self.eval(&args[0].expr, scope)?;
+//RS                     let converted = super::super::super::Builtins::apply_static_type_method(
+//RS                         &base.name(),
+//RS                         method,
+//RS                         vec![value],
+//RS                         span,
+//RS                     )
+//RS                     .ok_or_else(|| unsupported("this distinct numeric conversion", span))??;
+//RS                     let check_range = |value: CtValue| -> Result<CtValue, Diagnostic> {
+//RS                         let Some((lo, hi)) = range else {
+//RS                             return Ok(value);
+//RS                         };
+//RS                         let n = as_int(&value, args[0].expr.span())?;
+//RS                         Ok(if (lo..=hi).contains(&n) {
+//RS                             CtValue::Present(Box::new(CtValue::Int(n)))
+//RS                         } else {
+//RS                             CtValue::failed(Box::new(CtValue::Str(format!(
+//RS                                 "{} out of range {}..{}",
+//RS                                 n, lo, hi
+//RS                             ))))
+//RS                         })
+//RS                     };
+//RS                     if let (Some((lo, hi)), Some(n)) = (range, literal_int(&args[0].expr)) {
+//RS                         if (lo..=hi).contains(&n) {
+//RS                             return Ok(CtValue::Int(n));
+//RS                         }
+//RS                     }
+//RS                     return match converted {
+//RS                         CtValue::Present(value) if range.is_some() => check_range(*value),
+//RS                         CtValue::Failed(CtReport::Told(error)) if range.is_some() => {
+//RS                             Ok(CtValue::Failed(CtReport::Told(error)))
+//RS                         }
+//RS                         value => check_range(value),
+//RS                     };
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Expr::Ident(type_name, _) = receiver {
+//RS             if type_name == crate::Syntax::MEM_POOL && method == "new" {
+//RS                 return Ok(super::super::pool::new_value());
+//RS             }
+//RS             if type_name == crate::Syntax::TYPE_BYTES && matches!(method, "new" | "from") {
+//RS                 let bytes = if method == "new" {
+//RS                     Vec::new()
+//RS                 } else {
+//RS                     as_bytes(&self.eval(&args[0].expr, scope)?, span)?
+//RS                 };
+//RS                 return Ok(CtValue::Struct {
+//RS                     type_name: crate::Syntax::TYPE_BYTES.to_string(),
+//RS                     fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+//RS                 });
+//RS             }
+//RS             if type_name == crate::Syntax::TYPE_LRU && method == "new" {
+//RS                 let capacity = as_int(&self.eval(&args[0].expr, scope)?, span)?.max(0);
+//RS                 return Ok(CtValue::Struct {
+//RS                     type_name: crate::Syntax::TYPE_LRU.to_string(),
+//RS                     fields: vec![
+//RS                         ("capacity".to_string(), CtValue::Int(capacity)),
+//RS                         ("entries".to_string(), CtValue::List(Vec::new())),
+//RS                     ],
+//RS                 });
+//RS             }
+//RS             if type_name == crate::Syntax::TYPE_QUEUE && method == "new" {
+//RS                 return Ok(CtValue::Struct {
+//RS                     type_name: crate::Syntax::TYPE_QUEUE.to_string(),
+//RS                     fields: vec![("items".to_string(), CtValue::List(Vec::new()))],
+//RS                 });
+//RS             }
+//RS             if type_name == crate::Syntax::TYPE_QUEUE && method == "init" {
+//RS                 let items = match self.eval(&args[0].expr, scope)? {
+//RS                     CtValue::List(items) => items,
+//RS                     _ => return Err(unsupported("Queue.init with a non-list", span)),
+//RS                 };
+//RS                 return Ok(CtValue::Struct {
+//RS                     type_name: crate::Syntax::TYPE_QUEUE.to_string(),
+//RS                     fields: vec![("items".to_string(), CtValue::List(items))],
+//RS                 });
+//RS             }
+//RS             if type_name == crate::Syntax::TYPE_BITS && method == "new" {
+//RS                 return Ok(CtValue::Struct {
+//RS                     type_name: crate::Syntax::TYPE_BITS.to_string(),
+//RS                     fields: vec![("bits".to_string(), CtValue::List(Vec::new()))],
+//RS                 });
+//RS             }
+//RS             if type_name == crate::Syntax::TYPE_TALLY && method == "new" {
+//RS                 return Ok(CtValue::Struct {
+//RS                     type_name: crate::Syntax::TYPE_TALLY.to_string(),
+//RS                     fields: vec![
+//RS                         ("items".to_string(), CtValue::List(Vec::new())),
+//RS                         ("counts".to_string(), CtValue::List(Vec::new())),
+//RS                     ],
+//RS                 });
+//RS             }
+//RS             if type_name == crate::Syntax::TYPE_SET && method == "from" {
+//RS                 let items = match self.eval(&args[0].expr, scope)? {
+//RS                     CtValue::List(items) => unique_values(items),
+//RS                     _ => return Err(unsupported("Set.from with a non-list", span)),
+//RS                 };
+//RS                 return Ok(CtValue::Struct {
+//RS                     type_name: crate::Syntax::TYPE_SET.to_string(),
+//RS                     fields: vec![("items".to_string(), CtValue::List(items))],
+//RS                 });
+//RS             }
+//RS             if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE && matches!(method, "new" | "from") {
+//RS                 let items = if method == "new" {
+//RS                     Vec::new()
+//RS                 } else {
+//RS                     match self.eval(&args[0].expr, scope)? {
+//RS                         CtValue::List(items) => sorted_descending(items, span)?,
+//RS                         _ => return Err(unsupported("PriorityQueue.from with a non-list", span)),
+//RS                     }
+//RS                 };
+//RS                 return Ok(CtValue::Struct {
+//RS                     type_name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+//RS                     fields: vec![("items".to_string(), CtValue::List(items))],
+//RS                 });
+//RS             }
+//RS             if type_name == crate::Syntax::TYPE_RANK && matches!(method, "new" | "from") {
+//RS                 let items = if method == "new" {
+//RS                     Vec::new()
+//RS                 } else {
+//RS                     match self.eval(&args[0].expr, scope)? {
+//RS                         CtValue::List(items) => sorted_unique(items, span)?,
+//RS                         _ => return Err(unsupported("Rank.from with a non-list", span)),
+//RS                     }
+//RS                 };
+//RS                 return Ok(CtValue::Struct {
+//RS                     type_name: crate::Syntax::TYPE_RANK.to_string(),
+//RS                     fields: vec![("items".to_string(), CtValue::List(items))],
+//RS                 });
+//RS             }
+//RS         }
+//RS         // c97/D-STRPARSE1: static method on a built-in type name (e.g. `Int.parse(s)`).
+//RS         // Check *before* evaluating the receiver so `Int`/`Float` don't fail scope lookup.
+//RS         if let Expr::Ident(type_name, _) = receiver {
+//RS             // D-SHAPE-CTORVERB1=C: deterministic fresh state is type-owned.
+//RS             if type_name == crate::Syntax::CLOCK_TYPE && method == "new" {
+//RS                 let seed = self.eval(&args[0].expr, scope)?;
+//RS                 let CtValue::Int(seed) = seed else {
+//RS                     return Err(unsupported("Clock.new expects an Int seed", span));
+//RS                 };
+//RS                 return Ok(CtValue::Struct {
+//RS                     type_name: crate::Syntax::CLOCK_TYPE.to_string(),
+//RS                     fields: vec![("now".to_string(), CtValue::Int(seed))],
+//RS                 });
+//RS             }
+//RS             if type_name == crate::Syntax::DURATION_TYPE {
+//RS                 let Some(unit) = crate::Syntax::duration_unit_for_constructor(method) else {
+//RS                     return Err(super::super::super::Diagnostics::unsupported(
+//RS                         &format!("`{}.{}()`", type_name, method),
+//RS                         span,
+//RS                     ));
+//RS                 };
+//RS                 // D-TIMERES1=A: constructors produce an i64 nanosecond count.
+//RS                 let scale = match unit {
+//RS                     "Nanoseconds" => 1_i64,
+//RS                     "Microseconds" => 1_000,
+//RS                     "Milliseconds" => 1_000_000,
+//RS                     "Seconds" => 1_000_000_000,
+//RS                     "Minutes" => 60_000_000_000,
+//RS                     "Hours" => 3_600_000_000_000,
+//RS                     _ => unreachable!("Syntax returned a closed duration unit"),
+//RS                 };
+//RS                 let value = self.eval(&args[0].expr, scope)?;
+//RS                 let (ns, reason) = match value {
+//RS                     CtValue::Int(n) => (
+//RS                         super::super::core_calls::duration_kernel::jet_duration_kernel_from_int(n, scale),
+//RS                         super::super::core_calls::duration_kernel::jet_duration_kernel_int_error_reason(),
+//RS                     ),
+//RS                     CtValue::Float(n) => (
+//RS                         super::super::core_calls::duration_kernel::jet_duration_kernel_from_float(n.as_f64(), scale),
+//RS                         super::super::core_calls::duration_kernel::jet_duration_kernel_float_error_reason(),
+//RS                     ),
+//RS                     _ => (
+//RS                         None,
+//RS                         super::super::core_calls::duration_kernel::jet_duration_kernel_float_error_reason(),
+//RS                     ),
+//RS                 };
+//RS                 return Ok(match ns {
+//RS                     Some(ns) => CtValue::Present(Box::new(CtValue::Struct {
+//RS                         type_name: crate::Syntax::DURATION_TYPE.to_string(),
+//RS                         fields: vec![("ns".to_string(), CtValue::Int(ns))],
+//RS                     })),
+//RS                     None => CtValue::failed(Box::new(CtValue::Struct {
+//RS                         type_name: crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
+//RS                         fields: vec![("reason".to_string(), CtValue::Str(reason.to_string()))],
+//RS                     })),
+//RS                 });
+//RS             }
+//RS             // D-SOLVER-LIB1=A: bare `Solver.new(seed)` (same state as `solve.Solver.new`).
+//RS             if type_name == crate::Syntax::SOLVER_TYPE && method == "new" {
+//RS                 let mut argv = Vec::with_capacity(args.len());
+//RS                 for a in args {
+//RS                     argv.push(self.eval(&a.expr, scope)?);
+//RS                 }
+//RS                 return solver_new(&argv, span);
+//RS             }
+//RS             // Only intercept known built-in type names; user struct names use normal path.
+//RS             let is_builtin_type = crate::AST::numeric_type_from_name(type_name).is_some()
+//RS                 || matches!(type_name.as_str(), "Bool" | "String")
+//RS                 || super::super::super::MathLayout::is_math_type(type_name);
+//RS             if is_builtin_type {
+//RS                 let mut argv = Vec::with_capacity(args.len());
+//RS                 for a in args {
+//RS                     argv.push(self.eval(&a.expr, scope)?);
+//RS                 }
+//RS                 if let Some(result) = apply_static_type_method(type_name, method, argv, span) {
+//RS                     return result;
+//RS                 }
+//RS                 // If the static dispatch didn't match, fall through to the error below —
+//RS                 // a built-in type name is not a valid receiver for unknown methods.
+//RS                 return Err(super::super::super::Diagnostics::unsupported(
+//RS                     &format!("`{}.{}()`", type_name, method),
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS         }
+//RS         // D-META-EFFECT1: module alias calls like `math.sqrt(x)` use the shared
+//RS         // Core effect fact before evaluator dispatch.
+//RS         // Check *before* evaluating the receiver so unknown aliases don't fail.
+//RS         if let Expr::Ident(alias, _) = receiver {
+//RS             if let Some(module) = self.core_imports.get(alias.as_str()).cloned() {
+//RS                 // D-DET1: ambient nondeterminism is never folded into an AST
+//RS                 // value. This must precede argument evaluation so `shuffle`
+//RS                 // cannot mutate a temporary before E3403 is registered.
+//RS                 if !self.repl_mode && is_nondeterministic_core(&module, method) {
+//RS                     let api = format!(
+//RS                         "{}.{}",
+//RS                         module.rsplit('.').next().unwrap_or(&module),
+//RS                         method
+//RS                     );
+//RS                     return Err(Diagnostic::e3403(&api, Some(span)));
+//RS                 }
+//RS                 // D-DET1: `random.shuffle(&xs)` edits its list in place (E0202 requires
+//RS                 // write access). Evaluate the list first, then use the same Core
+//RS                 // adapter as every other tier before writing the returned list back.
+//RS                 if matches!((module.as_str(), method), ("core.math.random", "shuffle")) {
+//RS                     let Some(arg) = args.first() else {
+//RS                         return Err(unsupported("random.shuffle(): missing arg 0", span));
+//RS                     };
+//RS                     let list = self.eval(&arg.expr, scope)?;
+//RS                     if !matches!(&list, CtValue::List(_)) {
+//RS                         return Err(unsupported("random.shuffle needs a list", span));
+//RS                     }
+//RS                     let value = if self.repl_mode {
+//RS                         self.poll_repl_interrupt();
+//RS                         let _runtime_call =
+//RS                             super::super::super::ReplRuntimeCallGuard::new(self.repl_interruptible);
+//RS                         apply_repl_authorized_core_call_with_type(
+//RS                             &module,
+//RS                             method,
+//RS                             vec![list],
+//RS                             span,
+//RS                             self.base_dir,
+//RS                             self.sink.as_deref_mut(),
+//RS                             &self.repl_grants,
+//RS                             reborrow_repl_authorizer(&mut self.repl_authorizer),
+//RS                             resolved_ret,
+//RS                         )?
+//RS                     } else {
+//RS                         apply_core_call_with_type(
+//RS                             &module,
+//RS                             method,
+//RS                             vec![list],
+//RS                             span,
+//RS                             false,
+//RS                             resolved_ret,
+//RS                         )?
+//RS                     };
+//RS                     let CtValue::List(items) = value else {
+//RS                         return Err(unsupported("random.shuffle needs a list", span));
+//RS                     };
+//RS                     self.write_back(&arg.expr, CtValue::List(items), scope)?;
+//RS                     return Ok(CtValue::Unit);
+//RS                 }
+//RS                 let mut argv = Vec::with_capacity(args.len());
+//RS                 for a in args {
+//RS                     argv.push(self.eval(&a.expr, scope)?);
+//RS                 }
+//RS                 // D-FE-REPL-INTERRUPT1=A: poll before and after every Core
+//RS                 // runtime call. Long host calls stay marked so the raw UI can
+//RS                 // explain why cancellation has not returned yet.
+//RS                 self.poll_repl_interrupt();
+//RS                 let _runtime_call =
+//RS                     super::super::super::ReplRuntimeCallGuard::new(self.repl_interruptible);
+//RS                 // Typed data loaders and streams have one canonical provider
+//RS                 // boundary. Do not let the generic Core fallback erase their
+//RS                 // checked carrier or turn a provider-owned operation into a
+//RS                 // locally invented value.
+//RS                 if let Some(result) =
+//RS                     super::super::super::DataPipeline::eval_data_loader_call(
+//RS                         self,
+//RS                         &module,
+//RS                         method,
+//RS                         &argv,
+//RS                         type_args,
+//RS                         resolved_ret,
+//RS                         span,
+//RS                     )
+//RS                 {
+//RS                     return result;
+//RS                 }
+//RS                 // Plot construction/rendering also needs the sema-resolved
+//RS                 // row type and declaration metadata. Keep this route beside
+//RS                 // the typed table path, before generic Core dispatch.
+//RS                 if matches!(
+//RS                     (module.as_str(), method),
+//RS                     (
+//RS                         "core.data" | "core.data.plot",
+//RS                         "plot" | "inspect" | "inspect_json" | "text" | "svg" | "show" | "render",
+//RS                     )
+//RS                 ) {
+//RS                     let arg0_ty = args.first().and_then(|a| match &a.expr {
+//RS                         Expr::Ident(name, _) => self.binding_types.get(name).cloned(),
+//RS                         Expr::MethodCall {
+//RS                             resolved_ret: Some(ty),
+//RS                             ..
+//RS                         } => Some(ty.clone()),
+//RS                         _ => None,
+//RS                     });
+//RS                     return super::super::super::DataPipeline::plot_static_call(
+//RS                         &mut self.data_pipeline,
+//RS                         method,
+//RS                         &argv,
+//RS                         arg0_ty.as_ref(),
+//RS                         self.structs,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 // D-QUERY-RETAIN1=A: query is the one typed list adapter.
+//RS                 // `csv<T>`/`json<T>` decode lists, while query construction,
+//RS                 // schema, counts, and joins consume ordinary list values.
+//RS                 if matches!(
+//RS                     (module.as_str(), method),
+//RS                     (
+//RS                         "core.data",
+//RS                         "csv"
+//RS                             | "json"
+//RS                             | "query"
+//RS                             | "count"
+//RS                             | "schema"
+//RS                             | "inner_join"
+//RS                             | "left_join"
+//RS                             | "pivot_sum",
+//RS                     )
+//RS                 ) {
+//RS                     let arg0_ty = args.first().and_then(|a| match &a.expr {
+//RS                         Expr::Ident(name, _) => self.binding_types.get(name).cloned(),
+//RS                         Expr::MethodCall {
+//RS                             resolved_ret: Some(ty),
+//RS                             ..
+//RS                         } => Some(ty.clone()),
+//RS                         _ => None,
+//RS                     });
+//RS                     return self.eval_data_call(
+//RS                         method,
+//RS                         argv,
+//RS                         type_args,
+//RS                         arg0_ty.as_ref(),
+//RS                         resolved_ret,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 if module == "core.data" && matches!(method, "line_text" | "line_svg") {
+//RS                     return apply_data_line_call(method, argv, resolved_ret, span);
+//RS                 }
+//RS                 // D-ENC-CBOR-SURFACE1: encoding a Codable value needs its
+//RS                 // declared field types. CtValue intentionally erases `[U8]`
+//RS                 // to an integer list, so generic by-value dispatch cannot
+//RS                 // distinguish CBOR byte strings from ordinary arrays.
+//RS                 if module == "core.encoding.cbor"
+//RS                     && matches!(method, "to_bytes" | "to_bytes_canonical")
+//RS                 {
+//RS                     let Some(value) = argv.first() else {
+//RS                         return Err(unsupported(
+//RS                             "core.encoding.cbor.to_bytes(): missing arg 0",
+//RS                             span,
+//RS                         ));
+//RS                     };
+//RS                     let struct_fields =
+//RS                         super::super::super::EncodingLite::cbor_struct_fields(self.structs);
+//RS                     let root_ty = args.first().and_then(|arg| match &arg.expr {
+//RS                         Expr::Ident(name, _) => self.binding_types.get(name).cloned(),
+//RS                         Expr::StructLit {
+//RS                             type_name,
+//RS                             type_args,
+//RS                             ..
+//RS                         } if type_args.is_empty() => Some(Type::Named(type_name.clone())),
+//RS                         Expr::StructLit {
+//RS                             type_name,
+//RS                             type_args,
+//RS                             ..
+//RS                         } => Some(Type::Apply {
+//RS                             name: type_name.clone(),
+//RS                             args: type_args.clone(),
+//RS                         }),
+//RS                         Expr::TypedLit { head: Some(ty), .. } => Some(ty.clone()),
+//RS                         Expr::MethodCall {
+//RS                             resolved_ret: Some(ty),
+//RS                             ..
+//RS                         } => Some(ty.clone()),
+//RS                         _ => None,
+//RS                     });
+//RS                     return Ok(
+//RS                         match super::super::super::EncodingLite::cbor_encode_typed(
+//RS                             value,
+//RS                             root_ty.as_ref(),
+//RS                             &struct_fields,
+//RS                             method == "to_bytes_canonical",
+//RS                         ) {
+//RS                             Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+//RS                             Err(reason) => CtValue::failed(Box::new(
+//RS                                 super::super::super::EncodingLite::cbor_unsupported_error_value(
+//RS                                     reason,
+//RS                                 ),
+//RS                             )),
+//RS                         },
+//RS                     );
+//RS                 }
+//RS                 // D-ENCXML-PROJECTION1: typed `decode`/`decode_bytes` → project → Decode.
+//RS                 if module == "core.encoding.xml"
+//RS                     && matches!(method, "decode" | "decode_bytes")
+//RS                     && !type_args.is_empty()
+//RS                 {
+//RS                     let document = if method == "decode_bytes" {
+//RS                         let bytes = match argv.first() {
+//RS                             Some(value) => as_bytes(value, span)?,
+//RS                             None => {
+//RS                                 return Err(unsupported(
+//RS                                     "core.encoding.xml.decode_bytes(): missing arg 0",
+//RS                                     span,
+//RS                                 ))
+//RS                             }
+//RS                         };
+//RS                         match super::super::super::EncodingLite::xml_parse_bytes(
+//RS                             &bytes,
+//RS                             argv.get(1),
+//RS                         ) {
+//RS                             Ok(tree) => tree,
+//RS                             Err(error) => {
+//RS                                 return Ok(CtValue::failed(Box::new(decode_xml_error(error))))
+//RS                             }
+//RS                         }
+//RS                     } else {
+//RS                         let text = match argv.first() {
+//RS                             Some(CtValue::Str(s)) => s.as_str(),
+//RS                             _ => {
+//RS                                 return Err(unsupported(
+//RS                                     "core.encoding.xml.decode(): expected a string argument",
+//RS                                     span,
+//RS                                 ))
+//RS                             }
+//RS                         };
+//RS                         let parsed = match argv.get(1) {
+//RS                             Some(options) => {
+//RS                                 super::super::super::EncodingLite::xml_parse_with(text, options)
+//RS                             }
+//RS                             None => super::super::super::EncodingLite::xml_parse(text),
+//RS                         };
+//RS                         match parsed {
+//RS                             Ok(tree) => tree,
+//RS                             Err(error) => {
+//RS                                 return Ok(CtValue::failed(Box::new(decode_xml_error(error))))
+//RS                             }
+//RS                         }
+//RS                     };
+//RS                     let projected = match super::super::super::EncodingLite::xml_project_for_decode(
+//RS                         &document,
+//RS                     ) {
+//RS                         Ok(tree) => tree,
+//RS                         Err(error) => {
+//RS                             return Ok(CtValue::failed(Box::new(decode_error_value(
+//RS                                 error,
+//RS                                 "XML value cannot be projected for typed decode",
+//RS                             ))))
+//RS                         }
+//RS                     };
+//RS                     return match self.typed_decode_top(&type_args[0], &projected, span) {
+//RS                         Ok(value) => Ok(CtValue::Present(Box::new(value))),
+//RS                         Err(error) => Ok(CtValue::failed(Box::new(error))),
+//RS                     };
+//RS                 }
+//RS                 // D-SERDE6: typed
+//RS                 // Decode dispatch. Untyped `.decode()` (no turbofish, D-JSON3
+//RS                 // lenient form) keeps its existing `apply_core_call` arm below.
+//RS                 if matches!(
+//RS                     (module.as_str(), method),
+//RS                     (
+//RS                         "core.encoding.json"
+//RS                             | "core.encoding.csv"
+//RS                             | "core.encoding.toml"
+//RS                             | "core.encoding.yaml",
+//RS                         "decode",
+//RS                     )
+//RS                 ) && !type_args.is_empty()
+//RS                 {
+//RS                     let Some(text) = argv.first().and_then(|v| match v {
+//RS                         CtValue::Str(s) => Some(s.clone()),
+//RS                         _ => None,
+//RS                     }) else {
+//RS                         return Err(unsupported(
+//RS                             &format!("`{}.{}()`: expected a string argument", module, method),
+//RS                             span,
+//RS                         ));
+//RS                     };
+//RS                     return self.eval_typed_decode(&module, &text, &type_args[0], span);
+//RS                 }
+//RS                 // D-SERDE-ENGINE1: a user or generated `Encode` method is the
+//RS                 // same engine used by the native codec. The interpreter only
+//RS                 // marshals its returned tree into JSON text; it does not
+//RS                 // reconstruct the wire policy here.
+//RS                 if module == "core.encoding.json"
+//RS                     && matches!(method, "to_string" | "to_string_pretty")
+//RS                 {
+//RS                     if let Some(value) = argv.first() {
+//RS                         // Keep the canonical DataTree value on its renderer path.
+//RS                         // Every other value must enter the typed Encode adapter,
+//RS                         // which recursively gives nested explicit codecs precedence
+//RS                         // over structural fallback.
+//RS                         let is_dynamic_data_tree =
+//RS                             matches!(value, CtValue::Enum { type_name, .. } if type_name == "DataTree");
+//RS                         if !is_dynamic_data_tree {
+//RS                             let tree = self.encode_value(value, span)?;
+//RS                             return Ok(CtValue::Str(
+//RS                                 super::super::super::JSONInterp::render_ordered_datatree(
+//RS                                     &tree,
+//RS                                     method == "to_string_pretty",
+//RS                                     0,
+//RS                                 ),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 // D-ENC-CBOR-SURFACE1 / R12: generic whole-value CBOR decode
+//RS                 // uses the same typed tree walker as every other codec.  Keep
+//RS                 // this ahead of the compatibility `cbor.decode(DataTree)` arm
+//RS                 // below: the type argument is the semantic distinction.
+//RS                 if module == "core.encoding.cbor" && method == "decode" && !type_args.is_empty() {
+//RS                     let bytes = match argv.first() {
+//RS                         Some(value) => as_bytes(value, span)?,
+//RS                         None => {
+//RS                             return Err(unsupported(
+//RS                                 "core.encoding.cbor.decode(): missing arg 0",
+//RS                                 span,
+//RS                             ))
+//RS                         }
+//RS                     };
+//RS                     let options = match super::super::super::EncodingLite::cbor_options(argv.get(1))
+//RS                     {
+//RS                         Ok(options) => options,
+//RS                         Err(error) => {
+//RS                             return Ok(CtValue::failed(Box::new(decode_error_value(
+//RS                                 super::super::super::EncodingLite::cbor_encoding_error_value(error),
+//RS                                 "invalid CBOR options",
+//RS                             ))))
+//RS                         }
+//RS                     };
+//RS                     let tree = match super::super::super::EncodingLite::cbor_decode(
+//RS                         &bytes, &options, true,
+//RS                     ) {
+//RS                         Ok(tree) => tree,
+//RS                         Err(error) => {
+//RS                             return Ok(CtValue::failed(Box::new(decode_error_value(
+//RS                                 super::super::super::EncodingLite::cbor_encoding_error_value(error),
+//RS                                 "invalid CBOR input",
+//RS                             ))))
+//RS                         }
+//RS                     };
+//RS                     return match self.typed_decode_top(&type_args[0], &tree, span) {
+//RS                         Ok(value) => Ok(CtValue::Present(Box::new(value))),
+//RS                         Err(error) => Ok(CtValue::failed(Box::new(error))),
+//RS                     };
+//RS                 }
+//RS                 // D-CTEFFECT1 Tier-1: fetch is hermetic (sha256-pinned); no gate.
+//RS                 if module == "core.net" && method == "fetch" {
+//RS                     return eval_net_fetch(
+//RS                         &argv,
+//RS                         self.base_dir,
+//RS                         Some(&mut self.embed_inputs),
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 // U13 (D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` is denied at build time
+//RS                 // unconditionally — unlike the Tier-2 effects below, there is no
+//RS                 // `#Impure`/`--gate impure=allow` escape hatch, because a build artifact
+//RS                 // must never bake in a decrypted secret (I1).
+//RS                 if module == "core.crypto.vault" {
+//RS                     return Err(vault_comptime_denied(&module, method, span));
+//RS                 }
+//RS                 // D-DET1 / I9: the AST interpreter is another fold-capable
+//RS                 // entry point. Read the same foundation effect law before its
+//RS                 // generic adapter so ambient time/random state cannot be
+//RS                 // materialized by an implicit comptime evaluation.
+//RS                 if !self.repl_mode && is_nondeterministic_core(&module, method) {
+//RS                     let api = format!(
+//RS                         "{}.{}",
+//RS                         module.rsplit('.').next().unwrap_or(&module),
+//RS                         method
+//RS                     );
+//RS                     return Err(Diagnostic::e3403(&api, Some(span)));
+//RS                 }
+//RS                 if !self.repl_mode
+//RS                     && self.impure_depth == 0
+//RS                     && core_effect(&module, method).is_some()
+//RS                 {
+//RS                     return Err(Diagnostic::error(
+//RS                         "E3410",
+//RS                         format!(
+//RS                             "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
+//RS                         ),
+//RS                         "effectful Core APIs are not allowed in pure comptime evaluation"
+//RS                             .to_string(),
+//RS                         "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--gate impure=allow` to the build, or keep the call at runtime".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate (or REPL sandbox).
+//RS                 let is_tier2 = is_tier2_core_call(&module, method, self.repl_mode);
+//RS                 if is_tier2 {
+//RS                     if self.repl_mode {
+//RS                         if module == "core.encoding.csv"
+//RS                             && method == "query"
+//RS                             && !type_args.is_empty()
+//RS                         {
+//RS                             let sql = match argv.get(1) {
+//RS                                 Some(value) => as_string(value, span)?.to_string(),
+//RS                                 None => {
+//RS                                     return Err(unsupported(
+//RS                                         "`core.encoding.csv.query()`: missing SQL text",
+//RS                                         span,
+//RS                                     ))
+//RS                                 }
+//RS                             };
+//RS                             let path = argv.first().cloned().ok_or_else(|| {
+//RS                                 unsupported("`core.encoding.csv.query()`: missing path", span)
+//RS                             })?;
+//RS                             let read = apply_repl_authorized_core_call_with_type(
+//RS                                 "core.files",
+//RS                                 "read",
+//RS                                 vec![path],
+//RS                                 span,
+//RS                                 self.base_dir,
+//RS                                 self.sink.as_deref_mut(),
+//RS                                 &self.repl_grants,
+//RS                                 reborrow_repl_authorizer(&mut self.repl_authorizer),
+//RS                                 None,
+//RS                             )?;
+//RS                             let text = match read {
+//RS                                 CtValue::Present(value) => match *value {
+//RS                                     CtValue::Str(text) => text,
+//RS                                     _ => {
+//RS                                         return Err(unsupported(
+//RS                                             "`core.files.read()` returned non-text data",
+//RS                                             span,
+//RS                                         ))
+//RS                                     }
+//RS                                 },
+//RS                                 other => return Ok(other),
+//RS                             };
+//RS                             return self.eval_typed_csv_query(
+//RS                                 &text,
+//RS                                 &sql,
+//RS                                 &type_args[0],
+//RS                                 span,
+//RS                             );
+//RS                         }
+//RS                         return apply_repl_authorized_core_call_with_type(
+//RS                             &module,
+//RS                             method,
+//RS                             argv,
+//RS                             span,
+//RS                             self.base_dir,
+//RS                             self.sink.as_deref_mut(),
+//RS                             &self.repl_grants,
+//RS                             reborrow_repl_authorizer(&mut self.repl_authorizer),
+//RS                             resolved_ret,
+//RS                         );
+//RS                     }
+//RS                     if self.impure_depth == 0 {
+//RS                         return Err(Diagnostic::error(
+//RS                             "E3410",
+//RS                             format!("`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate", module, method),
+//RS                             "ambient I/O (filesystem, environment, process) is not allowed in \
+//RS                              pure comptime evaluation".to_string(),
+//RS                             "wrap the comptime binding in `#Impure(\"reason\") { … }` and \
+//RS                              pass `--gate impure=allow` to the build".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                     // Gate present (impure_depth > 0) but check --gate impure=allow flag too.
+//RS                     if !jet_foundation::Policy::resolve_invocation(
+//RS                         jet_foundation::Policy::PolicyKey::Impure,
+//RS                         &self.gates,
+//RS                     )
+//RS                     .unwrap_or(false)
+//RS                     {
+//RS                         return Err(Diagnostic::error(
+//RS                             "E3411",
+//RS                             format!("`{}.{}()` inside `#Impure` gate, but `--gate impure=allow` was not passed", module, method),
+//RS                             "the `#Impure` block opts in to ambient comptime I/O, but the build \
+//RS                              flag is required so CI can audit builds that touch the host".to_string(),
+//RS                             "add `--gate impure=allow` to your `jet build` / `jet run` invocation".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                     if module == "core.encoding.csv"
+//RS                         && method == "query"
+//RS                         && !type_args.is_empty()
+//RS                     {
+//RS                         let args = normalize_path_args(&module, method, argv, span)?;
+//RS                         let path = match args.first() {
+//RS                             Some(value) => as_string(value, span)?.to_string(),
+//RS                             None => {
+//RS                                 return Err(unsupported(
+//RS                                     "`core.encoding.csv.query()`: missing path",
+//RS                                     span,
+//RS                                 ))
+//RS                             }
+//RS                         };
+//RS                         let sql = match args.get(1) {
+//RS                             Some(value) => as_string(value, span)?.to_string(),
+//RS                             None => {
+//RS                                 return Err(unsupported(
+//RS                                     "`core.encoding.csv.query()`: missing SQL text",
+//RS                                     span,
+//RS                                 ))
+//RS                             }
+//RS                         };
+//RS                         let bytes = match jet_foundation::CheckReads::read_nofollow_at_root(
+//RS                             self.base_dir,
+//RS                             std::path::Path::new(&path),
+//RS                             crate::SHA256::MAX_TREE_FILE_BYTES,
+//RS                         ) {
+//RS                             Ok(bytes) => bytes,
+//RS                             Err(error) => {
+//RS                                 return Ok(CtValue::failed(Box::new(io_error_value(
+//RS                                     IoErrorOperation::Read,
+//RS                                     &path,
+//RS                                     error,
+//RS                                 ))))
+//RS                             }
+//RS                         };
+//RS                         let text = match String::from_utf8(bytes) {
+//RS                             Ok(text) => text,
+//RS                             Err(error) => {
+//RS                                 let error = std::io::Error::new(
+//RS                                     std::io::ErrorKind::InvalidData,
+//RS                                     error,
+//RS                                 );
+//RS                                 return Ok(CtValue::failed(Box::new(io_error_value(
+//RS                                     IoErrorOperation::Read,
+//RS                                     &path,
+//RS                                     error,
+//RS                                 ))))
+//RS                             }
+//RS                         };
+//RS                         return self.eval_typed_csv_query(&text, &sql, &type_args[0], span);
+//RS                     }
+//RS                     return apply_impure_core_call_with_type(
+//RS                         &module,
+//RS                         method,
+//RS                         argv,
+//RS                         span,
+//RS                         self.base_dir,
+//RS                         self.sink.as_deref_mut(),
+//RS                         false,
+//RS                         None,
+//RS                         None,
+//RS                         resolved_ret,
+//RS                     );
+//RS                 }
+//RS                 return apply_core_call_with_type(
+//RS                     &module,
+//RS                     method,
+//RS                     argv,
+//RS                     span,
+//RS                     self.repl_mode,
+//RS                     resolved_ret,
+//RS                 );
+//RS             }
+//RS         }
+//RS 
+//RS         // Enum-variant construction with a payload, called with an explicit type
+//RS         // name (`ParseError.BadDigit(raw)`), mirrors the no-arg `Field` fallback
+//RS         // below in interp.rs (`Color.Red`): sema already checked the variant
+//RS         // exists, so at eval time an unbound, capitalized receiver whose method
+//RS         // is also capitalized (variant-naming convention, S34) is a variant
+//RS         // literal, not a real method call. Checked after the builtin-type and
+//RS         // core-import cases above, and only when the receiver isn't a bound
+//RS         // local, so real static dispatch on a bound value is unaffected.
+//RS         if let Expr::Ident(type_name, _) = receiver {
+//RS             let is_type_name = type_name.chars().next().is_some_and(|c| c.is_uppercase());
+//RS             let is_variant_name = method.chars().next().is_some_and(|c| c.is_uppercase());
+//RS             if is_type_name && is_variant_name && !scope.contains_key(type_name.as_str()) {
+//RS                 let mut out = Vec::with_capacity(args.len());
+//RS                 for a in args {
+//RS                     let label = a.label.as_ref().map(|(n, _)| n.clone());
+//RS                     out.push((label, self.eval(&a.expr, scope)?));
+//RS                 }
+//RS                 return Ok(CtValue::Enum {
+//RS                     type_name: type_name.clone(),
+//RS                     variant: method.to_string(),
+//RS                     args: out,
+//RS                 });
+//RS             }
+//RS         }
+//RS 
+//RS         // c139 JIT/interpreter-parity: a static/associated call (`Type.assoc_fn(…)`,
+//RS         // no `self` param — `impl`/in-struct methods registered in
+//RS         // `self.methods`) or a D-MOD2 code-module namespaced call
+//RS         // (`alias.fn(…)` — registered `alias__fn` in `self.funcs`), reached via
+//RS         // an unbound name. A real instance receiver is always a scoped value,
+//RS         // so it never lands here. Checked after the enum-variant-literal case
+//RS         // above (capitalized `Type.Variant(…)` wins first).
+//RS         if let Expr::Ident(name, _) = receiver {
+//RS             if !(name == "Option" && method == "lift2") && !scope.contains_key(name.as_str()) {
+//RS                 if let Some(f) = self
+//RS                     .methods
+//RS                     .get(&(name.clone(), method.to_string()))
+//RS                     .copied()
+//RS                 {
+//RS                     if f.params.len() == args.len() {
+//RS                         let mut frame = HashMap::new();
+//RS                         for (p, a) in f.params.iter().zip(args) {
+//RS                             let v = self.eval(&a.expr, scope)?;
+//RS                             frame.insert(p.name.clone(), v);
+//RS                         }
+//RS                         return self.call_func(&format!("{}.{}", name, method), f, frame);
+//RS                     }
+//RS                 }
+//RS                 let qualified = format!("{name}::{method}");
+//RS                 if let Some(f) = self.funcs.get(qualified.as_str()).copied() {
+//RS                     if f.params.len() == args.len() {
+//RS                         let mut frame = HashMap::new();
+//RS                         for (p, a) in f.params.iter().zip(args) {
+//RS                             let v = self.eval(&a.expr, scope)?;
+//RS                             frame.insert(p.name.clone(), v);
+//RS                         }
+//RS                         return self.call_func(&qualified, f, frame);
+//RS                     }
+//RS                 }
+//RS                 let mangled = jet_foundation::Names::member_name(name, method);
+//RS                 if let Some(f) = self.funcs.get(mangled.as_str()).copied() {
+//RS                     if f.params.len() == args.len() {
+//RS                         let mut frame = HashMap::new();
+//RS                         for (p, a) in f.params.iter().zip(args) {
+//RS                             let v = self.eval(&a.expr, scope)?;
+//RS                             frame.insert(p.name.clone(), v);
+//RS                         }
+//RS                         return self.call_func(&mangled, f, frame);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         // D-HOLE1: `Option.lift2(f, a, b)` — a static call on the builtin
+//RS         // `Option` pseudo-type (never a real scoped value), so it's checked
+//RS         // here alongside the unbound-name case above rather than folded into
+//RS         // it (`Option` isn't in `self.methods`/`self.funcs`, and `f` is a
+//RS         // closure this dispatch must itself invoke).
+//RS         if let Expr::Ident(name, _) = receiver {
+//RS             if name == "Option" && method == "lift2" && !scope.contains_key("Option") {
+//RS                 if args.len() != 3 {
+//RS                     return Err(unsupported(
+//RS                         "`Option.lift2` (wrong number of arguments)",
+//RS                         span,
+//RS                     ));
+//RS                 }
+//RS                 // Evaluate operands before the callback expression. This is
+//RS                 // the lazy branch of Option.lift2: an absent operand must not
+//RS                 // run a callback-producing expression with effects.
+//RS                 let a = option_surface_view(self.eval(&args[1].expr, scope)?);
+//RS                 let b = option_surface_view(self.eval(&args[2].expr, scope)?);
+//RS                 let (Some(a), Some(b)) = (a, b) else {
+//RS                     return Err(unsupported("`Option.lift2` operands", span));
+//RS                 };
+//RS                 let Some((a, b)) = a.zip(b) else {
+//RS                     return Ok(CtValue::absent(
+//RS                         CtValue::resolved_option_element_type(resolved_ret).unwrap_or(Type::Int),
+//RS                     ));
+//RS                 };
+//RS                 let f = self.eval(&args[0].expr, scope)?;
+//RS                 return Ok(CtValue::Present(Box::new(self.call_inline_closure(
+//RS                     &f,
+//RS                     vec![a, b],
+//RS                     span,
+//RS                     scope,
+//RS                 )?)));
+//RS             }
+//RS         }
+//RS 
+//RS         if recv_type == Some("Regex") && method == "replace_all_with" && args.len() == 2 {
+//RS             let recv = match evaluated_receiver.take() {
+//RS                 Some(value) => value,
+//RS                 None => self.eval(receiver, scope)?,
+//RS             };
+//RS             let argv = vec![
+//RS                 self.eval(&args[0].expr, scope)?,
+//RS                 self.eval(&args[1].expr, scope)?,
+//RS             ];
+//RS             let mut invoke = |callback: CtValue, values: Vec<CtValue>| {
+//RS                 self.call_inline_closure(&callback, values, span, scope)
+//RS             };
+//RS             if let Some(result) = eval_regex_replace_all_with(&recv, &argv, span, &mut invoke) {
+//RS                 return result;
+//RS             }
+//RS             evaluated_receiver = Some(recv);
+//RS         }
+//RS 
+//RS         // c139: higher-order methods — need `&mut self` to invoke a closure
+//RS         // argument, so (like the mutating methods just below) they can't be
+//RS         // plain `apply_method` entries. Guarded to the receiver shapes they
+//RS         // actually apply to; anything else falls through to the generic
+//RS         // dispatch at the end of this function.
+//RS         const HOF_METHODS: &[&str] = &["filter", "map", "each", "sort_by", "sort_by_desc", "find"];
+//RS         if HOF_METHODS.contains(&method) {
+//RS             let recv = match evaluated_receiver.take() {
+//RS                 Some(value) => value,
+//RS                 None => self.eval(receiver, scope)?,
+//RS             };
+//RS             match (&recv, method) {
+//RS                 (CtValue::List(xs), "filter") => {
+//RS                     let f = self.eval(&args[0].expr, scope)?;
+//RS                     let mut out = Vec::new();
+//RS                     for x in xs {
+//RS                         if as_bool(
+//RS                             &self.call_inline_closure(&f, vec![x.clone()], span, scope)?,
+//RS                             span,
+//RS                         )? {
+//RS                             out.push(x.clone());
+//RS                         }
+//RS                     }
+//RS                     return Ok(CtValue::List(out));
+//RS                 }
+//RS                 (CtValue::List(xs), "map") => {
+//RS                     let f = self.eval(&args[0].expr, scope)?;
+//RS                     let mut out = Vec::with_capacity(xs.len());
+//RS                     for x in xs {
+//RS                         out.push(self.call_inline_closure(&f, vec![x.clone()], span, scope)?);
+//RS                     }
+//RS                     return Ok(CtValue::List(out));
+//RS                 }
+//RS                 (CtValue::List(xs), "each") => {
+//RS                     let f = self.eval(&args[0].expr, scope)?;
+//RS                     for x in xs {
+//RS                         self.call_inline_closure(&f, vec![x.clone()], span, scope)?;
+//RS                     }
+//RS                     return Ok(CtValue::Unit);
+//RS                 }
+//RS                 (CtValue::Map(entries), "each") => {
+//RS                     let f = self.eval(&args[0].expr, scope)?;
+//RS                     for (key, value) in entries {
+//RS                         self.call_inline_closure(
+//RS                             &f,
+//RS                             vec![key.to_value(), value.clone()],
+//RS                             span,
+//RS                             scope,
+//RS                         )?;
+//RS                     }
+//RS                     return Ok(CtValue::Unit);
+//RS                 }
+//RS                 (CtValue::List(xs), "find") => {
+//RS                     let f = self.eval(&args[0].expr, scope)?;
+//RS                     for x in xs {
+//RS                         if as_bool(
+//RS                             &self.call_inline_closure(&f, vec![x.clone()], span, scope)?,
+//RS                             span,
+//RS                         )? {
+//RS                             return Ok(CtValue::Present(Box::new(x.clone())));
+//RS                         }
+//RS                     }
+//RS                     return Ok(CtValue::absent(Type::Int));
+//RS                 }
+//RS                 // `.sort_by` writes back like the MUTATING list methods below
+//RS                 // (D-BIND4 `:=` receiver) — key every element once, sort the
+//RS                 // keyed pairs, then write the reordered list back through the
+//RS                 // same lvalue path `push`/`pop`/… use.
+//RS                 (CtValue::List(xs), method @ ("sort_by" | "sort_by_desc"))
+//RS                     if matches!(receiver, Expr::Ident(..) | Expr::Field(..)) =>
+//RS                 {
+//RS                     let f = self.eval(&args[0].expr, scope)?;
+//RS                     let mut keyed = Vec::with_capacity(xs.len());
+//RS                     for x in xs {
+//RS                         let k = self.call_inline_closure(&f, vec![x.clone()], span, scope)?;
+//RS                         keyed.push((k, x.clone()));
+//RS                     }
+//RS                     let mut sort_err = None;
+//RS                     let descending = method == "sort_by_desc";
+//RS                     keyed.sort_by(|a, b| match cmp_for_sort(a.0.clone(), b.0.clone(), span) {
+//RS                         Ok(o) if descending => o.reverse(),
+//RS                         Ok(o) => o,
+//RS                         Err(e) => {
+//RS                             sort_err.get_or_insert(e);
+//RS                             std::cmp::Ordering::Equal
+//RS                         }
+//RS                     });
+//RS                     if let Some(e) = sort_err {
+//RS                         return Err(e);
+//RS                     }
+//RS                     let sorted = CtValue::List(keyed.into_iter().map(|(_, v)| v).collect());
+//RS                     self.write_back(receiver, sorted, scope)?;
+//RS                     return Ok(CtValue::Unit);
+//RS                 }
+//RS                 (CtValue::Present(inner), "map") => {
+//RS                     let f = self.eval(&args[0].expr, scope)?;
+//RS                     let v = self.call_inline_closure(&f, vec![(**inner).clone()], span, scope)?;
+//RS                     return Ok(CtValue::Present(Box::new(v)));
+//RS                 }
+//RS                 (CtValue::Failed(CtReport::Clean(t)), "map") => {
+//RS                     return Ok(CtValue::absent(t.clone()))
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS             evaluated_receiver = Some(recv);
+//RS         }
+//RS 
+//RS         if matches!(method, "add" | "remove" | "ids") {
+//RS             let recv = match evaluated_receiver.take() {
+//RS                 Some(value) => value,
+//RS                 None => self.eval(receiver, scope)?,
+//RS             };
+//RS             if super::super::pool::is_method(&recv, method) {
+//RS                 let mut argv = Vec::with_capacity(args.len());
+//RS                 for arg in args {
+//RS                     argv.push(self.eval(&arg.expr, scope)?);
+//RS                 }
+//RS                 let outcome = super::super::pool::apply(&recv, method, &argv, resolved_ret, span)?;
+//RS                 if let Some(updated) = outcome.updated {
+//RS                     if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                         return Err(unsupported("Pool mutation on a temporary value", span));
+//RS                     }
+//RS                     self.write_back(receiver, updated, scope)?;
+//RS                 }
+//RS                 return Ok(outcome.value);
+//RS             }
+//RS             evaluated_receiver = Some(recv);
+//RS         }
+//RS         if matches!(
+//RS             method,
+//RS             "add"
+//RS                 | "add_new"
+//RS                 | "get"
+//RS                 | "remove"
+//RS                 | "has_key"
+//RS                 | "keys"
+//RS                 | "capacity"
+//RS                 | "count"
+//RS                 | "len"
+//RS                 | "is_empty"
+//RS                 | "clear"
+//RS                 | "push"
+//RS                 | "pop"
+//RS                 | "peek"
+//RS                 | "to_sorted_list"
+//RS                 | "push_front"
+//RS                 | "push_back"
+//RS                 | "pop_front"
+//RS                 | "pop_back"
+//RS                 | "peek_front"
+//RS                 | "peek_back"
+//RS                 | "has"
+//RS                 | "first"
+//RS                 | "last"
+//RS                 | "union"
+//RS                 | "to_list"
+//RS                 | "any"
+//RS         ) {
+//RS             let peek = match evaluated_receiver.take() {
+//RS                 Some(value) => value,
+//RS                 None => self.eval(receiver, scope)?,
+//RS             };
+//RS             match (&peek, method) {
+//RS                 (
+//RS                     CtValue::Struct { type_name, fields },
+//RS                     method @ ("add" | "remove" | "has" | "count" | "len" | "is_empty" | "any"),
+//RS                 ) if type_name == crate::Syntax::TYPE_TALLY => {
+//RS                     // ponytail: comptime bags are small; parallel equality-only
+//RS                     // vectors support every CtValue without a second hash model.
+//RS                     let mut items = fields
+//RS                         .iter()
+//RS                         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                             ("items", CtValue::List(items)) => Some(items.clone()),
+//RS                             _ => None,
+//RS                         })
+//RS                         .unwrap_or_default();
+//RS                     let mut counts = fields
+//RS                         .iter()
+//RS                         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                             ("counts", CtValue::List(counts)) => Some(counts.clone()),
+//RS                             _ => None,
+//RS                         })
+//RS                         .unwrap_or_else(|| vec![CtValue::Int(1); items.len()]);
+//RS                     let mut argv = Vec::with_capacity(args.len());
+//RS                     for arg in args {
+//RS                         argv.push(self.eval(&arg.expr, scope)?);
+//RS                     }
+//RS                     let mut changed = false;
+//RS                     let result = match method {
+//RS                         "len" => CtValue::Int(
+//RS                             counts
+//RS                                 .iter()
+//RS                                 .filter_map(|count| match count {
+//RS                                     CtValue::Int(count) => Some(*count),
+//RS                                     _ => None,
+//RS                                 })
+//RS                                 .sum(),
+//RS                         ),
+//RS                         "is_empty" => CtValue::Bool(items.is_empty()),
+//RS                         "has" => CtValue::Bool(items.contains(&argv[0])),
+//RS                         "count" => CtValue::Int(
+//RS                             items
+//RS                                 .iter()
+//RS                                 .position(|item| item == &argv[0])
+//RS                                 .and_then(|index| match counts.get(index) {
+//RS                                     Some(CtValue::Int(count)) => Some(*count),
+//RS                                     _ => None,
+//RS                                 })
+//RS                                 .unwrap_or(0),
+//RS                         ),
+//RS                         "any" => {
+//RS                             let mut found = false;
+//RS                             for item in &items {
+//RS                                 if as_bool(
+//RS                                     &self.call_inline_closure(
+//RS                                         &argv[0],
+//RS                                         vec![item.clone()],
+//RS                                         span,
+//RS                                         scope,
+//RS                                     )?,
+//RS                                     span,
+//RS                                 )? {
+//RS                                     found = true;
+//RS                                     break;
+//RS                                 }
+//RS                             }
+//RS                             CtValue::Bool(found)
+//RS                         }
+//RS                         "add" => {
+//RS                             if let Some(index) = items.iter().position(|item| item == &argv[0]) {
+//RS                                 if let Some(CtValue::Int(count)) = counts.get_mut(index) {
+//RS                                     *count += 1;
+//RS                                 }
+//RS                             } else {
+//RS                                 items.push(argv[0].clone());
+//RS                                 counts.push(CtValue::Int(1));
+//RS                             }
+//RS                             changed = true;
+//RS                             CtValue::Bool(true)
+//RS                         }
+//RS                         "remove" => {
+//RS                             if let Some(index) = items.iter().position(|item| item == &argv[0]) {
+//RS                                 let last = matches!(counts.get(index), Some(CtValue::Int(1)));
+//RS                                 if last {
+//RS                                     items.remove(index);
+//RS                                     counts.remove(index);
+//RS                                 } else if let Some(CtValue::Int(count)) = counts.get_mut(index) {
+//RS                                     *count -= 1;
+//RS                                 }
+//RS                                 changed = true;
+//RS                             }
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         _ => unreachable!("Tally method set is closed"),
+//RS                     };
+//RS                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                         self.write_back(
+//RS                             receiver,
+//RS                             CtValue::Struct {
+//RS                                 type_name: crate::Syntax::TYPE_TALLY.to_string(),
+//RS                                 fields: vec![
+//RS                                     ("items".to_string(), CtValue::List(items)),
+//RS                                     ("counts".to_string(), CtValue::List(counts)),
+//RS                                 ],
+//RS                             },
+//RS                             scope,
+//RS                         )?;
+//RS                     }
+//RS                     return Ok(result);
+//RS                 }
+//RS                 (
+//RS                     CtValue::Struct { type_name, fields },
+//RS                     method @ ("add" | "remove" | "has" | "union" | "to_list" | "len" | "is_empty"
+//RS                     | "clear"),
+//RS                 ) if type_name == crate::Syntax::TYPE_SET => {
+//RS                     let mut items = fields
+//RS                         .iter()
+//RS                         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                             ("items", CtValue::List(items)) => Some(items.clone()),
+//RS                             _ => None,
+//RS                         })
+//RS                         .unwrap_or_default();
+//RS                     let mut argv = Vec::with_capacity(args.len());
+//RS                     for arg in args {
+//RS                         argv.push(self.eval(&arg.expr, scope)?);
+//RS                     }
+//RS                     let mut changed = false;
+//RS                     let result = match method {
+//RS                         "len" => CtValue::Int(items.len() as i64),
+//RS                         "is_empty" => CtValue::Bool(items.is_empty()),
+//RS                         "has" => CtValue::Bool(items.contains(&argv[0])),
+//RS                         "to_list" => CtValue::List(items.clone()),
+//RS                         "add" => {
+//RS                             let added = !items.contains(&argv[0]);
+//RS                             if added {
+//RS                                 items.push(argv[0].clone());
+//RS                                 changed = true;
+//RS                             }
+//RS                             CtValue::Bool(added)
+//RS                         }
+//RS                         "remove" => {
+//RS                             if let Some(index) = items.iter().position(|item| item == &argv[0]) {
+//RS                                 items.remove(index);
+//RS                                 changed = true;
+//RS                             }
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         "union" => {
+//RS                             let CtValue::Struct {
+//RS                                 type_name: other_type,
+//RS                                 fields: other_fields,
+//RS                             } = &argv[0]
+//RS                             else {
+//RS                                 return Err(unsupported("Set.union with a non-set", span));
+//RS                             };
+//RS                             if other_type != crate::Syntax::TYPE_SET {
+//RS                                 return Err(unsupported("Set.union with a non-set", span));
+//RS                             }
+//RS                             if let Some(CtValue::List(other)) = other_fields
+//RS                                 .iter()
+//RS                                 .find(|(name, _)| name == "items")
+//RS                                 .map(|(_, value)| value)
+//RS                             {
+//RS                                 items.extend(other.iter().cloned());
+//RS                             }
+//RS                             CtValue::Struct {
+//RS                                 type_name: crate::Syntax::TYPE_SET.to_string(),
+//RS                                 fields: vec![(
+//RS                                     "items".to_string(),
+//RS                                     CtValue::List(unique_values(items.clone())),
+//RS                                 )],
+//RS                             }
+//RS                         }
+//RS                         "clear" => {
+//RS                             items.clear();
+//RS                             changed = true;
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         _ => unreachable!("Set method set is closed"),
+//RS                     };
+//RS                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                         self.write_back(
+//RS                             receiver,
+//RS                             CtValue::Struct {
+//RS                                 type_name: crate::Syntax::TYPE_SET.to_string(),
+//RS                                 fields: vec![("items".to_string(), CtValue::List(items))],
+//RS                             },
+//RS                             scope,
+//RS                         )?;
+//RS                     }
+//RS                     return Ok(result);
+//RS                 }
+//RS                 (
+//RS                     CtValue::Struct { type_name, fields },
+//RS                     method @ ("push" | "pop" | "peek" | "to_sorted_list" | "len" | "is_empty"
+//RS                     | "clear"),
+//RS                 ) if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE => {
+//RS                     let mut items = fields
+//RS                         .iter()
+//RS                         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                             ("items", CtValue::List(items)) => Some(items.clone()),
+//RS                             _ => None,
+//RS                         })
+//RS                         .unwrap_or_default();
+//RS                     let mut argv = Vec::with_capacity(args.len());
+//RS                     for arg in args {
+//RS                         argv.push(self.eval(&arg.expr, scope)?);
+//RS                     }
+//RS                     let option_none = || {
+//RS                         CtValue::absent(match resolved_ret {
+//RS                             Some(Type::Option(inner)) => (**inner).clone(),
+//RS                             _ => Type::Int,
+//RS                         })
+//RS                     };
+//RS                     let mut changed = false;
+//RS                     let result = match method {
+//RS                         "len" => CtValue::Int(items.len() as i64),
+//RS                         "is_empty" => CtValue::Bool(items.is_empty()),
+//RS                         "peek" => items
+//RS                             .first()
+//RS                             .cloned()
+//RS                             .map_or_else(option_none, |value| CtValue::Present(Box::new(value))),
+//RS                         "to_sorted_list" => CtValue::List(items.clone()),
+//RS                         "push" => {
+//RS                             items.push(argv[0].clone());
+//RS                             items = sorted_descending(items, span)?;
+//RS                             changed = true;
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         "pop" if items.is_empty() => option_none(),
+//RS                         "pop" => {
+//RS                             changed = true;
+//RS                             CtValue::Present(Box::new(items.remove(0)))
+//RS                         }
+//RS                         "clear" => {
+//RS                             items.clear();
+//RS                             changed = true;
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         _ => unreachable!("PriorityQueue method set is closed"),
+//RS                     };
+//RS                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                         self.write_back(
+//RS                             receiver,
+//RS                             CtValue::Struct {
+//RS                                 type_name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+//RS                                 fields: vec![("items".to_string(), CtValue::List(items))],
+//RS                             },
+//RS                             scope,
+//RS                         )?;
+//RS                     }
+//RS                     return Ok(result);
+//RS                 }
+//RS                 (
+//RS                     CtValue::Struct { type_name, fields },
+//RS                     method @ ("add" | "remove" | "has" | "count" | "len" | "is_empty" | "clear"
+//RS                     | "to_list" | "copy"),
+//RS                 ) if type_name == crate::Syntax::TYPE_BITS => {
+//RS                     let mut bits = fields
+//RS                         .iter()
+//RS                         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                             ("bits", CtValue::List(bits)) => Some(bits.clone()),
+//RS                             _ => None,
+//RS                         })
+//RS                         .unwrap_or_default();
+//RS                     let mut argv = Vec::with_capacity(args.len());
+//RS                     for arg in args {
+//RS                         argv.push(self.eval(&arg.expr, scope)?);
+//RS                     }
+//RS                     let mut changed = false;
+//RS                     let result = match method {
+//RS                         "count" => CtValue::Int(bits.len() as i64),
+//RS                         "len" => CtValue::Int(match bits.last() {
+//RS                             Some(CtValue::Int(bit)) => bit + 1,
+//RS                             _ => 0,
+//RS                         }),
+//RS                         "is_empty" => CtValue::Bool(bits.is_empty()),
+//RS                         "has" => {
+//RS                             CtValue::Bool(bits.contains(&CtValue::Int(as_int(&argv[0], span)?)))
+//RS                         }
+//RS                         "copy" => CtValue::Struct {
+//RS                             type_name: crate::Syntax::TYPE_BITS.to_string(),
+//RS                             fields: vec![("bits".to_string(), CtValue::List(bits.clone()))],
+//RS                         },
+//RS                         "to_list" => CtValue::List(bits.clone()),
+//RS                         "add" => {
+//RS                             let bit = as_int(&argv[0], span)?;
+//RS                             let added = bit >= 0 && !bits.contains(&CtValue::Int(bit));
+//RS                             if added {
+//RS                                 bits.push(CtValue::Int(bit));
+//RS                                 bits = sorted_unique(bits, span)?;
+//RS                                 changed = true;
+//RS                             }
+//RS                             CtValue::Bool(added)
+//RS                         }
+//RS                         "remove" => {
+//RS                             let bit = CtValue::Int(as_int(&argv[0], span)?);
+//RS                             if let Some(index) = bits.iter().position(|value| value == &bit) {
+//RS                                 bits.remove(index);
+//RS                                 changed = true;
+//RS                             }
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         "clear" => {
+//RS                             bits.clear();
+//RS                             changed = true;
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         _ => unreachable!("Bits method set is closed"),
+//RS                     };
+//RS                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                         self.write_back(
+//RS                             receiver,
+//RS                             CtValue::Struct {
+//RS                                 type_name: crate::Syntax::TYPE_BITS.to_string(),
+//RS                                 fields: vec![("bits".to_string(), CtValue::List(bits))],
+//RS                             },
+//RS                             scope,
+//RS                         )?;
+//RS                     }
+//RS                     return Ok(result);
+//RS                 }
+//RS                 (
+//RS                     CtValue::Struct { type_name, fields },
+//RS                     method @ ("add" | "remove" | "has" | "first" | "last" | "union" | "to_list"
+//RS                     | "len" | "is_empty" | "clear"),
+//RS                 ) if type_name == crate::Syntax::TYPE_RANK => {
+//RS                     let mut items = fields
+//RS                         .iter()
+//RS                         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                             ("items", CtValue::List(items)) => Some(items.clone()),
+//RS                             _ => None,
+//RS                         })
+//RS                         .unwrap_or_default();
+//RS                     let mut argv = Vec::with_capacity(args.len());
+//RS                     for arg in args {
+//RS                         argv.push(self.eval(&arg.expr, scope)?);
+//RS                     }
+//RS                     let option_none = || {
+//RS                         CtValue::absent(match resolved_ret {
+//RS                             Some(Type::Option(inner)) => (**inner).clone(),
+//RS                             _ => Type::Int,
+//RS                         })
+//RS                     };
+//RS                     let mut changed = false;
+//RS                     let result = match method {
+//RS                         "len" => CtValue::Int(items.len() as i64),
+//RS                         "is_empty" => CtValue::Bool(items.is_empty()),
+//RS                         "has" => CtValue::Bool(items.contains(&argv[0])),
+//RS                         "first" => items
+//RS                             .first()
+//RS                             .cloned()
+//RS                             .map_or_else(option_none, |value| CtValue::Present(Box::new(value))),
+//RS                         "last" => items
+//RS                             .last()
+//RS                             .cloned()
+//RS                             .map_or_else(option_none, |value| CtValue::Present(Box::new(value))),
+//RS                         "to_list" => CtValue::List(items.clone()),
+//RS                         "add" => {
+//RS                             let added = !items.contains(&argv[0]);
+//RS                             if added {
+//RS                                 items.push(argv[0].clone());
+//RS                                 items = sorted_unique(items, span)?;
+//RS                                 changed = true;
+//RS                             }
+//RS                             CtValue::Bool(added)
+//RS                         }
+//RS                         "remove" => {
+//RS                             if let Some(index) = items.iter().position(|item| item == &argv[0]) {
+//RS                                 items.remove(index);
+//RS                                 changed = true;
+//RS                             }
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         "union" => {
+//RS                             let CtValue::Struct {
+//RS                                 type_name: other_type,
+//RS                                 fields: other_fields,
+//RS                             } = &argv[0]
+//RS                             else {
+//RS                                 return Err(unsupported("Rank.union with a non-set", span));
+//RS                             };
+//RS                             if other_type != crate::Syntax::TYPE_RANK {
+//RS                                 return Err(unsupported("Rank.union with a non-set", span));
+//RS                             }
+//RS                             if let Some(CtValue::List(other)) = other_fields
+//RS                                 .iter()
+//RS                                 .find(|(name, _)| name == "items")
+//RS                                 .map(|(_, value)| value)
+//RS                             {
+//RS                                 items.extend(other.iter().cloned());
+//RS                             }
+//RS                             CtValue::Struct {
+//RS                                 type_name: crate::Syntax::TYPE_RANK.to_string(),
+//RS                                 fields: vec![(
+//RS                                     "items".to_string(),
+//RS                                     CtValue::List(sorted_unique(items.clone(), span)?),
+//RS                                 )],
+//RS                             }
+//RS                         }
+//RS                         "clear" => {
+//RS                             items.clear();
+//RS                             changed = true;
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         _ => unreachable!("Rank method set is closed"),
+//RS                     };
+//RS                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                         self.write_back(
+//RS                             receiver,
+//RS                             CtValue::Struct {
+//RS                                 type_name: crate::Syntax::TYPE_RANK.to_string(),
+//RS                                 fields: vec![("items".to_string(), CtValue::List(items))],
+//RS                             },
+//RS                             scope,
+//RS                         )?;
+//RS                     }
+//RS                     return Ok(result);
+//RS                 }
+//RS                 (
+//RS                     CtValue::Struct { type_name, fields },
+//RS                     method @ ("push_front" | "push_back" | "pop_front" | "pop_back" | "peek_front"
+//RS                     | "peek_back" | "len" | "is_empty" | "clear" | "capacity"
+//RS                     | "contains" | "get" | "delete" | "to_list" | "join" | "reverse"
+//RS                     | "split"),
+//RS                 ) if type_name == crate::Syntax::TYPE_QUEUE => {
+//RS                     let mut items = fields
+//RS                         .iter()
+//RS                         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                             ("items", CtValue::List(items)) => Some(items.clone()),
+//RS                             _ => None,
+//RS                         })
+//RS                         .unwrap_or_default();
+//RS                     let mut argv = Vec::with_capacity(args.len());
+//RS                     for arg in args {
+//RS                         argv.push(self.eval(&arg.expr, scope)?);
+//RS                     }
+//RS                     let option_none = || {
+//RS                         CtValue::absent(match resolved_ret {
+//RS                             Some(Type::Option(inner)) => (**inner).clone(),
+//RS                             _ => Type::Int,
+//RS                         })
+//RS                     };
+//RS                     let mut changed = false;
+//RS                     let result = match method {
+//RS                         "len" | "capacity" => CtValue::Int(items.len() as i64),
+//RS                         "is_empty" => CtValue::Bool(items.is_empty()),
+//RS                         "peek_front" => items
+//RS                             .first()
+//RS                             .cloned()
+//RS                             .map_or_else(option_none, |value| CtValue::Present(Box::new(value))),
+//RS                         "peek_back" => items
+//RS                             .last()
+//RS                             .cloned()
+//RS                             .map_or_else(option_none, |value| CtValue::Present(Box::new(value))),
+//RS                         "get" => {
+//RS                             let idx = match argv.first() {
+//RS                                 Some(CtValue::Int(i)) if *i >= 0 => *i as usize,
+//RS                                 _ => return Ok(option_none()),
+//RS                             };
+//RS                             items
+//RS                                 .get(idx)
+//RS                                 .cloned()
+//RS                                 .map_or_else(option_none, |value| CtValue::Present(Box::new(value)))
+//RS                         }
+//RS                         "contains" => {
+//RS                             let needle = argv.first().cloned().unwrap_or(CtValue::Unit);
+//RS                             CtValue::Bool(super::super::super::CollectionEval::collection_semantics::jet_list_contains(&items, &needle))
+//RS                         }
+//RS                         "to_list" => CtValue::List(items.clone()),
+//RS                         "join" => {
+//RS                             let sep = match argv.first() {
+//RS                                 Some(CtValue::Str(s)) => s.as_str(),
+//RS                                 _ => "",
+//RS                             };
+//RS                             let parts: Vec<String> = items.iter().map(|x| x.jet_show()).collect();
+//RS                             CtValue::Str(parts.join(sep))
+//RS                         }
+//RS                         "push_front" => {
+//RS                             items.insert(0, argv[0].clone());
+//RS                             changed = true;
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         "push_back" => {
+//RS                             items.push(argv[0].clone());
+//RS                             changed = true;
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         "pop_front" if items.is_empty() => option_none(),
+//RS                         "pop_front" => {
+//RS                             changed = true;
+//RS                             CtValue::Present(Box::new(items.remove(0)))
+//RS                         }
+//RS                         "pop_back" => match items.pop() {
+//RS                             Some(value) => {
+//RS                                 changed = true;
+//RS                                 CtValue::Present(Box::new(value))
+//RS                             }
+//RS                             None => option_none(),
+//RS                         },
+//RS                         "clear" => {
+//RS                             items.clear();
+//RS                             changed = true;
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         "delete" => {
+//RS                             let needle = argv.first().cloned().unwrap_or(CtValue::Unit);
+//RS                             if let Some(i) = items.iter().position(|x| x == &needle) {
+//RS                                 items.remove(i);
+//RS                                 changed = true;
+//RS                             }
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         "reverse" => {
+//RS                             items.reverse();
+//RS                             changed = true;
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         "split" => {
+//RS                             let idx = match argv.first() {
+//RS                                 Some(CtValue::Int(i)) if *i >= 0 => (*i as usize).min(items.len()),
+//RS                                 _ => items.len(),
+//RS                             };
+//RS                             let rest = items.split_off(idx);
+//RS                             changed = true;
+//RS                             CtValue::Struct {
+//RS                                 type_name: crate::Syntax::TYPE_QUEUE.to_string(),
+//RS                                 fields: vec![("items".to_string(), CtValue::List(rest))],
+//RS                             }
+//RS                         }
+//RS                         _ => unreachable!("Queue method set is closed"),
+//RS                     };
+//RS                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                         self.write_back(
+//RS                             receiver,
+//RS                             CtValue::Struct {
+//RS                                 type_name: crate::Syntax::TYPE_QUEUE.to_string(),
+//RS                                 fields: vec![("items".to_string(), CtValue::List(items))],
+//RS                             },
+//RS                             scope,
+//RS                         )?;
+//RS                     }
+//RS                     return Ok(result);
+//RS                 }
+//RS                 (
+//RS                     CtValue::Struct { type_name, fields },
+//RS                     method @ ("add" | "add_new" | "get" | "remove" | "has_key" | "keys"
+//RS                     | "capacity" | "len" | "is_empty" | "clear"),
+//RS                 ) if type_name == crate::Syntax::TYPE_LRU => {
+//RS                     let capacity = fields
+//RS                         .iter()
+//RS                         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                             ("capacity", CtValue::Int(capacity)) => Some(*capacity as usize),
+//RS                             _ => None,
+//RS                         })
+//RS                         .unwrap_or(0);
+//RS                     let mut entries = fields
+//RS                         .iter()
+//RS                         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                             ("entries", CtValue::List(entries)) => Some(entries.clone()),
+//RS                             _ => None,
+//RS                         })
+//RS                         .unwrap_or_default();
+//RS                     let mut argv = Vec::with_capacity(args.len());
+//RS                     for arg in args {
+//RS                         argv.push(self.eval(&arg.expr, scope)?);
+//RS                     }
+//RS                     let option_none = || {
+//RS                         CtValue::absent(match resolved_ret {
+//RS                             Some(Type::Option(inner)) => (**inner).clone(),
+//RS                             _ => Type::Int,
+//RS                         })
+//RS                     };
+//RS                     let key_position = |entries: &[CtValue], key: &CtValue| {
+//RS                         entries.iter().position(|entry| {
+//RS                             matches!(entry, CtValue::List(pair) if pair.first() == Some(key))
+//RS                         })
+//RS                     };
+//RS                     let mut changed = false;
+//RS                     let result = match method {
+//RS                         "len" => CtValue::Int(entries.len() as i64),
+//RS                         "is_empty" => CtValue::Bool(entries.is_empty()),
+//RS                         "capacity" => CtValue::Int(capacity as i64),
+//RS                         "has_key" => CtValue::Bool(key_position(&entries, &argv[0]).is_some()),
+//RS                         "keys" => CtValue::List(
+//RS                             entries
+//RS                                 .iter()
+//RS                                 .filter_map(|entry| match entry {
+//RS                                     CtValue::List(pair) => pair.first().cloned(),
+//RS                                     _ => None,
+//RS                                 })
+//RS                                 .collect(),
+//RS                         ),
+//RS                         "clear" => {
+//RS                             entries.clear();
+//RS                             changed = true;
+//RS                             CtValue::Unit
+//RS                         }
+//RS                         "add_new" => {
+//RS                             let added = capacity > 0 && key_position(&entries, &argv[0]).is_none();
+//RS                             if added {
+//RS                                 entries.insert(
+//RS                                     0,
+//RS                                     CtValue::List(vec![argv[0].clone(), argv[1].clone()]),
+//RS                                 );
+//RS                                 if entries.len() > capacity {
+//RS                                     entries.pop();
+//RS                                 }
+//RS                                 changed = true;
+//RS                             }
+//RS                             CtValue::Bool(added)
+//RS                         }
+//RS                         "add" => {
+//RS                             if capacity == 0 {
+//RS                                 option_none()
+//RS                             } else {
+//RS                                 let displaced = key_position(&entries, &argv[0]).map(|index| {
+//RS                                     let CtValue::List(pair) = entries.remove(index) else {
+//RS                                         unreachable!("Cache entries are pairs")
+//RS                                     };
+//RS                                     pair[1].clone()
+//RS                                 });
+//RS                                 entries.insert(
+//RS                                     0,
+//RS                                     CtValue::List(vec![argv[0].clone(), argv[1].clone()]),
+//RS                                 );
+//RS                                 if entries.len() > capacity {
+//RS                                     entries.pop();
+//RS                                 }
+//RS                                 changed = true;
+//RS                                 displaced.map_or_else(option_none, |value| {
+//RS                                     CtValue::Present(Box::new(value))
+//RS                                 })
+//RS                             }
+//RS                         }
+//RS                         "get" => match key_position(&entries, &argv[0]) {
+//RS                             Some(index) => {
+//RS                                 let entry = entries.remove(index);
+//RS                                 let CtValue::List(pair) = &entry else {
+//RS                                     unreachable!("Cache entries are pairs")
+//RS                                 };
+//RS                                 let value = pair[1].clone();
+//RS                                 entries.insert(0, entry);
+//RS                                 changed = true;
+//RS                                 CtValue::Present(Box::new(value))
+//RS                             }
+//RS                             None => option_none(),
+//RS                         },
+//RS                         "remove" => match key_position(&entries, &argv[0]) {
+//RS                             Some(index) => {
+//RS                                 let CtValue::List(pair) = entries.remove(index) else {
+//RS                                     unreachable!("Cache entries are pairs")
+//RS                                 };
+//RS                                 changed = true;
+//RS                                 CtValue::Present(Box::new(pair[1].clone()))
+//RS                             }
+//RS                             None => option_none(),
+//RS                         },
+//RS                         _ => unreachable!("Cache method set is closed"),
+//RS                     };
+//RS                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                         self.write_back(
+//RS                             receiver,
+//RS                             CtValue::Struct {
+//RS                                 type_name: crate::Syntax::TYPE_LRU.to_string(),
+//RS                                 fields: vec![
+//RS                                     ("capacity".to_string(), CtValue::Int(capacity as i64)),
+//RS                                     ("entries".to_string(), CtValue::List(entries)),
+//RS                                 ],
+//RS                             },
+//RS                             scope,
+//RS                         )?;
+//RS                     }
+//RS                     return Ok(result);
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS             evaluated_receiver = Some(peek);
+//RS         }
+//RS 
+//RS         // Mutating list/map methods on a named variable write back in place.
+//RS         const MUTATING: &[&str] = &[
+//RS             "push",
+//RS             "pop",
+//RS             "insert",
+//RS             "add",
+//RS             "add_new",
+//RS             "remove",
+//RS             "extend",
+//RS             "clear",
+//RS             "reverse",
+//RS             "sort",
+//RS             "sort_desc",
+//RS         ];
+//RS         if MUTATING.contains(&method) && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS             let mut container = match evaluated_receiver.take() {
+//RS                 Some(value) => value,
+//RS                 None => self.eval(receiver, scope)?,
+//RS             };
+//RS             let handled_here = matches!(&container, CtValue::List(_) | CtValue::Map(_))
+//RS                 || matches!(
+//RS                     &container,
+//RS                     CtValue::Struct { type_name, .. }
+//RS                         if method == "add" && matches!(
+//RS                             type_name.as_str(),
+//RS                             "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
+//RS                         )
+//RS                 );
+//RS             if handled_here {
+//RS                 let mut argv = Vec::new();
+//RS                 for a in args {
+//RS                     argv.push(self.eval(&a.expr, scope)?);
+//RS                 }
+//RS                 let arg_labels = args
+//RS                     .iter()
+//RS                     .map(|a| a.label.as_ref().map(|(name, _)| name.clone()))
+//RS                     .collect::<Vec<_>>();
+//RS                 if let Some(result) = sequence_parity::eval_sequence_method(
+//RS                     self,
+//RS                     &container,
+//RS                     method,
+//RS                     &argv,
+//RS                     &arg_labels,
+//RS                     sequence_result_ty.as_ref(),
+//RS                     span,
+//RS                     scope,
+//RS                 ) {
+//RS                     return match result? {
+//RS                         sequence_parity::SequenceOutcome::Value(value) => Ok(value),
+//RS                         sequence_parity::SequenceOutcome::WriteBack(value) => {
+//RS                             self.write_back(receiver, value, scope)?;
+//RS                             Ok(CtValue::Unit)
+//RS                         }
+//RS                     };
+//RS                 }
+//RS                 if let Some(result) = sketch_add(&container, &argv, span) {
+//RS                     let (ret, updated) = result?;
+//RS                     self.write_back(receiver, updated, scope)?;
+//RS                     return Ok(ret);
+//RS                 }
+//RS                 let ret = apply_mutating(&mut container, method, argv, span)?;
+//RS                 self.write_back(receiver, container, scope)?;
+//RS                 return Ok(ret);
+//RS             }
+//RS             evaluated_receiver = Some(container);
+//RS         }
+//RS         let recv = match evaluated_receiver {
+//RS             Some(value) => value,
+//RS             None => self.eval(receiver, scope)?,
+//RS         };
+//RS         if matches!(method, "next_u64" | "below" | "coin") {
+//RS             let mut argv = Vec::with_capacity(args.len());
+//RS             for argument in args {
+//RS                 argv.push(self.eval(&argument.expr, scope)?);
+//RS             }
+//RS             if let Some(result) = apply_history_rng_method(&recv, method, &argv, span) {
+//RS                 return result;
+//RS             }
+//RS         }
+//RS         if matches!(
+//RS             &recv,
+//RS             CtValue::Struct { type_name, .. }
+//RS                 if matches!(type_name.as_str(), "Query" | "DataGroupedQuery")
+//RS         ) {
+//RS             let mut argv = Vec::with_capacity(args.len());
+//RS             for arg in args {
+//RS                 argv.push(self.eval(&arg.expr, scope)?);
+//RS             }
+//RS             if let Some(result) =
+//RS                 self.eval_data_query_method(&recv, method, &argv, resolved_ret, span)
+//RS             {
+//RS                 return result;
+//RS             }
+//RS         }
+//RS         // Checked typed receivers must reach their canonical adapters before
+//RS         // user/builtin fallback. These nominal guards come from sema; the
+//RS         // adapters own carrier validation and provider/error semantics.
+//RS         if matches!(
+//RS             recv_type,
+//RS             Some("JetDataPlot" | "DataLoader" | "DataStream" | "JobQueue")
+//RS         ) {
+//RS             let mut argv = Vec::with_capacity(args.len());
+//RS             for a in args {
+//RS                 argv.push(self.eval(&a.expr, scope)?);
+//RS             }
+//RS             let result = match recv_type {
+//RS                 Some("JetDataPlot") => {
+//RS                     super::super::super::DataPipeline::eval_data_plot_method(
+//RS                         &mut self.data_pipeline,
+//RS                         &recv,
+//RS                         method,
+//RS                         &argv,
+//RS                         span,
+//RS                     )
+//RS                 }
+//RS                 Some("DataLoader") => {
+//RS                     super::super::super::DataPipeline::eval_data_loader_method(
+//RS                         self,
+//RS                         &recv,
+//RS                         method,
+//RS                         &argv,
+//RS                         span,
+//RS                     )
+//RS                 }
+//RS                 Some("DataStream") => {
+//RS                     super::super::super::DataPipeline::eval_data_stream_method(
+//RS                         self,
+//RS                         &recv,
+//RS                         method,
+//RS                         &argv,
+//RS                         span,
+//RS                     )
+//RS                 }
+//RS                 Some("JobQueue") => {
+//RS                     return super::super::super::ServicesLite::apply_jobs_method(
+//RS                         &recv, method, &argv, span,
+//RS                     );
+//RS                 }
+//RS                 _ => None,
+//RS             };
+//RS             let Some(result) = result else {
+//RS                 return Err(unsupported(
+//RS                     &format!(
+//RS                         "checked `{}` receiver has no canonical carrier",
+//RS                         recv_type.unwrap_or("typed"),
+//RS                     ),
+//RS                     span,
+//RS                 ));
+//RS             };
+//RS             let result = result?;
+//RS             if matches!(
+//RS                 &result,
+//RS                 CtValue::Struct { type_name, .. } if type_name == "JetDataPlot"
+//RS             ) && matches!(
+//RS                 receiver,
+//RS                 Expr::Ident(..) | Expr::ComptimeName { .. } | Expr::Field(..)
+//RS             ) {
+//RS                 self.write_back(receiver, result.clone(), scope)?;
+//RS             }
+//RS             return Ok(result);
+//RS         }
+//RS         // c139: an instance method the user wrote — `impl Type { fn … }` /
+//RS         // in-struct `fn`/`impl Trait { … }`. `recv`'s own `type_name` (not the
+//RS         // receiver expression's static type) picks the impl, so a value bound
+//RS         // through a trait-typed parameter still dispatches to its concrete
+//RS         // type's method (matches trait dynamic dispatch, no vtable needed).
+//RS         // Checked before the generic builtin dispatch so a user method always
+//RS         // wins over a same-named builtin.
+//RS         let type_name = match &recv {
+//RS             CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
+//RS                 Some(type_name.clone())
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS         if let Some(tn) = type_name {
+//RS             if let Some(f) = self.methods.get(&(tn.clone(), method.to_string())).copied() {
+//RS                 if !f.params.is_empty() && f.params.len() == args.len() + 1 {
+//RS                     let mut frame = HashMap::new();
+//RS                     frame.insert(f.params[0].name.clone(), recv.clone());
+//RS                     for (p, a) in f.params[1..].iter().zip(args) {
+//RS                         let v = self.eval(&a.expr, scope)?;
+//RS                         frame.insert(p.name.clone(), v);
+//RS                     }
+//RS                     return self.call_func(&format!("{}.{}", tn, method), f, frame);
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-SERDE-ENGINE1: primitive and container fields in a generated or
+//RS         // hand-written codec still use the same tree constructor. User types
+//RS         // are handled by the instance-method branch above.
+//RS         if method == "encode" && args.is_empty() {
+//RS             return self.encode_value(&recv, span);
+//RS         }
+//RS         if let (
+//RS             CtValue::Int(value),
+//RS             method @ ("count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"),
+//RS         ) = (&recv, method)
+//RS         {
+//RS             let width = recv_type
+//RS                 .and_then(integer_width_from_name)
+//RS                 .or_else(|| self.integer_width_for_expr(receiver))
+//RS                 .unwrap_or(64);
+//RS             let mask = if width == 64 {
+//RS                 u64::MAX
+//RS             } else {
+//RS                 (1_u64 << width) - 1
+//RS             };
+//RS             let bits = (*value as u64) & mask;
+//RS             let ones = bits.count_ones();
+//RS             let count = match method {
+//RS                 "count_ones" => ones,
+//RS                 "count_zeros" => width - ones,
+//RS                 "leading_zeros" => bits.leading_zeros() - (64 - width),
+//RS                 "trailing_zeros" => bits.trailing_zeros().min(width),
+//RS                 _ => unreachable!("integer bit-query set is closed"),
+//RS             };
+//RS             return Ok(CtValue::Int(i64::from(count)));
+//RS         }
+//RS         match (&recv, method) {
+//RS             (CtValue::Struct { type_name, fields }, method @ ("tick" | "advance" | "wait"))
+//RS                 if type_name == crate::Syntax::CLOCK_TYPE =>
+//RS             {
+//RS                 if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                     return Err(unsupported("Clock method on a temporary value", span));
+//RS                 }
+//RS                 let mut argv = Vec::with_capacity(args.len());
+//RS                 for arg in args {
+//RS                     argv.push(self.eval(&arg.expr, scope)?);
+//RS                 }
+//RS                 let now = fields
+//RS                     .iter()
+//RS                     .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                         ("now", CtValue::Int(now)) => Some(*now),
+//RS                         _ => None,
+//RS                     })
+//RS                     .unwrap_or(0);
+//RS                 let next = match method {
+//RS                     "tick" => now.wrapping_add(as_int(&argv[0], span)?),
+//RS                     "advance" => as_int(&argv[0], span)?,
+//RS                     "wait" => match &argv[0] {
+//RS                         CtValue::Struct { type_name, fields }
+//RS                             if type_name == crate::Syntax::DURATION_TYPE =>
+//RS                         {
+//RS                             let millis = fields
+//RS                                 .iter()
+//RS                                 .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                                     ("ns", CtValue::Int(ns)) => Some(ns.saturating_div(1_000_000)),
+//RS                                     _ => None,
+//RS                                 })
+//RS                                 .unwrap_or(0);
+//RS                             now.wrapping_add(millis)
+//RS                         }
+//RS                         _ => return Err(unsupported("Clock.wait expects a Duration", span)),
+//RS                     },
+//RS                     _ => unreachable!("Clock mutation set is closed"),
+//RS                 };
+//RS                 self.write_back(
+//RS                     receiver,
+//RS                     CtValue::Struct {
+//RS                         type_name: crate::Syntax::CLOCK_TYPE.to_string(),
+//RS                         fields: vec![("now".to_string(), CtValue::Int(next))],
+//RS                     },
+//RS                     scope,
+//RS                 )?;
+//RS                 return Ok(CtValue::Int(next));
+//RS             }
+//RS             (
+//RS                 CtValue::Struct { type_name, fields },
+//RS                 method @ ("len" | "is_empty" | "clear" | "to_bytes" | "write_u8" | "write_u16_le"
+//RS                 | "write_u16_be" | "write_u32_le" | "write_u32_be" | "write_u64_le"
+//RS                 | "write_u64_be" | "write_bytes"),
+//RS             ) if type_name == crate::Syntax::TYPE_BYTES => {
+//RS                 let mut argv = Vec::with_capacity(args.len());
+//RS                 for arg in args {
+//RS                     argv.push(self.eval(&arg.expr, scope)?);
+//RS                 }
+//RS                 let mut bytes = fields
+//RS                     .iter()
+//RS                     .find(|(name, _)| name == "bytes")
+//RS                     .map(|(_, value)| as_bytes(value, span))
+//RS                     .transpose()?
+//RS                     .unwrap_or_default();
+//RS                 let result = match method {
+//RS                     "len" => return Ok(CtValue::Int(bytes.len() as i64)),
+//RS                     "is_empty" => return Ok(CtValue::Bool(bytes.is_empty())),
+//RS                     "to_bytes" => return Ok(CtValue::Bytes(bytes)),
+//RS                     "clear" => {
+//RS                         bytes.clear();
+//RS                         CtValue::Unit
+//RS                     }
+//RS                     "write_bytes" => {
+//RS                         bytes.extend(as_bytes(&argv[0], span)?);
+//RS                         CtValue::Unit
+//RS                     }
+//RS                     method => {
+//RS                         let value = as_int(&argv[0], span)?;
+//RS                         match method {
+//RS                             "write_u8" => bytes.push(value as u8),
+//RS                             "write_u16_le" => {
+//RS                                 bytes.extend_from_slice(&(value as u16).to_le_bytes())
+//RS                             }
+//RS                             "write_u16_be" => {
+//RS                                 bytes.extend_from_slice(&(value as u16).to_be_bytes())
+//RS                             }
+//RS                             "write_u32_le" => {
+//RS                                 bytes.extend_from_slice(&(value as u32).to_le_bytes())
+//RS                             }
+//RS                             "write_u32_be" => {
+//RS                                 bytes.extend_from_slice(&(value as u32).to_be_bytes())
+//RS                             }
+//RS                             "write_u64_le" => {
+//RS                                 bytes.extend_from_slice(&(value as u64).to_le_bytes())
+//RS                             }
+//RS                             "write_u64_be" => {
+//RS                                 bytes.extend_from_slice(&(value as u64).to_be_bytes())
+//RS                             }
+//RS                             _ => unreachable!("Bytes method set is closed"),
+//RS                         }
+//RS                         CtValue::Unit
+//RS                     }
+//RS                 };
+//RS                 if matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                     self.write_back(
+//RS                         receiver,
+//RS                         CtValue::Struct {
+//RS                             type_name: crate::Syntax::TYPE_BYTES.to_string(),
+//RS                             fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+//RS                         },
+//RS                         scope,
+//RS                     )?;
+//RS                 }
+//RS                 return Ok(result);
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS         let is_build_context = matches!(
+//RS             &recv,
+//RS             CtValue::Struct { type_name, .. }
+//RS                 if type_name == crate::Syntax::TYPE_BUILD_CONTEXT
+//RS         );
+//RS         if is_build_context {
+//RS             match method {
+//RS                 "find" => return self.eval_find(args, span),
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         let template_source = args
+//RS             .iter()
+//RS             .find_map(|arg| arg.flags.template_items.as_deref())
+//RS             .map(|items| {
+//RS                 crate::Comptime::format_template_body(items, scope, self.funcs, self.base_dir)
+//RS             })
+//RS             .transpose()?;
+//RS         let mut argv = Vec::new();
+//RS         for a in args {
+//RS             if a.flags.template_items.is_some() {
+//RS                 continue;
+//RS             }
+//RS             argv.push(self.eval(&a.expr, scope)?);
+//RS         }
+//RS         let arg_labels = args
+//RS             .iter()
+//RS             .map(|a| a.label.as_ref().map(|(name, _)| name.clone()))
+//RS             .collect::<Vec<_>>();
+//RS         match (&recv, method) {
+//RS             (
+//RS                 CtValue::Struct { type_name, fields },
+//RS                 method @ ("int" | "float" | "float_range" | "bool" | "normal" | "exponential"
+//RS                 | "bytes" | "split" | "pick" | "weighted_pick" | "sample" | "shuffle"),
+//RS             ) if type_name == crate::Syntax::RNG_TYPE => {
+//RS                 if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                     return Err(unsupported("RNG method on a temporary value", span));
+//RS                 }
+//RS                 if method == "shuffle"
+//RS                     && !matches!(
+//RS                         args.first().map(|arg| &arg.expr),
+//RS                         Some(Expr::Ident(..) | Expr::Field(..))
+//RS                     )
+//RS                 {
+//RS                     return Err(unsupported("RNG.shuffle with a temporary list", span));
+//RS                 }
+//RS                 let mut state = fields
+//RS                     .iter()
+//RS                     .find_map(|(name, value)| match (name.as_str(), value) {
+//RS                         ("state", CtValue::Int(state)) => Some(*state as u64),
+//RS                         _ => None,
+//RS                     })
+//RS                     .unwrap_or(0);
+//RS                 let value = apply_seeded_rng_method_with_type(
+//RS                     &mut state,
+//RS                     method,
+//RS                     &mut argv,
+//RS                     span,
+//RS                     resolved_ret,
+//RS                 )?;
+//RS                 if method == "shuffle" {
+//RS                     self.write_back(&args[0].expr, argv[0].clone(), scope)?;
+//RS                 }
+//RS                 self.write_back(
+//RS                     receiver,
+//RS                     CtValue::Struct {
+//RS                         type_name: crate::Syntax::RNG_TYPE.to_string(),
+//RS                         fields: vec![("state".to_string(), CtValue::Int(state as i64))],
+//RS                     },
+//RS                     scope,
+//RS                 )?;
+//RS                 return Ok(value);
+//RS             }
+//RS             (
+//RS                 CtValue::Struct { type_name, .. },
+//RS                 method @ ("locale" | "name" | "email" | "host" | "address"),
+//RS             ) if type_name == crate::Syntax::FAKE_TYPE => {
+//RS                 if method != "locale" && !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                     return Err(unsupported("Fake method on a temporary value", span));
+//RS                 }
+//RS                 // The kernel advances the generator's own state, so it needs a
+//RS                 // mutable value; `recv` is bound by the match, so take a local
+//RS                 // copy and write it back below exactly as the RNG arm does.
+//RS                 let mut fake_recv = recv.clone();
+//RS                 let value = super::super::core_calls::apply_fake_method(
+//RS                     &mut fake_recv,
+//RS                     method,
+//RS                     &argv,
+//RS                     span,
+//RS                 )?;
+//RS                 if method != "locale" {
+//RS                     self.write_back(receiver, fake_recv, scope)?;
+//RS                 }
+//RS                 return Ok(value);
+//RS             }
+//RS             // D-SOLVER-LIB1=A: `solver.require(ok)` records a Bool constraint in place.
+//RS             (CtValue::Struct { type_name, .. }, "require")
+//RS                 if type_name == crate::Syntax::SOLVER_TYPE =>
+//RS             {
+//RS                 if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+//RS                     return Err(unsupported("Solver method on a temporary value", span));
+//RS                 }
+//RS                 let Some(result) = solver_require(&recv, &argv, span) else {
+//RS                     return Err(unsupported("`Solver.require`", span));
+//RS                 };
+//RS                 let (ret, updated) = result?;
+//RS                 self.write_back(receiver, updated, scope)?;
+//RS                 return Ok(ret);
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS         if is_build_context && method == "fetch" {
+//RS             return eval_net_fetch(&argv, self.base_dir, Some(&mut self.embed_inputs), span)
+//RS                 .map(|value| CtValue::Present(Box::new(value)));
+//RS         }
+//RS         if is_build_context && method == "embed" {
+//RS             return eval_build_embed(&argv, self.base_dir, Some(&mut self.embed_inputs), span);
+//RS         }
+//RS         if let Some(result) = sequence_parity::eval_sequence_method(
+//RS             self,
+//RS             &recv,
+//RS             method,
+//RS             &argv,
+//RS             &arg_labels,
+//RS             sequence_result_ty.as_ref(),
+//RS             span,
+//RS             scope,
+//RS         ) {
+//RS             return match result? {
+//RS                 sequence_parity::SequenceOutcome::Value(value) => Ok(value),
+//RS                 sequence_parity::SequenceOutcome::WriteBack(value) => {
+//RS                     self.write_back(receiver, value, scope)?;
+//RS                     Ok(CtValue::Unit)
+//RS                 }
+//RS             };
+//RS         }
+//RS         // D-BUILDENTRY1: selected-root `BuildContext` is interpreter-owned.
+//RS         // Driver removes `fn build` before runtime codegen.
+//RS         if let Some(result) = super::super::super::Build::eval_program_build_method(
+//RS             &recv,
+//RS             method,
+//RS             argv.clone(),
+//RS             template_source.as_deref(),
+//RS             span,
+//RS             self.impure_depth > 0,
+//RS         ) {
+//RS             return result;
+//RS         }
+//RS         // D-FILES-SCOPE1: the receiver keeps the original Authority carrier;
+//RS         // only the shared TextLite/Prelude adapter performs the rooted read.
+//RS         if let CtValue::Struct { type_name, fields } = &recv {
+//RS             if type_name == "FileScope" && method == "read" {
+//RS                 let authority = fields
+//RS                     .iter()
+//RS                     .find_map(|(name, value)| (name == "authority").then_some(value))
+//RS                     .and_then(super::super::super::Builtins::authority_holds)
+//RS                     .ok_or_else(|| unsupported("malformed FileScope value", span))?;
+//RS                 let path = argv
+//RS                     .first()
+//RS                     .ok_or_else(|| unsupported("FileScope.read expects a path", span))?;
+//RS                 let path = as_string(path, span)?;
+//RS                 return Ok(match super::super::super::TextLite::fs_scope_read(&authority, path) {
+//RS                     Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+//RS                     Err(error) => CtValue::failed(Box::new(error)),
+//RS                 });
+//RS             }
+//RS         }
+//RS         apply_method(&recv, method, argv, span)
+//RS     }
+//RS }
+// END-PORT-PENDING 0594 crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs:1-2469
+

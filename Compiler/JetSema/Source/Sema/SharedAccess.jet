@@ -167,7 +167,7 @@ pub fn sema_shared_access_expr_touches_shared(value: Expr, scopes: SemaScopeTabl
         .Binary(_, left, right, _) -> return sema_shared_access_expr_touches_shared(left, scopes) || sema_shared_access_expr_touches_shared(right, scopes)
         .CompareChain(values, _, _, _) -> return sema_shared_access_expr_list_touches_shared(values, scopes)
         .Call(call) -> return sema_shared_access_expr_call_args_touches_shared(call.args, scopes)
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> return sema_shared_access_expr_touches_shared(receiver, scopes) || sema_shared_access_expr_call_args_touches_shared(args, scopes)
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _, _, _) -> return sema_shared_access_expr_touches_shared(receiver, scopes) || sema_shared_access_expr_call_args_touches_shared(args, scopes)
         .StructLit(_, _, _, _, fields, _, _) -> {
             loop field in fields {
                 if sema_shared_access_expr_touches_shared(field.value, scopes) -> return true

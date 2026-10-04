@@ -1,0 +1,860 @@
+// PORT-PENDING 0526 crates-jet-codegen-src-codegen-tir-subset-types: crates/jet-codegen/src/Codegen/TIR/subset/types.rs:1-856
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::AST::Type;
+//RS use crate::Codegen::Cx;
+//RS use crate::Codegen::TIR::is_covered_enum_ty;
+//RS use crate::Codegen::TIR::is_covered_struct_ty;
+//RS use crate::Codegen::TIR::struct_is_covered;
+//RS use crate::Codegen::alloc_handle_rust_type;
+//RS use crate::Codegen::core_rust_type_name;
+//RS use crate::Codegen::file_handle_rust_type;
+//RS use crate::Codegen::is_json_type_name;
+//RS use crate::Codegen::layout_handle_rust_type;
+//RS use crate::Codegen::net_handle_rust_type;
+//RS use crate::Codegen::root_prelude_rust_type_name;
+//RS use crate::Codegen::service_handle_rust_type;
+//RS use std::collections::HashSet;
+//RS 
+//RS /// Resolve a `Self` type reference to the owning concrete type. Other types pass
+//RS /// through unchanged. (In current Jet a literal `Self` return rarely type-checks —
+//RS /// sema treats `Self` and the concrete name as distinct — but resolving it here
+//RS /// keeps the gate total if a future sema unifies them.)
+//RS pub(crate) fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
+//RS     match ty {
+//RS         Type::Named(n) if n == "Self" => Type::Named(type_name.to_string()),
+//RS         _ => ty.clone(),
+//RS     }
+//RS }
+//RS 
+//RS /// A param/return type the subset allows: scalar (Int/IntN/Float/F32/Bool),
+//RS /// Char, String, a covered *plain user struct* (c109 Phase 3) or generic
+//RS /// struct application (c109 Phase 19), a covered
+//RS /// *plain user enum* (c109 Phase 4), a covered collection (Phase 5), or a covered
+//RS /// *optional* `?T` / *fallible* `T !E` (c109 Phase 8). Generic type variables
+//RS /// are admitted when active in the enclosing function; recursive (boxed) types
+//RS /// remain out of the value subset.
+//RS pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     let ty = cx.expand_type_aliases(ty);
+//RS     // D-QUAL4=A: tagged types are transparent — strip the marker and check the inner type.
+//RS     if let Type::Tagged { inner, .. } = &ty {
+//RS         return is_subset_param_ty(inner, cx);
+//RS     }
+//RS     // D-TERM1 (ratified 2026-06-22): `Key` is a core enum (prelude, not user-registry).
+//RS     // It is always cloneable and has scalar/Char payloads only — fully covered.
+//RS     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_KEY) {
+//RS         return true;
+//RS     }
+//RS     // D-CMP3WAY1=B: Ordering is a compiler-owned core enum with a fixed,
+//RS     // scalar representation. Keep it on the TIR path like the other core enums.
+//RS     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_ORDERING) {
+//RS         return true;
+//RS     }
+//RS     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_TASKGROUP) {
+//RS         return true;
+//RS     }
+//RS     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_CONDITION) {
+//RS         return true;
+//RS     }
+//RS     // D-NEVER2=B: Never is the callable success-return bottom. It has no
+//RS     // runtime values; TIR/AOT render it as `std::convert::Infallible`.
+//RS     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_NEVER) {
+//RS         return true;
+//RS     }
+//RS     if matches!(&ty, Type::Named(n) if n == "DataEvent") {
+//RS         return true;
+//RS     }
+//RS     // D-ENC-DYN1=A+: DataTree and its canonical format spellings are one
+//RS     // Clone-backed Prelude enum. Their variant construction/matching has a
+//RS     // dedicated TIR path below; admit the type here so functions using a
+//RS     // dynamic value do not fall back before that path can run.
+//RS     if matches!(&ty, Type::Named(n) if is_json_type_name(n)) {
+//RS         return true;
+//RS     }
+//RS     if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError"))
+//RS     {
+//RS         return true;
+//RS     }
+//RS     if matches!(&ty, Type::Named(n) if n == "HTTPHandler") {
+//RS         return true;
+//RS     }
+//RS     if matches!(&ty, Type::Named(n) if matches!(n.as_str(),
+//RS         "Effect" | "UINode" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy" | "HookPolicy"
+//RS         | "Overflow" | "FailurePolicy" | "DispatchState" | "EventConfigError"
+//RS         // D-WEBAPP1 / D-RENDERTGT*: opaque UI + web graph value types (prelude hosts).
+//RS         | "App" | "WebPage" | "DevServer" | "HTTPServerTLS"
+//RS         | "EventResult" | "NullBackend" | "TUIBackend" | "GtkBackend"
+//RS         | "Point" | "Size" | "Rect" | "SizeConstraint" | "AriaRole" | "InputEvent"
+//RS         // D-UI-PREVIEW1=A: preview descriptors remain host-owned opaque values.
+//RS         | "UIPreview" | "UIPreviewRegistry"
+//RS         | "UIPreviewAccessibility" | "UIPreviewAuthority" | "UIPreviewContext"
+//RS         | "UIPreviewDevice" | "UIPreviewEffect" | "UIPreviewInputOverride"
+//RS         | "UIPreviewInputValue" | "UIPreviewKind" | "UIPreviewLifecycle"
+//RS         | "UIPreviewSource" | "UIPreviewTheme" | "UIPreviewTraits" | "UIPreviewViewport"))
+//RS     {
+//RS         return true;
+//RS     }
+//RS     if matches!(&ty, Type::Named(n) if n == "LateEventDisposition") {
+//RS         return true;
+//RS     }
+//RS     if matches!(&ty, Type::Named(n) if matches!(n.as_str(),
+//RS         "WebFormFieldState" | "WebFormTyped" | "WebTableState" | "WebVirtualPlan"
+//RS         | "WebTableSort" | "WebTableFilter" | "WebFormStatus" | "WebFormLifecycle"
+//RS         | "WebFormValidationTiming" | "WebTableSortDirection" | "WebTablePageMode"))
+//RS     {
+//RS         return true;
+//RS     }
+//RS     if matches!(&ty, Type::Apply { name, args }
+//RS         if matches!(name.as_str(), "WebTablePage" | "WebTable" | "WebTableColumn" | "WebTableRow")
+//RS             && args.len() == 1
+//RS             && is_subset_param_ty(&args[0], cx))
+//RS     {
+//RS         return true;
+//RS     }
+//RS     // D-UNIONTYPE1=A: anonymous unions are one generated enum of covered members.
+//RS     if let Type::Union(members) = &ty {
+//RS         return !members.is_empty() && members.iter().all(|m| is_subset_param_ty(m, cx));
+//RS     }
+//RS     ty.is_scalar()
+//RS         || matches!(&ty, Type::Char | Type::String)
+//RS         || is_type_var_param_ty(&ty, cx)
+//RS         || is_covered_trait_object_ty(&ty, cx)
+//RS         || is_covered_distinct_ty(&ty, cx)
+//RS         || is_covered_tuple_ty(&ty, cx)
+//RS         || is_covered_struct_ty(&ty, cx)
+//RS         || is_covered_enum_ty(&ty, cx)
+//RS         || is_covered_collection_ty(&ty, cx)
+//RS         || is_covered_view_ty(&ty, cx)
+//RS         || is_covered_expanded_collection_ty(&ty, cx)
+//RS         || is_covered_fallible_ty(&ty, cx)
+//RS         || is_covered_fn_ty(&ty, cx)
+//RS         || is_covered_foreign_value_ty(&ty, cx)
+//RS         || is_covered_generic_struct_ty(&ty, cx)
+//RS         || is_covered_concurrency_ty(&ty, cx)
+//RS         || is_covered_reactive_ty(&ty, cx)
+//RS         || is_covered_event_ty(&ty, cx)
+//RS         || is_covered_shared_ty(&ty, cx)
+//RS         || is_covered_shared_guard_ty(&ty, cx)
+//RS         || is_covered_shared_weak_ty(&ty, cx)
+//RS         || is_covered_atomic_ty(&ty)
+//RS         || is_covered_pool_ty(&ty, cx)
+//RS         || is_covered_cell_ty(&ty, cx)
+//RS         || is_covered_data_ty(&ty, cx)
+//RS         || is_covered_compute_ty(&ty)
+//RS         || is_covered_vault_ty(&ty, cx)
+//RS }
+//RS 
+//RS /// D-PLACE1: compiler-owned inline atomic carriers are covered whenever the
+//RS /// semantic closed-scalar gate has accepted their one type argument.
+//RS pub(crate) fn is_covered_atomic_ty(ty: &Type) -> bool {
+//RS     matches!(
+//RS         ty,
+//RS         Type::Apply { name, args }
+//RS             if name == "Atomic"
+//RS                 && args.len() == 1
+//RS                 && jet_foundation::Layout::atomic_scalar_type(&args[0])
+//RS     )
+//RS }
+//RS 
+//RS /// Unit has no value representation for parameters or bindings, but it is a
+//RS /// valid function result. Keep that distinction explicit so a Unit-returning
+//RS /// function can stay on the same TIR path as its body and call sites.
+//RS pub(crate) fn is_subset_return_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     matches!(ty, Type::Named(name) if name == "Unit") || is_subset_param_ty(ty, cx)
+//RS }
+//RS 
+//RS /// D-COMPUTE-TYPE1: all compute aliases use the same `JetTensor` value
+//RS /// representation. Sema owns the shape checks; this gate only admits the
+//RS /// resolved forms that `cx.rust_type` renders to that representation.
+//RS pub(crate) fn is_covered_compute_ty(ty: &Type) -> bool {
+//RS     ty.is_compute_tensor_family()
+//RS }
+//RS 
+//RS fn is_covered_vault_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     matches!(ty, Type::Apply { name, args }
+//RS         if matches!(name.as_str(), "ExpiringSecret" | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan")
+//RS             && args.len() == 1 && is_subset_param_ty(&args[0], cx))
+//RS }
+//RS 
+//RS /// D-MEM-VIEWRET1=B: views use the existing slice representation. Sema has
+//RS /// already proved their provenance; the TIR coverage gate only needs to know
+//RS /// that the element type is itself representable.
+//RS fn is_covered_view_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     // D-PIN1=A: `Pin<T>` joins the family — same borrowed representation, same
+//RS     // "sema already proved provenance" argument.
+//RS     matches!(
+//RS         ty,
+//RS         Type::Apply { name, args }
+//RS             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut" | crate::Syntax::TYPE_PIN)
+//RS                 && args.len() == 1
+//RS                 && (matches!(&args[0], Type::Named(inner) if inner == "str")
+//RS                     || is_subset_param_ty(&args[0], cx))
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn is_covered_event_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     let Type::Apply { name, args } = ty else {
+//RS         return false;
+//RS     };
+//RS     match name.as_str() {
+//RS         "Event" | "DispatchReport" | "DispatchFailure" => {
+//RS             args.len() == 1 && is_subset_param_ty(&args[0], cx)
+//RS         }
+//RS         "Hook" | "DecisionHook" | "HookDecision" | "HookOutcome" | "AsyncEvent" => {
+//RS             args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx))
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-QUERY-RETAIN1=A: query carriers and typed list products. Materialized
+//RS /// query results are ordinary lists; only deferred/query metadata needs a
+//RS /// nominal carrier.
+//RS pub(crate) fn is_covered_data_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     let Type::Apply { name, args } = ty else {
+//RS         return false;
+//RS     };
+//RS     match name.as_str() {
+//RS         "Query" => args.len() == 1 && is_subset_param_ty(&args[0], cx),
+//RS         "DataGroupedQuery" | "Group" => {
+//RS             args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx))
+//RS         }
+//RS         "DataJoin" => args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx)),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` / `Id<T>` — the generational arena and
+//RS /// its index+generation handle. Same shape as `is_covered_concurrency_ty`:
+//RS /// `cx.rust_type` already renders these to `{root}jet_std::Jet{Pool,Id}<{T}>`, so
+//RS /// binding/passing/returning one is byte-identical to the AST path. `T` must
+//RS /// itself be a covered value type.
+//RS pub(crate) fn is_covered_pool_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     let Type::Apply { name, args } = ty else {
+//RS         return false;
+//RS     };
+//RS     let Some(elem) = args.first() else {
+//RS         return false;
+//RS     };
+//RS     match name.as_str() {
+//RS         // `Id<T>` is a plain index+generation handle — it never actually stores
+//RS         // or embeds a `T` at runtime (`JetId<T>`'s only field is a zero-size
+//RS         // `PhantomData<fn() -> T>`). So its OWN coverage doesn't need `T`'s full
+//RS         // recursive struct-coverage — just that `T` names a real registered
+//RS         // type. This matters for the self-referential shape a parent-pointer
+//RS         // tree needs (`struct Node { parent: Id<Node>? }`): checking whether
+//RS         // `Node` is covered recurses into this field, which would recurse right
+//RS         // back into "is `Node` covered" through `concurrency_elem_covered` —
+//RS         // an infinite loop `is_covered_struct_ty` has no cycle guard for.
+//RS         "ID" => matches!(elem, Type::Named(n) if cx.type_names.contains(n)),
+//RS         "Pool" => concurrency_elem_covered(elem, cx),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-LOCALCELL1=A: local cell values and projected guards use one covered
+//RS /// element type. `cx.rust_type` maps each handle to the matching Prelude type.
+//RS pub(crate) fn is_covered_cell_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     matches!(
+//RS         ty,
+//RS         Type::Apply { name, args }
+//RS             if matches!(
+//RS                 name.as_str(),
+//RS                 "Cell" | "CellReadGuard" | "CellEditGuard"
+//RS             )
+//RS                 && args.len() == 1
+//RS                 && is_subset_param_ty(&args[0], cx)
+//RS     )
+//RS }
+//RS 
+//RS /// c109 Phase 6b: a `Shared<T>` (`Type::Shared`) usable as a param/return/local value
+//RS /// type. `cx.rust_type` renders it to `{root}jet_std::JetShared<{T}>` (D-MEM1 S6 —
+//RS /// was a bare `std::sync::Arc<{T}>` before this stage, back when the type had no
+//RS /// real constructor; see the type's own doc comment) and `rust_param_type` borrows
+//RS /// a `Read` non-scalar to `&{that}` — both shared with the AST path, so the
+//RS /// signature is byte-identical. A `Read` param reads as `(*user_h)` (`param_place`'s
+//RS /// non-scalar deref). The element `T` must itself be a covered value type. Admitting
+//RS /// the type is what lets a fn with a `Shared<T>` param route; passing one to a free
+//RS /// call auto-clones the handle via `lower_one_call_arg`'s `arc_clone` (the gate now
+//RS /// admits it) — a plain `.clone()` on `JetShared<T>`'s own `Clone` impl, not
+//RS /// `Arc::clone` directly (see `emit_tir_call_args`).
+//RS pub(crate) fn is_covered_shared_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     matches!(ty, Type::Shared(inner) if is_subset_param_ty(inner, cx))
+//RS }
+//RS 
+//RS pub(crate) fn is_covered_shared_guard_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     matches!(
+//RS         ty,
+//RS         Type::Apply { name, args }
+//RS             if name == crate::Syntax::TYPE_SHARED_GUARD
+//RS                 && args.len() == 1
+//RS                 && is_subset_param_ty(&args[0], cx)
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn is_covered_shared_weak_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     let Type::Apply { name, args } = ty else {
+//RS         return false;
+//RS     };
+//RS     if name != crate::Syntax::TYPE_SHARED_WEAK || args.len() != 1 {
+//RS         return false;
+//RS     }
+//RS     match &args[0] {
+//RS         // D-SHARED-CYCLE1=C: Weak of a user struct is always a sized handle.
+//RS         // Do not recurse into that struct's fields — a `Shared.Weak<Node>` field
+//RS         // on `Node` would otherwise loop forever through is_subset_param_ty.
+//RS         Type::Named(n) if cx.struct_fields.contains_key(n) => true,
+//RS         other => is_subset_param_ty(other, cx),
+//RS     }
+//RS }
+//RS 
+//RS /// c109 Phase 21 / D-TUPLE-DESTRUCT1: a concurrency handle type `Task<T>` /
+//RS /// `Receiver<T>` / `Sender<T>` (a `Type::Apply` with one type arg) usable as a
+//RS /// param/return/local *value* type. `cx.rust_type` (Source/Codegen/Context.rs)
+//RS /// already renders these to `{root}jet_std::Jet{Task,Receiver,Sender}<{T}>`, so
+//RS /// passing/binding/returning one is byte-identical to the AST path with no new emit.
+//RS /// The element type `T` must itself be a covered value type. A METHOD on one
+//RS /// (`join`/`detach`/`receive`/`send`) carries
+//RS /// `recv_type == None` (a Phase-9 builtin gap) and is covered by a dedicated shape — but
+//RS /// covering the value type never *forces* a method, so an uncovered method still excludes
+//RS /// its fn (the recurring "cover the value type, let the next uncovered node exclude its fn"
+//RS /// seam). These are NOT `Type::Named` (so they never match `emit_let`'s `is_file_handle`
+//RS /// set — their prelude methods take `&self`, so the binding stays a plain `let`, exactly as
+//RS /// the AST path renders).
+//RS pub(crate) fn is_covered_concurrency_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     let Type::Apply { name, args } = ty else {
+//RS         return false;
+//RS     };
+//RS     match name.as_str() {
+//RS         "Task" | "Receiver" | "Sender" | "Stream" | "StreamEventTime" => {
+//RS             args.len() == 1 && concurrency_elem_covered(&args[0], cx)
+//RS         }
+//RS         "KeyedStream" | "Window" => {
+//RS             args.len() == 2 && args.iter().all(|arg| concurrency_elem_covered(arg, cx))
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-REACT1=B: a reactive handle type `Signal<T>` / `Derived<T>` (a single-arg
+//RS /// `Type::Apply`) usable as a param/return/local *value* type. Structurally the
+//RS /// same seam as `is_covered_concurrency_ty`: `cx.rust_type` renders these to
+//RS /// `{root}jet_std::Jet{Signal,Derived}<{T}>` (Source/Codegen/Context.rs), so
+//RS /// binding/passing/returning one is byte-identical to the AST path. The element `T`
+//RS /// must itself be a covered value type. Their methods (`get`/`set`) carry
+//RS /// `recv_type == None` and are covered by the reactive-method shape.
+//RS pub(crate) fn is_covered_reactive_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     let Type::Apply { name, args } = ty else {
+//RS         return false;
+//RS     };
+//RS     matches!(name.as_str(), "Signal" | "Derived" | "Computed")
+//RS         && args.len() == 1
+//RS         && is_subset_param_ty(&args[0], cx)
+//RS }
+//RS 
+//RS pub(crate) fn is_covered_expanded_collection_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     match ty {
+//RS         Type::Named(name)
+//RS             if name == crate::Syntax::TYPE_BITS || name == crate::Syntax::TYPE_BYTES =>
+//RS         {
+//RS             true
+//RS         }
+//RS         Type::Apply { name, args }
+//RS             if matches!(
+//RS                 name.as_str(),
+//RS                 crate::Syntax::TYPE_SET
+//RS                     | crate::Syntax::TYPE_RANK
+//RS                     | crate::Syntax::TYPE_PRIORITY_QUEUE
+//RS                     | crate::Syntax::TYPE_TALLY
+//RS             ) =>
+//RS         {
+//RS             args.len() == 1 && is_subset_param_ty(&args[0], cx)
+//RS         }
+//RS         Type::Apply { name, args } if name == crate::Syntax::TYPE_LRU => {
+//RS             args.len() == 2 && is_subset_param_ty(&args[0], cx) && is_subset_param_ty(&args[1], cx)
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// c109 Phase 21: a `Task<T>`/`Receiver<T>`/`Sender<T>` element type. Any covered value
+//RS /// type, PLUS `Unit` (`Type::Named("Unit")`) — the result type of a `() => { … }` spawn
+//RS /// closure that returns nothing (`task { s.send(…) }` →
+//RS /// `Task<Unit>`, the `[Task<Unit>]` worker list in 34_parallel_scan). `Unit` renders via
+//RS /// `cx.rust_type` to `()` (Source/Codegen/Context.rs), so `JetTask<()>` is byte-identical
+//RS /// to the AST path. (`Unit` is not a covered value type generally — it has no binding/
+//RS /// param surface of its own — so it's admitted only here, where it can only appear as the
+//RS /// erased result of a unit-returning task.)
+//RS pub(crate) fn concurrency_elem_covered(ty: &Type, cx: &Cx) -> bool {
+//RS     matches!(ty, Type::Named(n) if n == "Unit") || is_subset_param_ty(ty, cx)
+//RS }
+//RS 
+//RS /// c109 Phase 19: a GENERIC struct application `Pair<T>` / `Stack<Int>` (a `Type::Apply`)
+//RS /// usable as a param/return/local value type. The base name must be a covered user struct
+//RS /// (`struct_is_covered` — which admits type-var fields, Phase 19), and every type argument
+//RS /// must itself be a covered value type OR a bare type variable. Imported struct shapes use
+//RS /// their canonical qualified names in the same tables, so `owner::Stack<Int>` follows the
+//RS /// identical TIR path. The Rust head is `__jet_<Name>::<args>` (the turbofish from
+//RS /// `user_type_apply_rust`), resolved at lowering. `cx.rust_type` already renders
+//RS /// `Type::Apply` to that head, so param/return/local typing is byte-identical to the AST
+//RS /// path. (A non-generic `Type::Apply` would be malformed; sema only produces `Apply` for a
+//RS /// generic struct/enum instantiation.)
+//RS pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     let Type::Apply { name, args } = ty else {
+//RS         return false;
+//RS     };
+//RS     // The base must be a known struct (not an enum/trait/core/prelude type). Local
+//RS     // and imported user structs are both registered in `cx.struct_fields`.
+//RS     if !cx.struct_fields.contains_key(name) {
+//RS         return false;
+//RS     }
+//RS     if !struct_is_covered(name, cx, &mut HashSet::new()) {
+//RS         return false;
+//RS     }
+//RS     // Every type argument is a covered value type or a bare type variable (`T`).
+//RS     // c148: pass cx so multi-char type params are recognized.
+//RS     args.iter()
+//RS         .all(|a| is_type_var_param_ty(a, cx) || is_subset_param_ty(a, cx))
+//RS }
+//RS 
+//RS /// c109 Phase 23: a DISTINCT type (`UserId :: distinct Int`, D-DIST1) usable as a
+//RS /// param/return/local *value* type. A distinct type renders via `cx.rust_type` to its
+//RS /// newtype `__jet_<Name>` (the `Type::Named` fallthrough in Context.rs), and the emitted
+//RS /// `#[repr(transparent)]` newtype is `Copy` iff its base is (sema/codegen derive set) —
+//RS /// but the param convention (`Read`→deref for a non-scalar Named) is decided exactly as
+//RS /// for a struct, so passing/binding/returning one is byte-identical to the AST path with
+//RS /// no new emit. Construction is the `is_distinct_ctor` `Call` shape; `.raw()` is the
+//RS /// dedicated DistinctRaw method shape; `+`/`==` on a `#Numeric` distinct emit the native
+//RS /// operator (`ast_operand_is_integer` returns `None` for a distinct-typed operand, so the
+//RS /// overflow trap is never claimed — matching the AST path's plain `+`).
+//RS pub(crate) fn is_covered_distinct_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     matches!(ty, Type::Named(name) if cx.is_distinct_type_name(name))
+//RS }
+//RS 
+//RS /// c109 Phase 23: a named-tuple type `(x: Int, y: Int)` (S73/D-SG7, `Type::Tuple`)
+//RS /// usable as a param/return/local value type. A tuple renders via `cx.rust_type` to a
+//RS /// generated `#[derive(Debug, Clone, PartialEq[, …])]` struct `JetTup_<hash>` (with
+//RS /// `__jet_<field>` fields) emitted by `Tuples.rs` for every tuple SHAPE the program uses
+//RS /// — so passing/binding/returning one is byte-identical to the AST path with no new
+//RS /// emit. A tuple field read is the generic `Field` shape (`(t).__jet_<f>`); construction
+//RS /// is the `TupleLit` shape; destructuring is the `BindPattern::Tuple` `let` form;
+//RS /// `==`/`!=` is native (the derived `PartialEq`). Every field type must itself be a
+//RS /// covered value type (so a field read / destructure element emits in-subset).
+//RS pub(crate) fn is_covered_tuple_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     let Type::Tuple(fields) = ty else {
+//RS         return false;
+//RS     };
+//RS     !fields.is_empty() && fields.iter().all(|(_, t)| is_subset_param_ty(t, cx))
+//RS }
+//RS 
+//RS /// c109 Phase 17: a bare type-PARAMETER type (`T` in a generic `fn id<T>(x: T)`). A
+//RS /// single-uppercase `Type::Named` reads as a type var (`Generics::is_type_var_name`),
+//RS /// rendered by `cx.rust_type`/`rust_param_type` as the bare letter (by-value, no `&`).
+//RS /// Admitting it lets a generic free function whose params/return are type-vars (or covered
+//RS /// concrete types) route through the TIR. A generic STRUCT type (`Pair<T>`, `Type::Apply`)
+//RS /// is NOT admitted here — that surface (turbofish construction, `[T]`-field builtins) is
+//RS /// deferred, so such a function exits the gate at the param/return type check.
+//RS ///
+//RS /// c148: also checks `cx.current_type_params` so multi-char params (`Kind`, `Elem`)
+//RS /// are treated identically to single-char ones.
+//RS pub(crate) fn is_type_var_param_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     matches!(ty, Type::Named(n)
+//RS         if crate::Generics::is_type_var_name(n)
+//RS             || cx.current_type_params.borrow().contains(n.as_str()))
+//RS }
+//RS 
+//RS /// Resolve a user nominal through the one canonical codegen import map.
+//RS ///
+//RS /// A nominal reaches the coverage predicate in one of three source spellings:
+//RS /// already canonical (`open_dep::Badge`), alias-qualified exactly as written
+//RS /// (`library.Badge`, `vendor.Token`), or bare (`Token`). `cx.foreign_types` is
+//RS /// keyed only by the canonical bundle identity, so all three MUST go through
+//RS /// `imported_type_metadata_name` — the one resolver that splits an alias off a
+//RS /// qualified name, keeps a bare local nominal local, and refuses an ambiguous
+//RS /// leaf. Feeding a whole dotted name in as if it were a leaf resolves nothing,
+//RS /// which silently drops every alias-qualified imported type out of the covered
+//RS /// subset (I3: coverage reads the bundle-resolved origin, never re-derives it).
+//RS pub(crate) fn foreign_type_module<'a>(name: &str, cx: &'a Cx) -> Option<&'a str> {
+//RS     if let Some(module) = cx.foreign_types.get(name) {
+//RS         return Some(module.as_str());
+//RS     }
+//RS     let identity = cx.imported_type_metadata_name(name)?;
+//RS     cx.foreign_types.get(&identity).map(String::as_str)
+//RS }
+//RS 
+//RS /// c109 Phase 17: a FOREIGN/PRELUDE type usable as a param/return/local *value* type.
+//RS /// These all render through `cx.rust_type` already (a prelude handle/core struct → its
+//RS /// `Jet…`/`jet_std::…` Rust name), so passing/binding/returning one is byte-identical to
+//RS /// the AST path with no new emit. Only the constructable PRELUDE STRUCTS
+//RS /// (HTTPRequest/HTTPResponse — `net_handle_rust_type` + a struct-literal form) and the
+//RS /// CORE structs (ProcessResult/Stopwatch/JSON/…) are admitted as value types here; a
+//RS /// foreign *imported user* struct/enum needs cross-module `import_ns` construction (a
+//RS /// Phase-14 surface) and stays excluded. A METHOD on any of these is still out of subset
+//RS /// (handle/prelude methods → Phase 13's residue), so a function that *calls* a method on
+//RS /// one is excluded by that call — covering the value type never reaches an uncovered
+//RS /// method form.
+//RS pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     let Type::Named(name) = ty else {
+//RS         return false;
+//RS     };
+//RS     // c109 Phase 19: a FOREIGN (imported user) struct/enum used as a value type. It
+//RS     // renders via `cx.rust_type` to `{root}{mod}::__jet_<Name>` (Context.rs), and a field
+//RS     // read on it mangles (`(n).user_title`) exactly as `mangle` produces — byte-identical
+//RS     // to the AST path with no new emit. Construction (`alias.Note { … }`) routes via the
+//RS     // `import_ns` StructLit shape; a method on it is still out of subset, so a fn that
+//RS     // calls one is excluded by that call (the recurring "cover the value type, let the next
+//RS     // uncovered node exclude its fn" seam).
+//RS     if foreign_type_module(name, cx).is_some() {
+//RS         return true;
+//RS     }
+//RS     // D-REGEXENGINE1=A: a regex `Match` value (`if m == value(mat)` binds
+//RS     // `mat: Match`). It renders to `jet_std::JetRegexMatch`.
+//RS     if name == "Match" {
+//RS         return true;
+//RS     }
+//RS     if matches!(
+//RS         name.as_str(),
+//RS         "Claims"
+//RS             | "AuthError"
+//RS             | "Session"
+//RS             | "Auth"
+//RS             | "SyncText"
+//RS             | "SyncCounter"
+//RS             | "SyncMap"
+//RS             | "SyncList"
+//RS             | "RowPolicy"
+//RS             | "LiveQuery"
+//RS             | "DBScope"
+//RS     ) {
+//RS         return true;
+//RS     }
+//RS     // Core crypto values already have total `cx.rust_type` mappings. Admitting
+//RS     // them here lets read-only helpers accept ExpiringSecret callback loans;
+//RS     // each helper body still has to pass the ordinary expression/method gates.
+//RS     if matches!(
+//RS         name.as_str(),
+//RS         "Secret"
+//RS             | "SigningKey"
+//RS             | "VerifyKey"
+//RS             | "X25519SecretKey"
+//RS             | "X25519PublicKey"
+//RS             | "SharedSecret"
+//RS             | "Signature"
+//RS             | "Sealed"
+//RS             | "WrappedKey"
+//RS             | "PasswordHash"
+//RS             | "Digest256"
+//RS             | "Digest512"
+//RS             | "CryptoError"
+//RS             | "FileCryptoError"
+//RS             | "KeyWrapError"
+//RS     ) {
+//RS         return true;
+//RS     }
+//RS     // D-FOUND-PLATFORM1=A: font values are shared Prelude carriers.  They
+//RS     // are canonical Core nominals (not user declarations), so no local
+//RS     // `struct_fields`/`enum_variants` row is registered for them; their
+//RS     // fields and enum literals still lower through the ordinary TIR paths.
+//RS     if !cx.type_names.contains(name)
+//RS         && matches!(
+//RS             name.as_str(),
+//RS             "FontStyle" | "FontFace" | "Glyph" | "GlyphRun" | "GlyphShaper"
+//RS         )
+//RS     {
+//RS         return true;
+//RS     }
+//RS     // A prelude struct constructable via a struct literal, or a core/prelude struct that
+//RS     // renders to its own Rust name. (FileReader/TcpStream/Arena/… are opaque handles — no
+//RS     // literal form — but are valid value types; admit the constructable + core ones, plus
+//RS     // the opaque handles, all of which `cx.rust_type` renders.)
+//RS     is_prelude_struct_name(name)
+//RS         || core_rust_type_name(name).is_some()
+//RS         || root_prelude_rust_type_name(name).is_some()
+//RS         || service_handle_rust_type(name).is_some()
+//RS         || cx.core_qualified_rust_type_name(name).is_some()
+//RS         || file_handle_rust_type(name).is_some()
+//RS         || net_handle_rust_type(name).is_some()
+//RS         || alloc_handle_rust_type(name).is_some()
+//RS         // D-LAYOUT1 / D-LAYOUT-GATES1: layout runtime types (opaque handles,
+//RS         // no literal form — like the alloc/file/net handles above).
+//RS         || layout_handle_rust_type(name).is_some()
+//RS }
+//RS 
+//RS /// c109 Phase 17: a PRELUDE STRUCT name with a struct-literal construction form — the
+//RS /// HTTP request/response types (`net_handle_rust_type` + the `is_prelude_struct` branch in
+//RS /// `emit_struct_lit`). These get a Rust head `<root>Jet…` with PLAIN (unmangled) fields,
+//RS /// and HTTPRequest additionally an injected `params: BTreeMap::new()` field.
+//RS pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
+//RS     // D-TEXTWIDTH1=B: `TextWidth` is a plain dot-ctor core struct (no auto
+//RS     // fields, unlike HTTPRequest's `params`) — see the lowering branch keyed
+//RS     // on `type_name == "TextWidth"` in `lower_expr`'s StructLit arm.
+//RS     matches!(
+//RS         name,
+//RS         "Err" | "HTTPRequest" | "HTTPResponse" | "Range" | "TextWidth" | "TerminalSize" | "TerminalPolicy"
+//RS             | "DataLineOptions"
+//RS             | "AsyncPolicy" | "FieldError"
+//RS             | "EncodingLimits" | "EncodingCause" | "EncodingError"
+//RS             | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions"
+//RS             | "XMLRenderOptions" | "XMLCanonical" | "XMLError"
+//RS             | "RecipientReport" | "SendReport" | "Limits" | "DKIMConfig" | "SMTPConfig"
+//RS             | "WebFormFieldSpec"
+//RS             // D-LIB-CALLGRANT1=A: the explicit load-site grant is a small
+//RS             // constructable Prelude record, so it must stay on the same TIR
+//RS             // path as `core.mod.load` on `jet run`.
+//RS             | "ModGrant"
+//RS     )
+//RS }
+//RS 
+//RS /// c109 Phase 19: is a FOREIGN (imported user) struct literal `alias.Type { … }` in
+//RS /// subset? The `import_ns` struct-literal branch emits
+//RS /// `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED field names.
+//RS /// Cover it when: the import alias resolves in `cx.import_mods` (so the module head is
+//RS /// total), the owner-qualified shape is registered, and every
+//RS /// turbofish type arg is a covered/type-var value. The field VALUES are checked in-subset
+//RS /// by the caller; the foreign struct's field *types* live in another module and don't
+//RS /// affect the emit (the head + mangled field names are the whole shape). A trait-coerced
+//RS /// foreign literal (`as_trait`) is excluded by the caller.
+//RS pub(crate) fn foreign_struct_lit_in_subset(
+//RS     type_name: &str,
+//RS     type_args: &[Type],
+//RS     import_ns: Option<&str>,
+//RS     cx: &Cx,
+//RS ) -> bool {
+//RS     let alias = import_ns.unwrap_or("");
+//RS     let Some(qualified) = cx.foreign_type_identity(alias, type_name) else {
+//RS         return false;
+//RS     };
+//RS     if let Some(alias) = import_ns {
+//RS         let Some(import_mod) = cx.import_mods.get(alias) else {
+//RS             return false;
+//RS         };
+//RS         if cx.foreign_types.get(&qualified) != Some(import_mod) {
+//RS             return false;
+//RS         }
+//RS     }
+//RS     if !cx.struct_fields.contains_key(&qualified) {
+//RS         return false;
+//RS     }
+//RS     type_args
+//RS         .iter()
+//RS         .all(|a| is_type_var_param_ty(a, cx) || is_subset_param_ty(a, cx))
+//RS }
+//RS 
+//RS /// c109 Phase 13: a Jet `fn(…) => …` parameter/return type the subset lowers. The fn-type
+//RS /// renders via `cx.rust_type` (`Box<dyn Fn(…) -> … [+ Send + Sync]>`) exactly as the
+//RS /// AST `rust_param_type`/`rust_return_type` do — passed/returned by value (no `&`,
+//RS /// `param_place`'s deref matches `emit_func`'s slot). The param/return + arg types must
+//RS /// themselves be covered value types so the rendered fn-trait is well-formed and the
+//RS /// arg lowering can wrap it. A higher-order fn param (a fn taking/returning a fn) is
+//RS /// admitted recursively.
+//RS pub(crate) fn is_covered_fn_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     match ty {
+//RS         Type::Fn { params, ret, .. } => {
+//RS             params.iter().all(|p| is_subset_param_ty(p, cx))
+//RS                 && ret
+//RS                     .as_ref()
+//RS                     .map(|r| is_subset_param_ty(r, cx))
+//RS                     .unwrap_or(true)
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// c109 Phase 30: a TRAIT-OBJECT param/return/local type (`s: Shape` where `Shape` is a
+//RS /// user trait → `Type::TraitObject("Shape")`, or a bare `Type::Named("Shape")` naming a
+//RS /// trait). It renders via `cx.rust_type` to `Box<dyn __jet_Shape>` (Context.rs), and the
+//RS /// param convention is decided by `rust_param_type`'s trait-object arm (`Read` → `&Box<dyn
+//RS /// …>`, the slot deref'd to `(*user_s)` by `param_place` — a non-scalar `Read` param). A
+//RS /// METHOD on it is the dedicated trait-object dispatch shape (`recv_type == Some(<trait>)`,
+//RS /// dynamic dispatch via the bare method name); a non-method use (pass/bind/return) is
+//RS /// byte-identical to the AST path. The trait must be a known user trait (`cx.trait_names`),
+//RS /// never a foreign/prelude name.
+//RS pub(crate) fn is_covered_trait_object_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     match ty {
+//RS         Type::TraitObject(t) => t.iter().all(|n| cx.trait_names.contains(n)),
+//RS         Type::Named(n) => cx.trait_names.contains(n),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// c109 Phase 8: `ty` is an optional `?T` (`Type::Option`) or a fallible `T !E`
+//RS /// (`Type::Result`) whose payload(s) are themselves covered *value* types. Both
+//RS /// lower through `cx.rust_type` (`Option<…>` / `Result<…, …>`) exactly as the AST
+//RS /// path does, so a covered-payload optional/fallible param/return needs no special
+//RS /// emit. A nested `??T` (Option of Option) never reaches here — sema rejects it —
+//RS /// but the recursion would handle it anyway. A list/map *of* options is still
+//RS /// excluded (`collection_elem_covered` does not admit `Option`/`Result`), because
+//RS /// element clone/coercion for those is deferred.
+//RS pub(crate) fn is_covered_fallible_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     match ty {
+//RS         Type::Option(inner) => fallible_payload_covered(inner, cx),
+//RS         Type::Result { ok, err } => {
+//RS             fallible_payload_covered(ok, cx) && fallible_payload_covered(err, cx)
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// An optional/fallible payload (`T` in `?T`, or `ok`/`err` in `T !E`) the subset
+//RS /// can lower: a scalar, Char, String, a covered struct/enum, a covered collection,
+//RS /// `()` (the ok payload of fallible `run`, rendered as `()`), or sema's
+//RS /// default error type `Err` (`Type::Named("Err")`, which `cx.rust_type`
+//RS /// lowers to the Prelude-owned `JetErr`).
+//RS pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
+//RS     // D-ERRSUFFIX1=B: the success side of a fallible signature may itself be
+//RS     // optional (`?T !E`). Keep the composed carrier on the same TIR path as
+//RS     // its AOT lowering; the inner payload follows the same coverage rules.
+//RS     if let Type::Option(inner) = ty {
+//RS         return fallible_payload_covered(inner, cx);
+//RS     }
+//RS     // c109 Phase 30: a type-variable payload (`T` in a generic fn's `?T` return —
+//RS     // `largest<T: Comparable>() ?T ->`). A type var renders via `cx.rust_type` to the
+//RS     // bare letter (`Option<T>`), and `value(best)`/`null` lower to `Some(user_best)`/`None`
+//RS     // byte-identically (no clone/box decision). A type var only appears where a type param
+//RS     // is in scope (sema guarantees), so an `Option<T>` payload is total.
+//RS     if is_type_var_param_ty(ty, cx) {
+//RS         return true;
+//RS     }
+//RS     // D-UNIONTYPE1=A: a fallible error payload may be the generated anonymous
+//RS     // union that `?` widens into. Every member uses the same covered payload
+//RS     // representation, so excluding the union would orphan an otherwise-covered
+//RS     // callee and force its caller into whole-program interpretation.
+//RS     if let Type::Union(members) = ty {
+//RS         return !members.is_empty()
+//RS             && members
+//RS                 .iter()
+//RS                 .all(|member| fallible_payload_covered(member, cx));
+//RS     }
+//RS 
+//RS     if let Type::Named(n) = ty {
+//RS         if n == "Unit" {
+//RS             return true;
+//RS         }
+//RS         // D-FAILURE-FOUNDATION1: `!Never` is the proof-carrying no-failure
+//RS         // route. It still has a Result-shaped carrier in TIR, with an
+//RS         // uninhabited error payload that needs no runtime construction.
+//RS         if n == crate::Syntax::TYPE_NEVER {
+//RS             return true;
+//RS         }
+//RS         if n == crate::Syntax::TYPE_ERR {
+//RS             return true;
+//RS         }
+//RS         if n == "CryptoError" {
+//RS             return true;
+//RS         }
+//RS         // D-TYPE2-MEASURE1=A: `ComputeError` is the err side of every fallible
+//RS         // compute operation, including the composed `Matrix<M, P> !ComputeError`
+//RS         // a matrix product produces. Same argument as `CryptoError` above: it
+//RS         // renders through `cx.rust_type` to the Prelude-owned
+//RS         // `jet_std::JetComputeError` (`core_rust_type_name`), so the payload is
+//RS         // byte-identical on the TIR path.
+//RS         if n == "ComputeError" {
+//RS             return true;
+//RS         }
+//RS         // c109 Phase 21 / D-TUPLE-DESTRUCT1: `Closed` is the err type of
+//RS         // `Receiver.receive()` → `Result<T, Closed>` (Source/Collections.rs
+//RS         // `receiver_method_return`). It renders
+//RS         // via `cx.rust_type` to `{root}jet_std::Closed` (`core_rust_type_name`), so a
+//RS         // `T !Closed` payload (the unwrap target of `ch.receive() ?? …`) is byte-identical.
+//RS         if n == "Closed" {
+//RS             return true;
+//RS         }
+//RS         // D-REGEXENGINE1=A: a regex `Match` (the payload of `re.match()`'s `Match?`).
+//RS         // It renders via `cx.rust_type` to `jet_std::JetRegexMatch`.
+//RS         if n == "Match" {
+//RS             return true;
+//RS         }
+//RS     }
+//RS     ty.is_scalar()
+//RS         || matches!(ty, Type::Char | Type::String)
+//RS         || is_covered_distinct_ty(ty, cx)
+//RS         || is_covered_struct_ty(ty, cx)
+//RS         || is_covered_enum_ty(ty, cx)
+//RS         || is_covered_generic_struct_ty(ty, cx)
+//RS         || is_covered_collection_ty(ty, cx)
+//RS         || is_covered_view_ty(ty, cx)
+//RS         || is_covered_data_ty(ty, cx)
+//RS         // c109 Phase 24: a FOREIGN value-type payload (`Note?` on a `ParsedResult` field —
+//RS         // `Note` is an imported struct). It renders via `cx.rust_type` to its own Rust
+//RS         // head; an `Option<Note>` is byte-identical (the `value(n)`/`null` constructor is
+//RS         // in-subset, the field read plain/sema-cloned).
+//RS         || is_covered_foreign_value_ty(ty, cx)
+//RS         // D-MEM1 S6: a `Pool<T>`/`Id<T>`/`Shared<T>` payload (`parent: Id<Node>?`'s
+//RS         // `Id<Node>` — the parent-pointer-tree shape D-POOLID-API1's ballot named).
+//RS         || is_covered_pool_ty(ty, cx)
+//RS         || is_covered_shared_ty(ty, cx)
+//RS         || is_covered_shared_guard_ty(ty, cx)
+//RS         || is_covered_shared_weak_ty(ty, cx)
+//RS         // D-TYPE2-MEASURE1=A / D-COMPUTE-TYPE1: a compute payload is the ok side
+//RS         // of that same composed product. `is_subset_param_ty` already admits the
+//RS         // shape aliases, and every one renders to the single `JetTensor`
+//RS         // representation, so an `Ok(Matrix<M, P>)` needs no special emit.
+//RS         || is_covered_compute_ty(ty)
+//RS }
+//RS 
+//RS /// c109 Phase 5: `ty` is a list `[E]` or map `[K:V]` the subset can lower. The
+//RS /// element/key/value types must themselves be covered *value* types — scalar,
+//RS /// Char, String, a covered tuple/struct/enum, or a nested covered collection —
+//RS /// so the literal/index/iteration lowerings reproduce the AST path without any
+//RS /// clone/box decision the subset can't make from total facts. A `FixedList`
+//RS /// (`[E#N]`, D-FIXARR1) is covered exactly like a `List`: indexing reads the
+//RS /// element type off the base, and a fan-out expression already produces a
+//RS /// `[T#N]` value (Rust `[E; N]`). Widening to `[T]` (Vec) when passed to a List
+//RS /// slot is handled by `TCallArg.widen_to_vec` — so a `[E#N]` param/return/element
+//RS /// is covered once its element type is covered.
+//RS pub(crate) fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
+//RS     match ty {
+//RS         Type::List(inner) => collection_elem_covered(inner, cx),
+//RS         Type::FixedList { elem, .. } => collection_elem_covered(elem, cx),
+//RS         Type::Map { key, value, .. } => {
+//RS             collection_elem_covered(key, cx) && collection_elem_covered(value, cx)
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// A list/map element, key, or value type the subset can lower: a scalar, Char,
+//RS /// String, a covered tuple/struct/enum, a sema-proved view, or a nested covered
+//RS /// collection. Anything else excludes the owning collection.
+//RS pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
+//RS     ty.is_scalar()
+//RS         || matches!(ty, Type::Char | Type::String)
+//RS         || matches!(ty, Type::Named(name) if name == "UINode")
+//RS         // c109 Phase 17: a type-variable element (`[T]` in a generic fn). A type var only
+//RS         // appears where a type param is in scope (sema guarantees), and renders by value
+//RS         // via `cx.rust_type` (`Vec<T>`), so a `[T]` list param/return/local is covered.
+//RS         // c148: pass cx so multi-char params are recognized.
+//RS         || is_type_var_param_ty(ty, cx)
+//RS         || is_covered_tuple_ty(ty, cx)
+//RS         || is_covered_distinct_ty(ty, cx)
+//RS         || is_covered_struct_ty(ty, cx)
+//RS         || is_covered_enum_ty(ty, cx)
+//RS         || is_covered_collection_ty(ty, cx)
+//RS         || is_covered_view_ty(ty, cx)
+//RS         // c109 Phase 21: a `[Task<Unit>]` worker list (34_parallel_scan) — a concurrency
+//RS         // handle element renders via `cx.rust_type` (`Vec<Jet…<…>>`) like any value type.
+//RS         || is_covered_concurrency_ty(ty, cx)
+//RS         // c109 Phase 30: a TRAIT-OBJECT element (`[Shape]` → `Vec<Box<dyn __jet_Shape>>`).
+//RS         // Each element is a `Box::new(<lit>) as Box<dyn …>` (the trait-coerced literal),
+//RS         // and `.each` over such a list dispatches via `jet_list_each_ref` (the `EachRef`
+//RS         // closure op, already built — `list_carries_trait`). The element renders via
+//RS         // `cx.rust_type` to `Box<dyn __jet_<Trait>>`, byte-identical to the AST path.
+//RS         || is_covered_trait_object_ty(ty, cx)
+//RS         // c109 Phase 24: a FOREIGN value-type element — the prelude JSON enum
+//RS         // (`[JSON]` / `[String:JSON]`) OR a cross-module imported user struct/enum (`[String:Note]`
+//RS         // where `Note` is an `import_ns` struct). These render via `cx.rust_type` to their
+//RS         // own Rust head ({root}jet_std::JSON / {root}{mod}::__jet_<Name>), and a foreign
+//RS         // element is moved/cloned by its own sub-expression (a construction or a bound
+//RS         // value), so the owning collection's `.iter().cloned()` / per-key/value clone is
+//RS         // byte-identical. (A foreign METHOD is still out of subset, so a fn that calls one
+//RS         // is excluded by that call — the recurring "cover the value type, let the next
+//RS         // uncovered node exclude its fn" seam.)
+//RS         || is_covered_foreign_value_ty(ty, cx)
+//RS         // D-MEM1 S6: a `Pool<T>`/`Id<T>`/`Shared<T>` element (`[Id<Node>]` — a
+//RS         // parent-pointer tree's `children` field, or `.ids()`'s `[Id<T>]` result).
+//RS         || is_covered_pool_ty(ty, cx)
+//RS         || is_covered_shared_ty(ty, cx)
+//RS         || is_covered_shared_guard_ty(ty, cx)
+//RS         || is_covered_shared_weak_ty(ty, cx)
+//RS }
+// END-PORT-PENDING 0526 crates/jet-codegen/src/Codegen/TIR/subset/types.rs:1-856
+

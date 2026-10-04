@@ -1,0 +1,1809 @@
+// PORT-PENDING 0338 crates-jet-parser-src-parser-statements-control-slice-1: crates/jet-parser/src/Parser/Statements/control.rs:1-1805
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::super::*;
+//RS use super::bindings::desugar_layout_anchors;
+//RS use jet_foundation::Names::mangle;
+//RS 
+//RS use crate::Diagnostics::{NoFixReason, NoFixReasonKind};
+//RS 
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS enum ForeignKeywordKind {
+//RS     For,
+//RS     While,
+//RS     Continue,
+//RS     Do,
+//RS     Repeat,
+//RS     Until,
+//RS     Declaration,
+//RS     MutableBinding,
+//RS     ImmutableBinding,
+//RS }
+//RS 
+//RS const FOREIGN_KEYWORDS: &[(&str, ForeignKeywordKind)] = &[
+//RS     (Syntax::FOREIGN_FOR, ForeignKeywordKind::For),
+//RS     (Syntax::FOREIGN_WHILE, ForeignKeywordKind::While),
+//RS     (Syntax::FOREIGN_CONTINUE, ForeignKeywordKind::Continue),
+//RS     (Syntax::FOREIGN_DO, ForeignKeywordKind::Do),
+//RS     (Syntax::FOREIGN_REPEAT, ForeignKeywordKind::Repeat),
+//RS     (Syntax::FOREIGN_UNTIL, ForeignKeywordKind::Until),
+//RS     (Syntax::FOREIGN_FUN, ForeignKeywordKind::Declaration),
+//RS     (Syntax::FOREIGN_FUNC, ForeignKeywordKind::Declaration),
+//RS     (Syntax::FOREIGN_DEF, ForeignKeywordKind::Declaration),
+//RS     (Syntax::FOREIGN_FUNCTION, ForeignKeywordKind::Declaration),
+//RS     (Syntax::FOREIGN_VAR, ForeignKeywordKind::MutableBinding),
+//RS     (Syntax::FOREIGN_LET, ForeignKeywordKind::ImmutableBinding),
+//RS     // `const` is deliberately absent from this table. It already has a MORE
+//RS     // specific ratified teaching — E0146 "`const` is retired — write `@`" —
+//RS     // which names Jet's comptime-constant spelling instead of the generic
+//RS     // binding advice. A known fact beats a family default, so the generic row
+//RS     // must not shadow it (tests/ui/const_retired.stderr pins that report).
+//RS     (Syntax::FOREIGN_VAL, ForeignKeywordKind::ImmutableBinding),
+//RS ];
+//RS 
+//RS impl<'a> Parser<'a> {
+//RS     /// D-LOOPEVAL1: parse a finite `loop … -> …` as an immediately invoked,
+//RS     /// compiler-private collecting closure. This reuses the existing callable
+//RS     /// expression pipeline; sema replaces the internal `Yield` markers with a
+//RS     /// typed eager List accumulator after it infers the item type.
+//RS     pub(in crate::Parser) fn yielding_loop_expr(&mut self) -> Result<Expr, Diagnostic> {
+//RS         let start = self.bump().span;
+//RS         if matches!(self.peek().kind, TokKind::LBrace) {
+//RS             self.bump();
+//RS             let body = self.block_stmts();
+//RS             let end = self.toks[self.pos - 1].span.end;
+//RS             let lambda = crate::AST::Lambda {
+//RS                 take_names: Vec::new(),
+//RS                 params: Vec::new(),
+//RS                 result_type: None,
+//RS                 error_type: None,
+//RS                 effects: None,
+//RS                 body: crate::AST::LambdaBody::Block(vec![Stmt::Loop {
+//RS                     body,
+//RS                     span: start,
+//RS                     arrow_body: false,
+//RS                     label: None,
+//RS                 }]),
+//RS                 span: Span::new(start.start, end),
+//RS                 meta: crate::AST::LambdaMeta {
+//RS                     result_loop: true,
+//RS                     ..crate::AST::LambdaMeta::default()
+//RS                 },
+//RS             };
+//RS             return Ok(Expr::CallValue {
+//RS                 callee: Box::new(Expr::Lambda(Box::new(lambda))),
+//RS                 args: Vec::new(),
+//RS                 span: Span::new(start.start, end),
+//RS             });
+//RS         }
+//RS         // The collecting arrow is `->` (`UnifiedArrow`).
+//RS         let bindingless_source = matches!(self.peek().kind, TokKind::Ident(_))
+//RS             && (Self::at_unified_arrow_token(&self.peek2().kind)
+//RS                 || matches!(self.peek2().kind, TokKind::KwIf));
+//RS         // `it` lexes as its own keyword, not an identifier, so a header that
+//RS         // names the implicit binding explicitly — `loop it in users` — reaches
+//RS         // here too. It is not the ratified spelling (D-LOOP-SUBJECT1 writes
+//RS         // the subject bare), but it must earn the honest "that is not a name"
+//RS         // diagnostic rather than a misleading claim about exhaustion.
+//RS         let binding_head = matches!(self.peek().kind, TokKind::Ident(_) | TokKind::KwIt);
+//RS         let finite_header = matches!(self.peek().kind, TokKind::LParen)
+//RS             || (binding_head
+//RS                 && (matches!(
+//RS                     self.peek2().kind,
+//RS                     TokKind::ColonEq
+//RS                         | TokKind::Semi
+//RS                         | TokKind::Comma
+//RS                         | TokKind::KwIf
+//RS                         | TokKind::KwIn
+//RS                 ) || Self::at_unified_arrow_token(&self.peek2().kind)));
+//RS         if !finite_header {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0072",
+//RS                 "this collecting loop cannot return a List because it has no finite exhaustion edge"
+//RS                     .to_string(),
+//RS                 "a collecting loop must finish after a statically finite source or C-style condition; bare infinite and condition-only loops do not provide that boundary"
+//RS                     .to_string(),
+//RS                 "remove `->`, or iterate a finite source; return one final value from an ordinary loop with `break value`"
+//RS                     .to_string(),
+//RS                 Some(start),
+//RS             ));
+//RS         }
+//RS         let mut clauses = Vec::new();
+//RS         let mut counted = None;
+//RS 
+//RS         if matches!(self.peek().kind, TokKind::Ident(_))
+//RS             && matches!(self.peek2().kind, TokKind::ColonEq)
+//RS         {
+//RS             let init = self.sigil_binding()?;
+//RS             self.expect_loop_comma("after the state initializer")?;
+//RS             let cond = self.expr_no_struct_lit()?;
+//RS             let step = if self.take_loop_comma() && !self.at_loop_body_start() {
+//RS                 let step_expr = self.expr()?;
+//RS                 let step = if matches!(self.peek().kind, TokKind::Eq)
+//RS                     || self.peek().kind.compound_op().is_some()
+//RS                 {
+//RS                     let op_tok = self.bump();
+//RS                     let op = op_tok.kind.compound_op();
+//RS                     let value = self.expr()?;
+//RS                     Stmt::Assign {
+//RS                         target: self.expr_to_lvalue(step_expr, op)?,
+//RS                         op,
+//RS                         op_span: op_tok.span,
+//RS                         value,
+//RS                     }
+//RS                 } else {
+//RS                     Stmt::Expr(step_expr)
+//RS                 };
+//RS                 Some(Box::new(step))
+//RS             } else {
+//RS                 None
+//RS             };
+//RS             counted = Some((init, cond, step));
+//RS         } else if bindingless_source {
+//RS             let collection = self.expr_no_struct_lit()?;
+//RS             let source_span = collection.span();
+//RS             clauses.push((
+//RS                 Syntax::KW_IT.to_string(),
+//RS                 source_span,
+//RS                 None,
+//RS                 ForKind::In {
+//RS                     collection,
+//RS                     step: None,
+//RS                 },
+//RS             ));
+//RS         } else {
+//RS             loop {
+//RS                 let (var, var_span, var2) = self.loop_source_binding()?;
+//RS                 self.expect_loop_source_separator()?;
+//RS                 let first = self.expr_no_struct_lit()?;
+//RS                 let kind = if let Expr::Range {
+//RS                     start,
+//RS                     end,
+//RS                     exclusive,
+//RS                     ..
+//RS                 } = &first
+//RS                 {
+//RS                     let step =
+//RS                         if self.at_yielding_loop_stride()
+//RS                             && !self.at_yielding_loop_guard_comma()
+//RS                             && !matches!(self.peek2().kind, TokKind::LBrace | TokKind::UnifiedArrow)
+//RS                         {
+//RS                             self.take_loop_comma();
+//RS                             Some(self.expr_no_struct_lit()?)
+//RS                         } else {
+//RS                             None
+//RS                         };
+//RS                     ForKind::Range {
+//RS                         start: (**start).clone(),
+//RS                         end: (**end).clone(),
+//RS                         step,
+//RS                         exclusive: *exclusive,
+//RS                     }
+//RS                 } else if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
+//RS                     let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
+//RS                     self.bump();
+//RS                     let end = self.expr_no_struct_lit()?;
+//RS                     let step =
+//RS                         if self.at_yielding_loop_stride()
+//RS                             && !self.at_yielding_loop_guard_comma()
+//RS                             && !matches!(self.peek2().kind, TokKind::LBrace | TokKind::UnifiedArrow)
+//RS                         {
+//RS                             self.take_loop_comma();
+//RS                             Some(self.expr_no_struct_lit()?)
+//RS                         } else {
+//RS                             None
+//RS                         };
+//RS                     ForKind::Range {
+//RS                         start: first,
+//RS                         end,
+//RS                         step,
+//RS                         exclusive,
+//RS                     }
+//RS                 } else {
+//RS                     let step =
+//RS                         if self.at_yielding_loop_stride()
+//RS                             && !self.at_yielding_loop_guard_comma()
+//RS                             && !matches!(self.peek2().kind, TokKind::LBrace | TokKind::UnifiedArrow)
+//RS                         {
+//RS                             self.take_loop_comma();
+//RS                             Some(self.expr_no_struct_lit()?)
+//RS                         } else {
+//RS                             None
+//RS                         };
+//RS                     ForKind::In {
+//RS                         collection: first,
+//RS                         step,
+//RS                     }
+//RS                 };
+//RS                 clauses.push((var, var_span, var2, kind));
+//RS                 if matches!(self.peek().kind, TokKind::Comma)
+//RS                     && matches!(self.peek2().kind, TokKind::LBrace | TokKind::UnifiedArrow)
+//RS                 {
+//RS                     self.bump();
+//RS                     break;
+//RS                 }
+//RS                 if self.at_yielding_loop_guard_comma() {
+//RS                     self.take_yielding_loop_guard_comma();
+//RS                 }
+//RS                 if !self.at_yielding_loop_clause() {
+//RS                     break;
+//RS                 }
+//RS                 self.bump();
+//RS             }
+//RS         }
+//RS 
+//RS         let guard = if matches!(self.peek().kind, TokKind::KwIf) {
+//RS             self.bump();
+//RS             Some(self.expr_no_struct_lit()?)
+//RS         } else {
+//RS             None
+//RS         };
+//RS         if !self.at_unified_arrow() {
+//RS             // D-CHOOSE-FIND1=A: a finite source loop in value position uses
+//RS             // its ordinary braced body. Sema later requires the surrounding
+//RS             // `??` route and attaches that route to this result carrier.
+//RS             if !matches!(self.peek().kind, TokKind::LBrace) {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0003",
+//RS                     "this statement loop is used where a value is required".to_string(),
+//RS                     "a finite loop produces a value only with a braced search body or `->`"
+//RS                         .to_string(),
+//RS                     "add `-> value`, or write `{ ... break value } ?? fallback`".to_string(),
+//RS                     Some(start),
+//RS                 ));
+//RS             }
+//RS             self.bump();
+//RS             let mut body = self.block_stmts();
+//RS             let exhaustion_span = self.toks[self.pos - 1].span;
+//RS             if let Some(cond) = guard {
+//RS                 body = vec![Stmt::Switch {
+//RS                     subject: Expr::Bool(true, start),
+//RS                     arms: vec![SwitchArm {
+//RS                         span: cond.span(),
+//RS                         cond,
+//RS                         body,
+//RS                     }],
+//RS                     else_body: None,
+//RS                     span: start,
+//RS                 }];
+//RS             }
+//RS             let result_label = mangle(&format!("value_loop_{}", start.start));
+//RS             rewrite_collect_root_exits(&mut body, &result_label, 0);
+//RS             let loop_stmt = if let Some((init, cond, step)) = counted {
+//RS                 Stmt::CountedLoop {
+//RS                     init,
+//RS                     cond,
+//RS                     step,
+//RS                     body,
+//RS                     span: start,
+//RS                     arrow_body: false,
+//RS                     label: None,
+//RS                 }
+//RS             } else {
+//RS                 let mut nested = body;
+//RS                 for (var, var_span, var2, kind) in clauses.into_iter().rev() {
+//RS                     nested = vec![Stmt::For {
+//RS                         var,
+//RS                         var_span,
+//RS                         var2,
+//RS                         kind,
+//RS                         body: nested,
+//RS                         span: start,
+//RS                         arrow_body: false,
+//RS                         label: None,
+//RS                         auto_vectorization: None,
+//RS                     }];
+//RS                 }
+//RS                 nested.pop().expect("a value loop has a source clause")
+//RS             };
+//RS             let end = exhaustion_span.end.max(loop_stmt.span().end).max(start.end);
+//RS             let lambda = crate::AST::Lambda {
+//RS                 take_names: Vec::new(),
+//RS                 params: Vec::new(),
+//RS                 result_type: None,
+//RS                 error_type: None,
+//RS                 effects: None,
+//RS                 body: crate::AST::LambdaBody::Block(vec![Stmt::Loop {
+//RS                     body: vec![loop_stmt],
+//RS                     span: start,
+//RS                     arrow_body: false,
+//RS                     label: Some((result_label, start)),
+//RS                 }]),
+//RS                 span: Span::new(start.start, end),
+//RS                 meta: crate::AST::LambdaMeta {
+//RS                     result_loop: true,
+//RS                     requires_exhaustion_route: true,
+//RS                     exhaustion_span: Some(exhaustion_span),
+//RS                     ..crate::AST::LambdaMeta::default()
+//RS                 },
+//RS             };
+//RS             return Ok(Expr::CallValue {
+//RS                 callee: Box::new(Expr::Lambda(Box::new(lambda))),
+//RS                 args: Vec::new(),
+//RS                 span: Span::new(start.start, end),
+//RS             });
+//RS         }
+//RS         self.bump();
+//RS         let mut body = if matches!(self.peek().kind, TokKind::LBrace) {
+//RS             self.bump();
+//RS             let previous_tail_depth = self.callable_tail_block_depth;
+//RS             let previous_tail_value = self.callable_tail_expects_value;
+//RS             self.callable_tail_block_depth = Some(self.block_depth + 1);
+//RS             self.callable_tail_expects_value = true;
+//RS             let body = self.block_stmts();
+//RS             self.callable_tail_block_depth = previous_tail_depth;
+//RS             self.callable_tail_expects_value = previous_tail_value;
+//RS             body
+//RS         } else {
+//RS             vec![Stmt::Expr(self.expr()?)]
+//RS         };
+//RS         let Some(last) = body.pop() else {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0073",
+//RS                 "this collecting loop path produces no item".to_string(),
+//RS                 "every accepted iteration must contribute one non-unit value unless `next` explicitly omits it"
+//RS                     .to_string(),
+//RS                 "return a value on this path, or use `next` to omit the item; remove `->` if the loop only performs effects".to_string(),
+//RS                 Some(start),
+//RS             ));
+//RS         };
+//RS         let value = match last {
+//RS             Stmt::Expr(value) => value,
+//RS             other => {
+//RS                 body.push(other);
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0073",
+//RS                     "this collecting loop path produces no item".to_string(),
+//RS                     "a multiline collecting body uses its final expression as the item".to_string(),
+//RS                     "return a value on this path, or use `next` to omit this iteration".to_string(),
+//RS                     Some(start),
+//RS                 ));
+//RS             }
+//RS         };
+//RS         // A zero-width span distinguishes this compiler-private collection
+//RS         // marker from the user-written `yield` statement used by Stream
+//RS         // generators. Formatter and sema remove it before user-facing output.
+//RS         body.push(Stmt::Yield(value, Span::new(start.start, start.start)));
+//RS         if let Some(cond) = guard {
+//RS             body = vec![Stmt::Switch {
+//RS                 subject: Expr::Bool(true, start),
+//RS                 arms: vec![SwitchArm {
+//RS                     span: cond.span(),
+//RS                     cond,
+//RS                     body,
+//RS                 }],
+//RS                 else_body: None,
+//RS                 span: start,
+//RS             }];
+//RS         }
+//RS         // A source comprehension may lower to several nested loops, but source
+//RS         // `break` exits the comprehension as one control construct. Give the
+//RS         // generated root a private label and retarget only exits owned by the
+//RS         // user body; exits inside an explicitly nested user loop remain local.
+//RS         let collect_label = mangle(&format!("collect_loop_{}", start.start));
+//RS         rewrite_collect_root_exits(&mut body, &collect_label, 0);
+//RS 
+//RS         let loop_stmt = if let Some((init, cond, step)) = counted {
+//RS             Stmt::CountedLoop {
+//RS                 init,
+//RS                 cond,
+//RS                 step,
+//RS                 body,
+//RS                 span: start,
+//RS                 arrow_body: false,
+//RS                 label: Some((collect_label.clone(), start)),
+//RS             }
+//RS         } else {
+//RS             let mut nested = body;
+//RS             let clause_count = clauses.len();
+//RS             for (index, (var, var_span, var2, kind)) in clauses.into_iter().rev().enumerate() {
+//RS                 nested = vec![Stmt::For {
+//RS                     var,
+//RS                     var_span,
+//RS                     var2,
+//RS                     kind,
+//RS                     body: nested,
+//RS                     span: start,
+//RS                     arrow_body: false,
+//RS                     label: (index + 1 == clause_count).then(|| (collect_label.clone(), start)),
+//RS                     auto_vectorization: None,
+//RS                 }];
+//RS             }
+//RS             nested.pop().expect("a yielding loop has a source clause")
+//RS         };
+//RS         let end = loop_stmt.span().end.max(start.end);
+//RS         let lambda = crate::AST::Lambda {
+//RS             take_names: Vec::new(),
+//RS             params: Vec::new(),
+//RS             result_type: None,
+//RS             error_type: None,
+//RS             effects: None,
+//RS             body: crate::AST::LambdaBody::Block(vec![loop_stmt]),
+//RS             span: Span::new(start.start, end),
+//RS             meta: crate::AST::LambdaMeta {
+//RS                 collecting_loop: true,
+//RS                 ..crate::AST::LambdaMeta::default()
+//RS             },
+//RS         };
+//RS         Ok(Expr::CallValue {
+//RS             callee: Box::new(Expr::Lambda(Box::new(lambda))),
+//RS             args: Vec::new(),
+//RS             span: Span::new(start.start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     pub(in super::super) fn at_meta_attr(&self) -> bool {
+//RS         matches!(self.peek().kind, TokKind::Hash)
+//RS             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_META)
+//RS             && matches!(self.peek3().kind, TokKind::LParen)
+//RS     }
+//RS 
+//RS     /// D-META-DSL1=A: recognize one library-declared block shape. The parser
+//RS     /// owns only the `#Name { … }` boundary; sema resolves the name against
+//RS     /// the bundle's declaration registry.
+//RS     pub(in super::super) fn at_declared_dsl_block(&self) -> bool {
+//RS         if !matches!(self.peek().kind, TokKind::Hash) {
+//RS             return false;
+//RS         }
+//RS         let TokKind::Ident(name) = &self.peek2().kind else {
+//RS             return false;
+//RS         };
+//RS         if matches!(
+//RS             name.as_str(),
+//RS             Syntax::RETIRED_MARKER_KNOWN
+//RS                 | Syntax::KW_UNSAFE
+//RS                 | Syntax::CTX_BLOCK
+//RS                 | Syntax::MARKER_REGION
+//RS                 | Syntax::MARKER_POLICY
+//RS                 | Syntax::MARKER_ARITHMETIC
+//RS                 | Syntax::MARKER_LIVE
+//RS                 | Syntax::MARKER_NONDETERMINISTIC
+//RS                 | Syntax::KW_FX
+//RS                 | Syntax::RETIRED_MARKER_GRANT
+//RS                 | Syntax::KW_TRANSACT
+//RS                 | Syntax::KW_IMPURE
+//RS                 | Syntax::KW_SHIELD
+//RS                 | Syntax::KW_REACTIVE
+//RS                 | Syntax::MARKER_OFF
+//RS                 | Syntax::MARKER_DEBUG_ONLY
+//RS         ) {
+//RS             return false;
+//RS         }
+//RS         self.marker_head_is_followed_by(TokKind::LBrace)
+//RS             || (name == Syntax::DSL_BLOCK_SQL
+//RS                 && matches!(self.peek3().kind, TokKind::Lt)
+//RS                 && matches!(self.peek4().kind, TokKind::Ident(_))
+//RS                 && matches!(self.peek5().kind, TokKind::Gt)
+//RS                 && matches!(
+//RS                     self.toks.get(self.pos + 5).map(|token| &token.kind),
+//RS                     Some(TokKind::LBrace)
+//RS                 ))
+//RS     }
+//RS 
+//RS     pub(in super::super) fn at_declared_dsl_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let start = self.peek().span;
+//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+//RS         let name = marker.name.clone();
+//RS         let name_span = marker.name_span;
+//RS         let mut args = marker.expr_args_owned();
+//RS         let args_span = (!args.is_empty()).then_some(marker.span);
+//RS         if matches!(self.peek().kind, TokKind::Lt) {
+//RS             let type_start = self.bump().span;
+//RS             let type_token = self.bump();
+//RS             let type_name = match type_token.kind {
+//RS                 TokKind::Ident(name) => name,
+//RS                 _ => String::new(),
+//RS             };
+//RS             let end = self.peek().span;
+//RS             self.expect(TokKind::Gt, "after the DSL type name")?;
+//RS             let old_span = Span::new(type_start.start, end.end);
+//RS             if !type_name.is_empty() {
+//RS                 args.push(Expr::Ident(type_name, type_token.span));
+//RS             }
+//RS             self.expect(TokKind::LBrace, "after a stdlib DSL marker")?;
+//RS             let _ = self.block_stmts();
+//RS             return Err(Diagnostic::error(
+//RS                 "E0927",
+//RS                 format!("`#{name}<…>` is retired"),
+//RS                 "marker arguments use the ordinary call form from the registry".to_string(),
+//RS                 format!("write `#{name}(Row) {{ … }}`"),
+//RS                 Some(Span::new(marker.span.start, old_span.end)),
+//RS             ));
+//RS         }
+//RS         self.expect(TokKind::LBrace, "after a checked text-block marker")?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         self.bind_rule_fact(
+//RS             marker.name_span,
+//RS             Some(Span::new(start.start, end)),
+//RS             crate::Policy::RuleSite::Block,
+//RS         );
+//RS         Ok(Stmt::ScopeMember {
+//RS             name,
+//RS             name_span,
+//RS             args,
+//RS             args_span,
+//RS             body,
+//RS             dsl: true,
+//RS             dot_span: start,
+//RS             span: Span::new(start.start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     pub(in super::super) fn meta_attr_next_kind(&self) -> Option<&TokKind> {
+//RS         self.meta_attr_next_index()
+//RS             .and_then(|i| self.toks.get(i).map(|t| &t.kind))
+//RS     }
+//RS 
+//RS     /// Index of the token immediately after a leading `#Meta(...)` (skipping ASI semis).
+//RS     pub(in super::super) fn meta_attr_next_index(&self) -> Option<usize> {
+//RS         if !self.at_meta_attr() {
+//RS             return None;
+//RS         }
+//RS         let mut depth = 0usize;
+//RS         let mut i = self.pos + 2;
+//RS         while let Some(tok) = self.toks.get(i) {
+//RS             match tok.kind {
+//RS                 TokKind::LParen => depth += 1,
+//RS                 TokKind::RParen => {
+//RS                     if depth == 0 {
+//RS                         return None;
+//RS                     }
+//RS                     depth -= 1;
+//RS                     if depth == 0 {
+//RS                         i += 1;
+//RS                         break;
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS             i += 1;
+//RS         }
+//RS         while matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Semi)) {
+//RS             i += 1;
+//RS         }
+//RS         if i < self.toks.len() {
+//RS             Some(i)
+//RS         } else {
+//RS             None
+//RS         }
+//RS     }
+//RS 
+//RS     /// After `#Meta(...)`, is the next item `#Persist …`?
+//RS     pub(in super::super) fn at_persist_after_meta(&self) -> bool {
+//RS         let Some(i) = self.meta_attr_next_index() else {
+//RS             return false;
+//RS         };
+//RS         matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Hash))
+//RS             && matches!(
+//RS                 self.toks.get(i + 1).map(|t| &t.kind),
+//RS                 Some(TokKind::Ident(n)) if n == Syntax::MARKER_PERSIST
+//RS             )
+//RS     }
+//RS 
+//RS     /// After `#Meta(...)`, is the next item an explicit compile-time marker?
+//RS     pub(in super::super) fn at_comptime_marker_after_meta(&self) -> bool {
+//RS         let Some(i) = self.meta_attr_next_index() else {
+//RS             return false;
+//RS         };
+//RS         // D-META-STAGE1=B: `#Meta(...) @name :: …` is a marked compile-time
+//RS         // binding; the retired `#Known` lead still routes here to teach.
+//RS         if matches!(
+//RS             self.toks.get(i).map(|t| &t.kind),
+//RS             Some(TokKind::Ident(n)) if Syntax::is_comptime_name(n)
+//RS         ) {
+//RS             return true;
+//RS         }
+//RS         matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Hash))
+//RS             && matches!(
+//RS                 self.toks.get(i + 1).map(|t| &t.kind),
+//RS                 Some(TokKind::Ident(n))
+//RS                     if matches!(
+//RS                         n.as_str(),
+//RS                         Syntax::RETIRED_MARKER_KNOWN
+//RS                             | Syntax::MARKER_STATIC
+//RS                             | Syntax::MARKER_INLINE
+//RS                             | "static"
+//RS                             | "inline"
+//RS                     )
+//RS             )
+//RS     }
+//RS 
+//RS     /// D-LAYOUT-CTOR1: `name (::|:=) Layout{` — typed-literal constraint body.
+//RS     /// The retired `Layout.{` spelling remains readable during migration.
+//RS     /// `:=` is recognized so we can teach immutable `::` (not silent TypedLit fallthrough).
+//RS     fn looks_like_layout_ctor(&self) -> bool {
+//RS         matches!(self.peek().kind, TokKind::Ident(_))
+//RS             && matches!(self.peek2().kind, TokKind::ColonColon | TokKind::ColonEq)
+//RS             && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::LAYOUT_TYPE)
+//RS             && (matches!(self.peek4().kind, TokKind::LBrace)
+//RS                 || (matches!(self.peek4().kind, TokKind::Dot)
+//RS                     && matches!(self.peek5().kind, TokKind::LBrace)))
+//RS     }
+//RS 
+//RS     /// D-LAYOUT-CTOR1: parse `name :: Layout{ … }` into `Stmt::Layout`.
+//RS     /// Body is a D-DOTCTOR3 element list of `Constraint` exprs (comma/semi),
+//RS     /// not a statement block — same separator convention as `[T]{ … }`.
+//RS     fn layout_ctor_binding(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let (name, name_span) = self.expect_ident("for the layout binding name")?;
+//RS         let (mutable, _) = self.expect_bind_sigil()?;
+//RS         if mutable {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0003",
+//RS                 format!(
+//RS                     "a `{}.{{ … }}` binding is immutable",
+//RS                     Syntax::LAYOUT_TYPE
+//RS                 ),
+//RS                 format!(
+//RS                     "`{}` builds a solved layout handle once; mutate suggestions through `.suggest`, not the binding",
+//RS                     Syntax::LAYOUT_TYPE
+//RS                 ),
+//RS                 format!(
+//RS                     "write `{name} {} {}.{{ … }}`",
+//RS                     Syntax::SIGIL_BIND_IMMUT,
+//RS                     Syntax::LAYOUT_TYPE
+//RS                 ),
+//RS                 Some(name_span),
+//RS             ));
+//RS         }
+//RS         let type_tok = self.bump(); // `Layout`
+//RS         if matches!(self.peek().kind, TokKind::Dot) {
+//RS             self.bump();
+//RS         }
+//RS         self.in_layout_body += 1;
+//RS         let lit_body =
+//RS             self.typed_lit_body_for_head(&Type::Named(Syntax::LAYOUT_TYPE.to_string()))?;
+//RS         self.in_layout_body -= 1;
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         let elems = match lit_body {
+//RS             TypedLitBody::Elements(elems) => elems,
+//RS             TypedLitBody::Empty => Vec::new(),
+//RS             TypedLitBody::Fields(_)
+//RS             | TypedLitBody::Entries(_)
+//RS             | TypedLitBody::Value(_)
+//RS             | TypedLitBody::ByteText(_) => {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0003",
+//RS                     format!(
+//RS                         "a `{}.{{ … }}` body is a comma-separated list of constraints",
+//RS                         Syntax::LAYOUT_TYPE
+//RS                     ),
+//RS                     format!(
+//RS                         "write comparisons separated by commas, e.g. `label.width >= 80.0, input.left == label.right`"
+//RS                     ),
+//RS                     format!(
+//RS                         "write `{name} {} {}.{{ constraint, … }}`",
+//RS                         Syntax::SIGIL_BIND_IMMUT,
+//RS                         Syntax::LAYOUT_TYPE
+//RS                     ),
+//RS                     Some(name_span),
+//RS                 ));
+//RS             }
+//RS         };
+//RS         let mut body: Vec<Stmt> = elems.into_iter().map(Stmt::Expr).collect();
+//RS         for stmt in &mut body {
+//RS             desugar_layout_anchors(&name, stmt);
+//RS         }
+//RS         Ok(Stmt::Layout {
+//RS             name,
+//RS             name_span,
+//RS             body,
+//RS             span: Span::new(name_span.start, end.max(type_tok.span.end)),
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-LAYOUT-CTOR1: retired `layout NAME { … }` — teaching error E2935.
+//RS     fn retired_layout_keyword(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let start = self.bump().span; // `layout`
+//RS         let mut name_hint = String::new();
+//RS         let mut end = start.end;
+//RS         if let TokKind::Ident(n) = &self.peek().kind {
+//RS             name_hint = n.clone();
+//RS             end = self.peek().span.end;
+//RS             self.bump();
+//RS         }
+//RS         if matches!(self.peek().kind, TokKind::LBrace) {
+//RS             end = self.peek().span.end;
+//RS         }
+//RS         let fix = if name_hint.is_empty() {
+//RS             format!(
+//RS                 "write `name {} {}.{{ … }}`",
+//RS                 Syntax::SIGIL_BIND_IMMUT,
+//RS                 Syntax::LAYOUT_TYPE
+//RS             )
+//RS         } else {
+//RS             format!(
+//RS                 "write `{name_hint} {} {}.{{ … }}`",
+//RS                 Syntax::SIGIL_BIND_IMMUT,
+//RS                 Syntax::LAYOUT_TYPE
+//RS             )
+//RS         };
+//RS         Err(Diagnostic::error(
+//RS             "E2935",
+//RS             format!("`{}` is retired", Syntax::FOREIGN_LAYOUT_KW),
+//RS             format!(
+//RS                 "constraint layouts use typed-literal construction — `name {} {}.{{ … }}` (D-DOTCTOR3 element body of `Constraint`s)",
+//RS                 Syntax::SIGIL_BIND_IMMUT,
+//RS                 Syntax::LAYOUT_TYPE
+//RS             ),
+//RS             fix,
+//RS             Some(Span::new(start.start, end)),
+//RS         ))
+//RS     }
+//RS 
+//RS     /// D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching error
+//RS     /// E0426 points at `name := Type{ uninit }`.
+//RS     fn retired_uninit_marker(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let head = self.read_marker_head()?;
+//RS         let hash_span = head.span;
+//RS         let mut end = head.name_span.end;
+//RS         let mut name_hint = String::new();
+//RS         if let TokKind::Ident(n) = &self.peek().kind {
+//RS             name_hint = n.clone();
+//RS             end = self.peek().span.end;
+//RS         }
+//RS         let fix = if name_hint.is_empty() {
+//RS             format!(
+//RS                 "write `name {} Type{{ {} }}`",
+//RS                 Syntax::SIGIL_BIND_MUT,
+//RS                 Syntax::KW_UNINIT
+//RS             )
+//RS         } else {
+//RS             format!(
+//RS                 "write `{name_hint} {} <Type>.{{ {} }}`",
+//RS                 Syntax::SIGIL_BIND_MUT,
+//RS                 Syntax::KW_UNINIT
+//RS             )
+//RS         };
+//RS         Err(Diagnostic::error(
+//RS             "E0426",
+//RS             format!("`#{}` is retired", Syntax::MARKER_UNINIT),
+//RS             format!(
+//RS                 "uninitialized storage is a fact about the value — it now reads `name {} Type{{ {} }}`",
+//RS                 Syntax::SIGIL_BIND_MUT,
+//RS                 Syntax::KW_UNINIT
+//RS             ),
+//RS             fix,
+//RS             Some(Span::new(hash_span.start, end)),
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(in super::super) fn parse_meta_attr_at_site(
+//RS         &mut self,
+//RS         site: crate::Policy::RuleSite,
+//RS     ) -> Result<MetaAttr, Diagnostic> {
+//RS         let marker = self.parse_registered_marker_at_site(site)?;
+//RS         self.meta_attr_from_marker(marker)
+//RS     }
+//RS 
+//RS     pub(in crate::Parser) fn meta_attr_from_marker(
+//RS         &mut self,
+//RS         marker: Marker,
+//RS     ) -> Result<MetaAttr, Diagnostic> {
+//RS         let arguments = self.bound_registered_rule_arguments(&marker)?;
+//RS         let parameter_indices = (0..marker.args.len())
+//RS             .map(|index| arguments.parameter_for_source(index))
+//RS             .collect::<Vec<_>>();
+//RS         let mut fields = Vec::new();
+//RS         for (index, (value, label)) in marker
+//RS             .expr_args_owned()
+//RS             .into_iter()
+//RS             .zip(marker.arg_labels)
+//RS             .enumerate()
+//RS         {
+//RS             if label.is_none()
+//RS                 && matches!(&value, Expr::Ident(name, _) if name == Syntax::META_FIELD_TUNABLE)
+//RS             {
+//RS                 fields.push(MetaField::Tunable { span: value.span() });
+//RS                 continue;
+//RS             }
+//RS             let label = label.or_else(|| {
+//RS                 let parameter_index = parameter_indices[index]?;
+//RS                 let parameter = crate::Policy::applied_rule(Syntax::MARKER_META)?
+//RS                     .signature
+//RS                     .params
+//RS                     .get(parameter_index)?;
+//RS                 Some((parameter.name.to_string(), value.span()))
+//RS             });
+//RS             match label {
+//RS                 Some((name, field_span)) => {
+//RS                     let span = Span::new(field_span.start, value.span().end);
+//RS                     if name == Syntax::META_FIELD_CATEGORY {
+//RS                         fields.push(MetaField::Category { value, span });
+//RS                     } else if name == Syntax::META_FIELD_MATURITY {
+//RS                         let valid = matches!(&value,
+//RS                             Expr::EnumLit { type_name, variant, args, .. }
+//RS                                 if type_name.is_empty()
+//RS                                     && args.is_empty()
+//RS                                     && matches!(variant.as_str(),
+//RS                                         Syntax::MARKER_EXPERIMENTAL
+//RS                                             | Syntax::MARKER_TESTED
+//RS                                             | Syntax::MARKER_HARDENED));
+//RS                         if !valid {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0352",
+//RS                                 "`#Meta` maturity needs a known maturity value".to_string(),
+//RS                                 "maturity metadata is a closed documentation scale".to_string(),
+//RS                                 "write `maturity: .Experimental`, `.Tested`, or `.Hardened`"
+//RS                                     .to_string(),
+//RS                                 Some(value.span()),
+//RS                             ));
+//RS                         }
+//RS                         fields.push(MetaField::Maturity { value, span });
+//RS                     } else if name == Syntax::META_FIELD_TUNABLE {
+//RS                         match value {
+//RS                             Expr::Bool(true, _) => fields.push(MetaField::Tunable { span }),
+//RS                             Expr::Bool(false, _) => {}
+//RS                             value => fields.push(MetaField::Unknown {
+//RS                                 name,
+//RS                                 value: Some(value),
+//RS                                 span: field_span,
+//RS                             }),
+//RS                         }
+//RS                     } else {
+//RS                         fields.push(MetaField::Unknown {
+//RS                             name,
+//RS                             value: Some(value),
+//RS                             span: field_span,
+//RS                         });
+//RS                     }
+//RS                 }
+//RS                 None => {
+//RS                     let span = value.span();
+//RS                     fields.push(MetaField::Unknown {
+//RS                         name: match value {
+//RS                             Expr::Ident(name, _) => name,
+//RS                             _ => "<positional>".to_string(),
+//RS                         },
+//RS                         value: None,
+//RS                         span,
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(MetaAttr {
+//RS             fields,
+//RS             span: marker.span,
+//RS         })
+//RS     }
+//RS 
+//RS     pub(in super::super) fn meta_attr_wrong_place_diag(
+//RS         &self,
+//RS         span: Span,
+//RS         target: &str,
+//RS     ) -> Diagnostic {
+//RS         Diagnostic::error(
+//RS             "E0349",
+//RS             "`#Meta` attaches to a binding or function".to_string(),
+//RS             "`#Meta` is a tooling fact about a named source item; expressions do not carry it"
+//RS                 .to_string(),
+//RS             format!("move `#Meta(...)` before a {target}, or remove it"),
+//RS             Some(span),
+//RS         )
+//RS     }
+//RS 
+//RS     pub(super) fn at_statement_switch_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         // Both switch markers are legal on a block and on its first statement;
+//RS         // parse through the registry's block row, then record the actual
+//RS         // target site after the body shape is known.
+//RS         let switch = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+//RS         let attr_span = switch.span;
+//RS         let marker = switch.name.as_str();
+//RS 
+//RS         if matches!(self.peek().kind, TokKind::Hash)
+//RS             && matches!(
+//RS                 &self.peek2().kind,
+//RS                 TokKind::Ident(n) if n == Syntax::MARKER_OFF || n == Syntax::MARKER_DEBUG_ONLY
+//RS             )
+//RS         {
+//RS             let second_start = self.peek().span;
+//RS             let second_name = match &self.peek2().kind {
+//RS                 TokKind::Ident(n) => n.clone(),
+//RS                 _ => String::new(),
+//RS             };
+//RS             let second_end = self.peek2().span.end;
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0344",
+//RS                 "only one switch-off attribute can be written on a statement".to_string(),
+//RS                 format!(
+//RS                     "`#{}` and `#{}` both control whether the same statement emits code",
+//RS                     marker, second_name
+//RS                 ),
+//RS                 format!(
+//RS                     "keep one marker: `#{} <statement>` or `#{} <statement>`",
+//RS                     Syntax::MARKER_OFF,
+//RS                     Syntax::MARKER_DEBUG_ONLY
+//RS                 ),
+//RS                 Some(Span::new(second_start.start, second_end)),
+//RS             ));
+//RS         }
+//RS 
+//RS         let body_is_block = matches!(self.peek().kind, TokKind::LBrace);
+//RS         let (body, end) = if body_is_block {
+//RS             self.bump();
+//RS             let body = self.block_stmts();
+//RS             let end = self.toks[self.pos - 1].span.end;
+//RS             (body, end)
+//RS         } else {
+//RS             let stmt = self.stmt()?;
+//RS             let end = stmt.span().end;
+//RS             (vec![stmt], end)
+//RS         };
+//RS         let span = Span::new(attr_span.start, end);
+//RS         let site = if body_is_block {
+//RS             crate::Policy::RuleSite::Block
+//RS         } else {
+//RS             crate::Policy::RuleSite::Statement
+//RS         };
+//RS         self.bind_rule_fact(switch.name_span, Some(span), site);
+//RS         Ok(Stmt::Switched {
+//RS             marker: switch,
+//RS             body,
+//RS             span,
+//RS         })
+//RS     }
+//RS 
+//RS     fn at_policy_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let mut declarations = self.policy_decl(crate::Policy::PolicyScope::Block)?;
+//RS         self.expect(TokKind::LBrace, "after a block policy")?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         let start = declarations.first().map(|d| d.span.start).unwrap_or(end);
+//RS         let span = Span::new(start, end);
+//RS         for declaration in &mut declarations {
+//RS             declaration.target = Some(span);
+//RS         }
+//RS         self.policy_declarations.extend(declarations.clone());
+//RS         Ok(Stmt::Policy {
+//RS             declarations,
+//RS             body,
+//RS             span,
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") { … }`
+//RS     /// in statement position. The reason string is the argument of `#Unsafe`
+//RS     /// itself; the separate `#Audit` marker is retired (E0055 teaching error).
+//RS     /// D-UNSAFE-REASON1=A: a missing reason is E3112.
+//RS     pub(super) fn at_unsafe_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let start = self.peek().span;
+//RS         // E0055: retirement and replacement come from the shared registry;
+//RS         // the ordinary marker-call reader consumes the old arguments.
+//RS         let retired_audit = match &self.peek2().kind {
+//RS             TokKind::Ident(name) if name == Syntax::MARKER_AUDIT => {
+//RS                 crate::Policy::applied_rule(name).and_then(|row| match row.status {
+//RS                     crate::Policy::RuleStatus::Retired { replacement } => Some(replacement),
+//RS                     crate::Policy::RuleStatus::Active => None,
+//RS                 })
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS         if matches!(self.peek().kind, TokKind::Hash) && retired_audit.is_some() {
+//RS             let replacement = retired_audit.unwrap();
+//RS             let audit = self.parse_rule_marker()?;
+//RS             // Skip synthetic line terminator between `#Audit(…)` and `#Unsafe`.
+//RS             if matches!(self.peek().kind, TokKind::Semi) {
+//RS                 self.bump();
+//RS             }
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0055",
+//RS                 format!("`#{}` is retired", audit.name),
+//RS                 "D-UNSAFE2 merged the audit reason into the gate itself".to_string(),
+//RS                 format!("write `{replacement} {{ … }}` and drop the separate audit line"),
+//RS                 Some(audit.span),
+//RS             ));
+//RS         }
+//RS         // Required `#Unsafe`.
+//RS         if !(matches!(self.peek().kind, TokKind::Hash)
+//RS             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_UNSAFE))
+//RS         {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0003",
+//RS                 format!("expected `#{}` here", Syntax::KW_UNSAFE),
+//RS                 "an audited region opens with `#Unsafe(\"reason\") { … }`".to_string(),
+//RS                 format!(
+//RS                     "write `#{}(\"why this is safe\") {{ … }}`",
+//RS                     Syntax::KW_UNSAFE
+//RS                 ),
+//RS                 Some(self.peek().span),
+//RS             ));
+//RS         }
+//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+//RS         if marker.args.is_empty() {
+//RS             return Err(Diagnostic::error(
+//RS                 "E3112",
+//RS                 "an `#Unsafe` block needs a reason".to_string(),
+//RS                 "every unsafe gate records why its unchecked operations preserve memory safety"
+//RS                     .to_string(),
+//RS                 "write `#Unsafe(\"why this is safe\") { … }`".to_string(),
+//RS                 Some(marker.span),
+//RS             ));
+//RS         }
+//RS         let arguments = self.bound_registered_rule_arguments(&marker)?;
+//RS         // D-UNSAFE-OBLIG1: ordinary call arguments, then semantic validation.
+//RS         let audit_expr = arguments.parameter(0).cloned();
+//RS         let audit = audit_expr.as_ref().and_then(|argument| match argument {
+//RS             Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+//RS                 StrPart::Lit(reason) => Some(reason.clone()),
+//RS                 StrPart::Interp(..) => None,
+//RS             },
+//RS             _ => None,
+//RS         });
+//RS         let mut obligation_mode = None;
+//RS         if marker.args.len() > 2 {
+//RS             return Err(crate::Policy::marker_argument_shape_error(
+//RS                 Syntax::KW_UNSAFE,
+//RS                 marker.span,
+//RS             ));
+//RS         }
+//RS         if let Some(value) = arguments.parameter(1) {
+//RS             let (mode, mode_span) = match value {
+//RS                 Expr::EnumLit {
+//RS                     type_name,
+//RS                     variant,
+//RS                     span,
+//RS                     args,
+//RS                     ..
+//RS                 } if type_name.is_empty() && args.is_empty() => (variant, span),
+//RS                 _ => {
+//RS                     return Err(crate::Policy::marker_argument_shape_error(
+//RS                         Syntax::KW_UNSAFE,
+//RS                         value.span(),
+//RS                     ))
+//RS                 }
+//RS             };
+//RS             obligation_mode = Some(match mode.as_str() {
+//RS                     "Track" => crate::Policy::PolicyValue::Track,
+//RS                     "Skip" => crate::Policy::PolicyValue::Skip,
+//RS                     _ => return Err(Diagnostic::error("E3108", format!("`.{mode}` is not a per-site obligation mode"), "a gate either tracks typed obligations or explicitly skips them when policy permits".to_string(), "write `.Track` or `.Skip`".to_string(), Some(*mode_span))),
+//RS                 });
+//RS         }
+//RS         self.expect(TokKind::LBrace, "after `#Unsafe(…)`")?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         let span = Span::new(start.start, end);
+//RS         self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
+//RS         if let Some(value) = obligation_mode {
+//RS             self.policy_declarations
+//RS                 .push(crate::Policy::PolicyDeclaration {
+//RS                     key: crate::Policy::PolicyKey::Unsafe,
+//RS                     value,
+//RS                     scope: crate::Policy::PolicyScope::Block,
+//RS                     span: Span::new(start.start, self.toks[self.pos - 1].span.end),
+//RS                     target: Some(span),
+//RS                     source: "<source>".to_string(),
+//RS                 });
+//RS         }
+//RS         Ok(Stmt::Unsafe {
+//RS             audit,
+//RS             audit_expr,
+//RS             body,
+//RS             span,
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-CTEFFECT1 (ratified 2026-06-25): parse `#Impure("reason") { … }` in
+//RS     /// statement position. Mirrors `at_unsafe_stmt`. Missing reason → L3102 in sema.
+//RS     pub(super) fn at_impure_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let start = self.peek().span;
+//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+//RS         let arguments = self.bound_registered_rule_arguments(&marker)?;
+//RS         let reason_expr = arguments.parameter(0).cloned();
+//RS         let reason = reason_expr.as_ref().and_then(|argument| match argument {
+//RS             Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+//RS                 StrPart::Lit(reason) => Some(reason.clone()),
+//RS                 StrPart::Interp(..) => None,
+//RS             },
+//RS             _ => None,
+//RS         });
+//RS         self.expect(TokKind::LBrace, "after `#Impure(…)`")?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         self.bind_rule_fact(
+//RS             marker.name_span,
+//RS             Some(Span::new(marker.span.start, end)),
+//RS             crate::Policy::RuleSite::Block,
+//RS         );
+//RS         Ok(Stmt::Impure {
+//RS             reason,
+//RS             reason_expr,
+//RS             body,
+//RS             span: Span::new(start.start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `#Reactive { … }` in
+//RS     /// statement position. Lowers to a reactive effect scope at codegen.
+//RS     pub(super) fn at_reactive_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+//RS         self.expect(TokKind::LBrace, "after `#Reactive`")?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         let span = Span::new(marker.span.start, end);
+//RS         self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
+//RS         Ok(Stmt::Reactive { body, span })
+//RS     }
+//RS 
+//RS     /// D-SHIELDNAME1=A (ratified 2026-07-11): parse `#Shield { … }` in statement
+//RS     /// position. Bare block only — no argument list. `#Shield(...)` is E0430.
+//RS     /// Lowers to `jet_scheduler_shield_enter`/`_leave` around the body at codegen.
+//RS     pub(super) fn at_shield_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         if matches!(self.peek3().kind, TokKind::LParen) {
+//RS             let head = self.read_marker_head()?;
+//RS             let lparen = self.peek().span;
+//RS             return Err(Diagnostic::error(
+//RS                 "E0430",
+//RS                 "`#Shield` takes no arguments".to_string(),
+//RS                 "a shield region protects whatever runs inside it; there is nothing to configure"
+//RS                     .to_string(),
+//RS                 "write `#Shield { … }`".to_string(),
+//RS                 Some(Span::new(head.name_span.start, lparen.end)),
+//RS             ));
+//RS         }
+//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+//RS         self.expect(TokKind::LBrace, "after `#Shield`")?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         let span = Span::new(marker.span.start, end);
+//RS         self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
+//RS         Ok(Stmt::Shield { body, span })
+//RS     }
+//RS 
+//RS     /// D-BLOCKPLANE1=A: `#Region(name) { … }`.
+//RS     pub(super) fn at_region_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+//RS         let arguments = self.bound_registered_rule_arguments(&marker)?;
+//RS         let Some(Expr::Ident(name, name_span)) = arguments.parameter(0) else {
+//RS             return Err(crate::Policy::marker_argument_shape_error(
+//RS                 Syntax::MARKER_REGION,
+//RS                 marker.span,
+//RS             ));
+//RS         };
+//RS         self.expect(TokKind::LBrace, "after `#Region(name)`")?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         self.bind_rule_fact(
+//RS             marker.name_span,
+//RS             Some(Span::new(marker.span.start, end)),
+//RS             crate::Policy::RuleSite::Block,
+//RS         );
+//RS         Ok(Stmt::Region {
+//RS             name: name.clone(),
+//RS             name_span: *name_span,
+//RS             body,
+//RS             span: Span::new(marker.span.start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-BLOCKPLANE1=A: `#Live { … }`.
+//RS     pub(super) fn at_live_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+//RS         self.expect(TokKind::LBrace, "after `#Live`")?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         let span = Span::new(marker.span.start, end);
+//RS         self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
+//RS         Ok(Stmt::Live { body, span })
+//RS     }
+//RS 
+//RS     /// D-BLOCKPLANE1=A: audited `#Nondeterministic("reason") { … }`.
+//RS     pub(super) fn at_nondeterministic_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+//RS         let arguments = self.bound_registered_rule_arguments(&marker)?;
+//RS         let reason_expr = arguments
+//RS             .parameter(0)
+//RS             .cloned()
+//RS             .expect("bound reason argument");
+//RS         let reason = match &reason_expr {
+//RS             Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+//RS                 StrPart::Lit(reason) => reason.clone(),
+//RS                 StrPart::Interp(..) => String::new(),
+//RS             },
+//RS             _ => String::new(),
+//RS         };
+//RS         self.expect(TokKind::LBrace, "after `#Nondeterministic(…)`")?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         self.bind_rule_fact(
+//RS             marker.name_span,
+//RS             Some(Span::new(marker.span.start, end)),
+//RS             crate::Policy::RuleSite::Block,
+//RS         );
+//RS         Ok(Stmt::AssumeDet {
+//RS             reason,
+//RS             reason_expr,
+//RS             body,
+//RS             span: Span::new(marker.span.start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-CTX1 (ratified 2026-06-22, G2): parse `#Context(field: value, …) { … }`.
+//RS     /// Cursor is on the `#` token. Emits E0760 for `=` spelling, E0761 for
+//RS     /// unknown fields.
+//RS     pub(super) fn at_context_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         if let (TokKind::Ident(field), TokKind::Eq) = (&self.peek4().kind, &self.peek5().kind) {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0760",
+//RS                 "context fields are set with `:`, not `=`".to_string(),
+//RS                 "`=` is reassignment (S17); the `name: value` form sets a context field"
+//RS                     .to_string(),
+//RS                 format!("write `#{}({field}: …) {{ … }}`", Syntax::CTX_BLOCK),
+//RS                 Some(self.peek5().span),
+//RS             ));
+//RS         }
+//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+//RS         let marker_span = marker.span;
+//RS         if let Some((field_name, field_name_span)) =
+//RS             marker.arg_labels.iter().flatten().find(|(field_name, _)| {
+//RS                 field_name != Syntax::CTX_FIELD_ALLOCATOR
+//RS                     && field_name != Syntax::CTX_FIELD_LOGGER
+//RS                     && field_name != Syntax::CTX_FIELD_DEADLINE
+//RS             })
+//RS         {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0761",
+//RS                 format!("`{field_name}` isn't a context field"),
+//RS                 "the context bundle holds `allocator`, `logger`, and `deadline`".to_string(),
+//RS                 format!(
+//RS                     "write `#{}(allocator: …)`, `#{}(logger: …)`, or `#{}(deadline: …)`",
+//RS                     Syntax::CTX_BLOCK,
+//RS                     Syntax::CTX_BLOCK,
+//RS                     Syntax::CTX_BLOCK
+//RS                 ),
+//RS                 Some(*field_name_span),
+//RS             ));
+//RS         }
+//RS         let arguments = self.bound_registered_rule_arguments(&marker)?;
+//RS         let parameter_indices = (0..marker.args.len())
+//RS             .map(|index| arguments.parameter_for_source(index))
+//RS             .collect::<Vec<_>>();
+//RS         let mut fields: Vec<(String, Expr, Span)> = Vec::new();
+//RS         for (index, (value, label)) in marker
+//RS             .expr_args_owned()
+//RS             .into_iter()
+//RS             .zip(marker.arg_labels)
+//RS             .enumerate()
+//RS         {
+//RS             let (field_name, field_name_span) = match label {
+//RS                 Some(label) => label,
+//RS                 None => {
+//RS                     let parameter_index =
+//RS                         parameter_indices[index].expect("normalized context argument");
+//RS                     let parameter = crate::Policy::applied_rule(Syntax::CTX_BLOCK)
+//RS                         .and_then(|rule| rule.signature.params.get(parameter_index))
+//RS                         .expect("normalized context argument");
+//RS                     (parameter.name.to_string(), value.span())
+//RS                 }
+//RS             };
+//RS             // E0761: unknown field name.
+//RS             if field_name != Syntax::CTX_FIELD_ALLOCATOR
+//RS                 && field_name != Syntax::CTX_FIELD_LOGGER
+//RS                 && field_name != Syntax::CTX_FIELD_DEADLINE
+//RS             {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0761",
+//RS                     format!("`{}` isn't a context field", field_name),
+//RS                     "the context bundle holds `allocator`, `logger`, and `deadline`".to_string(),
+//RS                     format!(
+//RS                         "write `#{}(allocator: …)`, `#{}(logger: …)`, or `#{}(deadline: …)`",
+//RS                         Syntax::CTX_BLOCK,
+//RS                         Syntax::CTX_BLOCK,
+//RS                         Syntax::CTX_BLOCK
+//RS                     ),
+//RS                     Some(field_name_span),
+//RS                 ));
+//RS             }
+//RS             fields.push((
+//RS                 field_name,
+//RS                 value.clone(),
+//RS                 Span::new(field_name_span.start, value.span().end),
+//RS             ));
+//RS         }
+//RS         self.expect(
+//RS             TokKind::LBrace,
+//RS             &format!("after `#{}(…)`", Syntax::CTX_BLOCK),
+//RS         )?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         self.bind_rule_fact(
+//RS             marker.name_span,
+//RS             Some(Span::new(marker.span.start, end)),
+//RS             crate::Policy::RuleSite::Block,
+//RS         );
+//RS         Ok(Stmt::ContextBlock {
+//RS             fields,
+//RS             body,
+//RS             span: Span::new(marker_span.start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-EFF1 / D-ABILITY-NAME2: parse a `#FX(Net, DB) { … }` effect-restriction region
+//RS     /// in statement position. Cursor is on the `#` token. Effect names are bare
+//RS     /// idents; sema validates them against the known effect vocabulary (E0119).
+//RS     pub(super) fn at_fx_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         if matches!(self.peek3().kind, TokKind::LParen)
+//RS             && matches!(self.peek4().kind, TokKind::Ident(_))
+//RS             && matches!(self.peek5().kind, TokKind::Colon)
+//RS         {
+//RS             let start = self.bump().span; // `#`
+//RS             let marker_name_span = self.peek().span;
+//RS             self.expect_ident(&format!("`#{}`", Syntax::KW_FX))?;
+//RS             self.expect(TokKind::LParen, "after `#FX`")?;
+//RS             let (binding, binding_span) = self.expect_ident("as the scoped Authority handle")?;
+//RS             self.expect(TokKind::Colon, "after the scoped Authority handle")?;
+//RS             let mut caps = Vec::new();
+//RS             let mut marker_args = Vec::new();
+//RS             loop {
+//RS                 let (name, span) = self.expect_effect_path_name("as an authority-bound effect")?;
+//RS                 let name = Self::strip_marker_enum_prefix(name, "Effect");
+//RS                 marker_args.push(crate::AST::MarkerCallArg::Expr(crate::AST::Expr::Ident(
+//RS                     name.clone(),
+//RS                     span,
+//RS                 )));
+//RS                 caps.push((name, span));
+//RS                 if matches!(self.peek().kind, TokKind::RParen) {
+//RS                     break;
+//RS                 }
+//RS                 self.expect(TokKind::Comma, "between scoped effects")?;
+//RS                 if matches!(self.peek().kind, TokKind::RParen) {
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             let caps_start = caps
+//RS                 .first()
+//RS                 .map_or(binding_span.end, |(_, span)| span.start);
+//RS             self.expect(TokKind::RParen, "to close `#FX`")?;
+//RS             let caps_end = self.toks[self.pos - 1].span.end;
+//RS             self.record_rule_fact(
+//RS                 crate::AST::Marker {
+//RS                     name_span: marker_name_span,
+//RS                     name: Syntax::KW_FX.to_string(),
+//RS                     negated: false,
+//RS                     args: marker_args,
+//RS                     arg_labels: vec![None; caps.len()],
+//RS                     span: Span::new(start.start, caps_end),
+//RS                     ct: None,
+//RS                 },
+//RS                 None,
+//RS                 crate::Policy::RuleSite::Block,
+//RS             );
+//RS             self.expect(TokKind::LBrace, "after `#FX(grant: Effects)`")?;
+//RS             let body = self.block_stmts();
+//RS             let end = self.toks[self.pos - 1].span.end;
+//RS             self.bind_rule_fact(
+//RS                 marker_name_span,
+//RS                 Some(Span::new(start.start, end)),
+//RS                 crate::Policy::RuleSite::Block,
+//RS             );
+//RS             return Ok(Stmt::AuthorityScope {
+//RS                 caps,
+//RS                 caps_span: Span::new(caps_start, caps_end),
+//RS                 binding: Some(binding),
+//RS                 binding_span: Some(binding_span),
+//RS                 body,
+//RS                 span: Span::new(start.start, end),
+//RS             });
+//RS         }
+//RS         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+//RS         let arguments = self.bound_registered_rule_arguments(&marker)?;
+//RS         let mut caps = Vec::with_capacity(marker.args.len());
+//RS         for argument in arguments.variadic() {
+//RS             let Some(name) = Self::marker_enum_path(argument, "Effect") else {
+//RS                 return Err(crate::Policy::marker_argument_shape_error(
+//RS                     Syntax::KW_FX,
+//RS                     argument.span(),
+//RS                 ));
+//RS             };
+//RS             caps.push((name, argument.span()));
+//RS         }
+//RS         self.expect(TokKind::LBrace, &format!("after `#{}(…)`", Syntax::KW_FX))?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         self.bind_rule_fact(
+//RS             marker.name_span,
+//RS             Some(Span::new(marker.span.start, end)),
+//RS             crate::Policy::RuleSite::Block,
+//RS         );
+//RS         Ok(Stmt::AuthorityScope {
+//RS             caps,
+//RS             caps_span: Span::new(marker.name_span.end, marker.span.end),
+//RS             binding: None,
+//RS             binding_span: None,
+//RS             body,
+//RS             span: Span::new(marker.span.start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-AUTHORITY-SCOPE1: the retired Grant marker is a hard parse error.
+//RS     pub(super) fn retired_grant_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let marker = self.parse_rule_marker()?;
+//RS         // The marker is a parser tombstone, not a live sema fact. Leaving the
+//RS         // fact behind makes sema report a second E0927 unknown-marker error.
+//RS         self.rule_facts.pop();
+//RS         Err(Diagnostic::error(
+//RS             "E0077",
+//RS             "the `#Grant` scope marker is retired".to_string(),
+//RS             "`#FX` now narrows a block and binds an Authority handle when its head has a name"
+//RS                 .to_string(),
+//RS             "write `#FX(grant: FS, Net) { ... }`".to_string(),
+//RS             Some(marker.span),
+//RS         ))
+//RS     }
+//RS 
+//RS     /// D-TXN4: parse a `#Transact { … }` or named `#Transact(name) { … }`
+//RS     /// transaction block in statement position. Cursor is on the `#` token.
+//RS     /// The optional `name` binds a user-chosen transaction handle (any ident,
+//RS     /// mirroring `region r { … }`).
+//RS     pub(super) fn at_transact_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         let start = self.peek().span;
+//RS         let marker_name_span = self.peek2().span;
+//RS         self.bump(); // `#`
+//RS         self.bump(); // `Transact`
+//RS                      // D-TXN4: a named form binds a handle; bare `#Transact { … }`
+//RS                      // (no handle, hence no `on_commit` hooks) stays legal.
+//RS         let (name, name_span) = if matches!(self.peek().kind, TokKind::LParen) {
+//RS             self.bump(); // `(`
+//RS             let (n, ns) = self.expect_ident("for the transaction handle name")?;
+//RS             self.expect(
+//RS                 TokKind::RParen,
+//RS                 &format!("to close `#{}(name`", Syntax::KW_TRANSACT),
+//RS             )?;
+//RS             (Some(n), Some(ns))
+//RS         } else {
+//RS             (None, None)
+//RS         };
+//RS         if let (Some(name), Some(name_span)) = (&name, name_span) {
+//RS             self.record_rule_fact(
+//RS                 crate::AST::Marker {
+//RS                     span: Span::new(start.start, self.toks[self.pos - 1].span.end),
+//RS                     name: Syntax::KW_TRANSACT.to_string(),
+//RS                     negated: false,
+//RS                     name_span: marker_name_span,
+//RS                     args: vec![crate::AST::MarkerCallArg::Expr(crate::AST::Expr::Ident(
+//RS                         name.clone(),
+//RS                         name_span,
+//RS                     ))],
+//RS                     arg_labels: vec![None],
+//RS                     ct: None,
+//RS                 },
+//RS                 None,
+//RS                 crate::Policy::RuleSite::Block,
+//RS             );
+//RS         }
+//RS         self.expect(
+//RS             TokKind::LBrace,
+//RS             &format!("after `#{}`", Syntax::KW_TRANSACT),
+//RS         )?;
+//RS         let body = self.block_stmts();
+//RS         let end = self.toks[self.pos - 1].span.end;
+//RS         if name.is_some() {
+//RS             self.bind_rule_fact(
+//RS                 marker_name_span,
+//RS                 Some(Span::new(start.start, end)),
+//RS                 crate::Policy::RuleSite::Block,
+//RS             );
+//RS         }
+//RS         Ok(Stmt::Transact {
+//RS             name,
+//RS             name_span,
+//RS             body,
+//RS             implicit: false,
+//RS             span: Span::new(start.start, end),
+//RS         })
+//RS     }
+//RS 
+//RS     /// S19 + D-LOOPLABEL3: parse a `loop` statement (all three header forms), with an
+//RS     /// optional compile-time name already parsed by the caller. The cursor is on the
+//RS     /// `loop` keyword.
+//RS     pub(super) fn loop_stmt(&mut self, label: Option<(String, Span)>) -> Result<Stmt, Diagnostic> {
+//RS         let span = self.bump().span; // `loop`
+//RS                                      // S19-amend: `loop` handles all three loop forms by header.
+//RS                                      //   loop { }               → infinite
+//RS                                      //   loop cond { }          → conditional (was `while`)
+//RS                                      //   loop x in ... { }      → iteration (was `for`)
+//RS                                      //   loop (k, v) in ... { } → key-value iteration
+//RS         if self.at_unified_arrow() {
+//RS             // D-ONELINE-BODY1=B: an infinite effect loop may use the same
+//RS             // one-statement arrow body as conditional and source loops.
+//RS             let (body, arrow_body) = self.effect_loop_body()?;
+//RS             Ok(Stmt::Loop {
+//RS                 body,
+//RS                 span,
+//RS                 arrow_body,
+//RS                 label,
+//RS             })
+//RS         } else if matches!(self.peek().kind, TokKind::LBrace) {
+//RS             // Infinite loop
+//RS             self.bump();
+//RS             let body = self.block_stmts();
+//RS             Ok(Stmt::Loop {
+//RS                 body,
+//RS                 span,
+//RS                 arrow_body: false,
+//RS                 label,
+//RS             })
+//RS         } else if matches!(self.peek().kind, TokKind::Ident(_))
+//RS             && matches!(self.peek2().kind, TokKind::ColonEq)
+//RS         {
+//RS             // D-LOOP-HEADER2=A / D-BIND-BARE1: state loop. Only a plain mutable
+//RS             // bare binding may initialize state (`name := value`).
+//RS             let init = self.sigil_binding()?;
+//RS             if !init.mutable || init.pattern.is_some() || init.name.is_empty() {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0003",
+//RS                     "loop state needs one mutable name binding".to_string(),
+//RS                     "state changes between loop turns, so its header starts with `name := value`"
+//RS                         .to_string(),
+//RS                     "write `loop name := value, condition { ... }`".to_string(),
+//RS                     Some(init.name_span),
+//RS                 ));
+//RS             }
+//RS             self.expect_loop_comma("after the state initializer")?;
+//RS             let cond = self.expr_no_struct_lit()?;
+//RS             // D-LOOP-HEADER3=D: three-slot C-style counter (`init, cond, step`)
+//RS             // retires. Keep two-slot state loops (`name := value, condition`).
+//RS             if self.take_loop_comma() && !self.at_loop_body_start() {
+//RS                 let step_span = self.peek().span;
+//RS                 let _ = self.expr()?;
+//RS                 if matches!(self.peek().kind, TokKind::Eq)
+//RS                     || self.peek().kind.compound_op().is_some()
+//RS                 {
+//RS                     self.bump();
+//RS                     let _ = self.expr()?;
+//RS                 }
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0376",
+//RS                     "C-style counter loop headers are retired".to_string(),
+//RS                     "a three-slot loop header is binding, source, and step rule — not init, condition, and assignment"
+//RS                         .to_string(),
+//RS                     "write `loop i in 0..<n { … }` or `loop i in 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state"
+//RS                         .to_string(),
+//RS                     Some(step_span),
+//RS                 ));
+//RS             }
+//RS             let (body, arrow_body) = self.effect_loop_body()?;
+//RS             Ok(Stmt::CountedLoop {
+//RS                 init,
+//RS                 cond,
+//RS                 step: None,
+//RS                 body,
+//RS                 span,
+//RS                 arrow_body,
+//RS                 label,
+//RS             })
+//RS         } else if (matches!(&self.peek().kind, TokKind::Ident(_))
+//RS             && matches!(
+//RS                 &self.peek2().kind,
+//RS                 TokKind::Semi | TokKind::Comma | TokKind::KwIn
+//RS             ))
+//RS             || matches!(&self.peek().kind, TokKind::LParen)
+//RS         {
+//RS             // D-LOOP-IN1=A: `loop x in source [, stride]`; two-name iteration
+//RS             // groups the binding as `loop (key, value) in source`.
+//RS             let (var, var_span, var2) = self.loop_source_binding()?;
+//RS             self.expect_loop_source_separator()?;
+//RS             let first = self.expr_no_struct_lit()?;
+//RS             let kind = if let Expr::Range {
+//RS                 start,
+//RS                 end,
+//RS                 exclusive,
+//RS                 ..
+//RS             } = &first
+//RS             {
+//RS                 let step = if self.take_loop_comma() && !self.at_loop_body_start() {
+//RS                     Some(self.expr_no_struct_lit()?)
+//RS                 } else {
+//RS                     None
+//RS                 };
+//RS                 ForKind::Range {
+//RS                     start: (**start).clone(),
+//RS                     end: (**end).clone(),
+//RS                     step,
+//RS                     exclusive: *exclusive,
+//RS                 }
+//RS             } else if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
+//RS                 // D-RANGE-EXCL1=C: `..` inclusive (S22); `..<` half-open.
+//RS                 let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
+//RS                 self.bump();
+//RS                 let end = self.expr_no_struct_lit()?;
+//RS                 let step = if self.take_loop_comma() && !self.at_loop_body_start() {
+//RS                     Some(self.expr_no_struct_lit()?)
+//RS                 } else {
+//RS                     None
+//RS                 };
+//RS                 ForKind::Range {
+//RS                     start: first,
+//RS                     end,
+//RS                     step,
+//RS                     exclusive,
+//RS                 }
+//RS             } else {
+//RS                 let step = if self.take_loop_comma() && !self.at_loop_body_start() {
+//RS                     Some(self.expr_no_struct_lit()?)
+//RS                 } else {
+//RS                     None
+//RS                 };
+//RS                 ForKind::In {
+//RS                     collection: first,
+//RS                     step,
+//RS                 }
+//RS             };
+//RS             let (body, arrow_body) = self.effect_loop_body()?;
+//RS             Ok(Stmt::For {
+//RS                 var,
+//RS                 var_span,
+//RS                 var2,
+//RS                 kind,
+//RS                 body,
+//RS                 span,
+//RS                 arrow_body,
+//RS                 label,
+//RS                 auto_vectorization: None,
+//RS             })
+//RS         } else {
+//RS             // Conditional: loop cond { }
+//RS             let cond = self.expr_no_struct_lit()?;
+//RS             let (body, arrow_body) = self.effect_loop_body()?;
+//RS             Ok(Stmt::While {
+//RS                 cond,
+//RS                 body,
+//RS                 span,
+//RS                 arrow_body,
+//RS                 label,
+//RS             })
+//RS         }
+//RS     }
+//RS 
+//RS     fn at_loop_body_start(&self) -> bool {
+//RS         matches!(self.peek().kind, TokKind::LBrace | TokKind::UnifiedArrow)
+//RS     }
+//RS 
+//RS     fn effect_loop_body(&mut self) -> Result<(Vec<Stmt>, bool), Diagnostic> {
+//RS         if self.at_unified_arrow() {
+//RS             self.expect_unified_arrow("after a loop header")?;
+//RS             let nested_control = matches!(self.peek().kind, TokKind::KwIf | TokKind::KwLoop)
+//RS                 || (matches!(self.peek().kind, TokKind::Ident(_))
+//RS                     && matches!(self.peek2().kind, TokKind::ColonColon)
+//RS                     && matches!(self.peek3().kind, TokKind::KwLoop));
+//RS             if nested_control {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E0329",
+//RS                     "a nested one-line control body needs braces".to_string(),
+//RS                     "an adjacent loop body owns one simple statement".to_string(),
+//RS                     "wrap the nested control statement in `{ ... }`".to_string(),
+//RS                     Some(self.peek().span),
+//RS                 ));
+//RS             }
+//RS             return Ok((vec![self.arrow_loop_stmt()?], true));
+//RS         }
+//RS         if matches!(self.peek().kind, TokKind::LBrace) {
+//RS             self.bump();
+//RS             return Ok((self.block_stmts(), false));
+//RS         }
+//RS         if matches!(self.peek().kind, TokKind::Semi | TokKind::Eof) {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0003",
+//RS                 "this loop has no body".to_string(),
+//RS                 "a loop header must be followed by a braced block".to_string(),
+//RS                 "add a body written as `{ ... }`".to_string(),
+//RS                 Some(self.peek().span),
+//RS             ));
+//RS         }
+//RS         if matches!(self.peek().kind, TokKind::KwIf | TokKind::KwLoop) {
+//RS             return Err(Diagnostic::error(
+//RS                 "E0329",
+//RS                 "a nested one-line control body needs braces".to_string(),
+//RS                 "an adjacent loop body owns one simple statement".to_string(),
+//RS                 "wrap the nested control statement in `{ ... }`".to_string(),
+//RS                 Some(self.peek().span),
+//RS             ));
+//RS         }
+//RS         self.teach_control_braces("loop", self.peek().span);
+//RS         Ok((vec![self.stmt()?], false))
+//RS     }
+//RS 
+//RS     /// D-LOOP-STMT-ARROW1=C: statement-position loop arrows accept one
+//RS     /// ordinary statement. The general statement parser keeps its useful
+//RS     /// value-discard rejection everywhere else; this path only opens the
+//RS     /// expression-statement slot after an explicit loop `->`.
+//RS     fn arrow_loop_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+//RS         if matches!(
+//RS             self.peek().kind,
+//RS             TokKind::KwReturn
+//RS                 | TokKind::KwYield
+//RS                 | TokKind::KwBreak
+//RS                 | TokKind::KwComptime
+//RS                 | TokKind::Hash
+//RS                 | TokKind::At
+//RS                 | TokKind::Dollar
+//RS         ) || matches!(
+//RS             &self.peek().kind,
+//RS             TokKind::Ident(name)
+//RS                 if name == Syntax::KW_DEFER
+//RS                     || name == Syntax::KW_ASSERT
+//RS                     || name == Syntax::KW_NEXT
+//RS                     || Self::is_foreign_loop_word(name)
+//RS         ) || self.looks_like_sigil_binding()
+//RS             || self.at_prep_verb(&TokKind::LBrace)
+//RS             || self.at_prep_verb(&TokKind::KwIf)
+//RS             || self.at_prep_verb(&TokKind::KwLoop)
+//RS         {
+//RS             return self.stmt();
+//RS         }
+//RS 
+//RS         let expression = self.expr()?;
+//RS         if matches!(self.peek().kind, TokKind::Eq) || self.peek().kind.compound_op().is_some() {
+//RS             let op_tok = self.bump();
+//RS             let op = op_tok.kind.compound_op();
+//RS             let value = self.expr()?;
+//RS             self.finish_stmt()?;
+//RS             let target = self.expr_to_lvalue(expression, op)?;
+//RS             return Ok(Stmt::Assign {
+//RS                 target,
+//RS                 op,
+//RS                 op_span: op_tok.span,
+//RS                 value,
+//RS             });
+//RS         }
+//RS         self.finish_stmt()?;
+//RS         Ok(Stmt::Expr(expression))
+//RS     }
+//RS 
+//RS     fn loop_source_binding(
+//RS         &mut self,
+//RS     ) -> Result<(String, Span, Option<(String, Span)>), Diagnostic> {
+//RS         if matches!(self.peek().kind, TokKind::LParen) {
+//RS             self.bump();
+//RS             let (first, first_span) = self.expect_ident("as the first loop variable")?;
+//RS             self.expect(TokKind::Comma, "between the two loop variables")?;
+//RS             let second = self.expect_ident("as the second loop variable")?;
+//RS             if matches!(self.peek().kind, TokKind::Comma) {
+//RS                 self.bump();
+//RS             }
+//RS             self.expect(TokKind::RParen, "after the two loop variables")?;
+//RS             return Ok((first, first_span, Some(second)));
+//RS         }
+//RS 
+//RS         let (first, first_span) = self.expect_ident("as the loop variable")?;
+//RS         // Retired unparenthesized two-name binding: retain enough structure for
+//RS         // fmt to produce the canonical parenthesized binding.
+//RS         if matches!(self.peek().kind, TokKind::Comma)
+//RS             && matches!(self.peek2().kind, TokKind::Ident(_))
+//RS             && matches!(self.peek3().kind, TokKind::Semi)
+//RS         {
+//RS             self.bump();
+//RS             let second = self.expect_ident("as the second loop variable")?;
+//RS             return Ok((first, first_span, Some(second)));
+//RS         }
+//RS         Ok((first, first_span, None))
+//RS     }
+//RS 
+//RS     fn expect_loop_comma(&mut self, context: &str) -> Result<(), Diagnostic> {
+//RS         if self.take_loop_comma() {
+//RS             Ok(())
+//RS         } else {
+//RS             self.expect(TokKind::Comma, context)
+//RS         }
+//RS     }
+//RS 
+//RS     pub(in crate::Parser) fn expect_loop_source_separator(&mut self) -> Result<(), Diagnostic> {
+//RS         match self.peek().kind {
+//RS             TokKind::KwIn => {
+//RS                 self.bump();
+//RS                 Ok(())
+//RS             }
+//RS             TokKind::Comma => {
+//RS                 let span = self.bump().span;
+//RS                 self.diags
+//RS                     .push(Diagnostic::from_row("E0383", &[], Some(span)));
+//RS                 Ok(())
+//RS             }
+//RS             TokKind::Semi if self.peek().span.start < self.peek().span.end => {
+//RS                 self.bump();
+//RS                 Ok(())
+//RS             }
+//RS             _ => self.expect(TokKind::KwIn, "between the loop binding and source"),
+//RS         }
+//RS     }
+//RS 
+// END-PORT-PENDING 0338 crates/jet-parser/src/Parser/Statements/control.rs:1-1805
+

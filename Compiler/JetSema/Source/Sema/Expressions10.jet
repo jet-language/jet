@@ -1,0 +1,1890 @@
+// PORT-PENDING 0450 crates-jet-sema-src-sema-mod-slice-1799: crates/jet-sema/src/Sema/mod.rs:1799-3684
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     fn inclusive_ranges_sharing_boundary_overlap() {
+//RS         let mut a = fact(1, 1, ViewKind::List).place;
+//RS         let mut b = a.clone();
+//RS         a.projections.push(ViewProjection::Range {
+//RS             start: Some(0),
+//RS             end: Some(1),
+//RS             span: Span::new(20, 24),
+//RS         });
+//RS         b.projections.push(ViewProjection::Range {
+//RS             start: Some(1),
+//RS             end: Some(2),
+//RS             span: Span::new(30, 34),
+//RS         });
+//RS         assert!(a.overlaps(&b));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn fresh_arena_allocations_are_disjoint() {
+//RS         let mut a = fact(1, 1, ViewKind::Arena).place;
+//RS         let mut b = a.clone();
+//RS         a.projections.push(ViewProjection::Fresh(Span::new(20, 21)));
+//RS         b.projections.push(ViewProjection::Fresh(Span::new(30, 31)));
+//RS         assert!(!a.overlaps(&b));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn buffer_and_matrix_use_named_window_boundary() {
+//RS         assert!(ViewKind::Buffer.is_named_window());
+//RS         assert!(ViewKind::Matrix.is_named_window());
+//RS         assert!(!ViewKind::Arena.is_named_window());
+//RS         assert!(!ViewKind::FixedBacking.is_named_window());
+//RS         assert!(!ViewKind::String.is_named_window());
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub(crate) enum SendProblemKind {
+//RS     ClosureNeedsTake,
+//RS     ClosureCaptures,
+//RS     CallableValue,
+//RS     TraitValue(String),
+//RS     ThreadConfined(String),
+//RS     LocalReactive(String),
+//RS     ViewBorrow,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub(crate) struct SendabilityProblem {
+//RS     root: Option<String>,
+//RS     path: Vec<String>,
+//RS     kind: SendProblemKind,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy)]
+//RS pub(crate) enum SendCrossing {
+//RS     TaskCapture,
+//RS     TaskResult,
+//RS     ChannelSend,
+//RS     ParallelWorker,
+//RS     Kernel,
+//RS     InterruptCallback,
+//RS     /// HTTP handlers are retained by the server and invoked on request
+//RS     /// workers; their captures must be `Send + Sync`.
+//RS     HttpHandler,
+//RS }
+//RS 
+//RS /// What the driver is compiling — affects `run` / test requirements (M6).
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum CompileMode {
+//RS     /// `jet run` / `jet build` — needs `run`, ignores test blocks in codegen.
+//RS     Run,
+//RS     /// `jet test` — needs at least one test; `run` is optional.
+//RS     Test,
+//RS     /// `jet test` with a user-owned `fn test` command adapter.
+//RS     TestOverride,
+//RS     /// `jet check` / LSP — type-check only; imported modules and library files
+//RS     /// need not define `run`.
+//RS     Check,
+//RS     /// `jet eval` — full sema type-checking, but `run` may return a non-`()`
+//RS     /// type. The entry still requires a `run` function.
+//RS     Eval,
+//RS }
+//RS 
+//RS /// A one-way boolean fact that parallel body checkers of one module may set
+//RS /// concurrently. Setting is idempotent, so the final value does not depend on
+//RS /// the order in which checkers finish.
+//RS #[derive(Default)]
+//RS pub(crate) struct SharedFlag(std::sync::atomic::AtomicBool);
+//RS 
+//RS impl SharedFlag {
+//RS     pub(crate) fn set(&self, value: bool) {
+//RS         self.0.store(value, std::sync::atomic::Ordering::Relaxed);
+//RS     }
+//RS 
+//RS     pub(crate) fn get(&self) -> bool {
+//RS         self.0.load(std::sync::atomic::Ordering::Relaxed)
+//RS     }
+//RS }
+//RS 
+//RS impl Clone for SharedFlag {
+//RS     fn clone(&self) -> Self {
+//RS         let flag = Self::default();
+//RS         flag.set(self.get());
+//RS         flag
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) struct ModuleState {
+//RS     module_path: String,
+//RS     source: String,
+//RS     package_scope: String,
+//RS     module_alias: String,
+//RS     /// Source items retained for compile-time reflection folds. The same AST
+//RS     /// is the producer for `Type.reflect()` and direct registered fact reads;
+//RS     /// no reflection lookup table is kept beside it.
+//RS     items: Vec<crate::AST::Item>,
+//RS     /// The bundle-wide build fact snapshot, copied into each module state so
+//RS     /// the checker can fold facts without an engine or global lookup.
+//RS     build_facts: jet_foundation::Facts::BuildFactSnapshot,
+//RS     /// True only for the explicitly selected package/workspace build entry.
+//RS     /// Ordinary `fn build` names do not grant compiler-host capabilities.
+//RS     allow_compiler_api: bool,
+//RS     /// D-INTBIG1: a checked body or sema-typed constant can reach the exact
+//RS     /// `Int` runtime. Keep this fact in sema; codegen must not rediscover it
+//RS     /// by enumerating source expression shapes.
+//RS     exact_int_reachable: SharedFlag,
+//RS     /// D-NEVER1=C: names whose checked bodies have no returning path. This is
+//RS     /// a compiler-only bottom fact; it never becomes a public `Never` type.
+//RS     diverging_functions: std::collections::HashSet<String>,
+//RS     /// D-SHAPE-PLACE1=A: `(function, parameter index)` pairs whose list write
+//RS     /// parameter is proven length-preserving, so a range window may fill it.
+//RS     fixed_length_write_params: std::collections::HashSet<(String, usize)>,
+//RS     funcs: HashMap<String, FuncSig>,
+//RS     registry: TypeRegistry,
+//RS     consts: HashMap<String, Type>,
+//RS     imports: HashMap<String, usize>,
+//RS     /// D-NAME-WALK1=A / D-VERDICT-1867-1: foreign namespace aliases scoped
+//RS     /// to one inline module body.
+//RS     inline_foreign_imports: HashMap<(String, String), usize>,
+//RS     /// D-VERDICT-1867-1: foreign namespace aliases publicly re-exported by
+//RS     /// an inline module.
+//RS     inline_reexport_foreign: HashMap<(String, String), usize>,
+//RS     core_imports: HashMap<String, String>,
+//RS     tests: HashMap<String, Span>,
+//RS 
+//RS     trait_reg: TraitRegistry,
+//RS     /// D-FACTMODEL1=A: the one erased fact registry visible to body folds.
+//RS     /// State rows and checked graphs are compile-time metadata only.
+//RS     fact_registry: jet_foundation::Facts::FactRegistry,
+//RS     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+//RS     /// D-STRUCT-POLICY1=A: one bundle-local nominal setting table shared by
+//RS     /// marker and `apply` validation.
+//RS     callable_policy_declarations: BTreeMap<(String, String), (usize, crate::AST::UserPolicyDecl)>,
+//RS     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
+//RS     /// D-MOD2: inline code module aliases present in this file (alias → module name).
+//RS     /// `math.double(x)` resolves to `__jet_math__double(x)` when `math` is in here.
+//RS     code_modules: HashMap<String, String>,
+//RS     /// Inline module spelling -> compiler semantic identity. Ordinary modules
+//RS     /// use their module identity; generic instances use `instance:<digest>`.
+//RS     code_module_identities: HashMap<String, String>,
+//RS     /// D-MOD3: unqualified items imported via `use alias.Item` (inline modules).
+//RS     /// Maps unqualified name → mangled name (e.g. "clamp" → "__jet_math__clamp").
+//RS     unqualified: HashMap<String, String>,
+//RS     /// D-MOD3: unqualified file-module items imported via `use alias.Item`.
+//RS     /// Maps name → (function_name, module_idx).
+//RS     unqualified_file: HashMap<String, (String, usize)>,
+//RS     /// D-CORE-USELIST1=A: unqualified Core items imported via `use core.X.[…]`.
+//RS     /// The value is the original Core member name; `core_imports` carries its
+//RS     /// module path so the call lowers through the ordinary Core method path.
+//RS     core_item_imports: HashMap<String, String>,
+//RS     /// D-MOD4: `pub use alias.Item` re-exports — items this module exposes on its
+//RS     /// own public surface even though they're defined elsewhere. Maps the
+//RS     /// exported name → (target_function_name, target_module_idx). A caller doing
+//RS     /// `thismod.Item` resolves through here to the real definition.
+//RS     reexports: HashMap<String, (String, usize)>,
+//RS     /// D-NAME-WALK1=A: unqualified imports declared inside an inline module.
+//RS     /// The first key is the inline module name; the second is the local item
+//RS     /// name. Inline bodies inherit the enclosing file's maps and overlay these
+//RS     /// entries for their own scope only.
+//RS     inline_unqualified: HashMap<(String, String), String>,
+//RS     /// D-NAME-WALK1=A: file-module items imported inside an inline module.
+//RS     inline_unqualified_file: HashMap<(String, String), (String, usize)>,
+//RS     /// D-NAME-WALK1=A: core modules imported by item name inside an inline
+//RS     /// module. Kept separate from the file-level map for scope safety.
+//RS     inline_core_imports: HashMap<(String, String), String>,
+//RS     /// D-NAME-WALK1=A: original Core member names for inline-module imports.
+//RS     inline_core_items: HashMap<(String, String), String>,
+//RS     /// D-NAME-WALK1=A: inline-module `pub use` of another inline function.
+//RS     inline_reexport_inline: HashMap<(String, String), (String, String)>,
+//RS     /// D-NAME-WALK1=A: inline-module `pub use` of a file-module function.
+//RS     inline_reexport_file: HashMap<(String, String), (String, usize)>,
+//RS     /// D-NAME-WALK1=A: inline-module `pub use` of a Core item. The first
+//RS     /// value is the Core module and the second is the original member name.
+//RS     inline_reexport_core: HashMap<(String, String), (String, String)>,
+//RS }
+//RS 
+//RS /// D-INTBIG1: whether a checked type carries Jet's default exact `Int`.
+//RS /// Fixed-width integers remain separate and must not pull in the exact runtime.
+//RS pub(crate) fn type_uses_default_int(ty: &Type) -> bool {
+//RS     match ty {
+//RS         Type::Int => true,
+//RS         Type::List(inner)
+//RS         | Type::Shared(inner)
+//RS         | Type::Option(inner)
+//RS         | Type::FixedList { elem: inner, .. }
+//RS         | Type::Tagged { inner, .. }
+//RS         | Type::InlineRange { base: inner, .. }
+//RS         | Type::Quantity { base: inner, .. } => type_uses_default_int(inner),
+//RS         Type::Map { key, value, .. }
+//RS         | Type::Result {
+//RS             ok: key,
+//RS             err: value,
+//RS         } => type_uses_default_int(key) || type_uses_default_int(value),
+//RS         Type::Tuple(fields) => fields.iter().any(|(_, field)| type_uses_default_int(field)),
+//RS         Type::Union(members) => members.iter().any(type_uses_default_int),
+//RS         Type::Fn { params, ret, .. } => {
+//RS             params.iter().any(type_uses_default_int)
+//RS                 || ret.as_deref().is_some_and(type_uses_default_int)
+//RS         }
+//RS         Type::Apply { args, .. } => args.iter().any(type_uses_default_int),
+//RS         Type::IntN { .. }
+//RS         | Type::Float
+//RS         | Type::Float32
+//RS         | Type::Bool
+//RS         | Type::String
+//RS         | Type::Char
+//RS         | Type::Named(_)
+//RS         | Type::TraitObject(_)
+//RS         | Type::Measure(_) => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) struct Checker<'a> {
+//RS     funcs: &'a HashMap<String, FuncSig>,
+//RS     /// D-NEVER1=C: sema's fixed-point bottom facts. A call consults this
+//RS     /// registry before ordinary value joining; no engine infers divergence.
+//RS     diverging_functions: &'a std::collections::HashSet<String>,
+//RS     /// D-SHAPE-PLACE1=A: proven length-preserving list write parameters.
+//RS     fixed_length_write_params: &'a std::collections::HashSet<(String, usize)>,
+//RS     effect_facts: &'a jet_foundation::Facts::FactRegistry,
+//RS     consts: &'a HashMap<String, Type>,
+//RS     pub(crate) devtools_registry: &'a jet_foundation::AST::DevtoolsRegistry,
+//RS     registry: &'a TypeRegistry,
+//RS     plugin_interfaces: &'a PluginInterfaceRegistry,
+//RS     modules: Option<&'a [ModuleState]>,
+//RS     /// D-COMPILE-SPEED1: unqualified nominal lookup may otherwise scan every
+//RS     /// module for each expression. This cache belongs to one body checker and
+//RS     /// is rebuilt after registration, so immutable module states cannot make a
+//RS     /// cached owner stale while the checker is alive.
+//RS     nominal_owner_cache: std::cell::RefCell<HashMap<String, Option<usize>>>,
+//RS     items: &'a [crate::AST::Item],
+//RS     module_idx: usize,
+//RS     imports: &'a HashMap<String, usize>,
+//RS     core_imports: &'a HashMap<String, String>,
+//RS     /// D-MOD2: inline code module aliases in scope (alias → module name).
+//RS     code_modules: &'a HashMap<String, String>,
+//RS     code_module_identities: &'a HashMap<String, String>,
+//RS     /// D-MOD3: unqualified inline-module items in scope (name → mangled name).
+//RS     unqualified: &'a HashMap<String, String>,
+//RS     /// D-MOD3: unqualified file-module items in scope (name → (fn_name, module_idx)).
+//RS     unqualified_file: &'a HashMap<String, (String, usize)>,
+//RS     /// D-CORE-USELIST1=A: unqualified Core items in scope (local name → member).
+//RS     core_item_imports: &'a HashMap<String, String>,
+//RS     /// D-NAME-WALK1=A: imports scoped to one inline-module body.
+//RS     inline_unqualified: &'a HashMap<(String, String), String>,
+//RS     inline_unqualified_file: &'a HashMap<(String, String), (String, usize)>,
+//RS     inline_module: Option<String>,
+//RS     /// D-NAME-WALK1=A: public re-exports declared inside inline modules.
+//RS     inline_reexport_inline: &'a HashMap<(String, String), (String, String)>,
+//RS     inline_reexport_file: &'a HashMap<(String, String), (String, usize)>,
+//RS     inline_reexport_core: &'a HashMap<(String, String), (String, String)>,
+//RS     inline_reexport_foreign: &'a HashMap<(String, String), usize>,
+//RS     module_path: &'a str,
+//RS     source: &'a str,
+//RS     package_scope: &'a str,
+//RS     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
+//RS     callable_policy_declarations:
+//RS         &'a BTreeMap<(String, String), (usize, crate::AST::UserPolicyDecl)>,
+//RS     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
+//RS     /// D-RESOURCE-SCHEDULE1=A: aggregate access facts for this checked frame
+//RS     /// callback body. A second callback is checked as a candidate parallel
+//RS     /// system; the first callback's source order remains the reference.
+//RS     frame_schedule_systems: Vec<jet_foundation::ResourceSchedule::JetFrameOperation>,
+//RS     current_function_span: Span,
+//RS     name_ledger: &'a mut jet_foundation::Names::NameLedger,
+//RS     diags: Vec<Diagnostic>,
+//RS     /// D-SUBJECT-COHERE1=A: statement-local `#allow(lint)` facts collected
+//RS     /// while checking the following expression statement.
+//RS     statement_lint_allows: Vec<String>,
+//RS     /// D-STDLIB-SMALL1: complete replacement idioms are discovered at block
+//RS     /// entry and emitted while their first statement is checked, so a local
+//RS     /// `#allow` marker can suppress exactly that diagnostic.
+//RS     stdlib_lint_candidates: HashMap<usize, (Span, crate::Diagnostics::TextEdit)>,
+//RS     /// D-LINT-UNUSED1: source declarations whose successful body check found
+//RS     /// no read or write. The declaration identity is the sema `def_span`, so
+//RS     /// shadowed names never share a liveness fact.
+//RS     unused_bindings: Vec<UnusedBinding>,
+//RS     unused_binding_refs: HashSet<Span>,
+//RS     /// D-FACT-FLOW1: the one store of per-binding facts — declarations, flow
+//RS     /// narrowing, moves, uninitialised places and open borrow windows. Every
+//RS     /// plane joins through `FlowFacts`; nothing here keeps the last-walked path.
+//RS     flow: FlowFacts::FlowFacts,
+//RS     concrete_unit_values: Vec<HashMap<String, f64>>,
+//RS     /// Field inference reads its base only to discover its type. Suppress a
+//RS     /// partial-root move report there; the complete field place is checked first.
+//RS     suppress_partial_move_root_read: bool,
+//RS     loop_depth: usize,
+//RS     /// D-COPY-DEFAULT1=A: while a `return` or `break` value is checked, the
+//RS     /// loop depth that exit lands at, paired with the depth it was set at. A
+//RS     /// move there is the last use for every loop it leaves, so it is not a
+//RS     /// reuse on a later iteration.
+//RS     loop_exit_depth: Option<(usize, usize)>,
+//RS     /// D-COPY-DEFAULT1=A: unmarked move sites that a later use turned into
+//RS     /// shares. After the body check each site becomes `~name`; the paired
+//RS     /// E0121 is reported only if that site cannot be found in the body.
+//RS     share_sites: Vec<(Span, Diagnostic)>,
+//RS     /// D-LOOP-SUBJECT1=A: active bindingless collecting-loop subjects.
+//RS     implicit_loop_subject_depth: usize,
+//RS     /// D-SUBJECT-COHERE1=A: active subject-shorthand lambda scopes.
+//RS     subject_shorthand_depth: usize,
+//RS     source_nesting: usize,
+//RS     /// D-LOOPLABEL3=A: stack of `name :: loop` names; scope, innermost last.
+//RS     loop_labels: Vec<String>,
+//RS     /// D-LOOPEVAL1: item type under each compiler-private collecting loop.
+//RS     /// Nested yielding loops push independent slots.
+//RS     collect_item_types: Vec<Option<Type>>,
+//RS     loop_value_frames: Vec<LoopValueFrame>,
+//RS     /// Flow facts captured by `break` exits, aligned with loop_value_frames.
+//RS     loop_break_flows: Vec<Vec<FlowFacts::FlowFacts>>,
+//RS     pending_loop_value: Option<(LoopValueKind, Option<String>)>,
+//RS     /// D-LOOP-STMT-ARROW1=C: the body currently being checked came from a
+//RS     /// statement-position loop arrow. Its ordinary expression statement may
+//RS     /// compute a value, but that value is intentionally discarded.
+//RS     arrow_loop_body: bool,
+//RS     last_loop_result_type: Option<Type>,
+//RS     /// D-EFF1: effects this function body reaches directly (Core calls, impure
+//RS     /// builtins). Accumulated during the walk; rolled into the per-function
+//RS     /// `EffectSummary` after the body is checked.
+//RS     fx_direct: EffectSet,
+//RS     /// First source span that introduced each direct effect, for inspect/LSP
+//RS     /// provenance. Duplicate uses keep the earliest stable witness.
+//RS     fx_direct_spans: HashMap<String, Span>,
+//RS     /// D-EFFECT-LAMBDA1: active lambda rows receive the same effect events as
+//RS     /// the enclosing body, preserving nested closure facts without a second
+//RS     /// analysis walk.
+//RS     lambda_effect_stack: Vec<Effects::LambdaEffectAccum>,
+//RS     /// D-EFF1: user functions called in this body (call-graph edges for the
+//RS     /// whole-program transitive fixpoint).
+//RS     fx_edges: BTreeSet<String>,
+//RS     /// D-EFF1: a foreign (`extern`) call was reached — the body's effects are
+//RS     /// the maximal set (an un-inspectable body may do anything).
+//RS     fx_maximal: bool,
+//RS     /// First source span that forced the row maximal.
+//RS     fx_maximal_span: Option<Span>,
+//RS     /// D-EFF1: stack of active `#FX(…)` regions, innermost last. Every effect
+//RS     /// or edge recorded while one is open is also added to it (and all enclosing
+//RS     /// regions) so the region's own effect set can be checked against its caps.
+//RS     region_stack: Vec<RegionAccum>,
+//RS     /// D-EFF1: completed `#FX(…)` regions in this body, rolled into the
+//RS     /// `EffectSummary` for the post-pass E0712 check.
+//RS     fx_regions: Vec<RegionSummary>,
+//RS     /// D-AUTHORITY-RECEIPT1: source facts for Authority handles delegated to
+//RS     /// approved Core boundary consumers.
+//RS     fx_authority_delegations: Vec<Effects::AuthorityDelegation>,
+//RS     /// D-EFF2: callback-bound obligations recorded at higher-order call sites
+//RS     /// where the function-typed parameter carries a `#Pure`/`#(…)` bound. Rolled
+//RS     /// into the `EffectSummary` for the post-pass E0747 check.
+//RS     fx_callback_obligations: Vec<CallbackObligation>,
+//RS     /// D-AUTODIFF1: named differentiated functions whose solved effect rows
+//RS     /// must be checked after the bundle effect graph closes.
+//RS     fx_autodiff_obligations: Vec<Effects::AutodiffObligation>,
+//RS     /// D-AUTODIFF1: compute consumers used by this function body.
+//RS     fx_compute_calls: Vec<Effects::ComputeCallFact>,
+//RS     /// D-AUTODIFF1: a `?? panic` directly attached to a Tensor-returning
+//RS     /// `core.compute` operation is a checked domain-failure boundary. Keep its
+//RS     /// provenance separate from arbitrary/direct panic sites so autodiff can
+//RS     /// admit only the former without erasing the D-NOPANIC effect fact.
+//RS     fx_autodiff_safe_panic: bool,
+//RS     fx_autodiff_unsafe_panic: bool,
+//RS     autodiff_safe_panic_context: bool,
+//RS     /// D-CRYPTO-DIAG1: compiler-known crypto facts wait for the function's
+//RS     /// syntax/type/effect phases to finish before becoming diagnostics.
+//RS     fx_pending_diagnostics: Vec<Diagnostic>,
+//RS     /// D-MEM-FACTS1 direct, source-spanned memory evidence accumulated beside
+//RS     /// effects so both policies share one pre-TIR call graph.
+//RS     fx_memory_events: Vec<MemoryFacts::MemoryEvent>,
+//RS     fx_memory_open: Vec<MemoryFacts::OpenMemoryDispatch>,
+//RS     memory_policy_stack: Vec<MemoryFacts::MemoryPolicyRegion>,
+//RS     /// D-WRAP-SCOPE1=A: active lexical fixed-width arithmetic modes. The last
+//RS     /// entry is the innermost block; function markers seed the stack once per
+//RS     /// body and never cross a call boundary.
+//RS     arithmetic_policy_stack: Vec<crate::AST::ArithmeticPolicyFact>,
+//RS     fx_memory_regions: Vec<MemoryFacts::MemoryPolicyRegion>,
+//RS     fx_memory_unbounded_control: Vec<Span>,
+//RS     fx_memory_calls: Vec<MemoryFacts::MemoryCall>,
+//RS     /// Statements that dropped a call's non-Unit result. The solved effect
+//RS     /// phase reports those whose callee row is empty (E0433).
+//RS     fx_discarded_results: Vec<Effects::DiscardedResultFact>,
+//RS     /// D-DISCARD1=A: span of the last statement of a named function with no
+//RS     /// written return type. A non-Unit value there is thrown away (E0433).
+//RS     lost_tail_span: Option<Span>,
+//RS     memory_control_multiplier: Option<u64>,
+//RS     /// D-TXN2: nesting depth of `#Transact(name) { … }` blocks whose body is
+//RS     /// being checked **directly** (not inside a deferred lambda). While `> 0`, an
+//RS     /// irreversible Core effect (Net/FS/Exec) reached directly in the block is
+//RS     /// E0746 at the call site — the fix is to move it after the block or register
+//RS     /// it via `name.on_commit(…)`. Zeroed and restored around every lambda body
+//RS     /// (effects inside an `on_commit`/other lambda are deferred, not rejected).
+//RS     txn_depth: usize,
+//RS     /// D-CONC-SHARE1=A (card #1561): nesting depth of transaction blocks the
+//RS     /// *user* opened. The D-TXN2 effect wall (E0746) keys off this, not
+//RS     /// `txn_depth`, so a compiler-synthesized one-statement transaction — the
+//RS     /// ordered-commit route for a plain statement touching several `Shared`
+//RS     /// cells — carries the commit plane without rejecting effects the author
+//RS     /// never put inside a transaction.
+//RS     txn_wall_depth: usize,
+//RS     /// D-TEST-WORLD1=A: depth of a `testing.world` callback. Calls reached
+//RS     /// here must use a scoped provider; external effects cannot be replayed.
+//RS     deterministic_world_depth: usize,
+//RS     /// D-DET1: nesting depth of `assume_deterministic { … }` blocks currently
+//RS     /// being checked. While `> 0`, the determinism rejections inside a `#Pure fn`
+//RS     /// (E3403 non-deterministic Core call, E3401 impure Core call) are suspended —
+//RS     /// the expert "I know this is deterministic" escape. A semantic footgun
+//RS     /// (v1-legal per the card); does not relax memory/type safety, only the
+//RS     /// determinism check. Zeroed/restored around lambda bodies like `txn_depth`.
+//RS     det_suppress: usize,
+//RS     /// D-CTX1 / c26: nesting depth of `#Context { … }` blocks (for L0506).
+//RS     context_depth: usize,
+//RS     /// True while inside a `#Context` block that set an `allocator` field.
+//RS     context_allocator_active: bool,
+//RS     in_unsafe: bool,
+//RS     /// D-IGNORERET2=A: true while inside a `#Suppress(MustUse) { … }` block.
+//RS     /// Suppresses E0402 / E0419 for fallible / `#MustUse` results dropped as statements.
+//RS     suppress_must_use: bool,
+//RS     /// True while checking a `pure fn` body, so E3403 can fire on a
+//RS     /// non-deterministic std call (time/random) reached from pure code.
+//RS     in_pure: bool,
+//RS     /// D-PRELUDEX1=A: true when the enclosing file declared `#NoPrelude`.
+//RS     /// Disables readable Core prelude resolution for this body.
+//RS     no_prelude: bool,
+//RS     /// D-PREPOST1: true while type-checking a `#Pre` clause's condition —
+//RS     /// `result` isn't bound yet at function entry, so a reference to it here
+//RS     /// is E0144 instead of the normal "undefined name" error.
+//RS     in_pre_clause: bool,
+//RS     /// D-FAIL-BIND1=A: `None` means no fallback is being checked; `Some(true)`
+//RS     /// is a fallible fallback with an ambient `err`; `Some(false)` has no
+//RS     /// failure report and rejects the spelling with E0408 or E0409.
+//RS     pub(crate) fallback_has_err: Option<bool>,
+//RS     /// D-FAILURE-FOUNDATION1=A: number of root inference calls that own their
+//RS     /// carrier explicitly. The token is consumed by that one `infer` call;
+//RS     /// recursive child expressions remain ordinary propagation sites.
+//RS     pub(crate) failure_auto_root_suppression: usize,
+//RS     /// D-FAILURE-FOUNDATION1=A: ambient carrier context retained for checks
+//RS     /// that need to distinguish an explicit carrier probe from ordinary value
+//RS     /// inference. Automatic propagation itself uses the root token above so
+//RS     /// nested call arguments can still propagate.
+//RS     pub(crate) failure_auto_depth: usize,
+//RS     /// D-CHOOSE-TEST1=A: distinguishes a pure pattern miss from an absent
+//RS     /// Optional while `fallback_has_err == Some(false)`.
+//RS     pub(crate) fallback_is_shape_miss: bool,
+//RS     /// D-GENERIC-CALL1=A: the type arguments a qualified module call
+//RS     /// (`table.sort(rows, false, key)`) inferred from its arguments. The
+//RS     /// module-call checkers take their spelled type arguments by reference,
+//RS     /// so the call site that owns the AST node takes this and records it
+//RS     /// there, exactly like a direct call's inferred `call.type_args`.
+//RS     pub(crate) inferred_call_type_args: Option<Vec<Type>>,
+//RS     /// Reads of an `invalid` binding. Such a read infers no type and emits no
+//RS     /// diagnostic, so a binding whose initializer yields no type after one of
+//RS     /// these reads is a cascade of the earlier error, not a new failure.
+//RS     pub(crate) invalid_binding_reads: usize,
+//RS     /// True while inferring a comptime binding's RHS or inside a comptime
+//RS     /// context (D-META-STAGE1=B).
+//RS     in_comptime: bool,
+//RS     /// True only while checking the selected package/workspace `fn build`.
+//RS     /// This is passed by the Driver's build authority, never inferred from a
+//RS     /// user-chosen function name.
+//RS     compiler_api_allowed: bool,
+//RS     ret: Option<Type>,
+//RS     fn_name: String,
+//RS     /// Compiler-generated bodies already spell their Result inspection or
+//RS     /// propagation explicitly. Do not apply source-level transparent failure
+//RS     /// propagation to those synthetic ASTs.
+//RS     compiler_generated: bool,
+//RS     /// Compiler-generated trait protocol bodies implement a raw Rust ABI. This
+//RS     /// is distinct from `compiler_generated`: policy wrappers and validation
+//RS     /// builders remain ordinary Jet callables with the shared failure carrier.
+//RS     raw_protocol_return: bool,
+//RS     /// Source-declared return type. The checker keeps `ret` as the effective
+//RS     /// failure carrier, while generator checks use this declaration directly.
+//RS     declared_return_type: Option<Type>,
+//RS     current_return_type_span: Option<Span>,
+//RS     /// Canonical caller-visible parameter order; excludes `self`.
+//RS     current_param_names: Vec<String>,
+//RS     /// Compiler-private names in inserted defaults resolve to their declaration
+//RS     /// slot type here. This map is populated by the shared call binder.
+//RS     pub(crate) binder_ref_types: HashMap<String, Type>,
+//RS     /// Context type for bare `null` (E0308).
+//RS     expected_type: Option<Type>,
+//RS     /// D-INTBIG1: typed reachability fact for this checked/generated body.
+//RS     uses_exact_int: bool,
+//RS     /// The written bounded-arithmetic call currently checking its argument.
+//RS     /// This is a sema-only context; no gate marker reaches TIR or codegen.
+//RS     knowledge_gate: Option<KnowledgeGate>,
+//RS     /// Collections currently read by an active `for x in xs` loop (E0507).
+//RS     iter_borrowed: HashSet<String>,
+//RS     /// Card #1440: NoElse-terminated dispatch chains already coverage-checked
+//RS     /// (chain span starts) — every level shares one span, the outermost wins.
+//RS     noelse_chains_checked: HashSet<usize>,
+//RS     /// D-RESULT-DECON2=B: the parser keeps one receiver in both fixed Result
+//RS     /// pattern tests. Cache its checked type and elaborated expression by source
+//RS     /// span so sema checks effects and ownership once while both lowered copies
+//RS     /// retain the same resolved call metadata.
+//RS     result_handler_subject_types: HashMap<usize, (Type, Expr)>,
+//RS     /// D-OUTCOME-SHAPE1=A: subject span starts of value-form pattern chains
+//RS     /// that handle a `T? E!` failure themselves; their `.Val`/`.None` levels
+//RS     /// test that same carrier instead of passing the failure up.
+//RS     carrier_chain_subjects: HashSet<usize>,
+//RS     /// Loop bindings that lend one `ViewMut<T>` element from a collection.
+//RS     /// These values may edit during the iteration but may not be retained.
+//RS     lending_view_loop_vars: HashSet<String>,
+//RS     /// D-MEM-VIEWRET1=B: one canonical public source inferred from every
+//RS     /// successful named-view return in this function.
+//RS     return_view_provenance: Option<crate::AST::ViewProvenanceMap>,
+//RS     /// View names read in the statement currently being checked. Together
+//RS     /// with the existing statement-tail analysis, this makes local window
+//RS     /// conflicts end at last use instead of lexical scope end.
+//RS     views_used_in_stmt: HashSet<String>,
+//RS     /// One scoped-loan read report per statement. Nested reads of the same
+//RS     /// place (`ps[0].position` is a Field over an Index) would otherwise each
+//RS     /// report the one mistake.
+//RS     scoped_loan_read_reported: bool,
+//RS     /// #1196: argument and receiver loans that remain active until their call
+//RS     /// finishes. Nested calls see every outer frame.
+//RS     call_access_frames: Vec<CallAccessFrame>,
+//RS     /// True while inferring an expression that the generated Rust will only
+//RS     /// borrow (method receivers, field/index bases, lvalues). Field reads in
+//RS     /// borrow position must NOT be rewritten to `.clone()`.
+//RS     borrow_ctx: bool,
+//RS     /// D-MEM-COPYSEM1: depth of an owning value-if inference. Only the
+//RS     /// value-if arm boundary consults this marker to route its tail through
+//RS     /// the owning-position copy rule.
+//RS     owning_if_value_depth: usize,
+//RS     /// `Fixed.new` / `Fixed.over` must be the whole initializer of one lexical
+//RS     /// binding so codegen can place and lifetime-order its inline backing.
+//RS     allow_fixed_constructor: bool,
+//RS     /// D-MEM-COPYSEM1: true while inferring a string-view fact for a direct
+//RS     /// non-owning operation, the operand of `~`, or a read-only view entering
+//RS     /// an owning destination. The general `Expr::Ident` arm reports E2307
+//RS     /// when this is false and `copies: .Explicit` has disabled materialization.
+//RS     allow_string_view_read: bool,
+//RS     /// M8: when false, a lambda is consumed inline (collection methods / borrow).
+//RS     lambda_escapes: bool,
+//RS     /// True only while checking a lambda body. Distinguishes an escaping lambda
+//RS     /// from the checker's ordinary top-level default escape policy.
+//RS     in_lambda_body: bool,
+//RS     /// Builtin mutating receivers discovered while inferring the current
+//RS     /// lambda body. The builtin table supplies the mutation fact; inline
+//RS     /// callbacks fold these roots into `LambdaMeta::mut_captures`.
+//RS     inferred_lambda_mut_captures: HashSet<String>,
+//RS     /// `edit_disjoint` lends each callback parameter for that invocation only.
+//RS     /// Any store, return, or retaining call from the callback is E0212.
+//RS     lambda_params_are_lending_views: bool,
+//RS     /// D-CAP-RECEIVER1=D: written `&`/`^` receiver marks, keyed by the
+//RS     /// marked place's span. The MethodCall arm removes the mark from the tree
+//RS     /// before resolution and keeps it here, so re-inference still sees it.
+//RS     receiver_marks: HashMap<(usize, usize), ReceiverMark>,
+//RS     /// D-CAP-RECEIVER1=D: one frame per method call being inferred; receiver
+//RS     /// hooks record the resolved convention into the frame for that receiver.
+//RS     receiver_mark_frames: Vec<ReceiverMarkFrame>,
+//RS     /// M11: when true, lambda is being passed to canonical `task` — stricter capture rules (E1101).
+//RS     is_task_spawn: bool,
+//RS     /// D-CONC-SPAWN1: set by `infer_try` when a `?` in the CURRENT lambda body
+//RS     /// is typed against the enclosing fallible return. `infer_lambda` scopes it
+//RS     /// per lambda and harvests it into `LambdaMeta::fallible_propagation`.
+//RS     task_body_propagates: bool,
+//RS     /// #3708: this function body (outside lambdas) produces a failure that is
+//RS     /// not a `Try`/`Err` node of the checked AST. Deliberately absent from
+//RS     /// the erased-scope snapshot: restoring it could only forget a source.
+//RS     failure_direct_source: bool,
+//RS     /// D-FAIL-INFER-UNION1=A: set only while the failure-union pre-pass
+//RS     /// probes a clone of an unannotated function. Each failure that reaches
+//RS     /// the default `Err` route is recorded here instead of being reported.
+//RS     failure_union_probe: Option<FailureUnionProbe>,
+//RS     /// True while an open callback return is being inferred. A fallible callee
+//RS     /// in this position supplies the callback's own Result carrier; it must not
+//RS     /// be auto-unwrapped against the enclosing function's return row.
+//RS     failure_carrier_inference: bool,
+//RS     /// The carrier discovered for the current open callback, if its body has
+//RS     /// reached a fallible callee.
+//RS     failure_carrier: Option<Type>,
+//RS     /// True while the root expression is being checked as a statement. A
+//RS     /// dispatch nested in a value expression must keep value-tail checking;
+//RS     /// only the statement root may make a braced arm's tail Unit.
+//RS     statement_expr_inference: bool,
+//RS     /// Source-nesting depth at which the root expression passed to
+//RS     /// `infer_statement_expr` is being inferred. Nested value expressions
+//RS     /// (for example an `if` passed to `print`) must not inherit the
+//RS     /// statement root's Unit result policy.
+//RS     statement_expr_root_depth: Option<usize>,
+//RS     /// HTTP handlers are retained by the server and invoked on request
+//RS     /// workers, so captured state must cross the `Send + Sync` boundary.
+//RS     http_handler_depth: usize,
+//RS     /// True while checking the callback stored by `core.sys.on_interrupt`.
+//RS     /// This boundary retains a callback for asynchronous signal delivery and
+//RS     /// therefore needs stricter capture facts than an ordinary higher-order call.
+//RS     interrupt_callback_depth: usize,
+//RS     /// D-MEM1 S6 (D-SHARED-API1=A): true only while binding `Shared<T>.edit(f)`'s
+//RS     /// closure parameter — grants it write access with no `&` sigil (the API
+//RS     /// contract IS the exclusive lock; `check_lambda` reads this once, at bind
+//RS     /// time, then it's irrelevant for the rest of the closure body).
+//RS     lambda_param_mutable: bool,
+//RS     /// `ExpiringSecret.with` lends its callback parameter without transferring
+//RS     /// ownership. The ordinary parameter convention machinery then rejects
+//RS     /// moves and captures before codegen.
+//RS     lambda_param_is_secret_loan: bool,
+//RS     /// D-DETACH1: task names whose spawn lambda had a non-view sendability error (E1102 fired).
+//RS     /// At `.detach()`, if the task is in this set and NOT in view_borrow_escape_tasks, E1103 fires.
+//RS     view_capture_tasks: HashSet<String>,
+//RS     /// D-DATARACE1=C: human-readable upgrade lines for `jet report` / CompileOutput.
+//RS     reactive_upgrades: Vec<String>,
+//RS     /// D-DATARACE1=C: binding names that crossed a concurrency boundary this function.
+//RS     reactive_upgrade_names: HashSet<String>,
+//RS     /// D-DETACH1: task names whose spawn lambda captured a `view` or
+//RS     /// task-group-scoped borrow. At `.detach()`, if the task is in this set,
+//RS     /// E1106 fires instead of E1103.
+//RS     view_borrow_escape_tasks: HashSet<String>,
+//RS     /// D-DETACH1: the binding name currently being elaborated (set at check_binding
+//RS     /// entry, cleared after). Used to record view-capturing task names.
+//RS     current_binding_name: Option<String>,
+//RS     /// Binding owned by the task spawn whose lambda is being checked. Nested
+//RS     /// task bodies must not reuse that outer name for group auto-join tracking,
+//RS     /// but sendability diagnostics still need the outer detach target.
+//RS     task_spawn_binding_name: Option<String>,
+//RS     /// M8: binding name when checking `f :: (…) => …` (E0804 self-call).
+//RS     lambda_binding: Option<String>,
+//RS     /// Names mutably captured by an escaping lambda still in scope (E0204).
+//RS     lambda_mut_borrow_stack: Vec<HashSet<String>>,
+//RS     /// M9: generic/trait metadata for this program.
+//RS     trait_reg: &'a TraitRegistry,
+//RS     /// M9.5: local comptime declaration context. This retains every declared
+//RS     /// body for semantic lookup; execution uses only `ct_checked_funcs`.
+//RS     ct_funcs: &'a HashMap<String, Func>,
+//RS     /// Function bodies that have completed the semantic checker and are safe
+//RS     /// to hand to the canonical comptime MIR evaluator.
+//RS     ct_checked_funcs: &'a HashMap<String, Func>,
+//RS     /// Source item context supplied to the checked evaluator. It may retain
+//RS     /// declarations whose executable method bodies are filtered by
+//RS     /// `ct_checked_funcs`.
+//RS     ct_items: &'a [crate::AST::Item],
+//RS     ct_externs: &'a HashSet<String>,
+//RS     ct_base_dir: &'a std::path::Path,
+//RS     ct_globals: &'a HashMap<String, crate::Comptime::CtValue>,
+//RS     ct_scopes: Vec<HashMap<String, crate::Comptime::CtValue>>,
+//RS     /// During the targeted comptime staging pass, type-check bodies without
+//RS     /// executing any compile-time expression. The ordinary pass evaluates
+//RS     /// mandatory and opportunistic expressions after their callees are safe.
+//RS     defer_ct_evaluation: bool,
+//RS     /// Active generic type parameters while checking a generic item.
+//RS     type_param_scope: Vec<crate::AST::TypeParam>,
+//RS     /// E2-M15: reject OS-dependent APIs on a selected no-OS target (E3301).
+//RS     no_os: bool,
+//RS     /// D-CTEFFECT1: `--gate impure=allow` was passed — `#Impure` blocks may execute
+//RS     /// Tier-2 ambient comptime effects (FS/Env/Exec/IO) at compile time.
+//RS     gates: crate::Policy::GateSet,
+//RS     /// D-CTEFFECT1: nesting depth of `#Impure` blocks currently being checked.
+//RS     /// Passed as `initial_impure_depth` to comptime evaluation of bindings
+//RS     /// inside, so the interpreter starts with the gate already open.
+//RS     ct_impure_depth: usize,
+//RS     /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs accumulated while
+//RS     /// checking this function body. Drained into `CompileOutput.comptime_inputs`
+//RS     /// by Bundle.rs after the full bundle is checked.
+//RS     pub(super) ct_embed_inputs: Vec<crate::AST::ComptimeInput>,
+//RS     /// D-WHEN2 (ratified 2026-06-19): when true, we are inside a dropped
+//RS     /// `@if` arm — name-resolution runs normally (so unknown-name
+//RS     /// typos are caught) but all other diagnostics are suppressed and the arm
+//RS     /// is never lowered to codegen.
+//RS     in_dropped_comptime_arm: bool,
+//RS     /// E0209 liveness gate (was D-L0201) — pointer to the statements that follow the
+//RS     /// currently-executing statement in the innermost block, plus the count.
+//RS     /// Set by `check_block` before each call to `check_stmt`.
+//RS     /// Safety: valid for the duration of `check_stmt` — the slice lives in
+//RS     /// the `Program` AST which outlives the checker.
+//RS     stmt_tail_ptr: *const crate::AST::Stmt,
+//RS     stmt_tail_len: usize,
+//RS     /// E0209 liveness gate (was D-L0201): stack of enclosing block tails, from outermost to innermost.
+//RS     /// Each entry is the (ptr, len) of the tail saved before entering a nested
+//RS     /// block, so `is_name_live_after` can walk up through all enclosing scopes.
+//RS     liveness_frames: Vec<(*const crate::AST::Stmt, usize)>,
+//RS     /// D-CONC-SPAWN1=D: stack of active `task.group` scopes (innermost last).
+//RS     taskgroup_stack: Vec<TaskGroupCtx>,
+//RS     /// True while inferring a child body passed to `task.group` — suppresses L1101
+//RS     /// (the group owns the handle until scope exit or an explicit join).
+//RS     in_taskgroup_spawn: bool,
+//RS     /// D-METHODMACRO1=A: top-level function names whose bare identifier was
+//RS     /// read as a VALUE (not called directly) while checking this one function
+//RS     /// body — see `CheckerInfer/expr.rs`'s `Expr::Ident` arm, the single spot
+//RS     /// that resolves a bare name to a global function's signature. Rolled up
+//RS     /// into a whole-program accumulator (`check_func_body`'s
+//RS     /// `global_addr_taken` parameter) so `#Inline(Always)` (E0918) can be
+//RS     /// checked once every function has run through here.
+//RS     inline_addr_taken: HashSet<String>,
+//RS     /// D-DX-PLUGIN1=D: checked `core.devtools.publish` facts of this body.
+//RS     /// The body's products carry them out; bundle completion projects them
+//RS     /// into the shared panel registry in source order.
+//RS     devtools_publications: Vec<jet_foundation::AST::DevtoolsFactPublication>,
+//RS     /// This body handed an expression to the compile-time evaluator. The
+//RS     /// evaluator reads `ct_checked_funcs`, which grows as the bodies before
+//RS     /// this one are checked, so such a body's result depends on check order.
+//RS     /// Deliberately not part of the erased-scope snapshot: an erased scope
+//RS     /// that evaluated still made this body order-dependent.
+//RS     ct_evaluator_ran: std::cell::Cell<bool>,
+//RS }
+//RS 
+//RS /// Mutable checker state that must not cross an erased `#Off`/`#DebugOnly`
+//RS /// body boundary. Diagnostics are deliberately not included: erased source is
+//RS /// still type-checked and its real diagnostics remain visible.
+//RS struct ErasedScopeSnapshot {
+//RS     nominal_owner_cache: HashMap<String, Option<usize>>,
+//RS     inline_module: Option<String>,
+//RS     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
+//RS     frame_schedule_systems: Vec<jet_foundation::ResourceSchedule::JetFrameOperation>,
+//RS     current_function_span: Span,
+//RS     name_ledger: jet_foundation::Names::NameLedger,
+//RS     statement_lint_allows: Vec<String>,
+//RS     stdlib_lint_candidates: HashMap<usize, (Span, crate::Diagnostics::TextEdit)>,
+//RS     unused_bindings: Vec<UnusedBinding>,
+//RS     unused_binding_refs: HashSet<Span>,
+//RS     flow: FlowFacts::FlowFacts,
+//RS     concrete_unit_values: Vec<HashMap<String, f64>>,
+//RS     suppress_partial_move_root_read: bool,
+//RS     loop_depth: usize,
+//RS     implicit_loop_subject_depth: usize,
+//RS     subject_shorthand_depth: usize,
+//RS     source_nesting: usize,
+//RS     loop_labels: Vec<String>,
+//RS     collect_item_types: Vec<Option<Type>>,
+//RS     loop_value_frames: Vec<LoopValueFrame>,
+//RS     loop_break_flows: Vec<Vec<FlowFacts::FlowFacts>>,
+//RS     pending_loop_value: Option<(LoopValueKind, Option<String>)>,
+//RS     arrow_loop_body: bool,
+//RS     last_loop_result_type: Option<Type>,
+//RS     fx_direct: EffectSet,
+//RS     fx_direct_spans: HashMap<String, Span>,
+//RS     lambda_effect_stack: Vec<Effects::LambdaEffectAccum>,
+//RS     fx_edges: BTreeSet<String>,
+//RS     fx_maximal: bool,
+//RS     fx_maximal_span: Option<Span>,
+//RS     region_stack: Vec<RegionAccum>,
+//RS     fx_regions: Vec<RegionSummary>,
+//RS     fx_authority_delegations: Vec<Effects::AuthorityDelegation>,
+//RS     fx_callback_obligations: Vec<CallbackObligation>,
+//RS     fx_autodiff_obligations: Vec<Effects::AutodiffObligation>,
+//RS     fx_compute_calls: Vec<Effects::ComputeCallFact>,
+//RS     fx_autodiff_safe_panic: bool,
+//RS     fx_autodiff_unsafe_panic: bool,
+//RS     autodiff_safe_panic_context: bool,
+//RS     fx_memory_events: Vec<MemoryFacts::MemoryEvent>,
+//RS     fx_memory_open: Vec<MemoryFacts::OpenMemoryDispatch>,
+//RS     memory_policy_stack: Vec<MemoryFacts::MemoryPolicyRegion>,
+//RS     arithmetic_policy_stack: Vec<crate::AST::ArithmeticPolicyFact>,
+//RS     fx_memory_regions: Vec<MemoryFacts::MemoryPolicyRegion>,
+//RS     fx_memory_unbounded_control: Vec<Span>,
+//RS     fx_memory_calls: Vec<MemoryFacts::MemoryCall>,
+//RS     fx_discarded_results: Vec<Effects::DiscardedResultFact>,
+//RS     memory_control_multiplier: Option<u64>,
+//RS     txn_depth: usize,
+//RS     txn_wall_depth: usize,
+//RS     deterministic_world_depth: usize,
+//RS     det_suppress: usize,
+//RS     context_depth: usize,
+//RS     context_allocator_active: bool,
+//RS     in_unsafe: bool,
+//RS     suppress_must_use: bool,
+//RS     in_pure: bool,
+//RS     no_prelude: bool,
+//RS     in_pre_clause: bool,
+//RS     fallback_has_err: Option<bool>,
+//RS     failure_auto_root_suppression: usize,
+//RS     failure_auto_depth: usize,
+//RS     fallback_is_shape_miss: bool,
+//RS     in_comptime: bool,
+//RS     compiler_api_allowed: bool,
+//RS     ret: Option<Type>,
+//RS     fn_name: String,
+//RS     compiler_generated: bool,
+//RS     raw_protocol_return: bool,
+//RS     declared_return_type: Option<Type>,
+//RS     current_return_type_span: Option<Span>,
+//RS     current_param_names: Vec<String>,
+//RS     binder_ref_types: HashMap<String, Type>,
+//RS     expected_type: Option<Type>,
+//RS     uses_exact_int: bool,
+//RS     knowledge_gate: Option<KnowledgeGate>,
+//RS     iter_borrowed: HashSet<String>,
+//RS     noelse_chains_checked: HashSet<usize>,
+//RS     result_handler_subject_types: HashMap<usize, (Type, Expr)>,
+//RS     carrier_chain_subjects: HashSet<usize>,
+//RS     lending_view_loop_vars: HashSet<String>,
+//RS     return_view_provenance: Option<crate::AST::ViewProvenanceMap>,
+//RS     views_used_in_stmt: HashSet<String>,
+//RS     scoped_loan_read_reported: bool,
+//RS     call_access_frames: Vec<CallAccessFrame>,
+//RS     borrow_ctx: bool,
+//RS     owning_if_value_depth: usize,
+//RS     allow_fixed_constructor: bool,
+//RS     allow_string_view_read: bool,
+//RS     lambda_escapes: bool,
+//RS     in_lambda_body: bool,
+//RS     inferred_lambda_mut_captures: HashSet<String>,
+//RS     lambda_params_are_lending_views: bool,
+//RS     is_task_spawn: bool,
+//RS     task_body_propagates: bool,
+//RS     failure_carrier_inference: bool,
+//RS     failure_carrier: Option<Type>,
+//RS     statement_expr_inference: bool,
+//RS     statement_expr_root_depth: Option<usize>,
+//RS     http_handler_depth: usize,
+//RS     interrupt_callback_depth: usize,
+//RS     lambda_param_mutable: bool,
+//RS     lambda_param_is_secret_loan: bool,
+//RS     view_capture_tasks: HashSet<String>,
+//RS     reactive_upgrades: Vec<String>,
+//RS     reactive_upgrade_names: HashSet<String>,
+//RS     view_borrow_escape_tasks: HashSet<String>,
+//RS     current_binding_name: Option<String>,
+//RS     task_spawn_binding_name: Option<String>,
+//RS     lambda_binding: Option<String>,
+//RS     lambda_mut_borrow_stack: Vec<HashSet<String>>,
+//RS     ct_scopes: Vec<HashMap<String, crate::Comptime::CtValue>>,
+//RS     defer_ct_evaluation: bool,
+//RS     type_param_scope: Vec<crate::AST::TypeParam>,
+//RS     ct_impure_depth: usize,
+//RS     ct_embed_inputs: Vec<crate::AST::ComptimeInput>,
+//RS     in_dropped_comptime_arm: bool,
+//RS     stmt_tail_ptr: *const crate::AST::Stmt,
+//RS     stmt_tail_len: usize,
+//RS     liveness_frames: Vec<(*const crate::AST::Stmt, usize)>,
+//RS     taskgroup_stack: Vec<TaskGroupCtx>,
+//RS     in_taskgroup_spawn: bool,
+//RS     inline_addr_taken: HashSet<String>,
+//RS     devtools_publications: Vec<jet_foundation::AST::DevtoolsFactPublication>,
+//RS }
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     fn snapshot_erased_scope(&self) -> ErasedScopeSnapshot {
+//RS         ErasedScopeSnapshot {
+//RS             nominal_owner_cache: self.nominal_owner_cache.borrow().clone(),
+//RS             inline_module: self.inline_module.clone(),
+//RS             rule_facts: self.rule_facts.clone(),
+//RS             frame_schedule_systems: self.frame_schedule_systems.clone(),
+//RS             current_function_span: self.current_function_span,
+//RS             name_ledger: self.name_ledger.clone(),
+//RS             statement_lint_allows: self.statement_lint_allows.clone(),
+//RS             stdlib_lint_candidates: self.stdlib_lint_candidates.clone(),
+//RS             unused_bindings: self.unused_bindings.clone(),
+//RS             unused_binding_refs: self.unused_binding_refs.clone(),
+//RS             flow: self.flow.clone(),
+//RS             concrete_unit_values: self.concrete_unit_values.clone(),
+//RS             suppress_partial_move_root_read: self.suppress_partial_move_root_read,
+//RS             loop_depth: self.loop_depth,
+//RS             implicit_loop_subject_depth: self.implicit_loop_subject_depth,
+//RS             subject_shorthand_depth: self.subject_shorthand_depth,
+//RS             source_nesting: self.source_nesting,
+//RS             loop_labels: self.loop_labels.clone(),
+//RS             collect_item_types: self.collect_item_types.clone(),
+//RS             loop_value_frames: self.loop_value_frames.clone(),
+//RS             loop_break_flows: self.loop_break_flows.clone(),
+//RS             pending_loop_value: self.pending_loop_value.clone(),
+//RS             arrow_loop_body: self.arrow_loop_body,
+//RS             last_loop_result_type: self.last_loop_result_type.clone(),
+//RS             fx_direct: self.fx_direct.clone(),
+//RS             fx_direct_spans: self.fx_direct_spans.clone(),
+//RS             lambda_effect_stack: self.lambda_effect_stack.clone(),
+//RS             fx_edges: self.fx_edges.clone(),
+//RS             fx_maximal: self.fx_maximal,
+//RS             fx_maximal_span: self.fx_maximal_span,
+//RS             region_stack: self.region_stack.clone(),
+//RS             fx_regions: self.fx_regions.clone(),
+//RS             fx_authority_delegations: self.fx_authority_delegations.clone(),
+//RS             fx_callback_obligations: self.fx_callback_obligations.clone(),
+//RS             fx_autodiff_obligations: self.fx_autodiff_obligations.clone(),
+//RS             fx_compute_calls: self.fx_compute_calls.clone(),
+//RS             fx_autodiff_safe_panic: self.fx_autodiff_safe_panic,
+//RS             fx_autodiff_unsafe_panic: self.fx_autodiff_unsafe_panic,
+//RS             autodiff_safe_panic_context: self.autodiff_safe_panic_context,
+//RS             fx_memory_events: self.fx_memory_events.clone(),
+//RS             fx_memory_open: self.fx_memory_open.clone(),
+//RS             memory_policy_stack: self.memory_policy_stack.clone(),
+//RS             arithmetic_policy_stack: self.arithmetic_policy_stack.clone(),
+//RS             fx_memory_regions: self.fx_memory_regions.clone(),
+//RS             fx_memory_unbounded_control: self.fx_memory_unbounded_control.clone(),
+//RS             fx_memory_calls: self.fx_memory_calls.clone(),
+//RS             fx_discarded_results: self.fx_discarded_results.clone(),
+//RS             memory_control_multiplier: self.memory_control_multiplier,
+//RS             txn_depth: self.txn_depth,
+//RS             txn_wall_depth: self.txn_wall_depth,
+//RS             deterministic_world_depth: self.deterministic_world_depth,
+//RS             det_suppress: self.det_suppress,
+//RS             context_depth: self.context_depth,
+//RS             context_allocator_active: self.context_allocator_active,
+//RS             in_unsafe: self.in_unsafe,
+//RS             suppress_must_use: self.suppress_must_use,
+//RS             in_pure: self.in_pure,
+//RS             no_prelude: self.no_prelude,
+//RS             in_pre_clause: self.in_pre_clause,
+//RS             fallback_has_err: self.fallback_has_err,
+//RS             failure_auto_root_suppression: self.failure_auto_root_suppression,
+//RS             failure_auto_depth: self.failure_auto_depth,
+//RS             fallback_is_shape_miss: self.fallback_is_shape_miss,
+//RS             in_comptime: self.in_comptime,
+//RS             compiler_api_allowed: self.compiler_api_allowed,
+//RS             ret: self.ret.clone(),
+//RS             fn_name: self.fn_name.clone(),
+//RS             compiler_generated: self.compiler_generated,
+//RS             raw_protocol_return: self.raw_protocol_return,
+//RS             declared_return_type: self.declared_return_type.clone(),
+//RS             current_return_type_span: self.current_return_type_span,
+//RS             current_param_names: self.current_param_names.clone(),
+//RS             binder_ref_types: self.binder_ref_types.clone(),
+//RS             expected_type: self.expected_type.clone(),
+//RS             uses_exact_int: self.uses_exact_int,
+//RS             knowledge_gate: self.knowledge_gate,
+//RS             iter_borrowed: self.iter_borrowed.clone(),
+//RS             noelse_chains_checked: self.noelse_chains_checked.clone(),
+//RS             result_handler_subject_types: self.result_handler_subject_types.clone(),
+//RS             carrier_chain_subjects: self.carrier_chain_subjects.clone(),
+//RS             lending_view_loop_vars: self.lending_view_loop_vars.clone(),
+//RS             return_view_provenance: self.return_view_provenance.clone(),
+//RS             views_used_in_stmt: self.views_used_in_stmt.clone(),
+//RS             scoped_loan_read_reported: self.scoped_loan_read_reported,
+//RS             call_access_frames: self.call_access_frames.clone(),
+//RS             borrow_ctx: self.borrow_ctx,
+//RS             owning_if_value_depth: self.owning_if_value_depth,
+//RS             allow_fixed_constructor: self.allow_fixed_constructor,
+//RS             allow_string_view_read: self.allow_string_view_read,
+//RS             lambda_escapes: self.lambda_escapes,
+//RS             in_lambda_body: self.in_lambda_body,
+//RS             inferred_lambda_mut_captures: self.inferred_lambda_mut_captures.clone(),
+//RS             lambda_params_are_lending_views: self.lambda_params_are_lending_views,
+//RS             is_task_spawn: self.is_task_spawn,
+//RS             task_body_propagates: self.task_body_propagates,
+//RS             failure_carrier_inference: self.failure_carrier_inference,
+//RS             failure_carrier: self.failure_carrier.clone(),
+//RS             statement_expr_inference: self.statement_expr_inference,
+//RS             statement_expr_root_depth: self.statement_expr_root_depth,
+//RS             http_handler_depth: self.http_handler_depth,
+//RS             interrupt_callback_depth: self.interrupt_callback_depth,
+//RS             lambda_param_mutable: self.lambda_param_mutable,
+//RS             lambda_param_is_secret_loan: self.lambda_param_is_secret_loan,
+//RS             view_capture_tasks: self.view_capture_tasks.clone(),
+//RS             reactive_upgrades: self.reactive_upgrades.clone(),
+//RS             reactive_upgrade_names: self.reactive_upgrade_names.clone(),
+//RS             view_borrow_escape_tasks: self.view_borrow_escape_tasks.clone(),
+//RS             current_binding_name: self.current_binding_name.clone(),
+//RS             task_spawn_binding_name: self.task_spawn_binding_name.clone(),
+//RS             lambda_binding: self.lambda_binding.clone(),
+//RS             lambda_mut_borrow_stack: self.lambda_mut_borrow_stack.clone(),
+//RS             ct_scopes: self.ct_scopes.clone(),
+//RS             defer_ct_evaluation: self.defer_ct_evaluation,
+//RS             type_param_scope: self.type_param_scope.clone(),
+//RS             ct_impure_depth: self.ct_impure_depth,
+//RS             ct_embed_inputs: self.ct_embed_inputs.clone(),
+//RS             in_dropped_comptime_arm: self.in_dropped_comptime_arm,
+//RS             stmt_tail_ptr: self.stmt_tail_ptr,
+//RS             stmt_tail_len: self.stmt_tail_len,
+//RS             liveness_frames: self.liveness_frames.clone(),
+//RS             taskgroup_stack: self.taskgroup_stack.clone(),
+//RS             in_taskgroup_spawn: self.in_taskgroup_spawn,
+//RS             inline_addr_taken: self.inline_addr_taken.clone(),
+//RS             devtools_publications: self.devtools_publications.clone(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn restore_erased_scope(&mut self, snapshot: ErasedScopeSnapshot) {
+//RS         *self.nominal_owner_cache.borrow_mut() = snapshot.nominal_owner_cache;
+//RS         self.inline_module = snapshot.inline_module;
+//RS         self.rule_facts = snapshot.rule_facts;
+//RS         self.frame_schedule_systems = snapshot.frame_schedule_systems;
+//RS         self.current_function_span = snapshot.current_function_span;
+//RS         *self.name_ledger = snapshot.name_ledger;
+//RS         self.statement_lint_allows = snapshot.statement_lint_allows;
+//RS         self.stdlib_lint_candidates = snapshot.stdlib_lint_candidates;
+//RS         self.unused_bindings = snapshot.unused_bindings;
+//RS         self.unused_binding_refs = snapshot.unused_binding_refs;
+//RS         self.flow = snapshot.flow;
+//RS         self.concrete_unit_values = snapshot.concrete_unit_values;
+//RS         self.suppress_partial_move_root_read = snapshot.suppress_partial_move_root_read;
+//RS         self.loop_depth = snapshot.loop_depth;
+//RS         self.implicit_loop_subject_depth = snapshot.implicit_loop_subject_depth;
+//RS         self.subject_shorthand_depth = snapshot.subject_shorthand_depth;
+//RS         self.source_nesting = snapshot.source_nesting;
+//RS         self.loop_labels = snapshot.loop_labels;
+//RS         self.collect_item_types = snapshot.collect_item_types;
+//RS         self.loop_value_frames = snapshot.loop_value_frames;
+//RS         self.loop_break_flows = snapshot.loop_break_flows;
+//RS         self.pending_loop_value = snapshot.pending_loop_value;
+//RS         self.arrow_loop_body = snapshot.arrow_loop_body;
+//RS         self.last_loop_result_type = snapshot.last_loop_result_type;
+//RS         self.fx_direct = snapshot.fx_direct;
+//RS         self.fx_direct_spans = snapshot.fx_direct_spans;
+//RS         self.lambda_effect_stack = snapshot.lambda_effect_stack;
+//RS         self.fx_edges = snapshot.fx_edges;
+//RS         self.fx_maximal = snapshot.fx_maximal;
+//RS         self.fx_maximal_span = snapshot.fx_maximal_span;
+//RS         self.region_stack = snapshot.region_stack;
+//RS         self.fx_regions = snapshot.fx_regions;
+//RS         self.fx_authority_delegations = snapshot.fx_authority_delegations;
+//RS         self.fx_callback_obligations = snapshot.fx_callback_obligations;
+//RS         self.fx_autodiff_obligations = snapshot.fx_autodiff_obligations;
+//RS         self.fx_compute_calls = snapshot.fx_compute_calls;
+//RS         self.fx_autodiff_safe_panic = snapshot.fx_autodiff_safe_panic;
+//RS         self.fx_autodiff_unsafe_panic = snapshot.fx_autodiff_unsafe_panic;
+//RS         self.autodiff_safe_panic_context = snapshot.autodiff_safe_panic_context;
+//RS         self.fx_memory_events = snapshot.fx_memory_events;
+//RS         self.fx_memory_open = snapshot.fx_memory_open;
+//RS         self.memory_policy_stack = snapshot.memory_policy_stack;
+//RS         self.arithmetic_policy_stack = snapshot.arithmetic_policy_stack;
+//RS         self.fx_memory_regions = snapshot.fx_memory_regions;
+//RS         self.fx_memory_unbounded_control = snapshot.fx_memory_unbounded_control;
+//RS         self.fx_memory_calls = snapshot.fx_memory_calls;
+//RS         self.fx_discarded_results = snapshot.fx_discarded_results;
+//RS         self.memory_control_multiplier = snapshot.memory_control_multiplier;
+//RS         self.txn_depth = snapshot.txn_depth;
+//RS         self.txn_wall_depth = snapshot.txn_wall_depth;
+//RS         self.deterministic_world_depth = snapshot.deterministic_world_depth;
+//RS         self.det_suppress = snapshot.det_suppress;
+//RS         self.context_depth = snapshot.context_depth;
+//RS         self.context_allocator_active = snapshot.context_allocator_active;
+//RS         self.in_unsafe = snapshot.in_unsafe;
+//RS         self.suppress_must_use = snapshot.suppress_must_use;
+//RS         self.in_pure = snapshot.in_pure;
+//RS         self.no_prelude = snapshot.no_prelude;
+//RS         self.in_pre_clause = snapshot.in_pre_clause;
+//RS         self.fallback_has_err = snapshot.fallback_has_err;
+//RS         self.failure_auto_root_suppression = snapshot.failure_auto_root_suppression;
+//RS         self.failure_auto_depth = snapshot.failure_auto_depth;
+//RS         self.fallback_is_shape_miss = snapshot.fallback_is_shape_miss;
+//RS         self.in_comptime = snapshot.in_comptime;
+//RS         self.compiler_api_allowed = snapshot.compiler_api_allowed;
+//RS         self.ret = snapshot.ret;
+//RS         self.fn_name = snapshot.fn_name;
+//RS         self.compiler_generated = snapshot.compiler_generated;
+//RS         self.raw_protocol_return = snapshot.raw_protocol_return;
+//RS         self.declared_return_type = snapshot.declared_return_type;
+//RS         self.current_return_type_span = snapshot.current_return_type_span;
+//RS         self.current_param_names = snapshot.current_param_names;
+//RS         self.binder_ref_types = snapshot.binder_ref_types;
+//RS         self.expected_type = snapshot.expected_type;
+//RS         self.uses_exact_int = snapshot.uses_exact_int;
+//RS         self.knowledge_gate = snapshot.knowledge_gate;
+//RS         self.iter_borrowed = snapshot.iter_borrowed;
+//RS         self.noelse_chains_checked = snapshot.noelse_chains_checked;
+//RS         self.result_handler_subject_types = snapshot.result_handler_subject_types;
+//RS         self.carrier_chain_subjects = snapshot.carrier_chain_subjects;
+//RS         self.lending_view_loop_vars = snapshot.lending_view_loop_vars;
+//RS         self.return_view_provenance = snapshot.return_view_provenance;
+//RS         self.views_used_in_stmt = snapshot.views_used_in_stmt;
+//RS         self.scoped_loan_read_reported = snapshot.scoped_loan_read_reported;
+//RS         self.call_access_frames = snapshot.call_access_frames;
+//RS         self.borrow_ctx = snapshot.borrow_ctx;
+//RS         self.owning_if_value_depth = snapshot.owning_if_value_depth;
+//RS         self.allow_fixed_constructor = snapshot.allow_fixed_constructor;
+//RS         self.allow_string_view_read = snapshot.allow_string_view_read;
+//RS         self.lambda_escapes = snapshot.lambda_escapes;
+//RS         self.in_lambda_body = snapshot.in_lambda_body;
+//RS         self.inferred_lambda_mut_captures = snapshot.inferred_lambda_mut_captures;
+//RS         self.lambda_params_are_lending_views = snapshot.lambda_params_are_lending_views;
+//RS         self.is_task_spawn = snapshot.is_task_spawn;
+//RS         self.task_body_propagates = snapshot.task_body_propagates;
+//RS         self.failure_carrier_inference = snapshot.failure_carrier_inference;
+//RS         self.failure_carrier = snapshot.failure_carrier;
+//RS         self.statement_expr_inference = snapshot.statement_expr_inference;
+//RS         self.statement_expr_root_depth = snapshot.statement_expr_root_depth;
+//RS         self.http_handler_depth = snapshot.http_handler_depth;
+//RS         self.interrupt_callback_depth = snapshot.interrupt_callback_depth;
+//RS         self.lambda_param_mutable = snapshot.lambda_param_mutable;
+//RS         self.lambda_param_is_secret_loan = snapshot.lambda_param_is_secret_loan;
+//RS         self.view_capture_tasks = snapshot.view_capture_tasks;
+//RS         self.reactive_upgrades = snapshot.reactive_upgrades;
+//RS         self.reactive_upgrade_names = snapshot.reactive_upgrade_names;
+//RS         self.view_borrow_escape_tasks = snapshot.view_borrow_escape_tasks;
+//RS         self.current_binding_name = snapshot.current_binding_name;
+//RS         self.task_spawn_binding_name = snapshot.task_spawn_binding_name;
+//RS         self.lambda_binding = snapshot.lambda_binding;
+//RS         self.lambda_mut_borrow_stack = snapshot.lambda_mut_borrow_stack;
+//RS         self.ct_scopes = snapshot.ct_scopes;
+//RS         self.defer_ct_evaluation = snapshot.defer_ct_evaluation;
+//RS         self.type_param_scope = snapshot.type_param_scope;
+//RS         self.ct_impure_depth = snapshot.ct_impure_depth;
+//RS         self.ct_embed_inputs = snapshot.ct_embed_inputs;
+//RS         self.in_dropped_comptime_arm = snapshot.in_dropped_comptime_arm;
+//RS         self.stmt_tail_ptr = snapshot.stmt_tail_ptr;
+//RS         self.stmt_tail_len = snapshot.stmt_tail_len;
+//RS         self.liveness_frames = snapshot.liveness_frames;
+//RS         self.taskgroup_stack = snapshot.taskgroup_stack;
+//RS         self.in_taskgroup_spawn = snapshot.in_taskgroup_spawn;
+//RS         self.inline_addr_taken = snapshot.inline_addr_taken;
+//RS         self.devtools_publications = snapshot.devtools_publications;
+//RS     }
+//RS 
+//RS     pub(crate) fn with_erased_scope<T>(
+//RS         &mut self,
+//RS         check: impl FnOnce(&mut Self) -> T,
+//RS     ) -> T {
+//RS         let snapshot = self.snapshot_erased_scope();
+//RS         let result = check(self);
+//RS         self.restore_erased_scope(snapshot);
+//RS         result
+//RS     }
+//RS 
+//RS }
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     pub(crate) fn with_knowledge_gate<T>(
+//RS         &mut self,
+//RS         gate: KnowledgeGate,
+//RS         check: impl FnOnce(&mut Self) -> T,
+//RS     ) -> T {
+//RS         let previous = self.knowledge_gate.replace(gate);
+//RS         let result = check(self);
+//RS         self.knowledge_gate = previous;
+//RS         result
+//RS     }
+//RS 
+//RS     pub(crate) fn knowledge_gate_allows(&self, plane: KnowledgePlane) -> bool {
+//RS         self.knowledge_gate
+//RS             .is_some_and(|gate| KnowledgeLoss::allows_gate(plane, gate))
+//RS     }
+//RS 
+//RS     /// Apply the one knowledge law at a sema boundary. Callers identify the
+//RS     /// existing written operation that can make the move explicit; this
+//RS     /// method owns the shared diagnostic and keeps codegen out of the policy.
+//RS     pub(crate) fn require_knowledge_gate(
+//RS         &mut self,
+//RS         plane: KnowledgePlane,
+//RS         gate: KnowledgeGate,
+//RS         span: Span,
+//RS     ) {
+//RS         if !self.knowledge_gate_allows(plane) {
+//RS             self.diags
+//RS                 .push(KnowledgeLoss::diagnostic(plane, gate.spelling(), span));
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn register_binder_refs(&mut self, args: &[crate::AST::CallArg]) {
+//RS         for arg in args {
+//RS             for (name, _, ty) in &arg.flags.binder_refs {
+//RS                 self.binder_ref_types.insert(name.clone(), ty.clone());
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Project a resolved source name through the sema-owned name ledger.
+//RS     /// Diagnostics keep a leaf while it is unique and use the canonical path
+//RS     /// when another visible declaration makes the leaf ambiguous.
+//RS     pub(crate) fn display_type_name(&self, name: &str, resolved_module: Option<usize>) -> String {
+//RS         self.name_ledger
+//RS             .display_path(self.module_idx, name, resolved_module)
+//RS             .unwrap_or_else(|| name.to_string())
+//RS     }
+//RS 
+//RS     /// Project every nominal leaf in a diagnostic type through the same
+//RS     /// source-name ledger used by hover and completion.
+//RS     pub(crate) fn display_type(&self, ty: &Type) -> Type {
+//RS         ty.map_named_types(&|name| self.name_ledger.display_path(self.module_idx, name, None))
+//RS     }
+//RS 
+//RS     pub(crate) fn enter_source_nesting(&mut self, span: Span) -> bool {
+//RS         self.source_nesting += 1;
+//RS         if self.source_nesting <= crate::Diagnostics::MAX_SOURCE_NESTING {
+//RS             return true;
+//RS         }
+//RS         self.diags.push(Diagnostic::source_nesting_exceeded(
+//RS             self.source_nesting,
+//RS             span,
+//RS         ));
+//RS         self.source_nesting -= 1;
+//RS         false
+//RS     }
+//RS 
+//RS     pub(crate) fn leave_source_nesting(&mut self) {
+//RS         self.source_nesting -= 1;
+//RS     }
+//RS 
+//RS     fn concrete_unit_value(&self, expr: &Expr) -> Option<f64> {
+//RS         match expr {
+//RS             Expr::Ident(name, _) => self
+//RS                 .concrete_unit_values
+//RS                 .iter()
+//RS                 .rev()
+//RS                 .find_map(|scope| scope.get(name).copied()),
+//RS             Expr::MethodCall { method, args, .. }
+//RS                 if method == crate::Syntax::numeric_conversion_method("Float")?
+//RS                     && args.len() == 1 =>
+//RS             {
+//RS                 match &args[0].expr {
+//RS                     Expr::Float(value, _, _, _) => Some(*value),
+//RS                     Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match &**inner {
+//RS                         Expr::Float(value, _, _, _) => Some(-*value),
+//RS                         _ => None,
+//RS                     },
+//RS                     _ => None,
+//RS                 }
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn unit_fact_for_type(&self, ty: &Type) -> Option<(String, UnitFact)> {
+//RS         let Type::Named(name) = ty else { return None };
+//RS         if let Some(fact) = self.registry.unit_fact(name) {
+//RS             return Some((name.clone(), fact.clone()));
+//RS         }
+//RS         let (import_ns, leaf) = Self::split_type_name(name);
+//RS         let modules = self.modules?;
+//RS         if let Some(namespace) = import_ns {
+//RS             let index = if namespace.contains("::") {
+//RS                 let identity = format!("{namespace}::{leaf}");
+//RS                 self.name_ledger.nominal_module(&identity)?
+//RS             } else {
+//RS                 *self.imports.get(namespace)?
+//RS             };
+//RS             let fact = modules.get(index)?.registry.unit_fact(leaf)?.clone();
+//RS             let canonical = if index == self.module_idx {
+//RS                 leaf.to_string()
+//RS             } else {
+//RS                 self.canonical_nominal_name(index, leaf)
+//RS             };
+//RS             return Some((canonical, fact));
+//RS         }
+//RS         let mut owner = None;
+//RS         for (index, module) in modules.iter().enumerate() {
+//RS             if module.registry.is_unit_type(leaf) && self.type_is_pub_in(index, leaf) {
+//RS                 if owner.is_some_and(|previous| previous != index) {
+//RS                     return None;
+//RS                 }
+//RS                 owner = Some(index);
+//RS             }
+//RS         }
+//RS         let index = owner?;
+//RS         let fact = modules.get(index)?.registry.unit_fact(leaf)?.clone();
+//RS         let canonical = if index == self.module_idx {
+//RS             leaf.to_string()
+//RS         } else {
+//RS             self.canonical_nominal_name(index, leaf)
+//RS         };
+//RS         Some((canonical, fact))
+//RS     }
+//RS 
+//RS     pub(crate) fn is_unit_type_name(&self, name: &str) -> bool {
+//RS         self.unit_fact_for_type(&Type::Named(name.to_string()))
+//RS             .is_some()
+//RS     }
+//RS 
+//RS     pub(crate) fn is_unit_type(&self, ty: &Type) -> bool {
+//RS         matches!(ty, Type::Named(name) if self.is_unit_type_name(name))
+//RS             || ty.quantity_parts().is_some()
+//RS     }
+//RS 
+//RS     pub(crate) fn counterpart_unit_type(
+//RS         &self,
+//RS         source_name: &str,
+//RS         fact: &UnitFact,
+//RS         kind: QuantityKind,
+//RS     ) -> Option<String> {
+//RS         let stem = crate::AST::UnitFamilyDef::type_name(&fact.member);
+//RS         let leaf = match kind {
+//RS             QuantityKind::Linear => stem,
+//RS             QuantityKind::Point => format!("{stem}Point"),
+//RS             QuantityKind::Delta => format!("{stem}Delta"),
+//RS         };
+//RS         let candidate = Self::split_type_name(source_name).0.map_or_else(
+//RS             || leaf.clone(),
+//RS             |namespace| {
+//RS                 if namespace.contains("::") {
+//RS                     format!("{namespace}::{leaf}")
+//RS                 } else {
+//RS                     format!("{namespace}.{leaf}")
+//RS                 }
+//RS             },
+//RS         );
+//RS         self.unit_fact_for_type(&Type::Named(candidate.clone()))
+//RS             .filter(|(_, other)| {
+//RS                 other.package == fact.package && other.family == fact.family && other.kind == kind
+//RS             })
+//RS             .map(|_| candidate)
+//RS     }
+//RS 
+//RS     pub(crate) fn type_satisfies_bound(&self, ty: &Type, bound: &str) -> bool {
+//RS         if let Some((dimension, kind)) = crate::Generics::parse_quantity_bound(bound) {
+//RS             if let Some((_, fact)) = self.unit_fact_for_type(ty) {
+//RS                 return fact.family == dimension && fact.kind.name() == kind;
+//RS             }
+//RS             let Some((_, actual_dimension)) = ty.quantity_parts() else {
+//RS                 return false;
+//RS             };
+//RS             return kind == QuantityKind::Linear.name()
+//RS                 && (self.registry.unit_facts.values().chain(
+//RS                     self.modules
+//RS                         .into_iter()
+//RS                         .flatten()
+//RS                         .flat_map(|module| module.registry.unit_facts.values()),
+//RS                 ))
+//RS                 .any(|fact| {
+//RS                     fact.family == dimension
+//RS                         && fact.kind == QuantityKind::Linear
+//RS                         && fact.dimension.as_ref() == Some(&actual_dimension)
+//RS                 });
+//RS         }
+//RS         // A type parameter in scope satisfies every bound declared on it, so
+//RS         // `fn outer<P: Shape>(shape: P)` may forward `P` to another
+//RS         // `<P: Shape>` generic (`inner<P>(shape)` or `inner(shape)`).
+//RS         if let Type::Named(name) = ty {
+//RS             let mut in_scope = false;
+//RS             let mut declared_bound = false;
+//RS             for param in self.type_param_scope.iter().filter(|param| param.name == *name) {
+//RS                 in_scope = true;
+//RS                 declared_bound |= param.bounds.iter().any(|candidate| candidate == bound);
+//RS             }
+//RS             if declared_bound {
+//RS                 return true;
+//RS             }
+//RS             // An in-scope type parameter without a declared `Decode` bound can
+//RS             // be instantiated with any type, so it never satisfies `Decode`.
+//RS             // A concrete named type (a `#Codable` / `#Decode` struct or enum)
+//RS             // falls through to its registered derive or impl below.
+//RS             if in_scope && bound == crate::Generics::DECODE {
+//RS                 return false;
+//RS             }
+//RS         }
+//RS         self.trait_reg.type_implements_trait(ty, bound)
+//RS     }
+//RS 
+//RS     pub(crate) fn unit_conversion_overflow_diagnostic(&self, span: Span) -> Diagnostic {
+//RS         Diagnostic::error(
+//RS             "E0127",
+//RS             "this unit conversion overflows its runtime representation".to_string(),
+//RS             "the declared exact scale or offset is outside Float's finite range".to_string(),
+//RS             "choose units with a finite conversion boundary".to_string(),
+//RS             Some(span),
+//RS         )
+//RS     }
+//RS 
+//RS     pub(crate) fn implicitly_convert_unit(
+//RS         &mut self,
+//RS         expr: &mut Expr,
+//RS         destination_ty: &Type,
+//RS         source_ty: &Type,
+//RS     ) -> bool {
+//RS         let Some((destination_name, destination_fact)) = self.unit_fact_for_type(destination_ty)
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         if let Some((base, dimension)) = source_ty.quantity_parts() {
+//RS             if base == &Type::Float
+//RS                 && destination_fact.dimension.as_ref() == Some(&dimension)
+//RS                 && destination_fact.kind == QuantityKind::Linear
+//RS                 && destination_fact.scale == crate::AST::UnitRatio::integer(1)
+//RS                 && destination_fact.offset == crate::AST::UnitRatio::zero()
+//RS             {
+//RS                 let span = expr.span();
+//RS                 let value = std::mem::replace(expr, Expr::Absent(span));
+//RS                 *expr = Expr::MethodCall {
+//RS                     receiver: Box::new(Expr::Ident(destination_name.clone(), span)),
+//RS                     method: crate::Syntax::numeric_conversion_method("Float")
+//RS                         .expect("Float conversion is registered")
+//RS                         .to_string(),
+//RS                     method_span: span,
+//RS                     owner_type_args: Vec::new(),
+//RS                     type_args: Vec::new(),
+//RS                     args: vec![crate::AST::CallArg {
+//RS                         convention: crate::AST::AccessConvention::Read,
+//RS                         expr: value,
+//RS                         span,
+//RS                         flags: crate::AST::CallArgFlags::default(),
+//RS                         label: None,
+//RS                         spread: false,
+//RS                     }],
+//RS                     recv_type: None,
+//RS                     resolved_ret: Some(destination_ty.clone()),
+//RS                     operator_rhs: None,
+//RS                     checked_widen: false,
+//RS                 };
+//RS                 return true;
+//RS             }
+//RS         }
+//RS         let Some((source_name, source_fact)) = self.unit_fact_for_type(source_ty) else {
+//RS             return false;
+//RS         };
+//RS         if destination_fact.package != source_fact.package
+//RS             || destination_fact.family != source_fact.family
+//RS             || destination_fact.dimension != source_fact.dimension
+//RS             || destination_fact.kind != source_fact.kind
+//RS         {
+//RS             return false;
+//RS         }
+//RS         if source_fact.is_measured() || destination_fact.is_measured() {
+//RS             self.diags.push(self.measured_unit_diagnostic(
+//RS                 &destination_name,
+//RS                 &source_name,
+//RS                 &source_fact,
+//RS                 &destination_fact,
+//RS                 expr.span(),
+//RS             ));
+//RS             return true;
+//RS         }
+//RS         if !source_fact.conversion_is_finite_to(&destination_fact) {
+//RS             self.diags
+//RS                 .push(self.unit_conversion_overflow_diagnostic(expr.span()));
+//RS             return true;
+//RS         }
+//RS         let exact = source_fact.is_symbolic()
+//RS             || destination_fact.is_symbolic()
+//RS             || self.concrete_unit_value(expr).map_or_else(
+//RS                 || source_fact.conversion_is_total_to(&destination_fact),
+//RS                 |value| source_fact.converted_value_is_exact_to(&destination_fact, value),
+//RS             );
+//RS         if !exact {
+//RS             if crate::Sema::knowledge_loss_requires_gate(KnowledgePlane::Unit, None) {
+//RS                 self.diags.push(self.inexact_unit_diagnostic(
+//RS                     &destination_name,
+//RS                     &source_name,
+//RS                     expr.span(),
+//RS                 ));
+//RS                 return true;
+//RS             }
+//RS         }
+//RS         if self.explicit_units_enabled() && destination_name != source_name {
+//RS             self.diags.push(self.explicit_units_diagnostic(
+//RS                 &destination_name,
+//RS                 &source_name,
+//RS                 expr.span(),
+//RS             ));
+//RS             return true;
+//RS         }
+//RS         let span = expr.span();
+//RS         let source_expr = std::mem::replace(expr, Expr::Absent(span));
+//RS         *expr = self.unit_conversion_expr(
+//RS             source_expr,
+//RS             &source_name,
+//RS             &source_fact,
+//RS             &destination_name,
+//RS             &destination_fact,
+//RS             span,
+//RS         );
+//RS         true
+//RS     }
+//RS 
+//RS     pub(crate) fn explicit_units_enabled(&self) -> bool {
+//RS         let base = self.policy_declarations.iter().any(|declaration| {
+//RS             declaration.key == crate::Policy::PolicyKey::ExplicitUnits
+//RS                 && (matches!(
+//RS                     declaration.scope,
+//RS                     crate::Policy::PolicyScope::Package | crate::Policy::PolicyScope::Module
+//RS                 ) || (declaration.scope == crate::Policy::PolicyScope::Function
+//RS                     && declaration.target == Some(self.current_function_span)))
+//RS         });
+//RS         base || self.memory_policy_stack.last().is_some_and(|region| {
+//RS             region
+//RS                 .declarations
+//RS                 .iter()
+//RS                 .any(|declaration| declaration.key == crate::Policy::PolicyKey::ExplicitUnits)
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-MEM-COPYSEM1=A: the default materializes a read-only view at an
+//RS     /// owning destination. `copies: .Explicit` is the opt-in refusal ladder;
+//RS     /// it follows the same package/module/function/block scope chain as the
+//RS     /// other source policies.
+//RS     pub(crate) fn copies_explicit(&self) -> bool {
+//RS         let declared = |declaration: &crate::Policy::PolicyDeclaration| {
+//RS             declaration.key == crate::Policy::PolicyKey::Copies
+//RS                 && declaration.value == crate::Policy::PolicyValue::Explicit
+//RS                 && (matches!(
+//RS                     declaration.scope,
+//RS                     crate::Policy::PolicyScope::Package | crate::Policy::PolicyScope::Module
+//RS                 ) || (declaration.scope == crate::Policy::PolicyScope::Function
+//RS                     && declaration.target == Some(self.current_function_span)))
+//RS         };
+//RS         self.policy_declarations.iter().any(declared)
+//RS             || self.memory_policy_stack.last().is_some_and(|region| {
+//RS                 region.declarations.iter().any(|declaration| {
+//RS                     declaration.key == crate::Policy::PolicyKey::Copies
+//RS                         && declaration.value == crate::Policy::PolicyValue::Explicit
+//RS                 })
+//RS             })
+//RS     }
+//RS 
+//RS     pub(crate) fn audited_gate_allowed(
+//RS         &mut self,
+//RS         key: crate::Policy::PolicyKey,
+//RS         span: Span,
+//RS     ) -> bool {
+//RS         let declarations = self
+//RS             .policy_declarations
+//RS             .iter()
+//RS             .filter(|declaration| {
+//RS                 declaration.key == key
+//RS                     && (matches!(
+//RS                         declaration.scope,
+//RS                         crate::Policy::PolicyScope::Organization
+//RS                             | crate::Policy::PolicyScope::Package
+//RS                             | crate::Policy::PolicyScope::Module
+//RS                     ) || declaration.target == Some(self.current_function_span)
+//RS                         || declaration.target == Some(span))
+//RS             })
+//RS             .cloned()
+//RS             .collect::<Vec<_>>();
+//RS         match crate::Policy::resolve_with_gates(key, declarations, &self.gates) {
+//RS             Ok(Some(policy)) if policy.value == crate::Policy::PolicyValue::Forbid => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     if key == crate::Policy::PolicyKey::Unsafe { "E3105" } else { "E3415" },
+//RS                     format!("the `{}` gate is denied by effective policy", key.name()),
+//RS                     "an organization or package policy can refuse an audited escape, including its invocation gate".to_string(),
+//RS                     format!("remove the `{}` escape or change the owning policy", key.name()),
+//RS                     Some(span),
+//RS                 ));
+//RS                 false
+//RS             }
+//RS             Ok(_) => true,
+//RS             Err(_error) => {
+//RS                 let code = if self.gates.allows(key) {
+//RS                     "E3415"
+//RS                 } else {
+//RS                     "E0355"
+//RS                 };
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     code,
+//RS                     format!("the `{}` gate is denied by effective policy", key.name()),
+//RS                     "an organization or package policy can refuse an audited escape, including its invocation gate".to_string(),
+//RS                     format!("remove `--gate {}=allow` or change the owning policy", key.name()),
+//RS                     Some(span),
+//RS                 ));
+//RS                 false
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn explicit_units_diagnostic(
+//RS         &self,
+//RS         destination_name: &str,
+//RS         source_name: &str,
+//RS         span: Span,
+//RS     ) -> Diagnostic {
+//RS         let source_leaf = source_name.rsplit('.').next().unwrap_or(source_name);
+//RS         let method = crate::Syntax::conversion_method_for_source(source_leaf);
+//RS         Diagnostic::error(
+//RS             "E0127",
+//RS             "`explicit_units` requires a written conversion".to_string(),
+//RS             format!(
+//RS                 "this scope does not convert `{source_name}` to `{destination_name}` implicitly"
+//RS             ),
+//RS             format!("write `{destination_name}.{method}(expr)`"),
+//RS             Some(span),
+//RS         )
+//RS     }
+//RS 
+//RS     fn measured_unit_diagnostic(
+//RS         &self,
+//RS         destination_name: &str,
+//RS         source_name: &str,
+//RS         source: &UnitFact,
+//RS         destination: &UnitFact,
+//RS         span: Span,
+//RS     ) -> Diagnostic {
+//RS         let measured = if source.is_measured() {
+//RS             source
+//RS         } else {
+//RS             destination
+//RS         };
+//RS         let crate::AST::UnitScaleProvenance::Measured {
+//RS             central_value,
+//RS             standard_uncertainty,
+//RS             source,
+//RS         } = &measured.scale_provenance
+//RS         else {
+//RS             unreachable!()
+//RS         };
+//RS         Diagnostic::error(
+//RS             "E0127",
+//RS             format!("`{source_name}` to `{destination_name}` crosses a measured scale"),
+//RS             format!(
+//RS                 "the pinned central value is {central_value} with standard uncertainty {standard_uncertainty} ({source})"
+//RS             ),
+//RS             format!(
+//RS                 "write an explicit rounded conversion to `{destination_name}` and audit the pinned source"
+//RS             ),
+//RS             Some(span),
+//RS         )
+//RS     }
+//RS 
+//RS     pub(crate) fn reject_implicit_unit_conversion(
+//RS         &mut self,
+//RS         destination_name: &str,
+//RS         source_name: &str,
+//RS         source_expr: &Expr,
+//RS         span: Span,
+//RS     ) -> bool {
+//RS         if let (Some((_, destination)), Some((_, source))) = (
+//RS             self.unit_fact_for_type(&Type::Named(destination_name.to_string())),
+//RS             self.unit_fact_for_type(&Type::Named(source_name.to_string())),
+//RS         ) {
+//RS             if source.is_measured() || destination.is_measured() {
+//RS                 self.diags.push(self.measured_unit_diagnostic(
+//RS                     destination_name,
+//RS                     source_name,
+//RS                     &source,
+//RS                     &destination,
+//RS                     span,
+//RS                 ));
+//RS                 return true;
+//RS             }
+//RS             if !source.conversion_is_finite_to(&destination) {
+//RS                 self.diags
+//RS                     .push(self.unit_conversion_overflow_diagnostic(span));
+//RS                 return true;
+//RS             }
+//RS             let exact = source.is_symbolic()
+//RS                 || destination.is_symbolic()
+//RS                 || self.concrete_unit_value(source_expr).map_or_else(
+//RS                     || source.conversion_is_total_to(&destination),
+//RS                     |value| source.converted_value_is_exact_to(&destination, value),
+//RS                 );
+//RS             if !exact {
+//RS                 if crate::Sema::knowledge_loss_requires_gate(KnowledgePlane::Unit, None) {
+//RS                     self.diags.push(self.inexact_unit_diagnostic(
+//RS                         destination_name,
+//RS                         source_name,
+//RS                         span,
+//RS                     ));
+//RS                     return true;
+//RS                 }
+//RS             }
+//RS         }
+//RS         if self.explicit_units_enabled() && destination_name != source_name {
+//RS             self.diags
+//RS                 .push(self.explicit_units_diagnostic(destination_name, source_name, span));
+//RS             true
+//RS         } else {
+//RS             false
+//RS         }
+//RS     }
+//RS 
+//RS     fn inexact_unit_diagnostic(
+//RS         &self,
+//RS         destination_name: &str,
+//RS         source_name: &str,
+//RS         span: Span,
+//RS     ) -> Diagnostic {
+//RS         let source_leaf = source_name.rsplit('.').next().unwrap_or(source_name);
+//RS         let method = crate::Syntax::conversion_method_for_source(source_leaf);
+//RS         Diagnostic::error(
+//RS             "E0127",
+//RS             "this implicit unit conversion would round".to_string(),
+//RS             "the exact scale or offset cannot be represented as an integer conversion at this boundary".to_string(),
+//RS             format!(
+//RS                 "write `{destination_name}.{method}_rounded(expr, .NearestEven, digits: 0)?` or choose another rounding policy"
+//RS             ),
+//RS             Some(span),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS pub mod ApiFreeze;
+//RS mod Bundle;
+//RS /// D-APILABEL1=A: the one argument binder every call form goes through.
+//RS pub(crate) mod CallBinder;
+//RS mod Captures;
+//RS mod CheckerCli;
+//RS mod CheckerCore;
+//RS mod CheckerCoreLib;
+//RS mod CheckerFieldPolicy;
+//RS mod CheckerInfer;
+//RS mod CheckerInline;
+//RS mod CheckerItems;
+//RS mod CheckerKernel;
+//RS mod CheckerMarkers;
+//RS mod CheckerOwnership;
+//RS mod CheckerPatchable;
+//RS mod CheckerSchedule;
+//RS mod CheckerTaskGroup;
+//RS use CheckerTaskGroup::TaskGroupCtx;
+//RS mod CheckerValidate;
+//RS mod CognitiveComplexity;
+//RS mod DevtoolsPanel;
+//RS pub mod Diagnostics;
+//RS mod Edition;
+//RS // The REPL's effect-name gate reads parse_effect_name and effect_covers
+//RS // directly, the same way it reads ApiFreeze and GateLedger above.
+//RS mod BudgetSpecs;
+//RS pub mod Effects;
+//RS mod FFI;
+//RS mod FlowFacts;
+//RS pub mod GateLedger;
+//RS mod Guest;
+//RS pub mod HotSwap;
+//RS mod MemberSpread;
+//RS mod MemoryFacts;
+//RS pub(crate) mod NominalWalk;
+//RS mod OSTarget;
+//RS mod PolicyFacts;
+//RS mod Prelude;
+//RS mod Protocol;
+//RS mod Purity;
+//RS mod Registration;
+//RS pub mod Schema;
+//RS mod SchemaMigration;
+//RS mod ScopeMembers;
+//RS /// D-CONC-SHARE1=A: the one plain-access desugar for `Shared<T>`.
+//RS mod SharedAccess;
+//RS /// D-CAP-RECEIVER1=D: receiver place marks are checked against conventions.
+//RS mod ReceiverMarks;
+//RS use ReceiverMarks::{ReceiverMark, ReceiverMarkFrame};
+//RS pub mod UnsafeObligations;
+//RS pub use BudgetSpecs::{
+//RS     collect_budget_specs, collect_budget_specs_bundle, collect_located_budget_specs_bundle,
+//RS     BudgetApplicability, BudgetAxis, BudgetComparisonFact, BudgetLimitFact, BudgetQuantity,
+//RS     BudgetRawQuantity, BudgetSpec, CompileWorkloadFact, LocatedBudgetSpec,
+//RS };
+//RS mod App;
+//RS mod CheckerReferences;
+//RS mod KnowledgeLoss;
+//RS mod State;
+//RS mod Taint;
+//RS mod TargetSurface;
+//RS mod WebPartition;
+//RS pub(crate) use CheckerReferences::record_comptime_import_alias_uses;
+//RS 
+//RS pub(crate) use KnowledgeLoss::{
+//RS     allows_gate as knowledge_gate_allows, requires_gate as knowledge_loss_requires_gate,
+//RS     KnowledgeGate, KnowledgePlane,
+//RS };
+//RS 
+//RS pub(crate) use Bundle::*;
+//RS pub(crate) use Captures::*;
+//RS 
+//RS /// Exact AST name-reference query used by codegen planning. Unlike conservative
+//RS /// feature-discovery walkers, this is exhaustive over every statement/expression form.
+//RS pub fn stmt_references_name_exact(stmt: &Stmt, name: &str) -> bool {
+//RS     Captures::stmt_refs_name(stmt, name)
+//RS }
+//RS 
+//RS /// Same question as `stmt_references_name_exact`, but a use inside a lambda
+//RS /// body counts. D-TASKBORROW1=A: a `task.group` child borrows through a lambda.
+//RS pub fn stmt_references_name_deep(stmt: &Stmt, name: &str) -> bool {
+//RS     Captures::stmt_uses_name_through_lambdas(stmt, name)
+//RS }
+//RS 
+//RS pub(crate) use CheckerCli::*;
+//RS pub use CheckerCoreLib::*;
+//RS pub(crate) use CheckerFieldPolicy::*;
+//RS pub(crate) use CheckerPatchable::*;
+//RS pub(crate) use CheckerValidate::*;
+//RS pub use CognitiveComplexity::{cognitive_complexity_reports, CognitiveComplexityReport};
+//RS pub(crate) use DevtoolsPanel::{check_devtools_publish, registry_error};
+//RS pub use DevtoolsPanel::{
+//RS     check_devtools_panels, check_unfed_state_fields,
+//RS     unfed_state_fields, E_DEVTOOLS_DUPLICATE_PANEL, E_DEVTOOLS_FIELD_TYPE,
+//RS     E_DEVTOOLS_INVALID_PANEL, E_DEVTOOLS_PUBLISH_GATE, E_DEVTOOLS_UNKNOWN_FIELD,
+//RS     E_DEVTOOLS_UNFED_FIELD,
+//RS };
+//RS pub(crate) use Diagnostics::*;
+//RS pub use Diagnostics::{is_core_error_family_type, type_requires_owned_iteration};
+//RS pub(crate) use Effects::*;
+//RS pub(crate) use Guest::{
+//RS     check_guest_export_surface, check_guest_import_surface, check_guest_symbol_collisions,
+//RS };
+//RS pub use Registration::*;
+//RS pub(crate) use Taint::check_func_taint;
+//RS pub use TargetSurface::check_target_surface;
+//RS pub(crate) use FFI::*;
+//RS // D-STATE1: typestate pass — wrong-state operation (E0150).
+//RS pub(crate) use State::{check_items_state, checked_state_graphs, StateTable};
+//RS // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
+//RS pub use App::extract_app_graph;
+//RS pub(crate) use WebPartition::check_web_partition;
+//RS pub use WebPartition::checked_web_bucket;
+//RS // D-OSTARGET1=A: native OS platform gating (mixed-axis + unmatched-call).
+//RS pub(crate) use MemberSpread::desugar_member_spreads;
+//RS pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
+//RS 
+//RS // Public entry points (preserve `jet::Sema::<item>` paths).
+//RS pub use Bundle::{
+//RS     build_entry_signature_is_valid, bundle_has_comptime_evaluation, check_bundle,
+//RS     check_bundle_for_output, check_bundle_for_output_opts,
+//RS     check_bundle_for_output_opts_with_effect_facts, check_bundle_gates,
+//RS     check_bundle_gates_with_effect_facts, check_bundle_no_os, check_bundle_no_os_with_effect_facts,
+//RS     check_bundle_no_os_with_gates,
+//RS     check_bundle_with_effect_facts, check_bundle_with_effect_facts_for_build,
+//RS     check_bundle_with_effect_facts_incremental,
+//RS     check_target_machine, is_build_entry, specialize_function_types, strip_build_only_entries,
+//RS     target_hardware_capabilities, target_hardware_profile, target_hardware_profile_id,
+//RS     target_hardware_use, target_hardware_use_with_effect_facts, target_machine_use,
+//RS     validate_target_hardware, IncrementalSemaCache, IncrementalSemaStats,
+//RS     sealed_package_count, with_package_records, PackageRecordStore, PackageReuse,
+//RS     PackageReuseRow,
+//RS };
+//RS pub use Effects::{AuthorityDelegation, EffectSummary, SemIndexEffectFacts};
+//RS pub use MemoryFacts::{
+//RS     check_memory_facts, project_memory_fact, MemoryCall, MemoryEvent, MemoryEventKind, MemoryFact,
+//RS     MemoryFactDeclaration, MemoryPolicyRegion, MemoryProjection, MemorySummary, OpenMemoryDispatch,
+//RS };
+//RS pub use PolicyFacts::{
+//RS     collect_policy_facts, collect_policy_facts_from_program, PolicyDomain, PolicyFact,
+//RS     PolicyFactGraph,
+//RS };
+//RS // D-EFFBUDGET1: the closed effect vocabulary, exposed so jet-driver can
+//RS // validate `pkg.jet` `authority.holds`/`authority.grants` manifest fields against it.
+//RS // D-EFFTREE1: also export the tree helpers — jet-driver's EffectBudget and
+//RS // manifest parsing need root validation and ancestor-subsumption coverage
+//RS // too, not just the bare enum.
+//RS pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
+//RS pub(crate) use CheckerMarkers::{
+//RS     check_declared_rule_facts, check_deprecated_visibility, check_marker_vocabulary,
+//RS };
+//RS pub(crate) use CheckerSchedule::{
+//RS     check_every_marker, check_job_collisions, check_job_graph,
+//RS };
+//RS pub use CheckerSchedule::checked_job_registry;
+//RS pub use Effects::{
+//RS     authority_delegations, builtin_effect, core_effect, effect_covers, effect_root, effect_row_var,
+//RS     effect_set_has_root, memory_allocation_bound, package_effect_policy_diagnostics,
+//RS     package_policy_path_covers, package_policy_source_path, parse_effect_name,
+//RS     reject_positive_deny_only_effect, resolve_effect_name, show_set, undeclared_effect, Effect,
+//RS     EffectSet,
+//RS };
+//RS pub(crate) use Guest::{PluginExportFact, PluginInterface, PluginInterfaceRegistry};
+//RS pub use Guest::{
+//RS     guest_export_native_symbol, guest_export_signature, guest_export_surface,
+//RS     guest_import_bridge_compatible, guest_import_function_signature, guest_import_signature,
+//RS     guest_import_surface, guest_import_symbol, guest_import_wrapper_name, guest_surface,
+//RS     is_guest_export, is_guest_export_marker, is_guest_import, is_guest_import_marker,
+//RS     sandbox_component_type, sandbox_export_signature, sandbox_export_surface, GuestDirection,
+//RS     GuestFunction, GuestScalar,
+//RS };
+//RS pub use Effects::{check_pure_fn, check_pure_program_root};
+//RS pub use Purity::{e3401, e3402, e3403};
+//RS pub use Registration::effect_key;
+//RS pub use FFI::{e3202, e3301, e3302, e3303};
+//RS // D-MIGRATE2C: `jet inspect schema status` reuses the schema-migration diff.
+//RS pub use SchemaMigration::{check_schema_migrations, desugar_migrations};
+//RS 
+//RS /// Free reads and direct calls in an expression, without copying its AST.
+//RS pub fn expr_free_reads_and_calls(
+//RS     expr: &crate::AST::Expr,
+//RS ) -> (HashSet<String>, HashSet<String>) {
+//RS     let bound = HashSet::new();
+//RS     let mut read = HashSet::new();
+//RS     let mut mut_cap = HashSet::new();
+//RS     let mut called = HashSet::new();
+//RS     Captures::expr_collect_captures(expr, &bound, &mut read, &mut mut_cap, &mut called);
+//RS     read.extend(mut_cap);
+//RS     (read, called)
+//RS }
+//RS 
+//RS /// D-REACTCORE1: free variable reads in a statement block (for reactive-scope capture cloning).
+//RS pub fn block_free_var_reads(stmts: &[crate::AST::Stmt]) -> HashSet<String> {
+//RS     let mut bound = HashSet::new();
+//RS     let mut read = HashSet::new();
+//RS     let mut mut_cap = HashSet::new();
+//RS     let mut called = HashSet::new();
+//RS     Captures::block_collect_captures(stmts, &mut bound, &mut read, &mut mut_cap, &mut called);
+//RS     read.extend(mut_cap);
+//RS     read
+//RS }
+//RS 
+//RS /// [`block_free_var_reads`], split from the free names the block invokes with
+//RS /// direct-call syntax (`f(x)`).
+//RS ///
+//RS /// A `Call` carries its callee in `Call::name` rather than an `Expr::Ident`, so
+//RS /// a fn-valued binding invoked this way is invisible to the read set even
+//RS /// though the lowered body reads that local. It is reported separately because
+//RS /// the same spelling names top-level functions and builtins, which are not
+//RS /// captured values; only the caller's scope can tell them apart.
+//RS pub fn block_free_reads_and_calls(
+//RS     stmts: &[crate::AST::Stmt],
+//RS ) -> (HashSet<String>, HashSet<String>) {
+//RS     let mut bound = HashSet::new();
+//RS     let mut read = HashSet::new();
+//RS     let mut mut_cap = HashSet::new();
+//RS     let mut called = HashSet::new();
+//RS     Captures::block_collect_captures(stmts, &mut bound, &mut read, &mut mut_cap, &mut called);
+//RS     read.extend(mut_cap);
+//RS     (read, called)
+//RS }
+// END-PORT-PENDING 0450 crates/jet-sema/src/Sema/mod.rs:1799-3684
+

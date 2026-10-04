@@ -20,12 +20,10 @@ use jet_foundation.[
     MIRPreludeTypeArg,
     MIRSemanticOp,
     MIRSourceFile,
-    MIRStringFormat,
-    MIRStringPart,
-    MIRStringPartKind,
     MIRTerminator,
     MIRType,
     MIRValueID,
+    TStrFormat,
     Span,
     SymbolID,
     SymbolKind,
@@ -766,7 +764,7 @@ fn jet_codegen_lower_builtin_method(builder: &JetCodegenBuilder, expression: TEx
         // `to_string` on a String, Bool, Char or inline range shows the value (Rust `jet_show`).
         .ToString -> {
             shown := jet_codegen_lower_expr(&builder, receiver)
-            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Interpolation{value: shown, format: MIRStringFormat.Display}}}})
+            return jet_codegen_lower_string_render(&builder, shown, receiver.ty, TStrFormat.Display, expression.span)
         }
         else -> {}
     }

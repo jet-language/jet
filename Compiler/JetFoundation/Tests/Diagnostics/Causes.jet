@@ -1,0 +1,252 @@
+// Original Diagnostics.rs tests 2123-2247 (report JSON lines, cause ordering
+// and multi-link chains) plus no-fix validation witnesses for
+// Diagnostics.rs:795-811 and Report.rs:67-75, which carry no Rust unit tests.
+fn causes_test_error(code: String, label: String, span: Span?) -> Diagnostic Never! {
+    diagnostic_from_registry(code, span, label, "test", "fix {label}")
+}
+
+fn causes_test_caused_by(code: String, label: String, span: Span?, cause: Diagnostic) -> Diagnostic Never! {
+    dependent :: causes_test_error(code, label, span)
+    diagnostic_caused_by(^dependent, cause)
+}
+
+fn causes_test_position(diagnostics: [Diagnostic], code: String) -> Int Never! {
+    loop index in 0..<diagnostics.len() {
+        if diagnostics[index].code == code -> return index
+    }
+    panic("ordered report must retain every diagnostic")
+}
+
+fn causes_test_text(bytes: [U8]) -> String Never! {
+    String.from_bytes(bytes) ?? panic("no-fix fixture bytes are UTF-8")
+}
+
+fn causes_test_attach(diagnostic: Diagnostic, next: String) -> Diagnostic Never! {
+    diagnostic_with_no_fix_reason(^diagnostic, NoFixReason{kind: NoFixReasonKind.Design, next: next}) ?? panic("valid no-fix reason rejected")
+}
+
+fn causes_test_no_fix_error(diagnostic: Diagnostic, next: String) -> String Never! {
+    if diagnostic_with_no_fix_reason(^diagnostic, NoFixReason{kind: NoFixReasonKind.Behavior, next: next}) == {
+        .Ok(_) -> panic("no-fix reason unexpectedly accepted")
+        .Err(error) -> error.message
+    }
+}
+
+// #3598: exact original protocol-parser witness stays gated in the frozen focused unit.
+#Test("ordinary diagnostics use report json lines") {
+    diagnostic :: diagnostic_from_registry("E0001", None, "bad token", "grammar", "remove it")
+    file :: ReportPath.from_process("x.jet")
+    json :: diagnostic_render_all_json(file, "", [Diagnostic]{diagnostic})
+    assert(json.starts_with("{{\"schema\":\"jet.report/v3\",\"moment\":\"compile\""))
+    assert(json.split("\n").len() == 2)
+    assert(json.ends_with("\n"))
+    trimmed := json.trim_end() // #4303: the trimmed view flows into a String-typed protocol call.
+    assert(foundation_parse_protocol_json(trimmed) != None)
+    assert(diagnostic_render_all_json(file, "", [Diagnostic]{}) == "")
+}
+
+// #4460: exact original ordering witness needs rebuilt list_remove_slot lowering.
+#Test("report order puts roots before their dependents") {
+    root :: causes_test_error("E0109", "root", Val(Span{start: 0, end: 1}))
+    middle :: causes_test_caused_by("E0108", "middle", Val(Span{start: 2, end: 3}), root)
+    leaf :: causes_test_caused_by("E0107", "leaf", Val(Span{start: 4, end: 5}), middle)
+    sibling :: causes_test_error("E0001", "sibling", Val(Span{start: 6, end: 7}))
+    batch :: [Diagnostic]{leaf, sibling, middle, root}
+    diagnostics :: diagnostic_order_root_first(^batch)
+    assert(diagnostics.len() == 4)
+    assert(causes_test_position(diagnostics, "E0001") < causes_test_position(diagnostics, "E0108"))
+    assert(causes_test_position(diagnostics, "E0109") < causes_test_position(diagnostics, "E0108"))
+    assert(causes_test_position(diagnostics, "E0108") < causes_test_position(diagnostics, "E0107"))
+}
+
+#Test("report json preserves a multi link cause chain") {
+    root :: causes_test_error("E0109", "root", None)
+    middle :: causes_test_caused_by("E0108", "middle", None, root)
+    leaf :: causes_test_caused_by("E0107", "leaf", None, middle)
+    sibling :: causes_test_caused_by("E0001", "sibling", None, root)
+    json :: diagnostic_render_all_json(ReportPath.from_process("x.jet"), "", [Diagnostic]{root, middle, leaf, sibling})
+    lines :: json.split("\n").to_list()
+    assert(lines[0].contains("\"cause\":[],\"clears\":3"))
+    assert(lines[1].contains("\"cause\":[{{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}}],\"clears\":1"))
+    assert(lines[2].contains("\"cause\":[{{\"code\":\"E0108\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}},{{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}}],\"clears\":0"))
+    assert(lines[3].contains("\"cause\":[{{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}}],\"clears\":0"))
+}
+
+#Test("caused by copies the nearest report span and origin before its chain") {
+    origin :: DiagnosticOrigin{display: "lib.jet", path: "/work/lib.jet", source: "fn f() {{}}\nfn é() {{}}", revision: "r1"}
+    root := causes_test_error("E0109", "root", Val(Span{start: 15, end: 17}))
+    root.origin = Val(origin)
+    middle :: causes_test_caused_by("E0108", "middle", Val(Span{start: 10, end: 12}), root)
+    leaf :: causes_test_caused_by("E0107", "leaf", None, middle)
+    assert(leaf.cause.len() == 2)
+    assert(leaf.cause[0] == DiagnosticCause{code: "E0108", span: Val(Span{start: 10, end: 12}), origin: None})
+    assert(leaf.cause[1] == DiagnosticCause{code: "E0109", span: Val(Span{start: 15, end: 17}), origin: Val(origin)})
+    assert(diagnostic_cause_matches(leaf.cause[1], root))
+    // A same-code report at another span or snapshot is a different report.
+    elsewhere := causes_test_error("E0109", "root", Val(Span{start: 15, end: 17}))
+    assert(!diagnostic_cause_matches(leaf.cause[1], elsewhere))
+    elsewhere.origin = Val(origin)
+    assert(diagnostic_cause_matches(leaf.cause[1], elsewhere))
+    elsewhere.origin = Val(DiagnosticOrigin{display: origin.display, path: origin.path, source: origin.source, revision: "r2"})
+    assert(!diagnostic_cause_matches(leaf.cause[1], elsewhere))
+    elsewhere.origin = Val(origin)
+    elsewhere.span = Val(Span{start: 15, end: 16})
+    assert(!diagnostic_cause_matches(leaf.cause[1], elsewhere))
+    // Each cause projects its own snapshot location; `é` is one column.
+    json :: diagnostic_to_json(leaf, ReportPath.from_process("<cli>"), "")
+    assert(json.contains("\"cause\":[{{\"code\":\"E0108\",\"file\":null,\"line\":null,\"col\":null,\"span\":{{\"start\":10,\"end\":12}}}},{{\"code\":\"E0109\",\"file\":\"/work/lib.jet\",\"line\":2,\"col\":5,\"span\":{{\"start\":15,\"end\":17}}}}]"))
+}
+
+// #4460: cycle stability uses the same frozen list_remove_slot gate.
+#Test("report order leaves a cause cycle in source order") {
+    seed :: causes_test_error("E0108", "first", Val(Span{start: 0, end: 1}))
+    second :: causes_test_caused_by("E0107", "second", Val(Span{start: 2, end: 3}), seed)
+    first :: diagnostic_caused_by(^seed, second)
+    independent :: causes_test_error("E0001", "independent", Val(Span{start: 4, end: 5}))
+    batch :: [Diagnostic]{first, second, independent}
+    ordered :: diagnostic_order_root_first(^batch)
+    assert(ordered.len() == 3)
+    assert(ordered[0].code == "E0001" && ordered[1].code == "E0108" && ordered[2].code == "E0107")
+}
+
+#Test("no fix reason attaches only a validated next action") {
+    diagnostic :: causes_test_error("E0109", "root", None)
+    attached :: causes_test_attach(diagnostic, "Rename the binding.")
+    assert(attached.no_fix_reason == (Val(NoFixReason{kind: NoFixReasonKind.Design, next: "Rename the binding."})))
+    assert(diagnostic_to_json(attached, ReportPath.from_process("<cli>"), "").contains(",\"no_fix_reason\":{{\"kind\":\"design\",\"next\":\"Rename the binding.\"}},\"cause\":[]"))
+    assert(causes_test_no_fix_error(diagnostic, "") == "no-fix reason next action must not be empty")
+    assert(causes_test_no_fix_error(diagnostic, " \t ") == "no-fix reason next action must not be empty")
+    // `str::trim` sees Unicode whitespace; a lone newline is blank before it is a control.
+    assert(causes_test_no_fix_error(diagnostic, "\n") == "no-fix reason next action must not be empty")
+    assert(causes_test_no_fix_error(diagnostic, causes_test_text([U8]{U8{32}, U8{0xC2}, U8{0xA0}})) == "no-fix reason next action must not be empty")
+    assert(causes_test_no_fix_error(diagnostic, "Run\tit") == "no-fix reason next action must not contain control characters")
+    assert(causes_test_no_fix_error(diagnostic, causes_test_text([U8]{U8{82}, U8{127}})) == "no-fix reason next action must not contain control characters")
+    assert(causes_test_no_fix_error(diagnostic, causes_test_text([U8]{U8{82}, U8{0xC2}, U8{0x85}})) == "no-fix reason next action must not contain control characters")
+    // U+00A0 inside text and U+00C2 itself are not controls.
+    accepted :: causes_test_attach(diagnostic, causes_test_text([U8]{U8{82}, U8{0xC2}, U8{0xA0}, U8{0xC3}, U8{0x82}}))
+    assert(accepted.no_fix_reason != None)
+}
+
+#Test("no fix reason rejects any primary or alternative edit before validating") {
+    edited :: causes_test_error("E0378", "alias", Val(Span{start: 4, end: 5}))
+    assert(edited.edit != None)
+    assert(causes_test_no_fix_error(edited, "Use `::`.") == "diagnostic `E0378` cannot carry fix_edits and no_fix_reason")
+    assert(causes_test_no_fix_error(edited, "") == "diagnostic `E0378` cannot carry fix_edits and no_fix_reason")
+    plain :: causes_test_error("E0109", "root", None)
+    alternatives :: diagnostic_with_structured(^plain, DiagnosticStructured.SuggestedEdits{edits: [TextEdit]{TextEdit{span: Span{start: 0, end: 1}, new_text: "x"}}})
+    assert(alternatives.edit == None)
+    assert(causes_test_no_fix_error(alternatives, "Rename the binding.") == "diagnostic `E0109` cannot carry fix_edits and no_fix_reason")
+    unedited :: causes_test_error("E0109", "root", None)
+    empty_alternatives :: diagnostic_with_structured(^unedited, DiagnosticStructured.SuggestedEdits{edits: [TextEdit]{}})
+    accepted :: causes_test_attach(empty_alternatives, "Rename the binding.")
+    assert(accepted.no_fix_reason != None)
+}
+
+#Test("report no fix validation preserves error precedence and edit exclusion") {
+    file :: ReportPath.from_process("<cli>")
+    edit :: ReportEdit.new(file, ReportSpan.new(0, 1), "x", FixSafety.Formatting)
+    reason :: NoFixReason{kind: NoFixReasonKind.Ambiguous, next: "Choose the intended binding."}
+    report := ReportEnvelope.new("compile", "error", "E0109", "What", "Why", "Fix")
+    &report.push_fix_edit(edit) ?? panic("an unreasoned report accepts an edit")
+    if &report.set_no_fix_reason(NoFixReason{kind: NoFixReasonKind.Design, next: ""}) == {
+        .Ok(_) -> panic("invalid next action accepted")
+        .Err(error) -> assert(error.message == "no-fix reason next action must not be empty")
+    }
+    if &report.set_no_fix_reason(reason) == {
+        .Ok(_) -> panic("reason accepted alongside an edit")
+        .Err(error) -> assert(error.message == "a report cannot carry fix_edits and no_fix_reason")
+    }
+    report.validate() ?? panic("a rejected reason leaves the edit-only report valid")
+    reasoned := ReportEnvelope.new("compile", "error", "E0109", "What", "Why", "Fix")
+    &reasoned.set_no_fix_reason(reason) ?? panic("valid reviewed action accepted")
+    if &reasoned.push_fix_edit(edit) == {
+        .Ok(_) -> panic("edit accepted alongside a reason")
+        .Err(error) -> assert(error.message == "a report cannot carry fix_edits and no_fix_reason")
+    }
+    reasoned.validate() ?? panic("a rejected edit leaves the reason-only report valid")
+    json :: reasoned.json()
+    assert(json.contains("\"no_fix_reason\":{{\"kind\":\"ambiguous\",\"next\":\"Choose the intended binding.\"}}"))
+    assert(!json.contains("\"fix_edits\""))
+}
+
+#Test("cause chains append without deduplicating codes or inheriting source locations") {
+    source :: DiagnosticOrigin{display: "owned.jet", path: "/work/owned.jet", source: "é\nz", revision: "r1"}
+    first := causes_test_error("E0109", "first", Val(Span{start: 3, end: 4}))
+    first.origin = Val(source)
+    second := causes_test_caused_by("E0109", "second", None, first)
+    second.origin = Val(DiagnosticOrigin{display: "empty.jet", path: "", source: "", revision: "r2"})
+    wrapper := causes_test_error("E0108", "wrapper", Val(Span{start: 0, end: 1}))
+    wrapper.origin = Val(DiagnosticOrigin{display: "wrapper.jet", path: "/work/wrapper.jet", source: "w", revision: "r3"})
+    existing :: diagnostic_caused_by(^wrapper, first)
+    wrapped :: diagnostic_caused_by(^existing, second)
+    assert(wrapped.cause.len() == 3)
+    assert(wrapped.cause[0] == DiagnosticCause{code: "E0109", span: first.span, origin: first.origin})
+    assert(wrapped.cause[1] == DiagnosticCause{code: "E0109", span: None, origin: second.origin})
+    assert(wrapped.cause[2] == wrapped.cause[0])
+    counts :: diagnostic_report_clear_counts([Diagnostic]{first, second, wrapped})
+    assert(counts == [Int]{2, 1, 0})
+    json :: diagnostic_to_json(wrapped, ReportPath.from_process("/wrong/caller.jet"), "wrong\nsource")
+    assert(json.contains("\"file\":\"/work/wrapper.jet\",\"line\":1,\"col\":1,\"span\":{{\"start\":0,\"end\":1}}"))
+    assert(json.contains("\"cause\":[{{\"code\":\"E0109\",\"file\":\"/work/owned.jet\",\"line\":2,\"col\":1,\"span\":{{\"start\":3,\"end\":4}}}},{{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}},{{\"code\":\"E0109\",\"file\":\"/work/owned.jet\",\"line\":2,\"col\":1,\"span\":{{\"start\":3,\"end\":4}}}}]"))
+    assert(!json.contains("/wrong/caller.jet"))
+}
+
+#Test("diagnostic report JSON preserves owned locations metadata and primary alternative edit order") {
+    diagnostic :: Diagnostic{
+        moment: DiagnosticMoment.Tool,
+        severity: DIAGNOSTIC_LINT,
+        code: "E0378",
+        span: Val(Span{start: 4, end: 5}),
+        origin: Val(DiagnosticOrigin{display: "owned", path: "<owned>", source: "a\néz", revision: "r1"}),
+        what: "Use \"x\"",
+        why: "Reason",
+        fix: "Repair",
+        detail: Val("first\nsecond"),
+        applicability: Val(FixApplicability.Suggested),
+        safety: Val(FixSafety.NeedsReview),
+        edit: Val(TextEdit{span: Span{start: 4, end: 5}, new_text: "x"}),
+        structured: Val(DiagnosticStructured.SuggestedEdits{edits: [TextEdit]{TextEdit{span: Span{start: 2, end: 4}, new_text: "y"}}}),
+        labels: [DiagnosticLabel]{DiagnosticLabel{span: Span{start: 2, end: 4}, message: "earlier"}},
+        denial_kind: Val("holds"),
+        call_chain: [String]{"entry", "callee"},
+        scope_chain: [String]{"outer"},
+        nearest_granting_scope: Val("grant"),
+    }
+    json :: diagnostic_to_json_with_clears(diagnostic, ReportPath.from_process("<wrong>"), "", 7)
+    expected :: "{{\"schema\":\"jet.report/v3\",\"moment\":\"tool\",\"severity\":\"warning\",\"code\":\"E0378\",\"what\":\"Use \\\"x\\\"\",\"why\":\"Reason\",\"fix\":\"Repair\",\"applicability\":\"suggested\",\"detail\":\"first\\nsecond\",\"denial_kind\":\"holds\",\"call_chain\":[\"entry\",\"callee\"],\"scope_chain\":[\"outer\"],\"nearest_granting_scope\":\"grant\",\"file\":\"<owned>\",\"line\":2,\"col\":2,\"span\":{{\"start\":4,\"end\":5}},\"fix_edits\":[{{\"file\":\"<owned>\",\"span\":{{\"start\":4,\"end\":5}},\"new_text\":\"x\",\"safety\":\"needs-review\"}},{{\"file\":\"<owned>\",\"span\":{{\"start\":2,\"end\":4}},\"new_text\":\"y\",\"safety\":\"needs-review\"}}],\"cause\":[],\"labels\":[{{\"line\":2,\"col\":1,\"span\":{{\"start\":2,\"end\":4}},\"message\":\"earlier\"}}],\"clears\":7}}"
+    assert(json == expected)
+}
+
+// Report.rs::StatusEnvelope: the same report renderer/validator owns status
+// findings; field order and report insertion order are independently retained.
+#Test("status reports preserve canonical bytes and insertion order") {
+    first :: ReportEnvelope.new("tool", "error", "E0001", "first", "why", "fix")
+    second :: ReportEnvelope.new("compile", "warning", "E0002", "second", "why", "fix")
+    status := StatusEnvelope.new("check", false).with_field("z", StatusValue.Integer{value: 2}).with_field("a", StatusValue.Null)
+    status.reports = [ReportEnvelope]{first, second}
+    expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"check\",\"ok\":false,\"reports\":[{first.json()},{second.json()}],\"z\":2,\"a\":null}}"
+    assert_eq(status.json(), expected)
+}
+
+#Test("status validator retains exact reserved field and action refusals") {
+    reserved :: [String]{"schema", "action", "ok", "reports"}
+    loop name in reserved {
+        status :: StatusEnvelope.new("check", true).with_field(name, StatusValue.Null)
+        actual :: if status.validate() == {
+            .Err(error) -> error.message
+            .Ok(_) -> panic("reserved status field accepted")
+        }
+        expected :: "status field `{name}` is reserved"
+        assert_eq(actual, expected)
+    }
+    empty :: if StatusEnvelope.new("", true).validate() == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("empty status action accepted")
+    }
+    assert_eq(empty, "status action must not be empty")
+    control :: if StatusEnvelope.new("a\n", true).validate() == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("control status action accepted")
+    }
+    assert_eq(control, "status action must not contain control characters")
+}

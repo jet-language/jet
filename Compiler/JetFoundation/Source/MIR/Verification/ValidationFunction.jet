@@ -1,0 +1,180 @@
+// MIR.rs:8322-8746,8889-8912. Validation uses indexed rows and the canonical
+// iterative dominator tree. Unreachable blocks retain native's vacuous dominance.
+fn mir_validation_missing(function: MIRFunctionID, id: U64, kind: String, native_type: String) -> MIRValidationError Never! {
+    if native_type == "MirSourceFileId" -> return MIRValidationError.MissingSourceFile{function: function, source_file: MIRSourceFileID{value: id}}
+    if native_type == "MirFieldId" -> return MIRValidationError.MissingField{function: function, field: MIRFieldID{value: id}}
+    if native_type == "MirPlaceId" -> return MIRValidationError.MissingPlace{function: function, place: MIRPlaceID{value: id}}
+    if native_type == "MirLocalId" -> return MIRValidationError.MissingLocal{function: function, local: MIRLocalID{value: id}}
+    if native_type == "MirScopeId" -> return MIRValidationError.MissingScope{function: function, scope: MIRScopeID{value: id}}
+    if native_type == "MirCoreCallId" -> return MIRValidationError.MissingCoreCall{function: function, call: MIRCoreCallID{value: id}}
+    if native_type == "MirPreludeCallId" -> return MIRValidationError.MissingPreludeCall{function: function, call: MIRPreludeCallID{value: id}}
+    if native_type == "MirTypeId" -> return MIRValidationError.MissingType{function: function, ty: MIRTypeID{value: id}}
+    if native_type == "MirValueId" -> return MIRValidationError.MissingValue{function: function, value: MIRValueID{value: id}}
+    panic("invalid internal validation reference domain {kind}/{native_type}")
+}
+fn mir_validation_function_require(ids: [U64:Bool], function: MIRFunctionID, id: U64, kind: String, native_type: String) MIRValidationError! {
+    if ids.get(id) == None -> return Err(mir_validation_missing(function, id, kind, native_type))
+    return
+}
+fn mir_validation_invalid_operation(function: MIRFunctionID, text: String) -> MIRValidationError Never! {
+    MIRValidationError.InvalidOperation{function: function, message: text}
+}
+fn mir_validation_target(function: MIRFunctionID, block: MIRBlockID) -> MIRValidationError Never! {
+    MIRValidationError.MissingBlock{function: function, block: block}
+}
+fn mir_validation_ensure_use(function: MIRFunctionID, definitions: [U64:MIRPassDefinition], dominance: MIRPassDominance, blocks: [U64:Int], use_block: MIRBlockID, use_index: Int, value: MIRValueID, span: Span) MIRValidationError! {
+    definition :: definitions.get(value.value) ?? return Err(mir_validation_missing(function, value.value, "value", "MirValueId"))
+    valid :: if definition.block == use_block -> definition.index < use_index else -> mir_pass_dominates(dominance, definition.block, use_block)
+    if !valid || blocks.get(definition.block.value) == None -> return Err(MIRValidationError.UseBeforeDefinition{function: function, value: value, span: span})
+    return
+}
+fn mir_validation_function(function: MIRFunction, functions: View<MIRFunction>, tables: MIRValidationTables) MIRValidationError! {
+    mir_validation_function_require(tables.sources, function.id, function.source_file.value, "source file", "MirSourceFileId")
+    declared := [U64:Int]{}
+    loop (index, value) in function.values {
+        if value.id.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "value", span: Val(value.span)})
+        if declared.get(value.id.value) != None -> return Err(MIRValidationError.DuplicateId{kind: "value metadata", id: value.id.value})
+        declared[value.id.value] = index
+    }
+    blocks := [U64:Int]{}
+    loop (index, block) in function.blocks {
+        if block.id.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "block", span: Val(block.span)})
+        if blocks.get(block.id.value) != None -> return Err(MIRValidationError.DuplicateId{kind: "block", id: block.id.value})
+        blocks[block.id.value] = index
+    }
+    if blocks.get(function.entry.value) == None -> return Err(mir_validation_target(function.id, function.entry))
+    places := [U64:Bool]{}
+    place_rows := [U64:Int]{}
+    loop (index, place) in function.places {
+        if place.id.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "place", span: Val(place.span)})
+        mir_validation_add(&places, place.id.value, "place")
+        place_rows[place.id.value] = index
+        loop projection in place.projections {
+            if projection == {
+                .Field(field, _) -> mir_validation_function_require(tables.fields, function.id, field.value, "field", "MirFieldId")
+                .Index(_, _, call, write_call, location, _, _) -> {
+                    mir_validation_function_require(tables.prelude, function.id, call.value, "Prelude call", "MirPreludeCallId")
+                    if write_call == .Val(setter) -> mir_validation_function_require(tables.prelude, function.id, setter.value, "Prelude call", "MirPreludeCallId")
+                    if place.access == .Write && write_call == None -> return Err(mir_validation_invalid_operation(function.id, "write index projection has no exact setter row"))
+                    if place.access != .Write && write_call != None -> return Err(mir_validation_invalid_operation(function.id, "non-write index projection carries a setter row"))
+                    mir_validation_function_require(tables.sources, function.id, location.file.value, "source file", "MirSourceFileId")
+                }
+                .Range(_, location, _) -> mir_validation_function_require(tables.sources, function.id, location.file.value, "source file", "MirSourceFileId")
+                else -> {}
+            }
+        }
+    }
+    locals := [U64:Bool]{}
+    loop local in function.locals {
+        if local.id.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "local", span: Val(local.span)})
+        mir_validation_add(&locals, local.id.value, "local")
+        mir_validation_function_require(places, function.id, local.place.value, "place", "MirPlaceId")
+    }
+    scopes := [U64:Bool]{}
+    loop scope in function.scopes {
+        if scope.id.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "scope", span: Val(scope.span)})
+        mir_validation_add(&scopes, scope.id.value, "scope")
+        if scope.deadline == .Val(deadline) {
+            if declared.get(deadline.value) == None -> return Err(mir_validation_missing(function.id, deadline.value, "value", "MirValueId"))
+        }
+    }
+    definitions := [U64:MIRPassDefinition]{}
+    loop block in function.blocks {
+        loop (index, instruction) in block.instructions {
+            if instruction.id.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "operation", span: Val(instruction.span)})
+            if instruction.result == .Val(result) {
+                if result.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "value", span: Val(instruction.span)})
+                declared_index :: declared.get(result.value) ?? return Err(mir_validation_missing(function.id, result.value, "value", "MirValueId"))
+                if instruction.ty != Val(function.values[declared_index].ty) -> return Err(MIRValidationError.MismatchedValueType{function: function.id, value: result})
+                if definitions.get(result.value) != None -> return Err(MIRValidationError.DuplicateId{kind: "value", id: result.value})
+                definitions[result.value] = MIRPassDefinition{value: result, block: block.id, index: index}
+            }
+            operation :: instruction.operation
+            if operation == {
+                .Parameter(index, _) -> if index >= function.params.len() -> return Err(MIRValidationError.InvalidParameter{function: function.id, index: index})
+                .Capture(slot) -> if slot >= function.capture_params.len() -> return Err(MIRValidationError.InvalidCapture{function: function.id, slot: slot})
+                else -> {}
+            }
+            loop place in mir_validation_places(operation) -> mir_validation_function_require(places, function.id, place.value, "place", "MirPlaceId")
+            loop local in mir_validation_locals(operation) -> mir_validation_function_require(locals, function.id, local.value, "local", "MirLocalId")
+            loop scope in mir_validation_scopes(operation) -> mir_validation_function_require(scopes, function.id, scope.value, "scope", "MirScopeId")
+            if instruction.ty == .Val(ty) -> mir_validation_type(ty, tables.types)
+            loop call in mir_validation_core_calls(operation) -> mir_validation_function_require(tables.core, function.id, call.value, "Core call", "MirCoreCallId")
+            loop callee in mir_validation_function_calls(operation) {
+                if tables.functions.get(callee.value) == None -> return Err(MIRValidationError.MissingEntry{id: callee})
+            }
+            if operation == .Closure(target, captures, _) {
+                target_index :: tables.functions.get(target.value) ?? panic("closure function existence checked")
+                target_row :: functions[target_index]
+                if captures.len() != target_row.capture_params.len() -> return Err(MIRValidationError.InvalidCaptureCount{function: function.id, target: target, expected: target_row.capture_params.len(), actual: captures.len()})
+                loop (slot, operand) in captures {
+                    capture :: target_row.capture_params[slot]
+                    matches := false
+                    if operand == {
+                        .Value(value) -> {
+                            if capture.ownership.mode == .Owned || capture.ownership.mode == .Move || capture.ownership.mode == .Copy || capture.ownership.mode == .Shared {
+                                if declared.get(value.value) == .Val(value_index) -> matches = function.values[value_index].ty == capture.ty
+                            }
+                        }
+                        .Place(place) -> {
+                            if place_rows.get(place.value) == .Val(place_index) {
+                                row :: function.places[place_index]
+                                matches = capture.access != .Move && (capture.ownership.mode == .ReadBorrow || capture.ownership.mode == .WriteBorrow) && row.ty == capture.ty && (capture.access != .Write || row.access == .Write)
+                            }
+                        }
+                    }
+                    if !matches -> return Err(MIRValidationError.MismatchedCaptureType{function: function.id, target: target, slot: slot})
+                }
+            }
+            loop call in mir_operation_prelude_calls(operation) -> mir_validation_function_require(tables.prelude, function.id, call.value, "Prelude call", "MirPreludeCallId")
+            if operation == {
+                .Call(.Foreign(id), _, _) -> mir_validation_require(tables.foreign, id.value, "foreign call")
+                .Semantic(.CCallback(_, callback, _)) -> mir_validation_require(tables.callbacks, callback.value, "semantic callback")
+                .Semantic(.GCEdit(_, _, _, _, _, _, site)) -> if site.value == U64{0} -> return Err(MIRValidationError.ZeroId{kind: "GC edit site", span: Val(instruction.span)})
+                else -> {}
+            }
+            loop ty in mir_operation_type_uses(operation) -> mir_validation_function_require(tables.types, function.id, ty.value, "type", "MirTypeId")
+            loop field in mir_validation_fields_used(operation) -> mir_validation_function_require(tables.fields, function.id, field.value, "field", "MirFieldId")
+            loop source in mir_validation_source_files(operation) -> mir_validation_function_require(tables.sources, function.id, source.value, "source file", "MirSourceFileId")
+        }
+    }
+    loop value in function.values {
+        if definitions.get(value.id.value) == None -> return Err(mir_validation_missing(function.id, value.id.value, "value", "MirValueId"))
+    }
+    dominance :: mir_compute_dominators(function, [MIRBlockID]{function.entry})
+    loop block in function.blocks {
+        loop (index, instruction) in block.instructions {
+            if instruction.operation == .Phi(incoming) {
+                loop row in incoming {
+                    predecessor :: blocks.get(row.block.value) ?? return Err(MIRValidationError.InvalidTerminator{function: function.id, block: row.block})
+                    targets :: mir_terminator_targets(function.blocks[predecessor].terminator)
+                    valid := false
+                    loop target in targets { if target == block.id -> valid = true }
+                    if !valid -> return Err(MIRValidationError.InvalidTerminator{function: function.id, block: row.block})
+                    mir_validation_ensure_use(function.id, definitions, dominance, blocks, row.block, 9223372036854775807, row.value, instruction.span)
+                }
+            } else {
+                loop value in mir_operation_value_uses(instruction.operation) -> mir_validation_ensure_use(function.id, definitions, dominance, blocks, block.id, index, value, instruction.span)
+            }
+            loop place_id in mir_validation_places(instruction.operation) {
+                loop value in mir_pass_place_value_uses(function.places, place_rows, place_id) -> mir_validation_ensure_use(function.id, definitions, dominance, blocks, block.id, index, value, instruction.span)
+            }
+        }
+        loop value in mir_terminator_value_uses(block.terminator) -> mir_validation_ensure_use(function.id, definitions, dominance, blocks, block.id, block.instructions.len(), value, block.span)
+        if block.terminator == .Yield(value, _, _) {
+            generator :: function.generator ?? return Err(MIRValidationError.InvalidYield{function: function.id, block: block.id})
+            declared_index :: declared.get(value.value) ?? return Err(MIRValidationError.InvalidYield{function: function.id, block: block.id})
+            if function.values[declared_index].ty != generator.item -> return Err(MIRValidationError.InvalidYield{function: function.id, block: block.id})
+        }
+        loop target in mir_terminator_targets(block.terminator) {
+            if blocks.get(target.value) == None -> return Err(mir_validation_target(function.id, target))
+        }
+    }
+    loop drop in function.drops {
+        mir_validation_function_require(places, function.id, drop.place.value, "place", "MirPlaceId")
+        if drop.edge == .Failure(target) || drop.edge == .Unwind(target) {
+            if blocks.get(target.value) == None -> return Err(MIRValidationError.InvalidDropEdge{function: function.id, block: target})
+        }
+    }
+    return
+}

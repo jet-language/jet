@@ -1,0 +1,38 @@
+// Complete native declaration-to-typed-Jet image generator entry point.
+// MirImageCodec.rs68-139 owns native source discovery; RuntimeMirCodec.rs14-69
+// supplies the checked Source declaration mapping. Generated sources are kept
+// alongside the generator, as with the canonical AST structural traversal.
+use core.files as image_generator_files
+pub fn mir_image_generator_generate_sources(native_sources: [MIRImageGeneratorSource], source_declarations: [String]) -> String MIRImageError! {
+    schema :: mir_image_generator_schema(native_sources)
+    declarations := [MIRImageSourceDefinition]{}
+    loop source in source_declarations -> loop definition in mir_image_generator_source_definitions(source) -> &declarations.push(definition)
+    mapping :: mir_image_generator_mapping(schema, declarations)
+    mir_image_generator_emit_codec(schema, mapping, "crate::MIR::MirProgram", mir_image_generator_interned_definitions())
+}
+fn mir_image_generator_collect_rust_files(root: String, relative: String, output: &[MIRImageGeneratorSource]) MIRImageError! -[FS.Read]> {
+    directory :: if relative == "" -> root else -> image_generator_files.join(root, relative)
+    entries :: image_generator_files.list_dir(directory) ?? return Err(MIRImageError{message: "read Foundation source directory {directory}: {err:Debug}"})
+    loop entry in entries {
+        path :: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
+        if entry.is_dir -> mir_image_generator_collect_rust_files(root, path, &output)
+        else if path.ends_with(".rs") {
+            text :: image_generator_files.read(entry.path) ?? return Err(MIRImageError{message: "cannot read MIR image schema {entry.path}: {err:Debug}"})
+            &output.push(MIRImageGeneratorSource{relative_path: path, text: text})
+        }
+    }
+    return
+}
+pub fn mir_image_generator_generate(manifest_dir: String, source_dir: String, out_dir: String) MIRImageError! -[FS]> {
+    native_sources := [MIRImageGeneratorSource]{}
+    mir_image_generator_collect_rust_files(image_generator_files.join(manifest_dir, "src"), "", &native_sources)
+    declarations := [String]{}
+    loop path in [String]{"MIR/MIR.jet", "Registry/CoreCalls.jet", "Types/Types.jet", "Target/Layout.jet", "Diagnostics/Diagnostic.jet"} {
+        full_path :: image_generator_files.join(source_dir, path)
+        &declarations.push(image_generator_files.read(full_path) ?? return Err(MIRImageError{message: "cannot read Source MIR schema {full_path}: {err:Debug}"}))
+    }
+    generated :: mir_image_generator_generate_sources(native_sources, declarations)
+    destination :: image_generator_files.join(out_dir, "ImageSchemaGenerated.jet")
+    image_generator_files.write(destination, generated) ?? return Err(MIRImageError{message: "write generated typed MIR image codec {destination}: {err:Debug}"})
+    return
+}

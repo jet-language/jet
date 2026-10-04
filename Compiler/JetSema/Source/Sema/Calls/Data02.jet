@@ -1,0 +1,2190 @@
+// PORT-PENDING 0382 crates-jet-sema-src-sema-checkercorelib-core-types-slice-1: crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1-2186
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::alloc_ptrs::{io_error_ty, result_ty};
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Sema::Checker;
+//RS use crate::Sema::Diagnostics::expr_root_ident;
+//RS use crate::Syntax;
+//RS use crate::AST::{Expr, Type, VariantField, VariantPayload};
+//RS 
+//RS /// D-MUSTUSE1 (c18iwxqx): built-in handle types whose bare statement result must
+//RS /// not be silently ignored (E0419). `scope.guard` returns `ScopeGuard` — bind it
+//RS /// or cleanup runs at end of the statement, not scope exit. `TransactionGuard` is
+//RS /// a phantom return from `on_commit`/`on_rollback` (registration is side-effect);
+//RS /// those calls are intentionally ignorable. `Task` stays on L1101.
+//RS pub(crate) fn core_must_use_type(name: &str) -> bool {
+//RS     matches!(name, "ScopeGuard" | "Iter" | "Delivery")
+//RS }
+//RS 
+//RS /// D-SERVICE-RECEIPT2=A: a bound `Delivery` owns one linear observation or
+//RS /// control obligation. The handle itself is not a cancellation token: moving
+//RS /// it to a return, storage, or another call transfers that obligation.
+//RS pub(crate) fn core_single_use_type(name: &str) -> bool {
+//RS     name == "Delivery"
+//RS }
+//RS 
+//RS pub(crate) fn unit_ty() -> Type {
+//RS     Type::Named("Unit".to_string())
+//RS }
+//RS 
+//RS pub(crate) fn u8_ty() -> Type {
+//RS     Type::IntN {
+//RS         signed: false,
+//RS         bits: 8,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn is_u8_ty(ty: &Type) -> bool {
+//RS     matches!(
+//RS         ty,
+//RS         Type::IntN {
+//RS             signed: false,
+//RS             bits: 8
+//RS         }
+//RS     )
+//RS }
+//RS 
+//RS /// D-EMAIL-SMTP-SURFACE1=A: exact ungated Message envelope access/replacement.
+//RS pub fn email_method_return(ty: &Type, method: &str, argc: usize) -> Option<Option<Type>> {
+//RS     match (ty, method, argc) {
+//RS         (Type::Named(name), "envelope", 0) if name == "Message" => {
+//RS             Some(Some(Type::Named("Envelope".to_string())))
+//RS         }
+//RS         (Type::Named(name), "with_envelope", 1) if name == "Message" => Some(Some(result_ty(
+//RS             Type::Named("Message".to_string()),
+//RS             Type::Named("EmailError".to_string()),
+//RS         ))),
+//RS         (Type::Named(name), "send", 1) if name == "Mailer" => Some(Some(result_ty(
+//RS             Type::Named("SendReport".to_string()),
+//RS             Type::Named("EmailError".to_string()),
+//RS         ))),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn json_ty() -> Type {
+//RS     Type::Named(Syntax::TYPE_DATA.to_string())
+//RS }
+//RS 
+//RS /// The ordered `DataTree.Object` payload a compiler-generated struct encoder
+//RS /// accumulates: `[(key: String, value: DataTree)]`, one row per emitted field
+//RS /// in declaration order. It is the pair list every engine already stores for
+//RS /// an Object, so appending a row per present field keeps the encoder linear
+//RS /// in the field count while absent optional fields stay off the wire.
+//RS pub(crate) fn data_tree_object_pairs_ty() -> Type {
+//RS     Type::List(Box::new(Type::Tuple(vec![
+//RS         ("key".to_string(), Box::new(Type::String)),
+//RS         ("value".to_string(), Box::new(json_ty())),
+//RS     ])))
+//RS }
+//RS 
+//RS pub(crate) fn encoding_error_ty() -> Type {
+//RS     Type::Named("EncodingError".to_string())
+//RS }
+//RS 
+//RS // D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `JSON`/`TOML`/
+//RS // `YAML`/`CSV`).
+//RS pub(crate) fn is_json_type_name(name: &str) -> bool {
+//RS     Syntax::is_data_type_name(name)
+//RS }
+//RS 
+//RS // D-DBDRIVER1: the `DBValue` dynamic tagged SQL value.
+//RS pub(crate) fn is_db_value_type_name(name: &str) -> bool {
+//RS     Syntax::is_db_value_type_name(name)
+//RS }
+//RS 
+//RS /// D-VALIDATE-DECODE1=B: typed decode returns the accumulated validation list.
+//RS /// Structural and validation failures share the one `[FieldError]` contract.
+//RS pub(crate) fn decode_error_ty() -> Type {
+//RS     Type::List(Box::new(field_error_ty()))
+//RS }
+//RS 
+//RS /// D-VALIDATE1: one accumulated validation error (`{ path, reason }`).
+//RS /// `validate { }` blocks / `Type.validate(value)` /
+//RS /// `Validate.over(s)` always report failures as `[FieldError]`.
+//RS pub(crate) fn field_error_ty() -> Type {
+//RS     Type::Named("FieldError".to_string())
+//RS }
+//RS 
+//RS /// D-SERDE13=B: the value tree's one user-facing name is `DataTree`. The old
+//RS /// `Data` spelling is retired (no alias, I8) — point at the new name wherever a
+//RS /// user still writes `Data` as a type or a construction receiver.
+//RS pub(crate) fn data_renamed_to_datatree(span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0351",
+//RS         "the value tree is named `DataTree`, not `Data`".to_string(),
+//RS         "`DataTree` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Text`/`.Array`/`.Object`".to_string(),
+//RS         "write `DataTree` instead of `Data`".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-LAYOUT-CTOR1: the constraint-layout container is named `Layout`. The old
+//RS /// `LayoutHandle` spelling is retired (no alias, I8).
+//RS pub(crate) fn layout_handle_renamed_to_layout(span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2936",
+//RS         format!(
+//RS             "the constraint-layout type is named `{}`, not `{}`",
+//RS             Syntax::LAYOUT_TYPE,
+//RS             Syntax::LAYOUT_HANDLE_TYPE_RETIRED
+//RS         ),
+//RS         format!(
+//RS             "`{}` is the solver/container value constructed by `name {} {}.{{ … }}`",
+//RS             Syntax::LAYOUT_TYPE,
+//RS             Syntax::SIGIL_BIND_IMMUT,
+//RS             Syntax::LAYOUT_TYPE
+//RS         ),
+//RS         format!(
+//RS             "write `{}` instead of `{}`",
+//RS             Syntax::LAYOUT_TYPE,
+//RS             Syntax::LAYOUT_HANDLE_TYPE_RETIRED
+//RS         ),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-ACRO-CASE1=A / D-ACRO-LEX1=A: a retired word-cased acronym spelling.
+//RS /// When `span` covers exactly the written name, the edit replaces it with the
+//RS /// canonical caps form; a span over a wider type expression gets no edit.
+//RS pub(crate) fn retired_acronym_spelling_diag(old: &str, canonical: &str, span: Span) -> Diagnostic {
+//RS     let diagnostic = Diagnostic::error(
+//RS         "E0358",
+//RS         format!("`{old}` is spelled `{canonical}`"),
+//RS         "Jet keeps acronyms fully capitalized inside PascalCase names (D-ACRO-CASE1=A, D-ACRO-LEX1=A)".to_string(),
+//RS         format!("write `{canonical}` instead of `{old}`"),
+//RS         Some(span),
+//RS     );
+//RS     if span.end.saturating_sub(span.start) != old.len() {
+//RS         return diagnostic;
+//RS     }
+//RS     diagnostic.with_edit(crate::Diagnostics::TextEdit {
+//RS         span,
+//RS         new_text: canonical.to_string(),
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn is_io_error_type_name(name: &str) -> bool {
+//RS     name == Syntax::TYPE_IO_ERROR || name == "IOError"
+//RS }
+//RS 
+//RS pub(crate) fn is_utf8_error_type_name(name: &str) -> bool {
+//RS     name == Syntax::TYPE_UTF8_ERROR || name == "UTF8Error"
+//RS }
+//RS 
+//RS /// D-TEXTWIDTH1=B: `text.display_width(s, policy: cjk)`'s reject-path error
+//RS /// (a `.Reject` control-character policy hit) — mirrors `UTF8Error`'s
+//RS /// minimal `{ message }` shape.
+//RS pub(crate) fn is_text_error_type_name(name: &str) -> bool {
+//RS     name == "TextError"
+//RS }
+//RS 
+//RS /// D-FACT-HOME1=A: the fixed marker-argument menu (`Effect`, `InlineMode`,
+//RS /// etc.) is a fact vocabulary published for reflection, never a general type —
+//RS /// no constructor exists outside `#Marker(param: Name.Variant)` position. Each
+//RS /// fix names the real path: the living counterpart when one exists (only
+//RS /// `Effect` has no general-position use here; it is written inside `#FX`,
+//RS /// otherwise the marker that
+//RS /// legitimately writes the name. `Layout` is excluded: it is also a real
+//RS /// dot-ctor value type (D-LAYOUT-CTOR1, see the `matches!` in
+//RS /// `core_type_known`), so that name resolves before this ever runs.
+//RS fn phantom_fact_menu_fix(name: &str) -> Option<&'static str> {
+//RS     Some(match name {
+//RS         "ABI" => "write it only inside `#ABI(name: system)`",
+//RS         "Effect" => "write it only inside `#FX(Net, FS)` or another `#FX(...)` effect scope",
+//RS         "FFILanguage" => "write it only inside `#FFI(language: c)`",
+//RS         "InlineMode" => "write it only inside `#Inline(mode: Always)`",
+//RS         "IntType" => "write it only inside `#Layout(tag: I32)`",
+//RS         "KernelMode" => "write it only inside `#Kernel(mode: parallel)`",
+//RS         "MemoBound" => "write `#Memo`, or the explicit `#Memo(bound: none)` form",
+//RS         "Maturity" => "write it only inside `#Meta(maturity: .Tested)`",
+//RS         "NamingCase" => "write it only inside `#RenameAll(case: snake)`",
+//RS         "ObligationMode" => "write it only inside `#Unsafe(\"reason\", obligations: .Track)`",
+//RS         "PolicySetting" => "write it only inside `#Policy(gc)`, `#Policy(copies: .Explicit)`, or another registered non-memory policy",
+//RS         "Site" => "write it only as `$sites: [...]` on a `marker` declaration",
+//RS         "State" => "write it only inside `#State(state: .Draft)` or `#Transition(from:, to:)`",
+//RS         "TaintKind" => "it has no live marker: its only user was the retired `#Tainted`, now `#Input`",
+//RS         "Target" => "write it only inside `#Target(target: Web)`",
+//RS         "Track" => "write `#Track` instead — it takes no arguments",
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS /// D-FACT-HOME1=A: "a phantom fact-menu name is refused at the signature, and
+//RS /// the diagnostic names the real path rather than a bare unknown-type error."
+//RS pub(crate) fn phantom_fact_menu_diag(name: &str, span: Span) -> Option<Diagnostic> {
+//RS     let fix = phantom_fact_menu_fix(name)?;
+//RS     Some(Diagnostic::error(
+//RS         "E0119",
+//RS         format!("`{name}` is a fact menu, not a type"),
+//RS         format!("`{name}` names a fixed set of marker-argument values; it is never constructed as an ordinary value"),
+//RS         fix.to_string(),
+//RS         Some(span),
+//RS     ))
+//RS }
+//RS 
+//RS /// D-ABILITY-NAME2=A: the old authority vocabulary is refused at a type site.
+//RS /// These spellings are not aliases. Reusing E0119 keeps the retirement in the
+//RS /// existing registered type-diagnostic family while the message gives the
+//RS /// exact source replacement.
+//RS pub(crate) fn retired_authority_vocabulary_diag(name: &str, span: Span) -> Option<Diagnostic> {
+//RS     let fix = match name {
+//RS         "Ability" => "write `Effect` only inside `#FX(...)`",
+//RS         "Abilities" | "Capability" | "Caps" => "write `Authority` for the rights value",
+//RS         _ => return None,
+//RS     };
+//RS     Some(Diagnostic::error(
+//RS         "E0119",
+//RS         format!("`{name}` is retired"),
+//RS         "Jet has one effect menu, one Authority value, and one `#FX` scope; the old authority spellings are not types".to_string(),
+//RS         fix.to_string(),
+//RS         Some(span),
+//RS     ))
+//RS }
+//RS 
+//RS pub(crate) fn core_type_known(name: &str) -> bool {
+//RS     if Syntax::typed_head_kind(name).is_some_and(|kind| kind.is_typed_text()) {
+//RS         return true;
+//RS     }
+//RS     if Syntax::is_simd_lane_type(name) {
+//RS         return true;
+//RS     }
+//RS     matches!(
+//RS         name,
+//RS         "Unit" | "U8" | Syntax::TYPE_ERR | Syntax::TYPE_NEVER | Syntax::TYPE_TASK_FAILURE
+//RS         | "ProcessResult" | "ProcessReceipt" | "ProcessPlan" | "ProcessSpec" | "ProcessChild"
+//RS         | "Stopwatch" | "Closed" | "RealtimeStream" | "RealtimeReceipt"
+//RS         | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy"
+//RS         // D-FOUND-LIFECYCLE1=A: typed process signals are a closed Core enum.
+//RS         | "ProcessSignal"
+//RS         // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum
+//RS         // (`.Stream`/`.Inherit`/`.Capture`, D-ENUMDOT2). `ProcessStdin`/
+//RS         // `ProcessStdoutStream`/`ProcessStderrStream` are field-access-only
+//RS         // handles off a `ProcessChild`; `ProcessLines` is the loop-source-only
+//RS         // result of `.lines()` on the latter two (mirrors `FileLines`/`StdinLines`).
+//RS         | "ProcessStreamMode" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "ProcessLines"
+//RS         // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: public expert
+//RS         // controls. TerminalFact is a namespace of checked String keys, not a
+//RS         // fifth value type.
+//RS         | "TerminalPolicy" | "TerminalSize" | "TerminalMode" | "TerminalSession"
+//RS         | Syntax::TYPE_VIEW_ITER
+//RS         | Syntax::TYPE_RANGE | Syntax::TYPE_ALLOC_ERROR
+//RS         // D-TEXTWIDTH1=B: `TextWidth` (dot-ctor struct, `core_constructable_fields`)
+//RS         // + its two dot-literal enum fields + the `.Reject` policy error.
+//RS         | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError" | "EnvError"
+//RS         // D-DET1: deterministic injected capability handles.
+//RS         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
+//RS         // D-AUTHORITY-NAME1=A: one ordinary, nameable rights carrier.
+//RS         | Syntax::TYPE_AUTHORITY
+//RS         | "Clock" | "RNG" | Syntax::DETERMINISTIC_WORLD_TYPE | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition"
+//RS         // D-SHARED-REVISION1=A: the opaque owner-bound snapshot carrier and
+//RS         // its typed wrong-owner/exhaustion failures.
+//RS         | Syntax::TYPE_SHARED_SNAPSHOT | Syntax::TYPE_SHARED_REVISION_ERROR
+//RS         | "Path"
+//RS         | "StreamEventTime" | "KeyedStream" | "Window" | "LateEventDisposition"
+//RS         | "TestSuite" | "TestComparison" | "Count" | "HandleID" | "TaskID" | "EventID"
+//RS         | "HistoryRNG" | "HistoryValue" | "HistoryPrecondition" | "HistoryCase"
+//RS         | "HistoryOperation" | "HistoryScheduleChoice" | "HistoryBounds"
+//RS         | "HistoryDistribution" | "HistoryStrategy" | "TypedHistoryCase"
+//RS         | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"
+//RS         | "GameInputSnapshot" | "GameSceneType" | "GameReplayType" | "GameBackendType"
+//RS         | "RaylibWindow" | "RaylibColor" | "RaylibSound"
+//RS         | "RaylibTextureAtlas"
+//RS         // D-DECIMAL1: exact decimal arithmetic.
+//RS         | "Decimal" | "Fraction"
+//RS         // D-TYPE2-IMAG1=A: imaginary literals construct the shared Complex value.
+//RS         | "Complex"
+//RS         // D-DBDRIVER1 / D-EFFDBREAD1=A: the `core.db` connection handle and its
+//RS         // error. Nameable so a query function can annotate its connection
+//RS         // parameter — the shape a `#(DB.Read)` live query (D-LIVEQUERY1) takes.
+//RS         | "DBConnection" | "DBScope" | "DBPool" | "DBLease" | "DBPoolReceipt" | "DBError"
+//RS         | "DBValue"
+//RS         // only constructable part of the host grant value.
+//RS         | "Mod" | "ModGrant"
+//RS         | "FileReader" | "FileWriter" | "FileLines" | "FileScope" | "MappedFile"
+//RS         // D-LSDIR1/D-FSOPS1/D-WATCH-SCOPE1: filesystem and watcher values.
+//RS         | "DirEntry" | "Stat" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
+//RS         // stdlib-api-laws D4: `WatchEvent.domain`/`.kind` are closed enums.
+//RS         | "WatchEvent" | "WatchDomain" | "WatchKind" | "WatchHandle" | "WatchSet"
+//RS         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
+//RS         | "DataLineOptions" | "DataColumn" | "DataFormat" | "DataSchema"
+//RS         | "DataFreshness" | "DataInvalidationCause" | "DataAuthority" | "DataStatus" | "DataSummary" | "DataJoin"
+//RS         | "Query" | "DataGroupedQuery" | "DataTracked" | "DataWatch"
+//RS         | "DataWatchStatus" | "Group"
+//RS         | "DataLimits" | "DataError" | "DataErrorKind" | "DataStream" | "DataPivotCell"
+//RS         | "DataSourceIdentity" | "DataProvenance" | "DataSnapshotIdentity" | "DataLoaderKind"
+//RS         | "DataLoaderStatus" | "DataLoader" | "DataSnapshot"
+//RS         | "JetDataPlot" | "JetDataPlotMark" | "JetDataPlotChannel" | "JetDataPlotAggregate"
+//RS         | "JetDataPlotFilterOp" | "JetDataPlotValue" | "JetDataPlotScaleKind"
+//RS         | "JetDataPlotDomain" | "JetDataPlotLegendPosition" | "JetDataPlotFacetKind"
+//RS         | "JetDataPlotInteraction" | "JetDataPlotBackend" | "JetDataPlotSupport"
+//RS         | "JetDataPlotErrorKind" | "JetDataPlotRenderFormat" | "JetDataPlotField"
+//RS         | "JetDataPlotSchema" | "JetDataPlotSourceFacts" | "JetDataPlotEncoding"
+//RS         | "JetDataPlotTransform" | "JetDataPlotScale" | "JetDataPlotAxis" | "JetDataPlotLegend"
+//RS         | "JetDataPlotFacet" | "JetDataPlotLayer" | "JetDataPlotAccessibility" | "JetDataPlotLayout"
+//RS         | "JetDataPlotCapability" | "JetDataPlotError" | "JetDataPlotPlan"
+//RS         | "JetDataPlotSelectedRow" | "JetDataPlotInspection" | "JetDataPlotRender"
+//RS         | "JetDataPlotProjection" | "JetDataPlotColumn"
+//RS         // D-DX-QUEUE1=A: durable queue carriers. Provider policy/request
+//RS         // internals remain private; these are the caller-visible records.
+//RS         | "JobQueue" | "JobPayload" | "JobResult" | "JobError"
+//RS         | "JobQueueReceipt" | "JobQueueClaim" | "JobQueueEvent"
+//RS         | "JobQueueRecord" | "JobQueueStatus"
+//RS         | "JobQueueState" | "JobQueueDeliveryPolicy"
+//RS         // D-LOGTRACE1=A: typed structured logging values.
+//RS         | "LogField" | "LogSpan"
+//RS         // D-ITERTOOLS1=A: expanded collection handles.
+//RS         | Syntax::TYPE_BITS | Syntax::TYPE_BYTES
+//RS         // E2-M10: networking opaque types.
+//RS         | "TCPListener" | "TCPStream" | "IPAddr" | "SocketAddr" | "UDPSocket" | "UDPPacket"
+//RS         | "DNSSRV" | "UnixListener" | "UnixStream" | "TLSStream" | "TLSClientConfig" | "TLSClientConfigType"
+//RS         | "TLSRootCertificates" | "TLSRootCertificatesType" | "TLSClientIdentity" | "TLSClientIdentityType"
+//RS         | "TLSClientTrust" | "TLSVersion" | "TLSPeerIdentity" | "TLSCertificate"
+//RS         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
+//RS         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
+//RS         | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream" | "VJPRun"
+//RS         | "SparseTensor"
+//RS         // D-SERVICE1=D: structured service tree handles.
+//RS         | "ServiceTree" | "ServiceWorkflow" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
+//RS         | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "Delivery"
+//RS         | "DeliveryState" | "DeliveryReceipt" | "DeliveryEvent"
+//RS         | "ServiceUpgradeReceipt" | "TaskOutcome" | "TaskStatus"
+//RS         | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"
+//RS         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
+//RS         // are opaque and receive no structural/collection capabilities.
+//RS         | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey"
+//RS         | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "PasswordHash"
+//RS         | "Digest256" | "Digest512" | "Hasher" | "CryptoError" | "FileCryptoError"
+//RS         | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
+//RS         | "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError"
+//RS         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
+//RS         | "Arena" | "Bump" | "Pool" | "Fixed"
+//RS         // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing types.
+//RS         | "ArgsSpec" | "ParsedArgs"
+//RS         // D-ANY-JAI1 (c7jaiany §6): runtime reflection floor handle types.
+//RS         | "Value" | "Field"
+//RS         // D-TERM1 (ratified 2026-06-22): terminal key-event enum.
+//RS         | "Key"
+//RS         // D-SERDE2 / D-VALIDATE-DECODE1: the format-agnostic value tree.
+//RS         | "DataTree"
+//RS         // D-VALIDATE1 (ratified 2026-07-12, card #506): the accumulated
+//RS         // validation error a `validate { }` block / `Type.validate(value)` /
+//RS         // `Validate.over(s)` build up.
+//RS         | "FieldError"
+//RS         // D-ENCSTREAM-SURFACE1=A: shared encoding values and codec-native
+//RS         // opaque stream handles.  Handles are intentionally non-Codable and
+//RS         // acquire values only from their format module constructors.
+//RS         | "EncodingLimits" | "EncodingError" | "EncodingCause"
+//RS         | "EncodingFormat"
+//RS         | "EncodingErrorKind" | "DataEvent"
+//RS         | "CBOROptions" | "CBORError" | "CBORErrorKind"
+//RS         | "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLEncoding"
+//RS         | "XMLLexicalPolicy" | "XMLCanonical" | "XMLCanonicalMode" | "XMLError" | "XMLReason" | "XMLEntityPolicy"
+//RS         | "JSONReader" | "JSONWriter" | "JSONLReader" | "JSONLWriter"
+//RS         | "CSVReader" | "CSVWriter" | "CSVRow" | "XMLReader" | "XMLWriter"
+//RS         | "CBORReader" | "CBORWriter"
+//RS         // D-SIMD2 / D-LINALG1: built-in SIMD lane + linear-algebra value types.
+//RS         | "F32x4" | "F64x2" | "ReduceOp"
+//RS         | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
+//RS         // D-SPACE-GEOMETRY1=A: typed coordinate spaces.  Space names are
+//RS         // nominal so `Point2<Float, Screen>` cannot silently cross a frame.
+//RS         | "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2"
+//RS         | "Screen" | "World" | "View" | "Camera" | "Device"
+//RS         | "ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint" | "DevicePoint"
+//RS         | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta"
+//RS         | "TransformError" | "FrameId"
+//RS         // D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 2, ratified 2026-06-28/29): the
+//RS         // built-in constraint-layout value types.
+//RS         | "HVar" | "VVar" | "LengthVar" | "Constraint" | "Layout"
+//RS         // D-REACT1=B: opt-in reactive handle types (used bare as `Signal<T>`/`Derived<T>`).
+//RS         | "Signal" | "Derived" | "Computed" | "Effect"
+//RS         // D-EVENT1=D: first-party typed Event/Hook family.
+//RS         | "Event" | "Hook" | "DecisionHook" | "HookPolicy" | "HookDecision" | "HookOutcome"
+//RS         | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace"
+//RS         | "AsyncEvent" | "AsyncPolicy" | "Overflow" | "FailurePolicy" | "DispatchReport" | "DispatchFailure" | "DispatchState" | "EventConfigError"
+//RS         // D-FFI-CALLBACK2=A: managed event values and consuming owners.
+//RS         | "FfiCallbackEvent" | "FfiCallbackRegistration"
+//RS         // D-HONESTNUM1=A: Measurement<T> value ± uncertainty.
+//RS         | "Measurement"
+//RS         // D-PENDING1=B: async UI state machine.
+//RS         | "Loadable"
+//RS         // D-CORE-SECRETS1=A / D-TTLVAL1=A: generic TTL plus one secret wrapper.
+//RS         | "Expired" | "ExpiringValue" | "ExpiringSecret"
+//RS         // D-RENDERTGT2=A (c133 M1): UI backend seam types.
+//RS         | "Point" | "Size" | "Rect" | "SizeConstraint" | "UINode" | "InputEvent"
+//RS         | "EventResult" | "NullBackend" | "TUIBackend"
+//RS         // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend.
+//RS         | "GtkBackend"
+//RS         // D-A11YGATE1=B (c134 Phase 6): accessible-role opaque type.
+//RS         | "UIAriaRole"
+//RS         // D-FOUND-PLATFORM1=A: shared font and host service value vocabulary.
+//RS         | "FontFace" | "FontStyle" | "Glyph" | "GlyphRun" | "GlyphShaper"
+//RS         | "UICapability" | "UICapabilityFact" | "UICapabilityFacts" | "UICancellation"
+//RS         | "UIHostError" | "UIServiceResult" | "UIFileDialogKind" | "UIFSAccess"
+//RS         | "UIFSRights" | "UIFSGrant" | "UIGrantedPath" | "UIFileFilter"
+//RS         | "UIClipboardWrite" | "UITextRange" | "UIIMEMode"
+//RS         | "UIPreview" | "UIPreviewAccessibility" | "UIPreviewAuthority"
+//RS         | "UIPreviewContext" | "UIPreviewDevice" | "UIPreviewEffect"
+//RS         | "UIPreviewInputOverride" | "UIPreviewInputValue" | "UIPreviewKind"
+//RS         | "UIPreviewLifecycle" | "UIPreviewRegistry" | "UIPreviewSource"
+//RS         | "UIPreviewTheme" | "UIPreviewTraits" | "UIPreviewViewport"
+//RS         | "UIIMEPhase"
+//RS         | "UIDragPhase" | "UIDragEvent" | "UIShortcutModifier" | "UIShortcutModifiers"
+//RS         | "UIShortcut" | "UIShortcutBinding" | "UIShortcutDispatch"
+//RS         | "UIAccessibilityState" | "UIAccessibility" | "UINodeID"
+//RS         | "UIAccessibilityProjection"
+//RS         // c-devserver (owner-directed 2026-07-01): the configurable `jet dev`
+//RS         // server value returned by `core.web.devserver.for_app(...)`.
+//RS         | "DevServer"
+//RS         // D-WEBAPP1=D: full-stack application builder types.
+//RS         | "App"
+//RS         | "WebPage"
+//RS         | "WebContext"
+//RS         | "WebMount"
+//RS         | "LiveQuery"
+//RS         // D-FLAGSHIP-WEBAPI1=A: headless first-party web suite values.
+//RS         | "WebRouterValueType" | "WebRouterField" | "WebRouterSearchCodec"
+//RS         | "WebRouterCacheStatus" | "WebRouterCacheState" | "WebNavigationStatus"
+//RS         | "WebNavigation" | "WebNavigationState"
+//RS         | "WebMutationStatus" | "WebMutationState"
+//RS         | "WebQueryStatus" | "WebQueryNetworkMode" | "WebQueryState" | "WebQuery"
+//RS         | "WebFormValueType" | "WebFormStatus" | "WebFormFieldState"
+//RS         | "WebFormFieldSpec" | "WebFormInput" | "WebFormDecodedInput"
+//RS         | "WebFormActionError" | "WebFormErrorState" | "WebFormLifecycleStatus"
+//RS         | "WebFormLifecycle" | "WebFormTyped" | "WebFormValidationChain"
+//RS         | "WebFormTypedValidation" | "WebFormTypedSubmission"
+//RS         | "WebFormState" | "WebForm" | "WebFormValidation"
+//RS         | "WebTableSortDirection" | "WebTablePageMode" | "WebTableSort" | "WebTableFilter"
+//RS         | "WebTableState" | "WebTableColumn" | "WebTablePage" | "WebTableRow" | "WebTable"
+//RS         | "WebVirtualWindow" | "WebVirtualPlan" | "WebVirtualPlanViewport"
+//RS         | "WebStoreTransaction" | "WebStoreEvent" | "WebStoreInspection"
+//RS         | "WebStorePatch" | "WebStore" | "WebStoreSubscription"
+//RS         // D-APPROX1=A: approximate sketch data structures.
+//RS         | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
+//RS         // D-TIMEDEPTH1=A: civil-time types.
+//RS         | "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "Period" | "Zone"
+//RS         | "ZonedDateTime"
+//RS         // D-URL1=A: typed URL and MIME values.
+//RS         | Syntax::TYPE_URL | "MIME"
+//RS         // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: exact ungated email values.
+//RS         | "Address" | "Message" | "Attachment" | "Envelope" | "EmailError"
+//RS         | "SMTPSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport"
+//RS         | "Limits" | "SMTPAuth" | "TLSTrust" | "DKIMConfig" | "SMTPConfig" | "Mailer"
+//RS         | "Regex" | "RegexFlags" | "Match"
+//RS         | "HTTPMethod" | "HTTPStatus" | "HTTPVersion" | "HTTPHeaderName" | "HTTPHeaderValue"
+//RS         | "Body" | "Headers" | "HTTPBodyChunks" | "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPMux" | "HTTPHandler" | "HTTPServerTLS" | "HTTPServer" | "HTTPShutdownReport" | "HTTPCorsPolicy" | "HTTPCorsOrigins" | "HTTPCompressEncoding"
+//RS         | "WsConn" | "WsError" | "WsMessage"
+//RS         | "Browser" | "BrowserContext" | "BrowserPage" | "BrowserFrame" | "BrowserLocator"
+//RS         | "BrowserIntercept"
+//RS         | "BrowserEvent" | "BrowserTrace" | "BrowserReceipt" | "BrowserPrivacy" | "BrowserError"
+//RS         | "BrowserAbilities"
+//RS         | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol" | "BrowserLocked"
+//RS         | "BrowserTestConfig" | "BrowserTestSource" | "BrowserTestAction"
+//RS         | "BrowserTestSnapshot" | "BrowserTestEventFact" | "BrowserTestArtifact"
+//RS         | "BrowserTestAttempt" | "BrowserTestCase" | "BrowserTestReport"
+//RS         | "BrowserTestFixture" | "BrowserTestServer"
+//RS         // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — consuming,
+//RS         // fallible, `?`-composed cursors over `[U8]`/`String`.
+//RS         | "Reader" | "Cursor"
+//RS         // D-BUILD*: selected-root build-program handles and the read-only
+//RS         // graph/diff records returned by `core.build`.
+//RS         | "BuildContext"
+//RS         | "BuildPlan"
+//RS         | "BuildAction"
+//RS         | "BuildTarget"
+//RS         | "BuildToolchain"
+//RS         | "BuildProbe"
+//RS         | "BuildSigningIdentity"
+//RS         | "BuildError"
+//RS         | "BuildGraph"
+//RS         | "BuildGraphTarget"
+//RS         | "BuildGraphAction"
+//RS         | "BuildGraphFile"
+//RS         | "BuildGraphNode"
+//RS         | "BuildGraphInputDigest"
+//RS         | "BuildGraphActionKey"
+//RS         | "BuildGraphFileDelta"
+//RS         | "BuildGraphKeyDelta"
+//RS         | "BuildGraphCacheDelta"
+//RS         | "BuildGraphDiff"
+//RS         | "ProgramInfo"
+//RS         | "MemoStats"
+//RS         | "TypeInfo"
+//RS         | "LayoutInfo"
+//RS         | "LayoutField"
+//RS         | "SourceSpan"
+//RS         | "CompilerViewSourcePath" | "CompilerViewSource" | "CompilerViewProjection"
+//RS         | "CompilerReference" | "CompilerDefinitionAnchor" | "CompilerCall"
+//RS         | "CompilerEffect" | "CompilerEffectProvenance" | "CompilerOutput"
+//RS         | "CompilerOutputEntry" | "CompilerStructuralNode" | "CompilerArithmeticOperation"
+//RS         | "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked"
+//RS         | "CompilerSourceMap" | "CompilerToken" | "CompilerNode"
+//RS         | "CompilerDiagnostic" | "CompilerGeneratedLine" | "CompilerError"
+//RS         | "CompilerPackageError" | "CompilerDependency" | "CompilerPackageTarget"
+//RS         | "CompilerPackageOutput" | "CompilerBuildProfile" | "CompilerManifest"
+//RS         | "CompilerPackage" | "CompilerLockedPackage" | "CompilerLock"
+//RS         | "CompilerKeyValue" | "CompilerProfile" | "CompilerProfileSet"
+//RS         | "MarkerInfo" | "MarkerArgInfo" | "StateInfo" | "TransitionInfo" | "FactInfo"
+//RS         | "FactKind" | "FactValue" | "DimensionInfo" | "DimensionAxis"
+//RS         | "MeasureInfo" | "ExactnessInfo" | "ExactnessKind" | "LayoutFact"
+//RS         | "ClassificationInfo" | "NominalInfo" | "ObligationInfo"
+//RS         | "ObligationParamInfo" | "ParamZone"
+//RS         | "SendabilityInfo" | "MovednessInfo" | "AttributionInfo" | "OriginInfo"
+//RS         | "ViewProvenanceInfo" | "UnitScaleProvenanceInfo" | "UnitScaleProvenanceKind"
+//RS         | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "ArithmeticOperationInfo" | "MethodInfo" | "FieldInfo" | "TypeParamInfo"
+//RS     ) || is_json_type_name(name)
+//RS         || is_db_value_type_name(name)
+//RS         || is_io_error_type_name(name)
+//RS         || is_utf8_error_type_name(name)
+//RS }
+//RS 
+//RS /// D-CONC-FAIL1=A: the task wait report is a normal closed enum. Its variants
+//RS /// are synthesized here because the runtime owns the type, but user code can
+//RS /// construct and match the same values on every tier.
+//RS pub(crate) fn core_task_failure_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+//RS     if enum_name != Syntax::TYPE_TASK_FAILURE {
+//RS         return None;
+//RS     }
+//RS     let zero = Span::new(0, 0);
+//RS     Some(
+//RS         [
+//RS             ("Cancelled".to_string(), (zero, VariantPayload::Unit)),
+//RS             ("DeadlineBlown".to_string(), (zero, VariantPayload::Unit)),
+//RS             (
+//RS                 "Panicked".to_string(),
+//RS                 (zero, VariantPayload::Single(Type::String, zero)),
+//RS             ),
+//RS         ]
+//RS         .into_iter()
+//RS         .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// D-RULEARG-TYPES1=A: enum variants generated from the marker registry.
+//RS pub(crate) fn core_lang_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+//RS     let declaration = crate::Policy::rule_arg_declaration(enum_name)?;
+//RS     let zero = Span::new(0, 0);
+//RS     Some(
+//RS         declaration
+//RS             .variants
+//RS             .iter()
+//RS             .map(|variant| ((*variant).to_string(), (zero, VariantPayload::Unit)))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS /// D-TEST-STRATEGY1=A: the history value and precondition enums are public
+//RS /// records, but their payloads remain closed so every tier shares one shape.
+//RS pub(crate) fn core_history_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+//RS     let zero = Span::new(0, 0);
+//RS     let field = |name: &str, ty: Type| VariantField {
+//RS         name: name.to_string(),
+//RS         name_span: zero,
+//RS         ty,
+//RS         ty_span: zero,
+//RS     };
+//RS     let variants = match enum_name {
+//RS         "HistoryValue" => vec![
+//RS             ("Integer".to_string(), VariantPayload::Single(Type::Int, zero)),
+//RS             ("Boolean".to_string(), VariantPayload::Single(Type::Bool, zero)),
+//RS             ("Text".to_string(), VariantPayload::Single(Type::String, zero)),
+//RS             (
+//RS                 "Handle".to_string(),
+//RS                 VariantPayload::Single(Type::Named("HandleID".to_string()), zero),
+//RS             ),
+//RS             ("Redacted".to_string(), VariantPayload::Single(Type::String, zero)),
+//RS         ],
+//RS         "HistoryPrecondition" => vec![
+//RS             (
+//RS                 "HandleLive".to_string(),
+//RS                 VariantPayload::Single(Type::Named("HandleID".to_string()), zero),
+//RS             ),
+//RS             (
+//RS                 "HandleState".to_string(),
+//RS                 VariantPayload::Named(vec![
+//RS                     field("handle", Type::Named("HandleID".to_string())),
+//RS                     field("state", Type::String),
+//RS                 ]),
+//RS             ),
+//RS             (
+//RS                 "TaskCompleted".to_string(),
+//RS                 VariantPayload::Single(Type::Named("TaskID".to_string()), zero),
+//RS             ),
+//RS             (
+//RS                 "EventAvailable".to_string(),
+//RS                 VariantPayload::Single(Type::Named("EventID".to_string()), zero),
+//RS             ),
+//RS         ],
+//RS         _ => return None,
+//RS     };
+//RS     Some(variants.into_iter().map(|(name, payload)| (name, (zero, payload))).collect())
+//RS }
+//RS 
+//RS /// Core-declared enum variants are synthesized from the canonical Core
+//RS /// declaration table, keeping sema's ordinary enum resolver aligned with the
+//RS /// source used for module/type exports.
+//RS pub(crate) fn core_declared_enum_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+//RS     if let Some(variants) = core_history_variants(enum_name) {
+//RS         return Some(variants);
+//RS     }
+//RS     let names = jet_foundation::CoreModuleExports::core_enum_variants(enum_name)?;
+//RS     let zero = Span::new(0, 0);
+//RS     Some(
+//RS         names
+//RS             .iter()
+//RS             .map(|name| ((*name).to_string(), (zero, VariantPayload::Unit)))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// D-FACT-READ1=A: reflection fact kinds are a closed typed menu, not strings
+//RS /// smuggled through `FactInfo.kind`.
+//RS pub fn core_fact_kind_variants(
+//RS     enum_name: &str,
+//RS ) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+//RS     let variants: Vec<String> = match enum_name {
+//RS         "FactKind" => {
+//RS             let mut names = vec!["Effect", "State", "Tag"];
+//RS             for row in jet_foundation::Registry::fact_rows()
+//RS                 .filter(|row| row.kind() == jet_foundation::Registry::RowKind::Plane)
+//RS             {
+//RS                 if let Some(kind) = jet_foundation::Registry::reflection_kind(row.name) {
+//RS                     if !names.contains(&kind) {
+//RS                         names.push(kind);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             names.into_iter().map(str::to_string).collect()
+//RS         }
+//RS         "Maturity" => ["Experimental", "Tested", "Hardened"]
+//RS             .into_iter()
+//RS             .map(str::to_string)
+//RS             .collect(),
+//RS         "ExactnessKind" => ["Exact", "Approximate", "Measured"]
+//RS             .into_iter()
+//RS             .map(str::to_string)
+//RS             .collect(),
+//RS         "ParamZone" => ["PositionalOnly", "Either", "LabelOnly"]
+//RS             .into_iter()
+//RS             .map(str::to_string)
+//RS             .collect(),
+//RS         "UnitScaleProvenanceKind" => ["Rational", "SymbolicPi", "Conventional", "Measured"]
+//RS             .into_iter()
+//RS             .map(str::to_string)
+//RS             .collect(),
+//RS         _ => return None,
+//RS     };
+//RS     Some({
+//RS         let zero = Span::new(0, 0);
+//RS         variants
+//RS             .into_iter()
+//RS             .map(|variant| (variant, (zero, VariantPayload::Unit)))
+//RS             .collect()
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+//RS     if type_name == "CSVRow" {
+//RS         return match field {
+//RS             "fields" => Some(Type::List(Box::new(Type::String))),
+//RS             "line" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_MEMO_STATS {
+//RS         return match field {
+//RS             "hits" | "misses" | "size" => Some(Type::Int),
+//RS             "bound" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_ALLOC_ERROR {
+//RS         return match field {
+//RS             "requested_bytes" => Some(Type::Int),
+//RS             "allocator" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_ERR {
+//RS         return match field {
+//RS             "message" => Some(Type::String),
+//RS             "code" => Some(Type::Option(Box::new(Type::String))),
+//RS             "cause" => Some(Type::Option(Box::new(Type::Named(
+//RS                 Syntax::TYPE_ERR.to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_RANGE {
+//RS         return match field {
+//RS             "start" | "end" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "TestSuite" {
+//RS         return matches!(field, "iteration" | "result").then_some(Type::Int);
+//RS     }
+//RS     if type_name == "TestComparison" {
+//RS         return match field {
+//RS             "first_difference" => Some(Type::Int),
+//RS             "seed" => Some(Type::Option(Box::new(Type::Int))),
+//RS             "case_ids" => Some(Type::List(Box::new(Type::String))),
+//RS             "inputs" | "reference" | "candidate" => Some(Type::List(Box::new(Type::Named(
+//RS                 "DataTree".to_string(),
+//RS             )))),
+//RS             "status" | "relation" | "source" | "tool" | "target" | "reason" => {
+//RS                 Some(Type::String)
+//RS             }
+//RS             "universal_proof" => Some(Type::Bool),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "TLSPeerIdentity" {
+//RS         return match field {
+//RS             "verified_server_name" => Some(Type::String),
+//RS             "leaf" => Some(Type::Named("TLSCertificate".to_string())),
+//RS             "certificate_chain" => Some(Type::List(Box::new(Type::Named(
+//RS                 "TLSCertificate".to_string(),
+//RS             )))),
+//RS             "cipher_suite" => Some(Type::String),
+//RS             "tls_version" => Some(Type::Named("TLSVersion".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "TLSCertificate" {
+//RS         return match field {
+//RS             "der" | "sha256" | "spki_sha256" => Some(Type::List(Box::new(Type::IntN {
+//RS                 signed: false,
+//RS                 bits: 8,
+//RS             }))),
+//RS             "dns_names" => Some(Type::List(Box::new(Type::String))),
+//RS             "valid_from_unix_ms" | "valid_until_unix_ms" => Some(Type::Int),
+//RS             "subject" | "issuer" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "Claims" {
+//RS         return match field {
+//RS             "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
+//RS             "audience" => Some(Type::String),
+//RS             "expires_at" => Some(Type::Int),
+//RS             "not_before" => Some(Type::Option(Box::new(Type::Int))),
+//RS             "issued_at" => Some(Type::Option(Box::new(Type::Int))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "Session" {
+//RS         return match field {
+//RS             "id" | "user_id" | "cookie" => Some(Type::String),
+//RS             "expires_at" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "Auth" {
+//RS         return match field {
+//RS             "users_table" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "ModGrant" {
+//RS         return match field {
+//RS             "read" => Some(Type::List(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "ProcessChild" && field == "terminal" {
+//RS         return Some(Type::Option(Box::new(Type::Named(
+//RS             Syntax::TYPE_TERMINAL_SESSION.to_string(),
+//RS         ))));
+//RS     }
+//RS     if type_name == Syntax::TYPE_IO_CONTEXT {
+//RS         return match field {
+//RS             "operation" => Some(Type::Named(Syntax::TYPE_IO_OPERATION.to_string())),
+//RS             "resource" | "cause" => Some(Type::Option(Box::new(Type::String))),
+//RS             "os_code" => Some(Type::Option(Box::new(Type::Int))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_GRAPH {
+//RS         let graph_list = |name: &str| Type::List(Box::new(Type::Named(name.to_string())));
+//RS         return match field {
+//RS             "targets" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_TARGET)),
+//RS             "actions" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_ACTION)),
+//RS             "action_keys" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_ACTION_KEY)),
+//RS             "cache_hits" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_ACTION)),
+//RS             "files" | "affected_files" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_FILE)),
+//RS             "nodes" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_NODE)),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_GRAPH_TARGET {
+//RS         return match field {
+//RS             "id" => Some(Type::Int),
+//RS             "name" => Some(Type::String),
+//RS             "kind" => Some(Type::String),
+//RS             "deps" | "actions" => Some(Type::List(Box::new(Type::Int))),
+//RS             "files" => Some(Type::List(Box::new(Type::String))),
+//RS             "plugin" => Some(Type::Option(Box::new(Type::Int))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_GRAPH_ACTION {
+//RS         return match field {
+//RS             "id" => Some(Type::Int),
+//RS             "name" | "kind" | "key" => Some(Type::String),
+//RS             "inputs" | "outputs" | "caps" | "pools" => {
+//RS                 Some(Type::List(Box::new(Type::String)))
+//RS             }
+//RS             "target" | "plugin" => Some(Type::Option(Box::new(Type::Int))),
+//RS             "legacy_wrapper" => Some(Type::Option(Box::new(Type::String))),
+//RS             "compiler_owned" => Some(Type::Bool),
+//RS             "cache_hit" => Some(Type::Option(Box::new(Type::Bool))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_GRAPH_FILE {
+//RS         return match field {
+//RS             "path" => Some(Type::String),
+//RS             "owner" => Some(Type::Option(Box::new(Type::Int))),
+//RS             "consumers" | "targets" => Some(Type::List(Box::new(Type::Int))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_GRAPH_NODE {
+//RS         return match field {
+//RS             "kind" | "key" | "subject" => Some(Type::String),
+//RS             "inputs" => Some(Type::List(Box::new(Type::String))),
+//RS             "input_digests" => Some(Type::List(Box::new(Type::Named(
+//RS                 Syntax::TYPE_BUILD_GRAPH_INPUT_DIGEST.to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_GRAPH_INPUT_DIGEST {
+//RS         return match field {
+//RS             "name" | "digest" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_GRAPH_ACTION_KEY {
+//RS         return match field {
+//RS             "action" | "key" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_GRAPH_FILE_DELTA {
+//RS         return match field {
+//RS             "path" => Some(Type::String),
+//RS             "before" | "after" => Some(Type::Option(Box::new(Type::Named(
+//RS                 Syntax::TYPE_BUILD_GRAPH_FILE.to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_GRAPH_KEY_DELTA {
+//RS         return match field {
+//RS             "action" => Some(Type::String),
+//RS             "before" | "after" => Some(Type::Option(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_GRAPH_CACHE_DELTA {
+//RS         return match field {
+//RS             "action" => Some(Type::String),
+//RS             "before" | "after" => Some(Type::Option(Box::new(Type::Bool))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_GRAPH_DIFF {
+//RS         return match field {
+//RS             "file_deltas" => Some(Type::List(Box::new(Type::Named(
+//RS                 Syntax::TYPE_BUILD_GRAPH_FILE_DELTA.to_string(),
+//RS             )))),
+//RS             "affected_files" => Some(Type::List(Box::new(Type::String))),
+//RS             "key_deltas" => Some(Type::List(Box::new(Type::Named(
+//RS                 Syntax::TYPE_BUILD_GRAPH_KEY_DELTA.to_string(),
+//RS             )))),
+//RS             "cache_deltas" => Some(Type::List(Box::new(Type::Named(
+//RS                 Syntax::TYPE_BUILD_GRAPH_CACHE_DELTA.to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "HTTPShutdownReport"
+//RS         && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled")
+//RS     {
+//RS         return Some(Type::Int);
+//RS     }
+//RS     if type_name == "Address" {
+//RS         return match field {
+//RS             "display" => Some(Type::Option(Box::new(Type::String))),
+//RS             "mailbox" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS 
+//RS     if type_name == "Envelope" {
+//RS         return match field {
+//RS             "from" => Some(Type::Named("Address".to_string())),
+//RS             "recipients" => Some(Type::List(Box::new(Type::Named("Address".to_string())))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_BUILD_CONTEXT && field == "program" {
+//RS         return Some(Type::Named(Syntax::TYPE_PROGRAM_INFO.to_string()));
+//RS     }
+//RS     if let Some(field_type) = compiler_package_struct_field(type_name, field) {
+//RS         return Some(field_type);
+//RS     }
+//RS     if type_name == "CompilerToken" {
+//RS         return match field {
+//RS             "kind" | "text" => Some(Type::String),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if matches!(
+//RS         type_name,
+//RS         "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked"
+//RS     ) && field == "source"
+//RS     {
+//RS         return Some(Type::String);
+//RS     }
+//RS     if matches!(
+//RS         type_name,
+//RS         "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked" | "CompilerSourceMap"
+//RS     ) && field == "schema_version"
+//RS     {
+//RS         return Some(Type::Int);
+//RS     }
+//RS     if type_name == "CompilerNode" {
+//RS         return match field {
+//RS             "kind" => Some(Type::String),
+//RS             "name" => Some(Type::Option(Box::new(Type::String))),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerDiagnostic" {
+//RS         return match field {
+//RS             "code" | "severity" | "message" | "why" | "fix" => Some(Type::String),
+//RS             "span" => Some(Type::Option(Box::new(Type::Named(
+//RS                 Syntax::TYPE_SOURCE_SPAN.to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerGeneratedLine" {
+//RS         return match field {
+//RS             "generated_line" | "source_line" => Some(Type::Int),
+//RS             "source" => Some(Type::Option(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerSemanticIndex" {
+//RS         return match field {
+//RS             "schema_version" => Some(Type::Int),
+//RS             "source_digest" => Some(Type::String),
+//RS             "definitions" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerDefinition".to_string(),
+//RS             )))),
+//RS             "references" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerReference".to_string(),
+//RS             )))),
+//RS             "calls" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerCall".to_string(),
+//RS             )))),
+//RS             "structural_nodes" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerStructuralNode".to_string(),
+//RS             )))),
+//RS             "effects" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerEffect".to_string(),
+//RS             )))),
+//RS             "arithmetic" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerArithmeticOperation".to_string(),
+//RS             )))),
+//RS             "outputs" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerOutput".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerDefinition" {
+//RS         return match field {
+//RS             "identity" | "name" | "module" => Some(Type::String),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             "kind" => Some(Type::Named("CompilerSymbolKind".to_string())),
+//RS             "view_provenance" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerViewProvenance".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerArithmeticOperation" {
+//RS         return match field {
+//RS             "operation" | "policy" | "module" => Some(Type::String),
+//RS             "operation_span" | "scope_span" => {
+//RS                 Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()))
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerSymbolKind" {
+//RS         return match field {
+//RS             "kind" => Some(Type::String),
+//RS             "params" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerParam".to_string(),
+//RS             )))),
+//RS             "ret" | "parent" | "ty" => Some(Type::Option(Box::new(Type::String))),
+//RS             "fields" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerField".to_string(),
+//RS             )))),
+//RS             "variants" => Some(Type::List(Box::new(Type::String))),
+//RS             "mutable" => Some(Type::Option(Box::new(Type::Bool))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerParam" {
+//RS         return match field {
+//RS             "name" | "ty" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerField" {
+//RS         return match field {
+//RS             "name" | "ty" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerViewProvenance" {
+//RS         return match field {
+//RS             "output_path" => Some(Type::List(Box::new(Type::String))),
+//RS             "sources" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerViewSourcePath".to_string(),
+//RS             )))),
+//RS             "mutable" => Some(Type::Bool),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerViewSourcePath" {
+//RS         return match field {
+//RS             "source" => Some(Type::Named("CompilerViewSource".to_string())),
+//RS             "projections" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerViewProjection".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerViewSource" {
+//RS         return match field {
+//RS             "kind" => Some(Type::String),
+//RS             "index" => Some(Type::Option(Box::new(Type::Int))),
+//RS             "module" | "name" => Some(Type::Option(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerViewProjection" {
+//RS         return match field {
+//RS             "kind" => Some(Type::String),
+//RS             "name" => Some(Type::Option(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerReference" {
+//RS         return match field {
+//RS             "name" | "module" => Some(Type::String),
+//RS             "scope_identity" => Some(Type::Option(Box::new(Type::String))),
+//RS             "target" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "CompilerDefinitionAnchor".to_string(),
+//RS             )))),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerDefinitionAnchor" {
+//RS         return match field {
+//RS             "module" | "kind" => Some(Type::String),
+//RS             "semantic_identity" => Some(Type::Option(Box::new(Type::String))),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerCall" {
+//RS         return match field {
+//RS             "caller" | "callee" | "module" => Some(Type::String),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerStructuralNode" {
+//RS         return match field {
+//RS             "id" | "ordinal" => Some(Type::Int),
+//RS             "parent" => Some(Type::Option(Box::new(Type::Int))),
+//RS             "slot" | "slot_kind" | "class" | "shape" | "module" => Some(Type::String),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerEffect" {
+//RS         return match field {
+//RS             "function" => Some(Type::String),
+//RS             "direct" | "callees" | "inferred" => Some(Type::List(Box::new(Type::String))),
+//RS             "maximal" => Some(Type::Bool),
+//RS             "provenance" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerEffectProvenance".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerEffectProvenance" {
+//RS         return match field {
+//RS             "effect" => Some(Type::String),
+//RS             "call_path" => Some(Type::List(Box::new(Type::String))),
+//RS             "spans" => Some(Type::List(Box::new(Type::Named(
+//RS                 Syntax::TYPE_SOURCE_SPAN.to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerOutput" {
+//RS         return match field {
+//RS             "binding" | "kind" | "name" | "module" => Some(Type::String),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             "entry" => Some(Type::Named("CompilerOutputEntry".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerOutputEntry" {
+//RS         return match field {
+//RS             "identity" | "name" | "module" | "failure_contract" | "failure_source"
+//RS             | "authority" => Some(Type::String),
+//RS             "definition_span" | "reference_span" => {
+//RS                 Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()))
+//RS             }
+//RS             "params" | "effects" => Some(Type::List(Box::new(Type::String))),
+//RS             "return_type" => Some(Type::Option(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     match type_name {
+//RS         "CompilerLexed" => {
+//RS             return match field {
+//RS                 "schema_version" => Some(Type::Int),
+//RS                 "tokens" => Some(Type::List(Box::new(Type::Named(
+//RS                     "CompilerToken".to_string(),
+//RS                 )))),
+//RS                 "diagnostics" => Some(Type::List(Box::new(Type::Named(
+//RS                     "CompilerDiagnostic".to_string(),
+//RS                 )))),
+//RS                 _ => None,
+//RS             }
+//RS         }
+//RS         "CompilerSyntaxTree" => {
+//RS             return match field {
+//RS                 "schema_version" => Some(Type::Int),
+//RS                 "items" => Some(Type::List(Box::new(Type::Named(
+//RS                     "CompilerNode".to_string(),
+//RS                 )))),
+//RS                 "diagnostics" => Some(Type::List(Box::new(Type::Named(
+//RS                     "CompilerDiagnostic".to_string(),
+//RS                 )))),
+//RS                 _ => None,
+//RS             }
+//RS         }
+//RS         "CompilerChecked" => {
+//RS             return match field {
+//RS                 "schema_version" => Some(Type::Int),
+//RS                 "syntax" => Some(Type::Named("CompilerSyntaxTree".to_string())),
+//RS                 "diagnostics" => Some(Type::List(Box::new(Type::Named(
+//RS                     "CompilerDiagnostic".to_string(),
+//RS                 )))),
+//RS                 "functions" => Some(Type::List(Box::new(Type::Named(
+//RS                     "FunctionInfo".to_string(),
+//RS                 )))),
+//RS                 "effects" => Some(Type::List(Box::new(Type::Named("EffectInfo".to_string())))),
+//RS                 // A failed check has diagnostics but no trustworthy semantic
+//RS                 // index. Keep that absence explicit at the typed API boundary;
+//RS                 // callers must not mistake an empty index for a checked file.
+//RS                 "semantic_index" => Some(Type::Option(Box::new(Type::Named(
+//RS                     "CompilerSemanticIndex".to_string(),
+//RS                 )))),
+//RS                 _ => None,
+//RS             };
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS     if type_name == "CompilerSourceMap" {
+//RS         return match field {
+//RS             "schema_version" => Some(Type::Int),
+//RS             "sources" => Some(Type::List(Box::new(Type::String))),
+//RS             "generated_lines" => Some(Type::List(Box::new(Type::Named(
+//RS                 "CompilerGeneratedLine".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "CompilerError" {
+//RS         return match field {
+//RS             "code" | "message" => Some(Type::String),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_TYPE_INFO {
+//RS         return match field {
+//RS             "name" | "path" | "module" | "identity" | "kind" => Some(Type::String),
+//RS             "layout" => Some(Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string())),
+//RS             "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
+//RS             "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),
+//RS             "type_params" => Some(Type::List(Box::new(Type::Named(
+//RS                 "TypeParamInfo".to_string(),
+//RS             )))),
+//RS             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
+//RS             "expanded_markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
+//RS             "implements" => Some(Type::List(Box::new(Type::String))),
+//RS             "states" => Some(Type::List(Box::new(Type::Named("StateInfo".to_string())))),
+//RS             "transitions" => Some(Type::List(Box::new(Type::Named(
+//RS                 "TransitionInfo".to_string(),
+//RS             )))),
+//RS             "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
+//RS             "dimensions" => Some(Type::List(Box::new(Type::Named(
+//RS                 "DimensionInfo".to_string(),
+//RS             )))),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_LAYOUT_INFO {
+//RS         return match field {
+//RS             "kind" | "target" | "guarantee" | "source" => Some(Type::String),
+//RS             "size" | "alignment" | "stride" | "requested_alignment" | "effective_alignment" => {
+//RS                 Some(Type::Option(Box::new(Type::Int)))
+//RS             }
+//RS             "fields" => Some(Type::List(Box::new(Type::Named(
+//RS                 Syntax::TYPE_LAYOUT_FIELD.to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_LAYOUT_FIELD {
+//RS         return match field {
+//RS             "name" | "ty" | "target" | "guarantee" | "source" => Some(Type::String),
+//RS             "offset" | "size" => Some(Type::Option(Box::new(Type::Int))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "MarkerInfo" {
+//RS         return match field {
+//RS             "name" => Some(Type::String),
+//RS             "args" => Some(Type::List(Box::new(Type::Named(
+//RS                 "MarkerArgInfo".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "MarkerArgInfo" {
+//RS         return match field {
+//RS             "name" | "ty" => Some(Type::String),
+//RS             "value" => Some(Type::Union(
+//RS                 std::iter::once(Type::String)
+//RS                     .chain([Type::Int, Type::Bool])
+//RS                     .chain(
+//RS                         crate::Policy::RULE_ARG_DECLARATIONS
+//RS                             .iter()
+//RS                             .map(|declaration| Type::Named(declaration.name.to_string())),
+//RS                     )
+//RS                     .collect(),
+//RS             )),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "StateInfo" {
+//RS         return match field {
+//RS             "name" => Some(Type::String),
+//RS             "path" => Some(Type::Named("StateRef".to_string())),
+//RS             "terminal" => Some(Type::Bool),
+//RS             "reachable" => Some(Type::Option(Box::new(Type::Bool))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "StateRef" {
+//RS         return match field {
+//RS             "owner" | "name" | "path" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "TransitionInfo" {
+//RS         return match field {
+//RS             "operation" => Some(Type::String),
+//RS             "from" | "to" => Some(Type::Named("StateRef".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "FactInfo" {
+//RS         return match field {
+//RS             "kind" => Some(Type::Named("FactKind".to_string())),
+//RS             "name" | "path" => Some(Type::String),
+//RS             "value" => Some(Type::Named("FactValue".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "FactValue" {
+//RS         return match field {
+//RS             "kind" => Some(Type::Named("FactKind".to_string())),
+//RS             "name" => Some(Type::String),
+//RS             "members" => Some(Type::List(Box::new(Type::String))),
+//RS             "range" => Some(Type::Option(Box::new(Type::Named(
+//RS                 Syntax::TYPE_RANGE.to_string(),
+//RS             )))),
+//RS             "dimension" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "DimensionInfo".to_string(),
+//RS             )))),
+//RS             "measure" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "MeasureInfo".to_string(),
+//RS             )))),
+//RS             "exactness" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "ExactnessInfo".to_string(),
+//RS             )))),
+//RS             "layout" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "LayoutFact".to_string(),
+//RS             )))),
+//RS             "classification" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "ClassificationInfo".to_string(),
+//RS             )))),
+//RS             "nominal" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "NominalInfo".to_string(),
+//RS             )))),
+//RS             "obligation" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "ObligationInfo".to_string(),
+//RS             )))),
+//RS             "state" => Some(Type::Option(Box::new(Type::Named("StateRef".to_string())))),
+//RS             "sendability" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "SendabilityInfo".to_string(),
+//RS             )))),
+//RS             "view_provenance" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "ViewProvenanceInfo".to_string(),
+//RS             )))),
+//RS             "movedness" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "MovednessInfo".to_string(),
+//RS             )))),
+//RS             "attribution" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "AttributionInfo".to_string(),
+//RS             )))),
+//RS             "origin" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "OriginInfo".to_string(),
+//RS             )))),
+//RS             "unit_scale_provenance" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "UnitScaleProvenanceInfo".to_string(),
+//RS             )))),
+//RS             "maturity" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "MaturityInfo".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "MeasureInfo" {
+//RS         return match field {
+//RS             "kind" => Some(Type::String),
+//RS             "value" => Some(Type::Option(Box::new(Type::Int))),
+//RS             "symbol" => Some(Type::Option(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "ExactnessInfo" {
+//RS         return match field {
+//RS             "kind" => Some(Type::Named("ExactnessKind".to_string())),
+//RS             "precision" => Some(Type::Option(Box::new(Type::Int))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "LayoutFact" {
+//RS         return match field {
+//RS             "bytes" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "ClassificationInfo" || type_name == "NominalInfo" {
+//RS         return match field {
+//RS             "name" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "ObligationParamInfo" {
+//RS         return match field {
+//RS             "name" => Some(Type::String),
+//RS             "zone" => Some(Type::Named("ParamZone".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "ObligationInfo" {
+//RS         return match field {
+//RS             "effect_bound" => Some(Type::List(Box::new(Type::String))),
+//RS             "param_contract" => Some(Type::List(Box::new(Type::Named(
+//RS                 "ObligationParamInfo".to_string(),
+//RS             )))),
+//RS             "variadic" => Some(Type::List(Box::new(Type::Bool))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "SendabilityInfo" || type_name == "MovednessInfo" {
+//RS         return match field {
+//RS             "known" => Some(Type::Bool),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "ViewProvenanceInfo" {
+//RS         return match field {
+//RS             "sources" => Some(Type::List(Box::new(Type::String))),
+//RS             "mutable" => Some(Type::Bool),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "AttributionInfo" {
+//RS         return match field {
+//RS             "source" => Some(Type::String),
+//RS             "code" => Some(Type::Option(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "OriginInfo" {
+//RS         return match field {
+//RS             "tracked" => Some(Type::Bool),
+//RS             "source" => Some(Type::Option(Box::new(Type::String))),
+//RS             "line" | "column" => Some(Type::Option(Box::new(Type::Int))),
+//RS             "ambiguity" => Some(Type::Bool),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "UnitScaleProvenanceInfo" {
+//RS         return match field {
+//RS             "kind" => Some(Type::Named("UnitScaleProvenanceKind".to_string())),
+//RS             "value" | "source" | "uncertainty" => Some(Type::Option(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "MaturityInfo" {
+//RS         return match field {
+//RS             "level" => Some(Type::Named("Maturity".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DimensionInfo" {
+//RS         return match field {
+//RS             "axes" => Some(Type::List(Box::new(Type::Named(
+//RS                 "DimensionAxis".to_string(),
+//RS             )))),
+//RS             "identity" | "display" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DimensionAxis" {
+//RS         return match field {
+//RS             "name" => Some(Type::String),
+//RS             "exponent" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "FunctionInfo" {
+//RS         return match field {
+//RS             "name" | "module" | "identity" => Some(Type::String),
+//RS             "params" => Some(Type::List(Box::new(Type::String))),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             "effects" => Some(Type::Named("EffectInfo".to_string())),
+//RS             "reaches_panic" => Some(Type::Bool),
+//RS             "arithmetic" => Some(Type::List(Box::new(Type::Named(
+//RS                 "ArithmeticOperationInfo".to_string(),
+//RS             )))),
+//RS             "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "ArithmeticOperationInfo" {
+//RS         return match field {
+//RS             "operation" | "policy" => Some(Type::String),
+//RS             "operation_span" | "scope_span" => {
+//RS                 Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()))
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "PackageInfo" {
+//RS         return match field {
+//RS             "name" | "identity" => Some(Type::String),
+//RS             "types" => Some(Type::List(Box::new(Type::Named(
+//RS                 Syntax::TYPE_TYPE_INFO.to_string(),
+//RS             )))),
+//RS             "functions" => Some(Type::List(Box::new(Type::Named(
+//RS                 "FunctionInfo".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "EffectInfo" && field == "values" {
+//RS         return Some(Type::List(Box::new(Type::String)));
+//RS     }
+//RS     if type_name == "MethodInfo" {
+//RS         return match field {
+//RS             "name" | "module" | "identity" | "return_type" | "signature" => Some(Type::String),
+//RS             "params" => Some(Type::List(Box::new(Type::String))),
+//RS             "effects" => Some(Type::Named("EffectInfo".to_string())),
+//RS             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
+//RS             "dimensions" => Some(Type::List(Box::new(Type::Named(
+//RS                 "DimensionInfo".to_string(),
+//RS             )))),
+//RS             "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
+//RS             "arithmetic" => Some(Type::List(Box::new(Type::Named(
+//RS                 "ArithmeticOperationInfo".to_string(),
+//RS             )))),
+//RS             "is_pub" => Some(Type::Bool),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "FieldInfo" {
+//RS         return match field {
+//RS             "name" | "ty" => Some(Type::String),
+//RS             "index" => Some(Type::Int),
+//RS             "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
+//RS             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
+//RS             "dimensions" => Some(Type::List(Box::new(Type::Named(
+//RS                 "DimensionInfo".to_string(),
+//RS             )))),
+//RS             "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
+//RS             "is_pub" => Some(Type::Bool),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "TypeParamInfo" {
+//RS         return match field {
+//RS             "name" => Some(Type::String),
+//RS             "bounds" => Some(Type::List(Box::new(Type::String))),
+//RS             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == Syntax::TYPE_SOURCE_SPAN {
+//RS         return match field {
+//RS             "start" | "end" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if is_utf8_error_type_name(type_name) {
+//RS         return match field {
+//RS             "message" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if is_text_error_type_name(type_name) {
+//RS         return match field {
+//RS             "message" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "RangeError" {
+//RS         return match field {
+//RS             "reason" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     // D-VALIDATE1 / D-VALIDATE-DECODE1: FieldError carries one path/reason.
+//RS     if type_name == "FieldError" {
+//RS         return match field {
+//RS             "path" | "reason" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataLineOptions" {
+//RS         return match field {
+//RS             "title" | "x_label" | "y_label" | "style" | "color" | "legend" => Some(Type::String),
+//RS             "markers" => Some(Type::Bool),
+//RS             "reference" => Some(Type::Option(Box::new(Type::Float))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataPivotCell" {
+//RS         return match field {
+//RS             "row_key" | "column_key" => Some(Type::String),
+//RS             "count" => Some(Type::Int),
+//RS             "sum" | "mean" => Some(Type::Float),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataLimits" {
+//RS         return match field {
+//RS             "encoding" => Some(Type::Named("EncodingLimits".to_string())),
+//RS             "max_groups" | "max_sort_rows" | "max_join_rows" | "max_output_rows" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataError" {
+//RS         return match field {
+//RS             "kind" => Some(Type::Named("DataErrorKind".to_string())),
+//RS             "operation" | "reason" => Some(Type::String),
+//RS             "row" | "column" | "index" => Some(Type::Option(Box::new(Type::Int))),
+//RS             "cause" => Some(Type::Option(Box::new(Type::Named(
+//RS                 "EncodingError".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataColumn" {
+//RS         return match field {
+//RS             "id" | "name" | "type_name" => Some(Type::String),
+//RS             "nullable" => Some(Type::Bool),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataSchema" {
+//RS         return match field {
+//RS             "identity" => Some(Type::String),
+//RS             "format" => Some(Type::Named("DataFormat".to_string())),
+//RS             "columns" => Some(Type::List(Box::new(Type::Named("DataColumn".to_string())))),
+//RS             "projection" => Some(Type::Option(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataStatus" {
+//RS         return match field {
+//RS             "step" | "path" | "clone_value" | "ownership" | "trust" | "fallback" | "replacement" => {
+//RS                 Some(Type::String)
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataAuthority" {
+//RS         return match field {
+//RS             "scope" | "revision" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataSourceIdentity" {
+//RS         return match field {
+//RS             "kind" => Some(Type::Named("DataLoaderKind".to_string())),
+//RS             "locator" | "member" => Some(Type::String),
+//RS             "parameters" => Some(Type::List(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataProvenance" {
+//RS         return match field {
+//RS             "source" => Some(Type::Named("DataSourceIdentity".to_string())),
+//RS             "format" => Some(Type::Named("DataFormat".to_string())),
+//RS             "authority" => Some(Type::Named("DataAuthority".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataSnapshotIdentity" {
+//RS         return match field {
+//RS             "id" | "source" | "content" | "schema" => Some(Type::String),
+//RS             "format" => Some(Type::Named("DataFormat".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataLoaderStatus" {
+//RS         return match field {
+//RS             "identity" | "error" | "cleanup" => Some(Type::String),
+//RS             "freshness" => Some(Type::Named("DataFreshness".to_string())),
+//RS             "invalidated_by" => Some(Type::Named("DataInvalidationCause".to_string())),
+//RS             "buffered_bytes" => Some(Type::Int),
+//RS             "backpressure" | "last_good" => Some(Type::Bool),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotField" {
+//RS         return match field {
+//RS             "name" => Some(Type::String),
+//RS             "kind" => Some(Type::Named("JetDataPlotValue".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotSchema" {
+//RS         return match field {
+//RS             "fields" => Some(Type::List(Box::new(Type::Named(
+//RS                 "JetDataPlotField".to_string(),
+//RS             )))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotSourceFacts" {
+//RS         return match field {
+//RS             "rows" | "columns" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotEncoding" {
+//RS         return match field {
+//RS             "x" | "y" => Some(Type::String),
+//RS             "mark" => Some(Type::Named("JetDataPlotMark".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotScale" {
+//RS         return match field {
+//RS             "kind" => Some(Type::Named("JetDataPlotScaleKind".to_string())),
+//RS             "field" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotAxis" {
+//RS         return match field {
+//RS             "field" | "title" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotLegend" {
+//RS         return match field {
+//RS             "position" => Some(Type::Named("JetDataPlotLegendPosition".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotFacet" {
+//RS         return match field {
+//RS             "kind" => Some(Type::Named("JetDataPlotFacetKind".to_string())),
+//RS             "field" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotLayer" {
+//RS         return match field {
+//RS             "mark" => Some(Type::Named("JetDataPlotMark".to_string())),
+//RS             "encoding" => Some(Type::Named("JetDataPlotEncoding".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotAccessibility" {
+//RS         return match field {
+//RS             "title" | "summary" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotLayout" {
+//RS         return match field {
+//RS             "width" | "height" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotCapability" {
+//RS         return match field {
+//RS             "backend" => Some(Type::Named("JetDataPlotBackend".to_string())),
+//RS             "support" => Some(Type::Named("JetDataPlotSupport".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotError" {
+//RS         return match field {
+//RS             "kind" => Some(Type::Named("JetDataPlotErrorKind".to_string())),
+//RS             "message" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotPlan" {
+//RS         return match field {
+//RS             "mark" => Some(Type::Named("JetDataPlotMark".to_string())),
+//RS             "labels" => Some(Type::List(Box::new(Type::String))),
+//RS             "values" => Some(Type::List(Box::new(Type::Float))),
+//RS             "layout" => Some(Type::Named("JetDataPlotLayout".to_string())),
+//RS             "encoding" => Some(Type::Named("JetDataPlotEncoding".to_string())),
+//RS             "schema" => Some(Type::Named("JetDataPlotSchema".to_string())),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotSelectedRow" {
+//RS         return match field {
+//RS             "index" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotInspection" {
+//RS         return match field {
+//RS             "text" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotRender" {
+//RS         return match field {
+//RS             "format" => Some(Type::Named("JetDataPlotRenderFormat".to_string())),
+//RS             "body" => Some(Type::String),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotProjection" {
+//RS         return match field {
+//RS             "start" | "end" => Some(Type::Int),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "JetDataPlotColumn" {
+//RS         return match field {
+//RS             "name" => Some(Type::String),
+//RS             "values" => Some(Type::List(Box::new(Type::String))),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     if type_name == "DataSummary" {
+//RS         return match field {
+//RS             "count" => Some(Type::Int),
+//RS             "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev" => Some(Type::Float),
+//RS             _ => None,
+//RS         };
+//RS     }
+//RS     match (type_name, field) {
+//RS         // D-DX-QUEUE1=A: queue carriers mirror the provider's typed public
+//RS         // records. State and delivery remain nameable enum values instead of
+//RS         // being flattened to strings.
+//RS         ("JobPayload" | "JobResult", "type_id") => Some(Type::String),
+//RS         ("JobPayload" | "JobResult", "bytes") => Some(Type::List(Box::new(u8_ty()))),
+//RS         ("JobPayload" | "JobResult", "publish") => Some(Type::Bool),
+//RS         ("JobError", "type_id" | "reason") => Some(Type::String),
+//RS         ("JobError", "detail") => Some(Type::Option(Box::new(Type::String))),
+//RS         ("JobQueueReceipt", "id" | "authority" | "queue" | "job_type" | "signature") => {
+//RS             Some(Type::String)
+//RS         }
+//RS         ("JobQueueReceipt", "state") => Some(Type::Named("JobQueueState".to_string())),
+//RS         ("JobQueueReceipt", "delivery") => {
+//RS             Some(Type::Named("JobQueueDeliveryPolicy".to_string()))
+//RS         }
+//RS         ("JobQueueReceipt", "sequence" | "attempts" | "due_at_ms" | "accepted_at_ms") => {
+//RS             Some(Type::Int)
+//RS         }
+//RS         ("JobQueueReceipt", "request_id" | "idempotency_key" | "error_reason") => {
+//RS             Some(Type::Option(Box::new(Type::String)))
+//RS         }
+//RS         ("JobQueueReceipt", "lease_until_ms" | "duration_ms") => {
+//RS             Some(Type::Option(Box::new(Type::Int)))
+//RS         }
+//RS         ("JobQueueReceipt", "duplicate") => Some(Type::Bool),
+//RS         ("JobQueueClaim", "receipt") => Some(Type::Named("JobQueueReceipt".to_string())),
+//RS         ("JobQueueClaim", "payload") => Some(Type::Named("JobPayload".to_string())),
+//RS         ("JobQueueClaim", "worker" | "lease_token") => Some(Type::String),
+//RS         ("JobQueueClaim", "lease_until_ms") => Some(Type::Int),
+//RS         ("JobQueueEvent", "sequence" | "attempts" | "timestamp_ms") => Some(Type::Int),
+//RS         ("JobQueueEvent", "state") => Some(Type::Named("JobQueueState".to_string())),
+//RS         ("JobQueueEvent", "reason" | "worker") => Some(Type::Option(Box::new(Type::String))),
+//RS         ("JobQueueEvent", "duration_ms") => Some(Type::Option(Box::new(Type::Int))),
+//RS         ("JobQueueRecord", "receipt") => Some(Type::Named("JobQueueReceipt".to_string())),
+//RS         ("JobQueueRecord", "payload") => Some(Type::Option(Box::new(Type::Named(
+//RS             "JobPayload".to_string(),
+//RS         )))),
+//RS         ("JobQueueRecord", "result") => Some(Type::Option(Box::new(Type::Named(
+//RS             "JobResult".to_string(),
+//RS         )))),
+//RS         ("JobQueueRecord", "error") => Some(Type::Option(Box::new(Type::Named(
+//RS             "JobError".to_string(),
+//RS         )))),
+//RS         ("JobQueueRecord", "started_at_ms" | "finished_at_ms") => {
+//RS             Some(Type::Option(Box::new(Type::Int)))
+//RS         }
+//RS         ("JobQueueStatus", "queue" | "authority") => Some(Type::String),
+//RS         (
+//RS             "JobQueueStatus",
+//RS             "queued"
+//RS             | "running"
+//RS             | "retrying"
+//RS             | "completed"
+//RS             | "failed"
+//RS             | "dead_lettered"
+//RS             | "cancelled"
+//RS             | "depth"
+//RS             | "wait_ms"
+//RS             | "throughput"
+//RS             | "capacity"
+//RS             | "freshness_ms",
+//RS         ) => Some(Type::Int),
+//RS         ("JobQueueStatus", "paused") => Some(Type::Bool),
+//RS         // D-LSDIR1=A: DirEntry has name (bare filename), path (full path), is_dir.
+//RS         ("DirEntry", "name" | "path") => Some(Type::String),
+//RS         ("DirEntry", "is_dir") => Some(Type::Bool),
+//RS         // D-FSOPS1=A: typed filesystem metadata and recursive walk entries.
+//RS         ("Stat", "size" | "modified_ms" | "created_ms" | "mode") => Some(Type::Int),
+//RS         ("Stat", "readonly" | "is_file" | "is_dir" | "is_symlink") => Some(Type::Bool),
+//RS         ("Stat", "kind") => Some(Type::String),
+//RS         ("WalkEntry", "path" | "relative") => Some(Type::String),
+//RS         ("WalkEntry", "is_dir") => Some(Type::Bool),
+//RS         ("WalkEntry", "depth") => Some(Type::Int),
+//RS         ("FileReader" | "FileWriter" | "TempDir" | "TempFile" | "FileLock", "path") => {
+//RS             Some(Type::String)
+//RS         }
+//RS         ("WatchEvent", "path") => Some(Type::String),
+//RS         ("WatchEvent", "domain") => Some(Type::Named("WatchDomain".to_string())),
+//RS         ("WatchEvent", "kind") => Some(Type::Named("WatchKind".to_string())),
+//RS         // D-RENDERTGT2=A (c133 M1): UI geometry fields.
+//RS         ("Point", "x" | "y") => Some(Type::Float),
+//RS         ("Size", "width" | "height") => Some(Type::Float),
+//RS         ("Rect", "x" | "y" | "width" | "height") => Some(Type::Float),
+//RS         ("SizeConstraint", "min_width" | "min_height" | "max_width" | "max_height") => {
+//RS             Some(Type::Float)
+//RS         }
+//RS         // D-SPACE-GEOMETRY1=A: stock aliases expose the same scalar fields;
+//RS         // their space is carried by the nominal type.
+//RS         (
+//RS             "ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint" | "DevicePoint"
+//RS                 | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta",
+//RS             "x" | "y",
+//RS         ) => Some(Type::Float),
+//RS         // D-FOUND-PLATFORM1=A: shared font and host value fields.
+//RS         ("FontFace", "family") => Some(Type::String),
+//RS         ("FontFace", "size") => Some(Type::Float),
+//RS         ("FontFace", "style") => Some(Type::Named("FontStyle".to_string())),
+//RS         ("Glyph", "id" | "cluster") => Some(Type::Int),
+//RS         ("Glyph", "x" | "y" | "advance_x" | "advance_y") => Some(Type::Float),
+//RS         ("GlyphRun", "glyphs") => Some(Type::List(Box::new(Type::Named("Glyph".to_string())))),
+//RS         ("GlyphRun", "advance_x" | "advance_y") => Some(Type::Float),
+//RS         ("GlyphRun", "shaper") => Some(Type::Named("GlyphShaper".to_string())),
+//RS         ("GlyphRun", "deterministic" | "approximate") => Some(Type::Bool),
+//RS         ("UINode", "label") => Some(Type::String),
+//RS         ("UINode", "width" | "height") => Some(Type::Float),
+//RS         ("UINode", "accessibility") => {
+//RS             Some(Type::Option(Box::new(Type::Named("UIAccessibility".to_string()))))
+//RS         }
+//RS         ("UINode", "ime") => {
+//RS             Some(Type::Option(Box::new(Type::Named("UIIMEMode".to_string()))))
+//RS         }
+//RS         ("UINode", "shortcut") => Some(Type::Option(Box::new(Type::Named("UIShortcut".to_string())))),
+//RS         ("UIFileFilter", "label") => Some(Type::String),
+//RS         ("UIFileFilter", "extensions" | "mime_types") => {
+//RS             Some(Type::List(Box::new(Type::String)))
+//RS         }
+//RS         ("UIFSGrant", "root") => Some(Type::String),
+//RS         ("UIFSGrant", "rights") => Some(Type::Named("UIFSRights".to_string())),
+//RS         ("UIGrantedPath", "path" | "grant_root") => Some(Type::String),
+//RS         ("UIGrantedPath", "access") => Some(Type::Named("UIFSAccess".to_string())),
+//RS         ("UIFileDialogRequest", "title") => Some(Type::String),
+//RS         ("UIFileDialogRequest", "kind") => Some(Type::Named("UIFileDialogKind".to_string())),
+//RS         ("UIFileDialogRequest", "grant") => Some(Type::Named("UIFSGrant".to_string())),
+//RS         ("UIFileDialogRequest", "initial_directory") => {
+//RS             Some(Type::Option(Box::new(Type::Named("UIGrantedPath".to_string()))))
+//RS         }
+//RS         ("UIFileDialogRequest", "filters") => {
+//RS             Some(Type::List(Box::new(Type::Named("UIFileFilter".to_string()))))
+//RS         }
+//RS         ("UIFileDialogRequest", "allow_multiple") => Some(Type::Bool),
+//RS         ("UIFileDialogSelection", "files") => {
+//RS             Some(Type::List(Box::new(Type::Named("UIGrantedPath".to_string()))))
+//RS         }
+//RS         ("UIClipboardText", "text") => Some(Type::String),
+//RS         ("UIClipboardText", "selection") => {
+//RS             Some(Type::Option(Box::new(Type::Named("UITextRange".to_string()))))
+//RS         }
+//RS         ("UIClipboardWrite", "characters") => Some(Type::Int),
+//RS         ("UITextRange", "start" | "end") => Some(Type::Int),
+//RS         ("UIIMEComposition", "text") => Some(Type::String),
+//RS         ("UIIMEComposition", "selection") => Some(Type::Named("UITextRange".to_string())),
+//RS         ("UIIMEComposition", "marked") => {
+//RS             Some(Type::Option(Box::new(Type::Named("UITextRange".to_string()))))
+//RS         }
+//RS         ("UIIMEEvent", "target") => Some(Type::Named("UINodeID".to_string())),
+//RS         ("UIIMEEvent", "phase") => Some(Type::Named("UIIMEPhase".to_string())),
+//RS         ("UIIMEEvent", "composition") => {
+//RS             Some(Type::Option(Box::new(Type::Named("UIIMEComposition".to_string()))))
+//RS         }
+//RS         ("UIDragEvent", "target") => Some(Type::Named("UINodeID".to_string())),
+//RS         ("UIDragEvent", "phase") => Some(Type::Named("UIDragPhase".to_string())),
+//RS         ("UIDragEvent", "operation") => Some(Type::Named("UIDragOperation".to_string())),
+//RS         ("UIDragEvent", "items") => Some(Type::List(Box::new(Type::Named("UIDropItem".to_string())))),
+//RS         ("UIShortcut", "key") => Some(Type::String),
+//RS         ("UIShortcut", "modifiers") => Some(Type::Named("UIShortcutModifiers".to_string())),
+//RS         ("UIShortcutBinding", "shortcut") => Some(Type::Named("UIShortcut".to_string())),
+//RS         ("UIShortcutBinding", "action") => Some(Type::String),
+//RS         ("UIShortcutBinding", "node") => {
+//RS             Some(Type::Option(Box::new(Type::Named("UINodeID".to_string()))))
+//RS         }
+//RS         ("UIAccessibility", "name" | "description") => Some(Type::Option(Box::new(Type::String))),
+//RS         // D-FOUND-REALTIME1=A: bounded callback accounting is a readable receipt.
+//RS         (
+//RS             "RealtimeReceipt",
+//RS             "requested_rate_hz"
+//RS                 | "requested_frames"
+//RS                 | "completed_callbacks"
+//RS                 | "completed_frames"
+//RS                 | "missed"
+//RS                 | "max_lateness_ns"
+//RS                 | "start_identity"
+//RS                 | "end_identity",
+//RS         ) => Some(Type::Int),
+//RS         ("ProcessResult" | "ProcessReceipt", "code") => Some(Type::Int),
+//RS         ("ProcessResult" | "ProcessReceipt", "success" | "timed_out" | "redacted") => {
+//RS             Some(Type::Bool)
+//RS         }
+//RS         ("ProcessResult" | "ProcessReceipt", "signal") => Some(Type::Option(Box::new(Type::Int))),
+//RS         ("ProcessResult" | "ProcessReceipt", "limit_hit") => Some(Type::Option(Box::new(
+//RS             Type::Named("ProcessResourceLimit".to_string()),
+//RS         ))),
+//RS         (
+//RS             "ProcessResult" | "ProcessReceipt",
+//RS             "output"
+//RS             | "errors"
+//RS             | "executable_identity"
+//RS             | "input_digest"
+//RS             | "policy_digest"
+//RS             | "backend"
+//RS             | "descendants",
+//RS         ) => Some(Type::String),
+//RS         ("ProcessResult" | "ProcessReceipt", "argv" | "authority" | "limits" | "outputs") => {
+//RS             Some(Type::List(Box::new(Type::String)))
+//RS         }
+//RS         ("ProcessResult" | "ProcessReceipt", "pid") => Some(Type::Int),
+//RS         (
+//RS             "ProcessPlan",
+//RS             "executable_identity" | "input_digest" | "policy_digest" | "backend" | "descendants",
+//RS         ) => Some(Type::String),
+//RS         ("ProcessPlan", "argv" | "authority" | "limits" | "outputs") => {
+//RS             Some(Type::List(Box::new(Type::String)))
+//RS         }
+//RS         // D-PROCESS1=A: `child.stdin`/`.stdout`/`.stderr` are handle fields, not
+//RS         // plain values — a writer and two streaming readers (E2502-restricted,
+//RS         // see `core_type_known`).
+//RS         ("ProcessChild", "stdin") => Some(Type::Named("ProcessStdin".to_string())),
+//RS         ("ProcessChild", "stdout") => Some(Type::Named("ProcessStdoutStream".to_string())),
+//RS         ("ProcessChild", "stderr") => Some(Type::Named("ProcessStderrStream".to_string())),
+//RS         // D-HTTP-CORE2=A: one byte-native message model.
+//RS         ("HTTPRequest", "method" | "path") => Some(Type::String),
+//RS         ("HTTPRequest", "body") => Some(Type::Named("Body".to_string())),
+//RS         ("HTTPRequest", "headers") => Some(Type::Named("Headers".to_string())),
+//RS         ("HTTPResponse", "status") => Some(Type::Int),
+//RS         ("HTTPResponse", "body") => Some(Type::Named("Body".to_string())),
+//RS         ("HTTPResponse", "headers") => Some(Type::Named("Headers".to_string())),
+//RS         // D-HTTPLIB1=A: TLS constructor fields are public PEM values.
+//RS         ("HTTPServerTLS", "cert_pem" | "key_pem") => Some(Type::String),
+//RS         // D-LOGTRACE1=A: typed logging values are Prelude structs, so their
+//RS         // published fields are readable like every other core record.
+//RS         ("LogField", "key" | "value" | "kind") => Some(Type::String),
+//RS         ("LogField", "redacted") => Some(Type::Bool),
+//RS         ("LogSpan", "id") => Some(Type::Int),
+//RS         ("LogSpan", "name") => Some(Type::String),
+//RS         // D-GAME-*: scene-owned headless game substrate fields.
+//RS         ("GameScene", "assets") => Some(Type::Named("GameAssets".to_string())),
+//RS         ("GameScene", "input") => Some(Type::Named("GameInputMap".to_string())),
+//RS         ("GameFrame", "index") => Some(Type::Int),
+//RS         ("GameFrame", "input") => Some(Type::Named("GameInputSnapshot".to_string())),
+//RS         ("WebRouterField", "name") => Some(Type::String),
+//RS         ("WebRouterField", "value_type") => Some(Type::Named("WebRouterValueType".to_string())),
+//RS         ("WebRouterField", "required") => Some(Type::Bool),
+//RS         ("WebRouterField", "default") => Some(Type::Option(Box::new(Type::String))),
+//RS         ("WebRouterCacheState", "identity" | "data") => Some(Type::String),
+//RS         ("WebRouterCacheState", "status") => Some(Type::Named("WebRouterCacheStatus".to_string())),
+//RS         ("WebRouterCacheState", "dependencies") => Some(Type::List(Box::new(Type::String))),
+//RS         ("WebRouterCacheState", "generation") => Some(Type::Int),
+//RS         ("WebNavigation", "url" | "route") => Some(Type::String),
+//RS         ("WebNavigation", "params" | "search") => Some(Type::Map {
+//RS             key: Box::new(Type::String),
+//RS             key_span: None,
+//RS             value: Box::new(Type::String),
+//RS         }),
+//RS         ("WebNavigationState", "status") => {
+//RS             Some(Type::Named("WebNavigationStatus".to_string()))
+//RS         }
+//RS         ("WebNavigationState", "current") => {
+//RS             Some(Type::Option(Box::new(Type::Named("WebNavigation".to_string()))))
+//RS         }
+//RS         ("WebNavigationState", "data" | "error") => Some(Type::String),
+//RS         ("WebNavigationState", "pending_boundary_id" | "error_boundary_id" | "island_identity" | "hydration_trigger") => {
+//RS             Some(Type::Option(Box::new(Type::String)))
+//RS         }
+//RS         ("WebQueryState", "status") => Some(Type::Named("WebQueryStatus".to_string())),
+//RS         ("WebQueryState", "value" | "error") => Some(Type::String),
+//RS         ("WebQueryState", "generation" | "queued") => Some(Type::Int),
+//RS         ("WebQueryState", "offline") => Some(Type::Bool),
+//RS         ("WebMutationState", "status") => Some(Type::Named("WebMutationStatus".to_string())),
+//RS         ("WebMutationState", "generation") => Some(Type::Int),
+//RS         ("WebMutationState", "optimistic" | "rollback" | "paused") => Some(Type::Bool),
+//RS         ("WebMutationState", "value" | "result" | "error" | "context") => Some(Type::String),
+//RS         ("WebMutationState", "queued" | "replayed") => Some(Type::Int),
+//RS         ("WebFormFieldState", "name" | "value") => Some(Type::String),
+//RS         ("WebFormFieldState", "value_type") => Some(Type::Named("WebFormValueType".to_string())),
+//RS         ("WebFormFieldState", "required" | "touched" | "validating") => Some(Type::Bool),
+//RS         ("WebFormFieldState", "errors") => Some(Type::List(Box::new(Type::String))),
+//RS         ("WebFormFieldSpec", "name" | "label" | "wire_name") => Some(Type::String),
+//RS         ("WebFormFieldSpec", "value_type") => Some(Type::Named("WebFormValueType".to_string())),
+//RS         ("WebFormFieldSpec", "required") => Some(Type::Bool),
+//RS         ("WebFormFieldSpec", "default" | "group") => Some(Type::Option(Box::new(Type::String))),
+//RS         ("WebFormFieldSpec", "control") => Some(Type::Named("WebFormControl".to_string())),
+//RS         ("WebFormDecodedInput", "type_name") => Some(Type::String),
+//RS         ("WebFormDecodedInput", "values" | "wire_values") => Some(Type::Map {
+//RS             key: Box::new(Type::String),
+//RS             key_span: None,
+//RS             value: Box::new(Type::String),
+//RS         }),
+//RS         ("WebFormActionError", "field_errors") => Some(Type::Map {
+//RS             key: Box::new(Type::String),
+//RS             key_span: None,
+//RS             value: Box::new(Type::List(Box::new(Type::String))),
+//RS         }),
+//RS         ("WebFormActionError", "form_errors") => Some(Type::List(Box::new(Type::String))),
+//RS         ("WebFormErrorState", "fields") => Some(Type::Map {
+//RS             key: Box::new(Type::String),
+//RS             key_span: None,
+//RS             value: Box::new(Type::List(Box::new(Type::String))),
+//RS         }),
+//RS         ("WebFormErrorState", "form") => Some(Type::List(Box::new(Type::String))),
+//RS         ("WebFormLifecycle", "status") => Some(Type::Named("WebFormLifecycleStatus".to_string())),
+//RS         ("WebFormLifecycle", "result" | "error") => Some(Type::String),
+//RS         ("WebFormLifecycle", "generation") => Some(Type::Int),
+//RS         ("WebTableSort", "column") | ("WebTableFilter", "column") => Some(Type::String),
+//RS         ("WebTableSort", "direction") => Some(Type::Named("WebTableSortDirection".to_string())),
+//RS         ("WebTableFilter", "value") => Some(Type::String),
+//RS         ("WebTableState", "sort") => Some(Type::Option(Box::new(Type::Named(
+//RS             "WebTableSort".to_string(),
+//RS         )))),
+//RS         ("WebTableState", "filter") => Some(Type::Option(Box::new(Type::Named(
+//RS             "WebTableFilter".to_string(),
+//RS         )))),
+//RS         ("WebTableState", "page_index" | "page_size") => Some(Type::Int),
+//RS         ("WebTableState", "selected_keys") => Some(Type::List(Box::new(Type::String))),
+//RS         ("WebTableState", "selection_anchor" | "focus_key") => Some(Type::Option(Box::new(Type::String))),
+//RS         ("WebTableState", "page_mode") => Some(Type::Named("WebTablePageMode".to_string())),
+//RS         ("WebTablePage", "rows") => Some(Type::List(Box::new(Type::Named("T".to_string())))),
+//RS         ("WebTablePage", "row_keys") => Some(Type::List(Box::new(Type::String))),
+//RS         ("WebTablePage", "total_rows" | "page_index" | "page_size" | "page_count") => Some(Type::Int),
+//RS         ("WebVirtualWindow",
+//RS             "total_count" | "scroll_offset" | "viewport_size" | "estimated_item_size"
+//RS             | "overscan" | "start" | "end" | "total_size" | "measured_count") => Some(Type::Int),
+//RS         ("WebVirtualPlan",
+//RS             "total_count" | "scroll_offset" | "viewport_width" | "viewport_height"
+//RS             | "estimated_item_size" | "overscan" | "start" | "end" | "total_size"
+//RS             | "measured_count" | "anchor_index" | "anchor_offset") => Some(Type::Int),
+//RS         ("WebVirtualPlan", "measurements") => Some(Type::List(Box::new(Type::Tuple(vec![
+//RS             ("index".to_string(), Box::new(Type::Int)),
+//RS             ("size".to_string(), Box::new(Type::Int)),
+//RS         ])))),
+//RS         ("WebVirtualPlanViewport",
+//RS             "start" | "end" | "total_size" | "measured_count" | "anchor_index"
+//RS             | "anchor_offset") => Some(Type::Int),
+//RS         ("WebStore", "name") => Some(Type::String),
+//RS         ("WebStoreEvent", "sequence" | "generation" | "cursor") => Some(Type::Int),
+//RS         ("WebStoreEvent", "action") => Some(Type::String),
+//RS         ("WebStoreEvent", "changed_fields") => Some(Type::List(Box::new(Type::String))),
+//RS         ("WebStoreEvent", "kind") => Some(Type::String),
+//RS         ("WebStoreInspection", "generation" | "cursor") => Some(Type::Int),
+//RS         ("WebStoreInspection", "history_enabled") => Some(Type::Bool),
+//RS         ("WebStoreInspection", "history_limit") => Some(Type::Int),
+//RS         ("WebStoreInspection", "events") => Some(Type::List(Box::new(
+//RS             Type::Named("WebStoreEvent".to_string()),
+//RS         ))),
+//RS         ("WebStoreInspection", "history") => Some(Type::List(Box::new(
+//RS             Type::Named("WebStoreTransaction".to_string()),
+//RS         ))),
+//RS         // Generic record fields are handled by `core_generic_struct_field`.
+//RS         // Every remaining CORE struct users can construct answers from the one
+//RS         // constructable-field table instead of a second hand-kept allowlist:
+//RS         // a shape spelled once for `Type.{ … }` cannot then disagree with the
+//RS         // same shape read back through `.field`. Card 2021 — the allowlist form
+//RS         // of this fallback had silently omitted `XMLRenderOptions`,
+//RS         // `XMLCanonical` and `TextWidth`, so their fields constructed but did
+//RS         // not read.
+//RS         _ => core_constructable_fields(type_name)?
+//RS             .into_iter()
+//RS             .find(|(name, _)| name == field)
+//RS             .map(|(_, ty)| ty),
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0382 crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1-2186
+

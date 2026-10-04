@@ -1,0 +1,849 @@
+// PORT-PENDING 0976 tests-browser-lock-module-group: tests/browser_lock.rs:1-265
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-BROWSER-AUTO1=A (#1187): locked browser provisioning proof.
+//RS //!
+//RS //! Jetpack pins exact browser binaries in `.jet/lock`. `core.web.browser.locked`
+//RS //! reads that pin through the product path with no skip/fallback.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::os::unix::fs::PermissionsExt;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS use std::time::{SystemTime, UNIX_EPOCH};
+//RS 
+//RS fn jetpack_bin() -> PathBuf {
+//RS     common::jetpack_bin().to_path_buf()
+//RS }
+//RS 
+//RS fn jet_bin() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn temp_root(label: &str) -> PathBuf {
+//RS     let nanos = SystemTime::now()
+//RS         .duration_since(UNIX_EPOCH)
+//RS         .unwrap()
+//RS         .as_nanos();
+//RS     let root = std::env::temp_dir().join(format!("jet-browser-provision-{label}-{nanos}"));
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     root
+//RS }
+//RS 
+//RS fn write_executable(path: &Path, body: &str) {
+//RS     if let Some(parent) = path.parent() {
+//RS         fs::create_dir_all(parent).unwrap();
+//RS     }
+//RS     fs::write(path, body).unwrap();
+//RS     let mut perms = fs::metadata(path).unwrap().permissions();
+//RS     perms.set_mode(0o755);
+//RS     fs::set_permissions(path, perms).unwrap();
+//RS }
+//RS 
+//RS fn run_jetpack(root: &Path, args: &[&str]) -> (i32, String, String) {
+//RS     let output = Command::new(jetpack_bin())
+//RS         .current_dir(root)
+//RS         .args(args)
+//RS         .output()
+//RS         .expect("jetpack");
+//RS     (
+//RS         output.status.code().unwrap_or(1),
+//RS         String::from_utf8_lossy(&output.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&output.stderr).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS fn run_jet_source(root: &Path, source: &str) -> (i32, String, String) {
+//RS     let path = root.join("main.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     let output = Command::new(jet_bin())
+//RS         .current_dir(root)
+//RS         .env("JET_PROJECT_ROOT", root)
+//RS         .args(["run", path.to_str().unwrap()])
+//RS         .output()
+//RS         .expect("jet run");
+//RS     (
+//RS         output.status.code().unwrap_or(1),
+//RS         String::from_utf8_lossy(&output.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&output.stderr).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS #[test]
+//RS fn jetpack_browser_lock_resolve_list_success() {
+//RS     let root = temp_root("success");
+//RS     let binary = root.join("tools").join("chromium");
+//RS     write_executable(&binary, "#!/bin/sh\necho 'Chromium 131.0.6778.0'\n");
+//RS 
+//RS     let (code, _out, err) = run_jetpack(
+//RS         &root,
+//RS         &[
+//RS             "browser",
+//RS             "lock",
+//RS             "chromium",
+//RS             "--binary",
+//RS             binary.to_str().unwrap(),
+//RS             "--version",
+//RS             "131.0.6778.0",
+//RS             "--protocol",
+//RS             "bidi-2025.5",
+//RS         ],
+//RS     );
+//RS     assert_eq!(code, 0, "lock failed: {err}");
+//RS 
+//RS     let lock = fs::read_to_string(root.join(".jet/lock")).expect("lock file");
+//RS     assert!(lock.contains("[[browser]]"), "{lock}");
+//RS     assert!(lock.contains("engine = \"chromium\""), "{lock}");
+//RS     assert!(lock.contains("protocol = \"bidi-2025.5\""), "{lock}");
+//RS     assert!(lock.contains("output-hash = \"sha256-"), "{lock}");
+//RS 
+//RS     let (code, out, err) = run_jetpack(&root, &["browser", "resolve", "chromium"]);
+//RS     assert_eq!(code, 0, "resolve failed: {err}");
+//RS     assert!(out.contains("engine=chromium"), "{out}");
+//RS     assert!(out.contains("protocol=bidi-2025.5"), "{out}");
+//RS     assert!(
+//RS         out.contains(&format!(
+//RS             "binary={}",
+//RS             binary.canonicalize().unwrap().display()
+//RS         )),
+//RS         "{out}"
+//RS     );
+//RS 
+//RS     let (code, out, err) = run_jetpack(&root, &["browser", "list"]);
+//RS     assert_eq!(code, 0, "list failed: {err}");
+//RS     assert!(out.contains("chromium"), "{out}");
+//RS     assert!(out.contains("bidi-2025.5"), "{out}");
+//RS 
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jetpack_browser_reject_unknown_engine_and_missing_binary() {
+//RS     let root = temp_root("reject");
+//RS     let (code, _out, err) = run_jetpack(
+//RS         &root,
+//RS         &[
+//RS             "browser",
+//RS             "lock",
+//RS             "edge",
+//RS             "--binary",
+//RS             root.join("missing").to_str().unwrap(),
+//RS         ],
+//RS     );
+//RS     assert_ne!(code, 0);
+//RS     assert!(
+//RS         err.contains("not supported") || err.contains("edge"),
+//RS         "{err}"
+//RS     );
+//RS 
+//RS     let (code, _out, err) = run_jetpack(
+//RS         &root,
+//RS         &[
+//RS             "browser",
+//RS             "lock",
+//RS             "firefox",
+//RS             "--binary",
+//RS             root.join("no-such-bin").to_str().unwrap(),
+//RS         ],
+//RS     );
+//RS     assert_ne!(code, 0);
+//RS     assert!(err.contains("not found") || err.contains("failed"), "{err}");
+//RS 
+//RS     let (code, _out, err) = run_jetpack(&root, &["browser", "resolve", "firefox"]);
+//RS     assert_ne!(code, 0);
+//RS     assert!(
+//RS         err.contains("no locked browser") || err.contains("failed"),
+//RS         "{err}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jetpack_browser_hash_drift_is_hostile() {
+//RS     let root = temp_root("drift");
+//RS     let binary = root.join("chromium");
+//RS     write_executable(&binary, "#!/bin/sh\necho Chromium 1\n");
+//RS     let (code, _out, err) = run_jetpack(
+//RS         &root,
+//RS         &[
+//RS             "browser",
+//RS             "lock",
+//RS             "chromium",
+//RS             "--binary",
+//RS             binary.to_str().unwrap(),
+//RS             "--version",
+//RS             "1",
+//RS         ],
+//RS     );
+//RS     assert_eq!(code, 0, "{err}");
+//RS 
+//RS     write_executable(&binary, "#!/bin/sh\necho Chromium TAMPERED\n");
+//RS     let (code, _out, err) = run_jetpack(&root, &["browser", "resolve", "chromium"]);
+//RS     assert_ne!(code, 0);
+//RS     assert!(
+//RS         err.contains("drift") || err.contains("hash") || err.contains("size"),
+//RS         "{err}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_browser_locked_reads_project_pin() {
+//RS     let root = temp_root("core");
+//RS     let binary = root.join("chromium");
+//RS     write_executable(&binary, "#!/bin/sh\necho Chromium 140.0\n");
+//RS     let (code, _out, err) = run_jetpack(
+//RS         &root,
+//RS         &[
+//RS             "browser",
+//RS             "lock",
+//RS             "chromium",
+//RS             "--binary",
+//RS             binary.to_str().unwrap(),
+//RS             "--version",
+//RS             "140.0",
+//RS             "--protocol",
+//RS             "bidi-2025.5",
+//RS         ],
+//RS     );
+//RS     assert_eq!(code, 0, "{err}");
+//RS 
+//RS     let source = r#"
+//RS use core.web.browser as browser
+//RS 
+//RS fn run() -[FS, IO]> {
+//RS     locked :: browser.locked("chromium") ?? panic("missing lock")
+//RS     print("engine:{locked.engine()}")
+//RS     print("version:{locked.version()}")
+//RS     print("protocol:{locked.protocol()}")
+//RS     locked.verify() ?? panic("verify")
+//RS     print("verified:true")
+//RS }
+//RS "#;
+//RS     let (code, out, err) = run_jet_source(&root, source);
+//RS     assert_eq!(code, 0, "jet run failed: {err}\n{out}");
+//RS     assert!(out.contains("engine:chromium"), "{out}");
+//RS     assert!(out.contains("version:140.0"), "{out}");
+//RS     assert!(out.contains("protocol:bidi-2025.5"), "{out}");
+//RS     assert!(out.contains("verified:true"), "{out}");
+//RS 
+//RS     fs::remove_file(&binary).unwrap();
+//RS     let hostile = r#"
+//RS use core.web.browser as browser
+//RS 
+//RS fn run() -[FS, IO]> {
+//RS     if browser.locked("chromium") == .Err(_) {
+//RS         print("outcome:caught")
+//RS     } else {
+//RS         print("outcome:ok")
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, out, err) = run_jet_source(&root, hostile);
+//RS     assert_eq!(code, 0, "{err}\n{out}");
+//RS     assert!(out.contains("outcome:caught"), "{out}");
+//RS 
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_browser_locked_requires_fs_effect() {
+//RS     let missing_effect = r#"
+//RS use core.web.browser as browser
+//RS 
+//RS fn run() -[IO]> {
+//RS     locked :: browser.locked("chromium") ?? return
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(missing_effect).expect_err("locked requires FS");
+//RS     assert!(
+//RS         diags
+//RS             .iter()
+//RS             .any(|diag| diag.code == "E0740" && diag.what.contains("FS")),
+//RS         "{diags:?}"
+//RS     );
+//RS }
+// END-PORT-PENDING 0976 tests/browser_lock.rs:1-265
+
+// PORT-PENDING 0976 tests-browser-lock-module-group: tests/build_cache_normalization.rs:1-464
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-BUILDNORM1=A (Tower #85): the content-addressed artifact-store key is
+//RS //! `SHA256(canonical_bytes(pre-sema AST) + profile + toolchain-salt)`. These
+//RS //! tests pin the six normalization properties of that key — the contract a
+//RS //! description alone can't enforce (I4/I5).
+//RS //!
+//RS //! The key is computed exactly as the compiler computes it for a real build:
+//RS //! load the program through `jet::Loader::load_entry_with_overlay` (lex + parse
+//RS //! + import resolution, *no sema*) and hash it with
+//RS //! `jet::CanonicalAST::ast_cache_key`.
+//RS 
+//RS mod common;
+//RS 
+//RS use jet::Syntax::RuntimeLayer;
+//RS use jet_foundation::Facts::TargetDossier;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS static COUNTER: AtomicU64 = AtomicU64::new(0);
+//RS 
+//RS /// Write `src` to a fresh temp dir under a *fixed* basename (so the module's
+//RS /// filename-derived alias is identical across variants — only the AST content
+//RS /// varies), load its pre-sema bundle, and return the cache key.
+//RS fn key_with(src: &str, profile_tag: &str, version: &str) -> String {
+//RS     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+//RS     let dir: PathBuf =
+//RS         std::env::temp_dir().join(format!("jet-buildnorm-{}-{}", std::process::id(), n));
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("prog.jet");
+//RS     std::fs::write(&file, src).unwrap();
+//RS     let bundle = jet::Loader::load_entry_with_overlay(file.to_str().unwrap(), None, false)
+//RS         .unwrap_or_else(|d| panic!("test program should parse:\n{src}\n{:?}", d));
+//RS     let key =
+//RS         jet::CanonicalAST::ast_cache_key(&bundle, profile_tag, version, &bundle.build_facts);
+//RS     std::fs::remove_dir_all(&dir).ok();
+//RS     key
+//RS }
+//RS 
+//RS /// Re-key one parsed bundle after changing only its target dossier.
+//RS fn key_with_target_dossier(
+//RS     bundle: &jet::AST::ProgramBundle,
+//RS     mutate: impl FnOnce(&mut TargetDossier),
+//RS ) -> String {
+//RS     let mut facts = bundle.build_facts.clone();
+//RS     mutate(&mut facts.target_dossier);
+//RS     jet::CanonicalAST::ast_cache_key(bundle, "default", "test-version", &facts)
+//RS }
+//RS 
+//RS /// Re-key one parsed bundle after changing only its target triple.
+//RS fn key_with_target_triple(bundle: &jet::AST::ProgramBundle, target_triple: &str) -> String {
+//RS     let mut facts = bundle.build_facts.clone();
+//RS     facts.target_triple = target_triple.to_string();
+//RS     jet::CanonicalAST::ast_cache_key(bundle, "default", "test-version", &facts)
+//RS }
+//RS 
+//RS /// The common case: default profile, a fixed version salt.
+//RS fn key(src: &str) -> String {
+//RS     key_with(src, "default", "test-version")
+//RS }
+//RS fn scratch_dir(label: &str) -> PathBuf {
+//RS     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet-buildnorm-scriptdeps-{label}-{}-{n}",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     dir
+//RS }
+//RS 
+//RS fn write_scratch_file(root: &Path, relative: &str, contents: &[u8]) -> PathBuf {
+//RS     let path = root.join(relative);
+//RS     fs::create_dir_all(path.parent().unwrap()).unwrap();
+//RS     fs::write(&path, contents).unwrap();
+//RS     path
+//RS }
+//RS 
+//RS fn inline_dep(name: &str, selector: &str) -> jet::ScriptDeps::InlineDep {
+//RS     jet::ScriptDeps::InlineDep {
+//RS         name: name.to_string(),
+//RS         selector: selector.to_string(),
+//RS         span: jet::Diagnostics::Span::new(0, 0),
+//RS     }
+//RS }
+//RS 
+//RS fn script_cache_digest(
+//RS     source_hash: &str,
+//RS     dependencies: &[jet::ScriptDeps::Resolved],
+//RS     toolchain: &str,
+//RS     target: &str,
+//RS ) -> String {
+//RS     jet::ScriptDeps::cache_identity(source_hash, dependencies, toolchain, target).digest()
+//RS }
+//RS 
+//RS // ── ScriptDeps cache identity and preparation guards ───────────────────────
+//RS 
+//RS #[test]
+//RS fn script_cache_identity_changes_for_source_dependency_toolchain_and_target() {
+//RS     let root = scratch_dir("identity");
+//RS     let script = write_scratch_file(&root, "standalone.jet", b"print(\"before\")\n");
+//RS     let dependency_file = write_scratch_file(
+//RS         &root,
+//RS         ".jet/inline-deps/textkit/1.4.2/value.jet",
+//RS         b"pub fn value() -> String {\n    return \"before\"\n}\n",
+//RS     );
+//RS     let dependency = inline_dep("textkit", "1.4.2");
+//RS     let resolved = jet::ScriptDeps::resolve(&dependency, &root).unwrap();
+//RS     let source_hash = jet::ScriptDeps::file_hash(&script).unwrap();
+//RS     let baseline = script_cache_digest(
+//RS         &source_hash,
+//RS         std::slice::from_ref(&resolved),
+//RS         "jet-toolchain-a",
+//RS         "x86_64-unknown-linux-gnu",
+//RS     );
+//RS 
+//RS     write_scratch_file(&root, "standalone.jet", b"print(\"after\")\n");
+//RS     let changed_source_hash = jet::ScriptDeps::file_hash(&script).unwrap();
+//RS     assert_ne!(
+//RS         baseline,
+//RS         script_cache_digest(
+//RS             &changed_source_hash,
+//RS             std::slice::from_ref(&resolved),
+//RS             "jet-toolchain-a",
+//RS             "x86_64-unknown-linux-gnu",
+//RS         ),
+//RS         "changed standalone source must invalidate the prepared identity"
+//RS     );
+//RS 
+//RS     write_scratch_file(
+//RS         &root,
+//RS         ".jet/inline-deps/textkit/1.4.2/value.jet",
+//RS         b"pub fn value() -> String {\n    return \"after\"\n}\n",
+//RS     );
+//RS     let changed_dependency = jet::ScriptDeps::resolve(&dependency, &root).unwrap();
+//RS     assert_ne!(
+//RS         resolved.content_hash, changed_dependency.content_hash,
+//RS         "the changed local dependency must receive a new content hash"
+//RS     );
+//RS     assert_ne!(
+//RS         baseline,
+//RS         script_cache_digest(
+//RS             &source_hash,
+//RS             std::slice::from_ref(&changed_dependency),
+//RS             "jet-toolchain-a",
+//RS             "x86_64-unknown-linux-gnu",
+//RS         ),
+//RS         "changed dependency material must invalidate the prepared identity"
+//RS     );
+//RS 
+//RS     assert_ne!(
+//RS         baseline,
+//RS         script_cache_digest(
+//RS             &source_hash,
+//RS             std::slice::from_ref(&resolved),
+//RS             "jet-toolchain-b",
+//RS             "x86_64-unknown-linux-gnu",
+//RS         ),
+//RS         "changed toolchain identity must invalidate the prepared identity"
+//RS     );
+//RS     assert_ne!(
+//RS         baseline,
+//RS         script_cache_digest(
+//RS             &source_hash,
+//RS             std::slice::from_ref(&resolved),
+//RS             "jet-toolchain-a",
+//RS             "aarch64-unknown-linux-gnu",
+//RS         ),
+//RS         "changed target identity must invalidate the prepared identity"
+//RS     );
+//RS 
+//RS     let mut relocated = resolved.clone();
+//RS     relocated.dir = PathBuf::from("/another/checkout");
+//RS     assert_eq!(
+//RS         baseline,
+//RS         script_cache_digest(
+//RS             &source_hash,
+//RS             std::slice::from_ref(&relocated),
+//RS             "jet-toolchain-a",
+//RS             "x86_64-unknown-linux-gnu",
+//RS         ),
+//RS         "moving an otherwise identical local source must not change its identity"
+//RS     );
+//RS 
+//RS     assert_eq!(
+//RS         fs::read(&dependency_file).unwrap(),
+//RS         b"pub fn value() -> String {\n    return \"after\"\n}\n"
+//RS     );
+//RS     fs::remove_dir_all(root).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn script_dependency_missing_material_fails_closed_without_creating_state() {
+//RS     let root = scratch_dir("missing");
+//RS     let name = format!(
+//RS         "missing_buildnorm_{}_{}",
+//RS         std::process::id(),
+//RS         COUNTER.fetch_add(1, Ordering::Relaxed)
+//RS     );
+//RS     let dependency = inline_dep(&name, "1.0.0");
+//RS     let error = jet::ScriptDeps::resolve(&dependency, &root).unwrap_err();
+//RS 
+//RS     assert!(matches!(
+//RS         &error,
+//RS         jet::ScriptDeps::Unresolved::UnknownPackage
+//RS     ));
+//RS     assert_eq!(jet::ScriptDeps::e1253(&dependency, &error).code, "E1253");
+//RS     assert!(
+//RS         !root.join(".jet").exists(),
+//RS         "a missing dependency must not materialize a cache or lock tree"
+//RS     );
+//RS     fs::remove_dir_all(root).unwrap();
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn script_dependency_hostile_material_fails_closed_without_creating_state() {
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let root = scratch_dir("hostile");
+//RS     let package = root.join(".jet/inline-deps/hostile/1.0.0");
+//RS     fs::create_dir_all(&package).unwrap();
+//RS     fs::write(package.join("value.jet"), b"stable\n").unwrap();
+//RS     symlink(".", package.join("loop")).unwrap();
+//RS 
+//RS     let dependency = inline_dep("hostile", "1.0.0");
+//RS     let error = jet::ScriptDeps::resolve(&dependency, &root).unwrap_err();
+//RS     assert!(matches!(
+//RS         &error,
+//RS         jet::ScriptDeps::Unresolved::InvalidTree(_)
+//RS     ));
+//RS     let diagnostic = jet::ScriptDeps::e1253(&dependency, &error);
+//RS     assert_eq!(diagnostic.code, "E1253");
+//RS     assert!(
+//RS         diagnostic.why.contains("cannot be hashed safely"),
+//RS         "hostile dependency diagnostics must explain the closed failure"
+//RS     );
+//RS     assert!(!root.join("standalone.jet.lock").exists());
+//RS     fs::remove_dir_all(root).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn standalone_local_selector_resolves_without_preparation_side_effects() {
+//RS     let root = scratch_dir("selector");
+//RS     let script = write_scratch_file(&root, "standalone.jet", b"print(\"stable\")\n");
+//RS     write_scratch_file(
+//RS         &root,
+//RS         ".jet/inline-deps/local_only/1.4.1/value.jet",
+//RS         b"one\n",
+//RS     );
+//RS     let selected_source = write_scratch_file(
+//RS         &root,
+//RS         ".jet/inline-deps/local_only/1.4.2/value.jet",
+//RS         b"two\n",
+//RS     );
+//RS     let source_before = fs::read(&script).unwrap();
+//RS     let selected_source_before = fs::read(&selected_source).unwrap();
+//RS     let source_hash = jet::ScriptDeps::file_hash(&script).unwrap();
+//RS 
+//RS     let loose = inline_dep("local_only", "1.4");
+//RS     let resolved_loose = jet::ScriptDeps::resolve(&loose, &root).unwrap();
+//RS     assert_eq!(resolved_loose.resolved_version, "1.4.2");
+//RS     assert_eq!(
+//RS         resolved_loose.dir,
+//RS         selected_source.parent().unwrap().to_path_buf()
+//RS     );
+//RS 
+//RS     let exact = inline_dep("local_only", "1.4.2");
+//RS     let resolved_exact = jet::ScriptDeps::resolve(&exact, &root).unwrap();
+//RS     assert_eq!(
+//RS         resolved_loose.content_hash, resolved_exact.content_hash,
+//RS         "loose and exact selectors should use the same locally selected source"
+//RS     );
+//RS     assert_ne!(
+//RS         script_cache_digest(
+//RS             &source_hash,
+//RS             std::slice::from_ref(&resolved_loose),
+//RS             "jet-toolchain-a",
+//RS             "x86_64-unknown-linux-gnu",
+//RS         ),
+//RS         script_cache_digest(
+//RS             &source_hash,
+//RS             std::slice::from_ref(&resolved_exact),
+//RS             "jet-toolchain-a",
+//RS             "x86_64-unknown-linux-gnu",
+//RS         ),
+//RS         "the selector remains part of the identity even when it selects the same source"
+//RS     );
+//RS 
+//RS     assert_eq!(fs::read(&script).unwrap(), source_before);
+//RS     assert_eq!(fs::read(&selected_source).unwrap(), selected_source_before);
+//RS     assert!(
+//RS         !root.join("package.jet").exists(),
+//RS         "standalone preparation must not lift local dependencies into a manifest"
+//RS     );
+//RS     assert!(
+//RS         !root.join("standalone.jet.lock").exists(),
+//RS         "resolution must not write a lock sidecar"
+//RS     );
+//RS     assert!(
+//RS         !root.join(".jet/lock").exists(),
+//RS         "resolution must not create managed lock state"
+//RS     );
+//RS     fs::remove_dir_all(root).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn whitespace_insensitive() {
+//RS     let a = "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n";
+//RS     let b = "fn  add( a : Int ,  b : Int )  {\n\n        print(  a  +  b  )\n\n}\n";
+//RS     assert_eq!(key(a), key(b), "reformatting must not change the key");
+//RS }
+//RS 
+//RS #[test]
+//RS fn comment_insensitive() {
+//RS     let a = "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n";
+//RS     let b = "/// doc comment\n// leading comment\nfn add(a: Int, b: Int) {\n  // inline\n  print(a + b) // trailing\n}\n";
+//RS     assert_eq!(key(a), key(b), "adding comments must not change the key");
+//RS }
+//RS 
+//RS #[test]
+//RS fn rename_sensitive() {
+//RS     // The D-BUILDNORM1 ratified example: renaming locals changes the key.
+//RS     let a = "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n";
+//RS     let b = "fn add(x: Int, y: Int) {\n    print(x + y)\n}\n";
+//RS     assert_ne!(key(a), key(b), "renaming a parameter must change the key");
+//RS }
+//RS 
+//RS #[test]
+//RS fn reorder_sensitive() {
+//RS     let a = "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n";
+//RS     let b = "fn add(a: Int, b: Int) {\n    print(b + a)\n}\n";
+//RS     assert_ne!(key(a), key(b), "reordering operands must change the key");
+//RS }
+//RS 
+//RS #[test]
+//RS fn profile_sensitive() {
+//RS     let src = "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n";
+//RS     let default = key_with(src, "default", "v");
+//RS     let small = key_with(src, "small", "v");
+//RS     let release = key_with(src, "release", "v");
+//RS     assert_ne!(default, small, "profiles must not share a cache entry");
+//RS     assert_ne!(default, release);
+//RS     assert_ne!(small, release);
+//RS }
+//RS 
+//RS #[test]
+//RS fn version_sensitive() {
+//RS     // A toolchain (or manifest) salt change must invalidate the entry — the
+//RS     // guard that a codegen change never serves a stale binary for an identical
+//RS     // AST (Tower #85 §1 step 3).
+//RS     let src = "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n";
+//RS     assert_ne!(
+//RS         key_with(src, "default", "0.1.0"),
+//RS         key_with(src, "default", "0.2.0"),
+//RS         "a version-salt change must change the key"
+//RS     );
+//RS }
+//RS 
+//RS // ── Extra discrimination guards (belt-and-suspenders for the serializer) ──
+//RS 
+//RS #[test]
+//RS fn operator_sensitive() {
+//RS     let a = "fn f(a: Int, b: Int) {\n    print(a + b)\n}\n";
+//RS     let b = "fn f(a: Int, b: Int) {\n    print(a - b)\n}\n";
+//RS     assert_ne!(key(a), key(b), "a different operator must change the key");
+//RS }
+//RS 
+//RS #[test]
+//RS fn literal_sensitive() {
+//RS     let a = "fn f() {\n    print(1)\n}\n";
+//RS     let b = "fn f() {\n    print(2)\n}\n";
+//RS     assert_ne!(key(a), key(b), "a different literal must change the key");
+//RS }
+//RS 
+//RS #[test]
+//RS fn script_body_sensitive() {
+//RS     let a = "print(\"a\")\n";
+//RS     let b = "print(\"b\")\n";
+//RS     let c = "print(\"a\")\nprint(\"b\")\n";
+//RS     assert_ne!(
+//RS         key(a),
+//RS         key(b),
+//RS         "a different script statement must change the key"
+//RS     );
+//RS     assert_ne!(
+//RS         key(a),
+//RS         key(c),
+//RS         "an added script statement must change the key"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn string_literal_content_sensitive() {
+//RS     // String-literal contents are part of the program and must change the key.
+//RS     // (The exact `Span {…}`-lookalike-inside-a-literal robustness of the span
+//RS     // stripper is pinned by the CanonicalAST unit test; Jet reads `{ }` in
+//RS     // strings as interpolation, so we use brace-free literals here.)
+//RS     let a = "fn f() {\n    print(\"Span start 1 end 2\")\n}\n";
+//RS     let b = "fn f() {\n    print(\"Span start 7 end 3\")\n}\n";
+//RS     assert_ne!(
+//RS         key(a),
+//RS         key(b),
+//RS         "string-literal contents must survive span-stripping"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn stable_across_reloads() {
+//RS     let src = "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n";
+//RS     assert_eq!(key(src), key(src), "same input must yield the same key");
+//RS     assert_eq!(key(src).len(), 64, "key is a 64-hex SHA-256 digest");
+//RS }
+//RS 
+//RS #[test]
+//RS fn target_dossier_inputs_invalidate_artifact_key() {
+//RS     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+//RS     let dir =
+//RS         std::env::temp_dir().join(format!("jet-buildnorm-dossier-{}-{}", std::process::id(), n));
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("prog.jet");
+//RS     let src = "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n";
+//RS     std::fs::write(&file, src).unwrap();
+//RS     let bundle = jet::Loader::load_entry_with_overlay(file.to_str().unwrap(), None, false)
+//RS         .unwrap_or_else(|d| panic!("test program should parse:\n{src}\n{:?}", d));
+//RS 
+//RS     let baseline = key_with_target_dossier(&bundle, |_| {});
+//RS     assert_eq!(
+//RS         baseline,
+//RS         key_with_target_dossier(&bundle, |_| {}),
+//RS         "identical input must keep the artifact key stable"
+//RS     );
+//RS 
+//RS     let assert_changes = |name: &str, mutate: fn(&mut TargetDossier)| {
+//RS         assert_ne!(
+//RS             baseline,
+//RS             key_with_target_dossier(&bundle, mutate),
+//RS             "{name} must invalidate the artifact key"
+//RS         );
+//RS     };
+//RS     assert_changes("runtime layer", |dossier| dossier.layer = RuntimeLayer::Core);
+//RS     assert_changes("provider digest/identity", |dossier| {
+//RS         dossier.provider_identity = "target-providers-v1:sha256:provider-b".to_string()
+//RS     });
+//RS     assert_changes("Prelude closure", |dossier| {
+//RS         dossier.closure_identity = "prelude-hosted-v2:sha256:closure-b".to_string()
+//RS     });
+//RS     assert_changes("linker", |dossier| {
+//RS         dossier.linker_identity = "lld:sha256:linker-b".to_string()
+//RS     });
+//RS     assert_changes("execution tier", |dossier| dossier.tier_identity = "aot".to_string());
+//RS     assert_changes("compiler", |dossier| dossier.compiler_identity = "jet@next".to_string());
+//RS     assert_changes("environment", |dossier| {
+//RS         dossier.environment_identity = "wasi".to_string()
+//RS     });
+//RS     assert_changes("dependency graph", |dossier| {
+//RS         dossier.dependency_identity = "deps:sha256:dependency-b".to_string()
+//RS     });
+//RS     assert_ne!(
+//RS         baseline,
+//RS         key_with_target_triple(&bundle, "wasm32-unknown-unknown"),
+//RS         "target triple must invalidate the artifact key"
+//RS     );
+//RS 
+//RS     std::fs::remove_dir_all(&dir).ok();
+//RS }
+// END-PORT-PENDING 0976 tests/build_cache_normalization.rs:1-464
+
+// PORT-PENDING 0976 tests-browser-lock-module-group: tests/build_cache_race.rs:1-108
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Tower #85 §0: regression test for the content-cache poisoning race.
+//RS //!
+//RS //! The bug: `jet` compiled straight onto the shared, non-content-addressed
+//RS //! display path `build/<stem>`, then `store_cached(key, build/<stem>)` copied
+//RS //! *from* it. Two concurrent processes compiling different source that share a
+//RS //! file stem (`main.jet` in different dirs, run from a shared cwd) both target
+//RS //! `build/main`; process B could overwrite it between A's rustc finishing and
+//RS //! A's `store_cached`, so A's key ended up mapped to B's binary in the shared
+//RS //! cache — a content-addressing integrity violation.
+//RS //!
+//RS //! The fix compiles to a private per-process path and `store_cached`s from
+//RS //! *that*, so the cache is always correct regardless of the display-path race.
+//RS //! This test drives N concurrent compiles that collide on `build/main` and a
+//RS //! shared cache, then verifies each source's cache entry still returns *its own*
+//RS //! binary (a poisoned entry would print another program's output on the hit).
+//RS 
+//RS mod common;
+//RS 
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS fn jet() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS const N: usize = 8;
+//RS 
+//RS #[test]
+//RS fn concurrent_distinct_sources_sharing_a_stem_do_not_poison_the_cache() {
+//RS     let root = std::env::temp_dir().join(format!("jet-cache-race-{}", std::process::id()));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS 
+//RS     // One shared cache and one shared cwd: every process's `build/main` display
+//RS     // path collides, maximally reproducing the original race.
+//RS     let cache = root.join("cache");
+//RS     std::fs::create_dir_all(&cache).unwrap();
+//RS     let shared_cwd = root.join("cwd");
+//RS     std::fs::create_dir_all(&shared_cwd).unwrap();
+//RS 
+//RS     // N distinct programs, each in its own dir but all named `main.jet`.
+//RS     let mut files = Vec::new();
+//RS     for i in 0..N {
+//RS         let dir = root.join(format!("src{i}"));
+//RS         std::fs::create_dir_all(&dir).unwrap();
+//RS         let f = dir.join("main.jet");
+//RS         std::fs::write(&f, format!("fn run() {{\n    print(\"prog-{i}\")\n}}\n")).unwrap();
+//RS         files.push(f);
+//RS     }
+//RS 
+//RS     // Fire all N `jet run` invocations concurrently from the shared cwd against
+//RS     // the shared cache. Under a shared display path the *executed* binary is
+//RS     // itself racy, so we only require each process to succeed here; integrity is
+//RS     // checked below on the cache entries, which the fix must keep correct.
+//RS     let handles: Vec<_> = files
+//RS         .iter()
+//RS         .cloned()
+//RS         .map(|f| {
+//RS             let cwd = shared_cwd.clone();
+//RS             let cache = cache.clone();
+//RS             std::thread::spawn(move || {
+//RS                 Command::new(jet())
+//RS                     .arg("run")
+//RS                     .arg(&f)
+//RS                     .current_dir(&cwd)
+//RS                     .env("JET_STORE_DIR", &cache)
+//RS                     .output()
+//RS                     .expect("spawn jet run")
+//RS             })
+//RS         })
+//RS         .collect();
+//RS     for h in handles {
+//RS         let out = h.join().expect("thread");
+//RS         assert!(
+//RS             out.status.success(),
+//RS             "a concurrent `jet run` failed:\nstderr: {}",
+//RS             String::from_utf8_lossy(&out.stderr)
+//RS         );
+//RS     }
+//RS 
+//RS     // Integrity check: re-run each source in its OWN isolated cwd against the
+//RS     // same shared cache. Each is now a cache hit; a poisoned entry (some other
+//RS     // program's binary stored under this source's key) would print the wrong
+//RS     // marker. Every entry must return exactly its own program.
+//RS     for (i, f) in files.iter().enumerate() {
+//RS         let iso = root.join(format!("verify{i}"));
+//RS         std::fs::create_dir_all(&iso).unwrap();
+//RS         let out = Command::new(jet())
+//RS             .arg("run")
+//RS             .arg(f)
+//RS             .current_dir(&iso)
+//RS             .env("JET_STORE_DIR", &cache)
+//RS             .output()
+//RS             .expect("spawn jet run (verify)");
+//RS         assert!(
+//RS             out.status.success(),
+//RS             "verify run {i} failed:\n{}",
+//RS             String::from_utf8_lossy(&out.stderr)
+//RS         );
+//RS         let stdout = String::from_utf8_lossy(&out.stdout);
+//RS         assert!(
+//RS             stdout.contains(&format!("prog-{i}")),
+//RS             "cache entry for source {i} returned the wrong binary — expected `prog-{i}`, got: {stdout:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     std::fs::remove_dir_all(&root).ok();
+//RS }
+// END-PORT-PENDING 0976 tests/build_cache_race.rs:1-108
+

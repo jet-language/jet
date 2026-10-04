@@ -1,0 +1,986 @@
+// PORT-PENDING 1127 tests-parity-lint-module-group: tests/parity_lint.rs:1-354
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-ONCE-LAW1 / D-ONCE-TIER1: every tier-parity promise has a mechanical grade.
+//RS //!
+//RS //! A promise comment is useful inventory, but it is not enforcement. This
+//RS //! guard accepts exactly one of the three mechanical links from the card:
+//RS //! `include`, `marshal`, or `guard`. A documented `gap` is accepted outside
+//RS //! the JIT and TIR-eval engines when it names the card that owns the risk.
+//RS //!
+//RS //! The scanner deliberately limits `byte-for-byte` to cross-tier promises.
+//RS //! Other uses in this corpus describe syntax, formatting, cache keys, or
+//RS //! emitted-shape tests; those are not AOT/JIT/interpreter synchronization
+//RS //! claims. Run: `Tools/agent/jet-env cargo test --test parity_lint`.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS const SCANNED_ROOTS: &[&str] = &["crates", "Source", "tests"];
+//RS const THIS_TEST: &str = "tests/parity_lint.rs";
+//RS const CROSS_TIER_WORDS: &[&str] = &[
+//RS     "aot",
+//RS     "comptime",
+//RS     "interpreter",
+//RS     "jit",
+//RS     "tier",
+//RS     "r12",
+//RS     "decode path",
+//RS     "ffi bridge",
+//RS     "wire format",
+//RS     "jet_std",
+//RS ];
+//RS 
+//RS #[derive(Debug)]
+//RS struct Site {
+//RS     path: String,
+//RS     line: usize,
+//RS     grade: String,
+//RS }
+//RS 
+//RS fn root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS fn collect_source_files(dir: &Path, out: &mut Vec<PathBuf>) {
+//RS     let Ok(entries) = fs::read_dir(dir) else {
+//RS         return;
+//RS     };
+//RS     for entry in entries.flatten() {
+//RS         let path = entry.path();
+//RS         if path.is_dir() {
+//RS             collect_source_files(&path, out);
+//RS         } else if path
+//RS             .extension()
+//RS             .is_some_and(|extension| extension == "rs" || extension == "jet")
+//RS         {
+//RS             out.push(path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn source_files(repo_root: &Path) -> Vec<PathBuf> {
+//RS     let mut files = Vec::new();
+//RS     for directory in SCANNED_ROOTS {
+//RS         collect_source_files(&repo_root.join(directory), &mut files);
+//RS     }
+//RS     files.sort();
+//RS     files
+//RS }
+//RS 
+//RS fn relative_path(repo_root: &Path, path: &Path) -> String {
+//RS     path.strip_prefix(repo_root)
+//RS         .unwrap_or(path)
+//RS         .to_string_lossy()
+//RS         .replace('\\', "/")
+//RS }
+//RS 
+//RS fn line_comment_start(line: &str) -> Option<usize> {
+//RS     let bytes = line.as_bytes();
+//RS     let mut in_string = false;
+//RS     let mut index = 0;
+//RS     while index + 1 < bytes.len() {
+//RS         match bytes[index] {
+//RS             b'"' => in_string = !in_string,
+//RS             b'\\' if in_string => {
+//RS                 index += 2;
+//RS                 continue;
+//RS             }
+//RS             b'/' if !in_string && bytes[index + 1] == b'/' => return Some(index),
+//RS             _ => {}
+//RS         }
+//RS         index += 1;
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn comment_blocks(source: &str) -> Vec<(usize, String)> {
+//RS     let mut blocks = Vec::new();
+//RS     let mut current_start = None;
+//RS     let mut current = String::new();
+//RS 
+//RS     let finish =
+//RS         |blocks: &mut Vec<(usize, String)>, start: &mut Option<usize>, text: &mut String| {
+//RS             if let Some(line) = start.take() {
+//RS                 blocks.push((line, std::mem::take(text)));
+//RS             }
+//RS         };
+//RS 
+//RS     for (index, line) in source.lines().enumerate() {
+//RS         let Some(comment_start) = line_comment_start(line) else {
+//RS             finish(&mut blocks, &mut current_start, &mut current);
+//RS             continue;
+//RS         };
+//RS         if current_start.is_none() {
+//RS             current_start = Some(index + 1);
+//RS         }
+//RS         if !current.is_empty() {
+//RS             current.push('\n');
+//RS         }
+//RS         current.push_str(line[comment_start + 2..].trim());
+//RS     }
+//RS     finish(&mut blocks, &mut current_start, &mut current);
+//RS     blocks
+//RS }
+//RS 
+//RS fn is_parity_promise(comment: &str) -> bool {
+//RS     let lower = comment.to_ascii_lowercase();
+//RS     if lower.contains("matches aot") || lower.contains("mirrors aot") {
+//RS         return true;
+//RS     }
+//RS     lower.contains("byte-for-byte") && CROSS_TIER_WORDS.iter().any(|word| lower.contains(word))
+//RS }
+//RS 
+//RS fn parity_annotations(comment: &str) -> Vec<String> {
+//RS     comment
+//RS         .lines()
+//RS         .filter_map(|line| {
+//RS             let lower = line.to_ascii_lowercase();
+//RS             let start = lower.find("parity:")? + "parity:".len();
+//RS             Some(line[start..].trim().to_string())
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn code_without_line_comments(source: &str) -> String {
+//RS     source
+//RS         .lines()
+//RS         .map(|line| line_comment_start(line).map_or(line, |comment_start| &line[..comment_start]))
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n")
+//RS }
+//RS 
+//RS fn include_mentions(source: &str, target: &str) -> bool {
+//RS     let suffix = target.strip_prefix("crates/").unwrap_or(target);
+//RS     let code = code_without_line_comments(source);
+//RS     (code.contains(target) || code.contains(suffix))
+//RS         && (code.contains("include!(") || code.contains("include_str!("))
+//RS }
+//RS 
+//RS fn is_engine_gap(path: &str) -> bool {
+//RS     path.contains("crates/jet-jit/") || path.contains("crates/jet-codegen/src/Codegen/TIR/eval/")
+//RS }
+//RS 
+//RS fn valid_card_number(token: &str) -> bool {
+//RS     let Some(number) = token.strip_prefix("card=#") else {
+//RS         return false;
+//RS     };
+//RS     !number.is_empty() && number.chars().all(|character| character.is_ascii_digit())
+//RS }
+//RS 
+//RS fn validate_grade(
+//RS     repo_root: &Path,
+//RS     path: &str,
+//RS     source: &str,
+//RS     comment: &str,
+//RS ) -> Result<String, String> {
+//RS     let annotations = parity_annotations(comment);
+//RS     if annotations.len() != 1 {
+//RS         return Err(format!(
+//RS             "expected exactly one `parity:` grade, found {}",
+//RS             annotations.len()
+//RS         ));
+//RS     }
+//RS     let annotation = annotations[0].trim();
+//RS 
+//RS     if let Some(target) = annotation.strip_prefix("include path=") {
+//RS         let target = target.trim();
+//RS         if target.is_empty() {
+//RS             return Err("the include grade has no canonical source path".to_string());
+//RS         }
+//RS         if !repo_root.join(target).is_file() {
+//RS             return Err(format!("the include target does not exist: {target}"));
+//RS         }
+//RS         if !include_mentions(source, target) {
+//RS             return Err(format!(
+//RS                 "the source does not include the canonical source named by the grade: {target}"
+//RS             ));
+//RS         }
+//RS         return Ok(format!("include {target}"));
+//RS     }
+//RS 
+//RS     if let Some(symbol) = annotation.strip_prefix("marshal symbol=") {
+//RS         let symbol = symbol.trim();
+//RS         if symbol.is_empty() || symbol.chars().any(char::is_whitespace) {
+//RS             return Err("the marshal grade must name one symbol".to_string());
+//RS         }
+//RS         if !code_without_line_comments(source).contains(symbol) {
+//RS             return Err(format!(
+//RS                 "the shared marshalling symbol is not called: {symbol}"
+//RS             ));
+//RS         }
+//RS         return Ok(format!("marshal {symbol}"));
+//RS     }
+//RS 
+//RS     if let Some(target) = annotation.strip_prefix("guard ") {
+//RS         let Some((test_path, function)) = target.trim().split_once("::") else {
+//RS             return Err("the guard grade must be `guard tests/file.rs::function`".to_string());
+//RS         };
+//RS         if !test_path.starts_with("tests/") {
+//RS             return Err("the guard grade must point to a test file".to_string());
+//RS         }
+//RS         let function = function.trim();
+//RS         if function.is_empty() {
+//RS             return Err("the guard grade names no test function".to_string());
+//RS         }
+//RS         let guard_path = repo_root.join(test_path);
+//RS         let guard_source = fs::read_to_string(&guard_path)
+//RS             .map_err(|error| format!("cannot read guard {test_path}: {error}"))?;
+//RS         if !guard_source.contains(&format!("fn {function}")) {
+//RS             return Err(format!(
+//RS                 "guard function does not exist: {test_path}::{function}"
+//RS             ));
+//RS         }
+//RS         if !guard_source.contains("assert") {
+//RS             return Err(format!(
+//RS                 "guard has no behavior assertion: {test_path}::{function}"
+//RS             ));
+//RS         }
+//RS         return Ok(format!("guard {test_path}::{function}"));
+//RS     }
+//RS 
+//RS     if let Some(rest) = annotation.strip_prefix("gap ") {
+//RS         let mut fields = rest.splitn(2, " risk=");
+//RS         let card = fields.next().unwrap_or_default().trim();
+//RS         let risk = fields.next().unwrap_or_default().trim();
+//RS         if !valid_card_number(card) || risk.is_empty() {
+//RS             return Err("the gap grade must be `gap card=#N risk=<reason>`".to_string());
+//RS         }
+//RS         if is_engine_gap(path) {
+//RS             return Err(
+//RS                 "jet-jit and TIR eval parity promises require include, marshal, or guard; gaps are not allowed"
+//RS                     .to_string(),
+//RS             );
+//RS         }
+//RS         return Ok(format!("gap {card}"));
+//RS     }
+//RS 
+//RS     Err(format!("unknown parity grade: {annotation}"))
+//RS }
+//RS 
+//RS fn scan(repo_root: &Path) -> (Vec<Site>, Vec<String>) {
+//RS     let mut sites = Vec::new();
+//RS     let mut errors = Vec::new();
+//RS     for path in source_files(repo_root) {
+//RS         let relative = relative_path(repo_root, &path);
+//RS         if relative == THIS_TEST {
+//RS             continue;
+//RS         }
+//RS         let Ok(source) = fs::read_to_string(&path) else {
+//RS             continue;
+//RS         };
+//RS         for (line, comment) in comment_blocks(&source) {
+//RS             if !is_parity_promise(&comment) {
+//RS                 continue;
+//RS             }
+//RS             match validate_grade(repo_root, &relative, &source, &comment) {
+//RS                 Ok(grade) => sites.push(Site {
+//RS                     path: relative.clone(),
+//RS                     line,
+//RS                     grade,
+//RS                 }),
+//RS                 Err(error) => errors.push(format!("{relative}:{line}: {error}")),
+//RS             }
+//RS         }
+//RS     }
+//RS     (sites, errors)
+//RS }
+//RS 
+//RS #[test]
+//RS fn every_tier_parity_promise_has_one_mechanical_grade() {
+//RS     let (mut sites, errors) = scan(&root());
+//RS     sites.sort_by(|left, right| (&left.path, left.line).cmp(&(&right.path, right.line)));
+//RS     assert!(
+//RS         errors.is_empty(),
+//RS         "ungraded parity promises:\n  {}",
+//RS         errors.join("\n  ")
+//RS     );
+//RS     assert!(
+//RS         !sites.is_empty(),
+//RS         "the parity inventory found no promise comments"
+//RS     );
+//RS     for site in sites {
+//RS         println!("{}:{} — {}", site.path, site.line, site.grade);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn new_unbacked_duplication_comment_is_rejected() {
+//RS     let source = "// hand-copy matches AOT\nfn copied() {}\n";
+//RS     let (line, comment) = comment_blocks(source)
+//RS         .into_iter()
+//RS         .find(|(_, comment)| is_parity_promise(comment))
+//RS         .expect("seeded promise comment");
+//RS     let error = validate_grade(&root(), "crates/jet-jit/src/new_copy.rs", source, &comment)
+//RS         .expect_err("a comment without a mechanical link must fail");
+//RS     assert!(
+//RS         error.contains("parity:` grade") || error.contains("parity: grade"),
+//RS         "line {line}: unexpected lint error: {error}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn include_grade_must_name_real_include_code() {
+//RS     let source = "// matches AOT\n// parity: include path=crates/jet-codegen/src/Prelude/Core/EncodingBase.rs\n";
+//RS     let (_, comment) = comment_blocks(source)
+//RS         .into_iter()
+//RS         .find(|(_, comment)| is_parity_promise(comment))
+//RS         .expect("seeded promise comment");
+//RS     let error = validate_grade(&root(), "crates/jet-jit/src/new_copy.rs", source, &comment)
+//RS         .expect_err("an include path written only in a comment must fail");
+//RS     assert!(
+//RS         error.contains("does not include the canonical source"),
+//RS         "{error}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_jit_and_tir_eval_cannot_card_a_parity_gap() {
+//RS     for path in [
+//RS         "crates/jet-jit/src/new_copy.rs",
+//RS         "crates/jet-codegen/src/Codegen/TIR/eval/new_copy.rs",
+//RS     ] {
+//RS         let source = "// matches AOT\n// parity: gap card=#1711 risk=hand-copy\n";
+//RS         let (_, comment) = comment_blocks(source)
+//RS             .into_iter()
+//RS             .find(|(_, comment)| is_parity_promise(comment))
+//RS             .expect("seeded promise comment");
+//RS         let error = validate_grade(&root(), path, source, &comment)
+//RS             .expect_err("engine parity gaps must have a mechanical link");
+//RS         assert!(
+//RS             error.contains("require include, marshal, or guard"),
+//RS             "{path}: {error}"
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 1127 tests/parity_lint.rs:1-354
+
+// PORT-PENDING 1127 tests-parity-lint-module-group: tests/pin.rs:1-624
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-PIN1=A / D-PIN2=A / D-PIN3=A: the `Pin<T>` address-stability contract.
+//RS //! Covers the ratified law end to end:
+//RS //!   * `mem.pin(&place)` opens a tracked write window; a value argument is E0218;
+//RS //!   * safe code cannot move, replace, or resize a pinned place (E0219);
+//RS //!   * reading and editing through the pin stay legal and reach the owner;
+//RS //!   * a `Pin<U>` field projects to `Pin<U>` through a pinned value;
+//RS //!   * the promise ends with the pin's scope and never escapes its owner;
+//RS //!   * AOT and the TIR interpreter agree on every case (I9).
+//RS 
+//RS use std::process::Command;
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS mod common;
+//RS 
+//RS static SEQ: AtomicU64 = AtomicU64::new(0);
+//RS fn unique_tmp() -> std::path::PathBuf {
+//RS     let n = SEQ.fetch_add(1, Ordering::Relaxed);
+//RS     std::env::temp_dir().join(format!("jet_pin_{}_{}", std::process::id(), n))
+//RS }
+//RS 
+//RS /// Diagnostic codes for a fixture written to a real path so `use core.mem`
+//RS /// resolves exactly as it does in a normal build.
+//RS fn error_codes(src: &str) -> Vec<String> {
+//RS     let dir = unique_tmp();
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("fixture.jet");
+//RS     std::fs::write(&path, src).unwrap();
+//RS     match jet::compile_with_path(src, &path.to_string_lossy()) {
+//RS         Ok(_) => Vec::new(),
+//RS         Err(diags) => diags.into_iter().map(|d| d.code.to_string()).collect(),
+//RS     }
+//RS }
+//RS 
+//RS /// Compile to Rust and, when rustc is present, build and run. The rustc step is
+//RS /// the I2 backstop: a pin the front end accepted must also survive the borrow
+//RS /// checker. Pass `allow_authored_unsafe` when the Jet source contains an
+//RS /// audited `#Unsafe("…")` region that must lower to Rust `unsafe`.
+//RS fn build_and_run(name: &str, src: &str, allow_authored_unsafe: bool) -> Option<String> {
+//RS     let dir0 = unique_tmp();
+//RS     std::fs::create_dir_all(&dir0).unwrap();
+//RS     let fpath = dir0.join("fixture.jet");
+//RS     std::fs::write(&fpath, src).unwrap();
+//RS     let out = jet::compile_with_path(src, &fpath.to_string_lossy()).unwrap_or_else(|d| {
+//RS         panic!(
+//RS             "front end rejected a should-compile fixture: {:?}",
+//RS             d.iter().map(|x| x.code.as_str()).collect::<Vec<_>>()
+//RS         )
+//RS     });
+//RS     let user = common::strip_vetted_module(
+//RS         &common::strip_vetted_prelude_modules(&out.rust),
+//RS         "jet_taskgroup_borrowed_spawn",
+//RS     );
+//RS     if !allow_authored_unsafe {
+//RS         let leaked: Vec<&str> = user
+//RS             .lines()
+//RS             .filter(|line| line.contains("unsafe") && !line.trim_start().starts_with("//"))
+//RS             .take(5)
+//RS             .collect();
+//RS         assert!(
+//RS             leaked.is_empty(),
+//RS             "a pin must not need `unsafe` outside the vetted prelude helpers:\n{}",
+//RS             leaked.join("\n")
+//RS         );
+//RS     }
+//RS 
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: rustc not found; compiled front end only");
+//RS         return None;
+//RS     }
+//RS     let dir = std::env::temp_dir();
+//RS     let rs = dir.join(format!("jet_pin_{}.rs", name));
+//RS     let bin = dir.join(format!("jet_pin_{}", name));
+//RS     std::fs::write(&rs, &out.rust).unwrap();
+//RS     let c = Command::new("rustc")
+//RS         .args(["--edition", "2021"])
+//RS         .arg(&rs)
+//RS         .arg("-o")
+//RS         .arg(&bin)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         c.status.success(),
+//RS         "I2 violated: rustc rejected generated code:\n{}",
+//RS         String::from_utf8_lossy(&c.stderr)
+//RS     );
+//RS     let r = Command::new(&bin).output().unwrap();
+//RS     Some(String::from_utf8_lossy(&r.stdout).to_string())
+//RS }
+//RS 
+//RS /// I9: the TIR interpreter is the deopt tier for `jet run`/`jet dev`. It must
+//RS /// produce the same output the native build does, never a stale copy.
+//RS fn interpret(src: &str) -> String {
+//RS     // Pin field / `from`-return write-through walks nested PlaceMut projections
+//RS     // with large TIR eval frames; the default test thread stack is too small.
+//RS     let src = src.to_string();
+//RS     std::thread::Builder::new()
+//RS         .name("jet-pin-interpret".into())
+//RS         .stack_size(8 * 1024 * 1024)
+//RS         .spawn(move || interpret_on_thread(src))
+//RS         .expect("spawn pin interpret thread")
+//RS         .join()
+//RS         .expect("pin interpret thread")
+//RS }
+//RS 
+//RS fn interpret_on_thread(src: String) -> String {
+//RS     let dir = unique_tmp();
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("fixture.jet");
+//RS     std::fs::write(&path, &src).unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(&path.to_string_lossy()).expect("fixture loads");
+//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         !diags
+//RS             .iter()
+//RS             .any(|d| d.severity == jet::Diagnostics::Severity::Error),
+//RS         "fixture must type-check: {:?}",
+//RS         diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+//RS     );
+//RS     let mut sink = jet::Comptime::DevSink::new();
+//RS     jet::Codegen::MIREval::install_mir_bridge();
+//RS     jet::Comptime::MirBridge::run_bundle(
+//RS         &bundle,
+//RS         &mut sink,
+//RS         jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+//RS     )
+//RS     .expect("interpreter runs the fixture");
+//RS     sink.stdout
+//RS }
+//RS 
+//RS const NODE: &str = r#"
+//RS use core.mem
+//RS 
+//RS struct Node {
+//RS     payload: Int
+//RS     hops: Int
+//RS }
+//RS "#;
+//RS 
+//RS // ── Criterion 1: safe code cannot move or replace a pinned place ────────────
+//RS 
+//RS #[test]
+//RS fn moving_a_pinned_place_is_e0219() {
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn consume(n: ^Node) -> Int {{ return n.payload }}
+//RS 
+//RS fn run() {{
+//RS     node := Node{{payload: 7, hops: 0}}
+//RS     pinned :: mem.pin(&node)
+//RS     taken :: consume(^node)
+//RS     print("{{taken}} {{(pinned.payload)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(error_codes(&src), vec!["E0219"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacing_a_pinned_place_is_e0219() {
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn run() {{
+//RS     node := Node{{payload: 7, hops: 0}}
+//RS     pinned :: mem.pin(&node)
+//RS     node = Node{{payload: 9, hops: 0}}
+//RS     print("{{(pinned.payload)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(error_codes(&src), vec!["E0219"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn pinning_a_value_instead_of_a_place_is_e0218() {
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn run() {{
+//RS     node := Node{{payload: 7, hops: 0}}
+//RS     pinned :: mem.pin(node)
+//RS     print("{{(node.payload)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(error_codes(&src), vec!["E0218"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn the_promise_ends_with_the_pin_scope() {
+//RS     // The pin dies at the end of the block, so the later move is legal — the
+//RS     // contract is a loan, not a permanent property of the place.
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn consume(n: ^Node) -> Int {{ return n.payload }}
+//RS 
+//RS fn run() {{
+//RS     node := Node{{payload: 7, hops: 0}}
+//RS     if true {{
+//RS         pinned :: mem.pin(&node)
+//RS         pinned.hops += 1
+//RS     }}
+//RS     taken :: consume(^node)
+//RS     print("{{taken}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(error_codes(&src), Vec::<String>::new());
+//RS }
+//RS 
+//RS // ── Editing through the pin reaches the owner, on every tier ────────────────
+//RS 
+//RS #[test]
+//RS fn editing_through_a_pin_reaches_the_owner_on_every_tier() {
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn run() {{
+//RS     node := Node{{payload: 41, hops: 0}}
+//RS     pinned :: mem.pin(&node)
+//RS     pinned.hops += 1
+//RS     pinned.payload += 1
+//RS     print("{{(pinned.payload)}} {{(pinned.hops)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(interpret(&src), "42 1\n");
+//RS     if let Some(out) = build_and_run("edit_through", &src, false) {
+//RS         assert_eq!(out, "42 1\n");
+//RS     }
+//RS }
+//RS 
+//RS // ── Criterion 3: declared `Pin<U>` fields project as pins ──────────────────
+//RS 
+//RS #[test]
+//RS fn a_pin_field_projects_to_a_pin_on_every_tier() {
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS struct Queue {{
+//RS     label: String
+//RS     head: Pin<Node>
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     node := Node{{payload: 41, hops: 0}}
+//RS     pinned :: mem.pin(&node)
+//RS     pinned.hops += 1
+//RS     queue :: Queue{{label: "ready", head: mem.pin(&node)}}
+//RS     print("{{(queue.label)}} {{(queue.head.payload)}} {{(queue.head.hops)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(interpret(&src), "ready 41 1\n");
+//RS     if let Some(out) = build_and_run("pin_field", &src, false) {
+//RS         assert_eq!(out, "ready 41 1\n");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn pinning_an_already_pinned_place_stays_one_pin() {
+//RS     // I8: one mechanism, one spelling. `Pin<Pin<T>>` must never exist.
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS struct Queue {{
+//RS     head: Pin<Node>
+//RS }}
+//RS 
+//RS fn takes_pin(n: ^Pin<Node>) -> Int {{ return n.payload }}
+//RS 
+//RS fn run() {{
+//RS     node := Node{{payload: 7, hops: 0}}
+//RS     queue :: Queue{{head: mem.pin(&node)}}
+//RS     seen :: takes_pin(^mem.pin(&queue.head))
+//RS     print("{{seen}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(error_codes(&src), Vec::<String>::new());
+//RS }
+//RS 
+//RS // ── Criterion 4: cleanup and panic paths preserve the contract ─────────────
+//RS 
+//RS #[test]
+//RS fn a_pin_cannot_escape_its_owner_scope() {
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn make() -> Pin<Node> {{
+//RS     node := Node{{payload: 7, hops: 0}}
+//RS     return mem.pin(&node)
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     escaped :: make()
+//RS     print("{{(escaped.payload)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     let codes = error_codes(&src);
+//RS     assert!(
+//RS         codes.iter().any(|code| code == "E2305"),
+//RS         "a pin into a local must not outlive its owner: {codes:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn a_pin_survives_a_branch_and_reads_of_the_owner() {
+//RS     // The contract holds across a branch: edits made through the pin on
+//RS     // either path reach the same storage.
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn run() {{
+//RS     node := Node{{payload: 41, hops: 0}}
+//RS     pinned :: mem.pin(&node)
+//RS     pinned.hops += 1
+//RS     if pinned.payload > 0 {{
+//RS         pinned.hops += 1
+//RS     }}
+//RS     print("{{(pinned.hops)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(interpret(&src), "2\n");
+//RS     if let Some(out) = build_and_run("branch_path", &src, false) {
+//RS         assert_eq!(out, "2\n");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn pinning_a_field_place_records_the_field_not_a_copy() {
+//RS     // Regression: the auto-copy pass wrapped a field argument in `copy`, so the
+//RS     // pin silently promised address stability for a temporary and the owner
+//RS     // field stayed replaceable.
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS struct Pair {{
+//RS     left: Node
+//RS     right: Node
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     pair := Pair{{left: Node{{payload: 1, hops: 0}}, right: Node{{payload: 2, hops: 0}}}}
+//RS     first :: mem.pin(&pair.left)
+//RS     pair.left = Node{{payload: 9, hops: 0}}
+//RS     print("{{(first.hops)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(error_codes(&src), vec!["E0219"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn pinning_an_index_place_records_the_element() {
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn run() {{
+//RS     nodes := [Node{{payload: 1, hops: 0}}, Node{{payload: 2, hops: 0}}]
+//RS     first :: mem.pin(&nodes[0])
+//RS     first.hops += 1
+//RS     print("{{(first.hops)}} {{(first.payload)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(error_codes(&src), Vec::<String>::new());
+//RS     assert_eq!(interpret(&src), "1 1\n");
+//RS     if let Some(out) = build_and_run("index_pin", &src, false) {
+//RS         assert_eq!(out, "1 1\n");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn two_pins_on_sibling_fields_do_not_conflict() {
+//RS     // Sibling places never overlap, so pinning both is one contract per field,
+//RS     // not a double borrow. Only nesting is exempt from the overlap rule.
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS struct Pair {{
+//RS     left: Node
+//RS     right: Node
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     pair := Pair{{left: Node{{payload: 1, hops: 0}}, right: Node{{payload: 2, hops: 0}}}}
+//RS     first :: mem.pin(&pair.left)
+//RS     second :: mem.pin(&pair.right)
+//RS     first.hops += 1
+//RS     second.hops += 2
+//RS     print("{{(first.hops)}} {{(second.hops)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(error_codes(&src), Vec::<String>::new());
+//RS     assert_eq!(interpret(&src), "1 2\n");
+//RS     if let Some(out) = build_and_run("sibling_pins", &src, false) {
+//RS         assert_eq!(out, "1 2\n");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn a_pin_taken_each_iteration_is_a_fresh_loan() {
+//RS     // The loan ends with the loop body's scope, so the next iteration may pin
+//RS     // the same place again without tripping the overlap rule.
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn run() {{
+//RS     node := Node{{payload: 0, hops: 0}}
+//RS     loop i in 0..2 {{
+//RS         pinned :: mem.pin(&node)
+//RS         pinned.hops += 1
+//RS     }}
+//RS     print("{{(node.hops)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(error_codes(&src), Vec::<String>::new());
+//RS     assert_eq!(interpret(&src), "3\n");
+//RS     if let Some(out) = build_and_run("loop_pin", &src, false) {
+//RS         assert_eq!(out, "3\n");
+//RS     }
+//RS }
+//RS 
+//RS // ── A pin never crosses a task boundary ────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn a_pin_cannot_cross_a_task_boundary() {
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn run() {{
+//RS     node := Node{{payload: 7, hops: 0}}
+//RS     pinned :: mem.pin(&node)
+//RS     handle :: task pinned.payload
+//RS     print("{{(handle.join() ?? 0)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     let codes = error_codes(&src);
+//RS     assert!(
+//RS         !codes.is_empty(),
+//RS         "a pin is a borrow into one owner's storage; it must not cross a task"
+//RS     );
+//RS }
+//RS 
+//RS // ── Card #1360: returned aggregates may store write windows via `from` ──────
+//RS 
+//RS #[test]
+//RS fn a_library_may_return_a_pin_field_from_an_owner_parameter() {
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS struct Queue {{
+//RS     label: String
+//RS     head: Pin<Node>
+//RS }}
+//RS 
+//RS fn attach(label: String, node: &Node) -> Queue from node {{
+//RS     return Queue{{label: ~label, head: mem.pin(&node)}}
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     node := Node{{payload: 41, hops: 0}}
+//RS     queue :: attach("ready", &node)
+//RS     queue.head.hops += 1
+//RS     queue.head.payload += 1
+//RS     print("{{(queue.label)}} {{(queue.head.payload)}} {{(queue.head.hops)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(error_codes(&src), Vec::<String>::new());
+//RS     assert_eq!(interpret(&src), "ready 42 1\n");
+//RS     if let Some(out) = build_and_run("return_pin_field", &src, false) {
+//RS         assert_eq!(out, "ready 42 1\n");
+//RS     }
+//RS }
+//RS 
+//RS // ── Card #1361: reading the owner beside a live write window is E0220 ───────
+//RS 
+//RS #[test]
+//RS fn reading_the_owner_while_a_pin_is_live_is_e0220() {
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn run() {{
+//RS     node := Node{{payload: 41, hops: 0}}
+//RS     pinned :: mem.pin(&node)
+//RS     if node.payload > 0 {{
+//RS         pinned.hops += 1
+//RS     }}
+//RS     print("{{(pinned.hops)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     assert_eq!(error_codes(&src), vec!["E0220"]);
+//RS }
+//RS 
+//RS // ── Criterion 2: local #Unsafe, safe Pin API at call sites ─────────────────
+//RS 
+//RS #[test]
+//RS fn library_wires_self_ref_under_unsafe_and_exposes_safe_pin_api() {
+//RS     // The audited region stays inside the library. Callers of `wire_self` never
+//RS     // write `#Unsafe` — they receive a ready `Pin<SelfNode>` (D-PIN1 step 5).
+//RS     let src = r#"
+//RS use core.mem
+//RS 
+//RS struct SelfNode {
+//RS     payload: Int
+//RS     self_addr: Int
+//RS }
+//RS 
+//RS fn wire_self(node: &SelfNode) -> Pin<SelfNode> {
+//RS     #Unsafe("node storage is fixed for the returned pin; self_addr names this place") {
+//RS         node.self_addr = mem.address_of(node.payload)
+//RS     }
+//RS     return mem.pin(&node)
+//RS }
+//RS 
+//RS fn run() {
+//RS     node := SelfNode{payload: 7, self_addr: 0}
+//RS     pinned :: wire_self(&node)
+//RS     pinned.payload += 1
+//RS     print("{(pinned.payload)} {(pinned.self_addr != 0)}")
+//RS }
+//RS "#;
+//RS     assert_eq!(error_codes(src), Vec::<String>::new());
+//RS     assert_eq!(interpret(src), "8 true\n");
+//RS     if let Some(out) = build_and_run("safe_pin_api", src, true) {
+//RS         assert_eq!(out, "8 true\n");
+//RS     }
+//RS }
+//RS 
+//RS // ── Criterion 4: cleanup / panic / cancel keep the contract ────────────────
+//RS 
+//RS #[test]
+//RS fn automatic_cleanup_still_runs_when_a_pin_is_live_at_panic() {
+//RS     // Owner destruction / panic must not skip resource cleanup, and the pin
+//RS     // must not outlive the place it names (D-PIN1 criterion 4).
+//RS     let src = r#"
+//RS use core.mem
+//RS 
+//RS struct Guard {
+//RS     name: String
+//RS }
+//RS 
+//RS impl Guard.Close {
+//RS     fn close(^self) {
+//RS         print("closed {self.name}")
+//RS     }
+//RS }
+//RS 
+//RS struct Node {
+//RS     payload: Int
+//RS     hops: Int
+//RS }
+//RS 
+//RS fn run() {
+//RS     guard := Guard{name: "pin"}
+//RS     node := Node{payload: 1, hops: 0}
+//RS     pinned :: mem.pin(&node)
+//RS     pinned.hops += 1
+//RS     print("body {(pinned.hops)}")
+//RS     panic("stop")
+//RS }
+//RS "#;
+//RS     assert_eq!(error_codes(src), Vec::<String>::new());
+//RS     if let Some(out) = build_and_run("pin_panic_cleanup", src, false) {
+//RS         assert!(
+//RS             out.contains("body 1") && out.contains("closed pin"),
+//RS             "panic must still run automatic cleanup while a pin is live: {out:?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn cancelling_a_task_cannot_smuggle_a_pin_across_the_boundary() {
+//RS     // Cancellation ends the task; a pin is a borrow into one owner's storage
+//RS     // and must not become a cross-task escape hatch (criterion 4 + task law).
+//RS     let src = format!(
+//RS         r#"{NODE}
+//RS fn run() {{
+//RS     node := Node{{payload: 7, hops: 0}}
+//RS     pinned :: mem.pin(&node)
+//RS     handle :: task {{
+//RS         pinned.hops += 1
+//RS         return pinned.payload
+//RS     }}
+//RS     handle.cancel()
+//RS     print("{{(handle.join() ?? 0)}}")
+//RS }}
+//RS "#
+//RS     );
+//RS     let codes = error_codes(&src);
+//RS     assert!(
+//RS         !codes.is_empty(),
+//RS         "a live pin must not cross into a cancellable task body: {codes:?}"
+//RS     );
+//RS }
+//RS 
+//RS // ── Criterion 5: Fixed / arena / caller-storage pin parity ─────────────────
+//RS 
+//RS #[test]
+//RS fn pinning_fixed_and_arena_storage_keeps_edits_in_caller_owned_places() {
+//RS     let src = r#"
+//RS use core.mem
+//RS 
+//RS struct Node {
+//RS     payload: Int
+//RS     hops: Int
+//RS }
+//RS 
+//RS fn run() {
+//RS     fixed :: mem.Fixed.new(size: 256)
+//RS     fixed_node :: fixed.alloc(Node{payload: 3, hops: 0})
+//RS     fixed_pin :: mem.pin(&fixed_node)
+//RS     fixed_pin.hops += 1
+//RS 
+//RS     arena :: mem.Arena.new(capacity: 1024)
+//RS     arena_node :: arena.alloc(Node{payload: 5, hops: 0})
+//RS     arena_pin :: mem.pin(&arena_node)
+//RS     arena_pin.hops += 2
+//RS 
+//RS     print("{(fixed_pin.payload)} {(fixed_pin.hops)} {(arena_pin.payload)} {(arena_pin.hops)}")
+//RS     close(^fixed)
+//RS     close(^arena)
+//RS }
+//RS "#;
+//RS     assert_eq!(error_codes(src), Vec::<String>::new());
+//RS     assert_eq!(interpret(src), "3 1 5 2\n");
+//RS     if let Some(out) = build_and_run("fixed_arena_pin", src, false) {
+//RS         assert_eq!(out, "3 1 5 2\n");
+//RS     }
+//RS }
+// END-PORT-PENDING 1127 tests/pin.rs:1-624
+

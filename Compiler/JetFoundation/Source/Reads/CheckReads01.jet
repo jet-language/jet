@@ -1,0 +1,166 @@
+// One process-wide audited check reader; overlapping sessions share all reads.
+use std.sync.[Mutex, MutexGuard]
+use std.fs as check_reads_fs
+use core.sys.host.os_path_ingress as check_reads_env
+use core.files.runtime.kernel_path_components.[OSPath]
+use core.io.[IOError, IOErrorKind]
+
+// Rust: crates/jet-foundation/src/CheckReads.rs:32 — CHECK_READS_MISSING in CheckReads.jet.
+// Rust: crates/jet-foundation/src/CheckReads.rs:36 — CHECK_READS_INJECT_ENV in CheckReads.jet.
+// Rust: crates/jet-foundation/src/CheckReads.rs:40 — CheckRead in CheckReads.jet.
+// Rust: crates/jet-foundation/src/CheckReads.rs:46
+struct Recorder { depth: Int, reads: [String:String] }
+// Rust: crates/jet-foundation/src/CheckReads.rs:51
+// GATE #4494: actual process-static mutex storage, native locking and guard cleanup.
+RECORDER :: Mutex<Recorder>.new(Recorder{depth: 0, reads: [:]})
+// Rust: crates/jet-foundation/src/CheckReads.rs:56
+fn recorder() -> MutexGuard<Recorder> Never! {
+    if RECORDER.lock() == { .Ok(guard) -> ^guard; .Err(poisoned) -> poisoned.into_inner() }
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:60
+fn record(label: String, digest: String) Never! {
+    guard := recorder()
+    if guard.depth == 0 -> return
+    if guard.reads.get(label) == .Val(previous) {
+        if previous != digest -> guard.reads[label] = "conflict"
+    } else -> guard.reads[label] = digest
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:75 — ReadSession in CheckReads.jet.
+// Its canonical carrier is cut over from native SessionId to finished: Bool.
+impl ReadSession {
+    // Rust: crates/jet-foundation/src/CheckReads.rs:80
+    pub fn begin() -[Env, FS.Read]> ReadSession Never! {
+        {
+            guard := recorder()
+            if guard.depth == 0 -> &guard.reads.clear()
+            guard.depth += 1
+        }
+        // GATE #4494: original native env value, including non-Unicode paths.
+        if check_reads_env.var_os(CHECK_READS_INJECT_ENV) == .Val(path) {
+            _ :: read(path)
+        }
+        ReadSession{finished: false}
+    }
+    // Rust: crates/jet-foundation/src/CheckReads.rs:96
+    pub fn finish(^self) -> [CheckRead] Never! {
+        self.finished = true
+        guard := recorder()
+        labels :: guard.reads.keys().collect()
+        &labels.sort()
+        reads := [CheckRead]{}
+        loop label in labels -> &reads.push(CheckRead{label: label, digest: guard.reads[label]})
+        guard.depth = if guard.depth > 0 -> guard.depth - 1 else -> 0
+        ^reads
+    }
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:113
+// GATE #4494: native resource destruction must execute on all exit/unwind paths.
+impl ReadSession.Drop {
+    fn drop(&self) Never! {
+        if !self.finished {
+            guard := recorder()
+            guard.depth = if guard.depth > 0 -> guard.depth - 1 else -> 0
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:121
+fn file_label(path: OSPath) -> String Never! { "file:{path.display()}" }
+// Rust: crates/jet-foundation/src/CheckReads.rs:125
+fn dir_label(path: OSPath) -> String Never! { "dir:{path.display()}" }
+// Rust: crates/jet-foundation/src/CheckReads.rs:129
+fn env_label(name: String) -> String Never! { "env:{name}" }
+// Rust: crates/jet-foundation/src/CheckReads.rs:133
+fn digest_io<T>(result: T IOError!, digest: fn(T) -> String) -> String Never! {
+    if result == {
+        .Ok(value) -> digest(value)
+        .Err(error) -> {
+            // GATE #4409: preserve original ErrorKind, including all Debug names.
+            if error.kind() == IOErrorKind.NotFound -> CHECK_READS_MISSING else -> "unreadable:{error.kind():Debug}"
+        }
+    }
+}
+fn check_reads_hash_bytes(bytes: [U8]) -> String Never! {
+    digest :: mir_sha256_bytes(bytes.view(0..<bytes.len()))
+    mir_sha256_hex_bytes(digest.view(0..<digest.len()))
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:142
+pub fn read(path: OSPath) -[FS.Read]> [U8] IOError! {
+    // GATE #4494: native filesystem read consumes the original encoded OSPath.
+    result :: check_reads_fs.read(path)
+    record(file_label(path), digest_io(result, check_reads_hash_bytes))
+    result
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:151
+pub fn read_nofollow_at_root(root: OSPath, relative: OSPath, max_bytes: U64) -[FS.Read]> [U8] IOError! {
+    result :: read_file_nofollow_at_root(root, relative, max_bytes)
+    record(file_label(root.join(relative)), digest_io(result, check_reads_hash_bytes))
+    result
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:158
+pub fn read_to_string(path: OSPath) -[FS.Read]> String IOError! {
+    bytes :: read(path)
+    if String.from_bytes(bytes) == {
+        .Ok(text) -> text
+        // GATE #4409: UTF-8 failure is InvalidData, after recording byte digest.
+        .Err(error) -> Err(IOError.new(IOErrorKind.InvalidData, error))
+    }
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:164
+pub fn read_dir_sorted(path: OSPath) -[FS.Read]> [OSPath] IOError! {
+    result :: check_reads_directory_paths(path)
+    record(dir_label(path), digest_io(result, listing_digest))
+    result
+}
+fn check_reads_directory_paths(path: OSPath) -[FS.Read]> [OSPath] IOError! {
+    // GATE #4494: real native stream, per-entry errors, and descriptor cleanup.
+    entries :: check_reads_fs.read_dir(path)
+    paths := [OSPath]{}
+    loop result in entries {
+        entry :: result
+        &paths.push(entry.path())
+    }
+    &paths.sort()
+    ^paths
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:177
+fn listing_digest(paths: [OSPath]) -> String Never! {
+    names := [String]{}
+    loop path in paths {
+        name :: if path.file_name() == .Val(value) -> value.to_string_lossy() else -> ""
+        &names.push(name)
+    }
+    mir_sha256_hex(names.join("\n"))
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:191
+pub fn env_var(name: String) -[Env]> String? Never! {
+    value :: env_var_os(name) ?? return None
+    value.into_string().ok()
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:196
+pub fn env_var_os(name: String) -[Env]> OSPath? Never! {
+    // GATE #4494: native env synchronization and exact original OS encoding.
+    value :: check_reads_env.var_os(name)
+    record(env_label(name), env_digest(value))
+    value
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:202
+fn env_digest(value: OSPath?) -> String Never! {
+    if value == { .None -> CHECK_READS_MISSING; .Val(item) -> mir_sha256_hex(item.to_string_lossy()) }
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:211
+pub fn current_digest(label: String) -[Env, FS.Read]> String? Never! {
+    if label.strip_prefix("file:") == .Val(path) {
+        native :: OSPath.from_text(path) // GATE #4494: native string-to-path ingress.
+        result :: check_reads_fs.read(native)
+        return Val(digest_io(result, check_reads_hash_bytes))
+    }
+    if label.strip_prefix("dir:") == .Val(path) {
+        native :: OSPath.from_text(path) // GATE #4494.
+        result :: check_reads_directory_paths(native)
+        return Val(digest_io(result, listing_digest))
+    }
+    if label.strip_prefix("env:") == .Val(name) -> return Val(env_digest(check_reads_env.var_os(name)))
+    None
+}
+// Rust: crates/jet-foundation/src/CheckReads.rs:233 — check_reads_undeclared in CheckReads.jet
+// retains snapshot order and compares exact digest with declared.get(label).

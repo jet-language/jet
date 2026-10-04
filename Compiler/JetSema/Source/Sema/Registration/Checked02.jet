@@ -1,0 +1,2148 @@
+// PORT-PENDING 0438 crates-jet-sema-src-sema-registration: crates/jet-sema/src/Sema/Registration.rs:1-2144
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use jet_foundation::CanonicalPass;
+//RS use crate::Collections::is_reserved_type;
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Numeric::{allows_float_money, is_money_like_name};
+//RS use crate::Sema::CheckerTaskGroup::TaskGroupOrigin;
+//RS use crate::Syntax;
+//RS use crate::AST::{AccessConvention, DistinctDef, EnumDef, Expr, Func, Item, Stmt, StructDef, Type};
+//RS use std::collections::{HashMap, HashSet};
+//RS 
+//RS mod Derives;
+//RS mod Items;
+//RS mod Serde;
+//RS 
+//RS pub(super) use Derives::{expand_builtin_derive_items, expand_builtin_derive_items_with_auto};
+//RS pub(crate) use Items::{
+//RS     check_strong_shared_cycles, comptime_context_from_items, const_evaluated_at_build,
+//RS     core_string_source_method, eval_comptime_items, name_defined,
+//RS     register_const, register_distinct, register_enum, register_impl_methods,
+//RS     register_missing_type_methods, register_struct, register_type_alias, register_type_methods,
+//RS     resolve_comptime_declaration_values,
+//RS };
+//RS pub(crate) use Serde::{
+//RS     expand_builtin_serde_items, expand_builtin_serde_items_with_auto, inject_anonymous_union_items,
+//RS };
+//RS 
+//RS /// Seed a checker-only declaration view before top-level comptime values run.
+//RS /// The production registration pass remains authoritative; this view only
+//RS /// gives initializer inference the same nominal and callable context.
+//RS pub(crate) fn register_comptime_declarations(
+//RS     items: &[Item],
+//RS     st: &mut ModuleState,
+//RS     prelude_enabled: bool,
+//RS ) {
+//RS     let mut ignored_diags = Vec::new();
+//RS 
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(function) => crate::Sema::register_func_item(
+//RS                 function,
+//RS                 st,
+//RS                 &mut ignored_diags,
+//RS                 prelude_enabled,
+//RS             ),
+//RS             Item::CodeModule(module) => {
+//RS                 let Some(body) = &module.body else {
+//RS                     continue;
+//RS                 };
+//RS                 st.code_modules.insert(module.name.clone(), module.name.clone());
+//RS                 st.code_module_identities.insert(
+//RS                     module.name.clone(),
+//RS                     module
+//RS                         .instance_identity
+//RS                         .as_ref()
+//RS                         .map(|identity| format!("instance:{}", identity.fingerprint))
+//RS                         .unwrap_or_else(|| format!("module:{}::{}", st.module_path, module.name)),
+//RS                 );
+//RS                 for inner in body {
+//RS                     if let Item::Func(function) = inner {
+//RS                         let mangled = jet_foundation::Names::member_name(
+//RS                             &module.name,
+//RS                             &function.name,
+//RS                         );
+//RS                         st.funcs
+//RS                             .insert(mangled.clone(), crate::Sema::func_to_sig(function));
+//RS                         if !function.type_params.is_empty() {
+//RS                             st.trait_reg
+//RS                                 .fn_params
+//RS                                 .insert(mangled, function.type_params.clone());
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::ExternRust(block) => {
+//RS                 for function in &block.functions {
+//RS                     crate::Sema::register_extern_fn(
+//RS                         function,
+//RS                         &mut st.funcs,
+//RS                         &st.registry,
+//RS                         &st.consts,
+//RS                         &mut ignored_diags,
+//RS                         false,
+//RS                         prelude_enabled,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             Item::CModule(module) => {
+//RS                 for function in &module.functions {
+//RS                     crate::Sema::register_extern_fn(
+//RS                         function,
+//RS                         &mut st.funcs,
+//RS                         &st.registry,
+//RS                         &st.consts,
+//RS                         &mut ignored_diags,
+//RS                         true,
+//RS                         prelude_enabled,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Struct(definition) => register_struct(
+//RS                 definition,
+//RS                 &mut st.registry,
+//RS                 &mut ignored_diags,
+//RS                 &st.funcs,
+//RS                 &st.consts,
+//RS                 &jet_foundation::Layout::TargetLayout::from_build_facts(&st.build_facts),
+//RS             ),
+//RS             Item::Enum(definition) => register_enum(
+//RS                 definition,
+//RS                 &mut st.registry,
+//RS                 &mut ignored_diags,
+//RS                 &st.funcs,
+//RS                 &st.consts,
+//RS             ),
+//RS             Item::Distinct(definition) => register_distinct(
+//RS                 definition,
+//RS                 &mut st.registry,
+//RS                 &mut ignored_diags,
+//RS                 &st.funcs,
+//RS                 &st.consts,
+//RS             ),
+//RS             Item::TypeAlias(definition) => register_type_alias(
+//RS                 definition,
+//RS                 &mut st.registry,
+//RS                 &mut ignored_diags,
+//RS                 &st.funcs,
+//RS                 &st.consts,
+//RS             ),
+//RS             Item::UnitFamily(family) => {
+//RS                 let dimension = family.resolved_dimension.clone();
+//RS                 for definition in family.distinct_defs() {
+//RS                     register_distinct(
+//RS                         &definition,
+//RS                         &mut st.registry,
+//RS                         &mut ignored_diags,
+//RS                         &st.funcs,
+//RS                         &st.consts,
+//RS                     );
+//RS                     st.registry.unit_types.insert(definition.name.clone());
+//RS                     if let Some(owner) = family
+//RS                         .resolved_owner
+//RS                         .as_deref()
+//RS                         .filter(|_| family.base.is_some() || dimension.is_some())
+//RS                     {
+//RS                         if let Some(fact) = unit_fact(
+//RS                             family,
+//RS                             &definition.name,
+//RS                             dimension.clone(),
+//RS                             std::path::PathBuf::from(owner),
+//RS                         ) {
+//RS                             st.registry.unit_facts.insert(definition.name.clone(), fact);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     for item in items {
+//RS         if let Item::Const(constant) = item {
+//RS             register_const(
+//RS                 constant,
+//RS                 &mut st.consts,
+//RS                 &mut ignored_diags,
+//RS                 &st.funcs,
+//RS                 &st.registry,
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     st.trait_reg.register_synthetic_iter_index();
+//RS     st.trait_reg.register_items(items, &mut ignored_diags);
+//RS     register_type_methods(items, &mut st.registry, &mut ignored_diags);
+//RS     register_impl_methods(items, &mut st.registry, &mut ignored_diags);
+//RS }
+//RS 
+//RS /// D-OPDEF1/D-OPMIX1: materialize the omitted RHS of every operator
+//RS /// declaration once, in sema, before any downstream registry or tier reads
+//RS /// the AST. An explicit `(Other)` remains untouched; a bare operator hook
+//RS /// means the implementation owner, including its generic parameters.
+//RS pub(crate) fn normalize_operator_rhs(items: &mut Vec<Item>) {
+//RS     let before = CanonicalPass::ast_items_payload(items);
+//RS     let before_identity = CanonicalPass::ast_items_identity(items);
+//RS     fn owner_type(name: &str, params: &[crate::AST::TypeParam]) -> Type {
+//RS         if params.is_empty() {
+//RS             Type::Named(name.to_string())
+//RS         } else {
+//RS             Type::Apply {
+//RS                 name: name.to_string(),
+//RS                 args: params
+//RS                     .iter()
+//RS                     .map(|param| Type::Named(param.name.clone()))
+//RS                     .collect(),
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn is_operator_trait(name: &str) -> bool {
+//RS         matches!(
+//RS             name,
+//RS             Syntax::TRAIT_ADD
+//RS                 | Syntax::TRAIT_SUB
+//RS                 | Syntax::TRAIT_MUL
+//RS                 | Syntax::TRAIT_DIV
+//RS                 | Syntax::TRAIT_EQUATABLE
+//RS                 | Syntax::TRAIT_COMPARABLE
+//RS         )
+//RS     }
+//RS 
+//RS     fn normalize_nested(items: &mut [Item]) {
+//RS         let owners: HashMap<String, Type> = items
+//RS             .iter()
+//RS             .filter_map(|item| match item {
+//RS                 Item::Struct(definition) => Some((
+//RS                     definition.name.clone(),
+//RS                     owner_type(&definition.name, &definition.type_params),
+//RS                 )),
+//RS                 Item::Enum(definition) => Some((
+//RS                     definition.name.clone(),
+//RS                     owner_type(&definition.name, &definition.type_params),
+//RS                 )),
+//RS                 _ => None,
+//RS             })
+//RS             .collect();
+//RS 
+//RS         for item in items {
+//RS             match item {
+//RS                 Item::Struct(definition) => {
+//RS                     let owner = owners
+//RS                         .get(&definition.name)
+//RS                         .cloned()
+//RS                         .unwrap_or_else(|| Type::Named(definition.name.clone()));
+//RS                     for implementation in &mut definition.trait_impls {
+//RS                         if implementation.operator_rhs.is_none()
+//RS                             && is_operator_trait(&implementation.trait_name)
+//RS                         {
+//RS                             implementation.operator_rhs = Some(owner.clone());
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Enum(definition) => {
+//RS                     let owner = owners
+//RS                         .get(&definition.name)
+//RS                         .cloned()
+//RS                         .unwrap_or_else(|| Type::Named(definition.name.clone()));
+//RS                     for implementation in &mut definition.trait_impls {
+//RS                         if implementation.operator_rhs.is_none()
+//RS                             && is_operator_trait(&implementation.trait_name)
+//RS                         {
+//RS                             implementation.operator_rhs = Some(owner.clone());
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Impl(implementation) => {
+//RS                     if implementation.operator_rhs.is_none()
+//RS                         && implementation
+//RS                             .trait_name
+//RS                             .as_deref()
+//RS                             .is_some_and(is_operator_trait)
+//RS                     {
+//RS                         implementation.operator_rhs = Some(
+//RS                             owners
+//RS                                 .get(&implementation.type_name)
+//RS                                 .cloned()
+//RS                                 .unwrap_or_else(|| Type::Named(implementation.type_name.clone())),
+//RS                         );
+//RS                     }
+//RS                 }
+//RS                 Item::CodeModule(module) => {
+//RS                     if let Some(body) = &mut module.body {
+//RS                         normalize_nested(body);
+//RS                     }
+//RS                 }
+//RS                 Item::GenericModule(module) => normalize_nested(&mut module.body),
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     normalize_nested(items);
+//RS     CanonicalPass::record(
+//RS         "lowering",
+//RS         "sema.normalize-operator-rhs",
+//RS         "crates/jet-sema/src/Sema/Registration.rs",
+//RS         "ast",
+//RS         before,
+//RS         before_identity,
+//RS         "ast",
+//RS         CanonicalPass::ast_items_payload(items),
+//RS         CanonicalPass::ast_items_identity(items),
+//RS         "preserve",
+//RS     );
+//RS }
+//RS 
+//RS fn is_void_named(ty: &Type) -> bool {
+//RS     matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+//RS }
+//RS 
+//RS /// True when a declared return type carries no value payload: `()` / `Unit`,
+//RS /// or fallible void (`!E`). Same void-named match used by asm return
+//RS /// checks in this file.
+//RS fn is_void_like_return(ty: &Type) -> bool {
+//RS     is_void_named(ty) || matches!(ty, Type::Result { ok, .. } if is_void_named(ok))
+//RS }
+//RS 
+//RS fn is_fallible_void_return(ty: &Type) -> bool {
+//RS     matches!(
+//RS         ty,
+//RS         Type::Result { ok, .. }
+//RS             if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
+//RS     )
+//RS }
+//RS 
+//RS fn asm_first_operand(line: &str) -> Option<&str> {
+//RS     let (_, operands) = line.split_once(|character: char| character.is_ascii_whitespace())?;
+//RS     operands
+//RS         .split(',')
+//RS         .next()
+//RS         .map(str::trim)
+//RS         .filter(|operand| !operand.is_empty())
+//RS }
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     /// D-FFI-INLINE1=A / D-FFI-ASM1=A / D-FFI-CPP1=A (card #501): validate an
+//RS     /// inline foreign tier function (`#FFI(<lang>) fn`). The systems floor ships
+//RS     /// `c`, `cpp`, and `asm`; every one is an unsafe foreign language, so an
+//RS     /// inline body requires the enclosing `#Unsafe("reason")` gate (I1/S58).
+//RS     /// Any other language name has no inline binder yet (E3220).
+//RS     fn check_inline_foreign_fn(&mut self, f: &mut Func) {
+//RS         let Some(inl) = f.inline_foreign.as_ref().cloned() else {
+//RS             return;
+//RS         };
+//RS         // Systems-floor inline languages (card #501). All three are unsafe.
+//RS         const UNSAFE_INLINE_LANGS: &[&str] = &[
+//RS             Syntax::C_MODULE_ROOT,
+//RS             Syntax::CPP_MODULE_ROOT,
+//RS             Syntax::ASM_LANG,
+//RS         ];
+//RS         if !UNSAFE_INLINE_LANGS.contains(&inl.lang.as_str()) {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E3220",
+//RS                 format!("no inline foreign binder for `{}` yet", inl.lang),
+//RS                 "the inline foreign tier ships `c`, `cpp`, and `asm` first (the systems floor, card #501); other languages arrive on later polyglot cards".to_string(),
+//RS                 "use `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)`".to_string(),
+//RS                 Some(inl.lang_span),
+//RS             ));
+//RS             return;
+//RS         }
+//RS         // I1/S58: an unsafe-language inline body must sit behind an `#Unsafe`
+//RS         // gate so the author states why calling it is sound.
+//RS         if !f.is_unsafe {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E3215",
+//RS                 format!("`#FFI({})` needs an `#Unsafe(\"reason\")` gate", inl.lang),
+//RS                 format!(
+//RS                     "`{}` is an unsafe foreign language — an inline `{}` body can break memory safety, so Jet requires you to state why it is sound to call (I1/S58)",
+//RS                     inl.lang, inl.lang
+//RS                 ),
+//RS                 format!("add the gate: `#Unsafe(\"…\") #FFI({}) fn …`", inl.lang),
+//RS                 Some(inl.marker_span),
+//RS             ));
+//RS             return;
+//RS         }
+//RS         if !f.type_params.is_empty()
+//RS             || f.params.iter().any(|p| !inline_ffi_scalar(&p.ty))
+//RS             || f.return_type
+//RS                 .as_ref()
+//RS                 .is_some_and(|ty| !inline_ffi_scalar(ty))
+//RS         {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E3222",
+//RS                 format!("`#FFI({})` has a signature its binder can't represent", inl.lang),
+//RS                 "inline foreign contracts are ABI boundaries; this systems tier accepts concrete integer, float, and Bool values only".to_string(),
+//RS                 "replace generic, collection, String, callback, or user-defined values with an explicit scalar ABI contract".to_string(),
+//RS                 Some(f.name_span),
+//RS             ));
+//RS             return;
+//RS         }
+//RS         if inl.lang == Syntax::ASM_LANG {
+//RS             self.check_inline_asm(f);
+//RS         }
+//RS     }
+//RS 
+//RS     fn check_inline_asm(&mut self, f: &mut Func) {
+//RS         let Some(inl) = f.inline_foreign.as_ref().cloned() else {
+//RS             return;
+//RS         };
+//RS         if f.params.iter().any(|p| !inline_asm_integer(&p.ty))
+//RS             || f.return_type
+//RS                 .as_ref()
+//RS                 .is_some_and(|ty| !inline_asm_integer_or_void(ty))
+//RS         {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E3222",
+//RS                 "`#FFI(asm)` has a signature its register binder can't represent".to_string(),
+//RS                 "the audited assembly bridge uses general-purpose integer registers; floats and Bool need explicit conversion in Jet before the boundary".to_string(),
+//RS                 "use Int or I8/I16/I32/I64/U8/U16/U32/U64 parameters and return values".to_string(),
+//RS                 Some(f.name_span),
+//RS             ));
+//RS             return;
+//RS         }
+//RS         if !self
+//RS             .core_imports
+//RS             .values()
+//RS             .any(|path| path == Syntax::CORE_MEM_MODULE)
+//RS         {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E3102",
+//RS                 "inline assembly is part of the low-level memory tier".to_string(),
+//RS                 "assembly can read registers and memory outside Jet's safe value model, so discovery requires the explicit `core.mem` opt-in".to_string(),
+//RS                 "add `use core.mem` at the top of this file".to_string(),
+//RS                 Some(inl.marker_span),
+//RS             ));
+//RS             return;
+//RS         }
+//RS 
+//RS         let params = f
+//RS             .params
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(index, param)| (param.name.as_str(), index))
+//RS             .collect::<HashMap<_, _>>();
+//RS         let target = self.layout_target().triple;
+//RS         let target_arch = crate::AST::inline_asm_target_arch(&target);
+//RS         let mut used = HashSet::new();
+//RS         let mut clobbers = Vec::new();
+//RS         let mut seen_clobbers = HashSet::new();
+//RS         let mut return_anchors = 0usize;
+//RS         let mut return_destination = None;
+//RS         let mut bad = None;
+//RS 
+//RS         for line in inl.source.lines() {
+//RS             let line = line.trim();
+//RS             if let Some(rest) = line.strip_prefix("; clobbers ") {
+//RS                 for raw in rest
+//RS                     .split(|c: char| c == ',' || c.is_whitespace())
+//RS                     .filter(|s| !s.is_empty())
+//RS                 {
+//RS                     let register = raw.strip_prefix('%').unwrap_or(raw).to_ascii_lowercase();
+//RS                     if target_arch.is_none()
+//RS                         || !crate::AST::inline_asm_register_known(&target, &register)
+//RS                     {
+//RS                         bad = Some(format!("`{raw}` isn't an audited register on this target"));
+//RS                     } else if !seen_clobbers.insert(register.clone()) {
+//RS                         bad = Some(format!(
+//RS                             "clobber register `{raw}` is listed more than once"
+//RS                         ));
+//RS                     } else {
+//RS                         clobbers.push(register);
+//RS                     }
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             if line.contains("; -> return") {
+//RS                 return_anchors += 1;
+//RS                 let destination = line
+//RS                     .split_once("; -> return")
+//RS                     .map(|(body, _)| body.trim())
+//RS                     .and_then(asm_first_operand);
+//RS                 let checked_destination = destination.and_then(|operand| {
+//RS                     if let Some(name) = operand
+//RS                         .strip_prefix('{')
+//RS                         .and_then(|name| name.strip_suffix('}'))
+//RS                     {
+//RS                         params
+//RS                             .get(name)
+//RS                             .copied()
+//RS                             .map(crate::AST::InlineAsmOutput::Parameter)
+//RS                     } else {
+//RS                         let register =
+//RS                             operand.strip_prefix('%').unwrap_or(operand).to_ascii_lowercase();
+//RS                         target_arch
+//RS                             .is_some_and(|_| crate::AST::inline_asm_register_known(&target, &register))
+//RS                             .then_some(crate::AST::InlineAsmOutput::Register(register))
+//RS                     }
+//RS                 });
+//RS                 if let Some(destination) = checked_destination {
+//RS                     if return_destination.is_some() {
+//RS                         bad = Some(
+//RS                             "an assembly body can have only one checked return destination"
+//RS                                 .to_string(),
+//RS                         );
+//RS                     } else {
+//RS                         return_destination = Some(destination);
+//RS                     }
+//RS                 } else {
+//RS                     bad = Some(
+//RS                         "a value-returning assembly body needs a named output operand or an explicit audited target register"
+//RS                             .to_string(),
+//RS                     );
+//RS                 }
+//RS             }
+//RS             let mut rest = line;
+//RS             while let Some(open) = rest.find('{') {
+//RS                 let Some(close) = rest[open + 1..].find('}') else {
+//RS                     bad = Some("an assembly operand has an unmatched `{`".to_string());
+//RS                     break;
+//RS                 };
+//RS                 let name = &rest[open + 1..open + 1 + close];
+//RS                 if !params.contains_key(name) {
+//RS                     bad = Some(format!("`{{{name}}}` doesn't name a Jet parameter"));
+//RS                 } else {
+//RS                     used.insert(name.to_string());
+//RS                 }
+//RS                 rest = &rest[open + close + 2..];
+//RS             }
+//RS         }
+//RS         let unused_name = params.keys().copied().find(|name| {
+//RS             used.iter().all(|used_name| used_name.as_str() != *name)
+//RS         });
+//RS         if let Some(name) = unused_name {
+//RS             bad = Some(format!(
+//RS                 "parameter `{name}` has no named `{{{name}}}` operand"
+//RS             ));
+//RS         }
+//RS         let returns_value = f
+//RS             .return_type
+//RS             .as_ref()
+//RS             .is_some_and(|ty| !is_void_like_return(ty));
+//RS         if return_anchors != usize::from(returns_value) {
+//RS             bad = Some(if returns_value {
+//RS                 "a value-returning assembly body needs exactly one `; -> return` anchor".to_string()
+//RS             } else {
+//RS                 "a void assembly body can't declare a `; -> return` anchor".to_string()
+//RS             });
+//RS         }
+//RS         if let Some(crate::AST::InlineAsmOutput::Register(register)) = &return_destination {
+//RS             if clobbers.iter().any(|clobber| clobber == register) {
+//RS                 bad = Some(format!(
+//RS                     "return register `{register}` cannot also be an early-written clobber"
+//RS                 ));
+//RS             }
+//RS         }
+//RS         if target_arch.is_none() {
+//RS             bad = Some(format!(
+//RS                 "inline assembly has no audited register set for target `{target}`"
+//RS             ));
+//RS         }
+//RS         if let Some(problem) = bad {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E3223",
+//RS                 "this inline assembly operand contract is incomplete".to_string(),
+//RS                 problem,
+//RS                 "bind each Jet parameter as `{name}`, mark one result with `; -> return`, and list overwritten registers on `; clobbers …`".to_string(),
+//RS                 Some(inl.source_span),
+//RS             ));
+//RS             return;
+//RS         }
+//RS         f.inline_foreign
+//RS             .as_mut()
+//RS             .expect("inline foreign checked above")
+//RS             .asm_contract = Some(crate::AST::InlineAsmContract {
+//RS             target,
+//RS             output: return_destination,
+//RS             clobbers,
+//RS         });
+//RS     }
+//RS 
+//RS 
+//RS     /// D-BOUND-UNDO1=A: prove the inverse named by `#Undo` is callable before
+//RS     /// codegen can lower it into a rollback closure.
+//RS     fn check_undo_contract(&mut self, f: &Func) {
+//RS         let Some((_inverse, span)) = &f.undo else {
+//RS             return;
+//RS         };
+//RS         if f.inline_foreign.is_none() {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E3212",
+//RS                 "`#Undo` only applies to a foreign binding".to_string(),
+//RS                 "an undo contract names the Jet function that compensates a foreign call"
+//RS                     .to_string(),
+//RS                 "attach `#Undo(inverse)` to `#FFI(...) fn` or an extern declaration".to_string(),
+//RS                 Some(*span),
+//RS             ));
+//RS             return;
+//RS         }
+//RS     }
+//RS 
+//RS     /// Shared tail of `check_func_body` and the failure-union probe:
+//RS     /// declare parameters, check the body, enforce definite return.
+//RS     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
+//RS         // A public fallible signature is an API boundary. Validate its error
+//RS         // carrier before checking the body so the public contract teaches the
+//RS         // required visibility change at the declaration that owns it.
+//RS         self.validate_public_failure_carrier(f);
+//RS         for param in &f.type_params {
+//RS             self.warn_soft_public_declared_type(
+//RS                 &Type::TraitObject(param.bounds.clone()),
+//RS                 param.name_span,
+//RS             );
+//RS         }
+//RS         if let Some(return_type) = &f.return_type {
+//RS             // D-CONC-GROUP1=A: parameter positions admit a group; the return
+//RS             // position stays banned, and it teaches with the E1110 family
+//RS             // instead of falling through to a bare "no such type" (E0119).
+//RS             // Returning the handle would let a child outlive the scope that
+//RS             // joins it, which is the one thing the ban exists to stop.
+//RS             if matches!(return_type, Type::Named(name) if name == Syntax::TYPE_TASKGROUP) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E1110",
+//RS                     "`Group` cannot be returned".to_string(),
+//RS                     "a task group is a scoped spawn authority; the block that owns it joins its children when it closes, so a returned handle would already be dead"
+//RS                         .to_string(),
+//RS                     "take `group: Group` as a parameter of a function or method and do the work there"
+//RS                         .to_string(),
+//RS                     Some(f.return_type_span.unwrap_or(f.name_span)),
+//RS                 ));
+//RS             } else {
+//RS                 let return_type = self.resolve_type(return_type.clone());
+//RS                 // D-NEVER2=B: Never is legal in the callable success-return
+//RS                 // slot (`fn f() Never`, `fn() Never`, `Never !E`).
+//RS                 self.check_declared_return_type(
+//RS                     &return_type,
+//RS                     f.return_type_span.unwrap_or(f.name_span),
+//RS                 );
+//RS             }
+//RS         }
+//RS         for p in &f.params {
+//RS             // D-FAIL-BIND1=A: parameters share the ordinary binding namespace,
+//RS             // so `err` is still worth flagging even when it is outside a
+//RS             // fallback today. A future fallback would give that spelling a
+//RS             // different, ambient meaning.
+//RS             if p.name == Syntax::AMBIENT_ERR {
+//RS                 self.diags.push(Diagnostic::lint(
+//RS                     "L0511",
+//RS                     "binding `err` shadows the fallback's ambient failure report".to_string(),
+//RS                     "`err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there".to_string(),
+//RS                     "rename the binding, or use it outside a fallback".to_string(),
+//RS                     Some(p.name_span),
+//RS                 ));
+//RS             }
+//RS             // D-ANY-JAI1: the `...[TraitA, TraitB]` bound-list form parses `ty`
+//RS             // as an unused `Type::Named("")` placeholder (the real bound list is
+//RS             // `variadic_bound_list`) — nothing to declared-type-check there.
+//RS             let skip_type_check = (p.name == Syntax::KW_SELF || p.variadic_bound_list.is_some())
+//RS                 && matches!(&p.ty, Type::Named(n) if n.is_empty());
+//RS             // D-CONC-GROUP1=A: a group is a borrow of its scope, so it may be
+//RS             // named in EVERY direct parameter position — a method's parameter
+//RS             // list exactly like a free function's. `Group` is a
+//RS             // compiler-private handle type, not a registered one, so the
+//RS             // declared-type check is skipped for it here; every other position
+//RS             // (struct field, return type, local annotation, lambda parameter)
+//RS             // still rejects the name, which is what keeps a group from
+//RS             // outliving its scope.
+//RS             let taskgroup_parameter =
+//RS                 matches!(&p.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP);
+//RS             let never_parameter =
+//RS                 matches!(&p.ty, Type::Named(name) if name == Syntax::TYPE_NEVER);
+//RS             if never_parameter {
+//RS                 self.diags.push(Diagnostic::from_row("E2422", &[], Some(p.ty_span)));
+//RS             } else if !skip_type_check && !taskgroup_parameter {
+//RS                 let pty = self.resolve_type(p.ty.clone());
+//RS                 self.check_declared_type(&pty, p.ty_span);
+//RS             }
+//RS             if p.name == Syntax::KW_SELF {
+//RS                 if let Some(owner) = owner_type {
+//RS                     // Generic impl methods own the same type parameters as
+//RS                     // their enclosing struct/enum. Keep that application on
+//RS                     // `self`; a bare owner name would make a returned `self`
+//RS                     // fail against a declared `Owner<T>` result.
+//RS                     // A non-generic owner keeps its plain name: an empty
+//RS                     // application `K<>` would not match a declared `K`.
+//RS                     let owner_params = self
+//RS                         .trait_reg
+//RS                         .struct_params
+//RS                         .get(owner)
+//RS                         .or_else(|| self.trait_reg.enum_params.get(owner))
+//RS                         .filter(|params| !params.is_empty());
+//RS                     let self_ty = owner_params.map_or_else(
+//RS                         || {
+//RS                             crate::Sema::Diagnostics::builtin_type_from_ident(owner)
+//RS                                 .unwrap_or_else(|| Type::Named(owner.to_string()))
+//RS                         },
+//RS                         |params| Type::Apply {
+//RS                             name: owner.to_string(),
+//RS                             args: params
+//RS                                 .iter()
+//RS                                 .map(|param| Type::Named(param.name.clone()))
+//RS                                 .collect(),
+//RS                         },
+//RS                     );
+//RS                     self.declare_in_scope(
+//RS                         &p.name,
+//RS                         LocalInfo {
+//RS                             def_span: p.name_span,
+//RS                             binding_sigil_span: None,
+//RS                             ty: self_ty,
+//RS                             mutable: matches!(p.convention, AccessConvention::Write),
+//RS                             param_conv: Some(p.convention),
+//RS                             decl_loop_depth: 0,
+//RS                             interrupt_sendable: false,
+//RS                             reactive_local: false,
+//RS                             reactive_shared: false,
+//RS                             single_use_span: None,
+//RS                             invalid: false,
+//RS                         },
+//RS                     );
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             if self.lookup(&p.name).is_some() {
+//RS                 self.diags.push(already_defined(&p.name, p.name_span));
+//RS             } else {
+//RS                 let pty = self.resolve_type(if p.variadic {
+//RS                     // D-ANY-JAI1: a trait-bounded variadic (`...Trait` /
+//RS                     // `...[A, B]`) binds its loop element as a `Type::TraitObject`
+//RS                     // carrying every bound trait name, reusing the existing
+//RS                     // boxed-dispatch method/interpolation checking unchanged for the
+//RS                     // body-check pass only (codegen never sees this type — its own
+//RS                     // per-call-site synthesis in `Codegen/VariadicBound.rs` binds
+//RS                     // the loop var to a bare generic type param instead, so
+//RS                     // there's no boxing in the generated Rust). `Type::TraitObject`
+//RS                     // carries the full bound list (not just the first), so a method
+//RS                     // call in the loop body resolves against ALL bound traits —
+//RS                     // fixed from the v1 known gap (`Type::TraitObject` used to hold
+//RS                     // one name only).
+//RS                     match p.variadic_trait_bounds(|n| self.trait_reg.is_trait_name(n)) {
+//RS                         Some(bounds) => Type::List(Box::new(Type::TraitObject(bounds))),
+//RS                         None => Type::List(Box::new(p.ty.clone())),
+//RS                     }
+//RS                 } else {
+//RS                     p.ty.clone()
+//RS                 });
+//RS                 let pty = if f.is_pure && crate::Sema::Diagnostics::is_clock_type(&pty) {
+//RS                     crate::Sema::Diagnostics::deterministic_clock_type(pty)
+//RS                 } else {
+//RS                     pty
+//RS                 };
+//RS                 // D-LIN1: a parameter never carries the consume duty. Passing a
+//RS                 // `#SingleUse` value to a `^` parameter IS its terminal consumption
+//RS                 // (spec: "passed to a take parameter … or returned"), so the `^`
+//RS                 // recipient is where linearity is satisfied — making the param
+//RS                 // re-consume would be infinite regress. Borrow/read params can't
+//RS                 // own it at all. So `single_use_span` stays `None` for every param.
+//RS                 self.declare_in_scope(
+//RS                     &p.name,
+//RS                     LocalInfo {
+//RS                         def_span: p.name_span,
+//RS                         binding_sigil_span: None,
+//RS                         ty: pty,
+//RS                         mutable: matches!(p.convention, AccessConvention::Write),
+//RS                         param_conv: Some(p.convention),
+//RS                         decl_loop_depth: 0,
+//RS                         interrupt_sendable: false,
+//RS                         reactive_local: false,
+//RS                         reactive_shared: false,
+//RS                         single_use_span: None,
+//RS                         invalid: false,
+//RS                     },
+//RS                 );
+//RS             }
+//RS         }
+//RS         self.mark_default_parameter_references(&f.params);
+//RS         self.check_memoized_function(f);
+//RS         // D-STRUCT-POLICY1=A: callable marker values use the same package
+//RS         // vocabulary as `apply`; declaration bodies are checked separately
+//RS         // against each wrapped function signature below the bundle seam.
+//RS         for marker in &f.markers {
+//RS             if marker.name == Syntax::MARKER_POLICY
+//RS                 && crate::AST::CallablePolicyChain::parse(&marker.expr_args_owned()).is_ok()
+//RS             {
+//RS                 let policy_args = marker.expr_args_owned();
+//RS                 let _ = self.validate_callable_policy_values(&policy_args, marker.span);
+//RS             }
+//RS         }
+//RS         for mut marker in self.take_targeted_rule_facts(f.span) {
+//RS             let Some(arguments) = self.validate_rule_signature(&mut marker) else {
+//RS                 if marker.name == Syntax::MARKER_EVERY {
+//RS                     f.every = None;
+//RS                 }
+//RS                 continue;
+//RS             };
+//RS             match marker.name.as_str() {
+//RS                 Syntax::KW_UNSAFE => {
+//RS                     f.unsafe_reason = match arguments.constant_for_source(0) {
+//RS                         Some(crate::Comptime::CtValue::Str(value)) => Some(value.clone()),
+//RS                         _ => f.unsafe_reason.take(),
+//RS                     };
+//RS                 }
+//RS                 Syntax::MARKER_PRE | Syntax::MARKER_POST => {
+//RS                     let clauses = if marker.name == Syntax::MARKER_PRE {
+//RS                         &mut f.pre
+//RS                     } else {
+//RS                         &mut f.post
+//RS                     };
+//RS                     if let Some(clause) =
+//RS                         clauses.iter_mut().find(|clause| clause.span == marker.span)
+//RS                     {
+//RS                         if let Some(message) = marker.expr_arg(1) {
+//RS                             clause.message_expr = message.clone();
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         // D-FFI-INLINE1=A (card #501): an inline foreign tier fn (`#FFI(<lang>)
+//RS         // fn`) has a foreign-source body, not Jet statements. Its parameters are
+//RS         // in scope above (the Jet signature is a real, checked contract at call
+//RS         // sites); validate the tier gate and skip the ordinary body/return
+//RS         // checker (the empty statement body would otherwise be E0114).
+//RS         self.check_undo_contract(f);
+//RS         if f.inline_foreign.is_some() {
+//RS             self.check_inline_foreign_fn(f);
+//RS             return;
+//RS         }
+//RS         // D-ADOPT-GUEST1=A: a per-callable `#Import(c)` has no Jet body. Its
+//RS         // signature and C-safe type law are checked by sema's guest-surface
+//RS         // pass; do not reinterpret the declaration as an empty value body.
+//RS         if crate::Sema::is_guest_import(f) {
+//RS             return;
+//RS         }
+//RS         // D-UNSAFE2 / D-LIN1-DROP: an `#Unsafe fn` body is an audited region just
+//RS         // like an `#Unsafe { … }` block — its reason is the audit note. Mark the
+//RS         // whole body unsafe so `drop(x)` of a `#SingleUse` value is permitted
+//RS         // (and any other unsafe-gated operation is reachable directly).
+//RS         if f.is_reactive {
+//RS             if f.is_pure {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E2914",
+//RS                     "`#Reactive fn` can't also declare `-[]>`".to_string(),
+//RS                     "a reactive effect re-runs when signals change, so it is not a pure function"
+//RS                         .to_string(),
+//RS                     "drop the `-[]>` bound or use `reactive.effect` inside a plain `fn`"
+//RS                         .to_string(),
+//RS                     Some(f.name_span),
+//RS                 ));
+//RS             }
+//RS             if f.return_type
+//RS                 .as_ref()
+//RS                 .is_some_and(|t| !matches!(t, Type::Named(n) if n == "Unit"))
+//RS             {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E2914",
+//RS                     "`#Reactive fn` must not return a value".to_string(),
+//RS                     "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value (D-REACTCORE1)"
+//RS                         .to_string(),
+//RS                     "drop the return type, or use `#Reactive { … }` inside a plain `fn`"
+//RS                         .to_string(),
+//RS                     Some(f.name_span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         // D-PREPOST1: check `#Pre`/`#Post` contract clauses. Params are already
+//RS         // in scope above; a condition is pure (same checker as `#Pure fn`,
+//RS         // E0139) and must be `Bool` (E0110 via `require_bool`). `#Post`
+//RS         // additionally binds `result` to the return type while its own
+//RS         // conditions are checked — `result` inside a `#Pre` is E0144 (see
+//RS         // the `Expr::Ident` dispatch in `CheckerInfer/expr.rs`).
+//RS         for clause in &mut f.pre {
+//RS             self.in_pre_clause = true;
+//RS             self.require_bool(&mut clause.cond, "a `#Pre` condition");
+//RS             self.in_pre_clause = false;
+//RS             if let Some(d) = check_pure_expr(&clause.cond, &f.name, self.funcs) {
+//RS                 self.diags.push(e0139(Syntax::MARKER_PRE, d.span));
+//RS             }
+//RS         }
+//RS         if !f.post.is_empty() {
+//RS             let result_ty = self.resolve_type(
+//RS                 f.return_type
+//RS                     .clone()
+//RS                     .unwrap_or(Type::Named("Unit".to_string())),
+//RS             );
+//RS             self.push_scope();
+//RS             self.declare(
+//RS                 "result",
+//RS                 f.name_span,
+//RS                 LocalInfo {
+//RS                     def_span: f.name_span,
+//RS                     binding_sigil_span: None,
+//RS                     ty: result_ty,
+//RS                     mutable: false,
+//RS                     param_conv: None,
+//RS                     decl_loop_depth: self.loop_depth,
+//RS                     interrupt_sendable: false,
+//RS                     reactive_local: false,
+//RS                     reactive_shared: false,
+//RS                     single_use_span: None,
+//RS                     invalid: false,
+//RS                 },
+//RS             );
+//RS             for clause in &mut f.post {
+//RS                 self.require_bool(&mut clause.cond, "a `#Post` condition");
+//RS                 if let Some(d) = check_pure_expr(&clause.cond, &f.name, self.funcs) {
+//RS                     self.diags.push(e0139(Syntax::MARKER_POST, d.span));
+//RS                 }
+//RS             }
+//RS             self.pop_scope();
+//RS         }
+//RS         let taskgroup_floor = self.taskgroup_stack.len();
+//RS         // D-CONC-GROUP1=A: a method's group parameter is spawn authority in the
+//RS         // same way a free function's is — `self` holds the receiver, never the
+//RS         // group, so admitting methods opens no new escape.
+//RS         self.taskgroup_stack
+//RS             .extend(f.params.iter().filter_map(|param| {
+//RS                 matches!(&param.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP)
+//RS                     .then(|| TaskGroupCtx::parameter(param.name.clone()))
+//RS             }));
+//RS         let prev_unsafe = self.in_unsafe;
+//RS         self.in_unsafe = self.in_unsafe || f.is_unsafe;
+//RS         let arithmetic_policy_depth = self.arithmetic_policy_stack.len();
+//RS         if let Some(marker) = f
+//RS             .markers
+//RS             .iter()
+//RS             .find(|marker| marker.name == Syntax::MARKER_ARITHMETIC)
+//RS         {
+//RS             if let Some(mode) = marker
+//RS                 .expr_arg(0)
+//RS                 .and_then(crate::AST::ArithmeticMode::from_expr)
+//RS             {
+//RS                 self.arithmetic_policy_stack
+//RS                     .push(crate::AST::ArithmeticPolicyFact {
+//RS                         mode,
+//RS                         scope_span: marker.span,
+//RS                         operation_span: marker.span,
+//RS                         operation: None,
+//RS                     });
+//RS             }
+//RS         }
+//RS         let is_generator =
+//RS             matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");
+//RS         // D-FAILURE-FOUNDATION1: body checking uses the same return projection
+//RS         // that the bundle checker publishes. Raw compiler-generated trait
+//RS         // protocol methods and conversion helpers retain their declared ABI.
+//RS         let body_return = crate::Sema::checked_body_return_type(f, self.raw_protocol_return);
+//RS         let value_return = body_return
+//RS             .as_ref()
+//RS             .filter(|ty| !is_void_like_return(ty) && !is_generator)
+//RS             .cloned();
+//RS         if let Some(expected) = value_return.as_ref() {
+//RS             self.check_value_block(&mut f.body, expected, false, f.span);
+//RS         } else {
+//RS             // D-DISCARD1=A: with no written return type the function returns
+//RS             // nothing, so a value on its last line is lost (E0433).
+//RS             let previous_lost_tail = self.lost_tail_span;
+//RS             self.lost_tail_span = match f.body.last() {
+//RS                 Some(Stmt::Expr(tail))
+//RS                     if f.return_type_span.is_none() && !is_generator && !f.compiler_generated =>
+//RS                 {
+//RS                     Some(tail.span())
+//RS                 }
+//RS                 _ => None,
+//RS             };
+//RS             self.check_block(&mut f.body, false);
+//RS             self.lost_tail_span = previous_lost_tail;
+//RS         }
+//RS         // D-COPY-DEFAULT1=A: every use is known now, so each unmarked move
+//RS         // that a later use reached becomes an ordinary `~name` copy.
+//RS         self.materialize_share_sites(&mut f.body);
+//RS         self.arithmetic_policy_stack
+//RS             .truncate(arithmetic_policy_depth);
+//RS         self.in_unsafe = prev_unsafe;
+//RS         // D-LINT-UNUSED1: all local and parameter references are known after
+//RS         // the body pass, including references in nested scopes and defaults.
+//RS         self.emit_unused_binding_lints();
+//RS         // D-ANY-JAI1: a trait-bounded variadic has no zero-cost representation
+//RS         // for arbitrary use (heterogeneous elements, no boxing allowed) — codegen
+//RS         // only covers one shape, a direct `loop x in parts { … }` loop, unrolled
+//RS         // per call site's arity. Reject anything else here (E1314) so codegen
+//RS         // never has to guess.
+//RS         self.check_variadic_bound_body_shape(f);
+//RS         self.mark_taskgroup_spawns_owned(TaskGroupOrigin::Parameter);
+//RS         self.taskgroup_stack.truncate(taskgroup_floor);
+//RS         // D-LIN1: the function body's own scope (parameters + top-level locals) is
+//RS         // never `pop_scope`d, so check its `#SingleUse` locals here (E0140).
+//RS         self.check_single_use_consumed_in_current_scope();
+//RS         // D-STREAMYIELD1: a generator (`Stream<T> ->`) falling off the end is
+//RS         // exactly a bare `return;` — it just ends the stream. Never E0114.
+//RS         let is_fallible_void = body_return
+//RS             .as_ref()
+//RS             .is_some_and(|ty| is_fallible_void_return(ty));
+//RS         if !is_generator
+//RS             && !is_fallible_void
+//RS             && body_return.is_some()
+//RS             && value_return.is_none()
+//RS             && !block_definitely_returns(&f.body)
+//RS         {
+//RS             let rt = body_return.clone().unwrap();
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0114",
+//RS                 format!(
+//RS                     "`{}` promises to return {}, but a path can reach the end without `return`",
+//RS                     f.name,
+//RS                     rt.show()
+//RS                 ),
+//RS                 "every way through the function must hand back a value".to_string(),
+//RS                 format!(
+//RS                     "add a final `return ...;`, or an `{}` branch that returns",
+//RS                     Syntax::KW_ELSE
+//RS                 ),
+//RS                 Some(f.name_span),
+//RS             ));
+//RS         }
+//RS         // D-COMPUTE-KERNEL-SURFACE1=B: attach the proof only after ordinary
+//RS         // sema has checked the complete body. TIR consumes this fact; it never
+//RS         // retries the safety analysis.
+//RS         self.check_kernel_marker(f, owner_type);
+//RS     }
+//RS 
+//RS     /// D-ANY-JAI1 (c7jaiany): validate that a trait-bounded variadic parameter
+//RS     /// is used *only* as the collection of a single top-level `loop x in parts {
+//RS     /// … }` loop — the one shape `crates/jet-codegen/src/Codegen/VariadicBound.rs`
+//RS     /// unrolls per call-site arity. `parts` has no zero-cost Rust representation
+//RS     /// outside that loop (heterogeneous elements, boxing is disallowed), so any
+//RS     /// other reference — a bare read, `.len()`, indexing, a second loop, passing
+//RS     /// it to another call, use inside a nested block (`#Unsafe { }`, `if`, …) —
+//RS     /// is E1314. v1 scope, matching the plan's "conservative v1" call for this
+//RS     /// card: exactly the shape the ballot's own `log_all` example needs.
+//RS     fn check_variadic_bound_body_shape(&mut self, f: &Func) {
+//RS         let Some(last) = f.params.last() else {
+//RS             return;
+//RS         };
+//RS         if last
+//RS             .variadic_trait_bounds(|n| self.trait_reg.is_trait_name(n))
+//RS             .is_none()
+//RS         {
+//RS             return;
+//RS         }
+//RS         let name = last.name.clone();
+//RS         let mut for_hits = 0usize;
+//RS         let mut other: Vec<Span> = Vec::new();
+//RS         for s in &f.body {
+//RS             scan_stmt_for_variadic_uses(s, &name, true, &mut for_hits, &mut other);
+//RS         }
+//RS         if for_hits > 1 {
+//RS             other.push(last.name_span);
+//RS         }
+//RS         for span in other {
+//RS             self.diags.push(e1314(&name, span));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn inline_ffi_scalar(ty: &Type) -> bool {
+//RS     matches!(
+//RS         ty,
+//RS         Type::Int
+//RS             | Type::Float
+//RS             | Type::IntN {
+//RS                 bits: 8 | 16 | 32 | 64,
+//RS                 ..
+//RS             }
+//RS             | Type::InlineRange { .. }
+//RS             | Type::Float32
+//RS             | Type::Bool
+//RS     ) || matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+//RS }
+//RS 
+//RS fn inline_asm_integer(ty: &Type) -> bool {
+//RS     matches!(
+//RS         ty,
+//RS         Type::Int
+//RS             | Type::IntN {
+//RS                 bits: 8 | 16 | 32 | 64,
+//RS                 ..
+//RS             }
+//RS             | Type::InlineRange { .. }
+//RS     )
+//RS }
+//RS 
+//RS fn inline_asm_integer_or_void(ty: &Type) -> bool {
+//RS     inline_asm_integer(ty) || matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+//RS }
+//RS 
+//RS 
+//RS /// D-ANY-JAI1: E1314 — a trait-bounded variadic parameter used outside the
+//RS /// one supported shape (a direct `loop x in name { … }` loop).
+//RS fn e1314(name: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1314",
+//RS         format!("`{name}` can only be used in a direct `loop x in {name} {{ … }}` loop here"),
+//RS         format!(
+//RS             "`{name}` is a trait-bounded variadic (`...Trait` / `...[A, B]`) — its elements can \
+//RS              have different concrete types, so there's no single Rust type to give `{name}` \
+//RS              outside a loop that visits each argument once"
+//RS         ),
+//RS         format!("iterate it with `loop x in {name} {{ … }}` — that's the only supported use"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// Walk one statement looking for uses of `name` (a trait-bounded variadic
+//RS /// parameter). `top_level` is true only for statements directly in the
+//RS /// function body (not nested in `if`/`while`/`loop`/`switch`/…) — the blessed
+//RS /// `loop x in name { … }` shape is only recognized there; `for_hits` counts how
+//RS /// many times it's seen; every other reference to `name` lands in `other`.
+//RS fn scan_stmt_for_variadic_uses(
+//RS     s: &Stmt,
+//RS     name: &str,
+//RS     top_level: bool,
+//RS     for_hits: &mut usize,
+//RS     other: &mut Vec<Span>,
+//RS ) {
+//RS     match s {
+//RS         Stmt::For {
+//RS             var2: None,
+//RS             kind:
+//RS                 crate::AST::ForKind::In {
+//RS                     collection,
+//RS                     step: None,
+//RS                 },
+//RS             body,
+//RS             label: None,
+//RS             ..
+//RS         } if top_level && matches!(collection, Expr::Ident(n, _) if n == name) => {
+//RS             *for_hits += 1;
+//RS             for st in body {
+//RS                 scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+//RS             }
+//RS         }
+//RS         Stmt::Expr(e) | Stmt::DeferClose { close: e, .. } | Stmt::Return(Some(e), _) => {
+//RS             expr_uses(e, name, other)
+//RS         }
+//RS         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => {}
+//RS         Stmt::BreakLabel(_, _) | Stmt::ContinueLabel(_, _) => {}
+//RS         Stmt::Val(b) => expr_uses(&b.init, name, other),
+//RS         Stmt::Assign { target, value, .. } => {
+//RS             match target {
+//RS                 crate::AST::LValue::Index { base, index, .. } => {
+//RS                     expr_uses(base, name, other);
+//RS                     expr_uses(index, name, other);
+//RS                 }
+//RS                 crate::AST::LValue::Field { base, .. } => expr_uses(base, name, other),
+//RS                 crate::AST::LValue::Local { name: n, name_span } => {
+//RS                     if n == name {
+//RS                         other.push(*name_span);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             expr_uses(value, name, other);
+//RS         }
+//RS         Stmt::While { cond, body, .. } => {
+//RS             expr_uses(cond, name, other);
+//RS             for st in body {
+//RS                 scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+//RS             }
+//RS         }
+//RS         Stmt::For {
+//RS             kind, body, span, ..
+//RS         } => {
+//RS             match kind {
+//RS                 crate::AST::ForKind::Range {
+//RS                     start,
+//RS                     end,
+//RS                     step,
+//RS                     exclusive: _,
+//RS                 } => {
+//RS                     expr_uses(start, name, other);
+//RS                     expr_uses(end, name, other);
+//RS                     if let Some(s) = step {
+//RS                         expr_uses(s, name, other);
+//RS                     }
+//RS                 }
+//RS                 crate::AST::ForKind::In { collection, step } => {
+//RS                     if matches!(collection, Expr::Ident(n, _) if n == name) {
+//RS                         other.push(*span);
+//RS                     } else {
+//RS                         expr_uses(collection, name, other);
+//RS                     }
+//RS                     if let Some(step) = step {
+//RS                         expr_uses(step, name, other);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             for st in body {
+//RS                 scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+//RS             }
+//RS         }
+//RS         Stmt::Switch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             expr_uses(subject, name, other);
+//RS             for arm in arms {
+//RS                 expr_uses(&arm.cond, name, other);
+//RS                 for st in &arm.body {
+//RS                     scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+//RS                 }
+//RS             }
+//RS             if let Some(body) = else_body {
+//RS                 for st in body {
+//RS                     scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Stmt::Loop { body, .. } => {
+//RS             for st in body {
+//RS                 scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+//RS             }
+//RS         }
+//RS         Stmt::CountedLoop {
+//RS             init,
+//RS             cond,
+//RS             step,
+//RS             body,
+//RS             ..
+//RS         } => {
+//RS             expr_uses(&init.init, name, other);
+//RS             expr_uses(cond, name, other);
+//RS             if let Some(step) = step {
+//RS                 scan_stmt_for_variadic_uses(step, name, false, for_hits, other);
+//RS             }
+//RS             for st in body {
+//RS                 scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+//RS             }
+//RS         }
+//RS         // Every other statement kind (lexical-scope wrappers like `#Unsafe { }`,
+//RS         // `region`, `task.group`, `#Transact`, `@ { }`, …) is out of scope
+//RS         // for v1 — a trait-bounded variadic used inside one of these isn't
+//RS         // caught here; codegen's own "internal compiler error" guard
+//RS         // (`VariadicBound.rs`) is the backstop.
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS /// Best-effort (not exhaustive — mirrors `Purity.rs`'s existing call-collector
+//RS /// coverage) scan of an expression for a bare `Ident(name)`.
+//RS fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
+//RS     match e {
+//RS         Expr::Ident(n, span) => {
+//RS             if n == name {
+//RS                 other.push(*span);
+//RS             }
+//RS         }
+//RS         Expr::Call(c) => {
+//RS             for a in &c.args {
+//RS                 expr_uses(&a.expr, name, other);
+//RS             }
+//RS         }
+//RS         Expr::MethodCall { receiver, args, .. } => {
+//RS             expr_uses(receiver, name, other);
+//RS             for a in args {
+//RS                 expr_uses(&a.expr, name, other);
+//RS             }
+//RS         }
+//RS         Expr::CallValue { callee, args, .. } => {
+//RS             expr_uses(callee, name, other);
+//RS             for a in args {
+//RS                 expr_uses(&a.expr, name, other);
+//RS             }
+//RS         }
+//RS         Expr::Binary(_, l, r, _) => {
+//RS             expr_uses(l, name, other);
+//RS             expr_uses(r, name, other);
+//RS         }
+//RS         Expr::Unary(_, inner, _)
+//RS         | Expr::Field(inner, _, _)
+//RS         | Expr::Deref(inner, _)
+//RS         | Expr::RawOf(inner, _)
+//RS         | Expr::Copy(inner, _)
+//RS         | Expr::Place(inner, _, _)
+//RS         | Expr::Tainted(inner, _, _)
+//RS         | Expr::Present(inner, _)
+//RS         | Expr::Ok(inner, _)
+//RS         | Expr::Err(inner, _) => expr_uses(inner, name, other),
+//RS         Expr::Try(inner, _, _, note) => {
+//RS             expr_uses(inner, name, other);
+//RS             if let Some(note) = note {
+//RS                 expr_uses(note, name, other);
+//RS             }
+//RS         }
+//RS         Expr::OptField { base, .. } => expr_uses(base, name, other),
+//RS         Expr::Index { base, index, .. } => {
+//RS             expr_uses(base, name, other);
+//RS             expr_uses(index, name, other);
+//RS         }
+//RS         Expr::Slice {
+//RS             base,
+//RS             start,
+//RS             end,
+//RS             range,
+//RS             ..
+//RS         } => {
+//RS             expr_uses(base, name, other);
+//RS             if let Some(range) = range {
+//RS                 expr_uses(range, name, other);
+//RS             } else {
+//RS                 expr_uses(start, name, other);
+//RS                 expr_uses(end, name, other);
+//RS             }
+//RS         }
+//RS         Expr::ListLit(items, _) => {
+//RS             for i in items {
+//RS                 expr_uses(i, name, other);
+//RS             }
+//RS         }
+//RS         Expr::MapLit(pairs, _) => {
+//RS             for (k, v) in pairs {
+//RS                 expr_uses(k, name, other);
+//RS                 expr_uses(v, name, other);
+//RS             }
+//RS         }
+//RS         Expr::StructLit { fields, .. } => {
+//RS             for (_, _, v) in fields {
+//RS                 expr_uses(v, name, other);
+//RS             }
+//RS         }
+//RS         Expr::TypedLit { body, .. } => {
+//RS             body.for_each_expr(|v| expr_uses(v, name, other));
+//RS         }
+//RS         Expr::TupleLit(fields, _, _) => {
+//RS             for (_, v) in fields {
+//RS                 expr_uses(v, name, other);
+//RS             }
+//RS         }
+//RS         Expr::EnumLit { args, .. } => {
+//RS             for a in args {
+//RS                 let e = match a {
+//RS                     crate::AST::EnumLitArg::Positional(e) => e,
+//RS                     crate::AST::EnumLitArg::Named { expr, .. } => expr,
+//RS                 };
+//RS                 expr_uses(e, name, other);
+//RS             }
+//RS         }
+//RS         Expr::Str(parts, _) => {
+//RS             for p in parts {
+//RS                 if let crate::AST::StrPart::Interp(inner, _) = p {
+//RS                     expr_uses(inner, name, other);
+//RS                 }
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS /// D-EFF1/D-SHAPE8: enforce declared effect-arrow bounds against inferred sets.
+//RS /// For each function (and method) carrying a row, the inferred set must be a
+//RS /// subset of the declared set — any extra effect is E0740.
+//RS pub(crate) fn check_effect_boundaries(
+//RS     items: &[Item],
+//RS     solved: &HashMap<String, EffectSet>,
+//RS     summaries: &HashMap<String, EffectSummary>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     fn unbounded_dispatch(
+//RS         key: &str,
+//RS         summaries: &HashMap<String, EffectSummary>,
+//RS         seen: &mut HashSet<String>,
+//RS     ) -> Option<(String, Span)> {
+//RS         if !seen.insert(key.to_string()) {
+//RS             return None;
+//RS         }
+//RS         let summary = summaries.get(key)?;
+//RS         for callee in &summary.edges {
+//RS             if summaries
+//RS                 .get(callee)
+//RS                 .is_some_and(|target| target.unbounded_trait_dispatch)
+//RS             {
+//RS                 let span = summary
+//RS                     .memory
+//RS                     .calls
+//RS                     .iter()
+//RS                     .find(|call| call.callee == *callee)
+//RS                     .map(|call| call.span)
+//RS                     .unwrap_or_else(|| Span::new(0, 0));
+//RS                 return Some((callee.clone(), span));
+//RS             }
+//RS             if let Some(found) = unbounded_dispatch(callee, summaries, seen) {
+//RS                 return Some(found);
+//RS             }
+//RS         }
+//RS         None
+//RS     }
+//RS 
+//RS     fn panic_site(
+//RS         key: &str,
+//RS         summaries: &HashMap<String, EffectSummary>,
+//RS         seen: &mut HashSet<String>,
+//RS     ) -> Option<String> {
+//RS         if !seen.insert(key.to_string()) {
+//RS             return None;
+//RS         }
+//RS         let summary = summaries.get(key)?;
+//RS         if summary.maximal
+//RS             || effect_set_has_root(&summary.direct, Effect::Panic)
+//RS             || summary.edges.contains("__jet_panic__")
+//RS         {
+//RS             return Some(key.to_string());
+//RS         }
+//RS         for callee in &summary.edges {
+//RS             if let Some(site) = panic_site(callee, summaries, seen) {
+//RS                 return Some(site);
+//RS             }
+//RS         }
+//RS         None
+//RS     }
+//RS 
+//RS     fn check_one(
+//RS         f: &Func,
+//RS         owner: Option<&str>,
+//RS         identity: Option<&str>,
+//RS         solved: &HashMap<String, EffectSet>,
+//RS         summaries: &HashMap<String, EffectSummary>,
+//RS         diags: &mut Vec<Diagnostic>,
+//RS     ) {
+//RS         let Some(declared_list) = &f.declared_effects else {
+//RS             return;
+//RS         };
+//RS         let key = identity
+//RS             .map(str::to_owned)
+//RS             .unwrap_or_else(|| effect_key(owner, &f.name));
+//RS         if let Some((trait_method, span)) = unbounded_dispatch(&key, summaries, &mut HashSet::new())
+//RS         {
+//RS             diags.push(e0743(&trait_method, span));
+//RS             return;
+//RS         }
+//RS         // Validate names and build the declared set; an unknown name is E0119.
+//RS         // A bad name leaves the declared set incomplete, so skip the subset
+//RS         // check to avoid a misleading E0740 piled on top of the real problem.
+//RS         // D-PROP2=A: names starting with `!` are prohibitions — validated separately.
+//RS         let mut declared: EffectSet = EffectSet::new();
+//RS         let mut prohibited: EffectSet = EffectSet::new();
+//RS         let mut bad_name = false;
+//RS         let mut open_row = false;
+//RS         for (name, span) in declared_list {
+//RS             let (is_prohibited, base_name) = if name.starts_with('!') {
+//RS                 (true, &name[1..])
+//RS             } else {
+//RS                 (false, name.as_str())
+//RS             };
+//RS             if effect_row_var(base_name).is_some() {
+//RS                 open_row = true;
+//RS                 continue;
+//RS             }
+//RS             match parse_effect_name(base_name) {
+//RS                 Some(e) => {
+//RS                     if is_prohibited {
+//RS                         // D-AUTHORITY-MEM1: memory denials are checked by the
+//RS                         // shared memory-event proof. They still parse and
+//RS                         // publish through the ordinary effect row, but the
+//RS                         // generic ambient-effect diagnostic must not duplicate
+//RS                         // the bounded/unbounded memory diagnostic.
+//RS                         if super::effect_root(&e) != "Mem" {
+//RS                             prohibited.insert(e);
+//RS                         }
+//RS                     } else if let Some(diagnostic) =
+//RS                         super::reject_positive_deny_only_effect(&e, *span)
+//RS                     {
+//RS                         diags.push(diagnostic);
+//RS                         bad_name = true;
+//RS                     } else {
+//RS                         declared.insert(e);
+//RS                     }
+//RS                 }
+//RS                 None => {
+//RS                     diags.push(unknown_effect(base_name, *span));
+//RS                     bad_name = true;
+//RS                 }
+//RS             }
+//RS         }
+//RS         if bad_name {
+//RS             return;
+//RS         }
+//RS         let inferred = solved.get(&key).cloned().unwrap_or_default();
+//RS         // E0740: only check positive bounds — prohibition-only annotations (`#(!Net)`)
+//RS         // have no upper-bound constraint; only the prohibition check applies.
+//RS         // D-EFFTREE1: `declared` may name ancestor roots — an ancestor entry
+//RS         // covers any effect at or below it, so this is a subsumption-aware
+//RS         // check, not a flat set difference.
+//RS         if !open_row && !declared.is_empty() {
+//RS             let over: EffectSet = effects_uncovered(&inferred, &declared);
+//RS             if !over.is_empty() {
+//RS                 let span = declared_list
+//RS                     .first()
+//RS                     .map(|(_, s)| *s)
+//RS                     .unwrap_or(f.name_span);
+//RS                 diags.push(e0740(&f.name, &over, &declared, span));
+//RS             }
+//RS         }
+//RS         // D-PROP1=A: check prohibitions — the inferred transitive set must not
+//RS         // contain any prohibited effect. E0749 names the effect and the function.
+//RS         // D-EFFTREE1: symmetric ancestor subsumption — a prohibited root
+//RS         // prohibits its whole subtree, so this is coverage, not intersection.
+//RS         if !prohibited.is_empty() {
+//RS             let reached_prohibited: EffectSet = effects_covered(&inferred, &prohibited);
+//RS             if !reached_prohibited.is_empty() {
+//RS                 let span = declared_list
+//RS                     .iter()
+//RS                     .find(|(n, _)| n.starts_with('!'))
+//RS                     .map(|(_, s)| *s)
+//RS                     .unwrap_or(f.name_span);
+//RS                 if effect_set_has_root(&reached_prohibited, Effect::Panic) {
+//RS                     let site = panic_site(&key, summaries, &mut HashSet::new())
+//RS                         .unwrap_or_else(|| "the reachable call graph".to_string());
+//RS                     diags.push(e0749_panic(&f.name, &site, &prohibited, span));
+//RS                 } else {
+//RS                     diags.push(e0749(&f.name, &reached_prohibited, &prohibited, span));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(f) => check_one(f, None, None, solved, summaries, diags),
+//RS             Item::Impl(i) => {
+//RS                 for m in &i.methods {
+//RS                     check_one(m, Some(&i.type_name), None, solved, summaries, diags);
+//RS                 }
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 for m in &s.methods {
+//RS                     check_one(m, Some(&s.name), None, solved, summaries, diags);
+//RS                 }
+//RS                 for block in &s.trait_impls {
+//RS                     for m in &block.methods {
+//RS                         check_one(m, Some(&s.name), None, solved, summaries, diags);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 for m in &e.methods {
+//RS                     check_one(m, Some(&e.name), None, solved, summaries, diags);
+//RS                 }
+//RS             }
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     for item in body {
+//RS                         if let Item::Func(f) = item {
+//RS                             let identity = super::inline_effect_key(&module.name, &f.name);
+//RS                             check_one(f, None, Some(&identity), solved, summaries, diags);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     // D-EFF3: trait-method effect bounds. Build the per-method bounds from every
+//RS     // trait, the (trait, type, method) list from every trait impl, then enforce
+//RS     // each impl's inferred effects ⊆ the trait's bound (E0742).
+//RS     let mut trait_bounds: HashMap<(String, String), EffectSet> = HashMap::new();
+//RS     for (trait_name, method) in [
+//RS         (Syntax::TRAIT_ADD, "add"),
+//RS         (Syntax::TRAIT_SUB, "sub"),
+//RS         (Syntax::TRAIT_MUL, "mul"),
+//RS         (Syntax::TRAIT_DIV, "div"),
+//RS         (Syntax::TRAIT_EQUATABLE, "equal"),
+//RS         (Syntax::TRAIT_COMPARABLE, "compare"),
+//RS     ] {
+//RS         trait_bounds.insert(
+//RS             (trait_name.to_string(), method.to_string()),
+//RS             EffectSet::new(),
+//RS         );
+//RS     }
+//RS     let mut impls: Vec<(String, String, String, Span)> = Vec::new();
+//RS     for item in items {
+//RS         if let Item::Trait(t) = item {
+//RS             for m in &t.methods {
+//RS                 let bound = match (m.is_pure, &m.declared_effects) {
+//RS                     (true, _) => Some(EffectSet::new()), // `#Pure` → empty bound
+//RS                     (false, Some(list)) => {
+//RS                         let mut set = EffectSet::new();
+//RS                         let mut ok = true;
+//RS                         let mut open = false;
+//RS                         for (name, span) in list {
+//RS                             if effect_row_var(name).is_some() {
+//RS                                 open = true;
+//RS                                 continue;
+//RS                             }
+//RS                             match parse_effect_name(name) {
+//RS                                 Some(e) => {
+//RS                                     if let Some(diagnostic) =
+//RS                                         super::reject_positive_deny_only_effect(&e, *span)
+//RS                                     {
+//RS                                         diags.push(diagnostic);
+//RS                                         ok = false;
+//RS                                     } else {
+//RS                                         set.insert(e);
+//RS                                     }
+//RS                                 }
+//RS                                 None => {
+//RS                                     diags.push(unknown_effect(name, *span));
+//RS                                     ok = false;
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         if ok && !open {
+//RS                             Some(set)
+//RS                         } else {
+//RS                             None
+//RS                         }
+//RS                     }
+//RS                     (false, None) => None, // un-annotated: per-impl, no obligation
+//RS                 };
+//RS                 if let Some(b) = bound {
+//RS                     trait_bounds.insert((t.name.clone(), m.name.clone()), b);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut push_impl = |trait_name: &str, type_name: &str, methods: &[Func]| {
+//RS         for m in methods {
+//RS             impls.push((
+//RS                 trait_name.to_string(),
+//RS                 type_name.to_string(),
+//RS                 m.name.clone(),
+//RS                 m.name_span,
+//RS             ));
+//RS         }
+//RS     };
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Impl(i) => {
+//RS                 if let Some(t) = &i.trait_name {
+//RS                     push_impl(t, &i.type_name, &i.methods);
+//RS                 }
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 for block in &s.trait_impls {
+//RS                     push_impl(&block.trait_name, &s.name, &block.methods);
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 for block in &e.trait_impls {
+//RS                     push_impl(&block.trait_name, &e.name, &block.methods);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     check_trait_obligations(&impls, &trait_bounds, solved, diags);
+//RS }
+//RS 
+//RS /// D-EFF1: the key a function is recorded under in the effect-summary map.
+//RS /// `Type::method` for methods (disambiguates same-named methods across types),
+//RS /// the bare name for top-level functions (so bare-call edges resolve).
+//RS pub fn effect_key(owner_type: Option<&str>, name: &str) -> String {
+//RS     match owner_type {
+//RS         Some(t) => format!("{t}::{name}"),
+//RS         None => name.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS /// D-ERR-CONV: canonical Rust function name for the `impl From -> To` conversion.
+//RS /// Used by sema (to stamp into `TryConvert::Typed`) and codegen (to define + call it).
+//RS pub fn error_conv_fn_name(from: &str, to: &str) -> String {
+//RS     let f = error_conv_name_part(from);
+//RS     let t = error_conv_name_part(to);
+//RS     jet_foundation::Names::mangle(&format!("errconv_{f}_to_{t}"))
+//RS }
+//RS 
+//RS fn error_conv_name_part(name: &str) -> String {
+//RS     if name.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+//RS         return name.to_string();
+//RS     }
+//RS 
+//RS     let mut encoded = String::with_capacity(name.len() * 2);
+//RS     for byte in name.bytes() {
+//RS         encoded.push_str(&format!("{byte:02x}"));
+//RS     }
+//RS     format!("__{}_{}", name.len(), encoded)
+//RS }
+//RS 
+//RS pub(crate) fn already_defined(name: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0118",
+//RS         format!("the name `{}` is already taken here", name),
+//RS         "inside one function, each name refers to exactly one thing".to_string(),
+//RS         format!(
+//RS             "pick a different name, or assign to the existing one with `{} = ...`",
+//RS             name
+//RS         ),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E0105: a top-level definition's name collides with another item. Every
+//RS /// item kind shares the same `what` and `fix`; callers pass the kind-specific
+//RS /// `why` (functions, structs, enums, consts, traits, tests, …).
+//RS pub(crate) fn defined_twice(name: &str, why: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0105",
+//RS         format!("`{}` is defined twice", name),
+//RS         why.to_string(),
+//RS         "rename or remove one of the definitions".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E0105: a method's name collides with a field on the same type.
+//RS pub(crate) fn method_field_clash(method: &str, type_name: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0105",
+//RS         format!(
+//RS             "method `{}` can't share a name with a field on `{}`",
+//RS             method, type_name
+//RS         ),
+//RS         "a type's methods and fields must have different names".to_string(),
+//RS         "rename the method or the field".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E0105: a method name appears twice on the same type.
+//RS /// `is_ctor` is true when the duplicate is a no-`self` static (a named
+//RS /// constructor per D-CTOR1), so the fix hint teaches constructor naming.
+//RS pub(crate) fn method_defined_twice(
+//RS     method: &str,
+//RS     type_name: &str,
+//RS     span: Span,
+//RS     is_ctor: bool,
+//RS ) -> Diagnostic {
+//RS     let fix = if is_ctor {
+//RS         format!(
+//RS             "named constructors must each have a unique name — call them `{}.{}` and `{}.other_name`",
+//RS             type_name, method, type_name
+//RS         )
+//RS     } else {
+//RS         "rename or remove one of the definitions".to_string()
+//RS     };
+//RS     Diagnostic::error(
+//RS         "E0105",
+//RS         format!("method `{}` is defined twice on `{}`", method, type_name),
+//RS         "each method name may appear only once on a type".to_string(),
+//RS         fix,
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn impl_type_exists(
+//RS     type_name: &str,
+//RS     registry: &TypeRegistry,
+//RS     imports: &HashMap<String, usize>,
+//RS     states: Option<&[ModuleState]>,
+//RS ) -> bool {
+//RS     if registry.contains(type_name) {
+//RS         return true;
+//RS     }
+//RS     if let Some((alias, local)) = type_name.rsplit_once('.') {
+//RS         let Some(states) = states else {
+//RS             return false;
+//RS         };
+//RS         let Some(&idx) = imports.get(alias) else {
+//RS             return false;
+//RS         };
+//RS         return states[idx].registry.contains(local);
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS pub(crate) fn synthesize_impls(items: &mut Vec<Item>) {
+//RS     // Build trait_name -> method sigs from the AST (no trait_reg needed).
+//RS     let mut trait_methods: HashMap<String, Vec<crate::AST::TraitMethodSig>> = HashMap::new();
+//RS     for item in items.iter() {
+//RS         if let Item::Trait(t) = item {
+//RS             trait_methods.insert(t.name.clone(), t.methods.clone());
+//RS         }
+//RS     }
+//RS 
+//RS     // Build (type_name, trait_name) impl pairs and struct field types from the AST.
+//RS     // Used to guard delegation synthesis — only synthesize if the field type actually
+//RS     // implements the trait (error is emitted later by E2401 validation if not).
+//RS     let mut impl_pairs: std::collections::HashSet<(String, String)> = Default::default();
+//RS     let mut struct_field_types: HashMap<String, HashMap<String, String>> = HashMap::new();
+//RS     for item in items.iter() {
+//RS         match item {
+//RS             Item::Impl(i) => {
+//RS                 if let Some(trait_name) = &i.trait_name {
+//RS                     if i.delegation_field.is_none() {
+//RS                         impl_pairs.insert((i.type_name.clone(), trait_name.clone()));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 // Also check inline trait impls (impl Trait { … } inside struct body)
+//RS                 for block in &s.trait_impls {
+//RS                     impl_pairs.insert((s.name.clone(), block.trait_name.clone()));
+//RS                 }
+//RS                 let fields: HashMap<String, String> = s
+//RS                     .fields
+//RS                     .iter()
+//RS                     .map(|f| (f.name.clone(), f.ty.name()))
+//RS                     .collect();
+//RS                 struct_field_types.insert(s.name.clone(), fields);
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     // S62: delegation — build forwarding Func nodes only when the field type
+//RS     // implements the trait (guards against generating invalid code for E2401 cases).
+//RS     let mut delegations: Vec<(usize, String, String, String)> = Vec::new(); // (idx, type_name, trait_name, field_name)
+//RS     for (idx, item) in items.iter().enumerate() {
+//RS         if let Item::Impl(i) = item {
+//RS             if let (Some(trait_name), Some(field_name)) = (&i.trait_name, &i.delegation_field) {
+//RS                 delegations.push((
+//RS                     idx,
+//RS                     i.type_name.clone(),
+//RS                     trait_name.clone(),
+//RS                     field_name.clone(),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     for (idx, type_name, trait_name, field_name) in delegations {
+//RS         // Check if the field type implements the trait in the AST.
+//RS         let field_type_name = struct_field_types
+//RS             .get(&type_name)
+//RS             .and_then(|fields| fields.get(&field_name))
+//RS             .cloned();
+//RS         let can_delegate = field_type_name
+//RS             .as_ref()
+//RS             .is_some_and(|ft| impl_pairs.contains(&(ft.clone(), trait_name.clone())));
+//RS         if !can_delegate {
+//RS             // Skip synthesis; E2401 validation will emit the appropriate error.
+//RS             continue;
+//RS         }
+//RS         if let Some(sigs) = trait_methods.get(&trait_name) {
+//RS             let synthesized: Vec<crate::AST::Func> = sigs
+//RS                 .iter()
+//RS                 .map(|m| synthesize_delegation_method(m, &field_name))
+//RS                 .collect();
+//RS             if let Item::Impl(i) = &mut items[idx] {
+//RS                 i.methods = synthesized;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // D-LIB2: default method body injection.
+//RS     let mut trait_impls_to_fill: Vec<(usize, String)> = Vec::new();
+//RS     for (idx, item) in items.iter().enumerate() {
+//RS         if let Item::Impl(i) = item {
+//RS             if let Some(trait_name) = &i.trait_name {
+//RS                 if i.delegation_field.is_none() {
+//RS                     trait_impls_to_fill.push((idx, trait_name.clone()));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     for (idx, trait_name) in trait_impls_to_fill {
+//RS         if let Some(sigs) = trait_methods.get(&trait_name) {
+//RS             let mut extras: Vec<crate::AST::Func> = Vec::new();
+//RS             if let Item::Impl(i) = &items[idx] {
+//RS                 let provided: std::collections::HashSet<String> =
+//RS                     i.methods.iter().map(|m| m.name.clone()).collect();
+//RS                 for sig in sigs {
+//RS                     if !provided.contains(&sig.name) {
+//RS                         if let Some(body) = &sig.default_body {
+//RS                             extras.push(synthesize_default_method(sig, body));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if !extras.is_empty() {
+//RS                 if let Item::Impl(i) = &mut items[idx] {
+//RS                     i.methods.extend(extras);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // S62: build a forwarding `Func` for one trait method sig, delegating to
+//RS // `self.<field>.<method>(args…)`.
+//RS pub(crate) fn synthesize_delegation_method(
+//RS     sig: &crate::AST::TraitMethodSig,
+//RS     field_name: &str,
+//RS ) -> crate::AST::Func {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::{AccessConvention, CallArg, CallArgFlags, Expr, Func, Param, Stmt, Type};
+//RS 
+//RS     let zero = Span::new(0, 0);
+//RS 
+//RS     // Build the forwarding call: self.<field>.<method>(non-self params...)
+//RS     let args: Vec<CallArg> = sig
+//RS         .params
+//RS         .iter()
+//RS         .filter(|p| p.name != Syntax::KW_SELF)
+//RS         .map(|p| CallArg {
+//RS             convention: p.convention,
+//RS             expr: Expr::Ident(p.name.clone(), zero),
+//RS             span: zero,
+//RS             flags: CallArgFlags::default(),
+//RS             label: None,
+//RS             spread: false,
+//RS         })
+//RS         .collect();
+//RS 
+//RS     let forward_call = Expr::MethodCall {
+//RS         receiver: Box::new(Expr::Field(
+//RS             Box::new(Expr::Ident(Syntax::KW_SELF.to_string(), zero)),
+//RS             field_name.to_string(),
+//RS             zero,
+//RS         )),
+//RS         method: sig.name.clone(),
+//RS         method_span: zero,
+//RS         owner_type_args: Vec::new(),
+//RS         type_args: Vec::new(),
+//RS         args,
+//RS         recv_type: None,
+//RS         resolved_ret: None,
+//RS         operator_rhs: None,
+//RS         checked_widen: false,
+//RS     };
+//RS 
+//RS     // Wrap in a return stmt if there's a return type; otherwise a bare expr stmt.
+//RS     let body_stmt = if sig.return_type.is_some() {
+//RS         Stmt::Return(Some(forward_call), zero)
+//RS     } else {
+//RS         Stmt::Expr(forward_call)
+//RS     };
+//RS 
+//RS     // Build the `self` param.
+//RS     let self_param = Param {
+//RS         convention: AccessConvention::Read,
+//RS         root: false,
+//RS         name: Syntax::KW_SELF.to_string(),
+//RS         name_span: zero,
+//RS         ty: Type::Named(String::new()), // S27: sema fills in the actual type name
+//RS         ty_span: zero,
+//RS         default: None,
+//RS         variadic: false,
+//RS         variadic_bound_list: None,
+//RS         declared_view_from_names: None,
+//RS         public_label: None,
+//RS         zone: crate::AST::ParamZone::Either,
+//RS     };
+//RS 
+//RS     let mut params = vec![self_param];
+//RS     params.extend(
+//RS         sig.params
+//RS             .iter()
+//RS             .filter(|p| p.name != Syntax::KW_SELF)
+//RS             .cloned(),
+//RS     );
+//RS 
+//RS     Func {
+//RS         span: sig.name_span,
+//RS         is_comptime: false,
+//RS         is_pub: false,
+//RS         is_package_pub: false,
+//RS         external_type: None,
+//RS         name: sig.name.clone(),
+//RS         name_span: sig.name_span,
+//RS         meta: None,
+//RS         type_params: vec![],
+//RS         head_pattern: None,
+//RS         params,
+//RS         return_type: sig.return_type.clone(),
+//RS         return_type_span: None,
+//RS         return_view_provenance: None,
+//RS         declared_return_view_provenance: None,
+//RS         gc_return: false,
+//RS         diverges: false,
+//RS         gc_scope: false,
+//RS         is_unsafe: false,
+//RS         unsafe_reason: None,
+//RS         unsafe_span: None,
+//RS         is_pure: false,
+//RS         is_reactive: false,
+//RS         reactive_upgrades: Vec::new(),
+//RS         is_replayable: false,
+//RS         replayable_span: None,
+//RS         is_job: false,
+//RS         job_span: None,
+//RS         every: None,
+//RS         job_metadata: None,
+//RS         is_must_use: false,
+//RS         must_use_span: None,
+//RS         maturity: None,
+//RS         maturity_span: None,
+//RS         kernel: None,
+//RS         is_inline: false,
+//RS         is_inline_always: false,
+//RS         inline_span: None,
+//RS         is_sanitizer: false,
+//RS         scrub_tag: None,
+//RS         declared_effects: None,
+//RS         effect_via: None,
+//RS         state_requires: None,
+//RS         state_transition: None,
+//RS         web_marker: None,
+//RS         pre: Vec::new(),
+//RS         post: Vec::new(),
+//RS         inline_foreign: None,
+//RS         undo: None,
+//RS         markers: Vec::new(),
+//RS         compiler_generated: false,
+//RS         body: vec![body_stmt],
+//RS     }
+//RS }
+//RS 
+//RS // D-LIB2: build a Func that uses the default body from the trait definition.
+//RS pub(crate) fn synthesize_default_method(
+//RS     sig: &crate::AST::TraitMethodSig,
+//RS     body: &[crate::AST::Stmt],
+//RS ) -> crate::AST::Func {
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::{AccessConvention, Func, Param, Type};
+//RS 
+//RS     let zero = Span::new(0, 0);
+//RS     let self_param = Param {
+//RS         convention: AccessConvention::Read,
+//RS         root: false,
+//RS         name: Syntax::KW_SELF.to_string(),
+//RS         name_span: zero,
+//RS         ty: Type::Named(String::new()), // S27: sema fills in the actual type name
+//RS         ty_span: zero,
+//RS         default: None,
+//RS         variadic: false,
+//RS         variadic_bound_list: None,
+//RS         declared_view_from_names: None,
+//RS         public_label: None,
+//RS         zone: crate::AST::ParamZone::Either,
+//RS     };
+//RS     let mut params = vec![self_param];
+//RS     params.extend(
+//RS         sig.params
+//RS             .iter()
+//RS             .filter(|p| p.name != Syntax::KW_SELF)
+//RS             .cloned(),
+//RS     );
+//RS 
+//RS     Func {
+//RS         span: sig.name_span,
+//RS         is_comptime: false,
+//RS         is_pub: false,
+//RS         is_package_pub: false,
+//RS         external_type: None,
+//RS         name: sig.name.clone(),
+//RS         name_span: sig.name_span,
+//RS         meta: None,
+//RS         type_params: vec![],
+//RS         head_pattern: None,
+//RS         params,
+//RS         return_type: sig.return_type.clone(),
+//RS         return_type_span: None,
+//RS         return_view_provenance: None,
+//RS         declared_return_view_provenance: None,
+//RS         gc_return: false,
+//RS         diverges: false,
+//RS         gc_scope: false,
+//RS         is_unsafe: false,
+//RS         unsafe_reason: None,
+//RS         unsafe_span: None,
+//RS         is_pure: false,
+//RS         is_reactive: false,
+//RS         reactive_upgrades: Vec::new(),
+//RS         is_replayable: false,
+//RS         replayable_span: None,
+//RS         is_job: false,
+//RS         job_span: None,
+//RS         every: None,
+//RS         job_metadata: None,
+//RS         is_must_use: false,
+//RS         must_use_span: None,
+//RS         maturity: None,
+//RS         maturity_span: None,
+//RS         kernel: None,
+//RS         is_inline: false,
+//RS         is_inline_always: false,
+//RS         inline_span: None,
+//RS         is_sanitizer: false,
+//RS         scrub_tag: None,
+//RS         declared_effects: None,
+//RS         effect_via: None,
+//RS         state_requires: None,
+//RS         state_transition: None,
+//RS         web_marker: None,
+//RS         pre: Vec::new(),
+//RS         post: Vec::new(),
+//RS         inline_foreign: None,
+//RS         undo: None,
+//RS         markers: Vec::new(),
+//RS         compiler_generated: false,
+//RS         body: body.to_vec(),
+//RS     }
+//RS }
+//RS 
+//RS // ─── D-NARG-D2: default-expression forward-reference check (E0126) ───────────
+//RS 
+//RS /// Check every default expression in a function/method for forward references —
+//RS /// i.e. an Ident that names a parameter declared *after* the one being defaulted.
+//RS /// Emits E0126 for each forward reference found.
+//RS /// `params` excludes `self`; `fn_name` is for the error message.
+//RS pub(crate) fn check_default_forward_refs(
+//RS     params: &[crate::AST::Param],
+//RS     fn_name: &str,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+//RS     for (i, p) in params.iter().enumerate() {
+//RS         let Some(default) = &p.default else { continue };
+//RS         let forward_refs = super::find_forward_refs(default, &param_names, i);
+//RS         for (fwd_name, fwd_span) in forward_refs {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0126",
+//RS                 format!(
+//RS                     "default for `{}` in `{}` references `{}`, which comes after it",
+//RS                     p.name, fn_name, fwd_name
+//RS                 ),
+//RS                 "defaults fill left to right; a parameter isn't in scope until it appears in the list".to_string(),
+//RS                 format!(
+//RS                     "reorder the parameters so `{}` comes before `{}`, or use a constant default",
+//RS                     fwd_name, p.name
+//RS                 ),
+//RS                 Some(fwd_span),
+//RS             ));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // ─── S60 / E2-M16: purity checking ───────────────────────────────────────────
+//RS 
+//RS #[cfg(test)]
+//RS mod structure_tests {
+//RS     #[test]
+//RS     fn registration_stays_split_without_reordering_passes() {
+//RS         const MAX_MODULE_LINES: usize = 2500;
+//RS         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS         let read = |relative: &str| std::fs::read_to_string(root.join(relative)).unwrap();
+//RS         let registration = read("src/Sema/Registration.rs");
+//RS         let items = read("src/Sema/Registration/Items.rs");
+//RS         let serde = read("src/Sema/Registration/Serde.rs");
+//RS         let production = registration
+//RS             .split("#[cfg(test)]\nmod structure_tests")
+//RS             .next()
+//RS             .unwrap();
+//RS         for (relative, source) in [
+//RS             ("src/Sema/Registration.rs", production),
+//RS             ("src/Sema/Registration/Items.rs", items.as_str()),
+//RS             ("src/Sema/Registration/Serde.rs", serde.as_str()),
+//RS         ] {
+//RS             assert!(
+//RS                 source.lines().count() < MAX_MODULE_LINES,
+//RS                 "{relative} must stay below the card #510 module boundary"
+//RS             );
+//RS             assert!(!source.contains("include!("));
+//RS             assert!(!source.contains("#[path"));
+//RS         }
+//RS 
+//RS         assert!(production.contains("\nmod Items;\nmod Serde;\n"));
+//RS     }
+//RS }
+// END-PORT-PENDING 0438 crates/jet-sema/src/Sema/Registration.rs:1-2144
+

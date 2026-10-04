@@ -21,7 +21,6 @@ use jet_foundation.[
     TextEdit,
     Type,
     diagnostic_with_edit,
-    expr_optional_method_call_as_call,
     expr_span,
     is_compute_tensor_family,
     mir_boundary_head_carrier_module,
@@ -383,7 +382,7 @@ fn sema_expression_optional_field(base: Expr, member: String, member_span: Span,
 // receiver is present; its result lifts to `R?` and flattens like `?.field`.
 // The call keeps its own failure rule: a fallible method propagates exactly as
 // the same call on a plain receiver would.
-fn sema_expression_optional_method_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_optional_method_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span, receiver_span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked_base :: sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     inner_ty :: if checked_base.ty == {
         .Option(value) -> value
@@ -392,7 +391,6 @@ fn sema_expression_optional_method_call(receiver: Expr, method: String, method_s
             return None
         }
     }
-    receiver_span :: expr_span(receiver)
     name :: "__jet_optional_receiver_{method_span.start}"
     sema_scope_enter(&scopes, &state, "optional-call@{method_span.start}")
     module_name :: environment.module_identity
@@ -413,7 +411,9 @@ fn sema_expression_optional_method_call(receiver: Expr, method: String, method_s
         return None
     }
     sema_ownership_declare_binding(&state, symbol, false)
-    call_expr :: expr_optional_method_call_as_call(Expr.Ident{name: name, span: receiver_span}, method, method_span, type_args, args)
+    // Semantic lowering creates the real present-payload call; syntax visitors
+    // borrow original node parts instead and never use this construction.
+    call_expr :: Expr.MethodCall{receiver: Expr.Ident{name: name, span: receiver_span}, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
     checked_call := sema_check_expression(call_expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     sema_scope_leave(&scopes, &state)
     call :: checked_call ?? return None

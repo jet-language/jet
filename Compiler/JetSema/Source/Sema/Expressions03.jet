@@ -1,0 +1,1155 @@
+// PORT-PENDING 0395 crates-jet-sema-src-sema-checkerinfer-binary-slice-1: crates/jet-sema/src/Sema/CheckerInfer/binary.rs:1-1151
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Type inference: binary operators and overflow/op-mismatch checks.
+//RS //!
+//RS //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
+//RS 
+//RS use super::*;
+//RS use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+//RS use crate::Generics::{e0905, substitute_type, COMPARABLE};
+//RS use crate::Sema::{KnowledgeGate, KnowledgePlane};
+//RS use crate::AST::{BinOp, CtValue, Dimension, Expr, StrPart, Type};
+//RS use std::collections::HashMap;
+//RS 
+//RS /// D-EXPSEM1=A: a written-out negative exponent, such as the `-1` in `2 ^ -1`.
+//RS /// Only a spelled numeral counts. An exponent whose sign the checker cannot
+//RS /// see keeps the whole-number result type, and the Prelude traps if the value
+//RS /// turns out negative at run time.
+//RS fn is_written_negative_int(expr: &Expr) -> bool {
+//RS     match expr {
+//RS         Expr::Paren(inner, _) => is_written_negative_int(inner),
+//RS         Expr::Int(value, _, _, raw) => {
+//RS             super::exact_integer_literal(*value, raw.as_deref()).negative
+//RS         }
+//RS         Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match inner.as_ref() {
+//RS             Expr::Int(value, _, _, raw) => {
+//RS                 let value = super::exact_integer_literal(*value, raw.as_deref());
+//RS                 !value.is_zero() && !value.negative
+//RS             }
+//RS             _ => false,
+//RS         },
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn simple_text_operand(expr: &Expr) -> Option<&str> {
+//RS     match expr.without_parens() {
+//RS         Expr::Ident(name, _) => Some(name.as_str()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn known_comptime_value(expr: &Expr) -> Option<CtValue> {
+//RS     match expr {
+//RS         Expr::ComptimeName {
+//RS             value: Some(value), ..
+//RS         } => Some(value.clone()),
+//RS         Expr::EnumLit {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS             ..
+//RS         } if args.is_empty() && !type_name.is_empty() => Some(CtValue::Enum {
+//RS             type_name: type_name.clone(),
+//RS             variant: variant.clone(),
+//RS             args: Vec::new(),
+//RS         }),
+//RS         Expr::Paren(inner, _) | Expr::Copy(inner, _) => known_comptime_value(inner),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn is_folded_fact_expr(expr: &Expr) -> bool {
+//RS     match expr {
+//RS         Expr::ComptimeName { value: Some(_), .. } => true,
+//RS         Expr::Paren(inner, _) | Expr::Copy(inner, _) => is_folded_fact_expr(inner),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     fn path_string_source(&self, name: &str) -> Option<&str> {
+//RS         self.flow
+//RS             .path_strings
+//RS             .get(name)
+//RS             .map(|fact| fact.source.as_str())
+//RS     }
+//RS 
+//RS     fn path_ident(expr: &Expr) -> Option<&str> {
+//RS         match expr.without_parens() {
+//RS             Expr::Ident(name, _) => Some(name.as_str()),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn path_prefix_guard(expr: &Expr) -> Option<(&str, &str)> {
+//RS         let Expr::Unary(crate::AST::UnOp::Not, inner, _) = expr.without_parens() else {
+//RS             return None;
+//RS         };
+//RS         let Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             ..
+//RS         } = inner.without_parens()
+//RS         else {
+//RS             return None;
+//RS         };
+//RS         if method != "starts_with" || args.len() != 1 || args[0].label.is_some() || args[0].spread {
+//RS             return None;
+//RS         }
+//RS         let candidate = Self::path_ident(receiver)?;
+//RS         let Expr::Str(parts, _) = args[0].expr.without_parens() else {
+//RS             return None;
+//RS         };
+//RS         let [StrPart::Interp(base, crate::AST::StrFormat::Display), StrPart::Lit(separator)] =
+//RS             parts.as_slice()
+//RS         else {
+//RS             return None;
+//RS         };
+//RS         if separator != "/" {
+//RS             return None;
+//RS         }
+//RS         Some((candidate, Self::path_ident(base)?))
+//RS     }
+//RS 
+//RS     /// D-PATH-CONTAINMENT1=A: both strings must retain provenance from a
+//RS     /// normalized typed Path, and the Boolean expression must be the exact
+//RS     /// separator-aware prefix guard. String-only and physical/symlink policy
+//RS     /// checks do not satisfy this proof.
+//RS     pub(crate) fn path_containment_string_prefix_edit(
+//RS         &self,
+//RS         lhs: &Expr,
+//RS         rhs: &Expr,
+//RS         span: Span,
+//RS     ) -> Option<TextEdit> {
+//RS         let (equality, guard) = if Self::path_prefix_guard(rhs).is_some() {
+//RS             (lhs, rhs)
+//RS         } else if Self::path_prefix_guard(lhs).is_some() {
+//RS             (rhs, lhs)
+//RS         } else {
+//RS             return None;
+//RS         };
+//RS         let (candidate, base) = Self::path_prefix_guard(guard)?;
+//RS         if candidate == base {
+//RS             return None;
+//RS         }
+//RS         let Expr::Binary(BinOp::Ne, left, right, _) = equality.without_parens() else {
+//RS             return None;
+//RS         };
+//RS         let equal_names = match (Self::path_ident(left), Self::path_ident(right)) {
+//RS             (Some(left), Some(right)) if left == candidate && right == base => true,
+//RS             (Some(left), Some(right)) if left == base && right == candidate => true,
+//RS             _ => false,
+//RS         };
+//RS         if !equal_names {
+//RS             return None;
+//RS         }
+//RS         let candidate_source = self.path_string_source(candidate)?;
+//RS         let base_source = self.path_string_source(base)?;
+//RS         if !self
+//RS             .lookup(candidate)
+//RS             .is_some_and(|info| info.ty == Type::String)
+//RS             || !self
+//RS                 .lookup(base)
+//RS                 .is_some_and(|info| info.ty == Type::String)
+//RS         {
+//RS             return None;
+//RS         }
+//RS         Some(TextEdit {
+//RS             span,
+//RS             // The recognized idiom is the negative guard (`!=` plus a
+//RS             // negated separator-aware prefix). Preserve that polarity while
+//RS             // moving the policy to the typed Path relation.
+//RS             new_text: format!("!{candidate_source}.is_within({base_source})"),
+//RS         })
+//RS     }
+//RS 
+//RS     fn is_complex_type(ty: &Type) -> bool {
+//RS         matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_COMPLEX)
+//RS     }
+//RS 
+//RS     fn is_complex_scalar(ty: &Type) -> bool {
+//RS         matches!(
+//RS             ty,
+//RS             Type::Int | Type::IntN { .. } | Type::Float | Type::Float32
+//RS         )
+//RS     }
+//RS 
+//RS     fn complexize_operand(&mut self, expr: &mut Box<Expr>, span: Span) -> Option<Type> {
+//RS         let original = std::mem::replace(expr, Box::new(Expr::Absent(span)));
+//RS         *expr = Box::new(Expr::Call(crate::AST::Call {
+//RS             name: crate::Syntax::TYPE_COMPLEX.to_string(),
+//RS             name_span: span,
+//RS             type_args: Vec::new(),
+//RS             args: vec![
+//RS                 crate::AST::CallArg {
+//RS                     convention: crate::AST::AccessConvention::Read,
+//RS                     expr: *original,
+//RS                     span,
+//RS                     flags: crate::AST::CallArgFlags::default(),
+//RS                     label: None,
+//RS                     spread: false,
+//RS                 },
+//RS                 crate::AST::CallArg {
+//RS                     convention: crate::AST::AccessConvention::Read,
+//RS                     expr: Expr::Float(0.0, span, false, None),
+//RS                     span,
+//RS                     flags: crate::AST::CallArgFlags::default(),
+//RS                     label: None,
+//RS                     spread: false,
+//RS                 },
+//RS             ],
+//RS             resolved_ret: None,
+//RS             range_checked: false,
+//RS             widen_approx: false,
+//RS         }));
+//RS         self.infer(expr.as_mut())
+//RS     }
+//RS 
+//RS     fn is_bare_integer_literal(expr: &Expr) -> bool {
+//RS         match expr {
+//RS             Expr::Paren(inner, _) => Self::is_bare_integer_literal(inner),
+//RS             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+//RS                 matches!(inner.as_ref(), Expr::Int(_, _, None, _))
+//RS             }
+//RS             Expr::Int(_, _, None, _) => true,
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn decimalize_integer_literal(&mut self, expr: &mut Box<Expr>, span: Span) -> Option<Type> {
+//RS         let value = match expr.as_ref() {
+//RS             Expr::Int(value, _, None, raw) => {
+//RS                 super::exact_integer_literal(*value, raw.as_deref()).to_string_rep()
+//RS             }
+//RS             Expr::Paren(inner, _) if Self::is_bare_integer_literal(inner) => {
+//RS                 let Expr::Int(value, _, None, raw) = inner.as_ref() else {
+//RS                     return None;
+//RS                 };
+//RS                 super::exact_integer_literal(*value, raw.as_deref()).to_string_rep()
+//RS             }
+//RS             _ => return None,
+//RS         };
+//RS         *expr = Box::new(super::exact_decimal_literal(value, span));
+//RS         self.infer(expr.as_mut())
+//RS     }
+//RS 
+//RS     /// D-NUMLIT-PEER1=A / D-INTLIT-WIDTH1=F: the width a bare numeral takes
+//RS     /// next to a sized peer. The peer chooses the signedness family; the
+//RS     /// numeral chooses the *narrowest* width of that family that holds it. A
+//RS     /// numeral with no sized peer, or one that outgrows every fixed width,
+//RS     /// stays `Int` — peerless `1000000 * 1000000` and `0 - 17` must not invent
+//RS     /// a U32/U8 and trap, and `byte + -1` must not invent a signed peer.
+//RS     fn minimal_literal_width(value: &crate::Numeric::CtBigInt, peer: Option<&Type>) -> Type {
+//RS         let Some(Type::IntN { signed, .. }) = peer else {
+//RS             return Type::Int;
+//RS         };
+//RS         [8u8, 16, 32, 64]
+//RS             .into_iter()
+//RS             .find_map(|bits| {
+//RS                 let interval = super::integer_width_interval(*signed, bits);
+//RS                 super::exact_integer_fits(value, interval.lo, interval.hi).then_some(Type::IntN {
+//RS                     signed: *signed,
+//RS                     bits,
+//RS                 })
+//RS             })
+//RS             .unwrap_or(Type::Int)
+//RS     }
+//RS 
+//RS     /// D-NUMLIT-PEER1=A / D-INTLIT-WIDTH1=F: a bare numeral takes its own
+//RS     /// minimal width *before* the operator join, then the ordinary value-set
+//RS     /// law decides the join. The peer's width is never pushed onto the numeral,
+//RS     /// so `byte + 256` joins `U8` with `U16` instead of rejecting `256` against
+//RS     /// `U8`. Destination width still arrives through `expected_type` on
+//RS     /// `Expr::Int` (e.g. `take_u8(1 + 2)`), and a numeral that already carries a
+//RS     /// width is left alone.
+//RS     fn minimal_integer_literal_type(expr: &mut Expr, peer: Option<&Type>) -> Option<Type> {
+//RS         match expr {
+//RS             Expr::Paren(inner, _) => Self::minimal_integer_literal_type(inner, peer),
+//RS             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+//RS                 let Expr::Int(value, _, width, raw) = inner.as_mut() else {
+//RS                     return None;
+//RS                 };
+//RS                 if width.is_some() {
+//RS                     return None;
+//RS                 }
+//RS                 let negated = super::exact_integer_literal(*value, raw.as_deref()).neg();
+//RS                 let minimal = Self::minimal_literal_width(&negated, peer);
+//RS                 *width = match &minimal {
+//RS                     Type::IntN { signed, bits } => Some((*signed, *bits)),
+//RS                     _ => None,
+//RS                 };
+//RS                 Some(minimal)
+//RS             }
+//RS             Expr::Int(value, _, width, raw)
+//RS                 if width.is_none()
+//RS                     && super::exact_integer_literal(*value, raw.as_deref())
+//RS                         .compare(&crate::Numeric::CtBigInt::from_int(0))
+//RS                         != std::cmp::Ordering::Less =>
+//RS             {
+//RS                 let exact = super::exact_integer_literal(*value, raw.as_deref());
+//RS                 let minimal = Self::minimal_literal_width(&exact, peer);
+//RS                 *width = match &minimal {
+//RS                     Type::IntN { signed, bits } => Some((*signed, *bits)),
+//RS                     _ => None,
+//RS                 };
+//RS                 Some(minimal)
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn take_numeric_approx_operand(expr: &mut Expr, span: Span) -> Option<Expr> {
+//RS         match expr {
+//RS             Expr::Paren(inner, _) => Self::take_numeric_approx_operand(inner, span),
+//RS             Expr::Call(call) if call.widen_approx && call.args.len() == 1 => Some(
+//RS                 std::mem::replace(&mut call.args[0].expr, Expr::Absent(span)),
+//RS             ),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn contextualize_numeric_literal(&mut self, expr: &mut Expr, target: &Type) -> Option<Type> {
+//RS         match expr {
+//RS             Expr::Paren(inner, _) => self.contextualize_numeric_literal(inner, target),
+//RS             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match (inner.as_mut(), target) {
+//RS                 (Expr::Int(value, span, width, raw), Type::InlineRange { base, lo, hi }) => {
+//RS                     let negated = super::exact_integer_literal(*value, raw.as_deref()).neg();
+//RS                     let interval = super::IntegerInterval::new(i128::from(*lo), i128::from(*hi));
+//RS                     if !super::exact_integer_fits(&negated, interval.lo, interval.hi) {
+//RS                         self.diags.push(
+//RS                             crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
+//RS                                 &negated, *lo, *hi, *span,
+//RS                             ),
+//RS                         );
+//RS                     }
+//RS                     *width = None;
+//RS                     Some(Type::InlineRange {
+//RS                         base: base.clone(),
+//RS                         lo: *lo,
+//RS                         hi: *hi,
+//RS                     })
+//RS                 }
+//RS                 (Expr::Int(value, span, width, raw), Type::IntN { signed: true, bits }) => {
+//RS                     let negated = super::exact_integer_literal(*value, raw.as_deref()).neg();
+//RS                     let interval = super::integer_width_interval(true, *bits);
+//RS                     if !super::exact_integer_fits(&negated, interval.lo, interval.hi) {
+//RS                         self.diags
+//RS                             .push(crate::Sema::int_range_error(true, *bits, *span));
+//RS                     }
+//RS                     *width = Some((true, *bits));
+//RS                     Some(target.clone())
+//RS                 }
+//RS                 (_, Type::IntN { signed: false, .. }) => None,
+//RS                 _ => self.contextualize_numeric_literal(inner, target),
+//RS             },
+//RS             Expr::Int(value, span, width, raw) => match target {
+//RS                 Type::Int => {
+//RS                     *width = None;
+//RS                     Some(Type::Int)
+//RS                 }
+//RS                 Type::InlineRange { base, lo, hi } => {
+//RS                     let exact = super::exact_integer_literal(*value, raw.as_deref());
+//RS                     let interval = super::IntegerInterval::new(i128::from(*lo), i128::from(*hi));
+//RS                     if !super::exact_integer_fits(&exact, interval.lo, interval.hi) {
+//RS                         self.diags.push(
+//RS                             crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
+//RS                                 &exact, *lo, *hi, *span,
+//RS                             ),
+//RS                         );
+//RS                     }
+//RS                     *width = None;
+//RS                     Some(Type::InlineRange {
+//RS                         base: base.clone(),
+//RS                         lo: *lo,
+//RS                         hi: *hi,
+//RS                     })
+//RS                 }
+//RS                 Type::IntN { signed, bits } => {
+//RS                     let interval = super::integer_width_interval(*signed, *bits);
+//RS                     let exact = super::exact_integer_literal(*value, raw.as_deref());
+//RS                     if !super::exact_integer_fits(&exact, interval.lo, interval.hi) {
+//RS                         self.diags
+//RS                             .push(crate::Sema::int_range_error(*signed, *bits, *span));
+//RS                     }
+//RS                     *width = Some((*signed, *bits));
+//RS                     Some(target.clone())
+//RS                 }
+//RS                 Type::Float | Type::Float32 => {
+//RS                     let exact_value = super::exact_integer_literal(*value, raw.as_deref());
+//RS                     let exact = exact_value.try_i64().is_some_and(|value| {
+//RS                         if *target == Type::Float32 {
+//RS                             (value as f32) as i64 == value
+//RS                         } else {
+//RS                             (value as f64) as i64 == value
+//RS                         }
+//RS                     });
+//RS                     if !exact {
+//RS                         let limit = if *target == Type::Float32 {
+//RS                             1i128 << 24
+//RS                         } else {
+//RS                             1i128 << 53
+//RS                         };
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E1003",
+//RS                             format!("{} does not fit exactly in {}", value, target.name()),
+//RS                             format!(
+//RS                                 "{} holds every whole number only from -{} through {}",
+//RS                                 target.name(),
+//RS                                 limit,
+//RS                                 limit
+//RS                             ),
+//RS                             format!(
+//RS                                 "use a whole-number type, or write a value from -{} through {}",
+//RS                                 limit, limit
+//RS                             ),
+//RS                             Some(*span),
+//RS                         ));
+//RS                     }
+//RS                     *expr = Expr::Float(*value as f64, *span, *target == Type::Float32, None);
+//RS                     Some(target.clone())
+//RS                 }
+//RS                 _ => None,
+//RS             },
+//RS             Expr::Float(_, _, is_f32, _) => match target {
+//RS                 Type::Float => {
+//RS                     *is_f32 = false;
+//RS                     Some(Type::Float)
+//RS                 }
+//RS                 Type::Float32 => {
+//RS                     *is_f32 = true;
+//RS                     Some(Type::Float32)
+//RS                 }
+//RS                 _ => None,
+//RS             },
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Record sema's numeric widening decision on the expression itself.
+//RS     /// Lowering consumes the explicit conversion and checked-crossing marker.
+//RS     pub(crate) fn widen_numeric_expr(&mut self, expr: &mut Expr, source: &Type, target: &Type) {
+//RS         if source == target {
+//RS             return;
+//RS         }
+//RS         // An inline range is a proof on its carrier, not a runtime wrapper.
+//RS         // Strip that proof before selecting the ordinary numeric conversion;
+//RS         // otherwise `Int(0..10)` would manufacture a method name from the
+//RS         // display spelling instead of widening through `Int`.
+//RS         let erased = source.erased_inline_ranges();
+//RS         if &erased != source {
+//RS             self.require_knowledge_gate(
+//RS                 KnowledgePlane::Range,
+//RS                 KnowledgeGate::BoundedArithmetic,
+//RS                 expr.span(),
+//RS             );
+//RS             if &erased == target {
+//RS                 return;
+//RS             }
+//RS             self.widen_numeric_expr(expr, &erased, target);
+//RS             return;
+//RS         }
+//RS         if self.contextualize_numeric_literal(expr, target).is_some() {
+//RS             return;
+//RS         }
+//RS         let Some(widening) = source.numeric_widening_to(target) else {
+//RS             return;
+//RS         };
+//RS         let span = expr.span();
+//RS         let approximate = Self::take_numeric_approx_operand(expr, span);
+//RS         let checked = crate::Sema::knowledge_loss_requires_gate(
+//RS             KnowledgePlane::Exactness,
+//RS             approximate.as_ref().map(|_| KnowledgeGate::Approximation),
+//RS         );
+//RS 
+//RS         if checked {
+//RS             if let Expr::Float(_, _, is_f32, _) = expr {
+//RS                 if *target == Type::Float32 {
+//RS                     *is_f32 = true;
+//RS                     return;
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         let old = approximate.unwrap_or_else(|| std::mem::replace(expr, Expr::Absent(span)));
+//RS         *expr = Expr::MethodCall {
+//RS             receiver: Box::new(Expr::Ident(target.name(), span)),
+//RS             method: Syntax::conversion_method_for_source(&source.name()),
+//RS             method_span: span,
+//RS             owner_type_args: Vec::new(),
+//RS             type_args: Vec::new(),
+//RS             args: vec![crate::AST::CallArg {
+//RS                 convention: crate::AST::AccessConvention::Read,
+//RS                 expr: old,
+//RS                 span,
+//RS                 flags: crate::AST::CallArgFlags::default(),
+//RS                 label: None,
+//RS                 spread: false,
+//RS             }],
+//RS             recv_type: None,
+//RS             resolved_ret: Some(target.clone()),
+//RS             operator_rhs: None,
+//RS             checked_widen: widening && checked,
+//RS         };
+//RS     }
+//RS 
+//RS     pub(crate) fn widen_numeric_argument(
+//RS         &mut self,
+//RS         expr: &mut Expr,
+//RS         source: Type,
+//RS         target: &Type,
+//RS         convention: crate::AST::AccessConvention,
+//RS     ) -> Type {
+//RS         if convention != crate::AST::AccessConvention::Write
+//RS             && source != *target
+//RS             && source.numeric_widening_to(target).is_some()
+//RS         {
+//RS             self.widen_numeric_expr(expr, &source, target);
+//RS             target.clone()
+//RS         } else {
+//RS             source
+//RS         }
+//RS     }
+//RS 
+//RS     /// Return-position widening: a plain numeric value fills the success slot
+//RS     /// of the return contract. Every checked return is a carrier
+//RS     /// (`T Never!`, `T E!`), so the conversion targets its `T`, not the
+//RS     /// carrier itself; the caller lifts the widened value into `Ok`. Returns
+//RS     /// the slot type when a conversion was recorded.
+//RS     pub(crate) fn widen_numeric_return(
+//RS         &mut self,
+//RS         expr: &mut Expr,
+//RS         source: &Type,
+//RS         ret: &Type,
+//RS     ) -> Option<Type> {
+//RS         let slot = match ret {
+//RS             Type::Result { ok, .. } => ok.as_ref(),
+//RS             _ => ret,
+//RS         };
+//RS         if source == slot || source.numeric_widening_to(slot).is_none() {
+//RS             return None;
+//RS         }
+//RS         let slot = slot.clone();
+//RS         self.widen_numeric_expr(expr, source, &slot);
+//RS         Some(slot)
+//RS     }
+//RS 
+//RS     fn distinct_raw(expr: Expr, type_name: &str, base: Type, span: Span) -> Expr {
+//RS         Expr::MethodCall {
+//RS             receiver: Box::new(expr),
+//RS             method: "raw".to_string(),
+//RS             method_span: span,
+//RS             owner_type_args: Vec::new(),
+//RS             type_args: Vec::new(),
+//RS             args: Vec::new(),
+//RS             recv_type: Some(type_name.to_string()),
+//RS             resolved_ret: Some(base),
+//RS             operator_rhs: None,
+//RS             checked_widen: false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn unit_conversion_expr(
+//RS         &self,
+//RS         expr: Expr,
+//RS         source_name: &str,
+//RS         _source: &UnitFact,
+//RS         destination_name: &str,
+//RS         _destination: &UnitFact,
+//RS         span: Span,
+//RS     ) -> Expr {
+//RS         if source_name == destination_name {
+//RS             return expr;
+//RS         }
+//RS         let source_leaf = source_name.rsplit('.').next().unwrap_or(source_name);
+//RS         Expr::MethodCall {
+//RS             receiver: Box::new(Expr::Ident(destination_name.to_string(), span)),
+//RS             method: Syntax::conversion_method_for_source(source_leaf),
+//RS             method_span: span,
+//RS             owner_type_args: Vec::new(),
+//RS             type_args: Vec::new(),
+//RS             args: vec![crate::AST::CallArg {
+//RS                 convention: crate::AST::AccessConvention::Read,
+//RS                 expr,
+//RS                 span,
+//RS                 flags: crate::AST::CallArgFlags::default(),
+//RS                 label: None,
+//RS                 spread: false,
+//RS             }],
+//RS             recv_type: None,
+//RS             resolved_ret: Some(Type::Named(destination_name.to_string())),
+//RS             operator_rhs: None,
+//RS             checked_widen: false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn convert_unit_operand(
+//RS         &self,
+//RS         operand: &mut Box<Expr>,
+//RS         source_name: &str,
+//RS         source: &UnitFact,
+//RS         destination_name: &str,
+//RS         destination: &UnitFact,
+//RS         span: Span,
+//RS     ) {
+//RS         let old = std::mem::replace(operand, Box::new(Expr::Absent(span)));
+//RS         *operand = Box::new(self.unit_conversion_expr(
+//RS             *old,
+//RS             source_name,
+//RS             source,
+//RS             destination_name,
+//RS             destination,
+//RS             span,
+//RS         ));
+//RS     }
+//RS 
+//RS     fn unit_wrapped_binary(
+//RS         &self,
+//RS         op: BinOp,
+//RS         left: Expr,
+//RS         left_name: &str,
+//RS         right: Expr,
+//RS         right_name: &str,
+//RS         destination_name: &str,
+//RS         span: Span,
+//RS     ) -> Expr {
+//RS         let raw = Expr::Binary(
+//RS             op,
+//RS             Box::new(Self::distinct_raw(left, left_name, Type::Float, span)),
+//RS             Box::new(Self::distinct_raw(right, right_name, Type::Float, span)),
+//RS             span,
+//RS         );
+//RS         Expr::MethodCall {
+//RS             receiver: Box::new(Expr::Ident(destination_name.to_string(), span)),
+//RS             method: Syntax::numeric_conversion_method("Float")
+//RS                 .expect("Float conversion is registered")
+//RS                 .to_string(),
+//RS             method_span: span,
+//RS             owner_type_args: Vec::new(),
+//RS             type_args: Vec::new(),
+//RS             args: vec![crate::AST::CallArg {
+//RS                 convention: crate::AST::AccessConvention::Read,
+//RS                 expr: raw,
+//RS                 span,
+//RS                 flags: crate::AST::CallArgFlags::default(),
+//RS                 label: None,
+//RS                 spread: false,
+//RS             }],
+//RS             recv_type: None,
+//RS             resolved_ret: Some(Type::Named(destination_name.to_string())),
+//RS             operator_rhs: None,
+//RS             checked_widen: false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn unit_scalar_wrapped_binary(
+//RS         &self,
+//RS         op: BinOp,
+//RS         unit: Expr,
+//RS         unit_name: &str,
+//RS         scalar: Expr,
+//RS         unit_on_left: bool,
+//RS         span: Span,
+//RS     ) -> Expr {
+//RS         let unit = Self::distinct_raw(unit, unit_name, Type::Float, span);
+//RS         let (left, right) = if unit_on_left {
+//RS             (unit, scalar)
+//RS         } else {
+//RS             (scalar, unit)
+//RS         };
+//RS         let raw = Expr::Binary(op, Box::new(left), Box::new(right), span);
+//RS         Expr::MethodCall {
+//RS             receiver: Box::new(Expr::Ident(unit_name.to_string(), span)),
+//RS             method: Syntax::numeric_conversion_method("Float")
+//RS                 .expect("Float conversion is registered")
+//RS                 .to_string(),
+//RS             method_span: span,
+//RS             owner_type_args: Vec::new(),
+//RS             type_args: Vec::new(),
+//RS             args: vec![crate::AST::CallArg {
+//RS                 convention: crate::AST::AccessConvention::Read,
+//RS                 expr: raw,
+//RS                 span,
+//RS                 flags: crate::AST::CallArgFlags::default(),
+//RS                 label: None,
+//RS                 spread: false,
+//RS             }],
+//RS             recv_type: None,
+//RS             resolved_ret: Some(Type::Named(unit_name.to_string())),
+//RS             operator_rhs: None,
+//RS             checked_widen: false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn operator_expr_type(&self, expr: &Expr) -> Option<Type> {
+//RS         match expr {
+//RS             Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
+//RS             Expr::Field(base, field, _) => {
+//RS                 let mut owner = self.operator_expr_type(base)?;
+//RS                 while let Type::Tagged { inner, .. } = owner {
+//RS                     owner = *inner;
+//RS                 }
+//RS                 let (type_name, type_args) = match owner {
+//RS                     Type::Named(name) => (name, None),
+//RS                     Type::Apply { name, args } => (name, Some(args)),
+//RS                     _ => return None,
+//RS                 };
+//RS                 let (import_ns, leaf) = Self::split_type_name(&type_name);
+//RS                 let owner_mod = self.struct_owner_module(leaf, import_ns)?;
+//RS                 let (registry, trait_reg) = if owner_mod == self.module_idx {
+//RS                     (self.registry, self.trait_reg)
+//RS                 } else {
+//RS                     let module = self.modules.and_then(|modules| modules.get(owner_mod))?;
+//RS                     (&module.registry, &module.trait_reg)
+//RS                 };
+//RS                 let subst: HashMap<String, Type> = type_args
+//RS                     .and_then(|args| {
+//RS                         Some(
+//RS                             trait_reg
+//RS                                 .struct_params
+//RS                                 .get(leaf)?
+//RS                                 .iter()
+//RS                                 .zip(args)
+//RS                                 .map(|(param, arg)| (param.name.clone(), arg))
+//RS                                 .collect::<HashMap<String, Type>>(),
+//RS                         )
+//RS                     })
+//RS                     .unwrap_or_default();
+//RS                 registry
+//RS                     .struct_fields(leaf)?
+//RS                     .iter()
+//RS                     .find(|(candidate, _, _)| candidate == field)
+//RS                     .map(|(_, _, ty)| substitute_type(ty, &subst))
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn operator_operand_needs_borrow(&self, expr: &Expr, op: BinOp) -> bool {
+//RS         let expr = expr.without_parens();
+//RS         if !matches!(expr, Expr::Field(..) | Expr::Index { .. }) {
+//RS             return false;
+//RS         }
+//RS         // A comparison only inspects its operands: every tier compares a
+//RS         // non-scalar operand through a reference, so a field operand is read
+//RS         // in place instead of being copied whole first.
+//RS         if matches!(
+//RS             op,
+//RS             BinOp::Eq
+//RS                 | BinOp::Ne
+//RS                 | BinOp::Compare
+//RS                 | BinOp::Lt
+//RS                 | BinOp::Le
+//RS                 | BinOp::Gt
+//RS                 | BinOp::Ge
+//RS         ) {
+//RS             return true;
+//RS         }
+//RS         let ty = self.operator_expr_type(expr);
+//RS         let trait_name = match op {
+//RS             BinOp::Add => crate::Syntax::TRAIT_ADD,
+//RS             BinOp::Sub => crate::Syntax::TRAIT_SUB,
+//RS             BinOp::Mul => crate::Syntax::TRAIT_MUL,
+//RS             BinOp::Div => crate::Syntax::TRAIT_DIV,
+//RS             _ => return false,
+//RS         };
+//RS         ty.is_some_and(|ty| match &ty {
+//RS             Type::Named(name) => {
+//RS                 self.type_implements_trait_for_name(name, trait_name)
+//RS                     || self.type_param_has_bound(&ty, trait_name)
+//RS             }
+//RS             _ => false,
+//RS         })
+//RS     }
+//RS 
+//RS     fn comparable_equality_hook(type_name: &str) -> bool {
+//RS         // D-TIME-ORDER1: ZonedDateTime equality includes zone identity, while
+//RS         // its Comparable hook remains the exact-instant ordering operation.
+//RS         Self::split_type_name(type_name).1 != "ZonedDateTime"
+//RS     }
+//RS 
+//RS     fn is_measurement_type(ty: &Type) -> bool {
+//RS         matches!(
+//RS             ty,
+//RS             Type::Apply { name, args }
+//RS                 if name == crate::Syntax::TYPE_MEASUREMENT && args == &[Type::Float]
+//RS         )
+//RS     }
+//RS 
+//RS     fn is_scalable_unit_fact(fact: &UnitFact) -> bool {
+//RS         // Canonical Time is a fixed nanosecond carrier with its own checked
+//RS         // Int operators above. It is not a Float-backed user unit.
+//RS         !(fact.family == "Time" && fact.package == std::path::PathBuf::from("core.units"))
+//RS             && matches!(
+//RS                 fact.kind,
+//RS                 crate::AST::QuantityKind::Linear | crate::AST::QuantityKind::Delta
+//RS             )
+//RS     }
+//RS 
+//RS     fn is_unit_scalar_type(ty: &Type) -> bool {
+//RS         // These are the built-in numeric carriers accepted by the existing
+//RS         // Float conversion seam. Decimal stays distinct so a Decimal value
+//RS         // cannot silently cross this boundary as a unit scale.
+//RS         matches!(
+//RS             ty,
+//RS             Type::Int | Type::IntN { .. } | Type::Float32 | Type::Float
+//RS         )
+//RS     }
+//RS 
+//RS     fn is_scalable_unit_type(&self, ty: &Type) -> bool {
+//RS         self.unit_fact_for_type(ty)
+//RS             .is_some_and(|(_, fact)| Self::is_scalable_unit_fact(&fact))
+//RS     }
+//RS 
+//RS     fn known_unit_expr(&self, expr: &Expr) -> bool {
+//RS         if let Some(ty) = self.operator_expr_type(expr) {
+//RS             if self.unit_fact_for_type(&ty).is_some() {
+//RS                 return true;
+//RS             }
+//RS         }
+//RS         match expr {
+//RS             Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+//RS                 self.known_unit_expr(inner)
+//RS             }
+//RS             Expr::UnitLit { suffix, .. } => self
+//RS                 .unit_fact_for_type(&Type::Named(crate::AST::UnitFamilyDef::type_name(suffix)))
+//RS                 .is_some(),
+//RS             Expr::MethodCall { receiver, .. } => match receiver.as_ref() {
+//RS                 Expr::Ident(name, _) => self
+//RS                     .unit_fact_for_type(&Type::Named(name.clone()))
+//RS                     .is_some(),
+//RS                 _ => false,
+//RS             },
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn direct_static_type_name(&self, expr: &Expr) -> Option<String> {
+//RS         match expr {
+//RS             Expr::Ident(name, _) if !name.is_empty() && self.lookup(name).is_none() => {
+//RS                 Some(name.clone())
+//RS             }
+//RS             Expr::Field(base, member, _) => Some(format!(
+//RS                 "{}.{}",
+//RS                 self.direct_static_type_name(base)?,
+//RS                 member
+//RS             )),
+//RS             Expr::Paren(inner, _) => self.direct_static_type_name(inner),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn direct_unit_value_fact(&self, expr: &Expr) -> Option<(String, UnitFact)> {
+//RS         let expr = match expr {
+//RS             Expr::Paren(inner, _) => inner.as_ref(),
+//RS             _ => expr,
+//RS         };
+//RS         let ty = self.operator_expr_type(expr)?;
+//RS         self.unit_fact_for_type(&ty)
+//RS     }
+//RS 
+//RS     fn same_unit_fact(left: &UnitFact, right: &UnitFact) -> bool {
+//RS         left.package == right.package
+//RS             && left.family == right.family
+//RS             && left.member == right.member
+//RS             && left.kind == right.kind
+//RS     }
+//RS 
+//RS     fn direct_unit_raw(&self, expr: &Expr, unit_fact: &UnitFact) -> bool {
+//RS         let Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             ..
+//RS         } = (match expr {
+//RS             Expr::Paren(inner, _) => inner.as_ref(),
+//RS             _ => expr,
+//RS         })
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         if method != crate::Syntax::METHOD_DISTINCT_RAW
+//RS             || !args.is_empty()
+//RS             || args.iter().any(|arg| arg.label.is_some() || arg.spread)
+//RS         {
+//RS             return false;
+//RS         }
+//RS         self.direct_unit_value_fact(receiver)
+//RS             .is_some_and(|(_, raw_fact)| Self::same_unit_fact(&raw_fact, unit_fact))
+//RS     }
+//RS 
+//RS     /// The lint deliberately accepts only a scalar expression whose type is
+//RS     /// already a built-in numeric carrier. Calls remain quiet unless they are
+//RS     /// the canonical Float widening constructor; this keeps FFI, calibration,
+//RS     /// helper, and exact-number conversion boundaries outside the suggestion.
+//RS     fn direct_unit_scalar(&self, expr: &Expr) -> bool {
+//RS         let expr = match expr {
+//RS             Expr::Paren(inner, _) => inner.as_ref(),
+//RS             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => return self.direct_unit_scalar(inner),
+//RS             _ => expr,
+//RS         };
+//RS         match expr {
+//RS             Expr::Int(..) | Expr::Float(..) => true,
+//RS             Expr::Ident(..) => self
+//RS                 .operator_expr_type(expr)
+//RS                 .is_some_and(|ty| Self::is_unit_scalar_type(&ty)),
+//RS             Expr::MethodCall {
+//RS                 receiver,
+//RS                 method,
+//RS                 args,
+//RS                 ..
+//RS             } => {
+//RS                 let Some(type_name) = self.direct_static_type_name(receiver) else {
+//RS                     return false;
+//RS                 };
+//RS                 type_name == crate::Syntax::TYPE_FLOAT
+//RS                     && args.len() == 1
+//RS                     && !args[0].spread
+//RS                     && args[0].label.is_none()
+//RS                     && self.direct_unit_scalar(&args[0].expr)
+//RS                     && crate::Syntax::numeric_conversion_source(method).is_some_and(|source| {
+//RS                         matches!(
+//RS                             source,
+//RS                             "I8" | "I64"
+//RS                                 | "I16"
+//RS                                 | "I32"
+//RS                                 | "Int"
+//RS                                 | "U8"
+//RS                                 | "U16"
+//RS                                 | "U32"
+//RS                                 | "U64"
+//RS                                 | "F32"
+//RS                                 | "Float"
+//RS                         )
+//RS                     })
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-UNIT-SCALAR1=A / `unit_scalar_rewrap`: match only the direct,
+//RS     /// policy-free `Unit.from_float(Unit.raw() OP scalar)` identity. The
+//RS     /// operation is checked after all children are typed, so this cannot
+//RS     /// diagnose an untyped resemblance or a policy-rewritten expression.
+//RS     pub(crate) fn unit_scalar_rewrap_identity(
+//RS         &self,
+//RS         receiver: &Expr,
+//RS         method: &str,
+//RS         args: &[crate::AST::CallArg],
+//RS         inferred: Option<&Type>,
+//RS     ) -> bool {
+//RS         if !self.arithmetic_policy_stack.is_empty()
+//RS             || method != crate::Syntax::numeric_conversion_method("Float").unwrap()
+//RS             || args.len() != 1
+//RS             || args[0].label.is_some()
+//RS             || args[0].spread
+//RS         {
+//RS             return false;
+//RS         }
+//RS         let Some(type_name) = self.direct_static_type_name(receiver) else {
+//RS             return false;
+//RS         };
+//RS         let Some((_, outer_fact)) = self.unit_fact_for_type(&Type::Named(type_name)) else {
+//RS             return false;
+//RS         };
+//RS         if !Self::is_scalable_unit_fact(&outer_fact) {
+//RS             return false;
+//RS         }
+//RS         let Some((_, result_fact)) = inferred.and_then(|ty| self.unit_fact_for_type(ty)) else {
+//RS             return false;
+//RS         };
+//RS         if !Self::same_unit_fact(&outer_fact, &result_fact) {
+//RS             return false;
+//RS         }
+//RS         let Expr::Binary(op, left, right, _) = (match &args[0].expr {
+//RS             Expr::Paren(inner, _) => inner.as_ref(),
+//RS             expr => expr,
+//RS         }) else {
+//RS             return false;
+//RS         };
+//RS         match op {
+//RS             BinOp::Mul => {
+//RS                 (Self::direct_unit_raw(self, left, &outer_fact) && self.direct_unit_scalar(right))
+//RS                     || (Self::direct_unit_raw(self, right, &outer_fact)
+//RS                         && self.direct_unit_scalar(left))
+//RS             }
+//RS             BinOp::Div => {
+//RS                 Self::direct_unit_raw(self, left, &outer_fact) && self.direct_unit_scalar(right)
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn is_exact_numeric_literal(expr: &Expr) -> bool {
+//RS         match expr {
+//RS             Expr::Int(..) | Expr::Float(..) => true,
+//RS             Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+//RS                 Self::is_exact_numeric_literal(inner)
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn known_measurement_expr(&self, expr: &Expr) -> bool {
+//RS         matches!(
+//RS             expr,
+//RS             Expr::Call(call)
+//RS                 if call.name == "measurement"
+//RS                     && self.funcs.get(&call.name).is_none()
+//RS                     && self.lookup(&call.name).is_none()
+//RS         ) || self
+//RS             .operator_expr_type(expr)
+//RS             .is_some_and(|ty| Self::is_measurement_type(&ty))
+//RS     }
+//RS 
+//RS     fn zero_uncertainty(expr: &mut Box<Expr>, span: Span) {
+//RS         let value = std::mem::replace(expr, Box::new(Expr::Absent(span)));
+//RS         *expr = Box::new(Expr::Call(crate::AST::Call {
+//RS             name: "measurement".to_string(),
+//RS             name_span: span,
+//RS             type_args: Vec::new(),
+//RS             args: vec![
+//RS                 crate::AST::CallArg {
+//RS                     convention: crate::AST::AccessConvention::Read,
+//RS                     expr: *value,
+//RS                     span,
+//RS                     flags: crate::AST::CallArgFlags::default(),
+//RS                     label: None,
+//RS                     spread: false,
+//RS                 },
+//RS                 crate::AST::CallArg {
+//RS                     convention: crate::AST::AccessConvention::Read,
+//RS                     expr: Expr::Float(0.0, span, false, None),
+//RS                     span,
+//RS                     flags: crate::AST::CallArgFlags::default(),
+//RS                     label: Some(("uncertainty".to_string(), span)),
+//RS                     spread: false,
+//RS                 },
+//RS             ],
+//RS             resolved_ret: Some(Type::Apply {
+//RS                 name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+//RS                 args: vec![Type::Float],
+//RS             }),
+//RS             range_checked: false,
+//RS             widen_approx: false,
+//RS         }));
+//RS     }
+//RS 
+//RS     /// D-OPMIX1: match a concrete operator RHS bound on a generic receiver.
+//RS     fn operator_bound_matches(&self, ty: &Type, trait_name: &str, rhs: &Type) -> bool {
+//RS         let Type::Named(name) = ty else {
+//RS             return false;
+//RS         };
+//RS         let Some(param) = self
+//RS             .type_param_scope
+//RS             .iter()
+//RS             .find(|param| param.name == *name)
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         let typed = format!("{trait_name}<{}>", rhs.name());
+//RS         param
+//RS             .bounds
+//RS             .iter()
+//RS             .any(|bound| bound == &typed || (bound == trait_name && rhs == ty))
+//RS     }
+//RS 
+//RS     /// D-FOUND-OPMIX1=A: a mixed operator resolves its direct `(left, right)`
+//RS     /// hook first; only a checked `#Commutative` hook derives the reverse
+//RS     /// lookup. Subtraction and division therefore never mirror implicitly.
+//RS     fn infer_mixed_operator(
+//RS         &mut self,
+//RS         op: BinOp,
+//RS         lhs: &mut Box<Expr>,
+//RS         rhs: &mut Box<Expr>,
+//RS         lt: &Type,
+//RS         rt: &Type,
+//RS         span: Span,
+//RS         replacement: &mut Option<Expr>,
+//RS     ) -> Option<Type> {
+//RS         let (trait_name, method) = match op {
+//RS             BinOp::Add => (crate::Syntax::TRAIT_ADD, "add"),
+//RS             BinOp::Sub => (crate::Syntax::TRAIT_SUB, "sub"),
+//RS             BinOp::Mul => (crate::Syntax::TRAIT_MUL, "mul"),
+//RS             BinOp::Div => (crate::Syntax::TRAIT_DIV, "div"),
+//RS             _ => return None,
+//RS         };
+//RS         if lt == rt {
+//RS             return None;
+//RS         }
+//RS 
+//RS         let mut receiver_is_left = true;
+//RS         let mut row = self
+//RS             .trait_reg
+//RS             .operator_impl_for(lt, trait_name, rt)
+//RS             .cloned();
+//RS         if row.is_none() {
+//RS             if let Some(candidate) = self.trait_reg.operator_impl_for(rt, trait_name, lt) {
+//RS                 if candidate.operator_marker == Some(crate::AST::OperatorMarker::Commutative) {
+//RS                     row = Some(candidate.clone());
+//RS                     receiver_is_left = false;
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         let (receiver_ty, argument_ty, result_ty, recv_type, operator_rhs) = if let Some(row) = row
+//RS         {
+//RS             let receiver_ty = if receiver_is_left { lt } else { rt };
+//RS             let argument_ty = if receiver_is_left { rt } else { lt };
+//RS             (
+//RS                 receiver_ty.clone(),
+//RS                 argument_ty.clone(),
+//RS                 row.result,
+//RS                 row.left,
+//RS                 Some(row.rhs),
+//RS             )
+//RS         } else {
+//RS             let receiver_ty = if receiver_is_left { lt } else { rt };
+//RS             let argument_ty = if receiver_is_left { rt } else { lt };
+//RS             if !self.operator_bound_matches(receiver_ty, trait_name, argument_ty) {
+//RS                 return None;
+//RS             }
+//RS             (
+//RS                 receiver_ty.clone(),
+//RS                 argument_ty.clone(),
+//RS                 receiver_ty.clone(),
+//RS                 trait_name.to_string(),
+//RS                 None,
+//RS             )
+//RS         };
+//RS 
+//RS         let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+//RS         let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+//RS         let (receiver, argument) = if receiver_is_left {
+//RS             (left, right)
+//RS         } else {
+//RS             (right, left)
+//RS         };
+//RS         let call = Expr::MethodCall {
+//RS             receiver,
+//RS             method: method.to_string(),
+//RS             method_span: span,
+//RS             owner_type_args: Vec::new(),
+//RS             type_args: Vec::new(),
+//RS             args: vec![crate::AST::CallArg {
+//RS                 convention: crate::AST::AccessConvention::Read,
+//RS                 expr: *argument,
+//RS                 span,
+//RS                 flags: crate::AST::CallArgFlags::default(),
+//RS                 label: None,
+//RS                 spread: false,
+//RS             }],
+//RS             recv_type: Some(recv_type),
+//RS             resolved_ret: Some(result_ty.clone()),
+//RS             operator_rhs,
+//RS             checked_widen: false,
+//RS         };
+//RS         *replacement = Some(call);
+//RS         let _ = (receiver_ty, argument_ty);
+//RS         Some(result_ty)
+//RS     }
+//RS 
+// END-PORT-PENDING 0395 crates/jet-sema/src/Sema/CheckerInfer/binary.rs:1-1151
+

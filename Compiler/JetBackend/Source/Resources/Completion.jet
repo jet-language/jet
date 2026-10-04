@@ -1,0 +1,134 @@
+// jit/backend.rs:22-57,975-1010,2062-2219,2567-2594. These checks are
+// transport-neutral, NOT Cranelift engine entries retired by D-EXEC1.
+// Completion/retirement ownership and task-local scopes require #4494;
+// no completion constructor or execution adapter is supplied as a stand-in.
+use jet_foundation.[JetTaskFailure, jet_task_failure_debug, MIRProgram, MIRArtifactID, MIRArtifactTarget, MIRFunctionID, MIRFunction, MIRTypeKind, MIRValueID, MIRAccess, MIRCallee, mir_validate_program, mir_validation_error_text]
+
+#Error
+pub enum SourceDeoptError {
+    InvalidRequest(message: String)
+    Callback(message: String)
+    CallbackJob(failure: JetTaskFailure)
+    Backend(message: String)
+    Resource(message: String)
+    NativeInterface(error: NativeInterfaceError)
+    MissingOutcome(cleanup: String?)
+}
+pub fn source_deopt_error_text(error: SourceDeoptError) -> String Never! {
+    if error == {
+        .InvalidRequest(message) -> "invalid Source entry request: {message}"
+        .Callback(message) -> "Source entry callback failed: {message}"
+        .CallbackJob(failure) -> "Source callback owner job failed: {jet_task_failure_debug(failure)}"
+        .Backend(message) -> "Source native backend failed: {message}"
+        .Resource(message) -> "Source resource activation failed: {message}"
+        .NativeInterface(inner) -> "Source native interface scope failed: {native_interface_error_text(inner)}"
+        .MissingOutcome(cleanup) -> if cleanup == {
+            .Val(detail) -> "Source entry callback returned no terminal outcome; cleanup evidence: {detail}"
+            else -> "Source entry callback returned no terminal outcome"
+        }
+    }
+}
+pub enum SourceExecutionTier { Native Source }
+pub enum SourceExecutionPolicy { JitWithSourceFallback SourceOnly }
+pub fn source_execution_policy_allows_native(policy: SourceExecutionPolicy) -> Bool Never! {
+    policy == .JitWithSourceFallback
+}
+pub fn source_native_attempt_allowed(host_supported: Bool, helper_invocation: Bool, policy: SourceExecutionPolicy, plan_allows_native: Bool, native_values_supported: Bool, native_return_supported: Bool) -> Bool Never! {
+    host_supported && (!helper_invocation || source_execution_policy_allows_native(policy)) && plan_allows_native && native_values_supported && native_return_supported
+}
+fn source_helper_artifact_target_debug(target: MIRArtifactTarget) -> String Never! {
+    if target == { .RustAOT -> "RustAot" .Cranelift -> "Cranelift" .Interpreter -> "Interpreter" .Web -> "Web" }
+}
+fn source_helper_function_positions(program: MIRProgram) -> [U64:Int] Never! {
+    positions := [U64:Int]{}
+    loop (index, function) in program.functions {
+        // Rust find() chooses the first row even before whole-program validation.
+        if positions.get(function.id.value) == None -> _ :: &positions.add(function.id.value, index)
+    }
+    positions
+}
+
+pub fn validate_source_helper_entry(program: MIRProgram, artifact: MIRArtifactID, helper_roots: [MIRFunctionID], function: MIRFunctionID, argument_count: Int) SourceDeoptError! {
+    mir_validate_program(program) ?? return Err(SourceDeoptError.InvalidRequest{message: "checked Source MIR is invalid: {mir_validation_error_text(err)}"})
+    artifact_position := -1
+    loop (index, candidate) in program.artifacts { if candidate.id == artifact { artifact_position = index; break } }
+    if artifact_position < 0 -> return Err(SourceDeoptError.InvalidRequest{message: "Source helper artifact MirArtifactId({artifact.value}) is missing"})
+    plan :: program.artifacts[artifact_position]
+    if plan.target != .RustAOT && plan.target != .Cranelift -> return Err(SourceDeoptError.InvalidRequest{message: "Source helper artifact MirArtifactId({artifact.value}) targets {source_helper_artifact_target_debug(plan.target)}, which is not executable by the Source helper native tier"})
+    present := false
+    loop root in helper_roots { if root == function -> present = true }
+    if helper_roots.len() == 0 || !present -> return Err(SourceDeoptError.InvalidRequest{message: "Source helper function MirFunctionId({function.value}) is not in the checked private root list"})
+    modules := [U64:Bool]{}
+    loop module_id in plan.modules -> _ :: &modules.add(module_id.value, true)
+    positions :: source_helper_function_positions(program)
+    loop root in helper_roots {
+        position :: positions.get(root.value) ?? return Err(SourceDeoptError.InvalidRequest{message: "private Source helper function MirFunctionId({root.value}) is missing"})
+        row :: program.functions[position]
+        if modules.get(row.module_id.value) == None -> return Err(SourceDeoptError.InvalidRequest{message: "private Source helper function MirFunctionId({root.value}) is not part of artifact MirArtifactId({artifact.value})"})
+        if !row.target_applicability.cranelift && !row.target_applicability.interpreter -> return Err(SourceDeoptError.InvalidRequest{message: "private Source helper function MirFunctionId({root.value}) has no executable target"})
+        if row.capture_params.len() != 0 -> return Err(SourceDeoptError.InvalidRequest{message: "private Source helper function MirFunctionId({root.value}) requires captured parameters"})
+    }
+    position :: positions.get(function.value) ?? return Err(SourceDeoptError.InvalidRequest{message: "Source helper function MirFunctionId({function.value}) is missing"})
+    row :: program.functions[position]
+    if row.params.len() != argument_count -> return Err(SourceDeoptError.InvalidRequest{message: "Source helper function MirFunctionId({function.value}) expected {row.params.len()} checked parameters, got {argument_count}"})
+    loop parameter in row.params {
+        if parameter.variadic -> return Err(SourceDeoptError.InvalidRequest{message: "Source helper function MirFunctionId({function.value}) has a variadic parameter `{parameter.name}`"})
+    }
+    return
+}
+
+// One index over declaration rows; visited membership and each function's
+// callable-value index avoid per-edge program/value-table scans.
+pub fn source_helper_requires_native_interface_scope(program: MIRProgram, root: MIRFunctionID) -> Bool SourceDeoptError! {
+    positions :: source_helper_function_positions(program)
+    pending := [MIRFunctionID]{root}
+    visited := [U64:Bool]{}
+    loop pending.len() > 0 {
+        id :: &pending.pop() ?? panic("nonempty Source helper worklist lost its tail")
+        if visited.get(id.value) != None -> next
+        _ :: &visited.add(id.value, true)
+        position :: positions.get(id.value) ?? return Err(SourceDeoptError.InvalidRequest{message: "reachable Source helper function MirFunctionId({id.value}) is missing"})
+        function :: program.functions[position]
+        callable_values := [U64:Bool]{}
+        loop value in function.values {
+            if value.ty.kind == { .Fn(_) | .SendFn(_, _, _) -> true else -> false } -> _ :: &callable_values.add(value.id.value, true)
+        }
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                if instruction.operation == {
+                    .Call(callee, _, _) -> if callee == {
+                        .TraitMethod(_, _, _) -> return Ok(true)
+                        .Indirect(value) -> { if callable_values.get(value.value) != None -> return Ok(true) }
+                        .User(target) | .Associated(target, _) | .Method(target, _) -> &pending.push(target)
+                        else -> {}
+                    }
+                    .IndirectCall(value, _, _) -> { if callable_values.get(value.value) != None -> return Ok(true) }
+                    .Closure(target, _, _) -> &pending.push(target)
+                    else -> {}
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub fn source_helper_integer_fits(kind: MIRTypeKind, raw: I64) -> Bool Never! {
+    if kind == {
+        .IntN(signed, bits) -> {
+            if bits == 0 || bits > 64 -> return false
+            if signed {
+                if bits == 64 -> return true
+                half :: I64{1} << (bits - 1)
+                raw >= -half && raw < half
+            } else {
+                if bits >= 63 -> return raw >= I64{0}
+                limit :: I64{1} << bits
+                raw >= I64{0} && raw < limit
+            }
+        }
+        .InlineRange(base, lo, hi) -> source_helper_integer_fits(base.kind, raw) && Int.from_i64(raw) >= lo && Int.from_i64(raw) <= hi
+        .Tagged(_, inner) -> source_helper_integer_fits(inner.kind, raw)
+        .Quantity(base, _) -> source_helper_integer_fits(base.kind, raw)
+        else -> true
+    }
+}

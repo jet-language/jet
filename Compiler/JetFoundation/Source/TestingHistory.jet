@@ -1,0 +1,1811 @@
+// PORT-PENDING 0106 crates-jet-foundation-src-testinghistory-slice-1: crates/jet-foundation/src/TestingHistory.rs:1-1807
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Typed operation-history generation, dependency-aware shrinking, and replay artifacts.
+//RS //!
+//RS //! A history is a bounded sequence of checked operations, not a byte-fuzzing
+//RS //! corpus.  The operation metadata keeps resource handles, task/event
+//RS //! dependencies, and schedule choices visible while the runner delegates the
+//RS //! verdict to [`crate::TestingComparison`].  The model and candidate are
+//RS //! supplied by the caller; this module never derives an oracle from either one.
+//RS 
+//RS use crate::JSON::quote;
+//RS use crate::SHA256;
+//RS use crate::TestingComparison::{
+//RS     compare_samples, ComparisonIdentity, ComparisonObservation, ComparisonRecord,
+//RS     ComparisonSample, ComparisonStatus, ObservationRelation,
+//RS };
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::fmt;
+//RS use std::fs;
+//RS use std::io::Write;
+//RS use std::path::Path;
+//RS 
+//RS // Compiler-private weak metadata indexes. Capture storage stays in the native
+//RS // callable environment, including its ordinary checked Rust references. Only
+//RS // the index erases a reader lifetime; it never owns or projects a referent.
+//RS //
+//RS // SAFETY CONTRACT: the native registry may call a reader only while borrowing
+//RS // the exact registered callable. That callable owns the typed reader and its
+//RS // allocation ticket. Dead tickets cannot match a reused allocation address.
+//RS macro_rules! history_callback_reader {
+//RS     ($name:ident, $owner:ident, $weak:ident $(, $bound:ident)*) => {
+//RS         #[derive(Clone)]
+//RS         pub struct $name<R: 'static>($weak<dyn Fn() -> R $(+ $bound)*>);
+//RS         impl<R: 'static> $name<R> {
+//RS             /// The registered callable must own this reader for its entire
+//RS             /// lifetime, and every read must borrow that same callable.
+//RS             pub unsafe fn new<'a>(reader: &$owner<dyn Fn() -> R $(+ $bound)* + 'a>) -> Self {
+//RS                 let weak = <$owner<_>>::downgrade(reader);
+//RS                 // SAFETY: Weak owns no capture. Its lifetime is restored by
+//RS                 // the caller's live-callable requirement on read().
+//RS                 Self(unsafe { std::mem::transmute::<
+//RS                     $weak<dyn Fn() -> R $(+ $bound)* + 'a>,
+//RS                     $weak<dyn Fn() -> R $(+ $bound)* + 'static>,
+//RS                 >(weak) })
+//RS             }
+//RS             /// The exact callable used at registration must remain borrowed
+//RS             /// until this call returns, keeping its typed reader alive.
+//RS             pub unsafe fn read(&self) -> Option<R> {
+//RS                 self.0.upgrade().map(|reader| reader())
+//RS             }
+//RS         }
+//RS     };
+//RS }
+//RS use std::rc::{Rc as HistoryReaderRc, Weak as HistoryReaderWeak};
+//RS use std::sync::{Arc as HistoryReaderArc, Weak as HistorySendReaderWeak};
+//RS history_callback_reader!(HistoryCallbackReader, HistoryReaderRc, HistoryReaderWeak);
+//RS history_callback_reader!(HistorySendCallbackReader, HistoryReaderArc, HistorySendReaderWeak, Send, Sync);
+//RS 
+//RS pub const HISTORY_SCHEMA: &str = "jet.testing.history";
+//RS pub const HISTORY_VERSION: u16 = 1;
+//RS pub const HISTORY_ENGINE: &str = "typed-history-v1";
+//RS const MAX_CASES: usize = 100_000;
+//RS const MAX_STEPS: usize = 4_096;
+//RS const MAX_RESOURCES: usize = 4_096;
+//RS const MAX_DISTRIBUTIONS: usize = 256;
+//RS const MAX_SHRINK_ATTEMPTS: usize = 1_000_000;
+//RS const MAX_STRING_BYTES: usize = 4_096;
+//RS 
+//RS pub const HISTORY_SEED_INVALID_REASON: &str = "history seed is invalid";
+//RS pub const HISTORY_CASE_BOUND_INVALID_REASON: &str = "history case bound is invalid";
+//RS 
+//RS /// Convert the source-level history bounds once for every execution tier.
+//RS /// Cases are checked first to preserve the provider's error precedence.
+//RS pub fn validate_history_bounds(seed: i64, cases: i64) -> Result<(u64, usize), &'static str> {
+//RS     let cases =
+//RS         usize::try_from(cases).map_err(|_| HISTORY_CASE_BOUND_INVALID_REASON)?;
+//RS     let seed = u64::try_from(seed).map_err(|_| HISTORY_SEED_INVALID_REASON)?;
+//RS     Ok((seed, cases))
+//RS }
+//RS 
+//RS /// Errors returned before a history can be claimed as evidence.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum HistoryError {
+//RS     InvalidConfig(String),
+//RS     InvalidCase(String),
+//RS     InvalidOracle(String),
+//RS     NoFailure,
+//RS     Io(String),
+//RS }
+//RS 
+//RS impl fmt::Display for HistoryError {
+//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::InvalidConfig(message) => write!(output, "invalid history config: {message}"),
+//RS             Self::InvalidCase(message) => write!(output, "invalid history case: {message}"),
+//RS             Self::InvalidOracle(message) => write!(output, "invalid history oracle: {message}"),
+//RS             Self::NoFailure => output.write_str("history did not contain a mismatch"),
+//RS             Self::Io(message) => write!(output, "history artifact I/O failed: {message}"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for HistoryError {}
+//RS 
+//RS /// A typed resource identity retained by operations that create, consume, or
+//RS /// inspect a resource.  Numeric identities are intentionally local to one
+//RS /// case; they are not secrets or process handles.
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub struct HandleId {
+//RS     pub value: u32,
+//RS }
+//RS 
+//RS /// A logical task identity used by the schedule and precondition metadata.
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub struct TaskId {
+//RS     pub value: u32,
+//RS }
+//RS 
+//RS /// A logical external event identity used by the schedule and precondition
+//RS /// metadata.
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub struct EventId {
+//RS     pub value: u32,
+//RS }
+//RS /// Non-negative source-level count values lower to the host `usize` only
+//RS /// after the compiler has checked their range.
+//RS pub type Count = usize;
+//RS /// Compiler-private provenance for one selected history execution.
+//RS ///
+//RS /// `source`, `tool`, and `target` are already canonical digests supplied by
+//RS /// the checked program/artifact boundary.  [`Self::bind_callbacks`] derives a
+//RS /// new source digest that also commits to the selected callbacks while leaving
+//RS /// the toolchain and target identities intact.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct HistoryProvenance {
+//RS     pub source: String,
+//RS     pub tool: String,
+//RS     pub target: String,
+//RS }
+//RS 
+//RS /// Hash checked callable metadata after its owner has losslessly encoded live
+//RS /// captures. Capture bytes never enter a replay artifact.
+//RS pub fn history_callback_value_fingerprint(
+//RS     function_identity: &str,
+//RS     canonical_capture_bytes: &[u8],
+//RS ) -> Result<String, HistoryError> {
+//RS     if function_identity.is_empty() {
+//RS         return Err(HistoryError::InvalidConfig(
+//RS             "history callback has no checked function identity".to_string(),
+//RS         ));
+//RS     }
+//RS     let mut payload = Vec::new();
+//RS     for bytes in [
+//RS         b"jet.history.callback.value.v1".as_slice(),
+//RS         function_identity.as_bytes(),
+//RS         canonical_capture_bytes,
+//RS     ] {
+//RS         payload.extend_from_slice(bytes.len().to_string().as_bytes());
+//RS         payload.push(b':');
+//RS         payload.extend_from_slice(bytes);
+//RS     }
+//RS     Ok(SHA256::sha256_hex(&payload))
+//RS }
+//RS 
+//RS impl HistoryProvenance {
+//RS     pub fn bind_callbacks(
+//RS         &self,
+//RS         callbacks: &[(&str, &str)],
+//RS     ) -> Result<Self, HistoryError> {
+//RS         if self.source.is_empty() || self.tool.is_empty() || self.target.is_empty() {
+//RS             return Err(HistoryError::InvalidConfig(
+//RS                 "history provenance is incomplete".to_string(),
+//RS             ));
+//RS         }
+//RS         let mut callbacks = callbacks
+//RS             .iter()
+//RS             .map(|(role, identity)| (*role, *identity))
+//RS             .collect::<Vec<_>>();
+//RS         if callbacks.iter().any(|(role, identity)| {
+//RS             role.is_empty()
+//RS                 || identity.is_empty()
+//RS                 || role.len() > MAX_STRING_BYTES
+//RS                 || identity.len() > MAX_STRING_BYTES
+//RS         }) {
+//RS             return Err(HistoryError::InvalidConfig(
+//RS                 "history callback provenance is incomplete".to_string(),
+//RS             ));
+//RS         }
+//RS         callbacks.sort_unstable_by(|left, right| left.0.cmp(right.0));
+//RS         if callbacks
+//RS             .windows(2)
+//RS             .any(|pair| pair[0].0 == pair[1].0 || pair[0].1 == pair[1].1)
+//RS         {
+//RS             return Err(HistoryError::InvalidConfig(
+//RS                 "history callback provenance contains a duplicate identity".to_string(),
+//RS             ));
+//RS         }
+//RS         let mut payload = Vec::new();
+//RS         fn frame(payload: &mut Vec<u8>, value: &str) {
+//RS             payload.extend_from_slice(value.len().to_string().as_bytes());
+//RS             payload.push(b':');
+//RS             payload.extend_from_slice(value.as_bytes());
+//RS         }
+//RS         frame(&mut payload, "jet.history.provenance.v1");
+//RS         frame(&mut payload, &self.source);
+//RS         for (role, identity) in callbacks {
+//RS             frame(&mut payload, role);
+//RS             frame(&mut payload, identity);
+//RS         }
+//RS         Ok(Self {
+//RS             source: SHA256::sha256_hex(&payload),
+//RS             tool: self.tool.clone(),
+//RS             target: self.target.clone(),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// Values carried by an operation.  Callers must use [`Self::redacted`] for a
+//RS /// secret; the original secret is never retained by this type.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum HistoryValue {
+//RS     Integer(i64),
+//RS     Boolean(bool),
+//RS     /// Text explicitly declared safe for a public replay artifact.
+//RS     Text(String),
+//RS     Handle(HandleId),
+//RS     Redacted(String),
+//RS }
+//RS 
+//RS impl HistoryValue {
+//RS     pub fn public_text(value: impl Into<String>) -> Self {
+//RS         Self::Text(value.into())
+//RS     }
+//RS 
+//RS     /// Discard a sensitive value before it enters the history.  Only the
+//RS     /// caller-provided non-sensitive label is persisted.
+//RS     pub fn redacted(label: impl Into<String>) -> Self {
+//RS         Self::Redacted(label.into())
+//RS     }
+//RS 
+//RS     /// Accept a sensitive value only to replace it immediately with a label.
+//RS     /// This makes accidental artifact serialization of the value impossible.
+//RS     pub fn secret(_value: impl AsRef<str>, label: impl Into<String>) -> Self {
+//RS         Self::redacted(label)
+//RS     }
+//RS 
+//RS     fn handles(&self) -> Option<HandleId> {
+//RS         match self {
+//RS             Self::Handle(handle) => Some(*handle),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn json(&self) -> String {
+//RS         match self {
+//RS             Self::Integer(value) => value.to_string(),
+//RS             Self::Boolean(value) => value.to_string(),
+//RS             Self::Text(value) => quote(value),
+//RS             Self::Handle(handle) => handle.value.to_string(),
+//RS             Self::Redacted(label) => format!("{{\"redacted\":{}}}", quote(label)),
+//RS         }
+//RS     }
+//RS 
+//RS     fn shrinks(&self) -> Vec<Self> {
+//RS         match self {
+//RS             Self::Integer(value) => {
+//RS                 let mut values = vec![Self::Integer(0)];
+//RS                 if *value != 0 {
+//RS                     values.push(Self::Integer(*value / 2));
+//RS                 }
+//RS                 values.dedup();
+//RS                 values
+//RS             }
+//RS             Self::Boolean(value) if *value => vec![Self::Boolean(false)],
+//RS             Self::Boolean(_) | Self::Handle(_) | Self::Redacted(_) => Vec::new(),
+//RS             Self::Text(value) if !value.is_empty() => {
+//RS                 let half = value.chars().take(value.chars().count() / 2).collect();
+//RS                 vec![Self::Text(String::new()), Self::Text(half)]
+//RS             }
+//RS             Self::Text(_) => Vec::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A precondition that must hold immediately before an operation runs.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum HistoryPrecondition {
+//RS     HandleLive(HandleId),
+//RS     HandleState { handle: HandleId, state: String },
+//RS     TaskCompleted(TaskId),
+//RS     EventAvailable(EventId),
+//RS }
+//RS 
+//RS /// One operation in a case.  `depends_on` captures explicit task/event order;
+//RS /// handle references in `arguments`, `creates`, and `consumes` capture object
+//RS /// lifetimes for the shrinker.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct HistoryOperation {
+//RS     pub index: u32,
+//RS     pub name: String,
+//RS     pub arguments: Vec<HistoryValue>,
+//RS     pub creates: Vec<HandleId>,
+//RS     pub consumes: Vec<HandleId>,
+//RS     pub preconditions: Vec<HistoryPrecondition>,
+//RS     pub depends_on: Vec<u32>,
+//RS     pub task: Option<TaskId>,
+//RS     pub event: Option<EventId>,
+//RS }
+//RS 
+//RS impl HistoryOperation {
+//RS     pub fn new(index: u32, name: impl Into<String>) -> Self {
+//RS         Self {
+//RS             index,
+//RS             name: name.into(),
+//RS             arguments: Vec::new(),
+//RS             creates: Vec::new(),
+//RS             consumes: Vec::new(),
+//RS             preconditions: Vec::new(),
+//RS             depends_on: Vec::new(),
+//RS             task: None,
+//RS             event: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_argument(mut self, value: HistoryValue) -> Self {
+//RS         self.arguments.push(value);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn creates(mut self, handle: HandleId) -> Self {
+//RS         self.creates.push(handle);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn consumes(mut self, handle: HandleId) -> Self {
+//RS         self.consumes.push(handle);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn requires(mut self, precondition: HistoryPrecondition) -> Self {
+//RS         self.preconditions.push(precondition);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn depends_on(mut self, operation: u32) -> Self {
+//RS         self.depends_on.push(operation);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn scheduled_on(mut self, task: TaskId, event: EventId) -> Self {
+//RS         self.task = Some(task);
+//RS         self.event = Some(event);
+//RS         self
+//RS     }
+//RS 
+//RS     fn references_any_handle(&self, handles: &BTreeSet<HandleId>) -> bool {
+//RS         self.creates.iter().any(|handle| handles.contains(handle))
+//RS             || self.consumes.iter().any(|handle| handles.contains(handle))
+//RS             || self
+//RS                 .arguments
+//RS                 .iter()
+//RS                 .filter_map(HistoryValue::handles)
+//RS                 .any(|handle| handles.contains(&handle))
+//RS             || self.preconditions.iter().any(|precondition| match precondition {
+//RS                 HistoryPrecondition::HandleLive(handle)
+//RS                 | HistoryPrecondition::HandleState { handle, .. } => handles.contains(handle),
+//RS                 HistoryPrecondition::TaskCompleted(_) | HistoryPrecondition::EventAvailable(_) => {
+//RS                     false
+//RS                 }
+//RS             })
+//RS     }
+//RS 
+//RS     fn json(&self) -> String {
+//RS         let arguments = self
+//RS             .arguments
+//RS             .iter()
+//RS             .map(HistoryValue::json)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let creates = self
+//RS             .creates
+//RS             .iter()
+//RS             .map(|handle| handle.value.to_string())
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let consumes = self
+//RS             .consumes
+//RS             .iter()
+//RS             .map(|handle| handle.value.to_string())
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let preconditions = self
+//RS             .preconditions
+//RS             .iter()
+//RS             .map(precondition_json)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let dependencies = self
+//RS             .depends_on
+//RS             .iter()
+//RS             .map(u32::to_string)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!(
+//RS             "{{\"arguments\":[{arguments}],\"consumes\":[{consumes}],\"creates\":[{creates}],\"dependsOn\":[{dependencies}],\"event\":{},\"index\":{},\"name\":{},\"preconditions\":[{preconditions}],\"task\":{}}}",
+//RS             optional_u32(self.event.map(|event| event.value)),
+//RS             self.index,
+//RS             quote(&self.name),
+//RS             optional_u32(self.task.map(|task| task.value)),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS fn optional_u32(value: Option<u32>) -> String {
+//RS     value.map_or_else(|| "null".to_string(), |value| value.to_string())
+//RS }
+//RS 
+//RS fn precondition_json(precondition: &HistoryPrecondition) -> String {
+//RS     match precondition {
+//RS         HistoryPrecondition::HandleLive(handle) => {
+//RS             format!("{{\"kind\":\"handle_live\",\"handle\":{}}}", handle.value)
+//RS         }
+//RS         HistoryPrecondition::HandleState { handle, state } => format!(
+//RS             "{{\"handle\":{},\"kind\":\"handle_state\",\"state\":{}}}",
+//RS             handle.value,
+//RS             quote(state)
+//RS         ),
+//RS         HistoryPrecondition::TaskCompleted(task) => {
+//RS             format!("{{\"kind\":\"task_completed\",\"task\":{}}}", task.value)
+//RS         }
+//RS         HistoryPrecondition::EventAvailable(event) => format!(
+//RS             "{{\"event\":{},\"kind\":\"event_available\"}}",
+//RS             event.value
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS /// One scheduler choice attached to an operation.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct HistoryScheduleChoice {
+//RS     pub operation: u32,
+//RS     pub task: Option<TaskId>,
+//RS     pub event: Option<EventId>,
+//RS     pub choice: String,
+//RS }
+//RS 
+//RS impl HistoryScheduleChoice {
+//RS     pub fn new(operation: u32, choice: impl Into<String>) -> Self {
+//RS         Self {
+//RS             operation,
+//RS             task: None,
+//RS             event: None,
+//RS             choice: choice.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn for_task_event(mut self, task: TaskId, event: EventId) -> Self {
+//RS         self.task = Some(task);
+//RS         self.event = Some(event);
+//RS         self
+//RS     }
+//RS 
+//RS     fn json(&self) -> String {
+//RS         format!(
+//RS             "{{\"choice\":{},\"event\":{},\"operation\":{},\"task\":{}}}",
+//RS             quote(&self.choice),
+//RS             optional_u32(self.event.map(|event| event.value)),
+//RS             self.operation,
+//RS             optional_u32(self.task.map(|task| task.value)),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS /// A complete concrete history case.  The case identity, derived seed, typed
+//RS /// operations, and scheduler choices travel together so replay and shrinking
+//RS /// never fall back to a seed-only or otherwise synthetic input.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct HistoryCase {
+//RS     pub case_id: String,
+//RS     pub seed: u64,
+//RS     pub operations: Vec<HistoryOperation>,
+//RS     pub schedule: Vec<HistoryScheduleChoice>,
+//RS }
+//RS 
+//RS 
+//RS impl HistoryCase {
+//RS     pub fn new(case_id: impl Into<String>, seed: u64) -> Self {
+//RS         Self {
+//RS             case_id: case_id.into(),
+//RS             seed,
+//RS             operations: Vec::new(),
+//RS             schedule: Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn push(&mut self, operation: HistoryOperation) {
+//RS         self.operations.push(operation);
+//RS     }
+//RS 
+//RS     pub fn schedule(&mut self, choice: HistoryScheduleChoice) {
+//RS         self.schedule.push(choice);
+//RS     }
+//RS 
+//RS     /// Validate generic handle and task/event dependencies.  Domain state
+//RS     /// preconditions are checked by the scenario callback passed to the runner.
+//RS     pub fn validate(&self) -> Result<(), HistoryError> {
+//RS         if self.case_id.is_empty() || self.case_id.len() > MAX_STRING_BYTES {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "case identity must be non-empty and bounded".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.operations.is_empty() {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "case must contain at least one operation".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.operations.len() > MAX_STEPS {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "operation count exceeds the history bound".to_string(),
+//RS             ));
+//RS         }
+//RS         let mut live = BTreeSet::new();
+//RS         let mut known = BTreeSet::new();
+//RS         let mut completed_tasks = BTreeSet::new();
+//RS         let mut available_events = BTreeSet::new();
+//RS         for (position, operation) in self.operations.iter().enumerate() {
+//RS             let expected_index = u32::try_from(position).map_err(|_| {
+//RS                 HistoryError::InvalidCase("operation index exceeds u32".to_string())
+//RS             })?;
+//RS             if operation.index != expected_index {
+//RS                 return Err(HistoryError::InvalidCase(format!(
+//RS                     "operation {} has index {}, expected {}",
+//RS                     position, operation.index, expected_index
+//RS                 )));
+//RS             }
+//RS             if operation.name.is_empty() || operation.name.len() > MAX_STRING_BYTES {
+//RS                 return Err(HistoryError::InvalidCase(format!(
+//RS                     "operation {} has an invalid name",
+//RS                     operation.index
+//RS                 )));
+//RS             }
+//RS             if operation.arguments.len() > 64
+//RS                 || operation.creates.len() > MAX_RESOURCES
+//RS                 || operation.consumes.len() > MAX_RESOURCES
+//RS                 || operation.preconditions.len() > 64
+//RS                 || operation.depends_on.len() > 64
+//RS             {
+//RS                 return Err(HistoryError::InvalidCase(format!(
+//RS                     "operation {} exceeds its metadata bound",
+//RS                     operation.index
+//RS                 )));
+//RS             }
+//RS             for argument in &operation.arguments {
+//RS                 match argument {
+//RS                     HistoryValue::Text(value) if value.len() > MAX_STRING_BYTES => {
+//RS                         return Err(HistoryError::InvalidCase(format!(
+//RS                             "operation {} has an oversized argument",
+//RS                             operation.index
+//RS                         )));
+//RS                     }
+//RS                     HistoryValue::Redacted(value)
+//RS                         if value.is_empty() || value.len() > MAX_STRING_BYTES =>
+//RS                     {
+//RS                         return Err(HistoryError::InvalidCase(format!(
+//RS                             "operation {} has an invalid redacted argument",
+//RS                             operation.index
+//RS                         )));
+//RS                     }
+//RS                     HistoryValue::Handle(handle) if !live.contains(handle) => {
+//RS                         return Err(HistoryError::InvalidCase(format!(
+//RS                             "operation {} requires non-live argument handle {}",
+//RS                             operation.index, handle.value
+//RS                         )));
+//RS                     }
+//RS                     HistoryValue::Integer(_)
+//RS                     | HistoryValue::Boolean(_)
+//RS                     | HistoryValue::Text(_)
+//RS                     | HistoryValue::Handle(_)
+//RS                     | HistoryValue::Redacted(_) => {}
+//RS                 }
+//RS             }
+//RS             let mut dependencies = BTreeSet::new();
+//RS             for dependency in &operation.depends_on {
+//RS                 if *dependency >= operation.index || !dependencies.insert(*dependency) {
+//RS                     return Err(HistoryError::InvalidCase(format!(
+//RS                         "operation {} has a duplicate or forward dependency",
+//RS                         operation.index
+//RS                     )));
+//RS                 }
+//RS             }
+//RS             for precondition in &operation.preconditions {
+//RS                 match precondition {
+//RS                     HistoryPrecondition::HandleLive(handle) => {
+//RS                         if !live.contains(handle) {
+//RS                             return Err(HistoryError::InvalidCase(format!(
+//RS                                 "operation {} requires non-live handle {}",
+//RS                                 operation.index, handle.value
+//RS                             )));
+//RS                         }
+//RS                     }
+//RS                     HistoryPrecondition::HandleState { handle, state } => {
+//RS                         if state.is_empty() || state.len() > MAX_STRING_BYTES {
+//RS                             return Err(HistoryError::InvalidCase(format!(
+//RS                                 "operation {} has an invalid handle state",
+//RS                                 operation.index
+//RS                             )));
+//RS                         }
+//RS                         if !live.contains(handle) {
+//RS                             return Err(HistoryError::InvalidCase(format!(
+//RS                                 "operation {} requires non-live handle {}",
+//RS                                 operation.index, handle.value
+//RS                             )));
+//RS                         }
+//RS                     }
+//RS                     HistoryPrecondition::TaskCompleted(task) => {
+//RS                         if !completed_tasks.contains(task) {
+//RS                             return Err(HistoryError::InvalidCase(format!(
+//RS                                 "operation {} requires incomplete task {}",
+//RS                                 operation.index, task.value
+//RS                             )));
+//RS                         }
+//RS                     }
+//RS                     HistoryPrecondition::EventAvailable(event) => {
+//RS                         if !available_events.contains(event) {
+//RS                             return Err(HistoryError::InvalidCase(format!(
+//RS                                 "operation {} requires unavailable event {}",
+//RS                                 operation.index, event.value
+//RS                             )));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             let creates = operation.creates.iter().copied().collect::<BTreeSet<_>>();
+//RS             if creates.len() != operation.creates.len() {
+//RS                 return Err(HistoryError::InvalidCase(format!(
+//RS                     "operation {} creates a handle more than once",
+//RS                     operation.index
+//RS                 )));
+//RS             }
+//RS             let consumes = operation.consumes.iter().copied().collect::<BTreeSet<_>>();
+//RS             if consumes.len() != operation.consumes.len() {
+//RS                 return Err(HistoryError::InvalidCase(format!(
+//RS                     "operation {} consumes a handle more than once",
+//RS                     operation.index
+//RS                 )));
+//RS             }
+//RS             if creates.intersection(&consumes).next().is_some() {
+//RS                 return Err(HistoryError::InvalidCase(format!(
+//RS                     "operation {} creates and consumes one handle",
+//RS                     operation.index
+//RS                 )));
+//RS             }
+//RS             for handle in &operation.consumes {
+//RS                 if !live.remove(handle) {
+//RS                     return Err(HistoryError::InvalidCase(format!(
+//RS                         "operation {} consumes non-live handle {}",
+//RS                         operation.index, handle.value
+//RS                     )));
+//RS                 }
+//RS             }
+//RS             for handle in &operation.creates {
+//RS                 if !known.insert(*handle) {
+//RS                     return Err(HistoryError::InvalidCase(format!(
+//RS                         "operation {} recreates handle {}",
+//RS                         operation.index, handle.value
+//RS                     )));
+//RS                 }
+//RS                 live.insert(*handle);
+//RS             }
+//RS             if let Some(task) = operation.task {
+//RS                 completed_tasks.insert(task);
+//RS             }
+//RS             if let Some(event) = operation.event {
+//RS                 available_events.insert(event);
+//RS             }
+//RS         }
+//RS         if known.len() > MAX_RESOURCES {
+//RS             return Err(HistoryError::InvalidCase(
+//RS                 "resource count exceeds the history bound".to_string(),
+//RS             ));
+//RS         }
+//RS         for choice in &self.schedule {
+//RS             let Some(operation) = self.operations.get(choice.operation as usize) else {
+//RS                 return Err(HistoryError::InvalidCase(format!(
+//RS                     "schedule references missing operation {}",
+//RS                     choice.operation
+//RS                 )));
+//RS             };
+//RS             if let Some(task) = choice.task {
+//RS                 if operation.task != Some(task) {
+//RS                     return Err(HistoryError::InvalidCase(format!(
+//RS                         "schedule task does not match operation {}",
+//RS                         choice.operation
+//RS                     )));
+//RS                 }
+//RS             }
+//RS             if let Some(event) = choice.event {
+//RS                 if operation.event != Some(event) {
+//RS                     return Err(HistoryError::InvalidCase(format!(
+//RS                         "schedule event does not match operation {}",
+//RS                         choice.operation
+//RS                     )));
+//RS                 }
+//RS             }
+//RS             if choice.choice.is_empty() || choice.choice.len() > MAX_STRING_BYTES {
+//RS                 return Err(HistoryError::InvalidCase(
+//RS                     "schedule choice must be non-empty and bounded".to_string(),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Stable public input identity.  It includes every operation and schedule
+//RS     /// choice, so a seed cannot accidentally replay a changed case.
+//RS     pub fn input_id(&self) -> String {
+//RS         SHA256::sha256_hex(self.canonical_json().as_bytes())
+//RS     }
+//RS 
+//RS     /// Canonical case JSON is the callback input for every execution tier.
+//RS     /// It contains the typed operations and schedule, never only the seed.
+//RS     pub fn json(&self) -> String {
+//RS         self.canonical_json()
+//RS     }
+//RS 
+//RS     fn canonical_json(&self) -> String {
+//RS         let operations = self
+//RS             .operations
+//RS             .iter()
+//RS             .map(HistoryOperation::json)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let schedule = self
+//RS             .schedule
+//RS             .iter()
+//RS             .map(HistoryScheduleChoice::json)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!(
+//RS             "{{\"caseId\":{},\"operations\":[{}],\"schedule\":[{}],\"seed\":{}}}",
+//RS             quote(&self.case_id),
+//RS             operations,
+//RS             schedule,
+//RS             self.seed,
+//RS         )
+//RS     }
+//RS 
+//RS     fn without_indices(&self, requested: &BTreeSet<u32>) -> Option<Self> {
+//RS         if requested.is_empty() || requested.len() >= self.operations.len() {
+//RS             return None;
+//RS         }
+//RS         let mut removed = requested.clone();
+//RS         loop {
+//RS             let handles = removed
+//RS                 .iter()
+//RS                 .filter_map(|index| self.operations.get(*index as usize))
+//RS                 .flat_map(|operation| operation.creates.iter().copied())
+//RS                 .collect::<BTreeSet<_>>();
+//RS             let mut changed = false;
+//RS             for operation in &self.operations {
+//RS                 if removed.contains(&operation.index) {
+//RS                     continue;
+//RS                 }
+//RS                 if operation.depends_on.iter().any(|dependency| removed.contains(dependency))
+//RS                     || operation.references_any_handle(&handles)
+//RS                 {
+//RS                     changed = removed.insert(operation.index) || changed;
+//RS                 }
+//RS             }
+//RS             if !changed {
+//RS                 break;
+//RS             }
+//RS         }
+//RS         if removed.len() >= self.operations.len() {
+//RS             return None;
+//RS         }
+//RS         let mut remap = BTreeMap::new();
+//RS         let mut operations = Vec::new();
+//RS         for operation in &self.operations {
+//RS             if removed.contains(&operation.index) {
+//RS                 continue;
+//RS             }
+//RS             let next = u32::try_from(operations.len()).ok()?;
+//RS             remap.insert(operation.index, next);
+//RS             operations.push(operation.clone());
+//RS         }
+//RS         for operation in &mut operations {
+//RS             operation.index = *remap.get(&operation.index)?;
+//RS             operation.depends_on = operation
+//RS                 .depends_on
+//RS                 .iter()
+//RS                 .filter_map(|dependency| remap.get(dependency).copied())
+//RS                 .collect();
+//RS         }
+//RS         let schedule = self
+//RS             .schedule
+//RS             .iter()
+//RS             .filter_map(|choice| {
+//RS                 let operation = remap.get(&choice.operation).copied()?;
+//RS                 let mut choice = choice.clone();
+//RS                 choice.operation = operation;
+//RS                 Some(choice)
+//RS             })
+//RS             .collect();
+//RS         Some(Self {
+//RS             case_id: self.case_id.clone(),
+//RS             seed: self.seed,
+//RS             operations,
+//RS             schedule,
+//RS         })
+//RS     }
+//RS 
+//RS     fn with_argument(
+//RS         &self,
+//RS         operation_index: usize,
+//RS         argument_index: usize,
+//RS         value: HistoryValue,
+//RS     ) -> Option<Self> {
+//RS         let mut candidate = self.clone();
+//RS         let operation = candidate.operations.get_mut(operation_index)?;
+//RS         *operation.arguments.get_mut(argument_index)? = value;
+//RS         Some(candidate)
+//RS     }
+//RS }
+//RS 
+//RS /// A generated case retains its typed commands beside the canonical metadata.
+//RS /// The metadata is what crosses replay boundaries; the command vector keeps
+//RS /// generation and domain validation tied to the declared operation type.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TypedHistoryCase<Command> {
+//RS     pub case: HistoryCase,
+//RS     pub commands: Vec<Command>,
+//RS }
+//RS 
+//RS impl<Command> TypedHistoryCase<Command> {
+//RS     pub fn new(case: HistoryCase, commands: Vec<Command>) -> Option<Self> {
+//RS         (case.operations.len() == commands.len()).then_some(Self { case, commands })
+//RS     }
+//RS }
+//RS 
+//RS /// Marker implemented by each operation type admitted to the generic history
+//RS /// runner. Each checked command type names its derived strategy as an
+//RS /// associated type. Explicit [`HistoryStrategy`] values never consult that
+//RS /// derived strategy: the call boundary chooses one or the other.
+//RS pub trait HistoryCommand: Clone + fmt::Debug + 'static {
+//RS     type Strategy: HistoryStrategyBehavior<Self>;
+//RS 
+//RS     fn history_strategy() -> Self::Strategy;
+//RS 
+//RS     /// Stable source-level identity retained in replay artifacts.
+//RS     fn history_command_type() -> &'static str {
+//RS         std::any::type_name::<Self>()
+//RS     }
+//RS 
+//RS     /// Compiler-supplied lossless command codec used by host bridges.
+//RS     fn history_commands_to_data_tree(
+//RS         _commands: &[Self],
+//RS     ) -> Option<crate::DataTree::DataTree> {
+//RS         None
+//RS     }
+//RS 
+//RS     /// Checked program/artifact provenance for generated strategy execution.
+//RS     fn history_provenance() -> Option<HistoryProvenance> {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS /// An explicit per-test strategy. It is an immutable value: all generation,
+//RS /// rebuilding, validation, bounds, and distribution policy is carried by the
+//RS /// five required fields, with no hidden merge with a derived strategy.
+//RS pub struct HistoryStrategy<Command> {
+//RS     pub generate: Box<
+//RS         dyn Fn(&mut HistoryRng, Count, Count) -> Option<TypedHistoryCase<Command>>,
+//RS     >,
+//RS     pub rebuild:
+//RS         Box<dyn Fn(&HistoryCase) -> Option<TypedHistoryCase<Command>>>,
+//RS     pub valid: Box<dyn Fn(&TypedHistoryCase<Command>) -> bool>,
+//RS     pub bounds: HistoryBounds,
+//RS     pub distributions: Vec<HistoryDistribution>,
+//RS }
+//RS 
+//RS impl<Command> fmt::Debug for HistoryStrategy<Command> {
+//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         output
+//RS             .debug_struct("HistoryStrategy")
+//RS             .field("bounds", &self.bounds)
+//RS             .field("distributions", &self.distributions)
+//RS             .finish_non_exhaustive()
+//RS     }
+//RS }
+//RS 
+//RS impl<Command> HistoryStrategy<Command> {
+//RS     pub fn new<G, R, V>(
+//RS         generate: G,
+//RS         rebuild: R,
+//RS         valid: V,
+//RS         bounds: HistoryBounds,
+//RS         distributions: Vec<HistoryDistribution>,
+//RS     ) -> Self
+//RS     where
+//RS         G: Fn(&mut HistoryRng, Count, Count) -> Option<TypedHistoryCase<Command>>
+//RS             + 'static,
+//RS         R: Fn(&HistoryCase) -> Option<TypedHistoryCase<Command>> + 'static,
+//RS         V: Fn(&TypedHistoryCase<Command>) -> bool + 'static,
+//RS     {
+//RS         Self {
+//RS             generate: Box::new(generate),
+//RS             rebuild: Box::new(rebuild),
+//RS             valid: Box::new(valid),
+//RS             bounds,
+//RS             distributions,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Shared behavior implemented by compiler-derived and explicit strategies.
+//RS /// The public value above is the only user-facing strategy shape.
+//RS pub trait HistoryStrategyBehavior<Command: HistoryCommand> {
+//RS     fn command_type(&self) -> &str;
+//RS     fn bounds(&self) -> HistoryBounds {
+//RS         HistoryBounds::default()
+//RS     }
+//RS     fn distributions(&self) -> Vec<HistoryDistribution>;
+//RS     /// Explain why an automatically derived strategy cannot execute.
+//RS     fn unsupported_reason(&self) -> Option<&str> {
+//RS         None
+//RS     }
+//RS     fn generate(
+//RS         &self,
+//RS         rng: &mut HistoryRng,
+//RS         case_index: Count,
+//RS         max_steps: Count,
+//RS     ) -> Option<TypedHistoryCase<Command>>;
+//RS     fn rebuild(&self, case: &HistoryCase) -> Option<TypedHistoryCase<Command>>;
+//RS     fn valid(&self, case: &TypedHistoryCase<Command>) -> bool;
+//RS 
+//RS     /// Project generated typed commands into the portable callback carrier.
+//RS     /// Tiers that execute callbacks natively can keep the commands typed; a
+//RS     /// host bridge uses this only at its boundary.
+//RS     fn commands_to_data_tree(
+//RS         &self,
+//RS         commands: &[Command],
+//RS     ) -> Option<crate::DataTree::DataTree> {
+//RS         Command::history_commands_to_data_tree(commands)
+//RS     }
+//RS }
+//RS 
+//RS impl<Command> HistoryStrategyBehavior<Command> for HistoryStrategy<Command>
+//RS where
+//RS     Command: HistoryCommand,
+//RS {
+//RS     fn command_type(&self) -> &str {
+//RS         Command::history_command_type()
+//RS     }
+//RS 
+//RS     fn bounds(&self) -> HistoryBounds {
+//RS         self.bounds
+//RS     }
+//RS 
+//RS     fn distributions(&self) -> Vec<HistoryDistribution> {
+//RS         self.distributions.clone()
+//RS     }
+//RS 
+//RS     fn generate(
+//RS         &self,
+//RS         rng: &mut HistoryRng,
+//RS         case_index: Count,
+//RS         max_steps: Count,
+//RS     ) -> Option<TypedHistoryCase<Command>> {
+//RS         (self.generate)(rng, case_index, max_steps)
+//RS     }
+//RS 
+//RS     fn rebuild(&self, case: &HistoryCase) -> Option<TypedHistoryCase<Command>> {
+//RS         (self.rebuild)(case)
+//RS     }
+//RS 
+//RS     fn valid(&self, case: &TypedHistoryCase<Command>) -> bool {
+//RS         (self.valid)(case)
+//RS     }
+//RS }
+//RS 
+//RS /// One typed operation produced alongside the metadata for a generated step.
+//RS /// The operation is the exact input that enters the case; the command is the
+//RS /// typed value that the command strategy and callback boundary consume.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct HistoryGeneratedStep<Command> {
+//RS     pub operation: HistoryOperation,
+//RS     pub command: Command,
+//RS }
+//RS 
+//RS 
+//RS /// One checked operation constructor for an automatically generated command
+//RS /// strategy. The compiler emits these rows from the command enum declaration;
+//RS /// no adapter invents operation names or payloads.
+//RS pub struct HistoryGeneratedVariant<Command> {
+//RS     pub operation: &'static str,
+//RS     pub weight: u32,
+//RS     pub generate: fn(&mut HistoryRng, u32) -> Option<HistoryGeneratedStep<Command>>,
+//RS     pub rebuild: fn(&HistoryOperation) -> Option<Command>,
+//RS     pub valid: fn(&HistoryOperation, &Command) -> bool,
+//RS }
+//RS /// Strategy shared by all compiler-emitted command types.
+//RS pub struct HistoryGeneratedStrategy<Command: 'static> {
+//RS     command_type: &'static str,
+//RS     variants: &'static [HistoryGeneratedVariant<Command>],
+//RS     commands_to_data_tree: fn(&[Command]) -> crate::DataTree::DataTree,
+//RS     unsupported_reason: Option<&'static str>,
+//RS }
+//RS 
+//RS impl<Command: 'static> HistoryGeneratedStrategy<Command> {
+//RS     pub const fn new(
+//RS         command_type: &'static str,
+//RS         variants: &'static [HistoryGeneratedVariant<Command>],
+//RS         commands_to_data_tree: fn(&[Command]) -> crate::DataTree::DataTree,
+//RS     ) -> Self {
+//RS         Self {
+//RS             command_type,
+//RS             variants,
+//RS             commands_to_data_tree,
+//RS             unsupported_reason: None,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Construct an automatically derived strategy that is explicitly
+//RS     /// unavailable because its full enum declaration is not executable.
+//RS     pub const fn new_with_unsupported(
+//RS         command_type: &'static str,
+//RS         variants: &'static [HistoryGeneratedVariant<Command>],
+//RS         commands_to_data_tree: fn(&[Command]) -> crate::DataTree::DataTree,
+//RS         unsupported_reason: &'static str,
+//RS     ) -> Self {
+//RS         Self {
+//RS             command_type,
+//RS             variants,
+//RS             commands_to_data_tree,
+//RS             unsupported_reason: Some(unsupported_reason),
+//RS         }
+//RS     }
+//RS 
+//RS     fn variant(&self, operation: &str) -> Option<&HistoryGeneratedVariant<Command>> {
+//RS         self.variants
+//RS             .iter()
+//RS             .find(|variant| variant.operation == operation)
+//RS     }
+//RS }
+//RS 
+//RS impl<Command: 'static> HistoryStrategyBehavior<Command> for HistoryGeneratedStrategy<Command>
+//RS where
+//RS     Command: HistoryCommand,
+//RS {
+//RS     fn command_type(&self) -> &str {
+//RS         self.command_type
+//RS     }
+//RS 
+//RS     fn distributions(&self) -> Vec<HistoryDistribution> {
+//RS         self.variants
+//RS             .iter()
+//RS             .filter(|variant| variant.weight > 0)
+//RS             .map(|variant| HistoryDistribution {
+//RS                 operation: variant.operation.to_string(),
+//RS                 weight: variant.weight as Count,
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     fn unsupported_reason(&self) -> Option<&str> {
+//RS         self.unsupported_reason
+//RS     }
+//RS 
+//RS     fn generate(
+//RS         &self,
+//RS         rng: &mut HistoryRng,
+//RS         case_index: usize,
+//RS         max_steps: usize,
+//RS     ) -> Option<TypedHistoryCase<Command>> {
+//RS         if self.unsupported_reason.is_some() {
+//RS             return None;
+//RS         }
+//RS         let distributions = self.distributions();
+//RS         if max_steps == 0 || distributions.is_empty() {
+//RS             return None;
+//RS         }
+//RS         let case_seed = rng.next_u64();
+//RS         let mut local = HistoryRng::new(case_seed);
+//RS         let step_count = 1 + local.below(max_steps.min(8) as u64) as usize;
+//RS         let mut case = HistoryCase::new(format!("{}-{case_index}", self.command_type), case_seed);
+//RS         let mut commands = Vec::with_capacity(step_count);
+//RS         for index in 0..step_count {
+//RS             let choice = local
+//RS                 .choose_distribution(&distributions)
+//RS                 .unwrap_or(index % distributions.len());
+//RS             let variant = self.variant(&distributions[choice].operation)?;
+//RS             let generated = (variant.generate)(&mut local, index as u32)?;
+//RS             let mut operation = generated.operation;
+//RS             if operation.name != variant.operation || operation.index != index as u32 {
+//RS                 return None;
+//RS             }
+//RS             operation = operation.scheduled_on(
+//RS                 TaskId {
+//RS                     value: index as u32 % 2,
+//RS                 },
+//RS                 EventId {
+//RS                     value: index as u32 + 1,
+//RS                 },
+//RS             );
+//RS             if index > 0 {
+//RS                 operation = operation
+//RS                     .depends_on(index as u32 - 1)
+//RS                     .requires(HistoryPrecondition::TaskCompleted(TaskId {
+//RS                         value: (index as u32 - 1) % 2,
+//RS                     }))
+//RS                     .requires(HistoryPrecondition::EventAvailable(EventId {
+//RS                         value: index as u32,
+//RS                     }));
+//RS             }
+//RS             case.push(operation);
+//RS             commands.push(generated.command);
+//RS         }
+//RS         TypedHistoryCase::new(case, commands)
+//RS     }
+//RS 
+//RS     fn rebuild(&self, case: &HistoryCase) -> Option<TypedHistoryCase<Command>> {
+//RS         if self.unsupported_reason.is_some() {
+//RS             return None;
+//RS         }
+//RS         let commands = case
+//RS             .operations
+//RS             .iter()
+//RS             .map(|operation| {
+//RS                 self.variant(&operation.name)
+//RS                     .and_then(|variant| (variant.rebuild)(operation))
+//RS             })
+//RS             .collect::<Option<Vec<_>>>()?;
+//RS         TypedHistoryCase::new(case.clone(), commands)
+//RS     }
+//RS 
+//RS     fn valid(&self, case: &TypedHistoryCase<Command>) -> bool {
+//RS         self.unsupported_reason.is_none()
+//RS             && case.case.validate().is_ok()
+//RS             && case
+//RS                 .case
+//RS                 .operations
+//RS                 .iter()
+//RS                 .zip(&case.commands)
+//RS                 .all(|(operation, command)| {
+//RS                     self.variant(&operation.name)
+//RS                         .is_some_and(|variant| (variant.valid)(operation, command))
+//RS                 })
+//RS     }
+//RS 
+//RS     fn commands_to_data_tree(
+//RS         &self,
+//RS         commands: &[Command],
+//RS     ) -> Option<crate::DataTree::DataTree> {
+//RS         Some((self.commands_to_data_tree)(commands))
+//RS     }
+//RS }
+//RS 
+//RS impl HistoryCase {
+//RS     /// Count operations after the first one that carry no dependency or
+//RS     /// precondition.  Such rows are legal, but reporting them prevents a
+//RS     /// campaign from hiding vacuous stateful coverage behind a case count.
+//RS     pub fn vacuous_preconditions(&self) -> usize {
+//RS         self.operations
+//RS             .iter()
+//RS             .skip(1)
+//RS             .filter(|operation| {
+//RS                 operation.preconditions.is_empty() && operation.depends_on.is_empty()
+//RS             })
+//RS             .count()
+//RS     }
+//RS }
+//RS 
+//RS /// Reusable non-booking operation type used by the public adapter and by the
+//RS /// second fixture.  Its presence keeps the generic surface from silently
+//RS /// specializing on the booking example.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum CounterCommand {
+//RS     Add(i64),
+//RS     Sub(i64),
+//RS     Reset,
+//RS }
+//RS 
+//RS impl HistoryCommand for CounterCommand {
+//RS     type Strategy = CounterHistoryStrategy;
+//RS 
+//RS     fn history_strategy() -> Self::Strategy {
+//RS         CounterHistoryStrategy::new()
+//RS     }
+//RS }
+//RS const COUNTER_DISTRIBUTIONS: [(&str, Count); 3] = [("add", 3), ("sub", 3), ("reset", 1)];
+//RS 
+//RS #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+//RS pub struct CounterHistoryStrategy;
+//RS 
+//RS impl CounterHistoryStrategy {
+//RS     pub fn new() -> Self {
+//RS         Self
+//RS     }
+//RS 
+//RS     pub fn distributions() -> Vec<HistoryDistribution> {
+//RS         COUNTER_DISTRIBUTIONS
+//RS             .into_iter()
+//RS             .map(|(operation, weight)| HistoryDistribution {
+//RS                 operation: operation.to_string(),
+//RS                 weight,
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     fn operation(
+//RS         index: u32,
+//RS         name: &str,
+//RS         argument: Option<i64>,
+//RS     ) -> HistoryOperation {
+//RS         let task = TaskId { value: index % 2 };
+//RS         let event = EventId { value: index + 1 };
+//RS         let mut operation = HistoryOperation::new(index, name).scheduled_on(task, event);
+//RS         if index > 0 {
+//RS             operation = operation
+//RS                 .depends_on(index - 1)
+//RS                 .requires(HistoryPrecondition::TaskCompleted(TaskId {
+//RS                     value: (index - 1) % 2,
+//RS                 }))
+//RS                 .requires(HistoryPrecondition::EventAvailable(EventId {
+//RS                     value: index,
+//RS                 }));
+//RS         }
+//RS         if let Some(argument) = argument {
+//RS             operation = operation.with_argument(HistoryValue::Integer(argument));
+//RS         }
+//RS         operation
+//RS     }
+//RS 
+//RS     fn command_for(operation: &HistoryOperation) -> Option<CounterCommand> {
+//RS         match operation.name.as_str() {
+//RS             "add" => match operation.arguments.as_slice() {
+//RS                 [HistoryValue::Integer(value)] => Some(CounterCommand::Add(*value)),
+//RS                 _ => None,
+//RS             },
+//RS             "sub" => match operation.arguments.as_slice() {
+//RS                 [HistoryValue::Integer(value)] => Some(CounterCommand::Sub(*value)),
+//RS                 _ => None,
+//RS             },
+//RS             "reset" if operation.arguments.is_empty() => Some(CounterCommand::Reset),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl HistoryStrategyBehavior<CounterCommand> for CounterHistoryStrategy {
+//RS     fn command_type(&self) -> &str {
+//RS         "CounterCommand"
+//RS     }
+//RS 
+//RS     fn distributions(&self) -> Vec<HistoryDistribution> {
+//RS         Self::distributions()
+//RS     }
+//RS 
+//RS     fn generate(
+//RS         &self,
+//RS         rng: &mut HistoryRng,
+//RS         case_index: usize,
+//RS         max_steps: usize,
+//RS     ) -> Option<TypedHistoryCase<CounterCommand>> {
+//RS         if max_steps == 0 {
+//RS             return None;
+//RS         }
+//RS         let case_seed = rng.next_u64();
+//RS         let mut local = HistoryRng::new(case_seed);
+//RS         let step_count = 1 + local.below(max_steps.min(8) as u64) as usize;
+//RS         let distributions = Self::distributions();
+//RS         let mut case = HistoryCase::new(format!("counter-{case_index}"), case_seed);
+//RS         let mut commands = Vec::with_capacity(step_count);
+//RS         for index in 0..step_count {
+//RS             let choice = local
+//RS                 .choose_distribution(&distributions)
+//RS                 .unwrap_or(index % distributions.len());
+//RS             let (name, argument, command) = match distributions[choice].operation.as_str() {
+//RS                 "add" => {
+//RS                     let value = local.below(17) as i64 - 8;
+//RS                     ("add", Some(value), CounterCommand::Add(value))
+//RS                 }
+//RS                 "sub" => {
+//RS                     let value = local.below(17) as i64 - 8;
+//RS                     ("sub", Some(value), CounterCommand::Sub(value))
+//RS                 }
+//RS                 "reset" => ("reset", None, CounterCommand::Reset),
+//RS                 _ => return None,
+//RS             };
+//RS             let operation = Self::operation(index as u32, name, argument);
+//RS             case.push(operation);
+//RS             case.schedule(
+//RS                 HistoryScheduleChoice::new(index as u32, "fifo")
+//RS                     .for_task_event(
+//RS                         TaskId {
+//RS                             value: index as u32 % 2,
+//RS                         },
+//RS                         EventId {
+//RS                             value: index as u32 + 1,
+//RS                         },
+//RS                     ),
+//RS             );
+//RS             commands.push(command);
+//RS         }
+//RS         TypedHistoryCase::new(case, commands)
+//RS     }
+//RS 
+//RS     fn rebuild(&self, case: &HistoryCase) -> Option<TypedHistoryCase<CounterCommand>> {
+//RS         let commands = case
+//RS             .operations
+//RS             .iter()
+//RS             .map(Self::command_for)
+//RS             .collect::<Option<Vec<_>>>()?;
+//RS         TypedHistoryCase::new(case.clone(), commands)
+//RS     }
+//RS 
+//RS     fn valid(&self, case: &TypedHistoryCase<CounterCommand>) -> bool {
+//RS         case.case.validate().is_ok()
+//RS             && case
+//RS                 .case
+//RS                 .operations
+//RS                 .iter()
+//RS                 .zip(&case.commands)
+//RS                 .all(|(operation, command)| match (operation.name.as_str(), command) {
+//RS                     ("add", CounterCommand::Add(value))
+//RS                     | ("sub", CounterCommand::Sub(value)) => {
+//RS                         operation.arguments.as_slice() == [HistoryValue::Integer(*value)]
+//RS                     }
+//RS                     ("reset", CounterCommand::Reset) => operation.arguments.is_empty(),
+//RS                     _ => false,
+//RS                 })
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum BookingCommand {
+//RS     Reserve { creates: HandleId },
+//RS     Cancel { handle: HandleId },
+//RS     Timeout { handle: HandleId },
+//RS     Retry { handle: HandleId, creates: HandleId },
+//RS }
+//RS 
+//RS impl HistoryCommand for BookingCommand {
+//RS     type Strategy = BookingHistoryStrategy;
+//RS 
+//RS     fn history_strategy() -> Self::Strategy {
+//RS         BookingHistoryStrategy::new()
+//RS     }
+//RS }
+//RS #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+//RS pub struct BookingHistoryStrategy;
+//RS 
+//RS impl BookingHistoryStrategy {
+//RS     pub fn new() -> Self {
+//RS         Self
+//RS     }
+//RS 
+//RS     pub fn distributions() -> Vec<HistoryDistribution> {
+//RS         [
+//RS             ("reserve", 3),
+//RS             ("cancel", 2),
+//RS             ("timeout", 2),
+//RS             ("retry", 1),
+//RS         ]
+//RS         .into_iter()
+//RS         .map(|(operation, weight)| HistoryDistribution {
+//RS             operation: operation.to_string(),
+//RS             weight,
+//RS         })
+//RS         .collect()
+//RS     }
+//RS 
+//RS     fn handle_argument(operation: &HistoryOperation) -> Option<HandleId> {
+//RS         let mut handles = operation.arguments.iter().filter_map(HistoryValue::handles);
+//RS         let handle = handles.next()?;
+//RS         handles.next().is_none().then_some(handle)
+//RS     }
+//RS 
+//RS     fn command_for(operation: &HistoryOperation) -> Option<BookingCommand> {
+//RS         match operation.name.as_str() {
+//RS             "reserve" if operation.arguments.is_empty() && operation.creates.len() == 1 => {
+//RS                 Some(BookingCommand::Reserve {
+//RS                     creates: operation.creates[0],
+//RS                 })
+//RS             }
+//RS             "cancel" if operation.creates.is_empty() && operation.consumes.is_empty() => {
+//RS                 Some(BookingCommand::Cancel {
+//RS                     handle: Self::handle_argument(operation)?,
+//RS                 })
+//RS             }
+//RS             "timeout" if operation.creates.is_empty() && operation.consumes.is_empty() => {
+//RS                 Some(BookingCommand::Timeout {
+//RS                     handle: Self::handle_argument(operation)?,
+//RS                 })
+//RS             }
+//RS             "retry" if operation.creates.len() == 1 && operation.consumes.len() == 1 => {
+//RS                 Some(BookingCommand::Retry {
+//RS                     handle: Self::handle_argument(operation)?,
+//RS                     creates: operation.creates[0],
+//RS                 })
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl HistoryStrategyBehavior<BookingCommand> for BookingHistoryStrategy {
+//RS     fn command_type(&self) -> &str {
+//RS         "BookingCommand"
+//RS     }
+//RS 
+//RS     fn distributions(&self) -> Vec<HistoryDistribution> {
+//RS         Self::distributions()
+//RS     }
+//RS 
+//RS     fn generate(
+//RS         &self,
+//RS         rng: &mut HistoryRng,
+//RS         case_index: usize,
+//RS         max_steps: usize,
+//RS     ) -> Option<TypedHistoryCase<BookingCommand>> {
+//RS         generate_booking_history_case(rng, case_index, max_steps)
+//RS             .and_then(|case| self.rebuild(&case))
+//RS     }
+//RS 
+//RS     fn rebuild(&self, case: &HistoryCase) -> Option<TypedHistoryCase<BookingCommand>> {
+//RS         let commands = case
+//RS             .operations
+//RS             .iter()
+//RS             .map(Self::command_for)
+//RS             .collect::<Option<Vec<_>>>()?;
+//RS         TypedHistoryCase::new(case.clone(), commands)
+//RS     }
+//RS 
+//RS     fn valid(&self, case: &TypedHistoryCase<BookingCommand>) -> bool {
+//RS         booking_case_is_valid(&case.case)
+//RS             && case
+//RS                 .case
+//RS                 .operations
+//RS                 .iter()
+//RS                 .zip(&case.commands)
+//RS                 .all(|(operation, command)| {
+//RS                     Self::command_for(operation).as_ref() == Some(command)
+//RS                 })
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct HistorySchemaCommand {
+//RS     pub operation: String,
+//RS     pub arguments: Vec<HistoryValue>,
+//RS     pub creates: Vec<HandleId>,
+//RS     pub consumes: Vec<HandleId>,
+//RS }
+//RS /// A scalar field admitted by the shared schema strategy.  Compiler tiers use
+//RS /// this small checked vocabulary for ordinary enum commands; resource-bearing
+//RS /// operations still require a domain strategy that can name their handles.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum HistorySchemaField {
+//RS     Integer { lo: i64, hi: i64 },
+//RS     Boolean,
+//RS     Text,
+//RS     Char,
+//RS }
+//RS 
+//RS impl HistorySchemaField {
+//RS     fn generate(&self, rng: &mut HistoryRng, case_index: usize, step_index: usize) -> Option<HistoryValue> {
+//RS         match self {
+//RS             Self::Integer { lo, hi } if lo <= hi => {
+//RS                 let width = (*hi as i128 - *lo as i128 + 1) as u128;
+//RS                 let value = if width <= u64::MAX as u128 {
+//RS                     *lo as i128 + rng.below(width as u64) as i128
+//RS                 } else {
+//RS                     *lo as i128
+//RS                 };
+//RS                 Some(HistoryValue::Integer(value as i64))
+//RS             }
+//RS             Self::Integer { .. } => None,
+//RS             Self::Boolean => Some(HistoryValue::Boolean(rng.coin())),
+//RS             Self::Text => Some(HistoryValue::Text(format!(
+//RS                 "history-{case_index}-{step_index}"
+//RS             ))),
+//RS             Self::Char => {
+//RS                 let value = (b'a' + rng.below(26) as u8) as char;
+//RS                 Some(HistoryValue::Text(value.to_string()))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn valid(&self, value: &HistoryValue) -> bool {
+//RS         match (self, value) {
+//RS             (Self::Integer { lo, hi }, HistoryValue::Integer(value)) => lo <= value && value <= hi,
+//RS             (Self::Boolean, HistoryValue::Boolean(_)) => true,
+//RS             (Self::Text, HistoryValue::Text(_)) => true,
+//RS             (Self::Char, HistoryValue::Text(value)) => {
+//RS                 value.chars().count() == 1
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS }
+//RS /// Canonical reason used when automatic derivation cannot cover a declared
+//RS /// enum variant without inventing a payload codec.
+//RS pub fn history_unsupported_variant_reason(command_type: &str, variant: &str) -> String {
+//RS     format!(
+//RS         "core.testing.histories command type `{command_type}` has unsupported variant `{variant}`: no type-valid scalar generator/codec"
+//RS     )
+//RS }
+//RS /// Canonical reason used when automatic derivation cannot find a checked enum
+//RS /// schema for the requested command type.
+//RS pub fn history_unsupported_type_reason(command_type: &str) -> String {
+//RS     format!(
+//RS         "core.testing.histories command type `{command_type}` has no checked enum schema"
+//RS     )
+//RS }
+//RS 
+//RS /// One ordinary enum operation accepted by [`HistorySchemaStrategy`].
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct HistorySchemaVariant {
+//RS     pub operation: String,
+//RS     pub variant: String,
+//RS     pub fields: Vec<HistorySchemaField>,
+//RS }
+//RS 
+//RS impl HistorySchemaVariant {
+//RS     pub fn new(
+//RS         operation: impl Into<String>,
+//RS         variant: impl Into<String>,
+//RS         fields: Vec<HistorySchemaField>,
+//RS     ) -> Option<Self> {
+//RS         let operation = operation.into();
+//RS         let variant = variant.into();
+//RS         (!operation.is_empty() && !variant.is_empty() && operation.len() <= MAX_STRING_BYTES)
+//RS             .then_some(Self {
+//RS                 operation,
+//RS                 variant,
+//RS                 fields,
+//RS             })
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct HistorySchemaStrategy {
+//RS     command_type: String,
+//RS     distributions: Vec<HistoryDistribution>,
+//RS     variants: Option<Vec<HistorySchemaVariant>>,
+//RS }
+//RS 
+//RS impl HistorySchemaStrategy {
+//RS     pub fn new(command_type: impl Into<String>) -> Self {
+//RS         Self {
+//RS             command_type: command_type.into(),
+//RS             distributions: vec![HistoryDistribution {
+//RS                 operation: "command".to_string(),
+//RS                 weight: 1,
+//RS             }],
+//RS             variants: None,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Build the shared ordinary-enum strategy from checked variant rows.
+//RS     /// Every admitted variant is visible in the distribution table; unsupported
+//RS     /// payloads are omitted by the caller before this constructor.
+//RS     pub fn with_variants(
+//RS         command_type: impl Into<String>,
+//RS         variants: Vec<HistorySchemaVariant>,
+//RS     ) -> Option<Self> {
+//RS         if variants.is_empty()
+//RS             || variants
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .any(|(index, variant)| {
+//RS                     variant.operation.is_empty()
+//RS                         || variant.operation.len() > MAX_STRING_BYTES
+//RS                         || variants[..index]
+//RS                             .iter()
+//RS                             .any(|previous| previous.operation == variant.operation)
+//RS                 })
+//RS         {
+//RS             return None;
+//RS         }
+//RS         let distributions = variants
+//RS             .iter()
+//RS             .map(|variant| HistoryDistribution {
+//RS                 operation: variant.operation.clone(),
+//RS                 weight: 1,
+//RS             })
+//RS             .collect();
+//RS         Some(Self {
+//RS             command_type: command_type.into(),
+//RS             distributions,
+//RS             variants: Some(variants),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn command_type(&self) -> &str {
+//RS         &self.command_type
+//RS     }
+//RS 
+//RS     pub fn distributions(&self) -> Vec<HistoryDistribution> {
+//RS         self.distributions.clone()
+//RS     }
+//RS 
+//RS     pub fn with_distributions(
+//RS         command_type: impl Into<String>,
+//RS         distributions: Vec<HistoryDistribution>,
+//RS     ) -> Option<Self> {
+//RS         (!distributions.is_empty()).then_some(Self {
+//RS             command_type: command_type.into(),
+//RS             distributions,
+//RS             variants: None,
+//RS         })
+//RS     }
+//RS 
+//RS     fn command_for(operation: &HistoryOperation) -> HistorySchemaCommand {
+//RS         HistorySchemaCommand {
+//RS             operation: operation.name.clone(),
+//RS             arguments: operation.arguments.clone(),
+//RS             creates: operation.creates.clone(),
+//RS             consumes: operation.consumes.clone(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn variant_for(&self, operation: &HistoryOperation) -> Option<&HistorySchemaVariant> {
+//RS         self.variants
+//RS             .as_ref()?
+//RS             .iter()
+//RS             .find(|variant| variant.operation == operation.name)
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS impl HistoryCommand for HistorySchemaCommand {
+//RS     type Strategy = HistorySchemaStrategy;
+//RS 
+//RS     fn history_strategy() -> Self::Strategy {
+//RS         HistorySchemaStrategy::new(std::any::type_name::<Self>())
+//RS     }
+//RS }
+//RS 
+//RS impl HistoryStrategyBehavior<HistorySchemaCommand> for HistorySchemaStrategy {
+//RS     fn command_type(&self) -> &str {
+//RS         &self.command_type
+//RS     }
+//RS 
+//RS     fn distributions(&self) -> Vec<HistoryDistribution> {
+//RS         self.distributions.clone()
+//RS     }
+//RS 
+//RS     fn generate(
+//RS         &self,
+//RS         rng: &mut HistoryRng,
+//RS         case_index: usize,
+//RS         max_steps: usize,
+//RS     ) -> Option<TypedHistoryCase<HistorySchemaCommand>> {
+//RS         if max_steps == 0 || self.distributions.is_empty() {
+//RS             return None;
+//RS         }
+//RS         let case_seed = rng.next_u64();
+//RS         let mut local = HistoryRng::new(case_seed);
+//RS         let step_count = 1 + local.below(max_steps.min(8) as u64) as usize;
+//RS         let mut case = HistoryCase::new(format!("{}-{case_index}", self.command_type), case_seed);
+//RS         for index in 0..step_count {
+//RS             let choice = local.choose_distribution(&self.distributions)?;
+//RS             let mut operation =
+//RS                 HistoryOperation::new(index as u32, self.distributions[choice].operation.clone())
+//RS                     .scheduled_on(
+//RS                         TaskId {
+//RS                             value: index as u32 % 2,
+//RS                         },
+//RS                         EventId {
+//RS                             value: index as u32 + 1,
+//RS                         },
+//RS                     );
+//RS             if self.variants.is_some() {
+//RS                 let variant = self.variant_for(&operation)?;
+//RS                 for (field_index, field) in variant.fields.iter().enumerate() {
+//RS                     operation = operation.with_argument(field.generate(
+//RS                         &mut local,
+//RS                         case_index,
+//RS                         index * variant.fields.len() + field_index,
+//RS                     )?);
+//RS                 }
+//RS             }
+//RS             if index > 0 {
+//RS                 operation = operation
+//RS                     .depends_on(index as u32 - 1)
+//RS                     .requires(HistoryPrecondition::TaskCompleted(TaskId {
+//RS                         value: (index as u32 - 1) % 2,
+//RS                     }))
+//RS                     .requires(HistoryPrecondition::EventAvailable(EventId {
+//RS                         value: index as u32,
+//RS                     }));
+//RS             }
+//RS             case.push(operation);
+//RS         }
+//RS         let commands = case
+//RS             .operations
+//RS             .iter()
+//RS             .map(Self::command_for)
+//RS             .collect();
+//RS         TypedHistoryCase::new(case, commands)
+//RS     }
+//RS 
+//RS     fn rebuild(
+//RS         &self,
+//RS         case: &HistoryCase,
+//RS     ) -> Option<TypedHistoryCase<HistorySchemaCommand>> {
+//RS         let commands = case
+//RS             .operations
+//RS             .iter()
+//RS             .map(Self::command_for)
+//RS             .collect();
+//RS         TypedHistoryCase::new(case.clone(), commands)
+//RS     }
+//RS 
+//RS     fn valid(&self, case: &TypedHistoryCase<HistorySchemaCommand>) -> bool {
+//RS         let schema_valid = self.variants.as_ref().is_none_or(|variants| {
+//RS             case.case.operations.iter().all(|operation| {
+//RS                 let Some(variant) = variants
+//RS                     .iter()
+//RS                     .find(|variant| variant.operation == operation.name)
+//RS                 else {
+//RS                     return false;
+//RS                 };
+//RS                 operation.creates.is_empty()
+//RS                     && operation.consumes.is_empty()
+//RS                     && operation.arguments.len() == variant.fields.len()
+//RS                     && operation
+//RS                         .arguments
+//RS                         .iter()
+//RS                         .zip(&variant.fields)
+//RS                         .all(|(value, field)| field.valid(value))
+//RS             })
+//RS         });
+//RS         case.case.validate().is_ok()
+//RS             && schema_valid
+//RS             && case
+//RS                 .case
+//RS                 .operations
+//RS                 .iter()
+//RS                 .zip(&case.commands)
+//RS                 .all(|(operation, command)| {
+//RS                     command.operation == operation.name
+//RS                         && command.arguments == operation.arguments
+//RS                         && command.creates == operation.creates
+//RS                         && command.consumes == operation.consumes
+//RS                 })
+//RS     }
+//RS }
+//RS 
+//RS fn history_value_data_tree(value: &HistoryValue) -> crate::DataTree::DataTree {
+//RS     match value {
+//RS         HistoryValue::Integer(value) => crate::DataTree::DataTree::Int(*value),
+//RS         HistoryValue::Boolean(value) => crate::DataTree::DataTree::Bool(*value),
+//RS         HistoryValue::Text(value) => crate::DataTree::DataTree::Text(value.clone()),
+//RS         HistoryValue::Handle(handle) => crate::DataTree::DataTree::Int(handle.value as i64),
+//RS         HistoryValue::Redacted(label) => crate::DataTree::DataTree::Object(vec![
+//RS             (
+//RS                 "redacted".to_string(),
+//RS                 crate::DataTree::DataTree::Text(label.clone()),
+//RS             ),
+//RS         ]),
+//RS     }
+//RS }
+//RS 
+//RS fn history_schema_command_data_tree(
+//RS     command: &HistorySchemaCommand,
+//RS ) -> crate::DataTree::DataTree {
+//RS     crate::DataTree::DataTree::Object(vec![
+//RS         (
+//RS             "operation".to_string(),
+//RS             crate::DataTree::DataTree::Text(command.operation.clone()),
+//RS         ),
+//RS         (
+//RS             "arguments".to_string(),
+//RS             crate::DataTree::DataTree::Array(
+//RS                 command
+//RS                     .arguments
+//RS                     .iter()
+//RS                     .map(history_value_data_tree)
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "creates".to_string(),
+//RS             crate::DataTree::DataTree::Array(
+//RS                 command
+//RS                     .creates
+//RS                     .iter()
+//RS                     .map(|handle| crate::DataTree::DataTree::Int(handle.value as i64))
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "consumes".to_string(),
+//RS             crate::DataTree::DataTree::Array(
+//RS                 command
+//RS                     .consumes
+//RS                     .iter()
+//RS                     .map(|handle| crate::DataTree::DataTree::Int(handle.value as i64))
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS     ])
+//RS }
+//RS 
+// END-PORT-PENDING 0106 crates/jet-foundation/src/TestingHistory.rs:1-1807
+

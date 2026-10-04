@@ -1,0 +1,943 @@
+// PORT-PENDING 0085 crates-jet-foundation-src-performancebudget-slice-1849: crates/jet-foundation/src/PerformanceBudget.rs:1849-2787
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn validate_compile_record(
+//RS     value: &CanonicalJson,
+//RS     root: &BTreeMap<String, CanonicalJson>,
+//RS     aggregate: &mut BTreeMap<String, BigInt>,
+//RS     elapsed: &mut Vec<Rational>,
+//RS     peak_rss_bytes: &mut BigInt,
+//RS ) -> Result<(), String> {
+//RS     unsigned(&root["workload_bytes"], "compile.workload_bytes")?;
+//RS     let fields = object(
+//RS         value,
+//RS         "compile sample record",
+//RS         &[
+//RS             "backend",
+//RS             "cache_state",
+//RS             "clock",
+//RS             "compiler_digest",
+//RS             "core_digest",
+//RS             "edit_bytes",
+//RS             "elapsed_ns",
+//RS             "host",
+//RS             "linker",
+//RS             "peak_rss_bytes",
+//RS             "phase_totals",
+//RS             "profile",
+//RS             "source_tree_sha256",
+//RS             "target",
+//RS             "workload_bytes",
+//RS         ],
+//RS     )?;
+//RS     for key in [
+//RS         "backend",
+//RS         "cache_state",
+//RS         "clock",
+//RS         "compiler_digest",
+//RS         "core_digest",
+//RS         "edit_bytes",
+//RS         "host",
+//RS         "linker",
+//RS         "profile",
+//RS         "source_tree_sha256",
+//RS         "target",
+//RS         "workload_bytes",
+//RS     ] {
+//RS         if fields[key] != root[key] {
+//RS             return Err(format!(
+//RS                 "compile sample record `{key}` does not match its row identity"
+//RS             ));
+//RS         }
+//RS     }
+//RS     hex64(&fields["compiler_digest"], "compile sample compiler_digest")?;
+//RS     hex64(&fields["core_digest"], "compile sample core_digest")?;
+//RS     hex64(
+//RS         &fields["source_tree_sha256"],
+//RS         "compile sample source_tree_sha256",
+//RS     )?;
+//RS     let ns = unsigned(&fields["elapsed_ns"], "compile sample elapsed_ns")?;
+//RS     elapsed.push(Rational::from_bigints(ns.clone(), BigInt::one())?);
+//RS     let rss = unsigned(&fields["peak_rss_bytes"], "compile sample peak_rss_bytes")?;
+//RS     if rss > *peak_rss_bytes {
+//RS         *peak_rss_bytes = rss;
+//RS     }
+//RS     let phases = validate_phase_totals(&fields["phase_totals"], "compile sample phase_totals")?;
+//RS     for (name, value) in phases {
+//RS         let slot = aggregate.entry(name).or_insert_with(BigInt::zero);
+//RS         *slot = slot.add(&value);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_phase_totals(
+//RS     value: &CanonicalJson,
+//RS     name: &str,
+//RS ) -> Result<BTreeMap<String, BigInt>, String> {
+//RS     let entries = array(value, name)?;
+//RS     let mut prior = None;
+//RS     let mut totals = BTreeMap::new();
+//RS     for entry in entries {
+//RS         let fields = object(entry, &format!("{name} entry"), &["name", "ns"])?;
+//RS         let phase = text(&fields["name"], &format!("{name}.name"))?;
+//RS         if phase.is_empty() || prior.is_some_and(|previous| previous >= phase) {
+//RS             return Err(format!("{name} is not sorted by phase name"));
+//RS         }
+//RS         prior = Some(phase);
+//RS         let ns = unsigned(&fields["ns"], &format!("{name}.ns"))?;
+//RS         if totals.insert(phase.into(), ns).is_some() {
+//RS             return Err(format!("{name} contains a duplicate phase"));
+//RS         }
+//RS     }
+//RS     if totals.is_empty() {
+//RS         return Err(format!("{name} is empty"));
+//RS     }
+//RS     Ok(totals)
+//RS }
+//RS fn validate_report_content(value: &CanonicalJson) -> Result<(), String> {
+//RS     let f = object(
+//RS         value,
+//RS         "report content",
+//RS         &[
+//RS             "subject",
+//RS             "toolchain",
+//RS             "evidence_id",
+//RS             "measurements",
+//RS             "summary",
+//RS             "privacy",
+//RS         ],
+//RS     )?;
+//RS     let subject = object(
+//RS         &f["subject"],
+//RS         "subject",
+//RS         &[
+//RS             "target_id",
+//RS             "member_sources",
+//RS             "target_triple",
+//RS             "target_class",
+//RS             "profile",
+//RS             "artifact",
+//RS             "measured_start",
+//RS             "measured_end",
+//RS         ],
+//RS     )?;
+//RS     for key in [
+//RS         "target_id",
+//RS         "target_triple",
+//RS         "target_class",
+//RS         "profile",
+//RS         "measured_start",
+//RS         "measured_end",
+//RS     ] {
+//RS         text(&subject[key], &format!("subject.{key}"))?;
+//RS     }
+//RS     let mut prior: Option<(&str, &str)> = None;
+//RS     for source in array(&subject["member_sources"], "subject.member_sources")? {
+//RS         let sf = object(source, "member source", &["path", "sha256"])?;
+//RS         let path = text(&sf["path"], "member source.path")?;
+//RS         let hash = hex64(&sf["sha256"], "member source.sha256")?;
+//RS         if prior.is_some_and(|p| p > (path, hash)) {
+//RS             return Err("member_sources is not sorted".into());
+//RS         }
+//RS         prior = Some((path, hash));
+//RS     }
+//RS     nullable(&subject["artifact"], |v| {
+//RS         let a = object(v, "artifact", &["sha256", "bytes"])?;
+//RS         hex64(&a["sha256"], "artifact.sha256")?;
+//RS         unsigned(&a["bytes"], "artifact.bytes")?;
+//RS         Ok(())
+//RS     })?;
+//RS     let tool = object(
+//RS         &f["toolchain"],
+//RS         "toolchain",
+//RS         &[
+//RS             "jet_version",
+//RS             "compiler_build_id",
+//RS             "stdlib_id",
+//RS             "runner_id",
+//RS             "digest",
+//RS         ],
+//RS     )?;
+//RS     for key in ["jet_version", "compiler_build_id", "stdlib_id", "runner_id"] {
+//RS         text(&tool[key], &format!("toolchain.{key}"))?;
+//RS     }
+//RS     hex64(&tool["digest"], "toolchain.digest")?;
+//RS     let digest_content = CanonicalJson::object(
+//RS         ["jet_version", "compiler_build_id", "stdlib_id", "runner_id"]
+//RS             .into_iter()
+//RS             .map(|k| (k.into(), tool[k].clone())),
+//RS     )?;
+//RS     verify_stable_id(&digest_content, text(&tool["digest"], "toolchain.digest")?)
+//RS         .map_err(|_| "toolchain digest mismatch".to_string())?;
+//RS     let evidence = hex64(&f["evidence_id"], "evidence_id")?;
+//RS     let measurements = array(&f["measurements"], "measurements")?;
+//RS     let mut order = None;
+//RS     for measurement in measurements {
+//RS         validate_measurement(measurement)?;
+//RS         let mf = match measurement {
+//RS             CanonicalJson::Object(v) => v,
+//RS             _ => unreachable!(),
+//RS         };
+//RS         let key = (
+//RS             text(&mf["budget_id"], "budget_id")?,
+//RS             text(&mf["source"], "source")?,
+//RS         );
+//RS         if order.is_some_and(|p| p > key) {
+//RS             return Err("measurements is not sorted by budget_id then source".into());
+//RS         }
+//RS         order = Some(key);
+//RS         validate_context_key(subject, tool, mf)?;
+//RS         verify_wire_evaluation(evidence, mf)?;
+//RS     }
+//RS     let sanitized = CanonicalJson::object([
+//RS         (
+//RS             "measurements".into(),
+//RS             CanonicalJson::Array(
+//RS                 measurements
+//RS                     .iter()
+//RS                     .map(sanitize_measurement)
+//RS                     .collect::<Result<Vec<_>, _>>()?,
+//RS             ),
+//RS         ),
+//RS         ("subject".into(), f["subject"].clone()),
+//RS         ("toolchain".into(), f["toolchain"].clone()),
+//RS     ])?;
+//RS     verify_stable_id(&sanitized, evidence).map_err(|_| "evidence_id mismatch".to_string())?;
+//RS     let summary = object(
+//RS         &f["summary"],
+//RS         "summary",
+//RS         &["outcome", "pass", "warn", "fail"],
+//RS     )?;
+//RS     one_of(
+//RS         &summary["outcome"],
+//RS         "summary.outcome",
+//RS         &["pass", "warn", "fail"],
+//RS     )?;
+//RS     for key in ["pass", "warn", "fail"] {
+//RS         unsigned(&summary[key], &format!("summary.{key}"))?;
+//RS     }
+//RS     let privacy = object(
+//RS         &f["privacy"],
+//RS         "privacy",
+//RS         &["schema", "workspace_paths_only", "retained", "excluded"],
+//RS     )?;
+//RS     if privacy["schema"] != CanonicalJson::Integer("1".into())
+//RS         || !boolean(
+//RS             &privacy["workspace_paths_only"],
+//RS             "privacy.workspace_paths_only",
+//RS         )?
+//RS     {
+//RS         return Err("unsupported privacy schema/policy".into());
+//RS     }
+//RS     for key in ["retained", "excluded"] {
+//RS         let vals = array(&privacy[key], &format!("privacy.{key}"))?;
+//RS         let mut prior = None;
+//RS         for v in vals {
+//RS             let v = text(v, &format!("privacy.{key} item"))?;
+//RS             if prior.is_some_and(|p| p > v) {
+//RS                 return Err(format!("privacy.{key} is not sorted"));
+//RS             }
+//RS             prior = Some(v);
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn sanitize_measurement(value: &CanonicalJson) -> Result<CanonicalJson, String> {
+//RS     let mut f = match value {
+//RS         CanonicalJson::Object(v) => v.clone(),
+//RS         _ => return Err("measurement is not object".into()),
+//RS     };
+//RS     for key in ["history", "baseline", "decision"] {
+//RS         f.insert(key.into(), CanonicalJson::Null);
+//RS     }
+//RS     Ok(CanonicalJson::Object(f))
+//RS }
+//RS fn frame(input: &mut Vec<u8>, value: &str) {
+//RS     input.extend_from_slice(&(value.len() as u64).to_be_bytes());
+//RS     input.extend_from_slice(value.as_bytes());
+//RS }
+//RS fn wire_text(value: &CanonicalJson) -> String {
+//RS     match value {
+//RS         CanonicalJson::String(v) | CanonicalJson::Integer(v) => v.clone(),
+//RS         CanonicalJson::Null => String::new(),
+//RS         _ => String::from_utf8(value.bytes())
+//RS             .expect("canonical JSON UTF-8")
+//RS             .trim_end()
+//RS             .into(),
+//RS     }
+//RS }
+//RS fn validate_context_key(
+//RS     subject: &BTreeMap<String, CanonicalJson>,
+//RS     tool: &BTreeMap<String, CanonicalJson>,
+//RS     measurement: &BTreeMap<String, CanonicalJson>,
+//RS ) -> Result<(), String> {
+//RS     let metric = match &measurement["metric"] {
+//RS         CanonicalJson::Object(v) => v,
+//RS         _ => return Err("metric is not object".into()),
+//RS     };
+//RS     let provider = match &measurement["provider"] {
+//RS         CanonicalJson::Object(v) => v,
+//RS         _ => return Err("provider is not object".into()),
+//RS     };
+//RS     let mut input = b"jet-budget-context-v1\0".to_vec();
+//RS     for value in [
+//RS         &subject["target_id"],
+//RS         &metric["name"],
+//RS         &metric["percentile"],
+//RS         &measurement["target_class"],
+//RS         &subject["target_triple"],
+//RS         &subject["profile"],
+//RS     ] {
+//RS         frame(&mut input, &wire_text(value));
+//RS     }
+//RS     for key in [
+//RS         "jet_version",
+//RS         "compiler_build_id",
+//RS         "stdlib_id",
+//RS         "runner_id",
+//RS         "digest",
+//RS     ] {
+//RS         frame(&mut input, &wire_text(&tool[key]));
+//RS     }
+//RS     for key in [
+//RS         "kind",
+//RS         "identity",
+//RS         "version",
+//RS         "isolation",
+//RS         "cpu_arch",
+//RS         "cpu_model",
+//RS         "logical_cpus",
+//RS         "memory_bytes",
+//RS         "os",
+//RS         "kernel",
+//RS         "power_governor",
+//RS         "hardware_fingerprint",
+//RS     ] {
+//RS         frame(&mut input, &wire_text(&provider[key]));
+//RS     }
+//RS     let actual = SHA256::sha256_hex(&input);
+//RS     if text(&measurement["context_key"], "context_key")? != actual {
+//RS         return Err("measurement context_key mismatch".into());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn usize_wire(value: &CanonicalJson, name: &str) -> Result<usize, String> {
+//RS     unsigned(value, name)?
+//RS         .to_string()
+//RS         .parse()
+//RS         .map_err(|_| format!("{name} exceeds implementation resource limit"))
+//RS }
+//RS fn rational_or_none(value: &CanonicalJson, name: &str) -> Result<Option<Rational>, String> {
+//RS     if matches!(value, CanonicalJson::Null) {
+//RS         Ok(None)
+//RS     } else {
+//RS         Ok(Some(validate_rational(value, false, name)?))
+//RS     }
+//RS }
+//RS fn parse_percentile(value: &CanonicalJson) -> Result<Option<Percentile>, String> {
+//RS     match value {
+//RS         CanonicalJson::Null => Ok(None),
+//RS         CanonicalJson::String(v) => match v.as_str() {
+//RS             "p50" => Ok(Some(Percentile::P50)),
+//RS             "p90" => Ok(Some(Percentile::P90)),
+//RS             "p95" => Ok(Some(Percentile::P95)),
+//RS             "p99" => Ok(Some(Percentile::P99)),
+//RS             "p999" => Ok(Some(Percentile::P999)),
+//RS             _ => Err("unknown percentile".into()),
+//RS         },
+//RS         _ => Err("percentile is not text or null".into()),
+//RS     }
+//RS }
+//RS fn parse_direction(value: &CanonicalJson) -> Result<Direction, String> {
+//RS     match text(value, "direction")? {
+//RS         "lower_is_better" => Ok(Direction::LowerIsBetter),
+//RS         "higher_is_better" => Ok(Direction::HigherIsBetter),
+//RS         _ => Err("unknown direction".into()),
+//RS     }
+//RS }
+//RS fn parse_enforcement(value: &CanonicalJson) -> Result<Enforcement, String> {
+//RS     match text(value, "enforcement")? {
+//RS         "warn" => Ok(Enforcement::Warn),
+//RS         "fail" => Ok(Enforcement::Fail),
+//RS         _ => Err("unknown enforcement".into()),
+//RS     }
+//RS }
+//RS fn parse_comparison(value: &CanonicalJson) -> Result<Comparison, String> {
+//RS     let f = match value {
+//RS         CanonicalJson::Object(v) => v,
+//RS         _ => return Err("comparison is not object".into()),
+//RS     };
+//RS     match text(&f["kind"], "comparison.kind")? {
+//RS         "absolute" => Ok(Comparison::Absolute {
+//RS             limit: validate_rational(&f["limit"], true, "comparison.limit")?,
+//RS             direction: match text(&f["direction"], "comparison.direction")? {
+//RS                 "at_most" => LimitDirection::AtMost,
+//RS                 "at_least" => LimitDirection::AtLeast,
+//RS                 _ => return Err("unknown limit direction".into()),
+//RS             },
+//RS         }),
+//RS         "absolute_from" => Ok(Comparison::AbsoluteFrom {
+//RS             limit: validate_rational(&f["limit"], true, "comparison.limit")?,
+//RS             direction: match text(&f["direction"], "comparison.direction")? {
+//RS                 "at_most" => LimitDirection::AtMost,
+//RS                 "at_least" => LimitDirection::AtLeast,
+//RS                 _ => return Err("unknown limit direction".into()),
+//RS             },
+//RS         }),
+//RS         "relative_to" => Ok(Comparison::RelativeTo {
+//RS             limit_basis_points: unsigned(
+//RS                 &f["limit_basis_points"],
+//RS                 "comparison.limit_basis_points",
+//RS             )?,
+//RS             goal: match text(&f["goal"], "comparison.goal")? {
+//RS                 "regression_at_most" => RelativeGoal::RegressionAtMost,
+//RS                 "improvement_at_least" => RelativeGoal::ImprovementAtLeast,
+//RS                 _ => return Err("unknown relative goal".into()),
+//RS             },
+//RS         }),
+//RS         _ => Err("unknown comparison kind".into()),
+//RS     }
+//RS }
+//RS fn parse_policy(value: &CanonicalJson) -> Result<Option<MeasurementPolicy>, String> {
+//RS     if matches!(value, CanonicalJson::Null) {
+//RS         return Ok(None);
+//RS     }
+//RS     let f = match value {
+//RS         CanonicalJson::Object(v) => v,
+//RS         _ => return Err("policy is not object".into()),
+//RS     };
+//RS     Ok(Some(MeasurementPolicy {
+//RS         bootstrap_resamples: usize_wire(&f["bootstrap_resamples"], "policy.bootstrap_resamples")?,
+//RS         lower_rank: usize_wire(&f["lower_rank"], "policy.lower_rank")?,
+//RS         upper_rank: usize_wire(&f["upper_rank"], "policy.upper_rank")?,
+//RS     }))
+//RS }
+//RS fn quantities(value: &CanonicalJson, name: &str) -> Result<Vec<Rational>, String> {
+//RS     array(value, name)?
+//RS         .iter()
+//RS         .map(|v| validate_rational(v, true, name))
+//RS         .collect()
+//RS }
+//RS fn history_ids(value: &CanonicalJson) -> Result<Vec<String>, String> {
+//RS     if matches!(value, CanonicalJson::Null) {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     let f = match value {
+//RS         CanonicalJson::Object(v) => v,
+//RS         _ => return Err("history is not object".into()),
+//RS     };
+//RS     Ok(array(&f["report_ids"], "history.report_ids")?
+//RS         .iter()
+//RS         .map(|v| text(v, "history report id").map(str::to_owned))
+//RS         .collect::<Result<_, _>>()?)
+//RS }
+//RS fn evidence_enum(value: &CanonicalJson) -> Result<Evidence, String> {
+//RS     match text(value, "decision.evidence")? {
+//RS         "pass" => Ok(Evidence::Pass),
+//RS         "regression" => Ok(Evidence::Regression),
+//RS         "inconclusive" => Ok(Evidence::Inconclusive),
+//RS         "unavailable" => Ok(Evidence::Unavailable),
+//RS         _ => Err("unknown evidence".into()),
+//RS     }
+//RS }
+//RS fn outcome_enum(value: &CanonicalJson) -> Result<PolicyOutcome, String> {
+//RS     match text(value, "decision.policy_outcome")? {
+//RS         "pass" => Ok(PolicyOutcome::Pass),
+//RS         "warn" => Ok(PolicyOutcome::Warn),
+//RS         "fail" => Ok(PolicyOutcome::Fail),
+//RS         _ => Err("unknown policy outcome".into()),
+//RS     }
+//RS }
+//RS fn trend_label_enum(value: &CanonicalJson) -> Result<TrendLabel, String> {
+//RS     match text(value, "trend.label")? {
+//RS         "improving" => Ok(TrendLabel::Improving),
+//RS         "stable" => Ok(TrendLabel::Stable),
+//RS         "regressing" => Ok(TrendLabel::Regressing),
+//RS         "insufficient" => Ok(TrendLabel::Insufficient),
+//RS         _ => Err("unknown trend label".into()),
+//RS     }
+//RS }
+//RS fn verify_wire_evaluation(
+//RS     evidence_id: &str,
+//RS     m: &BTreeMap<String, CanonicalJson>,
+//RS ) -> Result<(), String> {
+//RS     if matches!(m["decision"], CanonicalJson::Null) {
+//RS         return Ok(());
+//RS     }
+//RS     let d = match &m["decision"] {
+//RS         CanonicalJson::Object(v) => v,
+//RS         _ => unreachable!(),
+//RS     };
+//RS     let direction = parse_direction(&m["direction"])?;
+//RS     let enforcement = parse_enforcement(&m["enforcement"])?;
+//RS     let comparison = parse_comparison(&m["comparison"])?;
+//RS     let policy = parse_policy(&m["policy"])?;
+//RS     let candidate = quantities(&m["samples"], "measurement.samples")?;
+//RS     let (baseline, ids) = if let CanonicalJson::Object(b) = &m["baseline"] {
+//RS         (
+//RS             quantities(&b["pooled_samples"], "baseline.pooled_samples")?,
+//RS             history_ids(&b["history"])?,
+//RS         )
+//RS     } else {
+//RS         (Vec::new(), history_ids(&m["history"])?)
+//RS     };
+//RS     let stored_evidence = evidence_enum(&d["evidence"])?;
+//RS     let stored_outcome = outcome_enum(&d["policy_outcome"])?;
+//RS     if baseline.is_empty()
+//RS         && matches!(
+//RS             comparison,
+//RS             Comparison::AbsoluteFrom { .. } | Comparison::RelativeTo { .. }
+//RS         )
+//RS         && stored_evidence == Evidence::Unavailable
+//RS     {
+//RS         let expected = match enforcement {
+//RS             Enforcement::Warn => PolicyOutcome::Warn,
+//RS             Enforcement::Fail => PolicyOutcome::Fail,
+//RS         };
+//RS         if stored_outcome != expected {
+//RS             return Err("unavailable decision policy outcome mismatch".into());
+//RS         }
+//RS     } else {
+//RS         let metric = match &m["metric"] {
+//RS             CanonicalJson::Object(v) => v,
+//RS             _ => unreachable!(),
+//RS         };
+//RS         let actual = evaluate(
+//RS             evidence_id,
+//RS             text(&m["context_key"], "context_key")?,
+//RS             &ids,
+//RS             &candidate,
+//RS             &baseline,
+//RS             parse_percentile(&metric["percentile"])?,
+//RS             &comparison,
+//RS             direction,
+//RS             enforcement,
+//RS             policy.as_ref(),
+//RS         )?;
+//RS         if rational_or_none(&d["point"], "decision.point")? != Some(actual.point)
+//RS             || rational_or_none(&d["lower95"], "decision.lower95")? != actual.lower95
+//RS             || rational_or_none(&d["upper95"], "decision.upper95")? != actual.upper95
+//RS             || stored_evidence != actual.evidence
+//RS             || stored_outcome != actual.outcome
+//RS         {
+//RS             return Err(
+//RS                 "persisted decision does not match independent evaluator recomputation".into(),
+//RS             );
+//RS         }
+//RS     }
+//RS     let t = match &d["trend"] {
+//RS         CanonicalJson::Object(v) => v,
+//RS         _ => unreachable!(),
+//RS     };
+//RS     let tids = history_ids(&CanonicalJson::Object(BTreeMap::from([
+//RS         ("state_id".into(), CanonicalJson::String("0".repeat(64))),
+//RS         ("report_ids".into(), t["report_ids"].clone()),
+//RS     ])))?;
+//RS     let estimators = quantities(&t["estimators"], "trend.estimators")?;
+//RS     let actual = trend(&tids, &estimators, direction)?;
+//RS     if trend_label_enum(&t["label"])? != actual.label
+//RS         || rational_or_none(&t["score"], "trend.score")? != actual.score
+//RS     {
+//RS         return Err("persisted trend does not match independent recomputation".into());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub fn verify_evaluation(
+//RS     expected: &Evaluation,
+//RS     inputs: EvaluationInputs<'_>,
+//RS ) -> Result<(), String> {
+//RS     let actual = evaluate(
+//RS         inputs.evidence_id,
+//RS         inputs.context_key,
+//RS         inputs.baseline_report_ids,
+//RS         inputs.candidate,
+//RS         inputs.baseline,
+//RS         inputs.percentile,
+//RS         inputs.comparison,
+//RS         inputs.direction,
+//RS         inputs.enforcement,
+//RS         inputs.policy,
+//RS     )?;
+//RS     if &actual == expected {
+//RS         Ok(())
+//RS     } else {
+//RS         Err("persisted budget evaluation does not match independent recomputation".into())
+//RS     }
+//RS }
+//RS 
+//RS pub struct EvaluationInputs<'a> {
+//RS     pub evidence_id: &'a str,
+//RS     pub context_key: &'a str,
+//RS     pub baseline_report_ids: &'a [String],
+//RS     pub candidate: &'a [Rational],
+//RS     pub baseline: &'a [Rational],
+//RS     pub percentile: Option<Percentile>,
+//RS     pub comparison: &'a Comparison,
+//RS     pub direction: Direction,
+//RS     pub enforcement: Enforcement,
+//RS     pub policy: Option<&'a MeasurementPolicy>,
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn q(value: i128) -> Rational {
+//RS         Rational::integer(value)
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn canonical_json_sorts_keys_escapes_and_hashes_lf_terminated_content() {
+//RS         let value = CanonicalJson::object([
+//RS             ("z".into(), CanonicalJson::String("é\n".into())),
+//RS             ("a".into(), CanonicalJson::integer("123").unwrap()),
+//RS         ])
+//RS         .unwrap();
+//RS         assert_eq!(value.bytes(), "{\"a\":123,\"z\":\"é\\n\"}\n".as_bytes());
+//RS         assert_eq!(
+//RS             stable_id(&value),
+//RS             SHA256::sha256_hex(b"{\"a\":123,\"z\":\"\xc3\xa9\\n\"}\n")
+//RS         );
+//RS         assert!(CanonicalJson::integer("-0").is_err());
+//RS         assert!(CanonicalJson::integer("01").is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn rational_statistics_are_reduced_and_nearest_rank_exact() {
+//RS         assert_eq!(
+//RS             Rational::new(20, -30).unwrap(),
+//RS             Rational::new(-2, 3).unwrap()
+//RS         );
+//RS         let stats = statistics(&[q(1), q(2), q(3), q(4), q(100)]).unwrap();
+//RS         assert_eq!(stats.p50, q(3));
+//RS         assert_eq!(stats.p90, q(100));
+//RS         assert_eq!(stats.mean, Rational::new(22, 1).unwrap());
+//RS         assert_eq!(stats.mad, q(1));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn arbitrary_precision_rationals_are_total_and_reduce_exactly() {
+//RS         let huge = "999999999999999999999999999999999999999999999999999999999999999999999999";
+//RS         let value = Rational::parse(
+//RS             huge,
+//RS             "300000000000000000000000000000000000000000000000000000000000000000000000",
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(
+//RS             value.den.to_string(),
+//RS             "100000000000000000000000000000000000000000000000000000000000000000000000"
+//RS         );
+//RS         assert_eq!(
+//RS             value.num.to_string(),
+//RS             "333333333333333333333333333333333333333333333333333333333333333333333333"
+//RS         );
+//RS         let squared = value.mul(&value).unwrap();
+//RS         assert!(squared.num.to_string().len() > 140);
+//RS         assert_eq!(squared.div(&value).unwrap(), value);
+//RS         assert_eq!(
+//RS             Rational::parse("-0", "1").unwrap_err(),
+//RS             "non-canonical integer `-0`"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn deterministic_absolute_and_trend_follow_direction() {
+//RS         let evaluation = evaluate(
+//RS             "e",
+//RS             "c",
+//RS             &[],
+//RS             &[q(9)],
+//RS             &[],
+//RS             None,
+//RS             &Comparison::Absolute {
+//RS                 limit: q(10),
+//RS                 direction: LimitDirection::AtMost,
+//RS             },
+//RS             Direction::LowerIsBetter,
+//RS             Enforcement::Fail,
+//RS             None,
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(evaluation.evidence, Evidence::Pass);
+//RS         let ids = vec!["old".into(), "mid".into(), "new".into()];
+//RS         let got = trend(&ids, &[q(12), q(10), q(8)], Direction::LowerIsBetter).unwrap();
+//RS         assert_eq!(got.label, TrendLabel::Improving);
+//RS         assert_eq!(got.score, Some(q(2)));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn bootstrap_is_deterministic_and_reader_recomputes_every_outcome() {
+//RS         let policy = MeasurementPolicy {
+//RS             bootstrap_resamples: 20,
+//RS             lower_rank: 1,
+//RS             upper_rank: 20,
+//RS         };
+//RS         let comparison = Comparison::RelativeTo {
+//RS             limit_basis_points: BigInt::from_i128(500),
+//RS             goal: RelativeGoal::RegressionAtMost,
+//RS         };
+//RS         let ids = vec!["0".repeat(64)];
+//RS         let inputs = EvaluationInputs {
+//RS             evidence_id: &"1".repeat(64),
+//RS             context_key: &"2".repeat(64),
+//RS             baseline_report_ids: &ids,
+//RS             candidate: &[q(90), q(91), q(92)],
+//RS             baseline: &[q(100), q(101), q(102)],
+//RS             percentile: Some(Percentile::P50),
+//RS             comparison: &comparison,
+//RS             direction: Direction::LowerIsBetter,
+//RS             enforcement: Enforcement::Fail,
+//RS             policy: Some(&policy),
+//RS         };
+//RS         let got = evaluate(
+//RS             inputs.evidence_id,
+//RS             inputs.context_key,
+//RS             inputs.baseline_report_ids,
+//RS             inputs.candidate,
+//RS             inputs.baseline,
+//RS             inputs.percentile,
+//RS             inputs.comparison,
+//RS             inputs.direction,
+//RS             inputs.enforcement,
+//RS             inputs.policy,
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(got.evidence, Evidence::Pass);
+//RS         verify_evaluation(&got, inputs).unwrap();
+//RS         let mut corrupted = got.clone();
+//RS         corrupted.point = q(1);
+//RS         let inputs = EvaluationInputs {
+//RS             evidence_id: &"1".repeat(64),
+//RS             context_key: &"2".repeat(64),
+//RS             baseline_report_ids: &ids,
+//RS             candidate: &[q(90), q(91), q(92)],
+//RS             baseline: &[q(100), q(101), q(102)],
+//RS             percentile: Some(Percentile::P50),
+//RS             comparison: &comparison,
+//RS             direction: Direction::LowerIsBetter,
+//RS             enforcement: Enforcement::Fail,
+//RS             policy: Some(&policy),
+//RS         };
+//RS         assert!(verify_evaluation(&corrupted, inputs).is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn report_reader_rejects_noncanonical_unknown_and_hash_corrupt_artifacts() {
+//RS         let content =
+//RS             CanonicalJson::object([("summary".into(), CanonicalJson::String("pass".into()))])
+//RS                 .unwrap();
+//RS         let report = budget_report(content);
+//RS         let bytes = report.bytes();
+//RS         assert!(verify_budget_report(&bytes)
+//RS             .unwrap_err()
+//RS             .contains("report content"));
+//RS         let spaced = String::from_utf8(bytes.clone())
+//RS             .unwrap()
+//RS             .replace("{\"content\"", "{ \"content\"");
+//RS         assert!(verify_budget_report(spaced.as_bytes()).is_err());
+//RS         let corrupt = String::from_utf8(bytes)
+//RS             .unwrap()
+//RS             .replace("\"pass\"", "\"fail\"");
+//RS         assert!(verify_budget_report(corrupt.as_bytes()).is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_schema_rejects_extra_nonreduced_and_forged_statistics() {
+//RS         let extra = CanonicalJson::object([
+//RS             ("den".into(), CanonicalJson::Integer("2".into())),
+//RS             ("num".into(), CanonicalJson::Integer("1".into())),
+//RS             ("surprise".into(), CanonicalJson::Null),
+//RS         ])
+//RS         .unwrap();
+//RS         assert!(validate_rational(&extra, false, "q")
+//RS             .unwrap_err()
+//RS             .contains("unknown"));
+//RS         let nonreduced = CanonicalJson::object([
+//RS             ("den".into(), CanonicalJson::Integer("4".into())),
+//RS             ("num".into(), CanonicalJson::Integer("2".into())),
+//RS         ])
+//RS         .unwrap();
+//RS         assert!(validate_rational(&nonreduced, false, "q")
+//RS             .unwrap_err()
+//RS             .contains("gcd-reduced"));
+//RS         let qj = |n: i128| Rational::integer(n).to_json();
+//RS         let forged = CanonicalJson::object([
+//RS             ("count".into(), CanonicalJson::Integer("3".into())),
+//RS             (
+//RS                 "sorted_samples".into(),
+//RS                 CanonicalJson::Array(vec![qj(1), qj(2), qj(3)]),
+//RS             ),
+//RS             ("p50".into(), qj(3)),
+//RS             ("p90".into(), qj(3)),
+//RS             ("p95".into(), qj(3)),
+//RS             ("p99".into(), qj(3)),
+//RS             ("p999".into(), qj(3)),
+//RS             ("mean".into(), qj(2)),
+//RS             ("mad".into(), qj(1)),
+//RS         ])
+//RS         .unwrap();
+//RS         assert!(validate_statistics(&forged).unwrap_err().contains("p50"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn wire_reader_recomputes_decision_confidence_trend_and_history() {
+//RS         let evidence = "1".repeat(64);
+//RS         let context = "2".repeat(64);
+//RS         let ids = vec!["3".repeat(64)];
+//RS         let samples = vec![q(1), q(10), q(100), q(1000)];
+//RS         let comparison = Comparison::AbsoluteFrom {
+//RS             limit: q(50),
+//RS             direction: LimitDirection::AtMost,
+//RS         };
+//RS         let policy = MeasurementPolicy {
+//RS             bootstrap_resamples: 100,
+//RS             lower_rank: 50,
+//RS             upper_rank: 51,
+//RS         };
+//RS         let actual = evaluate(
+//RS             &evidence,
+//RS             &context,
+//RS             &ids,
+//RS             &samples,
+//RS             &[],
+//RS             Some(Percentile::P50),
+//RS             &comparison,
+//RS             Direction::LowerIsBetter,
+//RS             Enforcement::Fail,
+//RS             Some(&policy),
+//RS         )
+//RS         .unwrap();
+//RS         let ev = match actual.evidence {
+//RS             Evidence::Pass => "pass",
+//RS             Evidence::Regression => "regression",
+//RS             Evidence::Inconclusive => "inconclusive",
+//RS             Evidence::Unavailable => "unavailable",
+//RS         };
+//RS         let outcome = match actual.outcome {
+//RS             PolicyOutcome::Pass => "pass",
+//RS             PolicyOutcome::Warn => "warn",
+//RS             PolicyOutcome::Fail => "fail",
+//RS         };
+//RS         let trend_json = CanonicalJson::object([
+//RS             ("label".into(), CanonicalJson::String("insufficient".into())),
+//RS             ("report_ids".into(), CanonicalJson::Array(Vec::new())),
+//RS             ("estimators".into(), CanonicalJson::Array(Vec::new())),
+//RS             ("score".into(), CanonicalJson::Null),
+//RS         ])
+//RS         .unwrap();
+//RS         let decision = CanonicalJson::object([
+//RS             ("evidence".into(), CanonicalJson::String(ev.into())),
+//RS             ("reason".into(), CanonicalJson::Null),
+//RS             ("point".into(), actual.point.to_json()),
+//RS             ("lower95".into(), actual.lower95.as_ref().unwrap().to_json()),
+//RS             ("upper95".into(), actual.upper95.as_ref().unwrap().to_json()),
+//RS             ("trend".into(), trend_json),
+//RS             (
+//RS                 "policy_outcome".into(),
+//RS                 CanonicalJson::String(outcome.into()),
+//RS             ),
+//RS         ])
+//RS         .unwrap();
+//RS         let policy_json = CanonicalJson::object([
+//RS             (
+//RS                 "min_candidate_samples".into(),
+//RS                 CanonicalJson::Integer("1".into()),
+//RS             ),
+//RS             (
+//RS                 "min_baseline_samples".into(),
+//RS                 CanonicalJson::Integer("1".into()),
+//RS             ),
+//RS             (
+//RS                 "baseline_generations".into(),
+//RS                 CanonicalJson::Integer("5".into()),
+//RS             ),
+//RS             (
+//RS                 "bootstrap_resamples".into(),
+//RS                 CanonicalJson::Integer("100".into()),
+//RS             ),
+//RS             ("lower_rank".into(), CanonicalJson::Integer("50".into())),
+//RS             ("upper_rank".into(), CanonicalJson::Integer("51".into())),
+//RS             (
+//RS                 "stale_after_seconds".into(),
+//RS                 CanonicalJson::Integer("2592000".into()),
+//RS             ),
+//RS             (
+//RS                 "trend_generations".into(),
+//RS                 CanonicalJson::Integer("5".into()),
+//RS             ),
+//RS         ])
+//RS         .unwrap();
+//RS         let mut m = BTreeMap::from([
+//RS             ("decision".into(), decision),
+//RS             (
+//RS                 "direction".into(),
+//RS                 CanonicalJson::String("lower_is_better".into()),
+//RS             ),
+//RS             ("enforcement".into(), CanonicalJson::String("fail".into())),
+//RS             (
+//RS                 "comparison".into(),
+//RS                 CanonicalJson::object([
+//RS                     ("kind".into(), CanonicalJson::String("absolute_from".into())),
+//RS                     ("baseline".into(), CanonicalJson::String("main".into())),
+//RS                     ("limit".into(), q(50).to_json()),
+//RS                     ("direction".into(), CanonicalJson::String("at_most".into())),
+//RS                 ])
+//RS                 .unwrap(),
+//RS             ),
+//RS             ("policy".into(), policy_json),
+//RS             (
+//RS                 "samples".into(),
+//RS                 CanonicalJson::Array(samples.iter().map(Rational::to_json).collect()),
+//RS             ),
+//RS             ("baseline".into(), CanonicalJson::Null),
+//RS             (
+//RS                 "history".into(),
+//RS                 CanonicalJson::object([
+//RS                     ("state_id".into(), CanonicalJson::String("4".repeat(64))),
+//RS                     (
+//RS                         "report_ids".into(),
+//RS                         CanonicalJson::Array(
+//RS                             ids.iter().cloned().map(CanonicalJson::String).collect(),
+//RS                         ),
+//RS                     ),
+//RS                 ])
+//RS                 .unwrap(),
+//RS             ),
+//RS             (
+//RS                 "metric".into(),
+//RS                 CanonicalJson::object([
+//RS                     ("name".into(), CanonicalJson::String("BenchTime".into())),
+//RS                     ("percentile".into(), CanonicalJson::String("p50".into())),
+//RS                 ])
+//RS                 .unwrap(),
+//RS             ),
+//RS             ("context_key".into(), CanonicalJson::String(context)),
+//RS         ]);
+//RS         verify_wire_evaluation(&evidence, &m).unwrap();
+//RS         let original = m["decision"].clone();
+//RS         if let CanonicalJson::Object(d) = m.get_mut("decision").unwrap() {
+//RS             d.insert("upper95".into(), q(999).to_json());
+//RS         }
+//RS         assert!(verify_wire_evaluation(&evidence, &m).is_err());
+//RS         m.insert("decision".into(), original.clone());
+//RS         if let CanonicalJson::Object(d) = m.get_mut("decision").unwrap() {
+//RS             d.insert(
+//RS                 "policy_outcome".into(),
+//RS                 CanonicalJson::String("warn".into()),
+//RS             );
+//RS         }
+//RS         assert!(verify_wire_evaluation(&evidence, &m).is_err());
+//RS         m.insert("decision".into(), original);
+//RS         if let CanonicalJson::Object(h) = m.get_mut("history").unwrap() {
+//RS             h.insert(
+//RS                 "report_ids".into(),
+//RS                 CanonicalJson::Array(vec![CanonicalJson::String("forged".into())]),
+//RS             );
+//RS         }
+//RS         assert!(validate_history(&m["history"]).is_err());
+//RS     }
+//RS }
+// END-PORT-PENDING 0085 crates/jet-foundation/src/PerformanceBudget.rs:1849-2787
+

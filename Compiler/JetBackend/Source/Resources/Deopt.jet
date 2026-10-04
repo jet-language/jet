@@ -1,0 +1,19 @@
+// jit/deopt.rs:15-32,217-227. Exact checked fixed-word frame metadata.
+// These records do not decode words into language/runtime values and do not
+// impersonate a SourceDeoptRequest, retained execution guard, or TLS scope.
+use jet_foundation.[MIRValueID, MIRPlaceID, MIRFrameIdentity, MIRExecutionIdentity, MIRFunctionID]
+
+pub struct MIRFrameValue { pub value: MIRValueID, pub bits: U64 }
+pub struct MIRFramePlace { pub place: MIRPlaceID, pub bits: U64 }
+pub struct MIRFrameSnapshot {
+    pub identity: MIRFrameIdentity
+    pub values: [MIRFrameValue]
+    pub places: [MIRFramePlace]
+}
+pub struct MIRFrameSchema {
+    pub execution: MIRExecutionIdentity
+    pub function: MIRFunctionID
+    pub params: [MIRValueID]
+    pub values: [MIRValueID]
+    pub places: [MIRPlaceID]
+}

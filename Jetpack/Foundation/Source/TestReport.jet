@@ -1,0 +1,185 @@
+// The one outer typed test transport. Rust Prelude/TestReport.rs:73–395.
+// Counter precedence and summary belong only to Core's test outcome projection.
+fn test_report_source_value(source: EvidenceSource) -> DataTree Never! {
+    report_status_object(StatusFields.new().with("column", DataTree.Int(Int.from_u32(source.column))).with("line", DataTree.Int(Int.from_u32(source.line))).with("path", DataTree.Text(~source.path)))
+}
+fn test_report_build_value(build: EvidenceBuild) -> DataTree Never! { report_status_object(StatusFields.new().with("profile", DataTree.Text(~build.profile)).with("target", DataTree.Text(~build.target)).with("toolchain", DataTree.Text(~build.toolchain))) }
+fn test_report_revision_value(revision: EvidenceRevision) -> DataTree Never! { report_status_object(StatusFields.new().with("build", DataTree.Text(~revision.build)).with("revision", DataTree.Text(~revision.revision)).with("source", DataTree.Text(~revision.source))) }
+fn test_report_completeness_value(completeness: EvidenceCompleteness) -> DataTree Never! { report_status_object(StatusFields.new().with("reason", report_optional_text(evidence_completeness_reason(completeness))).with("state", DataTree.Text(evidence_completeness_state(completeness)))) }
+fn test_report_attachment_order(left: EvidenceAttachment, right: EvidenceAttachment) -> Ordering Never! { (left.name <=> right.name).then(left.value <=> right.value) }
+fn test_report_diagnostic_order(left: EvidenceDiagnostic, right: EvidenceDiagnostic) -> Ordering Never! {
+    order :: (left.code <=> right.code).then(left.message <=> right.message)
+    if order != Ordering.Equal -> return order
+    if left.source == {
+    .None -> {
+        if right.source == None -> return Ordering.Equal
+        return Ordering.Less
+    }
+    .Val(source) -> {
+        other :: right.source ?? return Ordering.Greater
+        return (source.path <=> other.path).then(source.line <=> other.line).then(source.column <=> other.column)
+    } }
+}
+fn test_report_attachments_value(values: [EvidenceAttachment]) -> DataTree Never! {
+    indices := [Int]{}
+    loop index in 0..<values.len() -> &indices.push(index)
+    &indices.sort_by((left: Int, right: Int) -> test_report_attachment_order(values[left], values[right]))
+    rows := [DataTree]{}
+    loop index in indices {
+        value :: values[index]
+        &rows.push(report_status_object(StatusFields.new().with("name", DataTree.Text(value.name)).with("value", DataTree.Text(value.value))))
+    }
+    DataTree.Array(rows)
+}
+fn test_report_diagnostics_value(values: [EvidenceDiagnostic]) -> DataTree Never! {
+    indices := [Int]{}
+    loop index in 0..<values.len() -> &indices.push(index)
+    &indices.sort_by((left: Int, right: Int) -> test_report_diagnostic_order(values[left], values[right]))
+    rows := [DataTree]{}
+    loop index in indices {
+        value :: values[index]
+        source :: if value.source == {
+            .None -> DataTree.Null
+            .Val(source) -> test_report_source_value(source)
+        }
+        &rows.push(report_status_object(StatusFields.new().with("code", DataTree.Text(value.code)).with("message", DataTree.Text(value.message)).with("source", source)))
+    }
+    DataTree.Array(rows)
+}
+fn test_report_chain_value(values: [EvidenceChainLink]) -> DataTree Never! {
+    indices := [Int]{}
+    loop index in 0..<values.len() -> &indices.push(index)
+    &indices.sort_by((left: Int, right: Int) -> (values[left].evidence_id <=> values[right].evidence_id).then(values[left].relation <=> values[right].relation))
+    rows := [DataTree]{}
+    loop index in indices {
+        value :: values[index]
+        &rows.push(report_status_object(StatusFields.new().with("evidence", DataTree.Text(value.evidence_id)).with("relation", DataTree.Text(value.relation))))
+    }
+    DataTree.Array(rows)
+}
+fn test_report_record_value(record: EvidenceRecord) -> DataTree Never! {
+    report_status_object(StatusFields.new()
+        .with("attachments", test_report_attachments_value(record.attachments))
+        .with("chain", test_report_chain_value(record.chain))
+        .with("claim", DataTree.Text(~record.identity.claim_id))
+        .with("completeness", test_report_completeness_value(record.completeness))
+        .with("count", DataTree.Int(Int.from_u64(record.count)))
+        .with("detail", DataTree.Text(~record.detail))
+        .with("diagnostics", test_report_diagnostics_value(record.diagnostics))
+        .with("evidence", DataTree.Text(~record.identity.evidence_id))
+        .with("expectation", DataTree.Text(evidence_expectation_name(record.expectation)))
+        .with("kind", DataTree.Text(evidence_kind_name(record.kind)))
+        .with("facet", DataTree.Text(evidence_facet_name(record.facet)))
+        .with("outcome", DataTree.Text(evidence_outcome_name(record.outcome)))
+        .with("producer", DataTree.Text(evidence_producer_name(record.producer)))
+        .with("source", test_report_source_value(record.source)))
+}
+fn test_report_record_order(left: EvidenceRecord, right: EvidenceRecord) -> Ordering Never! {
+    (left.source.path <=> right.source.path).then(left.source.line <=> right.source.line).then(left.source.column <=> right.source.column).then(evidence_producer_code(left.producer) <=> evidence_producer_code(right.producer)).then(evidence_kind_code(left.kind) <=> evidence_kind_code(right.kind)).then(left.identity.evidence_id <=> right.identity.evidence_id)
+}
+fn test_report_evidence_value(report: EvidenceReport) -> DataTree Never! {
+    indices := [Int]{}
+    loop index in 0..<report.records.len() -> &indices.push(index)
+    &indices.sort_by((left: Int, right: Int) -> test_report_record_order(report.records[left], report.records[right]))
+    records := [DataTree]{}
+    loop index in indices -> &records.push(test_report_record_value(report.records[index]))
+    report_status_object(StatusFields.new()
+        .with("schema", DataTree.Text("jet.evidence/v{report.schema_version}"))
+        .with("identity", report_status_object(StatusFields.new().with("claim", DataTree.Text(~report.identity.claim_id)).with("evidence", DataTree.Text(~report.identity.evidence_id)).with("report", DataTree.Text(~report.identity.report_id))))
+        .with("producer", DataTree.Text(evidence_producer_name(report.producer)))
+        .with("source", test_report_source_value(report.source))
+        .with("build", test_report_build_value(report.build))
+        .with("revision", test_report_revision_value(report.revision))
+        .with("attachments", test_report_attachments_value(report.attachments))
+        .with("diagnostics", test_report_diagnostics_value(report.diagnostics))
+        .with("completeness", test_report_completeness_value(report.completeness))
+        .with("evidence", DataTree.Array(records)))
+}
+// Main-ratified borrowed-per-call view: callers retain the EvidenceReport.
+// No stored borrow, shared payload, cloned report, or duplicate grading engine.
+pub struct JetTestReport {
+    pub passed: Int
+    pub failed: Int
+    pub skipped: Int
+    pub expected_failures: Int
+    pub unexpected_passes: Int
+
+    fn from_evidence(report: EvidenceReport) -> JetTestReport TestEvidenceError! {
+        test_evidence_validate(report)
+        projection := jet_test_empty_projection()
+        loop record in report.records {
+            terminal :: record.kind == EvidenceKind.Unit || record.kind == EvidenceKind.Property || record.kind == EvidenceKind.Doctest
+            outcome :: if record.outcome == {
+                .Passed -> JetTestRecordOutcome.Passed
+                .Failed -> JetTestRecordOutcome.Failed
+                .Error -> JetTestRecordOutcome.Error
+                .Skipped -> JetTestRecordOutcome.Skipped
+                else -> JetTestRecordOutcome.Other
+            }
+            jet_test_project_record(&projection, JetTestOutcomeRecord{terminal: terminal, outcome: outcome, expected_failure: record.expectation == EvidenceExpectation.ExpectedFailure})
+        }
+        Ok(JetTestReport{passed: projection.passed, failed: projection.failed, skipped: projection.skipped, expected_failures: projection.expected_failures, unexpected_passes: projection.unexpected_passes})
+    }
+
+    fn projection(self) -> JetTestOutcomeProjection Never! {
+        JetTestOutcomeProjection{passed: self.passed, failed: self.failed, skipped: self.skipped, expected_failures: self.expected_failures, unexpected_passes: self.unexpected_passes}
+    }
+
+    fn summary(self) -> String Never! { jet_test_report_summary(self.projection()) }
+    fn selected(self) -> Int Never! { jet_test_selected(self.projection()) }
+
+    fn status_envelope(self, report: EvidenceReport) -> StatusEnvelope TestEvidenceError! {
+        test :: report_status_object(StatusFields.new()
+            .with("failed", DataTree.Int(self.failed))
+            .with("passed", DataTree.Int(self.passed))
+            .with("skipped", DataTree.Int(self.skipped))
+            .with("selected", DataTree.Int(self.selected()))
+            .with("expectedFailures", DataTree.Int(self.expected_failures))
+            .with("unexpectedPasses", DataTree.Int(self.unexpected_passes)))
+        Ok(StatusEnvelope.new("test", jet_test_report_ok(self.projection()))
+            .with_field("test", test)
+            .with_field("evidence", test_report_evidence_value(report)))
+    }
+
+    fn json(self, report: EvidenceReport) -> String Never! {
+        status :: self.status_envelope(report) ?? panic("test report status construction cannot fail")
+        status.json()
+    }
+
+// Rust render_record: only a terminal view; structured payload stays canonical.
+fn render_record(record: EvidenceRecord) -> String Never! {
+    diagnostic :: record.diagnostics.first()
+    code :: if diagnostic == {
+        .None -> "E3001"
+        .Val(value) -> value.code
+    }
+    message :: if record.detail != "" -> record.detail else -> if diagnostic == {
+        .None -> evidence_outcome_name(record.outcome)
+        .Val(value) -> value.message
+    }
+    heading :: if record.outcome == {
+        .Error -> "Error"
+        .Failed -> "Stop"
+        else -> "Test"
+    }
+    out := "  {heading} [{code}]: {message}\n"
+    if record.source.path != "" && record.source.line != (U32{0}) {
+        out += "    --> {record.source.path}:{record.source.line}\n"
+        if record.source.column != (U32{0}) -> out += "      {" ".repeat(Int.from_u32(record.source.column) - 1)}^\n"
+    }
+    if diagnostic == {
+        .Val(value) -> {
+            if value.message != message {
+                loop line in value.message.lines() -> out += "    {line}\n"
+            }
+        }
+        .None -> {}
+    }
+    loop attachment in record.attachments {
+        if attachment.name == "detail" || attachment.value == "" -> next
+        loop line in attachment.value.lines() -> out += "    {attachment.name}: {line}\n"
+    }
+    out += "  More: jet-lang.dev/e/{code}\n"
+    out
+}
+}

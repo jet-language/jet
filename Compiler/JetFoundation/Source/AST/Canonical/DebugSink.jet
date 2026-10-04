@@ -1,0 +1,51 @@
+// Shared native compact Debug sink. A caller-owned visitor writes into mutable
+// caller state; neither the visitor nor a rendered row stores a writable loan.
+// Text rendering uses [U8], while native hash comparison streams the same bytes.
+pub trait CanonicalDebugSink<S> {
+    fn write(self, state: &S, text: String) Never!
+}
+pub enum CanonicalDebugBytes { Writer }
+impl CanonicalDebugBytes.CanonicalDebugSink<[U8]> {
+    fn write(self, state: &[U8], text: String) Never! {
+        canonical_ast_write(&state, text)
+    }
+}
+pub enum CanonicalDebugSHA256 { Writer }
+impl CanonicalDebugSHA256.CanonicalDebugSink<MIRSHA256> {
+    fn write(self, state: &MIRSHA256, text: String) Never! {
+        bytes :: text.bytes()
+        mir_sha256_update(&state, bytes.view(0..<bytes.len()))
+    }
+}
+// Sole native scalar policy, shared with the AST's existing byte adapters.
+// No JSON quote, JetShow, display normalization, or structural host Debug.
+pub fn canonical_debug_write_string<S, W: CanonicalDebugSink<S>>(sink: W, state: &S, value: String) Never! {
+    sink.write(&state, "{value:Debug}")
+}
+pub fn canonical_debug_write_char<S, W: CanonicalDebugSink<S>>(sink: W, state: &S, value: Char) Never! {
+    sink.write(&state, "{value:Debug}")
+}
+pub fn canonical_debug_write_optional_text<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: String?) Never! {
+    if value == {
+        .None -> sink.write(&out, "None")
+        .Val(text) -> {
+            sink.write(&out, "Some(")
+            canonical_debug_write_string<S, W>(sink, &out, text)
+            sink.write(&out, ")")
+        }
+    }
+}
+pub fn canonical_debug_write_layer<S, W: CanonicalDebugSink<S>>(sink: W, state: &S, value: MIRRuntimeLayer) Never! {
+    if value == {
+        .Core -> sink.write(&state, "Core")
+        .Alloc -> sink.write(&state, "Alloc")
+        .Std -> sink.write(&state, "Std")
+    }
+}
+pub fn canonical_debug_write_os<S, W: CanonicalDebugSink<S>>(sink: W, state: &S, value: MIROSTarget) Never! {
+    if value == {
+        .Linux -> sink.write(&state, "Linux")
+        .MacOS -> sink.write(&state, "MacOS")
+        .Windows -> sink.write(&state, "Windows")
+    }
+}

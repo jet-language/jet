@@ -1,0 +1,220 @@
+// Original tests/typestate.rs and task_state.rs front-end fixtures. These run
+// the real parser + registration + checked-bundle finalizer; no alternate
+// StateTable-only check substitutes for this producer acceptance.
+use jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Program, Span, foundation_embedded_core, jet_target_machine_hosted]
+use jet_parser.[parse_source]
+use jet_sema.[SemaBuildFacts, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_registration_prepare_graph, sema_effect_facts_state_graph]
+use core.files.host.retained_descriptor as state_test_native
+use core.files.runtime.kernel_path_components as state_test_path
+
+fn state_original_module(program: ^Program, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
+    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, foreign_handles: []}
+}
+fn state_original_diagnostics(source: String) -> [Diagnostic] Never! {
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() > 0 -> return parsed.diagnostics
+    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    assert(effects.diagnostics.len() == 0)
+    inputs :: [SemaRegistrationModuleInput]{state_original_module(^parsed.program, "main", "state.jet", "state"), state_original_module(^effects.program, "effects", "Prelude/Effects.jet", "jet:canonical-prelude")}
+    build :: SemaBuildFacts{package_name: "state", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "state-test", stamp_at: "", artifact_build: false}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    registration :: sema_registration_prepare_graph(inputs, [], "state", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+    stage :: sema_collect_comptime_declarations(registration, [], None)
+    project_root :: state_test_native.canonicalize(state_test_path.from_text(".", state_test_path.PathPlatform.Unix)) ?? panic("cannot read the original fixture's working directory")
+    checked :: sema_finalize_registration_graph(registration, stage, [], [], None, None, project_root)
+    assert(checked.complete || checked.diagnostics.len() > 0)
+    checked.diagnostics
+}
+fn state_original_has(source: String, code: String) -> Bool Never! {
+    loop diagnostic in state_original_diagnostics(source) { if diagnostic.code == code -> return true }
+    false
+}
+fn state_original_clean(source: String) Never! {
+    loop diagnostic in state_original_diagnostics(source) -> assert(diagnostic.severity != DIAGNOSTIC_ERROR)
+}
+STATE_ORIGINAL_DECL :: "\nstruct Reservation {{\n    state {{ Pending, Confirmed, CheckedIn }}\n    guest: String\n}}\n\nimpl Reservation {{\n    #Transition(_, Pending) fn book(guest: String) -[]> Reservation {{\n        return Reservation{{ guest: ~guest }}\n    }}\n    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -[]> Reservation {{\n        return self\n    }}\n    #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) -[]> Reservation {{\n        return self\n    }}\n    #State(CheckedIn) fn room_key(self) -[]> String {{\n        return \"key\"\n    }}\n}}\n"
+STATE_ORIGINAL_DIVERGENT :: "\nstruct Order {{\n    state {{ Draft, Confirmed, Cancelled, Closed }}\n    id: Int\n}}\n\nimpl Order {{\n    #Transition(_, Draft) fn start(id: Int) -[]> Order {{ return Order{{ id: id }} }}\n    #Transition(Draft, Confirmed) fn confirm(self: ^Order) -[]> Order {{ return self }}\n    #Transition(Draft, Cancelled) fn cancel(self: ^Order) -[]> Order {{ return self }}\n    #Transition(Confirmed, Closed) fn close(self: ^Order) -[]> Order {{ return self }}\n    #Transition(Cancelled, Closed) fn archive(self: ^Order) -[]> Order {{ return self }}\n    #State(Confirmed) fn ship(self) -[]> Int {{ return self.id }}\n}}\n"
+STATE_ORIGINAL_GOOD :: "{STATE_ORIGINAL_DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
+#Test("correct_lifecycle_ok") { state_original_clean(STATE_ORIGINAL_GOOD) }
+#Test("transition_in_wrong_state_is_error") {
+    assert(state_original_has("{STATE_ORIGINAL_DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.check_in()\n}}\n", "E0150"))
+}
+#Test("guarded_read_in_wrong_state_is_error") {
+    assert(state_original_has("{STATE_ORIGINAL_DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  print(r.room_key())\n}}\n", "E0150"))
+}
+#Test("guarded_read_after_full_lifecycle_ok") { assert(!state_original_has(STATE_ORIGINAL_GOOD, "E0150")) }
+#Test("no_typestate_is_inert") {
+    assert(!state_original_has("\nstruct Box {{ n: Int }}\nimpl Box {{\n    fn get(self) -[]> Int {{ return self.n }}\n}}\nfn run() {{\n    b :: Box{{ n: 1 }}\n    print(b.get())\n}}\n", "E0150"))
+}
+#Test("unknown_state_in_marker_is_e0151") {
+    assert(state_original_has("\nstruct Crate {{\n    state {{ Full, Empty }}\n    data: Int\n}}\n\nimpl Crate {{\n    #Transition(_, Full) fn fill(data: Int) -[]> Crate {{\n        return Crate{{ data: data }}\n    }}\n    #State(Stuffed) fn get(self) -[]> Int {{\n        return self.data\n    }}\n}}\n\nfn run() {{\n    b := Crate.fill(1)\n    print(b.get())\n}}\n", "E0151"))
+}
+#Test("unknown_transition_to_state_is_e0151") {
+    assert(state_original_has("\nstruct Crate {{\n    state {{ Full, Empty }}\n    data: Int\n}}\n\nimpl Crate {{\n    #Transition(_, Stuffed) fn fill(data: Int) -[]> Crate {{\n        return Crate{{ data: data }}\n    }}\n}}\n\nfn run() {{ }}\n", "E0151"))
+}
+#Test("unknown_transition_from_state_is_e0151") {
+    assert(state_original_has("\nstruct Crate {{ state {{ Full, Empty }} }}\nimpl Crate {{\n    #Transition(Gone, Full) fn fill() -[]> Crate {{ return Crate{{}} }}\n}}\nfn run() {{}}\n", "E0151"))
+}
+#Test("retired_top_level_state_companion_teaches_nested_owner") {
+    assert(state_original_has("state Door {{ Ready }}\nstruct Door {{ opened: Bool }}\nfn run() {{}}\n", "E0157"))
+}
+#Test("state_section_shape_diagnostics_are_distinct") {
+    assert(state_original_has("struct Empty {{ state {{}} }}\nfn run() {{}}\n", "E0169"))
+    assert(state_original_has("struct Door {{ state {{ Ready }} state {{ Open }} }}\nfn run() {{}}\n", "E0168"))
+    assert(state_original_has("struct Door {{ state {{ Ready, Ready }} }}\nfn run() {{}}\n", "E0166"))
+    assert(state_original_has("struct Door {{ state {{ open }} open: Bool }}\nfn run() {{}}\n", "E0167"))
+    assert(state_original_has("struct Door {{ opened: Bool }}\nimpl Door {{ #State(Ready) fn open(self) {{}} }}\nfn run() {{}}\n", "E0159"))
+}
+#Test("state_section_sema_diagnostic_spans_cover_the_section") {
+    empty :: "struct Empty {{ state {{}} }}\nfn run() {{}}\n"
+    found := false
+    loop diagnostic in state_original_diagnostics(empty) {
+        if diagnostic.code == "E0169" {
+            actual :: diagnostic.span ?? panic("state section span missing")
+            assert(actual == Span{start: 15, end: 23})
+            found = true
+        }
+    }
+    assert(found)
+    repeated :: "struct Door {{ state {{ Ready }} state {{ Open }} }}\nfn run() {{}}\n"
+    found = false
+    loop diagnostic in state_original_diagnostics(repeated) {
+        if diagnostic.code == "E0168" {
+            actual :: diagnostic.span ?? panic("duplicate section span missing")
+            assert(actual == Span{start: 30, end: 44})
+            found = true
+        }
+    }
+    assert(found)
+}
+#Test("qualified_state_markers_seed_leaf_states") {
+    state_original_clean("\nstruct Door {{\n    state {{ Closed, Open }}\n}}\n\nimpl Door {{\n    #Transition(_, Door.State.Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door {{\n        return self\n    }}\n    #State(Door.State.Closed) fn inspect(self: ^Door) -[]> String {{\n        next := self.open()\n        return \"closed\"\n    }}\n}}\n\nfn run() {{}}\n")
+}
+#Test("member_collision_in_separate_impl_is_e0167") {
+    assert(state_original_has("struct Door {{ state {{ open }} }}\nimpl Door {{ fn open(self) {{}} }}\nfn run() {{}}\n", "E0167"))
+}
+STATE_ORIGINAL_GENERIC :: "\nstruct Box<T> {{\n    state {{ Empty, Full }}\n    value: T\n}}\n\nimpl Box {{\n    #Transition(_, Empty) fn new(value: ^T) -[]> Box<T> {{\n        return Box<T>{{ value: value }}\n    }}\n    #Transition(Empty, Full) fn fill(self: ^Box<T>) -[]> Box<T> {{\n        return self\n    }}\n}}\n\nimpl Box {{\n    #State(Full) fn read(self) -[]> T {{\n        return self.value\n    }}\n}}\n\nfn run() {{\n    box := Box<Int>.new(1)\n    box = box.fill()\n    print(box.read())\n}}\n"
+#Test("generic_struct_state_set_is_shared_by_separate_impl") {
+    state_original_clean(STATE_ORIGINAL_GENERIC)
+    wrong := STATE_ORIGINAL_GENERIC.replace("    box = box.fill()\n", "") // #4303
+    assert(state_original_has(wrong, "E0150"))
+    // Original generated-Rust absence checks (Empty/Full/discriminant) remain
+    // tests/typestate.rs:353-359, Main's actual codegen gate, not AST assertions.
+}
+#Test("terminal_state_has_no_unreachable_lint") {
+    state_original_clean(STATE_ORIGINAL_GOOD)
+    assert(!state_original_has(STATE_ORIGINAL_GOOD, "L0153"))
+}
+#Test("self_loop_and_reopen_states_are_nonterminal") {
+    source :: "\nstruct Gate {{\n    state {{ Closed, Reopened }}\n    w: Int\n}}\n\nimpl Gate {{\n    #Transition(_, Closed) fn new(w: Int) -[]> Gate {{ return Gate{{ w: w }} }}\n    #Transition(Closed, Closed) fn hold(self: ^Gate) -[]> Gate {{ return self }}\n    #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate {{ return self }}\n}}\n\nfn run() {{\n    g := Gate.new(1)\n    g = g.hold()\n    g = g.reopen()\n}}\n"
+    state_original_clean(source)
+    assert(!state_original_has(source, "L0153"))
+}
+#Test("duplicate_transition_keeps_method_duplicate_diagnostic") {
+    assert(state_original_has("\nstruct Gate {{ state {{ Closed, Reopened }} }}\nimpl Gate {{\n    #Transition(_, Closed) fn new() -[]> Gate {{ return Gate{{}} }}\n    #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate {{ return self }}\n    #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate {{ return self }}\n}}\nfn run() {{}}\n", "E0105"))
+}
+#Test("entry_graph_reports_only_unreachable_declared_states") {
+    diagnostics :: state_original_diagnostics("\nstruct Flow {{\n    state {{ Start, Done, Cancelled, Orphan }}\n}}\nimpl Flow {{\n    #Transition(_, Start) fn start() -[]> Flow {{ return Flow{{}} }}\n    #Transition(Start, Done) fn done(self: ^Flow) -[]> Flow {{ return self }}\n    #Transition(Start, Cancelled) fn cancel(self: ^Flow) -[]> Flow {{ return self }}\n}}\n    fn run() {{}}\n")
+    count := 0
+    loop diagnostic in diagnostics { if diagnostic.code == "L0153" -> count += 1 }
+    assert(count == 1)
+}
+#Test("no_entry_graph_does_not_invent_reachability") {
+    assert(!state_original_has("\nstruct Flow {{ state {{ Start, Done }} }}\nimpl Flow {{\n    #Transition(Start, Done) fn done(self: ^Flow) -[]> Flow {{ return self }}\n}}\nfn run() {{}}\n    ", "L0153"))
+}
+#Test("divergent_branch_states_are_reported") {
+    assert(state_original_has("{STATE_ORIGINAL_DIVERGENT}\nfn decide(paid: Bool) {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.cancel()\n  }}\n  print(order.id)\n}}\nfn run() {{ decide(true) }}\n", "L0152"))
+}
+#Test("divergent_branch_does_not_keep_the_last_walked_arm") {
+    source :: "{STATE_ORIGINAL_DIVERGENT}\nfn decide(paid: Bool) {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.cancel()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(true) }}\n"
+    assert(!state_original_has(source, "E0150"))
+    assert(state_original_has(source, "L0152"))
+}
+#Test("agreeing_branches_keep_the_state") {
+    source :: "{STATE_ORIGINAL_DIVERGENT}\nfn decide(paid: Bool) {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(true) }}\n"
+    state_original_clean(source)
+    assert(!state_original_has(source, "L0152"))
+}
+#Test("agreeing_switch_arms_over_an_exhaustive_enum_keep_the_state") {
+    source :: "{STATE_ORIGINAL_DIVERGENT}\nenum Mode {{ Fast Slow }}\nfn decide(m: Mode) {{\n  order := Order.start(1)\n  if m == {{\n    .Fast -> order = order.confirm()\n    .Slow -> order = order.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(Mode.Fast) }}\n"
+    state_original_clean(source)
+    assert(!state_original_has(source, "L0152"))
+}
+#Test("counted_loop_zero_iterations_reports_the_pre_loop_divergence") {
+    assert(state_original_has("{STATE_ORIGINAL_DIVERGENT}\nfn decide(n: Int) {{\n  order := Order.start(1)\n  loop i := 0, i < n {{\n    fresh := Order.start(2)\n    order = fresh.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(1) }}\n", "L0152"))
+}
+#Test("task_join_duty_uses_the_dlin1_obligation_pass") {
+    assert(state_original_has("\nfn run() {{\n    handle :: task 42\n    print(0)\n}}\n", "L1101"))
+    assert(!state_original_has("\nfn run() {{\n    handle :: task 42\n    print(handle.join() ?? 0)\n}}\n", "L1101"))
+}
+#Test("a_task_handle_list_is_consumed_by_pop_and_join") {
+    state_original_clean("\nfn run() {{\n    workers := [Task<()>].{{}}\n    &workers.push(task {{ }})\n    loop workers.len() > 0 {{\n        worker :: &workers.pop() ?? panic(\"missing worker\")\n        worker.join() ?? panic(\"worker failed\")\n    }}\n}}\n")
+}
+#Test("task_lifecycle_joins_through_the_shared_flow_fact_walker") {
+    source :: "\nfn run() {{\n    handle :: task 42\n    if {{\n        true -> handle.join() ?? 0\n        else -> handle.detach()\n    }}\n}}\n"
+    state_original_clean(source)
+    assert(state_original_has(source, "L0152"))
+    assert(!state_original_has(source, "L1101"))
+}
+#Test("a_return_inside_a_task_body_keeps_later_declarations") {
+    source :: "\nfn run() {{\n    child :: task {{ return }}\n    later :: 7\n    print(later)\n    child.detach()\n}}\n"
+    assert(!state_original_has(source, "E0107"))
+    assert(!state_original_has(source, "E0102"))
+    mistaken :: "\nfn run() {{\n    child :: task {{ return \"child\" }}\n    later :: 7\n    print(later)\n    child.detach()\n}}\n"
+    assert(!state_original_has(mistaken, "E0107"))
+    assert(!state_original_has(mistaken, "E0102"))
+    assert(state_original_diagnostics(mistaken).len() > 0)
+}
+
+// Exact source/output fixtures for Main's original native/tier runners.
+// tests/typestate.rs:369,382,422 retain the original Rust erasure checks,
+// resident Cranelift executed/no-fallback trace, and web Node execution gates.
+STATE_ORIGINAL_TIER_SOURCE :: "\nstruct Settlement {{\n    state {{ Queued, Approved, Settled }}\n}}\n\nimpl Settlement {{\n    #Transition(_, Queued) fn begin() -[]> Settlement {{ return Settlement{{}} }}\n    #Transition(Queued, Approved) fn approve(self: ^Settlement) -[]> Settlement {{ return self }}\n    #Transition(Approved, Settled) fn settle(self: ^Settlement) -[]> Settlement {{ return self }}\n    #State(Settled) fn report(self) -[]> String {{ return \"settled\" }}\n}}\n\nSTATE_INFO :: prep {{ Settlement.reflect() }}\n\nfn run() {{\n    item := Settlement.begin()\n    item = item.approve()\n    item = item.settle()\n    print(item.report())\n    print(STATE_INFO.states[2].terminal)\n    print(STATE_INFO.states[2].reachable ?? false)\n}}\n"
+STATE_ORIGINAL_TIER_EXPECTED :: "settled\ntrue\ntrue\n"
+// tests/task_state_tiers.rs native gates intentionally remain unchanged:
+// tir_erases_task_state_facts_before_codegen (no Task.State in generated Rust);
+// aot_jit_and_interpreter_agree; repl_matches_canonical_task_output
+// ("ok\n42\n"); web_matches_expected_task_output (wasm rustc + Node).
+STATE_ORIGINAL_TASK_TIER_SOURCE :: "\nfn add(left: Int, right: Int) -> Int {{\n    return left + right\n}}\n\nfn run() {{\n    joined :: task add(40, 2)\n    print(joined.join() ?? 0)\n    detached :: task 0\n    detached.detach()\n}}\n"
+STATE_ORIGINAL_TASK_TIER_EXPECTED :: "42\n"
+#Test("parser_reads_the_canonical_task_surface") {
+    parsed :: parse_source(STATE_ORIGINAL_TASK_TIER_SOURCE.bytes())
+    assert(parsed.diagnostics.len() == 0)
+}
+#Test("sema_tracks_task_state_and_duty_without_a_new_surface") {
+    state_original_clean(STATE_ORIGINAL_TASK_TIER_SOURCE)
+    assert(!state_original_has(STATE_ORIGINAL_TASK_TIER_SOURCE, "L1101"))
+}
+#Test("comptime_keeps_task_facts_in_the_front_end") {
+    state_original_clean("{STATE_ORIGINAL_TASK_TIER_SOURCE}\nFOLDED :: prep {{ 40 + 2 }}\n\nfn show() {{\n    print(FOLDED)\n}}\n")
+}
+
+#Test("checked_state_owner_and_inherent_impl_in_separate_modules") {
+    owner :: parse_source("pub struct Door {{ state {{ Closed, Open }} }}\n".bytes())
+    main :: parse_source("use owner.[Door]\nimpl Door {{\n    #Transition(_, Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door {{ return self }}\n    #State(Open) fn read(self) -[]> Int {{ return 1 }}\n}}\nfn run() {{ door := Door.new(); door = door.open(); print(door.read()) }}\n".bytes())
+    assert(owner.diagnostics.len() == 0)
+    assert(main.diagnostics.len() == 0)
+    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    assert(effects.diagnostics.len() == 0)
+    inputs :: [SemaRegistrationModuleInput]{
+        state_original_module(^main.program, "main", "main.jet", "state"),
+        state_original_module(^owner.program, "owner", "owner.jet", "state"),
+        state_original_module(^effects.program, "effects", "Prelude/Effects.jet", "jet:canonical-prelude"),
+    }
+    build :: SemaBuildFacts{package_name: "state", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "state-test", stamp_at: "", artifact_build: false}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    registration :: sema_registration_prepare_graph(inputs, [], "state", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+    stage :: sema_collect_comptime_declarations(registration, [], None)
+    root :: state_test_native.canonicalize(state_test_path.from_text(".", state_test_path.PathPlatform.Unix)) ?? panic("fixture working directory unavailable")
+    checked :: sema_finalize_registration_graph(registration, stage, [], [], None, None, root)
+    assert(checked.complete)
+    graph :: sema_effect_facts_state_graph(checked.effect_facts, "Door.State") ?? panic("checked state registry not published")
+    assert(graph.states.len() == 2)
+    assert(graph.states[0].name == "Closed")
+    assert(!graph.states[0].terminal)
+    assert((graph.states[0].reachable ?? panic("entry reachability missing")) == true)
+    assert(graph.states[1].name == "Open")
+    assert(graph.states[1].terminal)
+    assert((graph.states[1].reachable ?? panic("terminal reachability missing")) == true)
+    assert(graph.transitions.len() == 2)
+}

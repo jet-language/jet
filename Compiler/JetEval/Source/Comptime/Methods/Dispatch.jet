@@ -1,0 +1,2019 @@
+// PORT-PENDING 0593 crates-jet-comptime-src-comptime-methods-dispatch: crates/jet-comptime/src/Comptime/Methods/dispatch.rs:1-2015
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Call/method dispatch for the interpreter: `eval_call`, `eval_method`,
+//RS //! `eval_require`, `eval_embed_file`. These are further
+//RS //! `impl Interp` methods; the struct and spine live in `interp.rs`.
+//RS 
+//RS #[path = "dispatch/eval_method.rs"]
+//RS mod eval_method;
+//RS #[path = "../SequenceParity.rs"]
+//RS mod sequence_parity;
+//RS 
+//RS use std::collections::HashMap;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::AST::{AccessConvention, CallArg, CtFloat, Expr, Func, LambdaBody, StrPart, Type, UnOp};
+//RS use jet_foundation::Effects::{core_requires_comptime_gate, is_nondeterministic_core};
+//RS 
+//RS use super::super::Builtins::{
+//RS     apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp_for_sort,
+//RS };
+//RS use super::super::Diagnostics::{comptime_panic, unsupported};
+//RS use super::super::Interpreter::{Flow, Interp};
+//RS use super::core_calls::{
+//RS     apply_core_call_with_type, apply_data_line_call, apply_history_rng_method,
+//RS     apply_impure_core_call_with_type, as_float,
+//RS     as_string, display_core_pure_value, eval_regex_replace_all_with, io_error_value,
+//RS     jet_term_print_frame, normalize_path_args, sketch_add, solver_new, solver_require,
+//RS     IoErrorOperation,
+//RS };
+//RS use super::repl_process::apply_repl_authorized_core_call_with_type;
+//RS use crate::AST::CtValue;
+//RS use jet_foundation::Names::{mangle, mangle_path};
+//RS use jet_foundation::Prelude::jet_as_bytes as as_bytes;
+//RS 
+//RS mod seeded_random_kernel {
+//RS     include!("../../../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
+//RS }
+//RS 
+//RS fn seeded_rng_int(state: &mut u64, low: i64, high: i64) -> Result<i64, &'static str> {
+//RS     seeded_random_kernel::jet_seeded_rng_int_checked(state, low, high)
+//RS }
+//RS 
+//RS fn seeded_rng_float(state: &mut u64) -> f64 {
+//RS     seeded_random_kernel::jet_seeded_rng_float(state)
+//RS }
+//RS 
+//RS fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
+//RS     let mut sort_error = None;
+//RS     items.sort_by(
+//RS         |left, right| match cmp_for_sort(left.clone(), right.clone(), span) {
+//RS             Ok(order) => order,
+//RS             Err(error) => {
+//RS                 sort_error.get_or_insert(error);
+//RS                 std::cmp::Ordering::Equal
+//RS             }
+//RS         },
+//RS     );
+//RS     if let Some(error) = sort_error {
+//RS         return Err(error);
+//RS     }
+//RS     items.dedup();
+//RS     Ok(items)
+//RS }
+//RS 
+//RS fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
+//RS     // ponytail: comptime sets are small; O(n²) equality dedup avoids a second
+//RS     // hash representation. Revisit only with measured large-set evidence.
+//RS     let mut unique = Vec::new();
+//RS     for item in items {
+//RS         if !unique.contains(&item) {
+//RS             unique.push(item);
+//RS         }
+//RS     }
+//RS     unique
+//RS }
+//RS 
+//RS /// D-META-USER1=A: turn the four declared rejection fields into the one
+//RS /// registered project diagnostic used by both comptime evaluators.
+//RS pub fn project_rejection(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+//RS     let [CtValue::Str(code), CtValue::Str(what), CtValue::Str(why), CtValue::Str(fix)] = args
+//RS     else {
+//RS         return Err(unsupported(
+//RS             "`reject` requires String code, what, why, and fix arguments",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     if jet_foundation::Registry::diagnostic(code).is_none() {
+//RS         return Err(unsupported(
+//RS             &format!("`reject` uses unregistered diagnostic `{code}`"),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     Err(Diagnostic::project_error(
+//RS         code.clone(),
+//RS         what.clone(),
+//RS         why.clone(),
+//RS         fix.clone(),
+//RS         Some(span),
+//RS     )
+//RS     .expect("registered rule diagnostic"))
+//RS }
+//RS 
+//RS pub fn is_tier2_core_call(module: &str, method: &str, repl_mode: bool) -> bool {
+//RS     // `app.live(…)` and friends are the web module's live-query registry under
+//RS     // the entry alias; resolve the alias before asking for the fact.
+//RS     let resolved = if module == "app" { "core.web" } else { module };
+//RS     if core_requires_comptime_gate(resolved, method) {
+//RS         return true;
+//RS     }
+//RS     // The REPL re-reads ambient randomness between lines, so a folded draw
+//RS     // would go stale; the seeded constructor stays deterministic.
+//RS     repl_mode && is_nondeterministic_core(resolved, method)
+//RS }
+//RS 
+//RS pub fn vault_comptime_denied(module: &str, method: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1265",
+//RS         format!("`{module}.{method}()` can't be reached from a build-time context"),
+//RS         "module-field/comptime evaluation runs before secrets are ever decrypted; \
+//RS          a repo's encrypted store is only ever opened at ordinary runtime, and — \
+//RS          unlike the Tier-2 comptime effect gate — there is no `#Impure` escape hatch \
+//RS          here."
+//RS             .to_string(),
+//RS         "move the secret read out of comptime/module-field evaluation and into \
+//RS          ordinary runtime code."
+//RS             .to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
+//RS     let mut sort_error = None;
+//RS     items.sort_by(
+//RS         |left, right| match cmp_for_sort(right.clone(), left.clone(), span) {
+//RS             Ok(order) => order,
+//RS             Err(error) => {
+//RS                 sort_error.get_or_insert(error);
+//RS                 std::cmp::Ordering::Equal
+//RS             }
+//RS         },
+//RS     );
+//RS     match sort_error {
+//RS         Some(error) => Err(error),
+//RS         None => Ok(items),
+//RS     }
+//RS }
+//RS 
+//RS pub fn apply_seeded_rng_method(
+//RS     state: &mut u64,
+//RS     method: &str,
+//RS     args: &mut [CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     apply_seeded_rng_method_with_type(state, method, args, span, None)
+//RS }
+//RS 
+//RS pub fn apply_seeded_rng_method_with_type(
+//RS     state: &mut u64,
+//RS     method: &str,
+//RS     args: &mut [CtValue],
+//RS     span: Span,
+//RS     resolved_ret: Option<&Type>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let float = |index| {
+//RS         args.get(index)
+//RS             .ok_or_else(|| unsupported("this RNG method argument", span))
+//RS             .and_then(|value| as_float(value, span))
+//RS     };
+//RS     let list = |index| match args.get(index) {
+//RS         Some(CtValue::List(values)) => Ok(values.as_slice()),
+//RS         _ => Err(unsupported("this RNG method list argument", span)),
+//RS     };
+//RS     match method {
+//RS         "int" => {
+//RS             let low = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+//RS             let high = as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?;
+//RS             let value = seeded_rng_int(state, low, high).map_err(|message| {
+//RS                 Diagnostic::from_row("E3010", &[("msg", message)], Some(span))
+//RS             })?;
+//RS             Ok(CtValue::Int(value))
+//RS         }
+//RS         "float" => Ok(CtValue::Float(CtFloat::f64(seeded_rng_float(state)))),
+//RS         "float_range" => {
+//RS             let low = float(0)?;
+//RS             let high = float(1)?;
+//RS             Ok(CtValue::Float(CtFloat::f64(
+//RS                 seeded_random_kernel::jet_seeded_rng_float_range(state, low, high),
+//RS             )))
+//RS         }
+//RS         "bool" if args.is_empty() => Ok(CtValue::Bool(seeded_random_kernel::jet_seeded_rng_bool(
+//RS             state,
+//RS         ))),
+//RS         "bool" => {
+//RS             let p = float(0)?;
+//RS             Ok(CtValue::Bool(seeded_random_kernel::jet_seeded_rng_bool_p(
+//RS                 state, p,
+//RS             )))
+//RS         }
+//RS         "normal" => {
+//RS             let mean = float(0)?;
+//RS             let stddev = float(1)?;
+//RS             Ok(CtValue::Float(CtFloat::f64(
+//RS                 seeded_random_kernel::jet_seeded_rng_normal(state, mean, stddev),
+//RS             )))
+//RS         }
+//RS         "exponential" => {
+//RS             let lambda = float(0)?;
+//RS             Ok(CtValue::Float(CtFloat::f64(
+//RS                 seeded_random_kernel::jet_seeded_rng_exponential(state, lambda),
+//RS             )))
+//RS         }
+//RS         "bytes" => {
+//RS             let count = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+//RS             Ok(CtValue::Bytes(seeded_random_kernel::jet_seeded_rng_bytes(
+//RS                 state, count,
+//RS             )))
+//RS         }
+//RS         "split" => Ok(CtValue::Struct {
+//RS             type_name: crate::Syntax::RNG_TYPE.to_string(),
+//RS             fields: vec![(
+//RS                 "state".to_string(),
+//RS                 CtValue::Int(seeded_random_kernel::jet_seeded_rng_split(state) as i64),
+//RS             )],
+//RS         }),
+//RS         "pick" => {
+//RS             let values = list(0)?;
+//RS             match seeded_random_kernel::jet_seeded_rng_pick(state, &values.to_vec()) {
+//RS                 Some(value) => Ok(CtValue::Present(Box::new(value))),
+//RS                 None => Ok(CtValue::absent(
+//RS                     CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+//RS                         unsupported("RNG.pick needs a resolved element type", span)
+//RS                     })?,
+//RS                 )),
+//RS             }
+//RS         }
+//RS         "weighted_pick" => {
+//RS             let values = list(0)?;
+//RS             let weights = list(1)?;
+//RS             if values.is_empty() || values.len() != weights.len() {
+//RS                 return Ok(CtValue::absent(
+//RS                     CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+//RS                         unsupported("RNG.weighted_pick needs a resolved element type", span)
+//RS                     })?,
+//RS                 ));
+//RS             }
+//RS             let weights = weights
+//RS                 .iter()
+//RS                 .map(|weight| as_float(weight, span))
+//RS                 .collect::<Result<Vec<_>, _>>()?;
+//RS             match seeded_random_kernel::jet_seeded_rng_weighted_pick(
+//RS                 state,
+//RS                 &values.to_vec(),
+//RS                 &weights,
+//RS             ) {
+//RS                 Some(value) => Ok(CtValue::Present(Box::new(value))),
+//RS                 None => Ok(CtValue::absent(
+//RS                     CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
+//RS                         unsupported("RNG.weighted_pick needs a resolved element type", span)
+//RS                     })?,
+//RS                 )),
+//RS             }
+//RS         }
+//RS         "sample" => {
+//RS             let values = list(0)?;
+//RS             let count = as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?;
+//RS             Ok(CtValue::List(seeded_random_kernel::jet_seeded_rng_sample(
+//RS                 state,
+//RS                 &values.to_vec(),
+//RS                 count,
+//RS             )))
+//RS         }
+//RS         "shuffle" => {
+//RS             let Some(CtValue::List(values)) = args.first_mut() else {
+//RS                 return Err(unsupported("RNG.shuffle with a non-list argument", span));
+//RS             };
+//RS             seeded_random_kernel::jet_seeded_rng_shuffle(state, values);
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         _ => Err(unsupported("this RNG method", span)),
+//RS     }
+//RS }
+//RS 
+//RS /// D-CTIO1 (ratified 2026-06-22): a comptime embed path must be a string
+//RS /// literal that stays inside the project — never computed, never absolute, and
+//RS /// never escaping via `..`. Computed or escaping paths can't be audited at
+//RS /// build time and open a supply-chain hole, so they are E0957, not file reads.
+//RS /// `builtin` names the function (`embed_file` / `embed_bytes` / `find`) for the message.
+//RS pub(crate) fn check_literal_embed_path(
+//RS     builtin: &str,
+//RS     path: &str,
+//RS     span: Span,
+//RS ) -> Result<String, Diagnostic> {
+//RS     let path = normalize_rel(path);
+//RS     let p = std::path::Path::new(&path);
+//RS     if p.is_absolute() {
+//RS         return Err(embed_path_err(builtin, "absolute", span));
+//RS     }
+//RS     if p.components()
+//RS         .any(|c| matches!(c, std::path::Component::ParentDir))
+//RS     {
+//RS         return Err(embed_path_err(builtin, "escape", span));
+//RS     }
+//RS     Ok(path)
+//RS }
+//RS 
+//RS pub(crate) fn embed_path_err(builtin: &str, kind: &str, span: Span) -> Diagnostic {
+//RS     let noun = if builtin == crate::Syntax::BUILTIN_FIND {
+//RS         "glob"
+//RS     } else {
+//RS         "path"
+//RS     };
+//RS     let inline_example = if builtin == crate::Syntax::BUILTIN_FIND {
+//RS         format!("{builtin}(\"content/**/*.jet\")")
+//RS     } else {
+//RS         format!("{builtin}(\"data/file\")")
+//RS     };
+//RS     let (msg, why, fix) = match kind {
+//RS         "literal" => (
+//RS             format!("`{builtin}` {noun} must be a string literal"),
+//RS             format!("a computed {noun} can't be audited at build time, so the compiler can't tell which file it reads"),
+//RS             format!("pass the {noun} inline, e.g. `{inline_example}`"),
+//RS         ),
+//RS         "absolute" => (
+//RS             format!("`{builtin}` {noun} must be relative"),
+//RS             format!("an absolute {noun} reaches outside the project"),
+//RS             format!("use a {noun} relative to this file's own directory"),
+//RS         ),
+//RS         _ => (
+//RS             format!("`{builtin}` {noun} escapes the project with `..`"),
+//RS             "`..` could read files outside your project; comptime inputs must stay inside it".to_string(),
+//RS             format!("drop the `..` and use a {noun} under this file's directory"),
+//RS         ),
+//RS     };
+//RS     Diagnostic::error("E0957", msg, why, fix, Some(span))
+//RS }
+//RS 
+//RS pub(crate) fn find_glob(
+//RS     base_dir: &Path,
+//RS     glob: &str,
+//RS     span: Span,
+//RS ) -> Result<Vec<String>, Diagnostic> {
+//RS     let pattern = normalize_rel(glob);
+//RS     let segments = split_rel(&pattern);
+//RS     let root_rel = static_glob_prefix(&segments);
+//RS     let walk_error = |error: std::io::Error| {
+//RS         Diagnostic::error(
+//RS             "E0955",
+//RS             format!("`{}` can't walk `{glob}`", crate::Syntax::BUILTIN_FIND),
+//RS             error.to_string(),
+//RS             "check that every directory matched by the glob can be read".to_string(),
+//RS             Some(span),
+//RS         )
+//RS     };
+//RS     let base_root = checked_embed_path(base_dir, ".").map_err(&walk_error)?;
+//RS     let root = if root_rel.is_empty() {
+//RS         base_root.clone()
+//RS     } else {
+//RS         match checked_embed_path(&base_root, &root_rel.join("/")) {
+//RS             Ok(root) => root,
+//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+//RS             Err(error) => return Err(walk_error(error)),
+//RS         }
+//RS     };
+//RS     let has_recursive = segments.iter().any(|segment| segment == "**");
+//RS     let max_depth = if has_recursive {
+//RS         usize::MAX
+//RS     } else {
+//RS         segments.len()
+//RS     };
+//RS     let mut out = Vec::new();
+//RS     if root.is_file() {
+//RS         let rel = root_rel.join("/");
+//RS         if glob_segments_match(&segments, &split_rel(&rel)) {
+//RS             out.push(rel);
+//RS         }
+//RS         return Ok(out);
+//RS     }
+//RS     if !root.exists() {
+//RS         return Ok(out);
+//RS     }
+//RS     let logical_root = root_rel.join("/");
+//RS     walk_find(
+//RS         &root,
+//RS         Path::new(&logical_root),
+//RS         &segments,
+//RS         root_rel.len(),
+//RS         max_depth,
+//RS         &mut out,
+//RS     )
+//RS     .map_err(walk_error)?;
+//RS     Ok(out)
+//RS }
+//RS 
+//RS /// D-CTIO1: the one implementation of `embed_file` / `embed_bytes` / `find`.
+//RS /// `literal` is the argument's source string literal, or `None` when the
+//RS /// argument was computed (E0957). Both the AST dispatcher below and the
+//RS /// canonical TIR evaluator call this, so the path law and its diagnostics live
+//RS /// in exactly one place.
+//RS pub fn eval_build_time_io(
+//RS     builtin: &str,
+//RS     base_dir: &Path,
+//RS     literal: Option<&str>,
+//RS     mut embed_inputs: Option<&mut Vec<crate::AST::ComptimeInput>>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let Some(literal) = literal else {
+//RS         return Err(embed_path_err(builtin, "literal", span));
+//RS     };
+//RS     let rel = check_literal_embed_path(builtin, literal, span)?;
+//RS     if builtin == crate::Syntax::BUILTIN_FIND {
+//RS         return eval_locked_find(base_dir, &rel, embed_inputs, span);
+//RS     }
+//RS     let bytes = jet_foundation::CheckReads::read_nofollow_at_root(
+//RS         base_dir,
+//RS         Path::new(&rel),
+//RS         crate::SHA256::MAX_TREE_FILE_BYTES,
+//RS     )
+//RS     .map_err(|error| {
+//RS         Diagnostic::error(
+//RS             "E0955",
+//RS             format!("`{builtin}` can't open `{rel}`"),
+//RS             format!("{error} (looked next to the file doing the embedding)"),
+//RS             "check the path — it is relative to the file's own directory".to_string(),
+//RS             Some(span),
+//RS         )
+//RS     })?;
+//RS     // D-CTEFFECT1 Tier-1: record the embed input hash for .jet/lock.
+//RS     if let Some(inputs) = embed_inputs.as_deref_mut() {
+//RS         inputs.push(crate::AST::ComptimeInput {
+//RS             path: rel.clone(),
+//RS             hash: crate::SHA256::sha256_hex(&bytes),
+//RS         });
+//RS     }
+//RS     if builtin == crate::Syntax::BUILTIN_EMBED_BYTES {
+//RS         return Ok(CtValue::Bytes(bytes));
+//RS     }
+//RS     match String::from_utf8(bytes) {
+//RS         Ok(text) => Ok(CtValue::Str(text)),
+//RS         Err(_) => Err(Diagnostic::error(
+//RS             "E0955",
+//RS             format!("`{builtin}` can't read `{rel}` as text"),
+//RS             format!("the file isn't valid UTF-8; `{builtin}` returns a String"),
+//RS             "embed it with `embed_bytes(\"path\")` instead — it returns raw `[U8]`".to_string(),
+//RS             Some(span),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS /// The source string literal of a call argument, or `None` when computed.
+//RS pub(crate) fn arg_string_literal(arg: &CallArg) -> Option<&str> {
+//RS     match &arg.expr {
+//RS         Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+//RS             StrPart::Lit(value) => Some(value.as_str()),
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub fn eval_locked_find(
+//RS     base_dir: &Path,
+//RS     glob: &str,
+//RS     mut embed_inputs: Option<&mut Vec<crate::AST::ComptimeInput>>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let builtin = crate::Syntax::BUILTIN_FIND;
+//RS     let base_root = checked_embed_path(base_dir, ".").map_err(|error| {
+//RS         Diagnostic::error(
+//RS             "E0955",
+//RS             format!("`{builtin}` can't walk `{glob}`"),
+//RS             error.to_string(),
+//RS             "check that every directory matched by the glob can be read".to_string(),
+//RS             Some(span),
+//RS         )
+//RS     })?;
+//RS     let mut matches = find_glob(&base_root, glob, span)?;
+//RS     matches.sort();
+//RS     for rel in &matches {
+//RS         let bytes = jet_foundation::CheckReads::read_nofollow_at_root(
+//RS             base_dir,
+//RS             Path::new(rel),
+//RS             crate::SHA256::MAX_TREE_FILE_BYTES,
+//RS         )
+//RS         .map_err(|error| {
+//RS             Diagnostic::error(
+//RS                 "E0955",
+//RS                 format!("`{builtin}` can't open `{rel}`"),
+//RS                 format!("{error} (matched while expanding `{glob}`)"),
+//RS                 "check the path — it is relative to the file's own directory".to_string(),
+//RS                 Some(span),
+//RS             )
+//RS         })?;
+//RS         if let Some(inputs) = embed_inputs.as_deref_mut() {
+//RS             inputs.push(crate::AST::ComptimeInput {
+//RS                 path: rel.clone(),
+//RS                 hash: crate::SHA256::sha256_hex(&bytes),
+//RS             });
+//RS         }
+//RS     }
+//RS     Ok(CtValue::List(
+//RS         matches.into_iter().map(CtValue::Str).collect(),
+//RS     ))
+//RS }
+//RS 
+//RS pub fn eval_build_embed(
+//RS     args: &[CtValue],
+//RS     base_dir: &Path,
+//RS     embed_inputs: Option<&mut Vec<crate::AST::ComptimeInput>>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let rel = match args.first() {
+//RS         Some(CtValue::Str(path)) => path,
+//RS         _ => return Err(unsupported("`b.embed` requires a path string", span)),
+//RS     };
+//RS     let path = Path::new(rel);
+//RS     if args.len() != 1
+//RS         || path.is_absolute()
+//RS         || path
+//RS             .components()
+//RS             .any(|component| matches!(component, std::path::Component::ParentDir))
+//RS     {
+//RS         return Err(Diagnostic::error(
+//RS             "E0957",
+//RS             format!("`b.embed` path `{rel}` escapes the build root"),
+//RS             "locked build inputs must stay beneath the selected source directory".to_string(),
+//RS             "use a relative path returned by `b.find`, without `..`".to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS     let bytes = jet_foundation::CheckReads::read_nofollow_at_root(
+//RS         base_dir,
+//RS         Path::new(rel),
+//RS         crate::SHA256::MAX_TREE_FILE_BYTES,
+//RS     )
+//RS     .map_err(|error| {
+//RS         Diagnostic::error(
+//RS             "E0955",
+//RS             format!("`b.embed` cannot open `{rel}`"),
+//RS             error.to_string(),
+//RS             "check the locked relative path".to_string(),
+//RS             Some(span),
+//RS         )
+//RS     })?;
+//RS     if let Some(inputs) = embed_inputs {
+//RS         inputs.push(crate::AST::ComptimeInput {
+//RS             path: rel.clone(),
+//RS             hash: crate::SHA256::sha256_hex(&bytes),
+//RS         });
+//RS     }
+//RS     String::from_utf8(bytes).map(CtValue::Str).map_err(|_| {
+//RS         Diagnostic::error(
+//RS             "E0955",
+//RS             format!("`b.embed` cannot decode `{rel}` as text"),
+//RS             "the embedded file is not valid UTF-8".to_string(),
+//RS             "embed a UTF-8 text file".to_string(),
+//RS             Some(span),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn normalize_rel(path: &str) -> String {
+//RS     path.replace('\\', "/")
+//RS }
+//RS 
+//RS fn checked_embed_path(base_dir: &Path, relative: &str) -> std::io::Result<PathBuf> {
+//RS     let root = std::fs::canonicalize(base_dir)?;
+//RS     let candidate = root.join(relative);
+//RS     let real = std::fs::canonicalize(&candidate)?;
+//RS     if !real.starts_with(&root) {
+//RS         return Err(std::io::Error::new(
+//RS             std::io::ErrorKind::PermissionDenied,
+//RS             "embedded path escapes the real source root",
+//RS         ));
+//RS     }
+//RS     Ok(real)
+//RS }
+//RS 
+//RS fn split_rel(path: &str) -> Vec<String> {
+//RS     path.split('/')
+//RS         .filter(|part| !part.is_empty() && *part != ".")
+//RS         .map(str::to_string)
+//RS         .collect()
+//RS }
+//RS 
+//RS fn static_glob_prefix(segments: &[String]) -> Vec<String> {
+//RS     let mut prefix = Vec::new();
+//RS     for segment in segments {
+//RS         if segment == "**" || segment_has_glob(segment) {
+//RS             break;
+//RS         }
+//RS         prefix.push(segment.clone());
+//RS     }
+//RS     prefix
+//RS }
+//RS 
+//RS fn segment_has_glob(segment: &str) -> bool {
+//RS     segment.chars().any(|c| matches!(c, '*' | '?' | '{' | '['))
+//RS }
+//RS 
+//RS fn walk_find(
+//RS     dir: &Path,
+//RS     logical_dir: &Path,
+//RS     pattern: &[String],
+//RS     depth: usize,
+//RS     max_depth: usize,
+//RS     out: &mut Vec<String>,
+//RS ) -> std::io::Result<()> {
+//RS     // #2517 S1b: the listing is a check input; a file added under a walked
+//RS     // directory must invalidate a recorded result.
+//RS     for path in jet_foundation::CheckReads::read_dir_sorted(dir)? {
+//RS         let ty = std::fs::symlink_metadata(&path)?.file_type();
+//RS         let Some(name) = path.file_name() else {
+//RS             continue;
+//RS         };
+//RS         let logical_path = logical_dir.join(name);
+//RS         if ty.is_dir() {
+//RS             let dir_depth = depth + 1;
+//RS             if dir_depth < max_depth {
+//RS                 walk_find(&path, &logical_path, pattern, dir_depth, max_depth, out)?;
+//RS             }
+//RS         } else if ty.is_file() {
+//RS             let rel = normalize_rel(&logical_path.to_string_lossy());
+//RS             if glob_segments_match(pattern, &split_rel(&rel)) {
+//RS                 out.push(rel);
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn glob_segments_match(pattern: &[String], path: &[String]) -> bool {
+//RS     if pattern.is_empty() {
+//RS         return path.is_empty();
+//RS     }
+//RS     if pattern[0] == "**" {
+//RS         return glob_segments_match(&pattern[1..], path)
+//RS             || (!path.is_empty() && glob_segments_match(pattern, &path[1..]));
+//RS     }
+//RS     !path.is_empty()
+//RS         && segment_match(&pattern[0], &path[0])
+//RS         && glob_segments_match(&pattern[1..], &path[1..])
+//RS }
+//RS 
+//RS fn segment_match(pattern: &str, text: &str) -> bool {
+//RS     segment_match_chars(
+//RS         &pattern.chars().collect::<Vec<_>>(),
+//RS         &text.chars().collect::<Vec<_>>(),
+//RS     )
+//RS }
+//RS 
+//RS fn segment_match_chars(pattern: &[char], text: &[char]) -> bool {
+//RS     if pattern.is_empty() {
+//RS         return text.is_empty();
+//RS     }
+//RS     match pattern[0] {
+//RS         '*' => {
+//RS             segment_match_chars(&pattern[1..], text)
+//RS                 || (!text.is_empty() && segment_match_chars(pattern, &text[1..]))
+//RS         }
+//RS         '?' => !text.is_empty() && segment_match_chars(&pattern[1..], &text[1..]),
+//RS         '{' => match find_closing(pattern, 0, '}') {
+//RS             Some(end) => split_alternatives(&pattern[1..end]).into_iter().any(|alt| {
+//RS                 let mut next = alt;
+//RS                 next.extend_from_slice(&pattern[end + 1..]);
+//RS                 segment_match_chars(&next, text)
+//RS             }),
+//RS             None => {
+//RS                 !text.is_empty() && text[0] == '{' && segment_match_chars(&pattern[1..], &text[1..])
+//RS             }
+//RS         },
+//RS         '[' => match find_closing(pattern, 0, ']') {
+//RS             Some(end) => {
+//RS                 !text.is_empty()
+//RS                     && class_matches(&pattern[1..end], text[0])
+//RS                     && segment_match_chars(&pattern[end + 1..], &text[1..])
+//RS             }
+//RS             None => {
+//RS                 !text.is_empty() && text[0] == '[' && segment_match_chars(&pattern[1..], &text[1..])
+//RS             }
+//RS         },
+//RS         c => !text.is_empty() && text[0] == c && segment_match_chars(&pattern[1..], &text[1..]),
+//RS     }
+//RS }
+//RS 
+//RS fn find_closing(chars: &[char], start: usize, close: char) -> Option<usize> {
+//RS     chars
+//RS         .iter()
+//RS         .enumerate()
+//RS         .skip(start + 1)
+//RS         .find_map(|(idx, c)| (*c == close).then_some(idx))
+//RS }
+//RS 
+//RS fn split_alternatives(chars: &[char]) -> Vec<Vec<char>> {
+//RS     let mut out = Vec::new();
+//RS     let mut cur = Vec::new();
+//RS     for c in chars {
+//RS         if *c == ',' {
+//RS             out.push(cur);
+//RS             cur = Vec::new();
+//RS         } else {
+//RS             cur.push(*c);
+//RS         }
+//RS     }
+//RS     out.push(cur);
+//RS     out
+//RS }
+//RS 
+//RS fn class_matches(class: &[char], needle: char) -> bool {
+//RS     let mut i = 0;
+//RS     let mut matched = false;
+//RS     while i < class.len() {
+//RS         if i + 2 < class.len() && class[i + 1] == '-' {
+//RS             matched |= class[i] <= needle && needle <= class[i + 2];
+//RS             i += 3;
+//RS         } else {
+//RS             matched |= class[i] == needle;
+//RS             i += 1;
+//RS         }
+//RS     }
+//RS     matched
+//RS }
+//RS 
+//RS /// c139: the integer value of `e` when it is (possibly parenthesized/negated)
+//RS /// an `Int` literal — used to mirror sema's compile-time-proof shortcut for a
+//RS /// ranged distinct-type constructor (`eval_distinct_ctor`).
+//RS fn literal_int(e: &Expr) -> Option<i64> {
+//RS     match e {
+//RS         Expr::Int(n, _, _, raw) => match crate::Comptime::exact_integer_ct_value(*n, raw.as_deref()) {
+//RS             CtValue::Int(value) => Some(value),
+//RS             CtValue::BigInt(_) => None,
+//RS             _ => None,
+//RS         },
+//RS         Expr::Unary(UnOp::Neg, inner, _) => literal_int(inner).and_then(i64::checked_neg),
+//RS         Expr::Paren(inner, _) => literal_int(inner),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn integer_width_from_type(ty: &Type) -> Option<u32> {
+//RS     match ty {
+//RS         Type::Int => Some(64),
+//RS         Type::IntN { bits, .. } => Some(u32::from(*bits)),
+//RS         Type::InlineRange { base, .. } => integer_width_from_type(base),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn integer_width_from_name(name: &str) -> Option<u32> {
+//RS     crate::AST::numeric_type_from_name(name)
+//RS         .as_ref()
+//RS         .and_then(integer_width_from_type)
+//RS }
+//RS 
+//RS /// D-CTEFFECT1 Tier-1 / D-NETDEP1=A: evaluate a sha256-pinned text fetch and
+//RS /// record its lock input. Shared by AST and canonical TIR evaluation.
+//RS pub fn eval_net_fetch(
+//RS     args: &[CtValue],
+//RS     base_dir: &Path,
+//RS     embed_inputs: Option<&mut Vec<crate::AST::ComptimeInput>>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let url =
+//RS         match args.first() {
+//RS             Some(CtValue::Str(s)) => s.clone(),
+//RS             _ => return Err(Diagnostic::error(
+//RS                 "E3414",
+//RS                 "fetch: first argument must be a string URL".to_string(),
+//RS                 "`core.net.fetch` expects a string URL as its first argument".to_string(),
+//RS                 "pass a string literal: `net.fetch('https://example.com/data.txt', sha256: '…')`"
+//RS                     .to_string(),
+//RS                 Some(span),
+//RS             )),
+//RS         };
+//RS     let expected =
+//RS         match args.get(1) {
+//RS             Some(CtValue::Str(s)) => s.clone(),
+//RS             _ => return Err(Diagnostic::error(
+//RS                 "E3414",
+//RS                 "fetch: `sha256:` argument missing or not a string".to_string(),
+//RS                 "`core.net.fetch` requires a `sha256:` labelled argument for content verification"
+//RS                     .to_string(),
+//RS                 "add `sha256: '<64-hex-chars>'` as the second argument".to_string(),
+//RS                 Some(span),
+//RS             )),
+//RS         };
+//RS 
+//RS     let bytes = jet_net::fetch_in_root(&url, base_dir).map_err(|error| {
+//RS         Diagnostic::error(
+//RS             error.diagnostic_code(),
+//RS             error.diagnostic_what(&url),
+//RS             error.diagnostic_why(&url),
+//RS             error.diagnostic_fix(),
+//RS             Some(span),
+//RS         )
+//RS     })?;
+//RS     let actual = crate::SHA256::sha256_hex(&bytes);
+//RS     if actual != expected {
+//RS         return Err(Diagnostic::error(
+//RS             "E3413",
+//RS             format!("fetch: sha256 mismatch for `{url}`"),
+//RS             format!("expected `{expected}` but content hashes to `{actual}`"),
+//RS             "update the `sha256:` pin to match the content, or verify the URL is correct"
+//RS                 .to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS     let content = String::from_utf8(bytes).map_err(|_| {
+//RS         Diagnostic::error(
+//RS             "E3414",
+//RS             format!("fetch: content at `{url}` is not valid UTF-8"),
+//RS             "the downloaded bytes could not be decoded as UTF-8 text".to_string(),
+//RS             "binary content is not supported by comptime fetch; use `embed_bytes` for binary data"
+//RS                 .to_string(),
+//RS             Some(span),
+//RS         )
+//RS     })?;
+//RS     if let Some(inputs) = embed_inputs {
+//RS         inputs.push(crate::AST::ComptimeInput {
+//RS             path: format!("url:{url}"),
+//RS             hash: actual,
+//RS         });
+//RS     }
+//RS     Ok(CtValue::Str(content))
+//RS }
+//RS 
+//RS impl<'a> Interp<'a> {
+//RS     pub(in super::super) fn eval_call(
+//RS         &mut self,
+//RS         name: &str,
+//RS         span: Span,
+//RS         args: &[crate::AST::CallArg],
+//RS         scope: &mut HashMap<String, CtValue>,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         // Whole-program dev mode (E2-M4): the two IO builtins write to the
+//RS         // buffered sink, producing bytes identical to the compiled program
+//RS         // (`jet_show()` + `\n`). In pure comptime mode the sink is `None` and
+//RS         // these are unreachable (the purity check rejects them first, E3401).
+//RS         if name == "print" || name == "eprint" {
+//RS             if self.sink.is_some() {
+//RS                 // D-VERDICT-1321-1: the AST/dev interpreter must preserve the
+//RS                 // same one-line-per-argument contract as TIR's joined form.
+//RS                 let text = args
+//RS                     .iter()
+//RS                     .map(|a| {
+//RS                         // D-DISPLAYDBG1/2: same Display-impl-aware rendering
+//RS                         // as `{value}` interpolation — never `:Debug`.
+//RS                         let v = self.eval(&a.expr, scope)?;
+//RS                         self.show_value(&v, a.expr.span())
+//RS                     })
+//RS                     .collect::<Result<Vec<_>, _>>()?
+//RS                     .join("\n");
+//RS                 let frame = jet_term_print_frame(&text);
+//RS                 let sink = self.sink.as_mut().expect("dev-mode sink");
+//RS                 if name == "print" {
+//RS                     sink.stdout.push_str(&frame);
+//RS                 } else {
+//RS                     sink.stderr.push_str(&frame);
+//RS                 }
+//RS                 return Ok(CtValue::Unit);
+//RS             }
+//RS             // Pure comptime mode: unreachable in practice, but stay honest.
+//RS             return Err(unsupported(&format!("`{}`", name), span));
+//RS         }
+//RS         // The sanctioned comptime build-time I/O builtins (D-CTIO1).
+//RS         if name == crate::Syntax::BUILTIN_EMBED_FILE {
+//RS             return self.eval_embed_file(args, span);
+//RS         }
+//RS         if name == crate::Syntax::BUILTIN_EMBED_BYTES {
+//RS             return self.eval_embed_bytes(args, span);
+//RS         }
+//RS         if name == crate::Syntax::BUILTIN_FIND {
+//RS             return self.eval_find(args, span);
+//RS         }
+//RS         // D-DBG1=A: the checked development trace. Sema recorded the site
+//RS         // text as the second argument; the line matches every compiled tier.
+//RS         // In dev mode it joins the buffered stderr sink; comptime evaluation
+//RS         // prints while compiling.
+//RS         if name == crate::Syntax::INTERNAL_DEBUG_TRACE && args.len() == 2 {
+//RS             let value = self.eval(&args[0].expr, scope)?;
+//RS             let site = self.eval(&args[1].expr, scope)?.jet_show();
+//RS             let line = format!(
+//RS                 "{} {site} = {}",
+//RS                 crate::Syntax::DEBUG_TRACE_PREFIX,
+//RS                 self.debug_value(&value)
+//RS             );
+//RS             if let Some(sink) = self.sink.as_mut() {
+//RS                 sink.stderr.push_str(&jet_term_print_frame(&line));
+//RS             } else {
+//RS                 eprintln!("{line}");
+//RS             }
+//RS             return Ok(value);
+//RS         }
+//RS         if name == "panic" {
+//RS             let msg = match args.first() {
+//RS                 Some(a) => self.eval(&a.expr, scope)?.jet_show(),
+//RS                 None => "comptime panic".to_string(),
+//RS             };
+//RS             return Err(comptime_panic(&msg, span));
+//RS         }
+//RS         if name == "assert" || name == "assert_eq" {
+//RS             return self.eval_assertion(name, args, span, scope);
+//RS         }
+//RS         // D-CONC-FREEZE1=A: comptime values are already owned snapshots. The
+//RS         // evaluator returns the value by value, preserving freeze's identity
+//RS         // law without inventing a second runtime representation.
+//RS         if name == crate::Syntax::KW_FREEZE
+//RS             && self.funcs.get(name).is_none()
+//RS             && !scope.contains_key(name)
+//RS         {
+//RS             if args.len() != 1 {
+//RS                 return Err(unsupported("`freeze` needs exactly one value", span));
+//RS             }
+//RS             return self.eval(&args[0].expr, scope);
+//RS         }
+//RS         // D-META-USER1=A: a checked rule may reject with a registered
+//RS         // project diagnostic. Labels keep the product fields explicit; the
+//RS         // registry still owns the code's severity and rendering metadata.
+//RS         if name == "reject" {
+//RS             let mut values = HashMap::new();
+//RS             for argument in args {
+//RS                 let Some((label, _)) = &argument.label else {
+//RS                     return Err(unsupported(
+//RS                         "`reject` requires code, what, why, and fix labels",
+//RS                         span,
+//RS                     ));
+//RS                 };
+//RS                 values.insert(label.as_str(), self.eval(&argument.expr, scope)?);
+//RS             }
+//RS             let text = |name: &str| -> Result<String, Diagnostic> {
+//RS                 match values.get(name) {
+//RS                     Some(CtValue::Str(value)) => Ok(value.clone()),
+//RS                     _ => Err(unsupported(
+//RS                         &format!("`reject` requires a String `{name}` argument"),
+//RS                         span,
+//RS                     )),
+//RS                 }
+//RS             };
+//RS             let code = text("code")?;
+//RS             let what = text("what")?;
+//RS             let why = text("why")?;
+//RS             let fix = text("fix")?;
+//RS             return project_rejection(
+//RS                 &[
+//RS                     CtValue::Str(code),
+//RS                     CtValue::Str(what),
+//RS                     CtValue::Str(why),
+//RS                     CtValue::Str(fix),
+//RS                 ],
+//RS                 span,
+//RS             );
+//RS         }
+//RS         // D-DECIMAL1: `Decimal("10.50")` — explicit string construction only.
+//RS         if name == crate::Syntax::TYPE_DECIMAL
+//RS             && self.funcs.get(name).is_none()
+//RS             && !scope.contains_key(name)
+//RS         {
+//RS             let arg = match args.first() {
+//RS                 Some(a) => self.eval(&a.expr, scope)?,
+//RS                 None => return Err(unsupported("`Decimal` with no argument", span)),
+//RS             };
+//RS             return match arg {
+//RS                 CtValue::Str(s) => crate::Numeric::CtDecimal::from_str(&s)
+//RS                     .map(|decimal| decimal.to_value())
+//RS                     .map_err(|_| unsupported(&format!("`Decimal(\"{}\")`", s), span)),
+//RS                 _ => Err(unsupported("`Decimal` with a non-String argument", span)),
+//RS             };
+//RS         }
+//RS         // D-TYPE2-IMAG1=A: explicit Complex construction is the interpreter
+//RS         // adapter for the same constructor used by `4i` and TIR precise nodes.
+//RS         if name == crate::Syntax::TYPE_COMPLEX
+//RS             && self.funcs.get(name).is_none()
+//RS             && !scope.contains_key(name)
+//RS         {
+//RS             if args.len() != 2 {
+//RS                 return Err(unsupported("`Complex` takes exactly two arguments", span));
+//RS             }
+//RS             let real = as_float(&self.eval(&args[0].expr, scope)?, span)?;
+//RS             let imaginary = as_float(&self.eval(&args[1].expr, scope)?, span)?;
+//RS             return Ok(crate::Comptime::ComplexParity::from_parts(real, imaginary));
+//RS         }
+//RS         // D-SIMD2 / D-LINALG1: `Vec3(…)` / `F32x4(…)` / `Mat3(…)` constructors.
+//RS         if super::super::MathLayout::is_math_type(name)
+//RS             && self.funcs.get(name).is_none()
+//RS             && !scope.contains_key(name)
+//RS         {
+//RS             let mut vals = Vec::with_capacity(args.len());
+//RS             for a in args {
+//RS                 vals.push(self.eval(&a.expr, scope)?);
+//RS             }
+//RS             return super::super::MathLayout::construct(name, &vals, span);
+//RS         }
+//RS         // D-LIN1-DROP: `consume(x)` — eval then discard.
+//RS         if name == crate::Syntax::BUILTIN_CONSUME
+//RS             && self.funcs.get(name).is_none()
+//RS             && !scope.contains_key(name)
+//RS         {
+//RS             if args.len() != 1 {
+//RS                 return Err(unsupported("`consume` discards exactly one value", span));
+//RS             }
+//RS             let _ = self.eval(&args[0].expr, scope)?;
+//RS             return Ok(CtValue::Unit);
+//RS         }
+//RS         // D-TOOL4: `expect(x)` — wrap Display text for `.snapshot()`.
+//RS         if name == crate::Syntax::BUILTIN_EXPECT
+//RS             && self.funcs.get(name).is_none()
+//RS             && !scope.contains_key(name)
+//RS         {
+//RS             if args.len() != 1 {
+//RS                 return Err(unsupported("`expect` needs exactly one value", span));
+//RS             }
+//RS             let value = self.eval(&args[0].expr, scope)?;
+//RS             let shown = self.show_value(&value, args[0].expr.span())?;
+//RS             return Ok(CtValue::Struct {
+//RS                 type_name: "__JetExpect__".to_string(),
+//RS                 fields: vec![("value".into(), CtValue::Str(shown))],
+//RS             });
+//RS         }
+//RS         // D-NUMOPS1: `wrapping`/`saturating`/`checked` over one integer binary.
+//RS         if name == crate::Syntax::BUILTIN_WRAPPING
+//RS             || name == crate::Syntax::BUILTIN_SATURATING
+//RS             || name == crate::Syntax::BUILTIN_CHECKED
+//RS         {
+//RS             if self.funcs.get(name).is_none() && !scope.contains_key(name) {
+//RS                 return self.eval_overflow_opt(name, args, span, scope);
+//RS             }
+//RS         }
+//RS         // c139/HOF: `f(x)` where `f` is a local binding (a lambda param, or a
+//RS         // `let f = someLambdaOrFn` variable) rather than a top-level `fn`
+//RS         // name — every bare-name call, whatever the callee resolves to,
+//RS         // parses as `Expr::Call` (the parser can't tell values from function
+//RS         // names apart), so this is where a stored closure value gets called.
+//RS         // Checked before the top-level-function lookup: a local binding
+//RS         // shadows a same-named top-level function, same as any other name.
+//RS         if let Some(f @ CtValue::Closure(_)) = scope.get(name).cloned() {
+//RS             let mut vals = Vec::with_capacity(args.len());
+//RS             for a in args {
+//RS                 vals.push(self.eval(&a.expr, scope)?);
+//RS             }
+//RS             return self.call_closure(&f, vals, span);
+//RS         }
+//RS         // A user function: bind params, run the body in a fresh frame.
+//RS         let qualified = name
+//RS             .split_once('.')
+//RS             .map(|(module, symbol)| format!("{module}::{symbol}"));
+//RS         let func = match self.funcs.get(name).copied().or_else(|| {
+//RS             qualified
+//RS                 .as_ref()
+//RS                 .and_then(|name| self.funcs.get(name).copied())
+//RS         }) {
+//RS             Some(f) => f,
+//RS             None => {
+//RS                 // c139 JIT/interpreter-parity: `Name(expr)` where `Name` isn't a
+//RS                 // known function is the distinct-type / `#UnitFamily` constructor
+//RS                 // call — the only capitalized-name *call* form Jet has (struct
+//RS                 // literals use `.{ }`, enum variants use `.Variant`).
+//RS                 if let Some(range) = self.distinct_ranges.get(name).copied() {
+//RS                     return self.eval_distinct_ctor(name, range, args, span, scope);
+//RS                 }
+//RS                 return Err(unsupported(&format!("calling `{}`", name), span));
+//RS             }
+//RS         };
+//RS         // D-VARIADIC1/D-ANY-JAI1: `name: ...T` / `name: ...[A, B]` — the last
+//RS         // parameter only. Every call-site argument from that position on
+//RS         // (any count, including zero) collects into one `List` bound to it;
+//RS         // fixed params before it still bind 1:1.
+//RS         if let Some(last) = func.params.last() {
+//RS             if last.variadic {
+//RS                 let fixed = &func.params[..func.params.len() - 1];
+//RS                 if args.len() < fixed.len() {
+//RS                     return Err(unsupported(
+//RS                         &format!("`{}` (wrong number of arguments)", name),
+//RS                         span,
+//RS                     ));
+//RS                 }
+//RS                 let (mut frame, writebacks) =
+//RS                     self.bind_fixed_call_args(fixed, &args[..fixed.len()], scope)?;
+//RS                 let mut rest = Vec::with_capacity(args.len() - fixed.len());
+//RS                 for a in &args[fixed.len()..] {
+//RS                     let value = self.eval(&a.expr, scope)?;
+//RS                     rest.push(super::super::Interpreter::coerce_value_to_type(
+//RS                         value, &last.ty,
+//RS                     ));
+//RS                 }
+//RS                 frame.insert(last.name.clone(), CtValue::List(rest));
+//RS                 return self.call_func_with_writebacks(name, func, frame, writebacks, scope);
+//RS             }
+//RS         }
+//RS         if func.params.len() != args.len() {
+//RS             return Err(unsupported(
+//RS                 &format!("`{}` (wrong number of arguments)", name),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         let (frame, writebacks) = self.bind_fixed_call_args(&func.params, args, scope)?;
+//RS         self.call_func_with_writebacks(name, func, frame, writebacks, scope)
+//RS     }
+//RS 
+//RS     fn bind_fixed_call_args(
+//RS         &mut self,
+//RS         params: &[crate::AST::Param],
+//RS         args: &[CallArg],
+//RS         scope: &mut HashMap<String, CtValue>,
+//RS     ) -> Result<(HashMap<String, CtValue>, Vec<(String, String)>), Diagnostic> {
+//RS         let mut frame = HashMap::new();
+//RS         let mut writebacks = Vec::new();
+//RS         for (p, a) in params.iter().zip(args) {
+//RS             let value = self.eval(&a.expr, scope)?;
+//RS             frame.insert(
+//RS                 p.name.clone(),
+//RS                 super::super::Interpreter::coerce_value_to_type(value, &p.ty),
+//RS             );
+//RS             if p.convention == AccessConvention::Write {
+//RS                 if let Expr::Ident(caller_name, _) = &a.expr {
+//RS                     writebacks.push((p.name.clone(), caller_name.clone()));
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok((frame, writebacks))
+//RS     }
+//RS 
+//RS     fn call_func_with_writebacks(
+//RS         &mut self,
+//RS         name: &str,
+//RS         func: &Func,
+//RS         frame: HashMap<String, CtValue>,
+//RS         writebacks: Vec<(String, String)>,
+//RS         scope: &mut HashMap<String, CtValue>,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         let (result, frame) = self.call_func_with_frame(name, func, frame)?;
+//RS         for (param_name, caller_name) in writebacks {
+//RS             if let Some(value) = frame.get(&param_name) {
+//RS                 scope.insert(caller_name, value.clone());
+//RS             }
+//RS         }
+//RS         Ok(result)
+//RS     }
+//RS 
+//RS     /// c139: run a resolved `Func`'s body in `frame` (already bound: params,
+//RS     /// and `self` for an instance/associated method), threading the same
+//RS     /// debugger bookkeeping and `?`/`?? return` sentinel handling `eval_call`
+//RS     /// always has. Shared by plain calls, instance-method dispatch, and
+//RS     /// code-module namespaced calls.
+//RS     pub(in super::super) fn call_func(
+//RS         &mut self,
+//RS         name: &str,
+//RS         func: &Func,
+//RS         frame: HashMap<String, CtValue>,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         self.call_func_with_frame(name, func, frame)
+//RS             .map(|(value, _)| value)
+//RS     }
+//RS 
+//RS     fn call_func_with_frame(
+//RS         &mut self,
+//RS         name: &str,
+//RS         func: &Func,
+//RS         mut frame: HashMap<String, CtValue>,
+//RS     ) -> Result<(CtValue, HashMap<String, CtValue>), Diagnostic> {
+//RS         // D-DBG3: enter a user-function frame — bump the debugger's call depth
+//RS         // and current-function name so `next`/`finish` and the `in fn()` banner
+//RS         // track correctly, then restore both on the way out (every path).
+//RS         let prev_depth = self.depth;
+//RS         let prev_func = std::mem::replace(&mut self.cur_func, name.to_string());
+//RS         let frame_types = func
+//RS             .params
+//RS             .iter()
+//RS             .map(|param| (param.name.clone(), param.ty.clone()))
+//RS             .collect();
+//RS         let prev_types = std::mem::replace(&mut self.binding_types, frame_types);
+//RS         self.depth = prev_depth + 1;
+//RS         let result = self.exec_block(&func.body, &mut frame);
+//RS         self.depth = prev_depth;
+//RS         self.cur_func = prev_func;
+//RS         self.binding_types = prev_types;
+//RS         let value = match result {
+//RS             Ok(Flow::Return(v)) => Ok(v),
+//RS             Ok(_) => Ok(CtValue::Unit),
+//RS             Err(e) => Err(e),
+//RS         }?;
+//RS         let value = func.return_type.as_ref().map_or(value.clone(), |ty| {
+//RS             super::super::Interpreter::coerce_value_to_type(value, ty)
+//RS         });
+//RS         Ok((value, frame))
+//RS     }
+//RS 
+//RS     /// c139 (D-DISPLAYDBG1/2): render `v` as `{value}` interpolation / `print`
+//RS     /// would in the compiled program. When `v`'s type has a user-written
+//RS     /// `impl Type.Display { fn display(self) -> String { … } }`, run that exact Jet
+//RS     /// function body (byte-identical to what the real build does); otherwise
+//RS     /// fall back to the built-in `jet_show()` rendering (every primitive, and
+//RS     /// any struct/enum with no such impl — sema only accepts those in
+//RS     /// interpolation when they're "auto-printable", which `jet_show()`
+//RS     /// already matches).
+//RS     pub(in super::super) fn show_value(
+//RS         &mut self,
+//RS         v: &CtValue,
+//RS         _span: Span,
+//RS     ) -> Result<String, Diagnostic> {
+//RS         let type_name = match v {
+//RS             CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
+//RS                 Some(type_name.clone())
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS         if let Some(tn) = type_name {
+//RS             if let Some(f) = self
+//RS                 .methods
+//RS                 .get(&(tn.clone(), "display".to_string()))
+//RS                 .copied()
+//RS             {
+//RS                 if f.params.len() == 1 {
+//RS                     let mut frame = HashMap::new();
+//RS                     frame.insert(f.params[0].name.clone(), v.clone());
+//RS                     if let CtValue::Str(s) = self.call_func(&format!("{}.display", tn), f, frame)? {
+//RS                         return Ok(s);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Some(rendered) = display_core_pure_value(v) {
+//RS             return Ok(rendered);
+//RS         }
+//RS         Ok(self.display_fallback_value(v))
+//RS     }
+//RS 
+//RS     fn display_fallback_value(&self, v: &CtValue) -> String {
+//RS         match v {
+//RS             CtValue::Struct { type_name, fields } => {
+//RS                 let Some(def) = self.structs.get(type_name) else {
+//RS                     return v.jet_show();
+//RS                 };
+//RS                 if def
+//RS                     .fields
+//RS                     .iter()
+//RS                     .any(|field| matches!(field.ty, Type::Fn { .. }))
+//RS                 {
+//RS                     return format!("{type_name} {{ ... }}");
+//RS                 }
+//RS                 if def.type_params.is_empty() {
+//RS                     let parts: Vec<String> = def
+//RS                         .fields
+//RS                         .iter()
+//RS                         .filter(|field| field.computed.is_none())
+//RS                         .map(|field| {
+//RS                             let rendered = fields
+//RS                                 .iter()
+//RS                                 .find(|(name, _)| name == &field.name)
+//RS                                 .map(|(_, value)| value.debug_rust())
+//RS                                 .unwrap_or_else(|| CtValue::Unit.debug_rust());
+//RS                             format!("{}: {}", mangle(&field.name), rendered)
+//RS                         })
+//RS                         .collect();
+//RS                     return format!("{} {{ {} }}", mangle_path(type_name), parts.join(", "));
+//RS                 }
+//RS                 let parts: Vec<String> = def
+//RS                     .fields
+//RS                     .iter()
+//RS                     .map(|field| {
+//RS                         let rendered = fields
+//RS                             .iter()
+//RS                             .find(|(name, _)| name == &field.name)
+//RS                             .map(|(_, value)| value.jet_show())
+//RS                             .unwrap_or_else(|| CtValue::Unit.jet_show());
+//RS                         format!("{}: {}", field.name, rendered)
+//RS                     })
+//RS                     .collect();
+//RS                 format!("{type_name}({})", parts.join(", "))
+//RS             }
+//RS             _ => v.jet_show(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(in super::super) fn debug_value(&self, v: &CtValue) -> String {
+//RS         match v {
+//RS             CtValue::Struct { type_name, fields } => {
+//RS                 let Some(def) = self.structs.get(type_name) else {
+//RS                     return v.debug_rust();
+//RS                 };
+//RS                 if def
+//RS                     .fields
+//RS                     .iter()
+//RS                     .any(|field| matches!(field.ty, Type::Fn { .. }))
+//RS                 {
+//RS                     return format!("{type_name} {{ ... }}");
+//RS                 }
+//RS                 if def.fields.is_empty() {
+//RS                     return format!("{type_name} {{}}");
+//RS                 }
+//RS                 let parts: Vec<String> = def
+//RS                     .fields
+//RS                     .iter()
+//RS                     .map(|field| {
+//RS                         if field.redact {
+//RS                             format!("{}: [redacted]", field.name)
+//RS                         } else {
+//RS                             let rendered = fields
+//RS                                 .iter()
+//RS                                 .find(|(name, _)| name == &field.name)
+//RS                                 .map(|(_, value)| value.debug_rust())
+//RS                                 .unwrap_or_else(|| CtValue::Unit.debug_rust());
+//RS                             format!("{}: {}", field.name, rendered)
+//RS                         }
+//RS                     })
+//RS                     .collect();
+//RS                 format!("{type_name} {{ {} }}", parts.join(", "))
+//RS             }
+//RS             _ => v.debug_rust(),
+//RS         }
+//RS     }
+//RS 
+//RS     /// c139: invoke a closure value (`(x) -> x > 3`) with already-evaluated
+//RS     /// arguments — the counterpart of `call_func` for a lambda instead of a
+//RS     /// named `fn`. The frame starts from the closure's captured scope (so it
+//RS     /// still sees the bindings visible where it was created) with the params
+//RS     /// bound over that.
+//RS     pub(in super::super) fn call_closure(
+//RS         &mut self,
+//RS         f: &CtValue,
+//RS         args: Vec<CtValue>,
+//RS         span: Span,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         self.call_closure_inner(f, args, span, None)
+//RS     }
+//RS     /// Invoke a closure with mutable arguments. This is the callback seam for
+//RS     /// APIs whose callback mutates more than one value (for example a history
+//RS     /// generator that advances its borrowed RNG argument).
+//RS     pub(in super::super) fn call_closure_mut_args(
+//RS         &mut self,
+//RS         f: &CtValue,
+//RS         args: &mut Vec<CtValue>,
+//RS         span: Span,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         if let Some(result) =
+//RS             crate::Comptime::try_ambient_standalone_closure_mut(f, args, span)
+//RS         {
+//RS             return result;
+//RS         }
+//RS         let CtValue::Closure(data) = f else {
+//RS             return Err(unsupported(
+//RS                 "calling this value (it isn't a function)",
+//RS                 span,
+//RS             ));
+//RS         };
+//RS         if data.lambda.params.len() != args.len() {
+//RS             return Err(unsupported(
+//RS                 "this closure (wrong number of arguments)",
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         let mut frame = data.captured.clone();
+//RS         let previous_types = self.binding_types.clone();
+//RS         for (parameter, argument) in data.lambda.params.iter().zip(args.iter().cloned()) {
+//RS             if let Some(ty) = &parameter.ty {
+//RS                 self.binding_types
+//RS                     .insert(parameter.name.clone(), ty.clone());
+//RS                 frame.insert(
+//RS                     parameter.name.clone(),
+//RS                     super::super::Interpreter::coerce_value_to_type(argument, ty),
+//RS                 );
+//RS             } else {
+//RS                 frame.insert(parameter.name.clone(), argument);
+//RS             }
+//RS         }
+//RS         let result = (|| match &data.lambda.body {
+//RS             LambdaBody::Expr(expr) => self.eval(expr, &mut frame),
+//RS             LambdaBody::Block(stmts) => match self.exec_block(stmts, &mut frame)? {
+//RS                 Flow::Return(value) => Ok(value),
+//RS                 _ => Ok(CtValue::Unit),
+//RS             },
+//RS         })();
+//RS         self.binding_types = previous_types;
+//RS         if result.is_ok() {
+//RS             for (index, parameter) in data.lambda.params.iter().enumerate() {
+//RS                 if let Some(value) = frame.get(&parameter.name) {
+//RS                     args[index] = value.clone();
+//RS                 }
+//RS             }
+//RS         }
+//RS         result.map(|value| {
+//RS             data.return_type.as_ref().map_or(value.clone(), |ty| {
+//RS                 super::super::Interpreter::coerce_value_to_type(value, ty)
+//RS             })
+//RS         })
+//RS     }
+//RS 
+//RS 
+//RS 
+//RS     pub(in super::super) fn call_inline_closure(
+//RS         &mut self,
+//RS         f: &CtValue,
+//RS         args: Vec<CtValue>,
+//RS         span: Span,
+//RS         scope: &mut HashMap<String, CtValue>,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         self.call_closure_inner(f, args, span, Some(scope))
+//RS     }
+//RS 
+//RS     fn call_closure_inner(
+//RS         &mut self,
+//RS         f: &CtValue,
+//RS         args: Vec<CtValue>,
+//RS         span: Span,
+//RS         mut writeback_scope: Option<&mut HashMap<String, CtValue>>,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         if let Some(result) =
+//RS             crate::Comptime::try_ambient_standalone_closure(f, args.clone(), span)
+//RS         {
+//RS             return result;
+//RS         }
+//RS         let CtValue::Closure(data) = f else {
+//RS             return Err(unsupported(
+//RS                 "calling this value (it isn't a function)",
+//RS                 span,
+//RS             ));
+//RS         };
+//RS         if data.lambda.params.len() != args.len() {
+//RS             return Err(unsupported(
+//RS                 "this closure (wrong number of arguments)",
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         let mut frame = data.captured.clone();
+//RS         if let Some(scope) = writeback_scope.as_deref() {
+//RS             // The public REPL evaluates its retained source AST, while sema's
+//RS             // capture metadata lives on the checked clone. Closures already
+//RS             // over-capture that source scope, so the explicit writeback path
+//RS             // synchronizes only bindings that still exist in the caller.
+//RS             for name in data.captured.keys() {
+//RS                 if let Some(value) = scope.get(name) {
+//RS                     frame.insert(name.clone(), value.clone());
+//RS                 }
+//RS             }
+//RS         }
+//RS         let previous_types = self.binding_types.clone();
+//RS         for (p, a) in data.lambda.params.iter().zip(args) {
+//RS             if let Some(ty) = &p.ty {
+//RS                 self.binding_types.insert(p.name.clone(), ty.clone());
+//RS                 frame.insert(
+//RS                     p.name.clone(),
+//RS                     super::super::Interpreter::coerce_value_to_type(a, ty),
+//RS                 );
+//RS             } else {
+//RS                 frame.insert(p.name.clone(), a);
+//RS             }
+//RS         }
+//RS         let result = (|| match &data.lambda.body {
+//RS             LambdaBody::Expr(e) => self.eval(e, &mut frame),
+//RS             LambdaBody::Block(stmts) => match self.exec_block(stmts, &mut frame)? {
+//RS                 Flow::Return(v) => Ok(v),
+//RS                 _ => Ok(CtValue::Unit),
+//RS             },
+//RS         })();
+//RS         self.binding_types = previous_types;
+//RS         if result.is_ok() {
+//RS             if let Some(scope) = writeback_scope.as_deref_mut() {
+//RS                 for name in data.captured.keys() {
+//RS                     let shadowed = data.lambda.params.iter().any(|param| param.name == *name);
+//RS                     let taken = data
+//RS                         .lambda
+//RS                         .take_names
+//RS                         .iter()
+//RS                         .any(|(taken, _)| taken == name);
+//RS                     if !shadowed && !taken && scope.contains_key(name) {
+//RS                         let value = frame.get(name).expect("captured binding stays in frame");
+//RS                         scope.insert(name.clone(), value.clone());
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         result.map(|value| {
+//RS             data.return_type.as_ref().map_or(value.clone(), |ty| {
+//RS                 super::super::Interpreter::coerce_value_to_type(value, ty)
+//RS             })
+//RS         })
+//RS     }
+//RS 
+//RS     /// c139: `Name(expr)` — the distinct-type / `#UnitFamily` constructor.
+//RS     /// `range` is the type's `distinct Base(lo..hi)` bound, if any
+//RS     /// (D-RANGETYPE1). Distinct types have zero runtime representation
+//RS     /// difference from their base (D-DIST1), so an unranged constructor is
+//RS     /// identity. A ranged one mirrors sema's own compile-time proof: a
+//RS     /// literal argument already known in-range folds to a direct value
+//RS     /// (matching what codegen bakes in); anything else is the fallible
+//RS     /// `Result`-wrapped form the `?`/`??` surface at the call site expects.
+//RS     fn eval_distinct_ctor(
+//RS         &mut self,
+//RS         name: &str,
+//RS         range: Option<(i64, i64)>,
+//RS         args: &[CallArg],
+//RS         span: Span,
+//RS         scope: &mut HashMap<String, CtValue>,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         let arg = args
+//RS             .first()
+//RS             .ok_or_else(|| unsupported(&format!("`{}` (wrong number of arguments)", name), span))?;
+//RS         let Some((lo, hi)) = range else {
+//RS             return self.eval(&arg.expr, scope);
+//RS         };
+//RS         if let Some(n) = literal_int(&arg.expr) {
+//RS             if n >= lo && n <= hi {
+//RS                 return Ok(CtValue::Int(n));
+//RS             }
+//RS         }
+//RS         let v = self.eval(&arg.expr, scope)?;
+//RS         let n = as_int(&v, arg.expr.span())?;
+//RS         Ok(if n >= lo && n <= hi {
+//RS             CtValue::Present(Box::new(CtValue::Int(n)))
+//RS         } else {
+//RS             CtValue::failed(Box::new(CtValue::Str(format!(
+//RS                 "{} out of range {}..{}",
+//RS                 n, lo, hi
+//RS             ))))
+//RS         })
+//RS     }
+//RS 
+//RS     fn eval_overflow_opt(
+//RS         &mut self,
+//RS         mode: &str,
+//RS         args: &[CallArg],
+//RS         span: Span,
+//RS         scope: &mut HashMap<String, CtValue>,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         let Some(arg) = args.first() else {
+//RS             return Err(unsupported(
+//RS                 &format!("`{mode}` needs one binary expression"),
+//RS                 span,
+//RS             ));
+//RS         };
+//RS         let Expr::Binary(op, left, right, _) = &arg.expr else {
+//RS             return Err(unsupported(
+//RS                 &format!("`{mode}` wraps one integer +/−/*/÷"),
+//RS                 span,
+//RS             ));
+//RS         };
+//RS         let lv = self.eval(left, scope)?;
+//RS         let rv = self.eval(right, scope)?;
+//RS         let left_n = as_int(&lv, left.span())?;
+//RS         let right_n = as_int(&rv, right.span())?;
+//RS         let width = self
+//RS             .overflow_opt_width(left.as_ref())
+//RS             .or_else(|| self.overflow_opt_width(right.as_ref()))
+//RS             .unwrap_or((true, 64));
+//RS         super::super::MathLayout::overflow_opt(mode, *op, left_n, right_n, width.0, width.1, span)
+//RS     }
+//RS 
+//RS     fn overflow_opt_width(&self, expr: &Expr) -> Option<(bool, u8)> {
+//RS         match expr {
+//RS             Expr::Ident(name, _) => match self.binding_types.get(name) {
+//RS                 Some(Type::IntN { signed, bits }) => Some((*signed, *bits)),
+//RS                 Some(Type::Int) => Some((true, 64)),
+//RS                 _ => None,
+//RS             },
+//RS             Expr::Binary(_, left, right, _) => self
+//RS                 .overflow_opt_width(left)
+//RS                 .or_else(|| self.overflow_opt_width(right)),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn eval_assertion(
+//RS         &mut self,
+//RS         name: &str,
+//RS         args: &[crate::AST::CallArg],
+//RS         span: Span,
+//RS         scope: &mut HashMap<String, CtValue>,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         if name == "assert_eq" {
+//RS             let a = self.eval(&args[0].expr, scope)?;
+//RS             let b = self.eval(&args[1].expr, scope)?;
+//RS             if a != b {
+//RS                 let msg = args
+//RS                     .get(2)
+//RS                     .map(|a| self.eval(&a.expr, scope))
+//RS                     .transpose()?
+//RS                     .map(|v| v.jet_show())
+//RS                     .unwrap_or_else(|| format!("{} != {}", a.jet_show(), b.jet_show()));
+//RS                 return Err(comptime_panic(&msg, span));
+//RS             }
+//RS             return Ok(CtValue::Unit);
+//RS         }
+//RS         let cond = as_bool(&self.eval(&args[0].expr, scope)?, span)?;
+//RS         if !cond {
+//RS             let msg = args
+//RS                 .get(1)
+//RS                 .map(|a| self.eval(&a.expr, scope))
+//RS                 .transpose()?
+//RS                 .map(|v| v.jet_show())
+//RS                 .unwrap_or_else(|| "a requirement was not met".to_string());
+//RS             return Err(comptime_panic(&msg, span));
+//RS         }
+//RS         Ok(CtValue::Unit)
+//RS     }
+//RS 
+//RS     fn eval_embed_file(&mut self, args: &[CallArg], span: Span) -> Result<CtValue, Diagnostic> {
+//RS         self.eval_build_time_io(crate::Syntax::BUILTIN_EMBED_FILE, args, span)
+//RS     }
+//RS 
+//RS     /// D-CTIO1 + D-ARROW-RESPELL1: `embed_bytes("path") [U8]` — the
+//RS     /// binary-safe sibling of
+//RS     /// `embed_file`. Same path-safety (E0957) and missing/unreadable (E0955)
+//RS     /// checks, but no UTF-8 requirement: any file embeds as raw bytes.
+//RS     fn eval_embed_bytes(&mut self, args: &[CallArg], span: Span) -> Result<CtValue, Diagnostic> {
+//RS         self.eval_build_time_io(crate::Syntax::BUILTIN_EMBED_BYTES, args, span)
+//RS     }
+//RS 
+//RS     /// D-CTFIND1/2 + D-ARROW-RESPELL1: `find(glob) [String]` walks inside
+//RS     /// the source file's
+//RS     /// directory, returns sorted relative file paths, and records each match's
+//RS     /// hash as Tier-1 lock evidence.
+//RS     fn eval_find(&mut self, args: &[CallArg], span: Span) -> Result<CtValue, Diagnostic> {
+//RS         self.eval_build_time_io(crate::Syntax::BUILTIN_FIND, args, span)
+//RS     }
+//RS 
+//RS     /// Arity and literal extraction for the three build-time IO builtins; the
+//RS     /// path law, the reads, and every diagnostic live in `eval_build_time_io`.
+//RS     fn eval_build_time_io(
+//RS         &mut self,
+//RS         builtin: &str,
+//RS         args: &[CallArg],
+//RS         span: Span,
+//RS     ) -> Result<CtValue, Diagnostic> {
+//RS         let noun = if builtin == crate::Syntax::BUILTIN_FIND {
+//RS             "glob"
+//RS         } else {
+//RS             "path"
+//RS         };
+//RS         let arg = args
+//RS             .first()
+//RS             .ok_or_else(|| unsupported(&format!("{builtin} with no {noun}"), span))?;
+//RS         if args.len() != 1 {
+//RS             return Err(unsupported(
+//RS                 &format!("{builtin} with extra arguments"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         eval_build_time_io(
+//RS             builtin,
+//RS             self.base_dir,
+//RS             arg_string_literal(arg),
+//RS             Some(&mut self.embed_inputs),
+//RS             span,
+//RS         )
+//RS     }
+//RS 
+//RS     /// c139: write `new_value` back to the place `target` reads from — the
+//RS     /// mutating-method counterpart of evaluating `target` for a read. Handles
+//RS     /// a bare local (`xs.push(v)`) and a field-access chain of any depth
+//RS     /// (`copy.items.push(v)`), recursing on the base of a `Field` so the
+//RS     /// write propagates all the way back to the owning local.
+//RS     fn write_back(
+//RS         &mut self,
+//RS         target: &Expr,
+//RS         new_value: CtValue,
+//RS         scope: &mut HashMap<String, CtValue>,
+//RS     ) -> Result<(), Diagnostic> {
+//RS         match target {
+//RS             // D-META-STAGE1=B: the mark is part of the identifier, so a marked
+//RS             // name is written back exactly like a plain one. Without this a
+//RS             // marked receiver never advances: `@ct.read_u8()` twice read the
+//RS             // same byte while the runtime copy moved on.
+//RS             Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => {
+//RS                 scope.insert(name.clone(), new_value);
+//RS                 Ok(())
+//RS             }
+//RS             Expr::Field(inner, member, span) => {
+//RS                 let mut base = self.eval(inner, scope)?;
+//RS                 match &mut base {
+//RS                     CtValue::Struct { fields, .. } => {
+//RS                         match fields.iter_mut().find(|(n, _)| n == member) {
+//RS                             Some(slot) => slot.1 = new_value,
+//RS                             None => {
+//RS                                 return Err(unsupported(&format!("the field `.{}`", member), *span))
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     _ => return Err(unsupported("this indexed assignment", *span)),
+//RS                 }
+//RS                 self.write_back(inner, base, scope)
+//RS             }
+//RS             _ => Err(unsupported("this indexed assignment", target.span())),
+//RS         }
+//RS     }
+//RS 
+//RS     fn integer_width_for_expr(&self, expr: &Expr) -> Option<u32> {
+//RS         match expr {
+//RS             Expr::Ident(name, _) => self
+//RS                 .binding_types
+//RS                 .get(name)
+//RS                 .and_then(integer_width_from_type),
+//RS             Expr::Call(call) => self
+//RS                 .funcs
+//RS                 .get(&call.name)
+//RS                 .and_then(|func| func.return_type.as_ref())
+//RS                 .and_then(integer_width_from_type),
+//RS             Expr::Int(_, _, width, _) => Some(width.map_or(64, |(_, bits)| u32::from(bits))),
+//RS             Expr::Unary(_, inner, _) | Expr::Copy(inner, _) => self.integer_width_for_expr(inner),
+//RS             Expr::Binary(_, left, _, _) => self.integer_width_for_expr(left),
+//RS             Expr::MethodCall { receiver, .. } => match receiver.as_ref() {
+//RS                 Expr::Ident(type_name, _) => integer_width_from_name(type_name),
+//RS                 _ => None,
+//RS             },
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS /// Standalone variant of [`invoke_standalone_closure`] for mutable Store
+//RS /// transaction state.
+//RS pub(in super::super) fn invoke_standalone_closure_mut(
+//RS     closure: &CtValue,
+//RS     arg: &mut CtValue,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let mut args = vec![arg.clone()];
+//RS     let result = invoke_standalone_closure_mut_args(closure, &mut args, span);
+//RS     if result.is_ok() {
+//RS         *arg = args
+//RS             .into_iter()
+//RS             .next()
+//RS             .expect("mutable standalone closure received one argument");
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS /// Standalone mutable-argument closure invocation for callbacks that carry
+//RS /// more than one writable value.
+//RS pub(in super::super) fn invoke_standalone_closure_mut_args(
+//RS     closure: &CtValue,
+//RS     args: &mut Vec<CtValue>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let funcs: HashMap<String, &Func> = HashMap::new();
+//RS     let error_conversions: Vec<crate::AST::ErrorConvDef> = Vec::new();
+//RS     let core_imports: HashMap<String, String> = HashMap::new();
+//RS     let globals: HashMap<String, CtValue> = HashMap::new();
+//RS     let methods: HashMap<(String, String), &Func> = HashMap::new();
+//RS     let structs: HashMap<String, &crate::AST::StructDef> = HashMap::new();
+//RS     let computed_fields: HashMap<(String, String), &crate::AST::Expr> = HashMap::new();
+//RS     let distinct_ranges: HashMap<String, Option<(i64, i64)>> = HashMap::new();
+//RS     let distinct_bases: HashMap<String, Type> = HashMap::new();
+//RS     let migrations: HashMap<String, Vec<&crate::AST::MigrationDecl>> = HashMap::new();
+//RS     let base_dir = Path::new(".");
+//RS     let mut interp = Interp {
+//RS         funcs: &funcs,
+//RS         error_conversions: &error_conversions,
+//RS         base_dir,
+//RS         fuel: super::super::Interpreter::FUEL_BUDGET,
+//RS         sink: None,
+//RS         core_imports: &core_imports,
+//RS         checked_nominals: None,
+//RS         debugger: None,
+//RS         runtime_execution: false,
+//RS         depth: 0,
+//RS         cur_func: String::new(),
+//RS         impure_depth: 0,
+//RS         gates: jet_foundation::Policy::GateSet::default(),
+//RS         repl_mode: false,
+//RS         repl_grants: Vec::new(),
+//RS         repl_authorizer: None,
+//RS         repl_interruptible: false,
+//RS         embed_inputs: Vec::new(),
+//RS         binding_types: HashMap::new(),
+//RS         globals: &globals,
+//RS         methods: &methods,
+//RS         structs: &structs,
+//RS         computed_fields: &computed_fields,
+//RS         distinct_ranges: &distinct_ranges,
+//RS         distinct_bases: &distinct_bases,
+//RS         migrations: &migrations,
+//RS         list_write_windows: HashMap::new(),
+//RS         data_pipeline: super::super::DataPipeline::DataPipelineState::default(),
+//RS     };
+//RS     interp.call_closure_mut_args(closure, args, span)
+//RS }
+//RS 
+//RS 
+//RS /// Invoke a retained closure through the same evaluator used by ordinary
+//RS /// interpreter calls. Web table columns can outlive the call-site `Interp`, so
+//RS /// they retain only the closure value and create this short-lived evaluator
+//RS /// when a renderer asks for a cell.
+//RS pub(in super::super) fn invoke_standalone_closure(
+//RS     closure: &CtValue,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let funcs: HashMap<String, &Func> = HashMap::new();
+//RS     let error_conversions: Vec<crate::AST::ErrorConvDef> = Vec::new();
+//RS     let core_imports: HashMap<String, String> = HashMap::new();
+//RS     let globals: HashMap<String, CtValue> = HashMap::new();
+//RS     let methods: HashMap<(String, String), &Func> = HashMap::new();
+//RS     let structs: HashMap<String, &crate::AST::StructDef> = HashMap::new();
+//RS     let computed_fields: HashMap<(String, String), &crate::AST::Expr> = HashMap::new();
+//RS     let distinct_ranges: HashMap<String, Option<(i64, i64)>> = HashMap::new();
+//RS     let distinct_bases: HashMap<String, Type> = HashMap::new();
+//RS     let migrations: HashMap<String, Vec<&crate::AST::MigrationDecl>> = HashMap::new();
+//RS     let base_dir = Path::new(".");
+//RS     let mut interp = Interp {
+//RS         funcs: &funcs,
+//RS         error_conversions: &error_conversions,
+//RS         base_dir,
+//RS         fuel: super::super::Interpreter::FUEL_BUDGET,
+//RS         sink: None,
+//RS         core_imports: &core_imports,
+//RS         checked_nominals: None,
+//RS         debugger: None,
+//RS         runtime_execution: false,
+//RS         depth: 0,
+//RS         cur_func: String::new(),
+//RS         impure_depth: 0,
+//RS         gates: jet_foundation::Policy::GateSet::default(),
+//RS         repl_mode: false,
+//RS         repl_grants: Vec::new(),
+//RS         repl_authorizer: None,
+//RS         repl_interruptible: false,
+//RS         embed_inputs: Vec::new(),
+//RS         binding_types: HashMap::new(),
+//RS         globals: &globals,
+//RS         methods: &methods,
+//RS         structs: &structs,
+//RS         computed_fields: &computed_fields,
+//RS         distinct_ranges: &distinct_ranges,
+//RS         distinct_bases: &distinct_bases,
+//RS         migrations: &migrations,
+//RS         list_write_windows: HashMap::new(),
+//RS         data_pipeline: super::super::DataPipeline::DataPipelineState::default(),
+//RS     };
+//RS     interp.call_closure(closure, args, span)
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn embed_file_bytes_and_build_embed_reject_symlink_escape() {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let root =
+//RS             std::env::temp_dir().join(format!("jet-comptime-embed-symlink-{}", std::process::id()));
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         let outside =
+//RS             root.with_file_name(format!("jet-comptime-embed-outside-{}", std::process::id()));
+//RS         std::fs::write(&outside, "must not be embedded").unwrap();
+//RS         symlink(&outside, root.join("payload.txt")).unwrap();
+//RS         let span = Span::new(0, 1);
+//RS 
+//RS         for builtin in [
+//RS             crate::Syntax::BUILTIN_EMBED_FILE,
+//RS             crate::Syntax::BUILTIN_EMBED_BYTES,
+//RS         ] {
+//RS             assert!(
+//RS                 eval_build_time_io(builtin, &root, Some("payload.txt"), None, span).is_err(),
+//RS                 "{builtin} must reject a symlink escape"
+//RS             );
+//RS         }
+//RS         let args = [CtValue::Str("payload.txt".to_string())];
+//RS         assert!(eval_build_embed(&args, &root, None, span).is_err());
+//RS         assert_eq!(
+//RS             std::fs::read_to_string(&outside).unwrap(),
+//RS             "must not be embedded"
+//RS         );
+//RS 
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_file(&outside);
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn embed_forms_reject_symlinked_ancestor_without_recording_input() {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-comptime-embed-ancestor-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let outside = root.with_file_name(format!(
+//RS             "jet-comptime-embed-ancestor-outside-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_dir_all(&outside);
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         std::fs::create_dir_all(&outside).unwrap();
+//RS         std::fs::write(outside.join("payload.txt"), "must not be embedded").unwrap();
+//RS         symlink(&outside, root.join("nested")).unwrap();
+//RS         let span = Span::new(0, 1);
+//RS 
+//RS         for builtin in [
+//RS             crate::Syntax::BUILTIN_EMBED_FILE,
+//RS             crate::Syntax::BUILTIN_EMBED_BYTES,
+//RS         ] {
+//RS             let mut inputs = Vec::new();
+//RS             assert!(
+//RS                 eval_build_time_io(
+//RS                     builtin,
+//RS                     &root,
+//RS                     Some("nested/payload.txt"),
+//RS                     Some(&mut inputs),
+//RS                     span,
+//RS                 )
+//RS                 .is_err(),
+//RS                 "{builtin} must reject a symlinked ancestor"
+//RS             );
+//RS             assert!(inputs.is_empty(), "{builtin} must not record outside input");
+//RS         }
+//RS         let args = [CtValue::Str("nested/payload.txt".to_string())];
+//RS         let mut inputs = Vec::new();
+//RS         assert!(eval_build_embed(&args, &root, Some(&mut inputs), span).is_err());
+//RS         assert!(inputs.is_empty(), "b.embed must not record outside input");
+//RS 
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_dir_all(&outside);
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn embed_forms_reject_hardlinked_input_without_hashing_it() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-comptime-embed-hardlink-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let outside = root.with_file_name(format!(
+//RS             "jet-comptime-embed-hardlink-outside-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_file(&outside);
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         std::fs::write(&outside, "must not be embedded").unwrap();
+//RS         std::fs::hard_link(&outside, root.join("payload.txt")).unwrap();
+//RS         let span = Span::new(0, 1);
+//RS 
+//RS         for builtin in [
+//RS             crate::Syntax::BUILTIN_EMBED_FILE,
+//RS             crate::Syntax::BUILTIN_EMBED_BYTES,
+//RS         ] {
+//RS             let mut inputs = Vec::new();
+//RS             assert!(
+//RS                 eval_build_time_io(builtin, &root, Some("payload.txt"), Some(&mut inputs), span,)
+//RS                     .is_err(),
+//RS                 "{builtin} must reject a multiply linked input"
+//RS             );
+//RS             assert!(inputs.is_empty(), "{builtin} must not hash a hard link");
+//RS         }
+//RS         let args = [CtValue::Str("payload.txt".to_string())];
+//RS         let mut inputs = Vec::new();
+//RS         assert!(eval_build_embed(&args, &root, Some(&mut inputs), span).is_err());
+//RS         assert!(inputs.is_empty(), "b.embed must not hash a hard link");
+//RS 
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_file(&outside);
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn find_rejects_symlinked_root_before_traversal() {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-comptime-find-symlink-root-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let outside = root.with_file_name(format!(
+//RS             "jet-comptime-find-symlink-outside-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_dir_all(&outside);
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         std::fs::create_dir_all(&outside).unwrap();
+//RS         std::fs::write(outside.join("secret.txt"), "must not be read").unwrap();
+//RS         symlink(&outside, root.join("link")).unwrap();
+//RS 
+//RS         let result = eval_locked_find(&root, "link/**", None, Span::new(0, 1));
+//RS         assert!(
+//RS             result.is_err(),
+//RS             "find must reject a symlinked traversal root"
+//RS         );
+//RS 
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_dir_all(&outside);
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn find_rejects_glob_reads_through_symlinked_root() {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-comptime-find-glob-symlink-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let outside = root.with_file_name(format!(
+//RS             "jet-comptime-find-glob-outside-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_dir_all(&outside);
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         std::fs::create_dir_all(&outside).unwrap();
+//RS         std::fs::write(outside.join("secret.txt"), "must not be read").unwrap();
+//RS         symlink(&outside, root.join("link")).unwrap();
+//RS 
+//RS         let mut inputs = Vec::new();
+//RS         let result = eval_locked_find(&root, r"link\**\*.txt", Some(&mut inputs), Span::new(0, 1));
+//RS         assert!(result.is_err(), "find must refuse the hostile matched read");
+//RS         assert!(
+//RS             inputs.is_empty(),
+//RS             "refused find must record no outside input"
+//RS         );
+//RS 
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_dir_all(&outside);
+//RS     }
+//RS }
+// END-PORT-PENDING 0593 crates/jet-comptime/src/Comptime/Methods/dispatch.rs:1-2015
+

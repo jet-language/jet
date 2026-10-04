@@ -1,0 +1,46 @@
+// Behavioral controls for Rust MIR.rs:5461-6072 (no inline Rust tests in this range).
+#Test("iterator_wire_rejects_trailing_empty_and_split_utf8") {
+    assert_eq(MIRLoopSourceKind.from_wire("plain"), Val(MIRLoopSourceKind.Plain))
+    assert_eq(MIRLoopSourceKind.from_wire("encoding:2:é"), Val(MIRLoopSourceKind.EncodingReader("é")))
+    assert_eq(MIRLoopSourceKind.from_wire("encoding:+2:é"), Val(MIRLoopSourceKind.EncodingReader("é")))
+    assert_eq(MIRLoopSourceKind.from_wire("encoding:1:é"), None)
+    assert_eq(MIRLoopSourceKind.from_wire("encoding:0:"), None)
+    assert_eq(MIRLoopSourceKind.from_wire("encoding:1:xy"), None)
+    assert_eq(MIRLoopSourceKind.from_wire("encoding:-1:x"), None)
+    assert_eq(MIRLoopSourceKind.from_wire("iterable:1:c:1:i:1:f:1:n"), Val(MIRLoopSourceKind.Iterable("c", "i", "f", "n")))
+    assert_eq(MIRLoopSourceKind.from_wire("iterable:1:c:1:i:1:f:1:n!"), None)
+    assert_eq(MIRLoopSourceKind.from_wire("iterable:1:c:1:i:0::1:n"), None)
+}
+#Test("mir_value_uses_retains_indirect_callee_before_arguments") {
+    callee :: MIRValueID{value: U64{7}}
+    operation :: MIROperation.Call(MIRCallee.Indirect(callee), [], [])
+    assert_eq(operation.value_uses(), [MIRValueID]{callee})
+}
+#Test("mir_copy_fact_ownership_preserves_explicit_and_view_facts") {
+    assert_eq(mir_copy_fact_for_ownership(MIRCopyFact.Materialize, MIROwnershipMode.Copy), MIRCopyFact.Scalar)
+    assert_eq(mir_copy_fact_for_ownership(MIRCopyFact.Share, MIROwnershipMode.Copy), MIRCopyFact.Scalar)
+    assert_eq(mir_copy_fact_for_ownership(MIRCopyFact.Explicit, MIROwnershipMode.Copy), MIRCopyFact.Explicit)
+    assert_eq(mir_copy_fact_for_ownership(MIRCopyFact.ViewMaterialize, MIROwnershipMode.Copy), MIRCopyFact.ViewMaterialize)
+    assert_eq(mir_copy_fact_for_ownership(MIRCopyFact.Share, MIROwnershipMode.Owned), MIRCopyFact.Share)
+}
+#Test("mir_handle_token_aliases_share_close_once_state") {
+    handle :: MIRHandleID{value: U64{3}}
+    token :: MIRHandleToken.new(handle, I64{0})
+    alias :: ~token
+    assert_eq(alias.identity(), token.identity())
+    assert_eq(alias.handle_id(), handle)
+    assert_eq(alias.raw(), Val(I64{0}))
+    assert_eq(token.take_raw(), Val((handle, I64{0})))
+    assert_eq(alias.raw(), None)
+    assert_eq(alias.take_raw(), None)
+    assert_eq(alias.is_taken(), true)
+}
+#Test("mir_artifact_request_name_is_optional_until_set") {
+    request :: MIRArtifactRequest.new(MIRArtifactTarget.Web, MIRArtifactKind.WebApplication, MIRArtifactBuildMode.Dev)
+    assert_eq(request.name, None)
+    named :: request.with_name("browser")
+    assert_eq(named.name, Val("browser"))
+    assert_eq(named.target, MIRArtifactTarget.Web)
+    assert_eq(named.kind, MIRArtifactKind.WebApplication)
+    assert_eq(named.mode, MIRArtifactBuildMode.Dev)
+}

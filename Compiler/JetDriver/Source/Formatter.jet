@@ -1,0 +1,36 @@
+// Driver facade: Package owns carrier grammar, Parser owns ordinary formatting.
+use jet_foundation.[Diagnostic]
+use jet_parser.[JetFormatOptions, jet_format_source_with_options]
+use jet_pkg_model.[pkg_mask_inline_package_source]
+
+pub fn format_source(src: String) -> String [Diagnostic]! {
+    format_source_with_options(src, JetFormatOptions{simplify: false})
+}
+pub fn format_source_with_options(src: String, options: JetFormatOptions) -> String [Diagnostic]! {
+    masked :: if pkg_mask_inline_package_source(src) == {
+        .Ok(value) -> value
+        .Err(error) -> return Err([Diagnostic]{error.diagnostic()})
+    }
+    if masked.block == None {
+        result :: jet_format_source_with_options(src, options)
+        return Ok(result.source ?? return Err(result.diagnostics))
+    }
+    block :: masked.block ?? panic("carrier presence checked above")
+    prefix_end :: block.span.start
+    ordinary := masked.source.bytes()
+    loop index in 0..<prefix_end {
+        if ordinary[index] != U8{10} && ordinary[index] != U8{13} -> ordinary[index] = U8{32}
+    }
+    ordinary_text :: String.from_bytes(ordinary) ?? panic("Package masking preserves valid UTF-8")
+    result :: jet_format_source_with_options(ordinary_text, options)
+    formatted :: result.source ?? return Err(result.diagnostics)
+    out := [U8]{}
+    original :: src.bytes()
+    loop index in 0..<prefix_end -> &out.push(original[index])
+    loop index in prefix_end..<block.span.end -> &out.push(original[index])
+    if formatted != "" {
+        if out.len() == 0 || (out[out.len() - 1] != U8{10} && out[out.len() - 1] != U8{13}) -> &out.push(U8{10})
+        loop byte in formatted.bytes() -> &out.push(byte)
+    }
+    Ok(String.from_bytes(out) ?? panic("formatter output preserves UTF-8"))
+}

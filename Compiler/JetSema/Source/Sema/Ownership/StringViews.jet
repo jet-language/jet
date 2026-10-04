@@ -9,9 +9,9 @@
 use jet_foundation.[
     AccessConvention,
     Diagnostic,
-    DiagnosticFixApplicability,
-    DiagnosticFixSafety,
     Expr,
+    FixApplicability,
+    FixSafety,
     Marker,
     PolicyDeclaration,
     PolicyKey,
@@ -153,7 +153,7 @@ fn sema_string_view_owner(scopes: SemaScopeTable, state: SemaOwnershipState, nam
 pub fn sema_string_view_unsupported_use(name: String, what: String, span: Span, scopes: SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     owner :: sema_string_view_owner(scopes, state, name)
     diagnostic :: sema_error("E2307", span, "`{name}` cannot {what} without an owning copy", "`{name}` is a zero-copy view into `{owner}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled", "write `~{name}` first, or remove `copies: .Explicit` to use the default owning copy")
-    &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.start, end: span.start}, new_text: "~"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.start, end: span.start}, new_text: "~"}, FixApplicability.Safe, FixSafety.BehaviorPreserving))
 }
 
 // Under `copies: .Explicit`, a bare string-view read outside the positions

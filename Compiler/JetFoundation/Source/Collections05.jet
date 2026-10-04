@@ -1,0 +1,1812 @@
+// PORT-PENDING 0092 crates-jet-foundation-src-registry-slice-1: crates/jet-foundation/src/Registry.rs:1-1808
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-META-REG1=A: one registration table.
+//RS //!
+//RS //! A marker rule, a knowledge plane, a right, and a build fact are rows of the
+//RS //! same table, separated only by what they attach to. Reflection, `jet explain`,
+//RS //! and the drift guards are written once here and serve all four kinds; nothing
+//RS //! downstream keeps a second table or a second guard per kind.
+//RS //!
+//RS //! D-FACT-LAW1=B puts the law on the row itself. A fact moves toward safety
+//RS //! silently; every move away is one written word at the site. So every row
+//RS //! states its safe direction and the gate words that move it the other way. A
+//RS //! row with no meaningful direction states `None` and names no gate;
+//RS //! `law_violations` fails a row that states one without the other.
+//RS //!
+//RS //! D-FACT-OWN1=A adds one row shape for a fact a prover publishes. The
+//RS //! ownership prover is never a plane: it publishes sendability, view
+//RS //! provenance, and moved-ness as read-only rows with no plane algebra, so tools
+//RS //! and other planes read them like any other fact.
+//RS //!
+//RS //! D-ONCE-LAW1=A adds the fifth use of the same table: a truth the compiler's
+//RS //! own corpus states once. Such a row names its home, everything that renders
+//RS //! the truth from that home, and the guard that proves no second copy exists.
+//RS //! A registered row with no guard fails `law_violations`, which is the one
+//RS //! lint the whole table shares — there is no second guard engine.
+//RS 
+//RS use std::sync::LazyLock;
+//RS 
+//RS use crate::AST::{
+//RS     MetadataArgumentMode, MetadataAvailability, MetadataCanonicalSource, MetadataCanonicalStatus,
+//RS     MetadataFieldCardinality, MetadataFieldSchema, MetadataIdentity, MetadataOperationArgument,
+//RS     MetadataOperationInputType, MetadataProducerStatus, MetadataRecord, MetadataRecordSchema,
+//RS     MetadataRecordShape, MetadataRootArgument, MetadataRootInputType, MetadataRootOverload,
+//RS     MetadataRootResult, MetadataRootScope, MetadataValueType, MetadataVariant,
+//RS     MetadataVariantSchema,
+//RS };
+//RS use crate::Diagnostics::{FixApplicability, FixSafety, ReportMoment, Severity};
+//RS use crate::Report::NoFixReasonKind;
+//RS use crate::Coverage::{
+//RS     validate_registry_coverage, CoverageBaseline, CoverageEntry, CoverageFact,
+//RS };
+//RS use crate::Policy::{AppliedRule, RuleSite, APPLIED_RULES};
+//RS 
+//RS /// Versioned D-META-REFLECT2 schema, separate from executable producers.
+//RS pub const COMPILER_METADATA_SCHEMA_VERSION: u32 = 1;
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum CompilerMetadataQuery {
+//RS     Phase,
+//RS     Program,
+//RS     Package,
+//RS     Source,
+//RS     Types,
+//RS }
+//RS 
+//RS impl CompilerMetadataQuery {
+//RS     pub const fn spelling(self) -> &'static str {
+//RS         match self {
+//RS             Self::Phase => crate::Syntax::FACT_ROOT_PHASE,
+//RS             Self::Program => crate::Syntax::FACT_ROOT_PROGRAM,
+//RS             Self::Package => crate::Syntax::FACT_ROOT_PACKAGE,
+//RS             Self::Source => crate::Syntax::META_QUERY_SOURCE,
+//RS             Self::Types => crate::Syntax::META_QUERY_TYPES,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct CompilerMetadataRoot {
+//RS     pub query: CompilerMetadataQuery,
+//RS     pub arguments: &'static [MetadataRootArgument],
+//RS     pub optional_arguments: &'static [MetadataRootArgument],
+//RS     pub overloads: &'static [MetadataRootOverload],
+//RS     pub result: MetadataRootResult,
+//RS     pub scope: MetadataRootScope,
+//RS     pub availability: MetadataAvailability,
+//RS     pub producer: MetadataProducerStatus,
+//RS }
+//RS 
+//RS const ROOT_NO_ARGUMENTS: &[MetadataRootArgument] = &[];
+//RS const OP_NO_ARGUMENTS: &[MetadataOperationArgument] = &[];
+//RS const ROOT_LIMIT_ARGUMENT: &[MetadataRootArgument] = &[MetadataRootArgument {
+//RS     name: "limit",
+//RS     input_type: MetadataRootInputType::Int,
+//RS     cardinality: MetadataFieldCardinality::Optional,
+//RS     mode: MetadataArgumentMode::NamedOnly,
+//RS }];
+//RS const ROOT_NO_OVERLOADS: &[MetadataRootOverload] = &[];
+//RS const ROOT_AUTHORIZED_HANDLE_OVERLOAD: &[MetadataRootOverload] =
+//RS     &[MetadataRootOverload::AuthorizedSnapshotHandle];
+//RS 
+//RS pub const COMPILER_METADATA_ROOTS: &[CompilerMetadataRoot] = &[
+//RS     CompilerMetadataRoot {
+//RS         query: CompilerMetadataQuery::Phase,
+//RS         arguments: ROOT_NO_ARGUMENTS,
+//RS         optional_arguments: ROOT_NO_ARGUMENTS,
+//RS         overloads: ROOT_NO_OVERLOADS,
+//RS         result: MetadataRootResult {
+//RS             success: MetadataValueType::Record(MetadataRecord::Phase),
+//RS             error: None,
+//RS         },
+//RS         scope: MetadataRootScope::EvaluationSite,
+//RS         availability: MetadataAvailability::EvaluationSite,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS     CompilerMetadataRoot {
+//RS         query: CompilerMetadataQuery::Program,
+//RS         arguments: ROOT_NO_ARGUMENTS,
+//RS         optional_arguments: ROOT_LIMIT_ARGUMENT,
+//RS         overloads: ROOT_AUTHORIZED_HANDLE_OVERLOAD,
+//RS         result: MetadataRootResult {
+//RS             success: MetadataValueType::Record(MetadataRecord::ProgramInfo),
+//RS             error: Some(MetadataRecord::MetadataError),
+//RS         },
+//RS         scope: MetadataRootScope::CurrentAuthorizedProgram,
+//RS         availability: MetadataAvailability::CheckedSnapshot,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS     CompilerMetadataRoot {
+//RS         query: CompilerMetadataQuery::Package,
+//RS         arguments: ROOT_NO_ARGUMENTS,
+//RS         optional_arguments: ROOT_LIMIT_ARGUMENT,
+//RS         overloads: ROOT_AUTHORIZED_HANDLE_OVERLOAD,
+//RS         result: MetadataRootResult {
+//RS             success: MetadataValueType::Record(MetadataRecord::PackageInfo),
+//RS             error: Some(MetadataRecord::MetadataError),
+//RS         },
+//RS         scope: MetadataRootScope::LexicalPackage,
+//RS         availability: MetadataAvailability::CheckedSnapshot,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS     CompilerMetadataRoot {
+//RS         query: CompilerMetadataQuery::Source,
+//RS         arguments: ROOT_NO_ARGUMENTS,
+//RS         optional_arguments: ROOT_LIMIT_ARGUMENT,
+//RS         overloads: ROOT_AUTHORIZED_HANDLE_OVERLOAD,
+//RS         result: MetadataRootResult {
+//RS             success: MetadataValueType::Record(MetadataRecord::SourceInfo),
+//RS             error: Some(MetadataRecord::MetadataError),
+//RS         },
+//RS         scope: MetadataRootScope::LexicalSource,
+//RS         availability: MetadataAvailability::CheckedSnapshot,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS     CompilerMetadataRoot {
+//RS         query: CompilerMetadataQuery::Types,
+//RS         arguments: ROOT_NO_ARGUMENTS,
+//RS         optional_arguments: ROOT_LIMIT_ARGUMENT,
+//RS         overloads: ROOT_AUTHORIZED_HANDLE_OVERLOAD,
+//RS         result: MetadataRootResult {
+//RS             success: MetadataValueType::Record(MetadataRecord::TypeCatalog),
+//RS             error: Some(MetadataRecord::MetadataError),
+//RS         },
+//RS         scope: MetadataRootScope::RetainedRuntimeTypeCatalog,
+//RS         availability: MetadataAvailability::RuntimeRetained,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS ];
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum MetaprogrammingOperation {
+//RS     Generate,
+//RS     Register,
+//RS     RegisterExpansion,
+//RS     RegisterSpecialization,
+//RS     Session,
+//RS     RetainMetadata,
+//RS     RetainProgramMetadata,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum MetaprogrammingOperationGate {
+//RS     /// Standard mode permits checked read-only facts and additive publication.
+//RS     Standard,
+//RS     /// The approved root package opts in and names the provider's targets.
+//RS     ApprovedRootRegistration,
+//RS     /// Only an active provider reached through explicit root registration may obtain a session.
+//RS     RegisteredProvider,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum MetaprogrammingOperationEffect {
+//RS     AdditivePublication,
+//RS     ExplicitRegistration,
+//RS     ProviderSession,
+//RS     ReadOnlyRetention,
+//RS }
+//RS 
+//RS impl MetaprogrammingOperation {
+//RS     pub const fn spelling(self) -> &'static str {
+//RS         match self {
+//RS             Self::Generate => crate::Syntax::COMPILER_GENERATE,
+//RS             Self::Register => crate::Syntax::COMPILER_ADVANCED_REGISTER,
+//RS             Self::RegisterExpansion => crate::Syntax::COMPILER_ADVANCED_REGISTER_EXPANSION,
+//RS             Self::RegisterSpecialization => {
+//RS                 crate::Syntax::COMPILER_ADVANCED_REGISTER_SPECIALIZATION
+//RS             }
+//RS             Self::Session => crate::Syntax::COMPILER_ADVANCED_SESSION,
+//RS             Self::RetainMetadata => "compiler.metadata.retain",
+//RS             Self::RetainProgramMetadata => "compiler.metadata.retain_program",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct MetaprogrammingOperationRow {
+//RS     pub operation: MetaprogrammingOperation,
+//RS     pub arguments: &'static [MetadataOperationArgument],
+//RS     pub gate: MetaprogrammingOperationGate,
+//RS     pub effect: MetaprogrammingOperationEffect,
+//RS     pub phase: crate::AST::Phase,
+//RS     pub producer: MetadataProducerStatus,
+//RS }
+//RS 
+//RS pub const METAPROGRAMMING_OPERATIONS: &[MetaprogrammingOperationRow] = &[
+//RS     MetaprogrammingOperationRow {
+//RS         operation: MetaprogrammingOperation::Generate,
+//RS         arguments: &[
+//RS             MetadataOperationArgument {
+//RS                 name: "name",
+//RS                 input_type: MetadataOperationInputType::String,
+//RS                 cardinality: MetadataFieldCardinality::One,
+//RS             },
+//RS             MetadataOperationArgument {
+//RS                 name: "value",
+//RS                 input_type: MetadataOperationInputType::Generated,
+//RS                 cardinality: MetadataFieldCardinality::One,
+//RS             },
+//RS         ],
+//RS         gate: MetaprogrammingOperationGate::Standard,
+//RS         effect: MetaprogrammingOperationEffect::AdditivePublication,
+//RS         phase: crate::AST::Phase::Preparation,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS     MetaprogrammingOperationRow {
+//RS         operation: MetaprogrammingOperation::Register,
+//RS         arguments: &[
+//RS             MetadataOperationArgument {
+//RS                 name: "provider",
+//RS                 input_type: MetadataOperationInputType::Provider,
+//RS                 cardinality: MetadataFieldCardinality::One,
+//RS             },
+//RS             MetadataOperationArgument {
+//RS                 name: "targets",
+//RS                 input_type: MetadataOperationInputType::Identity(MetadataIdentity::Declaration),
+//RS                 cardinality: MetadataFieldCardinality::List,
+//RS             },
+//RS         ],
+//RS         gate: MetaprogrammingOperationGate::ApprovedRootRegistration,
+//RS         effect: MetaprogrammingOperationEffect::ExplicitRegistration,
+//RS         phase: crate::AST::Phase::Preparation,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS     MetaprogrammingOperationRow {
+//RS         operation: MetaprogrammingOperation::RegisterExpansion,
+//RS         arguments: &[
+//RS             MetadataOperationArgument {
+//RS                 name: "provider",
+//RS                 input_type: MetadataOperationInputType::Provider,
+//RS                 cardinality: MetadataFieldCardinality::One,
+//RS             },
+//RS             MetadataOperationArgument {
+//RS                 name: "targets",
+//RS                 input_type: MetadataOperationInputType::Identity(MetadataIdentity::Declaration),
+//RS                 cardinality: MetadataFieldCardinality::List,
+//RS             },
+//RS         ],
+//RS         gate: MetaprogrammingOperationGate::ApprovedRootRegistration,
+//RS         effect: MetaprogrammingOperationEffect::ExplicitRegistration,
+//RS         phase: crate::AST::Phase::Preparation,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS     MetaprogrammingOperationRow {
+//RS         operation: MetaprogrammingOperation::RegisterSpecialization,
+//RS         arguments: &[
+//RS             MetadataOperationArgument {
+//RS                 name: "provider",
+//RS                 input_type: MetadataOperationInputType::Provider,
+//RS                 cardinality: MetadataFieldCardinality::One,
+//RS             },
+//RS             MetadataOperationArgument {
+//RS                 name: "targets",
+//RS                 input_type: MetadataOperationInputType::Identity(MetadataIdentity::Declaration),
+//RS                 cardinality: MetadataFieldCardinality::List,
+//RS             },
+//RS         ],
+//RS         gate: MetaprogrammingOperationGate::ApprovedRootRegistration,
+//RS         effect: MetaprogrammingOperationEffect::ExplicitRegistration,
+//RS         phase: crate::AST::Phase::Preparation,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS     MetaprogrammingOperationRow {
+//RS         operation: MetaprogrammingOperation::Session,
+//RS         arguments: OP_NO_ARGUMENTS,
+//RS         gate: MetaprogrammingOperationGate::RegisteredProvider,
+//RS         effect: MetaprogrammingOperationEffect::ProviderSession,
+//RS         phase: crate::AST::Phase::Preparation,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS     MetaprogrammingOperationRow {
+//RS         operation: MetaprogrammingOperation::RetainMetadata,
+//RS         arguments: &[
+//RS             MetadataOperationArgument {
+//RS                 name: "types",
+//RS                 input_type: MetadataOperationInputType::Identity(MetadataIdentity::Type),
+//RS                 cardinality: MetadataFieldCardinality::List,
+//RS             },
+//RS             MetadataOperationArgument {
+//RS                 name: "facts",
+//RS                 input_type: MetadataOperationInputType::Record(MetadataRecord::MetadataFamily),
+//RS                 cardinality: MetadataFieldCardinality::List,
+//RS             },
+//RS         ],
+//RS         gate: MetaprogrammingOperationGate::Standard,
+//RS         effect: MetaprogrammingOperationEffect::ReadOnlyRetention,
+//RS         phase: crate::AST::Phase::Preparation,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS     MetaprogrammingOperationRow {
+//RS         operation: MetaprogrammingOperation::RetainProgramMetadata,
+//RS         arguments: &[MetadataOperationArgument {
+//RS             name: "facts",
+//RS             input_type: MetadataOperationInputType::Record(MetadataRecord::MetadataFamily),
+//RS             cardinality: MetadataFieldCardinality::List,
+//RS         }],
+//RS         gate: MetaprogrammingOperationGate::Standard,
+//RS         effect: MetaprogrammingOperationEffect::ReadOnlyRetention,
+//RS         phase: crate::AST::Phase::Preparation,
+//RS         producer: MetadataProducerStatus::NotImplemented,
+//RS     },
+//RS ];
+//RS 
+//RS const fn schema_field(
+//RS     name: &'static str,
+//RS     value_type: MetadataValueType,
+//RS     cardinality: MetadataFieldCardinality,
+//RS     availability: MetadataAvailability,
+//RS ) -> MetadataFieldSchema {
+//RS     MetadataFieldSchema {
+//RS         name,
+//RS         value_type,
+//RS         cardinality,
+//RS         error_type: match cardinality {
+//RS             MetadataFieldCardinality::FallibleOne | MetadataFieldCardinality::FallibleList => {
+//RS                 Some(MetadataRecord::MetadataError)
+//RS             }
+//RS             MetadataFieldCardinality::One
+//RS             | MetadataFieldCardinality::Optional
+//RS             | MetadataFieldCardinality::List => None,
+//RS         },
+//RS         availability,
+//RS     }
+//RS }
+//RS 
+//RS const fn field(name: &'static str, value_type: MetadataValueType) -> MetadataFieldSchema {
+//RS     schema_field(
+//RS         name,
+//RS         value_type,
+//RS         MetadataFieldCardinality::One,
+//RS         MetadataAvailability::CheckedSnapshot,
+//RS     )
+//RS }
+//RS 
+//RS const fn optional_field(
+//RS     name: &'static str,
+//RS     value_type: MetadataValueType,
+//RS ) -> MetadataFieldSchema {
+//RS     schema_field(
+//RS         name,
+//RS         value_type,
+//RS         MetadataFieldCardinality::Optional,
+//RS         MetadataAvailability::CheckedSnapshot,
+//RS     )
+//RS }
+//RS 
+//RS const fn list_field(
+//RS     name: &'static str,
+//RS     value_type: MetadataValueType,
+//RS ) -> MetadataFieldSchema {
+//RS     schema_field(
+//RS         name,
+//RS         value_type,
+//RS         MetadataFieldCardinality::List,
+//RS         MetadataAvailability::CheckedSnapshot,
+//RS     )
+//RS }
+//RS 
+//RS const fn fallible_field(
+//RS     name: &'static str,
+//RS     value_type: MetadataValueType,
+//RS ) -> MetadataFieldSchema {
+//RS     schema_field(
+//RS         name,
+//RS         value_type,
+//RS         MetadataFieldCardinality::FallibleOne,
+//RS         MetadataAvailability::ProducerReported,
+//RS     )
+//RS }
+//RS 
+//RS const fn fallible_list_field(
+//RS     name: &'static str,
+//RS     value_type: MetadataValueType,
+//RS     stage: crate::AST::CompilerStage,
+//RS ) -> MetadataFieldSchema {
+//RS     schema_field(
+//RS         name,
+//RS         value_type,
+//RS         MetadataFieldCardinality::FallibleList,
+//RS         MetadataAvailability::AtStage(stage),
+//RS     )
+//RS }
+//RS 
+//RS const fn target_fallible_field(
+//RS     name: &'static str,
+//RS     value_type: MetadataValueType,
+//RS ) -> MetadataFieldSchema {
+//RS     schema_field(
+//RS         name,
+//RS         value_type,
+//RS         MetadataFieldCardinality::FallibleOne,
+//RS         MetadataAvailability::TargetDependent,
+//RS     )
+//RS }
+//RS 
+//RS const fn retained_field(
+//RS     name: &'static str,
+//RS     value_type: MetadataValueType,
+//RS     cardinality: MetadataFieldCardinality,
+//RS ) -> MetadataFieldSchema {
+//RS     schema_field(
+//RS         name,
+//RS         value_type,
+//RS         cardinality,
+//RS         MetadataAvailability::RuntimeRetained,
+//RS     )
+//RS }
+//RS 
+//RS const fn variant(
+//RS     name: MetadataVariant,
+//RS     fields: &'static [MetadataFieldSchema],
+//RS ) -> MetadataVariantSchema {
+//RS     MetadataVariantSchema { name, fields }
+//RS }
+//RS 
+//RS const fn field_record(
+//RS     record: MetadataRecord,
+//RS     fields: &'static [MetadataFieldSchema],
+//RS     producer: MetadataProducerStatus,
+//RS ) -> MetadataRecordSchema {
+//RS     MetadataRecordSchema {
+//RS         record,
+//RS         shape: MetadataRecordShape::Fields(fields),
+//RS         producer,
+//RS     }
+//RS }
+//RS 
+//RS const fn field_record_from(
+//RS     record: MetadataRecord,
+//RS     source: MetadataCanonicalSource,
+//RS     status: MetadataCanonicalStatus,
+//RS     fields: &'static [MetadataFieldSchema],
+//RS     producer: MetadataProducerStatus,
+//RS ) -> MetadataRecordSchema {
+//RS     MetadataRecordSchema {
+//RS         record,
+//RS         shape: MetadataRecordShape::FieldsFrom {
+//RS             source,
+//RS             status,
+//RS             fields,
+//RS         },
+//RS         producer,
+//RS     }
+//RS }
+//RS 
+//RS const fn extending_record(
+//RS     record: MetadataRecord,
+//RS     base: MetadataRecord,
+//RS     fields: &'static [MetadataFieldSchema],
+//RS     producer: MetadataProducerStatus,
+//RS ) -> MetadataRecordSchema {
+//RS     MetadataRecordSchema {
+//RS         record,
+//RS         shape: MetadataRecordShape::Extends { base, fields },
+//RS         producer,
+//RS     }
+//RS }
+//RS 
+//RS const fn variant_record(
+//RS     record: MetadataRecord,
+//RS     variants: &'static [MetadataVariantSchema],
+//RS     producer: MetadataProducerStatus,
+//RS ) -> MetadataRecordSchema {
+//RS     MetadataRecordSchema {
+//RS         record,
+//RS         shape: MetadataRecordShape::Variants(variants),
+//RS         producer,
+//RS     }
+//RS }
+//RS 
+//RS const fn variant_record_from(
+//RS     record: MetadataRecord,
+//RS     source: MetadataCanonicalSource,
+//RS     status: MetadataCanonicalStatus,
+//RS     variants: &'static [MetadataVariantSchema],
+//RS     producer: MetadataProducerStatus,
+//RS ) -> MetadataRecordSchema {
+//RS     MetadataRecordSchema {
+//RS         record,
+//RS         shape: MetadataRecordShape::VariantsFrom {
+//RS             source,
+//RS             status,
+//RS             variants,
+//RS         },
+//RS         producer,
+//RS     }
+//RS }
+//RS 
+//RS const fn canonical_record(
+//RS     record: MetadataRecord,
+//RS     source: MetadataCanonicalSource,
+//RS     status: MetadataCanonicalStatus,
+//RS     producer: MetadataProducerStatus,
+//RS ) -> MetadataRecordSchema {
+//RS     MetadataRecordSchema {
+//RS         record,
+//RS         shape: MetadataRecordShape::Canonical { source, status },
+//RS         producer,
+//RS     }
+//RS }
+//RS 
+//RS const CONTRACT_ONLY: MetadataProducerStatus = MetadataProducerStatus::ContractOnly;
+//RS const NOT_IMPLEMENTED: MetadataProducerStatus = MetadataProducerStatus::NotImplemented;
+//RS const EXISTING_CANONICAL: MetadataCanonicalStatus =
+//RS     MetadataCanonicalStatus::ExistingTypeOrRecord;
+//RS const MISSING_CANONICAL: MetadataCanonicalStatus =
+//RS     MetadataCanonicalStatus::ContractTypeHasNoCurrentDefinition;
+//RS 
+//RS /// Every public metadata field and canonical record reference in D-META-REFLECT2.
+//RS /// Canonical records deliberately point to their existing owners rather than
+//RS /// duplicating a lossy local shape.
+//RS pub const COMPILER_METADATA_RECORDS: &[MetadataRecordSchema] = &[
+//RS     variant_record_from(
+//RS         MetadataRecord::Phase,
+//RS         MetadataCanonicalSource::AstPhase,
+//RS         EXISTING_CANONICAL,
+//RS         &[
+//RS             variant(MetadataVariant::Preparation, &[]),
+//RS             variant(MetadataVariant::Build, &[]),
+//RS             variant(MetadataVariant::Runtime, &[]),
+//RS         ],
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     variant_record_from(
+//RS         MetadataRecord::CompilerStage,
+//RS         MetadataCanonicalSource::AstCompilerStage,
+//RS         EXISTING_CANONICAL,
+//RS         &[
+//RS             variant(MetadataVariant::Parsed, &[]),
+//RS             variant(MetadataVariant::Resolved, &[]),
+//RS             variant(MetadataVariant::Typed, &[]),
+//RS             variant(MetadataVariant::Prepared, &[]),
+//RS             variant(MetadataVariant::Emitted, &[]),
+//RS         ],
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     field_record_from(
+//RS         MetadataRecord::MetadataError,
+//RS         MetadataCanonicalSource::AstMetadataError,
+//RS         EXISTING_CANONICAL,
+//RS         &[
+//RS             field(
+//RS                 "kind",
+//RS                 MetadataValueType::Record(MetadataRecord::MetadataFailure),
+//RS             ),
+//RS             field("query", MetadataValueType::String),
+//RS             optional_field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS         ],
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     variant_record_from(
+//RS         MetadataRecord::MetadataFailure,
+//RS         MetadataCanonicalSource::AstMetadataFailure,
+//RS         EXISTING_CANONICAL,
+//RS         &[
+//RS             variant(
+//RS                 MetadataVariant::Unavailable,
+//RS                 &[
+//RS                     field(
+//RS                         "required_stage",
+//RS                         MetadataValueType::Record(MetadataRecord::CompilerStage),
+//RS                     ),
+//RS                     field("reason", MetadataValueType::String),
+//RS                 ],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::Unsupported,
+//RS                 &[field("capability", MetadataValueType::String)],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::Stale,
+//RS                 &[
+//RS                     field(
+//RS                         "requested",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Snapshot),
+//RS                     ),
+//RS                     field(
+//RS                         "current",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Snapshot),
+//RS                     ),
+//RS                 ],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::Invalid,
+//RS                 &[list_field(
+//RS                     "diagnostics",
+//RS                     MetadataValueType::Record(MetadataRecord::CompilerDiagnostic),
+//RS                 )],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::Denied,
+//RS                 &[
+//RS                     field(
+//RS                         "scope",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Scope),
+//RS                     ),
+//RS                     field("reason", MetadataValueType::String),
+//RS                 ],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::Truncated,
+//RS                 &[
+//RS                     field("limit", MetadataValueType::Int),
+//RS                     field("observed", MetadataValueType::Int),
+//RS                 ],
+//RS             ),
+//RS         ],
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     field_record_from(
+//RS         MetadataRecord::PackageId,
+//RS         MetadataCanonicalSource::AstPackageId,
+//RS         EXISTING_CANONICAL,
+//RS         &[
+//RS             field("name", MetadataValueType::String),
+//RS             field("version", MetadataValueType::String),
+//RS             field("digest", MetadataValueType::String),
+//RS         ],
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     field_record_from(
+//RS         MetadataRecord::SourceId,
+//RS         MetadataCanonicalSource::AstSourceId,
+//RS         EXISTING_CANONICAL,
+//RS         &[
+//RS             field(
+//RS                 "package",
+//RS                 MetadataValueType::Record(MetadataRecord::PackageId),
+//RS             ),
+//RS             optional_field("path", MetadataValueType::String),
+//RS             field("digest", MetadataValueType::String),
+//RS         ],
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     field_record_from(
+//RS         MetadataRecord::SourceSpan,
+//RS         MetadataCanonicalSource::AstSourceSpan,
+//RS         EXISTING_CANONICAL,
+//RS         &[
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceId),
+//RS             ),
+//RS             field("start", MetadataValueType::Int),
+//RS             field("end", MetadataValueType::Int),
+//RS         ],
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     field_record_from(
+//RS         MetadataRecord::ParameterInfo,
+//RS         MetadataCanonicalSource::SemanticCallableParameterFact,
+//RS         MetadataCanonicalStatus::ExistingStringProjectionNeedsTypedExtension,
+//RS         &[
+//RS             field("name", MetadataValueType::String),
+//RS             field("label", MetadataValueType::String),
+//RS             field(
+//RS                 "type",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS             optional_field(
+//RS                 "default",
+//RS                 MetadataValueType::Record(MetadataRecord::DefaultInfo),
+//RS             ),
+//RS             field(
+//RS                 "zone",
+//RS                 MetadataValueType::Record(MetadataRecord::ParamZone),
+//RS             ),
+//RS             field(
+//RS                 "access",
+//RS                 MetadataValueType::Record(MetadataRecord::AccessConvention),
+//RS             ),
+//RS             field("variadic", MetadataValueType::Bool),
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS         ],
+//RS         MetadataProducerStatus::ExistingCallableProducerNeedsExtension,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::DefaultInfo,
+//RS         &[
+//RS             field(
+//RS                 "expression",
+//RS                 MetadataValueType::Record(MetadataRecord::CodeRef),
+//RS             ),
+//RS             fallible_field(
+//RS                 "value",
+//RS                 MetadataValueType::Record(MetadataRecord::PreparedValue),
+//RS             ),
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS         ],
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     field_record_from(
+//RS         MetadataRecord::CallableSignature,
+//RS         MetadataCanonicalSource::SemanticCallableSignatureFact,
+//RS         MetadataCanonicalStatus::ExistingStringProjectionNeedsTypedExtension,
+//RS         &[
+//RS             list_field(
+//RS                 "params",
+//RS                 MetadataValueType::Record(MetadataRecord::ParameterInfo),
+//RS             ),
+//RS             optional_field(
+//RS                 "return_type",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS             list_field(
+//RS                 "effects",
+//RS                 MetadataValueType::Record(MetadataRecord::EffectInfo),
+//RS             ),
+//RS             list_field("errors", MetadataValueType::Identity(MetadataIdentity::Type)),
+//RS             field(
+//RS                 "failure",
+//RS                 MetadataValueType::Record(MetadataRecord::FailureInfo),
+//RS             ),
+//RS             field(
+//RS                 "calling_convention",
+//RS                 MetadataValueType::Record(MetadataRecord::CallingConvention),
+//RS             ),
+//RS             list_field(
+//RS                 "generic_bindings",
+//RS                 MetadataValueType::Record(MetadataRecord::GenericBinding),
+//RS             ),
+//RS             list_field(
+//RS                 "returned_views",
+//RS                 MetadataValueType::Record(MetadataRecord::ViewProvenanceFact),
+//RS             ),
+//RS             list_field(
+//RS                 "policies",
+//RS                 MetadataValueType::Record(MetadataRecord::PolicyFact),
+//RS             ),
+//RS         ],
+//RS         MetadataProducerStatus::ExistingCallableProducerNeedsExtension,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::FunctionInfo,
+//RS         &[
+//RS             field(
+//RS                 "identity",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS             ),
+//RS             field("name", MetadataValueType::String),
+//RS             field(
+//RS                 "signature",
+//RS                 MetadataValueType::Record(MetadataRecord::CallableSignature),
+//RS             ),
+//RS             field(
+//RS                 "visibility",
+//RS                 MetadataValueType::Record(MetadataRecord::Visibility),
+//RS             ),
+//RS             list_field(
+//RS                 "attributes",
+//RS                 MetadataValueType::Record(MetadataRecord::AttributeInfo),
+//RS             ),
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             list_field(
+//RS                 "documentation",
+//RS                 MetadataValueType::Record(MetadataRecord::CommentInfo),
+//RS             ),
+//RS             fallible_field(
+//RS                 "body",
+//RS                 MetadataValueType::Record(MetadataRecord::CodeRef),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     extending_record(
+//RS         MetadataRecord::MethodInfo,
+//RS         MetadataRecord::FunctionInfo,
+//RS         &[
+//RS             field(
+//RS                 "receiver",
+//RS                 MetadataValueType::Record(MetadataRecord::ParameterInfo),
+//RS             ),
+//RS             field(
+//RS                 "owner",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     extending_record(
+//RS         MetadataRecord::ClosureInfo,
+//RS         MetadataRecord::FunctionInfo,
+//RS         &[list_field(
+//RS             "captures",
+//RS             MetadataValueType::Record(MetadataRecord::CaptureInfo),
+//RS         )],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::CaptureInfo,
+//RS         &[
+//RS             field(
+//RS                 "binding",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS             ),
+//RS             field("name", MetadataValueType::String),
+//RS             field(
+//RS                 "type",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS             field(
+//RS                 "mode",
+//RS                 MetadataValueType::Record(MetadataRecord::CaptureMode),
+//RS             ),
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             list_field(
+//RS                 "constraints",
+//RS                 MetadataValueType::Record(MetadataRecord::ObligationFact),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::EffectInfo,
+//RS         &[
+//RS             field(
+//RS                 "identity",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS             ),
+//RS             field("name", MetadataValueType::String),
+//RS             optional_field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::FailureInfo,
+//RS         &[
+//RS             field(
+//RS                 "carrier",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::FailureSource),
+//RS             ),
+//RS             list_field("errors", MetadataValueType::Identity(MetadataIdentity::Type)),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::GenericBinding,
+//RS         &[
+//RS             field(
+//RS                 "parameter",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS             ),
+//RS             field(
+//RS                 "argument",
+//RS                 MetadataValueType::Record(MetadataRecord::GenericArgument),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     variant_record(
+//RS         MetadataRecord::GenericArgument,
+//RS         &[
+//RS             variant(
+//RS                 MetadataVariant::TypeArgument,
+//RS                 &[field(
+//RS                     "type",
+//RS                     MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                 )],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::ValueArgument,
+//RS                 &[field(
+//RS                     "value",
+//RS                     MetadataValueType::Record(MetadataRecord::PreparedValue),
+//RS                 )],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::MeasureArgument,
+//RS                 &[field(
+//RS                     "measure",
+//RS                     MetadataValueType::Record(MetadataRecord::MeasureInfo),
+//RS                 )],
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::MeasureInfo,
+//RS         MetadataCanonicalSource::AstMeasure,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     variant_record_from(
+//RS         MetadataRecord::TypeForm,
+//RS         MetadataCanonicalSource::AstType,
+//RS         EXISTING_CANONICAL,
+//RS         &[
+//RS             variant(MetadataVariant::FormInt, &[]),
+//RS             variant(MetadataVariant::FormFloat, &[]),
+//RS             variant(MetadataVariant::FormBool, &[]),
+//RS             variant(MetadataVariant::FormString, &[]),
+//RS             variant(MetadataVariant::FormChar, &[]),
+//RS             variant(
+//RS                 MetadataVariant::FormList,
+//RS                 &[field(
+//RS                     "element",
+//RS                     MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                 )],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormMap,
+//RS                 &[
+//RS                     field(
+//RS                         "key",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                     ),
+//RS                     field(
+//RS                         "value",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                     ),
+//RS                 ],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormShared,
+//RS                 &[field(
+//RS                     "value",
+//RS                     MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                 )],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormOption,
+//RS                 &[field(
+//RS                     "value",
+//RS                     MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                 )],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormResult,
+//RS                 &[
+//RS                     field(
+//RS                         "ok",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                     ),
+//RS                     field(
+//RS                         "err",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                     ),
+//RS                 ],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormFunction,
+//RS                 &[field(
+//RS                     "signature",
+//RS                     MetadataValueType::Record(MetadataRecord::CallableSignature),
+//RS                 )],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormNamed,
+//RS                 &[field(
+//RS                     "declaration",
+//RS                     MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS                 )],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormApply,
+//RS                 &[
+//RS                     field(
+//RS                         "declaration",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS                     ),
+//RS                     list_field(
+//RS                         "arguments",
+//RS                         MetadataValueType::Record(MetadataRecord::GenericArgument),
+//RS                     ),
+//RS                 ],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormTraitObject,
+//RS                 &[list_field(
+//RS                     "traits",
+//RS                     MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS                 )],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormTuple,
+//RS                 &[list_field(
+//RS                     "fields",
+//RS                     MetadataValueType::Record(MetadataRecord::TupleTypeField),
+//RS                 )],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormFixedList,
+//RS                 &[
+//RS                     field(
+//RS                         "element",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                     ),
+//RS                     field(
+//RS                         "length",
+//RS                         MetadataValueType::Record(MetadataRecord::MeasureInfo),
+//RS                     ),
+//RS                 ],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormIntN,
+//RS                 &[
+//RS                     field("signed", MetadataValueType::Bool),
+//RS                     field("bits", MetadataValueType::Int),
+//RS                 ],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormInlineRange,
+//RS                 &[
+//RS                     field(
+//RS                         "base",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                     ),
+//RS                     field("lo", MetadataValueType::Int),
+//RS                     field("hi", MetadataValueType::Int),
+//RS                 ],
+//RS             ),
+//RS             variant(MetadataVariant::FormFloat32, &[]),
+//RS             variant(
+//RS                 MetadataVariant::FormTagged,
+//RS                 &[
+//RS                     field(
+//RS                         "marker",
+//RS                         MetadataValueType::Record(MetadataRecord::TagMarker),
+//RS                     ),
+//RS                     field(
+//RS                         "inner",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                     ),
+//RS                 ],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormUnion,
+//RS                 &[list_field(
+//RS                     "members",
+//RS                     MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                 )],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormQuantity,
+//RS                 &[
+//RS                     field(
+//RS                         "base",
+//RS                         MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                     ),
+//RS                     field(
+//RS                         "dimension",
+//RS                         MetadataValueType::Record(MetadataRecord::DimensionInfo),
+//RS                     ),
+//RS                 ],
+//RS             ),
+//RS             variant(
+//RS                 MetadataVariant::FormMeasure,
+//RS                 &[field(
+//RS                     "measure",
+//RS                     MetadataValueType::Record(MetadataRecord::MeasureInfo),
+//RS                 )],
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::TypeInfo,
+//RS         &[
+//RS             field(
+//RS                 "identity",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS             field("name", MetadataValueType::String),
+//RS             field(
+//RS                 "form",
+//RS                 MetadataValueType::Record(MetadataRecord::TypeForm),
+//RS             ),
+//RS             optional_field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             list_field(
+//RS                 "attributes",
+//RS                 MetadataValueType::Record(MetadataRecord::AttributeInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "fields",
+//RS                 MetadataValueType::Record(MetadataRecord::FieldInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "cases",
+//RS                 MetadataValueType::Record(MetadataRecord::CaseInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "methods",
+//RS                 MetadataValueType::Record(MetadataRecord::MethodInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "traits",
+//RS                 MetadataValueType::Record(MetadataRecord::TraitInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "generic_bindings",
+//RS                 MetadataValueType::Record(MetadataRecord::GenericBinding),
+//RS             ),
+//RS             target_fallible_field(
+//RS                 "layout",
+//RS                 MetadataValueType::Record(MetadataRecord::LayoutInfo),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::TupleTypeField,
+//RS         &[
+//RS             field("name", MetadataValueType::String),
+//RS             field(
+//RS                 "type",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::FieldInfo,
+//RS         &[
+//RS             field(
+//RS                 "identity",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS             ),
+//RS             field("name", MetadataValueType::String),
+//RS             field(
+//RS                 "type",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS             field(
+//RS                 "visibility",
+//RS                 MetadataValueType::Record(MetadataRecord::Visibility),
+//RS             ),
+//RS             optional_field(
+//RS                 "default",
+//RS                 MetadataValueType::Record(MetadataRecord::DefaultInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "attributes",
+//RS                 MetadataValueType::Record(MetadataRecord::AttributeInfo),
+//RS             ),
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             target_fallible_field("offset", MetadataValueType::Int),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::CaseInfo,
+//RS         &[
+//RS             field(
+//RS                 "identity",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS             ),
+//RS             field("name", MetadataValueType::String),
+//RS             list_field(
+//RS                 "payload",
+//RS                 MetadataValueType::Record(MetadataRecord::FieldInfo),
+//RS             ),
+//RS             fallible_field(
+//RS                 "discriminant",
+//RS                 MetadataValueType::Record(MetadataRecord::PreparedValue),
+//RS             ),
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::TraitInfo,
+//RS         &[
+//RS             field(
+//RS                 "identity",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS             ),
+//RS             list_field(
+//RS                 "parameters",
+//RS                 MetadataValueType::Record(MetadataRecord::GenericBinding),
+//RS             ),
+//RS             list_field(
+//RS                 "required_methods",
+//RS                 MetadataValueType::Record(MetadataRecord::MethodInfo),
+//RS             ),
+//RS             list_field("associated_types", MetadataValueType::Identity(MetadataIdentity::Type)),
+//RS             list_field(
+//RS                 "constraints",
+//RS                 MetadataValueType::Record(MetadataRecord::ObligationFact),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::LayoutInfo,
+//RS         &[
+//RS             field(
+//RS                 "target",
+//RS                 MetadataValueType::Record(MetadataRecord::TargetId),
+//RS             ),
+//RS             field("size", MetadataValueType::Int),
+//RS             field("alignment", MetadataValueType::Int),
+//RS             field(
+//RS                 "abi",
+//RS                 MetadataValueType::Record(MetadataRecord::AbiInfo),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::ProgramInfo,
+//RS         &[
+//RS             field(
+//RS                 "snapshot",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Snapshot),
+//RS             ),
+//RS             field(
+//RS                 "stage",
+//RS                 MetadataValueType::Record(MetadataRecord::CompilerStage),
+//RS             ),
+//RS             list_field(
+//RS                 "declarations",
+//RS                 MetadataValueType::Record(MetadataRecord::SymbolDef),
+//RS             ),
+//RS             list_field(
+//RS                 "scopes",
+//RS                 MetadataValueType::Record(MetadataRecord::ScopeInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "references",
+//RS                 MetadataValueType::Record(MetadataRecord::ReferenceFact),
+//RS             ),
+//RS             list_field(
+//RS                 "calls",
+//RS                 MetadataValueType::Record(MetadataRecord::CallFact),
+//RS             ),
+//RS             fallible_list_field(
+//RS                 "typed_nodes",
+//RS                 MetadataValueType::Record(MetadataRecord::CheckedNode),
+//RS                 crate::AST::CompilerStage::Typed,
+//RS             ),
+//RS             fallible_list_field(
+//RS                 "state_graphs",
+//RS                 MetadataValueType::Record(MetadataRecord::StateGraph),
+//RS                 crate::AST::CompilerStage::Typed,
+//RS             ),
+//RS             list_field(
+//RS                 "fact_registry",
+//RS                 MetadataValueType::Record(MetadataRecord::FactDefinition),
+//RS             ),
+//RS             fallible_list_field(
+//RS                 "derivations",
+//RS                 MetadataValueType::Record(MetadataRecord::DerivationFact),
+//RS                 crate::AST::CompilerStage::Typed,
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::ScopeInfo,
+//RS         &[
+//RS             field(
+//RS                 "identity",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Scope),
+//RS             ),
+//RS             optional_field(
+//RS                 "parent",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Scope),
+//RS             ),
+//RS             list_field(
+//RS                 "declarations",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS             ),
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::CheckedNode,
+//RS         &[
+//RS             field(
+//RS                 "identity",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Node),
+//RS             ),
+//RS             field(
+//RS                 "kind",
+//RS                 MetadataValueType::Record(MetadataRecord::CheckedNodeKind),
+//RS             ),
+//RS             optional_field(
+//RS                 "type",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             list_field(
+//RS                 "children",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Node),
+//RS             ),
+//RS             list_field(
+//RS                 "facts",
+//RS                 MetadataValueType::Record(MetadataRecord::ObligationFact),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::CheckedNodeKind,
+//RS         MetadataCanonicalSource::CheckedNodeKind,
+//RS         MISSING_CANONICAL,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::ObligationFact,
+//RS         MetadataCanonicalSource::LocalObligationFact,
+//RS         MetadataCanonicalStatus::ProducerNotImplemented,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::SymbolDef,
+//RS         MetadataCanonicalSource::SemanticSymbolDef,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::ReferenceFact,
+//RS         MetadataCanonicalSource::SemanticSymbolRef,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::CallFact,
+//RS         MetadataCanonicalSource::SemanticCallEdge,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::StateGraph,
+//RS         MetadataCanonicalSource::SemanticStateGraphFact,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::FactDefinition,
+//RS         MetadataCanonicalSource::SemanticCompilerFact,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::DerivationFact,
+//RS         MetadataCanonicalSource::DerivationRecord,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::SourceInfo,
+//RS         &[
+//RS             field(
+//RS                 "identity",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceId),
+//RS             ),
+//RS             field("text", MetadataValueType::String),
+//RS             list_field(
+//RS                 "comments",
+//RS                 MetadataValueType::Record(MetadataRecord::CommentInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "documentation",
+//RS                 MetadataValueType::Record(MetadataRecord::CommentInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "expansions",
+//RS                 MetadataValueType::Record(MetadataRecord::ExpansionInfo),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::CommentInfo,
+//RS         &[
+//RS             field("text", MetadataValueType::String),
+//RS             field(
+//RS                 "span",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             field(
+//RS                 "kind",
+//RS                 MetadataValueType::Record(MetadataRecord::CommentKind),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     variant_record(
+//RS         MetadataRecord::CommentKind,
+//RS         &[
+//RS             variant(MetadataVariant::Line, &[]),
+//RS             variant(MetadataVariant::Block, &[]),
+//RS             variant(MetadataVariant::Documentation, &[]),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::ExpansionInfo,
+//RS         &[
+//RS             field(
+//RS                 "generated",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             optional_field(
+//RS                 "template",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             optional_field(
+//RS                 "caller",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             list_field(
+//RS                 "captures",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             optional_field(
+//RS                 "publisher",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::AttributeInfo,
+//RS         &[
+//RS             field(
+//RS                 "identity",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS             ),
+//RS             list_field(
+//RS                 "arguments",
+//RS                 MetadataValueType::Record(MetadataRecord::PreparedValue),
+//RS             ),
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             field(
+//RS                 "origin",
+//RS                 MetadataValueType::Record(MetadataRecord::AttributeOrigin),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     variant_record(
+//RS         MetadataRecord::AttributeOrigin,
+//RS         &[
+//RS             variant(MetadataVariant::Written, &[]),
+//RS             variant(
+//RS                 MetadataVariant::Expanded,
+//RS                 &[field(
+//RS                     "expansion",
+//RS                     MetadataValueType::Record(MetadataRecord::ExpansionInfo),
+//RS                 )],
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::PackageInfo,
+//RS         &[
+//RS             field(
+//RS                 "identity",
+//RS                 MetadataValueType::Record(MetadataRecord::PackageId),
+//RS             ),
+//RS             field(
+//RS                 "root",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceId),
+//RS             ),
+//RS             list_field(
+//RS                 "dependencies",
+//RS                 MetadataValueType::Record(MetadataRecord::DependencyInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "imports",
+//RS                 MetadataValueType::Record(MetadataRecord::ImportInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "settings",
+//RS                 MetadataValueType::Record(MetadataRecord::SettingInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "profiles",
+//RS                 MetadataValueType::Record(MetadataRecord::ProfileInfo),
+//RS             ),
+//RS             list_field(
+//RS                 "targets",
+//RS                 MetadataValueType::Record(MetadataRecord::TargetInfo),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::DependencyInfo,
+//RS         MetadataCanonicalSource::PackageDependencyRecord,
+//RS         MISSING_CANONICAL,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::ImportInfo,
+//RS         MetadataCanonicalSource::PackageImportRecord,
+//RS         MISSING_CANONICAL,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::SettingInfo,
+//RS         &[
+//RS             field("name", MetadataValueType::String),
+//RS             field(
+//RS                 "type",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS             field(
+//RS                 "default",
+//RS                 MetadataValueType::Record(MetadataRecord::PreparedValue),
+//RS             ),
+//RS             field(
+//RS                 "selected",
+//RS                 MetadataValueType::Record(MetadataRecord::PreparedValue),
+//RS             ),
+//RS             list_field(
+//RS                 "contributions",
+//RS                 MetadataValueType::Record(MetadataRecord::ContributionInfo),
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::ProfileInfo,
+//RS         MetadataCanonicalSource::PackageProfileRecord,
+//RS         MISSING_CANONICAL,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::TargetInfo,
+//RS         MetadataCanonicalSource::PackageTargetRecord,
+//RS         MISSING_CANONICAL,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::ContributionInfo,
+//RS         &[
+//RS             field(
+//RS                 "value",
+//RS                 MetadataValueType::Record(MetadataRecord::PreparedValue),
+//RS             ),
+//RS             field(
+//RS                 "source",
+//RS                 MetadataValueType::Record(MetadataRecord::SourceSpan),
+//RS             ),
+//RS             field(
+//RS                 "kind",
+//RS                 MetadataValueType::Record(MetadataRecord::ContributionKind),
+//RS             ),
+//RS             field("selected", MetadataValueType::Bool),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     variant_record(
+//RS         MetadataRecord::ContributionKind,
+//RS         &[
+//RS             variant(MetadataVariant::Declaration, &[]),
+//RS             variant(MetadataVariant::Profile, &[]),
+//RS             variant(MetadataVariant::CommandLine, &[]),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::ValueInfo,
+//RS         &[
+//RS             field(
+//RS                 "type",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS             optional_field(
+//RS                 "active_case",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS             ),
+//RS             retained_field(
+//RS                 "fields",
+//RS                 MetadataValueType::Record(MetadataRecord::ValueFieldInfo),
+//RS                 MetadataFieldCardinality::List,
+//RS             ),
+//RS             retained_field(
+//RS                 "value",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Value),
+//RS                 MetadataFieldCardinality::One,
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::ValueFieldInfo,
+//RS         &[
+//RS             field(
+//RS                 "field",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Declaration),
+//RS             ),
+//RS             field(
+//RS                 "type",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS             ),
+//RS             retained_field(
+//RS                 "value",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Value),
+//RS                 MetadataFieldCardinality::One,
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     field_record(
+//RS         MetadataRecord::TypeCatalog,
+//RS         &[
+//RS             field(
+//RS                 "snapshot",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Snapshot),
+//RS             ),
+//RS             field(
+//RS                 "target",
+//RS                 MetadataValueType::Record(MetadataRecord::TargetId),
+//RS             ),
+//RS             retained_field(
+//RS                 "roots",
+//RS                 MetadataValueType::Identity(MetadataIdentity::Type),
+//RS                 MetadataFieldCardinality::List,
+//RS             ),
+//RS             retained_field(
+//RS                 "types",
+//RS                 MetadataValueType::Record(MetadataRecord::TypeInfo),
+//RS                 MetadataFieldCardinality::List,
+//RS             ),
+//RS             retained_field(
+//RS                 "scope",
+//RS                 MetadataValueType::Record(MetadataRecord::RetentionScope),
+//RS                 MetadataFieldCardinality::One,
+//RS             ),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     variant_record(
+//RS         MetadataRecord::RetentionScope,
+//RS         &[
+//RS             variant(MetadataVariant::RequestedRoots, &[]),
+//RS             variant(MetadataVariant::WholeProgram, &[]),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     variant_record(
+//RS         MetadataRecord::MetadataFamily,
+//RS         &[
+//RS             variant(MetadataVariant::Types, &[]),
+//RS             variant(MetadataVariant::Callables, &[]),
+//RS             variant(MetadataVariant::Program, &[]),
+//RS             variant(MetadataVariant::Source, &[]),
+//RS             variant(MetadataVariant::Packages, &[]),
+//RS             variant(MetadataVariant::LocalState, &[]),
+//RS             variant(MetadataVariant::All, &[]),
+//RS         ],
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::Visibility,
+//RS         MetadataCanonicalSource::NameVisibility,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::ParamZone,
+//RS         MetadataCanonicalSource::AstParamZone,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::AccessConvention,
+//RS         MetadataCanonicalSource::AstAccessConvention,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::CallingConvention,
+//RS         MetadataCanonicalSource::CallingConvention,
+//RS         MISSING_CANONICAL,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::FailureSource,
+//RS         MetadataCanonicalSource::FailureSource,
+//RS         MISSING_CANONICAL,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::CaptureMode,
+//RS         MetadataCanonicalSource::CaptureMode,
+//RS         MISSING_CANONICAL,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::PreparedValue,
+//RS         MetadataCanonicalSource::ComptimeValue,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::CodeRef,
+//RS         MetadataCanonicalSource::CodeRef,
+//RS         MISSING_CANONICAL,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::DimensionInfo,
+//RS         MetadataCanonicalSource::AstDimension,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::TagMarker,
+//RS         MetadataCanonicalSource::AstTagMarker,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::PolicyFact,
+//RS         MetadataCanonicalSource::AstCallablePolicy,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::ViewProvenanceFact,
+//RS         MetadataCanonicalSource::SemanticViewProvenanceFact,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::CompilerDiagnostic,
+//RS         MetadataCanonicalSource::Diagnostic,
+//RS         EXISTING_CANONICAL,
+//RS         CONTRACT_ONLY,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::AbiInfo,
+//RS         MetadataCanonicalSource::AbiInfo,
+//RS         MISSING_CANONICAL,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS     canonical_record(
+//RS         MetadataRecord::TargetId,
+//RS         MetadataCanonicalSource::TargetId,
+//RS         MISSING_CANONICAL,
+//RS         NOT_IMPLEMENTED,
+//RS     ),
+//RS ];
+//RS 
+// END-PORT-PENDING 0092 crates/jet-foundation/src/Registry.rs:1-1808
+

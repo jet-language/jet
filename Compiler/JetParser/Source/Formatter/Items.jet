@@ -1,0 +1,1597 @@
+// Canonical declaration printing: Rust jet-parser/src/Formatter/Items.rs.
+// Member rows carry indices, never copied ASTs; one source-ordered walk owns comments.
+use jet_foundation.[AccessConvention, BudgetField, CModule, CModuleKind, CLICommandBinding, CodeModule, ConstAttr, ConstDef, ContribValue, DeriveBodyItem, DeriveDef, DistinctDef, EffectRowEntry, EnumDef, EnumGroup, ExternFn, ExternRustBlock, FactDecl, Field, Func, GenericModuleDef, GenericModuleParam, ImplDef, ImportDecl, ImportKind, Item, ItemTemplateLoop, Marker, MarkerCallArg, MarkerDecl, MarkerDeclParam, MetaAttr, MetaField, ModuleDecl, NamedSpan, NamedType, Namespace, Param, ParamZone, Pattern, PolicyDeclaration, PolicyKey, PolicyValue, ProtocolDecl, ProtocolDirection, SerdeWireShape, Span, StateDecl, Stmt, StructDef, TestDef, TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeAliasDef, TypeParam, UserPolicyDecl, Variant, VariantField, VariantPayload, ViewProvenance, ViewProvenanceMap, ViewSource, ViewSourceProjection, WebBucket, callable_marker_needs_line_break, expr_span, resolved_decode_wire_shapes, type_name]
+use jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_COLON_COLON, TOKEN_DOT, TOKEN_EQ, TOKEN_GT, TOKEN_LAMBDA_ARROW, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LINE_COMMENT, TOKEN_MINUS_MINUS, TOKEN_COLON, TOKEN_RBRACKET, TOKEN_UNIFIED_ARROW]
+
+// Rust Items.rs:126-167. The Foundation resolver owns wire-shape semantics.
+fn jet_format_has_ambiguous_decode_union(items: [Item], ty: Type) -> Bool Never! {
+    if ty == .Union(members) {
+        seen := [SerdeWireShape]{}
+        loop member in members {
+            if resolved_decode_wire_shapes(items, member) == .Val(shapes) {
+                loop shape in shapes {
+                    if seen.contains(shape) -> return true
+                    &seen.push(shape)
+                }
+            }
+        }
+    }
+    if ty == {
+        .List(inner) -> jet_format_has_ambiguous_decode_union(items, inner)
+        .Shared(inner) -> jet_format_has_ambiguous_decode_union(items, inner)
+        .Option(inner) -> jet_format_has_ambiguous_decode_union(items, inner)
+        .Tagged(_, inner) -> jet_format_has_ambiguous_decode_union(items, inner)
+        .FixedList(inner, _) -> jet_format_has_ambiguous_decode_union(items, inner)
+        .Map(key, _, value) -> jet_format_has_ambiguous_decode_union(items, key) || jet_format_has_ambiguous_decode_union(items, value)
+        .Result(ok, err) -> jet_format_has_ambiguous_decode_union(items, ok) || jet_format_has_ambiguous_decode_union(items, err)
+        .Fn(params, ret, _, _, _, _) -> {
+            loop param in params { if jet_format_has_ambiguous_decode_union(items, param) -> return true }
+            if ret == .Val(value) -> return jet_format_has_ambiguous_decode_union(items, value)
+            false
+        }
+        .Apply(_, args) -> {
+            loop arg in args { if jet_format_has_ambiguous_decode_union(items, arg) -> return true }
+            false
+        }
+        .Union(args) -> {
+            loop arg in args { if jet_format_has_ambiguous_decode_union(items, arg) -> return true }
+            false
+        }
+        .Tuple(fields) -> {
+            loop field in fields { if jet_format_has_ambiguous_decode_union(items, field.ty) -> return true }
+            false
+        }
+        else -> false
+    }
+}
+
+// Rust Items.rs:242-253: ambiguous Decode unions retain authored type bytes.
+fn jet_format_decode_type(context: &JetFormatterContext, ty: Type, span: Span, derives_decode: Bool) Never! {
+    if derives_decode && jet_format_has_ambiguous_decode_union(context.items, ty) {
+        if jet_format_source_type_spelling(&context, span.start) == .Val(spelling) {
+            jet_format_write(&context, spelling)
+            jet_format_skip_verbatim_comments(&context, span.start + spelling.bytes().len())
+            return
+        }
+    }
+    jet_format_type_at(&context, ty, Val(span))
+}
+
+// Rust Items.rs:255-293.
+fn jet_format_meta_field_span(field: MetaField) -> Span Never! {
+    if field == {
+        .Category(_, span) -> span
+        .Tunable(span) -> span
+        .Maturity(_, span) -> span
+        .Unknown(_, _, span) -> span
+    }
+}
+fn jet_format_meta_rule(context: &JetFormatterContext, meta: MetaAttr) Never! {
+    jet_format_write(&context, "Meta(")
+    source :: jet_format_source_list_span_after(&context, meta.span.start, JetFormatterSourceDelimiter.Paren)
+    multiline :: jet_format_comma_begin(&context, meta.fields.len(), source)
+    loop (index, field) in meta.fields {
+        span :: jet_format_meta_field_span(field)
+        jet_format_comma_before(&context, index, span, multiline)
+        if field == {
+            .Category(value, _) -> {
+                jet_format_write(&context, "category: ")
+                jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+            }
+            .Tunable(_) -> jet_format_write(&context, "tunable")
+            .Maturity(value, _) -> {
+                jet_format_write(&context, "maturity: ")
+                jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+            }
+            .Unknown(name, value, _) -> {
+                jet_format_write(&context, name)
+                if value == .Val(expr) {
+                    jet_format_write(&context, ": ")
+                    jet_format_expr(&context, expr, JetFormatterPrec.OrFallback)
+                }
+            }
+        }
+        jet_format_comma_after(&context, span, multiline)
+    }
+    jet_format_comma_end(&context, source, multiline)
+    jet_format_write(&context, ")")
+}
+fn jet_format_meta_attr(context: &JetFormatterContext, meta: MetaAttr) Never! {
+    jet_format_write(&context, "#")
+    jet_format_meta_rule(&context, meta)
+}
+
+// Rust Items.rs:1183-1262.
+fn jet_format_marker_arg_span(argument: MarkerCallArg) -> Span Never! {
+    if argument == {
+        .Expr(expr) -> expr_span(expr)
+        .EffectRow(_, span) -> span
+    }
+}
+fn jet_format_effect_name(context: &JetFormatterContext, value: EffectRowEntry) Never! { jet_format_write(&context, value.name) }
+fn jet_format_marker_call_arg(context: &JetFormatterContext, argument: MarkerCallArg) Never! {
+    if argument == {
+        .Expr(expr) -> jet_format_expr(&context, expr, JetFormatterPrec.OrFallback)
+        .EffectRow(effects, span) -> {
+            jet_format_write(&context, "-[")
+            source :: jet_format_source_list_span_after(&context, span.start, JetFormatterSourceDelimiter.Bracket)
+            multiline :: jet_format_comma_begin(&context, effects.len(), source)
+            loop (index, effect_bound) in effects {
+                item_span :: effect_bound.span
+                jet_format_comma_before(&context, index, item_span, multiline)
+                jet_format_effect_name(&context, effect_bound)
+                jet_format_comma_after(&context, item_span, multiline)
+            }
+            jet_format_comma_end(&context, source, multiline)
+            jet_format_write(&context, "]>")
+        }
+    }
+}
+fn jet_format_marker(context: &JetFormatterContext, marker: Marker) Never! {
+    if marker.negated -> jet_format_write(&context, "!")
+    jet_format_write(&context, marker.name)
+    if marker.args.len() == 0 -> return
+    jet_format_write(&context, "(")
+    source :: jet_format_source_list_span_after(&context, marker.name_span.end, JetFormatterSourceDelimiter.Paren)
+    multiline :: jet_format_comma_begin(&context, marker.args.len(), source)
+    loop index in 0..<marker.args.len() {
+        span :: jet_format_marker_arg_span(marker.args[index])
+        jet_format_comma_before(&context, index, span, multiline)
+        if index < marker.arg_labels.len() {
+            if marker.arg_labels[index] == .Val(label) {
+            jet_format_write(&context, label.name)
+            jet_format_write(&context, ": ")
+        }
+            }
+        jet_format_marker_call_arg(&context, marker.args[index])
+        jet_format_comma_after(&context, span, multiline)
+    }
+    jet_format_comma_end(&context, source, multiline)
+    jet_format_write(&context, ")")
+}
+fn jet_format_marker_group_head(context: &JetFormatterContext, markers: [Marker], sigil: String, lone_ok: Bool) Never! {
+    if markers.len() == 0 -> return
+    jet_format_write(&context, sigil)
+    if markers.len() == 1 && lone_ok {
+        jet_format_marker(&context, markers[0])
+        return
+    }
+    jet_format_write(&context, "[")
+    source :: jet_format_source_marker_group_span(&context, markers[0].name_span.start)
+    multiline :: jet_format_comma_begin(&context, markers.len(), source)
+    loop (index, marker) in markers {
+        span :: marker.span
+        jet_format_comma_before(&context, index, span, multiline)
+        jet_format_marker(&context, marker)
+        jet_format_comma_after(&context, span, multiline)
+    }
+    jet_format_comma_end(&context, source, multiline)
+    jet_format_write(&context, "]")
+}
+fn jet_format_marker_group(context: &JetFormatterContext, markers: [Marker], sigil: String, lone_ok: Bool) Never! {
+    if markers.len() == 0 -> return
+    jet_format_marker_group_head(&context, markers, sigil, lone_ok)
+    jet_format_newline(&context)
+}
+fn jet_format_type_markers(context: &JetFormatterContext, markers: [Marker], lone_hash_ok: Bool) Never! {
+    if markers.len() == 1 && !lone_hash_ok {
+        jet_format_write(&context, "#")
+        jet_format_marker(&context, markers[0])
+        jet_format_write(&context, " ")
+        return
+    }
+    jet_format_marker_group(&context, markers, "#", lone_hash_ok)
+}
+
+// Rust Items.rs:1088-1100.
+fn jet_format_pub_qualifier(context: &JetFormatterContext, is_pub: Bool, is_package_pub: Bool) Never! {
+    if is_package_pub {
+        jet_format_write(&context, "pub(package) ")
+        return
+    }
+    if context.pub_file {
+        if !is_pub -> jet_format_write(&context, "priv ")
+    } else { if is_pub -> jet_format_write(&context, "pub ") }
+}
+
+// Rust Items.rs:1499-1538.
+fn jet_format_policy_key(key: PolicyKey) -> String Never! {
+    if key == {
+        .Unsafe -> "unsafe"
+        .Impure -> "impure"
+        .Nondeterministic -> "nondeterministic"
+        .ScopedGC -> "gc"
+        .ExplicitUnits -> "explicit_units"
+        .Copies -> "copies"
+        .Sentries -> "sentries"
+    }
+}
+fn jet_format_policy_rule(context: &JetFormatterContext, declarations: [PolicyDeclaration]) Never! {
+    jet_format_write(&context, "Policy(")
+    source := JetFormatterSourceList?{None}
+    if declarations.len() > 0 -> source = jet_format_source_list_span_after(&context, declarations[0].span.start, JetFormatterSourceDelimiter.Paren)
+    multiline :: jet_format_comma_begin(&context, declarations.len(), source)
+    loop (index, declaration) in declarations {
+        span :: declaration.span
+        jet_format_comma_before(&context, index, span, multiline)
+        jet_format_policy_declaration(&context, declaration)
+        jet_format_comma_after(&context, span, multiline)
+    }
+    jet_format_comma_end(&context, source, multiline)
+    jet_format_write(&context, ")")
+}
+fn jet_format_policy_declaration(context: &JetFormatterContext, declaration: PolicyDeclaration) Never! {
+    jet_format_write(&context, jet_format_policy_key(declaration.key))
+    if declaration.value == {
+        .Limit(limit) -> jet_format_write(&context, "({limit})")
+        .On -> jet_format_write(&context, ": .On")
+        .Off -> jet_format_write(&context, ": .Off")
+        .Explicit -> jet_format_write(&context, ": .Explicit")
+        else -> {}
+    }
+}
+fn jet_format_policy_declarations(context: &JetFormatterContext, declarations: [PolicyDeclaration]) Never! {
+    jet_format_write(&context, "#")
+    jet_format_policy_rule(&context, declarations)
+}
+
+// Rust Items.rs:1130-1180: generic bounds retain source-aware comma lists.
+fn jet_format_type_params(context: &JetFormatterContext, params: [TypeParam], source: JetFormatterSourceList?) Never! {
+    if params.len() == 0 -> return
+    jet_format_write(&context, "<")
+    multiline :: jet_format_comma_begin(&context, params.len(), source)
+    loop (index, param) in params {
+        span :: param.name_span
+        jet_format_comma_before(&context, index, span, multiline)
+        if param.prep == .Val(prep) {
+            jet_format_write(&context, "prep {param.name}: {prep.value_type}")
+            jet_format_comma_after(&context, span, multiline)
+            next
+        }
+        jet_format_write(&context, param.name)
+        if {
+            param.bounds.len() == 1 -> {
+                jet_format_write(&context, ": ")
+                jet_format_write(&context, param.bounds[0])
+            }
+            param.bounds.len() > 1 -> {
+                jet_format_write(&context, ": [")
+                bounds_source :: jet_format_source_list_span_after(&context, param.name_span.end, JetFormatterSourceDelimiter.Bracket)
+                jet_format_string_list(&context, param.bounds, bounds_source, param.name_span)
+                jet_format_write(&context, "]")
+            }
+            else -> {}
+        }
+        jet_format_comma_after(&context, span, multiline)
+    }
+    jet_format_comma_end(&context, source, multiline)
+    jet_format_write(&context, ">")
+}
+// Index rows avoid copies while projecting fallback spans for string-only AST facts.
+fn jet_format_string_list(context: &JetFormatterContext, values: [String], source: JetFormatterSourceList?, fallback: Span) Never! {
+    spans := [Span]{}
+    if source == .Val(list) -> spans = jet_format_source_list_item_spans(&context, list)
+    multiline :: jet_format_comma_begin(&context, values.len(), source)
+    loop index in 0..<values.len() {
+        span :: if index < spans.len() -> spans[index] else -> fallback
+        jet_format_comma_before(&context, index, span, multiline)
+        jet_format_write(&context, values[index])
+        jet_format_comma_after(&context, span, multiline)
+    }
+    jet_format_comma_end(&context, source, multiline)
+}
+
+// Rust Items.rs:1540-1663: positional/label zones, capability and defaults.
+struct JetFormatterParamEntry {
+    index: Int
+    zone: String
+    span: Span
+}
+fn jet_format_param_list(context: &JetFormatterContext, params: [Param], source: JetFormatterSourceList?) Never! {
+    entries := [JetFormatterParamEntry]{}
+    star_done := false
+    loop index in 0..<params.len() {
+        param :: params[index]
+        if param.zone == ParamZone.LabelOnly && !star_done {
+            star_done = true
+            &entries.push(JetFormatterParamEntry{index: -1, zone: "*", span: param.name_span})
+        }
+        &entries.push(JetFormatterParamEntry{index: index, zone: "", span: param.name_span})
+        if param.zone == ParamZone.PositionalOnly {
+            if index + 1 == params.len() || params[index + 1].zone != ParamZone.PositionalOnly -> &entries.push(JetFormatterParamEntry{index: -1, zone: "/", span: param.name_span})
+        }
+    }
+    multiline :: jet_format_comma_begin(&context, entries.len(), source)
+    loop (index, entry) in entries {
+        span :: entry.span
+        jet_format_comma_before(&context, index, span, multiline)
+        if entry.index < 0 -> jet_format_write(&context, entry.zone) else -> jet_format_param(&context, params[entry.index])
+        jet_format_comma_after(&context, span, multiline)
+    }
+    jet_format_comma_end(&context, source, multiline)
+}
+fn jet_format_param(context: &JetFormatterContext, param: Param) Never! {
+    if param.root -> jet_format_write(&context, "#Root ")
+    sigil :: if param.convention == {
+        .Write -> "&"
+        .Move -> "^"
+        .Read -> ""
+    }
+    if param.name == "self" && type_name(param.ty).len() == 0 {
+        jet_format_write(&context, sigil)
+        jet_format_write(&context, param.name)
+    } else {
+        if param.public_label == .Val(label) {
+            jet_format_write(&context, label.name)
+            jet_format_write(&context, " ")
+        }
+        jet_format_write(&context, param.name)
+        jet_format_write(&context, ": ")
+        jet_format_write(&context, sigil)
+        if param.variadic -> jet_format_write(&context, "...")
+        if param.variadic_bound_list == {
+            .Val(bounds) -> {
+                jet_format_write(&context, "[")
+                source :: jet_format_source_list_span_after(&context, param.ty_span.start, JetFormatterSourceDelimiter.Bracket)
+                jet_format_string_list(&context, bounds, source, param.ty_span)
+                jet_format_write(&context, "]")
+            }
+            .None -> jet_format_type_at(&context, param.ty, Val(param.ty_span))
+        }
+        if param.declared_view_from_names == .Val(names) {
+            if names.len() > 0 {
+                jet_format_write(&context, " from ")
+                jet_format_write(&context, names.join(" | "))
+            }
+        }
+    }
+    if param.default == .Val(value) {
+        jet_format_write(&context, "{{")
+        jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+        jet_format_write(&context, "}}")
+    }
+}
+
+// Rust Items.rs:1665-1740: map order is canonical Foundation slot order.
+fn jet_format_declared_return_view_from(context: &JetFormatterContext, map: ViewProvenanceMap, params: [Param]) Never! {
+    if map.entries.len() == 0 -> return
+    jet_format_write(&context, " from ")
+    if map.entries.len() == 1 && map.entries[0].slot.len() == 0 {
+        jet_format_view_source_union(&context, map.entries[0].value, params)
+        return
+    }
+    jet_format_write(&context, "(")
+    loop index in 0..<map.entries.len() {
+        entry :: map.entries[index]
+        if index > 0 -> jet_format_write(&context, ", ")
+        jet_format_write(&context, entry.slot.join("."))
+        jet_format_write(&context, ": ")
+        jet_format_view_source_union(&context, entry.value, params)
+    }
+    jet_format_write(&context, ")")
+}
+fn jet_format_view_source_union(context: &JetFormatterContext, provenance: ViewProvenance, params: [Param]) Never! {
+    loop index in 0..<provenance.sources.len() {
+        path :: provenance.sources[index]
+        if index > 0 -> jet_format_write(&context, " | ")
+        if path.source == {
+            .Receiver -> jet_format_write(&context, "self")
+            .Parameter(wanted) -> {
+                ordinary := 0
+                found := false
+                loop param in params {
+                    if param.name == "self" -> next
+                    if ordinary == wanted {
+                        jet_format_write(&context, param.name)
+                        found = true
+                        break
+                    }
+                    ordinary += 1
+                }
+                if !found -> jet_format_write(&context, "param{wanted}")
+            }
+            .Static(module_path, name) -> {
+                jet_format_write(&context, "static.")
+                if module_path.len() > 0 {
+                    jet_format_write(&context, module_path)
+                    jet_format_write(&context, ".")
+                }
+                jet_format_write(&context, name)
+            }
+        }
+        loop projection in path.projections {
+            if projection == {
+                .Field(field) -> {
+                    jet_format_write(&context, ".")
+                    jet_format_write(&context, field)
+                }
+                .Index -> {}
+                .Range -> {}
+            }
+        }
+    }
+}
+
+// Rust Items.rs:440-493.
+fn jet_format_marker_decl_params(context: &JetFormatterContext, params: [MarkerDeclParam], source_start: Int) Never! {
+    source :: jet_format_source_list_span_after(&context, source_start, JetFormatterSourceDelimiter.Paren)
+    multiline :: jet_format_comma_begin(&context, params.len(), source)
+    loop (index, param) in params {
+        span :: param.name_span
+        jet_format_comma_before(&context, index, span, multiline)
+        jet_format_write(&context, param.name)
+        jet_format_write(&context, ": ")
+        if param.ty == {
+            .Val(ty) -> {
+                if param.variadic -> jet_format_write(&context, "...")
+                jet_format_type(&context, ty)
+                if param.value == .Val(value) {
+                    jet_format_write(&context, "{{")
+                    jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+                    jet_format_write(&context, "}}")
+                }
+            }
+            .None -> { if param.value == .Val(value) -> jet_format_expr(&context, value, JetFormatterPrec.OrFallback) }
+        }
+        jet_format_comma_after(&context, span, multiline)
+    }
+    jet_format_comma_end(&context, source, multiline)
+}
+fn jet_format_marker_decl(context: &JetFormatterContext, declaration: MarkerDecl) Never! {
+    jet_format_write(&context, "marker {declaration.name}(")
+    jet_format_marker_decl_params(&context, declaration.params, declaration.name_span.end)
+    jet_format_write(&context, ")")
+    if declaration.body == .Val(body) {
+        jet_format_write(&context, " {{")
+        jet_format_newline(&context)
+        context.indent += 1
+        jet_format_derive_body_items(&context, body)
+        context.indent -= 1
+        jet_format_emit_leading(&context, declaration.span.end)
+        jet_format_end_template_block(&context)
+    }
+    jet_format_newline(&context)
+}
+fn jet_format_fact_decl(context: &JetFormatterContext, declaration: FactDecl) Never! {
+    jet_format_write(&context, "fact {declaration.name}(")
+    jet_format_marker_decl_params(&context, declaration.params, declaration.name_span.end)
+    jet_format_write(&context, ")")
+    jet_format_newline(&context)
+}
+
+// Rust Items.rs:495-538.
+fn jet_format_protocol_decl(context: &JetFormatterContext, protocol: ProtocolDecl) Never! {
+    jet_format_pub_qualifier(&context, protocol.is_pub, protocol.is_package_pub)
+    jet_format_write(&context, "protocol {protocol.name} {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    loop index in 0..<protocol.messages.len() {
+        message :: protocol.messages[index]
+        if index > 0 -> jet_format_newline(&context)
+        jet_format_emit_leading(&context, message.span.start)
+        sender :: if message.direction == {
+            .ClientToServer -> "client"
+            .ServerToClient -> "server"
+        }
+        jet_format_write(&context, "{sender}: {message.name}(")
+        source :: jet_format_source_list_span_after(&context, message.name_span.end, JetFormatterSourceDelimiter.Paren)
+        spans := [Span]{}
+        if source == .Val(list) -> spans = jet_format_source_list_item_spans(&context, list)
+        multiline :: jet_format_comma_begin(&context, message.fields.len(), source)
+        loop field_index in 0..<message.fields.len() {
+            span :: if field_index < spans.len() -> spans[field_index] else -> message.span
+            jet_format_comma_before(&context, field_index, span, multiline)
+            field :: message.fields[field_index]
+            jet_format_write(&context, "{field.name}: ")
+            jet_format_type(&context, field.ty)
+            jet_format_comma_after(&context, span, multiline)
+        }
+        jet_format_comma_end(&context, source, multiline)
+        jet_format_write(&context, ")")
+        jet_format_emit_trailing(&context, message.span.end)
+    }
+    context.indent -= 1
+    jet_format_emit_leading(&context, protocol.span.end)
+    jet_format_end_block(&context)
+}
+
+// Rust Items.rs:545-553. A policy body is its own source DSL, not an Item AST.
+fn jet_format_user_policy_decl(context: &JetFormatterContext, declaration: UserPolicyDecl) Never! {
+    if declaration.is_pub -> jet_format_write(&context, "pub ")
+    text :: jet_format_source_slice(&context, declaration.span.start, declaration.span.end) ?? ""
+    jet_format_write(&context, text)
+    jet_format_newline(&context)
+    jet_format_skip_verbatim_comments(&context, declaration.span.end)
+}
+
+// Rust Items.rs:555-633: typed derive/marker/generated-source body walk.
+fn jet_format_end_template_block(context: &JetFormatterContext) Never! {
+    if !context.at_line_start -> jet_format_newline(&context)
+    jet_format_write(&context, "}}")
+}
+fn jet_format_derive_body_item_start(context: &JetFormatterContext, item: DeriveBodyItem) -> Int Never! {
+    if item == {
+        .Item(value) -> jet_format_item_span_start(value, context.src)
+        .Stmt(value) -> jet_format_stmt_start(value)
+        .Loop(_, _, _, _, span) -> span.start
+    }
+}
+fn jet_format_derive_body_item_end(context: &JetFormatterContext, item: DeriveBodyItem) -> Int Never! {
+    if item == {
+        .Item(value) -> jet_format_item_span_end(value)
+        .Stmt(value) -> jet_format_statement_source_end(&context, value)
+        .Loop(_, _, _, _, span) -> span.end
+    }
+}
+fn jet_format_derive_body_items(context: &JetFormatterContext, body: [DeriveBodyItem]) Never! {
+    loop index in 0..<body.len() {
+        item :: body[index]
+        if index > 0 && !context.at_line_start -> jet_format_newline(&context)
+        start :: jet_format_derive_body_item_start(&context, item)
+        jet_format_emit_leading(&context, start)
+        if item == {
+            .Item(value) -> jet_format_item(&context, value)
+            .Stmt(value) -> jet_format_stmt(&context, value)
+            .Loop(var, _, source, nested, _) -> {
+                jet_format_write(&context, "prep loop {var} in ")
+                jet_format_expr(&context, source, JetFormatterPrec.OrFallback)
+                jet_format_write(&context, " {{")
+                jet_format_newline(&context)
+                context.indent += 1
+                jet_format_derive_body_items(&context, nested)
+                context.indent -= 1
+                jet_format_end_template_block(&context)
+            }
+        }
+        end :: jet_format_derive_body_item_end(&context, item)
+        jet_format_emit_trailing(&context, end)
+        if !context.at_line_start -> jet_format_newline(&context)
+    }
+}
+fn jet_format_derive_decl(context: &JetFormatterContext, derivation: DeriveDef) Never! {
+    jet_format_write(&context, "derive {derivation.type_param}.{derivation.trait_name} {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    jet_format_derive_body_items(&context, derivation.body)
+    context.indent -= 1
+    jet_format_emit_leading(&context, derivation.span.end)
+    jet_format_end_template_block(&context)
+}
+fn jet_format_item_template_loop(context: &JetFormatterContext, item: ItemTemplateLoop) Never! {
+    jet_format_write(&context, "prep loop {item.var} in ")
+    jet_format_expr(&context, item.source, JetFormatterPrec.OrFallback)
+    jet_format_write(&context, " {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    jet_format_derive_body_items(&context, item.body)
+    context.indent -= 1
+    jet_format_emit_leading(&context, item.span.end)
+    jet_format_end_template_block(&context)
+}
+
+// Rust Items.rs:102-123,635-751. Index rows rethread split module vectors.
+struct JetFormatterMember {
+    kind: Int
+    index: Int
+    start: Int
+    compact: Bool
+}
+fn jet_format_member_start(member: JetFormatterMember) -> Int Never! { member.start }
+fn jet_format_module_body(context: &JetFormatterContext, imports: [ImportDecl], items: [Item], span_end: Int) Never! {
+    entries := [JetFormatterMember]{}
+    loop index in 0..<imports.len() -> &entries.push(JetFormatterMember{kind: 0, index: index, start: imports[index].span.start, compact: false})
+    loop index in 0..<items.len() -> &entries.push(JetFormatterMember{kind: 1, index: index, start: jet_format_item_span_start(items[index], context.src), compact: false})
+    &entries.sort_by(jet_format_member_start)
+    loop index in 0..<entries.len() {
+        entry :: entries[index]
+        if index > 0 -> jet_format_blank_separator_before_item(&context)
+        jet_format_emit_leading(&context, entry.start)
+        if entry.kind == 0 {
+            jet_format_import(&context, imports[entry.index])
+            jet_format_emit_trailing(&context, imports[entry.index].span.end)
+        } else {
+            jet_format_item(&context, items[entry.index])
+            jet_format_emit_trailing(&context, jet_format_item_span_end(items[entry.index]))
+        }
+    }
+    jet_format_emit_leading(&context, span_end)
+}
+fn jet_format_end_module_block(context: &JetFormatterContext) Never! { jet_format_end_template_block(&context) }
+fn jet_format_code_module(context: &JetFormatterContext, definition: CodeModule) Never! {
+    jet_format_pub_qualifier(&context, definition.is_pub, definition.is_package_pub)
+    jet_format_write(&context, "module {definition.name}")
+    if definition.web_target == .Val(target) {
+        jet_format_write(&context, " ")
+        jet_format_write(&context, if target == {
+            .JS -> "JS"
+            .Wasm -> "Wasm"
+        })
+    }
+    if definition.body == .Val(items) {
+        jet_format_write(&context, " {{")
+        jet_format_newline(&context)
+        context.indent += 1
+        jet_format_module_body(&context, definition.imports, items, definition.span.end)
+        context.indent -= 1
+        jet_format_end_module_block(&context)
+    }
+}
+fn jet_format_generic_module_param_span(param: GenericModuleParam) -> Span Never! {
+    if param == {
+        .Type(_, span, _) -> span
+        .Value(_, span, _) -> span
+    }
+}
+fn jet_format_generic_module(context: &JetFormatterContext, definition: GenericModuleDef) Never! {
+    jet_format_pub_qualifier(&context, definition.is_pub, definition.is_package_pub)
+    jet_format_write(&context, "module {definition.name}")
+    type_indices := [Int]{}
+    value_indices := [Int]{}
+    loop index in 0..<definition.params.len() {
+        if definition.params[index] == {
+            .Type(_, _, _) -> &type_indices.push(index)
+            .Value(_, _, _) -> &value_indices.push(index)
+        }
+    }
+    type_source :: jet_format_source_list_span_after(&context, definition.name_span.end, JetFormatterSourceDelimiter.Angle)
+    if type_indices.len() > 0 {
+        jet_format_write(&context, "<")
+        multiline :: jet_format_comma_begin(&context, type_indices.len(), type_source)
+        loop (ordinal, index) in type_indices {
+            span :: jet_format_generic_module_param_span(definition.params[index])
+            jet_format_comma_before(&context, ordinal, span, multiline)
+            if definition.params[index] == .Type(name, _, bound) {
+                jet_format_write(&context, name)
+                if bound == .Val(ty) {
+                    jet_format_write(&context, ": ")
+                    jet_format_type(&context, ty)
+                }
+            }
+            jet_format_comma_after(&context, span, multiline)
+        }
+        jet_format_comma_end(&context, type_source, multiline)
+        jet_format_write(&context, ">")
+    }
+    value_start := definition.name_span.end
+    if type_source == .Val(list) -> value_start = list.close_start
+    value_source :: jet_format_source_list_span_after(&context, value_start, JetFormatterSourceDelimiter.Paren)
+    if value_indices.len() > 0 {
+        jet_format_write(&context, "(")
+        multiline :: jet_format_comma_begin(&context, value_indices.len(), value_source)
+        loop (ordinal, index) in value_indices {
+            span :: jet_format_generic_module_param_span(definition.params[index])
+            jet_format_comma_before(&context, ordinal, span, multiline)
+            if definition.params[index] == .Value(name, _, ty) {
+                jet_format_write(&context, "{name}: ")
+                jet_format_type(&context, ty)
+            }
+            jet_format_comma_after(&context, span, multiline)
+        }
+        jet_format_comma_end(&context, value_source, multiline)
+        jet_format_write(&context, ")")
+    }
+    jet_format_write(&context, " {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    jet_format_module_body(&context, definition.imports, definition.body, definition.span.end)
+    context.indent -= 1
+    jet_format_end_module_block(&context)
+}
+
+// Rust Items.rs:753-875: contribution DSL only has a typed Perf projection.
+fn jet_format_c_module(context: &JetFormatterContext, definition: CModule) Never! {
+    jet_format_write(&context, if definition.kind == {
+        .Extern -> "#Import module c."
+        .Bindgen -> "#Bindgen module c."
+    })
+    jet_format_write(&context, definition.lib)
+    if definition.kind == CModuleKind.Bindgen -> jet_format_write(&context, ".__bindgen__")
+    jet_format_write(&context, " {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    loop index in 0..<definition.functions.len() {
+        function :: definition.functions[index]
+        if index > 0 && !context.at_line_start -> jet_format_newline(&context)
+        jet_format_emit_leading(&context, function.span.start)
+        jet_format_extern_fn(&context, function)
+        jet_format_emit_trailing(&context, function.span.end)
+    }
+    jet_format_emit_leading(&context, definition.span.end)
+    context.indent -= 1
+    jet_format_end_module_block(&context)
+}
+fn jet_format_perf_budget_fields(context: &JetFormatterContext, fields: [BudgetField], source: JetFormatterSourceList?) Never! {
+    multiline :: jet_format_comma_begin(&context, fields.len(), source)
+    loop (index, field) in fields {
+        span :: field.span
+        jet_format_comma_before(&context, index, span, multiline)
+        jet_format_write(&context, "{field.name}: ")
+        jet_format_expr(&context, field.value, JetFormatterPrec.OrFallback)
+        jet_format_comma_after(&context, span, multiline)
+    }
+    jet_format_comma_end(&context, source, multiline)
+}
+fn jet_format_perf_module(context: &JetFormatterContext, definition: ModuleDecl) -> Bool Never! {
+    if definition.sources.len() > 0 || definition.imports.len() > 0 || definition.members.len() > 0 || definition.contributions.len() != 1 -> return false
+    loop comment in context.comments { if comment.span.start >= definition.span.start && comment.span.start < definition.span.end -> return false }
+    contribution :: definition.contributions[0]
+    if contribution.namespace != Namespace.Perf -> return false
+    if contribution.value == .Perf(perf) {
+        text :: jet_format_source_slice(&context, perf.list_span.start, perf.list_span.end) ?? ""
+        typed :: text.contains("]{{") || text.contains("].{{")
+        jet_format_write(&context, "module {definition.name} {{")
+        jet_format_newline(&context)
+        context.indent += 1
+        if perf.compile_workloads.len() > 0 {
+            jet_format_write(&context, "compile_workloads: {{")
+            loop index in 0..<perf.compile_workloads.len() {
+                workload :: perf.compile_workloads[index]
+                jet_format_write(&context, if index == 0 -> " " else -> ", ")
+                jet_format_write(&context, "{workload.name}: CompilerWorkload.Edit{{target: ")
+                jet_format_expr(&context, workload.target, JetFormatterPrec.OrFallback)
+                jet_format_write(&context, ", patch: ")
+                jet_format_expr(&context, workload.patch, JetFormatterPrec.OrFallback)
+                jet_format_write(&context, "}}")
+            }
+            jet_format_write(&context, " }}")
+            jet_format_newline(&context)
+        }
+        jet_format_write(&context, if typed -> "budgets: [Budget]{{" else -> "budgets: [")
+        loop index in 0..<perf.budgets.len() {
+            budget :: perf.budgets[index]
+            if index > 0 -> jet_format_write(&context, ", ")
+            jet_format_write(&context, if typed -> "{{" else -> "Budget{{")
+            source :: jet_format_source_list_span_after(&context, budget.span.start, JetFormatterSourceDelimiter.Brace)
+            jet_format_perf_budget_fields(&context, budget.fields, source)
+            jet_format_write(&context, "}}")
+        }
+        jet_format_write(&context, if typed -> "}}" else -> "]")
+        context.indent -= 1
+        jet_format_end_block(&context)
+        return true
+    }
+    false
+}
+
+// Rust Items.rs:971-1086: foreign signatures and both real test forms.
+fn jet_format_extern_fn(context: &JetFormatterContext, function: ExternFn) Never! {
+    if function.undo == .Val(undo) -> jet_format_write(&context, "#Undo({undo.name}) ")
+    if function.abi == .Val(abi) -> jet_format_write(&context, "#ABI({abi.name}) ")
+    jet_format_write(&context, "fn {function.name}(")
+    source :: jet_format_source_list_span_after(&context, function.name_span.end, JetFormatterSourceDelimiter.Paren)
+    jet_format_param_list(&context, function.params, source)
+    jet_format_write(&context, ")")
+    if function.return_type == .Val(ret) {
+        if jet_format_is_unit_fallible_type(ret) { jet_format_unit_fallible_return(&context, ret) } else {
+            jet_format_write(&context, " -> ")
+            jet_format_return_type(&context, ret)
+        }
+    }
+    jet_format_write(&context, " = \"{function.rust_path}\"")
+    jet_format_newline(&context)
+}
+fn jet_format_extern_rust(context: &JetFormatterContext, block: ExternRustBlock) Never! {
+    jet_format_write(&context, "extern rust \"{block.crate_spec}\" {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    loop function in block.functions -> jet_format_extern_fn(&context, function)
+    context.indent -= 1
+    jet_format_end_block(&context)
+}
+fn jet_format_test(context: &JetFormatterContext, test: TestDef) Never! {
+    jet_format_write(&context, "#Test")
+    if test.params.len() == 0 && test.fn_keyword_span == None {
+        jet_format_write(&context, "(")
+        if test.name_expr == {
+            .Val(expr) -> jet_format_expr(&context, expr, JetFormatterPrec.OrFallback)
+            .None -> {
+                name :: test.name ?? panic("synthetic test blocks have a resolved name")
+                jet_format_write(&context, "\"")
+                jet_format_write(&context, name.replace("\\", "\\\\").replace("\"", "\\\""))
+                jet_format_write(&context, "\"")
+            }
+        }
+        if test.faults_expr == .Val(value) {
+            jet_format_write(&context, ", faults: ")
+            jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+        }
+        if test.expected_fail_expr == .Val(value) {
+            jet_format_write(&context, ", expected_fail: ")
+            jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+        }
+        jet_format_write(&context, ")")
+    } else {
+        if test.faults_expr != None || test.expected_fail_expr != None {
+            jet_format_write(&context, "(")
+            if test.faults_expr == .Val(value) {
+                jet_format_write(&context, "faults: ")
+                jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+            }
+            if test.expected_fail_expr == .Val(value) {
+                if test.faults_expr != None -> jet_format_write(&context, ", ")
+                jet_format_write(&context, "expected_fail: ")
+                jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+            }
+            jet_format_write(&context, ")")
+        }
+        name :: test.name ?? panic("property tests have a parsed name")
+        jet_format_write(&context, " fn {name}(")
+        source :: jet_format_source_list_span_after(&context, test.name_span.end, JetFormatterSourceDelimiter.Paren)
+        jet_format_param_list(&context, test.params, source)
+        jet_format_write(&context, ")")
+    }
+    jet_format_write(&context, " {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    jet_format_block_stmts(&context, test.body)
+    context.indent -= 1
+    jet_format_end_block(&context)
+}
+
+// Rust Items.rs:1102-1128.
+fn jet_format_distinct(context: &JetFormatterContext, definition: DistinctDef) Never! {
+    jet_format_type_markers(&context, definition.type_markers, true)
+    jet_format_pub_qualifier(&context, definition.is_pub, definition.is_package_pub)
+    jet_format_write(&context, "{definition.name} :: distinct ")
+    jet_format_type_at(&context, definition.base, Val(definition.base_span))
+    if definition.range == .Val(range) -> jet_format_write(&context, "({range.lo}..{range.hi})")
+}
+fn jet_format_type_alias(context: &JetFormatterContext, alias: TypeAliasDef) Never! {
+    jet_format_pub_qualifier(&context, alias.is_pub, alias.is_package_pub)
+    jet_format_write(&context, "alias {alias.name}")
+    source :: jet_format_source_list_span_after(&context, alias.name_span.end, JetFormatterSourceDelimiter.Angle)
+    jet_format_type_params(&context, alias.type_params, source)
+    jet_format_write(&context, " :: ")
+    jet_format_type_at(&context, alias.target, Val(alias.target_span))
+    jet_format_write(&context, ";")
+}
+
+// Rust Items.rs:1316-1497: function markers, signature and source body shape.
+fn jet_format_func(context: &JetFormatterContext, function: Func, top_level: Bool) Never! {
+    if function.markers.len() == 1 {
+        marker :: function.markers[0]
+        jet_format_write(&context, "#")
+        jet_format_marker(&context, marker)
+        if callable_marker_needs_line_break(marker.name) -> jet_format_newline(&context) else -> jet_format_write(&context, " ")
+    } else {
+        // Main-ratified callable placement: grouped inline attributes retain
+        // the same separator law as a single marker, unless registered as multiline.
+        jet_format_marker_group_head(&context, function.markers, "#", false)
+        if function.markers.len() > 0 {
+            needs_line_break := false
+            loop marker in function.markers { if callable_marker_needs_line_break(marker.name) -> needs_line_break = true }
+            if needs_line_break -> jet_format_newline(&context) else -> jet_format_write(&context, " ")
+        }
+    }
+    if top_level || function.is_pub -> jet_format_pub_qualifier(&context, function.is_pub, function.is_package_pub)
+    if function.is_comptime -> jet_format_write(&context, "prep ")
+    jet_format_write(&context, "fn {function.name}")
+    type_source :: jet_format_source_list_span_after(&context, function.name_span.end, JetFormatterSourceDelimiter.Angle)
+    jet_format_type_params(&context, function.type_params, type_source)
+    jet_format_write(&context, "(")
+    head_pattern := false
+    if function.head_pattern == .Val(pattern) {
+        if pattern == .Variant(variant, bindings, _, pattern_span) {
+            head_pattern = true
+            jet_format_write(&context, variant)
+            if bindings.len() > 0 {
+                jet_format_write(&context, "(")
+                source :: jet_format_source_list_span_after(&context, pattern_span.start, JetFormatterSourceDelimiter.Paren)
+                multiline :: jet_format_comma_begin(&context, function.params.len(), source)
+                loop (index, param) in function.params {
+                    span :: param.name_span
+                    jet_format_comma_before(&context, index, span, multiline)
+                    jet_format_param(&context, param)
+                    jet_format_comma_after(&context, span, multiline)
+                }
+                jet_format_comma_end(&context, source, multiline)
+                jet_format_write(&context, ")")
+            }
+        }
+    }
+    if !head_pattern {
+        source :: jet_format_source_list_span_after(&context, function.name_span.end, JetFormatterSourceDelimiter.Paren)
+        jet_format_param_list(&context, function.params, source)
+    }
+    jet_format_write(&context, ")")
+    has_effect_row :: function.declared_effects != None || function.effect_via != None || function.is_pure
+    if has_effect_row {
+        if function.declared_effects == {
+            .Val(effects) -> {
+                jet_format_write(&context, " -[")
+                source :: jet_format_source_effect_row_span_after(&context, function.name_span.end)
+                multiline :: jet_format_comma_begin(&context, effects.len(), source)
+                loop (index, effect_bound) in effects {
+                    span :: effect_bound.span
+                    jet_format_comma_before(&context, index, span, multiline)
+                    jet_format_effect_name(&context, effect_bound)
+                    jet_format_comma_after(&context, span, multiline)
+                }
+                jet_format_comma_end(&context, source, multiline)
+                jet_format_write(&context, "]>")
+            }
+            .None -> { if function.is_pure -> jet_format_write(&context, " -[]>") }
+        }
+        if function.effect_via == .Val(param) -> jet_format_write(&context, " -[via {param.name}]>")
+    }
+    if function.return_type == .Val(ret) {
+        if jet_format_is_unit_fallible_type(ret) { jet_format_unit_fallible_return(&context, ret) } else {
+            jet_format_write(&context, if has_effect_row -> " " else -> " -> ")
+            jet_format_type_at(&context, ret, function.return_type_span)
+        }
+    }
+    if function.declared_return_view_provenance == .Val(map) -> jet_format_declared_return_view_from(&context, map, function.params)
+    saved_return_type :: ^context.expected_return_type
+    context.expected_return_type = function.return_type
+    saved_optional :: ~context.optional_body_visit
+    saved_depth :: ~context.body_depth
+    saved_tail :: ~context.optional_tail
+    context.optional_body_visit = context.strip_optional_returns && if function.return_type == {
+        .Val(ty) -> if ty == .Option(_) -> true else -> false
+        else -> false
+    }
+    context.body_depth = 0
+    context.optional_tail = function.body.len() == 1
+    if function.body.len() == 1 && function.body[0] == .Expr(expr) {
+        previous := -1
+        loop index in 0..<context.source_toks.len() {
+            token :: context.source_toks[index]
+            if token.span.end > expr_span(expr).start -> break
+            if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> previous = index
+        }
+        if previous >= 0 {
+            kind :: context.source_toks[previous].kind
+            if kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW || kind == TOKEN_COLON_COLON || kind == TOKEN_EQ || (has_effect_row && kind == TOKEN_GT) {
+                jet_format_write(&context, " {{ ")
+                jet_format_optional_value(&context, expr, JetFormatterPrec.OrFallback)
+                jet_format_write(&context, " }}")
+                context.expected_return_type = saved_return_type
+                context.optional_body_visit = saved_optional
+                context.body_depth = saved_depth
+                context.optional_tail = saved_tail
+                return
+            }
+        }
+    }
+    if function.inline_foreign == .Val(inline_foreign) {
+        jet_format_write(&context, " {{")
+        context.indent += 1
+        jet_format_newline(&context)
+        jet_format_write(&context, "\"\"\"")
+        jet_format_write(&context, inline_foreign.source)
+        jet_format_write(&context, "\"\"\"")
+        context.indent -= 1
+        jet_format_newline(&context)
+        jet_format_write(&context, "}}")
+        context.expected_return_type = saved_return_type
+        context.optional_body_visit = saved_optional
+        context.body_depth = saved_depth
+        context.optional_tail = saved_tail
+        return
+    }
+    jet_format_write(&context, " {{")
+    if function.body.len() == 0 {
+        text :: jet_format_source_slice(&context, function.span.start, function.span.end) ?? ""
+        parts :: text.split("{{").to_list()
+        if parts.len() > 1 {
+            tail :: parts[parts.len() - 1].split("}}").to_list()
+            if tail.len() > 1 && !tail[0].contains("\n") && !tail[0].contains("//") && !tail[0].contains("/*") {
+                jet_format_write(&context, "}}")
+                context.expected_return_type = saved_return_type
+                context.optional_body_visit = saved_optional
+                context.body_depth = saved_depth
+                context.optional_tail = saved_tail
+                return
+            }
+        }
+    }
+    jet_format_body(&context, function.body)
+    context.expected_return_type = saved_return_type
+    context.optional_body_visit = saved_optional
+    context.body_depth = saved_depth
+    context.optional_tail = saved_tail
+}
+
+// Rust Items.rs:62-100,876-970,1264-1314: associated rows keep authored order.
+fn jet_format_impl_body(context: &JetFormatterContext, assoc_types: [NamedType], methods: [Func]) Never! {
+    members := [JetFormatterMember]{}
+    loop index in 0..<assoc_types.len() -> &members.push(JetFormatterMember{kind: 0, index: index, start: assoc_types[index].span.start, compact: true})
+    loop index in 0..<methods.len() -> &members.push(JetFormatterMember{kind: 1, index: index, start: methods[index].span.start, compact: false})
+    &members.sort_by(jet_format_member_start)
+    previous_compact := false
+    loop index in 0..<members.len() {
+        member :: members[index]
+        if index > 0 {
+            jet_format_newline(&context)
+            if !previous_compact || !member.compact -> jet_format_newline(&context)
+        }
+        if member.kind == 0 {
+            row :: assoc_types[member.index]
+            jet_format_emit_leading(&context, row.span.start)
+            jet_format_write(&context, "type {row.name} = ")
+            jet_format_type(&context, row.ty)
+        } else {
+            method :: methods[member.index]
+            jet_format_emit_leading(&context, method.name_span.start)
+            jet_format_func(&context, method, false)
+        }
+        previous_compact = member.compact
+    }
+}
+fn jet_format_trait_impl_block(context: &JetFormatterContext, block: TraitImplBlock) Never! {
+    jet_format_emit_leading(&context, block.trait_span.start)
+    jet_format_write(&context, "impl {block.trait_name} {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    jet_format_impl_body(&context, block.assoc_type_impls, block.methods)
+    context.indent -= 1
+    jet_format_end_block(&context)
+}
+fn jet_format_trait(context: &JetFormatterContext, trait_def: TraitDef) Never! {
+    jet_format_pub_qualifier(&context, trait_def.is_pub, trait_def.is_package_pub)
+    jet_format_write(&context, "trait {trait_def.name}")
+    if trait_def.supertraits.len() == 1 {
+        jet_format_write(&context, ": ")
+        jet_format_write(&context, trait_def.supertraits[0])
+    }
+    if trait_def.supertraits.len() > 1 -> jet_format_write(&context, ": [{trait_def.supertraits.join(", ")}]")
+    jet_format_write(&context, " {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    members := [JetFormatterMember]{}
+    loop index in 0..<trait_def.assoc_types.len() -> &members.push(JetFormatterMember{kind: 0, index: index, start: trait_def.assoc_types[index].span.start, compact: true})
+    loop index in 0..<trait_def.methods.len() -> &members.push(JetFormatterMember{kind: 1, index: index, start: trait_def.methods[index].span.start, compact: false})
+    &members.sort_by(jet_format_member_start)
+    loop member in members {
+        jet_format_emit_leading(&context, member.start)
+        if member.kind == 0 {
+            jet_format_write(&context, "type {trait_def.assoc_types[member.index].name}")
+            jet_format_emit_trailing(&context, trait_def.assoc_types[member.index].span.end)
+            jet_format_newline(&context)
+            next
+        }
+        method :: trait_def.methods[member.index]
+        jet_format_write(&context, "fn {method.name}(")
+        source :: jet_format_source_list_span_after(&context, method.name_span.end, JetFormatterSourceDelimiter.Paren)
+        jet_format_param_list(&context, method.params, source)
+        jet_format_write(&context, ")")
+        if method.declared_effects == {
+            .Val(effects) -> {
+                jet_format_write(&context, " -[")
+                source :: jet_format_source_effect_row_span_after(&context, method.name_span.end)
+                multiline :: jet_format_comma_begin(&context, effects.len(), source)
+                loop (index, effect_bound) in effects {
+                    span :: effect_bound.span
+                    jet_format_comma_before(&context, index, span, multiline)
+                    jet_format_effect_name(&context, effect_bound)
+                    jet_format_comma_after(&context, span, multiline)
+                }
+                jet_format_comma_end(&context, source, multiline)
+                jet_format_write(&context, "]>")
+            }
+            .None -> { if method.is_pure -> jet_format_write(&context, " -[]>") }
+        }
+        if method.return_type == .Val(ret) {
+            if jet_format_is_unit_fallible_type(ret) { jet_format_unit_fallible_return(&context, ret) } else {
+                jet_format_write(&context, if method.declared_effects != None || method.is_pure -> " " else -> " -> ")
+                jet_format_return_type(&context, ret)
+            }
+        }
+        if method.declared_return_view_provenance == .Val(map) -> jet_format_declared_return_view_from(&context, map, method.params)
+        if method.default_body == .Val(body) {
+            jet_format_write(&context, " {{")
+            jet_format_newline(&context)
+            context.indent += 1
+            jet_format_block_stmts(&context, body)
+            context.indent -= 1
+            jet_format_end_block(&context)
+        }
+        jet_format_emit_trailing(&context, method.span.end)
+        jet_format_newline(&context)
+    }
+    jet_format_emit_leading(&context, trait_def.span.end - 1)
+    context.indent -= 1
+    jet_format_write(&context, "}}")
+    jet_format_newline(&context)
+    jet_format_newline(&context)
+}
+
+// Rust Items.rs:2046-2130.
+fn jet_format_impl(context: &JetFormatterContext, implementation: ImplDef) Never! {
+    if implementation.os_target == .Val(os) {
+        jet_format_write(&context, "#Target(OS.{os})")
+        jet_format_newline(&context)
+    }
+    jet_format_write(&context, "impl {implementation.type_name}")
+    if implementation.trait_name == .Val(name) -> jet_format_write(&context, ".{name}")
+    if implementation.delegation_field == .Val(field) {
+        jet_format_write(&context, " using {field}")
+        return
+    }
+    jet_format_write(&context, " {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    jet_format_impl_body(&context, implementation.assoc_type_impls, implementation.methods)
+    context.indent -= 1
+    jet_format_end_block(&context)
+}
+fn jet_format_const(context: &JetFormatterContext, constant: ConstDef) Never! {
+    if constant.meta == .Val(meta) {
+        jet_format_meta_attr(&context, meta)
+        jet_format_newline(&context)
+    }
+    if constant.is_persist {
+        jet_format_write(&context, "#Persist {constant.name} ")
+        jet_format_write(&context, if constant.mutable -> ":=" else -> "::")
+        jet_format_write(&context, " ")
+        jet_format_expr(&context, constant.value, JetFormatterPrec.OrFallback)
+        return
+    }
+    loop attr in constant.attrs {
+        jet_format_write(&context, if attr == {
+            .ForceStatic -> "#Static "
+            .ForceInline -> "#Inline "
+        })
+    }
+    if constant.is_comptime {
+        jet_format_write(&context, "{constant.name} :: ")
+        jet_format_prepared_value(&context, constant.value)
+        return
+    }
+    if constant.ty == .Val(ty) {
+        if ty == .Named(name) {
+            if name == "Output" {
+                jet_format_write(&context, "{constant.name} :: ")
+                jet_format_expr(&context, constant.value, JetFormatterPrec.OrFallback)
+                return
+            }
+            if name == "__OutputDefaults" {
+                jet_format_write(&context, "defaults: ")
+                jet_format_expr(&context, constant.value, JetFormatterPrec.OrFallback)
+                return
+            }
+        }
+    }
+    jet_format_write(&context, "{constant.name} :: ")
+    jet_format_expr(&context, constant.value, JetFormatterPrec.OrFallback)
+}
+
+// Rust Items.rs:14-60,1744-1920: each split type vector is indexed once.
+fn jet_format_type_body_members(context: &JetFormatterContext, members: [JetFormatterMember], state: StateDecl?, fields: [Field], bindings: [CLICommandBinding], impls: [TraitImplBlock], methods: [Func], validate: [Stmt], derives_decode: Bool, preceded: Bool) Never! {
+    previous_compact := false
+    loop index in 0..<members.len() {
+        member :: members[index]
+        if index > 0 || preceded {
+            jet_format_newline(&context)
+            if index == 0 || !previous_compact || !member.compact -> jet_format_newline(&context)
+        }
+        if {
+            member.kind == 0 -> { if state == .Val(value) -> jet_format_state(&context, value) }
+            member.kind == 1 -> {
+                field :: fields[member.index]
+                jet_format_emit_leading(&context, field.name_span.start)
+                decodes_field := derives_decode
+                loop marker in field.serde_markers { if marker.name == "Skip" || marker.name == "Flatten" -> decodes_field = false }
+                jet_format_struct_field(&context, field, decodes_field)
+            }
+            member.kind == 2 -> {
+                jet_format_emit_leading(&context, bindings[member.index].name_span.start)
+                jet_format_cli_binding(&context, bindings[member.index])
+            }
+            member.kind == 3 -> jet_format_trait_impl_block(&context, impls[member.index])
+            member.kind == 4 -> {
+                jet_format_emit_leading(&context, methods[member.index].name_span.start)
+                jet_format_func(&context, methods[member.index], false)
+            }
+            member.kind == 5 -> {
+                jet_format_emit_leading(&context, member.start)
+                jet_format_write(&context, "validate {{")
+                if validate.len() == 0 -> jet_format_end_block(&context) else -> jet_format_body(&context, validate)
+            }
+            else -> panic("formatter type-body member discriminator")
+        }
+        previous_compact = member.compact
+    }
+}
+fn jet_format_state(context: &JetFormatterContext, state: StateDecl) Never! {
+    jet_format_emit_leading(&context, state.span.start)
+    jet_format_write(&context, "state {{")
+    if state.states.len() > 0 {
+        source :: jet_format_source_list_span_after(&context, state.span.start, JetFormatterSourceDelimiter.Brace)
+        multiline := false
+        if source == .Val(list) -> multiline = jet_format_source_span_multiline(&context, list.span)
+        if !multiline -> jet_format_write(&context, " ")
+        list_multiline :: jet_format_comma_begin(&context, state.states.len(), source)
+        loop (index, entry) in state.states {
+            span :: entry.span
+            jet_format_comma_before(&context, index, span, list_multiline)
+            jet_format_write(&context, entry.name)
+            jet_format_comma_after(&context, span, list_multiline)
+        }
+        jet_format_comma_end(&context, source, list_multiline)
+        if !multiline -> jet_format_write(&context, " ")
+    }
+    jet_format_write(&context, "}}")
+}
+fn jet_format_derives_decode(derives: [NamedSpan]) -> Bool Never! {
+    loop derivation in derives { if derivation.name == "Decode" -> return true }
+    false
+}
+fn jet_format_struct(context: &JetFormatterContext, definition: StructDef, top_level: Bool) Never! {
+    lone_hash_ok :: definition.layout == None && !definition.is_published_schema && !definition.is_single_use && !definition.is_must_use
+    jet_format_type_markers(&context, definition.type_markers, lone_hash_ok)
+    if top_level -> jet_format_pub_qualifier(&context, definition.is_pub, definition.is_package_pub)
+    jet_format_write(&context, "struct {definition.name}")
+    source :: jet_format_source_list_span_after(&context, definition.name_span.end, JetFormatterSourceDelimiter.Angle)
+    jet_format_type_params(&context, definition.type_params, source)
+    jet_format_write(&context, " {{")
+    jet_format_newline(&context)
+    members := [JetFormatterMember]{}
+    if definition.state == .Val(state) -> &members.push(JetFormatterMember{kind: 0, index: 0, start: state.span.start, compact: false})
+    loop index in 0..<definition.fields.len() -> &members.push(JetFormatterMember{kind: 1, index: index, start: definition.fields[index].name_span.start, compact: true})
+    loop index in 0..<definition.cli_bindings.len() -> &members.push(JetFormatterMember{kind: 2, index: index, start: definition.cli_bindings[index].name_span.start, compact: false})
+    loop index in 0..<definition.trait_impls.len() -> &members.push(JetFormatterMember{kind: 3, index: index, start: definition.trait_impls[index].trait_span.start, compact: false})
+    loop index in 0..<definition.methods.len() -> &members.push(JetFormatterMember{kind: 4, index: index, start: definition.methods[index].span.start, compact: false})
+    if definition.validate_span == .Val(span) -> &members.push(JetFormatterMember{kind: 5, index: 0, start: span.start, compact: false})
+    &members.sort_by(jet_format_member_start)
+    context.indent += 1
+    jet_format_type_body_members(&context, members, definition.state, definition.fields, definition.cli_bindings, definition.trait_impls, definition.methods, definition.validate_block, jet_format_derives_decode(definition.derives), false)
+    context.indent -= 1
+    jet_format_end_block(&context)
+}
+fn jet_format_enum(context: &JetFormatterContext, definition: EnumDef, top_level: Bool) Never! {
+    jet_format_type_markers(&context, definition.type_markers, !definition.is_single_use && !definition.is_must_use)
+    if top_level -> jet_format_pub_qualifier(&context, definition.is_pub, definition.is_package_pub)
+    jet_format_write(&context, "enum {definition.name}")
+    source :: jet_format_source_list_span_after(&context, definition.name_span.end, JetFormatterSourceDelimiter.Angle)
+    jet_format_type_params(&context, definition.type_params, source)
+    jet_format_write(&context, " {{")
+    jet_format_newline(&context)
+    derives_decode :: jet_format_derives_decode(definition.derives)
+    context.indent += 1
+    if definition.groups.len() == 0 {
+        loop index in 0..<definition.variants.len() {
+            if index > 0 -> jet_format_newline(&context)
+            variant :: definition.variants[index]
+            jet_format_variant_name_and_payload(&context, variant, variant.name, derives_decode)
+        }
+    } else { jet_format_enum_grouped(&context, definition, "", derives_decode) }
+    members := [JetFormatterMember]{}
+    loop index in 0..<definition.trait_impls.len() -> &members.push(JetFormatterMember{kind: 3, index: index, start: definition.trait_impls[index].trait_span.start, compact: false})
+    loop index in 0..<definition.methods.len() -> &members.push(JetFormatterMember{kind: 4, index: index, start: definition.methods[index].span.start, compact: false})
+    &members.sort_by(jet_format_member_start)
+    jet_format_type_body_members(&context, members, None, [Field]{}, [CLICommandBinding]{}, definition.trait_impls, definition.methods, [Stmt]{}, derives_decode, definition.variants.len() > 0)
+    context.indent -= 1
+    jet_format_end_block(&context)
+}
+
+// Rust Items.rs:1922-2044: flattened enum leaves reconstruct authored groups.
+fn jet_format_is_direct_child_path(path: String, prefix: String) -> Bool Never! {
+    path.starts_with(prefix) && !path.slice(prefix.len(), path.len()).contains(".")
+}
+fn jet_format_enum_entries_at_prefix(definition: EnumDef, prefix: String) -> [JetFormatterMember] Never! {
+    entries := [JetFormatterMember]{}
+    loop index in 0..<definition.groups.len() {
+        group :: definition.groups[index]
+        if !jet_format_is_direct_child_path(group.path, prefix) -> next
+        position := definition.variants.len()
+        head :: "{group.path}."
+        loop variant_index in 0..<definition.variants.len() {
+            if definition.variants[variant_index].name.starts_with(head) {
+                position = variant_index
+                break
+            }
+        }
+        &entries.push(JetFormatterMember{kind: 1, index: index, start: position, compact: false})
+    }
+    loop index in 0..<definition.variants.len() {
+        if jet_format_is_direct_child_path(definition.variants[index].name, prefix) -> &entries.push(JetFormatterMember{kind: 0, index: index, start: index, compact: false})
+    }
+    &entries.sort_by(jet_format_member_start)
+    entries
+}
+fn jet_format_enum_grouped(context: &JetFormatterContext, definition: EnumDef, prefix: String, derives_decode: Bool) Never! {
+    entries :: jet_format_enum_entries_at_prefix(definition, prefix)
+    loop index in 0..<entries.len() {
+        entry :: entries[index]
+        if index > 0 -> jet_format_newline(&context)
+        if entry.kind == 0 {
+            variant :: definition.variants[entry.index]
+            name :: if variant.name.starts_with(prefix) -> variant.name.slice(prefix.len(), variant.name.len()) else -> variant.name
+            jet_format_variant_name_and_payload(&context, variant, name, derives_decode)
+        } else { jet_format_enum_group(&context, definition, definition.groups[entry.index], derives_decode) }
+    }
+}
+fn jet_format_enum_group(context: &JetFormatterContext, definition: EnumDef, group: EnumGroup, derives_decode: Bool) Never! {
+    parts :: group.path.split(".").to_list()
+    short :: parts[parts.len() - 1]
+    jet_format_write(&context, short)
+    jet_format_write(&context, " {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    jet_format_enum_grouped(&context, definition, "{group.path}.", derives_decode)
+    context.indent -= 1
+    jet_format_end_block(&context)
+}
+fn jet_format_variant_field_span(field: VariantField) -> Span Never! { Span{start: field.name_span.start, end: field.ty_span.end} }
+fn jet_format_variant_name_and_payload(context: &JetFormatterContext, variant: Variant, name: String, derives_decode: Bool) Never! {
+    jet_format_inline_markers(&context, variant.serde_markers, variant.name_span.start)
+    jet_format_write(&context, name)
+    if variant.payload == {
+        .Unit -> {}
+        .Single(ty, span) -> {
+            jet_format_write(&context, "(")
+            jet_format_decode_type(&context, ty, span, derives_decode)
+            jet_format_write(&context, ")")
+        }
+        .Named(fields) -> {
+            jet_format_write(&context, "(")
+            source :: jet_format_source_list_span_after(&context, variant.name_span.end, JetFormatterSourceDelimiter.Paren)
+            multiline :: jet_format_comma_begin(&context, fields.len(), source)
+            loop (index, field) in fields {
+                span :: jet_format_variant_field_span(field)
+                jet_format_comma_before(&context, index, span, multiline)
+                jet_format_write(&context, "{field.name}: ")
+                jet_format_decode_type(&context, field.ty, field.ty_span, derives_decode)
+                jet_format_comma_after(&context, span, multiline)
+            }
+            jet_format_comma_end(&context, source, multiline)
+            jet_format_write(&context, ")")
+        }
+    }
+    if variant.discriminant_expr == {
+        .Val(expr) -> {
+            jet_format_write(&context, " = ")
+            jet_format_expr(&context, expr, JetFormatterPrec.OrFallback)
+        }
+        .None -> { if variant.discriminant == .Val(value) -> jet_format_write(&context, " = {value}") }
+    }
+}
+
+// Rust Items.rs:2229-2317: shared inline marker plane for variants/bindings.
+fn jet_format_inline_markers(context: &JetFormatterContext, markers: [Marker], start: Int) Never! {
+    if markers.len() == 0 -> return
+    jet_format_write(&context, "#")
+    if markers.len() == 1 { jet_format_marker(&context, markers[0]) } else {
+        jet_format_write(&context, "[")
+        source :: jet_format_source_marker_group_span(&context, start)
+        multiline :: jet_format_comma_begin(&context, markers.len(), source)
+        loop (index, marker) in markers {
+            span :: marker.span
+            jet_format_comma_before(&context, index, span, multiline)
+            jet_format_marker(&context, marker)
+            jet_format_comma_after(&context, span, multiline)
+        }
+        jet_format_comma_end(&context, source, multiline)
+        jet_format_write(&context, "]")
+    }
+    jet_format_write(&context, " ")
+}
+fn jet_format_struct_field(context: &JetFormatterContext, field: Field, derives_decode: Bool) Never! {
+    if field.redact || field.serde_markers.len() > 0 {
+        jet_format_write(&context, "#")
+        count :: field.serde_markers.len() + if field.redact -> 1 else -> 0
+        if count == 1 {
+            if field.redact -> jet_format_write(&context, "Redact") else -> jet_format_marker(&context, field.serde_markers[0])
+        } else {
+            jet_format_write(&context, "[")
+            indices := [Int]{}
+            if field.redact -> &indices.push(-1)
+            loop index in 0..<field.serde_markers.len() -> &indices.push(index)
+            source :: jet_format_source_marker_group_span(&context, field.name_span.start)
+            multiline :: jet_format_comma_begin(&context, indices.len(), source)
+            loop (ordinal, index) in indices {
+                span :: if index < 0 -> field.name_span else -> field.serde_markers[index].span
+                jet_format_comma_before(&context, ordinal, span, multiline)
+                if index < 0 -> jet_format_write(&context, "Redact") else -> jet_format_marker(&context, field.serde_markers[index])
+                jet_format_comma_after(&context, span, multiline)
+            }
+            jet_format_comma_end(&context, source, multiline)
+            jet_format_write(&context, "]")
+        }
+        jet_format_write(&context, " ")
+    }
+    jet_format_pub_qualifier(&context, field.is_pub, field.is_package_pub)
+    jet_format_write(&context, "{field.name}: ")
+    jet_format_decode_type(&context, field.ty, field.ty_span, derives_decode)
+    if field.computed == .Val(expr) {
+        jet_format_write(&context, " -> ")
+        jet_format_expr(&context, expr, jet_format_prec_add_rhs(JetFormatterPrec.OrFallback))
+    }
+    if field.default == .Val(expr) {
+        jet_format_write(&context, "{{")
+        jet_format_expr(&context, expr, jet_format_prec_add_rhs(JetFormatterPrec.OrFallback))
+        jet_format_write(&context, "}}")
+    }
+    end := field.ty_span.end
+    if field.computed == .Val(expr) -> end = expr_span(expr).end
+    if field.default == .Val(expr) -> end = expr_span(expr).end
+    jet_format_emit_trailing(&context, end)
+}
+fn jet_format_cli_binding(context: &JetFormatterContext, binding: CLICommandBinding) Never! {
+    jet_format_inline_markers(&context, binding.markers, binding.name_span.start)
+    jet_format_write(&context, "{binding.name} = ")
+    jet_format_expr(&context, binding.target, JetFormatterPrec.OrFallback)
+    jet_format_emit_trailing(&context, expr_span(binding.target).end)
+}
+
+// Rust Items.rs:2132-2227. Import facts are already canonical AST bindings.
+fn jet_format_import(context: &JetFormatterContext, declaration: ImportDecl) Never! {
+    if {
+        declaration.is_package_pub -> jet_format_write(&context, "pub(package) ")
+        declaration.is_pub -> jet_format_write(&context, "pub ")
+    }
+    jet_format_write(&context, "use ")
+    if declaration.kind == {
+        .File(path, _) -> {
+            jet_format_write(&context, "\"{path}\"")
+            parts :: path.split("/").to_list()
+            default_alias :: parts[parts.len() - 1]
+            if declaration.alias != default_alias -> jet_format_write(&context, " as {declaration.alias}")
+        }
+        .Module(name, _) -> {
+            jet_format_write(&context, name)
+            if declaration.inline_version == .Val(version) -> jet_format_write(&context, "#{version.text}")
+            parts :: name.split(".").to_list()
+            default_alias :: parts[parts.len() - 1]
+            if declaration.alias != default_alias || name.contains(".") -> jet_format_write(&context, " as {declaration.alias}")
+        }
+        .Unqualified(module_alias, _, items, items_span, _) -> {
+            if items.len() == 0 -> return
+            first :: items[0]
+            collapses :: items.len() == 1 && first.alias == None && !first.original.contains(".") && !module_alias.contains(".")
+            if collapses {
+                jet_format_write(&context, "{module_alias}.{first.original}")
+                return
+            }
+            jet_format_write(&context, "{module_alias}.[")
+            source :: jet_format_source_list_span_after(&context, items_span.start, JetFormatterSourceDelimiter.Bracket)
+            multiline :: jet_format_comma_begin(&context, items.len(), source)
+            loop index in 0..<items.len() {
+                span :: if {
+                    index < declaration.item_spans.len() -> declaration.item_spans[index]
+                    index < declaration.local_spans.len() -> declaration.local_spans[index]
+                    else -> declaration.alias_span
+                }
+                jet_format_comma_before(&context, index, span, multiline)
+                jet_format_write(&context, items[index].original)
+                if items[index].alias == .Val(alias) -> jet_format_write(&context, " as {alias}")
+                jet_format_comma_after(&context, span, multiline)
+            }
+            jet_format_comma_end(&context, source, multiline)
+            jet_format_write(&context, "]")
+        }
+    }
+}
+
+// Rust Items.rs:173-240: migration layout survives narrow token-span edits.
+struct JetFormatterMigrationEdit {
+    start: Int
+    end: Int
+    replacement: String
+}
+fn jet_format_migration_edit_start(edit: JetFormatterMigrationEdit) -> Int Never! { edit.start }
+fn jet_format_canonical_migration_source(context: &JetFormatterContext, span: Span) -> String Never! {
+    indices := [Int]{}
+    loop index in 0..<context.source_toks.len() {
+        token :: context.source_toks[index]
+        if token.span.start >= span.start && token.span.end <= span.end -> &indices.push(index)
+    }
+    edits := [JetFormatterMigrationEdit]{}
+    effect_arrows := [Int]{}
+    loop index in 0..<indices.len() {
+        token :: context.source_toks[indices[index]]
+        if token.kind != TOKEN_EQ && token.kind != TOKEN_COLON && token.kind != TOKEN_MINUS_MINUS -> next
+        if index + 1 >= indices.len() || context.source_toks[indices[index + 1]].kind != TOKEN_LBRACKET -> next
+        close := -1
+        loop candidate in (index + 2)..<indices.len() {
+            if context.source_toks[indices[candidate]].kind == TOKEN_RBRACKET {
+                close = candidate
+                break
+            }
+        }
+        if close < 0 || close + 1 >= indices.len() -> next
+        kind :: context.source_toks[indices[close + 1]].kind
+        if kind == TOKEN_GT || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW {
+            &edits.push(JetFormatterMigrationEdit{start: token.span.start, end: token.span.end, replacement: "-"})
+            &effect_arrows.push(close + 1)
+        }
+    }
+    loop index in 0..<indices.len() {
+        token :: context.source_toks[indices[index]]
+        replacement := String?{None}
+        if {
+            (token.kind == TOKEN_UNIFIED_ARROW || token.kind == TOKEN_LAMBDA_ARROW) && effect_arrows.contains(index) -> replacement = Val(">")
+            token.kind == TOKEN_LAMBDA_ARROW -> replacement = Val("->")
+            token.kind == TOKEN_DOT && index + 1 < indices.len() && context.source_toks[indices[index + 1]].kind == TOKEN_LBRACE -> replacement = Val("")
+            else -> {}
+        }
+        if replacement == .Val(text) -> &edits.push(JetFormatterMigrationEdit{start: token.span.start, end: token.span.end, replacement: text})
+    }
+    &edits.sort_by(jet_format_migration_edit_start)
+    output := [U8]{}
+    cursor := span.start
+    loop edit in edits {
+        if edit.start < cursor -> next
+        loop byte in context.source_bytes[cursor..<edit.start] -> &output.push(byte)
+        loop byte in edit.replacement.bytes() -> &output.push(byte)
+        cursor = edit.end
+    }
+    loop byte in context.source_bytes[cursor..<span.end] -> &output.push(byte)
+    String.from_bytes(output) ?? panic("migration edits preserve UTF-8 token boundaries")
+}
+
+// Rust Items.rs:295-438: exhaustive Item dispatch, with only the reference's
+// explicit source-owned DSL seams copied verbatim (never an unknown-kind fallback).
+fn jet_format_verbatim_item(context: &JetFormatterContext, span: Span, newline: Bool) Never! {
+    text :: jet_format_source_slice(&context, span.start, span.end) ?? ""
+    jet_format_write(&context, text)
+    if newline -> jet_format_newline(&context)
+    jet_format_skip_verbatim_comments(&context, span.end)
+}
+fn jet_format_item(context: &JetFormatterContext, item: Item) Never! {
+    if item == {
+        .Func(value) -> jet_format_func(&context, value, true)
+        .Struct(value) -> jet_format_struct(&context, value, true)
+        .Enum(value) -> jet_format_enum(&context, value, true)
+        .Impl(value) -> {
+            line_start := value.span.start
+            loop line_start > 0 && context.source_bytes[line_start - 1] != (U8{10}) { line_start -= 1 }
+            text :: jet_format_source_slice(&context, line_start, value.span.end) ?? ""
+            external_head :: "fn {value.type_name}."
+            if text.contains(external_head) {
+                split :: text.split(" = \"").to_list()
+                head :: split[0].replace("=[", "-[").replace(":[", "-[").replace("]=>", "]>").replace("=>", "->")
+                jet_format_write(&context, head)
+                if split.len() > 1 {
+                    jet_format_write(&context, " = \"")
+                    // split_once semantics: retain any later quoted separators.
+                    loop index in 1..<split.len() {
+                        if index > 1 -> jet_format_write(&context, " = \"")
+                        jet_format_write(&context, split[index])
+                    }
+                }
+                jet_format_newline(&context)
+                jet_format_skip_verbatim_comments(&context, value.span.end)
+            } else { jet_format_impl(&context, value) }
+        }
+        .Const(value) -> jet_format_const(&context, value)
+        .Test(value) -> jet_format_test(&context, value)
+        .ExternRust(value) -> jet_format_extern_rust(&context, value)
+        .Trait(value) -> jet_format_trait(&context, value)
+        .Tag(value) -> {
+            jet_format_pub_qualifier(&context, value.is_pub, value.is_package_pub)
+            jet_format_verbatim_item(&context, value.span, true)
+        }
+        .EffectDecl(value) -> jet_format_verbatim_item(&context, value.span, true)
+        .MarkerDecl(value) -> jet_format_marker_decl(&context, value)
+        .FactDecl(value) -> jet_format_fact_decl(&context, value)
+        .Module(value) -> { if !jet_format_perf_module(&context, value) -> jet_format_verbatim_item(&context, value.span, false) }
+        .CModule(value) -> jet_format_c_module(&context, value)
+        .CodeModule(value) -> jet_format_code_module(&context, value)
+        .Distinct(value) -> jet_format_distinct(&context, value)
+        .TypeAlias(value) -> jet_format_type_alias(&context, value)
+        .UnitFamily(value) -> {
+            jet_format_pub_qualifier(&context, value.is_pub, value.is_package_pub)
+            jet_format_verbatim_item(&context, value.span, false)
+        }
+        .ErrorConv(value) -> {
+            jet_format_write(&context, "impl {value.from_ty} -> {value.to_ty} ")
+            jet_format_verbatim_item(&context, value.body_span, true)
+        }
+        .Migration(value) -> {
+            text :: jet_format_canonical_migration_source(&context, value.span)
+            jet_format_write(&context, text)
+            jet_format_newline(&context)
+            jet_format_skip_verbatim_comments(&context, value.span.end)
+        }
+        .ProtocolDecl(value) -> jet_format_protocol_decl(&context, value)
+        .UserDerive(value) -> jet_format_derive_decl(&context, value)
+        .TemplateLoop(value) -> jet_format_item_template_loop(&context, value)
+        .GenericModule(value) -> jet_format_generic_module(&context, value)
+        .ModuleAlias(value) -> {
+            jet_format_pub_qualifier(&context, value.is_pub, value.is_package_pub)
+            jet_format_verbatim_item(&context, value.span, true)
+        }
+    }
+}

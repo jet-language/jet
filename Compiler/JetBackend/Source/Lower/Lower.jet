@@ -949,7 +949,7 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             lower_seal(&f, LIRTerminator.Return{value: Val(lowered)})
         }
         .Unreachable(_) -> lower_seal(&f, LIRTerminator.Unreachable)
-        .Yield(_, _) -> lower_fail(&m, &f, "generators are not lowered at O0 yet")
+        .Yield(_, _, _) -> lower_fail(&m, &f, "generators are not lowered at O0 yet")
     }
 }
 
@@ -1658,17 +1658,15 @@ fn lower_build_string(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     builder :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
     loop part in parts {
-        if part.kind == {
+        if part == {
             .Literal(text) -> {
                 args := [LIRValueID]{builder}
                 loop arg in lower_static_text(&m, &f, text) -> &args.push(arg)
                 lower_call_runtime(&m, &f, "jet_rt_string_builder_push_static", args, None)
             }
-            .Interpolation(value, format) -> {
-                if format != .Display -> return lower_fail(&m, &f, "interpolation formats other than Display are not lowered at O0 yet")
-                text :: lower_display(p, c, &m, &f, value) ?? return
-                lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, text.value}, None)
-                if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
+            .Value(value) -> {
+                text :: lower_use(&m, &f, value) ?? return
+                lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, text}, None)
             }
         }
     }
@@ -1694,6 +1692,16 @@ fn lower_function_index(m: LowerModule, id: MIRFunctionID) -> Int Never! {
 
 fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, callee: MIRCallee, args: [MIRCallArg], type_arg_count: Int) Never! {
     if type_arg_count > 0 -> return lower_fail(&m, &f, "generic calls are not lowered at O0 yet")
+    if callee == .Prelude(call) {
+        row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "call names missing Prelude call {call.value}")
+        if row.module_name == "core.text.fmt" && row.member == "display" {
+            if args.len() != 1 -> return lower_fail(&m, &f, "checked display route has wrong arity")
+            text :: lower_display(p, c, &m, &f, args[0].value) ?? return
+            if text.owned -> return lower_alias(c, &f, instruction, text.value)
+            dst :: lower_result(p, c, &m, &f, instruction) ?? return
+            return lower_call_runtime(&m, &f, "jet_rt_string_clone", [LIRValueID]{text.value}, Val(dst))
+        }
+    }
     lowered := [LIRValueID]{}
     loop arg in args {
         if lower_is_absent(f, arg.value) -> next

@@ -1,11 +1,37 @@
 // Checked Jet front-end pipeline: parse, check, lower, and assemble package MIR.
+use core.files.runtime.kernel_path_components as compiler_driver_os_path
+use jet_pkg_model.[PackageFacts, pkg_parse_policy_document]
 use jet_foundation.[
     AccessConvention,
+    BuildFactSnapshot,
+    BuildFactValue,
+    BuildSettingFact,
+    MIROSTarget,
     DIAGNOSTIC_ERROR,
     Diagnostic,
+    ContributionLayer,
+    FactContribution,
+    EffectiveFact,
+    FactKey,
+    fact_key_new,
+    Item,
+    VariantPayload,
+    fact_value_display,
+    fact_error_diagnostic,
+    FactValue,
+    SourceScope,
+    PolicyDeclaration,
+    PolicyScope,
+    policy_key_is_audited_gate,
+    diagnostic_with_source_path,
+    fact_contribution_new,
+    fact_key_with_default_source,
+    fact_resolve,
+    fact_error_message,
     ImportedItem,
     MIRAccess,
     MIRAllocatorPolicy,
+    MIRAppGraph,
     MIRArtifactBuildMode,
     MIRArtifactID,
     MIRArtifactKind,
@@ -43,7 +69,8 @@ use jet_foundation.[
     MIRLinkUnitID,
     MIRModule,
     MIRModuleID,
-    MIRNameFacts,
+    NameLedger,
+    name_ledger_mir_facts,
     MIROwnership,
     MIRPackageFacts,
     MIRParam,
@@ -71,6 +98,7 @@ use jet_foundation.[
     TUnaryOp,
     Type,
     TFunc,
+    TJobFact,
     TTypeDef,
     TTypeDefKind,
     core_module_export,
@@ -99,6 +127,8 @@ use jet_sema.[
     JET_CANONICAL_EFFECT_MODULE_PATH,
     JET_CANONICAL_EFFECT_PACKAGE_IDENTITY,
     SemaBuildFacts,
+    SemaBuildSettingFact,
+    sema_checked_const_char,
     SemaCheckedForeignFunction,
     SemaCheckedTextEvaluation,
     SemaComptimeDeclarationStage,
@@ -123,6 +153,7 @@ use jet_sema.[
     sema_check_comptime_function,
     sema_check_comptime_item,
     sema_collect_comptime_declarations,
+    sema_validate_budget_specs_bundle,
     sema_comptime_append_checked_function,
     sema_comptime_checked_text_source,
     sema_comptime_dependency_cycle_diagnostic,
@@ -143,13 +174,15 @@ use jet_codegen.[
     JetCodegenForeignArtifacts,
     JetCodegenFunctions,
     JetCodegenLoweredFunction,
-    JetRustEmitConfig,
+    JetRustEmitTarget,
     JetRustEmitManifest,
     JetWebEmitConfig,
     jet_codegen_collect_type_instances,
     jet_codegen_reachable_core_functions,
     jet_codegen_sorted_order,
+    jet_codegen_lower_job_test_artifacts,
     jet_rust_emit_program,
+    jet_rust_emit_config_for_artifact,
     jet_web_emit,
     lower_comptime_item,
     lower_foreign_artifacts,
@@ -377,7 +410,8 @@ fn jet_driver_source_file_for_loaded_module(load: JetDriverLoadResult, module_in
     if module_index < 0 || module_index >= load.modules.len() -> return None
     source_unit_index := load.modules[module_index].source_unit_index
     if source_unit_index < 0 || source_unit_index >= load.source_units.len() -> return None
-    source_file := mir_source_file_id(load.source_units[source_unit_index].path)
+    unit :: load.source_units[source_unit_index]
+    source_file := mir_source_file_id(unit.provenance_source_file ?? unit.path)
     if !jet_driver_has_source_file_id(load.source_files, source_file) -> return None
     Val(source_file)
 }
@@ -832,23 +866,23 @@ fn jet_driver_find_graph_import(imports: [SemaRegistrationImport], source_identi
 // the importer, once per dependency package (E0626), naming the check that
 // owns those errors.
 fn jet_driver_summarize_dependency_reports(load: JetDriverLoadResult, diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
-    entry_root := ""
-    loop package in load.packages {
-        if package.identity == load.package_identity -> entry_root = package.root_path
-    }
+    entry_root :: load.project_root
     kept := [Diagnostic]{}
     failing := [Bool]{}
     loop package in load.packages -> &failing.push(false)
     loop diagnostic in diagnostics {
-        // Diagnostics name a source by its display path; package roots are canonical.
+        // Match labels to retained units; never invert a lossy diagnostic path.
         source_path :: diagnostic.source_path ?? ""
-        path :: if source_path.len() == 0 -> "" else -> jet_driver_physical_path(entry_root, source_path)
         owner := -1
         owner_length := -1
-        loop (index, package) in load.packages {
-            if path.len() == 0 || package.root_path.len() <= owner_length || !jet_driver_path_within(path, package.root_path) -> next
-            owner = index
-            owner_length = package.root_path.len()
+        loop unit in load.source_units {
+            if unit.path != source_path -> next
+            physical :: unit.physical_path ?? next
+            loop (index, package) in load.packages {
+                if package.root_path.encoded.len() <= owner_length || !jet_driver_path_within(physical, package.root_path) -> next
+                owner = index
+                owner_length = package.root_path.encoded.len()
+            }
         }
         if owner < 0 || load.packages[owner].identity == load.package_identity || load.packages[owner].identity.starts_with("source-root:") {
             &kept.push(diagnostic)
@@ -993,40 +1027,173 @@ fn jet_driver_host_os_key(value: String) -> String Never! {
     ""
 }
 
-// D-CONF-READ1=A: the build snapshot sema folds `$package.*` and `$build.*`
-// from (Rust `seed_build_facts_from_stamp`). A manifest package names itself;
-// the manifest-less rung uses the entry file stem and version `0.0.0`. The
-// toolchain stamp is the compiler's own package version.
-fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRequest, target_machine: MIRTargetMachine) -> SemaBuildFacts Never! {
+// Rust seed_build_facts_from_stamp: loaded canonical declarations, every profile,
+// CLI/computed writers and fixed leaves share Foundation's one resolver.
+fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRequest, target_machine: MIRTargetMachine, entry_path: compiler_driver_os_path.OsPath, diagnostics: &[Diagnostic]) -> SemaBuildFacts? {
     package_name := ""
     package_version := ""
+    profile_source := "<default>"
+    manifest := PackageFacts?{None}
     loop package in load.packages {
         if package.identity == load.package_identity {
             package_name = package.name
             package_version = package.version
+            profile_source = package.manifest_path ?? "<default>"
+            manifest = package.manifest_facts
         }
     }
     if package_name.len() == 0 {
-        segments :: request.authorized_sources.entry_path.split("/").to_list()
-        file :: segments[segments.len() - 1]
+        file := jet_driver_path_leaf(entry_path) // #4303
         package_name = if file.ends_with(".jet") -> file.slice(0, file.len() - 4) else -> file
     }
     if package_name.len() == 0 -> package_name = "script"
     if package_version.len() == 0 -> package_version = "0.0.0"
     host_os := ""
     if request.host_facts.active_os == .Val(raw_os) -> host_os = jet_driver_host_os_key(raw_os)
-    toolchain := ""
-    if request.host_facts.compiler_identity == .Val(identity) -> toolchain = jet_target_package_version_from_compiler_identity(identity) ?? ""
-    SemaBuildFacts{
-        package_name: package_name,
-        package_version: package_version,
+    stamp :: request.host_facts.build_stamp ?? return None
+    profile_key :: fact_key_with_default_source("Build.Profile", FactValue.Text("dev"), profile_source)
+    profile_contributions := [FactContribution]{}
+    if request.profile != "dev" -> &profile_contributions.push(fact_contribution_new("Build.Profile", FactValue.Text(request.profile), SourceScope.Package, ContributionLayer.CommandLine, "command line"))
+    profile_fact :: jet_driver_resolve_build_fact(profile_key, profile_contributions, &diagnostics) ?? return None
+    resolved_profile :: if profile_fact.value == .Text(value) -> value else -> request.profile
+    facts := SemaBuildFacts{
+        package_name: package_name, package_version: package_version,
         os: jet_target_active_os_name(target_machine.triple, host_os),
-        profile: "dev",
-        stamp_git: None,
-        stamp_dirty: false,
-        stamp_toolchain: toolchain,
-        stamp_at: "",
+        profile: resolved_profile, stamp_git: stamp.git, stamp_dirty: stamp.dirty,
+        stamp_toolchain: stamp.toolchain, stamp_at: stamp.at, gates: request.gates,
+        artifact_build: request.artifact_build,
     }
+    canonical_settings := [String:BuildSettingFact]{}
+    facts.organization_policy = load.organization_policy ?? return None
+    loop package in load.packages {
+        if package.manifest_facts == .Val(manifest) -> facts.package_policies[package.identity] = manifest.policy.declarations
+    }
+    facts.contributions[profile_fact.key.name] = profile_fact
+    fixed := [FactContribution]{
+        fact_contribution_new("Build.Package.Name", FactValue.Text(package_name), SourceScope.Package, ContributionLayer.Declaration, if manifest == None -> "<source>" else -> profile_source),
+        fact_contribution_new("Build.Package.Version", FactValue.Text(package_version), SourceScope.Package, ContributionLayer.Declaration, if manifest == None -> "<source>" else -> profile_source),
+        fact_contribution_new("Build.OS", FactValue.Enum(facts.os), SourceScope.Package, ContributionLayer.Declaration, "<target>"),
+        fact_contribution_new("Build.Stamp.Git", FactValue.OptionalText(stamp.git), SourceScope.Package, ContributionLayer.Declaration, ".jet/lock"),
+        fact_contribution_new("Build.Stamp.Dirty", FactValue.Bool(stamp.dirty), SourceScope.Package, ContributionLayer.Declaration, ".jet/lock"),
+        fact_contribution_new("Build.Stamp.Toolchain", FactValue.Text(stamp.toolchain), SourceScope.Package, ContributionLayer.Declaration, ".jet/lock"),
+        fact_contribution_new("Build.Stamp.At", FactValue.Text(stamp.at), SourceScope.Package, ContributionLayer.Declaration, ".jet/lock"),
+    }
+    loop writer in fixed {
+        fact :: jet_driver_resolve_build_fact(fact_key_new(writer.key), [FactContribution]{writer}, &diagnostics) ?? return None
+        facts.contributions[fact.key.name] = fact
+    }
+    enums := [String:[String:Bool]]{}
+    loop module in load.modules -> jet_driver_collect_setting_enums(jet_driver_module_program(load, module).items, &enums)
+    if manifest == .Val(package) {
+        keys := package.settings.keys().to_list()
+        &keys.sort()
+        defaults := [String:FactValue]{}
+        writers := [String:[FactContribution]]{}
+        loop key in keys {
+            declaration :: package.settings[key]
+            if jet_driver_parse_setting_value(declaration.ty, declaration.default, enums) == {
+                .Ok(value) -> defaults[key] = value
+                .Err(error) -> {
+                    &diagnostics.push(jet_driver_invalid_setting(key, declaration.ty, declaration.default, error.detail))
+                    return None
+                }
+            }
+            writers[key] = [FactContribution]{}
+        }
+        // Inactive profiles remain package input: validate them all, once.
+        loop profile in package.build_profiles {
+            profile_keys := profile.settings.keys().to_list()
+            &profile_keys.sort()
+            loop key in profile_keys {
+                raw :: profile.settings[key]
+                declaration :: package.settings.get(key) ?? {
+                    &diagnostics.push(jet_driver_undeclared_setting(key, "the profile contribution names no declaration in `package.jet`", package.origin))
+                    return None
+                }
+                if jet_driver_parse_setting_value(declaration.ty, raw, enums) == {
+                    .Err(error) -> {
+                        &diagnostics.push(jet_driver_invalid_setting(key, declaration.ty, raw, error.detail))
+                        return None
+                    }
+                    .Ok(value) -> if profile.name == request.profile {
+                        &writers[key].push(fact_contribution_new("Build.Settings.{key}", value, SourceScope.Package, ContributionLayer.OptimizationBundle, "package.jet:build.{request.profile}.settings.{key}"))
+                    }
+                }
+            }
+        }
+        override_keys := request.setting_overrides.keys().to_list()
+        &override_keys.sort()
+        loop key in override_keys {
+            raw :: request.setting_overrides[key]
+            declaration :: package.settings.get(key) ?? {
+                &diagnostics.push(jet_driver_undeclared_setting(key, "the CLI contribution names no declaration in `package.jet`", package.origin))
+                return None
+            }
+            if jet_driver_parse_setting_value(declaration.ty, raw, enums) == {
+                .Ok(value) -> &writers[key].push(fact_contribution_new("Build.Settings.{key}", value, SourceScope.Package, ContributionLayer.CommandLine, "command line:--set {key}={raw}"))
+                .Err(error) -> {
+                    &diagnostics.push(jet_driver_invalid_setting(key, declaration.ty, raw, error.detail))
+                    return None
+                }
+            }
+        }
+        prefix :: "Build.Settings."
+        loop writer in request.computed_setting_contributions {
+            if !writer.key.starts_with(prefix) {
+                &diagnostics.push(jet_driver_undeclared_setting(writer.key, "`fn build` can contribute only to a declared setting", package.origin))
+                return None
+            }
+            key := writer.key.slice(prefix.len(), writer.key.len()) // #4303
+            if !package.settings.has_key(key) {
+                &diagnostics.push(jet_driver_undeclared_setting(key, "the `fn build` contribution names no declaration in `package.jet`", package.origin))
+                return None
+            }
+            &writers[key].push(writer)
+        }
+        loop key in keys {
+            declaration :: package.settings[key]
+            fact :: jet_driver_resolve_build_fact(fact_key_with_default_source("Build.Settings.{key}", defaults[key], "package.jet:settings.{key} (default)"), writers[key], &diagnostics) ?? return None
+            setting :: jet_driver_setting_from_fact(declaration.ty, fact.value, enums) ?? {
+                &diagnostics.push(jet_driver_invalid_setting(key, declaration.ty, fact_value_display(fact.value), "the computed value does not match the declared setting type"))
+                return None
+            }
+            facts.settings[key] = setting
+            // SAME already-validated folded fact, not a second contribution fold
+            // or an encoding of Sema's internal Type/TComptimeValue carrier.
+            canonical_settings[key] = BuildSettingFact{ty: declaration.ty, value: jet_driver_snapshot_setting_value(declaration.ty, fact.value)}
+            facts.setting_provenance[key] = loop writer in fact.provenance -> jet_driver_setting_provenance_line(writer)
+            facts.contributions[fact.key.name] = fact
+        }
+    } else {
+        if request.setting_overrides.len() != 0 || request.computed_setting_contributions.len() != 0 {
+            keys := request.setting_overrides.keys().to_list()
+            &keys.sort()
+            key := if keys.len() > 0 -> keys[0] else -> request.computed_setting_contributions[0].key
+            prefix :: "Build.Settings."
+            if keys.len() == 0 && key.starts_with(prefix) -> key = key.slice(prefix.len(), key.len())
+            root_display :: compiler_driver_os_path.display(load.project_root)
+            &diagnostics.push(jet_driver_undeclared_setting(key, "the package has no `settings:` declaration", "{root_display}/package.jet"))
+            return None
+        }
+    }
+    // Missing native identity cannot produce a cache candidate. The retained
+    // checked consumer reports the native gate, without a fabricated dossier.
+    if request.host_facts.target_triple == .Val(triple) && triple.len() != 0 && request.host_facts.target_dossier == .Val(dossier) {
+        os :: if facts.os == {
+            "Linux" -> MIROSTarget.Linux
+            "MacOS" -> MIROSTarget.MacOS
+            "Windows" -> MIROSTarget.Windows
+            else -> panic("selected OS is an exact native OSTarget")
+        }
+        facts.snapshot = Val(BuildFactSnapshot{
+            package_name: facts.package_name, package_version: facts.package_version,
+            os: os, target_triple: triple, target_dossier: dossier,
+            profile: facts.profile, artifact_build: facts.artifact_build, stamp: stamp,
+            contributions: facts.contributions, settings: canonical_settings,
+            setting_provenance: facts.setting_provenance,
+        })
+    }
+    Val(facts)
 }
 
 fn jet_driver_selected_target_machine(
@@ -1067,6 +1234,7 @@ fn jet_driver_package_facts(
     used_core: [String],
     inferred_layer: MIRRuntimeLayer,
     hardware_use: MIRTargetHardwareUse,
+    web_app: MIRAppGraph?,
     diagnostics: &[Diagnostic],
 ) -> MIRPackageFacts? {
     package := JetDriverPackageInfo?{None}
@@ -1164,7 +1332,7 @@ fn jet_driver_package_facts(
         package_version: package_version,
         artifact_target: Val(artifact_target),
         target_dossier: dossier,
-        web_app: None,
+        web_app: web_app,
         authority_needs: selected.authority_needs,
         hardware_use: hardware_use,
         hardware_profile: None,
@@ -1426,8 +1594,9 @@ fn jet_driver_comptime_eval_config(
 fn jet_driver_assemble_mir(
     load: JetDriverLoadResult,
     semantic_modules: [SemaGraphModuleResult],
+    typed_functions: [TFunc],
     semantic_imports: [SemaRegistrationImport],
-    names: MIRNameFacts,
+    names: NameLedger,
     lowered: JetCodegenFunctions,
     foreign_artifacts: JetCodegenForeignArtifacts,
     facts: MIRPackageFacts,
@@ -1545,7 +1714,7 @@ fn jet_driver_assemble_mir(
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() -> return None
         unit := load.source_units[loaded_module.source_unit_index]
         module_id := mir_module_id(loaded_module.module_identity)
-        module_source_file := mir_source_file_id(unit.path)
+        module_source_file := mir_source_file_id(unit.provenance_source_file ?? unit.path)
         if !jet_driver_has_source_file_id(load.source_files, module_source_file) -> return None
         module_import_ids := [MIRImportID]{}
         children := [MIRModuleID]{}
@@ -1615,11 +1784,20 @@ fn jet_driver_assemble_mir(
         })
     }
     if assigned_functions != all_functions.len() || assigned_foreigns != foreign_artifacts.foreign.len() || assigned_types != lowered.types.len() || assigned_traits != lowered.traits.len() || assigned_impls != lowered.impls.len() || assigned_constants != lowered.constants.len() -> return None
+    job_facts := [TJobFact]{}
+    loop module in semantic_modules {
+        loop job in module.jobs -> &job_facts.push(job)
+    }
+    job_artifacts :: jet_codegen_lower_job_test_artifacts(job_facts, [], [], typed_functions, all_functions)
+    if job_artifacts.jobs.len() != job_facts.len() {
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not retain every checked job", "job discovery consumes the semantic producer's checked function identity, arguments, and cadence", "preserve the complete checked job fact table through Codegen"))
+        return None
+    }
     Val(MIRProgram{
         schema_version: MIR_SCHEMA_VERSION,
         package_identity: load.package_identity,
         facts: facts,
-        names: names,
+        names: name_ledger_mir_facts(names),
         modules: modules,
         imports: imports,
         types: lowered.types,
@@ -1630,7 +1808,7 @@ fn jet_driver_assemble_mir(
         fields: lowered.fields,
         source_files: load.source_files,
         functions: all_functions,
-        jobs: [MIRJob]{},
+        jobs: job_artifacts.jobs,
         tests: [MIRTestCase]{},
         harnesses: [MIRHarnessPlan]{},
         artifacts: [MIRArtifactPlan]{},
@@ -1879,12 +2057,16 @@ fn jet_driver_run_comptime(
                 lowered.used_core,
                 jet_ring_prelude_closure_layer(lowered.used_core),
                 temporary_hardware_use,
+                // Temporary comptime MIR has an evaluation entry, not the
+                // finalized checked App-returning application entry.
+                None,
                 &diagnostics,
             ) ?? return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             foreign_artifacts := lower_foreign_artifacts(runtime_modules, temporary_facts)
             temporary_program := jet_driver_assemble_mir(
                 load,
                 runtime_modules,
+                closure.functions,
                 [SemaRegistrationImport]{},
                 stage.names,
                 lowered,
@@ -2005,7 +2187,7 @@ fn jet_driver_comptime_small_int(value: Int) -> Bool Never! {
 }
 
 fn jet_driver_foreign_provider_owners_valid(
-    modules: [JetDriverLoadedModule],
+    modules: [JetDriverModuleFacts],
     providers: [SemaForeignProviderInput],
     diagnostics: &[Diagnostic],
 ) -> Bool {
@@ -2317,7 +2499,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
         }
     }
     &load.generated_source_files.push(MIRSourceFile{id: mir_source_file_id(canonical_effect_module.source_file), path: canonical_effect_module.source_file, source: request.canonical_effect_source})
-    foreign_provider_inputs := jet_driver_assemble_foreign_providers(request.authorized_sources, &load)
+    foreign_provider_inputs := jet_driver_assemble_foreign_providers(request, &load)
     if !load.complete || jet_driver_has_errors(load.diagnostics) {
         failure :: load.failed_stage ?? JetDriverStage.Load
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(failure), false, trace)
@@ -2333,6 +2515,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
     target_machine :: target_machine_option ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
 
     registration_inputs := [SemaRegistrationModuleInput]{}
+    generic_identities :: jet_driver_genmod_package_identities(load, request.authorized_sources)
     loop loaded_module in load.modules {
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() {
             &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a loaded module has no exact source-unit owner", "semantic registration preserves the loader's canonical source-unit identity", "retain the catalog source-unit index returned by JetDriver"))
@@ -2349,27 +2532,28 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
             module_identity: loaded_module.module_identity,
             module_name: loaded_module.module_name,
             module_path: jet_driver_module_display(unit.relative_path),
-            source_file: unit.path,
+            generic_package_identity: generic_identities.get(loaded_module.package_identity),
+            generic_definition_path: unit.relative_path.replace("\\", "/"),
+            generic_application_module: jet_driver_module_display(unit.relative_path),
+            source_file: unit.provenance_source_file ?? unit.path,
             source_segments: unit.source_segments,
             source_origin: unit.source_origin,
-            program: loaded_module.program,
+            program: jet_driver_module_program(load, loaded_module),
+            unit_source: jet_driver_unit_semantic_source(load, unit) ?? return jet_driver_compile_internal_result(load, trace, "a loaded unit has no retained semantic source for Units Prelude injection"),
             foreign_handles: registration_foreign_handles,
         })
     }
+    budget_diagnostics :: sema_validate_budget_specs_bundle(registration_inputs, jet_driver_budget_package_roots(load))
     &registration_inputs.push(canonical_effect_module)
     registration_module_count := registration_inputs.len()
-    package_policies := [SemaRegistrationPackagePolicy]{}
-    loop package in load.packages {
-        &package_policies.push(SemaRegistrationPackagePolicy{
-            package_identity: package.identity,
-            authority_allow: package.authority_allow,
-            authority_deny: package.authority_deny,
-            authority_needs: package.authority_needs,
-            runtime_ceiling: package.runtime_ceiling,
-            edition: package.edition,
-        })
-    }
+    package_policies := jet_driver_registration_package_policies(load, request.authorized_sources.roots[0..<request.authorized_sources.roots.len()])
     canonical_effect_module_identity := canonical_effect_module.module_identity
+    if request.host_facts.build_stamp == None -> return jet_driver_compile_internal_result(load, trace, "CP-POLICY-SETTINGS: the native host omitted its lock-authorized build stamp")
+    if request.host_facts.organization_policy == .MissingProvider(path) -> return jet_driver_compile_internal_result(load, trace, "CP-POLICY-SETTINGS: the native host omitted the configured organization policy `{path}`")
+    fact_diagnostics := [Diagnostic]{}
+    build_facts_option :: jet_driver_build_facts(load, request, target_machine, request.authorized_sources.entry_path, &fact_diagnostics)
+    loop diagnostic in fact_diagnostics -> &load.diagnostics.push(diagnostic)
+    build_facts :: build_facts_option ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
     if request.trace_sink == .Val(sink) -> sink.begin("register", "", -1, -1)
     registration_graph := sema_registration_prepare_graph(
         registration_inputs,
@@ -2379,8 +2563,8 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
         canonical_effect_module_identity,
         foreign_provider_inputs,
         target_machine,
-        jet_driver_build_facts(load, request, target_machine),
-        request.eval_config.host_hooks,
+        build_facts,
+        jet_driver_closed_hooks(load, request),
     )
     if request.trace_sink == .Val(sink) -> sink.end("register", registration_graph.modules.len())
     if registration_graph.internal_problem != None {
@@ -2393,6 +2577,8 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
     }
     if request.trace_sink == .Val(sink) -> sink.begin("sema.check", "", -1, -1)
     comptime_stage := sema_collect_comptime_declarations(registration_graph, package_policies, request.trace_sink)
+    loop diagnostic in budget_diagnostics -> &comptime_stage.diagnostics.push(diagnostic)
+    if budget_diagnostics.len() != 0 -> comptime_stage.complete = false
     if request.trace_sink == .Val(sink) -> sink.end("sema.check", comptime_stage.modules.len())
     if !comptime_stage.complete || comptime_stage.modules.len() != registration_module_count || jet_driver_has_errors(comptime_stage.diagnostics) {
         loop diagnostic in comptime_stage.diagnostics -> &load.diagnostics.push(diagnostic)
@@ -2436,7 +2622,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
         return result
     }
     if request.trace_sink == .Val(sink) -> sink.begin("sema.finalize", "", -1, -1)
-    checked_graph := sema_finalize_registration_graph(registration_graph, comptime_stage, comptime_run.values, comptime_run.functions, request.trace_sink)
+    checked_graph := sema_finalize_registration_graph(registration_graph, comptime_stage, comptime_run.values, comptime_run.functions, request.trace_sink, None, jet_driver_entry_root_path(request.authorized_sources))
     if request.trace_sink == .Val(sink) -> sink.end("sema.finalize", checked_graph.modules.len())
     if checked_graph.modules.len() != registration_module_count {
         loop diagnostic in checked_graph.diagnostics -> &load.diagnostics.push(diagnostic)
@@ -2459,6 +2645,8 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
         load,
         request,
         &stage_diagnostics,
+        None,
+        jet_driver_entry_root_path(request.authorized_sources),
     )
     if request.trace_sink == .Val(sink) -> sink.end("comptime.bodies", body_run.values.len())
     load.diagnostics = stage_diagnostics
@@ -2616,6 +2804,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
         checked_graph.core_usage.used_core,
         checked_graph.core_usage.inferred_layer,
         checked_graph.hardware_use,
+        checked_graph.effect_facts.web_app,
         &stage_diagnostics,
     )
     load.diagnostics = stage_diagnostics
@@ -2627,6 +2816,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
     program := jet_driver_assemble_mir(
         load,
         runtime_semantic_modules,
+        sema_functions,
         checked_graph.imports,
         checked_graph.names,
         lowered,
@@ -2755,17 +2945,9 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
     }
 
     if request.trace_sink == .Val(sink) -> sink.begin("emit", "", -1, -1)
-    emitted := jet_rust_emit_program(optimized_program, JetRustEmitConfig{
-        target: "rust_aot",
-        root_prefix: "",
-        emit_types: true,
-        emit_foreign: true,
-        emit_metadata: true,
-        // The native build profile is `dev` (build facts above), whose
-        // development devtools policy keeps the local rail on.
-        local_rail: true,
-        web_bucket: None,
-    }, request.trace_sink)
+    emit_config := jet_rust_emit_config_for_artifact(artifact_plan.id, jet_target_layout_from_machine(target_machine), JetRustEmitTarget.Native)
+    emit_config.emit_metadata = true
+    emitted := jet_rust_emit_program(optimized_program, emit_config, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("emit", optimized_program.functions.len())
     emitted_source := String?{None}
     emit_manifest := JetRustEmitManifest?{None}
@@ -2789,4 +2971,225 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
     }
     if !emission_complete -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Emit), false, trace)
     jet_driver_compile_result(load, load.diagnostics, entry_function, Val(optimized_program), emitted_source, emit_manifest, None, true, trace)
+}
+
+// Rust Driver/mod.rs::parse_setting_value and its literal-domain helpers.
+#Error
+struct JetDriverSettingValueError { detail: String }
+
+fn jet_driver_setting_type_name(name: String) -> Bool Never! {
+    bytes :: name.bytes()
+    if bytes.len() == 0 || bytes[0] < U8{65} || bytes[0] > U8{90} -> return false
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        if !((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95) -> return false
+    }
+    true
+}
+
+// Rust valid_setting_variant: each dot-separated segment is UpperCase ASCII.
+fn jet_driver_setting_variant(name: String) -> Bool Never! {
+    loop segment in name.split(".") {
+        if !jet_driver_setting_type_name(segment) -> return false
+    }
+    true
+}
+
+// Rust unquote_setting: strip paired quotes, decode n/r/t and literal escaped
+// scalars, and retain a final backslash. One buffer, no growing-string loop.
+fn jet_driver_unquote_setting(value: String) -> String Never! {
+    raw := value.trim() // #4303
+    body := raw
+    if raw.len() >= 2 && raw.starts_with("\"") && raw.ends_with("\"") -> body = raw.slice(1, raw.len() - 1)
+    out := [U8]{}
+    escaped := false
+    loop scalar in body.chars() {
+        text :: "{scalar}"
+        if {
+            escaped -> {
+                decoded :: if text == {
+                    "n" -> "\n"
+                    "r" -> "\r"
+                    "t" -> "\t"
+                    else -> text
+                }
+                loop byte in decoded.bytes() -> &out.push(byte)
+                escaped = false
+            }
+            text == "\\" -> escaped = true
+            else -> loop byte in text.bytes() -> &out.push(byte)
+        }
+    }
+    if escaped -> &out.push(U8{92})
+    String.from_bytes(out) ?? panic("setting scalar buffer is UTF-8")
+}
+
+// Rust parse_setting_char: bare one scalar or exactly one decoded quoted scalar.
+fn jet_driver_parse_setting_char(raw: String) -> Char JetDriverSettingValueError! {
+    body := raw
+    if {
+        raw.len() >= 2 && raw.starts_with("'") && raw.ends_with("'") -> body = jet_driver_unquote_setting(raw.slice(1, raw.len() - 1))
+        raw.len() != 1 -> return Err(JetDriverSettingValueError{detail: "Char settings use one quoted character"})
+        else -> {}
+    }
+    if body.len() != 1 -> return Err(JetDriverSettingValueError{detail: "Char settings need one character"})
+    loop scalar in body.chars() -> return Ok(scalar)
+    Err(JetDriverSettingValueError{detail: "Char settings need one character"})
+}
+
+// Rust parse_setting_value: use Core's exact integer parser after constraining
+// Rust i64 decimal syntax; no float/coercion or enum text guessing.
+fn jet_driver_parse_setting_value(type_text: String, value_text: String, enums: [String:[String:Bool]]) -> FactValue JetDriverSettingValueError! {
+    ty := type_text.trim() // #4303
+    raw := value_text.trim() // #4303
+    if ty == {
+        "Bool" -> {
+            if raw == "true" -> return Ok(FactValue.Bool(true))
+            if raw == "false" -> return Ok(FactValue.Bool(false))
+            return Err(JetDriverSettingValueError{detail: "Bool settings use `true` or `false`"})
+        }
+        "Int" -> {
+            bytes :: raw.bytes()
+            start :: if bytes.len() > 0 && (bytes[0] == U8{43} || bytes[0] == U8{45}) -> 1 else -> 0
+            invalid :: JetDriverSettingValueError{detail: "Int settings use a signed 64-bit whole number"}
+            if bytes.len() == start -> return Err(invalid)
+            loop index in start..<bytes.len() {
+                if bytes[index] < U8{48} || bytes[index] > U8{57} -> return Err(invalid)
+            }
+            number :: Int.parse(raw) ?? return Err(invalid)
+            if number < -9223372036854775808 || number > 9223372036854775807 -> return Err(invalid)
+            return Ok(FactValue.Int(number))
+        }
+        "Char" -> return Ok(FactValue.Char(jet_driver_parse_setting_char(raw)))
+        "String" -> return Ok(FactValue.Text(jet_driver_unquote_setting(raw)))
+        else -> {}
+    }
+    if !jet_driver_setting_type_name(ty) -> return Err(JetDriverSettingValueError{detail: "settings use Bool, Int, Char, String, or a fieldless enum type"})
+    variant := raw // #4303
+    if raw.starts_with(".") -> variant = raw.slice(1, raw.len()).trim()
+    if variant.len() == 0 || !jet_driver_setting_variant(variant) -> return Err(JetDriverSettingValueError{detail: "fieldless enum settings use a named variant such as `.On`"})
+    variants :: enums.get(ty) ?? return Err(JetDriverSettingValueError{detail: "`{ty}` is not a declared fieldless enum"})
+    if !variants.has_key(variant) -> return Err(JetDriverSettingValueError{detail: "`{ty}` has no fieldless variant `{variant}`"})
+    Ok(FactValue.Enum(variant))
+}
+
+// Rust collect_fieldless_setting_enums: inspect authored nested module bodies
+// once; payload-bearing enums are excluded even if some variants are unit.
+fn jet_driver_collect_setting_enums(items: [Item], enums: &[String:[String:Bool]]) Never! {
+    loop item in items {
+        if item == {
+            .Enum(definition) -> {
+                variants := [String:Bool]{}
+                fieldless := true
+                loop variant in definition.variants {
+                    if variant.payload == VariantPayload.Unit -> variants[variant.name] = true else -> fieldless = false
+                }
+                if fieldless -> enums[definition.name] = variants
+            }
+            .CodeModule(module) -> {
+                if module.body == .Val(body) -> jet_driver_collect_setting_enums(body, &enums)
+            }
+            .GenericModule(module) -> jet_driver_collect_setting_enums(module.body, &enums)
+            else -> {}
+        }
+    }
+}
+
+// Rust setting_value_from_fact: validate the winning computed contribution's
+// variant and declared type without reparsing its displayed representation.
+fn jet_driver_setting_from_fact(type_text: String, value: FactValue, enums: [String:[String:Bool]]) -> SemaBuildSettingFact? Never! {
+    ty := type_text.trim() // #4303
+    if value == {
+        .Bool(flag) -> if ty == "Bool" -> return Val(SemaBuildSettingFact{ty: Type.Bool, value: TComptimeValue.Bool{value: flag}})
+        .Int(number) -> if ty == "Int" && number >= -9223372036854775808 && number <= 9223372036854775807 -> return Val(SemaBuildSettingFact{ty: Type.Int, value: TComptimeValue.Int{value: number}})
+        .Char(scalar) -> if ty == "Char" {
+            code :: sema_checked_const_char("{scalar}") ?? return None
+            return Val(SemaBuildSettingFact{ty: Type.Char, value: TComptimeValue.Char{value: code}})
+        }
+        .Text(text) -> if ty == "String" -> return Val(SemaBuildSettingFact{ty: Type.String, value: TComptimeValue.String{value: text}})
+        .Enum(variant) -> {
+            variants :: enums.get(ty) ?? return None
+            if jet_driver_setting_type_name(ty) && variants.has_key(variant) -> return Val(SemaBuildSettingFact{ty: Type.Named{name: ty}, value: TComptimeValue.Enum{type_name: ty, variant: variant, args: []}})
+        }
+        else -> {}
+    }
+    None
+}
+
+// Rust setting_value_from_fact: typed projection of the same checked value.
+fn jet_driver_snapshot_setting_value(type_text: String, value: FactValue) -> BuildFactValue Never! {
+    if value == {
+        .Bool(flag) -> BuildFactValue.Bool(flag)
+        .Int(number) -> BuildFactValue.Int(number)
+        .Char(scalar) -> BuildFactValue.Char(scalar)
+        .Text(text) -> BuildFactValue.Text(text)
+        .OptionalText(text) -> BuildFactValue.OptionalText(text)
+        .Enum(variant) -> {
+            type_name := type_text.trim() // #4303
+            BuildFactValue.Enum(type_name, variant)
+        }
+        .Policy(_) -> panic("setting type validation rejects policy values")
+    }
+}
+
+// Rust setting_provenance_line: preserve the resolver's complete writer order.
+fn jet_driver_setting_provenance_line(contribution: FactContribution) -> String Never! {
+    if contribution.reason == .Val(reason) -> "{contribution.source} ({reason})" else -> contribution.source
+}
+
+// Rust undeclared_setting_diagnostic and setting_value_diagnostic.
+fn jet_driver_undeclared_setting(key: String, why: String, site: String) -> Diagnostic Never! {
+    jet_driver_diagnostic_without_span("E0302", "`$build.settings.{key}` is undeclared", why, "add `{key}: Type = default` to the `settings: {{ … }}` block in `{site}`")
+}
+fn jet_driver_invalid_setting(key: String, ty: String, raw: String, detail: String) -> Diagnostic Never! {
+    jet_driver_diagnostic_without_span("E0302", "setting `{key}` cannot use `{raw}` as `{ty}`", detail, "use a `{ty}` value for the declared setting `{key}`")
+}
+
+// Rust resolve_build_fact/fact_contribution_diagnostic; all build leaves go
+// through Foundation's existing resolver and registered error projection.
+fn jet_driver_resolve_build_fact(key: FactKey, writers: [FactContribution], diagnostics: &[Diagnostic]) -> EffectiveFact? {
+    if fact_resolve(key, writers) == {
+        .Ok(fact) -> {
+            if fact != None -> return fact
+            &diagnostics.push(jet_driver_diagnostic_without_span("E3521", "build fact has no contribution", "the selected build fact must have at least one registered writer", "restore the declaration or choose a source with a complete build fact plane"))
+        }
+        .Err(error) -> &diagnostics.push(fact_error_diagnostic(error) ?? jet_driver_diagnostic_without_span("E3521", "build fact contributions conflict", fact_error_message(error), "make same-layer writers agree, or move one value to a more explicit layer"))
+    }
+    None
+}
+
+// Rust Loader.rs::load_organization_policy: the native leaf selects/reads the
+// configured file; the sole PackageModel parser validates its exact grammar.
+fn jet_driver_organization_policy(input: JetDriverOrganizationPolicySource, diagnostics: &[Diagnostic]) -> [PolicyDeclaration]? {
+    if input == {
+        .Absent -> return Val([PolicyDeclaration]{})
+        .MissingProvider(_) -> return None
+        .Unreadable(path, detail) -> {
+            &diagnostics.push(diagnostic_with_source_path(jet_driver_diagnostic_without_span("E3109", "cannot read the configured organization gate policy", "JET_ORG_UNSAFE_POLICY names `{path}`, but it could not be read: {detail}", "fix the policy path or remove the environment variable"), path, 0))
+            return None
+        }
+        .Loaded(file) -> {
+            path :: compiler_driver_os_path.display(file.path)
+            declarations := if pkg_parse_policy_document(file.source) == {
+                .Ok(values) -> values
+                .Err(error) -> {
+                    &diagnostics.push(diagnostic_with_source_path(jet_driver_diagnostic_without_span("E3109", "the configured organization gate policy is malformed", "`{path}` must contain a manifest-shaped `policy: {{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}` block: {error:Debug}", "fix the organization policy; configured policy never fails open"), path, 0))
+                    return None
+                }
+            }
+            valid := declarations.len() != 0
+            loop declaration in declarations {
+                if !policy_key_is_audited_gate(declaration.key) -> valid = false
+            }
+            if !valid {
+                &diagnostics.push(diagnostic_with_source_path(jet_driver_diagnostic_without_span("E3109", "the organization gate policy has the wrong shape", "this admin input contains only the shared audited-gate fields", "use `policy: {{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}` (with any subset of those fields)"), path, 0))
+                return None
+            }
+            loop index in 0..<declarations.len() {
+                declarations[index].scope = PolicyScope.Organization
+                declarations[index].source = path
+            }
+            return Val(declarations)
+        }
+    }
 }

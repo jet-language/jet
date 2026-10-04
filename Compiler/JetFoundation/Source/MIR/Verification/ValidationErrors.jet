@@ -1,0 +1,64 @@
+// MIR.rs:7384-7508: full typed failure domain, including spans and native IDs.
+#Error
+pub enum MIRValidationError {
+    SchemaVersion(version: Int)
+    ZeroId(kind: String, span: Span?)
+    DuplicateId(kind: String, id: U64)
+    DuplicateKey(kind: String, key: String)
+    MissingReference(kind: String, id: U64)
+    MissingEntry(id: MIRFunctionID)
+    MissingBlock(function: MIRFunctionID, block: MIRBlockID)
+    MissingType(function: MIRFunctionID, ty: MIRTypeID)
+    MismatchedValueType(function: MIRFunctionID, value: MIRValueID)
+    MissingValue(function: MIRFunctionID, value: MIRValueID)
+    MissingTypeIdentity
+    MissingTypeInstance(id: MIRTypeID)
+    MissingPlace(function: MIRFunctionID, place: MIRPlaceID)
+    MissingLocal(function: MIRFunctionID, local: MIRLocalID)
+    MissingScope(function: MIRFunctionID, scope: MIRScopeID)
+    InvalidParameter(function: MIRFunctionID, index: Int)
+    InvalidCapture(function: MIRFunctionID, slot: Int)
+    InvalidCaptureCount(function: MIRFunctionID, target: MIRFunctionID, expected: Int, actual: Int)
+    MismatchedCaptureType(function: MIRFunctionID, target: MIRFunctionID, slot: Int)
+    MissingCoreCall(function: MIRFunctionID, call: MIRCoreCallID)
+    MissingPreludeCall(function: MIRFunctionID, call: MIRPreludeCallID)
+    MissingField(function: MIRFunctionID, field: MIRFieldID)
+    MissingSourceFile(function: MIRFunctionID, source_file: MIRSourceFileID)
+    UseBeforeDefinition(function: MIRFunctionID, value: MIRValueID, span: Span)
+    InvalidTerminator(function: MIRFunctionID, block: MIRBlockID)
+    InvalidDropEdge(function: MIRFunctionID, block: MIRBlockID)
+    InvalidYield(function: MIRFunctionID, block: MIRBlockID)
+    InvalidOperation(function: MIRFunctionID, message: String)
+}
+pub fn mir_validation_error_text(error: MIRValidationError) -> String Never! {
+    if error == {
+        .SchemaVersion(version) -> "unsupported MIR schema version {version}"
+        .ZeroId(kind, _) -> "MIR {kind} has a zero stable ID"
+        .DuplicateId(kind, id) -> "duplicate MIR {kind} ID {id}"
+        .DuplicateKey(kind, key) -> "duplicate MIR {kind} key {key}"
+        .MissingReference(kind, id) -> "MIR {kind} references missing ID {id}"
+        .MissingEntry(id) -> "MIR entry function MirFunctionId({id.value}) is missing"
+        .MissingBlock(function, block) -> "function MirFunctionId({function.value}) targets missing block MirBlockId({block.value})"
+        .MissingCoreCall(function, call) -> "function MirFunctionId({function.value}) uses missing Core call MirCoreCallId({call.value})"
+        .MissingPreludeCall(function, call) -> "function MirFunctionId({function.value}) uses missing Prelude call MirPreludeCallId({call.value})"
+        .MissingType(function, ty) -> "function MirFunctionId({function.value}) uses missing type MirTypeId({ty.value})"
+        .MissingTypeIdentity -> "MIR type instance has no canonical identity"
+        .MissingTypeInstance(id) -> "MIR type definition MirTypeId({id.value}) has no canonical type instance"
+        .MissingValue(function, value) -> "function MirFunctionId({function.value}) uses missing value MirValueId({value.value})"
+        .MismatchedValueType(function, value) -> "function MirFunctionId({function.value}) has mismatched type metadata for value MirValueId({value.value})"
+        .MissingPlace(function, place) -> "function MirFunctionId({function.value}) uses missing place MirPlaceId({place.value})"
+        .MissingField(function, field) -> "function MirFunctionId({function.value}) uses missing field MirFieldId({field.value})"
+        .MissingLocal(function, local) -> "function MirFunctionId({function.value}) uses missing local MirLocalId({local.value})"
+        .MissingScope(function, scope) -> "function MirFunctionId({function.value}) uses missing scope MirScopeId({scope.value})"
+        .InvalidParameter(function, index) -> "function MirFunctionId({function.value}) uses missing parameter {index}"
+        .InvalidCapture(function, slot) -> "function MirFunctionId({function.value}) uses missing capture slot {slot}"
+        .InvalidCaptureCount(function, target, expected, actual) -> "function MirFunctionId({function.value}) constructs closure MirFunctionId({target.value}) with {actual} captures; expected {expected}"
+        .MismatchedCaptureType(function, target, slot) -> "function MirFunctionId({function.value}) constructs closure MirFunctionId({target.value}) with a mismatched value at capture slot {slot}"
+        .MissingSourceFile(function, source_file) -> "function MirFunctionId({function.value}) uses missing source file MirSourceFileId({source_file.value})"
+        .UseBeforeDefinition(function, value, span) -> "function MirFunctionId({function.value}) uses value MirValueId({value.value}) before its definition at {span.start}..{span.end}"
+        .InvalidTerminator(function, block) -> "function MirFunctionId({function.value}) has an invalid terminator in block MirBlockId({block.value})"
+        .InvalidDropEdge(function, block) -> "function MirFunctionId({function.value}) has an invalid drop edge in block MirBlockId({block.value})"
+        .InvalidYield(function, block) -> "function MirFunctionId({function.value}) has a yield incompatible with its generator ABI in block MirBlockId({block.value})"
+        .InvalidOperation(function, message) -> "function MirFunctionId({function.value}) has an invalid operation: {message}"
+    }
+}

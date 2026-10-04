@@ -1,0 +1,1929 @@
+// PORT-PENDING 0430 crates-jet-sema-src-sema-effects-module-group-slice-1748: crates/jet-sema/src/Sema/Effects.rs:1748-3590
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub fn check_inferred_purity(
+//RS     items: &[crate::AST::Item],
+//RS     module_alias: &str,
+//RS     summaries: &HashMap<String, EffectSummary>,
+//RS     solved: &HashMap<String, EffectSet>,
+//RS     reachability: &jet_foundation::Facts::ReachabilityResult,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     fn check_one(
+//RS         f: &crate::AST::Func,
+//RS         owner: Option<&str>,
+//RS         identity: Option<&str>,
+//RS         module_alias: &str,
+//RS         summaries: &HashMap<String, EffectSummary>,
+//RS         solved: &HashMap<String, EffectSet>,
+//RS         reachability: &jet_foundation::Facts::ReachabilityResult,
+//RS         diags: &mut Vec<Diagnostic>,
+//RS     ) {
+//RS         if !f.is_pure && !f.is_comptime {
+//RS             check_inferred_memo(f, owner, identity, module_alias, solved, diags);
+//RS             return;
+//RS         }
+//RS         let identity = identity
+//RS             .map(str::to_owned)
+//RS             .unwrap_or_else(|| super::effect_key(owner, &f.name));
+//RS         let key = format!("{module_alias}::{identity}");
+//RS         if solved.get(&key).map_or(true, EffectSet::is_empty) {
+//RS             return;
+//RS         }
+//RS         let row = if f.is_comptime {
+//RS             RightsRow::comptime(RightsProvenance::new(
+//RS                 key.clone(),
+//RS                 "comptime callable rights row",
+//RS             ))
+//RS         } else {
+//RS             RightsRow::pure(RightsProvenance::new(
+//RS                 key.clone(),
+//RS                 "declared pure callable rights row",
+//RS             ))
+//RS         };
+//RS         let Some(denial) = solved.get(&key).and_then(|effects| {
+//RS             effects.iter().find_map(|effect| {
+//RS                 let path = reachability.path("effects", &key, effect)?;
+//RS                 (path.len() > 1).then(|| {
+//RS                     let effects = Holds::from([effect.clone()]);
+//RS                     row.walk(&effects, path, &[])
+//RS                         .denials
+//RS                         .into_iter()
+//RS                         .next()
+//RS                 })?
+//RS             })
+//RS         }) else {
+//RS             // Direct ambient operations are diagnosed while checking the body,
+//RS             // where their precise call span and API spelling are available.
+//RS             return;
+//RS         };
+//RS         let chain = denial.chain.call_chain.get(1..).unwrap_or(&[]);
+//RS         let Some(first) = chain.first() else { return };
+//RS         let summary = summaries.get(&key);
+//RS         let span = summary
+//RS             .and_then(|summary| {
+//RS                 summary
+//RS                     .memory
+//RS                     .calls
+//RS                     .iter()
+//RS                     .find(|call| &call.callee == first)
+//RS             })
+//RS             .map(|call| call.span)
+//RS             .unwrap_or(f.name_span);
+//RS         let call_name = chain.last().expect("non-empty chain");
+//RS         if summaries
+//RS             .get(call_name)
+//RS             .is_some_and(|summary| summary.unbounded_trait_dispatch)
+//RS         {
+//RS             // `check_effect_boundaries` emits E0743 once for the explicit
+//RS             // ceiling. Do not stack a generic E3401 on the same call path.
+//RS             return;
+//RS         }
+//RS         let path = if chain.len() > 1 {
+//RS             std::iter::once(f.name.clone())
+//RS                 .chain(
+//RS                     chain[..chain.len() - 1]
+//RS                         .iter()
+//RS                         .map(|name| inferred_purity_display_name(module_alias, name).to_string()),
+//RS                 )
+//RS                 .collect::<Vec<_>>()
+//RS         } else {
+//RS             Vec::new()
+//RS         };
+//RS         let diagnostic = crate::Sema::e3401(
+//RS             &f.name,
+//RS             inferred_purity_display_name(module_alias, call_name),
+//RS             &path,
+//RS             span,
+//RS         );
+//RS         let display_call_chain = diagnostic.call_chain.clone();
+//RS         let effects = Holds::from([denial.right.clone()]);
+//RS         diags.push(rights_frame(
+//RS             diagnostic,
+//RS             &row,
+//RS             &effects,
+//RS             &display_call_chain,
+//RS             &denial.chain.scope_chain,
+//RS         ));
+//RS     }
+//RS 
+//RS     /// D-MEMO1=A with D-EFFECT-OMIT1=A: a `#Memo` function without a written
+//RS     /// `-[]>` is pure when its solved row is empty, so the marker's purity
+//RS     /// requirement is judged here, once every row is known. A declared
+//RS     /// `-[]>` is already proved by the body check and `check_one` above.
+//RS     /// Panic and memory are deny-only (`effects_uncovered`), exactly as they
+//RS     /// are for an explicit empty bound.
+//RS     fn check_inferred_memo(
+//RS         f: &crate::AST::Func,
+//RS         owner: Option<&str>,
+//RS         identity: Option<&str>,
+//RS         module_alias: &str,
+//RS         solved: &HashMap<String, EffectSet>,
+//RS         diags: &mut Vec<Diagnostic>,
+//RS     ) {
+//RS         let Some(marker) = f
+//RS             .markers
+//RS             .iter()
+//RS             .find(|marker| marker.name == crate::Syntax::MARKER_MEMO)
+//RS         else {
+//RS             return;
+//RS         };
+//RS         let identity = identity
+//RS             .map(str::to_owned)
+//RS             .unwrap_or_else(|| super::effect_key(owner, &f.name));
+//RS         let key = format!("{module_alias}::{identity}");
+//RS         let Some(row) = solved.get(&key) else {
+//RS             return;
+//RS         };
+//RS         let impure = effects_uncovered(row, &EffectSet::new());
+//RS         if impure.is_empty() {
+//RS             return;
+//RS         }
+//RS         let shown = impure.iter().cloned().collect::<Vec<_>>().join(", ");
+//RS         diags.push(Diagnostic::error(
+//RS             "E0938",
+//RS             "`#Memo` requires a pure function".to_string(),
+//RS             format!(
+//RS                 "memoization reuses a completed result, but `{}` uses `{shown}`",
+//RS                 f.name
+//RS             ),
+//RS             format!(
+//RS                 "remove the `{shown}` operations from `{}`, or drop `#Memo`",
+//RS                 f.name
+//RS             ),
+//RS             Some(marker.span),
+//RS         ));
+//RS     }
+//RS 
+//RS     use crate::AST::Item;
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(f) => check_one(
+//RS                 f,
+//RS                 None,
+//RS                 None,
+//RS                 module_alias,
+//RS                 summaries,
+//RS                 solved,
+//RS                 reachability,
+//RS                 diags,
+//RS             ),
+//RS             Item::Impl(i) => {
+//RS                 for f in &i.methods {
+//RS                     check_one(
+//RS                         f,
+//RS                         Some(&i.type_name),
+//RS                         None,
+//RS                         module_alias,
+//RS                         summaries,
+//RS                         solved,
+//RS                         reachability,
+//RS                         diags,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 for f in &s.methods {
+//RS                     check_one(
+//RS                         f,
+//RS                         Some(&s.name),
+//RS                         None,
+//RS                         module_alias,
+//RS                         summaries,
+//RS                         solved,
+//RS                         reachability,
+//RS                         diags,
+//RS                     );
+//RS                 }
+//RS                 for block in &s.trait_impls {
+//RS                     for f in &block.methods {
+//RS                         check_one(
+//RS                             f,
+//RS                             Some(&s.name),
+//RS                             None,
+//RS                             module_alias,
+//RS                             summaries,
+//RS                             solved,
+//RS                             reachability,
+//RS                             diags,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 for f in &e.methods {
+//RS                     check_one(
+//RS                         f,
+//RS                         Some(&e.name),
+//RS                         None,
+//RS                         module_alias,
+//RS                         summaries,
+//RS                         solved,
+//RS                         reachability,
+//RS                         diags,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     for item in body {
+//RS                         if let Item::Func(f) = item {
+//RS                             let identity = inline_effect_key(&module.name, &f.name);
+//RS                             check_one(
+//RS                                 f,
+//RS                                 None,
+//RS                                 Some(&identity),
+//RS                                 module_alias,
+//RS                                 summaries,
+//RS                                 solved,
+//RS                                 reachability,
+//RS                                 diags,
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub fn e0743(trait_method: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0743",
+//RS         format!("dynamic call `{trait_method}` has no effect bound"),
+//RS         "a trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound".to_string(),
+//RS         format!("declare an effect row on `{trait_method}`, such as `-[]>` for pure dispatch, or move this dynamic call outside the bounded function"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-EFF2 (`#(via f)` pass-through): seed each via-fn's effect summary with the
+//RS /// declared bound of its callback parameter `f`, so its published effect set is a
+//RS /// tight pass-through of `f` (the set that holds even when the callback value
+//RS /// escapes — the conservative flow-through can't see a callback the body stores
+//RS /// or returns). Runs over the assembled summaries **before** the shared
+//RS /// reachability projection.
+//RS ///
+//RS /// - `f` must be a parameter of this function whose type is a function type
+//RS ///   (`Type::Fn`), else E0748.
+//RS /// - `f`'s declared bound (`#Pure` → empty, `#(E)` → that set) is the pass-through
+//RS ///   set. An **unbounded** callback param (`f: fn(T)`) publishes the maximal set
+//RS ///   (sound: an unconstrained callback may do anything).
+//RS /// - `#(via f)` and a `#(…)` effect list are mutually exclusive at parse time, so
+//RS ///   there is no interaction with E0740 here.
+//RS pub fn apply_effect_via(
+//RS     items: &[crate::AST::Item],
+//RS     summaries: &mut HashMap<String, EffectSummary>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     use crate::AST::{Item, Type};
+//RS     fn one(
+//RS         f: &crate::AST::Func,
+//RS         owner: Option<&str>,
+//RS         summaries: &mut HashMap<String, EffectSummary>,
+//RS         diags: &mut Vec<Diagnostic>,
+//RS     ) {
+//RS         let Some((param, via_span)) = &f.effect_via else {
+//RS             return;
+//RS         };
+//RS         let Some(p) = f.params.iter().find(|p| &p.name == param) else {
+//RS             diags.push(e0748_unknown_param(&f.name, param, *via_span));
+//RS             return;
+//RS         };
+//RS         let Type::Fn { effect_bound, .. } = &p.ty else {
+//RS             diags.push(e0748_not_callback(&f.name, param, p.ty.name(), *via_span));
+//RS             return;
+//RS         };
+//RS         // The pass-through set: the param's declared bound, or maximal if unbounded.
+//RS         let mut via_set = EffectSet::new();
+//RS         let mut via_spans = HashMap::new();
+//RS         let mut maximal = false;
+//RS         match effect_bound {
+//RS             Some(names) => {
+//RS                 for (n, ns) in names {
+//RS                     if effect_row_var(n).is_some() {
+//RS                         // The caller contributes the concrete callback edge in
+//RS                         // `attribute_fn_arg`; making the generic callee maximal
+//RS                         // here would lose that substitution and invent every
+//RS                         // effect for even a pure callback.
+//RS                         continue;
+//RS                     }
+//RS                     match parse_effect_name(n) {
+//RS                         Some(e) => {
+//RS                             if reject_positive_deny_only_effect(&e, *ns).is_some() {
+//RS                                 continue;
+//RS                             }
+//RS                             via_spans.entry(e.clone()).or_insert(*ns);
+//RS                             via_set.insert(e);
+//RS                         }
+//RS                         None => diags.push(unknown_effect(n, *ns)),
+//RS                     }
+//RS                 }
+//RS             }
+//RS             None => maximal = true,
+//RS         }
+//RS         let key = super::effect_key(owner, &f.name);
+//RS         let entry = summaries.entry(key).or_default();
+//RS         entry.direct.extend(via_set);
+//RS         entry.direct_spans.extend(via_spans);
+//RS         entry.maximal |= maximal;
+//RS         if maximal {
+//RS             entry.maximal_span.get_or_insert(*via_span);
+//RS         }
+//RS     }
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(f) => one(f, None, summaries, diags),
+//RS             Item::Impl(i) => {
+//RS                 for m in &i.methods {
+//RS                     one(m, Some(&i.type_name), summaries, diags);
+//RS                 }
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 for m in &s.methods {
+//RS                     one(m, Some(&s.name), summaries, diags);
+//RS                 }
+//RS                 for block in &s.trait_impls {
+//RS                     for m in &block.methods {
+//RS                         one(m, Some(&s.name), summaries, diags);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 for m in &e.methods {
+//RS                     one(m, Some(&e.name), summaries, diags);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// E0748 (D-EFF2/D-SHAPE8): `-[via f]>` names no callback parameter.
+//RS pub fn e0748_unknown_param(fn_name: &str, param: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0748",
+//RS         format!("`-[via {}]>` on `{}` names no such parameter", param, fn_name),
+//RS         format!(
+//RS             "`-[via f]>` publishes the effects of a callback parameter `f`; `{}` has no parameter called `{}`",
+//RS             fn_name, param
+//RS         ),
+//RS         format!("name one of `{}`'s callback parameters after `via`", fn_name),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E0748 (D-EFF2/D-SHAPE8): `-[via f]>` names a non-callback parameter.
+//RS pub fn e0748_not_callback(fn_name: &str, param: &str, ty: String, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0748",
+//RS         format!("`-[via {}]>` on `{}` names a parameter that isn't a callback", param, fn_name),
+//RS         format!(
+//RS             "`-[via f]>` publishes the effects of a *function* parameter; `{}` is `{}`, not a `fn(…)` type",
+//RS             param, ty
+//RS         ),
+//RS         format!("point `via` at a parameter whose type is a function, or drop the `-[via {}]>` annotation", param),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-EFF2: check every callback-bound obligation across the program. For each
+//RS /// obligation, resolve the callback's effects (its direct effects, plus the
+//RS /// maximal set if it escaped, plus the transitive effects of every edge from
+//RS /// `solved`) and verify the result is a subset of the declared bound. Any effect
+//RS /// beyond the bound is E0747.
+//RS pub fn check_callback_bounds(
+//RS     summaries: &HashMap<String, EffectSummary>,
+//RS     solved: &HashMap<String, EffectSet>,
+//RS     failed_diagnostic_phases: &mut HashSet<String>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     for (key, summary) in summaries {
+//RS         for ob in &summary.callback_obligations {
+//RS             let mut cb = ob.direct.clone();
+//RS             if ob.maximal {
+//RS                 cb.extend(Effect::all());
+//RS             }
+//RS             for callee in &ob.edges {
+//RS                 if let Some(cs) = solved.get(callee) {
+//RS                     cb.extend(cs.iter().cloned());
+//RS                 }
+//RS             }
+//RS             let over: EffectSet = effects_uncovered(&cb, &ob.bound);
+//RS             let call_chain = [key.clone()];
+//RS             if !over.is_empty() {
+//RS                 failed_diagnostic_phases.insert(key.clone());
+//RS                 diags.push(e0747_with_chain(&over, &ob.bound, ob.span, &call_chain));
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// E0433: a statement dropped the result of a call whose solved effect row is
+//RS /// empty and that cannot fail, so the line has no observable outcome
+//RS /// (D-DISCARD1=A). Memory rights are not an observable outcome of a call;
+//RS /// every other root (including `Panic`) keeps the site quiet, as do
+//RS /// open-world, unresolved and undeclared-dispatch rows. A call whose failure
+//RS /// would still propagate keeps the site quiet unless `infallible` (the #3708
+//RS /// solve, module-qualified keys) proves its failure set empty.
+//RS pub fn check_discarded_results(
+//RS     summaries: &HashMap<String, EffectSummary>,
+//RS     all_summaries: &HashMap<String, EffectSummary>,
+//RS     solved: &HashMap<String, EffectSet>,
+//RS     infallible: &HashSet<String>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     let mut facts = summaries
+//RS         .values()
+//RS         .flat_map(|summary| summary.discarded_results.iter())
+//RS         .filter(|fact| {
+//RS             let Some(callee) = all_summaries.get(&fact.callee) else {
+//RS                 return false;
+//RS             };
+//RS             (!fact.failure_open || infallible.contains(&fact.callee))
+//RS                 && !callee.maximal
+//RS                 && !callee.unbounded_trait_dispatch
+//RS                 && solved.get(&fact.callee).is_some_and(|row| {
+//RS                     row.iter()
+//RS                         .all(|effect| effect_root(effect) == Effect::Mem.name())
+//RS                 })
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     facts.sort_by_key(|fact| (fact.span.start, fact.span.end));
+//RS     facts.dedup_by_key(|fact| (fact.span.start, fact.span.end));
+//RS     for fact in facts {
+//RS         diags.push(e0433(fact));
+//RS     }
+//RS }
+//RS 
+//RS pub fn e0433(fact: &DiscardedResultFact) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0433",
+//RS         format!("the result of `{}` is thrown away", fact.call_text),
+//RS         format!(
+//RS             "`{}` is pure (it has no effects and changes nothing through `&`), so this line does nothing",
+//RS             fact.callee_name
+//RS         ),
+//RS         format!(
+//RS             "use the result, bind it with `result :: {}`, or write `.drop(\"reason\")` if dropping it is intended",
+//RS             fact.call_text
+//RS         ),
+//RS         Some(fact.span),
+//RS     )
+//RS     .with_source_derived_suggestion(Span::new(fact.span.start, fact.span.start), "result :: ")
+//RS }
+//RS 
+//RS /// E0433 (D-DISCARD1=A), lost-tail site: the last line of a named function
+//RS /// with no written return type produces a value that nobody receives. The
+//RS /// function returns nothing, so the value would only surface later as a
+//RS /// confusing `Unit` error at a caller.
+//RS pub fn e0433_lost_tail(function: &str, value_type: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0433",
+//RS         format!("this {value_type} value is thrown away"),
+//RS         format!(
+//RS             "`{function}` has no return type, so it returns nothing and the value of its last line is lost"
+//RS         ),
+//RS         format!(
+//RS             "if `{function}` should return it, write `-> {value_type}` after its parameter list; to discard it on purpose, write `.drop(\"reason\")`"
+//RS         ),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E0747's public constructor retains its stable source-facing API. The
+//RS /// post-solve checker supplies the enclosing callable so the rights frame can
+//RS /// retain that semantic chain.
+//RS pub fn e0747(over: &EffectSet, bound: &EffectSet, span: Span) -> Diagnostic {
+//RS     e0747_with_chain(over, bound, span, &[])
+//RS }
+//RS 
+//RS fn e0747_with_chain(
+//RS     over: &EffectSet,
+//RS     bound: &EffectSet,
+//RS     span: Span,
+//RS     call_chain: &[String],
+//RS ) -> Diagnostic {
+//RS     let over_list = show_set(over);
+//RS     let bound_desc = if bound.is_empty() {
+//RS         "the parameter is `fn(…) -[]>`, so the callback must be pure".to_string()
+//RS     } else {
+//RS         format!(
+//RS             "the parameter is `fn(…) -[{}]>`, so the callback may use only those effects",
+//RS             show_set(bound)
+//RS         )
+//RS     };
+//RS     let fix = if bound.is_empty() {
+//RS         "pass a `fn(…) -[]>` callback (or a lambda that uses no effects), or widen the parameter's bound".to_string()
+//RS     } else {
+//RS         format!(
+//RS             "pass a callback within `-[{}]>`, or add `{}` to the parameter's bound",
+//RS             show_set(bound),
+//RS             over_list
+//RS         )
+//RS     };
+//RS     let row = RightsRow::invocation(
+//RS         bound.iter().map(String::as_str),
+//RS         std::iter::empty::<&str>(),
+//RS         RightsProvenance::new("callback", "callback parameter rights row"),
+//RS     );
+//RS     rights_frame(
+//RS         Diagnostic::error(
+//RS             "E0747",
+//RS             format!(
+//RS                 "this callback uses the effect `{}`, which the parameter doesn't allow",
+//RS                 over_list
+//RS             ),
+//RS             format!("{}; `{}` is outside that bound", bound_desc, over_list),
+//RS             fix,
+//RS             Some(span),
+//RS         ),
+//RS         &row,
+//RS         over,
+//RS         call_chain,
+//RS         &[],
+//RS     )
+//RS }
+//RS 
+//RS /// D-REPLAY1: `#Replayable` functions may not reach ambient
+//RS /// Time/Rand/Net/IO. Deterministic handles (`Clock.new(seed)`,
+//RS /// `random.rng(seed)`, mockable input objects) stay valid because they do
+//RS /// not enter the ambient Core-call effect graph.
+//RS pub fn check_replayable_effects(
+//RS     items: &[crate::AST::Item],
+//RS     solved: &HashMap<String, EffectSet>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     use crate::AST::Item;
+//RS 
+//RS     fn check_one(
+//RS         f: &crate::AST::Func,
+//RS         owner: Option<&str>,
+//RS         solved: &HashMap<String, EffectSet>,
+//RS         diags: &mut Vec<Diagnostic>,
+//RS     ) {
+//RS         if !f.is_replayable {
+//RS             return;
+//RS         }
+//RS         let key = super::effect_key(owner, &f.name);
+//RS         let inferred = solved.get(&key).cloned().unwrap_or_default();
+//RS         let row = RightsRow::replayable(RightsProvenance::new(
+//RS             key,
+//RS             "declared replayable callable rights row",
+//RS         ));
+//RS         let forbidden: EffectSet = row
+//RS             .walk(&inferred, &[], &[])
+//RS             .denials
+//RS             .into_iter()
+//RS             .map(|denial| denial.right)
+//RS             .collect();
+//RS         if !forbidden.is_empty() {
+//RS             diags.push(e0725(
+//RS                 &f.name,
+//RS                 &forbidden,
+//RS                 f.replayable_span.unwrap_or(f.name_span),
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(f) => check_one(f, None, solved, diags),
+//RS             Item::Impl(i) => {
+//RS                 for m in &i.methods {
+//RS                     check_one(m, Some(&i.type_name), solved, diags);
+//RS                 }
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 for m in &s.methods {
+//RS                     check_one(m, Some(&s.name), solved, diags);
+//RS                 }
+//RS                 for block in &s.trait_impls {
+//RS                     for m in &block.methods {
+//RS                         check_one(m, Some(&s.name), solved, diags);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 for m in &e.methods {
+//RS                     check_one(m, Some(&e.name), solved, diags);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// E0725 (D-REPLAY1): a `#Replayable` function reaches ambient nondeterminism.
+//RS pub fn e0725(fn_name: &str, effects: &EffectSet, span: Span) -> Diagnostic {
+//RS     let effect_list = show_set(effects);
+//RS     let row = RightsRow::replayable(RightsProvenance::new(
+//RS         fn_name,
+//RS         "ambient nondeterminism denied by replayable row",
+//RS     ));
+//RS     let call_chain = [fn_name.to_string()];
+//RS     rights_frame(
+//RS         Diagnostic::error(
+//RS             "E0725",
+//RS             format!(
+//RS                 "`{}` is `#Replayable` but reaches `{}`",
+//RS                 fn_name, effect_list
+//RS             ),
+//RS             "`#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge"
+//RS                 .to_string(),
+//RS             "inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function"
+//RS                 .to_string(),
+//RS             Some(span),
+//RS         ),
+//RS         &row,
+//RS         effects,
+//RS         &call_chain,
+//RS         &[],
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS /// E0740: a function's inferred effects exceed its declared effect-row bound.
+//RS pub fn e0740(fn_name: &str, over: &EffectSet, declared: &EffectSet, span: Span) -> Diagnostic {
+//RS     let over_list = show_set(over);
+//RS     let decl = if declared.is_empty() {
+//RS         "no effects".to_string()
+//RS     } else {
+//RS         format!("`-[{}]>`", show_set(declared))
+//RS     };
+//RS     let row = RightsRow::invocation(
+//RS         declared.iter().map(String::as_str),
+//RS         std::iter::empty::<&str>(),
+//RS         RightsProvenance::new(fn_name, "declared effect-arrow rights row"),
+//RS     );
+//RS     let call_chain = [fn_name.to_string()];
+//RS     rights_frame(
+//RS         Diagnostic::error(
+//RS             "E0740",
+//RS             format!(
+//RS                 "`{}` uses the effect `{}`, which its signature doesn't allow",
+//RS                 fn_name, over_list
+//RS             ),
+//RS             format!(
+//RS                 "the signature declares {}, so the body may only use those; `{}` is outside that set",
+//RS                 decl, over_list
+//RS             ),
+//RS             format!(
+//RS                 "add `{}` to the effect list, or stop using it in `{}`",
+//RS                 over_list, fn_name
+//RS             ),
+//RS             Some(span),
+//RS         ),
+//RS         &row,
+//RS         over,
+//RS         &call_chain,
+//RS         &[],
+//RS     )
+//RS }
+//RS 
+//RS /// E0749 (D-PROP1=A): a function's reachable call graph uses a prohibited
+//RS /// effect. `reached` is the actual offending effect(s); `prohibited` is the
+//RS /// declared `#(!…)` set that covers them — D-EFFTREE1: since ancestor
+//RS /// prohibits descendant, `reached` may name a leaf (`FS.Write`) under a
+//RS /// broader declared root (`FS`), so the two are shown separately rather than
+//RS /// assuming they're always the same text (they always were, pre-D-EFFTREE1).
+//RS pub fn e0749(fn_name: &str, reached: &EffectSet, prohibited: &EffectSet, span: Span) -> Diagnostic {
+//RS     let reached_list = show_set(reached);
+//RS     let decl_list = show_set(prohibited);
+//RS     let row = RightsRow::invocation(
+//RS         std::iter::empty::<&str>(),
+//RS         prohibited.iter().map(String::as_str),
+//RS         RightsProvenance::new(fn_name, "prohibited effect rights row"),
+//RS     );
+//RS     let call_chain = [fn_name.to_string()];
+//RS     rights_frame(
+//RS         Diagnostic::error(
+//RS             "E0749",
+//RS             format!(
+//RS                 "`{}` reaches the `{}` effect, which it prohibits with `-[!{}]>`",
+//RS                 fn_name, reached_list, decl_list
+//RS             ),
+//RS             format!(
+//RS                 "a `-[!{}]>` row means the function and every callee it can reach must not use `{}`",
+//RS                 decl_list, reached_list
+//RS             ),
+//RS             format!(
+//RS                 "remove the call that introduces `{}`, or drop the `-[!{}]>` prohibition",
+//RS                 reached_list, decl_list
+//RS             ),
+//RS             Some(span),
+//RS         ),
+//RS         &row,
+//RS         reached,
+//RS         &call_chain,
+//RS         &[],
+//RS     )
+//RS }
+//RS 
+//RS /// E0749 / D-PANICROOT1=A: a denied Panic row names the reachable function
+//RS /// where the stop enters the call graph and gives the three legal exits.
+//RS pub fn e0749_panic(
+//RS     fn_name: &str,
+//RS     panic_site: &str,
+//RS     prohibited: &EffectSet,
+//RS     span: Span,
+//RS ) -> Diagnostic {
+//RS     let prohibition = show_set(prohibited);
+//RS     let row = RightsRow::invocation(
+//RS         std::iter::empty::<&str>(),
+//RS         prohibited.iter().map(String::as_str),
+//RS         RightsProvenance::new(fn_name, "Panic prohibition rights row"),
+//RS     );
+//RS     let effects = Holds::from([Effect::Panic.name().to_string()]);
+//RS     let call_chain = [fn_name.to_string(), panic_site.to_string()];
+//RS     rights_frame(
+//RS         Diagnostic::error(
+//RS             "E0749",
+//RS             format!("`{fn_name}` can stop, but Panic is denied here"),
+//RS             format!(
+//RS                 "`{panic_site}` can stop; `{fn_name}` and every reachable callee must not stop when Panic is denied"
+//RS             ),
+//RS             format!(
+//RS                 "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop the `-[!{prohibition}]>` prohibition"
+//RS             ),
+//RS             Some(span),
+//RS         ),
+//RS         &row,
+//RS         &effects,
+//RS         &call_chain,
+//RS         &[],
+//RS     )
+//RS }
+//RS 
+//RS /// D-EFF1: check every `#FX(…)` region across the program against its
+//RS /// transitive inferred effect set (region.direct ∪ maximal ∪ ⋃ solved[edge]).
+//RS /// An effect used inside a region that its cap list omits is E0712.
+//RS pub fn check_region_caps(
+//RS     summaries: &HashMap<String, EffectSummary>,
+//RS     solved: &HashMap<String, EffectSet>,
+//RS     failed_diagnostic_phases: &mut HashSet<String>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     for (key, summary) in summaries {
+//RS         for region in &summary.regions {
+//RS             let mut inferred = region.direct.clone();
+//RS             if region.maximal {
+//RS                 inferred.extend(Effect::all());
+//RS             }
+//RS             for callee in &region.edges {
+//RS                 if let Some(cs) = solved.get(callee) {
+//RS                     inferred.extend(cs.iter().cloned());
+//RS                 }
+//RS             }
+//RS             let over: EffectSet = effects_uncovered(&inferred, &region.caps);
+//RS             if !over.is_empty() {
+//RS                 failed_diagnostic_phases.insert(key.clone());
+//RS                 diags.push(e0712(
+//RS                     &over,
+//RS                     &region.caps,
+//RS                     region.caps_span,
+//RS                     crate::Syntax::KW_FX,
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS /// Collect source ranges belonging to removed/debug-only statement bodies.
+//RS ///
+//RS /// The body checker restores its semantic ledgers after each such body, but
+//RS /// authority delegation is projected from checked AST flags after the walk.
+//RS /// Keep that projection on the same active-source boundary so an erased call
+//RS /// cannot publish a delegation fact merely because its argument was checked.
+//RS fn erased_scope_spans(body: &[crate::AST::Stmt], spans: &mut HashSet<Span>) {
+//RS     use crate::AST::{Expr, LambdaBody, OrFallback, Stmt};
+//RS 
+//RS     for statement in body {
+//RS         if matches!(
+//RS             statement,
+//RS             Stmt::Switched { marker, .. }
+//RS                 if crate::AST::switched_off(marker)
+//RS                     || marker.name == crate::Syntax::MARKER_DEBUG_ONLY
+//RS         ) {
+//RS             spans.insert(statement.span());
+//RS             continue;
+//RS         }
+//RS 
+//RS         for nested in super::ScopeMembers::statement_bodies(statement) {
+//RS             erased_scope_spans(nested, spans);
+//RS         }
+//RS 
+//RS         // `Stmt::for_each_expr` also reaches expression-position blocks and
+//RS         // lambda bodies, whose statements are not exposed by
+//RS         // `statement_bodies`.
+//RS         statement.for_each_expr(|expression| match expression {
+//RS             Expr::If {
+//RS                 then_body,
+//RS                 else_body,
+//RS                 ..
+//RS             } => {
+//RS                 erased_scope_spans(then_body, spans);
+//RS                 erased_scope_spans(else_body, spans);
+//RS             }
+//RS             Expr::Lambda(lambda) => {
+//RS                 if let LambdaBody::Block(body) = &lambda.body {
+//RS                     erased_scope_spans(body, spans);
+//RS                 }
+//RS             }
+//RS             Expr::OrFallback { fallback, .. } => {
+//RS                 if let OrFallback::Block { body, .. } = fallback {
+//RS                     erased_scope_spans(body, spans);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn expression_is_erased(expression: &crate::AST::Expr, spans: &HashSet<Span>) -> bool {
+//RS     let span = expression.span();
+//RS     spans
+//RS         .iter()
+//RS         .any(|scope| scope.start <= span.start && span.end <= scope.end)
+//RS }
+//RS 
+//RS /// Walk only active checked expressions. Sema still checks every erased body,
+//RS /// but post-check projections must not consume its AST-attached facts.
+//RS fn for_each_active_expression(
+//RS     body: &[crate::AST::Stmt],
+//RS     mut visit: impl FnMut(&crate::AST::Expr),
+//RS ) {
+//RS     let mut erased = HashSet::new();
+//RS     erased_scope_spans(body, &mut erased);
+//RS     for statement in body {
+//RS         statement.for_each_expr(|expression| {
+//RS             if !expression_is_erased(expression, &erased) {
+//RS                 visit(expression);
+//RS             }
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// D-AUTHORITY-SCOPE1: detect whether the authority handle `handle` bound by a
+//RS /// named `#FX(…)` region
+//RS /// region escapes its block — returned, stored, passed, captured, or otherwise
+//RS /// used as a value that outlives the scope. Returns the span of the first escape,
+//RS /// or `None` if the handle is only ever used in place (as the receiver of a
+//RS /// method call / field access / `?` on itself). The receiver of `handle.read(…)`
+//RS /// is an in-place use (performing the authorized effect); everything else — `return
+//RS /// handle`, `x :: handle`, `f(handle)`, `[handle]`, a struct field, an `or`
+//RS /// fallback — lets the revoked authority leak past the scope (E0711).
+//RS pub fn grant_handle_escape(body: &[crate::AST::Stmt], handle: &str) -> Option<Span> {
+//RS     body.iter()
+//RS         .find_map(|s| stmt_handle_escape(s, handle))
+//RS         .or_else(|| grant_derived_handle_escape(body, handle))
+//RS }
+//RS 
+//RS /// Collect the source facts for Authority values that cross an approved Core
+//RS /// boundary. `CallArgFlags::authority_boundary` is set only after sema has
+//RS /// checked the argument as an `Authority`, so this remains a fact projection,
+//RS /// not a second authorization path.
+//RS pub fn authority_delegations(
+//RS     body: &[crate::AST::Stmt],
+//RS     binding: &str,
+//RS     scope_span: Span,
+//RS ) -> Vec<AuthorityDelegation> {
+//RS     fn operation_parts(name: &str) -> (String, String) {
+//RS         name.rsplit_once('.')
+//RS             .map(|(resource, operation)| (resource.to_string(), operation.to_string()))
+//RS             .unwrap_or_else(|| ("core".to_string(), name.to_string()))
+//RS     }
+//RS 
+//RS     let mut delegations = Vec::new();
+//RS     for_each_active_expression(body, |expression| match expression {
+//RS         crate::AST::Expr::Call(call) => {
+//RS             let (resource, operation) = operation_parts(&call.name);
+//RS             for argument in &call.args {
+//RS                 if argument.flags.authority_boundary {
+//RS                     delegations.push(AuthorityDelegation {
+//RS                         scope_span,
+//RS                         binding: binding.to_string(),
+//RS                         resource: resource.clone(),
+//RS                         operation: operation.clone(),
+//RS                         span: argument.span,
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::MethodCall { method, args, .. } => {
+//RS             for argument in args {
+//RS                 if argument.flags.authority_boundary {
+//RS                     delegations.push(AuthorityDelegation {
+//RS                         scope_span,
+//RS                         binding: binding.to_string(),
+//RS                         resource: "method".to_string(),
+//RS                         operation: method.clone(),
+//RS                         span: argument.span,
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     });
+//RS     delegations
+//RS }
+//RS 
+//RS fn authority_expr_rights(regions: &[RegionAccum], expr: &crate::AST::Expr) -> Option<EffectSet> {
+//RS     use crate::AST::{Expr, StrPart};
+//RS 
+//RS     match expr {
+//RS         Expr::Ident(name, _) => regions.iter().rev().find_map(|region| {
+//RS             if region.binding.as_deref() == Some(name.as_str()) {
+//RS                 Some(region.caps.clone())
+//RS             } else {
+//RS                 region.aliases.get(name).cloned()
+//RS             }
+//RS         }),
+//RS         Expr::Paren(inner, _) => authority_expr_rights(regions, inner),
+//RS         Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             ..
+//RS         } if matches!(method.as_str(), "with" | "without") => {
+//RS             let mut rights = authority_expr_rights(regions, receiver)?;
+//RS             let requested = args.first().and_then(|arg| match &arg.expr {
+//RS                 Expr::Str(parts, _) if parts.iter().all(|part| matches!(part, StrPart::Lit(_))) => {
+//RS                     let text = parts
+//RS                         .iter()
+//RS                         .filter_map(|part| match part {
+//RS                             StrPart::Lit(text) => Some(text.as_str()),
+//RS                             StrPart::Interp(..) => None,
+//RS                         })
+//RS                         .collect::<String>();
+//RS                     jet_foundation::Authority::parse_right(&text)
+//RS                 }
+//RS                 _ => None,
+//RS             });
+//RS             match (method.as_str(), requested) {
+//RS                 ("with", Some(requested))
+//RS                     if rights.iter().any(|bound| effect_covers(bound, &requested)) =>
+//RS                 {
+//RS                     rights.clear();
+//RS                     rights.insert(requested);
+//RS                 }
+//RS                 ("without", Some(requested)) => {
+//RS                     rights.retain(|held| !effect_covers(&requested, held));
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS             Some(rights)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Check an Authority argument after sema has identified an approved Core
+//RS /// boundary.  Only active named handles participate; ordinary Authority data
+//RS /// such as `session.authority` remains an ordinary boundary value.
+//RS pub(crate) fn check_authority_boundary_scope(
+//RS     checker: &mut super::Checker<'_>,
+//RS     expr: &crate::AST::Expr,
+//RS ) {
+//RS     let Some(rights) = authority_expr_rights(&checker.region_stack, expr) else {
+//RS         return;
+//RS     };
+//RS     let Some(current) = checker.region_stack.last() else {
+//RS         return;
+//RS     };
+//RS     let widening = effects_uncovered(&rights, &current.caps);
+//RS     if !widening.is_empty() {
+//RS         checker.diags.push(e0712(
+//RS             &widening,
+//RS             &current.caps,
+//RS             expr.span(),
+//RS             crate::Syntax::KW_FX,
+//RS         ));
+//RS     }
+//RS }
+//RS 
+//RS /// Record a local `Authority` value derived from an active named scope. The
+//RS /// boundary checker consumes this fact later in the same sema walk.
+//RS pub(crate) fn record_authority_alias(
+//RS     checker: &mut super::Checker<'_>,
+//RS     binding: &crate::AST::Binding,
+//RS ) {
+//RS     let Some(rights) = authority_expr_rights(&checker.region_stack, &binding.init) else {
+//RS         return;
+//RS     };
+//RS     if let Some(region) = checker.region_stack.last_mut() {
+//RS         if binding.name != "_" {
+//RS             region.aliases.insert(binding.name.clone(), rights);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-AUTHORITY-SCOPE1: a value derived from a scoped handle is still scoped.
+//RS /// The existing escape walk intentionally treats `handle.with(…)` as an
+//RS /// in-place operation. Track those derived bindings separately so the
+//RS /// narrowing operation itself stays legal while returning, storing, or
+//RS /// capturing its result remains rejected.
+//RS fn authority_chain_rooted_in(
+//RS     expr: &crate::AST::Expr,
+//RS     handle: &str,
+//RS     aliases: &BTreeSet<String>,
+//RS ) -> bool {
+//RS     use crate::AST::Expr;
+//RS     match expr {
+//RS         Expr::Ident(name, _) => name == handle || aliases.contains(name),
+//RS         Expr::Paren(inner, _) => authority_chain_rooted_in(inner, handle, aliases),
+//RS         Expr::MethodCall {
+//RS             receiver, method, ..
+//RS         } if matches!(method.as_str(), "with" | "without") => {
+//RS             authority_chain_rooted_in(receiver, handle, aliases)
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn is_authority_narrowing_chain(
+//RS     expr: &crate::AST::Expr,
+//RS     handle: &str,
+//RS     aliases: &BTreeSet<String>,
+//RS ) -> bool {
+//RS     use crate::AST::Expr;
+//RS     match expr {
+//RS         Expr::Paren(inner, _) => is_authority_narrowing_chain(inner, handle, aliases),
+//RS         Expr::MethodCall {
+//RS             receiver, method, ..
+//RS         } if matches!(method.as_str(), "with" | "without") => {
+//RS             authority_chain_rooted_in(receiver, handle, aliases)
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// Spans below an approved Authority boundary are deliberately ignored by
+//RS /// value-escape checks. The boundary consumer receives the handle as a
+//RS /// borrowed/delegated value and is already recorded by the checked call fact.
+//RS fn authority_boundary_spans(expr: &crate::AST::Expr) -> HashSet<Span> {
+//RS     use crate::AST::Expr;
+//RS     let mut spans = HashSet::new();
+//RS     expr.for_each_expr(|nested| match nested {
+//RS         Expr::Call(call) => {
+//RS             for arg in &call.args {
+//RS                 if arg.flags.authority_boundary {
+//RS                     arg.expr.for_each_expr(|value| {
+//RS                         spans.insert(value.span());
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS         Expr::CallValue { args, .. } | Expr::MethodCall { args, .. } => {
+//RS             for arg in args {
+//RS                 if arg.flags.authority_boundary {
+//RS                     arg.expr.for_each_expr(|value| {
+//RS                         spans.insert(value.span());
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     });
+//RS     spans
+//RS }
+//RS 
+//RS /// Find a scoped Authority value in a value position. This is intentionally a
+//RS /// projection over the checked AST: it does not resolve new types or approve
+//RS /// new consumers, and approved boundary arguments are skipped.
+//RS fn authority_value_escape(
+//RS     expr: &crate::AST::Expr,
+//RS     handle: &str,
+//RS     aliases: &BTreeSet<String>,
+//RS ) -> Option<Span> {
+//RS     use crate::AST::Expr;
+//RS     let boundary_spans = authority_boundary_spans(expr);
+//RS     let mut found = None;
+//RS     expr.for_each_expr(|nested| {
+//RS         if found.is_some() || boundary_spans.contains(&nested.span()) {
+//RS             return;
+//RS         }
+//RS         if matches!(nested, Expr::Ident(name, _) if aliases.contains(name))
+//RS             || is_authority_narrowing_chain(nested, handle, aliases)
+//RS         {
+//RS             found = Some(nested.span());
+//RS         }
+//RS     });
+//RS     found
+//RS }
+//RS 
+//RS /// A discarded expression is allowed to use a scoped Authority in place. Its
+//RS /// non-boundary call arguments are still value positions, so callbacks and
+//RS /// ordinary helpers cannot smuggle a derived handle away.
+//RS fn authority_call_argument_escape(
+//RS     expr: &crate::AST::Expr,
+//RS     handle: &str,
+//RS     aliases: &BTreeSet<String>,
+//RS ) -> Option<Span> {
+//RS     use crate::AST::Expr;
+//RS     let mut found = None;
+//RS     expr.for_each_expr(|nested| {
+//RS         if found.is_some() {
+//RS             return;
+//RS         }
+//RS         let args = match nested {
+//RS             Expr::Call(call) => Some(&call.args),
+//RS             Expr::CallValue { args, .. } | Expr::MethodCall { args, .. } => Some(args),
+//RS             _ => None,
+//RS         };
+//RS         if let Some(args) = args {
+//RS             found = args
+//RS                 .iter()
+//RS                 .filter(|arg| !arg.flags.authority_boundary)
+//RS                 .find_map(|arg| authority_value_escape(&arg.expr, handle, aliases));
+//RS         }
+//RS     });
+//RS     found
+//RS }
+//RS 
+//RS fn derived_binding_escape(
+//RS     binding: &crate::AST::Binding,
+//RS     handle: &str,
+//RS     aliases: &mut BTreeSet<String>,
+//RS ) -> Option<Span> {
+//RS     if is_authority_narrowing_chain(&binding.init, handle, aliases) {
+//RS         if binding.name != "_" {
+//RS             aliases.insert(binding.name.clone());
+//RS         }
+//RS         None
+//RS     } else {
+//RS         authority_value_escape(&binding.init, handle, aliases)
+//RS     }
+//RS }
+//RS 
+//RS fn derived_block_escape(
+//RS     body: &[crate::AST::Stmt],
+//RS     handle: &str,
+//RS     aliases: &mut BTreeSet<String>,
+//RS ) -> Option<Span> {
+//RS     let saved = aliases.clone();
+//RS     let found = body
+//RS         .iter()
+//RS         .find_map(|stmt| derived_stmt_escape(stmt, handle, aliases));
+//RS     *aliases = saved;
+//RS     found
+//RS }
+//RS 
+//RS fn derived_stmt_escape(
+//RS     stmt: &crate::AST::Stmt,
+//RS     handle: &str,
+//RS     aliases: &mut BTreeSet<String>,
+//RS ) -> Option<Span> {
+//RS     use crate::AST::{ForKind, Stmt};
+//RS     match stmt {
+//RS         Stmt::Expr(expr) => authority_call_argument_escape(expr, handle, aliases),
+//RS         Stmt::Val(binding) => derived_binding_escape(binding, handle, aliases),
+//RS         Stmt::Assign { value, .. } => authority_value_escape(value, handle, aliases),
+//RS         Stmt::Return(Some(value), _)
+//RS         | Stmt::BreakValue(value, _)
+//RS         | Stmt::BreakLabelValue(_, _, value, _)
+//RS         | Stmt::Yield(value, _)
+//RS         | Stmt::DeferClose { close: value, .. } => authority_value_escape(value, handle, aliases),
+//RS         Stmt::While { cond, body, .. } => authority_call_argument_escape(cond, handle, aliases)
+//RS             .or_else(|| derived_block_escape(body, handle, aliases)),
+//RS         Stmt::For { kind, body, .. } => {
+//RS             let header = match kind {
+//RS                 ForKind::Range {
+//RS                     start, end, step, ..
+//RS                 } => authority_call_argument_escape(start, handle, aliases)
+//RS                     .or_else(|| authority_call_argument_escape(end, handle, aliases))
+//RS                     .or_else(|| {
+//RS                         step.as_ref()
+//RS                             .and_then(|step| authority_call_argument_escape(step, handle, aliases))
+//RS                     }),
+//RS                 ForKind::In { collection, step } => {
+//RS                     authority_call_argument_escape(collection, handle, aliases).or_else(|| {
+//RS                         step.as_ref()
+//RS                             .and_then(|step| authority_call_argument_escape(step, handle, aliases))
+//RS                     })
+//RS                 }
+//RS             };
+//RS             header.or_else(|| derived_block_escape(body, handle, aliases))
+//RS         }
+//RS         Stmt::Switch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         }
+//RS         | Stmt::ComptimeSwitch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         } => authority_call_argument_escape(subject, handle, aliases)
+//RS             .or_else(|| {
+//RS                 arms.iter().find_map(|arm| {
+//RS                     authority_call_argument_escape(&arm.cond, handle, aliases)
+//RS                         .or_else(|| derived_block_escape(&arm.body, handle, aliases))
+//RS                 })
+//RS             })
+//RS             .or_else(|| {
+//RS                 else_body
+//RS                     .as_deref()
+//RS                     .and_then(|body| derived_block_escape(body, handle, aliases))
+//RS             }),
+//RS         Stmt::CountedLoop {
+//RS             init,
+//RS             cond,
+//RS             step,
+//RS             body,
+//RS             ..
+//RS         } => {
+//RS             let saved = aliases.clone();
+//RS             let found = derived_binding_escape(init, handle, aliases)
+//RS                 .or_else(|| authority_call_argument_escape(cond, handle, aliases))
+//RS                 .or_else(|| {
+//RS                     step.as_deref()
+//RS                         .and_then(|step| derived_stmt_escape(step, handle, aliases))
+//RS                 })
+//RS                 .or_else(|| derived_block_escape(body, handle, aliases));
+//RS             *aliases = saved;
+//RS             found
+//RS         }
+//RS         Stmt::Switched { marker, .. }
+//RS             if crate::AST::switched_off(marker)
+//RS                 || marker.name == crate::Syntax::MARKER_DEBUG_ONLY => None,
+//RS         Stmt::Loop { body, .. }
+//RS         | Stmt::Unsafe { body, .. }
+//RS         | Stmt::Impure { body, .. }
+//RS         | Stmt::Reactive { body, .. }
+//RS         | Stmt::Shield { body, .. }
+//RS         | Stmt::Switched { body, .. }
+//RS         | Stmt::Region { body, .. }
+//RS         | Stmt::Policy { body, .. }
+//RS         | Stmt::AuthorityScope { body, .. }
+//RS         | Stmt::Live { body, .. }
+//RS         | Stmt::Transact { body, .. }
+//RS         | Stmt::TaskGroup { body, .. }
+//RS         | Stmt::Layout { body, .. }
+//RS         | Stmt::AssumeDet { body, .. }
+//RS         | Stmt::ScopeMember { body, .. } => derived_block_escape(body, handle, aliases),
+//RS         Stmt::ComptimeBlock { .. } => None,
+//RS         Stmt::ComptimeIf {
+//RS             cond,
+//RS             then_body,
+//RS             else_body,
+//RS             ..
+//RS         } => authority_call_argument_escape(cond, handle, aliases)
+//RS             .or_else(|| derived_block_escape(then_body, handle, aliases))
+//RS             .or_else(|| {
+//RS                 else_body
+//RS                     .as_deref()
+//RS                     .and_then(|body| derived_block_escape(body, handle, aliases))
+//RS             }),
+//RS         Stmt::ContextBlock { fields, body, .. } => fields
+//RS             .iter()
+//RS             .find_map(|(_, value, _)| authority_value_escape(value, handle, aliases))
+//RS             .or_else(|| derived_block_escape(body, handle, aliases)),
+//RS         Stmt::Break(_)
+//RS         | Stmt::Continue(_)
+//RS         | Stmt::BreakLabel(..)
+//RS         | Stmt::ContinueLabel(..)
+//RS         | Stmt::Return(None, _) => None,
+//RS     }
+//RS }
+//RS 
+//RS fn grant_derived_handle_escape(body: &[crate::AST::Stmt], handle: &str) -> Option<Span> {
+//RS     let mut aliases = BTreeSet::new();
+//RS     body.iter()
+//RS         .find_map(|stmt| derived_stmt_escape(stmt, handle, &mut aliases))
+//RS }
+//RS 
+//RS fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
+//RS     use crate::AST::{ForKind, Stmt};
+//RS     let block = |b: &[Stmt]| b.iter().find_map(|s| stmt_handle_escape(s, handle));
+//RS     match stmt {
+//RS         Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
+//RS             expr_handle_escape(e, handle)
+//RS         }
+//RS         Stmt::Val(b) => expr_handle_escape(&b.init, handle),
+//RS         Stmt::Assign { value, .. } => expr_handle_escape(value, handle),
+//RS         Stmt::Return(Some(e), _) => expr_handle_escape(e, handle),
+//RS         Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => expr_handle_escape(e, handle),
+//RS         Stmt::While { cond, body, .. } => expr_handle_escape(cond, handle).or_else(|| block(body)),
+//RS         Stmt::For { kind, body, .. } => {
+//RS             let coll = match kind {
+//RS                 ForKind::Range {
+//RS                     start,
+//RS                     end,
+//RS                     step,
+//RS                     exclusive: _,
+//RS                 } => expr_handle_escape(start, handle)
+//RS                     .or_else(|| expr_handle_escape(end, handle))
+//RS                     .or_else(|| step.as_ref().and_then(|s| expr_handle_escape(s, handle))),
+//RS                 ForKind::In { collection, step } => expr_handle_escape(collection, handle)
+//RS                     .or_else(|| step.as_ref().and_then(|s| expr_handle_escape(s, handle))),
+//RS             };
+//RS             coll.or_else(|| block(body))
+//RS         }
+//RS         Stmt::Switch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         }
+//RS         | Stmt::ComptimeSwitch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         } => expr_handle_escape(subject, handle)
+//RS             .or_else(|| {
+//RS                 arms.iter()
+//RS                     .find_map(|a| expr_handle_escape(&a.cond, handle).or_else(|| block(&a.body)))
+//RS             })
+//RS             .or_else(|| else_body.as_ref().and_then(|b| block(b))),
+//RS         Stmt::CountedLoop {
+//RS             init,
+//RS             cond,
+//RS             step,
+//RS             body,
+//RS             ..
+//RS         } => expr_handle_escape(&init.init, handle)
+//RS             .or_else(|| expr_handle_escape(cond, handle))
+//RS             .or_else(|| block(body))
+//RS             .or_else(|| {
+//RS                 step.as_ref()
+//RS                     .and_then(|step| stmt_handle_escape(step, handle))
+//RS             }),
+//RS         // D-CANVASSTATE1=D: an `#Off` or `#DebugOnly` body never reaches the
+//RS         // release runtime, so nothing escapes it.
+//RS         Stmt::Switched { marker, .. }
+//RS             if crate::AST::switched_off(marker)
+//RS                 || marker.name == crate::Syntax::MARKER_DEBUG_ONLY => None,
+//RS         Stmt::Loop { body, .. }
+//RS         | Stmt::Unsafe { body, .. }
+//RS         | Stmt::Impure { body, .. }
+//RS         | Stmt::Reactive { body, .. }
+//RS         | Stmt::Shield { body, .. }
+//RS         | Stmt::Switched { body, .. }
+//RS         | Stmt::Region { body, .. }
+//RS         | Stmt::Policy { body, .. }
+//RS         | Stmt::TaskGroup { body, .. }
+//RS         | Stmt::Layout { body, .. }
+//RS         | Stmt::AuthorityScope { body, .. }
+//RS         | Stmt::Transact { body, .. }
+//RS         | Stmt::AssumeDet { body, .. }
+//RS         | Stmt::ScopeMember { body, .. }
+//RS         | Stmt::Live { body, .. } => block(body),
+//RS         // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block erases; no handle can escape a build-time block.
+//RS         Stmt::ComptimeBlock { .. } => None,
+//RS         Stmt::ComptimeIf {
+//RS             cond,
+//RS             then_body,
+//RS             else_body,
+//RS             ..
+//RS         } => expr_handle_escape(cond, handle)
+//RS             .or_else(|| block(then_body))
+//RS             .or_else(|| else_body.as_ref().and_then(|b| block(b))),
+//RS         Stmt::ContextBlock { fields, body, .. } => fields
+//RS             .iter()
+//RS             .find_map(|(_, e, _)| expr_handle_escape(e, handle))
+//RS             .or_else(|| block(body)),
+//RS         Stmt::Break(_)
+//RS         | Stmt::Continue(_)
+//RS         | Stmt::BreakLabel(..)
+//RS         | Stmt::ContinueLabel(..)
+//RS         | Stmt::Return(None, _) => None,
+//RS     }
+//RS }
+//RS 
+//RS /// True when `e` is the bare handle ident (the root of an in-place chain). A bare
+//RS /// reference to the handle is a *value-use* (escape) on its own; but as the
+//RS /// receiver of a method call / field access / `?` / index it is an in-place use
+//RS /// of the capability that does NOT carry it out of scope.
+//RS fn is_bare_handle(e: &crate::AST::Expr, handle: &str) -> bool {
+//RS     matches!(e, crate::AST::Expr::Ident(n, _) if n == handle)
+//RS }
+//RS 
+//RS /// The span of the first escaping use of `handle` in `e`, or `None`. A bare
+//RS /// reference to the handle in value position is an escape; a method-call /
+//RS /// field-access / `?` chain rooted at the handle is an in-place use, but the
+//RS /// chain's arguments and indices are still scanned (they can carry it out).
+//RS fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
+//RS     use crate::AST::{EnumLitArg, Expr, OrFallback, StrPart};
+//RS     match e {
+//RS         // A bare value-position reference to the handle escapes.
+//RS         Expr::Ident(n, span) if n == handle => Some(*span),
+//RS         Expr::Ident(_, _) => None,
+//RS         // A method call / field / `?` / deref / index whose receiver is the bare
+//RS         // handle is an in-place use (performing the authorized effect) — NOT an
+//RS         // escape; but the call's args and the index are still scanned.
+//RS         Expr::MethodCall { receiver, args, .. } if is_bare_handle(receiver, handle) => {
+//RS             args.iter().find_map(|a| expr_handle_escape(&a.expr, handle))
+//RS         }
+//RS         Expr::Field(receiver, _, _) if is_bare_handle(receiver, handle) => None,
+//RS         Expr::OptField { base, .. } if is_bare_handle(base, handle) => None,
+//RS         Expr::Try(receiver, _, _, note) if is_bare_handle(receiver, handle) => {
+//RS             note.as_deref().and_then(|note| expr_handle_escape(note, handle))
+//RS         }
+//RS         Expr::Deref(receiver, _) if is_bare_handle(receiver, handle) => None,
+//RS         Expr::Index { base, index, .. } if is_bare_handle(base, handle) => {
+//RS             expr_handle_escape(index, handle)
+//RS         }
+//RS         Expr::Unary(_, inner, _)
+//RS         | Expr::Deref(inner, _)
+//RS         | Expr::RawOf(inner, _)
+//RS         | Expr::Copy(inner, _)
+//RS         | Expr::Place(inner, _, _)
+//RS         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
+//RS         | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _)
+//RS         | Expr::Field(inner, _, _) => expr_handle_escape(inner, handle),
+//RS         Expr::Try(inner, _, _, note) => expr_handle_escape(inner, handle).or_else(|| {
+//RS             note.as_deref().and_then(|note| expr_handle_escape(note, handle))
+//RS         }),
+//RS         Expr::MemberSpread { base, .. } => expr_handle_escape(base, handle),
+//RS         Expr::OptField { base, .. } => expr_handle_escape(base, handle),
+//RS         Expr::Binary(_, l, r, _) => {
+//RS             expr_handle_escape(l, handle).or_else(|| expr_handle_escape(r, handle))
+//RS         }
+//RS         Expr::CompareChain { operands, .. } => {
+//RS             operands.iter().find_map(|e| expr_handle_escape(e, handle))
+//RS         }
+//RS         Expr::Call(c) => c
+//RS             .args
+//RS             .iter()
+//RS             .filter(|a| !a.flags.authority_boundary)
+//RS             .find_map(|a| expr_handle_escape(&a.expr, handle)),
+//RS         Expr::CallValue { callee, args, .. } => expr_handle_escape(callee, handle)
+//RS             .or_else(|| {
+//RS                 args.iter()
+//RS                     .filter(|a| !a.flags.authority_boundary)
+//RS                     .find_map(|a| expr_handle_escape(&a.expr, handle))
+//RS             }),
+//RS         Expr::MethodCall { receiver, args, .. } => expr_handle_escape(receiver, handle)
+//RS             .or_else(|| {
+//RS                 args.iter()
+//RS                     .filter(|a| !a.flags.authority_boundary)
+//RS                     .find_map(|a| expr_handle_escape(&a.expr, handle))
+//RS             }),
+//RS         Expr::Index { base, index, .. } => {
+//RS             expr_handle_escape(base, handle).or_else(|| expr_handle_escape(index, handle))
+//RS         }
+//RS         Expr::Slice { base, start, end, range, .. } => expr_handle_escape(base, handle)
+//RS             .or_else(|| {
+//RS                 range.as_deref().map_or_else(
+//RS                     || {
+//RS                         expr_handle_escape(start, handle)
+//RS                             .or_else(|| expr_handle_escape(end, handle))
+//RS                     },
+//RS                     |range| expr_handle_escape(range, handle),
+//RS                 )
+//RS             }),
+//RS         Expr::Range { start, end, .. } => {
+//RS             expr_handle_escape(start, handle).or_else(|| expr_handle_escape(end, handle))
+//RS         }
+//RS         Expr::ListLit(elems, _) => elems.iter().find_map(|el| expr_handle_escape(el, handle)),
+//RS         Expr::TupleLit(fields, _, _) => {
+//RS             fields.iter().find_map(|(_, e)| expr_handle_escape(e, handle))
+//RS         }
+//RS         Expr::MapLit(entries, _) => entries
+//RS             .iter()
+//RS             .find_map(|(k, v)| expr_handle_escape(k, handle).or_else(|| expr_handle_escape(v, handle))),
+//RS         Expr::StructLit { fields, .. } => {
+//RS             fields.iter().find_map(|(_, _, f)| expr_handle_escape(f, handle))
+//RS         }
+//RS         Expr::TypedLit { body, .. } => {
+//RS             let mut found = None;
+//RS             body.for_each_expr(|f| {
+//RS                 if found.is_none() {
+//RS                     found = expr_handle_escape(f, handle);
+//RS                 }
+//RS             });
+//RS             found
+//RS         }
+//RS         Expr::EnumLit { args, .. } => args.iter().find_map(|a| match a {
+//RS             EnumLitArg::Positional(e) => expr_handle_escape(e, handle),
+//RS             EnumLitArg::Named { expr, .. } => expr_handle_escape(expr, handle),
+//RS         }),
+//RS         Expr::OrFallback { value, fallback, .. } => expr_handle_escape(value, handle).or_else(|| {
+//RS             match fallback {
+//RS                 OrFallback::Value(e) => expr_handle_escape(e, handle),
+//RS                 OrFallback::Block { body, value, .. } => body
+//RS                     .iter()
+//RS                     .find_map(|stmt| stmt_handle_escape(stmt, handle))
+//RS                     .or_else(|| value.as_ref().and_then(|value| expr_handle_escape(value, handle))),
+//RS                 OrFallback::Return(Some(e), _) => expr_handle_escape(e, handle),
+//RS                 _ => None,
+//RS             }
+//RS         }),
+//RS         Expr::PatternTest { subject, .. } => expr_handle_escape(subject, handle),
+//RS         Expr::Str(parts, _) => parts.iter().find_map(|p| match p {
+//RS             StrPart::Interp(e, _) => expr_handle_escape(e, handle),
+//RS             _ => None,
+//RS         }),
+//RS         Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+//RS             expr_handle_escape(cond, handle)
+//RS                 .or_else(|| expr_handle_escape(then_value, handle))
+//RS                 .or_else(|| expr_handle_escape(else_value, handle))
+//RS                 .or_else(|| then_body.iter().find_map(|s| stmt_handle_escape(s, handle)))
+//RS                 .or_else(|| else_body.iter().find_map(|s| stmt_handle_escape(s, handle)))
+//RS         }
+//RS         Expr::PtrFromAddr { addr, .. } => expr_handle_escape(addr, handle),
+//RS         // A lambda that captures the handle smuggles it out — the closure can
+//RS         // outlive the scope. Count a reference unless a lambda param shadows the
+//RS         // handle name (then it's a different binding, not a capture).
+//RS         Expr::Lambda(l) => {
+//RS             let shadowed = l.params.iter().any(|p| p.name == handle)
+//RS                 || l.take_names.iter().any(|(n, _)| n == handle);
+//RS             if !shadowed && super::lambda_body_refs_name(&l.body, handle) {
+//RS                 Some(l.span)
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         }
+//RS         Expr::Int(..)
+//RS         | Expr::Float(..)
+//RS         | Expr::Bool(..)
+//RS         | Expr::Unit(..)
+//RS         | Expr::Char(..)
+//RS         | Expr::Absent(_)
+//RS         | Expr::ReduceMarker(_, _)
+//RS         | Expr::Todo { .. }
+//RS         | Expr::NoElse(_)
+//RS         | Expr::UnitLit { .. }
+//RS         | Expr::ComptimeName { .. }
+//RS         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
+//RS         // literal, no nested `Expr` to recurse into.
+//RS         | Expr::StrMatchLit(_, _)
+//RS         | Expr::BinMatchLit(_, _) => None,
+//RS         Expr::Paren(inner, _) => expr_handle_escape(inner, handle),
+//RS         Expr::Spread(inner, _) => expr_handle_escape(inner, handle),
+//RS     }
+//RS }
+//RS 
+//RS /// E0712 (D-ABILITY-NAME2): an effect used inside a `#FX(…)` region is not
+//RS /// in the region's list. The same check covers bare and named regions.
+//RS pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span, marker: &str) -> Diagnostic {
+//RS     let over_list = show_set(over);
+//RS     let caps_list = if caps.is_empty() {
+//RS         "no effects".to_string()
+//RS     } else {
+//RS         format!("`{}`", show_set(caps))
+//RS     };
+//RS     let row = RightsRow::invocation(
+//RS         caps.iter().map(String::as_str),
+//RS         std::iter::empty::<&str>(),
+//RS         RightsProvenance::new(marker, "block authority rights row"),
+//RS     );
+//RS     let call_chain = [format!("#{marker}")];
+//RS     let scope_chain = [jet_foundation::sema::ScopeFrame::new(
+//RS         jet_foundation::Authority::Scope::Block,
+//RS         format!("#{marker}"),
+//RS         caps.clone(),
+//RS         RightsProvenance::new(marker, "lexical block authority scope"),
+//RS     )];
+//RS     rights_frame(
+//RS         Diagnostic::error(
+//RS             "E0712",
+//RS             format!(
+//RS                 "this `#{}` region uses the effect `{}`, which it has no authority for",
+//RS                 marker, over_list
+//RS             ),
+//RS             format!(
+//RS                 "`#{}(…)` allows only {}; an effect reached inside — even through a call — must be in that list",
+//RS                 marker, caps_list
+//RS             ),
+//RS             format!(
+//RS                 "add `{}` to the `#{}(…)` list, or move that work outside the region",
+//RS                 over_list, marker
+//RS             ),
+//RS             Some(span),
+//RS         ),
+//RS         &row,
+//RS         over,
+//RS         &call_chain,
+//RS         &scope_chain,
+//RS     )
+//RS }
+//RS 
+//RS /// E0711 (D-ABILITY-NAME2): the `Authority` handle bound by a named `#FX(…)` region escapes
+//RS /// its scope — returned, stored in an outer binding, or captured by an escaping
+//RS /// value. The rights are revoked at scope end (RAII, S63), so a reference
+//RS /// that outlives the block would name revoked rights.
+//RS pub fn e0711(handle: &str, marker: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0711",
+//RS         format!("the `Authority` handle `{}` can't escape its `#{}` block", handle, marker),
+//RS         format!(
+//RS             "`#{}(…)` revokes the `Authority` at the end of its block (RAII); returning, storing, or sharing `{}` would let revoked rights outlive the scope",
+//RS             marker, handle
+//RS         ),
+//RS         format!("use `{}` only inside the `#{}` block, or perform the work there", handle, marker),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E0119: a `#(…)` or `#FX(…)` list names something that isn't a known effect.
+//RS pub fn unknown_effect(name: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0119",
+//RS         format!("`{}` isn't a known effect", name),
+//RS         "an effect list names compiler-known effects like `Net`, `FS`, `IO`, `DB`, or `Time`"
+//RS             .to_string(),
+//RS         "use one of the known effect names, or remove it from the list".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E0742 (D-EFF3): an impl of a trait method uses effects beyond the upper
+//RS /// bound the trait method declares (`#Pure fn …` / `fn … #(GPU)`).
+//RS pub fn e0742(
+//RS     trait_name: &str,
+//RS     method: &str,
+//RS     over: &EffectSet,
+//RS     bound: &EffectSet,
+//RS     span: Span,
+//RS ) -> Diagnostic {
+//RS     e0742_with_chain(trait_name, method, over, bound, span, &[])
+//RS }
+//RS 
+//RS fn e0742_with_chain(
+//RS     trait_name: &str,
+//RS     method: &str,
+//RS     over: &EffectSet,
+//RS     bound: &EffectSet,
+//RS     span: Span,
+//RS     call_chain: &[String],
+//RS ) -> Diagnostic {
+//RS     let over_list = show_set(over);
+//RS     let bound_desc = if bound.is_empty() {
+//RS         format!(
+//RS             "`{}` bounds `{}` to `-[]>`, so impls must be pure",
+//RS             trait_name, method
+//RS         )
+//RS     } else {
+//RS         format!(
+//RS             "`{}` bounds `{}` to `-[{}]>`, so impls may use only those",
+//RS             trait_name,
+//RS             method,
+//RS             show_set(bound)
+//RS         )
+//RS     };
+//RS     let row = RightsRow::invocation(
+//RS         bound.iter().map(String::as_str),
+//RS         std::iter::empty::<&str>(),
+//RS         RightsProvenance::new(
+//RS             format!("{trait_name}::{method}"),
+//RS             "trait method rights row",
+//RS         ),
+//RS     );
+//RS     rights_frame(
+//RS         Diagnostic::error(
+//RS             "E0742",
+//RS             format!(
+//RS                 "this `{}` impl uses the effect `{}`, which the trait doesn't allow",
+//RS                 method, over_list
+//RS             ),
+//RS             format!("{}; `{}` is outside that bound", bound_desc, over_list),
+//RS             format!(
+//RS                 "remove the `{}` work from this impl, or widen the bound on the trait method",
+//RS                 over_list
+//RS             ),
+//RS             Some(span),
+//RS         ),
+//RS         &row,
+//RS         over,
+//RS         call_chain,
+//RS         &[],
+//RS     )
+//RS }
+//RS 
+//RS /// D-EFF3: enforce trait-method effect upper bounds against each impl's inferred
+//RS /// effects. `trait_bounds[(trait, method)]` is `Some(bound)` when the trait
+//RS /// method declares one (`#Pure` → empty set). Impl methods are keyed
+//RS /// `Type::method` in `solved`. An impl whose inferred set exceeds the bound is
+//RS /// E0742.
+//RS pub fn check_trait_obligations(
+//RS     impls: &[(String, String, String, Span)],
+//RS     trait_bounds: &HashMap<(String, String), EffectSet>,
+//RS     solved: &HashMap<String, EffectSet>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     for (trait_name, type_name, method, span) in impls {
+//RS         let Some(bound) = trait_bounds.get(&(trait_name.clone(), method.clone())) else {
+//RS             continue;
+//RS         };
+//RS         let key = format!("{type_name}::{method}");
+//RS         let inferred = solved.get(&key).cloned().unwrap_or_default();
+//RS         let over: EffectSet = effects_uncovered(&inferred, bound);
+//RS         if !over.is_empty() {
+//RS             let call_chain = [key.clone()];
+//RS             diags.push(e0742_with_chain(
+//RS                 trait_name,
+//RS                 method,
+//RS                 &over,
+//RS                 bound,
+//RS                 *span,
+//RS                 &call_chain,
+//RS             ));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// U13 (D-JPK-SECRETCRYPTO1): unlike every other effect, `Secret` is denied
+//RS /// even with no declared bound at all — `core.crypto.vault.get` demands an explicit
+//RS /// `#(Secret)` (or a wider declared bound covering it) on the calling
+//RS /// function; a bare `fn` with no `#(…)` list, or one that omits `Secret`, is
+//RS /// E1264. A helper fn two calls deep from the actual `core.crypto.vault.get` still
+//RS /// requires the grant on itself — the same call-graph reach E0740 checks —
+//RS /// but this deliberately uses the dedicated `secret` row rather than the
+//RS /// general `effects` row: unannotated foreign calls seed every grantable root,
+//RS /// while language-tagged calls seed their `FFI.*` leaf; neither proves a
+//RS /// specific secret read.
+//RS pub(crate) fn check_secret_grants(
+//RS     items: &[crate::AST::Item],
+//RS     module_alias: &str,
+//RS     reaches_secret: &BTreeSet<String>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     fn declared_set(f: &crate::AST::Func) -> EffectSet {
+//RS         let mut declared = EffectSet::new();
+//RS         let Some(list) = &f.declared_effects else {
+//RS             return declared;
+//RS         };
+//RS         for (name, _span) in list {
+//RS             if let Some(base) = name.strip_prefix('!') {
+//RS                 // Prohibitions don't grant anything.
+//RS                 let _ = base;
+//RS                 continue;
+//RS             }
+//RS             if let Some(e) = parse_effect_name(name) {
+//RS                 declared.insert(e);
+//RS             }
+//RS         }
+//RS         declared
+//RS     }
+//RS     fn check_one(
+//RS         f: &crate::AST::Func,
+//RS         owner: Option<&str>,
+//RS         module_alias: &str,
+//RS         reaches_secret: &BTreeSet<String>,
+//RS         diags: &mut Vec<Diagnostic>,
+//RS     ) {
+//RS         let key = format!("{module_alias}::{}", super::effect_key(owner, &f.name));
+//RS         if !reaches_secret.contains(&key) {
+//RS             return;
+//RS         }
+//RS         let declared = declared_set(f);
+//RS         if !declared
+//RS             .iter()
+//RS             .any(|e| effect_root(e) == Effect::Secret.name())
+//RS         {
+//RS             let span = f
+//RS                 .declared_effects
+//RS                 .as_ref()
+//RS                 .and_then(|list| list.first())
+//RS                 .map(|(_, s)| *s)
+//RS                 .unwrap_or(f.name_span);
+//RS             diags.push(e1264(&f.name, span));
+//RS         }
+//RS     }
+//RS     use crate::AST::Item;
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(f) => check_one(f, None, module_alias, reaches_secret, diags),
+//RS             Item::Impl(i) => {
+//RS                 for m in &i.methods {
+//RS                     check_one(m, Some(&i.type_name), module_alias, reaches_secret, diags);
+//RS                 }
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 for m in &s.methods {
+//RS                     check_one(m, Some(&s.name), module_alias, reaches_secret, diags);
+//RS                 }
+//RS                 for block in &s.trait_impls {
+//RS                     for m in &block.methods {
+//RS                         check_one(m, Some(&s.name), module_alias, reaches_secret, diags);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 for m in &e.methods {
+//RS                     check_one(m, Some(&e.name), module_alias, reaches_secret, diags);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// E1264 (U13, D-JPK-SECRETCRYPTO1): a function reaches `core.crypto.vault.get`
+//RS /// (transitively) without `Secret` in its own declared effect row.
+//RS pub fn e1264(fn_name: &str, span: Span) -> Diagnostic {
+//RS     let diagnostic = Diagnostic::error(
+//RS         "E1264",
+//RS         format!(
+//RS             "`{}` reads a secret but doesn't declare the `Secret` effect",
+//RS             fn_name
+//RS         ),
+//RS         "reading a secret (`core.crypto.vault.get`) always requires an explicit grant — unlike other \
+//RS          effects, there is no silently-inferred default here, so a function must opt in even with \
+//RS          no other explicit effect row at all."
+//RS             .to_string(),
+//RS         format!(
+//RS             "add `-[Secret]>` to `{}`'s signature (or widen an existing effect row to cover it)",
+//RS             fn_name
+//RS         ),
+//RS         Some(span),
+//RS     );
+//RS     let row = RightsRow::invocation(
+//RS         std::iter::empty::<&str>(),
+//RS         std::iter::empty::<&str>(),
+//RS         RightsProvenance::new(fn_name, "implicit Secret grant rights row"),
+//RS     );
+//RS     let effects = Holds::from([Effect::Secret.name().to_string()]);
+//RS     let call_chain = [fn_name.to_string()];
+//RS     rights_frame(diagnostic, &row, &effects, &call_chain, &[])
+//RS }
+// END-PORT-PENDING 0430 crates/jet-sema/src/Sema/Effects.rs:1748-3590
+
+// PORT-PENDING 0430 crates-jet-sema-src-sema-effects-module-group-slice-1748: crates/jet-sema/src/Sema/Purity.rs:1-78
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::Diagnostics::Diagnostic;
+//RS 
+//RS /// `call_name` is the callee; `path` is the chain of calls that led here
+//RS /// (for the trace message).
+//RS pub fn e3401(
+//RS     pure_fn_name: &str,
+//RS     call_name: &str,
+//RS     path: &[String],
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Diagnostic {
+//RS     let why = if path.is_empty() {
+//RS         format!(
+//RS             "`{}` is impure, but `{}` declares `-[]>`",
+//RS             call_name, pure_fn_name
+//RS         )
+//RS     } else {
+//RS         format!(
+//RS             "{} calls `{}`, which is impure — the whole call chain must be pure inside `{}`",
+//RS             path.join(" → "),
+//RS             call_name,
+//RS             pure_fn_name
+//RS         )
+//RS     };
+//RS     let mut call_chain = Vec::with_capacity(path.len() + 2);
+//RS     call_chain.push(pure_fn_name.to_string());
+//RS     for component in path {
+//RS         if call_chain.last().map(String::as_str) != Some(component.as_str()) {
+//RS             call_chain.push(component.clone());
+//RS         }
+//RS     }
+//RS     if call_chain.last().map(String::as_str) != Some(call_name) {
+//RS         call_chain.push(call_name.to_string());
+//RS     }
+//RS     Diagnostic::error(
+//RS         "E3401",
+//RS         format!(
+//RS             "`{}` calls the impure function `{}`",
+//RS             pure_fn_name, call_name
+//RS         ),
+//RS         why,
+//RS         // The callee's row is inferred or built in, so the user can only
+//RS         // change the pure caller: lose the call or lose the empty bound.
+//RS         if path.is_empty() {
+//RS             format!(
+//RS                 "remove the call from `{}`, or drop the `-[]>` bound from `{}` so its effects are inferred",
+//RS                 pure_fn_name, pure_fn_name
+//RS             )
+//RS         } else {
+//RS             format!(
+//RS                 "remove the call to `{}`, or drop the `-[]>` bound from `{}` so its effects are inferred",
+//RS                 call_name, pure_fn_name
+//RS             )
+//RS         },
+//RS         Some(span),
+//RS     )
+//RS     .with_rights_chain("pure", call_chain, std::iter::empty::<String>(), None)
+//RS }
+//RS 
+//RS /// E3402: ambient I/O or network access attempted during a sandboxed package build.
+//RS pub fn e3402(call_name: &str, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E3402",
+//RS         format!(
+//RS             "`{}` is not allowed during a sandboxed package build",
+//RS             call_name
+//RS         ),
+//RS         "package builds run with ambient I/O and network access disabled (D-PURE2)".to_string(),
+//RS         "compute this value at compile time or pass it in as a parameter".to_string(),
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS /// E3403: keep the sema-facing constructor while the registered diagnostic
+//RS /// wording lives with the foundation diagnostic row.
+//RS pub fn e3403(what: &str, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
+//RS     Diagnostic::e3403(what, span)
+//RS }
+//RS 
+// END-PORT-PENDING 0430 crates/jet-sema/src/Sema/Purity.rs:1-78
+

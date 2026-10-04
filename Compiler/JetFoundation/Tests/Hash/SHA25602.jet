@@ -1,0 +1,211 @@
+// The eight original SHA256.rs:1299–1515 filesystem tests, unchanged in
+// substantive fixtures/assertions. Run only after the native ABI is real:
+// #4494/#4483/#4409/#4500, real raw temp_dir/PID/clock/fs/UnixListener producers.
+// No fake file providers, no String path bridges, no disabled assertions.
+use core.net.host.native_unix as sha256_test_unix
+
+fn sha256_test_join(base: sha256_paths.OSPath, text: String) -> sha256_paths.OSPath Never! {
+    result := ~base
+    sha256_paths.push(&result, sha256_paths.from_text(text, base.platform))
+    result
+}
+fn sha256_test_root(label: String) -[Env,FS.Read,Exec,Time]> sha256_paths.OSPath Never! {
+    pid :: sha256_process.id()
+    time :: sha256_clock.system_time_now()
+    stamp :: sha256_wide.decimal(sha256_metadata.modified_nanoseconds(&time) ?? panic("test clock predates UNIX epoch"))
+    sha256_test_join(sha256_ingress.temp_dir(), "{label}-{pid}-{stamp}")
+}
+fn sha256_test_outside(root: sha256_paths.OSPath) -> sha256_paths.OSPath Never! {
+    name :: sha256_paths.file_name_span(root) ?? panic("test root name")
+    // Fixture name was deliberately created as fresh ASCII; root parent still
+    // retains its original encoded bytes, even with a non-UTF8 temp_dir.
+    text := sha256_path_utf8(root, name) ?? panic("ASCII test root name") // #4303
+    parent :: sha256_paths.parent_span(root) ?? panic("test root parent")
+    sha256_test_join(sha256_paths.owned_span(root, parent), "{text}-outside")
+}
+fn sha256_test_write(path: sha256_paths.OSPath, text: String) -[FS.Write]> Never! {
+    bytes :: text.bytes()
+    sha256_io.write(path, bytes) ?? panic("test fixture write")
+}
+
+#Test("tree_hash_accepts_valid_tree_with_empty_directories") {
+    root :: sha256_test_root("jet-tree-hash-valid")
+    _ :: sha256_io.remove_dir_all(root)
+    sha256_io.create_dir_all(sha256_test_join(root, "empty/nested")) ?? panic("empty directories")
+    sha256_test_write(sha256_test_join(root, "src.jet"), "pub fn stable() {}\n")
+    first :: try_tree_hash(root) ?? panic("regular files and empty directories are valid")
+    second :: try_tree_hash(root) ?? panic("the valid tree remains hashable")
+    assert_eq(first, second)
+    _ :: sha256_io.remove_dir_all(root)
+}
+#Test("tree_hash_rejects_excessive_directory_depth") {
+    root :: sha256_test_root("jet-tree-hash-deep")
+    _ :: sha256_io.remove_dir_all(root)
+    sha256_io.create_dir_all(root) ?? panic("root")
+    current := ~root
+    loop index in 0..<MAX_TREE_DEPTH + 1 {
+        sha256_paths.push(&current, sha256_paths.from_text("d{index}", root.platform))
+        sha256_io.create_dir(current) ?? panic("deep directory")
+    }
+    if try_tree_hash(root) == {
+        .Ok(_) -> panic("excessive directory depth must fail closed")
+        .Err(error) -> {
+            if error == .TooLarge(_, limit) -> assert_eq(limit, U64{MAX_TREE_DEPTH})
+            else -> panic("depth limit had wrong refusal")
+        }
+    }
+    _ :: sha256_io.remove_dir_all(root)
+}
+#Test("collect_tree_files_charges_empty_directories_to_node_budget") {
+    root :: sha256_test_root("jet-tree-hash-wide-empty")
+    _ :: sha256_io.remove_dir_all(root)
+    sha256_io.create_dir_all(root) ?? panic("root")
+    sha256_io.create_dir(sha256_test_join(root, "empty-a")) ?? panic("empty a")
+    sha256_io.create_dir(sha256_test_join(root, "empty-b")) ?? panic("empty b")
+    entries := [TreeFile]{}
+    nodes := MAX_TREE_NODES - 1
+    if collect_tree_files(root, root, &entries, 0, &nodes) == {
+        .Ok(_) -> panic("wide empty directories must consume the node budget")
+        .Err(error) -> {
+            if error == .TooLarge(_, limit) -> assert_eq(limit, U64{MAX_TREE_NODES})
+            else -> panic("node budget had wrong refusal")
+        }
+    }
+    assert_eq(nodes, MAX_TREE_NODES)
+    assert(entries.is_empty())
+    _ :: sha256_io.remove_dir_all(root)
+}
+#Test("rooted_read_rejects_final_path_swap") {
+    // Same cfg(any(linux,android,macos,ios)) membership as the original test.
+    if !sha256_rooted_available() -> return
+    root :: sha256_test_root("jet-rooted-read-final-swap")
+    outside :: sha256_test_outside(root)
+    payload :: sha256_test_join(root, "payload.txt")
+    _ :: sha256_io.remove_dir_all(root)
+    _ :: sha256_io.remove(outside)
+    sha256_io.create_dir_all(root) ?? panic("root")
+    sha256_test_write(payload, "inside\n")
+    sha256_test_write(outside, "outside\n")
+    authority :: sha256_authority_open(root, sha256_paths.from_text("payload.txt", root.platform)) ?? panic("open authority")
+    sha256_io.remove(payload) ?? panic("remove payload")
+    sha256_io.symlink(outside, payload) ?? panic("swap final path")
+    if sha256_authority_read_bounded(^authority, MAX_TREE_FILE_BYTES) == {
+        .Ok(_) -> panic("final path swap was accepted")
+        .Err(_) -> {}
+    }
+    _ :: sha256_io.remove_dir_all(root)
+    _ :: sha256_io.remove(outside)
+}
+#Test("rooted_read_rejects_ancestor_path_swap") {
+    if !sha256_rooted_available() -> return
+    root :: sha256_test_root("jet-rooted-read-ancestor-swap")
+    outside :: sha256_test_outside(root)
+    nested :: sha256_test_join(root, "nested")
+    payload :: sha256_test_join(nested, "payload.txt")
+    _ :: sha256_io.remove_dir_all(root)
+    _ :: sha256_io.remove_dir_all(outside)
+    sha256_io.create_dir_all(nested) ?? panic("nested")
+    sha256_io.create_dir_all(outside) ?? panic("outside")
+    sha256_test_write(payload, "inside\n")
+    sha256_test_write(sha256_test_join(outside, "payload.txt"), "outside\n")
+    authority :: sha256_authority_open(root, sha256_paths.from_text("nested/payload.txt", root.platform)) ?? panic("open authority")
+    sha256_io.rename(nested, sha256_test_join(root, "nested-old")) ?? panic("move ancestor")
+    sha256_io.symlink(outside, nested) ?? panic("swap ancestor")
+    if sha256_authority_read_bounded(^authority, MAX_TREE_FILE_BYTES) == {
+        .Ok(_) -> panic("ancestor path swap was accepted")
+        .Err(_) -> {}
+    }
+    _ :: sha256_io.remove_dir_all(root)
+    _ :: sha256_io.remove_dir_all(outside)
+}
+#Test("rooted_read_rejects_multiply_linked_input") {
+    if !sha256_rooted_available() -> return
+    root :: sha256_test_root("jet-rooted-read-hardlink")
+    outside :: sha256_test_outside(root)
+    _ :: sha256_io.remove_dir_all(root)
+    _ :: sha256_io.remove(outside)
+    sha256_io.create_dir_all(root) ?? panic("root")
+    sha256_test_write(outside, "outside\n")
+    sha256_io.hard_link(outside, sha256_test_join(root, "payload.txt")) ?? panic("hardlink")
+    if sha256_authority_open(root, sha256_paths.from_text("payload.txt", root.platform)) == {
+        .Ok(_) -> panic("multiply linked authority input was accepted")
+        .Err(_) -> {}
+    }
+    _ :: sha256_io.remove_dir_all(root)
+    _ :: sha256_io.remove(outside)
+}
+#Test("tree_hash_rejects_recursive_symlink_nodes") {
+    if sha256_target.selected_family() != .Unix -> return
+    root :: sha256_test_root("jet-tree-hash-symlink")
+    sha256_io.create_dir_all(sha256_test_join(root, "src")) ?? panic("src")
+    sha256_test_write(sha256_test_join(root, "src/value.txt"), "stable\n")
+    sha256_io.symlink(sha256_paths.from_text(".", root.platform), sha256_test_join(root, "src/loop")) ?? panic("recursive symlink")
+    if try_tree_hash(root) == {
+        .Ok(_) -> panic("recursive symlink was accepted")
+        .Err(error) -> assert(error == .Symlink(_))
+    }
+    _ :: sha256_io.remove_dir_all(root)
+}
+#Test("tree_hash_rejects_special_nodes") {
+    if sha256_target.selected_family() != .Unix -> return
+    root :: sha256_test_join(sha256_ingress.temp_dir(), "jet-sha-tree-special-{sha256_process.id()}")
+    _ :: sha256_io.remove_dir_all(root)
+    sha256_io.create_dir_all(root) ?? panic("root")
+    socket :: sha256_test_join(root, "socket")
+    listener :: sha256_test_unix.UnixListener.bind(socket) ?? panic("bind actual Unix listener")
+    if try_tree_hash(root) == {
+        .Ok(_) -> panic("special node was accepted")
+        .Err(error) -> {
+            if error == .Special(path) -> assert(sha256_paths.equals(path, socket))
+            else -> panic("special node had wrong refusal")
+        }
+    }
+    // Original listener drop BEFORE root cleanup; close failure is ignored.
+    _ :: listener.close(^listener)
+    _ :: sha256_io.remove_dir_all(root)
+}
+
+// Additional bounded-file controls for the consumer law named in the brief.
+#Test("SHA256 file hex hashes exact bytes and bounded reads retain error precedence") {
+    root :: sha256_test_root("jet-sha-file-control")
+    _ :: sha256_io.remove_dir_all(root)
+    sha256_io.create_dir_all(root) ?? panic("root")
+    path :: sha256_test_join(root, "abc.txt")
+    sha256_test_write(path, "abc")
+    assert_eq(sha256_file_hex(path) ?? panic("file hash"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    assert_eq(read_file_nofollow(path, U64{3}) ?? panic("exact bound"), "abc".bytes())
+    if read_file_nofollow(path, U64{2}) == {
+        .Ok(_) -> panic("oversize accepted")
+        .Err(error) -> assert_eq(error, IOError.InvalidData(sha256_io_context(.Read, path, "file exceeds its read bound")))
+    }
+    missing :: sha256_test_join(root, "missing.txt")
+    if read_file_nofollow(missing, MAX_TREE_FILE_BYTES + U64{1}) == {
+        .Ok(_) -> panic("excessive bound accepted")
+        .Err(error) -> assert_eq(error, sha256_invalid_input(missing, "file read bound exceeds the tree hashing bound"))
+    }
+    _ :: sha256_io.remove_dir_all(root)
+}
+#Test("tree framing and rooted atomic publication use the canonical hash") {
+    if !sha256_rooted_available() -> return
+    root :: sha256_test_root("jet-sha-publication-control")
+    _ :: sha256_io.remove_dir_all(root)
+    sha256_io.create_dir_all(root) ?? panic("root")
+    relative :: sha256_paths.from_text("nested/abc.txt", root.platform)
+    bytes :: "abc".bytes()
+    write_file_nofollow_at_root(root, relative, bytes[0..<bytes.len()]) ?? panic("publish")
+    assert_eq(read_file_nofollow_at_root(root, relative, MAX_TREE_FILE_BYTES) ?? panic("rooted read"), bytes)
+    framed := mir_sha256_new()
+    label :: "nested/abc.txt".bytes()
+    nul :: TEXT_NUL.bytes()
+    length :: [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{3}}
+    mir_sha256_update(&framed, label[0..<label.len()])
+    mir_sha256_update(&framed, nul[0..<nul.len()])
+    mir_sha256_update(&framed, length[0..<length.len()])
+    mir_sha256_update(&framed, bytes[0..<bytes.len()])
+    digest :: mir_sha256_finish(^framed)
+    assert_eq(try_tree_hash(root) ?? panic("tree"), "sha256-{mir_sha256_hex_bytes(digest[0..<digest.len()])}")
+    replacement :: "replaced".bytes()
+    write_file_nofollow_at_root(root, relative, replacement[0..<replacement.len()]) ?? panic("replace")
+    assert_eq(read_file_nofollow_at_root(root, relative, MAX_TREE_FILE_BYTES) ?? panic("read replacement"), replacement)
+    _ :: sha256_io.remove_dir_all(root)
+}

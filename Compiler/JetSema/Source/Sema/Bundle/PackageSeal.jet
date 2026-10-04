@@ -1,0 +1,1085 @@
+// PORT-PENDING 0355 crates-jet-sema-src-sema-bundle-packageseal: crates/jet-sema/src/Sema/Bundle/PackageSeal.rs:1-1081
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #2517 stage S2: dependency packages checked once, reused from records.
+//RS //!
+//RS //! A `jet check` runs inside a package-record session (`with_package_records`).
+//RS //! After registration and the failure-union probe, every package of the
+//RS //! bundle gets its check key: compiler identity, the target facts and check
+//RS //! environment sema reads, the package's source digest, and the interface
+//RS //! digests its direct dependencies produced in this run. A dependency package
+//RS //! (Core, or a package under a dependency root) whose key has a stored record
+//RS //! is **sealed**: its bodies are erased, it is not body-checked, and its item
+//RS //! records seed the facts its bodies would have produced. Every other
+//RS //! package is checked, and each clean dependency package publishes its
+//RS //! record for the next run.
+//RS //!
+//RS //! The record is a bundle of item records (design section 3.5): one entry
+//RS //! per effect-graph node the package owns, with its summary and summary
+//RS //! digest, plus the per-module facts that are not keyed by item yet
+//RS //! (address-taken names, the #3708 inferred-infallible set, exact-int use).
+//RS //! Call edges are stored with stable module identities, never loader
+//RS //! aliases, and are mapped back to the current bundle's aliases when seeded.
+//RS //! Spans are module-absolute; a sealed package has the recorded bytes, so
+//RS //! they stay valid. Item reuse inside a checked package (stage S3R,
+//RS //! `ItemReuse`) stores item-relative spans in its own item records.
+//RS //!
+//RS //! A package is not published when the codec cannot carry one of its facts,
+//RS //! when its bodies evaluate at compile time or discovered inputs, or when its
+//RS //! check reported a diagnostic that reaches the importer's output. Such a
+//RS //! package is checked on every run.
+//RS 
+//RS use crate::Diagnostics::Span;
+//RS use crate::Sema::Effects::{
+//RS     AuthorityDelegation, AutodiffObligation, CallbackObligation, ComputeCallFact,
+//RS     DiscardedResultFact, EffectSummary, RegionSummary,
+//RS };
+//RS use crate::Sema::MemoryFacts::{
+//RS     MemoryCall, MemoryEvent, MemoryEventKind, MemorySummary, OpenMemoryDispatch,
+//RS };
+//RS use crate::AST::{Func, Item, ProgramBundle};
+//RS use jet_foundation::PackageIdentity::{self as identity, PackageGraph, PackageKind};
+//RS use jet_foundation::RecordCodec::{
+//RS     encode_record, record_digest, record_map, RecordError, RecordReader, RecordSection,
+//RS     RecordValue,
+//RS };
+//RS use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+//RS use std::sync::{Arc, Mutex};
+//RS 
+//RS /// Schema of the package check record (an action record under the key).
+//RS pub const PKG_CHECK_SCHEMA: &str = "jet.pkg-check/v1";
+//RS /// Schema of the item bundle the check record points to (content addressed).
+//RS pub const ITEMS_SCHEMA: &str = "jet.items/v1";
+//RS const ITEM_SUMMARY_SCHEMA: &str = "jet.item-summary/v1";
+//RS 
+//RS const SECTION_HEADER: u64 = 1;
+//RS const SECTION_MODULES: u64 = 2;
+//RS const SECTION_ITEMS: u64 = 3;
+//RS 
+//RS /// The record store a package-record session reads and writes. The CLI
+//RS /// implements it over the shared `jet-store` cache.
+//RS pub trait PackageRecordStore: Send + Sync {
+//RS     /// Compiler and Core identity; part of every key.
+//RS     fn compiler_identity(&self) -> String;
+//RS     /// A stored record of `schema` under `key`, or `None` on a miss.
+//RS     fn load(&self, schema: &str, key: &str) -> Option<Vec<u8>>;
+//RS     /// Publish a record. Content-addressed schemas use the SHA-256 hex of
+//RS     /// `bytes` as `key`. Failing to publish only costs speed.
+//RS     fn publish(&self, schema: &str, key: &str, bytes: &[u8]);
+//RS     /// A stored action record without recording its use. A check that reads
+//RS     /// one record per item uses this and records the uses in `publish_batch`.
+//RS     fn load_untouched(&self, schema: &str, key: &str) -> Option<Vec<u8>>;
+//RS     /// Record the uses of the `touched` action records and publish `records`
+//RS     /// (action records under their keys) in one store transaction. Failing
+//RS     /// only costs speed.
+//RS     fn publish_batch(&self, schema: &str, touched: &[String], records: Vec<(String, Vec<u8>)>);
+//RS     /// The manifest bytes of a package directory.
+//RS     fn manifest(&self, root: &std::path::Path) -> Option<Vec<u8>>;
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum PackageReuse {
+//RS     /// Sealed: checked from its stored record, no body checked.
+//RS     Reused,
+//RS     /// Checked, and its record published for the next run.
+//RS     CheckedPublished,
+//RS     /// Checked; not recordable (the root package, or a reason in `detail`).
+//RS     Checked,
+//RS }
+//RS 
+//RS impl PackageReuse {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Reused => "reused",
+//RS             Self::CheckedPublished => "checked+published",
+//RS             Self::Checked => "checked",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One package of one sealed-aware check.
+//RS #[derive(Clone, Debug)]
+//RS pub struct PackageReuseRow {
+//RS     pub identity: String,
+//RS     pub key: String,
+//RS     pub reuse: PackageReuse,
+//RS     pub modules: usize,
+//RS     pub detail: String,
+//RS }
+//RS 
+//RS struct Session {
+//RS     store: Arc<dyn PackageRecordStore>,
+//RS     rows: Vec<PackageReuseRow>,
+//RS }
+//RS 
+//RS static SESSION: Mutex<Option<Session>> = Mutex::new(None);
+//RS 
+//RS fn session() -> std::sync::MutexGuard<'static, Option<Session>> {
+//RS     SESSION.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS }
+//RS 
+//RS struct SessionGuard;
+//RS 
+//RS impl Drop for SessionGuard {
+//RS     fn drop(&mut self) {
+//RS         session().take();
+//RS         super::ItemReuse::end();
+//RS     }
+//RS }
+//RS 
+//RS /// Run `check` with package records enabled for `jet check` bundles, and
+//RS /// return its rows. The session is process-wide so it follows the check onto
+//RS /// the compiler stack thread; one `jet check` process runs one session.
+//RS pub fn with_package_records<R>(
+//RS     store: Arc<dyn PackageRecordStore>,
+//RS     check: impl FnOnce() -> R,
+//RS ) -> (R, Vec<PackageReuseRow>) {
+//RS     *session() = Some(Session {
+//RS         store,
+//RS         rows: Vec::new(),
+//RS     });
+//RS     let guard = SessionGuard;
+//RS     let result = check();
+//RS     let rows = session().as_mut().map(|state| std::mem::take(&mut state.rows)).unwrap_or_default();
+//RS     drop(guard);
+//RS     (result, rows)
+//RS }
+//RS 
+//RS /// Packages sealed so far in the active session.
+//RS pub fn sealed_package_count() -> usize {
+//RS     session().as_ref().map_or(0, |state| {
+//RS         state
+//RS             .rows
+//RS             .iter()
+//RS             .filter(|row| row.reuse == PackageReuse::Reused)
+//RS             .count()
+//RS     })
+//RS }
+//RS 
+//RS /// The record store of the active session, if any.
+//RS pub(super) fn session_store() -> Option<Arc<dyn PackageRecordStore>> {
+//RS     session().as_ref().map(|state| state.store.clone())
+//RS }
+//RS 
+//RS /// Stored facts of one sealed module.
+//RS pub(super) struct SealedModule {
+//RS     /// Canonical effect-graph nodes as `(local key, summary)`, with edges
+//RS     /// already mapped to this bundle's aliases.
+//RS     pub summaries: Vec<(String, EffectSummary)>,
+//RS     pub address_taken: Vec<String>,
+//RS     pub inferred_infallible: HashSet<String>,
+//RS     pub exact_int: bool,
+//RS }
+//RS 
+//RS /// Per-module facts a checked module contributes to its package record.
+//RS #[derive(Default)]
+//RS pub(super) struct ModuleOutputs {
+//RS     pub address_taken: HashSet<String>,
+//RS     pub discovered_inputs: bool,
+//RS }
+//RS 
+//RS /// One bundle's package plan: keys, sealed packages, and what to publish.
+//RS pub(super) struct SealPlan {
+//RS     store: Arc<dyn PackageRecordStore>,
+//RS     graph: PackageGraph,
+//RS     keys: Vec<String>,
+//RS     eligible: Vec<Option<String>>,
+//RS     sealed: Vec<bool>,
+//RS     module_identity: Vec<Option<String>>,
+//RS     comptime: Vec<bool>,
+//RS     pub modules: HashMap<usize, SealedModule>,
+//RS     pub outputs: HashMap<usize, ModuleOutputs>,
+//RS }
+//RS 
+//RS fn sealed_body(item: &Item) -> bool {
+//RS     !matches!(item, Item::Const(_)) && super::Comptime::item_has_comptime_evaluation(item)
+//RS }
+//RS 
+//RS fn erase_function(function: &mut Func) {
+//RS     function.body.clear();
+//RS }
+//RS 
+//RS /// Bodies of a sealed module are never checked; erase them so no later phase
+//RS /// walks an unchecked body.
+//RS fn erase_bodies(items: &mut [Item]) {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(function) => erase_function(function),
+//RS             Item::Struct(definition) => {
+//RS                 definition.methods.iter_mut().for_each(erase_function);
+//RS                 for implementation in &mut definition.trait_impls {
+//RS                     implementation.methods.iter_mut().for_each(erase_function);
+//RS                 }
+//RS             }
+//RS             Item::Enum(definition) => {
+//RS                 definition.methods.iter_mut().for_each(erase_function);
+//RS                 for implementation in &mut definition.trait_impls {
+//RS                     implementation.methods.iter_mut().for_each(erase_function);
+//RS                 }
+//RS             }
+//RS             Item::Impl(implementation) => implementation.methods.iter_mut().for_each(erase_function),
+//RS             Item::Test(test) => test.body.clear(),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl SealPlan {
+//RS     /// Plan one `jet check` bundle after registration and the failure-union
+//RS     /// probe (so inferred contracts are part of every interface digest).
+//RS     /// `None` outside a package-record session.
+//RS     pub(super) fn begin(
+//RS         bundle: &mut ProgramBundle,
+//RS         ledger: &jet_foundation::Names::NameLedger,
+//RS         plugin_digest: &str,
+//RS     ) -> Option<Self> {
+//RS         let store = session().as_ref()?.store.clone();
+//RS         let graph = PackageGraph::from_ledger(bundle, ledger);
+//RS         if !graph.is_acyclic() {
+//RS             return None;
+//RS         }
+//RS         // A runnable root lowers the whole program after checking (the cost
+//RS         // projection), which needs every body. Until per-package lowering
+//RS         // records exist (design stage S4), only library roots seal.
+//RS         let runnable = bundle.modules[bundle.entry].items.iter().any(|item| match item {
+//RS             Item::Func(function) => function.name == "run",
+//RS             Item::Const(constant) => constant.resolved_output.is_some(),
+//RS             _ => false,
+//RS         });
+//RS         if runnable {
+//RS             return None;
+//RS         }
+//RS         let mut environment = identity::KeyHasher::new(identity::TARGET_FACTS_SCHEMA);
+//RS         environment
+//RS             .field(&identity::target_facts_digest(&identity::target_fact_pairs(bundle)))
+//RS             .field(&jet_foundation::SHA256::sha256_hex(
+//RS                 &super::incremental_global_environment(bundle, plugin_digest),
+//RS             ));
+//RS         let target = environment.finish();
+//RS         let compiler = store.compiler_identity();
+//RS         let count = graph.packages.len();
+//RS         let mut interfaces = vec![String::new(); count];
+//RS         let mut keys = vec![String::new(); count];
+//RS         for component in graph.components() {
+//RS             for &index in &component {
+//RS                 interfaces[index] = graph.interface_digest(bundle, index, &BTreeMap::new());
+//RS             }
+//RS             for &index in &component {
+//RS                 let package = &graph.packages[index];
+//RS                 let manifest = package.root.as_deref().and_then(|root| store.manifest(root));
+//RS                 let source = graph.source_digest(bundle, index, manifest.as_deref());
+//RS                 let dependencies = package
+//RS                     .dependencies
+//RS                     .iter()
+//RS                     .map(|&dependency| {
+//RS                         (
+//RS                             graph.packages[dependency].identity.clone(),
+//RS                             interfaces[dependency].clone(),
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 keys[index] =
+//RS                     identity::package_check_key(&compiler, &target, &package.identity, &source, &dependencies);
+//RS             }
+//RS         }
+//RS         let module_identity = (0..bundle.modules.len())
+//RS             .map(|module| ledger.module_identity(module))
+//RS             .collect::<Vec<_>>();
+//RS         let comptime = bundle
+//RS             .modules
+//RS             .iter()
+//RS             .map(|module| module.items.iter().any(sealed_body))
+//RS             .collect::<Vec<_>>();
+//RS         // Only a dependency package's reports are summarized away from the
+//RS         // importer's output (the rule `summarize_dependency_reports` applies:
+//RS         // a module under a dependency root), so only dependencies and Core
+//RS         // are sealed.
+//RS         let eligible = graph
+//RS             .packages
+//RS             .iter()
+//RS             .map(|package| {
+//RS                 if package.modules.contains(&bundle.entry) {
+//RS                     return Some("the checked package itself".to_string());
+//RS                 }
+//RS                 let dependency = package.kind == PackageKind::Core
+//RS                     || package.modules.iter().all(|&module| {
+//RS                         let path = &bundle.modules[module].path;
+//RS                         bundle.dep_roots.values().any(|root| path.starts_with(root))
+//RS                     });
+//RS                 if !dependency {
+//RS                     return Some("not a dependency package".to_string());
+//RS                 }
+//RS                 if package.modules.iter().any(|&module| module_identity[module].is_none()) {
+//RS                     return Some("a module has no stable identity".to_string());
+//RS                 }
+//RS                 None
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let mut plan = Self {
+//RS             store,
+//RS             graph,
+//RS             keys,
+//RS             eligible,
+//RS             sealed: vec![false; count],
+//RS             module_identity,
+//RS             comptime,
+//RS             modules: HashMap::new(),
+//RS             outputs: HashMap::new(),
+//RS         };
+//RS         let aliases = plan.identity_aliases(ledger, bundle);
+//RS         for index in 0..count {
+//RS             if plan.eligible[index].is_some() {
+//RS                 continue;
+//RS             }
+//RS             if let Some(modules) = plan.load(index, &aliases) {
+//RS                 plan.sealed[index] = true;
+//RS                 plan.modules.extend(modules);
+//RS             }
+//RS         }
+//RS         // S3R: every module that is checked here may reuse its items, except
+//RS         // Core's: Core is sealed whole once checked, and its keys change only
+//RS         // with the compiler. Keys read the declarations as loaded, so they are
+//RS         // computed before the sealed bodies are erased.
+//RS         let checked = (0..bundle.modules.len())
+//RS             .filter(|module| !plan.modules.contains_key(module))
+//RS             .filter(|&module| !plan.comptime[module] && plan.module_identity[module].is_some())
+//RS             .filter(|&module| {
+//RS                 plan.graph.package_of(module).map_or(true, |package| {
+//RS                     plan.graph.packages[package].kind != PackageKind::Core
+//RS                 })
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let package_mates = (0..bundle.modules.len())
+//RS             .map(|module| {
+//RS                 plan.graph
+//RS                     .package_of(module)
+//RS                     .map(|package| plan.graph.packages[package].modules.clone())
+//RS                     .unwrap_or_else(|| vec![module])
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         super::ItemReuse::begin(
+//RS             plan.store.clone(),
+//RS             bundle,
+//RS             ledger,
+//RS             &format!("{compiler}\u{0}{target}"),
+//RS             &checked,
+//RS             &package_mates,
+//RS             &plan.module_identity,
+//RS             aliases,
+//RS         );
+//RS         for &module in plan.modules.keys() {
+//RS             erase_bodies(&mut bundle.modules[module].items);
+//RS         }
+//RS         Some(plan)
+//RS     }
+//RS 
+//RS     /// Module identity to this bundle's loader alias.
+//RS     fn identity_aliases(
+//RS         &self,
+//RS         ledger: &jet_foundation::Names::NameLedger,
+//RS         bundle: &ProgramBundle,
+//RS     ) -> HashMap<String, String> {
+//RS         self.module_identity
+//RS             .iter()
+//RS             .enumerate()
+//RS             .filter_map(|(module, identity)| {
+//RS                 let alias = ledger.module_alias(module).unwrap_or(&bundle.modules[module].alias);
+//RS                 identity.clone().map(|identity| (identity, alias.to_string()))
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     fn load(&self, index: usize, aliases: &HashMap<String, String>) -> Option<HashMap<usize, SealedModule>> {
+//RS         let package = &self.graph.packages[index];
+//RS         let check = self.store.load(PKG_CHECK_SCHEMA, &self.keys[index])?;
+//RS         let check = RecordReader::open_schema(&check, PKG_CHECK_SCHEMA).ok()?;
+//RS         let header = check.element(SECTION_HEADER, 0).ok()?;
+//RS         if header.field("package").ok()?.as_str().ok()? != package.identity
+//RS             || header.field("key").ok()?.as_str().ok()? != self.keys[index]
+//RS         {
+//RS             return None;
+//RS         }
+//RS         let items_key = header.field("items").ok()?.as_str().ok()?.to_string();
+//RS         let items = self.store.load(ITEMS_SCHEMA, &items_key)?;
+//RS         let items = RecordReader::open_schema(&items, ITEMS_SCHEMA).ok()?;
+//RS         let by_identity = package
+//RS             .modules
+//RS             .iter()
+//RS             .map(|&module| (self.module_identity[module].clone().unwrap_or_default(), module))
+//RS             .collect::<HashMap<_, _>>();
+//RS         let mut modules = HashMap::new();
+//RS         for value in items.elements(SECTION_MODULES).ok()? {
+//RS             let identity = value.field("module").ok()?.as_str().ok()?;
+//RS             let module = *by_identity.get(identity)?;
+//RS             modules.insert(
+//RS                 module,
+//RS                 SealedModule {
+//RS                     summaries: Vec::new(),
+//RS                     address_taken: value.field("address_taken").ok()?.str_list().ok()?,
+//RS                     inferred_infallible: value
+//RS                         .field("inferred_infallible")
+//RS                         .ok()?
+//RS                         .str_list()
+//RS                         .ok()?
+//RS                         .into_iter()
+//RS                         .collect(),
+//RS                     exact_int: value.field("exact_int").ok()?.as_bool().ok()?,
+//RS                 },
+//RS             );
+//RS         }
+//RS         if modules.len() != package.modules.len() {
+//RS             return None;
+//RS         }
+//RS         for value in items.elements(SECTION_ITEMS).ok()? {
+//RS             let identity = value.field("module").ok()?.as_str().ok()?;
+//RS             let module = *by_identity.get(identity)?;
+//RS             let key = value.field("key").ok()?.as_str().ok()?.to_string();
+//RS             let mut summary = decode_summary(value.field("summary").ok()?).ok()?;
+//RS             map_edges(&mut summary, &|edge| to_alias(edge, aliases));
+//RS             modules.get_mut(&module)?.summaries.push((key, summary));
+//RS         }
+//RS         Some(modules)
+//RS     }
+//RS 
+//RS     /// Module paths of sealed modules, for dropping their reports.
+//RS     pub(super) fn sealed_paths(&self, bundle: &ProgramBundle) -> HashSet<String> {
+//RS         self.modules
+//RS             .keys()
+//RS             .map(|&module| bundle.modules[module].path.to_string_lossy().into_owned())
+//RS             .collect()
+//RS     }
+//RS 
+//RS     /// Publish every clean dependency package that was checked, and report
+//RS     /// every package's row to the session.
+//RS     #[allow(clippy::too_many_arguments)]
+//RS     pub(super) fn finish(
+//RS         self,
+//RS         bundle: &ProgramBundle,
+//RS         ledger: &jet_foundation::Names::NameLedger,
+//RS         public_summaries: &HashMap<String, EffectSummary>,
+//RS         inferred: &[HashSet<String>],
+//RS         exact_int: &[bool],
+//RS         diagnostics: &[crate::Diagnostics::Diagnostic],
+//RS     ) {
+//RS         let aliases = self.identity_aliases(ledger, bundle);
+//RS         let identities = aliases
+//RS             .iter()
+//RS             .map(|(identity, alias)| (alias.clone(), identity.clone()))
+//RS             .collect::<HashMap<_, _>>();
+//RS         let module_of_path = bundle
+//RS             .modules
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(module, loaded)| (loaded.path.to_string_lossy().into_owned(), module))
+//RS             .collect::<HashMap<_, _>>();
+//RS         let mut reported = vec![false; self.graph.packages.len()];
+//RS         let mut unattributed = false;
+//RS         for diagnostic in diagnostics {
+//RS             let core_lint = diagnostic.severity == crate::Diagnostics::Severity::Lint;
+//RS             let error = diagnostic.severity == crate::Diagnostics::Severity::Error;
+//RS             // A report without an origin renders against the entry file, so
+//RS             // it belongs to the checked package, which is never recorded.
+//RS             let Some(origin) = diagnostic.origin() else {
+//RS                 continue;
+//RS             };
+//RS             match module_of_path
+//RS                 .get(&origin.path)
+//RS                 .and_then(|&module| self.graph.package_of(module))
+//RS             {
+//RS                 Some(package) => {
+//RS                     let core = self.graph.packages[package].kind == PackageKind::Core;
+//RS                     if error || (core && !core_lint) {
+//RS                         reported[package] = true;
+//RS                     }
+//RS                 }
+//RS                 None => unattributed |= error,
+//RS             }
+//RS         }
+//RS         let mut rows = Vec::with_capacity(self.graph.packages.len());
+//RS         for (index, package) in self.graph.packages.iter().enumerate() {
+//RS             let (reuse, detail) = if self.sealed[index] {
+//RS                 (PackageReuse::Reused, "green:key".to_string())
+//RS             } else if let Some(reason) = &self.eligible[index] {
+//RS                 (PackageReuse::Checked, reason.clone())
+//RS             } else if reported[index] || unattributed {
+//RS                 (PackageReuse::Checked, "its check reported diagnostics".to_string())
+//RS             } else if package.modules.iter().any(|&module| self.comptime[module]) {
+//RS                 (PackageReuse::Checked, "a body evaluates at compile time".to_string())
+//RS             } else if package.modules.iter().any(|&module| {
+//RS                 self.outputs.get(&module).is_some_and(|outputs| outputs.discovered_inputs)
+//RS             }) {
+//RS                 (PackageReuse::Checked, "its check discovered inputs".to_string())
+//RS             } else {
+//RS                 match self.publish(index, bundle, ledger, &identities, public_summaries, inferred, exact_int) {
+//RS                     Ok(()) => (PackageReuse::CheckedPublished, "red".to_string()),
+//RS                     Err(reason) => (PackageReuse::Checked, reason),
+//RS                 }
+//RS             };
+//RS             // S3R: how the package's items fared inside the check.
+//RS             let detail = match super::ItemReuse::package_detail(&package.modules) {
+//RS                 Some(items) => format!("{detail}; {items}"),
+//RS                 None => detail,
+//RS             };
+//RS             rows.push(PackageReuseRow {
+//RS                 identity: package.identity.clone(),
+//RS                 key: self.keys[index].clone(),
+//RS                 reuse,
+//RS                 modules: package.modules.len(),
+//RS                 detail,
+//RS             });
+//RS         }
+//RS         super::ItemReuse::end();
+//RS         if let Some(state) = session().as_mut() {
+//RS             state.rows.extend(rows);
+//RS         }
+//RS     }
+//RS 
+//RS     #[allow(clippy::too_many_arguments)]
+//RS     fn publish(
+//RS         &self,
+//RS         index: usize,
+//RS         bundle: &ProgramBundle,
+//RS         ledger: &jet_foundation::Names::NameLedger,
+//RS         identities: &HashMap<String, String>,
+//RS         public_summaries: &HashMap<String, EffectSummary>,
+//RS         inferred: &[HashSet<String>],
+//RS         exact_int: &[bool],
+//RS     ) -> Result<(), String> {
+//RS         let package = &self.graph.packages[index];
+//RS         let mut modules = Vec::new();
+//RS         let mut items = Vec::new();
+//RS         for &module in &package.modules {
+//RS             let identity = self.module_identity[module].clone().unwrap_or_default();
+//RS             let alias = ledger.module_alias(module).unwrap_or(&bundle.modules[module].alias);
+//RS             let prefix = format!("{alias}::");
+//RS             let mut nodes = public_summaries
+//RS                 .iter()
+//RS                 .filter_map(|(key, summary)| key.strip_prefix(&prefix).map(|local| (local, summary)))
+//RS                 .collect::<Vec<_>>();
+//RS             nodes.sort_by(|left, right| left.0.cmp(right.0));
+//RS             for (local, summary) in nodes {
+//RS                 let mut summary = summary.clone();
+//RS                 map_edges(&mut summary, &|edge| to_identity(edge, identities));
+//RS                 let encoded = encode_summary(&summary)?;
+//RS                 let digest = record_digest(
+//RS                     ITEM_SUMMARY_SCHEMA,
+//RS                     &[RecordSection::new(1, vec![encoded.clone()])],
+//RS                 )
+//RS                 .map_err(|error| error.to_string())?;
+//RS                 items.push(record_map([
+//RS                     ("module", RecordValue::str(identity.as_str())),
+//RS                     ("key", RecordValue::str(local)),
+//RS                     ("summary_digest", RecordValue::Digest(digest)),
+//RS                     ("summary", encoded),
+//RS                 ]));
+//RS             }
+//RS             let mut address_taken = self
+//RS                 .outputs
+//RS                 .get(&module)
+//RS                 .map(|outputs| outputs.address_taken.iter().cloned().collect::<Vec<_>>())
+//RS                 .unwrap_or_default();
+//RS             address_taken.sort();
+//RS             let mut infallible = inferred
+//RS                 .get(module)
+//RS                 .map(|names| names.iter().cloned().collect::<Vec<_>>())
+//RS                 .unwrap_or_default();
+//RS             infallible.sort();
+//RS             modules.push(record_map([
+//RS                 ("module", RecordValue::str(identity)),
+//RS                 ("address_taken", RecordValue::list_of_str(&address_taken)),
+//RS                 ("inferred_infallible", RecordValue::list_of_str(&infallible)),
+//RS                 ("exact_int", RecordValue::Bool(exact_int.get(module).copied().unwrap_or(false))),
+//RS             ]));
+//RS         }
+//RS         let header = record_map([("package", RecordValue::str(package.identity.as_str()))]);
+//RS         let items = encode_record(
+//RS             ITEMS_SCHEMA,
+//RS             &[
+//RS                 RecordSection::new(SECTION_HEADER, vec![header]),
+//RS                 RecordSection::new(SECTION_MODULES, modules),
+//RS                 RecordSection::new(SECTION_ITEMS, items),
+//RS             ],
+//RS         )
+//RS         .map_err(|error| error.to_string())?;
+//RS         let items_key = jet_foundation::SHA256::sha256_hex(&items);
+//RS         self.store.publish(ITEMS_SCHEMA, &items_key, &items);
+//RS         let check = encode_record(
+//RS             PKG_CHECK_SCHEMA,
+//RS             &[RecordSection::new(
+//RS                 SECTION_HEADER,
+//RS                 vec![record_map([
+//RS                     ("package", RecordValue::str(package.identity.as_str())),
+//RS                     ("key", RecordValue::str(self.keys[index].as_str())),
+//RS                     ("items", RecordValue::Str(items_key)),
+//RS                 ])],
+//RS             )],
+//RS         )
+//RS         .map_err(|error| error.to_string())?;
+//RS         self.store.publish(PKG_CHECK_SCHEMA, &self.keys[index], &check);
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS // ------------------------------------------------------------ edge identity
+//RS 
+//RS /// `alias::rest` becomes `{module identity}::rest`; other edges (bare names
+//RS /// the bundle could not resolve, the panic sentinel) are kept as written.
+//RS pub(super) fn to_identity(edge: &str, identities: &HashMap<String, String>) -> String {
+//RS     match edge.split_once("::") {
+//RS         Some((alias, rest)) => match identities.get(alias) {
+//RS             Some(identity) => format!("{{{identity}}}::{rest}"),
+//RS             None => edge.to_string(),
+//RS         },
+//RS         None => edge.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn to_alias(edge: &str, aliases: &HashMap<String, String>) -> String {
+//RS     let Some(stable) = edge.strip_prefix('{') else {
+//RS         return edge.to_string();
+//RS     };
+//RS     match stable.split_once("}::") {
+//RS         Some((identity, rest)) => match aliases.get(identity) {
+//RS             Some(alias) => format!("{alias}::{rest}"),
+//RS             None => edge.to_string(),
+//RS         },
+//RS         None => edge.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS /// Every call-graph reference a summary carries (the same fields
+//RS /// `qualified_effect_facts` resolves).
+//RS pub(super) fn map_edges(summary: &mut EffectSummary, map: &dyn Fn(&str) -> String) {
+//RS     let set = |edges: &BTreeSet<String>| edges.iter().map(|edge| map(edge)).collect::<BTreeSet<_>>();
+//RS     summary.edges = set(&summary.edges);
+//RS     for region in &mut summary.regions {
+//RS         region.edges = set(&region.edges);
+//RS     }
+//RS     for obligation in &mut summary.callback_obligations {
+//RS         obligation.edges = set(&obligation.edges);
+//RS     }
+//RS     for obligation in &mut summary.autodiff_obligations {
+//RS         obligation.target = map(&obligation.target);
+//RS     }
+//RS     for fact in &mut summary.discarded_results {
+//RS         fact.callee = map(&fact.callee);
+//RS     }
+//RS     for call in &mut summary.memory.calls {
+//RS         call.callee = map(&call.callee);
+//RS     }
+//RS }
+//RS 
+//RS // ------------------------------------------------------------ summary codec
+//RS 
+//RS fn span_value(span: Span) -> RecordValue {
+//RS     RecordValue::List(vec![
+//RS         RecordValue::Int(span.start as i64),
+//RS         RecordValue::Int(span.end as i64),
+//RS     ])
+//RS }
+//RS 
+//RS fn span_of(value: &RecordValue) -> Result<Span, RecordError> {
+//RS     match value.as_list()? {
+//RS         [start, end] => Ok(Span::new(start.as_usize()?, end.as_usize()?)),
+//RS         _ => Err(RecordError::Malformed("span is not a pair".to_string())),
+//RS     }
+//RS }
+//RS 
+//RS fn strings(values: &BTreeSet<String>) -> RecordValue {
+//RS     RecordValue::list_of_str(values)
+//RS }
+//RS 
+//RS fn string_set(value: &RecordValue) -> Result<BTreeSet<String>, RecordError> {
+//RS     Ok(value.str_list()?.into_iter().collect())
+//RS }
+//RS 
+//RS fn count_value(value: Option<u64>) -> RecordValue {
+//RS     value.map_or(RecordValue::Null, |count| RecordValue::Int(count as i64))
+//RS }
+//RS 
+//RS fn count_of(value: &RecordValue) -> Result<Option<u64>, RecordError> {
+//RS     if value.is_null() {
+//RS         return Ok(None);
+//RS     }
+//RS     u64::try_from(value.as_int()?)
+//RS         .map(Some)
+//RS         .map_err(|_| RecordError::Malformed("negative count".to_string()))
+//RS }
+//RS 
+//RS fn text(value: &RecordValue, name: &str) -> Result<String, RecordError> {
+//RS     value.field(name)?.as_str().map(str::to_string)
+//RS }
+//RS 
+//RS fn list<T>(
+//RS     value: &RecordValue,
+//RS     name: &str,
+//RS     decode: impl Fn(&RecordValue) -> Result<T, RecordError>,
+//RS ) -> Result<Vec<T>, RecordError> {
+//RS     value.field(name)?.as_list()?.iter().map(decode).collect()
+//RS }
+//RS 
+//RS /// Lossless encoding of one effect-graph node. Destructuring keeps the codec
+//RS /// exhaustive: a new summary field does not compile until it is carried.
+//RS pub(super) fn encode_summary(summary: &EffectSummary) -> Result<RecordValue, String> {
+//RS     let EffectSummary {
+//RS         direct,
+//RS         direct_spans,
+//RS         edges,
+//RS         maximal,
+//RS         maximal_span,
+//RS         unbounded_trait_dispatch,
+//RS         regions,
+//RS         authority_delegations,
+//RS         callback_obligations,
+//RS         autodiff_obligations,
+//RS         compute_calls,
+//RS         autodiff_safe_panic,
+//RS         autodiff_unsafe_panic,
+//RS         memory,
+//RS         discarded_results,
+//RS         failure_direct,
+//RS     } = summary;
+//RS     let MemorySummary {
+//RS         events,
+//RS         open_dispatches,
+//RS         regions: memory_regions,
+//RS         unbounded_control,
+//RS         calls,
+//RS     } = memory;
+//RS     if !memory_regions.is_empty() {
+//RS         return Err("a memory policy region is not recordable yet".to_string());
+//RS     }
+//RS     let direct_spans = direct_spans
+//RS         .iter()
+//RS         .collect::<BTreeMap<_, _>>()
+//RS         .into_iter()
+//RS         .map(|(effect, span)| {
+//RS             record_map([("effect", RecordValue::str(effect.as_str())), ("span", span_value(*span))])
+//RS         })
+//RS         .collect();
+//RS     Ok(record_map([
+//RS         ("direct", strings(direct)),
+//RS         ("direct_spans", RecordValue::List(direct_spans)),
+//RS         ("edges", strings(edges)),
+//RS         ("maximal", RecordValue::Bool(*maximal)),
+//RS         ("maximal_span", maximal_span.map_or(RecordValue::Null, span_value)),
+//RS         ("unbounded_trait_dispatch", RecordValue::Bool(*unbounded_trait_dispatch)),
+//RS         (
+//RS             "regions",
+//RS             RecordValue::List(
+//RS                 regions
+//RS                     .iter()
+//RS                     .map(|region| {
+//RS                         record_map([
+//RS                             ("caps", strings(&region.caps)),
+//RS                             ("direct", strings(&region.direct)),
+//RS                             ("edges", strings(&region.edges)),
+//RS                             ("maximal", RecordValue::Bool(region.maximal)),
+//RS                             ("caps_span", span_value(region.caps_span)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "authority_delegations",
+//RS             RecordValue::List(
+//RS                 authority_delegations
+//RS                     .iter()
+//RS                     .map(|delegation| {
+//RS                         record_map([
+//RS                             ("scope_span", span_value(delegation.scope_span)),
+//RS                             ("binding", RecordValue::str(delegation.binding.as_str())),
+//RS                             ("resource", RecordValue::str(delegation.resource.as_str())),
+//RS                             ("operation", RecordValue::str(delegation.operation.as_str())),
+//RS                             ("span", span_value(delegation.span)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "callback_obligations",
+//RS             RecordValue::List(
+//RS                 callback_obligations
+//RS                     .iter()
+//RS                     .map(|obligation| {
+//RS                         record_map([
+//RS                             ("bound", strings(&obligation.bound)),
+//RS                             ("direct", strings(&obligation.direct)),
+//RS                             ("edges", strings(&obligation.edges)),
+//RS                             ("maximal", RecordValue::Bool(obligation.maximal)),
+//RS                             ("span", span_value(obligation.span)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "autodiff_obligations",
+//RS             RecordValue::List(
+//RS                 autodiff_obligations
+//RS                     .iter()
+//RS                     .map(|obligation| {
+//RS                         record_map([
+//RS                             ("method", RecordValue::str(obligation.method.as_str())),
+//RS                             ("target", RecordValue::str(obligation.target.as_str())),
+//RS                             ("span", span_value(obligation.span)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "compute_calls",
+//RS             RecordValue::List(
+//RS                 compute_calls
+//RS                     .iter()
+//RS                     .map(|call| {
+//RS                         record_map([
+//RS                             ("method", RecordValue::str(call.method.as_str())),
+//RS                             ("span", span_value(call.span)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS         ("autodiff_safe_panic", RecordValue::Bool(*autodiff_safe_panic)),
+//RS         ("autodiff_unsafe_panic", RecordValue::Bool(*autodiff_unsafe_panic)),
+//RS         (
+//RS             "memory_events",
+//RS             RecordValue::List(
+//RS                 events
+//RS                     .iter()
+//RS                     .map(|event| {
+//RS                         let (kind, bytes) = match event.kind {
+//RS                             MemoryEventKind::Allocation => ("alloc", RecordValue::Null),
+//RS                             MemoryEventKind::RetainRelease => ("rc", RecordValue::Null),
+//RS                             MemoryEventKind::ArenaBytes(bytes) => ("arena", count_value(bytes)),
+//RS                         };
+//RS                         record_map([
+//RS                             ("kind", RecordValue::str(kind)),
+//RS                             ("bytes", bytes),
+//RS                             ("span", span_value(event.span)),
+//RS                             ("source", RecordValue::str(event.source.as_str())),
+//RS                             ("operation", RecordValue::str(event.operation.as_str())),
+//RS                             ("provenance", RecordValue::str(event.provenance.as_str())),
+//RS                             ("executions", count_value(event.executions)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "memory_open_dispatches",
+//RS             RecordValue::List(
+//RS                 open_dispatches
+//RS                     .iter()
+//RS                     .map(|dispatch| {
+//RS                         record_map([
+//RS                             ("span", span_value(dispatch.span)),
+//RS                             ("source", RecordValue::str(dispatch.source.as_str())),
+//RS                             ("reason", RecordValue::str(dispatch.reason.as_str())),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "memory_unbounded_control",
+//RS             RecordValue::List(unbounded_control.iter().copied().map(span_value).collect()),
+//RS         ),
+//RS         (
+//RS             "memory_calls",
+//RS             RecordValue::List(
+//RS                 calls
+//RS                     .iter()
+//RS                     .map(|call| {
+//RS                         record_map([
+//RS                             ("callee", RecordValue::str(call.callee.as_str())),
+//RS                             ("span", span_value(call.span)),
+//RS                             ("source", RecordValue::str(call.source.as_str())),
+//RS                             ("executions", count_value(call.executions)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "discarded_results",
+//RS             RecordValue::List(
+//RS                 discarded_results
+//RS                     .iter()
+//RS                     .map(|fact| {
+//RS                         record_map([
+//RS                             ("callee", RecordValue::str(fact.callee.as_str())),
+//RS                             ("callee_name", RecordValue::str(fact.callee_name.as_str())),
+//RS                             ("call_text", RecordValue::str(fact.call_text.as_str())),
+//RS                             ("span", span_value(fact.span)),
+//RS                             ("failure_open", RecordValue::Bool(fact.failure_open)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         ),
+//RS         ("failure_direct", RecordValue::Bool(*failure_direct)),
+//RS     ]))
+//RS }
+//RS 
+//RS pub(super) fn decode_summary(value: &RecordValue) -> Result<EffectSummary, RecordError> {
+//RS     let flag = |name: &str| value.field(name)?.as_bool();
+//RS     let maximal_span = value.field("maximal_span")?;
+//RS     Ok(EffectSummary {
+//RS         direct: string_set(value.field("direct")?)?,
+//RS         direct_spans: list(value, "direct_spans", |entry| {
+//RS             Ok((text(entry, "effect")?, span_of(entry.field("span")?)?))
+//RS         })?
+//RS         .into_iter()
+//RS         .collect(),
+//RS         edges: string_set(value.field("edges")?)?,
+//RS         maximal: flag("maximal")?,
+//RS         maximal_span: if maximal_span.is_null() {
+//RS             None
+//RS         } else {
+//RS             Some(span_of(maximal_span)?)
+//RS         },
+//RS         unbounded_trait_dispatch: flag("unbounded_trait_dispatch")?,
+//RS         regions: list(value, "regions", |entry| {
+//RS             Ok(RegionSummary {
+//RS                 caps: string_set(entry.field("caps")?)?,
+//RS                 direct: string_set(entry.field("direct")?)?,
+//RS                 edges: string_set(entry.field("edges")?)?,
+//RS                 maximal: entry.field("maximal")?.as_bool()?,
+//RS                 caps_span: span_of(entry.field("caps_span")?)?,
+//RS             })
+//RS         })?,
+//RS         authority_delegations: list(value, "authority_delegations", |entry| {
+//RS             Ok(AuthorityDelegation {
+//RS                 scope_span: span_of(entry.field("scope_span")?)?,
+//RS                 binding: text(entry, "binding")?,
+//RS                 resource: text(entry, "resource")?,
+//RS                 operation: text(entry, "operation")?,
+//RS                 span: span_of(entry.field("span")?)?,
+//RS             })
+//RS         })?,
+//RS         callback_obligations: list(value, "callback_obligations", |entry| {
+//RS             Ok(CallbackObligation {
+//RS                 bound: string_set(entry.field("bound")?)?,
+//RS                 direct: string_set(entry.field("direct")?)?,
+//RS                 edges: string_set(entry.field("edges")?)?,
+//RS                 maximal: entry.field("maximal")?.as_bool()?,
+//RS                 span: span_of(entry.field("span")?)?,
+//RS             })
+//RS         })?,
+//RS         autodiff_obligations: list(value, "autodiff_obligations", |entry| {
+//RS             Ok(AutodiffObligation {
+//RS                 method: text(entry, "method")?,
+//RS                 target: text(entry, "target")?,
+//RS                 span: span_of(entry.field("span")?)?,
+//RS             })
+//RS         })?,
+//RS         compute_calls: list(value, "compute_calls", |entry| {
+//RS             Ok(ComputeCallFact {
+//RS                 method: text(entry, "method")?,
+//RS                 span: span_of(entry.field("span")?)?,
+//RS             })
+//RS         })?,
+//RS         autodiff_safe_panic: flag("autodiff_safe_panic")?,
+//RS         autodiff_unsafe_panic: flag("autodiff_unsafe_panic")?,
+//RS         memory: MemorySummary {
+//RS             events: list(value, "memory_events", |entry| {
+//RS                 let kind = match entry.field("kind")?.as_str()? {
+//RS                     "alloc" => MemoryEventKind::Allocation,
+//RS                     "rc" => MemoryEventKind::RetainRelease,
+//RS                     "arena" => MemoryEventKind::ArenaBytes(count_of(entry.field("bytes")?)?),
+//RS                     other => {
+//RS                         return Err(RecordError::Malformed(format!("memory event kind `{other}`")))
+//RS                     }
+//RS                 };
+//RS                 Ok(MemoryEvent {
+//RS                     kind,
+//RS                     span: span_of(entry.field("span")?)?,
+//RS                     source: text(entry, "source")?,
+//RS                     operation: text(entry, "operation")?,
+//RS                     provenance: text(entry, "provenance")?,
+//RS                     executions: count_of(entry.field("executions")?)?,
+//RS                 })
+//RS             })?,
+//RS             open_dispatches: list(value, "memory_open_dispatches", |entry| {
+//RS                 Ok(OpenMemoryDispatch {
+//RS                     span: span_of(entry.field("span")?)?,
+//RS                     source: text(entry, "source")?,
+//RS                     reason: text(entry, "reason")?,
+//RS                 })
+//RS             })?,
+//RS             regions: Vec::new(),
+//RS             unbounded_control: list(value, "memory_unbounded_control", span_of)?,
+//RS             calls: list(value, "memory_calls", |entry| {
+//RS                 Ok(MemoryCall {
+//RS                     callee: text(entry, "callee")?,
+//RS                     span: span_of(entry.field("span")?)?,
+//RS                     source: text(entry, "source")?,
+//RS                     executions: count_of(entry.field("executions")?)?,
+//RS                 })
+//RS             })?,
+//RS         },
+//RS         discarded_results: list(value, "discarded_results", |entry| {
+//RS             Ok(DiscardedResultFact {
+//RS                 callee: text(entry, "callee")?,
+//RS                 callee_name: text(entry, "callee_name")?,
+//RS                 call_text: text(entry, "call_text")?,
+//RS                 span: span_of(entry.field("span")?)?,
+//RS                 failure_open: entry.field("failure_open")?.as_bool()?,
+//RS             })
+//RS         })?,
+//RS         failure_direct: flag("failure_direct")?,
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn summary_round_trips_with_stable_edges() {
+//RS         let summary = EffectSummary {
+//RS             direct: ["IO".to_string()].into_iter().collect(),
+//RS             direct_spans: HashMap::from([("IO".to_string(), Span::new(3, 9))]),
+//RS             edges: ["util::helper".to_string(), "__jet_panic__".to_string(), "bare".to_string()]
+//RS                 .into_iter()
+//RS                 .collect(),
+//RS             maximal_span: Some(Span::new(1, 2)),
+//RS             memory: MemorySummary {
+//RS                 events: vec![MemoryEvent::new(MemoryEventKind::ArenaBytes(Some(64)), Span::new(4, 5), "arena")],
+//RS                 calls: vec![MemoryCall {
+//RS                     callee: "util::helper".to_string(),
+//RS                     span: Span::new(6, 7),
+//RS                     source: "a.jet".to_string(),
+//RS                     executions: None,
+//RS                 }],
+//RS                 ..Default::default()
+//RS             },
+//RS             failure_direct: true,
+//RS             ..Default::default()
+//RS         };
+//RS         let identities = HashMap::from([("util".to_string(), "pkg::Source/Util.jet".to_string())]);
+//RS         let mut stable = summary.clone();
+//RS         map_edges(&mut stable, &|edge| to_identity(edge, &identities));
+//RS         assert!(stable.edges.contains("{pkg::Source/Util.jet}::helper"));
+//RS         let decoded = decode_summary(&encode_summary(&stable).unwrap()).unwrap();
+//RS         // A later bundle names the same module with another loader alias.
+//RS         let aliases = HashMap::from([("pkg::Source/Util.jet".to_string(), "util_2".to_string())]);
+//RS         let mut seeded = decoded;
+//RS         map_edges(&mut seeded, &|edge| to_alias(edge, &aliases));
+//RS         assert_eq!(
+//RS             seeded.edges,
+//RS             ["util_2::helper", "__jet_panic__", "bare"].iter().map(|s| s.to_string()).collect()
+//RS         );
+//RS         assert_eq!(seeded.memory.calls[0].callee, "util_2::helper");
+//RS         assert_eq!(seeded.memory.events, summary.memory.events);
+//RS         assert_eq!(seeded.direct_spans, summary.direct_spans);
+//RS         assert_eq!(seeded.maximal_span, summary.maximal_span);
+//RS         assert!(seeded.failure_direct);
+//RS     }
+//RS }
+// END-PORT-PENDING 0355 crates/jet-sema/src/Sema/Bundle/PackageSeal.rs:1-1081
+

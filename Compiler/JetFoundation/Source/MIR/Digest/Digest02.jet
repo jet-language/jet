@@ -1,0 +1,808 @@
+// Canonical MIR encoding continuation. Exact existing encoders remain in Digest.jet;
+// the Rust anchors below name those owners instead of duplicating their bodies.
+use jet_foundation.[TEXT_NUL, encode_effects]
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13607
+// encode_handle -> Digest.jet::mir_digest_handle (all lifecycle fields, in wire order).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13621
+// encode_cli_input -> Digest.jet::mir_digest_cli_input (shape/default arms and optional fields).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13655
+// encode_cli_entry -> Digest.jet::mir_digest_cli_entry (inputs, commands, standard).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13675
+// encode_entry_spec -> Digest.jet::mir_digest_entry_spec (CLI presence and initialization flags).
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13692
+fn encode_runtime_parts(writer: &MIRCanonicalWriter, values: [MIRRuntimePartID]) Never! {
+    mir_digest_len(&writer, values.len())
+    // Rust receives a BTreeSet: GC is first, independently of its wire code.
+    loop position in mir_digest_sort_runtime_parts(values) -> mir_digest_int(&writer, mir_digest_runtime_part(values[position]))
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13698
+fn encode_hardware_setups(writer: &MIRCanonicalWriter, setups: [MIRHardwareSetup]) Never! {
+    // The Rust key is formatted text, not a tuple: vector 10 precedes vector 2.
+    keys :: loop setup in setups -> if setup == {
+        .DMAConfigure(profile_id, channel, transfer_width, ownership) -> "dma-configure{TEXT_NUL}{profile_id}{TEXT_NUL}{channel}{TEXT_NUL}{mir_digest_register_width(transfer_width)}{TEXT_NUL}{mir_digest_dma_ownership(ownership)}"
+        .InterruptBind(profile_id, interrupt, vector, handler_symbol, forbidden_effects) -> "interrupt-bind{TEXT_NUL}{profile_id}{TEXT_NUL}{interrupt}{TEXT_NUL}{vector}{TEXT_NUL}{handler_symbol}{TEXT_NUL}{forbidden_effects.join(TEXT_NUL)}"
+    }
+    mir_digest_len(&writer, setups.len())
+    loop position in mir_digest_sort_strings(keys) {
+        if setups[position] == {
+            .DMAConfigure(profile_id, channel, transfer_width, ownership) -> {
+                mir_digest_tag(&writer, "dma-configure")
+                mir_digest_string(&writer, profile_id)
+                mir_digest_string(&writer, channel)
+                mir_digest_string(&writer, mir_digest_register_width(transfer_width))
+                mir_digest_string(&writer, mir_digest_dma_ownership(ownership))
+            }
+            .InterruptBind(profile_id, interrupt, vector, handler_symbol, forbidden_effects) -> {
+                mir_digest_tag(&writer, "interrupt-bind")
+                mir_digest_string(&writer, profile_id)
+                mir_digest_string(&writer, interrupt)
+                mir_digest_u16(&writer, vector)
+                mir_digest_string(&writer, handler_symbol)
+                mir_digest_len(&writer, forbidden_effects.len())
+                loop effect in mir_digest_sort_strings(forbidden_effects) -> mir_digest_string(&writer, forbidden_effects[effect])
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13759
+fn encode_target_hardware_facts(writer: &MIRCanonicalWriter, facts: MIRTargetHardwareFacts) Never! {
+    if facts.svd == {
+        Val(svd) -> {
+            mir_digest_bool(&writer, true)
+            mir_digest_string(&writer, svd.source)
+            mir_digest_string(&writer, svd.sha256)
+        }
+        None -> mir_digest_bool(&writer, false)
+    }
+    blocks := [Int]{}
+    loop index in 0..<facts.register_blocks.len() -> &blocks.push(index)
+    &blocks.sort_by((left: Int, right: Int) -> {
+        a :: facts.register_blocks[left]
+        b :: facts.register_blocks[right]
+        if a.name != b.name -> return a.name <=> b.name
+        if a.base != b.base -> return a.base <=> b.base
+        a.size.bytes <=> b.size.bytes
+    })
+    mir_digest_len(&writer, blocks.len())
+    loop position in blocks {
+        block :: facts.register_blocks[position]
+        mir_digest_string(&writer, block.name)
+        mir_digest_int(&writer, block.base)
+        mir_digest_int(&writer, block.size.bytes)
+        registers := [Int]{}
+        loop index in 0..<block.registers.len() -> &registers.push(index)
+        &registers.sort_by((left: Int, right: Int) -> {
+            a :: block.registers[left]
+            b :: block.registers[right]
+            if a.name != b.name -> return a.name <=> b.name
+            if a.offset != b.offset -> return a.offset <=> b.offset
+            aw :: mir_digest_register_width(a.width)
+            bw :: mir_digest_register_width(b.width)
+            if aw != bw -> return aw <=> bw
+            aa :: mir_digest_register_access_mode(a.access)
+            ba :: mir_digest_register_access_mode(b.access)
+            if aa != ba -> return aa <=> ba
+            mir_digest_bool_order(a.volatile) <=> mir_digest_bool_order(b.volatile)
+        })
+        mir_digest_len(&writer, registers.len())
+        loop register_position in registers {
+            register :: block.registers[register_position]
+            mir_digest_string(&writer, register.name)
+            mir_digest_int(&writer, register.offset)
+            mir_digest_string(&writer, mir_digest_register_width(register.width))
+            mir_digest_string(&writer, mir_digest_register_access_mode(register.access))
+            mir_digest_bool(&writer, register.volatile)
+        }
+    }
+    interrupts := [Int]{}
+    loop index in 0..<facts.interrupts.len() -> &interrupts.push(index)
+    &interrupts.sort_by((left: Int, right: Int) -> {
+        a :: facts.interrupts[left]
+        b :: facts.interrupts[right]
+        if a.name != b.name -> return a.name <=> b.name
+        a.vector <=> b.vector
+    })
+    mir_digest_len(&writer, interrupts.len())
+    loop position in interrupts {
+        interrupt :: facts.interrupts[position]
+        mir_digest_string(&writer, interrupt.name)
+        mir_digest_u16(&writer, interrupt.vector)
+        mir_digest_len(&writer, interrupt.forbidden_effects.len())
+        loop effect in interrupt.forbidden_effects -> mir_digest_string(&writer, effect)
+        mir_digest_bool(&writer, interrupt.bounded)
+    }
+    channels := [Int]{}
+    loop index in 0..<facts.dma_channels.len() -> &channels.push(index)
+    &channels.sort_by((left: Int, right: Int) -> {
+        a :: facts.dma_channels[left]
+        b :: facts.dma_channels[right]
+        if a.name != b.name -> return a.name <=> b.name
+        if a.channel != b.channel -> return a.channel <=> b.channel
+        aw :: mir_digest_register_width(a.transfer_width)
+        bw :: mir_digest_register_width(b.transfer_width)
+        if aw != bw -> return aw <=> bw
+        ao :: mir_digest_dma_ownership(a.ownership)
+        bo :: mir_digest_dma_ownership(b.ownership)
+        if ao != bo -> return ao <=> bo
+        if a.max_transfer_bytes == {
+            None -> if b.max_transfer_bytes == None -> Ordering.Equal else -> Ordering.Less
+            Val(av) -> if b.max_transfer_bytes == {
+                None -> Ordering.Greater
+                Val(bv) -> av <=> bv
+            }
+        }
+    })
+    mir_digest_len(&writer, channels.len())
+    loop position in channels {
+        channel :: facts.dma_channels[position]
+        mir_digest_string(&writer, channel.name)
+        mir_digest_u16(&writer, channel.channel)
+        mir_digest_string(&writer, mir_digest_register_width(channel.transfer_width))
+        mir_digest_string(&writer, mir_digest_dma_ownership(channel.ownership))
+        mir_digest_option_int(&writer, channel.max_transfer_bytes)
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13832
+// encode_target_register_operation -> tag(mir_digest_target_register_operation(operation)).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13842
+// encode_target_dma_operation -> tag(mir_digest_target_dma_operation(operation)).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13853
+// encode_target_dma_owner -> tag(mir_digest_target_dma_owner(owner)).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13863
+// encode_target_hardware_use -> Digest.jet::mir_digest_target_hardware_use, including unresolved arms.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13925
+// encode_job -> Digest.jet::mir_digest_job, including schedule/skip arms and sorted limits.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:13984
+// encode_test -> Digest.jet::mir_digest_test, including eligibility and generation reason.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14004
+// encode_harness -> Digest.jet::mir_digest_harness, with sorted tests/checks/coverage.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14034
+// encode_artifact_kind -> int(mir_digest_artifact_kind(kind)), codes 1..7.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14047
+// encode_artifact_target -> int(mir_digest_artifact_target(target)), codes 1..4.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14056
+// encode_artifact_mode -> int(mir_digest_artifact_mode(mode)), codes 1..5.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14066
+// encode_erasure_reason -> int(mir_digest_erasure_reason(reason)), codes 1..4.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14078
+// encode_runtime_part -> int(mir_digest_runtime_part(part)), codes 1..31.
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14113
+fn encode_artifact(writer: &MIRCanonicalWriter, artifact: MIRArtifactPlan) Never! {
+    mir_digest_u64(&writer, artifact.id.value)
+    mir_digest_int(&writer, mir_digest_artifact_kind(artifact.kind))
+    mir_digest_string(&writer, artifact.name)
+    mir_digest_int(&writer, mir_digest_artifact_target(artifact.target))
+    mir_digest_int(&writer, mir_digest_artifact_mode(artifact.mode))
+    modules :: artifact.modules.map(row -> row.value)
+    mir_digest_len(&writer, modules.len())
+    loop position in mir_digest_sort_ids(modules) -> mir_digest_u64(&writer, modules[position])
+    links :: artifact.links.map(row -> row.value)
+    mir_digest_len(&writer, links.len())
+    loop position in mir_digest_sort_ids(links) -> mir_digest_u64(&writer, links[position])
+    jobs :: artifact.jobs.map(row -> row.value)
+    mir_digest_len(&writer, jobs.len())
+    loop position in mir_digest_sort_ids(jobs) -> mir_digest_u64(&writer, jobs[position])
+    encode_runtime_parts(&writer, artifact.runtime_parts)
+    mir_digest_len(&writer, artifact.exports.len())
+    loop position in mir_digest_sort_exports(artifact.exports) -> mir_digest_export(&writer, artifact.exports[position])
+    mir_digest_string(&writer, artifact.provider_identity)
+    mir_digest_string(&writer, artifact.closure_identity)
+    mir_digest_string(&writer, artifact.artifact_identity)
+    if artifact.entry == {
+        Val(entry) -> { mir_digest_bool(&writer, true); mir_digest_entry_spec(&writer, entry) }
+        None -> mir_digest_bool(&writer, false)
+    }
+    mir_digest_option_u64(&writer, artifact.harness.map(row -> row.value))
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14162
+// encode_callee -> Digest.jet::mir_digest_callee (all eight callee arms).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14203
+// encode_data_plan_stream -> Digest.jet::mir_digest_data_plan_stream (bounded/materialized).
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14219
+fn encode_data_plan(writer: &MIRCanonicalWriter, plan: MIRDataPlan) Never! {
+    mir_digest_u16(&writer, plan.schema_version)
+    mir_digest_string(&writer, encode_data_plan_source_name(plan.source))
+    mir_digest_len(&writer, plan.logical.len())
+    loop node in plan.logical {
+        mir_digest_u64(&writer, node.id.value)
+        mir_digest_string(&writer, if node.operation == {
+            .Scan -> "scan"
+            .Filter -> "filter"
+            .SortBy -> "sort_by"
+            .InnerJoin -> "inner_join"
+            .LeftJoin -> "left_join"
+            .Group -> "group"
+            .Window -> "window"
+            .Project -> "project"
+            .Collect -> "collect"
+        })
+        mir_digest_len(&writer, node.inputs.len())
+        loop input in node.inputs -> mir_digest_u64(&writer, input.value)
+        mir_digest_option_string(&writer, node.source.map(source -> encode_data_plan_source_name(source)))
+        mir_digest_type(&writer, node.row_type)
+        mir_digest_len(&writer, node.columns.len())
+        loop column in node.columns {
+            mir_digest_string(&writer, column.name)
+            mir_digest_type(&writer, column.ty)
+            mir_digest_bool(&writer, column.nullable)
+        }
+        if node.callable == {
+            Val(callable) -> {
+                mir_digest_bool(&writer, true)
+                mir_digest_string(&writer, callable.label)
+                mir_digest_type(&writer, callable.parameter)
+                mir_digest_type(&writer, callable.result)
+                mir_digest_span(&writer, callable.span)
+            }
+            None -> mir_digest_bool(&writer, false)
+        }
+        mir_digest_data_plan_stream(&writer, node.stream)
+        mir_digest_span(&writer, node.span)
+    }
+    mir_digest_len(&writer, plan.physical.len())
+    loop node in plan.physical {
+        mir_digest_u64(&writer, node.logical.value)
+        mir_digest_string(&writer, if node.operator == {
+            .Scan -> "scan"
+            .Filter -> "filter"
+            .SortBy -> "sort_by"
+            .InnerJoin -> "inner_join"
+            .LeftJoin -> "left_join"
+            .Group -> "group"
+            .Window -> "window"
+            .Project -> "project"
+            .Batch -> "batch"
+            .Materialize -> "materialize"
+        })
+        mir_digest_data_plan_stream(&writer, node.stream)
+        mir_digest_string(&writer, node.reason)
+    }
+    mir_digest_u64(&writer, plan.output.value)
+    mir_digest_span(&writer, plan.source_span)
+}
+
+// Rust: crates/jet-foundation/src/AST/data_plan.rs:85
+fn encode_data_plan_source_name(source: MIRDataPlanSourceKind) -> String Never! {
+    if source == {
+        .Table -> "table"
+        .Series -> "series"
+        .CSV -> "csv"
+        .JSON -> "json"
+        .JSONL -> "jsonl"
+        .Parquet -> "parquet"
+        .Arrow -> "arrow"
+        .Loader -> "loader"
+        .CSVReader -> "csv_reader"
+        .JSONReader -> "json_reader"
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14262
+// encode_call_args -> Digest.jet::mir_digest_call_args (all coercion/presence fields).
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14310
+fn encode_conversion(writer: &MIRCanonicalWriter, conversion: MIRConversion) Never! {
+    if conversion == {
+        .Transparent -> mir_digest_tag(&writer, "transparent")
+        .NumericCast -> mir_digest_tag(&writer, "numeric-cast")
+        .SendFn -> mir_digest_tag(&writer, "send-fn")
+        .Prelude(call, location, fallibility) -> {
+            mir_digest_tag(&writer, "prelude")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_string(&writer, "MirPanicLoc {{ file: MirSourceFileId({location.file.value}), line: {location.line}, column: {location.column} }}")
+            mir_digest_call_fallibility(&writer, fallibility)
+        }
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14328
+// encode_values -> Digest.jet::mir_digest_values (length followed by IDs).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14335
+// encode_field_path -> Digest.jet::mir_digest_field_path (length followed by IDs).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14342
+// encode_field_paths -> Digest.jet::mir_digest_field_paths (outer length and framed paths).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14348
+// encode_panic_location -> Digest.jet::mir_digest_panic_location (file, line, column).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14354
+// encode_panic_context -> Digest.jet::mir_digest_panic_context (text, caret, ordered locals).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14365
+// encode_hardware_op -> Digest.jet::mir_digest_hardware_op (read/write/start/wait).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14413
+// encode_loop_source_kind -> Digest.jet::mir_digest_loop_source_kind (all eight sources).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14440
+// encode_text_pattern_parts -> Digest.jet::mir_digest_text_pattern_parts (literal/hole).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14461
+// encode_binary_pattern_parts -> Digest.jet::mir_digest_binary_pattern_parts (literal/bits/rest).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14492
+// encode_component_type -> Digest.jet::mir_digest_component_type (recursive descriptors).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14527
+// encode_component_signature -> Digest.jet::mir_digest_component_signature (tag, params, result).
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:14539
+fn encode_semantic_operation(writer: &MIRCanonicalWriter, operation: MIRSemanticOp) Never! {
+    if operation == {
+        .DataEntriesToMap(call, local) -> {
+            mir_digest_tag(&writer, "data-entries-to-map")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, local.value)
+        }
+        .MathBuiltin(type_id, call, args) -> {
+            mir_digest_tag(&writer, "math-builtin")
+            mir_digest_u64(&writer, type_id.value)
+            mir_digest_u64(&writer, call.value)
+            mir_digest_values(&writer, args)
+        }
+        .PreciseBuiltin(type_id, call, args) -> {
+            mir_digest_tag(&writer, "precise-builtin")
+            mir_digest_u64(&writer, type_id.value)
+            mir_digest_u64(&writer, call.value)
+            mir_digest_values(&writer, args)
+        }
+        .Print(call, value) -> {
+            mir_digest_tag(&writer, "print")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, value.value)
+        }
+        .AmbientInput(call, prompt) -> {
+            mir_digest_tag(&writer, "ambient-input")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_option_u64(&writer, prompt.map(value -> value.value))
+        }
+        .RequireStop(call, kind, condition, location, context, values, always_stops) -> {
+            mir_digest_tag(&writer, "require-stop")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_require_kind(&writer, kind)
+            mir_digest_option_u64(&writer, condition.map(value -> value.value))
+            mir_digest_panic_location(&writer, location)
+            mir_digest_panic_context(&writer, context)
+            mir_digest_values(&writer, values)
+            mir_digest_bool(&writer, always_stops)
+        }
+        .LayoutCompare(call, op, left, right) -> {
+            mir_digest_tag(&writer, "layout-compare")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_layout_compare(&writer, op)
+            mir_digest_u64(&writer, left.value)
+            mir_digest_u64(&writer, right.value)
+        }
+        .LayoutLiteral(inner) -> {
+            mir_digest_tag(&writer, "layout-literal")
+            mir_digest_u64(&writer, inner.value)
+        }
+        .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> {
+            mir_digest_tag(&writer, "struct-literal")
+            mir_digest_u64(&writer, type_id.value)
+            mir_digest_len(&writer, fields.len())
+            loop field in fields {
+                mir_digest_u64(&writer, field.field.value)
+                mir_digest_u64(&writer, field.value.value)
+            }
+            mir_digest_struct_extra(&writer, extra)
+            mir_digest_option_u64(&writer, trait_coercion.map(ty -> ty.value))
+            mir_digest_len(&writer, boxed_fields.len())
+            loop field in boxed_fields -> mir_digest_u64(&writer, field.value)
+        }
+        .ReflectOf(type_name, path, display, fields) -> {
+            mir_digest_tag(&writer, "reflect-of")
+            mir_digest_string(&writer, type_name)
+            mir_digest_string(&writer, path)
+            mir_digest_u64(&writer, display.value)
+            mir_digest_len(&writer, fields.len())
+            loop field in fields {
+                mir_digest_string(&writer, field.name)
+                mir_digest_string(&writer, field.type_name)
+                mir_digest_string(&writer, field.path)
+                mir_digest_u64(&writer, field.value.value)
+            }
+        }
+        .CellGuardProject(map_call, split_call, guard, paths, editable, edit_paths_disjoint) -> {
+            mir_digest_tag(&writer, "cell-guard-project")
+            mir_digest_u64(&writer, map_call.value)
+            mir_digest_option_u64(&writer, split_call.map(call -> call.value))
+            mir_digest_u64(&writer, guard.value)
+            mir_digest_field_paths(&writer, paths)
+            mir_digest_bool(&writer, editable)
+            mir_digest_bool(&writer, edit_paths_disjoint)
+        }
+        .SharedGuardMap(call, guard, path, editable) -> {
+            mir_digest_tag(&writer, "shared-guard-map")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, guard.value)
+            mir_digest_field_path(&writer, path)
+            mir_digest_bool(&writer, editable)
+        }
+        .SharedGuardSplit(call, map_call, guard, first, second, editable) -> {
+            mir_digest_tag(&writer, "shared-guard-split")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, map_call.value)
+            mir_digest_u64(&writer, guard.value)
+            mir_digest_len(&writer, 2)
+            mir_digest_field_path(&writer, first)
+            mir_digest_field_path(&writer, second)
+            mir_digest_bool(&writer, editable)
+        }
+        .SharedGuardWait(call, guard, condition, predicate) -> {
+            mir_digest_tag(&writer, "shared-guard-wait")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, guard.value)
+            mir_digest_u64(&writer, condition.value)
+            mir_digest_u64(&writer, predicate.value)
+        }
+        .ConditionNotify(call, condition, all) -> {
+            mir_digest_tag(&writer, "condition-notify")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, condition.value)
+            mir_digest_bool(&writer, all)
+        }
+        .AllocNew(call, kind, inline_size, args) -> {
+            mir_digest_tag(&writer, "alloc-new")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_allocator(&writer, kind)
+            mir_digest_option_int(&writer, inline_size)
+            mir_digest_call_args(&writer, args)
+        }
+        .ColumnarRead(base, index, column, column_index, accessor) -> {
+            mir_digest_tag(&writer, "columnar-read")
+            mir_digest_u64(&writer, base.value)
+            mir_digest_u64(&writer, index.value)
+            mir_digest_u64(&writer, column.value)
+            mir_digest_len(&writer, column_index)
+            mir_digest_u64(&writer, accessor.value)
+        }
+        .StaticPreludeCall(call, args, owner_type_args, type_args) -> {
+            mir_digest_tag(&writer, "static-prelude-call")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_call_args(&writer, args)
+            mir_digest_len(&writer, owner_type_args.len())
+            loop type_arg in owner_type_args {
+                if type_arg == {
+                    .Type(ty) -> { mir_digest_tag(&writer, "type"); mir_digest_type(&writer, ty) }
+                    .HostUsize -> mir_digest_tag(&writer, "host-usize")
+                }
+            }
+            mir_digest_len(&writer, type_args.len())
+            loop type_arg in type_args -> mir_digest_type(&writer, type_arg)
+        }
+        .DecodeUnder(call, segment, inner) -> {
+            mir_digest_tag(&writer, "decode-under")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, segment.value)
+            mir_digest_u64(&writer, inner.value)
+        }
+        .HardwareCall(call, op, receiver, args) -> {
+            mir_digest_tag(&writer, "hardware-call")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_hardware_op(&writer, op)
+            mir_digest_option_u64(&writer, receiver.map(value -> value.value))
+            mir_digest_call_args(&writer, args)
+        }
+        .BuiltinMethod(call, receiver, receiver_place, args, aggregate_fields) -> {
+            mir_digest_tag(&writer, "builtin-method")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, receiver.value)
+            mir_digest_option_u64(&writer, receiver_place.map(place -> place.value))
+            mir_digest_values(&writer, args)
+            if aggregate_fields == {
+                Val(fields) -> { mir_digest_bool(&writer, true); mir_digest_field_path(&writer, fields) }
+                None -> mir_digest_bool(&writer, false)
+            }
+        }
+        .OptionLift2(call, function, left, right) -> {
+            mir_digest_tag(&writer, "option-lift2")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, function.value)
+            mir_digest_u64(&writer, left.value)
+            mir_digest_u64(&writer, right.value)
+        }
+        .ClosureMethod(receiver, args, call) -> {
+            mir_digest_tag(&writer, "closure-method")
+            mir_digest_u64(&writer, receiver.value)
+            mir_digest_u64(&writer, call.value)
+            mir_digest_call_args(&writer, args)
+        }
+        .HostBorrowCallback(callable, params) -> {
+            mir_digest_tag(&writer, "host-borrow-callback")
+            mir_digest_u64(&writer, callable.value)
+            mir_digest_len(&writer, params.len())
+            loop param in params -> mir_digest_type(&writer, param)
+        }
+        .TextPatternMatch(call, subject, parts) -> {
+            mir_digest_tag(&writer, "text-pattern-match")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, subject.value)
+            mir_digest_text_pattern_parts(&writer, parts)
+        }
+        .BinaryPatternMatch(call, subject, parts) -> {
+            mir_digest_tag(&writer, "binary-pattern-match")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, subject.value)
+            mir_digest_binary_pattern_parts(&writer, parts)
+        }
+        .CursorTakePattern(receiver, receiver_place, parts) -> {
+            mir_digest_tag(&writer, "cursor-take-pattern")
+            mir_digest_u64(&writer, receiver.value)
+            mir_digest_u64(&writer, receiver_place.value)
+            mir_digest_text_pattern_parts(&writer, parts)
+        }
+        .ReaderTakePattern(receiver, receiver_place, parts) -> {
+            mir_digest_tag(&writer, "reader-take-pattern")
+            mir_digest_u64(&writer, receiver.value)
+            mir_digest_u64(&writer, receiver_place.value)
+            mir_digest_binary_pattern_parts(&writer, parts)
+        }
+        .NumericMethod(call, receiver) -> {
+            mir_digest_tag(&writer, "numeric-method")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, receiver.value)
+        }
+        .NumericBinaryMethod(call, receiver, argument) -> {
+            mir_digest_tag(&writer, "numeric-binary-method")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, receiver.value)
+            mir_digest_u64(&writer, argument.value)
+        }
+        .OverflowOption(call, left, right, location) -> {
+            mir_digest_tag(&writer, "overflow-option")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, left.value)
+            mir_digest_u64(&writer, right.value)
+            if location == {
+                Val(location) -> { mir_digest_bool(&writer, true); mir_digest_panic_location(&writer, location) }
+                None -> mir_digest_bool(&writer, false)
+            }
+        }
+        .HandleMethod(call, receiver, args, frame_schedule, frame_schedule_derivation) -> {
+            mir_digest_tag(&writer, "handle-method")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, receiver.value)
+            mir_digest_values(&writer, args)
+            if frame_schedule == {
+                Val(schedule) -> { mir_digest_bool(&writer, true); mir_digest_string(&writer, mir_frame_schedule_json(schedule)) }
+                None -> mir_digest_bool(&writer, false)
+            }
+            if frame_schedule_derivation == {
+                Val(reference) -> { mir_digest_bool(&writer, true); mir_digest_string(&writer, reference.id) }
+                None -> mir_digest_bool(&writer, false)
+            }
+        }
+        .PluginInvoke(call, handle, export_name, signature, args) -> {
+            mir_digest_tag(&writer, "plugin-invoke")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, handle.value)
+            mir_digest_string(&writer, export_name)
+            mir_digest_component_signature(&writer, signature)
+            mir_digest_values(&writer, args)
+        }
+        .HTTPRouterRegister(call, receiver, path, handler, method, handler_param_names, contract_json, location) -> {
+            mir_digest_tag(&writer, "http-router-register")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, receiver.value)
+            mir_digest_u64(&writer, path.value)
+            mir_digest_u64(&writer, handler.value)
+            mir_digest_string(&writer, mir_digest_http_method(method))
+            mir_digest_app_string_list(&writer, handler_param_names)
+            mir_digest_string(&writer, contract_json)
+            mir_digest_panic_location(&writer, location)
+        }
+        .CoreClosureCall(call, kind, values, closure, site, label) -> {
+            mir_digest_tag(&writer, "core-closure-call")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_core_closure(&writer, kind)
+            mir_digest_values(&writer, values)
+            mir_digest_option_u64(&writer, closure.map(value -> value.value))
+            mir_digest_u64(&writer, site.value)
+            mir_digest_string(&writer, label)
+        }
+        .TaskGroup(call, kind, tasks) -> {
+            mir_digest_tag(&writer, "task-group")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_task_group(&writer, kind)
+            mir_digest_values(&writer, tasks)
+        }
+        .Select(call, kind, values) -> {
+            mir_digest_tag(&writer, "select")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_select(&writer, kind)
+            mir_digest_values(&writer, values)
+        }
+        .PolicyFunction(policy, values) -> {
+            mir_digest_tag(&writer, "policy-function")
+            mir_digest_u64(&writer, policy.value)
+            mir_digest_values(&writer, values)
+        }
+        .InterruptFunction(interrupt, values) -> {
+            mir_digest_tag(&writer, "interrupt-function")
+            mir_digest_u64(&writer, interrupt.value)
+            mir_digest_values(&writer, values)
+        }
+        .CarrierFact(call, receiver, field, notes) -> {
+            mir_digest_tag(&writer, "carrier-fact")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, receiver.value)
+            mir_digest_u64(&writer, field.value)
+            mir_digest_bool(&writer, notes)
+        }
+        .GCEdit(call, root, edges, edit, index, kind, site) -> {
+            mir_digest_tag(&writer, "gc-edit")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, root.value)
+            mir_digest_values(&writer, edges)
+            mir_digest_u64(&writer, edit.value)
+            mir_digest_option_u64(&writer, index.map(value -> value.value))
+            mir_digest_gc_edit(&writer, kind)
+            mir_digest_u64(&writer, site.value)
+        }
+        .TypedTextInterp(call, kind, literals, holes, trusted_html) -> {
+            mir_digest_tag(&writer, "typed-text-interp")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_typed_head(&writer, kind)
+            mir_digest_len(&writer, literals.len())
+            loop literal in literals -> mir_digest_string(&writer, literal)
+            mir_digest_values(&writer, holes)
+            mir_digest_len(&writer, trusted_html.len())
+            loop trusted in trusted_html -> mir_digest_bool(&writer, trusted)
+        }
+        .CCallback(call, callback, lambda) -> {
+            mir_digest_tag(&writer, "c-callback")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_u64(&writer, callback.value)
+            mir_digest_u64(&writer, lambda.value)
+        }
+        .HostCall(call, args) -> {
+            mir_digest_tag(&writer, "host-call")
+            mir_digest_u64(&writer, call.value)
+            mir_digest_call_args(&writer, args)
+        }
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15072
+// encode_shape_field_names -> Digest.jet::mir_digest_shape_field_names (eleven codec names).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15089
+// encode_field -> Digest.jet::mir_digest_field (ID/names/type/span and all flags).
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15102
+fn encode_type_def_kind(writer: &MIRCanonicalWriter, kind: MIRTypeDefKind) Never! {
+    if kind == {
+        .Struct(fields, methods) -> {
+            mir_digest_tag(&writer, "struct")
+            mir_digest_len(&writer, fields.len())
+            loop field in fields -> mir_digest_field(&writer, field)
+            rendered :: loop method in methods -> "MirFunctionId({method.value})"
+            mir_digest_string(&writer, "[{rendered.join(", ")}]")
+        }
+        .Enum(variants, methods) -> {
+            mir_digest_tag(&writer, "enum")
+            mir_digest_len(&writer, variants.len())
+            loop variant in variants {
+                mir_digest_string(&writer, variant.name)
+                mir_digest_string(&writer, variant.wire_name)
+                mir_digest_span(&writer, variant.span)
+                mir_digest_variant_payload(&writer, variant.payload)
+                mir_digest_option_int(&writer, variant.discriminant)
+            }
+            rendered :: loop method in methods -> "MirFunctionId({method.value})"
+            mir_digest_string(&writer, "[{rendered.join(", ")}]")
+        }
+        .Distinct(base, range) -> {
+            mir_digest_tag(&writer, "distinct")
+            mir_digest_type(&writer, base)
+            mir_digest_string(&writer, mir_digest_integer_range_debug(range))
+        }
+        .Alias(target) -> { mir_digest_tag(&writer, "alias"); mir_digest_type(&writer, target) }
+        .UnitFamily(members) -> {
+            mir_digest_tag(&writer, "unit-family")
+            mir_digest_string(&writer, mir_digest_debug_string_list(members))
+        }
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15159
+// encode_param -> Digest.jet::mir_digest_param (index/name/span/type/access/ownership/label).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15169
+// encode_capture_param -> Digest.jet::mir_digest_capture_param (slot/name/span/type/access/ownership).
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15181
+fn encode_foreign(writer: &MIRCanonicalWriter, foreign: MIRForeign) Never! {
+    mir_digest_u64(&writer, foreign.id.value)
+    mir_digest_u64(&writer, foreign.module_id.value)
+    mir_digest_string(&writer, foreign.key)
+    mir_digest_string(&writer, foreign.module_name)
+    mir_digest_string(&writer, foreign.name)
+    mir_digest_span(&writer, foreign.span)
+    mir_digest_string(&writer, foreign.symbol)
+    mir_digest_string(&writer, foreign.path)
+    mir_digest_len(&writer, foreign.params.len())
+    loop param in foreign.params -> mir_digest_param(&writer, param)
+    mir_digest_option_type(&writer, foreign.return_type)
+    mir_digest_foreign_abi(&writer, foreign.foreign_abi)
+    mir_digest_int(&writer, mir_digest_foreign_language(foreign.foreign_language))
+    mir_digest_target_applicability(&writer, foreign.target_applicability)
+    encode_effects(&writer, foreign.effects)
+    mir_digest_option_u64(&writer, foreign.link.map(link -> link.value))
+    mir_digest_option_u64(&writer, foreign.callback.map(callback -> callback.value))
+    mir_digest_option_u64(&writer, foreign.handle.map(handle -> handle.value))
+    mir_digest_option_u64(&writer, foreign.close_function.map(function -> function.value))
+    mir_digest_option_u64(&writer, foreign.close_foreign.map(foreign -> foreign.value))
+    mir_digest_option_u64(&writer, foreign.undo_function.map(function -> function.value))
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15213
+// encode_failure_carrier -> Digest.jet::mir_digest_failure_carrier (infallible/result/optional/diverges).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15232
+// encode_call_fallibility -> Digest.jet::mir_digest_call_fallibility (infallible/failure).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15242
+// encode_core_call_fallibility -> Digest.jet::mir_digest_core_call_fallibility (Sema=1).
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15248
+fn encode_core_call(writer: &MIRCanonicalWriter, call: MIRCoreCall) Never! {
+    mir_digest_u64(&writer, call.id.value)
+    mir_digest_string(&writer, call.key)
+    mir_digest_string(&writer, call.module_name)
+    mir_digest_string(&writer, call.member)
+    mir_digest_string(&writer, mir_digest_debug_string_list(call.receiver_types))
+    mir_digest_len(&writer, call.arity)
+    mir_digest_len(&writer, call.max_arity)
+    mir_digest_string(&writer, mir_digest_debug_bool_list(call.borrow_mask))
+    mir_digest_core_call_fallibility(&writer, call.fallibility)
+    mir_digest_string(&writer, mir_digest_core_effect_debug(call.effect_kind))
+    mir_digest_string(&writer, mir_digest_debug_option_string(call.effect_leaf))
+    mir_digest_string(&writer, mir_digest_core_sink_debug(call.sink_class))
+    mir_digest_core_pure_route(&writer, call.pure_route)
+    mir_digest_core_interpreter_route(&writer, call.interpreter_route)
+    mir_digest_core_symbol(&writer, call.symbol)
+    mir_digest_int(&writer, call.coverage_bits)
+    mir_digest_bool(&writer, call.aot_direct)
+    mir_digest_bool(&writer, call.jit_direct)
+    mir_digest_option_string(&writer, call.jit_symbol)
+    mir_digest_bool(&writer, call.native_int_result)
+    mir_digest_string(&writer, mir_digest_core_marker_debug(call.marker))
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15271
+// encode_authority -> Digest.jet::mir_digest_authority (import/argument/inheritance fields).
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15293
+fn encode_prelude_call(writer: &MIRCanonicalWriter, call: MIRPreludeCall) Never! {
+    mir_digest_u64(&writer, call.id.value)
+    mir_digest_int(&writer, mir_digest_prelude_family(call.family))
+    mir_digest_string(&writer, call.module_name)
+    mir_digest_string(&writer, call.member)
+    mir_digest_symbol(&writer, call.symbol)
+    mir_digest_string(&writer, mir_digest_call_signature_debug(call.signature))
+    mir_digest_string(&writer, mir_digest_core_effect_debug(call.effect_kind))
+    mir_digest_call_fallibility(&writer, call.fallibility)
+    mir_digest_int(&writer, mir_digest_prelude_abi(call.abi))
+    mir_digest_authority(&writer, call.authority)
+    if call.db_metadata == {
+        Val(metadata) -> {
+            mir_digest_bool(&writer, true)
+            mir_digest_u64(&writer, metadata.source_file.value)
+            mir_digest_string(&writer, metadata.source_path)
+            mir_digest_span(&writer, metadata.source_span)
+            mir_digest_string(&writer, metadata.statement_identity)
+            mir_digest_len(&writer, metadata.table_facts.len())
+            loop fact in metadata.table_facts {
+                mir_digest_string(&writer, fact.table_id)
+                mir_digest_bool(&writer, fact.read)
+                mir_digest_bool(&writer, fact.write)
+            }
+        }
+        None -> mir_digest_bool(&writer, false)
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15331
+// encode_function_form -> Digest.jet::mir_digest_function_form (top-level/method/trait-method).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15357
+// encode_web_param_reconstruction -> Digest.jet::mir_digest_web_param_reconstruction (local/type/field rows).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15371
+// encode_local -> Digest.jet::mir_digest_local (all ownership, mutability, view and GC flags).

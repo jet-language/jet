@@ -1,0 +1,458 @@
+// Rust Syntax/core_surface.rs and Syntax/package_files.rs: shared path spellings.
+pub FILE_EXT :: prep { "jet" }
+pub UNIFIED_LOCK_FILE :: prep { ".jet/lock" }
+
+
+// Rust Syntax/predicates.rs and Syntax.rs::is_memo_storage_name.
+pub GENERATED_NAME_PREFIX :: prep { "__jet_" }
+pub fn is_memo_storage_name(name: String) -> Bool Never! {
+    if !name.starts_with(GENERATED_NAME_PREFIX) -> return false
+    suffix := name.slice(GENERATED_NAME_PREFIX.len(), name.len()) // #4303
+    suffix.starts_with("__memo_")
+}
+// Rust Syntax/predicates.rs classify_identifier: only the underscore prefix
+// affects source visibility. Bare `_` remains an ordinary binding spelling.
+pub enum IdentifierClass {
+    Ordinary
+    SoftPublic
+    Reserved
+}
+
+pub fn classify_identifier(name: String) -> IdentifierClass Never! {
+    if name.starts_with("__") -> return IdentifierClass.Reserved
+    // After the ASCII `_` prefix, a second scalar also means >1 UTF-8 bytes.
+    if name.starts_with("_") && name.len() > 1 -> return IdentifierClass.SoftPublic
+    IdentifierClass.Ordinary
+}
+
+// Rust Syntax/package_files.rs JET_KEYWORD_LIST/JET_TYPE_LIST: ordered current
+// completion/rename catalogs, not lexer teaching words or internal type names.
+JET_KEYWORD_NAMES :: prep { [String]{
+    "fn", "pub", "priv", "use", "as", "extern", "module",
+    "if", "else", "loop", "in", "break", "return", "defer",
+    "struct", "enum", "alias", "impl", "policy", "wrap", "trait", "tag", "effect", "derive", "distinct",
+    "migration", "rename", "add", "remove", "change", "via", "self",
+    "Unsafe", "Impure", "Context", "task", "freeze", "shared", "Transact", "Job", "Test", "Todo",
+    "State", "Transition", "state", "protocol", "client", "server", "marker", "validate", "check",
+    "true", "false", "None", "it"
+} }
+
+JET_TYPE_NAMES :: prep { [String]{
+    "Int", "Float", "Bool", "String", "()", "Char", "Err",
+    "Shared", "SharedSnapshot", "SharedRevisionError", "SharedGuard", "Shared.Weak", "Condition",
+    "Task", "Receiver", "Sender", "TaskFailure", "HashMap", "BTreeMap", "Map", "Queue", "Set", "Rank",
+    "PriorityQueue", "Cache", "Tally", "Bits", "Bytes", "ViewIter",
+    "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64"
+} }
+
+pub fn jet_keyword_names() -> [String] Never! { ~JET_KEYWORD_NAMES }
+pub fn jet_type_names() -> [String] Never! { ~JET_TYPE_NAMES }
+
+// Rust Syntax/core_surface.rs: retirement diagnostics, never keyword aliases.
+pub KW_COPY :: prep { "copy" }
+pub KW_MUTATE :: prep { "mut" }
+pub KW_MOVE :: prep { "take" }
+pub KW_CONST :: prep { "const" }
+pub FOREIGN_UNSAFE :: prep { "unsafe" }
+
+// Rust Syntax/core_surface.rs: source marks keep their independent meanings.
+pub SIGIL_BIND_IMMUT :: prep { "::" }
+pub SIGIL_BIND_MUT :: prep { ":=" }
+pub SIGIL_WRITE :: prep { "&" }
+pub SIGIL_MOVE :: prep { "^" }
+pub SIGIL_COPY :: prep { "~" }
+pub COMPTIME_MARK :: prep { "$" }
+pub SIGIL_FENCE_OPEN :: prep { "<:" }
+pub SIGIL_FENCE_CLOSE :: prep { ":>" }
+pub SIGIL_SPREAD :: prep { "..." }
+
+// Rust Syntax/{package_files,jetpack_config}.rs: canonical file/engine names.
+pub DEFAULT_ENTRY_FILE :: prep { "run.jet" }
+pub LEGACY_ENTRY_FILE :: prep { "main.jet" }
+pub JETPACK_TOML :: prep { "jetpack.toml" }
+pub PACKAGE_FILE :: prep { "package.jet" }
+pub PAYLOAD_FILE :: prep { "pkg.jet" }
+pub TARGET_SANDBOX :: prep { "sandbox" }
+pub RETIRED_TARGET_PLUGIN :: prep { "plugin" }
+pub ENGINE_PROTOCOL_FLAG :: prep { "--engine-protocol" }
+pub ROOT_ENGINE_DISPATCH_PID_ENV :: prep { "JET_INTERNAL_ROOT_DISPATCH_PID" }
+pub BINARY_NAME :: prep { "jet" }
+pub JETPACK_BINARY_NAME :: prep { "jetpack" }
+pub RETIRED_COMPTIME_MARK :: prep { "@" }
+pub ENV_FILE :: prep { "env.jet" }
+pub CONFIG_FILE :: prep { "config.jet" }
+pub WORKSPACE_FILE :: prep { "workspace.jet" }
+pub COMMAND_FILE_RUN :: prep { "@run.jet" }
+pub COMMAND_FILE_BUILD :: prep { "@build.jet" }
+pub COMMAND_FILE_DEV :: prep { "@dev.jet" }
+pub COMMAND_FILE_TEST :: prep { "@test.jet" }
+
+// Rust Syntax/math_layout.rs: canonical names and diagnostic retirements.
+pub TYPE_QUEUE :: prep { "Queue" }
+pub TYPE_RANK :: prep { "Rank" }
+pub TYPE_TALLY :: prep { "Tally" }
+pub TYPE_BITS :: prep { "Bits" }
+pub TYPE_BYTES :: prep { "Bytes" }
+pub RETIRED_TYPE_QUEUE :: prep { "Deque" }
+pub RETIRED_TYPE_RANK :: prep { "SortedSet" }
+pub RETIRED_TYPE_TALLY :: prep { "Bag" }
+pub RETIRED_TYPE_BITS :: prep { "BitSet" }
+pub RETIRED_TYPE_BYTES :: prep { "ByteBuffer" }
+pub RETIRED_OP_PLUS_PLUS :: prep { "++" }
+pub RETIRED_OP_MINUS_MINUS :: prep { "--" }
+pub DIGIT_SEPARATOR :: prep { "_" }
+
+// Rust Syntax/effects_surface.rs: leaf/provenance/provider scalar spellings.
+pub EFFECT_LEAF_EXEC_ARGS :: prep { "Exec.Args" }
+pub RETIRED_INTERPOLATION_SELECTOR_EXAMPLE :: prep { "{{value#Selector}}" }
+pub INTERPOLATION_SELECTOR_EXAMPLE :: prep { "{{value:Selector}}" }
+pub REF_SOURCE_JETPACK :: prep { "jetpack" }
+pub REF_SOURCE_NIXPKGS :: prep { "nixpkgs" }
+pub REF_SOURCE_GITHUB :: prep { "github" }
+pub REF_SOURCE_PATH :: prep { "path" }
+pub REF_SOURCE_CRAN :: prep { "cran" }
+pub REF_SOURCE_LUAROCKS :: prep { "luarocks" }
+pub REF_SOURCE_RUBY :: prep { "ruby" }
+pub REF_SOURCE_PERL :: prep { "perl" }
+pub REF_SOURCE_PHP :: prep { "php" }
+pub REF_SOURCE_JET_REGISTRY :: prep { "jet-registry" }
+pub REF_SOURCE_NPM :: prep { "npm" }
+pub REF_SOURCE_CARGO :: prep { "cargo" }
+pub REF_SOURCE_PYPI :: prep { "pypi" }
+pub REF_SOURCE_SWIFTPM :: prep { "swiftpm" }
+pub REF_SOURCE_RELEASES :: prep { "releases" }
+
+// Rust Syntax/effects_surface.rs:32–67, ordered canonical built-in leaves.
+pub BUILTIN_EFFECT_LEAVES :: prep { [String]{
+    "DB.Read", "DB.Write", "FS.Read", "FS.Write", "Rand.Draw", "Exec.Exit",
+    EFFECT_LEAF_EXEC_ARGS, "Time.Wait", "FFI.Go", "FFI.Java", "FFI.DotNet",
+    "FFI.Fortran", "FFI.Cobol", "FFI.Tcl", "FFI.Lua", "FFI.Ada", "FFI.Pascal",
+    "FFI.Dart", "FFI.PowerShell", "FFI.Perl", "FFI.Ruby", "FFI.Php", "FFI.R",
+    "FFI.Com", "FFI.C", "FFI.Cpp", "FFI.Asm", "FFI.Py", "FFI.Octave",
+} }
+pub REF_SOURCE_PROVIDERS :: prep { [String]{
+    REF_SOURCE_JETPACK, REF_SOURCE_NIXPKGS, REF_SOURCE_GITHUB, REF_SOURCE_PATH,
+    REF_SOURCE_CRAN, REF_SOURCE_LUAROCKS, REF_SOURCE_RUBY, REF_SOURCE_PERL,
+    REF_SOURCE_PHP, REF_SOURCE_JET_REGISTRY, REF_SOURCE_NPM, REF_SOURCE_CARGO,
+    REF_SOURCE_PYPI, REF_SOURCE_SWIFTPM, REF_SOURCE_RELEASES,
+} }
+// Rust Syntax/package_files.rs:47–56, ordered closed command-role vocabulary.
+pub COMMAND_ROLE_FILES :: prep { [String]{
+    COMMAND_FILE_RUN, COMMAND_FILE_BUILD, COMMAND_FILE_DEV, COMMAND_FILE_TEST,
+} }
+
+// Rust Syntax/{effects_surface,core_surface,math_layout}.rs: the canonical
+// checked operator and nominal names consumed by native MIR legality.
+pub TRAIT_ADD :: prep { "Add" }
+pub TRAIT_MUL :: prep { "Mul" }
+pub TYPE_PATH :: prep { "Path" }
+pub TYPE_COMPLEX :: prep { "Complex" }
+pub TYPE_RANGE :: prep { "Range" }
+
+// Syntax/core_surface.rs: canonical source, diagnostic-only retired, and
+// compiler-internal spellings. Retired words are not added to keyword catalogs.
+pub LANG_NAME :: prep { "Jet" }
+pub ENV_ORG_UNSAFE_POLICY :: prep { "JET_ORG_UNSAFE_POLICY" }
+pub KW_ASSERT :: prep { "assert" }
+pub INTERNAL_UNSAFE_ASSERT :: prep { "__jet_unsafe_assert" }
+pub UNSAFE_OBLIGATION_VALID_PTR :: prep { "valid_ptr" }
+pub UNSAFE_OBLIGATION_ALIGNED :: prep { "aligned" }
+pub UNSAFE_OBLIGATION_NO_ALIAS :: prep { "no_alias" }
+pub ARTIFACT_EXT_SOURCE_MAP :: prep { ".jetmap" }
+pub ARTIFACT_EXT_NOTEBOOK :: prep { ".jetnb" }
+pub ARTIFACT_EXT_PROOF :: prep { ".jetproof" }
+pub ARTIFACT_EXT_TRACE :: prep { ".jettrace" }
+pub ARTIFACT_EXT_GAME_REPLAY :: prep { ".jetreplay" }
+pub ARTIFACT_EXT_PROOF_REPLAY :: prep { ".jetproof-replay" }
+pub KW_FN :: prep { "fn" }
+pub GENERIC_CALL_OPEN :: prep { "<" }
+pub GENERIC_CALL_CLOSE :: prep { ">" }
+pub KW_PUB :: prep { "pub" }
+pub KW_PRIV :: prep { "priv" }
+pub MARKER_PUB_FILE :: prep { "PubFile" }
+pub MARKER_NO_PRELUDE :: prep { "NoPrelude" }
+pub FOREIGN_PRIVATE :: prep { "private" }
+pub CLI_COMPLETIONS_FOR :: prep { "--for" }
+pub MARKER_PUBLIC_FILE :: prep { "PublicFile" }
+pub PUB_PACKAGE_QUALIFIER :: prep { "package" }
+pub RETIRED_FENCE_OPEN :: prep { "@[" }
+pub RETIRED_FENCE_CLOSE :: prep { "]@" }
+pub MARKER_TRACK :: prep { "Track" }
+pub FACT_ROOT_BUILD :: prep { "$build" }
+pub FACT_ROOT_PACKAGE :: prep { "$package" }
+pub FACT_ROOT_PHASE :: prep { "$phase" }
+pub FACT_ROOT_PROGRAM :: prep { "$program" }
+pub RETIRED_MARKER_KNOWN :: prep { "Known" }
+pub MARKER_OFF :: prep { "Off" }
+pub MARKER_DEBUG_ONLY :: prep { "DebugOnly" }
+pub MARKER_META :: prep { "Meta" }
+pub MARKER_DEV_PANEL :: prep { "DevPanel" }
+pub MARKER_INTERRUPT :: prep { "Interrupt" }
+pub CORE_DEVTOOLS_MODULE :: prep { "core.devtools" }
+pub CORE_DEVTOOLS_PUBLISH :: prep { "publish" }
+pub TYPE_UI_NODE :: prep { "UINode" }
+pub META_FIELD_CATEGORY :: prep { "category" }
+pub META_FIELD_TUNABLE :: prep { "tunable" }
+pub META_FIELD_MATURITY :: prep { "maturity" }
+pub BLOCK_OPEN :: prep { "{{" }
+pub BLOCK_CLOSE :: prep { "}}" }
+pub OP_TRY_SUFFIX :: prep { "?" }
+pub COMMENT_PREFIX :: prep { "//" }
+pub BLOCK_COMMENT_OPEN :: prep { "/*" }
+pub BLOCK_COMMENT_CLOSE :: prep { "*/" }
+pub STMT_SEP :: prep { ";" }
+pub INTERP_OPEN :: prep { "{{" }
+pub INTERP_CLOSE :: prep { "}}" }
+pub BUILTIN_PRINT :: prep { "print" }
+pub BUILTIN_DEBUG :: prep { "debug" }
+pub INTERNAL_DEBUG_TRACE :: prep { "__jet_debug_trace" }
+pub DEBUG_TRACE_PREFIX :: prep { "[debug]" }
+pub BUILTIN_INPUT :: prep { "input" }
+pub TYPE_INT :: prep { "Int" }
+pub TYPE_FLOAT :: prep { "Float" }
+pub TYPE_BOOL :: prep { "Bool" }
+pub TYPE_STRING :: prep { "String" }
+pub TYPE_HTML :: prep { "HTML" }
+pub TYPE_ERR :: prep { "Err" }
+pub TYPE_NEVER :: prep { "Never" }
+pub AMBIENT_ERR :: prep { "err" }
+pub AMBIENT_CASE :: prep { "case" }
+pub RETIRED_TYPE_ERROR :: prep { "Error" }
+pub TYPE_UNIT :: prep { "()" }
+pub INTERNAL_UNIT_TYPE :: prep { "Unit" }
+pub INTERNAL_MULTI_HEAD_SUBJECT :: prep { "__jet_multi_head_subject" }
+pub RETIRED_TYPE_VOID :: prep { "Void" }
+pub TYPE_TERMINAL_POLICY :: prep { "TerminalPolicy" }
+pub TYPE_TERMINAL_SIZE :: prep { "TerminalSize" }
+pub TYPE_TERMINAL_MODE :: prep { "TerminalMode" }
+pub TYPE_TERMINAL_SESSION :: prep { "TerminalSession" }
+pub TERMINAL_FACT_NAMESPACE :: prep { "TerminalFact" }
+pub TERMINAL_FACT_TERMINAL :: prep { "terminal" }
+pub TERMINAL_FACT_RESIZE :: prep { "resize" }
+pub TERMINAL_FACT_RAW :: prep { "raw" }
+pub TERMINAL_FACTS :: prep { [String]{
+    TERMINAL_FACT_TERMINAL, TERMINAL_FACT_RESIZE, TERMINAL_FACT_RAW,
+} }
+pub TYPE_I8 :: prep { "I8" }
+pub TYPE_I16 :: prep { "I16" }
+pub TYPE_I32 :: prep { "I32" }
+pub TYPE_I64 :: prep { "I64" }
+pub TYPE_U8 :: prep { "U8" }
+pub TYPE_U16 :: prep { "U16" }
+pub TYPE_U32 :: prep { "U32" }
+pub TYPE_U64 :: prep { "U64" }
+pub TYPE_F32 :: prep { "F32" }
+pub TYPE_F64 :: prep { "F64" }
+pub SIZED_NUMERIC_TYPES :: prep { [String]{
+    TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_F32, TYPE_F64,
+} }
+pub WRITE_ACCESS_LABEL :: prep { "the write-access marker `&`" }
+pub MOVE_MARKER_LABEL :: prep { "the move marker `^`" }
+pub PARAM_ZONE_POSITIONAL_ONLY :: prep { "/" }
+pub PARAM_ZONE_LABEL_ONLY :: prep { "*" }
+pub KW_STRUCT :: prep { "struct" }
+pub KW_ENUM :: prep { "enum" }
+pub KW_ALIAS :: prep { "alias" }
+pub TYPE_OPTION_MARK :: prep { "?" }
+pub TYPE_FALLIBLE_MARK :: prep { "!" }
+pub TYPE_UNION_SEP :: prep { "|" }
+pub LIT_VALUE :: prep { "Val" }
+pub LIT_NULL :: prep { "None" }
+pub KW_SELF :: prep { "self" }
+pub KW_IMPL :: prep { "impl" }
+pub EXTERNAL_METHOD_CONNECTOR :: prep { "." }
+pub EXTERNAL_METHOD_CONNECTOR_RETIRED :: prep { "~~" }
+pub KW_POLICY :: prep { "policy" }
+pub KW_WRAP :: prep { "wrap" }
+pub KW_RETURN :: prep { "return" }
+pub KW_DEFER :: prep { "defer" }
+pub RESOURCE_CLOSE :: prep { "close" }
+pub TRAIT_CLOSE :: prep { "Close" }
+pub TRAIT_LITERAL_INT :: prep { "Literal.Int" }
+pub TRAIT_LITERAL_FLOAT :: prep { "Literal.Float" }
+pub METHOD_LITERAL_FROM_LITERAL :: prep { "from_literal" }
+pub KW_LOOP :: prep { "loop" }
+pub KW_YIELD :: prep { "yield" }
+pub TYPE_STREAM :: prep { "Stream" }
+pub KW_UNSAFE :: prep { "Unsafe" }
+pub KW_SHIELD :: prep { "Shield" }
+pub KW_IMPURE :: prep { "Impure" }
+pub KW_REACTIVE :: prep { "Reactive" }
+pub MARKER_TARGET :: prep { "Target" }
+pub MARKER_WASM_EXPORT :: prep { "WasmExport" }
+pub WEB_BUCKET_JS :: prep { "JS" }
+pub WEB_BUCKET_WASM :: prep { "Wasm" }
+pub BUILD_TARGET_WEB :: prep { "web" }
+pub BUILD_TARGET_WASI_SERVER :: prep { "wasm32-wasip2" }
+pub WEB_TARGET_DEFAULT_WEB :: prep { "Web" }
+pub MARKER_HTML :: prep { "HTML" }
+pub DSL_BLOCK_SQL :: prep { "SQL" }
+pub TYPE_SH :: prep { "Sh" }
+pub TYPE_REGEX :: prep { "Regex" }
+pub TYPE_URL :: prep { "URL" }
+pub TYPE_DATETIME :: prep { "DateTime" }
+pub TEXT_HEAD_ON :: prep { "on" }
+pub TARGET_OS_NAMESPACE :: prep { "OS" }
+pub TARGET_OS_LINUX :: prep { "Linux" }
+pub TARGET_OS_MACOS :: prep { "MacOS" }
+pub TARGET_OS_WINDOWS :: prep { "Windows" }
+pub BUILD_INFO :: prep { "build" }
+pub BUILD_INFO_OS :: prep { "os" }
+pub BUILD_INFO_PROFILE :: prep { "profile" }
+pub BUILD_INFO_SETTINGS :: prep { "settings" }
+pub COMPILER_BUILD_FACT_PACKAGE_NAME :: prep { "$package.name" }
+pub COMPILER_BUILD_FACT_PACKAGE_VERSION :: prep { "$package.version" }
+pub COMPILER_BUILD_FACT_OS :: prep { "$build.os" }
+pub COMPILER_BUILD_FACT_PROFILE_PATH :: prep { "$build.profile" }
+pub COMPILER_BUILD_FACT_SETTINGS_PREFIX :: prep { "$build.settings." }
+pub COMPILER_BUILD_FACT_STAMP_GIT :: prep { "$build.stamp.git" }
+pub COMPILER_BUILD_FACT_STAMP_DIRTY :: prep { "$build.stamp.dirty" }
+pub COMPILER_BUILD_FACT_STAMP_TOOLCHAIN :: prep { "$build.stamp.toolchain" }
+pub COMPILER_BUILD_FACT_STAMP_AT :: prep { "$build.stamp.at" }
+pub CORE_MEM_MODULE :: prep { "core.mem" }
+pub MARKER_UNINIT :: prep { "Uninit" }
+pub KW_UNINIT :: prep { "uninit" }
+pub CORE_SOLVE_MODULE :: prep { "core.compute.solve" }
+pub SOLVER_TYPE :: prep { "Solver" }
+pub VAULT_KEY_REF_TYPE :: prep { "KeyRef" }
+pub VAULT_KEY_REF_HANDLE :: prep { "__jet_vault_handle" }
+pub VAULT_KEY_REF_SHOWN :: prep { "__jet_vault_shown" }
+// TYPE_PTR remains the internal dispatch identity, not current source syntax.
+pub TYPE_PTR :: prep { "Ptr" }
+pub MEM_FROM_ADDR :: prep { "from_addr" }
+pub VIEW_FROM :: prep { "from" }
+pub VIEW_FROM_STATIC :: prep { "static" }
+pub OP_MEMBER_SPREAD :: prep { ".[" }
+pub MEM_VOLATILE_READ :: prep { "volatile_read" }
+pub MEM_VOLATILE_WRITE :: prep { "volatile_write" }
+pub MEM_ADDRESS_OF :: prep { "address_of" }
+pub MEM_PIN :: prep { "pin" }
+pub TYPE_PIN :: prep { "Pin" }
+pub MEM_ARENA :: prep { "Arena" }
+pub MEM_BUMP :: prep { "Bump" }
+pub MEM_POOL :: prep { "Pool" }
+pub MEM_FIXED :: prep { "Fixed" }
+pub TYPE_ALLOC_ERROR :: prep { "AllocError" }
+pub MEM_ALLOC_NEW :: prep { "new" }
+pub MEM_ALLOC_ALLOC :: prep { "alloc" }
+pub MEM_ALLOC_TRY_ALLOC :: prep { "try_alloc" }
+pub MEM_ALLOC_RESET :: prep { "reset" }
+pub MEM_ALLOC_FREE :: prep { "free" }
+pub CORE_ARGS_MODULE :: prep { "core.args" }
+pub CORE_MOD_MODULE :: prep { "core.mod" }
+pub MOD_TYPE :: prep { "Mod" }
+pub MOD_GRANT_TYPE :: prep { "ModGrant" }
+pub CORE_EMAIL_MODULE :: prep { "core.email" }
+pub TYPE_EMAIL_ADDRESS :: prep { "Address" }
+pub TYPE_EMAIL_MESSAGE :: prep { "Message" }
+pub TYPE_EMAIL_ATTACHMENT :: prep { "Attachment" }
+pub TYPE_EMAIL_ENVELOPE :: prep { "Envelope" }
+pub TYPE_EMAIL_SMTP_SECURITY :: prep { "SMTPSecurity" }
+pub TYPE_EMAIL_RECIPIENT_POLICY :: prep { "RecipientPolicy" }
+pub TYPE_EMAIL_RECIPIENT_REPORT :: prep { "RecipientReport" }
+pub TYPE_EMAIL_SEND_REPORT :: prep { "SendReport" }
+pub TYPE_EMAIL_ERROR :: prep { "EmailError" }
+pub TYPE_EMAIL_LIMITS :: prep { "Limits" }
+pub TYPE_EMAIL_SMTP_AUTH :: prep { "SMTPAuth" }
+pub TYPE_EMAIL_TLS_TRUST :: prep { "TLSTrust" }
+pub TYPE_EMAIL_SMTP_CONFIG :: prep { "SMTPConfig" }
+pub TYPE_EMAIL_DKIM_CONFIG :: prep { "DKIMConfig" }
+pub TYPE_EMAIL_MAILER :: prep { "Mailer" }
+pub EMAIL_LIMITS_SAFE_METHOD :: prep { "safe" }
+pub CORE_EMAIL_ADDRESS_FN :: prep { "address" }
+pub CORE_EMAIL_ATTACHMENT_FN :: prep { "attachment" }
+pub CORE_EMAIL_MESSAGE_FN :: prep { "message" }
+pub CORE_EMAIL_ENVELOPE_FN :: prep { "envelope" }
+pub CORE_EMAIL_SERIALIZE_FN :: prep { "serialize" }
+pub CORE_EMAIL_SMTP_FN :: prep { "smtp" }
+pub CORE_EMAIL_SMTP_FROM_ENV_FN :: prep { "smtp_from_env" }
+pub MARKER_REGION :: prep { "Region" }
+pub CTX_BLOCK :: prep { "Context" }
+pub CTX_FIELD_ALLOCATOR :: prep { "allocator" }
+pub CTX_FIELD_LOGGER :: prep { "logger" }
+pub CTX_FIELD_DEADLINE :: prep { "deadline" }
+pub MARKER_LIVE :: prep { "Live" }
+pub MARKER_NONDETERMINISTIC :: prep { "Nondeterministic" }
+pub CLOCK_TYPE :: prep { "Clock" }
+pub EXPIRING_VALUE_TYPE :: prep { "ExpiringValue" }
+pub METHOD_FRESH_NEW_RANDOM :: prep { "new_random" }
+pub RNG_TYPE :: prep { "RNG" }
+pub DETERMINISTIC_WORLD_TYPE :: prep { "DeterministicWorld" }
+pub FAKE_TYPE :: prep { "Fake" }
+pub DURATION_TYPE :: prep { "Duration" }
+pub TYPE_INSTANT :: prep { "Instant" }
+pub DURATION_UNIT_TYPE :: prep { "DurationUnit" }
+pub DURATION_RANGE_ERROR_TYPE :: prep { "RangeError" }
+pub DURATION_CONSTRUCTORS :: prep { [String]{
+    "nanoseconds", "microseconds", "milliseconds", "seconds", "minutes", "hours",
+} }
+pub DURATION_UNITS :: prep { [String]{
+    "Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours",
+} }
+pub METHOD_DURATION_IN :: prep { "in" }
+pub METHOD_DURATION_IS_ZERO :: prep { "is_zero" }
+pub METHOD_DURATION_TOTAL_SECONDS :: prep { "total_seconds" }
+pub TYPE_DECIMAL :: prep { "Decimal" }
+pub TYPE_FRACTION :: prep { "Fraction" }
+pub TYPE_AUTHORITY :: prep { "Authority" }
+pub TYPE_BUILD_CONTEXT :: prep { "BuildContext" }
+pub TYPE_BUILD_PLAN :: prep { "BuildPlan" }
+pub TYPE_BUILD_ACTION :: prep { "BuildAction" }
+pub TYPE_BUILD_TARGET :: prep { "BuildTarget" }
+pub TYPE_BUILD_TOOLCHAIN :: prep { "BuildToolchain" }
+pub TYPE_BUILD_PROBE :: prep { "BuildProbe" }
+pub TYPE_PROGRAM_INFO :: prep { "ProgramInfo" }
+pub TYPE_BUILD_GRAPH :: prep { "BuildGraph" }
+pub TYPE_BUILD_GRAPH_TARGET :: prep { "BuildGraphTarget" }
+pub TYPE_BUILD_GRAPH_ACTION :: prep { "BuildGraphAction" }
+pub TYPE_BUILD_GRAPH_FILE :: prep { "BuildGraphFile" }
+pub TYPE_BUILD_GRAPH_NODE :: prep { "BuildGraphNode" }
+pub TYPE_BUILD_GRAPH_INPUT_DIGEST :: prep { "BuildGraphInputDigest" }
+pub TYPE_BUILD_GRAPH_ACTION_KEY :: prep { "BuildGraphActionKey" }
+pub TYPE_BUILD_GRAPH_FILE_DELTA :: prep { "BuildGraphFileDelta" }
+pub TYPE_BUILD_GRAPH_KEY_DELTA :: prep { "BuildGraphKeyDelta" }
+pub TYPE_BUILD_GRAPH_CACHE_DELTA :: prep { "BuildGraphCacheDelta" }
+pub TYPE_BUILD_GRAPH_DIFF :: prep { "BuildGraphDiff" }
+pub TYPE_MEMO_STATS :: prep { "MemoStats" }
+pub METHOD_MEMO_CACHE :: prep { "cache" }
+// Rust `'\0'` / `"\u{0}"`: Jet quoted text has no NUL escape, so the one NUL
+// sentinel string is built from its byte here and shared.
+pub TEXT_NUL :: prep { String.from_bytes([U8]{U8{0}}) ?? "" }
+pub MEMO_STATS_CALL_PREFIX :: prep { "{TEXT_NUL}jet.memo.stats." }
+pub TYPE_TYPE_INFO :: prep { "TypeInfo" }
+pub TYPE_SOURCE_SPAN :: prep { "SourceSpan" }
+pub COMPILER_FACT_LAYOUT :: prep { "$layout" }
+pub COMPILER_FACT_NAME :: prep { "$name" }
+pub COMPILER_FACT_FIELDS :: prep { "$fields" }
+pub COMPILER_FACT_RANGE :: prep { "$range" }
+pub COMPILER_FACT_DIMENSION :: prep { "$dimension" }
+pub COMPILER_FACT_MEASURE :: prep { "$measure" }
+pub COMPILER_FACT_EXACTNESS :: prep { "$exactness" }
+pub COMPILER_FACT_CLASSIFICATION :: prep { "$classification" }
+pub COMPILER_FACT_OBLIGATION :: prep { "$obligation" }
+pub COMPILER_FACT_STATES :: prep { "$states" }
+pub COMPILER_FACT_EFFECTS :: prep { "$effects" }
+pub COMPILER_FACT_SENDABILITY :: prep { "$sendability" }
+pub COMPILER_FACT_MOVEDNESS :: prep { "$movedness" }
+pub COMPILER_FACT_ATTRIBUTION :: prep { "$attribution" }
+pub COMPILER_FACT_ORIGIN :: prep { "$origin" }
+pub COMPILER_FACT_VIEW_PROVENANCE :: prep { "$view_provenance" }
+pub COMPILER_FACT_UNIT_SCALE_PROVENANCE :: prep { "$unit_scale_provenance" }
+pub COMPILER_FACT_MATURITY :: prep { "$maturity" }
+pub COMPILER_BUILD_FACT_PROFILE :: prep { "$profile" }
+pub TYPE_LAYOUT_INFO :: prep { "LayoutInfo" }
+pub TYPE_LAYOUT_FIELD :: prep { "LayoutField" }
+pub LAYOUT_SELECTOR_PREFIX :: prep { "{TEXT_NUL}jet.layout.selector." }
+
+// Requested canonical constants from the sibling Syntax reference windows.
+// math_layout.rs:765–768, effects_surface.rs:260, Syntax.rs:730.
+pub BUILTIN_WRAPPING :: prep { "wrapping" }
+pub BUILTIN_SATURATING :: prep { "saturating" }
+pub INTERNAL_ARITHMETIC_CHECKED :: prep { "__jet_arithmetic_checked" }
+pub TRAIT_NUMERIC :: prep { "Numeric" }
+pub BOUND_QUANTITY :: prep { "Quantity" }
+// Syntax/markers.rs:27 (D-MEMO1=A, D-FIELDMEMO1=A); Syntax/package_files.rs:431-433 (D-MARK-META1).
+pub MARKER_MEMO :: prep { "Memo" }
+pub MARKER_EXPERIMENTAL :: prep { "Experimental" }
+pub MARKER_TESTED :: prep { "Tested" }
+pub MARKER_HARDENED :: prep { "Hardened" }

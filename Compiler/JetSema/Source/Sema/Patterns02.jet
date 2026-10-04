@@ -1,0 +1,1587 @@
+// PORT-PENDING 0416 crates-jet-sema-src-sema-checkeritems-slice-3597: crates/jet-sema/src/Sema/CheckerItems.rs:3597-5179
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     pub(crate) fn check_enum_lit(
+//RS         &mut self,
+//RS         type_name: &str,
+//RS         variant: &str,
+//RS         args: &mut [EnumLitArg],
+//RS         span: Span,
+//RS         variant_span: Option<Span>,
+//RS     ) -> Type {
+//RS         self.warn_deprecated_type_name(type_name, span);
+//RS         // An enum literal reads its enum's name, so it uses the import
+//RS         // that binds it (`use dep.[Kind]` then `Kind.Beta(3)`).
+//RS         self.record_type_import_name_use(type_name);
+//RS         let contextual_ty = self
+//RS             .expected_type
+//RS             .clone()
+//RS             .filter(|ty| matches!(ty, Type::Apply { name, .. } if name == type_name));
+//RS         // D-MOD2: an enum named through a member import carries its owner's
+//RS         // canonical identity, the one every signature from that owner uses.
+//RS         let ty = contextual_ty.clone().unwrap_or_else(|| {
+//RS             if self.member_imported_type(type_name) {
+//RS                 Type::Named(self.imported_nominal_head(type_name))
+//RS             } else {
+//RS                 Type::Named(type_name.to_string())
+//RS             }
+//RS         });
+//RS         let display_type_name = self.display_type_name(type_name, None);
+//RS         let Some(variants) = self.resolve_enum_variants_cloned(type_name) else {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0119",
+//RS                 format!("there's no enum called `{}`", display_type_name),
+//RS                 "enum literals need an enum type name".to_string(),
+//RS                 "define the enum first, or check the spelling".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS             for a in args.iter_mut() {
+//RS                 match a {
+//RS                     EnumLitArg::Positional(e) | EnumLitArg::Named { expr: e, .. } => {
+//RS                         self.infer(e);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             return ty;
+//RS         };
+//RS         let Some((_, payload)) = variants.get(variant) else {
+//RS             // D-TAG1: a group name in value position — a value is always a leaf.
+//RS             if let Some((_, leaves)) = self
+//RS                 .resolve_enum_groups_cloned(type_name)
+//RS                 .and_then(|g| g.get(variant).cloned())
+//RS             {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0332",
+//RS                     format!("`{}` is a group, not a value", variant),
+//RS                     "a group names its whole subtree in patterns; an actual value is always a leaf variant (D-TAG1)".to_string(),
+//RS                     format!(
+//RS                         "pick a leaf: {}",
+//RS                         leaves
+//RS                             .iter()
+//RS                             .map(|l| format!("`{display_type_name}.{l}`"))
+//RS                             .collect::<Vec<_>>()
+//RS                             .join(", ")
+//RS                     ),
+//RS                     Some(span),
+//RS                 ));
+//RS                 for a in args.iter_mut() {
+//RS                     match a {
+//RS                         EnumLitArg::Positional(e) | EnumLitArg::Named { expr: e, .. } => {
+//RS                             self.infer(e);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 return ty;
+//RS             }
+//RS             let suggestion = suggest_field(variant, &variants.keys().cloned().collect::<Vec<_>>());
+//RS             let fix = suggestion.as_ref().map_or_else(
+//RS                 || "check the variant name".to_string(),
+//RS                 |s| format!("did you mean `{s}`?"),
+//RS             );
+//RS             let mut diagnostic = Diagnostic::error(
+//RS                 "E0304",
+//RS                 format!("`{}` has no variant `{}`", display_type_name, variant),
+//RS                 "enum literals must name a variant on the type".to_string(),
+//RS                 fix,
+//RS                 Some(span),
+//RS             );
+//RS             if let (Some(candidate), Some(variant_span)) = (suggestion, variant_span) {
+//RS                 diagnostic = diagnostic.with_edit(TextEdit {
+//RS                     span: variant_span,
+//RS                     new_text: candidate,
+//RS                 });
+//RS             }
+//RS             self.diags.push(diagnostic);
+//RS             for a in args.iter_mut() {
+//RS                 match a {
+//RS                     EnumLitArg::Positional(e) | EnumLitArg::Named { expr: e, .. } => {
+//RS                         self.infer(e);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             return ty;
+//RS         };
+//RS         match payload {
+//RS             VariantPayload::Unit => {
+//RS                 if !args.is_empty() {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0303",
+//RS                         format!("variant `{}` takes no payload", variant),
+//RS                         "unit variants are written without parentheses".to_string(),
+//RS                         format!("write `{display_type_name}.{variant}` with no `(...)`"),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             VariantPayload::Single(expected, _) => {
+//RS                 let contextual_payload = match (&contextual_ty, type_name, variant) {
+//RS                     (
+//RS                         Some(Type::Apply { args, .. }),
+//RS                         "HookDecision" | "HookOutcome",
+//RS                         "Transform" | "Continue",
+//RS                     ) => args.first(),
+//RS                     (Some(Type::Apply { args, .. }), "HookDecision" | "HookOutcome", "Fail") => {
+//RS                         args.get(1)
+//RS                     }
+//RS                     _ => None,
+//RS                 };
+//RS                 let expected = contextual_payload.unwrap_or(expected);
+//RS                 if args.len() != 1 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0303",
+//RS                         format!("variant `{}` expects one value", variant),
+//RS                         "single-payload variants take one positional argument (S30)".to_string(),
+//RS                         format!("write `{display_type_name}.{variant}(...)`"),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 if let Some(EnumLitArg::Positional(e)) = args.first_mut() {
+//RS                     let expected_for_child = expected.clone();
+//RS                     let et = self.infer_with_expected(e, &expected_for_child);
+//RS                     if let Some(et) = &et {
+//RS                         if contextual_payload.is_some() && et != expected {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0108",
+//RS                                 format!("`{display_type_name}.{variant}` needs {}, not {}", expected.show(), et.show()),
+//RS                                 "the decision payload must match the hook's declared payload or error type".to_string(),
+//RS                                 type_fix_hint(expected, et),
+//RS                                 Some(e.span()),
+//RS                             ));
+//RS                         } else {
+//RS                             self.check_enum_payload_assignable(
+//RS                                 type_name, variant, None, expected, et, e,
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                     // D-EPPAYLOAD1 (I2 fix): same owning-position clone-insertion
+//RS                     // as a struct-lit field value — see `clone_borrowed_struct_field_value`.
+//RS                     // An enum payload is an owning slot exactly like a struct field;
+//RS                     // without this, an owned local moved here and read afterward
+//RS                     // reached rustc as a raw, unreported E0382.
+//RS                     self.clone_borrowed_struct_field_value(None, e, et.as_ref());
+//RS                 } else if let Some(EnumLitArg::Named { label, .. }) = args.first() {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0303",
+//RS                         format!(
+//RS                             "variant `{}` expects a positional value, not `{}:`",
+//RS                             variant, label
+//RS                         ),
+//RS                         "single-payload variants use positional args only (S30)".to_string(),
+//RS                         format!("write `{display_type_name}.{variant}(value)`"),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             VariantPayload::Named(fields) => {
+//RS                 let mut seen = HashSet::new();
+//RS                 for a in args.iter_mut() {
+//RS                     match a {
+//RS                         EnumLitArg::Positional(_) => {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0303",
+//RS                                 format!("variant `{}` requires labeled fields", variant),
+//RS                                 "named-payload variants construct with the dot-brace form \
+//RS                                  (D-UITREE1/D-DOTCTOR1), matching struct construction"
+//RS                                     .to_string(),
+//RS                                 format!(
+//RS                                     "write `{display_type_name}.{variant}.{{ w: 1.0, h: 2.0 }}`"
+//RS                                 ),
+//RS                                 Some(span),
+//RS                             ));
+//RS                         }
+//RS                         EnumLitArg::Named { label, expr } => {
+//RS                             if !seen.insert(label.clone()) {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0303",
+//RS                                     format!("field `{}` appears more than once", label),
+//RS                                     "each payload field may be written only once".to_string(),
+//RS                                     "remove the duplicate label".to_string(),
+//RS                                     Some(expr.span()),
+//RS                                 ));
+//RS                             }
+//RS                             let expected_for_child = fields
+//RS                                 .iter()
+//RS                                 .find(|field| field.name == *label)
+//RS                                 .map(|field| field.ty.clone());
+//RS                             let et = match expected_for_child.as_ref() {
+//RS                                 Some(expected) => self.infer_with_expected(expr, expected),
+//RS                                 None => self.infer(expr),
+//RS                             };
+//RS                             // D-EPPAYLOAD1 (I2 fix): see the positional-payload call above.
+//RS                             self.clone_borrowed_struct_field_value(None, expr, et.as_ref());
+//RS                             if let Some(f) = fields.iter().find(|f| f.name == *label) {
+//RS                                 if let Some(et) = et {
+//RS                                     self.check_enum_payload_assignable(
+//RS                                         type_name,
+//RS                                         variant,
+//RS                                         Some(label.as_str()),
+//RS                                         &f.ty,
+//RS                                         &et,
+//RS                                         expr,
+//RS                                     );
+//RS                                 }
+//RS                             } else {
+//RS                                 // No typed edit here: the AST has the payload
+//RS                                 // expression span, not the unknown label span.
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0302",
+//RS                                     format!("variant `{}` has no field `{}`", variant, label),
+//RS                                     "check the field names on this variant".to_string(),
+//RS                                     suggest_field(
+//RS                                         label,
+//RS                                         &fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
+//RS                                     )
+//RS                                     .map(|s| format!("did you mean `{}`?", s))
+//RS                                     .unwrap_or_else(|| "remove this label".to_string()),
+//RS                                     Some(expr.span()),
+//RS                                 ));
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 let missing: Vec<_> = fields
+//RS                     .iter()
+//RS                     .filter(|f| !seen.contains(&f.name))
+//RS                     .map(|f| f.name.clone())
+//RS                     .collect();
+//RS                 if !missing.is_empty() {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0303",
+//RS                         format!(
+//RS                             "variant `{}` is missing fields: {}",
+//RS                             variant,
+//RS                             missing.join(", ")
+//RS                         ),
+//RS                         "every payload field must appear exactly once".to_string(),
+//RS                         format!("add: {}", missing.join(", ")),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         ty
+//RS     }
+//RS 
+//RS     /// S31 / D-ENUMDOT1: bare `subject == Red` for a unit variant is E0367 —
+//RS     /// patterns need a leading `.`. Still return the pattern so recovery can
+//RS     /// typecheck the rest of the table.
+//RS     pub(crate) fn eq_unit_variant_pattern(
+//RS         &mut self,
+//RS         lhs: &Expr,
+//RS         rhs: &Expr,
+//RS         subject_name: Option<&str>,
+//RS         subj_ty: &Type,
+//RS     ) -> Option<Pattern> {
+//RS         if !subject_name.is_some_and(|n| expr_is_same_ident(lhs, n)) {
+//RS             return None;
+//RS         }
+//RS         let Expr::Ident(variant, rhs_span) = rhs else {
+//RS             return None;
+//RS         };
+//RS         if self.lookup(variant).is_some() || self.consts.contains_key(variant) {
+//RS             return None;
+//RS         }
+//RS         let enum_name = match subj_ty {
+//RS             Type::Named(name) | Type::Apply { name, .. } => name,
+//RS             _ => return None,
+//RS         };
+//RS         let variant_known = self
+//RS             .resolve_enum_variants_cloned(enum_name)
+//RS             .is_some_and(|variants| variants.contains_key(variant))
+//RS             // D-TAG1: a group name is pattern-shaped too (matches its subtree).
+//RS             || self
+//RS                 .resolve_enum_groups_cloned(enum_name)
+//RS                 .is_some_and(|groups| groups.contains_key(variant));
+//RS         if !variant_known {
+//RS             return None;
+//RS         }
+//RS         self.diags.push(Diagnostic::error(
+//RS             "E0367",
+//RS             format!("pattern `{variant}` needs a leading `.`"),
+//RS             "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+//RS                 .to_string(),
+//RS             format!("write `.{variant}`"),
+//RS             Some(*rhs_span),
+//RS         ));
+//RS         Some(Pattern::Variant {
+//RS             variant: variant.clone(),
+//RS             bindings: Vec::new(),
+//RS             leading_dot: false,
+//RS             span: *rhs_span,
+//RS         })
+//RS     }
+//RS 
+//RS     /// S31: pattern carried as `PatternTest` or as bare `subject == UnitVariant`
+//RS     /// (the latter is accepted only to emit E0367 and recover).
+//RS     pub(crate) fn switch_arm_pattern(
+//RS         &mut self,
+//RS         cond: &Expr,
+//RS         subject_name: Option<&str>,
+//RS         subj_ty: &Type,
+//RS     ) -> Option<Pattern> {
+//RS         match cond {
+//RS             // D-PARSESTR1 / D-BINPAT1: a str-match or binary pattern is never
+//RS             // provably exhaustive (fixed text/bytes might not match; a subject
+//RS             // might be too short), so it must never join the `all_pattern`
+//RS             // provable-coverage path — it always needs its own E0148 (missing
+//RS             // `else`) check instead.
+//RS             Expr::PatternTest {
+//RS                 pattern: Pattern::StrMatch { .. } | Pattern::BinMatch { .. },
+//RS                 ..
+//RS             } => None,
+//RS             Expr::PatternTest {
+//RS                 subject, pattern, ..
+//RS             } => {
+//RS                 if subject_name.is_some_and(|n| expr_is_same_ident(subject, n)) {
+//RS                     Some(pattern.clone())
+//RS                 } else {
+//RS                     None
+//RS                 }
+//RS             }
+//RS             Expr::Binary(BinOp::Eq, lhs, rhs, _) => {
+//RS                 self.eq_unit_variant_pattern(lhs, rhs, subject_name, subj_ty)
+//RS             }
+//RS             // D-ENUMDOT1: bare unit / call-shaped arm heads are the old S31
+//RS             // spelling. Accept only to emit E0367 and recover — canonical form
+//RS             // is `.Variant` / `.Variant(binding)`.
+//RS             Expr::Ident(variant, span) if subject_name.is_some() => {
+//RS                 let enum_name = match subj_ty {
+//RS                     Type::Named(name) | Type::Apply { name, .. } => name,
+//RS                     _ => return None,
+//RS                 };
+//RS                 let variants = self.resolve_enum_variants_cloned(enum_name)?;
+//RS                 // D-TAG1: a bare group name is a unit-shaped subtree pattern.
+//RS                 let is_group = self
+//RS                     .resolve_enum_groups_cloned(enum_name)
+//RS                     .is_some_and(|g| g.contains_key(variant.as_str()));
+//RS                 if !is_group {
+//RS                     let (_, payload) = variants.get(variant.as_str())?;
+//RS                     if !matches!(payload, crate::AST::VariantPayload::Unit) {
+//RS                         return None;
+//RS                     }
+//RS                 }
+//RS                 // Only accept if the variant is NOT a live local (avoids shadowing).
+//RS                 if self.lookup(variant).is_some() {
+//RS                     return None;
+//RS                 }
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0367",
+//RS                     format!("pattern `{variant}` needs a leading `.`"),
+//RS                     "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+//RS                         .to_string(),
+//RS                     format!("write `.{variant}`"),
+//RS                     Some(*span),
+//RS                 ));
+//RS                 Some(Pattern::Variant {
+//RS                     variant: variant.clone(),
+//RS                     bindings: vec![],
+//RS                     leading_dot: false,
+//RS                     span: *span,
+//RS                 })
+//RS             }
+//RS             Expr::Call(call) if subject_name.is_some() => {
+//RS                 // Only a single positional binding arg is the pattern form.
+//RS                 if call.args.len() != 1 {
+//RS                     return None;
+//RS                 }
+//RS                 let Expr::Ident(binding, binding_span) = &call.args[0].expr else {
+//RS                     return None;
+//RS                 };
+//RS                 if self.lookup(binding).is_some() {
+//RS                     return None;
+//RS                 } // it's a real local
+//RS                 let enum_name = match subj_ty {
+//RS                     Type::Named(name) | Type::Apply { name, .. } => name,
+//RS                     Type::Union(members)
+//RS                         if members
+//RS                             .iter()
+//RS                             .any(|m| crate::AST::union_member_tag(m) == call.name) =>
+//RS                     {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0367",
+//RS                             format!("pattern `{}` needs a leading `.`", call.name),
+//RS                             "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+//RS                                 .to_string(),
+//RS                             format!("write `.{}(…)`", call.name),
+//RS                             Some(call.name_span),
+//RS                         ));
+//RS                         return Some(Pattern::Variant {
+//RS                             variant: call.name.clone(),
+//RS                             bindings: vec![crate::AST::PatSlot::Bind {
+//RS                                 name: binding.clone(),
+//RS                                 span: *binding_span,
+//RS                             }],
+//RS                             leading_dot: false,
+//RS                             span: call.name_span,
+//RS                         });
+//RS                     }
+//RS                     _ => return None,
+//RS                 };
+//RS                 let variants = self.resolve_enum_variants_cloned(enum_name)?;
+//RS                 let (_, payload) = variants.get(call.name.as_str())?;
+//RS                 if !matches!(payload, crate::AST::VariantPayload::Single(..)) {
+//RS                     return None;
+//RS                 }
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0367",
+//RS                     format!("pattern `{}` needs a leading `.`", call.name),
+//RS                     "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+//RS                         .to_string(),
+//RS                     format!("write `.{}(…)`", call.name),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 Some(Pattern::Variant {
+//RS                     variant: call.name.clone(),
+//RS                     bindings: vec![crate::AST::PatSlot::Bind {
+//RS                         name: binding.clone(),
+//RS                         span: *binding_span,
+//RS                     }],
+//RS                     leading_dot: false,
+//RS                     span: call.name_span,
+//RS                 })
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn check_pattern_test(
+//RS         &mut self,
+//RS         subject: &mut Box<Expr>,
+//RS         pattern: &mut Pattern,
+//RS         span: Span,
+//RS     ) -> HashMap<String, Type> {
+//RS         self.check_pattern_test_typed(subject, pattern, span).1
+//RS     }
+//RS 
+//RS     /// The typed form is shared by ordinary conditions and statement-level
+//RS     /// refutable bindings. Returning the subject type keeps the fallback route
+//RS     /// checker on the same validated pattern-test path without inferring the
+//RS     /// subject a second time.
+//RS     pub(crate) fn check_pattern_test_typed(
+//RS         &mut self,
+//RS         subject: &mut Box<Expr>,
+//RS         pattern: &mut Pattern,
+//RS         span: Span,
+//RS     ) -> (Option<Type>, HashMap<String, Type>) {
+//RS         // A Result pattern consumes the carrier itself. Keep a direct
+//RS         // fallible call as `T !E` here; ordinary value positions unwrap the
+//RS         // same call through the existing automatic propagation rule. This
+//RS         // includes contextual `.Ok` / `.Err` syntax before normalization.
+//RS         // D-OUTCOME-SHAPE1=A: a `.Val`/`.None` level of a value chain that
+//RS         // also handles `.Err` tests the same `T? E!` carrier.
+//RS         let preserve_result_carrier = super::CheckerCore::pattern_consumes_result_carrier(pattern)
+//RS             || (super::CheckerCore::names_optional_state(pattern)
+//RS                 && self.carrier_chain_subjects.contains(&subject.span().start));
+//RS         // Source spans are the diagnostic anchor, not an AST identity. Compiler
+//RS         // generated codec/derive bodies intentionally stamp every synthetic
+//RS         // node with one declaration span, so a span-only cache would let one
+//RS         // `Result<Int, E>` subject answer a later `Result<String, E>` subject.
+//RS         // Those bodies are fully typed by their explicit generated signatures;
+//RS         // infer each carrier subject directly instead of reusing that ambiguous
+//RS         // key. User source keeps the cache for the existing single-inference
+//RS         // behavior.
+//RS         let use_subject_cache = preserve_result_carrier && !self.compiler_generated;
+//RS         let subject_key = subject.span().start;
+//RS         let cached_subject = use_subject_cache
+//RS             .then(|| self.result_handler_subject_types.get(&subject_key).cloned())
+//RS             .flatten();
+//RS         if let Some((_, typed_subject)) = &cached_subject {
+//RS             **subject = typed_subject.clone();
+//RS         }
+//RS         let cached_subject_ty = cached_subject.as_ref().map(|(ty, _)| ty.clone());
+//RS         if preserve_result_carrier && cached_subject_ty.is_none() {
+//RS             self.failure_auto_depth += 1;
+//RS         }
+//RS         // A value pattern tests the success value, even when the surrounding
+//RS         // value expression is itself checked against a Result return carrier.
+//RS         // Do not let that outer carrier expectation keep a direct call wrapped
+//RS         // as `Result<T, E>` here; ordinary call inference must insert the one
+//RS         // shared Try and validate the pattern against `T`. Explicit `.Ok` /
+//RS         // `.Err` patterns are the carrier-owned exception above.
+//RS         let saved_subject_expected = self.expected_type.clone();
+//RS         if !preserve_result_carrier && matches!(saved_subject_expected, Some(Type::Result { .. })) {
+//RS             self.expected_type = None;
+//RS         }
+//RS         let stable_optional_subject = if pattern_needs_stable_optional_carrier(pattern) {
+//RS             match subject.as_ref() {
+//RS                 Expr::Ident(name, _) => self.flow.bindings.get(name).and_then(|info| {
+//RS                     matches!(&info.ty, Type::Option(_)).then(|| info.ty.clone())
+//RS                 }),
+//RS                 _ => None,
+//RS             }
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let mut subj_ty = cached_subject_ty.clone().or_else(|| {
+//RS             let inferred = if let Some(stable) = stable_optional_subject.clone() {
+//RS                 // Preserve ordinary identifier-use/ownership bookkeeping; only
+//RS                 // replace the type returned to pattern validation.
+//RS                 let _ = self.infer(subject);
+//RS                 Some(stable)
+//RS             } else if preserve_result_carrier {
+//RS                 self.infer_without_auto_propagation(subject)
+//RS             } else {
+//RS                 self.infer(subject)
+//RS             };
+//RS             if use_subject_cache {
+//RS                 if let Some(ty) = inferred.clone() {
+//RS                     self.result_handler_subject_types
+//RS                         .insert(subject_key, (ty, (**subject).clone()));
+//RS                 }
+//RS             }
+//RS             inferred
+//RS         });
+//RS         self.expected_type = saved_subject_expected;
+//RS         if preserve_result_carrier && cached_subject_ty.is_none() {
+//RS             self.failure_auto_depth -= 1;
+//RS         }
+//RS         // An invalid explicit `!` domain is diagnosed at its declaration and
+//RS         // does not make a call a usable Result carrier. Let the ordinary call
+//RS         // inference consume that invalid carrier before validating `.Ok`/`.Err`,
+//RS         // preserving the independent pattern mismatch (E0305).
+//RS         if preserve_result_carrier
+//RS             && subj_ty.as_ref().is_some_and(|ty| {
+//RS                 matches!(
+//RS                     ty,
+//RS                     Type::Result { err, .. } if !self.is_error_domain(err)
+//RS                 )
+//RS             })
+//RS         {
+//RS             subj_ty = self.infer(subject);
+//RS         }
+//RS         let Some(st) = subj_ty else {
+//RS             return (None, HashMap::new());
+//RS         };
+//RS         self.normalize_pattern_tree(pattern, &st);
+//RS         let bindings = self.validate_pattern(&st, pattern, span);
+//RS         if cached_subject_ty.is_none() && !matches!(pattern, Pattern::Struct { .. }) {
+//RS             self.mark_pattern_subject_moved(subject, &bindings);
+//RS         }
+//RS         (Some(st), bindings)
+//RS     }
+//RS 
+//RS     /// Binding a non-copy payload out of a pattern gives the subject away in
+//RS     /// the generated Rust (`if let` / `matches!` move the place), so the old
+//RS     /// name must stop being usable — otherwise rustc rejects the output (I2).
+//RS     pub(crate) fn mark_pattern_subject_moved(
+//RS         &mut self,
+//RS         subject: &Expr,
+//RS         bindings: &HashMap<String, Type>,
+//RS     ) {
+//RS         if bindings.values().all(type_is_copy) {
+//RS             return;
+//RS         }
+//RS         // D-OPT-WRITE1 (#3974): a `&place` subject binds write windows into
+//RS         // its payload; the owner keeps its value.
+//RS         if crate::Sema::CheckerCore::is_write_window_subject(subject) {
+//RS             return;
+//RS         }
+//RS         if let Expr::Ident(name, _) = subject {
+//RS             // A borrowed parameter's payload binds as a read view of that
+//RS             // parameter, exactly like a projected subject `param.field`; the
+//RS             // subject stays usable and nothing is copied.
+//RS             if self.is_borrowed_binding(name) {
+//RS                 return;
+//RS             }
+//RS         }
+//RS         if self.transfer_mutable_pattern_subject(subject) {
+//RS             return;
+//RS         }
+//RS         if let Expr::Ident(n, nspan) = subject {
+//RS             if n != Syntax::KW_IT && self.lookup(n).is_some() {
+//RS                 self.mark_moved(n.clone(), *nspan, "the pattern match");
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-PARSESTR1 (shared with D-SHIFT1's `take_pattern` — I8, one hole-type
+//RS     /// rule, not two): the bound type of a str-match pattern hole. `None`
+//RS     /// binds `String`; a typed hole must be an integer carrier (`Int` or an
+//RS     /// inline range), `Float`, `Bool`, or `String` — the types that can read
+//RS     /// out of matched text — else E0305.
+//RS     pub(crate) fn str_match_hole_type(
+//RS         &mut self,
+//RS         name: &str,
+//RS         ty: &Option<Type>,
+//RS         hole_span: Span,
+//RS     ) -> Type {
+//RS         match ty {
+//RS             None => Type::String,
+//RS             Some(
+//RS                 t
+//RS                 @ (Type::Int | Type::Float | Type::Bool | Type::String | Type::InlineRange { .. }),
+//RS             ) => t.clone(),
+//RS             Some(other) => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0305",
+//RS                     format!(
+//RS                         "`{{{}:{}}}` can't read text as {} — only an integer carrier, `Float`, `Bool`, or `String` can come out of a pattern hole",
+//RS                         name,
+//RS                         other.show(),
+//RS                         other.show()
+//RS                     ),
+//RS                     "a typed hole reads the matched text into that type, and only these four types know how to read text".to_string(),
+//RS                     "use `Int`, an inline integer range, `Float`, `Bool`, or `String`, or drop the type to bind `String`".to_string(),
+//RS                     Some(hole_span),
+//RS                 ));
+//RS                 Type::String
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-BINPAT1 (shared with card #506 follow-up's `take_pattern` — I8, one
+//RS     /// hole-type rule, not two): walk a binary pattern's parts, folding the
+//RS     /// running bit offset and pushing alignment/endian diagnostics (E1008,
+//RS     /// E1011), and return the ORDERED `(name, Type)` list for every hole
+//RS     /// (literal parts contribute no entry). Order matches source order —
+//RS     /// `validate_pattern`'s arm-head bindings collect this into a
+//RS     /// name-keyed `HashMap` (binding order doesn't matter for a switch arm);
+//RS     /// `take_pattern` needs the order preserved, since it becomes a
+//RS     /// canonical result tuple, so it keeps the `Vec` as-is.
+//RS     pub(crate) fn bin_match_hole_types(
+//RS         &mut self,
+//RS         parts: &[crate::AST::BinMatchPart],
+//RS         span: Span,
+//RS     ) -> Vec<(String, Type)> {
+//RS         let mut off: usize = 0;
+//RS         let mut holes: Vec<(String, Type)> = Vec::new();
+//RS         for part in parts {
+//RS             match part {
+//RS                 crate::AST::BinMatchPart::Lit(bytes) => {
+//RS                     if off % 8 != 0 {
+//RS                         self.diags.push(self.bin_align_diag(span));
+//RS                     }
+//RS                     off += bytes.len() * 8;
+//RS                 }
+//RS                 crate::AST::BinMatchPart::Hole {
+//RS                     name,
+//RS                     spec,
+//RS                     span: hole_span,
+//RS                 } => match spec {
+//RS                     crate::AST::BinSpec::Rest => {
+//RS                         if off % 8 != 0 {
+//RS                             self.diags.push(self.bin_align_diag(*hole_span));
+//RS                         }
+//RS                         holes.push((
+//RS                             name.clone(),
+//RS                             Type::List(Box::new(Type::IntN {
+//RS                                 signed: false,
+//RS                                 bits: 8,
+//RS                             })),
+//RS                         ));
+//RS                     }
+//RS                     crate::AST::BinSpec::Bits { width, endian } => {
+//RS                         if matches!(endian, crate::AST::BinEndian::Little) && *width % 8 != 0 {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E1008",
+//RS                                     format!(
+//RS                                         "a little-endian read `U{width}le` must be a whole number of bytes"
+//RS                                     ),
+//RS                                     "byte order only reorders whole bytes, so a `le` read's width must be a multiple of 8"
+//RS                                         .to_string(),
+//RS                                     "use a multiple-of-8 width (`U16le`, `U32le`) or big-endian `be`".to_string(),
+//RS                                     Some(*hole_span),
+//RS                                 ));
+//RS                         }
+//RS                         holes.push((name.clone(), bin_bits_type(*width)));
+//RS                         off += *width as usize;
+//RS                     }
+//RS                 },
+//RS             }
+//RS         }
+//RS         holes
+//RS     }
+//RS 
+//RS     /// D-BINPAT1: a fixed byte literal or a rest capture must start on a byte
+//RS     /// boundary — the preceding bit-typed holes must sum to a multiple of 8.
+//RS     fn bin_align_diag(&self, span: Span) -> Diagnostic {
+//RS         Diagnostic::error(
+//RS             "E1011",
+//RS             "this part of the binary pattern doesn't start on a byte boundary".to_string(),
+//RS             "fixed bytes and a `{rest:...}` capture are read whole-byte, so every bit-field before them must add up to a multiple of 8 bits"
+//RS                 .to_string(),
+//RS             "pad the preceding holes to a byte boundary (e.g. add a reserved `{_:U4}`)".to_string(),
+//RS             Some(span),
+//RS         )
+//RS     }
+//RS 
+//RS     pub(crate) fn validate_pattern(
+//RS         &mut self,
+//RS         subject_ty: &Type,
+//RS         pattern: &Pattern,
+//RS         span: Span,
+//RS     ) -> HashMap<String, Type> {
+//RS         match (subject_ty, pattern) {
+//RS             // S31: a nested payload pattern is validated against the payload
+//RS             // type and contributes its own bindings.
+//RS             (
+//RS                 Type::Option(payload),
+//RS                 Pattern::Present {
+//RS                     inner: Some(inner), ..
+//RS                 },
+//RS             )
+//RS             | (
+//RS                 Type::Result { ok: payload, .. },
+//RS                 Pattern::Ok {
+//RS                     inner: Some(inner), ..
+//RS                 },
+//RS             )
+//RS             | (
+//RS                 Type::Result { err: payload, .. },
+//RS                 Pattern::Err {
+//RS                     inner: Some(inner), ..
+//RS                 },
+//RS             ) => self.validate_pattern(payload, inner, inner.span()),
+//RS             (Type::Option(inner), Pattern::Present { binding, .. }) => {
+//RS                 let mut map = HashMap::new();
+//RS                 map.insert(binding.clone(), (**inner).clone());
+//RS                 map
+//RS             }
+//RS             (Type::Option(_), Pattern::Absent(_)) => HashMap::new(),
+//RS             (Type::Result { ok, .. }, Pattern::Ok { binding, .. }) => {
+//RS                 let mut map = HashMap::new();
+//RS                 map.insert(binding.clone(), (**ok).clone());
+//RS                 map
+//RS             }
+//RS             (Type::Result { err, .. }, Pattern::Err { binding, .. }) => {
+//RS                 let mut map = HashMap::new();
+//RS                 map.insert(binding.clone(), (**err).clone());
+//RS                 map
+//RS             }
+//RS             (Type::Result { .. }, Pattern::Present { .. } | Pattern::Absent(_)) => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0305",
+//RS                     format!(
+//RS                         "this pattern belongs to an optional value, not {}",
+//RS                         subject_ty.name()
+//RS                     ),
+//RS                     "use `== .Ok(...)` or `== .Err(...)` on a fallible result".to_string(),
+//RS                     format!(
+//RS                         "write `== .{}(...)` or `== .{}(...)` instead",
+//RS                         Syntax::LIT_OK,
+//RS                         Syntax::LIT_ERR
+//RS                     ),
+//RS                     Some(span),
+//RS                 ));
+//RS                 HashMap::new()
+//RS             }
+//RS             // D-UNIONTYPE1=A: arm head is the member type name; binds that member.
+//RS             (
+//RS                 Type::Union(members),
+//RS                 Pattern::Variant {
+//RS                     variant, bindings, ..
+//RS                 },
+//RS             ) => {
+//RS                 let Some(member_ty) = members
+//RS                     .iter()
+//RS                     .find(|m| crate::AST::union_member_tag(m) == *variant)
+//RS                     .cloned()
+//RS                 else {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0305",
+//RS                         format!(
+//RS                             "pattern `{}` doesn't belong to `{}`",
+//RS                             variant,
+//RS                             subject_ty.name()
+//RS                         ),
+//RS                         "union match arms name a member type of the subject's union".to_string(),
+//RS                         format!(
+//RS                             "members are {}",
+//RS                             members
+//RS                                 .iter()
+//RS                                 .map(crate::AST::union_member_tag)
+//RS                                 .collect::<Vec<_>>()
+//RS                                 .join(", ")
+//RS                         ),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return HashMap::new();
+//RS                 };
+//RS                 if bindings.len() != 1 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0306",
+//RS                         format!(
+//RS                             "pattern `{}` expects 1 binding, got {}",
+//RS                             variant,
+//RS                             bindings.len()
+//RS                         ),
+//RS                         "each union member arm binds the member value once".to_string(),
+//RS                         format!("write `.{}(v)`", variant),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 match bindings.first() {
+//RS                     Some(crate::AST::PatSlot::Bind { name, .. }) => {
+//RS                         HashMap::from([(name.clone(), member_ty)])
+//RS                     }
+//RS                     Some(crate::AST::PatSlot::Nested(inner)) => {
+//RS                         self.validate_pattern(&member_ty, inner, inner.span())
+//RS                     }
+//RS                     _ => HashMap::new(),
+//RS                 }
+//RS             }
+//RS             (
+//RS                 Type::Named(type_name)
+//RS                 | Type::Apply {
+//RS                     name: type_name, ..
+//RS                 },
+//RS                 Pattern::Struct { fields, rest, .. },
+//RS             ) => {
+//RS                 let (import_ns, lookup_name) = self.struct_type_name_parts(type_name);
+//RS                 let owner_mod = self.struct_owner_module(lookup_name, import_ns);
+//RS                 let display_type_name = owner_mod
+//RS                     .map(|owner| self.display_type_name(type_name, Some(owner)))
+//RS                     .unwrap_or_else(|| self.display_type_name(type_name, None));
+//RS                 let all_fields: Option<Vec<String>> = owner_mod
+//RS                     .and_then(|m| self.struct_fields_of(m, lookup_name))
+//RS                     .map(|fs| fs.iter().map(|(name, ..)| name.clone()).collect());
+//RS                 let Some(all_fields) = all_fields else {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0313",
+//RS                         format!(
+//RS                             "`{{ … }}` can only match a struct value, but this is {}",
+//RS                             subject_ty.show()
+//RS                         ),
+//RS                         "a struct pattern reads named fields from a struct value".to_string(),
+//RS                         "match a struct value, or use an enum/optional pattern instead".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return HashMap::new();
+//RS                 };
+//RS                 let mut named = HashSet::new();
+//RS                 let mut result = HashMap::new();
+//RS                 for f in fields {
+//RS                     let field_name = f.field_name();
+//RS                     named.insert(field_name.to_string());
+//RS                     let fty = self
+//RS                         .field_type(subject_ty, field_name, f.field_span())
+//RS                         .unwrap_or(Type::Int);
+//RS                     match f {
+//RS                         StructPatField::Bind {
+//RS                             local, local_span, ..
+//RS                         } => {
+//RS                             result.insert(local.clone(), fty);
+//RS                             let _ = local_span;
+//RS                         }
+//RS                         StructPatField::Value { value, .. } => {
+//RS                             let mut value = (**value).clone();
+//RS                             let saved_expected = self.expected_type.clone();
+//RS                             self.expected_type = Some(fty.clone());
+//RS                             let got = self.infer(&mut value);
+//RS                             self.expected_type = saved_expected;
+//RS                             if let Some(got) = got {
+//RS                                 let reported = self.check_type_assignable(&fty, &got, value.span());
+//RS                                 if !reported && got != fty {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0108",
+//RS                                         format!(
+//RS                                             "field `{}` is {}, but this pattern value is {}",
+//RS                                             field_name,
+//RS                                             fty.show(),
+//RS                                             got.show()
+//RS                                         ),
+//RS                                         "a field pattern value must have the field's type"
+//RS                                             .to_string(),
+//RS                                         type_fix_hint(&fty, &got),
+//RS                                         Some(value.span()),
+//RS                                     ));
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 if rest.is_none() && named.len() < all_fields.len() {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0326",
+//RS                         format!("this pattern leaves out fields of `{}`", display_type_name),
+//RS                         "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance".to_string(),
+//RS                         "add `, ..` before the closing `}`, or name the remaining fields".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                 } else if let Some(rest_span) = rest {
+//RS                     if named.len() >= all_fields.len() && !all_fields.is_empty() {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0327",
+//RS                             "this `..` is redundant".to_string(),
+//RS                             format!(
+//RS                                 "the pattern already names every field of `{}`",
+//RS                                 display_type_name
+//RS                             ),
+//RS                             "remove `..` or leave out at least one field".to_string(),
+//RS                             Some(*rest_span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 result
+//RS             }
+//RS             (_, Pattern::Struct { .. }) => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0313",
+//RS                     format!(
+//RS                         "`{{ … }}` can only match a struct value, but this is {}",
+//RS                         subject_ty.show()
+//RS                     ),
+//RS                     "a struct pattern reads named fields from a struct value".to_string(),
+//RS                     "match a struct value, or use an enum/optional pattern instead".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 HashMap::new()
+//RS             }
+//RS             (
+//RS                 Type::Apply {
+//RS                     name: enum_name,
+//RS                     args,
+//RS                 },
+//RS                 Pattern::Variant {
+//RS                     variant, bindings, ..
+//RS                 },
+//RS             ) if matches!(enum_name.as_str(), "HookDecision" | "HookOutcome") => {
+//RS                 let payload_ty = match (enum_name.as_str(), variant.as_str()) {
+//RS                     ("HookDecision", "Continue" | "Cancel") | ("HookOutcome", "Cancel") => None,
+//RS                     ("HookDecision", "Transform") | ("HookOutcome", "Continue") => {
+//RS                         args.first().cloned()
+//RS                     }
+//RS                     ("HookDecision" | "HookOutcome", "Fail") => args.get(1).cloned(),
+//RS                     _ => {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0305",
+//RS                             format!("pattern `{variant}` doesn't belong to `{enum_name}`"),
+//RS                             "pattern tests must name a variant on the value's enum type"
+//RS                                 .to_string(),
+//RS                             "check the variant spelling".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                         return HashMap::new();
+//RS                     }
+//RS                 };
+//RS                 let expected_count = usize::from(payload_ty.is_some());
+//RS                 if bindings.len() != expected_count {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0306",
+//RS                         format!(
+//RS                             "pattern `{variant}` expects {expected_count} binding{}, got {}",
+//RS                             if expected_count == 1 { "" } else { "s" },
+//RS                             bindings.len()
+//RS                         ),
+//RS                         "each payload field needs its own binding name".to_string(),
+//RS                         if expected_count == 1 {
+//RS                             format!("write `{variant}(value)`")
+//RS                         } else {
+//RS                             format!("write `{variant}`")
+//RS                         },
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 match (payload_ty, bindings.first()) {
+//RS                     (Some(ty), Some(crate::AST::PatSlot::Bind { name, .. })) => {
+//RS                         HashMap::from([(name.clone(), ty)])
+//RS                     }
+//RS                     (Some(ty), Some(crate::AST::PatSlot::Nested(inner))) => {
+//RS                         self.validate_pattern(&ty, inner, inner.span())
+//RS                     }
+//RS                     _ => HashMap::new(),
+//RS                 }
+//RS             }
+//RS             (
+//RS                 Type::Named(enum_name)
+//RS                 | Type::Apply {
+//RS                     name: enum_name, ..
+//RS                 },
+//RS                 Pattern::Variant {
+//RS                     variant, bindings, ..
+//RS                 },
+//RS             ) => {
+//RS                 let display_enum_name = self.display_type_name(enum_name, None);
+//RS                 if is_json_type_name(enum_name) {
+//RS                     let Some(expected) = core_json_pattern_types(variant) else {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0305",
+//RS                             format!(
+//RS                                 "pattern `{}` doesn't belong to `{}`",
+//RS                                 variant,
+//RS                                 Syntax::TYPE_DATA
+//RS                             ),
+//RS                             "pattern tests must name a variant on the value's enum type"
+//RS                                 .to_string(),
+//RS                             "the `Data` variants are Null/Bool/Int/Float/Text/Array/Object"
+//RS                                 .to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                         return HashMap::new();
+//RS                     };
+//RS                     if bindings.len() != expected.len() {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0306",
+//RS                             format!(
+//RS                                 "pattern `{}` expects {} binding{}, got {}",
+//RS                                 variant,
+//RS                                 expected.len(),
+//RS                                 if expected.len() == 1 { "" } else { "s" },
+//RS                                 bindings.len()
+//RS                             ),
+//RS                             "each payload field needs its own binding name".to_string(),
+//RS                             format!(
+//RS                                 "write `{}({})",
+//RS                                 variant,
+//RS                                 (0..expected.len())
+//RS                                     .map(|i| format!("v{i}"))
+//RS                                     .collect::<Vec<_>>()
+//RS                                     .join(", ")
+//RS                             ),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                     // JSON pattern: only Bind slots generate bindings; wildcard/range are invalid here.
+//RS                     let mut result = HashMap::new();
+//RS                     for (slot, ty) in bindings.iter().zip(expected.iter()) {
+//RS                         match slot {
+//RS                             crate::AST::PatSlot::Bind { name, .. } => {
+//RS                                 result.insert(name.clone(), ty.clone());
+//RS                             }
+//RS                             crate::AST::PatSlot::Wildcard => {}
+//RS                             crate::AST::PatSlot::Nested(inner) => {
+//RS                                 result.extend(self.validate_pattern(ty, inner, inner.span()));
+//RS                             }
+//RS                             crate::AST::PatSlot::Range { .. } => {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0316",
+//RS                                     "range patterns are not supported in JSON variant payloads".to_string(),
+//RS                                     "JSON variants have flexible payload types; use a binding and check at runtime".to_string(),
+//RS                                     "write a name like `n` instead of a range".to_string(),
+//RS                                     Some(span),
+//RS                                 ));
+//RS                             }
+//RS                             crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
+//RS                                 unreachable!("normalize_pattern_tree places named payload entries")
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     return result;
+//RS                 }
+//RS                 // D-TERM1 (ratified 2026-06-22): `Key` is a core enum — resolve
+//RS                 // its variants without a user-defined type registry entry.
+//RS                 if enum_name == crate::Syntax::TYPE_KEY {
+//RS                     let Some(expected) = core_key_pattern_types(variant) else {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0305",
+//RS                             format!(
+//RS                                 "pattern `{}` doesn't belong to `Key`",
+//RS                                 variant
+//RS                             ),
+//RS                             "pattern tests must name a variant on the value's enum type".to_string(),
+//RS                             "valid `Key` variants: `Char(c)`, `Enter`, `Escape`, `Backspace`, `Tab`, `Delete`, `Up`, `Down`, `Left`, `Right`, `F(n)`, `Ctrl(c)`, `Unknown`".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                         return HashMap::new();
+//RS                     };
+//RS                     if bindings.len() != expected.len() {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0306",
+//RS                             format!(
+//RS                                 "pattern `{}` expects {} binding{}, got {}",
+//RS                                 variant,
+//RS                                 expected.len(),
+//RS                                 if expected.len() == 1 { "" } else { "s" },
+//RS                                 bindings.len()
+//RS                             ),
+//RS                             "each payload field needs its own binding name".to_string(),
+//RS                             format!(
+//RS                                 "write `{}({})",
+//RS                                 variant,
+//RS                                 (0..expected.len())
+//RS                                     .map(|i| format!("v{i}"))
+//RS                                     .collect::<Vec<_>>()
+//RS                                     .join(", ")
+//RS                             ),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                     let mut result = HashMap::new();
+//RS                     for (slot, ty) in bindings.iter().zip(expected.iter()) {
+//RS                         match slot {
+//RS                             crate::AST::PatSlot::Bind { name, .. } => {
+//RS                                 result.insert(name.clone(), ty.clone());
+//RS                             }
+//RS                             crate::AST::PatSlot::Wildcard => {}
+//RS                             crate::AST::PatSlot::Nested(inner) => {
+//RS                                 result.extend(self.validate_pattern(ty, inner, inner.span()));
+//RS                             }
+//RS                             crate::AST::PatSlot::Range { .. } => {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0316",
+//RS                                     "range patterns are not supported in `Key` variant payloads".to_string(),
+//RS                                     "`Key` payload types are `Char` and `Int`; use a binding and check at runtime".to_string(),
+//RS                                     "write a name like `c` instead of a range".to_string(),
+//RS                                     Some(span),
+//RS                                 ));
+//RS                             }
+//RS                             crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
+//RS                                 unreachable!("normalize_pattern_tree places named payload entries")
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     return result;
+//RS                 }
+//RS                 let Some(variants) = self.resolve_enum_variants_cloned(enum_name) else {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0305",
+//RS                         format!("pattern `{}` doesn't match this value's type", variant),
+//RS                         format!("`{}` is a struct, not an enum", display_enum_name),
+//RS                         "use a struct field access instead of a variant pattern".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return HashMap::new();
+//RS                 };
+//RS                 let Some((_, payload)) = variants.get(variant) else {
+//RS                     // D-TAG1: a group name matches its whole subtree — a unit-shaped
+//RS                     // pattern with no bindings (groups carry no payload, E0331).
+//RS                     if self
+//RS                         .resolve_enum_groups_cloned(enum_name)
+//RS                         .is_some_and(|g| g.contains_key(variant))
+//RS                     {
+//RS                         if !bindings.is_empty() {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0306",
+//RS                                 format!(
+//RS                                     "pattern `{}` expects 0 bindings, got {}",
+//RS                                     variant,
+//RS                                     bindings.len()
+//RS                                 ),
+//RS                                 "a group has no payload of its own — payloads live on leaf variants (D-TAG1)".to_string(),
+//RS                                 format!("write `.{}` with no `(...)`, or match a specific leaf to bind its payload", variant),
+//RS                                 Some(span),
+//RS                             ));
+//RS                         }
+//RS                         return HashMap::new();
+//RS                     }
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0305",
+//RS                         format!(
+//RS                             "pattern `{}` doesn't belong to `{}`",
+//RS                             variant, display_enum_name
+//RS                         ),
+//RS                         "pattern tests must name a variant on the value's enum type".to_string(),
+//RS                         "check the variant spelling".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return HashMap::new();
+//RS                 };
+//RS                 let expected = pattern_binding_types(payload);
+//RS                 if bindings.len() != expected.len() {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0306",
+//RS                         format!(
+//RS                             "pattern `{}` expects {} binding{}, got {}",
+//RS                             variant,
+//RS                             expected.len(),
+//RS                             if expected.len() == 1 { "" } else { "s" },
+//RS                             bindings.len()
+//RS                         ),
+//RS                         "each payload field needs its own binding name".to_string(),
+//RS                         format!(
+//RS                             "write `{}({})",
+//RS                             variant,
+//RS                             (0..expected.len())
+//RS                                 .map(|i| format!("v{i}"))
+//RS                                 .collect::<Vec<_>>()
+//RS                                 .join(", ")
+//RS                         ),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 // Build bindings: Bind(name) → insert; Wildcard → skip; Range → validate type + skip.
+//RS                 let mut result = HashMap::new();
+//RS                 for (slot, ty) in bindings.iter().zip(expected.iter()) {
+//RS                     match slot {
+//RS                         crate::AST::PatSlot::Bind { name, .. } => {
+//RS                             result.insert(name.clone(), ty.clone());
+//RS                         }
+//RS                         crate::AST::PatSlot::Wildcard => {}
+//RS                         crate::AST::PatSlot::Nested(inner) => {
+//RS                             result.extend(self.validate_pattern(ty, inner, inner.span()));
+//RS                         }
+//RS                         crate::AST::PatSlot::Range { lo, hi } => {
+//RS                             // D-PATR: field must be Int, an inline range, or Char;
+//RS                             // lo must be <= hi.
+//RS                             if !matches!(ty, Type::Int | Type::InlineRange { .. } | Type::Char) {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0316",
+//RS                                     format!(
+//RS                                         "range pattern `{}..{}` used on a non-integer field (type `{}`)",
+//RS                                         lo, hi, ty.show()
+//RS                                     ),
+//RS                                     "range patterns only work on `Int` or `Char` payload fields".to_string(),
+//RS                                     "use a binding name and add a condition in the arm body instead".to_string(),
+//RS                                     Some(span),
+//RS                                 ));
+//RS                             } else if lo > hi {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0316",
+//RS                                     format!("range pattern `{}..{}` is empty — lower bound exceeds upper bound", lo, hi),
+//RS                                     "the lower end of a range must be ≤ the upper end".to_string(),
+//RS                                     format!("swap to `{}..{}`", hi, lo),
+//RS                                     Some(span),
+//RS                                 ));
+//RS                             }
+//RS                         }
+//RS                         crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
+//RS                             unreachable!("normalize_pattern_tree places named payload entries")
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 result
+//RS             }
+//RS             (_, Pattern::Variant { variant, .. }) => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0305",
+//RS                     format!("pattern `{}` doesn't match {}", variant, subject_ty.show()),
+//RS                     "variant patterns only work on enum values".to_string(),
+//RS                     format!(
+//RS                         "test an enum value, or use `{}` / `{}` for optionals",
+//RS                         Syntax::LIT_VALUE,
+//RS                         Syntax::LIT_NULL
+//RS                     ),
+//RS                     Some(span),
+//RS                 ));
+//RS                 HashMap::new()
+//RS             }
+//RS             (Type::Named(_), Pattern::Present { .. } | Pattern::Absent(_)) => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0305",
+//RS                     "this pattern doesn't match the value's type".to_string(),
+//RS                     format!(
+//RS                         "`{}` / `{}` patterns work on `T?` values only",
+//RS                         Syntax::LIT_VALUE,
+//RS                         Syntax::LIT_NULL
+//RS                     ),
+//RS                     "use a variant pattern for enum values".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 HashMap::new()
+//RS             }
+//RS             (_, Pattern::Ok { .. } | Pattern::Err { .. }) => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0305",
+//RS                     format!(
+//RS                         "this pattern belongs to a fallible result, not {}",
+//RS                         subject_ty.name()
+//RS                     ),
+//RS                     format!(
+//RS                         "use `== {}(...)` or `== {}(...)` on `T !E`",
+//RS                         Syntax::LIT_OK,
+//RS                         Syntax::LIT_ERR
+//RS                     ),
+//RS                     "check the type of the value being tested".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 HashMap::new()
+//RS             }
+//RS             // D-PATR (ratified 2026-06-19): arm-head range pattern.
+//RS             (_, Pattern::Range { lo, hi, .. }) => {
+//RS                 if !matches!(
+//RS                     subject_ty,
+//RS                     Type::Int | Type::InlineRange { .. } | Type::Char
+//RS                 ) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0316",
+//RS                         format!(
+//RS                             "range pattern `{}..{}` used on `{}` — only `Int` or `Char` values support range patterns",
+//RS                             lo, hi, subject_ty.show()
+//RS                         ),
+//RS                         "range arms match a subject that is an integer or character".to_string(),
+//RS                         "use a regular condition (`subject >= lo && subject <= hi`) for other types".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                 } else if lo > hi {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0316",
+//RS                         format!(
+//RS                             "range pattern `{}..{}` is empty — lower bound exceeds upper bound",
+//RS                             lo, hi
+//RS                         ),
+//RS                         "the lower end of a range must be ≤ the upper end".to_string(),
+//RS                         format!("swap to `{}..{}`", hi, lo),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 HashMap::new() // range patterns bind nothing at arm-head level
+//RS             }
+//RS             // D-PARSESTR1: the same interpolation literal that formats a
+//RS             // string can sit in pattern position — matches the fixed text
+//RS             // and binds each hole. Always refutable; E0148 (missing `else`)
+//RS             // is enforced in `check_switch`, not here.
+//RS             (_, Pattern::StrMatch { parts, .. }) => {
+//RS                 if !matches!(subject_ty, Type::String) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0305",
+//RS                         format!(
+//RS                             "this pattern matches text, but the subject is {}",
+//RS                             subject_ty.show()
+//RS                         ),
+//RS                         "a string-interpolation pattern only matches a `String` value".to_string(),
+//RS                         "match a `String` subject, or use a pattern for this type instead"
+//RS                             .to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return HashMap::new();
+//RS                 }
+//RS                 let mut result = HashMap::new();
+//RS                 for part in parts {
+//RS                     let StrMatchPart::Hole {
+//RS                         name,
+//RS                         ty,
+//RS                         span: hole_span,
+//RS                     } = part
+//RS                     else {
+//RS                         continue;
+//RS                     };
+//RS                     let bound_ty = self.str_match_hole_type(name, ty, *hole_span);
+//RS                     result.insert(name.clone(), bound_ty);
+//RS                 }
+//RS                 result
+//RS             }
+//RS             // D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` binary pattern matches a
+//RS             // `[U8]` subject. Each fixed-width hole binds an unsigned integer; a
+//RS             // `{rest:...}` hole binds `[U8]`. Always refutable; E0148 (missing
+//RS             // `else`) is enforced in `check_switch`.
+//RS             (_, Pattern::BinMatch { parts, .. }) => {
+//RS                 let is_bytes = matches!(subject_ty, Type::List(elem)
+//RS                     if matches!(elem.as_ref(), Type::IntN { signed: false, bits: 8 }));
+//RS                 if !is_bytes {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E1010",
+//RS                         format!(
+//RS                             "this pattern matches raw bytes, but the subject is {}",
+//RS                             subject_ty.show()
+//RS                         ),
+//RS                         "an `[U8].{\"…\"}` binary pattern only matches a `[U8]` byte buffer"
+//RS                             .to_string(),
+//RS                         "match a `[U8]` subject, or use a pattern for this type instead"
+//RS                             .to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return HashMap::new();
+//RS                 }
+//RS                 // Static bit-offset fold: literals and the rest capture must be
+//RS                 // byte-aligned, and a little-endian read must be byte-multiple.
+//RS                 self.bin_match_hole_types(parts, span)
+//RS                     .into_iter()
+//RS                     .collect::<HashMap<_, _>>()
+//RS             }
+//RS             // D-PATO (ratified 2026-06-19): structural or-pattern `A(x) | B(x)`.
+//RS             (_, Pattern::Or(alts, _)) => {
+//RS                 if alts.is_empty() {
+//RS                     return HashMap::new();
+//RS                 }
+//RS                 // Check each alternative and collect its bindings.
+//RS                 let first_bindings = self.validate_pattern(subject_ty, &alts[0], span);
+//RS                 for alt in &alts[1..] {
+//RS                     let alt_bindings = self.validate_pattern(subject_ty, alt, span);
+//RS                     // E0317: alternatives must bind the same names at the same types.
+//RS                     let names_match = first_bindings.len() == alt_bindings.len()
+//RS                         && first_bindings
+//RS                             .iter()
+//RS                             .all(|(k, v)| alt_bindings.get(k) == Some(v));
+//RS                     if !names_match {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0317",
+//RS                             "or-pattern alternatives bind different names or types".to_string(),
+//RS                             "every arm of `A(x) | B(y)` must bind the same names at the same types"
+//RS                                 .to_string(),
+//RS                             "rename bindings so both alternatives bind identical names".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 first_bindings
+//RS             }
+//RS             _ => HashMap::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn check_panic_call(&mut self, call: &mut Call) {
+//RS         // D-PANICROOT1=A: the sentinel remains the reachability source for
+//RS         // the legacy `reaches_panic` fact and the deniable Panic row.
+//RS         // Panic is not an ordinary direct effect and cannot be granted.
+//RS         self.fx_edges.insert("__jet_panic__".to_string());
+//RS         self.record_effect(Effect::Panic.name(), call.name_span);
+//RS         // Keep local panic provenance in the dedicated autodiff flags below;
+//RS         // the reachability sentinel is the only effect-graph edge.
+//RS         let safe_panic_context = self.autodiff_safe_panic_context;
+//RS         if safe_panic_context {
+//RS             self.fx_autodiff_safe_panic = true;
+//RS         } else {
+//RS             self.fx_autodiff_unsafe_panic = true;
+//RS         }
+//RS         // A panic message is an ordinary expression. Do not let a nested
+//RS         // direct panic inherit the outer compute-failure provenance.
+//RS         self.autodiff_safe_panic_context = false;
+//RS         if call.args.len() != 1 {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0103",
+//RS                 format!("`{}` needs exactly one message", Syntax::BUILTIN_PANIC),
+//RS                 "a panic report needs something to show the user".to_string(),
+//RS                 format!("e.g. {}(\"something went wrong\")", Syntax::BUILTIN_PANIC),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS         }
+//RS         for arg in call.args.iter_mut() {
+//RS             self.borrow_ctx = true; // panic shows the message via `.jet_show()`
+//RS             let t = self.infer(&mut arg.expr);
+//RS             if let Some(t) = t {
+//RS                 if t != Type::String {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0112",
+//RS                         format!(
+//RS                             "`{}` needs text, but this is {}",
+//RS                             Syntax::BUILTIN_PANIC,
+//RS                             t.show()
+//RS                         ),
+//RS                         "the panic message is shown to the user as text".to_string(),
+//RS                         "put the message in quotes".to_string(),
+//RS                         Some(arg.expr.span()),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         self.autodiff_safe_panic_context = safe_panic_context;
+//RS     }
+//RS 
+//RS     pub(crate) fn check_assert_call(&mut self, call: &mut Call) {
+//RS         if call.args.is_empty() || call.args.len() > 2 {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0103",
+//RS                 format!(
+//RS                     "`{}` needs one condition, or a condition and a message",
+//RS                     Syntax::BUILTIN_ASSERT
+//RS                 ),
+//RS                 "assert checks a yes/no condition and stops when it's false".to_string(),
+//RS                 format!(
+//RS                     "e.g. {}(x > 0) or {}(x > 0, \"x must be positive\")",
+//RS                     Syntax::BUILTIN_ASSERT,
+//RS                     Syntax::BUILTIN_ASSERT
+//RS                 ),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS         }
+//RS         if let Some(arg) = call.args.first_mut() {
+//RS             let t = self.infer(&mut arg.expr);
+//RS             if let Some(t) = t {
+//RS                 if t != Type::Bool {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0110",
+//RS                         format!(
+//RS                             "`{}` needs {}, but this is {}",
+//RS                             Syntax::BUILTIN_ASSERT,
+//RS                             Type::Bool.show(),
+//RS                             t.show()
+//RS                         ),
+//RS                         "the condition must be true or false".to_string(),
+//RS                         "compare values first, e.g. `x > 0`".to_string(),
+//RS                         Some(arg.expr.span()),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Some(arg) = call.args.get_mut(1) {
+//RS             let t = self.infer(&mut arg.expr);
+//RS             if let Some(t) = t {
+//RS                 if t != Type::String {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0112",
+//RS                         format!(
+//RS                             "`{}` message must be text, but this is {}",
+//RS                             Syntax::BUILTIN_ASSERT,
+//RS                             t.show()
+//RS                         ),
+//RS                         "the optional message is shown when the condition is false".to_string(),
+//RS                         "put the message in quotes".to_string(),
+//RS                         Some(arg.expr.span()),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn check_assert_eq_call(&mut self, call: &mut Call) {
+//RS         if call.args.len() != 2 {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0104",
+//RS                 format!(
+//RS                     "`{}` needs exactly two values to compare",
+//RS                     Syntax::BUILTIN_ASSERT_EQ
+//RS                 ),
+//RS                 "assert_eq checks that two values are equal".to_string(),
+//RS                 format!("e.g. {}(got, expected)", Syntax::BUILTIN_ASSERT_EQ),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             return;
+//RS         }
+//RS         // assert_eq compares and shows by reference in the generated Rust.
+//RS         self.borrow_ctx = true;
+//RS         let lt = self.infer(&mut call.args[0].expr);
+//RS         self.borrow_ctx = true;
+//RS         // The right side takes the left's type where it needs one, as `==`
+//RS         // does (`assert_eq(code(), None)`, `.Variant`, `.{…}`).
+//RS         let rt = match lt.clone() {
+//RS             Some(expected)
+//RS                 if crate::Sema::CheckerInfer::expr_wants_expected_type(
+//RS                     &call.args[1].expr,
+//RS                 ) =>
+//RS             {
+//RS                 self.infer_with_expected(&mut call.args[1].expr, &expected)
+//RS             }
+//RS             _ => self.infer(&mut call.args[1].expr),
+//RS         };
+//RS         match (lt, rt) {
+//RS             (Some(lt), Some(rt)) => {
+//RS                 if lt != rt {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0108",
+//RS                         format!(
+//RS                             "`{}` compared {} and {}, which don't match",
+//RS                             Syntax::BUILTIN_ASSERT_EQ,
+//RS                             lt.show(),
+//RS                             rt.show()
+//RS                         ),
+//RS                         "both sides must be the same type to compare them".to_string(),
+//RS                         "convert one side, or compare fields that have the same type".to_string(),
+//RS                         Some(call.name_span),
+//RS                     ));
+//RS                 } else if !self.is_equatable_type(&lt) {
+//RS                     if let Some(field) = incomparable_field(&lt, self.registry) {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0312",
+//RS                             format!(
+//RS                                 "`{}` can't compare values of type `{}` (field `{}` isn't comparable)",
+//RS                                 Syntax::BUILTIN_ASSERT_EQ,
+//RS                                 lt.name(),
+//RS                                 field
+//RS                             ),
+//RS                             "equality needs types whose fields can all be compared".to_string(),
+//RS                             "compare the fields you care about instead".to_string(),
+//RS                             Some(call.name_span),
+//RS                         ));
+//RS                     } else {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0312",
+//RS                             format!(
+//RS                                 "`{}` can't compare values of type `{}`",
+//RS                                 Syntax::BUILTIN_ASSERT_EQ,
+//RS                                 lt.show()
+//RS                             ),
+//RS                             "this type doesn't support `==`".to_string(),
+//RS                             "compare fields individually, or use a different check".to_string(),
+//RS                             Some(call.name_span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0416 crates/jet-sema/src/Sema/CheckerItems.rs:3597-5179
+

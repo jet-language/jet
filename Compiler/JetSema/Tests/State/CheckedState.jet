@@ -1,0 +1,187 @@
+// Focused real source algorithms from State.rs, without a mock checker.
+use jet_foundation.[Diagnostic, Expr, FactKind, Func, ImplDef, Item, NamedSpan, Span, StateDecl, StateTransition, StateGraph, Stmt, TextEdit, fact_registry_new, fact_registry_state_members, fact_registry_state_graph, ast_func, ast_binding, ast_struct, diagnostic_with_edit]
+use jet_sema.[SemaStateCallable, SemaStateTransitionRow, SemaFlowDivergence, SemaFlowFacts, sema_flow_new, sema_flow_set, sema_flow_set_at, sema_flow_get, sema_flow_enter, sema_flow_leave, sema_flow_merge, sema_flow_after_loop, sema_state_table_new, sema_state_check_func, sema_state_unknown, sema_state_for_owner, sema_state_add_items, sema_state_validate_declarations]
+
+#Test("task_spawn_seeds_a_running_typestate_row") {
+    span :: Span{start: 0, end: 0}
+    nul :: String.from_bytes([U8]{U8{0}}) ?? panic("NUL must decode")
+    spawn :: Expr.MethodCall{receiver: Expr.Ident{name: "{nul}jet.task", span: span}, method: "{nul}jet.task.spawn", method_span: span, owner_type_args: [], type_args: [], args: [], recv_type: Val("{nul}jet.task.surface"), resolved_ret: None, operator_rhs: None, checked_widen: false}
+    registry := fact_registry_new()
+    table := sema_state_table_new(&registry)
+    transition :: table.transitions.get("Task::join") ?? panic("task join row missing")
+    assert((transition.from ?? panic("task from missing")) == "Running")
+    assert(transition.to == "Joined")
+    assert((fact_registry_state_members(registry, "Task") ?? panic("task members missing")) == [String]{"Running", "Joined", "Detached"})
+    // Running versus Joined at a zero-iteration loop proves the binding's
+    // initial state came from the real spawn entry producer.
+    function := ast_func("run", span, span)
+    join :: Expr.MethodCall{receiver: Expr.Ident{name: "handle", span: span}, method: "join", method_span: span, owner_type_args: [], type_args: [], args: [], recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+    function.body = [Stmt]{Stmt.Val{binding: ast_binding("handle", span, false, spawn, None)}, Stmt.Loop{body: [Stmt]{Stmt.Expr{expr: join}}, span: span, arrow_body: false, label: None}}
+    diagnostics :: sema_state_check_func(function, None, ^table, [Int:SemaStateCallable]{}, [Diagnostic]{})
+    assert(diagnostics.len() == 1)
+    assert(diagnostics[0].code == "L0152")
+    assert(diagnostics[0].what.contains("Running"))
+    assert(diagnostics[0].what.contains("Joined"))
+}
+#Test("state_join_keeps_only_agreeing_reaching_paths") {
+    before := sema_flow_new<String>()
+    sema_flow_set<String>(&before, "order", "Draft")
+    confirmed := ~before
+    cancelled := ~before
+    sema_flow_set<String>(&confirmed, "order", "Confirmed")
+    sema_flow_set<String>(&cancelled, "order", "Cancelled")
+    splits := [SemaFlowDivergence<String>]{}
+    joined :: sema_flow_merge<String>(before, [SemaFlowFacts<String>]{confirmed, cancelled}, &splits)
+    assert(sema_flow_get<String>(joined, "order") == None)
+    assert(splits.len() == 1)
+    assert(splits[0].left == "Confirmed")
+    assert(splits[0].right == "Cancelled")
+    same_splits := [SemaFlowDivergence<String>]{}
+    same :: sema_flow_merge<String>(before, [SemaFlowFacts<String>]{confirmed, confirmed}, &same_splits)
+    assert((sema_flow_get<String>(same, "order") ?? panic("agreeing row missing")) == "Confirmed")
+    assert(same_splits.len() == 0)
+}
+#Test("state_loop_includes_zero_iterations") {
+    before := sema_flow_new<String>()
+    sema_flow_set<String>(&before, "order", "Draft")
+    after := ~before
+    sema_flow_set<String>(&after, "order", "Confirmed")
+    splits := [SemaFlowDivergence<String>]{}
+    joined :: sema_flow_after_loop<String>(before, after, &splits)
+    assert(sema_flow_get<String>(joined, "order") == None)
+    assert(splits.len() == 1)
+}
+#Test("state_lexical_shadow_restores_outer_known_or_unknown_row") {
+    flow := sema_flow_new<String>()
+    sema_flow_set<String>(&flow, "door", "Closed")
+    sema_flow_enter<String>(&flow)
+    inner_depth :: flow.depth
+    sema_flow_set_at<String>(&flow, "door", inner_depth, Val("Open"))
+    assert((sema_flow_get<String>(flow, "door") ?? panic("inner row missing")) == "Open")
+    sema_flow_leave<String>(&flow)
+    assert((sema_flow_get<String>(flow, "door") ?? panic("outer row missing")) == "Closed")
+    sema_flow_enter<String>(&flow)
+    unknown_depth :: flow.depth
+    sema_flow_set_at<String>(&flow, "door", unknown_depth, None)
+    assert(sema_flow_get<String>(flow, "door") == None)
+    sema_flow_leave<String>(&flow)
+    assert((sema_flow_get<String>(flow, "door") ?? panic("restored row missing")) == "Closed")
+}
+#Test("unknown_state_suggests_only_unique_minimum_with_exact_span") {
+    span :: Span{start: 40, end: 47}
+    diagnostic :: sema_state_unknown("Door.State.Clsoed", "Door", [String]{"Closed", "Open"}, span)
+    assert(diagnostic.code == "E0151")
+    assert(diagnostic.what == "`Door.State.Clsoed` is not a declared state of `Door`")
+    actual_span :: diagnostic.span ?? panic("diagnostic span missing")
+    assert(actual_span == span)
+    edit :: diagnostic.edit ?? panic("unique suggestion missing")
+    assert(edit.span == span)
+    assert(edit.new_text == "Closed")
+    ambiguous :: sema_state_unknown("C", "Door", [String]{"A", "B"}, span)
+    assert(ambiguous.edit == None)
+}
+#Test("state_owner_leaf_accepts_qualified_nested_nominal_only") {
+    assert(sema_state_for_owner(Val("Payment.Client"), "Payment.Client.State.Pending") == "Pending")
+    assert(sema_state_for_owner(Val("Door"), "Other.State.Open") == "Other.State.Open")
+    assert(sema_state_for_owner(Val("Door"), "Door.NotState.Open") == "Door.NotState.Open")
+    assert(sema_state_for_owner(Val("Door"), "Door.State.Open.Child") == "Door.State.Open.Child")
+}
+
+#Test("unicode_state_suggestion_counts_characters_not_utf8_bytes") {
+    span :: Span{start: 0, end: 6}
+    diagnostic :: sema_state_unknown("éx", "Door", [String]{"ab"}, span)
+    edit :: diagnostic.edit ?? panic("two-character suggestion missing")
+    assert(edit.new_text == "ab")
+}
+
+#Test("cross_module_state_owner_and_impl_validate_one_checked_registry") {
+    span :: Span{start: 8, end: 20}
+    definition := ast_struct("Payment.Client", span, span)
+    definition.state = Val(StateDecl{is_pub: false, is_package_pub: false, type_name: "Payment.Client", type_name_span: span, states: [NamedSpan]{NamedSpan{name: "Closed", span: span}, NamedSpan{name: "Open", span: span}, NamedSpan{name: "Orphan", span: span}}, span: span})
+    entry := ast_func("new", span, span)
+    entry.state_transition = Val(StateTransition{from: None, to: "Payment.Client.State.Closed", span: span})
+    open := ast_func("open", span, span)
+    open.state_transition = Val(StateTransition{from: Val("Payment.Client.State.Closed"), to: "Payment.Client.State.Open", span: span})
+    invalid := ast_func("broken", span, span)
+    invalid.state_transition = Val(StateTransition{from: Val("Payment.Client.State.Open"), to: "Other.State.Open", span: span})
+    implementation :: ImplDef{span: span, type_name: "Payment.Client", type_span: span, trait_name: None, trait_span: None, operator_rhs: None, operator_marker: None, methods: [Func]{entry, open, invalid}, delegation_field: None, assoc_type_impls: [], is_generated_serde: false, os_target: None}
+    owner_items :: [Item]{Item.Struct{value: definition}}
+    impl_items :: [Item]{Item.Impl{value: implementation}}
+    registry := fact_registry_new()
+    table := sema_state_table_new(&registry)
+    sema_state_add_items(&table, owner_items, &registry)
+    sema_state_add_items(&table, impl_items, &registry)
+    items := [Item]{}
+    &items.extend(owner_items)
+    &items.extend(impl_items)
+    diagnostics := [Diagnostic]{}
+    sema_state_validate_declarations(table, items, &registry, &diagnostics)
+    assert(diagnostics.len() == 2)
+    assert(diagnostics[0].code == "E0151")
+    assert(diagnostics[1].code == "L0153")
+    graph :: fact_registry_state_graph(registry, "Payment.Client.State") ?? panic("checked graph missing")
+    assert(graph.states.len() == 3)
+    assert(graph.states[0].name == "Closed")
+    assert(!graph.states[0].terminal)
+    assert(graph.states[1].terminal)
+    assert(graph.states[2].terminal)
+    assert((graph.states[0].reachable ?? panic("entry reachability missing")) == true)
+    assert((graph.states[2].reachable ?? panic("orphan reachability missing")) == false)
+    assert(graph.transitions.len() == 2)
+}
+
+#Test("known_wrong_state_guard_reports_exact_operation_and_span") {
+    span :: Span{start: 40, end: 44}
+    registry := fact_registry_new()
+    table := sema_state_table_new(&registry)
+    table.entry_ctors["Door::new"] = "Closed"
+    table.requires["Door::read"] = "Open"
+    function := ast_func("run", span, span)
+    entry :: Expr.MethodCall{receiver: Expr.Ident{name: "Door", span: span}, method: "new", method_span: span, owner_type_args: [], type_args: [], args: [], recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+    guard :: Expr.MethodCall{receiver: Expr.Ident{name: "door", span: span}, method: "read", method_span: span, owner_type_args: [], type_args: [], args: [], recv_type: Val("Door"), resolved_ret: None, operator_rhs: None, checked_widen: false}
+    function.body = [Stmt]{Stmt.Val{binding: ast_binding("door", span, true, entry, None)}, Stmt.Expr{expr: guard}}
+    diagnostics :: sema_state_check_func(function, None, ^table, [Int:SemaStateCallable]{}, [Diagnostic]{})
+    assert(diagnostics.len() == 1)
+    diagnostic :: diagnostics[0]
+    assert(diagnostic.code == "E0150")
+    assert(diagnostic.what == "`read` needs `Door` in state `Open`, but `door` is in state `Closed`")
+    assert(diagnostic.fix == "transition `door` into state `Open` before calling `read`")
+    assert((diagnostic.span ?? panic("guard span missing")) == span)
+}
+
+#Test("checked_state_body_restores_outer_fact_after_lexical_shadow") {
+    span :: Span{start: 1, end: 5}
+    registry := fact_registry_new()
+    table := sema_state_table_new(&registry)
+    table.entry_ctors["Door::closed"] = "Closed"
+    table.entry_ctors["Door::opened"] = "Open"
+    table.requires["Door::inspect"] = "Closed"
+    closed :: Expr.MethodCall{receiver: Expr.Ident{name: "Door", span: span}, method: "closed", method_span: span, owner_type_args: [], type_args: [], args: [], recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+    opened :: Expr.MethodCall{receiver: Expr.Ident{name: "Door", span: span}, method: "opened", method_span: span, owner_type_args: [], type_args: [], args: [], recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+    inspect :: Expr.MethodCall{receiver: Expr.Ident{name: "door", span: span}, method: "inspect", method_span: span, owner_type_args: [], type_args: [], args: [], recv_type: Val("Door"), resolved_ret: None, operator_rhs: None, checked_widen: false}
+    function := ast_func("run", span, span)
+    function.body = [Stmt]{
+        Stmt.Val{binding: ast_binding("door", span, false, closed, None)},
+        Stmt.Unsafe{audit: None, audit_expr: None, body: [Stmt]{Stmt.Val{binding: ast_binding("door", span, false, opened, None)}}, span: span},
+        Stmt.Expr{expr: inspect},
+    }
+    diagnostics :: sema_state_check_func(function, None, ^table, [Int:SemaStateCallable]{}, [Diagnostic]{})
+    assert(diagnostics.len() == 0)
+}
+
+#Test("checked_callee_identity_supplies_missing_receiver_annotation") {
+    span :: Span{start: 40, end: 44}
+    registry := fact_registry_new()
+    table := sema_state_table_new(&registry)
+    table.entry_ctors["Door::new"] = "Closed"
+    table.requires["Door::read"] = "Open"
+    entry :: Expr.MethodCall{receiver: Expr.Ident{name: "Door", span: span}, method: "new", method_span: span, owner_type_args: [], type_args: [], args: [], recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+    guard :: Expr.MethodCall{receiver: Expr.Ident{name: "door", span: span}, method: "read", method_span: span, owner_type_args: [], type_args: [], args: [], recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+    function := ast_func("run", span, span)
+    function.body = [Stmt]{Stmt.Val{binding: ast_binding("door", span, true, entry, None)}, Stmt.Expr{expr: guard}}
+    calls :: [Int:SemaStateCallable]{40: SemaStateCallable{owner: Val("Door"), name: "read"}}
+    diagnostics :: sema_state_check_func(function, None, ^table, ~calls, [Diagnostic]{})
+    assert(diagnostics.len() == 1)
+    assert(diagnostics[0].code == "E0150")
+    assert((diagnostics[0].span ?? panic("checked callee span missing")) == span)
+}

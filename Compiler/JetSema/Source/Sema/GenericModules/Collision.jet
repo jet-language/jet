@@ -1,0 +1,21 @@
+// Rust Identity::register_instance_fingerprint: collisions stop before codegen.
+use jet_foundation.[ModuleInstanceIdentity, Span]
+fn sema_genmod_hex(bytes: [U8]) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        &out.push(digits[code /% 16])
+        &out.push(digits[code % 16])
+    }
+    String.from_bytes(out) ?? panic("hex is UTF-8")
+}
+pub fn sema_genmod_register_fingerprint(registry: &[String:[U8]], identity: ModuleInstanceIdentity, span: Span) Never! {
+    if registry.get(identity.fingerprint) == .Val(previous) {
+        if previous != identity.full_key {
+            panic("internal compiler error: E0859 generic module instance fingerprint collision: digest={identity.fingerprint} first-full-key={sema_genmod_hex(previous)} second-full-key={sema_genmod_hex(identity.full_key)}; compilation stopped before codegen")
+        }
+    } else {
+        registry[identity.fingerprint] = identity.full_key
+    }
+}

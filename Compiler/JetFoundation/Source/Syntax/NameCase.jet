@@ -1,0 +1,222 @@
+// Rust Syntax.rs:747–882 and Syntax/acronyms.rs:88–158.
+// #4475 D-UNICODE-CASE1=A proposed property semantics: remains gated until
+// ratification. Full pinned Uppercase/Lowercase (including Other_*), not case
+// mapping changes. #4318/#4392: canonical UTF-8 byte-read and static-asset
+// borrowing must land; no allocation-parity claim for bootstrap Vec emission.
+use core.text.runtime.unicode_assets as name_case_asset
+use core.text.runtime.kernel_unicode_string as name_case_utf8
+use core.text.runtime.assets.unicode_uppercase as name_case_uppercase
+use core.text.runtime.assets.unicode_lowercase as name_case_lowercase
+use core.text.runtime.assets.unicode_alphabetic as name_case_alphabetic
+use core.text.runtime.assets.unicode_numeric as name_case_numeric
+
+pub enum NameCase { Pascal Snake Screaming }
+pub struct NameCaseCategory {
+    pub category: String
+    pub case: NameCase
+}
+pub NAME_CASE_CATEGORIES :: prep { [NameCaseCategory]{
+    NameCaseCategory{category: "associated type", case: .Pascal},
+    NameCaseCategory{category: "distinct type", case: .Pascal},
+    NameCaseCategory{category: "enum", case: .Pascal},
+    NameCaseCategory{category: "enum variant", case: .Pascal},
+    NameCaseCategory{category: "variant group", case: .Pascal},
+    NameCaseCategory{category: "marker", case: .Pascal},
+    NameCaseCategory{category: "protocol", case: .Pascal},
+    NameCaseCategory{category: "protocol message", case: .Pascal},
+    NameCaseCategory{category: "state", case: .Pascal},
+    NameCaseCategory{category: "state type", case: .Pascal},
+    NameCaseCategory{category: "struct", case: .Pascal},
+    NameCaseCategory{category: "tag", case: .Pascal},
+    NameCaseCategory{category: "trait", case: .Pascal},
+    NameCaseCategory{category: "type", case: .Pascal},
+    NameCaseCategory{category: "type alias", case: .Pascal},
+    NameCaseCategory{category: "type parameter", case: .Pascal},
+    NameCaseCategory{category: "unit family", case: .Pascal},
+    NameCaseCategory{category: "config name", case: .Snake},
+    NameCaseCategory{category: "constant", case: .Screaming},
+    NameCaseCategory{category: "field", case: .Snake},
+    NameCaseCategory{category: "function", case: .Snake},
+    NameCaseCategory{category: "generic module", case: .Snake},
+    NameCaseCategory{category: "lambda parameter", case: .Snake},
+    NameCaseCategory{category: "local", case: .Snake},
+    NameCaseCategory{category: "local constant", case: .Snake},
+    NameCaseCategory{category: "loop label", case: .Snake},
+    NameCaseCategory{category: "message field", case: .Snake},
+    NameCaseCategory{category: "method", case: .Snake},
+    NameCaseCategory{category: "module", case: .Snake},
+    NameCaseCategory{category: "module variable", case: .Snake},
+    NameCaseCategory{category: "module alias", case: .Snake},
+    NameCaseCategory{category: "parameter", case: .Snake},
+    NameCaseCategory{category: "pattern binding", case: .Snake},
+    NameCaseCategory{category: "unit member", case: .Snake},
+    NameCaseCategory{category: "value parameter", case: .Snake},
+    NameCaseCategory{category: "variant field", case: .Snake},
+} }
+pub fn name_case_for_category(category: String) -> NameCase? Never! {
+    loop row in NAME_CASE_CATEGORIES {
+        if row.category == category -> return Val(row.case)
+    }
+    None
+}
+
+// These classify a scalar using the one Core asset decoder; no new Unicode
+// table, ASCII branch, single-character String or mapping-based approximation.
+fn name_case_scalar_upper(cp: Int) -> Bool Never! {
+    name_case_asset.asset_contains(name_case_uppercase.UNICODE_UPPERCASE, cp)
+}
+fn name_case_scalar_lower(cp: Int) -> Bool Never! {
+    name_case_asset.asset_contains(name_case_lowercase.UNICODE_LOWERCASE, cp)
+}
+fn name_case_scalar_alpha(cp: Int) -> Bool Never! {
+    name_case_asset.asset_contains(name_case_alphabetic.UNICODE_ALPHABETIC, cp)
+}
+fn name_case_scalar_alnum(cp: Int) -> Bool Never! {
+    name_case_scalar_alpha(cp) || name_case_asset.asset_contains(name_case_numeric.UNICODE_NUMERIC, cp)
+}
+pub fn name_has_uppercase(name: String) -> Bool Never! {
+    raw :: name_case_utf8.utf8_bytes(name)
+    at := 0
+    loop at < raw.len() {
+        if name_case_scalar_upper(name_case_utf8.scalar_at(raw, at)) -> return true
+        at += name_case_utf8.utf8_width_at(raw, at)
+    }
+    false
+}
+
+pub fn name_has_case(name: String, case: NameCase) -> Bool Never! {
+    if name == "_" -> return true
+    raw :: name_case_utf8.utf8_bytes(name)
+    start := 0
+    if raw.len() > start && raw[start] == (U8{36}) -> start += 1
+    if raw.len() > start && raw[start] == (U8{95}) -> start += 1
+    if start == raw.len() || raw[start] == (U8{95}) || raw[raw.len() - 1] == (U8{95}) -> return false
+    first :: name_case_utf8.scalar_at(raw, start)
+    valid_first :: if case == {
+        .Snake -> name_case_scalar_lower(first) || (name_case_scalar_alpha(first) && !name_case_scalar_upper(first))
+        .Pascal | .Screaming -> name_case_scalar_upper(first) || (name_case_scalar_alpha(first) && !name_case_scalar_lower(first))
+    }
+    if !valid_first -> return false
+    at := start + name_case_utf8.utf8_width_at(raw, start)
+    previous_underscore := false
+    loop at < raw.len() {
+        cp :: name_case_utf8.scalar_at(raw, at)
+        if cp == 95 && previous_underscore -> return false
+        valid :: if case == {
+            .Pascal -> name_case_scalar_alnum(cp)
+            .Snake -> cp == 95 || (name_case_scalar_alnum(cp) && !name_case_scalar_upper(cp))
+            .Screaming -> cp == 95 || (name_case_scalar_alnum(cp) && !name_case_scalar_lower(cp))
+        }
+        if !valid -> return false
+        previous_underscore = cp == 95
+        at += name_case_utf8.utf8_width_at(raw, at)
+    }
+    true
+}
+
+fn name_case_push_word(words: &[String], name: String, start: Int, end: Int) Never! {
+    word := name.slice(start, end) // #4303
+    // Rust's Vec<String> owns each emitted word; each byte is copied once.
+    &words.push(~word)
+}
+
+// Exact mechanical split, with byte offsets instead of Vec<char>: a capital
+// run followed by lowercase yields its last capital to the next word. Input
+// decoding streams and output copies only the required owned word strings.
+pub fn split_pascal_words(name: String) -> [String] Never! {
+    raw :: name_case_utf8.utf8_bytes(name)
+    words := [String]{}
+    segment_start := 0
+    loop segment_start < raw.len() {
+        if raw[segment_start] == (U8{95}) {
+            segment_start += 1
+            next
+        }
+        segment_end := segment_start
+        loop segment_end < raw.len() && raw[segment_end] != (U8{95}) -> segment_end += name_case_utf8.utf8_width_at(raw, segment_end)
+        start := segment_start
+        at := segment_start
+        loop at < segment_end {
+            if name_case_scalar_upper(name_case_utf8.scalar_at(raw, at)) {
+                run_start :: at
+                run_count := 0
+                last_capital := at
+                loop at < segment_end && name_case_scalar_upper(name_case_utf8.scalar_at(raw, at)) {
+                    last_capital = at
+                    run_count += 1
+                    at += name_case_utf8.utf8_width_at(raw, at)
+                }
+                if at < segment_end && name_case_scalar_lower(name_case_utf8.scalar_at(raw, at)) {
+                    if run_count > 1 {
+                        if last_capital > start -> name_case_push_word(&words, name, start, last_capital)
+                        start = last_capital
+                    } else {
+                        if run_start > start -> name_case_push_word(&words, name, start, run_start)
+                        start = run_start
+                    }
+                    loop at < segment_end && !name_case_scalar_upper(name_case_utf8.scalar_at(raw, at)) -> at += name_case_utf8.utf8_width_at(raw, at)
+                    name_case_push_word(&words, name, start, at)
+                    start = at
+                }
+            } else {
+                loop at < segment_end && !name_case_scalar_upper(name_case_utf8.scalar_at(raw, at)) -> at += name_case_utf8.utf8_width_at(raw, at)
+                if at > start {
+                    name_case_push_word(&words, name, start, at)
+                    start = at
+                }
+            }
+        }
+        if start < segment_end -> name_case_push_word(&words, name, start, segment_end)
+        segment_start = segment_end
+    }
+    ^words
+}
+
+pub fn to_snake_acronym(name: String) -> String Never! {
+    if name.contains("_") && !name_has_uppercase(name) -> return ~name
+    words := [String]{}
+    loop word in split_pascal_words(name) -> &words.push(name_case_utf8.lower(word))
+    words.join("_")
+}
+
+pub fn canonical_name_case(name: String, case: NameCase) -> String Never! {
+    raw :: name_case_utf8.utf8_bytes(name)
+    // Rust recurses over `$`; one scan preserves all marks without repeated
+    // copying or recursive stack growth for a long run of marks.
+    mark_end := 0
+    loop mark_end < raw.len() && raw[mark_end] == (U8{36}) -> mark_end += 1
+    leading :: mark_end < raw.len() && raw[mark_end] == (U8{95})
+    body_start := mark_end
+    loop body_start < raw.len() && raw[body_start] == (U8{95}) -> body_start += 1
+    parts := [String]{}
+    if mark_end > 0 {
+        marks := name.slice(0, mark_end) // #4303
+        &parts.push(~marks)
+    }
+    if leading -> &parts.push("_")
+    if case == .Pascal {
+        at := body_start
+        loop at < raw.len() {
+            if raw[at] == (U8{95}) {
+                at += 1
+                next
+            }
+            first_end :: at + name_case_utf8.utf8_width_at(raw, at)
+            first := name.slice(at, first_end) // #4303
+            &parts.push(name_case_utf8.upper(first))
+            end := first_end
+            loop end < raw.len() && raw[end] != (U8{95}) -> end += name_case_utf8.utf8_width_at(raw, end)
+            if end > first_end {
+                rest := name.slice(first_end, end) // #4303
+                &parts.push(~rest)
+            }
+            at = end
+        }
+    } else {
+        body := name.slice(body_start, name.len()) // #4303
+        out :: to_snake_acronym(body)
+        if case == .Screaming -> &parts.push(name_case_utf8.upper(out))
+        else -> &parts.push(out)
+    }
+    parts.join("")
+}

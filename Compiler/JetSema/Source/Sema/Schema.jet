@@ -1,0 +1,656 @@
+// PORT-PENDING 0428 crates-jet-sema-src-sema-edition-module-group: crates/jet-sema/src/Sema/Schema.rs:1-652
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-MIGRATE1 (ratified 2026-06-22): published-schema snapshot — records the
+//RS //! field layout of a `#PublishedSchema` struct at release time.
+//RS //!
+//RS //! Format (std-only, lockfile-style — no serde, I6):
+//RS //!
+//RS //! ```text
+//RS //! schema_version = 1
+//RS //! type = UserRecord
+//RS //! published_version = 1.2.0
+//RS //! field name: String
+//RS //! field email: String
+//RS //! ```
+//RS //!
+//RS //! Lives at `.jet/cache/schema/<TypeName>.snapshot` (committed, durable contract).
+//RS 
+//RS use crate::Syntax;
+//RS use crate::AST::{CtValue, Expr, MigrationDecl, MigrationOp, StructDef, StructLayout, Type};
+//RS use jet_foundation::Facts::{
+//RS     ShapeDimensions, ShapeEncoding, ShapeError, ShapeFact, ShapeFieldFact, ShapeIdentity,
+//RS     ShapeLayoutFact, ShapeProvenance, ShapeType,
+//RS };
+//RS use jet_foundation::Shape::{ShapeDefault, ShapeProjectionKind};
+//RS use std::collections::{BTreeSet, HashMap};
+//RS 
+//RS /// Build the one backend-neutral fact row for a struct. This is intentionally
+//RS /// a pure sema fold: projections consume the row, while no backend re-reads
+//RS /// marker syntax or invents a second field table.
+//RS pub fn shape_fact_from_struct(
+//RS     source: &str,
+//RS     structure: &StructDef,
+//RS ) -> Result<ShapeFact, ShapeError> {
+//RS     let fields = structure
+//RS         .fields
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(order, field)| {
+//RS             let ty = shape_type(source, &field.ty);
+//RS             let encoding = shape_encoding(&ty);
+//RS             let names = jet_foundation::CLISchema::shape_field_names(structure, field);
+//RS             let mut fact = ShapeFieldFact::new(field.name.clone(), ty, order)
+//RS                 .with_names(names)
+//RS                 .with_encoding(encoding);
+//RS             if field.computed.is_some()
+//RS                 || field
+//RS                     .serde_markers
+//RS                     .iter()
+//RS                     .any(|marker| marker.name == Syntax::MARKER_SKIP)
+//RS             {
+//RS                 fact = fact.skipped();
+//RS             }
+//RS 
+//RS             if let Some(default) = field.default_ct.as_ref().and_then(shape_default) {
+//RS                 fact = fact.with_default(default);
+//RS             }
+//RS             if let Some(short) = field
+//RS                 .serde_markers
+//RS                 .iter()
+//RS                 .find(|marker| marker.name == Syntax::MARKER_SHORT)
+//RS                 .and_then(|marker| shape_marker_string(marker, None))
+//RS             {
+//RS                 fact = fact.with_short(short);
+//RS             }
+//RS             fact
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     ShapeFact::new(
+//RS         ShapeIdentity::new(source, structure.name.clone()),
+//RS         ShapeDimensions::record(fields.len()),
+//RS         fields,
+//RS         ShapeEncoding::Object,
+//RS         ShapeProvenance::declared().with_declaration(structure.name.clone()),
+//RS     )
+//RS     .and_then(|fact| fact.with_layout(shape_layout(structure)))
+//RS }
+//RS 
+//RS fn shape_layout(structure: &StructDef) -> ShapeLayoutFact {
+//RS     match structure.layout.as_ref() {
+//RS         Some(StructLayout::C) => ShapeLayoutFact::c(),
+//RS         Some(StructLayout::CAligned {
+//RS             alignment,
+//RS             target,
+//RS         }) => ShapeLayoutFact::c_aligned_with_mode(*alignment, *target),
+//RS         Some(StructLayout::Columnar) => ShapeLayoutFact::columnar(),
+//RS         None => ShapeLayoutFact::default(),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn shape_marker_string(marker: &crate::AST::Marker, label: Option<&str>) -> Option<String> {
+//RS     let expression = match label {
+//RS         Some(label) => marker
+//RS             .arg_labels
+//RS             .iter()
+//RS             .enumerate()
+//RS             .find(|(_, value)| value.as_ref().is_some_and(|(name, _)| name == label))
+//RS             .and_then(|(index, _)| marker.args.get(index))
+//RS             .and_then(crate::AST::MarkerCallArg::as_expr),
+//RS         None => marker.expr_arg(0),
+//RS     }?;
+//RS     shape_static_string(expression)
+//RS }
+//RS 
+//RS fn shape_static_string(expression: &Expr) -> Option<String> {
+//RS     match expression {
+//RS         Expr::Str(parts, _) => parts.first().and_then(|part| match part {
+//RS             crate::AST::StrPart::Lit(value) => Some(value.clone()),
+//RS             crate::AST::StrPart::Interp(..) => None,
+//RS         }),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS fn shape_rename_all_style(structure: &StructDef) -> Option<&str> {
+//RS     structure
+//RS         .serde_markers
+//RS         .iter()
+//RS         .find(|marker| marker.name == Syntax::MARKER_RENAME_ALL)
+//RS         .and_then(|marker| marker.expr_arg(0))
+//RS         .and_then(|expression| match expression {
+//RS             Expr::Ident(name, _) => Some(name.as_str()),
+//RS             _ => None,
+//RS         })
+//RS }
+//RS 
+//RS fn shape_rename_all_name(style: Option<&str>, name: &str) -> String {
+//RS     match style {
+//RS         Some("camel") => Syntax::to_camel_acronym(name),
+//RS         Some("kebab") => Syntax::to_snake_acronym(name).replace('_', "-"),
+//RS         Some("screaming") => Syntax::to_shouty_acronym(name),
+//RS         Some("pascal") => Syntax::to_pascal_acronym(name),
+//RS         Some("snake") => Syntax::to_snake_acronym(name),
+//RS         _ => name.to_string(),
+//RS     }
+//RS }
+//RS /// Canonical JSON field names and wire-key shapes for one checked migration chain.
+//RS ///
+//RS /// The sema ShapeFact is the sole source of current per-field names. Historical
+//RS /// names that are no longer present use the checked container `#RenameAll`
+//RS /// transform, because their old field-level marker is no longer available.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct CanonicalMigrationShape {
+//RS     /// Source field name to its canonical JSON projection name.
+//RS     pub names: HashMap<String, String>,
+//RS     /// Current JSON keys, excluding fields marked `#Skip`.
+//RS     pub current: BTreeSet<String>,
+//RS     /// Historical JSON-key sets, oldest first.
+//RS     pub historical: Vec<Vec<String>>,
+//RS     /// Current skipped JSON keys, retained for snapshot consumers.
+//RS     pub skipped: BTreeSet<String>,
+//RS     rename_all: Option<String>,
+//RS }
+//RS 
+//RS impl CanonicalMigrationShape {
+//RS     /// Resolve a source field name to its checked JSON wire key.
+//RS     ///
+//RS     /// A historical field may be absent from `names`; in that case the
+//RS     /// checked container rename rule is the only recoverable wire spelling.
+//RS     pub fn json_key(&self, field: &str) -> String {
+//RS         self.names
+//RS             .get(field)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| shape_rename_all_name(self.rename_all.as_deref(), field))
+//RS     }
+//RS }
+//RS 
+//RS /// Fold checked migration operations into canonical current and historical
+//RS /// JSON-key shapes. Historical shapes are returned oldest first.
+//RS pub fn canonical_migration_shape(
+//RS     source: &str,
+//RS     structure: &StructDef,
+//RS     blocks: &[MigrationDecl],
+//RS ) -> Result<CanonicalMigrationShape, ShapeError> {
+//RS     let fact = shape_fact_from_struct(source, structure)?;
+//RS     let mut names = HashMap::with_capacity(fact.fields.len());
+//RS     let mut current = BTreeSet::new();
+//RS     let mut skipped = BTreeSet::new();
+//RS     for field in &fact.fields {
+//RS         let json_name = field
+//RS             .names
+//RS             .name_for(ShapeProjectionKind::Json)
+//RS             .expect("canonical shape field must have a JSON projection name")
+//RS             .to_string();
+//RS         names.insert(field.name.clone(), json_name.clone());
+//RS         if field.skip {
+//RS             skipped.insert(json_name);
+//RS         } else {
+//RS             current.insert(json_name);
+//RS         }
+//RS     }
+//RS     let rename_all = shape_rename_all_style(structure).map(str::to_owned);
+//RS     let json_key = |field: &str| {
+//RS         names
+//RS             .get(field)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| shape_rename_all_name(rename_all.as_deref(), field))
+//RS     };
+//RS     let mut shape = current.clone();
+//RS     let mut historical = Vec::with_capacity(blocks.len());
+//RS     for block in blocks.iter().rev() {
+//RS         for op in &block.ops {
+//RS             match op {
+//RS                 MigrationOp::Add { field, .. } => {
+//RS                     shape.remove(&json_key(field));
+//RS                 }
+//RS                 MigrationOp::Remove { field, .. } => {
+//RS                     shape.insert(json_key(field));
+//RS                 }
+//RS                 MigrationOp::Rename { from, to, .. } => {
+//RS                     shape.remove(&json_key(to));
+//RS                     shape.insert(json_key(from));
+//RS                 }
+//RS                 MigrationOp::Change { .. } => {}
+//RS             }
+//RS         }
+//RS         historical.push(shape.iter().cloned().collect());
+//RS     }
+//RS     historical.reverse();
+//RS     Ok(CanonicalMigrationShape {
+//RS         names,
+//RS         current,
+//RS         historical,
+//RS         skipped,
+//RS         rename_all,
+//RS     })
+//RS }
+//RS 
+//RS fn shape_type(source: &str, ty: &Type) -> ShapeType {
+//RS     match ty {
+//RS         Type::Int | Type::IntN { .. } => ShapeType::Int,
+//RS         Type::Float | Type::Float32 => ShapeType::Float,
+//RS         Type::Bool => ShapeType::Bool,
+//RS         Type::String | Type::Char => ShapeType::Text,
+//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+//RS             ShapeType::Array(Box::new(shape_type(source, inner)))
+//RS         }
+//RS         Type::Option(inner) => ShapeType::Optional(Box::new(shape_type(source, inner))),
+//RS         Type::Shared(inner)
+//RS         | Type::InlineRange { base: inner, .. }
+//RS         | Type::Tagged { inner, .. }
+//RS         | Type::Quantity { base: inner, .. } => shape_type(source, inner),
+//RS         Type::Named(name) => match name.as_str() {
+//RS             "Bool" => ShapeType::Bool,
+//RS             "Int" | "I8" | "I16" | "I32" | "I64" | "U8" | "U16" | "U32" | "U64" => {
+//RS                 ShapeType::Int
+//RS             }
+//RS             "Float" | "F32" | "F64" => ShapeType::Float,
+//RS             "String" | "Char" => ShapeType::Text,
+//RS             "Bytes" => ShapeType::Bytes,
+//RS             "Number" => ShapeType::Number,
+//RS             _ => ShapeType::Object(ShapeIdentity::new(source, name.clone())),
+//RS         },
+//RS         Type::Apply { name, .. } => ShapeType::Unknown(name.clone()),
+//RS         Type::Map { .. } => ShapeType::Unknown("Map".to_string()),
+//RS         Type::Result { .. }
+//RS         | Type::Fn { .. }
+//RS         | Type::TraitObject(_)
+//RS         | Type::Tuple(_)
+//RS         | Type::Union(_)
+//RS         | Type::Measure(_) => ShapeType::Unknown(ty.name()),
+//RS     }
+//RS }
+//RS 
+//RS fn shape_encoding(ty: &ShapeType) -> ShapeEncoding {
+//RS     match ty {
+//RS         ShapeType::Null => ShapeEncoding::Null,
+//RS         ShapeType::Bool => ShapeEncoding::Bool,
+//RS         ShapeType::Int => ShapeEncoding::Int,
+//RS         ShapeType::Float => ShapeEncoding::Float,
+//RS         ShapeType::Number => ShapeEncoding::Number,
+//RS         ShapeType::Text | ShapeType::Bytes => ShapeEncoding::Text,
+//RS         ShapeType::Array(_) => ShapeEncoding::Array,
+//RS         ShapeType::Optional(inner) => shape_encoding(inner),
+//RS         ShapeType::Object(_) | ShapeType::Unknown(_) => ShapeEncoding::Object,
+//RS     }
+//RS }
+//RS 
+//RS fn shape_default(value: &CtValue) -> Option<ShapeDefault> {
+//RS     match value {
+//RS         CtValue::Int(value) => Some(ShapeDefault::Int(*value as i128)),
+//RS         CtValue::Float(value) => Some(ShapeDefault::Float(format!("{value:?}"))),
+//RS         CtValue::Bool(value) => Some(ShapeDefault::Bool(*value)),
+//RS         CtValue::Char(value) => Some(ShapeDefault::Text(value.to_string())),
+//RS         CtValue::Str(value) => Some(ShapeDefault::Text(value.clone())),
+//RS         CtValue::Bytes(value) => Some(ShapeDefault::Bytes(value.clone())),
+//RS         CtValue::Present(value) => shape_default(value),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub const SNAPSHOT_VERSION: u32 = 1;
+//RS 
+//RS 
+//RS /// One field entry in a schema snapshot.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct SnapshotField {
+//RS     pub name: String,
+//RS     pub ty: String,
+//RS }
+//RS 
+//RS /// The full schema snapshot for one `#PublishedSchema` struct.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct SchemaSnapshot {
+//RS     pub schema_version: u32,
+//RS     pub type_name: String,
+//RS     pub published_version: String,
+//RS     /// D-MIGRATE2C: set by `jet inspect schema squash --before <ver>` to re-baseline this
+//RS     /// record. When present, the snapshot's `fields` are the *current* authoritative
+//RS     /// shape and migration ops for any version `< squashed_before` are no longer
+//RS     /// required — the diff treats this shape as the new baseline. `None` for an
+//RS     /// ordinary publish-time snapshot.
+//RS     pub squashed_before: Option<String>,
+//RS     pub fields: Vec<SnapshotField>,
+//RS }
+//RS 
+//RS impl SchemaSnapshot {
+//RS     /// Serialise to the lockfile-style text format.
+//RS     pub fn write(&self) -> String {
+//RS         let mut out = String::new();
+//RS         out.push_str(&format!("schema_version = {}\n", self.schema_version));
+//RS         out.push_str(&format!("type = {}\n", self.type_name));
+//RS         out.push_str(&format!("published_version = {}\n", self.published_version));
+//RS         if let Some(before) = &self.squashed_before {
+//RS             out.push_str(&format!("squashed_before = {}\n", before));
+//RS         }
+//RS         for f in &self.fields {
+//RS             out.push_str(&format!("field {}: {}\n", f.name, f.ty));
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     /// Parse from the lockfile-style text format.
+//RS     pub fn parse(raw: &str) -> Result<Self, String> {
+//RS         let mut schema_version: Option<u32> = None;
+//RS         let mut type_name: Option<String> = None;
+//RS         let mut published_version: Option<String> = None;
+//RS         let mut squashed_before: Option<String> = None;
+//RS         let mut fields = Vec::new();
+//RS 
+//RS         for line in raw.lines() {
+//RS             let line = line.trim();
+//RS             if line.is_empty() {
+//RS                 continue;
+//RS             }
+//RS             if let Some(rest) = line.strip_prefix("schema_version = ") {
+//RS                 schema_version = Some(
+//RS                     rest.parse()
+//RS                         .map_err(|_| format!("invalid schema_version: {}", rest))?,
+//RS                 );
+//RS             } else if let Some(rest) = line.strip_prefix("type = ") {
+//RS                 type_name = Some(rest.to_string());
+//RS             } else if let Some(rest) = line.strip_prefix("published_version = ") {
+//RS                 published_version = Some(rest.to_string());
+//RS             } else if let Some(rest) = line.strip_prefix("squashed_before = ") {
+//RS                 squashed_before = Some(rest.to_string());
+//RS             } else if let Some(rest) = line.strip_prefix("field ") {
+//RS                 // "field name: TypeStr"
+//RS                 let colon = rest
+//RS                     .find(':')
+//RS                     .ok_or_else(|| format!("malformed field line: {}", line))?;
+//RS                 let name = rest[..colon].trim().to_string();
+//RS                 let ty = rest[colon + 1..].trim().to_string();
+//RS                 fields.push(SnapshotField { name, ty });
+//RS             } else {
+//RS                 return Err(format!("unknown line in schema snapshot: {}", line));
+//RS             }
+//RS         }
+//RS 
+//RS         Ok(SchemaSnapshot {
+//RS             schema_version: schema_version.ok_or("missing schema_version")?,
+//RS             type_name: type_name.ok_or("missing type")?,
+//RS             published_version: published_version.ok_or("missing published_version")?,
+//RS             squashed_before,
+//RS             fields,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// Build a snapshot from a `StructDef` at a given version string.
+//RS pub fn snapshot_from_struct(s: &StructDef, version: &str) -> SchemaSnapshot {
+//RS     SchemaSnapshot {
+//RS         schema_version: SNAPSHOT_VERSION,
+//RS         type_name: s.name.clone(),
+//RS         published_version: version.to_string(),
+//RS         squashed_before: None,
+//RS         fields: s
+//RS             .fields
+//RS             .iter()
+//RS             .map(|f| SnapshotField {
+//RS                 name: f.name.clone(),
+//RS                 ty: f.ty.name(),
+//RS             })
+//RS             .collect(),
+//RS     }
+//RS }
+//RS 
+//RS /// Load a snapshot from disk. Checks `JET_SCHEMA_CACHE_DIR` env var first
+//RS /// (for tests), then `<project_root>/<SOURCE_ROOT_DIR>/<SCHEMA_CACHE_SUBDIR>/`.
+//RS pub fn load_snapshot(project_root: &std::path::Path, type_name: &str) -> Option<SchemaSnapshot> {
+//RS     let base = if let Some(override_dir) = jet_foundation::CheckReads::env_var("JET_SCHEMA_CACHE_DIR") {
+//RS         std::path::PathBuf::from(override_dir)
+//RS     } else {
+//RS         project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(Syntax::SCHEMA_CACHE_SUBDIR)
+//RS     };
+//RS     let path = base.join(format!("{}.snapshot", type_name));
+//RS     let raw = jet_foundation::CheckReads::read_to_string(&path).ok()?;
+//RS     SchemaSnapshot::parse(&raw).ok()
+//RS }
+//RS 
+//RS /// Write a snapshot to disk under `<project_root>/.jet/cache/schema/`.
+//RS pub fn save_snapshot(project_root: &std::path::Path, snap: &SchemaSnapshot) -> Result<(), String> {
+//RS     let dir = project_root
+//RS         .join(Syntax::SOURCE_ROOT_DIR)
+//RS         .join(Syntax::SCHEMA_CACHE_SUBDIR);
+//RS     std::fs::create_dir_all(&dir)
+//RS         .map_err(|e| format!("could not create schema cache dir: {}", e))?;
+//RS     let path = dir.join(format!("{}.snapshot", snap.type_name));
+//RS     std::fs::write(&path, snap.write())
+//RS         .map_err(|e| format!("could not write schema snapshot: {}", e))
+//RS }
+//RS 
+//RS /// The schema cache directory for a project (`<root>/.jet/cache/schema/`),
+//RS /// honouring the `JET_SCHEMA_CACHE_DIR` test override.
+//RS pub fn schema_cache_dir(project_root: &std::path::Path) -> std::path::PathBuf {
+//RS     if let Some(override_dir) = jet_foundation::CheckReads::env_var("JET_SCHEMA_CACHE_DIR") {
+//RS         std::path::PathBuf::from(override_dir)
+//RS     } else {
+//RS         project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(Syntax::SCHEMA_CACHE_SUBDIR)
+//RS     }
+//RS }
+//RS 
+//RS /// Load every `<Type>.snapshot` in the project's schema cache, sorted by type
+//RS /// name. Returns `(type_name, snapshot)` pairs. Used by `jet inspect schema status`.
+//RS pub fn load_all_snapshots(project_root: &std::path::Path) -> Vec<SchemaSnapshot> {
+//RS     let dir = schema_cache_dir(project_root);
+//RS     let mut out = Vec::new();
+//RS     if let Ok(entries) = jet_foundation::CheckReads::read_dir_sorted(&dir) {
+//RS         for path in entries {
+//RS             if path.extension().and_then(|x| x.to_str()) != Some("snapshot") {
+//RS                 continue;
+//RS             }
+//RS             if let Ok(raw) = jet_foundation::CheckReads::read_to_string(&path) {
+//RS                 if let Ok(snap) = SchemaSnapshot::parse(&raw) {
+//RS                     out.push(snap);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     out.sort_by(|a, b| a.type_name.cmp(&b.type_name));
+//RS     out
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Unit tests
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn make_snap(type_name: &str, version: &str, fields: &[(&str, &str)]) -> SchemaSnapshot {
+//RS         SchemaSnapshot {
+//RS             schema_version: SNAPSHOT_VERSION,
+//RS             type_name: type_name.to_string(),
+//RS             published_version: version.to_string(),
+//RS             squashed_before: None,
+//RS             fields: fields
+//RS                 .iter()
+//RS                 .map(|(n, t)| SnapshotField {
+//RS                     name: n.to_string(),
+//RS                     ty: t.to_string(),
+//RS                 })
+//RS                 .collect(),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn schema_round_trip() {
+//RS         let snap = make_snap("UserRecord", "1.2.0", &[("name", "String"), ("age", "Int")]);
+//RS         let text = snap.write();
+//RS         let parsed = SchemaSnapshot::parse(&text).expect("should parse");
+//RS         assert_eq!(parsed, snap);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn schema_parse_known_text() {
+//RS         let text = "schema_version = 1\ntype = Foo\npublished_version = 0.1.0\nfield x: Int\n";
+//RS         let snap = SchemaSnapshot::parse(text).unwrap();
+//RS         assert_eq!(snap.type_name, "Foo");
+//RS         assert_eq!(snap.published_version, "0.1.0");
+//RS         assert_eq!(snap.fields.len(), 1);
+//RS         assert_eq!(snap.fields[0].name, "x");
+//RS         assert_eq!(snap.fields[0].ty, "Int");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn schema_diff_detects_removed_field() {
+//RS         let old = make_snap("T", "1.0.0", &[("name", "String"), ("age", "Int")]);
+//RS         let new = make_snap("T", "1.1.0", &[("display_name", "String"), ("age", "Int")]);
+//RS         let removed: Vec<_> = old
+//RS             .fields
+//RS             .iter()
+//RS             .filter(|f| !new.fields.iter().any(|nf| nf.name == f.name))
+//RS             .collect();
+//RS         assert_eq!(removed.len(), 1);
+//RS         assert_eq!(removed[0].name, "name");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn schema_rename_with_type_match_unblocks() {
+//RS         let old = make_snap("T", "1.0.0", &[("name", "String")]);
+//RS         let new_fields = vec![SnapshotField {
+//RS             name: "display_name".to_string(),
+//RS             ty: "String".to_string(),
+//RS         }];
+//RS         // with rename name -> display_name, type matches → unblocked
+//RS         let old_field = old.fields.iter().find(|f| f.name == "name").unwrap();
+//RS         let new_field = new_fields
+//RS             .iter()
+//RS             .find(|f| f.name == "display_name")
+//RS             .unwrap();
+//RS         assert_eq!(
+//RS             old_field.ty, new_field.ty,
+//RS             "type must match for rename to unblock"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn schema_rename_with_type_mismatch_stays_blocked() {
+//RS         let old = make_snap("T", "1.0.0", &[("name", "String")]);
+//RS         let new_field = SnapshotField {
+//RS             name: "display_name".to_string(),
+//RS             ty: "Int".to_string(),
+//RS         };
+//RS         let old_field = old.fields.iter().find(|f| f.name == "name").unwrap();
+//RS         assert_ne!(
+//RS             old_field.ty, new_field.ty,
+//RS             "type mismatch — rename does not unblock"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn schema_empty_snapshot_parses() {
+//RS         let text = "schema_version = 1\ntype = Empty\npublished_version = 1.0.0\n";
+//RS         let snap = SchemaSnapshot::parse(text).unwrap();
+//RS         assert!(snap.fields.is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn schema_squashed_before_round_trips() {
+//RS         // D-MIGRATE2C: `squashed_before` survives write→parse.
+//RS         let mut snap = make_snap("Rec", "2.0.0", &[("name", "String")]);
+//RS         snap.squashed_before = Some("2.0.0".to_string());
+//RS         let text = snap.write();
+//RS         assert!(text.contains("squashed_before = 2.0.0\n"), "got:\n{text}");
+//RS         let parsed = SchemaSnapshot::parse(&text).unwrap();
+//RS         assert_eq!(parsed.squashed_before.as_deref(), Some("2.0.0"));
+//RS         assert_eq!(parsed, snap);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn schema_no_squash_omits_line() {
+//RS         let snap = make_snap("Rec", "1.0.0", &[("name", "String")]);
+//RS         let text = snap.write();
+//RS         assert!(
+//RS             !text.contains("squashed_before"),
+//RS             "ordinary snapshot must omit the line"
+//RS         );
+//RS         assert_eq!(SchemaSnapshot::parse(&text).unwrap().squashed_before, None);
+//RS     }
+//RS 
+//RS     /// Guard: `snapshot_from_struct` must write canonical type names (e.g. "String", not
+//RS     /// "String (text)"). If the wrong method is used, the snapshot format will diverge from
+//RS     /// what `load_snapshot` expects and the diff pass will silently mis-compare types.
+//RS     #[test]
+//RS     fn snapshot_from_struct_writes_canonical_type_names() {
+//RS         use crate::Diagnostics::Span;
+//RS         use crate::AST::{Field, StructDef, Type};
+//RS         let zero = Span::new(0, 0);
+//RS         let s = StructDef {
+//RS             span: zero,
+//RS             is_pub: false,
+//RS             is_package_pub: false,
+//RS             name: "Rec".to_string(),
+//RS             name_span: zero,
+//RS             type_params: vec![],
+//RS             fields: vec![
+//RS                 Field {
+//RS                     is_pub: false,
+//RS                     is_package_pub: false,
+//RS                     name: "label".to_string(),
+//RS                     name_span: zero,
+//RS                     ty: Type::String,
+//RS                     ty_span: zero,
+//RS                     serde_markers: Vec::new(),
+//RS                     redact: false,
+//RS                     computed: None,
+//RS                     default: None,
+//RS                     default_ct: None,
+//RS                 },
+//RS                 Field {
+//RS                     is_pub: false,
+//RS                     is_package_pub: false,
+//RS                     name: "count".to_string(),
+//RS                     name_span: zero,
+//RS                     ty: Type::Int,
+//RS                     ty_span: zero,
+//RS                     serde_markers: Vec::new(),
+//RS                     redact: false,
+//RS                     computed: None,
+//RS                     default: None,
+//RS                     default_ct: None,
+//RS                 },
+//RS             ],
+//RS             state: None,
+//RS             methods: vec![],
+//RS             cli_bindings: vec![],
+//RS             trait_impls: vec![],
+//RS             derives: vec![],
+//RS             auto_derive_default: true,
+//RS             is_published_schema: true,
+//RS             published_schema_span: None,
+//RS             is_single_use: false,
+//RS             single_use_span: None,
+//RS             is_must_use: false,
+//RS             must_use_span: None,
+//RS             layout: None,
+//RS             layout_span: None,
+//RS             serde_markers: Vec::new(),
+//RS             type_markers: Vec::new(),
+//RS             validate_block: Vec::new(),
+//RS             validate_span: None,
+//RS         };
+//RS         let snap = snapshot_from_struct(&s, "2.0.0");
+//RS         let text = snap.write();
+//RS         // The canonical names must appear verbatim in the snapshot text.
+//RS         assert!(
+//RS             text.contains("field label: String\n"),
+//RS             "expected `field label: String` in snapshot, got:\n{text}"
+//RS         );
+//RS         assert!(
+//RS             text.contains("field count: Int\n"),
+//RS             "expected `field count: Int` in snapshot, got:\n{text}"
+//RS         );
+//RS         // Must also round-trip cleanly.
+//RS         let parsed = SchemaSnapshot::parse(&text).unwrap();
+//RS         assert_eq!(parsed.fields[0].ty, "String");
+//RS         assert_eq!(parsed.fields[1].ty, "Int");
+//RS     }
+//RS }
+// END-PORT-PENDING 0428 crates/jet-sema/src/Sema/Schema.rs:1-652
+

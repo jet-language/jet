@@ -1,0 +1,313 @@
+// Behavioral witnesses ported from Rust TestingComparison.rs:898–967.
+// Target-width witnesses are held on #4483 / D-USIZE-TARGET1 together with
+// production decoding; they must run against the actual execution target.
+use core.sys as comparison_test_target_facts
+fn comparison_test_sample(case_id: String, reference: String, candidate: String) -> ComparisonSample Never! {
+    comparison_sample_new(comparison_identity_new(case_id, "input-{case_id}", "fixture", "test", "host"), comparison_observation_value(reference), comparison_observation_value(candidate))
+}
+fn comparison_test_assertion_ok(record: ComparisonRecord) -> Bool Never! {
+    if comparison_record_assert_equal(record) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+}
+fn comparison_test_validation_error(record: ComparisonRecord) -> String Never! {
+    if comparison_record_validate(record) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("expected validation failure")
+    }
+}
+fn comparison_test_json(record: ComparisonRecord) -> CanonicalJSON Never! {
+    if comparison_record_to_json(record) == {
+        .Ok(value) -> value
+        .Err(error) -> panic(error.message)
+    }
+}
+fn comparison_test_decode(value: CanonicalJSON) -> ComparisonRecord Never! {
+    if comparison_record_from_json(value) == {
+        .Ok(record) -> record
+        .Err(error) -> panic(error.message)
+    }
+}
+fn comparison_test_decode_error(value: CanonicalJSON) -> String Never! {
+    if comparison_record_from_json(value) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("expected decode failure")
+    }
+}
+fn comparison_test_artifact(record: ComparisonRecord) -> String Never! {
+    if comparison_record_artifact_id(record) == {
+        .Ok(id) -> id
+        .Err(error) -> panic(error.message)
+    }
+}
+fn comparison_test_field(value: CanonicalJSON, key: String) -> CanonicalJSON Never! {
+    if value == {
+        .Object(fields) -> {
+            loop field in fields {
+                if field.key == key -> return ~field.value
+            }
+            panic("missing fixture field")
+        }
+        else -> panic("fixture must be object")
+    }
+}
+fn comparison_test_replace(value: CanonicalJSON, key: String, replacement: CanonicalJSON) -> CanonicalJSON Never! {
+    if value == { .Object(fields) -> {
+        result := [CanonicalJSONField]{}
+        loop field in fields -> &result.push(CanonicalJSONField{key: field.key, value: if field.key == key -> replacement else -> field.value})
+        if canonical_json_object(result) == {
+            .Ok(object) -> object
+            .Err(error) -> panic(error.message)
+        }
+    }
+    else -> panic("fixture must be object")
+    }
+}
+#Test("finite_equal_corpus_is_not_universal_proof") {
+    record :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{comparison_test_sample("one", "a", "a")})
+    assert(record.status == ComparisonStatus.Matched)
+    assert(!record.universal_proof)
+    assert(comparison_test_assertion_ok(record))
+}
+#Test("empty_discarded_and_custom_without_declaration_cannot_pass") {
+    empty :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{})
+    assert(empty.status == ComparisonStatus.Empty)
+    assert(!comparison_test_assertion_ok(empty))
+    discarded :: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{comparison_test_sample("one", "a", "a")}, 1)
+    assert(discarded.status == ComparisonStatus.InvalidOracle)
+    assert(!comparison_test_assertion_ok(discarded))
+    custom :: testing_compare_samples(ObservationRelation.Custom("domain"), [ComparisonSample]{comparison_test_sample("one", "a", "a")})
+    assert(custom.status == ComparisonStatus.InvalidOracle)
+    assert(!comparison_test_assertion_ok(custom))
+}
+#Test("replay_contamination_and_relation_aware_reduction_are_preserved") {
+    contaminated :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{comparison_sample_with_replays(comparison_test_sample("one", "a", "a"), comparison_observation_value("changed"), comparison_observation_value("a"))})
+    assert(contaminated.status == ComparisonStatus.Contaminated)
+    assert(contaminated.contamination != None)
+    record :: testing_compare_samples(ObservationRelation.OrderedEffects, [ComparisonSample]{comparison_sample_new(
+        comparison_identity_new("one", "input-one", "fixture", "test", "host"),
+        comparison_observation_with_effects(comparison_observation_value("same"), [String]{"write-a", "write-b"}),
+        comparison_observation_with_effects(comparison_observation_value("same"), [String]{"write-b", "write-a"}))})
+    assert(record.status == ComparisonStatus.Mismatch)
+    reduced :: testing_reduce_mismatch(record, [[ComparisonSample]]{[ComparisonSample]{comparison_test_sample("wrong", "a", "a")}}) ?? panic("mismatch lost")
+    assert(reduced.identity.case_id == "one")
+}
+#Test("comparison terminal statuses never pass and roundtrip canonical payload") {
+    statuses :: [ComparisonStatus]{ComparisonStatus.Empty, ComparisonStatus.Unsupported, ComparisonStatus.Unavailable, ComparisonStatus.Timeout, ComparisonStatus.Cancelled, ComparisonStatus.InvalidOracle, ComparisonStatus.Contaminated, ComparisonStatus.Mismatch}
+    loop status in statuses {
+        record :: comparison_record_terminal(ObservationRelation.TypedEquality, status, "runner stopped")
+        assert(!comparison_test_assertion_ok(record))
+        assert(comparison_test_decode(comparison_test_json(record)) == record)
+        assert(!record.universal_proof)
+        assert(comparison_record_first_mismatch(record) == None)
+    }
+    empty :: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, 2)
+    assert((empty.reason ?? "") == "all comparison cases were discarded")
+    terminal :: comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unavailable, "runner stopped")
+    expected :: "{{\"contamination\":null,\"discarded_cases\":0,\"first_difference\":null,\"reason\":\"runner stopped\",\"reduced_counterexample\":null,\"relation\":\"typed_equality\",\"samples\":[],\"schema_version\":1,\"status\":\"unavailable\",\"universal_proof\":false}}\n"
+    assert(canonical_json_bytes(comparison_test_json(terminal)) == expected.bytes())
+    assert(comparison_test_artifact(terminal) == canonical_json_sha256(comparison_test_json(terminal)))
+    if comparison_record_assert_equal(terminal) == {
+        .Err(error) -> assert(comparison_assertion_error_text(error) == "comparison unavailable: runner stopped")
+        .Ok(_) -> panic("terminal passed")
+    }
+}
+#Test("comparison relations compare exactly their declared observations") {
+    assert(observation_relation_supports_plain_callable(ObservationRelation.TypedEquality))
+    relations :: [ObservationRelation]{ObservationRelation.OrderedEffects, ObservationRelation.TypedFailure, ObservationRelation.Custom("domain")}
+    loop relation in relations -> assert(!observation_relation_supports_plain_callable(relation))
+    sample := comparison_test_sample("one", "same", "same")
+    sample.reference.typed_failure = Val("Failure.One")
+    sample.candidate.typed_failure = Val("Failure.Two")
+    assert(testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{~sample}).status == ComparisonStatus.Matched)
+    assert(testing_compare_samples(ObservationRelation.TypedFailure, [ComparisonSample]{~sample}).status == ComparisonStatus.Mismatch)
+    sample.candidate.typed_failure = sample.reference.typed_failure
+    assert(testing_compare_samples(ObservationRelation.TypedFailure, [ComparisonSample]{~sample}).status == ComparisonStatus.Matched)
+    sample.candidate.cleanup = [String]{"close"}
+    assert(testing_compare_samples(ObservationRelation.OrderedEffects, [ComparisonSample]{~sample}).status == ComparisonStatus.Mismatch)
+    sample.candidate.cleanup = [String]{}
+    sample.reference.mutation = Val("changed")
+    assert(testing_compare_samples(ObservationRelation.OrderedEffects, [ComparisonSample]{~sample}).status == ComparisonStatus.Mismatch)
+    accepted :: testing_compare_samples(ObservationRelation.Custom("domain"), [ComparisonSample]{comparison_sample_with_declared_equal(comparison_test_sample("one", "a", "b"), true)})
+    assert(accepted.status == ComparisonStatus.Matched)
+    rejected :: testing_compare_samples(ObservationRelation.Custom("domain"), [ComparisonSample]{comparison_sample_with_declared_equal(comparison_test_sample("one", "a", "a"), false)})
+    assert(rejected.status == ComparisonStatus.Mismatch)
+    assert(comparison_test_decode(comparison_test_json(rejected)) == rejected)
+}
+#Test("comparison first mismatch reduction and verdict precedence") {
+    record :: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{comparison_test_sample("ok", "a", "a"), comparison_test_sample("bad", "a", "b")}, 1)
+    assert(record.status == ComparisonStatus.Mismatch)
+    assert((record.first_difference ?? -1) == 1)
+    assert((comparison_record_first_mismatch(record) ?? panic("missing mismatch")).identity.case_id == "bad")
+    reduced :: testing_reduce_mismatch(record, [[ComparisonSample]]{[ComparisonSample]{}, [ComparisonSample]{comparison_test_sample("smaller", "x", "y")}}) ?? panic("missing reduction")
+    assert(reduced.identity.case_id == "smaller")
+    matched :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{comparison_test_sample("ok", "a", "a")})
+    assert(testing_reduce_mismatch(matched, [[ComparisonSample]]{[ComparisonSample]{comparison_test_sample("bad", "x", "y")}}) == None)
+    invalid := comparison_test_sample("", "a", "b")
+    oracle :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{comparison_test_sample("bad", "a", "b"), invalid})
+    assert(oracle.status == ComparisonStatus.InvalidOracle)
+    replay :: comparison_sample_with_replays(comparison_test_sample("one", "a", "b"), comparison_observation_value("a"), comparison_observation_value("changed"))
+    contaminated :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{replay})
+    assert(contaminated.status == ComparisonStatus.Contaminated)
+    assert((contaminated.reason ?? "") == "candidate observation changed on replay for case `one`")
+}
+#Test("comparison record preserves every sample observation identity replay and reduction") {
+    identity := comparison_identity_new("é\"case", "input", "source", "tool", "target")
+    identity.seed = Val(U64{18446744073709551615})
+    reference :: comparison_observation_with_mutation(comparison_observation_with_cleanup(comparison_observation_with_effects(comparison_observation_failure("raw\nvalue", "Failure.Tag"), [String]{"first", "second"}), [String]{"close", "drop"}), "mutation")
+    candidate :: comparison_observation_failure("different", "Failure.Other")
+    sample :: comparison_sample_with_declared_equal(comparison_sample_with_replays(comparison_sample_new(identity, reference, candidate), reference, candidate), false)
+    record :: testing_compare_samples(ObservationRelation.TypedFailure, [ComparisonSample]{sample})
+    encoded :: comparison_test_json(record)
+    bytes :: canonical_json_bytes(encoded)
+    parsed :: if canonical_json_parse(bytes) == {
+        .Ok(value) -> value
+        .Err(error) -> panic(error.message)
+    }
+    decoded :: comparison_test_decode(parsed)
+    assert(decoded == record)
+    assert(canonical_json_bytes(comparison_test_json(decoded)) == bytes)
+    assert(comparison_test_artifact(decoded) == comparison_test_artifact(record))
+    changed := ~record
+    changed.reason = Val("changed")
+    assert(comparison_test_artifact(changed) != comparison_test_artifact(record))
+}
+#Test("comparison structural validation is transitive and byte exact") {
+    base :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{comparison_test_sample("one", "a", "a")})
+    record := ~base
+    record.schema_version = U16{2}
+    assert(comparison_test_validation_error(record) == "unsupported comparison schema version 2")
+    record = ~base
+    record.universal_proof = true
+    assert(comparison_test_validation_error(record) == "comparison records cannot claim universal proof")
+    record = ~base
+    record.discarded_cases = 1
+    assert(comparison_test_validation_error(record) == "matched comparison records require non-empty samples and no discarded cases")
+    record = ~base
+    record.first_difference = Val(1)
+    assert(comparison_test_validation_error(record) == "comparison first_difference is outside samples")
+    record = ~base
+    record.reduced_counterexample = Val(comparison_test_sample("one", "a", "b"))
+    assert(comparison_test_validation_error(record) == "comparison reduced_counterexample is only valid for a mismatch")
+    record = ~base
+    record.samples[0].identity.target = ""
+    assert(comparison_test_validation_error(record) == "comparison sample identity is incomplete")
+    record = ~base
+    record.samples[0].reference_replay = Val(comparison_observation_value("a"))
+    assert(comparison_test_validation_error(record) == "comparison sample replay fields must be paired")
+    record = ~base
+    record.status = ComparisonStatus.Mismatch
+    bad := comparison_test_sample("", "x", "y")
+    record.reduced_counterexample = Val(bad)
+    assert(comparison_test_validation_error(record) == "comparison sample identity is incomplete")
+    bad.identity.case_id = "reduced"
+    bad.candidate_replay = Val(comparison_observation_value("y"))
+    record.reduced_counterexample = Val(bad)
+    assert(comparison_test_validation_error(record) == "comparison sample replay fields must be paired")
+}
+#Test("comparison decoder rejects wrong schema types missing fields and invalid ranges") {
+    record :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{comparison_test_sample("one", "a", "a")})
+    base :: comparison_test_json(record)
+    assert(comparison_test_decode_error(CanonicalJSON.Null) == "comparison value must be an object")
+    assert(comparison_test_decode_error(CanonicalJSON.Object([CanonicalJSONField]{})) == "comparison value is missing `schema_version`")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "schema_version", CanonicalJSON.String("1"))) == "comparison field `schema_version` must be an integer")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "schema_version", CanonicalJSON.Integer("65536"))) == "comparison schema_version is not a valid u16")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "schema_version", CanonicalJSON.Integer("2"))) == "unsupported comparison schema version 2")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "status", CanonicalJSON.String("pass"))) == "unknown comparison status `pass`")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "status", CanonicalJSON.Null)) == "comparison field `status` must be a string")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "relation", CanonicalJSON.String(""))) == "comparison relation cannot be empty")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "samples", CanonicalJSON.Null)) == "comparison field `samples` must be an array")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "discarded_cases", CanonicalJSON.Integer("18446744073709551616"))) == "comparison discarded_cases is not a valid usize")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "first_difference", CanonicalJSON.Integer("-1"))) == "comparison first_difference is not a valid usize")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "first_difference", CanonicalJSON.String("0"))) == "comparison field `first_difference` must be an integer or null")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "reason", CanonicalJSON.Bool(false))) == "comparison field `reason` must be a string or null")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "universal_proof", CanonicalJSON.Null)) == "comparison field `universal_proof` must be a boolean")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "universal_proof", CanonicalJSON.Bool(true))) == "comparison records cannot claim universal proof")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "samples", CanonicalJSON.Array([CanonicalJSON]{}))) == "matched comparison records require non-empty samples and no discarded cases")
+}
+#Test("comparison decoder validates nested replays identity and observation fields") {
+    record :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{comparison_test_sample("one", "", "")})
+    base :: comparison_test_json(record)
+    sample :: if comparison_test_field(base, "samples") == {
+        .Array(values) -> ~values[0]
+        else -> panic("fixture samples")
+    }
+    observation :: comparison_test_field(sample, "reference")
+    identity :: comparison_test_field(sample, "identity")
+    malformed_replay :: comparison_test_replace(sample, "reference_replay", observation)
+    assert(comparison_test_decode_error(comparison_test_replace(base, "samples", CanonicalJSON.Array([CanonicalJSON]{malformed_replay}))) == "comparison sample 0 must provide both replays")
+    wrong_equal :: comparison_test_replace(sample, "declared_equal", CanonicalJSON.String("true"))
+    assert(comparison_test_decode_error(comparison_test_replace(base, "samples", CanonicalJSON.Array([CanonicalJSON]{wrong_equal}))) == "comparison sample 0 declared_equal must be bool or null")
+    wrong_seed :: comparison_test_replace(sample, "identity", comparison_test_replace(identity, "seed", CanonicalJSON.Integer("18446744073709551616")))
+    assert(comparison_test_decode_error(comparison_test_replace(base, "samples", CanonicalJSON.Array([CanonicalJSON]{wrong_seed}))) == "comparison identity seed is not a valid u64")
+    wrong_effect :: comparison_test_replace(sample, "reference", comparison_test_replace(observation, "ordered_effects", CanonicalJSON.Array([CanonicalJSON]{CanonicalJSON.Bool(false)})))
+    assert(comparison_test_decode_error(comparison_test_replace(base, "samples", CanonicalJSON.Array([CanonicalJSON]{wrong_effect}))) == "comparison field `ordered_effects` entries must be strings")
+    wrong_failure :: comparison_test_replace(sample, "reference", comparison_test_replace(observation, "typed_failure", CanonicalJSON.Bool(false)))
+    assert(comparison_test_decode_error(comparison_test_replace(base, "samples", CanonicalJSON.Array([CanonicalJSON]{wrong_failure}))) == "comparison field `typed_failure` must be a string or null")
+    assert(comparison_test_decode(base) == record)
+}
+
+#Test("comparison public Int carriers preserve Rust usize validation and transport domain") {
+    maximum :: Int.from_u64(comparison_test_target_facts.usize_max())
+    invalid :: [Int]{-1, maximum + 1}
+    loop value in invalid {
+        record := comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Mismatch, "fixture")
+        record.discarded_cases = value
+        assert(comparison_test_validation_error(record) == "comparison discarded_cases is not a valid usize")
+        discarded_error :: if comparison_record_to_json(record) == {
+            .Ok(_) -> panic("invalid discarded_cases encoded")
+            .Err(error) -> error.message
+        }
+        assert(discarded_error == "comparison discarded_cases is not a valid usize")
+        record.discarded_cases = 0
+        record.first_difference = Val(value)
+        assert(comparison_test_validation_error(record) == "comparison first_difference is not a valid usize")
+        first_error :: if comparison_record_to_json(record) == {
+            .Ok(_) -> panic("invalid first_difference encoded")
+            .Err(error) -> error.message
+        }
+        assert(first_error == "comparison first_difference is not a valid usize")
+    }
+    boundary :: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, maximum)
+    comparison_record_validate(boundary) ?? panic("valid usize boundary rejected")
+    assert(comparison_test_decode(comparison_test_json(boundary)) == boundary)
+}
+
+#Test("comparison typed unsigned decoding preserves Rust lexical and target-width laws") {
+    maximum :: Int.from_u64(comparison_test_target_facts.usize_max())
+    record :: comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Empty, "fixture")
+    base :: comparison_test_json(record)
+    leading_plus :: comparison_test_replace(base, "schema_version", CanonicalJSON.Integer("+0001"))
+    assert(comparison_test_decode(leading_plus) == record)
+    leading_zero :: comparison_test_replace(base, "discarded_cases", CanonicalJSON.Integer("0000"))
+    assert(comparison_test_decode(leading_zero) == record)
+    loop invalid in [String]{"", "+", "-0", "-1", " 1", "1 ", "1_0", "1.0", "++1", "١", "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999"} {
+        assert(comparison_test_decode_error(comparison_test_replace(base, "schema_version", CanonicalJSON.Integer(invalid))) == "comparison schema_version is not a valid u16")
+    }
+    overflow :: CanonicalJSON.Integer("{maximum + 1}")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "discarded_cases", overflow)) == "comparison discarded_cases is not a valid usize")
+    assert(comparison_test_decode_error(comparison_test_replace(base, "first_difference", overflow)) == "comparison first_difference is not a valid usize")
+    // Decimal conversion rejects only out-of-domain values; record validation
+    // subsequently rejects an in-domain index outside the finite sample list.
+    assert(comparison_test_decode_error(comparison_test_replace(base, "first_difference", CanonicalJSON.Integer("+0"))) == "comparison first_difference is outside samples")
+}
+
+#Test("comparison decoder ignores sorted unknown fields without losing known fields") {
+    record :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{comparison_test_sample("one", "a", "a")})
+    base :: comparison_test_json(record)
+    fields := if base == {
+        .Object(values) -> ~values
+        else -> panic("fixture must be object")
+    }
+    // CanonicalJSON owns sorting and duplicate detection. Unknown members are
+    // accepted by Rust's typed decoder even before and between known members.
+    &fields.push(CanonicalJSONField{key: "aaa", value: CanonicalJSON.Null})
+    &fields.push(CanonicalJSONField{key: "relation_extra", value: CanonicalJSON.Bool(true)})
+    &fields.push(CanonicalJSONField{key: "zzz", value: CanonicalJSON.String("ignored")})
+    extended :: if canonical_json_object(fields) == {
+        .Ok(value) -> value
+        .Err(error) -> panic(error.message)
+    }
+    assert(comparison_test_decode(extended) == record)
+}

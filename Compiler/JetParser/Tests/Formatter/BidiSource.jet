@@ -1,0 +1,46 @@
+// #4204 composed tests: full canonical formatter SCC, no mock parser/provider.
+use jet_lexer.[lex, TOKEN_STRING, STRING_PART_BYTE]
+use jet_foundation.[diagnostic_bidi_control_at]
+
+fn fmt_bidi_visible(value: String) {
+    bytes :: value.bytes()
+    loop index in 0..<bytes.len() -> assert(!diagnostic_bidi_control_at(bytes, index))
+}
+
+#Test("literal_bidi_comment_is_refused_before_formatter_migrations") {
+    control :: String.from_bytes([U8]{226, 128, 174}).unwrap("UTF-8 control")
+    source :: "fn run() {{ // {control}\n}}\n"
+    rejected :: jet_format_source(source)
+    assert(rejected.source == None)
+    assert(rejected.diagnostics.len() == 1)
+    assert(rejected.diagnostics[0].code == "E-SOURCE-BIDI")
+    assert(rejected.diagnostics[0].span == lex(source.bytes()).diagnostics[0].span)
+}
+
+#Test("escaped_bidi_byte_string_stays_escaped_and_preserves_runtime_data") {
+    source :: "fn run() {{ _ :: String.from_bytes([U8]{{\"\\xe2\\x80\\xae\"}}) ?? \"\" }}\n"
+    result :: jet_format_source(source)
+    assert(result.diagnostics.len() == 0)
+    formatted :: result.source.unwrap("escaped byte-string source admitted")
+    fmt_bidi_visible(formatted)
+    assert(jet_format_source(formatted).source == Val(formatted))
+    lexed :: lex(formatted.bytes())
+    assert(lexed.diagnostics.len() == 0)
+    bytes := [U8]{}
+    loop token in lexed.tokens {
+        loop part in token.payload.string_parts {
+            if part.kind == STRING_PART_BYTE -> &bytes.push(U8{part.byte})
+        }
+    }
+    assert(bytes == [U8]{226, 128, 174})
+    assert(String.from_bytes(bytes) == String.from_bytes([U8]{"\xe2\x80\xae"}))
+}
+
+#Test("formatter_diff_escapes_bidi_paths_and_source_lines") {
+    control :: String.from_bytes([U8]{226, 128, 174}).unwrap("UTF-8 control")
+    diff :: jet_format_unified_diff("file{control}.jet", "// {control}\n", "// repaired\n")
+    fmt_bidi_visible(diff)
+    assert(diff.contains("\\u{{202e}}"))
+    assert(diff.contains("-// \\u{{202e}}\n"))
+    assert(diff.contains("+// repaired\n"))
+}

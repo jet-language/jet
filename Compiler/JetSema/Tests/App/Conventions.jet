@@ -1,0 +1,142 @@
+// Original tests/web_app_graph.rs:156-185,220-261 and web_app.rs:167-198.
+// Real on-disk inputs, parser, registration and checked finalizer. No virtual
+// filesystem or hand-built checked App graph replaces the native originals.
+// CLI explain/run acceptance remains the unchanged Rust original until the
+// composed Driver/CLI/native closure can run; these do not claim CLI receipts.
+use core.files as app_convention_files
+use core.testing.host.check_reads as app_convention_host
+use core.files.host.retained_descriptor as app_convention_native
+use core.files.runtime.kernel_path_components as app_convention_path
+use jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, MIRAppGraph, MIRAppRenderMode, Program, foundation_embedded_core, jet_target_machine_hosted, check_reads_read_to_string, check_reads_begin_session, check_reads_finish_session, CHECK_READS_INJECT_ENV]
+use jet_parser.[parse_source]
+use jet_sema.[SemaBuildFacts, SemaGraphResult, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_registration_prepare_graph, sema_app_convention_path, sema_app_convention_handler]
+
+fn app_convention_module(program: ^Program, identity: String, path: String) -> SemaRegistrationModuleInput Never! {
+    SemaRegistrationModuleInput{package_identity: "app-fixture", module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, foreign_handles: []}
+}
+fn app_convention_check(root: String, entry: String, files: [String]) -> SemaGraphResult {
+    inputs := [SemaRegistrationModuleInput]{}
+    loop file in files {
+        path :: app_convention_files.join(root, file)
+        source :: check_reads_read_to_string(path) ?? panic("fixture input: {path}")
+        parsed :: parse_source(source.bytes())
+        assert(parsed.diagnostics.len() == 0, "original App source must parse")
+        &inputs.push(app_convention_module(^parsed.program, file, path))
+    }
+    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    assert(effects.diagnostics.len() == 0)
+    &inputs.push(SemaRegistrationModuleInput{package_identity: "jet:canonical-prelude", module_identity: "effects", module_name: "effects", module_path: "Prelude/Effects.jet", source_file: "Prelude/Effects.jet", source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: ^effects.program, foreign_handles: []})
+    build :: SemaBuildFacts{package_name: "app-fixture", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "app-test", stamp_at: "", artifact_build: false}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    registration :: sema_registration_prepare_graph(inputs, [], "app-fixture", entry, "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+    stage :: sema_collect_comptime_declarations(registration, [], None)
+    // root is the exact UTF8 pathname passed by this fixture to mkdir/write,
+    // not a lossy conversion of an observed native name. Canonicalization must
+    // return the original native OS root before App discovers raw child names.
+    native_root :: app_convention_native.canonicalize(app_convention_path.from_text(root, app_convention_path.PathPlatform.Unix)) ?? panic("native App fixture root")
+    sema_finalize_registration_graph(registration, stage, [], [], None, None, native_root)
+}
+fn app_convention_has_code(diagnostics: [Diagnostic], code: String) -> Bool Never! {
+    loop diagnostic in diagnostics { if diagnostic.code == code -> return true }
+    false
+}
+fn app_convention_paths(graph: MIRAppGraph) -> [String] Never! { loop route in graph.routes -> route.path }
+fn app_convention_contains(paths: [String], path: String) -> Bool Never! {
+    loop value in paths { if value == path -> return true }
+    false
+}
+
+#Test("routes_from_expands_convention_files") {
+    guard :: app_convention_host.exclusive_read_tests()
+    env_guard :: app_convention_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    temp :: app_convention_files.temp_dir("jet-app-routes-from") ?? panic("temporary directory")
+    root :: temp.path
+    app_convention_files.mkdir(app_convention_files.join(root, "routes/about"), true) ?? panic("routes")
+    app_convention_files.write(app_convention_files.join(root, "app.jet"), "use core.web as web\nfn about_page() -> WebPage {{ return web.page(\"About\", \"us\") }}\nfn run() -> App {{ return web.app().routes(from: \"routes\").ssr() }}\n") ?? panic("app")
+    app_convention_files.write(app_convention_files.join(root, "routes/index.jet"), "fn page() {{}}\n") ?? panic("index")
+    app_convention_files.write(app_convention_files.join(root, "routes/about/page.jet"), "fn page() {{}}\n") ?? panic("about")
+    session :: check_reads_begin_session()
+    facts :: app_convention_check(root, "app.jet", [String]{"app.jet"})
+    loop diagnostic in facts.diagnostics -> assert(diagnostic.severity != DIAGNOSTIC_ERROR)
+    assert(facts.complete, "original routes-from check must succeed")
+    graph :: facts.effect_facts.web_app ?? panic("checked App graph")
+    paths :: app_convention_paths(graph)
+    assert(app_convention_contains(paths, "/"))
+    assert(app_convention_contains(paths, "/about"))
+    loop route in graph.routes -> assert(route.render == MIRAppRenderMode.SSR)
+    reads :: check_reads_finish_session(^session)
+    assert(reads.len() > 0, "convention expansion must retain actual native reads")
+    app_convention_files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("collision_and_stray_and_dynamic_diagnose") {
+    guard :: app_convention_host.exclusive_read_tests()
+    env_guard :: app_convention_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    temp :: app_convention_files.temp_dir("jet-app-diags") ?? panic("temporary directory")
+    root :: temp.path
+    app_convention_files.mkdir(app_convention_files.join(root, "routes"), true) ?? panic("routes")
+    app_convention_files.write(app_convention_files.join(root, "routes/index.jet"), "fn page() {{}}\n") ?? panic("index")
+    app_convention_files.write(app_convention_files.join(root, "routes/stray.jet"), "fn helper() {{}}\n") ?? panic("stray")
+    app_convention_files.write(app_convention_files.join(root, "collision.jet"), "use core.web as web\n#Target(Web)\nfn home() -> WebPage {{ return web.page(\"h\", \"b\") }}\nfn run() -> App {{ return web.app().route(\"/\", home).routes(from: \"routes\").csr() }}\n") ?? panic("collision")
+    collision :: app_convention_check(root, "collision.jet", [String]{"collision.jet"})
+    assert(app_convention_has_code(collision.diagnostics, "E2807"))
+    app_convention_files.write(app_convention_files.join(root, "stray.jet"), "use core.web as web\n#Target(Web)\nfn run() -> App {{ return web.app().routes(from: \"routes\").csr() }}\n") ?? panic("stray entry")
+    stray :: app_convention_check(root, "stray.jet", [String]{"stray.jet"})
+    assert(app_convention_has_code(stray.diagnostics, "E2806"))
+    app_convention_files.write(app_convention_files.join(root, "dynamic.jet"), "use core.web as web\n#Target(Web)\nfn pick() -> Int {{ return 1 }}\nfn run() -> App {{\n    return web.app().route(\"/\", pick()).csr()\n}}\n") ?? panic("dynamic")
+    dynamic :: app_convention_check(root, "dynamic.jet", [String]{"dynamic.jet"})
+    assert(app_convention_has_code(dynamic.diagnostics, "E2810"))
+    app_convention_files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("web_app_routes_from_exhaustive") {
+    guard :: app_convention_host.exclusive_read_tests()
+    env_guard :: app_convention_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    temp :: app_convention_files.temp_dir("webapp-routes") ?? panic("temporary directory")
+    root :: temp.path
+    app_convention_files.mkdir(app_convention_files.join(root, "routes/orders"), true) ?? panic("routes")
+    app_convention_files.write(app_convention_files.join(root, "app.jet"), "\nuse core.web as web\n\nfn run() -> App {{\n    return web.app().routes(from: \"routes\")\n}}\n") ?? panic("app")
+    app_convention_files.write(app_convention_files.join(root, "routes/index.jet"), "fn page() {{}}\n") ?? panic("index")
+    app_convention_files.write(app_convention_files.join(root, "routes/orders/[id].jet"), "fn page() {{}}\n") ?? panic("id")
+    app_convention_files.write(app_convention_files.join(root, "routes/_helper.jet"), "fn helper() {{}}\n") ?? panic("helper")
+    facts :: app_convention_check(root, "app.jet", [String]{"app.jet"})
+    loop diagnostic in facts.diagnostics -> assert(diagnostic.severity != DIAGNOSTIC_ERROR)
+    assert(facts.complete, "original exhaustive routes-from check must succeed")
+    graph :: facts.effect_facts.web_app ?? panic("checked App graph")
+    paths :: app_convention_paths(graph)
+    assert(app_convention_contains(paths, "/"))
+    assert(app_convention_contains(paths, "/orders/:id"))
+    loop route in graph.routes -> assert(!route.provenance.contains("_helper"))
+    app_convention_files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("nonUnicode convention basenames do not use the lossy underscore optout") {
+    guard :: app_convention_host.exclusive_read_tests()
+    env_guard :: app_convention_host.raw_env_override(CHECK_READS_INJECT_ENV, None)
+    temp :: app_convention_files.temp_dir("jet-app-raw-convention") ?? panic("temporary directory")
+    routes :: app_convention_files.join(temp.path, "routes")
+    app_convention_files.mkdir(routes, true) ?? panic("routes")
+    // The real platform fixture names this file _<invalid OS token>.jet.
+    // Rust file_name.to_str() is None, so it is NOT the Unicode `_` optout.
+    raw_file :: app_convention_host.nonunicode_file(routes, "fn page() {{}}\n".bytes())
+    basename :: app_convention_files.basename(raw_file.1)
+    assert(basename.starts_with("_") && basename.ends_with(".jet"))
+    app_convention_files.write(app_convention_files.join(temp.path, "app.jet"), "use core.web as web\nfn run() -> App {{ return web.app().routes(from: \"routes\") }}\n") ?? panic("app")
+    facts :: app_convention_check(temp.path, "app.jet", [String]{"app.jet"})
+    loop diagnostic in facts.diagnostics -> assert(diagnostic.severity != DIAGNOSTIC_ERROR)
+    graph :: facts.effect_facts.web_app ?? panic("checked raw convention")
+    assert(graph.routes.len() == 1)
+    expected :: "routes/{basename}"
+    assert(graph.routes[0].provenance == expected)
+    app_convention_files.remove_all(temp.path) ?? panic("cleanup")
+}
+
+
+#Test("convention path and handler preserve indices dynamic segments and Unicode") {
+    assert(sema_app_convention_path("index.jet") == "/")
+    assert(sema_app_convention_path("about/page.jet") == "/about")
+    assert(sema_app_convention_path("orders/[id].jet") == "/orders/:id")
+    assert(sema_app_convention_path("é/[名前].jet") == "/é/:名前")
+    assert(sema_app_convention_handler("orders/[id].jet") == "orders__id_")
+    assert(sema_app_convention_handler("a.jet.jet") == "a")
+}

@@ -1,0 +1,103 @@
+// Rust lvalue support extends the canonical AST carriers, without duplicate types.
+use AST.Statements.[LValue, MetaAttr, MetaField, MetaFacts, Binding, Marker]
+use AST.Expressions.[Expr, StrPart, IndexKind]
+use AST.Items.[MaturityTag]
+use Diagnostics.[Span]
+use Syntax
+
+// Rust: crates/jet-foundation/src/AST/lvalues.rs:6
+// LValue: AST/Statements.jet:136; Local, Index and Field retain all payloads.
+// Rust: crates/jet-foundation/src/AST/lvalues.rs:42
+// IndexKind: AST/Expressions.jet:176; all nine variants, including semantic proofs.
+impl LValue {
+    // Rust: crates/jet-foundation/src/AST/lvalues.rs:33
+    pub fn span(self) -> Span Never! {
+        if self == {
+            .Local(_, name_span) -> name_span
+            .Index(_, _, span, _) | .Field(_, _, span) -> span
+        }
+    }
+}
+impl IndexKind {
+    // Rust: crates/jet-foundation/src/AST/lvalues.rs:43
+    pub fn default() -> IndexKind Never! { .Unknown }
+}
+// Rust: crates/jet-foundation/src/AST/lvalues.rs:71
+// MetaField: AST/Statements.jet:142 (Category, Tunable, Maturity, Unknown).
+// Rust: crates/jet-foundation/src/AST/lvalues.rs:93
+// MetaAttr: AST/Statements.jet:149 (fields, span).
+// Rust: crates/jet-foundation/src/AST/lvalues.rs:99
+// MetaFacts: AST/Statements.jet:154 (category, tunable).
+impl MetaAttr {
+    // Rust: crates/jet-foundation/src/AST/lvalues.rs:105
+    pub fn facts(self) -> MetaFacts Never! {
+        out := MetaFacts{category: None, tunable: false}
+        loop field in self.fields {
+            if field == {
+                .Category(value, _) -> {
+                    if value == {
+                        .Str(parts, _) -> {
+                            if parts.len() == 1 {
+                                if parts[0] == {
+                                    .Lit(text) -> { if !text.is_empty() -> out.category = Val(~text) }
+                                    else -> {}
+                                }
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+                .Tunable(_) -> out.tunable = true
+                .Maturity(_, _) | .Unknown(_, _, _) -> {}
+            }
+        }
+        out
+    }
+    // Rust: crates/jet-foundation/src/AST/lvalues.rs:132
+    pub fn maturity(self) -> (tag: MaturityTag, span: Span)? Never! {
+        loop field in self.fields {
+            if field == {
+                .Maturity(value, span) -> {
+                    if value == {
+                        .EnumLit(type_name, variant, _, args, _, _) -> {
+                            if type_name.is_empty() && args.is_empty() {
+                                if variant == {
+                                    Syntax.MARKER_EXPERIMENTAL -> return Val((.Experimental, span))
+                                    Syntax.MARKER_TESTED -> return Val((.Tested, span))
+                                    Syntax.MARKER_HARDENED -> return Val((.Hardened, span))
+                                    else -> {}
+                                }
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+                else -> {}
+            }
+        }
+        None
+    }
+}
+// Rust: crates/jet-foundation/src/AST/lvalues.rs:162
+// ForKind: AST/Statements.jet:131; Range(start,end,step,exclusive) and In(collection,step).
+// Rust: crates/jet-foundation/src/AST/lvalues.rs:180
+// Binding: AST/Statements.jet:159; every source/sema carrier field remains canonical.
+impl Binding {
+    // Rust: crates/jet-foundation/src/AST/lvalues.rs:238
+    pub fn marker(self, name: String) -> (@Marker)? from self {
+        loop marker in self.markers {
+            if marker.name == name -> return Val(marker)
+        }
+        None
+    }
+    // Rust: crates/jet-foundation/src/AST/lvalues.rs:243
+    pub fn track(self) -> Bool Never! { self.marker(Syntax.MARKER_TRACK).is_some() }
+    // Rust: crates/jet-foundation/src/AST/lvalues.rs:249
+    pub fn reactive_local(self) -> Bool Never! { self.marker(Syntax.MARKER_LOCAL).is_some() }
+    // Rust: crates/jet-foundation/src/AST/lvalues.rs:254
+    pub fn reactive_shared(self) -> Bool Never! { self.marker(Syntax.MARKER_SHARED).is_some() }
+}
+// Rust: crates/jet-foundation/src/AST/lvalues.rs:260
+// GcPromotion -> AST/Statements.jet:180 GCPromotion; span/scope/policy_provenance/reason/edges/collection_len.
+// Rust: crates/jet-foundation/src/AST/lvalues.rs:272
+// GcPromotionEdge -> AST/Statements.jet:189 GCPromotionEdge; binding/slot/group.

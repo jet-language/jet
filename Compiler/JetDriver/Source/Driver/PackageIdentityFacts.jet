@@ -1,0 +1,128 @@
+// Rust PackageIdentity.rs::from_ledger/module_interface source dependency closure.
+// Small retained facts from the real loader; never clone the AST/registration graph.
+use jet_foundation.[
+    PackageIdentityDependencyRoot,
+    PackageIdentityBundle,
+    PackageIdentityLedger,
+    PackageIdentityLoadedModule,
+    PackageIdentityImportEdge,
+    PackageIdentityModuleInterface,
+    PackageTargetFactBundle,
+    PackageKeyTargetFact,
+    package_identity_project_module,
+    mir_sha256_hex,
+]
+use core.files.runtime.kernel_path_components as compiler_identity_path
+use jet_sema.[SemaCompilerModuleSource, SemaGraphResult, SemaRegistrationGraph, SemaSourceOrigin]
+pub struct JetDriverPackageIdentityFacts {
+    pub interfaces: [PackageIdentityModuleInterface]
+    pub modules: [PackageIdentityLoadedModule]
+    pub namespaces: [Int:compiler_identity_path.OsPath]
+    pub dependency_roots: [PackageIdentityDependencyRoot]
+    pub imports: [PackageIdentityImportEdge]
+}
+// Caller owns load.modules and its original inline nesting for this projection.
+fn jet_driver_package_identity_facts(load: JetDriverLoadResult, module_sources: [SemaCompilerModuleSource], registration: SemaRegistrationGraph, checked: SemaGraphResult) -> JetDriverPackageIdentityFacts Never! {
+    interfaces := [PackageIdentityModuleInterface]{}
+    modules := [PackageIdentityLoadedModule]{}
+    namespaces := [Int:compiler_identity_path.OsPath]{}
+    module_index := [String:Int]{}
+    loop (registration_index, loaded) in load.modules {
+        unit :: load.source_units[loaded.source_unit_index]
+        if !unit.bundle_module -> next
+        index :: interfaces.len()
+        module_index[loaded.module_identity] = index
+        &interfaces.push(package_identity_project_module<SemaRegistrationGraph>(jet_driver_module_program(load, loaded), registration))
+        source :: module_sources[registration_index]
+        path :: if source.physical_path == {
+            .Val(physical) -> physical
+            .None -> {
+                if unit.source_origin == SemaSourceOrigin.Snapshot -> panic("a loaded physical module must retain its OS path")
+                // Generated/Core labels are actual compiler-authored paths,
+                // not a recovery of native-authorized lossy display text.
+                compiler_identity_path.from_text(unit.path, load.project_root.platform)
+            }
+        }
+        &modules.push(PackageIdentityLoadedModule{path: path, source_digest: mir_sha256_hex(source.loaded_source), is_core_source: jet_driver_unit_is_core(unit)})
+        if load.package_namespaces.get(loaded.module_identity) == .Val(root) -> namespaces[index] = root
+    }
+    imports := [PackageIdentityImportEdge]{}
+    loop edge in load.imports {
+        from :: module_index.get(edge.source_module_identity) ?? next
+        to :: module_index.get(edge.target_module_identity) ?? next
+        &imports.push(PackageIdentityImportEdge{from: from, to: to})
+    }
+    // Reuse the once-produced root dependency ledger retained by typed policy.
+    dependency_roots := [PackageIdentityDependencyRoot]{}
+    loop policy in checked.package_policies {
+        if policy.package_identity != load.package_identity -> next
+        loop (name, path) in policy.dep_roots -> &dependency_roots.push(PackageIdentityDependencyRoot{name: name, path: path})
+        break
+    }
+    JetDriverPackageIdentityFacts{interfaces: interfaces, modules: modules, namespaces: namespaces, dependency_roots: dependency_roots, imports: imports}
+}
+
+fn jet_driver_package_dependency_roots(load: JetDriverLoadResult, roots: View<JetDriverAuthorizedSourceRoot>) -> [PackageIdentityDependencyRoot] Never! {
+    // Resolved declaration names retain their selected authority root. Root's
+    // direct dependencies win names before transitive declarations (Rust Loader
+    // collect_dep_dirs); no inference from module aliases or displayed paths.
+    selected := [String:compiler_identity_path.OsPath]{}
+    package_by_root := [Int:Int]{}
+    pending := [Int]{}
+    seen := [Int:Bool]{}
+    loop (index, package) in load.packages {
+        package_by_root[package.root_index] = index
+        if package.identity == load.package_identity {
+            &pending.push(package.root_index)
+            seen[package.root_index] = true
+        }
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        root_index :: pending[cursor]
+        cursor += 1
+        package_index :: package_by_root.get(root_index) ?? next
+        loop dependency in load.packages[package_index].dependencies {
+            target :: dependency.target_root_index
+            if target < 0 || target >= roots.len() -> next
+            if selected.get(dependency.name) == None -> selected[dependency.name] = roots[target].canonical_path
+            if seen.get(target) == None {
+                seen[target] = true
+                &pending.push(target)
+            }
+        }
+    }
+    dependency_roots := [PackageIdentityDependencyRoot]{}
+    loop (name, path) in selected -> &dependency_roots.push(PackageIdentityDependencyRoot{name: name, path: path})
+    return dependency_roots
+}
+
+// Borrow the actual loader partition inputs on a resident query hit. #4494:
+// nested returned storage loans must be proven by the rebuilt native compiler.
+pub fn jet_driver_compiler_package_bundle(result: JetDriverCompilerCheckResult) -> PackageIdentityBundle? from result {
+    root :: result.project_root ?? return None
+    facts :: result.package_identity ?? return None
+    Val(PackageIdentityBundle{project_root: root, dependency_roots: facts.dependency_roots[0..<facts.dependency_roots.len()], modules: facts.modules[0..<facts.modules.len()], interfaces: facts.interfaces[0..<facts.interfaces.len()], ledger: PackageIdentityLedger{namespaces: facts.namespaces, imports: facts.imports[0..<facts.imports.len()]}})
+}
+
+#Error
+pub enum JetDriverTargetFactError {
+    MissingNativeTargetTriple
+    MissingNativeTargetDossier
+    MissingCheckedBuildSnapshot
+    MissingBundleEdition
+}
+// Actual checked producer, not a hash of hand-authored fact strings. Native
+// capture has no replacement lookup at digest time and no backend fallback.
+pub fn jet_driver_compiler_target_fact_bundle(result: JetDriverCompilerCheckResult) -> PackageTargetFactBundle JetDriverTargetFactError! from result {
+    if result.target_fact_gate == .Val(gate) -> return Err(gate)
+    registration :: result.registration ?? return Err(JetDriverTargetFactError.MissingCheckedBuildSnapshot)
+    snapshot :: registration.build_facts.snapshot ?? return Err(JetDriverTargetFactError.MissingCheckedBuildSnapshot)
+    edition :: result.target_fact_edition ?? return Err(JetDriverTargetFactError.MissingBundleEdition)
+    Ok(PackageTargetFactBundle{active_os: snapshot.os, edition: edition, web_partition_enforced: result.target_fact_web_partition, layer_ceiling: result.target_fact_layer_ceiling, build_facts: snapshot})
+}
+pub fn jet_driver_compiler_target_fact_pairs(result: JetDriverCompilerCheckResult) -> [PackageKeyTargetFact] JetDriverTargetFactError! from result {
+    if result.target_fact_gate == .Val(gate) -> return Err(gate)
+    pairs :: result.target_facts ?? return Err(JetDriverTargetFactError.MissingCheckedBuildSnapshot)
+    Ok(pairs)
+}

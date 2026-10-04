@@ -7,6 +7,9 @@
 // `package.jet`, or the entry's own directory for a loose file.
 use core.files as cli_files
 use core.sys as cli_sys
+use jet_foundation.[
+    foundation_embedded_core,
+]
 use jet_driver.[
     JetDriverAuthorizedSourceFile,
     JetDriverAuthorizedSourceRoot,
@@ -14,19 +17,15 @@ use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
     JetDriverCompileTarget,
-    JetDriverCoreSource,
     JetDriverHostFacts,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_USER_ERROR,
     jet_driver_compile,
+    jet_driver_embedded_core_sources,
 ]
 use jet_eval.[
     jet_eval_default_config,
 ]
-
-// Names the Jet toolchain source tree: the directory that holds `Core/`. The
-// Rust host embeds those bodies; the Jet host reads them from this tree.
-pub JET_CLI_TOOLCHAIN_ROOT_ENV :: "JET_TOOLCHAIN_ROOT"
 
 // crates/jet-foundation/src/SHA256.rs `MAX_TREE_DEPTH`.
 JET_CLI_MAX_TREE_DEPTH :: 256
@@ -199,13 +198,8 @@ pub fn jet_cli_compile_file(file: String, color: Bool) -> JetCLICompiled {
     if jet_cli_foreign_cache_files(root, &caches) == .Val(problem) {
         return jet_cli_refused("can't securely read the foreign bindings under `{root}`: {problem}", "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color)
     }
-    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return jet_cli_refused("`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the Core library sources can't be found", "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`", color)
-    core_sources := [JetDriverCoreSource]{}
-    loop row in JET_CLI_CORE_SOURCE_ROWS {
-        core_path :: jet_cli_authority_path(toolchain, row.path)
-        body :: cli_files.read(core_path) ?? return jet_cli_refused("can't read the Core library source `{core_path}`", "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`", color)
-        &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, source: body})
-    }
+    core :: foundation_embedded_core()
+    core_sources :: jet_driver_embedded_core_sources(core)
     root_identity :: jet_cli_identity_key("directory", root_stat)
     snapshot :: JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: caches}},
@@ -215,7 +209,7 @@ pub fn jet_cli_compile_file(file: String, color: Bool) -> JetCLICompiled {
     os :: cli_sys.name()
     request := JetDriverCompileRequest{
         authorized_sources: ~snapshot,
-        canonical_effect_source: JET_CLI_EFFECT_SOURCE,
+        canonical_effect_source: core.effect_source(),
         core_sources: core_sources,
         host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: None},
         eval_config: jet_eval_default_config(),

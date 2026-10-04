@@ -284,10 +284,6 @@ const FIELD_RENAMES = {
   MIRNameAlias: { module: "module_index" },
 };
 
-// Variant renames: Jet enum -> Rust variant name -> Jet variant name.
-const VARIANT_RENAMES = {
-  MIRStringPartKind: { Value: "Interpolation" },
-};
 
 const fold = (name) => name.toLowerCase().replace(/_/g, "");
 
@@ -391,12 +387,6 @@ export class Converter {
         }),
       };
     }
-    // A Rust enum value filling a Jet struct that wraps that enum
-    // (`MirStringPart::Value(v)` -> `MIRStringPart{kind: Interpolation(v)}`).
-    const wrapped = def.fields.length === 1 && def.fields[0].type.k === "named" ? this.schema.get(def.fields[0].type.name) : undefined;
-    if (wrapped?.kind === "enum" && (node.k === "tuple" || node.k === "unit") && node.name && fold(node.name) !== fold(def.name)) {
-      return { fields: [this.convert(node, def.fields[0].type, `${at}.${def.fields[0].name}`)] };
-    }
     if (node.k === "tuple" || node.k === "list") {
       const items = node.items;
       if (def.fields.length === 1 && items.length !== 1) return { fields: [this.convert(node, def.fields[0].type, `${at}.${def.fields[0].name}`)] };
@@ -413,7 +403,7 @@ export class Converter {
 
   enumValue(node, def, where) {
     const at = `${where}.${def.name}`;
-    const hostName = VARIANT_RENAMES[def.name]?.[node.name ?? ""] ?? node.name ?? "";
+    const hostName = node.name ?? "";
     let tag = def.variants.findIndex((v) => fold(v.name) === fold(hostName));
     // Rust spells "no such fact" `None` where Jet names the variant `No<Thing>`.
     if (tag < 0 && hostName === "None") tag = def.variants.findIndex((v) => /^No[A-Z]/.test(v.name));

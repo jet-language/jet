@@ -1,0 +1,110 @@
+// DevtoolsNative.rs:1-153,313-400. Native transport owns no event catalogue.
+// The process registries, retained erased callbacks, and automatic guard
+// destruction require Core's #4494 physical owner; no host wrappers substitute.
+pub struct JetDevtoolsNativeColor { pub red: U8, pub green: U8, pub blue: U8, pub alpha: U8 }
+pub JET_DEVTOOLS_NATIVE_WHITE :: JetDevtoolsNativeColor{red: U8{255}, green: U8{255}, blue: U8{255}, alpha: U8{255}}
+pub fn jet_devtools_native_color_new(red: U8, green: U8, blue: U8, alpha: U8) -> JetDevtoolsNativeColor Never! { JetDevtoolsNativeColor{red: red, green: green, blue: blue, alpha: alpha} }
+pub enum JetDevtoolsNativeDrawCommand {
+    Rectangle(x: I32, y: I32, width: I32, height: I32, color: JetDevtoolsNativeColor)
+    Text(text: String, x: I32, y: I32, size: I32, color: JetDevtoolsNativeColor)
+}
+pub enum JetDevtoolsNativeInput {
+    Key(code: String, pressed: Bool)
+    Gamepad(gamepad: I64, control: String, pressed: Bool)
+}
+pub struct JetDevtoolsNativeWindow { pub session_id: String, pub width: U32, pub height: U32 }
+pub fn jet_devtools_native_window_new(^session_id: String, width: U32, height: U32) -> JetDevtoolsNativeWindow Never! { JetDevtoolsNativeWindow{session_id: ^session_id, width: width, height: height} }
+pub struct JetDevtoolsNativeFrame { pub session_id: String, pub frame_index: U64, pub width: U32, pub height: U32 }
+pub fn jet_devtools_native_frame_new(^session_id: String, frame_index: U64, width: U32, height: U32) -> JetDevtoolsNativeFrame Never! { JetDevtoolsNativeFrame{session_id: ^session_id, frame_index: frame_index, width: width, height: height} }
+pub trait JetDevtoolsNativeHost {
+    fn on_event(self, session_id: String, ^event: JetDevtoolsEvent) Never!
+    fn on_window_open(self, ^window: JetDevtoolsNativeWindow) Never!
+    fn on_window_close(self, session_id: String) Never!
+    fn on_input(self, session_id: String, ^input: JetDevtoolsNativeInput) -> Bool Never!
+    fn on_frame_begin(self, ^frame: JetDevtoolsNativeFrame) -> [JetDevtoolsNativeDrawCommand] Never!
+    fn on_draw(self, session_id: String, ^command: JetDevtoolsNativeDrawCommand) Never!
+    fn on_frame_end(self, session_id: String) Never!
+}
+// Native.rs142 and Control.rs14 independently own the same admission law.
+// Kept separate from Observation's length-only metadata validation.
+fn jet_devtools_validate_command_text(value: String, field: String) Err! {
+    if value.len() == 0 -> return Err("jet.devtools.v1 {field} must not be empty")
+    if value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES -> return Err("jet.devtools.v1 {field} exceeds the Prelude text limit")
+    if jet_devtools_text_has_control(value) -> return Err("jet.devtools.v1 {field} contains a control character")
+    return
+}
+// Native.rs325 and Control.rs31 have IDENTICAL quote laws. Sole host-only
+// quotation kernel: unlike Observation it spells BS/FF as \b/\f.
+fn jet_devtools_control_quote(value: String, out: &[U8]) Never! {
+    &out.push(U8{34})
+    raw :: value.bytes()
+    index := 0
+    loop index < raw.len() {
+        byte :: Int.from_u8(raw[index])
+        control :: jet_devtools_control_at(raw.view(0..<raw.len()), index)
+        if {
+            byte == 34 -> jet_devtools_wire_append(&out, "\\\"")
+            byte == 92 -> jet_devtools_wire_append(&out, "\\\\")
+            byte == 8 -> jet_devtools_wire_append(&out, "\\b")
+            byte == 12 -> jet_devtools_wire_append(&out, "\\f")
+            byte == 10 -> jet_devtools_wire_append(&out, "\\n")
+            byte == 13 -> jet_devtools_wire_append(&out, "\\r")
+            byte == 9 -> jet_devtools_wire_append(&out, "\\t")
+            control >= 0 -> {
+                jet_devtools_wire_append(&out, "\\u00")
+                &out.push(jet_devtools_hex_digit(U8{control >> 4}))
+                &out.push(jet_devtools_hex_digit(U8{control & 255}))
+                if byte == 194 -> index += 1
+            }
+            else -> &out.push(raw[index])
+        }
+        index += 1
+    }
+    &out.push(U8{34})
+}
+fn jet_devtools_relay_json_string(value: String) -> String Never! {
+    out := [U8]{}
+    jet_devtools_control_quote(value, &out)
+    String.from_bytes(out) ?? panic("control writer preserves UTF-8")
+}
+// Original relay parser is a narrow STRING extractor, not a JSON parser.
+// In particular \u escapes are unsupported; do not broaden its acceptance.
+fn jet_devtools_relay_string_field(frame: String, field: String) -> String Err! {
+    marker :: "\"{field}\":\""
+    start :: frame.index_of(marker) ?? return Err("game control relay is missing `{field}`")
+    remaining :: frame.slice((start + marker.len())..<frame.len())
+    raw :: remaining.bytes()
+    out := [U8]{}
+    escaped := false
+    loop index in 0..<raw.len() {
+        byte :: Int.from_u8(raw[index])
+        if escaped {
+            decoded :: if { byte == 34 || byte == 92 || byte == 47 -> byte, byte == 98 -> 8, byte == 102 -> 12, byte == 110 -> 10, byte == 114 -> 13, byte == 116 -> 9, else -> -1 }
+            if decoded < 0 -> return Err("game control relay `{field}` contains an unsupported escape")
+            &out.push(U8{decoded})
+            escaped = false
+        } else {
+            if {
+                byte == 92 -> escaped = true
+                byte == 34 -> {
+                    value :: String.from_bytes(out) ?? panic("relay string boundaries preserve UTF-8")
+                    jet_devtools_validate_command_text(value, field)
+                    return Ok(value)
+                }
+                else -> &out.push(raw[index])
+            }
+        }
+    }
+    Err("game control relay `{field}` is not a closed JSON string")
+}
+fn jet_devtools_validate_relay_frame(frame: String, session_id: String) Err! {
+    if frame.bytes().len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES -> return Err("game control relay frame exceeds the envelope limit")
+    protocol :: jet_devtools_relay_string_field(frame, "protocol")
+    if protocol != JET_DEVTOOLS_PROTOCOL -> return Err("game control relay protocol is unsupported")
+    frame_session :: jet_devtools_relay_string_field(frame, "session_id")
+    if frame_session != session_id -> return Err("game control relay belongs to another devtools session")
+    direction :: jet_devtools_relay_string_field(frame, "direction")
+    if direction != "host_to_runtime" -> return Err("game control relay direction is unsupported")
+    if !frame.contains(`"commands":[{"kind":"GameControl","payload":`) -> return Err("game control relay has no GameControl command payload")
+    return
+}

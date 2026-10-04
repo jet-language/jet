@@ -1,0 +1,359 @@
+// MirImageCodec.rs:6-67,142-767,1593-1710. Byte positions are retained while
+// masking Rust comments/literals: lifetimes remain syntax, Unicode stays UTF-8.
+// The generator consumes declarations, never native runtime objects.
+pub enum MIRImageSchemaType {
+    Named(name: String)
+    Optional(inner: MIRImageSchemaType)
+    Sequence(inner: MIRImageSchemaType)
+    Set(inner: MIRImageSchemaType, hash: Bool)
+    Map(key: MIRImageSchemaType, value: MIRImageSchemaType, hash: Bool)
+    Boxed(inner: MIRImageSchemaType)
+    Shared(inner: MIRImageSchemaType)
+    Tuple(items: [MIRImageSchemaType])
+    Array(inner: MIRImageSchemaType, length: Int)
+    StaticString
+}
+pub struct MIRImageSchemaField { pub name: String, pub ty: MIRImageSchemaType, pub public: Bool }
+pub enum MIRImageSchemaVariantBody {
+    Unit
+    Tuple(fields: [MIRImageSchemaType])
+    Struct(fields: [MIRImageSchemaField])
+    Unsupported(reason: String)
+}
+pub struct MIRImageSchemaVariant { pub name: String, pub body: MIRImageSchemaVariantBody }
+pub enum MIRImageSchemaBody {
+    Struct(fields: [MIRImageSchemaField])
+    Tuple(fields: [MIRImageSchemaField])
+    Unit
+    Alias(ty: MIRImageSchemaType)
+    Enum(variants: [MIRImageSchemaVariant])
+}
+pub struct MIRImageSchemaDefinition {
+    pub key: String
+    pub path: String
+    pub module_name: String
+    pub name: String
+    pub imports: [String:String]
+    pub body: MIRImageSchemaBody
+    pub generic: Bool
+}
+pub struct MIRImageSchemaWildcard { pub public_module: String, pub target_module: String }
+pub struct MIRImageSchema {
+    pub definitions: [String:MIRImageSchemaDefinition]
+    pub aliases: [String:String]
+    pub wildcards: [MIRImageSchemaWildcard]
+}
+pub fn mir_image_schema_new() -> MIRImageSchema Never! {
+    MIRImageSchema{definitions: [String:MIRImageSchemaDefinition]{}, aliases: [String:String]{}, wildcards: [MIRImageSchemaWildcard]{}}
+}
+fn mir_image_gen_byte(text: String, index: Int) -> U8? Never! {
+    bytes :: text.bytes()
+    if index < 0 || index >= bytes.len() -> return None
+    Val(bytes[index])
+}
+fn mir_image_gen_identifier_byte(byte: U8) -> Bool Never! {
+    (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || (byte >= U8{48} && byte <= U8{57}) || byte == U8{95}
+}
+fn mir_image_gen_space(byte: U8) -> Bool Never! { byte == U8{32} || (byte >= U8{9} && byte <= U8{13}) }
+fn mir_image_gen_hex(byte: U8) -> Bool Never! {
+    (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{65} && byte <= U8{70}) || (byte >= U8{97} && byte <= U8{102})
+}
+fn mir_image_gen_skip_space(text: String, start: Int) -> Int Never! {
+    cursor := start
+    bytes :: text.bytes()
+    loop cursor < bytes.len() && mir_image_gen_space(bytes[cursor]) -> cursor += 1
+    cursor
+}
+fn mir_image_gen_starts(text: String, cursor: Int, token: String) -> Bool Never! {
+    bytes :: text.bytes()
+    wanted :: token.bytes()
+    if cursor < 0 || cursor > bytes.len() || wanted.len() > bytes.len() - cursor -> return false
+    loop index in 0..<wanted.len() -> if bytes[cursor + index] != wanted[index] -> return false
+    true
+}
+fn mir_image_gen_token(text: String, cursor: Int, token: String) -> Bool Never! {
+    if !mir_image_gen_starts(text, cursor, token) -> return false
+    before :: mir_image_gen_byte(text, cursor - 1)
+    after :: mir_image_gen_byte(text, cursor + token.bytes().len())
+    if before == .Val(byte) && mir_image_gen_identifier_byte(byte) -> return false
+    if after == .Val(byte) && mir_image_gen_identifier_byte(byte) -> return false
+    true
+}
+fn mir_image_gen_find(text: String, token: String, start: Int) -> Int? Never! {
+    cursor := start
+    loop cursor <= text.bytes().len() {
+        if mir_image_gen_starts(text, cursor, token) -> return Val(cursor)
+        cursor += 1
+    }
+    None
+}
+fn mir_image_gen_keyword(text: String, token: String, start: Int) -> Int? Never! {
+    cursor := start
+    loop cursor <= text.bytes().len() {
+        if mir_image_gen_token(text, cursor, token) -> return Val(cursor)
+        cursor += 1
+    }
+    None
+}
+pub fn mir_image_generator_matching(text: String, start: Int, open: U8, close: U8) -> Int? Never! {
+    bytes :: text.bytes()
+    depth := 0
+    loop index in start..<bytes.len() {
+        if bytes[index] == open -> depth += 1
+        else if bytes[index] == close && !(close == U8{62} && index > 0 && bytes[index - 1] == U8{45}) {
+            if depth == 0 -> return None
+            depth -= 1
+            if depth == 0 -> return Val(index)
+        }
+    }
+    None
+}
+pub fn mir_image_generator_top_level(text: String, wanted: U8) -> Int? Never! {
+    bytes :: text.bytes()
+    depth := 0
+    loop index in 0..<bytes.len() {
+        byte :: bytes[index]
+        if byte == wanted && depth == 0 -> return Val(index)
+        if byte == U8{60} || byte == U8{40} || byte == U8{91} || byte == U8{123} -> depth += 1
+        else if byte == U8{62} && index > 0 && bytes[index - 1] == U8{45} {}
+        else if byte == U8{62} || byte == U8{41} || byte == U8{93} || byte == U8{125} -> depth = if depth > 0 -> depth - 1 else -> 0
+    }
+    None
+}
+pub fn mir_image_generator_split(text: String, delimiter: U8) -> [String] Never! {
+    bytes :: text.bytes()
+    parts := [String]{}
+    depth := 0
+    start := 0
+    loop index in 0..<bytes.len() {
+        byte :: bytes[index]
+        if byte == U8{60} || byte == U8{40} || byte == U8{91} || byte == U8{123} -> depth += 1
+        else if byte == U8{62} && index > 0 && bytes[index - 1] == U8{45} {}
+        else if byte == U8{62} || byte == U8{41} || byte == U8{93} || byte == U8{125} -> depth = if depth > 0 -> depth - 1 else -> 0
+        else if byte == delimiter && depth == 0 {
+            &parts.push(text.slice(start, index))
+            start = index + 1
+        }
+    }
+    &parts.push(text.slice(start, bytes.len()))
+    parts
+}
+fn mir_image_gen_quoted_end(text: String, start: Int, quote: U8) -> Int Never! {
+    bytes :: text.bytes()
+    cursor := start + 1
+    loop cursor < bytes.len() {
+        if bytes[cursor] == U8{92} -> cursor = if cursor + 2 < bytes.len() -> cursor + 2 else -> bytes.len()
+        else if bytes[cursor] == quote -> return cursor + 1
+        else -> cursor += 1
+    }
+    bytes.len()
+}
+fn mir_image_gen_raw_end(text: String, start: Int) -> Int? Never! {
+    bytes :: text.bytes()
+    cursor := start
+    if cursor < bytes.len() && bytes[cursor] == U8{98} -> cursor += 1
+    if cursor >= bytes.len() || bytes[cursor] != U8{114} -> return None
+    cursor += 1
+    hashes := 0
+    loop cursor < bytes.len() && bytes[cursor] == U8{35} { hashes += 1; cursor += 1 }
+    if cursor >= bytes.len() || bytes[cursor] != U8{34} -> return None
+    cursor += 1
+    loop cursor < bytes.len() {
+        if bytes[cursor] == U8{34} {
+            end := cursor + 1
+            count := 0
+            loop end < bytes.len() && count < hashes && bytes[end] == U8{35} { end += 1; count += 1 }
+            if count == hashes -> return Val(end)
+        }
+        cursor += 1
+    }
+    Val(bytes.len())
+}
+fn mir_image_gen_char_end(text: String, start: Int) -> Int? Never! {
+    bytes :: text.bytes()
+    if start >= bytes.len() || bytes[start] != U8{39} -> return None
+    cursor := start + 1
+    if cursor >= bytes.len() -> return None
+    first :: bytes[cursor]
+    if first == U8{92} {
+        cursor += 1
+        if cursor >= bytes.len() -> return None
+        escaped :: bytes[cursor]
+        if escaped == U8{117} {
+            cursor += 1
+            if cursor >= bytes.len() || bytes[cursor] != U8{123} -> return None
+            cursor += 1
+            digits := 0
+            loop cursor < bytes.len() {
+                if mir_image_gen_hex(bytes[cursor]) -> digits += 1
+                else if bytes[cursor] != U8{95} -> break
+                cursor += 1
+            }
+            if digits == 0 || digits > 6 || cursor >= bytes.len() || bytes[cursor] != U8{125} -> return None
+            cursor += 1
+        } else if escaped == U8{120} {
+            cursor += 1
+            if cursor + 2 > bytes.len() || !mir_image_gen_hex(bytes[cursor]) || !mir_image_gen_hex(bytes[cursor + 1]) -> return None
+            cursor += 2
+        } else if escaped == U8{110} || escaped == U8{114} || escaped == U8{116} || escaped == U8{48} || escaped == U8{92} || escaped == U8{39} || escaped == U8{34} -> cursor += 1
+        else -> return None
+    } else {
+        width :: if first <= U8{127} && first != U8{39} && first != U8{10} && first != U8{13} -> 1 else if first >= U8{194} && first <= U8{223} -> 2 else if first >= U8{224} && first <= U8{239} -> 3 else if first >= U8{240} && first <= U8{244} -> 4 else -> return None
+        if cursor + width > bytes.len() -> return None
+        cursor += width
+    }
+    if cursor < bytes.len() && bytes[cursor] == U8{39} -> Val(cursor + 1) else -> None
+}
+fn mir_image_gen_blank(bytes: &[U8], start: Int, end: Int) Never! {
+    loop index in start..<end -> if bytes[index] != U8{10} && bytes[index] != U8{13} -> bytes[index] = U8{32}
+}
+pub fn mir_image_generator_mask(source: String) -> String Never! {
+    bytes := source.bytes().to_list()
+    cursor := 0
+    loop cursor < bytes.len() {
+        if mir_image_gen_starts(source, cursor, "//") {
+            start :: cursor
+            loop cursor < bytes.len() && bytes[cursor] != U8{10} -> cursor += 1
+            mir_image_gen_blank(&bytes, start, cursor)
+        } else if mir_image_gen_starts(source, cursor, "/*") {
+            start :: cursor
+            cursor += 2
+            depth := 1
+            loop cursor < bytes.len() && depth != 0 {
+                if mir_image_gen_starts(source, cursor, "/*") { depth += 1; cursor += 2 }
+                else if mir_image_gen_starts(source, cursor, "*/") { depth -= 1; cursor += 2 }
+                else -> cursor += 1
+            }
+            mir_image_gen_blank(&bytes, start, cursor)
+        } else if mir_image_gen_raw_end(source, cursor) == .Val(end) {
+            mir_image_gen_blank(&bytes, cursor, end)
+            cursor = end
+        } else if bytes[cursor] == U8{34} {
+            end :: mir_image_gen_quoted_end(source, cursor, U8{34})
+            mir_image_gen_blank(&bytes, cursor, end)
+            cursor = end
+        } else if mir_image_gen_char_end(source, cursor) == .Val(end) {
+            mir_image_gen_blank(&bytes, cursor, end)
+            cursor = end
+        } else -> cursor += 1
+    }
+    String.from_bytes(bytes) ?? panic("masking preserves UTF-8")
+}
+fn mir_image_gen_trim(text: String) -> String Never! { text.trim().to_string() }
+fn mir_image_gen_generic(text: String, name: String) -> String? Never! {
+    open :: mir_image_generator_top_level(text, U8{60}) ?? return None
+    outer :: text.slice(0, open).split("::").to_list()
+    if outer[outer.len() - 1] != name || !text.ends_with(">") -> return None
+    Val(text.slice(open + 1, text.len() - 1))
+}
+pub fn mir_image_generator_parse_type(input: String) -> MIRImageSchemaType MIRImageError! {
+    text :: mir_image_gen_trim(input)
+    if text == "&'static str" || text == "& str" -> return Ok(MIRImageSchemaType.StaticString)
+    if mir_image_gen_generic(text, "Option") == .Val(inner) -> return Ok(MIRImageSchemaType.Optional(mir_image_generator_parse_type(inner)))
+    if mir_image_gen_generic(text, "Vec") == .Val(inner) -> return Ok(MIRImageSchemaType.Sequence(mir_image_generator_parse_type(inner)))
+    if mir_image_gen_generic(text, "Box") == .Val(inner) -> return Ok(MIRImageSchemaType.Boxed(mir_image_generator_parse_type(inner)))
+    if mir_image_gen_generic(text, "Arc") == .Val(inner) -> return Ok(MIRImageSchemaType.Shared(mir_image_generator_parse_type(inner)))
+    if mir_image_gen_generic(text, "BTreeSet") == .Val(inner) -> return Ok(MIRImageSchemaType.Set(mir_image_generator_parse_type(inner), false))
+    if mir_image_gen_generic(text, "HashSet") == .Val(inner) -> return Ok(MIRImageSchemaType.Set(mir_image_generator_parse_type(inner), true))
+    loop name in [String]{"BTreeMap", "HashMap"} {
+        if mir_image_gen_generic(text, name) == .Val(inner) {
+            parts :: mir_image_generator_split(inner, U8{44})
+            if parts.len() == 2 -> return Ok(MIRImageSchemaType.Map(mir_image_generator_parse_type(parts[0]), mir_image_generator_parse_type(parts[1]), name == "HashMap"))
+            return Ok(MIRImageSchemaType.Named(text))
+        }
+    }
+    if text.starts_with("(") && text.ends_with(")") {
+        fields := [MIRImageSchemaType]{}
+        loop part in mir_image_generator_split(text.slice(1, text.len() - 1), U8{44}) {
+            if mir_image_gen_trim(part) != "" -> &fields.push(mir_image_generator_parse_type(part))
+        }
+        return Ok(MIRImageSchemaType.Tuple(fields))
+    }
+    if text.starts_with("[") && text.ends_with("]") {
+        parts :: mir_image_generator_split(text.slice(1, text.len() - 1), U8{59})
+        if parts.len() == 2 {
+            length :: mir_image_gen_decimal(mir_image_gen_trim(parts[1]))
+            if length == .Val(count) -> return Ok(MIRImageSchemaType.Array(mir_image_generator_parse_type(parts[0]), count))
+        }
+    }
+    if text == "" -> return Err(MIRImageError{message: "empty native MIR image field type"})
+    Ok(MIRImageSchemaType.Named(text))
+}
+fn mir_image_gen_decimal(text: String) -> Int? Never! {
+    if text == "" -> return None
+    value := 0
+    loop byte in text.bytes() {
+        if byte < U8{48} || byte > U8{57} -> return None
+        value = value * 10 + Int.from_u8(byte) - 48
+    }
+    Val(value)
+}
+fn mir_image_gen_identifier(text: String, start: Int) -> (String, Int) MIRImageError! {
+    cursor := start
+    if mir_image_gen_starts(text, cursor, "r#") -> cursor += 2
+    first :: cursor
+    bytes :: text.bytes()
+    loop cursor < bytes.len() && mir_image_gen_identifier_byte(bytes[cursor]) -> cursor += 1
+    if cursor == first -> return Err(MIRImageError{message: "expected identifier at byte {start}"})
+    Ok((text.slice(start, cursor), cursor))
+}
+fn mir_image_gen_attributes(input: String) -> String Never! {
+    text := mir_image_gen_trim(input)
+    loop text.starts_with("#[") {
+        end :: mir_image_generator_matching(text, 1, U8{91}, U8{93}) ?? return text
+        text = mir_image_gen_trim(text.slice(end + 1, text.len()))
+    }
+    text
+}
+fn mir_image_gen_visibility(input: String) -> String Never! {
+    text :: mir_image_gen_trim(input)
+    if text.starts_with("pub(") {
+        end :: mir_image_gen_find(text, ")", 4) ?? return text
+        return mir_image_gen_trim(text.slice(end + 1, text.len()))
+    }
+    if text.starts_with("pub ") -> return mir_image_gen_trim(text.slice(4, text.len()))
+    text
+}
+pub fn mir_image_generator_fields(body: String) -> [MIRImageSchemaField] MIRImageError! {
+    fields := [MIRImageSchemaField]{}
+    loop part in mir_image_generator_split(body, U8{44}) {
+        raw :: mir_image_gen_attributes(part)
+        if raw == "" -> continue
+        colon :: mir_image_generator_top_level(raw, U8{58}) ?? return Err(MIRImageError{message: "struct field has no type: `{raw}`"})
+        declaration :: mir_image_gen_trim(raw.slice(0, colon))
+        name :: mir_image_gen_visibility(declaration)
+        &fields.push(MIRImageSchemaField{name: name, ty: mir_image_generator_parse_type(raw.slice(colon + 1, raw.len())), public: declaration.starts_with("pub ") || declaration.starts_with("pub(")})
+    }
+    Ok(fields)
+}
+fn mir_image_gen_variant_suffix(text: String) -> Bool Never! {
+    suffix :: mir_image_gen_trim(text)
+    suffix == "" || (suffix.starts_with("=") && mir_image_gen_trim(suffix.slice(1, suffix.len())) != "")
+}
+pub fn mir_image_generator_variants(body: String) -> [MIRImageSchemaVariant] MIRImageError! {
+    variants := [MIRImageSchemaVariant]{}
+    loop part in mir_image_generator_split(body, U8{44}) {
+        raw :: mir_image_gen_attributes(part)
+        if raw == "" -> continue
+        id :: mir_image_gen_identifier(raw, 0)
+        cursor :: mir_image_gen_skip_space(raw, id.1)
+        variant_body := MIRImageSchemaVariantBody.Unit
+        if mir_image_gen_byte(raw, cursor) == .Val(U8{40}) {
+            end :: mir_image_generator_matching(raw, cursor, U8{40}, U8{41}) ?? return Err(MIRImageError{message: "unclosed tuple variant `{id.0}`"})
+            if mir_image_gen_variant_suffix(raw.slice(end + 1, raw.len())) {
+                fields := [MIRImageSchemaType]{}
+                loop ty in mir_image_generator_split(raw.slice(cursor + 1, end), U8{44}) -> if mir_image_gen_trim(ty) != "" -> &fields.push(mir_image_generator_parse_type(ty))
+                variant_body = MIRImageSchemaVariantBody.Tuple(fields)
+            } else -> variant_body = MIRImageSchemaVariantBody.Unsupported(mir_image_gen_trim(raw.slice(end + 1, raw.len())))
+        } else if mir_image_gen_byte(raw, cursor) == .Val(U8{123}) {
+            end :: mir_image_generator_matching(raw, cursor, U8{123}, U8{125}) ?? return Err(MIRImageError{message: "unclosed struct variant `{id.0}`"})
+            if mir_image_gen_variant_suffix(raw.slice(end + 1, raw.len())) {
+                fields := mir_image_generator_fields(raw.slice(cursor + 1, end))
+                loop index in 0..<fields.len() -> fields[index].public = true
+                variant_body = MIRImageSchemaVariantBody.Struct(fields)
+            } else -> variant_body = MIRImageSchemaVariantBody.Unsupported(mir_image_gen_trim(raw.slice(end + 1, raw.len())))
+        } else if !mir_image_gen_variant_suffix(raw.slice(cursor, raw.len())) -> variant_body = MIRImageSchemaVariantBody.Unsupported(mir_image_gen_trim(raw.slice(cursor, raw.len())))
+        &variants.push(MIRImageSchemaVariant{name: id.0, body: variant_body})
+    }
+    Ok(variants)
+}

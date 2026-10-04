@@ -1,0 +1,700 @@
+// PORT-PENDING 0060 crates-jet-foundation-src-coresourceparts-module-group-slice-1: crates/jet-foundation/src/Policy.rs:1824-2519
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub fn marker_repeated_error(
+//RS     name: &str,
+//RS     noun: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> crate::Diagnostics::Diagnostic {
+//RS     crate::Diagnostics::Diagnostic::error(
+//RS         "E0999",
+//RS         format!("`#{name}` is already applied to this {noun}"),
+//RS         format!(
+//RS             "`#{name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first"
+//RS         ),
+//RS         "remove the repeated marker".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-MARK-FORM1=A: parentheses appear exactly when arguments are written, so an
+//RS /// empty pair is always a leftover. `parens` covers `(` through `)` alone, so
+//RS /// the autofix deletes exactly that and `jet fmt` can apply it.
+//RS pub fn marker_empty_arguments_error(
+//RS     name: &str,
+//RS     parens: crate::Diagnostics::Span,
+//RS ) -> crate::Diagnostics::Diagnostic {
+//RS     let mut diagnostic = crate::Diagnostics::Diagnostic::error(
+//RS         // E0999 is the marker-spelling family the formatter canonicalizes
+//RS         // (D-MARK-STACK1's bracket edges live here too); E0930 is reserved for
+//RS         // arguments that were written and do not match the signature.
+//RS         "E0999",
+//RS         format!("`#{name}()` has empty parentheses"),
+//RS         "a marker writes parentheses exactly when it passes arguments".to_string(),
+//RS         format!("write `#{name}`"),
+//RS         Some(parens),
+//RS     );
+//RS     diagnostic.set_structured_edit(crate::Diagnostics::TextEdit {
+//RS         span: parens,
+//RS         new_text: String::new(),
+//RS     });
+//RS     diagnostic
+//RS }
+//RS 
+//RS /// A marker argument whose shape is right but whose value is outside the
+//RS /// declared menu. Naming the menu is the whole point: the writer typed a name
+//RS /// the compiler knows nothing about.
+//RS pub fn marker_argument_unknown_variant(
+//RS     name: &str,
+//RS     declaration: RuleArgDeclaration,
+//RS     written: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> crate::Diagnostics::Diagnostic {
+//RS     let menu = declaration
+//RS         .variants
+//RS         .iter()
+//RS         .map(|variant| format!("`{variant}`"))
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     crate::Diagnostics::Diagnostic::error(
+//RS         "E0930",
+//RS         format!("`#{name}` has no `{}` called `{written}`", declaration.name),
+//RS         format!("`{}` is a closed menu: {menu}", declaration.name),
+//RS         format!("pick one of {menu}"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS #[path = "Policy/MarkerSource.rs"]
+//RS mod MarkerSource;
+//RS 
+//RS pub use MarkerSource::MARKER_SOURCE;
+//RS 
+//RS /// D-MARKSIG1=A + D-META-ONE1=A: the sole compiler registry for active and
+//RS /// retired markers. Parser, sema, formatter, LSP, highlighting, explain, and
+//RS /// retirement diagnostics read these rows; the rows themselves are written as
+//RS /// ordinary Jet `marker` declarations in `Prelude/Markers.jet`, so this file
+//RS /// holds no copy of the vocabulary.
+//RS pub static APPLIED_RULES: LazyLock<Vec<AppliedRule>> = LazyLock::new(MarkerSource::read);
+//RS 
+//RS pub fn applied_rule_registry() -> &'static [AppliedRule] {
+//RS     &APPLIED_RULES
+//RS }
+//RS 
+//RS pub fn applied_rule(name: &str) -> Option<&'static AppliedRule> {
+//RS     APPLIED_RULES.iter().find(|row| row.name == name)
+//RS }
+//RS 
+//RS pub fn rule_allows(name: &str, site: RuleSite) -> bool {
+//RS     applied_rule(name).is_some_and(|row| row.sites.contains(&site))
+//RS }
+//RS 
+//RS /// `rule_allows`, plus the extra site a companion on the same target opens.
+//RS /// `companions` is every rule name attached to that target, so `#Doc` is legal
+//RS /// on a function exactly when `#Job` sits beside it (D-TASKS-LIST1=A).
+//RS pub fn rule_allows_with_companions<'a>(
+//RS     name: &str,
+//RS     site: RuleSite,
+//RS     companions: impl Iterator<Item = &'a str>,
+//RS ) -> bool {
+//RS     if rule_allows(name, site) {
+//RS         return true;
+//RS     }
+//RS     let Some(companion) = applied_rule(name).and_then(|row| row.companion_site) else {
+//RS         return false;
+//RS     };
+//RS     companion.site == site && companions.into_iter().any(|other| other == companion.rule)
+//RS }
+//RS 
+//RS pub const DERIVE_RULES: &[&str] = &[
+//RS     "Codable",
+//RS     "Encode",
+//RS     "Decode",
+//RS     "Comparable",
+//RS     "Equatable",
+//RS     "Debug",
+//RS     "Numeric",
+//RS     "Printable",
+//RS     "CLI",
+//RS     "Patchable",
+//RS     "UnitFamily",
+//RS ];
+//RS 
+//RS /// A trait may rhyme with a type-site marker only when that marker is the
+//RS /// trait's derive spelling (`trait X` → `#X`). Other type markers own their
+//RS /// names and cannot silently collide with dispatch.
+//RS pub fn nonderive_marker_trait_collision(name: &str) -> bool {
+//RS     applied_rule(name).is_some_and(|row| {
+//RS         matches!(row.status, RuleStatus::Active)
+//RS             && row.sites.contains(&RuleSite::Type)
+//RS             && !DERIVE_RULES.contains(&name)
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     #[test]
+//RS     fn every_registered_rule_has_one_exact_applicability_row() {
+//RS         let rows = super::applied_rule_registry();
+//RS         for row in rows {
+//RS             assert_eq!(
+//RS                 rows.iter()
+//RS                     .filter(|candidate| candidate.name == row.name)
+//RS                     .count(),
+//RS                 1,
+//RS                 "{}",
+//RS                 row.name
+//RS             );
+//RS             // D-META-STAGE1=B: an active row must keep at least one legal site.
+//RS             // A retired row may keep none, because a stage that is no longer a
+//RS             // rule about a target has nowhere left to be written.
+//RS             if matches!(row.status, super::RuleStatus::Active) {
+//RS                 assert!(!row.sites.is_empty(), "{}", row.name);
+//RS             }
+//RS             assert_eq!(
+//RS                 row.signature.variadic.is_some(),
+//RS                 row.signature.variadic_source_type.is_some(),
+//RS                 "{}",
+//RS                 row.name
+//RS             );
+//RS             assert!(
+//RS                 row.signature.required() <= row.signature.params.len(),
+//RS                 "{}",
+//RS                 row.name
+//RS             );
+//RS             for param in row.signature.params {
+//RS                 assert!(!param.name.is_empty(), "{}", row.name);
+//RS                 assert!(!param.source_type.is_empty(), "{}", row.name);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn site_variants_match_the_enum() {
+//RS         use super::RuleSite;
+//RS 
+//RS         assert_eq!(super::SITE_VARIANTS.len(), 18);
+//RS         let published: Vec<&str> = RuleSite::ALL.iter().map(|site| site.name()).collect();
+//RS         assert_eq!(published, super::SITE_VARIANTS);
+//RS 
+//RS         let declaration = super::rule_arg_declaration("Site")
+//RS             .expect("`Site` is published in `core.compiler.lang`");
+//RS         assert_eq!(declaration.variants, super::SITE_VARIANTS);
+//RS         assert_eq!(declaration.variant_segment, super::VariantSegment::Last);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn authoritative_attachment_matrix_covers_declaration_sites() {
+//RS         use super::RuleSite;
+//RS 
+//RS         let legal = [
+//RS             ("allow", RuleSite::Field),
+//RS             ("Rename", RuleSite::Variant),
+//RS             ("Inline", RuleSite::Method),
+//RS             ("Policy", RuleSite::Module),
+//RS             ("HTML", RuleSite::File),
+//RS             ("Test", RuleSite::Test),
+//RS             ("Job", RuleSite::Function),
+//RS             ("Doc", RuleSite::Type),
+//RS             ("Doc", RuleSite::Variant),
+//RS             ("Doc", RuleSite::Method),
+//RS         ];
+//RS         for (name, site) in legal {
+//RS             assert!(super::rule_allows(name, site), "#{name} at {site:?}");
+//RS         }
+//RS 
+//RS         let illegal = [
+//RS             ("Job", RuleSite::Field),
+//RS             ("Skip", RuleSite::Variant),
+//RS             ("Job", RuleSite::Method),
+//RS             ("HTML", RuleSite::Module),
+//RS             ("Inline", RuleSite::File),
+//RS             ("Codable", RuleSite::Function),
+//RS             ("Doc", RuleSite::Function),
+//RS         ];
+//RS         for (name, site) in illegal {
+//RS             assert!(!super::rule_allows(name, site), "#{name} at {site:?}");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn authority_rows_are_site_bound_and_policy_is_lexical() {
+//RS         let rows = super::applied_rule_registry();
+//RS         // D-AUTHORITY-SCOPE1/D-ABILITY-NAME2: `#FX` is canonical; `#Grant` is retired.
+//RS         for name in ["Unsafe", "FX", "Scrub", "wire"] {
+//RS             let row = rows.iter().find(|row| row.name == name).unwrap();
+//RS             assert_eq!(row.resolution, super::RuleResolution::SiteBound);
+//RS             assert!(row.policy_scopes.is_empty());
+//RS         }
+//RS         let policy = rows.iter().find(|row| row.name == "Policy").unwrap();
+//RS         assert_eq!(
+//RS             policy.policy_scopes,
+//RS             &[
+//RS                 super::PolicyScope::Package,
+//RS                 super::PolicyScope::Module,
+//RS                 super::PolicyScope::Function,
+//RS                 super::PolicyScope::Block
+//RS             ]
+//RS         );
+//RS         assert!(!super::rule_allows("Pure", super::RuleSite::Type));
+//RS         assert!(!super::rule_allows("Codable", super::RuleSite::Function));
+//RS         assert!(!super::rule_allows("Doc", super::RuleSite::Block));
+//RS         assert!(!super::rule_allows("Region", super::RuleSite::File));
+//RS         assert!(!super::rule_allows("PubFile", super::RuleSite::Field));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn every_typed_marker_argument_has_one_core_lang_declaration() {
+//RS         // One declaration per typed marker-argument menu, plus the `Track`
+//RS         // reflection enum retained by D-RULEARG-TYPES1.
+//RS         assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 19);
+//RS         let mut expected = std::collections::BTreeSet::from(["Site", "Track"]);
+//RS         for row in super::APPLIED_RULES.iter() {
+//RS             expected.extend(
+//RS                 row.signature
+//RS                     .params
+//RS                     .iter()
+//RS                     .map(|parameter| parameter.source_type),
+//RS             );
+//RS             expected.extend(row.signature.variadic_source_type);
+//RS         }
+//RS         expected.retain(|name| super::canonical_rule_arg_variants(name).is_some());
+//RS         let actual = super::RULE_ARG_DECLARATIONS
+//RS             .iter()
+//RS             .map(|declaration| declaration.name)
+//RS             .collect::<std::collections::BTreeSet<_>>();
+//RS         assert_eq!(actual, expected);
+//RS         for declaration in super::RULE_ARG_DECLARATIONS.iter() {
+//RS             assert_eq!(
+//RS                 declaration.variants,
+//RS                 super::canonical_rule_arg_variants(declaration.name).unwrap(),
+//RS                 "{}",
+//RS                 declaration.name
+//RS             );
+//RS         }
+//RS         for row in super::APPLIED_RULES.iter() {
+//RS             for param in row.signature.params {
+//RS                 if !super::rule_arg_needs_core_declaration(param.source_type) {
+//RS                     continue;
+//RS                 }
+//RS                 assert!(
+//RS                     super::rule_arg_declaration(param.source_type).is_some(),
+//RS                     "#{} parameter {} names missing core.compiler.lang.{}",
+//RS                     row.name,
+//RS                     param.name,
+//RS                     param.source_type
+//RS                 );
+//RS             }
+//RS             if let Some(source_type) = row.signature.variadic_source_type {
+//RS                 if super::rule_arg_needs_core_declaration(source_type) {
+//RS                     assert!(
+//RS                         super::rule_arg_declaration(source_type).is_some(),
+//RS                         "#{} variadic type core.compiler.lang.{source_type}",
+//RS                         row.name
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn generated_rule_argument_variants_match_canonical_surface() {
+//RS         let variants = |name| super::rule_arg_declaration(name).unwrap().variants;
+//RS         assert_eq!(
+//RS             variants("ABI"),
+//RS             &["system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"]
+//RS         );
+//RS         assert_eq!(variants("FFILanguage"), &["c", "cpp", "asm"]);
+//RS         assert_eq!(variants("Layout"), &["c", "columnar"]);
+//RS         assert_eq!(
+//RS             variants("NamingCase"),
+//RS             &["camel", "snake", "pascal", "kebab", "screaming"]
+//RS         );
+//RS         assert_eq!(
+//RS             variants("Effect"),
+//RS             crate::Authority::EFFECT_ROOTS.as_slice()
+//RS         );
+//RS     }
+//RS 
+//RS     /// D-MARK-FORM1=A / D-MARK-REPEAT1=A / D-VERDICT-1455-1: the facts the
+//RS     /// consumers used to hard-code by name are registry columns now.
+//RS     #[test]
+//RS     fn marker_behaviour_lives_in_columns_not_name_lists() {
+//RS         let row = |name| super::applied_rule(name).unwrap();
+//RS 
+//RS         // Repeatable is a column: contracts and lints repeat, nothing else does.
+//RS         for name in ["Pre", "Post", "allow"] {
+//RS             assert!(row(name).repeatable, "{name} must be repeatable");
+//RS         }
+//RS         for name in ["Inline", "Codable", "Job", "PubFile", "NoPrelude"] {
+//RS             assert!(!row(name).repeatable, "{name} must not be repeatable");
+//RS         }
+//RS 
+//RS         // Owning a menu is a column, not a name match in the shared binder.
+//RS         for name in ["FFI", "RenameAll"] {
+//RS             assert!(row(name).owns_menu, "{name} teaches its own menu");
+//RS         }
+//RS         assert!(!row("Layout").owns_menu);
+//RS 
+//RS         // The Doc-with-Job coupling is row data.
+//RS         let companion = row("Doc").companion_site.expect("Doc declares a companion");
+//RS         assert_eq!(companion.rule, "Job");
+//RS         assert_eq!(companion.site, super::RuleSite::Function);
+//RS         assert!(!super::rule_allows("Doc", super::RuleSite::Function));
+//RS         assert!(super::rule_allows_with_companions(
+//RS             "Doc",
+//RS             super::RuleSite::Function,
+//RS             ["Job", "Doc"].into_iter()
+//RS         ));
+//RS         assert!(!super::rule_allows_with_companions(
+//RS             "Doc",
+//RS             super::RuleSite::Function,
+//RS             ["Doc"].into_iter()
+//RS         ));
+//RS         // A companion never opens a site the column did not name.
+//RS         assert!(!super::rule_allows_with_companions(
+//RS             "Doc",
+//RS             super::RuleSite::Block,
+//RS             ["Job", "Doc"].into_iter()
+//RS         ));
+//RS 
+//RS         // Which path segment names a variant is declaration data.
+//RS         assert_eq!(
+//RS             super::rule_arg_declaration("Effect")
+//RS                 .unwrap()
+//RS                 .variant_segment,
+//RS             super::VariantSegment::First
+//RS         );
+//RS         assert_eq!(
+//RS             super::rule_arg_declaration("Target")
+//RS                 .unwrap()
+//RS                 .variant_segment,
+//RS             super::VariantSegment::First
+//RS         );
+//RS         assert_eq!(
+//RS             super::rule_arg_declaration("NamingCase")
+//RS                 .unwrap()
+//RS                 .variant_segment,
+//RS             super::VariantSegment::Last
+//RS         );
+//RS 
+//RS         // D-VERDICT-1455-1: the two ghost rows are gone for good.
+//RS         assert!(super::applied_rule("Authority").is_none());
+//RS         assert!(super::applied_rule("Summarize").is_none());
+//RS         assert!(!super::DERIVE_RULES.contains(&"Summarize"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nonderive_type_markers_cannot_rhyme_with_traits() {
+//RS         assert!(super::nonderive_marker_trait_collision("Layout"));
+//RS         assert!(super::nonderive_marker_trait_collision("Discriminant"));
+//RS         assert!(!super::nonderive_marker_trait_collision("Comparable"));
+//RS         assert!(!super::nonderive_marker_trait_collision("Debug"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn rule_argument_bindings_cover_variadics_and_named_arguments() {
+//RS         let policy = super::applied_rule("Policy").unwrap().signature;
+//RS         assert_eq!(policy.argument_bindings(&[]), Some(Vec::new()));
+//RS         assert_eq!(
+//RS             policy.argument_types(&[None, None, None]),
+//RS             Some(vec![
+//RS                 super::RuleArgType::Any,
+//RS                 super::RuleArgType::Any,
+//RS                 super::RuleArgType::Any,
+//RS             ])
+//RS         );
+//RS         assert!(policy.argument_bindings(&[Some("setting")]).is_none());
+//RS         let meta = super::applied_rule("Meta").unwrap().signature;
+//RS         let reordered = meta
+//RS             .argument_bindings(&[Some("maturity"), Some("category")])
+//RS             .unwrap();
+//RS         assert_eq!(
+//RS             reordered
+//RS                 .iter()
+//RS                 .map(|binding| binding.parameter_index)
+//RS                 .collect::<Vec<_>>(),
+//RS             vec![Some(2), Some(0)]
+//RS         );
+//RS         assert_eq!(
+//RS             meta.argument_types(&[Some("maturity"), Some("category")]),
+//RS             Some(vec![super::RuleArgType::Ident, super::RuleArgType::String])
+//RS         );
+//RS         assert!(meta.argument_bindings(&[None, Some("maturity")]).is_some());
+//RS         assert!(meta.argument_bindings(&[Some("maturity")]).is_some());
+//RS         assert!(meta.argument_bindings(&[Some("category"), None]).is_none());
+//RS         assert!(meta
+//RS             .argument_bindings(&[Some("category"), Some("category")])
+//RS             .is_none());
+//RS         assert!(meta.argument_types(&[Some("unknown")]).is_none());
+//RS         let transition = super::applied_rule("Transition").unwrap().signature;
+//RS         assert!(transition.argument_bindings(&[Some("to")]).is_none());
+//RS     }
+//RS     #[test]
+//RS     fn marker_argument_bindings_accept_positional_strings() {
+//RS         let span = crate::Diagnostics::Span::new(0, 1);
+//RS         let marker = crate::AST::Marker {
+//RS             name: "Doc".to_string(),
+//RS             negated: false,
+//RS             name_span: span,
+//RS             args: vec![crate::AST::MarkerCallArg::Expr(crate::AST::Expr::Str(
+//RS                 vec![crate::AST::StrPart::Lit("text".to_string())],
+//RS                 span,
+//RS             ))],
+//RS             arg_labels: vec![None],
+//RS             span,
+//RS             ct: None,
+//RS         };
+//RS         let bindings = super::applied_rule("Doc")
+//RS             .unwrap()
+//RS             .signature
+//RS             .marker_argument_bindings(&marker)
+//RS             .expect("Doc's ordinary positional argument must bind to text");
+//RS         assert_eq!(bindings.len(), 1);
+//RS         assert_eq!(bindings[0].parameter_index, Some(0));
+//RS         assert_eq!(bindings[0].ty, super::RuleArgType::String);
+//RS     }
+//RS 
+//RS 
+//RS     #[test]
+//RS     fn memory_floor_words_are_not_policy_keys() {
+//RS         assert!(super::PolicyKey::parse("no_alloc").is_none());
+//RS         assert!(super::PolicyKey::parse("zero_rc").is_none());
+//RS         assert!(super::PolicyKey::parse("arena_bounded").is_none());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn contribution_law_orders_all_scopes_and_layers() {
+//RS         let key = super::FactKey::new("Build.Profile");
+//RS         let contribution = |value: &str, scope, layer, source| {
+//RS             super::FactContribution::new(
+//RS                 "Build.Profile",
+//RS                 super::FactValue::Text(value.to_string()),
+//RS                 scope,
+//RS                 layer,
+//RS                 source,
+//RS             )
+//RS         };
+//RS         let resolved = super::resolve(
+//RS             key.clone(),
+//RS             [
+//RS                 contribution(
+//RS                     "package",
+//RS                     super::SourceScope::Package,
+//RS                     super::ContributionLayer::Declaration,
+//RS                     "package.jet",
+//RS                 ),
+//RS                 contribution(
+//RS                     "file",
+//RS                     super::SourceScope::File,
+//RS                     super::ContributionLayer::Declaration,
+//RS                     "src/main.jet",
+//RS                 ),
+//RS                 contribution(
+//RS                     "module",
+//RS                     super::SourceScope::Module,
+//RS                     super::ContributionLayer::Declaration,
+//RS                     "src/main.jet",
+//RS                 ),
+//RS                 contribution(
+//RS                     "function",
+//RS                     super::SourceScope::Function,
+//RS                     super::ContributionLayer::Declaration,
+//RS                     "src/main.jet",
+//RS                 ),
+//RS                 contribution(
+//RS                     "block",
+//RS                     super::SourceScope::Block,
+//RS                     super::ContributionLayer::Declaration,
+//RS                     "src/main.jet",
+//RS                 ),
+//RS                 contribution(
+//RS                     "item",
+//RS                     super::SourceScope::Item,
+//RS                     super::ContributionLayer::Declaration,
+//RS                     "src/main.jet",
+//RS                 ),
+//RS                 contribution(
+//RS                     "bundle",
+//RS                     super::SourceScope::Package,
+//RS                     super::ContributionLayer::OptimizationBundle,
+//RS                     "build bundle",
+//RS                 ),
+//RS                 contribution(
+//RS                     "workspace",
+//RS                     super::SourceScope::Package,
+//RS                     super::ContributionLayer::Workspace,
+//RS                     "workspace.jet",
+//RS                 ),
+//RS                 contribution(
+//RS                     "environment",
+//RS                     super::SourceScope::Package,
+//RS                     super::ContributionLayer::Environment,
+//RS                     "env.dev",
+//RS                 ),
+//RS                 contribution(
+//RS                     "system",
+//RS                     super::SourceScope::Package,
+//RS                     super::ContributionLayer::System,
+//RS                     "system.dev",
+//RS                 ),
+//RS                 contribution(
+//RS                     "fleet",
+//RS                     super::SourceScope::Package,
+//RS                     super::ContributionLayer::Fleet,
+//RS                     "fleet.ci",
+//RS                 ),
+//RS                 contribution(
+//RS                     "cli",
+//RS                     super::SourceScope::Package,
+//RS                     super::ContributionLayer::CommandLine,
+//RS                     "command line",
+//RS                 ),
+//RS             ],
+//RS         )
+//RS         .unwrap()
+//RS         .unwrap();
+//RS         assert_eq!(resolved.key, key);
+//RS         assert_eq!(resolved.value, super::FactValue::Text("cli".to_string()));
+//RS         assert_eq!(resolved.provenance.len(), 12);
+//RS         assert_eq!(resolved.effective, 11);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn contribution_law_conflicts_same_layer_and_force_pins_later_layers() {
+//RS         let key = super::FactKey::new("Build.Profile");
+//RS         let same_layer = [
+//RS             super::FactContribution::new(
+//RS                 "Build.Profile",
+//RS                 super::FactValue::Text("debug".to_string()),
+//RS                 super::SourceScope::Package,
+//RS                 super::ContributionLayer::Workspace,
+//RS                 "workspace-a.jet",
+//RS             )
+//RS             .at(crate::Diagnostics::Span::new(10, 11)),
+//RS             super::FactContribution::new(
+//RS                 "Build.Profile",
+//RS                 super::FactValue::Text("release".to_string()),
+//RS                 super::SourceScope::Package,
+//RS                 super::ContributionLayer::Workspace,
+//RS                 "workspace-b.jet",
+//RS             )
+//RS             .at(crate::Diagnostics::Span::new(20, 21)),
+//RS         ];
+//RS         let error = super::resolve(key.clone(), same_layer).unwrap_err();
+//RS         assert!(matches!(&error, super::FactError::Conflict { .. }));
+//RS         assert!(error.diagnostic().is_some());
+//RS 
+//RS         let resolved = super::resolve(
+//RS             key,
+//RS             [
+//RS                 super::FactContribution::new(
+//RS                     "Build.Profile",
+//RS                     super::FactValue::Text("debug".to_string()),
+//RS                     super::SourceScope::Package,
+//RS                     super::ContributionLayer::Declaration,
+//RS                     "package.jet",
+//RS                 ),
+//RS                 super::FactContribution::new(
+//RS                     "Build.Profile",
+//RS                     super::FactValue::Text("release".to_string()),
+//RS                     super::SourceScope::Package,
+//RS                     super::ContributionLayer::System,
+//RS                     "system.jet",
+//RS                 )
+//RS                 .force_with_reason("release certification"),
+//RS                 super::FactContribution::new(
+//RS                     "Build.Profile",
+//RS                     super::FactValue::Text("debug".to_string()),
+//RS                     super::SourceScope::Package,
+//RS                     super::ContributionLayer::CommandLine,
+//RS                     "command line",
+//RS                 ),
+//RS             ],
+//RS         )
+//RS         .unwrap()
+//RS         .unwrap();
+//RS         assert_eq!(
+//RS             resolved.value,
+//RS             super::FactValue::Text("release".to_string())
+//RS         );
+//RS         let explanation = super::explain(&resolved);
+//RS         assert!(explanation.contains("[effective] system"));
+//RS         assert!(explanation.contains("pin=release certification"));
+//RS         assert!(explanation.contains("[shadowed] command line"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn resolver_owns_defaults_and_replays_default_writer() {
+//RS         let profile = super::FactKey::with_default(
+//RS             "Build.Profile",
+//RS             super::FactValue::Text("dev".to_string()),
+//RS         );
+//RS         let effective = super::resolve(
+//RS             profile.clone(),
+//RS             [super::FactContribution::new(
+//RS                 "Build.Profile",
+//RS                 super::FactValue::Text("release".to_string()),
+//RS                 super::SourceScope::Package,
+//RS                 super::ContributionLayer::CommandLine,
+//RS                 "command line",
+//RS             )],
+//RS         )
+//RS         .unwrap()
+//RS         .unwrap();
+//RS         assert_eq!(
+//RS             effective.value,
+//RS             super::FactValue::Text("release".to_string())
+//RS         );
+//RS         assert_eq!(effective.provenance.len(), 2);
+//RS         assert!(super::explain(&effective).contains("[shadowed] declaration / package \"dev\""));
+//RS 
+//RS         let replayed = super::resolve(profile, effective.provenance.clone())
+//RS             .unwrap()
+//RS             .unwrap();
+//RS         assert_eq!(replayed.provenance.len(), 2);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn tighten_only_facts_reject_widening() {
+//RS         let key = super::FactKey::tighten_only("Build.Limit");
+//RS         let declarations = [
+//RS             super::FactContribution::new(
+//RS                 "Build.Limit",
+//RS                 super::FactValue::Int(8),
+//RS                 super::SourceScope::Package,
+//RS                 super::ContributionLayer::Declaration,
+//RS                 "package.jet",
+//RS             ),
+//RS             super::FactContribution::new(
+//RS                 "Build.Limit",
+//RS                 super::FactValue::Int(4),
+//RS                 super::SourceScope::Package,
+//RS                 super::ContributionLayer::Workspace,
+//RS                 "workspace.jet",
+//RS             ),
+//RS         ];
+//RS         assert!(super::resolve(key.clone(), declarations).is_ok());
+//RS         let widening = [
+//RS             super::FactContribution::new(
+//RS                 "Build.Limit",
+//RS                 super::FactValue::Int(4),
+//RS                 super::SourceScope::Package,
+//RS                 super::ContributionLayer::Declaration,
+//RS                 "package.jet",
+//RS             ),
+//RS             super::FactContribution::new(
+//RS                 "Build.Limit",
+//RS                 super::FactValue::Int(8),
+//RS                 super::SourceScope::Package,
+//RS                 super::ContributionLayer::Workspace,
+//RS                 "workspace.jet",
+//RS             ),
+//RS         ];
+//RS         assert!(matches!(
+//RS             super::resolve(key, widening),
+//RS             Err(super::FactError::SafetyWidening { .. })
+//RS         ));
+//RS     }
+//RS }
+// END-PORT-PENDING 0060 crates/jet-foundation/src/Policy.rs:1824-2519
+

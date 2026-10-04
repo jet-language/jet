@@ -9,8 +9,9 @@
 // fails the backend's trait check, it never changes behavior.
 pub fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
     keep := [Bool]{}
-    by_method := [String:Int]{}
-    by_name := [String:[Int]]{}
+    by_method := [U64:Int]{}
+    by_name := [String:Int]{}
+    next_named := [Int]{}
     loop (index, implementation) in program.impls {
         nominal :: if implementation.self_type.kind == {
             .Apply(name, _) -> Val(name.name)
@@ -18,35 +19,34 @@ pub fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
         }
         candidate :: implementation.compiler_generated && implementation.serde != None && nominal != None
         &keep.push(!candidate)
+        &next_named.push(-1)
         if !candidate -> next
-        loop method in implementation.methods -> by_method["{method.value}"] = index
+        loop method in implementation.methods -> by_method[method.value] = index
         name :: nominal ?? next
-        rows := by_name.get(name) ?? [Int]{}
-        &rows.push(index)
-        by_name[name] = rows
+        next_named[index] = by_name.get(name) ?? -1
+        by_name[name] = index
     }
-    function_index := [String:Int]{}
+    function_index := [U64:Int]{}
     pending := [Int]{}
     loop (index, function) in program.functions {
-        key :: "{function.id.value}"
+        key :: function.id.value
         function_index[key] = index
         if by_method.get(key) == None -> &pending.push(index)
     }
     seen_names := [String:Bool]{}
-    cursor := 0
-    loop {
-        if cursor >= pending.len() -> break
-        current :: pending[cursor]
-        cursor += 1
-        names := [String]{}
-        demanded := [Int]{}
+    names := [String]{}
+    demanded := [Int]{}
+    loop pending.len() > 0 {
+        current :: &pending.pop() ?? break
+        &names.clear()
+        &demanded.clear()
         loop block in program.functions[current].blocks {
             loop instruction in block.instructions {
                 if instruction.operation == {
                     .Call(callee, _, type_args) -> {
                         if callee == {
                             .User(id) | .Associated(id, _) | .Method(id, _) -> {
-                                if by_method.get("{id.value}") == .Val(row) -> &demanded.push(row)
+                                if by_method.get(id.value) == .Val(row) -> &demanded.push(row)
                             }
                             else -> {}
                         }
@@ -79,14 +79,17 @@ pub fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
         loop name in names {
             if seen_names.get(name) != None -> next
             seen_names[name] = true
-            rows :: by_name.get(name) ?? [Int]{}
-            loop row in rows -> &demanded.push(row)
+            row := by_name.get(name) ?? -1
+            loop row >= 0 {
+                &demanded.push(row)
+                row = next_named[row]
+            }
         }
         loop row in demanded {
             if keep[row] -> next
             keep[row] = true
             loop method in program.impls[row].methods {
-                if function_index.get("{method.value}") == .Val(found) -> &pending.push(found)
+                if function_index.get(method.value) == .Val(found) -> &pending.push(found)
             }
         }
     }

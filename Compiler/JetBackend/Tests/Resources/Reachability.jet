@@ -1,0 +1,41 @@
+use jet_foundation.[MIROperation, MIRCallee, MIRValueID, MIROwnership, MIROwnershipMode, MIRDropKind, MIRAccess]
+
+fn source_resource_metadata_add_op(function: &MIRFunction, operation: ^MIROperation) Never! {
+    instruction :: source_resource_mir.MIRInstruction{id: source_resource_mir.MIROpID{value: U64{1}}, span: Span{start: 0, end: 0}, source_line: None, result: None, ty: None, operation: operation}
+    block :: source_resource_mir.MIRBasicBlock{id: MIRBlockID{value: U64{1}}, span: Span{start: 0, end: 0}, instructions: [source_resource_mir.MIRInstruction]{instruction}, terminator: .Return{value: None}}
+    &function.blocks.push(block)
+}
+#Test("source_helper_scope_follows_reachable_edges_without_unrelated_binding_demand") {
+    program := source_resource_metadata_program()
+    first := source_resource_metadata_function(U64{1})
+    second := source_resource_metadata_function(U64{2})
+    third := source_resource_metadata_function(U64{3})
+    source_resource_metadata_add_op(&first, MIROperation.Call{callee: MIRCallee.User{function: second.id}, args: [], type_args: []})
+    source_resource_metadata_add_op(&second, MIROperation.Call{callee: MIRCallee.Associated{function: first.id, owner: mir_type_from_kind(.Int)}, args: [], type_args: []})
+    source_resource_metadata_add_op(&third, MIROperation.Call{callee: MIRCallee.TraitMethod{method: MIRTraitMethodID{value: U64{3}}, trait_ref: source_resource_mir.MIRTraitRef{id: MIRTraitID{value: U64{2}}, name: "Interface"}, receiver: source_resource_metadata_receiver()}, args: [], type_args: []})
+    &program.functions.push(^first)
+    &program.functions.push(^second)
+    &program.functions.push(^third)
+    assert(! (source_helper_requires_native_interface_scope(program, MIRFunctionID{value: U64{1}}) ?? panic(source_deopt_error_text(err))))
+    assert(source_helper_requires_native_interface_scope(program, MIRFunctionID{value: U64{3}}) ?? panic(source_deopt_error_text(err)))
+    target :: program.functions[2].id
+    source_resource_metadata_add_op(&program.functions[1], MIROperation.Call{callee: MIRCallee.Method{function: target, owner: mir_type_from_kind(.Int)}, args: [], type_args: []})
+    assert(source_helper_requires_native_interface_scope(program, MIRFunctionID{value: U64{1}}) ?? panic(source_deopt_error_text(err)))
+}
+#Test("source_helper_scope_missing_reachable_function_is_exact_failure") {
+    program :: source_resource_metadata_program()
+    _ :: source_helper_requires_native_interface_scope(program, MIRFunctionID{value: U64{99}}) ?? {
+        assert_eq(source_deopt_error_text(err), "invalid Source entry request: reachable Source helper function MirFunctionId(99) is missing")
+        return
+    }
+    panic("missing Source helper root was accepted")
+}
+#Test("source_helper_entry_validates_program_before_artifact_and_root_checks") {
+    program := source_resource_metadata_program()
+    program.schema_version = 999
+    validate_source_helper_entry(program, MIRArtifactID{value: U64{1}}, [], MIRFunctionID{value: U64{1}}, 0) ?? {
+        assert_eq(source_deopt_error_text(err), "invalid Source entry request: checked Source MIR is invalid: unsupported MIR schema version 999")
+        return
+    }
+    panic("invalid Source MIR schema was accepted")
+}

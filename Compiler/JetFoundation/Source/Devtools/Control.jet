@@ -1,0 +1,318 @@
+// DevtoolsControl.rs:10-710,944-1096. HOST ONLY, not a runtime embedding.
+// Global queues/receipt sequence at 712-942 require #4494; DTOs do not emulate
+// those registries or acquire authority merely by being constructed.
+pub JET_DEVTOOLS_MAX_COMMANDS :: 256
+pub JET_DEVTOOLS_MAX_COMMAND_ROWS :: 256
+fn jet_devtools_control_validate_text(value: String, field: String) Err! { jet_devtools_validate_command_text(value, field) }
+fn jet_devtools_control_text(value: String) -> String Never! { jet_devtools_relay_json_string(value) }
+fn jet_devtools_control_optional_text(value: String?) -> String Never! { if value == .Val(text) -> jet_devtools_control_text(text) else -> "null" }
+fn jet_devtools_control_optional_u64(value: U64?) -> String Never! { if value == .Val(number) -> "{number}" else -> "null" }
+pub struct JetDevtoolsDatabaseExplainRequest { pub session_id: String, pub request_id: String, pub statement_identity: String, pub timeout_ms: U64, pub max_rows: U64 }
+pub fn jet_devtools_database_explain_request_new(^session_id: String, ^request_id: String, ^statement_identity: String, timeout_ms: U64, max_rows: U64) -> JetDevtoolsDatabaseExplainRequest Err! {
+    request :: JetDevtoolsDatabaseExplainRequest{session_id: ^session_id, request_id: ^request_id, statement_identity: ^statement_identity, timeout_ms: timeout_ms, max_rows: max_rows}
+    jet_devtools_database_explain_request_validate(request)
+    Ok(request)
+}
+pub fn jet_devtools_database_explain_request_validate(request: JetDevtoolsDatabaseExplainRequest) Err! {
+    jet_devtools_control_validate_text(request.session_id, "session_id")
+    jet_devtools_control_validate_text(request.request_id, "request_id")
+    jet_devtools_control_validate_text(request.statement_identity, "statement_identity")
+    if request.timeout_ms == (U64{0}) || request.timeout_ms > (U64{30000}) -> return Err("jet.devtools.v1 EXPLAIN timeout is outside its limit")
+    if request.max_rows == (U64{0}) || request.max_rows > (U64{256}) -> return Err("jet.devtools.v1 EXPLAIN row limit is outside its limit")
+    return
+}
+pub fn jet_devtools_database_explain_request_render_json(request: JetDevtoolsDatabaseExplainRequest) -> String Never! {
+    "{{\"session_id\":{jet_devtools_control_text(request.session_id)},\"request_id\":{jet_devtools_control_text(request.request_id)},\"statement_identity\":{jet_devtools_control_text(request.statement_identity)},\"timeout_ms\":{request.timeout_ms},\"max_rows\":{request.max_rows}}}"
+}
+pub struct JetDevtoolsDbPlanRow { pub id: String, pub parent: String?, pub detail: String }
+pub fn jet_devtools_db_plan_row_new(^id: String, ^parent: String?, ^detail: String) -> JetDevtoolsDbPlanRow Err! {
+    row :: JetDevtoolsDbPlanRow{id: ^id, parent: ^parent, detail: ^detail}
+    jet_devtools_db_plan_row_validate(row)
+    Ok(row)
+}
+pub fn jet_devtools_db_plan_row_validate(row: JetDevtoolsDbPlanRow) Err! {
+    jet_devtools_control_validate_text(row.id, "plan row id")
+    if row.parent == .Val(parent) -> jet_devtools_control_validate_text(parent, "plan row parent")
+    jet_devtools_control_validate_text(row.detail, "plan row detail")
+}
+fn jet_devtools_db_plan_row_render_json(row: JetDevtoolsDbPlanRow) -> String Never! {
+    "{{\"id\":{jet_devtools_control_text(row.id)},\"parent\":{jet_devtools_control_optional_text(row.parent)},\"detail\":{jet_devtools_control_text(row.detail)}}}"
+}
+pub struct JetDevtoolsDatabaseExplainResult {
+    pub session_id: String
+    pub request_id: String
+    pub statement_identity: String
+    pub status: String
+    pub elapsed_ns: U64
+    pub truncated: Bool
+    pub row_count: U64
+    pub plan_rows: [JetDevtoolsDbPlanRow]
+    pub error_code: String?
+    pub error_message: String?
+}
+pub fn jet_devtools_database_explain_result_new(^session_id: String, ^request_id: String, ^statement_identity: String, ^status: String, elapsed_ns: U64, truncated: Bool, row_count: U64, ^plan_rows: [JetDevtoolsDbPlanRow], ^error_code: String?, ^error_message: String?) -> JetDevtoolsDatabaseExplainResult Err! {
+    if plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS -> return Err("jet.devtools.v1 EXPLAIN result has too many plan rows")
+    result :: JetDevtoolsDatabaseExplainResult{session_id: ^session_id, request_id: ^request_id, statement_identity: ^statement_identity, status: ^status, elapsed_ns: elapsed_ns, truncated: truncated, row_count: row_count, plan_rows: ^plan_rows, error_code: ^error_code, error_message: ^error_message}
+    jet_devtools_database_explain_result_validate(result)
+    Ok(result)
+}
+pub fn jet_devtools_database_explain_result_validate(result: JetDevtoolsDatabaseExplainResult) Err! {
+    jet_devtools_control_validate_text(result.session_id, "session_id")
+    jet_devtools_control_validate_text(result.request_id, "request_id")
+    jet_devtools_control_validate_text(result.statement_identity, "statement_identity")
+    jet_devtools_control_validate_text(result.status, "status")
+    if result.plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS -> return Err("jet.devtools.v1 EXPLAIN result has too many plan rows")
+    loop row in result.plan_rows -> jet_devtools_db_plan_row_validate(row)
+    if result.error_code == .Val(code) -> jet_devtools_control_validate_text(code, "error code")
+    if result.error_message == .Val(message) -> jet_devtools_control_validate_text(message, "error message")
+    return
+}
+pub fn jet_devtools_database_explain_result_render_json(result: JetDevtoolsDatabaseExplainResult) -> String Never! {
+    rows := [String]{}
+    loop row in result.plan_rows -> &rows.push(jet_devtools_db_plan_row_render_json(row))
+    "{{\"session_id\":{jet_devtools_control_text(result.session_id)},\"request_id\":{jet_devtools_control_text(result.request_id)},\"statement_identity\":{jet_devtools_control_text(result.statement_identity)},\"status\":{jet_devtools_control_text(result.status)},\"elapsed_ns\":{result.elapsed_ns},\"truncated\":{result.truncated},\"row_count\":{result.row_count},\"plan_rows\":[{rows.join(",")}],\"error_code\":{jet_devtools_control_optional_text(result.error_code)},\"error_message\":{jet_devtools_control_optional_text(result.error_message)}}}"
+}
+pub enum JetDevtoolsGameControlKind { Play, Simulate, Pause, Step, Resume, FrameAdvance, Edit, Eject, Keep, Discard, SelectCategory, SelectWorld, EditWorld, EvaluateWorld }
+pub fn jet_devtools_game_control_kind_wire(kind: JetDevtoolsGameControlKind) -> String Never! {
+    if kind == { .Play -> "play", .Simulate -> "simulate", .Pause -> "pause", .Step -> "step", .Resume -> "resume", .FrameAdvance -> "frame_advance", .Edit -> "edit", .Eject -> "eject", .Keep -> "keep", .Discard -> "discard", .SelectCategory -> "select_category", .SelectWorld -> "select_world", .EditWorld -> "edit_world", .EvaluateWorld -> "evaluate_world" }
+}
+pub fn jet_devtools_game_control_kind_from_str(value: String) -> JetDevtoolsGameControlKind Err! {
+    if value == {
+        "play" -> Ok(.Play), "simulate" -> Ok(.Simulate), "pause" -> Ok(.Pause), "step" -> Ok(.Step), "resume" -> Ok(.Resume), "frame_advance" -> Ok(.FrameAdvance), "edit" -> Ok(.Edit), "eject" -> Ok(.Eject), "keep" -> Ok(.Keep), "discard" -> Ok(.Discard), "select_category" -> Ok(.SelectCategory), "select_world" -> Ok(.SelectWorld), "edit_world" -> Ok(.EditWorld), "evaluate_world" -> Ok(.EvaluateWorld), else -> Err("jet.devtools.v1 game control operation `{value}` is unsupported")
+    }
+}
+pub struct JetDevtoolsGameControlRequest {
+    pub session_id: String
+    pub request_id: String
+    pub kind: JetDevtoolsGameControlKind
+    pub source_id: String?
+    pub revision: String?
+    pub world_id: String?
+    pub actor_id: String?
+    pub component_id: String?
+    pub authored_instance_id: String?
+    pub source_span_start: U64?
+    pub source_span_end: U64?
+    pub field: String?
+    pub value: String?
+    pub category: String?
+    pub expression: String?
+    pub required_authority: String?
+    pub frame_id: U64?
+    pub budget: U64?
+}
+fn jet_devtools_required_game_control_field(value: String?, kind: JetDevtoolsGameControlKind, field: String) -> @String Err! from value {
+    if value == .Val(text) {
+        if text.len() != 0 -> return Ok(@text)
+    }
+    operation :: jet_devtools_game_control_kind_wire(kind)
+    Err("game control `{operation}` requires {field}")
+}
+pub fn jet_devtools_game_control_request_new(^session_id: String, ^request_id: String, operation: JetDevtoolsGameControlKind) -> JetDevtoolsGameControlRequest Err! {
+    request :: JetDevtoolsGameControlRequest{session_id: ^session_id, request_id: ^request_id, kind: operation, source_id: None, revision: None, world_id: None, actor_id: None, component_id: None, authored_instance_id: None, source_span_start: None, source_span_end: None, field: None, value: None, category: None, expression: None, required_authority: None, frame_id: None, budget: None}
+    jet_devtools_game_control_request_validate(request)
+    Ok(request)
+}
+pub fn jet_devtools_game_control_request_validate(request: JetDevtoolsGameControlRequest) Err! {
+    jet_devtools_control_validate_text(request.session_id, "game control session_id")
+    jet_devtools_control_validate_text(request.request_id, "game control request_id")
+    if request.source_id == .Val(text) -> jet_devtools_control_validate_text(text, "game control source_id")
+    if request.revision == .Val(text) -> jet_devtools_control_validate_text(text, "game control revision")
+    if request.world_id == .Val(text) -> jet_devtools_control_validate_text(text, "game control world_id")
+    if request.actor_id == .Val(text) -> jet_devtools_control_validate_text(text, "game control actor_id")
+    if request.component_id == .Val(text) -> jet_devtools_control_validate_text(text, "game control component_id")
+    if request.authored_instance_id == .Val(text) -> jet_devtools_control_validate_text(text, "game control authored_instance_id")
+    if request.field == .Val(text) -> jet_devtools_control_validate_text(text, "game control field")
+    if request.value == .Val(text) -> jet_devtools_control_validate_text(text, "game control value")
+    if request.category == .Val(text) -> jet_devtools_control_validate_text(text, "game control category")
+    if request.expression == .Val(text) -> jet_devtools_control_validate_text(text, "game control expression")
+    if request.required_authority == .Val(text) -> jet_devtools_control_validate_text(text, "game control required_authority")
+    if request.kind == {
+        .Play | .Simulate -> {
+            _ :: jet_devtools_required_game_control_field(request.source_id, request.kind, "source_id")
+            _ :: jet_devtools_required_game_control_field(request.revision, request.kind, "revision")
+        }
+        .Eject -> {
+            _ :: jet_devtools_required_game_control_field(request.source_id, request.kind, "source_id")
+            _ :: jet_devtools_required_game_control_field(request.revision, request.kind, "revision")
+            _ :: jet_devtools_required_game_control_field(request.world_id, request.kind, "world_id")
+            _ :: jet_devtools_required_game_control_field(request.actor_id, request.kind, "actor_id")
+        }
+        .Keep | .EditWorld -> {
+            _ :: jet_devtools_required_game_control_field(request.source_id, request.kind, "source_id")
+            _ :: jet_devtools_required_game_control_field(request.revision, request.kind, "revision")
+            _ :: jet_devtools_required_game_control_field(request.authored_instance_id, request.kind, "authored_instance_id")
+            _ :: jet_devtools_required_game_control_field(request.field, request.kind, "field")
+            _ :: jet_devtools_required_game_control_field(request.value, request.kind, "value")
+            if request.source_span_start == None || request.source_span_end == None {
+                operation :: jet_devtools_game_control_kind_wire(request.kind)
+                return Err("game control `{operation}` requires source_span_start and source_span_end")
+            }
+        }
+        .SelectCategory -> { _ :: jet_devtools_required_game_control_field(request.category, request.kind, "category") }
+        .SelectWorld -> {
+            _ :: jet_devtools_required_game_control_field(request.world_id, request.kind, "world_id")
+            if request.component_id != None && request.actor_id == None -> return Err("select_world component_id requires actor_id")
+            if request.field != None && request.component_id == None -> return Err("select_world field requires component_id")
+        }
+        .EvaluateWorld -> {
+            _ :: jet_devtools_required_game_control_field(request.world_id, request.kind, "world_id")
+            _ :: jet_devtools_required_game_control_field(request.actor_id, request.kind, "actor_id")
+            _ :: jet_devtools_required_game_control_field(request.component_id, request.kind, "component_id")
+            _ :: jet_devtools_required_game_control_field(request.expression, request.kind, "expression")
+            _ :: jet_devtools_required_game_control_field(request.required_authority, request.kind, "required_authority")
+            if request.frame_id == None -> return Err("evaluate_world requires frame_id")
+            if (request.budget ?? U64{0}) == (U64{0}) -> return Err("evaluate_world requires a positive budget")
+        }
+        .Pause | .Step | .Resume | .FrameAdvance | .Edit | .Discard -> {}
+    }
+    if request.source_span_start == .Val(start) {
+        end :: request.source_span_end ?? return Err("game control source span must include both bounds")
+        if start >= end -> return Err("game control source span must end after it starts")
+    } else {
+        if request.source_span_end != None -> return Err("game control source span must include both bounds")
+    }
+    return
+}
+pub fn jet_devtools_game_control_request_render_json(request: JetDevtoolsGameControlRequest) -> String Never! {
+    "{{\"session_id\":{jet_devtools_control_text(request.session_id)},\"request_id\":{jet_devtools_control_text(request.request_id)},\"kind\":{jet_devtools_control_text(jet_devtools_game_control_kind_wire(request.kind))},\"source_id\":{jet_devtools_control_optional_text(request.source_id)},\"revision\":{jet_devtools_control_optional_text(request.revision)},\"world_id\":{jet_devtools_control_optional_text(request.world_id)},\"actor_id\":{jet_devtools_control_optional_text(request.actor_id)},\"component_id\":{jet_devtools_control_optional_text(request.component_id)},\"authored_instance_id\":{jet_devtools_control_optional_text(request.authored_instance_id)},\"source_span_start\":{jet_devtools_control_optional_u64(request.source_span_start)},\"source_span_end\":{jet_devtools_control_optional_u64(request.source_span_end)},\"field\":{jet_devtools_control_optional_text(request.field)},\"value\":{jet_devtools_control_optional_text(request.value)},\"category\":{jet_devtools_control_optional_text(request.category)},\"expression\":{jet_devtools_control_optional_text(request.expression)},\"required_authority\":{jet_devtools_control_optional_text(request.required_authority)},\"frame_id\":{jet_devtools_control_optional_u64(request.frame_id)},\"budget\":{jet_devtools_control_optional_u64(request.budget)}}}"
+}
+pub struct JetDevtoolsProjectRebuildRequest { pub session_id: String, pub request_id: String, pub expected_revision: String }
+pub fn jet_devtools_project_rebuild_request_new(^session_id: String, ^request_id: String, ^expected_revision: String) -> JetDevtoolsProjectRebuildRequest Err! {
+    request :: JetDevtoolsProjectRebuildRequest{session_id: ^session_id, request_id: ^request_id, expected_revision: ^expected_revision}
+    jet_devtools_project_rebuild_request_validate(request)
+    Ok(request)
+}
+pub fn jet_devtools_project_rebuild_request_validate(request: JetDevtoolsProjectRebuildRequest) Err! {
+    jet_devtools_control_validate_text(request.session_id, "project rebuild session_id")
+    jet_devtools_control_validate_text(request.request_id, "project rebuild request_id")
+    jet_devtools_control_validate_text(request.expected_revision, "project rebuild expected_revision")
+}
+pub fn jet_devtools_project_rebuild_request_render_json(request: JetDevtoolsProjectRebuildRequest) -> String Never! {
+    "{{\"session_id\":{jet_devtools_control_text(request.session_id)},\"request_id\":{jet_devtools_control_text(request.request_id)},\"expected_revision\":{jet_devtools_control_text(request.expected_revision)}}}"
+}
+pub enum JetDevtoolsCommand { DatabaseExplain(JetDevtoolsDatabaseExplainRequest), GameControl(JetDevtoolsGameControlRequest), ProjectRebuild(JetDevtoolsProjectRebuildRequest) }
+pub fn jet_devtools_command_session_id(command: JetDevtoolsCommand) -> @String Never! from command {
+    if command == { .DatabaseExplain(request) -> @request.session_id, .GameControl(request) -> @request.session_id, .ProjectRebuild(request) -> @request.session_id }
+}
+pub fn jet_devtools_command_validate(command: JetDevtoolsCommand) Err! {
+    if command == { .DatabaseExplain(request) -> jet_devtools_database_explain_request_validate(request), .GameControl(request) -> jet_devtools_game_control_request_validate(request), .ProjectRebuild(request) -> jet_devtools_project_rebuild_request_validate(request) }
+}
+pub fn jet_devtools_command_render_json(command: JetDevtoolsCommand) -> String Never! {
+    if command == { .DatabaseExplain(request) -> jet_devtools_database_explain_request_render_json(request), .GameControl(request) -> jet_devtools_game_control_request_render_json(request), .ProjectRebuild(request) -> jet_devtools_project_rebuild_request_render_json(request) }
+}
+pub fn jet_devtools_command_kind(command: JetDevtoolsCommand) -> String Never! { if command == { .DatabaseExplain(_) -> "DatabaseExplain", .GameControl(_) -> "GameControl", .ProjectRebuild(_) -> "ProjectRebuild" } }
+pub fn jet_devtools_command_request_id(command: JetDevtoolsCommand) -> @String Never! from command {
+    if command == { .DatabaseExplain(request) -> @request.request_id, .GameControl(request) -> @request.request_id, .ProjectRebuild(request) -> @request.request_id }
+}
+pub struct JetDevtoolsCommandReceipt { pub sequence: U64, pub session_id: String, pub request_id: String, pub kind: String, pub status: String, pub error: String? }
+pub fn jet_devtools_command_receipt_validate(receipt: JetDevtoolsCommandReceipt) Err! {
+    jet_devtools_control_validate_text(receipt.session_id, "command receipt session_id")
+    jet_devtools_control_validate_text(receipt.request_id, "command receipt request_id")
+    jet_devtools_control_validate_text(receipt.kind, "command receipt kind")
+    jet_devtools_control_validate_text(receipt.status, "command receipt status")
+    if receipt.error == .Val(error) -> jet_devtools_control_validate_text(error, "command receipt error")
+    return
+}
+pub fn jet_devtools_command_receipt_render_json(receipt: JetDevtoolsCommandReceipt) -> String Never! {
+    "{{\"sequence\":{receipt.sequence},\"session_id\":{jet_devtools_control_text(receipt.session_id)},\"request_id\":{jet_devtools_control_text(receipt.request_id)},\"kind\":{jet_devtools_control_text(receipt.kind)},\"status\":{jet_devtools_control_text(receipt.status)},\"error\":{jet_devtools_control_optional_text(receipt.error)}}}"
+}
+pub enum JetDevtoolsCommandDirection { HostToRuntime, RuntimeToHost }
+pub fn jet_devtools_command_direction_wire(direction: JetDevtoolsCommandDirection) -> String Never! { if direction == { .HostToRuntime -> "host_to_runtime", .RuntimeToHost -> "runtime_to_host" } }
+pub struct JetDevtoolsCommandEnvelope {
+    pub protocol: String
+    pub session_id: String
+    pub started_at_ms: U64
+    pub direction: JetDevtoolsCommandDirection
+    commands: [JetDevtoolsCommand?]
+    head: Int
+    count: Int
+}
+pub fn jet_devtools_command_envelope_new(^session_id: String, started_at_ms: U64) -> JetDevtoolsCommandEnvelope Never! {
+    slots := [JetDevtoolsCommand?]{}
+    loop _ in 0..<JET_DEVTOOLS_MAX_COMMANDS -> &slots.push(None)
+    JetDevtoolsCommandEnvelope{protocol: JET_DEVTOOLS_PROTOCOL, session_id: ^session_id, started_at_ms: started_at_ms, direction: .HostToRuntime, commands: slots, head: 0, count: 0}
+}
+pub fn jet_devtools_command_envelope_validate(envelope: JetDevtoolsCommandEnvelope) Err! {
+    if envelope.protocol != JET_DEVTOOLS_PROTOCOL -> return Err("jet.devtools.v1 command envelope protocol mismatch")
+    jet_devtools_control_validate_text(envelope.session_id, "session_id")
+    if envelope.direction != .HostToRuntime -> return Err("jet.devtools.v1 command envelope direction must be host_to_runtime")
+    if envelope.count > JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
+    loop command in jet_devtools_command_envelope_commands(envelope) {
+        jet_devtools_command_validate(command)
+        if jet_devtools_command_session_id(command) != envelope.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
+    }
+    return
+}
+pub fn jet_devtools_command_envelope_enqueue_command(envelope: &JetDevtoolsCommandEnvelope, ^command: JetDevtoolsCommand) Err! {
+    jet_devtools_command_validate(command)
+    if jet_devtools_command_session_id(command) != envelope.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
+    if envelope.count >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
+    envelope.direction = .HostToRuntime
+    slot :: (envelope.head + envelope.count) % JET_DEVTOOLS_MAX_COMMANDS
+    envelope.commands[slot] = Val(^command)
+    envelope.count += 1
+    return
+}
+pub fn jet_devtools_command_envelope_requeue_command_front(envelope: &JetDevtoolsCommandEnvelope, ^command: JetDevtoolsCommand) Err! {
+    jet_devtools_command_validate(command)
+    if jet_devtools_command_session_id(command) != envelope.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
+    if envelope.count >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
+    envelope.direction = .HostToRuntime
+    envelope.head = (envelope.head + JET_DEVTOOLS_MAX_COMMANDS - 1) % JET_DEVTOOLS_MAX_COMMANDS
+    envelope.commands[envelope.head] = Val(^command)
+    envelope.count += 1
+    return
+}
+pub fn jet_devtools_command_envelope_poll_command(envelope: &JetDevtoolsCommandEnvelope) -> JetDevtoolsCommand? Never! {
+    if envelope.count == 0 -> return None
+    command :: ^envelope.commands[envelope.head]
+    envelope.commands[envelope.head] = None
+    envelope.head = (envelope.head + 1) % JET_DEVTOOLS_MAX_COMMANDS
+    envelope.count -= 1
+    command
+}
+pub struct JetDevtoolsCommands { envelope: @JetDevtoolsCommandEnvelope, at: Int }
+impl JetDevtoolsCommands.Iterator {
+    type Item = @JetDevtoolsCommand
+    fn next(&self) -> (@JetDevtoolsCommand)? from self {
+        if self.at >= self.envelope.count -> return None
+        slot :: (self.envelope.head + self.at) % JET_DEVTOOLS_MAX_COMMANDS
+        self.at += 1
+        if self.envelope.commands[slot] == .Val(command) -> return Val(@command)
+        panic("occupied command ring slot")
+    }
+}
+pub fn jet_devtools_command_envelope_commands(envelope: JetDevtoolsCommandEnvelope) -> JetDevtoolsCommands Never! from envelope { JetDevtoolsCommands{envelope: @envelope, at: 0} }
+pub fn jet_devtools_command_envelope_command_count(envelope: JetDevtoolsCommandEnvelope) -> Int Never! { envelope.count }
+pub fn jet_devtools_command_envelope_serialize(envelope: JetDevtoolsCommandEnvelope) -> String Err! {
+    jet_devtools_command_envelope_validate(envelope)
+    out := [U8]{}
+    jet_devtools_wire_append(&out, `{"protocol":`)
+    jet_devtools_control_quote(envelope.protocol, &out)
+    jet_devtools_wire_append(&out, ",\"session_id\":")
+    jet_devtools_control_quote(envelope.session_id, &out)
+    jet_devtools_wire_append(&out, ",\"started_at_ms\":{envelope.started_at_ms},\"direction\":")
+    jet_devtools_control_quote(jet_devtools_command_direction_wire(envelope.direction), &out)
+    jet_devtools_wire_append(&out, ",\"commands\":[")
+    first := true
+    loop command in jet_devtools_command_envelope_commands(envelope) {
+        if !first -> &out.push(U8{44})
+        first = false
+        jet_devtools_wire_append(&out, `{"kind":`)
+        jet_devtools_control_quote(jet_devtools_command_kind(command), &out)
+        jet_devtools_wire_append(&out, ",\"payload\":")
+        jet_devtools_wire_append(&out, jet_devtools_command_render_json(command))
+        &out.push(U8{125})
+    }
+    jet_devtools_wire_append(&out, `]}`)
+    if out.len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES -> return Err("jet.devtools.v1 command envelope exceeds the Prelude byte limit")
+    Ok(String.from_bytes(out) ?? panic("command writer preserves UTF-8"))
+}
+pub enum JetDevtoolsDecodedEnvelope { Events(JetDevtoolsEnvelope), Commands(JetDevtoolsCommandEnvelope) }
+pub fn jet_devtools_decoded_envelope_validate(envelope: JetDevtoolsDecodedEnvelope) Err! {
+    if envelope == { .Events(events) -> { _ :: jet_devtools_serialize(events); return }, .Commands(commands) -> jet_devtools_command_envelope_validate(commands) }
+}
+pub fn jet_devtools_decoded_envelope_session_id(envelope: JetDevtoolsDecodedEnvelope) -> @String Never! from envelope {
+    if envelope == { .Events(events) -> @events.session_id, .Commands(commands) -> @commands.session_id }
+}

@@ -1,0 +1,101 @@
+fn json_test_text(bytes: [U8]) -> String Never! { String.from_bytes(bytes) ?? panic("test bytes are not UTF-8") }
+
+#Test("json_escape short escapes match Rust") {
+    cr :: json_test_text([U8]{U8{13}})
+    assert(json_escape("a\"b\\c\nd{cr}e\tf") == "a\\\"b\\\\c\\nd\\re\\tf")
+    assert(foundation_json_quote("x") == "\"x\"")
+}
+
+#Test("json_escape C0, DEL and C1 controls become u00xx") {
+    assert(json_escape(json_test_text([U8]{U8{1}, U8{8}, U8{12}, U8{31}})) == "\\u0001\\u0008\\u000c\\u001f")
+    assert(json_escape(json_test_text([U8]{U8{127}})) == "\\u007f")
+    assert(json_escape(json_test_text([U8]{U8{194}, U8{128}, U8{194}, U8{133}, U8{194}, U8{159}})) == "\\u0080\\u0085\\u009f")
+    assert(foundation_json_quote(json_test_text([U8]{U8{8}, U8{12}, U8{127}, U8{194}, U8{128}})) == "\"\\u0008\\u000c\\u007f\\u0080\"")
+}
+
+#Test("json_escape keeps non-control scalars verbatim") {
+    nbsp :: json_test_text([U8]{U8{194}, U8{160}})
+    assert(json_escape(nbsp) == nbsp)
+    text :: "é → 🚀 ok"
+    assert(json_escape(text) == text)
+    assert(json_escape("") == "")
+    assert(foundation_json_quote("") == "\"\"")
+}
+
+fn foundation_protocol_test_nested(depth: Int) -> String Never! {
+    bytes := [U8]{}
+    loop _ in 0..<depth -> &bytes.push(U8{91})
+    &bytes.push(U8{48})
+    loop _ in 0..<depth -> &bytes.push(U8{93})
+    json_test_text(bytes)
+}
+
+// Rust JSON.rs::protocol_json_accepts_rfc_escapes_unicode_and_bounded_nesting.
+#Test("protocol_json_accepts_rfc_escapes_unicode_and_bounded_nesting") {
+    assert(foundation_parse_protocol_json("{{\"text\":\"caf\\u00e9 \\ud83d\\ude80\",\"n\":-1.25e+2}}") != None)
+    assert(foundation_parse_protocol_json(foundation_protocol_test_nested(64)) != None)
+    assert(foundation_parse_protocol_json(foundation_protocol_test_nested(65)) == None)
+}
+
+// Rust JSON.rs::protocol_json_rejects_ambiguous_or_malformed_input_without_panic.
+#Test("protocol_json_rejects_ambiguous_or_malformed_input_without_panic") {
+    hostile :: [String]{"{{\"a\":1,\"a\":2}}", "{{\"text\":\"line\nfeed\"}}", "01", "-", "1.", "1e", "1e9999", "\"\\ud800\"", "{{\"nested\":{{\"method\":\"fake\"}}"}
+    loop raw in hostile -> assert(foundation_parse_protocol_json(raw) == None)
+}
+
+#Test("protocol_json byte limit uses raw UTF-8 and preserves caller ceiling") {
+    assert(foundation_parse_protocol_json_with_limit("\"é\"", 4) != None)
+    assert(foundation_parse_protocol_json_with_limit("\"é\"", 3) == None)
+    bytes := [U8]{U8{34}}
+    loop _ in 0..<1048574 -> &bytes.push(U8{120})
+    &bytes.push(U8{34})
+    at_limit :: json_test_text(bytes)
+    assert(foundation_parse_protocol_json(at_limit) != None)
+    above_limit :: "{at_limit} "
+    assert(foundation_parse_protocol_json(above_limit) == None)
+    assert(foundation_parse_protocol_json_with_limit(above_limit, 16777216) != None)
+}
+
+// Rust JSONParser::number's i64 boundary remains the protocol contract.
+#Test("protocol_json rejects out-of-i64 integers without converting them") {
+    assert(foundation_parse_protocol_json("9223372036854775807") != None)
+    assert(foundation_parse_protocol_json("-9223372036854775808") != None)
+    assert(foundation_parse_protocol_json("9223372036854775808") == None)
+    assert(foundation_parse_protocol_json("-9223372036854775809") == None)
+    assert(foundation_parse_protocol_json("[9223372036854775808]") == None)
+    assert(foundation_parse_protocol_json("{{\"n\":-9223372036854775809}}") == None)
+    assert(foundation_parse_protocol_json("9223372036854775808.0") != None)
+    error :: foundation_protocol_json_integer_error(DataTree.Int(9223372036854775808))
+    message :: error ?? panic("out-of-i64 protocol integer had no diagnostic")
+    assert(message == "invalid number `9223372036854775808`")
+}
+
+// Main D-JSON=C retires the second Rust parser into Core EncodingJson.
+#Test("foundation_json_parse preserves Core exact integers and depth domain") {
+    parsed :: foundation_json_parse("9223372036854775808") ?? panic("Core exact integer was rejected")
+    exact :: if parsed == {
+        .Int(value) -> value == 9223372036854775808
+        else -> false
+    }
+    assert(exact)
+    accepted :: if foundation_json_parse(foundation_protocol_test_nested(65)) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+    assert(accepted)
+}
+
+#Test("foundation_json_parse passes Core error reasons through unchanged") {
+    malformed :: [String]{"", "?", "01", "{{\"a\":1,\"a\":2}}", "\"\\ud800\"", "1e9999", "[1"}
+    loop raw in malformed {
+        expected :: if foundation_protocol_json.parse(raw) == {
+            .Ok(_) -> panic("malformed Core JSON unexpectedly parsed")
+            .Err(error) -> error.reason
+        }
+        actual :: if foundation_json_parse(raw) == {
+            .Ok(_) -> panic("malformed Foundation JSON unexpectedly parsed")
+            .Err(error) -> error.message
+        }
+        assert(actual == expected)
+    }
+}

@@ -1,0 +1,169 @@
+// CoreModuleExports.rs:1015; all production lookups use the same data path.
+#Test("known_modules_resolve_without_a_bespoke_arm") {
+    address :: core_leaf_kind("core.email", "Address") ?? panic("Address export")
+    assert(address == CoreLeafKind.Plain)
+    // D-CORE-TREE1: source crypto leaves are Plain; nominal identity has a
+    // separate crypto owner, not the retired CryptoNominal export marker.
+    secret :: core_leaf_kind("core.crypto", "Secret") ?? panic("Secret export")
+    verify_key :: core_leaf_kind("core.crypto", "VerifyKey") ?? panic("VerifyKey export")
+    env_error :: core_leaf_kind("core.sys", "EnvError") ?? panic("EnvError export")
+    cbor_reader :: core_leaf_kind("core.encoding.cbor", "CBORReader") ?? panic("CBORReader export")
+    assert(secret == CoreLeafKind.Plain)
+    assert(verify_key == CoreLeafKind.Plain)
+    assert(env_error == CoreLeafKind.Plain)
+    assert(cbor_reader == CoreLeafKind.Plain)
+    assert(core_leaf_kind("core.email", "NoSuchLeaf") == None)
+    assert(core_leaf_kind("core.nonexistent", "Address") == None)
+}
+
+// CoreModuleExports.rs:1043 (EXPECTED preserves canonical variant order).
+#Test("web_enum_variants_come_from_the_canonical_declaration") {
+    variants :: core_enum_variants("WebQueryStatus") ?? panic("WebQueryStatus variants")
+    expected :: [String]{"Pending", "Fresh", "Stale", "Fetching", "Error", "Offline"}
+    assert(variants.len() == expected.len())
+    loop index in 0..<expected.len() -> assert(variants[index] == expected[index])
+    assert(core_enum_variants("Address") == None)
+}
+
+// CoreModuleExports.rs:1050.
+#Test("transparent_math_primitives_keep_the_fixed_provider_route") {
+    assert(!core_source_owns("core.math", "is_finite"))
+    assert(!core_source_owns("core.math", "sqrt"))
+    assert(core_source_owns("core.math", "is_even"))
+    loop member in [String]{"cmp", "cos", "exp", "fabs", "ln", "sin"} {
+        assert(!core_source_owns("core.math", member))
+        assert(!core_source_owns_call("core.math", member, 1))
+    }
+}
+
+// CoreModuleExports.rs:1060 (NEW_MODULE_TYPES, TABLE_WITH_NEW_MODULE).
+#Test("adding_a_module_is_one_data_row_no_new_match_arm") {
+    types :: [CoreModuleTypeExport]{CoreModuleTypeExport{name: "Widget", kind: CoreLeafKind.Plain}}
+    table :: [CoreModuleDeclaration]{CoreModuleDeclaration{
+        module_name: "core.widgets", members: [String]{"Widget"},
+        type_exports: types, dependencies: [String]{},
+    }}
+    kind :: core_module_leaf_kind_in(table, "core.widgets", "Widget") ?? panic("Widget export")
+    assert(kind == CoreLeafKind.Plain)
+    assert(core_module_leaf_kind_in(table, "core.widgets", "Missing") == None)
+    assert(core_module_leaf_kind_in(table, "core.other", "Widget") == None)
+}
+
+// CoreModuleExports.rs:1076.
+#Test("declarations_expose_bootstrap_and_dependency_order") {
+    steps :: core_bootstrap_order()
+    assert(steps.len() == 4)
+    assert(steps[0].name == "Syntax")
+    assert(steps[1].name == "Effects")
+    assert(steps[2].name == "Core")
+    assert(steps[3].name == "Derives")
+    assert(steps[0].dependencies == [String]{})
+    assert(steps[1].dependencies == [String]{"Syntax"})
+    assert(steps[2].dependencies == [String]{"Effects"})
+    assert(steps[3].dependencies == [String]{"Core"})
+    found := false
+    loop entry in core_modules() {
+        if entry.module_name == "core.web" {
+            assert(entry.dependencies == [String]{"core.http", "core.web.forms"})
+            found = true
+        }
+    }
+    assert(found)
+}
+
+#Test("generic arity keeps conflicting exports explicit and ignores nongenerics") {
+    assert(core_generic_arity("DataTracked") == (Val(2)))
+    assert(core_generic_arity("DataLoader") == (Val(1)))
+    assert(core_generic_arity("Address") == None)
+    assert(core_generic_arity("unknown") == None)
+    one :: CoreModuleTypeExport{name: "Shared", kind: CoreLeafKind.Generic{arity: 1}}
+    two :: CoreModuleTypeExport{name: "Shared", kind: CoreLeafKind.Generic{arity: 2}}
+    plain :: CoreModuleTypeExport{name: "Shared", kind: CoreLeafKind.Plain}
+    table :: [CoreModuleDeclaration]{
+        CoreModuleDeclaration{module_name: "one", members: [String]{}, type_exports: [CoreModuleTypeExport]{one, plain}, dependencies: [String]{}},
+        CoreModuleDeclaration{module_name: "two", members: [String]{}, type_exports: [CoreModuleTypeExport]{two}, dependencies: [String]{}},
+    }
+    assert(core_generic_arity_in(table, "Shared") == None)
+}
+
+#Test("first module row is authoritative even when a later row exports the leaf") {
+    table :: [CoreModuleDeclaration]{
+        CoreModuleDeclaration{module_name: "same", members: [String]{}, type_exports: [CoreModuleTypeExport]{}, dependencies: [String]{}},
+        CoreModuleDeclaration{module_name: "same", members: [String]{"Widget"}, type_exports: [CoreModuleTypeExport]{CoreModuleTypeExport{name: "Widget", kind: CoreLeafKind.Plain}}, dependencies: [String]{}},
+    }
+    assert(core_module_leaf_kind_in(table, "same", "Widget") == None)
+}
+
+#Test("source routing retains exact module alias path and term arity policy") {
+    assert(core_source_module("core.nonexistent") == None)
+    assert(core_source_module_by_alias("nonexistent") == None)
+    assert(core_source_module("core") == None)
+    source :: core_source_module("core.math") ?? panic("source math metadata")
+    assert(source.alias == "core_math")
+    assert(source.path == "Core/math/math.jet")
+    alias :: core_source_module_by_alias("core_math") ?? panic("source alias")
+    assert(alias.module_name == "core.math")
+    assert(alias.owned_members == source.owned_members)
+    assert(!core_source_owns("core.math", "nonexistent"))
+    assert(!core_source_owns("core.nonexistent", "is_even"))
+    loop member in [String]{"print", "eprint", "progress"} {
+        assert(core_source_owns("core.term", member))
+        assert(core_source_owns_call("core.term", member, 1))
+        assert(!core_source_owns_call("core.term", member, 0))
+        assert(!core_source_owns_call("core.term", member, 2))
+        assert(!core_source_owns_call("core.term", member, 3))
+    }
+    assert(core_source_owns_call("core.term", "readline", 0))
+}
+
+#Test("type owner queries preserve namespace leaf precedence and root names") {
+    expected :: [String]{"core.email"}
+    assert(core_type_modules("Address") == expected)
+    assert(core_type_modules("email.Address") == expected)
+    assert(core_type_modules("alias::Address") == expected)
+    assert(core_type_modules("alias::nested::Address") == expected)
+    assert(core_type_modules("alias::Address.suffix").len() == 0)
+    assert(core_type_modules("email.").len() == 0)
+    assert(core_type_modules("alias::").len() == 0)
+    assert(core_type_modules("unknown").len() == 0)
+    loop root in CORE_ROOT_TYPES -> assert(is_core_type_name(root))
+    assert(is_core_type_name("Address"))
+    assert(!is_core_type_name("email.Address"))
+    assert(!is_core_type_name("unknown"))
+}
+
+// Cross-check every retained row against the existing canonical declarations
+// and embedded public-source owner, not a second fixture registry.
+#Test("typed Core registry agrees with canonical embedded declaration and source owners") {
+    core :: foundation_embedded_core()
+    text :: core.declaration_text()
+    declarations :: core_modules()
+    assert(declarations.len() == 114)
+    assert(declarations.len() == CORE_MODULE_EXPORTS.len())
+    loop index in 0..<declarations.len() {
+        actual :: declarations[index]
+        expected :: core_module_declaration_from_source(text, actual.module_name) ?? panic("canonical Core declaration")
+        assert(actual.module_name == CORE_MODULE_EXPORTS[index].module_name)
+        assert(actual.members == expected.members)
+        assert(actual.dependencies == expected.dependencies)
+        assert(actual.type_exports.len() == expected.type_exports.len())
+        loop type_index in 0..<actual.type_exports.len() {
+            assert(actual.type_exports[type_index].name == expected.type_exports[type_index].name)
+            assert(actual.type_exports[type_index].kind == expected.type_exports[type_index].kind)
+        }
+    }
+    sources :: core_source_modules()
+    embedded :: core.public_sources()
+    assert(sources.len() == 110)
+    assert(sources.len() == embedded.len())
+    loop index in 0..<sources.len() {
+        assert(sources[index].module_name == embedded[index].module_name)
+        assert(sources[index].alias == embedded[index].alias)
+        assert(sources[index].path == embedded[index].path)
+        assert(sources[index].owned_members == embedded[index].owned_members)
+    }
+    names := [String]{}
+    loop name in core_module_names() -> &names.push(name)
+    assert(names.len() == declarations.len())
+    loop index in 0..<names.len() -> assert(names[index] == declarations[index].module_name)
+}

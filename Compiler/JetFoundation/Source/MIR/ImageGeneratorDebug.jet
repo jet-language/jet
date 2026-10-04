@@ -1,0 +1,194 @@
+// CompilerImage.rs DebugDigest/field_debug_differences and native derived
+// Debug traversal. Labels come from Rust declarations, never Jet Debug for a
+// compound carrier. Scalar Debug shares the canonical AST/runtime formatter.
+fn mir_image_gen_debug_literal(text: String) -> String Never! {
+    quoted :: "{text:Debug}"
+    "mir_image_debug_write(&writer, {quoted})\n"
+}
+fn mir_image_gen_debug_expression(state: &MIRImageGeneratorEmission, context: MIRImageSchemaDefinition, native: MIRImageSchemaType, source: MIRImageSchemaType, expression: String) -> String MIRImageError! {
+    if native == {
+        .Boxed(inner) -> mir_image_gen_debug_expression(&state, context, inner, source, expression)
+        .Shared(inner) -> mir_image_gen_debug_expression(&state, context, inner, source, expression)
+        .StaticString -> Ok("mir_image_debug_scalar_string(&writer, {expression})\n")
+        .Named(name) -> {
+            if name == "String" || name == "PathBuf" || name == "std::path::PathBuf" || name == "str" -> return Ok("mir_image_debug_scalar_string(&writer, {expression})\n")
+            if name == "char" -> return Ok("mir_image_debug_scalar_char(&writer, {expression})\n")
+            if mir_image_gen_builtin(name) -> return Ok("mir_image_debug_write(&writer, \"{{{expression}:Debug}}\")\n")
+            key :: mir_image_generator_resolve_type(state.schema, context, name)
+            definition :: state.schema.definitions[key]
+            if definition.body == .Alias(inner) -> return mir_image_gen_debug_expression(&state, definition, inner, source, expression)
+            carrier :: mir_image_gen_named_source(source)
+            mir_image_gen_enqueue(&state, key, carrier)
+            function :: mir_image_gen_function("debug", key, carrier)
+            Ok("{function}<S, W>({expression}, &writer, sink, &state)\n")
+        }
+        .Optional(inner) -> {
+            source_inner :: if source == .Optional(value) -> value else -> return Err(MIRImageError{message: "native optional Debug field has a nonoptional Source carrier"})
+            item :: mir_image_gen_fresh(&state, "item")
+            body :: mir_image_gen_debug_expression(&state, context, inner, source_inner, item)
+            Ok("if {expression} == .Val({item}) {{\nmir_image_debug_open(&writer, \"Some(\", \"Some(\", true)\nmir_image_debug_item(&writer, 0, \"\")\n{body}mir_image_debug_item_end(&writer)\nmir_image_debug_close(&writer, \")\", \")\", true)\n}} else -> mir_image_debug_write(&writer, \"None\")\n")
+        }
+        .Sequence(inner) -> mir_image_gen_debug_sequence(&state, context, inner, source, expression, false)
+        .Array(inner, _) -> mir_image_gen_debug_sequence(&state, context, inner, source, expression, false)
+        .Set(inner, _) -> mir_image_gen_debug_sequence(&state, context, inner, source, expression, true)
+        .Tuple(items) -> {
+            carrier :: mir_image_gen_named_source(source)
+            definition :: state.mapping.source[carrier]
+            fields :: if definition.body == .Struct(value) -> value else -> return Err(MIRImageError{message: "native tuple Debug carrier `{carrier}` is not a Source record"})
+            if items.len() != fields.len() -> return Err(MIRImageError{message: "native tuple Debug carrier `{carrier}` changes tuple arity"})
+            parts := [String]{"mir_image_debug_open(&writer, \"(\", \"(\", {items.len() != 0})\n"}
+            loop index in 0..<items.len() {
+                field :: fields[index]
+                &parts.push("mir_image_debug_item(&writer, {index}, \"\")\n")
+                &parts.push(mir_image_gen_debug_expression(&state, context, items[index], mir_image_generator_source_type(field.ty), "{expression}.{field.name}"))
+                &parts.push("mir_image_debug_item_end(&writer)\n")
+            }
+            if items.len() == 1 -> &parts.push("if !writer.pretty -> mir_image_debug_write(&writer, \",\")\n")
+            &parts.push("mir_image_debug_close(&writer, \")\", \")\", {items.len() != 0})\n")
+            Ok(parts.join(""))
+        }
+        .Map(key, value, _) -> mir_image_gen_debug_map(&state, context, key, value, source, expression)
+    }
+}
+fn mir_image_gen_debug_sequence(state: &MIRImageGeneratorEmission, context: MIRImageSchemaDefinition, native: MIRImageSchemaType, source: MIRImageSchemaType, expression: String, set: Bool) -> String MIRImageError! {
+    inner :: if source == .Sequence(value) -> value else -> return Err(MIRImageError{message: "native collection Debug has a nonsequence Source carrier"})
+    item :: mir_image_gen_fresh(&state, "item")
+    index :: mir_image_gen_fresh(&state, "index")
+    order :: mir_image_gen_fresh(&state, "order")
+    body :: mir_image_gen_debug_expression(&state, context, native, inner, item)
+    prefix := ""
+    walk := expression
+    open :: if set -> "{" else -> "["
+    close :: if set -> "}" else -> "]"
+    if set {
+        ty :: mir_image_gen_type_text(inner)
+        prefix = "{order} := ~{expression}\n&{order}.sort_by((left: {ty}, right: {ty}) -> left <=> right)\n"
+        walk = order
+    }
+    open_quoted :: "{open:Debug}"
+    close_quoted :: "{close:Debug}"
+    Ok("{prefix}mir_image_debug_open(&writer, {open_quoted}, {open_quoted}, {expression}.len() != 0)\n{index} := 0\nloop {item} in {walk} {{\nmir_image_debug_item(&writer, {index}, \"\")\n{body}mir_image_debug_item_end(&writer)\n{index} += 1\n}}\nmir_image_debug_close(&writer, {close_quoted}, {close_quoted}, {expression}.len() != 0)\n")
+}
+fn mir_image_gen_debug_map(state: &MIRImageGeneratorEmission, context: MIRImageSchemaDefinition, native_key: MIRImageSchemaType, native_value: MIRImageSchemaType, source: MIRImageSchemaType, expression: String) -> String MIRImageError! {
+    key_source := MIRImageSchemaType.Named("")
+    value_source := MIRImageSchemaType.Named("")
+    entry :: mir_image_gen_fresh(&state, "entry")
+    order :: mir_image_gen_fresh(&state, "order")
+    index :: mir_image_gen_fresh(&state, "index")
+    prefix := ""
+    key_expression := entry
+    value_expression := "{expression}[{entry}]"
+    if source == .Map(key, value, _) {
+        key_source = key
+        value_source = value
+        ty :: mir_image_gen_type_text(key)
+        prefix = "{order} := [{ty}]{{}}\nloop (key, _) in {expression} -> &{order}.push(key)\n&{order}.sort_by((left: {ty}, right: {ty}) -> left <=> right)\n"
+    } else if source == .Sequence(inner) {
+        carrier :: mir_image_gen_named_source(inner)
+        fields :: if state.mapping.source[carrier].body == .Struct(value) -> value else -> return Err(MIRImageError{message: "native map Debug has a nonrecord Source entry"})
+        if fields.len() != 2 -> return Err(MIRImageError{message: "native map Debug Source entry changes pair arity"})
+        key_source = mir_image_generator_source_type(fields[0].ty)
+        value_source = mir_image_generator_source_type(fields[1].ty)
+        key_expression = "{entry}.{fields[0].name}"
+        value_expression = "{entry}.{fields[1].name}"
+        prefix = "{order} := ~{expression}\n&{order}.sort_by((left: {carrier}, right: {carrier}) -> left.{fields[0].name} <=> right.{fields[0].name})\n"
+    } else -> return Err(MIRImageError{message: "native map Debug has no typed Source map"})
+    key_body :: mir_image_gen_debug_expression(&state, context, native_key, key_source, key_expression)
+    value_body :: mir_image_gen_debug_expression(&state, context, native_value, value_source, value_expression)
+    Ok("{prefix}mir_image_debug_open(&writer, \"{{\", \"{{\", {expression}.len() != 0)\n{index} := 0\nloop {entry} in {order} {{\nmir_image_debug_item(&writer, {index}, \"\")\n{key_body}mir_image_debug_write(&writer, \": \")\n{value_body}mir_image_debug_item_end(&writer)\n{index} += 1\n}}\nmir_image_debug_close(&writer, \"}}\", \"}}\", {expression}.len() != 0)\n")
+}
+fn mir_image_gen_debug_definition(state: &MIRImageGeneratorEmission, key: String, carrier: String) -> String MIRImageError! {
+    definition :: state.schema.definitions[key]
+    source :: state.mapping.source.get(carrier)
+    parts := [String]{}
+    if definition.body == {
+        .Struct(fields) -> {
+            source_definition :: source ?? return Err(MIRImageError{message: "Source Debug carrier `{carrier}` is not declared"})
+            source_fields :: if source_definition.body == .Struct(value) -> value else -> return Err(MIRImageError{message: "native Debug struct has a nonrecord Source carrier"})
+            mir_image_generator_check_struct(carrier, source_fields, fields)
+            if fields.len() == 0 -> &parts.push(mir_image_gen_debug_literal(definition.name))
+            else {
+            name :: definition.name
+            &parts.push("mir_image_debug_open(&writer, \"{name} {{ \", \"{name} {{\", {fields.len() != 0})\n")
+            loop index in 0..<fields.len() {
+                native :: fields[index]
+                source_name :: mir_image_generator_source_field(carrier, native.name)
+                source_index :: mir_image_gen_source_field_index(source_fields, source_name) ?? return Err(MIRImageError{message: "native Debug field has no Source carrier"})
+                &parts.push("mir_image_debug_item(&writer, {index}, \"{native.name}\")\n")
+                if carrier == "MIRFunction" && native.name == "memo_bound" -> &parts.push("mir_image_debug_memo(&writer, value.memo_bound, value.memo_unbounded)\n")
+                else if carrier == "MIROptimizationFacts" && native.name == "derived_from_digest" -> &parts.push("mir_image_debug_seal(&writer, value.derived_from_digest)\n")
+                else -> &parts.push(mir_image_gen_debug_expression(&state, definition, native.ty, mir_image_generator_source_type(source_fields[source_index].ty), "value.{source_name}"))
+                &parts.push("mir_image_debug_item_end(&writer)\n")
+            }
+            &parts.push("mir_image_debug_close(&writer, \" }}\", \"}}\", {fields.len() != 0})\n")
+            }
+        }
+        .Tuple(fields) -> {
+            source_definition :: source ?? return Err(MIRImageError{message: "Source Debug carrier `{carrier}` is not declared"})
+            source_fields :: if source_definition.body == .Struct(value) -> value else -> return Err(MIRImageError{message: "native Debug tuple has a nonrecord Source carrier"})
+            if fields.len() != source_fields.len() -> return Err(MIRImageError{message: "native Debug tuple Source carrier changes arity"})
+            if fields.len() == 0 -> &parts.push(mir_image_gen_debug_literal(definition.name))
+            else {
+            &parts.push("mir_image_debug_open(&writer, \"{definition.name}(\", \"{definition.name}(\", {fields.len() != 0})\n")
+            loop index in 0..<fields.len() {
+                source_field :: source_fields[index]
+                &parts.push("mir_image_debug_item(&writer, {index}, \"\")\n")
+                &parts.push(mir_image_gen_debug_expression(&state, definition, fields[index].ty, mir_image_generator_source_type(source_field.ty), "value.{source_field.name}"))
+                &parts.push("mir_image_debug_item_end(&writer)\n")
+            }
+            &parts.push("mir_image_debug_close(&writer, \")\", \")\", {fields.len() != 0})\n")
+            }
+        }
+        .Enum(variants) -> {
+            source_definition :: source ?? return Err(MIRImageError{message: "Source Debug carrier `{carrier}` is not declared"})
+            source_variants :: if source_definition.body == .Enum(value) -> value else -> return Err(MIRImageError{message: "native Debug enum has a nonenum Source carrier"})
+            &parts.push("if value == {{\n")
+            loop native in variants {
+                variant :: mir_image_gen_source_variant(source_variants, carrier, native.name)
+                aligned :: mir_image_generator_align_variant(carrier, variant, native)
+                fields :: mir_image_gen_variant_fields(native.body)
+                bindings := [String]{}
+                loop index in 0..<variant.fields.len() -> &bindings.push("__field_{index}")
+                pattern :: if bindings.len() == 0 -> ".{variant.name}" else -> ".{variant.name}({bindings.join(", ")})"
+                &parts.push("{pattern} -> {{\n")
+                if fields.len() == 0 -> &parts.push(mir_image_gen_debug_literal(native.name))
+                else {
+                    named :: native.body == .Struct(_)
+                    open :: if named -> "{native.name} {{ " else -> "{native.name}("
+                    pretty_open :: if named -> "{native.name} {{" else -> open
+                    close :: if named -> " }" else -> ")"
+                    pretty_close :: if named -> "}" else -> close
+                    open_quoted :: "{open:Debug}"
+                    pretty_open_quoted :: "{pretty_open:Debug}"
+                    close_quoted :: "{close:Debug}"
+                    pretty_close_quoted :: "{pretty_close:Debug}"
+                    &parts.push("mir_image_debug_open(&writer, {open_quoted}, {pretty_open_quoted}, true)\n")
+                    loop index in 0..<fields.len() {
+                        source_index :: aligned[index] ?? return Err(MIRImageError{message: "native Debug variant field has no Source carrier"})
+                        label :: if named -> fields[index].name else -> ""
+                        &parts.push("mir_image_debug_item(&writer, {index}, \"{label}\")\n")
+                        &parts.push(mir_image_gen_debug_expression(&state, definition, fields[index].ty, mir_image_generator_source_type(variant.fields[source_index].ty), bindings[source_index]))
+                        &parts.push("mir_image_debug_item_end(&writer)\n")
+                    }
+                    &parts.push("mir_image_debug_close(&writer, {close_quoted}, {pretty_close_quoted}, true)\n")
+                }
+                &parts.push("return\n}}\n")
+            }
+            &parts.push("}}\n")
+        }
+        .Unit -> &parts.push(mir_image_gen_debug_literal(definition.name))
+        .Alias(ty) -> &parts.push(mir_image_gen_debug_expression(&state, definition, ty, mir_image_generator_source_type(carrier), "value"))
+    }
+    function :: mir_image_gen_function("debug", key, carrier)
+    error_type :: if state.debug_fallible.get(key) == .Val(_) -> "MIRImageError!" else -> "Never!"
+    body :: parts.join("").replace("(&writer,", "(&writer, sink, &state,").replace("(&writer)", "(&writer, sink, &state)")
+    fragments := [String]{}
+    if carrier == "MIRTargetDossier" || carrier == "MIRTargetMachine" {
+        target :: if carrier == "MIRTargetDossier" -> "build_snapshot_write_target_dossier" else -> "build_snapshot_write_target_machine"
+        &fragments.push("fn {function}<S, W: CanonicalDebugSink<S>>(value: {carrier}, writer: &MIRImageDebugWriter, sink: W, state: &S) {error_type} {{\nif !writer.pretty {{ {target}<S, W>(sink, &state, value)\nreturn }}\n{body}return\n}}\n")
+    } else -> &fragments.push("fn {function}<S, W: CanonicalDebugSink<S>>(value: {carrier}, writer: &MIRImageDebugWriter, sink: W, state: &S) {error_type} {{\n{body}return\n}}\n")
+    if state.mapping.native_to_source.get(key) == .Val(carrier) {
+        &fragments.push("pub fn mir_image_debug_write_{carrier}(out: &[U8], value: {carrier}, pretty: Bool, depth: Int) {error_type} {{\nwriter := mir_image_debug_writer(pretty)\nwriter.depth = depth\n{function}<[U8], CanonicalDebugBytes>(value, &writer, CanonicalDebugBytes.Writer, &out)\nreturn\n}}\n")
+    }
+    Ok(fragments.join(""))
+}

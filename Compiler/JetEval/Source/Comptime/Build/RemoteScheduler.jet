@@ -1,0 +1,675 @@
+// PORT-PENDING 0568 crates-jet-comptime-src-comptime-build-provenance-toolchains-module-group: crates/jet-comptime/src/Comptime/Build/remote_scheduler.rs:1-671
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Canonical remote builder capability model and scheduler.
+//RS //!
+//RS //! The scheduler selects among host-owned bindings. Callers then use the same
+//RS //! authenticated binding and transport used by the build executor.
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::fmt;
+//RS use std::sync::{Arc, Mutex};
+//RS 
+//RS use super::{ActionKey, BuildCapability, BuildResourcePool, RemoteBuildBinding};
+//RS 
+//RS /// Maximum capability and placement request for one action.
+//RS ///
+//RS /// This is a data model only. It never contains an endpoint or credential;
+//RS /// those come from a host-owned [`RemoteBuildBinding`].
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct RemoteBuildRequest {
+//RS     pub action: ActionKey,
+//RS     pub capabilities: BTreeSet<BuildCapability>,
+//RS     pub features: BTreeSet<String>,
+//RS     pub resource_pools: BTreeSet<BuildResourcePool>,
+//RS     pub platform: Option<String>,
+//RS     pub trust_domain: Option<String>,
+//RS     pub cache_read: bool,
+//RS     pub cache_write: bool,
+//RS     pub execute: bool,
+//RS     pub fallback_local: bool,
+//RS }
+//RS 
+//RS impl RemoteBuildRequest {
+//RS     pub fn new(action: ActionKey) -> Self {
+//RS         Self {
+//RS             action,
+//RS             capabilities: BTreeSet::new(),
+//RS             features: BTreeSet::new(),
+//RS             resource_pools: BTreeSet::new(),
+//RS             platform: None,
+//RS             trust_domain: None,
+//RS             cache_read: false,
+//RS             cache_write: false,
+//RS             execute: false,
+//RS             fallback_local: false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_capability(mut self, capability: BuildCapability) -> Self {
+//RS         self.capabilities.insert(capability);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_feature(mut self, feature: impl Into<String>) -> Self {
+//RS         self.features.insert(feature.into());
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_pool(mut self, pool: BuildResourcePool) -> Self {
+//RS         self.resource_pools.insert(pool);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_platform(mut self, platform: impl Into<String>) -> Self {
+//RS         self.platform = Some(platform.into());
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_trust_domain(mut self, trust_domain: impl Into<String>) -> Self {
+//RS         self.trust_domain = Some(trust_domain.into());
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_cache_read(mut self, enabled: bool) -> Self {
+//RS         self.cache_read = enabled;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_cache_write(mut self, enabled: bool) -> Self {
+//RS         self.cache_write = enabled;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_execute(mut self, enabled: bool) -> Self {
+//RS         self.execute = enabled;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_local_fallback(mut self, enabled: bool) -> Self {
+//RS         self.fallback_local = enabled;
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS /// Facts a host has granted to one remote worker.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct RemoteBuilderCapabilities {
+//RS     pub platform: String,
+//RS     pub features: BTreeSet<String>,
+//RS     pub resource_pools: BTreeSet<BuildResourcePool>,
+//RS     pub capabilities: BTreeSet<BuildCapability>,
+//RS     pub concurrency: usize,
+//RS     pub priority: i32,
+//RS     pub trust_domain: String,
+//RS     pub cache_read: bool,
+//RS     pub cache_write: bool,
+//RS     pub execute: bool,
+//RS }
+//RS 
+//RS impl RemoteBuilderCapabilities {
+//RS     pub fn new(platform: impl Into<String>, trust_domain: impl Into<String>) -> Self {
+//RS         Self {
+//RS             platform: platform.into(),
+//RS             features: BTreeSet::new(),
+//RS             resource_pools: BTreeSet::new(),
+//RS             capabilities: BTreeSet::new(),
+//RS             concurrency: 1,
+//RS             priority: 0,
+//RS             trust_domain: trust_domain.into(),
+//RS             cache_read: false,
+//RS             cache_write: false,
+//RS             execute: false,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Derive the non-secret facts that are already present in a host binding.
+//RS     /// Action capabilities and optional features remain explicit because a
+//RS     /// binding must not silently grant more authority than its host record.
+//RS     pub fn from_binding(binding: &RemoteBuildBinding) -> Self {
+//RS         let mut capabilities = Self::new(&binding.platform, &binding.trust_domain);
+//RS         capabilities.resource_pools.insert(BuildResourcePool::CPU);
+//RS         capabilities.cache_read = binding.cache_read;
+//RS         capabilities.cache_write = binding.cache_write;
+//RS         capabilities.execute = binding.execute;
+//RS         capabilities
+//RS     }
+//RS 
+//RS     pub fn with_feature(mut self, feature: impl Into<String>) -> Self {
+//RS         self.features.insert(feature.into());
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_pool(mut self, pool: BuildResourcePool) -> Self {
+//RS         self.resource_pools.insert(pool);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_capability(mut self, capability: BuildCapability) -> Self {
+//RS         self.capabilities.insert(capability);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_concurrency(mut self, concurrency: usize) -> Self {
+//RS         self.concurrency = concurrency;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_priority(mut self, priority: i32) -> Self {
+//RS         self.priority = priority;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_cache_read(mut self, enabled: bool) -> Self {
+//RS         self.cache_read = enabled;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_cache_write(mut self, enabled: bool) -> Self {
+//RS         self.cache_write = enabled;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_execute(mut self, enabled: bool) -> Self {
+//RS         self.execute = enabled;
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS /// One scheduler candidate: a host-owned binding plus its declared facts.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct RemoteBuilder {
+//RS     pub binding: RemoteBuildBinding,
+//RS     pub capabilities: RemoteBuilderCapabilities,
+//RS }
+//RS 
+//RS impl RemoteBuilder {
+//RS     pub fn new(
+//RS         binding: RemoteBuildBinding,
+//RS         capabilities: RemoteBuilderCapabilities,
+//RS     ) -> Result<Self, RemoteScheduleError> {
+//RS         if binding.platform != capabilities.platform
+//RS             || binding.trust_domain != capabilities.trust_domain
+//RS             || binding.cache_read != capabilities.cache_read
+//RS             || binding.cache_write != capabilities.cache_write
+//RS             || binding.execute != capabilities.execute
+//RS         {
+//RS             return Err(RemoteScheduleError::BindingFactsMismatch {
+//RS                 builder: binding.builder,
+//RS             });
+//RS         }
+//RS         Ok(Self {
+//RS             binding,
+//RS             capabilities,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn from_binding(binding: RemoteBuildBinding) -> Self {
+//RS         let capabilities = RemoteBuilderCapabilities::from_binding(&binding);
+//RS         Self {
+//RS             binding,
+//RS             capabilities,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn builder(&self) -> &str {
+//RS         &self.binding.builder
+//RS     }
+//RS }
+//RS 
+//RS /// A worker loss or transient transport failure that permits failover.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct RemoteAttemptError {
+//RS     pub retryable: bool,
+//RS     pub detail: String,
+//RS }
+//RS 
+//RS impl RemoteAttemptError {
+//RS     pub fn worker_lost(detail: impl Into<String>) -> Self {
+//RS         Self {
+//RS             retryable: true,
+//RS             detail: detail.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn retryable(detail: impl Into<String>) -> Self {
+//RS         Self {
+//RS             retryable: true,
+//RS             detail: detail.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn rejected(detail: impl Into<String>) -> Self {
+//RS         Self {
+//RS             retryable: false,
+//RS             detail: detail.into(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum RemoteScheduleError {
+//RS     DuplicateBuilder(String),
+//RS     BindingFactsMismatch {
+//RS         builder: String,
+//RS     },
+//RS     NoEligibleBuilder {
+//RS         action: ActionKey,
+//RS         fallback_local: bool,
+//RS     },
+//RS     CapacityExhausted {
+//RS         action: ActionKey,
+//RS         fallback_local: bool,
+//RS     },
+//RS     Rejected {
+//RS         action: ActionKey,
+//RS         builder: String,
+//RS         detail: String,
+//RS         fallback_local: bool,
+//RS     },
+//RS     AttemptsExhausted {
+//RS         action: ActionKey,
+//RS         attempted: Vec<String>,
+//RS         fallback_local: bool,
+//RS     },
+//RS }
+//RS 
+//RS impl fmt::Display for RemoteScheduleError {
+//RS     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::DuplicateBuilder(builder) => write!(f, "remote builder `{builder}` is duplicated"),
+//RS             Self::BindingFactsMismatch { builder } => write!(
+//RS                 f,
+//RS                 "remote builder `{builder}` binding facts do not match its capability record"
+//RS             ),
+//RS             Self::NoEligibleBuilder {
+//RS                 action,
+//RS                 fallback_local,
+//RS             } => write!(
+//RS                 f,
+//RS                 "no eligible remote builder for `{}` (local fallback: {fallback_local})",
+//RS                 action.as_str()
+//RS             ),
+//RS             Self::CapacityExhausted {
+//RS                 action,
+//RS                 fallback_local,
+//RS             } => write!(
+//RS                 f,
+//RS                 "eligible remote builder capacity is exhausted for `{}` (local fallback: {fallback_local})",
+//RS                 action.as_str()
+//RS             ),
+//RS             Self::Rejected {
+//RS                 action,
+//RS                 builder,
+//RS                 detail,
+//RS                 fallback_local,
+//RS             } => write!(
+//RS                 f,
+//RS                 "remote builder `{builder}` rejected `{}`: {detail} (local fallback: {fallback_local})",
+//RS                 action.as_str()
+//RS             ),
+//RS             Self::AttemptsExhausted {
+//RS                 action,
+//RS                 attempted,
+//RS                 fallback_local,
+//RS             } => write!(
+//RS                 f,
+//RS                 "remote builders exhausted for `{}` after [{}] (local fallback: {fallback_local})",
+//RS                 action.as_str(),
+//RS                 attempted.join(", ")
+//RS             ),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for RemoteScheduleError {}
+//RS 
+//RS #[derive(Debug, PartialEq, Eq)]
+//RS pub struct RemoteDispatch<T> {
+//RS     pub builder: String,
+//RS     pub attempted: Vec<String>,
+//RS     pub value: T,
+//RS }
+//RS 
+//RS /// Deterministic capability scheduler for host-owned builders.
+//RS #[derive(Debug, Clone, Default)]
+//RS pub struct RemoteScheduler {
+//RS     builders: BTreeMap<String, RemoteBuilder>,
+//RS     active: Arc<Mutex<BTreeMap<String, usize>>>,
+//RS }
+//RS 
+//RS impl RemoteScheduler {
+//RS     pub fn new<I>(builders: I) -> Result<Self, RemoteScheduleError>
+//RS     where
+//RS         I: IntoIterator<Item = RemoteBuilder>,
+//RS     {
+//RS         let mut registered = BTreeMap::new();
+//RS         for builder in builders {
+//RS             let name = builder.builder().to_string();
+//RS             if registered.insert(name.clone(), builder).is_some() {
+//RS                 return Err(RemoteScheduleError::DuplicateBuilder(name));
+//RS             }
+//RS         }
+//RS         Ok(Self {
+//RS             builders: registered,
+//RS             active: Arc::default(),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn builders(&self) -> impl Iterator<Item = &RemoteBuilder> {
+//RS         self.builders.values()
+//RS     }
+//RS 
+//RS     pub fn candidates<'a>(&'a self, request: &RemoteBuildRequest) -> Vec<&'a RemoteBuilder> {
+//RS         let mut candidates = self
+//RS             .builders
+//RS             .values()
+//RS             .filter(|builder| eligible(builder, request))
+//RS             .collect::<Vec<_>>();
+//RS         candidates.sort_by(|left, right| {
+//RS             right
+//RS                 .capabilities
+//RS                 .priority
+//RS                 .cmp(&left.capabilities.priority)
+//RS                 .then_with(|| left.builder().cmp(right.builder()))
+//RS         });
+//RS         candidates
+//RS     }
+//RS 
+//RS     pub fn select(
+//RS         &self,
+//RS         request: &RemoteBuildRequest,
+//RS     ) -> Result<&RemoteBuilder, RemoteScheduleError> {
+//RS         self.candidates(request).into_iter().next().ok_or_else(|| {
+//RS             RemoteScheduleError::NoEligibleBuilder {
+//RS                 action: request.action.clone(),
+//RS                 fallback_local: request.fallback_local,
+//RS             }
+//RS         })
+//RS     }
+//RS 
+//RS     /// Try eligible builders in deterministic priority/name order. A retryable
+//RS     /// worker loss advances to the next candidate. The scheduler reports local
+//RS     /// fallback to its caller; it never executes a local action implicitly.
+//RS     pub fn dispatch<T, F>(
+//RS         &self,
+//RS         request: &RemoteBuildRequest,
+//RS         mut attempt: F,
+//RS     ) -> Result<RemoteDispatch<T>, RemoteScheduleError>
+//RS     where
+//RS         F: FnMut(&RemoteBuilder) -> Result<T, RemoteAttemptError>,
+//RS     {
+//RS         let candidates = self.candidates(request);
+//RS         if candidates.is_empty() {
+//RS             return Err(RemoteScheduleError::NoEligibleBuilder {
+//RS                 action: request.action.clone(),
+//RS                 fallback_local: request.fallback_local,
+//RS             });
+//RS         }
+//RS         let mut attempted = Vec::with_capacity(candidates.len());
+//RS         let mut reserved = false;
+//RS         for builder in candidates {
+//RS             let Some(reservation) = self.reserve(builder) else {
+//RS                 continue;
+//RS             };
+//RS             reserved = true;
+//RS             let name = builder.builder().to_string();
+//RS             attempted.push(name.clone());
+//RS             let result = attempt(builder);
+//RS             drop(reservation);
+//RS             match result {
+//RS                 Ok(value) => {
+//RS                     return Ok(RemoteDispatch {
+//RS                         builder: name,
+//RS                         attempted,
+//RS                         value,
+//RS                     });
+//RS                 }
+//RS                 Err(error) if error.retryable => {}
+//RS                 Err(error) => {
+//RS                     return Err(RemoteScheduleError::Rejected {
+//RS                         action: request.action.clone(),
+//RS                         builder: name,
+//RS                         detail: error.detail,
+//RS                         fallback_local: request.fallback_local,
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS         if !reserved {
+//RS             return Err(RemoteScheduleError::CapacityExhausted {
+//RS                 action: request.action.clone(),
+//RS                 fallback_local: request.fallback_local,
+//RS             });
+//RS         }
+//RS         Err(RemoteScheduleError::AttemptsExhausted {
+//RS             action: request.action.clone(),
+//RS             attempted,
+//RS             fallback_local: request.fallback_local,
+//RS         })
+//RS     }
+//RS 
+//RS     fn reserve(&self, builder: &RemoteBuilder) -> Option<RemoteBuilderLease> {
+//RS         let mut active = self
+//RS             .active
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let count = active.entry(builder.builder().to_string()).or_default();
+//RS         if *count >= builder.capabilities.concurrency {
+//RS             return None;
+//RS         }
+//RS         *count += 1;
+//RS         Some(RemoteBuilderLease {
+//RS             active: Arc::clone(&self.active),
+//RS             builder: builder.builder().to_string(),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS struct RemoteBuilderLease {
+//RS     active: Arc<Mutex<BTreeMap<String, usize>>>,
+//RS     builder: String,
+//RS }
+//RS 
+//RS impl Drop for RemoteBuilderLease {
+//RS     fn drop(&mut self) {
+//RS         let mut active = self
+//RS             .active
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         if let Some(count) = active.get_mut(&self.builder) {
+//RS             *count = count.saturating_sub(1);
+//RS             if *count == 0 {
+//RS                 active.remove(&self.builder);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn eligible(builder: &RemoteBuilder, request: &RemoteBuildRequest) -> bool {
+//RS     let facts = &builder.capabilities;
+//RS     builder.binding.is_enabled()
+//RS         && facts.concurrency > 0
+//RS         && request
+//RS             .platform
+//RS             .as_ref()
+//RS             .is_none_or(|platform| platform == &facts.platform)
+//RS         && request
+//RS             .trust_domain
+//RS             .as_ref()
+//RS             .is_none_or(|trust| trust == &facts.trust_domain)
+//RS         && request.features.is_subset(&facts.features)
+//RS         && request.resource_pools.is_subset(&facts.resource_pools)
+//RS         && request.capabilities.is_subset(&facts.capabilities)
+//RS         && (!request.cache_read || facts.cache_read && builder.binding.cache_read)
+//RS         && (!request.cache_write || facts.cache_write && builder.binding.cache_write)
+//RS         && (!request.execute || facts.execute && builder.binding.execute)
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn binding(name: &str, execute: bool) -> RemoteBuildBinding {
+//RS         RemoteBuildBinding::new(name, format!("/var/lib/jet/{name}"), b"test-key")
+//RS             .unwrap()
+//RS             .with_trust_domain("trusted")
+//RS             .with_platform("linux-x86_64")
+//RS             .with_execute(execute)
+//RS     }
+//RS 
+//RS     fn capabilities(priority: i32, execute: bool) -> RemoteBuilderCapabilities {
+//RS         RemoteBuilderCapabilities::new("linux-x86_64", "trusted")
+//RS             .with_capability(BuildCapability::Exec)
+//RS             .with_feature("clang")
+//RS             .with_pool(BuildResourcePool::CPU)
+//RS             .with_concurrency(2)
+//RS             .with_priority(priority)
+//RS             .with_execute(execute)
+//RS     }
+//RS 
+//RS     fn request() -> RemoteBuildRequest {
+//RS         RemoteBuildRequest::new(ActionKey::new("remote-action"))
+//RS             .with_capability(BuildCapability::Exec)
+//RS             .with_platform("linux-x86_64")
+//RS             .with_trust_domain("trusted")
+//RS             .with_feature("clang")
+//RS             .with_pool(BuildResourcePool::CPU)
+//RS             .with_execute(true)
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn selects_priority_then_name() {
+//RS         let scheduler = RemoteScheduler::new([
+//RS             RemoteBuilder::new(binding("zeta", true), capabilities(10, true)).unwrap(),
+//RS             RemoteBuilder::new(binding("alpha", true), capabilities(10, true)).unwrap(),
+//RS             RemoteBuilder::new(binding("fast", true), capabilities(20, true)).unwrap(),
+//RS         ])
+//RS         .unwrap();
+//RS 
+//RS         assert_eq!(scheduler.select(&request()).unwrap().builder(), "fast");
+//RS         let tied = RemoteBuildRequest::new(ActionKey::new("remote-action"))
+//RS             .with_capability(BuildCapability::Exec)
+//RS             .with_platform("linux-x86_64")
+//RS             .with_trust_domain("trusted")
+//RS             .with_feature("clang")
+//RS             .with_pool(BuildResourcePool::CPU)
+//RS             .with_execute(true);
+//RS         let tied_scheduler = RemoteScheduler::new([
+//RS             RemoteBuilder::new(binding("zeta", true), capabilities(10, true)).unwrap(),
+//RS             RemoteBuilder::new(binding("alpha", true), capabilities(10, true)).unwrap(),
+//RS         ])
+//RS         .unwrap();
+//RS         assert_eq!(tied_scheduler.select(&tied).unwrap().builder(), "alpha");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn retries_worker_loss_but_rejects_terminal_failure() {
+//RS         let scheduler = RemoteScheduler::new([
+//RS             RemoteBuilder::new(binding("fast", true), capabilities(20, true)).unwrap(),
+//RS             RemoteBuilder::new(binding("safe", true), capabilities(10, true)).unwrap(),
+//RS         ])
+//RS         .unwrap();
+//RS         let dispatched = scheduler
+//RS             .dispatch(&request(), |builder| {
+//RS                 if builder.builder() == "fast" {
+//RS                     Err(RemoteAttemptError::worker_lost("worker disappeared"))
+//RS                 } else {
+//RS                     Ok(builder.builder().to_string())
+//RS                 }
+//RS             })
+//RS             .unwrap();
+//RS         assert_eq!(dispatched.builder, "safe");
+//RS         assert_eq!(dispatched.attempted, vec!["fast", "safe"]);
+//RS         assert_eq!(dispatched.value, "safe");
+//RS 
+//RS         let error = scheduler
+//RS             .dispatch(&request(), |_| {
+//RS                 Err::<(), _>(RemoteAttemptError::rejected("bad result"))
+//RS             })
+//RS             .unwrap_err();
+//RS         assert!(matches!(
+//RS             error,
+//RS             RemoteScheduleError::Rejected { builder, .. } if builder == "fast"
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dispatch_reserves_capacity_and_releases_it_after_completion() {
+//RS         use std::sync::mpsc;
+//RS 
+//RS         let scheduler = std::sync::Arc::new(
+//RS             RemoteScheduler::new([
+//RS                 RemoteBuilder::new(
+//RS                     binding("fast", true),
+//RS                     capabilities(20, true).with_concurrency(1),
+//RS                 )
+//RS                 .unwrap(),
+//RS                 RemoteBuilder::new(
+//RS                     binding("safe", true),
+//RS                     capabilities(10, true).with_concurrency(1),
+//RS                 )
+//RS                 .unwrap(),
+//RS             ])
+//RS             .unwrap(),
+//RS         );
+//RS         let request = request();
+//RS         let (started_tx, started_rx) = mpsc::channel();
+//RS         let (release_tx, release_rx) = mpsc::channel();
+//RS 
+//RS         std::thread::scope(|scope| {
+//RS             let first_scheduler = scheduler.clone();
+//RS             let first_request = request.clone();
+//RS             let first = scope.spawn(move || {
+//RS                 first_scheduler
+//RS                     .dispatch(&first_request, |builder| {
+//RS                         assert_eq!(builder.builder(), "fast");
+//RS                         started_tx.send(()).unwrap();
+//RS                         release_rx.recv().unwrap();
+//RS                         Ok::<_, RemoteAttemptError>("first")
+//RS                     })
+//RS                     .unwrap()
+//RS             });
+//RS 
+//RS             started_rx.recv().unwrap();
+//RS             let second = scheduler
+//RS                 .dispatch(&request, |builder| {
+//RS                     assert_eq!(builder.builder(), "safe");
+//RS                     Ok::<_, RemoteAttemptError>("second")
+//RS                 })
+//RS                 .unwrap();
+//RS             assert_eq!(second.builder, "safe");
+//RS             release_tx.send(()).unwrap();
+//RS             assert_eq!(first.join().unwrap().builder, "fast");
+//RS 
+//RS             let third = scheduler
+//RS                 .dispatch(&request, |builder| {
+//RS                     assert_eq!(builder.builder(), "fast");
+//RS                     Ok::<_, RemoteAttemptError>("third")
+//RS                 })
+//RS                 .unwrap();
+//RS             assert_eq!(third.builder, "fast");
+//RS         });
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn separates_cache_and_execution_grants() {
+//RS         let binding = binding("cache-only", false).with_cache_read(true);
+//RS         let facts = RemoteBuilderCapabilities::from_binding(&binding);
+//RS         let scheduler =
+//RS             RemoteScheduler::new([RemoteBuilder::new(binding, facts).unwrap()]).unwrap();
+//RS         let cache_request = RemoteBuildRequest::new(ActionKey::new("remote-cache"))
+//RS             .with_platform("linux-x86_64")
+//RS             .with_trust_domain("trusted")
+//RS             .with_cache_read(true);
+//RS         assert_eq!(
+//RS             scheduler.select(&cache_request).unwrap().builder(),
+//RS             "cache-only"
+//RS         );
+//RS         assert!(matches!(
+//RS             scheduler.select(&request()),
+//RS             Err(RemoteScheduleError::NoEligibleBuilder { .. })
+//RS         ));
+//RS     }
+//RS }
+// END-PORT-PENDING 0568 crates/jet-comptime/src/Comptime/Build/remote_scheduler.rs:1-671
+

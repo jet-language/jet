@@ -163,13 +163,7 @@ pub fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method
         sema_plugin_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    found_export := SemaPluginInterfaceExport?{None}
-    loop row in interface_value.exports {
-        if row.name == method {
-            found_export = Val(row)
-            break
-        }
-    }
+    found_export :: sema_plugin_interface_export(interface_value, method)
     export_value :: found_export ?? {
         if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         sema_plugin_method_diagnostic(method, Val(interface_value), span, &diagnostics)

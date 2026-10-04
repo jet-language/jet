@@ -1,0 +1,79 @@
+// PORT-PENDING 0358 crates-jet-sema-src-sema-bundle-pipeline-failureunion-module-group: crates/jet-sema/src/Sema/CheckerCore/helpers.rs:1-75
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::AST::{Expr, Type};
+//RS 
+//RS /// D-UNINIT1 engine (reused by D-UNINIT-SENTINEL2): a `Type.{ uninit }` binding
+//RS /// is restricted to plain-data ("POD") types — no heap ownership, no Drop glue —
+//RS /// so an uninitialized value can never expose freed/owned state. v1 allows
+//RS /// scalars, `Char`, `U8`, and fixed arrays of those.
+//RS pub(crate) fn is_pod_uninit_type(ty: &Type) -> bool {
+//RS     match ty {
+//RS         Type::Int | Type::Float | Type::Bool | Type::Char => true,
+//RS         Type::IntN { .. } | Type::InlineRange { .. } | Type::Float32 => true,
+//RS         Type::FixedList { elem, .. } => is_pod_uninit_type(elem),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-LAYOUT1 (E2934): a structural fingerprint of a (parser-desugared)
+//RS /// layout constraint expression, used only to catch EXACT duplicate lines
+//RS /// within one `layout { … }` block. Not a general expression hasher — it
+//RS /// only needs to be stable and injective enough for the small shapes a
+//RS /// constraint line can take (`Binary`/`MethodCall`/`Ident`/literals).
+//RS pub(super) fn layout_constraint_fingerprint(e: &Expr) -> String {
+//RS     match e {
+//RS         Expr::Binary(op, l, r, _) => format!(
+//RS             "({} {:?} {})",
+//RS             layout_constraint_fingerprint(l),
+//RS             op,
+//RS             layout_constraint_fingerprint(r)
+//RS         ),
+//RS         Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             ..
+//RS         } => {
+//RS             let recv = layout_constraint_fingerprint(receiver);
+//RS             let a: Vec<String> = args
+//RS                 .iter()
+//RS                 .map(|a| layout_constraint_fingerprint(&a.expr))
+//RS                 .collect();
+//RS             format!("{}.{}({})", recv, method, a.join(","))
+//RS         }
+//RS         Expr::Ident(n, _) => n.clone(),
+//RS         Expr::Str(parts, _) => match parts.as_slice() {
+//RS             [crate::AST::StrPart::Lit(s)] => format!("{:?}", s),
+//RS             _ => "<str>".to_string(),
+//RS         },
+//RS         Expr::Float(f, _, _, _) => f.to_string(),
+//RS         Expr::Int(i, _, _, _) => i.to_string(),
+//RS         _ => "<?>".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn no_any_type(span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0350",
+//RS         "Jet does not have an `Any` type".to_string(),
+//RS         "a value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `DataTree` for parsed dynamic data".to_string(),
+//RS         "replace `Any` with the specific mechanism for this value".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D9: `_` is a pattern wildcard, never a type hole. A signature names every
+//RS /// type, so the hole is one error at its own site; failure-contract checks
+//RS /// that would read the hole as a domain stay quiet.
+//RS pub(super) fn type_hole_diag(span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0119",
+//RS         "`_` isn't a type".to_string(),
+//RS         "a signature names every type; `_` is only a pattern wildcard".to_string(),
+//RS         "write the type out; in a `T _!` return, name the error domain the body fails with, such as `Int ParseError!`".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+// END-PORT-PENDING 0358 crates/jet-sema/src/Sema/CheckerCore/helpers.rs:1-75
+

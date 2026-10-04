@@ -1,0 +1,2437 @@
+// PORT-PENDING 0573 crates-jet-comptime-src-comptime-collectioneval: crates/jet-comptime/src/Comptime/CollectionEval.rs:1-2433
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Comptime/MIR-eval collection ops (#722 / #777). Same CtValue shapes as
+//RS //! `Methods/dispatch/eval_method.rs` — one table for MirBridge + old helpers.
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::AST::Type;
+//RS 
+//RS use super::Builtins::{as_int, cmp_for_sort};
+//RS use super::Diagnostics::{index_oob, unsupported};
+//RS use crate::AST::CtValue;
+//RS use jet_foundation::Prelude::jet_as_bytes as as_bytes;
+//RS 
+//RS #[allow(dead_code, non_camel_case_types, unused_imports)]
+//RS pub(crate) mod collection_semantics {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     use jet_foundation::StructuralDebug::{jet_debug_map, jet_debug_optional, jet_debug_range};
+//RS 
+//RS     #[derive(Clone)]
+//RS     struct JetByteBuffer {
+//RS         bytes: Vec<u8>,
+//RS     }
+//RS 
+//RS     trait __jet_Display {
+//RS         fn display(&self) -> String;
+//RS     }
+//RS 
+//RS     trait __jet_Equatable: Sized {
+//RS         fn equal(&self, rhs: &Self) -> bool;
+//RS     }
+//RS 
+//RS     #[derive(Clone, Debug, PartialEq, Eq)]
+//RS     struct JetMap<K, V>(std::collections::BTreeMap<K, V>);
+//RS 
+//RS     impl<K, V> JetMap<K, V> {
+//RS         fn new() -> Self {
+//RS             Self(std::collections::BTreeMap::new())
+//RS         }
+//RS     }
+//RS 
+//RS     /// By-value take of the map entries (`Prelude/Core.rs` spelling); this
+//RS     /// mirror owns its storage outright, so it simply drains it.
+//RS     fn jet_map_into_entries<K: Ord + Clone, V: Clone>(m: JetMap<K, V>) -> Vec<(K, V)> {
+//RS         m.0.into_iter().collect()
+//RS     }
+//RS 
+//RS     impl<K: Ord, V> std::iter::FromIterator<(K, V)> for JetMap<K, V> {
+//RS         fn from_iter<I: IntoIterator<Item = (K, V)>>(pairs: I) -> Self {
+//RS             Self(pairs.into_iter().collect())
+//RS         }
+//RS     }
+//RS 
+//RS     impl<K, V> std::ops::Deref for JetMap<K, V> {
+//RS         type Target = std::collections::BTreeMap<K, V>;
+//RS 
+//RS         fn deref(&self) -> &Self::Target {
+//RS             &self.0
+//RS         }
+//RS     }
+//RS 
+//RS     impl<K, V> std::ops::DerefMut for JetMap<K, V> {
+//RS         fn deref_mut(&mut self) -> &mut Self::Target {
+//RS             &mut self.0
+//RS         }
+//RS     }
+//RS 
+//RS     // BTreeMap has no stable fallible reservation API. Keep this representation
+//RS     // step at the map seam; the shared Prelude owns the AllocError projection.
+//RS     fn jet_map_try_insert_storage<K: Ord + Clone, V: Clone>(
+//RS         map: &mut JetMap<K, V>,
+//RS         key: K,
+//RS         value: V,
+//RS     ) -> Result<Option<V>, ()> {
+//RS         Ok(map.insert(key, value))
+//RS     }
+//RS 
+//RS     fn jet_panic(_file: &str, _line: u32, message: &str) -> ! {
+//RS         panic!("{}", message);
+//RS     }
+//RS     // Collections.rs is also embedded in this generic comptime host. Use the
+//RS     // shared registry-backed renderer so rich stops retain their code, policy,
+//RS     // and source context instead of falling back to a generic E3001 panic.
+//RS     #[allow(dead_code)]
+//RS     fn jet_panic_rich_code(
+//RS         code: &'static str,
+//RS         file: &str,
+//RS         line: u32,
+//RS         fn_name: &str,
+//RS         src_line: &str,
+//RS         col: u32,
+//RS         caret_len: u32,
+//RS         message: &str,
+//RS         locals: &str,
+//RS     ) -> ! {
+//RS         let report = jet_foundation::Outcome::jet_render_runtime_stop(
+//RS             code, file, line, fn_name, src_line, col, caret_len, message, locals,
+//RS         );
+//RS         panic!("{}", report.rendered);
+//RS     }
+//RS 
+//RS     #[allow(dead_code)]
+//RS     fn jet_panic_rich(
+//RS         file: &str,
+//RS         line: u32,
+//RS         fn_name: &str,
+//RS         src_line: &str,
+//RS         col: u32,
+//RS         caret_len: u32,
+//RS         message: &str,
+//RS         locals: &str,
+//RS     ) -> ! {
+//RS         jet_panic_rich_code(
+//RS             "E3001", file, line, fn_name, src_line, col, caret_len, message, locals,
+//RS         )
+//RS     }
+//RS 
+//RS     // Comptime evaluates collection expressions outside the runtime #Test
+//RS     // harness. The runtime Prelude owns the active fault scheduler.
+//RS     fn jet_fault_should_fail_allocation() -> bool {
+//RS         false
+//RS     }
+//RS     // Values.rs is shared with the AOT Prelude; bind its unqualified Int
+//RS     // formatter to the comptime mirror before including that fragment.
+//RS     use crate::Comptime::SyncLite::jet_int_to_string;
+//RS     include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/Values.rs");
+//RS     // D-DATAFRAME1 / card #2447: comptime evaluation consumes the same typed
+//RS     // table-plan fact kernel as AOT and JIT; it owns no alternate plan shape.
+//RS     include!("../../../jet-codegen/src/Prelude/Core/LazyTablePlan.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/TextValues.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Memo.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/CollectionFailure.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/SortKernel.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/Collections.rs");
+//RS 
+//RS     pub struct LoopListCursor<T> {
+//RS         cursor: JetLoopIterCursor,
+//RS         started: bool,
+//RS         item: std::marker::PhantomData<T>,
+//RS     }
+//RS 
+//RS     impl<T> std::fmt::Debug for LoopListCursor<T> {
+//RS         fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS             formatter.debug_struct("LoopListCursor").finish_non_exhaustive()
+//RS         }
+//RS     }
+//RS 
+//RS     impl<T: 'static> LoopListCursor<T> {
+//RS         pub fn new(
+//RS             values: Vec<T>,
+//RS             step: Option<i64>,
+//RS         ) -> Result<Self, &'static str> {
+//RS             jet_loop_iter_init_checked(
+//RS                 values,
+//RS                 step.unwrap_or(0),
+//RS                 step.is_some(),
+//RS                 true,
+//RS                 JetLoopSourceKind::Plain,
+//RS             )
+//RS             .map(|cursor| Self {
+//RS                 cursor,
+//RS                 started: false,
+//RS                 item: std::marker::PhantomData,
+//RS             })
+//RS         }
+//RS     }
+//RS 
+//RS     impl<T: 'static> Iterator for LoopListCursor<T> {
+//RS         type Item = T;
+//RS 
+//RS         fn next(&mut self) -> Option<Self::Item> {
+//RS             // Skip/drop subsequent items only after the current loop body.
+//RS             if self.started {
+//RS                 jet_loop_iter_advance(&mut self.cursor);
+//RS             } else {
+//RS                 self.started = true;
+//RS             }
+//RS             if !jet_loop_iter_has_next(&self.cursor) {
+//RS                 return None;
+//RS             }
+//RS             Some(jet_loop_iter_value(&mut self.cursor))
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
+//RS         jet_list_pop_kernel(values).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn list_insert<T>(
+//RS         values: &mut Vec<T>,
+//RS         index: i64,
+//RS         value: T,
+//RS     ) -> Result<(), JetListInsertError> {
+//RS         jet_list_insert_kernel(values, index, value)
+//RS     }
+//RS 
+//RS     pub(super) fn list_replace<T: Clone>(values: &[T], index: i64, new: T) -> Vec<T> {
+//RS         jet_list_replace(values, index, new)
+//RS     }
+//RS 
+//RS     pub(super) fn set_pop<T: PartialEq>(values: &mut Vec<T>, value: &T) -> Option<T> {
+//RS         jet_set_pop_kernel(values, value).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn deque_pop_front<T>(values: &mut Vec<T>) -> Option<T> {
+//RS         jet_deque_pop_front_kernel(values).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn deque_pop_back<T>(values: &mut Vec<T>) -> Option<T> {
+//RS         jet_deque_pop_back_kernel(values).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn priority_queue_pop<T>(values: &mut Vec<T>) -> Option<T> {
+//RS         jet_priority_queue_pop_kernel(values).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn map_pop<K: Ord + Clone, V: Clone>(
+//RS         map: &mut std::collections::BTreeMap<K, V>,
+//RS         key: &K,
+//RS     ) -> Option<V> {
+//RS         let mut native = JetMap(std::mem::take(map));
+//RS         let result = jet_map_pop_kernel(&mut native, key);
+//RS         *map = native.0;
+//RS         result.ok()
+//RS     }
+//RS 
+//RS     pub(super) fn try_list_new<T>() -> JetOutcome<Vec<T>, AllocError> {
+//RS         jet_list_try_new()
+//RS     }
+//RS 
+//RS     pub(super) fn try_list_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
+//RS         jet_list_try_with_capacity(capacity)
+//RS     }
+//RS 
+//RS     pub(super) fn try_list_with_capacity_defaulted<T>(
+//RS         capacity: i64,
+//RS         program_allocator_reserve: impl FnOnce(usize) -> bool,
+//RS         program_allocator_cancel: impl FnOnce(usize),
+//RS     ) -> JetOutcome<Vec<T>, AllocError> {
+//RS         jet_list_try_with_capacity_defaulted(
+//RS             capacity,
+//RS             program_allocator_reserve,
+//RS             program_allocator_cancel,
+//RS         )
+//RS     }
+//RS 
+//RS     pub(super) fn try_list_push<T>(values: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {
+//RS         jet_list_try_push(values, value)
+//RS     }
+//RS 
+//RS     pub(super) fn try_list_reserve<T>(
+//RS         values: &mut Vec<T>,
+//RS         additional: i64,
+//RS     ) -> JetOutcome<(), AllocError> {
+//RS         jet_list_try_reserve(values, additional)
+//RS     }
+//RS 
+//RS     pub(super) fn try_map_insert<K: Ord + Clone, V: Clone>(
+//RS         map: &mut std::collections::BTreeMap<K, V>,
+//RS         key: K,
+//RS         value: V,
+//RS     ) -> JetOutcome<Option<V>, AllocError> {
+//RS         let mut native = JetMap(std::mem::take(map));
+//RS         let result = jet_map_try_insert(&mut native, key, value);
+//RS         *map = native.0;
+//RS         result
+//RS     }
+//RS 
+//RS     pub(super) fn try_string_push(text: &mut String, addition: &str) -> JetOutcome<(), AllocError> {
+//RS         jet_string_try_push(text, addition)
+//RS     }
+//RS 
+//RS     pub(super) fn iter_first<T: 'static>(values: Vec<T>) -> Option<T> {
+//RS         jet_iter_first(jet_iter_from_vec(values)).ok()
+//RS     }
+//RS 
+//RS     pub(super) fn iter_skip<T: 'static>(values: Vec<T>, n: i64) -> Vec<T> {
+//RS         jet_iter_skip(jet_iter_from_vec(values), n).to_list()
+//RS     }
+//RS 
+//RS     pub fn try_collect<T, E>(values: impl IntoIterator<Item = Result<T, E>>) -> Result<Vec<T>, E> {
+//RS         jet_list_try_collect(values)
+//RS     }
+//RS 
+//RS     pub(super) fn sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
+//RS         jet_sequence_argument_message(method, value)
+//RS     }
+//RS 
+//RS     pub(super) fn zip_row_count(lengths: &[usize], mode: u8) -> Option<usize> {
+//RS         jet_zip_row_count(lengths, mode)
+//RS     }
+//RS     pub(super) fn string_split(text: &str, separator: &str) -> Vec<String> {
+//RS         jet_iter_string_split(text, separator).to_list()
+//RS     }
+//RS }
+//RS pub fn string_split(text: &str, separator: &str) -> Vec<String> {
+//RS     collection_semantics::string_split(text, separator)
+//RS }
+//RS 
+//RS pub use collection_semantics::LoopListCursor;
+//RS pub use collection_semantics::{
+//RS     jet_zip_pad_step, jet_zip_short_step, jet_zip_strict_step, try_collect,
+//RS };
+//RS 
+//RS #[derive(Debug)]
+//RS pub struct LoopRangeCursor(collection_semantics::JetLoopRangeCursor);
+//RS 
+//RS impl LoopRangeCursor {
+//RS     pub fn new(
+//RS         start: i64,
+//RS         end: i64,
+//RS         step: Option<i64>,
+//RS         exclusive: bool,
+//RS     ) -> Result<Self, &'static str> {
+//RS         collection_semantics::jet_loop_range_init_checked(
+//RS             start, end, step.unwrap_or(0), step.is_some(), exclusive,
+//RS         ).map(Self)
+//RS     }
+//RS }
+//RS 
+//RS impl Iterator for LoopRangeCursor {
+//RS     type Item = i64;
+//RS 
+//RS     fn next(&mut self) -> Option<Self::Item> {
+//RS         if !collection_semantics::jet_loop_range_has_next(&self.0) {
+//RS             return None;
+//RS         }
+//RS         let value = collection_semantics::jet_loop_range_value(&self.0);
+//RS         collection_semantics::jet_loop_range_advance(&mut self.0);
+//RS         Some(value)
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn string_contains(text: &str, needle: &str) -> bool {
+//RS     collection_semantics::jet_string_contains(text, needle)
+//RS }
+//RS 
+//RS pub(super) fn iter_first<T: 'static>(values: Vec<T>) -> Option<T> {
+//RS     collection_semantics::iter_first(values)
+//RS }
+//RS 
+//RS pub(super) fn iter_skip<T: 'static>(values: Vec<T>, n: i64) -> Vec<T> {
+//RS     collection_semantics::iter_skip(values, n)
+//RS }
+//RS 
+//RS pub fn sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
+//RS     collection_semantics::sequence_argument_message(method, value)
+//RS }
+//RS 
+//RS /// Cross-crate MIR bridge for the shared fallible predicate-count kernel.
+//RS pub fn list_count_where_result<T, E, F>(values: &[T], predicate: F) -> Result<i64, E>
+//RS where
+//RS     F: FnMut(&T) -> Result<bool, E>,
+//RS {
+//RS     collection_semantics::jet_list_count_where_result_kernel(values, predicate)
+//RS }
+//RS 
+//RS /// Cross-crate MIR bridge for the shared fallible first-match update kernel.
+//RS pub fn list_update_first_result<T, E, F>(
+//RS     values: &mut Vec<T>,
+//RS     predicate: F,
+//RS     replacement: T,
+//RS ) -> Result<bool, E>
+//RS where
+//RS     F: FnMut(&T) -> Result<bool, E>,
+//RS {
+//RS     collection_semantics::jet_list_update_first_result_kernel(values, predicate, replacement)
+//RS }
+//RS 
+//RS pub(super) fn zip_row_count(lengths: &[usize], mode: u8) -> Option<usize> {
+//RS     collection_semantics::zip_row_count(lengths, mode)
+//RS }
+//RS 
+//RS pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
+//RS     collection_semantics::list_pop(values)
+//RS }
+//RS 
+//RS pub(super) fn list_insert(
+//RS     values: &mut Vec<CtValue>,
+//RS     index: i64,
+//RS     value: CtValue,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     collection_semantics::list_insert(values, index, value).map_err(|error| {
+//RS         let message = error.message();
+//RS         Diagnostic::from_row(error.code(), &[("msg", message.as_str())], Some(span))
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn list_insert_args(
+//RS     values: &mut Vec<CtValue>,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let [index, item] = args else {
+//RS         return Err(unsupported(
+//RS             "the method `.insert` with these arguments",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     list_insert(values, as_int(index, span)?, item.clone(), span)
+//RS }
+//RS 
+//RS pub(super) fn list_replace<T: Clone>(values: &[T], index: i64, new: T) -> Vec<T> {
+//RS     collection_semantics::list_replace(values, index, new)
+//RS }
+//RS 
+//RS pub(super) fn map_pop<K: Ord + Clone, V: Clone>(
+//RS     map: &mut std::collections::BTreeMap<K, V>,
+//RS     key: &K,
+//RS ) -> Option<V> {
+//RS     collection_semantics::map_pop(map, key)
+//RS }
+//RS 
+//RS pub fn try_list_new<T>() -> Result<Vec<T>, jet_foundation::Outcome::AllocError> {
+//RS     collection_semantics::try_list_new()
+//RS }
+//RS 
+//RS pub fn try_list_with_capacity<T>(
+//RS     capacity: i64,
+//RS ) -> Result<Vec<T>, jet_foundation::Outcome::AllocError> {
+//RS     collection_semantics::try_list_with_capacity(capacity)
+//RS }
+//RS 
+//RS pub fn try_list_with_capacity_defaulted<T>(
+//RS     capacity: i64,
+//RS     program_allocator_reserve: impl FnOnce(usize) -> bool,
+//RS     program_allocator_cancel: impl FnOnce(usize),
+//RS ) -> Result<Vec<T>, jet_foundation::Outcome::AllocError> {
+//RS     collection_semantics::try_list_with_capacity_defaulted(
+//RS         capacity,
+//RS         program_allocator_reserve,
+//RS         program_allocator_cancel,
+//RS     )
+//RS }
+//RS 
+//RS pub fn try_list_push<T>(
+//RS     values: &mut Vec<T>,
+//RS     value: T,
+//RS ) -> Result<(), jet_foundation::Outcome::AllocError> {
+//RS     collection_semantics::try_list_push(values, value)
+//RS }
+//RS 
+//RS pub fn try_list_reserve<T>(
+//RS     values: &mut Vec<T>,
+//RS     additional: i64,
+//RS ) -> Result<(), jet_foundation::Outcome::AllocError> {
+//RS     collection_semantics::try_list_reserve(values, additional)
+//RS }
+//RS 
+//RS pub fn try_map_insert<K: Ord + Clone, V: Clone>(
+//RS     map: &mut std::collections::BTreeMap<K, V>,
+//RS     key: K,
+//RS     value: V,
+//RS ) -> Result<Option<V>, jet_foundation::Outcome::AllocError> {
+//RS     collection_semantics::try_map_insert(map, key, value)
+//RS }
+//RS 
+//RS pub fn try_string_push(
+//RS     text: &mut String,
+//RS     addition: &str,
+//RS ) -> Result<(), jet_foundation::Outcome::AllocError> {
+//RS     collection_semantics::try_string_push(text, addition)
+//RS }
+//RS 
+//RS mod set_semantics {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../../jet-codegen/src/Prelude/Core/SetAlgebra.rs");
+//RS }
+//RS 
+//RS fn list_field(fields: &[(String, CtValue)], wanted: &str) -> Vec<CtValue> {
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS             (name, CtValue::List(values)) if name == wanted => Some(values.clone()),
+//RS             _ => None,
+//RS         })
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn int_field(fields: &[(String, CtValue)], wanted: &str) -> Option<i64> {
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS             (name, CtValue::Int(n)) if name == wanted => Some(*n),
+//RS             _ => None,
+//RS         })
+//RS }
+//RS 
+//RS fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
+//RS     // ponytail: comptime sets are small; O(n²) equality dedup.
+//RS     let mut unique = Vec::new();
+//RS     for item in items {
+//RS         if !unique.contains(&item) {
+//RS             unique.push(item);
+//RS         }
+//RS     }
+//RS     unique
+//RS }
+//RS 
+//RS fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
+//RS     let mut sort_error = None;
+//RS     items.sort_by(
+//RS         |left, right| match cmp_for_sort(left.clone(), right.clone(), span) {
+//RS             Ok(order) => order,
+//RS             Err(error) => {
+//RS                 sort_error.get_or_insert(error);
+//RS                 std::cmp::Ordering::Equal
+//RS             }
+//RS         },
+//RS     );
+//RS     if let Some(error) = sort_error {
+//RS         return Err(error);
+//RS     }
+//RS     items.dedup();
+//RS     Ok(items)
+//RS }
+//RS 
+//RS fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
+//RS     let mut sort_error = None;
+//RS     items.sort_by(
+//RS         |left, right| match cmp_for_sort(right.clone(), left.clone(), span) {
+//RS             Ok(order) => order,
+//RS             Err(error) => {
+//RS                 sort_error.get_or_insert(error);
+//RS                 std::cmp::Ordering::Equal
+//RS             }
+//RS         },
+//RS     );
+//RS     match sort_error {
+//RS         Some(error) => Err(error),
+//RS         None => Ok(items),
+//RS     }
+//RS }
+//RS 
+//RS fn as_string(v: &CtValue, span: Span) -> Result<String, Diagnostic> {
+//RS     match v {
+//RS         CtValue::Str(s) => Ok(s.clone()),
+//RS         _ => Err(unsupported("non-String argument to Bytes", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn option_none() -> CtValue {
+//RS     CtValue::absent(Type::Int)
+//RS }
+//RS 
+//RS fn set_struct(type_name: &str, items: Vec<CtValue>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: vec![("items".to_string(), CtValue::List(items))],
+//RS     }
+//RS }
+//RS 
+//RS fn bitset_struct(bits: Vec<CtValue>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: crate::Syntax::TYPE_BITS.to_string(),
+//RS         fields: vec![("bits".to_string(), CtValue::List(bits))],
+//RS     }
+//RS }
+//RS 
+//RS fn bag_struct(items: Vec<CtValue>, counts: Vec<CtValue>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: crate::Syntax::TYPE_TALLY.to_string(),
+//RS         fields: vec![
+//RS             ("items".to_string(), CtValue::List(items)),
+//RS             ("counts".to_string(), CtValue::List(counts)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn lru_struct(capacity: i64, entries: Vec<CtValue>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: crate::Syntax::TYPE_LRU.to_string(),
+//RS         fields: vec![
+//RS             ("capacity".to_string(), CtValue::Int(capacity)),
+//RS             ("entries".to_string(), CtValue::List(entries)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn byte_buffer_struct(bytes: Vec<u8>) -> CtValue {
+//RS     byte_buffer_struct_at(bytes, 0)
+//RS }
+//RS 
+//RS fn byte_buffer_struct_at(bytes: Vec<u8>, pos: usize) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: crate::Syntax::TYPE_BYTES.to_string(),
+//RS         fields: vec![
+//RS             ("bytes".to_string(), CtValue::Bytes(bytes)),
+//RS             ("pos".to_string(), CtValue::Int(pos as i64)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn deque_struct(items: Vec<CtValue>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: crate::Syntax::TYPE_QUEUE.to_string(),
+//RS         fields: vec![("items".to_string(), CtValue::List(items))],
+//RS     }
+//RS }
+//RS 
+//RS fn pool_struct() -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: crate::Syntax::MEM_POOL.to_string(),
+//RS         fields: vec![
+//RS             ("slots".to_string(), CtValue::List(Vec::new())),
+//RS             ("free".to_string(), CtValue::List(Vec::new())),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS /// `Set.from(list)` / `Rank.from(list)` / `PriorityQueue.from(list)` /
+//RS /// `Queue.init(list)` — recv is the list (TIR lowering).
+//RS pub fn from_list(type_name: &str, list: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+//RS     let CtValue::List(items) = list else {
+//RS         return Err(unsupported(
+//RS             &format!("{type_name}.from with a non-list"),
+//RS             span,
+//RS         ));
+//RS     };
+//RS     let items = items.clone();
+//RS     match type_name {
+//RS         name if name == crate::Syntax::TYPE_SET => Ok(set_struct(name, unique_values(items))),
+//RS         name if name == crate::Syntax::TYPE_RANK => {
+//RS             Ok(set_struct(name, sorted_unique(items, span)?))
+//RS         }
+//RS         name if name == crate::Syntax::TYPE_PRIORITY_QUEUE => {
+//RS             Ok(set_struct(name, sorted_descending(items, span)?))
+//RS         }
+//RS         name if name == crate::Syntax::TYPE_QUEUE => Ok(deque_struct(items)),
+//RS         _ => Err(unsupported(
+//RS             &format!("{type_name}.from at compile time"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS pub fn byte_buffer_from(bytes: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+//RS     Ok(byte_buffer_struct(as_bytes(bytes, span)?))
+//RS }
+//RS 
+//RS /// Prelude `StaticCall` constructors lowered from `Type.new()`.
+//RS pub fn prelude_new(
+//RS     path: &str,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     Some(match path {
+//RS         "JetBitSet" => Ok(bitset_struct(Vec::new())),
+//RS         "JetByteBuffer" => {
+//RS             let capacity = match args.into_iter().next() {
+//RS                 Some(v) => match as_int(&v, span) {
+//RS                     Ok(n) => n.max(0) as usize,
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 },
+//RS                 None => 0,
+//RS             };
+//RS             let mut bytes = Vec::new();
+//RS             bytes.reserve(capacity);
+//RS             Ok(byte_buffer_struct(bytes))
+//RS         }
+//RS         "JetCache" => {
+//RS             let capacity = match args.into_iter().next() {
+//RS                 Some(v) => match as_int(&v, span) {
+//RS                     Ok(n) => n.max(0),
+//RS                     Err(e) => return Some(Err(e)),
+//RS                 },
+//RS                 None => 0,
+//RS             };
+//RS             Ok(lru_struct(capacity, Vec::new()))
+//RS         }
+//RS         "std::collections::VecDeque" => Ok(deque_struct(Vec::new())),
+//RS         // Tally.new → HashMap (Map literals use MapLit, not this path).
+//RS         "std::collections::HashMap" => Ok(bag_struct(Vec::new(), Vec::new())),
+//RS         // #1478: `Set.new()` at this tier — the tier1 native path
+//RS         // (`crates/jet-jit/.../lower_ctx.rs`) already builds an empty
+//RS         // HashSet handle; this closes the same construct for the canonical
+//RS         // MIR evaluator (comptime + `jet run` deopt), matching `BTreeSet`
+//RS         // just below (I9 — no tier left calling this an unsupported prelude
+//RS         // static once tier1 already ships it natively).
+//RS         "std::collections::HashSet" => Ok(set_struct(crate::Syntax::TYPE_SET, Vec::new())),
+//RS         "std::collections::BTreeSet" => Ok(set_struct(crate::Syntax::TYPE_RANK, Vec::new())),
+//RS         "std::collections::BinaryHeap" => {
+//RS             Ok(set_struct(crate::Syntax::TYPE_PRIORITY_QUEUE, Vec::new()))
+//RS         }
+//RS         "jet_std::JetPool" => Ok(pool_struct()),
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS /// Non-mutating collection methods. `contains` aliases `has` for set-like types.
+//RS pub fn apply_method(
+//RS     recv: &CtValue,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     let CtValue::Struct { type_name, fields } = recv else {
+//RS         return None;
+//RS     };
+//RS     let method = if method == "contains"
+//RS         && matches!(
+//RS             type_name.as_str(),
+//RS             "Set" | crate::Syntax::TYPE_RANK | crate::Syntax::TYPE_BITS
+//RS         ) {
+//RS         "has"
+//RS     } else {
+//RS         method
+//RS     };
+//RS 
+//RS     if type_name == crate::Syntax::TYPE_TALLY {
+//RS         return Some(bag_method(fields, method, args, span));
+//RS     }
+//RS     if type_name == crate::Syntax::TYPE_SET {
+//RS         return Some(set_method(
+//RS             crate::Syntax::TYPE_SET,
+//RS             fields,
+//RS             method,
+//RS             args,
+//RS             span,
+//RS             false,
+//RS         ));
+//RS     }
+//RS     if type_name == crate::Syntax::TYPE_RANK {
+//RS         return Some(set_method(
+//RS             crate::Syntax::TYPE_RANK,
+//RS             fields,
+//RS             method,
+//RS             args,
+//RS             span,
+//RS             true,
+//RS         ));
+//RS     }
+//RS     if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE {
+//RS         return Some(priority_queue_method(fields, method, args, span));
+//RS     }
+//RS     if type_name == crate::Syntax::TYPE_BITS {
+//RS         return Some(bitset_method(fields, method, args, span));
+//RS     }
+//RS     if type_name == crate::Syntax::TYPE_QUEUE {
+//RS         return Some(deque_method(fields, method, args, span));
+//RS     }
+//RS     if type_name == crate::Syntax::TYPE_LRU {
+//RS         return Some(lru_method(fields, method, args, span));
+//RS     }
+//RS     if type_name == crate::Syntax::TYPE_BYTES {
+//RS         return Some(byte_buffer_method(fields, method, args, span));
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS /// Mutating collection methods — rewrite `recv` in place when needed.
+//RS pub fn apply_mutating(
+//RS     recv: &mut CtValue,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     let CtValue::Struct { type_name, .. } = &*recv else {
+//RS         return None;
+//RS     };
+//RS     let type_name = type_name.clone();
+//RS     // PriorityQueue uses ordinary push/pop names.
+//RS     let handled = matches!(
+//RS         (type_name.as_str(), method),
+//RS         (crate::Syntax::TYPE_TALLY, "add" | "remove" | "clear")
+//RS             | ("Set", "add" | "remove" | "pop" | "clear")
+//RS             | (crate::Syntax::TYPE_RANK, "add" | "remove" | "clear")
+//RS             | ("PriorityQueue", "push" | "pop" | "clear" | "remove")
+//RS             | (crate::Syntax::TYPE_BITS, "add" | "remove" | "clear")
+//RS             | (
+//RS                 crate::Syntax::TYPE_QUEUE,
+//RS                 "push_front" | "push_back" | "pop_front" | "pop_back" | "clear"
+//RS             )
+//RS             | ("Cache", "add" | "add_new" | "get" | "remove" | "clear")
+//RS             | (
+//RS                 crate::Syntax::TYPE_BYTES,
+//RS                 "clear"
+//RS                     | "write_u8"
+//RS                     | "write_u16_le"
+//RS                     | "write_u16_be"
+//RS                     | "write_i8"
+//RS                     | "write_i16_le"
+//RS                     | "write_i16_be"
+//RS                     | "write_u32_le"
+//RS                     | "write_u32_be"
+//RS                     | "write_i32_le"
+//RS                     | "write_i32_be"
+//RS                     | "write_u64_le"
+//RS                     | "write_u64_be"
+//RS                     | "write_i64_le"
+//RS                     | "write_i64_be"
+//RS                     | "write_f32_le"
+//RS                     | "write_f32_be"
+//RS                     | "write_f64_le"
+//RS                     | "write_f64_be"
+//RS                     | "write_bytes"
+//RS             )
+//RS     );
+//RS     if !handled {
+//RS         return None;
+//RS     }
+//RS 
+//RS     let peek = recv.clone();
+//RS     let CtValue::Struct { fields, .. } = &peek else {
+//RS         return None;
+//RS     };
+//RS     let result = match type_name.as_str() {
+//RS         crate::Syntax::TYPE_TALLY => bag_mutating(recv, fields, method, &args, span),
+//RS         "Set" => set_mutating(
+//RS             recv,
+//RS             crate::Syntax::TYPE_SET,
+//RS             fields,
+//RS             method,
+//RS             &args,
+//RS             span,
+//RS             false,
+//RS         ),
+//RS         crate::Syntax::TYPE_RANK => set_mutating(
+//RS             recv,
+//RS             crate::Syntax::TYPE_RANK,
+//RS             fields,
+//RS             method,
+//RS             &args,
+//RS             span,
+//RS             true,
+//RS         ),
+//RS         "PriorityQueue" => priority_queue_mutating(recv, fields, method, &args, span),
+//RS         crate::Syntax::TYPE_BITS => bitset_mutating(recv, fields, method, &args, span),
+//RS         crate::Syntax::TYPE_QUEUE => deque_mutating(recv, fields, method, &args, span),
+//RS         "Cache" => lru_mutating(recv, fields, method, &args, span),
+//RS         crate::Syntax::TYPE_BYTES => byte_buffer_mutating(recv, fields, method, &args, span),
+//RS         _ => return None,
+//RS     };
+//RS     Some(result)
+//RS }
+//RS 
+//RS fn bag_method(
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let items = list_field(fields, "items");
+//RS     let counts = {
+//RS         let c = list_field(fields, "counts");
+//RS         if c.is_empty() {
+//RS             vec![CtValue::Int(1); items.len()]
+//RS         } else {
+//RS             c
+//RS         }
+//RS     };
+//RS     match method {
+//RS         "len" => Ok(CtValue::Int(
+//RS             counts
+//RS                 .iter()
+//RS                 .filter_map(|c| match c {
+//RS                     CtValue::Int(n) => Some(*n),
+//RS                     _ => None,
+//RS                 })
+//RS                 .sum(),
+//RS         )),
+//RS         "is_empty" => Ok(CtValue::Bool(items.is_empty())),
+//RS         "has" => Ok(CtValue::Bool(
+//RS             items.contains(args.first().unwrap_or(&CtValue::Unit)),
+//RS         )),
+//RS         "count" => Ok(CtValue::Int(
+//RS             items
+//RS                 .iter()
+//RS                 .position(|item| item == args.first().unwrap_or(&CtValue::Unit))
+//RS                 .and_then(|index| match counts.get(index) {
+//RS                     Some(CtValue::Int(count)) => Some(*count),
+//RS                     _ => None,
+//RS                 })
+//RS                 .unwrap_or(0),
+//RS         )),
+//RS         _ => Err(unsupported(
+//RS             &format!("Tally.{} at compile time", method),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn bag_mutating(
+//RS     recv: &mut CtValue,
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let mut items = list_field(fields, "items");
+//RS     let mut counts = {
+//RS         let c = list_field(fields, "counts");
+//RS         if c.is_empty() {
+//RS             vec![CtValue::Int(1); items.len()]
+//RS         } else {
+//RS             c
+//RS         }
+//RS     };
+//RS     let result = match method {
+//RS         "clear" => {
+//RS             items.clear();
+//RS             counts.clear();
+//RS             CtValue::Unit
+//RS         }
+//RS         "add" => {
+//RS             let value = args.first().cloned().unwrap_or(CtValue::Unit);
+//RS             if let Some(index) = items.iter().position(|item| item == &value) {
+//RS                 if let Some(CtValue::Int(count)) = counts.get_mut(index) {
+//RS                     *count += 1;
+//RS                 }
+//RS             } else {
+//RS                 items.push(value);
+//RS                 counts.push(CtValue::Int(1));
+//RS             }
+//RS             CtValue::Bool(true)
+//RS         }
+//RS         "remove" => {
+//RS             let value = args.first().unwrap_or(&CtValue::Unit);
+//RS             if let Some(index) = items.iter().position(|item| item == value) {
+//RS                 let last = matches!(counts.get(index), Some(CtValue::Int(1)));
+//RS                 if last {
+//RS                     items.remove(index);
+//RS                     counts.remove(index);
+//RS                 } else if let Some(CtValue::Int(count)) = counts.get_mut(index) {
+//RS                     *count -= 1;
+//RS                 }
+//RS             }
+//RS             CtValue::Unit
+//RS         }
+//RS         _ => {
+//RS             return Err(unsupported(
+//RS                 &format!("Tally.{} at compile time", method),
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     };
+//RS     *recv = bag_struct(items, counts);
+//RS     Ok(result)
+//RS }
+//RS 
+//RS fn set_method(
+//RS     type_name: &str,
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS     sorted: bool,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let items = list_field(fields, "items");
+//RS     match method {
+//RS         "len" => Ok(CtValue::Int(items.len() as i64)),
+//RS         "is_empty" => Ok(CtValue::Bool(items.is_empty())),
+//RS         "has" => Ok(CtValue::Bool(
+//RS             items.contains(args.first().unwrap_or(&CtValue::Unit)),
+//RS         )),
+//RS         "to_list" => Ok(CtValue::List(items)),
+//RS         // #1478: `Set.values()` — Iter is List-shaped at this eval tier
+//RS         // (see the `take`/`dedup` note in Builtins.rs), so this is `to_list`.
+//RS         "values" => Ok(CtValue::List(items)),
+//RS         // D-SET-DECLINE1=C: `sort`/`shuffle` — same to-list-then-List
+//RS         // machinery as `to_list`/`values` above, never mutating the Set.
+//RS         "sort" => {
+//RS             let mut sorted = items;
+//RS             sorted.sort_by(|a, b| {
+//RS                 super::Builtins::cmp_for_sort(a.clone(), b.clone(), span)
+//RS                     .unwrap_or(std::cmp::Ordering::Equal)
+//RS             });
+//RS             Ok(CtValue::List(sorted))
+//RS         }
+//RS         "max" => super::Builtins::apply_method(
+//RS             &CtValue::List(items),
+//RS             "max",
+//RS             args.to_vec(),
+//RS             span,
+//RS         ),
+//RS         // Same Fisher-Yates + fixed-seed PCG stream `List.shuffle()` runs
+//RS         // (`(CtValue::List(xs), "shuffle")` in Builtins.rs) — deterministic
+//RS         // and uniform regardless of the Set's internal walk order.
+//RS         "shuffle" => {
+//RS             let mut out = items;
+//RS             let mut state: u64 = 0xC0FF_EE42;
+//RS             for i in (1..out.len()).rev() {
+//RS                 state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+//RS                 let j = ((state >> 33) as usize) % (i + 1);
+//RS                 out.swap(i, j);
+//RS             }
+//RS             Ok(CtValue::List(out))
+//RS         }
+//RS         "copy" | "to_set" => Ok(set_struct(type_name, items)),
+//RS         "capacity" => Ok(CtValue::Int(items.len() as i64)),
+//RS         "equal" => {
+//RS             let other = args
+//RS                 .first()
+//RS                 .ok_or_else(|| unsupported(&format!("{type_name}.equal missing argument"), span))?;
+//RS             let CtValue::Struct {
+//RS                 type_name: other_type,
+//RS                 fields: other_fields,
+//RS             } = other
+//RS             else {
+//RS                 return Err(unsupported(
+//RS                     &format!("{type_name}.equal with a non-set"),
+//RS                     span,
+//RS                 ));
+//RS             };
+//RS             if other_type != type_name {
+//RS                 return Ok(CtValue::Bool(false));
+//RS             }
+//RS             let other_items = list_field(other_fields, "items");
+//RS             Ok(CtValue::Bool(
+//RS                 set_semantics::jet_set_is_subset_by(&items, &other_items, |a, b| a == b)
+//RS                     && set_semantics::jet_set_is_subset_by(&other_items, &items, |a, b| a == b),
+//RS             ))
+//RS         }
+//RS         "first" => Ok(items
+//RS             .first()
+//RS             .cloned()
+//RS             .map_or_else(option_none, |v| CtValue::Present(Box::new(v)))),
+//RS         "last" if sorted => Ok(items
+//RS             .last()
+//RS             .cloned()
+//RS             .map_or_else(option_none, |v| CtValue::Present(Box::new(v)))),
+//RS         "union" => {
+//RS             let other = args
+//RS                 .first()
+//RS                 .ok_or_else(|| unsupported(&format!("{type_name}.union missing argument"), span))?;
+//RS             let CtValue::Struct {
+//RS                 type_name: other_type,
+//RS                 fields: other_fields,
+//RS             } = other
+//RS             else {
+//RS                 return Err(unsupported(
+//RS                     &format!("{type_name}.union with a non-set"),
+//RS                     span,
+//RS                 ));
+//RS             };
+//RS             if other_type != type_name {
+//RS                 return Err(unsupported(
+//RS                     &format!("{type_name}.union with a non-set"),
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             let other_items = list_field(other_fields, "items");
+//RS             let merged =
+//RS                 set_semantics::jet_set_union_by(&items, &other_items, |left, right| left == right);
+//RS             let merged = if sorted {
+//RS                 sorted_unique(merged, span)?
+//RS             } else {
+//RS                 merged
+//RS             };
+//RS             Ok(set_struct(type_name, merged))
+//RS         }
+//RS         "intersection"
+//RS         | "difference"
+//RS         | "symmetric_difference"
+//RS         | "is_subset"
+//RS         | "is_superset"
+//RS         | "is_disjoint" => {
+//RS             let other = args.first().ok_or_else(|| {
+//RS                 unsupported(&format!("{type_name}.{method} missing argument"), span)
+//RS             })?;
+//RS             let CtValue::Struct {
+//RS                 type_name: other_type,
+//RS                 fields: other_fields,
+//RS             } = other
+//RS             else {
+//RS                 return Err(unsupported(
+//RS                     &format!("{type_name}.{method} with a non-set"),
+//RS                     span,
+//RS                 ));
+//RS             };
+//RS             if other_type != type_name {
+//RS                 return Err(unsupported(
+//RS                     &format!("{type_name}.{method} with a non-set"),
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             let other_items = list_field(other_fields, "items");
+//RS             let equal = |left: &CtValue, right: &CtValue| left == right;
+//RS             match method {
+//RS                 "is_subset" => Ok(CtValue::Bool(set_semantics::jet_set_is_subset_by(
+//RS                     &items,
+//RS                     &other_items,
+//RS                     equal,
+//RS                 ))),
+//RS                 "is_superset" => Ok(CtValue::Bool(set_semantics::jet_set_is_superset_by(
+//RS                     &items,
+//RS                     &other_items,
+//RS                     equal,
+//RS                 ))),
+//RS                 "is_disjoint" => Ok(CtValue::Bool(set_semantics::jet_set_is_disjoint_by(
+//RS                     &items,
+//RS                     &other_items,
+//RS                     equal,
+//RS                 ))),
+//RS                 "intersection" => {
+//RS                     let values =
+//RS                         set_semantics::jet_set_intersection_by(&items, &other_items, equal);
+//RS                     Ok(set_struct(
+//RS                         type_name,
+//RS                         if sorted {
+//RS                             sorted_unique(values, span)?
+//RS                         } else {
+//RS                             values
+//RS                         },
+//RS                     ))
+//RS                 }
+//RS                 "difference" => {
+//RS                     let values = set_semantics::jet_set_difference_by(&items, &other_items, equal);
+//RS                     Ok(set_struct(
+//RS                         type_name,
+//RS                         if sorted {
+//RS                             sorted_unique(values, span)?
+//RS                         } else {
+//RS                             values
+//RS                         },
+//RS                     ))
+//RS                 }
+//RS                 "symmetric_difference" => {
+//RS                     let values =
+//RS                         set_semantics::jet_set_symmetric_difference_by(&items, &other_items, equal);
+//RS                     Ok(set_struct(
+//RS                         type_name,
+//RS                         if sorted {
+//RS                             sorted_unique(values, span)?
+//RS                         } else {
+//RS                             values
+//RS                         },
+//RS                     ))
+//RS                 }
+//RS                 _ => unreachable!(),
+//RS             }
+//RS         }
+//RS         _ => Err(unsupported(
+//RS             &format!("{type_name}.{} at compile time", method),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn set_mutating(
+//RS     recv: &mut CtValue,
+//RS     type_name: &str,
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS     sorted: bool,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let mut items = list_field(fields, "items");
+//RS     let result = match method {
+//RS         "clear" => {
+//RS             items.clear();
+//RS             CtValue::Unit
+//RS         }
+//RS         "add" => {
+//RS             let value = args.first().cloned().unwrap_or(CtValue::Unit);
+//RS             let added = !items.contains(&value);
+//RS             if added {
+//RS                 items.push(value);
+//RS                 if sorted {
+//RS                     items = sorted_unique(items, span)?;
+//RS                 }
+//RS             }
+//RS             CtValue::Bool(added)
+//RS         }
+//RS         "remove" => {
+//RS             let value = args.first().unwrap_or(&CtValue::Unit);
+//RS             if let Some(index) = items.iter().position(|item| item == value) {
+//RS                 items.remove(index);
+//RS             }
+//RS             CtValue::Unit
+//RS         }
+//RS         // D-ONCE-VERB1=A: remove-and-return is `pop` on every collection.
+//RS         "pop" => {
+//RS             let value = args.first().unwrap_or(&CtValue::Unit);
+//RS             match collection_semantics::set_pop(&mut items, value) {
+//RS                 Some(value) => CtValue::Present(Box::new(value)),
+//RS                 None => option_none(),
+//RS             }
+//RS         }
+//RS         _ => {
+//RS             return Err(unsupported(
+//RS                 &format!("{type_name}.{} at compile time", method),
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     };
+//RS     *recv = set_struct(type_name, items);
+//RS     Ok(result)
+//RS }
+//RS 
+//RS fn priority_queue_method(
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     _args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let items = list_field(fields, "items");
+//RS     match method {
+//RS         "len" => Ok(CtValue::Int(items.len() as i64)),
+//RS         "is_empty" => Ok(CtValue::Bool(items.is_empty())),
+//RS         "peek" => Ok(items
+//RS             .first()
+//RS             .cloned()
+//RS             .map_or_else(option_none, |v| CtValue::Present(Box::new(v)))),
+//RS         "to_sorted_list" => Ok(CtValue::List(items)),
+//RS         _ => Err(unsupported(
+//RS             &format!("PriorityQueue.{} at compile time", method),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn priority_queue_mutating(
+//RS     recv: &mut CtValue,
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let mut items = list_field(fields, "items");
+//RS     let result = match method {
+//RS         "clear" => {
+//RS             items.clear();
+//RS             CtValue::Unit
+//RS         }
+//RS         "push" => {
+//RS             items.push(args.first().cloned().unwrap_or(CtValue::Unit));
+//RS             items = sorted_descending(items, span)?;
+//RS             CtValue::Unit
+//RS         }
+//RS         "pop" => match collection_semantics::priority_queue_pop(&mut items) {
+//RS             Some(value) => CtValue::Present(Box::new(value)),
+//RS             None => option_none(),
+//RS         },
+//RS         // D-LISTREMOVE1/F (criterion c6 on #1481): same value/slot selector
+//RS         // as `List.remove`, over the same highest-first order `push` already
+//RS         // maintains — matches the AOT/JIT `BinaryHeap::into_sorted_vec().rev()`
+//RS         // order so `.Slot` means the same position on every tier (I9).
+//RS         "remove" => {
+//RS             let by_slot = matches!(
+//RS                 args.get(1),
+//RS                 Some(CtValue::Enum { variant, .. }) if variant == "Slot"
+//RS             );
+//RS             if by_slot {
+//RS                 let i = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+//RS                 if i < 0 || i as usize >= items.len() {
+//RS                     return Err(index_oob(items.len(), i, span));
+//RS                 }
+//RS                 CtValue::Present(Box::new(items.remove(i as usize)))
+//RS             } else {
+//RS                 let value = args.first().cloned().unwrap_or(CtValue::Unit);
+//RS                 match items.iter().position(|item| *item == value) {
+//RS                     Some(index) => CtValue::Present(Box::new(items.remove(index))),
+//RS                     None => CtValue::absent(
+//RS                         items
+//RS                             .first()
+//RS                             .map(|item| item.jet_type())
+//RS                             .unwrap_or(Type::Int),
+//RS                     ),
+//RS                 }
+//RS             }
+//RS         }
+//RS         _ => {
+//RS             return Err(unsupported(
+//RS                 &format!("PriorityQueue.{} at compile time", method),
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     };
+//RS     *recv = set_struct(crate::Syntax::TYPE_PRIORITY_QUEUE, items);
+//RS     Ok(result)
+//RS }
+//RS 
+//RS fn bitset_method(
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let bits = list_field(fields, "bits");
+//RS     match method {
+//RS         "count" => Ok(CtValue::Int(bits.len() as i64)),
+//RS         "len" => Ok(CtValue::Int(match bits.last() {
+//RS             Some(CtValue::Int(bit)) => bit + 1,
+//RS             _ => 0,
+//RS         })),
+//RS         "is_empty" => Ok(CtValue::Bool(bits.is_empty())),
+//RS         "has" => {
+//RS             let bit = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+//RS             Ok(CtValue::Bool(bits.contains(&CtValue::Int(bit))))
+//RS         }
+//RS         "copy" => Ok(bitset_struct(bits.clone())),
+//RS         "to_list" => Ok(CtValue::List(bits)),
+//RS         _ => Err(unsupported(
+//RS             &format!("Bits.{} at compile time", method),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn bitset_mutating(
+//RS     recv: &mut CtValue,
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let mut bits = list_field(fields, "bits");
+//RS     let result = match method {
+//RS         "clear" => {
+//RS             bits.clear();
+//RS             CtValue::Unit
+//RS         }
+//RS         "add" => {
+//RS             let bit = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+//RS             let added = bit >= 0 && !bits.contains(&CtValue::Int(bit));
+//RS             if added {
+//RS                 bits.push(CtValue::Int(bit));
+//RS                 bits = sorted_unique(bits, span)?;
+//RS             }
+//RS             CtValue::Bool(added)
+//RS         }
+//RS         "remove" => {
+//RS             let bit = CtValue::Int(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?);
+//RS             if let Some(index) = bits.iter().position(|value| value == &bit) {
+//RS                 bits.remove(index);
+//RS             }
+//RS             CtValue::Unit
+//RS         }
+//RS         _ => {
+//RS             return Err(unsupported(
+//RS                 &format!("Bits.{} at compile time", method),
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     };
+//RS     *recv = bitset_struct(bits);
+//RS     Ok(result)
+//RS }
+//RS 
+//RS fn deque_method(
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let items = list_field(fields, "items");
+//RS     match method {
+//RS         "len" | "capacity" => Ok(CtValue::Int(items.len() as i64)),
+//RS         "is_empty" => Ok(CtValue::Bool(items.is_empty())),
+//RS         "peek_front" => Ok(items
+//RS             .first()
+//RS             .cloned()
+//RS             .map_or_else(option_none, |v| CtValue::Present(Box::new(v)))),
+//RS         "peek_back" => Ok(items
+//RS             .last()
+//RS             .cloned()
+//RS             .map_or_else(option_none, |v| CtValue::Present(Box::new(v)))),
+//RS         "get" => {
+//RS             let idx = match args.first() {
+//RS                 Some(CtValue::Int(i)) if *i >= 0 => *i as usize,
+//RS                 _ => return Ok(option_none()),
+//RS             };
+//RS             Ok(items
+//RS                 .get(idx)
+//RS                 .cloned()
+//RS                 .map_or_else(option_none, |v| CtValue::Present(Box::new(v))))
+//RS         }
+//RS         "contains" => {
+//RS             let needle = args.first().cloned().unwrap_or(CtValue::Unit);
+//RS             Ok(CtValue::Bool(items.iter().any(|x| x == &needle)))
+//RS         }
+//RS         "to_list" => Ok(CtValue::List(items)),
+//RS         "join" => {
+//RS             let sep = match args.first() {
+//RS                 Some(CtValue::Str(s)) => s.as_str(),
+//RS                 _ => "",
+//RS             };
+//RS             let parts: Vec<String> = items.iter().map(|x| x.jet_show()).collect();
+//RS             Ok(CtValue::Str(parts.join(sep)))
+//RS         }
+//RS         _ => Err(unsupported(
+//RS             &format!("Queue.{} at compile time", method),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn deque_mutating(
+//RS     recv: &mut CtValue,
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let mut items = list_field(fields, "items");
+//RS     let result = match method {
+//RS         "clear" => {
+//RS             items.clear();
+//RS             CtValue::Unit
+//RS         }
+//RS         "push_front" => {
+//RS             items.insert(0, args.first().cloned().unwrap_or(CtValue::Unit));
+//RS             CtValue::Unit
+//RS         }
+//RS         "push_back" => {
+//RS             items.push(args.first().cloned().unwrap_or(CtValue::Unit));
+//RS             CtValue::Unit
+//RS         }
+//RS         "pop_front" => match collection_semantics::deque_pop_front(&mut items) {
+//RS             Some(value) => CtValue::Present(Box::new(value)),
+//RS             None => option_none(),
+//RS         },
+//RS         "pop_back" => match collection_semantics::deque_pop_back(&mut items) {
+//RS             Some(value) => CtValue::Present(Box::new(value)),
+//RS             None => option_none(),
+//RS         },
+//RS         "delete" => {
+//RS             let needle = args.first().cloned().unwrap_or(CtValue::Unit);
+//RS             if let Some(i) = items.iter().position(|x| x == &needle) {
+//RS                 items.remove(i);
+//RS             }
+//RS             CtValue::Unit
+//RS         }
+//RS         "reverse" => {
+//RS             items.reverse();
+//RS             CtValue::Unit
+//RS         }
+//RS         "split" => {
+//RS             let idx = match args.first() {
+//RS                 Some(CtValue::Int(i)) if *i >= 0 => (*i as usize).min(items.len()),
+//RS                 _ => items.len(),
+//RS             };
+//RS             let rest = items.split_off(idx);
+//RS             *recv = deque_struct(items);
+//RS             return Ok(deque_struct(rest));
+//RS         }
+//RS         _ => {
+//RS             return Err(unsupported(
+//RS                 &format!("Queue.{} at compile time", method),
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     };
+//RS     *recv = deque_struct(items);
+//RS     Ok(result)
+//RS }
+//RS 
+//RS fn lru_method(
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let capacity = int_field(fields, "capacity").unwrap_or(0) as usize;
+//RS     let entries = list_field(fields, "entries");
+//RS     let key_position = |entries: &[CtValue], key: &CtValue| {
+//RS         entries
+//RS             .iter()
+//RS             .position(|entry| matches!(entry, CtValue::List(pair) if pair.first() == Some(key)))
+//RS     };
+//RS     match method {
+//RS         "len" => Ok(CtValue::Int(entries.len() as i64)),
+//RS         "is_empty" => Ok(CtValue::Bool(entries.is_empty())),
+//RS         "capacity" => Ok(CtValue::Int(capacity as i64)),
+//RS         "has_key" | "contains_key" => Ok(CtValue::Bool(
+//RS             key_position(&entries, args.first().unwrap_or(&CtValue::Unit)).is_some(),
+//RS         )),
+//RS         "keys" => Ok(CtValue::List(
+//RS             entries
+//RS                 .iter()
+//RS                 .filter_map(|entry| match entry {
+//RS                     CtValue::List(pair) => pair.first().cloned(),
+//RS                     _ => None,
+//RS                 })
+//RS                 .collect(),
+//RS         )),
+//RS         _ => Err(unsupported(
+//RS             &format!("Cache.{} at compile time", method),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn lru_mutating(
+//RS     recv: &mut CtValue,
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let capacity = int_field(fields, "capacity").unwrap_or(0).max(0) as usize;
+//RS     let mut entries = list_field(fields, "entries");
+//RS     let key_position = |entries: &[CtValue], key: &CtValue| {
+//RS         entries
+//RS             .iter()
+//RS             .position(|entry| matches!(entry, CtValue::List(pair) if pair.first() == Some(key)))
+//RS     };
+//RS     let key = args.first().cloned().unwrap_or(CtValue::Unit);
+//RS     let value = args.get(1).cloned().unwrap_or(CtValue::Unit);
+//RS     let result = match method {
+//RS         "clear" => {
+//RS             entries.clear();
+//RS             CtValue::Unit
+//RS         }
+//RS         "add_new" => {
+//RS             let added = capacity > 0 && key_position(&entries, &key).is_none();
+//RS             if added {
+//RS                 entries.insert(0, CtValue::List(vec![key, value]));
+//RS                 if entries.len() > capacity {
+//RS                     entries.pop();
+//RS                 }
+//RS             }
+//RS             CtValue::Bool(added)
+//RS         }
+//RS         "add" => {
+//RS             if capacity == 0 {
+//RS                 option_none()
+//RS             } else {
+//RS                 let displaced = key_position(&entries, &key).map(|index| {
+//RS                     let CtValue::List(pair) = entries.remove(index) else {
+//RS                         unreachable!("Cache entries are pairs")
+//RS                     };
+//RS                     pair[1].clone()
+//RS                 });
+//RS                 entries.insert(0, CtValue::List(vec![key, value]));
+//RS                 if entries.len() > capacity {
+//RS                     entries.pop();
+//RS                 }
+//RS                 displaced.map_or_else(option_none, |v| CtValue::Present(Box::new(v)))
+//RS             }
+//RS         }
+//RS         "get" => match key_position(&entries, &key) {
+//RS             Some(index) => {
+//RS                 let entry = entries.remove(index);
+//RS                 let CtValue::List(pair) = &entry else {
+//RS                     unreachable!("Cache entries are pairs")
+//RS                 };
+//RS                 let value = pair[1].clone();
+//RS                 entries.insert(0, entry);
+//RS                 CtValue::Present(Box::new(value))
+//RS             }
+//RS             None => option_none(),
+//RS         },
+//RS         "remove" => match key_position(&entries, &key) {
+//RS             Some(index) => {
+//RS                 let CtValue::List(pair) = entries.remove(index) else {
+//RS                     unreachable!("Cache entries are pairs")
+//RS                 };
+//RS                 CtValue::Present(Box::new(pair[1].clone()))
+//RS             }
+//RS             None => option_none(),
+//RS         },
+//RS         _ => {
+//RS             return Err(unsupported(
+//RS                 &format!("Cache.{} at compile time", method),
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     };
+//RS     *recv = lru_struct(capacity as i64, entries);
+//RS     Ok(result)
+//RS }
+//RS 
+//RS fn byte_buffer_method(
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let bytes = fields
+//RS         .iter()
+//RS         .find(|(name, _)| name == "bytes")
+//RS         .map(|(_, value)| as_bytes(value, span))
+//RS         .transpose()?
+//RS         .unwrap_or_default();
+//RS     let pos = fields
+//RS         .iter()
+//RS         .find(|(name, _)| name == "pos")
+//RS         .map(|(_, value)| as_int(value, span))
+//RS         .transpose()?
+//RS         .unwrap_or(0)
+//RS         .max(0) as usize;
+//RS     let text = String::from_utf8_lossy(&bytes).into_owned();
+//RS     match method {
+//RS         "len" => Ok(CtValue::Int(bytes.len() as i64)),
+//RS         "capacity" => Ok(CtValue::Int(bytes.capacity() as i64)),
+//RS         "is_empty" => Ok(CtValue::Bool(bytes.is_empty())),
+//RS         "to_bytes" | "get_buffer" | "buffer" => Ok(CtValue::Bytes(bytes)),
+//RS         "position" => Ok(CtValue::Int(pos as i64)),
+//RS         "eof" => Ok(CtValue::Bool(pos >= bytes.len())),
+//RS         "to_string" | "string" => Ok(CtValue::Str(text)),
+//RS         "is_ascii" => Ok(CtValue::Bool(bytes.is_ascii())),
+//RS         "first" => Ok(match bytes.first() {
+//RS             Some(b) => CtValue::Present(Box::new(CtValue::Int(*b as i64))),
+//RS             None => CtValue::absent(Type::Int),
+//RS         }),
+//RS         "get" => {
+//RS             let index = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+//RS             Ok(if index < 0 {
+//RS                 CtValue::absent(Type::Int)
+//RS             } else {
+//RS                 match bytes.get(index as usize) {
+//RS                     Some(b) => CtValue::Present(Box::new(CtValue::Int(*b as i64))),
+//RS                     None => CtValue::absent(Type::Int),
+//RS                 }
+//RS             })
+//RS         }
+//RS         "contains" => {
+//RS             let needle = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+//RS             Ok(CtValue::Bool(text.contains(&needle)))
+//RS         }
+//RS         "starts_with" => {
+//RS             let prefix = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+//RS             Ok(CtValue::Bool(text.starts_with(&prefix)))
+//RS         }
+//RS         "ends_with" => {
+//RS             let suffix = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+//RS             Ok(CtValue::Bool(text.ends_with(&suffix)))
+//RS         }
+//RS         "trim" => Ok(byte_buffer_struct(text.trim().as_bytes().to_vec())),
+//RS         "trim_start" => Ok(byte_buffer_struct(text.trim_start().as_bytes().to_vec())),
+//RS         "trim_end" => Ok(byte_buffer_struct(text.trim_end().as_bytes().to_vec())),
+//RS         "to_lower" => Ok(byte_buffer_struct(text.to_lowercase().into_bytes())),
+//RS         "to_upper" => Ok(byte_buffer_struct(text.to_uppercase().into_bytes())),
+//RS         "to_title" | "title" => {
+//RS             let mut out = String::with_capacity(text.len());
+//RS             let mut start = true;
+//RS             for ch in text.chars() {
+//RS                 if ch.is_whitespace() {
+//RS                     start = true;
+//RS                     out.push(ch);
+//RS                 } else if start {
+//RS                     for c in ch.to_uppercase() {
+//RS                         out.push(c);
+//RS                     }
+//RS                     start = false;
+//RS                 } else {
+//RS                     for c in ch.to_lowercase() {
+//RS                         out.push(c);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Ok(byte_buffer_struct(out.into_bytes()))
+//RS         }
+//RS         "clone" | "copy" => Ok(byte_buffer_struct_at(bytes, pos)),
+//RS         "lines" => Ok(CtValue::List(
+//RS             text.lines().map(|s| CtValue::Str(s.to_string())).collect(),
+//RS         )),
+//RS         "index_of" => {
+//RS             let needle = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+//RS             Ok(match text.find(&needle) {
+//RS                 Some(i) => CtValue::Present(Box::new(CtValue::Int(i as i64))),
+//RS                 None => CtValue::absent(Type::Int),
+//RS             })
+//RS         }
+//RS         "last_index_of" => {
+//RS             let needle = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+//RS             Ok(match text.rfind(&needle) {
+//RS                 Some(i) => CtValue::Present(Box::new(CtValue::Int(i as i64))),
+//RS                 None => CtValue::absent(Type::Int),
+//RS             })
+//RS         }
+//RS         "split" => {
+//RS             let sep = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+//RS             Ok(CtValue::List(
+//RS                 text.split(&sep)
+//RS                     .map(|s| CtValue::Str(s.to_string()))
+//RS                     .collect(),
+//RS             ))
+//RS         }
+//RS         "replace" => {
+//RS             let from = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+//RS             let to = as_string(args.get(1).unwrap_or(&CtValue::Str(String::new())), span)?;
+//RS             Ok(byte_buffer_struct(text.replace(&from, &to).into_bytes()))
+//RS         }
+//RS         "join" => {
+//RS             let parts = match args.first() {
+//RS                 Some(CtValue::List(xs)) => {
+//RS                     xs.iter()
+//RS                         .map(|x| as_string(x, span))
+//RS                         .collect::<Result<Vec<_>, _>>()?
+//RS                 }
+//RS                 _ => Vec::new(),
+//RS             };
+//RS             Ok(byte_buffer_struct(parts.join(&text).into_bytes()))
+//RS         }
+//RS         "equal" => {
+//RS             let other = match args.first() {
+//RS                 Some(CtValue::Struct { fields, .. }) => fields
+//RS                     .iter()
+//RS                     .find(|(n, _)| n == "bytes")
+//RS                     .map(|(_, v)| as_bytes(v, span))
+//RS                     .transpose()?
+//RS                     .unwrap_or_default(),
+//RS                 _ => Vec::new(),
+//RS             };
+//RS             Ok(CtValue::Bool(bytes == other))
+//RS         }
+//RS         "compare" => {
+//RS             let other = match args.first() {
+//RS                 Some(CtValue::Struct { fields, .. }) => fields
+//RS                     .iter()
+//RS                     .find(|(n, _)| n == "bytes")
+//RS                     .map(|(_, v)| as_bytes(v, span))
+//RS                     .transpose()?
+//RS                     .unwrap_or_default(),
+//RS                 _ => Vec::new(),
+//RS             };
+//RS             Ok(CtValue::Int(match bytes.cmp(&other) {
+//RS                 std::cmp::Ordering::Less => -1,
+//RS                 std::cmp::Ordering::Equal => 0,
+//RS                 std::cmp::Ordering::Greater => 1,
+//RS             }))
+//RS         }
+//RS         "parse" => match crate::Numeric::CtBigInt::from_str(text.trim()) {
+//RS             Ok(n) => Ok(CtValue::Present(Box::new(
+//RS                 super::Builtins::exact_int_value(n),
+//RS             ))),
+//RS             Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e.to_string())))),
+//RS         },
+//RS         _ => Err(unsupported(
+//RS             &format!("Bytes.{} at compile time", method),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn byte_buffer_mutating(
+//RS     recv: &mut CtValue,
+//RS     fields: &[(String, CtValue)],
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let mut bytes = fields
+//RS         .iter()
+//RS         .find(|(name, _)| name == "bytes")
+//RS         .map(|(_, value)| as_bytes(value, span))
+//RS         .transpose()?
+//RS         .unwrap_or_default();
+//RS     let mut pos = fields
+//RS         .iter()
+//RS         .find(|(name, _)| name == "pos")
+//RS         .map(|(_, value)| as_int(value, span))
+//RS         .transpose()?
+//RS         .unwrap_or(0)
+//RS         .max(0) as usize;
+//RS     let result = match method {
+//RS         "clear" | "close" | "shutdown" => {
+//RS             bytes.clear();
+//RS             pos = 0;
+//RS             CtValue::Unit
+//RS         }
+//RS         "flush" => CtValue::Unit,
+//RS         "rewind" => {
+//RS             pos = 0;
+//RS             CtValue::Unit
+//RS         }
+//RS         "seek" => {
+//RS             let index = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+//RS             pos = if index <= 0 {
+//RS                 0
+//RS             } else if (index as usize) > bytes.len() {
+//RS                 bytes.len()
+//RS             } else {
+//RS                 index as usize
+//RS             };
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_bytes" | "write" => {
+//RS             bytes.extend(as_bytes(
+//RS                 args.first().unwrap_or(&CtValue::Bytes(vec![])),
+//RS                 span,
+//RS             )?);
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_u8" | "write_byte" => {
+//RS             bytes.push(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u8);
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_u16_le" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u16).to_le_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_u16_be" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u16).to_be_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_i8" => {
+//RS             bytes.push(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i8 as u8);
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_i16_le" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i16).to_le_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_i16_be" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i16).to_be_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_u32_le" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u32).to_le_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_u32_be" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u32).to_be_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_i32_le" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i32).to_le_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_i32_be" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i32).to_be_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_u64_le" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u64).to_le_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_u64_be" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u64).to_be_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_i64_le" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i64).to_le_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_i64_be" => {
+//RS             bytes.extend_from_slice(
+//RS                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i64).to_be_bytes(),
+//RS             );
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_f32_le" | "write_f32_be" => {
+//RS             let Some(CtValue::Float(value)) = args.first() else {
+//RS                 return Err(unsupported("Bytes.write_f32 expects Float", span));
+//RS             };
+//RS             let bytes_value = value.as_f32();
+//RS             if method == "write_f32_le" {
+//RS                 bytes.extend_from_slice(&bytes_value.to_le_bytes());
+//RS             } else {
+//RS                 bytes.extend_from_slice(&bytes_value.to_be_bytes());
+//RS             }
+//RS             CtValue::Unit
+//RS         }
+//RS         "write_f64_le" | "write_f64_be" => {
+//RS             let Some(CtValue::Float(value)) = args.first() else {
+//RS                 return Err(unsupported("Bytes.write_f64 expects Float", span));
+//RS             };
+//RS             let bytes_value = value.as_f64();
+//RS             if method == "write_f64_le" {
+//RS                 bytes.extend_from_slice(&bytes_value.to_le_bytes());
+//RS             } else {
+//RS                 bytes.extend_from_slice(&bytes_value.to_be_bytes());
+//RS             }
+//RS             CtValue::Unit
+//RS         }
+//RS         "read_byte" | "next" => {
+//RS             if pos >= bytes.len() {
+//RS                 CtValue::absent(Type::Int)
+//RS             } else {
+//RS                 let b = bytes[pos];
+//RS                 pos += 1;
+//RS                 CtValue::Present(Box::new(CtValue::Int(b as i64)))
+//RS             }
+//RS         }
+//RS         "read" => {
+//RS             if pos >= bytes.len() {
+//RS                 CtValue::absent(Type::List(Box::new(Type::IntN {
+//RS                     signed: false,
+//RS                     bits: 8,
+//RS                 })))
+//RS             } else {
+//RS                 let out = bytes[pos..].to_vec();
+//RS                 pos = bytes.len();
+//RS                 CtValue::Present(Box::new(CtValue::Bytes(out)))
+//RS             }
+//RS         }
+//RS         "read_bytes" => {
+//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+//RS             if n < 0 || pos + (n as usize) > bytes.len() {
+//RS                 CtValue::absent(Type::List(Box::new(Type::IntN {
+//RS                     signed: false,
+//RS                     bits: 8,
+//RS                 })))
+//RS             } else {
+//RS                 let out = bytes[pos..pos + n as usize].to_vec();
+//RS                 pos += n as usize;
+//RS                 CtValue::Present(Box::new(CtValue::Bytes(out)))
+//RS             }
+//RS         }
+//RS         "read_string" => {
+//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+//RS             if n < 0 || pos + (n as usize) > bytes.len() {
+//RS                 CtValue::absent(Type::String)
+//RS             } else {
+//RS                 let out = bytes[pos..pos + n as usize].to_vec();
+//RS                 pos += n as usize;
+//RS                 CtValue::Present(Box::new(CtValue::Str(
+//RS                     String::from_utf8_lossy(&out).into_owned(),
+//RS                 )))
+//RS             }
+//RS         }
+//RS         "copy_to" | "write_to" => {
+//RS             // Mutating methods with a second buffer are runtime-only.
+//RS             return Err(unsupported(
+//RS                 &format!("Bytes.{} at compile time", method),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         _ => {
+//RS             return Err(unsupported(
+//RS                 &format!("Bytes.{} at compile time", method),
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     };
+//RS     *recv = byte_buffer_struct_at(bytes, pos);
+//RS     Ok(result)
+//RS }
+//RS 
+//RS fn collection_type_matches(actual: &str, expected: &str) -> bool {
+//RS     actual == expected || actual == format!("Jet{expected}")
+//RS }
+//RS 
+//RS fn collection_struct_fields<'a>(
+//RS     value: &'a CtValue,
+//RS     expected: &str,
+//RS     what: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a [(String, CtValue)], Diagnostic> {
+//RS     match value {
+//RS         CtValue::Struct { type_name, fields }
+//RS             if collection_type_matches(type_name, expected) =>
+//RS         {
+//RS             Ok(fields)
+//RS         }
+//RS         _ => Err(unsupported(what, span)),
+//RS     }
+//RS }
+//RS 
+//RS fn collection_field<'a>(
+//RS     fields: &'a [(String, CtValue)],
+//RS     name: &str,
+//RS     what: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a CtValue, Diagnostic> {
+//RS     fields
+//RS         .iter()
+//RS         .find(|(field_name, _)| field_name == name)
+//RS         .map(|(_, value)| value)
+//RS         .ok_or_else(|| unsupported(what, span))
+//RS }
+//RS 
+//RS fn collection_string_list(
+//RS     value: &CtValue,
+//RS     what: &str,
+//RS     span: Span,
+//RS ) -> Result<Vec<String>, Diagnostic> {
+//RS     let CtValue::List(values) = value else {
+//RS         return Err(unsupported(what, span));
+//RS     };
+//RS     values
+//RS         .iter()
+//RS         .map(|value| match value {
+//RS             CtValue::Str(value) => Ok(value.clone()),
+//RS             _ => Err(unsupported(what, span)),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn collection_int_list(
+//RS     value: &CtValue,
+//RS     what: &str,
+//RS     span: Span,
+//RS ) -> Result<Vec<i64>, Diagnostic> {
+//RS     let CtValue::List(values) = value else {
+//RS         return Err(unsupported(what, span));
+//RS     };
+//RS     values
+//RS         .iter()
+//RS         .map(|value| as_int(value, span))
+//RS         .collect::<Result<Vec<_>, _>>()
+//RS }
+//RS 
+//RS fn collection_counter(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<collection_semantics::JetCounter, Diagnostic> {
+//RS     let fields = collection_struct_fields(value, "Counter", "Counter value", span)?;
+//RS     let keys = collection_string_list(
+//RS         collection_field(fields, "keys", "Counter keys", span)?,
+//RS         "Counter keys",
+//RS         span,
+//RS     )?;
+//RS     let counts = collection_int_list(
+//RS         collection_field(fields, "counts", "Counter counts", span)?,
+//RS         "Counter counts",
+//RS         span,
+//RS     )?;
+//RS     if keys.len() != counts.len() {
+//RS         return Err(unsupported("Counter keys/counts", span));
+//RS     }
+//RS     Ok(collection_semantics::JetCounter { keys, counts })
+//RS }
+//RS 
+//RS fn collection_counter_value(counter: &collection_semantics::JetCounter) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "Counter".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "keys".to_string(),
+//RS                 CtValue::List(counter.keys.iter().cloned().map(CtValue::Str).collect()),
+//RS             ),
+//RS             (
+//RS                 "counts".to_string(),
+//RS                 CtValue::List(counter.counts.iter().copied().map(CtValue::Int).collect()),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn collection_optional_string(value: Option<String>) -> CtValue {
+//RS     value
+//RS         .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
+//RS         .unwrap_or_else(|| CtValue::absent(Type::String))
+//RS }
+//RS 
+//RS fn collection_ordered_map(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<collection_semantics::JetOrderedMap, Diagnostic> {
+//RS     let fields = collection_struct_fields(value, "OrderedMap", "OrderedMap value", span)?;
+//RS     let keys = collection_string_list(
+//RS         collection_field(fields, "keys", "OrderedMap keys", span)?,
+//RS         "OrderedMap keys",
+//RS         span,
+//RS     )?;
+//RS     let values = collection_string_list(
+//RS         collection_field(fields, "values", "OrderedMap values", span)?,
+//RS         "OrderedMap values",
+//RS         span,
+//RS     )?;
+//RS     if keys.len() != values.len() {
+//RS         return Err(unsupported("OrderedMap keys/values", span));
+//RS     }
+//RS     Ok(collection_semantics::JetOrderedMap { keys, values })
+//RS }
+//RS 
+//RS fn collection_ordered_map_value(map: &collection_semantics::JetOrderedMap) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "OrderedMap".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "keys".to_string(),
+//RS                 CtValue::List(map.keys.iter().cloned().map(CtValue::Str).collect()),
+//RS             ),
+//RS             (
+//RS                 "values".to_string(),
+//RS                 CtValue::List(map.values.iter().cloned().map(CtValue::Str).collect()),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn collection_layer(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<collection_semantics::JetLayer, Diagnostic> {
+//RS     let fields = collection_struct_fields(value, "Layer", "Chain layer", span)?;
+//RS     let keys = collection_string_list(
+//RS         collection_field(fields, "keys", "Chain layer keys", span)?,
+//RS         "Chain layer keys",
+//RS         span,
+//RS     )?;
+//RS     let values = collection_string_list(
+//RS         collection_field(fields, "values", "Chain layer values", span)?,
+//RS         "Chain layer values",
+//RS         span,
+//RS     )?;
+//RS     if keys.len() != values.len() {
+//RS         return Err(unsupported("Chain layer keys/values", span));
+//RS     }
+//RS     Ok(collection_semantics::JetLayer { keys, values })
+//RS }
+//RS 
+//RS fn collection_layer_value(layer: &collection_semantics::JetLayer) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "Layer".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "keys".to_string(),
+//RS                 CtValue::List(layer.keys.iter().cloned().map(CtValue::Str).collect()),
+//RS             ),
+//RS             (
+//RS                 "values".to_string(),
+//RS                 CtValue::List(layer.values.iter().cloned().map(CtValue::Str).collect()),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn collection_chain(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<collection_semantics::JetChain, Diagnostic> {
+//RS     let fields = collection_struct_fields(value, "Chain", "Chain value", span)?;
+//RS     let CtValue::List(layers) =
+//RS         collection_field(fields, "layers", "Chain layers", span)?
+//RS     else {
+//RS         return Err(unsupported("Chain layers", span));
+//RS     };
+//RS     Ok(collection_semantics::JetChain {
+//RS         layers: layers
+//RS             .iter()
+//RS             .map(|layer| collection_layer(layer, span))
+//RS             .collect::<Result<Vec<_>, _>>()?,
+//RS     })
+//RS }
+//RS 
+//RS fn collection_chain_value(chain: &collection_semantics::JetChain) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "Chain".to_string(),
+//RS         fields: vec![(
+//RS             "layers".to_string(),
+//RS             CtValue::List(chain.layers.iter().map(collection_layer_value).collect()),
+//RS         )],
+//RS     }
+//RS }
+//RS fn collection_string_set(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<collection_semantics::JetStringSet, Diagnostic> {
+//RS     let fields = collection_struct_fields(value, "StringSet", "StringSet value", span)?;
+//RS     Ok(collection_semantics::JetStringSet {
+//RS         items: collection_string_list(
+//RS             collection_field(fields, "items", "StringSet items", span)?,
+//RS             "StringSet items",
+//RS             span,
+//RS         )?,
+//RS     })
+//RS }
+//RS 
+//RS fn collection_string_set_value(set: &collection_semantics::JetStringSet) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "StringSet".to_string(),
+//RS         fields: vec![(
+//RS             "items".to_string(),
+//RS             CtValue::List(set.items.iter().cloned().map(CtValue::Str).collect()),
+//RS         )],
+//RS     }
+//RS }
+//RS 
+//RS fn collection_optional_string_set(
+//RS     value: Option<collection_semantics::JetStringSet>,
+//RS ) -> CtValue {
+//RS     value
+//RS         .map(|value| CtValue::Present(Box::new(collection_string_set_value(&value))))
+//RS         .unwrap_or_else(|| CtValue::absent(Type::Named("StringSet".to_string())))
+//RS }
+//RS 
+//RS fn collection_arg<'a>(
+//RS     args: &'a [CtValue],
+//RS     index: usize,
+//RS     method: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a CtValue, Diagnostic> {
+//RS     args.get(index)
+//RS         .ok_or_else(|| unsupported(&format!("core.collections.{method} argument"), span))
+//RS }
+//RS 
+//RS /// Evaluate the nominal string-container surface through the same kernel used
+//RS /// by generated AOT code.  This is deliberately outside the generic list
+//RS /// evaluator: the carrier fields are part of the public Core type contract.
+//RS pub fn apply_core_collections(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     use collection_semantics as native;
+//RS 
+//RS     match method {
+//RS         "counter" => Ok(collection_counter_value(&native::jet_coll_counter())),
+//RS         "counter_from" => {
+//RS             let keys = collection_string_list(
+//RS                 collection_arg(args, 0, method, span)?,
+//RS                 "core.collections.counter_from keys",
+//RS                 span,
+//RS             )?;
+//RS             Ok(collection_counter_value(&native::jet_coll_counter_from(&keys)))
+//RS         }
+//RS         "add" if module == "core.collections" => {
+//RS             let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+//RS             let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+//RS             let amount = as_int(collection_arg(args, 2, method, span)?, span)?;
+//RS             Ok(collection_counter_value(&native::jet_coll_counter_add(
+//RS                 &counter, &key, amount,
+//RS             )))
+//RS         }
+//RS         "inc" | "dec" => {
+//RS             let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+//RS             let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+//RS             let value = if method == "inc" {
+//RS                 native::jet_coll_counter_inc(&counter, &key)
+//RS             } else {
+//RS                 native::jet_coll_counter_dec(&counter, &key)
+//RS             };
+//RS             Ok(collection_counter_value(&value))
+//RS         }
+//RS         "get" => {
+//RS             let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+//RS             let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+//RS             Ok(CtValue::Int(native::jet_coll_counter_get(&counter, &key)))
+//RS         }
+//RS         "set_count" => {
+//RS             let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+//RS             let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+//RS             let count = as_int(collection_arg(args, 2, method, span)?, span)?;
+//RS             Ok(collection_counter_value(&native::jet_coll_counter_set_count(
+//RS                 &counter, &key, count,
+//RS             )))
+//RS         }
+//RS         "total" => {
+//RS             let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+//RS             Ok(CtValue::Int(native::jet_coll_counter_total(&counter)))
+//RS         }
+//RS         "names" | "elements" => {
+//RS             let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+//RS             let values = if method == "names" {
+//RS                 native::jet_coll_counter_names(&counter)
+//RS             } else {
+//RS                 native::jet_coll_counter_elements(&counter)
+//RS             };
+//RS             Ok(CtValue::List(values.into_iter().map(CtValue::Str).collect()))
+//RS         }
+//RS         "most_common" => {
+//RS             let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+//RS             let count = as_int(collection_arg(args, 1, method, span)?, span)?;
+//RS             Ok(collection_counter_value(&native::jet_coll_counter_most_common(
+//RS                 &counter, count,
+//RS             )))
+//RS         }
+//RS         "subtract" | "merge_add" => {
+//RS             let left = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+//RS             let right = collection_counter(collection_arg(args, 1, method, span)?, span)?;
+//RS             let value = if method == "subtract" {
+//RS                 native::jet_coll_counter_subtract(&left, &right)
+//RS             } else {
+//RS                 native::jet_coll_counter_merge_add(&left, &right)
+//RS             };
+//RS             Ok(collection_counter_value(&value))
+//RS         }
+//RS         "clear_counter" => {
+//RS             let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+//RS             Ok(collection_counter_value(&native::jet_coll_counter_clear(
+//RS                 &counter,
+//RS             )))
+//RS         }
+//RS         "ordered_map" => Ok(collection_ordered_map_value(&native::jet_coll_ordered_map())),
+//RS         "map_get" | "map_set" | "map_remove" | "map_contains" => {
+//RS             let map = collection_ordered_map(collection_arg(args, 0, method, span)?, span)?;
+//RS             let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+//RS             match method {
+//RS                 "map_get" => Ok(collection_optional_string(
+//RS                     native::jet_coll_map_get(&map, &key),
+//RS                 )),
+//RS                 "map_set" => {
+//RS                     let value = as_string(collection_arg(args, 2, method, span)?, span)?;
+//RS                     Ok(collection_ordered_map_value(&native::jet_coll_map_set(
+//RS                         &map, &key, &value,
+//RS                     )))
+//RS                 }
+//RS                 "map_remove" => Ok(collection_ordered_map_value(
+//RS                     &native::jet_coll_map_remove(&map, &key),
+//RS                 )),
+//RS                 _ => Ok(CtValue::Bool(native::jet_coll_map_contains(&map, &key))),
+//RS             }
+//RS         }
+//RS         "map_keys" | "map_values" | "map_len" => {
+//RS             let map = collection_ordered_map(collection_arg(args, 0, method, span)?, span)?;
+//RS             match method {
+//RS                 "map_keys" => Ok(CtValue::List(
+//RS                     native::jet_coll_map_keys(&map)
+//RS                         .into_iter()
+//RS                         .map(CtValue::Str)
+//RS                         .collect(),
+//RS                 )),
+//RS                 "map_values" => Ok(CtValue::List(
+//RS                     native::jet_coll_map_values(&map)
+//RS                         .into_iter()
+//RS                         .map(CtValue::Str)
+//RS                         .collect(),
+//RS                 )),
+//RS                 _ => Ok(CtValue::Int(native::jet_coll_map_len(&map))),
+//RS             }
+//RS         }
+//RS         "chain" => Ok(collection_chain_value(&native::jet_coll_chain())),
+//RS         "chain_push" => {
+//RS             let chain = collection_chain(collection_arg(args, 0, method, span)?, span)?;
+//RS             let keys = collection_string_list(
+//RS                 collection_arg(args, 1, method, span)?,
+//RS                 "core.collections.chain_push keys",
+//RS                 span,
+//RS             )?;
+//RS             let values = collection_string_list(
+//RS                 collection_arg(args, 2, method, span)?,
+//RS                 "core.collections.chain_push values",
+//RS                 span,
+//RS             )?;
+//RS             Ok(collection_chain_value(&native::jet_coll_chain_push(
+//RS                 &chain, &keys, &values,
+//RS             )))
+//RS         }
+//RS         "chain_get" | "chain_contains" => {
+//RS             let chain = collection_chain(collection_arg(args, 0, method, span)?, span)?;
+//RS             let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+//RS             if method == "chain_get" {
+//RS                 Ok(collection_optional_string(
+//RS                     native::jet_coll_chain_get(&chain, &key),
+//RS                 ))
+//RS             } else {
+//RS                 Ok(CtValue::Bool(native::jet_coll_chain_contains(&chain, &key)))
+//RS             }
+//RS         }
+//RS         "new" => Ok(collection_string_set_value(&native::jet_coll_set())),
+//RS         "from_list" => {
+//RS             let items = collection_string_list(
+//RS                 collection_arg(args, 0, method, span)?,
+//RS                 "core.collections.set.from_list items",
+//RS                 span,
+//RS             )?;
+//RS             Ok(collection_string_set_value(
+//RS                 &native::jet_coll_set_from_list(&items),
+//RS             ))
+//RS         }
+//RS         "add" | "discard" => {
+//RS             let set = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+//RS             let item = as_string(collection_arg(args, 1, method, span)?, span)?;
+//RS             let next = if method == "add" {
+//RS                 native::jet_coll_set_add(&set, &item)
+//RS             } else {
+//RS                 native::jet_coll_set_discard(&set, &item)
+//RS             };
+//RS             Ok(collection_string_set_value(&next))
+//RS         }
+//RS         "remove" => {
+//RS             let set = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+//RS             let item = as_string(collection_arg(args, 1, method, span)?, span)?;
+//RS             Ok(collection_optional_string_set(
+//RS                 native::jet_coll_set_remove(&set, &item),
+//RS             ))
+//RS         }
+//RS         "contains" => {
+//RS             let set = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+//RS             let item = as_string(collection_arg(args, 1, method, span)?, span)?;
+//RS             Ok(CtValue::Bool(native::jet_coll_set_contains(&set, &item)))
+//RS         }
+//RS         "len" | "is_empty" | "to_list" | "clear" | "clone_set" => {
+//RS             let set = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+//RS             match method {
+//RS                 "len" => Ok(CtValue::Int(native::jet_coll_set_len(&set))),
+//RS                 "is_empty" => Ok(CtValue::Bool(native::jet_coll_set_is_empty(&set))),
+//RS                 "to_list" => Ok(CtValue::List(
+//RS                     native::jet_coll_set_items(&set)
+//RS                         .into_iter()
+//RS                         .map(CtValue::Str)
+//RS                         .collect(),
+//RS                 )),
+//RS                 "clear" => Ok(collection_string_set_value(
+//RS                     &native::jet_coll_set_clear(&set),
+//RS                 )),
+//RS                 _ => Ok(collection_string_set_value(
+//RS                     &native::jet_coll_set_clone(&set),
+//RS                 )),
+//RS             }
+//RS         }
+//RS         "union" | "intersection" | "difference" | "symmetric_difference" => {
+//RS             let left = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+//RS             let right = collection_string_set(collection_arg(args, 1, method, span)?, span)?;
+//RS             let next = match method {
+//RS                 "union" => native::jet_coll_set_union(&left, &right),
+//RS                 "intersection" => native::jet_coll_set_intersection(&left, &right),
+//RS                 "difference" => native::jet_coll_set_difference(&left, &right),
+//RS                 _ => native::jet_coll_set_symmetric_difference(&left, &right),
+//RS             };
+//RS             Ok(collection_string_set_value(&next))
+//RS         }
+//RS         "issubset" | "issuperset" | "isdisjoint" => {
+//RS             let left = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+//RS             let right = collection_string_set(collection_arg(args, 1, method, span)?, span)?;
+//RS             let result = match method {
+//RS                 "issubset" => native::jet_coll_set_issubset(&left, &right),
+//RS                 "issuperset" => native::jet_coll_set_issuperset(&left, &right),
+//RS                 _ => native::jet_coll_set_isdisjoint(&left, &right),
+//RS             };
+//RS             Ok(CtValue::Bool(result))
+//RS         }
+//RS         _ => Err(unsupported(
+//RS             &format!("core.collections.{method}()"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+// END-PORT-PENDING 0573 crates/jet-comptime/src/Comptime/CollectionEval.rs:1-2433
+

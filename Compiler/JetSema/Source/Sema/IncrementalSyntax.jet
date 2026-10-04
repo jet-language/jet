@@ -1,0 +1,281 @@
+// Rust Bundle/Comptime.rs and Pipeline/FailureUnion.rs:109–243. One read-only
+// walk records actual AST inputs for volatility and typed-failure probes.
+use jet_foundation.[DeriveBodyItem, EnumLitArg, Expr, ForKind, Item, LambdaBody, OrFallback, Pattern, Stmt, StrPart, StructPatField, TypedLitBody]
+
+struct SemaIncrementalSyntaxFacts {
+    calls: [String:Bool]
+    typed_error: Bool
+    has_comptime: Bool
+}
+
+fn sema_incremental_syntax_facts(body: [Stmt]) -> SemaIncrementalSyntaxFacts Never! {
+    facts := SemaIncrementalSyntaxFacts{calls: [String:Bool]{}, typed_error: false, has_comptime: false}
+    sema_incremental_visit_statements(body, &facts)
+    facts
+}
+
+fn sema_incremental_visit_optional(value: Expr?, facts: &SemaIncrementalSyntaxFacts) Never! {
+    if value == .Val(expression) -> sema_incremental_visit_expression(expression, &facts)
+}
+
+fn sema_incremental_call_leaf(name: String) -> String Never! {
+    parts :: name.replace("::", ".").split(".").to_list()
+    if parts.len() == 0 -> return ~name
+    parts[parts.len() - 1]
+}
+
+fn sema_incremental_visit_fallback(fallback: OrFallback, facts: &SemaIncrementalSyntaxFacts) Never! {
+    if fallback == {
+        .Value(value) -> sema_incremental_visit_expression(value, &facts)
+        .Return(value, _) -> sema_incremental_visit_optional(value, &facts)
+        .Block(body, value, _) -> {
+            sema_incremental_visit_statements(body, &facts)
+            sema_incremental_visit_optional(value, &facts)
+        }
+        .Panic(_, args) -> loop argument in args -> sema_incremental_visit_expression(argument.expr, &facts)
+        else -> {}
+    }
+}
+
+fn sema_incremental_visit_pattern(pattern: Pattern, facts: &SemaIncrementalSyntaxFacts) Never! {
+    if pattern == {
+        .Struct(fields, _, _) -> loop field in fields {
+            if field == .Value(_, _, value) -> sema_incremental_visit_expression(value, &facts)
+        }
+        .Or(patterns, _) -> loop alternative in patterns -> sema_incremental_visit_pattern(alternative, &facts)
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(value) -> sema_incremental_visit_pattern(value, &facts)
+        }
+        else -> {}
+    }
+}
+
+fn sema_incremental_visit_expression(expression: Expr, facts: &SemaIncrementalSyntaxFacts) Never! {
+    if expression == {
+        .Str(parts, _) -> loop part in parts {
+            if part == .Interp(value, _) -> sema_incremental_visit_expression(value, &facts)
+        }
+        .ListLit(values, _) | .CompareChain(values, _, _, _) -> loop value in values -> sema_incremental_visit_expression(value, &facts)
+        .MemberSpread(value, _, _) | .Spread(value, _) | .Unary(_, value, _) | .Deref(value, _) | .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _) | .Field(value, _, _) | .OptField(value, _, _, _, _) | .Tainted(value, _, _) | .Present(value, _) | .Ok(value, _) | .Paren(value, _) | .PtrFromAddr(_, _, _, value, _) -> sema_incremental_visit_expression(value, &facts)
+        .Err(value, _) -> {
+            plain :: sema_failure_union_unparen(value)
+            if plain != .Str{parts: _, span: _} -> facts.typed_error = true
+            sema_incremental_visit_expression(value, &facts)
+        }
+        .Try(value, _, _, context) -> {
+            sema_incremental_visit_expression(value, &facts)
+            sema_incremental_visit_optional(context, &facts)
+        }
+        .MapLit(entries, _) -> loop entry in entries {
+            sema_incremental_visit_expression(entry.key, &facts)
+            sema_incremental_visit_expression(entry.value, &facts)
+        }
+        .Index(left, right, _, _) | .Range(left, right, _, _) | .Binary(_, left, right, _) -> {
+            sema_incremental_visit_expression(left, &facts)
+            sema_incremental_visit_expression(right, &facts)
+        }
+        .Slice(base, start, end, range, _) -> {
+            sema_incremental_visit_expression(base, &facts)
+            if range == {
+                .Val(value) -> sema_incremental_visit_expression(value, &facts)
+                None -> {
+                    sema_incremental_visit_expression(start, &facts)
+                    sema_incremental_visit_expression(end, &facts)
+                }
+            }
+        }
+        .Call(call) -> {
+            if call.name == "Err" && call.args.len() == 1 {
+                plain :: sema_failure_union_unparen(call.args[0].expr)
+                if plain != .Str{parts: _, span: _} -> facts.typed_error = true
+            } else { facts.calls[sema_incremental_call_leaf(call.name)] = true }
+            loop argument in call.args -> sema_incremental_visit_expression(argument.expr, &facts)
+        }
+        .MethodCall(receiver, method, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, method, _, _, args, _, _, _) -> {
+            facts.calls[method] = true
+            sema_incremental_visit_expression(receiver, &facts)
+            loop argument in args -> sema_incremental_visit_expression(argument.expr, &facts)
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> sema_incremental_visit_expression(field.value, &facts)
+        .TypedLit(_, body, _) -> if body == {
+            .Fields(fields) -> loop field in fields -> sema_incremental_visit_expression(field.value, &facts)
+            .Elements(values) -> loop value in values -> sema_incremental_visit_expression(value, &facts)
+            .Entries(entries) -> loop entry in entries {
+                sema_incremental_visit_expression(entry.key, &facts)
+                sema_incremental_visit_expression(entry.value, &facts)
+            }
+            .Value(value) -> sema_incremental_visit_expression(value, &facts)
+            else -> {}
+        }
+        .EnumLit(_, _, _, args, _, _) -> loop argument in args {
+            if argument == {
+                .Positional(value) | .Named(_, value) -> sema_incremental_visit_expression(value, &facts)
+            }
+        }
+        .PatternTest(subject, pattern, _) -> {
+            sema_incremental_visit_expression(subject, &facts)
+            sema_incremental_visit_pattern(pattern, &facts)
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            sema_incremental_visit_expression(value, &facts)
+            sema_incremental_visit_fallback(fallback, &facts)
+        }
+        .If(condition, then_body, then_value, else_body, else_value, _) -> {
+            sema_incremental_visit_expression(condition, &facts)
+            sema_incremental_visit_statements(then_body, &facts)
+            sema_incremental_visit_expression(then_value, &facts)
+            sema_incremental_visit_statements(else_body, &facts)
+            sema_incremental_visit_expression(else_value, &facts)
+        }
+        .TupleLit(fields, _, _) -> loop field in fields -> sema_incremental_visit_expression(field.value, &facts)
+        .Lambda(lambda) -> if lambda.body == {
+            .Expr(value) -> sema_incremental_visit_expression(value, &facts)
+            .Block(body) -> sema_incremental_visit_statements(body, &facts)
+        }
+        .CallValue(callee, args, _) -> {
+            sema_incremental_visit_expression(callee, &facts)
+            loop argument in args -> sema_incremental_visit_expression(argument.expr, &facts)
+        }
+        .ComptimeName(_, _, _) -> facts.has_comptime = true
+        else -> {}
+    }
+}
+
+fn sema_incremental_visit_statements(body: [Stmt], facts: &SemaIncrementalSyntaxFacts) Never! {
+    loop statement in body {
+        if statement == {
+            .Expr(value) | .Yield(value, _) | .DeferClose(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) | .Assign(_, _, _, value) -> sema_incremental_visit_expression(value, &facts)
+            .Val(binding) -> {
+                facts.has_comptime = facts.has_comptime || binding.is_comptime
+                sema_incremental_visit_expression(binding.init, &facts)
+            }
+            .Return(value, _) -> sema_incremental_visit_optional(value, &facts)
+            .While(condition, nested, _, _, _) -> {
+                sema_incremental_visit_expression(condition, &facts)
+                sema_incremental_visit_statements(nested, &facts)
+            }
+            .For(_, _, _, kind, nested, _, _, _, _) -> {
+                if kind == {
+                    .Range(start, end, step, _) -> {
+                        sema_incremental_visit_expression(start, &facts)
+                        sema_incremental_visit_expression(end, &facts)
+                        sema_incremental_visit_optional(step, &facts)
+                    }
+                    .In(collection, step) -> {
+                        sema_incremental_visit_expression(collection, &facts)
+                        sema_incremental_visit_optional(step, &facts)
+                    }
+                }
+                sema_incremental_visit_statements(nested, &facts)
+            }
+            .Switch(subject, arms, otherwise, _) | .ComptimeSwitch(subject, arms, otherwise, _) -> {
+                if statement == .ComptimeSwitch(_, _, _, _) -> facts.has_comptime = true
+                sema_incremental_visit_expression(subject, &facts)
+                loop arm in arms {
+                    sema_incremental_visit_expression(arm.cond, &facts)
+                    sema_incremental_visit_statements(arm.body, &facts)
+                }
+                if otherwise == .Val(nested) -> sema_incremental_visit_statements(nested, &facts)
+            }
+            .CountedLoop(init, condition, step, nested, _, _, _) -> {
+                facts.has_comptime = facts.has_comptime || init.is_comptime
+                sema_incremental_visit_expression(init.init, &facts)
+                sema_incremental_visit_expression(condition, &facts)
+                if step == .Val(value) {
+                    single :: [Stmt]{value}
+                    sema_incremental_visit_statements(single, &facts)
+                }
+                sema_incremental_visit_statements(nested, &facts)
+            }
+            .Loop(nested, _, _, _) | .Unsafe(_, _, nested, _) | .Impure(_, _, nested, _) | .Reactive(nested, _) | .Shield(nested, _) | .Switched(_, nested, _) | .Region(_, _, nested, _) | .Policy(_, nested, _) | .TaskGroup(_, _, _, nested, _) | .Layout(_, _, nested, _) | .AuthorityScope(_, _, _, nested, _) | .Transact(_, _, nested, _, _) | .AssumeDet(_, _, nested, _) | .Live(nested, _) | .ScopeMember(_, _, _, _, nested, _, _, _) -> sema_incremental_visit_statements(nested, &facts)
+            .ContextBlock(fields, nested, _) -> {
+                loop field in fields -> sema_incremental_visit_expression(field.value, &facts)
+                sema_incremental_visit_statements(nested, &facts)
+            }
+            .ComptimeIf(_, _, _, _, _, _) | .ComptimeBlock(_, _, _) -> facts.has_comptime = true
+            else -> {}
+        }
+    }
+}
+
+pub fn sema_incremental_item_has_comptime(item: Item) -> Bool Never! {
+    if item == {
+        .Func(function) -> sema_incremental_syntax_facts(function.body).has_comptime
+        .Struct(definition) -> {
+            loop method in definition.methods {
+                if sema_incremental_syntax_facts(method.body).has_comptime -> return true
+            }
+            loop implementation in definition.trait_impls {
+                loop method in implementation.methods {
+                    if sema_incremental_syntax_facts(method.body).has_comptime -> return true
+                }
+            }
+            false
+        }
+        .Enum(definition) -> {
+            loop method in definition.methods {
+                if sema_incremental_syntax_facts(method.body).has_comptime -> return true
+            }
+            loop implementation in definition.trait_impls {
+                loop method in implementation.methods {
+                    if sema_incremental_syntax_facts(method.body).has_comptime -> return true
+                }
+            }
+            false
+        }
+        .Trait(definition) -> {
+            loop method in definition.methods {
+                if method.default_body == .Val(body) && sema_incremental_syntax_facts(body).has_comptime -> return true
+            }
+            false
+        }
+        .Impl(implementation) -> {
+            loop method in implementation.methods {
+                if sema_incremental_syntax_facts(method.body).has_comptime -> return true
+            }
+            false
+        }
+        .Const(constant) -> constant.is_comptime
+        .Test(test) -> sema_incremental_syntax_facts(test.body).has_comptime
+        .CodeModule(definition) -> {
+            if definition.body == .Val(body) {
+                loop child in body {
+                    if sema_incremental_item_has_comptime(child) -> return true
+                }
+            }
+            false
+        }
+        .GenericModule(definition) -> {
+            loop child in definition.body {
+                if sema_incremental_item_has_comptime(child) -> return true
+            }
+            false
+        }
+        .ErrorConv(conversion) -> sema_incremental_syntax_facts(conversion.body).has_comptime
+        .UserDerive(definition) -> sema_incremental_derive_has_comptime(definition.body)
+        .TemplateLoop(definition) -> {
+            facts := SemaIncrementalSyntaxFacts{calls: [String:Bool]{}, typed_error: false, has_comptime: false}
+            sema_incremental_visit_expression(definition.source, &facts)
+            facts.has_comptime || sema_incremental_derive_has_comptime(definition.body)
+        }
+        else -> false
+    }
+}
+
+fn sema_incremental_derive_has_comptime(body: [DeriveBodyItem]) -> Bool Never! {
+    loop entry in body {
+        if entry == {
+            .Item(item) -> if sema_incremental_item_has_comptime(item) -> return true
+            .Stmt(statement) -> {
+                single :: [Stmt]{statement}
+                if sema_incremental_syntax_facts(single).has_comptime -> return true
+            }
+            .Loop(_, _, source, nested, _) -> {
+                facts := SemaIncrementalSyntaxFacts{calls: [String:Bool]{}, typed_error: false, has_comptime: false}
+                sema_incremental_visit_expression(source, &facts)
+                if facts.has_comptime || sema_incremental_derive_has_comptime(nested) -> return true
+            }
+        }
+    }
+    false
+}

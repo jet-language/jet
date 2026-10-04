@@ -1,0 +1,20 @@
+use jet_driver.[format_source]
+#Test("format_preserves_inline_package_and_ordinary_source") {
+    source :: "package {{\n    name: \"inline-demo\"\n}}\n\npub(package) fn helper() -> String {{ return \"ok\" }}\nfn run() {{ print(helper()) }}\n"
+    formatted :: format_source(source) ?? panic("inline Package source should format")
+    assert(formatted.starts_with("package {{\n    name: \"inline-demo\"\n}}\n"))
+    assert(formatted.contains("pub(package) fn helper"))
+    assert(formatted.contains("fn run"))
+}
+#Test("format_rejects_duplicate_inline_package_carriers") {
+    source :: "package {{ name: \"one\" }}\npackage {{ name: \"two\" }}\nfn run() {{}}\n"
+    if format_source(source) == {
+        .Err(diagnostics) -> assert_eq(diagnostics[0].code, "E1361")
+        .Ok(_) -> panic("duplicate carriers must fail")
+    }
+}
+#Test("format_preserves_leading_comments_verbatim") {
+    source :: "// before\npackage {{ name: \"one\" }}\nfn run() {{}}\n"
+    formatted :: format_source(source) ?? panic("leading trivia is legal")
+    assert(formatted.starts_with("// before\npackage {{ name: \"one\" }}"))
+}

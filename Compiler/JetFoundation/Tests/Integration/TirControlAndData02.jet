@@ -1,0 +1,1083 @@
+// PORT-PENDING 1172 tests-tir-control-and-data-module-group-slice-1821: tests/tir_control_and_data.rs:1821-2568
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn labeled_break_and_continue() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     outer :: loop i in 1..3 {
+//RS         loop j in 1..3 {
+//RS             if (j == 2) {
+//RS                 next(outer)
+//RS             }
+//RS             print(\"{i}-{j}\")
+//RS             if (i == 2) {
+//RS                 break(outer)
+//RS             }
+//RS         }
+//RS     }
+//RS     print(\"done\")
+//RS }
+//RS ";
+//RS     let rust = compile("tir_labeled", src);
+//RS     assert!(rust.contains("continue '__jet_outer;"), "{rust}");
+//RS     assert!(rust.contains("break '__jet_outer;"), "{rust}");
+//RS     let (code, stdout) = build_and_run("tir_labeled", src);
+//RS     assert_eq!(code, 0);
+//RS     // i=1: j=1 prints 1-1, i!=2 so j=2 -> next(outer).
+//RS     // i=2: j=1 prints 2-1, i==2 -> break(outer).
+//RS     assert_eq!(stdout, "1-1\n2-1\ndone\n");
+//RS }
+//RS 
+//RS /// D-LOOPLABEL3 / D-ORRETURN-CANON1: named exits are also valid `??`
+//RS /// fallbacks and target the named loop's normal continuation/break edges.
+//RS #[test]
+//RS fn labeled_break_and_continue_fallbacks() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     outer :: loop text in ["skip", "7"] {
+//RS         loop {
+//RS             value :: Int.parse(text) ?? next(outer)
+//RS             print(value)
+//RS             Int.parse("stop") ?? break(outer)
+//RS         }
+//RS     }
+//RS     print("done")
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("tir_labeled_fallbacks", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "7\ndone\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn yielding_and_result_loops_compile_and_run() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn find(xs: [Int]) -> Int {
+//RS     found :: loop {
+//RS         loop x in xs {
+//RS             if x > 2 -> break(found, x)
+//RS         }
+//RS         break -1
+//RS     }
+//RS     found
+//RS }
+//RS 
+//RS fn outer_result() -> Int {
+//RS     result :: loop {
+//RS         ignored :: loop {
+//RS             break(result, 9)
+//RS         }
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn identity(value: Int) -> Int -> value
+//RS 
+//RS fn nested_binary_exit() -> Int {
+//RS     result :: loop {
+//RS         ignored :: (loop {
+//RS             break(result, 11)
+//RS             break 1
+//RS         }) + 2
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn nested_call_exit() -> Int {
+//RS     result :: loop {
+//RS         ignored :: identity(loop {
+//RS             break(result, 12)
+//RS             break 1
+//RS         })
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn nested_condition_exit() -> Int {
+//RS     result :: loop {
+//RS         if (loop {
+//RS             break(result, 13)
+//RS             break 1
+//RS         }) > 0 {
+//RS             break 0
+//RS         }
+//RS         break -1
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn counted_init_exit() -> Int {
+//RS     result :: loop {
+//RS         loop i := (loop {
+//RS             break(result, 14)
+//RS             break 0
+//RS         }), i < 1 {
+//RS             i += 1
+//RS         }
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn counted_step_exit() -> Int {
+//RS     result :: loop {
+//RS         loop i := 0, i < 2 {
+//RS             i = (loop {
+//RS                 break(result, 15)
+//RS                 break 0
+//RS             })
+//RS         }
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn value_if_exit() -> Int {
+//RS     result :: loop {
+//RS         ignored :: if true -> {
+//RS             break(result, 16)
+//RS             0
+//RS         } else -> 0
+//RS         break 0
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn run() {
+//RS     xs :: [Int]{ 1, 2, 3, 4 }
+//RS     prefix :: loop x in xs -> {
+//RS         if x > 3 -> break
+//RS         x * 2
+//RS     }
+//RS     rows :: loop x in xs, y in [10, 20] -> {
+//RS         if x == 2 && y == 20 -> break
+//RS         x + y
+//RS     }
+//RS     outer :: loop x in xs {
+//RS         ignored :: loop {
+//RS             if x == 1 -> next(outer)
+//RS             if x == 2 -> break(outer)
+//RS             break 0
+//RS         }
+//RS         print(ignored)
+//RS     }
+//RS     print(prefix)
+//RS     print(rows)
+//RS     print(find(xs))
+//RS     print(outer_result())
+//RS     print(nested_binary_exit())
+//RS     print(nested_call_exit())
+//RS     print(nested_condition_exit())
+//RS     print(counted_init_exit())
+//RS     print(counted_step_exit())
+//RS     print(value_if_exit())
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("tir_loop_values", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "[2, 4, 6]\n[11, 21, 12]\n3\n9\n11\n12\n13\n14\n15\n16\n"
+//RS     );
+//RS }
+//RS 
+//RS /// D-LOOP-COMMA1=A/D-LOOP-ADVANCE2/D-LOOP-CONTROLWORD1: every multi-clause loop
+//RS /// header separates its clauses with commas, source/stride expressions run once,
+//RS /// and `next` enters the target loop's advancement edge. D-LOOP-HEADER3=D retired
+//RS /// the C-style counter header, so mutable state advances in the body and a
+//RS /// counted walk uses a source range.
+//RS #[test]
+//RS fn unified_loop_headers_stride_and_next_edges() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn source() -> [Int] {
+//RS     print("source")
+//RS     return [0, 1, 2, 3, 4, 5, 6]
+//RS }
+//RS 
+//RS fn stride() -> Int {
+//RS     print("stride")
+//RS     return 3
+//RS }
+//RS 
+//RS fn run() {
+//RS     loop item in source(), stride() {
+//RS         print(item)
+//RS         if item == 0 { next }
+//RS     }
+//RS 
+//RS     outer :: loop i in 0..<3 {
+//RS         loop {
+//RS             if i < 2 { next(outer) }
+//RS             break
+//RS         }
+//RS         print("state {i}")
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("tir_unified_loops", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "source\nstride\n0\n3\n6\nstate 2\n");
+//RS 
+//RS     let invalid = r#"
+//RS fn source() -> [Int] {
+//RS     print("source")
+//RS     return [1]
+//RS }
+//RS fn stride() -> Int {
+//RS     print("stride")
+//RS     return 0
+//RS }
+//RS fn run() {
+//RS     loop item in source(), stride() {
+//RS         print(item)
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) =
+//RS         build_and_run_full("jet_tir_test", "tir_unified_loop_invalid_stride", invalid);
+//RS     assert_eq!(code, 70);
+//RS     assert_eq!(stdout, "source\nstride\n", "no source item may be pulled");
+//RS     assert!(stderr.contains("E0123: loop stride must be positive"));
+//RS }
+//RS 
+//RS // --- c109 Phase 3: structs --------------------------------------------------
+//RS 
+//RS /// Struct literal, a struct-typed param with scalar field reads (borrow
+//RS /// position — no clone), a struct return value, and a struct-typed local. All
+//RS /// of `sum_pt`, `origin`, and `main` are inside the subset, so all route
+//RS /// through the TIR. The scalar field-read arithmetic (`p.x + p.y`) must NOT
+//RS /// overflow-trap: the old emitter baseline left this field operand unresolved,
+//RS /// so the plain `+` was used — the TIR reproduces that parity exactly.
+//RS #[test]
+//RS fn struct_literal_field_read_and_return() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Point {
+//RS     x: Int
+//RS     y: Int
+//RS }
+//RS fn sum_pt(p: Point) -> Int {
+//RS     return (p.x + p.y)
+//RS }
+//RS fn origin() -> Point {
+//RS     return Point{ x: 0, y: 0 }
+//RS }
+//RS fn run() {
+//RS     p :: Point{ x: 3, y: 4 }
+//RS     print(sum_pt(p))
+//RS     print(p.x)
+//RS     o :: origin()
+//RS     print(sum_pt(o))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_struct_pt", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "7\n3\n0\n");
+//RS }
+//RS 
+//RS /// A String struct field read in interpolation (a borrow-position read, so no
+//RS /// clone is inserted) plus a struct literal whose String field is moved from an
+//RS /// owned local. `describe` and `main` both route through the TIR.
+//RS #[test]
+//RS fn struct_string_field_in_interpolation() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Person {
+//RS     name: String
+//RS     age: Int
+//RS }
+//RS fn describe(p: Person) {
+//RS     print(\"{p.name} is {p.age}\")
+//RS }
+//RS fn run() {
+//RS     label :: \"Ada\"
+//RS     p :: Person{ name: label, age: 36 }
+//RS     describe(p)
+//RS     print(p.age)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_struct_person", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "Ada is 36\n36\n");
+//RS }
+//RS 
+//RS /// Nested struct: a struct field whose type is itself a covered struct. Both the
+//RS /// nested literal (`Outer.{ inner: Inner { … }, … }`) and the chained field read
+//RS /// (`o.inner.v`) are covered, so `deep` and `main` route through the TIR.
+//RS #[test]
+//RS fn nested_struct_literal_and_chained_field() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Inner {
+//RS     v: Int
+//RS }
+//RS struct Outer {
+//RS     inner: Inner
+//RS     label: Int
+//RS }
+//RS fn deep(o: Outer) -> Int {
+//RS     return (o.inner.v + o.label)
+//RS }
+//RS fn run() {
+//RS     o :: Outer{ inner: Inner{ v: 10 }, label: 5 }
+//RS     print(deep(o))
+//RS     print(o.inner.v)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_struct_nested", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "15\n10\n");
+//RS }
+//RS 
+//RS // --- c109 Phase 4: enums + when/match + patterns ----------------------------
+//RS 
+//RS /// A unit-variant enum, enum literals (`Light.Red` etc.), and two exhaustive
+//RS /// variant matches (the `_ => unreachable!` fallthrough is dead but mandatory).
+//RS /// `next`, `label`, and `main` (an enum-typed local + covered helper calls) all
+//RS /// route through the TIR. Mirrors Examples/features/types/enums.jet.
+//RS #[test]
+//RS fn enum_unit_variants_and_exhaustive_match() {
+//RS     let src = "\
+//RS enum Light {
+//RS     Red
+//RS     Yellow
+//RS     Green
+//RS }
+//RS fn next(light: Light) -> Light {
+//RS     if light == {
+//RS         .Red -> { return Light.Yellow }
+//RS         .Yellow -> { return Light.Green }
+//RS         .Green -> { return Light.Red }
+//RS     }
+//RS }
+//RS fn label(light: Light) -> String {
+//RS     if light == {
+//RS         .Red -> { return \"stop\" }
+//RS         .Yellow -> { return \"caution\" }
+//RS         .Green -> { return \"go\" }
+//RS     }
+//RS }
+//RS fn run() {
+//RS     start :: Light.Red
+//RS     print(label(start))
+//RS     print(label(next(start)))
+//RS }
+//RS ";
+//RS     assert_tiers_agree("tir_enum_unit", src, "stop\ncaution\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn data_tree_pattern_dispatch_binds_payload_and_wildcard_on_all_tiers() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn classify(tree: DataTree) -> String {
+//RS     if tree == {
+//RS         .Object(entries) -> { return "object:{entries.len()}" }
+//RS         .Int(_) -> { return "int" }
+//RS         else -> { return "other" }
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(classify(DataTree.Object(["a": DataTree.Int(7)])))
+//RS     print(classify(DataTree.Int(3)))
+//RS     print(classify(DataTree.Text("x")))
+//RS }
+//RS "#;
+//RS     let (aot_code, aot_stdout) = build_and_run("tir_data_tree_pattern_dispatch", src);
+//RS     assert_eq!(aot_code, 0);
+//RS     assert_eq!(aot_stdout, "object:1\nint\nother\n");
+//RS 
+//RS     let (default_code, default_stdout, stderr) = jit_run("tir_data_tree_pattern_dispatch", src);
+//RS     assert_eq!(default_code, 0, "default tier failed: {stderr}");
+//RS     assert_eq!(default_stdout, "object:1\nint\nother\n", "{stderr}");
+//RS }
+//RS 
+//RS /// Alternatives share one payload binding; sibling arms may reuse that name
+//RS /// for another payload type without sharing its storage.
+//RS #[test]
+//RS fn enum_payload_or_pattern_and_binding() {
+//RS     let src = "\
+//RS enum Conn {
+//RS     Active(Int)
+//RS     Reconnecting(Int)
+//RS     Blocked(String)
+//RS     Idle(Int)
+//RS     Closed
+//RS }
+//RS fn describe(c: Conn) -> String {
+//RS     if c == {
+//RS         .Active(id) | .Reconnecting(id) -> { return \"live:{id}\" }
+//RS         .Blocked(id) -> { return \"blocked:{id}\" }
+//RS         .Idle(_) -> { return \"idle\" }
+//RS         .Closed -> { return \"closed\" }
+//RS     }
+//RS     return \"unknown\"
+//RS }
+//RS fn run() {
+//RS     print(describe(Conn.Active(42)))
+//RS     print(describe(Conn.Reconnecting(7)))
+//RS     print(describe(Conn.Blocked(\"waiting\")))
+//RS     print(describe(Conn.Idle(99)))
+//RS     print(describe(Conn.Closed))
+//RS }
+//RS ";
+//RS     assert_tiers_agree(
+//RS         "tir_enum_payload",
+//RS         src,
+//RS         "live:42\nlive:7\nblocked:waiting\nidle\nclosed\n",
+//RS     );
+//RS }
+//RS 
+//RS /// S83 / D-CHOOSE-HEADS1=A: multi-head declarations lower to the same TIR
+//RS /// enum table used by ordinary `if subject == { … }` dispatch.
+//RS #[test]
+//RS fn multi_head_functions_use_table_dispatch() {
+//RS     assert!(
+//RS         have_rustc(),
+//RS         "multi-head AOT parity requires rustc; project harness must provision it"
+//RS     );
+//RS     let src = "\
+//RS enum Shape {
+//RS     Circle(Float)
+//RS     Rect(w: Float, h: Float)
+//RS }
+//RS fn area(Circle(r: Float)) -> Float {
+//RS     return r * r
+//RS }
+//RS fn area(Rect(w: Float, h: Float)) -> Float {
+//RS     return w * h
+//RS }
+//RS fn run() {
+//RS     print(area(Shape.Circle(3.0)))
+//RS     print(area(.Rect{ w: 2.0, h: 4.0 }))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_multi_head_functions", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "9.0\n8.0\n");
+//RS }
+//RS 
+//RS /// A range pattern in a *payload* slot (`Good(200..299)`, lowered to a match-arm
+//RS /// guard) alongside wildcard slots, all over an exhaustive enum match.
+//RS #[test]
+//RS fn enum_payload_range_pattern_guard() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS enum HTTP {
+//RS     Good(Int)
+//RS     Fail(Int)
+//RS }
+//RS fn classify(r: HTTP) -> String {
+//RS     if r == {
+//RS         .Good(200..299) -> { return \"success\" }
+//RS         .Good(400..499) -> { return \"client error\" }
+//RS         .Good(_) -> { return \"other\" }
+//RS         .Fail(_) -> { return \"network error\" }
+//RS     }
+//RS     return \"unknown\"
+//RS }
+//RS fn run() {
+//RS     print(classify(HTTP.Good(201)))
+//RS     print(classify(HTTP.Good(404)))
+//RS     print(classify(HTTP.Good(302)))
+//RS     print(classify(HTTP.Fail(0)))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_enum_range", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "success\nclient error\nother\nnetwork error\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn datatree_array_accepts_explicit_empty_payload_on_all_tiers() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     _value := DataTree.Array([DataTree]{})
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_datatree_empty_array_payload", src, "");
+//RS }
+//RS 
+//RS /// An arm-head range dispatch over a scalar subject with an `else` (the mixed-dispatch
+//RS /// `if/else if … else` lowering, with the parity `__jet_switch_subject` binding).
+//RS /// Mirrors Examples/features/basics/pattern_matching.jet's `score_grade`.
+//RS #[test]
+//RS fn arm_head_range_dispatch() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn grade(score: Int) -> String {
+//RS     if score == {
+//RS         0..59 -> { return \"F\" }
+//RS         60..69 -> { return \"D\" }
+//RS         70..89 -> { return \"C\" }
+//RS         90..100 -> { return \"A\" }
+//RS         else -> { return \"?\" }
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(grade(95))
+//RS     print(grade(72))
+//RS     print(grade(45))
+//RS     print(grade(120))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_range_dispatch", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "A\nC\nF\n?\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn literal_dispatch_emits_nested_comparisons_and_preserves_order() {
+//RS     let table = compile(
+//RS         "tir_branch_table",
+//RS         r#"
+//RS fn dense(n: Int) -> String {
+//RS     if n == {
+//RS         1 -> { return "one" }
+//RS         2 -> { return "two" }
+//RS         3 -> { return "three" }
+//RS         else -> { return "other" }
+//RS     }
+//RS }
+//RS fn sparse(n: Int) -> String {
+//RS     if n == {
+//RS         1 -> { return "one" }
+//RS         100 -> { return "hundred" }
+//RS         else -> { return "other" }
+//RS     }
+//RS }
+//RS fn truth(flag: Bool) -> String {
+//RS     if flag == {
+//RS         true -> { return "yes" }
+//RS         false -> { return "no" }
+//RS         else -> { return "no" }
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(dense(1))
+//RS     print(sparse(100))
+//RS     print(truth(true))
+//RS }
+//RS "#,
+//RS     );
+//RS     // Ordinary literal arms use the current nested comparison lowering. Keep
+//RS     // the assertions tied to emitted comparisons, not to retired classifier
+//RS     // comments or a Rust `match` shape.
+//RS     let dense = table
+//RS         .split("pub fn __jet_dense")
+//RS         .nth(1)
+//RS         .expect("dense dispatch function should be emitted");
+//RS     let dense_needles = [
+//RS         "jet_int_compare_hot!((__jet_n), (1i64)) == 0",
+//RS         "jet_int_compare_hot!((__jet_n), (2i64)) == 0",
+//RS         "jet_int_compare_hot!((__jet_n), (3i64)) == 0",
+//RS     ];
+//RS     let dense_positions = dense_needles
+//RS         .iter()
+//RS         .map(|needle| dense.find(needle).expect("dense arm comparison was removed"))
+//RS         .collect::<Vec<_>>();
+//RS     assert!(
+//RS         dense_positions.windows(2).all(|pair| pair[0] < pair[1]),
+//RS         "dense comparisons changed authored order: {table}"
+//RS     );
+//RS     let sparse = table
+//RS         .split("pub fn __jet_sparse")
+//RS         .nth(1)
+//RS         .expect("sparse dispatch function should be emitted");
+//RS     let sparse_one = sparse
+//RS         .find("jet_int_compare_hot!((__jet_n), (1i64)) == 0")
+//RS         .expect("sparse first arm comparison was removed");
+//RS     let sparse_hundred = sparse
+//RS         .find("jet_int_compare_hot!((__jet_n), (100i64)) == 0")
+//RS         .expect("sparse second arm comparison was removed");
+//RS     assert!(
+//RS         sparse_one < sparse_hundred,
+//RS         "sparse comparisons changed authored order: {table}"
+//RS     );
+//RS     let truth = table
+//RS         .split("pub fn __jet_truth")
+//RS         .nth(1)
+//RS         .expect("Bool dispatch function should be emitted");
+//RS     let truth_true = truth
+//RS         .find("((__jet_flag) == (true))")
+//RS         .expect("Bool true comparison was removed");
+//RS     let truth_false = truth
+//RS         .find("((__jet_flag) == (false))")
+//RS         .expect("Bool false comparison was removed");
+//RS     assert!(
+//RS         truth_true < truth_false,
+//RS         "Bool comparisons changed authored order: {table}"
+//RS     );
+//RS 
+//RS     let ordered = compile(
+//RS         "tir_branch_ordered",
+//RS         r#"
+//RS fn subject() -> Int { return 7 }
+//RS fn run() {
+//RS     if subject() == {
+//RS         0..3 -> { print("low") }
+//RS         4..9 -> { print("mid") }
+//RS         42 -> { print("answer") }
+//RS         else -> { print("other") }
+//RS     }
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(
+//RS         ordered.contains("let __jet___switch_subject"),
+//RS         "dispatch subject was not retained once: {ordered}"
+//RS     );
+//RS     assert!(
+//RS         ordered.contains("__jet___switch_subject"),
+//RS         "conditions must reuse the evaluated subject: {ordered}"
+//RS     );
+//RS     assert_eq!(
+//RS         ordered.matches("jet_trace_err(__jet_subject()").count(),
+//RS         1,
+//RS         "branch subject was evaluated more than once: {ordered}"
+//RS     );
+//RS     assert!(
+//RS         !ordered.contains("__jet___switch_subject.clone()"),
+//RS         "branch dispatch must not clone its subject: {ordered}"
+//RS     );
+//RS }
+//RS 
+//RS /// D-OPERATOR-ABI1 / I9: user arithmetic hooks use the same raw owner-value
+//RS /// ABI for AOT, resident JIT, and the forced TIR interpreter. Assignment
+//RS /// compound syntax must route through the same `Add` hook as binary `+`.
+//RS #[test]
+//RS fn user_arithmetic_hooks_preserve_values_on_all_tiers() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS struct Money { cents: Int }
+//RS 
+//RS impl Money.Add {
+//RS     fn add(self, rhs: Money) -> Money {
+//RS         return Money{ cents: self.cents + rhs.cents }
+//RS     }
+//RS }
+//RS impl Money.Sub {
+//RS     fn sub(self, rhs: Money) -> Money {
+//RS         return Money{ cents: self.cents - rhs.cents }
+//RS     }
+//RS }
+//RS impl Money.Mul {
+//RS     fn mul(self, rhs: Money) -> Money {
+//RS         return Money{ cents: self.cents * rhs.cents }
+//RS     }
+//RS }
+//RS impl Money.Div {
+//RS     fn div(self, rhs: Money) -> Money {
+//RS         return Money{ cents: self.cents /% rhs.cents }
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     base :: Money{ cents: 8 }
+//RS     add :: base + Money{ cents: 2 }
+//RS     sub :: base - Money{ cents: 2 }
+//RS     mul :: base * Money{ cents: 2 }
+//RS     div :: base / Money{ cents: 2 }
+//RS     compound := Money{ cents: 8 }
+//RS     compound += Money{ cents: 2 }
+//RS     print("{add.cents} {sub.cents} {mul.cents} {div.cents} {compound.cents}")
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_user_arithmetic_hooks", src, "10 6 16 4 10\n");
+//RS }
+//RS 
+//RS /// Hardening finding lane-7/labeled-break-aot-ice (card #2841): tier-parity regression fixture.
+//RS #[test]
+//RS fn card_2841_labeled_loop_value_tier_parity() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     outer :: loop {
+//RS         loop {
+//RS             break(outer, 7)
+//RS         }
+//RS     }
+//RS     answer :: outer ?? 0
+//RS     print(answer)
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_card_2841_labeled_loop_value", src, "7\n");
+//RS }
+//RS 
+//RS /// Hardening finding lane-7/negative-range-stride-aot-drift (card #2834): tier-parity regression fixture.
+//RS #[test]
+//RS fn card_2834_negative_stride_tier_parity() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     total := 0
+//RS     loop i in 5..1, -2 {
+//RS         total += i
+//RS     }
+//RS     print(total)
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_card_2834_negative_stride", src, "9\n");
+//RS }
+// END-PORT-PENDING 1172 tests/tir_control_and_data.rs:1821-2568
+
+// PORT-PENDING 1172 tests-tir-control-and-data-module-group-slice-1821: tests/tir_data_math_reactive.rs:1-327
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! TIR data math reactive integration tests.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS 
+//RS use tir_support::{build_and_run, have_rustc};
+//RS 
+//RS // --- D-SOA1 / D-SOA2A-D: `#Layout(columnar)` struct-of-arrays --------------
+//RS 
+//RS /// Compile a program to Rust (front end only) for source-level assertions.
+//RS fn compile_rust(name: &str, src: &str) -> String {
+//RS     let dir = std::env::temp_dir().join(format!("jet_tir_test_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let jet_path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&jet_path, src).unwrap();
+//RS     let shown = jet_path.to_string_lossy().into_owned();
+//RS     jet::compile_with_path(src, &shown)
+//RS         .unwrap_or_else(|diags| {
+//RS             panic!(
+//RS                 "front end rejected:\n{}",
+//RS                 jet::render_diagnostics(&shown, src, &diags)
+//RS             )
+//RS         })
+//RS         .rust
+//RS }
+//RS 
+//RS const COLUMNAR_PROG: &str = "\
+//RS #Layout(columnar)
+//RS struct P {
+//RS     x: Float
+//RS     mass: Float
+//RS }
+//RS fn total(ps: [P]) -> Float {
+//RS     s := Float{0.0}
+//RS     loop p in ps {
+//RS         s = s + p.mass
+//RS     }
+//RS     return s
+//RS }
+//RS fn particle_energy(ps: [P]) -> Float {
+//RS     total := Float{0.0}
+//RS     loop i in 0..<ps.len() {
+//RS         total += ps[i].x * ps[i].mass
+//RS     }
+//RS     return total
+//RS }
+//RS 
+//RS fn run() {
+//RS     ps := [P]{ P{ x: 0.0, mass: 1.0 }, P{ x: 1.0, mass: 2.0 } }
+//RS     ps.push(P{ x: 2.0, mass: 3.0 })
+//RS     print(ps.len())
+//RS     print(ps[2].x)
+//RS     print(ps[1].mass)
+//RS     print(total(ps))
+//RS     print(particle_energy(ps))
+//RS }
+//RS ";
+//RS 
+//RS /// The whole columnar surface (construct, push, len, index-read, field-read,
+//RS /// iterate) compiles and runs with AoS-identical behavior.
+//RS #[test]
+//RS fn columnar_list_core_surface_runs() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let (code, stdout) = build_and_run("tir_columnar_core", COLUMNAR_PROG);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "3\n2.0\n2.0\n6.0\n8.0\n");
+//RS }
+//RS 
+//RS /// Codegen emits the struct-of-arrays storage type and routes the list ops
+//RS /// through it — and emits ZERO `unsafe` (I1 golden grep).
+//RS #[test]
+//RS fn columnar_lowers_to_struct_of_arrays_no_unsafe() {
+//RS     let rust = compile_rust("tir_columnar_gen", COLUMNAR_PROG);
+//RS     assert!(
+//RS         rust.contains("struct __jet_P_columns"),
+//RS         "expected a generated struct-of-arrays type"
+//RS     );
+//RS     assert!(
+//RS         rust.contains("from_aos") && rust.contains("gather_at") && rust.contains("iter_aos"),
+//RS         "expected the columnar inherent API in the output"
+//RS     );
+//RS     // I1: no `unsafe` anywhere in generated columnar code.
+//RS     assert!(
+//RS         !tir_support::strip_vetted_prelude_modules(&rust).contains("unsafe"),
+//RS         "columnar codegen must emit no `unsafe`"
+//RS     );
+//RS }
+//RS 
+//RS /// D-SOA2D: serialization is transparent — a columnar `[S]` encodes identically
+//RS /// to the array-of-structs form.
+//RS #[test]
+//RS fn columnar_serialization_is_transparent() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.encoding.json as json
+//RS #[Codable, Layout(columnar)]
+//RS struct Pt { a: Int, b: Int }
+//RS #Codable
+//RS struct PlainPt { a: Int, b: Int }
+//RS fn run() {
+//RS     cs :: [Pt]{ Pt{ a: 1, b: 2 }, Pt{ a: 3, b: 4 } }
+//RS     ps :: [PlainPt]{ PlainPt{ a: 1, b: 2 }, PlainPt{ a: 3, b: 4 } }
+//RS     print(json.to_string(cs) == json.to_string(ps))
+//RS     print(json.to_string(cs))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_columnar_serde", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "true\n[{\"a\":1,\"b\":2},{\"a\":3,\"b\":4}]\n");
+//RS }
+//RS 
+//RS /// D-LINALG1: vector + matrix math (constructors, dot/cross, operators,
+//RS /// matrix-vector transform) compiles and runs with the right results.
+//RS #[test]
+//RS fn linalg_vectors_and_matrices() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS a :: Vec3(1.0, 2.0, 3.0)
+//RS b :: Vec3(4.0, 5.0, 6.0)
+//RS     print(a.dot(b))
+//RS c :: Vec3{ a + b }
+//RS     print(c.to_array())
+//RS     print(a.cross(b).to_array())
+//RS scale :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+//RS out :: Vec3{ scale * a }
+//RS     print(out.to_array())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_linalg", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "32.0\n[5.0, 7.0, 9.0]\n[-3.0, 6.0, -3.0]\n[2.0, 4.0, 6.0]\n"
+//RS     );
+//RS }
+//RS 
+//RS /// D-SIMD2: SIMD lane construction, element-wise operators, splat, lane index,
+//RS /// reductions (named + `reduce(.Op)`), and the `[F32#4]` array bridge.
+//RS #[test]
+//RS fn simd_lanes_ops_and_reductions() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS v :: F32x4(1.0, 2.0, 3.0, 4.0)
+//RS w :: F32x4(10.0, 20.0, 30.0, 40.0)
+//RS s :: F32x4{ v + w }
+//RS     print(s.to_array())
+//RS     print(v[2])
+//RS     print(v.sum())
+//RS     print(v.reduce(.Max))
+//RS     print(v.reduce(.Mul))
+//RS     print(v.reduce(.Avg))
+//RS     print(F32x4.splat(5.0).to_array())
+//RS d :: F64x2.from_array([1.5, 2.5])
+//RS     print(d.sum())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_simd", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "[11.0, 22.0, 33.0, 44.0]\n3.0\n10.0\n4.0\n24.0\n2.5\n[5.0, 5.0, 5.0, 5.0]\n4.0\n"
+//RS     );
+//RS }
+//RS 
+//RS /// A user struct named `Vec3` (a built-in math name) keeps its own semantics —
+//RS /// the built-in family yields to user types (no silent hijack).
+//RS #[test]
+//RS fn user_type_shadows_builtin_math_name() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Vec3 { x: Int, y: Int }
+//RS fn run() {
+//RS     v :: Vec3{ x: 3, y: 4 }
+//RS     print(v.x)
+//RS     print(v.y)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_user_vec3", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "3\n4\n");
+//RS }
+//RS 
+//RS /// D-REACT1=B: a signal + derived + effect reactive flow. A signal change
+//RS /// recomputes the derived and re-runs the effect (a real reactive update).
+//RS #[test]
+//RS fn reactive_signal_derived_effect() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.reactive as reactive
+//RS fn run() {
+//RS     n := reactive.signal(1)
+//RS     doubled := reactive.derived(() -> (n.get() * 2))
+//RS     print(doubled.get())
+//RS     subscription := reactive.effect(() -> {
+//RS         print(doubled.get())
+//RS     })
+//RS     n.set(5)
+//RS     print(doubled.get())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_reactive_flow", src);
+//RS     assert_eq!(code, 0, "reactive program should run cleanly");
+//RS     // initial derived (2), effect runs now (2), effect re-runs on set (10),
+//RS     // final direct read (10).
+//RS     assert_eq!(stdout, "2\n2\n10\n10\n");
+//RS }
+//RS 
+//RS /// D-REACTCORE1 + D-SIGNAL1: `#Reactive { … }` and `reactive.computed`.
+//RS #[test]
+//RS fn reactive_scope_marker() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.reactive as reactive
+//RS fn run() {
+//RS     n := reactive.signal(1)
+//RS     doubled := reactive.computed(() -> (n.get() * 2))
+//RS     print(doubled.get())
+//RS     #Reactive {
+//RS         print(doubled.get())
+//RS     }
+//RS     n.set(5)
+//RS     print(doubled.get())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_reactive_scope", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "2\n2\n10\n10\n");
+//RS }
+//RS 
+//RS /// D-REACT1=B: a `Signal<String>` carries non-numeric data; `.set` notifies a
+//RS /// derived that concatenates it.
+//RS #[test]
+//RS fn reactive_string_signal() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.reactive as reactive
+//RS fn run() {
+//RS     name := reactive.signal(\"world\")
+//RS     greeting := reactive.derived(() -> \"hello, {name.get()}\")
+//RS     print(greeting.get())
+//RS     name.set(\"jet\")
+//RS     print(greeting.get())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_reactive_string", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "hello, world\nhello, jet\n");
+//RS }
+//RS 
+//RS /// Each effect run owns exactly its current dependency set. Switching branches
+//RS /// must detach the old signal, not leave a stale subscription behind.
+//RS #[test]
+//RS fn reactive_effect_replaces_stale_dependencies() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.reactive as reactive
+//RS fn run() {
+//RS     choose_left := reactive.signal(true)
+//RS     left := reactive.signal(1)
+//RS     right := reactive.signal(10)
+//RS     subscription := reactive.effect(() -> {
+//RS         if choose_left.get() {
+//RS             print(left.get())
+//RS         } else {
+//RS             print(right.get())
+//RS         }
+//RS     })
+//RS     choose_left.set(false)
+//RS     left.set(2)
+//RS     right.set(11)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_reactive_effect_stale_deps", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "1\n10\n11\n");
+//RS }
+//RS 
+//RS /// D-EFFECT-LIFECYCLE1=A: effects are retained values with the same explicit
+//RS /// lifecycle vocabulary as event subscriptions. Cleanup is idempotent.
+//RS #[test]
+//RS fn reactive_effect_unsubscribe_and_activity() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.reactive as reactive
+//RS fn run() {
+//RS     value := reactive.signal(1)
+//RS     subscription := reactive.effect(() -> {
+//RS         print(value.get())
+//RS     })
+//RS     print(subscription.is_active())
+//RS     value.set(2)
+//RS     subscription.unsubscribe()
+//RS     print(subscription.is_active())
+//RS     subscription.unsubscribe()
+//RS     value.set(3)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_reactive_effect_lifecycle", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "1\ntrue\n2\nfalse\n");
+//RS }
+// END-PORT-PENDING 1172 tests/tir_data_math_reactive.rs:1-327
+

@@ -1,0 +1,34 @@
+// Rust Loader.rs::package_run_member (3253-3271). The canonical inward
+// AuthorityResolver captures/open-discover-reads once with held native handles;
+// Driver neither reopens paths nor invents discovery order. Real Core native
+// retained-descriptor publication remains a source gate (#4494/#4392/#4483).
+use core.files.runtime.kernel_path_components as package_run_path
+use jet_pkg_model.[AuthorityResolver]
+use jet_lexer.[lex]
+use jet_parser.[parse_with_source]
+
+// The pure fragment consumes the SAME checked-file text retained by the
+// authority owner. Strict parsing rejects teaching errors; lexer diagnostics
+// must be entirely empty, exactly like the original selector.
+fn jet_driver_package_run_source(source: String) -> Bool {
+    lexed :: lex(source.bytes())
+    if lexed.diagnostics.len() != 0 -> return false
+    parsed :: parse_with_source(lexed.tokens, source.bytes())
+    program :: parsed.program ?? return false
+    loop item in program.items {
+        if item == .Func(function) && function.name == "run" -> return true
+    }
+    false
+}
+
+pub fn jet_driver_package_run_member(root: package_run_path.OsPath) -[FS, Env]> package_run_path.OsPath? Never! {
+    resolver :: AuthorityResolver.open(root) ?? return None
+    files :: resolver.discover_source_files() ?? return None
+    loop file in files {
+        name :: package_run_path.file_name_span(file.relative)
+        if name == .Val(span) && file.relative.encoded[span.start..<span.end] == "package.jet".bytes() -> next
+        source :: file.text() ?? next
+        if jet_driver_package_run_source(source) -> return Val(file.path)
+    }
+    None
+}

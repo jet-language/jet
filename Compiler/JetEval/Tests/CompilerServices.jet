@@ -1,0 +1,13 @@
+// Rust Source/Compiler.rs:15-16 and compiler_source_map's schema projection.
+use jet_eval.[API_VERSION, SCHEMA_VERSION, jet_eval_compiler_services_source_map]
+use jet_foundation.TComptimeValue
+#Test("compiler service versions have one public source authority") {
+    assert_eq(API_VERSION, 1)
+    assert_eq(SCHEMA_VERSION, 1)
+    facts :: jet_eval_compiler_services_source_map("fn run() {{}}\n")
+    if facts.value == .Struct(name, fields) {
+        assert_eq(name, "CompilerSourceMap")
+        assert_eq(fields[0].name, "schema_version")
+        assert_eq(fields[0].value, TComptimeValue.Int{value: SCHEMA_VERSION})
+    } else { assert(false) }
+}

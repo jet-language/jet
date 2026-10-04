@@ -1,0 +1,220 @@
+// Real checked-loader producer witness: original inline nesting, exact loaded
+// membership including a symbol-free module, and a canonical interface consumer.
+// Native OS-path graph composition is separately gated; no text-path substitute.
+use jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileRequest, JetDriverCompileTarget, JetDriverHostFacts, JetDriverCompilerCheckInput, JetDriverCompilerCheckResult, jet_driver_compiler_check, jet_driver_compiler_check_loaded_module_rows, jet_driver_compiler_package_bundle, jet_driver_embedded_core_sources]
+use jet_eval.[JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse, jet_eval_default_config]
+use jet_foundation.[CanonicalASTParsedDefaults, CompilerPackageKind, PackageIdentityOsPaths, PackageKeySourceFile, compiler_package_graph, compiler_package_of, compiler_package_components, compiler_package_source_digest, compiler_package_interface_digest, package_key_source_digest, package_identity_project_module, record_blob_key, foundation_embedded_core]
+use jet_parser.[parse_source]
+use jet_foundation.[BuildStamp]
+use jet_foundation.[MIRTargetDossier, MIRRuntimeLayer, BuildFactValue, FactContribution, FactValue, SourceScope, ContributionLayer, fact_contribution_new, package_key_target_facts_digest, package_key_check_key, package_identity_target_fact_pairs, build_snapshot_check_debug_bytes]
+use jet_driver.[JetDriverTargetFactError, jet_driver_compiler_target_fact_bundle, jet_driver_compiler_target_fact_pairs]
+use jet_foundation.[MIRArtifactBuildMode, pkg_release_policy_development]
+use jet_codegen.[jet_web_assets_with_default_shell]
+use core.files.runtime.kernel_path_components as package_identity_producer_paths
+// Explicit fixture encoding, never a conversion of retained loader display text.
+fn package_identity_producer_path(text: String) -> package_identity_producer_paths.OsPath Never! {
+    package_identity_producer_paths.from_text(text, package_identity_producer_paths.PathPlatform.Unix)
+}
+fn package_identity_producer_request(source: String, load_core: Bool{false}) -> JetDriverCompileRequest Never! {
+    files :: [JetDriverAuthorizedSourceFile]{
+        JetDriverAuthorizedSourceFile{path: package_identity_producer_path("/identity/Main.jet"), relative_path: package_identity_producer_path("Main.jet"), identity: "identity-main", source: source},
+        JetDriverAuthorizedSourceFile{path: package_identity_producer_path("/identity/empty.jet"), relative_path: package_identity_producer_path("empty.jet"), identity: "identity-empty", source: "// symbol-free loaded module\n"},
+    }
+    core :: foundation_embedded_core()
+    JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: package_identity_producer_path("/identity"), identity: "identity-root", allow_hardlinks: false, files: files, foreign_cache_files: []}}, entry_root_identity: "identity-root", entry_path: package_identity_producer_path("/identity/Main.jet")},
+        canonical_effect_source: core.effect_source(), core_sources: if load_core -> jet_driver_embedded_core_sources(core) else -> [],
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("identity-test"), build_stamp: Val(BuildStamp{git: Val("identity-fixture"), dirty: false, toolchain: "0.1.0", at: "2026-10-03T00:00:00Z"})},
+        eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
+        record_store: None, trace_sink: None, mir_lint_every_pass: false,
+    }
+}
+fn package_identity_producer_check(source: String) -> JetDriverCompilerCheckResult {
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: source})}) ?? panic("producer fixture parser failed")
+    jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: package_identity_producer_request(source)})
+}
+#Test("package identity uses original inline AST and symbol-free real loader order") {
+    source :: "module empty\npub module API { pub fn f() -> Int { return 1 } fn hidden() -> Int { return 3 } }\nfn run() {}\n"
+    result :: package_identity_producer_check(source)
+    assert_eq(result.internal_problem, None)
+    assert(result.complete)
+    facts :: result.package_identity ?? panic("original loader projection absent")
+    rows :: jet_driver_compiler_check_loaded_module_rows(result)
+    assert_eq(rows.len(), 2)
+    main_source :: result.module_sources[rows[0]]
+    empty_source :: result.module_sources[rows[1]]
+    assert_eq(result.project_root, Val(package_identity_producer_path("/identity")))
+    assert_eq(main_source.loaded_module_index, Val(0))
+    assert_eq(main_source.physical_path, Val(package_identity_producer_path("/identity/Main.jet")))
+    assert_eq(main_source.loaded_source, source)
+    assert_eq(empty_source.loaded_module_index, Val(1))
+    assert_eq(empty_source.physical_path, Val(package_identity_producer_path("/identity/empty.jet")))
+    assert_eq(empty_source.loaded_source, "// symbol-free loaded module\n")
+    assert_eq(facts.interfaces.len(), 2)
+    assert_eq(facts.interfaces[1].declarations.len(), 0)
+    assert_eq(facts.interfaces[0].declarations.len(), 1)
+    assert_eq(facts.interfaces[0].declarations[0].name, "module API")
+    original :: parse_source(source.bytes())
+    assert_eq(original.diagnostics.len(), 0)
+    expected :: package_identity_project_module<CanonicalASTParsedDefaults>(original.program, CanonicalASTParsedDefaults.Parsed)
+    assert_eq(facts.interfaces[0], expected)
+    assert_eq(facts.modules.len(), 2)
+    assert(!facts.modules[0].is_core_source)
+    assert(!facts.modules[1].is_core_source)
+    raw_source :: source.bytes()
+    assert_eq(facts.modules[0].source_digest, record_blob_key(raw_source.view(0..<raw_source.len())))
+    assert_eq(facts.imports.len(), 1)
+    assert_eq(facts.imports[0].from, 0)
+    assert_eq(facts.imports[0].to, 1)
+    bundle :: jet_driver_compiler_package_bundle(result) ?? panic("actual loader bundle facts missing")
+    graph :: compiler_package_graph<PackageIdentityOsPaths>(bundle, PackageIdentityOsPaths.Components)
+    assert_eq(graph.packages.len(), 2)
+    assert_eq(graph.packages[0].identity, "file:Main.jet")
+    assert_eq(graph.packages[0].modules, [Int]{0})
+    assert_eq(graph.packages[1].identity, "file:empty.jet")
+    assert_eq(graph.packages[1].modules, [Int]{1})
+    assert_eq(graph.packages[0].dependencies, [Int]{1})
+    assert_eq(compiler_package_components(graph), [[Int]]{[Int]{1}, [Int]{0}})
+    source_digest :: compiler_package_source_digest<PackageIdentityOsPaths>(graph, bundle, 0, None, PackageIdentityOsPaths.Components)
+    assert_eq(source_digest, package_key_source_digest([PackageKeySourceFile]{PackageKeySourceFile{relative_path: "Main.jet", source: source.bytes()}}, None))
+    interface_digest :: compiler_package_interface_digest<PackageIdentityOsPaths>(graph, bundle, 0, [String:String]{}, PackageIdentityOsPaths.Components)
+    changed :: package_identity_producer_check("module empty\npub module API { pub fn f() -> Int { return 2 } fn hidden() -> Int { return 4 } }\nfn run() {}\n")
+    assert(changed.complete)
+    changed_facts :: changed.package_identity ?? panic("changed loader projection absent")
+    assert_eq(changed_facts.interfaces[0], facts.interfaces[0])
+    changed_bundle :: jet_driver_compiler_package_bundle(changed) ?? panic("changed actual bundle absent")
+    changed_graph :: compiler_package_graph<PackageIdentityOsPaths>(changed_bundle, PackageIdentityOsPaths.Components)
+    assert_eq(compiler_package_interface_digest<PackageIdentityOsPaths>(changed_graph, changed_bundle, 0, [String:String]{}, PackageIdentityOsPaths.Components), interface_digest)
+    assert(compiler_package_source_digest<PackageIdentityOsPaths>(changed_graph, changed_bundle, 0, None, PackageIdentityOsPaths.Components) != source_digest)
+    signature :: package_identity_producer_check("module empty\npub module API { pub fn f(x: Int) -> Int { return x } }\nfn run() {}\n")
+    assert(signature.complete)
+    signature_facts :: signature.package_identity ?? panic("signature loader projection absent")
+    assert(signature_facts.interfaces[0] != facts.interfaces[0])
+    signature_bundle :: jet_driver_compiler_package_bundle(signature) ?? panic("signature actual bundle absent")
+    signature_graph :: compiler_package_graph<PackageIdentityOsPaths>(signature_bundle, PackageIdentityOsPaths.Components)
+    assert(compiler_package_interface_digest<PackageIdentityOsPaths>(signature_graph, signature_bundle, 0, [String:String]{}, PackageIdentityOsPaths.Components) != interface_digest)
+}
+
+#Test("real manifest namespace and embedded Core partition share the retained name graph") {
+    source :: "module empty\nuse core.math as math\npub fn answer() -> Int { return math.abs(-1) }\nfn run() {}\n"
+    request := package_identity_producer_request(source, true)
+    manifest :: "name: \"identity\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: Main.run } }\n"
+    &request.authorized_sources.roots[0].files.push(JetDriverAuthorizedSourceFile{path: package_identity_producer_path("/identity/package.jet"), relative_path: package_identity_producer_path("package.jet"), identity: "identity-manifest", source: manifest})
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: source})}) ?? panic("Core producer parser failed")
+    result :: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request})
+    assert_eq(result.internal_problem, None)
+    assert(result.complete)
+    bundle :: jet_driver_compiler_package_bundle(result) ?? panic("real Core/manifest bundle absent")
+    graph :: compiler_package_graph<PackageIdentityOsPaths>(bundle, PackageIdentityOsPaths.Components)
+    assert_eq(bundle.modules.len(), jet_driver_compiler_check_loaded_module_rows(result).len())
+    root_package :: compiler_package_of(graph, 0) ?? panic("entry is not a loaded member")
+    assert_eq(graph.packages[root_package].kind, CompilerPackageKind.Manifest)
+    assert_eq(graph.packages[root_package].identity, "pkg:.")
+    assert_eq(bundle.ledger.namespaces.get(0), Val(package_identity_producer_path("/identity")))
+    core_package := -1
+    loop (index, package) in graph.packages {
+        if package.kind == CompilerPackageKind.Core -> core_package = index
+    }
+    assert(core_package >= 0)
+    assert_eq(graph.packages[core_package].identity, "core")
+    assert(graph.packages[core_package].modules.len() > 0)
+    assert_eq(graph.packages[root_package].dependencies, [Int]{core_package})
+    loop module_index in graph.packages[core_package].modules -> assert(bundle.modules[module_index].is_core_source)
+    // Real exact-byte manifest input and inferred-summary identity reach the consumer.
+    baseline :: compiler_package_interface_digest<PackageIdentityOsPaths>(graph, bundle, root_package, [String:String]{}, PackageIdentityOsPaths.Components)
+    summary :: [String:String]{"pkg:.::Main.jet::answer": "effects:Pure"}
+    assert(compiler_package_interface_digest<PackageIdentityOsPaths>(graph, bundle, root_package, summary, PackageIdentityOsPaths.Components) != baseline)
+    assert(compiler_package_source_digest<PackageIdentityOsPaths>(graph, bundle, root_package, Val(manifest.bytes()), PackageIdentityOsPaths.Components) != compiler_package_source_digest<PackageIdentityOsPaths>(graph, bundle, root_package, None, PackageIdentityOsPaths.Components))
+}
+
+// These native authority inputs are explicit fixture values, never a production
+// fallback. Main's real Host capture/differential Debug oracle remains a gate.
+fn package_identity_target_request() -> JetDriverCompileRequest Never! {
+    request := package_identity_producer_request("fn run() {}\n")
+    request.host_facts.target_dossier = Val(MIRTargetDossier{machine: None, layer: MIRRuntimeLayer.Std, provider_identity: "hosted-default", closure_identity: "prelude-hosted-v1", linker_identity: "hosted-default", tier_identity: "dev", compiler_identity: "0.1.0", environment_identity: "hosted", dependency_identity: "none"})
+    manifest :: "name: \"identity\"\nversion: \"0.1.0\"\nsettings: {{ cache_slots: Int = 3 }}\noutputs: {{ app: .Executable{{ entry: Main.run }} }}\n"
+    &request.authorized_sources.roots[0].files.push(JetDriverAuthorizedSourceFile{path: package_identity_producer_path("/identity/package.jet"), relative_path: package_identity_producer_path("package.jet"), identity: "identity-manifest", source: manifest})
+    request.computed_setting_contributions = [FactContribution]{fact_contribution_new("Build.Settings.cache_slots", FactValue.Int(7), SourceScope.Package, ContributionLayer.CommandLine, "/identity/build.jet")}
+    request
+}
+fn package_identity_target_check(request: JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
+    source :: request.authorized_sources.roots[0].files[0].source
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: source})}) ?? panic("actual target producer parser failed")
+    result :: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request})
+    assert_eq(result.internal_problem, None)
+    assert(result.complete)
+    result
+}
+#Test("checked bundle target producer retains folded settings and excludes only clock provenance") {
+    first :: package_identity_target_check(package_identity_target_request())
+    bundle :: jet_driver_compiler_target_fact_bundle(first) ?? panic("true checked bundle target facts absent")
+    assert_eq(bundle.build_facts.settings["cache_slots"].value, BuildFactValue.Int(7))
+    pairs :: jet_driver_compiler_target_fact_pairs(first) ?? panic("actual producer failed")
+    assert_eq(pairs, package_identity_target_fact_pairs(bundle))
+    assert_eq(pairs.map(pair -> pair.name), [String]{"os", "edition", "web_partition", "layer_ceiling", "build_facts"})
+    request := package_identity_target_request()
+    request.host_facts.build_stamp = Val(BuildStamp{git: Val("identity-fixture"), dirty: false, toolchain: "0.1.0", at: "different native clock"})
+    request.computed_setting_contributions = [FactContribution]{fact_contribution_new("Build.Settings.cache_slots", FactValue.Int(7), SourceScope.Package, ContributionLayer.CommandLine, "/different/checkout/build.jet")}
+    second :: package_identity_target_check(request)
+    second_bundle :: jet_driver_compiler_target_fact_bundle(second) ?? panic("changed true checked bundle target facts absent")
+    assert(second_bundle.build_facts.stamp.at != bundle.build_facts.stamp.at)
+    assert(second_bundle.build_facts.setting_provenance != bundle.build_facts.setting_provenance)
+    assert(second_bundle.build_facts.contributions != bundle.build_facts.contributions)
+    assert_eq(jet_driver_compiler_target_fact_pairs(second) ?? panic("changed producer failed"), pairs)
+    target :: package_key_target_facts_digest(pairs)
+    other_target :: package_key_target_facts_digest(jet_driver_compiler_target_fact_pairs(second) ?? panic("changed producer failed"))
+    assert_eq(target, other_target)
+    assert_eq(package_key_check_key("identity-test", target, "pkg:.", "same-source", []), package_key_check_key("identity-test", other_target, "pkg:.", "same-source", []))
+    bytes :: build_snapshot_check_debug_bytes(bundle.build_facts)
+    assert_eq(pairs[4].value, record_blob_key(bytes.view(0..<bytes.len())))
+}
+#Test("real checked fold changes native snapshot identity for every semantic build input") {
+    first :: package_identity_target_check(package_identity_target_request())
+    baseline :: jet_driver_compiler_target_fact_pairs(first) ?? panic("real baseline producer")
+    loop field in 0..<14 {
+        request := package_identity_target_request()
+        if field == {
+            0 -> request.profile = "release"
+            1 -> request.artifact_build = true
+            2 -> request.host_facts.build_stamp = Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})
+            3 -> request.host_facts.build_stamp = Val(BuildStamp{git: Val("identity-fixture"), dirty: true, toolchain: "0.1.0", at: ""})
+            4 -> request.host_facts.build_stamp = Val(BuildStamp{git: Val("identity-fixture"), dirty: false, toolchain: "different", at: ""})
+            5 -> request.host_facts.target_triple = Val("aarch64-unknown-linux-gnu")
+            6 -> request.host_facts.target_dossier = Val(MIRTargetDossier{machine: None, layer: MIRRuntimeLayer.Core, provider_identity: "changed-provider", closure_identity: "changed-closure", linker_identity: "changed-linker", tier_identity: "aot", compiler_identity: "changed-compiler", environment_identity: "no-os", dependency_identity: "changed-dependencies"})
+            7 -> request.computed_setting_contributions = [FactContribution]{fact_contribution_new("Build.Settings.cache_slots", FactValue.Int(8), SourceScope.Package, ContributionLayer.CommandLine, "/identity/build.jet")}
+            8 -> request.host_facts.target_triple = Val("x86_64-pc-windows-msvc")
+            9 -> request.authorized_sources.roots[0].files[2].source = request.authorized_sources.roots[0].files[2].source.replace("name: \"identity\"", "name: \"renamed\"")
+            10 -> request.authorized_sources.roots[0].files[2].source = request.authorized_sources.roots[0].files[2].source.replace("version: \"0.1.0\"", "version: \"0.2.0\"")
+            11 -> request.authorized_sources.roots[0].files[2].source = "edition: \"2027\"\n{request.authorized_sources.roots[0].files[2].source}"
+            12 -> request.authorized_sources.roots[0].files[2].source = "runtime: alloc\n{request.authorized_sources.roots[0].files[2].source}"
+            13 -> {
+                request.target = JetDriverCompileTarget.Web(jet_web_assets_with_default_shell(), pkg_release_policy_development(), MIRArtifactBuildMode.Dev)
+                request.host_facts.target_triple = Val("wasm32-unknown-unknown")
+            }
+            else -> panic("semantic target input case outside fixture domain")
+        }
+        result :: package_identity_target_check(request)
+        pairs :: jet_driver_compiler_target_fact_pairs(result) ?? panic("real changed producer")
+        if field != 11 && field != 12 -> assert(pairs[4].value != baseline[4].value)
+        if field == 11 {
+            assert_eq(pairs[1].value, "2027")
+            assert_eq(pairs[4].value, baseline[4].value)
+        }
+        if field == 12 {
+            assert_eq(pairs[3].value, "Some(Alloc)")
+            assert_eq(pairs[4].value, baseline[4].value)
+        }
+        if field == 13 -> assert_eq(pairs[2].value, "true")
+        assert(package_key_target_facts_digest(pairs) != package_key_target_facts_digest(baseline))
+        if field == 8 -> assert_eq(pairs[0].value, "Windows")
+    }
+}
+#Test("missing native dossier is an explicit target producer gate never a surrogate hash") {
+    request := package_identity_target_request()
+    request.host_facts.target_dossier = None
+    result :: package_identity_target_check(request)
+    assert_eq(result.target_fact_gate, Val(JetDriverTargetFactError.MissingNativeTargetDossier))
+    assert_eq(jet_driver_compiler_target_fact_pairs(result), Err(JetDriverTargetFactError.MissingNativeTargetDossier))
+    registration :: result.registration ?? panic("ordinary checked graph missing")
+    assert_eq(registration.build_facts.snapshot, None)
+}

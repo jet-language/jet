@@ -1,0 +1,159 @@
+// Syntax/core_surface.rs:1–1159 has no inline tests or includes. These are
+// faithful behavioral controls for every callable branch and retained table.
+#Test("artifact suffixes preserve closed family order and exact case") {
+    suffixes :: [String]{".jetmap", ".jetnb", ".jetproof", ".jettrace", ".jetreplay", ".jetproof-replay"}
+    kinds :: [ArtifactKind]{.SourceMap, .Notebook, .Proof, .Trace, .GameReplay, .ProofReplay}
+    assert(ARTIFACT_KINDS.len() == 6)
+    loop index in 0..<6 {
+        assert(ARTIFACT_KINDS[index].kind == kinds[index])
+        assert(ARTIFACT_KINDS[index].suffix == suffixes[index])
+        assert(artifact_kind(suffixes[index]) == Val(kinds[index]))
+        assert(artifact_kind("dir/日本語{suffixes[index]}") == Val(kinds[index]))
+        assert(artifact_kind("dir/file{suffixes[index]}.other") == None)
+    }
+    assert(artifact_kind("") == None)
+    assert(artifact_kind("file.jet") == None)
+    assert(artifact_kind("FILE.JETMAP") == None)
+    assert(artifact_kind("file.jetproof-replay") == Val(ArtifactKind.ProofReplay))
+}
+
+#Test("fact marks roots and retired words retain exact spelling rules") {
+    assert(is_comptime_name("$"))
+    assert(is_comptime_name("$ordinary"))
+    assert(!is_comptime_name("ordinary$"))
+    assert(!is_comptime_name("@build"))
+    assert(!is_comptime_name(""))
+    loop root in [String]{"$build", "$package", "$phase", "$program"} -> assert(is_fact_root(root))
+    loop other in [String]{"$", "$BUILD", "$build.os", "$fields", "build", "@build"} -> assert(!is_fact_root(other))
+    assert(retired_fact_spelling("@build") == Val(RetiredFactSpelling.Root{name: "$build"}))
+    assert(retired_fact_spelling("@PHASE") == Val(RetiredFactSpelling.Root{name: "$phase"}))
+    assert(retired_fact_spelling("@PROGRAM") == Val(RetiredFactSpelling.Root{name: "$program"}))
+    assert(retired_fact_spelling("@PACKAGE") == Val(RetiredFactSpelling.Root{name: "$package"}))
+    loop name in [String]{"TYPE", "FUNCTION", "METHOD", "CLOSURE", "VALUE"} {
+        assert(retired_fact_spelling("@{name}") == Val(RetiredFactSpelling.SubjectMember))
+    }
+    loop name in [String]{"@", "@BUILD", "@phase", "@type", "@build.package", "$build", "build", "@@build"} {
+        assert(retired_fact_spelling(name) == None)
+    }
+}
+
+// #4475: pinned Unicode property semantics, not a narrowed ASCII fixture.
+#Test("constant names need screaming grammar and a real uppercase scalar") {
+    loop name in [String]{"MAX_ROWS", "_MAX_ROWS", "ÉCLAIR", "日本語_A", "Ⅻ_ROWS"} -> assert(is_constant_name(name))
+    loop name in [String]{"", "_", "日本語", "max_rows", "MaxRows", "MAX__ROWS", "MAX_", "__MAX", "$MAX", "@MAX", "123", "1MAX", "ǅ"} {
+        assert(!is_constant_name(name))
+    }
+    assert(retired_constant_respelling("@max_rows") == Val("MAX_ROWS"))
+    assert(retired_constant_respelling("@HTTPHeader") == Val("HTTP_HEADER"))
+    assert(retired_constant_respelling("@_max_rows") == Val("_MAX_ROWS"))
+    assert(retired_constant_respelling("@") == Val(""))
+    assert(retired_constant_respelling("@$rows") == Val("$ROWS"))
+    assert(retired_constant_respelling("MAX_ROWS") == None)
+    assert(retired_constant_respelling("$rows") == None)
+}
+
+#Test("terminal facts and access labels are exact not prefix matches") {
+    assert(TERMINAL_FACTS == [String]{"terminal", "resize", "raw"})
+    loop name in TERMINAL_FACTS -> assert(terminal_fact(name) == Val(name))
+    loop name in [String]{"", "Terminal", "TerminalFact", "terminal.raw", "raw_mode"} -> assert(terminal_fact(name) == None)
+    assert(access_label("&") == "the write-access marker `&`")
+    assert(access_label("^") == "the move marker `^`")
+    loop sigil in [String]{"", "~", "&&", "write"} -> assert(access_label(sigil) == "the access marker")
+}
+
+#Test("typed heads reuse MIR carrier and distinguish runtime from record owners") {
+    names :: [String]{"SQL", "HTML", "Sh", "URL", "Path", "DateTime"}
+    kinds :: [MIRTypedHeadKind]{.SQL, .HTML, .Sh, .URL, .Path, .DateTime}
+    runtime_owners :: [String?]{None, None, None, Val("core.net.url"), Val("core.files"), Val("core.time")}
+    carrier_owners :: [String?]{None, None, None, Val("core.net.url"), None, None}
+    loop index in 0..<6 {
+        head :: kinds[index]
+        assert(typed_head_kind(names[index]) == Val(head))
+        assert(head.source_name() == names[index])
+        assert(head.internal_type_name() == names[index])
+        assert(head.is_typed_text() == (index < 3))
+        assert(head.is_boundary() == (index >= 3))
+        assert(head.is_interpolated_template())
+        assert(head.forbids_holes() == (index == 5))
+        assert(mir_boundary_head_owner_module(names[index]) == runtime_owners[index])
+        assert(mir_boundary_head_carrier_module(names[index]) == carrier_owners[index])
+    }
+    loop name in [String]{"", "Url", "url", "sql", "Regex", "Path.extra"} -> assert(typed_head_kind(name) == None)
+}
+
+#Test("core memory named tiers fail closed for every unknown item") {
+    names :: [String]{"Ptr", "from_addr", "volatile_read", "volatile_write", "address_of", "pin", "Pin", "Arena", "Bump", "Pool", "Fixed", "AllocError", "Atomic"}
+    assert(CORE_MEM_GATE_TIERS.len() == names.len())
+    loop index in 0..<names.len() {
+        expected :: if index >= 1 && index <= 3 -> CoreMemGate.Audit else -> CoreMemGate.Import
+        assert(CORE_MEM_GATE_TIERS[index].name == names[index])
+        assert(CORE_MEM_GATE_TIERS[index].gate == expected)
+        assert(core_mem_gate(names[index]) == Val(expected))
+        assert(core_mem_requires_audit(names[index]) == (expected == .Audit))
+    }
+    loop name in [String]{"", "ptr", "RawPtr", "core.mem.Arena", "alloc", "try_alloc", "free", "Unknown"} {
+        assert(core_mem_gate(name) == None)
+        assert(core_mem_requires_audit(name))
+    }
+}
+
+#Test("duration constructor units keep canonical paired order") {
+    methods :: [String]{"nanoseconds", "microseconds", "milliseconds", "seconds", "minutes", "hours"}
+    units :: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}
+    assert(DURATION_CONSTRUCTORS == methods)
+    assert(DURATION_UNITS == units)
+    loop index in 0..<6 {
+        assert(duration_unit_for_constructor(methods[index]) == Val(units[index]))
+        assert(duration_unit_for_constructor(units[index]) == None)
+    }
+    assert(duration_unit_for_constructor("") == None)
+    assert(duration_unit_for_constructor("days") == None)
+    assert(duration_unit_for_constructor("total_seconds") == None)
+}
+
+#Test("TypeInfo projections do not conflate the larger typed fact registry") {
+    facts :: [String]{"$layout", "$name", "$fields"}
+    members :: [String]{"layout", "name", "fields"}
+    assert(COMPILER_FACTS.len() == 3)
+    loop index in 0..<3 {
+        assert(COMPILER_FACTS[index].fact == facts[index])
+        assert(COMPILER_FACTS[index].member == members[index])
+        assert(compiler_fact_member(facts[index]) == Val(members[index]))
+        assert(fact_read_kind(facts[index]) != None)
+    }
+    loop fact in [String]{"", "layout", "@layout", "$LAYOUT", "$effects", "$range", "$origin", "$profile"} -> assert(compiler_fact_member(fact) == None)
+    assert(fact_read_kind("$origin") == Val(FactRead.Origin))
+    assert(fact_read_kind("$profile") == Val(FactRead.BuildProfile))
+    assert(fact_read_kind("layout") == None)
+    members_from_registry :: fact_read_members()
+    loop fact in facts -> assert(members_from_registry.contains(fact))
+}
+
+#Test("layout vocabulary and hidden sentinels preserve bytes and empty suffixes") {
+    loop field in [String]{"size", "alignment", "stride", "requested_alignment", "effective_alignment"} {
+        assert(is_layout_byte_fact("LayoutInfo", field))
+        assert(!is_layout_byte_fact("Other", field))
+    }
+    loop field in [String]{"offset", "size"} -> assert(is_layout_byte_fact("LayoutField", field))
+    assert(!is_layout_byte_fact("LayoutInfo", "offset"))
+    assert(!is_layout_byte_fact("LayoutField", "alignment"))
+    assert(!is_layout_byte_fact("LayoutInfo", "Size"))
+    assert(!is_layout_byte_fact("LayoutInfo", ""))
+    assert(!is_layout_byte_fact("layoutinfo", "size"))
+    assert(LAYOUT_SELECTOR_PREFIX == "{TEXT_NUL}jet.layout.selector.")
+    assert(MEMO_STATS_CALL_PREFIX == "{TEXT_NUL}jet.memo.stats.")
+    loop name in [String]{"", "field", "é日本語", "$field", "a{TEXT_NUL}b"} {
+        encoded :: layout_selector(name)
+        assert(encoded == "{TEXT_NUL}jet.layout.selector.{name}")
+        assert(layout_selector_name(encoded) == Val(name))
+        assert(memo_stats_call(name) == "{TEXT_NUL}jet.memo.stats.{name}")
+    }
+    loop name in [String]{"field", "jet.layout.selector.field", "{TEXT_NUL}jet.layout.selector", "x{TEXT_NUL}jet.layout.selector.field", "{TEXT_NUL}jet.memo.stats.field"} {
+        assert(layout_selector_name(name) == None)
+    }
+    assert(BLOCK_OPEN == "{{")
+    assert(BLOCK_CLOSE == "}}")
+    assert(INTERP_OPEN == BLOCK_OPEN)
+    assert(INTERP_CLOSE == BLOCK_CLOSE)
+    assert(SIZED_NUMERIC_TYPES == [String]{"I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64"})
+}

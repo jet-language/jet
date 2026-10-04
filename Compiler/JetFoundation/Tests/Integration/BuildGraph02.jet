@@ -1,0 +1,2260 @@
+// PORT-PENDING 0980 tests-build-graph-slice-1829: tests/build_graph.rs:1829-4084
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn remote_execution_retries_after_worker_loss() {
+//RS     let project_root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_retry_{}_{}",
+//RS         std::process::id(),
+//RS         "worker-loss"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&project_root);
+//RS     fs::create_dir_all(project_root.join("src")).unwrap();
+//RS     fs::write(project_root.join("src/input"), b"retry input").unwrap();
+//RS     let remote_root = project_root.join("remote-transport");
+//RS     let mut b = BuildContext::new();
+//RS     let action = b
+//RS         .action(
+//RS             "remote-retry",
+//RS             ActionSpec::cached(["remote-tool"])
+//RS                 .with_inputs(["src/input"])
+//RS                 .with_outputs(["build/retried"])
+//RS                 .with_cap(BuildCapability::Net),
+//RS         )
+//RS         .unwrap();
+//RS     let target = b
+//RS         .add_executable("retried", TargetSpec::new().with_action(action))
+//RS         .unwrap();
+//RS     let plan = b.plan_with_default(target).unwrap();
+//RS     let grants = [BuildCapability::Net].into_iter().collect();
+//RS     let store = test_artifact_store(&project_root);
+//RS     let snapshots =
+//RS         snapshot_declared_inputs(&store, &project_root, plan.action(action).unwrap()).unwrap();
+//RS     let key = plan
+//RS         .effective_action_key(
+//RS             action,
+//RS             &snapshots,
+//RS             &grants,
+//RS             std::path::Path::new("remote-tool"),
+//RS             &ContentDigest::from_bytes(b"remote-tool"),
+//RS             &[],
+//RS         )
+//RS         .unwrap();
+//RS     let binding = RemoteBuildBinding::new("builder-retry", &remote_root, b"retry-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_worker_id("worker-retry")
+//RS         .with_platform(format!(
+//RS             "{}-{}",
+//RS             std::env::consts::OS,
+//RS             std::env::consts::ARCH
+//RS         ))
+//RS         .with_abi("native")
+//RS         .with_execute(true)
+//RS         .with_timeout_ms(1_000);
+//RS 
+//RS     let worker_key = key.clone();
+//RS     let worker_binding = binding.clone();
+//RS     let worker = std::thread::spawn(move || {
+//RS         let transport = RemoteCacheTransport::for_binding(&worker_binding).unwrap();
+//RS         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+//RS         let mut lost_attempt = None;
+//RS         loop {
+//RS             match transport.read_execution_request(&worker_key) {
+//RS                 Ok(request) if lost_attempt.is_none() => {
+//RS                     lost_attempt = Some(request.attempt_id);
+//RS                 }
+//RS                 Ok(request)
+//RS                     if lost_attempt
+//RS                         .as_ref()
+//RS                         .is_some_and(|attempt| attempt == &request.attempt_id) =>
+//RS                 {
+//RS                     std::thread::sleep(std::time::Duration::from_millis(2));
+//RS                 }
+//RS                 Ok(request) => {
+//RS                     let policy =
+//RS                         RemoteCachePolicy::with_grants(false, false, true, request.sandbox.clone());
+//RS                     let bytes = b"retried output";
+//RS                     let digest = transport.upload_execution_blob(bytes, &policy).unwrap();
+//RS                     let (stdout_digest, stderr_digest) =
+//RS                         remote_empty_log_digests(&transport, &policy);
+//RS                     transport
+//RS                         .publish_execution_result(
+//RS                             &RemoteExecutionResult {
+//RS                                 key: request.key.clone(),
+//RS                                 attempt_id: request.attempt_id.clone(),
+//RS                                 execution_id: remote_execution_identity(&request),
+//RS                                 outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS                                 outputs: vec![ActionOutputRecord {
+//RS                                     path: request.outputs[0].clone(),
+//RS                                     digest,
+//RS                                     byte_len: bytes.len() as u64,
+//RS                                 }],
+//RS                                 toolchain_digest: request.toolchain_digest.clone(),
+//RS                                 sandbox: request.sandbox.clone(),
+//RS                                 stdout_digest,
+//RS                                 stderr_digest,
+//RS                                 provenance_signer: request.sandbox.worker_id.clone(),
+//RS                             },
+//RS                             &policy,
+//RS                         )
+//RS                         .unwrap();
+//RS                     return;
+//RS                 }
+//RS                 Err(RemoteCacheError::Io(error))
+//RS                     if error.kind() == std::io::ErrorKind::NotFound
+//RS                         && std::time::Instant::now() < deadline =>
+//RS                 {
+//RS                     std::thread::sleep(std::time::Duration::from_millis(2));
+//RS                 }
+//RS                 Err(error) => panic!("remote retry worker could not read request: {error}"),
+//RS             }
+//RS         }
+//RS     });
+//RS 
+//RS     let execution = execute_build_plan_with_front_end_and_remote(
+//RS         &plan,
+//RS         &project_root,
+//RS         &grants,
+//RS         FrontEndCompletion::all_complete(),
+//RS         Some(&binding),
+//RS     )
+//RS     .unwrap();
+//RS     worker.join().unwrap();
+//RS     assert!(execution.report.events.iter().any(|event| {
+//RS         matches!(
+//RS             event,
+//RS             BuildExecutionEvent::Finished {
+//RS                 action: finished,
+//RS                 outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS             } if *finished == action.id()
+//RS         )
+//RS     }));
+//RS     assert_eq!(
+//RS         fs::read(project_root.join("build/retried")).unwrap(),
+//RS         b"retried output"
+//RS     );
+//RS     let cancellation_digest = ContentDigest::from_bytes(key.as_str().as_bytes());
+//RS     let cancellation_hex = cancellation_digest
+//RS         .as_str()
+//RS         .strip_prefix("sha256:")
+//RS         .unwrap();
+//RS     assert!(remote_root
+//RS         .join("execution/cancelled")
+//RS         .join(&cancellation_hex[..2])
+//RS         .join(&cancellation_hex[2..])
+//RS         .is_file());
+//RS     let _ = fs::remove_dir_all(project_root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn remote_execution_fails_over_to_registered_builder_after_worker_loss() {
+//RS     let _guard = REMOTE_HOST_ENV_LOCK.lock().unwrap();
+//RS     let project_root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_failover_{}_{}",
+//RS         std::process::id(),
+//RS         "registered"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&project_root);
+//RS     fs::create_dir_all(&project_root).unwrap();
+//RS     let config_root = project_root.join("config");
+//RS     let fast_root = project_root.join("fast-transport");
+//RS     let safe_root = project_root.join("safe-transport");
+//RS     let fast_credential = project_root.join("fast.credential");
+//RS     let safe_credential = project_root.join("safe.credential");
+//RS     fs::write(&fast_credential, b"fast-failover-key").unwrap();
+//RS     fs::write(&safe_credential, b"safe-failover-key").unwrap();
+//RS     let previous_config = std::env::var_os("XDG_CONFIG_HOME");
+//RS     std::env::set_var("XDG_CONFIG_HOME", &config_root);
+//RS     let fast_name = format!("remote-fast-{}", std::process::id());
+//RS     let safe_name = format!("remote-safe-{}", std::process::id());
+//RS     let fast = RemoteBuildBinding::bind_host(
+//RS         &fast_name,
+//RS         &fast_root,
+//RS         &fast_credential,
+//RS         "trusted",
+//RS         "worker-fast",
+//RS         &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+//RS         "native",
+//RS         false,
+//RS         false,
+//RS         true,
+//RS         false,
+//RS         1_000,
+//RS     )
+//RS     .unwrap();
+//RS     let safe = RemoteBuildBinding::bind_host(
+//RS         &safe_name,
+//RS         &safe_root,
+//RS         &safe_credential,
+//RS         "trusted",
+//RS         "worker-safe",
+//RS         &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+//RS         "native",
+//RS         false,
+//RS         false,
+//RS         true,
+//RS         false,
+//RS         1_000,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let mut b = BuildContext::new();
+//RS     let action = b
+//RS         .action(
+//RS             "remote-failover",
+//RS             ActionSpec::cached(["remote-tool"])
+//RS                 .with_outputs(["build/failover"])
+//RS                 .with_cap(BuildCapability::Net),
+//RS         )
+//RS         .unwrap();
+//RS     let target = b
+//RS         .add_executable("failover", TargetSpec::new().with_action(action))
+//RS         .unwrap();
+//RS     let plan = b.plan_with_default(target).unwrap();
+//RS     let grants = [BuildCapability::Net].into_iter().collect();
+//RS     let store = test_artifact_store(&project_root);
+//RS     let snapshots =
+//RS         snapshot_declared_inputs(&store, &project_root, plan.action(action).unwrap()).unwrap();
+//RS     let key = plan
+//RS         .effective_action_key(
+//RS             action,
+//RS             &snapshots,
+//RS             &grants,
+//RS             std::path::Path::new("remote-tool"),
+//RS             &ContentDigest::from_bytes(b"remote-tool"),
+//RS             &[],
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS     let lost_key = key.clone();
+//RS     let lost_binding = fast.clone();
+//RS     let lost_worker = std::thread::spawn(move || {
+//RS         let transport = RemoteCacheTransport::for_binding(&lost_binding).unwrap();
+//RS         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+//RS         let mut attempts = std::collections::BTreeSet::new();
+//RS         loop {
+//RS             match transport.read_execution_request(&lost_key) {
+//RS                 Ok(request) => {
+//RS                     assert!(
+//RS                         std::time::Instant::now() < deadline,
+//RS                         "lost worker did not observe both retry attempts"
+//RS                     );
+//RS                     attempts.insert(request.attempt_id);
+//RS                     if attempts.len() >= 2 {
+//RS                         return;
+//RS                     }
+//RS                     std::thread::sleep(std::time::Duration::from_millis(40));
+//RS                 }
+//RS                 Err(RemoteCacheError::Io(error))
+//RS                     if error.kind() == std::io::ErrorKind::NotFound
+//RS                         && std::time::Instant::now() < deadline =>
+//RS                 {
+//RS                     std::thread::sleep(std::time::Duration::from_millis(2));
+//RS                 }
+//RS                 Err(error) => panic!("lost worker could not inspect request: {error}"),
+//RS             }
+//RS         }
+//RS     });
+//RS 
+//RS     let safe_key = key.clone();
+//RS     let safe_binding = safe.clone();
+//RS     let safe_worker = std::thread::spawn(move || {
+//RS         let transport = RemoteCacheTransport::for_binding(&safe_binding).unwrap();
+//RS         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+//RS         loop {
+//RS             match transport.read_execution_request(&safe_key) {
+//RS                 Ok(request) => {
+//RS                     let policy =
+//RS                         RemoteCachePolicy::with_grants(false, false, true, request.sandbox.clone());
+//RS                     let bytes = b"failover output";
+//RS                     let digest = transport.upload_execution_blob(bytes, &policy).unwrap();
+//RS                     let (stdout_digest, stderr_digest) =
+//RS                         remote_empty_log_digests(&transport, &policy);
+//RS                     transport
+//RS                         .publish_execution_result(
+//RS                             &RemoteExecutionResult {
+//RS                                 key: request.key.clone(),
+//RS                                 attempt_id: request.attempt_id.clone(),
+//RS                                 execution_id: remote_execution_identity(&request),
+//RS                                 outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS                                 outputs: vec![ActionOutputRecord {
+//RS                                     path: request.outputs[0].clone(),
+//RS                                     digest,
+//RS                                     byte_len: bytes.len() as u64,
+//RS                                 }],
+//RS                                 toolchain_digest: request.toolchain_digest.clone(),
+//RS                                 sandbox: request.sandbox.clone(),
+//RS                                 stdout_digest,
+//RS                                 stderr_digest,
+//RS                                 provenance_signer: request.sandbox.worker_id.clone(),
+//RS                             },
+//RS                             &policy,
+//RS                         )
+//RS                         .unwrap();
+//RS                     return;
+//RS                 }
+//RS                 Err(RemoteCacheError::Io(error))
+//RS                     if error.kind() == std::io::ErrorKind::NotFound
+//RS                         && std::time::Instant::now() < deadline =>
+//RS                 {
+//RS                     std::thread::sleep(std::time::Duration::from_millis(2));
+//RS                 }
+//RS                 Err(error) => panic!("failover worker could not inspect request: {error}"),
+//RS             }
+//RS         }
+//RS     });
+//RS 
+//RS     let execution = execute_build_plan_with_front_end_and_remote(
+//RS         &plan,
+//RS         &project_root,
+//RS         &grants,
+//RS         FrontEndCompletion::all_complete(),
+//RS         Some(&fast),
+//RS     );
+//RS     let lost_join = lost_worker.join();
+//RS     let safe_join = safe_worker.join();
+//RS     assert!(RemoteBuildBinding::remove_host(&fast_name).is_ok());
+//RS     assert!(RemoteBuildBinding::remove_host(&safe_name).is_ok());
+//RS     match previous_config {
+//RS         Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+//RS         None => std::env::remove_var("XDG_CONFIG_HOME"),
+//RS     }
+//RS     assert!(lost_join.is_ok(), "lost worker thread panicked");
+//RS     assert!(safe_join.is_ok(), "failover worker thread panicked");
+//RS     let cancellation_digest = ContentDigest::from_bytes(key.as_str().as_bytes());
+//RS     let cancellation_hex = cancellation_digest
+//RS         .as_str()
+//RS         .strip_prefix("sha256:")
+//RS         .unwrap();
+//RS     assert!(fast_root
+//RS         .join("execution/cancelled")
+//RS         .join(&cancellation_hex[..2])
+//RS         .join(&cancellation_hex[2..])
+//RS         .is_file());
+//RS     let execution = execution.unwrap();
+//RS     assert!(execution.report.events.iter().any(|event| {
+//RS         matches!(
+//RS             event,
+//RS             BuildExecutionEvent::Finished {
+//RS                 action: finished,
+//RS                 outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS             } if *finished == action.id()
+//RS         )
+//RS     }));
+//RS     assert_eq!(
+//RS         fs::read(project_root.join("build/failover")).unwrap(),
+//RS         b"failover output"
+//RS     );
+//RS     let _ = fs::remove_dir_all(project_root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn remote_execution_timeout_uses_declared_local_fallback() {
+//RS     let project_root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_fallback_{}_{}",
+//RS         std::process::id(),
+//RS         "local"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&project_root);
+//RS     fs::create_dir_all(&project_root).unwrap();
+//RS     let remote_root = project_root.join("remote-transport");
+//RS     let mut b = BuildContext::new();
+//RS     let action = b
+//RS         .action(
+//RS             "local-fallback",
+//RS             ActionSpec::cached(["sh", "-c", "printf fallback > build/fallback.txt"])
+//RS                 .with_outputs(["build/fallback.txt"])
+//RS                 .with_cap(BuildCapability::Exec)
+//RS                 .with_cap(BuildCapability::FS)
+//RS                 .with_cap(BuildCapability::Net),
+//RS         )
+//RS         .unwrap();
+//RS     let target = b
+//RS         .add_executable("fallback", TargetSpec::new().with_action(action))
+//RS         .unwrap();
+//RS     let plan = b.plan_with_default(target).unwrap();
+//RS     let grants = [
+//RS         BuildCapability::Exec,
+//RS         BuildCapability::FS,
+//RS         BuildCapability::Net,
+//RS     ]
+//RS     .into_iter()
+//RS     .collect();
+//RS     let binding = RemoteBuildBinding::new("builder-fallback", &remote_root, b"fallback-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_execute(true)
+//RS         .with_local_fallback(true)
+//RS         .with_timeout_ms(20);
+//RS 
+//RS     let execution = execute_build_plan_with_front_end_and_remote(
+//RS         &plan,
+//RS         &project_root,
+//RS         &grants,
+//RS         FrontEndCompletion::all_complete(),
+//RS         Some(&binding),
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(
+//RS         fs::read_to_string(project_root.join("build/fallback.txt")).unwrap(),
+//RS         "fallback"
+//RS     );
+//RS     assert!(execution.report.events.iter().any(|event| {
+//RS         matches!(
+//RS             event,
+//RS             BuildExecutionEvent::Finished {
+//RS                 action: finished,
+//RS                 outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS             } if *finished == action.id()
+//RS         )
+//RS     }));
+//RS     let _ = fs::remove_dir_all(project_root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn remote_execution_grant_carries_blobs_without_cache_authority() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_execute_only_{}_{}",
+//RS         std::process::id(),
+//RS         "roundtrip"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     let binding = RemoteBuildBinding::new("builder-execute-only", &root, b"remote-test-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_worker_id("worker-execute-only")
+//RS         .with_platform("linux-x86_64")
+//RS         .with_abi("native");
+//RS     let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
+//RS     let key = ActionKey::new("execute-only");
+//RS     let sandbox = transport
+//RS         .sandbox_proof(
+//RS             "remote:builder-execute-only:trusted:sandbox-execute-only",
+//RS             "attempt-execute-only-1",
+//RS             key.as_str(),
+//RS             ContentDigest::from_bytes(b"toolchain"),
+//RS         )
+//RS         .unwrap();
+//RS     let policy = RemoteCachePolicy::with_grants(false, false, true, sandbox.clone());
+//RS     let input_digest = transport.upload_execution_blob(b"source", &policy).unwrap();
+//RS     assert_eq!(
+//RS         transport
+//RS             .download_execution_blob(&input_digest, &policy)
+//RS             .unwrap(),
+//RS         b"source"
+//RS     );
+//RS     assert!(transport.upload_blob(b"cache-forbidden", &policy).is_err());
+//RS 
+//RS     let input = ActionInputSnapshot {
+//RS         path: BuildPath::new("src/main.jet").unwrap(),
+//RS         digest: input_digest,
+//RS         byte_len: 6,
+//RS     };
+//RS     let output_path = BuildPath::new("build/app").unwrap();
+//RS     let request = RemoteExecutionRequest {
+//RS         key: key.clone(),
+//RS         attempt_id: sandbox.attempt_id.clone(),
+//RS         argv: vec!["jetc".to_string(), "src/main.jet".to_string()],
+//RS         inputs: vec![input],
+//RS         outputs: vec![output_path.clone()],
+//RS         toolchain_digest: ContentDigest::from_bytes(b"toolchain"),
+//RS         sandbox: sandbox.clone(),
+//RS     };
+//RS     transport.submit_execution(&request, &policy).unwrap();
+//RS     assert_eq!(transport.read_execution_request(&key).unwrap(), request);
+//RS 
+//RS     let output_digest = transport
+//RS         .upload_execution_blob(b"compiled", &policy)
+//RS         .unwrap();
+//RS     let (stdout_digest, stderr_digest) = remote_empty_log_digests(&transport, &policy);
+//RS     let result = RemoteExecutionResult {
+//RS         key: key.clone(),
+//RS         attempt_id: request.attempt_id.clone(),
+//RS         execution_id: remote_execution_identity(&request),
+//RS         outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS         outputs: vec![ActionOutputRecord {
+//RS             path: output_path,
+//RS             digest: output_digest,
+//RS             byte_len: 8,
+//RS         }],
+//RS         toolchain_digest: request.toolchain_digest.clone(),
+//RS         sandbox: sandbox.clone(),
+//RS         stdout_digest,
+//RS         stderr_digest,
+//RS         provenance_signer: sandbox.worker_id.clone(),
+//RS     };
+//RS     transport
+//RS         .publish_execution_result(&result, &policy)
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         transport.download_execution_result(&key, &policy).unwrap(),
+//RS         result
+//RS     );
+//RS     let _ = fs::remove_dir_all(&root);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn remote_transport_rejects_a_symlinked_store_root() {
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_symlink_{}_{}",
+//RS         std::process::id(),
+//RS         "root"
+//RS     ));
+//RS     let outside = root.with_extension("outside");
+//RS     let _ = fs::remove_file(&root);
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     let _ = fs::remove_dir_all(&outside);
+//RS     fs::create_dir_all(&outside).unwrap();
+//RS     symlink(&outside, &root).unwrap();
+//RS     let key = ActionKey::new("remote-symlink-key");
+//RS     let binding = RemoteBuildBinding::new("builder-symlink", &root, b"remote-test-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_worker_id("worker-symlink")
+//RS         .with_platform("linux-x86_64")
+//RS         .with_abi("native");
+//RS     let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
+//RS     let policy = RemoteCachePolicy::granted(
+//RS         transport
+//RS             .sandbox_proof(
+//RS                 "remote:builder-symlink:trusted:symlink",
+//RS                 "attempt-symlink-1",
+//RS                 key.as_str(),
+//RS                 ContentDigest::from_bytes(b"provenance"),
+//RS             )
+//RS             .unwrap(),
+//RS     );
+//RS     assert!(matches!(
+//RS         transport.upload_blob(b"must not follow", &policy),
+//RS         Err(RemoteCacheError::Io(_))
+//RS     ));
+//RS     assert!(!outside.join("cas").exists());
+//RS     let _ = fs::remove_file(&root);
+//RS     let _ = fs::remove_dir_all(outside);
+//RS }
+//RS 
+//RS #[test]
+//RS fn authenticated_cache_only_transport_cannot_publish_without_worker_identity() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_cache_only_{}_{}",
+//RS         std::process::id(),
+//RS         "identity"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     let transport = RemoteCacheTransport::authenticated(&root, b"remote-test-key").unwrap();
+//RS     let policy = RemoteCachePolicy::with_grants(
+//RS         true,
+//RS         true,
+//RS         false,
+//RS         RemoteSandboxProof::new(
+//RS             "cache-only",
+//RS             "cache-only-key",
+//RS             ContentDigest::from_bytes(b"provenance"),
+//RS         ),
+//RS     );
+//RS     assert!(matches!(
+//RS         transport.upload_blob(b"must bind a worker", &policy),
+//RS         Err(RemoteCacheError::InvalidRecord(message)) if message.contains("worker identity")
+//RS     ));
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_hostile_{}_{}",
+//RS         std::process::id(),
+//RS         "exchange"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     let key = ActionKey::new("hostile-worker");
+//RS     let worker_binding = RemoteBuildBinding::new("builder-a", &root, b"worker-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_worker_id("worker-a")
+//RS         .with_platform("linux-x86_64")
+//RS         .with_abi("native");
+//RS     let client = RemoteCacheTransport::for_binding(&worker_binding).unwrap();
+//RS     let worker = RemoteCacheTransport::for_binding(&worker_binding).unwrap();
+//RS     let sandbox = client
+//RS         .sandbox_proof(
+//RS             "remote:builder-a:trusted:job-1",
+//RS             "attempt-job-1",
+//RS             key.as_str(),
+//RS             ContentDigest::from_bytes(b"provenance"),
+//RS         )
+//RS         .unwrap();
+//RS     let policy = RemoteCachePolicy::with_grants(false, false, true, sandbox.clone());
+//RS     let unauthenticated = RemoteCacheTransport::new(&root);
+//RS     let auth_error = unauthenticated
+//RS         .upload_execution_blob(b"must-not-write", &policy)
+//RS         .unwrap_err();
+//RS     assert!(matches!(
+//RS         auth_error,
+//RS         RemoteCacheError::Denied(denied)
+//RS             if denied.reason == RemoteDeniedReason::MissingAuthentication
+//RS     ));
+//RS 
+//RS     let input_digest = client.upload_execution_blob(b"source", &policy).unwrap();
+//RS     let request = RemoteExecutionRequest {
+//RS         key: key.clone(),
+//RS         attempt_id: sandbox.attempt_id.clone(),
+//RS         argv: vec!["jetc".to_string(), "src/main.jet".to_string()],
+//RS         inputs: vec![ActionInputSnapshot {
+//RS             path: BuildPath::new("src/main.jet").unwrap(),
+//RS             digest: input_digest,
+//RS             byte_len: 6,
+//RS         }],
+//RS         outputs: vec![BuildPath::new("build/app").unwrap()],
+//RS         toolchain_digest: ContentDigest::from_bytes(b"toolchain"),
+//RS         sandbox: sandbox.clone(),
+//RS     };
+//RS     client.submit_execution(&request, &policy).unwrap();
+//RS     let wrong_binding = RemoteBuildBinding::new("builder-a", &root, b"wrong-worker-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_worker_id("worker-a")
+//RS         .with_platform("linux-x86_64")
+//RS         .with_abi("native");
+//RS     let wrong_key = RemoteCacheTransport::for_binding(&wrong_binding).unwrap();
+//RS     assert!(matches!(
+//RS         wrong_key.read_execution_request(&key),
+//RS         Err(RemoteCacheError::InvalidRecord(_))
+//RS     ));
+//RS     assert_eq!(worker.read_execution_request(&key).unwrap(), request);
+//RS 
+//RS     let output_digest = worker.upload_execution_blob(b"compiled", &policy).unwrap();
+//RS     let (stdout_digest, stderr_digest) = remote_empty_log_digests(&worker, &policy);
+//RS     let result = RemoteExecutionResult {
+//RS         key: key.clone(),
+//RS         attempt_id: request.attempt_id.clone(),
+//RS         execution_id: remote_execution_identity(&request),
+//RS         outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS         outputs: vec![ActionOutputRecord {
+//RS             path: request.outputs[0].clone(),
+//RS             digest: output_digest.clone(),
+//RS             byte_len: 8,
+//RS         }],
+//RS         toolchain_digest: request.toolchain_digest.clone(),
+//RS         sandbox: sandbox.clone(),
+//RS         stdout_digest,
+//RS         stderr_digest,
+//RS         provenance_signer: sandbox.worker_id.clone(),
+//RS     };
+//RS     worker.publish_execution_result(&result, &policy).unwrap();
+//RS     assert_eq!(
+//RS         client.download_execution_result(&key, &policy).unwrap(),
+//RS         result
+//RS     );
+//RS 
+//RS     let result_digest = ContentDigest::from_bytes(key.as_str().as_bytes());
+//RS     let result_hex = result_digest.as_str().strip_prefix("sha256:").unwrap();
+//RS     let result_path = root
+//RS         .join("execution/results")
+//RS         .join(&result_hex[..2])
+//RS         .join(&result_hex[2..]);
+//RS     let signed = fs::read(&result_path).unwrap();
+//RS     let mut unsigned = signed.clone();
+//RS     let mac_start = unsigned
+//RS         .windows(4)
+//RS         .position(|window| window == b"mac=")
+//RS         .unwrap();
+//RS     let mac_end = mac_start
+//RS         + unsigned[mac_start..]
+//RS             .iter()
+//RS             .position(|byte| *byte == b'\n')
+//RS             .unwrap()
+//RS         + 1;
+//RS     unsigned.drain(mac_start..mac_end);
+//RS     fs::write(&result_path, unsigned).unwrap();
+//RS     assert!(matches!(
+//RS         client.download_execution_result(&key, &policy),
+//RS         Err(RemoteCacheError::InvalidRecord(message))
+//RS             if message.contains("no MAC")
+//RS     ));
+//RS 
+//RS     let mut corrupt = signed;
+//RS     let payload_offset = corrupt
+//RS         .windows(2)
+//RS         .position(|window| window == b"\n\n")
+//RS         .unwrap()
+//RS         + 2;
+//RS     corrupt[payload_offset] = if corrupt[payload_offset] == b'v' {
+//RS         b'w'
+//RS     } else {
+//RS         b'v'
+//RS     };
+//RS     fs::write(&result_path, corrupt).unwrap();
+//RS     assert!(matches!(
+//RS         client.download_execution_result(&key, &policy),
+//RS         Err(RemoteCacheError::InvalidRecord(message))
+//RS             if message.contains("authentication failed")
+//RS     ));
+//RS 
+//RS     // A second submission for the same action is a new remote attempt. The
+//RS     // old result is removed before the new request is visible, so a delayed
+//RS     // worker cannot replay a successful result into a changed sandbox.
+//RS     let new_sandbox = client
+//RS         .sandbox_proof(
+//RS             "remote:builder-a:trusted:job-2",
+//RS             "attempt-job-2",
+//RS             key.as_str(),
+//RS             ContentDigest::from_bytes(b"provenance"),
+//RS         )
+//RS         .unwrap();
+//RS     let new_policy = RemoteCachePolicy::with_grants(false, false, true, new_sandbox.clone());
+//RS     let mut new_request = request.clone();
+//RS     new_request.sandbox = new_sandbox.clone();
+//RS     new_request.attempt_id = new_sandbox.attempt_id.clone();
+//RS     client.submit_execution(&new_request, &new_policy).unwrap();
+//RS     let stale_error = client
+//RS         .download_execution_result(&key, &new_policy)
+//RS         .unwrap_err();
+//RS     assert!(matches!(
+//RS         stale_error,
+//RS         RemoteCacheError::Io(error) if error.kind() == std::io::ErrorKind::NotFound
+//RS     ));
+//RS     let replay_error = worker
+//RS         .publish_execution_result(&result, &policy)
+//RS         .unwrap_err();
+//RS     assert!(matches!(replay_error, RemoteCacheError::InvalidRecord(_)));
+//RS 
+//RS     let output_path = root
+//RS         .join("cas")
+//RS         .join("blobs")
+//RS         .join("sha256")
+//RS         .join(&output_digest.as_str()[7..9])
+//RS         .join(&output_digest.as_str()[9..]);
+//RS     let mut tampered = fs::read(&output_path).unwrap();
+//RS     let last = tampered.len() - 1;
+//RS     tampered[last] ^= 0x01;
+//RS     fs::write(&output_path, tampered).unwrap();
+//RS     let tampered_error = client
+//RS         .download_execution_blob(&output_digest, &policy)
+//RS         .unwrap_err();
+//RS     assert!(matches!(tampered_error, RemoteCacheError::InvalidRecord(_)));
+//RS 
+//RS     let binding = RemoteBuildBinding::new("builder-a", root.clone(), b"worker-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_execute(true);
+//RS     assert!(binding.is_enabled());
+//RS     assert!(format!("{binding:?}").contains("configured: true"));
+//RS     let bound = RemoteCacheTransport::for_binding(&binding).unwrap();
+//RS     let foreign_policy = RemoteCachePolicy::with_grants(
+//RS         false,
+//RS         false,
+//RS         true,
+//RS         RemoteSandboxProof::new(
+//RS             "remote:builder-a:other-trust:job-1",
+//RS             key.as_str(),
+//RS             ContentDigest::from_bytes(b"provenance"),
+//RS         ),
+//RS     );
+//RS     assert!(matches!(
+//RS         bound.upload_execution_blob(b"foreign", &foreign_policy),
+//RS         Err(RemoteCacheError::InvalidRecord(_))
+//RS     ));
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn scheduler_records_parallel_ready_graph_pools_cancellation_and_metrics() {
+//RS     let mut b = BuildContext::new();
+//RS     let core = b
+//RS         .action(
+//RS             "compile-core",
+//RS             ActionSpec::cached(["jetc", "src/core.jet"])
+//RS                 .with_outputs(["build/core.o"])
+//RS                 .with_pool(BuildResourcePool::CPU),
+//RS         )
+//RS         .unwrap();
+//RS     let ui = b
+//RS         .action(
+//RS             "compile-ui",
+//RS             ActionSpec::cached(["jetc", "src/ui.jet"])
+//RS                 .with_outputs(["build/ui.o"])
+//RS                 .with_pool(BuildResourcePool::CPU),
+//RS         )
+//RS         .unwrap();
+//RS     let link = b
+//RS         .action(
+//RS             "link-app",
+//RS             ActionSpec::cached(["ld", "-o", "build/app"])
+//RS                 .with_inputs(["build/core.o", "build/ui.o"])
+//RS                 .with_outputs(["build/app"])
+//RS                 .with_pool(BuildResourcePool::Linker)
+//RS                 .with_pool(BuildResourcePool::Console),
+//RS         )
+//RS         .unwrap();
+//RS     let core_target = b
+//RS         .add_library("core", TargetSpec::new().with_action(core))
+//RS         .unwrap();
+//RS     let ui_target = b
+//RS         .add_library("ui", TargetSpec::new().with_action(ui))
+//RS         .unwrap();
+//RS     let app = b
+//RS         .add_executable(
+//RS             "app",
+//RS             TargetSpec::new()
+//RS                 .with_dep(core_target)
+//RS                 .with_dep(ui_target)
+//RS                 .with_action(link),
+//RS         )
+//RS         .unwrap();
+//RS     let plan = b.plan_with_default(app).unwrap();
+//RS 
+//RS     let model = plan.execution_model().unwrap();
+//RS     assert_eq!(model.stages[0].actions, vec![core.id(), ui.id()]);
+//RS     assert_eq!(model.stages[1].actions, vec![link.id()]);
+//RS     assert_eq!(model.metrics.max_parallel_actions, 2);
+//RS     assert_eq!(model.metrics.cacheable_actions, 3);
+//RS     assert_eq!(
+//RS         model
+//RS             .pools
+//RS             .iter()
+//RS             .map(|pool| pool.pool.as_str())
+//RS             .collect::<Vec<_>>(),
+//RS         vec!["cpu", "memory", "linker", "console", "gpu"]
+//RS     );
+//RS     assert_eq!(
+//RS         model
+//RS             .nodes
+//RS             .iter()
+//RS             .find(|node| node.action == link.id())
+//RS             .unwrap()
+//RS             .prerequisites,
+//RS         vec![core.id(), ui.id()]
+//RS     );
+//RS     assert_eq!(model.console_order, vec![core.id(), ui.id(), link.id()]);
+//RS 
+//RS     let report = plan
+//RS         .execution_report(&[
+//RS             (core, ActionOutcome::Failed { exit_code: 1 }),
+//RS             (ui, ActionOutcome::Succeeded { exit_code: 0 }),
+//RS         ])
+//RS         .unwrap();
+//RS     assert!(report.events.contains(&BuildExecutionEvent::Cancelled {
+//RS         action: link.id(),
+//RS         failed_prereq: core.id(),
+//RS     }));
+//RS     assert_eq!(report.metrics.failed_actions, 1);
+//RS     assert_eq!(report.metrics.cancelled_actions, 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn scheduler_orders_file_producer_before_consumer_without_target_dep() {
+//RS     let mut b = BuildContext::new();
+//RS     let gen = b
+//RS         .action(
+//RS             "generate",
+//RS             ActionSpec::cached(["gen"])
+//RS                 .with_outputs([".jet/generated/schema.jet"])
+//RS                 .with_pool(BuildResourcePool::CPU),
+//RS         )
+//RS         .unwrap();
+//RS     let compile = b
+//RS         .action(
+//RS             "compile",
+//RS             ActionSpec::cached(["jetc", ".jet/generated/schema.jet"])
+//RS                 .with_inputs([".jet/generated/schema.jet"])
+//RS                 .with_outputs(["build/schema.o"])
+//RS                 .with_pool(BuildResourcePool::CPU),
+//RS         )
+//RS         .unwrap();
+//RS     b.add_library("gen", TargetSpec::new().with_action(gen))
+//RS         .unwrap();
+//RS     b.add_library("compile", TargetSpec::new().with_action(compile))
+//RS         .unwrap();
+//RS     let plan = b.plan().unwrap();
+//RS 
+//RS     let model = plan.execution_model().unwrap();
+//RS     assert_eq!(model.stages[0].actions, vec![gen.id()]);
+//RS     assert_eq!(model.stages[1].actions, vec![compile.id()]);
+//RS     assert_eq!(
+//RS         model
+//RS             .nodes
+//RS             .iter()
+//RS             .find(|node| node.action == compile.id())
+//RS             .unwrap()
+//RS             .prerequisites,
+//RS         vec![gen.id()]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn graph_query_explain_and_rebuild_reasons_share_plan_provenance() {
+//RS     let mut b = BuildContext::new();
+//RS     let gen = b
+//RS         .action(
+//RS             "generate-schema",
+//RS             ActionSpec::cached(["schema-gen", "schema/app.sql"])
+//RS                 .with_inputs(["schema/app.sql"])
+//RS                 .with_outputs([".jet/generated/schema.jet"])
+//RS                 .with_cap(BuildCapability::FS),
+//RS         )
+//RS         .unwrap();
+//RS     let lib = b
+//RS         .add_library(
+//RS             "db",
+//RS             TargetSpec::new()
+//RS                 .with_source(".jet/generated/schema.jet")
+//RS                 .with_action(gen),
+//RS         )
+//RS         .unwrap();
+//RS     let plan = b.plan_with_default(lib).unwrap();
+//RS 
+//RS     let graph = plan.graph();
+//RS     assert_eq!(graph.targets[0].name, "db");
+//RS     assert_eq!(graph.actions[0].outputs, vec![".jet/generated/schema.jet"]);
+//RS     let ownership = plan.file_ownership(".jet/generated/schema.jet");
+//RS     assert_eq!(ownership.owner, Some(gen.id()));
+//RS     assert_eq!(ownership.targets, vec![lib.id()]);
+//RS 
+//RS     let target_explain = plan.explain_target(lib).unwrap();
+//RS     assert_eq!(target_explain.subject, BuildGraphSubject::Target(lib.id()));
+//RS     assert!(target_explain
+//RS         .provenance
+//RS         .iter()
+//RS         .any(|line| line == "actions=1"));
+//RS     let action_explain = plan.explain_action(gen).unwrap();
+//RS     assert_eq!(action_explain.subject, BuildGraphSubject::Action(gen.id()));
+//RS     assert!(action_explain
+//RS         .provenance
+//RS         .iter()
+//RS         .any(|line| line == "inputs=1"));
+//RS     let file_explain = plan.explain_file(".jet/generated/schema.jet");
+//RS     assert!(
+//RS         file_explain
+//RS             .provenance
+//RS             .iter()
+//RS             .any(|line| line == "owner=Some(ActionId(0))"),
+//RS         "generated action ownership must remain visible"
+//RS     );
+//RS     let rebuilt = plan
+//RS         .why_rebuilt(
+//RS             gen,
+//RS             ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged),
+//RS         )
+//RS         .unwrap();
+//RS     assert_eq!(rebuilt.action, gen.id());
+//RS     assert_eq!(rebuilt.reason, "action key changed");
+//RS }
+//RS 
+//RS #[test]
+//RS fn legacy_wrappers_are_typed_declared_and_policy_denied_without_ambient_authority() {
+//RS     let policy = BuildPolicy::allow_all();
+//RS     for (kind, spec) in [
+//RS         (
+//RS             LegacyWrapperKind::CMake,
+//RS             LegacyWrapperSpec::cmake(["cmake", "--build", "build"]),
+//RS         ),
+//RS         (LegacyWrapperKind::Make, LegacyWrapperSpec::make(["make"])),
+//RS         (
+//RS             LegacyWrapperKind::Gradle,
+//RS             LegacyWrapperSpec::gradle(["gradle", "assemble"]),
+//RS         ),
+//RS         (
+//RS             LegacyWrapperKind::Npm,
+//RS             LegacyWrapperSpec::npm(["npm", "run", "build"]),
+//RS         ),
+//RS         (
+//RS             LegacyWrapperKind::Cargo,
+//RS             LegacyWrapperSpec::cargo(["cargo", "build"]),
+//RS         ),
+//RS     ] {
+//RS         let action = spec
+//RS             .with_inputs(["legacy/project"])
+//RS             .with_outputs([format!("build/{}", kind.as_str())])
+//RS             .with_cap(BuildCapability::Exec)
+//RS             .with_cap(BuildCapability::FS)
+//RS             .into_action_spec(&policy)
+//RS             .unwrap();
+//RS         assert_eq!(action.legacy_wrapper, Some(kind));
+//RS         assert!(action.caps.contains(&BuildCapability::Exec));
+//RS         assert_eq!(action.inputs[0].as_str(), "legacy/project");
+//RS         assert_eq!(
+//RS             action.labels.get("legacy.wrapper").map(String::as_str),
+//RS             Some(kind.as_str())
+//RS         );
+//RS     }
+//RS 
+//RS     let denial = LegacyWrapperSpec::cargo(["cargo", "build"])
+//RS         .with_inputs(["Cargo.toml"])
+//RS         .with_outputs(["target/debug/app"])
+//RS         .with_cap(BuildCapability::Exec)
+//RS         .explain(&BuildPolicy::deny_legacy_wrappers(
+//RS             "CI forbids legacy build tools",
+//RS         ));
+//RS     assert!(!denial.allowed);
+//RS     assert_eq!(denial.reason, "CI forbids legacy build tools");
+//RS 
+//RS     let err = LegacyWrapperSpec::make(["make"])
+//RS         .with_inputs(["Makefile"])
+//RS         .with_outputs(["build/app"])
+//RS         .into_action_spec(&policy)
+//RS         .unwrap_err();
+//RS     assert_eq!(
+//RS         err,
+//RS         BuildError::LegacyWrapperWithoutCaps(LegacyWrapperKind::Make)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn legacy_project_import_reads_one_canonical_file_and_ci_denies_the_wrapper() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_legacy_import_{}_{}",
+//RS         std::process::id(),
+//RS         "cargo"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(root.join("Cargo.toml"), b"[package]\nname = \"imported\"\n").unwrap();
+//RS 
+//RS     let imported = LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo).unwrap();
+//RS     assert_eq!(
+//RS         imported
+//RS             .labels
+//RS             .get("legacy.project-file")
+//RS             .map(String::as_str),
+//RS         Some("Cargo.toml")
+//RS     );
+//RS     assert_eq!(imported.inputs[0].as_str(), "Cargo.toml");
+//RS     assert_eq!(imported.argv[0], "cargo");
+//RS     let action = imported
+//RS         .clone()
+//RS         .with_outputs(["target/debug/imported"])
+//RS         .with_cap(BuildCapability::Exec)
+//RS         .into_action_spec(&BuildPolicy::allow_all())
+//RS         .unwrap();
+//RS     assert_eq!(action.legacy_wrapper, Some(LegacyWrapperKind::Cargo));
+//RS 
+//RS     let ci = imported
+//RS         .with_outputs(["target/debug/imported"])
+//RS         .with_cap(BuildCapability::Exec)
+//RS         .into_action_spec(&BuildPolicy::ci_default())
+//RS         .unwrap_err();
+//RS     assert!(matches!(ci, BuildError::PolicyDenied(_)));
+//RS 
+//RS     fs::remove_file(root.join("Cargo.toml")).unwrap();
+//RS     assert_eq!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo).unwrap_err(),
+//RS         BuildError::LegacyProjectFileMissing(LegacyWrapperKind::Cargo)
+//RS     );
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn legacy_project_import_rejects_ambiguous_targets_and_unmodeled_dependencies() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_legacy_import_strict_{}_{}",
+//RS         std::process::id(),
+//RS         "all"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS 
+//RS     fs::write(
+//RS         root.join("CMakeLists.txt"),
+//RS         "project(app)\nadd_executable(app main.cc)\nadd_dependencies(app generated)\n",
+//RS     )
+//RS     .unwrap();
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::CMake),
+//RS         Err(BuildError::LegacyProjectFileInvalid(message)) if message.contains("add_dependencies")
+//RS     ));
+//RS 
+//RS     fs::write(root.join("Makefile"), "all: main.o\nother:\n").unwrap();
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Make),
+//RS         Err(BuildError::LegacyProjectFileInvalid(message)) if message.contains("multiple or ambiguous")
+//RS     ));
+//RS 
+//RS     fs::write(
+//RS         root.join("build.gradle"),
+//RS         "tasks.register(\"build\")\ndependencies { implementation(\"x:y:1\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Gradle),
+//RS         Err(BuildError::LegacyProjectFileInvalid(message)) if message.contains("depends") || message.contains("dependencies")
+//RS     ));
+//RS 
+//RS     fs::write(
+//RS         root.join("package.json"),
+//RS         r#"{"scripts":{"build":"tool"},"dependencies":"not-an-object"}"#,
+//RS     )
+//RS     .unwrap();
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Npm),
+//RS         Err(BuildError::LegacyProjectFileInvalid(message)) if message.contains("dependencies")
+//RS     ));
+//RS 
+//RS     fs::write(
+//RS         root.join("Cargo.toml"),
+//RS         "[package]\nname = \"app\"\n[[bin]]\nname = \"one\"\n[[bin]]\nname = \"two\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo),
+//RS         Err(BuildError::LegacyProjectFileInvalid(message)) if message.contains("multiple binary")
+//RS     ));
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn legacy_project_import_captures_source_closure_and_rejects_unmodeled_recipes() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_legacy_import_closure_{}_{}",
+//RS         std::process::id(),
+//RS         "all"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(root.join("src")).unwrap();
+//RS     fs::create_dir_all(root.join("include")).unwrap();
+//RS     fs::write(root.join("src/main.c"), "int main(void) { return 0; }\n").unwrap();
+//RS     fs::write(root.join("include/app.h"), "#pragma once\n").unwrap();
+//RS 
+//RS     fs::write(
+//RS         root.join("CMakeLists.txt"),
+//RS         "project(app)\nadd_executable(app src/main.c)\n# jet: output=build/app\n",
+//RS     )
+//RS     .unwrap();
+//RS     let cmake = LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::CMake).unwrap();
+//RS     assert!(cmake
+//RS         .inputs
+//RS         .iter()
+//RS         .any(|path| path.as_str() == "src/main.c"));
+//RS     assert!(cmake
+//RS         .inputs
+//RS         .iter()
+//RS         .any(|path| path.as_str() == "include/app.h"));
+//RS     assert!(cmake
+//RS         .labels
+//RS         .get("legacy.source-closure")
+//RS         .is_some_and(|value| value.starts_with("project-files-v1:")));
+//RS 
+//RS     fs::write(
+//RS         root.join("CMakeLists.txt"),
+//RS         "project(app)\nadd_executable(app src/main.c)\n",
+//RS     )
+//RS     .unwrap();
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::CMake),
+//RS         Err(BuildError::LegacyProjectFileInvalid(message))
+//RS             if message.contains("exact build output")
+//RS     ));
+//RS 
+//RS     fs::write(
+//RS         root.join("Makefile"),
+//RS         "app: src/main.c\n\tcc -o app src/main.c\n",
+//RS     )
+//RS     .unwrap();
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Make),
+//RS         Err(BuildError::LegacyProjectFileInvalid(message))
+//RS             if message.contains("recipe bodies")
+//RS     ));
+//RS 
+//RS     fs::write(
+//RS         root.join("build.gradle"),
+//RS         "rootProject.name = \"app\"\ntasks.register(\"build\")\n# jet: output=build/libs/app.jar\n",
+//RS     )
+//RS     .unwrap();
+//RS     let gradle = LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Gradle).unwrap();
+//RS     assert!(gradle
+//RS         .outputs
+//RS         .iter()
+//RS         .any(|path| path.as_str() == "build/libs/app.jar"));
+//RS 
+//RS     fs::write(
+//RS         root.join("build.gradle"),
+//RS         "tasks.register(\"build\") { dependsOn \"x\" }\n",
+//RS     )
+//RS     .unwrap();
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Gradle),
+//RS         Err(BuildError::LegacyProjectFileInvalid(message))
+//RS             if message.contains("task body")
+//RS     ));
+//RS 
+//RS     fs::write(
+//RS         root.join("Cargo.toml"),
+//RS         "[package]\nname = \"app\"\n[dependencies]\nserde = \"1\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo),
+//RS         Err(BuildError::LegacyProjectFileInvalid(message))
+//RS             if message.contains("Cargo.lock")
+//RS     ));
+//RS 
+//RS     fs::write(root.join("package.json"), r#"{"scripts":{"build":"tool"}}"#).unwrap();
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Npm),
+//RS         Err(BuildError::LegacyProjectFileInvalid(message))
+//RS             if message.contains("exact build output")
+//RS     ));
+//RS 
+//RS     fs::write(
+//RS         root.join("package.json"),
+//RS         r#"{"scripts":{"build":"tool"},"main":"dist/index.js","dependencies":{"vite":"5"}}"#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(root.join("package-lock.json"), b"{}").unwrap();
+//RS     let npm = LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Npm).unwrap();
+//RS     assert!(npm
+//RS         .outputs
+//RS         .iter()
+//RS         .any(|path| path.as_str() == "dist/index.js"));
+//RS     assert_eq!(
+//RS         npm.labels
+//RS             .get("legacy.dependency.dependencies.vite")
+//RS             .map(String::as_str),
+//RS         Some("5")
+//RS     );
+//RS 
+//RS     fs::remove_file(root.join("package-lock.json")).unwrap();
+//RS     fs::write(
+//RS         root.join("package.json"),
+//RS         r#"{"scripts":{"build":"tool"},"dependencies":{"vite":"5"}}"#,
+//RS     )
+//RS     .unwrap();
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Npm),
+//RS         Err(BuildError::LegacyProjectFileInvalid(message))
+//RS             if message.contains("package-lock") || message.contains("shrinkwrap")
+//RS     ));
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn legacy_project_import_rejects_a_symlinked_canonical_file() {
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_legacy_import_symlink_{}_{}",
+//RS         std::process::id(),
+//RS         "cargo"
+//RS     ));
+//RS     let outside = root.with_extension("outside");
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     let _ = fs::remove_dir_all(&outside);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::create_dir_all(&outside).unwrap();
+//RS     fs::write(
+//RS         outside.join("Cargo.toml"),
+//RS         b"[package]\nname = \"outside\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     symlink(outside.join("Cargo.toml"), root.join("Cargo.toml")).unwrap();
+//RS 
+//RS     assert!(matches!(
+//RS         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo),
+//RS         Err(BuildError::LegacyProjectFileInvalid(path)) if path == "Cargo.toml"
+//RS     ));
+//RS     let _ = fs::remove_file(root.join("Cargo.toml"));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     let _ = fs::remove_dir_all(outside);
+//RS }
+//RS 
+//RS #[test]
+//RS fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
+//RS     let mut b = BuildContext::new();
+//RS     let plugin = WasmComponentPluginSpec::new(
+//RS         "shader-tools",
+//RS         "1.2.0",
+//RS         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+//RS     )
+//RS     .with_capability(BuildCapability::FS)
+//RS     .with_capability(BuildCapability::Exec);
+//RS     let policy = BuildPolicy::allow_all()
+//RS         .with_plugin_grant("shader-tools", BuildCapability::FS)
+//RS         .with_plugin_grant("shader-tools", BuildCapability::Exec);
+//RS     let contribution = PluginContribution::new()
+//RS         .with_action(
+//RS             "compile-shaders",
+//RS             ActionSpec::cached(["shaderc", "assets/main.glsl"])
+//RS                 .with_inputs(["assets/main.glsl"])
+//RS                 .with_outputs(["build/shaders.bin"])
+//RS                 .with_cap(BuildCapability::FS)
+//RS                 .with_cap(BuildCapability::Exec),
+//RS         )
+//RS         .with_target(
+//RS             TargetKind::Library,
+//RS             "shader-lib",
+//RS             TargetSpec::new().with_source(".jet/generated/shaders.jet"),
+//RS         )
+//RS         .with_generated_module(GeneratedModuleSpec::new(
+//RS             "shaders",
+//RS             ".jet/generated/shaders.jet",
+//RS             "fn shader_count() -[]> Int { return 1 }",
+//RS         ));
+//RS 
+//RS     let applied = b
+//RS         .apply_wasm_component_plugin(plugin, contribution, &policy)
+//RS         .unwrap();
+//RS     let plan = b.plan().unwrap();
+//RS     assert_eq!(plan.plugins()[0].name, "shader-tools");
+//RS     assert_eq!(plan.plugins()[0].api_version, BUILD_PLUGIN_API_VERSION);
+//RS     assert_eq!(
+//RS         plan.action(applied.actions[0]).unwrap().plugin,
+//RS         Some(applied.plugin)
+//RS     );
+//RS     assert_eq!(
+//RS         plan.target(applied.targets[0]).unwrap().plugin,
+//RS         Some(applied.plugin)
+//RS     );
+//RS     assert_eq!(plan.generated_modules()[0].name, "shaders");
+//RS     assert!(plan.generated_modules()[0]
+//RS         .source_digest
+//RS         .as_str()
+//RS         .starts_with("sha256:"));
+//RS     let generated = plan.explain_file(".jet/generated/shaders.jet");
+//RS     assert!(generated
+//RS         .provenance
+//RS         .iter()
+//RS         .any(|fact| fact == "generated=shaders"));
+//RS     assert!(generated
+//RS         .provenance
+//RS         .iter()
+//RS         .any(|fact| fact.starts_with("digest=sha256:")));
+//RS 
+//RS     let denied = BuildContext::new()
+//RS         .apply_wasm_component_plugin(
+//RS             WasmComponentPluginSpec::new(
+//RS                 "net-plugin",
+//RS                 "1.0.0",
+//RS                 "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+//RS             )
+//RS             .with_capability(BuildCapability::Net),
+//RS             PluginContribution::new(),
+//RS             &BuildPolicy::allow_all(),
+//RS         )
+//RS         .unwrap_err();
+//RS     assert!(matches!(denied, BuildError::PolicyDenied(_)));
+//RS 
+//RS     let version_err = BuildContext::new()
+//RS         .apply_wasm_component_plugin(
+//RS             WasmComponentPluginSpec::new(
+//RS                 "old-plugin",
+//RS                 "0.1.0",
+//RS                 "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+//RS             )
+//RS             .with_api_version("jet.build.plugin.v0"),
+//RS             PluginContribution::new(),
+//RS             &BuildPolicy::allow_all(),
+//RS         )
+//RS         .unwrap_err();
+//RS     assert!(matches!(
+//RS         version_err,
+//RS         BuildError::PluginVersionMismatch { .. }
+//RS     ));
+//RS 
+//RS     let contributed_cap_denied = BuildContext::new()
+//RS         .apply_wasm_component_plugin(
+//RS             WasmComponentPluginSpec::new(
+//RS                 "net-plugin",
+//RS                 "1.0.0",
+//RS                 "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+//RS             )
+//RS             .with_capability(BuildCapability::FS),
+//RS             PluginContribution::new().with_action(
+//RS                 "probe-network",
+//RS                 ActionSpec::cached(["curl", "https://example.invalid"])
+//RS                     .with_outputs(["build/net.txt"])
+//RS                     .with_cap(BuildCapability::Net),
+//RS             ),
+//RS             &BuildPolicy::allow_all().with_plugin_grant("net-plugin", BuildCapability::FS),
+//RS         )
+//RS         .unwrap_err();
+//RS     assert!(matches!(
+//RS         contributed_cap_denied,
+//RS         BuildError::PolicyDenied(_)
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn packaged_build_plugins_verify_bytes_and_roll_back_rejected_contributions() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_build_plugin_package_{}_{}",
+//RS         std::process::id(),
+//RS         std::thread::current().name().unwrap_or("test")
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     let component = b"\0asm\x0d\0\x01\0";
+//RS     let digest = ContentDigest::from_bytes(component);
+//RS     let manifest = root.join("plugin.manifest");
+//RS     let component_path = root.join("plugin.wasm");
+//RS     fs::write(
+//RS         &manifest,
+//RS         format!(
+//RS             "name = \"packaged\"\nversion = \"1.0.0\"\napi_version = \"{BUILD_PLUGIN_API_VERSION}\"\ncomponent_digest = \"{}\"\ncapabilities = [\"FS\"]\n",
+//RS             digest.as_str()
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(&component_path, component).unwrap();
+//RS 
+//RS     let spec = WasmComponentPluginSpec::load_packaged(&manifest, &component_path).unwrap();
+//RS     assert_eq!(spec.component_digest, digest.as_str());
+//RS 
+//RS     let invalid_component = b"not a component";
+//RS     let invalid_manifest = root.join("invalid.manifest");
+//RS     let invalid_component_path = root.join("invalid.wasm");
+//RS     fs::write(
+//RS         &invalid_manifest,
+//RS         format!(
+//RS             "name = \"invalid\"\nversion = \"1.0.0\"\napi_version = \"{BUILD_PLUGIN_API_VERSION}\"\ncomponent_digest = \"{}\"\ncapabilities = []\n",
+//RS             ContentDigest::from_bytes(invalid_component).as_str()
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(&invalid_component_path, invalid_component).unwrap();
+//RS     let invalid =
+//RS         WasmComponentPluginSpec::load_packaged(&invalid_manifest, &invalid_component_path)
+//RS             .expect_err("digest-matching arbitrary bytes must not be a component");
+//RS     assert!(invalid.contains("Component Model binary"), "{invalid}");
+//RS 
+//RS     let policy = BuildPolicy::allow_all().with_plugin_grant("packaged", BuildCapability::FS);
+//RS     let rejected = PluginContribution::new()
+//RS         .with_action(
+//RS             "partial-action",
+//RS             ActionSpec::cached(["tool"])
+//RS                 .with_outputs(["build/out"])
+//RS                 .with_cap(BuildCapability::FS),
+//RS         )
+//RS         .with_generated_module(GeneratedModuleSpec::new(
+//RS             "bad-module",
+//RS             "bad-module.jet",
+//RS             "fn bad() {}",
+//RS         ));
+//RS     let mut build = BuildContext::new();
+//RS     assert!(matches!(
+//RS         build.apply_packaged_wasm_component_plugin(&manifest, &component_path, rejected, &policy),
+//RS         Err(BuildError::InvalidGeneratedModulePath(_))
+//RS     ));
+//RS     assert!(build.plan().unwrap().actions().is_empty());
+//RS     assert!(build.plan().unwrap().plugins().is_empty());
+//RS 
+//RS     let accepted = PluginContribution::new().with_action(
+//RS         "packaged-action",
+//RS         ActionSpec::cached(["tool"])
+//RS             .with_outputs(["build/packaged.out"])
+//RS             .with_cap(BuildCapability::FS),
+//RS     );
+//RS     let applied = build
+//RS         .apply_packaged_wasm_component_plugin(&manifest, &component_path, accepted, &policy)
+//RS         .unwrap();
+//RS     assert_eq!(applied.actions.len(), 1);
+//RS     assert_eq!(build.plan().unwrap().plugins().len(), 1);
+//RS 
+//RS     fs::write(&component_path, b"tampered").unwrap();
+//RS     assert!(WasmComponentPluginSpec::load_packaged(&manifest, &component_path).is_err());
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn packaged_plugin_host_reads_are_bounded_and_reject_links() {
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_build_plugin_bounds_{}_{}",
+//RS         std::process::id(),
+//RS         "hostile"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     let oversized = root.join("oversized.manifest");
+//RS     fs::write(&oversized, vec![b'x'; 65 * 1024]).unwrap();
+//RS     let error = read_packaged_file_bounded(&oversized, "manifest", 64 * 1024).unwrap_err();
+//RS     assert!(error.contains("exceeds 65536"), "{error}");
+//RS 
+//RS     let target = root.join("real.manifest");
+//RS     fs::write(&target, b"safe").unwrap();
+//RS     let link = root.join("linked.manifest");
+//RS     symlink(&target, &link).unwrap();
+//RS     let error = read_packaged_file_bounded(&link, "manifest", 64 * 1024).unwrap_err();
+//RS     assert!(error.contains("regular non-symlink"), "{error}");
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn action_environment_allowlist_cannot_name_undeclared_values() {
+//RS     let mut build = BuildContext::new();
+//RS     let error = build
+//RS         .action(
+//RS             "env-check",
+//RS             ActionSpec::cached(["tool"])
+//RS                 .with_outputs(["build/out"])
+//RS                 .with_env_allowlist(["MISSING"]),
+//RS         )
+//RS         .unwrap_err();
+//RS     assert_eq!(
+//RS         error,
+//RS         BuildError::UndeclaredEnvName {
+//RS             action: "env-check".to_string(),
+//RS             key: "MISSING".to_string(),
+//RS         }
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn plugin_action_and_generated_module_cannot_share_one_path() {
+//RS     let result = BuildContext::new().apply_wasm_component_plugin(
+//RS         WasmComponentPluginSpec::new(
+//RS             "collision-plugin",
+//RS             "1.0.0",
+//RS             "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+//RS         )
+//RS         .with_capability(BuildCapability::Exec),
+//RS         PluginContribution::new()
+//RS             .with_action(
+//RS                 "emit-source",
+//RS                 ActionSpec::cached(["generator"])
+//RS                     .with_outputs([".jet/generated/collision.jet"])
+//RS                     .with_cap(BuildCapability::Exec),
+//RS             )
+//RS             .with_generated_module(GeneratedModuleSpec::new(
+//RS                 "collision",
+//RS                 ".jet/generated/collision.jet",
+//RS                 "fn collision() {}",
+//RS             )),
+//RS         &BuildPolicy::allow_all().with_plugin_grant("collision-plugin", BuildCapability::Exec),
+//RS     );
+//RS     assert!(matches!(
+//RS         result,
+//RS         Err(BuildError::GeneratedModuleCycle { .. })
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn action_kinds_have_distinct_identities() {
+//RS     use jet::Comptime::Build::ActionKind;
+//RS     fn key(kind: ActionKind) -> String {
+//RS         let mut b = BuildContext::new();
+//RS         let action = b
+//RS             .action(
+//RS                 "same",
+//RS                 ActionSpec::cached(["jetc", "src/main.jet"])
+//RS                     .with_kind(kind)
+//RS                     .with_inputs(["src/main.jet"])
+//RS                     .with_outputs(["build/out"]),
+//RS             )
+//RS             .unwrap();
+//RS         b.plan()
+//RS             .unwrap()
+//RS             .action_key(action)
+//RS             .unwrap()
+//RS             .as_str()
+//RS             .to_string()
+//RS     }
+//RS     let compile = key(ActionKind::Compile);
+//RS     let docs = key(ActionKind::Docs);
+//RS     let debug = key(ActionKind::Debug);
+//RS     let archive = key(ActionKind::SourceArchive);
+//RS     assert_ne!(compile, docs);
+//RS     assert_ne!(compile, debug);
+//RS     assert_ne!(compile, archive);
+//RS     assert_ne!(docs, debug);
+//RS     assert_ne!(docs, archive);
+//RS     assert_ne!(debug, archive);
+//RS }
+//RS 
+//RS #[test]
+//RS fn complete_action_key_covers_dep_outputs_env_allowlist_helpers_and_exact_source() {
+//RS     use jet::Comptime::Build::{ActionInputSnapshot, ActionKind, ContentDigest};
+//RS 
+//RS     let mut b = BuildContext::new();
+//RS     let dep_action = b
+//RS         .action(
+//RS             "dep-compile",
+//RS             ActionSpec::cached(["jetc", "lib.jet"])
+//RS                 .with_kind(ActionKind::Compile)
+//RS                 .with_outputs(["build/lib.o"]),
+//RS         )
+//RS         .unwrap();
+//RS     let dep = b
+//RS         .add_library(
+//RS             "lib",
+//RS             TargetSpec::new()
+//RS                 .with_source("lib.jet")
+//RS                 .with_action(dep_action)
+//RS                 .with_output("build/lib.o"),
+//RS         )
+//RS         .unwrap();
+//RS     let main = b
+//RS         .action(
+//RS             "main-compile",
+//RS             ActionSpec::cached(["jetc", "main.jet"])
+//RS                 .with_kind(ActionKind::Compile)
+//RS                 .with_inputs(["main.jet"])
+//RS                 .with_outputs(["build/main"])
+//RS                 .with_env("JET_PROFILE", "release")
+//RS                 .with_env("HOME", "/tmp/leak")
+//RS                 .with_env_allowlist(["JET_PROFILE"])
+//RS                 .with_helper_version("docgen", "1.2.3")
+//RS                 .with_label("profile", "release"),
+//RS         )
+//RS         .unwrap();
+//RS     b.add_executable(
+//RS         "app",
+//RS         TargetSpec::new()
+//RS             .with_source("main.jet")
+//RS             .with_dep(dep)
+//RS             .with_action(main)
+//RS             .with_metadata("profile", "release"),
+//RS     )
+//RS     .unwrap();
+//RS     let plan = b.plan().unwrap();
+//RS     let snap = [ActionInputSnapshot {
+//RS         path: jet::Comptime::Build::BuildPath::new("main.jet").unwrap(),
+//RS         digest: ContentDigest::from_bytes(b"fn run() {}"),
+//RS         byte_len: 11,
+//RS     }];
+//RS     let base = plan.action_key_with_inputs(main, &snap).unwrap();
+//RS 
+//RS     // Ambient HOME is outside allowlist — changing declared HOME must not
+//RS     // affect the key once allowlist filters it.
+//RS     let mut b2 = BuildContext::new();
+//RS     let dep2 = {
+//RS         let dep_action = b2
+//RS             .action(
+//RS                 "dep-compile",
+//RS                 ActionSpec::cached(["jetc", "lib.jet"])
+//RS                     .with_kind(ActionKind::Compile)
+//RS                     .with_outputs(["build/lib.o"]),
+//RS             )
+//RS             .unwrap();
+//RS         b2.add_library(
+//RS             "lib",
+//RS             TargetSpec::new()
+//RS                 .with_source("lib.jet")
+//RS                 .with_action(dep_action)
+//RS                 .with_output("build/lib.o"),
+//RS         )
+//RS         .unwrap()
+//RS     };
+//RS     let main2 = b2
+//RS         .action(
+//RS             "main-compile",
+//RS             ActionSpec::cached(["jetc", "main.jet"])
+//RS                 .with_kind(ActionKind::Compile)
+//RS                 .with_inputs(["main.jet"])
+//RS                 .with_outputs(["build/main"])
+//RS                 .with_env("JET_PROFILE", "release")
+//RS                 .with_env("HOME", "/other/home")
+//RS                 .with_env_allowlist(["JET_PROFILE"])
+//RS                 .with_helper_version("docgen", "1.2.3")
+//RS                 .with_label("profile", "release"),
+//RS         )
+//RS         .unwrap();
+//RS     b2.add_executable(
+//RS         "app",
+//RS         TargetSpec::new()
+//RS             .with_source("main.jet")
+//RS             .with_dep(dep2)
+//RS             .with_action(main2)
+//RS             .with_metadata("profile", "release"),
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(
+//RS         base,
+//RS         b2.plan()
+//RS             .unwrap()
+//RS             .action_key_with_inputs(main2, &snap)
+//RS             .unwrap()
+//RS     );
+//RS 
+//RS     // Helper version change flips key.
+//RS     let mut b3 = BuildContext::new();
+//RS     let dep3 = {
+//RS         let dep_action = b3
+//RS             .action(
+//RS                 "dep-compile",
+//RS                 ActionSpec::cached(["jetc", "lib.jet"])
+//RS                     .with_kind(ActionKind::Compile)
+//RS                     .with_outputs(["build/lib.o"]),
+//RS             )
+//RS             .unwrap();
+//RS         b3.add_library(
+//RS             "lib",
+//RS             TargetSpec::new()
+//RS                 .with_source("lib.jet")
+//RS                 .with_action(dep_action)
+//RS                 .with_output("build/lib.o"),
+//RS         )
+//RS         .unwrap()
+//RS     };
+//RS     let main3 = b3
+//RS         .action(
+//RS             "main-compile",
+//RS             ActionSpec::cached(["jetc", "main.jet"])
+//RS                 .with_kind(ActionKind::Compile)
+//RS                 .with_inputs(["main.jet"])
+//RS                 .with_outputs(["build/main"])
+//RS                 .with_env("JET_PROFILE", "release")
+//RS                 .with_env_allowlist(["JET_PROFILE"])
+//RS                 .with_helper_version("docgen", "9.9.9")
+//RS                 .with_label("profile", "release"),
+//RS         )
+//RS         .unwrap();
+//RS     b3.add_executable(
+//RS         "app",
+//RS         TargetSpec::new()
+//RS             .with_source("main.jet")
+//RS             .with_dep(dep3)
+//RS             .with_action(main3)
+//RS             .with_metadata("profile", "release"),
+//RS     )
+//RS     .unwrap();
+//RS     assert_ne!(
+//RS         base,
+//RS         b3.plan()
+//RS             .unwrap()
+//RS             .action_key_with_inputs(main3, &snap)
+//RS             .unwrap()
+//RS     );
+//RS 
+//RS     // Exact source byte change flips key for observing kinds.
+//RS     let snap2 = [ActionInputSnapshot {
+//RS         path: jet::Comptime::Build::BuildPath::new("main.jet").unwrap(),
+//RS         digest: ContentDigest::from_bytes(b"fn run() { print(1) }"),
+//RS         byte_len: 20,
+//RS     }];
+//RS     assert_ne!(base, plan.action_key_with_inputs(main, &snap2).unwrap());
+//RS 
+//RS     // Dep output path change flips key.
+//RS     let mut b4 = BuildContext::new();
+//RS     let dep4 = {
+//RS         let dep_action = b4
+//RS             .action(
+//RS                 "dep-compile",
+//RS                 ActionSpec::cached(["jetc", "lib.jet"])
+//RS                     .with_kind(ActionKind::Compile)
+//RS                     .with_outputs(["build/lib-renamed.o"]),
+//RS             )
+//RS             .unwrap();
+//RS         b4.add_library(
+//RS             "lib",
+//RS             TargetSpec::new()
+//RS                 .with_source("lib.jet")
+//RS                 .with_action(dep_action)
+//RS                 .with_output("build/lib-renamed.o"),
+//RS         )
+//RS         .unwrap()
+//RS     };
+//RS     let main4 = b4
+//RS         .action(
+//RS             "main-compile",
+//RS             ActionSpec::cached(["jetc", "main.jet"])
+//RS                 .with_kind(ActionKind::Compile)
+//RS                 .with_inputs(["main.jet"])
+//RS                 .with_outputs(["build/main"])
+//RS                 .with_env("JET_PROFILE", "release")
+//RS                 .with_env_allowlist(["JET_PROFILE"])
+//RS                 .with_helper_version("docgen", "1.2.3")
+//RS                 .with_label("profile", "release"),
+//RS         )
+//RS         .unwrap();
+//RS     b4.add_executable(
+//RS         "app",
+//RS         TargetSpec::new()
+//RS             .with_source("main.jet")
+//RS             .with_dep(dep4)
+//RS             .with_action(main4)
+//RS             .with_metadata("profile", "release"),
+//RS     )
+//RS     .unwrap();
+//RS     assert_ne!(
+//RS         base,
+//RS         b4.plan()
+//RS             .unwrap()
+//RS             .action_key_with_inputs(main4, &snap)
+//RS             .unwrap()
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn front_end_completion_gates_cache_lookup() {
+//RS     use jet::Comptime::Build::{CacheBypassDenied, FrontEndCompletion};
+//RS 
+//RS     assert!(FrontEndCompletion::all_complete()
+//RS         .authorize_cache_lookup()
+//RS         .is_ok());
+//RS     assert_eq!(
+//RS         FrontEndCompletion {
+//RS             parsed: false,
+//RS             ..FrontEndCompletion::all_complete()
+//RS         }
+//RS         .authorize_cache_lookup()
+//RS         .unwrap_err(),
+//RS         CacheBypassDenied::Parser
+//RS     );
+//RS     assert_eq!(
+//RS         FrontEndCompletion {
+//RS             sema_checked: false,
+//RS             ..FrontEndCompletion::all_complete()
+//RS         }
+//RS         .authorize_cache_lookup()
+//RS         .unwrap_err(),
+//RS         CacheBypassDenied::Sema
+//RS     );
+//RS     assert_eq!(
+//RS         FrontEndCompletion {
+//RS             policy_checked: false,
+//RS             ..FrontEndCompletion::all_complete()
+//RS         }
+//RS         .authorize_cache_lookup()
+//RS         .unwrap_err(),
+//RS         CacheBypassDenied::Policy
+//RS     );
+//RS     assert_eq!(
+//RS         FrontEndCompletion {
+//RS             diagnostics_complete: false,
+//RS             ..FrontEndCompletion::all_complete()
+//RS         }
+//RS         .authorize_cache_lookup()
+//RS         .unwrap_err(),
+//RS         CacheBypassDenied::Diagnostics
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn per_package_dependency_artifacts_restore_and_invalidate() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_build_package_actions_{}_restore",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS 
+//RS     let make_plan =
+//RS         |identity: &str, target: &str, profile: &str, alpha_source: &[u8], beta_source: &[u8]| {
+//RS             let mut context = BuildContext::new();
+//RS             let app = context
+//RS                 .add_executable("app", TargetSpec::new().with_source("main.jet"))
+//RS                 .unwrap();
+//RS             let mut plan = context.plan_with_default(app).unwrap();
+//RS             plan.add_compiler_package_actions(
+//RS                 &[
+//RS                     CompilerPackageSpec::new(
+//RS                         "alpha",
+//RS                         ContentDigest::from_bytes(alpha_source),
+//RS                         Vec::new(),
+//RS                     ),
+//RS                     CompilerPackageSpec::new(
+//RS                         "beta",
+//RS                         ContentDigest::from_bytes(beta_source),
+//RS                         Vec::new(),
+//RS                     ),
+//RS                     CompilerPackageSpec::new(
+//RS                         "app",
+//RS                         ContentDigest::from_bytes(b"app"),
+//RS                         vec!["alpha".to_string(), "beta".to_string()],
+//RS                     ),
+//RS                 ],
+//RS                 identity,
+//RS                 target,
+//RS                 profile,
+//RS             )
+//RS             .unwrap();
+//RS             plan
+//RS         };
+//RS     let plan = make_plan(
+//RS         "jet-test-compiler@clean",
+//RS         "native-test-target",
+//RS         "debug",
+//RS         b"alpha",
+//RS         b"beta",
+//RS     );
+//RS 
+//RS     let compiler = |action: &jet::Comptime::Build::BuildAction,
+//RS                     snapshots: &[ActionInputSnapshot]| {
+//RS         let label = |name: &str| {
+//RS             action
+//RS                 .labels
+//RS                 .get(name)
+//RS                 .map(String::as_str)
+//RS                 .unwrap_or_default()
+//RS         };
+//RS         let dependencies = snapshots
+//RS             .iter()
+//RS             .map(|snapshot| format!("{}={}", snapshot.path.as_str(), snapshot.digest.as_str()))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         Ok(action
+//RS             .outputs
+//RS             .iter()
+//RS             .map(|_| {
+//RS                 format!(
+//RS                     "sealed:{}:{}:{}:{}:{}:{dependencies}",
+//RS                     action.name.as_str(),
+//RS                     label("compiler.source-digest"),
+//RS                     label("compiler.identity"),
+//RS                     label("compiler.target"),
+//RS                     label("compiler.profile"),
+//RS                 )
+//RS                 .into_bytes()
+//RS             })
+//RS             .collect::<Vec<_>>())
+//RS     };
+//RS 
+//RS     let first = execute_build_plan_with_front_end_and_compiler(
+//RS         &plan,
+//RS         &root,
+//RS         &std::collections::BTreeSet::new(),
+//RS         FrontEndCompletion::all_complete(),
+//RS         &compiler,
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(
+//RS         first
+//RS             .report
+//RS             .events
+//RS             .iter()
+//RS             .filter(|event| matches!(
+//RS                 event,
+//RS                 BuildExecutionEvent::Finished {
+//RS                     action,
+//RS                     outcome: ActionOutcome::Succeeded { .. },
+//RS                 } if plan.action_handle(*action).and_then(|handle| plan.action(handle)).is_some_and(|action| action.is_compiler_owned())
+//RS             ))
+//RS             .count(),
+//RS         3
+//RS     );
+//RS 
+//RS     let second = execute_build_plan_with_front_end_and_compiler(
+//RS         &plan,
+//RS         &root,
+//RS         &std::collections::BTreeSet::new(),
+//RS         FrontEndCompletion::all_complete(),
+//RS         &compiler,
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(second.report.metrics.cache_restored_actions, 3);
+//RS     assert_eq!(
+//RS         second
+//RS             .report
+//RS             .events
+//RS             .iter()
+//RS             .filter(|event| matches!(
+//RS                 event,
+//RS                 BuildExecutionEvent::Finished {
+//RS                     action,
+//RS                     outcome: ActionOutcome::RestoredFromCache,
+//RS                 } if plan
+//RS                     .action_handle(*action)
+//RS                     .and_then(|handle| plan.action(handle))
+//RS                     .and_then(|action| action.labels.get("compiler.package"))
+//RS                     .is_some_and(|package| package != "app")
+//RS             ))
+//RS             .count(),
+//RS         2,
+//RS         "every unchanged dependency artifact must restore"
+//RS     );
+//RS     assert!(second.report.events.iter().all(|event| {
+//RS         !matches!(
+//RS             event,
+//RS             BuildExecutionEvent::Finished {
+//RS                 action,
+//RS                 outcome: ActionOutcome::Succeeded { .. },
+//RS             } if plan
+//RS                 .action_handle(*action)
+//RS                 .and_then(|handle| plan.action(handle))
+//RS                 .and_then(|action| action.labels.get("compiler.package"))
+//RS                 .is_some_and(|package| package != "app")
+//RS         )
+//RS     }));
+//RS 
+//RS     let rebuild_with = |field: &str, value: &str| {
+//RS         let changed_plan = match field {
+//RS             "compiler.identity" => {
+//RS                 make_plan(value, "native-test-target", "debug", b"alpha", b"beta")
+//RS             }
+//RS             "compiler.target" => {
+//RS                 make_plan("jet-test-compiler@clean", value, "debug", b"alpha", b"beta")
+//RS             }
+//RS             "compiler.profile" => make_plan(
+//RS                 "jet-test-compiler@clean",
+//RS                 "native-test-target",
+//RS                 value,
+//RS                 b"alpha",
+//RS                 b"beta",
+//RS             ),
+//RS             _ => unreachable!(),
+//RS         };
+//RS         let rebuilt = execute_build_plan_with_front_end_and_compiler(
+//RS             &changed_plan,
+//RS             &root,
+//RS             &std::collections::BTreeSet::new(),
+//RS             FrontEndCompletion::all_complete(),
+//RS             &compiler,
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(rebuilt.report.metrics.cache_restored_actions, 0, "{field}");
+//RS         assert_eq!(
+//RS             rebuilt
+//RS                 .report
+//RS                 .events
+//RS                 .iter()
+//RS                 .filter(|event| matches!(
+//RS                     event,
+//RS                     BuildExecutionEvent::Finished {
+//RS                         action,
+//RS                         outcome: ActionOutcome::Succeeded { .. },
+//RS                     } if changed_plan
+//RS                         .action_handle(*action)
+//RS                         .and_then(|handle| changed_plan.action(handle))
+//RS                         .and_then(|action| action.labels.get("compiler.package"))
+//RS                         .is_some_and(|package| package != "app")
+//RS                 ))
+//RS                 .count(),
+//RS             2,
+//RS             "{field} change must rebuild each dependency artifact once"
+//RS         );
+//RS     };
+//RS     rebuild_with("compiler.identity", "jet-test-compiler@next");
+//RS     rebuild_with("compiler.target", "aarch64-test-target");
+//RS     rebuild_with("compiler.profile", "release");
+//RS 
+//RS     let changed_source_plan = make_plan(
+//RS         "jet-test-compiler@clean",
+//RS         "native-test-target",
+//RS         "debug",
+//RS         b"alpha-v2",
+//RS         b"beta",
+//RS     );
+//RS     let changed_source = execute_build_plan_with_front_end_and_compiler(
+//RS         &changed_source_plan,
+//RS         &root,
+//RS         &std::collections::BTreeSet::new(),
+//RS         FrontEndCompletion::all_complete(),
+//RS         &compiler,
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(changed_source.report.metrics.cache_restored_actions, 1);
+//RS     assert_eq!(
+//RS         changed_source
+//RS             .report
+//RS             .events
+//RS             .iter()
+//RS             .filter(|event| matches!(
+//RS                 event,
+//RS                 BuildExecutionEvent::Finished {
+//RS                     action,
+//RS                     outcome: ActionOutcome::Succeeded { .. },
+//RS                 } if changed_source_plan
+//RS                     .action_handle(*action)
+//RS                     .and_then(|handle| changed_source_plan.action(handle))
+//RS                     .is_some_and(|action| action.is_compiler_owned())
+//RS             ))
+//RS             .count(),
+//RS         2,
+//RS         "changing alpha must rebuild alpha and its app dependent only"
+//RS     );
+//RS     assert!(changed_source.report.events.iter().any(|event| matches!(
+//RS         event,
+//RS         BuildExecutionEvent::Finished {
+//RS             action,
+//RS             outcome: ActionOutcome::RestoredFromCache,
+//RS         } if changed_source_plan
+//RS             .action_handle(*action)
+//RS             .and_then(|handle| changed_source_plan.action(handle))
+//RS             .and_then(|action| action.labels.get("compiler.package"))
+//RS             .is_some_and(|package| package == "beta")
+//RS     )));
+//RS 
+//RS     let dependency = plan
+//RS         .actions()
+//RS         .iter()
+//RS         .find(|action| {
+//RS             action
+//RS                 .labels
+//RS                 .get("compiler.package")
+//RS                 .is_some_and(|value| value == "alpha")
+//RS         })
+//RS         .unwrap();
+//RS     let consumer = plan
+//RS         .actions()
+//RS         .iter()
+//RS         .find(|action| {
+//RS             action
+//RS                 .labels
+//RS                 .get("compiler.package")
+//RS                 .is_some_and(|value| value == "app")
+//RS         })
+//RS         .unwrap();
+//RS     let original = ActionInputSnapshot {
+//RS         path: dependency.outputs[0].clone(),
+//RS         digest: ContentDigest::from_bytes(b"sealed:alpha"),
+//RS         byte_len: "sealed:alpha".len() as u64,
+//RS     };
+//RS     let changed = ActionInputSnapshot {
+//RS         digest: ContentDigest::from_bytes(b"sealed:alpha-v2"),
+//RS         byte_len: "sealed:alpha-v2".len() as u64,
+//RS         ..original.clone()
+//RS     };
+//RS     let consumer_handle = plan.action_handle(consumer.id).unwrap();
+//RS     assert_ne!(
+//RS         plan.action_key_with_inputs(consumer_handle, &[original])
+//RS             .unwrap(),
+//RS         plan.action_key_with_inputs(consumer_handle, &[changed])
+//RS             .unwrap()
+//RS     );
+//RS 
+//RS     fs::remove_dir_all(root).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn compiler_package_identity_target_and_profile_force_rebuild_keys() {
+//RS     fn key(identity: &str, target: &str, profile: &str) -> ActionKey {
+//RS         let mut context = BuildContext::new();
+//RS         let app = context
+//RS             .add_executable("app", TargetSpec::new().with_source("main.jet"))
+//RS             .unwrap();
+//RS         let mut plan = context.plan_with_default(app).unwrap();
+//RS         let handles = plan
+//RS             .add_compiler_package_actions(
+//RS                 &[CompilerPackageSpec::new(
+//RS                     "app",
+//RS                     ContentDigest::from_bytes(b"source"),
+//RS                     Vec::new(),
+//RS                 )],
+//RS                 identity,
+//RS                 target,
+//RS                 profile,
+//RS             )
+//RS             .unwrap();
+//RS         plan.action_key(handles[0]).unwrap()
+//RS     }
+//RS 
+//RS     let base = key("jet-a", "x86_64-linux", "debug");
+//RS     assert_ne!(base, key("jet-b", "x86_64-linux", "debug"));
+//RS     assert_ne!(base, key("jet-a", "aarch64-linux", "debug"));
+//RS     assert_ne!(base, key("jet-a", "x86_64-linux", "release"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn declared_hangar_toolchain_binds_virtual_mount_and_action_identity() {
+//RS     fn plan_for(mount_identity: &str) -> (BuildPlan, ActionHandle) {
+//RS         let mut context = BuildContext::new();
+//RS         let provenance = BuildProvenance::jetpack_dependency(
+//RS             "cc-toolchain@jetpack",
+//RS             LockRecord::new("hangar", "sha256:bundle"),
+//RS         );
+//RS         let mount_source = format!("/hangar/objects/{mount_identity}");
+//RS         let mount_destination = "/jet/toolchains/bundle";
+//RS         let toolchain = context
+//RS             .toolchain(
+//RS                 "jet-cc",
+//RS                 ToolchainSpec::target("x86_64-unknown-linux-gnu", provenance.clone())
+//RS                     .with_host_triple("x86_64-unknown-linux-gnu")
+//RS                     .with_linker(LinkerIdentity::new("lld", provenance.clone()))
+//RS                     .with_sysroot(SysrootIdentity::new(
+//RS                         "sysroot",
+//RS                         "sha256:sysroot",
+//RS                         provenance.clone(),
+//RS                     ))
+//RS                     .with_tool(
+//RS                         "cc",
+//RS                         format!("{mount_destination}/bin/cc"),
+//RS                     )
+//RS                     .with_tool(
+//RS                         "c++",
+//RS                         format!("{mount_destination}/bin/c++"),
+//RS                     )
+//RS                     .with_tool(
+//RS                         "ld",
+//RS                         format!("{mount_destination}/bin/ld"),
+//RS                     )
+//RS                     .declared_only()
+//RS                     .with_read_only_mount_identity(
+//RS                         mount_source,
+//RS                         mount_destination,
+//RS                         format!("sha256:{mount_identity}"),
+//RS                     ),
+//RS             )
+//RS             .unwrap();
+//RS         let action = context
+//RS             .action(
+//RS                 "compile-main",
+//RS                 ActionSpec::cached([
+//RS                     "cc",
+//RS                     "--target=x86_64-unknown-linux-gnu",
+//RS                     "--sysroot=/jet/toolchains/bundle/sysroot",
+//RS                     "-c",
+//RS                     "main.c",
+//RS                 ])
+//RS                 .with_inputs(["main.c"])
+//RS                 .with_outputs(["main.o"])
+//RS                 .with_kind(ActionKind::Compile)
+//RS                 .with_cap(BuildCapability::Exec)
+//RS                 .with_toolchain(toolchain),
+//RS             )
+//RS             .unwrap();
+//RS         let app = context
+//RS             .add_executable(
+//RS                 "app",
+//RS                 TargetSpec::new()
+//RS                     .with_source("main.c")
+//RS                     .with_output("app")
+//RS                     .with_action(action)
+//RS                     .with_toolchain(toolchain),
+//RS             )
+//RS             .unwrap();
+//RS         (context.plan_with_default(app).unwrap(), action)
+//RS     }
+//RS 
+//RS     let (first, first_action) = plan_for("bundle-a");
+//RS     let (second, second_action) = plan_for("bundle-b");
+//RS 
+//RS     let first_toolchain = &first.toolchains()[1];
+//RS     assert_eq!(
+//RS         first_toolchain.resolution,
+//RS         ToolchainResolution::DeclaredOnly
+//RS     );
+//RS     assert_eq!(first_toolchain.mounts[0].identity, "sha256:bundle-a");
+//RS     assert_eq!(
+//RS         first_toolchain.tools.get("cc").map(String::as_str),
+//RS         Some("/jet/toolchains/bundle/bin/cc")
+//RS     );
+//RS     assert_eq!(
+//RS         first.action(first_action).unwrap().kind,
+//RS         ActionKind::Compile
+//RS     );
+//RS     assert_ne!(
+//RS         first.action_key(first_action).unwrap(),
+//RS         second.action_key(second_action).unwrap()
+//RS     );
+//RS }
+//RS  
+//RS #[test]
+//RS fn compiler_nodes_are_sorted_and_path_independent() {
+//RS     let first = BuildPlanNode::new(
+//RS         BuildNodeKind::Check,
+//RS         "src/main.jet",
+//RS         vec![
+//RS             ("src/z.jet".to_string(), "digest-z".to_string()),
+//RS             ("src/a.jet".to_string(), "digest-a".to_string()),
+//RS         ],
+//RS     );
+//RS     let second = BuildPlanNode::new(
+//RS         BuildNodeKind::Check,
+//RS         "src/main.jet",
+//RS         vec![
+//RS             ("src/a.jet".to_string(), "digest-a".to_string()),
+//RS             ("src/z.jet".to_string(), "digest-z".to_string()),
+//RS         ],
+//RS     );
+//RS     assert_eq!(first, second);
+//RS     assert_eq!(first.inputs, vec!["src/a.jet", "src/z.jet"]);
+//RS     assert_eq!(first.key.len(), 64);
+//RS }
+// END-PORT-PENDING 0980 tests/build_graph.rs:1829-4084
+

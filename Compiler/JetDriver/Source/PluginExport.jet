@@ -1,0 +1,178 @@
+// PORT-PENDING 0613 crates-jet-driver-src-pluginexport-module-group: crates/jet-driver/src/PluginExport.rs:1-174
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-PLUGIN1=B / D-PLUGIN-EXPORT1=A / D-PLUGIN-VERSION1=A
+//RS //! (c81): the driver-layer half of `target: sandbox` — resolving the manifest
+//RS //! `export:` name, validating the entry module's top-level `pub fn` surface
+//RS //! (homogeneous scalar or recursively closed Component Model shapes), and the
+//RS //! ApiFreeze-based version handshake.
+//RS 
+//RS //!
+//RS //! Re-grounding note (this card): D-PLUGIN-EXPORT1/D-PLUGIN-VERSION1's ratified
+//RS //! text names the retired D-CAP4 `api: stable` freeze machinery as the version
+//RS //! contract. That machinery (`CapabilityFreeze.rs`, the manifest `api:` field)
+//RS //! was deleted in the D-MEM1/S2 migration — the ratified *intent* (freeze the
+//RS //! exported interface, diff for compatibility, reject incompatible changes) is
+//RS //! unchanged, so this builds on `Sema::ApiFreeze`'s still-live pub-metadata
+//RS //! semver-snapshot mechanism instead: the same `ApiSnapshot`/`fn_signature`
+//RS //! machinery a normal library uses (E1218/E2601), just keyed under a
+//RS //! `plugin__` namespace so a plugin's frozen interface never collides with an
+//RS //! ordinary library package's frozen API in the same project.
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Sema::ApiFreeze;
+//RS use crate::AST::{Item, ProgramBundle};
+//RS 
+//RS /// The canonical Package `export:` target, or the package name, or (no
+//RS /// Package context at all) the entry file's stem. Inline and file-backed
+//RS /// carriers use the same PackageFacts model (D-ECO-INLINEPACKAGE1=A).
+//RS pub fn resolve_export_name(bundle: &ProgramBundle) -> String {
+//RS     if let Ok(Some(facts)) = crate::Loader::package_facts_for_bundle(bundle) {
+//RS         for pkg in &facts.packages {
+//RS             for t in &pkg.targets {
+//RS                 if let crate::Package::Target::Plugin { export } = t {
+//RS                     return export.clone().unwrap_or_else(|| pkg.name.clone());
+//RS                 }
+//RS             }
+//RS         }
+//RS         return facts.name;
+//RS     }
+//RS     bundle.modules[bundle.entry]
+//RS         .path
+//RS         .file_stem()
+//RS         .and_then(|s| s.to_str())
+//RS         .unwrap_or("plugin")
+//RS         .to_string()
+//RS }
+//RS 
+//RS /// The published-version identity used for the frozen snapshot header. A
+//RS /// missing version keeps the historical `"0.0.0"` fallback.
+//RS fn resolve_version(bundle: &ProgramBundle) -> String {
+//RS     crate::Loader::package_facts_for_bundle(bundle)
+//RS         .ok()
+//RS         .flatten()
+//RS         .and_then(|facts| facts.version)
+//RS         .unwrap_or_else(|| "0.0.0".to_string())
+//RS }
+//RS 
+//RS /// E1260: a sandbox's exported `pub fn` has no homogeneous scalar or closed
+//RS /// Component Model shape.
+//RS fn e1260(detail: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1260",
+//RS         "a sandbox's exported function has an unsupported signature".to_string(),
+//RS         detail.to_string(),
+//RS         "every parameter and the return type must use one scalar type, or a recursively closed `#Codable` Component Model shape — narrow the signature, or drop `pub` if this function isn't meant to be called across the sandbox boundary".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn component_signature(bundle: &ProgramBundle, guest: &crate::Sema::GuestFunction) -> bool {
+//RS     guest
+//RS         .return_type
+//RS         .as_ref()
+//RS         .is_some_and(|ty| crate::Sema::sandbox_component_type(bundle, ty))
+//RS         && guest
+//RS             .params
+//RS             .iter()
+//RS             .all(|(_, ty)| crate::Sema::sandbox_component_type(bundle, ty))
+//RS }
+//RS 
+//RS /// Validate the entry module's top-level `pub fn` surface for a
+//RS /// `target: sandbox` build. Every public function is checked through the sema
+//RS /// guest projection; a non-conforming one is E1260, not a silent skip.
+//RS pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
+//RS     let mut diags = Vec::new();
+//RS     for item in &bundle.modules[bundle.entry].items {
+//RS         let Item::Func(f) = item else { continue };
+//RS         let Some(guest) = crate::Sema::sandbox_export_signature(f) else {
+//RS             continue;
+//RS         };
+//RS         if guest.scalar.is_none() && !component_signature(bundle, &guest) {
+//RS             diags.push(e1260(&format!(
+//RS                 "`pub fn {}` has neither one homogeneous scalar shape nor a recursively closed `#Codable` Component Model shape",
+//RS                 f.name
+//RS             )));
+//RS         }
+//RS     }
+//RS     diags
+//RS }
+//RS 
+//RS /// E1257: the sandbox's exported interface changed incompatibly since the last
+//RS /// build (D-PLUGIN-VERSION1=A). `delta` names what changed — a removed export
+//RS /// or a changed signature; adding a new export is always compatible.
+//RS fn e1257(delta: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1257",
+//RS         "this sandbox's exported interface changed incompatibly".to_string(),
+//RS         format!(
+//RS             "a sandbox's frozen exported interface is the load-time contract (D-PLUGIN-VERSION1) — {delta}"
+//RS         ),
+//RS         "restore the removed/changed export, or accept this as an intentional breaking change (delete the stale snapshot under `.jet/cache/api/` to re-freeze)".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// The frozen-snapshot package identity for plugin `export_name` — namespaced
+//RS /// so it never collides with an ordinary library package's frozen API in the
+//RS /// same project's `.jet/cache/api/` directory.
+//RS fn snapshot_package_key(export_name: &str) -> String {
+//RS     format!("plugin__{export_name}")
+//RS }
+//RS 
+//RS /// `ApiFreeze`'s existing pub-metadata snapshot mechanism (re-grounded from
+//RS /// the retired D-CAP4 system — see module doc). Builds the current snapshot
+//RS /// from exactly the sema scalar functions that the checked MIR plan projects,
+//RS /// diffs it against the prior frozen snapshot (if any), and — when compatible
+//RS /// (no prior snapshot, or nothing removed/changed) — saves the new snapshot as
+//RS /// the fresh baseline. Returns `Err` diagnostics on an incompatible change;
+//RS /// never touches disk when it does.
+//RS pub fn check_and_freeze_version(
+//RS     bundle: &ProgramBundle,
+//RS     export_name: &str,
+//RS ) -> Result<(), Vec<Diagnostic>> {
+//RS     let package = snapshot_package_key(export_name);
+//RS     let version = resolve_version(bundle);
+//RS     let mut funcs = Vec::new();
+//RS     for item in &bundle.modules[bundle.entry].items {
+//RS         let Item::Func(f) = item else { continue };
+//RS         let Some(guest) = crate::Sema::sandbox_export_signature(f) else {
+//RS             continue;
+//RS         };
+//RS         if guest.scalar.is_none() && !component_signature(bundle, &guest) {
+//RS             continue;
+//RS         }
+//RS         funcs.push(ApiFreeze::FrozenFn {
+//RS             name: f.name.clone(),
+//RS             signature: ApiFreeze::fn_signature(f),
+//RS         });
+//RS     }
+//RS     funcs.sort();
+//RS     let current = ApiFreeze::ApiSnapshot {
+//RS         api_version: ApiFreeze::API_SNAPSHOT_VERSION,
+//RS         package: package.clone(),
+//RS         published_version: version,
+//RS         funcs,
+//RS     };
+//RS 
+//RS     if let Some(prior) = ApiFreeze::load_snapshot(&bundle.project_root, &package) {
+//RS         let mut deltas = Vec::new();
+//RS         for old_fn in &prior.funcs {
+//RS             match current.funcs.iter().find(|f| f.name == old_fn.name) {
+//RS                 None => deltas.push(format!("export `{}` was removed", old_fn.name)),
+//RS                 Some(new_fn) if new_fn.signature != old_fn.signature => deltas.push(format!(
+//RS                     "export `{}` changed from `{}` to `{}`",
+//RS                     old_fn.name, old_fn.signature, new_fn.signature
+//RS                 )),
+//RS                 Some(_) => {}
+//RS             }
+//RS         }
+//RS         if !deltas.is_empty() {
+//RS             return Err(deltas.iter().map(|d| e1257(d)).collect());
+//RS         }
+//RS     }
+//RS 
+//RS     let _ = ApiFreeze::save_snapshot(&bundle.project_root, &current);
+//RS     Ok(())
+//RS }
+// END-PORT-PENDING 0613 crates/jet-driver/src/PluginExport.rs:1-174
+

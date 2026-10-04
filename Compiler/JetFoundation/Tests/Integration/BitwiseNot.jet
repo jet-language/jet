@@ -1,0 +1,1418 @@
+// PORT-PENDING 0973 tests-bitwise-not-module-group: tests/bitwise_not.rs:1-148
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-BITNOT1=A — prefix `!` turns over every bit it is given: the one bit of a
+//RS //! `Bool`, or every bit of a whole number. Operands arrive through `bits` so
+//RS //! the work really happens in the built program rather than folding away.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use tir_support::{assert_tiers_agree, build_and_run, have_rustc};
+//RS 
+//RS const SEED: &str = "fn bits(n: Int) -> Int {\n    return n\n}\n";
+//RS 
+//RS /// D-BITNOT1=A: on the width-free default `Int`, turning over every bit is the
+//RS /// same as `-x - 1`. Proving the identity rather than a table of constants is
+//RS /// what shows the operator is the complement and not a lookup.
+//RS #[test]
+//RS fn bit_not_on_int_is_minus_x_minus_one() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = format!(
+//RS         "{SEED}
+//RS fn check(x: Int) {{
+//RS     print(!x == -x - 1)
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     check(bits(0))
+//RS     check(bits(5))
+//RS     check(bits(-6))
+//RS     check(bits(1000))
+//RS     print(!bits(0))
+//RS     print(!bits(5))
+//RS }}
+//RS "
+//RS     );
+//RS     let (code, out) = build_and_run("bitnot_identity", &src);
+//RS     assert_eq!(code, 0, "{out}");
+//RS     assert_eq!(out, "true\ntrue\ntrue\ntrue\n-1\n-6\n", "{out}");
+//RS }
+//RS 
+//RS /// D-BITNOT1=A: a sized type flips exactly its own width and comes back as the
+//RS /// same width. Each result below is that width's all-ones minus the value,
+//RS /// which only holds if the flip stayed inside the declared width.
+//RS #[test]
+//RS fn bit_not_keeps_each_integer_width() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "
+//RS fn run() {
+//RS     a :: U8{5}
+//RS     print(!a)
+//RS     b :: U16{5}
+//RS     print(!b)
+//RS     c :: U32{5}
+//RS     print(!c)
+//RS     d :: I8{5}
+//RS     print(!d)
+//RS     e :: I16{5}
+//RS     print(!e)
+//RS     f :: I32{5}
+//RS     print(!f)
+//RS }
+//RS ";
+//RS     let (code, out) = build_and_run("bitnot_widths", src);
+//RS     assert_eq!(code, 0, "{out}");
+//RS     // Unsigned: all-ones minus 5. Signed: -6 at every width.
+//RS     assert_eq!(out, "250\n65530\n4294967290\n-6\n-6\n-6\n", "{out}");
+//RS }
+//RS 
+//RS /// D-BITNOT1=A: the everyday use — `flags & !mask` keeps every bit except the
+//RS /// ones the mask names.
+//RS #[test]
+//RS fn bit_not_clears_the_bits_a_mask_names() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = format!(
+//RS         "{SEED}
+//RS fn run() {{
+//RS     flags :: bits(15)
+//RS     print(flags & !bits(4))
+//RS     print(flags & !bits(1))
+//RS     print(flags & !bits(15))
+//RS     print(flags & !bits(0))
+//RS }}
+//RS "
+//RS     );
+//RS     let (code, out) = build_and_run("bitnot_mask", &src);
+//RS     assert_eq!(code, 0, "{out}");
+//RS     assert_eq!(out, "11\n14\n0\n15\n", "{out}");
+//RS }
+//RS 
+//RS /// D-BITNOT1=A: the Bool meaning is untouched.
+//RS #[test]
+//RS fn bit_not_on_bool_is_unchanged() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "
+//RS fn yes() -> Bool {
+//RS     return true
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(!true)
+//RS     print(!false)
+//RS     print(!yes())
+//RS }
+//RS ";
+//RS     let (code, out) = build_and_run("bitnot_bool", src);
+//RS     assert_eq!(code, 0, "{out}");
+//RS     assert_eq!(out, "false\ntrue\nfalse\n", "{out}");
+//RS }
+//RS 
+//RS /// I9: every case above is AOT only. This runs the same flips under `jet run`
+//RS /// — the Cranelift host, with the interpreter taking whatever it deopts on —
+//RS /// and asserts both tiers agree. The width-clamping is the part most likely to
+//RS /// differ, so each sized type is checked, and the value above 2^32 is the one
+//RS /// that catches a tier doing 32-bit work.
+//RS #[test]
+//RS fn bit_not_agrees_on_every_tier() {
+//RS     let src = format!(
+//RS         "{SEED}
+//RS fn run() {{
+//RS     print(!bits(0))
+//RS     print(!bits(5))
+//RS     print(!bits(-6))
+//RS     print(!bits(4294967296))
+//RS     print(bits(15) & !bits(4))
+//RS     print(!true)
+//RS     a :: U8{{5}}
+//RS     print(!a)
+//RS     b :: I16{{5}}
+//RS     print(!b)
+//RS     c :: U32{{5}}
+//RS     print(!c)
+//RS }}
+//RS "
+//RS     );
+//RS     assert_tiers_agree(
+//RS         "bitnot_tiers",
+//RS         &src,
+//RS         "-1\n-6\n5\n-4294967297\n11\nfalse\n250\n-6\n4294967290\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 0973 tests/bitwise_not.rs:1-148
+
+// PORT-PENDING 0973 tests-bitwise-not-module-group: tests/build_entry_epoch4.rs:1-283
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Focused production legacy-bridge contract coverage for Epoch 4.
+//RS 
+//RS mod common;
+//RS 
+//RS use jet::Comptime::Build::{BuildCapability, BuildPolicy};
+//RS use jet::Driver::{compile_bundle_path_build, BuildRunOptions};
+//RS use std::collections::BTreeSet;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS static NEXT: AtomicU64 = AtomicU64::new(0);
+//RS 
+//RS const LEGACY_TEMPLATE: &str = r#"
+//RS fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+//RS     #Impure("exercise the typed legacy bridge") {
+//RS         tc :: b.toolchain("native", "x86_64-linux")
+//RS         identity :: b.signing("builder", "ci")
+//RS         imported :: b.legacy(
+//RS             "cargo",
+//RS             "legacy",
+//RS             __INPUTS__,
+//RS             __OUTPUTS__,
+//RS             __ARGV__,
+//RS             ["Exec", "FS"],
+//RS             tc,
+//RS             [],
+//RS             identity,
+//RS             "generic",
+//RS             [],
+//RS             [],
+//RS             [],
+//RS             [],
+//RS             [],
+//RS             "cached",
+//RS             "Cargo.toml"
+//RS         )
+//RS         app :: b.add_executable("app", ["main.jet"], [imported])
+//RS         return b.plan(app)
+//RS     }
+//RS     return b.plan()
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS 
+//RS fn project(name: &str) -> PathBuf {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet-build-entry-epoch4-{name}-{}-{}",
+//RS         std::process::id(),
+//RS         NEXT.fetch_add(1, Ordering::Relaxed)
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     root
+//RS }
+//RS 
+//RS fn source(inputs: &str, outputs: &str, argv: &str) -> String {
+//RS     LEGACY_TEMPLATE
+//RS         .replace("__INPUTS__", inputs)
+//RS         .replace("__OUTPUTS__", outputs)
+//RS         .replace("__ARGV__", argv)
+//RS }
+//RS 
+//RS fn options(policy: BuildPolicy) -> BuildRunOptions {
+//RS     BuildRunOptions {
+//RS         grants: BTreeSet::from([BuildCapability::Exec, BuildCapability::FS]),
+//RS         policy,
+//RS         execute: false,
+//RS         gates: jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+//RS         inspect_only: false,
+//RS         emit_generated: false,
+//RS         locked: false,
+//RS         no_os: false,
+//RS         web_target: false,
+//RS         plugin_target: false,
+//RS         cross_target: None,
+//RS         profile: "dev".to_string(),
+//RS         artifact_build: false,
+//RS         application_authority: None,
+//RS         setting_overrides: std::collections::BTreeMap::new(),
+//RS         remote: None,
+//RS         package_scope: true,
+//RS         build_override: true,
+//RS         entry_fn: None,
+//RS     }
+//RS }
+//RS 
+//RS fn write_entry(root: &Path, text: &str) -> PathBuf {
+//RS     let entry = root.join("main.jet");
+//RS     fs::write(&entry, text).unwrap();
+//RS     entry
+//RS }
+//RS 
+//RS #[test]
+//RS fn ci_denies_legacy_before_reading_a_missing_manifest() {
+//RS     let root = project("ci-policy-order");
+//RS     let entry = write_entry(
+//RS         &root,
+//RS         &source(
+//RS             "[\"Cargo.toml\"]",
+//RS             "[\"target/debug/cli\"]",
+//RS             "[\"cargo\", \"build\", \"--bin\", \"cli\"]",
+//RS         ),
+//RS     );
+//RS 
+//RS     let errors =
+//RS         compile_bundle_path_build(entry.to_str().unwrap(), options(BuildPolicy::ci_default()))
+//RS             .unwrap_err();
+//RS     assert!(
+//RS         errors.iter().any(|diagnostic| diagnostic
+//RS             .what
+//RS             .contains("legacy build wrappers are disabled in CI")),
+//RS         "CI policy must win over missing canonical manifest: {errors:#?}"
+//RS     );
+//RS     assert!(
+//RS         !errors
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.what.contains("requires `Cargo.toml`")),
+//RS         "denied wrappers must not attempt canonical import: {errors:#?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn allowed_legacy_bridge_rejects_stale_canonical_facts() {
+//RS     for (name, inputs, outputs, argv, expected) in [
+//RS         (
+//RS             "argv",
+//RS             "[\"Cargo.toml\"]",
+//RS             "[\"target/debug/cli\"]",
+//RS             "[\"cargo\", \"check\"]",
+//RS             "argv does not match",
+//RS         ),
+//RS         (
+//RS             "inputs",
+//RS             "[\"Cargo.toml\", \"extra.txt\"]",
+//RS             "[\"target/debug/cli\"]",
+//RS             "[\"cargo\", \"build\", \"--bin\", \"cli\"]",
+//RS             "inputs must exactly match",
+//RS         ),
+//RS         (
+//RS             "outputs",
+//RS             "[\"Cargo.toml\"]",
+//RS             "[\"target/debug/other\"]",
+//RS             "[\"cargo\", \"build\", \"--bin\", \"cli\"]",
+//RS             "outputs must exactly match",
+//RS         ),
+//RS     ] {
+//RS         let root = project(&format!("stale-{name}"));
+//RS         fs::write(
+//RS             root.join("Cargo.toml"),
+//RS             "[package]\nname = \"legacy-contract\"\n\n[[bin]]\nname = \"cli\"\n",
+//RS         )
+//RS         .unwrap();
+//RS         let entry = write_entry(&root, &source(inputs, outputs, argv));
+//RS         let errors =
+//RS             compile_bundle_path_build(entry.to_str().unwrap(), options(BuildPolicy::allow_all()))
+//RS                 .unwrap_err();
+//RS         assert!(
+//RS             errors
+//RS                 .iter()
+//RS                 .any(|diagnostic| diagnostic.what.contains(expected)),
+//RS             "stale {name} declaration must be rejected: {errors:#?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn workspace_build_observes_dependency_order_and_execution_chain() {
+//RS     let root = project("workspace-dependency-order");
+//RS     let packages = root.join("packages");
+//RS     fs::create_dir_all(packages.join("a")).unwrap();
+//RS     fs::create_dir_all(packages.join("b")).unwrap();
+//RS     let workspace_source = r#"
+//RS use b
+//RS 
+//RS module workspace {
+//RS     members: ["./packages/a", "./packages/b"]
+//RS }
+//RS 
+//RS fn build(b: BuildContext) -[Exec]> BuildPlan {
+//RS     #Impure("workspace must observe member b") {
+//RS         action :: b.action(
+//RS             "workspace-order",
+//RS             [],
+//RS             ["workspace-stamp"],
+//RS             ["sh", "-c", "printf workspace > workspace-stamp"],
+//RS             ["Exec"]
+//RS         )
+//RS         app :: b.add_executable("workspace", ["workspace.jet"], [action])
+//RS         return b.plan(app)
+//RS     }
+//RS     return b.plan()
+//RS }
+//RS "#
+//RS     .to_string();
+//RS     fs::write(root.join("workspace.jet"), workspace_source).unwrap();
+//RS     fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"workspace\"\nversion: \"0.1.0\"\ndeps: { b: ./packages/b }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         packages.join("a").join("package.jet"),
+//RS         "name: \"a\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         packages.join("b").join("package.jet"),
+//RS         "name: \"b\"\nversion: \"0.1.0\"\ndeps: { a: ../a }\nbuild: { allow: #(Exec) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         packages.join("a").join("run.jet"),
+//RS         r#"
+//RS fn build(b: BuildContext) -[Exec]> BuildPlan {
+//RS     #Impure("member a records execution") {
+//RS         action :: b.action(
+//RS             "a-order",
+//RS             [],
+//RS             ["a/a.jet"],
+//RS             ["sh", "-c", "printf 'fn a_ready() -> Int -> 1' > a/a.jet"],
+//RS             ["Exec"]
+//RS         )
+//RS         target :: b.add_library("a", ["run.jet"], [action])
+//RS         return b.plan(target)
+//RS     }
+//RS     return b.plan()
+//RS }
+//RS fn run() {}
+//RS "#
+//RS         .to_string(),
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         packages.join("b").join("run.jet"),
+//RS         r#"
+//RS use a
+//RS 
+//RS fn build(b: BuildContext) -[Exec]> BuildPlan {
+//RS     #Impure("member b records its realized package") {
+//RS         action :: b.action(
+//RS             "b-order",
+//RS             [],
+//RS             ["b/b.jet"],
+//RS             ["sh", "-c", "printf 'fn b_ready() -> Int -> 1' > b/b.jet"],
+//RS             ["Exec"]
+//RS         )
+//RS         target :: b.add_library("b", ["run.jet"], [action])
+//RS         return b.plan(target)
+//RS     }
+//RS     return b.plan()
+//RS }
+//RS fn run() {}
+//RS "#
+//RS         .to_string(),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let plan = jetpack::WorkspaceFile::load(&root)
+//RS         .expect("workspace manifest should be found")
+//RS         .expect("workspace manifest should parse");
+//RS     let ordered = jetpack::MemberSelect::dependency_order(&root, &plan.members).unwrap();
+//RS     let names: Vec<_> = ordered.iter().map(|member| member.name.as_str()).collect();
+//RS     assert_eq!(names, ["a", "b"]);
+//RS 
+//RS     jet::compile_programmable_build_opts(
+//RS         root.join("workspace.jet").to_str().unwrap(),
+//RS         &["exec".to_string()],
+//RS         false,
+//RS         jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         None,
+//RS     )
+//RS     .expect("workspace and member entries should run through the production driver");
+//RS     assert!(packages.join("a/a/a.jet").is_file());
+//RS     assert!(packages.join("b/b/b.jet").is_file());
+//RS     assert_eq!(
+//RS         fs::read_to_string(root.join("workspace-stamp")).unwrap(),
+//RS         "workspace"
+//RS     );
+//RS }
+// END-PORT-PENDING 0973 tests/build_entry_epoch4.rs:1-283
+
+// PORT-PENDING 0973 tests-bitwise-not-module-group: tests/build_metadata_compat.rs:1-96
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS use jet::ReceiptStore::ReceiptStore;
+//RS use jet::Lock;
+//RS use jet_store::{ActionHandle, BuildRecord, Digest, Store};
+//RS 
+//RS const LOCK_V0: &str = include_str!("fixtures/build-metadata-compat/lock-v0.lock");
+//RS const BUILD_RECORD_V0: &str =
+//RS     include_str!("fixtures/build-metadata-compat/build-record-v0.json");
+//RS const STORE_V0: &[u8] = include_bytes!("fixtures/build-metadata-compat/store-v0.magic");
+//RS const RECEIPT_V1: &[u8] = include_bytes!("fixtures/build-metadata-compat/receipt-v1.magic");
+//RS const RECEIPT_KEY: &str = "e27dfe4d5c5f1b2c8a861de44091b4c7ac7eec90fe2f4cac59a328f73c66337f";
+//RS 
+//RS fn scratch_root() -> PathBuf {
+//RS     PathBuf::from(
+//RS         std::env::var_os("HOME").expect("HOME is required for the compatibility scratch root"),
+//RS     )
+//RS     .join(".cache/jet-luna/build-metadata-compat-conformance")
+//RS }
+//RS 
+//RS fn reset_scratch(root: &Path) {
+//RS     let _ = fs::remove_dir_all(root);
+//RS     fs::create_dir_all(root).expect("create compatibility scratch root");
+//RS }
+//RS 
+//RS #[test]
+//RS fn previous_tool_owned_artifacts_are_read_fail_closed_without_rewriting_input() {
+//RS     let root = scratch_root();
+//RS     reset_scratch(&root);
+//RS 
+//RS     let lock_path = root.join(".jet/lock");
+//RS     fs::create_dir_all(lock_path.parent().unwrap()).expect("create lock directory");
+//RS     fs::write(&lock_path, LOCK_V0).expect("write lock fixture");
+//RS     let lock_before = fs::read(&lock_path).expect("read lock fixture");
+//RS     let diagnostic = Lock::load_strict_with_path(&root)
+//RS         .expect_err("unsupported lock version must stop the strict reader");
+//RS     assert_eq!(diagnostic.code, "E1214");
+//RS     assert_eq!(fs::read(&lock_path).unwrap(), lock_before);
+//RS 
+//RS     assert!(STORE_V0.starts_with(b"jet.store.v0\0action\0"));
+//RS     assert!(STORE_V0.windows(b"jet.store.v0\0artifact\0".len()).any(|window| {
+//RS         window == b"jet.store.v0\0artifact\0"
+//RS     }));
+//RS     let action_key = STORE_V0[18..50]
+//RS         .iter()
+//RS         .map(|byte| format!("{byte:02x}"))
+//RS         .collect::<String>();
+//RS     let action = ActionHandle::new(Digest::from_hex(&action_key).expect("fixture action key"));
+//RS     let store = Store::new(root.join("store")).expect("create store");
+//RS     let action_path = store.action_path(&action);
+//RS     fs::write(&action_path, STORE_V0).expect("write store fixture");
+//RS     let store_before = fs::read(&action_path).expect("read store fixture");
+//RS     assert!(store
+//RS         .get_action(&action)
+//RS         .expect("read previous store action")
+//RS         .is_none());
+//RS     assert_eq!(fs::read(&action_path).unwrap(), store_before);
+//RS     assert!(matches!(
+//RS         store.lookup_artifact(&action_key).expect("read previous artifact"),
+//RS         jet_store::ArtifactLookup::Missing
+//RS     ));
+//RS     let mut corrupt_store = STORE_V0.to_vec();
+//RS     corrupt_store[0] = b'x';
+//RS     fs::write(&action_path, corrupt_store).expect("write corrupt store probe");
+//RS     assert!(matches!(
+//RS         store.lookup_artifact(&action_key).expect("read corrupt store probe"),
+//RS         jet_store::ArtifactLookup::Corrupt
+//RS     ));
+//RS     assert!(
+//RS         !action_path.exists(),
+//RS         "genuine corruption should still be quarantined"
+//RS     );
+//RS 
+//RS     let build_record_error = BuildRecord::from_json(BUILD_RECORD_V0)
+//RS         .expect_err("unsupported build-record schema must be rejected");
+//RS     assert_eq!(
+//RS         build_record_error,
+//RS         "unsupported build record schema `jet.build-record/v0`"
+//RS     );
+//RS 
+//RS     let receipts_root = root.join("receipts");
+//RS     let receipts_objects = receipts_root.join("objects");
+//RS     fs::create_dir_all(&receipts_objects).expect("create receipt object directory");
+//RS     let receipt_path = receipts_objects.join(RECEIPT_KEY);
+//RS     fs::write(&receipt_path, RECEIPT_V1).expect("write receipt fixture");
+//RS     assert!(
+//RS         ReceiptStore::new(&receipts_root)
+//RS             .list()
+//RS             .expect("list previous receipts")
+//RS             .is_empty()
+//RS     );
+//RS     assert_eq!(fs::read(&receipt_path).unwrap(), RECEIPT_V1);
+//RS 
+//RS     fs::remove_dir_all(root).expect("remove compatibility scratch root");
+//RS }
+// END-PORT-PENDING 0973 tests/build_metadata_compat.rs:1-96
+
+// PORT-PENDING 0973 tests-bitwise-not-module-group: tests/card_2209_regressions.rs:1-44
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #2209: every restored sema rejection keeps an independent regression.
+//RS 
+//RS fn assert_fixture_rejects(name: &str, code: &str, expected_count: usize) {
+//RS     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let path = root.join("tests/ui").join(format!("{name}.jet"));
+//RS     let source = std::fs::read_to_string(&path).unwrap();
+//RS     let diagnostics = match jet::compile_with_path(&source, path.to_str().unwrap()) {
+//RS         Err(diagnostics) => diagnostics,
+//RS         Ok(_) => panic!("{name} unexpectedly compiled"),
+//RS     };
+//RS     let actual_count = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == code)
+//RS         .count();
+//RS     assert_eq!(
+//RS         actual_count, expected_count,
+//RS         "{name} must emit {expected_count} instance(s) of {code}: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn decimal_float_mix_emits_e0131() {
+//RS     assert_fixture_rejects("decimal_float_mix", "E0131", 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn gc_escape_ownership_emits_e2111() {
+//RS     assert_fixture_rejects("gc_escape_ownership", "E2111", 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn inline_range_runtime_needs_try_emits_e0136() {
+//RS     assert_fixture_rejects("inline_range_runtime_needs_try", "E0136", 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn map_key_composite_rejected_emits_both_e0502_diagnostics() {
+//RS     assert_fixture_rejects("map_key_composite_rejected", "E0502", 2);
+//RS }
+//RS 
+//RS #[test]
+//RS fn must_use_fn_ignored_emits_e0419() {
+//RS     assert_fixture_rejects("must_use_fn_ignored", "E0419", 1);
+//RS }
+// END-PORT-PENDING 0973 tests/card_2209_regressions.rs:1-44
+
+// PORT-PENDING 0973 tests-bitwise-not-module-group: tests/cc_driver_hosts.rs:1-93
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Static contracts for the direct C/C++ driver integrations.
+//RS //!
+//RS //! The executable Make/CMake matrix is intentionally not run by this focused
+//RS //! test. The proof commands in the reference document run the real aliases
+//RS //! against a provisioned signed toolchain; this test keeps the fixture contract
+//RS //! visible even on machines without Make, CMake, or the Hangar bundle.
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS fn repo_root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS fn read(path: &Path) -> String {
+//RS     fs::read_to_string(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+//RS }
+//RS 
+//RS #[test]
+//RS fn make_driver_fixture_requires_explicit_tool_aliases_and_scopes_paths() {
+//RS     let root = repo_root().join("tests/fixtures/foreign_build_hosts/make-cc");
+//RS     let makefile = read(&root.join("Makefile"));
+//RS     for declaration in [
+//RS         "ifeq ($(origin CC),command line)",
+//RS         "ifeq ($(origin CXX),command line)",
+//RS         "--project-root=\"$(PROJECT_ROOT)\"",
+//RS         "--build-root=\"$(BUILD_ROOT)\"",
+//RS         "@flags.rsp",
+//RS         "-MMD",
+//RS         "-MP",
+//RS         "-MF \"$(C_DEPFILE)\"",
+//RS         "-MT \"$(C_OBJECT)\"",
+//RS         "-MF \"$(CXX_DEPFILE)\"",
+//RS         "-MT \"$(CXX_OBJECT)\"",
+//RS     ] {
+//RS         assert!(makefile.contains(declaration), "Make fixture omits {declaration}");
+//RS     }
+//RS     for fallback in ["CC ?=", "CXX ?=", "CC := cc", "CXX := c++"] {
+//RS         assert!(!makefile.contains(fallback), "Make fixture retains {fallback}");
+//RS     }
+//RS     for file in ["main.c", "main.cpp", "flags.rsp", "include/config.h"] {
+//RS         assert!(root.join(file).is_file(), "Make fixture omits {file}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn cmake_driver_fixture_builds_both_languages_through_standard_compiler_slots() {
+//RS     let root = repo_root().join("tests/fixtures/foreign_build_hosts/cmake-cc");
+//RS     let cmake = read(&root.join("CMakeLists.txt"));
+//RS     for declaration in [
+//RS         "project(jet_cc_cmake_fixture LANGUAGES C CXX)",
+//RS         "add_executable(cc-driver main.c)",
+//RS         "add_executable(cxx-driver main.cpp)",
+//RS         "target_include_directories",
+//RS         "@${CMAKE_CURRENT_SOURCE_DIR}/flags.rsp",
+//RS         "C_STANDARD 11",
+//RS         "CXX_STANDARD 17",
+//RS     ] {
+//RS         assert!(cmake.contains(declaration), "CMake fixture omits {declaration}");
+//RS     }
+//RS     assert!(!cmake.contains("find_program"));
+//RS     assert!(!cmake.contains("/usr/bin/cc"));
+//RS     for file in ["main.c", "main.cpp", "flags.rsp", "include/config.h"] {
+//RS         assert!(root.join(file).is_file(), "CMake fixture omits {file}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn aliases_are_real_installed_bins_and_docs_cover_the_driver_matrix() {
+//RS     let cargo = read(&repo_root().join("Cargo.toml"));
+//RS     for bin in ["name = \"jet-cc\"", "name = \"jet-cxx\""] {
+//RS         assert!(cargo.contains(bin), "Cargo does not build {bin}");
+//RS     }
+//RS     let main = read(&repo_root().join("Source/main.rs"));
+//RS     assert!(main.contains("\"jet-cc\" => Some(\"cc\")"));
+//RS     assert!(main.contains("\"jet-cxx\" | \"jet-c++\" => Some(\"c++\")"));
+//RS 
+//RS     let docs = read(&repo_root().join("Docs/spec/reference/cc-driver.md"));
+//RS     for term in [
+//RS         "signed Nix index",
+//RS         "offline",
+//RS         "Make",
+//RS         "CMake",
+//RS         "no PATH fallback",
+//RS         "cross-target",
+//RS         "clean",
+//RS         "no-op",
+//RS         "edit",
+//RS         "error",
+//RS     ] {
+//RS         assert!(docs.to_ascii_lowercase().contains(&term.to_ascii_lowercase()), "driver docs omit {term}");
+//RS     }
+//RS }
+// END-PORT-PENDING 0973 tests/cc_driver_hosts.rs:1-93
+
+// PORT-PENDING 0973 tests-bitwise-not-module-group: tests/compiled_workloads.rs:1-33
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #1414: the compiled-workload release gate must fail closed.
+//RS 
+//RS use std::process::Command;
+//RS 
+//RS #[path = "common/mod.rs"]
+//RS mod common;
+//RS 
+//RS #[test]
+//RS fn compiled_workload_gate_self_check() {
+//RS     let root = env!("CARGO_MANIFEST_DIR");
+//RS     let scratch = std::env::var("TMPDIR")
+//RS         .unwrap_or_else(|_| format!("{}/.cache/jet-test-scratch", std::env::var("HOME").unwrap()));
+//RS     let output = Command::new("bash")
+//RS         .arg("Tools/ci/test-compiled-workload-gate.sh")
+//RS         .current_dir(root)
+//RS         .env("TMPDIR", scratch)
+//RS         .output()
+//RS         .expect("compiled workload gate self-check must start");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "compiled workload gate self-check failed\nstdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_corpus_policy_runs_with_compiled_workloads() {
+//RS     common::corpus_policy::CorpusPolicy::load()
+//RS         .expect("corpus manifest")
+//RS         .check_gate("workload")
+//RS         .expect("compiled workload corpus semantic policy");
+//RS }
+// END-PORT-PENDING 0973 tests/compiled_workloads.rs:1-33
+
+// PORT-PENDING 0973 tests-bitwise-not-module-group: tests/compute_parity.rs:1-313
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Focused CPU-oracle laws for the production `core.compute` Prelude path.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use tir_support::{
+//RS     assert_tiers_agree, build_and_run, compile_source, have_rustc, jit_run_traced, run_default_multi,
+//RS };
+//RS 
+//RS const SOURCE: &str = r#"
+//RS use core.compute as compute
+//RS 
+//RS fn run() {
+//RS     a :: compute.from_list([1.0, 2.0, 3.0]) ?? panic("a")
+//RS     b :: compute.from_list([4.0, 5.0, 6.0]) ?? panic("b")
+//RS     sum :: compute.add(a, b) ?? panic("sum")
+//RS     print("sum:{compute.to_list(sum)}")
+//RS 
+//RS     matrix :: compute.full([2, 2], 2.0) ?? panic("matrix")
+//RS     identity :: compute.eye(2) ?? panic("eye")
+//RS     product :: compute.matmul(matrix, identity) ?? panic("matmul")
+//RS     print("product:{compute.to_list(product)}")
+//RS 
+//RS     tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
+//RS     compute.set(&tensor, [1], 9.0) ?? panic("set")
+//RS     print("edited:{compute.to_list(tensor)}")
+//RS 
+//RS     wire :: compute.serialize(product) ?? panic("wire")
+//RS     round :: compute.deserialize(wire) ?? panic("round")
+//RS     print("round:{compute.to_list(round)}")
+//RS 
+//RS     compute.deserialize("shape=2;data=1") ? value -> { print("corrupt:accepted") } ! error -> { print("corrupt:rejected") }
+//RS 
+//RS     compute.deserialize("shape=02;data=1.0,1.0") ? value -> { print("axis:accepted") } ! error -> { print("axis:rejected") }
+//RS 
+//RS     compute.deserialize("shape=1;data=1.0;data=1.0") ? value -> { print("field:accepted") } ! error -> { print("field:rejected") }
+//RS 
+//RS     compute.deserialize("shape=1;data=1.0;profile=F64Strict+Reproducible;checksum=0000000000000000") ? value -> { print("checksum:accepted") } ! error -> { print("checksum:rejected") }
+//RS 
+//RS     mse_left :: compute.full([2], 1.0) ?? panic("mse_left")
+//RS     mse_right :: compute.full([3], 1.0) ?? panic("mse_right")
+//RS     compute.mse_loss(mse_left, mse_right) ? value -> { print("mse_shape:accepted") } ! error -> { print("mse_shape:rejected") }
+//RS 
+//RS     f32_seed :: compute.matrix(1, 1, 1.0) ?? panic("f32_seed")
+//RS     f32_tensor :: compute.matmul_f32_tile(f32_seed, f32_seed) ?? panic("f32_tensor")
+//RS     f64_target :: compute.full([1], 1.0) ?? panic("f64_target")
+//RS     compute.mse_loss(f32_tensor, f64_target) ? value -> { print("mse_profile:accepted") } ! error -> { print("mse_profile:rejected") }
+//RS 
+//RS     compute.sgd_step(mse_left, mse_left, -1.0) ? value -> { print("negative_lr:accepted") } ! error -> { print("negative_lr:rejected") }
+//RS 
+//RS     compute.kernel_bounds_ok([2, 3], [2, 0]) ? value -> { print("bounds:accepted") } ! error -> { print("bounds:rejected") }
+//RS 
+//RS     empty :: compute.full([0, 3], 1.0) ?? panic("empty")
+//RS     print("empty:{compute.shape(empty)}:{compute.to_list(empty)}")
+//RS     empty_other :: compute.full([1, 3], 2.0) ?? panic("empty_other")
+//RS     compute.add(empty, empty_other) ? value -> { print("empty_broadcast:{compute.shape(value)}:{compute.to_list(value)}") } ! error -> { print("empty_broadcast:rejected") }
+//RS 
+//RS     left_shape :: compute.full([2, 2], 1.0) ?? panic("left_shape")
+//RS     right_shape :: compute.full([3], 1.0) ?? panic("right_shape")
+//RS     compute.add(left_shape, right_shape) ? value -> { print("broadcast:accepted") } ! error -> { print("broadcast:rejected") }
+//RS 
+//RS     compute.full([9223372036854775807, 2], 1.0) ? value -> { print("overflow:accepted") } ! error -> { print("overflow:rejected") }
+//RS 
+//RS     compute.get(tensor, [4]) ? value -> { print("tensor_bounds:accepted") } ! error -> { print("tensor_bounds:rejected") }
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn compute_cpu_oracle_aot_covers_storage_algebra_and_corruption() {
+//RS     if !have_rustc() {
+//RS         eprintln!("SKIP compute_cpu_oracle_aot_covers_storage_algebra_and_corruption: rustc is unavailable");
+//RS         return;
+//RS     }
+//RS     let (code, stdout) = build_and_run("compute_cpu_oracle", SOURCE);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nchecksum:rejected\nmse_shape:rejected\nmse_profile:rejected\nnegative_lr:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn compute_cpu_oracle_default_run_matches_aot_meaning() {
+//RS     let (code, stdout, stderr) = run_default_multi(
+//RS         "compute_cpu_oracle_jit",
+//RS         "main.jet",
+//RS         &[("main.jet", SOURCE)],
+//RS     );
+//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nchecksum:rejected\nmse_shape:rejected\nmse_profile:rejected\nnegative_lr:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn compute_set_requires_mutable_binding_before_codegen() {
+//RS     let immutable = include_str!("ui/compute_set_immutable.jet");
+//RS     let diagnostics = compile_source("compute_set_immutable", immutable)
+//RS         .expect_err("an immutable tensor passed to compute.set must be rejected");
+//RS     let diagnostic = diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0111")
+//RS         .unwrap_or_else(|| panic!("missing E0111: {diagnostics:?}"));
+//RS     assert_eq!(
+//RS         diagnostic.what,
+//RS         "`tensor` was made with `::`, so it can't be changed"
+//RS     );
+//RS     assert_eq!(
+//RS         diagnostic.why,
+//RS         "`set` will change this value, so it must be mutable (`:=`)"
+//RS     );
+//RS     assert_eq!(diagnostic.fix, "Declare it with `tensor := ...`");
+//RS     assert!(diagnostic.span.is_some(), "{diagnostic:?}");
+//RS 
+//RS     let mutable = r#"
+//RS use core.compute as compute
+//RS 
+//RS fn run() {
+//RS     tensor := compute.zeros([2, 2]) ?? panic("zeros")
+//RS     compute.set(&tensor, [0, 1], 3.0) ?? panic("set")
+//RS     print("values:{compute.to_list(tensor)}")
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "compute_set_mutable",
+//RS         mutable,
+//RS         "values:[0.0, 3.0, 0.0, 0.0]\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn compute_result_tensor_payload_survives_resident_return_cleanup() {
+//RS     let source = r#"
+//RS use core.compute as compute
+//RS 
+//RS fn make_tensor() -> Tensor ComputeError! {
+//RS     tensor :: compute.full([2], 3.0) ?? panic("tensor")
+//RS     return tensor
+//RS }
+//RS 
+//RS fn run() {
+//RS     tensor :: make_tensor() ?? panic("result")
+//RS     print("shape:{compute.shape(tensor)}")
+//RS     print("value:{compute.to_list(tensor)}")
+//RS }
+//RS "#;
+//RS     let expected = "shape:[2]\nvalue:[3.0, 3.0]\n";
+//RS     assert_tiers_agree("compute_result_tensor_payload", source, expected);
+//RS 
+//RS     let (code, stdout, stderr) = jit_run_traced("compute_result_tensor_payload_trace", source);
+//RS     assert_eq!(code, 0, "traced default jet run failed: {stderr}");
+//RS     assert_eq!(stdout, expected, "traced default output drifted: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("tier1 native") && !stderr.contains("tier0 interp"),
+//RS         "Result-wrapped Tensor did not stay resident:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn compute_tensor_in_record_has_parity_across_tiers() {
+//RS     let source = r#"
+//RS use core.compute as compute
+//RS 
+//RS struct TensorRecord {
+//RS     value: Tensor
+//RS }
+//RS 
+//RS fn run() {
+//RS     tensor :: compute.from_list([1.0, 2.0]) ?? panic("tensor")
+//RS     record :: TensorRecord{ value: tensor }
+//RS     print("wrapped:{compute.shape(record.value)}")
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("compute_tensor_record", source, "wrapped:[2]\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn named_gradient_composes_into_second_derivative() {
+//RS     let source = r#"
+//RS use core.compute as compute
+//RS 
+//RS fn loss(w: Tensor, x: Tensor) -> Tensor -> compute.mul(w, x) ?? panic("loss")
+//RS 
+//RS fn run() {
+//RS     w :: compute.from_list([2.0]) ?? panic("w")
+//RS     x :: compute.from_list([4.0]) ?? panic("x")
+//RS     derivative :: compute.gradient(loss)
+//RS     curvature :: compute.gradient(derivative)
+//RS     result :: curvature(w, x)
+//RS     print("ww:{compute.to_list(result.w.w)}")
+//RS     print("wx:{compute.to_list(result.w.x)}")
+//RS     print("xw:{compute.to_list(result.x.w)}")
+//RS     print("xx:{compute.to_list(result.x.x)}")
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "compute_named_second_derivative",
+//RS         source,
+//RS         "ww:[0.0]\nwx:[1.0]\nxw:[1.0]\nxx:[0.0]\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn compute_fixed_vec_and_matrix_aliases_keep_shape_facts_on_the_tensor_substrate() {
+//RS     let source = r#"
+//RS use core.compute as compute
+//RS 
+//RS fn vec_rank(value: Vec<3>) -[GPU]> Int {
+//RS     return compute.rank(value)
+//RS }
+//RS 
+//RS fn matrix_rank(value: Matrix<2, 3>) -[GPU]> Int {
+//RS     return compute.rank(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     vector :: compute.vec(3, 1.0) ?? panic("vec")
+//RS     matrix :: compute.matrix(2, 3, 2.0) ?? panic("matrix")
+//RS     print("vec:{vec_rank(vector)}")
+//RS     print("matrix:{matrix_rank(matrix)}")
+//RS }
+//RS "#;
+//RS     if have_rustc() {
+//RS         let (code, stdout) = build_and_run("compute_fixed_aliases", source);
+//RS         assert_eq!(code, 0);
+//RS         assert_eq!(stdout, "vec:1\nmatrix:2\n");
+//RS     } else {
+//RS         eprintln!("SKIP compute_fixed_vec_and_matrix_aliases_keep_shape_facts_on_the_tensor_substrate AOT leg: rustc is unavailable");
+//RS     }
+//RS     let (code, stdout, stderr) = run_default_multi(
+//RS         "compute_fixed_aliases_default",
+//RS         "main.jet",
+//RS         &[("main.jet", source)],
+//RS     );
+//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
+//RS     assert_eq!(stdout, "vec:1\nmatrix:2\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn matrix_shape_measures_match_or_diagnose_inner_sides() {
+//RS     let matching = r#"
+//RS use core.compute as compute
+//RS 
+//RS fn accept_3_by_2(value: Matrix<3, 2>) {}
+//RS 
+//RS fn run() {
+//RS     left :: compute.matrix(3, 4, 1.0) ?? panic("left")
+//RS     right :: compute.matrix(4, 2, 1.0) ?? panic("right")
+//RS     product :: left * right ?? panic("product")
+//RS     accept_3_by_2(product)
+//RS }
+//RS "#;
+//RS     jet::compile(matching).expect("3x4 multiplied by 4x2 must produce Matrix<3, 2>");
+//RS 
+//RS     let mismatched = r#"
+//RS use core.compute as compute
+//RS 
+//RS fn run() {
+//RS     left :: compute.matrix(3, 4, 1.0) ?? panic("left")
+//RS     right :: compute.matrix(5, 2, 1.0) ?? panic("right")
+//RS     product :: left * right
+//RS }
+//RS "#;
+//RS     let diagnostics =
+//RS         jet::compile(mismatched).expect_err("matrix inner measures 4 and 5 must not match");
+//RS     assert!(
+//RS         diagnostics.iter().any(|diagnostic| {
+//RS             diagnostic.code == "E2512"
+//RS                 && diagnostic.what.contains("inner sides")
+//RS                 && diagnostic.what.contains('4')
+//RS                 && diagnostic.what.contains('5')
+//RS         }),
+//RS         "the matrix mismatch must teach the differing inner measures: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn compute_broadcast_ufunc_fuses_indexing_and_arithmetic() {
+//RS     let source = r#"
+//RS use core.compute as compute
+//RS 
+//RS fn run() {
+//RS     rows :: compute.full([2, 1], 3.0) ?? panic("rows")
+//RS     columns :: compute.from_list([1.0, 2.0, 4.0]) ?? panic("columns")
+//RS     fused :: compute.add(rows, columns) ?? panic("fused")
+//RS     print("shape:{compute.shape(fused)}")
+//RS     print("values:{compute.to_list(fused)}")
+//RS }
+//RS "#;
+//RS     if have_rustc() {
+//RS         let (code, stdout) = build_and_run("compute_fused_broadcast", source);
+//RS         assert_eq!(code, 0);
+//RS         assert_eq!(
+//RS             stdout,
+//RS             "shape:[2, 3]\nvalues:[4.0, 5.0, 7.0, 4.0, 5.0, 7.0]\n"
+//RS         );
+//RS     } else {
+//RS         eprintln!("SKIP compute_broadcast_ufunc_fuses_indexing_and_arithmetic AOT leg: rustc is unavailable");
+//RS     }
+//RS     let (code, stdout, stderr) = run_default_multi(
+//RS         "compute_fused_broadcast_default",
+//RS         "main.jet",
+//RS         &[("main.jet", source)],
+//RS     );
+//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "shape:[2, 3]\nvalues:[4.0, 5.0, 7.0, 4.0, 5.0, 7.0]\n"
+//RS     );
+//RS }
+// END-PORT-PENDING 0973 tests/compute_parity.rs:1-313
+
+// PORT-PENDING 0973 tests-bitwise-not-module-group: tests/compute_views.rs:1-376
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-SHAPE-PLACE1=A: Tensor bracket slices use the same checked window law on
+//RS //! owned copies, AOT views, and mutable write-through places.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS 
+//RS use tir_support::{
+//RS     build_and_run, build_and_run_full, have_rustc, run_default_multi, strip_vetted_prelude_modules,
+//RS };
+//RS 
+//RS fn run_direct(name: &str, src: &str, force_interpreter: bool) -> (i32, String, String) {
+//RS     use jet::Interpreter::RunOutcome;
+//RS 
+//RS     let dir = common::unique_tmp(&format!("compute_views_{name}"));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     let result =
+//RS         match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => (exit_code, stdout, stderr),
+//RS             RunOutcome::Problems(diags) => {
+//RS                 panic!("direct tier rejected compute view source: {diags:?}")
+//RS             }
+//RS         };
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     result
+//RS }
+//RS 
+//RS fn assert_resident_trace() {
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "compute view proof did not execute tier1 native"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "compute view proof used tier0, deopt, or fallback"
+//RS     );
+//RS }
+//RS 
+//RS fn run_forced_interpreter(name: &str, src: &str) -> (i32, String, String) {
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let result = run_direct(name, src, true);
+//RS     assert!(!jet_jit::jit_executed_for_test());
+//RS     assert!(!jet_jit::deopt_invoked_for_test());
+//RS     assert!(!jet_jit::fallback_invoked_for_test());
+//RS     result
+//RS }
+//RS 
+//RS #[test]
+//RS fn tensor_mutable_window_write_uses_shared_prelude_policy() {
+//RS     let src = r#"
+//RS use core.compute as compute
+//RS fn run() {
+//RS     tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
+//RS         copied :: ~tensor[1..2]
+//RS     edit :: &tensor[1..2]
+//RS     edit[0] = 9.0
+//RS     print(compute.to_list(copied))
+//RS     print(compute.to_list(tensor))
+//RS }
+//RS "#;
+//RS     assert!(
+//RS         have_rustc(),
+//RS         "compute view AOT coverage requires rustc; do not skip this proof"
+//RS     );
+//RS     let (code, stdout) = build_and_run("compute_tensor_views", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n");
+//RS     let (code, stdout, stderr) =
+//RS         run_default_multi("compute_tensor_views_tir", "main.jet", &[("main.jet", src)]);
+//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("tier1 native"),
+//RS         "compute views must run in resident JIT:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("tier0 interp"),
+//RS         "compute views unexpectedly fell back to the interpreter:\n{stderr}"
+//RS     );
+//RS     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n");
+//RS 
+//RS     let (code, stdout, stderr) = run_forced_interpreter("mutable_window_interpreter", src);
+//RS     assert_eq!(code, 0, "forced interpreter failed: {stderr}");
+//RS     assert_eq!(stderr, "");
+//RS     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn tensor_explicit_copy_is_deep_but_implicit_clone_shares_storage() {
+//RS     let src = r#"
+//RS use core.compute as compute
+//RS 
+//RS struct Holder { value: Tensor }
+//RS 
+//RS fn run() {
+//RS     tensor := compute.from_list([1.0, 2.0]) ?? panic("tensor")
+//RS     copied :: ~tensor
+//RS     copied_edit :: &copied[0..1]
+//RS     copied_edit[0] = 9.0
+//RS     print(compute.to_list(tensor))
+//RS     print(compute.to_list(copied))
+//RS 
+//RS     holder := Holder{ value: ~tensor }
+//RS     aliased :: holder.value
+//RS     aliased_edit :: &aliased[0..1]
+//RS     aliased_edit[0] = 8.0
+//RS }
+//RS "#;
+//RS     assert!(
+//RS         have_rustc(),
+//RS         "Tensor copy/clone AOT coverage requires rustc; do not skip this proof"
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run_full(
+//RS         "compute_tensor_copy_clone_aot",
+//RS         "explicit_copy_vs_implicit_clone_aot",
+//RS         src,
+//RS     );
+//RS     assert_ne!(
+//RS         code, 0,
+//RS         "an implicit Tensor clone must retain shared storage"
+//RS     );
+//RS     assert_eq!(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n");
+//RS     assert!(
+//RS         stderr.contains("Tensor mutable view requires exclusive backing storage"),
+//RS         "AOT used the wrong Tensor clone policy:\n{stderr}"
+//RS     );
+//RS 
+//RS     let (code, stdout, stderr) = run_default_multi(
+//RS         "compute_tensor_copy_clone_tir",
+//RS         "main.jet",
+//RS         &[("main.jet", src)],
+//RS     );
+//RS     assert_ne!(
+//RS         code, 0,
+//RS         "an implicit Tensor clone must retain shared storage"
+//RS     );
+//RS     assert_eq!(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n");
+//RS     assert!(
+//RS         stderr.contains("Tensor mutable view requires exclusive backing storage"),
+//RS         "resident JIT used the wrong Tensor clone policy:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("tier1 native"),
+//RS         "resident rejection left tier1:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("tier0 interp"),
+//RS         "resident rejection entered tier0:\n{stderr}"
+//RS     );
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let (code, stdout, stderr) = run_direct("compute_tensor_copy_clone_resident", src, false);
+//RS     assert_ne!(
+//RS         code, 0,
+//RS         "an implicit Tensor clone must retain shared storage"
+//RS     );
+//RS     assert_eq!(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n");
+//RS     assert!(
+//RS         stderr.contains("Tensor mutable view requires exclusive backing storage"),
+//RS         "resident JIT used the wrong Tensor clone policy:\n{stderr}"
+//RS     );
+//RS     assert_resident_trace();
+//RS 
+//RS     let (code, stdout, stderr) =
+//RS         run_forced_interpreter("compute_tensor_copy_clone_interpreter", src);
+//RS     assert_ne!(
+//RS         code, 0,
+//RS         "an implicit Tensor clone must retain shared storage"
+//RS     );
+//RS     assert_eq!(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n");
+//RS     assert!(
+//RS         stderr.contains("Tensor mutable view requires exclusive backing storage"),
+//RS         "forced interpreter used the wrong Tensor clone policy:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn tensor_slice_is_represented_by_the_compute_prelude() {
+//RS     let src = r#"
+//RS use core.compute as compute
+//RS fn run() {
+//RS     tensor :: compute.from_list([1.0, 2.0]) ?? panic("tensor")
+//RS         read :: ~tensor[0..1]
+//RS     print(compute.to_list(read))
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("Tensor bracket slices must type-check");
+//RS     assert!(out.rust.contains("struct JetTensor"), "{}", out.rust);
+//RS     let rust = strip_vetted_prelude_modules(&out.rust);
+//RS     assert!(rust.contains("jet_compute_slice(&("), "{}", rust);
+//RS     assert!(rust.contains("jet_compute_copy(&("), "{}", rust);
+//RS }
+//RS 
+//RS #[test]
+//RS fn tensor_stored_range_uses_the_same_owned_and_mutable_window_law() {
+//RS     let src = r#"
+//RS use core.compute as compute
+//RS fn run() {
+//RS     tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
+//RS     window :: 1..2
+//RS         copied :: ~tensor[window]
+//RS     edit :: &tensor[window]
+//RS     edit[1] = 8.0
+//RS     print(compute.to_list(copied))
+//RS     print(compute.to_list(tensor))
+//RS }
+//RS "#;
+//RS     assert!(
+//RS         have_rustc(),
+//RS         "stored compute view AOT coverage requires rustc; do not skip this proof"
+//RS     );
+//RS     let (code, stdout) = build_and_run("compute_tensor_stored_range", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 2.0, 8.0, 4.0]\n");
+//RS     let (code, stdout, stderr) = run_default_multi(
+//RS         "compute_tensor_stored_range_tir",
+//RS         "main.jet",
+//RS         &[("main.jet", src)],
+//RS     );
+//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("tier1 native"),
+//RS         "stored compute views must run in resident JIT:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("tier0 interp"),
+//RS         "stored compute views unexpectedly fell back to the interpreter:\n{stderr}"
+//RS     );
+//RS     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 2.0, 8.0, 4.0]\n");
+//RS 
+//RS     let (code, stdout, stderr) =
+//RS         run_forced_interpreter("compute_tensor_stored_range_interpreter", src);
+//RS     assert_eq!(code, 0, "forced interpreter failed: {stderr}");
+//RS     assert_eq!(stderr, "");
+//RS     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 2.0, 8.0, 4.0]\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn tensor_bare_range_is_a_borrowed_read_view() {
+//RS     let src = r#"
+//RS use core.compute as compute
+//RS fn run() {
+//RS     tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
+//RS     read :: tensor[1..2]
+//RS     print(read[0])
+//RS     print(read[1])
+//RS }
+//RS "#;
+//RS     assert!(
+//RS         have_rustc(),
+//RS         "borrowed compute view AOT coverage requires rustc; do not skip this proof"
+//RS     );
+//RS     let (code, stdout) = build_and_run("compute_tensor_borrowed_read_view", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "2.0\n3.0\n");
+//RS     let (code, stdout, stderr) = run_default_multi(
+//RS         "compute_tensor_borrowed_read_view_tir",
+//RS         "main.jet",
+//RS         &[("main.jet", src)],
+//RS     );
+//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("tier1 native"),
+//RS         "borrowed compute read view must run in resident JIT:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("tier0 interp"),
+//RS         "borrowed compute read view unexpectedly fell back to the interpreter:\n{stderr}"
+//RS     );
+//RS     assert_eq!(stdout, "2.0\n3.0\n");
+//RS 
+//RS     let (code, stdout, stderr) =
+//RS         run_forced_interpreter("compute_tensor_borrowed_read_view_interpreter", src);
+//RS     assert_eq!(code, 0, "forced interpreter failed: {stderr}");
+//RS     assert_eq!(stderr, "");
+//RS     assert_eq!(stdout, "2.0\n3.0\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected() {
+//RS     let cases = [
+//RS         (
+//RS             "empty_window_read",
+//RS             r#"
+//RS use core.compute as compute
+//RS fn run() {
+//RS     tensor := compute.from_list([1.0, 2.0]) ?? panic("tensor")
+//RS     empty :: &tensor[0..<0]
+//RS     print(empty.is_empty())
+//RS     print(empty.len())
+//RS     print(empty[0])
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "empty_window_write",
+//RS             r#"
+//RS use core.compute as compute
+//RS fn run() {
+//RS     tensor := compute.from_list([1.0, 2.0]) ?? panic("tensor")
+//RS     empty :: &tensor[0..<0]
+//RS     print(empty.is_empty())
+//RS     print(empty.len())
+//RS     empty[0] = 9.0
+//RS }
+//RS "#,
+//RS         ),
+//RS     ];
+//RS     assert!(
+//RS         have_rustc(),
+//RS         "empty Tensor window AOT coverage requires rustc; do not skip this proof"
+//RS     );
+//RS     for (name, src) in cases {
+//RS         let (code, stdout, stderr) =
+//RS             build_and_run_full("compute_tensor_empty_window_aot", name, src);
+//RS         assert_ne!(code, 0, "an empty Tensor element operation must fail");
+//RS         assert_eq!(stdout, "true\n0\n");
+//RS         assert!(
+//RS             stderr.contains("the list has 0 items, so position 0 doesn't exist"),
+//RS             "AOT used a non-canonical empty-window element error:\n{stderr}"
+//RS         );
+//RS 
+//RS         let (code, stdout, stderr) = run_default_multi(
+//RS             &format!("compute_tensor_empty_window_tir_{name}"),
+//RS             "main.jet",
+//RS             &[("main.jet", src)],
+//RS         );
+//RS         assert_ne!(code, 0, "an empty Tensor element operation must fail");
+//RS         assert_eq!(stdout, "true\n0\n");
+//RS         assert!(
+//RS             stderr.contains("the list has 0 items, so position 0 doesn't exist"),
+//RS             "resident JIT used a non-canonical empty-window element error:\n{stderr}"
+//RS         );
+//RS         assert!(
+//RS             stderr.contains("tier1 native"),
+//RS             "empty-window case left tier1:\n{stderr}"
+//RS         );
+//RS         assert!(
+//RS             !stderr.contains("tier0 interp"),
+//RS             "empty-window case entered tier0:\n{stderr}"
+//RS         );
+//RS 
+//RS         jet_jit::reset_jit_trace_for_test();
+//RS         let (code, stdout, stderr) = run_direct(
+//RS             &format!("compute_tensor_empty_window_resident_{name}"),
+//RS             src,
+//RS             false,
+//RS         );
+//RS         assert_ne!(code, 0, "an empty Tensor element operation must fail");
+//RS         assert_eq!(stdout, "true\n0\n");
+//RS         assert!(
+//RS             stderr.contains("the list has 0 items, so position 0 doesn't exist"),
+//RS             "resident JIT used a non-canonical empty-window element error:\n{stderr}"
+//RS         );
+//RS         assert_resident_trace();
+//RS 
+//RS         let (code, stdout, stderr) = run_forced_interpreter(
+//RS             &format!("compute_tensor_empty_window_interpreter_{name}"),
+//RS             src,
+//RS         );
+//RS         assert_ne!(code, 0, "an empty Tensor element operation must fail");
+//RS         assert_eq!(stdout, "true\n0\n");
+//RS         assert!(
+//RS             stderr.contains("the list has 0 items, so position 0 doesn't exist"),
+//RS             "forced interpreter used a non-canonical empty-window element error:\n{stderr}"
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 0973 tests/compute_views.rs:1-376
+

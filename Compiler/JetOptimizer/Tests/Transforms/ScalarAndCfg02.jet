@@ -1,0 +1,51 @@
+// No inline Rust tests occur in MIROptimization.rs:6400-8183.
+// Behavioral controls use the actual inline and reduction-normalization helpers.
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7918
+#Test("normalized_float_zero_preserves_width_and_spelling") {
+    wide :: normalized_float_zero(mir_type_from_kind(MIRTypeKind.Float))
+    narrow :: normalized_float_zero(mir_type_from_kind(MIRTypeKind.Float32))
+    assert_eq(wide, MIROperation.Constant{constant: MIRConstant.Float{value: 0.0, f32: false, spelling: Val("0.0")}})
+    assert_eq(narrow, MIROperation.Constant{constant: MIRConstant.Float{value: 0.0, f32: true, spelling: Val("0.0")}})
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:6976
+#Test("inline_type_substitutes_nested_type_and_retains_unchanged_identity") {
+    substitutions := [String:MIRType]{}
+    replacement :: mir_type_with_identity(mir_type_from_kind(MIRTypeKind.Float), mir_type_id("replacement"))
+    &substitutions.add("T", replacement).drop("one substitution")
+    parameter :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("T"), args: []})
+    assert_eq(inline_type(parameter, substitutions), replacement)
+    nested :: mir_type_from_kind(MIRTypeKind.List{inner: parameter})
+    mapped :: inline_type(nested, substitutions)
+    expected :: mir_type_from_kind(MIRTypeKind.List{inner: replacement})
+    assert_eq(mapped, mir_type_with_identity(expected, mir_type_id(mir_type_canonical_key(expected))))
+    unchanged :: mir_type_with_identity(mir_type_from_kind(MIRTypeKind.Int), mir_type_id("retained-original-identity"))
+    assert_eq(inline_type(unchanged, substitutions), unchanged)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:6925
+#Test("inline_terminator_remaps_value_and_targets_without_losing_absence") {
+    ids := InlineIdMaps.default()
+    old_value :: MIRValueID{value: 10}
+    new_value :: MIRValueID{value: 20}
+    old_block :: MIRBlockID{value: 30}
+    new_block :: MIRBlockID{value: 40}
+    &ids.values.add(old_value, new_value).drop("one value")
+    &ids.blocks.add(old_block, new_block).drop("one block")
+    branch :: MIRTerminator.Branch{condition: old_value, then_target: old_block, else_target: MIRBlockID{value: 99}}
+    assert_eq(inline_terminator(branch, ids), MIRTerminator.Branch{condition: new_value, then_target: new_block, else_target: MIRBlockID{value: 99}})
+    assert_eq(inline_terminator(MIRTerminator.Return{value: None}, ids), MIRTerminator.Return{value: None})
+    assert_eq(inline_terminator(MIRTerminator.Yield{value: old_value, resume: old_block, cancel: old_block}, ids), MIRTerminator.Yield{value: new_value, resume: new_block, cancel: new_block})
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:6400
+#Test("inline_semantic_keeps_policy_ids_out_of_value_substitution") {
+    ids := InlineIdMaps.default()
+    policy :: MIRValueID{value: 7}
+    old_value :: MIRValueID{value: 7}
+    new_value :: MIRValueID{value: 11}
+    &ids.values.add(old_value, new_value).drop("one value")
+    operation :: MIRSemanticOp.PolicyFunction{policy: policy, values: [MIRValueID]{old_value}}
+    assert_eq(inline_semantic(operation, ids, [:]), MIRSemanticOp.PolicyFunction{policy: policy, values: [MIRValueID]{new_value}})
+}

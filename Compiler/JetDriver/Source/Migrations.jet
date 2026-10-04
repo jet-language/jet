@@ -1,0 +1,603 @@
+// Rust crates/jet-driver/src/Migrations.rs:1–1001.
+// Durable graph/source format/advisory pathname locks; selected database owns
+// receipts and state. Native calls use ONLY the published retained ABI.
+// #4494/#4483: actual FS/PID/clock/process-static counter and checked Close
+// lowering are required, not delivered by this consumer. #4409: native error
+// kind/display must preserve NotFound/AlreadyExists and invalid UTF-8 exactly.
+// #4500: CARGO_PKG_VERSION must come from the retained driver source graph.
+use core.files.runtime.kernel_path_components as migration_path
+use core.files.runtime.kernel_path_traits as migration_path_order
+use core.files.host.retained_descriptor as migration_fs
+use core.sys.host.retained_clock as migration_clock
+use core.sys.host.retained_counter as migration_counter
+use core.process.host.native_process as migration_process
+use core.files.runtime.descriptor_metadata as migration_metadata
+use core.time.runtime.kernel_wide_time as migration_wide
+use core.text.runtime.kernel_unicode_string as migration_text
+use core.sys.runtime.hardware_facts as migration_decimal
+use jet_foundation.[MIGRATION_SCHEMA, MIGRATION_DIRECTORY, MIGRATION_LOCK_DIRECTORY, TEXT_NUL, FILE_EXT, mir_sha256_hex, mir_sha256_bytes, mir_sha256_hex_bytes]
+
+// Pending canonical source retention #4500: Rust env!("CARGO_PKG_VERSION").
+// This is a source-graph fact, never a runtime environment lookup.
+
+pub enum MigrationLock { Shared Exclusive }
+impl MigrationLock {
+    pub fn as_str(self) -> String Never! { if self == .Shared -> "shared" else -> "exclusive" }
+    pub fn parse(value: String) -> MigrationLock MigrationError! {
+        trimmed := value.trim() // #4303
+        folded :: migration_text.ascii_lower(trimmed)
+        if folded == "shared" || folded == "read" -> return Ok(MigrationLock.Shared)
+        if folded == "exclusive" || folded == "write" -> return Ok(MigrationLock.Exclusive)
+        Err(MigrationError.usage("E2456", "unknown migration lock policy `{value}`", "use `--lock shared` for inspection or `--lock exclusive` before a write"))
+    }
+}
+pub enum MigrationDirection { Apply Rollback }
+impl MigrationDirection {
+    pub fn as_str(self) -> String Never! { if self == .Apply -> "apply" else -> "rollback" }
+}
+enum RollbackMode { Inverse Irreversible }
+#Error
+pub struct MigrationError { pub code: String pub message: String pub fix: String }
+impl MigrationError {
+    pub fn usage(code: String, message: String, fix: String) -> MigrationError Never! { MigrationError{code: ~code, message: ~message, fix: ~fix} }
+    pub fn io(context: String, error: String) -> MigrationError Never! { MigrationError.usage("E2105", "{context}: {safe_error(error)}", "check the project permissions and rerun the migration command") }
+    pub fn authority(message: String, fix: String) -> MigrationError Never! { MigrationError.usage("E2456", message, fix) }
+    pub fn conflict(message: String, fix: String) -> MigrationError Never! { MigrationError.usage("E2456", message, fix) }
+    pub fn display(self) -> String Never! { "{self.code}: {self.message} ({self.fix})" }
+}
+
+pub struct MigrationTarget {
+    pub name: String
+    pub database: migration_path.OSPath
+    pub identity: String
+    pub database_identity: String
+    pub lock: MigrationLock
+    priv root: migration_path.OSPath
+}
+impl MigrationTarget {
+    pub fn new(root: migration_path.OSPath, name: String, database: migration_path.OSPath?, lock: MigrationLock) -[FS.Read]> MigrationTarget MigrationError! {
+        validate_name(name, "target") ?? return Err(err)
+        raw :: database ?? migration_path.from_text(".jet/db/{name}.sqlite", root.platform)
+        selected :: safe_database_path(root, raw) ?? return Err(err)
+        relative_span :: migration_path.strip_prefix_span(selected, root) ?? return Err(MigrationError.authority("database target escapes the project root", "pass a relative `--database` path inside this project"))
+        relative :: migration_path.display_span(selected, relative_span)
+        database_identity :: "sha256:{mir_sha256_hex("{MIGRATION_SCHEMA}{TEXT_NUL}database{TEXT_NUL}{relative}")}"
+        identity :: "sha256:{mir_sha256_hex("{MIGRATION_SCHEMA}{TEXT_NUL}target{TEXT_NUL}{name}{TEXT_NUL}{relative}")}"
+        Ok(MigrationTarget{name: ~name, database: ^selected, identity: ^identity, database_identity: ^database_identity, lock: lock, root: ~root})
+    }
+    pub fn lock_path(self) -> migration_path.OSPath Never! { migration_join_text(migration_join_text(self.root, MIGRATION_LOCK_DIRECTORY), "{self.name}.lock") }
+    fn shared_lock_path(self) -[Env, Time]> migration_path.OSPath Never! {
+        // Published retained_counter ABI: dedicated zero-initialized process-
+        // static AtomicWord, OLD wrapping U64 value, Relaxed. Real native
+        // static/cell bodies remain #4494/#4483/#4500, never temp_counter_next.
+        sequence :: migration_counter.shared_lock_counter_next()
+        stamp :: migration_wide.decimal(now_ms())
+        migration_join_text(migration_join_text(self.root, MIGRATION_LOCK_DIRECTORY), "{self.name}.shared.{migration_process.id()}.{stamp}.{sequence}.lock")
+    }
+    pub fn acquire_lock(self) -[FS.Read, FS.Write, Env, Time]> MigrationLockGuard MigrationError! {
+        directory :: migration_join_text(self.root, MIGRATION_LOCK_DIRECTORY)
+        migration_fs.create_dir_all(directory) ?? return Err(MigrationError.io("couldn't create migration lock directory", err.display()))
+        facts :: migration_fs.symlink_metadata(directory) ?? return Err(MigrationError.io("couldn't inspect migration lock directory", err.display()))
+        if facts.is_symlink || !facts.is_dir -> return Err(MigrationError.authority("migration lock directory is not project-owned", "replace the lock path with a normal directory before migrating"))
+        exclusive_path :: self.lock_path()
+        shared_paths :: lock_paths(directory, self.name) ?? return Err(err)
+        blocked :: migration_fs.exists(exclusive_path) || (self.lock == MigrationLock.Exclusive && shared_paths.len() > 0)
+        if blocked -> return Err(migration_locked(self.name))
+        shared_path :: if self.lock == MigrationLock.Shared -> Val(self.shared_lock_path()) else -> None
+        // Borrow the selected pathname through create/write/recheck; transfer
+        // its original owner into the guard only after all checks succeed.
+        lock_path :: shared_path ?? exclusive_path
+        options :: migration_fs.CreateOptions{read: false, write: true, access_mode: None, share_mode: None, mode: None, delete_on_close: false, open_reparse_point: false, custom_flags: None}
+        file := migration_fs.create_new(lock_path, options, None) ?? {
+            if err.kind() == "AlreadyExists" -> return Err(migration_locked(self.name))
+            return Err(MigrationError.io("couldn't acquire migration lock", err.display()))
+        }
+        relative :: migration_path.strip_prefix_span(self.database, self.root) ?? migration_path.PathSpan{start: 0, end: self.database.encoded.len()}
+        database :: migration_path.display_span(self.database, relative)
+        owner :: "schema={MIGRATION_SCHEMA}\ntarget={self.name}\ntarget_identity={self.identity}\ndatabase={database}\ndatabase_identity={self.database_identity}\nlock={self.lock.as_str()}\npid={migration_process.id()}\n"
+        owner_bytes :: migration_text.utf8_bytes(owner)
+        file.write_all(owner_bytes.view(0..<owner_bytes.len())) ?? {
+            migration_fs.remove(lock_path).drop("Rust write failure removes lock ignoring error")
+            return Err(MigrationError.io("couldn't write migration lock", err.display()))
+        }
+        file.sync_all() ?? {
+            migration_fs.remove(lock_path).drop("Rust sync failure removes lock ignoring error")
+            return Err(MigrationError.io("couldn't write migration lock", err.display()))
+        }
+        blocked_after := false
+        if self.lock == MigrationLock.Shared {
+            blocked_after = migration_fs.exists(exclusive_path)
+        } else {
+            paths :: lock_paths(directory, self.name) ?? {
+                migration_fs.remove(lock_path).drop("Rust lock listing failure removes lock ignoring error")
+                return Err(err)
+            }
+            loop path in paths -> if !migration_path.equals(path, lock_path) -> blocked_after = true
+        }
+        if blocked_after {
+            migration_fs.remove(lock_path).drop("Rust acquisition race removes lock ignoring error")
+            return Err(MigrationError.conflict("migration target `{self.name}` became locked while acquiring its lock", "retry after the other migration process releases its lock"))
+        }
+        // FileWriter Close releases the original create-new handle on ALL rails.
+        // Guard itself retains just the original pathname, exactly as Rust.
+        owned_path :: if shared_path == { .Val(path) -> ^path, .None -> ^exclusive_path }
+        Ok(MigrationLockGuard{path: ^owned_path, remove_on_close: true})
+    }
+    pub fn list_locks(self) -[FS.Read]> [MigrationLockInfo] MigrationError! { read_lock_info(self.root, Val(self.name)) }
+}
+fn migration_join_text(root: migration_path.OSPath, text: String) -> migration_path.OSPath Never! {
+    out := ~root
+    migration_path.push(&out, migration_path.from_text(text, root.platform))
+    out
+}
+fn migration_locked(name: String) -> MigrationError Never! { MigrationError.conflict("migration target `{name}` is already locked", "wait for the other migration process or remove the lock only after checking its owner") }
+fn lock_paths(directory: migration_path.OSPath, target: String) -[FS.Read]> [migration_path.OSPath] MigrationError! {
+    exact :: "{target}.lock"
+    prefix :: "{target}.shared."
+    entries := migration_fs.read_dir(directory) ?? return Err(MigrationError.io("couldn't inspect migration locks", err.display()))
+    paths := [migration_path.OSPath]{}
+    loop {
+        entry :: entries.next() ?? return Err(MigrationError.io("couldn't inspect migration locks", err.display()))
+        item :: entry ?? break
+        name :: migration_path.display(item.file_name())
+        if name == exact || (name.starts_with(prefix) && name.ends_with(".lock")) -> &paths.push(item.path())
+    }
+    Ok(^paths)
+}
+pub struct MigrationLockInfo {
+    pub path: migration_path.OSPath
+    pub target: String
+    pub target_identity: String
+    pub database: String
+    pub database_identity: String
+    pub lock: MigrationLock
+    pub pid: U64
+}
+pub fn read_lock_info(root: migration_path.OSPath, target: String?) -[FS.Read]> [MigrationLockInfo] MigrationError! {
+    if target == .Val(name) -> validate_name(name, "target") ?? return Err(err)
+    directory :: migration_join_text(root, MIGRATION_LOCK_DIRECTORY)
+    facts :: migration_fs.symlink_metadata(directory) ?? {
+        if err.kind() == "NotFound" -> return Ok([MigrationLockInfo]{})
+        return Err(MigrationError.io("couldn't inspect migration lock directory", err.display()))
+    }
+    if facts.is_symlink || !facts.is_dir -> return Err(MigrationError.authority("migration lock directory is not project-owned", "replace the lock path with a normal directory before listing locks"))
+    entries := migration_fs.read_dir(directory) ?? return Err(MigrationError.io("couldn't inspect migration locks", err.display()))
+    locks := [MigrationLockInfo]{}
+    loop {
+        entry :: entries.next() ?? return Err(MigrationError.io("couldn't inspect migration locks", err.display()))
+        item :: entry ?? break
+        path :: item.path()
+        kind :: item.file_type() ?? return Err(MigrationError.io("couldn't inspect migration lock", err.display()))
+        if !kind.is_file -> next
+        text :: migration_fs.read_text(path) ?? return Err(MigrationError.io("couldn't read migration lock `{migration_path.display(path)}`", err.display()))
+        values := [String:String]{}
+        loop line in text.lines() {
+            // split_once, not all separators; duplicate fields retain LAST value.
+            pair :: migration_text.split_once(line, "=") ?? next
+            values[pair.0] = pair.1
+        }
+        name :: values.get("target") ?? ""
+        if target == .Val(expected) && expected != name -> next
+        validate_name(name, "target") ?? return Err(err)
+        target_identity :: values.get("target_identity") ?? ""
+        database :: values.get("database") ?? ""
+        database_identity :: values.get("database_identity") ?? ""
+        fix :: "release the lock only after checking its owner, then reacquire it with the current Jet tool"
+        shown :: migration_path.display(path)
+        if values.get("schema") != Val(MIGRATION_SCHEMA) || target_identity.is_empty() || database.is_empty() || database_identity.is_empty() -> return Err(MigrationError.authority("migration lock `{shown}` is missing canonical target metadata", fix))
+        expected :: MigrationTarget.new(root, name, Val(migration_path.from_text(database, root.platform)), MigrationLock.Shared) ?? return Err(MigrationError.authority("migration lock `{shown}` has an invalid database target: {err.message}", fix))
+        if target_identity != expected.identity || database_identity != expected.database_identity -> return Err(MigrationError.authority("migration lock `{shown}` has stale target or database identity", fix))
+        lock :: MigrationLock.parse(values.get("lock") ?? "") ?? return Err(err)
+        pid_text :: migration_text.utf8_bytes(values.get("pid") ?? "")
+        pid :: migration_decimal.parse_usize_decimal(pid_text.view(0..<pid_text.len()), U64.MAX) ?? return Err(MigrationError.conflict("migration lock `{shown}` has an invalid owner pid", "remove the malformed lock only after checking its owner"))
+        &locks.push(MigrationLockInfo{path: ^path, target: ~name, target_identity: ~target_identity, database: ~database, database_identity: ~database_identity, lock: lock, pid: pid})
+    }
+    &locks.sort_by((left: MigrationLockInfo, right: MigrationLockInfo) -> migration_path_order.compare(left.path, right.path))
+    Ok(^locks)
+}
+
+pub struct MigrationLockGuard {
+    priv path: migration_path.OSPath
+    priv remove_on_close: Bool
+}
+impl MigrationLockGuard {
+    // Approved process::exit seam: consuming self reaches normal checked Close,
+    // but disarms only THIS pathname cleanup. It owns no open native handle.
+    pub fn abandon(^self) -[FS.Write]> Never! {
+        guard := ^self
+        guard.remove_on_close = false
+    }
+}
+impl MigrationLockGuard.Close {
+    pub fn close(^self) -[FS.Write]> Never! {
+        if self.remove_on_close -> migration_fs.remove(self.path).drop("Rust MigrationLockGuard::drop ignores remove error")
+    }
+}
+
+pub struct MigrationStep { pub ordinal: U64 pub sql: String pub inverse_sql: String? pub risk: String pub lock: MigrationLock }
+impl MigrationStep {
+    fn new(ordinal: U64, ^sql: String, ^inverse_sql: String?, ^risk: String, lock: MigrationLock) -> MigrationStep MigrationError! {
+        if sql.trim().is_empty() -> return Err(MigrationError.usage("E2456", "migration contains an empty forward SQL step", "write at least one non-empty `// up:` statement"))
+        raw :: migration_text.utf8_bytes(sql)
+        loop i in 0..<raw.len() {
+            b :: Int.from_u8(raw[i])
+            if (b < 32 && b != 9 && b != 10 && b != 13) || b == 127 || (b == 194 && i + 1 < raw.len() && raw[i + 1] >= (U8{128}) && raw[i + 1] <= (U8{159})) -> return Err(MigrationError.usage("E2456", "migration SQL contains an invalid control character", "write UTF-8 SQL without NUL or terminal control bytes"))
+        }
+        Ok(MigrationStep{ordinal: ordinal, sql: ^sql, inverse_sql: ^inverse_sql, risk: ^risk, lock: lock})
+    }
+}
+pub struct MigrationDefinition { pub version: U64 pub name: String pub path: migration_path.OSPath pub source_digest: String pub steps: [MigrationStep] priv rollback: RollbackMode }
+impl MigrationDefinition { pub fn has_rollback(self) -> Bool Never! { self.rollback != RollbackMode.Irreversible } }
+pub struct MigrationCatalog { pub root: migration_path.OSPath pub migrations: [MigrationDefinition] pub source_identity: String }
+impl MigrationCatalog {
+    pub fn load(root: migration_path.OSPath) -[FS.Read]> MigrationCatalog MigrationError! {
+        directory :: migration_join_text(root, MIGRATION_DIRECTORY)
+        paths := [migration_path.OSPath]{}
+        if migration_fs.exists(directory) {
+            facts :: migration_fs.symlink_metadata(directory) ?? return Err(MigrationError.io("couldn't inspect the migrations directory", err.display()))
+            if facts.is_symlink || !facts.is_dir -> return Err(MigrationError.authority("the migrations path is not a normal directory", "replace `migrations` with a project-owned directory"))
+            entries := migration_fs.read_dir(directory) ?? return Err(MigrationError.io("couldn't read the migrations directory", err.display()))
+            loop {
+                entry :: entries.next() ?? return Err(MigrationError.io("couldn't read a migration entry", err.display()))
+                item :: entry ?? break
+                path :: item.path()
+                facts :: migration_fs.symlink_metadata(path) ?? return Err(MigrationError.io("couldn't inspect a migration entry", err.display()))
+                if facts.is_symlink -> return Err(MigrationError.authority("migration entry `{migration_path.display(path)}` is a symlink", "copy the migration into the project-owned migrations directory"))
+                if facts.is_dir -> next
+                extension :: migration_path.extension_span(path) ?? next
+                raw :: migration_path.owned_span(path, extension)
+                if migration_path.to_str(raw) != Val(FILE_EXT) -> next
+                &paths.push(^path)
+            }
+        }
+        &paths.sort_by((left: migration_path.OSPath, right: migration_path.OSPath) -> migration_path_order.compare(left, right))
+        migrations := [MigrationDefinition]{}
+        versions := [U64:Bool]{}
+        names := [String:Bool]{}
+        loop path in paths {
+            migration :: parse_migration(path) ?? return Err(err)
+            if versions.has_key(migration.version) -> return Err(MigrationError.conflict("duplicate migration version {migration.version}", "rename one migration so every version is unique"))
+            versions[migration.version] = true
+            if names.has_key(migration.name) -> return Err(MigrationError.conflict("duplicate migration name `{migration.name}`", "rename one migration so every migration name is unique"))
+            names[migration.name] = true
+            &migrations.push(^migration)
+        }
+        &migrations.sort_by((left: MigrationDefinition, right: MigrationDefinition) -> left.version <=> right.version)
+        identity := [U8]{}
+        loop migration in migrations {
+            migration_append(&identity, "{migration.version}{TEXT_NUL}{migration.name}{TEXT_NUL}{migration.source_digest}{TEXT_NUL}")
+            loop step in migration.steps {
+                migration_append(&identity, step.sql)
+                &identity.push(U8{0})
+                if step.inverse_sql == .Val(inverse) -> migration_append(&identity, inverse)
+                &identity.push(U8{0})
+            }
+        }
+        digest :: mir_sha256_bytes(identity.view(0..<identity.len()))
+        Ok(MigrationCatalog{root: ~root, migrations: ^migrations, source_identity: "sha256:{mir_sha256_hex_bytes(digest.view(0..<digest.len()))}"})
+    }
+    pub fn next_version(self) -> U64 Never! {
+        highest := U64{0}
+        loop migration in self.migrations -> if migration.version > highest -> highest = migration.version
+        if highest == U64.MAX -> highest else -> highest + (U64{1})
+    }
+    // Borrowed optional projection; #4494/#4303 retaining-field loans.
+    pub fn definition(self, version: U64) -> MigrationDefinition? Never! {
+        loop migration in self.migrations -> if migration.version == version -> return Val(migration)
+        None
+    }
+    pub fn plan_apply(self, ^target: MigrationTarget, from_version: U64, target_version: U64?) -> MigrationPlan MigrationError! {
+        if from_version != (U64{0}) && self.definition(from_version) == None -> return Err(MigrationError.authority("migration state starts at undeclared version {from_version}", "reconcile the target receipt history before planning another migration"))
+        highest := from_version
+        if self.migrations.len() > 0 {
+            highest = U64{0}
+            loop migration in self.migrations -> if migration.version > highest -> highest = migration.version
+        }
+        to_version :: target_version ?? highest
+        if to_version < from_version -> return Err(MigrationError.usage("E2456", "migration target {to_version} is behind current version {from_version}", "use `rollback --target <name> --step <count>` for a reverse plan"))
+        if self.definition(to_version) == None && to_version != from_version -> return Err(MigrationError.usage("E2456", "migration target version {to_version} is not declared", "choose a declared version from `jet db migrate status`"))
+        steps := [MigrationStep]{}
+        loop migration in self.migrations {
+            if migration.version > from_version && migration.version <= to_version -> loop step in migration.steps -> &steps.push(~step)
+        }
+        Ok(MigrationPlan.new(^target, ~self.source_identity, from_version, to_version, MigrationDirection.Apply, ^steps))
+    }
+    pub fn plan_rollback(self, ^target: MigrationTarget, from_version: U64, target_version: U64?) -> MigrationPlan MigrationError! {
+        if from_version != (U64{0}) && self.definition(from_version) == None -> return Err(MigrationError.authority("migration state starts at undeclared version {from_version}", "reconcile the target receipt history before planning another migration"))
+        previous := U64{0}
+        loop migration in self.migrations -> if migration.version < from_version && migration.version > previous -> previous = migration.version
+        to_version :: target_version ?? previous
+        if to_version >= from_version -> return Err(MigrationError.usage("E2456", "rollback target {to_version} is not below current version {from_version}", "choose an older declared version or pass `--step <count>`"))
+        steps := [MigrationStep]{}
+        at := self.migrations.len()
+        loop at > 0 {
+            at -= 1
+            migration :: self.migrations[at]
+            if migration.version <= to_version || migration.version > from_version -> next
+            if !migration.has_rollback() -> return Err(MigrationError.authority("migration {migration.version} `{migration.name}` has no checked rollback path", "add checked `// down:` inverse SQL before requesting rollback"))
+            step_at := migration.steps.len()
+            loop step_at > 0 {
+                step_at -= 1
+                step :: migration.steps[step_at]
+                sql :: step.inverse_sql ?? return Err(MigrationError.authority("migration {migration.version} `{migration.name}` has no inverse SQL", "add `// down:` SQL before requesting rollback"))
+                selected :: MigrationStep.new(step.ordinal, ~sql, None, ~step.risk, step.lock) ?? return Err(err)
+                &steps.push(^selected)
+            }
+        }
+        Ok(MigrationPlan.new(^target, ~self.source_identity, from_version, to_version, MigrationDirection.Rollback, ^steps))
+    }
+}
+pub struct MigrationPlan {
+    pub target: MigrationTarget pub source_identity: String pub schema_identity: String
+    pub database_identity: String pub tool_identity: String pub from_version: U64
+    pub to_version: U64 pub direction: MigrationDirection pub steps: [MigrationStep] pub risk: String
+}
+impl MigrationPlan {
+    fn new(^target: MigrationTarget, ^source_identity: String, from_version: U64, to_version: U64, direction: MigrationDirection, ^steps: [MigrationStep]) -> MigrationPlan Never! {
+        risks := [String:Bool]{}
+        loop step in steps -> risks[step.risk] = true
+        ordered := risks.keys().to_list()
+        &ordered.sort()
+        risk :: if ordered.len() == 0 -> "none" else -> ordered.join(", ")
+        // Pending canonical build/source-graph ABI reconciliation #4500:
+        // original Rust name, NOT a hard-coded version or runtime env fallback.
+        tool_identity :: "jet/{CARGO_PKG_VERSION}"
+        MigrationPlan{database_identity: ~target.database_identity, schema_identity: "sha256:{mir_sha256_hex(MIGRATION_SCHEMA)}", tool_identity: ^tool_identity, target: ^target, source_identity: ^source_identity, from_version: from_version, to_version: to_version, direction: direction, steps: ^steps, risk: ^risk}
+    }
+}
+
+pub fn render_migration(version: U64, name: String, up: String, down: String?, lock: MigrationLock, risk: String) -> String MigrationError! {
+    validate_name(name, "migration") ?? return Err(err)
+    forward := up.trim() // #4303
+    if forward.is_empty() -> return Err(MigrationError.usage("E2456", "a migration needs forward SQL", "pass `--up <SQL>` (or `--sql <SQL>`) to `jet db migrate new`"))
+    if version == (U64{0}) -> return Err(MigrationError.usage("E2456", "migration versions start at 1", "let `jet db migrate new` allocate the next version"))
+    slug :: slugify(name)
+    trimmed_risk := risk.trim() // #4303
+    selected_risk :: if trimmed_risk.is_empty() -> "schema change" else -> trimmed_risk
+    output := [U8]{}
+    migration_append(&output, "// jet db migration/v1\n// name: {name}\n// lock: {lock.as_str()}\n// risk: {selected_risk}\n// up: SQL{{{escape_sql_literal(forward)}}}\n")
+    if down == .Val(value) {
+        inverse := value.trim() // #4303
+        if !inverse.is_empty() -> migration_append(&output, "// down: SQL{{{escape_sql_literal(inverse)}}}\n")
+    }
+    migration_append(&output, "// slug: {slug}\n")
+    Ok(String.from_bytes(output) ?? panic("migration renderer emits UTF-8"))
+}
+fn parse_migration(path: migration_path.OSPath) -[FS.Read]> MigrationDefinition MigrationError! {
+    extent :: migration_path.file_name_span(path) ?? return Err(MigrationError.usage("E2456", "migration filename is not valid UTF-8", "rename the migration using `<version>_<name>.jet"))
+    raw_name :: migration_path.owned_span(path, extent)
+    file_name :: migration_path.to_str(raw_name) ?? return Err(MigrationError.usage("E2456", "migration filename is not valid UTF-8", "rename the migration using `<version>_<name>.jet"))
+    if !file_name.ends_with(".jet") -> return Err(MigrationError.usage("E2456", "migration `{file_name}` needs the `.jet` extension", "use a checked `.jet` migration file"))
+    stem := file_name.slice(0, file_name.len() - 4) // #4303
+    pair :: migration_text.split_once(stem, "_") ?? return Err(MigrationError.usage("E2456", "migration `{file_name}` needs `<version>_<name>.jet`", "rename it to a versioned migration filename"))
+    version_text := pair.0 // #4303
+    slug := pair.1 // #4303
+    if version_text.is_empty() -> return Err(MigrationError.usage("E2456", "migration `{file_name}` has an invalid version", "use a positive decimal version prefix"))
+    loop byte in migration_text.utf8_bytes(version_text) -> if byte < (U8{48}) || byte > (U8{57}) -> return Err(MigrationError.usage("E2456", "migration `{file_name}` has an invalid version", "use a positive decimal version prefix"))
+    version_raw :: migration_text.utf8_bytes(version_text)
+    version :: migration_decimal.parse_usize_decimal(version_raw.view(0..<version_raw.len()), U64.MAX) ?? return Err(MigrationError.usage("E2456", "migration `{file_name}` has an oversized version", "use a version that fits in an unsigned 64-bit integer"))
+    if version == (U64{0}) -> return Err(MigrationError.usage("E2456", "migration `{file_name}` starts at version zero", "version migrations from 1 upward"))
+    source :: migration_fs.read_bytes(path) ?? return Err(MigrationError.io("couldn't read migration `{migration_path.display(path)}`", err.display()))
+    digest :: mir_sha256_bytes(source.view(0..<source.len()))
+    source_digest :: "sha256:{mir_sha256_hex_bytes(digest.view(0..<digest.len()))}"
+    text :: String.from_bytes(source) ?? return Err(MigrationError.usage("E2456", "migration `{file_name}` is not UTF-8", "save migration files as UTF-8"))
+    marker := false
+    loop line in text.lines() -> if line.trim() == "// jet db migration/v1" -> marker = true
+    if !marker -> return Err(MigrationError.usage("E2456", "migration `{file_name}` is missing the `{MIGRATION_SCHEMA}` marker", "start a file with `// jet db migration/v1` or recreate it with `jet db migrate new`"))
+    name := String?{None}
+    lock := MigrationLock.Exclusive
+    risk := String?{None}
+    up := [String]{}
+    down := [String]{}
+    rollback := String?{None}
+    loop line in text.lines() {
+        pair :: metadata(line) ?? next
+        key := pair.0 // #4303
+        value := pair.1 // #4303
+        if key == {
+            "name" -> name = Val(~value)
+            "lock" -> lock = MigrationLock.parse(value) ?? return Err(err)
+            "risk" -> risk = Val(~value)
+            "up" | "up_sql" -> &up.push(parse_sql(value) ?? return Err(err))
+            "down" | "down_sql" -> &down.push(parse_sql(value) ?? return Err(err))
+            "rollback" -> rollback = Val(migration_text.ascii_lower(value))
+            else -> {}
+        }
+    }
+    selected_name :: name ?? slug.replace("-", " ")
+    validate_name(selected_name, "migration") ?? return Err(err)
+    if slugify(selected_name) != slug -> return Err(MigrationError.conflict("migration `{file_name}` name does not match its filename slug", "rename the file or make its `// name:` metadata match"))
+    if up.len() == 0 -> return Err(MigrationError.usage("E2456", "migration `{file_name}` has no forward SQL", "add one or more `// up: SQL{{...}}` lines"))
+    selected_risk :: if risk == { .Val(value) -> if value.is_empty() -> infer_risk(up) else -> ~value, .None -> infer_risk(up) }
+    mode := RollbackMode.Irreversible
+    if rollback == .Val(value) {
+        if {
+            value == "inverse" && down.len() > 0 -> mode = RollbackMode.Inverse
+            value == "irreversible" && down.len() == 0 -> mode = RollbackMode.Irreversible
+            else -> return Err(MigrationError.usage("E2456", "migration `{file_name}` has invalid rollback mode `{value}`", "use `inverse` or `irreversible` with matching `down` SQL"))
+        }
+    } else {
+        if down.len() > 0 -> mode = RollbackMode.Inverse
+    }
+    steps := [MigrationStep]{}
+    index := 0
+    loop sql in ^up {
+        inverse :: if index < down.len() -> Val(~down[index]) else -> None
+        step :: MigrationStep.new(U64{index} + (U64{1}), ^sql, ^inverse, ~selected_risk, lock) ?? return Err(err)
+        &steps.push(^step)
+        index += 1
+    }
+    if down.len() > steps.len() -> return Err(MigrationError.usage("E2456", "migration `{file_name}` has more down steps than up steps", "keep one inverse statement per forward statement"))
+    Ok(MigrationDefinition{version: version, name: ^selected_name, path: ~path, source_digest: ^source_digest, steps: ^steps, rollback: mode})
+}
+fn metadata(line: String) -> (String, String)? Never! {
+    trimmed := line.trim() // #4303
+    body := if trimmed.starts_with("//") -> trimmed.slice(2, trimmed.len()) else -> trimmed // #4303
+    clean := body.trim() // #4303
+    pair :: migration_text.split_once(clean, ":") ?? return None
+    Val((pair.0.trim(), pair.1.trim()))
+}
+fn parse_sql(value: String) -> String MigrationError! {
+    trimmed := value.trim() // #4303
+    output := ~trimmed
+    if {
+        trimmed.starts_with("SQL{{") && trimmed.ends_with("}}") -> {
+            inner := trimmed.slice(4, trimmed.len() - 1) // #4303
+            output = unescape_sql_literal(inner) ?? return Err(err)
+        }
+        trimmed.starts_with("\"") && trimmed.ends_with("\"") && trimmed.len() >= 2 -> {
+            inner := trimmed.slice(1, trimmed.len() - 1) // #4303
+            output = unescape_sql_literal(inner) ?? return Err(err)
+        }
+        else -> {}
+    }
+    if output.trim().is_empty() -> return Err(MigrationError.usage("E2456", "migration SQL cannot be empty", "write a non-empty SQL statement"))
+    Ok(^output)
+}
+fn infer_risk(steps: [String]) -> String Never! {
+    // Joining is semantic: a keyword may span adjacent steps ("create"/"index").
+    sql :: migration_text.ascii_lower(steps.join(" "))
+    if sql.contains("drop") || sql.contains("alter") -> return "table lock"
+    if sql.contains("update") || sql.contains("delete") || sql.contains("insert") -> return "data rewrite"
+    if sql.contains("create index") -> return "index build"
+    "schema change"
+}
+fn validate_name(value: String, kind: String) MigrationError! {
+    safe := !value.is_empty() && value.len() <= 96
+    loop byte in migration_text.utf8_bytes(value) {
+        b :: Int.from_u8(byte)
+        if !migration_ascii_alnum(b) && b != 95 && b != 45 && b != 46 -> safe = false
+    }
+    if !safe -> return Err(MigrationError.usage("E2456", "{kind} name `{value}` is not safe", "use only ASCII letters, digits, `_`, `-`, or `.` in the {kind} name"))
+}
+fn migration_ascii_alnum(b: Int) -> Bool Never! { (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) }
+fn slugify(value: String) -> String Never! {
+    out := [U8]{}
+    previous := -1
+    loop byte in migration_text.utf8_bytes(value) {
+        b :: Int.from_u8(byte)
+        if migration_ascii_alnum(b) {
+            if b >= 65 && b <= 90 && previous >= 97 && previous <= 122 && (out.len() == 0 || out[out.len() - 1] != (U8{95})) -> &out.push(U8{95})
+            &out.push(if b >= 65 && b <= 90 -> U8{b + 32} else -> byte)
+            previous = b
+        } else {
+            if out.len() == 0 || out[out.len() - 1] != (U8{95}) {
+                &out.push(U8{95})
+                previous = b
+            }
+        }
+    }
+    loop out.len() > 0 && out[out.len() - 1] == (U8{95}) -> _ :: &out.pop()
+    String.from_bytes(out) ?? panic("migration slug is ASCII")
+}
+fn safe_database_path(root: migration_path.OSPath, path: migration_path.OSPath) -[FS.Read]> migration_path.OSPath MigrationError! {
+    if migration_path.is_absolute(path) -> return Err(MigrationError.authority("absolute database paths are not accepted", "pass a database path relative to the project root"))
+    clean := migration_path.OSPath{encoded: [U8]{}, platform: path.platform}
+    cursor := migration_path.components(path)
+    loop {
+        component :: migration_path.next(path, &cursor) ?? break
+        if component.kind == {
+            .CurDir -> {}
+            .Normal -> migration_path.push_component(&clean, path, component)
+            .ParentDir -> return Err(MigrationError.authority("database path contains `..`", "choose a path below the project root"))
+            .RootDir | .Prefix -> return Err(MigrationError.authority("database path is outside the project root", "pass a relative database path"))
+        }
+    }
+    if clean.encoded.len() == 0 -> return Err(MigrationError.authority("database path is empty", "pass `--database <relative-path>`"))
+    database := ~root
+    migration_path.push(&database, clean)
+    if migration_fs.exists(database) {
+        is_link :: if migration_fs.symlink_metadata(database) == { .Ok(facts) -> facts.is_symlink, .Err(_) -> true }
+        if is_link -> return Err(MigrationError.authority("database target is a symlink", "use a project-owned regular database path"))
+    }
+    Ok(^database)
+}
+fn migration_append(out: &[U8], value: String) Never! { loop byte in migration_text.utf8_bytes(value) -> &out.push(byte) }
+fn escape_sql_literal(value: String) -> String Never! {
+    out := [U8]{}
+    loop byte in migration_text.utf8_bytes(value) {
+        if Int.from_u8(byte) == {
+            92 -> migration_append(&out, "\\\\")
+            34 -> migration_append(&out, "\\\"")
+            123 -> migration_append(&out, "{{{{")
+            125 -> migration_append(&out, "}}}}")
+            10 -> migration_append(&out, "\\n")
+            13 -> migration_append(&out, "\\r")
+            9 -> migration_append(&out, "\\t")
+            else -> &out.push(byte)
+        }
+    }
+    String.from_bytes(out) ?? panic("SQL escape preserves UTF-8")
+}
+fn unescape_sql_literal(value: String) -> String MigrationError! {
+    raw :: migration_text.utf8_bytes(value)
+    out := [U8]{}
+    at := 0
+    loop at < raw.len() {
+        b :: Int.from_u8(raw[at])
+        at += 1
+        if b == 92 {
+            if at == raw.len() -> return Err(MigrationError.usage("E2456", "migration SQL ends with an escape", "finish the SQL literal with a complete escape"))
+            escaped :: Int.from_u8(raw[at])
+            if escaped == {
+                110 -> &out.push(U8{10})
+                114 -> &out.push(U8{13})
+                116 -> &out.push(U8{9})
+                92 | 34 | 123 | 125 -> &out.push(raw[at])
+                else -> {
+                    // Unknown escape is one Unicode scalar, not just its first byte.
+                    end :: at + migration_text.utf8_width_at(raw, at)
+                    unknown_raw := [U8]{}
+                    loop index in at..<end -> &unknown_raw.push(raw[index])
+                    unknown :: String.from_bytes(unknown_raw) ?? panic("unknown SQL escape is one UTF-8 scalar")
+                    return Err(MigrationError.usage("E2456", "unknown SQL escape `\\{unknown}`", "use `\\n`, `\\r`, `\\t`, `\\\\`, `\\\"`, `\\{{`, or `\\}}`"))
+                }
+            }
+            at += 1
+        } else {
+            if (b == 123 || b == 125) && at < raw.len() && raw[at] == (U8{b}) -> at += 1
+            &out.push(U8{b})
+        }
+    }
+    Ok(String.from_bytes(out) ?? panic("SQL unescape preserves UTF-8"))
+}
+fn safe_error(error: String) -> String Never! {
+    raw :: migration_text.utf8_bytes(error)
+    out := [U8]{}
+    at := 0
+    loop at < raw.len() {
+        cp :: migration_text.scalar_at(raw, at)
+        width :: migration_text.utf8_width_at(raw, at)
+        if (cp >= 32 && (cp < 127 || cp > 159)) || cp == 10 || cp == 13 || cp == 9 -> loop i in at..<at + width -> &out.push(raw[i])
+        at += width
+    }
+    folded :: migration_text.ascii_lower(String.from_bytes(out) ?? panic("migration error filter retains whole scalars"))
+    secrets :: [String]{"password", "passwd", "token", "secret", "api_key", "apikey"}
+    loop secret in secrets -> if folded.contains(secret) -> return "migration operation failed without a safe public detail"
+    // Rust String::truncate(240) PANICS if 240 is not a scalar boundary.
+    // Preserve that law; never round down/up and silently change the source.
+    if out.len() > 240 {
+        if (Int.from_u8(out[240]) & 192) == 128 -> panic("assertion failed: self.is_char_boundary(new_len)")
+        loop out.len() > 240 -> _ :: &out.pop()
+        migration_append(&out, "…")
+    }
+    String.from_bytes(out) ?? panic("migration error filter retains whole scalars")
+}
+fn now_ms() -[Time]> migration_wide.UInt128Parts Never! {
+    time :: migration_clock.system_time_now()
+    ns :: migration_metadata.modified_nanoseconds(&time) ?? return migration_wide.UInt128Parts{hi: U64{0}, lo: U64{0}}
+    // Full as_millis u128, NOT retained_clock.unix_ms's saturating U64 policy.
+    // Fixed four-limb long division needs no exact Int/bignum allocation.
+    mask :: U64{4294967295}
+    remainder := U64{0}
+    hi := U64{0}
+    lo := U64{0}
+    loop index in 0..<4 {
+        limb :: if index == 0 -> ns.hi >> 32 else -> if index == 1 -> ns.hi & mask else -> if index == 2 -> ns.lo >> 32 else -> ns.lo & mask
+        partial :: (remainder << 32) | limb
+        quotient :: partial /% (U64{1000000})
+        remainder = partial %% (U64{1000000})
+        if index < 2 -> hi = (hi << 32) | quotient else -> lo = (lo << 32) | quotient
+    }
+    migration_wide.UInt128Parts{hi: hi, lo: lo}
+}

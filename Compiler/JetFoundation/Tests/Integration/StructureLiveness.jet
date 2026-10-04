@@ -1,0 +1,939 @@
+// PORT-PENDING 1157 tests-structure-liveness-module-group: tests/structure_liveness.rs:1-226
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-STRUCT-LIVE1=A: the four liveness verdicts share the structure fact plane,
+//RS //! policy gate, source fixes, and every applicable execution tier.
+//RS 
+//RS use jet_foundation::Names::StructureFactKind;
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::{Command, Output};
+//RS 
+//RS fn repo() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS fn example() -> &'static str {
+//RS     "Examples/features/tooling/structure_liveness.jet"
+//RS }
+//RS 
+//RS fn run_jet(args: &[&str]) -> Output {
+//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .current_dir(repo())
+//RS         .env("NO_COLOR", "1")
+//RS         .args(args)
+//RS         .output()
+//RS         .expect("run jet")
+//RS }
+//RS 
+//RS fn assert_liveness_warnings(label: &str, output: &Output) {
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     for code in ["L0101", "L0103", "L0104", "L0105"] {
+//RS         assert!(stderr.contains(code), "{label} missing {code}: {stderr}");
+//RS     }
+//RS }
+//RS 
+//RS fn assert_liveness_policy_denied(label: &str, output: &Output) {
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "{label} unexpectedly ran: {stderr}"
+//RS     );
+//RS     assert!(output.stdout.is_empty(), "{label} executed user code");
+//RS     assert!(
+//RS         stderr.contains("E1293") && stderr.contains("L0101"),
+//RS         "{label} missing denied liveness lint: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("Warning [L0101]"),
+//RS         "{label} printed denied lint as warning: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn liveness_facts_and_fixes_are_one_checked_result() {
+//RS     let source = fs::read_to_string(repo().join(example())).expect("liveness example source");
+//RS     let mut bundle = jet::Loader::load_entry(example()).expect("liveness example loads");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS 
+//RS     let mut codes: Vec<_> = diagnostics
+//RS         .iter()
+//RS         .map(|diagnostic| diagnostic.code.as_str())
+//RS         .collect();
+//RS     codes.sort_unstable();
+//RS     assert_eq!(codes, ["L0101", "L0103", "L0104", "L0105"]);
+//RS     assert!(diagnostics.iter().all(|diagnostic| {
+//RS         diagnostic.severity == jet::Diagnostics::Severity::Lint
+//RS             && diagnostic
+//RS                 .edit
+//RS                 .as_ref()
+//RS                 .is_some_and(|edit| edit.new_text.is_empty() || edit.new_text.starts_with('_'))
+//RS     }));
+//RS 
+//RS     let facts: Vec<_> = bundle
+//RS         .name_ledger
+//RS         .structure_facts()
+//RS         .iter()
+//RS         .filter(|fact| fact.kind == StructureFactKind::Liveness)
+//RS         .collect();
+//RS     assert_eq!(facts.len(), 4);
+//RS     assert!(facts.iter().all(|fact| {
+//RS         fact.kind == StructureFactKind::Liveness
+//RS             && fact.gate.as_deref() == Some("_name")
+//RS             && fact.source == example()
+//RS     }));
+//RS     assert!(facts.iter().any(|fact| fact.subject == "support"));
+//RS     assert!(facts.iter().any(|fact| fact.subject == "unused_binding"));
+//RS     assert!(facts.iter().any(|fact| fact.subject == "unused_private"));
+//RS     assert!(facts.iter().any(|fact| fact.subject == "package_export"));
+//RS     assert!(!facts.iter().any(|fact| fact.subject == "library_pub"));
+//RS     for diagnostic in &diagnostics {
+//RS         let span = diagnostic.span.expect("liveness diagnostic span");
+//RS         let edit = diagnostic.edit.as_ref().expect("liveness source edit");
+//RS         if edit.new_text.is_empty() {
+//RS             assert!(matches!(diagnostic.code.as_str(), "L0101" | "L0104"));
+//RS             assert!(edit.span.start <= span.start && edit.span.end >= span.end);
+//RS         } else {
+//RS             assert_eq!(edit.span, span);
+//RS             assert_eq!(edit.new_text, format!("_{}", &source[span.start..span.end]));
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     let text = run_jet(&["inspect", "structure", example()]);
+//RS     assert!(text.status.success(), "structure inspect failed: {text:?}");
+//RS     let text = String::from_utf8(text.stdout).expect("structure text is utf8");
+//RS     let expected_text = fs::read_to_string(
+//RS         repo().join("Examples/features/expected/tooling/structure_liveness.structure.out"),
+//RS     )
+//RS     .expect("structure text golden");
+//RS     assert_eq!(text, expected_text);
+//RS     for subject in [
+//RS         "support",
+//RS         "unused_binding",
+//RS         "unused_private",
+//RS         "package_export",
+//RS     ] {
+//RS         assert!(text.contains(subject), "missing {subject} in {text}");
+//RS     }
+//RS     assert!(text.contains("Structure.Liveness"));
+//RS     assert!(text.contains("gates=_name"));
+//RS 
+//RS     let json = run_jet(&["inspect", "structure", "--json", example()]);
+//RS     assert!(
+//RS         json.status.success(),
+//RS         "JSON structure inspect failed: {json:?}"
+//RS     );
+//RS     let json = String::from_utf8(json.stdout).expect("structure JSON is utf8");
+//RS     let expected_json = fs::read_to_string(
+//RS         repo().join("Examples/features/expected/tooling/structure_liveness.structure.json"),
+//RS     )
+//RS     .expect("structure JSON golden");
+//RS     assert_eq!(json, expected_json);
+//RS     assert!(json.contains("\"registry\":\"Structure.Liveness\""));
+//RS     assert!(json.contains("\"gate\":\"_name\""));
+//RS 
+//RS     let cache = std::env::temp_dir().join(format!(
+//RS         "jet_structure_liveness_tiers_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&cache);
+//RS     for (mode, args) in [
+//RS         ("release", vec!["run", "--release", example()]),
+//RS         ("default", vec!["run", example()]),
+//RS         ("interpret", vec!["run", "--interpret", example()]),
+//RS     ] {
+//RS         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .current_dir(repo())
+//RS             .env("NO_COLOR", "1")
+//RS             .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
+//RS             .env("JET_STORE_DIR", cache.join(mode).join("build"))
+//RS             .args(args)
+//RS             .output()
+//RS             .expect("run liveness example tier");
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "{mode} failed: stdout={} stderr={}",
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         assert_eq!(output.stdout, b"structure liveness\n", "{mode} output");
+//RS         assert_liveness_warnings(mode, &output);
+//RS     }
+//RS 
+//RS     let dev = run_jet(&["dev", example(), "--watch=off"]);
+//RS     assert!(
+//RS         dev.status.success(),
+//RS         "dev failed: stdout={} stderr={}",
+//RS         String::from_utf8_lossy(&dev.stdout),
+//RS         String::from_utf8_lossy(&dev.stderr)
+//RS     );
+//RS     assert_eq!(dev.stdout, b"structure liveness\n", "dev output");
+//RS     assert_liveness_warnings("dev", &dev);
+//RS 
+//RS     for (mode, args) in [
+//RS         (
+//RS             "policy-aot",
+//RS             vec!["run", "--release", "tests/ui/lint_policy_liveness/run.jet"],
+//RS         ),
+//RS         (
+//RS             "policy-jit",
+//RS             vec!["run", "tests/ui/lint_policy_liveness/run.jet"],
+//RS         ),
+//RS         (
+//RS             "policy-interpreter",
+//RS             vec![
+//RS                 "run",
+//RS                 "--interpret",
+//RS                 "tests/ui/lint_policy_liveness/run.jet",
+//RS             ],
+//RS         ),
+//RS         (
+//RS             "policy-dev",
+//RS             vec![
+//RS                 "dev",
+//RS                 "tests/ui/lint_policy_liveness/run.jet",
+//RS                 "--watch=off",
+//RS             ],
+//RS         ),
+//RS     ] {
+//RS         let output = run_jet(&args);
+//RS         assert_liveness_policy_denied(mode, &output);
+//RS     }
+//RS     let _ = fs::remove_dir_all(cache);
+//RS }
+//RS 
+//RS #[test]
+//RS fn liveness_web_compile_keeps_the_same_front_end_result() {
+//RS     let rustc = Command::new("rustc")
+//RS         .args([
+//RS             "--print",
+//RS             "target-libdir",
+//RS             "--target",
+//RS             "wasm32-unknown-unknown",
+//RS         ])
+//RS         .output()
+//RS         .expect("probe wasm target");
+//RS     if !rustc.status.success() {
+//RS         eprintln!("note: skipping liveness web tier proof (wasm target unavailable)");
+//RS         return;
+//RS     }
+//RS     let output = run_jet(&["build", "--target=web", example()]);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "web build failed: stdout={} stderr={}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_liveness_warnings("web", &output);
+//RS }
+// END-PORT-PENDING 1157 tests/structure_liveness.rs:1-226
+
+// PORT-PENDING 1157 tests-structure-liveness-module-group: tests/suite_goldens.rs:1-81
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Golden tests for the user-story suite.
+//RS //!
+//RS //! The feature corpus keeps its existing discovery and acceptance path. This
+//RS //! focused test gives the additive suite the same executable-output contract.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS struct Scratch(PathBuf);
+//RS 
+//RS impl Drop for Scratch {
+//RS     fn drop(&mut self) {
+//RS         let _ = fs::remove_dir_all(&self.0);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn user_story_suite_matches_expected_output() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let suite = root.join("Examples/suites");
+//RS     let mut programs = fs::read_dir(&suite)
+//RS         .expect("user-story suite exists")
+//RS         .flatten()
+//RS         .map(|entry| entry.path())
+//RS         .filter(|path| {
+//RS             path.extension().and_then(|extension| extension.to_str()) == Some("jet")
+//RS                 && path.file_name().and_then(|name| name.to_str()) != Some("package.jet")
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     programs.sort();
+//RS     assert_eq!(programs.len(), 8, "the suite must keep eight user stories");
+//RS 
+//RS     let cache = std::env::temp_dir().join(format!(
+//RS         "jet-user-story-golden-{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _scratch = Scratch(cache.clone());
+//RS     fs::create_dir_all(&cache).expect("create golden cache");
+//RS 
+//RS     for program in programs {
+//RS         let stem = program
+//RS             .file_stem()
+//RS             .and_then(|name| name.to_str())
+//RS             .expect("program has a utf8 stem");
+//RS         let expected = suite.join("expected").join(format!("{stem}.out"));
+//RS         let expected_output = fs::read_to_string(&expected)
+//RS             .unwrap_or_else(|error| panic!("read {}: {error}", expected.display()));
+//RS         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .args(["run", program.to_str().expect("program path is utf8")])
+//RS             .current_dir(&root)
+//RS             .env("JETPACK_ENV", "1")
+//RS             .env_remove("JETPACK_ENV_DIR")
+//RS             .env("JET_STORE_DIR", &cache)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap_or_else(|error| panic!("run {}: {error}", program.display()));
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "{} failed:\n{}",
+//RS             program.display(),
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         assert_eq!(
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             expected_output,
+//RS             "golden mismatch for {}",
+//RS             program.display()
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_corpus_policy_runs_with_suite_goldens() {
+//RS     common::corpus_policy::CorpusPolicy::load()
+//RS         .expect("corpus manifest")
+//RS         .check_gate("suite")
+//RS         .expect("suite corpus semantic policy");
+//RS }
+// END-PORT-PENDING 1157 tests/suite_goldens.rs:1-81
+
+// PORT-PENDING 1157 tests-structure-liveness-module-group: tests/suite_membership.rs:1-620
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #2025: every declared test target belongs to exactly one named verification set.
+//RS //!
+//RS //! Three targets — `golden`, `ban_bare_panic` and `jit_run` — were each found red
+//RS //! while sitting outside every set an agent routinely ran. None of them was
+//RS //! broken by the session that found them; they had simply been red for a while
+//RS //! with nothing watching. The defect is not the three targets, it is that suite
+//RS //! MEMBERSHIP was remembered rather than enforced: a target nobody runs is a
+//RS //! target whose failures are invisible, and "add these three to the list" repeats
+//RS //! the same defect one layer up.
+//RS //!
+//RS //! So membership is derived and checked here, in the shape
+//RS //! `tests/dev_parts/support.rs` already uses for the corpus-gate ledger:
+//RS //!
+//RS //! - the DENOMINATOR is walked from the filesystem on every run, never listed —
+//RS //!   cargo builds one test binary per `tests/*.rs` file, so the walk IS the
+//RS //!   target inventory and a new file cannot be born outside it;
+//RS //! - `tests/suites.txt` states which set each target belongs to;
+//RS //! - the pins live HERE, outside the file they guard, so a hand-edit cannot green
+//RS //!   the check by deleting the row that fails;
+//RS //! - `suite_ledger_audit_fires_on_a_target_in_no_set` proves the law can fail,
+//RS //!   because a pin nobody has watched fail is a pin nobody should trust.
+//RS //!
+//RS //! Scope: integration test targets, in this package and every workspace crate.
+//RS //! Package lib/bin unit tests ride with their package under `--workspace` and
+//RS //! cannot fall out of a set on their own, which is the failure mode this file
+//RS //! exists to stop.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::collections::BTreeMap;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS /// The one list of set names. The ledger parser and the writer of any message
+//RS /// here all read the sections out of the ledger rather than keeping a private
+//RS /// copy, so a new set cannot exist in one reader and not another (AGENTS.md I8).
+//RS const SUITE_ORDER: [&str; 7] = [
+//RS     "guards",
+//RS     "dev_loop",
+//RS     "language",
+//RS     "runtime",
+//RS     "tooling",
+//RS     "surface",
+//RS     "host_gated",
+//RS ];
+//RS 
+//RS /// The one section that is not executable, so the one section that owes a reason.
+//RS const HOST_GATED: &str = "host_gated";
+//RS 
+//RS /// How many test targets `tests/suites.txt` must assign (#2025).
+//RS ///
+//RS /// A floor: rows may only GROW. State the polarity plainly, because both
+//RS /// directions are bugs — a row that VANISHES is a target that left the sets and
+//RS /// went back to being unwatched, which is the defect this file pins; a target
+//RS /// with no row raises `unassigned` and fails against the ceiling below.
+//RS ///
+//RS /// Measured on 2026-08-17: 289 `tests/*.rs` targets in this package, 8 in
+//RS /// workspace crates, plus this file. 2026-08-19 (#677): `cli_compile_latency`
+//RS /// split out of `cli`, so 290 in this package. Lower it only in the same
+//RS /// reviewed diff as a deleted test file.
+//RS const TEST_TARGET_FLOOR: usize = 302;
+//RS 
+//RS /// How many declared targets may belong to NO set (#2025).
+//RS ///
+//RS /// Zero, and shrink-only cannot go below zero, so this is the whole point of the
+//RS /// card expressed as a number: there is no legitimate "in no set". A target that
+//RS /// genuinely cannot run on a normal host is parked in `host_gated:` WITH its
+//RS /// observed gate, which costs an edit here as well — it is never simply absent.
+//RS const UNASSIGNED_CEILING: usize = 0;
+//RS 
+//RS /// How many suites may exceed the guard's 900s default (#677).
+//RS ///
+//RS /// The guard's default is deliberately hostile: almost every suite that outruns
+//RS /// 900s is defective, and the remedy is to split it or speed it up. A
+//RS /// measurement suite whose sample count is ratified policy is the real
+//RS /// exception, so `tests/suite_budgets.txt` exists — and this number is what
+//RS /// keeps that exception an exception. It equals the row count today, so a
+//RS /// SECOND exemption cannot land without moving this pin in the same reviewed
+//RS /// diff. That friction is the feature: the goal is to speed development up, not
+//RS /// to let the slow suites become the norm they were guarded against.
+//RS const OVER_DEFAULT_BUDGET_CEILING: usize = 1;
+//RS 
+//RS /// The targets that cannot run in any executable set, with the observed gate and
+//RS /// the card that owes the fix. Sorted, and compared EXACTLY against the
+//RS /// `host_gated:` section for the same reason `AOT_BROKEN_HELD_OUT` is compared
+//RS /// exactly against its class: a newly parked target fails until someone writes
+//RS /// the reason down, and an un-parked one fails until its row leaves both places.
+//RS ///
+//RS /// Empty today, and empty is the goal. This is armed, not decorative: the
+//RS /// negative control below drives it with synthetic input.
+//RS const HOST_GATED_HELD_OUT: &[(&str, &str, &str)] = &[];
+//RS 
+//RS /// One ledger row: a repo-relative target path, its set, and (host_gated only)
+//RS /// the observed gate.
+//RS #[derive(Clone, Debug)]
+//RS struct SuiteRow {
+//RS     target: String,
+//RS     set: &'static str,
+//RS     observed: String,
+//RS }
+//RS 
+//RS /// What the law found. Every field is a list of NAMES, never a bare count: a
+//RS /// count tells a reader that something is wrong and nothing about what.
+//RS #[derive(Debug, Default)]
+//RS struct SuiteLedgerAudit {
+//RS     /// Rows that name a target that exists. Ghost rows classify nothing, so they
+//RS     /// do not count toward the floor.
+//RS     assigned: usize,
+//RS     /// Discovered targets no section names — the defect this file pins.
+//RS     unassigned: Vec<String>,
+//RS     /// Rows naming a path with no `.rs` file: a stale row to delete, never a set
+//RS     /// change that failed.
+//RS     ghosts: Vec<String>,
+//RS     /// Targets claimed by more than one section, with both claimants named.
+//RS     duplicated: Vec<String>,
+//RS     /// `host_gated:` rows that park a target without saying what gates it.
+//RS     reasonless: Vec<String>,
+//RS     /// Executable sets with no members: a set name nobody can run is a name that
+//RS     /// will be cited as coverage it does not have.
+//RS     empty_sets: Vec<&'static str>,
+//RS     /// The observed `host_gated:` section, for the exact compare.
+//RS     host_gated: Vec<(String, String)>,
+//RS }
+//RS 
+//RS fn repo_root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS /// Walk the target inventory. Cargo makes one test binary per `tests/*.rs` file
+//RS /// in every workspace package, so this walk is the inventory itself — nothing
+//RS /// here reads a list, which is exactly why a target cannot be born outside it.
+//RS fn discover_test_targets() -> Vec<String> {
+//RS     let root = repo_root();
+//RS     let mut targets = integration_targets(&root.join("tests"), "tests");
+//RS     let crates = root.join("crates");
+//RS     let mut crate_dirs: Vec<PathBuf> = fs::read_dir(&crates)
+//RS         .expect("crates dir")
+//RS         .flatten()
+//RS         .map(|entry| entry.path())
+//RS         .filter(|path| path.is_dir())
+//RS         .collect();
+//RS     crate_dirs.sort();
+//RS     for crate_dir in crate_dirs {
+//RS         let name = crate_dir
+//RS             .file_name()
+//RS             .expect("crate dir name")
+//RS             .to_string_lossy()
+//RS             .into_owned();
+//RS         let tests = crate_dir.join("tests");
+//RS         if tests.is_dir() {
+//RS             targets.extend(integration_targets(&tests, &format!("crates/{name}/tests")));
+//RS         }
+//RS     }
+//RS     targets.sort();
+//RS     targets
+//RS }
+//RS 
+//RS fn integration_targets(dir: &Path, prefix: &str) -> Vec<String> {
+//RS     let mut targets: Vec<String> = fs::read_dir(dir)
+//RS         .unwrap_or_else(|err| panic!("read {}: {err}", dir.display()))
+//RS         .flatten()
+//RS         .filter(|entry| entry.path().is_file())
+//RS         .filter_map(|entry| {
+//RS             let name = entry.file_name().to_string_lossy().into_owned();
+//RS             name.strip_suffix(".rs")
+//RS                 .map(|stem| format!("{prefix}/{stem}"))
+//RS         })
+//RS         .collect();
+//RS     targets.sort();
+//RS     targets
+//RS }
+//RS 
+//RS fn parse_suite_ledger(text: &str) -> Vec<SuiteRow> {
+//RS     let mut section: Option<&'static str> = None;
+//RS     let mut rows = Vec::new();
+//RS     for raw in text.lines() {
+//RS         let trimmed = raw.trim();
+//RS         if trimmed.is_empty() || trimmed.starts_with('#') {
+//RS             continue;
+//RS         }
+//RS         if let Some(name) = trimmed.strip_suffix(':') {
+//RS             section = Some(
+//RS                 SUITE_ORDER
+//RS                     .into_iter()
+//RS                     .find(|known| *known == name)
+//RS                     .unwrap_or_else(|| {
+//RS                         panic!(
+//RS                             "tests/suites.txt names the set `{name}:`, which is not one of \
+//RS                              {SUITE_ORDER:?}. A set the runner cannot name is a set nobody runs."
+//RS                         )
+//RS                     }),
+//RS             );
+//RS             continue;
+//RS         }
+//RS         let (target, observed) = match trimmed.split_once(": ") {
+//RS             Some((target, observed)) => (target.to_string(), observed.to_string()),
+//RS             None => (trimmed.to_string(), String::new()),
+//RS         };
+//RS         let set = section
+//RS             .unwrap_or_else(|| panic!("tests/suites.txt row outside any section: {trimmed}"));
+//RS         rows.push(SuiteRow {
+//RS             target,
+//RS             set,
+//RS             observed,
+//RS         });
+//RS     }
+//RS     rows
+//RS }
+//RS 
+//RS /// The whole law as a pure function, so the negative control can prove it fires.
+//RS ///
+//RS /// `every_test_target_belongs_to_a_named_set` is the only caller that reads the
+//RS /// real ledger and the real filesystem; this half takes both sides as arguments
+//RS /// so a synthetic inventory with a target no section names can be handed to it.
+//RS fn audit_suite_ledger(ledger: &[SuiteRow], discovered: &[String]) -> SuiteLedgerAudit {
+//RS     let existing: std::collections::HashSet<&str> = discovered.iter().map(String::as_str).collect();
+//RS 
+//RS     let mut claims: BTreeMap<&str, Vec<&'static str>> = BTreeMap::new();
+//RS     for row in ledger {
+//RS         claims.entry(row.target.as_str()).or_default().push(row.set);
+//RS     }
+//RS 
+//RS     let ghosts: Vec<String> = claims
+//RS         .keys()
+//RS         .filter(|target| !existing.contains(**target))
+//RS         .map(|target| (*target).to_string())
+//RS         .collect();
+//RS     let duplicated: Vec<String> = claims
+//RS         .iter()
+//RS         .filter(|(_, sets)| sets.len() > 1)
+//RS         .map(|(target, sets)| format!("  {target}: {}", sets.join(", ")))
+//RS         .collect();
+//RS     let unassigned: Vec<String> = discovered
+//RS         .iter()
+//RS         .filter(|target| !claims.contains_key(target.as_str()))
+//RS         .cloned()
+//RS         .collect();
+//RS     let reasonless: Vec<String> = ledger
+//RS         .iter()
+//RS         .filter(|row| row.set == HOST_GATED && row.observed.is_empty())
+//RS         .map(|row| {
+//RS             format!(
+//RS                 "  {}: parked in `{HOST_GATED}:` with no gate named",
+//RS                 row.target
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     let empty_sets: Vec<&'static str> = SUITE_ORDER
+//RS         .into_iter()
+//RS         .filter(|set| *set != HOST_GATED)
+//RS         .filter(|set| !ledger.iter().any(|row| row.set == *set))
+//RS         .collect();
+//RS     let mut host_gated: Vec<(String, String)> = ledger
+//RS         .iter()
+//RS         .filter(|row| row.set == HOST_GATED)
+//RS         .map(|row| (row.target.clone(), row.observed.clone()))
+//RS         .collect();
+//RS     host_gated.sort();
+//RS 
+//RS     SuiteLedgerAudit {
+//RS         assigned: claims.len() - ghosts.len(),
+//RS         unassigned,
+//RS         ghosts,
+//RS         duplicated,
+//RS         reasonless,
+//RS         empty_sets,
+//RS         host_gated,
+//RS     }
+//RS }
+//RS 
+//RS /// #2025 c4/c5: membership is enforced, not remembered.
+//RS ///
+//RS /// Reads `tests/suites.txt` and walks the test directories. No cargo metadata, no
+//RS /// build, no run — it fires on any host in milliseconds, which matters because
+//RS /// the checks that failed to notice three red targets were the expensive ones
+//RS /// that return green early where the host is unsupported.
+//RS #[test]
+//RS fn every_test_target_belongs_to_a_named_set() {
+//RS     let ledger = parse_suite_ledger(include_str!("suites.txt"));
+//RS     let discovered = discover_test_targets();
+//RS     let audit = audit_suite_ledger(&ledger, &discovered);
+//RS 
+//RS     // Printed on every run, pass or fail: the denominator is stated, never
+//RS     // implied.
+//RS     eprintln!(
+//RS         "suite membership: {} of {} declared test target(s) in a named set; {} in none:",
+//RS         audit.assigned,
+//RS         discovered.len(),
+//RS         audit.unassigned.len()
+//RS     );
+//RS     for target in &audit.unassigned {
+//RS         eprintln!("  {target}");
+//RS     }
+//RS 
+//RS     // Named first, because a row naming a file that does not exist reads exactly
+//RS     // like a set assignment that changed.
+//RS     assert!(
+//RS         audit.ghosts.is_empty(),
+//RS         "tests/suites.txt names {} target(s) with no matching `.rs` file: {:?}. A nonexistent \
+//RS          target is a stale row to delete, never a set that failed.",
+//RS         audit.ghosts.len(),
+//RS         audit.ghosts
+//RS     );
+//RS     assert!(
+//RS         audit.duplicated.is_empty(),
+//RS         "{} target(s) appear in more than one section of tests/suites.txt, breaking that file's \
+//RS          own invariant that every target belongs to exactly one set:\n{}",
+//RS         audit.duplicated.len(),
+//RS         audit.duplicated.join("\n")
+//RS     );
+//RS     assert!(
+//RS         audit.reasonless.is_empty(),
+//RS         "{} target(s) are parked in `{HOST_GATED}:` without saying what gates them:\n{}\nA target \
+//RS          held out states its gate, or it is not held out — it is hidden, which is the whole \
+//RS          defect (#2025).",
+//RS         audit.reasonless.len(),
+//RS         audit.reasonless.join("\n")
+//RS     );
+//RS     assert!(
+//RS         audit.empty_sets.is_empty(),
+//RS         "these named sets have no members: {:?}. An empty set is a name that will be cited as \
+//RS          coverage it does not have — delete the name or give it members.",
+//RS         audit.empty_sets
+//RS     );
+//RS 
+//RS     // The pins below only mean something while this identity holds: with no
+//RS     // ghosts and no duplicates, assigned + unassigned IS the inventory, so
+//RS     // neither pin can be satisfied by moving a target out of the accounting.
+//RS     assert_eq!(
+//RS         audit.assigned + audit.unassigned.len(),
+//RS         discovered.len(),
+//RS         "suite accounting is broken: {} assigned + {} unassigned != {} discovered target(s).",
+//RS         audit.assigned,
+//RS         audit.unassigned.len(),
+//RS         discovered.len()
+//RS     );
+//RS     assert!(
+//RS         audit.unassigned.len() <= UNASSIGNED_CEILING,
+//RS         "{} declared test target(s) belong to NO verification set (ceiling \
+//RS          {UNASSIGNED_CEILING}):\n  {}\nThat is how `golden`, `ban_bare_panic` and `jit_run` were \
+//RS          each found red long after they broke. Put the target in the set it belongs to, or park \
+//RS          it in `{HOST_GATED}:` with the observed gate AND a row in HOST_GATED_HELD_OUT.",
+//RS         audit.unassigned.len(),
+//RS         audit.unassigned.join("\n  ")
+//RS     );
+//RS     assert!(
+//RS         audit.assigned >= TEST_TARGET_FLOOR,
+//RS         "tests/suites.txt assigns {} target(s) but the ratchet floor is {TEST_TARGET_FLOOR}; rows \
+//RS          may only GROW. A target that lost its row did not change set — it left the sets and went \
+//RS          back to being unwatched. Lower the floor only in the same diff as a deleted test file.",
+//RS         audit.assigned
+//RS     );
+//RS 
+//RS     // Exact, not a ceiling: a newly parked target fails until its gate is written
+//RS     // down here, and a target that can run again fails until its row leaves both
+//RS     // places, so neither list can outlive its defect.
+//RS     let held_out: Vec<(String, String)> = HOST_GATED_HELD_OUT
+//RS         .iter()
+//RS         .map(|(target, observed, _)| ((*target).to_string(), (*observed).to_string()))
+//RS         .collect();
+//RS     assert_eq!(
+//RS         audit.host_gated,
+//RS         held_out,
+//RS         "the `{HOST_GATED}:` section of tests/suites.txt and HOST_GATED_HELD_OUT disagree. A new \
+//RS          entry is a target that stopped being routine; a vanished entry is one that can run again \
+//RS          and must leave both places in the same diff. Held out: {}",
+//RS         HOST_GATED_HELD_OUT
+//RS             .iter()
+//RS             .map(|(target, observed, why)| format!("{target} ({observed}) — {why}"))
+//RS             .collect::<Vec<_>>()
+//RS             .join("; ")
+//RS     );
+//RS }
+//RS 
+//RS /// #2025 negative control: the membership law actually fires.
+//RS ///
+//RS /// The check above passes today only because every target happens to carry a
+//RS /// row, so "it passed" says nothing about whether it CAN fail — and a ledger that
+//RS /// stayed green through three falsifications is exactly the history the retired
+//RS /// JIT hand ledger had. Hand the audit an inventory with a target no section
+//RS /// names, a target two sections claim, a row with no file, and a parked row with
+//RS /// no gate, and require it to name each one.
+//RS #[test]
+//RS fn suite_ledger_audit_fires_on_a_target_in_no_set() {
+//RS     let row = |target: &str, set: &'static str, observed: &str| SuiteRow {
+//RS         target: target.to_string(),
+//RS         set,
+//RS         observed: observed.to_string(),
+//RS     };
+//RS     let ledger = vec![
+//RS         row("tests/golden", "guards", ""),
+//RS         row("tests/dev", "dev_loop", ""),
+//RS         row("tests/dev", "language", ""),
+//RS         row("tests/gone_yesterday", "guards", ""),
+//RS         row("tests/os_interrupt_windows", HOST_GATED, ""),
+//RS     ];
+//RS     let discovered = vec![
+//RS         "tests/dev".to_string(),
+//RS         "tests/golden".to_string(),
+//RS         "tests/jit_run".to_string(),
+//RS         "tests/os_interrupt_windows".to_string(),
+//RS     ];
+//RS 
+//RS     let audit = audit_suite_ledger(&ledger, &discovered);
+//RS 
+//RS     assert_eq!(
+//RS         audit.unassigned,
+//RS         vec!["tests/jit_run".to_string()],
+//RS         "a target in no set must be named, not counted away"
+//RS     );
+//RS     assert_eq!(
+//RS         audit.ghosts,
+//RS         vec!["tests/gone_yesterday".to_string()],
+//RS         "a row with no file must read as a stale row, never as a set change"
+//RS     );
+//RS     assert_eq!(audit.duplicated.len(), 1, "{:?}", audit.duplicated);
+//RS     assert!(
+//RS         audit.duplicated[0].contains("tests/dev")
+//RS             && audit.duplicated[0].contains("dev_loop")
+//RS             && audit.duplicated[0].contains("language"),
+//RS         "the duplicate must name both claiming sets: {:?}",
+//RS         audit.duplicated
+//RS     );
+//RS     assert_eq!(audit.reasonless.len(), 1, "{:?}", audit.reasonless);
+//RS     assert!(
+//RS         audit.reasonless[0].contains("tests/os_interrupt_windows"),
+//RS         "a parked row with no gate must be named: {:?}",
+//RS         audit.reasonless
+//RS     );
+//RS     assert_eq!(
+//RS         audit.empty_sets,
+//RS         vec!["runtime", "tooling", "surface"],
+//RS         "a named set with no members must be named too"
+//RS     );
+//RS     // Ghost rows classify nothing, so they do not pay for a target that fell out
+//RS     // of the ledger: three real targets are assigned, not four.
+//RS     assert_eq!(
+//RS         audit.assigned, 3,
+//RS         "only targets that exist count toward the floor"
+//RS     );
+//RS     assert_eq!(
+//RS         audit.assigned + audit.unassigned.len(),
+//RS         discovered.len(),
+//RS         "the identity the pins rest on must hold on synthetic input too"
+//RS     );
+//RS     assert_eq!(
+//RS         audit.host_gated,
+//RS         vec![("tests/os_interrupt_windows".to_string(), String::new())],
+//RS         "the parked section is reported for the exact compare"
+//RS     );
+//RS }
+//RS 
+//RS /// What the budget table got wrong, as NAMES rather than a count — same rule as
+//RS /// `SuiteLedgerAudit` above: a number tells a reader something is wrong and
+//RS /// nothing about what.
+//RS fn audit_suite_budgets(rows: &[common::SuiteBudgetRow<'_>], discovered: &[String]) -> Vec<String> {
+//RS     let names: Vec<&str> = discovered
+//RS         .iter()
+//RS         .map(|target| target.rsplit('/').next().unwrap_or(target.as_str()))
+//RS         .collect();
+//RS     let mut violations = Vec::new();
+//RS     let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
+//RS     for row in rows {
+//RS         *seen.entry(row.suite).or_default() += 1;
+//RS         if row.secs <= 900 {
+//RS             violations.push(format!(
+//RS                 "`{}` asks for {}s, at or under the 900s default — a row that buys nothing is a \
+//RS                  row to delete, and the env var is what tightens a budget",
+//RS                 row.suite, row.secs
+//RS             ));
+//RS         }
+//RS         if !names.contains(&row.suite) {
+//RS             violations.push(format!(
+//RS                 "`{}` names no test target — a stale row keeps an exemption alive for a suite that \
+//RS                  no longer exists, and spends the ceiling on nothing",
+//RS                 row.suite
+//RS             ));
+//RS         }
+//RS     }
+//RS     for (suite, count) in seen {
+//RS         if count > 1 {
+//RS             violations.push(format!(
+//RS                 "`{suite}` has {count} rows; the guard takes the first, so the others are \
+//RS                  exemptions nobody reads"
+//RS             ));
+//RS         }
+//RS     }
+//RS     violations
+//RS }
+//RS 
+//RS /// #677: the over-default budget rows stay a named minority.
+//RS ///
+//RS /// The guard in `tests/common/mod.rs` no longer holds a flat 900s constant — it
+//RS /// resolves each suite's budget from `tests/suite_budgets.txt`, defaulting to
+//RS /// 900s. That flexibility is one edit away from becoming "everything is slow
+//RS /// now", so the exemption list is itself guarded: the pin lives HERE, outside
+//RS /// the file it guards, for the same reason `TEST_TARGET_FLOOR` does — a
+//RS /// hand-edit of the table cannot green the check that limits the table.
+//RS #[test]
+//RS fn suite_budget_rows_stay_a_named_minority() {
+//RS     let rows = common::parse_suite_budgets(common::SUITE_BUDGET_LEDGER).unwrap_or_else(|err| {
+//RS         panic!(
+//RS             "{} does not parse, so the guard silently falls back to the 900s default for every \
+//RS              listed suite: {err}",
+//RS             common::SUITE_BUDGET_LEDGER_PATH
+//RS         )
+//RS     });
+//RS     let discovered = discover_test_targets();
+//RS     let violations = audit_suite_budgets(&rows, &discovered);
+//RS 
+//RS     // The denominator, printed pass or fail.
+//RS     eprintln!(
+//RS         "suite budgets: {} of {} declared test target(s) exceed the 900s default (ceiling \
+//RS          {OVER_DEFAULT_BUDGET_CEILING}):",
+//RS         rows.len(),
+//RS         discovered.len()
+//RS     );
+//RS     for row in &rows {
+//RS         eprintln!("  {} {}s — {}", row.suite, row.secs, row.reason);
+//RS     }
+//RS 
+//RS     assert!(
+//RS         violations.is_empty(),
+//RS         "{} is {} row(s) wrong:\n  {}",
+//RS         common::SUITE_BUDGET_LEDGER_PATH,
+//RS         violations.len(),
+//RS         violations.join("\n  ")
+//RS     );
+//RS     assert!(
+//RS         rows.len() <= OVER_DEFAULT_BUDGET_CEILING,
+//RS         "{} suite(s) now exceed the 900s guard default, over the ceiling of \
+//RS          {OVER_DEFAULT_BUDGET_CEILING}:\n  {}\nThe guard is flexible for a NAMED minority, not for \
+//RS          the majority: a suite that outruns 900s is normally defective and gets split or sped up. \
+//RS          If this row genuinely belongs, raise OVER_DEFAULT_BUDGET_CEILING in the same reviewed \
+//RS          diff and say why here (#677).",
+//RS         rows.len(),
+//RS         rows.iter()
+//RS             .map(|row| format!("{} {}s — {}", row.suite, row.secs, row.reason))
+//RS             .collect::<Vec<_>>()
+//RS             .join("\n  ")
+//RS     );
+//RS }
+//RS 
+//RS /// #677 negative control: the budget law actually fires.
+//RS ///
+//RS /// A pin that has never been watched fail is a pin nobody should trust — the
+//RS /// same reason `suite_ledger_audit_fires_on_a_target_in_no_set` exists. Hand the
+//RS /// audit a row that buys nothing, a row naming no target, and a duplicated row,
+//RS /// and require it to name each one; hand the parser a reasonless row and require
+//RS /// it to refuse.
+//RS #[test]
+//RS fn suite_budget_audit_fires_on_a_row_that_should_not_exist() {
+//RS     let discovered = vec![
+//RS         "tests/cli_compile_latency".to_string(),
+//RS         "tests/some_unit_suite".to_string(),
+//RS     ];
+//RS     let rows = vec![
+//RS         common::SuiteBudgetRow {
+//RS             suite: "cli_compile_latency",
+//RS             secs: 5400,
+//RS             reason: "ratified sample policy",
+//RS         },
+//RS         common::SuiteBudgetRow {
+//RS             suite: "cli_compile_latency",
+//RS             secs: 4000,
+//RS             reason: "a second row for the same suite",
+//RS         },
+//RS         common::SuiteBudgetRow {
+//RS             suite: "some_unit_suite",
+//RS             secs: 900,
+//RS             reason: "at the default, so it buys nothing",
+//RS         },
+//RS         common::SuiteBudgetRow {
+//RS             suite: "deleted_suite",
+//RS             secs: 1200,
+//RS             reason: "target no longer exists",
+//RS         },
+//RS     ];
+//RS     let violations = audit_suite_budgets(&rows, &discovered);
+//RS     assert_eq!(
+//RS         violations.len(),
+//RS         3,
+//RS         "one row at the default, one naming no target, one duplicated: {violations:?}"
+//RS     );
+//RS     assert!(
+//RS         violations
+//RS             .iter()
+//RS             .any(|v| v.contains("some_unit_suite") && v.contains("900s default")),
+//RS         "a row at the default must be named: {violations:?}"
+//RS     );
+//RS     assert!(
+//RS         violations
+//RS             .iter()
+//RS             .any(|v| v.contains("deleted_suite") && v.contains("no test target")),
+//RS         "a row naming no target must be named: {violations:?}"
+//RS     );
+//RS     assert!(
+//RS         violations
+//RS             .iter()
+//RS             .any(|v| v.contains("cli_compile_latency") && v.contains("2 rows")),
+//RS         "a duplicated row must be named: {violations:?}"
+//RS     );
+//RS 
+//RS     // The parser is the other half of the law: a row with a budget but no reason
+//RS     // is an exemption nobody can review or retire, so it never becomes a row.
+//RS     let err = common::parse_suite_budgets("some_unit_suite 5400\n")
+//RS         .expect_err("a reasonless row must be refused");
+//RS     assert!(err.contains("states no reason"), "{err}");
+//RS     let err = common::parse_suite_budgets("some_unit_suite ninety minutes, please\n")
+//RS         .expect_err("a non-numeric budget must be refused");
+//RS     assert!(err.contains("not a budget in whole seconds"), "{err}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_corpus_policy_runs_with_suite_membership() {
+//RS     common::corpus_policy::CorpusPolicy::load()
+//RS         .expect("corpus manifest")
+//RS         .check_gate("suite")
+//RS         .expect("suite corpus semantic policy");
+//RS }
+// END-PORT-PENDING 1157 tests/suite_membership.rs:1-620
+

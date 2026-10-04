@@ -1,0 +1,1006 @@
+// Rust Sema/App.rs: the sole checked App-returning run producer. Executable
+// bodies remain TIR; the existing MIRApp* carriers own only erased metadata.
+use core.files.runtime.kernel_path_components as sema_app_os_path
+use core.files.host.retained_descriptor as sema_app_descriptors
+use jet_foundation.[
+    ASTExprVisitor, CallArg, Diagnostic, Expr, FailureContract, Func, Item,
+    MIRAppAction, MIRAppCacheFact, MIRAppFormFact, MIRAppFormFieldFact,
+    MIRAppGraph, MIRAppHydrationTrigger, MIRAppIslandFact, MIRAppMount,
+    MIRAppQueryFact, MIRAppRenderFactMode, MIRAppRenderFacts, MIRAppRenderMode,
+    MIRAppResumeCapture, MIRAppResumePayload, MIRAppRoute, MIRAppRouteBoundaries,
+    MIRAppRouteField, MIRAppRouteLoader, MIRAppRoutesFrom, MIRAppStoreFact,
+    Span, Stmt, StructDef, TTypeDef, Type, UnOp, WebPartitionMarker, TEXT_NUL,
+    app_cache_parse, app_graph_new, app_render_fact_from_builder,
+    app_render_fact_mode_name, app_render_fact_mode_parse, app_render_facts_default,
+    app_render_mode_parse,
+    app_server_function_middleware, ast_stmt_for_each_expr, app_entry_run_fn,
+    fact_sorted_strings, func_failure_contract, stable_island_identity,
+    stable_pending_boundary_id, stable_route_identity, type_name,
+    check_reads_read_dir_sorted_path, check_reads_read_path,
+]
+use core.files as sema_app_files
+
+struct SemaAppFunctionLocation { module_index: Int, path: [Int] }
+struct SemaAppSeenRoute { provenance: String, span: Span }
+struct SemaAppBuilder {
+    graph: MIRAppGraph
+    diagnostics: [Diagnostic]
+    render: MIRAppRenderMode
+    override_mode: MIRAppRenderFactMode?
+    seen: [String:SemaAppSeenRoute]
+}
+struct SemaAppRoutePart { kind: Int, name: String }
+struct SemaAppRouteInputs { path: [MIRAppRouteField], search: [MIRAppRouteField], codec: String }
+struct SemaAppFormCall { model: String, action: String, source: String, span: Span }
+struct SemaAppDiscovery {
+    source: String
+    queries: [MIRAppQueryFact]
+    stores: [MIRAppStoreFact]
+    forms: [SemaAppFormCall]
+}
+
+fn sema_app_collect_functions(items: [Item], module_index: Int, prefix: [Int], locations: &[String:SemaAppFunctionLocation], ordered: &[SemaAppFunctionLocation]) Never! {
+    loop (index, item) in items {
+        path := prefix
+        &path.push(index)
+        if item == {
+            .Func(function) -> {
+                location :: SemaAppFunctionLocation{module_index: module_index, path: path}
+                if locations.get(function.name) == None -> locations[function.name] = location
+                &ordered.push(location)
+            }
+            .CodeModule(module) -> if module.body == .Val(body) -> sema_app_collect_functions(body, module_index, path, &locations, &ordered)
+            else -> {}
+        }
+    }
+}
+fn sema_app_function_in_path(items: [Item], path: [Int], depth: Int) -> Func Never! {
+    item :: items[path[depth]]
+    if item == {
+        .Func(function) -> function
+        .CodeModule(module) -> sema_app_function_in_path(module.body ?? panic("App function module lost its body"), path, depth + 1)
+        else -> panic("App function location lost its declaration")
+    }
+}
+fn sema_app_function(registration: SemaRegistrationGraph, location: SemaAppFunctionLocation) -> Func Never! {
+    sema_app_function_in_path(registration.modules[location.module_index].program.items, location.path, 0)
+}
+fn sema_app_find_struct(items: [Item], name: String) -> StructDef? {
+    loop item in items {
+        if item == {
+            .Struct(definition) -> if definition.name == name -> return Val(definition)
+            .CodeModule(module) -> if module.body == .Val(body) {
+                found :: sema_app_find_struct(body, name)
+                if found != None -> return found
+            }
+            else -> {}
+        }
+    }
+    None
+}
+fn sema_app_find_struct_bundle(registration: SemaRegistrationGraph, name: String) -> StructDef? {
+    loop module in registration.modules {
+        found :: sema_app_find_struct(module.program.items, name)
+        if found != None -> return found
+    }
+    None
+}
+fn sema_app_stmt_expr(statement: Stmt) -> Expr? {
+    if statement == {
+        .Expr(expr) -> Val(expr)
+        .Return(value, _) -> value
+        .Val(binding) -> Val(binding.init)
+        .Assign(_, _, _, value) -> Val(value)
+        else -> None
+    }
+}
+fn sema_app_string(expr: Expr) -> String? {
+    if expr == .Str(parts, _) {
+        out := ""
+        loop part in parts {
+            if part == {
+                .Lit(text) -> out = "{out}{text}"
+                else -> return None
+            }
+        }
+        return Val(out)
+    }
+    None
+}
+fn sema_app_string_arg(args: [CallArg], index: Int) -> String? {
+    if index >= args.len() -> return None
+    sema_app_string(args[index].expr)
+}
+fn sema_app_handler(args: [CallArg], index: Int) -> String? {
+    if index >= args.len() -> return None
+    if args[index].expr == {
+        .Ident(name, _) -> Val(name)
+        .Field(_, field, _) -> Val(field)
+        else -> None
+    }
+}
+fn sema_app_labeled_string(args: [CallArg], label: String) -> String? {
+    loop arg in args {
+        if arg.label == .Val(value) && value.name == label -> return sema_app_string(arg.expr)
+    }
+    None
+}
+fn sema_app_labeled_bool(args: [CallArg], label: String) -> Bool? {
+    loop arg in args {
+        if arg.label == .Val(value) && value.name == label {
+            if arg.expr == .Bool(value, _) -> return Val(value)
+            return None
+        }
+    }
+    index := args.len() - 1
+    loop index >= 0 {
+        if args[index].label == None {
+            if args[index].expr == .Bool(value, _) -> return Val(value)
+            return None
+        }
+        index -= 1
+    }
+    None
+}
+fn sema_app_int(expr: Expr) -> Int? {
+    if expr == {
+        .Int(value, _, _, _) -> if value >= -9223372036854775808 && value <= 9223372036854775807 -> Val(value) else -> None
+        .Paren(inner, _) -> sema_app_int(inner)
+        .Unary(op, inner, _) -> {
+            if op != UnOp.Neg -> return None
+            value :: sema_app_int(inner) ?? return None
+            if value == -9223372036854775808 -> None else -> Val(-value)
+        }
+        else -> None
+    }
+}
+fn sema_app_wire_text(expr: Expr?) -> String? {
+    value :: expr ?? return None
+    if value == {
+        .Str(_, _) -> sema_app_string(value)
+        .Int(n, _, _, _) -> Val("{n}")
+        .Float(n, _, _, _) -> Val("{n}")
+        .Bool(n, _) -> Val("{n}")
+        .Char(n, _) -> Val(n)
+        else -> None
+    }
+}
+fn sema_app_render_mode(args: [CallArg]) -> MIRAppRenderFactMode? {
+    name :: sema_app_string_arg(args, 0) ?? sema_app_handler(args, 0) ?? return None
+    app_render_fact_mode_parse(name)
+}
+fn sema_app_builder_mode(mode: MIRAppRenderFactMode) -> MIRAppRenderMode Never! {
+    if mode == {
+        .Static -> MIRAppRenderMode.SSG
+        .Server -> MIRAppRenderMode.SSR
+        .ServerStream -> MIRAppRenderMode.Stream
+        .ServerIsland -> MIRAppRenderMode.Island
+        .Client -> MIRAppRenderMode.CSR
+    }
+}
+fn sema_app_override_facts(mode: MIRAppRenderFactMode?) -> MIRAppRenderFacts Never! {
+    facts := app_render_facts_default()
+    if mode == .Val(value) {
+        facts.mode = value
+        facts.reason = [String]{"explicit render mode `{app_render_fact_mode_name(value)}`"}
+        facts.override_mode = mode
+    }
+    facts
+}
+fn sema_app_canonical_path(path: String) -> String Never! {
+    parts := [String]{}
+    loop segment in path.split("/").to_list() {
+        if segment.len() > 2 && segment.starts_with("{") && segment.ends_with("}") {
+            name := segment.slice(1, segment.len() - 1) // #4303
+            &parts.push(":{name}")
+        } else -> &parts.push(segment)
+    }
+    parts.join("/")
+}
+fn sema_app_route_parts(path: String) -> [SemaAppRoutePart] Never! {
+    parts := [SemaAppRoutePart]{}
+    canonical := sema_app_canonical_path(path)
+    loop segment in canonical.split("/").to_list() {
+        if segment.len() == 0 -> next
+        if {
+            segment.starts_with("*") -> &parts.push(SemaAppRoutePart{kind: 2, name: segment.slice(1, segment.len())})
+            segment.starts_with(":") -> &parts.push(SemaAppRoutePart{kind: 1, name: segment.slice(1, segment.len())})
+            else -> &parts.push(SemaAppRoutePart{kind: 0, name: segment})
+        }
+    }
+    parts
+}
+fn sema_app_route_precedence(path: String) -> [Int] Never! {
+    parts :: sema_app_route_parts(path)
+    statics := 0
+    loop part in parts { if part.kind == 0 -> statics += 1 }
+    [Int]{statics, parts.len()}
+}
+fn sema_app_precedence_name(path: String) -> String Never! {
+    loop part in sema_app_route_parts(path) { if part.kind != 0 -> return "static-before-dynamic" }
+    "static"
+}
+fn sema_app_routes_overlap(left_path: String, right_path: String) -> Bool Never! {
+    left :: sema_app_route_parts(left_path)
+    right :: sema_app_route_parts(right_path)
+    left_catch :: left.len() > 0 && left[left.len() - 1].kind == 2
+    right_catch :: right.len() > 0 && right[right.len() - 1].kind == 2
+    if !left_catch && !right_catch && left.len() != right.len() -> return false
+    shared :: if left.len() < right.len() -> left.len() else -> right.len()
+    loop index in 0..<shared {
+        if left[index].kind == 2 || right[index].kind == 2 -> return true
+        if left[index].kind == 0 && right[index].kind == 0 && left[index].name != right[index].name -> return false
+    }
+    left.len() == right.len() || left_catch || right_catch
+}
+fn sema_app_record_route(builder: &SemaAppBuilder, route: MIRAppRoute) Never! {
+    span :: Span{start: route.span_start, end: route.span_end}
+    if builder.seen.get(route.path) == .Val(previous) {
+        &builder.diagnostics.push(sema_error("E2807", span, "route `{route.path}` is registered both by `{previous.provenance}` and `{route.provenance}`", "explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1)", "remove one registration, or rename the convention file"))
+        if previous.span != span -> &builder.diagnostics.push(sema_error("E2807", previous.span, "earlier registration of route `{route.path}`", "both spans are kept so provenance stays audible", "delete or rename this registration"))
+        return
+    }
+    loop previous in builder.graph.routes {
+        if sema_app_routes_overlap(previous.path, route.path) && sema_app_route_precedence(previous.path) == sema_app_route_precedence(route.path) {
+            &builder.diagnostics.push(sema_error("E2807", span, "routes `{previous.path}` and `{route.path}` are ambiguous", "one checked route graph uses static-before-dynamic precedence; equally specific overlapping patterns have no deterministic owner", "make one pattern more specific, or remove the duplicate dynamic shape"))
+            return
+        }
+    }
+    builder.seen[route.path] = SemaAppSeenRoute{provenance: route.provenance, span: span}
+    &builder.graph.routes.push(route)
+}
+fn sema_app_action_contract(function: Func?, name: String, handler: String, kind: String, span: Span, preload: Bool, provenance: String) -> MIRAppAction Never! {
+    action := MIRAppAction{name: name, handler: handler, kind: kind, preload: preload, input_type: "", output_type: "", error_type: "", endpoint: "/actions/{name}", method: "POST", csrf: "same-origin", effects: [String]{}, middleware: [String]{}, provenance: provenance, span_start: span.start, span_end: span.end}
+    declaration :: function ?? return action
+    params :: loop param in declaration.params if param.name != "self" -> param
+    if {
+        params.len() == 0 -> action.input_type = "Unit"
+        params.len() == 1 -> action.input_type = type_name(params[0].ty)
+        else -> {
+            fields :: loop param in params -> "{param.name}:{type_name(param.ty)}"
+            action.input_type = "({fields.join(",")})"
+        }
+    }
+    if func_failure_contract(declaration) == {
+        .Default(success, error) | .Explicit(success, error) | .Inferred(success, error) -> {
+            action.output_type = type_name(success)
+            action.error_type = type_name(error)
+        }
+        .Optional(success) | .ProvenUnreachable(success) | .InferredNever(success) -> {
+            action.output_type = type_name(success)
+            action.error_type = "Never"
+        }
+        .Converted(success, _, target) -> {
+            action.output_type = type_name(success)
+            action.error_type = type_name(target)
+        }
+        .DeclaredNever -> {
+            action.output_type = "Never"
+            action.error_type = "Never"
+        }
+    }
+    loop entry in declaration.declared_effects ?? [] -> &action.effects.push(entry.name)
+    action.middleware = app_server_function_middleware()
+    action
+}
+fn sema_app_apply_method(method: String, args: [CallArg], span: Span, builder: &SemaAppBuilder, registration: SemaRegistrationGraph, functions: [String:SemaAppFunctionLocation]) Never! {
+    if method == {
+        "route" | "page" | "layout" -> {
+            path :: sema_app_canonical_path(sema_app_string_arg(args, 0) ?? "/")
+            handler :: sema_app_handler(args, 1) ?? "<dynamic>"
+            if handler == "<dynamic>" || functions.get(handler) == None -> &builder.diagnostics.push(sema_error("E2810", span, "route `{path}` is not a statically known handler", "D-WEBAPP1 keeps every route on the typed application graph; a runtime-built handler outside `.mount` is an unanalyzed edge", "pass a named function, or declare a typed `.mount(prefix, handler)` for dynamic subtrees"))
+            facts :: sema_app_override_facts(builder.override_mode)
+            builder.override_mode = None
+            sema_app_record_route(&builder, MIRAppRoute{path: path, handler: handler, route_identity: stable_route_identity(path, handler), path_params: [MIRAppRouteField]{}, search_params: [MIRAppRouteField]{}, search_codec: "query", loader: None, boundaries: MIRAppRouteBoundaries{pending: None, not_found: None, error: None}, precedence: sema_app_precedence_name(path), render: builder.render, render_facts: facts, provenance: "builder", span_start: span.start, span_end: span.end})
+        }
+        "action" | "form" | "data" | "loader" -> {
+            name :: if method == "loader" -> sema_app_handler(args, 0) ?? sema_app_string_arg(args, 0) ?? method else -> sema_app_string_arg(args, 0) ?? method
+            handler :: sema_app_handler(args, 1) ?? "<dynamic>"
+            if handler == "<dynamic>" || functions.get(handler) == None -> &builder.diagnostics.push(sema_error("E2810", span, "`{method}` `{name}` is not a statically known handler", "D-WEBAPP1 records actions/forms/data on the typed application graph; a runtime value outside `.mount` is an unanalyzed edge", "pass a named function, or declare a typed `.mount(prefix, handler)` for dynamic registration"))
+            if method == "loader" && (builder.graph.routes.len() == 0 || builder.graph.routes[builder.graph.routes.len() - 1].handler != name) -> &builder.diagnostics.push(sema_error("E2810", span, "`loader` for `{name}` does not follow that route registration", "a loader belongs to the route registered immediately before it in the App graph", "write `.loader({name}, …)` directly after `.route(path, {name})`"))
+            function :: if functions.get(handler) == {
+                .Val(location) -> Val(sema_app_function(registration, location))
+                .None -> None
+            }
+            &builder.graph.actions.push(sema_app_action_contract(function, name, handler, method, span, method == "loader" && (sema_app_labeled_bool(args, "preload") ?? false), "builder"))
+        }
+        "pending" | "not_found" | "error" -> {
+            handler :: sema_app_handler(args, 0) ?? "<dynamic>"
+            if handler == "<dynamic>" || functions.get(handler) == None -> &builder.diagnostics.push(sema_error("E2810", span, "`{method}` boundary is not a statically known handler", "route boundaries are part of the checked App graph and cannot be selected at runtime", "pass a named boundary function after a route registration"))
+            if builder.graph.routes.len() == 0 {
+                &builder.diagnostics.push(sema_error("E2810", span, "`{method}` boundary has no preceding route", "a boundary must attach to one route identity in the App graph", "register a route before declaring its boundary"))
+            } else {
+                index :: builder.graph.routes.len() - 1
+                if method == {
+                    "pending" -> builder.graph.routes[index].boundaries.pending = Val(handler)
+                    "not_found" -> builder.graph.routes[index].boundaries.not_found = Val(handler)
+                    else -> builder.graph.routes[index].boundaries.error = Val(handler)
+                }
+            }
+        }
+        "mount" -> {
+            effects := [String]{}
+            security := [String]{}
+            if sema_app_string_arg(args, 2) == .Val(value) -> &effects.push(value)
+            if sema_app_string_arg(args, 3) == .Val(value) -> &security.push(value)
+            &builder.graph.mounts.push(MIRAppMount{prefix: sema_app_string_arg(args, 0) ?? "/", handler: sema_app_handler(args, 1) ?? "<mount>", effects: effects, security: security, provenance: "builder", span_start: span.start, span_end: span.end})
+        }
+        "routes" -> {
+            root :: sema_app_labeled_string(args, "from") ?? sema_app_string_arg(args, 0) ?? ""
+            if root.len() == 0 -> &builder.diagnostics.push(sema_error("E2806", span, "`.routes(from:)` needs a directory path", "file routing activates only through an explicit builder opt-in (D-WEBAUTHOR1)", "write `.routes(from: \"routes\")` with the convention root"))
+            else -> &builder.graph.routes_from.push(MIRAppRoutesFrom{root: root, span_start: span.start, span_end: span.end})
+        }
+        "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" -> {
+            mode :: app_render_mode_parse(method) ?? panic("App mode dispatch lost its spelling")
+            builder.render = mode
+            builder.override_mode = Val(app_render_fact_from_builder(mode))
+        }
+        "render" -> if sema_app_render_mode(args) == .Val(mode) {
+            builder.render = sema_app_builder_mode(mode)
+            builder.override_mode = Val(mode)
+            if builder.graph.routes.len() > 0 {
+                index :: builder.graph.routes.len() - 1
+                builder.graph.routes[index].render = builder.render
+                builder.graph.routes[index].render_facts = sema_app_override_facts(Val(mode))
+            }
+        }
+        "security" -> if sema_app_string_arg(args, 0) == .Val(value) -> &builder.graph.policy.security.push(value)
+        "assets" -> if sema_app_string_arg(args, 0) == .Val(value) -> &builder.graph.policy.assets.push(value)
+        "split" | "code_split" -> if sema_app_string_arg(args, 0) == .Val(value) -> &builder.graph.policy.split.push(value)
+        "a11y" -> if sema_app_string_arg(args, 0) == .Val(value) -> &builder.graph.policy.a11y.push(value)
+        "adapter" -> if sema_app_string_arg(args, 0) == .Val(value) -> &builder.graph.policy.adapters.push(value)
+        "cache" -> {
+            if sema_app_string_arg(args, 1) == {
+                .Val(policy) -> {
+                    if builder.graph.routes.len() > 0 {
+                        index :: builder.graph.routes.len() - 1
+                        if sema_app_string_arg(args, 0) == Val(builder.graph.routes[index].path) && app_cache_parse(policy) == .Val(cache) -> builder.graph.routes[index].render_facts.cache = cache
+                    }
+                    &builder.graph.policy.cache.push(policy)
+                }
+                .None -> if sema_app_string_arg(args, 0) == .Val(policy) -> &builder.graph.policy.cache.push(policy)
+            }
+        }
+        "hydration_release" -> builder.graph.hydration = "release-keep-server"
+        "hydration_dev" -> builder.graph.hydration = "dev-overlay"
+        else -> {}
+    }
+}
+fn sema_app_walk_builder(expr: Expr, builder: &SemaAppBuilder, registration: SemaRegistrationGraph, functions: [String:SemaAppFunctionLocation]) Never! {
+    if expr == {
+        .MethodCall(receiver, method, span, _, _, args, _, _, _, _) -> {
+            sema_app_walk_builder(receiver, &builder, registration, functions)
+            sema_app_apply_method(method, args, span, &builder, registration, functions)
+        }
+        .Copy(inner, _) | .Place(inner, _, _) | .Paren(inner, _) | .Ok(inner, _) -> sema_app_walk_builder(inner, &builder, registration, functions)
+        .Call(call) -> {
+            if (call.name == "app" || call.name == "web.app" || call.name == "core.web.app") && call.args.len() == 0 -> return
+            loop arg in call.args -> sema_app_walk_builder(arg.expr, &builder, registration, functions)
+        }
+        else -> {}
+    }
+}
+
+fn sema_app_named_type(ty: Type) -> String? {
+    if ty == {
+        .Named(name) -> Val(name)
+        .Option(inner) -> sema_app_named_type(inner)
+        else -> None
+    }
+}
+fn sema_app_route_codec(ty: Type) -> String Never! {
+    if ty == {
+        .Option(inner) -> sema_app_route_codec(inner)
+        .Int | .IntN(_, _) -> "int"
+        .Float -> "float"
+        .Bool -> "bool"
+        .Named(name) -> if name == "JSON" || name == "Data" -> "json" else -> "string"
+        else -> "string"
+    }
+}
+fn sema_app_optional(ty: Type) -> Bool Never! {
+    if ty == {
+        .Option(_) -> true
+        else -> false
+    }
+}
+fn sema_app_route_field(name: String, ty: Type, default: Expr?, required: Bool) -> MIRAppRouteField Never! {
+    MIRAppRouteField{name: name, ty: sema_type_show(ty), codec: sema_app_route_codec(ty), required: required, default: sema_app_wire_text(default)}
+}
+fn sema_app_collect_serializable(items: [Item], names: &[String:Bool]) Never! {
+    loop item in items {
+        if item == {
+            .Struct(definition) -> loop derive in definition.derives { if derive.name == "Codable" || derive.name == "Encode" || derive.name == "Decode" -> names[definition.name] = true }
+            .Enum(definition) -> loop derive in definition.derives { if derive.name == "Codable" || derive.name == "Encode" || derive.name == "Decode" -> names[definition.name] = true }
+            .CodeModule(module) -> if module.body == .Val(body) -> sema_app_collect_serializable(body, &names)
+            else -> {}
+        }
+    }
+}
+fn sema_app_resume_type_serializable(ty: Type, names: [String:Bool]) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
+        .List(inner) | .Shared(inner) | .Option(inner) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) | .FixedList(inner, _) -> sema_app_resume_type_serializable(inner, names)
+        .Map(key, _, value) -> key == Type.String && sema_app_resume_type_serializable(value, names)
+        .Result(ok, err) -> sema_app_resume_type_serializable(ok, names) && sema_app_resume_type_serializable(err, names)
+        .Tuple(fields) -> {
+            loop field in fields { if !sema_app_resume_type_serializable(field.ty, names) -> return false }
+            true
+        }
+        .Union(members) -> {
+            loop member in members { if !sema_app_resume_type_serializable(member, names) -> return false }
+            true
+        }
+        .Named(name) -> name == "Data" || name == "JSON" || name == "Date" || name == "DateTime" || name == "Decimal" || name == "Duration" || name == "Unit" || (names.get(name) ?? false)
+        .Apply(name, args) -> {
+            if !(names.get(name) ?? false) -> return false
+            loop arg in args { if !sema_app_resume_type_serializable(arg, names) -> return false }
+            true
+        }
+        .Fn(_, _, _, _, _, _) | .TraitObject(_) -> false
+    }
+}
+fn sema_app_derive_route_inputs(registration: SemaRegistrationGraph, function: Func, path: String, names: [String:Bool], loader_data_type: String?, loader: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaAppRouteInputs Never! {
+    path_params := [MIRAppRouteField]{}
+    search_params := [MIRAppRouteField]{}
+    codec := "query"
+    used := [Int:Bool]{}
+    loop part in sema_app_route_parts(path) {
+        if part.kind == 0 -> next
+        selected := -1
+        loop (index, parameter) in function.params {
+            if parameter.name == part.name && !(used.get(index) ?? false) {
+                selected = index
+                break
+            }
+        }
+        if selected < 0 {
+            &diagnostics.push(sema_error("E2810", span, "route `{path}` has no typed handler input for path parameter `{part.name}`", "every dynamic segment must map to one handler parameter in the checked App graph", "add `{part.name}: T` to the `{function.name}` handler"))
+            next
+        }
+        used[selected] = true
+        parameter :: function.params[selected]
+        if sema_app_optional(parameter.ty) -> &diagnostics.push(sema_error("E2810", parameter.ty_span, "route `{path}` path parameter `{part.name}` cannot be optional", "path segments are always present; only search fields may be omitted", "make the path input required"))
+        &path_params.push(sema_app_route_field(part.name, parameter.ty, parameter.default, true))
+    }
+    search_bound := false
+    loop (index, parameter) in function.params {
+        if used.get(index) ?? false -> next
+        if parameter.name == "data" {
+            if loader_data_type == {
+                .None -> &diagnostics.push(sema_error("E2810", parameter.ty_span, "route `{path}` handler `{function.name}` reads `data` but declares no loader", "route data comes only from the route's `.loader(handler, loader)` registration", "declare a loader for this route or remove the `data` input"))
+                .Val(data_type) -> if data_type != sema_type_show(parameter.ty) -> &diagnostics.push(sema_error("E2810", parameter.ty_span, "route `{path}` `data` input `{sema_type_show(parameter.ty)}` does not match loader data `{data_type}`", "the loader's success type is the route data type", "declare the `data` input with the loader's return type"))
+            }
+            used[index] = true
+            next
+        }
+        record_name :: sema_app_named_type(parameter.ty)
+        record :: if record_name == {
+            .Val(name) -> sema_app_find_struct_bundle(registration, name)
+            .None -> None
+        }
+        if record == None && parameter.name != "search" && parameter.name != "query" -> next
+        used[index] = true
+        if search_bound {
+            &diagnostics.push(sema_error("E2810", parameter.ty_span, "route `{path}` handler `{function.name}` binds more than one search input", "the checked route graph accepts one search record or one scalar search field", "merge the search inputs into one Codable record"))
+            next
+        }
+        search_bound = true
+        if record == {
+            .Val(definition) -> {
+                if !(names.get(record_name ?? "") ?? false) -> &diagnostics.push(sema_error("E2810", parameter.ty_span, "route `{path}` search input `{parameter.name}` is not Codable", "search records use the shared JSON codec and must have a checked Codable shape", "derive `#[Codable]` for `{record_name ?? ""}`"))
+                loop field in definition.fields {
+                    if field.is_pub && field.computed == None -> &search_params.push(sema_app_route_field(field.name, field.ty, field.default, !sema_app_optional(field.ty) && field.default == None))
+                }
+                codec = "json"
+            }
+            .None -> &search_params.push(sema_app_route_field(parameter.name, parameter.ty, parameter.default, !sema_app_optional(parameter.ty) && parameter.default == None))
+        }
+    }
+    loop (index, parameter) in function.params {
+        if !(used.get(index) ?? false) -> &diagnostics.push(sema_error("E2810", parameter.ty_span, "route `{path}` handler `{function.name}` has unbound input `{parameter.name}`", "the checked route graph binds path parameters by name, one search record or a `search`/`query` field, and the loader `data`", "rename the input to its path segment, `search`, `query`, or `data`, or remove it"))
+    }
+    success :: if function.return_type == {
+        .Val(ty) -> if ty == {
+            .Result(ok, _) -> ok
+            else -> ty
+        }
+        .None -> Type.Named{name: "Unit"}
+    }
+    if !loader && success != (Type.Named{name: "WebPage"}) -> &diagnostics.push(sema_error("E2810", span, "route `{path}` handler `{function.name}` must return `WebPage`", "page handlers render one WebPage or fail with a declared failure domain", "declare the handler as `WebPage` or `WebPage !E`"))
+    SemaAppRouteInputs{path: path_params, search: search_params, codec: codec}
+}
+fn sema_app_action_matches(path: String, handler: String, action: MIRAppAction) -> Bool Never! { action.name == path || action.name == handler || action.name == "*" || (path == "/" && action.name.len() == 0) }
+fn sema_app_derive_contracts(registration: SemaRegistrationGraph, functions: [String:SemaAppFunctionLocation], names: [String:Bool], builder: &SemaAppBuilder) Never! {
+    loop index in 0..<builder.graph.routes.len() {
+        route := builder.graph.routes[index]
+        span :: Span{start: route.span_start, end: route.span_end}
+        loader_action := MIRAppAction?{None}
+        loop action in builder.graph.actions {
+            if (action.kind == "loader" || action.kind == "data") && sema_app_action_matches(route.path, route.handler, action) -> loader_action = Val(action)
+        }
+        loader_data := String?{None}
+        if loader_action == .Val(action) {
+            loader_function :: functions.get(action.handler)
+            if loader_function == {
+                .Val(location) -> {
+                    function :: sema_app_function(registration, location)
+                    return_ty :: function.return_type
+                    success :: if return_ty == {
+                        .Val(ty) -> if ty == {
+                            .Result(ok, _) -> Val(ok)
+                            else -> Val(ty)
+                        }
+                        .None -> None
+                    }
+                    loader_data = Val(if success == .Val(ty) -> sema_type_show(ty) else -> if action.output_type.len() == 0 -> "Unit" else -> action.output_type)
+                    _ := sema_app_derive_route_inputs(registration, function, route.path, names, None, true, span, &builder.diagnostics)
+                    serializable :: if success == {
+                        .Val(ty) -> sema_app_resume_type_serializable(ty, names)
+                        .None -> false
+                    }
+                    if !serializable -> &builder.diagnostics.push(sema_error("E2810", Span{start: action.span_start, end: action.span_end}, "route `{route.path}` loader `{action.handler}` data `{loader_data ?? "Unit"}` is not Codable", "loader data is serialized once for the page, the router cache, and the browser", "return a scalar, collection, or `#[Codable]` value from the loader"))
+                }
+                .None -> loader_data = Val(if action.output_type.len() == 0 -> "Unit" else -> action.output_type)
+            }
+            route.loader = Val(MIRAppRouteLoader{handler: action.handler, data_type: loader_data ?? "Unit", dependency: if action.name.len() == 0 -> action.handler else -> action.name, preload: action.preload, cache_identity: stable_route_identity(route.path, route.handler)})
+        }
+        if sema_app_find_route_function(registration, functions, route) == .Val(location) {
+            inputs :: sema_app_derive_route_inputs(registration, sema_app_function(registration, location), route.path, names, loader_data, false, span, &builder.diagnostics)
+            route.path_params = inputs.path
+            route.search_params = inputs.search
+            route.search_codec = inputs.codec
+        }
+        route.path = sema_app_canonical_path(route.path)
+        route.route_identity = stable_route_identity(route.path, route.handler)
+        route.precedence = sema_app_precedence_name(route.path)
+        builder.graph.routes[index] = route
+    }
+}
+// Same serde owner as ordinary data calls; results validate each wire arm.
+fn sema_app_wire_type_ok(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+    if ty == .Result(ok, err) -> return sema_app_wire_type_ok(ok, environment) && sema_app_wire_type_ok(err, environment)
+    sema_serde_type_is_admissible(environment, ty, SemaSerdeDirection.Encode) && sema_serde_type_is_admissible(environment, ty, SemaSerdeDirection.Decode)
+}
+fn sema_app_wire_error(function: Func, direction: String, ty: Type, span: Span) -> Diagnostic Never! {
+    sema_error("E2411", span, "server function `{function.name}` {direction} type `{sema_type_show(ty)}` is not serializable", "server functions cross a checked JSON boundary for both scripted calls and native forms", "derive Encode and Decode for the type, or use a supported wire type")
+}
+fn sema_app_validate_server_boundary(function: Func, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) Never! {
+    loop parameter in function.params {
+        if parameter.name != "self" && !sema_app_wire_type_ok(parameter.ty, environment) -> &diagnostics.push(sema_app_wire_error(function, "input", parameter.ty, parameter.ty_span))
+    }
+    span :: function.return_type_span ?? function.name_span
+    if func_failure_contract(function) == {
+        .Default(success, error) | .Explicit(success, error) | .Inferred(success, error) -> {
+            if !sema_app_wire_type_ok(success, environment) -> &diagnostics.push(sema_app_wire_error(function, "output", success, span))
+            if !sema_app_wire_type_ok(error, environment) -> &diagnostics.push(sema_app_wire_error(function, "error", error, span))
+        }
+        .Optional(success) | .ProvenUnreachable(success) | .InferredNever(success) | .Converted(success, _, _) -> if !sema_app_wire_type_ok(success, environment) -> &diagnostics.push(sema_app_wire_error(function, "output", success, span))
+        .DeclaredNever -> {}
+    }
+}
+
+// Rust append_function_effects uses the retained declaration's semantic key,
+// never a rendered name or a suffix guess. SymbolIDs are globally qualified.
+fn sema_app_function_effects(registration: SemaRegistrationGraph, location: SemaAppFunctionLocation, solved: [String:[String]]) -> [String] Never! {
+    function :: sema_app_function(registration, location)
+    module :: registration.modules[location.module_index]
+    loop registered in module.functions {
+        if registered.declaration.name_span == function.name_span {
+            if solved.get(registered.symbol.id.key) == .Val(effects) -> return effects
+            break
+        }
+    }
+    effects := [String]{}
+    loop entry in function.declared_effects ?? [] -> &effects.push(entry.name)
+    effects
+}
+fn sema_app_add_captures(registration: SemaRegistrationGraph, location: SemaAppFunctionLocation, names: [String:Bool], captures: &[String:MIRAppResumeCapture]) Never! {
+    function :: sema_app_function(registration, location)
+    loop parameter in function.params {
+        if captures.get(parameter.name) == None -> captures[parameter.name] = MIRAppResumeCapture{name: parameter.name, ty: sema_type_show(parameter.ty), serializable: sema_app_resume_type_serializable(parameter.ty, names)}
+    }
+}
+fn sema_app_derive_render(registration: SemaRegistrationGraph, entry_module: Int, functions: [String:SemaAppFunctionLocation], solved: [String:[String]], names: [String:Bool], builder: &SemaAppBuilder) Never! {
+    loop index in 0..<builder.graph.routes.len() {
+        route := builder.graph.routes[index]
+        handler_location :: functions.get(route.handler)
+        // Rust derive_render_facts searches only the entry item's functions.
+        entry_handler :: if handler_location == {
+            .Val(location) -> location.module_index == entry_module
+            .None -> false
+        }
+        effects := [String]{}
+        captures := [String:MIRAppResumeCapture]{}
+        browser := false
+        reactive := false
+        if entry_handler && handler_location == .Val(location) {
+            &effects.extend(sema_app_function_effects(registration, location, solved))
+            sema_app_add_captures(registration, location, names, &captures)
+            function :: sema_app_function(registration, location)
+            browser = function.web_marker == Val(WebPartitionMarker.JS)
+            reactive = function.is_reactive
+        }
+        loader := String?{None}
+        form := String?{None}
+        loop action in builder.graph.actions {
+            if !sema_app_action_matches(route.path, route.handler, action) -> next
+            if action.kind == "loader" || action.kind == "data" -> loader = Val(action.handler)
+            if action.kind == "form" || action.kind == "action" -> form = Val(action.handler)
+            location :: functions.get(action.handler) ?? next
+            if location.module_index != entry_module -> next
+            &effects.extend(sema_app_function_effects(registration, location, solved))
+            if action.kind == "form" || action.kind == "action" -> sema_app_add_captures(registration, location, names, &captures)
+        }
+        effects = fact_sorted_strings(effects)
+        runtime := false
+        loop effect in effects {
+            root :: sema_effect_root(effect)
+            if root == "Browser" -> browser = true
+            if root == "DB" || root == "FS" || root == "Net" || root == "IO" || root == "Time" || root == "Rand" || root == "Env" || root == "Exec" || root == "Secret" || root == "RequestContext" -> runtime = true
+        }
+        interactive :: browser || reactive || form != None
+        derived :: if { browser -> MIRAppRenderFactMode.Client interactive -> MIRAppRenderFactMode.ServerIsland loader != None -> MIRAppRenderFactMode.ServerStream runtime -> MIRAppRenderFactMode.Server else -> MIRAppRenderFactMode.Static }
+        override_mode :: route.render_facts.override_mode
+        mode :: override_mode ?? derived
+        reason := [String]{}
+        if override_mode == {
+            .Val(explicit) -> &reason.push("explicit render mode `{app_render_fact_mode_name(explicit)}`")
+            .None -> {
+                if browser -> &reason.push("handler `{route.handler}` reaches Browser")
+                if reactive -> &reason.push("handler `{route.handler}` is reactive")
+                if loader == .Val(name) -> &reason.push("loader `{name}` supplies runtime data")
+                if form == .Val(name) -> &reason.push("form/action `{name}` adds interactivity")
+                if runtime && loader == None -> &reason.push("handler `{route.handler}` reaches runtime effect(s): {effects.join(", ")}")
+                if reason.len() == 0 -> &reason.push("handler `{route.handler}` has no runtime data or interactivity")
+            }
+        }
+        cache := route.render_facts.cache
+        if cache == MIRAppCacheFact.Unspecified {
+            policy_index := builder.graph.policy.cache.len() - 1
+            loop policy_index >= 0 {
+                if app_cache_parse(builder.graph.policy.cache[policy_index]) == .Val(policy) {
+                    cache = policy
+                    break
+                }
+                policy_index -= 1
+            }
+        }
+        island := MIRAppIslandFact?{None}
+        if interactive || mode == MIRAppRenderFactMode.ServerIsland || mode == MIRAppRenderFactMode.Client {
+            capture_names := [String]{}
+            loop (name, _) in captures -> &capture_names.push(name)
+            &capture_names.sort()
+            values := [MIRAppResumeCapture]{}
+            serializable := true
+            loop name in capture_names {
+                capture :: captures.get(name) ?? panic("App capture disappeared")
+                &values.push(capture)
+                if !capture.serializable {
+                    serializable = false
+                    &builder.diagnostics.push(sema_error("E_WEB_SERIALIZE_CAPTURE", Span{start: route.span_start, end: route.span_end}, "route `{route.path}` island capture `{capture.name}` of type `{capture.ty}` cannot be resumed", "resumable islands serialize their compiler-derived payload before browser execution", "use a scalar, collection, or `#[Codable]` value, or move the resource behind a server action"))
+                }
+            }
+            island = Val(MIRAppIslandFact{identity: stable_island_identity(route.path, route.handler), hydration_trigger: MIRAppHydrationTrigger.Immediate, resume_payload: MIRAppResumePayload{captures: values, serializable: serializable}})
+        }
+        pending :: if mode == MIRAppRenderFactMode.ServerStream || mode == MIRAppRenderFactMode.ServerIsland -> Val(stable_pending_boundary_id(route.path, route.handler)) else -> None
+        route.render_facts = MIRAppRenderFacts{mode: mode, reason: reason, effects: effects, interactive: interactive || mode == MIRAppRenderFactMode.ServerIsland || mode == MIRAppRenderFactMode.Client, loader: loader, form: form, cache: cache, override_mode: override_mode, pending_boundary_id: pending, island: island}
+        builder.graph.routes[index] = route
+    }
+}
+
+fn sema_app_query_receiver(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Ident(name, _) -> name == "query" || name == "web.query" || name == "core.web.query"
+        .Field(base, field, _) -> field == "query" && (if base == {
+            .Ident(name, _) -> name == "web" || name == "core.web"
+            else -> false
+        })
+        .Paren(inner, _) -> sema_app_query_receiver(inner)
+        else -> false
+    }
+}
+fn sema_app_store_receiver(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Ident(name, _) -> name == "store" || name == "web.store" || name == "core.web.store"
+        .Field(base, field, _) -> field == "store" && (if base == {
+            .Ident(name, _) -> name == "web" || name == "core.web"
+            else -> false
+        })
+        .Paren(inner, _) -> sema_app_store_receiver(inner)
+        else -> false
+    }
+}
+fn sema_app_form_model(expr: Expr) -> String? {
+    if expr == {
+        .Ident(name, _) -> Val(name)
+        .Paren(inner, _) | .OrFallback(inner, _, _, _) -> sema_app_form_model(inner)
+        .MethodCall(_, method, _, _, _, args, _, _, _, _) -> if method == "input" -> sema_app_string_arg(args, 0) else -> None
+        .Call(call) -> if call.name == "input" || call.name.ends_with(".input") -> sema_app_string_arg(call.args, 0) else -> None
+        else -> None
+    }
+}
+impl SemaAppDiscovery.ASTExprVisitor {
+    fn visit(&self, expression: Expr) Never! {
+        args := [CallArg]{}
+        query_kind := String?{None}
+        store_kind := String?{None}
+        if expression == {
+            .Call(call) -> {
+                args = call.args
+                if call.name == {
+                    "query.live" | "web.query.live" | "core.web.query.live" -> query_kind = Val("live")
+                    "query.subscribe" | "web.query.subscribe" | "core.web.query.subscribe" -> query_kind = Val("subscribe")
+                    "store" | "web.store" | "core.web.store" -> store_kind = Val("default")
+                    "store.with_history" | "web.store.with_history" | "core.web.store.with_history" -> store_kind = Val("with_history")
+                    "form" | "web.form" | "core.web.form" -> if args.len() == 2 {
+                        action_index := 1
+                        loop (index, arg) in args {
+                            if arg.label == .Val(label) && label.name == "action" {
+                                action_index = index
+                                break
+                            }
+                        }
+                        model_index :: 1 - action_index
+                        model :: sema_app_form_model(args[model_index].expr) ?? return
+                        action :: sema_app_string(args[action_index].expr) ?? sema_app_handler(args, action_index) ?? return
+                        if model.len() > 0 && action.len() > 0 -> &self.forms.push(SemaAppFormCall{model: model, action: action, source: self.source, span: call.name_span})
+                    }
+                    else -> {}
+                }
+            }
+            .MethodCall(receiver, method, _, _, _, arguments, _, _, _, _) -> {
+                args = arguments
+                if sema_app_query_receiver(receiver) {
+                    if method == "live" -> query_kind = Val("live")
+                    if method == "subscribe" -> query_kind = Val("subscribe")
+                }
+                if sema_app_store_receiver(receiver) {
+                    if method == "new" -> store_kind = Val("default")
+                    if method == "with_history" -> store_kind = Val("with_history")
+                }
+            }
+            else -> return
+        }
+        if query_kind == .Val(kind) {
+            key :: sema_app_string_arg(args, 0) ?? return
+            footprint :: if kind == "live" -> sema_app_string_arg(args, 1) ?? return else -> "ext:{key}"
+            if key.trim().len() > 0 && footprint.trim().len() > 0 -> &self.queries.push(MIRAppQueryFact{key: key, footprint: footprint, source: self.source, kind: kind})
+        }
+        if store_kind == .Val(kind) {
+            name :: sema_app_string_arg(args, 0) ?? return
+            if name.trim().len() == 0 -> return
+            limit :: if kind == "with_history" -> if args.len() > 2 -> if sema_app_int(args[2].expr) == {
+                .Val(value) -> "{value}"
+                .None -> "<dynamic>"
+            } else -> "<dynamic>" else -> "default"
+            &self.stores.push(MIRAppStoreFact{name: name, source: self.source, kind: kind, history_limit: limit})
+        }
+    }
+}
+fn sema_app_form_label(name: String) -> String Never! {
+    labels := [String]{}
+    loop part in name.split("_").to_list() {
+        if part.len() == 0 -> next
+        first := part.slice(0, 1) // #4303
+        rest := part.slice(1, part.len()) // #4303
+        &labels.push("{first.to_upper()}{rest}")
+    }
+    labels.join(" ")
+}
+fn sema_app_collect_discovery(registration: SemaRegistrationGraph, locations: [SemaAppFunctionLocation], functions: [String:SemaAppFunctionLocation], builder: &SemaAppBuilder) Never! {
+    queries := [String:MIRAppQueryFact]{}
+    stores := [String:MIRAppStoreFact]{}
+    forms := [String:SemaAppFormCall]{}
+    loop location in locations {
+        function :: sema_app_function(registration, location)
+        visitor := SemaAppDiscovery{source: function.name, queries: [MIRAppQueryFact]{}, stores: [MIRAppStoreFact]{}, forms: [SemaAppFormCall]{}}
+        loop statement in function.body -> ast_stmt_for_each_expr<SemaAppDiscovery>(statement, &visitor)
+        loop query in visitor.queries -> queries["{query.key}{TEXT_NUL}{query.footprint}{TEXT_NUL}{query.source}{TEXT_NUL}{query.kind}"] = query
+        loop store in visitor.stores -> stores["{store.name}{TEXT_NUL}{store.source}{TEXT_NUL}{store.kind}{TEXT_NUL}{store.history_limit}"] = store
+        loop form in visitor.forms {
+            key :: "{form.model}{TEXT_NUL}{form.action}{TEXT_NUL}{form.source}"
+            if forms.get(key) == None -> forms[key] = form
+        }
+    }
+    query_keys := [String]{}
+    loop (key, _) in queries -> &query_keys.push(key)
+    &query_keys.sort()
+    loop key in query_keys -> &builder.graph.queries.push(queries.get(key) ?? panic("query discovery disappeared"))
+    store_keys := [String]{}
+    loop (key, _) in stores -> &store_keys.push(key)
+    &store_keys.sort()
+    loop key in store_keys -> &builder.graph.stores.push(stores.get(key) ?? panic("store discovery disappeared"))
+    form_keys := [String]{}
+    loop (key, _) in forms -> &form_keys.push(key)
+    &form_keys.sort()
+    loop key in form_keys {
+        call :: forms.get(key) ?? panic("form discovery disappeared")
+        record :: sema_app_find_struct_bundle(registration, call.model) ?? next
+        fields := [MIRAppFormFieldFact]{}
+        loop field in record.fields {
+            if field.computed != None -> next
+            base :: if field.ty == {
+                .Option(inner) -> inner
+                else -> field.ty
+            }
+            ty :: if base == {
+                .Int | .IntN(_, _) -> "Int"
+                .Float -> "Float"
+                .Bool -> "Bool"
+                .String -> "String"
+                else -> type_name(base)
+            }
+            control :: if base == {
+                .Int | .IntN(_, _) | .Float -> "Number"
+                .Bool -> "Checkbox"
+                else -> "Text"
+            }
+            &fields.push(MIRAppFormFieldFact{name: field.name, ty: ty, required: !sema_app_optional(field.ty) && field.default == None, default: sema_app_wire_text(field.default), label: sema_app_form_label(field.name), control: control, wire_name: field.name})
+        }
+        declaration :: if functions.get(call.action) == {
+            .Val(location) -> Val(sema_app_function(registration, location))
+            .None -> None
+        }
+        contract :: sema_app_action_contract(declaration, call.action, call.action, "form", call.span, false, call.source)
+        &builder.graph.forms.push(MIRAppFormFact{name: call.model, model: call.model, action: call.action, input_type: contract.input_type, output_type: contract.output_type, error_type: contract.error_type, endpoint: contract.endpoint, method: contract.method, csrf: contract.csrf, effects: contract.effects, fields: fields, middleware: contract.middleware, provenance: call.source, span_start: call.span.start, span_end: call.span.end})
+    }
+}
+
+// Rust App.rs:1794-1941. Filesystem reads share Foundation's process-wide
+// audit; keep native raw paths for opening non-Unicode directory entries.
+fn sema_app_collect_jet_files(dir: sema_app_os_path.OsPath, relative_dir: String, out: &[(String, sema_app_os_path.OsPath)]) IOError! -[FS.Read]> {
+    entries :: check_reads_read_dir_sorted_path(dir)
+    loop entry in entries {
+        relative :: if relative_dir.len() == 0 -> entry.0 else -> "{relative_dir}/{entry.0}"
+        if entry.2 {
+            sema_app_collect_jet_files(entry.1, relative, &out)
+            next
+        }
+        // The fourth native field is an explicit unmet prerequisite: Rust
+        // checks only a Unicode basename for the `_` optout, never its lossy form.
+        if entry.3 && entry.0.starts_with("_") -> next
+        if sema_app_files.suffix(entry.0) == ".jet" -> &out.push((relative.replace("\\", "/"), entry.1))
+    }
+}
+pub fn sema_app_convention_path(relative: String) -> String Never! {
+    stem := sema_app_files.with_suffix(relative, "") // #4303
+    parts := stem.split("/").to_list()
+    if parts.len() > 0 && (parts[parts.len() - 1] == "index" || parts[parts.len() - 1] == "page") -> &parts.pop().drop("convention index segment")
+    path := ""
+    loop part in parts {
+        if part.starts_with("[") && part.ends_with("]") {
+            name := part.slice(1, part.len() - 1) // #4303
+            path = "{path}/:{name}"
+        } else -> path = "{path}/{part}"
+    }
+    if path.len() == 0 -> "/" else -> path
+}
+pub fn sema_app_convention_handler(relative: String) -> String Never! {
+    stem := relative
+    loop stem.ends_with(".jet") -> stem = stem.slice(0, stem.len() - 4) // #4303
+    stem.replace("/", "_").replace("\\", "_").replace("[", "_").replace("]", "_")
+}
+fn sema_app_convention_has_page(path: sema_app_os_path.OsPath) -[FS.Read]> Bool Never! {
+    opened :: check_reads_read_path(path)
+    bytes :: if opened.1 == {
+        .Ok(value) -> value
+        .Err(_) -> return false
+    }
+    source :: String.from_bytes(bytes) ?? return false
+    loop line in source.split("\n").to_list() {
+        trimmed := line.trim() // #4303
+        if trimmed.starts_with("fn page") || trimmed.starts_with("pub fn page") -> return true
+    }
+    false
+}
+fn sema_app_expand_routes_from(project_root: sema_app_os_path.OsPath, root: MIRAppRoutesFrom, builder: &SemaAppBuilder) -[FS.Read]> Never! {
+    dir := ~project_root
+    sema_app_os_path.push(&dir, sema_app_os_path.from_text(root.root, project_root.platform))
+    span :: Span{start: root.span_start, end: root.span_end}
+    is_directory :: if sema_app_descriptors.metadata(dir) == {
+        .Ok(stat) -> stat.is_dir
+        .Err(_) -> false
+    }
+    if !is_directory {
+        &builder.diagnostics.push(sema_error("E2806", span, "`.routes(from: \"{root.root}\")` directory does not exist", "file routing expands only an explicit builder root; a missing directory cannot invent endpoints", "create `{root.root}/`, or remove the `.routes(from:)` line"))
+        return
+    }
+    files := [(String, sema_app_os_path.OsPath)]{}
+    if sema_app_collect_jet_files(dir, "", &files) == .Err(error) {
+        &builder.diagnostics.push(sema_error("E2806", span, "could not read `.routes(from: \"{root.root}\")`: {error}", "convention expansion must see every file under the declared root", "fix directory permissions, or remove the opt-in"))
+        return
+    }
+    &files.sort_by((left: (String, sema_app_os_path.OsPath), right: (String, sema_app_os_path.OsPath)) -> left.0 <=> right.0)
+    loop file in files {
+        provenance :: "{root.root}/{file.0}"
+        if !sema_app_convention_has_page(file.1) {
+            &builder.diagnostics.push(sema_error("E2806", span, "convention file `{provenance}` has no `fn page`", "every file under a `.routes(from:)` root must declare `fn page` or start with `_` to opt out (D-WEBAUTHOR1)", "add `fn page()`, rename the file with a leading `_`, or remove it from the routes directory"))
+            next
+        }
+        path :: sema_app_convention_path(file.0)
+        handler :: sema_app_convention_handler(file.0)
+        sema_app_record_route(&builder, MIRAppRoute{path: path, handler: handler, route_identity: stable_route_identity(path, handler), path_params: [], search_params: [], search_codec: "query", loader: None, boundaries: MIRAppRouteBoundaries{pending: None, not_found: None, error: None}, precedence: sema_app_precedence_name(path), render: builder.render, render_facts: sema_app_override_facts(builder.override_mode), provenance: provenance, span_start: root.span_start, span_end: root.span_end})
+    }
+}
+fn sema_app_find_function_in_items(items: [Item], module_index: Int, name: String, prefix: [Int]) -> SemaAppFunctionLocation? {
+    loop (index, item) in items {
+        if item == {
+            .Func(function) -> if function.name == name {
+                path := prefix
+                &path.push(index)
+                return Val(SemaAppFunctionLocation{module_index: module_index, path: path})
+            }
+            .CodeModule(module) -> if module.body == .Val(body) {
+                path := prefix
+                &path.push(index)
+                found :: sema_app_find_function_in_items(body, module_index, name, path)
+                if found != None -> return found
+            }
+            else -> {}
+        }
+    }
+    None
+}
+// Rust find_route_func: convention handlers fall back to the actual module
+// identified by provenance, not an unrelated global function named `page`.
+fn sema_app_find_route_function(registration: SemaRegistrationGraph, functions: [String:SemaAppFunctionLocation], route: MIRAppRoute) -> SemaAppFunctionLocation? {
+    if functions.get(route.handler) == .Val(location) -> return Val(location)
+    loop (module_index, module) in registration.modules {
+        if !module.source_file.ends_with(route.provenance) -> next
+        return sema_app_find_function_in_items(module.program.items, module_index, "page", [])
+    }
+    None
+}
+
+pub struct SemaAppCheckResult {
+    pub graph: MIRAppGraph?
+    pub diagnostics: [Diagnostic]
+}
+
+// Rust extract_app_graph_with_effects_and_registry/extract_app_graph_inner.
+// The caller supplies its existing checked type declarations; the same
+// canonical serde environment is needed only for discovered server actions.
+pub fn sema_extract_app_graph(registration: SemaRegistrationGraph, solved: [String:[String]], checked_types: [TTypeDef], project_root: sema_app_os_path.OsPath) -[FS.Read]> SemaAppCheckResult Never! {
+    entry_module :: sema_registration_module_index(registration, registration.entry_module_identity) ?? return SemaAppCheckResult{graph: None, diagnostics: []}
+    entry :: registration.modules[entry_module]
+    run :: app_entry_run_fn(entry.program.items) ?? return SemaAppCheckResult{graph: None, diagnostics: []}
+    builder := SemaAppBuilder{graph: app_graph_new(entry.source_file), diagnostics: [Diagnostic]{}, render: MIRAppRenderMode.CSR, override_mode: None, seen: [String:SemaAppSeenRoute]{}}
+    functions := [String:SemaAppFunctionLocation]{}
+    locations := [SemaAppFunctionLocation]{}
+    serializable := [String:Bool]{}
+    loop (module_index, module) in registration.modules {
+        sema_app_collect_functions(module.program.items, module_index, [Int]{}, &functions, &locations)
+        sema_app_collect_serializable(module.program.items, &serializable)
+    }
+    loop statement in run.body {
+        expr :: sema_app_stmt_expr(statement) ?? next
+        sema_app_walk_builder(expr, &builder, registration, functions)
+    }
+    if builder.graph.actions.len() > 0 {
+        environment := sema_check_pass_environment(registration, checked_types)
+        sema_scope_environment_enter_module(&environment, entry, [])
+        loop action in builder.graph.actions {
+            if action.kind != "action" && action.kind != "form" && action.kind != "data" && action.kind != "loader" -> next
+            location :: functions.get(action.handler) ?? next
+            function :: sema_app_function(registration, location)
+            sema_app_validate_server_boundary(function, environment, &builder.diagnostics)
+        }
+    }
+    loop root in builder.graph.routes_from -> sema_app_expand_routes_from(project_root, root, &builder)
+    sema_app_derive_contracts(registration, functions, serializable, &builder)
+    &builder.graph.routes.sort_by((left: MIRAppRoute, right: MIRAppRoute) -> {
+        left_rank :: sema_app_route_precedence(left.path)
+        right_rank :: sema_app_route_precedence(right.path)
+        if {
+            left_rank[0] != right_rank[0] -> right_rank[0] <=> left_rank[0]
+            left_rank[1] != right_rank[1] -> right_rank[1] <=> left_rank[1]
+            left.path != right.path -> left.path <=> right.path
+            else -> left.handler <=> right.handler
+        }
+    })
+    sema_app_derive_render(registration, entry_module, functions, solved, serializable, &builder)
+    sema_app_collect_discovery(registration, locations, functions, &builder)
+    sema_attach_diagnostic_source_locations(&builder.diagnostics, 0, entry.source_segments)
+    SemaAppCheckResult{graph: Val(builder.graph), diagnostics: builder.diagnostics}
+}

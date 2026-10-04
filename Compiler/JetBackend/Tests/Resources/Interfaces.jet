@@ -1,0 +1,102 @@
+use jet_foundation.[MIRAccess, MIRType, MIRTypeKind, MIRFunctionSignature, MIRCallMetadata, MIRCallablePolicyChain, MIRCallablePolicy, mir_type_from_kind]
+
+// Original SourceInterfaces.rs:3319-3324, unchanged acceptance matrix.
+#Test("writeback_requires_checked_write_access") {
+    assert(!native_interface_validate_writeback_access(.Read, true))
+    assert(native_interface_validate_writeback_access(.Read, false))
+    assert(native_interface_validate_writeback_access(.Write, true))
+    assert(!native_interface_validate_writeback_access(.Write, false))
+}
+#Test("writeback_move_never_authorizes_mutable_slot") {
+    assert(native_interface_validate_writeback_access(.Move, false))
+    assert(!native_interface_validate_writeback_access(.Move, true))
+}
+fn native_interface_test_fn(metadata: MIRCallMetadata?) -> MIRType Never! {
+    mir_type_from_kind(.Fn{signature: MIRFunctionSignature{params: [MIRType]{mir_type_from_kind(.Int), mir_type_from_kind(.String)}, ret: Val(mir_type_from_kind(.Bool)), effect_bound: None, param_contract: None, call_metadata: metadata, return_view_provenance: None}})
+}
+#Test("native_callable_signature_defaults_each_absent_convention_to_read") {
+    first :: native_callable_signature_checked(native_interface_test_fn(None)) ?? panic(native_interface_error_text(err))
+    assert_eq(first.parameters.len(), 2)
+    assert_eq(first.parameters[0].access, MIRAccess.Read)
+    assert_eq(first.parameters[1].access, MIRAccess.Read)
+    metadata :: MIRCallMetadata{names: [String]{}, defaults: [Bool]{}, variadic: [Bool]{}, conventions: [MIRAccess]{.Move}, policies: MIRCallablePolicyChain{policies: [MIRCallablePolicy]{}}}
+    second :: native_callable_signature_checked(native_interface_test_fn(Val(metadata))) ?? panic(native_interface_error_text(err))
+    assert_eq(second.parameters[0].access, MIRAccess.Move)
+    assert_eq(second.parameters[1].access, MIRAccess.Read)
+    assert_eq(second.return_type, Val(mir_type_from_kind(.Bool)))
+}
+#Test("native_callable_signature_preserves_sendfn_access_and_absent_return") {
+    ty :: mir_type_from_kind(.SendFn{params: [MIRType]{mir_type_from_kind(.Int), mir_type_from_kind(.String)}, ret: None, conventions: [MIRAccess]{.Write, .Move}})
+    signature :: native_callable_signature_checked(ty) ?? panic(native_interface_error_text(err))
+    assert_eq(signature.parameters[0].access, MIRAccess.Write)
+    assert_eq(signature.parameters[1].access, MIRAccess.Move)
+    assert_eq(signature.return_type, None)
+}
+fn native_interface_test_signature_failure(ty: MIRType, expected: String) Never! {
+    _ :: native_callable_signature_checked(ty) ?? { assert_eq(native_interface_error_text(err), expected); return }
+    panic("invalid native callable signature was accepted")
+}
+#Test("native_callable_signature_checks_layout_before_kind_and_exact_sendfn_coverage") {
+    malformed := mir_type_from_kind(.Int)
+    malformed.layout = mir_type_from_kind(.String).layout
+    native_interface_test_signature_failure(malformed, "invalid native interface metadata: native callable type has an invalid MIR layout")
+    native_interface_test_signature_failure(mir_type_from_kind(.Int), "invalid native interface metadata: native callable binding requires a checked Fn or SendFn type")
+    ty :: mir_type_from_kind(.SendFn{params: [MIRType]{mir_type_from_kind(.Int)}, ret: None, conventions: [MIRAccess]{}})
+    native_interface_test_signature_failure(ty, "invalid native interface metadata: native SendFn conventions do not cover every checked parameter")
+}
+#Test("native_interface_errors_preserve_original_wording_and_transfer_indices") {
+    assert_eq(native_interface_error_text(.MissingBinding), "no native interface binding is active for this checked receiver")
+    assert_eq(native_interface_error_text(.ExecutionMismatch), "native interface binding belongs to a different checked execution or artifact")
+    assert_eq(native_interface_error_text(.UnresolvedTransfers{arguments: [Int]{0, 12, 2}}), "native interface call has unresolved owned transfers for arguments [0, 12, 2]")
+    assert_eq(native_interface_error_text(.UnresolvedTransfers{arguments: [Int]{}}), "native interface call has unresolved owned transfers for arguments []")
+    assert_eq(native_interface_error_text(.HandlerPanicked{detail: "borrow changed"}), "native interface handler panicked: borrow changed")
+}
+
+fn native_interface_test_method_failure(program: jet_foundation.MIRProgram, receiver: MIRType, expected: String) Never! {
+    execution :: source_resource_metadata_execution()
+    _ :: native_interface_method_checked_for_execution(program, ^execution, jet_foundation.MIRArtifactID{value: U64{1}}, jet_foundation.MIRTraitID{value: U64{2}}, jet_foundation.MIRTraitMethodID{value: U64{3}}, ^receiver) ?? { assert_eq(native_interface_error_text(err), expected); return }
+    panic("invalid checked native method was accepted")
+}
+#Test("native_interface_checked_method_uses_exact_artifact_rows_and_trait_bound") {
+    program :: source_resource_metadata_method_program()
+    execution :: source_resource_metadata_execution()
+    method :: native_interface_method_checked_for_execution(program, ^execution, jet_foundation.MIRArtifactID{value: U64{1}}, jet_foundation.MIRTraitID{value: U64{2}}, jet_foundation.MIRTraitMethodID{value: U64{3}}, source_resource_metadata_receiver()) ?? panic(native_interface_error_text(err))
+    assert_eq(method.identity.method_name, "invoke")
+    assert_eq(method.signature.receiver_access, MIRAccess.Read)
+    assert_eq(method.signature.parameters.len(), 0)
+    assert_eq(method.signature.return_type, mir_type_from_kind(.Int))
+}
+#Test("native_interface_checked_method_preserves_preflight_error_order") {
+    program := source_resource_metadata_program()
+    native_interface_test_method_failure(program, source_resource_metadata_receiver(), "invalid native interface metadata: MIR artifact MirArtifactId(1) is missing")
+    program = source_resource_metadata_method_program()
+    &program.artifacts[0].modules.clear()
+    native_interface_test_method_failure(program, source_resource_metadata_receiver(), "invalid native interface metadata: native interface trait identity is ambiguous or outside the selected artifact")
+    program = source_resource_metadata_method_program()
+    program.traits[0].methods[0].self_access = None
+    native_interface_test_method_failure(program, mir_type_from_kind(.Int), "invalid native interface metadata: native interface method has no checked receiver access")
+    program = source_resource_metadata_method_program()
+    native_interface_test_method_failure(program, mir_type_from_kind(.Int), "invalid native interface metadata: native interface receiver type is not a checked trait object")
+    native_interface_test_method_failure(program, mir_type_from_kind(.TraitObject{bounds: []}), "invalid native interface metadata: native interface receiver type does not carry the exact checked trait bound")
+}
+#Test("native_interface_checked_method_rejects_duplicate_trait_and_method_identity") {
+    program := source_resource_metadata_method_program()
+    duplicate :: ~program.traits[0]
+    &program.traits.push(duplicate)
+    native_interface_test_method_failure(program, source_resource_metadata_receiver(), "invalid native interface metadata: native interface trait identity is ambiguous or outside the selected artifact")
+    program = source_resource_metadata_method_program()
+    duplicate_method :: ~program.traits[0].methods[0]
+    &program.traits[0].methods.push(duplicate_method)
+    native_interface_test_method_failure(program, source_resource_metadata_receiver(), "invalid native interface metadata: native interface method identity is ambiguous")
+}
+#Test("native_callable_key_preflight_rejects_empty_and_trimmed_spellings") {
+    keys :: [String]{"", " name", "name ", "\nname"}
+    loop key in keys {
+        execution :: source_resource_metadata_execution()
+        _ :: native_callable_identity_checked_for_execution(^execution, jet_foundation.MIRArtifactID{value: U64{1}}, ~key, native_interface_test_fn(None)) ?? {
+            assert_eq(native_interface_error_text(err), "invalid native interface metadata: native callable key must be a non-empty canonical string")
+            next
+        }
+        panic("noncanonical native callable key was accepted")
+    }
+}

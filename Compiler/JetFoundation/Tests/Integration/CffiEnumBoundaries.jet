@@ -1,0 +1,1085 @@
+// PORT-PENDING 0990 tests-cffi-enum-boundaries-module-group: tests/cffi_enum_boundaries.rs:1-60
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Bounded front-end guards for the existing C-ABI enum boundary.
+//RS //!
+//RS //! These checks deliberately stay outside the shared native matrix owned by
+//RS //! cards #524/#525. They pin the existing rejection paths only; they are not
+//RS //! native target evidence and do not replace a Darwin or Windows run.
+//RS 
+//RS use std::fs;
+//RS 
+//RS mod common;
+//RS 
+//RS fn codes(source: &str, stem: &str) -> Vec<String> {
+//RS     let root = common::unique_tmp(stem);
+//RS     let path = root.join("main.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     let diagnostics = jet::check_with_path(path.to_str().unwrap());
+//RS     let _ = fs::remove_dir_all(root);
+//RS     diagnostics
+//RS         .into_iter()
+//RS         .map(|diagnostic| diagnostic.code)
+//RS         .collect()
+//RS }
+//RS 
+//RS #[test]
+//RS fn cffi_enum_unknown_tag_width_stays_at_the_checked_boundary() {
+//RS     let diagnostics = codes(
+//RS         r#"
+//RS use c.bad as c
+//RS #Layout(c, tag: U24)
+//RS enum BadTag {
+//RS     Ok = 0
+//RS }
+//RS #Import module c.bad {
+//RS     fn take(value: BadTag) -> I32 = "take_bad_tag"
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS         "jet_cffi_enum_bad_tag",
+//RS     );
+//RS     assert!(
+//RS         diagnostics.iter().any(|code| code == "E0003"),
+//RS         "unsupported C enum tag width must be rejected by the marker boundary: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn cffi_enum_out_of_range_discriminant_stays_at_the_checked_boundary() {
+//RS     let diagnostics = codes(
+//RS         r#"
+//RS enum BadDiscriminant {
+//RS     TooWide = 9223372036854775808
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS         "jet_cffi_enum_bad_discriminant",
+//RS     );
+//RS     assert!(
+//RS         diagnostics.iter().any(|code| code == "E0035"),
+//RS         "an out-of-range enum discriminant must stop before C ABI lowering: {diagnostics:?}"
+//RS     );
+//RS }
+// END-PORT-PENDING 0990 tests/cffi_enum_boundaries.rs:1-60
+
+// PORT-PENDING 0990 tests-cffi-enum-boundaries-module-group: tests/cffi_native_matrix.rs:1-264
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Required native C ABI matrix for card #436.
+//RS //!
+//RS //! Unlike the broad `cffi` suite, this lane never skips. CI supplies explicit
+//RS //! C/Rust toolchains and a runner where cross execution is required.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS fn required(name: &str) -> String {
+//RS     std::env::var(name).unwrap_or_else(|_| panic!("{name} is required in the native C ABI matrix"))
+//RS }
+//RS 
+//RS fn command(program: &str) -> Command {
+//RS     let mut parts = program.split_whitespace();
+//RS     let mut cmd = Command::new(parts.next().expect("empty command"));
+//RS     cmd.args(parts);
+//RS     cmd
+//RS }
+//RS 
+//RS fn run_ok(cmd: &mut Command, label: &str) {
+//RS     let output = cmd
+//RS         .output()
+//RS         .unwrap_or_else(|e| panic!("could not start {label}: {e}"));
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{label} failed\nstdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS }
+//RS 
+//RS fn binary(root: &Path) -> PathBuf {
+//RS     root.join("matrix")
+//RS }
+//RS 
+//RS #[test]
+//RS fn required_native_c_abi_matrix() {
+//RS     assert_eq!(required("JET_CFFI_MATRIX_REQUIRED"), "1");
+//RS     let cc = required("JET_CFFI_CC");
+//RS     let ar = required("JET_CFFI_AR");
+//RS     let rustc = required("JET_CFFI_RUSTC");
+//RS     let rust_target = std::env::var("JET_CFFI_RUST_TARGET").ok();
+//RS     let rust_linker = std::env::var("JET_CFFI_RUST_LINKER").ok();
+//RS     let runner = std::env::var("JET_CFFI_RUNNER").ok();
+//RS     let abi = required("JET_CFFI_ABI");
+//RS 
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet-cffi-required-{}-{}",
+//RS         std::process::id(),
+//RS         abi.replace(['/', ' '], "-")
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS 
+//RS     let c_source = root.join("matrix.c");
+//RS     fs::write(
+//RS         &c_source,
+//RS         r#"
+//RS #include <stddef.h>
+//RS #include <stdint.h>
+//RS 
+//RS typedef struct { int64_t x; int64_t y; } Coord;
+//RS typedef int32_t Status;
+//RS typedef uint8_t PacketTag;
+//RS typedef union { int64_t ping; struct { int64_t x; int64_t y; } data; } PacketPayload;
+//RS typedef struct { PacketTag tag; PacketPayload payload; } Packet;
+//RS 
+//RS int64_t coord_sum(Coord p) { return p.x + p.y; }
+//RS int32_t status_value(Status s) { return s; }
+//RS int32_t packet_value(Packet p) { return (int32_t)p.tag * 100 + (int32_t)p.payload.ping; }
+//RS int32_t packet_size(void) { return (int32_t)sizeof(Packet); }
+//RS int32_t packet_align(void) { struct A { char c; Packet p; }; return (int32_t)offsetof(struct A, p); }
+//RS int32_t packet_payload_offset(void) { return (int32_t)offsetof(Packet, payload); }
+//RS 
+//RS typedef int32_t (*callback_t)(int32_t);
+//RS int32_t callback_twice(callback_t cb, int32_t x) { return cb(cb(x)); }
+//RS 
+//RS #include <pthread.h>
+//RS typedef struct { callback_t cb; int32_t x; int32_t out; } Job;
+//RS static void *run_job(void *raw) { Job *j = (Job *)raw; j->out = j->cb(j->x); return 0; }
+//RS int32_t callback_parallel(callback_t cb) {
+//RS     pthread_t threads[4]; Job jobs[4]; int32_t sum = 0;
+//RS     for (int i=0;i<4;i++) { jobs[i]=(Job){cb,i,0}; if(pthread_create(&threads[i],0,run_job,&jobs[i])) return -1000; }
+//RS     for (int i=0;i<4;i++) { pthread_join(threads[i],0); sum += jobs[i].out; }
+//RS     return sum;
+//RS }
+//RS 
+//RS typedef struct { uint64_t id; uint32_t flags; } Record;
+//RS int32_t load_record(uint64_t id, Record *out) {
+//RS     if (id == 7) { out->id=70; out->flags=3; return 0; }
+//RS     unsigned char *p=(unsigned char *)out; for(size_t i=0;i<sizeof(*out);i++) p[i]=0xA5;
+//RS     return 9;
+//RS }
+//RS 
+//RS int32_t abi_default(int32_t a, int32_t b) { return a + b; }
+//RS int32_t abi_explicit(int32_t a, int32_t b) { return a + b; }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let object = root.join("matrix.o");
+//RS     let library = root.join("libjetmatrix.a");
+//RS     let mut compile_c = command(&cc);
+//RS     compile_c.arg("-c").arg(&c_source).arg("-o").arg(&object);
+//RS     run_ok(&mut compile_c, "C compiler");
+//RS     let mut archive = command(&ar);
+//RS     archive.arg("rcs").arg(&library).arg(&object);
+//RS     run_ok(&mut archive, "C archiver");
+//RS     fs::write(
+//RS         root.join("package.jet"),
+//RS         format!(
+//RS             "name: \"jet-cffi-matrix\"\nversion: \"0.1.0\"\ndeps: {{ jetmatrix: c@\"{}\" }}\n",
+//RS             root.display()
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let explicit_abi = match abi.as_str() {
+//RS         "sysv64" => "#ABI(sysv64) ",
+//RS         "default" => "",
+//RS         other => panic!("unsupported matrix ABI {other}"),
+//RS     };
+//RS     let jet_source = format!(
+//RS         r#"use core.mem
+//RS use c.jetmatrix as c
+//RS 
+//RS #Layout(c)
+//RS struct Coord {{
+//RS     x: Int
+//RS     y: Int
+//RS }}
+//RS #Layout(c)
+//RS enum Status {{
+//RS     Ok = 0
+//RS     Lost = 7
+//RS }}
+//RS #Layout(c, tag: U8)
+//RS enum Packet {{
+//RS     Ping(Int) = 3
+//RS     Data(x: Int, y: Int) = 7
+//RS }}
+//RS #Layout(c)
+//RS struct Record {{
+//RS     id: U64
+//RS     flags: U32
+//RS }}
+//RS 
+//RS fn increment(x: I32) -[]> I32 {{ return x + 1 }}
+//RS 
+//RS #Import module c.jetmatrix {{
+//RS     fn coord_sum(p: Coord) -> Int = "coord_sum"
+//RS     fn status_value(s: Status) -> I32 = "status_value"
+//RS     fn packet_value(p: Packet) -> I32 = "packet_value"
+//RS     fn packet_size() -> I32 = "packet_size"
+//RS     fn packet_align() -> I32 = "packet_align"
+//RS     fn packet_payload_offset() -> I32 = "packet_payload_offset"
+//RS     fn callback_twice(cb: fn(I32) -[]> I32, x: I32) -> I32 = "callback_twice"
+//RS     fn callback_parallel(cb: fn(I32) -[]> I32) -> I32 = "callback_parallel"
+//RS     fn load_record(id: U64, out: *Record) -> I32 = "load_record"
+//RS     fn abi_default(a: I32, b: I32) -> I32 = "abi_default"
+//RS     {explicit_abi}fn abi_explicit(a: I32, b: I32) -> I32 = "abi_explicit"
+//RS }}
+//RS 
+//RS fn load(id: U64) -[]> Record String! {{
+//RS     slot := Record{{id: 0, flags: 0}}
+//RS     status := I32{{ 1 }}
+//RS     #Unsafe("live non-null out slot; read only after status zero") {{
+//RS         p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
+//RS         status = c.load_record(id, p)
+//RS         if Int.from_i32(status) == 0 {{ slot = ~p.* }}
+//RS     }}
+//RS     if Int.from_i32(status) != 0 {{ return Err("status {{status}}") }}
+//RS     return Ok(slot)
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     print(c.coord_sum(Coord{{x: 3, y: 4}}))
+//RS     print(c.status_value(Status.Lost))
+//RS     print(c.packet_value(Packet.Ping(41)))
+//RS     print(c.packet_size())
+//RS     print(c.packet_align())
+//RS     print(c.packet_payload_offset())
+//RS     print(c.callback_twice(increment, 40))
+//RS     print(c.callback_parallel(increment))
+//RS     print((load(7) ?? panic("success expected")).id)
+//RS     if load(8) == {{ .Ok(v) -> {{ print("unexpected {{v.id}}") }} .Err(e) -> {{ print(e) }} }}
+//RS     print(c.abi_default(20, 22))
+//RS     print(c.abi_explicit(19, 23))
+//RS }}
+//RS "#
+//RS     );
+//RS     let jet_path = root.join("matrix.jet");
+//RS     fs::write(&jet_path, &jet_source).unwrap();
+//RS     let out = jet::compile_with_path(&jet_source, jet_path.to_str().unwrap()).unwrap_or_else(|d| {
+//RS         panic!(
+//RS             "front end rejected required matrix fixture:\n{}",
+//RS             jet::render_diagnostics(jet_path.to_str().unwrap(), &jet_source, &d)
+//RS         )
+//RS     });
+//RS     assert!(!out.rust.contains("/* unsupported"));
+//RS     assert!(out.rust.contains("extern \"C\" fn __jet_increment"));
+//RS     assert!(out.rust.contains("#[repr(C, u8)]"));
+//RS     assert!(out.rust.contains(&format!(
+//RS         "extern \"{}\"",
+//RS         if abi == "default" { "C" } else { &abi }
+//RS     )));
+//RS 
+//RS     let rust_path = root.join("matrix.rs");
+//RS     fs::write(&rust_path, out.rust).unwrap();
+//RS     let mut compile_rust = command(&rustc);
+//RS     compile_rust.args(["--edition", "2021"]);
+//RS     if let Some(target) = &rust_target {
+//RS         compile_rust.arg("--target").arg(target);
+//RS     }
+//RS     if let Some(linker) = &rust_linker {
+//RS         compile_rust.arg("-C").arg(format!("linker={linker}"));
+//RS     }
+//RS     compile_rust
+//RS         .arg(&rust_path)
+//RS         .arg("-o")
+//RS         .arg(binary(&root))
+//RS         .arg("-L")
+//RS         .arg(format!("native={}", root.display()))
+//RS         .arg("-l")
+//RS         .arg("static=jetmatrix");
+//RS     compile_rust.arg("-l").arg("pthread");
+//RS     run_ok(&mut compile_rust, "Rust compiler/linker");
+//RS 
+//RS     let mut execute = if let Some(runner) = runner {
+//RS         let mut cmd = command(&runner);
+//RS         cmd.arg(binary(&root));
+//RS         cmd
+//RS     } else {
+//RS         Command::new(binary(&root))
+//RS     };
+//RS     let output = execute
+//RS         .output()
+//RS         .expect("could not execute generated matrix binary");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "generated matrix failed: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let lines: Vec<_> = String::from_utf8(output.stdout)
+//RS         .unwrap()
+//RS         .lines()
+//RS         .map(str::to_owned)
+//RS         .collect();
+//RS     assert_eq!(lines.len(), 12, "unexpected output: {lines:?}");
+//RS     assert_eq!(lines[0], "7");
+//RS     assert_eq!(lines[1], "7");
+//RS     assert_eq!(lines[2], "341");
+//RS     assert_eq!(
+//RS         &lines[3..6],
+//RS         &["24", "8", "8"],
+//RS         "wrong native Packet size/alignment/offset"
+//RS     );
+//RS     assert_eq!(&lines[6..], &["42", "10", "70", "status 9", "42", "42"]);
+//RS 
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+// END-PORT-PENDING 0990 tests/cffi_native_matrix.rs:1-264
+
+// PORT-PENDING 0990 tests-cffi-enum-boundaries-module-group: tests/checked_text.rs:1-377
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS use jet::compile;
+//RS 
+//RS const SOURCE: &str = r#"
+//RS #Error
+//RS enum TextError { Bad }
+//RS 
+//RS Pattern :: distinct String
+//RS 
+//RS impl Pattern.CheckedText {
+//RS     type Error = TextError
+//RS 
+//RS     fn check(text: String) TextError! -[]> {
+//RS         if text == "" { return Err(TextError.Bad) }
+//RS         return Ok()
+//RS     }
+//RS 
+//RS     fn encode_hole<T: Printable>(value: T) -[]> String {
+//RS         return "{hole}"
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     value :: Pattern{"hello"}
+//RS     print("{value.raw()}")
+//RS }
+//RS "#;
+//RS 
+//RS const TIERS_SOURCE: &str = r#"
+//RS #Error
+//RS enum TextError { Bad }
+//RS 
+//RS Pattern :: distinct String
+//RS 
+//RS impl Pattern.CheckedText {
+//RS     type Error = TextError
+//RS 
+//RS     fn check(text: String) TextError! -[]> {
+//RS         if text == "hello [1]" || text == "ok" { return Ok() }
+//RS         return Err(TextError.Bad)
+//RS     }
+//RS 
+//RS     fn encode_hole<T: Printable>(value: T) -[]> String {
+//RS         return "[1]"
+//RS     }
+//RS }
+//RS 
+//RS fn accepts(text: String) -[]> Bool {
+//RS     result :: Pattern.from(text)
+//RS     result ? value -> return true ! error -> return false
+//RS }
+//RS 
+//RS COMPTIME_GOOD :: prep { accepts("ok") }
+//RS COMPTIME_BAD :: prep { accepts("") }
+//RS 
+//RS fn run() {
+//RS     literal :: Pattern{"hello {1}"}
+//RS     print(literal.raw())
+//RS 
+//RS     good :: Pattern.from("ok")
+//RS     good ? value -> print(value.raw()) ! error -> print("good rejected")
+//RS 
+//RS     bad :: Pattern.from("")
+//RS     bad ? value -> print("bad accepted") ! error -> print("bad rejected")
+//RS 
+//RS     runtime_good :: accepts("ok")
+//RS     runtime_bad :: accepts("")
+//RS     print("{COMPTIME_GOOD}")
+//RS     print("{COMPTIME_BAD}")
+//RS     print("{runtime_good}")
+//RS     print("{runtime_bad}")
+//RS }
+//RS "#;
+//RS 
+//RS const TIERS_STDOUT: &str = "hello [1]\nok\nbad rejected\ntrue\nfalse\ntrue\nfalse\n";
+//RS 
+//RS const HTML_TIERS_SOURCE: &str = r#"
+//RS fn run() {
+//RS     name :: "<script>&"
+//RS     fragment :: HTML{"<strong>safe</strong>"}
+//RS     page :: HTML{"<p>{name}</p>{fragment}"}
+//RS     print(page.text())
+//RS     static :: HTML{"<hr>"}
+//RS     print(static.text())
+//RS }
+//RS "#;
+//RS 
+//RS const HTML_TIERS_STDOUT: &str = "<p>&lt;script&gt;&amp;</p><strong>safe</strong>\n<hr>\n";
+//RS 
+//RS const DYNAMIC_ERROR_SOURCE: &str = r#"
+//RS #Error
+//RS enum PatternError { Rejected }
+//RS 
+//RS Pattern :: distinct String
+//RS 
+//RS impl Pattern.CheckedText {
+//RS     type Error = PatternError
+//RS 
+//RS     fn check(text: String) PatternError! -[]> {
+//RS         if text == "bad" { return Err(PatternError.Rejected) }
+//RS         return Ok()
+//RS     }
+//RS 
+//RS     fn encode_hole<T: Printable>(value: T) -[]> String {
+//RS         return ""
+//RS     }
+//RS }
+//RS 
+//RS impl PatternError -> Err {
+//RS     return Err("pattern rejected", code: "E_PATTERN", cause: Err("invalid shape"))
+//RS }
+//RS 
+//RS fn parse(text: String) -[]> Pattern {
+//RS     pattern :: Pattern.from(text)
+//RS     return Ok(pattern)
+//RS }
+//RS 
+//RS fn load(text: String) -[]> Pattern {
+//RS     pattern :: parse(text)?("loading pattern")
+//RS     return Ok(pattern)
+//RS }
+//RS 
+//RS fn run() {
+//RS     _ :: load("bad")
+//RS }
+//RS "#;
+//RS 
+//RS fn normalize_journey_paths(stderr: &str) -> String {
+//RS     let mut normalized = stderr
+//RS         .lines()
+//RS         .map(|line| {
+//RS             let Some(open) = line.find(" (") else {
+//RS                 return line.to_string();
+//RS             };
+//RS             let Some(colon) = line.rfind(':') else {
+//RS                 return line.to_string();
+//RS             };
+//RS             if !line[open + 2..colon].contains(".jet") {
+//RS                 return line.to_string();
+//RS             }
+//RS             format!("{}<source>:{}", &line[..open + 2], &line[colon + 1..])
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     if stderr.ends_with('\n') {
+//RS         normalized.push('\n');
+//RS     }
+//RS     normalized
+//RS }
+//RS 
+//RS #[test]
+//RS fn ordinary_checked_text_source_compiles() {
+//RS     let output = compile(SOURCE).expect("ordinary CheckedText source should compile");
+//RS     assert!(output.rust.contains("pub trait CheckedText"));
+//RS     assert!(!output.rust.contains("__jet_CheckedText"));
+//RS     assert!(!output.rust.contains("jet_checked_text_from"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn malformed_checked_text_impl_reports_the_trait_contract() {
+//RS     let source = r#"
+//RS Pattern :: distinct String
+//RS 
+//RS impl Pattern.CheckedText {
+//RS     fn check(text: String) Error! -[]> { return }
+//RS     fn encode_hole<T: Printable>(value: T) -[]> String { return "" }
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics = compile(source).expect_err("missing associated Error must be rejected");
+//RS     assert!(diagnostics
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.code == "E0913"));
+//RS     assert!(diagnostics
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.code == "E0907"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn checked_text_raw_requires_unsafe() {
+//RS     let source = r#"
+//RS Pattern :: distinct String
+//RS 
+//RS impl Pattern.CheckedText {
+//RS     type Error = Error
+//RS     fn check(text: String) Error! -[]> { return }
+//RS     fn encode_hole<T: Printable>(value: T) -[]> String { return "" }
+//RS }
+//RS 
+//RS fn run() {
+//RS     value :: Pattern.raw("already checked")
+//RS     print(value.raw())
+//RS }
+//RS "#;
+//RS     let diagnostics = compile(source).expect_err("raw construction must require unsafe");
+//RS     assert!(diagnostics
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.code == "E0387"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn checked_text_acceptance_matches_comptime_aot_jit_interpreter_and_web() {
+//RS     tir_support::assert_tiers_agree("checked_text_tiers", TIERS_SOURCE, TIERS_STDOUT);
+//RS     assert_checked_text_web_tier();
+//RS }
+//RS 
+//RS #[test]
+//RS fn html_composition_matches_aot_jit_interpreter_and_web() {
+//RS     tir_support::assert_tiers_agree(
+//RS         "html_composition_tiers",
+//RS         HTML_TIERS_SOURCE,
+//RS         HTML_TIERS_STDOUT,
+//RS     );
+//RS     assert_html_web_tier();
+//RS }
+//RS 
+//RS #[test]
+//RS fn dynamic_checked_text_from_keeps_the_shared_error_report() {
+//RS     let generated =
+//RS         compile(DYNAMIC_ERROR_SOURCE).expect("dynamic CheckedText source should compile");
+//RS     assert!(generated.rust.contains("pub trait CheckedText"));
+//RS     assert!(!generated.rust.contains("__jet_CheckedText"));
+//RS     assert!(!generated.rust.contains("jet_checked_text_from"));
+//RS     assert!(generated.rust.contains("__jet_errconv_PatternError_to_Err"));
+//RS 
+//RS     let (jit_code, jit_out, jit_err) =
+//RS         tir_support::jit_run("checked_text_dynamic_error", DYNAMIC_ERROR_SOURCE);
+//RS     assert_eq!(
+//RS         jit_code, 1,
+//RS         "dynamic checked text failure must escape: {jit_err}"
+//RS     );
+//RS     assert!(
+//RS         jit_out.is_empty(),
+//RS         "dynamic checked text failure printed stdout: {jit_out}"
+//RS     );
+//RS     assert!(jit_err.starts_with("Error [E_PATTERN]: pattern rejected (type: PatternError)\n"));
+//RS     assert!(jit_err.contains("  cause: invalid shape\n"));
+//RS     assert!(jit_err.contains("  conversion: PatternError -> Err\n"));
+//RS     assert!(jit_err.contains(") — loading pattern\n"));
+//RS     assert!(jit_err.contains("Trail [E3002]"));
+//RS 
+//RS     let (interpreter_code, interpreter_out, interpreter_err) =
+//RS         tir_support::interpreter_run("checked_text_dynamic_error", DYNAMIC_ERROR_SOURCE);
+//RS     assert_eq!(interpreter_code, jit_code);
+//RS     assert_eq!(interpreter_out, jit_out);
+//RS     assert_eq!(
+//RS         normalize_journey_paths(&interpreter_err),
+//RS         normalize_journey_paths(&jit_err)
+//RS     );
+//RS 
+//RS     if tir_support::have_rustc() {
+//RS         let (aot_code, aot_out, aot_err) = tir_support::build_and_run_full(
+//RS             "checked_text_dynamic_error",
+//RS             "main",
+//RS             DYNAMIC_ERROR_SOURCE,
+//RS         );
+//RS         assert_eq!(aot_code, jit_code);
+//RS         assert_eq!(aot_out, jit_out);
+//RS         assert_eq!(
+//RS             normalize_journey_paths(&aot_err),
+//RS             normalize_journey_paths(&jit_err)
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn assert_checked_text_web_tier() {
+//RS     let output = jet::compile_web_with_path(TIERS_SOURCE, "checked_text_web.jet")
+//RS         .expect("ordinary CheckedText source should compile for web");
+//RS     let web = output
+//RS         .web
+//RS         .expect("ordinary CheckedText source should produce web artifacts");
+//RS     assert!(web.wasm_rust.contains("__jet_checked_text__Pattern__check"));
+//RS     assert!(web
+//RS         .wasm_rust
+//RS         .contains("__jet_checked_text__Pattern__encode_hole"));
+//RS     assert_web_artifacts_run(
+//RS         &web.js_app,
+//RS         &web.dom_runtime,
+//RS         &web.wasm_rust,
+//RS         TIERS_STDOUT,
+//RS         "checked-text-web",
+//RS     );
+//RS }
+//RS 
+//RS fn assert_html_web_tier() {
+//RS     let output = jet::compile_web_with_path(HTML_TIERS_SOURCE, "html_composition_web.jet")
+//RS         .expect("typed HTML composition should compile for web");
+//RS     let web = output
+//RS         .web
+//RS         .expect("typed HTML composition should produce web artifacts");
+//RS     assert_web_artifacts_run(
+//RS         &web.js_app,
+//RS         &web.dom_runtime,
+//RS         &web.wasm_rust,
+//RS         HTML_TIERS_STDOUT,
+//RS         "html-composition-web",
+//RS     );
+//RS }
+//RS 
+//RS fn assert_web_artifacts_run(
+//RS     js_app: &str,
+//RS     dom_runtime: &str,
+//RS     wasm_rust: &str,
+//RS     expected_stdout: &str,
+//RS     scratch_name: &str,
+//RS ) {
+//RS     let have_tool = |name: &str| {
+//RS         Command::new(name)
+//RS             .arg("--version")
+//RS             .output()
+//RS             .map(|output| output.status.success())
+//RS             .unwrap_or(false)
+//RS     };
+//RS     let have_wasm_target = Command::new("rustc")
+//RS         .args([
+//RS             "--print",
+//RS             "target-libdir",
+//RS             "--target",
+//RS             "wasm32-unknown-unknown",
+//RS         ])
+//RS         .output()
+//RS         .map(|output| output.status.success())
+//RS         .unwrap_or(false);
+//RS     if !have_tool("rustc") || !have_tool("node") || !have_wasm_target {
+//RS         eprintln!("note: skipping web execution (need rustc, wasm32 target, and node)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let scratch = common::Scratch::new(scratch_name);
+//RS     fs::write(scratch.join("app.js"), js_app).unwrap();
+//RS     fs::write(scratch.join("jet_dom_runtime.js"), dom_runtime).unwrap();
+//RS     fs::write(scratch.join("app_wasm.rs"), wasm_rust).unwrap();
+//RS     fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
+//RS 
+//RS     let wasm = Command::new("rustc")
+//RS         .current_dir(&scratch.path)
+//RS         .args([
+//RS             "--edition",
+//RS             "2021",
+//RS             "--target",
+//RS             "wasm32-unknown-unknown",
+//RS             "--crate-type",
+//RS             "cdylib",
+//RS             "-O",
+//RS             "app_wasm.rs",
+//RS             "-o",
+//RS             "app.wasm",
+//RS         ])
+//RS         .output()
+//RS         .expect("spawn web rustc");
+//RS     assert!(
+//RS         wasm.status.success(),
+//RS         "rustc rejected web output: {}",
+//RS         String::from_utf8_lossy(&wasm.stderr)
+//RS     );
+//RS 
+//RS     let node = Command::new("node")
+//RS         .current_dir(&scratch.path)
+//RS         .arg("app.js")
+//RS         .output()
+//RS         .expect("spawn web app");
+//RS     assert!(
+//RS         node.status.success(),
+//RS         "node rejected web output: stdout={} stderr={}",
+//RS         String::from_utf8_lossy(&node.stdout),
+//RS         String::from_utf8_lossy(&node.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&node.stdout), expected_stdout);
+//RS }
+// END-PORT-PENDING 0990 tests/checked_text.rs:1-377
+
+// PORT-PENDING 0990 tests-cffi-enum-boundaries-module-group: tests/closures.rs:1-368
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! M8 closure compile checks (rustc-as-verifier battery subset).
+//RS 
+//RS mod common;
+//RS 
+//RS #[test]
+//RS fn lambdas_compile_to_rust() {
+//RS     let src = r#"
+//RS fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+//RS     return f(f(x))
+//RS }
+//RS 
+//RS fn run() {
+//RS     nums :: [1, 2, 3]
+//RS     print(nums.map((n: Int) -> n * n).to_list().len())
+//RS     total := 0
+//RS     nums.each((n: Int) -> { total += n })
+//RS     print(total)
+//RS     print(apply((x: Int) -> x + 1, 5))
+//RS     print(nums.filter((n: Int) -> n > 1).to_list().len())
+//RS     print(nums.any((n: Int) -> n == 2))
+//RS     print(nums.reduce(0, (acc: Int, n: Int) -> acc + n))
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("closures should compile");
+//RS     assert!(
+//RS         !common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
+//RS         "invariant I1"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_list_map"),
+//RS         "map should lower to prelude helper"
+//RS     );
+//RS     assert!(out.rust.contains("move |"), "lambdas should emit closures");
+//RS }
+//RS 
+//RS #[test]
+//RS fn single_line_lambda_bodies_need_no_braces() {
+//RS     // S46: braces only for multi-statement bodies. One assignment or one void
+//RS     // call after `->` is the brace-free form of the same block.
+//RS     let src = r#"
+//RS struct Box {
+//RS     n: Int
+//RS }
+//RS 
+//RS fn bump(box: Shared<Box>) {
+//RS     slot :: box.guard_edit().map(b -> b.n)
+//RS     slot.value += 1
+//RS }
+//RS 
+//RS fn run() {
+//RS     box :: shared Box{n: 0}
+//RS     t :: task bump(box)
+//RS     t.join() ?? panic("task failed")
+//RS     print(box.n)
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("brace-free single-statement lambdas should compile");
+//RS     assert!(
+//RS         out.rust.contains("move |"),
+//RS         "brace-free lambdas should still emit closures"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn parallel_adapters_reject_unsafe_boundaries_before_codegen() {
+//RS     let mutable_capture = r#"
+//RS fn run() {
+//RS     seen := [Int]{}
+//RS     ignored :: [1, 2, 3].para_map((n: Int) -> { &seen.push(n) })
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(mutable_capture).expect_err("mutable parallel capture must fail");
+//RS     assert_eq!(
+//RS         diags.iter().filter(|diag| diag.code == "E1101").count(),
+//RS         1,
+//RS         "{diags:#?}"
+//RS     );
+//RS 
+//RS     let borrowed_capture = r#"
+//RS fn run() {
+//RS     values := [1, 2, 3]
+//RS     window :: values[0..1]
+//RS     ignored :: [1, 2, 3].para_filter((n: Int) -> window.contains(n))
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(borrowed_capture).expect_err("borrowed parallel capture must fail");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E1102"), "{diags:#?}");
+//RS 
+//RS     let hidden_capture = r#"
+//RS fn run() {
+//RS     offset :: 1
+//RS     callback :: (n: Int) -> n + offset
+//RS     ignored :: [1, 2, 3].para_map(callback)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(hidden_capture).expect_err("stored parallel callback must fail");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E1102"), "{diags:#?}");
+//RS 
+//RS     for (role, source) in [
+//RS         (
+//RS             "item",
+//RS             r#"fn bump(n: Int) -> Int { return n + 1 }
+//RS fn run() {
+//RS     callbacks :: [fn(Int) -> Int]{ bump }
+//RS     ignored :: callbacks.para_filter((callback: fn(Int) -> Int) -> true)
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "result",
+//RS             r#"fn run() {
+//RS     ignored :: [1].para_map((n: Int) -> (x: Int) -> x + n)
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "accumulator",
+//RS             r#"fn run() {
+//RS     ignored :: [1].para_fold(
+//RS         () -> (x: Int) -> x,
+//RS         (callback: fn(Int) -> Int, n: Int) -> callback,
+//RS         (left: fn(Int) -> Int, right: fn(Int) -> Int) -> left
+//RS     )
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "enum payload",
+//RS             r#"alias Boxed<T> :: T
+//RS enum CallbackPayload { Callback(Boxed<fn(Int) -> Int>) }
+//RS fn bump(n: Int) -> Int { return n + 1 }
+//RS fn run() {
+//RS     payloads :: [CallbackPayload]{ CallbackPayload.Callback(bump) }
+//RS     ignored :: payloads.para_map((payload: CallbackPayload) -> 1)
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "stored-function capture",
+//RS             r#"fn run() {
+//RS     stored :: (n: Int) -> n + 1
+//RS     ignored :: [1].para_map((n: Int) -> stored(n))
+//RS }
+//RS "#,
+//RS         ),
+//RS     ] {
+//RS         let diags =
+//RS             jet::compile(source).expect_err("function-typed worker values must fail in sema");
+//RS         assert!(
+//RS             diags.iter().any(|diag| diag.code == "E1102"),
+//RS             "function {role} must stop before rustc: {diags:#?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn legacy_parallel_adapter_spellings_are_removed() {
+//RS     for method in ["par_map", "par_filter", "par_partition", "par_fold"] {
+//RS         let source = format!("fn run() {{ ignored :: [1, 2, 3].{method}((n: Int) -> n) }}\n");
+//RS         let diags = jet::compile(&source).expect_err("legacy parallel spelling must fail");
+//RS         assert!(
+//RS             diags.iter().any(|diag| diag.code == "E0311"),
+//RS             "{method} unexpectedly remained available: {diags:#?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn bare_lambda_to_fn_typed_param_emits_param_type() {
+//RS     // c142: a bare lambda (no param annotation) passed to a user fn-typed param
+//RS     // used to ICE — codegen emitted `move |__jet_x| …` with no Rust type, so
+//RS     // rustc couldn't infer it. Sema now elaborates the param type from the
+//RS     // expected fn-type back onto the AST so codegen emits it.
+//RS     let src = r#"
+//RS fn run_each(xs: [Int], f: fn(Int)) {
+//RS     loop x in xs {
+//RS         f(x)
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     run_each([1, 2, 3], (x) -> {
+//RS         print(x)
+//RS     })
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("bare lambda to fn-typed param should compile");
+//RS     assert!(
+//RS         !common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
+//RS         "invariant I1"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("__jet_x: i64"),
+//RS         "bare lambda param must get its type from the fn-typed slot, got:\n{}",
+//RS         out.rust
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn stored_callback_boxes() {
+//RS     let src = r#"
+//RS fn twice(f: fn(Int) -> Int, x: Int) -> Int {
+//RS     return f(f(x))
+//RS }
+//RS 
+//RS fn run() {
+//RS     bump :: (x: Int) -> x + 1
+//RS     print(twice(bump, 10))
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("stored fn value should compile");
+//RS     assert!(out.rust.contains("Box::new"), "stored lambdas should box");
+//RS }
+//RS 
+//RS #[test]
+//RS fn multiline_callable_tail_returns_the_declared_result() {
+//RS     let src = r#"
+//RS fn double(value: Int) -> Int {
+//RS     adjusted :: value + 1
+//RS     adjusted * 2
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(double(4))
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("multiline callable tail should return");
+//RS     assert!(
+//RS         out.rust.contains("return (__jet_adjusted).jet_mul"),
+//RS         "the final expression must lower as the function result:\n{}",
+//RS         out.rust
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn implicit_capture_copies_cloneable_and_moves_non_cloneable_values() {
+//RS     let src = r#"
+//RS struct NoClone { label: Int }
+//RS fn run() {
+//RS     item :: NoClone{ label: 7 }
+//RS     f :: (n: Int) -> n + item.label
+//RS     values :: [1, 2, 3]
+//RS     g :: () -> values.len()
+//RS     print(values.len())
+//RS     print(f(1))
+//RS     print(g())
+//RS }
+//RS "#;
+//RS     jet::compile(src).expect("captures should copy cloneable values and move non-cloneable values");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fn_field_callback() {
+//RS     let src = r#"
+//RS struct Worker { step: fn(Int) -> Int }
+//RS fn run() {
+//RS     w :: Worker{ step: (n: Int) -> n + 1 }
+//RS     print(w.step(4))
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("fn field callback should compile");
+//RS     assert!(out.rust.contains("Box::new"), "fn fields should box");
+//RS }
+//RS 
+//RS #[test]
+//RS fn sort_by_with_lambda() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     nums := [3, 1, 2]
+//RS     &nums.sort_by((n: Int) -> n)
+//RS     print(nums[0])
+//RS }
+//RS "#;
+//RS     jet::compile(src).expect("sort_by lambda should compile");
+//RS }
+//RS 
+//RS // D-ITER1 / D-CORE-EAGER2: adapter receiver split.
+//RS #[test]
+//RS fn iter_adapters_compile() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     nums := [1, 2, 3, 4, 5]
+//RS     print(&nums.take(3).to_list())
+//RS     print(nums.skip(2).to_list())
+//RS     print(nums.step_by(2).to_list())
+//RS     print(nums.dedup().to_list())
+//RS     print(nums.take_while((n: Int) -> (n < 4)).to_list())
+//RS     print(nums.skip_while((n: Int) -> (n < 4)).to_list())
+//RS     sum := nums.fold(0, (acc: Int, n: Int) -> (acc + n))
+//RS     print(sum)
+//RS     pos := nums.position((n: Int) -> (n == 3))
+//RS     print(pos)
+//RS     words := ["b", "a", "c"]
+//RS     print(words.min_by((w: String) -> w.len()))
+//RS     print(words.max_by((w: String) -> w.len()))
+//RS     nested := [[1, 2], [3, 4]]
+//RS     print(nested.flatten())
+//RS     print(nested.lazy().flatten().to_list())
+//RS     print(nested.flat_map((xs: [Int]) -> xs))
+//RS     print(nested.lazy().flat_map((xs: [Int]) -> xs).to_list())
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("D-ITER1 adapters should compile");
+//RS     assert!(
+//RS         !common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
+//RS         "invariant I1"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_iter_take"),
+//RS         "take should lower to lazy jet_iter_take"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_iter_from_vec"),
+//RS         "list→Iter adapters should start from jet_iter_from_vec"
+//RS     );
+//RS     assert!(
+//RS         !out.rust.contains("jet_iter_from_vec(jet_list_take"),
+//RS         "adapters must not eagerly collect then re-wrap"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_iter_skip("),
+//RS         "skip should lower to lazy helper"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_list_fold"),
+//RS         "fold should lower to helper"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_iter_take_while"),
+//RS         "take_while should lower lazily"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_list_flat_map"),
+//RS         "concrete List.flat_map should lower eagerly"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_list_flatten"),
+//RS         "concrete List.flatten should lower eagerly"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_iter_flatten"),
+//RS         "`.lazy().flatten` should lower lazily"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_iter_flat_map"),
+//RS         "`.lazy().flat_map` should lower lazily"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn iter_chunks_windows() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     nums := [1, 2, 3, 4, 5, 6]
+//RS     print(nums.chunks(2).len())
+//RS     print(nums.windows(3).len())
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("chunks/windows should compile");
+//RS     assert!(
+//RS         out.rust.contains("jet_iter_chunks"),
+//RS         "chunks should lower lazily"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_iter_windows"),
+//RS         "windows should lower lazily"
+//RS     );
+//RS }
+// END-PORT-PENDING 0990 tests/closures.rs:1-368
+

@@ -1,0 +1,2118 @@
+// PORT-PENDING 0540 crates-jet-codegen-src-codegen-tir-tir-to-mir-types-slice-1823: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1823-3936
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn lower_distinct(
+//RS     definition: &DistinctDef,
+//RS     module: &str,
+//RS     qualify_type: &impl Fn(&Type, &[String]) -> Type,
+//RS     auto_printable: bool,
+//RS ) -> TirTypeDef {
+//RS     TirTypeDef {
+//RS         module: module.to_string(),
+//RS         key: qualified_key(module, &definition.name),
+//RS         name: definition.name.clone(),
+//RS         span: definition.span,
+//RS         public: definition.is_pub,
+//RS         package_public: definition.is_package_pub,
+//RS         generic_params: Vec::new(),
+//RS         derives: lower_derive_names(&definition.derives, false, false),
+//RS         auto_derive_default: false,
+//RS         // D-CAPBUNDLE1: `#Printable` on a distinct type grants the base
+//RS         // type's rendering, so the adapters emit the same Printable surface
+//RS         // an auto-derived nominal gets.
+//RS         auto_printable: auto_printable
+//RS             || definition
+//RS                 .derives
+//RS                 .iter()
+//RS                 .any(|(name, _)| name == crate::Generics::PRINTABLE),
+//RS         published_schema: false,
+//RS         single_use: false,
+//RS         must_use: false,
+//RS         layout: None,
+//RS         layout_alignment: None,
+//RS         c_layout_tag: None,
+//RS         enum_layout: None,
+//RS         serde: Vec::new(),
+//RS         cli_bindings: Vec::new(),
+//RS         cli: None,
+//RS         ownership: TirOwnership::Owned,
+//RS         boxed_edges: Vec::new(),
+//RS         compiler_builtin: None,
+//RS         kind: TirTypeDefKind::Distinct {
+//RS             base: qualify_type(&definition.base, &[]),
+//RS             range: definition.range.map(|(lo, hi, _)| (lo, hi)),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn lower_alias(
+//RS     definition: &TypeAliasDef,
+//RS     module: &str,
+//RS     qualify_type: &impl Fn(&Type, &[String]) -> Type,
+//RS     auto_printable: bool,
+//RS ) -> TirTypeDef {
+//RS     let binders = definition
+//RS         .type_params
+//RS         .iter()
+//RS         .map(|param| param.name.clone())
+//RS         .collect::<Vec<_>>();
+//RS     TirTypeDef {
+//RS         module: module.to_string(),
+//RS         key: qualified_key(module, &definition.name),
+//RS         name: definition.name.clone(),
+//RS         span: definition.span,
+//RS         public: definition.is_pub,
+//RS         package_public: definition.is_package_pub,
+//RS         generic_params: lower_generic_params(&definition.type_params),
+//RS         derives: Vec::new(),
+//RS         auto_derive_default: false,
+//RS         auto_printable,
+//RS         published_schema: false,
+//RS         single_use: false,
+//RS         must_use: false,
+//RS         layout: None,
+//RS         layout_alignment: None,
+//RS         c_layout_tag: None,
+//RS         enum_layout: None,
+//RS         serde: Vec::new(),
+//RS         cli_bindings: Vec::new(),
+//RS         cli: None,
+//RS         ownership: TirOwnership::Owned,
+//RS         boxed_edges: Vec::new(),
+//RS         compiler_builtin: None,
+//RS         kind: TirTypeDefKind::Alias {
+//RS             target: qualify_type(&definition.target, &binders),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn lower_unit_family(definition: &UnitFamilyDef, module: &str, auto_printable: bool) -> TirTypeDef {
+//RS     TirTypeDef {
+//RS         module: module.to_string(),
+//RS         key: qualified_key(module, &definition.family),
+//RS         name: definition.family.clone(),
+//RS         span: definition.span,
+//RS         public: definition.is_pub,
+//RS         package_public: definition.is_package_pub,
+//RS         generic_params: Vec::new(),
+//RS         derives: Vec::new(),
+//RS         auto_derive_default: false,
+//RS         auto_printable,
+//RS         published_schema: false,
+//RS         single_use: false,
+//RS         must_use: false,
+//RS         layout: None,
+//RS         layout_alignment: None,
+//RS         c_layout_tag: None,
+//RS         enum_layout: None,
+//RS         serde: Vec::new(),
+//RS         cli_bindings: Vec::new(),
+//RS         cli: None,
+//RS         ownership: TirOwnership::Owned,
+//RS         boxed_edges: Vec::new(),
+//RS         compiler_builtin: None,
+//RS         kind: TirTypeDefKind::UnitFamily {
+//RS             members: definition
+//RS                 .distinct_defs()
+//RS                 .into_iter()
+//RS                 .map(|member| member.name)
+//RS                 .collect(),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn lower_trait_param(
+//RS     index: usize,
+//RS     param: &Param,
+//RS     qualify_type: &impl Fn(&Type, &[String]) -> Type,
+//RS ) -> TirParam {
+//RS     TirParam {
+//RS         index,
+//RS         name: param.name.clone(),
+//RS         span: param.name_span,
+//RS         ty: qualify_type(&param.ty, &[]),
+//RS         access: lower_access_convention(param.convention),
+//RS         ownership: match param.convention {
+//RS             AccessConvention::Move => TirOwnership::Move,
+//RS             AccessConvention::Write => TirOwnership::WriteBorrow,
+//RS             AccessConvention::Read => TirOwnership::ReadBorrow,
+//RS         },
+//RS         public_label: param
+//RS             .public_label
+//RS             .as_ref()
+//RS             .map(|(label, _)| label.clone())
+//RS             .unwrap_or_else(|| param.name.clone()),
+//RS         variadic: param.variadic,
+//RS         default_present: param.default.is_some(),
+//RS     }
+//RS }
+//RS 
+//RS fn lower_trait(
+//RS     definition: &TraitDef,
+//RS     module: &str,
+//RS     qualify_type: &impl Fn(&Type, &[String]) -> Type,
+//RS ) -> TirTraitDef {
+//RS     TirTraitDef {
+//RS         module: module.to_string(),
+//RS         key: definition.name.clone(),
+//RS         name: definition.name.clone(),
+//RS         span: definition.span,
+//RS         visibility: if definition.is_pub {
+//RS             TirVisibility::Public
+//RS         } else if definition.is_package_pub {
+//RS             TirVisibility::Package
+//RS         } else {
+//RS             TirVisibility::Private
+//RS         },
+//RS         associated_types: definition
+//RS             .assoc_types
+//RS             .iter()
+//RS             .map(|(name, span)| TirAssociatedTypeDecl {
+//RS                 name: name.clone(),
+//RS                 span: *span,
+//RS             })
+//RS             .collect(),
+//RS         methods: definition
+//RS             .methods
+//RS             .iter()
+//RS             .map(|method| {
+//RS                 let mut params = Vec::new();
+//RS                 let mut self_access = None;
+//RS                 for param in &method.params {
+//RS                     if params.is_empty() && self_access.is_none() && param.name == "self" {
+//RS                         self_access = Some(lower_access_convention(param.convention));
+//RS                         continue;
+//RS                     }
+//RS                     params.push(lower_trait_param(params.len(), param, qualify_type));
+//RS                 }
+//RS                 TirTraitMethod {
+//RS                     key: qualified_key(module, &method.name),
+//RS                     name: method.name.clone(),
+//RS                     span: method.span,
+//RS                     self_access,
+//RS                     params,
+//RS                     declared_return: method.return_type.as_ref().map(|ty| qualify_type(ty, &[])),
+//RS                     return_type: qualify_type(&method.effective_return_type(), &[]),
+//RS                     failure: super::TFailureCarrier::from_contract(&method.failure_contract())
+//RS                         .map_types(|ty| qualify_type(ty, &[])),
+//RS                     is_pure: method.is_pure,
+//RS                     declared_effects: method.declared_effects.clone(),
+//RS                     return_view_provenance: method.return_view_provenance.get(),
+//RS                     declared_return_view_provenance: method.declared_return_view_provenance.clone(),
+//RS                     default_function_key: method
+//RS                         .default_body
+//RS                         .as_ref()
+//RS                         .map(|_| qualified_key(module, &method.name)),
+//RS                 }
+//RS             })
+//RS             .collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn push_nested_trait_impls(
+//RS     out: &mut TirDeclarations,
+//RS     type_name: &str,
+//RS     blocks: &[TraitImplBlock],
+//RS     module: &str,
+//RS ) {
+//RS     for block in blocks {
+//RS         out.impls
+//RS             .push(lower_nested_trait_impl(type_name, block, module));
+//RS     }
+//RS }
+//RS 
+//RS fn lower_nested_trait_impl(type_name: &str, block: &TraitImplBlock, module: &str) -> TirImplDef {
+//RS     TirImplDef {
+//RS         module: module.to_string(),
+//RS         key: format!("{}::{type_name}::{}", module, block.trait_name),
+//RS         span: block.trait_span,
+//RS         // Impl rows carry the same module-qualified nominal as the type
+//RS         // definition.  MIR can therefore match an imported owner by its
+//RS         // checked identity, never by a colliding leaf name.
+//RS         self_type: Type::Named(qualified_key(module, type_name)),
+//RS         trait_name: Some(block.trait_name.clone()),
+//RS         trait_ref: Some(block.trait_name.clone()),
+//RS         associated_types: block
+//RS             .assoc_type_impls
+//RS             .iter()
+//RS             .map(|(name, span, ty)| TirAssociatedTypeValue {
+//RS                 name: name.clone(),
+//RS                 ty: ty.clone(),
+//RS                 span: *span,
+//RS             })
+//RS             .collect(),
+//RS         methods: method_keys(
+//RS             module,
+//RS             type_name,
+//RS             Some(&block.trait_name),
+//RS             block.operator_rhs.as_ref(),
+//RS             &block.methods,
+//RS         ),
+//RS         delegation_field: None,
+//RS         compiler_generated: block.compiler_generated,
+//RS         serde: match block.trait_name.as_str() {
+//RS             crate::Generics::ENCODE => Some(TirSerdeCodec::Encode),
+//RS             crate::Generics::DECODE => Some(TirSerdeCodec::Decode),
+//RS             _ => None,
+//RS         },
+//RS         operator_rhs: match block.trait_name.as_str() {
+//RS             crate::Syntax::TRAIT_ADD
+//RS             | crate::Syntax::TRAIT_SUB
+//RS             | crate::Syntax::TRAIT_MUL
+//RS             | crate::Syntax::TRAIT_DIV => block.operator_rhs.clone(),
+//RS             _ => None,
+//RS         },
+//RS         operator_marker: block.operator_marker,
+//RS         target_os: None,
+//RS     }
+//RS }
+//RS 
+//RS /// `owner_module` declares the implemented type: the impl's own module, or
+//RS /// (D-MOD-CYCLE1=A) the sibling file of its package that declares it.
+//RS fn lower_impl(definition: &ImplDef, module: &str, owner_module: &str) -> TirImplDef {
+//RS     let owner = if owner_module == module {
+//RS         definition.type_name.clone()
+//RS     } else {
+//RS         qualified_key(owner_module, &definition.type_name)
+//RS     };
+//RS     TirImplDef {
+//RS         module: module.to_string(),
+//RS         key: match definition.trait_name.as_deref() {
+//RS             Some(trait_name) => format!("{}::{}::{trait_name}", module, definition.type_name),
+//RS             None => format!("{}::{}", module, definition.type_name),
+//RS         },
+//RS         span: definition.span,
+//RS         self_type: Type::Named(qualified_key(owner_module, &definition.type_name)),
+//RS         trait_name: definition.trait_name.clone(),
+//RS         trait_ref: definition.trait_name.clone(),
+//RS         associated_types: definition
+//RS             .assoc_type_impls
+//RS             .iter()
+//RS             .map(|(name, span, ty)| TirAssociatedTypeValue {
+//RS                 name: name.clone(),
+//RS                 ty: ty.clone(),
+//RS                 span: *span,
+//RS             })
+//RS             .collect(),
+//RS         methods: method_keys(
+//RS             module,
+//RS             &owner,
+//RS             definition.trait_name.as_deref(),
+//RS             definition.operator_rhs.as_ref(),
+//RS             &definition.methods,
+//RS         ),
+//RS         delegation_field: definition.delegation_field.clone(),
+//RS         compiler_generated: definition.is_generated_serde,
+//RS         serde: match definition.trait_name.as_deref() {
+//RS             Some(crate::Generics::ENCODE) => Some(TirSerdeCodec::Encode),
+//RS             Some(crate::Generics::DECODE) => Some(TirSerdeCodec::Decode),
+//RS             _ => None,
+//RS         },
+//RS         operator_rhs: definition.operator_rhs.clone(),
+//RS         operator_marker: definition.operator_marker,
+//RS         target_os: definition.os_target,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn lower_constant(definition: &ConstDef, module: &str) -> TirConstantDef {
+//RS     let value = super::source_constant_value(definition).unwrap_or(CtValue::Unit);
+//RS     let ty = super::source_constant_type(definition)
+//RS         .or_else(|| (!matches!(value, CtValue::Unit)).then(|| value.jet_type()))
+//RS         .unwrap_or(Type::Named("Unit".into()));
+//RS     TirConstantDef {
+//RS         module: module.to_string(),
+//RS         key: qualified_key(module, &definition.name),
+//RS         name: definition.name.clone(),
+//RS         span: definition.span,
+//RS         visibility: TirVisibility::Public,
+//RS         ty,
+//RS         is_comptime: definition.is_comptime,
+//RS         is_storage: !definition.is_comptime && (definition.is_persist || definition.mutable),
+//RS         addressable: definition.attrs.contains(&crate::AST::ConstAttr::ForceStatic),
+//RS         force_inline: definition.attrs.contains(&crate::AST::ConstAttr::ForceInline),
+//RS         value,
+//RS     }
+//RS }
+//RS 
+//RS const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
+//RS     ("Overflow", &["Block", "DropNewest", "DropOldest"]),
+//RS     ("FailurePolicy", &["StopFirst", "Collect", "Log", "Ignore"]),
+//RS     ("HookPolicy", &["FirstCancelElseTransform"]),
+//RS     ("HookOutcome", &["Continue", "Cancel", "Fail"]),
+//RS     ("HookDecision", &["Continue", "Transform", "Cancel", "Fail"]),
+//RS     (
+//RS         "DispatchState",
+//RS         &[
+//RS             "Delivered",
+//RS             "HandlerFailed",
+//RS             "DroppedNewest",
+//RS             "DroppedOldest",
+//RS             "Closed",
+//RS             "Cancelled",
+//RS             "DeadlineExceeded",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         crate::Syntax::TYPE_ORDERING,
+//RS         crate::Syntax::ORDERING_VARIANTS,
+//RS     ),
+//RS     (crate::Syntax::TYPE_REMOVE_BY, &["Val", "Slot"]),
+//RS     (
+//RS         crate::Syntax::TYPE_TASK_FAILURE,
+//RS         &[
+//RS             crate::Syntax::TASK_FAILURE_CANCELLED,
+//RS             crate::Syntax::TASK_FAILURE_DEADLINE_BLOWN,
+//RS             crate::Syntax::TASK_FAILURE_PANICKED,
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "TaskOutcome",
+//RS         &["Finished", "Panicked", "Cancelled", "DeadlineBlown"],
+//RS     ),
+//RS     ("TaskStatus", &["Running", "Paused", "CancelRequested"]),
+//RS     (
+//RS         "DeliveryState",
+//RS         &[
+//RS             "Pending",
+//RS             "Accepted",
+//RS             "Delivering",
+//RS             "Delivered",
+//RS             "DeadLettered",
+//RS             "Cancelled",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         crate::Syntax::TYPE_IO_ERROR,
+//RS         crate::Syntax::IO_ERROR_VARIANTS,
+//RS     ),
+//RS     (
+//RS         crate::Syntax::TYPE_KEY,
+//RS         &[
+//RS             "Char",
+//RS             "Enter",
+//RS             "Escape",
+//RS             "Backspace",
+//RS             "Tab",
+//RS             "Delete",
+//RS             "Up",
+//RS             "Down",
+//RS             "Left",
+//RS             "Right",
+//RS             "F",
+//RS             "Ctrl",
+//RS             "Unknown",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         crate::Syntax::TYPE_IO_OPERATION,
+//RS         crate::Syntax::IO_OPERATION_VARIANTS,
+//RS     ),
+//RS     (
+//RS         crate::Syntax::TYPE_PROCESS_RESOURCE_LIMIT,
+//RS         crate::Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS,
+//RS     ),
+//RS     ("ProcessStreamMode", &["Stream", "Inherit", "Capture"]),
+//RS     (crate::Syntax::TYPE_TERMINAL_MODE, &["Raw", "Cooked"]),
+//RS     (
+//RS         crate::Syntax::DURATION_UNIT_TYPE,
+//RS         crate::Syntax::DURATION_UNITS,
+//RS     ),
+//RS     ("FontStyle", &["Body", "Title", "Monospace"]),
+//RS     ("GlyphShaper", &["HarfBuzz", "HeadlessFallback"]),
+//RS     ("WebFormValueType", &["String", "Int", "Bool", "Float"]),
+//RS     (
+//RS         "WebFormControl",
+//RS         &[
+//RS             "Text", "Email", "URL", "Password", "Number", "Date", "Checkbox", "Hidden",
+//RS         ],
+//RS     ),
+//RS     // D-DX-LOADERS1: the native Prelude carrier still needs a checked MIR
+//RS     // owner row so tag-only `DataLoaderKind` patterns lower on every tier.
+//RS     ("DataLoaderKind", &["File", "URL", "Database", "Value"]),
+//RS     // D-DX-LOADERS1: the source-facing data records carry these closed native
+//RS     // enums; keep their checked tag rows beside DataLoaderKind.
+//RS     (
+//RS         "DataErrorKind",
+//RS         &[
+//RS             "Decode",
+//RS             "Limit",
+//RS             "IO",
+//RS             "Empty",
+//RS             "InvalidArgument",
+//RS             "NonFinite",
+//RS             "Overflow",
+//RS             "State",
+//RS             "Bridge",
+//RS             "Unsupported",
+//RS             "DuplicateKey",
+//RS             "MissingKey",
+//RS             "WrongOwner",
+//RS             "StaleRevision",
+//RS             "InvalidValue",
+//RS         ],
+//RS     ),
+//RS     ("DataFormat", &["CSV", "JSON", "JSONL", "Parquet", "Arrow"]),
+//RS     (
+//RS         "DataFreshness",
+//RS         &["Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"],
+//RS     ),
+//RS     (
+//RS         "DataInvalidationCause",
+//RS         &[
+//RS             "NoCause",
+//RS             "Loader",
+//RS             "Input",
+//RS             "ArchiveMember",
+//RS             "Parameters",
+//RS             "Credential",
+//RS             "Capability",
+//RS             "Manual",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "DataTree",
+//RS         &[
+//RS             "Null",
+//RS             "Bool",
+//RS             "Int",
+//RS             "Float",
+//RS             "Number",
+//RS             "TypedText",
+//RS             "Text",
+//RS             "Bytes",
+//RS             "Array",
+//RS             "Object",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "DataEvent",
+//RS         &[
+//RS             "Null",
+//RS             "ArrayStart",
+//RS             "ArrayEnd",
+//RS             "ObjectStart",
+//RS             "ObjectEnd",
+//RS             "Bool",
+//RS             "Int",
+//RS             "Float",
+//RS             "Text",
+//RS             "Bytes",
+//RS             "Key",
+//RS         ],
+//RS     ),
+//RS     ("XMLCanonicalMode", &["Inclusive11", "Exclusive10"]),
+//RS     (
+//RS         "EmailError",
+//RS         &[
+//RS             "Configuration",
+//RS             "DNS",
+//RS             "Connect",
+//RS             "TLS",
+//RS             "Auth",
+//RS             "Protocol",
+//RS             "Rejected",
+//RS             "Transient",
+//RS             "TimedOut",
+//RS             "Cancelled",
+//RS             "DeliveryUnknown",
+//RS         ],
+//RS     ),
+//RS     ("SMTPSecurity", &["StartTLS", "TLS"]),
+//RS     ("RecipientPolicy", &["RequireAll", "DeliverAccepted"]),
+//RS     ("SMTPAuth", &["None", "Password"]),
+//RS     ("TLSTrust", &["System", "SystemPlusCa"]),
+//RS     ("TLSVersion", &["TLS12", "TLS13"]),
+//RS     ("TLSClientTrust", &["System", "SystemPlus", "CustomOnly"]),
+//RS     ("NetDnsError", &["NotFound", "Failure"]),
+//RS     (
+//RS         "NetError",
+//RS         &[
+//RS             "InvalidInput",
+//RS             "PermissionDenied",
+//RS             "AddressInUse",
+//RS             "AddressUnavailable",
+//RS             "ConnectionRefused",
+//RS             "ConnectionReset",
+//RS             "NotConnected",
+//RS             "Closed",
+//RS             "Timeout",
+//RS             "Cancelled",
+//RS             "Unsupported",
+//RS             "TLS",
+//RS             "Protocol",
+//RS             "Other",
+//RS             "DNS",
+//RS         ],
+//RS     ),
+//RS     ("NetShutdown", &["Read", "Write", "Both"]),
+//RS     ("WatchDomain", &["File", "Process", "Port"]),
+//RS     (
+//RS         "WatchKind",
+//RS         &["Created", "Modified", "Removed", "Error", "Exited", "Ready"],
+//RS     ),
+//RS     ("NetReadyInterest", &["Read", "Write", "ReadWrite"]),
+//RS     (
+//RS         "WsError",
+//RS         &[
+//RS             "InvalidURL",
+//RS             "InvalidHandshake",
+//RS             "Protocol",
+//RS             "Timeout",
+//RS             "Closed",
+//RS             "Cancelled",
+//RS             "UnsupportedTarget",
+//RS             "MessageTooLarge",
+//RS             "IO",
+//RS         ],
+//RS     ),
+//RS ];
+//RS // Compiler-owned Core records are checked values, not user declarations. Keep
+//RS // their owner rows in the checked declaration table so a field projection can
+//RS // use the same nominal identity in every engine. The field list is only the
+//RS // Core oracle's vocabulary; field types are read below through
+//RS // `core_struct_field_type`, never guessed from a folded value.
+//RS const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
+//RS     (
+//RS         crate::Syntax::TYPE_IO_CONTEXT,
+//RS         crate::Syntax::IO_CONTEXT_FIELDS,
+//RS     ),
+//RS     (
+//RS         "NetErrorDetail",
+//RS         &["operation", "address", "name", "message", "os_code"],
+//RS     ),
+//RS     ("AsyncPolicy", &["capacity", "overflow"]),
+//RS     ("CSVRow", &["fields", "line"]),
+//RS     (
+//RS         "DataLineOptions",
+//RS         &[
+//RS             "title",
+//RS             "x_label",
+//RS             "y_label",
+//RS             "markers",
+//RS             "reference",
+//RS             "style",
+//RS             "color",
+//RS             "legend",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "DataLimits",
+//RS         &[
+//RS             "encoding",
+//RS             "max_groups",
+//RS             "max_sort_rows",
+//RS             "max_join_rows",
+//RS             "max_output_rows",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "DataSourceIdentity",
+//RS         &["kind", "locator", "member", "parameters"],
+//RS     ),
+//RS     ("DataAuthority", &["scope", "revision"]),
+//RS     (
+//RS         "DataError",
+//RS         &[
+//RS             "kind",
+//RS             "operation",
+//RS             "row",
+//RS             "column",
+//RS             "index",
+//RS             "reason",
+//RS             "cause",
+//RS         ],
+//RS     ),
+//RS     ("EncodingCause", &["kind", "os_code", "message"]),
+//RS     (
+//RS         "EncodingError",
+//RS         &[
+//RS             "format",
+//RS             "kind",
+//RS             "byte_offset",
+//RS             "line",
+//RS             "column",
+//RS             "path",
+//RS             "reason",
+//RS             "cause",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "EncodingLimits",
+//RS         &[
+//RS             "buffer_bytes",
+//RS             "max_depth",
+//RS             "max_item_bytes",
+//RS             "max_total_bytes",
+//RS             "max_expansion_depth",
+//RS             "max_expansion_bytes",
+//RS         ],
+//RS     ),
+//RS     ("DataProvenance", &["source", "format", "authority"]),
+//RS     (
+//RS         "DataSchema",
+//RS         &["identity", "format", "columns", "projection"],
+//RS     ),
+//RS     (
+//RS         "DataSnapshotIdentity",
+//RS         &["id", "source", "content", "schema", "format"],
+//RS     ),
+//RS     (
+//RS         "DataLoaderStatus",
+//RS         &[
+//RS             "identity",
+//RS             "freshness",
+//RS             "invalidated_by",
+//RS             "error",
+//RS             "cleanup",
+//RS             "buffered_bytes",
+//RS             "backpressure",
+//RS             "last_good",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "Claims",
+//RS         &[
+//RS             "subject",
+//RS             "audience",
+//RS             "issuer",
+//RS             "expires_at",
+//RS             "not_before",
+//RS             "issued_at",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "WebFormFieldSpec",
+//RS         &[
+//RS             "name",
+//RS             "value_type",
+//RS             "required",
+//RS             "default",
+//RS             "label",
+//RS             "control",
+//RS             "group",
+//RS             "wire_name",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "WebFormFieldState",
+//RS         &[
+//RS             "name",
+//RS             "value_type",
+//RS             "required",
+//RS             "value",
+//RS             "touched",
+//RS             "validating",
+//RS             "errors",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "WebTableState",
+//RS         &[
+//RS             "sort",
+//RS             "filter",
+//RS             "page_index",
+//RS             "page_size",
+//RS             "selected_keys",
+//RS             "selection_anchor",
+//RS             "focus_key",
+//RS             "page_mode",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "WebTablePage",
+//RS         &[
+//RS             "rows",
+//RS             "row_keys",
+//RS             "total_rows",
+//RS             "page_index",
+//RS             "page_size",
+//RS             "page_count",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "WebVirtualPlan",
+//RS         &[
+//RS             "total_count",
+//RS             "scroll_offset",
+//RS             "viewport_width",
+//RS             "viewport_height",
+//RS             "estimated_item_size",
+//RS             "overscan",
+//RS             "start",
+//RS             "end",
+//RS             "total_size",
+//RS             "measured_count",
+//RS             "anchor_index",
+//RS             "anchor_offset",
+//RS             "measurements",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         crate::Syntax::TYPE_MEMO_STATS,
+//RS         &["hits", "misses", "size", "bound"],
+//RS     ),
+//RS     ("GameScene", &["assets", "input"]),
+//RS     ("GameFrame", &["index", "input"]),
+//RS     ("GameAssets", &[]),
+//RS     ("GameInputMap", &[]),
+//RS     ("GameInputSnapshot", &[]),
+//RS     ("GameBackend", &[]),
+//RS     ("GameReplay", &[]),
+//RS     ("GameImage", &[]),
+//RS     ("GameSound", &[]),
+//RS     ("TestSuite", &["iteration", "result"]),
+//RS     (
+//RS         "TestComparison",
+//RS         &[
+//RS             "status",
+//RS             "relation",
+//RS             "source",
+//RS             "tool",
+//RS             "target",
+//RS             "seed",
+//RS             "case_ids",
+//RS             "inputs",
+//RS             "reference",
+//RS             "candidate",
+//RS             "first_difference",
+//RS             "reason",
+//RS             "universal_proof",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "ProcessReceipt",
+//RS         &[
+//RS             "code",
+//RS             "output",
+//RS             "errors",
+//RS             "success",
+//RS             "signal",
+//RS             "timed_out",
+//RS             "executable_identity",
+//RS             "argv",
+//RS             "input_digest",
+//RS             "policy_digest",
+//RS             "backend",
+//RS             "authority",
+//RS             "descendants",
+//RS             "limits",
+//RS             "outputs",
+//RS             "redacted",
+//RS             "pid",
+//RS             "limit_hit",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "ProcessPlan",
+//RS         &[
+//RS             "executable_identity",
+//RS             "argv",
+//RS             "input_digest",
+//RS             "policy_digest",
+//RS             "backend",
+//RS             "authority",
+//RS             "descendants",
+//RS             "limits",
+//RS             "outputs",
+//RS         ],
+//RS     ),
+//RS     ("ProcessChild", &["stdin", "stdout", "stderr", "terminal"]),
+//RS     (crate::Syntax::TYPE_TERMINAL_SIZE, &["cols", "rows"]),
+//RS     (crate::Syntax::TYPE_TERMINAL_POLICY, &["size", "mode"]),
+//RS     ("Address", &[]),
+//RS     ("Message", &[]),
+//RS     ("Attachment", &[]),
+//RS     (
+//RS         "RecipientReport",
+//RS         &["address", "accepted", "code", "message"],
+//RS     ),
+//RS     (
+//RS         "SendReport",
+//RS         &[
+//RS             "server",
+//RS             "accepted",
+//RS             "rejected",
+//RS             "response_code",
+//RS             "response",
+//RS             "accepted_at",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "Limits",
+//RS         &[
+//RS             "max_reply_line_bytes",
+//RS             "max_reply_lines",
+//RS             "max_capabilities",
+//RS             "max_recipients",
+//RS             "max_message_bytes",
+//RS             "max_auth_challenge_bytes",
+//RS         ],
+//RS     ),
+//RS     ("Mailer", &[]),
+//RS     ("Envelope", &["from", "recipients"]),
+//RS     (
+//RS         "DKIMConfig",
+//RS         &["domain", "selector", "private_key", "signed_headers"],
+//RS     ),
+//RS     (
+//RS         "SMTPConfig",
+//RS         &[
+//RS             "host",
+//RS             "port",
+//RS             "security",
+//RS             "auth",
+//RS             "recipient_policy",
+//RS             "trust",
+//RS             "limits",
+//RS             "dkim",
+//RS         ],
+//RS     ),
+//RS     ("XMLCanonical", &["mode", "comments", "inclusive_prefixes"]),
+//RS     ("Size", &["width", "height"]),
+//RS     (
+//RS         "UINode",
+//RS         &[
+//RS             "label",
+//RS             "width",
+//RS             "height",
+//RS             "accessibility",
+//RS             "ime",
+//RS             "shortcut",
+//RS         ],
+//RS     ),
+//RS     ("JSONWriter", &[]),
+//RS     ("JSONReader", &[]),
+//RS     ("JSONLWriter", &[]),
+//RS     ("JSONLReader", &[]),
+//RS     ("DirEntry", &["name", "path", "is_dir"]),
+//RS     ("WalkEntry", &["path", "relative", "is_dir", "depth"]),
+//RS     ("TempDir", &["path"]),
+//RS     ("TempFile", &["path"]),
+//RS     ("FileLock", &["path"]),
+//RS     ("WatchEvent", &["path", "domain", "kind"]),
+//RS     (
+//RS         "Stat",
+//RS         &[
+//RS             "size",
+//RS             "modified_ms",
+//RS             "created_ms",
+//RS             "readonly",
+//RS             "is_file",
+//RS             "is_dir",
+//RS             "is_symlink",
+//RS             "kind",
+//RS             "mode",
+//RS         ],
+//RS     ),
+//RS     ("DataColumn", &["id", "name", "type_name", "nullable"]),
+//RS     (
+//RS         "DataStatus",
+//RS         &[
+//RS             "step",
+//RS             "path",
+//RS             "clone_value",
+//RS             "ownership",
+//RS             "trust",
+//RS             "fallback",
+//RS             "replacement",
+//RS         ],
+//RS     ),
+//RS     ("FontFace", &["family", "size", "style"]),
+//RS     (
+//RS         "Glyph",
+//RS         &["id", "cluster", "x", "y", "advance_x", "advance_y"],
+//RS     ),
+//RS     (
+//RS         "GlyphRun",
+//RS         &[
+//RS             "glyphs",
+//RS             "advance_x",
+//RS             "advance_y",
+//RS             "shaper",
+//RS             "deterministic",
+//RS             "approximate",
+//RS         ],
+//RS     ),
+//RS     // D-FOUND-PLATFORM1=A: Core UI host records share their runtime carriers
+//RS     // with every backend; keep their checked field vocabulary in the nominal
+//RS     // declaration registry so field projections have MIR owner rows.
+//RS     ("UIFileFilter", &["label", "extensions", "mime_types"]),
+//RS     ("UIFSGrant", &["root", "rights"]),
+//RS     ("UIGrantedPath", &["path", "grant_root", "access"]),
+//RS     (
+//RS         "UIFileDialogRequest",
+//RS         &[
+//RS             "kind",
+//RS             "title",
+//RS             "grant",
+//RS             "initial_directory",
+//RS             "filters",
+//RS             "allow_multiple",
+//RS         ],
+//RS     ),
+//RS     ("UIFileDialogSelection", &["files"]),
+//RS     ("UIClipboardText", &["text", "selection"]),
+//RS     ("UIClipboardWrite", &["characters"]),
+//RS     ("UITextRange", &["start", "end"]),
+//RS     ("UIIMEComposition", &["text", "selection", "marked"]),
+//RS     ("UIIMEEvent", &["target", "phase", "composition"]),
+//RS     ("UIDragEvent", &["target", "phase", "operation", "items"]),
+//RS     ("UIShortcut", &["key", "modifiers"]),
+//RS     ("UIShortcutBinding", &["shortcut", "action", "node"]),
+//RS     ("UIAccessibility", &["name", "description"]),
+//RS     (
+//RS         crate::Syntax::TYPE_TYPE_INFO,
+//RS         &[
+//RS             "name",
+//RS             "path",
+//RS             "module",
+//RS             "identity",
+//RS             "kind",
+//RS             "layout",
+//RS             "fields",
+//RS             "methods",
+//RS             "type_params",
+//RS             "markers",
+//RS             "expanded_markers",
+//RS             "implements",
+//RS             "states",
+//RS             "transitions",
+//RS             "facts",
+//RS             "dimensions",
+//RS             "span",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         crate::Syntax::TYPE_LAYOUT_INFO,
+//RS         &[
+//RS             "kind",
+//RS             "target",
+//RS             "guarantee",
+//RS             "source",
+//RS             "size",
+//RS             "alignment",
+//RS             "stride",
+//RS             "requested_alignment",
+//RS             "effective_alignment",
+//RS             "fields",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         crate::Syntax::TYPE_LAYOUT_FIELD,
+//RS         &[
+//RS             "name",
+//RS             "ty",
+//RS             "target",
+//RS             "guarantee",
+//RS             "source",
+//RS             "offset",
+//RS             "size",
+//RS         ],
+//RS     ),
+//RS     ("MarkerInfo", &["name", "args"]),
+//RS     ("MarkerArgInfo", &["name", "ty", "value"]),
+//RS     ("StateInfo", &["name", "path", "terminal", "reachable"]),
+//RS     ("StateRef", &["owner", "name", "path"]),
+//RS     ("TransitionInfo", &["operation", "from", "to"]),
+//RS     ("FactInfo", &["kind", "name", "path", "value"]),
+//RS     (
+//RS         "FactValue",
+//RS         &[
+//RS             "kind",
+//RS             "name",
+//RS             "members",
+//RS             "range",
+//RS             "dimension",
+//RS             "measure",
+//RS             "exactness",
+//RS             "layout",
+//RS             "classification",
+//RS             "nominal",
+//RS             "obligation",
+//RS             "state",
+//RS             "sendability",
+//RS             "view_provenance",
+//RS             "movedness",
+//RS             "attribution",
+//RS             "origin",
+//RS             "unit_scale_provenance",
+//RS             "maturity",
+//RS         ],
+//RS     ),
+//RS     ("MeasureInfo", &["kind", "value", "symbol"]),
+//RS     ("ExactnessInfo", &["kind", "precision"]),
+//RS     ("LayoutFact", &["bytes"]),
+//RS     ("ClassificationInfo", &["name"]),
+//RS     ("NominalInfo", &["name"]),
+//RS     ("ObligationParamInfo", &["name", "zone"]),
+//RS     (
+//RS         "ObligationInfo",
+//RS         &["effect_bound", "param_contract", "variadic"],
+//RS     ),
+//RS     ("SendabilityInfo", &["known"]),
+//RS     ("MovednessInfo", &["known"]),
+//RS     ("ViewProvenanceInfo", &["sources", "mutable"]),
+//RS     ("AttributionInfo", &["source", "code"]),
+//RS     (
+//RS         "OriginInfo",
+//RS         &["tracked", "source", "line", "column", "ambiguity"],
+//RS     ),
+//RS     (
+//RS         "UnitScaleProvenanceInfo",
+//RS         &["kind", "value", "source", "uncertainty"],
+//RS     ),
+//RS     ("MaturityInfo", &["level"]),
+//RS     ("DimensionInfo", &["axes", "identity", "display"]),
+//RS     ("DimensionAxis", &["name", "exponent"]),
+//RS     (
+//RS         "FunctionInfo",
+//RS         &[
+//RS             "name",
+//RS             "module",
+//RS             "identity",
+//RS             "params",
+//RS             "span",
+//RS             "effects",
+//RS             "reaches_panic",
+//RS             "arithmetic",
+//RS             "facts",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "ArithmeticOperationInfo",
+//RS         &["operation", "policy", "operation_span", "scope_span"],
+//RS     ),
+//RS     ("PackageInfo", &["name", "identity", "types", "functions"]),
+//RS     ("EffectInfo", &["values"]),
+//RS     (
+//RS         "MethodInfo",
+//RS         &[
+//RS             "name",
+//RS             "module",
+//RS             "identity",
+//RS             "return_type",
+//RS             "signature",
+//RS             "params",
+//RS             "effects",
+//RS             "markers",
+//RS             "dimensions",
+//RS             "facts",
+//RS             "arithmetic",
+//RS             "is_pub",
+//RS             "span",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "FieldInfo",
+//RS         &[
+//RS             "name",
+//RS             "ty",
+//RS             "index",
+//RS             "fields",
+//RS             "markers",
+//RS             "dimensions",
+//RS             "facts",
+//RS             "is_pub",
+//RS             "span",
+//RS         ],
+//RS     ),
+//RS     ("TypeParamInfo", &["name", "bounds", "span"]),
+//RS     ("SourceSpan", &["start", "end"]),
+//RS     (
+//RS         "TLSPeerIdentity",
+//RS         &[
+//RS             "verified_server_name",
+//RS             "leaf",
+//RS             "certificate_chain",
+//RS             "cipher_suite",
+//RS             "tls_version",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "TLSCertificate",
+//RS         &[
+//RS             "der",
+//RS             "sha256",
+//RS             "spki_sha256",
+//RS             "dns_names",
+//RS             "valid_from_unix_ms",
+//RS             "valid_until_unix_ms",
+//RS             "subject",
+//RS             "issuer",
+//RS         ],
+//RS     ),
+//RS     // D-LIB-CALLGRANT1=A: the load-site grant is a constructable Prelude
+//RS     // record (`{read: roots}`), so its literal needs an owner row.
+//RS     ("ModGrant", &["read"]),
+//RS ];
+//RS const COMPILER_OWNED_MATH_RECORDS: &[(&str, &[&str])] = &[
+//RS     ("F32x4", &["x", "y", "z", "w"]),
+//RS     ("F64x2", &["x", "y"]),
+//RS     ("Vec2", &["x", "y"]),
+//RS     ("Vec3", &["x", "y", "z"]),
+//RS     ("Vec4", &["x", "y", "z", "w"]),
+//RS ];
+//RS const COMPILER_OWNED_GEOMETRY_RECORDS: &[(&str, &[&str], &[&str])] = &[
+//RS     ("Point2", &["T", "Space"], &["x", "y"]),
+//RS     ("Delta2", &["T", "Space"], &["x", "y"]),
+//RS     ("ScreenPoint", &[], &["x", "y"]),
+//RS     ("WorldPoint", &[], &["x", "y"]),
+//RS     ("ViewPoint", &[], &["x", "y"]),
+//RS     ("CameraPoint", &[], &["x", "y"]),
+//RS     ("DevicePoint", &[], &["x", "y"]),
+//RS     ("ScreenDelta", &[], &["x", "y"]),
+//RS     ("WorldDelta", &[], &["x", "y"]),
+//RS     ("ViewDelta", &[], &["x", "y"]),
+//RS     ("CameraDelta", &[], &["x", "y"]),
+//RS     ("DeviceDelta", &[], &["x", "y"]),
+//RS     ("Ray2", &["T", "From", "To"], &["origin", "direction"]),
+//RS     (
+//RS         "Transform",
+//RS         &["From", "To"],
+//RS         &["m00", "m01", "m10", "m11", "tx", "ty"],
+//RS     ),
+//RS     (
+//RS         "Transform2",
+//RS         &["T", "From", "To"],
+//RS         &["m00", "m01", "m10", "m11", "tx", "ty"],
+//RS     ),
+//RS ];
+//RS 
+//RS pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
+//RS     let source_name = name;
+//RS     let name = crate::Codegen::core_source_type_leaf(name);
+//RS     COMPILER_OWNED_ENUMS.iter().any(|(owned, _)| *owned == name)
+//RS         || (jet_foundation::CoreModuleExports::core_enum_variants(name).is_some()
+//RS             && (!source_name.starts_with("<corelib>/")
+//RS                 || crate::Codegen::core_rust_type_name(source_name).is_some()))
+//RS         || COMPILER_OWNED_CORE_RECORDS
+//RS             .iter()
+//RS             .any(|(owned, _)| *owned == name)
+//RS         || COMPILER_OWNED_MATH_RECORDS
+//RS             .iter()
+//RS             .any(|(owned, _)| *owned == name)
+//RS         || COMPILER_OWNED_GEOMETRY_RECORDS
+//RS             .iter()
+//RS             .any(|(owned, _, _)| *owned == name)
+//RS         || crate::Codegen::core_email_rust_type_name(name).is_some()
+//RS         || crate::Codegen::core_crypto_rust_type_name(name).is_some()
+//RS         || crate::Codegen::core_rust_type_name(name) == Some("JetMappedFile")
+//RS         || (source_name.starts_with("<corelib>/Core/files::")
+//RS             && matches!(
+//RS                 crate::Codegen::file_handle_rust_type(source_name),
+//RS                 Some("JetFileReader" | "JetFileWriter" | "JetFileScope")
+//RS             ))
+//RS         || name == crate::Syntax::TYPE_MEASUREMENT
+//RS         || name == crate::Syntax::TYPE_ERR
+//RS         || matches!(
+//RS             name,
+//RS             "VJPRun"
+//RS                 | "Group"
+//RS                 | "DataJoin"
+//RS                 | "DataSnapshot"
+//RS                 | "DataPivotCell"
+//RS                 | "DataSummary"
+//RS                 | "FieldError"
+//RS                 | "AllocError"
+//RS                 | "KeyRef"
+//RS                 | "MutationPlan"
+//RS                 | "VaultWrite"
+//RS                 | "Rotation"
+//RS                 | crate::Syntax::TYPE_RANGE
+//RS         )
+//RS }
+//RS 
+//RS pub(crate) fn compiler_owned_enum_variants(name: &str) -> Option<&'static [&'static str]> {
+//RS     COMPILER_OWNED_ENUMS
+//RS         .iter()
+//RS         .find(|(owned, _)| *owned == name)
+//RS         .map(|(_, variants)| *variants)
+//RS }
+//RS 
+//RS /// Project Core enums into checked MIR declarations. Non-unit payloads are
+//RS /// retained from sema's checked source enum facts when that source is loaded.
+//RS fn compiler_owned_core_enums(
+//RS     module: &str,
+//RS     checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+//RS ) -> Vec<TirTypeDef> {
+//RS     let span = Span::new(0, 0);
+//RS     let mut seen = HashSet::new();
+//RS     let checked_payloads = checked_core_enum_payloads(checked_nominals);
+//RS     jet_foundation::CoreModuleExports::core_modules()
+//RS         .iter()
+//RS         .flat_map(|entry| {
+//RS             let module = entry.module;
+//RS             entry
+//RS                 .type_exports
+//RS                 .iter()
+//RS                 .map(move |&(name, _)| (module, name))
+//RS         })
+//RS         .filter_map(|(source_module, name)| {
+//RS             if compiler_owned_enum_variants(name).is_some() {
+//RS                 return None;
+//RS             }
+//RS             let variants = jet_foundation::CoreModuleExports::core_enum_variants(name)?;
+//RS             if !seen.insert(name) {
+//RS                 return None;
+//RS             }
+//RS 
+//RS             if let Some(definition) = checked_payloads.get(&(source_module, name)) {
+//RS                 let mut definition = (**definition).clone();
+//RS                 definition.name = name.to_string();
+//RS                 let identity = |ty: &Type, _: &[String]| ty.clone();
+//RS                 let mut row = lower_enum(
+//RS                     &definition,
+//RS                     module,
+//RS                     &identity,
+//RS                     None,
+//RS                     &HashSet::new(),
+//RS                     false,
+//RS                     false,
+//RS                 );
+//RS                 // Compiler-owned Core rows are looked up by their canonical
+//RS                 // leaf, not by the importing module's qualified key.
+//RS                 row.key = name.to_string();
+//RS                 return Some(row);
+//RS             }
+//RS 
+//RS             Some(TirTypeDef {
+//RS                 module: module.to_string(),
+//RS                 key: name.to_string(),
+//RS                 name: name.to_string(),
+//RS                 span,
+//RS                 public: true,
+//RS                 package_public: false,
+//RS                 generic_params: Vec::new(),
+//RS                 derives: Vec::new(),
+//RS                 auto_derive_default: false,
+//RS                 auto_printable: false,
+//RS                 published_schema: false,
+//RS                 single_use: false,
+//RS                 must_use: false,
+//RS                 layout: None,
+//RS                 layout_alignment: None,
+//RS                 c_layout_tag: None,
+//RS                 enum_layout: None,
+//RS                 serde: Vec::new(),
+//RS                 cli_bindings: Vec::new(),
+//RS                 cli: None,
+//RS                 ownership: TirOwnership::Owned,
+//RS                 boxed_edges: Vec::new(),
+//RS                 compiler_builtin: None,
+//RS                 kind: TirTypeDefKind::Enum {
+//RS                     variants: variants
+//RS                         .iter()
+//RS                         .map(|variant| TirVariant {
+//RS                             name: variant.to_string(),
+//RS                             wire_name: variant.to_string(),
+//RS                             span,
+//RS                             payload: TirVariantPayload::Unit,
+//RS                             discriminant: None,
+//RS                         })
+//RS                         .collect(),
+//RS                     methods: Vec::new(),
+//RS                 },
+//RS             })
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn checked_core_enum_payloads<'a>(
+//RS     checked_nominals: Option<&'a crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+//RS ) -> HashMap<(&'a str, &'a str), &'a EnumDef> {
+//RS     let mut payloads = HashMap::new();
+//RS     let Some(checked_nominals) = checked_nominals else {
+//RS         return payloads;
+//RS     };
+//RS     for (identity, definition) in &checked_nominals.enums {
+//RS         let Some(module_alias) = checked_nominals.foreign_modules.get(identity) else {
+//RS             continue;
+//RS         };
+//RS         let Some(source) =
+//RS             jet_foundation::CoreModuleExports::core_source_module_by_alias(module_alias)
+//RS         else {
+//RS             continue;
+//RS         };
+//RS         let name = crate::Codegen::core_source_type_leaf(identity);
+//RS         if !matches!(
+//RS             jet_foundation::CoreModuleExports::core_leaf_kind(source.module, name),
+//RS             Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
+//RS         ) || !definition
+//RS             .variants
+//RS             .iter()
+//RS             .any(|variant| !matches!(&variant.payload, VariantPayload::Unit))
+//RS         {
+//RS             continue;
+//RS         }
+//RS         payloads.insert((source.module, name), definition);
+//RS     }
+//RS     payloads
+//RS }
+//RS 
+//RS fn compiler_owned_default_err(module: &str) -> TirTypeDef {
+//RS     let span = Span::new(0, 0);
+//RS     let field = |name: &str, ty: Type| TirField {
+//RS         name: name.to_string(),
+//RS         shape_names: ShapeFieldNames::from_source(name),
+//RS         skip: false,
+//RS         ty,
+//RS         span,
+//RS         public: true,
+//RS         package_public: false,
+//RS         computed: false,
+//RS         has_default: false,
+//RS         redact: false,
+//RS     };
+//RS     TirTypeDef {
+//RS         module: module.to_string(),
+//RS         key: crate::Syntax::TYPE_ERR.to_string(),
+//RS         name: crate::Syntax::TYPE_ERR.to_string(),
+//RS         span,
+//RS         public: true,
+//RS         package_public: false,
+//RS         generic_params: Vec::new(),
+//RS         derives: Vec::new(),
+//RS         auto_derive_default: false,
+//RS         auto_printable: false,
+//RS         published_schema: false,
+//RS         single_use: false,
+//RS         must_use: false,
+//RS         layout: None,
+//RS         layout_alignment: None,
+//RS         c_layout_tag: None,
+//RS         enum_layout: None,
+//RS         serde: Vec::new(),
+//RS         cli_bindings: Vec::new(),
+//RS         cli: None,
+//RS         ownership: TirOwnership::Owned,
+//RS         boxed_edges: Vec::new(),
+//RS         compiler_builtin: Some(MirCompilerBuiltin::DefaultErr),
+//RS         kind: TirTypeDefKind::Struct {
+//RS             fields: vec![
+//RS                 field("message", Type::String),
+//RS                 field("code", Type::Option(Box::new(Type::String))),
+//RS                 field(
+//RS                     "cause",
+//RS                     Type::Option(Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string()))),
+//RS                 ),
+//RS             ],
+//RS             methods: Vec::new(),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn compiler_owned_record(
+//RS     module: &str,
+//RS     name: &str,
+//RS     fields: impl IntoIterator<Item = (&'static str, Type)>,
+//RS ) -> TirTypeDef {
+//RS     let span = Span::new(0, 0);
+//RS     TirTypeDef {
+//RS         module: module.to_string(),
+//RS         key: name.to_string(),
+//RS         name: name.to_string(),
+//RS         span,
+//RS         public: true,
+//RS         package_public: false,
+//RS         generic_params: Vec::new(),
+//RS         derives: Vec::new(),
+//RS         auto_derive_default: false,
+//RS         auto_printable: false,
+//RS         published_schema: false,
+//RS         single_use: false,
+//RS         must_use: false,
+//RS         layout: None,
+//RS         layout_alignment: None,
+//RS         c_layout_tag: None,
+//RS         enum_layout: None,
+//RS         serde: Vec::new(),
+//RS         cli_bindings: Vec::new(),
+//RS         cli: None,
+//RS         ownership: TirOwnership::Owned,
+//RS         boxed_edges: Vec::new(),
+//RS         compiler_builtin: None,
+//RS         kind: TirTypeDefKind::Struct {
+//RS             fields: fields
+//RS                 .into_iter()
+//RS                 .map(|(name, ty)| TirField {
+//RS                     name: name.to_string(),
+//RS                     shape_names: ShapeFieldNames::from_source(name),
+//RS                     skip: false,
+//RS                     ty,
+//RS                     span,
+//RS                     public: true,
+//RS                     package_public: false,
+//RS                     computed: false,
+//RS                     has_default: false,
+//RS                     redact: false,
+//RS                 })
+//RS                 .collect(),
+//RS             methods: Vec::new(),
+//RS         },
+//RS     }
+//RS }
+//RS /// Build one compiler-owned Core record from the checked field oracle.  This
+//RS /// keeps reflection/metadata declarations aligned with sema when a field is
+//RS /// projected through checked TIR.
+//RS fn compiler_owned_core_record(
+//RS     module: &str,
+//RS     name: &'static str,
+//RS     fields: &'static [&'static str],
+//RS ) -> TirTypeDef {
+//RS     compiler_owned_record(
+//RS         module,
+//RS         name,
+//RS         fields.iter().copied().map(|field| {
+//RS             (
+//RS                 field,
+//RS                 crate::Sema::core_struct_field_type(name, field, &[])
+//RS                     .unwrap_or_else(|| panic!("missing canonical Core field {name}.{field}")),
+//RS             )
+//RS         }),
+//RS     )
+//RS }
+//RS fn compiler_owned_core_variant_payload(payload: &VariantPayload) -> TirVariantPayload {
+//RS     let identity = |ty: &Type, _: &[String]| ty.clone();
+//RS     match payload {
+//RS         VariantPayload::Unit => TirVariantPayload::Unit,
+//RS         VariantPayload::Single(ty, _) => TirVariantPayload::Single(ty.clone()),
+//RS         VariantPayload::Named(fields) => TirVariantPayload::Named(
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|field| lower_variant_field(field, &identity, &[]))
+//RS                 .collect(),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn compiler_owned_vjp_run(module: &str) -> TirTypeDef {
+//RS     let span = Span::new(0, 0);
+//RS     let field = |name: &str, ty: Type| TirField {
+//RS         name: name.to_string(),
+//RS         shape_names: ShapeFieldNames::from_source(name),
+//RS         skip: false,
+//RS         ty,
+//RS         span,
+//RS         public: true,
+//RS         package_public: false,
+//RS         computed: false,
+//RS         has_default: false,
+//RS         redact: false,
+//RS     };
+//RS     TirTypeDef {
+//RS         module: module.to_string(),
+//RS         key: "VJPRun".to_string(),
+//RS         name: "VJPRun".to_string(),
+//RS         span,
+//RS         public: true,
+//RS         package_public: false,
+//RS         generic_params: vec![super::TGenericParam {
+//RS             name: "T".to_string(),
+//RS             bounds: Vec::new(),
+//RS         }],
+//RS         derives: Vec::new(),
+//RS         auto_derive_default: false,
+//RS         auto_printable: false,
+//RS         published_schema: false,
+//RS         single_use: false,
+//RS         must_use: false,
+//RS         layout: None,
+//RS         layout_alignment: None,
+//RS         c_layout_tag: None,
+//RS         enum_layout: None,
+//RS         serde: Vec::new(),
+//RS         cli_bindings: Vec::new(),
+//RS         cli: None,
+//RS         ownership: TirOwnership::Owned,
+//RS         boxed_edges: Vec::new(),
+//RS         compiler_builtin: None,
+//RS         kind: TirTypeDefKind::Struct {
+//RS             fields: vec![
+//RS                 field("value", Type::Named("Tensor".to_string())),
+//RS                 field(
+//RS                     "pull",
+//RS                     Type::Fn {
+//RS                         params: vec![Type::Named("Tensor".to_string())],
+//RS                         ret: Some(Box::new(Type::Named("T".to_string()))),
+//RS                         effect_bound: None,
+//RS                         param_contract: None,
+//RS                         call_metadata: None,
+//RS                         return_view_provenance: None,
+//RS                     },
+//RS                 ),
+//RS                 field(
+//RS                     "grads",
+//RS                     Type::Fn {
+//RS                         params: Vec::new(),
+//RS                         ret: Some(Box::new(Type::Named("T".to_string()))),
+//RS                         effect_bound: None,
+//RS                         param_contract: None,
+//RS                         call_metadata: None,
+//RS                         return_view_provenance: None,
+//RS                     },
+//RS                 ),
+//RS             ],
+//RS             methods: Vec::new(),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn compiler_owned_parse_error(module: &str) -> TirTypeDef {
+//RS     let span = Span::new(0, 0);
+//RS     let mut row = lower_alias(
+//RS         &TypeAliasDef {
+//RS             is_pub: true,
+//RS             is_package_pub: false,
+//RS             name: "ParseError".to_string(),
+//RS             name_span: span,
+//RS             type_params: Vec::new(),
+//RS             target: Type::String,
+//RS             target_span: span,
+//RS             span,
+//RS         },
+//RS         module,
+//RS         &|ty, _| ty.clone(),
+//RS         false,
+//RS     );
+//RS     // Compiler-owned rows use the shared Prelude spelling rather than a module
+//RS     // qualification. Keep alias lowering responsible for the representation.
+//RS     row.key = "ParseError".to_string();
+//RS     row
+//RS }
+//RS 
+//RS fn compiler_owned_type_defs<'a>(
+//RS     module: &'a str,
+//RS     seed_parse_error: bool,
+//RS     checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+//RS ) -> impl Iterator<Item = TirTypeDef> + 'a {
+//RS     let span = Span::new(0, 0);
+//RS     let net_error_variants = ["NetDnsError", "NetError"]
+//RS         .into_iter()
+//RS         .map(|enum_name| {
+//RS             (
+//RS                 enum_name.to_string(),
+//RS                 crate::Sema::core_net_error_variants(enum_name)
+//RS                     .unwrap_or_else(|| panic!("missing canonical Core enum {enum_name}")),
+//RS             )
+//RS         })
+//RS         .collect::<HashMap<_, _>>();
+//RS     for enum_name in ["NetDnsError", "NetError"] {
+//RS         let canonical_names = compiler_owned_enum_variants(enum_name)
+//RS             .unwrap_or_else(|| panic!("missing canonical MIR enum {enum_name}"));
+//RS         let variants = net_error_variants
+//RS             .get(enum_name)
+//RS             .expect("canonical sema enum was registered");
+//RS         assert_eq!(
+//RS             canonical_names.len(),
+//RS             variants.len(),
+//RS             "Core/MIR variant rows disagree for {enum_name}"
+//RS         );
+//RS         for variant in canonical_names {
+//RS             assert!(
+//RS                 variants.contains_key(*variant),
+//RS                 "missing canonical Core variant {enum_name}.{variant}"
+//RS             );
+//RS         }
+//RS     }
+//RS     COMPILER_OWNED_ENUMS
+//RS         .iter()
+//RS         .map(move |(name, variants)| TirTypeDef {
+//RS             module: module.to_string(),
+//RS             key: name.to_string(),
+//RS             name: name.to_string(),
+//RS             span,
+//RS             public: true,
+//RS             package_public: false,
+//RS             generic_params: match *name {
+//RS                 "HookDecision" | "HookOutcome" => ["T", "E"]
+//RS                     .into_iter()
+//RS                     .map(|name| super::TGenericParam {
+//RS                         name: name.to_string(),
+//RS                         bounds: Vec::new(),
+//RS                     })
+//RS                     .collect(),
+//RS                 _ => Vec::new(),
+//RS             },
+//RS             derives: Vec::new(),
+//RS             auto_derive_default: false,
+//RS             auto_printable: false,
+//RS             published_schema: false,
+//RS             single_use: false,
+//RS             must_use: false,
+//RS             layout: None,
+//RS             layout_alignment: None,
+//RS             c_layout_tag: None,
+//RS             enum_layout: None,
+//RS             serde: Vec::new(),
+//RS             cli_bindings: Vec::new(),
+//RS             cli: None,
+//RS             ownership: TirOwnership::Owned,
+//RS             boxed_edges: Vec::new(),
+//RS             compiler_builtin: None,
+//RS             kind: TirTypeDefKind::Enum {
+//RS                 variants: variants
+//RS                     .iter()
+//RS                     .map(|variant| TirVariant {
+//RS                         name: variant.to_string(),
+//RS                         wire_name: variant.to_string(),
+//RS                         span,
+//RS                         payload: if *name == crate::Syntax::TYPE_TASK_FAILURE {
+//RS                             // This row mirrors the canonical Prelude enum. The
+//RS                             // runtime owns failure conversion; MIR only needs
+//RS                             // the nominal variant shape for typed projections.
+//RS                             if *variant == crate::Syntax::TASK_FAILURE_PANICKED {
+//RS                                 TirVariantPayload::Single(Type::String)
+//RS                             } else {
+//RS                                 TirVariantPayload::Unit
+//RS                             }
+//RS                         } else if *name == "TaskOutcome" && *variant == "Panicked" {
+//RS                             TirVariantPayload::Single(Type::String)
+//RS                         } else if *name == "HookDecision" {
+//RS                             match *variant {
+//RS                                 "Transform" => {
+//RS                                     TirVariantPayload::Single(Type::Named("T".to_string()))
+//RS                                 }
+//RS                                 "Fail" => TirVariantPayload::Single(Type::Named("E".to_string())),
+//RS                                 _ => TirVariantPayload::Unit,
+//RS                             }
+//RS                         } else if *name == "HookOutcome" {
+//RS                             match *variant {
+//RS                                 "Continue" => {
+//RS                                     TirVariantPayload::Single(Type::Named("T".to_string()))
+//RS                                 }
+//RS                                 "Fail" => TirVariantPayload::Single(Type::Named("E".to_string())),
+//RS                                 _ => TirVariantPayload::Unit,
+//RS                             }
+//RS                         } else if *name == "WsError" {
+//RS                             match *variant {
+//RS                                 "MessageTooLarge" => TirVariantPayload::Named(vec![TirField {
+//RS                                     name: "limit".to_string(),
+//RS                                     shape_names: ShapeFieldNames::from_source("limit"),
+//RS                                     skip: false,
+//RS                                     ty: Type::Int,
+//RS                                     span,
+//RS                                     public: true,
+//RS                                     package_public: false,
+//RS                                     computed: false,
+//RS                                     has_default: false,
+//RS                                     redact: false,
+//RS                                 }]),
+//RS                                 "IO" => TirVariantPayload::Named(vec![TirField {
+//RS                                     name: "operation".to_string(),
+//RS                                     shape_names: ShapeFieldNames::from_source("operation"),
+//RS                                     skip: false,
+//RS                                     ty: Type::String,
+//RS                                     span,
+//RS                                     public: true,
+//RS                                     package_public: false,
+//RS                                     computed: false,
+//RS                                     has_default: false,
+//RS                                     redact: false,
+//RS                                 }]),
+//RS                                 _ => TirVariantPayload::Unit,
+//RS                             }
+//RS                         } else if *name == crate::Syntax::TYPE_IO_ERROR {
+//RS                             if *variant == "ResourceLimit" {
+//RS                                 TirVariantPayload::Single(Type::Named(
+//RS                                     crate::Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string(),
+//RS                                 ))
+//RS                             } else {
+//RS                                 TirVariantPayload::Single(Type::Named(
+//RS                                     crate::Syntax::TYPE_IO_CONTEXT.to_string(),
+//RS                                 ))
+//RS                             }
+//RS                         } else if *name == crate::Syntax::TYPE_KEY {
+//RS                             match *variant {
+//RS                                 "Char" | "Ctrl" => TirVariantPayload::Single(Type::Char),
+//RS                                 "F" => TirVariantPayload::Single(Type::Int),
+//RS                                 _ => TirVariantPayload::Unit,
+//RS                             }
+//RS                         } else if *name == "EmailError" {
+//RS                             TirVariantPayload::Named(vec![
+//RS                                 TirField {
+//RS                                     name: "operation".to_string(),
+//RS                                     shape_names: ShapeFieldNames::from_source("operation"),
+//RS                                     skip: false,
+//RS                                     ty: Type::String,
+//RS                                     span,
+//RS                                     public: true,
+//RS                                     package_public: false,
+//RS                                     computed: false,
+//RS                                     has_default: false,
+//RS                                     redact: false,
+//RS                                 },
+//RS                                 TirField {
+//RS                                     name: "server".to_string(),
+//RS                                     shape_names: ShapeFieldNames::from_source("server"),
+//RS                                     skip: false,
+//RS                                     ty: Type::Option(Box::new(Type::String)),
+//RS                                     span,
+//RS                                     public: true,
+//RS                                     package_public: false,
+//RS                                     computed: false,
+//RS                                     has_default: false,
+//RS                                     redact: false,
+//RS                                 },
+//RS                                 TirField {
+//RS                                     name: "code".to_string(),
+//RS                                     shape_names: ShapeFieldNames::from_source("code"),
+//RS                                     skip: false,
+//RS                                     ty: Type::Option(Box::new(Type::Int)),
+//RS                                     span,
+//RS                                     public: true,
+//RS                                     package_public: false,
+//RS                                     computed: false,
+//RS                                     has_default: false,
+//RS                                     redact: false,
+//RS                                 },
+//RS                                 TirField {
+//RS                                     name: "reason".to_string(),
+//RS                                     shape_names: ShapeFieldNames::from_source("reason"),
+//RS                                     skip: false,
+//RS                                     ty: Type::String,
+//RS                                     span,
+//RS                                     public: true,
+//RS                                     package_public: false,
+//RS                                     computed: false,
+//RS                                     has_default: false,
+//RS                                     redact: false,
+//RS                                 },
+//RS                             ])
+//RS                         } else if *name == "SMTPAuth" && *variant == "Password" {
+//RS                             TirVariantPayload::Named(vec![
+//RS                                 TirField {
+//RS                                     name: "username".to_string(),
+//RS                                     shape_names: ShapeFieldNames::from_source("username"),
+//RS                                     skip: false,
+//RS                                     ty: Type::String,
+//RS                                     span,
+//RS                                     public: true,
+//RS                                     package_public: false,
+//RS                                     computed: false,
+//RS                                     has_default: false,
+//RS                                     redact: false,
+//RS                                 },
+//RS                                 TirField {
+//RS                                     name: "password".to_string(),
+//RS                                     shape_names: ShapeFieldNames::from_source("password"),
+//RS                                     skip: false,
+//RS                                     ty: Type::Named("Secret".to_string()),
+//RS                                     span,
+//RS                                     public: true,
+//RS                                     package_public: false,
+//RS                                     computed: false,
+//RS                                     has_default: false,
+//RS                                     redact: false,
+//RS                                 },
+//RS                             ])
+//RS                         } else if *name == "TLSTrust" && *variant == "SystemPlusCa" {
+//RS                             TirVariantPayload::Named(vec![TirField {
+//RS                                 name: "pem".to_string(),
+//RS                                 shape_names: ShapeFieldNames::from_source("pem"),
+//RS                                 skip: false,
+//RS                                 ty: Type::List(Box::new(Type::IntN {
+//RS                                     signed: false,
+//RS                                     bits: 8,
+//RS                                 })),
+//RS                                 span,
+//RS                                 public: true,
+//RS                                 package_public: false,
+//RS                                 computed: false,
+//RS                                 has_default: false,
+//RS                                 redact: false,
+//RS                             }])
+//RS                         } else if *name == "TLSClientTrust" {
+//RS                             match *variant {
+//RS                                 "SystemPlus" | "CustomOnly" => TirVariantPayload::Single(
+//RS                                     Type::Named("TLSRootCertificates".to_string()),
+//RS                                 ),
+//RS                                 _ => TirVariantPayload::Unit,
+//RS                             }
+//RS                         } else if *name == "DataEvent" {
+//RS                             match *variant {
+//RS                                 "Bool" => TirVariantPayload::Single(Type::Bool),
+//RS                                 "Int" => TirVariantPayload::Single(Type::Int),
+//RS                                 "Float" => TirVariantPayload::Single(Type::Float),
+//RS                                 "Text" | "Key" => TirVariantPayload::Single(Type::String),
+//RS                                 "Bytes" => {
+//RS                                     TirVariantPayload::Single(Type::List(Box::new(Type::IntN {
+//RS                                         signed: false,
+//RS                                         bits: 8,
+//RS                                     })))
+//RS                                 }
+//RS                                 _ => TirVariantPayload::Unit,
+//RS                             }
+//RS                         } else if *name == "DataTree" {
+//RS                             match *variant {
+//RS                                 "Bool" => TirVariantPayload::Single(Type::Bool),
+//RS                                 "Int" => TirVariantPayload::Single(Type::Int),
+//RS                                 "Float" => TirVariantPayload::Single(Type::Float),
+//RS                                 "Number" | "TypedText" | "Text" => {
+//RS                                     TirVariantPayload::Single(Type::String)
+//RS                                 }
+//RS                                 "Bytes" => {
+//RS                                     TirVariantPayload::Single(Type::List(Box::new(Type::IntN {
+//RS                                         signed: false,
+//RS                                         bits: 8,
+//RS                                     })))
+//RS                                 }
+//RS                                 "Array" => TirVariantPayload::Single(Type::List(Box::new(
+//RS                                     Type::Named("DataTree".to_string()),
+//RS                                 ))),
+//RS                                 "Object" => TirVariantPayload::Single(Type::List(Box::new(
+//RS                                     Type::Tuple(vec![
+//RS                                         ("key".to_string(), Box::new(Type::String)),
+//RS                                         (
+//RS                                             "value".to_string(),
+//RS                                             Box::new(Type::Named("DataTree".to_string())),
+//RS                                         ),
+//RS                                     ]),
+//RS                                 ))),
+//RS                                 _ => TirVariantPayload::Unit,
+//RS                             }
+//RS                         } else if matches!(*name, "NetError" | "NetDnsError") {
+//RS                             let (_, payload) = net_error_variants
+//RS                                 .get(*name)
+//RS                                 .and_then(|variants| variants.get(*variant))
+//RS                                 .unwrap_or_else(|| {
+//RS                                     panic!("missing canonical Core variant {name}.{variant}")
+//RS                                 });
+//RS                             compiler_owned_core_variant_payload(payload)
+//RS                         } else {
+//RS                             TirVariantPayload::Unit
+//RS                         },
+//RS                         discriminant: None,
+//RS                     })
+//RS                     .collect(),
+//RS                 methods: Vec::new(),
+//RS             },
+//RS         })
+//RS         .chain(compiler_owned_core_enums(module, checked_nominals))
+//RS         .chain(std::iter::once(compiler_owned_default_err(module)))
+//RS         .chain(std::iter::once(compiler_owned_record(
+//RS             module,
+//RS             "FieldError",
+//RS             ["path", "reason"].map(|name| {
+//RS                 (
+//RS                     name,
+//RS                     crate::Sema::core_struct_field_type("FieldError", name, &[])
+//RS                         .expect("canonical FieldError field"),
+//RS                 )
+//RS             }),
+//RS         )))
+//RS         .chain(std::iter::once(compiler_owned_record(
+//RS             module,
+//RS             crate::Syntax::TYPE_RANGE,
+//RS             [
+//RS                 ("start", Type::Int),
+//RS                 ("end", Type::Int),
+//RS                 ("exclusive", Type::Bool),
+//RS             ],
+//RS         )))
+//RS         .chain(
+//RS             [
+//RS                 ("DataJoin", &["L", "R"][..], &["left", "right"][..]),
+//RS                 ("Group", &["K", "V"][..], &["key", "value"][..]),
+//RS                 (
+//RS                     "DataSnapshot",
+//RS                     &["T"][..],
+//RS                     &[
+//RS                         "value",
+//RS                         "identity",
+//RS                         "provenance",
+//RS                         "schema",
+//RS                         "status",
+//RS                         "content",
+//RS                     ][..],
+//RS                 ),
+//RS             ]
+//RS             .into_iter()
+//RS             .map(move |(name, params, fields)| {
+//RS                 let args = params
+//RS                     .iter()
+//RS                     .map(|name| Type::Named((*name).to_string()))
+//RS                     .collect::<Vec<_>>();
+//RS                 let mut row = compiler_owned_record(
+//RS                     module,
+//RS                     name,
+//RS                     fields.iter().map(|field| {
+//RS                         (
+//RS                             *field,
+//RS                             crate::Sema::core_struct_field_type(name, field, &args)
+//RS                                 .expect("canonical generic Core record field"),
+//RS                         )
+//RS                     }),
+//RS                 );
+//RS                 row.generic_params = params
+//RS                     .iter()
+//RS                     .map(|name| super::TGenericParam {
+//RS                         name: (*name).to_string(),
+//RS                         bounds: Vec::new(),
+//RS                     })
+//RS                     .collect();
+//RS                 row
+//RS             }),
+//RS         )
+//RS         .chain(
+//RS             COMPILER_OWNED_GEOMETRY_RECORDS
+//RS                 .iter()
+//RS                 .map(move |(name, params, fields)| {
+//RS                     let args = params
+//RS                         .iter()
+//RS                         .copied()
+//RS                         .map(|name| Type::Named(name.to_string()))
+//RS                         .collect::<Vec<_>>();
+//RS                     let mut row = compiler_owned_record(
+//RS                         module,
+//RS                         *name,
+//RS                         fields.iter().copied().map(|field| {
+//RS                             (
+//RS                                 field,
+//RS                                 crate::Sema::core_struct_field_type(*name, field, &args)
+//RS                                     .expect("canonical geometry Core record field"),
+//RS                             )
+//RS                         }),
+//RS                     );
+//RS                     row.generic_params = params
+//RS                         .iter()
+//RS                         .copied()
+//RS                         .map(|name| super::TGenericParam {
+//RS                             name: name.to_string(),
+//RS                             bounds: Vec::new(),
+//RS                         })
+//RS                         .collect();
+//RS                     row
+//RS                 }),
+//RS         )
+//RS         .chain(
+//RS             ["KeyRef", "MutationPlan", "VaultWrite"]
+//RS                 .into_iter()
+//RS                 .map(move |name| {
+//RS                     let mut row = compiler_owned_record(
+//RS                         module,
+//RS                         name,
+//RS                         std::iter::empty::<(&'static str, Type)>(),
+//RS                     );
+//RS                     row.generic_params = vec![super::TGenericParam {
+//RS                         name: "T".to_string(),
+//RS                         bounds: Vec::new(),
+//RS                     }];
+//RS                     row
+//RS                 }),
+//RS         )
+//RS         .chain(std::iter::once({
+//RS             let args = [Type::Named("T".to_string())];
+//RS             let mut row = compiler_owned_record(
+//RS                 module,
+//RS                 "Rotation",
+//RS                 ["previous", "current"].map(|field| {
+//RS                     (
+//RS                         field,
+//RS                         crate::Sema::core_struct_field_type("Rotation", field, &args)
+//RS                             .expect("canonical Rotation field"),
+//RS                     )
+//RS                 }),
+//RS             );
+//RS             row.generic_params = vec![super::TGenericParam {
+//RS                 name: "T".to_string(),
+//RS                 bounds: Vec::new(),
+//RS             }];
+//RS             row
+//RS         }))
+//RS         .chain(std::iter::once({
+//RS             let mut row = compiler_owned_record(
+//RS                 module,
+//RS                 crate::Syntax::TYPE_MEASUREMENT,
+//RS                 [
+//RS                     ("value", Type::Named("T".to_string())),
+//RS                     ("uncertainty", Type::Named("T".to_string())),
+//RS                 ],
+//RS             );
+//RS             row.generic_params = vec![super::TGenericParam {
+//RS                 name: "T".to_string(),
+//RS                 bounds: Vec::new(),
+//RS             }];
+//RS             row
+//RS         }))
+//RS         .chain(std::iter::once(compiler_owned_record(
+//RS             module,
+//RS             "DataPivotCell",
+//RS             ["row_key", "column_key", "count", "sum", "mean"].map(|name| {
+//RS                 (
+//RS                     name,
+//RS                     crate::Sema::core_struct_field_type("DataPivotCell", name, &[])
+//RS                         .expect("canonical DataPivotCell field"),
+//RS                 )
+//RS             }),
+//RS         )))
+//RS         .chain(std::iter::once(compiler_owned_record(
+//RS             module,
+//RS             "AllocError",
+//RS             ["requested_bytes", "allocator"].map(|name| {
+//RS                 (
+//RS                     name,
+//RS                     crate::Sema::core_struct_field_type("AllocError", name, &[])
+//RS                         .expect("canonical AllocError field"),
+//RS                 )
+//RS             }),
+//RS         )))
+//RS         .chain(std::iter::once(compiler_owned_record(
+//RS             module,
+//RS             "DataSummary",
+//RS             [
+//RS                 "count", "sum", "mean", "min", "max", "median", "variance", "stddev",
+//RS             ]
+//RS             .map(|name| {
+//RS                 (
+//RS                     name,
+//RS                     crate::Sema::core_struct_field_type("DataSummary", name, &[])
+//RS                         .expect("canonical DataSummary field"),
+//RS                 )
+//RS             }),
+//RS         )))
+//RS         .chain(std::iter::once(compiler_owned_vjp_run(module)))
+//RS         .chain(
+//RS             COMPILER_OWNED_CORE_RECORDS
+//RS                 .iter()
+//RS                 .map(move |(name, fields)| compiler_owned_core_record(module, *name, *fields)),
+//RS         )
+//RS         .chain(
+//RS             COMPILER_OWNED_MATH_RECORDS
+//RS                 .iter()
+//RS                 .map(move |(name, fields)| {
+//RS                     let scalar = crate::Sema::math_scalar_ty(name);
+//RS                     compiler_owned_record(
+//RS                         module,
+//RS                         name,
+//RS                         fields
+//RS                             .iter()
+//RS                             .copied()
+//RS                             .map(move |field| (field, scalar.clone())),
+//RS                     )
+//RS                 }),
+//RS         )
+//RS         .chain(seed_parse_error.then(|| compiler_owned_parse_error(module)))
+//RS }
+//RS 
+//RS pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         crate::Generics::ENCODE
+//RS             | crate::Generics::DECODE
+//RS             | crate::Generics::DISPLAY
+//RS             | crate::Generics::DEBUG
+//RS             | crate::Generics::EQUATABLE
+//RS             | crate::Generics::COMPARABLE
+//RS             | crate::Generics::CLOSE
+//RS             | crate::Syntax::TRAIT_INDEX
+//RS             | crate::Syntax::TRAIT_INDEX_MUT
+//RS             | crate::Syntax::TRAIT_ITERABLE
+//RS             | crate::Syntax::TRAIT_ITERATOR
+//RS             | crate::Generics::ADD
+//RS             | crate::Generics::SUB
+//RS             | crate::Generics::MUL
+//RS             | crate::Generics::DIV
+//RS             | crate::Syntax::TRAIT_ROLLBACK
+//RS     )
+//RS }
+// END-PORT-PENDING 0540 crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1823-3936
+

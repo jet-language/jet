@@ -1,0 +1,54 @@
+// Original Effects.rs reachability_tests1663-1742 and Validation.rs158-201.
+use jet_foundation.[Span, TEffectSpan, reachability_nodes_with]
+use jet_sema.[CallbackObligation, DiscardedResultFact, EffectSummary, MemoryCall, MemoryEvent, MemoryPolicyRegion, MemorySummary, OpenMemoryDispatch, RegionSummary, SemaAutodiffObligation, SemaComputeCallFact, SemaEffectQualificationModule, sema_qualified_effect_facts, sema_solve_reachability]
+fn reachability_test_summary(direct: [String], edges: [String]) -> EffectSummary Never! {
+    EffectSummary{direct: direct, direct_spans: [TEffectSpan]{}, edges: edges, maximal: false, maximal_span: None, unbounded_trait_dispatch: false, regions: [RegionSummary]{}, callback_obligations: [CallbackObligation]{}, autodiff_obligations: [SemaAutodiffObligation]{}, compute_calls: [SemaComputeCallFact]{}, autodiff_safe_panic: false, autodiff_unsafe_panic: false, memory: MemorySummary{events: [MemoryEvent]{}, open_dispatches: [OpenMemoryDispatch]{}, unbounded_control: [Span]{}, calls: [MemoryCall]{}, regions: [MemoryPolicyRegion]{}}, discarded_results: [DiscardedResultFact]{}, failure_direct: false}
+}
+#Test("one_graph_projects_all_reachability_rows") {
+    summaries :: [String:EffectSummary]{
+        "root": reachability_test_summary([String]{}, [String]{"mid"}),
+        "mid": reachability_test_summary([String]{}, [String]{"leaf"}),
+        "leaf": reachability_test_summary([String]{"Exec", "Secret"}, [String]{"__jet_panic__"}),
+    }
+    taint :: [String:[String]]{"leaf": [String]{"Credential"}}
+    result :: sema_solve_reachability(summaries, taint)
+    assert(reachability_nodes_with(result, "effects", "Exec").contains("root"))
+    assert(reachability_nodes_with(result, "effects", "Panic").contains("root"))
+    assert(reachability_nodes_with(result, "secret", "Secret").contains("root"))
+    assert(reachability_nodes_with(result, "panic", "panic").contains("root"))
+    assert(reachability_nodes_with(result, "taint", "Credential").contains("root"))
+    assert(reachability_nodes_with(result, "calls-exec", "Exec").contains("root"))
+}
+#Test("qualified_taint_seed_matches_preserve_exact_and_suffix_identity") {
+    summaries := [String:EffectSummary]{}
+    keys :: [String]{"leaf", "Type::leaf", "a::Type::leaf", "b::leaf", "λ::leaf", "unrelated"}
+    loop key in keys -> summaries[key] = reachability_test_summary([String]{}, [String]{})
+    taint :: [String:[String]]{"leaf": [String]{"Credential"}, "Type::leaf": [String]{"Token"}, "λ::leaf": [String]{"UnicodeSecret"}}
+    result :: sema_solve_reachability(summaries, taint)
+    assert(reachability_nodes_with(result, "taint", "Credential") == [String]{"Type::leaf", "a::Type::leaf", "b::leaf", "leaf", "λ::leaf"})
+    assert(reachability_nodes_with(result, "taint", "Token") == [String]{"Type::leaf", "a::Type::leaf"})
+    assert(reachability_nodes_with(result, "taint", "UnicodeSecret") == [String]{"λ::leaf"})
+}
+#Test("nested_region_and_callback_edges_are_module_qualified") {
+    root := reachability_test_summary([String]{}, [String]{})
+    root.regions = [RegionSummary]{RegionSummary{caps: [String]{}, direct: [String]{}, edges: [String]{"left.same"}, maximal: false, caps_span: Span{start: 1, end: 2}}}
+    root.callback_obligations = [CallbackObligation]{CallbackObligation{bound: [String]{}, direct: [String]{}, edges: [String]{"right.same"}, maximal: false, span: Span{start: 3, end: 4}}}
+    modules :: [SemaEffectQualificationModule]{
+        SemaEffectQualificationModule{alias: "main", summaries: [String:EffectSummary]{"root": root}},
+        SemaEffectQualificationModule{alias: "left", summaries: [String:EffectSummary]{"same": reachability_test_summary([String]{}, [String]{})}},
+        SemaEffectQualificationModule{alias: "right", summaries: [String:EffectSummary]{"same": reachability_test_summary([String]{}, [String]{})}},
+    }
+    result :: sema_qualified_effect_facts(modules, [SemaEffectQualificationModule]{}, [String:[String]]{})
+    qualified_root :: result.summaries.get("main::root") ?? panic("qualified root missing")
+    assert(qualified_root.regions[0].edges == [String]{"left::same"})
+    assert(qualified_root.callback_obligations[0].edges == [String]{"right::same"})
+    assert(result.summaries.get("same") == None)
+    assert(result.summaries.get("root") != None)
+}
+#Test("maximal_effects_seed_exec_but_not_direct_secret") {
+    summary := reachability_test_summary([String]{}, [String]{})
+    summary.maximal = true
+    result :: sema_solve_reachability([String:EffectSummary]{"open": summary}, [String:[String]]{})
+    assert(reachability_nodes_with(result, "calls-exec", "Exec") == [String]{"open"})
+    assert(reachability_nodes_with(result, "secret", "Secret").len() == 0)
+}

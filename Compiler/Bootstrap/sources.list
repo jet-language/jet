@@ -5,6 +5,7 @@
 
 # Foundation diagnostics and the host trace sink
 Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet
+Compiler/JetFoundation/Source/Diagnostics/Bounds.jet
 Compiler/JetFoundation/Source/Trace.jet
 
 # Lexer
@@ -22,12 +23,24 @@ Compiler/JetFoundation/Source/Registry/Diagnostics.jet
 Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet
 Compiler/JetFoundation/Source/Diagnostics/Render.jet
 Compiler/JetFoundation/Source/Registry/Explain.jet
+Compiler/JetFoundation/Source/Syntax/Spellings.jet
+Compiler/JetFoundation/Source/Registry/Retirements.jet
+Compiler/JetFoundation/Source/Registry/InterpolationSelectors.jet
+Compiler/JetFoundation/Source/Registry/CallableMarkers.jet
+Compiler/JetFoundation/Source/Registry/BlockMarkers.jet
+Compiler/JetFoundation/Source/Registry/FactReads.jet
+Compiler/JetFoundation/Source/Registry/PerformanceBudgets.jet
+Compiler/JetFoundation/Source/Registry/EmbeddedCore.jet
+Compiler/JetFoundation/Source/Registry/EmbeddedCoreData.jet
 Compiler/JetFoundation/Source/Types/Types.jet
 Compiler/JetFoundation/Source/Types/IntegerKinds.jet
+Compiler/JetFoundation/Source/Execution/WatchPolicy.jet
 Compiler/JetFoundation/Source/Types/TupleNames.jet
 Compiler/JetFoundation/Source/MIR/MIR.jet
 Compiler/JetFoundation/Source/MIR/Digest/Digest.jet
 Compiler/JetFoundation/Source/MIR/Reachability.jet
+Compiler/JetFoundation/Source/Encoding/Json.jet
+Compiler/JetFoundation/Source/Encoding/CanonicalJson.jet
 Compiler/JetFoundation/Source/Derivations.jet
 Compiler/JetOptimizer/Source/Analysis/ControlFlow.jet
 Compiler/JetOptimizer/Source/Verification/Legality.jet
@@ -46,9 +59,20 @@ Compiler/JetFoundation/Source/TIR/TIR.jet
 Compiler/JetFoundation/Source/TIR/InlineAssembly.jet
 Compiler/JetFoundation/Source/TIR/TestArtifacts.jet
 Compiler/JetFoundation/Source/Hash/SHA256.jet
+Compiler/JetQueries/Source/Queries/Engine.jet
 Compiler/JetFoundation/Source/Record/RecordCodec.jet
+Compiler/JetFoundation/Source/Record/JetLib.jet
+Compiler/JetFoundation/Source/Evidence/TestingComparison.jet
+Compiler/JetFoundation/Source/Evidence/Evidence.jet
+Compiler/JetFoundation/Source/Evidence/EvidenceCodec.jet
+Compiler/JetFoundation/Source/Evidence/EvidenceSchedule.jet
+Compiler/JetFoundation/Source/Evidence/EvidenceJson.jet
+Compiler/JetFoundation/Source/Evidence/EvidenceProducer.jet
+Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet
+Compiler/JetFoundation/Source/Evidence/TestEvidence.jet
 Compiler/JetFoundation/Source/Record/PackageIdentity.jet
 Compiler/JetFoundation/Source/Rings/RingLayer.jet
+Compiler/JetFoundation/Source/Names/Names.jet
 Compiler/JetFoundation/Source/Target/Layout.jet
 Compiler/JetFoundation/Source/Target/TargetMachine.jet
 Compiler/JetFoundation/Source/Target/ReleaseDevtools.jet
@@ -63,6 +87,7 @@ Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet
 Compiler/JetFoundation/Source/Registry/WebCoreSignatures.jet
 Compiler/JetFoundation/Source/Policy/CoreMenus.jet
 Compiler/JetFoundation/Source/Policy/AppliedRules.jet
+Compiler/JetFoundation/Source/Policy/Policy.jet
 
 # Jet-native backend: LIR, MIR -> LIR lowering, x86-64 generator, images,
 # the Jet OS layer and the in-process loader
@@ -87,6 +112,9 @@ Compiler/JetFoundation/Source/AST/Patterns.jet
 Compiler/JetFoundation/Source/AST/Statements.jet
 Compiler/JetFoundation/Source/AST/Items.jet
 Compiler/JetFoundation/Source/AST/Comptime.jet
+Compiler/JetFoundation/Source/AST/DecodeShapes.jet
+Compiler/JetFoundation/Source/AST/Canonical.jet
+Compiler/JetFoundation/Source/AST/Canonical/Structural.jet
 Compiler/JetParser/Source/Parser/State.jet
 Compiler/JetParser/Source/Parser/Types.jet
 Compiler/JetParser/Source/Parser/Declarations/Foreign.jet
@@ -111,6 +139,13 @@ Compiler/JetParser/Source/Parser/DeclarationMarkers.jet
 Compiler/JetParser/Source/Parser/Declarations/Migrations.jet
 Compiler/JetParser/Source/Parser/Declarations/Policies.jet
 Compiler/JetParser/Source/Parser/AuthorityScopes.jet
+Compiler/JetParser/Source/Formatter/Context.jet
+Compiler/JetParser/Source/Formatter/Expressions.jet
+Compiler/JetParser/Source/Formatter/Items.jet
+Compiler/JetParser/Source/Formatter/Statements.jet
+Compiler/JetParser/Source/Formatter/Edits.jet
+Compiler/JetParser/Source/Formatter/Simplify.jet
+Compiler/JetParser/Source/Formatter/Entry.jet
 
 # Sema: ownership/scopes, registration/inference/calls, expressions, checks
 Compiler/JetSema/Source/Sema/Ownership/Checks.jet
@@ -130,6 +165,13 @@ Compiler/JetSema/Source/Sema/TypeRelations.jet
 Compiler/JetSema/Source/Sema/Declarations.jet
 Compiler/JetSema/Source/Sema/Casing.jet
 Compiler/JetSema/Source/Sema/Registration/Items.jet
+Compiler/JetSema/Source/Sema/CanonicalDefaults.jet
+Compiler/JetSema/Source/Sema/Incremental.jet
+Compiler/JetSema/Source/Sema/IncrementalSyntax.jet
+Compiler/JetSema/Source/Sema/BudgetSpecs.jet
+Compiler/JetSema/Source/Sema/ApiFreeze.jet
+Compiler/JetSema/Source/Sema/ApiFreeze/Checked.jet
+Compiler/JetSema/Source/Sema/ApiFreeze/IO.jet
 Compiler/JetSema/Source/Sema/Registration/PreludeDerives.jet
 Compiler/JetSema/Source/Sema/Registration/Derives.jet
 Compiler/JetSema/Source/Sema/Registration/UserTemplates.jet
@@ -292,6 +334,8 @@ Compiler/JetEval/Source/EvalOperations.jet
 Compiler/JetEval/Source/Evaluator.jet
 Compiler/JetDriver/Source/Driver/Identity.jet
 Compiler/JetDriver/Source/Driver/Loader.jet
+Compiler/JetDriver/Source/Driver/QuerySnapshots.jet
+Compiler/JetDriver/Source/Driver/QueryService.jet
 Compiler/JetDriver/Source/Driver/ForeignProviders.jet
 Compiler/JetDriver/Source/Driver/Pipeline.jet
 Compiler/JetDriver/Source/Driver/BodyComptime.jet
@@ -301,7 +345,6 @@ Compiler/JetDriver/Source/Driver/Verbs.jet
 Compiler/JetCli/Source/Cli/Commands.jet
 Compiler/JetCli/Source/Cli/Registry.jet
 Compiler/JetCli/Source/Cli/Front.jet
-Compiler/JetCli/Source/Cli/CoreSources.jet
 Compiler/JetCli/Source/Cli/Request.jet
 Compiler/JetCli/Source/Cli/Host.jet
 

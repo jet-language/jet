@@ -1,0 +1,84 @@
+use jet_foundation.[NameLedger, MIRNameReference, MIRNameVisibility, Program, Span, foundation_embedded_core, foundation_member_name, jet_target_machine_hosted, name_ledger_canonical_path, name_ledger_declaration, name_ledger_reference, name_ledger_references, name_ledger_semantic_identity, name_ledger_new, name_ledger_record_alias, name_ledger_alias, name_ledger_record_reference, name_ledger_mir_facts]
+use jet_parser.[parse_source]
+use jet_sema.[SemaBuildFacts, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_registration_prepare_graph]
+use core.files.host.retained_descriptor as names_test_native
+use core.files.runtime.kernel_path_components as names_test_path
+
+fn names_checked_module(program: ^Program, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
+    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, foreign_handles: []}
+}
+fn names_checked_facts(source: String) -[Env, FS]> NameLedger Never! {
+    parsed :: parse_source(source.bytes())
+    assert(parsed.diagnostics.len() == 0, "names source witness must parse")
+    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    assert(effects.diagnostics.len() == 0, "canonical effects must parse")
+    inputs :: [SemaRegistrationModuleInput]{names_checked_module(^parsed.program, "main", "names.jet", "names"), names_checked_module(^effects.program, "effects", "Prelude/Effects.jet", "jet:canonical-prelude")}
+    build :: SemaBuildFacts{package_name: "names", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "names-test", stamp_at: "", artifact_build: false}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    registration :: sema_registration_prepare_graph(inputs, [], "names", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+    stage :: sema_collect_comptime_declarations(registration, [], None)
+    project_root :: names_test_native.canonicalize(names_test_path.from_text(".", names_test_path.PathPlatform.Unix)) ?? panic("names fixture requires its actual working directory")
+    checked :: sema_finalize_registration_graph(registration, stage, [], [], None, None, project_root)
+    assert(checked.diagnostics.len() == 0, "names source witness must check")
+    assert(checked.complete, "names source witness requires complete checked facts")
+    checked.names
+}
+
+// Permanent real-source edit witness. A comment edit changes source byte spans,
+// not the canonical name or nominal identity, and every original use survives.
+#Test("names_checked_source_edit_rekeys_each_use_site") {
+    source :: "fn helper(value: Int) -> Int {{ value }}\nfn run() -> Int {{ helper(7) + helper(8) }}"
+    prefix :: "// source edit\n"
+    before :: names_checked_facts(source)
+    after :: names_checked_facts("{prefix}{source}")
+    first :: name_ledger_declaration(before, 0, "helper") ?? panic("helper declaration")
+    edited :: name_ledger_declaration(after, 0, "helper") ?? panic("edited helper declaration")
+    assert_eq(edited.span.start, first.span.start + prefix.len())
+    assert_eq(edited.span.end, first.span.end + prefix.len())
+    assert_eq(name_ledger_canonical_path(before, 0, "helper"), Val("main.helper"))
+    assert_eq(name_ledger_canonical_path(after, 0, "helper"), Val("main.helper"))
+    assert_eq(name_ledger_semantic_identity(before, 0, "helper"), name_ledger_semantic_identity(after, 0, "helper"))
+    count := 0
+    loop (site, reference) in name_ledger_references(before) {
+        if site.source != "names.jet" || reference.semantic_identity != Val("names::names.jet::helper") -> next
+        moved :: name_ledger_reference(after, "names.jet", site.start + prefix.len(), site.end + prefix.len()) ?? panic("use-site lost after source edit")
+        assert_eq(moved.semantic_identity, reference.semantic_identity)
+        assert_eq(moved.module_path, "names.jet")
+        assert_eq(moved.def_span.start, reference.def_span.start + prefix.len())
+        assert_eq(moved.def_span.end, reference.def_span.end + prefix.len())
+        count += 1
+    }
+    assert(count >= 2, "separate calls to the same definition must not coalesce")
+}
+
+// Exact Rust alias replacement semantics: weaker visibility still replaces.
+#Test("names_alias_record_replaces_target_even_when_visibility_weakens") {
+    ledger := name_ledger_new()
+    name_ledger_record_alias(&ledger, 0, "helper", "first", Val(1), Span{start: 3, end: 7}, MIRNameVisibility.Public)
+    name_ledger_record_alias(&ledger, 0, "helper", "second", Val(2), Span{start: 3, end: 7}, MIRNameVisibility.Private)
+    kept :: name_ledger_alias(ledger, 0, "helper") ?? panic("alias")
+    assert_eq(kept.target, "second")
+    assert_eq(kept.target_module, Val(2))
+    assert_eq(kept.visibility, MIRNameVisibility.Private)
+}
+
+#Test("names_checked_reference_consolidation_keeps_distinct_uses_and_last_write") {
+    ledger := name_ledger_new()
+    first :: MIRNameReference{module_path: "lib.jet", kind: "type", def_span: Span{start: 3, end: 7}, semantic_identity: Val("pkg::lib.jet::Thing")}
+    name_ledger_record_reference(&ledger, "app.jet", 20, 25, first)
+    name_ledger_record_reference(&ledger, "app.jet", 40, 45, first)
+    replacement := first
+    replacement.kind = "method"
+    name_ledger_record_reference(&ledger, "app.jet", 20, 25, replacement)
+    assert_eq(name_ledger_mir_facts(ledger).references.len(), 2)
+    assert_eq((name_ledger_reference(ledger, "app.jet", 20, 25) ?? panic("first use")).kind, "method")
+    assert_eq((name_ledger_reference(ledger, "app.jet", 40, 45) ?? panic("second use")).kind, "type")
+}
+
+#Test("names_generated_member_function_canonical_path_retains_semantic_key") {
+    generated :: foundation_member_name("bank", "open")
+    assert_eq(sema_name_function_path("app", generated), "app.bank.open")
+    assert_eq(sema_name_function_path("app", foundation_member_name(foundation_member_name("outer", "inner"), "helper")), "app.outer.inner.helper")
+    assert_eq(sema_name_function_path("app", "run"), "app.run")
+    assert_eq(sema_name_function_path("app", "__jet_unqualified"), "app.__jet_unqualified")
+}

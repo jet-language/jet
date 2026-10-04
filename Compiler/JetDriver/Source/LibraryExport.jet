@@ -1,0 +1,164 @@
+// D-LIB-EXPORT1=C: package selection, native symbol law and API freeze.
+use jet_foundation.[Diagnostic, Item, ProgramBundle, diagnostic_from_registry]
+use jet_pkg_model.[PackageFacts, OutputFact, PackageOutputKind]
+use jet_sema.[APISnapshot, API_SNAPSHOT_VERSION, FrozenFn, SemaGuestFunction, SemaGuestScalar, fn_signature, load_snapshot, save_snapshot, sema_guest_export_native_symbol, sema_guest_export_surface]
+// pending Foundation Effects ABI reconciliation: the Rust effect lookup owns
+// legacy unregistered leaves as well as registry rows; never drop that fallback.
+use jet_foundation.[core_effect]
+// pending Loader package_facts_for_bundle ABI reconciliation in this module.
+
+SUPPORTED_BINDINGS :: prep { [String]{"c", "cpp", "rust", "zig", "go", "python", "javascript", "swift"} }
+pub struct LibraryConfig {
+    pub name: String
+    pub entry: String?
+    pub loadable: Bool
+    pub native: Bool
+    pub bindings: [String]
+    // Canonical Rust EffectSet/Holds projection: sorted, duplicate-free strings.
+    pub declared_effects: [String]
+}
+fn e1341(what: String, why: String, fix: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1341", None, what, why, fix)
+}
+fn package_facts(bundle: ProgramBundle) -> PackageFacts? [Diagnostic]! {
+    package_facts_for_bundle(bundle)
+}
+pub fn jet_driver_library_resolve_config(bundle: ProgramBundle, explicit_output: String?) -> LibraryConfig [Diagnostic]! {
+    facts :: package_facts(bundle)
+    selected :: library_selected_output(facts, explicit_output)
+    library_config_for_output(selected, jet_driver_library_declared_effects(bundle))
+}
+fn library_no_output() -> Diagnostic Never! {
+    e1341("this build does not select a Library output", "native and loadable artifacts are driven by a checked `outputs: {{ … }}` Library fact (D-LIB-EXPORT1=C)", "select one Library with `--output=<name>`, or declare exactly one Library output in package.jet")
+}
+fn library_selected_output(facts: PackageFacts?, explicit_output: String?) -> OutputFact [Diagnostic]! {
+    package :: facts ?? return Err([Diagnostic]{library_no_output()})
+    names := [String]{}
+    loop (name, output) in package.outputs {
+        if output.kind == PackageOutputKind.Library -> &names.push(name)
+    }
+    // Package outputs are a Rust BTreeMap. Match candidate reporting order
+    // explicitly instead of inheriting the host map iteration order.
+    &names.sort()
+    candidates :: if names.len() == 0 -> "none" else -> names.join(", ")
+    if explicit_output == .Val(name) {
+        output :: package.outputs.get(name) ?? return Err([Diagnostic]{e1341("Library output `{name}` does not exist", "`--output` addresses the checked name in the package output model", "choose a declared Library output: {candidates}")})
+        if output.kind != PackageOutputKind.Library -> return Err([Diagnostic]{e1341("output `{name}` is not a Library", "`jet build --lib` publishes only outputs of kind `Library`", "choose a declared Library output: {candidates}")})
+        return Ok(output)
+    }
+    if names.len() == 0 -> return Err([Diagnostic]{library_no_output()})
+    if names.len() != 1 -> return Err([Diagnostic]{e1341("multiple Library outputs require an explicit selection", "a native Library build must publish exactly one checked package output", "run `jet build --lib --output <name>`; candidates: {names.join(", ")}")})
+    Ok(package.outputs.get(names[0]) ?? panic("Library name came from package outputs"))
+}
+fn library_config_for_output(output: OutputFact, effects: [String]) -> LibraryConfig [Diagnostic]! {
+    bindings :: output.binding_languages()
+    loop language in bindings {
+        if !SUPPORTED_BINDINGS.contains(language) -> return Err([Diagnostic]{e1341("a Library requests an unsupported `{language}` binding", "D-LIB-EXPORT1=C defines one closed set of generated foreign projections; unknown names cannot be emitted safely", "use c, cpp, rust, zig, go, python, javascript, or swift, or remove the unsupported binding")})
+    }
+    if bindings.len() != 0 && !output.is_native() -> return Err([Diagnostic]{e1341("a Library requests foreign bindings without `native: true`", "C, Python, and Swift bindings project the native Library boundary; a sealed Jet package has no foreign symbol surface", "add `native: true` to the selected Library output")})
+    Ok(LibraryConfig{name: output.name, entry: output.entry, loadable: output.is_loadable(), native: output.is_native(), bindings: bindings, declared_effects: effects})
+}
+pub fn jet_driver_library_declared_effects(bundle: ProgramBundle) -> [String] Never! {
+    effects := [String:Bool]{}
+    loop raw in bundle.used_core {
+        usage := "" // #4303
+        if raw.starts_with("__core_intrinsic::") -> usage = raw.slice(18, raw.len())
+        else if raw.starts_with("__core_source::") -> usage = raw.slice(15, raw.len())
+        else -> next
+        split :: usage.find("::")
+        if split < 0 -> next
+        module := usage.slice(0, split) // #4303
+        method := usage.slice(split + 2, usage.len()) // #4303
+        if core_effect(module, method) == .Val(effect) -> effects[effect.name()] = true
+    }
+    names := effects.keys().to_list()
+    &names.sort()
+    names
+}
+pub fn jet_driver_library_validate_export_surface(bundle: ProgramBundle) -> [Diagnostic] Never! {
+    library_validate_surface(sema_guest_export_surface(bundle))
+}
+fn library_validate_surface(surface: [SemaGuestFunction]) -> [Diagnostic] Never! {
+    diagnostics := [Diagnostic]{}
+    has_text_export := false
+    has_rich_export := false
+    symbols := [String:String]{}
+    loop export in surface {
+        symbol :: sema_guest_export_native_symbol(export.name)
+        if symbols.get(symbol) == .Val(previous) -> &diagnostics.push(e1341("Library exports `{previous}` and `{export.name}` with the same C symbol `{symbol}`", "C, Python, and Swift projections must name one native function unambiguously; foreign names outside ASCII collapse to the same C symbol", "rename one exported function so every `#Export(c)` function has a unique ASCII C symbol"))
+        symbols[symbol] = export.name
+        if export.scalar == None {
+            has_rich_export = true
+            component_symbol :: "{symbol}_component"
+            if symbols.get(component_symbol) == .Val(previous) -> &diagnostics.push(e1341("Library export `{export.name}` needs generated component symbol `{component_symbol}`, already used by `{previous}`", "rich Library projections add one typed component symbol beside each selected C export", "rename the export whose component symbol collides with another Library symbol"))
+            symbols[component_symbol] = export.name
+            next
+        }
+        if export.scalar == Val(SemaGuestScalar.Text) -> has_text_export = true
+    }
+    if has_rich_export {
+        if symbols.get("jet_component_free") == .Val(function) -> &diagnostics.push(e1341("Library export `{function}` collides with generated C symbol `jet_component_free`", "rich component results use one library-owned allocator release function", "rename the export so it does not use `jet_component_free`"))
+    }
+    if has_text_export {
+        if symbols.get("jet_text_free") == .Val(function) -> &diagnostics.push(e1341("Library export `{function}` collides with generated C symbol `jet_text_free`", "Text results use `jet_text_free` as the one library-owned allocator release function", "rename the export so it does not use `jet_text_free`"))
+    }
+    if surface.len() == 0 -> &diagnostics.push(e1341("a native Library has no exported functions", "D-ADOPT-GUEST1=A publishes the entry module's explicit `#Export(c)` surface", "mark at least one supported scalar function `#Export(c)`, or use a sealed package output instead"))
+    diagnostics
+}
+fn resolve_version(bundle: ProgramBundle) -> String Never! {
+    if package_facts_for_bundle(bundle) == .Ok(facts) {
+        if facts == .Val(package) -> return package.version ?? "0.0.0"
+    }
+    "0.0.0"
+}
+fn library_snapshot_package_key(name: String) -> String Never! { "library__{name}" }
+fn library_e1257(delta: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1257", None, "this Library's exported interface changed incompatibly", "a Library's frozen `pub` interface is the load and foreign-call contract (D-LIB-EXPORT1=C) — {delta}", "restore the removed or changed export, or delete the stale `.jet/cache/api/` snapshot to re-freeze this deliberate breaking change")
+}
+fn library_frozen_functions(bundle: ProgramBundle) -> [FrozenFn] Never! {
+    // Name -> source index retains Rust find_map's FIRST matching declaration,
+    // avoiding an entry-module rescan per export and any whole-Func copy.
+    source :: bundle.modules[bundle.entry].items
+    functions := [String:Int]{}
+    loop (index, item) in source {
+        if item == .Func(function) {
+            if !functions.has_key(function.name) -> functions[function.name] = index
+        }
+    }
+    funcs := [FrozenFn]{}
+    loop export in sema_guest_export_surface(bundle) {
+        index :: functions.get(export.name) ?? next
+        if source[index] == .Func(function) -> &funcs.push(FrozenFn{name: function.name, signature: fn_signature(function)})
+    }
+    &funcs.sort_by((left: FrozenFn, right: FrozenFn) -> {
+        if left.name != right.name -> left.name <=> right.name else -> left.signature <=> right.signature
+    })
+    funcs
+}
+fn library_snapshot_deltas(prior: APISnapshot, current: APISnapshot) -> [Diagnostic] Never! {
+    first_signatures := [String:String]{}
+    loop function in current.funcs {
+        if !first_signatures.has_key(function.name) -> first_signatures[function.name] = function.signature
+    }
+    diagnostics := [Diagnostic]{}
+    loop old_fn in prior.funcs {
+        if first_signatures.get(old_fn.name) == {
+            .None -> &diagnostics.push(library_e1257("export `{old_fn.name}` was removed"))
+            .Val(signature) -> {
+                if signature != old_fn.signature -> &diagnostics.push(library_e1257("export `{old_fn.name}` changed from `{old_fn.signature}` to `{signature}`"))
+            }
+        }
+    }
+    diagnostics
+}
+pub fn jet_driver_library_check_and_freeze_version(bundle: ProgramBundle, name: String) -> [Diagnostic]! -[Env, FS]> {
+    package :: library_snapshot_package_key(name)
+    current :: APISnapshot{api_version: API_SNAPSHOT_VERSION, package: package, published_version: resolve_version(bundle), funcs: library_frozen_functions(bundle)}
+    // pending ApiFreeze/IO OSPath ABI reconciliation (#4494 retained path).
+    // Existing String-root IO is not a legal substitute for this native path.
+    if load_snapshot(bundle.project_root, package) == .Val(prior) {
+        deltas :: library_snapshot_deltas(prior, current)
+        if deltas.len() != 0 -> return Err(deltas)
+    }
+    _ :: save_snapshot(bundle.project_root, current)
+}

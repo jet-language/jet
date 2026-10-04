@@ -17,6 +17,7 @@ use jet_foundation.[
     ExprPair,
     Field,
     Func,
+    trait_method_effective_return_type,
     ImplDef,
     InlineAsmContract,
     Item,
@@ -982,15 +983,20 @@ fn sema_checked_foreign_bridge_eligible(graph: SemaRegistrationGraph, module_ide
 }
 
 fn sema_checked_foreign_signature(graph: SemaRegistrationGraph, module_identity: String, registered: SemaRegistrationForeignFunction, c_abi: Bool, handles: [SemaCheckedForeignHandle], diagnostics: &[Diagnostic]) -> Bool {
+    sema_checked_foreign_parameter_signature(graph, module_identity, registered.declaration.params, registered.declaration.return_type, registered.declaration.return_type_span ?? registered.declaration.name_span, c_abi, registered.declaration.generated, handles, &diagnostics)
+}
+
+// One raw-parameter law for C-module declarations and per-callable guests.
+// Callers need no synthetic registered symbol or duplicate nominal type law.
+pub fn sema_checked_foreign_parameter_signature(graph: SemaRegistrationGraph, module_identity: String, params: [Param], return_type: Type?, return_span: Span, c_abi: Bool, generated: Bool, handles: [SemaCheckedForeignHandle], diagnostics: &[Diagnostic]) -> Bool {
     valid := true
-    loop parameter in registered.declaration.params {
-        if !sema_checked_foreign_type(graph, parameter.ty, module_identity, c_abi, registered.declaration.generated, handles, [String]{}) {
+    loop parameter in params {
+        if !sema_checked_foreign_type(graph, parameter.ty, module_identity, c_abi, generated, handles, [String]{}) {
             &diagnostics.push(sema_checked_foreign_type_error(parameter.ty, parameter.ty_span, c_abi))
             valid = false
         }
     }
-    if registered.declaration.return_type == .Val(return_type) {
-        return_span :: registered.declaration.return_type_span ?? registered.declaration.name_span
+    if return_type == .Val(return_type) {
         pointer_return :: if return_type == {
             .Apply(name, _) -> c_abi && name == "Ptr"
             else -> false
@@ -1000,7 +1006,7 @@ fn sema_checked_foreign_signature(graph: SemaRegistrationGraph, module_identity:
                 &diagnostics.push(sema_error("E3202", return_span, "Type `{type_name(return_type)}` cannot cross the C boundary here.", "C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe` region", "Move the call inside `#Unsafe`, or change the type to a C-safe value type."))
                 valid = false
             }
-            !sema_checked_foreign_type(graph, return_type, module_identity, c_abi, registered.declaration.generated, handles, [String]{}) -> {
+            !sema_checked_foreign_type(graph, return_type, module_identity, c_abi, generated, handles, [String]{}) -> {
                 &diagnostics.push(sema_checked_foreign_type_error(return_type, return_span, c_abi))
                 valid = false
             }
@@ -1011,7 +1017,7 @@ fn sema_checked_foreign_signature(graph: SemaRegistrationGraph, module_identity:
             .List(_) -> generated_list_return = true
             else -> {}
         }
-        if c_abi && registered.declaration.generated && generated_list_return && !sema_checked_foreign_has_array_length(registered.declaration.params) {
+        if c_abi && generated && generated_list_return && !sema_checked_foreign_has_array_length(params) {
             &diagnostics.push(sema_checked_foreign_type_error(return_type, return_span, c_abi))
             valid = false
         }
@@ -1526,7 +1532,7 @@ fn sema_checked_trait_method(graph: SemaRegistrationGraph, method: SemaRegistrat
         self_access: self_access,
         params: sema_checked_declaration_params(graph, module_row.module_identity, parameters),
         declared_return: qualified_return,
-        return_type: sema_checked_qualify_type(graph, sema_effective_return_type(declaration.return_type), module_row.module_identity),
+        return_type: sema_checked_qualify_type(graph, trait_method_effective_return_type(declaration), module_row.module_identity),
         failure: sema_checked_failure(qualified_return),
         is_pure: declaration.is_pure,
         declared_effects: sema_checked_effects(declaration.declared_effects),

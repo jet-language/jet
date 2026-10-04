@@ -1,0 +1,55 @@
+// CompilerImage.rs736-799,810-864. Whole values and zipped list rows are
+// compact-Debug hashed; only unequal rows are rendered in pretty Debug.
+fn mir_image_gen_debug_sink_body(body: String, hash: Bool) -> String Never! {
+    generic :: if hash -> "<image_debug_sip.SipHasher13, MIRImageDebugHashSink>" else -> "<[U8], CanonicalDebugBytes>"
+    body.replace("<S, W>", generic).replace("(&writer,", "(&writer, sink, &state,").replace("(&writer)", "(&writer, sink, &state)")
+}
+fn mir_image_gen_debug_hash(body: String) -> String Never! {
+    adapted :: mir_image_gen_debug_sink_body(body, true)
+    "{{ writer := mir_image_debug_writer(false)\nstate := mir_image_debug_hasher_new()\nsink :: MIRImageDebugHashSink.Hash\n{adapted}mir_image_debug_hasher_finish(state) }}"
+}
+fn mir_image_gen_debug_text(body: String) -> String Never! {
+    adapted :: mir_image_gen_debug_sink_body(body, false)
+    "{{ writer := mir_image_debug_writer(true)\nstate := [U8]{{}}\nsink :: CanonicalDebugBytes.Writer\n{adapted}String.from_bytes(state) ?? panic(\"Debug text preserves UTF-8\") }}"
+}
+fn mir_image_gen_debug_pair(state: &MIRImageGeneratorEmission, context: MIRImageSchemaDefinition, native: MIRImageSchemaType, source: MIRImageSchemaType, name: String) -> String MIRImageError! {
+    ty :: mir_image_gen_type_text(source)
+    native_body :: mir_image_gen_debug_expression(&state, context, native, source, "native")
+    restored_body :: mir_image_gen_debug_expression(&state, context, native, source, "restored")
+    native_hash :: mir_image_gen_debug_hash(native_body)
+    restored_hash :: mir_image_gen_debug_hash(restored_body)
+    native_text :: mir_image_gen_debug_text(native_body)
+    restored_text :: mir_image_gen_debug_text(restored_body)
+    Ok("fn mir_image_debug_pair_{name}(native: {ty}, restored: {ty}, path: String, output: &[MIRImageDebugField]) MIRImageError! {{\nnative_hash :: {native_hash}\nrestored_hash :: {restored_hash}\nif native_hash == restored_hash -> return\nnative_text :: {native_text}\nrestored_text :: {restored_text}\n&output.push(MIRImageDebugField{{path: path, native_text: native_text, restored_text: restored_text}})\nreturn\n}}\n")
+}
+fn mir_image_gen_debug_differences(state: &MIRImageGeneratorEmission, root: String) -> String MIRImageError! {
+    definition :: state.schema.definitions[root]
+    native_fields :: if definition.body == .Struct(fields) -> fields else -> return Err(MIRImageError{message: "MIR program Debug differences require the native program record"})
+    carrier :: state.mapping.native_to_source[root]
+    source_fields :: if state.mapping.source[carrier].body == .Struct(fields) -> fields else -> return Err(MIRImageError{message: "MIR program Debug differences require the Source program record"})
+    mir_image_generator_check_struct(carrier, source_fields, native_fields)
+    helpers := [String]{}
+    body := [String]{"output := [MIRImageDebugField]{}\n"}
+    loop field in native_fields {
+        source_name :: mir_image_generator_source_field(carrier, field.name)
+        source_index :: mir_image_gen_source_field_index(source_fields, source_name) ?? return Err(MIRImageError{message: "native MIR program field has no Source carrier"})
+        source :: mir_image_generator_source_type(source_fields[source_index].ty)
+        name :: field.name
+        if field.ty == .Sequence(native_inner) {
+            source_inner :: if source == .Sequence(inner) -> inner else -> return Err(MIRImageError{message: "native MIR program list has a nonsequence Source carrier"})
+            &helpers.push(mir_image_gen_debug_pair(&state, definition, native_inner, source_inner, name))
+            named := false
+            loop row in [String]{"modules", "types", "traits", "constants", "functions", "artifacts"} -> if row == name -> named = true
+            label :: if named -> "native.{source_name}[index].name" else -> "\"\""
+            &body.push("if native.{source_name}.len() != restored.{source_name}.len() -> &output.push(MIRImageDebugField{{path: \"{name}.len\", native_text: \"{{native.{source_name}.len()}}\", restored_text: \"{{restored.{source_name}.len()}}\"}})\n")
+            &body.push("count_{name} :: if native.{source_name}.len() < restored.{source_name}.len() -> native.{source_name}.len() else -> restored.{source_name}.len()\nloop index in 0..<count_{name} {{ label :: {label}\nmir_image_debug_pair_{name}(native.{source_name}[index], restored.{source_name}[index], \"{name}[{{index}} {{label}}]\", &output) }}\n")
+        } else {
+            // codec_migrations is a native HashMap but this original comparison
+            // converts both sides to BTreeMap. The map renderer sorts keys.
+            &helpers.push(mir_image_gen_debug_pair(&state, definition, field.ty, source, name))
+            &body.push("mir_image_debug_pair_{name}(native.{source_name}, restored.{source_name}, \"{name}\", &output)\n")
+        }
+    }
+    &body.push("Ok(output)\n")
+    Ok("{helpers.join("")}pub fn mir_image_program_debug_differences(native: MIRProgram, restored: MIRProgram) -> [MIRImageDebugField] MIRImageError! {{\n{body.join("")}}}\n")
+}

@@ -1,0 +1,428 @@
+// Rust Policy/MarkerSource.rs tests and marker_declarations.rs registry laws.
+// The production witnesses use the embedded source, real parser, Core menu
+// projection and registration. Small malformed catalogs only test rejection.
+use jet_foundation.[CtValue, Diagnostic, Item, Program, RuleSite, TAppliedRule, TAppliedRuleArgKind, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, TAppliedRuleStatus, TComptimeValue, TTypeDef, expr_span, foundation_core_argument_menus, foundation_embedded_core, jet_target_machine_hosted, rule_allows, rule_allows_with_companions, rule_arg_declaration, type_name]
+use jet_parser.[parse_source]
+
+#Test("rule_allows_reuses_marker_source_catalog_and_same_target_companions") {
+    source :: "marker Replayable($sites: [.Function, .Method])\nmarker Doc(text: String, $sites: [.Field, .Type, .Variant, .Method], $companion: [Job, .Function])\n"
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    catalog :: sema_marker_rules_build_catalog(parsed.program, source, [TAppliedRuleArgumentMenu]{}) ?? panic("original marker rows produce a catalog")
+    assert(rule_allows(catalog, "Replayable", RuleSite.Function))
+    assert(rule_allows(catalog, "Replayable", RuleSite.Method))
+    assert(!rule_allows(catalog, "Replayable", RuleSite.Type))
+    assert(!rule_allows(catalog, "Unknown", RuleSite.Function))
+    assert(rule_allows(catalog, "Doc", RuleSite.Field))
+    assert(!rule_allows(catalog, "Doc", RuleSite.Function))
+    assert(rule_allows_with_companions(catalog, "Doc", RuleSite.Function, [String]{"Job"}))
+    assert(!rule_allows_with_companions(catalog, "Doc", RuleSite.Function, [String]{"Replayable"}))
+    assert(!rule_allows_with_companions(catalog, "Doc", RuleSite.Block, [String]{"Job"}))
+}
+
+fn rule_catalog_row(catalog: TAppliedRuleCatalog, name: String) -> TAppliedRule Never! {
+    loop row in catalog.rows { if row.name == name -> return row }
+    panic("missing canonical row: {name}")
+}
+
+fn rule_catalog_module(program: ^Program, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
+    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, foreign_handles: []}
+}
+
+fn rule_catalog_prepare_registration(source: String) -> SemaRegistrationGraph Never! {
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    assert_eq(effects.diagnostics.len(), 0)
+    inputs :: [SemaRegistrationModuleInput]{
+        rule_catalog_module(^parsed.program, "main", "catalog.jet", "catalog"),
+        rule_catalog_module(^effects.program, "effects", "Prelude/Effects.jet", "jet:canonical-prelude"),
+    }
+    build :: SemaBuildFacts{package_name: "catalog", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "catalog-test", stamp_at: "", artifact_build: false}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    graph :: sema_registration_prepare_graph(inputs, [], "catalog", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+    graph
+}
+
+fn rule_catalog_registration(source: String) -> SemaRegistrationGraph Never! {
+    graph :: rule_catalog_prepare_registration(source)
+    assert(graph.complete)
+    graph
+}
+
+fn rule_catalog_field(value: TComptimeValue, name: String) -> TComptimeValue Never! {
+    if value == .Struct(_, fields) {
+        loop field in fields { if field.name == name -> return field.value }
+    }
+    panic("missing reflected field: {name}")
+}
+
+fn rule_catalog_marker(info: TComptimeValue, name: String) -> TComptimeValue Never! {
+    markers :: rule_catalog_field(info, "markers")
+    if markers == .List(values) {
+        loop value in values {
+            if rule_catalog_field(value, "name") == (TComptimeValue.String{value: name}) -> return value
+        }
+    }
+    panic("missing reflected marker: {name}")
+}
+
+fn rule_catalog_ct_field(value: CtValue, name: String) -> CtValue Never! {
+    if value == .Struct(_, fields) {
+        loop field in fields { if field.name == name -> return field.value }
+    }
+    panic("missing template field: {name}")
+}
+
+// Runs the real existing marker checker against registration's retained rows.
+// No dependency or typed-expression implementation is substituted.
+fn rule_catalog_diagnostics(source: String) -> [Diagnostic] Never! {
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> return parsed.diagnostics
+    graph :: rule_catalog_prepare_registration(source)
+    if !graph.complete -> return graph.diagnostics
+    environment := sema_scope_environment_init(Val(^graph), "main", "catalog", "main", "catalog.jet", SemaSourceOrigin.Snapshot, [], [TTypeDef]{}, [])
+    retained :: environment.registration_graph ?? panic("retained registration")
+    memory :: sema_function_memory_plan_from_graph(retained)
+    checked :: sema_check_registration_module(retained, &environment, memory, 0, [], [], true, None)
+    checked.diagnostics
+}
+
+fn rule_catalog_code_count(diagnostics: [Diagnostic], code: String) -> Int Never! {
+    count := 0
+    loop diagnostic in diagnostics { if diagnostic.code == code -> count += 1 }
+    count
+}
+
+#Test("a_row_carries_its_parameters_and_its_facts") {
+    graph :: rule_catalog_registration("fn run() {{}}\n")
+    catalog :: graph.applied_rule_catalog
+    unsafe_row :: rule_catalog_row(catalog, "Unsafe")
+    assert_eq(unsafe_row.signature.params.len(), 2)
+    assert_eq(unsafe_row.signature.params[0].name, "reason")
+    assert_eq(unsafe_row.signature.params[0].kind, TAppliedRuleArgKind.String)
+    assert_eq(unsafe_row.signature.params[1].source_type, "ObligationMode")
+    assert_eq(unsafe_row.signature.params[1].default_source, Val(".None"))
+    assert(rule_allows(catalog, "Unsafe", RuleSite.Operation))
+    fx :: rule_catalog_row(catalog, "FX")
+    assert_eq(fx.signature.variadic, Val(TAppliedRuleArgKind.Ident))
+    assert_eq(fx.signature.variadic_source_type, Val("Effect"))
+    assert(rule_catalog_row(catalog, "Pre").repeatable)
+    companion :: rule_catalog_row(catalog, "Doc").companion_site ?? panic("Doc rides Job")
+    assert_eq(companion.rule, "Job")
+    assert_eq(companion.site, "Function")
+    policy :: rule_catalog_row(catalog, "Policy")
+    assert(policy.inherits)
+    assert_eq(policy.resolution, "Tighten")
+    assert(policy.policy_scopes.contains("Module"))
+}
+
+#Test("a_retired_row_keeps_its_replacement") {
+    catalog :: rule_catalog_registration("fn run() {{}}\n").applied_rule_catalog
+    assert_eq(rule_catalog_row(catalog, "Suppress").status, TAppliedRuleStatus.Retired{replacement: ".drop(\"reason\")"})
+    assert_eq(rule_catalog_row(catalog, "Known").sites.len(), 0)
+}
+
+#Test("separators_inside_brackets_and_strings_are_not_separators") {
+    source :: "marker Sample(a: Value{{[1, 2]}}, b: String{{\"p, q\"}}, c: String{{\"a = b\"}}, d: Duration | String, $sites: [.Type, .Field])\n"
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    catalog :: sema_marker_rules_build_catalog(parsed.program, source, []) ?? panic("nested separators")
+    row :: rule_catalog_row(catalog, "Sample")
+    assert_eq(row.signature.params.len(), 4)
+    assert_eq(row.signature.params[0].default_source, Val("[1, 2]"))
+    assert_eq(row.signature.params[1].default_source, Val("\"p, q\""))
+    assert_eq(row.signature.params[2].default_source, Val("\"a = b\""))
+    assert_eq(row.signature.params[3].default_source, None)
+    assert_eq(row.signature.params[3].kind, TAppliedRuleArgKind.DurationOrString)
+    assert_eq(row.sites, [String]{"Type", "Field"})
+}
+
+#Test("every_registry_row_is_one_written_declaration") {
+    source :: foundation_embedded_core().marker_source()
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    catalog :: rule_catalog_registration("fn run() {{}}\n").applied_rule_catalog
+    names := [String]{}
+    loop item in parsed.program.items {
+        if item == .MarkerDecl(declaration) -> &names.push(declaration.name)
+    }
+    registered_names :: loop row in catalog.rows -> row.name
+    assert_eq(names, registered_names)
+}
+
+#Test("the_parser_and_the_registry_read_the_same_rows") {
+    source :: foundation_embedded_core().marker_source()
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    catalog :: rule_catalog_registration("fn run() {{}}\n").applied_rule_catalog
+    loop item in parsed.program.items {
+        if item == .MarkerDecl(declaration) {
+            row :: rule_catalog_row(catalog, declaration.name)
+            argument_index := 0
+            variadics := 0
+            saw_sites := false
+            loop parameter in declaration.params {
+                if parameter.name.starts_with("$") {
+                    assert_eq(parameter.ty, None)
+                    assert(parameter.value != None)
+                    if parameter.name == "$sites" -> saw_sites = true
+                    next
+                }
+                ty :: parameter.ty ?? panic("typed argument")
+                if parameter.variadic {
+                    variadics += 1
+                    assert_eq(row.signature.variadic_source_type, Val(type_name(ty)))
+                    next
+                }
+                registered :: row.signature.params[argument_index]
+                assert_eq(registered.name, parameter.name)
+                assert_eq(registered.source_type, type_name(ty))
+                if parameter.value == .Val(value) {
+                    assert_eq(registered.default_source, sema_marker_rules_source_slice(source, expr_span(value)))
+                } else -> assert_eq(registered.default_source, None)
+                argument_index += 1
+            }
+            assert(saw_sites)
+            assert_eq(argument_index, row.signature.params.len())
+            assert_eq(variadics, if row.signature.variadic != None -> 1 else -> 0)
+            assert_eq(row.sites, sema_marker_rules_metadata_names(declaration, "$sites", true) ?? panic("site list"))
+            assert_eq(row.repeatable, sema_marker_rules_bool_fact(declaration, "$repeatable") ?? panic("repeatability"))
+        }
+    }
+}
+
+#Test("a_written_site_list_reaches_the_registry") {
+    catalog :: rule_catalog_registration("fn run() {{}}\n").applied_rule_catalog
+    assert(rule_allows(catalog, "Unsafe", RuleSite.Block))
+    assert(rule_allows(catalog, "Redact", RuleSite.Field))
+    assert(!rule_allows(catalog, "Redact", RuleSite.Type))
+    assert_eq(rule_catalog_row(catalog, "Known").sites.len(), 0)
+    assert(!rule_allows(catalog, "Doc", RuleSite.Function))
+    assert(rule_allows_with_companions(catalog, "Doc", RuleSite.Function, [String]{"Job"}))
+    assert(!rule_allows_with_companions(catalog, "Doc", RuleSite.Function, [String]{"Replayable"}))
+    assert(!rule_allows_with_companions(catalog, "Doc", RuleSite.Block, [String]{"Job"}))
+}
+
+#Test("every_retired_row_teaches_a_replacement") {
+    catalog :: rule_catalog_registration("fn run() {{}}\n").applied_rule_catalog
+    loop row in catalog.rows {
+        if row.status == .Retired(replacement) -> assert(replacement.trim() != "")
+    }
+}
+
+#Test("invariant_marker_is_retired_to_the_interval_range_form") {
+    catalog :: rule_catalog_registration("fn run() {{}}\n").applied_rule_catalog
+    assert_eq(rule_catalog_row(catalog, "Invariant").status, TAppliedRuleStatus.Retired{replacement: "distinct Int(lo..hi)"})
+}
+
+#Test("repeatable_rows_are_declared_not_assumed") {
+    catalog :: rule_catalog_registration("fn run() {{}}\n").applied_rule_catalog
+    names := [String]{}
+    loop row in catalog.rows { if row.repeatable -> &names.push(row.name) }
+    assert_eq(names, [String]{"Pre", "Post", "allow"})
+}
+
+#Test("canonical_source_reaches_retained_reflection_and_template_menu_values") {
+    graph :: rule_catalog_registration("#Layout(c)\nstruct Row {{ id: Int }}\nfn run() {{}}\n")
+    catalog :: graph.applied_rule_catalog
+    assert(rule_allows(catalog, "Layout", RuleSite.Type))
+    assert(!rule_allows(catalog, "Layout", RuleSite.Field))
+    reflected :: sema_comptime_reflection_type_info(graph, "main", "Row") ?? panic("registered reflection")
+    marker :: rule_catalog_marker(reflected, "Layout")
+    assert_eq(rule_catalog_field(marker, "sites"), TComptimeValue.List{values: [TComptimeValue]{TComptimeValue.String{value: "Type"}}})
+    args :: rule_catalog_field(marker, "args")
+    if args == .List(values) {
+        assert_eq(values.len(), 1)
+        assert_eq(rule_catalog_field(values[0], "name"), TComptimeValue.String{value: "kind"})
+        assert_eq(rule_catalog_field(values[0], "ty"), TComptimeValue.String{value: "Layout"})
+        assert_eq(rule_catalog_field(values[0], "value"), TComptimeValue.Enum{type_name: "Layout", variant: "c", args: []})
+    } else -> panic("typed marker arguments")
+    template :: sema_user_template_type_info(graph, 0, "Row") ?? panic("template reflection reads retained catalog")
+    template_markers :: rule_catalog_ct_field(template, "markers")
+    if template_markers == .List(values) {
+        assert_eq(values.len(), 1)
+        template_args :: rule_catalog_ct_field(values[0], "args")
+        if template_args == .List(arguments) {
+            assert_eq(rule_catalog_ct_field(arguments[0], "name"), CtValue.Str{value: "kind"})
+            assert_eq(rule_catalog_ct_field(arguments[0], "value"), CtValue.Enum{type_name: "Layout", variant: "c", args: []})
+        } else -> panic("template typed arguments")
+    } else -> panic("template markers")
+}
+
+#Test("catalog_rejects_unknown_menu_duplicate_rows_and_duplicate_menus") {
+    unknown_source :: "marker Unknown(value: MissingMenu, $sites: [.Type])\n"
+    unknown :: parse_source(unknown_source.bytes())
+    assert_eq(unknown.diagnostics.len(), 0)
+    assert_eq(sema_marker_rules_build_catalog(unknown.program, unknown_source, []), None)
+    duplicate_source :: "marker Same($sites: [.Type])\nmarker Same($sites: [.Field])\n"
+    duplicate :: parse_source(duplicate_source.bytes())
+    assert_eq(sema_marker_rules_build_catalog(duplicate.program, duplicate_source, []), None)
+    source :: foundation_embedded_core().marker_source()
+    parsed :: parse_source(source.bytes())
+    menus := foundation_core_argument_menus(foundation_embedded_core()) ?? panic("actual Core menus")
+    &menus.push(menus[0])
+    assert_eq(sema_marker_rules_build_catalog(parsed.program, source, menus), None)
+}
+
+#Test("core_lang_marker_enums_and_hierarchical_roots_use_retained_menus") {
+    catalog :: rule_catalog_registration("fn run() {{}}\n").applied_rule_catalog
+    obligation :: rule_arg_declaration("ObligationMode", catalog.argument_menus) ?? panic("ObligationMode")
+    assert_eq(obligation.variants, [String]{"None", "GateOnly", "Obligations", "PerSite", "Track", "Skip"})
+    effect :: rule_arg_declaration("Effect", catalog.argument_menus) ?? panic("Effect")
+    target :: rule_arg_declaration("Target", catalog.argument_menus) ?? panic("Target")
+    assert(effect.first_variant_segment)
+    assert(target.first_variant_segment)
+    assert_eq(sema_marker_rules_menu_candidate("core.compiler.lang.Target.Web.dom", target), "Web")
+    assert_eq(sema_marker_rules_menu_candidate("lang.Effect.Net.http", effect), "Net")
+    assert_eq(rule_catalog_code_count(rule_catalog_diagnostics("#Inline(.Always)\nfn helper() -> Int -> 1\nfn run() {{}}"), "E0930"), 0)
+}
+
+#Test("arithmetic_policy_accepts_only_declared_sites_and_modes") {
+    valid :: rule_catalog_diagnostics("#Arithmetic(.Checked) fn checked() {{}}\nstruct Accumulator {{ value: U8 }}\nimpl Accumulator {{\n    #Arithmetic(.Wrapping) fn step(self) {{}}\n}}\nfn run() {{\n    #Arithmetic(.Saturating) {{}}\n}}\n")
+    assert_eq(valid.len(), 0)
+    assert_eq(rule_catalog_code_count(rule_catalog_diagnostics("#Arithmetic(.Wrapping) struct Bad {{ value: U8 }}\nfn run() {{}}"), "E0355"), 1)
+    assert_eq(rule_catalog_code_count(rule_catalog_diagnostics("#Arithmetic(.Other) fn bad() {{}}\nfn run() {{}}"), "E0930"), 1)
+}
+
+#Test("retired_bench_marker_teaches_measured_test") {
+    assert(rule_catalog_code_count(rule_catalog_diagnostics("#Bench(\"old\") {{ assert(true) }}\nfn run() {{}}\n"), "E0927") > 0)
+}
+
+#Test("field_and_variant_sites_reject_every_non_applicable_example") {
+    sources :: [String]{
+        "#[Job, Static] struct Bad {{ value: Int }}\nfn run() {{}}",
+        "enum Bad {{ #Comparable Value }}\nfn run() {{}}",
+        "enum Bad {{ #Skip Value }}\nfn run() {{}}",
+    }
+    loop source in sources -> assert_eq(rule_catalog_code_count(rule_catalog_diagnostics(source), "E0355"), 1)
+}
+
+#Test("source_rule_rejects_a_wrong_typed_argument") {
+    diagnostics :: rule_catalog_diagnostics("marker NeedsName(name: String, $sites: [.Type])\n#NeedsName(7)\nstruct Person {{ id: Int }}\n")
+    assert_eq(rule_catalog_code_count(diagnostics, "E0930"), 1)
+}
+
+#Test("unknown_callable_rule_is_checked_against_the_bundle_registry") {
+    diagnostics :: rule_catalog_diagnostics("#MissingRule fn work() {{}}\nfn run() {{}}\n")
+    assert_eq(rule_catalog_code_count(diagnostics, "E0927"), 1)
+}
+
+#Test("source_rule_rejects_a_site_not_in_its_declared_facts") {
+    diagnostics :: rule_catalog_diagnostics("marker TypeOnly($sites: [.Type])\n#TypeOnly fn work() {{}}\nfn run() {{}}\n")
+    assert(rule_catalog_code_count(diagnostics, "E0355") > 0)
+}
+
+#Test("source_rule_rejects_a_non_repeatable_duplicate") {
+    diagnostics :: rule_catalog_diagnostics("marker Once($sites: [.Type])\n#[Once, Once]\nstruct Person {{ id: Int }}\n")
+    found := false
+    loop diagnostic in diagnostics {
+        if diagnostic.code != "E0999" -> next
+        detail :: diagnostic.detail ?? ""
+        assert(detail.contains("first application span"))
+        assert(detail.contains("second application span"))
+        found = true
+    }
+    assert(found, "duplicate rule diagnostic")
+}
+
+#Test("source_rule_body_can_reject_a_function_target") {
+    source :: "marker RejectsFunction($sites: [.Function]) {{\n    reject(code: \"E0927\", what: \"the function is not allowed\", why: \"the test rule rejects this declaration\", fix: \"remove the marker\")\n}}\n#RejectsFunction\nfn run() {{}}\n"
+    diagnostics :: rule_catalog_diagnostics(source)
+    assert(rule_catalog_code_count(diagnostics, "E0927") > 0)
+    loop diagnostic in diagnostics -> assert_eq(diagnostic.code, "E0927")
+}
+
+#Test("source_rule_collision_names_generated_and_written_spans") {
+    source :: "marker AddGreeting($sites: [.Type]) {{\n    tname :: target.name\n    impl $tname {{\n        fn greeting(self) -> String -> \"generated\"\n    }}\n}}\n#AddGreeting\nstruct Person {{ name: String }}\nimpl Person {{\n    fn greeting(self) -> String {{ return \"written\" }}\n}}\n"
+    diagnostics :: rule_catalog_diagnostics(source)
+    found := false
+    loop diagnostic in diagnostics {
+        if diagnostic.code != "E0105" -> next
+        assert(diagnostic.what.contains("generated member"))
+        detail :: diagnostic.detail ?? ""
+        assert(detail.contains("generated member"))
+        assert(detail.contains("from rule"))
+        assert(detail.contains("existing member"))
+        found = true
+    }
+    assert(found, "collision diagnostic")
+}
+
+#Test("source_rule_rejection_keeps_the_registered_cause") {
+    source :: "marker Rejects($sites: [.Type]) {{\n    reject(code: \"E0927\", what: \"the rule rejected this type\", why: \"the test rule is deliberately strict\", fix: \"remove the marker\")\n}}\n#Rejects\nstruct Person {{ id: Int }}\nfn run() {{}}\n"
+    diagnostics :: rule_catalog_diagnostics(source)
+    assert(rule_catalog_code_count(diagnostics, "E0927") > 0)
+    loop diagnostic in diagnostics -> assert_eq(diagnostic.code, "E0927")
+}
+
+// Rust marker_declarations.rs::source_rules_record_facts_and_add_checked_members.
+// Registration is the same phase that actually executes the marker template;
+// final body/runtime compilation remains the unchanged composed original gate.
+#Test("source_rules_record_facts_and_add_checked_members") {
+    source :: "marker Recorded($sites: [.Type])\nmarker AddGreeting($sites: [.Type]) {{\n    tname :: target.name\n    impl $tname {{\n        fn greeting(self) -> String -> \"hello\"\n    }}\n}}\n#[Recorded, AddGreeting]\nstruct Person {{ name: String }}\nfn run() {{\n    person :: Person{{name: \"ada\"}}\n    print(person.greeting())\n}}\n"
+    graph :: rule_catalog_registration(source)
+    reflected :: sema_comptime_reflection_type_info(graph, "main", "Person") ?? panic("source-rule reflection")
+    recorded :: rule_catalog_marker(reflected, "Recorded")
+    greeting :: rule_catalog_marker(reflected, "AddGreeting")
+    assert_eq(rule_catalog_field(recorded, "name"), TComptimeValue.String{value: "Recorded"})
+    assert_eq(rule_catalog_field(greeting, "sites"), TComptimeValue.List{values: [TComptimeValue]{TComptimeValue.String{value: "Type"}}})
+    assert_eq(rule_catalog_field(greeting, "repeatable"), TComptimeValue.Bool{value: false})
+    assert(!rule_allows(graph.applied_rule_catalog, "Recorded", RuleSite.Type))
+    generated := false
+    loop implementation in graph.modules[0].impls {
+        loop method in implementation.methods {
+            if method.symbol.name == "greeting" -> generated = true
+        }
+    }
+    assert(generated, "actual registration must retain the expanded template method")
+}
+
+// Original marker_rule_signatures.rs live-scope controls. They deliberately
+// keep the native semantic assertions, including scheduling's E0926 gate.
+#Test("string_and_bool_rule_arguments_use_local_semantic_types") {
+    valid :: rule_catalog_diagnostics("fn run() {{\n    category :: \"Movement\"\n    enabled :: true\n    #Meta(category: category, tunable: enabled) speed :: 1\n}}\n")
+    assert_eq(rule_catalog_code_count(valid, "E0930"), 0)
+    assert_eq(rule_catalog_code_count(valid, "E3112"), 0)
+    assert_eq(rule_catalog_code_count(valid, "L3102"), 0)
+    wrong :: rule_catalog_diagnostics("fn run() {{\n    category :: 42\n    enabled :: 1\n    #Meta(category: category, tunable: enabled) speed :: 1\n}}\n")
+    assert_eq(rule_catalog_code_count(wrong, "E0930"), 1)
+    assert_eq(rule_catalog_code_count(wrong, "E0345"), 0)
+    assert_eq(rule_catalog_code_count(wrong, "E0347"), 0)
+}
+
+#Test("int_rule_arguments_use_local_semantic_types") {
+    valid :: rule_catalog_diagnostics("fn run() {{\n    deadline :: 42\n    #Context(deadline: deadline) {{}}\n}}\n")
+    assert_eq(rule_catalog_code_count(valid, "E0930"), 0)
+    assert_eq(rule_catalog_code_count(valid, "E0762"), 0)
+    wrong :: rule_catalog_diagnostics("fn run() {{\n    deadline :: \"soon\"\n    #Context(deadline: deadline) {{}}\n}}\n")
+    assert_eq(rule_catalog_code_count(wrong, "E0930"), 1)
+    assert_eq(rule_catalog_code_count(wrong, "E0762"), 0)
+}
+
+#Test("duration_rule_arguments_use_function_parameter_types") {
+    valid :: rule_catalog_diagnostics("#[Job, Every(schedule)]\nfn tick(schedule: Duration) {{}}\nfn run() {{}}\n")
+    assert_eq(rule_catalog_code_count(valid, "E0930"), 0)
+    assert_eq(rule_catalog_code_count(valid, "E3112"), 0)
+    assert_eq(rule_catalog_code_count(valid, "L3102"), 0)
+    assert(rule_catalog_code_count(valid, "E0926") > 0)
+    wrong :: rule_catalog_diagnostics("#[Job, Every(schedule)]\nfn tick(schedule: Int) {{}}\nfn run() {{}}\n")
+    assert_eq(rule_catalog_code_count(wrong, "E0930"), 1)
+    assert_eq(rule_catalog_code_count(wrong, "E0926"), 0)
+}
+
+#Test("block_string_rules_use_local_semantic_types") {
+    valid :: rule_catalog_diagnostics("fn run() {{\n    reason :: \"audited\"\n    #Unsafe(reason) {{}}\n    #Impure(reason) {{}}\n    #Nondeterministic(reason) {{}}\n}}\n")
+    assert_eq(rule_catalog_code_count(valid, "E0930"), 0)
+    assert_eq(rule_catalog_code_count(valid, "E3112"), 0)
+    assert_eq(rule_catalog_code_count(valid, "L3102"), 0)
+    wrong :: rule_catalog_diagnostics("fn run() {{\n    reason :: 42\n    #Unsafe(reason) {{}}\n    #Impure(reason) {{}}\n    #Nondeterministic(reason) {{}}\n}}\n")
+    assert_eq(rule_catalog_code_count(wrong, "E0930"), 3)
+}
+
+#Test("contract_messages_use_function_parameter_types") {
+    valid :: rule_catalog_diagnostics("#[Pre(value > 0, message), Post(result > 0, message)]\nfn positive(value: Int, message: String) -> Int {{ return value }}\nfn run() {{}}\n")
+    assert_eq(rule_catalog_code_count(valid, "E0930"), 0)
+    wrong :: rule_catalog_diagnostics("#[Pre(value > 0, message), Post(result > 0, message)]\nfn positive(value: Int, message: Int) -> Int {{ return value }}\nfn run() {{}}\n")
+    assert_eq(rule_catalog_code_count(wrong, "E0930"), 2)
+}

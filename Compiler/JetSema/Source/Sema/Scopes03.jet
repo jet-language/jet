@@ -1,0 +1,549 @@
+// PORT-PENDING 0358 crates-jet-sema-src-sema-bundle-pipeline-failureunion-module-group: crates/jet-sema/src/Sema/CheckerCore/scopes.rs:1-545
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::AST::{AccessConvention, Expr, Type};
+//RS use crate::Diagnostics::Span;
+//RS use crate::Sema::Registration::already_defined;
+//RS use crate::Sema::{Checker, LocalInfo};
+//RS use std::borrow::Cow;
+//RS use std::collections::{HashMap, HashSet};
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     pub(crate) fn push_scope(&mut self) {
+//RS         self.flow.enter_scope();
+//RS         self.concrete_unit_values.push(HashMap::new());
+//RS         self.lambda_mut_borrow_stack.push(HashSet::new());
+//RS         self.ct_scopes.push(HashMap::new());
+//RS     }
+//RS 
+//RS     pub(crate) fn pop_scope(&mut self) {
+//RS         self.check_single_use_consumed_in_current_scope();
+//RS         self.drop_scope_no_obligation_checks();
+//RS     }
+//RS 
+//RS     pub(crate) fn drop_scope_no_obligation_checks(&mut self) {
+//RS         // D-FACT-FLOW1: every scope-lived plane — bindings, flow narrowing
+//RS         // and open windows — leaves the one store together.
+//RS         self.flow.leave_scope();
+//RS         self.concrete_unit_values.pop();
+//RS         self.lambda_mut_borrow_stack.pop();
+//RS         self.ct_scopes.pop();
+//RS     }
+//RS 
+//RS     /// Number of open scopes. A fact recorded now leaves at this depth.
+//RS     pub(crate) fn scope_depth(&self) -> usize {
+//RS         self.flow.depth
+//RS     }
+//RS 
+//RS     /// Record a binding in the scope that is open now, with none of
+//RS     /// `declare`'s redefinition checks. Parameters and loop variables use
+//RS     /// this: their own caller already decided the name is free.
+//RS     pub(crate) fn declare_in_scope(&mut self, name: &str, info: LocalInfo) {
+//RS         let depth = self.flow.depth;
+//RS         if !info.invalid {
+//RS             self.note_unused_binding(name, info.def_span, info.param_conv.is_some());
+//RS         }
+//RS         // D-FACT-OWN1: every binding enters the shared crossing plane with
+//RS         // the ownership prover's answer. Do not give parameters and other
+//RS         // scope-only bindings a private/default sendability bit.
+//RS         let sendable = self.sendability_problem(&info.ty, true).is_none();
+//RS         self.flow.bindings.set_at(name, depth, info);
+//RS         self.flow.sendability.set_at(name, depth, sendable);
+//RS         self.flow.path_strings.remove_at(name, depth);
+//RS         self.flow
+//RS             .origins
+//RS             .set_at(name, depth, crate::Sema::FlowFacts::OriginFact::untracked());
+//RS     }
+//RS 
+//RS     /// Every name a binding is known by here, at any depth. Callers use it
+//RS     /// to match spellings, so the order carries no meaning.
+//RS     pub(crate) fn visible_names(&self) -> Vec<String> {
+//RS         self.flow
+//RS             .bindings
+//RS             .all()
+//RS             .map(|(name, _)| name.to_string())
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub(crate) fn lambda_mut_borrow_active(&self, name: &str) -> bool {
+//RS         self.lambda_mut_borrow_stack
+//RS             .iter()
+//RS             .any(|s| s.contains(name))
+//RS     }
+//RS 
+//RS     pub(crate) fn current_ct_globals(&self) -> Cow<'_, HashMap<String, crate::Comptime::CtValue>> {
+//RS         // Most semantic expressions do not open a comptime scope. Borrow the
+//RS         // immutable module globals instead of cloning every known value for
+//RS         // each node; overlays still receive the exact old merged snapshot.
+//RS         if self.ct_scopes.iter().all(|scope| scope.is_empty()) {
+//RS             return Cow::Borrowed(self.ct_globals);
+//RS         }
+//RS         let mut globals = self.ct_globals.clone();
+//RS         for scope in &self.ct_scopes {
+//RS             for (name, value) in scope {
+//RS                 globals.insert(name.clone(), value.clone());
+//RS             }
+//RS         }
+//RS         Cow::Owned(globals)
+//RS     }
+//RS 
+//RS     /// Types for names visible to the compile-time evaluator. CtValue erases
+//RS     /// nominal text facts, so folding must carry the checker-owned declaration
+//RS     /// type alongside the value. Only names with values are exposed: the MIR
+//RS     /// fragment receives each typed name as an argument.
+//RS     pub(crate) fn current_ct_binding_types(
+//RS         &self,
+//RS         values: &HashMap<String, crate::Comptime::CtValue>,
+//RS     ) -> HashMap<String, Type> {
+//RS         values
+//RS             .keys()
+//RS             .filter_map(|name| {
+//RS                 self.flow
+//RS                     .bindings
+//RS                     .get(name)
+//RS                     .map(|info| (name.clone(), info.ty.clone()))
+//RS                     .or_else(|| self.consts.get(name).map(|ty| (name.clone(), ty.clone())))
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     /// Record what a folded initializer changed about earlier bindings.
+//RS     /// `r :: Reader.over(bytes)` followed by `magic :: r.read_u32_le()?`
+//RS     /// advances `r`; without writing that back, every later fold reads a
+//RS     /// reader still parked at position zero. Only names a comptime scope
+//RS     /// already holds are updated.
+//RS     pub(crate) fn apply_ct_mutations(
+//RS         &mut self,
+//RS         mutated: HashMap<String, crate::Comptime::CtValue>,
+//RS     ) {
+//RS         for (name, value) in mutated {
+//RS             if let Some(slot) = self
+//RS                 .ct_scopes
+//RS                 .iter_mut()
+//RS                 .rev()
+//RS                 .find_map(|scope| scope.get_mut(&name))
+//RS             {
+//RS                 *slot = value;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Whether `expr` is an explicit constant, so a diagnostic may evaluate
+//RS     /// it. Compile time is always explicit, so only literal forms qualify:
+//RS     /// literals (including unit literals and their elaborated constructor),
+//RS     /// type-, enum- or module-qualified members such as `Method.Get` or
+//RS     /// `math.PI`, negation and arithmetic over those, module constants with
+//RS     /// a known value (a `prep` constant or a literal initializer), and local
+//RS     /// `prep` bindings whose value is live in the compile-time frame. An
+//RS     /// ordinary binding or a function call never counts as a constant here.
+//RS     pub(crate) fn is_explicit_constant(
+//RS         &self,
+//RS         expr: &Expr,
+//RS         values: &HashMap<String, crate::Comptime::CtValue>,
+//RS     ) -> bool {
+//RS         let constant = |inner: &Expr| self.is_explicit_constant(inner, values);
+//RS         match expr {
+//RS             Expr::Int(..)
+//RS             | Expr::Float(..)
+//RS             | Expr::Bool(..)
+//RS             | Expr::Char(..)
+//RS             | Expr::Unit(_)
+//RS             | Expr::Absent(_)
+//RS             | Expr::UnitLit { .. }
+//RS             | Expr::ComptimeName { .. } => true,
+//RS             Expr::Str(parts, _) => parts.iter().all(|part| match part {
+//RS                 crate::AST::StrPart::Lit(_) => true,
+//RS                 crate::AST::StrPart::Interp(inner, _) => constant(inner),
+//RS             }),
+//RS             Expr::Paren(inner, _) | Expr::Unary(_, inner, _) | Expr::Present(inner, _) => {
+//RS                 constant(inner)
+//RS             }
+//RS             Expr::Binary(_, left, right, _) => constant(left) && constant(right),
+//RS             Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
+//RS                 operands.iter().all(constant)
+//RS             }
+//RS             Expr::TupleLit(fields, ..) => fields.iter().all(|(_, value)| constant(value)),
+//RS             Expr::MapLit(entries, _) => entries
+//RS                 .iter()
+//RS                 .all(|(key, value)| constant(key) && constant(value)),
+//RS             Expr::EnumLit { args, .. } => args.iter().all(|arg| match arg {
+//RS                 crate::AST::EnumLitArg::Positional(value)
+//RS                 | crate::AST::EnumLitArg::Named { expr: value, .. } => constant(value),
+//RS             }),
+//RS             Expr::Ident(name, _) => self.names_explicit_constant(name, values),
+//RS             Expr::Field(base, ..) => self.qualifies_explicit_constant(base, values),
+//RS             // Sema elaborates a unit literal in place: `5s` becomes
+//RS             // `Duration.nanoseconds(5 * scale) ?? panic(…)`, `2.5px` becomes
+//RS             // `Px.float(2.5)` and `4i` becomes `Complex(0.0, 4.0)`.
+//RS             Expr::OrFallback {
+//RS                 value,
+//RS                 fallback: crate::AST::OrFallback::Panic { .. },
+//RS                 ..
+//RS             } => self.is_elaborated_unit_literal(value) && constant(value),
+//RS             Expr::MethodCall { args, .. } => {
+//RS                 self.is_elaborated_unit_literal(expr) && args.iter().all(|arg| constant(&arg.expr))
+//RS             }
+//RS             Expr::Call(call) if call.name == crate::Syntax::TYPE_COMPLEX => {
+//RS                 call.args.iter().all(|arg| constant(&arg.expr))
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     /// The constructor call sema writes in place of a unit literal.
+//RS     fn is_elaborated_unit_literal(&self, expr: &Expr) -> bool {
+//RS         let Expr::MethodCall {
+//RS             receiver, method, ..
+//RS         } = expr
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         let Expr::Ident(owner, _) = receiver.as_ref() else {
+//RS             return false;
+//RS         };
+//RS         if self.lookup(owner).is_some() {
+//RS             return false;
+//RS         }
+//RS         (owner == crate::Syntax::DURATION_TYPE && method == "nanoseconds")
+//RS             || (self.registry.is_distinct(owner)
+//RS                 && crate::Syntax::numeric_conversion_method("Float") == Some(method.as_str()))
+//RS     }
+//RS 
+//RS     /// The base of a member read `base.member` that keeps it constant: a
+//RS     /// type, enum or module name (`Method.Get`, `math.PI`), or a value that
+//RS     /// is itself an explicit constant.
+//RS     fn qualifies_explicit_constant(
+//RS         &self,
+//RS         base: &Expr,
+//RS         values: &HashMap<String, crate::Comptime::CtValue>,
+//RS     ) -> bool {
+//RS         match base {
+//RS             Expr::Field(inner, ..) => self.qualifies_explicit_constant(inner, values),
+//RS             Expr::Ident(name, _) if self.lookup(name).is_none() && !self.consts.contains_key(name) => {
+//RS                 true
+//RS             }
+//RS             _ => self.is_explicit_constant(base, values),
+//RS         }
+//RS     }
+//RS 
+//RS     /// A name read is constant when it is a module constant with a known
+//RS     /// value or a local `prep` binding whose value is live.
+//RS     fn names_explicit_constant(
+//RS         &self,
+//RS         name: &str,
+//RS         values: &HashMap<String, crate::Comptime::CtValue>,
+//RS     ) -> bool {
+//RS         if self.lookup(name).is_none() {
+//RS             // A module-level name: only a constant with a known value.
+//RS             return values.contains_key(name);
+//RS         }
+//RS         let Some(depth) = self.flow.bindings.depth_of(name) else {
+//RS             return false;
+//RS         };
+//RS         // Flow depth counts open scopes, so the function scope is depth 1
+//RS         // while its compile-time frame is `ct_scopes[0]`.
+//RS         let Some(local_value) = depth
+//RS             .checked_sub(1)
+//RS             .and_then(|index| self.ct_scopes.get(index))
+//RS             .and_then(|scope| scope.get(name))
+//RS         else {
+//RS             // This lexical local shadows any same-named outer value, but no
+//RS             // live compile-time value belongs to this binding.
+//RS             return false;
+//RS         };
+//RS         values.get(name) == Some(local_value)
+//RS     }
+//RS 
+//RS     pub(crate) fn evaluate_constant(
+//RS         &self,
+//RS         expr: &crate::AST::Expr,
+//RS     ) -> Option<crate::Comptime::CtValue> {
+//RS         if self.defer_ct_evaluation {
+//RS             return None;
+//RS         }
+//RS         let globals = self.current_ct_globals().into_owned();
+//RS         if !self.is_explicit_constant(expr, &globals) {
+//RS             return None;
+//RS         }
+//RS         let binding_types = self.current_ct_binding_types(&globals);
+//RS         let checked_nominals = self.checked_comptime_nominals();
+//RS         crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
+//RS             expr,
+//RS             self.ct_checked_funcs_for_evaluation(),
+//RS             self.ct_externs,
+//RS             self.ct_base_dir,
+//RS             &globals,
+//RS             &binding_types,
+//RS             self.core_imports,
+//RS             self.gates,
+//RS             0,
+//RS             &[],
+//RS             checked_nominals,
+//RS             None,
+//RS         )
+//RS         .ok()
+//RS         .map(|(value, _)| value)
+//RS     }
+//RS 
+//RS 
+//RS     /// What the checker knows about a name here: the innermost declaration,
+//RS     /// or the flow-narrowed refinement of it when a proven test recorded one
+//RS     /// at the same depth or deeper (D-FLOWTYPE1).
+//RS     pub(crate) fn lookup(&self, name: &str) -> Option<&LocalInfo> {
+//RS         if name == "_" {
+//RS             return None;
+//RS         }
+//RS         let declared = self.flow.bindings.depth_of(name);
+//RS         let narrowed = self.flow.narrow.depth_of(name);
+//RS         match (declared, narrowed) {
+//RS             (Some(declared), Some(narrowed)) if narrowed >= declared => self.flow.narrow.get(name),
+//RS             (Some(_), _) => self.flow.bindings.get(name),
+//RS             (None, Some(_)) => self.flow.narrow.get(name),
+//RS             (None, None) => None,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Module-level mutable bindings are the one module-level write target.
+//RS     /// Keep the permission fact on the declaration; do not create a second
+//RS     /// mutable-binding table beside `consts`.
+//RS     pub(crate) fn is_global_mutable_binding(&self, name: &str) -> bool {
+//RS         self.items.iter().any(|item| {
+//RS             matches!(
+//RS                 item,
+//RS                 crate::AST::Item::Const(c)
+//RS                     if c.name == name && c.mutable && !c.is_comptime
+//RS             )
+//RS         })
+//RS     }
+//RS 
+//RS     pub(crate) fn sendability_for(&self, name: &str) -> bool {
+//RS         let Some(depth) = self.binding_fact_depth(name) else {
+//RS             return true;
+//RS         };
+//RS         self.flow
+//RS             .sendability
+//RS             .get_at(name, depth)
+//RS             .copied()
+//RS             .unwrap_or(true)
+//RS     }
+//RS 
+//RS     /// D-CONC-FREEZE1=A: read the one frozen proof attached to the active
+//RS     /// binding/refinement. A missing row means the value is not frozen.
+//RS     pub(crate) fn frozen_for(&self, name: &str) -> Option<Span> {
+//RS         let declared = self.flow.bindings.depth_of(name);
+//RS         let narrowed = self.flow.narrow.depth_of(name);
+//RS         match (declared, narrowed) {
+//RS             (Some(declared), Some(narrowed)) if narrowed >= declared => self
+//RS                 .flow
+//RS                 .frozen
+//RS                 .get_at(name, narrowed)
+//RS                 .or_else(|| self.flow.frozen.get_at(name, declared))
+//RS                 .copied(),
+//RS             (Some(declared), _) => self.flow.frozen.get_at(name, declared).copied(),
+//RS             (None, Some(narrowed)) => self.flow.frozen.get_at(name, narrowed).copied(),
+//RS             (None, None) => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn binding_fact_depth(&self, name: &str) -> Option<usize> {
+//RS         let declared = self.flow.bindings.depth_of(name);
+//RS         let narrowed = self.flow.narrow.depth_of(name);
+//RS         match (declared, narrowed) {
+//RS             (Some(declared), Some(narrowed)) if narrowed >= declared => Some(narrowed),
+//RS             (Some(declared), _) => Some(declared),
+//RS             (None, Some(narrowed)) => Some(narrowed),
+//RS             (None, None) => None,
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-CONC-FREEZE1=A: find the proof that a place expression is backed
+//RS     /// by a frozen value. Deep immutability follows every place projection.
+//RS     pub(crate) fn frozen_expr_site(&self, expr: &Expr) -> Option<Span> {
+//RS         match expr {
+//RS             Expr::Ident(name, _) => self.frozen_for(name),
+//RS             Expr::Field(base, ..)
+//RS             | Expr::Index { base, .. }
+//RS             | Expr::Slice { base, .. }
+//RS             | Expr::Place(base, ..)
+//RS             | Expr::Paren(base, _) => self.frozen_expr_site(base),
+//RS             Expr::Call(call) if call.name == crate::Syntax::KW_FREEZE && call.args.len() == 1 => {
+//RS                 Some(call.name_span)
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Update the callback representation fact after a function-valued
+//RS     /// local is assigned. The fact is deliberately attached to the
+//RS     /// binding, not inferred again at the eventual host call: an unsafe
+//RS     /// reassignment must not leave a stale `Send` proof behind.
+//RS     pub(crate) fn set_interrupt_sendable(&mut self, name: &str, sendable: bool) {
+//RS         if let Some(info) = self.flow.bindings.get_mut(name) {
+//RS             info.interrupt_sendable = sendable && info.param_conv.is_none();
+//RS         }
+//RS         if let Some(info) = self.flow.narrow.get_mut(name) {
+//RS             info.interrupt_sendable = sendable && info.param_conv.is_none();
+//RS         }
+//RS     }
+//RS 
+//RS     /// A binding is borrowed (a `view`) when it is a `Read` parameter of a
+//RS     /// non-scalar type — in v1 those lower to `&T`, so the value can't be moved
+//RS     /// out of it. Used to decide where a consuming use must clone (B1).
+//RS     pub(crate) fn is_borrowed_binding(&self, name: &str) -> bool {
+//RS         self.lookup(name)
+//RS             .map(|info| {
+//RS                 matches!(info.param_conv, Some(AccessConvention::Read)) && !info.ty.is_scalar()
+//RS             })
+//RS             .unwrap_or(false)
+//RS     }
+//RS 
+//RS     pub(crate) fn declare(&mut self, name: &str, name_span: Span, info: LocalInfo) {
+//RS         if name == "_" {
+//RS             return;
+//RS         }
+//RS         if !info.invalid {
+//RS             self.note_unused_binding(name, info.def_span, info.param_conv.is_some());
+//RS         }
+//RS         if self.lookup(name).is_some()
+//RS             || self.consts.contains_key(name)
+//RS             || self.loop_labels.iter().any(|label| label == name)
+//RS         {
+//RS             self.diags.push(already_defined(name, name_span));
+//RS         }
+//RS         self.clear_moved_binding(name);
+//RS         let depth = self.flow.depth;
+//RS         // A fresh declaration replaces any refinement recorded for the same
+//RS         // name in this scope: the new binding is what the name now means.
+//RS         self.flow.narrow.remove_at(name, depth);
+//RS         self.flow.sendability.remove_at(name, depth);
+//RS         self.flow.frozen.remove_at(name, depth);
+//RS         self.flow.path_strings.remove_at(name, depth);
+//RS         self.flow.bindings.set_at(name, depth, info);
+//RS         self.flow.sendability.set_at(name, depth, true);
+//RS         self.flow
+//RS             .origins
+//RS             .set_at(name, depth, crate::Sema::FlowFacts::OriginFact::untracked());
+//RS     }
+//RS 
+//RS     pub(crate) fn declare_with_sendability(
+//RS         &mut self,
+//RS         name: &str,
+//RS         name_span: Span,
+//RS         info: LocalInfo,
+//RS         sendable: bool,
+//RS     ) {
+//RS         self.declare(name, name_span, info);
+//RS         let depth = self.flow.depth;
+//RS         self.flow.sendability.set_at(name, depth, sendable);
+//RS     }
+//RS 
+//RS     pub(crate) fn declare_loop_var(&mut self, name: String, name_span: Span, ty: &Type) {
+//RS         if name == "_" {
+//RS             return;
+//RS         }
+//RS         // D-LOOP-SUBJECT1=A: an inner bindingless loop cannot shadow its
+//RS         // outer implicit subject; its diagnostic teaches named bindings.
+//RS         if name == crate::Syntax::KW_IT && self.implicit_loop_subject_depth > 0 {
+//RS             return;
+//RS         }
+//RS         if self.lookup(&name).is_some()
+//RS             || self.consts.contains_key(&name)
+//RS             || self.loop_labels.iter().any(|label| label == &name)
+//RS         {
+//RS             self.diags.push(already_defined(&name, name_span));
+//RS         } else {
+//RS             let depth = self.flow.depth;
+//RS             self.note_unused_binding(&name, name_span, false);
+//RS             // A fresh loop binding is a new value: a move of an earlier
+//RS             // binding with the same name (an earlier loop's variable) is gone.
+//RS             self.clear_moved_binding(&name);
+//RS             self.flow.bindings.set_at(
+//RS                 &name,
+//RS                 depth,
+//RS                 LocalInfo {
+//RS                     def_span: name_span,
+//RS                     binding_sigil_span: None,
+//RS                     ty: ty.clone(),
+//RS                     mutable: false,
+//RS                     param_conv: None,
+//RS                     decl_loop_depth: self.loop_depth,
+//RS                     interrupt_sendable: false,
+//RS                     reactive_local: false,
+//RS                     reactive_shared: false,
+//RS                     single_use_span: None,
+//RS                     invalid: false,
+//RS                 },
+//RS             );
+//RS             self.flow.sendability.set_at(&name, depth, true);
+//RS             self.flow.path_strings.remove_at(&name, depth);
+//RS             self.flow.origins.set_at(
+//RS                 &name,
+//RS                 depth,
+//RS                 crate::Sema::FlowFacts::OriginFact::untracked(),
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     /// Error recovery for a loop whose source failed to check: its item type
+//RS     /// is unknown, so bind each loop variable as invalid. A use then stays
+//RS     /// silent (the source already reported) instead of cascading into E0107
+//RS     /// "nothing named `row`" reports that suggest an unrelated similar name.
+//RS     pub(crate) fn declare_invalid_loop_vars(
+//RS         &mut self,
+//RS         var: &str,
+//RS         var_span: Span,
+//RS         var2: Option<&(String, Span)>,
+//RS     ) {
+//RS         let names = std::iter::once((var, var_span))
+//RS             .chain(var2.map(|(name, span)| (name.as_str(), *span)));
+//RS         for (name, name_span) in names {
+//RS             if name == "_" || self.lookup(name).is_some() {
+//RS                 continue;
+//RS             }
+//RS             let depth = self.flow.depth;
+//RS             self.clear_moved_binding(name);
+//RS             self.flow.bindings.set_at(
+//RS                 name,
+//RS                 depth,
+//RS                 LocalInfo {
+//RS                     def_span: name_span,
+//RS                     binding_sigil_span: None,
+//RS                     ty: Type::Named(String::new()),
+//RS                     mutable: false,
+//RS                     param_conv: None,
+//RS                     decl_loop_depth: self.loop_depth,
+//RS                     interrupt_sendable: false,
+//RS                     reactive_local: false,
+//RS                     reactive_shared: false,
+//RS                     single_use_span: None,
+//RS                     invalid: true,
+//RS                 },
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     /// Replace the active binding's origin with the scoped "not tracked" row.
+//RS     /// Removing it would make an outer shadowed origin visible again.
+//RS     pub(crate) fn clear_origin(&mut self, name: &str) {
+//RS         let depth = self
+//RS             .flow
+//RS             .origins
+//RS             .depth_of(name)
+//RS             .or_else(|| self.binding_fact_depth(name))
+//RS             .unwrap_or_else(|| self.scope_depth());
+//RS         self.flow
+//RS             .origins
+//RS             .set_at(name, depth, crate::Sema::FlowFacts::OriginFact::untracked());
+//RS     }
+//RS 
+//RS     pub(crate) fn declare_loop_label(&mut self, name: &str, name_span: Span) {
+//RS         if self.lookup(name).is_some()
+//RS             || self.consts.contains_key(name)
+//RS             || self.loop_labels.iter().any(|label| label == name)
+//RS         {
+//RS             self.diags.push(already_defined(name, name_span));
+//RS         }
+//RS         self.loop_labels.push(name.to_string());
+//RS     }
+//RS }
+// END-PORT-PENDING 0358 crates/jet-sema/src/Sema/CheckerCore/scopes.rs:1-545
+

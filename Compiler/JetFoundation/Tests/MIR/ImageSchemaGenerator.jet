@@ -1,0 +1,111 @@
+// MirImageCodec.rs original generator tests. Native declaration parsing and
+// reachability are tested without a Rust compiler or a native schema wrapper.
+fn mir_image_generator_test_add(schema: &MIRImageSchema, text: String, module_name: String) MIRImageError! {
+    imports := [String:String]{}
+    masked :: mir_image_generator_mask(text)
+    imports = mir_image_gen_parse_uses(masked, module_name, &schema)
+    loop definition in mir_image_generator_definitions(masked, module_name, imports) -> schema.definitions[definition.key] = definition
+    return
+}
+#Test("MIR image grouped imports use aliases or final components") {
+    imports := [String:String]{}
+    mir_image_generator_insert_use("crate::Mir::{Value, Instruction as Op, nested::Block, *}", "crate::Image", &imports)
+    assert_eq(imports.len(), 3)
+    assert_eq(imports["Value"], "crate::Mir::Value")
+    assert_eq(imports["Op"], "crate::Mir::Instruction")
+    assert_eq(imports["Block"], "crate::Mir::nested::Block")
+}
+#Test("MIR image character mask preserves lifetimes and nested delimiters") {
+    source :: "pub struct Rows { pub rows: &'static [(&'static str, Kind)], pub next: u64 }"
+    masked :: mir_image_generator_mask(source)
+    assert_eq(masked, source)
+    definitions :: mir_image_generator_definitions(masked, "crate::Rows", [String:String]{}) ?? panic(err.message)
+    fields :: if definitions[0].body == .Struct(value) -> value else -> panic("expected struct")
+    assert_eq(fields.len(), 2)
+    assert_eq(fields[0].name, "rows")
+    assert_eq(fields[1].name, "next")
+    assert_eq(mir_image_generator_mask("&'a str, &'b str"), "&'a str, &'b str")
+}
+#Test("MIR image character mask handles Unicode and escapes") {
+    literals :: [String]{"'a'", "'é'", "'中'", "'𐐀'", "'\\n'", "'\\''", "'\\\\'", "'\\x7f'", "'\\u{10400}'"}
+    loop literal in literals {
+        spaces := [U8]{}
+        loop _ in 0..<literal.bytes().len() -> &spaces.push(U8{32})
+        blank :: String.from_bytes(spaces) ?? panic("ASCII spaces")
+        assert_eq(mir_image_generator_mask("{literal}, following"), "{blank}, following")
+    }
+}
+#Test("MIR image function arrows do not close generic delimiters") {
+    ty :: "Option<Arc<dyn Fn(u8) -> Result<(u8, u8), String>>>"
+    assert_eq(mir_image_generator_matching(ty, 6, U8{60}, U8{62}), Val(ty.len() - 1))
+    fields :: "pub callback: {ty}, pub next: u64"
+    assert_eq(mir_image_generator_split(fields, U8{44}).len(), 2)
+    assert_eq((mir_image_generator_fields(fields) ?? panic(err.message)).len(), 2)
+    assert_eq(mir_image_generator_top_level("{ty}, following", U8{44}), Val(ty.len()))
+}
+#Test("MIR image recursive Self resolves to declaring definition") {
+    schema := mir_image_schema_new()
+    mir_image_generator_test_add(&schema, "pub enum Node { Leaf, Child(Box<Self>) }", "crate::Graph") ?? panic(err.message)
+    definition :: schema.definitions["crate::Graph::Node"]
+    assert_eq(mir_image_generator_resolve_type(schema, definition, "Self") ?? panic(err.message), "crate::Graph::Node")
+}
+#Test("MIR image aliases follow imported chains and container schema") {
+    schema := mir_image_schema_new()
+    mir_image_generator_test_add(&schema, "use crate::Kinds::Kind; pub type KindAlias = Kind; pub type KindSet = BTreeSet<KindAlias>; pub struct MirProgram { pub items: KindSet }", "crate::MIR") ?? panic(err.message)
+    mir_image_generator_test_add(&schema, "pub type Code = u8; pub struct Kind { pub code: Code }", "crate::Kinds") ?? panic(err.message)
+    mir_image_generator_assign_paths(&schema)
+    reachable :: mir_image_generator_reachable(schema, "crate::MIR::MirProgram") ?? panic(err.message)
+    assert_eq(reachable, [String]{"crate::Kinds::Code", "crate::Kinds::Kind", "crate::MIR::KindAlias", "crate::MIR::KindSet", "crate::MIR::MirProgram"})
+}
+fn mir_image_generator_test_reachable_error(text: String) -> String Never! {
+    schema := mir_image_schema_new()
+    mir_image_generator_test_add(&schema, text, "crate::MIR") ?? return err.message
+    mir_image_generator_reachable(schema, "crate::MIR::MirProgram") ?? return err.message
+    "unexpected schema success"
+}
+#Test("MIR image alias-only cycles are rejected") {
+    message :: mir_image_generator_test_reachable_error("pub type First = Option<Second>; pub type Second = Box<First>; pub struct MirProgram { pub value: First }")
+    assert(message.contains("cyclic native MIR type aliases"))
+    assert(message.contains("crate::MIR::First"))
+    assert(message.contains("crate::MIR::Second"))
+}
+#Test("MIR image generic aliases report unsupported instantiated wire contract") {
+    message :: mir_image_generator_test_reachable_error("pub type Generic<T> = Vec<T>; pub struct MirProgram { pub value: Generic<u8> }")
+    assert(message.contains("generic native MIR type alias `crate::MIR::Generic`"))
+    assert(message.contains("explicit instantiated wire schema"))
+}
+#Test("MIR image public paths follow reexports not private modules") {
+    schema := mir_image_schema_new()
+    mir_image_generator_test_add(&schema, "pub enum Kind { One }", "crate::AST::details") ?? panic(err.message)
+    mir_image_generator_test_add(&schema, "pub enum Kind { One }", "crate::Syntax::details") ?? panic(err.message)
+    mir_image_generator_public_use("details::Kind", "crate::AST", &schema)
+    mir_image_generator_public_use("details::Kind as ExportedKind", "crate::Syntax", &schema)
+    mir_image_generator_public_use("crate::Syntax::ExportedKind as Kind", "crate", &schema)
+    mir_image_generator_assign_paths(&schema)
+    assert_eq(schema.definitions["crate::AST::details::Kind"].path, "crate::AST::Kind")
+    assert_eq(schema.definitions["crate::Syntax::details::Kind"].path, "crate::Kind")
+}
+#Test("MIR image discriminants preserve declaration wire order and payloads") {
+    variants :: mir_image_generator_variants("First = 7, Second(u64) = 2, Third { value: u8 } = -1") ?? panic(err.message)
+    assert_eq(variants.len(), 3)
+    assert_eq(variants[0].name, "First")
+    assert_eq(variants[1].name, "Second")
+    assert_eq(variants[2].name, "Third")
+    assert(variants[0].body == .Unit)
+    assert(variants[1].body == .Tuple(_))
+    assert(variants[2].body == .Struct(_))
+    broken :: mir_image_generator_variants("Broken =") ?? panic(err.message)
+    assert(broken[0].body == .Unsupported(_))
+}
+#Test("MIR image mapping never drops native fields or Source metadata") {
+    source :: [MIRImageSourceField]{MIRImageSourceField{name: "value", ty: "Int"}}
+    native :: [MIRImageSchemaField]{MIRImageSchemaField{name: "value", ty: MIRImageSchemaType.Named("u64"), public: true}, MIRImageSchemaField{name: "cancel", ty: MIRImageSchemaType.Named("MirBlockId"), public: true}}
+    mir_image_generator_check_struct("Carrier", source, native) ?? {
+        assert_eq(err.message, "native MIR field `Carrier.cancel` has no lossless Source-MIR field")
+        return
+    }
+    panic("missing native field must gate generation")
+}
+#Test("MIR image interned kinds match native encounter order") {
+    assert_eq(mir_image_generator_interned_definitions(), [String]{"crate::MIR::MirType", "crate::Diagnostics::Span", "crate::MIR::MirOwnership", "crate::Names::NameReference", "crate::MIR::MirValueId", "crate::MIR::MirBlockId", "crate::MIR::MirPlaceId"})
+}

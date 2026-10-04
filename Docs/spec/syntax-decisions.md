@@ -1271,6 +1271,32 @@ unreachable-state lint for declarations that no entry path reaches. With no
 entry transition, reachability stays unknown and the compiler does not invent
 an initial state. This outcome adds no syntax.
 
+The checked bundle owns one erased state registry: a struct and its inherent
+impls may live in different modules without splitting their state graph.
+State member order follows the declaration. Owner-qualified state names use
+the complete nominal owner, including nested names such as
+`Payment.Client.State.Pending`. Unknown names, missing state sections,
+duplicate labels, empty sections, and collisions with ordinary members have
+distinct diagnostics.
+
+Preparation-time type reflection precedes body checking and reads the current
+complete registration bundle, including generated declarations and impls.
+It uses the same state-graph projection as the checked validator, but does not
+pretend that a late checked registry already exists. Checked-program reflection
+reads the retained checked registry rather than recomputing a source-module
+projection. Switch coverage and call identities are module-scoped even when
+different source files reuse the same byte spans.
+
+Body checking reads the checker-retained callable identity for each module
+and call span; it does not guess a receiver type from displayed source names.
+A known wrong state produces E0150. An unproved state stays silent. Branches
+retain only states on which every reaching path agrees, and L0152 records
+known disagreement in deterministic binding order. Loop joins include the
+zero-iteration path. An inner binding shadows an outer state fact only until
+its lexical scope closes; transitioning an unshadowed outer binding still
+updates its existing row. Task Running/Joined/Detached facts use this same
+compile-time plane; the existing join-duty pass owns consumed-handle errors.
+
 **D-REFINE1 — Refinements** *(retired by D-TYPE2-REFINE1=A)*: the former
 `#Invariant("value >= lo && value < hi")` spelling is retired. Use
 `distinct Int(lo..hi)` for a named range or `Int(lo..hi)` inline; the interval
@@ -2834,6 +2860,11 @@ conditions pure; checked in every build; per-module build-policy strip is an
 explicit opt-out. A proof of the condition is a second, proof-keyed erasure
 disposition. A `#Pre` violation quotes the clause at the call site; a `#Post`
 violation points at the body.
+
+Contract conditions are checked as `Bool` and messages as `String` in the
+function parameter scope. `#Post` additionally owns a typed `result` binding;
+`#Pre` cannot refer to it. Checked postconditions and call-site preconditions
+retain their expressions in TIR rather than acting as accepted-only headers.
 
 **D-METHODMACRO1=A / D-INLINE-PARAM1=A — Checked inline contracts**:
 `#Inline`/`#Inline(Always)` on
@@ -6323,6 +6354,21 @@ keep prefix, effects, and security policy static. Browser/server partition,
 hydration mismatch, executable TIR, and generated-source re-entry laws apply;
 `jet inspect expand --facts web` and `jet explain --web-graph` expose stable JSON facts.
 
+The Jet compiler uses the existing `MIRAppGraph` and `MIRApp*` records for the
+same erased `AppGraph` metadata, not a second application IR. `Csr`, `Ssr`,
+and `Ssg` map to `CSR`, `SSR`, and `SSG`; render-fact modes, cache facts,
+hydration triggers, wire types, resume payloads, source byte spans, and
+query/store/form metadata retain their original fields and order. Route,
+island, and pending-boundary identities use the canonical SHA-256 inputs
+(route path, a NUL delimiter, and handler), never source spans.
+
+Application discovery consumes the canonical App-entry predicate, retained
+effect identities, and the same Encode/Decode proof as ordinary data calls.
+Optional `.routes(from:)` expansion uses the actual authorized project root
+and canonical check-read session: missing directories, unreadable trees, and
+stray files remain real read/declaration failures. A builder awaiting that
+native authority is not published as a checked convention-expanded graph.
+
 **D-DX-ROUTER1=A — routes bind typed inputs on the one App graph**: a route
 handler's parameters are its route contract. A parameter bound by name to a
 dynamic path segment is a path input; one `#Codable` record (JSON `?search=`
@@ -6722,6 +6768,13 @@ them in production, a jetos generation projects them as timer units.
 Complex calendars (cron expressions, timezones, jitter) stay with the
 runtime API or jetos timers; operator-side cadence overrides live at the
 jetos/service layer with explain provenance.
+
+The shared typed marker check observes schedule arguments in the function's
+parameter scope before schedule-domain validation. A dynamic `Duration` or
+`String` has the right type but no fixed cadence (E0926); a value of another
+type produces E0930, without an additional E0926. Job discovery retains the
+checked cadence, argument/default facts, documentation, scope, and graph
+metadata; runtime consumers do not reparse marker arguments.
 
 *Shipped 2026-07-12 (card #505, slice 2)*: `#Job fn` (D-JPK-TASKRUN1) and
 `#Every(…)` parse, placement-check (E0925), and value-check (E0926); `jet

@@ -556,7 +556,7 @@ fn sema_function_memory_collect_expr_idents(expression: Expr, names: &[String]) 
     if expression == {
         .Ident(name, _) -> sema_function_memory_append_name_unique(&names, name)
         .Call(call) -> loop argument in call.args -> sema_function_memory_collect_expr_idents(argument.expr, &names)
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _, _, _) | .CallValue(receiver, args, _) -> {
             sema_function_memory_collect_expr_idents(receiver, &names)
             loop argument in args -> sema_function_memory_collect_expr_idents(argument.expr, &names)
         }

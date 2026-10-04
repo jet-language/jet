@@ -1,0 +1,1289 @@
+// PORT-PENDING 1027 tests-data-one-kernel-module-group: tests/data_one_kernel.rs:1-211
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #1657 (I9): `core.data` statistics live in one place.
+//RS //!
+//RS //! `crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs` is the kernel.
+//RS //! AOT embeds it with `include_str!`, the Cranelift JIT host and the
+//RS //! comptime/interpreter tier `include!` the same file, and every other tier is
+//RS //! a marshalling adapter. A second implementation — compensated or naive —
+//RS //! makes one tier answer a question differently from the rest, which is the
+//RS //! exact I9 drift this card removed.
+//RS //!
+//RS //! This test fails the build on a second copy. It looks for two things:
+//RS //!   1. a function that takes a float sequence and carries a statistics name
+//RS //!      (`sum`, `mean`, `variance`, …) outside the kernel;
+//RS //!   2. the kernel's own arithmetic fingerprints — the Neumaier compensation
+//RS //!      step and the Welford update — outside the kernel.
+//RS //!
+//RS //! Run: `cargo test --test data_one_kernel`
+//RS 
+//RS mod common;
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS const KERNEL: &str = "crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs";
+//RS 
+//RS /// Statistics names that must not head a second float-sequence function.
+//RS const STAT_WORDS: &[&str] = &[
+//RS     "sum", "mean", "min", "max", "median", "variance", "stddev", "quantile", "rolling", "describe",
+//RS ];
+//RS 
+//RS /// Arithmetic that only the kernel may contain.
+//RS const FINGERPRINTS: &[(&str, &str)] = &[
+//RS     ("compensation +=", "Neumaier compensated sum"),
+//RS     ("m2 += delta * delta2", "Welford variance update"),
+//RS ];
+//RS 
+//RS fn root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+//RS     let Ok(entries) = fs::read_dir(dir) else {
+//RS         return;
+//RS     };
+//RS     for entry in entries.flatten() {
+//RS         let path = entry.path();
+//RS         if path.is_dir() {
+//RS             collect_rs_files(&path, out);
+//RS         } else if path.extension().is_some_and(|e| e == "rs") {
+//RS             out.push(path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn source_files() -> Vec<PathBuf> {
+//RS     let mut out = Vec::new();
+//RS     collect_rs_files(&root().join("crates"), &mut out);
+//RS     collect_rs_files(&root().join("Source"), &mut out);
+//RS     out.sort();
+//RS     out
+//RS }
+//RS 
+//RS /// A one-line function head that reads a float sequence, answers with a float
+//RS /// or a float list, and names a statistic. A marshalling adapter answers with a
+//RS /// value type instead, so it never matches.
+//RS fn stats_function_names(text: &str) -> Vec<String> {
+//RS     let mut found = Vec::new();
+//RS     for line in text.lines() {
+//RS         let trimmed = line.trim_start();
+//RS         if trimmed.starts_with("//") {
+//RS             continue;
+//RS         }
+//RS         if !(line.contains("&[f64]") || line.contains("&Vec<f64>")) {
+//RS             continue;
+//RS         }
+//RS         let Some((_, after_arrow)) = line.split_once("-> ") else {
+//RS             continue;
+//RS         };
+//RS         if !after_arrow.contains("f64") {
+//RS             continue;
+//RS         }
+//RS         let Some(rest) = line.split_once("fn ") else {
+//RS             continue;
+//RS         };
+//RS         let name: String = rest
+//RS             .1
+//RS             .chars()
+//RS             .take_while(|c| c.is_alphanumeric() || *c == '_')
+//RS             .collect();
+//RS         let lower = name.to_ascii_lowercase();
+//RS         if lower.split('_').any(|part| STAT_WORDS.contains(&part)) {
+//RS             found.push(name);
+//RS         }
+//RS     }
+//RS     found
+//RS }
+//RS 
+//RS #[test]
+//RS fn only_one_core_data_statistics_implementation() {
+//RS     let kernel = root().join(KERNEL);
+//RS     assert!(
+//RS         kernel.is_file(),
+//RS         "the one core.data statistics kernel is missing: {KERNEL}"
+//RS     );
+//RS 
+//RS     let mut offenders = Vec::new();
+//RS     for path in source_files() {
+//RS         if path == kernel {
+//RS             continue;
+//RS         }
+//RS         let Ok(text) = fs::read_to_string(&path) else {
+//RS             continue;
+//RS         };
+//RS         let relative = path
+//RS             .strip_prefix(root())
+//RS             .unwrap_or(&path)
+//RS             .display()
+//RS             .to_string();
+//RS         for name in stats_function_names(&text) {
+//RS             offenders.push(format!("{relative}: fn {name}(… &[f64] …)"));
+//RS         }
+//RS         for (needle, what) in FINGERPRINTS {
+//RS             if text.contains(needle) {
+//RS                 offenders.push(format!("{relative}: {what} (`{needle}`)"));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     assert!(
+//RS         offenders.is_empty(),
+//RS         "a second core.data statistics implementation exists (I9). Every tier must call \
+//RS          the one kernel at {KERNEL} instead:\n  {}",
+//RS         offenders.join("\n  ")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn every_tier_includes_the_one_kernel() {
+//RS     let kernel_name = "CoreLib/Top/DataStats.rs";
+//RS     for (path, how) in [
+//RS         (
+//RS             "crates/jet-codegen/src/Codegen/mod.rs",
+//RS             "AOT embeds the kernel",
+//RS         ),
+//RS         (
+//RS             "crates/jet-jit/src/Data.rs",
+//RS             "the Cranelift JIT host includes the kernel",
+//RS         ),
+//RS         (
+//RS             "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+//RS             "comptime and the interpreter include the kernel",
+//RS         ),
+//RS     ] {
+//RS         let text = fs::read_to_string(root().join(path))
+//RS             .unwrap_or_else(|error| panic!("cannot read {path}: {error}"));
+//RS         assert!(
+//RS             text.contains(kernel_name),
+//RS             "{how}: {path} no longer names {kernel_name}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn rolling_mean_prefix_windows_when_window_exceeds_input() {
+//RS     let source = r#"
+//RS use core.data as data
+//RS 
+//RS fn run() {
+//RS     means :: data.rolling_mean([Float]{1.0, 2.0, 3.0}, 5) ?? panic("rolling mean")
+//RS     if means.len() != 3 -> panic("rolling mean length")
+//RS     if means[0] != 1.0 || means[1] != 1.5 || means[2] != 2.0 -> panic("rolling mean prefix")
+//RS     print("rolling prefix windows: ok")
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("rolling_mean_prefix_windows", source, "rolling prefix windows: ok\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn sum_preserves_neumaier_cancellation_result() {
+//RS     let source = r#"
+//RS use core.data as data
+//RS 
+//RS fn run() {
+//RS     result :: data.sum([Float]{10000000000000000.0, 1.0, -10000000000000000.0}) ?? panic("sum")
+//RS     if result != 1.0 -> panic("sum lost the cancellation residual")
+//RS     print("compensated sum: ok")
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("sum_cancellation", source, "compensated sum: ok\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn rolling_mean_nonfinite_error_keeps_transform_identity() {
+//RS     let source = r#"
+//RS use core.data as data
+//RS use core.data.[DataErrorKind]
+//RS 
+//RS fn run() {
+//RS     if data.rolling_mean([1.0, Float.NAN, 3.0], 2) == {
+//RS         .Ok(_) -> panic("rolling mean accepted a non-finite value")
+//RS         .Err(error) -> {
+//RS             if error.kind != DataErrorKind.NonFinite -> panic("wrong rolling mean error kind")
+//RS             if error.operation != "rolling_mean" -> panic("wrong rolling mean operation")
+//RS             if error.index != Val(1) -> panic("wrong rolling mean error index")
+//RS         }
+//RS     }
+//RS     print("rolling error policy: ok")
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("rolling_mean_error_policy", source, "rolling error policy: ok\n");
+//RS }
+// END-PORT-PENDING 1027 tests/data_one_kernel.rs:1-211
+
+// PORT-PENDING 1027 tests-data-one-kernel-module-group: tests/dataflow_stream.rs:1-177
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-DATAFLOW1=A: bounded DataStream pull + typed DataError policy.
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS 
+//RS fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) {
+//RS     let path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     let rs = dir.join(format!("{name}.rs"));
+//RS     let bin = dir.join(name);
+//RS     fs::write(&rs, &out.rust).unwrap();
+//RS     let mut rustc_cmd = Command::new("rustc");
+//RS     rustc_cmd.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         rs.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     if let Some(link) = &out.ffi {
+//RS         rustc_cmd
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc_cmd
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     let rustc = rustc_cmd.output().unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc rejected generated code:\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let out = Command::new(&bin).current_dir(dir).output().unwrap();
+//RS     (
+//RS         out.status.code().unwrap_or(0),
+//RS         String::from_utf8_lossy(&out.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&out.stderr).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS #[test]
+//RS fn data_stream_limits_and_typed_errors() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping dataflow stream test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_dataflow_stream_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let events = dir.join("events.csv");
+//RS     let events_path = events.to_str().unwrap();
+//RS     let src = format!(
+//RS         r#"
+//RS use core.data as data
+//RS use core.encoding as encoding
+//RS use core.encoding.csv as csv
+//RS use core.files as files
+//RS 
+//RS #Codable
+//RS struct Event {{
+//RS     service: String
+//RS     latency_ms: Float
+//RS }}
+//RS 
+//RS fn write_fixture(path: String) {{
+//RS     output :: files.create(path) ?? panic("create")
+//RS     writer :: csv.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
+//RS     writer.write(["service", "latency_ms"]) ?? panic("header")
+//RS     writer.write(["api", "10.0"]) ?? panic("r1")
+//RS     writer.write(["api", "20.0"]) ?? panic("r2")
+//RS     writer.write(["db", "5.0"]) ?? panic("r3")
+//RS     writer.write(["api", "30.0"]) ?? panic("r4")
+//RS     &writer.flush() ?? panic("flush")
+//RS     writer.finish() ?? panic("finish")
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     path :: "{events_path}"
+//RS     write_fixture(path)
+//RS     input :: files.open(path) ?? panic("open")
+//RS     limits := data.DataLimits.safe()
+//RS     limits.max_groups = 1
+//RS     limits.max_output_rows = 10
+//RS     reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
+//RS     first :: reader.next() ?? panic("next")
+//RS     print("first:{{first.service}}:{{first.latency_ms}}")
+//RS     if data.query(reader)
+//RS         .group_by((e) -> e.service)
+//RS         .mean((e) -> e.latency_ms)
+//RS         .collect() == {{
+//RS         .Ok(_) -> print("groups:ok")
+//RS         .Err(error) -> print("groups:{{error.operation}}:{{error.reason}}")
+//RS     }}
+//RS     if data.mean([Float]{{}}) == {{
+//RS         .Ok(_) -> print("mean:ok")
+//RS         .Err(error) -> print("mean:{{error.operation}}:{{error.reason}}")
+//RS     }}
+//RS     if data.quantile([1.0, 2.0], 1.5) == {{
+//RS         .Ok(_) -> print("q:ok")
+//RS         .Err(error) -> print("q:{{error.operation}}:{{error.reason}}")
+//RS     }}
+//RS     if data.rolling_mean([1.0, 2.0], 0) == {{
+//RS         .Ok(_) -> print("roll:ok")
+//RS         .Err(error) -> print("roll:{{error.operation}}:{{error.reason}}")
+//RS     }}
+//RS }}
+//RS "#,
+//RS         events_path = events_path
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "data_stream_bounds", &src);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "first:api:10.0\ngroups:query.group_by.mean:max_groups 1 exceeded\nmean:mean:mean of empty data is undefined\nq:quantile:quantile q must be a finite value in 0.0 through 1.0\nroll:rolling_mean:rolling width must be positive\n"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rolling_mean_nonfinite_matches_aot_and_default_dev() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping rolling_mean parity test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_dataflow_rolling_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = r#"
+//RS use core.data as data
+//RS 
+//RS fn run() {
+//RS     if data.rolling_mean([1.0, Float.NAN, 3.0], 2) == {
+//RS         .Ok(_) -> print("unexpected ok")
+//RS         .Err(error) -> print("{error}")
+//RS     }
+//RS     compensated :: data.rolling_mean([10000000000000000.0, 1.0, -10000000000000000.0], 3) ?? panic("compensated")
+//RS     print(compensated[2])
+//RS     if data.rolling_mean([Float.MAX, Float.MAX], 2) == {
+//RS         .Ok(_) -> print("unexpected overflow ok")
+//RS         .Err(error) -> print("{error}")
+//RS     }
+//RS     zero :: data.rolling_mean([-0.0, -0.0], 2) ?? panic("zero")
+//RS     print(zero[1])
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "rolling_nonfinite", source);
+//RS     assert_eq!(code, 0, "rolling_mean AOT failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "NonFinite rolling_mean, index 1: numeric input must be finite\n0.3333333333333333\nOverflow sum: finite overflow while summing\n0.0\n"
+//RS     );
+//RS     let path = dir.join("rolling_nonfinite.jet");
+//RS     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout: dev_stdout,
+//RS             stderr: dev_stderr,
+//RS             exit_code,
+//RS         } => assert_eq!(
+//RS             (exit_code, dev_stdout, dev_stderr),
+//RS             (0, stdout, String::new())
+//RS         ),
+//RS         other => panic!("rolling_mean default-dev failed: {other:?}"),
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+// END-PORT-PENDING 1027 tests/dataflow_stream.rs:1-177
+
+// PORT-PENDING 1027 tests-data-one-kernel-module-group: tests/db_policy.rs:1-332
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Focused proof that one explicit DB scope enforces row policy on every row path.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use tir_support::{assert_tiers_agree, build_and_run, run_default_multi};
+//RS 
+//RS const SOURCE: &str = r#"
+//RS use core.db as db
+//RS 
+//RS fn run() {
+//RS     conn := db.open_memory()
+//RS     policy :: db.policy("tasks", "owner == user") ?? panic("policy")
+//RS     scoped := conn.with_policy(policy, "alice")
+//RS     audit :: db.policy_audit(scoped)
+//RS     print("audit:{audit}")
+//RS     _created :: db.migrate(scoped, "tasks-v1", [SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}]) ?? panic("create")
+//RS     _schema :: db.migrate(scoped, "other-v1", [SQL{"CREATE TABLE other (owner TEXT, title TEXT)"}]) ?? panic("schema")
+//RS     scoped.execute(SQL{"DROP TABLE other"}) ? _ok -> {
+//RS         print("schema:accepted")
+//RS     } ! _error -> {
+//RS         print("schema:rejected")
+//RS     }
+//RS     bob_owner :: "bob"
+//RS     one_title :: "one"
+//RS     _one :: scoped.execute(
+//RS         SQL{"INSERT INTO tasks (owner, title) VALUES ({bob_owner}, {one_title})"}
+//RS     ) ?? panic("insert one")
+//RS     two_title :: "two"
+//RS     _two :: scoped.execute(
+//RS         SQL{"INSERT INTO tasks (title, owner) VALUES ({two_title}, {bob_owner})"}
+//RS     ) ?? panic("insert two")
+//RS     rows :: scoped.query(
+//RS         SQL{"SELECT title FROM tasks WHERE title = {one_title} OR title = {two_title} ORDER BY title"}
+//RS     ) ?? panic("query")
+//RS     print("rows:{rows.len()}")
+//RS     limit_n :: 1
+//RS     offset_n :: 0
+//RS     limited :: scoped.query(
+//RS         SQL{"SELECT title FROM tasks WHERE title = {one_title} ORDER BY title LIMIT {limit_n} OFFSET {offset_n}"}
+//RS     ) ?? panic("limit")
+//RS     print("limit:{limited.len()}")
+//RS     _one_row :: scoped.query_one(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("query one")
+//RS     print("query-one:ok")
+//RS     _tx :: db.transaction(scoped, "policy-tx", [SQL{"UPDATE tasks SET title = 'one'"}]) ?? panic("transaction")
+//RS     print("transaction:ok")
+//RS     scoped.query(SQL{"SELECT title FROM other"}) ? _rows -> {
+//RS         print("bypass:accepted")
+//RS     } ! _error -> {
+//RS         print("bypass:rejected")
+//RS     }
+//RS     bob := conn.with_policy(policy, "bob")
+//RS     alice_owner :: "alice"
+//RS     three_title :: "three"
+//RS     _bob_insert :: bob.execute(
+//RS         SQL{"INSERT INTO tasks (owner, title) VALUES ({alice_owner}, {three_title})"}
+//RS     ) ?? panic("bob insert")
+//RS     bob_rows :: bob.query(SQL{"SELECT title FROM tasks"}) ?? panic("bob query")
+//RS     alice_rows :: scoped.query(SQL{"SELECT title FROM tasks"}) ?? panic("alice query")
+//RS     print("cross:{bob_rows.len()}:{alice_rows.len()}")
+//RS     blank_user := conn.with_policy(policy, "   ")
+//RS     blank_owner :: "   "
+//RS     blank_title :: "blank"
+//RS     blank_user.execute(
+//RS         SQL{"INSERT INTO tasks (owner, title) VALUES ({blank_owner}, {blank_title})"}
+//RS     ) ? _ok -> {
+//RS         print("blank-user:accepted")
+//RS     } ! _error -> {
+//RS         print("blank-user:rejected")
+//RS     }
+//RS     _live :: scoped.live(SQL{"SELECT title FROM tasks"}) ?? panic("live")
+//RS     print("live:ok")
+//RS     scoped.query(SQL{"SELECT title FROM tasks -- hide policy"}) ? _rows -> {
+//RS         print("comment:accepted")
+//RS     } ! _error -> {
+//RS         print("comment:rejected")
+//RS     }
+//RS     scoped.query(SQL{"SELECT title FROM tasks /* hide policy */"}) ? _rows -> {
+//RS         print("block:accepted")
+//RS     } ! _error -> {
+//RS         print("block:rejected")
+//RS     }
+//RS     scoped.query(SQL{"SELECT tasks.title FROM tasks JOIN other ON other.owner = tasks.owner"}) ? _rows -> {
+//RS         print("join:accepted")
+//RS     } ! _error -> {
+//RS         print("join:rejected")
+//RS     }
+//RS     scoped.query(SQL{"SELECT title FROM tasks WHERE owner IN (SELECT owner FROM other)"}) ? _rows -> {
+//RS         print("subquery:accepted")
+//RS     } ! _error -> {
+//RS         print("subquery:rejected")
+//RS     }
+//RS     four_title :: "four"
+//RS     scoped.execute(
+//RS         SQL{"INSERT INTO tasks (owner, title) VALUES ({alice_owner}, {four_title}) ON CONFLICT(owner) DO UPDATE SET owner = {bob_owner}"}
+//RS     ) ? _ok -> {
+//RS         print("upsert:accepted")
+//RS     } ! _error -> {
+//RS         print("upsert:rejected")
+//RS     }
+//RS     five_title :: "five"
+//RS     scoped.execute(
+//RS         SQL{"INSERT OR REPLACE INTO tasks (owner, title) VALUES ({bob_owner}, {five_title})"}
+//RS     ) ? _ok -> {
+//RS         print("replace:accepted")
+//RS     } ! _error -> {
+//RS         print("replace:rejected")
+//RS     }
+//RS     _closed :: scoped.close()
+//RS }
+//RS "#;
+//RS 
+//RS /// Hostile values, malformed placeholders, driver errors, policy denial, and
+//RS /// rollback all cross the same SQL carrier and preserve one policy boundary.
+//RS const HOSTILE_SOURCE: &str = r#"
+//RS use app as application
+//RS use core.db as db
+//RS 
+//RS fn run() {
+//RS     conn := db.open_memory()
+//RS     policy :: db.policy("tasks", "true") ?? panic("policy")
+//RS     scoped := conn.with_policy(policy, "attacker")
+//RS     _created :: db.migrate(scoped, "tasks-v1", [
+//RS         SQL{"CREATE TABLE tasks (id INTEGER PRIMARY KEY, body TEXT)"}
+//RS     ]) ?? panic("create")
+//RS 
+//RS     payload :: "x'); DROP TABLE tasks; --"
+//RS     _inserted :: scoped.execute(
+//RS         SQL{"INSERT INTO tasks (id, body) VALUES (1, {payload})"}
+//RS     ) ?? panic("insert")
+//RS     row :: scoped.query_one(SQL{"SELECT body FROM tasks"}) ?? panic("query")
+//RS     body :: db.row_text(row, "body") ?? panic("missing body")
+//RS     print("interpolation:{body}")
+//RS 
+//RS     duplicate :: scoped.query(
+//RS         SQL{"SELECT id FROM tasks WHERE body = {payload} OR body = {payload}"}
+//RS     ) ?? panic("duplicate")
+//RS     print("duplicate:{duplicate.len()}")
+//RS 
+//RS     scoped.query(SQL{"SELECT body FROM tasks WHERE body = ?"}) ? _rows -> {
+//RS         print("placeholder:accepted")
+//RS     } ! _error -> {
+//RS         print("placeholder:rejected")
+//RS     }
+//RS     scoped.query(SQL{"SELECT no_such_column FROM tasks"}) ? _rows -> {
+//RS         print("driver:accepted")
+//RS     } ! _error -> {
+//RS         print("driver:rejected")
+//RS     }
+//RS     scoped.query(SQL{"SELECT body FROM other"}) ? _rows -> {
+//RS         print("authority:accepted")
+//RS     } ! _error -> {
+//RS         print("authority:rejected")
+//RS     }
+//RS 
+//RS     live :: scoped.live(SQL{"SELECT body FROM tasks"}) ?? panic("live")
+//RS     live_before :: application.live_get(live)
+//RS     print("live-before:{live_before.contains(payload)}")
+//RS     updated :: "updated"
+//RS     _updated :: scoped.execute(SQL{"UPDATE tasks SET body = {updated}"}) ?? panic("update")
+//RS     _invalidated :: application.invalidate("tasks")
+//RS     live_after :: application.live_get(live)
+//RS     print("live-after:{live_after.contains(updated)}")
+//RS 
+//RS     tx_body :: "rolled back"
+//RS     tx_count :: db.transaction(scoped, "rollback", [
+//RS         SQL{"INSERT INTO tasks (id, body) VALUES (2, {tx_body})"},
+//RS         SQL{"INSERT INTO tasks (missing_column) VALUES (2)"}
+//RS     ]) ?? -1
+//RS     if {
+//RS         tx_count < 0 -> print("rollback:rejected")
+//RS         else -> print("rollback:accepted")
+//RS     }
+//RS     rollback_rows :: scoped.query(SQL{"SELECT id FROM tasks"}) ?? panic("rollback query")
+//RS     print("rollback-rows:{rollback_rows.len()}")
+//RS     migration_count :: db.migrate(scoped, "broken", [
+//RS         SQL{"CREATE TABLE migration_marker (id INTEGER)"},
+//RS         SQL{"INSERT INTO tasks (missing_column) VALUES (3)"}
+//RS     ]) ?? -1
+//RS     if {
+//RS         migration_count < 0 -> print("migration:rejected")
+//RS         else -> print("migration:accepted")
+//RS     }
+//RS     retry_count :: db.migrate(scoped, "broken", [
+//RS         SQL{"CREATE TABLE migration_marker (id INTEGER)"}
+//RS     ]) ?? -1
+//RS     if {
+//RS         retry_count == 1 -> print("migration-retry:1")
+//RS         else -> print("migration-retry:rejected")
+//RS     }
+//RS     _closed :: scoped.close()
+//RS }
+//RS "#;
+//RS 
+//RS const HOSTILE_EXPECTED: &str = "interpolation:x'); DROP TABLE tasks; --\nduplicate:1\nplaceholder:rejected\ndriver:rejected\nauthority:rejected\nlive-before:true\nlive-after:true\nrollback:rejected\nrollback-rows:1\nmigration:rejected\nmigration-retry:1\n";
+//RS 
+//RS #[test]
+//RS fn typed_sql_hostile_operations_keep_policy_and_provenance_across_tiers() {
+//RS     assert_tiers_agree("db_policy_hostile", HOSTILE_SOURCE, HOSTILE_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn typed_sql_canonical_scope_example_has_aot_default_and_interpreter_parity() {
+//RS     assert_tiers_agree(
+//RS         "db_policy_scope_all_tiers",
+//RS         SOURCE,
+//RS         "audit:DBPolicy(table=tasks, user=alice, expr=owner == user, predicate=owner = ?)\nschema:rejected\nrows:2\nlimit:1\nquery-one:ok\ntransaction:ok\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn db_scope_enforces_policy_on_query_insert_and_live_aot() {
+//RS     let (code, stdout) = build_and_run("db_policy_scope", SOURCE);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "audit:DBPolicy(table=tasks, user=alice, expr=owner == user, predicate=owner = ?)\nschema:rejected\nrows:2\nlimit:1\nquery-one:ok\ntransaction:ok\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn db_scope_enforces_policy_on_query_insert_and_live_default() {
+//RS     let (code, stdout, stderr) =
+//RS         run_default_multi("db_policy_scope_jit", "main.jet", &[("main.jet", SOURCE)]);
+//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
+//RS     assert_eq!(stdout, "audit:DBPolicy(table=tasks, user=alice, expr=owner == user, predicate=owner = ?)\nschema:rejected\nrows:2\nlimit:1\nquery-one:ok\ntransaction:ok\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
+//RS }
+//RS 
+//RS /// D-DBPOLICY1=A + I9: the closed policy language is one fact
+//RS /// (`Prelude/CoreLib/JetStd/RowPolicy.rs`), so a rejected policy is rejected on
+//RS /// every tier and an accepted one normalizes identically. A leading-digit table
+//RS /// and a padded table used to divide AOT from the JIT/ambient hosts, which each
+//RS /// re-derived the rule.
+//RS const INVALID_POLICY_SOURCE: &str = r#"
+//RS use core.db as db
+//RS 
+//RS fn run() {
+//RS     conn := db.open_memory()
+//RS     if db.policy("9tasks", "true") == {
+//RS         .Ok(_) -> {
+//RS             print("digit-table:accepted")
+//RS         }
+//RS         .Err(_) -> {
+//RS             print("digit-table:rejected")
+//RS         }
+//RS     }
+//RS     if db.policy("two words", "true") == {
+//RS         .Ok(_) -> {
+//RS             print("spaced-table:accepted")
+//RS         }
+//RS         .Err(_) -> {
+//RS             print("spaced-table:rejected")
+//RS         }
+//RS     }
+//RS     if db.policy("tasks", "owner != user") == {
+//RS         .Ok(_) -> {
+//RS             print("other-expr:accepted")
+//RS         }
+//RS         .Err(_) -> {
+//RS             print("other-expr:rejected")
+//RS         }
+//RS     }
+//RS     padded :: db.policy("  tasks  ", "owner == user") ?? panic("padded policy")
+//RS     scoped := conn.with_policy(padded, "alice")
+//RS     _created :: db.migrate(scoped, "tasks-v1", [SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}]) ?? panic("create")
+//RS     owner :: "bob"
+//RS     title :: "one"
+//RS     _one :: scoped.execute(
+//RS         SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"}
+//RS     ) ?? panic("insert")
+//RS     rows :: scoped.query(SQL{"SELECT title FROM tasks"}) ?? panic("query")
+//RS     print("padded-rows:{rows.len()}")
+//RS     _closed :: scoped.close()
+//RS }
+//RS "#;
+//RS 
+//RS const INVALID_POLICY_EXPECTED: &str =
+//RS     "digit-table:rejected\nspaced-table:rejected\nother-expr:rejected\npadded-rows:1\n";
+//RS 
+//RS #[test]
+//RS fn invalid_row_policy_is_denied_the_same_way_aot() {
+//RS     let (code, stdout) = build_and_run("db_policy_invalid", INVALID_POLICY_SOURCE);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, INVALID_POLICY_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn invalid_row_policy_is_denied_the_same_way_default() {
+//RS     let (code, stdout, stderr) = run_default_multi(
+//RS         "db_policy_invalid_jit",
+//RS         "main.jet",
+//RS         &[("main.jet", INVALID_POLICY_SOURCE)],
+//RS     );
+//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
+//RS     assert_eq!(stdout, INVALID_POLICY_EXPECTED);
+//RS }
+//RS const BLOB_SOURCE: &str = r#"
+//RS use core.db as db
+//RS 
+//RS fn run() {
+//RS     conn := db.open_memory()
+//RS     policy :: db.policy("blobs", "true") ?? panic("policy")
+//RS     scoped := conn.with_policy(policy, "alice")
+//RS     _created :: db.migrate(scoped, "blobs-v1", [
+//RS         SQL{"CREATE TABLE blobs (payload BLOB, explicit_payload BLOB)"}
+//RS     ]) ?? panic("create")
+//RS     payload :: [U8]{0, 1, 2, 127, 128, 255}
+//RS     explicit_payload :: [U8]{0, 1, 2, 127, 128, 255}
+//RS     bound :: DBValue.Blob(explicit_payload)
+//RS     _inserted :: scoped.execute(
+//RS         SQL{"INSERT INTO blobs (payload, explicit_payload) VALUES ({payload}, {bound})"}
+//RS     ) ?? panic("insert")
+//RS     row :: scoped.query_one(
+//RS         SQL{"SELECT payload, explicit_payload FROM blobs"}
+//RS     ) ?? panic("query")
+//RS     direct :: db.row_value(row, "payload") ?? panic("direct row value")
+//RS     explicit :: db.row_value(row, "explicit_payload") ?? panic("explicit row value")
+//RS     direct_bytes :: direct.blob() ?? panic("direct blob")
+//RS     explicit_bytes :: explicit.blob() ?? panic("explicit blob")
+//RS     print("direct:{direct_bytes}")
+//RS     print("explicit:{explicit_bytes}")
+//RS     print("equal:{direct_bytes == payload && explicit_bytes == explicit_payload}")
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn sqlite_blob_round_trip_preserves_bytes_across_tiers() {
+//RS     assert_tiers_agree(
+//RS         "db_policy_blob",
+//RS         BLOB_SOURCE,
+//RS         "direct:[0, 1, 2, 127, 128, 255]\nexplicit:[0, 1, 2, 127, 128, 255]\nequal:true\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 1027 tests/db_policy.rs:1-332
+
+// PORT-PENDING 1027 tests-data-one-kernel-module-group: tests/deadline_clock_single_home.rs:1-71
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #1747: the `#Context(deadline: …)` clock, budget, and
+//RS //! `JetDeadlineGuard` now live in one file, `Prelude/Deadline.rs`, included
+//RS //! by both the AOT emission list (`Codegen/mod.rs`) and the in-crate
+//RS //! `jet_codegen::scheduler` module that the Cranelift JIT and `net_http_rt`
+//RS //! compile. `MathRandomTime.rs`, `SchedulerHost.rs`, and `net_http_rt.rs`
+//RS //! used to hand-type their own copy of the clock function and the
+//RS //! thread-local deadline cell; this guard fails if a second copy reappears.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS fn root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS const DEADLINE_HOME: &str = "crates/jet-codegen/src/Prelude/Deadline.rs";
+//RS 
+//RS fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+//RS     let Ok(entries) = fs::read_dir(dir) else {
+//RS         return;
+//RS     };
+//RS     for entry in entries.flatten() {
+//RS         let path = entry.path();
+//RS         if path.is_dir() {
+//RS             collect_rs_files(&path, out);
+//RS         } else if path.extension().is_some_and(|e| e == "rs") {
+//RS             out.push(path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn homes_for(needle: &str) -> Vec<String> {
+//RS     let root = root();
+//RS     let mut files = Vec::new();
+//RS     collect_rs_files(&root.join("crates"), &mut files);
+//RS     let mut homes = Vec::new();
+//RS     for file in &files {
+//RS         let text = fs::read_to_string(file).unwrap_or_default();
+//RS         if text.contains(needle) {
+//RS             homes.push(
+//RS                 file.strip_prefix(&root)
+//RS                     .unwrap_or(file)
+//RS                     .display()
+//RS                     .to_string(),
+//RS             );
+//RS         }
+//RS     }
+//RS     homes
+//RS }
+//RS 
+//RS #[test]
+//RS fn deadline_clock_fn_lives_only_in_the_one_renderer() {
+//RS     let homes = homes_for("fn jet_std_time_now");
+//RS     assert_eq!(
+//RS         homes,
+//RS         vec![DEADLINE_HOME.to_string()],
+//RS         "jet_std_time_now must be defined only in {DEADLINE_HOME}, found in: {homes:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn deadline_thread_local_lives_only_in_the_one_renderer() {
+//RS     let homes = homes_for("static JET_CTX_DEADLINE_MS");
+//RS     assert_eq!(
+//RS         homes,
+//RS         vec![DEADLINE_HOME.to_string()],
+//RS         "JET_CTX_DEADLINE_MS must be declared only in {DEADLINE_HOME}, found in: {homes:?}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1027 tests/deadline_clock_single_home.rs:1-71
+
+// PORT-PENDING 1027 tests-data-one-kernel-module-group: tests/decisions.rs:1-478
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Ratification enforcement (invariant I7 + Docs/spec/syntax-decisions.md).
+//RS //!
+//RS //! Every `cargo test` run verifies that `Docs/spec/syntax-decisions.md` and
+//RS //! `crates/jet-foundation/src/Syntax.rs` plus its split fragments stay in sync — ratified decisions
+//RS //! cannot drift back to "provisional" in code, and open/deferred decisions cannot land in syntax
+//RS //! without owner sign-off.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::fs;
+//RS 
+//RS #[test]
+//RS fn ratified_decisions_enforced() {
+//RS     let docs =
+//RS         fs::read_to_string("Docs/spec/syntax-decisions.md").expect("Docs/spec/syntax-decisions.md");
+//RS     let syntax = read_syntax_surface();
+//RS     let ratified = extract_section_ids(&docs, "## Ratified", "## Enforcement");
+//RS 
+//RS     for (id, status) in parse_syntax_rs_status(&syntax) {
+//RS         assert!(
+//RS             ratified.contains(&id),
+//RS             "{id} is in crates/jet-foundation/src/Syntax.rs or Syntax/ fragments but not ratified in Docs/spec/syntax-decisions.md"
+//RS         );
+//RS         assert_ne!(
+//RS             status, "provisional",
+//RS             "{id} is ratified but still marked provisional in the canonical syntax source"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS // ---------------------------------------------------------------------------
+//RS // I7 pin (card #447 / durability W2): every `pub const KW_*` / `SIGIL_*` in
+//RS // crates/jet-foundation/src/Syntax.rs and its Syntax/ fragments must sit
+//RS // directly under (or carry a trailing) comment naming a decision ID (S123 /
+//RS // N12 / U12 / D-XXXX / D-XXXX=A). A blank line between the decision comment
+//RS // and the const closes the old "no adjacent comment" escape (decisions.rs
+//RS // used to `continue` past any const whose comment lacked a status tag) — no
+//RS // more silent unratified keyword/sigil constants. Scope is KW_*/SIGIL_*
+//RS // (the user-typeable keyword/sigil surface I7 governs); other pub consts
+//RS // (types, attrs, aggregated tables) are covered by the broader
+//RS // ratified_decisions_enforced check above.
+//RS // ---------------------------------------------------------------------------
+//RS #[test]
+//RS fn every_syntax_const_has_adjacent_decision_comment() {
+//RS     let root = "crates/jet-foundation/src/Syntax";
+//RS     let mut files: Vec<String> = vec!["crates/jet-foundation/src/Syntax.rs".to_string()];
+//RS     let mut entries: Vec<_> = fs::read_dir(root)
+//RS         .expect(root)
+//RS         .map(|e| e.expect("Syntax fragment entry").path())
+//RS         .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("rs"))
+//RS         .collect();
+//RS     entries.sort();
+//RS     for path in entries {
+//RS         files.push(path.display().to_string());
+//RS     }
+//RS 
+//RS     // Ratchet (card #447 / W2): foundational keywords predating the
+//RS     // S-numbered decision log carry a `KW_DECISION_ID_EXEMPT` marker comment
+//RS     // instead of a fabricated decision ID. This count must never grow —
+//RS     // shrinking (by finding/assigning the real ID) is always welcome.
+//RS     const EXEMPT_MARKER: &str = "KW_DECISION_ID_EXEMPT";
+//RS     const EXEMPT_BASELINE: usize = 2; // KW_RETURN, KW_IT
+//RS 
+//RS     let mut violations = Vec::new();
+//RS     let mut exempt_count = 0usize;
+//RS     for file in &files {
+//RS         let source = fs::read_to_string(file).unwrap_or_else(|err| panic!("{file}: {err}"));
+//RS         let mut covered = false;
+//RS         let mut exempt = false;
+//RS         for (i, line) in source.lines().enumerate() {
+//RS             let t = line.trim();
+//RS             if t.is_empty() {
+//RS                 covered = false;
+//RS                 exempt = false;
+//RS                 continue;
+//RS             }
+//RS             if t.starts_with("///") || t.starts_with("//!") {
+//RS                 if line_has_decision_id(t) {
+//RS                     covered = true;
+//RS                 }
+//RS                 if t.contains(EXEMPT_MARKER) {
+//RS                     exempt = true;
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             let is_kw_or_sigil =
+//RS                 t.starts_with("pub const KW_") || t.starts_with("pub const SIGIL_");
+//RS             if is_kw_or_sigil && !covered && !line_has_decision_id(t) {
+//RS                 if exempt {
+//RS                     exempt_count += 1;
+//RS                 } else {
+//RS                     violations.push(format!("{file}:{}: {t}", i + 1));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     assert!(
+//RS         violations.is_empty(),
+//RS         "pub const KW_*/SIGIL_* declarations without an adjacent decision-ID doc \
+//RS          comment (I7 — add `/// S123 (ratified): …` or `/// D-XXXX=A: …` directly \
+//RS          above, no blank line in between; or a `KW_DECISION_ID_EXEMPT` marker \
+//RS          comment if truly foundational and pre-dates the decision log):\n{}",
+//RS         violations.join("\n")
+//RS     );
+//RS     assert!(
+//RS         exempt_count <= EXEMPT_BASELINE,
+//RS         "KW_DECISION_ID_EXEMPT count grew from {EXEMPT_BASELINE} to {exempt_count} — \
+//RS          find/assign a real decision ID instead of exempting a new keyword const"
+//RS     );
+//RS }
+//RS 
+//RS /// #1670 / D-ONCE-LAW1=A: a real tombstone guard, not two hand-picked
+//RS /// sentences. Every truth has one home (Docs/spec/syntax-decisions.md's
+//RS /// "Superseded & deferred IDs (tombstones)" section); a comment citing a
+//RS /// tombstoned ID is only honest if it says so. This parses the tombstone ID
+//RS /// list from that section (so a newly-tombstoned ID is covered automatically,
+//RS /// no hand-maintained copy) and scans every `.rs` comment under `crates/`
+//RS /// and `Source/` for a literal citation. A hit must carry a provenance word
+//RS /// (retires/retired/superseded/formerly/historical/tombstoned/predates)
+//RS /// in the same comment block, or it reads as current law and fails the test.
+//RS ///
+//RS /// Scope note: only `D-`-prefixed tombstone IDs are scanned. Bare `S`/`N`/`U`
+//RS /// tombstone numbers (S6, S10, U1, U10, …) collide with unrelated numbering
+//RS /// used elsewhere in the corpus — e.g. `D-MEM1 S6` names a memory-model spec
+//RS /// section, not the retired semicolon decision S6 — so a literal-substring
+//RS /// scan over them produces false positives a lazy guard cannot tell apart
+//RS /// from a real citation. `D-` IDs are namespaced and collision-free, and they
+//RS /// are the entire evidence base for this card (~25 D-CTMARKER1 + ~20
+//RS /// D-MARKERMOVE* citations). Widening to bare S/N/U tombstones needs
+//RS /// contextual disambiguation, which is future work, not a silent allowlist.
+//RS ///
+//RS /// The scan covers all of `crates/` and `Source/` with no exclusions — a
+//RS /// carved-out path is a hole the guard cannot see (review bd10-rev proved the
+//RS /// point by planting a violation in an excluded path).
+//RS #[test]
+//RS fn tombstoned_decision_ids_carry_provenance() {
+//RS     let docs =
+//RS         fs::read_to_string("Docs/spec/syntax-decisions.md").expect("Docs/spec/syntax-decisions.md");
+//RS     let tombstones = extract_tombstone_d_ids(&docs);
+//RS     assert!(
+//RS         tombstones.contains("D-CTMARKER1")
+//RS             && tombstones.contains("D-MARKERMOVE1")
+//RS             && tombstones.contains("D-MARKERMOVE2")
+//RS             && tombstones.contains("D-MARKERMOVE3")
+//RS             && tombstones.contains("D-MARKER-FAMILY1"),
+//RS         "tombstone extraction regressed: expected D-CTMARKER1/D-MARKER-FAMILY1/D-MARKERMOVE1..3, got {tombstones:?}"
+//RS     );
+//RS 
+//RS     const EXCLUDED_DIRS: &[&str] = &[];
+//RS     const EXCLUDED_FILES: &[&str] = &[];
+//RS     const PROVENANCE_WORDS: &[&str] = &[
+//RS         "retires",
+//RS         "retired",
+//RS         "superseded",
+//RS         "formerly",
+//RS         "historical",
+//RS         "tombstoned",
+//RS         "predates",
+//RS     ];
+//RS 
+//RS     let mut files = Vec::new();
+//RS     for root in ["crates", "Source"] {
+//RS         collect_rs_files(root, EXCLUDED_DIRS, &mut files);
+//RS     }
+//RS 
+//RS     let mut violations = Vec::new();
+//RS     for path in &files {
+//RS         if EXCLUDED_FILES.contains(&path.as_str()) {
+//RS             continue;
+//RS         }
+//RS         let raw = fs::read_to_string(path).unwrap_or_else(|err| panic!("{path}: {err}"));
+//RS         for (block_start, block) in comment_blocks(&raw) {
+//RS             let joined = block.join(" ");
+//RS             for id in &tombstones {
+//RS                 if !contains_id(&joined, id) {
+//RS                     continue;
+//RS                 }
+//RS                 let has_provenance = PROVENANCE_WORDS
+//RS                     .iter()
+//RS                     .any(|w| joined.to_lowercase().contains(w));
+//RS                 if !has_provenance {
+//RS                     violations.push(format!(
+//RS                         "{path}:{block_start}: cites tombstoned {id} with no provenance word ({})",
+//RS                         PROVENANCE_WORDS.join("/")
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     assert!(
+//RS         violations.is_empty(),
+//RS         "comments cite a tombstoned decision ID as if it were live law (#1670, D-ONCE-LAW1):\n{}",
+//RS         violations.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS /// Recursively collect `.rs` file paths under `dir`, skipping any path equal
+//RS /// to (or nested under) an entry in `exclude_dirs`.
+//RS fn collect_rs_files(dir: &str, exclude_dirs: &[&str], out: &mut Vec<String>) {
+//RS     if exclude_dirs
+//RS         .iter()
+//RS         .any(|ex| dir == *ex || dir.starts_with(&format!("{ex}/")))
+//RS     {
+//RS         return;
+//RS     }
+//RS     let entries = match fs::read_dir(dir) {
+//RS         Ok(e) => e,
+//RS         Err(_) => return,
+//RS     };
+//RS     let mut children: Vec<_> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+//RS     children.sort();
+//RS     for path in children {
+//RS         let path_str = path.display().to_string();
+//RS         if exclude_dirs
+//RS             .iter()
+//RS             .any(|ex| path_str == *ex || path_str.starts_with(&format!("{ex}/")))
+//RS         {
+//RS             continue;
+//RS         }
+//RS         if path.is_dir() {
+//RS             collect_rs_files(&path_str, exclude_dirs, out);
+//RS         } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+//RS             out.push(path_str);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Group contiguous `//`, `///`, `//!` comment lines into blocks (a blank
+//RS /// line or a non-comment line closes a block). Returns each block's
+//RS /// 1-indexed starting line number alongside its lines, so a phrase wrapped
+//RS /// across several comment lines is still checked as one continuous string.
+//RS fn comment_blocks(raw: &str) -> Vec<(usize, Vec<&str>)> {
+//RS     let mut blocks = Vec::new();
+//RS     let mut current: Vec<&str> = Vec::new();
+//RS     let mut current_start = 0usize;
+//RS     for (i, line) in raw.lines().enumerate() {
+//RS         let t = line.trim_start();
+//RS         if t.starts_with("//") {
+//RS             if current.is_empty() {
+//RS                 current_start = i + 1;
+//RS             }
+//RS             current.push(line);
+//RS         } else if !current.is_empty() {
+//RS             blocks.push((current_start, std::mem::take(&mut current)));
+//RS         }
+//RS     }
+//RS     if !current.is_empty() {
+//RS         blocks.push((current_start, current));
+//RS     }
+//RS     blocks
+//RS }
+//RS 
+//RS /// Whole-word literal match of `id` inside `text`: the char immediately
+//RS /// before and after the match (if any) must not be alphanumeric or `-`, so
+//RS /// `S6` cannot false-match inside `S6-R` and `D-CTMARKER1` cannot false-match
+//RS /// inside a longer `D-CTMARKER1X`-shaped token.
+//RS fn contains_id(text: &str, id: &str) -> bool {
+//RS     let bytes = text.as_bytes();
+//RS     let idb = id.as_bytes();
+//RS     if idb.is_empty() || bytes.len() < idb.len() {
+//RS         return false;
+//RS     }
+//RS     for start in 0..=(bytes.len() - idb.len()) {
+//RS         if &bytes[start..start + idb.len()] != idb {
+//RS             continue;
+//RS         }
+//RS         let before_ok = start == 0 || {
+//RS             let c = bytes[start - 1];
+//RS             !(c.is_ascii_alphanumeric() || c == b'-')
+//RS         };
+//RS         let after = start + idb.len();
+//RS         let after_ok = after >= bytes.len() || {
+//RS             let c = bytes[after];
+//RS             !(c.is_ascii_alphanumeric() || c == b'-')
+//RS         };
+//RS         if before_ok && after_ok {
+//RS             return true;
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS /// Parse `D-`-prefixed tombstone IDs out of the "Superseded & deferred IDs
+//RS /// (tombstones)" section of Docs/spec/syntax-decisions.md. Each record is a
+//RS /// `**id-list [— title]**: description.` paragraph; the id-list is a
+//RS /// comma/` / `-separated list, and a compact `D-PREFIXn/m/o` spelling expands
+//RS /// to `D-PREFIXn`, `D-PREFIXm`, `D-PREFIXo`. Bare S/N/U tombstone numbers are
+//RS /// intentionally not extracted here — see the scope note on the test above.
+//RS fn extract_tombstone_d_ids(docs: &str) -> BTreeSet<String> {
+//RS     let section = section_between(docs, "### Superseded IDs (tombstones)", "## Enforcement");
+//RS     let joined = section.replace('\n', " ");
+//RS     let mut ids = BTreeSet::new();
+//RS     let mut rest = joined.as_str();
+//RS     while let Some(start) = rest.find("**") {
+//RS         let after_start = &rest[start + 2..];
+//RS         let Some(end) = after_start.find("**") else {
+//RS             break;
+//RS         };
+//RS         let bold = &after_start[..end];
+//RS         let id_part = match bold.find(" — ") {
+//RS             Some(i) => &bold[..i],
+//RS             None => bold,
+//RS         };
+//RS         for comma_piece in id_part.split(',') {
+//RS             for piece in comma_piece.split(" / ") {
+//RS                 let piece = piece.trim();
+//RS                 if !piece.starts_with("D-") {
+//RS                     continue;
+//RS                 }
+//RS                 for expanded in expand_slash_compound(piece) {
+//RS                     ids.insert(expanded);
+//RS                 }
+//RS             }
+//RS         }
+//RS         rest = &after_start[end + 2..];
+//RS     }
+//RS     ids
+//RS }
+//RS 
+//RS /// Expand a compact `D-PREFIXn/m/o` (or `D-PREFIXn/m-suffix`) tombstone
+//RS /// spelling into its full IDs. A token with no `/` is returned unchanged.
+//RS fn expand_slash_compound(tok: &str) -> Vec<String> {
+//RS     if !tok.contains('/') {
+//RS         return vec![tok.to_string()];
+//RS     }
+//RS     let segs: Vec<&str> = tok.split('/').collect();
+//RS     let first = segs[0];
+//RS     // Prefix: the non-digit head of the first segment, e.g. "D-CAP" out of "D-CAP1".
+//RS     let prefix_end = first
+//RS         .find(|c: char| c.is_ascii_digit())
+//RS         .unwrap_or(first.len());
+//RS     let prefix = &first[..prefix_end];
+//RS     // Suffix: any trailing non-digit text after the last segment's leading
+//RS     // digit run, e.g. "-words" out of "2-words" in `D-CAP1/2-words`. This
+//RS     // suffix belongs to every expanded ID, including the first.
+//RS     let last = segs[segs.len() - 1];
+//RS     let last_digit_end = last
+//RS         .find(|c: char| !c.is_ascii_digit())
+//RS         .unwrap_or(last.len());
+//RS     let suffix = &last[last_digit_end..];
+//RS     let mut out = Vec::new();
+//RS     for seg in &segs {
+//RS         let digits: String = seg
+//RS             .chars()
+//RS             .skip_while(|c| !c.is_ascii_digit())
+//RS             .take_while(|c| c.is_ascii_digit())
+//RS             .collect();
+//RS         out.push(format!("{prefix}{digits}{suffix}"));
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn line_has_decision_id(line: &str) -> bool {
+//RS     // Matches S123 / N12 / U12 tokens, or D-XXXX / D-XXXX=A / D-XXXX1=A decision IDs.
+//RS     let bytes = line.as_bytes();
+//RS     let mut i = 0;
+//RS     while i < bytes.len() {
+//RS         let c = bytes[i];
+//RS         if (c == b'S' || c == b'N' || c == b'U')
+//RS             && i + 1 < bytes.len()
+//RS             && bytes[i + 1].is_ascii_digit()
+//RS         {
+//RS             let mut j = i + 1;
+//RS             while j < bytes.len() && bytes[j].is_ascii_digit() {
+//RS                 j += 1;
+//RS             }
+//RS             let word_start_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+//RS             let word_end_ok = j >= bytes.len() || !bytes[j].is_ascii_alphanumeric();
+//RS             if word_start_ok && word_end_ok {
+//RS                 return true;
+//RS             }
+//RS             i = j;
+//RS             continue;
+//RS         }
+//RS         if c == b'D' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+//RS             let word_start_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+//RS             if word_start_ok {
+//RS                 return true;
+//RS             }
+//RS         }
+//RS         i += 1;
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS fn read_syntax_surface() -> String {
+//RS     let root = "crates/jet-foundation/src/Syntax.rs";
+//RS     let mut syntax = fs::read_to_string(root).expect(root);
+//RS     let dir = "crates/jet-foundation/src/Syntax";
+//RS     let mut entries: Vec<_> = fs::read_dir(dir)
+//RS         .expect(dir)
+//RS         .map(|entry| entry.expect("Syntax fragment entry").path())
+//RS         .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("rs"))
+//RS         .collect();
+//RS     entries.sort();
+//RS     for path in entries {
+//RS         syntax.push('\n');
+//RS         syntax.push_str(&fs::read_to_string(&path).unwrap_or_else(|err| {
+//RS             panic!("{}: {err}", path.display());
+//RS         }));
+//RS     }
+//RS     syntax
+//RS }
+//RS 
+//RS fn extract_section_ids(docs: &str, start: &str, end: &str) -> BTreeSet<String> {
+//RS     let body = section_between(docs, start, end);
+//RS     ids_in_text(body)
+//RS }
+//RS 
+//RS fn section_between<'a>(docs: &'a str, start: &str, end: &str) -> &'a str {
+//RS     let from = docs
+//RS         .find(start)
+//RS         .unwrap_or_else(|| panic!("Docs/spec/syntax-decisions.md missing section header: {start}"));
+//RS     let rest = &docs[from + start.len()..];
+//RS     let to = rest.find(end).unwrap_or_else(|| {
+//RS         panic!("Docs/spec/syntax-decisions.md missing section header after {start}: {end}")
+//RS     });
+//RS     &rest[..to]
+//RS }
+//RS 
+//RS fn ids_in_text(text: &str) -> BTreeSet<String> {
+//RS     let mut out = BTreeSet::new();
+//RS     for line in text.lines() {
+//RS         if let Some(id) = line_id(line) {
+//RS             out.insert(id);
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn line_id(line: &str) -> Option<String> {
+//RS     let line = line.trim();
+//RS     if !line.starts_with("**") {
+//RS         return None;
+//RS     }
+//RS     let rest = &line[2..];
+//RS     let end = rest.find(' ').or_else(|| rest.find('\u{2014}'))?;
+//RS     let id = &rest[..end];
+//RS     // S/N decisions (language surface) and U decisions (unified ecosystem,
+//RS     // U1–U7) are enforced. D-JPK* IDs start with `D` and are left alone.
+//RS     if (id.starts_with('S') || id.starts_with('N') || id.starts_with('U'))
+//RS         && id[1..].chars().all(|c| c.is_ascii_digit())
+//RS     {
+//RS         Some(id.to_string())
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS fn parse_syntax_rs_status(syntax: &str) -> BTreeMap<String, String> {
+//RS     let mut out = BTreeMap::new();
+//RS     for line in syntax.lines() {
+//RS         let line = line.trim();
+//RS         if !line.starts_with("///") {
+//RS             continue;
+//RS         }
+//RS         let rest = line.trim_start_matches('/').trim();
+//RS         if !rest.starts_with('S') && !rest.starts_with('N') && !rest.starts_with('U') {
+//RS             continue;
+//RS         }
+//RS         let id_end = rest
+//RS             .find(' ')
+//RS             .unwrap_or_else(|| panic!("malformed syntax.rs decision comment: {line}"));
+//RS         let id = &rest[..id_end];
+//RS         let status = if rest.contains("(provisional)") {
+//RS             "provisional"
+//RS         } else if rest.contains("(ratified") {
+//RS             "ratified"
+//RS         } else {
+//RS             continue;
+//RS         };
+//RS         out.insert(id.to_string(), status.to_string());
+//RS     }
+//RS     out
+//RS }
+// END-PORT-PENDING 1027 tests/decisions.rs:1-478
+

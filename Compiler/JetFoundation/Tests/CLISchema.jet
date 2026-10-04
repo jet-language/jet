@@ -1,0 +1,75 @@
+// No inline Rust tests occur in CLISchema.rs:1-1797; these controls retain the
+// version-8 wire contract, corruption rejection, positional width and byte order.
+fn cli_schema_test_command() -> CLICommandSchema Never! {
+    CLICommandSchema{entry_type: "Options", description: Val("tool docs"), standard: true,
+        version: Val("1.2.3"), inputs: [CLIInputSchema]{CLIInputSchema{
+            field: "path", flag: "--path", short: Val("p"), env: Val("TOOL_PATH"), help: "input path",
+            metavar: Val("PATH"), shape: CLIInputShape.Value{kind: CLIValueKind.Path, optional: false,
+                default: Val(CLIDefault.Recorded{value: "input.jet"})}, positional: Val(U16{65535})}},
+        commands: [CLISubcommandSchema]{CLISubcommandSchema{name: "clean", description: None,
+            inputs: [CLIInputSchema]{CLIInputSchema{field: "force", flag: "--force", short: None,
+                env: None, help: "force removal", metavar: None, shape: CLIInputShape.Flag, positional: None}}}},
+        jobs: [JobFact]{JobFact{name: "ship", scope: JobScope.Ship, doc: Val("ship docs"),
+            arguments: [JobArgumentSchema]{JobArgumentSchema{name: "target", label: "target", ty: "String",
+                required: true, default: None, variadic: false, zone: ParamZone.LabelOnly}},
+            after: [String]{"build"}, packages: [String]{"files"}, cwd: Val("work"),
+            inputs: [String]{"input.jet"}, outputs: [String]{"output"},
+            skip: Val(JobSkip.UnlessPlatform{platform: "linux"}), cache: JobCachePolicy.Shared,
+            parallel: 3, limits: [StringMapEntry]{StringMapEntry{key: "cpu", value: "2"},
+                StringMapEntry{key: "memory", value: "64MiB"}}, schedule: Val("day 03:04")}}}
+}
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:832-858,1201-1275
+#Test("cli_schema_v8_record_roundtrip_retains_complete_job_policy") {
+    schema :: cli_schema_test_command()
+    bytes :: encode_record(schema)
+    assert_eq(bytes[8], U8{8})
+    assert_eq(bytes[9], U8{0})
+    assert_eq(decode_record(bytes.view(0..<bytes.len())), Ok(schema))
+    assert(!schema.inputs[0].required())
+    assert_eq(schema.inputs[0].value_kind(), CLIValueKind.Path)
+    assert_eq(schema.inputs[0].default_display(), Val("input.jet"))
+    assert_eq(schema.commands[0].inputs[0].default_display(), Val("false"))
+}
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:1201-1215
+#Test("cli_schema_record_rejects_header_version_length_and_digest") {
+    schema :: cli_schema_test_command()
+    bad_header := encode_record(schema)
+    bad_header[0] = U8{0}
+    assert_eq(decode_record(bad_header.view(0..<bad_header.len())), Err(MetadataError.Malformed{why: "bad record header"}))
+    bad_version := encode_record(schema)
+    bad_version[8] = U8{7}
+    assert_eq(decode_record(bad_version.view(0..<bad_version.len())), Err(MetadataError.UnsupportedVersion{version: U16{7}}))
+    bad_length := encode_record(schema)
+    bad_length[10] = bad_length[10] ~| U8{1}
+    assert_eq(decode_record(bad_length.view(0..<bad_length.len())), Err(MetadataError.Malformed{why: "invalid record length"}))
+    bad_digest := encode_record(schema)
+    bad_digest[14] = bad_digest[14] ~| U8{1}
+    assert_eq(decode_record(bad_digest.view(0..<bad_digest.len())), Err(MetadataError.Malformed{why: "digest mismatch"}))
+}
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:1516-1574
+#Test("cli_schema_input_positional_rejects_u16_overflow") {
+    payload := [U8]{}
+    input :: cli_schema_test_command().inputs[0]
+    encode_input(&payload, input)
+    // Last five bytes are the present bit followed by the little-endian order.
+    payload[payload.len() - 2] = U8{1}
+    cursor := Cursor.new(payload.view(0..<payload.len()))
+    assert_eq(decode_input(&cursor), Err(MetadataError.Malformed{why: "positional order out of range"}))
+}
+
+// Rust: crates/jet-foundation/src/CLISchema.rs:1647-1680
+#Test("cli_schema_numeric_and_section_name_byte_contract") {
+    bytes :: [U8]{1, 2, 3, 4, 0, 255}
+    assert_eq(read_num(bytes.view(0..<bytes.len()), 0, 4, true), Ok(U64{0x04030201}))
+    assert_eq(read_num(bytes.view(0..<bytes.len()), 0, 4, false), Ok(U64{0x01020304}))
+    assert_eq(read_num(bytes.view(0..<bytes.len()), 0, 3, true), Err(MetadataError.Malformed{why: "invalid integer width"}))
+    assert_eq(bounds(bytes.view(0..<bytes.len()), 5, 2), Err(MetadataError.Malformed{why: "section outside file"}))
+    name :: [U8]{46, 106, 101, 116, 99, 109, 100, 0, 255}
+    assert_eq(c_name(name.view(0..<name.len())), Ok(".jetcmd"))
+    invalid :: [U8]{255}
+    assert_eq(c_name(invalid.view(0..<invalid.len())), Err(MetadataError.Malformed{why: "section name is not UTF-8"}))
+    assert_eq(read_executable(bytes.view(0..<bytes.len())), Err(MetadataError.UnknownFormat))
+}

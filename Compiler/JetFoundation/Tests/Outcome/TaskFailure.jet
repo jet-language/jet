@@ -1,0 +1,19 @@
+// Outcome.rs:2169-2186 has no local task-failure unit test. These assert the
+// original message, derived equality, and Debug projection used by backend.
+#Test("task_failure_has_one_message_contract") {
+    assert_eq(jet_task_failure_message(.Cancelled), "task cancelled")
+    assert_eq(jet_task_failure_message(.DeadlineBlown), "task deadline exceeded")
+    assert_eq(jet_task_failure_message(.Panicked{reason: "exact reason"}), "exact reason")
+    assert_eq(jet_task_failure_message(.Panicked{reason: ""}), "")
+}
+#Test("task_failure_equality_compares_variant_and_exact_panic_payload") {
+    assert(JetTaskFailure.Cancelled == JetTaskFailure.Cancelled)
+    assert(JetTaskFailure.Cancelled != JetTaskFailure.DeadlineBlown)
+    assert(JetTaskFailure.Panicked{reason: "x"} == JetTaskFailure.Panicked{reason: "x"})
+    assert(JetTaskFailure.Panicked{reason: "x"} != JetTaskFailure.Panicked{reason: "y"})
+}
+#Test("task_failure_debug_keeps_rust_scalar_escaping") {
+    assert_eq(jet_task_failure_debug(.Cancelled), "Cancelled")
+    assert_eq(jet_task_failure_debug(.DeadlineBlown), "DeadlineBlown")
+    assert_eq(jet_task_failure_debug(.Panicked{reason: "\n\"\\"}), "Panicked(\"\\n\\\"\\\\\")")
+}

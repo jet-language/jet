@@ -1,0 +1,172 @@
+// MIROptimization.rs::verify_function. Borrowed graph + small keyed indexes.
+struct MIRNativeProgramIndex {
+    functions: [U64:Bool]
+    types: [U64:Bool]
+    fields: [U64:Bool]
+    sources: [U64:Bool]
+    foreign: [U64:Bool]
+    callbacks: [U64:Bool]
+    traits: [U64:Bool]
+    core: [U64:Int]
+    prelude: [U64:Int]
+    type_definitions: [U64:Int]
+}
+struct MIRNativeFunctionIndex {
+    definitions: MIRPassDefinitions
+    blocks: [U64:Int]
+    locals: [U64:Int]
+    scopes: [U64:Int]
+    instructions: [U64:Bool]
+}
+fn mir_native_definition_type(function: MIRFunction, index: MIRNativeFunctionIndex, value: MIRValueID) -> MIRType? Never! {
+    definition :: index.definitions.values.get(value.value) ?? return None
+    block :: index.blocks.get(definition.block.value) ?? return None
+    function.blocks[block].instructions[definition.index].ty
+}
+fn mir_native_definition_ownership(function: MIRFunction, index: MIRNativeFunctionIndex, value: MIRValueID) -> MIROwnership Never! {
+    position :: index.definitions.metadata.get(value.value) ?? return mir_copy_ownership()
+    function.values[position].ownership
+}
+
+// MIROptimization.rs:1220-1259.
+fn mir_native_verify_function_owner(owner: MIRType, function: MIRFunctionID, span: Span, types: [U64:Bool]) MIRLegalityError! {
+    mir_native_verify_type(owner, span, function)
+    identity :: owner.identity ?? return Err(MIRLegalityError.InvalidReference{function: function, subject: "function form owner has no type identity", span: span})
+    if types.get(identity.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function, subject: "function form owner type MirTypeId({identity.value})", span: span})
+    return
+}
+fn mir_native_verify_function_form(form: MIRFunctionForm, types: [U64:Bool], traits: [U64:Bool], span: Span, function: MIRFunctionID) MIRLegalityError! {
+    if form == {
+        .TopLevel -> {}
+        .Method(owner, _) -> mir_native_verify_function_owner(owner, function, span, types)
+        .TraitMethod(owner, trait_ref, _, _) -> {
+            mir_native_verify_function_owner(owner, function, span, types)
+            if trait_ref.id.value == U64{0} || traits.get(trait_ref.id.value) == None || trait_ref.name.len() == 0 -> return Err(MIRLegalityError.InvalidReference{function: function, subject: "function form trait MirTraitId({trait_ref.id.value})", span: span})
+        }
+    }
+    return
+}
+
+// MIROptimization.rs:1261-1425. Preserve error order, including the independent
+// copy-fact check before moves and optimization metadata after ownership.
+fn mir_native_verify_function(function: MIRFunction, program: MIRProgram, tables: MIRNativeProgramIndex) MIRLegalityError! {
+    if tables.sources.get(function.source_file.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "source file MirSourceFileId({function.source_file.value})", span: function.span})
+    if function.span.start > function.span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function.id), span: function.span})
+    mir_native_verify_function_form(function.form, tables.types, tables.traits, function.span, function.id)
+    mir_native_verify_generic_params(function.generic_params, tables.traits, function.span)
+    loop (slot, capture) in function.capture_params {
+        if capture.slot != slot || capture.name.len() == 0 -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "capture parameter slot {capture.slot}", span: capture.span})
+        mir_native_verify_type(capture.ty, capture.span, function.id)
+        mir_native_verify_ownership(capture.ownership, capture.span, function.id, MIRValueID{value: U64{capture.slot + 1}})
+    }
+    loop (position, param) in function.params {
+        if param.index != position -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "parameter index {param.index}", span: param.span})
+        mir_native_verify_type(param.ty, param.span, function.id)
+        mir_native_verify_ownership(param.ownership, param.span, function.id, MIRValueID{value: U64{param.index + 1}})
+    }
+    mir_native_verify_type(function.return_type, function.span, function.id)
+    if function.declared_return == .Val(ty) -> mir_native_verify_type(ty, function.span, function.id)
+    mir_native_verify_failure_carrier(function.failure, function)
+    if function.generator == .Val(generator) -> mir_native_verify_type(generator.item, function.span, function.id)
+    blocks := [U64:Int]{}
+    locals := [U64:Int]{}
+    scopes := [U64:Int]{}
+    places := [U64:Int]{}
+    metadata := [U64:Int]{}
+    definitions := [U64:MIRPassDefinition]{}
+    instructions := [U64:Bool]{}
+    loop (position, block) in function.blocks -> blocks[block.id.value] = position
+    loop (position, scope) in function.scopes { if scopes.get(scope.id.value) == None -> scopes[scope.id.value] = position }
+    loop (position, local) in function.locals -> locals[local.id.value] = position
+    loop (position, place) in function.places -> places[place.id.value] = position
+    loop (position, value) in function.values { if metadata.get(value.id.value) == None -> metadata[value.id.value] = position }
+    definition_order := [MIRValueID]{}
+    loop block in function.blocks {
+        if block.span.start > block.span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function.id), span: block.span})
+        loop (position, instruction) in block.instructions {
+            if instructions.get(instruction.id.value) != None -> return Err(MIRLegalityError.DuplicateInstruction{function: function.id, id: instruction.id.value})
+            instructions[instruction.id.value] = true
+            if instruction.span.start > instruction.span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function.id), span: instruction.span})
+            if instruction.ty == .Val(ty) -> mir_native_verify_type(ty, instruction.span, function.id)
+            if instruction.result == {
+                .Val(value) -> {
+                    if instruction.ty == None -> return Err(MIRLegalityError.InvalidType{function: function.id, span: instruction.span})
+                    if definitions.get(value.value) != None -> return Err(MIRLegalityError.Validation{error: MIRValidationError.DuplicateId{kind: "value", id: value.value}})
+                    definitions[value.value] = MIRPassDefinition{value: value, block: block.id, index: position}
+                    &definition_order.push(value)
+                }
+                .None -> { if instruction.ty != None -> return Err(MIRLegalityError.InvalidType{function: function.id, span: instruction.span}) }
+            }
+        }
+    }
+    metadata_ids := [U64:Bool]{}
+    loop value in function.values {
+        if metadata_ids.get(value.id.value) != None -> return Err(MIRLegalityError.Validation{error: MIRValidationError.DuplicateId{kind: "value metadata", id: value.id.value}})
+        metadata_ids[value.id.value] = true
+        mir_native_verify_type(value.ty, value.span, function.id)
+        mir_native_verify_ownership(value.ownership, value.span, function.id, value.id)
+        if definitions.get(value.id.value) == None -> return Err(MIRLegalityError.UnexpectedValueMetadata{function: function.id, value: value.id})
+    }
+    loop value in definition_order {
+        if metadata_ids.get(value.value) == None -> return Err(MIRLegalityError.MissingValueMetadata{function: function.id, value: value})
+    }
+    loop local in function.locals {
+        mir_native_verify_type(local.ty, local.span, function.id)
+        mir_native_verify_ownership(local.ownership, local.span, function.id, MIRValueID{value: local.id.value})
+        if places.get(local.place.value) == None -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "local {local.name} place", span: local.span})
+    }
+    index :: MIRNativeFunctionIndex{definitions: MIRPassDefinitions{values: ^definitions, places: ^places, metadata: ^metadata}, blocks: ^blocks, locals: ^locals, scopes: ^scopes, instructions: ^instructions}
+    loop place in function.places -> mir_native_verify_place(place, function, index, program, tables)
+    reachable := [U64:Bool]{}
+    loop block in mir_pass_reachable(function) -> reachable[block.value] = true
+    predecessors :: mir_pass_predecessor_map(function)
+    dominance :: mir_pass_dominators(function)
+    loop block in function.blocks -> mir_native_verify_block_references(block, function, index, program, tables, reachable, predecessors, dominance)
+    mir_native_verify_host_borrow_callback_uses(function, index, program, tables)
+    mir_native_verify_drops(function, index)
+    mir_native_verify_copy_facts(function, index)
+    mir_native_verify_moves_and_borrows(function, index, dominance, reachable)
+    mir_native_verify_facts(function, index)
+    return
+}
+
+// MIROptimization.rs:1428-1450,1453-1509. Distinct definitions are indexed
+// once by the root, replacing the native per-conversion type-definition scan.
+fn mir_native_verify_capture_operations(function: MIRFunction) MIRLegalityError! {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .Capture(slot) {
+                if slot >= function.capture_params.len() -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "capture slot {slot}", span: instruction.span})
+                if instruction.ty != Val(function.capture_params[slot].ty) -> return Err(MIRLegalityError.InvalidType{function: function.id, span: instruction.span})
+            }
+        }
+    }
+    return
+}
+fn mir_native_transparent_wrapper_base(ty: MIRType, program: MIRProgram, definitions: [U64:Int]) -> MIRType? Never! {
+    identity :: ty.identity ?? return None
+    position :: definitions.get(identity.value) ?? return None
+    if program.types[position].kind == .Distinct(base, _) -> Val(base)
+    else -> None
+}
+fn mir_native_transparent_wrapper_pair(source: MIRType, target: MIRType, program: MIRProgram, definitions: [U64:Int]) -> Bool Never! {
+    source_base :: mir_native_transparent_wrapper_base(source, program, definitions)
+    target_base :: mir_native_transparent_wrapper_base(target, program, definitions)
+    if source_base == None && target_base == None -> return false
+    left :: source_base ?? source
+    right :: target_base ?? target
+    left.kind == right.kind && left.layout == right.layout
+}
+fn mir_native_verify_transparent_conversions(function: MIRFunction, program: MIRProgram, definitions: [U64:Int]) MIRLegalityError! {
+    values := [U64:Int]{}
+    loop (position, row) in function.values -> values[row.id.value] = position
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .Convert(value, parameters, target, .Transparent) {
+                position :: values.get(value.value) ?? next
+                if parameters.len() != 0 || !mir_native_transparent_wrapper_pair(function.values[position].ty, target, program, definitions) -> return Err(MIRLegalityError.InvalidReference{function: function.id, subject: "transparent conversion is not a representation-transparent distinct pair", span: instruction.span})
+            }
+        }
+    }
+    return
+}

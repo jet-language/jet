@@ -1,0 +1,853 @@
+// Rust: jet-parser/src/Formatter/mod.rs::Fmt, Comment, SourceDelimiter, Prec.
+// A single mutable UTF-8 buffer is shared by the mutually recursive printers.
+use jet_foundation.[BinOp, Expr, FencedStatement, Func, Item, LValue, PolicyDeclaration, Span, Stmt, Type, expr_span]
+use jet_lexer.[Token, lex, TOKEN_BLOCK_COMMENT, TOKEN_COMMA, TOKEN_EOF, TOKEN_GT, TOKEN_LAMBDA_ARROW, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LINE_COMMENT, TOKEN_LPAREN, TOKEN_LT, TOKEN_MINUS, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_SHR, TOKEN_UNIFIED_ARROW]
+
+pub struct JetFormatOptions { pub simplify: Bool{false} }
+pub struct JetFormatterComment { pub text: String, pub span: Span }
+pub enum JetFormatterSourceDelimiter { Paren Bracket Brace Angle }
+pub struct JetFormatterSourceList { pub span: Span, pub close_start: Int }
+pub enum JetFormatterPrec { OrFallback Range Or And Cmp BitOr BitXor BitAnd Shift Add Mul Unary Pow Postfix Primary }
+pub struct JetFormatterContext {
+    pub src: String
+    pub source_bytes: [U8]
+    pub source_toks: [Token]
+    pub comments: [JetFormatterComment]
+    pub comment_i: Int
+    pub out: [U8]
+    pub col: Int
+    pub at_line_start: Bool
+    pub indent: Int
+    pub pending_blank: Bool
+    // -1 is the unbounded sentinel; source offsets themselves are nonnegative.
+    pub trailing_comment_limit: Int
+    pub pub_file: Bool
+    pub items: [Item]
+    pub policy_declarations: [PolicyDeclaration]
+    pub fenced_statements: [FencedStatement]
+    pub simplify: Bool
+    pub expected_return_type: Type?
+    pub force_control_braces: Bool
+    pub layout_name: String?
+    pub layout_resugar: Bool
+    pub strip_optional_returns: Bool
+    pub optional_body_visit: Bool
+    pub optional_tail: Bool
+    pub body_depth: Int
+}
+
+// Rust: mod.rs::Prec::of_bin / add_rhs. Powers bind above unary, below postfix.
+fn jet_format_prec_rank(prec: JetFormatterPrec) -> Int Never! {
+    if prec == {
+        .OrFallback -> 0
+        .Range -> 1
+        .Or -> 2
+        .And -> 3
+        .Cmp -> 4
+        .BitOr -> 5
+        .BitXor -> 6
+        .BitAnd -> 7
+        .Shift -> 8
+        .Add -> 9
+        .Mul -> 10
+        .Unary -> 11
+        .Pow -> 12
+        .Postfix -> 13
+        .Primary -> 14
+    }
+}
+fn jet_format_prec_of_bin(op: BinOp) -> JetFormatterPrec Never! {
+    if op == {
+        .Or -> .Or
+        .And -> .And
+        .Eq -> .Cmp
+        .Ne -> .Cmp
+        .Lt -> .Cmp
+        .Gt -> .Cmp
+        .Le -> .Cmp
+        .Ge -> .Cmp
+        .Compare -> .Cmp
+        .BitOr -> .BitOr
+        .BitXor -> .BitXor
+        .BitAnd -> .BitAnd
+        .Shl -> .Shift
+        .Shr -> .Shift
+        .Add -> .Add
+        .Sub -> .Add
+        .Pow -> .Pow
+        else -> .Mul
+    }
+}
+fn jet_format_prec_add_rhs(prec: JetFormatterPrec) -> JetFormatterPrec Never! {
+    if prec == {
+        .OrFallback -> .OrFallback
+        .Range -> .Or
+        .Or -> .And
+        .And -> .Cmp
+        .Cmp -> .BitOr
+        .BitOr -> .BitXor
+        .BitXor -> .BitAnd
+        .BitAnd -> .Shift
+        .Shift -> .Add
+        .Add -> .Mul
+        .Mul -> .Unary
+        .Unary -> .Pow
+        .Pow -> .Postfix
+        else -> .Primary
+    }
+}
+
+// Rust: mod.rs::Fmt::write/write_indent/newline. col counts Unicode scalars.
+fn jet_format_write(context: &JetFormatterContext, text: String) Never! {
+    if context.at_line_start && text.len() > 0 -> jet_format_write_indent(&context)
+    context.col += text.len()
+    context.at_line_start = false
+    loop byte in text.bytes() -> &context.out.push(byte)
+    context.pending_blank = false
+}
+fn jet_format_write_indent(context: &JetFormatterContext) Never! {
+    loop index in 0..<context.indent * 4 -> &context.out.push(U8{32})
+    context.col = context.indent * 4
+    context.at_line_start = false
+}
+fn jet_format_newline(context: &JetFormatterContext) Never! {
+    &context.out.push(U8{10})
+    context.col = 0
+    context.at_line_start = true
+}
+fn jet_format_output(context: &JetFormatterContext) -> String Never! {
+    String.from_bytes(context.out) ?? panic("formatter output is UTF-8")
+}
+fn jet_format_truncate(context: &JetFormatterContext, length: Int) Never! {
+    loop context.out.len() > length -> &context.out.pop().drop("formatter rollback discards speculative bytes")
+}
+fn jet_format_output_has_newline(context: &JetFormatterContext, start: Int) -> Bool Never! {
+    loop index in start..<context.out.len() {
+        if context.out[index] == (U8{10}) -> return true
+    }
+    false
+}
+fn jet_format_source_slice(context: &JetFormatterContext, start: Int, end: Int) -> String? Never! {
+    if start < 0 || end < start || end > context.source_bytes.len() -> return None
+    decoded :: String.from_bytes(context.source_bytes[start..<end]) ?? return None
+    Val(decoded)
+}
+// Rust: mod.rs::line_of. Byte counting cannot split a codepoint or panic.
+fn jet_format_line_of(source: String, pos: Int) -> Int Never! {
+    bytes :: source.bytes()
+    end :: if pos < bytes.len() -> pos else -> bytes.len()
+    count := 0
+    loop index in 0..<end { if bytes[index] == (U8{10}) -> count += 1 }
+    count
+}
+fn jet_format_source_line(context: &JetFormatterContext, pos: Int) -> Int Never! {
+    end :: if pos < context.source_bytes.len() -> pos else -> context.source_bytes.len()
+    count := 0
+    loop index in 0..<end { if context.source_bytes[index] == (U8{10}) -> count += 1 }
+    count
+}
+// Rust: mod.rs::Fmt::blank_line_between_items/blank_separator_before_item.
+fn jet_format_blank_line_between_items(context: &JetFormatterContext) Never! {
+    if !context.pending_blank {
+        jet_format_newline(&context)
+        context.pending_blank = true
+    }
+}
+fn jet_format_blank_separator_before_item(context: &JetFormatterContext) Never! {
+    if context.out.len() == 0 -> return
+    if !context.at_line_start -> jet_format_newline(&context)
+    length :: context.out.len()
+    if length < 2 || context.out[length - 2] != (U8{10}) -> &context.out.push(U8{10})
+    context.pending_blank = true
+}
+// Rust: mod.rs::Fmt::{emit_leading,emit_trailing,skip_verbatim_comments}.
+fn jet_format_emit_remaining_comments(context: &JetFormatterContext) Never! {
+    loop context.comment_i < context.comments.len() {
+        index :: ~context.comment_i
+        jet_format_emit_comment_line_at(&context, index)
+        context.comment_i += 1
+    }
+}
+fn jet_format_emit_leading(context: &JetFormatterContext, pos: Int) Never! {
+    loop context.comment_i < context.comments.len() {
+        span :: ~context.comments[context.comment_i].span
+        if span.start >= pos || jet_format_is_trailing_comment_at(&context, span) -> break
+        index :: ~context.comment_i
+        jet_format_emit_comment_line_at(&context, index)
+        context.comment_i += 1
+        context.pending_blank = false
+    }
+}
+fn jet_format_emit_trailing(context: &JetFormatterContext, end: Int) Never! {
+    loop context.comment_i < context.comments.len() {
+        span :: ~context.comments[context.comment_i].span
+        if context.trailing_comment_limit >= 0 && span.start >= context.trailing_comment_limit -> break
+        if span.start < end || jet_format_source_line(&context, span.start) != jet_format_source_line(&context, end) -> break
+        jet_format_write(&context, "  ")
+        index :: ~context.comment_i
+        jet_format_write_comment_at(&context, index)
+        context.comment_i += 1
+    }
+}
+fn jet_format_skip_verbatim_comments(context: &JetFormatterContext, end: Int) Never! {
+    loop context.comment_i < context.comments.len() && context.comments[context.comment_i].span.start < end -> context.comment_i += 1
+}
+fn jet_format_is_trailing_comment_at(context: &JetFormatterContext, span: Span) -> Bool Never! {
+    if context.out.len() == 0 -> return false
+    last := context.out.len()
+    loop last > 0 && context.out[last - 1] != (U8{10}) -> last -= 1
+    jet_format_source_line(&context, span.start) == jet_format_source_line(&context, last) && !context.at_line_start
+}
+// Indexed emission keeps the immutable comment text separate from output writes.
+fn jet_format_write_comment_at(context: &JetFormatterContext, index: Int) Never! {
+    length :: context.comments[index].text.len()
+    if context.at_line_start && length > 0 -> jet_format_write_indent(&context)
+    context.col += length
+    context.at_line_start = false
+    loop byte in context.comments[index].text.bytes() -> &context.out.push(byte)
+    context.pending_blank = false
+}
+fn jet_format_emit_comment_line_at(context: &JetFormatterContext, index: Int) Never! {
+    if context.out.len() > 0 && !context.at_line_start -> jet_format_newline(&context)
+    jet_format_write_indent(&context)
+    jet_format_write_comment_at(&context, index)
+    jet_format_newline(&context)
+    context.pending_blank = false
+}
+// Rust: mod.rs::Fmt::{write_loop_continuation_indent,loop_separator_tail}.
+fn jet_format_write_loop_continuation_indent(context: &JetFormatterContext) Never! {
+    context.indent += 1
+    jet_format_write_indent(&context)
+    context.indent -= 1
+}
+fn jet_format_loop_clause_separator(context: &JetFormatterContext, next_start: Int, wrap: Bool) Never! {
+    jet_format_write(&context, ",")
+    jet_format_loop_separator_tail(&context, next_start, wrap)
+}
+fn jet_format_loop_source_separator(context: &JetFormatterContext, next_start: Int, wrap: Bool) Never! {
+    jet_format_write(&context, " in")
+    jet_format_loop_separator_tail(&context, next_start, wrap)
+}
+fn jet_format_loop_separator_tail(context: &JetFormatterContext, next_start: Int, wrap: Bool) Never! {
+    broke := false
+    loop context.comment_i < context.comments.len() && context.comments[context.comment_i].span.start < next_start {
+        line_comment :: context.comments[context.comment_i].text.starts_with("//")
+        jet_format_write(&context, "  ")
+        index :: ~context.comment_i
+        jet_format_write_comment_at(&context, index)
+        context.comment_i += 1
+        if line_comment {
+            jet_format_newline(&context)
+            jet_format_write_loop_continuation_indent(&context)
+            broke = true
+        }
+    }
+    if {
+        wrap && !broke -> {
+            jet_format_newline(&context)
+            jet_format_write_loop_continuation_indent(&context)
+        }
+        !broke -> jet_format_write(&context, " ")
+    }
+}
+fn jet_format_maybe_wrap_loop_clause(context: &JetFormatterContext, wrap: Bool) Never! {
+    if wrap {
+        jet_format_newline(&context)
+        jet_format_write_loop_continuation_indent(&context)
+    }
+}
+// Rust: mod.rs::Fmt::source_* token scans use binary search, not copied tails.
+fn jet_format_source_token_at(context: &JetFormatterContext, start: Int) -> Int Never! {
+    lo := 0
+    hi := context.source_toks.len()
+    loop lo < hi {
+        mid :: (lo + hi) /% 2
+        if context.source_toks[mid].span.start < start -> lo = mid + 1 else -> hi = mid
+    }
+    lo
+}
+fn jet_format_chain_break_between(context: &JetFormatterContext, from: Int, to: Int) -> Bool Never! {
+    if from > to -> return false
+    source :: jet_format_source_slice(&context, from, to) ?? return false
+    source.contains("\n")
+}
+fn jet_format_source_type_spelling(context: &JetFormatterContext, start: Int) -> String? Never! {
+    parens := 0
+    brackets := 0
+    angles := 0
+    end := start
+    loop index in jet_format_source_token_at(&context, start)..<context.source_toks.len() {
+        token :: context.source_toks[index]
+        top :: parens == 0 && brackets == 0 && angles == 0
+        if top && (token.kind == TOKEN_COMMA || token.kind == TOKEN_SEMI || token.kind == TOKEN_UNIFIED_ARROW || token.kind == TOKEN_LAMBDA_ARROW || token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACE || token.kind == TOKEN_EOF) -> break
+        if {
+            token.kind == TOKEN_LPAREN -> parens += 1
+            token.kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
+            token.kind == TOKEN_LBRACKET -> brackets += 1
+            token.kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
+            token.kind == TOKEN_LT -> angles += 1
+            token.kind == TOKEN_GT && angles > 0 -> angles -= 1
+            token.kind == TOKEN_SHR -> angles = if angles > 2 -> angles - 2 else -> 0
+        }
+        end = token.span.end
+    }
+    if end > start -> jet_format_source_slice(&context, start, end) else -> None
+}
+fn jet_format_source_list_span_after(context: &JetFormatterContext, start: Int, delimiter: JetFormatterSourceDelimiter) -> JetFormatterSourceList? Never! {
+    open_kind :: if delimiter == {
+        .Paren -> TOKEN_LPAREN
+        .Bracket -> TOKEN_LBRACKET
+        .Brace -> TOKEN_LBRACE
+        .Angle -> TOKEN_LT
+    }
+    close_kind :: if delimiter == {
+        .Paren -> TOKEN_RPAREN
+        .Bracket -> TOKEN_RBRACKET
+        .Brace -> TOKEN_RBRACE
+        .Angle -> TOKEN_GT
+    }
+    depth := 0
+    open := 0
+    loop index in jet_format_source_token_at(&context, start)..<context.source_toks.len() {
+        token :: context.source_toks[index]
+        if depth == 0 {
+            if token.kind == open_kind {
+                depth = 1
+                open = token.span.start
+            }
+            next
+        }
+        if {
+            token.kind == open_kind -> depth += 1
+            token.kind == close_kind || (delimiter == .Angle && token.kind == TOKEN_SHR) -> {
+                consumed :: if delimiter == .Angle && token.kind == TOKEN_SHR -> 2 else -> 1
+                depth = if depth > consumed -> depth - consumed else -> 0
+                if depth == 0 -> return Val(JetFormatterSourceList{span: Span{start: open, end: token.span.end}, close_start: token.span.start})
+            }
+        }
+    }
+    None
+}
+fn jet_format_source_effect_row_span_after(context: &JetFormatterContext, start: Int) -> JetFormatterSourceList? Never! {
+    loop index in jet_format_source_token_at(&context, start)..<context.source_toks.len() - 1 {
+        if context.source_toks[index].kind == TOKEN_MINUS && context.source_toks[index + 1].kind == TOKEN_LBRACKET {
+            open :: ~context.source_toks[index + 1].span.start
+            return jet_format_source_list_span_after(&context, open, .Bracket)
+        }
+    }
+    None
+}
+fn jet_format_source_marker_group_span(context: &JetFormatterContext, start: Int) -> JetFormatterSourceList? Never! {
+    index := jet_format_source_token_at(&context, start)
+    loop index > 0 {
+        index -= 1
+        if context.source_toks[index].kind == TOKEN_LBRACKET {
+            open :: ~context.source_toks[index].span.start
+            return jet_format_source_list_span_after(&context, open, .Bracket)
+        }
+    }
+    None
+}
+fn jet_format_span_has_comment(context: &JetFormatterContext, open: Int, close: Int) -> Bool Never! {
+    loop comment in context.comments {
+        if comment.span.start >= open && comment.span.start < close -> return true
+    }
+    false
+}
+fn jet_format_source_span_multiline(context: &JetFormatterContext, span: Span) -> Bool Never! {
+    source :: jet_format_source_slice(&context, span.start, span.end)
+    if source == .Val(text) { if text.contains("\n") -> return true }
+    jet_format_span_has_comment(&context, span.start, span.end)
+}
+// Rust: mod.rs::Fmt::fmt_comma_items; list rendering preserves authored comments.
+// The caller walks borrowed/indexed items between these state transitions.
+// No callback captures the context during an outstanding write-marked call.
+fn jet_format_comma_begin(context: &JetFormatterContext, count: Int, source: JetFormatterSourceList?) -> Bool Never! {
+    multiline := false
+    if source == .Val(list) -> multiline = jet_format_source_span_multiline(&context, list.span)
+    if multiline && count > 0 -> jet_format_newline(&context)
+    multiline
+}
+fn jet_format_comma_before(context: &JetFormatterContext, index: Int, span: Span, multiline: Bool) Never! {
+    if index > 0 {
+        if multiline -> jet_format_newline(&context) else -> jet_format_write(&context, ", ")
+    }
+    if multiline -> jet_format_emit_leading(&context, span.start)
+}
+fn jet_format_comma_after(context: &JetFormatterContext, span: Span, multiline: Bool) Never! {
+    if multiline {
+        jet_format_write(&context, ",")
+        jet_format_emit_trailing(&context, span.end)
+    }
+}
+fn jet_format_comma_end(context: &JetFormatterContext, source: JetFormatterSourceList?, multiline: Bool) Never! {
+    if multiline {
+        if source == .Val(list) -> jet_format_emit_leading(&context, list.close_start)
+        if !context.at_line_start -> jet_format_newline(&context)
+    }
+}
+// Rust: mod.rs::Fmt::source_list_item_spans. Exclude the outer delimiter from
+// nesting depth so the commas between elements are actually top-level.
+fn jet_format_source_list_item_spans(context: &JetFormatterContext, source: JetFormatterSourceList) -> [Span] Never! {
+    parens := 0
+    brackets := 0
+    braces := 0
+    angles := 0
+    start := -1
+    end := -1
+    items := [Span]{}
+    loop index in jet_format_source_token_at(&context, source.span.start)..<context.source_toks.len() {
+        token :: context.source_toks[index]
+        if token.span.start >= source.close_start -> break
+        if token.span.start == source.span.start || token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
+        top :: parens == 0 && brackets == 0 && braces == 0 && angles == 0
+        if top && token.kind == TOKEN_COMMA {
+            if start >= 0 && end >= 0 -> &items.push(Span{start: start, end: end})
+            start = -1
+            end = -1
+            next
+        }
+        if start < 0 -> start = token.span.start
+        end = token.span.end
+        if {
+            token.kind == TOKEN_LPAREN -> parens += 1
+            token.kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
+            token.kind == TOKEN_LBRACKET -> brackets += 1
+            token.kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
+            token.kind == TOKEN_LBRACE -> braces += 1
+            token.kind == TOKEN_RBRACE && braces > 0 -> braces -= 1
+            token.kind == TOKEN_LT -> angles += 1
+            token.kind == TOKEN_GT && angles > 0 -> angles -= 1
+            token.kind == TOKEN_SHR -> angles = if angles > 2 -> angles - 2 else -> 0
+        }
+    }
+    if start >= 0 && end >= 0 -> &items.push(Span{start: start, end: end})
+    items
+}
+// Rust: mod.rs::Fmt::statement_source_end; calls' name spans omit delimiters.
+fn jet_format_statement_source_end(context: &JetFormatterContext, stmt: Stmt) -> Int Never! {
+    scan :: if stmt == {
+        .Expr(_) -> true
+        .DeferClose(_, _) -> true
+        .Val(_) -> true
+        .Assign(_, _, _, _) -> true
+        .Return(_, _) -> true
+        .Yield(_, _) -> true
+        else -> false
+    }
+    if !scan -> return jet_format_stmt_end(stmt)
+    parens := 0
+    brackets := 0
+    braces := 0
+    last := jet_format_stmt_end(stmt)
+    loop index in jet_format_source_token_at(&context, jet_format_stmt_start(stmt))..<context.source_toks.len() {
+        token :: context.source_toks[index]
+        if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
+        if (token.kind == TOKEN_SEMI && parens == 0 && brackets == 0 && braces == 0) || token.kind == TOKEN_EOF -> return last
+        if {
+            token.kind == TOKEN_LPAREN -> parens += 1
+            token.kind == TOKEN_RPAREN -> {
+                if parens == 0 -> return last
+                parens -= 1
+            }
+            token.kind == TOKEN_LBRACKET -> brackets += 1
+            token.kind == TOKEN_RBRACKET -> {
+                if brackets == 0 -> return last
+                brackets -= 1
+            }
+            token.kind == TOKEN_LBRACE -> braces += 1
+            token.kind == TOKEN_RBRACE -> {
+                if braces == 0 -> return last
+                braces -= 1
+            }
+        }
+        last = token.span.end
+    }
+    last
+}
+// Rust: mod.rs::Fmt::{single_stmt_braces,value_block_braces,source_gap_is_trivia}.
+fn jet_format_source_gap_is_trivia(context: &JetFormatterContext, start: Int, end: Int) -> Bool Never! {
+    if start > end -> return false
+    cursor := start
+    loop comment in context.comments {
+        if comment.span.start < cursor -> next
+        if comment.span.start >= end -> break
+        gap :: jet_format_source_slice(&context, cursor, comment.span.start) ?? return false
+        if gap.trim().len() > 0 -> return false
+        cursor = if comment.span.end < end -> comment.span.end else -> end
+    }
+    gap :: jet_format_source_slice(&context, cursor, end) ?? return false
+    gap.trim().len() == 0
+}
+fn jet_format_single_stmt_braces(context: &JetFormatterContext, stmt: Stmt) -> Span? Never! {
+    start :: jet_format_stmt_start(stmt)
+    if start > context.source_bytes.len() -> return None
+    open := start
+    loop open > 0 && context.source_bytes[open - 1] != (U8{123}) -> open -= 1
+    if open == 0 || !jet_format_source_gap_is_trivia(&context, open, start) -> return None
+    depth := 1
+    loop index in jet_format_source_token_at(&context, open)..<context.source_toks.len() {
+        token :: context.source_toks[index]
+        if {
+            token.kind == TOKEN_LBRACE -> depth += 1
+            token.kind == TOKEN_RBRACE -> {
+                if depth == 1 -> return Val(Span{start: open, end: token.span.start})
+                depth -= 1
+            }
+        }
+    }
+    None
+}
+fn jet_format_value_block_braces(context: &JetFormatterContext, value: Expr) -> Span? Never! {
+    span :: expr_span(value)
+    if span.start > context.source_bytes.len() || span.end > context.source_bytes.len() -> return None
+    open := span.start
+    loop open > 0 && context.source_bytes[open - 1] != (U8{123}) -> open -= 1
+    if open == 0 -> return None
+    close := span.end
+    loop close < context.source_bytes.len() && context.source_bytes[close] != (U8{125}) -> close += 1
+    if close == context.source_bytes.len() || open > close -> return None
+    Val(Span{start: open, end: close})
+}
+// Rust: mod.rs::Fmt::{end_block,fmt_body,fmt_body_expanded,fmt_control_body}.
+fn jet_format_end_block(context: &JetFormatterContext) Never! {
+    jet_format_newline(&context)
+    jet_format_write(&context, "}}")
+}
+fn jet_format_body(context: &JetFormatterContext, body: [Stmt]) Never! { jet_format_control_body(&context, body) }
+fn jet_format_body_expanded(context: &JetFormatterContext, body: [Stmt]) Never! {
+    jet_format_newline(&context)
+    context.indent += 1
+    jet_format_block_stmts(&context, body)
+    context.indent -= 1
+    jet_format_end_block(&context)
+}
+fn jet_format_control_body(context: &JetFormatterContext, body: [Stmt]) Never! {
+    if body.len() == 1 {
+        statement :: body[0]
+        comment_free := true
+        if jet_format_single_stmt_braces(&context, statement) == .Val(braces) -> comment_free = !jet_format_span_has_comment(&context, braces.start, braces.end)
+        if jet_format_is_simple_stmt(statement) && comment_free {
+            saved_out :: context.out.len()
+            saved_col :: context.col
+            saved_line :: context.at_line_start
+            saved_blank :: context.pending_blank
+            saved_comment :: context.comment_i
+            jet_format_write(&context, " ")
+            jet_format_stmt_inline(&context, statement)
+            jet_format_write(&context, " }}")
+            if context.col <= 100 && !jet_format_output_has_newline(&context, saved_out) -> return
+            jet_format_truncate(&context, saved_out)
+            context.col = saved_col
+            context.at_line_start = saved_line
+            context.pending_blank = saved_blank
+            context.comment_i = saved_comment
+        }
+    }
+    jet_format_body_expanded(&context, body)
+}
+// Rust: mod.rs::Fmt::try_inline_value_block rolls back exactly its line state.
+fn jet_format_try_inline_value_block(context: &JetFormatterContext, stmts: [Stmt], value: Expr) -> Bool Never! {
+    if !jet_format_value_block_inlineable(&context, stmts, value) -> return false
+    saved_out :: context.out.len()
+    saved_col :: context.col
+    saved_line :: context.at_line_start
+    jet_format_write(&context, " ")
+    jet_format_expr(&context, value, .OrFallback)
+    jet_format_write(&context, " }}")
+    if context.col <= 100 -> return true
+    jet_format_truncate(&context, saved_out)
+    context.col = saved_col
+    context.at_line_start = saved_line
+    false
+}
+// Rust: mod.rs::{is_simple_stmt,is_simple_expr,is_generated_label}.
+fn jet_format_is_simple_stmt(stmt: Stmt) -> Bool Never! {
+    if stmt == {
+        .Expr(expr) -> jet_format_is_simple_expr(expr)
+        .Val(binding) -> jet_format_is_simple_expr(binding.init)
+        .Assign(_, _, _, _) -> true
+        .Return(value, _) -> value != None
+        .Break(_) -> true
+        .Continue(_) -> true
+        .BreakLabel(_, _) -> true
+        .ContinueLabel(_, _) -> true
+        else -> false
+    }
+}
+fn jet_format_is_simple_expr(expr: Expr) -> Bool Never! {
+    if expr == .CallValue(callee, _, _) {
+        if callee == .Lambda(lambda) -> return !lambda.meta.collecting_loop && !lambda.meta.result_loop
+    }
+    true
+}
+fn jet_format_is_generated_label(name: String) -> Bool Never! { name.starts_with("__jet_") }
+// Rust: mod.rs::compound_spell: callers admit only compound arithmetic/bit ops.
+fn jet_format_compound_spell(op: BinOp) -> String Never! {
+    if op == {
+        .Add -> "+="
+        .Sub -> "-="
+        .Mul -> "*="
+        .Div -> "/="
+        .FloorDiv -> "/%="
+        .Mod -> "%="
+        .Rem -> "%%="
+        .Pow -> "^="
+        .BitAnd -> "&="
+        .BitOr -> "|="
+        .BitXor -> "~|="
+        .Shl -> "<<="
+        .Shr -> ">>="
+        else -> panic("compound assignment uses arithmetic/bit ops only")
+    }
+}
+// Rust: mod.rs::int_literal_spelling; reuse the lexer's exact numeric decoding.
+fn jet_format_int_literal_spelling(source: String, span: Span, number: Int, raw: String?) -> String Never! {
+    if raw == .Val(text) -> return text
+    bytes :: source.bytes()
+    if span.start < 0 || span.end < span.start || span.end > bytes.len() -> return "{number}"
+    text :: String.from_bytes(bytes[span.start..<span.end]) ?? return "{number}"
+    lexed :: lex(text.bytes())
+    if lexed.diagnostics.len() == 0 && lexed.tokens.len() > 0 {
+        decoded :: lexed.tokens[0].payload.integer
+        if decoded == .Val(value) && value == number -> return text
+    }
+    "{number}"
+}
+fn jet_format_float_literal_spelling(source: String, span: Span, number: Float, raw: String?) -> String Never! {
+    if raw == .Val(text) -> return text
+    text :: "{number}"
+    if !text.contains(".") && !text.contains("e") && !text.contains("E") && number == number && number != (Float{1} / Float{0}) && number != (Float{-1} / Float{0}) -> return "{text}.0"
+    text
+}
+// Rust: mod.rs::{fmt_char,escape_str_lit,escape_str_multiline}.
+JET_FORMAT_CARRIAGE_RETURN :: prep { String.from_bytes([U8]{13}) ?? panic("ASCII carriage return is UTF-8") }
+fn jet_format_char(value: String) -> String Never! {
+    if value == JET_FORMAT_CARRIAGE_RETURN -> return "'\\r'"
+    if value == {
+        "'" -> "'\\''"
+        "\\" -> "'\\\\'"
+        "\n" -> "'\\n'"
+        "\t" -> "'\\t'"
+        else -> "'{value}'"
+    }
+}
+fn jet_format_escape_str_lit(value: String) -> String Never! {
+    out := [String]{}
+    loop scalar in value.chars() {
+        ch :: "{scalar}"
+        if ch == JET_FORMAT_CARRIAGE_RETURN {
+            &out.push("\\r")
+            next
+        }
+        if ch == {
+            "\\" -> &out.push("\\\\")
+            "\n" -> &out.push("\\n")
+            "\t" -> &out.push("\\t")
+            "\"" -> &out.push("\\\"")
+            "{{" -> &out.push("{{{{")
+            "}}" -> &out.push("}}}}")
+            else -> &out.push(ch)
+        }
+    }
+    out.join("")
+}
+fn jet_format_escape_str_multiline(value: String) -> String Never! {
+    out := [String]{}
+    loop scalar in value.chars() {
+        ch :: "{scalar}"
+        if ch == {
+            "\\" -> &out.push("\\\\")
+            "{{" -> &out.push("{{{{")
+            "}}" -> &out.push("}}}}")
+            else -> &out.push(ch)
+        }
+    }
+    out.join("")
+}
+
+// Rust: mod.rs::stmt_start/stmt_end. Declaration and semantic spans differ.
+fn jet_format_stmt_start(stmt: Stmt) -> Int Never! {
+    if stmt == {
+        .Expr(value) -> expr_span(value).start
+        .Val(binding) -> binding.name_span.start
+        .Assign(target, _, _, _) -> if target == {
+            .Local(_, span) -> span.start
+            .Index(_, _, span, _) -> span.start
+            .Field(base, _, _) -> expr_span(base).start
+        }
+        .Return(_, span) | .Yield(_, span) | .DeferClose(_, span) -> span.start
+        .Break(span) | .Continue(span) | .BreakLabel(_, span) | .ContinueLabel(_, span) -> span.start
+        .BreakValue(_, span) | .BreakLabelValue(_, _, _, span) -> span.start
+        .While(_, _, span, _, _) | .For(_, _, _, _, _, span, _, _, _) | .Switch(_, _, _, span) -> span.start
+        .Loop(_, span, _, _) | .CountedLoop(_, _, _, _, span, _, _) -> span.start
+        .Unsafe(_, _, _, span) | .Impure(_, _, _, span) | .Reactive(_, span) | .Shield(_, span) -> span.start
+        .Switched(_, _, span) | .Region(_, _, _, span) | .Policy(_, _, span) -> span.start
+        .TaskGroup(_, _, _, _, span) | .Layout(_, _, _, span) | .AuthorityScope(_, _, _, _, span) -> span.start
+        .ComptimeIf(_, _, _, _, span, _) | .ComptimeSwitch(_, _, _, span) | .ComptimeBlock(_, _, span) -> span.start
+        .ContextBlock(_, _, span) | .Live(_, span) | .AssumeDet(_, _, _, span) | .Transact(_, _, _, _, span) -> span.start
+        .ScopeMember(_, _, _, _, _, _, _, span) -> span.start
+    }
+}
+fn jet_format_body_end(body: [Stmt], fallback: Int) -> Int Never! {
+    if body.len() > 0 -> jet_format_stmt_end(body[body.len() - 1]) else -> fallback
+}
+fn jet_format_stmt_end(stmt: Stmt) -> Int Never! {
+    if stmt == {
+        .Expr(value) -> expr_span(value).end
+        .DeferClose(_, span) -> span.end
+        .Val(binding) -> expr_span(binding.init).end
+        .Assign(_, _, _, value) -> expr_span(value).end
+        .Return(value, span) -> if value == {
+            .Val(expr) -> expr_span(expr).end
+            None -> span.end
+        }
+        .Yield(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> expr_span(value).end
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) -> jet_format_body_end(body, 0)
+        .Switch(_, arms, else_body, _) -> {
+            if else_body == .Val(body) { if body.len() > 0 -> return jet_format_body_end(body, 0) }
+            if arms.len() == 0 -> return 0
+            arm :: arms[arms.len() - 1]
+            jet_format_body_end(arm.body, arm.span.end)
+        }
+        .Break(span) | .Continue(span) | .BreakLabel(_, span) | .ContinueLabel(_, span) -> span.end
+        .Loop(body, span, _, _) | .CountedLoop(_, _, _, body, span, _, _) -> jet_format_body_end(body, span.end)
+        .Unsafe(_, _, body, span) | .Impure(_, _, body, span) | .Reactive(body, span) | .Shield(body, span) -> jet_format_body_end(body, span.end)
+        .Switched(_, body, span) | .Region(_, _, body, span) | .Policy(_, body, span) -> jet_format_body_end(body, span.end)
+        .TaskGroup(_, _, _, body, span) | .Layout(_, _, body, span) | .AuthorityScope(_, _, _, body, span) -> jet_format_body_end(body, span.end)
+        .ComptimeBlock(body, _, span) | .ContextBlock(_, body, span) | .Live(body, span) -> jet_format_body_end(body, span.end)
+        .AssumeDet(_, _, body, span) | .Transact(_, _, body, _, span) | .ScopeMember(_, _, _, _, body, _, _, span) -> jet_format_body_end(body, span.end)
+        .ComptimeIf(_, _, then_body, else_body, span, _) -> {
+            if else_body == .Val(body) { if body.len() > 0 -> return jet_format_body_end(body, span.end) }
+            jet_format_body_end(then_body, span.end)
+        }
+        .ComptimeSwitch(_, _, _, span) -> span.end
+    }
+}
+// Rust: mod.rs::{func_decl_start,type_decl_start,item_span_start}.
+fn jet_format_rfind_before(source: String, end: Int, needle: String, fallback: Int) -> Int Never! {
+    bytes :: source.bytes()
+    mark :: needle.bytes()
+    if end < 0 || end > bytes.len() || mark.len() > end -> return fallback
+    index := end - mark.len()
+    loop index >= 0 {
+        matches := true
+        loop offset in 0..<mark.len() {
+            if bytes[index + offset] != mark[offset] {
+                matches = false
+                break
+            }
+        }
+        if matches -> return index
+        index -= 1
+    }
+    fallback
+}
+fn jet_format_type_decl_start(is_pub: Bool, name_start: Int, keyword: String, source: String) -> Int Never! {
+    pos :: jet_format_rfind_before(source, name_start, keyword, name_start)
+    if is_pub -> jet_format_rfind_before(source, pos, "pub", pos) else -> pos
+}
+fn jet_format_func_decl_start(function: Func, source: String) -> Int Never! {
+    jet_format_type_decl_start(function.is_pub, function.name_span.start, "fn", source)
+}
+fn jet_format_item_span_start(item: Item, source: String) -> Int Never! {
+    if item == {
+        .Func(value) -> jet_format_func_decl_start(value, source)
+        .Struct(value) -> jet_format_type_decl_start(value.is_pub, value.name_span.start, "struct", source)
+        .Enum(value) -> jet_format_type_decl_start(value.is_pub, value.name_span.start, "enum", source)
+        .Impl(value) -> jet_format_rfind_before(source, value.type_span.start, "impl", value.type_span.start)
+        .Const(value) -> {
+            if value.is_persist -> return jet_format_rfind_before(source, value.name_span.start, "#Persist", value.name_span.start)
+            if value.attrs.len() > 0 {
+                pos :: jet_format_rfind_before(source, value.name_span.start, "#Static", -1)
+                if pos >= 0 -> return pos
+                return jet_format_rfind_before(source, value.name_span.start, "#Inline", value.name_span.start)
+            }
+            value.name_span.start
+        }
+        .Test(value) -> jet_format_rfind_before(source, value.name_span.start, "#Test", value.name_span.start)
+        .ExternRust(value) -> jet_format_rfind_before(source, value.crate_span.start, "extern", value.span.start)
+        .Trait(value) -> jet_format_type_decl_start(value.is_pub, value.name_span.start, "trait", source)
+        .Module(value) -> jet_format_rfind_before(source, value.name_span.start, "module", value.span.start)
+        .CodeModule(value) -> jet_format_rfind_before(source, value.name_span.start, "module", value.span.start)
+        .ErrorConv(value) -> jet_format_rfind_before(source, value.from_span.start, "impl", value.from_span.start)
+        .Tag(value) -> value.span.start
+        .EffectDecl(value) -> value.span.start
+        .MarkerDecl(value) -> value.span.start
+        .FactDecl(value) -> value.span.start
+        .CModule(value) -> value.span.start
+        .Distinct(value) -> value.span.start
+        .TypeAlias(value) -> value.span.start
+        .UnitFamily(value) -> value.span.start
+        .Migration(value) -> value.span.start
+        .ProtocolDecl(value) -> value.span.start
+        .UserDerive(value) -> value.span.start
+        .TemplateLoop(value) -> value.span.start
+        .GenericModule(value) -> value.span.start
+        .ModuleAlias(value) -> value.span.start
+    }
+}
+// Rust: mod.rs::item_span_end/synthetic_item_end.
+fn jet_format_item_span_end(item: Item) -> Int Never! {
+    if item == {
+        .Func(value) -> jet_format_body_end(value.body, value.name_span.end)
+        .Struct(value) -> {
+            if value.methods.len() > 0 {
+                method :: value.methods[value.methods.len() - 1]
+                return jet_format_body_end(method.body, method.name_span.end)
+            }
+            if value.fields.len() > 0 -> return value.fields[value.fields.len() - 1].ty_span.end
+            value.name_span.end
+        }
+        .Enum(value) -> {
+            if value.methods.len() > 0 {
+                method :: value.methods[value.methods.len() - 1]
+                return jet_format_body_end(method.body, method.name_span.end)
+            }
+            if value.variants.len() > 0 -> return value.variants[value.variants.len() - 1].name_span.end
+            value.name_span.end
+        }
+        .Impl(value) -> {
+            if value.methods.len() > 0 {
+                method :: value.methods[value.methods.len() - 1]
+                return jet_format_body_end(method.body, method.name_span.end)
+            }
+            value.type_span.end
+        }
+        .Const(value) -> expr_span(value.value).end
+        .Test(value) -> jet_format_body_end(value.body, value.name_span.end)
+        .Trait(value) -> {
+            if value.methods.len() > 0 -> return value.methods[value.methods.len() - 1].span.end
+            value.name_span.end
+        }
+        .ErrorConv(value) -> value.body_span.end
+        .ExternRust(value) -> value.span.end
+        .Tag(value) -> value.span.end
+        .EffectDecl(value) -> value.span.end
+        .MarkerDecl(value) -> value.span.end
+        .FactDecl(value) -> value.span.end
+        .Module(value) -> value.span.end
+        .CModule(value) -> value.span.end
+        .CodeModule(value) -> value.span.end
+        .Distinct(value) -> value.span.end
+        .TypeAlias(value) -> value.span.end
+        .UnitFamily(value) -> value.span.end
+        .Migration(value) -> value.span.end
+        .ProtocolDecl(value) -> value.span.end
+        .UserDerive(value) -> value.span.end
+        .TemplateLoop(value) -> value.span.end
+        .GenericModule(value) -> value.span.end
+        .ModuleAlias(value) -> value.span.end
+    }
+}
+fn jet_format_synthetic_item_end(item: Item) -> Int Never! {
+    declared :: if item == {
+        .Func(value) -> value.span.end
+        .Struct(value) -> value.span.end
+        .Enum(value) -> value.span.end
+        .Impl(value) -> value.span.end
+        else -> 0
+    }
+    end :: jet_format_item_span_end(item)
+    if declared > end -> declared else -> end
+}

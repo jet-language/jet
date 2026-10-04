@@ -1,0 +1,320 @@
+// Original Rust AST/{comptime,items,patterns,statements,types,program_imports}.rs
+// helper behavior. These are semantic carriers/bytes, not source-shape checks.
+fn projection_test_span(start: Int) -> Span Never! { Span{start: start, end: start + 1} }
+fn projection_test_function(return_type: Type?, written: Bool) -> Func Never! {
+    span :: projection_test_span(7)
+    Func{
+        span: span, is_pub: false, is_package_pub: false, is_comptime: false,
+        external_type: None, name: "run", name_span: span, meta: None,
+        type_params: [TypeParam]{}, head_pattern: None, params: [Param]{},
+        return_type: return_type, return_type_span: if written -> Val(span) else -> None,
+        return_view_provenance: None, declared_return_view_provenance: None,
+        gc_return: false, diverges: false, gc_scope: false, is_unsafe: false,
+        unsafe_reason: None, unsafe_span: None, is_pure: false, is_sanitizer: false,
+        scrub_tag: None, declared_effects: None, effect_via: None,
+        state_requires: None, state_transition: None, is_reactive: false,
+        reactive_upgrades: [String]{}, is_replayable: false, replayable_span: None,
+        is_job: false, job_span: None, job_metadata: None, every: None,
+        is_must_use: false, must_use_span: None, maturity: None, maturity_span: None,
+        kernel: None, is_inline: false, is_inline_always: false, inline_span: None,
+        web_marker: None, pre: [ContractClause]{}, post: [ContractClause]{},
+        inline_foreign: None, undo: None, markers: [Marker]{},
+        compiler_generated: false, body: [Stmt]{},
+    }
+}
+fn projection_test_arg(expression: Expr) -> CallArg Never! {
+    CallArg{convention: AccessConvention.Read, expr: expression, span: expr_span(expression), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+}
+fn projection_test_call(name: String, args: [CallArg]) -> Expr Never! {
+    Expr.Call{call: Call{name: name, name_span: projection_test_span(3), type_args: [Type]{}, args: args, resolved_ret: None, range_checked: false, widen_approx: false}}
+}
+
+#Test("callable_failure_contract_projects_one_carrier") {
+    default :: failure_contract_from_return_type(None)
+    assert_eq(default, FailureContract.Default{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}})
+    assert_eq(failure_contract_effective_type(default), Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}})
+    explicit :: failure_contract_from_return_type(Val(Type.Result{ok: Type.Int, err: Type.Named{name: "IOError"}}))
+    assert_eq(explicit, FailureContract.Explicit{success: Type.Int, error: Type.Named{name: "IOError"}})
+    assert_eq(failure_contract_effective_type(explicit), Type.Result{ok: Type.Int, err: Type.Named{name: "IOError"}})
+    never :: failure_contract_from_return_type(Val(Type.Result{ok: Type.Int, err: Type.Named{name: "Never"}}))
+    assert_eq(never, FailureContract.ProvenUnreachable{success: Type.Int})
+}
+#Test("failure_contract_written_and_inferred_provenance_3708") {
+    ty :: Val(Type.Result{ok: Type.Int, err: Type.Named{name: "Never"}})
+    written :: projection_test_function(ty, true)
+    inferred :: projection_test_function(ty, false)
+    assert_eq(func_effective_return_type(written), func_effective_return_type(inferred))
+    assert_eq(failure_contract_source(func_failure_contract(written)), "explicit !Never (proven unreachable)")
+    assert_eq(failure_contract_source(func_failure_contract(inferred)), "inferred: none")
+    union :: Type.Union{members: [Type]{Type.Named{name: "ReadError"}, Type.Named{name: "WriteError"}}}
+    inferred_union :: projection_test_function(Val(Type.Result{ok: Type.Int, err: union}), false)
+    assert_eq(func_failure_contract(inferred_union), FailureContract.Inferred{success: Type.Int, error: union})
+    defaulted_run :: projection_test_function(Val(Type.Result{ok: Type.Int, err: Type.Named{name: "Err"}}), false)
+    assert_eq(func_failure_contract(defaulted_run), FailureContract.Explicit{success: Type.Int, error: Type.Named{name: "Err"}})
+}
+#Test("failure_contract_optional_declared_never_converted_and_trait") {
+    optional :: failure_contract_from_return_type(Val(Type.Option{inner: Type.String}))
+    assert_eq(optional, FailureContract.Optional{success: Type.String})
+    assert_eq(failure_contract_effective_type(optional), Type.Option{inner: Type.String})
+    assert_eq(failure_contract_from_return_type(Val(Type.Named{name: "Never"})), FailureContract.DeclaredNever)
+    converted :: FailureContract.Converted{success: Type.Int, source: Type.Named{name: "IOError"}, target: Type.Named{name: "AppError"}}
+    assert_eq(failure_contract_source(converted), "converted IOError -> AppError")
+    assert_eq(failure_contract_effective_type(converted), Type.Result{ok: Type.Int, err: Type.Named{name: "AppError"}})
+    method :: TraitMethodSig{name: "read", name_span: projection_test_span(1), params: [Param]{}, return_type: Val(Type.Result{ok: Type.Int, err: Type.Named{name: "Never"}}), span: projection_test_span(1), default_body: None, is_pure: false, declared_effects: None, return_view_provenance: None, declared_return_view_provenance: None}
+    assert_eq(trait_method_failure_contract(method), FailureContract.ProvenUnreachable{success: Type.Int})
+    assert_eq(trait_method_effective_return_type(method), Type.Result{ok: Type.Int, err: Type.Named{name: "Never"}})
+}
+#Test("param_call_label_and_marker_expr_arguments") {
+    parameter := Param{convention: AccessConvention.Read, root: false, name: "seconds", name_span: projection_test_span(9), public_label: None, zone: ParamZone.Either, ty: Type.Int, ty_span: projection_test_span(10), default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None}
+    assert_eq(param_call_label(parameter), "seconds")
+    parameter.public_label = Val(CallLabel{name: "timeout", span: projection_test_span(1)})
+    assert_eq(param_call_label(parameter), "timeout")
+    value :: Expr.Int{value: 3, span: projection_test_span(3), width: None, raw: None}
+    marker :: Marker{name: "Policy", negated: false, name_span: projection_test_span(1), args: [MarkerCallArg]{MarkerCallArg.EffectRow{effects: [EffectRowEntry]{}, span: projection_test_span(2)}, MarkerCallArg.Expr{value: value}}, arg_labels: [CallLabel?]{None, None}, span: projection_test_span(1), ct: None}
+    assert_eq(marker_expr_args_owned(marker), [Expr]{value})
+}
+#Test("callable_policy_chain_rejects_noncall_labels_and_spreads_exactly") {
+    span :: projection_test_span(1)
+    if callable_policy_chain_parse([Expr]{Expr.Ident{name: "retry", span: span}}) == {
+        .Err(reason) -> assert_eq(reason, "a callable policy is a call such as `retry(3)`")
+        .Ok(_) -> assert(false)
+    }
+    labelled := projection_test_arg(Expr.Int{value: 3, span: span, width: None, raw: None})
+    labelled.label = Val(CallLabel{name: "count", span: span})
+    if callable_policy_chain_parse([Expr]{projection_test_call("retry", [CallArg]{labelled})}) == {
+        .Err(reason) -> assert_eq(reason, "`retry` policies take ordinary positional values")
+        .Ok(_) -> assert(false)
+    }
+    spread := labelled
+    spread.label = None
+    spread.spread = true
+    if callable_policy_chain_parse([Expr]{projection_test_call("trace", [CallArg]{spread})}) == {
+        .Err(reason) -> assert_eq(reason, "`trace` policies take ordinary positional values")
+        .Ok(_) -> assert(false)
+    }
+}
+#Test("callable_policy_argument_text_matches_original_expression_rules") {
+    span :: projection_test_span(1)
+    args :: [CallArg]{
+        projection_test_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "line\n\"quoted\""}}, span: span}),
+        projection_test_arg(Expr.Int{value: 16, span: span, width: None, raw: Val("0x10")}),
+        projection_test_arg(Expr.Float{value: 1.0, span: span, is_f32: false, raw: Val("1e0")}),
+        projection_test_arg(Expr.Bool{value: true, span: span}),
+        projection_test_arg(Expr.Char{value: "x", span: span}),
+        projection_test_arg(Expr.Field{base: Expr.Ident{name: "limit", span: span}, member: "max", span: span}),
+        projection_test_arg(projection_test_call("nested", [CallArg]{projection_test_arg(Expr.Bool{value: false, span: span})})),
+        projection_test_arg(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: Expr.Unit{span: span}, format: StrFormat.Display}}, span: span}),
+        projection_test_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "a"}, StrPart.Lit{text: "b"}}, span: span}),
+        projection_test_arg(Expr.Unit{span: span}),
+    }
+    if callable_policy_chain_parse([Expr]{projection_test_call("trace", args)}) == {
+        .Ok(chain) -> assert_eq(chain.policies[0].arguments, [String]{"\"line\\n\\\"quoted\\\"\"", "0x10", "1", "true", "'x'", "limit.max", "nested(false)", "<string>", "<expression>", "<expression>"})
+        .Err(_) -> assert(false)
+    }
+    if callable_policy_chain_parse([Expr]{}) == { .Ok(chain) -> assert_eq(chain.policies.len(), 0), .Err(_) -> assert(false) }
+}
+#Test("view_canonical_uses_enum_tuple_order_not_display_text") {
+    receiver :: ViewSourcePath{source: ViewSource.Receiver, projections: [ViewSourceProjection]{}}
+    parameter2 :: ViewSourcePath{source: ViewSource.Parameter{index: 2}, projections: [ViewSourceProjection]{ViewSourceProjection.Index}}
+    parameter10 :: ViewSourcePath{source: ViewSource.Parameter{index: 10}, projections: [ViewSourceProjection]{}}
+    static :: ViewSourcePath{source: ViewSource.Static{module_path: "pkg", name: "CACHE"}, projections: [ViewSourceProjection]{ViewSourceProjection.Range}}
+    value :: ViewProvenance{sources: [ViewSourcePath]{static, parameter10, parameter2, receiver, parameter2}, mutable: false}
+    assert_eq(view_provenance_canonical(value), "one_of(receiver;path:,parameter:2;path:index,parameter:10;path:,static:pkg::CACHE;path:range);access:read")
+    assert_eq(view_provenance_canonical(ViewProvenance{sources: [ViewSourcePath]{parameter2}, mutable: true}), "parameter:2;access:write;path:index")
+    assert_eq(view_provenance_canonical(ViewProvenance{sources: [ViewSourcePath]{}, mutable: false}), "one_of();access:read")
+    first :: ViewProvenance{sources: [ViewSourcePath]{receiver}, mutable: false}
+    map :: ViewProvenanceMap{entries: [ViewProvenanceEntry]{ViewProvenanceEntry{slot: [String]{"a.b"}, value: first}, ViewProvenanceEntry{slot: [String]{"a", "z"}, value: first}, ViewProvenanceEntry{slot: [String]{}, value: first}}}
+    assert_eq(canonical_view_provenance_map(map), "$=receiver;access:read;path:|a.z=receiver;access:read;path:|a.b=receiver;access:read;path:")
+}
+#Test("unit_family_distinct_defs_canonical_time_affine_derives_visibility_spans") {
+    span :: projection_test_span(11)
+    dimension :: dimension_base("pkg::Temperature")
+    family := UnitFamilyDef{is_pub: true, is_package_pub: false, family: "Temperature", family_span: span, dimension: None, resolved_dimension: Val(dimension), resolved_owner: Val("pkg"), base: Val(NamedSpan{name: "kelvin", span: span}), members: [UnitFamilyMember]{UnitFamilyMember{name: "deg_c", name_span: span, scale: UnitRatio{numerator: 1, denominator: 1}, scale_provenance: UnitScaleProvenance.Rational, offset: UnitRatio{numerator: 27315, denominator: 100}}}, span: span}
+    definitions :: unit_family_distinct_defs(family)
+    assert_eq(definitions.len(), 2)
+    assert_eq(definitions[0].name, "DegCPoint")
+    assert_eq(definitions[1].name, "DegCDelta")
+    assert_eq(definitions[0].derives, [NamedSpan]{NamedSpan{name: "Comparable", span: span}, NamedSpan{name: "Encode", span: span}, NamedSpan{name: "Decode", span: span}})
+    assert_eq(definitions[1].derives[0], NamedSpan{name: "Numeric", span: span})
+    assert_eq(definitions[0].quantity, Val(QuantityInfo{dimension: dimension, kind: QuantityKind.Point}))
+    assert_eq(definitions[1].quantity, Val(QuantityInfo{dimension: dimension, kind: QuantityKind.Delta}))
+    loop definition in definitions {
+        assert(definition.is_pub && !definition.is_package_pub)
+        assert_eq(definition.name_span, span)
+        assert_eq(definition.base_span, span)
+        assert_eq(definition.span, span)
+        assert_eq(definition.base, Type.Float)
+        assert_eq(definition.type_markers.len(), 0)
+        assert_eq(definition.range, None)
+    }
+    family.base = None
+    family.resolved_dimension = None
+    linear :: unit_family_distinct_defs(family)
+    assert_eq(linear[0].name, "DegC")
+    assert_eq(linear[0].derives, [NamedSpan]{NamedSpan{name: "Numeric", span: span}})
+    assert_eq(linear[0].quantity, None)
+    family.family = "Time"
+    family.resolved_owner = Val("core.units")
+    assert_eq(unit_family_distinct_defs(family).len(), 0)
+    family.resolved_owner = Val("pkg")
+    assert_eq(unit_family_distinct_defs(family).len(), 1)
+    assert_eq(unit_family_type_name("m_per_s"), "MPerS")
+    assert_eq(unit_family_type_name("__"), "__")
+}
+#Test("bind_pattern_names_are_retained_source_names_and_spans") {
+    first :: BindName{name: "field", span: projection_test_span(2), rename: Val(BindNameRename{name: "local", span: projection_test_span(5)})}
+    second :: BindName{name: "tail", span: projection_test_span(9), rename: None}
+    names :: [BindName]{first, second}
+    span :: projection_test_span(1)
+    patterns :: [BindPattern]{BindPattern.Struct{type_name: "Pair", type_span: span, fields: names, rest: Val(projection_test_span(10)), span: span}, BindPattern.List{elems: names, span: span}, BindPattern.Tuple{elems: names, span: span}, BindPattern.Refutable{pattern: Pattern.Absent{span: span}, fallback: OrFallback.Break{span: span}, names: names, span: span, synthesized: false}}
+    loop pattern in patterns {
+        assert_eq(bind_pattern_names(pattern), names)
+        assert_eq(bind_pattern_span(pattern), span)
+    }
+}
+#Test("import_bindings_preserve_source_order_aliases_and_span_fallbacks") {
+    prefix :: projection_test_span(1)
+    item :: projection_test_span(3)
+    local :: projection_test_span(5)
+    declaration := ImportDecl{kind: ImportKind.Unqualified{module_alias: "core", module_alias_span: prefix, items: [ImportedItem]{ImportedItem{original: "encoding.json", alias: None}, ImportedItem{original: "math", alias: Val("numbers")}, ImportedItem{original: "text", alias: None}}, items_span: projection_test_span(2), span: prefix}, alias: "", alias_span: prefix, span: prefix, item_spans: [Span]{item, item}, local_spans: [Span]{local}, is_pub: true, is_package_pub: false, inline_version: None}
+    bindings :: import_walk_bindings(declaration)
+    assert_eq(import_alias(declaration), "core")
+    assert_eq(bindings.len(), 3)
+    assert_eq(bindings[0].local, "json")
+    assert_eq(bindings[1].local, "numbers")
+    assert_eq(bindings[2].local, "text")
+    assert_eq(bindings[0].local_span, local)
+    assert_eq(bindings[1].local_span, item)
+    assert_eq(bindings[2].local_span, prefix)
+    assert_eq(bindings[2].item_span, None)
+    assert_eq(import_binding_path(bindings[0]), "core.encoding.json")
+    assert_eq(bindings[1].alias, Val("numbers"))
+    assert(bindings[0].is_pub && !bindings[0].is_package_pub)
+    declaration.kind = ImportKind.Module{name: "core.math", span: prefix}
+    declaration.alias = "math"
+    assert_eq(import_alias(declaration), "math")
+    assert_eq(import_walk_bindings(declaration)[0].local_span, prefix)
+    declaration.kind = ImportKind.File{path: "dir/module.jet", span: prefix}
+    declaration.alias = ""
+    assert_eq(import_alias(declaration), "module.jet")
+    assert_eq(import_walk_bindings(declaration).len(), 0)
+}
+
+struct ProjectionExprVisitor { spans: [Span] }
+impl ProjectionExprVisitor.ASTExprVisitor {
+    fn visit(&self, expression: Expr) Never! { &self.spans.push(expr_span(expression)) }
+}
+#Test("borrowed_expression_visitor_preserves_preorder_and_original_statement_entries") {
+    expression :: Expr.MapLit{entries: [ExprPair]{ExprPair{key: Expr.Ident{name: "key", span: projection_test_span(2)}, value: Expr.Try{value: Expr.Ident{name: "value", span: projection_test_span(4)}, span: projection_test_span(3), conversion: TryConvert.NoConversion, context: Val(Expr.Ident{name: "note", span: projection_test_span(5)})}}}, span: projection_test_span(1)}
+    visitor := ProjectionExprVisitor{spans: [Span]{}}
+    ast_expr_for_each_expr<ProjectionExprVisitor>(expression, &visitor)
+    assert_eq(visitor.spans, [Span]{projection_test_span(1), projection_test_span(2), projection_test_span(3), projection_test_span(4), projection_test_span(5)})
+}
+
+enum ProjectionOptionalVisitor { Borrowed }
+impl ProjectionOptionalVisitor.CanonicalASTOptionalCallVisitor<[Span], Int, String, String, String, String> {
+    fn visit_optional_method_call(self, db: &[Span], context: &Int, names: String, program: String, source: String, module_path: String, receiver: Expr, receiver_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg], call_span: Span) Never! {
+        context += 1
+        &db.push(call_span)
+        &db.push(Span{start: receiver_span.start, end: method_span.end})
+        &db.push(receiver_span)
+        assert_eq(method, "read")
+        assert_eq(type_args.len(), 0)
+        assert_eq(args.len(), 1)
+        assert_eq(expr_span(receiver), projection_test_span(4))
+    }
+}
+#Test("borrowed_optional_call_projects_original_receiver_and_exact_parentheses") {
+    // Receiver's Expr span deliberately differs from its real parsed extent.
+    receiver :: Expr.Call{call: Call{name: "produce", name_span: projection_test_span(4), type_args: [Type]{}, args: [CallArg]{}, resolved_ret: None, range_checked: false, widen_approx: false}}
+    optional :: Expr.OptMethodCall{receiver: receiver, method: "read", method_span: Span{start: 20, end: 24}, type_args: [Type]{}, args: [CallArg]{projection_test_arg(Expr.Bool{value: true, span: projection_test_span(26)})}, span: Span{start: 4, end: 30}, receiver_span: Span{start: 4, end: 17}, call_span: Span{start: 24, end: 30}}
+    spans := [Span]{}
+    count := 0
+    assert(canonical_ast_visit_optional_method_call<ProjectionOptionalVisitor, [Span], Int, String, String, String, String>(optional, ProjectionOptionalVisitor.Borrowed, &spans, &count, "actual", "actual", "actual", "actual"))
+    assert_eq(count, 1)
+    assert_eq(spans, [Span]{Span{start: 24, end: 30}, Span{start: 4, end: 24}, Span{start: 4, end: 17}})
+    assert(!canonical_ast_visit_optional_method_call<ProjectionOptionalVisitor, [Span], Int, String, String, String, String>(receiver, ProjectionOptionalVisitor.Borrowed, &spans, &count, "actual", "actual", "actual", "actual"))
+    assert_eq(count, 1)
+}
+#Test("output_kind_and_authority_project_canonical_spellings") {
+    kinds :: [OutputKind]{OutputKind.Library, OutputKind.Executable, OutputKind.Service, OutputKind.Check, OutputKind.Environment, OutputKind.Image, OutputKind.Bundle, OutputKind.System, OutputKind.Fleet}
+    loop kind in kinds -> assert_eq(OutputKind.from_name(kind.as_str()), Val(kind))
+    assert_eq(OutputKind.from_name("library"), None)
+    assert(OutputKind.Executable.is_runnable() && OutputKind.Service.is_runnable() && OutputKind.Check.is_runnable())
+    assert(!OutputKind.Library.is_runnable())
+    assert_eq(OutputCallableAuthority.SafeJet.as_str(), "safe-jet")
+}
+
+fn projection_test_binding(init: Expr, pattern: BindPattern?) -> Binding Never! {
+    Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: "value", name_span: projection_test_span(8), sigil_span: None, pattern: pattern, ty: None, ty_span: None, init: init, is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}
+}
+#Test("stmt_span_covers_every_original_variant_and_anchor") {
+    span :: projection_test_span(1)
+    expression :: Expr.Unit{span: span}
+    body :: [Stmt]{}
+    binding :: projection_test_binding(expression, None)
+    marker :: Marker{name: "Switched", negated: false, name_span: span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: span, ct: None}
+    statements :: [Stmt]{
+        Stmt.Expr{expr: expression},
+        Stmt.Assign{target: LValue.Local{name: "target", name_span: span}, op: None, op_span: projection_test_span(99), value: expression},
+        Stmt.Return{value: None, span: span},
+        Stmt.While{cond: expression, body: body, span: span, arrow_body: false, label: None},
+        Stmt.For{var: "item", var_span: projection_test_span(90), var2: None, kind: ForKind.In{collection: expression, step: None}, body: body, span: span, arrow_body: false, label: None, auto_vectorization: None},
+        Stmt.Switch{subject: expression, arms: [SwitchArm]{}, else_body: None, span: span},
+        Stmt.Break{span: span}, Stmt.BreakValue{value: expression, span: span},
+        Stmt.Continue{span: span}, Stmt.BreakLabel{name: "loop", span: span},
+        Stmt.BreakLabelValue{name: "loop", name_span: projection_test_span(90), value: expression, span: span},
+        Stmt.ContinueLabel{name: "loop", span: span},
+        Stmt.Loop{body: body, span: span, arrow_body: false, label: None},
+        Stmt.CountedLoop{init: binding, cond: expression, step: None, body: body, span: span, arrow_body: false, label: None},
+        Stmt.Unsafe{audit: None, audit_expr: None, body: body, span: span},
+        Stmt.Impure{reason: None, reason_expr: None, body: body, span: span},
+        Stmt.Reactive{body: body, span: span}, Stmt.Shield{body: body, span: span},
+        Stmt.Switched{marker: marker, body: body, span: span},
+        Stmt.Region{name: "arena", name_span: projection_test_span(90), body: body, span: span},
+        Stmt.Policy{declarations: [PolicyDeclaration]{}, body: body, span: span},
+        Stmt.TaskGroup{name: "workers", name_span: projection_test_span(90), limit: None, body: body, span: span},
+        Stmt.Layout{name: "rows", name_span: projection_test_span(90), body: body, span: span},
+        Stmt.AuthorityScope{caps: [NamedSpan]{}, caps_span: projection_test_span(90), binding: None, body: body, span: span},
+        Stmt.ComptimeIf{cond: expression, cond_span: projection_test_span(90), then_body: body, else_body: None, span: span, selected_then: None},
+        Stmt.ComptimeSwitch{subject: expression, arms: [SwitchArm]{}, else_body: None, span: span},
+        Stmt.ComptimeBlock{body: body, is_template_loop: false, span: span},
+        Stmt.ContextBlock{fields: [ContextField]{}, body: body, span: span},
+        Stmt.Live{body: body, span: span},
+        Stmt.AssumeDet{reason: "fixture", reason_expr: expression, body: body, span: span},
+        Stmt.Transact{name: None, name_span: None, body: body, implicit: false, span: span},
+        Stmt.Yield{value: expression, span: span},
+        Stmt.ScopeMember{name: "render", name_span: projection_test_span(90), args: [Expr]{}, args_span: None, body: body, dsl: false, dot_span: projection_test_span(90), span: span},
+        Stmt.DeferClose{close: expression, span: span},
+    }
+    loop statement in statements -> assert_eq(stmt_span(statement), span)
+    assert_eq(stmt_span(Stmt.Val{binding: binding}), projection_test_span(8))
+    assert_eq(stmt_span(Stmt.Assign{target: LValue.Index{base: expression, index: expression, span: span, kind: IndexKind.Unknown}, op: None, op_span: projection_test_span(90), value: expression}), span)
+    assert_eq(stmt_span(Stmt.Assign{target: LValue.Field{base: expression, field: "x", span: span}, op: None, op_span: projection_test_span(90), value: expression}), span)
+}
+#Test("borrowed_stmt_and_nested_expr_visit_original_refutable_entry_difference") {
+    span :: projection_test_span(1)
+    init :: Expr.Ident{name: "init", span: projection_test_span(2)}
+    pattern :: Pattern.Struct{fields: [StructPatField]{StructPatField.Value{field: "test", field_span: projection_test_span(3), value: Expr.Bool{value: true, span: projection_test_span(4)}}}, rest: None, span: span}
+    binding :: projection_test_binding(init, Val(BindPattern.Refutable{pattern: pattern, fallback: OrFallback.Value{value: Expr.Bool{value: false, span: projection_test_span(5)}}, names: [BindName]{}, span: span, synthesized: false}))
+    statement :: Stmt.Val{binding: binding}
+    direct := ProjectionExprVisitor{spans: [Span]{}}
+    ast_stmt_for_each_expr<ProjectionExprVisitor>(statement, &direct)
+    assert_eq(direct.spans, [Span]{projection_test_span(2)})
+    lambda :: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, result_type: None, error_type: None, effects: None, body: LambdaBody.Block{body: [Stmt]{statement}}, span: span, meta: ast_empty_lambda_meta()}
+    nested := ProjectionExprVisitor{spans: [Span]{}}
+    ast_expr_for_each_expr<ProjectionExprVisitor>(Expr.Lambda{lambda: lambda}, &nested)
+    assert_eq(nested.spans, [Span]{span, projection_test_span(2), projection_test_span(4), projection_test_span(5)})
+}
+#Test("app_entry_run_fn_uses_exact_app_predicate_and_module_source_order") {
+    run := projection_test_function(Val(Type.Named{name: "App"}), false)
+    ordinary :: projection_test_function(Val(Type.Int), true)
+    module :: CodeModule{name: "nested", name_span: projection_test_span(3), is_pub: false, is_package_pub: false, body: Val([Item]{Item.Func{value: run}}), imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: projection_test_span(3)}
+    entry :: app_entry_run_fn([Item]{Item.Func{value: ordinary}, Item.CodeModule{value: module}}) ?? panic("real App entry")
+    assert_eq(entry.name_span, run.name_span)
+    assert(type_is_app(Type.Result{ok: Type.Named{name: "App"}, err: Type.Named{name: "Err"}}))
+    assert(!type_is_app(Type.Option{inner: Type.Named{name: "App"}}))
+    assert(!type_is_app(Type.Apply{name: "App", args: [Type]{}}))
+    run.name = "other"
+    assert_eq(app_entry_run_fn([Item]{Item.Func{value: run}}), None)
+}

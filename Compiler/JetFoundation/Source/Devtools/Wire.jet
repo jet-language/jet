@@ -1,0 +1,373 @@
+// Canonical required ABI (RuntimeLead-8); native implementation is not yet
+// delivered. This import is an explicit source-closure gate, not a formatter
+// fallback or a claim that the missing shortest-roundtrip producer exists.
+use core.text.runtime.kernel_float_format as foundation_devtools_float
+// Devtools.rs:1421-2075. One amortized byte writer; no JSON reparsing.
+fn jet_devtools_wire_append(out: &[U8], value: String) Never! { loop byte in value.bytes() -> &out.push(byte) }
+fn jet_devtools_control_at(bytes: View<U8>, at: Int) -> Int Never! {
+    byte :: Int.from_u8(bytes[at])
+    if byte < 32 || byte == 127 -> return byte
+    // Unicode General_Category=Cc is exactly C0 + DEL + C1.
+    if byte == 194 && at + 1 < bytes.len() {
+        second :: Int.from_u8(bytes[at + 1])
+        if second >= 128 && second <= 159 -> return second
+    }
+    -1
+}
+pub fn jet_devtools_text_has_control(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    loop index in 0..<raw.len() { if jet_devtools_control_at(raw.view(0..<raw.len()), index) >= 0 -> return true }
+    false
+}
+// Devtools.rs:2001. Framing ONLY: accepts non-JSON tokens and multiple balanced
+// objects exactly as Rust does. No parser, escape whitelist, or field schema.
+fn jet_devtools_validate_json_object(value: String, field: String) Err! {
+    trimmed := value.trim() // #4303
+    raw :: trimmed.bytes()
+    if raw.len() > JET_DEVTOOLS_MAX_TEXT_BYTES || raw.len() < 2 || raw[0] != (U8{123}) || raw[raw.len() - 1] != (U8{125}) -> return Err("jet.devtools.v1 {field} must be a bounded JSON object")
+    depth := 0
+    in_string := false
+    escaped := false
+    loop index in 0..<raw.len() {
+        if jet_devtools_control_at(raw.view(0..<raw.len()), index) >= 0 -> return Err("jet.devtools.v1 {field} contains a control character")
+        byte :: Int.from_u8(raw[index])
+        if in_string {
+            if { escaped -> escaped = false, byte == 92 -> escaped = true, byte == 34 -> in_string = false, else -> {} }
+            next
+        }
+        if {
+            byte == 34 -> in_string = true
+            byte == 123 -> depth += 1
+            byte == 125 -> {
+                if depth == 0 -> return Err("jet.devtools.v1 {field} has unbalanced braces")
+                depth -= 1
+            }
+            else -> {}
+        }
+    }
+    if in_string || escaped || depth != 0 -> return Err("jet.devtools.v1 {field} has unbalanced JSON")
+    return
+}
+pub fn jet_devtools_hex_digit(value: U8) -> U8 Never! {
+    digit :: Int.from_u8(value) & 15
+    U8{if digit < 10 -> 48 + digit else -> 87 + digit}
+}
+// Devtools policy intentionally differs from Control: BS/FF -> u0008/u000c,
+// DEL/C1 retained as low-two-nibble u00xx, not raw UTF-8 and not \b/\f.
+pub fn render_text(value: String, out: &[U8]) Err! {
+    jet_devtools_validate_text(value, "text")
+    foundation_json_write_quote(&out, value)
+    return
+}
+fn jet_devtools_render_field_prefix(key: String, out: &[U8]) Never! {
+    if out.len() > 0 && out[out.len() - 1] != (U8{123}) -> &out.push(U8{44})
+    &out.push(U8{34})
+    jet_devtools_wire_append(&out, key)
+    jet_devtools_wire_append(&out, "\":")
+}
+fn jet_devtools_render_text_field(key: String, value: String, out: &[U8]) Err! { jet_devtools_render_field_prefix(key, &out); render_text(value, &out) }
+fn jet_devtools_render_u64_field(key: String, value: U64, out: &[U8]) Never! { jet_devtools_render_field_prefix(key, &out); jet_devtools_wire_append(&out, "{value}") }
+fn jet_devtools_render_null_field(key: String, out: &[U8]) Never! { jet_devtools_render_field_prefix(key, &out); jet_devtools_wire_append(&out, "null") }
+fn jet_devtools_render_bool_field(key: String, value: Bool, out: &[U8]) Never! { jet_devtools_render_field_prefix(key, &out); jet_devtools_wire_append(&out, if value -> "true" else -> "false") }
+fn jet_devtools_render_optional_text_field(key: String, value: String?, out: &[U8]) Err! {
+    jet_devtools_render_field_prefix(key, &out)
+    if value == .Val(text) -> render_text(text, &out) else -> jet_devtools_wire_append(&out, "null")
+    return
+}
+fn jet_devtools_render_launch_phase(phase: JetDevtoolsGameLaunchPhase, out: &[U8]) Err! {
+    jet_devtools_game_launch_phase_validate(phase)
+    &out.push(U8{123})
+    jet_devtools_render_text_field("phase", phase.phase, &out)
+    jet_devtools_render_text_field("status", phase.status, &out)
+    jet_devtools_render_text_field("detail", phase.detail, &out)
+    &out.push(U8{125})
+    return
+}
+fn jet_devtools_render_function_field(key: String, function: JetDevtoolsFunctionIdentity, out: &[U8]) Err! { jet_devtools_render_field_prefix(key, &out); jet_devtools_render_function_identity(function, &out) }
+fn jet_devtools_render_function_identity(function: JetDevtoolsFunctionIdentity, out: &[U8]) Err! {
+    jet_devtools_function_identity_validate(function)
+    &out.push(U8{123})
+    jet_devtools_render_text_field("function_id", function.function_id, &out)
+    jet_devtools_render_text_field("name", function.name, &out)
+    jet_devtools_render_field_prefix("source", &out)
+    jet_devtools_render_source_span(function.source, &out)
+    &out.push(U8{125})
+    return
+}
+fn jet_devtools_render_source_span(span: JetDevtoolsSourceSpan, out: &[U8]) Err! {
+    jet_devtools_source_span_validate(span)
+    &out.push(U8{123})
+    jet_devtools_render_text_field("source_id", span.source_id, &out)
+    jet_devtools_render_text_field("file", span.file, &out)
+    jet_devtools_render_u64_field("start_line", U64.from_u32(span.start_line), &out)
+    jet_devtools_render_u64_field("start_column", U64.from_u32(span.start_column), &out)
+    jet_devtools_render_u64_field("end_line", U64.from_u32(span.end_line), &out)
+    jet_devtools_render_u64_field("end_column", U64.from_u32(span.end_column), &out)
+    &out.push(U8{125})
+    return
+}
+fn jet_devtools_render_body_fields(body: JetDevtoolsEventBody) -> String Err! {
+    out := [U8]{U8{123}}
+    if body == {
+        .Build(status, tier, diagnostics, kept, reset) -> {
+            jet_devtools_render_text_field("status", status, &out)
+            jet_devtools_render_text_field("tier", tier, &out)
+            if diagnostics.len() > JET_DEVTOOLS_MAX_HISTORY -> return Err("jet.devtools.v1 build has too many diagnostics")
+            jet_devtools_wire_append(&out, ",\"diagnostics\":[")
+            loop (index, diagnostic) in diagnostics {
+                if index != 0 -> &out.push(U8{44})
+                render_text(diagnostic, &out)
+            }
+            &out.push(U8{93})
+            jet_devtools_render_u64_field("kept", kept, &out)
+            jet_devtools_render_u64_field("reset", reset, &out)
+        }
+        .Route(path, matched, render_mode, reason) -> {
+            jet_devtools_render_text_field("path", path, &out)
+            jet_devtools_render_bool_field("matched", matched, &out)
+            jet_devtools_render_text_field("render_mode", render_mode, &out)
+            jet_devtools_render_text_field("reason", reason, &out)
+        }
+        .Query(name, state, footprint) -> {
+            jet_devtools_render_text_field("name", name, &out)
+            jet_devtools_render_text_field("state", jet_devtools_query_state_wire(state), &out)
+            jet_devtools_render_u64_field("footprint", footprint, &out)
+        }
+        .Mutation(name, lifecycle, rollback) -> {
+            jet_devtools_render_text_field("name", name, &out)
+            jet_devtools_render_text_field("lifecycle", jet_devtools_mutation_lifecycle_wire(lifecycle), &out)
+            jet_devtools_render_bool_field("rollback", rollback, &out)
+        }
+        .Form(name, field, state, validation) -> {
+            jet_devtools_render_text_field("name", name, &out)
+            jet_devtools_render_text_field("field", field, &out)
+            jet_devtools_render_text_field("state", jet_devtools_form_state_wire(state), &out)
+            jet_devtools_render_text_field("validation", validation, &out)
+        }
+        .Table(name, viewport, sort, filter) -> {
+            jet_devtools_render_text_field("name", name, &out)
+            jet_devtools_render_u64_field("viewport", viewport, &out)
+            jet_devtools_render_text_field("sort", sort, &out)
+            jet_devtools_render_text_field("filter", filter, &out)
+        }
+        .Store(name, transaction, diff, cursor) -> {
+            jet_devtools_render_text_field("name", name, &out)
+            jet_devtools_render_text_field("transaction", transaction, &out)
+            jet_devtools_render_text_field("diff", diff, &out)
+            jet_devtools_render_u64_field("cursor", cursor, &out)
+        }
+        .Trace(name, kind, request, duration_ms, status) -> {
+            jet_devtools_render_text_field("name", name, &out)
+            jet_devtools_render_text_field("kind", jet_devtools_trace_kind_wire(kind), &out)
+            jet_devtools_render_text_field("request", request, &out)
+            jet_devtools_render_u64_field("duration_ms", duration_ms, &out)
+            jet_devtools_render_text_field("status", status, &out)
+        }
+        .Cost(name, rule, bytes, allocations) -> {
+            jet_devtools_render_text_field("name", name, &out)
+            jet_devtools_render_text_field("rule", rule, &out)
+            jet_devtools_render_u64_field("bytes", bytes, &out)
+            jet_devtools_render_u64_field("allocations", allocations, &out)
+        }
+        .Gate(name, status, detail) -> {
+            jet_devtools_render_text_field("name", name, &out)
+            jet_devtools_render_text_field("status", status, &out)
+            jet_devtools_render_text_field("detail", detail, &out)
+        }
+        .Structure(name, kind, status) -> {
+            jet_devtools_render_text_field("name", name, &out)
+            jet_devtools_render_text_field("kind", kind, &out)
+            jet_devtools_render_text_field("status", status, &out)
+        }
+        .Test(name, status, duration_ms, diagnostics) | .Job(name, status, duration_ms, diagnostics) -> {
+            jet_devtools_render_text_field("name", name, &out)
+            jet_devtools_render_text_field("status", status, &out)
+            jet_devtools_render_u64_field("duration_ms", duration_ms, &out)
+            jet_devtools_render_text_field("diagnostics", diagnostics, &out)
+        }
+        .Frame(name, status, duration_ms) -> {
+            jet_devtools_render_text_field("name", name, &out)
+            jet_devtools_render_text_field("status", status, &out)
+            jet_devtools_render_u64_field("duration_ms", duration_ms, &out)
+        }
+        .GameFrameSample(sequence, frame_id, scene, frame_index, build, revision, trace_id, start_ns, cpu_ns, gpu_ns, responsible_function) -> {
+            jet_devtools_render_u64_field("sequence", sequence, &out)
+            jet_devtools_render_u64_field("frame_id", frame_id, &out)
+            jet_devtools_render_text_field("scene", scene, &out)
+            jet_devtools_render_u64_field("frame_index", frame_index, &out)
+            jet_devtools_render_text_field("build", build, &out)
+            jet_devtools_render_text_field("revision", revision, &out)
+            jet_devtools_render_text_field("trace_id", trace_id, &out)
+            jet_devtools_render_u64_field("start_ns", start_ns, &out)
+            jet_devtools_render_u64_field("cpu_ns", cpu_ns, &out)
+            if gpu_ns == .Val(number) -> jet_devtools_render_u64_field("gpu_ns", number, &out) else -> jet_devtools_render_null_field("gpu_ns", &out)
+            if responsible_function == .Val(function) -> jet_devtools_render_function_field("responsible_function", function, &out) else -> jet_devtools_render_null_field("responsible_function", &out)
+        }
+        .GameDrawEvent(sequence, frame_id, scene, frame_index, build, revision, trace_id, event_index, event_id, function, phase, domain, start_ns, duration_ns, object_id, resource_id) -> {
+            jet_devtools_render_u64_field("sequence", sequence, &out)
+            jet_devtools_render_u64_field("frame_id", frame_id, &out)
+            jet_devtools_render_text_field("scene", scene, &out)
+            jet_devtools_render_u64_field("frame_index", frame_index, &out)
+            jet_devtools_render_text_field("build", build, &out)
+            jet_devtools_render_text_field("revision", revision, &out)
+            jet_devtools_render_text_field("trace_id", trace_id, &out)
+            jet_devtools_render_u64_field("event_index", event_index, &out)
+            jet_devtools_render_u64_field("event_id", event_id, &out)
+            jet_devtools_render_function_field("function", function, &out)
+            jet_devtools_render_text_field("phase", phase, &out)
+            jet_devtools_render_text_field("domain", domain, &out)
+            jet_devtools_render_u64_field("start_ns", start_ns, &out)
+            jet_devtools_render_u64_field("duration_ns", duration_ns, &out)
+            jet_devtools_render_optional_text_field("object_id", object_id, &out)
+            jet_devtools_render_optional_text_field("resource_id", resource_id, &out)
+        }
+        .GameLaunchProfile(target, run_mode, headless_compatible, phases) -> {
+            if phases.len() > 256 -> return Err("jet.devtools.v1 game launch profile exceeds phase limit")
+            jet_devtools_render_text_field("target", target, &out)
+            jet_devtools_render_text_field("run_mode", run_mode, &out)
+            jet_devtools_render_bool_field("headless_compatible", headless_compatible, &out)
+            jet_devtools_render_field_prefix("phases", &out)
+            &out.push(U8{91})
+            loop (index, phase) in phases {
+                if index != 0 -> &out.push(U8{44})
+                jet_devtools_render_launch_phase(phase, &out)
+            }
+            &out.push(U8{93})
+        }
+        .GameSwap(sequence, path, kind, status, old_schema_id, new_schema_id, migration, reason) -> {
+            jet_devtools_render_u64_field("sequence", sequence, &out)
+            jet_devtools_render_text_field("path", path, &out)
+            jet_devtools_render_text_field("kind", kind, &out)
+            jet_devtools_render_text_field("status", status, &out)
+            jet_devtools_render_optional_text_field("old_schema_id", old_schema_id, &out)
+            jet_devtools_render_optional_text_field("new_schema_id", new_schema_id, &out)
+            jet_devtools_render_text_field("migration", migration, &out)
+            jet_devtools_render_text_field("reason", reason, &out)
+        }
+        .Request(id, method, path, status) -> {
+            jet_devtools_render_text_field("id", id, &out)
+            jet_devtools_render_text_field("method", method, &out)
+            jet_devtools_render_text_field("path", path, &out)
+            jet_devtools_render_u64_field("status", U64.from_u16(status), &out)
+        }
+        .Response(id, status, bytes) -> {
+            jet_devtools_render_text_field("id", id, &out)
+            jet_devtools_render_u64_field("status", U64.from_u16(status), &out)
+            jet_devtools_render_u64_field("bytes", bytes, &out)
+        }
+    }
+    &out.push(U8{125})
+    Ok(String.from_bytes(out) ?? panic("devtools body writer preserves UTF-8"))
+}
+fn jet_devtools_render_payload(payload: JetDevtoolsPayload, out: &[U8]) Err! {
+    payload.validate()
+    // Sort only indices, never clone fields or their possibly large values.
+    ordered := [Int]{}
+    loop index in 0..<payload.fields.len() -> &ordered.push(index)
+    &ordered.sort_by((left: Int, right: Int) -> payload.fields[left].key <=> payload.fields[right].key)
+    jet_devtools_wire_append(&out, `{"fields":{`)
+    loop (index, slot) in ordered {
+        if index != 0 -> &out.push(U8{44})
+        render_text(payload.fields[slot].key, &out)
+        &out.push(U8{58})
+        render_value(payload.fields[slot].value, &out)
+    }
+    jet_devtools_wire_append(&out, `}}`)
+    return
+}
+pub fn render_value(value: JetDevtoolsValue, out: &[U8]) Err! {
+    value.validate()
+    if value == {
+        .Bool(boolean) -> jet_devtools_wire_append(&out, if boolean -> "true" else -> "false")
+        .Int(number) -> jet_devtools_wire_append(&out, "{number}")
+        .Float(number) -> jet_devtools_wire_append(&out, foundation_devtools_float.display(number))
+        .Text(text) -> render_text(text, &out)
+    }
+    return
+}
+fn jet_devtools_render_event(event: JetDevtoolsEvent, out: &[U8]) Err! {
+    if event.sequence == (U64{0}) -> return Err("jet.devtools.v1 event has no assigned sequence")
+    jet_devtools_validate_text(event.source, "source")
+    jet_devtools_validate_text(event.kind, "kind")
+    jet_devtools_validate_text(event.entity, "entity")
+    jet_devtools_validate_json_object(event.fields, "fields")
+    if event.payload == .Val(text) -> jet_devtools_validate_json_object(text, "payload")
+    jet_devtools_wire_append(&out, "{{\"sequence\":{event.sequence},\"timestamp_ms\":{event.timestamp_ms},\"source\":")
+    render_text(event.source, &out)
+    jet_devtools_wire_append(&out, ",\"kind\":")
+    render_text(event.kind, &out)
+    jet_devtools_wire_append(&out, ",\"entity\":")
+    render_text(event.entity, &out)
+    jet_devtools_wire_append(&out, ",\"fields\":")
+    jet_devtools_wire_append(&out, event.fields)
+    jet_devtools_wire_append(&out, ",\"payload\":")
+    if event.payload == .Val(text) -> jet_devtools_wire_append(&out, text) else -> jet_devtools_wire_append(&out, "null")
+    &out.push(U8{125})
+    return
+}
+fn jet_devtools_render_event_ring(events: JetDevtoolsEvents, out: &[U8]) Err! {
+    first := true
+    loop event in events {
+        if !first -> &out.push(U8{44})
+        first = false
+        jet_devtools_render_event(event, &out)
+    }
+    return
+}
+fn jet_devtools_render_selection(selection: JetDevtoolsSelection, out: &[U8]) Err! {
+    jet_devtools_validate_text(selection.panel_id, "selection.panel_id")
+    if selection.item_key == .Val(text) -> jet_devtools_validate_text(text, "selection.item_key")
+    jet_devtools_wire_append(&out, `{"panel_id":`)
+    render_text(selection.panel_id, &out)
+    jet_devtools_wire_append(&out, ",\"item_key\":")
+    if selection.item_key == .Val(text) -> render_text(text, &out) else -> jet_devtools_wire_append(&out, "null")
+    &out.push(U8{125})
+    return
+}
+fn jet_devtools_render_source_identity(identity: JetDevtoolsSourceIdentityFact, out: &[U8]) Err! {
+    identity.validate()
+    &out.push(U8{123})
+    if identity.source_id == .Val(text) -> jet_devtools_render_text_field("source_id", text, &out)
+    if identity.build_id == .Val(text) -> jet_devtools_render_text_field("build_id", text, &out)
+    if identity.revision == .Val(text) -> jet_devtools_render_text_field("revision", text, &out)
+    if identity.world_id == .Val(text) -> jet_devtools_render_text_field("world_id", text, &out)
+    &out.push(U8{125})
+    return
+}
+pub fn jet_devtools_serialize(envelope: JetDevtoolsEnvelope) -> String Err! {
+    jet_devtools_validate_text(envelope.session_id, "session_id")
+    if envelope.source_identity == .Val(identity) -> identity.validate()
+    out := [U8]{}
+    jet_devtools_wire_append(&out, `{"protocol":`)
+    render_text(JET_DEVTOOLS_PROTOCOL, &out)
+    jet_devtools_wire_append(&out, ",\"session_id\":")
+    render_text(envelope.session_id, &out)
+    jet_devtools_wire_append(&out, ",\"started_at_ms\":{envelope.started_at_ms},\"events\":[")
+    jet_devtools_render_event_ring(envelope.events(), &out)
+    jet_devtools_wire_append(&out, "],\"selection\":")
+    if envelope.view.selection == .Val(selection) -> jet_devtools_render_selection(selection, &out) else -> jet_devtools_wire_append(&out, "null")
+    jet_devtools_wire_append(&out, ",\"cursor\":")
+    if envelope.view.cursor == .Val(cursor) -> jet_devtools_wire_append(&out, "{cursor}") else -> jet_devtools_wire_append(&out, "null")
+    has_metadata :: envelope.lifecycle != .Starting || envelope.freshness.state != .Unknown || envelope.freshness.observed_at_ms != (U64{0}) || envelope.privacy.published_payloads || envelope.source_identity != None || envelope.reset || envelope.truncated
+    if has_metadata {
+        jet_devtools_wire_append(&out, ",\"lifecycle\":")
+        render_text(envelope.lifecycle.as_str(), &out)
+        jet_devtools_wire_append(&out, `,"freshness":{"state":`)
+        render_text(envelope.freshness.state.as_str(), &out)
+        jet_devtools_wire_append(&out, ",\"observed_at_ms\":{envelope.freshness.observed_at_ms}}},\"privacy\":{{\"loopback_only\":")
+        jet_devtools_wire_append(&out, if envelope.privacy.loopback_only -> "true" else -> "false")
+        jet_devtools_wire_append(&out, ",\"payload_free_by_default\":")
+        jet_devtools_wire_append(&out, if envelope.privacy.payload_free_by_default -> "true" else -> "false")
+        jet_devtools_wire_append(&out, ",\"published_payloads\":")
+        jet_devtools_wire_append(&out, if envelope.privacy.published_payloads -> "true" else -> "false")
+        jet_devtools_wire_append(&out, `},"reset":`)
+        jet_devtools_wire_append(&out, if envelope.reset -> "true" else -> "false")
+        jet_devtools_wire_append(&out, ",\"truncated\":")
+        jet_devtools_wire_append(&out, if envelope.truncated -> "true" else -> "false")
+        jet_devtools_wire_append(&out, ",\"source_identity\":")
+        if envelope.source_identity == .Val(identity) -> jet_devtools_render_source_identity(identity, &out) else -> jet_devtools_wire_append(&out, "null")
+    }
+    &out.push(U8{125})
+    if out.len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES -> return Err("jet.devtools.v1 envelope exceeds the Prelude byte limit")
+    Ok(String.from_bytes(out) ?? panic("devtools envelope writer preserves UTF-8"))
+}

@@ -1,0 +1,167 @@
+// MIR.rs:231-391 (`MirMeasure` measure operations and `MirDimension` identity
+// and display) has no local Rust unit tests; these pin its frozen behavior.
+fn mir_measure_test_u(value: Int) -> MIRMeasure Never! { MIRMeasure.Literal{kind: "length", value: value} }
+
+fn mir_measure_test_s(value: Int) -> MIRMeasure Never! { MIRMeasure.SignedLiteral{kind: "exponent", value: value} }
+
+fn mir_measure_test_sym(name: String) -> MIRMeasure Never! { MIRMeasure.Symbol{kind: "length", name: name} }
+
+fn mir_measure_test_add(left: MIRMeasure, right: MIRMeasure) -> MIRMeasure Never! {
+    MIRMeasure.Combined{kind: "length", rule: MIRMeasureRule.Add, left: left, right: right}
+}
+
+fn mir_measure_test_mul(left: MIRMeasure, right: MIRMeasure) -> MIRMeasure Never! {
+    MIRMeasure.Combined{kind: "length", rule: MIRMeasureRule.Mul, left: left, right: right}
+}
+
+fn mir_measure_test_match(left: MIRMeasure, right: MIRMeasure) -> MIRMeasure Never! {
+    MIRMeasure.Combined{kind: "length", rule: MIRMeasureRule.Match, left: left, right: right}
+}
+
+fn mir_measure_test_is(actual: Int?, expected: Int) -> Bool Never! {
+    if actual == {
+        .Val(value) -> value == expected
+        else -> false
+    }
+}
+
+fn mir_measure_test_axis(name: String, exponent: MIRMeasure) -> MIRDimensionAxis Never! {
+    MIRDimensionAxis{name: name, exponent: exponent}
+}
+
+#Test("literal_value keeps the exact u64 range") {
+    assert(mir_measure_test_is(mir_measure_literal_value(mir_measure_test_u(0)), 0))
+    assert(mir_measure_test_is(mir_measure_literal_value(mir_measure_test_u(18446744073709551615)), 18446744073709551615))
+    assert(mir_measure_test_is(mir_measure_literal_value(mir_measure_test_add(mir_measure_test_u(18446744073709551614), mir_measure_test_u(1))), 18446744073709551615))
+    assert(mir_measure_test_is(mir_measure_literal_value(mir_measure_test_mul(mir_measure_test_u(4294967296), mir_measure_test_u(4294967295))), 18446744069414584320))
+    assert(mir_measure_test_is(mir_measure_literal_value(mir_measure_test_mul(mir_measure_test_u(0), mir_measure_test_u(18446744073709551615))), 0))
+    assert(mir_measure_test_is(mir_measure_literal_value(mir_measure_test_add(mir_measure_test_mul(mir_measure_test_u(2), mir_measure_test_u(3)), mir_measure_test_u(4))), 10))
+}
+
+#Test("literal_value checked_add and checked_mul overflow is None") {
+    assert(mir_measure_literal_value(mir_measure_test_add(mir_measure_test_u(18446744073709551615), mir_measure_test_u(1))) == None)
+    assert(mir_measure_literal_value(mir_measure_test_mul(mir_measure_test_u(4294967296), mir_measure_test_u(4294967296))) == None)
+    assert(mir_measure_literal_value(mir_measure_test_mul(mir_measure_test_u(18446744073709551615), mir_measure_test_u(2))) == None)
+    overflowed :: mir_measure_test_add(mir_measure_test_u(18446744073709551615), mir_measure_test_u(1))
+    assert(mir_measure_literal_value(mir_measure_test_mul(overflowed, mir_measure_test_u(0))) == None)
+}
+
+#Test("literal_value rejects signed, symbolic, match and out-of-u64 carriers") {
+    assert(mir_measure_literal_value(mir_measure_test_s(5)) == None)
+    assert(mir_measure_literal_value(mir_measure_test_sym("N")) == None)
+    assert(mir_measure_literal_value(mir_measure_test_add(mir_measure_test_sym("N"), mir_measure_test_u(1))) == None)
+    assert(mir_measure_literal_value(mir_measure_test_add(mir_measure_test_u(1), mir_measure_test_s(1))) == None)
+    assert(mir_measure_literal_value(mir_measure_test_match(mir_measure_test_u(1), mir_measure_test_u(2))) == None)
+    assert(mir_measure_literal_value(mir_measure_test_u(-1)) == None)
+    assert(mir_measure_literal_value(mir_measure_test_u(18446744073709551616)) == None)
+}
+
+#Test("signed_literal_value keeps the exact i64 range") {
+    assert(mir_measure_test_is(mir_measure_signed_literal_value(mir_measure_test_s(-9223372036854775808)), -9223372036854775808))
+    assert(mir_measure_test_is(mir_measure_signed_literal_value(mir_measure_test_s(9223372036854775807)), 9223372036854775807))
+    assert(mir_measure_test_is(mir_measure_signed_literal_value(mir_measure_test_u(9223372036854775807)), 9223372036854775807))
+    assert(mir_measure_test_is(mir_measure_signed_literal_value(mir_measure_test_add(mir_measure_test_u(5), mir_measure_test_s(-7))), -2))
+    assert(mir_measure_test_is(mir_measure_signed_literal_value(mir_measure_test_mul(mir_measure_test_s(-1), mir_measure_test_s(9223372036854775807))), -9223372036854775807))
+    assert(mir_measure_test_is(mir_measure_signed_literal_value(mir_measure_test_add(mir_measure_test_s(-9223372036854775807), mir_measure_test_s(-1))), -9223372036854775808))
+}
+
+#Test("signed_literal_value try_from and checked overflow is None") {
+    assert(mir_measure_signed_literal_value(mir_measure_test_u(9223372036854775808)) == None)
+    assert(mir_measure_signed_literal_value(mir_measure_test_u(18446744073709551615)) == None)
+    assert(mir_measure_signed_literal_value(mir_measure_test_add(mir_measure_test_u(9223372036854775808), mir_measure_test_s(-1))) == None)
+    assert(mir_measure_signed_literal_value(mir_measure_test_add(mir_measure_test_s(9223372036854775807), mir_measure_test_s(1))) == None)
+    assert(mir_measure_signed_literal_value(mir_measure_test_add(mir_measure_test_s(-9223372036854775808), mir_measure_test_s(-1))) == None)
+    assert(mir_measure_signed_literal_value(mir_measure_test_mul(mir_measure_test_s(-9223372036854775808), mir_measure_test_s(-1))) == None)
+    assert(mir_measure_signed_literal_value(mir_measure_test_sym("N")) == None)
+    assert(mir_measure_signed_literal_value(mir_measure_test_match(mir_measure_test_s(1), mir_measure_test_s(2))) == None)
+    assert(mir_measure_signed_literal_value(mir_measure_test_s(9223372036854775808)) == None)
+}
+
+#Test("measure kind and expression match the Rust Display") {
+    assert(mir_measure_kind(mir_measure_test_u(3)) == "length")
+    assert(mir_measure_kind(mir_measure_test_s(3)) == "exponent")
+    assert(mir_measure_kind(mir_measure_test_sym("N")) == "length")
+    assert(mir_measure_kind(mir_measure_test_match(mir_measure_test_s(1), mir_measure_test_s(2))) == "length")
+    assert(mir_measure_expression(mir_measure_test_u(18446744073709551615)) == "18446744073709551615")
+    assert(mir_measure_expression(mir_measure_test_s(-9223372036854775808)) == "-9223372036854775808")
+    assert(mir_measure_expression(mir_measure_test_sym("N")) == "N")
+    assert(mir_measure_expression(mir_measure_test_add(mir_measure_test_sym("N"), mir_measure_test_u(1))) == "(N + 1)")
+    assert(mir_measure_expression(mir_measure_test_mul(mir_measure_test_add(mir_measure_test_u(1), mir_measure_test_u(2)), mir_measure_test_sym("N"))) == "((1 + 2) * N)")
+    assert(mir_measure_expression(mir_measure_test_match(mir_measure_test_sym("N"), mir_measure_test_s(-4))) == "match(N, -4)")
+    assert(mir_measure_expression(mir_measure_test_add(mir_measure_test_u(18446744073709551615), mir_measure_test_u(1))) == "(18446744073709551615 + 1)")
+}
+
+// `MirMeasure::symbol_name` is the `.Symbol` payload projection.
+#Test("symbol_name is the Symbol payload projection") {
+    measures :: [MIRMeasure]{mir_measure_test_sym("capacity"), mir_measure_test_u(1), mir_measure_test_s(1), mir_measure_test_add(mir_measure_test_sym("N"), mir_measure_test_u(1))}
+    names := [String]{}
+    loop measure in measures {
+        if measure == {
+            .Symbol(_, name) -> &names.push(name)
+            else -> {}
+        }
+    }
+    assert(names.len() == 1)
+    assert(names[0] == "capacity")
+}
+
+#Test("scalar dimension has empty identity and Scalar display") {
+    scalar :: MIRDimension{axes: [MIRDimensionAxis]{}}
+    assert(mir_dimension_identity(scalar) == "")
+    assert(mir_dimension_display_name(scalar) == "Scalar")
+}
+
+#Test("dimension keeps byte-ordered axes for identity and display") {
+    dimension :: MIRDimension{axes: [MIRDimensionAxis]{
+        mir_measure_test_axis("core.units::Time", mir_measure_test_s(-2)),
+        mir_measure_test_axis("physics::Length", mir_measure_test_u(1)),
+        mir_measure_test_axis("physics::mass", mir_measure_test_s(3)),
+    }}
+    assert(mir_dimension_identity(dimension) == "core.units::Time:-2;physics::Length:1;physics::mass:3")
+    assert(mir_dimension_display_name(dimension) == "Time^-2 * Length * mass^3")
+}
+
+#Test("dimension identity renders measures while display evaluates them") {
+    folded :: MIRDimension{axes: [MIRDimensionAxis]{mir_measure_test_axis("si::M", mir_measure_test_add(mir_measure_test_s(1), mir_measure_test_s(1)))}}
+    assert(mir_dimension_identity(folded) == "si::M:(1 + 1)")
+    assert(mir_dimension_display_name(folded) == "M^2")
+    unit :: MIRDimension{axes: [MIRDimensionAxis]{mir_measure_test_axis("si::M", mir_measure_test_mul(mir_measure_test_s(-1), mir_measure_test_s(-1)))}}
+    assert(mir_dimension_identity(unit) == "si::M:(-1 * -1)")
+    assert(mir_dimension_display_name(unit) == "M")
+    zero :: MIRDimension{axes: [MIRDimensionAxis]{mir_measure_test_axis("si::M", mir_measure_test_s(0))}}
+    assert(mir_dimension_identity(zero) == "si::M:0")
+    assert(mir_dimension_display_name(zero) == "M^0")
+}
+
+#Test("dimension identity keeps symbolic exponents and unescaped axes") {
+    symbolic :: MIRDimension{axes: [MIRDimensionAxis]{
+        mir_measure_test_axis("si::M", mir_measure_test_sym("N")),
+        mir_measure_test_axis("si::T", mir_measure_test_match(mir_measure_test_sym("N"), mir_measure_test_s(2))),
+    }}
+    assert(mir_dimension_identity(symbolic) == "si::M:N;si::T:match(N, 2)")
+    raw :: MIRDimension{axes: [MIRDimensionAxis]{mir_measure_test_axis("a;b:c%", mir_measure_test_s(1))}}
+    assert(mir_dimension_identity(raw) == "a;b:c%:1")
+    assert(mir_dimension_display_name(raw) == "a;b:c%")
+}
+
+#Test("dimension display keeps concrete i32 exponent bounds") {
+    high :: MIRDimension{axes: [MIRDimensionAxis]{mir_measure_test_axis("si::M", mir_measure_test_s(2147483647))}}
+    assert(mir_dimension_display_name(high) == "M^2147483647")
+    low :: MIRDimension{axes: [MIRDimensionAxis]{mir_measure_test_axis("si::M", mir_measure_test_s(-2147483648))}}
+    assert(mir_dimension_display_name(low) == "M^-2147483648")
+    assert(mir_dimension_identity(low) == "si::M:-2147483648")
+}
+
+#Test("dimension display takes the leaf after the last path separator") {
+    nested :: MIRDimension{axes: [MIRDimensionAxis]{mir_measure_test_axis("a::b::c", mir_measure_test_s(1))}}
+    assert(mir_dimension_display_name(nested) == "c")
+    triple :: MIRDimension{axes: [MIRDimensionAxis]{mir_measure_test_axis("a:::b", mir_measure_test_s(2))}}
+    assert(mir_dimension_display_name(triple) == "b^2")
+    plain :: MIRDimension{axes: [MIRDimensionAxis]{mir_measure_test_axis("plain", mir_measure_test_s(1))}}
+    assert(mir_dimension_display_name(plain) == "plain")
+    trailing :: MIRDimension{axes: [MIRDimensionAxis]{mir_measure_test_axis("pkg::", mir_measure_test_s(2))}}
+    assert(mir_dimension_display_name(trailing) == "^2")
+    unicode :: MIRDimension{axes: [MIRDimensionAxis]{mir_measure_test_axis("物理::長さ", mir_measure_test_s(-1))}}
+    assert(mir_dimension_display_name(unicode) == "長さ^-1")
+    assert(mir_dimension_identity(unicode) == "物理::長さ:-1")
+}

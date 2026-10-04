@@ -1,0 +1,62 @@
+// MIR.rs:5217-5244,5295-5304. Canonical semantic reference visitors, shared
+// with validation, optimizers and adapters (not a verifier-only projection).
+pub fn mir_semantic_op_field_uses(operation: MIRSemanticOp) -> [MIRFieldID] Never! {
+    uses := [MIRFieldID]{}
+    if operation == {
+        .StructLiteral(_, fields, _, _, boxed) -> {
+            loop field in fields -> &uses.push(field.field)
+            loop field in boxed -> &uses.push(field)
+        }
+        .BuiltinMethod(_, _, _, _, .Val(fields)) -> { loop field in fields -> &uses.push(field) }
+        .CellGuardProject(_, _, _, paths, _, _) -> { loop path in paths { loop field in path -> &uses.push(field) } }
+        .SharedGuardMap(_, _, path, _) -> { loop field in path -> &uses.push(field) }
+        .SharedGuardSplit(_, _, _, first, second, _) -> { loop field in first -> &uses.push(field); loop field in second -> &uses.push(field) }
+        .ColumnarRead(_, _, field, _, _) | .CarrierFact(_, _, field, _) -> &uses.push(field)
+        else -> {}
+    }
+    uses
+}
+pub fn mir_semantic_op_source_file_uses(operation: MIRSemanticOp) -> [MIRSourceFileID] Never! {
+    if operation == {
+        .RequireStop(_, _, _, location, _, _, _) | .HTTPRouterRegister(_, _, _, _, _, _, _, location) -> [MIRSourceFileID]{location.file}
+        .OverflowOption(_, _, _, .Val(location)) -> [MIRSourceFileID]{location.file}
+        else -> [MIRSourceFileID]{}
+    }
+}
+
+// MIR.rs:5379-5395. Preserve dense logical IDs, backward input edges, and
+// physical-node trimmed reason law without source/backend interpretation.
+pub MIR_DATA_PLAN_SCHEMA_VERSION :: prep { 1 }
+pub fn mir_data_plan_validate(plan: MIRDataPlan) -> Bool Never! {
+    if plan.schema_version != MIR_DATA_PLAN_SCHEMA_VERSION || plan.logical.len() == 0 || plan.output.value >= U64{plan.logical.len()} -> return false
+    loop (index, node) in plan.logical {
+        if node.id.value != U64{index} -> return false
+        loop input in node.inputs { if input.value >= node.id.value -> return false }
+        loop column in node.columns { if column.name.len() == 0 -> return false }
+    }
+    loop node in plan.physical {
+        if node.logical.value >= U64{plan.logical.len()} || node.reason.trim().len() == 0 -> return false
+    }
+    true
+}
+
+// MIR.rs:1023-1031,1077-1099,1132-1138. The scalar-kind queries preserve
+// the native tag/range transparency, unlike checking only the outer enum.
+pub fn mir_type_nominal_name(ty: MIRType) -> String? Never! {
+    if ty.kind == {
+        .Apply(name, _) -> Val(name.name)
+        .TraitObject(bounds) -> { if bounds.len() == 1 -> Val(bounds[0].name) else -> None }
+        else -> None
+    }
+}
+pub fn mir_type_is_bool(ty: MIRType) -> Bool Never! {
+    if ty.kind == { .Bool -> true .InlineRange(base, _, _) | .Tagged(_, base) -> mir_type_is_bool(base) else -> false }
+}
+pub fn mir_type_is_string(ty: MIRType) -> Bool Never! {
+    if ty.kind == { .String -> true .Tagged(_, inner) -> mir_type_is_string(inner) else -> false }
+}
+pub fn mir_type_is_char(ty: MIRType) -> Bool Never! {
+    if ty.kind == { .Char -> true .Tagged(_, inner) -> mir_type_is_char(inner) else -> false }
+}
+pub fn mir_type_is_function(ty: MIRType) -> Bool Never! { ty.kind == .Fn(_) || ty.kind == .SendFn(_, _, _) }
+pub fn mir_type_is_result(ty: MIRType) -> Bool Never! { ty.kind == .Result(_, _) }

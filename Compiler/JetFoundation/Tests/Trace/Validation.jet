@@ -1,0 +1,159 @@
+// Additional behavioral boundaries of JetTrace.rs's complete validator closure.
+#Test("JetTrace original content validation precedes claimed id and hash") {
+    content := trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)
+    jettrace_test_set(&content, "command", .Null)
+    wrapper := jettrace_artifact(^content) ?? panic(err.message)
+    jettrace_test_set(&wrapper, "trace_id", .Integer("0"))
+    assert_eq(jettrace_test_error_bytes(canonical_json_bytes(wrapper)), "content.command is not text")
+}
+#Test("JetTrace wrapper exact keys schema version and lowercase Hex64") {
+    content :: trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)
+    wrapper := jettrace_artifact(~content) ?? panic(err.message)
+    jettrace_test_set(&wrapper, "schema", .String("jet.gc.trace"))
+    assert_eq(jettrace_test_error_bytes(canonical_json_bytes(wrapper)), "unsupported jettrace schema (need jet.trace)")
+    wrapper = jettrace_artifact(~content) ?? panic(err.message)
+    jettrace_test_set(&wrapper, "version", .String("1"))
+    assert_eq(jettrace_test_error_bytes(canonical_json_bytes(wrapper)), "jettrace version is not an integer")
+    wrapper = jettrace_artifact(^content) ?? panic(err.message)
+    jettrace_test_set(&wrapper, "trace_id", .String("A".repeat(64)))
+    assert_eq(jettrace_test_error_bytes(canonical_json_bytes(wrapper)), "jettrace trace_id is not lowercase Hex64")
+    assert_eq(jettrace_test_error_bytes("[]\n".bytes()), "jettrace wrapper is not an object")
+    assert_eq(jettrace_test_error_bytes("{{}}\n".bytes()), "jettrace wrapper has missing or unknown keys")
+    bytes :: jettrace_test_bytes(jettrace_sample_skeleton())
+    assert_eq(bytes[bytes.len() - 1], U8{10})
+    assert(bytes[bytes.len() - 2] != U8{10})
+}
+#Test("JetTrace u64 checked decimal domain does not narrow through Int") {
+    assert_eq(jettrace_unsigned(.Integer("18446744073709551615"), "x") ?? panic(err.message), U64{18446744073709551615})
+    invalid :: [String]{"18446744073709551616", "-1", "", "1x"}
+    loop text in invalid {
+        if jettrace_unsigned(.Integer(~text), "x") == {
+            .Err(error) -> assert_eq(error.message, "x is not an unsigned integer")
+            else -> panic("unsigned overflow accepted")
+        }
+    }
+    skeleton := jettrace_sample_skeleton()
+    &skeleton.samples.push(TraceSample{domain: "cpu", duration_ns: U64{18446744073709551615}, symbol: jettrace_test_symbol()})
+    _ :: jettrace_test_valid(skeleton)
+}
+#Test("JetTrace task cycles duplicates zero ids and symbol references") {
+    skeleton := jettrace_sample_skeleton()
+    &skeleton.tasks.push(jettrace_test_task(U64{1}, U64{2}, "done", ""))
+    &skeleton.tasks.push(jettrace_test_task(U64{2}, U64{1}, "done", ""))
+    assert(jettrace_test_error(skeleton).contains("task 1 has cyclic parent causality"))
+    skeleton.tasks[0].parent = U64{0}
+    skeleton.tasks[1].id = U64{1}
+    skeleton.tasks[1].parent = U64{0}
+    assert(jettrace_test_error(skeleton).contains("duplicates task 1"))
+    skeleton.tasks[1].id = U64{0}
+    assert(jettrace_test_error(skeleton).contains("id must be greater than zero"))
+    skeleton.tasks = [TraceTask]{jettrace_test_task(U64{1}, U64{0}, "blocked", "tcp accept")}
+    &skeleton.io.push(TraceIO{start_ns: U64{1}, end_ns: U64{2}, kind: "tcp", task_id: U64{1}, wait: "tcp accept", symbol: JetSymbolRef{path: "app.jet", name: "wrong"}})
+    assert(jettrace_test_error(skeleton).contains("symbol does not match its task"))
+}
+fn jettrace_test_profile_skeleton() -> TraceSkeleton Never! {
+    skeleton := jettrace_sample_skeleton()
+    skeleton.profile.status = "captured"
+    skeleton.profile.coverage = "partial"
+    &skeleton.source_identity.push(SourceIdentity{path: "app.jet", sha256: "a".repeat(64), symbols: [(name: String, kind: String)]{(name: "run", kind: "fn")}})
+    &skeleton.profile.rows.push(TraceProfileRow{clock: "wall", execution_count: None, sample_count: U64{1}, sample_weight: U64{37},
+        source: TraceProfileSource{path: "app.jet", sha256: "a".repeat(64), start_line: U64{1}, start_column: U64{1}, end_line: U64{3}, end_column: U64{2}}, symbol: jettrace_test_symbol()})
+    skeleton
+}
+#Test("JetTrace source profile digest attribution and explicit measurement states") {
+    skeleton := jettrace_test_profile_skeleton()
+    _ :: jettrace_test_valid(skeleton)
+    skeleton.profile.overhead_status = "measured"
+    assert(jettrace_test_error(skeleton).contains("measured profile overhead must include overhead_ns"))
+    skeleton.profile.overhead_ns = Val(U64{3})
+    _ :: jettrace_test_valid(skeleton)
+    skeleton.profile.overhead_status = "not_measured"
+    assert(jettrace_test_error(skeleton).contains("unmeasured profile overhead cannot include overhead_ns"))
+    skeleton.profile.overhead_ns = None
+    skeleton.profile.rows[0].source.sha256 = "b".repeat(64)
+    assert(jettrace_test_error(skeleton).contains("does not match content.source_identity"))
+    skeleton.profile.rows[0].source.sha256 = "a".repeat(64)
+    skeleton.profile.rows[0].source.start_line = U64{0}
+    assert(jettrace_test_error(skeleton).contains("start_line must be nonzero"))
+    skeleton.profile.rows[0].source.start_line = U64{1}
+    skeleton.profile.rows[0].symbol.path = "other.jet"
+    assert(jettrace_test_error(skeleton).contains("symbol.path does not match source.path"))
+    skeleton.profile.rows[0].symbol.path = "app.jet"
+    skeleton.profile.status = "unsupported"
+    assert(jettrace_test_error(skeleton).contains("unsupported state cannot contain rows"))
+    skeleton.profile.status = "truncated"
+    assert(jettrace_test_error(skeleton).contains("truncation state is inconsistent"))
+    skeleton.profile.rows_truncated = true
+    _ :: jettrace_test_valid(skeleton)
+    skeleton.profile.rows = [TraceProfileRow]{}
+    assert(jettrace_test_error(skeleton).contains("truncated profile must retain bounded rows"))
+}
+#Test("JetTrace receipt sections enforce UTF8 byte caps and digest") {
+    skeleton := jettrace_sample_skeleton()
+    value :: canonical_json_object([CanonicalJSONField]{CanonicalJSONField{key: "proof", value: .Bool(true)}}) ?? panic(err.message)
+    digest :: canonical_json_sha256(value)
+    &skeleton.receipt_sections.push(TraceReceiptSection{name: "b", type_name: "Evidence", value: ~value, digest: ~digest})
+    &skeleton.receipt_sections.push(TraceReceiptSection{name: "a", type_name: "Evidence", value: ~value, digest: ~digest})
+    _ :: jettrace_test_valid(skeleton)
+    skeleton.receipt_sections[0].name = "é".repeat(64)
+    _ :: jettrace_test_valid(skeleton)
+    skeleton.receipt_sections[0].name = "é".repeat(65)
+    assert(jettrace_test_error(skeleton).contains("maximum 128 bytes"))
+    skeleton.receipt_sections[0].name = "a"
+    assert(jettrace_test_error(skeleton).contains("duplicates receipt section"))
+    skeleton.receipt_sections[0].name = "a/b"
+    assert(jettrace_test_error(skeleton).contains("name is invalid"))
+    skeleton.receipt_sections[0].name = "x"
+    skeleton.receipt_sections[0].type_name = "é".repeat(129)
+    assert(jettrace_test_error(skeleton).contains("maximum 256 bytes"))
+    skeleton.receipt_sections[0].type_name = "Evidence"
+    skeleton.receipt_sections[0].digest = "0".repeat(64)
+    assert(jettrace_test_error(skeleton).contains("digest does not match value"))
+}
+#Test("JetTrace privacy exclusions ordering allowlist and hardware toolchain digests") {
+    skeleton := jettrace_sample_skeleton()
+    skeleton.capture_policy.allowlist = [String]{"values", "urls", "values"}
+    text :: jettrace_test_text(skeleton)
+    assert(text.contains("\"allowlist\":[\"urls\",\"values\"]"))
+    _ :: jettrace_test_valid(skeleton)
+    content := trace_skeleton_content_json(skeleton) ?? panic(err.message)
+    hardware := trace_hardware_to_json(skeleton.hardware) ?? panic(err.message)
+    jettrace_test_set(&hardware, "fingerprint", .String("0".repeat(64)))
+    jettrace_test_set(&content, "hardware", ^hardware)
+    assert(jettrace_test_error_bytes(jettrace_test_wrap(^content)).contains("content hash mismatch"))
+    content = trace_skeleton_content_json(skeleton) ?? panic(err.message)
+    toolchain := trace_toolchain_to_json(skeleton.toolchain) ?? panic(err.message)
+    jettrace_test_set(&toolchain, "digest", .String("0".repeat(64)))
+    jettrace_test_set(&content, "toolchain", ^toolchain)
+    assert_eq(jettrace_test_error_bytes(jettrace_test_wrap(^content)), "toolchain digest mismatch")
+    content = trace_skeleton_content_json(skeleton) ?? panic(err.message)
+    policy := capture_policy_to_json(skeleton.capture_policy) ?? panic(err.message)
+    jettrace_test_set(&policy, "default_exclusions", .Array([CanonicalJSON]{}))
+    jettrace_test_set(&content, "capture_policy", ^policy)
+    assert(jettrace_test_error_bytes(jettrace_test_wrap(^content)).contains("does not match D-PERFSESSION1 defaults"))
+}
+#Test("JetTrace game projection retains every typed frame and draw identity") {
+    function :: jet_devtools_function_identity_new("fn:draw", "draw", jet_devtools_source_span_new("source:scene", "scene.jet", U32{2}, U32{3}, U32{4}, U32{5}))
+    bodies :: [JetDevtoolsEventBody]{
+        .GameFrameSample{sequence: U64{8}, frame_id: U64{7}, scene: "scene", frame_index: U64{6}, build: "build", revision: "rev", trace_id: "trace", start_ns: U64{100}, cpu_ns: U64{42}, gpu_ns: Val(U64{31}), responsible_function: Val(~function)},
+        .GameDrawEvent{sequence: U64{9}, frame_id: U64{7}, scene: "scene", frame_index: U64{6}, build: "build", revision: "rev", trace_id: "trace", event_index: U64{2}, event_id: U64{3}, function: ~function, phase: "draw", domain: "gpu", start_ns: U64{110}, duration_ns: U64{12}, object_id: Val("object"), resource_id: Val("resource")},
+        .Gate{name: "not game", status: "ready", detail: ""}
+    }
+    projected :: project_game_devtools_bodies(bodies) ?? panic(err.message)
+    assert_eq(projected.frames.len(), 1)
+    assert_eq(projected.draws.len(), 1)
+    assert_eq(projected.frames[0].sequence, U64{8})
+    assert_eq(projected.frames[0].gpu_ns, Val(U64{31}))
+    assert_eq(projected.draws[0].event_id, U64{3})
+    assert_eq(projected.draws[0].object_id, Val("object"))
+    assert_eq(projected.draws[0].resource_id, Val("resource"))
+    assert_eq(projected.draws[0].function.source.start_line, U64{2})
+    skeleton := jettrace_sample_skeleton()
+    _ :: trace_skeleton_add_game_devtools_bodies(&skeleton, bodies) ?? panic(err.message)
+    _ :: jettrace_test_valid(skeleton)
+    skeleton.game_frames[0].scene = ""
+    assert(jettrace_test_error(skeleton).contains("scene is empty"))
+    skeleton.game_frames[0].scene = "scene"
+    skeleton.game_draw_events[0].function.source.file = ""
+    assert(jettrace_test_error(skeleton).contains("source.file is empty"))
+}

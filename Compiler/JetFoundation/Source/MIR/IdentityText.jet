@@ -1,0 +1,67 @@
+// MIR.rs:6487-6685. Frozen native identity JSON is not canonical receipt JSON:
+// IDs in display JSON are strings, digest payload IDs are numeric, and BS/FF
+// are four-digit Unicode escapes. Both use the existing Foundation quote kernel.
+fn mir_identity_quote(value: String) -> String Never! {
+    out := [U8]{}
+    canonical_json_encode_string(value, &out, false)
+    String.from_bytes(out) ?? panic("JSON quoting preserves UTF-8")
+}
+pub fn mir_program_identity_unavailable(program_digest: String, source_map: ^[MIRSourceMapIdentity]) -> MIRProgramIdentity Never! {
+    MIRProgramIdentity{semantic_hash: ~program_digest, optimized_hash: program_digest, function_ids: [U64]{}, core_ids: [U64]{}, target_facts: [(String, String)]{("availability", "unavailable")}, source_map: source_map}
+}
+fn mir_identity_canonical_parts(identity: MIRProgramIdentity, ids_as_strings: Bool) -> (String, String, String, String) Never! {
+    function_ids :: mir_identity_unique_ids(identity.function_ids)
+    function_text :: function_ids.map(id -> if ids_as_strings -> mir_identity_quote("{id}") else -> "{id}").join(",")
+    core_ids :: mir_identity_unique_ids(identity.core_ids)
+    core_text :: core_ids.map(id -> if ids_as_strings -> mir_identity_quote("{id}") else -> "{id}").join(",")
+    source_ids :: identity.source_map.map(entry -> entry.id)
+    source_paths :: identity.source_map.map(entry -> entry.path)
+    source_text := [String]{}
+    loop index in mir_digest_order(source_ids, [U64]{}, [U64]{}, source_paths, [String]{}, false) {
+        entry :: identity.source_map[index]
+        id :: if ids_as_strings -> mir_identity_quote("{entry.id}") else -> "{entry.id}"
+        &source_text.push("{{\"digest\":{mir_identity_quote(entry.digest)},\"id\":{id},\"path\":{mir_identity_quote(entry.path)}}}")
+    }
+    keys :: identity.target_facts.map(fact -> fact.0)
+    values :: identity.target_facts.map(fact -> fact.1)
+    target_text := [String]{}
+    loop index in mir_digest_order([U64]{}, [U64]{}, [U64]{}, keys, values, false) {
+        fact :: identity.target_facts[index]
+        &target_text.push("{{\"key\":{mir_identity_quote(fact.0)},\"value\":{mir_identity_quote(fact.1)}}}")
+    }
+    (core_text, function_text, source_text.join(","), target_text.join(","))
+}
+pub fn mir_program_identity_canonical_payload(identity: MIRProgramIdentity) -> String Never! {
+    parts :: mir_identity_canonical_parts(identity, false)
+    "{{\"core_ids\":[{parts.0}],\"function_ids\":[{parts.1}],\"optimized_hash\":{mir_identity_quote(identity.optimized_hash)},\"schema\":{mir_identity_quote(MIR_IDENTITY_SCHEMA)},\"semantic_hash\":{mir_identity_quote(identity.semantic_hash)},\"source_map\":[{parts.2}],\"target_facts\":[{parts.3}]}}"
+}
+pub fn mir_program_identity_digest(identity: MIRProgramIdentity) -> String Never! {
+    mir_sha256_hex(mir_program_identity_canonical_payload(identity))
+}
+pub fn mir_program_identity_canonical_json(identity: MIRProgramIdentity) -> String Never! {
+    parts :: mir_identity_canonical_parts(identity, true)
+    "{{\"core_ids\":[{parts.0}],\"function_ids\":[{parts.1}],\"identity_digest\":{mir_identity_quote(mir_program_identity_digest(identity))},\"optimized_hash\":{mir_identity_quote(identity.optimized_hash)},\"schema\":{mir_identity_quote(MIR_IDENTITY_SCHEMA)},\"semantic_hash\":{mir_identity_quote(identity.semantic_hash)},\"source_map\":[{parts.2}],\"target_facts\":[{parts.3}]}}"
+}
+fn mir_identity_field(key: String, value: String) -> String Never! { "{key}:{value.bytes().len()}:{value};" }
+pub fn mir_artifact_identity_canonical_text(identity: MIRArtifactIdentity) -> String Never! {
+    fields :: [String]{
+        "mir-artifact-identity:{identity.schema_version}:{identity.mir_schema_version}:{mir_sha256_hex_bytes(identity.program_digest[0..<identity.program_digest.len()])};",
+        mir_identity_field("package", identity.package_identity), "artifact:{identity.artifact.value};",
+        mir_identity_field("name", identity.name), mir_identity_field("kind", mir_artifact_kind_name(identity.kind)),
+        mir_identity_field("target", mir_artifact_target_name(identity.target)), mir_identity_field("mode", mir_artifact_mode_name(identity.mode)),
+        mir_identity_field("provider", identity.provider_identity), mir_identity_field("closure", identity.closure_identity),
+        mir_identity_field("artifact-key", identity.artifact_identity)
+    }
+    fields.join("")
+}
+pub fn mir_artifact_identity_digest(identity: MIRArtifactIdentity) -> String Never! {
+    guard :: identity.program_identity.guard_read()
+    mir_program_identity_digest(guard.value)
+}
+pub fn mir_artifact_identity_canonical_json(identity: MIRArtifactIdentity) -> String Never! {
+    guard :: identity.program_identity.guard_read()
+    mir_program_identity_canonical_json(guard.value)
+}
+pub fn mir_execution_identity_canonical_text(identity: MIRExecutionIdentity) -> String Never! {
+    "mir-execution-identity:{identity.schema_version};{mir_artifact_identity_canonical_text(identity.artifact)}"
+}

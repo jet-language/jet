@@ -1,0 +1,1712 @@
+// PORT-PENDING 0439 crates-jet-sema-src-sema-registration-items-slice-1: crates/jet-sema/src/Sema/Registration/Items.rs:1-1708
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use crate::AST::{KnowledgeVector, NameLedger};
+//RS 
+//RS pub(crate) fn name_defined(
+//RS     name: &str,
+//RS     funcs: &HashMap<String, FuncSig>,
+//RS     registry: &TypeRegistry,
+//RS     consts: &HashMap<String, Type>,
+//RS ) -> bool {
+//RS     funcs.contains_key(name) || registry.contains(name) || consts.contains_key(name)
+//RS }
+//RS 
+//RS fn declared_type_contains_cell_guard(ty: &Type) -> bool {
+//RS     match ty {
+//RS         Type::Apply { name, .. } if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") => {
+//RS             true
+//RS         }
+//RS         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+//RS             declared_type_contains_cell_guard(inner)
+//RS         }
+//RS         Type::Map { key, value, .. }
+//RS         | Type::Result {
+//RS             ok: key,
+//RS             err: value,
+//RS         } => declared_type_contains_cell_guard(key) || declared_type_contains_cell_guard(value),
+//RS         Type::Fn { params, ret, .. } => {
+//RS             params.iter().any(declared_type_contains_cell_guard)
+//RS                 || ret
+//RS                     .as_deref()
+//RS                     .is_some_and(declared_type_contains_cell_guard)
+//RS         }
+//RS         Type::Tuple(fields) => fields
+//RS             .iter()
+//RS             .any(|(_, field)| declared_type_contains_cell_guard(field)),
+//RS         Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
+//RS             declared_type_contains_cell_guard(elem)
+//RS         }
+//RS         Type::Union(members) | Type::Apply { args: members, .. } => {
+//RS             members.iter().any(declared_type_contains_cell_guard)
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn cell_guard_storage_diagnostic(place: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0217",
+//RS         format!("a Cell guard cannot be stored in {place}"),
+//RS         "a Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends"
+//RS             .to_string(),
+//RS         "keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections"
+//RS             .to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS /// D-PLACE1=A / D-LAYOUT-ALIGN1=A: sema is the sole owner of the declaration
+//RS /// gate. It reads one target/profile intersection fact and carries the checked
+//RS /// request forward; no backend or rustc probe invents a second policy.
+//RS fn layout_alignment_literal(expr: &Expr) -> Option<(i128, Span)> {
+//RS     match expr {
+//RS         Expr::Int(value, span, _, _) => Some((i128::from(*value), *span)),
+//RS         Expr::Unary(crate::AST::UnOp::Neg, inner, span)
+//RS             if matches!(&**inner, Expr::Int(..)) =>
+//RS         {
+//RS             let Expr::Int(value, _, _, _) = &**inner else {
+//RS                 return None;
+//RS             };
+//RS             Some((-i128::from(*value), *span))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn nearest_layout_alignment(value: i128) -> String {
+//RS     if value <= 0 {
+//RS         return "1".to_string();
+//RS     }
+//RS     let value = u64::try_from(value).unwrap_or(u64::MAX);
+//RS     let upper = value.checked_next_power_of_two().unwrap_or(u64::MAX);
+//RS     if value > jet_foundation::Layout::PORTABLE_ALIGNMENT_BASELINE_MAX {
+//RS         return format!("{}, {}", Syntax::LAYOUT_ALIGN_TARGET, upper);
+//RS     }
+//RS     let lower = upper / 2;
+//RS     let nearest = if value - lower <= upper.saturating_sub(value) {
+//RS         lower
+//RS     } else {
+//RS         upper
+//RS     };
+//RS     nearest.to_string()
+//RS }
+//RS 
+//RS fn validate_layout_alignment(
+//RS     s: &StructDef,
+//RS     target: &jet_foundation::Layout::TargetLayout,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     let Some(marker) = s
+//RS         .type_markers
+//RS         .iter()
+//RS         .find(|marker| marker.name == Syntax::MARKER_LAYOUT && !marker.negated)
+//RS     else {
+//RS         return;
+//RS     };
+//RS     let Some(Expr::Call(call)) = marker.expr_arg(1) else {
+//RS         return;
+//RS     };
+//RS     if call.name != Syntax::LAYOUT_ALIGN {
+//RS         return;
+//RS     }
+//RS     let target_mode = call.args.len() == 2
+//RS         && matches!(
+//RS             &call.args[0].expr,
+//RS             Expr::Ident(name, _) if name == Syntax::LAYOUT_ALIGN_TARGET
+//RS         );
+//RS     let argument = match call.args.len() {
+//RS         1 => &call.args[0].expr,
+//RS         2 if target_mode => &call.args[1].expr,
+//RS         _ => return,
+//RS     };
+//RS     let Some((value, span)) = layout_alignment_literal(argument) else {
+//RS         return;
+//RS     };
+//RS     let value_text = value.to_string();
+//RS     let Some(requested) = u64::try_from(value).ok() else {
+//RS         diags.push(Diagnostic::from_row(
+//RS             "E1119",
+//RS             &[
+//RS                 ("value", value_text.as_str()),
+//RS                 ("reason", "negative values cannot describe byte alignment"),
+//RS                 ("suggestion", "1"),
+//RS             ],
+//RS             Some(span),
+//RS         ));
+//RS         return;
+//RS     };
+//RS     match target
+//RS         .layout_facts
+//RS         .check_alignment(requested, 1, target_mode)
+//RS     {
+//RS         Ok(_) => {}
+//RS         Err(error) => {
+//RS             let reason = error.reason();
+//RS             let suggestion = nearest_layout_alignment(value);
+//RS             diags.push(Diagnostic::from_row(
+//RS                 "E1119",
+//RS                 &[
+//RS                     ("value", value_text.as_str()),
+//RS                     ("reason", reason.as_str()),
+//RS                     ("suggestion", suggestion.as_str()),
+//RS                 ],
+//RS                 Some(span),
+//RS             ));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS fn receipt_schema_digest(type_name: &str, fields: &[(String, Span, Type)]) -> String {
+//RS     let mut schema = String::new();
+//RS     schema.push_str(type_name);
+//RS     schema.push('\0');
+//RS     for (name, _, ty) in fields {
+//RS         schema.push_str(name);
+//RS         schema.push(':');
+//RS         schema.push_str(&ty.name());
+//RS         schema.push(';');
+//RS     }
+//RS     jet_foundation::SHA256::sha256_hex(schema.as_bytes())
+//RS }
+//RS /// D-DIST1/D-DIST3: register a distinct type declaration.
+//RS pub(crate) fn register_distinct(
+//RS     d: &DistinctDef,
+//RS     registry: &mut TypeRegistry,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     funcs: &HashMap<String, FuncSig>,
+//RS     consts: &HashMap<String, Type>,
+//RS ) {
+//RS     if is_reserved_type(&d.name) {
+//RS         diags.push(Diagnostic::error(
+//RS             "E0106",
+//RS             format!("the name `{}` is built in and can't be redefined", d.name),
+//RS             format!("`{}` is provided by the language itself", d.name),
+//RS             "choose a different name for this distinct type".to_string(),
+//RS             Some(d.name_span),
+//RS         ));
+//RS         return;
+//RS     }
+//RS     if name_defined(&d.name, funcs, registry, consts) {
+//RS         diags.push(defined_twice(
+//RS             &d.name,
+//RS             "every distinct type needs a unique name",
+//RS             d.name_span,
+//RS         ));
+//RS         return;
+//RS     }
+//RS     // E0129: base must be a concrete value type, not itself a distinct type.
+//RS     // We can only detect pre-registered distinct bases here; forward-declared
+//RS     // bases are checked lazily in sema (resolve_type / type check).
+//RS     if let Type::Named(base_name) = &d.base {
+//RS         if registry.is_distinct(base_name) {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0129",
+//RS                 format!(
+//RS                     "`{}` can't be built on `{}` — `{}` is itself a distinct type",
+//RS                     d.name, base_name, base_name
+//RS                 ),
+//RS                 format!(
+//RS                     "`distinct`-over-`distinct` chaining is not allowed in v1; `{}` is already a distinct type",
+//RS                     base_name
+//RS                 ),
+//RS                 format!("use `{}` directly, or build on the shared base type", base_name),
+//RS                 Some(d.base_span),
+//RS             ));
+//RS             return;
+//RS         }
+//RS     }
+//RS     // D-RANGETYPE1: a range constraint (`distinct Int(0..10)`) only makes
+//RS     // sense on `Int` — reject it on any other base rather than silently
+//RS     // ignoring it.
+//RS     if let Some((lo, hi, range_span)) = &d.range {
+//RS         if d.base != Type::Int {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0003",
+//RS                 format!(
+//RS                     "a range constraint only works on `Int`, but `{}` is {}",
+//RS                     d.name,
+//RS                     d.base.show()
+//RS                 ),
+//RS                 "`distinct Base(lo..hi)` provably bounds a whole-number value".to_string(),
+//RS                 format!("use `distinct Int({}..{})`, or drop the range", lo, hi),
+//RS                 Some(*range_span),
+//RS             ));
+//RS         }
+//RS     }
+//RS     registry.types.insert(
+//RS         d.name.clone(),
+//RS         TypeDef::Distinct {
+//RS             base: d.base.clone(),
+//RS             derives: d.derives.iter().map(|(name, _)| name.clone()).collect(),
+//RS             deprecation: super::super::deprecation_from_markers(&d.type_markers),
+//RS             knowledge: d
+//RS                 .range
+//RS                 .map_or_else(KnowledgeVector::default, |(lo, hi, _)| {
+//RS                     KnowledgeVector::from_interval(lo, hi)
+//RS                 }),
+//RS         },
+//RS     );
+//RS     if d.type_markers
+//RS         .iter()
+//RS         .any(|marker| marker.name == Syntax::MARKER_ERROR)
+//RS     {
+//RS         registry.error_types.insert(d.name.clone());
+//RS     }
+//RS }
+//RS 
+//RS /// D-TYPEALIAS1 / D-ALIAS-OP1=B: register `alias Name<T> :: …` — generic shortcuts only.
+//RS pub(crate) fn register_type_alias(
+//RS     a: &crate::AST::TypeAliasDef,
+//RS     registry: &mut TypeRegistry,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     funcs: &HashMap<String, FuncSig>,
+//RS     consts: &HashMap<String, Type>,
+//RS ) {
+//RS     if is_reserved_type(&a.name) {
+//RS         diags.push(Diagnostic::error(
+//RS             "E0106",
+//RS             format!("the name `{}` is built in and can't be redefined", a.name),
+//RS             format!("`{}` is provided by the language itself", a.name),
+//RS             "choose a different name for this type alias".to_string(),
+//RS             Some(a.name_span),
+//RS         ));
+//RS         return;
+//RS     }
+//RS     if name_defined(&a.name, funcs, registry, consts) {
+//RS         diags.push(defined_twice(
+//RS             &a.name,
+//RS             "every type alias needs a unique name",
+//RS             a.name_span,
+//RS         ));
+//RS         return;
+//RS     }
+//RS     if a.type_params.is_empty() {
+//RS         diags.push(crate::Generics::e0324(a.name_span));
+//RS         return;
+//RS     }
+//RS     registry.types.insert(
+//RS         a.name.clone(),
+//RS         TypeDef::Alias {
+//RS             params: a.type_params.clone(),
+//RS             target: a.target.clone(),
+//RS             deprecation: None,
+//RS         },
+//RS     );
+//RS }
+//RS 
+//RS /// S57 (M9.5): evaluate every `@name :: expr;` in `items`. Purity and
+//RS /// fuel are enforced by the interpreter (E3401/E0952); panics surface as
+//RS /// E0953. Each result's Jet type is registered in `consts` so references
+//RS /// type-check, and the value is stashed on the item for codegen to inline.
+//RS pub(crate) fn eval_comptime_items(
+//RS     items: &mut [Item],
+//RS     consts: &mut HashMap<String, Type>,
+//RS     base_dir: &std::path::Path,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     module_idx: usize,
+//RS     name_ledger: &mut NameLedger,
+//RS     // D-META-EFFECT1: module alias → Core path so the interpreter can evaluate
+//RS     // effect-approved Core calls (e.g. `@value :: math.sqrt(4.0)`).
+//RS     core_imports: &HashMap<String, String>,
+//RS     // D-CORE-USELIST1=A: local grouped-item name → original Core member.
+//RS     core_item_imports: &HashMap<String, String>,
+//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+//RS     states: &mut [ModuleState],
+//RS     plugin_interfaces: &PluginInterfaceRegistry,
+//RS     devtools_registry: &jet_foundation::AST::DevtoolsRegistry,
+//RS     no_os: bool,
+//RS     gates: crate::Policy::GateSet,
+//RS     no_prelude: bool,
+//RS     mut embed_inputs_out: Option<&mut Vec<crate::AST::ComptimeInput>>,
+//RS     // #2517: stored values of earlier checks, in a package-record session.
+//RS     reuse: Option<&crate::Sema::Bundle::ComptimeReuse::ComptimeReuseEnv>,
+//RS ) {
+//RS     if !items
+//RS         .iter()
+//RS         .any(|i| matches!(i, Item::Const(c) if const_evaluated_at_build(c)))
+//RS     {
+//RS         return;
+//RS     }
+//RS     {
+//RS         // Comptime runs before the production derive and serde expansion
+//RS         // passes. Expand a clone, in the same order, so the canonical TIR
+//RS         // evaluator can call the same generated `compare`/`equal` hooks (a
+//RS         // checked `==` on an enum dispatches through `Comparable.compare`) and
+//RS         // Encode/Decode bodies without mutating or duplicating module items.
+//RS         let mut eval_items = items.to_vec();
+//RS         let mut ignored_early_expansion_diags = Vec::new();
+//RS         super::Derives::expand_builtin_derive_items(
+//RS             &mut eval_items,
+//RS             &mut ignored_early_expansion_diags,
+//RS         );
+//RS         super::Serde::expand_builtin_serde_items(&mut eval_items, &mut ignored_early_expansion_diags);
+//RS         let mut explicit_codecs = eval_items
+//RS             .iter()
+//RS             .filter_map(|item| {
+//RS                 let Item::Impl(implementation) = item else {
+//RS                     return None;
+//RS                 };
+//RS                 (!implementation.is_generated_serde
+//RS                     && matches!(
+//RS                         implementation.trait_name.as_deref(),
+//RS                         Some(crate::Generics::ENCODE | crate::Generics::DECODE)
+//RS                     ))
+//RS                 .then(|| {
+//RS                     (
+//RS                         implementation.type_name.clone(),
+//RS                         implementation.trait_name.clone(),
+//RS                     )
+//RS                 })
+//RS             })
+//RS             .collect::<std::collections::HashSet<_>>();
+//RS         for item in &eval_items {
+//RS             let blocks = match item {
+//RS                 Item::Struct(definition) => &definition.trait_impls,
+//RS                 Item::Enum(definition) => &definition.trait_impls,
+//RS                 _ => continue,
+//RS             };
+//RS             for block in blocks {
+//RS                 if !block.compiler_generated
+//RS                     && matches!(
+//RS                         block.trait_name.as_str(),
+//RS                         crate::Generics::ENCODE | crate::Generics::DECODE
+//RS                     )
+//RS                 {
+//RS                     explicit_codecs.insert((
+//RS                         match item {
+//RS                             Item::Struct(definition) => definition.name.clone(),
+//RS                             Item::Enum(definition) => definition.name.clone(),
+//RS                             _ => unreachable!("matched struct or enum above"),
+//RS                         },
+//RS                         Some(block.trait_name.clone()),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         let mut funcs: HashMap<String, &Func> = HashMap::new();
+//RS         let mut methods: HashMap<(String, String), &Func> = HashMap::new();
+//RS         let mut distinct_ranges = HashMap::new();
+//RS         let mut distinct_bases = HashMap::new();
+//RS         let mut unit_families = Vec::new();
+//RS         let mut structs = HashMap::new();
+//RS         let mut externs: HashSet<String> = HashSet::new();
+//RS         for item in &eval_items {
+//RS             match item {
+//RS                 Item::Func(f) => {
+//RS                     funcs.insert(f.name.clone(), f);
+//RS                 }
+//RS                 Item::Impl(implementation) => {
+//RS                     if implementation.is_generated_serde
+//RS                         && explicit_codecs.contains(&(
+//RS                             implementation.type_name.clone(),
+//RS                             implementation.trait_name.clone(),
+//RS                         ))
+//RS                     {
+//RS                         continue;
+//RS                     }
+//RS                     for method in &implementation.methods {
+//RS                         let method_key = (implementation.type_name.clone(), method.name.clone());
+//RS                         if matches!(
+//RS                             implementation.trait_name.as_deref(),
+//RS                             Some(crate::Generics::ENCODE | crate::Generics::DECODE)
+//RS                         ) {
+//RS                             let key = format!("{}::{}", implementation.type_name, method.name);
+//RS                             if implementation.is_generated_serde || method.compiler_generated {
+//RS                                 funcs.entry(key).or_insert(method);
+//RS                                 methods.entry(method_key).or_insert(method);
+//RS                             } else {
+//RS                                 funcs.insert(key, method);
+//RS                                 methods.insert(method_key, method);
+//RS                             }
+//RS                         } else {
+//RS                             methods.insert(method_key, method);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Struct(s) => {
+//RS                     structs.insert(s.name.clone(), s);
+//RS                     for method in &s.methods {
+//RS                         methods.insert((s.name.clone(), method.name.clone()), method);
+//RS                     }
+//RS                     for block in &s.trait_impls {
+//RS                         for method in &block.methods {
+//RS                             let method_key = (s.name.clone(), method.name.clone());
+//RS                             if matches!(
+//RS                                 block.trait_name.as_str(),
+//RS                                 crate::Generics::ENCODE | crate::Generics::DECODE
+//RS                             ) {
+//RS                                 let key = format!("{}::{}", s.name, method.name);
+//RS                                 if block.compiler_generated || method.compiler_generated {
+//RS                                     funcs.entry(key).or_insert(method);
+//RS                                     methods.entry(method_key).or_insert(method);
+//RS                                 } else {
+//RS                                     funcs.insert(key, method);
+//RS                                     methods.insert(method_key, method);
+//RS                                 }
+//RS                             } else {
+//RS                                 methods.insert(method_key, method);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Enum(e) => {
+//RS                     for method in &e.methods {
+//RS                         methods.insert((e.name.clone(), method.name.clone()), method);
+//RS                     }
+//RS                     for block in &e.trait_impls {
+//RS                         for method in &block.methods {
+//RS                             let method_key = (e.name.clone(), method.name.clone());
+//RS                             if matches!(
+//RS                                 block.trait_name.as_str(),
+//RS                                 crate::Generics::ENCODE | crate::Generics::DECODE
+//RS                             ) {
+//RS                                 let key = format!("{}::{}", e.name, method.name);
+//RS                                 if block.compiler_generated || method.compiler_generated {
+//RS                                     funcs.entry(key).or_insert(method);
+//RS                                     methods.entry(method_key).or_insert(method);
+//RS                                 } else {
+//RS                                     funcs.insert(key, method);
+//RS                                     methods.insert(method_key, method);
+//RS                                 }
+//RS                             } else {
+//RS                                 methods.insert(method_key, method);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Item::Distinct(definition) => {
+//RS                     distinct_ranges.insert(
+//RS                         definition.name.clone(),
+//RS                         definition.range.map(|(lo, hi, _)| (lo, hi)),
+//RS                     );
+//RS                     distinct_bases.insert(definition.name.clone(), definition.base.clone());
+//RS                 }
+//RS                 Item::UnitFamily(family) => {
+//RS                     for definition in family.distinct_defs() {
+//RS                         distinct_ranges.insert(
+//RS                             definition.name.clone(),
+//RS                             definition.range.map(|(lo, hi, _)| (lo, hi)),
+//RS                         );
+//RS                         distinct_bases.insert(definition.name.clone(), definition.base);
+//RS                     }
+//RS                     unit_families.push(family.clone());
+//RS                 }
+//RS                 Item::ExternRust(b) => {
+//RS                     for ef in &b.functions {
+//RS                         externs.insert(ef.name.clone());
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         // Earlier comptime bindings are in scope for later ones. Keep each
+//RS         // value on its declaration as soon as it is known: generic-module
+//RS         // expansion can hand registration a declaration whose predecessor
+//RS         // was already folded, and delayed write-back loses that binding.
+//RS         let mut globals: HashMap<String, crate::Comptime::CtValue> = HashMap::new();
+//RS         let (ct_funcs, ct_externs, _) = comptime_context_from_items(&eval_items);
+//RS         let ct_checked_funcs = HashMap::new();
+//RS         // The checked nominal and import projection, with the loaded Core and
+//RS         // user module sources, built once per module on the first constant
+//RS         // that needs the evaluator: a `prep` fragment calls another module's
+//RS         // functions exactly as runtime code does.
+//RS         let mut checked_nominals = None;
+//RS         // #2517: the module's reuse inputs, built on the first constant that
+//RS         // needs the evaluator, and the digests of the values bound so far.
+//RS         let mut module_reuse = None;
+//RS         let mut global_digests = std::collections::BTreeMap::new();
+//RS         // D-MOD-CYCLE1=A: a package is one namespace, so a `prep` initializer
+//RS         // reads a sibling file's constant by bare name. The bundle evaluates
+//RS         // the files a module's constants read first (`comptime_module_order`)
+//RS         // and mirrors each value onto its module's comptime state; seed those
+//RS         // values here unless this module declares the name itself.
+//RS         let declared_here: HashSet<String> = items
+//RS             .iter()
+//RS             .filter_map(|item| match item {
+//RS                 Item::Const(constant) => Some(constant.name.clone()),
+//RS                 Item::Func(function) => Some(function.name.clone()),
+//RS                 _ => None,
+//RS             })
+//RS             .collect();
+//RS         let mut sibling_values = Vec::new();
+//RS         for sibling in name_ledger.namespace_siblings(module_idx) {
+//RS             for item in &states[sibling].items {
+//RS                 let Item::Const(constant) = item else {
+//RS                     continue;
+//RS                 };
+//RS                 if let (Some(value), Some(ty)) = (&constant.ct, &constant.ty) {
+//RS                     if !declared_here.contains(&constant.name) {
+//RS                         sibling_values.push((constant.name.clone(), ty.clone(), value.clone()));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         for (name, ty, value) in sibling_values {
+//RS             if globals.contains_key(&name) {
+//RS                 continue;
+//RS             }
+//RS             states[module_idx].consts.insert(name.clone(), ty);
+//RS             if let Some(env) = reuse {
+//RS                 global_digests.insert(name.clone(), env.value_digest(&value));
+//RS             }
+//RS             globals.insert(name, value);
+//RS         }
+//RS         for index in 0..items.len() {
+//RS             let (name, value, known, known_ty, module_value) = match &items[index] {
+//RS                 Item::Const(c) if const_evaluated_at_build(c) => (
+//RS                     c.name.clone(),
+//RS                     c.value.clone(),
+//RS                     c.ct.clone(),
+//RS                     c.ty.clone(),
+//RS                     !c.is_comptime,
+//RS                 ),
+//RS                 _ => continue,
+//RS             };
+//RS             if let Some(value) = known {
+//RS                 let ty = known_ty.unwrap_or_else(|| value.jet_type());
+//RS                 consts.insert(name.clone(), ty.clone());
+//RS                 states[module_idx].consts.insert(name.clone(), ty.clone());
+//RS                 if let Some(env) = reuse {
+//RS                     global_digests.insert(name.clone(), env.value_digest(&value));
+//RS                 }
+//RS                 mirror_comptime_value(&mut states[module_idx], &name, &ty, &value);
+//RS                 globals.insert(name, value.clone());
+//RS 
+//RS                 if let Item::Const(c) = &mut items[index] {
+//RS                     c.ty = Some(ty);
+//RS                     c.ct = Some(value);
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             // D-CTIO1: report a bad embed path against the call itself,
+//RS             // then skip evaluation so the law isn't reported twice.
+//RS             if !crate::Comptime::check_build_time_io(&value, base_dir, diags) {
+//RS                 continue;
+//RS             }
+//RS             // D-META-EFFECT1: evaluate_with_imports resolves Core calls
+//RS             // through the shared effect facts.
+//RS             let mut eval_value = value.clone();
+//RS             let (checker_diags, checked_ty) = {
+//RS                 let effect_facts = &states[module_idx].fact_registry;
+//RS                 let mut checker = crate::Sema::checker_for_module(
+//RS                     module_idx,
+//RS                     &*states,
+//RS                     plugin_interfaces,
+//RS                     devtools_registry,
+//RS                     effect_facts,
+//RS                     &ct_funcs,
+//RS                     &ct_checked_funcs,
+//RS                     &eval_items,
+//RS                     &ct_externs,
+//RS                     base_dir,
+//RS                     &globals,
+//RS                     no_os,
+//RS                     gates,
+//RS                     no_prelude,
+//RS                     name_ledger,
+//RS                     None,
+//RS                     false,
+//RS                     false,
+//RS                 );
+//RS                 checker.in_comptime = true;
+//RS                 checker.in_pure = true;
+//RS                 // S57: `@name :: expr` fails the build when evaluation cannot
+//RS                 // complete. The build edge carries the same implicit `!Err`
+//RS                 // rail as `fn run()` (D-FAIL-EXIT1), so an ordinary fallible
+//RS                 // call propagates here instead of reporting E0403.
+//RS                 checker.ret =
+//RS                     Some(crate::AST::FailureContract::from_return_type(None).effective_type());
+//RS                 let checked_ty = checker.infer(&mut eval_value);
+//RS                 (checker.diags, checked_ty)
+//RS             };
+//RS             let invalid = checker_diags
+//RS                 .iter()
+//RS                 .any(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error);
+//RS             diags.extend(checker_diags);
+//RS             if invalid {
+//RS                 continue;
+//RS             }
+//RS             eval_value.for_each_expr_mut(|expr| {
+//RS                 let Expr::Call(call) = expr else {
+//RS                     return;
+//RS                 };
+//RS                 if funcs.contains_key(&call.name) && !core_item_imports.contains_key(&call.name) {
+//RS                     return;
+//RS                 }
+//RS                 let Some(item) = core_item_imports.get(&call.name) else {
+//RS                     return;
+//RS                 };
+//RS                 if core_imports.contains_key(&call.name) {
+//RS                     crate::AST::rewrite_core_item_call(expr, item);
+//RS                 }
+//RS             });
+//RS             // D-APILABEL1: this pass runs before ordinary sema has inferred the
+//RS             // binding, so apply table-defined Core defaults to the evaluation
+//RS             // clone first. The same binder then supplies the fixed arguments
+//RS             // that AOT and the resident tiers receive after inference.
+//RS             eval_value.for_each_expr_mut(|expr| {
+//RS                 let call_span = expr.span();
+//RS                 let Expr::MethodCall {
+//RS                     receiver,
+//RS                     method,
+//RS                     args,
+//RS                     ..
+//RS                 } = expr
+//RS                 else {
+//RS                     return;
+//RS                 };
+//RS                 let Expr::Ident(alias, _) = receiver.as_ref() else {
+//RS                     return;
+//RS                 };
+//RS                 let Some(module) = core_imports.get(alias) else {
+//RS                     return;
+//RS                 };
+//RS                 crate::Sema::CheckerCoreLib::apply_core_call_defaults(
+//RS                     module, method, args, call_span,
+//RS                 );
+//RS             });
+//RS             // A plain literal constant is its own value. Evaluating it through
+//RS             // the MIR fragment path lowered, optimized and verified a program
+//RS             // holding every type in the module, once per constant, which made
+//RS             // registration quadratic in unit size (#3661). Anything else still
+//RS             // takes the evaluator.
+//RS             let evaluated = match plain_literal_value(&eval_value) {
+//RS                 Some(value) => Ok((value, Vec::new())),
+//RS                 None => {
+//RS                     let reuse_key = reuse.and_then(|env| {
+//RS                         module_reuse
+//RS                             .get_or_insert_with(|| {
+//RS                                 crate::Sema::Bundle::ComptimeReuse::ModuleComptime::new(
+//RS                                     env,
+//RS                                     module_idx,
+//RS                                     &eval_items,
+//RS                                     &comptime_reuse_context(
+//RS                                         base_dir,
+//RS                                         core_imports,
+//RS                                         core_item_imports,
+//RS                                     ),
+//RS                                 )
+//RS                             })
+//RS                             .key(&name, &eval_value, &global_digests)
+//RS                     });
+//RS                     let stored = reuse
+//RS                         .zip(reuse_key.as_deref())
+//RS                         .and_then(|(env, key)| env.load(key));
+//RS                     match stored {
+//RS                         Some(value) => Ok((value, Vec::new())),
+//RS                         None => {
+//RS                             let checked_nominals = checked_nominals.get_or_insert_with(|| {
+//RS                                 crate::Sema::CheckerCore::checked_comptime_nominals_for_context(
+//RS                                     &*states,
+//RS                                     module_idx,
+//RS                                     &*name_ledger,
+//RS                                 )
+//RS                             });
+//RS                             let evaluated = crate::Comptime::evaluate_closed_value_with_imports_opts_collecting_structs_and_facts(
+//RS                                 &eval_value,
+//RS                                 &funcs,
+//RS                                 &externs,
+//RS                                 base_dir,
+//RS                                 &globals,
+//RS                                 core_imports,
+//RS                                 crate::Policy::GateSet::default(),
+//RS                                 0,
+//RS                                 &structs,
+//RS                                 &methods,
+//RS                                 &distinct_ranges,
+//RS                                 &distinct_bases,
+//RS                                 &unit_families,
+//RS                                 None,
+//RS                                 &eval_items,
+//RS                                 build_facts,
+//RS                                 &states[module_idx].fact_registry,
+//RS                                 checked_nominals.as_ref(),
+//RS                             );
+//RS                             // A value that read a file depends on more than
+//RS                             // its key.
+//RS                             if let (Some(env), Some(key), Ok((value, inputs))) =
+//RS                                 (reuse, reuse_key, &evaluated)
+//RS                             {
+//RS                                 if inputs.is_empty() {
+//RS                                     env.record(key, value);
+//RS                                 }
+//RS                             }
+//RS                             evaluated
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             };
+//RS             match evaluated {
+//RS                 Ok((v, inputs)) => {
+//RS                     crate::Sema::record_comptime_import_alias_uses(
+//RS                         name_ledger,
+//RS                         module_idx,
+//RS                         &eval_value,
+//RS                         core_imports,
+//RS                         &globals,
+//RS                     );
+//RS 
+//RS                     // A literal module constant keeps its checked type, so
+//RS                     // `U8{5}` and an empty `[Rgb]{}` stay exact. For a
+//RS                     // comptime binding, `v.jet_type()` reads the element type
+//RS                     // off the value's first element; a fixed-return-type
+//RS                     // builtin whose result is empty prefers its known static
+//RS                     // return type.
+//RS                     let ty = match checked_ty.filter(|_| module_value) {
+//RS                         Some(ty) => ty,
+//RS                         None => comptime_builtin_fixed_return_type(&value, core_imports, &v)
+//RS                             .unwrap_or_else(|| v.jet_type()),
+//RS                     };
+//RS                     consts.insert(name.clone(), ty.clone());
+//RS                     states[module_idx].consts.insert(name.clone(), ty.clone());
+//RS                     if let Some(env) = reuse {
+//RS                         global_digests.insert(name.clone(), env.value_digest(&v));
+//RS                     }
+//RS                     globals.insert(name.clone(), v.clone());
+//RS                     if let Item::Const(c) = &mut items[index] {
+//RS                         c.ty = Some(ty.clone());
+//RS                         c.ct = Some(v.clone());
+//RS                     }
+//RS                     mirror_comptime_value(&mut states[module_idx], &name, &ty, &v);
+//RS                     if let Some(out) = embed_inputs_out.as_deref_mut() {
+//RS                         out.extend(inputs);
+//RS                     }
+//RS                 }
+//RS                 Err(d) => diags.push(d),
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Keep a folded constant on the module's comptime item snapshot too, where a
+//RS /// sibling file's `prep` initializer and fragment bodies read it.
+//RS fn mirror_comptime_value(
+//RS     state: &mut ModuleState,
+//RS     name: &str,
+//RS     ty: &Type,
+//RS     value: &crate::Comptime::CtValue,
+//RS ) {
+//RS     if let Some(Item::Const(constant)) = state
+//RS         .items
+//RS         .iter_mut()
+//RS         .find(|item| matches!(item, Item::Const(constant) if constant.name == name))
+//RS     {
+//RS         constant.ty = Some(ty.clone());
+//RS         constant.ct = Some(value.clone());
+//RS     }
+//RS }
+//RS 
+//RS /// The evaluation context of one module's constants besides its items, for
+//RS /// the reuse key: base directory and import tables, in a fixed order.
+//RS fn comptime_reuse_context(
+//RS     base_dir: &std::path::Path,
+//RS     core_imports: &HashMap<String, String>,
+//RS     core_item_imports: &HashMap<String, String>,
+//RS ) -> String {
+//RS     let core_imports = core_imports.iter().collect::<std::collections::BTreeMap<_, _>>();
+//RS     let core_item_imports = core_item_imports
+//RS         .iter()
+//RS         .collect::<std::collections::BTreeMap<_, _>>();
+//RS     format!("{base_dir:?}\u{0}{core_imports:?}\u{0}{core_item_imports:?}")
+//RS }
+//RS 
+//RS /// The value of a checked constant initializer that is a plain literal: an
+//RS /// unsuffixed `Int` (optionally negated), `Bool`, `Char`, or a string with no
+//RS /// interpolation. These are exactly the values the evaluator returns for such
+//RS /// an initializer; every other shape returns `None` and is evaluated.
+//RS fn plain_literal_value(expr: &Expr) -> Option<crate::Comptime::CtValue> {
+//RS     use crate::Comptime::CtValue;
+//RS     match expr {
+//RS         Expr::Int(value, _, None, None) => Some(CtValue::Int(*value)),
+//RS         Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match inner.as_ref() {
+//RS             Expr::Int(value, _, None, None) => value.checked_neg().map(CtValue::Int),
+//RS             _ => None,
+//RS         },
+//RS         Expr::Bool(value, _) => Some(CtValue::Bool(*value)),
+//RS         Expr::Char(value, _) => Some(CtValue::Char(*value)),
+//RS         Expr::Str(parts, _) => match parts.as_slice() {
+//RS             [] => Some(CtValue::Str(String::new())),
+//RS             [crate::AST::StrPart::Lit(text)] => Some(CtValue::Str(text.clone())),
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-META-CONST1: resolve every declaration-side fixed-list length and enum
+//RS /// discriminant after comptime bindings have been evaluated, but before type
+//RS /// registration. Generic function measures remain symbolic until their
+//RS /// specialization; all other declaration measures must resolve here.
+//RS pub(crate) fn resolve_comptime_declaration_values(
+//RS     items: &mut [Item],
+//RS     base_dir: &std::path::Path,
+//RS     core_imports: &HashMap<String, String>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     let (funcs, externs, globals) = comptime_context_from_items(items);
+//RS     let mut resolver = ComptimeTypeResolver {
+//RS         funcs,
+//RS         externs,
+//RS         globals,
+//RS         base_dir,
+//RS         core_imports,
+//RS         diags,
+//RS         allow_symbolic_measures: false,
+//RS     };
+//RS     resolver.resolve_items(items);
+//RS }
+//RS 
+//RS struct ComptimeTypeResolver<'a> {
+//RS     funcs: HashMap<String, Func>,
+//RS     externs: HashSet<String>,
+//RS     globals: HashMap<String, crate::Comptime::CtValue>,
+//RS     base_dir: &'a std::path::Path,
+//RS     core_imports: &'a HashMap<String, String>,
+//RS     diags: &'a mut Vec<Diagnostic>,
+//RS     allow_symbolic_measures: bool,
+//RS }
+//RS 
+//RS enum IntegerFailure {
+//RS     Unknown,
+//RS     NonInteger(String),
+//RS     OutOfRange,
+//RS }
+//RS 
+//RS impl<'a> ComptimeTypeResolver<'a> {
+//RS     fn resolve_items(&mut self, items: &mut [Item]) {
+//RS         for item in items {
+//RS             self.resolve_item(item);
+//RS         }
+//RS     }
+//RS 
+//RS     fn resolve_item(&mut self, item: &mut Item) {
+//RS         match item {
+//RS             Item::Func(function) => self.resolve_func(function),
+//RS             Item::Struct(definition) => {
+//RS                 self.resolve_fields(&mut definition.fields);
+//RS                 for method in &mut definition.methods {
+//RS                     self.resolve_func(method);
+//RS                 }
+//RS                 for implementation in &mut definition.trait_impls {
+//RS                     for (_, _, ty) in &mut implementation.assoc_type_impls {
+//RS                         self.resolve_type(ty);
+//RS                     }
+//RS                     for method in &mut implementation.methods {
+//RS                         self.resolve_func(method);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(definition) => {
+//RS                 for variant in &mut definition.variants {
+//RS                     match &mut variant.payload {
+//RS                         crate::AST::VariantPayload::Unit => {}
+//RS                         crate::AST::VariantPayload::Single(ty, _) => self.resolve_type(ty),
+//RS                         crate::AST::VariantPayload::Named(fields) => {
+//RS                             for field in fields {
+//RS                                 self.resolve_type(&mut field.ty);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     if let Some(mut expression) = variant.discriminant_expr.take() {
+//RS                         let span = expression.span();
+//RS                         self.resolve_expr_types(&mut expression);
+//RS                         match self.evaluate_integer(&expression) {
+//RS                             Ok(value) if (i64::MIN as i128..=i64::MAX as i128).contains(&value) => {
+//RS                                 variant.discriminant = Some(value as i64);
+//RS                             }
+//RS                             Ok(_) | Err(IntegerFailure::OutOfRange) => {
+//RS                                 self.push_constant_error(
+//RS                                     "E0035",
+//RS                                     "an enum discriminant is outside the signed integer range",
+//RS                                     "enum discriminants are stored as signed 64-bit values",
+//RS                                     "use a compile-time integer between -9223372036854775808 and 9223372036854775807",
+//RS                                     span,
+//RS                                 );
+//RS                             }
+//RS                             Err(IntegerFailure::NonInteger(ty)) => self.push_constant_error(
+//RS                                 "E0035",
+//RS                                 format!("an enum discriminant must be an integer, got {ty}"),
+//RS                                 "enum discriminants select a numeric variant value",
+//RS                                 "use an integer literal or a compile-time expression that produces Int",
+//RS                                 span,
+//RS                             ),
+//RS                             Err(IntegerFailure::Unknown) => self.push_constant_error(
+//RS                                 "E0035",
+//RS                                 "an enum discriminant must be computable at compile time",
+//RS                                 "the enum number is part of the type layout and must be known before code generation",
+//RS                                 "use a literal, a same-file `@` binding, or another comptime expression",
+//RS                                 span,
+//RS                             ),
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 for method in &mut definition.methods {
+//RS                     self.resolve_func(method);
+//RS                 }
+//RS                 for implementation in &mut definition.trait_impls {
+//RS                     for (_, _, ty) in &mut implementation.assoc_type_impls {
+//RS                         self.resolve_type(ty);
+//RS                     }
+//RS                     for method in &mut implementation.methods {
+//RS                         self.resolve_func(method);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Distinct(definition) => self.resolve_type(&mut definition.base),
+//RS             Item::TypeAlias(definition) => self.resolve_type(&mut definition.target),
+//RS             Item::Trait(definition) => {
+//RS                 for method in &mut definition.methods {
+//RS                     for parameter in &mut method.params {
+//RS                         self.resolve_type(&mut parameter.ty);
+//RS                     }
+//RS                     if let Some(return_type) = &mut method.return_type {
+//RS                         self.resolve_type(return_type);
+//RS                     }
+//RS                     for parameter in &mut method.params {
+//RS                         if let Some(default) = &mut parameter.default {
+//RS                             self.resolve_expr_types(default);
+//RS                         }
+//RS                     }
+//RS                     if let Some(body) = &mut method.default_body {
+//RS                         self.resolve_stmts(body);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Impl(implementation) => {
+//RS                 for (_, _, ty) in &mut implementation.assoc_type_impls {
+//RS                     self.resolve_type(ty);
+//RS                 }
+//RS                 for method in &mut implementation.methods {
+//RS                     self.resolve_func(method);
+//RS                 }
+//RS             }
+//RS             Item::Const(constant) => {
+//RS                 if let Some(ty) = &mut constant.ty {
+//RS                     self.resolve_type(ty);
+//RS                 }
+//RS                 self.resolve_expr_types(&mut constant.value);
+//RS             }
+//RS             Item::Test(test) => {
+//RS                 if let Some(expression) = &mut test.name_expr {
+//RS                     self.resolve_expr_types(expression);
+//RS                 }
+//RS                 if let Some(expression) = &mut test.faults_expr {
+//RS                     self.resolve_expr_types(expression);
+//RS                 }
+//RS                 if let Some(expression) = &mut test.expected_fail_expr {
+//RS                     self.resolve_expr_types(expression);
+//RS                 }
+//RS                 for parameter in &mut test.params {
+//RS                     self.resolve_type(&mut parameter.ty);
+//RS                 }
+//RS                 self.resolve_stmts(&mut test.body);
+//RS             }
+//RS             Item::ExternRust(block) => {
+//RS                 for function in &mut block.functions {
+//RS                     self.resolve_params(&mut function.params);
+//RS                     if let Some(return_type) = &mut function.return_type {
+//RS                         self.resolve_type(return_type);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::CModule(block) => {
+//RS                 for function in &mut block.functions {
+//RS                     self.resolve_params(&mut function.params);
+//RS                     if let Some(return_type) = &mut function.return_type {
+//RS                         self.resolve_type(return_type);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::ProtocolDecl(protocol) => {
+//RS                 for message in &mut protocol.messages {
+//RS                     for (_, ty) in &mut message.fields {
+//RS                         self.resolve_type(ty);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::UserDerive(derive) => self.resolve_derive_body_items(&mut derive.body),
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = &mut module.body {
+//RS                     self.resolve_items(body);
+//RS                 }
+//RS             }
+//RS             Item::MarkerDecl(declaration) => {
+//RS                 for parameter in &mut declaration.params {
+//RS                     if let Some(ty) = &mut parameter.ty {
+//RS                         self.resolve_type(ty);
+//RS                     }
+//RS                     if let Some(value) = &mut parameter.value {
+//RS                         self.resolve_expr_types(value);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::FactDecl(declaration) => {
+//RS                 for parameter in &mut declaration.params {
+//RS                     if let Some(ty) = &mut parameter.ty {
+//RS                         self.resolve_type(ty);
+//RS                     }
+//RS                     if let Some(value) = &mut parameter.value {
+//RS                         self.resolve_expr_types(value);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Module(module) => {
+//RS                 for expression in &mut module.imports {
+//RS                     self.resolve_expr_types(expression);
+//RS                 }
+//RS                 for expression in &mut module.members {
+//RS                     self.resolve_expr_types(expression);
+//RS                 }
+//RS             }
+//RS             // Generic-module bodies are templates. Their value expressions are
+//RS             // substituted while an alias is expanded, then this pass visits the
+//RS             // generated CodeModule above.
+//RS             Item::GenericModule(_)
+//RS             | Item::ModuleAlias(_)
+//RS             | Item::EffectDecl(_)
+//RS             | Item::Tag(_)
+//RS             | Item::UnitFamily(_)
+//RS             | Item::Migration(_)
+//RS             | Item::ErrorConv(_)
+//RS             | Item::TemplateLoop(_) => {}
+//RS         }
+//RS     }
+//RS 
+//RS     fn resolve_func(&mut self, function: &mut Func) {
+//RS         let previous = self.allow_symbolic_measures;
+//RS         self.allow_symbolic_measures = !function.type_params.is_empty();
+//RS         self.resolve_params(&mut function.params);
+//RS         if let Some(return_type) = &mut function.return_type {
+//RS             self.resolve_type(return_type);
+//RS         }
+//RS         self.resolve_stmts(&mut function.body);
+//RS         self.allow_symbolic_measures = previous;
+//RS     }
+//RS 
+//RS     fn resolve_params(&mut self, params: &mut [crate::AST::Param]) {
+//RS         for parameter in params {
+//RS             self.resolve_type(&mut parameter.ty);
+//RS             if let Some(default) = &mut parameter.default {
+//RS                 self.resolve_expr_types(default);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn resolve_fields(&mut self, fields: &mut [crate::AST::Field]) {
+//RS         for field in fields {
+//RS             self.resolve_type(&mut field.ty);
+//RS             if let Some(expression) = &mut field.computed {
+//RS                 self.resolve_expr_types(expression);
+//RS             }
+//RS             if let Some(expression) = &mut field.default {
+//RS                 self.resolve_expr_types(expression);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn resolve_type(&mut self, ty: &mut Type) {
+//RS         match ty {
+//RS             Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+//RS                 self.resolve_type(inner)
+//RS             }
+//RS             Type::Map { key, value, .. } => {
+//RS                 self.resolve_type(key);
+//RS                 self.resolve_type(value);
+//RS             }
+//RS             Type::Result { ok, err } => {
+//RS                 self.resolve_type(ok);
+//RS                 self.resolve_type(err);
+//RS             }
+//RS             Type::Fn {
+//RS                 params,
+//RS                 ret,
+//RS                 call_metadata,
+//RS                 ..
+//RS             } => {
+//RS                 for parameter in params {
+//RS                     self.resolve_type(parameter);
+//RS                 }
+//RS                 if let Some(return_type) = ret {
+//RS                     self.resolve_type(return_type);
+//RS                 }
+//RS                 if let Some(metadata) = call_metadata {
+//RS                     for default in &mut metadata.defaults {
+//RS                         if let Some(expression) = default {
+//RS                             self.resolve_expr_types(expression);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Type::Apply { args, .. } | Type::Union(args) => {
+//RS                 for argument in args {
+//RS                     self.resolve_type(argument);
+//RS                 }
+//RS             }
+//RS             Type::Tuple(fields) => {
+//RS                 for (_, field) in fields {
+//RS                     self.resolve_type(field);
+//RS                 }
+//RS             }
+//RS             Type::FixedList { elem, len } => {
+//RS                 self.resolve_type(elem);
+//RS                 self.resolve_measure(len);
+//RS             }
+//RS             Type::InlineRange { base, .. } => self.resolve_type(base),
+//RS             Type::Tagged { inner, .. } | Type::Quantity { base: inner, .. } => {
+//RS                 self.resolve_type(inner)
+//RS             }
+//RS             Type::Int
+//RS             | Type::Float
+//RS             | Type::Bool
+//RS             | Type::String
+//RS             | Type::Char
+//RS             | Type::Named(_)
+//RS             | Type::TraitObject(_)
+//RS             | Type::IntN { .. }
+//RS             | Type::Float32 => {}
+//RS             Type::Measure(measure) => self.resolve_measure(measure),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Resolve every measure-bearing type position through the same closed
+//RS     /// literal/module-value boundary. Generic-module templates skip this pass;
+//RS     /// their symbols are substituted before the specialized module is visited.
+//RS     fn resolve_measure(&mut self, measure: &mut crate::AST::Measure) {
+//RS         *measure = measure.resolve_symbols(&|name| match self.globals.get(name) {
+//RS             Some(crate::Comptime::CtValue::Int(value)) => u64::try_from(*value).ok(),
+//RS             _ => None,
+//RS         });
+//RS         if measure.literal_value().is_none() && !self.allow_symbolic_measures {
+//RS             self.push_constant_error(
+//RS                 "E0963",
+//RS                 "a type measure must resolve to a compile-time integer",
+//RS                 "the measure named something that is not a declared constant or module value parameter",
+//RS                 "use an integer literal, a same-file `@` constant, or a module Int value argument",
+//RS                 crate::Diagnostics::Span::new(0, 0),
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     fn resolve_expr_types(&mut self, expression: &mut Expr) {
+//RS         expression.for_each_expr_mut(|nested| match nested {
+//RS             Expr::Call(call) => {
+//RS                 for ty in &mut call.type_args {
+//RS                     self.resolve_type(ty);
+//RS                 }
+//RS                 if let Some(ty) = &mut call.resolved_ret {
+//RS                     self.resolve_type(ty);
+//RS                 }
+//RS             }
+//RS             Expr::MethodCall {
+//RS                 owner_type_args,
+//RS                 type_args,
+//RS                 resolved_ret,
+//RS                 ..
+//RS             } => {
+//RS                 for ty in owner_type_args.iter_mut().chain(type_args.iter_mut()) {
+//RS                     self.resolve_type(ty);
+//RS                 }
+//RS                 if let Some(ty) = resolved_ret {
+//RS                     self.resolve_type(ty);
+//RS                 }
+//RS             }
+//RS             Expr::StructLit { type_args, .. } => {
+//RS                 for ty in type_args {
+//RS                     self.resolve_type(ty);
+//RS                 }
+//RS             }
+//RS             Expr::TypedLit { head, .. } => {
+//RS                 if let Some(ty) = head {
+//RS                     self.resolve_type(ty);
+//RS                 }
+//RS             }
+//RS             Expr::TupleLit(_, _, inferred) => {
+//RS                 if let Some(ty) = inferred {
+//RS                     self.resolve_type(ty);
+//RS                 }
+//RS             }
+//RS             Expr::Lambda(lambda) => {
+//RS                 for parameter in &mut lambda.params {
+//RS                     if let Some(ty) = &mut parameter.ty {
+//RS                         self.resolve_type(ty);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Expr::PtrFromAddr { elem, .. } => self.resolve_type(elem),
+//RS             _ => {}
+//RS         });
+//RS     }
+//RS 
+//RS     fn resolve_stmts(&mut self, statements: &mut [Stmt]) {
+//RS         for statement in statements {
+//RS             match statement {
+//RS                 Stmt::Val(binding) => self.resolve_binding(binding),
+//RS                 Stmt::CountedLoop {
+//RS                     init, step, body, ..
+//RS                 } => {
+//RS                     self.resolve_binding(init);
+//RS                     if let Some(step) = step {
+//RS                         self.resolve_stmts(std::slice::from_mut(step));
+//RS                     }
+//RS                     self.resolve_stmts(body);
+//RS                 }
+//RS                 Stmt::While { body, .. }
+//RS                 | Stmt::For { body, .. }
+//RS                 | Stmt::Loop { body, .. }
+//RS                 | Stmt::Reactive { body, .. }
+//RS                 | Stmt::Shield { body, .. }
+//RS                 | Stmt::Switched { body, .. }
+//RS                 | Stmt::Region { body, .. }
+//RS                 | Stmt::Policy { body, .. }
+//RS                 | Stmt::TaskGroup { body, .. }
+//RS                 | Stmt::Layout { body, .. }
+//RS                 | Stmt::AuthorityScope { body, .. }
+//RS                 | Stmt::ComptimeBlock { body, .. }
+//RS                 | Stmt::Live { body, .. }
+//RS                 | Stmt::Transact { body, .. }
+//RS                 | Stmt::Unsafe { body, .. }
+//RS                 | Stmt::Impure { body, .. }
+//RS                 | Stmt::AssumeDet { body, .. }
+//RS                 | Stmt::ScopeMember { body, .. } => self.resolve_stmts(body),
+//RS                 Stmt::Switch {
+//RS                     arms, else_body, ..
+//RS                 }
+//RS                 | Stmt::ComptimeSwitch {
+//RS                     arms, else_body, ..
+//RS                 } => {
+//RS                     for arm in arms {
+//RS                         self.resolve_stmts(&mut arm.body);
+//RS                     }
+//RS                     if let Some(body) = else_body {
+//RS                         self.resolve_stmts(body);
+//RS                     }
+//RS                 }
+//RS                 Stmt::ComptimeIf {
+//RS                     then_body,
+//RS                     else_body,
+//RS                     ..
+//RS                 } => {
+//RS                     self.resolve_stmts(then_body);
+//RS                     if let Some(body) = else_body {
+//RS                         self.resolve_stmts(body);
+//RS                     }
+//RS                 }
+//RS                 Stmt::ContextBlock { body, .. } => self.resolve_stmts(body),
+//RS                 Stmt::Expr(_)
+//RS                 | Stmt::DeferClose { .. }
+//RS                 | Stmt::Assign { .. }
+//RS                 | Stmt::Return(..)
+//RS                 | Stmt::Break(..)
+//RS                 | Stmt::BreakValue(..)
+//RS                 | Stmt::Continue(..)
+//RS                 | Stmt::BreakLabel(..)
+//RS                 | Stmt::BreakLabelValue(..)
+//RS                 | Stmt::ContinueLabel(..)
+//RS                 | Stmt::Yield(..) => {}
+//RS             }
+//RS             statement.for_each_expr_mut(|expression| self.resolve_expr_types(expression));
+//RS         }
+//RS     }
+//RS 
+//RS     fn resolve_derive_body_items(&mut self, items: &mut [crate::AST::DeriveBodyItem]) {
+//RS         for item in items {
+//RS             match item {
+//RS                 crate::AST::DeriveBodyItem::Item(item) => self.resolve_item(item.as_mut()),
+//RS                 crate::AST::DeriveBodyItem::Stmt(statement) => {
+//RS                     self.resolve_stmts(std::slice::from_mut(statement));
+//RS                 }
+//RS                 crate::AST::DeriveBodyItem::Loop { source, body, .. } => {
+//RS                     self.resolve_expr_types(source);
+//RS                     self.resolve_derive_body_items(body);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn resolve_binding(&mut self, binding: &mut crate::AST::Binding) {
+//RS         if let Some(ty) = &mut binding.ty {
+//RS             self.resolve_type(ty);
+//RS         }
+//RS         self.resolve_expr_types(&mut binding.init);
+//RS     }
+//RS 
+//RS     fn evaluate_integer(&self, expression: &Expr) -> Result<i128, IntegerFailure> {
+//RS         let value = crate::Comptime::evaluate_owned_with_imports(
+//RS             expression,
+//RS             &self.funcs,
+//RS             &self.externs,
+//RS             self.base_dir,
+//RS             &self.globals,
+//RS             self.core_imports,
+//RS         )
+//RS         .map_err(|_| IntegerFailure::Unknown)?;
+//RS         match value {
+//RS             crate::Comptime::CtValue::Int(value) => Ok(i128::from(value)),
+//RS             crate::Comptime::CtValue::BigInt(value) => value
+//RS                 .to_string_rep()
+//RS                 .parse::<i128>()
+//RS                 .map_err(|_| IntegerFailure::OutOfRange),
+//RS             other => Err(IntegerFailure::NonInteger(other.jet_type().show())),
+//RS         }
+//RS     }
+//RS 
+//RS     fn push_constant_error(
+//RS         &mut self,
+//RS         code: &str,
+//RS         what: impl Into<String>,
+//RS         why: impl Into<String>,
+//RS         fix: impl Into<String>,
+//RS         span: Span,
+//RS     ) {
+//RS         self.diags.push(Diagnostic::error(
+//RS             code,
+//RS             what.into(),
+//RS             why.into(),
+//RS             fix.into(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS }
+//RS 
+//RS /// A handful of comptime builtins have a fixed, non-polymorphic return type
+//RS /// regardless of arguments or result size — `find(glob)` always returns
+//RS /// `[String]` (D-CTFIND1/2), even when the glob matches nothing. Naming that
+//RS /// type here (rather than trusting `CtValue::jet_type()`, which samples the
+//RS /// first element and has nothing to sample when the result is empty) is what
+//RS /// lets codegen render a correctly-typed empty Rust collection instead of an
+//RS /// ambiguous `vec![]` (see `ConstDef::ty`).
+//RS fn comptime_builtin_fixed_return_type(
+//RS     value: &Expr,
+//RS     core_imports: &HashMap<String, String>,
+//RS     evaluated: &crate::Comptime::CtValue,
+//RS ) -> Option<Type> {
+//RS     match value {
+//RS         Expr::Call(call) if call.name == Syntax::BUILTIN_FIND => {
+//RS             Some(Type::List(Box::new(Type::String)))
+//RS         }
+//RS         Expr::Call(call) if call.name == Syntax::BUILTIN_EMBED_FILE => Some(Type::String),
+//RS         Expr::Call(call) if call.name == Syntax::BUILTIN_EMBED_BYTES => Some(Type::List(
+//RS             Box::new(Type::IntN {
+//RS                 signed: false,
+//RS                 bits: 8,
+//RS             }),
+//RS         )),
+//RS         Expr::MethodCall {
+//RS             receiver, method, ..
+//RS         } if matches!(receiver.as_ref(), Expr::Ident(alias, _)
+//RS             if core_imports.get(alias).map(String::as_str) == Some("core.reactive.loadable")) =>
+//RS         {
+//RS             let unit = Type::Named("Unit".to_string());
+//RS             let payload = match evaluated {
+//RS                 crate::Comptime::CtValue::Enum { args, .. } => {
+//RS                     args.first().map(|(_, value)| value.jet_type())
+//RS                 }
+//RS                 _ => None,
+//RS             };
+//RS             match method.as_str() {
+//RS                 "idle" | "loading" => Some(Type::Apply {
+//RS                     name: "Loadable".to_string(),
+//RS                     args: vec![unit.clone(), unit],
+//RS                 }),
+//RS                 "loaded" => payload.map(|value| Type::Apply {
+//RS                     name: "Loadable".to_string(),
+//RS                     args: vec![value, unit],
+//RS                 }),
+//RS                 "failed" => payload.map(|error| Type::Apply {
+//RS                     name: "Loadable".to_string(),
+//RS                     args: vec![unit, error],
+//RS                 }),
+//RS                 _ => None,
+//RS             }
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Card #131 / D-SERDE5: pre-evaluate every `#[Default(expr)]` argument on a
+//RS /// `#[Codable]`/`#[Encode]`/`#[Decode]` struct field to a compile-time value,
+//RS /// stashed on the marker (`Marker::ct`). Runs after `eval_comptime_items`, so a
+//RS /// default may reference a `comptime` const. Codegen serializes this value and
+//RS /// the comptime decode tier reuses it, so the two tiers bake the same default —
+//RS /// a non-primitive `#[Default(expr)]` never silently degrades to
+//RS /// `Default::default()` (R11/R12). A non-const argument is E2414.
+//RS pub(crate) fn comptime_context_from_items(
+//RS     items: &[Item],
+//RS ) -> (
+//RS     HashMap<String, Func>,
+//RS     HashSet<String>,
+//RS     HashMap<String, crate::Comptime::CtValue>,
+//RS ) {
+//RS     let mut funcs = HashMap::new();
+//RS     let mut externs = HashSet::new();
+//RS     let mut globals = HashMap::new();
+//RS     for item in items
+//RS         .iter()
+//RS         .filter(|item| !matches!(item, Item::MarkerDecl(_) | Item::FactDecl(_)))
+//RS     {
+//RS         match item {
+//RS             Item::Func(f) => {
+//RS                 funcs.insert(f.name.clone(), f.clone());
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 for m in &s.methods {
+//RS                     funcs.insert(m.name.clone(), m.clone());
+//RS                 }
+//RS                 for block in &s.trait_impls {
+//RS                     for m in &block.methods {
+//RS                         funcs.insert(m.name.clone(), m.clone());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 for m in &e.methods {
+//RS                     funcs.insert(m.name.clone(), m.clone());
+//RS                 }
+//RS             }
+//RS             Item::Impl(i) => {
+//RS                 for m in &i.methods {
+//RS                     funcs.insert(m.name.clone(), m.clone());
+//RS                 }
+//RS             }
+//RS             Item::Const(c) if c.is_comptime => {
+//RS                 if let Some(v) = &c.ct {
+//RS                     globals.insert(c.name.clone(), v.clone());
+//RS                 }
+//RS             }
+//RS             // An immutable literal module constant is its own value, so build-
+//RS             // time code (a `prep { … }` block, a prepared value) reads it like
+//RS             // a prepared one; literal data values already carry `ct`.
+//RS             Item::Const(c) if !c.mutable && !c.is_persist => {
+//RS                 if let Some(v) = c.ct.clone().or_else(|| plain_literal_value(&c.value)) {
+//RS                     globals.insert(c.name.clone(), v);
+//RS                 }
+//RS             }
+//RS             Item::ExternRust(b) => {
+//RS                 for ef in &b.functions {
+//RS                     externs.insert(ef.name.clone());
+//RS                 }
+//RS             }
+//RS             Item::EffectDecl(_)
+//RS             | Item::Test(_)
+//RS             | Item::Const(_)
+//RS             | Item::Trait(_)
+//RS             | Item::Tag(_) // D-QUAL2: tags contribute no comptime context
+//RS             | Item::Module(_)
+//RS             | Item::CModule(_) | Item::CodeModule(_)
+//RS             | Item::Distinct(_)
+//RS             | Item::TypeAlias(_) // D-TYPEALIAS1: erases at codegen
+//RS             | Item::UnitFamily(_) // D-QUAL3: contributes no comptime context
+//RS             | Item::ErrorConv(_)
+//RS             | Item::Migration(_) // D-MIGRATE1
+//RS             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2
+//RS             | Item::UserDerive(_) // D-METADERIVE1=A: expanded in Bundle.rs
+//RS             | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before registration
+//RS             | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
+//RS             | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
+//RS             Item::MarkerDecl(_) | Item::FactDecl(_) => {
+//RS                 unreachable!("declaration items are consumed by the bundle registry")
+//RS             }
+//RS         }
+//RS     }
+//RS     (funcs, externs, globals)
+//RS }
+//RS 
+//RS fn supported_module_array_type(c: &crate::AST::ConstDef) -> Option<Type> {
+//RS     if c.mutable || c.is_comptime {
+//RS         return None;
+//RS     }
+//RS     let Expr::TypedLit {
+//RS         head: Some(Type::List(element)),
+//RS         body,
+//RS         ..
+//RS     } = &c.value
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     if !matches!(
+//RS         element.as_ref(),
+//RS         Type::Int | Type::IntN {
+//RS             signed: false,
+//RS             bits: 8,
+//RS         }
+//RS     ) {
+//RS         return None;
+//RS     }
+//RS     let elements = match body {
+//RS         crate::AST::TypedLitBody::Elements(elements) => elements,
+//RS         crate::AST::TypedLitBody::Empty => return Some(Type::List(element.clone())),
+//RS         _ => return None,
+//RS     };
+//RS     let supported = match element.as_ref() {
+//RS         Type::Int => elements.iter().all(|value| matches!(value, Expr::Int(..))),
+//RS         Type::IntN {
+//RS             signed: false,
+//RS             bits: 8,
+//RS         } => elements.iter().all(|value| {
+//RS             let Expr::Int(number, _, _, raw) = value else {
+//RS                 return false;
+//RS             };
+//RS             let exact = crate::Sema::CheckerInfer::exact_integer_literal(*number, raw.as_deref());
+//RS             crate::Sema::CheckerInfer::exact_integer_fits(&exact, 0, 255)
+//RS         }),
+//RS         _ => false,
+//RS     };
+//RS     supported.then(|| Type::List(element.clone()))
+//RS }
+//RS 
+//RS pub(crate) fn register_const(
+//RS     c: &crate::AST::ConstDef,
+//RS     consts: &mut HashMap<String, Type>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     funcs: &HashMap<String, FuncSig>,
+//RS     registry: &TypeRegistry,
+//RS ) {
+//RS     if name_defined(&c.name, funcs, registry, consts) {
+//RS         diags.push(defined_twice(
+//RS             &c.name,
+//RS             "every const needs a unique name",
+//RS             c.name_span,
+//RS         ));
+//RS         return;
+//RS     }
+//RS     // S57 (M9.5): comptime bindings are evaluated by a dedicated pass
+//RS     // (`eval_comptime_items`), which registers their type from the result.
+//RS     if c.is_comptime {
+//RS         return;
+//RS     }
+//RS     // D-SHAPE-OUTPUT-CALLABLE1: typed Outputs are sema-only package graph
+//RS     // values. Bundle resolution below checks their closed shape and callable;
+//RS     // they are not runtime numeric constants.
+//RS     if matches!(&c.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT || name == Syntax::TYPE_OUTPUT_DEFAULTS)
+//RS     {
+//RS         consts.insert(c.name.clone(), c.ty.clone().unwrap());
+//RS         return;
+//RS     }
+//RS     if module_value_const(c) {
+//RS         // Evaluated by `eval_comptime_items`, which registers the checked
+//RS         // type from the folded value (D-MODULE-VALUE1).
+//RS         return;
+//RS     }
+//RS     match module_scalar_const_type(c) {
+//RS         Some(t) => {
+//RS             consts.insert(c.name.clone(), t);
+//RS         }
+//RS         None => {
+//RS             let storage = c.mutable || c.is_persist;
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0622",
+//RS                 "a module binding's value must be a literal".to_string(),
+//RS                 if storage {
+//RS                     "a mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `fn run`"
+//RS                 } else {
+//RS                     "a module constant is folded once while building, so its value must be literal data: numbers, text, typed literals, and enum cases"
+//RS                 }
+//RS                 .to_string(),
+//RS                 if storage {
+//RS                     "use an integer, float, or bool literal, or keep struct and list values in an unmarked `::` constant"
+//RS                 } else {
+//RS                     "write the value as literal data, such as `RGB{r: U8{0}, g: U8{0}, b: U8{0}}`, prepare it while building with `NAME :: prep { value }`, or compute it inside a function"
+//RS                 }
+//RS                 .to_string(),
+//RS                 Some(c.value.span()),
+//RS             ));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The tier-stable scalar, string, and integer-array module bindings whose
+//RS /// source literal is their value. Mutable bindings are limited to these.
+//RS fn module_scalar_const_type(c: &crate::AST::ConstDef) -> Option<Type> {
+//RS     match &c.value {
+//RS         Expr::Int(_, _, _, _) => Some(Type::Int),
+//RS         Expr::Float(_, _, _, _) => Some(Type::Float),
+//RS         Expr::Bool(_, _) => Some(Type::Bool),
+//RS         Expr::Char(_, _) => (!c.mutable).then_some(Type::Char),
+//RS         Expr::Str(parts, _)
+//RS             if !c.mutable && matches!(parts.as_slice(), [crate::AST::StrPart::Lit(_)]) =>
+//RS         {
+//RS             Some(Type::String)
+//RS         }
+//RS         _ => supported_module_array_type(c),
+//RS     }
+//RS }
+//RS 
+//RS /// D-MODULE-VALUE1: an unmarked immutable module constant whose value is
+//RS /// literal data beyond the scalar forms (a struct, enum case, list, or map
+//RS /// literal, nested freely). The compile-time evaluator folds it once, exactly
+//RS /// like `@name :: value`, and every tier reads the folded value as an ordinary
+//RS /// module constant.
+//RS fn module_value_const(c: &crate::AST::ConstDef) -> bool {
+//RS     !c.is_comptime
+//RS         && !c.mutable
+//RS         && !c.is_persist
+//RS         && !matches!(&c.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT || name == Syntax::TYPE_OUTPUT_DEFAULTS)
+//RS         && module_scalar_const_type(c).is_none()
+//RS         && module_literal_value(&c.value)
+//RS }
+//RS 
+//RS /// Evaluated before type registration: comptime bindings and literal module
+//RS /// constants share the one compile-time evaluator.
+//RS pub(crate) fn const_evaluated_at_build(c: &crate::AST::ConstDef) -> bool {
+//RS     c.is_comptime || module_value_const(c)
+//RS }
+//RS 
+//RS /// Literal data only: no calls, operators, or name reads. An uppercase
+//RS /// `Type.Case` path (optionally `Type.Case(args)`) names an enum case.
+//RS fn module_literal_value(expr: &Expr) -> bool {
+//RS     fn type_path(expr: &Expr) -> bool {
+//RS         let upper = |name: &str| name.chars().next().is_some_and(char::is_uppercase);
+//RS         match expr {
+//RS             Expr::Ident(name, _) => upper(name),
+//RS             Expr::Field(base, member, _) => upper(member) && type_path(base),
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS     match expr {
+//RS         Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) | Expr::Unit(_) => true,
+//RS         Expr::Absent(_) => true,
+//RS         Expr::Str(parts, _) => parts
+//RS             .iter()
+//RS             .all(|part| matches!(part, crate::AST::StrPart::Lit(_))),
+//RS         Expr::Unary(crate::AST::UnOp::Neg, operand, _) => {
+//RS             matches!(operand.as_ref(), Expr::Int(..) | Expr::Float(..))
+//RS         }
+//RS         Expr::Present(inner, _) => module_literal_value(inner),
+//RS         Expr::ListLit(values, _) => values.iter().all(module_literal_value),
+//RS         Expr::MapLit(entries, _) => entries
+//RS             .iter()
+//RS             .all(|(key, value)| module_literal_value(key) && module_literal_value(value)),
+//RS         Expr::StructLit { fields, .. } => fields
+//RS             .iter()
+//RS             .all(|(_, _, value)| module_literal_value(value)),
+//RS         Expr::TypedLit { body, .. } => {
+//RS             let mut literal = true;
+//RS             body.for_each_expr(|value| literal &= module_literal_value(value));
+//RS             literal
+//RS         }
+//RS         Expr::EnumLit { args, .. } => args.iter().all(|arg| match arg {
+//RS             crate::AST::EnumLitArg::Positional(value)
+//RS             | crate::AST::EnumLitArg::Named { expr: value, .. } => module_literal_value(value),
+//RS         }),
+//RS         Expr::Field(..) => type_path(expr),
+//RS         Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             type_args,
+//RS             ..
+//RS         } => {
+//RS             type_args.is_empty()
+//RS                 && method.chars().next().is_some_and(char::is_uppercase)
+//RS                 && type_path(receiver)
+//RS                 && args.iter().all(|arg| module_literal_value(&arg.expr))
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0439 crates/jet-sema/src/Sema/Registration/Items.rs:1-1708
+

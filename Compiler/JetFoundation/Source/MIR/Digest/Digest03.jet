@@ -1,0 +1,251 @@
+use jet_foundation.MIROptimization.[CanonicalWriter, encode_index_kind, encode_function_form, encode_generic_params, encode_capture_param, encode_param, encode_failure_carrier, encode_web_param_reconstruction, encode_local]
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15386
+// Extends the canonical writer owner. Its Debug lane is Rust std::fmt::Debug,
+// not a lossy row summary; GATE #4494 for that retained formatting transport.
+fn encode_place(writer: &CanonicalWriter, place: MIRPlace) Never! {
+    &writer.u64(place.id.value)
+    &writer.span(place.span)
+    &writer.mir_type(place.ty)
+    if place.base == {
+        .Local(local) -> { &writer.tag("local"); &writer.u64(local.value) }
+        .Parameter(value) -> { &writer.tag("parameter"); &writer.u64(value.value) }
+        .Capture(value) -> { &writer.tag("capture"); &writer.u64(value.value) }
+        .Temporary(value) -> { &writer.tag("temporary"); &writer.u64(value.value) }
+        .Static(name) -> { &writer.tag("static"); &writer.str(name) }
+    }
+    &writer.len(place.projections.len())
+    loop projection in place.projections {
+        if projection == {
+            .Field(field, span) -> {
+                &writer.tag("field")
+                &writer.u64(field.value)
+                &writer.span(span)
+            }
+            .Index(kind, index, call, write_call, location, context, span) -> {
+                &writer.tag("index")
+                encode_index_kind(&writer, kind)
+                &writer.u64(index.value)
+                &writer.u64(call.value)
+                &writer.option_u64(write_call.map(call -> call.value))
+                &writer.debug(location)
+                &writer.debug(context)
+                &writer.span(span)
+            }
+            .Deref(span) -> { &writer.tag("deref"); &writer.span(span) }
+            .Payload(kind, span) -> {
+                &writer.tag("payload")
+                &writer.debug(kind)
+                &writer.span(span)
+            }
+            .Range(range, location, span) -> {
+                &writer.tag("range")
+                &writer.u64(range.value)
+                &writer.debug(location)
+                &writer.span(span)
+            }
+        }
+    }
+    &writer.debug(place.access)
+    &writer.option_str(place.persist_key)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15463
+fn encode_function(writer: &CanonicalWriter, function: MIRFunction) Never! {
+    &writer.u64(function.id.value)
+    &writer.u64(function.module_id.value)
+    &writer.u64(function.source_file.value)
+    &writer.str(function.key)
+    &writer.str(function.module_name)
+    &writer.str(function.name)
+    &writer.span(function.span)
+    &writer.debug(function.kind)
+    encode_function_form(&writer, function.form)
+    &writer.debug(function.visibility)
+    &writer.debug(function.target_applicability)
+    &writer.debug(function.web_bucket)
+    &writer.debug(function.web_marker)
+    encode_generic_params(&writer, function.generic_params)
+    &writer.len(function.capture_params.len())
+    // Canonical sorters return positions, avoiding copies of owned MIR rows.
+    loop position in mir_digest_sort_captures(function.capture_params) -> encode_capture_param(&writer, function.capture_params[position])
+    &writer.len(function.params.len())
+    loop param in function.params -> encode_param(&writer, param)
+    if function.declared_return == {
+        .Val(ty) -> { &writer.bool(true); &writer.mir_type(ty) }
+        .None -> &writer.bool(false)
+    }
+    &writer.mir_type(function.return_type)
+    if function.generator == {
+        .Val(generator) -> { &writer.bool(true); &writer.mir_type(generator.item) }
+        .None -> &writer.bool(false)
+    }
+    encode_failure_carrier(&writer, function.failure)
+    &writer.debug(function.effects)
+    &writer.debug(function.captures)
+    encode_optimization_facts(&writer, function.optimization)
+    &writer.bool(function.is_unsafe)
+    &writer.debug(function.unsafe_gate)
+    &writer.bool(function.is_pure)
+    // The canonical Jet row splits Option<Option<usize>> into bound/unbounded.
+    if function.memo_bound == {
+        .Val(bound) -> &writer.str("Some(Some({bound}))")
+        .None -> &writer.str(if function.memo_unbounded -> "Some(None)" else -> "None")
+    }
+    &writer.bool(function.is_reactive)
+    &writer.debug(function.reactive_upgrades)
+    &writer.bool(function.is_inline)
+    &writer.bool(function.is_inline_always)
+    &writer.bool(function.is_scalar)
+    &writer.debug(function.kernel_proof)
+    &writer.bool(function.gc_return)
+    &writer.debug(function.return_view_provenance)
+    &writer.len(function.web_param_reconstructions.len())
+    loop reconstruction in function.web_param_reconstructions -> encode_web_param_reconstruction(&writer, reconstruction)
+    &writer.len(function.blocks.len())
+    loop position in mir_digest_sort_blocks(function.blocks) {
+        block :: function.blocks[position]
+        &writer.u64(block.id.value)
+        &writer.span(block.span)
+        &writer.len(block.instructions.len())
+        loop instruction in block.instructions {
+            &writer.u64(instruction.id.value)
+            &writer.span(instruction.span)
+            &writer.debug(instruction.source_line)
+            &writer.option_u64(instruction.result.map(value -> value.value))
+            if instruction.ty == {
+                .Val(ty) -> { &writer.bool(true); &writer.mir_type(ty) }
+                .None -> &writer.bool(false)
+            }
+            &writer.operation(instruction.operation)
+        }
+        &writer.debug(block.terminator)
+    }
+    &writer.len(function.locals.len())
+    loop position in mir_digest_sort_locals(function.locals) -> encode_local(&writer, function.locals[position])
+    &writer.len(function.values.len())
+    loop position in mir_digest_sort_value_facts(function.values) {
+        value :: function.values[position]
+        &writer.u64(value.id.value)
+        &writer.mir_type(value.ty)
+        &writer.span(value.span)
+        &writer.debug(value.ownership)
+    }
+    &writer.len(function.places.len())
+    loop position in mir_digest_sort_places(function.places) -> encode_place(&writer, function.places[position])
+    // Match Vec<&row> Debug: ordered borrowed rows, without string quoting.
+    scopes :: loop position in mir_digest_sort_scopes(function.scopes) -> function.scopes[position]
+    &writer.debug(scopes)
+    drops :: loop position in mir_digest_sort_drops(function.drops) -> function.drops[position]
+    &writer.debug(drops)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15575
+fn encode_optimization_facts(writer: &CanonicalWriter, facts: MIROptimizationFacts) Never! {
+    &writer.bool(facts.pure)
+    &writer.bool(facts.replayable)
+    &writer.bool(facts.diverges)
+    &writer.bool(facts.inline)
+    &writer.bool(facts.inline_always)
+    &writer.bool(facts.gc_return)
+    &writer.bool(facts.gc_scope)
+    &writer.bool(facts.kernel)
+    &writer.bool(facts.auto_vectorizable)
+    &writer.bool(facts.no_aliasing)
+    &writer.bool(facts.no_early_exit)
+    &writer.bool(facts.no_cross_iteration_dependencies)
+    &writer.debug(facts.pass_ids)
+    &writer.debug(facts.loop_facts)
+    &writer.debug(facts.bounds_facts)
+    &writer.len(facts.vector_facts.len())
+    loop fact in facts.vector_facts {
+        &writer.u64(fact.loop_header.value)
+        &writer.option_u64(fact.cursor.map(cursor -> cursor.value))
+        &writer.len(fact.body_blocks.len())
+        loop block in fact.body_blocks -> &writer.u64(block.value)
+        &writer.option_u64(fact.advance_block.map(block -> block.value))
+        &writer.tag(mir_digest_vector_rule(fact.rule))
+        &writer.len(fact.accesses.len())
+        loop access in fact.accesses {
+            if access.root == {
+                .Place(place) -> { &writer.tag("place"); &writer.u64(place.value) }
+                .Value(value) -> { &writer.tag("value"); &writer.u64(value.value) }
+            }
+            &writer.option_u64(access.field.map(field -> field.value))
+            &writer.tag(mir_digest_vector_layout(access.layout))
+            &writer.option_u64(access.column_index.map(index -> U64{index}))
+        }
+        &writer.tag(mir_digest_vector_layout(fact.layout))
+        if fact.element_type == {
+            .Val(ty) -> { &writer.bool(true); &writer.mir_type(ty) }
+            .None -> &writer.bool(false)
+        }
+        &writer.bool(fact.packed)
+        &writer.option_u64(fact.lane_width.map(width -> U64{width}))
+        &writer.bool(fact.no_aliasing)
+        &writer.bool(fact.no_early_exit)
+        &writer.bool(fact.effect_free_body)
+        &writer.bool(fact.no_cross_iteration_dependencies)
+        if fact.fixed_reduction == {
+            .Val(reduction) -> {
+                &writer.bool(true)
+                &writer.u64(reduction.accumulator.value)
+                &writer.u64(reduction.addend.value)
+                &writer.u64(reduction.seed.value)
+                &writer.option_u64(reduction.condition.map(value -> value.value))
+                &writer.len(reduction.source_operations.len())
+                loop operation in reduction.source_operations -> &writer.u64(operation.value)
+                &writer.u64(reduction.exit.value)
+                &writer.u64(U64{reduction.order.lanes})
+                &writer.u64(U64{reduction.order.seed_lane})
+                &writer.tag(reduction.order.tree_name())
+            }
+            .None -> &writer.bool(false)
+        }
+        &writer.span(fact.span)
+        if fact.decision == {
+            .Eligible -> &writer.tag("eligible")
+            .Rejected(reason) -> { &writer.tag("rejected"); &writer.tag(reason.as_str()) }
+        }
+    }
+    &writer.debug(facts.checked_vector_facts)
+    &writer.debug(facts.fusion_facts)
+    // O(n log n) position sort by (loop_header, transform), matching sort_by_key.
+    primary := [U64]{}
+    secondary := [U64]{}
+    loop fact in facts.acceleration_facts {
+        &primary.push(fact.loop_header.value)
+        &secondary.push(if fact.transform == .TransientColumnCopy -> U64{0} else -> U64{1})
+    }
+    order :: mir_digest_order(primary, secondary, [U64]{}, [String]{}, [String]{}, false)
+    &writer.len(order.len())
+    loop position in order {
+        fact :: facts.acceleration_facts[position]
+        &writer.u64(fact.loop_header.value)
+        &writer.tag(if fact.transform == .TransientColumnCopy -> "transient-column-copy" else -> "pooled-parallel-chunks")
+        &writer.bool(fact.workload.nested_reuse)
+        &writer.bool(fact.workload.single_pass)
+        &writer.bool(fact.proof.source_proven)
+        &writer.bool(fact.proof.independent_iterations)
+        &writer.bool(fact.proof.no_aliasing)
+        &writer.bool(fact.proof.no_cross_iteration_dependencies)
+        &writer.bool(fact.proof.no_early_exit)
+        &writer.bool(fact.proof.effect_free_body)
+        &writer.bool(fact.proof.ownership_safe)
+        &writer.bool(fact.proof.failure_order_preserved)
+        &writer.span(fact.span)
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15699
+// encode_mir_constant -> Digest.jet::mir_digest_constant. Every variant is
+// retained, including nested map/key, struct/enum fields, Present, and both
+// Failed report arms. mir_digest_int writes the Rust low-u64 two's-complement
+// word; the float lane writes to_bits; Bytes is length followed by raw bytes.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:15808
+// encode_mir_const_key -> Digest.jet::mir_digest_const_key. Int/String/Bool/Char
+// and recursive Tuple/Struct/Enum all retain their tags and field order.
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:16324
+// Closing boundary only; original ownership_guard_tests are outside this slice.
+

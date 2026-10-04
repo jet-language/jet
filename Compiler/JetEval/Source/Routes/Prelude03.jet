@@ -1,0 +1,1249 @@
+// PORT-PENDING 0603 crates-jet-comptime-src-comptime-textlite: crates/jet-comptime/src/Comptime/TextLite.rs:1-1245
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! CtValue adapters over the canonical Prelude text/Unicode kernel.
+//RS 
+//RS mod text_kernel {
+//RS     pub mod jet_std {
+//RS         #[derive(Clone, Copy, Debug, PartialEq)]
+//RS         pub enum IOOperation {
+//RS             Read,
+//RS             Write,
+//RS             Flush,
+//RS             Connect,
+//RS             Accept,
+//RS             Close,
+//RS             Resolve,
+//RS             Codec,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct IOContext {
+//RS             pub operation: IOOperation,
+//RS             pub resource: Option<String>,
+//RS             pub os_code: Option<i64>,
+//RS             pub cause: Option<String>,
+//RS         }
+//RS 
+//RS         impl IOContext {
+//RS             pub fn new(
+//RS                 operation: IOOperation,
+//RS                 resource: Option<String>,
+//RS                 os_code: Option<i64>,
+//RS                 cause: Option<String>,
+//RS             ) -> Self {
+//RS                 Self {
+//RS                     operation,
+//RS                     resource,
+//RS                     os_code,
+//RS                     cause,
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub enum IOError {
+//RS             InvalidInput(IOContext),
+//RS             NotFound(IOContext),
+//RS             PermissionDenied(IOContext),
+//RS             TimedOut(IOContext),
+//RS             Cancelled(IOContext),
+//RS             Closed(IOContext),
+//RS             Protocol(IOContext),
+//RS             Other(IOContext),
+//RS         }
+//RS 
+//RS         impl IOError {
+//RS             pub fn other(
+//RS                 operation: IOOperation,
+//RS                 resource: Option<String>,
+//RS                 cause: impl ToString,
+//RS             ) -> Self {
+//RS                 Self::Other(IOContext::new(
+//RS                     operation,
+//RS                     resource,
+//RS                     None,
+//RS                     Some(cause.to_string()),
+//RS                 ))
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn io_error_at(operation: IOOperation, path: &str, error: std::io::Error) -> IOError {
+//RS             let context = IOContext::new(
+//RS                 operation,
+//RS                 Some(path.to_string()),
+//RS                 error.raw_os_error().map(i64::from),
+//RS                 Some(error.to_string()),
+//RS             );
+//RS             match error.kind() {
+//RS                 std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+//RS                     IOError::InvalidInput(context)
+//RS                 }
+//RS                 std::io::ErrorKind::NotFound => IOError::NotFound(context),
+//RS                 std::io::ErrorKind::PermissionDenied => IOError::PermissionDenied(context),
+//RS                 std::io::ErrorKind::TimedOut => IOError::TimedOut(context),
+//RS                 std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => {
+//RS                     IOError::Closed(context)
+//RS                 }
+//RS                 _ => IOError::Other(context),
+//RS             }
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub enum TextWidthAmbiguous {
+//RS             Narrow,
+//RS             Wide,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub enum TextWidthControls {
+//RS             Zero,
+//RS             Reject,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct TextWidth {
+//RS             pub ambiguous: TextWidthAmbiguous,
+//RS             pub controls: TextWidthControls,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct TextError {
+//RS             pub message: String,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct DirEntry {
+//RS             pub name: String,
+//RS             pub path: String,
+//RS             pub is_dir: bool,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct Stat {
+//RS             pub size: i64,
+//RS             pub modified_ms: i64,
+//RS             pub created_ms: i64,
+//RS             pub readonly: bool,
+//RS             pub is_file: bool,
+//RS             pub is_dir: bool,
+//RS             pub is_symlink: bool,
+//RS             pub kind: String,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct WalkEntry {
+//RS             pub path: String,
+//RS             pub relative: String,
+//RS             pub is_dir: bool,
+//RS             pub depth: i64,
+//RS         }
+//RS 
+//RS         include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs");
+//RS     }
+//RS 
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_unicode::*;
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../../jet-codegen/src/Prelude/Core/UnicodeString.rs");
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     pub(crate) struct JetFileReader {
+//RS         pub(crate) inner: std::io::BufReader<std::fs::File>,
+//RS         pub(crate) path: String,
+//RS     }
+//RS     pub(crate) struct JetFileWriter {
+//RS         pub(crate) inner: std::io::BufWriter<std::fs::File>,
+//RS         pub(crate) path: String,
+//RS     }
+//RS     include!("../../../jet-codegen/src/Prelude/Core/StdinReader.rs");
+//RS 
+//RS     // TextLite keeps the same runtime Authority/FileScope carrier as AOT; only
+//RS     // the CtValue adapter differs at this boundary.
+//RS     mod authority_semantics {
+//RS         include!("../../../jet-codegen/src/Prelude/Core/Authority.rs");
+//RS     }
+//RS     fn jet_mapped_path_key(path: &str) -> String {
+//RS         authority_semantics::jet_mapped_path_key(path)
+//RS     }
+//RS 
+//RS     fn jet_mapped_register(key: &str) {
+//RS         authority_semantics::jet_mapped_register(key)
+//RS     }
+//RS 
+//RS     fn jet_mapped_unregister(key: &str) {
+//RS         authority_semantics::jet_mapped_unregister(key)
+//RS     }
+//RS     fn jet_mapped_writer_refusal(
+//RS         path: &str,
+//RS     ) -> Option<authority_semantics::JetMappedWriterRefusal> {
+//RS         authority_semantics::jet_mapped_writer_refusal(path)
+//RS     }
+//RS     use authority_semantics::{JetAuthority, JetFileScope};
+//RS     fn jet_fault_should_fail(_operation: &str) -> bool {
+//RS         false
+//RS     }
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/FSIgnore.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/FSWalk.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/FSOps.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/Core/FileHandleOwners.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs");
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs");
+//RS 
+//RS     pub(super) fn nfd(s: &str) -> String {
+//RS         jet_text_nfd(&s.to_string())
+//RS     }
+//RS     pub(super) fn nfkd(s: &str) -> String {
+//RS         jet_text_nfkd(&s.to_string())
+//RS     }
+//RS     pub(super) fn nfc(s: &str) -> String {
+//RS         jet_text_nfc(&s.to_string())
+//RS     }
+//RS     pub(super) fn nfkc(s: &str) -> String {
+//RS         jet_text_nfkc(&s.to_string())
+//RS     }
+//RS     pub(super) fn casefold(s: &str) -> String {
+//RS         jet_text_casefold(&s.to_string())
+//RS     }
+//RS     pub(super) fn alphabetic(cp: u32) -> bool {
+//RS         jet_text_alphabetic(cp)
+//RS     }
+//RS     pub(super) fn letter(cp: u32) -> bool {
+//RS         jet_text_letter(cp)
+//RS     }
+//RS     pub(super) fn numeric(cp: u32) -> bool {
+//RS         jet_text_numeric(cp)
+//RS     }
+//RS     pub(super) fn whitespace(cp: u32) -> bool {
+//RS         jet_text_whitespace(cp)
+//RS     }
+//RS     pub(super) fn lower(s: &str) -> String {
+//RS         jet_text_lower(&s.to_string())
+//RS     }
+//RS     pub(super) fn upper(s: &str) -> String {
+//RS         jet_text_upper(&s.to_string())
+//RS     }
+//RS     pub(super) fn title(s: &str) -> String {
+//RS         jet_text_title(&s.to_string())
+//RS     }
+//RS     pub(super) fn caseless_eq(a: &str, b: &str) -> bool {
+//RS         jet_text_caseless_eq(&a.to_string(), &b.to_string())
+//RS     }
+//RS     pub(super) fn graphemes(s: &str) -> Vec<String> {
+//RS         jet_text_graphemes(&s.to_string())
+//RS     }
+//RS     pub(super) fn word_segments(s: &str) -> Vec<String> {
+//RS         jet_text_word_segments(&s.to_string())
+//RS     }
+//RS     pub(super) fn words(s: &str) -> Vec<String> {
+//RS         jet_text_words(&s.to_string())
+//RS     }
+//RS     pub(super) fn sentence_segments(s: &str) -> Vec<String> {
+//RS         jet_text_sentence_segments(&s.to_string())
+//RS     }
+//RS     pub(super) fn sentences(s: &str) -> Vec<String> {
+//RS         jet_text_sentences(&s.to_string())
+//RS     }
+//RS     pub(super) fn display_width_default(s: &str) -> i64 {
+//RS         jet_text_display_width_default(&s.to_string())
+//RS     }
+//RS     pub(super) fn display_width_policy(
+//RS         s: &str,
+//RS         ambiguous_wide: bool,
+//RS         controls_reject: bool,
+//RS     ) -> Result<i64, String> {
+//RS         jet_text_display_width_policy(&s.to_string(), ambiguous_wide, controls_reject)
+//RS     }
+//RS     pub(super) fn is_alphabetic(s: &str) -> bool {
+//RS         jet_text_is_alphabetic(&s.to_string())
+//RS     }
+//RS     pub(super) fn is_numeric(s: &str) -> bool {
+//RS         jet_text_is_numeric(&s.to_string())
+//RS     }
+//RS     pub(super) fn is_whitespace(s: &str) -> bool {
+//RS         jet_text_is_whitespace(&s.to_string())
+//RS     }
+//RS     pub(super) fn is_lower(s: &str) -> bool {
+//RS         jet_text_is_lower(&s.to_string())
+//RS     }
+//RS     pub(super) fn is_upper(s: &str) -> bool {
+//RS         jet_text_is_upper(&s.to_string())
+//RS     }
+//RS     pub(super) fn capitalize(s: &str) -> String {
+//RS         jet_text_capitalize(&s.to_string())
+//RS     }
+//RS     pub(super) fn swapcase(s: &str) -> String {
+//RS         jet_text_swapcase(&s.to_string())
+//RS     }
+//RS     pub(super) fn remove_prefix(s: &str, prefix: &str) -> String {
+//RS         jet_text_remove_prefix(&s.to_string(), &prefix.to_string())
+//RS     }
+//RS     pub(super) fn remove_suffix(s: &str, suffix: &str) -> String {
+//RS         jet_text_remove_suffix(&s.to_string(), &suffix.to_string())
+//RS     }
+//RS     pub(super) fn compare(a: &str, b: &str) -> i64 {
+//RS         jet_text_compare(a, b)
+//RS     }
+//RS     pub(super) fn reverse(s: &str) -> String {
+//RS         jet_text_reverse(&s.to_string())
+//RS     }
+//RS     pub(super) fn trim_start(s: &str) -> String {
+//RS         jet_text_trim_start(&s.to_string())
+//RS     }
+//RS     pub(super) fn trim_end(s: &str) -> String {
+//RS         jet_text_trim_end(&s.to_string())
+//RS     }
+//RS     pub(super) fn trim(s: &str) -> String {
+//RS         jet_text_trim(&s.to_string())
+//RS     }
+//RS     pub(super) fn splitn(s: &str, pattern: &str, count: i64) -> Vec<String> {
+//RS         jet_text_splitn(&s.to_string(), &pattern.to_string(), count)
+//RS     }
+//RS     pub(super) fn rsplitn(s: &str, pattern: &str, count: i64) -> Vec<String> {
+//RS         jet_text_rsplitn(&s.to_string(), &pattern.to_string(), count)
+//RS     }
+//RS     pub(super) fn pad_start(s: &str, width: i64, fill: &str) -> String {
+//RS         jet_text_pad_start(
+//RS             &s.to_string(),
+//RS             jet_foundation::Numeric::JetInt::from_i64(width),
+//RS             &fill.to_string(),
+//RS         )
+//RS     }
+//RS     pub(super) fn pad_end(s: &str, width: i64, fill: &str) -> String {
+//RS         jet_text_pad_end(
+//RS             &s.to_string(),
+//RS             jet_foundation::Numeric::JetInt::from_i64(width),
+//RS             &fill.to_string(),
+//RS         )
+//RS     }
+//RS     pub(super) fn center(s: &str, width: i64, fill: &str) -> String {
+//RS         jet_text_center(
+//RS             &s.to_string(),
+//RS             jet_foundation::Numeric::JetInt::from_i64(width),
+//RS             &fill.to_string(),
+//RS         )
+//RS     }
+//RS     pub(super) fn starts_any(s: &str, prefixes: &[String]) -> bool {
+//RS         jet_text_starts_any(&s.to_string(), &prefixes.to_vec())
+//RS     }
+//RS     pub(super) fn ends_any(s: &str, suffixes: &[String]) -> bool {
+//RS         jet_text_ends_any(&s.to_string(), &suffixes.to_vec())
+//RS     }
+//RS     pub(super) fn char_indices(s: &str) -> Vec<String> {
+//RS         jet_text_char_indices(&s.to_string())
+//RS     }
+//RS     pub(super) fn inspect(s: &str) -> Vec<String> {
+//RS         jet_text_inspect(&s.to_string())
+//RS     }
+//RS     pub(super) fn unicode_scalar_count(s: &str) -> i64 {
+//RS         jet_text_unicode_scalar_count(&s.to_string())
+//RS     }
+//RS     pub(super) fn unicode_byte_count(s: &str) -> i64 {
+//RS         jet_text_unicode_byte_count(&s.to_string())
+//RS     }
+//RS     pub(super) fn unicode_is_ascii(s: &str) -> bool {
+//RS         jet_text_unicode_is_ascii(&s.to_string())
+//RS     }
+//RS     pub(super) fn unicode_lower(s: &str) -> String {
+//RS         jet_text_unicode_lower(&s.to_string())
+//RS     }
+//RS     pub(super) fn unicode_upper(s: &str) -> String {
+//RS         jet_text_unicode_upper(&s.to_string())
+//RS     }
+//RS     pub(super) fn unicode_scalars(s: &str) -> Vec<String> {
+//RS         jet_text_unicode_scalars(&s.to_string())
+//RS     }
+//RS     /// The receiver-first String routes of `string_method_route` whose
+//RS     /// AOT/JIT kernel lives in Text.rs. The evaluator calls the same kernel
+//RS     /// functions, so `find` stays a byte offset and `partition` keeps the
+//RS     /// `(head, sep, tail)` shape on every tier (I9). `None`: not a kernel row.
+//RS     pub(super) fn string_route(
+//RS         s: &str,
+//RS         member: &str,
+//RS         args: &[crate::AST::CtValue],
+//RS     ) -> Option<crate::AST::CtValue> {
+//RS         use crate::AST::CtValue;
+//RS         let text = s.to_string();
+//RS         let str_arg = |index: usize| match args.get(index) {
+//RS             Some(CtValue::Str(value)) => Some(value.clone()),
+//RS             _ => None,
+//RS         };
+//RS         let int_arg = |index: usize| match args.get(index) {
+//RS             Some(CtValue::Int(value)) => Some(*value),
+//RS             _ => None,
+//RS         };
+//RS         let triple = |(head, sep, tail): (String, String, String)| CtValue::Struct {
+//RS             type_name: "(head,sep,tail)".to_string(),
+//RS             fields: vec![
+//RS                 ("head".to_string(), CtValue::Str(head)),
+//RS                 ("sep".to_string(), CtValue::Str(sep)),
+//RS                 ("tail".to_string(), CtValue::Str(tail)),
+//RS             ],
+//RS         };
+//RS         let width = |index: usize| int_arg(index).map(jet_foundation::Numeric::JetInt::from_i64);
+//RS         Some(match (member, args.len()) {
+//RS             ("casefold", 0) => CtValue::Str(jet_text_casefold(&text)),
+//RS             ("strip", 0) => CtValue::Str(jet_text_parse_strip(&text)),
+//RS             ("lstrip", 0) => CtValue::Str(jet_text_parse_lstrip(&text)),
+//RS             ("rstrip", 0) => CtValue::Str(jet_text_parse_rstrip(&text)),
+//RS             ("isalnum", 0) => CtValue::Bool(jet_text_isalnum(&text)),
+//RS             ("isalpha", 0) => CtValue::Bool(jet_text_is_alphabetic(&text)),
+//RS             ("isascii", 0) => CtValue::Bool(jet_text_unicode_is_ascii(&text)),
+//RS             ("isdecimal", 0) => CtValue::Bool(jet_text_isdecimal(&text)),
+//RS             ("isdigit", 0) => CtValue::Bool(jet_text_isdigit(&text)),
+//RS             ("isidentifier", 0) => CtValue::Bool(jet_text_isidentifier(&text)),
+//RS             ("isnumeric", 0) => CtValue::Bool(jet_text_isnumeric(&text)),
+//RS             ("isprintable", 0) => CtValue::Bool(jet_text_isprintable(&text)),
+//RS             ("isspace", 0) => CtValue::Bool(jet_text_is_whitespace(&text)),
+//RS             ("istitle", 0) => CtValue::Bool(jet_text_istitle(&text)),
+//RS             ("islower", 0) => CtValue::Bool(jet_text_is_lower(&text)),
+//RS             ("isupper", 0) => CtValue::Bool(jet_text_is_upper(&text)),
+//RS             ("find", 1) => CtValue::Int(jet_text_parse_find(&text, &str_arg(0)?)),
+//RS             ("rfind", 1) => CtValue::Int(jet_text_parse_rfind(&text, &str_arg(0)?)),
+//RS             ("partition", 1) => triple(jet_text_parse_partition(&text, &str_arg(0)?)),
+//RS             ("rpartition", 1) => triple(jet_text_parse_rpartition(&text, &str_arg(0)?)),
+//RS             ("zfill", 1) => CtValue::Str(jet_text_zfill(&text, int_arg(0)?)),
+//RS             ("expandtabs", 1) => CtValue::Str(jet_text_expandtabs(&text, width(0)?)),
+//RS             ("center", 2) => CtValue::Str(jet_text_center(&text, width(0)?, &str_arg(1)?)),
+//RS             ("ljust", 2) => CtValue::Str(jet_text_pad_end(&text, width(0)?, &str_arg(1)?)),
+//RS             ("rjust", 2) => CtValue::Str(jet_text_pad_start(&text, width(0)?, &str_arg(1)?)),
+//RS             _ => return None,
+//RS         })
+//RS     }
+//RS 
+//RS     // ── D-I9: the ONE `core.files` kernel ────────────────────────────────
+//RS     // `Prelude/CoreLib/Top/Text.rs` (included above) owns fault injection,
+//RS     // the recursive/non-recursive split and every `IOError` this family
+//RS     // reports — the same `jet_std_fs_*` symbols AOT emits and the resident
+//RS     // Cranelift host calls. The shared evaluator marshals a path in and a
+//RS     // `CtValue` out; it never spells a second `std::fs` call. Hand-written
+//RS     // per-member arms are exactly what left `create_dir_all` and `remove_all`
+//RS     // with no arm at all while `create_dir` silently ran the recursive one.
+//RS     pub(super) fn fs_read(path: &str) -> Result<String, jet_std::IOError> {
+//RS         jet_std_fs_read(&path.to_string())
+//RS     }
+//RS     pub(super) fn fs_scope_read(
+//RS         rights: &std::collections::BTreeSet<String>,
+//RS         path: &str,
+//RS     ) -> Result<String, jet_std::IOError> {
+//RS         let authority = JetAuthority::from_rights(rights.iter().cloned().collect());
+//RS         let scope = jet_std_fs_scope(&authority);
+//RS         jet_std_fs_scope_read(&scope, &path.to_string())
+//RS     }
+//RS     pub(super) fn fs_read_bytes(path: &str) -> Result<Vec<u8>, jet_std::IOError> {
+//RS         jet_std_fs_read_bytes(&path.to_string())
+//RS     }
+//RS     pub(super) fn fs_write(path: &str, text: &str) -> Result<(), jet_std::IOError> {
+//RS         jet_std_fs_write(&path.to_string(), &text.to_string())
+//RS     }
+//RS     pub(super) fn fs_append(path: &str, text: &str) -> Result<(), jet_std::IOError> {
+//RS         jet_std_fs_append(&path.to_string(), &text.to_string())
+//RS     }
+//RS     pub(super) fn fs_exists(path: &str) -> bool {
+//RS         jet_std_fs_exists(&path.to_string())
+//RS     }
+//RS     pub(super) fn fs_is_dir(path: &str) -> bool {
+//RS         jet_std_fs_is_dir(&path.to_string())
+//RS     }
+//RS     pub(super) fn fs_create_dir(path: &str) -> Result<(), jet_std::IOError> {
+//RS         jet_std_fs_create_dir(&path.to_string())
+//RS     }
+//RS     pub(super) fn fs_create_dir_all(path: &str) -> Result<(), jet_std::IOError> {
+//RS         jet_std_fs_create_dir_all(&path.to_string())
+//RS     }
+//RS     pub(super) fn fs_remove(path: &str) -> Result<(), jet_std::IOError> {
+//RS         jet_std_fs_remove(&path.to_string())
+//RS     }
+//RS     pub(super) fn fs_remove_dir(path: &str) -> Result<(), jet_std::IOError> {
+//RS         jet_std_fs_remove_dir(&path.to_string())
+//RS     }
+//RS     pub(super) fn fs_remove_all(path: &str) -> Result<(), jet_std::IOError> {
+//RS         jet_std_fs_remove_all(&path.to_string())
+//RS     }
+//RS     pub(super) fn fs_copy(from: &str, to: &str) -> Result<(), jet_std::IOError> {
+//RS         jet_std_fs_copy(&from.to_string(), &to.to_string())
+//RS     }
+//RS     pub(super) fn fs_copy_dir(from: &str, to: &str) -> Result<(), jet_std::IOError> {
+//RS         jet_std_fs_copy_dir(&from.to_string(), &to.to_string())
+//RS     }
+//RS     pub(super) fn fs_list_dir(path: &str) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
+//RS         jet_std_fs_list_dir(&path.to_string())
+//RS     }
+//RS     pub(super) fn fs_walk_parallel(
+//RS         path: &str,
+//RS     ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+//RS         fs_walk_parallel_with_ignore(path, None)
+//RS     }
+//RS     pub(super) fn fs_walk_parallel_with_ignore(
+//RS         path: &str,
+//RS         ignore_name: Option<&str>,
+//RS     ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+//RS         let mut entries = jet_fs_walk_parallel_with_ignore(
+//RS             path,
+//RS             path,
+//RS             ignore_name,
+//RS             |path, relative, is_dir, depth| jet_std::WalkEntry {
+//RS                 path,
+//RS                 relative,
+//RS                 is_dir,
+//RS                 depth,
+//RS             },
+//RS             |shown, error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error),
+//RS         )?;
+//RS         entries.sort_by(|left, right| left.path.cmp(&right.path));
+//RS         Ok(entries)
+//RS     }
+//RS     pub(super) fn fs_walk_files_parallel(
+//RS         path: &str,
+//RS     ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+//RS         fs_walk_files_parallel_with_ignore(path, None)
+//RS     }
+//RS     pub(super) fn fs_walk_files_parallel_with_ignore(
+//RS         path: &str,
+//RS         ignore_name: Option<&str>,
+//RS     ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+//RS         let mut entries = jet_fs_walk_files_parallel_with_ignore(
+//RS             path,
+//RS             path,
+//RS             ignore_name,
+//RS             |path, relative, is_dir, depth| jet_std::WalkEntry {
+//RS                 path,
+//RS                 relative,
+//RS                 is_dir,
+//RS                 depth,
+//RS             },
+//RS             |shown, error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error),
+//RS         )?;
+//RS         entries.sort_by(|left, right| left.path.cmp(&right.path));
+//RS         Ok(entries)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS enum MirFileOwnerKind {
+//RS     TempDir(text_kernel::JetTempDirOwner),
+//RS     TempFile(text_kernel::JetTempFileOwner),
+//RS     FileLock(text_kernel::JetFileLockOwner),
+//RS }
+//RS 
+//RS /// Private runtime carrier used by the MIR interpreter to retain the same
+//RS /// provider-owned cleanup value as AOT.
+//RS #[derive(Clone, Debug)]
+//RS pub struct MirFileOwner {
+//RS     inner: MirFileOwnerKind,
+//RS }
+//RS 
+//RS impl MirFileOwner {
+//RS     pub fn path(&self) -> &str {
+//RS         match &self.inner {
+//RS             MirFileOwnerKind::TempDir(owner) => &owner.path,
+//RS             MirFileOwnerKind::TempFile(owner) => &owner.path,
+//RS             MirFileOwnerKind::FileLock(owner) => &owner.path,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub fn mir_fs_temp_dir(prefix: &str) -> Result<MirFileOwner, crate::AST::CtValue> {
+//RS     text_kernel::jet_std_fs_temp_dir(&prefix.to_string())
+//RS         .map(|owner| MirFileOwner {
+//RS             inner: MirFileOwnerKind::TempDir(owner),
+//RS         })
+//RS         .map_err(io_error_ct)
+//RS }
+//RS 
+//RS pub fn mir_fs_temp_file(prefix: &str) -> Result<MirFileOwner, crate::AST::CtValue> {
+//RS     text_kernel::jet_std_fs_temp_file(&prefix.to_string())
+//RS         .map(|owner| MirFileOwner {
+//RS             inner: MirFileOwnerKind::TempFile(owner),
+//RS         })
+//RS         .map_err(io_error_ct)
+//RS }
+//RS 
+//RS pub fn mir_fs_lock(path: &str) -> Result<MirFileOwner, crate::AST::CtValue> {
+//RS     text_kernel::jet_std_fs_lock(&path.to_string())
+//RS         .map(|owner| MirFileOwner {
+//RS             inner: MirFileOwnerKind::FileLock(owner),
+//RS         })
+//RS         .map_err(io_error_ct)
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS pub(super) enum IoErrorOperation {
+//RS     Read,
+//RS     Write,
+//RS     Resolve,
+//RS }
+//RS 
+//RS pub(super) fn io_error_value(
+//RS     operation: IoErrorOperation,
+//RS     path: &str,
+//RS     error: std::io::Error,
+//RS ) -> crate::AST::CtValue {
+//RS     let operation = match operation {
+//RS         IoErrorOperation::Read => text_kernel::jet_std::IOOperation::Read,
+//RS         IoErrorOperation::Write => text_kernel::jet_std::IOOperation::Write,
+//RS         IoErrorOperation::Resolve => text_kernel::jet_std::IOOperation::Resolve,
+//RS     };
+//RS     io_error_ct(text_kernel::jet_std::io_error_at(operation, path, error))
+//RS }
+//RS 
+//RS /// Project the ONE Prelude `IOError` carrier into the evaluator's value
+//RS /// carrier. The kernel decides operation, resource, OS code and cause; this
+//RS /// only renames the Rust shape into a `CtValue` (I9).
+//RS fn io_error_ct(error: text_kernel::jet_std::IOError) -> crate::AST::CtValue {
+//RS     let operation_value = |operation| {
+//RS         let variant = match operation {
+//RS             text_kernel::jet_std::IOOperation::Read => "Read",
+//RS             text_kernel::jet_std::IOOperation::Write => "Write",
+//RS             text_kernel::jet_std::IOOperation::Flush => "Flush",
+//RS             text_kernel::jet_std::IOOperation::Connect => "Connect",
+//RS             text_kernel::jet_std::IOOperation::Accept => "Accept",
+//RS             text_kernel::jet_std::IOOperation::Close => "Close",
+//RS             text_kernel::jet_std::IOOperation::Resolve => "Resolve",
+//RS             text_kernel::jet_std::IOOperation::Codec => "Codec",
+//RS         };
+//RS         crate::AST::CtValue::Enum {
+//RS             type_name: "IOOperation".to_string(),
+//RS             variant: variant.to_string(),
+//RS             args: Vec::new(),
+//RS         }
+//RS     };
+//RS     let context_value = |context: text_kernel::jet_std::IOContext| {
+//RS         let optional_string = |value: Option<String>| {
+//RS             value
+//RS                 .map(|value| {
+//RS                     crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Str(value)))
+//RS                 })
+//RS                 .unwrap_or_else(|| crate::AST::CtValue::absent(crate::AST::Type::String))
+//RS         };
+//RS         let optional_int = |value: Option<i64>| {
+//RS             value
+//RS                 .map(|value| {
+//RS                     crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Int(value)))
+//RS                 })
+//RS                 .unwrap_or_else(|| crate::AST::CtValue::absent(crate::AST::Type::Int))
+//RS         };
+//RS         crate::AST::CtValue::Struct {
+//RS             type_name: "IOContext".to_string(),
+//RS             fields: vec![
+//RS                 ("operation".to_string(), operation_value(context.operation)),
+//RS                 ("resource".to_string(), optional_string(context.resource)),
+//RS                 ("os_code".to_string(), optional_int(context.os_code)),
+//RS                 ("cause".to_string(), optional_string(context.cause)),
+//RS             ],
+//RS         }
+//RS     };
+//RS     let (variant, context) = match error {
+//RS         text_kernel::jet_std::IOError::InvalidInput(context) => ("InvalidInput", context),
+//RS         text_kernel::jet_std::IOError::NotFound(context) => ("NotFound", context),
+//RS         text_kernel::jet_std::IOError::PermissionDenied(context) => ("PermissionDenied", context),
+//RS         text_kernel::jet_std::IOError::TimedOut(context) => ("TimedOut", context),
+//RS         text_kernel::jet_std::IOError::Cancelled(context) => ("Cancelled", context),
+//RS         text_kernel::jet_std::IOError::Closed(context) => ("Closed", context),
+//RS 
+//RS         text_kernel::jet_std::IOError::Protocol(context) => ("Protocol", context),
+//RS         text_kernel::jet_std::IOError::Other(context) => ("Other", context),
+//RS     };
+//RS     crate::AST::CtValue::Enum {
+//RS         type_name: "IOError".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: vec![(None, context_value(context))],
+//RS     }
+//RS }
+//RS struct FileReaderHandle(
+//RS     std::sync::Arc<std::sync::Mutex<Option<text_kernel::JetFileReader>>>,
+//RS );
+//RS struct FileWriterHandle(
+//RS     std::sync::Arc<std::sync::Mutex<Option<text_kernel::JetFileWriter>>>,
+//RS );
+//RS 
+//RS fn opaque_file<T: std::any::Any + Send + Sync>(value: T) -> crate::AST::CtValue {
+//RS     crate::AST::CtValue::Closure(std::sync::Arc::new(crate::AST::ClosureData {
+//RS         lambda: crate::AST::Lambda {
+//RS             take_names: Vec::new(),
+//RS             params: Vec::new(),
+//RS             result_type: None,
+//RS             error_type: None,
+//RS             effects: None,
+//RS             body: crate::AST::LambdaBody::Block(Vec::new()),
+//RS             span: crate::Diagnostics::Span::new(0, 0),
+//RS             meta: crate::AST::LambdaMeta::default(),
+//RS         },
+//RS         captured: std::collections::HashMap::new(),
+//RS         return_type: None,
+//RS         opaque: Some(crate::AST::CtOpaque::new(value)),
+//RS     }))
+//RS }
+//RS 
+//RS fn file_reader_handle(
+//RS     value: &crate::AST::CtValue,
+//RS ) -> Option<&FileReaderHandle> {
+//RS     let crate::AST::CtValue::Closure(data) = value else {
+//RS         return None;
+//RS     };
+//RS     data.opaque
+//RS         .as_ref()
+//RS         .and_then(|opaque| opaque.downcast_ref::<FileReaderHandle>())
+//RS }
+//RS 
+//RS fn file_writer_handle(
+//RS     value: &crate::AST::CtValue,
+//RS ) -> Option<&FileWriterHandle> {
+//RS     let crate::AST::CtValue::Closure(data) = value else {
+//RS         return None;
+//RS     };
+//RS     data.opaque
+//RS         .as_ref()
+//RS         .and_then(|opaque| opaque.downcast_ref::<FileWriterHandle>())
+//RS }
+//RS 
+//RS fn closed_file_error(operation: text_kernel::jet_std::IOOperation, message: &str) -> crate::AST::CtValue {
+//RS     io_error_ct(text_kernel::jet_std::IOError::Closed(
+//RS         text_kernel::jet_std::IOContext::new(
+//RS             operation,
+//RS             None,
+//RS             None,
+//RS             Some(message.to_string()),
+//RS         ),
+//RS     ))
+//RS }
+//RS 
+//RS fn reader_line(
+//RS     handle: &FileReaderHandle,
+//RS ) -> Result<Option<String>, crate::AST::CtValue> {
+//RS     let mut reader = handle.0.lock().map_err(|_| {
+//RS         io_error_ct(text_kernel::jet_std::IOError::other(
+//RS             text_kernel::jet_std::IOOperation::Read,
+//RS             None,
+//RS             "file reader handle is poisoned",
+//RS         ))
+//RS     })?;
+//RS     let reader = reader
+//RS         .as_mut()
+//RS         .ok_or_else(|| {
+//RS             closed_file_error(
+//RS                 text_kernel::jet_std::IOOperation::Read,
+//RS                 "file reader is closed",
+//RS             )
+//RS         })?;
+//RS     text_kernel::jet_std_file_reader_read_line(reader).map_err(io_error_ct)
+//RS }
+//RS 
+//RS fn writer_line(
+//RS     handle: &FileWriterHandle,
+//RS     line: &str,
+//RS ) -> Result<(), crate::AST::CtValue> {
+//RS     let mut writer = handle.0.lock().map_err(|_| {
+//RS         io_error_ct(text_kernel::jet_std::IOError::other(
+//RS             text_kernel::jet_std::IOOperation::Write,
+//RS             None,
+//RS             "file writer handle is poisoned",
+//RS         ))
+//RS     })?;
+//RS     let writer = writer
+//RS         .as_mut()
+//RS         .ok_or_else(|| {
+//RS             closed_file_error(
+//RS                 text_kernel::jet_std::IOOperation::Write,
+//RS                 "file writer is closed",
+//RS             )
+//RS         })?;
+//RS     text_kernel::jet_std_file_writer_write_line(writer, &line.to_string()).map_err(io_error_ct)
+//RS }
+//RS 
+//RS fn writer_flush(handle: &FileWriterHandle) -> Result<(), crate::AST::CtValue> {
+//RS     let mut writer = handle.0.lock().map_err(|_| {
+//RS         io_error_ct(text_kernel::jet_std::IOError::other(
+//RS             text_kernel::jet_std::IOOperation::Write,
+//RS             None,
+//RS             "file writer handle is poisoned",
+//RS         ))
+//RS     })?;
+//RS     let writer = writer
+//RS         .as_mut()
+//RS         .ok_or_else(|| {
+//RS             closed_file_error(
+//RS                 text_kernel::jet_std::IOOperation::Write,
+//RS                 "file writer is closed",
+//RS             )
+//RS         })?;
+//RS     text_kernel::jet_std_file_writer_flush(writer).map_err(io_error_ct)
+//RS }
+//RS 
+//RS fn reader_line_value(handle: &FileReaderHandle) -> crate::AST::CtValue {
+//RS     match reader_line(handle) {
+//RS         Ok(line) => crate::AST::CtValue::Present(Box::new(match line {
+//RS             Some(line) => crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Str(line))),
+//RS             None => crate::AST::CtValue::absent(crate::AST::Type::String),
+//RS         })),
+//RS         Err(error) => crate::AST::CtValue::failed(Box::new(error)),
+//RS     }
+//RS }
+//RS 
+//RS fn writer_result(result: Result<(), crate::AST::CtValue>) -> crate::AST::CtValue {
+//RS     match result {
+//RS         Ok(()) => crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Unit)),
+//RS         Err(error) => crate::AST::CtValue::failed(Box::new(error)),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn fs_open(path: &str) -> FsResult<crate::AST::CtValue> {
+//RS     text_kernel::jet_std_files_open(&path.to_string())
+//RS         .map(|reader| {
+//RS             opaque_file(FileReaderHandle(std::sync::Arc::new(
+//RS                 std::sync::Mutex::new(Some(reader)),
+//RS             )))
+//RS         })
+//RS         .map_err(io_error_ct)
+//RS }
+//RS 
+//RS pub(crate) fn fs_create(path: &str) -> FsResult<crate::AST::CtValue> {
+//RS     text_kernel::jet_std_files_create(&path.to_string())
+//RS         .map(|writer| {
+//RS             opaque_file(FileWriterHandle(std::sync::Arc::new(
+//RS                 std::sync::Mutex::new(Some(writer)),
+//RS             )))
+//RS         })
+//RS         .map_err(io_error_ct)
+//RS }
+//RS 
+//RS pub(crate) fn fs_append_stream(path: &str) -> FsResult<crate::AST::CtValue> {
+//RS     text_kernel::jet_std_files_append(&path.to_string())
+//RS         .map(|writer| {
+//RS             opaque_file(FileWriterHandle(std::sync::Arc::new(
+//RS                 std::sync::Mutex::new(Some(writer)),
+//RS             )))
+//RS         })
+//RS         .map_err(io_error_ct)
+//RS }
+//RS 
+//RS pub fn file_reader_next_line(
+//RS     receiver: &crate::AST::CtValue,
+//RS ) -> Result<Option<String>, String> {
+//RS     let handle = file_reader_handle(receiver)
+//RS         .ok_or_else(|| "value is not a FileReader handle".to_string())?;
+//RS     reader_line(handle).map_err(|error| error.jet_show())
+//RS }
+//RS 
+//RS pub(crate) fn apply_file_handle(
+//RS     receiver: &crate::AST::CtValue,
+//RS     method: &str,
+//RS     args: &[crate::AST::CtValue],
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Option<Result<crate::AST::CtValue, crate::Diagnostics::Diagnostic>> {
+//RS     if let Some(handle) = file_reader_handle(receiver) {
+//RS         return Some(match method {
+//RS             "file_reader.path" if args.is_empty() => {
+//RS                 let path = handle
+//RS                     .0
+//RS                     .lock()
+//RS                     .ok()
+//RS                     .and_then(|reader| reader.as_ref().map(|reader| reader.path.clone()));
+//RS                 match path {
+//RS                     Some(path) => Ok(crate::AST::CtValue::Str(path)),
+//RS                     None => Err(crate::Comptime::Diagnostics::unsupported(
+//RS                         "FileReader.path requires a live handle",
+//RS                         span,
+//RS                     )),
+//RS                 }
+//RS             }
+//RS             "file_reader.path" => Err(crate::Comptime::Diagnostics::unsupported(
+//RS                 "FileReader.path takes no arguments",
+//RS                 span,
+//RS             )),
+//RS             "file_reader.read_line" | "read_line" if args.is_empty() => {
+//RS                 Ok(reader_line_value(handle))
+//RS             }
+//RS             "file_reader.read_line" | "read_line" => Err(
+//RS                 crate::Comptime::Diagnostics::unsupported(
+//RS                     "FileReader.read_line expects no arguments",
+//RS                     span,
+//RS                 ),
+//RS             ),
+//RS             _ => Err(crate::Comptime::Diagnostics::unsupported(
+//RS                 &format!("FileReader.{method}"),
+//RS                 span,
+//RS             )),
+//RS         });
+//RS     }
+//RS     if let Some(handle) = file_writer_handle(receiver) {
+//RS         return Some(match method {
+//RS             "file_writer.path" if args.is_empty() => {
+//RS                 let path = handle
+//RS                     .0
+//RS                     .lock()
+//RS                     .ok()
+//RS                     .and_then(|writer| writer.as_ref().map(|writer| writer.path.clone()));
+//RS                 match path {
+//RS                     Some(path) => Ok(crate::AST::CtValue::Str(path)),
+//RS                     None => Err(crate::Comptime::Diagnostics::unsupported(
+//RS                         "FileWriter.path requires a live handle",
+//RS                         span,
+//RS                     )),
+//RS                 }
+//RS             }
+//RS             "file_writer.path" => Err(crate::Comptime::Diagnostics::unsupported(
+//RS                 "FileWriter.path takes no arguments",
+//RS                 span,
+//RS             )),
+//RS             "file_writer.write_line" | "write_line" => {
+//RS                 let [line] = args else {
+//RS                     return Some(Err(crate::Comptime::Diagnostics::unsupported(
+//RS                         "FileWriter.write_line expects one String argument",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 let crate::AST::CtValue::Str(line) = line else {
+//RS                     return Some(Err(crate::Comptime::Diagnostics::unsupported(
+//RS                         "FileWriter.write_line expects one String argument",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 Ok(writer_result(writer_line(handle, line)))
+//RS             }
+//RS             "file_writer.flush" | "flush" if args.is_empty() => {
+//RS                 Ok(writer_result(writer_flush(handle)))
+//RS             }
+//RS             "file_writer.flush" | "flush" => Err(crate::Comptime::Diagnostics::unsupported(
+//RS                 "FileWriter.flush expects no arguments",
+//RS                 span,
+//RS             )),
+//RS             _ => Err(crate::Comptime::Diagnostics::unsupported(
+//RS                 &format!("FileWriter.{method}"),
+//RS                 span,
+//RS             )),
+//RS         });
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS pub(super) fn fs_scope_read(
+//RS     rights: &std::collections::BTreeSet<String>,
+//RS     path: &str,
+//RS ) -> FsResult<String> {
+//RS     text_kernel::fs_scope_read(rights, path).map_err(io_error_ct)
+//RS }
+//RS // ── D-I9 `core.files`: one arm per Prelude symbol, no second spelling ──────
+//RS // Every helper below is pure marshalling: it hands the resolved path to the
+//RS // `jet_std_fs_*` symbol AOT emits and projects that symbol's `IOError` with
+//RS // the shared `io_error_ct`. `Ok`/`Err` stay Rust-shaped here so the caller
+//RS // decides the outcome carrier for its own row.
+//RS pub(super) type FsResult<T> = Result<T, crate::AST::CtValue>;
+//RS 
+//RS pub(super) fn fs_read(path: &str) -> FsResult<String> {
+//RS     text_kernel::fs_read(path).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_read_bytes(path: &str) -> FsResult<Vec<u8>> {
+//RS     text_kernel::fs_read_bytes(path).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_write_bytes(path: &str, bytes: &[u8]) -> FsResult<()> {
+//RS     text_kernel::jet_std_fs_write_bytes(&path.to_string(), &bytes.to_vec()).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_write(path: &str, text: &str) -> FsResult<()> {
+//RS     text_kernel::fs_write(path, text).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_append(path: &str, text: &str) -> FsResult<()> {
+//RS     text_kernel::fs_append(path, text).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_fsync(path: &str) -> FsResult<()> {
+//RS     text_kernel::jet_std_fs_fsync(&path.to_string()).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_set_mode(path: &str, mode: i64) -> FsResult<()> {
+//RS     text_kernel::jet_std_fs_set_mode(&path.to_string(), mode).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_exists(path: &str) -> bool {
+//RS     text_kernel::fs_exists(path)
+//RS }
+//RS pub(super) fn fs_is_dir(path: &str) -> bool {
+//RS     text_kernel::fs_is_dir(path)
+//RS }
+//RS pub(super) fn fs_create_dir(path: &str) -> FsResult<()> {
+//RS     text_kernel::fs_create_dir(path).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_create_dir_all(path: &str) -> FsResult<()> {
+//RS     text_kernel::fs_create_dir_all(path).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_remove(path: &str) -> FsResult<()> {
+//RS     text_kernel::fs_remove(path).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_remove_dir(path: &str) -> FsResult<()> {
+//RS     text_kernel::fs_remove_dir(path).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_remove_all(path: &str) -> FsResult<()> {
+//RS     text_kernel::fs_remove_all(path).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_copy(from: &str, to: &str) -> FsResult<()> {
+//RS     text_kernel::fs_copy(from, to).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_copy_dir(from: &str, to: &str) -> FsResult<()> {
+//RS     text_kernel::fs_copy_dir(from, to).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_rename(from: &str, to: &str) -> FsResult<()> {
+//RS     text_kernel::jet_fs_rename(from, to).map_err(|error| {
+//RS         io_error_ct(text_kernel::jet_std::io_error_at(
+//RS             text_kernel::jet_std::IOOperation::Write,
+//RS             from,
+//RS             error,
+//RS         ))
+//RS     })
+//RS }
+//RS pub(super) fn fs_symlink(from: &str, to: &str) -> FsResult<()> {
+//RS     text_kernel::jet_std_fs_symlink(&from.to_string(), &to.to_string()).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_hard_link(from: &str, to: &str) -> FsResult<()> {
+//RS     text_kernel::jet_std_fs_hard_link_path(&from.to_string(), &to.to_string()).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_read_link(path: &str) -> FsResult<String> {
+//RS     text_kernel::jet_std_fs_read_link_path(&path.to_string()).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_canonicalize(path: &str) -> FsResult<String> {
+//RS     text_kernel::jet_std_fs_canonicalize(&path.to_string()).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_absolute(path: &str) -> FsResult<String> {
+//RS     text_kernel::jet_std_fs_absolute(&path.to_string()).map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_stat(path: &str) -> FsResult<crate::AST::CtValue> {
+//RS     text_kernel::jet_fs_stat(&path.to_string())
+//RS         .map(|stat| crate::AST::CtValue::Struct {
+//RS             type_name: "Stat".to_string(),
+//RS             fields: vec![
+//RS                 ("size".to_string(), crate::AST::CtValue::Int(stat.size)),
+//RS                 (
+//RS                     "modified_ms".to_string(),
+//RS                     crate::AST::CtValue::Int(stat.modified_ms),
+//RS                 ),
+//RS                 (
+//RS                     "created_ms".to_string(),
+//RS                     crate::AST::CtValue::Int(stat.created_ms),
+//RS                 ),
+//RS                 (
+//RS                     "readonly".to_string(),
+//RS                     crate::AST::CtValue::Bool(stat.readonly),
+//RS                 ),
+//RS                 (
+//RS                     "is_file".to_string(),
+//RS                     crate::AST::CtValue::Bool(stat.is_file),
+//RS                 ),
+//RS                 ("is_dir".to_string(), crate::AST::CtValue::Bool(stat.is_dir)),
+//RS                 (
+//RS                     "is_symlink".to_string(),
+//RS                     crate::AST::CtValue::Bool(stat.is_symlink),
+//RS                 ),
+//RS                 ("kind".to_string(), crate::AST::CtValue::Str(stat.kind)),
+//RS                 ("mode".to_string(), crate::AST::CtValue::Int(stat.mode)),
+//RS             ],
+//RS         })
+//RS         .map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_glob(pattern: &str) -> FsResult<Vec<String>> {
+//RS     text_kernel::jet_fs_glob(pattern).map_err(|error| {
+//RS         io_error_ct(text_kernel::jet_std::io_error_at(
+//RS             text_kernel::jet_std::IOOperation::Read,
+//RS             pattern,
+//RS             error,
+//RS         ))
+//RS     })
+//RS }
+//RS /// `(name, full path, is_dir)` rows in the kernel's own sorted order (D-LSDIR1).
+//RS pub(super) fn fs_list_dir(path: &str) -> FsResult<Vec<(String, String, bool)>> {
+//RS     text_kernel::fs_list_dir(path)
+//RS         .map(|entries| {
+//RS             entries
+//RS                 .into_iter()
+//RS                 .map(|entry| (entry.name, entry.path, entry.is_dir))
+//RS                 .collect()
+//RS         })
+//RS         .map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_walk_parallel(path: &str) -> FsResult<Vec<(String, String, bool, i64)>> {
+//RS     fs_walk_parallel_with_ignore(path, None)
+//RS }
+//RS pub(super) fn fs_walk_parallel_with_ignore(
+//RS     path: &str,
+//RS     ignore_name: Option<&str>,
+//RS ) -> FsResult<Vec<(String, String, bool, i64)>> {
+//RS     text_kernel::fs_walk_parallel_with_ignore(path, ignore_name)
+//RS         .map(|entries| {
+//RS             entries
+//RS                 .into_iter()
+//RS                 .map(|entry| (entry.path, entry.relative, entry.is_dir, entry.depth))
+//RS                 .collect()
+//RS         })
+//RS         .map_err(io_error_ct)
+//RS }
+//RS pub(super) fn fs_walk_files_parallel(path: &str) -> FsResult<Vec<(String, String, bool, i64)>> {
+//RS     fs_walk_files_parallel_with_ignore(path, None)
+//RS }
+//RS pub(super) fn fs_walk_files_parallel_with_ignore(
+//RS     path: &str,
+//RS     ignore_name: Option<&str>,
+//RS ) -> FsResult<Vec<(String, String, bool, i64)>> {
+//RS     text_kernel::fs_walk_files_parallel_with_ignore(path, ignore_name)
+//RS         .map(|entries| {
+//RS             entries
+//RS                 .into_iter()
+//RS                 .map(|entry| (entry.path, entry.relative, entry.is_dir, entry.depth))
+//RS                 .collect()
+//RS         })
+//RS         .map_err(io_error_ct)
+//RS }
+//RS 
+//RS pub(super) fn nfd(s: &str) -> String {
+//RS     text_kernel::nfd(s)
+//RS }
+//RS pub(super) fn nfkd(s: &str) -> String {
+//RS     text_kernel::nfkd(s)
+//RS }
+//RS pub(super) fn nfc(s: &str) -> String {
+//RS     text_kernel::nfc(s)
+//RS }
+//RS pub(super) fn nfkc(s: &str) -> String {
+//RS     text_kernel::nfkc(s)
+//RS }
+//RS pub(super) fn casefold(s: &str) -> String {
+//RS     text_kernel::casefold(s)
+//RS }
+//RS pub(super) fn alphabetic(cp: u32) -> bool {
+//RS     text_kernel::alphabetic(cp)
+//RS }
+//RS pub(super) fn letter(cp: u32) -> bool {
+//RS     text_kernel::letter(cp)
+//RS }
+//RS pub(super) fn numeric(cp: u32) -> bool {
+//RS     text_kernel::numeric(cp)
+//RS }
+//RS pub(super) fn whitespace(cp: u32) -> bool {
+//RS     text_kernel::whitespace(cp)
+//RS }
+//RS pub(super) fn lower(s: &str) -> String {
+//RS     text_kernel::lower(s)
+//RS }
+//RS pub(super) fn upper(s: &str) -> String {
+//RS     text_kernel::upper(s)
+//RS }
+//RS pub(super) fn title(s: &str) -> String {
+//RS     text_kernel::title(s)
+//RS }
+//RS pub(super) fn caseless_eq(a: &str, b: &str) -> bool {
+//RS     text_kernel::caseless_eq(a, b)
+//RS }
+//RS pub(super) fn graphemes(s: &str) -> Vec<String> {
+//RS     text_kernel::graphemes(s)
+//RS }
+//RS pub(super) fn word_segments(s: &str) -> Vec<String> {
+//RS     text_kernel::word_segments(s)
+//RS }
+//RS pub(super) fn words(s: &str) -> Vec<String> {
+//RS     text_kernel::words(s)
+//RS }
+//RS pub(super) fn sentence_segments(s: &str) -> Vec<String> {
+//RS     text_kernel::sentence_segments(s)
+//RS }
+//RS pub(super) fn sentences(s: &str) -> Vec<String> {
+//RS     text_kernel::sentences(s)
+//RS }
+//RS pub(super) fn display_width_default(s: &str) -> i64 {
+//RS     text_kernel::display_width_default(s)
+//RS }
+//RS pub(super) fn display_width_policy(s: &str, wide: bool, reject: bool) -> Result<i64, String> {
+//RS     text_kernel::display_width_policy(s, wide, reject)
+//RS }
+//RS pub(super) fn is_alphabetic(s: &str) -> bool {
+//RS     text_kernel::is_alphabetic(s)
+//RS }
+//RS pub(super) fn is_numeric(s: &str) -> bool {
+//RS     text_kernel::is_numeric(s)
+//RS }
+//RS pub(super) fn is_whitespace(s: &str) -> bool {
+//RS     text_kernel::is_whitespace(s)
+//RS }
+//RS pub(super) fn is_lower(s: &str) -> bool {
+//RS     text_kernel::is_lower(s)
+//RS }
+//RS pub(super) fn is_upper(s: &str) -> bool {
+//RS     text_kernel::is_upper(s)
+//RS }
+//RS pub(super) fn capitalize(s: &str) -> String {
+//RS     text_kernel::capitalize(s)
+//RS }
+//RS pub(super) fn swapcase(s: &str) -> String {
+//RS     text_kernel::swapcase(s)
+//RS }
+//RS pub(super) fn remove_prefix(s: &str, prefix: &str) -> String {
+//RS     text_kernel::remove_prefix(s, prefix)
+//RS }
+//RS pub(super) fn remove_suffix(s: &str, suffix: &str) -> String {
+//RS     text_kernel::remove_suffix(s, suffix)
+//RS }
+//RS pub(super) fn compare(a: &str, b: &str) -> i64 {
+//RS     text_kernel::compare(a, b)
+//RS }
+//RS pub(super) fn reverse(s: &str) -> String {
+//RS     text_kernel::reverse(s)
+//RS }
+//RS pub(super) fn trim_start(s: &str) -> String {
+//RS     text_kernel::trim_start(s)
+//RS }
+//RS pub(super) fn trim_end(s: &str) -> String {
+//RS     text_kernel::trim_end(s)
+//RS }
+//RS pub(super) fn trim(s: &str) -> String {
+//RS     text_kernel::trim(s)
+//RS }
+//RS pub(super) fn splitn(s: &str, pattern: &str, count: i64) -> Vec<String> {
+//RS     text_kernel::splitn(s, pattern, count)
+//RS }
+//RS pub(super) fn rsplitn(s: &str, pattern: &str, count: i64) -> Vec<String> {
+//RS     text_kernel::rsplitn(s, pattern, count)
+//RS }
+//RS pub(super) fn pad_start(s: &str, width: i64, fill: &str) -> String {
+//RS     text_kernel::pad_start(s, width, fill)
+//RS }
+//RS pub(super) fn pad_end(s: &str, width: i64, fill: &str) -> String {
+//RS     text_kernel::pad_end(s, width, fill)
+//RS }
+//RS pub(super) fn center(s: &str, width: i64, fill: &str) -> String {
+//RS     text_kernel::center(s, width, fill)
+//RS }
+//RS pub(super) fn starts_any(s: &str, prefixes: &[String]) -> bool {
+//RS     text_kernel::starts_any(s, prefixes)
+//RS }
+//RS pub(super) fn ends_any(s: &str, suffixes: &[String]) -> bool {
+//RS     text_kernel::ends_any(s, suffixes)
+//RS }
+//RS pub(super) fn char_indices(s: &str) -> Vec<String> {
+//RS     text_kernel::char_indices(s)
+//RS }
+//RS pub(super) fn inspect(s: &str) -> Vec<String> {
+//RS     text_kernel::inspect(s)
+//RS }
+//RS pub(super) fn unicode_scalar_count(s: &str) -> i64 {
+//RS     text_kernel::unicode_scalar_count(s)
+//RS }
+//RS pub(super) fn unicode_byte_count(s: &str) -> i64 {
+//RS     text_kernel::unicode_byte_count(s)
+//RS }
+//RS pub(super) fn unicode_is_ascii(s: &str) -> bool {
+//RS     text_kernel::unicode_is_ascii(s)
+//RS }
+//RS pub(super) fn unicode_lower(s: &str) -> String {
+//RS     text_kernel::unicode_lower(s)
+//RS }
+//RS pub(super) fn unicode_upper(s: &str) -> String {
+//RS     text_kernel::unicode_upper(s)
+//RS }
+//RS pub(super) fn unicode_scalars(s: &str) -> Vec<String> {
+//RS     text_kernel::unicode_scalars(s)
+//RS }
+//RS pub(super) fn string_route(
+//RS     s: &str,
+//RS     member: &str,
+//RS     args: &[crate::AST::CtValue],
+//RS ) -> Option<crate::AST::CtValue> {
+//RS     text_kernel::string_route(s, member, args)
+//RS }
+// END-PORT-PENDING 0603 crates/jet-comptime/src/Comptime/TextLite.rs:1-1245
+

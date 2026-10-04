@@ -1,0 +1,10 @@
+// CanonicalPass.rs:50-53, exact native nonempty var_os semantics. The ingress
+// retains Unix bytes / Windows WTF-8; invalid UTF-8 is not absence. #4494:
+// canonical Core var_os activation is a provider gate, never a String fallback.
+use core.sys.host.os_path_ingress as canonical_pass_policy_env
+pub fn canonical_pass_enabled() -> Bool Never! {
+    mode :: canonical_pass_policy_env.var_os("JET_ADAPTER_MODE") ?? return false
+    if mode.encoded.len() == 0 -> return false
+    ids :: canonical_pass_policy_env.var_os("JET_ADAPTER_OPERATION_IDS") ?? return false
+    ids.encoded.len() != 0
+}

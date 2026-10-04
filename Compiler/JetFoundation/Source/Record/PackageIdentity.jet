@@ -6,7 +6,7 @@
 
 pub struct PackageKeySourceFile {
     pub relative_path: String
-    pub source: String
+    pub source: [U8]
 }
 
 pub struct PackageKeyTargetFact {
@@ -29,15 +29,22 @@ fn package_key_byte_order(names: [String]) -> [Int] Never! {
 // SHA-256 over the package's member files sorted by package-relative path,
 // each as its path and the SHA-256 of its exact bytes, then the manifest's
 // SHA-256 (empty when the package has no manifest).
-pub fn package_key_source_digest(files: [PackageKeySourceFile], manifest: String?) -> String Never! {
+pub fn package_key_source_digest(files: [PackageKeySourceFile], manifest: [U8]?) -> String Never! {
+    fingerprints :: loop file in files -> PackageKeySourceFingerprint{relative_path: file.relative_path, digest: record_blob_key(file.source.view(0..<file.source.len()))}
+    package_key_source_fingerprints_digest(fingerprints, manifest)
+}
+// Private shared framing, also used for loader-retained hashes without a second
+// source-text copy or a second hash pass on a resident query hit.
+struct PackageKeySourceFingerprint { relative_path: String, digest: String }
+fn package_key_source_fingerprints_digest(files: [PackageKeySourceFingerprint], manifest: [U8]?) -> String Never! {
     fields := [String]{"jet.pkg-source/v1", "files", "{files.len()}"}
     paths :: loop file in files -> file.relative_path
     loop index in package_key_byte_order(paths) {
         &fields.push(files[index].relative_path)
-        &fields.push(mir_sha256_hex(files[index].source))
+        &fields.push(files[index].digest)
     }
     manifest_digest :: if manifest == {
-        Val(bytes) -> mir_sha256_hex(bytes)
+        Val(bytes) -> record_blob_key(bytes.view(0..<bytes.len()))
         None -> ""
     }
     &fields.push("manifest")
@@ -67,4 +74,101 @@ pub fn package_key_check_key(compiler_identity: String, target_facts_digest: Str
         &fields.push(dependencies[index].interface_digest)
     }
     record_key_digest(fields)
+}
+
+// Rust PackageIdentity.rs::exported/keeps_body/interface_item. Projection is
+// performed by CanonicalAST; no Item clone or second structural serializer.
+fn package_identity_exported(is_pub: Bool, is_package_pub: Bool, pub_file: Bool) -> Bool Never! {
+    is_pub || is_package_pub || pub_file
+}
+fn package_identity_keeps_body(func: Func) -> Bool Never! {
+    func.type_params.len() != 0 || func.is_inline_always
+}
+fn package_identity_exported_item(item: Item, pub_file: Bool) -> Bool Never! {
+    if item == {
+        .Func(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .Struct(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .Enum(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .CodeModule(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .Distinct(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .TypeAlias(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .UnitFamily(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .Trait(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .Tag(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .Const(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .ProtocolDecl(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .GenericModule(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .ModuleAlias(def) -> package_identity_exported(def.is_pub, def.is_package_pub, pub_file)
+        .Test(_) -> false
+        else -> true
+    }
+}
+// Rust PackageIdentity.rs::item_source_fingerprint/item_interface_fingerprint.
+pub fn package_identity_item_source_fingerprint<D: CanonicalASTDefaultProvider>(item: Item, defaults: D) -> String Never! {
+    bytes :: canonical_ast_fragment<D>(item, defaults, false)
+    record_blob_key(bytes.view(0..<bytes.len()))
+}
+pub fn package_identity_item_interface_fingerprint<D: CanonicalASTDefaultProvider>(item: Item, defaults: D, pub_file: Bool) -> String? Never! {
+    bytes :: canonical_ast_interface_fragment<D>(item, defaults, pub_file) ?? return None
+    Val(record_blob_key(bytes.view(0..<bytes.len())))
+}
+// Rust PackageIdentity.rs::item_name: unnamed declarations use the FULL item hash.
+fn package_identity_item_name<D: CanonicalASTDefaultProvider>(item: Item, defaults: D) -> String Never! {
+    if item == {
+        .Func(def) -> "fn {def.name}"
+        .Struct(def) -> "struct {def.name}"
+        .Enum(def) -> "enum {def.name}"
+        .Distinct(def) -> "distinct {def.name}"
+        .TypeAlias(def) -> "alias {def.name}"
+        .Trait(def) -> "trait {def.name}"
+        .Tag(def) -> "tag {def.name}"
+        .Const(def) -> "const {def.name}"
+        .ProtocolDecl(def) -> "protocol {def.name}"
+        .CodeModule(def) -> "module {def.name}"
+        .GenericModule(def) -> "module {def.name}"
+        .ModuleAlias(def) -> "module {def.name}"
+        .EffectDecl(def) -> "effect {def.name}"
+        .MarkerDecl(def) -> "marker {def.name}"
+        .FactDecl(def) -> "fact {def.name}"
+        .Impl(def) -> if def.trait_name == {
+            .Val(name) -> "impl {def.type_name}: {name}"
+            .None -> "impl {def.type_name}"
+        }
+        else -> "item {package_identity_item_source_fingerprint<D>(item, defaults)}"
+    }
+}
+pub struct PackageIdentityDeclaration {
+    pub name: String
+    pub fingerprint: String
+}
+// Rust PackageIdentity.rs::module_interface: preserve original declaration order.
+pub fn package_identity_module_interface<D: CanonicalASTDefaultProvider>(program: Program, defaults: D) -> [PackageIdentityDeclaration] Never! {
+    declarations := [PackageIdentityDeclaration]{}
+    loop item in program.items {
+        if package_identity_item_interface_fingerprint<D>(item, defaults, program.pub_file) == .Val(fingerprint) {
+            &declarations.push(PackageIdentityDeclaration{name: package_identity_item_name<D>(item, defaults), fingerprint: fingerprint})
+        }
+    }
+    declarations
+}
+// Rust PackageIdentity.rs::import_fingerprint; visibility/spans/order use the same codec.
+fn package_identity_import_fingerprint<D: CanonicalASTDefaultProvider>(declaration: ImportDecl, defaults: D) -> String Never! {
+    out := [U8]{}
+    canonical_ast_write_import_decl<D>(&out, defaults, declaration, false)
+    bytes :: canonical_ast_strip_spans(String.from_bytes(out) ?? panic("AST structural encoding is UTF-8"))
+    record_blob_key(bytes.view(0..<bytes.len()))
+}
+
+pub struct PackageIdentityModuleInterface {
+    pub declarations: [PackageIdentityDeclaration]
+    pub reexports: [String]
+}
+// Rust module_interface plus visible import_fingerprint closure, computed while
+// the loader still owns the ORIGINAL (pre-inline-registration) Program.
+pub fn package_identity_project_module<D: CanonicalASTDefaultProvider>(program: Program, defaults: D) -> PackageIdentityModuleInterface Never! {
+    reexports := [String]{}
+    loop declaration in program.imports {
+        if declaration.is_pub || declaration.is_package_pub -> &reexports.push(package_identity_import_fingerprint<D>(declaration, defaults))
+    }
+    PackageIdentityModuleInterface{declarations: package_identity_module_interface<D>(program, defaults), reexports: reexports}
 }

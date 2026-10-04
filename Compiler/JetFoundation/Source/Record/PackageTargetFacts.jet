@@ -1,0 +1,36 @@
+// Rust PackageIdentity.rs::target_fact_pairs (134-155). Borrowed projection of
+// the actual ProgramBundle target inputs, retained beside the checked graph.
+// This does not replace PackageIdentityBundle's loader partition/root contract.
+pub struct PackageTargetFactBundle {
+    pub active_os: MIROSTarget
+    pub edition: String
+    pub web_partition_enforced: Bool
+    pub layer_ceiling: MIRRuntimeLayer?
+    pub build_facts: BuildFactSnapshot
+}
+pub fn package_identity_target_fact_pairs(bundle: PackageTargetFactBundle) -> [PackageKeyTargetFact] Never! {
+    os_bytes := [U8]{}
+    build_snapshot_write_os(&os_bytes, bundle.active_os)
+    layer_bytes := [U8]{}
+    if bundle.layer_ceiling == {
+        .None -> canonical_ast_write(&layer_bytes, "None")
+        .Val(layer) -> {
+            canonical_ast_write(&layer_bytes, "Some(")
+            build_snapshot_write_layer(&layer_bytes, layer)
+            canonical_ast_write(&layer_bytes, ")")
+        }
+    }
+    // Same snapshot, with only clock/contribution/setting provenance omitted.
+    // This structural writer has no spans outside literals; it is already the
+    // canonical_fragment byte stream, without a second String/buffer copy.
+    hash := mir_sha256_new()
+    build_snapshot_write_check_debug<MIRSHA256, CanonicalDebugSHA256>(CanonicalDebugSHA256.Writer, &hash, bundle.build_facts)
+    digest :: mir_sha256_finish(^hash)
+    [PackageKeyTargetFact]{
+        PackageKeyTargetFact{name: "os", value: String.from_bytes(os_bytes) ?? panic("native OS Debug is UTF-8")},
+        PackageKeyTargetFact{name: "edition", value: bundle.edition},
+        PackageKeyTargetFact{name: "web_partition", value: if bundle.web_partition_enforced -> "true" else -> "false"},
+        PackageKeyTargetFact{name: "layer_ceiling", value: String.from_bytes(layer_bytes) ?? panic("native layer Debug is UTF-8")},
+        PackageKeyTargetFact{name: "build_facts", value: mir_sha256_hex_bytes(digest.view(0..<digest.len()))},
+    }
+}

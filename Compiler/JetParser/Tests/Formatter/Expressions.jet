@@ -1,0 +1,672 @@
+// Rust tests/fmt.rs expression/type/pattern regressions. The shared entry
+// admits lexer/parser failures explicitly and never returns the authored source.
+use jet_parser.[jet_format_source, jet_format_canonical_program, parse_for_fmt]
+use jet_lexer.[lex]
+
+fn fmt_expr_identity(source: String) -> [U8] Never! {
+    lexed :: lex(source.bytes())
+    assert_eq(lexed.diagnostics.len(), 0)
+    parsed :: parse_for_fmt(lexed.tokens)
+    program :: parsed.program ?? panic("formatter fixture must parse")
+    jet_format_canonical_program(program)
+}
+fn fmt_expr_keeps(source: String, needles: [String]) -> String Never! {
+    before :: fmt_expr_identity(source)
+    result :: jet_format_source(source)
+    assert_eq(result.diagnostics.len(), 0)
+    once :: result.source ?? panic("formatter fixture must format")
+    loop needle in needles -> assert(once.contains(needle), "formatter dropped {needle}")
+    assert_eq(before, fmt_expr_identity(once))
+    again :: jet_format_source(once)
+    assert_eq(again.diagnostics.len(), 0)
+    assert_eq(again.source, Val(once))
+    once
+}
+fn fmt_expr_stable(source: String) Never! { fmt_expr_keeps(source, [String]{}) }
+
+#Test("fixed_interpolation_selector_is_stable") {
+    source :: `fn run(){price::1234.5
+print("{price:Fixed(2)}")}
+`
+    expected :: `fn run() {
+    price :: 1234.5
+    print("{price:Fixed(2)}")
+}
+`
+    assert_eq(fmt_expr_keeps(source, [String]{`{price:Fixed(2)}`}), expected)
+}
+#Test("grouped_interpolation_selector_is_stable") {
+    source :: `fn run(){price::1234.5
+print("{price:Grouped(2)}") }
+`
+    expected :: `fn run() {
+    price :: 1234.5
+    print("{price:Grouped(2)}")
+}
+`
+    assert_eq(fmt_expr_keeps(source, [String]{`{price:Grouped(2)}`}), expected)
+}
+#Test("checked_text_bodies_keep_raw_backslashes") {
+    fmt_expr_keeps(`fn run() {
+    pattern :: Pattern{"\d+"}
+    text :: "a\nb"
+    page :: Pattern{"<p>{name}</p>"}
+}
+`, [String]{`Pattern{"\d+"}`, `"a\nb"`, `{name}`})
+}
+#Test("fmt_preserves_binary_pattern_holes") {
+    fmt_expr_keeps(`fn run() {
+    packet :: [0x45]
+    if packet == {
+        [U8]{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}"} -> { print("ok") }
+        else -> { print("no") }
+    }
+}
+`, [String]{`{version:U4}`, `{ihl:U4}`, `{tos:U8}`, `{len:U16be}`, `{rest:...}`})
+}
+#Test("fmt_preserves_rate_count_literal_spelling") {
+    fmt_expr_keeps(`fn run() {
+    rate :: Rate{ count: 000_100, per: 2s }
+}
+`, [String]{`count: 000_100`, `per: 2s`})
+}
+#Test("fmt_preserves_s61_call_labels") {
+    fmt_expr_keeps(`fn run() {
+    area(width: 3, height: 4)
+}
+`, [String]{`area(width: 3, height: 4)`})
+}
+#Test("fmt_preserves_value_table_with_alternatives_in_first_arm") {
+    fmt_expr_keeps(`fn canonical_device(device: String) -> String? {
+    if device == {
+        "CPU" | "cpu" -> Val("CPU")
+        "GPU" | "gpu" -> Val("GPU")
+        else -> None
+    }
+}
+`, [String]{`if device == {`, `"CPU" | "cpu" -> Val("CPU")`, `else -> None`})
+}
+#Test("fmt_preserves_predicate_arms_under_eq_table") {
+    fmt_expr_keeps(`fn handle(code: Int) {
+    if code == {
+        200 -> print("ok")
+        code >= 500 -> print("server")
+        else -> print("other")
+    }
+}
+`, [String]{`code >= 500`})
+}
+#Test("fmt_preserves_multiline_collection_literals") {
+    fmt_expr_keeps(`fn run() {
+    values :: [
+        1,
+        2,
+    ]
+    lookup :: [
+        "a": 1,
+        "b": 2,
+    ]
+    point :: (
+        x: 7,
+        y: 8,
+    )
+}
+`, [String]{`values :: [
+`, `lookup :: [
+`, `point :: (
+`})
+}
+#Test("fmt_preserves_comments_inside_multiline_collection_literals") {
+    source :: `fn run() {
+    values :: [
+        // Primary value.
+        1,
+        2  // Secondary value.
+    ]
+    point :: (
+        // Horizontal coordinate.
+        x: /* coordinate value */ 7,
+        y: 8
+    )
+    lookup :: [
+        // Stable key.
+        "a": /* mapped value */ 1,
+        "b": 2
+    ]
+    typed :: [Int]{
+        // First typed value.
+        3,
+        4
+    }
+    record :: Point{
+        // Named field.
+        x: /* field value */ 9,
+        y: 10
+    }
+    typed_lookup :: [String:Int]{
+        "c": /* typed mapped value */ 5,
+        "d": 6
+    }
+    empty :: [
+        // Intentionally empty.
+    ]
+    typed_empty :: [Int]{
+        /* Typed sentinel. */
+    }
+    print(values.len() + point.x + lookup.len() + typed.len())
+}
+`
+    fmt_expr_keeps(source, [String]{"// Primary value.", "// Secondary value.", "// Horizontal coordinate.", "/* coordinate value */", "// Stable key.", "/* mapped value */", "// First typed value.", "// Named field.", "/* field value */", "/* typed mapped value */", "// Intentionally empty.", "/* Typed sentinel. */"})
+}
+#Test("fmt_if_expression_preserves_condition_parens") {
+    fmt_expr_keeps(`fn run() {
+    m :: if (a > b) -> {
+        a
+    } else -> {
+        b
+    }
+    if (a > b) {
+        print("hi")
+    }
+}
+`, [String]{`m :: if (a > b) -> {`, `} else -> {`})
+}
+#Test("fmt_preserves_author_placed_chain_breaks") {
+    fmt_expr_keeps(`fn run() {
+    raw :: "  hi  "
+    out :: raw
+        .trim()  // strip padding
+        .to_upper()  // shout it
+    print("{out}")
+}
+`, [String]{`.trim()  // strip padding`, `.to_upper()  // shout it`})
+}
+#Test("fmt_preserves_triple_quoted_strings") {
+    fmt_expr_keeps(`fn run() {
+    who :: "Jet"
+    banner :: """
+    hello, {who}
+        indented
+    """
+    print("{banner}")
+}
+`, [String]{`banner :: """
+`, `    hello, {who}
+`, `        indented
+`})
+}
+#Test("fmt_preserves_named_tuples") {
+    fmt_expr_keeps(`fn bounds() -> (min: Int, max: Int) {
+    return (min: 0, max: 10)
+}
+fn run() {
+    p :: (x: 1, y: 2)
+    (a, b) :: p
+    print("{p.x}{a}{b}")
+}
+`, [String]{`(min: Int, max: Int)`, `(min: 0, max: 10)`, `(x: 1, y: 2)`})
+}
+#Test("fmt_preserves_optional_chaining") {
+    fmt_expr_keeps(`fn run() {
+    n :: o.mid?.inner?.name
+}
+`, [String]{`o.mid?.inner?.name`})
+}
+#Test("fmt_preserves_optional_method_chaining") {
+    fmt_expr_keeps(`fn run() {
+    n :: o?.read<Int>(limit: 2)
+}
+`, [String]{`o?.read<Int>(limit: 2)`})
+}
+#Test("fmt_map_type_spacing_is_canonical_and_value_spacing_stays") {
+    fmt_expr_keeps(`fn read(values: [String: Int]) -> [String: Int] {
+    return ["key": 1]
+}
+`, [String]{`values: [String:Int]`, `["key": 1]`})
+}
+#Test("fmt_preserves_leading_dot_enum_lit") {
+    fmt_expr_keeps(`enum Color { Red Blue }
+fn paint(c: Color) { print(c) }
+fn run() {
+    c := .Red
+    paint(.Blue)
+    paint(c)
+}
+`, [String]{`c := .Red`, `paint(.Blue)`})
+}
+#Test("fmt_preserves_optional_result_variants") {
+    fmt_expr_keeps(`fn f(flag: Bool) -> Int String! {
+    maybe :: .Val(1)
+    empty :: .None
+    if flag -> return .Ok(1)
+    return .Err("bad")
+}
+`, [String]{`.Val(1)`, `.None`, `.Ok(1)`, `.Err("bad")`})
+}
+#Test("fmt_canonicalizes_anonymous_union_types") {
+    fmt_expr_keeps(`fn hold(v: String | Int) -> Int | String {
+    return v
+}
+fn parse(raw: String) -> Int (String | Bool)! {
+    return .Err(false)
+}
+`, [String]{`Int | String`, `(Bool | String)!`})
+}
+#Test("fmt_preserves_named_payload_variant_dot_brace") {
+    fmt_expr_keeps(`enum Node { Text(text: String) Box(width: Int) }
+fn run() {
+    a :: .Text.{ text: "hi" }
+    b :: .Box.{ width: 10 }
+}
+`, [String]{`.Text{text: "hi"}`, `.Box{width: 10}`})
+}
+#Test("fmt_preserves_take_pattern_literal") {
+    fmt_expr_keeps(`fn run() {
+    cursor :: "id=42".cursor()
+    cursor.take_pattern("id={id:Int}")
+}
+`, [String]{`take_pattern("id={id:Int}")`})
+}
+#Test("fmt_preserves_bin_take_pattern_literal") {
+    fmt_expr_keeps(`fn run() {
+    header :: [69, 0, 0, 40]
+    reader :: header.reader()
+    reader.take_pattern([U8]{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}"})
+}
+`, [String]{`[U8]{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}"}`})
+}
+#Test("fmt_compact_result_handler_is_one_line_when_it_fits") {
+    fmt_expr_keeps("fn pick(value: Int String!) -> String -> value ? ok -> ok ! error -> error\n", [String]{"value ? ok -> ok ! error -> error"})
+}
+#Test("fmt_compact_result_handler_expands_long_branches_deterministically") {
+    ok :: "ok_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz"
+    err :: "error_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz"
+    out :: fmt_expr_keeps("fn pick(value: Int String!) -> String -> value ? ok -> {ok} ! error -> {err}\n", [String]{"\n! error ->", "-> {{"})
+    assert(!out.contains("->{{"))
+}
+#Test("fmt_result_handler_expands_blocked_nested_and_commented_branches") {
+    cases :: [String]{
+        `fn pick(value: Int String!) -> String -> value ? ok -> {
+    saved :: ok
+    saved
+} ! error -> {
+    saved_error :: error
+    saved_error
+}
+`,
+        "fn pick(value: Int String!) -> Int -> value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0\n",
+        "fn pick(value: Int String!) -> Int -> value ? ok -> if ready -> 1 else -> 2 ! error -> 0\n",
+        "fn pick(value: Int String!) -> String -> value ? ok -> ok /* keep this branch readable */ ! error -> error\n",
+        "fn pick(value: Int String!) -> String -> value ? ok -> ok ! error -> error /* keep failure readable */\n",
+    }
+    loop source in cases {
+        out :: fmt_expr_keeps(source, [String]{"\n! error ->", "-> {{"})
+        assert(!out.contains("->{{"))
+        if source.contains("keep this branch readable") -> assert(out.contains("ok  /* keep this branch readable */"))
+        if source.contains("keep failure readable") -> assert(out.contains("error  /* keep failure readable */"))
+    }
+}
+#Test("fmt_keeps_parens_around_binary_receiver") {
+    fmt_expr_keeps(`fn run() {
+    a :: (x + y).method()
+    b :: (x + y) * z
+    c :: x - (y - z)
+}
+`, [String]{`(x + y).method()`, `(x + y) * z`, `x - (y - z)`})
+}
+#Test("fmt_preserves_single_line_if_expr_branch") {
+    fmt_expr_stable(`fn run() {
+    a :: true
+    n :: if a -> 1 else -> 2
+    print("{n}")
+}
+`)
+}
+#Test("fmt_preserves_bare_lambda_params") {
+    fmt_expr_keeps(`fn run() {
+    nums :: [1, 2, 3, 4, 5]
+    big :: nums.filter(x -> x > 3)
+    explicit :: nums.filter((x) -> x > 3)
+    annotated :: nums.filter((x: Int) -> x > 3)
+}
+`, [String]{`filter(x -> x > 3)`, `filter((x) -> x > 3)`, `filter((x: Int) -> x > 3)`})
+}
+#Test("fmt_preserves_multiline_lambda_call_arg") {
+    fmt_expr_keeps(`fn twice(f: fn()) {
+    f()
+    f()
+}
+fn run() {
+    twice(() -> {
+        print("HI")
+        print("Hello")
+    })
+}
+`, [String]{`() -> {`, `print("HI")`, `print("Hello")`})
+}
+#Test("fmt_preserves_struct_pattern_arm_head") {
+    fmt_expr_keeps(`struct Incident { title: String kind: String }
+fn run() {
+    routed :: Incident{title: "database down", kind: "page"}
+    if routed == {
+        { kind: "page", title, .. } -> print("page {title}")
+        else -> print("other")
+    }
+}
+`, [String]{`{kind: "page", title, ..}`})
+}
+#Test("fmt_preserves_unit_literal") {
+    fmt_expr_keeps(`fn run() {
+    a :: 500ms
+    print(a)
+    z :: 4i
+}
+`, [String]{"500ms", "4i"})
+}
+#Test("fmt_preserves_inline_range_in_type_positions") {
+    fmt_expr_keeps(`struct Brightness { level: Int(0..100) }
+fn set_brightness(level: Int(0..100)) -> Int(0..100) { return level }
+fn run() {
+    value :: Int(0..100).from_int(12)
+    print("{set_brightness(value)}")
+}
+`, [String]{"level: Int(0..100)", "Int(0..100).from_int(12)"})
+}
+#Test("fmt_preserves_parse_pattern") {
+    fmt_expr_keeps(`fn run() {
+    ticket :: "inc-42-open"
+    if ticket == {
+        "inc-{id:Int}-{status}" -> { print("incident #{id} {status}") }
+        else -> { print("not an incident id") }
+    }
+}
+`, [String]{`"inc-{id:Int}-{status}"`, `print("incident #{id} {status}")`})
+}
+#Test("fmt_preserves_chained_comparison") {
+    fmt_expr_keeps(`fn run() {
+    sev :: 5
+    if 0 <= sev < 10 { print("in range") }
+}
+`, [String]{"0 <= sev < 10"})
+}
+#Test("fmt_never_emits_an_unparenthesized_and_or_mix") {
+    fmt_expr_keeps(`fn run() {
+    a :: true
+    b :: false
+    c :: true
+    print((a || b) && c)
+    print(a || (b && c))
+    print((a && b) || c)
+    print(a && b && c)
+    print(a || b || c)
+}
+`, [String]{"(a || b) && c", "a || (b && c)", "(a && b) || c"})
+}
+#Test("fmt_preserves_view_call_range_args") {
+    fmt_expr_keeps(`fn run() {
+    incidents := [1, 2, 3]
+    window :: incidents.view(0..2)
+    print(window.len())
+}
+`, [String]{"incidents.view(0..2)"})
+}
+#Test("fmt_place_access_stability") {
+    fmt_expr_keeps(`fn run() {
+    values := [1, 2, 3, 4]
+    read :: values[0..1]
+    edit :: &values[2..3].sort()
+    owned :: ~values[0..1]
+    print("{read.len()},{edit.len()},{owned.len()}")
+}
+`, [String]{"values[0..1]", "&values[2..3].sort()", "~values[0..1]"})
+}
+#Test("fmt_preserves_call_spread") {
+    fmt_expr_keeps(`fn join(prefix: String, msgs: ...String) -> String {
+    return [prefix, ...msgs].join(" ")
+}
+fn run() {
+    parts := ["one", "two"]
+    b :: join("tags:", ...parts)
+    print(b)
+}
+`, [String]{`join("tags:", ...parts)`, `[prefix, ...msgs]`})
+}
+#Test("fmt_preserves_pure_callback_bound_sigil") {
+    fmt_expr_keeps(`fn transform(items: [Int], f: fn(Int) -[]> Int) -> [Int] {
+    return items.map((x) -> f(x))
+}
+fn run() {
+    doubled :: transform([1, 2, 3], (n: Int) -> n * 2)
+    print("{doubled}")
+}
+`, [String]{"f: fn(Int) -[]> Int"})
+}
+#Test("fmt_preserves_int_literal_radix") {
+    fmt_expr_keeps(`fn run() {
+    packet :: [0x2a, 0x00, 0xFF, 0o17, 0b1010, 116]
+    big :: 1_000_000
+    print("{packet.len()} {big}")
+}
+`, [String]{"0x2a", "0x00", "0xFF", "0o17", "0b1010", "1_000_000"})
+}
+#Test("fmt_keeps_reordered_and_skipped_argument_labels") {
+    fmt_expr_keeps(`fn run() {
+    a :: connect("db", tls: false, timeout: 5)
+    b :: connect("db", tls: false)
+}
+`, [String]{`connect("db", tls: false, timeout: 5)`, `connect("db", tls: false)`})
+}
+#Test("fmt_keeps_power_and_exclusive_or_spellings") {
+    fmt_expr_keeps(`fn run() {
+    a :: 2 ^ 3 ^ 2
+    b :: -3 ^ 2
+    c :: (2 ^ 3) ^ 2
+    d :: (-3) ^ 2
+    e :: 2 ^ -1
+    f :: 12 ~| 10
+    g := 2
+    g ^= 10
+    h := 12
+    h ~|= 10
+    print("{a}{b}{c}{d}{e}{f}{g}{h}")
+}
+`, [String]{"2 ^ 3 ^ 2", "-3 ^ 2", "(2 ^ 3) ^ 2", "(-3) ^ 2", "2 ^ -1", "12 ~| 10", "g ^= 10", "h ~|= 10"})
+}
+#Test("fmt_keeps_the_division_family_spellings") {
+    fmt_expr_keeps(`fn run() {
+    a :: 7 /% 2
+    b :: -7 /% 2
+    c :: 7.5 /% 2.0
+    d :: -7 % 2
+    e :: -7 %% 2
+    f :: 20 /% 3 /% 2
+    g :: 2 * 7 /% 4
+    h := 9
+    h /%= 2
+    i := -3
+    i %= 5
+    j := -7
+    j %%= 5
+    print("{a}{b}{c}{d}{e}{f}{g}{h}{i}{j}")
+}
+`, [String]{"7 /% 2", "-7 /% 2", "7.5 /% 2.0", "-7 % 2", "-7 %% 2", "20 /% 3 /% 2", "2 * 7 /% 4", "h /%= 2", "i %= 5", "j %%= 5"})
+}
+#Test("dispatch_subject_comparison_keeps_differing_method_arguments") {
+    // #4400: static tandem Rust correction, Expressions.rs:745-756.
+    fmt_expr_keeps(`fn pick() -> Int {
+    if device.code(1) == {
+        1 -> 1
+        device.code(2) == 7 -> 2
+        else -> 0
+    }
+}
+`, [String]{`device.code(2) == 7`})
+}
+
+#Test("lambda_interface_round_trips_result_error_and_pure_effect_row") {
+    fmt_expr_keeps(`enum LambdaError { Invalid }
+
+fn run() {
+    increment :: (n: Int) Int LambdaError! -[]> { return Ok(n + 1) }
+}
+`, [String]{`(n: Int) Int LambdaError! -[]>`})
+}
+#Test("failure_formatter_keeps_prefix_and_contextual_roles") {
+    fmt_expr_keeps(`fn load() -> Int? IOError! -> read()?(
+    "loading"
+)
+`, [String]{`fn load() -> Int? IOError!`, `read()?("loading")`})
+}
+#Test("interpolated_struct_literals_survive_retired_dot_migration") {
+    fmt_expr_keeps(`fn run() {
+    print("{NoDebug{value: 2}:Debug}")
+    print("{Probe{value: 2} == Probe{value: 1}:Debug}")
+}
+`, [String]{`print("{NoDebug{value: 2}:Debug}")`, `print("{Probe{value: 2} == Probe{value: 1}:Debug}")`})
+}
+#Test("fmt_concurrency_spellings_that_parse_today") {
+    fmt_expr_keeps(`fn inspect(handle: Task<Int>, group: Group, rx: Receiver<Int>, tx: Sender<Int>) -> TaskFailure {
+    joined :: handle.join()
+    cancelled :: .Cancelled
+    deadline :: .DeadlineBlown
+    loop value in rx -> tx.send(value)
+    return .Panicked("boom")
+}
+
+fn open() {
+    pair :: channel<Int>(capacity: 8)
+    plain :: task { 1 }
+    frozen :: freeze(1)
+    task.group g {
+        child :: task ^frozen { frozen }
+        child.join() ?? 0
+    }
+}
+`, [String]{"Task<Int>", "Group", "Receiver<Int>", "Sender<Int>", "TaskFailure", "handle.join()", ".Cancelled", ".DeadlineBlown", "loop value in rx", `.Panicked("boom")`, "channel<Int>(capacity: 8)", `plain :: task { 1 }`, "freeze(1)", "task ^frozen"})
+}
+#Test("fmt_loop_values_and_yielding_loops_are_idempotent") {
+    out :: fmt_expr_keeps(`fn find(xs: [Int]) -> Int {
+    found :: loop {
+        loop x in xs {
+            if x > 2 { break(found, x) }
+        }
+        break -1
+    }
+    found
+}
+
+fn run() {
+    xs :: [Int]{ 1, 2, 3, 4 }
+    values :: loop x in xs -> {
+        if x > 3 { break }
+        x * 2
+    }
+    print(values)
+}
+`, [String]{"found :: loop", "break(found, x)", "values :: loop x in xs ->"})
+    assert(!out.contains("__jet_"))
+    guard :: `fn run() {
+    values :: loop u in users if u.active -> u.name
+}
+`
+    assert_eq(fmt_expr_keeps(guard, [String]{"loop u in users if u.active -> u.name"}), guard)
+}
+#Test("subjectless_guards_preserve_tokens_and_are_byte_stable") {
+    source :: `fn run() {
+    ready :: true
+    if ready -> print("inline")
+    if {
+        ready -> print("ready")
+        false -> print("never")
+    }
+    label :: if {
+        ready -> "ready"
+        else -> "waiting"
+    }
+    print(label)
+}
+`
+    assert_eq(fmt_expr_keeps(source, [String]{`else -> "waiting"`}), source)
+}
+
+// Boundary witnesses for every literal mode and selector (including UTF-8).
+#Test("formatter_raw_strings_choose_a_noncolliding_fence") {
+    fmt_expr_keeps(````fn run() {
+    raw :: ```value ` and `` stay raw```
+    padded :: `  value  `
+    empty :: ""
+}
+````, [String]{```` ```value ` and `` stay raw``` ````, `` `  value  ` ``})
+}
+#Test("formatter_preserves_bytes_without_unicode_reencoding") {
+    fmt_expr_keeps(`fn run() {
+    bytes :: [U8]{"A\x00\xFF\"\\\n\t{{}}"}
+    text :: String{"C:\tmp\file {name}"}
+}
+`, [String]{`[U8]{"A\x00\xFF\"\\\n\t{{}}"}`, `String{"C:\tmp\file {name}"}`})
+}
+#Test("formatter_interpolation_selectors_and_debug_labels") {
+    fmt_expr_keeps(`fn run() {
+    print("{value=}")
+    print("{value:Debug} {value:Pretty} {value:Fixed(2)} {value:Grouped(2)}")
+    print("{value:Hex(4)} {value:Pad(8, "0")} {value:PadLeft(8)}")
+    print("{value:Sci(3)} {value:Percent(2)} {value:Bin} {value:Oct}")
+    print("{duration:Unit(name)} {duration:Unit(bare)}")
+}
+`, [String]{`{value=}`, `:Debug`, `:Pretty`, `:Fixed(2)`, `:Grouped(2)`, `:Hex(4)`, `:Pad(8, "0")`, `:PadLeft(8)`, `:Sci(3)`, `:Percent(2)`, `:Bin`, `:Oct`, `:Unit(name)`, `:Unit(bare)`})
+}
+#Test("formatter_nested_named_payload_patterns_and_ranges") {
+    fmt_expr_keeps(`fn pick(value: Packet) -> Int {
+    if value == {
+        .Data{kind: .Present(.Leaf(0..10)), payload, ..} -> payload
+        .Other(_) | .Empty -> 0
+        else -> 1
+    }
+}
+`, [String]{`.Data{kind: .Present(.Leaf(0..10)), payload, ..}`, `.Other(_) | .Empty`})
+}
+#Test("formatter_grouped_suffixes_measures_and_callable_zones") {
+    fmt_expr_keeps(`fn contract(value: (Int | String)?, callback: fn(host: String, /, *, seconds: Int) -[IO]> Int Err!, values: [Int#N]) -> (Int | String)? {
+    return value
+}
+fn run() {
+    sized :: build<Int, (N + 1)>(value: 0)
+}
+`, [String]{`(Int | String)?`, `fn(host: String, /, *, seconds: Int) -[IO]> Int Err!`, `[Int#N]`, `build<Int, (N + 1)>`})
+}
+#Test("formatter_utf8_comments_and_source_extents") {
+    fmt_expr_keeps(`fn run() {
+    label :: "é🙂"
+    out :: label
+        .trim()  // ── étape ──
+        .to_upper()
+    result :: if label == {
+        "é🙂" -> { /* 中文 */ 1 }
+        else -> 0
+    }
+}
+`, [String]{`"é🙂"`, `// ── étape ──`, `/* 中文 */`})
+}
+#Test("formatter_task_combinators_keep_named_branches") {
+    fmt_expr_keeps(`fn run() {
+    all :: task.all { first: 1, second: {
+        value :: 2
+        value
+    } }
+    any :: task.any { 1, 2 }
+    race :: task.race { 1, 2 }
+    timeout :: task.timeout(500ms)
+}
+`, [String]{`task.all {first: 1, second: {`, `task.any {1, 2}`, `task.race {1, 2}`, `task.timeout(500ms)`})
+}
+#Test("formatter_generic_argument_comments_retain_source_order") {
+    fmt_expr_keeps(`fn run() {
+    result :: build<
+        /* first type */ Int,
+        /* second type */ String,
+    >(
+        /* argument */ 1,
+    )
+}
+`, [String]{`/* first type */`, `/* second type */`, `/* argument */`})
+}

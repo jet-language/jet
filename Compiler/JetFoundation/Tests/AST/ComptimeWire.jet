@@ -1,0 +1,142 @@
+// Original AST/comptime.rs width-native tests and tests/pure.rs projections.
+// Rust serialize/loadable laws are unchanged and not credited by these tests.
+use jet_foundation.[
+    CtFloat, CtValue, CtKey, NamedCtValue, NamedCtKey, ClosureData,
+    CtMapEntry, CtEnumArg, CtReport,
+    Lambda, LambdaBody, LambdaParam, NamedSpan, Stmt, Span, Type,
+    TComptimeValue, TComptimeKey, TComptimeKeyField, TComptimeField,
+    TComptimeMapEntry, TComptimeEnumArg, TComptimeReport,
+    ast_empty_lambda_meta, ast_comptime_value_type, ast_comptime_key_value,
+    ast_comptime_value_text, tir_comptime_key_value, tir_comptime_value_bytes,
+    tir_comptime_value_text, comptime_float_render, comptime_float_json,
+    comptime_character, is_memo_storage_name,
+]
+#Test("ct_float_preserves_width_native_equality_and_rounding") {
+    rounded :: F32.from_float(16777217.0) ?? panic("finite F32 narrowing")
+    one :: F32.from_float(1.0) ?? panic("finite F32 narrowing")
+    zero :: F32.from_float(0.0) ?? panic("finite F32 narrowing")
+    negative_zero :: F32.from_float(-0.0) ?? panic("finite F32 narrowing")
+    assert_eq(comptime_float_render(16777217.0, 32), "16777216.0")
+    assert_eq(comptime_float_render(16777217.0, 64), "16777217.0")
+    assert_eq(rounded + one, rounded)
+    assert_eq(zero, negative_zero)
+    assert(F32.NAN != F32.NAN)
+    assert_eq(ast_comptime_value_type(CtValue.Float{value: CtFloat.F32{value: 16777216.0}}), Type.Float32)
+    assert_eq(ast_comptime_value_type(CtValue.Float{value: CtFloat.F64{value: 16777217.0}}), Type.Float)
+    assert(CtFloat.F32{value: 16777216.0} != CtFloat.F64{value: 16777217.0})
+}
+#Test("ct_float_render_json_and_rust_serialization_are_width_native JSON subset") {
+    nested :: CtValue.List{values: [CtValue]{CtValue.Float{value: CtFloat.F32{value: 16777217.0}}, CtValue.Float{value: CtFloat.F64{value: 16777217.0}}}}
+    assert_eq(comptime_float_render(-0.0, 32), "-0.0")
+    assert_eq(ast_comptime_value_text(CtValue.Float{value: CtFloat.F32{value: 1.0}}), "1.0")
+    assert_eq(ast_comptime_value_text(nested), "[16777216.0,16777217.0]")
+    checked_widths :: TComptimeValue.List{values: [TComptimeValue]{TComptimeValue.Float{value: 16777217.0, bits: 32}, TComptimeValue.Float{value: 16777217.0, bits: 64}}}
+    assert_eq(tir_comptime_value_text(checked_widths), "[16777216.0,16777217.0]")
+    assert_eq(comptime_float_json(-0.0, 64), "-0.0")
+    assert_eq(comptime_float_json(0.00000001, 32), "1e-8")
+    assert_eq(comptime_float_json(0.00000001, 64), "1e-8")
+    assert_eq(comptime_float_json(1e20, 32), "1e20")
+    assert_eq(comptime_float_json(1e20, 64), "1e20")
+    assert_eq(comptime_float_json(Float.NAN, 32), "NaN.0")
+    assert_eq(comptime_float_json(Float.INFINITY, 64), "inf.0")
+    assert_eq(comptime_float_json(Float.NEG_INFINITY, 32), "-inf.0")
+}
+#Test("ctvalue_to_json_struct") {
+    point :: CtValue.Struct{type_name: "Point", fields: [NamedCtValue]{NamedCtValue{name: "x", value: CtValue.Int{value: 3}}, NamedCtValue{name: "y", value: CtValue.Int{value: 4}}}}
+    assert_eq(ast_comptime_value_text(point), "{{\"x\":3,\"y\":4}}")
+}
+#Test("ctvalue_to_json_list") {
+    assert_eq(ast_comptime_value_text(CtValue.List{values: [CtValue]{CtValue.Int{value: 1}, CtValue.Int{value: 2}}}), "[1,2]")
+}
+#Test("compiler value key conversion retains lowercase tuple and authored order") {
+    key :: TComptimeKey.Tuple{fields: [TComptimeKeyField]{
+        TComptimeKeyField{name: "z", key: TComptimeKey.Int{value: 1}},
+        TComptimeKeyField{name: "a", key: TComptimeKey.Struct{type_name: "Point", fields: [TComptimeKeyField]{TComptimeKeyField{name: "y", key: TComptimeKey.Char{value: 128512}}}}},
+    }}
+    value :: tir_comptime_key_value(key)
+    if value == .Struct(name, fields) {
+        assert_eq(name, "tuple")
+        assert_eq(fields[0].name, "z")
+        if fields[1].value == .Struct(inner_name, _) -> assert_eq(inner_name, "Point") else -> assert(false)
+    } else { assert(false) }
+    assert_eq(tir_comptime_value_text(value), "{{\"z\":1,\"a\":{{\"y\":\"😀\"}}}}")
+    ast :: CtKey.Tuple{fields: [NamedCtKey]{NamedCtKey{name: "z", value: CtKey.Int{value: 1}}, NamedCtKey{name: "a", value: CtKey.Bool{value: true}}}}
+    if ast_comptime_key_value(ast) == .Struct(name, _) -> assert_eq(name, "tuple") else -> assert(false)
+    assert_eq(ast_comptime_value_text(ast_comptime_key_value(ast)), "{{\"z\":1,\"a\":true}}")
+}
+#Test("compiler value ordered memo filter excludes only original generated storage") {
+    fields :: [TComptimeField]{
+        TComptimeField{name: "z", value: TComptimeValue.Int{value: 1}},
+        TComptimeField{name: "__jet___memo_cache", value: TComptimeValue.Int{value: 9}},
+        TComptimeField{name: "__memo_cache", value: TComptimeValue.Int{value: 2}},
+        TComptimeField{name: "__jet_memo_cache", value: TComptimeValue.Int{value: 3}},
+        TComptimeField{name: "a", value: TComptimeValue.Int{value: 4}},
+        TComptimeField{name: "z", value: TComptimeValue.Int{value: 5}},
+    }
+    assert(is_memo_storage_name("__jet___memo_"))
+    assert(!is_memo_storage_name("__jet___memo"))
+    value :: TComptimeValue.Struct{type_name: "Ordered", fields: fields}
+    assert_eq(tir_comptime_value_text(value), "{{\"z\":1,\"__memo_cache\":2,\"__jet_memo_cache\":3,\"a\":4,\"z\":5}}")
+    assert_eq(tir_comptime_value_bytes(value), tir_comptime_value_text(value).bytes())
+}
+#Test("compiler value map keeps nonstring compound keys entry order and duplicates") {
+    tuple :: TComptimeKey.Tuple{fields: [TComptimeKeyField]{TComptimeKeyField{name: "z", key: TComptimeKey.Int{value: 1}}, TComptimeKeyField{name: "a", key: TComptimeKey.Bool{value: false}}}}
+    value :: TComptimeValue.Map{entries: [TComptimeMapEntry]{
+        TComptimeMapEntry{key: tuple, value: TComptimeValue.Int{value: 2}},
+        TComptimeMapEntry{key: TComptimeKey.Int{value: 7}, value: TComptimeValue.Bool{value: true}},
+        TComptimeMapEntry{key: TComptimeKey.Enum{type_name: "Color", variant: "Red"}, value: TComptimeValue.Unit},
+        TComptimeMapEntry{key: TComptimeKey.Int{value: 7}, value: TComptimeValue.Int{value: 3}},
+    }}
+    assert_eq(tir_comptime_value_text(value), "{{{{\"z\":1,\"a\":false}}:2,7:true,\"Red\":null,7:3}}")
+}
+#Test("compiler value enum all labeled unlabeled and mixed tandem law") {
+    first :: TComptimeEnumArg{name: Val("z"), value: TComptimeValue.Int{value: 1}}
+    second :: TComptimeEnumArg{name: Val("a"), value: TComptimeValue.Int{value: 2}}
+    positional :: TComptimeEnumArg{name: None, value: TComptimeValue.Int{value: 2}}
+    assert_eq(tir_comptime_value_text(TComptimeValue.Enum{type_name: "E", variant: "Pair", args: [TComptimeEnumArg]{first, second}}), "{{\"Pair\":{{\"z\":1,\"a\":2}}}}")
+    assert_eq(tir_comptime_value_text(TComptimeValue.Enum{type_name: "E", variant: "Pair", args: [TComptimeEnumArg]{first, positional}}), "{{\"Pair\":[{{\"z\":1}},2]}}")
+    assert_eq(tir_comptime_value_text(TComptimeValue.Enum{type_name: "E", variant: "Pair", args: [TComptimeEnumArg]{positional}}), "{{\"Pair\":[2]}}")
+    assert_eq(tir_comptime_value_text(tir_comptime_key_value(TComptimeKey.Enum{type_name: "E", variant: "Empty"})), "\"Empty\"")
+    ast :: CtValue.Map{entries: [CtMapEntry]{CtMapEntry{key: CtKey.Str{value: "z"}, value: CtValue.Enum{type_name: "E", variant: "Pair", args: [CtEnumArg]{
+        CtEnumArg{label: Val("z"), value: CtValue.Present{value: CtValue.Bytes{value: [U8]{U8{255}}}}},
+        CtEnumArg{label: None, value: CtValue.Failed{report: CtReport.Told{value: CtValue.Str{value: "bad"}}}},
+    }}}, CtMapEntry{key: CtKey.Str{value: "a"}, value: CtValue.BigInt{value: "18446744073709551616"}}}}
+    assert_eq(ast_comptime_value_text(ast), "{{\"z\":{{\"Pair\":[{{\"z\":[255]}},{{\"err\":\"bad\"}}]}},\"a\":\"18446744073709551616\"}}")
+}
+#Test("compiler value Present Clean Told Unit Bytes BigInt Bool transport") {
+    values :: TComptimeValue.List{values: [TComptimeValue]{
+        TComptimeValue.Present{value: TComptimeValue.Int{value: 3}},
+        TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.String}},
+        TComptimeValue.Failed{report: TComptimeReport.Told{value: TComptimeValue.String{value: "bad"}}},
+        TComptimeValue.Unit,
+        TComptimeValue.Bytes{value: [U8]{U8{0}, U8{255}}},
+        TComptimeValue.BigInt{decimal: "18446744073709551616"},
+        TComptimeValue.Bool{value: false},
+    }}
+    assert_eq(tir_comptime_value_text(values), "[3,null,{{\"err\":\"bad\"}},null,[0,255],\"18446744073709551616\",false]")
+}
+#Test("compiler value tandem escaping Char Str field variant and label") {
+    assert_eq(tir_comptime_value_text(TComptimeValue.Char{value: 34}), "\"\\\"\"")
+    assert_eq(tir_comptime_value_text(TComptimeValue.Char{value: 10}), "\"\\n\"")
+    assert_eq(ast_comptime_value_text(CtValue.Char{value: '\\'}), "\"\\\\\"")
+    controls :: String.from_bytes([U8]{U8{0}, U8{8}, U8{10}, U8{13}, U8{9}, U8{34}, U8{92}, U8{195}, U8{169}, U8{240}, U8{159}, U8{152}, U8{128}}) ?? panic("test controls and Unicode are valid UTF-8")
+    assert_eq(tir_comptime_value_text(TComptimeValue.String{value: controls}), "\"\\u0000\\u0008\\n\\r\\t\\\"\\\\é😀\"")
+    value :: TComptimeValue.Struct{type_name: "S", fields: [TComptimeField]{TComptimeField{name: "a\"b", value: TComptimeValue.Unit}}}
+    assert_eq(tir_comptime_value_text(value), "{{\"a\\\"b\":null}}")
+    enum_value :: TComptimeValue.Enum{type_name: "E", variant: "V\"\n", args: [TComptimeEnumArg]{TComptimeEnumArg{name: Val("z\"\t"), value: TComptimeValue.Char{value: 92}}, TComptimeEnumArg{name: None, value: TComptimeValue.Unit}}}
+    assert_eq(tir_comptime_value_text(enum_value), "{{\"V\\\"\\n\":[{{\"z\\\"\\t\":\"\\\\\"}},null]}}")
+}
+#Test("compiler value Unicode scalar transport one two three four byte boundaries") {
+    assert_eq(comptime_character(127).bytes(), [U8]{U8{127}})
+    assert_eq(comptime_character(128).bytes(), [U8]{U8{194}, U8{128}})
+    assert_eq(comptime_character(2047).bytes(), [U8]{U8{223}, U8{191}})
+    assert_eq(comptime_character(2048).bytes(), [U8]{U8{224}, U8{160}, U8{128}})
+    assert_eq(comptime_character(65535).bytes(), [U8]{U8{239}, U8{191}, U8{191}})
+    assert_eq(comptime_character(65536).bytes(), [U8]{U8{240}, U8{144}, U8{128}, U8{128}})
+    assert_eq(comptime_character(1114111).bytes(), [U8]{U8{244}, U8{143}, U8{191}, U8{191}})
+}
+#Test("compiler value closure is null without evaluating captured AST") {
+    lambda :: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, result_type: None, error_type: None, effects: None, body: LambdaBody.Block{body: [Stmt]{}}, span: Span{start: 0, end: 0}, meta: ast_empty_lambda_meta()}
+    closure :: CtValue.Closure{value: ClosureData{lambda: lambda, captured: [NamedCtValue]{}, return_type: None, opaque: None}}
+    assert_eq(ast_comptime_value_text(closure), "null")
+}

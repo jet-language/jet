@@ -1,0 +1,1685 @@
+// PORT-PENDING 0463 crates-jet-codegen-src-codegen-mirweb-slice-3560: crates/jet-codegen/src/Codegen/MIRWeb.rs:3560-5240
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn js_ccallback_unsupported(
+//RS     program: &MirProgram,
+//RS     function: &MirFunction,
+//RS     call: MirPreludeCallId,
+//RS     callback: jet_foundation::MIR::MirCallbackId,
+//RS     lambda: jet_foundation::MIR::MirValueId,
+//RS ) -> Result<String, MirWebError> {
+//RS     let Some(adapter) = program.callbacks.iter().find(|adapter| adapter.id == callback) else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!("MIR callback adapter {} is missing", callback.0),
+//RS         });
+//RS     };
+//RS     if adapter.symbol.is_empty() {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!("MIR callback adapter {} has no symbol", callback.0),
+//RS         });
+//RS     }
+//RS     if !program.functions.iter().any(|candidate| candidate.id == adapter.function) {
+//RS         return Err(MirWebError::MissingUserFunction {
+//RS             function: adapter.function.0,
+//RS         });
+//RS     }
+//RS     let _ = mir_function_value_type(function, lambda)?;
+//RS     let _ = js_prelude_call_expression(
+//RS         program,
+//RS         call,
+//RS         &[format!("__jet_values.get({})", lambda.0)],
+//RS     )?;
+//RS     Err(MirWebError::InvalidMir {
+//RS         message: format!(
+//RS             "MIR C callback adapter {} is not applicable to the Web target",
+//RS             callback.0
+//RS         ),
+//RS     })
+//RS }
+//RS /// Browser publication has no Component Model host boundary.  Keep this
+//RS /// defensive MIR arm even when sema already emits E3306: emitting an empty
+//RS /// object or a fake promise would silently turn a checked plugin call into
+//RS /// success.
+//RS fn js_plugin_invoke_unsupported(
+//RS     program: &MirProgram,
+//RS     call: MirPreludeCallId,
+//RS     export_name: &str,
+//RS     signature: &jet_foundation::MIR::ComponentSignatureDescriptor,
+//RS ) -> Result<String, MirWebError> {
+//RS     let Some(route) = program.prelude_calls.iter().find(|row| row.id == call) else {
+//RS         return Err(MirWebError::MissingPreludeCall { call: call.0 });
+//RS     };
+//RS     if route.module != "core.plugin" || route.member != "invoke" {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!(
+//RS                 "MIR plugin invocation {} uses non-plugin route {}.{}",
+//RS                 call.0, route.module, route.member
+//RS             ),
+//RS         });
+//RS     }
+//RS     Err(MirWebError::InvalidMir {
+//RS         message: format!(
+//RS             "E3306: selected web target does not provide the Component Model host boundary \
+//RS              for reachable Core plugin import `core.plugin::{export_name}` (signature `{}`)",
+//RS             signature.wire()
+//RS         ),
+//RS     })
+//RS }
+//RS 
+//RS fn js_semantic_expression(
+//RS     program: &MirProgram,
+//RS     function: &MirFunction,
+//RS     semantic: &MirSemanticOp,
+//RS     result_type: Option<&MirType>,
+//RS ) -> Result<String, MirWebError> {
+//RS 
+//RS     let value = |id: jet_foundation::MIR::MirValueId| format!("__jet_values.get({})", id.0);
+//RS     let values = |ids: &[jet_foundation::MIR::MirValueId]| {
+//RS         ids.iter().map(|id| value(*id)).collect::<Vec<_>>()
+//RS     };
+//RS     let prelude = |id: MirPreludeCallId, args: Vec<String>| {
+//RS         js_prelude_call_expression(program, id, &args)
+//RS     };
+//RS     let expression = match semantic {
+//RS         MirSemanticOp::DataEntriesToMap { call, local } => {
+//RS             let place = function
+//RS                 .locals
+//RS                 .iter()
+//RS                 .find(|candidate| candidate.id == *local)
+//RS                 .map(|candidate| candidate.place)
+//RS                 .ok_or_else(|| MirWebError::InvalidMir {
+//RS                     message: format!("MIR data-entry local {} is missing", local.0),
+//RS                 })?;
+//RS             prelude(*call, vec![js_read_place_expression(program, function, place)?])?
+//RS         }
+//RS         MirSemanticOp::MathBuiltin { type_id, call, args }
+//RS         | MirSemanticOp::PreciseBuiltin { type_id, call, args } => {
+//RS             ensure_type_instance(program, *type_id)?;
+//RS             prelude(*call, values(args))?
+//RS         }
+//RS         MirSemanticOp::Print { call, value: id } => {
+//RS             let value_type = mir_function_value_type(function, *id)?;
+//RS             let rendered = if matches!(value_type.kind(), MirTypeKind::String) {
+//RS                 value(*id)
+//RS             } else {
+//RS                 format!("jet_show({})", value(*id))
+//RS             };
+//RS             prelude(*call, vec![rendered])?
+//RS         }
+//RS         MirSemanticOp::AmbientInput { call, prompt } => {
+//RS             prelude(*call, prompt.map(value).into_iter().collect())?
+//RS         }
+//RS         MirSemanticOp::RequireStop {
+//RS             call,
+//RS             kind,
+//RS             condition,
+//RS             location,
+//RS             context,
+//RS             values: ids,
+//RS             always_stops: _,
+//RS         } => {
+//RS             let location_args = vec![
+//RS                 js_source_file_path(program, location.file)?,
+//RS                 location.line.to_string(),
+//RS                 js_string(&context.function),
+//RS                 js_string(&context.source_line),
+//RS                 location.column.to_string(),
+//RS                 context.caret.to_string(),
+//RS             ];
+//RS             let locals = js_panic_locals(program, function, context)?;
+//RS             match kind {
+//RS                 MirRequireKind::Require => {
+//RS                     let Some(condition) = *condition else {
+//RS                         return Err(MirWebError::InvalidMir {
+//RS                             message: "MIR require stop has no checked condition".to_string(),
+//RS                         });
+//RS                     };
+//RS                     let message = match ids.as_slice() {
+//RS                         [] => js_string(jet_foundation::Outcome::jet_require_message(None)),
+//RS                         [message] => value(*message),
+//RS                         _ => {
+//RS                             return Err(MirWebError::InvalidMir {
+//RS                                 message:
+//RS                                     "MIR require stop expects one checked condition and an optional message"
+//RS                                         .to_string(),
+//RS                             });
+//RS                         }
+//RS                     };
+//RS                     let mut args = vec![value(condition), message];
+//RS                     args.extend(location_args);
+//RS                     args.push(locals);
+//RS                     prelude(*call, args)?
+//RS                 }
+//RS                 MirRequireKind::RequireEq => {
+//RS                     let Some(condition) = *condition else {
+//RS                         return Err(MirWebError::InvalidMir {
+//RS                             message: "MIR require_eq stop has no checked condition".to_string(),
+//RS                         });
+//RS                     };
+//RS                     let [left, right] = ids.as_slice() else {
+//RS                         return Err(MirWebError::InvalidMir {
+//RS                             message: format!(
+//RS                                 "MIR require_eq stop has {} values, expected two",
+//RS                                 ids.len()
+//RS                             ),
+//RS                         });
+//RS                     };
+//RS                     let mut args = vec![value(condition), value(*left), value(*right)];
+//RS                     args.extend(location_args);
+//RS                     args.push(locals);
+//RS                     prelude(*call, args)?
+//RS                 }
+//RS                 MirRequireKind::Panic => {
+//RS                     if condition.is_some() {
+//RS                         return Err(MirWebError::InvalidMir {
+//RS                             message: "MIR panic stop carries an unexpected condition".to_string(),
+//RS                         });
+//RS                     }
+//RS                     let [message] = ids.as_slice() else {
+//RS                         return Err(MirWebError::InvalidMir {
+//RS                             message: format!(
+//RS                                 "MIR panic stop has {} values, expected one",
+//RS                                 ids.len()
+//RS                             ),
+//RS                         });
+//RS                     };
+//RS                     let mut args = location_args;
+//RS                     args.push(value(*message));
+//RS                     args.push(locals);
+//RS                     prelude(*call, args)?
+//RS                 }
+//RS             }
+//RS         }
+//RS         MirSemanticOp::LayoutCompare { call, op, left, right } => {
+//RS             prelude(*call, vec![layout_compare_code(*op).to_string(), value(*left), value(*right)])?
+//RS         }
+//RS         MirSemanticOp::LayoutLiteral { inner } => value(*inner),
+//RS         MirSemanticOp::StructLiteral { type_id, fields, .. } => {
+//RS             ensure_type_instance(program, *type_id)?;
+//RS             let entries = fields
+//RS                 .iter()
+//RS                 .map(|(field, id)| {
+//RS                     Ok(format!(
+//RS                         "{}: {}",
+//RS                         js_string(&js_field_name(program, *field)?),
+//RS                         value(*id)
+//RS                     ))
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, MirWebError>>()?
+//RS                 .join(", ");
+//RS             format!(
+//RS                 "Object.defineProperty({{ {} }}, \"__jet_type\", {{ value: {}, enumerable: false }})",
+//RS                 entries,
+//RS                 js_string(&type_id.0.to_string())
+//RS             )
+//RS         }
+//RS         MirSemanticOp::ReflectOf {
+//RS             type_name,
+//RS             path,
+//RS             display,
+//RS             fields,
+//RS         } => {
+//RS             let fields = fields
+//RS                 .iter()
+//RS                 .map(|field| {
+//RS                     format!(
+//RS                         "{{ name: {}, value: {{ type_name: {}, path: {}, display: jet_show({}), fields: [] }} }}",
+//RS                         js_string(&field.name),
+//RS                         js_string(&field.type_name),
+//RS                         js_string(&field.path),
+//RS                         value(field.value),
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             format!(
+//RS                 "{{ type_name: {}, path: {}, display: {}, fields: [{}] }}",
+//RS                 js_string(type_name),
+//RS                 js_string(path),
+//RS                 value(*display),
+//RS                 fields,
+//RS             )
+//RS         }
+//RS         MirSemanticOp::CellGuardProject {
+//RS             map_call,
+//RS             split_call,
+//RS             guard,
+//RS             paths,
+//RS             editable,
+//RS             edit_paths_disjoint,
+//RS         } => js_cell_guard_project_expression(
+//RS             program,
+//RS             *map_call,
+//RS             *split_call,
+//RS             value(*guard),
+//RS             paths,
+//RS             *editable,
+//RS             *edit_paths_disjoint,
+//RS             result_type,
+//RS         )?,
+//RS         MirSemanticOp::SharedGuardMap { call, guard, path, editable } => {
+//RS             if path.is_empty() {
+//RS                 return Err(MirWebError::InvalidMir {
+//RS                     message: "MIR shared guard map has no checked field path".to_string(),
+//RS                 });
+//RS             }
+//RS             js_shared_guard_map_expression(
+//RS                 program,
+//RS                 *call,
+//RS                 value(*guard),
+//RS                 path,
+//RS                 *editable,
+//RS             )?
+//RS         }
+//RS         MirSemanticOp::SharedGuardSplit {
+//RS             call,
+//RS             map_call,
+//RS             guard,
+//RS             first,
+//RS             second,
+//RS             editable,
+//RS         } => js_shared_guard_split_expression(
+//RS             program,
+//RS             *map_call,
+//RS             *call,
+//RS             value(*guard),
+//RS             first,
+//RS             second,
+//RS             *editable,
+//RS             result_type,
+//RS         )?,
+//RS         MirSemanticOp::SharedGuardWait { call, guard, condition, predicate } => {
+//RS             prelude(*call, vec![value(*guard), value(*condition), value(*predicate)])?
+//RS         }
+//RS         MirSemanticOp::ConditionNotify { call, condition, all } => {
+//RS             prelude(*call, vec![value(*condition), all.to_string()])?
+//RS         }
+//RS             MirSemanticOp::AllocNew {
+//RS                 call,
+//RS                 kind: _,
+//RS                 args,
+//RS                 ..
+//RS             } => {
+//RS             prelude(*call, js_call_values(program, function, args, false)?)?
+//RS         }
+//RS         MirSemanticOp::ColumnarRead { base, index, column, column_index, accessor } => {
+//RS             let _ = js_field_name(program, *column)?;
+//RS             prelude(
+//RS                 *accessor,
+//RS                 vec![value(*base), column_index.to_string(), value(*index)],
+//RS             )?
+//RS         }
+//RS         MirSemanticOp::StaticPreludeCall {
+//RS             call,
+//RS             args,
+//RS             owner_type_args,
+//RS             type_args,
+//RS         } => {
+//RS             validate_type_args(program, type_args)?;
+//RS             validate_owner_type_args(program, owner_type_args)?;
+//RS             let Some(route) = program.prelude_calls.iter().find(|route| route.id == *call) else {
+//RS                 return Err(MirWebError::MissingPreludeCall { call: call.0 });
+//RS             };
+//RS             if route.module == "core.encoding.codec"
+//RS                 && matches!(route.member.as_str(), "encode" | "decode" | "decode_typed")
+//RS             {
+//RS                 js_codec_prelude_expression(program, function, &route.member, args, type_args)?
+//RS             } else {
+//RS                 let mut rendered = js_call_values(program, function, args, false)?;
+//RS                 if route.module == "::jet_std::JetShared" && route.member == "new" {
+//RS                     if args.len() != 1 {
+//RS                         return Err(MirWebError::InvalidMir {
+//RS                             message: format!(
+//RS                                 "MIR Shared.new has {} arguments; expected one payload",
+//RS                                 args.len()
+//RS                             ),
+//RS                         });
+//RS                     }
+//RS                     let [jet_foundation::MIR::MirPreludeTypeArg::Type(payload)] =
+//RS                         owner_type_args.as_slice()
+//RS                     else {
+//RS                         return Err(MirWebError::InvalidMir {
+//RS                             message: "MIR Shared.new has no checked payload type argument"
+//RS                                 .to_string(),
+//RS                         });
+//RS                     };
+//RS                     rendered.push(js_string(&js_copy_type_key(program, payload)));
+//RS                 }
+//RS                 prelude(*call, rendered)?
+//RS             }
+//RS         }
+//RS 
+//RS         MirSemanticOp::HostCall { call, args } => {
+//RS             prelude(*call, js_call_values(program, function, args, false)?)?
+//RS         }
+//RS         MirSemanticOp::HardwareCall { .. } => {
+//RS             return Err(web_hardware_leak(&format!(
+//RS                 "function {} reached the Web adapter",
+//RS                 function.id.0
+//RS             )));
+//RS         }
+//RS         MirSemanticOp::DecodeUnder { call, segment, inner } => {
+//RS             prelude(*call, vec![value(*segment), value(*inner)])?
+//RS         }
+//RS         MirSemanticOp::BuiltinMethod {
+//RS             call,
+//RS             receiver,
+//RS             receiver_place,
+//RS             args,
+//RS             ..
+//RS         } => {
+//RS             let receiver = match receiver_place {
+//RS                 Some(place) => {
+//RS                     let cell = js_place_cell_expression(program, function, *place)?;
+//RS                     format!("({cell}).value")
+//RS                 }
+//RS                 None => value(*receiver),
+//RS             };
+//RS             let mut rendered = vec![receiver];
+//RS             rendered.extend(values(args));
+//RS             prelude(*call, rendered)?
+//RS         }
+//RS         MirSemanticOp::OptionLift2 { call, function, left, right } => {
+//RS             prelude(*call, vec![value(*left), value(*right), value(*function)])?
+//RS         }
+//RS         MirSemanticOp::ClosureMethod { receiver, args, call } => {
+//RS             let Some(route) = program.prelude_calls.iter().find(|route| route.id == *call) else {
+//RS                 return Err(MirWebError::MissingPreludeCall { call: call.0 });
+//RS             };
+//RS             let mut rendered = vec![value(*receiver)];
+//RS             for (index, arg) in args.iter().enumerate() {
+//RS                 let rendered_arg = js_call_arg_value(program, function, arg, false)?;
+//RS                 if route.member == "zip_pad" && matches!(index, 1 | 2) {
+//RS                     let ty = mir_function_value_type(function, arg.value)?;
+//RS                     let mut schemas = BTreeMap::new();
+//RS                     let key = js_history_capture_schema(
+//RS                         program,
+//RS                         ty,
+//RS                         &BTreeMap::new(),
+//RS                         &mut schemas,
+//RS                     );
+//RS                     rendered.push(format!(
+//RS                         "jet_copy_value_register({}, {}, __jet_copy_type_facts)",
+//RS                         rendered_arg,
+//RS                         js_string(&key),
+//RS                     ));
+//RS                 } else {
+//RS                     rendered.push(rendered_arg);
+//RS                 }
+//RS             }
+//RS             prelude(*call, rendered)?
+//RS         }
+//RS         MirSemanticOp::HostBorrowCallback { callable, params } => {
+//RS             validate_type_args(program, params)?;
+//RS             format!("(...__jet_callback_args) => {}(...__jet_callback_args)", value(*callable))
+//RS         }
+//RS         MirSemanticOp::TextPatternMatch { call, subject, parts } => prelude(
+//RS             *call,
+//RS             vec![value(*subject), js_text_pattern_parts(program, parts)?],
+//RS         )?,
+//RS         MirSemanticOp::BinaryPatternMatch { call, subject, parts } => prelude(
+//RS             *call,
+//RS             vec![value(*subject), js_binary_pattern_parts(program, parts)?],
+//RS         )?,
+//RS         MirSemanticOp::CursorTakePattern {
+//RS             receiver_place,
+//RS             parts,
+//RS             ..
+//RS         } => {
+//RS             let result_type = result_type.ok_or_else(|| MirWebError::InvalidMir {
+//RS                 message: "MIR Cursor.take_pattern has no result type".to_string(),
+//RS             })?;
+//RS             let (ok, _) = result_type.result_parts().ok_or_else(|| MirWebError::InvalidMir {
+//RS                 message: "MIR Cursor.take_pattern result is not a Result".to_string(),
+//RS             })?;
+//RS             let fields = ok.tuple_fields().ok_or_else(|| MirWebError::InvalidMir {
+//RS                 message: "MIR Cursor.take_pattern result is not a typed tuple".to_string(),
+//RS             })?;
+//RS             let cell = js_place_cell_expression(program, function, *receiver_place)?;
+//RS             let pattern = js_text_pattern_parts(program, parts)?;
+//RS             let fields = fields
+//RS                 .iter()
+//RS                 .map(|(name, _)| js_string(name))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             format!("jet_cursor_take_pattern(({cell}).value, {pattern}, [{fields}])")
+//RS         }
+//RS         MirSemanticOp::ReaderTakePattern { .. } => {
+//RS             unreachable!("Reader.take_pattern is not Web-applicable")
+//RS         }
+//RS         MirSemanticOp::NumericMethod { call, receiver } => {
+//RS             prelude(*call, vec![value(*receiver)])?
+//RS         }
+//RS         MirSemanticOp::NumericBinaryMethod { call, receiver, argument } => {
+//RS             prelude(*call, vec![value(*receiver), value(*argument)])?
+//RS         }
+//RS         MirSemanticOp::OverflowOption { call, left, right, location } => {
+//RS             let Some(route) = program.prelude_calls.iter().find(|route| route.id == *call) else {
+//RS                 return Err(MirWebError::MissingPreludeCall { call: call.0 });
+//RS             };
+//RS             let mut rendered = vec![value(*left), value(*right)];
+//RS             match (route.signature.arity, location) {
+//RS                 (2, None) => {}
+//RS                 (4, Some(location)) => {
+//RS                     rendered.push(js_source_file_path(program, location.file)?);
+//RS                     rendered.push(location.line.to_string());
+//RS                 }
+//RS                 (arity, location) => {
+//RS                     return Err(MirWebError::InvalidMir {
+//RS                         message: format!(
+//RS                             "MIR OverflowOption Prelude call {} has arity {} with {} location",
+//RS                             call.0,
+//RS                             arity,
+//RS                             if location.is_some() { "a" } else { "no" }
+//RS                         ),
+//RS                     });
+//RS                 }
+//RS             }
+//RS             prelude(*call, rendered)?
+//RS         }
+//RS         MirSemanticOp::HandleMethod {
+//RS             call,
+//RS             receiver,
+//RS             args,
+//RS             frame_schedule,
+//RS             frame_schedule_derivation,
+//RS         } => {
+//RS             let Some(route) = program.prelude_calls.iter().find(|row| row.id == *call) else {
+//RS                 return Err(MirWebError::MissingPreludeCall { call: call.0 });
+//RS             };
+//RS             if route.family == MirPreludeFamily::HandleMethod
+//RS                 && route.module == "core.reflect"
+//RS             {
+//RS                 if !args.is_empty() {
+//RS                     return Err(MirWebError::InvalidMir {
+//RS                         message: "MIR reflection handle method has arguments".to_string(),
+//RS                     });
+//RS                 }
+//RS                 let receiver = value(*receiver);
+//RS                 return Ok(match route.member.as_str() {
+//RS                     "value.type_name" => format!("({receiver}).type_name"),
+//RS                     "value.path" => format!("({receiver}).path"),
+//RS                     "value.display" => format!("({receiver}).display"),
+//RS                     "value.fields" => format!("({receiver}).fields"),
+//RS                     "field.name" => format!("({receiver}).name"),
+//RS                     "field.value" => format!("({receiver}).value"),
+//RS                     member => {
+//RS                         return Err(MirWebError::InvalidMir {
+//RS                             message: format!(
+//RS                                 "unknown MIR reflection handle method `{member}`"
+//RS                             ),
+//RS                         });
+//RS                     }
+//RS                 });
+//RS             }
+//RS             if web_task_join_call(program, *call) {
+//RS                 if !args.is_empty() {
+//RS                     return Err(MirWebError::InvalidMir {
+//RS                         message: format!(
+//RS                             "MIR task join route has {} arguments; expected none",
+//RS                             args.len()
+//RS                         ),
+//RS                     });
+//RS                 }
+//RS                 let joined = prelude(*call, vec![value(*receiver)])?;
+//RS                 format!("await ({joined})")
+//RS             } else if web_channel_handle_call(program, *call) {
+//RS                 let mut rendered = vec![value(*receiver)];
+//RS                 rendered.extend(values(args));
+//RS                 let expression = prelude(*call, rendered)?;
+//RS                 if web_channel_async_call(program, *call) {
+//RS                     format!("await ({expression})")
+//RS                 } else {
+//RS                     expression
+//RS                 }
+//RS             } else if route.family == MirPreludeFamily::HandleMethod
+//RS                 && route.module == "core.encoding.datatree"
+//RS             {
+//RS                 let mut rendered = vec![value(*receiver)];
+//RS                 rendered.extend(values(args));
+//RS                 js_datatree_handle_expression(route, &rendered)?
+//RS             } else if route.family == MirPreludeFamily::HandleMethod
+//RS                 && route.module == "core.handle"
+//RS                 && route.member == "duration.ns_value"
+//RS             {
+//RS                 if !args.is_empty() {
+//RS                     return Err(MirWebError::InvalidMir {
+//RS                         message: "MIR Duration nanosecond projection has arguments".to_string(),
+//RS                     });
+//RS                 }
+//RS                 format!("jet_web_duration_ns({})", value(*receiver))
+//RS             } else if route.family == MirPreludeFamily::HandleMethod
+//RS                 && route.module == "core.time"
+//RS                 && route
+//RS                     .member
+//RS                     .split_once('.')
+//RS                     .is_some_and(|(kind, method)| {
+//RS                         crate::Codegen::TIR::is_civil_time_method_name(Some(kind), method)
+//RS                     })
+//RS             {
+//RS                 let (kind, method) = route.member.split_once('.').ok_or_else(|| {
+//RS                     MirWebError::InvalidMir {
+//RS                         message: format!(
+//RS                             "MIR civil-time route member `{}` is malformed",
+//RS                             route.member
+//RS                         ),
+//RS                     }
+//RS                 })?;
+//RS                 let rendered_args = values(args).join(", ");
+//RS                 format!(
+//RS                     "jet_time_method({}, {}, {}, [{}])",
+//RS                     value(*receiver),
+//RS                     js_string(kind),
+//RS                     js_string(method),
+//RS                     rendered_args
+//RS                 )
+//RS             } else {
+//RS                 let mut rendered = vec![value(*receiver)];
+//RS                 rendered.extend(values(args));
+//RS                 if let Some(metadata) = route.db_metadata.as_ref() {
+//RS                     rendered.push(js_string(&metadata.to_wire()));
+//RS                 }
+//RS                 if route.member == "game.scene_on_frame" {
+//RS                     rendered.push(
+//RS                         frame_schedule
+//RS                             .as_ref()
+//RS                             .map(|schedule| js_string(&schedule.canonical_json()))
+//RS                             .unwrap_or_else(|| "null".to_string()),
+//RS                     );
+//RS                     rendered.push(
+//RS                         frame_schedule_derivation
+//RS                             .as_ref()
+//RS                             .map(|reference| js_string(&reference.id))
+//RS                             .unwrap_or_else(|| "null".to_string()),
+//RS                     );
+//RS                 }
+//RS                 prelude(*call, rendered)?
+//RS             }
+//RS         }
+//RS         MirSemanticOp::PluginInvoke {
+//RS             call,
+//RS             export_name,
+//RS             signature,
+//RS             ..
+//RS         } => js_plugin_invoke_unsupported(program, *call, export_name, signature)?,
+//RS         MirSemanticOp::CoreClosureCall {
+//RS             call,
+//RS             kind,
+//RS             values: ids,
+//RS             closure,
+//RS             site,
+//RS             label,
+//RS         } => js_core_closure_call_expression(
+//RS             program,
+//RS             *call,
+//RS             kind.clone(),
+//RS             ids,
+//RS             *closure,
+//RS             *site,
+//RS             label,
+//RS         )?,
+//RS         MirSemanticOp::TaskGroup { call, kind, tasks } => {
+//RS             let mut rendered = vec![task_group_code(*kind).to_string()];
+//RS             rendered.extend(values(tasks));
+//RS             prelude(*call, rendered)?
+//RS         }
+//RS         MirSemanticOp::Select { call, kind, values: ids } => {
+//RS             if web_channel_select_call(program, *call) {
+//RS                 let [receivers, timers] = ids.as_slice() else {
+//RS                     return Err(MirWebError::InvalidMir {
+//RS                         message: format!(
+//RS                             "MIR channel select has {} values; expected receiver and timer lists",
+//RS                             ids.len()
+//RS                         ),
+//RS                     });
+//RS                 };
+//RS                 let expression = prelude(*call, vec![value(*receivers), value(*timers)])?;
+//RS                 if web_channel_select_wait_call(program, *call) {
+//RS                     format!("await ({expression})")
+//RS                 } else {
+//RS                     expression
+//RS                 }
+//RS             } else {
+//RS                 let mut rendered = vec![select_code(*kind).to_string()];
+//RS                 rendered.extend(values(ids));
+//RS                 prelude(*call, rendered)?
+//RS             }
+//RS         }
+//RS         MirSemanticOp::PolicyFunction { policy, values: ids } => {
+//RS             format!("{}({})", value(*policy), values(ids).join(", "))
+//RS         }
+//RS         MirSemanticOp::InterruptFunction { interrupt, values: ids } => {
+//RS             format!("{}({})", value(*interrupt), values(ids).join(", "))
+//RS         }
+//RS         MirSemanticOp::CarrierFact {
+//RS             call,
+//RS             receiver,
+//RS             field,
+//RS             notes,
+//RS         } => js_carrier_fact_expression(program, *call, *receiver, *field, *notes)?,
+//RS         MirSemanticOp::GcEdit {
+//RS             call,
+//RS             root,
+//RS             edges,
+//RS             edit,
+//RS             index,
+//RS             kind,
+//RS             site,
+//RS         } => js_gc_edit_expression(
+//RS             program,
+//RS             *call,
+//RS             *root,
+//RS             edges,
+//RS             *edit,
+//RS             *index,
+//RS             *kind,
+//RS             *site,
+//RS         )?,
+//RS         MirSemanticOp::TypedTextInterp {
+//RS             call,
+//RS             kind,
+//RS             literals,
+//RS             holes,
+//RS             trusted_html,
+//RS         } => js_typed_text_interp_expression(
+//RS             program,
+//RS             *call,
+//RS             *kind,
+//RS             literals,
+//RS             holes,
+//RS             trusted_html,
+//RS         )?,
+//RS         MirSemanticOp::HttpRouterRegister {
+//RS             call,
+//RS             receiver,
+//RS             path,
+//RS             handler,
+//RS             method,
+//RS             handler_param_names,
+//RS             contract_json,
+//RS             location,
+//RS         } => js_http_router_register_expression(
+//RS             program,
+//RS             function,
+//RS             *call,
+//RS             *receiver,
+//RS             *path,
+//RS             *handler,
+//RS             *method,
+//RS             handler_param_names,
+//RS             contract_json,
+//RS             *location,
+//RS         )?,
+//RS         MirSemanticOp::CCallback {
+//RS             call,
+//RS             callback,
+//RS             lambda,
+//RS         } => js_ccallback_unsupported(program, function, *call, *callback, *lambda)?,
+//RS     };
+//RS     Ok(expression)
+//RS }
+//RS fn js_codec_prelude_expression(
+//RS     program: &MirProgram,
+//RS     function: &MirFunction,
+//RS     member: &str,
+//RS     args: &[jet_foundation::MIR::MirCallArg],
+//RS     type_args: &[MirType],
+//RS ) -> Result<String, MirWebError> {
+//RS     let rendered = js_call_values(program, function, args, false)?;
+//RS     if member == "decode_typed" {
+//RS         let [tree] = rendered.as_slice() else {
+//RS             return Err(MirWebError::InvalidMir {
+//RS                 message: format!(
+//RS                     "MIR typed codec Prelude call has {} arguments, expected one tree",
+//RS                     rendered.len()
+//RS                 ),
+//RS             });
+//RS         };
+//RS         let [ty] = type_args else {
+//RS             return Err(MirWebError::InvalidMir {
+//RS                 message: format!(
+//RS                     "MIR typed codec Prelude call has {} type arguments, expected one target",
+//RS                     type_args.len()
+//RS                 ),
+//RS             });
+//RS         };
+//RS         let descriptor = js_codec_type_descriptor(program, ty)?;
+//RS         return Ok(format!("jet_codec_decode_typed({tree}, {descriptor})"));
+//RS     }
+//RS     let [_kind, value] = rendered.as_slice() else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!(
+//RS                 "MIR codec Prelude call {member:?} has {} arguments, expected kind and value",
+//RS                 rendered.len()
+//RS             ),
+//RS         });
+//RS     };
+//RS     let [ty] = type_args else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!(
+//RS                 "MIR codec Prelude call {member:?} has {} type arguments, expected one codec type",
+//RS                 type_args.len()
+//RS             ),
+//RS         });
+//RS     };
+//RS     if member == "encode" {
+//RS         let descriptor = js_codec_type_descriptor(program, ty)?;
+//RS         return Ok(format!("jet_codec_encode_typed({value}, {descriptor})"));
+//RS     }
+//RS     let codec = ty.nominal_name().ok_or_else(|| MirWebError::InvalidMir {
+//RS         message: format!(
+//RS             "MIR codec Prelude call {member:?} has a non-nominal codec type {}",
+//RS             ty.display_name()
+//RS         ),
+//RS     })?;
+//RS     if !matches!(
+//RS         codec,
+//RS         "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration" | "Decimal"
+//RS     ) {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!(
+//RS                 "MIR codec Prelude call {member:?} has unsupported codec type {codec:?}"
+//RS             ),
+//RS         });
+//RS     }
+//RS     match member {
+//RS         "decode" => {
+//RS             let decoded = match codec {
+//RS                 "Date" | "LocalDate" => {
+//RS                     let text = js_codec_tree_text_expression(value);
+//RS                     js_codec_result_expression(
+//RS                         format!("jet_time_date_parse({text})"),
+//RS                         &format!("expected {codec}: "),
+//RS                     )
+//RS                 }
+//RS                 "LocalTime" => {
+//RS                     let text = js_codec_tree_text_expression(value);
+//RS                     js_codec_result_expression(
+//RS                         format!("jet_time_parse_time({text})"),
+//RS                         "expected LocalTime: ",
+//RS                     )
+//RS                 }
+//RS                 "DateTime" => {
+//RS                     let text = js_codec_tree_text_expression(value);
+//RS                     js_codec_result_expression(
+//RS                         format!("jet_time_parse_rfc3339({text})"),
+//RS                         "expected DateTime: ",
+//RS                     )
+//RS                 }
+//RS                 "Duration" => {
+//RS                     let integer = js_codec_tree_integer_expression(value);
+//RS                     let body = format!(
+//RS                         "(() => {{ const __jet_duration = {integer}; \
+//RS                          if (__jet_duration < JET_I64_MIN || __jet_duration > JET_I64_MAX) \
+//RS                          throw new Error(\"expected Duration, found out-of-range Int\"); \
+//RS                          return jet_time_clamp_i64(__jet_duration); }})()"
+//RS                     );
+//RS                     js_codec_result_expression(body, "")
+//RS                 }
+//RS                 "Decimal" => {
+//RS                     let decimal = js_codec_tree_decimal_expression(value);
+//RS                     js_codec_result_expression(decimal, "expected Decimal: ")
+//RS                 }
+//RS                 _ => unreachable!(),
+//RS             };
+//RS             Ok(decoded)
+//RS         }
+//RS         _ => Err(MirWebError::InvalidMir {
+//RS             message: format!("unsupported MIR codec Prelude member {member:?}"),
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn js_datatree_handle_expression(
+//RS     route: &jet_foundation::MIR::MirPreludeCall,
+//RS     rendered: &[String],
+//RS ) -> Result<String, MirWebError> {
+//RS     let (symbol, arity, borrow_mask) = match route.member.as_str() {
+//RS         "field" => ("jet_datatree_field", 2, &[true, true][..]),
+//RS         "at" => ("jet_datatree_at", 2, &[true, false][..]),
+//RS         "int" => ("jet_datatree_int", 1, &[true][..]),
+//RS         "text" => ("jet_datatree_text", 1, &[true][..]),
+//RS         "bool" => ("jet_datatree_bool", 1, &[true][..]),
+//RS         "float" => ("jet_datatree_float", 1, &[true][..]),
+//RS         "to_text" => ("jet_datatree_to_text", 1, &[true][..]),
+//RS         "equal_unordered" => ("jet_datatree_equal_unordered", 2, &[true, true][..]),
+//RS         other => {
+//RS             return Err(MirWebError::InvalidMir {
+//RS                 message: format!("unsupported DataTree Prelude member {other:?}"),
+//RS             });
+//RS         }
+//RS     };
+//RS     if route.signature.arity != arity
+//RS         || route.signature.max_arity != arity
+//RS         || route.signature.borrow_mask.as_slice() != borrow_mask
+//RS     {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!(
+//RS                 "MIR DataTree Prelude call {:?} has an invalid signature",
+//RS                 route.member
+//RS             ),
+//RS         });
+//RS     }
+//RS     match &route.symbol {
+//RS         MirSymbol::Prelude(actual) if actual == symbol => {}
+//RS         _ => {
+//RS             return Err(MirWebError::InvalidMir {
+//RS                 message: format!(
+//RS                     "MIR DataTree Prelude member {:?} has symbol {:?}, expected {:?}",
+//RS                     route.member, route.symbol, symbol
+//RS                 ),
+//RS             });
+//RS         }
+//RS     }
+//RS     if rendered.len() != arity {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!(
+//RS                 "MIR DataTree Prelude call {:?} has {} arguments, expected {}",
+//RS                 route.member,
+//RS                 rendered.len(),
+//RS                 arity
+//RS             ),
+//RS         });
+//RS     }
+//RS     Ok(format!("{symbol}({})", rendered.join(", ")))
+//RS }
+//RS 
+//RS fn js_codec_user_decode_function(
+//RS     program: &MirProgram,
+//RS     target: &MirType,
+//RS ) -> Result<jet_foundation::MIR::MirFunctionId, MirWebError> {
+//RS     let mut candidate = program
+//RS         .impls
+//RS         .iter()
+//RS         .filter(|implementation| {
+//RS             implementation.serde == Some(MirSerdeCodec::Decode)
+//RS                 && implementation.self_type.same_checked_type(target)
+//RS         })
+//RS         .flat_map(|implementation| implementation.methods.iter().copied())
+//RS         .find(|id| {
+//RS             program
+//RS                 .functions
+//RS                 .iter()
+//RS                 .find(|function| function.id == *id)
+//RS                 .is_some_and(|function| function.name == "decode")
+//RS         });
+//RS     if candidate.is_none() {
+//RS         candidate = target.nominal_id().and_then(|type_id| {
+//RS             program
+//RS                 .types
+//RS                 .iter()
+//RS                 .find(|definition| definition.id == type_id)
+//RS                 .and_then(|definition| match &definition.kind {
+//RS                     MirTypeDefKind::Struct { methods, .. }
+//RS                     | MirTypeDefKind::Enum { methods, .. } => methods.iter().copied().find(|id| {
+//RS                         program
+//RS                             .functions
+//RS                             .iter()
+//RS                             .find(|function| function.id == *id)
+//RS                             .is_some_and(|function| function.name == "decode")
+//RS                     }),
+//RS                     _ => None,
+//RS                 })
+//RS         });
+//RS     }
+//RS     let Some(id) = candidate else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!(
+//RS                 "typed codec target `{}` has no checked Decode function",
+//RS                 target.display_name()
+//RS             ),
+//RS         });
+//RS     };
+//RS     let Some(function) = program.functions.iter().find(|function| function.id == id) else {
+//RS         return Err(MirWebError::MissingUserFunction { function: id.0 });
+//RS     };
+//RS     if !function.target_applicability.web || !function_in_bucket(function, WebBucket::JS) {
+//RS         return Err(MirWebError::MissingUserFunction { function: id.0 });
+//RS     }
+//RS     if function.generator.is_some() || web_function_is_async(program, id) {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!(
+//RS                 "typed codec Decode function {} is async or generator",
+//RS                 id.0
+//RS             ),
+//RS         });
+//RS     }
+//RS     Ok(id)
+//RS }
+//RS 
+//RS fn js_codec_type_descriptor(
+//RS     program: &MirProgram,
+//RS     ty: &MirType,
+//RS ) -> Result<String, MirWebError> {
+//RS     match &ty.kind {
+//RS         MirTypeKind::Int => Ok("{ kind: \"int\" }".to_string()),
+//RS         MirTypeKind::Float => Ok("{ kind: \"float\" }".to_string()),
+//RS         MirTypeKind::Bool => Ok("{ kind: \"bool\" }".to_string()),
+//RS         MirTypeKind::String => Ok("{ kind: \"string\" }".to_string()),
+//RS         MirTypeKind::Char => Ok("{ kind: \"char\" }".to_string()),
+//RS         MirTypeKind::Float32 => Ok("{ kind: \"float32\" }".to_string()),
+//RS         MirTypeKind::IntN { signed, bits } => Ok(format!(
+//RS             "{{ kind: \"intn\", signed: {}, bits: {}, name: {}, byte: {} }}",
+//RS             signed,
+//RS             bits,
+//RS             js_string(&ty.display_name()),
+//RS             !signed && *bits == 8
+//RS         )),
+//RS         MirTypeKind::InlineRange { base, lo, hi } => Ok(format!(
+//RS             "{{ kind: \"range\", base: {}, lo: BigInt({lo}), hi: BigInt({hi}) }}",
+//RS             js_codec_type_descriptor(program, base)?
+//RS         )),
+//RS         MirTypeKind::Option(inner) => Ok(format!(
+//RS             "{{ kind: \"option\", inner: {} }}",
+//RS             js_codec_type_descriptor(program, inner)?
+//RS         )),
+//RS         MirTypeKind::List(inner) => Ok(format!(
+//RS             "{{ kind: \"list\", element: {} }}",
+//RS             js_codec_type_descriptor(program, inner)?
+//RS         )),
+//RS         MirTypeKind::FixedList { elem, len } => {
+//RS             let Some(length) = len.literal_value() else {
+//RS                 return Err(MirWebError::InvalidMir {
+//RS                     message: format!(
+//RS                         "typed codec fixed-list target `{}` has a non-literal length",
+//RS                         ty.display_name()
+//RS                     ),
+//RS                 });
+//RS             };
+//RS             Ok(format!(
+//RS                 "{{ kind: \"fixed_list\", element: {}, length: BigInt({length}) }}",
+//RS                 js_codec_type_descriptor(program, elem)?
+//RS             ))
+//RS         }
+//RS         MirTypeKind::Map { key, value } => {
+//RS             if !matches!(&key.kind, MirTypeKind::String) {
+//RS                 return Err(MirWebError::InvalidMir {
+//RS                     message: "comptime maps require String keys".to_string(),
+//RS                 });
+//RS             }
+//RS             Ok(format!(
+//RS                 "{{ kind: \"map\", key: {}, value: {} }}",
+//RS                 js_codec_type_descriptor(program, key)?,
+//RS                 js_codec_type_descriptor(program, value)?
+//RS             ))
+//RS         }
+//RS         MirTypeKind::Shared(inner) | MirTypeKind::Tagged { inner, .. } => {
+//RS             js_codec_type_descriptor(program, inner)
+//RS         }
+//RS         MirTypeKind::Apply { name, .. } => match name.name.as_str() {
+//RS             "Data" | "DataTree" => Ok("{ kind: \"datatree\" }".to_string()),
+//RS             "Date" => Ok("{ kind: \"date\" }".to_string()),
+//RS             "LocalDate" => Ok("{ kind: \"local_date\" }".to_string()),
+//RS             "LocalTime" => Ok("{ kind: \"local_time\" }".to_string()),
+//RS             "DateTime" => Ok("{ kind: \"datetime\" }".to_string()),
+//RS             "Duration" => Ok("{ kind: \"duration\" }".to_string()),
+//RS             "Decimal" => Ok("{ kind: \"decimal\" }".to_string()),
+//RS             name @ ("I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32" | "U64" | "U128") => {
+//RS                 let signed = name.starts_with('I');
+//RS                 let bits = &name[1..];
+//RS                 Ok(format!(
+//RS                     "{{ kind: \"intn\", signed: {}, bits: {}, name: {}, byte: {} }}",
+//RS                     signed,
+//RS                     bits,
+//RS                     js_string(name),
+//RS                     !signed && name == "U8"
+//RS                 ))
+//RS             }
+//RS             _ => {
+//RS                 let id = js_codec_user_decode_function(program, ty)?;
+//RS                 Ok(format!(
+//RS                     "{{ kind: \"user\", name: {}, decode: (tree) => jet_fn_{}([], [tree]) }}",
+//RS                     js_string(&ty.display_name()),
+//RS                     id.0
+//RS                 ))
+//RS             }
+//RS         },
+//RS         _ => Err(MirWebError::InvalidMir {
+//RS             message: format!(
+//RS                 "unsupported typed codec target `{}` in Web adapter",
+//RS                 ty.display_name()
+//RS             ),
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn js_codec_tree_text_expression(tree: &str) -> String {
+//RS     format!(
+//RS         "(() => {{ const __jet_tree = {tree}; switch (__jet_tree?.tag) {{ \
+//RS          case \"Text\": case \"TypedText\": return String(__jet_tree.values?.[0]); \
+//RS          case \"Int\": return BigInt(__jet_tree.values?.[0]).toString(); \
+//RS          case \"Float\": return String(__jet_tree.values?.[0]); \
+//RS          case \"Bool\": return __jet_tree.values?.[0] ? \"true\" : \"false\"; \
+//RS          case \"Number\": throw new Error(\"expected Text, found number \" + String(__jet_tree.values?.[0])); \
+//RS          default: throw new Error(\"expected Text, found \" + String(__jet_tree?.tag ?? \"value\")); \
+//RS          }} }})()"
+//RS     )
+//RS }
+//RS 
+//RS fn js_codec_tree_integer_expression(tree: &str) -> String {
+//RS     format!(
+//RS         "(() => {{ const __jet_tree = {tree}; switch (__jet_tree?.tag) {{ \
+//RS          case \"Int\": return BigInt(__jet_tree.values?.[0]); \
+//RS          case \"Number\": case \"Text\": {{ \
+//RS            const __jet_text = String(__jet_tree.values?.[0]).trim(); \
+//RS            try {{ return BigInt(__jet_text); }} \
+//RS            catch (_) {{ throw new Error(\"expected Int, found text \" + JSON.stringify(__jet_text)); }} \
+//RS          }} \
+//RS          case \"Float\": {{ \
+//RS            const __jet_number = Number(__jet_tree.values?.[0]); \
+//RS            if (!Number.isFinite(__jet_number) || !Number.isInteger(__jet_number) \
+//RS              || __jet_number < Number(JET_I64_MIN) || __jet_number >= Number(JET_I64_MAX)) \
+//RS              throw new Error(\"expected Int, found out-of-range Float\"); \
+//RS            return BigInt(__jet_number); \
+//RS          }} \
+//RS          default: throw new Error(\"expected Int, found \" + String(__jet_tree?.tag ?? \"value\")); \
+//RS          }} }})()"
+//RS     )
+//RS }
+//RS 
+//RS fn js_codec_tree_decimal_expression(tree: &str) -> String {
+//RS     format!(
+//RS         "(() => {{ const __jet_tree = {tree}; switch (__jet_tree?.tag) {{ \
+//RS          case \"Number\": case \"Text\": \
+//RS            return jet_decimal_from_str(String(__jet_tree.values?.[0])); \
+//RS          case \"Int\": \
+//RS            return jet_decimal_from_str(BigInt(__jet_tree.values?.[0]).toString()); \
+//RS          case \"TypedText\": \
+//RS            throw new Error(\"expected Decimal, found text \" + JSON.stringify(__jet_tree.values?.[0])); \
+//RS          default: throw new Error(\"expected Decimal, found \" + String(__jet_tree?.tag ?? \"value\")); \
+//RS          }} }})()"
+//RS     )
+//RS }
+//RS 
+//RS fn js_codec_result_expression(body: String, prefix: &str) -> String {
+//RS     format!(
+//RS         "(() => {{ const __jet_codec_result = jet_time_result(() => {body}); \
+//RS          if (__jet_codec_result.tag === \"Ok\") return __jet_codec_result; \
+//RS          return {{ tag: \"Err\", values: [[{{ path: \"\", reason: {} + \
+//RS          String(__jet_codec_result.values?.[0] ?? \"\") }}]] }}; }})()",
+//RS         js_string(prefix)
+//RS     )
+//RS }
+//RS fn js_conversion_expression(
+//RS     program: &MirProgram,
+//RS     value_id: jet_foundation::MIR::MirValueId,
+//RS     parameters: &[jet_foundation::MIR::MirValueId],
+//RS     target: &MirType,
+//RS     conversion: &MirConversion,
+//RS ) -> Result<String, MirWebError> {
+//RS     if let Some(type_id) = target.identity {
+//RS         ensure_type_instance(program, type_id)?;
+//RS     }
+//RS     let value = format!("__jet_values.get({})", value_id.0);
+//RS     match conversion {
+//RS         MirConversion::Transparent => Ok(value),
+//RS         MirConversion::NumericCast => {
+//RS             if !parameters.is_empty() {
+//RS                 return Err(MirWebError::InvalidMir {
+//RS                     message: "numeric cast has parameters".to_string(),
+//RS                 });
+//RS             }
+//RS             Ok(if target.is_integer() {
+//RS                 format!("BigInt({value})")
+//RS             } else if matches!(target.kind(), MirTypeKind::Float32) {
+//RS                 format!("Math.fround(Number({value}))")
+//RS             } else {
+//RS                 format!("Number({value})")
+//RS             })
+//RS         }
+//RS         MirConversion::SendFn => {
+//RS             if !parameters.is_empty() {
+//RS                 return Err(MirWebError::InvalidMir {
+//RS                     message: "SendFn MIR conversion has parameters".to_string(),
+//RS                 });
+//RS             }
+//RS             Ok(value)
+//RS         }
+//RS         MirConversion::Prelude { call, location, .. } => {
+//RS             let Some(route) = program.prelude_calls.iter().find(|route| route.id == *call) else {
+//RS                 return Err(MirWebError::MissingPreludeCall { call: call.0 });
+//RS             };
+//RS             if route.signature.max_arity != route.signature.arity {
+//RS                 return Err(MirWebError::InvalidMir {
+//RS                     message: format!(
+//RS                         "MIR conversion Prelude call {} does not have an exact arity",
+//RS                         call.0
+//RS                     ),
+//RS                 });
+//RS             }
+//RS             let mut args = Vec::with_capacity(parameters.len() + 3);
+//RS             args.push(value);
+//RS             args.extend(
+//RS                 parameters
+//RS                     .iter()
+//RS                     .map(|id| format!("__jet_values.get({})", id.0)),
+//RS             );
+//RS             match route.signature.arity.checked_sub(args.len()) {
+//RS                 Some(0) => {}
+//RS                 Some(2) => {
+//RS                     args.push(js_source_file_path(program, location.file)?);
+//RS                     args.push(location.line.to_string());
+//RS                 }
+//RS                 Some(additional) => {
+//RS                     return Err(MirWebError::InvalidMir {
+//RS                         message: format!(
+//RS                             "MIR conversion Prelude call {} requires unsupported context arity {additional}",
+//RS                             call.0
+//RS                         ),
+//RS                     });
+//RS                 }
+//RS                 None => {
+//RS                     return Err(MirWebError::InvalidMir {
+//RS                         message: format!(
+//RS                             "MIR conversion Prelude call {} has fewer arguments than its value/parameter prefix",
+//RS                             call.0
+//RS                         ),
+//RS                     });
+//RS                 }
+//RS             }
+//RS             js_prelude_call_expression(program, *call, &args)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn validate_owner_type_args(
+//RS     program: &MirProgram,
+//RS     type_args: &[jet_foundation::MIR::MirPreludeTypeArg],
+//RS ) -> Result<(), MirWebError> {
+//RS     for type_arg in type_args {
+//RS         if let jet_foundation::MIR::MirPreludeTypeArg::Type(ty) = type_arg {
+//RS             validate_type_args(program, std::slice::from_ref(ty))?;
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn ensure_type_instance(
+//RS     program: &MirProgram,
+//RS     id: jet_foundation::MIR::MirTypeId,
+//RS ) -> Result<(), MirWebError> {
+//RS     if program
+//RS         .type_instances
+//RS         .iter()
+//RS         .any(|ty| ty.identity == Some(id))
+//RS     {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(MirWebError::InvalidMir {
+//RS             message: format!("MIR type instance {} is missing", id.0),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS fn validate_type_args(
+//RS     program: &MirProgram,
+//RS     types: &[MirType],
+//RS ) -> Result<(), MirWebError> {
+//RS     for ty in types {
+//RS         if let Some(type_id) = ty.identity {
+//RS             ensure_type_instance(program, type_id)?;
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn ensure_enum_variant(
+//RS     program: &MirProgram,
+//RS     owner: jet_foundation::MIR::MirTypeId,
+//RS     variant: &str,
+//RS     payload_index: Option<usize>,
+//RS ) -> Result<(), MirWebError> {
+//RS     ensure_type_instance(program, owner)?;
+//RS     let Some(type_def) = program.types.iter().find(|type_def| type_def.id == owner) else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!("MIR enum type definition {} is missing", owner.0),
+//RS         });
+//RS     };
+//RS     let MirTypeDefKind::Enum { variants, .. } = &type_def.kind else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!("MIR enum operation owner {} is not an enum", owner.0),
+//RS         });
+//RS     };
+//RS     let Some(declared) = variants.iter().find(|candidate| candidate.name == variant) else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!("MIR enum {} has no variant {}", owner.0, variant),
+//RS         });
+//RS     };
+//RS     if let Some(index) = payload_index {
+//RS         let arity = match &declared.payload {
+//RS             MirVariantPayload::Unit => 0,
+//RS             MirVariantPayload::Single(_) => 1,
+//RS             MirVariantPayload::Named(fields) => fields.len(),
+//RS         };
+//RS         if index >= arity {
+//RS             return Err(MirWebError::InvalidMir {
+//RS                 message: format!(
+//RS                     "MIR enum {} variant {} has no payload index {}",
+//RS                     owner.0, variant, index
+//RS                 ),
+//RS             });
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn js_field_name(
+//RS     program: &MirProgram,
+//RS     id: jet_foundation::MIR::MirFieldId,
+//RS ) -> Result<String, MirWebError> {
+//RS     program
+//RS         .fields
+//RS         .iter()
+//RS         .find(|row| row.id == id)
+//RS         .map(|row| row.field.name.clone())
+//RS         .ok_or_else(|| MirWebError::InvalidMir {
+//RS             message: format!("MIR field {} is missing", id.0),
+//RS         })
+//RS }
+//RS 
+//RS fn js_shared_guard_map_expression(
+//RS     program: &MirProgram,
+//RS     call: MirPreludeCallId,
+//RS     guard: String,
+//RS     path: &[jet_foundation::MIR::MirFieldId],
+//RS     editable: bool,
+//RS ) -> Result<String, MirWebError> {
+//RS     let mut expression = guard;
+//RS     for field in path {
+//RS         let field_name = js_field_name(program, *field)?;
+//RS         expression = js_prelude_call_expression(
+//RS             program,
+//RS             call,
+//RS             &[
+//RS                 expression,
+//RS                 js_string(&field_name),
+//RS                 editable.to_string(),
+//RS             ],
+//RS         )?;
+//RS     }
+//RS     Ok(expression)
+//RS }
+//RS 
+//RS fn js_shared_guard_split_expression(
+//RS     program: &MirProgram,
+//RS     map_call: MirPreludeCallId,
+//RS     split_call: MirPreludeCallId,
+//RS     guard: String,
+//RS     first: &[jet_foundation::MIR::MirFieldId],
+//RS     second: &[jet_foundation::MIR::MirFieldId],
+//RS     editable: bool,
+//RS     result_type: Option<&MirType>,
+//RS ) -> Result<String, MirWebError> {
+//RS     if first.is_empty() || second.is_empty() {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: "MIR shared guard split has an empty checked field path".to_string(),
+//RS         });
+//RS     }
+//RS     let common = first
+//RS         .iter()
+//RS         .zip(second)
+//RS         .take_while(|(left, right)| left == right)
+//RS         .count();
+//RS     if common == first.len() || common == second.len() {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: "MIR shared guard split paths are identical or prefix-related".to_string(),
+//RS         });
+//RS     }
+//RS     let mapped = js_shared_guard_map_expression(program, map_call, guard, &first[..common], editable)?;
+//RS     let first_name = js_field_name(program, first[common])?;
+//RS     let second_name = js_field_name(program, second[common])?;
+//RS     let split = js_prelude_call_expression(
+//RS         program,
+//RS         split_call,
+//RS         &[
+//RS             mapped,
+//RS             js_string(&first_name),
+//RS             js_string(&second_name),
+//RS             editable.to_string(),
+//RS         ],
+//RS     )?;
+//RS     let first_guard = js_shared_guard_map_expression(
+//RS         program,
+//RS         map_call,
+//RS         "__jet_shared_split[0]".to_string(),
+//RS         &first[common + 1..],
+//RS         editable,
+//RS     )?;
+//RS     let second_guard = js_shared_guard_map_expression(
+//RS         program,
+//RS         map_call,
+//RS         "__jet_shared_split[1]".to_string(),
+//RS         &second[common + 1..],
+//RS         editable,
+//RS     )?;
+//RS     js_guard_pair_expression(
+//RS         program,
+//RS         result_type,
+//RS         split,
+//RS         first_guard,
+//RS         second_guard,
+//RS         "__jet_shared_split",
+//RS     )
+//RS }
+//RS 
+//RS fn js_guard_pair_expression(
+//RS     program: &MirProgram,
+//RS     result_type: Option<&MirType>,
+//RS     split: String,
+//RS     first_guard: String,
+//RS     second_guard: String,
+//RS     split_binding: &str,
+//RS ) -> Result<String, MirWebError> {
+//RS     let Some(result_type) = result_type else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: "MIR guard split has no result type".to_string(),
+//RS         });
+//RS     };
+//RS     let Some(type_id) = result_type.identity else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: "MIR guard split result has no type identity".to_string(),
+//RS         });
+//RS     };
+//RS     ensure_type_instance(program, type_id)?;
+//RS     let Some(type_def) = program.types.iter().find(|type_def| type_def.id == type_id) else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!("MIR guard split result type {} is missing", type_id.0),
+//RS         });
+//RS     };
+//RS     let MirTypeDefKind::Struct { fields, .. } = &type_def.kind else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!("MIR guard split result type {} is not a two-field struct", type_id.0),
+//RS         });
+//RS     };
+//RS     let [first_field, second_field] = fields.as_slice() else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!(
+//RS                 "MIR guard split result type {} does not have two fields",
+//RS                 type_id.0
+//RS             ),
+//RS         });
+//RS     };
+//RS     let first_key = js_string(&js_field_name(program, first_field.id)?);
+//RS     let second_key = js_string(&js_field_name(program, second_field.id)?);
+//RS     Ok(format!(
+//RS         "(() => {{ const {split_binding} = {split}; return {{ {first_key}: {first_guard}, {second_key}: {second_guard} }}; }})()"
+//RS     ))
+//RS }
+//RS 
+//RS fn js_cell_guard_map_expression(
+//RS     program: &MirProgram,
+//RS     call: MirPreludeCallId,
+//RS     guard: String,
+//RS     path: &[jet_foundation::MIR::MirFieldId],
+//RS     _editable: bool,
+//RS ) -> Result<String, MirWebError> {
+//RS     let mut expression = guard;
+//RS     for field in path {
+//RS         let field_name = js_field_name(program, *field)?;
+//RS         expression = js_prelude_call_expression(
+//RS             program,
+//RS             call,
+//RS             &[expression, js_string(&field_name)],
+//RS         )?;
+//RS     }
+//RS     Ok(expression)
+//RS }
+//RS 
+//RS fn js_cell_guard_project_expression(
+//RS     program: &MirProgram,
+//RS     map_call: MirPreludeCallId,
+//RS     split_call: Option<MirPreludeCallId>,
+//RS     guard: String,
+//RS     paths: &[Vec<jet_foundation::MIR::MirFieldId>],
+//RS     editable: bool,
+//RS     edit_paths_disjoint: bool,
+//RS     result_type: Option<&MirType>,
+//RS ) -> Result<String, MirWebError> {
+//RS     if !(1..=2).contains(&paths.len()) || paths.iter().any(|path| path.is_empty()) {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: "MIR Cell guard projection has an invalid checked path shape".to_string(),
+//RS         });
+//RS     }
+//RS     let is_split = paths.len() == 2;
+//RS     if split_call.is_some() != is_split {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: "MIR Cell guard projection path arity disagrees with its split row".to_string(),
+//RS         });
+//RS     }
+//RS     if edit_paths_disjoint && (!editable || !is_split) {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: "MIR Cell guard edit disjointness proof has an invalid shape".to_string(),
+//RS         });
+//RS     }
+//RS     if editable && is_split && !edit_paths_disjoint {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: "MIR editable Cell guard split is missing disjoint paths proof".to_string(),
+//RS         });
+//RS     }
+//RS     match paths {
+//RS         [path] => js_cell_guard_map_expression(program, map_call, guard, path, editable),
+//RS         [first, second] => {
+//RS             let common = first
+//RS                 .iter()
+//RS                 .zip(second)
+//RS                 .take_while(|(left, right)| left == right)
+//RS                 .count();
+//RS             if common == first.len() || common == second.len() {
+//RS                 return Err(MirWebError::InvalidMir {
+//RS                     message: "MIR Cell guard split paths are identical or prefix-related".to_string(),
+//RS                 });
+//RS             }
+//RS             let mapped =
+//RS                 js_cell_guard_map_expression(program, map_call, guard, &first[..common], editable)?;
+//RS             let first_name = js_field_name(program, first[common])?;
+//RS             let second_name = js_field_name(program, second[common])?;
+//RS             let Some(split_call) = split_call else {
+//RS                 return Err(MirWebError::InvalidMir {
+//RS                     message: "MIR Cell guard split has no exact split row".to_string(),
+//RS                 });
+//RS             };
+//RS             let split = js_prelude_call_expression(
+//RS                 program,
+//RS                 split_call,
+//RS                 &[
+//RS                     mapped,
+//RS                     js_string(&first_name),
+//RS                     js_string(&second_name),
+//RS                 ],
+//RS             )?;
+//RS             let first_guard = js_cell_guard_map_expression(
+//RS                 program,
+//RS                 map_call,
+//RS                 "__jet_cell_split[0]".to_string(),
+//RS                 &first[common + 1..],
+//RS                 editable,
+//RS             )?;
+//RS             let second_guard = js_cell_guard_map_expression(
+//RS                 program,
+//RS                 map_call,
+//RS                 "__jet_cell_split[1]".to_string(),
+//RS                 &second[common + 1..],
+//RS                 editable,
+//RS             )?;
+//RS             js_guard_pair_expression(
+//RS                 program,
+//RS                 result_type,
+//RS                 split,
+//RS                 first_guard,
+//RS                 second_guard,
+//RS                 "__jet_cell_split",
+//RS             )
+//RS         }
+//RS         _ => Err(MirWebError::InvalidMir {
+//RS             message: "MIR Cell guard projection has an invalid checked path shape".to_string(),
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn js_source_file_path(
+//RS     program: &MirProgram,
+//RS     id: jet_foundation::MIR::MirSourceFileId,
+//RS ) -> Result<String, MirWebError> {
+//RS     let Some(file) = program.source_files.iter().find(|file| file.id == id) else {
+//RS         return Err(MirWebError::InvalidMir {
+//RS             message: format!("MIR source file {} is missing", id.0),
+//RS         });
+//RS     };
+//RS     Ok(js_string(&file.path))
+//RS }
+//RS fn js_function_stack_context(
+//RS     program: &MirProgram,
+//RS     function: &MirFunction,
+//RS ) -> Result<(String, u32, String), MirWebError> {
+//RS     let file = program
+//RS         .source_files
+//RS         .iter()
+//RS         .find(|file| file.id == function.source_file)
+//RS         .ok_or_else(|| MirWebError::InvalidMir {
+//RS             message: format!("MIR source file {} is missing", function.source_file.0),
+//RS         })?;
+//RS     let (line, _) = jet_foundation::Diagnostics::span_line_col(&file.source, function.span.start);
+//RS     let source_line = file
+//RS         .source
+//RS         .lines()
+//RS         .nth(line.saturating_sub(1))
+//RS         .unwrap_or_default()
+//RS         .trim_end();
+//RS     Ok((js_string(&file.path), line as u32, js_string(source_line)))
+//RS }
+//RS 
+//RS 
+//RS fn js_text_hole_kind(kind: MirTextHoleKind) -> String {
+//RS     match kind {
+//RS         MirTextHoleKind::Text => "{ kind: \"text\" }".to_string(),
+//RS         MirTextHoleKind::Int => "{ kind: \"int\" }".to_string(),
+//RS         MirTextHoleKind::Float => "{ kind: \"float\" }".to_string(),
+//RS         MirTextHoleKind::Bool => "{ kind: \"bool\" }".to_string(),
+//RS         MirTextHoleKind::InlineRange { lo, hi } => {
+//RS             format!("{{ kind: \"inline_range\", lo: {lo}, hi: {hi} }}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn js_text_pattern_parts(
+//RS     program: &MirProgram,
+//RS     parts: &[MirTextPatternPart],
+//RS ) -> Result<String, MirWebError> {
+//RS     let rendered = parts
+//RS         .iter()
+//RS         .map(|part| match part {
+//RS             MirTextPatternPart::Literal(value) => {
+//RS                 Ok(format!("{{ kind: \"literal\", value: {} }}", js_string(value)))
+//RS             }
+//RS             MirTextPatternPart::Hole { kind, ty, .. } => {
+//RS                 ensure_type_instance(program, *ty)?;
+//RS                 Ok(format!(
+//RS                     "{{ kind: \"hole\", hole_kind: {} }}",
+//RS                     js_text_hole_kind(*kind)
+//RS                 ))
+//RS             }
+//RS         })
+//RS         .collect::<Result<Vec<_>, MirWebError>>()?;
+//RS     Ok(format!("[{}]", rendered.join(", ")))
+//RS }
+//RS 
+//RS fn js_binary_pattern_parts(
+//RS     program: &MirProgram,
+//RS     parts: &[MirBinaryPatternPart],
+//RS ) -> Result<String, MirWebError> {
+//RS     let rendered = parts
+//RS         .iter()
+//RS         .map(|part| match part {
+//RS             MirBinaryPatternPart::Literal(values) => Ok(format!(
+//RS                 "{{ kind: \"literal\", value: new Uint8Array([{}]) }}",
+//RS                 values
+//RS                     .iter()
+//RS                     .map(|value| value.to_string())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ")
+//RS             )),
+//RS             MirBinaryPatternPart::Bits { width, ty, little, .. } => {
+//RS                 ensure_type_instance(program, *ty)?;
+//RS                 Ok(format!("{{ kind: \"bits\", width: {}, little: {} }}", width, little))
+//RS             }
+//RS             MirBinaryPatternPart::Rest { ty, .. } => {
+//RS                 ensure_type_instance(program, *ty)?;
+//RS                 Ok("{ kind: \"rest\" }".to_string())
+//RS             }
+//RS         })
+//RS         .collect::<Result<Vec<_>, MirWebError>>()?;
+//RS     Ok(format!("[{}]", rendered.join(", ")))
+//RS }
+//RS 
+//RS fn web_trait_method_targets(
+//RS     program: &MirProgram,
+//RS     method_id: MirTraitMethodId,
+//RS     trait_ref: &MirTraitRef,
+//RS ) -> Result<
+//RS     (
+//RS         Vec<(jet_foundation::MIR::MirTypeId, jet_foundation::MIR::MirFunctionId)>,
+//RS         Option<jet_foundation::MIR::MirFunctionId>,
+//RS     ),
+//RS     MirWebError,
+//RS > {
+//RS     let trait_def = program
+//RS         .traits
+//RS         .iter()
+//RS         .find(|definition| definition.id == trait_ref.id)
+//RS         .ok_or_else(|| MirWebError::InvalidMir {
+//RS             message: format!("MIR trait {} is missing", trait_ref.id.0),
+//RS         })?;
+//RS     let method = trait_def
+//RS         .methods
+//RS         .iter()
+//RS         .find(|method| method.id == method_id)
+//RS         .ok_or_else(|| MirWebError::InvalidMir {
+//RS             message: format!("MIR trait method {} is missing", method_id.0),
+//RS         })?;
+//RS     let mut targets = Vec::new();
+//RS     for impl_row in &program.impls {
+//RS         let Some(impl_trait) = impl_row.trait_ref.as_ref() else {
+//RS             continue;
+//RS         };
+//RS         if impl_trait.id != trait_ref.id {
+//RS             continue;
+//RS         }
+//RS         let type_id = impl_row
+//RS             .self_type
+//RS             .identity
+//RS             .ok_or_else(|| MirWebError::InvalidMir {
+//RS                 message: format!("MIR impl {} has no self type identity", impl_row.id.0),
+//RS             })?;
+//RS         for function_id in &impl_row.methods {
+//RS             let function = program
+//RS                 .functions
+//RS                 .iter()
+//RS                 .find(|function| function.id == *function_id)
+//RS                 .ok_or_else(|| MirWebError::InvalidMir {
+//RS                     message: format!("MIR impl {} references a missing function", impl_row.id.0),
+//RS                 })?;
+//RS             if function.name == method.name
+//RS                 && matches!(
+//RS                     &function.form,
+//RS                     MirFunctionForm::TraitMethod {
+//RS                         trait_ref: function_trait,
+//RS                         ..
+//RS                     } if function_trait.id == trait_ref.id
+//RS                 )
+//RS             {
+//RS                 if targets.iter().any(|(existing, _)| *existing == type_id) {
+//RS                     return Err(MirWebError::InvalidMir {
+//RS                         message: format!(
+//RS                             "MIR trait method {} has ambiguous implementations for type {}",
+//RS                             method_id.0, type_id.0
+//RS                         ),
+//RS                     });
+//RS                 }
+//RS                 targets.push((type_id, *function_id));
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok((targets, method.default))
+//RS }
+//RS 
+// END-PORT-PENDING 0463 crates/jet-codegen/src/Codegen/MIRWeb.rs:3560-5240
+

@@ -1,0 +1,1818 @@
+// PORT-PENDING 0406 crates-jet-sema-src-sema-checkerinfer-calls-method-calls-module-group-slice-6582: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:6582-8395
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS             _ => None,
+//RS         };
+//RS         if let Some(shared_guard_ty) = shared_guard_ty {
+//RS             if let Some(result) =
+//RS                 self.finish_shared_guard_method(receiver, &shared_guard_ty, method, args, span)
+//RS             {
+//RS                 *recv_type_out = Some(crate::Syntax::TYPE_SHARED_GUARD.to_string());
+//RS                 *resolved_ret_out = result.clone();
+//RS                 return result;
+//RS             }
+//RS         }
+//RS         // D-SPACE-GEOMETRY1=A: generic and stock geometry methods share the
+//RS         // same closed return oracle.  This is the sema boundary that rejects
+//RS         // a mismatched transform middle space before any backend sees it.
+//RS         if let Some(base) = recv_ty.base_name() {
+//RS             if is_geometry_type(base) && !self.registry.contains(base) {
+//RS                 let args_len = args.len();
+//RS                 let mut arg_types = Vec::with_capacity(args_len);
+//RS                 for (idx, arg) in args.iter_mut().enumerate() {
+//RS                     let depth_arg = idx == 1
+//RS                         && method == "point_at_depth"
+//RS                         && matches!(
+//RS                             &recv_ty,
+//RS                             Type::Apply { name, .. }
+//RS                                 if matches!(name.as_str(), "Transform" | "Transform2")
+//RS                         )
+//RS                         && args_len == 2;
+//RS                     if depth_arg {
+//RS                         self.expect_core_arg(
+//RS                             "Transform.point_at_depth",
+//RS                             idx,
+//RS                             &Type::Float,
+//RS                             arg,
+//RS                         );
+//RS                         arg_types.push(Type::Float);
+//RS                     } else if let Some(arg_ty) = self.infer(&mut arg.expr) {
+//RS                         arg_types.push(arg_ty);
+//RS                     }
+//RS                 }
+//RS                 if let Some(result) = geometry_method_return(&recv_ty, method, &arg_types) {
+//RS                     *recv_type_out = Some(base.to_string());
+//RS                     match result {
+//RS                         Ok(ret) => {
+//RS                             *resolved_ret_out = Some(ret.clone());
+//RS                             return Some(ret);
+//RS                         }
+//RS                         Err(()) => {
+//RS                             if let Some((first, second, middle_a, middle_b)) =
+//RS                                 geometry_transform_diagnostic(&recv_ty, method, &arg_types)
+//RS                             {
+//RS                                 self.diags.push(Diagnostic::from_row(
+//RS                                     "E2521",
+//RS                                     &[
+//RS                                         ("first", first.as_str()),
+//RS                                         ("second", second.as_str()),
+//RS                                         ("middle_a", middle_a.as_str()),
+//RS                                         ("middle_b", middle_b.as_str()),
+//RS                                     ],
+//RS                                     Some(span),
+//RS                                 ));
+//RS                             } else {
+//RS                                 let expected = geometry_space(&recv_ty)
+//RS                                     .map(|space| space.show())
+//RS                                     .unwrap_or_else(|| recv_ty.show());
+//RS                                 let actual = arg_types
+//RS                                     .first()
+//RS                                     .and_then(geometry_space)
+//RS                                     .map(|space| space.show())
+//RS                                     .or_else(|| arg_types.first().map(|ty| ty.show()))
+//RS                                     .unwrap_or_else(|| "<missing>".to_string());
+//RS                                 let expected = if method == "add" && geometry_is_point(&recv_ty) {
+//RS                                     format!("a displacement in {expected}")
+//RS                                 } else if method == "sub" && geometry_is_point(&recv_ty) {
+//RS                                     format!("a point or displacement in {expected}")
+//RS                                 } else if geometry_is_delta(&recv_ty) {
+//RS                                     format!("a displacement in {expected}")
+//RS                                 } else {
+//RS                                     expected
+//RS                                 };
+//RS                                 let operation = format!("{base}.{method}");
+//RS                                 self.diags.push(Diagnostic::from_row(
+//RS                                     "E2520",
+//RS                                     &[
+//RS                                         ("operation", operation.as_str()),
+//RS                                         ("expected", expected.as_str()),
+//RS                                         ("actual", actual.as_str()),
+//RS                                     ],
+//RS                                     Some(span),
+//RS                                 ));
+//RS                             }
+//RS                             return None;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         // D-SIMD2 / D-LINALG1: methods on the built-in math value types
+//RS         // (`v.dot(w)`, `v.length()`, `v.sum()`, `v.reduce(.Max)`, `m.matmul(n)`).
+//RS         // Operator overloading on this closed family is blessed; named methods are
+//RS         // the rest of the surface. Set `recv_type_out` so codegen routes to the
+//RS         // math-method op (TIR handle-method path).
+//RS         if let Type::Named(math_ty) = &recv_ty {
+//RS             if is_math_type(math_ty) && !self.registry.contains(math_ty) {
+//RS                 let math_ty = math_ty.clone();
+//RS                 // D-REDUCE-VALUE1=A: the sole argument is a Core ReduceOp value.
+//RS                 if method == "reduce" && is_simd_lane_type(&math_ty) {
+//RS                     if args.len() != 1 {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E2510",
+//RS                             format!("`reduce` takes one `ReduceOp` value, got {}", args.len()),
+//RS                             "a lane reduction uses the closed Core `ReduceOp` enum".to_string(),
+//RS                             "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     } else if let Expr::ReduceMarker(op, mspan) = &args[0].expr {
+//RS                         let replacement = crate::Policy::applied_rule(op)
+//RS                             .and_then(|row| match row.status {
+//RS                                 crate::Policy::RuleStatus::Retired { replacement } => {
+//RS                                     Some(replacement)
+//RS                                 }
+//RS                                 crate::Policy::RuleStatus::Active => None,
+//RS                             })
+//RS                             .unwrap_or(".Add");
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E2510",
+//RS                             format!("`#{op}` is retired as a reduce selector"),
+//RS                             "reduce operations are ordinary Core `ReduceOp` enum values"
+//RS                                 .to_string(),
+//RS                             format!("write `v.reduce({replacement})`"),
+//RS                             Some(*mspan),
+//RS                         ));
+//RS                     } else if let Expr::EnumLit {
+//RS                         type_name,
+//RS                         variant,
+//RS                         args: enum_args,
+//RS                         span: value_span,
+//RS                         ..
+//RS                     } = &args[0].expr
+//RS                     {
+//RS                         let valid = (type_name.is_empty()
+//RS                             || type_name == crate::Syntax::TYPE_REDUCE_OP)
+//RS                             && enum_args.is_empty()
+//RS                             && simd_reduce_markers().contains(&variant.as_str());
+//RS                         let value_span = *value_span;
+//RS                         if valid {
+//RS                             let old = self.expected_type.take();
+//RS                             self.expected_type =
+//RS                                 Some(Type::Named(crate::Syntax::TYPE_REDUCE_OP.to_string()));
+//RS                             self.infer(&mut args[0].expr);
+//RS                             self.expected_type = old;
+//RS                         } else {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E2510",
+//RS                                 "this value is not a `ReduceOp`".to_string(),
+//RS                                 "`reduce` accepts `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`"
+//RS                                     .to_string(),
+//RS                                 "use a Core `ReduceOp` value".to_string(),
+//RS                                 Some(value_span),
+//RS                             ));
+//RS                         }
+//RS                     } else {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E2510",
+//RS                             "`reduce` takes a `ReduceOp` value".to_string(),
+//RS                             "the operation is an ordinary closed Core enum value".to_string(),
+//RS                             "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`".to_string(),
+//RS                             Some(args[0].expr.span()),
+//RS                         ));
+//RS                         self.infer(&mut args[0].expr);
+//RS                     }
+//RS                     *recv_type_out = Some(math_ty.clone());
+//RS                     return Some(math_scalar_ty(&math_ty));
+//RS                 }
+//RS                 if let Some(ret) = math_method_return(&math_ty, method, args.len()) {
+//RS                     // Check each arg against its expected type (so a literal
+//RS                     // elaborates), then return the method's result type.
+//RS                     for arg in args.iter_mut() {
+//RS                         let want = math_method_arg_ty(&math_ty, method);
+//RS                         let old = self.expected_type.take();
+//RS                         if let Some(w) = &want {
+//RS                             self.expected_type = Some(w.clone());
+//RS                         }
+//RS                         let got = self.infer(&mut arg.expr);
+//RS                         self.expected_type = old;
+//RS                         if let (Some(w), Some(g)) = (&want, &got) {
+//RS                             if g != w {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0128",
+//RS                                     format!(
+//RS                                         "`.{}()` on `{}` expects a `{}`, got `{}`",
+//RS                                         method,
+//RS                                         math_ty,
+//RS                                         w.name(),
+//RS                                         g.name()
+//RS                                     ),
+//RS                                     format!(
+//RS                                         "`{}.{}(…)` operates on a `{}`",
+//RS                                         math_ty,
+//RS                                         method,
+//RS                                         w.name()
+//RS                                     ),
+//RS                                     format!("pass a `{}` value", w.name()),
+//RS                                     Some(arg.expr.span()),
+//RS                                 ));
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     *recv_type_out = Some(math_ty.clone());
+//RS                     return Some(ret);
+//RS                 }
+//RS                 // A math type but an unknown method — fall through to the generic
+//RS                 // "no such method" path below, which prints a teaching diagnostic.
+//RS             }
+//RS         }
+//RS         if let Type::Named(n) = &recv_ty {
+//RS             if let Some(param) = self.type_param_scope.iter().find(|p| p.name == *n) {
+//RS                 let bounds = param.bounds.clone();
+//RS                 let known_method = bounds
+//RS                     .iter()
+//RS                     .find_map(|trait_name| {
+//RS                         self.trait_reg
+//RS                             .traits
+//RS                             .get(trait_name)
+//RS                             .and_then(|info| info.methods.get(method))
+//RS                             .map(|msig| (trait_name.clone(), msig.clone()))
+//RS                     })
+//RS                     .or_else(|| {
+//RS                         self.trait_reg
+//RS                             .traits
+//RS                             .iter()
+//RS                             .filter_map(|(trait_name, info)| {
+//RS                                 info.methods.get(method).map(|msig| (trait_name, msig))
+//RS                             })
+//RS                             .min_by(|(left, _), (right, _)| left.cmp(right))
+//RS                             .map(|(trait_name, msig)| (trait_name.clone(), msig.clone()))
+//RS                     });
+//RS                 if let Some((trait_name, mut msig)) = known_method {
+//RS                     // Inside a generic body the bounded parameter is the
+//RS                     // trait's `Self`: `left.compare(right)` with `T: Comparable`
+//RS                     // wants a `T`. Synthetic operator traits spell `Self` as
+//RS                     // the empty name.
+//RS                     let self_subst: HashMap<String, Type> = [
+//RS                         ("Self".to_string(), recv_ty.clone()),
+//RS                         (String::new(), recv_ty.clone()),
+//RS                     ]
+//RS                     .into_iter()
+//RS                     .collect();
+//RS                     for param in &mut msig.params {
+//RS                         param.ty = crate::Generics::substitute_type(&param.ty, &self_subst);
+//RS                     }
+//RS                     msig.return_type = msig
+//RS                         .return_type
+//RS                         .as_ref()
+//RS                         .map(|ret| crate::Generics::substitute_type(ret, &self_subst));
+//RS                     self.record_open_memory_dispatch(
+//RS                         span,
+//RS                         "generic trait dispatch has no sealed target set",
+//RS                     );
+//RS                     self.record_edge(
+//RS                         format!(
+//RS                             "{}::<static>",
+//RS                             crate::Sema::effect_key(Some(&trait_name), method)
+//RS                         ),
+//RS                         span,
+//RS                     );
+//RS                     if !bounds.iter().any(|bound| bound == &trait_name) {
+//RS                         self.diags.push(e0901(method, &trait_name, span));
+//RS                     }
+//RS                     *recv_type_out = Some(trait_name.clone());
+//RS                     let source = self.check_trait_method_args(method, &msig, receiver, args, span);
+//RS                     // The AST fact is the checked carrier for ordinary trait
+//RS                     // calls. Raw protocol traits retain their ABI declaration
+//RS                     // so auto-propagation cannot add `Try`.
+//RS                     let raw_protocol_return = crate::Sema::uses_raw_protocol_return(
+//RS                         Some(&trait_name),
+//RS                         false,
+//RS                         false,
+//RS                     );
+//RS                     let (resolved_ret, _carrier) =
+//RS                         self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
+//RS                     *resolved_ret_out = Some(resolved_ret);
+//RS                     return source;
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-SOA1: a `[S]` of a `#layout(columnar)` struct is stored
+//RS         // struct-of-arrays. v1 supports the core list surface (construct,
+//RS         // index-read, field-read, `len`, `is_empty`, `push`, iterate); the rest
+//RS         // is deferred — reject the method with a clear message rather than
+//RS         // silently miscompiling on columnar storage.
+//RS         if let Type::List(inner) = &recv_ty {
+//RS             if let Type::Named(elem) = inner.as_ref() {
+//RS                 if self.registry.is_columnar(elem)
+//RS                     && !matches!(method, "len" | "is_empty" | "push")
+//RS                     && Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+//RS                         .is_some()
+//RS                 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E1108",
+//RS                             format!(
+//RS                                 "`.{}()` isn't supported on a columnar list `{}` yet",
+//RS                                 method,
+//RS                                 recv_ty.show()
+//RS                             ),
+//RS                             "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
+//RS                             format!(
+//RS                                 "drop `#Layout(columnar)` from `{}` to use `.{}()`, or rewrite the loop with indexing",
+//RS                                 elem, method
+//RS                             ),
+//RS                             Some(span),
+//RS                         ));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-SERDE-ACCESS=B: accessor methods on Data/JSON/DataTree.
+//RS         if let Type::Named(ref tn) = recv_ty {
+//RS             if is_json_type_name(tn) {
+//RS                 if let Some(ret) = datatree_method_return(method, args.len()) {
+//RS                     let json_ret = match ret {
+//RS                         Type::Result { ok, err } => Type::Result {
+//RS                             ok: if matches!(*ok, Type::Named(ref n) if n == "DataTree") {
+//RS                                 Box::new(json_ty())
+//RS                             } else {
+//RS                                 ok
+//RS                             },
+//RS                             err,
+//RS                         },
+//RS                         other => other,
+//RS                     };
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     *recv_type_out = Some(tn.clone());
+//RS                     return Some(json_ret);
+//RS                 }
+//RS             }
+//RS             if tn == "DataTree" {
+//RS                 if let Some(ret) = datatree_method_return(method, args.len()) {
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     *recv_type_out = Some("DataTree".to_string());
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS             // D-DBDRIVER1: accessor methods on `DBValue` (`.int()`/`.text()`/
+//RS             // `.bool()`/`.float()`/`.is_null()`) — read back a bound/column value.
+//RS             if is_db_value_type_name(tn) {
+//RS                 if let Some(ret) = db_value_method_return(method, args.len()) {
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     *recv_type_out = Some(tn.clone());
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS             // D-ANY-JAI1 (c7jaiany §6): accessor methods on `reflect.of(x)`'s
+//RS             // `Value`/`Field` handles — same zero-arg-getter shape as `DBValue`
+//RS             // above. `Value`/`Field` are common enough words a user struct might
+//RS             // reuse them (`Examples/features/memory/zerocopy.jet` already has its
+//RS             // own `struct Field`) — `!self.registry.contains(tn)` makes a
+//RS             // user-declared type of that name win, same principle as codegen's
+//RS             // `!self.type_names.contains(name)` guard on the Rust-type-name side.
+//RS             if is_reflect_type_name(tn) && !self.registry.contains(tn) {
+//RS                 if let Some(ret) = reflect_method_return(tn, method, args.len()) {
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     *recv_type_out = Some(tn.clone());
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS             // D-LAYOUT1 / D-LAYOUT-GATES1: methods on the built-in
+//RS             // `LayoutHandle`/`Constraint` types (`form.h("label","width")`,
+//RS             // `form.value(v)`, `form.suggest(v, 90.0)`, `c.medium()`, …).
+//RS             // `.h`/`.v`/`suggest`'s var argument (index 0 for `.value`/
+//RS             // `.suggest`) accepts any axis type (`HVar`/`VVar`/`LengthVar`),
+//RS             // so it's checked with `is_layout_axis_type` instead of the
+//RS             // single-fixed-`Type` table `layout_method_arg_ty` covers.
+//RS             if is_layout_type(tn) {
+//RS                 if let Some(ret) = layout_method_return(tn, method, args.len()) {
+//RS                     for (i, arg) in args.iter_mut().enumerate() {
+//RS                         let axis_arg = (tn == "Layout"
+//RS                             && ((method == "value" && i == 0) || (method == "suggest" && i == 0)))
+//RS                             .then_some(());
+//RS                         let want = layout_method_arg_ty(method, i);
+//RS                         let old = self.expected_type.take();
+//RS                         if let Some(w) = &want {
+//RS                             self.expected_type = Some(w.clone());
+//RS                         }
+//RS                         let got = self.infer(&mut arg.expr);
+//RS                         self.expected_type = old;
+//RS                         if axis_arg.is_some() {
+//RS                             let ok = matches!(&got, Some(Type::Named(n)) if is_layout_axis_type(n));
+//RS                             if !ok {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                         "E0128",
+//RS                                         format!(
+//RS                                             "`.{}()` on `{}` expects a layout value (`HVar`/`VVar`/`LengthVar`), got `{}`",
+//RS                                             method,
+//RS                                             tn,
+//RS                                             got.as_ref().map(|t| t.name()).unwrap_or_default()
+//RS                                         ),
+//RS                                         "layout variables come from `handle.h(box, anchor)` / `handle.v(box, anchor)`, or a `box.anchor` read inside a `layout { … }` block".to_string(),
+//RS                                         "pass a layout variable, not a plain value".to_string(),
+//RS                                         Some(arg.expr.span()),
+//RS                                     ));
+//RS                             }
+//RS                         } else if let (Some(w), Some(g)) = (&want, &got) {
+//RS                             if g != w {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0128",
+//RS                                     format!(
+//RS                                         "`.{}()` on `{}` expects a `{}`, got `{}`",
+//RS                                         method,
+//RS                                         tn,
+//RS                                         w.name(),
+//RS                                         g.name()
+//RS                                     ),
+//RS                                     format!("`{}.{}(…)` operates on a `{}`", tn, method, w.name()),
+//RS                                     format!("pass a `{}` value", w.name()),
+//RS                                     Some(arg.expr.span()),
+//RS                                 ));
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     *recv_type_out = Some(tn.clone());
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-FLAGSHIP-WEBAPI1=A: generic web suite methods keep the receiver's
+//RS         // element type through sema; no engine-specific method table is needed.
+//RS         if let Some(ret) = web_method_return(&recv_ty, method, args.len()) {
+//RS             let (type_name, element) = match &recv_ty {
+//RS                 Type::Named(name) => (name.as_str(), None),
+//RS                 Type::Apply { name, args } => (name.as_str(), args.first().cloned()),
+//RS                 _ => ("", None),
+//RS             };
+//RS             let expected = match (type_name, method) {
+//RS                 ("JetDataPlot", "line" | "bar" | "point") => Some(0),
+//RS                 ("JetDataPlot", "x" | "color" | "size" | "text" | "detail"
+//RS                     | "with_transform" | "with_scale" | "with_axis" | "with_legend"
+//RS                     | "with_layer" | "with_interaction" | "accessibility" | "layout"
+//RS                     | "select_indices") => Some(1),
+//RS                 ("JetDataPlot", "y") => Some(2),
+//RS                 ("JetDataPlot", "facet") => Some(1),
+//RS                 ("WebTable", "with_column") => Some(1),
+//RS                 ("WebTable", "paginate") => Some(2),
+//RS                 ("WebTable", "page") => Some(0),
+//RS                 ("WebStore", "set") => Some(1),
+//RS                 ("WebStore", "signal" | "state_signal" | "facts_json")
+//RS                     | ("WebVirtualWindow", "facts_json") => Some(0),
+//RS                 ("WebStorePatch", "generation" | "transaction" | "active" | "commit" | "rollback") => Some(0),
+//RS                 ("WebStoreSubscription", "unsubscribe" | "active") => Some(0),
+//RS                 (
+//RS                     "WebQuery",
+//RS                     "state" | "state_signal" | "mutation_state" | "mutation_signal"
+//RS                     | "invalidate" | "get" | "show" | "facts" | "cancel" | "refresh",
+//RS                 ) => Some(0),
+//RS                 ("WebFormTyped", "set_async_validator") => Some(4),
+//RS                 ("WebFormTyped", "set") => Some(2),
+//RS                 ("WebFormTyped", "blur" | "focus" | "set_action" | "post") => Some(1),
+//RS                 ("WebFormTyped", "validate") if !args.is_empty() => Some(3),
+//RS                 ("WebFormTyped", "validate") => Some(0),
+//RS                 (
+//RS                     "WebFormTyped",
+//RS                     "cancel" | "submit" | "no_script" | "state" | "lifecycle"
+//RS                     | "errors" | "render" | "show",
+//RS                 ) => Some(0),
+//RS                 ("WebFormValidationChain", "render") => Some(0),
+//RS                 _ => None,
+//RS             };
+//RS             let Some(expected) = expected else {
+//RS                 return None;
+//RS             };
+//RS             if args.len() != expected {
+//RS                 self.diags
+//RS                     .push(wrong_core_arity(method, expected, args.len(), span));
+//RS             }
+//RS             let row = element.unwrap_or(Type::Int);
+//RS             match (type_name, method) {
+//RS                 ("JetDataPlot", _) => {
+//RS                     let column = Type::Apply {
+//RS                         name: "JetDataPlotColumn".to_string(),
+//RS                         args: vec![row.clone()],
+//RS                     };
+//RS                     match method {
+//RS                         "line" | "bar" | "point" => {}
+//RS                         "x" | "color" | "size" | "text" | "detail" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 if !self.check_plot_column_selector(&row, arg) {
+//RS                                     self.expect_core_arg(method, 0, &column, arg);
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         "y" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 if !self.check_plot_column_selector(&row, arg) {
+//RS                                     self.expect_core_arg(method, 0, &column, arg);
+//RS                                 }
+//RS                             }
+//RS                             if let Some(arg) = args.get_mut(1) {
+//RS                                 self.expect_core_arg(
+//RS                                     method,
+//RS                                     1,
+//RS                                     &Type::Named("JetDataPlotAggregate".to_string()),
+//RS                                     arg,
+//RS                                 );
+//RS                             }
+//RS                         }
+//RS                         "with_transform" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 self.expect_core_arg(
+//RS                                     method,
+//RS                                     0,
+//RS                                     &Type::Named("JetDataPlotTransform".to_string()),
+//RS                                     arg,
+//RS                                 );
+//RS                             }
+//RS                         }
+//RS                         "with_scale" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 self.expect_core_arg(
+//RS                                     method,
+//RS                                     0,
+//RS                                     &Type::Named("JetDataPlotScale".to_string()),
+//RS                                     arg,
+//RS                                 );
+//RS                             }
+//RS                         }
+//RS                         "with_axis" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 self.expect_core_arg(
+//RS                                     method,
+//RS                                     0,
+//RS                                     &Type::Named("JetDataPlotAxis".to_string()),
+//RS                                     arg,
+//RS                                 );
+//RS                             }
+//RS                         }
+//RS                         "with_legend" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 self.expect_core_arg(
+//RS                                     method,
+//RS                                     0,
+//RS                                     &Type::Named("JetDataPlotLegend".to_string()),
+//RS                                     arg,
+//RS                                 );
+//RS                             }
+//RS                         }
+//RS                         "facet" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 if !self.check_plot_column_selector(&row, arg) {
+//RS                                     self.expect_core_arg(method, 0, &column, arg);
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         "with_layer" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 self.expect_core_arg(
+//RS                                     method,
+//RS                                     0,
+//RS                                     &Type::Named("JetDataPlotLayer".to_string()),
+//RS                                     arg,
+//RS                                 );
+//RS                             }
+//RS                         }
+//RS                         "with_interaction" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 self.expect_core_arg(
+//RS                                     method,
+//RS                                     0,
+//RS                                     &Type::Named("JetDataPlotInteraction".to_string()),
+//RS                                     arg,
+//RS                                 );
+//RS                             }
+//RS                         }
+//RS                         "accessibility" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 self.expect_core_arg(
+//RS                                     method,
+//RS                                     0,
+//RS                                     &Type::Named("JetDataPlotAccessibility".to_string()),
+//RS                                     arg,
+//RS                                 );
+//RS                             }
+//RS                         }
+//RS                         "layout" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 self.expect_core_arg(
+//RS                                     method,
+//RS                                     0,
+//RS                                     &Type::Named("JetDataPlotLayout".to_string()),
+//RS                                     arg,
+//RS                                 );
+//RS                             }
+//RS                         }
+//RS                         "select_indices" => {
+//RS                             if let Some(arg) = args.get_mut(0) {
+//RS                                 self.expect_core_arg(
+//RS                                     method,
+//RS                                     0,
+//RS                                     &Type::List(Box::new(Type::Int)),
+//RS                                     arg,
+//RS                                 );
+//RS                             }
+//RS                         }
+//RS                         _ => unreachable!("web method return was checked above"),
+//RS                     }
+//RS                     self.record_call_receiver_access(receiver, AccessConvention::Read, span);
+//RS                 }
+//RS                 ("WebTable", "with_column") => {
+//RS                     let column = Type::Apply {
+//RS                         name: "WebTableColumn".to_string(),
+//RS                         args: vec![row],
+//RS                     };
+//RS                     if let Some(arg) = args.get_mut(0) {
+//RS                         self.expect_core_arg(method, 0, &column, arg);
+//RS                     }
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Move,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebTable", "paginate") => {
+//RS                     if let Some(arg) = args.get_mut(0) {
+//RS                         self.expect_core_arg(method, 0, &Type::Int, arg);
+//RS                     }
+//RS                     if let Some(arg) = args.get_mut(1) {
+//RS                         self.expect_core_arg(method, 1, &Type::Int, arg);
+//RS                     }
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Read,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebTable", "page") => {
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Read,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebStore", "set") => {
+//RS                     if let Some(arg) = args.get_mut(0) {
+//RS                         self.expect_core_arg(method, 0, &row, arg);
+//RS                     }
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Read,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebStore", "signal" | "state_signal" | "facts_json")
+//RS                 | ("WebVirtualWindow", "facts_json") => {
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Read,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebStorePatch", "commit" | "rollback") => {
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Move,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebStoreSubscription", "unsubscribe" | "active") => {
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Read,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebQuery", _) => {
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Read,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebFormTyped", "validate") => {
+//RS                     if args.len() == 3 {
+//RS                         require_exact_labels(
+//RS                             "WebFormTyped.validate",
+//RS                             args,
+//RS                             &[(1, "on"), (2, "with")],
+//RS                             span,
+//RS                             &mut self.diags,
+//RS                         );
+//RS                     }
+//RS                     if let Some(arg) = args.get_mut(0) {
+//RS                         if !self.check_web_form_field_selector(arg) {
+//RS                             self.expect_core_arg(method, 0, &Type::String, arg);
+//RS                         }
+//RS                     }
+//RS                     if let Some(arg) = args.get_mut(1) {
+//RS                         self.expect_core_arg(
+//RS                             method,
+//RS                             1,
+//RS                             &Type::Named("WebFormValidationTiming".to_string()),
+//RS                             arg,
+//RS                         );
+//RS                     }
+//RS                     if let Some(arg) = args.get_mut(2) {
+//RS                         let validator = Type::Fn {
+//RS                             params: vec![Type::String],
+//RS                             ret: Some(Box::new(Type::Result {
+//RS                                 ok: Box::new(unit_ty()),
+//RS                                 err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+//RS                             })),
+//RS                             effect_bound: None,
+//RS                             return_view_provenance: None,
+//RS                             param_contract: None,
+//RS                             call_metadata: None,
+//RS                         };
+//RS                         self.expect_core_arg(method, 2, &validator, arg);
+//RS                     }
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Read,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebFormTyped", "set_async_validator") => {
+//RS                     // ABI: form, field name, timing, debounce, callback.
+//RS                     let string = Type::String;
+//RS                     if let Some(arg) = args.get_mut(0) {
+//RS                         self.expect_core_arg(method, 0, &string, arg);
+//RS                     }
+//RS                     if let Some(arg) = args.get_mut(1) {
+//RS                         self.expect_core_arg(
+//RS                             method,
+//RS                             1,
+//RS                             &Type::Named("WebFormValidationTiming".to_string()),
+//RS                             arg,
+//RS                         );
+//RS                     }
+//RS                     if let Some(arg) = args.get_mut(2) {
+//RS                         self.expect_core_arg(method, 2, &Type::Int, arg);
+//RS                     }
+//RS                     if let Some(arg) = args.get_mut(3) {
+//RS                         let validator = Type::Fn {
+//RS                             params: vec![Type::String],
+//RS                             ret: Some(Box::new(Type::Result {
+//RS                                 ok: Box::new(unit_ty()),
+//RS                                 err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+//RS                             })),
+//RS                             effect_bound: None,
+//RS                             return_view_provenance: None,
+//RS                             param_contract: None,
+//RS                             call_metadata: None,
+//RS                         };
+//RS                         self.expect_core_arg(method, 3, &validator, arg);
+//RS                     }
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Read,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebFormTyped", "set_action") => {
+//RS                     if let Some(arg) = args.get_mut(0) {
+//RS                         let handler = Type::Fn {
+//RS                             params: vec![Type::Named("WebFormDecodedInput".to_string())],
+//RS                             ret: Some(Box::new(Type::Result {
+//RS                                 ok: Box::new(Type::String),
+//RS                                 err: Box::new(Type::Named("WebFormActionError".to_string())),
+//RS                             })),
+//RS                             effect_bound: None,
+//RS                             return_view_provenance: None,
+//RS                             param_contract: None,
+//RS                             call_metadata: None,
+//RS                         };
+//RS                         self.expect_core_arg(method, 0, &handler, arg);
+//RS                     }
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Read,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebFormTyped", _) => {
+//RS                     for index in 0..expected {
+//RS                         if let Some(arg) = args.get_mut(index) {
+//RS                             self.expect_core_arg(method, index, &Type::String, arg);
+//RS                         }
+//RS                     }
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Read,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 ("WebFormValidationChain", "render") => {
+//RS                     self.record_call_receiver_access(
+//RS                         receiver,
+//RS                         AccessConvention::Read,
+//RS                         span,
+//RS                     );
+//RS                 }
+//RS                 _ => unreachable!("web method return was checked above"),
+//RS             }
+//RS             for arg in args.iter_mut().skip(expected) {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             *recv_type_out = Some(type_name.to_string());
+//RS             if let Some(ret) = &ret {
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS             }
+//RS             return ret;
+//RS         }
+//RS         // D-QUERY-RETAIN1=A: Query<T> methods preserve the deferred carrier;
+//RS         // only `collect` changes the value back to an ordinary list.
+//RS         // `group_by` yields the internal `DataGroupedQuery<T, K>` carrier whose
+//RS         // reducers return `Query<Group<K, V>>`; the key and value types are the
+//RS         // ordinary callback result types, never a String/Float projection.
+//RS         if let Type::Apply { name: head, args: query_args } = &recv_ty {
+//RS             if head == "DataTracked" && query_args.len() == 2 {
+//RS                 let row = query_args[0].clone();
+//RS                 let key = query_args[1].clone();
+//RS                 match method {
+//RS                     "query" => {
+//RS                         if !args.is_empty() {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 0, args.len(), span));
+//RS                         }
+//RS                         let ret = Type::Apply {
+//RS                             name: "Query".to_string(),
+//RS                             args: vec![row.clone()],
+//RS                         };
+//RS                         *recv_type_out = Some("DataTracked".to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     "insert" => {
+//RS                         if args.len() != 1 {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 1, args.len(), span));
+//RS                         }
+//RS                         if let Some(arg) = args.get_mut(0) {
+//RS                             self.expect_core_arg(method, 0, &row, arg);
+//RS                         }
+//RS                     }
+//RS                     "replace" => {
+//RS                         if args.len() != 2 {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 2, args.len(), span));
+//RS                         }
+//RS                         if let Some(arg) = args.get_mut(0) {
+//RS                             self.expect_core_arg(method, 0, &key, arg);
+//RS                         }
+//RS                         if let Some(arg) = args.get_mut(1) {
+//RS                             self.expect_core_arg(method, 1, &row, arg);
+//RS                         }
+//RS                     }
+//RS                     "remove" => {
+//RS                         if args.len() != 1 {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 1, args.len(), span));
+//RS                         }
+//RS                         if let Some(arg) = args.get_mut(0) {
+//RS                             self.expect_core_arg(method, 0, &key, arg);
+//RS                         }
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS                 if matches!(method, "insert" | "replace" | "remove") {
+//RS                     let ret = Type::Result {
+//RS                         ok: Box::new(unit_ty()),
+//RS                         err: Box::new(Type::Named("DataError".to_string())),
+//RS                     };
+//RS                     *recv_type_out = Some("DataTracked".to_string());
+//RS                     *resolved_ret_out = Some(ret.clone());
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS             if head == "DataWatch" && query_args.len() == 1 {
+//RS                 let row = query_args[0].clone();
+//RS                 match method {
+//RS                     "get" => {
+//RS                         if !args.is_empty() {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 0, args.len(), span));
+//RS                         }
+//RS                         let ret = Type::Result {
+//RS                             ok: Box::new(Type::List(Box::new(row))),
+//RS                             err: Box::new(Type::Named("DataError".to_string())),
+//RS                         };
+//RS                         *recv_type_out = Some("DataWatch".to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     "status" => {
+//RS                         if !args.is_empty() {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 0, args.len(), span));
+//RS                         }
+//RS                         let ret = Type::Named("DataWatchStatus".to_string());
+//RS                         *recv_type_out = Some("DataWatch".to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     "cancel" => {
+//RS                         if !args.is_empty() {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 0, args.len(), span));
+//RS                         }
+//RS                         let ret = unit_ty();
+//RS                         *recv_type_out = Some("DataWatch".to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS             }
+//RS             if head == "Query" && query_args.len() == 1 {
+//RS                 let row = query_args[0].clone();
+//RS                 match method {
+//RS                     "filter" | "sort_by" => {
+//RS                         if args.len() != 1 {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 1, args.len(), span));
+//RS                         }
+//RS                         if let Some(callback) = args.get_mut(0) {
+//RS                             let callback_ty = Type::Fn {
+//RS                                 params: vec![row.clone()],
+//RS                                 ret: Some(Box::new(if method == "filter" {
+//RS                                     Type::Bool
+//RS                                 } else {
+//RS                                     Type::String
+//RS                                 })),
+//RS                                 // Ordinary Query combinators collect later; empty
+//RS                                 // effect bounds belong on live `.watch()` callbacks.
+//RS                                 effect_bound: None,
+//RS                                 return_view_provenance: None,
+//RS                                 param_contract: None,
+//RS                                 call_metadata: None,
+//RS                             };
+//RS                             self.expect_core_arg(method, 0, &callback_ty, callback);
+//RS                         }
+//RS                         let ret = Type::Apply {
+//RS                             name: "Query".to_string(),
+//RS                             args: vec![row],
+//RS                         };
+//RS                         *recv_type_out = Some("Query".to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     "map" | "min" | "max" => {
+//RS                         if args.len() != 1 {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 1, args.len(), span));
+//RS                         }
+//RS                         let value = args
+//RS                             .get_mut(0)
+//RS                             .and_then(|callback| self.infer_query_callback(method, &row, callback))
+//RS                             .unwrap_or_else(|| row.clone());
+//RS                         let ret = Type::Apply {
+//RS                             name: "Query".to_string(),
+//RS                             args: vec![value],
+//RS                         };
+//RS                         *recv_type_out = Some("Query".to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     "inner_join" | "left_join" => {
+//RS                         if args.len() != 3 {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 3, args.len(), span));
+//RS                         }
+//RS                         let right_row = args.get_mut(0).and_then(|other| {
+//RS                             let other_ty = self.infer(&mut other.expr);
+//RS                             match other_ty.as_ref().map(Type::without_user_tags) {
+//RS                                 Some(Type::Apply { name, args })
+//RS                                     if name == "Query" && args.len() == 1 =>
+//RS                                 {
+//RS                                     Some(args[0].clone())
+//RS                                 }
+//RS                                 Some(other_ty) => {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0112",
+//RS                                         format!(
+//RS                                             "`{method}` wants a Query as argument 1, but this is {}",
+//RS                                             other_ty.show()
+//RS                                         ),
+//RS                                         "keyed joins combine two typed deferred queries".to_string(),
+//RS                                         "pass another `Query<Row>` value".to_string(),
+//RS                                         Some(other.expr.span()),
+//RS                                     ));
+//RS                                     None
+//RS                                 }
+//RS                                 None => None,
+//RS                             }
+//RS                         });
+//RS                         let right_row = right_row.unwrap_or_else(|| row.clone());
+//RS                         let _left_key = args.get_mut(1).and_then(|callback| {
+//RS                             self.infer_query_callback(method, &row, callback)
+//RS                         });
+//RS                         let _right_key = args.get_mut(2).and_then(|callback| {
+//RS                             self.infer_query_callback(method, &right_row, callback)
+//RS                         });
+//RS                         let joined_right = if method == "left_join" {
+//RS                             Type::Option(Box::new(right_row))
+//RS                         } else {
+//RS                             right_row
+//RS                         };
+//RS                         let ret = Type::Apply {
+//RS                             name: "Query".to_string(),
+//RS                             args: vec![Type::Apply {
+//RS                                 name: "DataJoin".to_string(),
+//RS                                 args: vec![row, joined_right],
+//RS                             }],
+//RS                         };
+//RS                         *recv_type_out = Some("Query".to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     "collect" => {
+//RS                         if args.len() != 0 {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 0, args.len(), span));
+//RS                         }
+//RS                         let ret = Type::Result {
+//RS                             ok: Box::new(Type::List(Box::new(row))),
+//RS                             err: Box::new(Type::Named("DataError".to_string())),
+//RS                         };
+//RS                         *recv_type_out = Some("Query".to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     "plan" => {
+//RS                         if !args.is_empty() {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 0, args.len(), span));
+//RS                         }
+//RS                         let ret = Type::List(Box::new(Type::String));
+//RS                         *recv_type_out = Some("Query".to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     "group_by" => {
+//RS                         if args.len() != 1 {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 1, args.len(), span));
+//RS                         }
+//RS                         let key = args
+//RS                             .get_mut(0)
+//RS                             .and_then(|callback| self.infer_query_callback(method, &row, callback))
+//RS                             .unwrap_or(Type::String);
+//RS                         let ret = Type::Apply {
+//RS                             name: "DataGroupedQuery".to_string(),
+//RS                             args: vec![row.clone(), key],
+//RS                         };
+//RS                         *recv_type_out = Some("Query".to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     "watch" => {
+//RS                         if !args.is_empty() {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 0, args.len(), span));
+//RS                         }
+//RS                         let ret = Type::Result {
+//RS                             ok: Box::new(Type::Apply {
+//RS                                 name: "DataWatch".to_string(),
+//RS                                 args: vec![row.clone()],
+//RS                             }),
+//RS                             err: Box::new(Type::Named("DataError".to_string())),
+//RS                         };
+//RS                         *recv_type_out = Some("Query".to_string());
+//RS                         *resolved_ret_out = Some(ret.clone());
+//RS                         return Some(ret);
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS             }
+//RS             if head == "DataGroupedQuery" && query_args.len() == 2 {
+//RS                 let row = query_args[0].clone();
+//RS                 let key = query_args[1].clone();
+//RS                 let value = match method {
+//RS                     "count" => {
+//RS                         if !args.is_empty() {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 0, args.len(), span));
+//RS                         }
+//RS                         Some(Type::Int)
+//RS                     }
+//RS                     "sum" | "mean" => {
+//RS                         if args.len() != 1 {
+//RS                             self.diags
+//RS                                 .push(wrong_core_arity(method, 1, args.len(), span));
+//RS                         }
+//RS                         let value = args
+//RS                             .get_mut(0)
+//RS                             .and_then(|callback| self.infer_query_callback(method, &row, callback));
+//RS                         if method == "sum"
+//RS                             && !matches!(
+//RS                                 value,
+//RS                                 Some(
+//RS                                     Type::Int
+//RS                                         | Type::IntN { .. }
+//RS                                         | Type::Float
+//RS                                         | Type::Float32
+//RS                                 )
+//RS                             )
+//RS                         {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0112",
+//RS                                 format!(
+//RS                                     "`sum` wants an Int, fixed-width Int, Float, or F32 result, but this is {}",
+//RS                                     value
+//RS                                         .as_ref()
+//RS                                         .map_or_else(|| "missing".to_string(), |ty| ty.show())
+//RS                                 ),
+//RS                                 "grouped sum follows the runtime numeric domain and does not add arbitrary values"
+//RS                                     .to_string(),
+//RS                                 "return a numeric row value, or use `count` for cardinality".to_string(),
+//RS                                 Some(span),
+//RS                             ));
+//RS                         }
+//RS                         if method == "mean" {
+//RS                             if let Some(value) = &value {
+//RS                                 if !matches!(value, Type::Float) {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0112",
+//RS                                         format!(
+//RS                                             "`mean` wants Float for argument 1's result, but this is {}",
+//RS                                             value.show()
+//RS                                         ),
+//RS                                         "a grouped mean follows the Float numeric rules; \
+//RS                                          it does not widen integers or units silently"
+//RS                                             .to_string(),
+//RS                                         "return a Float from the value callback, or use `sum`"
+//RS                                             .to_string(),
+//RS                                         Some(span),
+//RS                                     ));
+//RS                                 }
+//RS                             }
+//RS                             Some(Type::Float)
+//RS                         } else {
+//RS                             Some(value.unwrap_or(Type::Int))
+//RS                         }
+//RS                     }
+//RS                     _ => None,
+//RS                 };
+//RS                 if let Some(value) = value {
+//RS                     let ret = Type::Apply {
+//RS                         name: "Query".to_string(),
+//RS                         args: vec![Type::Apply {
+//RS                             name: "Group".to_string(),
+//RS                             args: vec![key, value],
+//RS                         }],
+//RS                     };
+//RS                     *recv_type_out = Some("DataGroupedQuery".to_string());
+//RS                     *resolved_ret_out = Some(ret.clone());
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS         }
+//RS         // D-ZIPPAD1: list/iterator zip-family calls use one variadic typed
+//RS         // contract for free and method spellings. Option.zip remains the
+//RS         // separate nullable combinator below.
+//RS         if method == "query" {
+//RS             if let Type::List(inner) = &recv_ty {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity(method, 1, args.len(), span));
+//RS                 }
+//RS                 if let Some(query) = args.get_mut(0) {
+//RS                     self.check_analytics_sql_schema(inner, &query.expr);
+//RS                     self.expect_core_arg(method, 0, &Type::Named("SQL".to_string()), query);
+//RS                 }
+//RS                 let ret = Type::Result {
+//RS                     ok: Box::new(Type::Apply {
+//RS                         name: "Query".to_string(),
+//RS                         args: vec![(*inner.clone())],
+//RS                     }),
+//RS                     err: Box::new(Type::List(Box::new(Type::Named("FieldError".to_string())))),
+//RS                 };
+//RS                 *resolved_ret_out = Some(ret.clone());
+//RS                 return Some(ret);
+//RS             }
+//RS         }
+//RS         if matches!(method, "zip" | "zip_short" | "zip_pad") {
+//RS             if let Some(ret) = self.check_zip_family_method(
+//RS                 receiver,
+//RS                 method,
+//RS                 &recv_ty,
+//RS                 args,
+//RS                 span,
+//RS                 resolved_ret_out,
+//RS             ) {
+//RS                 return Some(ret);
+//RS             }
+//RS         }
+//RS 
+//RS         // D-HOLE1: `.zip` on `T?` pairs two optionals into `(a: T, b: U)?` — present
+//RS         // only when both operands are present. `U` is independent of the receiver's
+//RS         // `T`, which doesn't fit `Collections::builtin_method_arg_types`'s
+//RS         // one-fixed-placeholder-type table (that table's `[T].zip([T])` entry works
+//RS         // around the same limitation by forcing the same element type instead);
+//RS         // handled directly here, the same shape as `finish_rng_generic`'s hand-rolled
+//RS         // generic dispatch below.
+//RS         if let Type::Option(a_inner) = &recv_ty {
+//RS             if method == "zip" {
+//RS                 let a_inner = (**a_inner).clone();
+//RS                 return self.finish_option_zip(a_inner, args, span, resolved_ret_out);
+//RS             }
+//RS         }
+//RS         // Compiler-private String source methods keep the existing primitive
+//RS         // contract and borrow/mutation checks, but mark the call for typed
+//RS         // source lowering. The source registry is intentionally consulted only
+//RS         // for the canonical primitive, never for user nominal types.
+//RS         if matches!(&recv_ty, Type::String)
+//RS             && self.modules.map_or(false, |modules| {
+//RS                 crate::Sema::Registration::core_string_source_method(modules, method)
+//RS                     .is_some()
+//RS             })
+//RS         {
+//RS             if let Some(ret) =
+//RS                 Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+//RS             {
+//RS                 *recv_type_out = Some(Syntax::TYPE_STRING.to_string());
+//RS                 let result =
+//RS                     self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+//RS                 if let Some(ty) = &result {
+//RS                     *resolved_ret_out = Some(ty.clone());
+//RS                 }
+//RS                 return result;
+//RS             }
+//RS         }
+//RS         if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
+//RS             let nominal_recv = match &recv_ty {
+//RS                 Type::Named(name) => Some(name.as_str()),
+//RS                 Type::Apply { name, args } if name == "Atomic" && args.len() == 1 => {
+//RS                     Some(name.as_str())
+//RS                 }
+//RS                 Type::Tagged { marker, inner }
+//RS                     if matches!(
+//RS                         marker,
+//RS                         crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
+//RS                     ) =>
+//RS                 {
+//RS                     match inner.as_ref() {
+//RS                         Type::Named(name) => Some(name.as_str()),
+//RS                         _ => None,
+//RS                     }
+//RS                 }
+//RS                 _ => None,
+//RS             };
+//RS             if let Some(name) = nominal_recv {
+//RS                 // ProgramInfo / TypeInfo / compiler-API / crypto host methods
+//RS                 // need the owner on the call so fragment and subset lowering
+//RS                 // can dispatch them. Collection builtins, Ordering combinators,
+//RS                 // and BuildContext must stay unset: their lowering key is
+//RS                 // `recv_type.is_none()`.
+//RS                 if matches!(
+//RS                     name,
+//RS                     crate::Syntax::TYPE_PROGRAM_INFO
+//RS                         | crate::Syntax::TYPE_TYPE_INFO
+//RS                         | "FieldInfo"
+//RS                         | "MethodInfo"
+//RS                         | "CompilerLexed"
+//RS                         | "CompilerSyntaxTree"
+//RS                         | "CompilerChecked"
+//RS                         | "CompilerSourceMap"
+//RS                         | "CompilerPackageError"
+//RS                         | "CompilerDependency"
+//RS                         | "CompilerPackageTarget"
+//RS                         | "CompilerPackageOutput"
+//RS                         | "CompilerBuildProfile"
+//RS                         | "CompilerManifest"
+//RS                         | "CompilerPackage"
+//RS                         | "CompilerLockedPackage"
+//RS                         | "CompilerLock"
+//RS                         | "CompilerKeyValue"
+//RS                         | "CompilerProfile"
+//RS                         | "CompilerProfileSet"
+//RS                         | "WrappedVaultKey"
+//RS                 ) {
+//RS                     *recv_type_out = Some(name.to_string());
+//RS                 }
+//RS             }
+//RS             // D-NUMOPS1: hand codegen the receiver's numeric width so it picks the
+//RS             // same widening/narrowing form sema just chose for the return type.
+//RS             if recv_ty.is_numeric() {
+//RS                 *recv_type_out = Some(recv_ty.name());
+//RS             }
+//RS             // D-DECIMAL1 / D-NUMTYPE1: exact numeric handle methods.
+//RS             if matches!(
+//RS                 &recv_ty,
+//RS                 Type::Named(n)
+//RS                     if n == crate::Syntax::TYPE_DECIMAL
+//RS                         || n == crate::Syntax::TYPE_FRACTION
+//RS             ) {
+//RS                 *recv_type_out = Some(recv_ty.name());
+//RS             }
+//RS             // S40: retain the receiver fact so the caller can lower the
+//RS             // Range spelling through the existing Slice expression path.
+//RS             if matches!(&recv_ty, Type::String) && method == "slice" && args.len() == 1 {
+//RS                 *recv_type_out = Some(crate::Syntax::TYPE_STRING.to_string());
+//RS             }
+//RS             let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+//RS             // Lowering consumes the checked result, including ordinary nominal
+//RS             // methods; retaining only refinements loses their return contract.
+//RS             if let Some(ty) = &result {
+//RS                 *resolved_ret_out = Some(ty.clone());
+//RS             }
+//RS             return result;
+//RS         }
+//RS         if recv_ty.is_numeric() {
+//RS             if let Some(target) = Syntax::retired_numeric_conversion_target(method) {
+//RS                 let source = recv_ty.name();
+//RS                 let from = Syntax::numeric_conversion_method(&source).unwrap_or("from_value");
+//RS                 self.diags.push(Diagnostic::error(
+//RS                         "E0311",
+//RS                         format!("source-owned conversion `.{method}()` is retired"),
+//RS                         "explicit conversion belongs to the destination type, so the promised result is visible first".to_string(),
+//RS                         format!("write `{target}.{from}(value)`"),
+//RS                         Some(span),
+//RS                     ));
+//RS                 for arg in args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS         }
+//RS         // D-STR-DECLINE1=C (ratified 2026-08-07): `String.to_int`/`.to_float`
+//RS         // ship directly as `Int.parse`/`Float.parse` spellings (see
+//RS         // crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs's
+//RS         // `("to_int", 0) if is_string => TBuiltinOp::ParseInt`) — no
+//RS         // "retired" guard here anymore; the builtin-method dispatch below
+//RS         // resolves the call.
+//RS         if let Type::TraitObject(trait_names) = &recv_ty {
+//RS             // D-ANY-JAI1: a multi-trait bound (`...[A, B]`) types its loop element as a
+//RS             // multi-name `TraitObject` — check EVERY bound trait for the method, not
+//RS             // just the first, so a call inside the body can reach a method on any of
+//RS             // them. First match wins (S48 single-trait dispatch is the n=1 case of
+//RS             // this loop, unchanged).
+//RS             let sig = trait_names.iter().find_map(|tn| {
+//RS                 self.trait_reg
+//RS                     .traits
+//RS                     .get(tn)
+//RS                     .and_then(|t| t.methods.get(method))
+//RS                     .map(|msig| (tn.clone(), msig.clone()))
+//RS             });
+//RS             if let Some((trait_name, msig)) = sig {
+//RS                 self.record_open_memory_dispatch(
+//RS                     span,
+//RS                     "trait-object dispatch has no sealed target set",
+//RS                 );
+//RS                 self.record_edge(crate::Sema::effect_key(Some(&trait_name), method), span);
+//RS                 *recv_type_out = Some(trait_name.clone());
+//RS                 let source = self.check_trait_method_args(method, &msig, receiver, args, span);
+//RS                 // The AST fact is the checked carrier for ordinary trait
+//RS                 // calls. Raw protocol traits retain their ABI declaration so
+//RS                 // auto-propagation cannot add `Try`.
+//RS                 let raw_protocol_return = crate::Sema::uses_raw_protocol_return(
+//RS                     Some(&trait_name),
+//RS                     false,
+//RS                     false,
+//RS                 );
+//RS                 let (resolved_ret, _carrier) =
+//RS                     self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
+//RS                 *resolved_ret_out = Some(resolved_ret);
+//RS                 return source;
+//RS             }
+//RS             // Keep the original single-trait wording byte-for-byte (it's snapshot-
+//RS             // pinned product copy, Docs/spec/diagnostics.md) when there's only one
+//RS             // bound trait; only the multi-bound case needs the "none of" phrasing.
+//RS             let (headline, fix) = match trait_names.as_slice() {
+//RS                 [only] => (
+//RS                     format!("trait `{only}` has no method `{method}`"),
+//RS                     format!("add `fn {method}(…)` to `trait {only}`"),
+//RS                 ),
+//RS                 many => (
+//RS                     format!(
+//RS                         "none of {} has a method `{method}`",
+//RS                         many.iter()
+//RS                             .map(|t| format!("`{t}`"))
+//RS                             .collect::<Vec<_>>()
+//RS                             .join(" + ")
+//RS                     ),
+//RS                     format!("add `fn {method}(…)` to one of the bound traits"),
+//RS                 ),
+//RS             };
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0102",
+//RS                 headline,
+//RS                 "check the method name on this trait value".to_string(),
+//RS                 fix,
+//RS                 Some(span),
+//RS             ));
+//RS             for a in args.iter_mut() {
+//RS                 self.infer(&mut a.expr);
+//RS             }
+//RS             return None;
+//RS         }
+//RS         // Built-in value types have no user `struct`/`enum` registry entry,
+//RS         // but their method names still come from the canonical collection
+//RS         // table. Keep their ordinary missing-method errors on E0311 so the
+//RS         // explanation describes the actual receiver instead of claiming
+//RS         // that only nominal values can have methods. `Iter` retains its
+//RS         // materializer-specific E0102 recovery below.
+//RS         let builtin_methods = Collections::builtin_method_names(&recv_ty);
+//RS         if !builtin_methods.is_empty()
+//RS             && !matches!(
+//RS                 &recv_ty,
+//RS                 Type::Apply { name, .. }
+//RS                     if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER
+//RS             )
+//RS         {
+//RS             let diagnostic = self.missing_instance_method_diagnostic(
+//RS                 method,
+//RS                 &recv_ty,
+//RS                 None,
+//RS                 Self::missing_receiver_method_why(&recv_ty, method),
+//RS                 span,
+//RS             );
+//RS             self.diags.push(diagnostic);
+//RS             for a in args.iter_mut() {
+//RS                 self.infer(&mut a.expr);
+//RS             }
+//RS             return None;
+//RS         }
+//RS         let type_name = match &recv_ty {
+//RS             Type::Named(n) | Type::Apply { name: n, .. } => n.clone(),
+//RS             Type::Option(inner) => match inner.as_ref() {
+//RS                 Type::Named(n) | Type::Apply { name: n, .. } => n.clone(),
+//RS                 _ => {
+//RS                     let diagnostic = self.missing_instance_method_diagnostic(
+//RS                         method,
+//RS                         &recv_ty,
+//RS                         None,
+//RS                         format!("this value does not expose an instance method named `{method}`"),
+//RS                         span,
+//RS                     );
+//RS                     self.diags.push(diagnostic);
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS             },
+//RS             _ => {
+//RS                 let diagnostic = self.missing_instance_method_diagnostic(
+//RS                     method,
+//RS                     &recv_ty,
+//RS                     None,
+//RS                     format!("this value does not expose an instance method named `{method}`"),
+//RS                     span,
+//RS                 );
+//RS                 self.diags.push(diagnostic);
+//RS                 for a in args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         let (_, dispatch_type_name) = self.struct_type_name_parts(&type_name);
+//RS         let display_type_name = self.display_type_name(&type_name, None);
+//RS         // Reserved generic core records do not live in the ordinary struct
+//RS         // registry. Their function-valued fields still use the same field
+//RS         // call surface as user structs (`vjp_run.pull(seed)`).
+//RS         if let Type::Apply {
+//RS             name,
+//RS             args: type_args,
+//RS         } = &recv_ty
+//RS         {
+//RS             if let Some(field_ty) = core_generic_struct_field(name, method, type_args) {
+//RS                 if matches!(field_ty, Type::Fn { .. }) {
+//RS                     *recv_type_out = Some(dispatch_type_name.to_string());
+//RS                     let mut callee =
+//RS                         Box::new(Expr::Field(receiver.clone(), method.to_string(), span));
+//RS                     let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
+//RS                     let call_span = Span::new(span.start, end);
+//RS                     return self.infer_call_value(&mut callee, args, call_span);
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Some(fields) = self.struct_fields_for_type_name(&type_name) {
+//RS             if let Some((_, _, field_ty)) = fields.iter().find(|(fname, _, _)| fname == method) {
+//RS                 if matches!(field_ty, Type::Fn { .. }) {
+//RS                     *recv_type_out = Some(dispatch_type_name.to_string());
+//RS                     let mut callee =
+//RS                         Box::new(Expr::Field(receiver.clone(), method.to_string(), span));
+//RS                     let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
+//RS                     let call_span = Span::new(span.start, end);
+//RS                     return self.infer_call_value(&mut callee, args, call_span);
+//RS                 }
+//RS             }
+//RS         }
+//RS         let Some((owner_mod, mut msig)) = self.resolve_method_sig(&type_name, method) else {
+//RS             let iter_elem = match &recv_ty {
+//RS                 Type::Apply { name, args }
+//RS                     if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER =>
+//RS                 {
+//RS                     args.first()
+//RS                 }
+//RS                 _ => None,
+//RS             };
+//RS             let iter_positional_pick = iter_elem.is_some() && method == "nth";
+//RS             // #1887: `.to_list()` is the truthful fix only when the collected
+//RS             // list really carries the method that was asked for — a lazy view
+//RS             // has to be materialized before a positional read. A name the
+//RS             // list doesn't carry either is an ordinary misspelling, and falls
+//RS             // through to the near-miss candidate below.
+//RS             let collect_first = iter_elem
+//RS                 .is_some_and(|elem| {
+//RS                     Collections::builtin_method_names(&Type::List(Box::new(elem.clone())))
+//RS                         .iter()
+//RS                         .any(|known| known == method)
+//RS                 })
+//RS                 .then(|| crate::Sema::Diagnostics::one_pass_materializer(&recv_ty))
+//RS                 .flatten();
+//RS             // A cursor method is present in the Core signature table even
+//RS             // when its arity-specific return lookup misses. Recover that
+//RS             // method here so the fallback reports E0104 rather than suggesting
+//RS             // an extension to a protected Core type.
+//RS             if let Some(expected_args) = Self::protected_cursor_method_arity(&type_name, method) {
+//RS                 if args.len() != expected_args {
+//RS                     let plural = if expected_args == 1 { "" } else { "s" };
+//RS                     let fix = if expected_args == 0 {
+//RS                         format!("call `{display_type_name}.{method}()` with no arguments")
+//RS                     } else {
+//RS                         format!(
+//RS                             "call `{display_type_name}.{method}(…)` with exactly {expected_args} argument{plural}"
+//RS                         )
+//RS                     };
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0104",
+//RS                         format!(
+//RS                             "`{display_type_name}.{method}` expects {expected_args} argument{plural}, got {}",
+//RS                             args.len()
+//RS                         ),
+//RS                         format!(
+//RS                             "`{display_type_name}` is a consuming cursor; this operation advances its source"
+//RS                         ),
+//RS                         fix,
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 for arg in args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS             // #1887: a hand-authored hint for a known receiver/method pair
+//RS             // outranks the generic edit-distance near-miss. `len` is one edit
+//RS             // away from `get` but semantically unrelated, and offering it
+//RS             // would displace the real explanation. The candidate list is the
+//RS             // fallback for a receiver nothing specific is known about, and it
+//RS             // also owns the suggested source edit: renaming the method is an
+//RS             // honest edit only when renaming is the fix being offered.
+//RS             let protected_core = (!self.registry.contains(&type_name))
+//RS                 && (crate::Sema::CheckerCoreLib::core_type_known(&type_name)
+//RS                     || Collections::is_reserved_type(&type_name)
+//RS                     || crate::Sema::Diagnostics::is_one_pass_source(&recv_ty));
+//RS             let generic_bounds = match &recv_ty {
+//RS                 Type::Named(name) => self
+//RS                     .type_param_scope
+//RS                     .iter()
+//RS                     .find(|param| param.name == *name)
+//RS                     .map(|param| param.bounds.clone()),
+//RS                 _ => None,
+//RS             };
+//RS             let (why, fix, rename_edit) = if iter_positional_pick {
+//RS                 (
+//RS                     "positional picks on `Iter` use one consuming path".to_string(),
+//RS                     "use `.skip(n).first()`; `nth` is not part of the API".to_string(),
+//RS                     None,
+//RS                 )
+//RS             } else if let Some(materializer) = collect_first {
+//RS                 (
+//RS                     format!(
+//RS                         "`{display_type_name}` is a one-pass source; `{method}` needs a materialized list, so collection consumes the source and allocates the list"
+//RS                     ),
+//RS                     format!(
+//RS                         "materialize it first with `{materializer}`; this consumes the source and allocates a list"
+//RS                     ),
+//RS                     None,
+//RS                 )
+//RS             } else {
+//RS                 let suggestion = self.method_suggestion(method, &recv_ty, Some(&type_name));
+//RS                 if protected_core {
+//RS                     let fix = suggestion.as_ref().map_or_else(
+//RS                         || format!("use a documented method on `{display_type_name}`"),
+//RS                         |suggestion| suggestion.fix.clone(),
+//RS                     );
+//RS                     (
+//RS                         format!(
+//RS                             "`{display_type_name}` is a protected Core type with a closed method surface"
+//RS                         ),
+//RS                         fix,
+//RS                         suggestion.map(|suggestion| suggestion.name),
+//RS                     )
+//RS                 } else if let Some(bounds) = generic_bounds {
+//RS                     let bound_names = bounds
+//RS                         .iter()
+//RS                         .map(|bound| format!("`{bound}`"))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(" + ");
+//RS                     let why = if bounds.is_empty() {
+//RS                         format!(
+//RS                             "type parameter `{type_name}` has no bound that provides `{method}`"
+//RS                         )
+//RS                     } else {
+//RS                         format!(
+//RS                             "none of type parameter `{type_name}`'s bounds ({bound_names}) provides `{method}`"
+//RS                         )
+//RS                     };
+//RS                     let fix = if bounds.is_empty() {
+//RS                         format!(
+//RS                             "add a trait bound that defines `{method}`, or use a method available on `{type_name}`"
+//RS                         )
+//RS                     } else {
+//RS                         format!(
+//RS                             "add a bound that defines `{method}`, or use a method from {bound_names}"
+//RS                         )
+//RS                     };
+//RS                     (why, fix, None)
+//RS                 } else {
+//RS                     let fix = suggestion.as_ref().map_or_else(
+//RS                         || {
+//RS                             format!(
+//RS                                 "define it inside `struct {display_type_name}` or `impl {display_type_name}`"
+//RS                             )
+//RS                         },
+//RS                         |suggestion| suggestion.fix.clone(),
+//RS                     );
+//RS                     (
+//RS                         "check the method name on this type".to_string(),
+//RS                         fix,
+//RS                         suggestion.map(|suggestion| suggestion.name),
+//RS                     )
+//RS                 }
+//RS             };
+//RS             let mut diagnostic = Diagnostic::error(
+//RS                 "E0102",
+//RS                 format!("`{}` has no method `{}`", display_type_name, method),
+//RS                 why,
+//RS                 fix,
+//RS                 Some(span),
+//RS             );
+//RS             if let Some(candidate) = rename_edit {
+//RS                 diagnostic = diagnostic.with_edit(TextEdit {
+//RS                     span,
+//RS                     new_text: candidate,
+//RS                 });
+//RS             }
+//RS             self.diags.push(diagnostic);
+//RS             for a in args.iter_mut() {
+//RS                 self.infer(&mut a.expr);
+//RS             }
+//RS             return None;
+//RS         };
+//RS         let (_, method_type_name) = self.struct_type_name_parts(&type_name);
+//RS         let method_name = format!("{method_type_name}.{method}");
+//RS         let display_type_name = self.display_type_name(&type_name, Some(owner_mod));
+//RS         if owner_mod != self.module_idx
+//RS             && !self
+//RS                 .name_ledger
+//RS                 .visible(self.module_idx, owner_mod, &method_name)
+//RS         {
+//RS             self.diags
+//RS                 .push(crate::Sema::Diagnostics::private_item(method, span));
+//RS         } else if owner_mod != self.module_idx
+//RS             && Syntax::classify_identifier(method) == Syntax::IdentifierClass::SoftPublic
+//RS         {
+//RS             self.diags
+//RS                 .push(crate::Sema::Diagnostics::soft_public_use(method, span));
+//RS         }
+//RS         if let Some(dep) = msig.deprecation.as_ref() {
+//RS             self.check_deprecation(&method_name, dep, span);
+//RS         }
+//RS         let applied_args = match &recv_ty {
+//RS             Type::Apply { args, .. } => Some(args.as_slice()),
+//RS             Type::Option(inner) => match inner.as_ref() {
+//RS                 Type::Apply { args, .. } => Some(args.as_slice()),
+//RS                 _ => None,
+//RS             },
+//RS             _ => None,
+//RS         };
+//RS         if let Some(args) = applied_args {
+//RS             self.instantiate_method_sig(owner_mod, &type_name, &mut msig, args);
+//RS         }
+//RS         let raw_protocol_return = self.raw_protocol_return_for_method(&type_name, method);
+//RS         // D-APILABEL1=A: bind before inference — see `bind_method_args`.
+//RS         if !self.bind_method_args(method, &msig, args, span) {
+//RS             let (resolved_ret, return_type) =
+//RS                 self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
+//RS             let ret = Some(return_type);
+//RS             *resolved_ret_out = Some(resolved_ret);
+//RS             return ret;
+//RS         }
+//RS         self.normalize_method_variadic_call(method, &msig, args, span);
+//RS         let mut call_access = self.call_access_frame();
+//RS         let pre_inferred_method = self.instantiate_method_type_args(
+//RS             dispatch_type_name,
+//RS             method,
+//RS             &mut msig,
+//RS             type_args,
+//RS             args,
+//RS             span,
+//RS             &mut call_access,
+//RS         );
+//RS         self.record_method_reference(&type_name, method, span);
+//RS         self.record_edge(
+//RS             crate::Sema::effect_key(Some(dispatch_type_name), method),
+//RS             span,
+//RS         );
+//RS         if msig.is_static {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0311",
+//RS                 format!("`{}` is a static method on `{}`", method, display_type_name),
+//RS                 "static methods belong to the type name, not a value".to_string(),
+//RS                 format!("write `{}.{method}(...)` instead", display_type_name),
+//RS                 Some(span),
+//RS             ));
+//RS         }
+//RS         *recv_type_out = Some(dispatch_type_name.to_string());
+//RS         // `mut self` methods change the receiver: it must be changeable,
+//RS         // free of an active `for` borrow, and not aliased by an argument.
+//RS         if msig.self_conv == Some(AccessConvention::Write) {
+//RS             self.check_mutating_method_receiver(receiver, method, span);
+//RS         }
+//RS         if msig.self_conv == Some(AccessConvention::Move) {
+//RS             if let Expr::Ident(n, nspan) = &**receiver {
+//RS                 // A borrowed parameter can't be consumed (the generated Rust
+//RS                 // would move out of a `&T`/`&mut T`).
+//RS                 if let Some(info) = self.lookup(n) {
+//RS                     if !type_is_copy(&info.ty)
+//RS                         && matches!(
+//RS                             info.param_conv,
+//RS                             Some(AccessConvention::Read) | Some(AccessConvention::Write)
+//RS                         )
+//RS                     {
+//RS                         let source_ty = info.ty.clone();
+//RS                         let diagnostic = Diagnostic::error(
+//RS                             "E0120",
+//RS                             format!(
+//RS                                 "`{}` was not moved here, so `.{}()` cannot take it with the move marker `^`",
+//RS                                 n, method
+//RS                             ),
+//RS                             "this function has read access only and does not own the value; the move marker `^` is required".to_string(),
+//RS                             format!(
+//RS                                 "call it on a copy: `({}{}).{}(...)` — or take ownership with the move marker `^`: `{}: {}{}`",
+//RS                                 Syntax::SIGIL_COPY,
+//RS                                 n,
+//RS                                 method,
+//RS                                 n,
+//RS                                 Syntax::SIGIL_MOVE,
+//RS                                 source_ty.name()
+//RS                             ),
+//RS                             Some(*nspan),
+//RS                         );
+//RS                         self.diags.push(self.with_ownership_copy_edit(
+//RS                             diagnostic,
+//RS                             *nspan,
+//RS                             Some(&source_ty),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 self.mark_moved_by(n.clone(), *nspan, format!("{dispatch_type_name}.{method}"));
+//RS             } else if let Some(place) = self.place_from_expr(receiver).filter(|place| {
+//RS                 !place.projections.is_empty()
+//RS                     && place
+//RS                         .projections
+//RS                         .iter()
+//RS                         .all(|projection| matches!(projection, crate::Sema::ViewProjection::Field(_)))
+//RS             }) {
+//RS                 // A taking call on a field moves that field out of its owner
+//RS                 // (a partial move); siblings stay usable and a later read of
+//RS                 // the field or its owner is E0121.
+//RS                 if !self
+//RS                     .place_expr_type(receiver)
+//RS                     .is_some_and(|ty| type_is_copy(&ty))
+//RS                 {
+//RS                     self.mark_moved_place_by(
+//RS                         place,
+//RS                         crate::Sema::ReceiverMarks::place_span(receiver),
+//RS                         format!("{dispatch_type_name}.{method}"),
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS         self.check_method_args(
+//RS             dispatch_type_name,
+//RS             method,
+//RS             &msig,
+//RS             Some(receiver),
+//RS             args,
+//RS             span,
+//RS             pre_inferred_method.as_deref(),
+//RS             Some(call_access),
+//RS         )?;
+//RS         let (resolved_ret, return_type) =
+//RS             self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
+//RS         let ret = Some(return_type);
+//RS         *resolved_ret_out = Some(resolved_ret);
+//RS         ret
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0406 crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:6582-8395
+

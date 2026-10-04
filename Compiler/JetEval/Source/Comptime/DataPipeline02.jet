@@ -1,0 +1,1891 @@
+// PORT-PENDING 0581 crates-jet-comptime-src-comptime-datapipeline-slice-1823: crates/jet-comptime/src/Comptime/DataPipeline.rs:1823-3709
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn data_loader_payload(
+//RS     state: &DataKernel,
+//RS ) -> Result<(Vec<u8>, bool), CtValue> {
+//RS     if let Some(payload) = jet_foundation::PreludeDataFlow::payload(state)
+//RS         .map_err(data_loader_kernel_failure)?
+//RS     {
+//RS         return Ok(payload);
+//RS     }
+//RS     if state.source.kind == jet_foundation::PreludeDataFlow::LoaderKind::File
+//RS         && state.source.member.is_empty()
+//RS     {
+//RS         let payload = jet_foundation::CheckReads::read(&state.raw_locator).map_err(|error| {
+//RS             data_loader_failure(
+//RS                 "IO",
+//RS                 "data.loader.file",
+//RS                 format!("could not read `{}`: {error}", state.source.locator),
+//RS             )
+//RS         })?;
+//RS         jet_foundation::PreludeDataFlow::check_payload(
+//RS             &state.limits,
+//RS             payload.len(),
+//RS             "data.loader.file",
+//RS         )
+//RS         .map_err(data_loader_kernel_failure)?;
+//RS         return Ok((payload, state.offline));
+//RS     }
+//RS     let operation = match state.source.kind {
+//RS         jet_foundation::PreludeDataFlow::LoaderKind::URL => "data.loader.url",
+//RS         jet_foundation::PreludeDataFlow::LoaderKind::Database => "data.loader.database",
+//RS         jet_foundation::PreludeDataFlow::LoaderKind::File => "data.loader.archive",
+//RS         jet_foundation::PreludeDataFlow::LoaderKind::Value => "data.loader.value",
+//RS     };
+//RS     Err(data_loader_bridge(operation))
+//RS }
+//RS 
+//RS fn data_dynamic_scalar_type(value: &CtValue) -> (&'static str, bool) {
+//RS     match value {
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             ..
+//RS         } if type_name == "DataTree" => match variant.as_str() {
+//RS             "Null" => ("null", true),
+//RS             "Bool" => ("bool", false),
+//RS             "Number" => ("float", false),
+//RS             "TypedText" | "Text" => ("text", false),
+//RS             "Array" => ("array", false),
+//RS             "Object" => ("object", false),
+//RS             _ => ("Any", false),
+//RS         },
+//RS         CtValue::Bool(_) => ("bool", false),
+//RS         CtValue::Int(_) | CtValue::BigInt(_) => ("int", false),
+//RS         CtValue::Float(_) => ("float", false),
+//RS         CtValue::Str(_) => ("text", false),
+//RS         CtValue::Bytes(_) => ("bytes", false),
+//RS         CtValue::List(_) => ("array", false),
+//RS         CtValue::Map(_) => ("object", false),
+//RS         CtValue::Struct { .. } => ("object", false),
+//RS         _ => ("Any", false),
+//RS     }
+//RS }
+//RS 
+//RS fn data_dynamic_merge_type(left: &str, right: &str) -> (&'static str, bool) {
+//RS     if left == right {
+//RS         return (
+//RS             match left {
+//RS                 "null" => "null",
+//RS                 "bool" => "bool",
+//RS                 "int" => "int",
+//RS                 "float" => "float",
+//RS                 "text" => "text",
+//RS                 "bytes" => "bytes",
+//RS                 "array" => "array",
+//RS                 "object" => "object",
+//RS                 _ => "Any",
+//RS             },
+//RS             left == "null",
+//RS         );
+//RS     }
+//RS     if left == "null" {
+//RS         return (match right {
+//RS             "bool" => "bool",
+//RS             "int" => "int",
+//RS             "float" => "float",
+//RS             "text" => "text",
+//RS             "bytes" => "bytes",
+//RS             "array" => "array",
+//RS             "object" => "object",
+//RS             _ => "Any",
+//RS         }, true);
+//RS     }
+//RS     if right == "null" {
+//RS         return (match left {
+//RS             "bool" => "bool",
+//RS             "int" => "int",
+//RS             "float" => "float",
+//RS             "text" => "text",
+//RS             "bytes" => "bytes",
+//RS             "array" => "array",
+//RS             "object" => "object",
+//RS             _ => "Any",
+//RS         }, true);
+//RS     }
+//RS     if (left == "int" && right == "float") || (left == "float" && right == "int") {
+//RS         return ("float", false);
+//RS     }
+//RS     ("Any", false)
+//RS }
+//RS 
+//RS fn data_dynamic_object_fields(value: &CtValue) -> Option<Vec<(String, CtValue)>> {
+//RS     if let CtValue::Struct { type_name, fields } = value {
+//RS         if type_name == "JSONObject" {
+//RS             return Some(fields.clone());
+//RS         }
+//RS     }
+//RS     super::JSONInterp::json_payload(value, "Object")
+//RS         .and_then(|value| data_dynamic_object_fields(value))
+//RS }
+//RS 
+//RS fn data_schema_value(tree: &CtValue, format: &str) -> CtValue {
+//RS     let rows = data_dynamic_rows(tree);
+//RS     let mut fields = BTreeMap::<String, (&'static str, bool)>::new();
+//RS     let mut rows_seen = 0usize;
+//RS     for row in &rows {
+//RS         if let Some(entries) = data_dynamic_object_fields(row) {
+//RS             let present = entries
+//RS                 .iter()
+//RS                 .map(|(name, _)| name.clone())
+//RS                 .collect::<std::collections::BTreeSet<_>>();
+//RS             for (name, value) in entries {
+//RS                 let (current, nullable) = data_dynamic_scalar_type(&value);
+//RS                 let (merged, merged_nullable) = fields
+//RS                     .get(&name)
+//RS                     .map(|(previous, previous_nullable)| {
+//RS                         let (merged, type_nullable) = data_dynamic_merge_type(previous, current);
+//RS                         (merged, *previous_nullable || nullable || type_nullable)
+//RS                     })
+//RS                     .unwrap_or((current, nullable));
+//RS                 fields.insert(name, (merged, merged_nullable || rows_seen > 0));
+//RS             }
+//RS             for name in fields
+//RS                 .keys()
+//RS                 .filter(|name| !present.contains(*name))
+//RS                 .cloned()
+//RS                 .collect::<Vec<_>>()
+//RS             {
+//RS                 if let Some((type_name, _)) = fields.get(&name).copied() {
+//RS                     fields.insert(name, (type_name, true));
+//RS                 }
+//RS             }
+//RS         } else {
+//RS             let (current, nullable) = data_dynamic_scalar_type(row);
+//RS             let (merged, merged_nullable) = fields
+//RS                 .get("$")
+//RS                 .map(|(previous, previous_nullable)| {
+//RS                     let (merged, type_nullable) = data_dynamic_merge_type(previous, current);
+//RS                     (merged, *previous_nullable || nullable || type_nullable)
+//RS                 })
+//RS                 .unwrap_or((current, nullable || rows_seen > 0));
+//RS             fields.insert("$".to_string(), (merged, merged_nullable));
+//RS         }
+//RS         rows_seen = rows_seen.saturating_add(1);
+//RS     }
+//RS     let columns = fields
+//RS         .into_iter()
+//RS         .enumerate()
+//RS         .map(|(order, (name, (type_name, nullable)))| {
+//RS             data_column_with_id(order, &name, type_name, nullable)
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let mut identity = String::new();
+//RS     jet_foundation::PreludeDataFlow::identity_part(&mut identity, format);
+//RS     for column in &columns {
+//RS         for name in ["id", "name", "type_name", "nullable"] {
+//RS             if let Some(value) = struct_field(column, "DataColumn", name) {
+//RS                 let text = match value {
+//RS                     CtValue::Bool(value) => value.to_string(),
+//RS                     CtValue::Str(value) => value.clone(),
+//RS                     _ => String::new(),
+//RS                 };
+//RS                 jet_foundation::PreludeDataFlow::identity_part(&mut identity, &text);
+//RS             }
+//RS         }
+//RS     }
+//RS     ct_struct(
+//RS         "DataSchema",
+//RS         vec![
+//RS             (
+//RS                 "identity",
+//RS                 CtValue::Str(jet_foundation::PreludeDataFlow::digest(identity.as_bytes())),
+//RS             ),
+//RS             ("format", data_kernel_format_value(format)),
+//RS             ("columns", CtValue::List(columns)),
+//RS             (
+//RS                 "projection",
+//RS                 CtValue::absent(Type::Named("ShapeProjection".to_string())),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn data_column_with_id(
+//RS     order: usize,
+//RS     name: &str,
+//RS     type_name: &str,
+//RS     nullable: bool,
+//RS ) -> CtValue {
+//RS     ct_struct(
+//RS         "DataColumn",
+//RS         vec![
+//RS             (
+//RS                 "id",
+//RS                 CtValue::Str(format!("column-{order}-{name}")),
+//RS             ),
+//RS             ("name", CtValue::Str(name.to_string())),
+//RS             ("type_name", CtValue::Str(type_name.to_string())),
+//RS             ("nullable", CtValue::Bool(nullable)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn data_loader_fail_value(
+//RS     loader: &mut ComptimeLoader,
+//RS     value: &CtValue,
+//RS     operation: &str,
+//RS ) {
+//RS     let kind = match struct_field(value, "DataError", "kind") {
+//RS         Some(CtValue::Enum { variant, .. }) if variant == "Limit" => {
+//RS             jet_foundation::PreludeDataFlow::ErrorKind::Limit
+//RS         }
+//RS         Some(CtValue::Enum { variant, .. }) if variant == "State" => {
+//RS             jet_foundation::PreludeDataFlow::ErrorKind::State
+//RS         }
+//RS         Some(CtValue::Enum { variant, .. }) if variant == "Bridge" => {
+//RS             jet_foundation::PreludeDataFlow::ErrorKind::Bridge
+//RS         }
+//RS         _ => jet_foundation::PreludeDataFlow::ErrorKind::InvalidArgument,
+//RS     };
+//RS     let reason = struct_field(value, "DataError", "reason")
+//RS         .map(query_cell_text)
+//RS         .unwrap_or_else(|| value.jet_show());
+//RS     let error = jet_foundation::PreludeDataFlow::KernelError {
+//RS         kind,
+//RS         operation: operation.to_string(),
+//RS         reason,
+//RS     };
+//RS     jet_foundation::PreludeDataFlow::fail(&mut loader.state, &error);
+//RS }
+//RS 
+//RS fn data_dynamic_canonical(value: &CtValue) -> CtValue {
+//RS     match value {
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if type_name == "DataTree" && variant == "Object" => {
+//RS             let Some(CtValue::Struct {
+//RS                 type_name: object_type,
+//RS                 fields,
+//RS             }) = args.first().map(|(_, value)| value)
+//RS             else {
+//RS                 return value.clone();
+//RS             };
+//RS             if object_type != "JSONObject" {
+//RS                 return value.clone();
+//RS             }
+//RS             let mut fields = fields
+//RS                 .iter()
+//RS                 .map(|(name, value)| (name.clone(), data_dynamic_canonical(value)))
+//RS                 .collect::<Vec<_>>();
+//RS             fields.sort_by(|left, right| left.0.cmp(&right.0));
+//RS             data_dynamic_object(fields)
+//RS         }
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if type_name == "DataTree" && variant == "Array" => {
+//RS             let Some(CtValue::List(values)) = args.first().map(|(_, value)| value) else {
+//RS                 return value.clone();
+//RS             };
+//RS             data_dynamic_array(
+//RS                 values
+//RS                     .iter()
+//RS                     .map(data_dynamic_canonical)
+//RS                     .collect(),
+//RS             )
+//RS         }
+//RS         _ => value.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn data_snapshot_dynamic(
+//RS     loader: &mut ComptimeLoader,
+//RS     interp: &mut super::Interpreter::Interp<'_>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, CtValue> {
+//RS     if loader.state.cancelled {
+//RS         let error = jet_foundation::PreludeDataFlow::KernelError {
+//RS             kind: jet_foundation::PreludeDataFlow::ErrorKind::State,
+//RS             operation: "data.loader".to_string(),
+//RS             reason: "loader was cancelled before snapshot".to_string(),
+//RS         };
+//RS         jet_foundation::PreludeDataFlow::fail(&mut loader.state, &error);
+//RS         return Err(data_loader_kernel_failure(error));
+//RS     }
+//RS     if let Err(error) = jet_foundation::PreludeDataFlow::validate_loader(&loader.state) {
+//RS         jet_foundation::PreludeDataFlow::fail(&mut loader.state, &error);
+//RS         return Err(data_loader_kernel_failure(error));
+//RS     }
+//RS     if let Err(error) = jet_foundation::PreludeDataFlow::validate_limits(&loader.state.limits) {
+//RS         jet_foundation::PreludeDataFlow::fail(&mut loader.state, &error);
+//RS         return Err(data_loader_kernel_failure(error));
+//RS     }
+//RS     let (payload, offline) = match data_loader_payload(&loader.state) {
+//RS         Ok(payload) => payload,
+//RS         Err(error) => {
+//RS             data_loader_fail_value(loader, &error, "data.loader");
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     let tree = match data_dynamic_tree(&payload, &loader.state.format, &loader.state.limits) {
+//RS         Ok(tree) => tree,
+//RS         Err(error) => {
+//RS             data_loader_fail_value(loader, &error, "data.loader");
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     let value = if let Some(ty) = loader.decode_ty.clone() {
+//RS         let decode_tree = if loader.state.format == "csv" {
+//RS             data_typed_tree(&tree)
+//RS         } else {
+//RS             tree.clone()
+//RS         };
+//RS         match interp.typed_decode_top(&ty, &decode_tree, span) {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 let failure = data_loader_failure(
+//RS                     "Decode",
+//RS                     "data.loader",
+//RS                     format!("typed decode failed: {}", typed_decode_failure_text(&error)),
+//RS                 );
+//RS                 data_loader_fail_value(loader, &failure, "data.loader");
+//RS                 return Err(failure);
+//RS             }
+//RS         }
+//RS     } else {
+//RS         loader.seed.clone().unwrap_or_else(|| tree.clone())
+//RS     };
+//RS     let canonical_value = if loader.decode_ty.is_some() {
+//RS         match interp.encode_value(&value, span) {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 let failure = data_loader_failure(
+//RS                     "Decode",
+//RS                     "data.loader",
+//RS                     format!("typed encode failed: {error:?}"),
+//RS                 );
+//RS                 data_loader_fail_value(loader, &failure, "data.loader");
+//RS                 return Err(failure);
+//RS             }
+//RS         }
+//RS     } else {
+//RS         data_dynamic_canonical(&value)
+//RS     };
+//RS     let canonical =
+//RS         super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0).into_bytes();
+//RS     let schema = data_schema_value(&tree, &loader.state.format);
+//RS     let schema_id = match struct_field(&schema, "DataSchema", "identity") {
+//RS         Some(CtValue::Str(value)) => value.clone(),
+//RS         _ => String::new(),
+//RS     };
+//RS     let mut state = loader.state.clone();
+//RS     let facts = match jet_foundation::PreludeDataFlow::commit_snapshot(
+//RS         &mut state,
+//RS         payload,
+//RS         &canonical,
+//RS         &schema_id,
+//RS         offline,
+//RS     ) {
+//RS         Ok(facts) => facts,
+//RS         Err(error) => {
+//RS             jet_foundation::PreludeDataFlow::fail(&mut loader.state, &error);
+//RS             return Err(data_loader_kernel_failure(error));
+//RS         }
+//RS     };
+//RS     loader.state = state;
+//RS     let identity = ct_struct(
+//RS         "DataSnapshotIdentity",
+//RS         vec![
+//RS             ("id", CtValue::Str(format!("snapshot-{}", facts.snapshot_id))),
+//RS             ("source", CtValue::Str(format!("source-{}", facts.source_id))),
+//RS             ("content", CtValue::Str(facts.content_id)),
+//RS             ("schema", CtValue::Str(facts.schema_id)),
+//RS             ("format", data_kernel_format_value(&loader.state.format)),
+//RS         ],
+//RS     );
+//RS     let provenance = ct_struct(
+//RS         "DataProvenance",
+//RS         vec![
+//RS             ("source", data_kernel_source_value(&loader.state.source)),
+//RS             ("format", data_kernel_format_value(&loader.state.format)),
+//RS             ("authority", data_kernel_authority_value(&loader.state.authority)),
+//RS         ],
+//RS     );
+//RS     Ok(ct_struct(
+//RS         "DataSnapshot",
+//RS         vec![
+//RS             ("value", value),
+//RS             ("identity", identity),
+//RS             ("provenance", provenance),
+//RS             ("schema", schema),
+//RS             (
+//RS                 "status",
+//RS                 data_kernel_status_value(&jet_foundation::PreludeDataFlow::status(
+//RS                     &loader.state,
+//RS                 )),
+//RS             ),
+//RS             ("content", CtValue::Bytes(canonical)),
+//RS         ],
+//RS     ))
+//RS }
+//RS 
+//RS fn data_stream_row_type(ty: &Type) -> Type {
+//RS     match ty {
+//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => (**inner).clone(),
+//RS         _ => ty.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn data_stream_rows(
+//RS     loader: &ComptimeLoader,
+//RS     interp: &mut super::Interpreter::Interp<'_>,
+//RS     span: Span,
+//RS ) -> Result<Vec<CtValue>, CtValue> {
+//RS     let (payload, _) = data_loader_payload(&loader.state)?;
+//RS     let tree = data_dynamic_tree(&payload, &loader.state.format, &loader.state.limits)?;
+//RS     let rows = data_dynamic_rows(&tree);
+//RS     let ty = loader.decode_ty.clone().map(|ty| data_stream_row_type(&ty));
+//RS     let Some(ty) = ty else {
+//RS         return Ok(rows);
+//RS     };
+//RS     rows.into_iter()
+//RS         .enumerate()
+//RS         .map(|(index, row)| {
+//RS             let row = if loader.state.format == "csv" {
+//RS                 data_typed_tree(&row)
+//RS             } else {
+//RS                 row
+//RS             };
+//RS             interp.typed_decode_top(&ty, &row, span).map_err(|error| {
+//RS                 data_loader_failure(
+//RS                     "Decode",
+//RS                     "data.loader.stream",
+//RS                     format!(
+//RS                         "typed decode failed at row {}: {}",
+//RS                         index + 1,
+//RS                         typed_decode_failure_text(&error)
+//RS                     ),
+//RS                 )
+//RS             })
+//RS         })
+//RS         .collect()
+//RS }
+//RS fn data_stream_next(stream: &mut ComptimeStream) -> CtValue {
+//RS     if stream.cancelled {
+//RS         return data_loader_failure("State", "data.stream", "stream was cancelled");
+//RS     }
+//RS     if let Some(row) = stream.rows.get(stream.cursor).cloned() {
+//RS         stream.cursor += 1;
+//RS         return CtValue::Present(Box::new(CtValue::Present(Box::new(row))));
+//RS     }
+//RS     let row_ty = stream
+//RS         .row_ty
+//RS         .clone()
+//RS         .unwrap_or_else(|| Type::Named("Unknown".to_string()));
+//RS     CtValue::Present(Box::new(CtValue::absent(row_ty)))
+//RS }
+//RS fn data_state_plain_tree(value: &CtValue) -> CtValue {
+//RS     match value {
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if type_name == "DataTree" => match variant.as_str() {
+//RS             "Null" => CtValue::Unit,
+//RS             "Bool" | "Int" | "Float" | "Text" | "TypedText" | "Bytes" => args
+//RS                 .first()
+//RS                 .map(|(_, value)| data_state_plain_tree(value))
+//RS                 .unwrap_or(CtValue::Unit),
+//RS             "Number" => {
+//RS                 let Some(CtValue::Str(value)) = args.first().map(|(_, value)| value) else {
+//RS                     return CtValue::Unit;
+//RS                 };
+//RS                 value
+//RS                     .parse::<i64>()
+//RS                     .map(CtValue::Int)
+//RS                     .or_else(|_| value.parse::<f64>().map(|value| CtValue::Float(CtFloat::f64(value))))
+//RS                     .unwrap_or_else(|_| CtValue::Str(value.clone()))
+//RS             }
+//RS             "Array" => CtValue::List(
+//RS                 args.first()
+//RS                     .and_then(|(_, value)| match value {
+//RS                         CtValue::List(values) => Some(
+//RS                             values
+//RS                                 .iter()
+//RS                                 .map(data_state_plain_tree)
+//RS                                 .collect::<Vec<_>>(),
+//RS                         ),
+//RS                         _ => None,
+//RS                     })
+//RS                     .unwrap_or_default(),
+//RS             ),
+//RS             "Object" => CtValue::Struct {
+//RS                 type_name: "JSONObject".to_string(),
+//RS                 fields: args
+//RS                     .first()
+//RS                     .and_then(|(_, value)| data_dynamic_object_fields(value))
+//RS                     .unwrap_or_default()
+//RS                     .into_iter()
+//RS                     .map(|(name, value)| (name, data_state_plain_tree(&value)))
+//RS                     .collect(),
+//RS             },
+//RS             _ => value.clone(),
+//RS         },
+//RS         CtValue::List(values) => {
+//RS             CtValue::List(values.iter().map(data_state_plain_tree).collect())
+//RS         }
+//RS         CtValue::Map(values) => CtValue::Map(
+//RS             values
+//RS                 .iter()
+//RS                 .map(|(key, value)| (key.clone(), data_state_plain_tree(value)))
+//RS                 .collect(),
+//RS         ),
+//RS         CtValue::Struct { type_name, fields } => CtValue::Struct {
+//RS             type_name: type_name.clone(),
+//RS             fields: fields
+//RS                 .iter()
+//RS                 .map(|(name, value)| (name.clone(), data_state_plain_tree(value)))
+//RS                 .collect(),
+//RS         },
+//RS         CtValue::Present(value) => data_state_plain_tree(value),
+//RS         _ => value.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn data_state_decode_tree(ty: &Type, tree: &CtValue) -> Result<CtValue, CtValue> {
+//RS     let plain = data_state_plain_tree(tree);
+//RS     match ty {
+//RS         Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => match plain {
+//RS             CtValue::Int(value) => Ok(CtValue::Int(value)),
+//RS             CtValue::Str(value) => value.parse::<i64>().map(CtValue::Int).map_err(|_| {
+//RS                 data_loader_failure(
+//RS                     "Decode",
+//RS                     "data.loader",
+//RS                     format!("expected Int for `{}`", ty.name()),
+//RS                 )
+//RS             }),
+//RS             _ => Err(data_loader_failure(
+//RS                 "Decode",
+//RS                 "data.loader",
+//RS                 format!("expected Int for `{}`", ty.name()),
+//RS             )),
+//RS         },
+//RS         Type::Float | Type::Float32 => match plain {
+//RS             CtValue::Float(value) => Ok(CtValue::Float(value)),
+//RS             CtValue::Int(value) => Ok(CtValue::Float(CtFloat::f64(value as f64))),
+//RS             CtValue::Str(value) => value
+//RS                 .parse::<f64>()
+//RS                 .map(|value| CtValue::Float(CtFloat::f64(value)))
+//RS                 .map_err(|_| {
+//RS                     data_loader_failure(
+//RS                         "Decode",
+//RS                         "data.loader",
+//RS                         format!("expected Float for `{}`", ty.name()),
+//RS                     )
+//RS                 }),
+//RS             _ => Err(data_loader_failure(
+//RS                 "Decode",
+//RS                 "data.loader",
+//RS                 format!("expected Float for `{}`", ty.name()),
+//RS             )),
+//RS         },
+//RS         Type::Bool => match plain {
+//RS             CtValue::Bool(value) => Ok(CtValue::Bool(value)),
+//RS             _ => Err(data_loader_failure(
+//RS                 "Decode",
+//RS                 "data.loader",
+//RS                 format!("expected Bool for `{}`", ty.name()),
+//RS             )),
+//RS         },
+//RS         Type::String => match plain {
+//RS             CtValue::Str(value) => Ok(CtValue::Str(value)),
+//RS             _ => Err(data_loader_failure(
+//RS                 "Decode",
+//RS                 "data.loader",
+//RS                 format!("expected String for `{}`", ty.name()),
+//RS             )),
+//RS         },
+//RS         Type::Char => match plain {
+//RS             CtValue::Str(value) => value
+//RS                 .chars()
+//RS                 .next()
+//RS                 .filter(|_| value.chars().count() == 1)
+//RS                 .map(CtValue::Char)
+//RS                 .ok_or_else(|| {
+//RS                     data_loader_failure(
+//RS                         "Decode",
+//RS                         "data.loader",
+//RS                         format!("expected one character for `{}`", ty.name()),
+//RS                     )
+//RS                 }),
+//RS             _ => Err(data_loader_failure(
+//RS                 "Decode",
+//RS                 "data.loader",
+//RS                 format!("expected one character for `{}`", ty.name()),
+//RS             )),
+//RS         },
+//RS         Type::Option(inner) => {
+//RS             if matches!(plain, CtValue::Unit) {
+//RS                 Ok(CtValue::absent((**inner).clone()))
+//RS             } else {
+//RS                 data_state_decode_tree(inner, tree)
+//RS                     .map(|value| CtValue::Present(Box::new(value)))
+//RS             }
+//RS         }
+//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+//RS             let CtValue::List(values) = plain else {
+//RS                 return Err(data_loader_failure(
+//RS                     "Decode",
+//RS                     "data.loader",
+//RS                     format!("expected a list for `{}`", ty.name()),
+//RS                 ));
+//RS             };
+//RS             let mut decoded = Vec::with_capacity(values.len());
+//RS             for value in values {
+//RS                 decoded.push(data_state_decode_tree(inner, &value)?);
+//RS             }
+//RS             Ok(CtValue::List(decoded))
+//RS         }
+//RS         Type::Map {
+//RS             key,
+//RS             value: value_ty,
+//RS             ..
+//RS         } if matches!(key.as_ref(), Type::String) => {
+//RS             let CtValue::Struct { fields, .. } = plain else {
+//RS                 return Err(data_loader_failure(
+//RS                     "Decode",
+//RS                     "data.loader",
+//RS                     format!("expected an object for `{}`", ty.name()),
+//RS                 ));
+//RS             };
+//RS             let mut decoded = BTreeMap::new();
+//RS             for (name, cell) in fields {
+//RS                 decoded.insert(
+//RS                     CtKey::Str(name),
+//RS                     data_state_decode_tree(value_ty, &cell)?,
+//RS                 );
+//RS             }
+//RS             Ok(CtValue::Map(decoded))
+//RS         }
+//RS         Type::Map { .. } => Err(data_loader_failure(
+//RS             "Decode",
+//RS             "data.loader",
+//RS             "loader maps require String keys",
+//RS         )),
+//RS         Type::Result { ok, .. } => data_state_decode_tree(ok, tree)
+//RS             .map(|value| CtValue::Present(Box::new(value))),
+//RS         Type::Shared(inner)
+//RS         | Type::Tagged { inner, .. }
+//RS         | Type::Quantity { base: inner, .. } => data_state_decode_tree(inner, tree),
+//RS         Type::Named(name) => match plain {
+//RS             CtValue::Struct { fields, .. } => Ok(CtValue::Struct {
+//RS                 type_name: name.clone(),
+//RS                 fields,
+//RS             }),
+//RS             value => Ok(value),
+//RS         },
+//RS         Type::Apply { name, .. } => match plain {
+//RS             CtValue::Struct { fields, .. } => Ok(CtValue::Struct {
+//RS                 type_name: name.clone(),
+//RS                 fields,
+//RS             }),
+//RS             value => Ok(value),
+//RS         },
+//RS         Type::Union(_) => Ok(plain),
+//RS         _ => Err(data_loader_failure(
+//RS             "Decode",
+//RS             "data.loader",
+//RS             format!("MIR loader cannot decode `{}`", ty.name()),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn data_state_encode_tree(value: &CtValue) -> Result<CtValue, CtValue> {
+//RS     match value {
+//RS         CtValue::Int(value) => Ok(super::JSONInterp::json_variant(
+//RS             "Int",
+//RS             Some(CtValue::Int(*value)),
+//RS         )),
+//RS         CtValue::BigInt(value) => Ok(super::JSONInterp::json_variant(
+//RS             "Int",
+//RS             Some(CtValue::BigInt(value.clone())),
+//RS         )),
+//RS         CtValue::Float(value) => Ok(super::JSONInterp::json_variant(
+//RS             "Float",
+//RS             Some(CtValue::Float(*value)),
+//RS         )),
+//RS         CtValue::Bool(value) => Ok(super::JSONInterp::json_variant(
+//RS             "Bool",
+//RS             Some(CtValue::Bool(*value)),
+//RS         )),
+//RS         CtValue::Str(value) => Ok(super::JSONInterp::json_variant(
+//RS             "Text",
+//RS             Some(CtValue::Str(value.clone())),
+//RS         )),
+//RS         CtValue::Char(value) => Ok(super::JSONInterp::json_variant(
+//RS             "Text",
+//RS             Some(CtValue::Str(value.to_string())),
+//RS         )),
+//RS         CtValue::Bytes(value) => Ok(super::JSONInterp::json_variant(
+//RS             "Bytes",
+//RS             Some(CtValue::Bytes(value.clone())),
+//RS         )),
+//RS         CtValue::List(values) => values
+//RS             .iter()
+//RS             .map(data_state_encode_tree)
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .map(|values| super::JSONInterp::json_variant("Array", Some(CtValue::List(values)))),
+//RS         CtValue::Map(values) => values
+//RS             .iter()
+//RS             .map(|(key, value)| {
+//RS                 let CtKey::Str(key) = key else {
+//RS                     return Err(data_loader_failure(
+//RS                         "Decode",
+//RS                         "data.loader",
+//RS                         "loader maps require String keys",
+//RS                     ));
+//RS                 };
+//RS                 Ok((key.clone(), data_state_encode_tree(value)?))
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .map(|fields| {
+//RS                 super::JSONInterp::json_variant(
+//RS                     "Object",
+//RS                     Some(CtValue::Struct {
+//RS                         type_name: "JSONObject".to_string(),
+//RS                         fields,
+//RS                     }),
+//RS                 )
+//RS             }),
+//RS         CtValue::Struct { fields, .. } => fields
+//RS             .iter()
+//RS             .map(|(name, value)| Ok((name.clone(), data_state_encode_tree(value)?)))
+//RS             .collect::<Result<Vec<_>, CtValue>>()
+//RS             .map(|fields| {
+//RS                 super::JSONInterp::json_variant(
+//RS                     "Object",
+//RS                     Some(CtValue::Struct {
+//RS                         type_name: "JSONObject".to_string(),
+//RS                         fields,
+//RS                     }),
+//RS                 )
+//RS             }),
+//RS         CtValue::Present(value) => data_state_encode_tree(value),
+//RS         CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit => {
+//RS             Ok(super::JSONInterp::json_variant("Null", None))
+//RS         }
+//RS         CtValue::Enum { type_name, .. } if type_name == "DataTree" => Ok(value.clone()),
+//RS         CtValue::Enum { .. } | CtValue::Failed(CtReport::Told(_)) => Err(data_loader_failure(
+//RS             "Decode",
+//RS             "data.loader",
+//RS             "typed loader value has no canonical Encode representation",
+//RS         )),
+//RS         CtValue::Closure(_) => Err(data_loader_failure(
+//RS             "Decode",
+//RS             "data.loader",
+//RS             "closures cannot cross the typed loader boundary",
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn data_snapshot_dynamic_in_state(
+//RS     loader: &mut ComptimeLoader,
+//RS ) -> Result<CtValue, CtValue> {
+//RS     if loader.state.cancelled {
+//RS         let error = jet_foundation::PreludeDataFlow::KernelError {
+//RS             kind: jet_foundation::PreludeDataFlow::ErrorKind::State,
+//RS             operation: "data.loader".to_string(),
+//RS             reason: "loader was cancelled before snapshot".to_string(),
+//RS         };
+//RS         jet_foundation::PreludeDataFlow::fail(&mut loader.state, &error);
+//RS         return Err(data_loader_kernel_failure(error));
+//RS     }
+//RS     if let Err(error) = jet_foundation::PreludeDataFlow::validate_loader(&loader.state) {
+//RS         jet_foundation::PreludeDataFlow::fail(&mut loader.state, &error);
+//RS         return Err(data_loader_kernel_failure(error));
+//RS     }
+//RS     if let Err(error) = jet_foundation::PreludeDataFlow::validate_limits(&loader.state.limits) {
+//RS         jet_foundation::PreludeDataFlow::fail(&mut loader.state, &error);
+//RS         return Err(data_loader_kernel_failure(error));
+//RS     }
+//RS     let (payload, offline) = match data_loader_payload(&loader.state) {
+//RS         Ok(payload) => payload,
+//RS         Err(error) => {
+//RS             data_loader_fail_value(loader, &error, "data.loader");
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     let tree = match data_dynamic_tree(&payload, &loader.state.format, &loader.state.limits) {
+//RS         Ok(tree) => tree,
+//RS         Err(error) => {
+//RS             data_loader_fail_value(loader, &error, "data.loader");
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     let value = if let Some(ty) = loader.decode_ty.clone() {
+//RS         let decode_tree = if loader.state.format == "csv" {
+//RS             data_typed_tree(&tree)
+//RS         } else {
+//RS             tree.clone()
+//RS         };
+//RS         match data_state_decode_tree(&ty, &decode_tree) {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 data_loader_fail_value(loader, &error, "data.loader");
+//RS                 return Err(error);
+//RS             }
+//RS         }
+//RS     } else {
+//RS         loader.seed.clone().unwrap_or_else(|| tree.clone())
+//RS     };
+//RS     let canonical_value = if loader.decode_ty.is_some() {
+//RS         match data_state_encode_tree(&value) {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 data_loader_fail_value(loader, &error, "data.loader");
+//RS                 return Err(error);
+//RS             }
+//RS         }
+//RS     } else {
+//RS         data_dynamic_canonical(&value)
+//RS     };
+//RS     let canonical =
+//RS         super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0).into_bytes();
+//RS     let schema = data_schema_value(&tree, &loader.state.format);
+//RS     let schema_id = match struct_field(&schema, "DataSchema", "identity") {
+//RS         Some(CtValue::Str(value)) => value.clone(),
+//RS         _ => String::new(),
+//RS     };
+//RS     let mut state = loader.state.clone();
+//RS     let facts = match jet_foundation::PreludeDataFlow::commit_snapshot(
+//RS         &mut state,
+//RS         payload,
+//RS         &canonical,
+//RS         &schema_id,
+//RS         offline,
+//RS     ) {
+//RS         Ok(facts) => facts,
+//RS         Err(error) => {
+//RS             jet_foundation::PreludeDataFlow::fail(&mut loader.state, &error);
+//RS             return Err(data_loader_kernel_failure(error));
+//RS         }
+//RS     };
+//RS     loader.state = state;
+//RS     let identity = ct_struct(
+//RS         "DataSnapshotIdentity",
+//RS         vec![
+//RS             ("id", CtValue::Str(format!("snapshot-{}", facts.snapshot_id))),
+//RS             ("source", CtValue::Str(format!("source-{}", facts.source_id))),
+//RS             ("content", CtValue::Str(facts.content_id)),
+//RS             ("schema", CtValue::Str(facts.schema_id)),
+//RS             ("format", data_kernel_format_value(&loader.state.format)),
+//RS         ],
+//RS     );
+//RS     let provenance = ct_struct(
+//RS         "DataProvenance",
+//RS         vec![
+//RS             ("source", data_kernel_source_value(&loader.state.source)),
+//RS             ("format", data_kernel_format_value(&loader.state.format)),
+//RS             ("authority", data_kernel_authority_value(&loader.state.authority)),
+//RS         ],
+//RS     );
+//RS     Ok(ct_struct(
+//RS         "DataSnapshot",
+//RS         vec![
+//RS             ("value", value),
+//RS             ("identity", identity),
+//RS             ("provenance", provenance),
+//RS             ("schema", schema),
+//RS             (
+//RS                 "status",
+//RS                 data_kernel_status_value(&jet_foundation::PreludeDataFlow::status(
+//RS                     &loader.state,
+//RS                 )),
+//RS             ),
+//RS             ("content", CtValue::Bytes(canonical)),
+//RS         ],
+//RS     ))
+//RS }
+//RS 
+//RS fn data_stream_rows_in_state(loader: &ComptimeLoader) -> Result<Vec<CtValue>, CtValue> {
+//RS     let (payload, _) = data_loader_payload(&loader.state)?;
+//RS     let tree = data_dynamic_tree(&payload, &loader.state.format, &loader.state.limits)?;
+//RS     let rows = data_dynamic_rows(&tree);
+//RS     let Some(ty) = loader.decode_ty.clone() else {
+//RS         return Ok(rows);
+//RS     };
+//RS     rows.into_iter()
+//RS         .map(|row| {
+//RS             let row = if loader.state.format == "csv" {
+//RS                 data_typed_tree(&row)
+//RS             } else {
+//RS                 row
+//RS             };
+//RS             data_state_decode_tree(&ty, &row)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS /// State-only data route used by the canonical MIR evaluator. Checked MIR
+//RS /// carries the row schema and descriptor facts when the erased CtValue call
+//RS /// cannot carry them itself.
+//RS pub fn eval_data_call_in_state(
+//RS     state: &mut DataPipelineState,
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     type_args: &[Type],
+//RS     resolved_ret: Option<&Type>,
+//RS     data_plan: Option<&jet_foundation::MIR::MirDataPlan>,
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     // D-QUERY-RETAIN1=A: receiver Core rows carry an empty module. The
+//RS     // `Query`/`DataGroupedQuery` carrier is argument 0; callbacks are MIR
+//RS     // standalone closures invoked through the shared closure host. The
+//RS     // checked-SQL list door is the same row family with the list first.
+//RS     if module.is_empty() {
+//RS         if let Some(recv) = args.first() {
+//RS             if matches!(recv, CtValue::Struct { type_name, .. } if matches!(
+//RS                 type_name.as_str(),
+//RS                 "Query" | "DataGroupedQuery" | "DataTracked" | "DataWatch"
+//RS             ))
+//RS             {
+//RS                 return eval_data_query_method_with(
+//RS                     state,
+//RS                     recv,
+//RS                     method,
+//RS                     &args[1..],
+//RS                     resolved_ret,
+//RS                     &mut |callback, callback_args, span| {
+//RS                         super::Methods::invoke_standalone_closure(callback, callback_args, span)
+//RS                     },
+//RS                     span,
+//RS                 );
+//RS             }
+//RS             if method == "query" && matches!(recv, CtValue::List(_)) {
+//RS                 return eval_data_call_in_state(
+//RS                     state,
+//RS                     "core.data",
+//RS                     "query",
+//RS                     args,
+//RS                     type_args,
+//RS                     resolved_ret,
+//RS                     data_plan,
+//RS                     span,
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS     if matches!(module, "core.data" | "core.data.plot")
+//RS         && matches!(
+//RS             method,
+//RS             "plot" | "inspect" | "inspect_json" | "text" | "svg" | "show" | "render"
+//RS         )
+//RS     {
+//RS         return Some(plot_static_call(
+//RS             state,
+//RS             method,
+//RS             args,
+//RS             None,
+//RS             &HashMap::new(),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     // MIR may carry a checked `Result<DataSummary, DataError>` even when the
+//RS     // package-edition thread still reflects the legacy plain-value surface.
+//RS     // Keep this state route on the shared statistics kernel and honor that
+//RS     // declaration instead of erasing the outcome carrier.
+//RS     if module == "core.data" && method == "describe" {
+//RS         return Some(super::Methods::eval_data_describe(args, resolved_ret, span));
+//RS     }
+//RS     if module == "core.data"
+//RS         && matches!(
+//RS             method,
+//RS             "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value"
+//RS         )
+//RS     {
+//RS         return Some(data_loader_constructor_in_state(
+//RS             state,
+//RS             method,
+//RS             args,
+//RS             type_args,
+//RS             resolved_ret,
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if module == "core.data" && method == "snapshot" {
+//RS         let result = args
+//RS             .first()
+//RS             .ok_or_else(|| unsupported("`data.snapshot()` is missing loader", span))
+//RS             .and_then(|loader| {
+//RS                 eval_data_loader_method_in_state(state, loader, "snapshot", &[], span)
+//RS                     .unwrap_or_else(|| Err(unsupported("data.snapshot", span)))
+//RS             });
+//RS         return Some(result);
+//RS     }
+//RS     if module == "core.data.loader" && method == "snapshot_reusable" {
+//RS         return Some(match (args.first(), args.get(1)) {
+//RS             (Some(left), Some(right)) => data_snapshot_reusable_value(left, right)
+//RS                 .map(CtValue::Bool)
+//RS                 .ok_or_else(|| {
+//RS                     unsupported(
+//RS                         "`data.loader.snapshot_reusable()` needs snapshot identities",
+//RS                         span,
+//RS                     )
+//RS                 }),
+//RS             _ => Err(unsupported(
+//RS                 "`data.loader.snapshot_reusable()`: missing argument",
+//RS                 span,
+//RS             )),
+//RS         });
+//RS     }
+//RS     if module == "core.data.loader" {
+//RS         let result = args
+//RS             .first()
+//RS             .ok_or_else(|| {
+//RS                 unsupported(&format!("`data.loader.{method}()`: missing loader"), span)
+//RS             })
+//RS             .and_then(|loader| {
+//RS                 eval_data_loader_method_in_state(state, loader, method, &args[1..], span)
+//RS                     .unwrap_or_else(|| Err(unsupported(&format!("data.loader.{method}"), span)))
+//RS             });
+//RS         return Some(result);
+//RS     }
+//RS     if module == "core.data.stream" {
+//RS         let result = args
+//RS             .first()
+//RS             .ok_or_else(|| {
+//RS                 unsupported(&format!("`data.stream.{method}()`: missing stream"), span)
+//RS             })
+//RS             .and_then(|stream| {
+//RS                 eval_data_stream_method_in_state(state, stream, method, &args[1..], span)
+//RS                     .unwrap_or_else(|| Err(unsupported(&format!("data.stream.{method}"), span)))
+//RS             });
+//RS         return Some(result);
+//RS     }
+//RS 
+//RS     if module == "core.data" && matches!(method, "inner_join" | "left_join") {
+//RS         let [left, right, left_key, right_key] = args else {
+//RS             return Some(Err(unsupported(
+//RS                 &format!("`data.{method}()` expects left, right, and two key callbacks"),
+//RS                 span,
+//RS             )));
+//RS         };
+//RS         let left = match left {
+//RS             CtValue::List(rows) => rows.clone(),
+//RS             _ => {
+//RS                 return Some(Err(unsupported(
+//RS                     &format!("`data.{method}()` needs a left list"),
+//RS                     span,
+//RS                 )))
+//RS             }
+//RS         };
+//RS         let right = match right {
+//RS             CtValue::List(rows) => rows.clone(),
+//RS             _ => {
+//RS                 return Some(Err(unsupported(
+//RS                     &format!("`data.{method}()` needs a right list"),
+//RS                     span,
+//RS                 )))
+//RS             }
+//RS         };
+//RS         let right_type = data_join_right_type(resolved_ret);
+//RS         let mut call = |callback: &CtValue, args: Vec<CtValue>, span: Span| {
+//RS             super::Methods::invoke_standalone_closure(callback, args, span)
+//RS         };
+//RS         let joined = collect_join_rows(
+//RS             &left,
+//RS             &right,
+//RS             left_key,
+//RS             right_key,
+//RS             method == "left_join",
+//RS             right_type,
+//RS             &mut call,
+//RS             span,
+//RS         )
+//RS         .map(CtValue::List)
+//RS         .map(|joined| CtValue::Present(Box::new(joined)));
+//RS         return Some(joined);
+//RS     }
+//RS 
+//RS     if module == "core.data" && method == "pivot_sum" {
+//RS         return Some(super::Methods::eval_data_pivot_sum(
+//RS             args,
+//RS             span,
+//RS             |callback, callback_args, span| {
+//RS                 super::Methods::invoke_standalone_closure(callback, callback_args, span)
+//RS             },
+//RS         ));
+//RS     }
+//RS 
+//RS     if module == "core.data" && method == "track" {
+//RS         if args.len() != 2 {
+//RS             return Some(Err(unsupported(
+//RS                 "`data.track()` expects rows and one key callback",
+//RS                 span,
+//RS             )));
+//RS         }
+//RS         let rows = match args.first() {
+//RS             Some(CtValue::List(rows)) => rows.clone(),
+//RS             Some(_) => return Some(Err(unsupported("`data.track()` needs a list", span))),
+//RS             None => return Some(Err(unsupported("`data.track()` is missing rows", span))),
+//RS         };
+//RS         let key = args[1].clone();
+//RS         return Some(build_tracked(
+//RS             state,
+//RS             rows,
+//RS             key,
+//RS             &mut |callback, callback_args, span| {
+//RS                 super::Methods::invoke_standalone_closure(callback, callback_args, span)
+//RS             },
+//RS             span,
+//RS         ).map(|tracked| CtValue::Present(Box::new(tracked))));
+//RS     }
+//RS     if module == "core.data" && method == "query" {
+//RS         let rows = match args.first() {
+//RS             Some(CtValue::List(rows)) => rows.clone(),
+//RS             Some(_) => return Some(Err(unsupported("`data.query()` needs a list", span))),
+//RS             None => return Some(Err(unsupported("`data.query()` is missing rows", span))),
+//RS         };
+//RS         let declared_fields = data_plan
+//RS             .and_then(|plan| plan.logical.iter().find(|node| node.id == plan.output))
+//RS             .map(|node| node.columns.iter().map(|column| column.name.clone()).collect());
+//RS         let selected = if args.len() == 1 {
+//RS             Ok(rows)
+//RS         } else {
+//RS             let Some(CtValue::Str(sql)) = args.get(1) else {
+//RS                 return Some(Err(unsupported(
+//RS                     "`data.query()` expects SQL text as argument 1",
+//RS                     span,
+//RS                 )));
+//RS             };
+//RS             query_sql_rows(rows, sql, declared_fields)
+//RS         };
+//RS         return Some(match selected {
+//RS             Ok(rows) => {
+//RS                 let query = store_query(
+//RS                     state,
+//RS                     rows,
+//RS                     if args.len() == 1 {
+//RS                         vec!["scan".to_string()]
+//RS                     } else {
+//RS                         vec!["scan".to_string(), "sql".to_string()]
+//RS                     },
+//RS                 );
+//RS                 if args.len() == 1 {
+//RS                     Ok(query)
+//RS                 } else {
+//RS                     Ok(CtValue::Present(Box::new(query)))
+//RS                 }
+//RS             }
+//RS             Err(error) => Ok(CtValue::failed(Box::new(error))),
+//RS         });
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn data_loader_constructor_in_state(
+//RS     state: &mut DataPipelineState,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     type_args: &[Type],
+//RS     resolved_ret: Option<&Type>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let operation = format!("core.data.{method}");
+//RS     let (kind, locator, member, parameters, format, authority, limits, payload, seed) =
+//RS         match method {
+//RS             "load" => {
+//RS                 let locator = data_loader_string_arg(args, 0, method, span)?;
+//RS                 let limits = data_limits_from_value(args.get(1));
+//RS                 let format = match data_loader_format_for_locator(&locator) {
+//RS                     Ok(format) => format,
+//RS                     Err(error) => return Ok(error),
+//RS                 };
+//RS                 let kind = if locator.starts_with("http://")
+//RS                     || locator.starts_with("https://")
+//RS                 {
+//RS                     jet_foundation::PreludeDataFlow::LoaderKind::URL
+//RS                 } else {
+//RS                     jet_foundation::PreludeDataFlow::LoaderKind::File
+//RS                 };
+//RS                 let scope = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
+//RS                     "network"
+//RS                 } else {
+//RS                     "local"
+//RS                 };
+//RS                 let authority = match data_loader_authority(scope, "") {
+//RS                     Ok(authority) => authority,
+//RS                     Err(error) => return Ok(error),
+//RS                 };
+//RS                 (
+//RS                     kind,
+//RS                     locator,
+//RS                     String::new(),
+//RS                     Vec::new(),
+//RS                     format,
+//RS                     authority,
+//RS                     limits,
+//RS                     None,
+//RS                     None,
+//RS                 )
+//RS             }
+//RS             "load_default" => {
+//RS                 let locator = data_loader_string_arg(args, 0, method, span)?;
+//RS                 let format = match data_loader_format_for_locator(&locator) {
+//RS                     Ok(format) => format,
+//RS                     Err(error) => return Ok(error),
+//RS                 };
+//RS                 let kind = if locator.starts_with("http://")
+//RS                     || locator.starts_with("https://")
+//RS                 {
+//RS                     jet_foundation::PreludeDataFlow::LoaderKind::URL
+//RS                 } else {
+//RS                     jet_foundation::PreludeDataFlow::LoaderKind::File
+//RS                 };
+//RS                 let scope = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
+//RS                     "network"
+//RS                 } else {
+//RS                     "local"
+//RS                 };
+//RS                 let authority = match data_loader_authority(scope, "") {
+//RS                     Ok(authority) => authority,
+//RS                     Err(error) => return Ok(error),
+//RS                 };
+//RS                 (
+//RS                     kind,
+//RS                     locator,
+//RS                     String::new(),
+//RS                     Vec::new(),
+//RS                     format,
+//RS                     authority,
+//RS                     data_kernel_limits_safe(),
+//RS                     None,
+//RS                     None,
+//RS                 )
+//RS             }
+//RS             "file" => {
+//RS                 let path = data_loader_string_arg(args, 0, method, span)?;
+//RS                 let format = data_loader_string_arg(args, 1, method, span)?;
+//RS                 let Some(format) = data_loader_format(&format) else {
+//RS                     return Ok(data_loader_failure(
+//RS                         "Bridge",
+//RS                         &operation,
+//RS                         "format is provider-owned; import its package",
+//RS                     ));
+//RS                 };
+//RS                 let authority = match data_loader_authority("local", "") {
+//RS                     Ok(authority) => authority,
+//RS                     Err(error) => return Ok(error),
+//RS                 };
+//RS                 (
+//RS                     jet_foundation::PreludeDataFlow::LoaderKind::File,
+//RS                     path,
+//RS                     String::new(),
+//RS                     Vec::new(),
+//RS                     format.to_string(),
+//RS                     authority,
+//RS                     data_limits_from_value(args.get(2)),
+//RS                     None,
+//RS                     None,
+//RS                 )
+//RS             }
+//RS             "file_member" => {
+//RS                 let path = data_loader_string_arg(args, 0, method, span)?;
+//RS                 let member = data_loader_string_arg(args, 1, method, span)?;
+//RS                 let format = data_loader_string_arg(args, 2, method, span)?;
+//RS                 let Some(format) = data_loader_format(&format) else {
+//RS                     return Ok(data_loader_failure(
+//RS                         "Bridge",
+//RS                         &operation,
+//RS                         "format is provider-owned; import its package",
+//RS                     ));
+//RS                 };
+//RS                 let authority = match data_loader_authority("local", "") {
+//RS                     Ok(authority) => authority,
+//RS                     Err(error) => return Ok(error),
+//RS                 };
+//RS                 (
+//RS                     jet_foundation::PreludeDataFlow::LoaderKind::File,
+//RS                     path,
+//RS                     member,
+//RS                     Vec::new(),
+//RS                     format.to_string(),
+//RS                     authority,
+//RS                     data_limits_from_value(args.get(3)),
+//RS                     None,
+//RS                     None,
+//RS                 )
+//RS             }
+//RS             "url" => {
+//RS                 let url = data_loader_string_arg(args, 0, method, span)?;
+//RS                 let format = data_loader_string_arg(args, 1, method, span)?;
+//RS                 let authority_name = data_loader_string_arg(args, 2, method, span)?;
+//RS                 let Some(format) = data_loader_format(&format) else {
+//RS                     return Ok(data_loader_failure(
+//RS                         "Bridge",
+//RS                         &operation,
+//RS                         "format is provider-owned; import its package",
+//RS                     ));
+//RS                 };
+//RS                 let authority = match data_loader_authority(&authority_name, "") {
+//RS                     Ok(authority) => authority,
+//RS                     Err(error) => return Ok(error),
+//RS                 };
+//RS                 (
+//RS                     jet_foundation::PreludeDataFlow::LoaderKind::URL,
+//RS                     url,
+//RS                     String::new(),
+//RS                     Vec::new(),
+//RS                     format.to_string(),
+//RS                     authority,
+//RS                     data_limits_from_value(args.get(3)),
+//RS                     None,
+//RS                     None,
+//RS                 )
+//RS             }
+//RS             "database" => {
+//RS                 let query = data_loader_string_arg(args, 0, method, span)?;
+//RS                 let parameters = args
+//RS                     .get(1)
+//RS                     .ok_or_else(|| unsupported("`data.database()` is missing parameters", span))
+//RS                     .and_then(|value| data_loader_parameters(value, span))?;
+//RS                 let authority_name = data_loader_string_arg(args, 2, method, span)?;
+//RS                 let authority = match data_loader_authority(&authority_name, "") {
+//RS                     Ok(authority) => authority,
+//RS                     Err(error) => return Ok(error),
+//RS                 };
+//RS                 (
+//RS                     jet_foundation::PreludeDataFlow::LoaderKind::Database,
+//RS                     query,
+//RS                     String::new(),
+//RS                     parameters,
+//RS                     "json".to_string(),
+//RS                     authority,
+//RS                     data_limits_from_value(args.get(3)),
+//RS                     None,
+//RS                     None,
+//RS                 )
+//RS             }
+//RS             "value" => {
+//RS                 let value = args
+//RS                     .first()
+//RS                     .cloned()
+//RS                     .ok_or_else(|| unsupported("`data.value()` is missing value", span))?;
+//RS                 let limits = data_limits_from_value(args.get(1));
+//RS                 let text = super::JSONInterp::render_ordered_datatree(&value, false, 0);
+//RS                 let authority = match data_loader_authority("local", "") {
+//RS                     Ok(authority) => authority,
+//RS                     Err(error) => return Ok(error),
+//RS                 };
+//RS                 (
+//RS                     jet_foundation::PreludeDataFlow::LoaderKind::Value,
+//RS                     "value".to_string(),
+//RS                     String::new(),
+//RS                     Vec::new(),
+//RS                     "json".to_string(),
+//RS                     authority,
+//RS                     limits,
+//RS                     Some(text.into_bytes()),
+//RS                     Some(value),
+//RS                 )
+//RS             }
+//RS             _ => unreachable!(),
+//RS         };
+//RS     match data_loader_new(
+//RS         state,
+//RS         kind,
+//RS         locator,
+//RS         member,
+//RS         parameters,
+//RS         format,
+//RS         limits,
+//RS         authority,
+//RS         payload,
+//RS         loader_type_for_call(type_args, resolved_ret),
+//RS         seed,
+//RS     ) {
+//RS         Ok(value) => Ok(value),
+//RS         Err(error) => Ok(error),
+//RS     }
+//RS }
+//RS 
+//RS fn eval_data_loader_method_in_state(
+//RS     state: &mut DataPipelineState,
+//RS     recv: &CtValue,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if !matches!(recv, CtValue::Struct { type_name, .. } if type_name == "DataLoader") {
+//RS         return None;
+//RS     }
+//RS     let id = match data_loader_state_id(state, recv, span) {
+//RS         Ok(id) => id,
+//RS         Err(error) => return Some(Err(error)),
+//RS     };
+//RS     let mut slot = state
+//RS         .loaders
+//RS         .get_mut(id - 1)
+//RS         .and_then(Option::take)
+//RS         .expect("loader identity checked");
+//RS     let result = (|| -> Result<CtValue, Diagnostic> {
+//RS         match method {
+//RS             "status" => Ok(data_kernel_status_value(
+//RS                 &jet_foundation::PreludeDataFlow::status(&slot.state),
+//RS             )),
+//RS             "source_identity" => Ok(data_kernel_source_value(&slot.state.source)),
+//RS             "authority" | "authority_of" => Ok(data_kernel_authority_value(&slot.state.authority)),
+//RS             "ready" => Ok(CtValue::Bool(jet_foundation::PreludeDataFlow::ready(
+//RS                 &slot.state,
+//RS             ))),
+//RS             "needs_refresh" => Ok(CtValue::Bool(
+//RS                 jet_foundation::PreludeDataFlow::needs_refresh(&slot.state),
+//RS             )),
+//RS             "snapshot_reusable" => {
+//RS                 let snapshot = args.first().ok_or_else(|| {
+//RS                     unsupported("`data.loader.snapshot_reusable()` needs a snapshot", span)
+//RS                 })?;
+//RS                 data_snapshot_reusable_value(recv, snapshot)
+//RS                     .map(CtValue::Bool)
+//RS                     .ok_or_else(|| unsupported("`snapshot_reusable()` needs a DataSnapshot", span))
+//RS             }
+//RS             "bind" => {
+//RS                 let payload = match args.first() {
+//RS                     Some(CtValue::Bytes(bytes)) => bytes.clone(),
+//RS                     Some(CtValue::List(values)) => values
+//RS                         .iter()
+//RS                         .map(|value| match value {
+//RS                             CtValue::Int(value) if (0..=255).contains(value) => Ok(*value as u8),
+//RS                             _ => Err(unsupported("`DataLoader.bind()` needs byte values", span)),
+//RS                         })
+//RS                         .collect::<Result<Vec<_>, _>>()?,
+//RS                     _ => {
+//RS                         return Err(unsupported(
+//RS                             "`DataLoader.bind()` needs byte values",
+//RS                             span,
+//RS                         ))
+//RS                     }
+//RS                 };
+//RS                 match jet_foundation::PreludeDataFlow::bind(&mut slot.state, payload) {
+//RS                     Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
+//RS                     Err(error) => {
+//RS                         jet_foundation::PreludeDataFlow::fail(&mut slot.state, &error);
+//RS                         Ok(data_loader_kernel_failure(error))
+//RS                     }
+//RS                 }
+//RS             }
+//RS             "bind_text" => {
+//RS                 let payload = match args.first() {
+//RS                     Some(CtValue::Str(value)) => value.as_bytes().to_vec(),
+//RS                     _ => return Err(unsupported("`DataLoader.bind_text()` needs String", span)),
+//RS                 };
+//RS                 match jet_foundation::PreludeDataFlow::bind(&mut slot.state, payload) {
+//RS                     Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
+//RS                     Err(error) => {
+//RS                         jet_foundation::PreludeDataFlow::fail(&mut slot.state, &error);
+//RS                         Ok(data_loader_kernel_failure(error))
+//RS                     }
+//RS                 }
+//RS             }
+//RS             "cancel" => {
+//RS                 jet_foundation::PreludeDataFlow::cancel(&mut slot.state);
+//RS                 Ok(CtValue::Unit)
+//RS             }
+//RS             "offline" => {
+//RS                 let enabled = match args.first() {
+//RS                     Some(CtValue::Bool(value)) => *value,
+//RS                     _ => return Err(unsupported("`DataLoader.offline()` needs Bool", span)),
+//RS                 };
+//RS                 jet_foundation::PreludeDataFlow::set_offline(&mut slot.state, enabled);
+//RS                 Ok(CtValue::Unit)
+//RS             }
+//RS             "invalidate" => {
+//RS                 let cause = match args.first() {
+//RS                     Some(CtValue::Enum {
+//RS                         type_name,
+//RS                         variant,
+//RS                         ..
+//RS                     }) if type_name == "DataInvalidationCause" => match variant.as_str() {
+//RS                         "NoCause" => jet_foundation::PreludeDataFlow::InvalidationCause::NoCause,
+//RS                         "Loader" => jet_foundation::PreludeDataFlow::InvalidationCause::Loader,
+//RS                         "Input" => jet_foundation::PreludeDataFlow::InvalidationCause::Input,
+//RS                         "ArchiveMember" => {
+//RS                             jet_foundation::PreludeDataFlow::InvalidationCause::ArchiveMember
+//RS                         }
+//RS                         "Parameters" => {
+//RS                             jet_foundation::PreludeDataFlow::InvalidationCause::Parameters
+//RS                         }
+//RS                         "Credential" => {
+//RS                             jet_foundation::PreludeDataFlow::InvalidationCause::Credential
+//RS                         }
+//RS                         "Capability" => {
+//RS                             jet_foundation::PreludeDataFlow::InvalidationCause::Capability
+//RS                         }
+//RS                         "Manual" => jet_foundation::PreludeDataFlow::InvalidationCause::Manual,
+//RS                         _ => {
+//RS                             return Err(unsupported(
+//RS                                 "`DataLoader.invalidate()` needs DataInvalidationCause",
+//RS                                 span,
+//RS                             ))
+//RS                         }
+//RS                     },
+//RS                     _ => {
+//RS                         return Err(unsupported(
+//RS                             "`DataLoader.invalidate()` needs DataInvalidationCause",
+//RS                             span,
+//RS                         ))
+//RS                     }
+//RS                 };
+//RS                 jet_foundation::PreludeDataFlow::invalidate(&mut slot.state, cause);
+//RS                 Ok(CtValue::Unit)
+//RS             }
+//RS             "stream" => {
+//RS                 if slot.state.cancelled {
+//RS                     let error = jet_foundation::PreludeDataFlow::KernelError {
+//RS                         kind: jet_foundation::PreludeDataFlow::ErrorKind::State,
+//RS                         operation: "data.loader.stream".to_string(),
+//RS                         reason: "loader was cancelled".to_string(),
+//RS                     };
+//RS                     jet_foundation::PreludeDataFlow::fail(&mut slot.state, &error);
+//RS                     return Ok(data_loader_kernel_failure(error));
+//RS                 }
+//RS                 if let Err(error) =
+//RS                     jet_foundation::PreludeDataFlow::validate_loader(&slot.state)
+//RS                 {
+//RS                     jet_foundation::PreludeDataFlow::fail(&mut slot.state, &error);
+//RS                     return Ok(data_loader_kernel_failure(error));
+//RS                 }
+//RS                 if let Err(error) =
+//RS                     jet_foundation::PreludeDataFlow::validate_limits(&slot.state.limits)
+//RS                 {
+//RS                     jet_foundation::PreludeDataFlow::fail(&mut slot.state, &error);
+//RS                     return Ok(data_loader_kernel_failure(error));
+//RS                 }
+//RS                 match data_stream_rows_in_state(&slot) {
+//RS                     Ok(rows) => {
+//RS                         let size = slot
+//RS                             .state
+//RS                             .payload
+//RS                             .as_ref()
+//RS                             .map_or(0, Vec::len);
+//RS                         let bytes = i64::try_from(size).unwrap_or(i64::MAX);
+//RS                         slot.state.status.buffered_bytes = bytes;
+//RS                         slot.state.status.backpressure =
+//RS                             bytes > slot.state.limits.buffer_bytes;
+//RS                         Ok(CtValue::Present(Box::new(store_data_stream(
+//RS                             state,
+//RS                             ComptimeStream {
+//RS                                 rows,
+//RS                                 cursor: 0,
+//RS                                 cancelled: false,
+//RS                                 row_ty: slot
+//RS                                     .decode_ty
+//RS                                     .as_ref()
+//RS                                     .map(data_stream_row_type),
+//RS                             },
+//RS                         ))))
+//RS                     }
+//RS                     Err(error) => {
+//RS                         data_loader_fail_value(&mut slot, &error, "data.loader.stream");
+//RS                         Ok(error)
+//RS                     }
+//RS                 }
+//RS             }
+//RS             "snapshot" => match data_snapshot_dynamic_in_state(&mut slot) {
+//RS                 Ok(value) => Ok(value),
+//RS                 Err(error) => Ok(error),
+//RS             },
+//RS             _ => Err(unsupported(
+//RS                 &format!("`DataLoader.{method}()` is not a registered operation"),
+//RS                 span,
+//RS             )),
+//RS         }
+//RS     })();
+//RS     state.loaders[id - 1] = Some(slot);
+//RS     Some(result)
+//RS }
+//RS 
+//RS fn eval_data_stream_method_in_state(
+//RS     state: &mut DataPipelineState,
+//RS     recv: &CtValue,
+//RS     method: &str,
+//RS     _args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if !matches!(recv, CtValue::Struct { type_name, .. } if type_name == "DataStream") {
+//RS         return None;
+//RS     }
+//RS     let id = match data_stream_state_id(state, recv, span) {
+//RS         Ok(id) => id,
+//RS         Err(error) => return Some(Err(error)),
+//RS     };
+//RS     let mut stream = state
+//RS         .streams
+//RS         .get_mut(id - 1)
+//RS         .and_then(Option::take)
+//RS         .expect("stream identity checked");
+//RS     let result = match method {
+//RS         "next" => Ok(data_stream_next(&mut stream)),
+//RS         "collect" => {
+//RS             if stream.cancelled {
+//RS                 Ok(data_loader_failure(
+//RS                     "State",
+//RS                     "data.stream.collect",
+//RS                     "stream was cancelled",
+//RS                 ))
+//RS             } else {
+//RS                 let rows = stream.rows[stream.cursor..].to_vec();
+//RS                 stream.cursor = stream.rows.len();
+//RS                 Ok(CtValue::Present(Box::new(CtValue::List(rows))))
+//RS             }
+//RS         }
+//RS         "cancel" => {
+//RS             stream.cancelled = true;
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         _ => Err(unsupported(
+//RS             &format!("`DataStream.{method}()` is not a registered operation"),
+//RS             span,
+//RS         )),
+//RS     };
+//RS     state.streams[id - 1] = Some(stream);
+//RS     Some(result)
+//RS }
+//RS 
+//RS /// Static Core data-loader/stream projection. Local CSV, JSON, and JSONL use
+//RS /// the Foundation carrier; provider-owned sources retain structured Bridge.
+//RS pub(super) fn eval_data_loader_call(
+//RS     interp: &mut super::Interpreter::Interp<'_>,
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     type_args: &[Type],
+//RS     resolved_ret: Option<&Type>,
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     let operation = format!("{module}.{method}");
+//RS     match (module, method) {
+//RS         ("core.data", "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value") => {
+//RS             let result = (|| -> Result<CtValue, Diagnostic> {
+//RS                 let (kind, locator, member, parameters, format, authority, limits, payload, seed) =
+//RS                     match method {
+//RS                         "load" => {
+//RS                             let locator = data_loader_string_arg(args, 0, method, span)?;
+//RS                             let limits = data_limits_from_value(args.get(1));
+//RS                             let format = match data_loader_format_for_locator(&locator) {
+//RS                                 Ok(format) => format,
+//RS                                 Err(error) => return Ok(error),
+//RS                             };
+//RS                             let kind = if locator.starts_with("http://")
+//RS                                 || locator.starts_with("https://")
+//RS                             {
+//RS                                 jet_foundation::PreludeDataFlow::LoaderKind::URL
+//RS                             } else {
+//RS                                 jet_foundation::PreludeDataFlow::LoaderKind::File
+//RS                             };
+//RS                             let scope = if kind
+//RS                                 == jet_foundation::PreludeDataFlow::LoaderKind::URL
+//RS                             {
+//RS                                 "network"
+//RS                             } else {
+//RS                                 "local"
+//RS                             };
+//RS                             let authority = match data_loader_authority(scope, "") {
+//RS                                 Ok(authority) => authority,
+//RS                                 Err(error) => return Ok(error),
+//RS                             };
+//RS                             (
+//RS                                 kind,
+//RS                                 locator,
+//RS                                 String::new(),
+//RS                                 Vec::new(),
+//RS                                 format,
+//RS                                 authority,
+//RS                                 limits,
+//RS                                 None,
+//RS                                 None,
+//RS                             )
+//RS                         }
+//RS                         "load_default" => {
+//RS                             let locator = data_loader_string_arg(args, 0, method, span)?;
+//RS                             let format = match data_loader_format_for_locator(&locator) {
+//RS                                 Ok(format) => format,
+//RS                                 Err(error) => return Ok(error),
+//RS                             };
+//RS                             let kind = if locator.starts_with("http://")
+//RS                                 || locator.starts_with("https://")
+//RS                             {
+//RS                                 jet_foundation::PreludeDataFlow::LoaderKind::URL
+//RS                             } else {
+//RS                                 jet_foundation::PreludeDataFlow::LoaderKind::File
+//RS                             };
+//RS                             let scope = if kind
+//RS                                 == jet_foundation::PreludeDataFlow::LoaderKind::URL
+//RS                             {
+//RS                                 "network"
+//RS                             } else {
+//RS                                 "local"
+//RS                             };
+//RS                             let authority = match data_loader_authority(scope, "") {
+//RS                                 Ok(authority) => authority,
+//RS                                 Err(error) => return Ok(error),
+//RS                             };
+//RS                             (kind, locator, String::new(), Vec::new(), format, authority, data_kernel_limits_safe(), None, None)
+//RS                         }
+//RS                         "file" => {
+//RS                             let path = data_loader_string_arg(args, 0, method, span)?;
+//RS                             let format = data_loader_string_arg(args, 1, method, span)?;
+//RS                             let Some(format) = data_loader_format(&format) else {
+//RS                                 return Ok(data_loader_failure(
+//RS                                     "Bridge",
+//RS                                     &operation,
+//RS                                     "format is provider-owned; import its package",
+//RS                                 ));
+//RS                             };
+//RS                             let authority = match data_loader_authority("local", "") {
+//RS                                 Ok(authority) => authority,
+//RS                                 Err(error) => return Ok(error),
+//RS                             };
+//RS                             (jet_foundation::PreludeDataFlow::LoaderKind::File, path, String::new(), Vec::new(), format.to_string(), authority, data_limits_from_value(args.get(2)), None, None)
+//RS                         }
+//RS                         "file_member" => {
+//RS                             let path = data_loader_string_arg(args, 0, method, span)?;
+//RS                             let member = data_loader_string_arg(args, 1, method, span)?;
+//RS                             let format = data_loader_string_arg(args, 2, method, span)?;
+//RS                             let Some(format) = data_loader_format(&format) else {
+//RS                                 return Ok(data_loader_failure(
+//RS                                     "Bridge",
+//RS                                     &operation,
+//RS                                     "format is provider-owned; import its package",
+//RS                                 ));
+//RS                             };
+//RS                             let authority = match data_loader_authority("local", "") {
+//RS                                 Ok(authority) => authority,
+//RS                                 Err(error) => return Ok(error),
+//RS                             };
+//RS                             (jet_foundation::PreludeDataFlow::LoaderKind::File, path, member, Vec::new(), format.to_string(), authority, data_limits_from_value(args.get(3)), None, None)
+//RS                         }
+//RS                         "url" => {
+//RS                             let url = data_loader_string_arg(args, 0, method, span)?;
+//RS                             let format = data_loader_string_arg(args, 1, method, span)?;
+//RS                             let authority_name = data_loader_string_arg(args, 2, method, span)?;
+//RS                             let Some(format) = data_loader_format(&format) else {
+//RS                                 return Ok(data_loader_failure(
+//RS                                     "Bridge",
+//RS                                     &operation,
+//RS                                     "format is provider-owned; import its package",
+//RS                                 ));
+//RS                             };
+//RS                             let authority = match data_loader_authority(&authority_name, "") {
+//RS                                 Ok(authority) => authority,
+//RS                                 Err(error) => return Ok(error),
+//RS                             };
+//RS                             (jet_foundation::PreludeDataFlow::LoaderKind::URL, url, String::new(), Vec::new(), format.to_string(), authority, data_limits_from_value(args.get(3)), None, None)
+//RS                         }
+//RS                         "database" => {
+//RS                             let query = data_loader_string_arg(args, 0, method, span)?;
+//RS                             let parameters = args
+//RS                                 .get(1)
+//RS                                 .ok_or_else(|| unsupported("`data.database()` is missing parameters", span))
+//RS                                 .and_then(|value| data_loader_parameters(value, span))?;
+//RS                             let authority_name = data_loader_string_arg(args, 2, method, span)?;
+//RS                             let authority = match data_loader_authority(&authority_name, "") {
+//RS                                 Ok(authority) => authority,
+//RS                                 Err(error) => return Ok(error),
+//RS                             };
+//RS                             (jet_foundation::PreludeDataFlow::LoaderKind::Database, query, String::new(), parameters, "json".to_string(), authority, data_limits_from_value(args.get(3)), None, None)
+//RS                         }
+//RS                         "value" => {
+//RS                             let value = args
+//RS                                 .first()
+//RS                                 .cloned()
+//RS                                 .ok_or_else(|| unsupported("`data.value()` is missing value", span))?;
+//RS                             let limits = data_limits_from_value(args.get(1));
+//RS                             let text = super::JSONInterp::render_ordered_datatree(&value, false, 0);
+//RS                             let authority = match data_loader_authority("local", "") {
+//RS                                 Ok(authority) => authority,
+//RS                                 Err(error) => return Ok(error),
+//RS                             };
+//RS                             (
+//RS                                 jet_foundation::PreludeDataFlow::LoaderKind::Value,
+//RS                                 "value".to_string(),
+//RS                                 String::new(),
+//RS                                 Vec::new(),
+//RS                                 "json".to_string(),
+//RS                                 authority,
+//RS                                 limits,
+//RS                                 Some(text.into_bytes()),
+//RS                                 Some(value),
+//RS                             )
+//RS                         }
+//RS                         _ => unreachable!(),
+//RS                     };
+//RS                 match data_loader_new(
+//RS                     &mut interp.data_pipeline,
+//RS                     kind,
+//RS                     locator,
+//RS                     member,
+//RS                     parameters,
+//RS                     format,
+//RS                     limits,
+//RS                     authority,
+//RS                     payload,
+//RS                     loader_type_for_call(type_args, resolved_ret),
+//RS                     seed,
+//RS                 ) {
+//RS                     Ok(value) => Ok(value),
+//RS                     Err(error) => Ok(error),
+//RS                 }
+//RS             })();
+//RS             Some(result)
+//RS         }
+//RS         ("core.data", "snapshot") => {
+//RS             let result = args
+//RS                 .first()
+//RS                 .ok_or_else(|| unsupported("`data.snapshot()` is missing loader", span))
+//RS                 .and_then(|loader| {
+//RS                     eval_data_loader_method(interp, loader, "snapshot", &[], span)
+//RS                         .unwrap_or_else(|| Err(unsupported("data.snapshot", span)))
+//RS                 });
+//RS             Some(result)
+//RS         }
+//RS         ("core.data.loader", "snapshot_reusable") => {
+//RS             let result = match (args.first(), args.get(1)) {
+//RS                 (Some(left), Some(right)) => data_snapshot_reusable_value(left, right)
+//RS                     .map(CtValue::Bool)
+//RS                     .ok_or_else(|| {
+//RS                         unsupported(
+//RS                             "`data.loader.snapshot_reusable()` needs snapshot identities",
+//RS                             span,
+//RS                         )
+//RS                     }),
+//RS                 _ => Err(unsupported(
+//RS                     "`data.loader.snapshot_reusable()`: missing argument",
+//RS                     span,
+//RS                 )),
+//RS             };
+//RS             Some(result)
+//RS         }
+//RS         ("core.data.loader", _) => {
+//RS             let result = args
+//RS                 .first()
+//RS                 .ok_or_else(|| {
+//RS                     unsupported(&format!("`data.loader.{method}()`: missing loader"), span)
+//RS                 })
+//RS                 .and_then(|loader| {
+//RS                     eval_data_loader_method(interp, loader, method, &args[1..], span)
+//RS                         .unwrap_or_else(|| Err(unsupported(&operation, span)))
+//RS                 });
+//RS             Some(result)
+//RS         }
+//RS         ("core.data.stream", _) => {
+//RS             let result = args
+//RS                 .first()
+//RS                 .ok_or_else(|| unsupported(&format!("`data.stream.{method}()`: missing stream"), span))
+//RS                 .and_then(|stream| {
+//RS                     eval_data_stream_method(interp, stream, method, &args[1..], span)
+//RS                         .unwrap_or_else(|| Err(unsupported(&operation, span)))
+//RS                 });
+//RS             Some(result)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0581 crates/jet-comptime/src/Comptime/DataPipeline.rs:1823-3709
+

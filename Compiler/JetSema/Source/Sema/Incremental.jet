@@ -1,0 +1,259 @@
+// Rust Sema/Bundle.rs:766–1155 and Bundle/Validation.rs:528–605.
+// Cache body products, not module verdicts: failure/effect/policy solving stays
+// downstream of replay and runs against every module's current call facts.
+use jet_foundation.[Diagnostic, Func, Item, Stmt, SymbolID, TFuncKind, CanonicalDebugBytes, canonical_ast_fragment, canonical_ast_incremental_module_metadata, build_snapshot_write_check_debug]
+
+pub struct SemaIncrementalSemaStats {
+    pub hits: Int
+    pub recomputes: Int
+    pub live_items: Int
+    pub live_item_bytes: Int
+    pub recomputed_items: [String]
+}
+
+struct SemaCachedFunctionBody {
+    input: String
+    result: SemaFunctionResult
+    diagnostics: [Diagnostic]
+    call_facts: [SemaCallSiteFact]
+    comptime_requests: [SemaComptimeRequest]
+    name_references: [SemaNameReferenceFact]
+    retained_bytes: Int
+}
+
+pub struct SemaIncrementalSemaCache {
+    environment: [U8]
+    module_interfaces: [String:[U8]]
+    module_dependencies: [String:[String]]
+    functions: [String:SemaCachedFunctionBody]
+    owners: [String:String]
+    hits: Int
+    recomputes: Int
+    measurement_recomputed_items: [String]
+}
+
+pub fn sema_incremental_cache_new() -> SemaIncrementalSemaCache Never! {
+    SemaIncrementalSemaCache{environment: [U8]{}, module_interfaces: [String:[U8]]{}, module_dependencies: [String:[String]]{}, functions: [String:SemaCachedFunctionBody]{}, owners: [String:String]{}, hits: 0, recomputes: 0, measurement_recomputed_items: [String]{}}
+}
+
+pub fn sema_incremental_cache_clear_measurement(cache: &SemaIncrementalSemaCache) Never! {
+    cache.measurement_recomputed_items = [String]{}
+}
+
+pub fn sema_incremental_cache_clear(cache: &SemaIncrementalSemaCache) Never! {
+    cache.environment = [U8]{}
+    cache.module_interfaces = [String:[U8]]{}
+    cache.module_dependencies = [String:[String]]{}
+    cache.functions = [String:SemaCachedFunctionBody]{}
+    cache.owners = [String:String]{}
+    cache.measurement_recomputed_items = [String]{}
+}
+
+pub fn sema_incremental_cache_stats(cache: SemaIncrementalSemaCache) -> SemaIncrementalSemaStats Never! {
+    bytes := cache.environment.len()
+    loop (module_key, fingerprint) in cache.module_interfaces -> bytes += module_key.bytes().len() + fingerprint.len()
+    loop (module_key, dependencies) in cache.module_dependencies {
+        bytes += module_key.bytes().len()
+        loop dependency in dependencies -> bytes += dependency.bytes().len()
+    }
+    loop (key, entry) in cache.functions -> bytes += key.bytes().len() + entry.retained_bytes
+    SemaIncrementalSemaStats{hits: cache.hits, recomputes: cache.recomputes, live_items: cache.functions.len(), live_item_bytes: bytes, recomputed_items: ~cache.measurement_recomputed_items}
+}
+
+
+fn sema_incremental_module_interface(graph: SemaRegistrationGraph, registered_module: SemaRegistrationModule, values: [SemaComptimeItemValue]) -> [U8] Never! {
+    // Exclude parser layout metadata (block/else/debug/fence spans), exactly
+    // as Rust incremental_module_interface excludes it. AST field spans are
+    // removed only by the shared Foundation canonical fragment operation.
+    program :: registered_module.program
+    output := canonical_ast_incremental_module_metadata<SemaRegistrationGraph>(registered_module.source_file, registered_module.module_path, registered_module.module_name, program, graph)
+    loop item in program.items {
+        bytes :: canonical_ast_fragment<SemaRegistrationGraph>(item, graph, true)
+        loop byte in bytes -> &output.push(byte)
+    }
+    // The Jet finalization rail retains evaluated declaration values beside
+    // its AST rather than rewriting Const.ct as Rust does. They are the same
+    // module-interface inputs: an embed/prep value edit dirties its importers.
+    loop value in values {
+        if value.module_identity != registered_module.module_identity || value.kind == SemaComptimeItemKind.BodyExpression -> next
+        loop byte in "{value.destination_key:Debug}:{value.kind:Debug}:{value.ty:Debug}:{value.value:Debug}".bytes() -> &output.push(byte)
+    }
+    output
+}
+
+fn sema_incremental_global_environment(graph: SemaRegistrationGraph, policies: [SemaRegistrationPackagePolicy]) -> [U8] Never! {
+    build :: graph.build_facts
+    // Internal Sema equality fingerprint, NOT the native package-check key.
+    // Borrow every field. The native clock exclusion must also cover its
+    // contribution row; never clone the whole snapshot/target/maps to clear it.
+    out := "{graph.package_identity:Debug}{graph.entry_module_identity:Debug}{graph.canonical_effect_module_identity:Debug}{graph.target_machine:Debug}{build.package_name:Debug}{build.package_version:Debug}{build.os:Debug}{build.profile:Debug}{build.stamp_git:Debug}{build.stamp_dirty:Debug}{build.stamp_toolchain:Debug}{build.artifact_build:Debug}{build.settings:Debug}{build.gates:Debug}{build.package_policies:Debug}{build.organization_policy:Debug}".bytes()
+    names := build.contributions.keys().to_list()
+    &names.sort()
+    loop name in names {
+        if name == "Build.Stamp.At" -> next
+        loop byte in "{name:Debug}:{build.contributions[name]:Debug}".bytes() -> &out.push(byte)
+    }
+    provenance := build.setting_provenance.keys().to_list()
+    &provenance.sort()
+    loop name in provenance {
+        if name == "Build.Stamp.At" -> next
+        loop byte in "{name:Debug}:{build.setting_provenance[name]:Debug}".bytes() -> &out.push(byte)
+    }
+    if build.snapshot == .Val(snapshot) {
+        build_snapshot_write_check_debug<[U8], CanonicalDebugBytes>(CanonicalDebugBytes.Writer, &out, snapshot)
+    }
+    loop byte in "{policies:Debug}{graph.foreign_providers:Debug}{graph.core_builtin_owner_facts:Debug}{graph.unit_facts:Debug}".bytes() -> &out.push(byte)
+    out
+}
+
+pub fn sema_incremental_begin_graph(cache: &SemaIncrementalSemaCache, graph: SemaRegistrationGraph, policies: [SemaRegistrationPackagePolicy], values: [SemaComptimeItemValue]) Never! {
+    environment :: sema_incremental_global_environment(graph, policies)
+    environment_changed :: cache.environment != environment
+    interfaces := [String:[U8]]{}
+    dependencies := [String:[String]]{}
+    reverse := [String:[String]]{}
+    dirty := [String:Bool]{}
+    queue := [String]{}
+    loop registered_module in graph.modules {
+        interfaces[registered_module.module_identity] = sema_incremental_module_interface(graph, registered_module, values)
+        imports := [String]{}
+        seen := [String:Bool]{}
+        // Registration's exact resolved graph includes lifted inline imports;
+        // identity, never a display/alias leaf, determines the invalidation edge.
+        loop edge in graph.edges {
+            if edge.source_module_identity != registered_module.module_identity || seen.has_key(edge.target_module_identity) -> next
+            seen[edge.target_module_identity] = true
+            &imports.push(edge.target_module_identity)
+        }
+        &imports.sort()
+        dependencies[registered_module.module_identity] = imports
+    }
+    loop (module_key, imports) in dependencies {
+        loop dependency in imports {
+            rows := reverse.get(dependency) ?? [String]{}
+            &rows.push(module_key)
+            reverse[dependency] = rows
+        }
+    }
+    loop (module_key, previous) in cache.module_interfaces {
+        if interfaces.get(module_key) != (Val(previous)) -> dirty[module_key] = true
+    }
+    loop (module_key, current) in interfaces {
+        if environment_changed || cache.module_interfaces.get(module_key) != (Val(current)) -> dirty[module_key] = true
+    }
+    loop (module_key, previous) in cache.module_dependencies {
+        if dependencies.get(module_key) != (Val(previous)) -> dirty[module_key] = true
+    }
+    loop (module_key, current) in dependencies {
+        if cache.module_dependencies.get(module_key) != (Val(current)) -> dirty[module_key] = true
+    }
+    loop (module_key, _) in dirty -> &queue.push(module_key)
+    position := 0
+    loop position < queue.len() {
+        module_key :: queue[position]
+        position += 1
+        importers :: reverse.get(module_key) ?? [String]{}
+        loop importer in importers {
+            if dirty.has_key(importer) -> next
+            dirty[importer] = true
+            &queue.push(importer)
+        }
+    }
+    dead := [String]{}
+    loop (key, owner) in cache.owners {
+        if dirty.has_key(owner) -> &dead.push(key)
+    }
+    loop key in dead {
+        _ := &cache.functions.remove(key)
+        _ := &cache.owners.remove(key)
+    }
+    cache.environment = environment
+    cache.module_interfaces = interfaces
+    cache.module_dependencies = dependencies
+}
+
+fn sema_incremental_record_recompute(cache: &SemaIncrementalSemaCache, key: String) Never! {
+    cache.recomputes += 1
+    &cache.measurement_recomputed_items.push(key)
+}
+
+// Rust Validation.rs cache-key grammar is also the receipt work identity.
+// Compiler symbol IDs still own internal lookup; display names never resolve
+// a declaration or become a second semantic cache key.
+fn sema_incremental_work_identity(environment: SemaScopeEnvironment, owner_id: SymbolID, func: Func) -> String Never! {
+    graph :: environment.registration_graph ?? return "{environment.module_name}::fn:{func.name}"
+    source :: graph.module_rows.get(environment.module_identity) ?? return "{environment.module_name}::fn:{func.name}"
+    registered_module :: graph.modules[source]
+    row :: graph.callable_rows.get(owner_id.key) ?? return "{registered_module.module_path}::fn:{func.name}"
+    if row == {
+        .NominalMethod(_, owner, _) -> {
+            nominal :: registered_module.nominals[owner]
+            kind :: if nominal.kind == SemaRegistrationNominalKind.Enum -> "enum" else -> "struct"
+            return "{registered_module.module_path}::{kind}:{nominal.symbol.name}::method:{func.name}"
+        }
+        .ImplMethod(_, owner, _) -> {
+            implementation :: registered_module.impls[owner]
+            trait_name :: implementation.trait_name ?? "inherent"
+            loop nominal in registered_module.nominals {
+                nested := false
+                if nominal.source == {
+                    .SourceAST(item) -> if item == {
+                        .Struct(definition) -> loop candidate in definition.trait_impls {
+                            if candidate.span == implementation.declaration.span -> nested = true
+                        }
+                        .Enum(definition) -> loop candidate in definition.trait_impls {
+                            if candidate.span == implementation.declaration.span -> nested = true
+                        }
+                        else -> {}
+                    }
+                    .ForeignHandle(_) -> {}
+                }
+                if nested {
+                    kind :: if nominal.kind == SemaRegistrationNominalKind.Enum -> "enum" else -> "struct"
+                    return "{registered_module.module_path}::{kind}:{nominal.symbol.name}::trait:{trait_name}::method:{func.name}"
+                }
+            }
+            return "{registered_module.module_path}::impl:{implementation.target_type_name}::{trait_name}::method:{func.name}"
+        }
+        else -> return "{registered_module.module_path}::fn:{func.name}"
+    }
+}
+
+// Rust check_func_body_cached: every product belongs to this body and must
+// travel together. The SemaFunctionResult retains failure/compute/hardware,
+// copy/exact-Int facts, TIR and incomplete reasons, not merely the function.
+fn sema_incremental_function_check(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+    storage :: environment.incremental_cache ?? return sema_function_check_uncached(func, owner_id, function_kind, raw_protocol_return, &environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+    input :: "{func:Debug}:{function_kind:Debug}:{raw_protocol_return}:{environment.generic_params:Debug}"
+    cache_allowed :: !func.is_comptime && !sema_incremental_syntax_facts(func.body).has_comptime
+    if !environment.incremental_probe && cache_allowed {
+        permit := storage.guard_edit()
+        if permit.value.functions.get(owner_id.key) == .Val(hit) {
+            if hit.input == input {
+                permit.value.hits += 1
+                loop diagnostic in hit.diagnostics -> &diagnostics.push(diagnostic)
+                loop fact in hit.call_facts -> &call_facts.push(fact)
+                loop request in hit.comptime_requests -> &comptime_requests.push(request)
+                loop reference in hit.name_references -> &name_references.push(reference)
+                return ~hit.result
+            }
+        }
+    }
+    diagnostic_start :: diagnostics.len()
+    call_start :: call_facts.len()
+    request_start :: comptime_requests.len()
+    reference_start :: name_references.len()
+    result :: sema_function_check_uncached(func, owner_id, function_kind, raw_protocol_return, &environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+    if environment.incremental_probe -> return result
+    body_diagnostics :: loop index in diagnostic_start..<diagnostics.len() -> diagnostics[index]
+    body_calls :: loop index in call_start..<call_facts.len() -> call_facts[index]
+    body_requests :: loop index in request_start..<comptime_requests.len() -> comptime_requests[index]
+    body_references :: loop index in reference_start..<name_references.len() -> name_references[index]
+    permit := storage.guard_edit()
+    sema_incremental_record_recompute(&permit.value, sema_incremental_work_identity(environment, owner_id, func))
+    if !cache_allowed || result.comptime_body_sources.len() > 0 || body_requests.len() > 0 -> return result
+    retained :: input.bytes().len() + "{result:Debug}{body_diagnostics:Debug}{body_calls:Debug}{body_requests:Debug}{body_references:Debug}".bytes().len()
+    permit.value.functions[owner_id.key] = SemaCachedFunctionBody{input: input, result: ~result, diagnostics: body_diagnostics, call_facts: body_calls, comptime_requests: body_requests, name_references: body_references, retained_bytes: retained}
+    permit.value.owners[owner_id.key] = environment.module_identity
+    result
+}

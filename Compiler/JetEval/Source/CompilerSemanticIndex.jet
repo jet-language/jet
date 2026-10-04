@@ -1,0 +1,197 @@
+// Source/Compiler.rs:1187-1733,1783-1957. This is the DISTINCT compiler
+// reflection view (12 fields), not SemIndex's 15-field JSON status payload.
+// Every row borrows the ONE retained full index; no AST/index rebuild, graph
+// clone, JSON reparse, or StatusValue -> ComptimeValue adapter participates.
+// The inward pure JetSemIndex publication is an explicit compilation gate.
+use jet_foundation.[TComptimeField, TComptimeValue, TComptimeReport, Type, Span, FactRegistry, DerivationRecord, fact_registry_iter, fact_kind_name, derivation_method_raw, derivation_disposition_text, derivation_payload_json, mir_sha256_hex]
+use jet_semindex.[SemIndex, SourceSpan, SemIndexSymbolKind, SymbolDef, SymbolRef, DefinitionAnchor, CallEdge, StructuralNode, StructuralSlotKind, ArithmeticOperationFact, EffectFact, ViewSourceFact, ViewProjectionFact, ViewProvenanceFact, StateGraphFact, SemIndexOutputFact, OutputEntryFact]
+
+fn jet_eval_compiler_index_field(name: String, value: TComptimeValue) -> TComptimeField Never! { TComptimeField{name: name, value: value} }
+fn jet_eval_compiler_index_record(name: String, fields: [TComptimeField]) -> TComptimeValue Never! { TComptimeValue.Struct{type_name: name, fields: fields} }
+fn jet_eval_compiler_index_absent(name: String) -> TComptimeValue Never! { TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: name}}} }
+fn jet_eval_compiler_index_span(span: SourceSpan) -> TComptimeValue Never! { jet_eval_compiler_services_span(Span{start: span.start, end: span.end}) }
+fn jet_eval_compiler_index_option_int(value: Int?) -> TComptimeValue Never! {
+    if value == .Val(number) -> return TComptimeValue.Present{value: jet_eval_compiler_services_int(number)}
+    TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Int}}
+}
+fn jet_eval_compiler_index_option_bool(value: Bool?) -> TComptimeValue Never! {
+    if value == .Val(flag) -> return TComptimeValue.Present{value: TComptimeValue.Bool{value: flag}}
+    TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Bool}}
+}
+fn jet_eval_compiler_index_symbol_kind(kind: SemIndexSymbolKind) -> TComptimeValue Never! {
+    name := ""
+    params := [TComptimeValue]{}
+    fields := [TComptimeValue]{}
+    variants := [String]{}
+    ret := String?{None}
+    parent := String?{None}
+    mutable := Bool?{None}
+    ty := String?{None}
+    if kind == {
+        .Module -> name = "module"
+        .Function(parameters, _, returns) -> {
+            name = "function"
+            ret = returns
+            loop parameter in parameters -> &params.push(jet_eval_compiler_index_record("CompilerParam", [TComptimeField]{jet_eval_compiler_index_field("name", jet_eval_compiler_services_string(parameter.name)), jet_eval_compiler_index_field("ty", jet_eval_compiler_services_string(parameter.ty))}))
+        }
+        .Struct(rows) -> {
+            name = "struct"
+            loop row in rows -> &fields.push(jet_eval_compiler_index_record("CompilerField", [TComptimeField]{jet_eval_compiler_index_field("name", jet_eval_compiler_services_string(row.name)), jet_eval_compiler_index_field("ty", jet_eval_compiler_services_string(row.ty))}))
+        }
+        .Enum(rows) -> { name = "enum"; variants = rows }
+        .Trait -> name = "trait"
+        .Tag -> name = "tag"
+        .Type -> name = "type"
+        .Const -> name = "const"
+        .EnumVariant(owner) -> { name = "enum_variant"; parent = Val(owner) }
+        .Field(value_type, owner) -> { name = "field"; ty = Val(value_type); parent = Val(owner) }
+        .Local(write, value_type) -> { name = "local"; mutable = Val(write); ty = value_type }
+        .Param(value_type) -> { name = "param"; ty = Val(value_type) }
+    }
+    jet_eval_compiler_index_record("CompilerSymbolKind", [TComptimeField]{
+        jet_eval_compiler_index_field("kind", jet_eval_compiler_services_string(name)),
+        jet_eval_compiler_index_field("params", TComptimeValue.List{values: params}),
+        jet_eval_compiler_index_field("ret", jet_eval_compiler_services_option_string(ret)),
+        jet_eval_compiler_index_field("fields", TComptimeValue.List{values: fields}),
+        jet_eval_compiler_index_field("variants", jet_eval_compiler_services_string_values(variants)),
+        jet_eval_compiler_index_field("parent", jet_eval_compiler_services_option_string(parent)),
+        jet_eval_compiler_index_field("mutable", jet_eval_compiler_index_option_bool(mutable)),
+        jet_eval_compiler_index_field("ty", jet_eval_compiler_services_option_string(ty)),
+    })
+}
+fn jet_eval_compiler_index_view_source(source: ViewSourceFact) -> TComptimeValue Never! {
+    kind := ""
+    index := Int?{None}
+    module := String?{None}
+    name := String?{None}
+    if source == {
+        .Receiver -> kind = "receiver"
+        .Parameter(value) -> { kind = "parameter"; index = Val(value) }
+        .Static(path, value) -> { kind = "static"; module = Val(path); name = Val(value) }
+    }
+    jet_eval_compiler_index_record("CompilerViewSource", [TComptimeField]{
+        jet_eval_compiler_index_field("kind", jet_eval_compiler_services_string(kind)),
+        jet_eval_compiler_index_field("index", jet_eval_compiler_index_option_int(index)),
+        jet_eval_compiler_index_field("module", jet_eval_compiler_services_option_string(module)),
+        jet_eval_compiler_index_field("name", jet_eval_compiler_services_option_string(name)),
+    })
+}
+fn jet_eval_compiler_index_view_projection(projection: ViewProjectionFact) -> TComptimeValue Never! {
+    kind := ""
+    name := String?{None}
+    if projection == {
+        .Field(field) -> { kind = "field"; name = Val(field) }
+        .Index -> kind = "index"
+        .Range -> kind = "range"
+    }
+    jet_eval_compiler_index_record("CompilerViewProjection", [TComptimeField]{jet_eval_compiler_index_field("kind", jet_eval_compiler_services_string(kind)), jet_eval_compiler_index_field("name", jet_eval_compiler_services_option_string(name))})
+}
+fn jet_eval_compiler_index_view_provenance(provenance: ViewProvenanceFact) -> TComptimeValue Never! {
+    sources := [TComptimeValue]{}
+    loop source in provenance.sources {
+        projections := [TComptimeValue]{}
+        loop projection in source.projections -> &projections.push(jet_eval_compiler_index_view_projection(projection))
+        &sources.push(jet_eval_compiler_index_record("CompilerViewSourcePath", [TComptimeField]{jet_eval_compiler_index_field("source", jet_eval_compiler_index_view_source(source.source)), jet_eval_compiler_index_field("projections", TComptimeValue.List{values: projections})}))
+    }
+    jet_eval_compiler_index_record("CompilerViewProvenance", [TComptimeField]{jet_eval_compiler_index_field("output_path", jet_eval_compiler_services_string_values(provenance.output_path)), jet_eval_compiler_index_field("sources", TComptimeValue.List{values: sources}), jet_eval_compiler_index_field("mutable", TComptimeValue.Bool{value: provenance.mutable})})
+}
+fn jet_eval_compiler_index_definition(definition: SymbolDef) -> TComptimeValue Never! {
+    provenance := [TComptimeValue]{}
+    loop row in definition.view_provenance -> &provenance.push(jet_eval_compiler_index_view_provenance(row))
+    jet_eval_compiler_index_record("CompilerDefinition", [TComptimeField]{
+        jet_eval_compiler_index_field("identity", jet_eval_compiler_services_string(definition.identity)),
+        jet_eval_compiler_index_field("name", jet_eval_compiler_services_string(definition.name)),
+        jet_eval_compiler_index_field("module", jet_eval_compiler_services_string(definition.module_path)),
+        jet_eval_compiler_index_field("span", jet_eval_compiler_index_span(definition.def_span)),
+        jet_eval_compiler_index_field("kind", jet_eval_compiler_index_symbol_kind(definition.kind)),
+        jet_eval_compiler_index_field("view_provenance", TComptimeValue.List{values: provenance}),
+    })
+}
+fn jet_eval_compiler_index_anchor(anchor: DefinitionAnchor) -> TComptimeValue Never! {
+    jet_eval_compiler_index_record("CompilerDefinitionAnchor", [TComptimeField]{jet_eval_compiler_index_field("module", jet_eval_compiler_services_string(anchor.module_path)), jet_eval_compiler_index_field("kind", jet_eval_compiler_services_string(anchor.kind)), jet_eval_compiler_index_field("semantic_identity", jet_eval_compiler_services_option_string(anchor.semantic_identity)), jet_eval_compiler_index_field("span", jet_eval_compiler_index_span(anchor.def_span))})
+}
+fn jet_eval_compiler_index_reference(reference: SymbolRef) -> TComptimeValue Never! {
+    target :: if reference.target == .Val(anchor) -> TComptimeValue.Present{value: jet_eval_compiler_index_anchor(anchor)} else -> jet_eval_compiler_index_absent("CompilerDefinitionAnchor")
+    jet_eval_compiler_index_record("CompilerReference", [TComptimeField]{jet_eval_compiler_index_field("name", jet_eval_compiler_services_string(reference.name)), jet_eval_compiler_index_field("module", jet_eval_compiler_services_string(reference.module_path)), jet_eval_compiler_index_field("scope_identity", jet_eval_compiler_services_option_string(reference.scope_identity)), jet_eval_compiler_index_field("target", target), jet_eval_compiler_index_field("span", jet_eval_compiler_index_span(reference.span))})
+}
+fn jet_eval_compiler_index_call(call: CallEdge) -> TComptimeValue Never! {
+    jet_eval_compiler_index_record("CompilerCall", [TComptimeField]{jet_eval_compiler_index_field("caller", jet_eval_compiler_services_string(call.caller)), jet_eval_compiler_index_field("callee", jet_eval_compiler_services_string(call.callee)), jet_eval_compiler_index_field("module", jet_eval_compiler_services_string(call.module_path)), jet_eval_compiler_index_field("span", jet_eval_compiler_index_span(call.call_span))})
+}
+fn jet_eval_compiler_index_node(node: StructuralNode) -> TComptimeValue Never! {
+    slot_kind :: if node.slot_kind == { .Scalar -> "scalar"; .List -> "list" }
+    jet_eval_compiler_index_record("CompilerStructuralNode", [TComptimeField]{jet_eval_compiler_index_field("id", jet_eval_compiler_services_int(node.id)), jet_eval_compiler_index_field("parent", jet_eval_compiler_index_option_int(node.parent)), jet_eval_compiler_index_field("slot", jet_eval_compiler_services_string(node.slot)), jet_eval_compiler_index_field("slot_kind", jet_eval_compiler_services_string(slot_kind)), jet_eval_compiler_index_field("ordinal", jet_eval_compiler_services_int(node.ordinal)), jet_eval_compiler_index_field("class", jet_eval_compiler_services_string(node.class)), jet_eval_compiler_index_field("shape", jet_eval_compiler_services_string(node.shape)), jet_eval_compiler_index_field("module", jet_eval_compiler_services_string(node.module_path)), jet_eval_compiler_index_field("span", jet_eval_compiler_index_span(node.span))})
+}
+fn jet_eval_compiler_index_arithmetic(value: ArithmeticOperationFact) -> TComptimeValue Never! {
+    jet_eval_compiler_index_record("CompilerArithmeticOperation", [TComptimeField]{jet_eval_compiler_index_field("operation", jet_eval_compiler_services_string(value.operation)), jet_eval_compiler_index_field("policy", jet_eval_compiler_services_string(value.policy)), jet_eval_compiler_index_field("module", jet_eval_compiler_services_string(value.module_path)), jet_eval_compiler_index_field("operation_span", jet_eval_compiler_index_span(value.operation_span)), jet_eval_compiler_index_field("scope_span", jet_eval_compiler_index_span(value.scope_span))})
+}
+fn jet_eval_compiler_index_effect(effect: EffectFact) -> TComptimeValue Never! {
+    provenance := [TComptimeValue]{}
+    loop origin in effect.provenance {
+        spans := [TComptimeValue]{}
+        loop span in origin.spans -> &spans.push(jet_eval_compiler_index_span(span))
+        &provenance.push(jet_eval_compiler_index_record("CompilerEffectProvenance", [TComptimeField]{jet_eval_compiler_index_field("effect", jet_eval_compiler_services_string(origin.effect_name)), jet_eval_compiler_index_field("call_path", jet_eval_compiler_services_string_values(origin.call_path)), jet_eval_compiler_index_field("spans", TComptimeValue.List{values: spans})}))
+    }
+    jet_eval_compiler_index_record("CompilerEffect", [TComptimeField]{jet_eval_compiler_index_field("function", jet_eval_compiler_services_string(effect.function)), jet_eval_compiler_index_field("direct", jet_eval_compiler_services_string_values(effect.direct)), jet_eval_compiler_index_field("callees", jet_eval_compiler_services_string_values(effect.callees)), jet_eval_compiler_index_field("inferred", jet_eval_compiler_services_string_values(effect.inferred)), jet_eval_compiler_index_field("maximal", TComptimeValue.Bool{value: effect.maximal}), jet_eval_compiler_index_field("provenance", TComptimeValue.List{values: provenance})})
+}
+fn jet_eval_compiler_index_output_entry(entry: OutputEntryFact) -> TComptimeValue Never! {
+    jet_eval_compiler_index_record("CompilerOutputEntry", [TComptimeField]{jet_eval_compiler_index_field("identity", jet_eval_compiler_services_string(entry.identity)), jet_eval_compiler_index_field("name", jet_eval_compiler_services_string(entry.name)), jet_eval_compiler_index_field("module", jet_eval_compiler_services_string(entry.module_path)), jet_eval_compiler_index_field("definition_span", jet_eval_compiler_index_span(entry.definition_span)), jet_eval_compiler_index_field("reference_span", jet_eval_compiler_index_span(entry.reference_span)), jet_eval_compiler_index_field("params", jet_eval_compiler_services_string_values(entry.params)), jet_eval_compiler_index_field("return_type", jet_eval_compiler_services_option_string(entry.return_type)), jet_eval_compiler_index_field("failure_contract", jet_eval_compiler_services_string(entry.failure_contract)), jet_eval_compiler_index_field("failure_source", jet_eval_compiler_services_string(entry.failure_source)), jet_eval_compiler_index_field("authority", jet_eval_compiler_services_string(entry.authority)), jet_eval_compiler_index_field("effects", jet_eval_compiler_services_string_values(entry.effects))})
+}
+fn jet_eval_compiler_index_output(output: SemIndexOutputFact) -> TComptimeValue Never! {
+    jet_eval_compiler_index_record("CompilerOutput", [TComptimeField]{jet_eval_compiler_index_field("binding", jet_eval_compiler_services_string(output.binding)), jet_eval_compiler_index_field("kind", jet_eval_compiler_services_string(output.kind)), jet_eval_compiler_index_field("name", jet_eval_compiler_services_string(output.name)), jet_eval_compiler_index_field("module", jet_eval_compiler_services_string(output.module_path)), jet_eval_compiler_index_field("span", jet_eval_compiler_index_span(output.span)), jet_eval_compiler_index_field("entry", jet_eval_compiler_index_output_entry(output.entry))})
+}
+fn jet_eval_compiler_index_state_graph(graph: StateGraphFact) -> TComptimeValue Never! {
+    states := [TComptimeValue]{}
+    loop node in graph.states -> &states.push(jet_eval_compiler_index_record("CompilerStateNode", [TComptimeField]{jet_eval_compiler_index_field("name", jet_eval_compiler_services_string(node.name)), jet_eval_compiler_index_field("terminal", TComptimeValue.Bool{value: node.terminal}), jet_eval_compiler_index_field("reachable", jet_eval_compiler_index_option_bool(node.reachable)), jet_eval_compiler_index_field("span", jet_eval_compiler_index_span(node.span))}))
+    transitions := [TComptimeValue]{}
+    loop transition in graph.transitions -> &transitions.push(jet_eval_compiler_index_record("CompilerStateTransition", [TComptimeField]{jet_eval_compiler_index_field("operation", jet_eval_compiler_services_string(transition.operation)), jet_eval_compiler_index_field("from", jet_eval_compiler_services_option_string(transition.from)), jet_eval_compiler_index_field("to", jet_eval_compiler_services_string(transition.to))}))
+    jet_eval_compiler_index_record("CompilerStateGraph", [TComptimeField]{jet_eval_compiler_index_field("owner", jet_eval_compiler_services_string(graph.owner)), jet_eval_compiler_index_field("module", jet_eval_compiler_services_string(graph.module_path)), jet_eval_compiler_index_field("states", TComptimeValue.List{values: states}), jet_eval_compiler_index_field("transitions", TComptimeValue.List{values: transitions})})
+}
+fn jet_eval_compiler_index_registry(registry: FactRegistry) -> TComptimeValue Never! {
+    declarations := [TComptimeValue]{}
+    loop declaration in fact_registry_iter(registry) -> &declarations.push(jet_eval_compiler_index_record("CompilerFactDeclaration", [TComptimeField]{jet_eval_compiler_index_field("kind", jet_eval_compiler_services_string(fact_kind_name(declaration.kind))), jet_eval_compiler_index_field("name", jet_eval_compiler_services_string(declaration.name)), jet_eval_compiler_index_field("members", jet_eval_compiler_services_string_values(declaration.members)), jet_eval_compiler_index_field("deny", jet_eval_compiler_services_string_values(declaration.deny)), jet_eval_compiler_index_field("from", jet_eval_compiler_services_string_values(declaration.from))}))
+    TComptimeValue.List{values: declarations}
+}
+fn jet_eval_compiler_index_derivation(record: DerivationRecord) -> TComptimeValue Never! {
+    observation :: if record.observation == .Val(value) -> TComptimeValue.Present{value: jet_eval_compiler_index_record("CompilerDerivationObservation", [TComptimeField]{jet_eval_compiler_index_field("counterexample", jet_eval_compiler_services_option_string(value.counterexample_id)), jet_eval_compiler_index_field("event", jet_eval_compiler_services_option_string(value.event_id))})} else -> jet_eval_compiler_index_absent("CompilerDerivationObservation")
+    payload :: if record.payload == .Val(value) -> TComptimeValue.Present{value: jet_eval_compiler_index_record("CompilerDerivationPayload", [TComptimeField]{jet_eval_compiler_index_field("kind", jet_eval_compiler_services_string("frame_schedule")), jet_eval_compiler_index_field("json", jet_eval_compiler_services_string(derivation_payload_json(value)))})} else -> jet_eval_compiler_index_absent("CompilerDerivationPayload")
+    identity :: jet_eval_compiler_index_record("CompilerDerivationIdentity", [TComptimeField]{jet_eval_compiler_index_field("source", jet_eval_compiler_services_string(record.identity.source)), jet_eval_compiler_index_field("build", jet_eval_compiler_services_string(record.identity.build)), jet_eval_compiler_index_field("run", jet_eval_compiler_services_string(record.identity.run)), jet_eval_compiler_index_field("target", jet_eval_compiler_services_string(record.identity.target))})
+    jet_eval_compiler_index_record("CompilerDerivationRecord", [TComptimeField]{jet_eval_compiler_index_field("id", jet_eval_compiler_services_string(record.id)), jet_eval_compiler_index_field("subject", jet_eval_compiler_services_string(record.subject)), jet_eval_compiler_index_field("claim", jet_eval_compiler_services_string(record.claim)), jet_eval_compiler_index_field("producer", jet_eval_compiler_services_string(record.producer)), jet_eval_compiler_index_field("method", jet_eval_compiler_services_string(derivation_method_raw(record.method))), jet_eval_compiler_index_field("rule", jet_eval_compiler_services_string(record.rule)), jet_eval_compiler_index_field("premises", jet_eval_compiler_services_string_values(record.premises)), jet_eval_compiler_index_field("identity", identity), jet_eval_compiler_index_field("assumptions", jet_eval_compiler_services_string_values(record.assumptions)), jet_eval_compiler_index_field("disposition", jet_eval_compiler_services_string(derivation_disposition_text(record.disposition))), jet_eval_compiler_index_field("observation", observation), jet_eval_compiler_index_field("payload", payload)})
+}
+
+// Source/Compiler.rs::compiler_semantic_index_value, exact ordered 12-field
+// compiler reflection schema. Allocation is the requested CtValue projection,
+// never a cloned index, declaration graph or independently checked snapshot.
+pub fn jet_eval_compiler_semantic_index_value(index: SemIndex, source: String, registry: FactRegistry) -> TComptimeValue Never! {
+    definitions := [TComptimeValue]{}
+    loop row in index.definitions() -> &definitions.push(jet_eval_compiler_index_definition(row))
+    references := [TComptimeValue]{}
+    loop row in index.references() -> &references.push(jet_eval_compiler_index_reference(row))
+    calls := [TComptimeValue]{}
+    loop row in index.call_edges() -> &calls.push(jet_eval_compiler_index_call(row))
+    nodes := [TComptimeValue]{}
+    loop row in index.structural_nodes() -> &nodes.push(jet_eval_compiler_index_node(row))
+    effects := [TComptimeValue]{}
+    loop row in index.effects() -> &effects.push(jet_eval_compiler_index_effect(row))
+    arithmetic := [TComptimeValue]{}
+    loop row in index.arithmetic() -> &arithmetic.push(jet_eval_compiler_index_arithmetic(row))
+    outputs := [TComptimeValue]{}
+    loop row in index.outputs() -> &outputs.push(jet_eval_compiler_index_output(row))
+    states := [TComptimeValue]{}
+    loop row in index.state_graphs() -> &states.push(jet_eval_compiler_index_state_graph(row))
+    derivations := [TComptimeValue]{}
+    loop row in index.derivations() -> &derivations.push(jet_eval_compiler_index_derivation(row))
+    jet_eval_compiler_index_record("CompilerSemanticIndex", [TComptimeField]{
+        jet_eval_compiler_index_field("schema_version", jet_eval_compiler_services_int(index.schema_version())),
+        jet_eval_compiler_index_field("source_digest", jet_eval_compiler_services_string(mir_sha256_hex(source))),
+        jet_eval_compiler_index_field("definitions", TComptimeValue.List{values: definitions}),
+        jet_eval_compiler_index_field("references", TComptimeValue.List{values: references}),
+        jet_eval_compiler_index_field("calls", TComptimeValue.List{values: calls}),
+        jet_eval_compiler_index_field("structural_nodes", TComptimeValue.List{values: nodes}),
+        jet_eval_compiler_index_field("effects", TComptimeValue.List{values: effects}),
+        jet_eval_compiler_index_field("arithmetic", TComptimeValue.List{values: arithmetic}),
+        jet_eval_compiler_index_field("outputs", TComptimeValue.List{values: outputs}),
+        jet_eval_compiler_index_field("state_graphs", TComptimeValue.List{values: states}),
+        jet_eval_compiler_index_field("fact_registry", jet_eval_compiler_index_registry(registry)),
+        jet_eval_compiler_index_field("derivations", TComptimeValue.List{values: derivations}),
+    })
+}

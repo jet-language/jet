@@ -1,0 +1,394 @@
+// Rust Sema/State.rs:547-1267. The source traversal consumes retained checked
+// callee identities, never reruns type checking or invents receiver types.
+use jet_foundation.[Diagnostic, Expr, Func, Item, LValue, Span, Stmt, expr_span]
+struct SemaStateContext {
+    table: SemaStateTable
+    flow: SemaFlowFacts<String>
+    calls: [Int:SemaStateCallable]
+    existing: [Diagnostic]
+    diagnostics: [Diagnostic]
+}
+fn sema_state_context(table: ^SemaStateTable, calls: ^[Int:SemaStateCallable], existing: [Diagnostic]) -> SemaStateContext Never! {
+    coverage := [Diagnostic]{}
+    loop diagnostic in existing {
+        if diagnostic.code == "E0307" -> &coverage.push(diagnostic)
+    }
+    SemaStateContext{table: table, flow: sema_flow_new<String>(), calls: calls, existing: coverage, diagnostics: [Diagnostic]{}}
+}
+fn sema_state_static_owner(receiver: Expr) -> String? {
+    if receiver == {
+        .Ident(name, _) -> return Val(name)
+        .Field(base, leaf, _) -> if base == .Ident(prefix, _) {
+            bytes :: prefix.bytes()
+            if bytes.len() > 0 && bytes[0] >= 65 && bytes[0] <= 90 -> return Val("{prefix}.{leaf}")
+        }
+        else -> {}
+    }
+    None
+}
+fn sema_state_method_owner(context: SemaStateContext, receiver: Expr, method: String, span: Span, recv_type: String?) -> String? {
+    if recv_type != None -> return recv_type
+    if context.calls.get(span.start) == .Val(target) && target.owner != None -> return target.owner
+    if receiver == .Ident(local, _) {
+        if sema_flow_get<String>(context.flow, local) == .Val(state) {
+            if state == "Running" || state == "Joined" || state == "Detached" {
+                if context.table.transitions.get("Task::{method}") != None -> return Val("Task")
+            }
+        }
+    }
+    None
+}
+fn sema_state_free_name(context: SemaStateContext, name: String, span: Span) -> String Never! {
+    if context.calls.get(span.start) == .Val(target) && target.owner == None -> return target.name
+    ~name
+}
+fn sema_state_entry(context: SemaStateContext, expr: Expr) -> String? {
+    if expr == {
+        .OrFallback(value, _, _, _) | .Copy(value, _) | .Place(value, _, _) | .Paren(value, _) | .Ok(value, _) | .Try(value, _, _, _) -> return sema_state_entry(context, value)
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
+            spawn :: "{String.from_bytes([U8]{U8{0}}) ?? ""}jet.task.spawn"
+            if method == spawn -> return Val("Running")
+            owner :: sema_state_static_owner(receiver) ?? return None
+            return context.table.entry_ctors.get("{owner}::{method}")
+        }
+        .Call(call) -> {
+            name :: sema_state_free_name(context, call.name, call.name_span)
+            transition :: context.table.fn_transitions.get(name) ?? return None
+            if transition.from == None -> return Val(transition.to)
+        }
+        else -> {}
+    }
+    None
+}
+fn sema_state_result(context: SemaStateContext, expr: Expr) -> String? {
+    if expr == {
+        .OrFallback(value, _, _, _) | .Copy(value, _) | .Place(value, _, _) | .Paren(value, _) | .Ok(value, _) | .Try(value, _, _, _) -> return sema_state_result(context, value)
+        .MethodCall(receiver, method, span, _, _, _, recv_type, _, _, _) -> {
+            resolved := sema_state_method_owner(context, receiver, method, span, recv_type)
+            if resolved == None -> resolved = sema_state_static_owner(receiver)
+            owner :: resolved ?? return None
+            if owner == "Task" -> return None
+            transition :: context.table.transitions.get("{owner}::{method}") ?? return None
+            return Val(transition.to)
+        }
+        .Call(call) -> {
+            name :: sema_state_free_name(context, call.name, call.name_span)
+            transition :: context.table.fn_transitions.get(name) ?? return None
+            return Val(transition.to)
+        }
+        else -> {}
+    }
+    None
+}
+fn sema_state_hint(table: SemaStateTable, owner: String, required: String) -> String Never! {
+    prefix :: "{owner}::"
+    loop (key, transition) in table.transitions {
+        if transition.to != required || !key.starts_with(prefix) -> next
+        parts :: key.split("::").to_list()
+        return parts[parts.len() - 1]
+    }
+    loop (name, transition) in table.fn_transitions { if transition.to == required -> return name }
+    ""
+}
+fn sema_state_guard(context: &SemaStateContext, local: String, current: String?, required: String, owner: String, operation: String, span: Span) Never! {
+    state :: current ?? return
+    if state == required -> return
+    transition :: sema_state_hint(context.table, owner, required)
+    fix :: if transition == "" -> "transition `{local}` into state `{required}` before calling `{operation}`" else -> "transition it first: call `{transition}` to reach `{required}`"
+    &context.diagnostics.push(sema_error("E0150", span, "`{operation}` needs `{owner}` in state `{required}`, but `{local}` is in state `{state}`", "typestate (D-STATE1): `{operation}` is only valid in state `{required}`; calling it in `{state}` is the out-of-order-events bug it prevents", fix))
+}
+fn sema_state_report_divergence(context: &SemaStateContext, splits: [SemaFlowDivergence<String>], span: Span) Never! {
+    // Rust sorts (name,left,right), then deduplicates name. Select that exact
+    // minimum without relying on map iteration order.
+    names := [String]{}
+    selected := [String:SemaFlowDivergence<String>]{}
+    loop split in splits {
+        previous :: selected.get(split.name)
+        if previous == None -> &names.push(split.name)
+        if previous == .Val(value) {
+            if split.left > value.left || (split.left == value.left && split.right >= value.right) -> next
+        }
+        selected[split.name] = split
+    }
+    &names.sort()
+    loop name in names {
+        split :: selected.get(name) ?? next
+        &context.diagnostics.push(sema_state_row("L0152", span, [String:String]{"value": split.name, "one": split.left, "other": split.right}))
+    }
+}
+fn sema_state_merge(context: &SemaStateContext, before: SemaFlowFacts<String>, paths: [SemaFlowFacts<String>], span: Span) Never! {
+    diverged := [SemaFlowDivergence<String>]{}
+    context.flow = sema_flow_merge<String>(before, paths, &diverged)
+    sema_state_report_divergence(&context, diverged, span)
+}
+fn sema_state_loop(context: &SemaStateContext, body: [Stmt], span: Span) Never! {
+    before := ~context.flow
+    sema_state_block(&context, body)
+    diverged := [SemaFlowDivergence<String>]{}
+    context.flow = sema_flow_after_loop<String>(before, context.flow, &diverged)
+    sema_state_report_divergence(&context, diverged, span)
+}
+fn sema_state_expr(context: &SemaStateContext, expr: Expr) Never! {
+    if expr == {
+        .MethodCall(receiver, method, span, _, _, args, recv_type, _, _, _) -> {
+            sema_state_expr(&context, receiver)
+            loop argument in args -> sema_state_expr(&context, argument.expr)
+            if receiver == .Ident(local, _) {
+                owner :: sema_state_method_owner(context, receiver, method, span, recv_type) ?? return
+                key :: "{owner}::{method}"
+                current :: sema_flow_get<String>(context.flow, local)
+                if owner != "Task" {
+                    if context.table.requires.get(key) == .Val(required) -> sema_state_guard(&context, local, current, required, owner, method, span)
+                }
+                if context.table.transitions.get(key) == .Val(transition) {
+                    if owner != "Task" && transition.from == .Val(required) -> sema_state_guard(&context, local, current, required, owner, method, span)
+                    sema_flow_set<String>(&context.flow, local, transition.to)
+                }
+            }
+        }
+        .OptMethodCall(receiver, _, _, _, args, _, _, _) -> {
+            sema_state_expr(&context, receiver)
+            loop argument in args -> sema_state_expr(&context, argument.expr)
+        }
+        .Call(call) -> {
+            loop argument in call.args -> sema_state_expr(&context, argument.expr)
+            if call.args.len() == 0 -> return
+            if call.args[0].expr == .Ident(local, _) {
+                name :: sema_state_free_name(context, call.name, call.name_span)
+                span :: expr_span(call.args[0].expr)
+                current :: sema_flow_get<String>(context.flow, local)
+                if context.table.fn_requires.get(name) == .Val(required) -> sema_state_guard(&context, local, current, required, local, name, span)
+                if context.table.fn_transitions.get(name) == .Val(transition) {
+                    if transition.from == .Val(required) -> sema_state_guard(&context, local, current, required, local, name, span)
+                    sema_flow_set<String>(&context.flow, local, transition.to)
+                }
+            }
+        }
+        .Tainted(value, _, _) | .Unary(_, value, _) | .Deref(value, _) | .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _) | .Field(value, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) | .Paren(value, _) | .Spread(value, _) | .MemberSpread(value, _, _) -> sema_state_expr(&context, value)
+        .Try(value, _, _, note) -> {
+            sema_state_expr(&context, value)
+            if note == .Val(inner) -> sema_state_expr(&context, inner)
+        }
+        .Binary(_, left, right, _) -> {
+            sema_state_expr(&context, left)
+            sema_state_expr(&context, right)
+        }
+        .CompareChain(operands, _, _, _) -> loop value in operands -> sema_state_expr(&context, value)
+        .CallValue(callee, args, _) -> {
+            sema_state_expr(&context, callee)
+            loop argument in args -> sema_state_expr(&context, argument.expr)
+        }
+        .OptField(base, _, _, _, _) -> sema_state_expr(&context, base)
+        .Index(base, index, _, _) -> {
+            sema_state_expr(&context, base)
+            sema_state_expr(&context, index)
+        }
+        .Slice(base, start, end, range, _) -> {
+            sema_state_expr(&context, base)
+            if range == {
+                .Val(value) -> sema_state_expr(&context, value)
+                .None -> {
+                    sema_state_expr(&context, start)
+                    sema_state_expr(&context, end)
+                }
+            }
+        }
+        .Range(start, end, _, _) -> {
+            sema_state_expr(&context, start)
+            sema_state_expr(&context, end)
+        }
+        .ListLit(values, _) -> loop value in values -> sema_state_expr(&context, value)
+        .MapLit(entries, _) -> loop entry in entries {
+            sema_state_expr(&context, entry.key)
+            sema_state_expr(&context, entry.value)
+        }
+        .TupleLit(fields, _, _) -> loop field in fields -> sema_state_expr(&context, field.value)
+        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> sema_state_expr(&context, field.value)
+        .TypedLit(_, body, _) -> if body == {
+            .Fields(fields) -> loop field in fields -> sema_state_expr(&context, field.value)
+            .Elements(values) -> loop value in values -> sema_state_expr(&context, value)
+            .Entries(entries) -> loop entry in entries {
+                sema_state_expr(&context, entry.key)
+                sema_state_expr(&context, entry.value)
+            }
+            .Value(value) -> sema_state_expr(&context, value)
+            else -> {}
+        }
+        .EnumLit(_, _, _, args, _, _) -> loop argument in args { if argument == { .Positional(value) | .Named(_, value) -> sema_state_expr(&context, value) } }
+        .Str(parts, _) -> loop part in parts { if part == .Interp(value, _) -> sema_state_expr(&context, value) }
+        .If(cond, then_body, then_value, else_body, else_value, span) -> {
+            sema_state_expr(&context, cond)
+            before := ~context.flow
+            sema_flow_enter<String>(&context.flow)
+            loop statement in then_body -> sema_state_stmt(&context, statement)
+            sema_state_expr(&context, then_value)
+            sema_flow_leave<String>(&context.flow)
+            then_path := ~context.flow
+            context.flow = ~before
+            sema_flow_enter<String>(&context.flow)
+            loop statement in else_body -> sema_state_stmt(&context, statement)
+            sema_state_expr(&context, else_value)
+            sema_flow_leave<String>(&context.flow)
+            else_path := ~context.flow
+            sema_state_merge(&context, before, [SemaFlowFacts<String>]{then_path, else_path}, span)
+        }
+        .PatternTest(subject, _, _) -> sema_state_expr(&context, subject)
+        .PtrFromAddr(_, _, _, addr, _) -> sema_state_expr(&context, addr)
+        .OrFallback(value, fallback, _, _) -> {
+            sema_state_expr(&context, value)
+            if fallback == {
+                .Value(inner) -> sema_state_expr(&context, inner)
+                .Block(body, fallback_value, _) -> {
+                    sema_flow_enter<String>(&context.flow)
+                    loop statement in body -> sema_state_stmt(&context, statement)
+                    if fallback_value == .Val(inner) -> sema_state_expr(&context, inner)
+                    sema_flow_leave<String>(&context.flow)
+                }
+                .Return(fallback_value, _) -> {
+                    if fallback_value == .Val(inner) -> sema_state_expr(&context, inner)
+                }
+                else -> {}
+            }
+        }
+        // Rust deliberately does not enter lambda execution while checking
+        // its construction, nor synthesize facts for literal/untracked forms.
+        else -> {}
+    }
+}
+fn sema_state_bind(context: &SemaStateContext, name: String, value: Expr, declaration: Bool) Never! {
+    state := sema_state_result(context, value)
+    if state == None -> state = sema_state_entry(context, value)
+    if declaration && state == None && value == .Ident(source, _) -> state = sema_flow_get<String>(context.flow, source)
+    if declaration {
+        // Unknown lexical declarations shadow outer facts without inventing
+        // a state, and scope exit restores the outer row.
+        depth :: context.flow.depth
+        sema_flow_set_at<String>(&context.flow, name, depth, state)
+    } else {
+        if state == .Val(known) -> sema_flow_set<String>(&context.flow, name, known)
+        else -> sema_flow_forget<String>(&context.flow, name)
+    }
+}
+fn sema_state_stmt(context: &SemaStateContext, statement: Stmt) Never! {
+    if statement == {
+        .Expr(value) | .Yield(value, _) | .DeferClose(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> sema_state_expr(&context, value)
+        .Val(binding) -> {
+            sema_state_expr(&context, binding.init)
+            if binding.name != "" -> sema_state_bind(&context, binding.name, binding.init, true)
+        }
+        .Assign(target, op, _, value) -> {
+            sema_state_expr(&context, value)
+            if op == None && target == .Local(name, _) -> sema_state_bind(&context, name, value, false)
+        }
+        .Return(value, _) -> {
+            if value == .Val(inner) -> sema_state_expr(&context, inner)
+        }
+        .While(cond, body, span, _, _) -> {
+            sema_state_expr(&context, cond)
+            sema_state_loop(&context, body, span)
+        }
+        .For(_, _, _, kind, body, span, _, _, _) -> {
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    sema_state_expr(&context, start)
+                    sema_state_expr(&context, end)
+                    if step == .Val(value) -> sema_state_expr(&context, value)
+                }
+                .In(collection, step) -> {
+                    sema_state_expr(&context, collection)
+                    if step == .Val(value) -> sema_state_expr(&context, value)
+                }
+            }
+            sema_state_loop(&context, body, span)
+        }
+        .Switch(subject, arms, else_body, span) | .ComptimeSwitch(subject, arms, else_body, span) -> {
+            sema_state_expr(&context, subject)
+            before := ~context.flow
+            paths := [SemaFlowFacts<String>]{}
+            loop arm in arms {
+                context.flow = ~before
+                sema_state_expr(&context, arm.cond)
+                sema_state_block(&context, arm.body)
+                &paths.push(~context.flow)
+            }
+            if else_body == {
+                .Val(body) -> {
+                    context.flow = ~before
+                    sema_state_block(&context, body)
+                    &paths.push(~context.flow)
+                }
+                .None -> {
+                    if !sema_flow_switch_exhaustive(arms, context.existing, span) -> &paths.push(~before)
+                }
+            }
+            sema_state_merge(&context, before, paths, span)
+        }
+        .CountedLoop(init, cond, step, body, span, _, _) -> {
+            sema_state_expr(&context, init.init)
+            sema_state_expr(&context, cond)
+            before := ~context.flow
+            sema_state_block(&context, body)
+            if step == .Val(value) -> sema_state_stmt(&context, value)
+            diverged := [SemaFlowDivergence<String>]{}
+            context.flow = sema_flow_after_loop<String>(before, context.flow, &diverged)
+            sema_state_report_divergence(&context, diverged, span)
+        }
+        .Loop(body, span, _, _) -> sema_state_loop(&context, body, span)
+        .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .AssumeDet(_, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Switched(_, body, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_state_block(&context, body)
+        .ComptimeIf(cond, _, then_body, else_body, span, _) -> {
+            sema_state_expr(&context, cond)
+            before := ~context.flow
+            sema_state_block(&context, then_body)
+            then_path := ~context.flow
+            context.flow = ~before
+            if else_body == .Val(body) -> sema_state_block(&context, body)
+            else_path := ~context.flow
+            sema_state_merge(&context, before, [SemaFlowFacts<String>]{then_path, else_path}, span)
+        }
+        .ContextBlock(fields, body, _) -> {
+            loop field in fields -> sema_state_expr(&context, field.value)
+            sema_state_block(&context, body)
+        }
+        else -> {}
+    }
+}
+fn sema_state_block(context: &SemaStateContext, body: [Stmt]) Never! {
+    sema_flow_enter<String>(&context.flow)
+    loop statement in body -> sema_state_stmt(&context, statement)
+    sema_flow_leave<String>(&context.flow)
+}
+fn sema_state_run_func(context: &SemaStateContext, func: Func, owner: String?) Never! {
+    context.flow = sema_flow_new<String>()
+    if func.params.len() > 0 && func.params[0].name == "self" {
+        incoming := String?{None}
+        if func.state_requires == .Val(required) -> incoming = Val(sema_state_for_owner(owner, required.name))
+        if incoming == None && func.state_transition == .Val(transition) {
+            if transition.from == .Val(from) -> incoming = Val(sema_state_for_owner(owner, from))
+        }
+        if incoming == .Val(state) -> sema_flow_set<String>(&context.flow, "self", state)
+    }
+    sema_state_block(&context, func.body)
+}
+pub fn sema_state_check_func(func: Func, owner: String?, table: ^SemaStateTable, calls: ^[Int:SemaStateCallable], existing: [Diagnostic]) -> [Diagnostic] Never! {
+    context := sema_state_context(^table, ^calls, existing)
+    sema_state_run_func(&context, func, owner)
+    context.diagnostics
+}
+fn sema_state_check_items(context: &SemaStateContext, items: [Item]) Never! {
+    loop item in items {
+        if item == {
+            .Func(func) -> sema_state_run_func(&context, func, None)
+            .Impl(value) -> loop method in value.methods -> sema_state_run_func(&context, method, Val(value.type_name))
+            .Struct(value) -> {
+                loop method in value.methods -> sema_state_run_func(&context, method, Val(value.name))
+                loop block in value.trait_impls { loop method in block.methods -> sema_state_run_func(&context, method, Val(value.name)) }
+            }
+            .Enum(value) -> loop method in value.methods -> sema_state_run_func(&context, method, Val(value.name))
+            .Test(value) -> {
+                context.flow = sema_flow_new<String>()
+                sema_state_block(&context, value.body)
+            }
+            else -> {}
+        }
+    }
+}

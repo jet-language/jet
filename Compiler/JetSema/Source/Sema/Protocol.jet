@@ -1,0 +1,196 @@
+// PORT-PENDING 0437 crates-jet-sema-src-sema-policyfacts-module-group: crates/jet-sema/src/Sema/Protocol.rs:1-192
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-PROTO1 / D-PROTO2: protocol/session type expansion.
+//RS //!
+//RS //! A `protocol Name { … }` block declares an ordered message exchange. Sema expands
+//RS //! it into `#SingleUse` `.Client`/`.Server` handle structs plus `state`/`#Transition`
+//RS //! impl methods, then re-parses the fragments through the normal front end (R11).
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Syntax;
+//RS use crate::AST::{Item, ProtocolDecl, ProtocolDirection, ProtocolMessage};
+//RS 
+//RS /// Expand every `protocol` declaration in `items`, replacing each with its generated
+//RS /// handle types and methods. Parse/lex failures are reported at the protocol
+//RS /// declaration through E0153 rather than exposing generated-source spans.
+//RS pub fn expand_module_protocols(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
+//RS     let mut i = 0;
+//RS     while i < items.len() {
+//RS         let decl = match &items[i] {
+//RS             Item::ProtocolDecl(d) => d.clone(),
+//RS             _ => {
+//RS                 i += 1;
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         let fragment = generate_protocol_source(&decl);
+//RS         match lex_parse_fragment(&fragment) {
+//RS             Ok(mut parsed) => {
+//RS                 mark_generated_protocol_items(&mut parsed);
+//RS                 for item in parsed {
+//RS                     items.insert(i, item);
+//RS                     i += 1;
+//RS                 }
+//RS             }
+//RS             Err(()) => {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E0153",
+//RS                     format!(
+//RS                         "protocol `{}` failed to expand into handle types",
+//RS                         decl.name
+//RS                     ),
+//RS                     "the compiler generates `#SingleUse` `.Client`/`.Server` stubs from \
+//RS                      the protocol block — a fragment did not parse"
+//RS                         .to_string(),
+//RS                     "check the protocol declaration for typos; if this persists, file a bug"
+//RS                         .to_string(),
+//RS                     Some(decl.name_span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         i += 1;
+//RS     }
+//RS }
+//RS 
+//RS fn mark_generated_protocol_items(items: &mut [Item]) {
+//RS     for item in items {
+//RS         let methods = match item {
+//RS             Item::Impl(definition) => Some(&mut definition.methods),
+//RS             Item::Struct(definition) => Some(&mut definition.methods),
+//RS             Item::Enum(definition) => Some(&mut definition.methods),
+//RS             _ => None,
+//RS         };
+//RS         if let Some(methods) = methods {
+//RS             for method in methods {
+//RS                 if method.state_transition.is_some() {
+//RS                     method.compiler_generated = true;
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn lex_parse_fragment(src: &str) -> Result<Vec<Item>, ()> {
+//RS     let (toks, lex_diags) = crate::Lexer::lex(src);
+//RS     if !lex_diags.is_empty() {
+//RS         return Err(());
+//RS     }
+//RS     match crate::Parser::parse(&toks) {
+//RS         Ok(prog) => Ok(prog.items),
+//RS         Err(_) => Err(()),
+//RS     }
+//RS }
+//RS 
+//RS fn generate_protocol_source(decl: &ProtocolDecl) -> String {
+//RS     let mut out = String::new();
+//RS     let client = format!("{}.Client", decl.name);
+//RS     let server = format!("{}.Server", decl.name);
+//RS     let state_count = decl.messages.len() + 1;
+//RS     let states: Vec<String> = (0..state_count).map(|i| format!("S{i}")).collect();
+//RS     let state_list = states.join(", ");
+//RS 
+//RS     out.push_str(&format!(
+//RS         "#{} struct {client} {{\n    state {{ {state_list} }}\n    _token: Int,\n}}\n\n",
+//RS         Syntax::MARKER_SINGLE_USE
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "#{} struct {server} {{\n    state {{ {state_list} }}\n    _token: Int,\n}}\n\n",
+//RS         Syntax::MARKER_SINGLE_USE
+//RS     ));
+//RS 
+//RS     out.push_str(&format!("impl {client} {{\n"));
+//RS     out.push_str(&format!(
+//RS         "    #{}(_, S0) fn client() {client} -> {{\n        return {client}{{ _token: 0 }}\n    }}\n\n",
+//RS         Syntax::KW_TRANSITION
+//RS     ));
+//RS     for (idx, msg) in decl.messages.iter().enumerate() {
+//RS         let terminal = idx + 1 == decl.messages.len();
+//RS         if matches!(msg.direction, ProtocolDirection::ClientToServer) {
+//RS             append_send_method(&mut out, &client, &states, idx, msg, terminal);
+//RS         } else {
+//RS             append_recv_method(&mut out, &client, &states, idx, msg, terminal);
+//RS         }
+//RS     }
+//RS     out.push_str("}\n\n");
+//RS 
+//RS     out.push_str(&format!("impl {server} {{\n"));
+//RS     out.push_str(&format!(
+//RS         "    #{}(_, S0) fn server() {server} -> {{\n        return {server}{{ _token: 0 }}\n    }}\n\n",
+//RS         Syntax::KW_TRANSITION
+//RS     ));
+//RS     for (idx, msg) in decl.messages.iter().enumerate() {
+//RS         let terminal = idx + 1 == decl.messages.len();
+//RS         if matches!(msg.direction, ProtocolDirection::ClientToServer) {
+//RS             append_recv_method(&mut out, &server, &states, idx, msg, terminal);
+//RS         } else {
+//RS             append_send_method(&mut out, &server, &states, idx, msg, terminal);
+//RS         }
+//RS     }
+//RS     out.push('}');
+//RS     out
+//RS }
+//RS 
+//RS fn append_send_method(
+//RS     out: &mut String,
+//RS     handle: &str,
+//RS     states: &[String],
+//RS     idx: usize,
+//RS     msg: &ProtocolMessage,
+//RS     terminal: bool,
+//RS ) {
+//RS     let from = &states[idx];
+//RS     let to = &states[idx + 1];
+//RS     let fields = format_fields(msg);
+//RS     let param_suffix = if fields.is_empty() {
+//RS         String::new()
+//RS     } else {
+//RS         format!(", {fields}")
+//RS     };
+//RS     if terminal {
+//RS         out.push_str(&format!(
+//RS             "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) {{\n        return\n    }}\n\n",
+//RS             Syntax::KW_TRANSITION,
+//RS             msg.name,
+//RS         ));
+//RS     } else {
+//RS         out.push_str(&format!(
+//RS             "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) -> {handle} !Err {{\n        return Ok(self)\n    }}\n\n",
+//RS             Syntax::KW_TRANSITION,
+//RS             msg.name,
+//RS         ));
+//RS     }
+//RS }
+//RS 
+//RS fn append_recv_method(
+//RS     out: &mut String,
+//RS     handle: &str,
+//RS     states: &[String],
+//RS     idx: usize,
+//RS     msg: &ProtocolMessage,
+//RS     terminal: bool,
+//RS ) {
+//RS     let from = &states[idx];
+//RS     let to = &states[idx + 1];
+//RS     let method = format!("recv_{}", msg.name);
+//RS     if terminal {
+//RS         out.push_str(&format!(
+//RS             "    #{}({from}, {to}) fn {method}(self: ^{handle}) {{\n        return\n    }}\n\n",
+//RS             Syntax::KW_TRANSITION,
+//RS         ));
+//RS     } else {
+//RS         out.push_str(&format!(
+//RS             "    #{}({from}, {to}) fn {method}(self: ^{handle}) -> {handle} !Err {{\n        return Ok(self)\n    }}\n\n",
+//RS             Syntax::KW_TRANSITION,
+//RS         ));
+//RS     }
+//RS }
+//RS 
+//RS fn format_fields(msg: &ProtocolMessage) -> String {
+//RS     msg.fields
+//RS         .iter()
+//RS         .map(|(name, ty)| format!("{name}: {}", ty.name()))
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ")
+//RS }
+// END-PORT-PENDING 0437 crates/jet-sema/src/Sema/Protocol.rs:1-192
+

@@ -1,0 +1,862 @@
+// PORT-PENDING 0393 crates-jet-sema-src-sema-checkercorelib-serde-diags: crates/jet-sema/src/Sema/CheckerCoreLib/serde_diags.rs:1-858
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::core_types::is_json_type_name;
+//RS use super::module_items::core_module_items;
+//RS use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+//RS use crate::Sema::Diagnostics::suggest_field;
+//RS use crate::Syntax;
+//RS use crate::Traits::TraitRegistry;
+//RS use crate::AST::{Expr, Type};
+//RS 
+//RS /// E2-M15: modules that require an OS and are forbidden on no-OS targets.
+//RS pub(crate) fn is_no_os_forbidden(module: &str) -> bool {
+//RS     matches!(
+//RS         module,
+//RS         "core.files" | "core.watcher" | "core.term" | "core.net" | "core.net.tls" | "core.tasks"
+//RS             | "core.process" | "core.time" | "core.http" | "core.log"
+//RS             // U13 (D-JPK-SECRETCRYPTO1): reading the encrypted repo store is
+//RS             // filesystem I/O — same OS dependency as `core.files`.
+//RS             | "core.crypto.vault"
+//RS     )
+//RS }
+//RS 
+//RS /// Return a short display name for the module alias (the part after the dot).
+//RS pub(crate) fn module_short_name(module: &str) -> &str {
+//RS     module.split('.').last().unwrap_or(module)
+//RS }
+//RS 
+//RS /// Fix hint for E3301 depending on the forbidden module.
+//RS pub(crate) fn no_os_hint(module: &str) -> &'static str {
+//RS     match module {
+//RS         "core.files" => {
+//RS             "Embed the data at compile time with `@embed(\"file\")`, or select a hosted target."
+//RS         }
+//RS         "core.net" | "core.net.tls" | "core.http" => {
+//RS             "No-OS targets have no network stack. Select a hosted target, or use a declared network provider."
+//RS         }
+//RS         "core.tasks" => {
+//RS             "OS threads are not available without an OS. Use cooperative or interrupt-driven concurrency."
+//RS         }
+//RS         "core.term" => {
+//RS             "Standard I/O requires an OS. Use a declared IO provider or select a hosted target."
+//RS         }
+//RS         "core.process" | "core.time" => {
+//RS             "System calls are not available on a no-OS target. Select a hosted target or declare the required provider."
+//RS         }
+//RS         "core.log" => {
+//RS             "The log module writes to stderr (an OS resource). Use a declared IO provider or select a hosted target."
+//RS         }
+//RS         _ => "Select a hosted target, or replace this call with a core-level alternative.",
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnostic {
+//RS     if module == "core.time" && name == "clock" {
+//RS         return Diagnostic::error(
+//RS             "E1004",
+//RS             "`time.clock` was retired".to_string(),
+//RS             "deterministic fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)"
+//RS                 .to_string(),
+//RS             "use `Clock.new(seed)`".to_string(),
+//RS             Some(span),
+//RS         );
+//RS     }
+//RS     if module == "core.time.expiring" && name == "new" {
+//RS         return Diagnostic::error(
+//RS             "E1004",
+//RS             "`expiring.new` was retired".to_string(),
+//RS             "fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)".to_string(),
+//RS             "use `ExpiringValue.new(value, ttl, clock)`".to_string(),
+//RS             Some(span),
+//RS         );
+//RS     }
+//RS     if module == "core.event" && name == "policy_async" {
+//RS         return Diagnostic::error(
+//RS             "E1004",
+//RS             "`event.policy_async` was retired".to_string(),
+//RS             "a synchronous `Event<T>` cannot provide real queued dispatch; `AsyncEvent<T, E>` is the sole asynchronous event model".to_string(),
+//RS             "use `event.async_result<T, E>(AsyncPolicy.{ capacity: n, overflow: .Block }, FailurePolicy.Collect)`".to_string(),
+//RS             Some(span),
+//RS         );
+//RS     }
+//RS     if module == "core.crypto" && name == "constant_time_eq" {
+//RS         return Diagnostic::error(
+//RS             "E1004",
+//RS             "`crypto.constant_time_eq` was retired".to_string(),
+//RS             "`eq` is not one of Jet's blessed API abbreviations".to_string(),
+//RS             "use `crypto.constant_time_equal_bytes(a, b)`".to_string(),
+//RS             Some(span),
+//RS         );
+//RS     }
+//RS     if module == "core.crypto" {
+//RS         if let Some(algorithm) = name.strip_suffix("_bytes") {
+//RS             let digest = match algorithm {
+//RS                 "sha256" | "blake3" => "Digest256",
+//RS                 "sha512" => "Digest512",
+//RS                 _ => "",
+//RS             };
+//RS             if !digest.is_empty() {
+//RS                 return Diagnostic::error(
+//RS                     "E1004",
+//RS                     format!("`crypto.{name}` was retired"),
+//RS                     format!(
+//RS                         "`crypto.{algorithm}` returns `{digest}`, so the representation is explicit"
+//RS                     ),
+//RS                     format!(
+//RS                         "use `crypto.{algorithm}(bytes).hex()` for text or `.bytes()` for raw bytes"
+//RS                     ),
+//RS                     Some(span),
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS     let items = core_module_items(module);
+//RS     // #2002: the module DOES expose `name`. Claiming it has no such item, and
+//RS     // then "suggesting" that same name back, is two false statements produced by
+//RS     // one table disagreement: the item list says the name is public while the
+//RS     // position this call came from has no arm for it. Say what is true instead —
+//RS     // the item exists, this position did not resolve it, and the list-member
+//RS     // import (D-CORE-USELIST1=A) is a spelling that reaches it.
+//RS     if items.iter().any(|item| item == name) {
+//RS         return Diagnostic::error(
+//RS             "E1004",
+//RS             format!("`{module}` exposes `{name}`, but not in this position"),
+//RS             "standard library modules expose a fixed set of public items, each reachable only where its surface declares".to_string(),
+//RS             format!("import it directly with `use {module}.[{name}]`"),
+//RS             Some(span),
+//RS         );
+//RS     }
+//RS     // #1965: Core is one nested tree (D-CORE-TREE1=A), so a miss at one node is
+//RS     // often a hit one level down. Listing this module's own items then hands the
+//RS     // reader a set that provably does not contain what they asked for, and the
+//RS     // edit-distance guess below answers with an unrelated sibling. An exact
+//RS     // submodule hit is a fact about where the name lives, so it outranks both.
+//RS     if let Some(diagnostic) = submodule_path_hint(module, name, span) {
+//RS         return diagnostic;
+//RS     }
+//RS     let suggestion = suggest_field(name, &items);
+//RS     let fix = if items.is_empty() {
+//RS         "import a specific core module, like `import core.files as fs;`".to_string()
+//RS     } else {
+//RS         format!("use one of: {}", items.join(", "))
+//RS     };
+//RS     let fix = suggestion
+//RS         .as_ref()
+//RS         .map_or(fix, |s| format!("did you mean `{s}`?"));
+//RS     let mut diagnostic = Diagnostic::error(
+//RS         "E1004",
+//RS         format!("`{}` has no item `{}`", module, name),
+//RS         "standard library modules expose a fixed set of public items".to_string(),
+//RS         fix,
+//RS         Some(span),
+//RS     );
+//RS     if let Some(suggestion) = suggestion {
+//RS         diagnostic = diagnostic.with_edit(TextEdit {
+//RS             span,
+//RS             new_text: suggestion,
+//RS         });
+//RS     }
+//RS     diagnostic
+//RS }
+//RS 
+//RS /// E1004 for a name that lives one level down the Core tree: either
+//RS /// `{module}.{name}` is itself a submodule, or `name` is an item of one.
+//RS fn submodule_path_hint(module: &str, name: &str, span: Span) -> Option<Diagnostic> {
+//RS     // No typed edit: this hint changes the import path shape (and may require
+//RS     // adding a member), rather than replacing one token with one candidate.
+//RS     const WHY: &str = "Core is one nested tree, so a name under this module can belong to a submodule instead of the module itself";
+//RS     let nested = format!("{module}.{name}");
+//RS     if Syntax::is_known_core_module(&nested) {
+//RS         let fix = match core_module_items(&nested).first() {
+//RS             Some(item) => {
+//RS                 format!("`{nested}` is a submodule, so name an item on it: `{nested}.{item}`")
+//RS             }
+//RS             None => format!("`{nested}` is a submodule; import it with `import {nested};`"),
+//RS         };
+//RS         return Some(Diagnostic::error(
+//RS             "E1004",
+//RS             format!("`{module}` has no item `{name}`"),
+//RS             WHY.to_string(),
+//RS             fix,
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS     let prefix = format!("{module}.");
+//RS     let owner = Syntax::KNOWN_CORE_MODULES
+//RS         .iter()
+//RS         .copied()
+//RS         .filter(|candidate| candidate.starts_with(&prefix))
+//RS         .find(|candidate| core_module_items(candidate).iter().any(|item| item == name))?;
+//RS     Some(Diagnostic::error(
+//RS         "E1004",
+//RS         format!("`{module}` has no item `{name}`"),
+//RS         WHY.to_string(),
+//RS         format!("`{name}` lives in the submodule `{owner}`, so write `{owner}.{name}`"),
+//RS         Some(span),
+//RS     ))
+//RS }
+//RS 
+//RS pub(crate) fn unknown_core_module(module: &str, span: Span) -> Diagnostic {
+//RS     if let Some(diagnostic) = Syntax::retired_core_module_diagnostic(module, span) {
+//RS         return diagnostic;
+//RS     }
+//RS     Diagnostic::error(
+//RS         "E1001",
+//RS         format!("there is no core module `{module}`"),
+//RS         "`core` is compiler-known in M10, and only the frozen core modules exist".to_string(),
+//RS         format!("import one of: {}", Syntax::core_modules_list()),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E2411 (D-SERDE): a type used with an encoding verb can't be (de)serialized — it
+//RS /// holds something with no wire form (a closure, handle, …), or a user type that
+//RS /// hasn't opted in with `#[Codable]`/`#[Encode]`/`#[Decode]`.
+//RS pub(crate) fn e2411(ty: &Type, encode: bool, span: Span) -> Diagnostic {
+//RS     let shown = ty.show();
+//RS     let ty = shown.as_str();
+//RS     let (verb, marker) = if encode {
+//RS         ("serialized", "`#[Codable]` or `#[Encode]`")
+//RS     } else {
+//RS         ("decoded", "`#[Codable]` or `#[Decode]`")
+//RS     };
+//RS     Diagnostic::error(
+//RS         "E2411",
+//RS         format!("`{ty}` can't be {verb}"),
+//RS         format!("only types that opt in (and their fields) have a wire form; `{ty}` does not"),
+//RS         format!("add {marker} to `{ty}`, or remove it from the encoded value"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn e2411_unknown_union_shape(union_ty: &str, member: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2411",
+//RS         format!(
+//RS             "union `{union_ty}` can't be decoded — `{member}` has no compiler-known wire shape"
+//RS         ),
+//RS         format!(
+//RS             "`{member}` uses a custom or imported decoder; anonymous unions need each member's outer wire shape before codegen"
+//RS         ),
+//RS         "use a compiler-derived codec, a configured tagged enum, or a #CodableAsBase distinct type"
+//RS             .to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E2415 (D-UNIONTYPE1=A): two Codable union members share a primary wire shape,
+//RS /// so decode cannot pick a unique member without declaration-order guessing.
+//RS pub(crate) fn e2415(union_ty: &str, a: &str, b: &str, shape: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2415",
+//RS         format!("Union `{union_ty}` can't be decoded — `{a}` and `{b}` share wire shape `{shape}`"),
+//RS         "anonymous-union decode picks a member by wire shape; two members with the same shape would force an arbitrary order".to_string(),
+//RS         "use a named enum with an explicit tag, or change the members so each has a distinct wire shape".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn validate_union_decode_shapes(
+//RS     items: &[crate::AST::Item],
+//RS     ty: &Type,
+//RS     span: Span,
+//RS     out: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     fn label(ty: &Type) -> String {
+//RS         ty.show().trim_matches('`').to_string()
+//RS     }
+//RS 
+//RS     if let Type::Union(members) = ty {
+//RS         let mut seen: Vec<(crate::AST::SerdeWireShape, &Type)> = Vec::new();
+//RS         let mut reported_pairs = std::collections::HashSet::new();
+//RS         for member in members {
+//RS             let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
+//RS                 out.push(e2411_unknown_union_shape(&ty.show(), &label(member), span));
+//RS                 continue;
+//RS             };
+//RS             for shape in shapes {
+//RS                 if let Some((_, previous)) = seen.iter().find(|(known, _)| *known == shape) {
+//RS                     let pair = (label(previous), label(member));
+//RS                     if reported_pairs.insert(pair.clone()) {
+//RS                         out.push(e2415(&ty.show(), &pair.0, &pair.1, shape.name(), span));
+//RS                     }
+//RS                 } else {
+//RS                     seen.push((shape, member));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     match ty {
+//RS         Type::List(inner)
+//RS         | Type::Shared(inner)
+//RS         | Type::Option(inner)
+//RS         | Type::Tagged { inner, .. }
+//RS         | Type::FixedList { elem: inner, .. } => {
+//RS             validate_union_decode_shapes(items, inner, span, out)
+//RS         }
+//RS         Type::Map { key, value, .. }
+//RS         | Type::Result {
+//RS             ok: key,
+//RS             err: value,
+//RS         } => {
+//RS             validate_union_decode_shapes(items, key, span, out);
+//RS             validate_union_decode_shapes(items, value, span, out);
+//RS         }
+//RS         Type::Apply { args, .. } | Type::Union(args) => {
+//RS             for arg in args {
+//RS                 validate_union_decode_shapes(items, arg, span, out);
+//RS             }
+//RS         }
+//RS         Type::Tuple(fields) => {
+//RS             for (_, field) in fields {
+//RS                 validate_union_decode_shapes(items, field, span, out);
+//RS             }
+//RS         }
+//RS         Type::Fn { params, ret, .. } => {
+//RS             for param in params {
+//RS                 validate_union_decode_shapes(items, param, span, out);
+//RS             }
+//RS             if let Some(ret) = ret {
+//RS                 validate_union_decode_shapes(items, ret, span, out);
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS /// E2408: `#[Flatten]` needs a field whose type is itself a Codable struct.
+//RS pub(crate) fn e2408(field: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2408",
+//RS         format!("`#[Flatten]` on `{field}` needs a struct-typed field"),
+//RS         "flatten splices another struct's keys into this object, so the field must be a `#[Codable]` struct — not a primitive, list, or map".to_string(),
+//RS         format!("give `{field}` a `#[Codable]` struct type, or drop `#[Flatten]`"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E2414 (Card #131 / D-SERDE5 / D-DEFAULT-SHAPE1): a field `{}` default didn't evaluate
+//RS /// to a compile-time constant. The default is baked into the program to fill a
+//RS /// missing field during decode, so it must be known at compile time — a literal
+//RS /// or a `comptime`-evaluable expression — not a value read from runtime state.
+//RS pub(crate) fn e2414(field: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2414",
+//RS         format!("`{field}`'s `{{…}}` default must be a compile-time constant"),
+//RS         "a decode default is baked into the program, so its value has to be known at compile time; this expression can only be computed at runtime".to_string(),
+//RS         "use a literal or a `comptime`-evaluable expression — e.g. `port: Int{8080}` or `ports: [Int]{[80, 443]}`".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E2409: `#[RenameAll(...)]` names a casing style outside the closed menu.
+//RS pub(crate) fn e2409(style: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2409",
+//RS         format!("`#[RenameAll({style})]` isn't a known casing style"),
+//RS         "the wire-casing menu is `camel`, `snake`, `pascal`, `kebab`, `screaming`".to_string(),
+//RS         "pick one of `camel` / `snake` / `pascal` / `kebab` / `screaming`".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-SERDE9/10: `Name<args>` satisfies the serde `trait_name` when `Name` derives
+//RS /// it (or is imported/non-local, hence trusted) and every type arg at a
+//RS /// wire-reaching position satisfies it too (`elem_ok`). A phantom/skip-only param
+//RS /// position imposes no obligation, so `Id<Kind>` is fine for any `Kind`.
+//RS pub(super) fn apply_serde_ok(
+//RS     name: &str,
+//RS     args: &[Type],
+//RS     reg: &TraitRegistry,
+//RS     trait_name: &str,
+//RS     elem_ok: &dyn Fn(&Type) -> bool,
+//RS ) -> bool {
+//RS     let head_ok = !reg.local_types.contains(name) || reg.implements_trait(name, trait_name);
+//RS     if !head_ok {
+//RS         return false;
+//RS     }
+//RS     match reg.serde_wire_params.get(name) {
+//RS         // Local generic Codable type: only the wire-reaching args must be codable.
+//RS         Some(idxs) => idxs
+//RS             .iter()
+//RS             .all(|&i| args.get(i).map_or(true, |t| elem_ok(t))),
+//RS         // No recorded wire params (imported/non-generic): trust every arg is fine
+//RS         // only if each is codable — be conservative and check them all.
+//RS         None => args.iter().all(|t| elem_ok(t)),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
+//RS     match ty {
+//RS         Type::Int
+//RS         | Type::Float
+//RS         | Type::Bool
+//RS         | Type::String
+//RS         | Type::Char
+//RS         | Type::Float32
+//RS         | Type::IntN { .. } => true,
+//RS         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_encodable_ty(e, reg),
+//RS         Type::FixedList { elem, .. } => is_encodable_ty(elem, reg),
+//RS         Type::Map { key, value, .. } => {
+//RS             matches!(**key, Type::String) && is_encodable_ty(value, reg)
+//RS         }
+//RS         // A non-local type (imported) is trusted; a local one must derive Encode.
+//RS         Type::Named(n) => {
+//RS             n == "Decimal"
+//RS                 || matches!(
+//RS                     n.as_str(),
+//RS                     "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"
+//RS                 )
+//RS                 || is_json_type_name(n)
+//RS                 || !reg.local_types.contains(n)
+//RS                 || reg.implements_trait(n, crate::Generics::ENCODE)
+//RS         }
+//RS         Type::Apply { name, args } => {
+//RS             apply_serde_ok(name, args, reg, crate::Generics::ENCODE, &|t| {
+//RS                 is_encodable_ty(t, reg)
+//RS             })
+//RS         }
+//RS         Type::Union(members) => members.iter().all(|m| is_encodable_ty(m, reg)),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
+//RS     match ty {
+//RS         Type::Int
+//RS         | Type::Float
+//RS         | Type::Bool
+//RS         | Type::String
+//RS         | Type::Char
+//RS         | Type::Float32
+//RS         | Type::IntN { .. } => true,
+//RS         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_decodable_ty(e, reg),
+//RS         Type::FixedList { elem, .. } => is_decodable_ty(elem, reg),
+//RS         Type::Map { key, value, .. } => {
+//RS             matches!(**key, Type::String) && is_decodable_ty(value, reg)
+//RS         }
+//RS         Type::Tagged { marker, inner }
+//RS             if matches!(
+//RS                 marker,
+//RS                 crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
+//RS             ) && matches!(inner.as_ref(), Type::Named(name) if name == "Secret") =>
+//RS         {
+//RS             true
+//RS         }
+//RS         Type::Named(n) => {
+//RS             n == "Decimal"
+//RS                 || n == "Secret"
+//RS                 || n.rsplit_once('.').is_some_and(|(_, leaf)| leaf == "Secret")
+//RS                 || matches!(
+//RS                     n.as_str(),
+//RS                     "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"
+//RS                 )
+//RS                 || !reg.local_types.contains(n)
+//RS                 || reg.implements_trait(n, crate::Generics::DECODE)
+//RS         }
+//RS         Type::Apply { name, args } => {
+//RS             apply_serde_ok(name, args, reg, crate::Generics::DECODE, &|t| {
+//RS                 is_decodable_ty(t, reg)
+//RS             })
+//RS         }
+//RS         Type::Union(members) => members.iter().all(|m| is_decodable_ty(m, reg)),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn invalid_union_decode_shapes(items: &[crate::AST::Item], ty: &Type) -> bool {
+//RS     if let Type::Union(members) = ty {
+//RS         let mut seen = Vec::new();
+//RS         for member in members {
+//RS             let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
+//RS                 return true;
+//RS             };
+//RS             for shape in shapes {
+//RS                 if seen.contains(&shape) {
+//RS                     return true;
+//RS                 }
+//RS                 seen.push(shape);
+//RS             }
+//RS         }
+//RS     }
+//RS     match ty {
+//RS         Type::List(inner)
+//RS         | Type::Shared(inner)
+//RS         | Type::Option(inner)
+//RS         | Type::Tagged { inner, .. }
+//RS         | Type::FixedList { elem: inner, .. } => invalid_union_decode_shapes(items, inner),
+//RS         Type::Map { key, value, .. }
+//RS         | Type::Result {
+//RS             ok: key,
+//RS             err: value,
+//RS         } => invalid_union_decode_shapes(items, key) || invalid_union_decode_shapes(items, value),
+//RS         Type::Apply { args, .. } | Type::Union(args) => args
+//RS             .iter()
+//RS             .any(|arg| invalid_union_decode_shapes(items, arg)),
+//RS         Type::Tuple(fields) => fields
+//RS             .iter()
+//RS             .any(|(_, field)| invalid_union_decode_shapes(items, field)),
+//RS         Type::Fn { params, ret, .. } => {
+//RS             params
+//RS                 .iter()
+//RS                 .any(|param| invalid_union_decode_shapes(items, param))
+//RS                 || ret
+//RS                     .as_deref()
+//RS                     .is_some_and(|ret| invalid_union_decode_shapes(items, ret))
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn invalid_generated_union_decode_shapes(
+//RS     items: &[crate::AST::Item],
+//RS     definition: &crate::AST::EnumDef,
+//RS ) -> bool {
+//RS     if !definition.name.starts_with("__JetUnion_") {
+//RS         return false;
+//RS     }
+//RS     let mut seen = Vec::new();
+//RS     for variant in &definition.variants {
+//RS         let crate::AST::VariantPayload::Single(member, _) = &variant.payload else {
+//RS             continue;
+//RS         };
+//RS         let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
+//RS             return true;
+//RS         };
+//RS         for shape in shapes {
+//RS             if seen.contains(&shape) {
+//RS                 return true;
+//RS             }
+//RS             seen.push(shape);
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS /// Generated serde bodies are implementation detail. When the declaration pass
+//RS /// already reports an invalid field, default, or union wire shape, checking
+//RS /// that synthetic body would only repeat the same problem at a generated-code
+//RS /// span.
+//RS pub(crate) fn invalid_serde_derive_impls(
+//RS     items: &[crate::AST::Item],
+//RS     reg: &TraitRegistry,
+//RS ) -> std::collections::HashSet<(String, String)> {
+//RS     use crate::AST::Item;
+//RS     let mut invalid = std::collections::HashSet::new();
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Struct(s) => {
+//RS                 let fields = s
+//RS                     .fields
+//RS                     .iter()
+//RS                     .filter(|f| {
+//RS                         !f.serde_markers.iter().any(|m| {
+//RS                             matches!(
+//RS                                 m.name.as_str(),
+//RS                                 Syntax::MARKER_SKIP | Syntax::MARKER_FLATTEN
+//RS                             )
+//RS                         })
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 if s.derives.iter().any(|(t, _)| t == crate::Generics::ENCODE)
+//RS                     && fields.iter().any(|f| !is_encodable_ty(&f.ty, reg))
+//RS                 {
+//RS                     invalid.insert((s.name.clone(), crate::Generics::ENCODE.to_string()));
+//RS                 }
+//RS                 if s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
+//RS                     && (fields.iter().any(|f| {
+//RS                         !is_decodable_ty(&f.ty, reg) || invalid_union_decode_shapes(items, &f.ty)
+//RS                     }) || s
+//RS                         .fields
+//RS                         .iter()
+//RS                         .any(|f| f.default.is_some() && f.default_ct.is_none()))
+//RS                 {
+//RS                     invalid.insert((s.name.clone(), crate::Generics::DECODE.to_string()));
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 let payloads = e
+//RS                     .variants
+//RS                     .iter()
+//RS                     .flat_map(|v| match &v.payload {
+//RS                         crate::AST::VariantPayload::Unit => Vec::new(),
+//RS                         crate::AST::VariantPayload::Single(t, _) => vec![t],
+//RS                         crate::AST::VariantPayload::Named(fields) => {
+//RS                             fields.iter().map(|f| &f.ty).collect()
+//RS                         }
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 if e.derives.iter().any(|(t, _)| t == crate::Generics::ENCODE)
+//RS                     && payloads.iter().any(|t| !is_encodable_ty(t, reg))
+//RS                 {
+//RS                     invalid.insert((e.name.clone(), crate::Generics::ENCODE.to_string()));
+//RS                 }
+//RS                 if e.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
+//RS                     && (payloads
+//RS                         .iter()
+//RS                         .any(|t| !is_decodable_ty(t, reg) || invalid_union_decode_shapes(items, t))
+//RS                         || invalid_generated_union_decode_shapes(items, e))
+//RS                 {
+//RS                     invalid.insert((e.name.clone(), crate::Generics::DECODE.to_string()));
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     invalid
+//RS }
+//RS 
+//RS /// True for a `#[Flatten]`-able field type: a named struct (not a primitive/list/map).
+//RS fn is_struct_named(ty: &Type) -> bool {
+//RS     matches!(ty, Type::Named(n) if !is_json_type_name(n))
+//RS }
+//RS 
+//RS /// D-SERDE: validate serde markers on every `#[Codable]`/`#[Encode]`/`#[Decode]` type
+//RS /// (E2407–E2412). Runs after the trait registry is built so field types resolve. This
+//RS /// keeps generated code rustc-clean (I2): a field with no wire form is caught here, not
+//RS /// by rustc on the emitted `impl`.
+//RS pub(crate) fn validate_serde_items(
+//RS     items: &[crate::AST::Item],
+//RS     reg: &TraitRegistry,
+//RS ) -> Vec<Diagnostic> {
+//RS     use crate::AST::Item;
+//RS     let mut out = Vec::new();
+//RS     for item in items {
+//RS         let (derives, container): (&[(String, Span)], &[crate::AST::Marker]) = match item {
+//RS             Item::Struct(s) => (&s.derives, &s.serde_markers),
+//RS             Item::Enum(e) => (&e.derives, &e.serde_markers),
+//RS             _ => continue,
+//RS         };
+//RS         let enc = derives.iter().any(|(t, _)| t == crate::Generics::ENCODE);
+//RS         let dec = derives.iter().any(|(t, _)| t == crate::Generics::DECODE);
+//RS         if !enc && !dec {
+//RS             continue;
+//RS         }
+//RS         // D-SERDE12: generic `#[Codable]` is first-class — no `type_params > 0`
+//RS         // gate. The per-field checks below run on generic types unchanged; a type
+//RS         // param `T` reads as a non-local `Type::Named`, so it's trusted here and
+//RS         // the codability obligation falls on the use site (E0905).
+//RS         // Container `#[RenameAll(style)]` casing menu (E2409).
+//RS         for m in container {
+//RS             if m.name == Syntax::MARKER_RENAME_ALL {
+//RS                 match m.expr_arg(0) {
+//RS                     Some(Expr::Ident(style, sp)) => {
+//RS                         if !matches!(
+//RS                             style.as_str(),
+//RS                             Syntax::RENAME_ALL_CAMEL
+//RS                                 | Syntax::RENAME_ALL_SNAKE
+//RS                                 | Syntax::RENAME_ALL_PASCAL
+//RS                                 | Syntax::RENAME_ALL_KEBAB
+//RS                                 | Syntax::RENAME_ALL_SCREAMING
+//RS                         ) {
+//RS                             out.push(e2409(style, *sp));
+//RS                         }
+//RS                     }
+//RS                     _ => out.push(e2409("?", m.span)),
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Item::Struct(s) = item {
+//RS             for f in &s.fields {
+//RS                 let skip = f
+//RS                     .serde_markers
+//RS                     .iter()
+//RS                     .any(|m| m.name == Syntax::MARKER_SKIP);
+//RS                 let flatten = f
+//RS                     .serde_markers
+//RS                     .iter()
+//RS                     .any(|m| m.name == Syntax::MARKER_FLATTEN);
+//RS                 if flatten && !is_struct_named(&f.ty) {
+//RS                     out.push(e2408(&f.name, f.name_span));
+//RS                     continue;
+//RS                 }
+//RS                 if skip || flatten {
+//RS                     continue;
+//RS                 }
+//RS                 // E2411: every encoded/decoded field must have a wire form.
+//RS                 if enc && !is_encodable_ty(&f.ty, reg) {
+//RS                     out.push(e2411(&f.ty, true, f.name_span));
+//RS                 }
+//RS                 if dec && !is_decodable_ty(&f.ty, reg) {
+//RS                     out.push(e2411(&f.ty, false, f.name_span));
+//RS                 }
+//RS                 if dec {
+//RS                     validate_union_decode_shapes(items, &f.ty, f.name_span, &mut out);
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Item::Enum(e) = item {
+//RS             for v in &e.variants {
+//RS                 let tys: Vec<&Type> = match &v.payload {
+//RS                     crate::AST::VariantPayload::Unit => vec![],
+//RS                     crate::AST::VariantPayload::Single(t, _) => vec![t],
+//RS                     crate::AST::VariantPayload::Named(fs) => fs.iter().map(|f| &f.ty).collect(),
+//RS                 };
+//RS                 for t in tys {
+//RS                     if enc && !is_encodable_ty(t, reg) {
+//RS                         out.push(e2411(&t, true, v.name_span));
+//RS                     }
+//RS                     if dec && !is_decodable_ty(t, reg) {
+//RS                         out.push(e2411(&t, false, v.name_span));
+//RS                     }
+//RS                     if dec {
+//RS                         validate_union_decode_shapes(items, t, v.name_span, &mut out);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub(crate) fn wrong_core_arity(name: &str, want: usize, got: usize, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0104",
+//RS         format!(
+//RS             "`{}` expects {} argument{}, got {}",
+//RS             name,
+//RS             want,
+//RS             if want == 1 { "" } else { "s" },
+//RS             got
+//RS         ),
+//RS         "every argument must match a standard library function parameter".to_string(),
+//RS         format!("check the call to `{}`", name),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-A11YGATE1=B: is `expr` a single, non-interpolated literal string part?
+//RS /// Shared by E2930 (empty-label check) and E2931 (duplicate-label check).
+//RS pub(super) fn is_empty_string_literal(expr: &Expr) -> bool {
+//RS     matches!(
+//RS         expr,
+//RS         Expr::Str(parts, _) if parts.iter().all(|p| matches!(p, crate::AST::StrPart::Lit(s) if s.is_empty()))
+//RS     )
+//RS }
+//RS 
+//RS /// D-A11YGATE1=B: the literal text of `expr` when it's a plain (non-interpolated)
+//RS /// string literal, else `None`.
+//RS pub(super) fn literal_string_value(expr: &Expr) -> Option<String> {
+//RS     let Expr::Str(parts, _) = expr else {
+//RS         return None;
+//RS     };
+//RS     if parts.len() != 1 {
+//RS         return None;
+//RS     }
+//RS     match &parts[0] {
+//RS         crate::AST::StrPart::Lit(s) => Some(s.clone()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-A11YGATE1=B (c134 Phase 6, E2930): an interactive-role `UiNode` with an
+//RS /// empty accessible label.
+//RS pub(crate) fn a11y_unlabeled_control(role: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::from_row("E2930", &[("role", role)], Some(span))
+//RS }
+//RS 
+//RS /// D-A11YGATE1=B (c134 Phase 6, E2931): two interactive nodes in the same
+//RS /// inline focus group share an accessible label.
+//RS pub(crate) fn a11y_duplicate_label(label: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::from_row("E2931", &[("label", label)], Some(span))
+//RS }
+//RS 
+//RS /// D-REACT1=B (E2910): a `reactive.derived`/`effect` argument that isn't a lambda.
+//RS pub(crate) fn reactive_not_lambda(kind: &str, got: &Type, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2910",
+//RS         format!("`reactive.{kind}` needs a lambda, not {}", got.show()),
+//RS         format!(
+//RS             "a reactive {} is built from a `() -> …` body so it can re-run when a signal changes",
+//RS             kind
+//RS         ),
+//RS         format!("write `reactive.{kind}(() -> {{ … }})`"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-REACT1=B (E2911): a `reactive.derived`/`effect` lambda that takes parameters.
+//RS pub(crate) fn reactive_lambda_arity(kind: &str, n: usize, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2911",
+//RS         format!(
+//RS             "`reactive.{kind}` needs a zero-parameter lambda, got {} parameter{}",
+//RS             n,
+//RS             if n == 1 { "" } else { "s" }
+//RS         ),
+//RS         "the body takes no arguments — it reads the signals it depends on via `.get()`".to_string(),
+//RS         format!("write `reactive.{kind}(() -> {{ … }})` with no parameters"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-REACT1=B (E2912): a `reactive.derived` whose lambda returns nothing.
+//RS pub(crate) fn reactive_derived_unit(span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2912",
+//RS         "`reactive.derived` must compute and return a value".to_string(),
+//RS         "a derived value is recomputed from its signals; its lambda has to return the value"
+//RS             .to_string(),
+//RS         "return a value from the body, or use `reactive.effect(() -> { … })` for a side effect"
+//RS             .to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-REACT1=B (E2913): a reactive value type the library can't hold (e.g. a function).
+//RS pub(crate) fn reactive_bad_value_type(kind: &str, ty: &Type, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2913",
+//RS         format!("a reactive {} can't hold a {}", kind, ty.show()),
+//RS         "signals and derived values hold ordinary data so they can be copied to dependents".to_string(),
+//RS         "use a data value (number, text, list, struct, …); wrap behaviour in `reactive.effect` instead".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-NUMOPS1 (E1005): a `wrapping`/`saturating`/`checked` opt-in wasn't given a
+//RS /// single integer `+`/`-`/`*`/`/` to wrap.
+//RS pub(crate) fn overflow_opt_in_error(kind: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1005",
+//RS         format!("`{kind}` must wrap a single integer `+`, `-`, `*`, or `/`"),
+//RS         "the overflow opt-ins apply to one arithmetic operation on whole numbers".to_string(),
+//RS         format!("write it around one operation, e.g. `{kind}(a + b)`"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-NUMOPS1: the type of a numeric type-constant — `MIN`/`MAX` on any numeric
+//RS /// type, `INFINITY`/`NAN`/`EPSILON` on floats. `None` if `member` isn't one.
+//RS pub(crate) fn numeric_const_type(nt: &Type, member: &str) -> Option<Type> {
+//RS     match member {
+//RS         "MIN" | "MAX" => Some(nt.clone()),
+//RS         "INFINITY" | "NEG_INFINITY" | "NAN" | "EPSILON" if nt.is_float() => Some(nt.clone()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-SG9/D-NUMOPS1 (E1003): an integer literal doesn't fit its fixed-width type.
+//RS /// `U8` keeps its byte-framed wording; other widths get the general range message.
+//RS pub(crate) fn int_range_error(signed: bool, bits: u8, span: Span) -> Diagnostic {
+//RS     let (lo, hi) = crate::AST::int_range(signed, bits);
+//RS     let spelling = crate::AST::int_spelling(signed, bits);
+//RS     // "an I8" (the letter I reads as a vowel) vs "a U8".
+//RS     let article = if signed { "an" } else { "a" };
+//RS     let why = if !signed && bits == 8 {
+//RS         "binary APIs use one byte per value".to_string()
+//RS     } else {
+//RS         format!(
+//RS             "{article} `{spelling}` is a fixed-width number — values outside its range can't fit"
+//RS         )
+//RS     };
+//RS     Diagnostic::error(
+//RS         "E1003",
+//RS         format!("{article} `{spelling}` holds {lo}..{hi}"),
+//RS         why,
+//RS         format!("use a number from {lo} through {hi}"),
+//RS         Some(span),
+//RS     )
+//RS }
+// END-PORT-PENDING 0393 crates/jet-sema/src/Sema/CheckerCoreLib/serde_diags.rs:1-858
+

@@ -1,0 +1,16 @@
+// Exact compact original derived Debug field/enum/Option laws, independent of
+// activation; the real evaluation caller still belongs to its optimizer owner.
+#Test("canonical pass acceleration Debug preserves native widths and options") {
+    measurement :: AccelerationMeasurement{items: 100001, sample_items: 17, sample_nanos: U64{18446744073709551615}, spawn_nanos: U64{1}, bandwidth_floor_nanos: U64{2}, floor_nanos: U64{2}, projected_serial_nanos: None, required_serial_nanos: Val(U64{9223372036854775808})}
+    decision :: AccelerationDecision{transform: MIRAccelerationTransform.PooledParallelChunks, status: AccelerationGateStatus.Pinned{pin: AccelerationPin.Local}, measurement: measurement}
+    out := [U8]{}
+    decision.write_canonical_pass_debug(&out)
+    expected :: "AccelerationDecision {{ transform: PooledParallelChunks, status: Pinned(Local), measurement: AccelerationMeasurement {{ items: 100001, sample_items: 17, sample_nanos: 18446744073709551615, spawn_nanos: 1, bandwidth_floor_nanos: 2, floor_nanos: 2, projected_serial_nanos: None, required_serial_nanos: Some(9223372036854775808) }} }}"
+    assert_eq(String.from_bytes(out) ?? panic("Debug is UTF-8"), expected)
+}
+#Test("canonical pass acceleration Debug retains all original statuses") {
+    statuses :: [AccelerationGateStatus]{.BelowStaticFloor, .Pinned(AccelerationPin.Scalar), .NotReleaseBuild, .CrossModeParityMissing, .ColumnCopyNotApplicable, .ProofIncomplete, .SampleNotTimed, .SpawnCostNotMeasured, .BandwidthFloorNotMeasured, .InvalidMeasurement, .ProjectedGainBelowThreshold, .Selected}
+    expected :: [String]{"BelowStaticFloor", "Pinned(Scalar)", "NotReleaseBuild", "CrossModeParityMissing", "ColumnCopyNotApplicable", "ProofIncomplete", "SampleNotTimed", "SpawnCostNotMeasured", "BandwidthFloorNotMeasured", "InvalidMeasurement", "ProjectedGainBelowThreshold", "Selected"}
+    loop (index, status) in statuses -> assert_eq(canonical_pass_acceleration_status(status), expected[index])
+    assert_eq(canonical_pass_acceleration_transform(MIRAccelerationTransform.TransientColumnCopy), "TransientColumnCopy")
+}

@@ -1,0 +1,1222 @@
+// PORT-PENDING 1120 tests-outcome-carrier-module-group: tests/outcome_carrier.rs:1-444
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-FAIL-CARRIER1=A / D-FAIL-MODEL1=A: one outcome carrier under `T?` and
+//RS //! `T !E`. An outcome has a payload, a verdict and reports. `T?` is the view
+//RS //! whose report is the clean absence; `T !E` is the view whose report matters.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS 
+//RS fn compile(name: &str, src: &str) -> String {
+//RS     let dir = std::env::temp_dir().join("jet_outcome_carrier");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join(format!("{name}.jet"));
+//RS     fs::write(&file, src).unwrap();
+//RS     let out = jet::compile_with_path(src, file.to_str().unwrap())
+//RS         .unwrap_or_else(|diags| panic!("{name} failed the front end: {diags:?}"));
+//RS     out.rust
+//RS }
+//RS 
+//RS /// Run a program on the interpreter tier — the tier the corpus gate proves
+//RS /// agrees with AOT — so a claim about what a read *answers* is tested, not just
+//RS /// what it emits.
+//RS fn run_jet(name: &str, src: &str) -> String {
+//RS     let dir = std::env::temp_dir().join("jet_outcome_carrier");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join(format!("{name}.jet"));
+//RS     fs::write(&file, src).unwrap();
+//RS 
+//RS     // The front end and the evaluator both recurse through the program, so run
+//RS     // them with the same room the other interpreter tests give them rather than
+//RS     // the default test stack.
+//RS     let (name, src) = (name.to_string(), src.to_string());
+//RS     std::thread::Builder::new()
+//RS         .stack_size(32 * 1024 * 1024)
+//RS         .spawn(move || {
+//RS             let path = file.to_str().unwrap();
+//RS             let mut bundle = jet::Loader::load_entry(path).expect("fixture should load");
+//RS             let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS             assert!(
+//RS                 !diags
+//RS                     .iter()
+//RS                     .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
+//RS                 "{name} failed the front end:\n{}",
+//RS                 jet::render_diagnostics(path, &src, &diags)
+//RS             );
+//RS             match common::run_interpreter_checked_bundle(
+//RS                 &bundle,
+//RS                 true,
+//RS                 jet::Interpreter::InterpreterInvocation::RunInterpret,
+//RS                 &common::development_policy(),
+//RS             ) {
+//RS                 jet::Interpreter::RunOutcome::Ran {
+//RS                     stdout,
+//RS                     stderr,
+//RS                     exit_code,
+//RS                 } => {
+//RS                     assert_eq!(exit_code, 0, "{name} failed on the interpreter: {stderr}");
+//RS                     assert!(stderr.is_empty(), "{name} emitted diagnostics: {stderr}");
+//RS                     stdout
+//RS                 }
+//RS                 jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+//RS                     panic!("{name} failed on the interpreter: {diagnostics:?}");
+//RS                 }
+//RS             }
+//RS         })
+//RS         .expect("spawn the interpreter thread")
+//RS         .join()
+//RS         .expect("the interpreter thread must finish")
+//RS }
+//RS 
+//RS fn user_body(rust: &str, function: &str) -> String {
+//RS     let head = format!("pub fn {function}(");
+//RS     let start = rust
+//RS         .find(&head)
+//RS         .unwrap_or_else(|| panic!("no `{function}` in generated Rust"));
+//RS     let rest = &rust[start..];
+//RS     let end = rest.find("\n}\n").expect("unterminated function") + 3;
+//RS     rest[..end].to_string()
+//RS }
+//RS 
+//RS /// Both ratified spellings lower onto the one carrier, and neither leaves a
+//RS /// second representation behind.
+//RS #[test]
+//RS fn both_views_lower_onto_one_carrier() {
+//RS     let rust = compile(
+//RS         "views",
+//RS         r#"
+//RS fn lookup(id: Int) -> Int? {
+//RS     if id == 1 { return Val(9) }
+//RS     return None
+//RS }
+//RS 
+//RS fn parse(raw: String) -> Int Err! {
+//RS     if raw == "" { return Err("empty") }
+//RS     return Ok(7)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(lookup(1) ?? 0)
+//RS     print(parse("x") ?? 0)
+//RS }
+//RS "#,
+//RS     );
+//RS     let lookup = user_body(&rust, "__jet_lookup");
+//RS     let parse = user_body(&rust, "__jet_parse");
+//RS 
+//RS     assert!(
+//RS         lookup.contains("JetOutcome<i64, JetAbsent>"),
+//RS         "`T?` must lower onto the carrier:\n{lookup}"
+//RS     );
+//RS     assert!(
+//RS         parse.contains("JetOutcome<i64, JetErr>"),
+//RS         "`T !E` must lower onto the same carrier:\n{parse}"
+//RS     );
+//RS     assert!(
+//RS         !lookup.contains("Option<"),
+//RS         "no second representation may survive for `T?`:\n{lookup}"
+//RS     );
+//RS     // One carrier means one payload spelling and one report spelling, so the
+//RS     // optional view builds `Ok`/`Err` exactly like the fallible view.
+//RS     assert!(
+//RS         lookup.contains("Ok(9i64)") && lookup.contains("Err(JetAbsent)"),
+//RS         "the optional view builds the carrier:\n{lookup}"
+//RS     );
+//RS 
+//RS     let run = user_body(&rust, "__jet_run");
+//RS     assert!(
+//RS         !run.contains("Some(") && !run.contains("None"),
+//RS         "`??` reads both views the same way:\n{run}"
+//RS     );
+//RS }
+//RS 
+//RS /// `.or_err("why")` moves an outcome from the optional view to the fallible
+//RS /// one. The payload rides through untouched, so nothing converts.
+//RS #[test]
+//RS fn or_err_lifts_a_clean_absence_into_a_failure() {
+//RS     let rust = compile(
+//RS         "or_err",
+//RS         r#"
+//RS fn birth_year(book: [String:String], name: String) -> String Err! {
+//RS     return book.get(name).or_err("nobody in the book is called that")
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(birth_year(["ada": "1815"], "ada") ?? "unknown")
+//RS }
+//RS "#,
+//RS     );
+//RS     let body = user_body(&rust, "__jet_birth_year");
+//RS     assert!(
+//RS         body.contains(".or_err(\"nobody in the book is called that\""),
+//RS         "`.or_err` must reach the prelude's one meaning:\n{body}"
+//RS     );
+//RS     assert!(
+//RS         !body.contains("ok_or") && !body.contains("Some(") && !body.contains("None"),
+//RS         "the two views are one carrier, so nothing converts between them:\n{body}"
+//RS     );
+//RS }
+//RS 
+//RS /// The carrier's middle states: a failure that kept part of its work, and a
+//RS /// failure that had something to say. Both live on the outcome value, so two
+//RS /// outcomes alive at once never share a fact and reading one twice answers the
+//RS /// same thing both times.
+//RS #[test]
+//RS fn the_middle_states_read_off_the_same_carrier() {
+//RS     let rust = compile(
+//RS         "middle_states",
+//RS         r#"
+//RS struct ImportErr {
+//RS     broken: Int
+//RS     partial: [String]
+//RS     notes: [String]
+//RS }
+//RS 
+//RS fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
+//RS     good :: rows.filter((row) -> row != "")
+//RS     broken :: rows.len() - good.len()
+//RS     if broken > 0 {
+//RS         return Err(ImportErr.{ broken: broken, partial: good, notes: [~label] })
+//RS     }
+//RS     return Ok(good)
+//RS }
+//RS 
+//RS fn run() {
+//RS     people :: import_rows("people", ["ada", "", "alan"])
+//RS     ports :: import_rows("ports", ["80", ""])
+//RS     print(people.notes().join(""))
+//RS     print(ports.notes().join(""))
+//RS     print(people.notes().join(""))
+//RS     print((&people.partial() ?? []).len())
+//RS }
+//RS "#,
+//RS     );
+//RS     let run = user_body(&rust, "__jet_run");
+//RS     let report = jet::AST::mangle_generated("report");
+//RS     let partial_field = jet::AST::mangle("partial");
+//RS     let notes_field = jet::AST::mangle("notes");
+//RS     let partial_read = format!("|{report}| {report}.{partial_field}.clone()");
+//RS     let notes_read = format!("|{report}| {report}.{notes_field}.clone()");
+//RS     assert!(
+//RS         run.contains("jet_partial(&(") && run.contains(&partial_read),
+//RS         "`.partial` must read the typed carrier field through `jet_partial`:\n{run}"
+//RS     );
+//RS     assert!(
+//RS         run.contains("jet_notes(&(") && run.contains(&notes_read),
+//RS         "`.notes` must read the typed carrier field through `jet_notes`:\n{run}"
+//RS     );
+//RS     // The middle states are the same carrier, so no third type appears.
+//RS     assert!(
+//RS         !run.contains("Partial<") && !run.contains("Noted<"),
+//RS         "the middle states need no third type:\n{run}"
+//RS     );
+//RS 
+//RS     // And both facts really are read off the value: two outcomes alive at once
+//RS     // answer differently, and the second read of one answers what the first
+//RS     // did. Nothing here can pass if a fact is kept beside the value.
+//RS     let out = run_jet(
+//RS         "middle_states_run",
+//RS         r#"
+//RS struct ImportErr {
+//RS     broken: Int
+//RS     partial: [String]
+//RS     notes: [String]
+//RS }
+//RS 
+//RS fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
+//RS     good :: rows.filter((row) -> row != "")
+//RS     broken :: rows.len() - good.len()
+//RS     if broken > 0 {
+//RS         return Err(ImportErr.{ broken: broken, partial: good, notes: [~label] })
+//RS     }
+//RS     return Ok(good)
+//RS }
+//RS 
+//RS fn run() {
+//RS     people :: import_rows("people", ["ada", "", "alan"])
+//RS     ports :: import_rows("ports", ["80", ""])
+//RS     clean :: import_rows("clean", ["ada"])
+//RS     print(people.notes().join(""))
+//RS     print(ports.notes().join(""))
+//RS     print(people.notes().join(""))
+//RS     print((&people.partial() ?? []).join(","))
+//RS     print((&ports.partial() ?? []).join(","))
+//RS     print(clean.notes().len())
+//RS     print((&clean.partial() ?? ["kept nothing"]).join(","))
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_eq!(
+//RS         out, "people\nports\npeople\nada,alan\n80\n0\nkept nothing\n",
+//RS         "two outcomes must not share a fact, and a second read must answer the first"
+//RS     );
+//RS }
+//RS 
+//RS /// The web tier names the same carrier. The wasm module includes the very same
+//RS /// `Outcome.rs` file the native prelude puts first — not a copy, and not a
+//RS /// second representation — so an outcome means one thing on every tier.
+//RS #[test]
+//RS fn the_web_tier_reads_the_same_carrier() {
+//RS     let src = r#"
+//RS #WasmExport
+//RS fn double(n: Int) -> Int -> n * 2
+//RS 
+//RS #Target(JS)
+//RS fn run() {
+//RS     print(double(4))
+//RS }
+//RS "#;
+//RS     let out = jet::compile_web_with_path(src, "main.jet")
+//RS         .unwrap_or_else(|diags| panic!("web fixture rejected: {diags:?}"));
+//RS     let web = out.web.expect("web target must produce artifacts");
+//RS 
+//RS     assert!(
+//RS         web.wasm_rust
+//RS             .contains("pub type JetOutcome<T, E> = Result<T, E>;")
+//RS             && web.wasm_rust.contains("pub struct JetAbsent;"),
+//RS         "the wasm module must include the one carrier file:\n{}",
+//RS         web.wasm_rust
+//RS     );
+//RS 
+//RS     // And the web emitter spells outcomes with that carrier, so a `T?` that
+//RS     // reaches the wasm module can only be the same thing every other tier
+//RS     // carries.
+//RS     let emitter = std::fs::read_to_string(concat!(
+//RS         env!("CARGO_MANIFEST_DIR"),
+//RS         "/crates/jet-codegen/src/Codegen/Web.rs"
+//RS     ))
+//RS     .expect("read the web emitter");
+//RS     assert!(
+//RS         emitter.contains("JetOutcome<{}, JetAbsent>") && emitter.contains("Err(JetAbsent)"),
+//RS         "the web emitter must build the one carrier"
+//RS     );
+//RS     assert!(
+//RS         !emitter.contains("format!(\"Option<{}>\""),
+//RS         "no second representation may survive on the web tier"
+//RS     );
+//RS }
+//RS 
+//RS /// D-FAIL-ERROR1=A / I9: a web-side default error is the Prelude value, and
+//RS /// field reads marshal through the same helpers as native code.
+//RS #[test]
+//RS fn the_web_tier_marshals_default_err_values() {
+//RS     let src = r#"
+//RS #Target(Wasm)
+//RS fn run() {
+//RS     error :: Err("bad", code: "E_BAD", cause: Err("root"))
+//RS     print(error.message)
+//RS }
+//RS "#;
+//RS     let out = jet::compile_web_with_path(src, "default_err.jet")
+//RS         .unwrap_or_else(|diags| panic!("web Err fixture rejected: {diags:?}"));
+//RS     let web = out.web.expect("web target must produce artifacts");
+//RS 
+//RS     assert!(web.wasm_rust.contains("pub struct JetErr {"));
+//RS     assert!(web.wasm_rust.contains("jet_err("));
+//RS     assert!(web.wasm_rust.contains("jet_err_message"));
+//RS 
+//RS     let js_src = r#"
+//RS #Target(JS)
+//RS fn run() {
+//RS     error :: Err("bad", code: "E_BAD", cause: Err("root"))
+//RS     print(error.message)
+//RS }
+//RS "#;
+//RS     let js_out = jet::compile_web_with_path(js_src, "default_err.js.jet")
+//RS         .unwrap_or_else(|diags| panic!("web JS Err fixture rejected: {diags:?}"));
+//RS     let js = js_out.web.expect("JS web target must produce artifacts");
+//RS     assert!(
+//RS         js.js_app.contains("message: \"bad\"")
+//RS             && js.js_app.contains("code: \"E_BAD\"")
+//RS             && js.js_app.contains("cause:"),
+//RS         "the JS tier must carry the same Err fields:\n{}",
+//RS         js.js_app
+//RS     );
+//RS }
+//RS 
+//RS /// D-FAIL-ERROR1=A / I9: the standalone interpreter reports the same Prelude
+//RS /// value as the compiled edge when `fn run` returns an unhandled `Err`.
+//RS #[test]
+//RS fn the_interpreter_edge_renders_default_err_through_the_prelude() {
+//RS     let src = r#"
+//RS fn run() Err! {
+//RS     return Err("unhandled", code: "E_RUN", cause: Err("root"))
+//RS }
+//RS "#;
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_default_err_interpreter_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("main.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap())
+//RS         .expect("interpreter Err fixture should load");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+//RS         "interpreter Err fixture should type-check: {diagnostics:?}"
+//RS     );
+//RS 
+//RS     match common::run_interpreter_checked_bundle(
+//RS         &bundle,
+//RS         false,
+//RS         jet::Interpreter::InterpreterInvocation::RunInterpret,
+//RS         &common::development_policy(),
+//RS     ) {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(stdout, "");
+//RS             assert_eq!(exit_code, 1);
+//RS             assert_eq!(stderr, "Error [E_RUN]: unhandled\n  cause: root\n");
+//RS         }
+//RS         other => panic!("interpreter Err fixture did not run: {other:?}"),
+//RS     }
+//RS }
+//RS 
+//RS /// The verdict erases from the happy path: reading a `T?` costs no allocation
+//RS /// and no branch beyond the one the payload already needs.
+//RS #[test]
+//RS fn an_unread_verdict_costs_nothing() {
+//RS     // The carrier itself, not a copy of it: these are the very types the
+//RS     // prelude embeds, so adding a field to either one fails this test.
+//RS     use jet::Outcome::{JetAbsent, JetOutcome};
+//RS 
+//RS     assert_eq!(
+//RS         std::mem::size_of::<JetOutcome<i64, JetAbsent>>(),
+//RS         std::mem::size_of::<Option<i64>>(),
+//RS         "a clean report is zero-sized, so `T?` carries no verdict word"
+//RS     );
+//RS     assert_eq!(
+//RS         std::mem::size_of::<JetOutcome<String, JetAbsent>>(),
+//RS         std::mem::size_of::<String>(),
+//RS         "the payload's niche still holds the absence"
+//RS     );
+//RS 
+//RS     let rust = compile(
+//RS         "erasure",
+//RS         r#"
+//RS fn first_even(n: Int) -> Int? {
+//RS     if n % 2 == 0 {
+//RS         return Val(n)
+//RS     }
+//RS     return None
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(first_even(4) ?? -1)
+//RS }
+//RS "#,
+//RS     );
+//RS     let body = user_body(&rust, "__jet_first_even");
+//RS     let run = user_body(&rust, "__jet_run");
+//RS     for shape in ["Vec::", "vec!", "to_vec()", "String::new()"] {
+//RS         assert!(
+//RS             !body.contains(shape),
+//RS             "an unread verdict must allocate nothing, found `{shape}`:\n{body}"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         run.matches("match ").count(),
+//RS         1,
+//RS         "reading the payload is one branch, not one per fact:\n{run}"
+//RS     );
+//RS }
+//RS /// The shared runtime policy keeps omission distinct from an explicit empty
+//RS /// message and formats equality as expected-versus-got without tier-local text.
+//RS #[test]
+//RS fn shared_runtime_require_policy_preserves_empty_and_equality() {
+//RS     use jet::Outcome::{jet_require_eq_message, jet_require_message};
+//RS 
+//RS     assert_eq!(jet_require_message(None), "condition failed");
+//RS     assert_eq!(jet_require_message(Some("")), "");
+//RS 
+//RS     let left = "actual";
+//RS     let right = "expected";
+//RS     assert_eq!(
+//RS         jet_require_eq_message(&left, &right).to_string(),
+//RS         "expected: expected, got: actual"
+//RS     );
+//RS }
+// END-PORT-PENDING 1120 tests/outcome_carrier.rs:1-444
+
+// PORT-PENDING 1120 tests-outcome-carrier-module-group: tests/output_callable.rs:1-770
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use jet::Interpreter::RunOutcome;
+//RS use jet::AST::{Expr, Item, OutputKind, Type};
+//RS use jet_jit::CraneliftBackend;
+//RS 
+//RS mod common;
+//RS 
+//RS fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+//RS     emit_native_artifact(
+//RS         bundle,
+//RS         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+//RS         jet_foundation::MIR::MirArtifactBuildMode::Dev,
+//RS     )
+//RS }
+//RS 
+//RS fn emit_test_harness(bundle: &jet::AST::ProgramBundle) -> String {
+//RS     emit_native_artifact(
+//RS         bundle,
+//RS         jet_foundation::MIR::MirArtifactKind::TestExecutable,
+//RS         jet_foundation::MIR::MirArtifactBuildMode::Test,
+//RS     )
+//RS }
+//RS 
+//RS fn emit_native_artifact(
+//RS     bundle: &jet::AST::ProgramBundle,
+//RS     kind: jet_foundation::MIR::MirArtifactKind,
+//RS     mode: jet_foundation::MIR::MirArtifactBuildMode,
+//RS ) -> String {
+//RS     let request = jet_foundation::MIR::MirArtifactRequest::new(
+//RS         jet_foundation::MIR::MirArtifactTarget::RustAot,
+//RS         kind,
+//RS         mode,
+//RS     );
+//RS     let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+//RS         .expect("checked native artifact lowers through MIR");
+//RS     mir.validate()
+//RS         .expect("canonical MIR validates in output-callable test");
+//RS     let mir = jet_foundation::MIR::optimize_mir_program(
+//RS         mir,
+//RS         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
+//RS     )
+//RS     .expect("canonical MIR optimizes in output-callable test");
+//RS     jet::Codegen::MIRRust::emit_mir_program(
+//RS         &mir,
+//RS         &jet::Codegen::MIRRust::MirRustConfig {
+//RS             target: jet_foundation::Layout::TargetLayout::host(),
+//RS             target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
+//RS             root_prefix: String::new(),
+//RS             execution: jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn checked_bundle(
+//RS     source: &str,
+//RS     tag: &str,
+//RS     mode: jet::Sema::CompileMode,
+//RS ) -> jet::AST::ProgramBundle {
+//RS     let dir = common::unique_tmp(tag);
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("main.jet");
+//RS     std::fs::write(&file, source).unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, mode);
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+//RS     bundle
+//RS }
+//RS 
+//RS #[test]
+//RS fn parser_retains_typed_output_function_reference() {
+//RS     let source = "APP :: Output.Executable{ name: \"demo\", entry: run }\nfn run() {}\n";
+//RS     let (tokens, lex) = jet::Lexer::lex(source);
+//RS     assert!(lex.is_empty(), "{lex:#?}");
+//RS     let program = jet::Parser::parse(&tokens).expect("Output syntax parses");
+//RS     let output = program
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| match item {
+//RS             Item::Const(value) if value.name == "app" => Some(value),
+//RS             _ => None,
+//RS         })
+//RS         .expect("typed Output item");
+//RS     assert!(matches!(output.ty, Some(Type::Named(ref name)) if name == "Output"));
+//RS     assert!(matches!(
+//RS         output.value,
+//RS         Expr::EnumLit { ref variant, .. }
+//RS             if OutputKind::from_name(variant) == Some(OutputKind::Executable)
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn sema_resolves_sole_executable_entry_before_codegen() {
+//RS     let dir = common::unique_tmp("jet_output_callable");
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("run.jet");
+//RS     std::fs::write(
+//RS         &file,
+//RS         "APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+//RS     let output = bundle.modules[bundle.entry]
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| match item {
+//RS             Item::Const(value) => value.resolved_output.as_ref(),
+//RS             _ => None,
+//RS         })
+//RS         .expect("sema resolved Output entry");
+//RS     assert_eq!(output.kind, OutputKind::Executable);
+//RS     assert_eq!(output.source_name, "start");
+//RS     assert_eq!(output.module, bundle.entry);
+//RS }
+//RS 
+//RS #[test]
+//RS fn inspect_output_reports_selected_callable_facts() {
+//RS     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/tooling/output_callable.jet");
+//RS     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["inspect", "output", path.to_str().unwrap()])
+//RS         .output()
+//RS         .expect("jet inspect output");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     for expected in [
+//RS         "selected: Executable \"checked-output\"",
+//RS         "entry: launch",
+//RS         "source path: ",
+//RS         "callable identity: output_callable::launch",
+//RS         "failure contract: !Err",
+//RS         "implicit default !Err",
+//RS         "effects: IO",
+//RS         "selection reason: sole compatible Output",
+//RS     ] {
+//RS         assert!(stdout.contains(expected), "missing {expected}: {stdout}");
+//RS     }
+//RS 
+//RS     let json = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["inspect", "output", path.to_str().unwrap(), "--json"])
+//RS         .output()
+//RS         .expect("jet inspect output JSON");
+//RS     assert!(
+//RS         json.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&json.stderr)
+//RS     );
+//RS     let json = String::from_utf8_lossy(&json.stdout);
+//RS     assert!(json.contains("\"failure_contract\":\"!Err\""), "{json}");
+//RS     assert!(
+//RS         json.contains("\"failure_source\":\"implicit default !Err\""),
+//RS         "{json}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn aot_dev_and_jit_consume_the_resolved_entry() {
+//RS     let dir = common::unique_tmp("jet_output_callable_parity");
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("run.jet");
+//RS     std::fs::write(
+//RS         &file,
+//RS         "APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+//RS 
+//RS     let rust = emit_native_aot(&bundle);
+//RS     assert!(rust.contains("match __jet_start()"), "{rust}");
+//RS     assert!(matches!(
+//RS         common::run_interpreter_checked_bundle(
+//RS             &bundle,
+//RS             false,
+//RS             jet::Interpreter::InterpreterInvocation::RunInterpret,
+//RS             &common::development_policy(),
+//RS         ),
+//RS         RunOutcome::Ran { exit_code: 0, .. }
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_runs_hot_swaps_and_reports_fallible_selected_entry_without_fallback() {
+//RS     // `run` then `hot_swap` is one resident session, and a session is scoped
+//RS     // to its thread (D-HOTSWAP1 / D-PERSIST1). Install the sized compiler
+//RS     // stack once around the whole session; `CraneliftBackend::run`'s own
+//RS     // boundary is re-entrant and runs inline inside it.
+//RS     jet_jit::on_compiler_stack(resident_jit_hot_swap_session);
+//RS }
+//RS 
+//RS fn resident_jit_hot_swap_session() {
+//RS     if !jet_jit::cranelift_host_supported() {
+//RS         return;
+//RS     }
+//RS     let v1 = checked_bundle(
+//RS         "APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() { print(\"v1\") }\n",
+//RS         "jet_output_resident_v1",
+//RS         jet::Sema::CompileMode::Run,
+//RS     );
+//RS     let v2 = checked_bundle(
+//RS         "APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() { return Err(\"selected boom\") }\n",
+//RS         "jet_output_resident_v2",
+//RS         jet::Sema::CompileMode::Run,
+//RS     );
+//RS     assert!(common::cranelift_resident_safe(&v1));
+//RS     assert!(common::cranelift_resident_safe(&v2));
+//RS 
+//RS     let policy = common::development_policy();
+//RS     let mut backend = CraneliftBackend::new();
+//RS     let first = common::run_cranelift_bundle(&mut backend, &v1, false, &policy);
+//RS     assert!(matches!(first, RunOutcome::Ran { ref stdout, exit_code: 0, .. } if stdout == "v1\n"));
+//RS     let swapped = common::hot_swap_cranelift_bundle(
+//RS         &mut backend,
+//RS         "start",
+//RS         &v2,
+//RS         false,
+//RS         &policy,
+//RS     )
+//RS     .expect("resident hot swap");
+//RS     assert!(
+//RS         matches!(&swapped, RunOutcome::Ran { stderr, exit_code: 1, .. } if stderr == "Error: selected boom\n"),
+//RS         "{swapped:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn qualified_entry_keeps_one_definition_and_effect_identity() {
+//RS     let dir = common::unique_tmp("jet_output_callable_qualified");
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     std::fs::write(dir.join("helper.jet"), "pub fn start() { print(\"ok\") }\n").unwrap();
+//RS     let file = dir.join("main.jet");
+//RS     std::fs::write(
+//RS         &file,
+//RS         "use \"helper\"\nAPP :: Output.Executable{ name: \"demo\", entry: helper.start }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+//RS     let (diagnostics, facts) =
+//RS         jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+//RS     let output = bundle.modules[bundle.entry]
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| match item {
+//RS             Item::Const(value) => value.resolved_output.as_ref(),
+//RS             _ => None,
+//RS         })
+//RS         .unwrap();
+//RS     assert_eq!(bundle.modules[output.module].alias, "helper");
+//RS     assert_eq!(output.source_name, "start");
+//RS     assert!(
+//RS         !output.effects.is_empty(),
+//RS         "effect row should be copied from sema"
+//RS     );
+//RS     assert_eq!(output.authority.as_str(), "safe-jet");
+//RS     assert!(facts.name_ledger.references().values().any(|anchor| {
+//RS         anchor.module_path == output.source_path && anchor.def_span == output.definition
+//RS     }));
+//RS     let rust = emit_native_aot(&bundle);
+//RS     assert!(rust.contains("__jet_helper::__jet_start()"), "{rust}");
+//RS     assert!(matches!(
+//RS         common::run_interpreter_checked_bundle(
+//RS             &bundle,
+//RS             false,
+//RS             jet::Interpreter::InterpreterInvocation::RunInterpret,
+//RS             &common::development_policy(),
+//RS         ),
+//RS         RunOutcome::Ran { exit_code: 0, .. }
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn qualified_entry_follows_nested_quoted_import_graph() {
+//RS     let dir = common::unique_tmp("jet_output_callable_nested");
+//RS     std::fs::create_dir_all(dir.join("src")).unwrap();
+//RS     std::fs::write(
+//RS         dir.join("src/command.jet"),
+//RS         "pub fn run() { print(\"nested\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(
+//RS         dir.join("src/cli.jet"),
+//RS         "pub use \"command\" as command\npub fn run() { print(\"reexport\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(
+//RS         dir.join("src/app.jet"),
+//RS         "pub use \"cli\" as cli;\npub use cli.[run as cli_run];\n",
+//RS     )
+//RS     .unwrap();
+//RS     let file = dir.join("main.jet");
+//RS     std::fs::write(
+//RS         &file,
+//RS         "use \"src/app\" as app\nNESTED :: Output.Executable{ name: \"nested\", entry: app.cli.command.run }\nREEXPORTED :: Output.Service{ name: \"reexported\", entry: app.cli_run }\ndefaults: { run: NESTED };\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+//RS     let outputs = bundle.modules[bundle.entry]
+//RS         .items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             Item::Const(value) => value.resolved_output.as_ref(),
+//RS             _ => None,
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let nested = outputs
+//RS         .iter()
+//RS         .find(|output| output.address == "nested")
+//RS         .copied()
+//RS         .expect("nested Output entry resolves");
+//RS     let reexported = outputs
+//RS         .iter()
+//RS         .find(|output| output.address == "reexported")
+//RS         .copied()
+//RS         .expect("re-exported Output entry resolves");
+//RS     assert_eq!(nested.source_name, "run");
+//RS     assert_eq!(nested.semantic_name, "run");
+//RS     assert!(
+//RS         nested.source_path.ends_with("src/command.jet"),
+//RS         "{}",
+//RS         nested.source_path
+//RS     );
+//RS     assert_eq!(reexported.source_name, "run");
+//RS     assert!(reexported.source_path.ends_with("src/cli.jet"));
+//RS 
+//RS     let rust = emit_native_aot(&bundle);
+//RS     assert!(rust.contains("__jet_command::__jet_run()"), "{rust}");
+//RS     assert!(matches!(
+//RS         common::run_interpreter_checked_bundle(
+//RS             &bundle,
+//RS             false,
+//RS             jet::Interpreter::InterpreterInvocation::RunInterpret,
+//RS             &common::development_policy(),
+//RS         ),
+//RS         RunOutcome::Ran {
+//RS             ref stdout,
+//RS             exit_code: 0,
+//RS             ..
+//RS         } if stdout == "nested\n"
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_output_root_alias_is_live_for_direct_check() {
+//RS     let dir = common::unique_tmp("jet_manifest_output_check");
+//RS     std::fs::create_dir_all(dir.join("src/cli")).unwrap();
+//RS     std::fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"manifest_output_check\"\nversion: \"0.1.0\"\noutputs: { dogfood: .Executable{ entry: app.run } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(
+//RS         dir.join("run.jet"),
+//RS         "use \"src/cli/main\" as app\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(dir.join("src/cli/main.jet"), "pub fn run() {}\n").unwrap();
+//RS 
+//RS     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["check", "run.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("jet check should execute");
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(output.status.success(), "{stderr}");
+//RS     assert!(!stderr.contains("L0103"), "{stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn nested_output_links_report_e1321_before_codegen() {
+//RS     fn codes(tag: &str, app: &str, cli: &str, entry: &str) -> Vec<String> {
+//RS         let dir = common::unique_tmp(tag);
+//RS         std::fs::create_dir_all(&dir).unwrap();
+//RS         std::fs::write(
+//RS             dir.join("main.jet"),
+//RS             format!(
+//RS                 "use \"app\" as app\nOUT :: Output.Executable{{ name: \"out\", entry: {entry} }}\n"
+//RS             ),
+//RS         )
+//RS         .unwrap();
+//RS         std::fs::write(dir.join("app.jet"), app).unwrap();
+//RS         std::fs::write(dir.join("cli.jet"), cli).unwrap();
+//RS 
+//RS         let mut bundle = jet::Loader::load_entry(dir.join("main.jet").to_str().unwrap()).unwrap();
+//RS         jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check)
+//RS             .into_iter()
+//RS             .map(|diagnostic| diagnostic.code)
+//RS             .collect()
+//RS     }
+//RS 
+//RS     let missing = codes(
+//RS         "jet_output_nested_missing",
+//RS         "pub use \"cli\" as cli;\n",
+//RS         "pub fn run() {}\n",
+//RS         "app.cli.missing",
+//RS     );
+//RS     assert!(
+//RS         missing.iter().any(|code| code == "E1321"),
+//RS         "{missing:?}"
+//RS     );
+//RS 
+//RS     let private = codes(
+//RS         "jet_output_nested_private",
+//RS         "use \"cli\" as cli;\n",
+//RS         "pub fn run() {}\n",
+//RS         "app.cli.run",
+//RS     );
+//RS     assert!(
+//RS         private.iter().any(|code| code == "E1321"),
+//RS         "{private:?}"
+//RS     );
+//RS 
+//RS     let escaped = codes(
+//RS         "jet_output_nested_escape",
+//RS         "pub use \"cli\" as cli;\n",
+//RS         "fn run() {}\n",
+//RS         "app.cli.run",
+//RS     );
+//RS     assert!(
+//RS         escaped.iter().any(|code| code == "E1321"),
+//RS         "{escaped:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn runnable_contracts_and_selection_fail_in_sema() {
+//RS     fn codes(source: &str, mode: jet::Sema::CompileMode) -> Vec<String> {
+//RS         let dir = common::unique_tmp("jet_output_callable_bad");
+//RS         std::fs::create_dir_all(&dir).unwrap();
+//RS         let file = dir.join("main.jet");
+//RS         std::fs::write(&file, source).unwrap();
+//RS         let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+//RS         jet::Sema::check_bundle(&mut bundle, mode)
+//RS             .into_iter()
+//RS             .map(|diagnostic| diagnostic.code)
+//RS             .collect()
+//RS     }
+//RS 
+//RS     assert!(codes(
+//RS         "APP :: Output.Executable{ name: \"demo\", entry: \"start\" }\nfn start() {}\n",
+//RS         jet::Sema::CompileMode::Check,
+//RS     )
+//RS     .contains(&"E1321".to_string()));
+//RS     assert!(codes(
+//RS         "API :: Output.Service{ name: \"api\", entry: serve }\nfn serve(port: Int) {}\n",
+//RS         jet::Sema::CompileMode::Check,
+//RS     )
+//RS     .contains(&"E1321".to_string()));
+//RS     assert!(codes(
+//RS         "RELEASE :: Output.Check{ name: \"release\", entry: verify }\nfn verify() -> Int { return 1 }\n",
+//RS         jet::Sema::CompileMode::Check,
+//RS     )
+//RS     .contains(&"E1321".to_string()));
+//RS     assert!(codes(
+//RS         "APP :: Output.Executable{ name: \"demo\", entry: start }\n#Unsafe(\"raw boundary\") fn start() {}\n",
+//RS         jet::Sema::CompileMode::Check,
+//RS     )
+//RS     .contains(&"E1321".to_string()));
+//RS     let ambiguity = codes(
+//RS         "ONE :: Output.Executable{ name: \"one\", entry: first }\nTWO :: Output.Executable{ name: \"two\", entry: second }\nfn first() {}\nfn second() {}\n",
+//RS         jet::Sema::CompileMode::Run,
+//RS     );
+//RS     assert_eq!(ambiguity.iter().filter(|code| *code == "E1321").count(), 1);
+//RS     assert!(ambiguity.contains(&"E0101".to_string()), "{ambiguity:?}");
+//RS 
+//RS     for source in [
+//RS         "LIB :: Output.Library{ name: \"lib\" }\n",
+//RS         "API :: Output.Service{ name: \"api\", entry: serve }\nfn serve() {}\n",
+//RS     ] {
+//RS         let no_entry = codes(source, jet::Sema::CompileMode::Run);
+//RS         assert!(no_entry.contains(&"E0101".to_string()), "{no_entry:?}");
+//RS     }
+//RS 
+//RS     let dir = common::unique_tmp("jet_output_explicit_check_bad");
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("main.jet");
+//RS     std::fs::write(
+//RS         &file,
+//RS         "RELEASE :: Output.Check{ name: \"release\", entry: verify }\nfn verify() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+//RS     let explicit_check =
+//RS         jet::Sema::check_bundle_for_output(&mut bundle, jet::Sema::CompileMode::Run, "release");
+//RS     assert!(
+//RS         explicit_check
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E1321"),
+//RS         "{explicit_check:?}"
+//RS     );
+//RS 
+//RS     for source in [
+//RS         "APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing }\nfn start() {}\n",
+//RS         "APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing }\nfn start() {}\nfn run() {}\n",
+//RS         "APP :: Output.Executable{ name: \"app\", entry: start }\nAPI :: Output.Service{ name: \"api\", entry: serve }\ndefaults: { run: API }\nfn start() {}\nfn serve() {}\n",
+//RS     ] {
+//RS         let stale_default = codes(source, jet::Sema::CompileMode::Run);
+//RS         assert!(
+//RS             stale_default.contains(&"E1321".to_string()),
+//RS             "{stale_default:?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn invalid_output_selection_stops_in_jet_before_codegen() {
+//RS     fn reject(source: &str, args: &[&str], code: &str) {
+//RS         let dir = common::unique_tmp("jet_output_selection_cli_bad");
+//RS         std::fs::create_dir_all(&dir).unwrap();
+//RS         let file = dir.join("main.jet");
+//RS         std::fs::write(&file, source).unwrap();
+//RS         let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS         command.arg("run");
+//RS         command.args(args);
+//RS         let output = command.arg(&file).output().unwrap();
+//RS         let stderr = String::from_utf8_lossy(&output.stderr);
+//RS         assert!(!output.status.success(), "{stderr}");
+//RS         assert!(stderr.contains(&format!("Error [{code}]")), "{stderr}");
+//RS         assert!(!stderr.contains("internal compiler error"), "{stderr}");
+//RS         assert!(!stderr.contains("rustc rejected"), "{stderr}");
+//RS     }
+//RS 
+//RS     reject("LIB :: Output.Library{ name: \"lib\" }\n", &[], "E0101");
+//RS     reject(
+//RS         "API :: Output.Service{ name: \"api\", entry: serve }\nfn serve() {}\n",
+//RS         &[],
+//RS         "E0101",
+//RS     );
+//RS     reject(
+//RS         "RELEASE :: Output.Check{ name: \"release\", entry: verify }\nfn verify() {}\n",
+//RS         &["--output", "release"],
+//RS         "E1321",
+//RS     );
+//RS     reject(
+//RS         "APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing }\nfn start() {}\nfn run() {}\n",
+//RS         &[],
+//RS         "E1321",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn checked_default_selects_one_of_multiple_executables() {
+//RS     let bundle = checked_bundle(
+//RS         "ONE :: Output.Executable{ name: \"one\", entry: first }\nTWO :: Output.Executable{ name: \"two\", entry: second }\ndefaults: { run: TWO }\nfn first() { print(\"first\") }\nfn second() { print(\"second\") }\n",
+//RS         "jet_output_checked_default",
+//RS         jet::Sema::CompileMode::Run,
+//RS     );
+//RS     let selected = bundle.modules[bundle.entry]
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| {
+//RS             let Item::Const(value) = item else {
+//RS                 return None;
+//RS             };
+//RS             value
+//RS                 .resolved_output
+//RS                 .as_ref()
+//RS                 .filter(|output| output.selected)
+//RS         })
+//RS         .expect("checked default selects one Output");
+//RS     assert_eq!(selected.address, "two");
+//RS     let rust = emit_native_aot(&bundle);
+//RS     assert!(rust.contains("match __jet_second()"), "{rust}");
+//RS     assert!(
+//RS         !rust.contains("match __jet_first()"),
+//RS         "{rust}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn explicit_service_address_reaches_tir_and_real_cli_runtime() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let dir = common::unique_tmp("jet_output_service_cli");
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("main.jet");
+//RS     std::fs::write(
+//RS         &file,
+//RS         "APP :: Output.Executable{ name: \"app\", entry: launch }\nAPI :: Output.Service{ name: \"api\", entry: serve }\nfn launch() { print(\"app\") }\nfn serve() { print(\"service\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+//RS     let diagnostics =
+//RS         jet::Sema::check_bundle_for_output(&mut bundle, jet::Sema::CompileMode::Run, "api");
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+//RS 
+//RS     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", "--quiet", "--output", "api", file.to_str().unwrap()])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .expect("run explicit Service Output");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&output.stdout), "service\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn service_edge_emits_one_structured_report_record() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let dir = common::unique_tmp("jet_output_service_failure");
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("main.jet");
+//RS     std::fs::write(
+//RS         &file,
+//RS         "API :: Output.Service{ name: \"api\", entry: serve }\nfn serve() { return Err(\"service unavailable\", code: \"SVC503\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", "--output", "api", file.to_str().unwrap()])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .expect("run failing Service Output");
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert_eq!(output.status.code(), Some(1), "{stderr}");
+//RS     let records: Vec<&str> = stderr
+//RS         .lines()
+//RS         .filter(|line| line.starts_with('{'))
+//RS         .collect();
+//RS     assert_eq!(
+//RS         records.len(),
+//RS         1,
+//RS         "service failure must have one structured record:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         records[0]
+//RS             .contains(r#"{"target":"service","report":"Error [SVC503]: service unavailable\n"}"#,),
+//RS         "service report lost its native report text:\n{stderr}"
+//RS     );
+//RS     assert!(output.stdout.is_empty(), "service failure wrote stdout");
+//RS     let _ = std::fs::remove_dir_all(dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn check_outputs_are_plural_real_test_harness_entries_without_test_blocks() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let dir = common::unique_tmp("jet_output_check_cli");
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("main.jet");
+//RS     std::fs::write(
+//RS         &file,
+//RS         "UNIT :: Output.Check{ name: \"unit\", entry: verify_unit }\nRELEASE :: Output.Check{ name: \"release\", entry: verify_release }\nfn verify_unit() {}\nfn verify_release() { return Err(\"release blocked\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Test);
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+//RS     let rust = emit_test_harness(&bundle);
+//RS     assert_eq!(rust.matches("// jet-mir-output-check:").count(), 2, "{rust}");
+//RS     assert_eq!(rust.matches("fn __jet_output_check_").count(), 2, "{rust}");
+//RS 
+//RS     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["test", "--show-default", file.to_str().unwrap()])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .expect("run Check Output harness");
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(1),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(stdout.contains("unit: pass"), "{stdout}");
+//RS     assert!(stdout.contains("release: FAIL"), "{stdout}");
+//RS     assert!(String::from_utf8_lossy(&output.stderr).contains("release blocked"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn renamed_entry_is_not_recovered_from_a_stale_lock() {
+//RS     let dir = common::unique_tmp("jet_output_callable_stale");
+//RS     std::fs::create_dir_all(dir.join(".jet")).unwrap();
+//RS     std::fs::write(
+//RS         dir.join(".jet/lock"),
+//RS         "version = 1\nentry = \"helper.start\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(dir.join("helper.jet"), "pub fn renamed() {}\n").unwrap();
+//RS     let file = dir.join("main.jet");
+//RS     std::fs::write(
+//RS         &file,
+//RS         "use \"helper\"\nAPP :: Output.Executable{ name: \"demo\", entry: helper.start }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(diagnostics
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.code == "E1321"));
+//RS     assert!(bundle.modules[bundle.entry]
+//RS         .items
+//RS         .iter()
+//RS         .all(|item| { !matches!(item, Item::Const(value) if value.resolved_output.is_some()) }));
+//RS }
+//RS 
+//RS #[test]
+//RS fn typed_executable_output_reuses_the_checked_cli_schema() {
+//RS     let dir = common::unique_tmp("jet_output_callable_cli");
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("main.jet");
+//RS     std::fs::write(
+//RS         &file,
+//RS         "#CLI\nstruct Args { value: Int }\n\nAPP :: Output.Executable{ name: \"demo\", entry: launch }\n\nfn launch(args: Args) { print(args.value) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+//RS     let schema = jet_foundation::CLISchema::entry_schema_for_bundle(&bundle)
+//RS         .expect("typed Output owns one checked CLI schema");
+//RS     assert_eq!(schema.entry_type, "Args");
+//RS     let rust = emit_native_aot(&bundle);
+//RS     assert!(rust.contains("jet_args_option_base"), "{rust}");
+//RS     assert!(rust.contains("__jet_launch(__jet_cli_0)"), "{rust}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn compiled_imported_typed_fallible_entry_uses_its_defining_module() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let dir = common::unique_tmp("jet_output_callable_imported_cli");
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     std::fs::write(
+//RS         dir.join("helper.jet"),
+//RS         "#CLI\npub struct Args { value: Int }\n\npub fn launch(args: Args) {\n    print(args.value)\n    return Err(\"imported boom\")\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let file = dir.join("main.jet");
+//RS     std::fs::write(
+//RS         &file,
+//RS         "use \"helper\"\nAPP :: Output.Executable{ name: \"demo\", entry: helper.launch }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", file.to_str().unwrap(), "--", "--value", "42"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .expect("run imported typed Output");
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(1),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         "42\n",
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&output.stderr).contains("imported boom"));
+//RS }
+// END-PORT-PENDING 1120 tests/output_callable.rs:1-770
+

@@ -1,0 +1,204 @@
+use core.collections.runtime.kernel_siphash13 as mir_image_sip
+use core.text.runtime.kernel_unicode_string as mir_image_text
+
+// MirImageCodec.rs:1088-1251 emitted byte law. MIR images use canonical
+// LEB128 words, zigzag signed words, fixed LE float bits, and first-encounter
+// string/value tables. Reader extents always retain the original wire owner.
+#Error
+pub struct MIRImageError { pub message: String }
+pub struct MIRImageWriter {
+    bytes: [U8]
+    fn new() -> MIRImageWriter Never! { MIRImageWriter{bytes: [U8]{}} }
+    fn write_u8(&self, value: U8) Never! { &self.bytes.push(value) }
+    fn write_varint(&self, value: U64) Never! {
+        remaining := value
+        loop remaining >= U64{128} {
+            &self.bytes.push(U8.from_u64((remaining & U64{127}) | U64{128}) ?? panic("masked varint byte exceeds u8"))
+            remaining = remaining >> 7
+        }
+        &self.bytes.push(U8.from_u64(remaining) ?? panic("final varint byte exceeds u8"))
+    }
+    fn write_u16(&self, value: U16) Never! { &self.write_varint(U64.from_u16(value)) }
+    fn write_u32(&self, value: U32) Never! { &self.write_varint(U64.from_u32(value)) }
+    fn write_u64(&self, value: U64) Never! { &self.write_varint(value) }
+    fn write_signed(&self, value: Int) Never! {
+        // Magnitude-minus-one keeps MIN_INT representable; shift in U64.
+        zigzag :: if value < 0 -> (U64{-(value + 1)} << 1) | U64{1} else -> U64{value} << 1
+        &self.write_varint(zigzag)
+    }
+    fn write_fixed_u32(&self, value: U32) Never! {
+        loop index in 0..<4 -> &self.bytes.push(U8.from_u32((value >> (8 * index)) & U32{255}) ?? panic("masked u32 byte exceeds u8"))
+    }
+    fn write_fixed_u64(&self, value: U64) Never! {
+        loop index in 0..<8 -> &self.bytes.push(U8.from_u64((value >> (8 * index)) & U64{255}) ?? panic("masked u64 byte exceeds u8"))
+    }
+    fn write_count(&self, value: Int) MIRImageError! {
+        if value < 0 || value > 18446744073709551615 -> return Err(MIRImageError{message: "native MIR collection exceeds u64"})
+        &self.write_varint(U64{value})
+        return
+    }
+    fn write_raw(&self, value: View<U8>) Never! { loop byte in value -> &self.bytes.push(byte) }
+    fn write_bytes(&self, value: View<U8>) MIRImageError! {
+        &self.write_count(value.len())
+        &self.write_raw(value)
+        return
+    }
+    fn finish(self) -> [U8] Never! { self.bytes }
+}
+pub struct MIRImageReader {
+    bytes: View<U8>
+    cursor: Int
+    host_max: U64
+    fn new(bytes: View<U8>, host: JetTargetLayout) -> MIRImageReader Never! {
+        MIRImageReader{bytes: bytes, cursor: 0, host_max: mir_image_host_max(host)}
+    }
+    fn read_raw(&self, length: Int) -> View<U8> MIRImageError! {
+        if length < 0 || U64{length} > self.host_max - U64{self.cursor} -> return Err(MIRImageError{message: "MIR image cursor overflow"})
+        if length > self.bytes.len() - self.cursor -> return Err(MIRImageError{message: "truncated native MIR image"})
+        start :: self.cursor
+        self.cursor += length
+        Ok(self.bytes[start..<self.cursor])
+    }
+    fn read_u8(&self) -> U8 MIRImageError! {
+        bytes :: &self.read_raw(1)
+        Ok(bytes[0])
+    }
+    fn read_varint(&self) -> U64 MIRImageError! {
+        value := U64{0}
+        shift := 0
+        loop {
+            byte :: &self.read_u8()
+            bits :: U64.from_u8(byte & U8{127})
+            if shift == 63 && bits > U64{1} -> return Err(MIRImageError{message: "native MIR image varint exceeds u64"})
+            value = value | (bits << shift)
+            if (byte & U8{128}) == U8{0} {
+                if byte == U8{0} && shift != 0 -> return Err(MIRImageError{message: "native MIR image varint is not canonical"})
+                return Ok(value)
+            }
+            shift += 7
+            if shift > 63 -> return Err(MIRImageError{message: "native MIR image varint exceeds u64"})
+        }
+    }
+    fn read_u16(&self) -> U16 MIRImageError! {
+        raw :: &self.read_varint()
+        Ok(U16.from_u64(raw) ?? return Err(MIRImageError{message: "native MIR image u16 out of range"}))
+    }
+    fn read_u32(&self) -> U32 MIRImageError! {
+        raw :: &self.read_varint()
+        Ok(U32.from_u64(raw) ?? return Err(MIRImageError{message: "native MIR image u32 out of range"}))
+    }
+    fn read_u64(&self) -> U64 MIRImageError! { &self.read_varint() }
+    fn read_signed(&self) -> Int MIRImageError! {
+        raw :: &self.read_varint()
+        magnitude :: Int.from_u64(raw >> 1)
+        Ok(if (raw & U64{1}) == U64{0} -> magnitude else -> -magnitude - 1)
+    }
+    fn read_fixed_u32(&self) -> U32 MIRImageError! {
+        raw :: &self.read_raw(4)
+        value := U32{0}
+        loop index in 0..<4 -> value = value | (U32.from_u8(raw[index]) << (8 * index))
+        Ok(value)
+    }
+    fn read_fixed_u64(&self) -> U64 MIRImageError! {
+        raw :: &self.read_raw(8)
+        value := U64{0}
+        loop index in 0..<8 -> value = value | (U64.from_u8(raw[index]) << (8 * index))
+        Ok(value)
+    }
+    fn read_count(&self) -> Int MIRImageError! {
+        raw :: &self.read_varint()
+        if raw > self.host_max -> return Err(MIRImageError{message: "native MIR image count exceeds host range"})
+        if raw > U64{self.bytes.len() - self.cursor} -> return Err(MIRImageError{message: "native MIR image collection count exceeds remaining bytes"})
+        Ok(Int.from_u64(raw))
+    }
+    fn read_len(&self) -> Int MIRImageError! { &self.read_count() }
+    fn read_bytes(&self) -> View<U8> MIRImageError! {
+        count :: &self.read_len()
+        &self.read_raw(count)
+    }
+    fn read_index(&self) -> U64 MIRImageError! {
+        raw :: &self.read_varint()
+        if raw > self.host_max -> return Err(MIRImageError{message: "native MIR image table index exceeds host range"})
+        Ok(raw)
+    }
+    fn read_string(&self, strings: View<String>) -> String MIRImageError! {
+        index :: &self.read_index()
+        if index >= U64{strings.len()} -> return Err(MIRImageError{message: "native MIR image references an unknown string"})
+        Ok(~strings[Int.from_u64(index)])
+    }
+    fn finish(self) MIRImageError! {
+        if self.cursor != self.bytes.len() -> return Err(MIRImageError{message: "native MIR image has trailing bytes"})
+        return
+    }
+}
+
+fn mir_image_host_max(host: JetTargetLayout) -> U64 Never! {
+    if host.pointer_size >= 8 -> U64{18446744073709551615} else -> (U64{1} << (host.pointer_size * 8)) - U64{1}
+}
+
+// Native interner uses keyed probes, never a linear per-value id search. The
+// table byte buffers grow once; nested entries must be inserted before parents.
+struct MIRImageInterner {
+    strings: [String:U64]
+    string_table: MIRImageWriter
+    entries: [(Int, [U8]):U64]
+    kind_counts: [U64]
+    entry_table: MIRImageWriter
+    entry_count: U64
+}
+fn mir_image_interner_new() -> MIRImageInterner Never! {
+    counts := [U64]{}
+    loop _ in 0..<7 -> &counts.push(U64{0})
+    MIRImageInterner{strings: [String:U64]{}, string_table: MIRImageWriter.new(), entries: [(Int, [U8]):U64]{}, kind_counts: counts, entry_table: MIRImageWriter.new(), entry_count: U64{0}}
+}
+fn mir_image_intern_string(interner: &MIRImageInterner, value: String) -> U64 MIRImageError! {
+    if interner.strings.get(value) == .Val(index) -> return Ok(index)
+    index :: U64{interner.strings.len()}
+    bytes :: value.bytes()
+    if bytes.len() > 18446744073709551615 -> return Err(MIRImageError{message: "MIR image string exceeds u64"})
+    &interner.string_table.write_varint(U64{bytes.len()})
+    &interner.string_table.write_raw(bytes[0..<bytes.len()])
+    interner.strings[value] = index
+    Ok(index)
+}
+fn mir_image_intern_entry(interner: &MIRImageInterner, kind: Int, entry: ^[U8]) -> U64 Never! {
+    key :: (kind, entry)
+    if interner.entries.get(key) == .Val(index) -> return index
+    index :: interner.kind_counts[kind]
+    &interner.entry_table.write_varint(U64{kind})
+    &interner.entry_table.write_raw(key.1[0..<key.1.len()])
+    interner.entry_count = interner.entry_count.wrapping_add(U64{1})
+    interner.kind_counts[kind] = index.wrapping_add(U64{1})
+    interner.entries[^key] = index
+    index
+}
+fn mir_image_write_string(writer: &MIRImageWriter, interner: &MIRImageInterner, value: String) MIRImageError! {
+    &writer.write_varint(mir_image_intern_string(&interner, value))
+    return
+}
+fn mir_image_write_entry(writer: &MIRImageWriter, interner: &MIRImageInterner, kind: Int, entry: ^[U8]) Never! {
+    &writer.write_varint(mir_image_intern_entry(&interner, kind, ^entry))
+}
+fn mir_image_assemble(interner: ^MIRImageInterner, body: ^[U8]) -> [U8] MIRImageError! {
+    writer := MIRImageWriter.new()
+    &writer.write_count(interner.strings.len())
+    &writer.write_raw(interner.string_table.bytes[0..<interner.string_table.bytes.len()])
+    &writer.write_varint(interner.entry_count)
+    &writer.write_raw(interner.entry_table.bytes[0..<interner.entry_table.bytes.len()])
+    &writer.write_raw(body[0..<body.len()])
+    Ok(writer.finish())
+}
+
+// CompilerImage.rs::DebugDigest reuses the canonical zero-key SipHash-1-3
+// kernel used by tuple names, but writes raw bytes (no str Hash terminator).
+fn mir_image_debug_hasher_new() -> mir_image_sip.SipHasher13 Never! {
+    mir_image_sip.new()
+}
+fn mir_image_debug_hasher_write(state: &mir_image_sip.SipHasher13, text: String) Never! {
+    // #4318/#4392: retained String UTF-8 ingress still gates native allocation parity.
+    bytes :: mir_image_text.utf8_bytes(text)
+    mir_image_sip.write(&state, bytes[0..<bytes.len()])
+}
+fn mir_image_debug_hasher_finish(input: mir_image_sip.SipHasher13) -> U64 Never! {
+    mir_image_sip.finish(input)
+}

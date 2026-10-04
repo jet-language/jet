@@ -1,0 +1,501 @@
+// Rust Bundle.rs:2437-2527 and tests/unit_family.rs producer/parser witnesses.
+// Runs the canonical ordinary source catalog, parser, dimension stage and
+// declaration graph. Native conversion/runtime/retired-tier gates are recorded
+// separately; these tests do not replace them with constant registries.
+use jet_foundation.[Diagnostic, Dimension, Item, Program, QuantityKind, Span, Type, UnitDimensionDecl, UnitFamilyDef, UnitRatio, UnitScaleProvenance, dimension_base, dimension_divide, dimension_identity, dimension_multiply, foundation_embedded_core, jet_target_machine_hosted, unit_family_distinct_defs, unit_family_type_name]
+use jet_parser.[parse_source]
+use core.files.host.retained_descriptor as unit_test_native
+use core.files.runtime.kernel_path_components as unit_test_path
+
+fn unit_test_input(source: String, identity: String, package: String, path: String) -> SemaRegistrationModuleInput Never! {
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    starts := [Int]{0}
+    loop (index, byte) in source.bytes() { if byte == U8{10} -> &starts.push(index + 1) }
+    SemaRegistrationModuleInput{package_identity: package, generic_package_identity: Val(package), generic_definition_path: path, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_origin: SemaSourceOrigin.Snapshot, source_segments: [SemaSourceSegment]{SemaSourceSegment{generated: Span{start: 0, end: source.bytes().len()}, source_file: path, source_start: 0, line_starts: starts, origin: SemaSourceOrigin.Snapshot}}, program: parsed.program, unit_source: source, foreign_handles: []}
+}
+fn unit_test_family(program: Program, name: String) -> UnitFamilyDef Never! {
+    loop item in program.items { if item == .UnitFamily(family) { if family.family == name -> return family } }
+    panic("missing unit family {name}")
+}
+fn unit_test_parse_family(source: String) -> UnitFamilyDef Never! {
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    if parsed.program.items[0] == .UnitFamily(family) -> return family
+    panic("expected a unit family")
+}
+fn unit_test_dimension(program: Program, name: String) -> Dimension Never! {
+    unit_test_family(program, name).resolved_dimension ?? panic("missing dimension {name}")
+}
+fn unit_test_edge(source: SemaRegistrationModuleInput, target: SemaRegistrationModuleInput, index: Int) -> SemaRegistrationImportEdge Never! {
+    SemaRegistrationImportEdge{source_module_identity: source.module_identity, target_module_identity: target.module_identity, target_package_identity: target.package_identity, foreign_binding: None, declaration: source.program.imports[index]}
+}
+fn unit_test_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) -> [Diagnostic] Never! {
+    diagnostics := [Diagnostic]{}
+    catalog :: sema_units_catalog(&diagnostics)
+    assert_eq(diagnostics.len(), 0)
+    loop index in 0..<inputs.len() -> sema_units_inject(&inputs[index], catalog)
+    sema_units_resolve(&inputs, edges, &diagnostics)
+    diagnostics
+}
+fn unit_test_graph(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) -> SemaRegistrationGraph Never! {
+    retained := inputs
+    effects_source :: foundation_embedded_core().effect_source()
+    &retained.push(unit_test_input(effects_source, "effects", "jet:canonical-prelude", "Prelude/Effects.jet"))
+    build :: SemaBuildFacts{package_name: "units", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "unit-plane-test", stamp_at: "", artifact_build: false}
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    sema_registration_prepare_graph(retained, edges, inputs[0].package_identity, inputs[0].module_identity, "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
+}
+fn unit_test_checked_modules(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) -> SemaGraphResult Never! {
+    graph :: unit_test_graph(inputs, edges)
+    stage :: sema_collect_comptime_declarations(graph, [], None)
+    root :: unit_test_native.canonicalize(unit_test_path.from_text(".", unit_test_path.PathPlatform.Unix)) ?? panic("unit fixture requires actual working directory")
+    sema_finalize_registration_graph(graph, stage, [], [], None, None, root)
+}
+fn unit_test_checked(source: String) -> SemaGraphResult Never! {
+    graph :: unit_test_graph([SemaRegistrationModuleInput]{unit_test_input(source, "main", "units", "main.jet")}, [])
+    stage :: sema_collect_comptime_declarations(graph, [], None)
+    root :: unit_test_native.canonicalize(unit_test_path.from_text(".", unit_test_path.PathPlatform.Unix)) ?? panic("unit fixture requires actual working directory")
+    sema_finalize_registration_graph(graph, stage, [], [], None, None, root)
+}
+fn unit_test_codes(source: String) -> [String] Never! {
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() > 0 -> return loop diagnostic in parsed.diagnostics -> diagnostic.code
+    checked :: unit_test_checked(source)
+    loop diagnostic in checked.diagnostics { if diagnostic.severity == 1 -> diagnostic.code }
+}
+
+#Test("ordinary_units_prelude_supplies_standard_axes_and_provenance") {
+    source :: "#UnitFamily(Token, dimension, base: token) {{ token }}\n#UnitFamily(TokenRate, dimension: Token / Time, base: token_per_second) {{ token_per_second }}\nfn touch_mass() {{ _ :: 1dalton }}\n"
+    inputs := [SemaRegistrationModuleInput]{unit_test_input(source, "main", "units", "main.jet")}
+    assert_eq(unit_test_resolve(&inputs, []).len(), 0)
+    token :: unit_test_dimension(inputs[0].program, "Token")
+    time :: unit_test_dimension(inputs[0].program, "Time")
+    rate :: unit_test_dimension(inputs[0].program, "TokenRate")
+    assert_eq(Val(rate), dimension_divide(token, time))
+    assert_eq(unit_test_family(inputs[0].program, "Time").resolved_owner, Val("core.units"))
+    mass :: unit_test_family(inputs[0].program, "Mass")
+    found := false
+    loop member in mass.members {
+        if member.name == "dalton" {
+            if member.scale_provenance == .Measured(_, _, _) -> found = true
+        }
+    }
+    assert(found)
+}
+#Test("imported_public_dimension_participates_in_derived_claims") {
+    main :: unit_test_input("use dep\n#UnitFamily(InventoryRate, dimension: Inventory / Time, base: item_per_second) {{ item_per_second }}\n", "main", "units", "main.jet")
+    dep :: unit_test_input("pub #UnitFamily(Inventory, dimension, base: item) {{ item }}\n", "dep", "warehouse", "deps/dep.jet")
+    edge :: unit_test_edge(main, dep, 0)
+    inputs := [SemaRegistrationModuleInput]{main, dep}
+    assert_eq(unit_test_resolve(&inputs, [SemaRegistrationImportEdge]{edge}).len(), 0)
+    assert_eq(Val(unit_test_dimension(inputs[0].program, "InventoryRate")), dimension_divide(unit_test_dimension(inputs[1].program, "Inventory"), unit_test_dimension(inputs[0].program, "Time")))
+    assert_eq(inputs[0].unit_dimension_aliases, [String]{"dep"})
+}
+#Test("open_base_and_derived_dimension_claims_parse") {
+    base :: unit_test_parse_family("#UnitFamily(Mass, dimension, base: kilogram) {{ kilogram }}")
+    assert(base.dimension != None)
+    if base.dimension == .Val(claim) { if claim != .Base(_) -> panic("expected base dimension") }
+    derived :: unit_test_parse_family("#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) {{ newton }}")
+    if derived.dimension == .Val(claim) { if claim != .Derived(_) -> panic("expected derived dimension") } else -> panic("missing dimension")
+}
+#Test("omitted_base_defaults_to_first_member") {
+    dimensioned :: unit_test_parse_family("#UnitFamily(Length, dimension) {{ meter foot }}")
+    assert_eq((dimensioned.base ?? panic("missing default base")).name, "meter")
+    converted :: unit_test_parse_family("#UnitFamily(Length) {{ meter millimeter(scale: 1/1000) }}")
+    assert_eq((converted.base ?? panic("missing converted base")).name, "meter")
+    assert_eq(unit_test_codes("#UnitFamily(Length) {{ meter millimeter(scale: 1/1000) }}\nfn run() {{\n m :: Millimeter.from_float(Float{{1000.0}})\n print(\"{{(m.raw())}}\")\n}}\n"), [String]{})
+}
+#Test("omitted_base_without_dimension_or_conversion_stays_none") {
+    assert_eq(unit_test_parse_family("#UnitFamily(Currency) {{ usd eur }}").base, None)
+}
+#Test("derived_dimension_requires_one_scale_one_anchor") {
+    parsed :: parse_source("#UnitFamily(Energy, dimension: Force * Length) {{ joule }}".bytes())
+    assert_eq(loop diagnostic in parsed.diagnostics -> diagnostic.code, [String]{"E0003"})
+    assert_eq(parsed.diagnostics[0].fix, "Add `base: member_name` and keep that member's scale at 1 with offset 0")
+}
+#Test("scale_provenance_parses_without_erasing_source_truth") {
+    angle :: unit_test_parse_family("#UnitFamily(Angle, dimension, base: radian) {{ radian degree(scale: pi / 180) }}")
+    if angle.members[1].scale_provenance != .SymbolicPi(_, _) -> panic("symbolic pi source lost")
+    mass :: unit_test_parse_family("#UnitFamily(Mass, dimension, base: kilogram) {{\n kilogram\n dalton(scale: measured(1.66053906892e-27, uncertainty: 0.00000000052e-27, source: \"BIPM-2026/CODATA-2022\"))\n}}")
+    if mass.members[1].scale_provenance != .Measured(_, _, _) -> panic("measured source lost")
+}
+#Test("scaled_and_affine_metadata_is_exact_and_normalized") {
+    family :: unit_test_parse_family("#UnitFamily(Temperature, dimension, base: kelvin) {{\n kelvin\n celsius(scale: 2/2, offset: 54630/200)\n}}")
+    assert_eq((family.base ?? panic("missing kelvin base")).name, "kelvin")
+    assert_eq(family.members[1].scale, UnitRatio{numerator: 1, denominator: 1})
+    assert_eq(family.members[1].offset, UnitRatio{numerator: 5463, denominator: 20})
+}
+#Test("unit_metadata_uses_arbitrary_precision_signed_ratios") {
+    family :: unit_test_parse_family("#UnitFamily(Temperature, dimension, base: kelvin) {{\n kelvin\n huge(scale: -123_456_789_012_345_678_901_234_567_890/-10, offset: -0xA/-0b100)\n}}")
+    assert_eq(family.members[1].scale, UnitRatio{numerator: 12345678901234567890123456789, denominator: 1})
+    assert_eq(family.members[1].offset, UnitRatio{numerator: 5, denominator: 2})
+}
+#Test("zero_ratio_denominator_points_at_the_denominator") {
+    source :: "#UnitFamily(Length, dimension, base: meter) {{ meter broken(scale: 1/0) }}"
+    parsed :: parse_source(source.bytes())
+    found := false
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.what.contains("denominator is zero") {
+            assert_eq(diagnostic.span, Val(Span{start: 68, end: 69}))
+            found = true
+        }
+    }
+    assert(found)
+}
+#Test("affine_family_mints_point_and_delta_types_only") {
+    family :: unit_test_parse_family("#UnitFamily(Temperature, dimension, base: kelvin) {{\n kelvin\n celsius(scale: 1, offset: 27315/100)\n}}")
+    assert_eq(loop definition in unit_family_distinct_defs(family) -> definition.name, [String]{"KelvinPoint", "KelvinDelta", "CelsiusPoint", "CelsiusDelta"})
+}
+#Test("quantity_bounds_accept_open_dimensions_but_reject_unknown_kinds") {
+    open :: parse_source("fn keep<Q: Quantity<Banana, .Linear>>(value: ^Q) -> Q {{ return value }}".bytes())
+    assert_eq(open.diagnostics.len(), 0)
+    wrong :: parse_source("fn keep<Q: Quantity<Length, .Mystery>>(value: ^Q) -> Q {{ return value }}".bytes())
+    assert(wrong.diagnostics.len() > 0)
+}
+#Test("local_same_named_family_does_not_inherit_standard_dimension") {
+    source :: "#UnitFamily(Length, base: meter) {{ meter }}\nfn run() {{\n squared :: 2meter * 3meter\n print(squared.raw())\n}}\n"
+    inputs := [SemaRegistrationModuleInput]{unit_test_input(source, "main", "units", "main.jet")}
+    assert_eq(unit_test_resolve(&inputs, []).len(), 0)
+    local :: unit_test_family(inputs[0].program, "Length")
+    assert_eq(local.resolved_dimension, None)
+    assert_eq(local.resolved_owner, Val("units"))
+    assert_eq(local.members.len(), 1)
+    assert_eq(unit_test_codes(source), [String]{"E0127"})
+}
+#Test("qualified_imported_dimensions_resolve_by_alias_and_unqualified_collisions_fail") {
+    stock :: unit_test_input("pub #UnitFamily(Inventory, dimension, base: item) {{ item }}\n", "stock", "warehouse", "stock.jet")
+    other :: unit_test_input("pub #UnitFamily(Inventory, dimension, base: widget) {{ widget }}\n", "other", "warehouse", "other.jet")
+    qualified :: unit_test_input("use \"stock\" as dep\n#UnitFamily(Rate, dimension: dep.Inventory / Time, base: item_per_second) {{ item_per_second }}\nfn run() {{}}\n", "main", "warehouse", "qualified.jet")
+    inputs := [SemaRegistrationModuleInput]{qualified, stock}
+    assert_eq(unit_test_resolve(&inputs, [SemaRegistrationImportEdge]{unit_test_edge(qualified, stock, 0)}).len(), 0)
+    assert_eq(inputs[0].unit_dimension_aliases, [String]{"dep"})
+    assert_eq(Val(unit_test_dimension(inputs[0].program, "Rate")), dimension_divide(unit_test_dimension(inputs[1].program, "Inventory"), unit_test_dimension(inputs[0].program, "Time")))
+    ambiguous :: unit_test_input("use \"stock\" as stock\nuse \"other\" as other\n#UnitFamily(Rate, dimension: Inventory / Time, base: item_per_second) {{ item_per_second }}\nfn run() {{}}\n", "main", "warehouse", "ambiguous.jet")
+    collision := [SemaRegistrationModuleInput]{ambiguous, stock, other}
+    diagnostics :: unit_test_resolve(&collision, [SemaRegistrationImportEdge]{unit_test_edge(ambiguous, stock, 0), unit_test_edge(ambiguous, other, 1)})
+    assert_eq(loop diagnostic in diagnostics -> diagnostic.code, [String]{"E0905"})
+    assert_eq(diagnostics[0].what, "dimension name `Inventory` is ambiguous")
+    assert_eq(diagnostics[0].why, "more than one imported module exports that dimension")
+    assert_eq(diagnostics[0].fix, "qualify it with the intended module alias, such as `dep.Inventory`")
+    assert_eq(diagnostics[0].span, Val(unit_test_family(ambiguous.program, "Rate").family_span))
+}
+#Test("custom_axis_identity_ignores_checkout_root_and_separates_packages") {
+    source :: "pub #UnitFamily(Inventory, dimension, base: item) {{ item }}\npub fn sample() -> Item {{ return 1item }}\nfn run() {{}}\n"
+    first := unit_test_input(source, "first", "warehouse:1.0.0", "main.jet")
+    second := unit_test_input(source, "second", "warehouse:1.0.0", "main.jet")
+    first.source_file = "/checkout-a/main.jet"
+    second.source_file = "/checkout-b/main.jet"
+    distinct :: unit_test_input(source, "distinct", "ledger:1.0.0", "main.jet")
+    inputs := [SemaRegistrationModuleInput]{first, second, distinct}
+    assert_eq(unit_test_resolve(&inputs, []).len(), 0)
+    a :: unit_test_dimension(inputs[0].program, "Inventory")
+    b :: unit_test_dimension(inputs[1].program, "Inventory")
+    c :: unit_test_dimension(inputs[2].program, "Inventory")
+    assert_eq(a, b)
+    assert(a != c)
+    assert(!dimension_identity(a).contains("checkout"))
+    a_api := APIUnitDimensions{identities: [String:String]{}}
+    b_api := APIUnitDimensions{identities: [String:String]{}}
+    c_api := APIUnitDimensions{identities: [String:String]{}}
+    collect_api_unit_dimensions(inputs[0].program.items, "warehouse", &a_api)
+    collect_api_unit_dimensions(inputs[1].program.items, "warehouse", &b_api)
+    collect_api_unit_dimensions(inputs[2].program.items, "ledger", &c_api)
+    assert_eq(a_api.identities.get("Item"), b_api.identities.get("Item"))
+    assert(a_api.identities.get("Item") != c_api.identities.get("Item"))
+}
+#Test("standard_units_share_canonical_owner_across_dependency_boundary") {
+    main :: unit_test_input("use dep\npub fn local() -> Meter {{ return 1meter }}\nfn accept(value: Meter) {{ print(value.raw()) }}\nfn run() {{ accept(dep.distance()) }}\n", "main", "app:0.1.0", "main.jet")
+    dep :: unit_test_input("pub fn distance() -> Meter {{ return 2meter }}\n", "dep", "dep:0.1.0", "dep.jet")
+    inputs := [SemaRegistrationModuleInput]{main, dep}
+    assert_eq(unit_test_resolve(&inputs, [SemaRegistrationImportEdge]{unit_test_edge(main, dep, 0)}).len(), 0)
+    assert_eq(unit_test_dimension(inputs[0].program, "Length"), unit_test_dimension(inputs[1].program, "Length"))
+    loop input in inputs {
+        family :: unit_test_family(input.program, "Length")
+        assert_eq(family.resolved_owner, Val("core.units"))
+        dimensions := APIUnitDimensions{identities: [String:String]{}}
+        collect_api_unit_dimensions(input.program.items, input.package_identity, &dimensions)
+        assert((dimensions.identities.get("Meter") ?? panic("standard API identity missing")).contains("package=core.units; family=Length"))
+    }
+}
+#Test("unit_dimension_forward_references_cycles_missing_and_private_visibility") {
+    forward :: "#UnitFamily(Rate, dimension: Stock / Clock, base: per_tick) {{ per_tick }}\n#UnitFamily(Stock, dimension, base: item) {{ item }}\n#UnitFamily(Clock, dimension, base: tick) {{ tick }}\n"
+    inputs := [SemaRegistrationModuleInput]{unit_test_input(forward, "main", "warehouse", "main.jet")}
+    assert_eq(unit_test_resolve(&inputs, []).len(), 0)
+    assert_eq(Val(unit_test_dimension(inputs[0].program, "Rate")), dimension_divide(unit_test_dimension(inputs[0].program, "Stock"), unit_test_dimension(inputs[0].program, "Clock")))
+    cycle := [SemaRegistrationModuleInput]{unit_test_input("#UnitFamily(Left, dimension: Right, base: left) {{ left }}\n#UnitFamily(Right, dimension: Left, base: right) {{ right }}\n", "main", "warehouse", "main.jet")}
+    diagnostics :: unit_test_resolve(&cycle, [])
+    assert_eq(loop diagnostic in diagnostics -> diagnostic.code, [String]{"E0905", "E0905"})
+    assert_eq(diagnostics[0].why, "derived dimensions can use visible declared dimensions and cannot form a cycle")
+    assert_eq(diagnostics[0].fix, "import or declare every base dimension and remove any dimension cycle")
+    dep :: unit_test_input("#UnitFamily(Hidden, dimension, base: hidden) {{ hidden }}\n", "dep", "warehouse", "dep.jet")
+    main :: unit_test_input("use dep\n#UnitFamily(Rate, dimension: dep.Hidden / Time, base: rate) {{ rate }}\n", "main", "warehouse", "main.jet")
+    private := [SemaRegistrationModuleInput]{main, dep}
+    assert_eq(loop diagnostic in unit_test_resolve(&private, [SemaRegistrationImportEdge]{unit_test_edge(main, dep, 0)}) -> diagnostic.code, [String]{"E0905"})
+}
+#Test("units_no_prelude_does_not_borrow_other_modules_time_facts") {
+    main := unit_test_input("fn run() {{ _ :: 1ms }}\n", "main", "units", "main.jet")
+    main.program.no_prelude = true
+    ordinary :: unit_test_input("fn tick() {{ _ :: 1ms }}\n", "ordinary", "units", "ordinary.jet")
+    graph :: unit_test_graph([SemaRegistrationModuleInput]{main, ordinary}, [])
+    assert_eq(sema_expression_unit_literal_time_fact("ms", graph, "main"), None)
+    fact :: sema_expression_unit_literal_time_fact("ms", graph, "ordinary") ?? panic("actual Time producer missing")
+    assert_eq(fact.scale, UnitRatio{numerator: 1000000, denominator: 1})
+    assert_eq(fact.dimension, Val(dimension_base("core.units::Time")))
+    assert_eq(unit_family_distinct_defs(unit_test_family(graph.modules[1].program, "Time")).len(), 0)
+    assert_eq(sema_registration_unit_fact_for_type(graph, Type.Named{name: "Duration"}, "main").map(value -> value.kind), Val(QuantityKind.Delta))
+    assert_eq(sema_registration_unit_fact_for_type(graph, Type.Named{name: "Instant"}, "main").map(value -> value.kind), Val(QuantityKind.Point))
+}
+#Test("unit_occupied_types_dependency_closure_and_original_unicode_byte_anchors") {
+    input := unit_test_input("struct Meter {{ value: Int }}\nfn use_unit(value: Meter) {{ _ :: 1newton }}\n", "main", "units", "main.jet")
+    diagnostics := [Diagnostic]{}
+    catalog :: sema_units_catalog(&diagnostics)
+    sema_units_inject(&input, catalog)
+    length :: unit_test_family(input.program, "Length")
+    assert_eq(length.members.len(), 0)
+    assert(unit_test_family(input.program, "Mass").members.len() > 0)
+    assert(unit_test_family(input.program, "Time").members.len() > 0)
+    source :: "λδ\nfrom_μmeter 3μmeter ΩMeter Meter"
+    mentions :: sema_units_source_mentions(source)
+    assert_eq(sema_units_member_span(mentions, "μmeter"), Val(Span{start: 10, end: 17}))
+    assert_eq(sema_units_identifier_span(mentions, "Meter"), Val(Span{start: 35, end: 40}))
+    assert(sema_units_member(mentions, "μmeter"))
+    qualified :: sema_units_source_mentions("dep.Meter unrelatedMsmeter _Meter Ms 5ms_extra from_ms_other")
+    assert(!sema_units_member(sema_units_source_mentions("dep.Meter"), "meter"))
+    assert(sema_units_member(qualified, "ms"))
+    assert(!sema_units_member(qualified, "mss"))
+}
+#Test("long_source_many_unit_mentions_uses_one_index") {
+    parts := [String]{}
+    loop index in 0..<12000 -> &parts.push("let_λ_{index} unrelated_{index} dep.Meter 5ms_extra from_kilometer\n")
+    source :: parts.join("")
+    mentions :: sema_units_source_mentions(source)
+    diagnostics := [Diagnostic]{}
+    catalog :: sema_units_catalog(&diagnostics)
+    assert_eq(diagnostics.len(), 0)
+    loop family in catalog {
+        loop member in family.members {
+            expected :: member.name == "ms" || member.name == "kilometer"
+            assert_eq(sema_units_member(mentions, member.name), expected)
+        }
+    }
+    assert(!sema_units_identifier(mentions, "unrelated"))
+    assert(sema_units_identifier(mentions, "let_λ_11999"))
+}
+#Test("open_families_keep_owner_and_affine_facts_keep_scale_offset_kind") {
+    input :: unit_test_input("#UnitFamily(MeasureTag, base: tick) {{ tick double_tick(scale: 2) }}\n#UnitFamily(Currency) {{ usd eur }}\n#UnitFamily(Temperature, dimension, base: kelvin) {{ kelvin celsius(offset: 27315/100) }}\nfn run() {{}}\n", "main", "units", "main.jet")
+    graph :: unit_test_graph([SemaRegistrationModuleInput]{input}, [])
+    assert_eq(unit_test_family(graph.modules[0].program, "Currency").resolved_owner, Val("units"))
+    assert_eq(sema_registration_unit_fact_for_type(graph, Type.Named{name: "Usd"}, "main"), None)
+    assert(sema_expression_unit_literal_fact("usd", graph, "main") != None)
+    tick :: sema_registration_unit_fact_for_type(graph, Type.Named{name: "DoubleTick"}, "main") ?? panic("unclaimed owner facts missing")
+    assert_eq(tick.dimension, None)
+    assert_eq(tick.scale, UnitRatio{numerator: 2, denominator: 1})
+    point :: sema_registration_unit_fact_for_type(graph, Type.Named{name: "CelsiusPoint"}, "main") ?? panic("point missing")
+    delta :: sema_registration_unit_fact_for_type(graph, Type.Named{name: "CelsiusDelta"}, "main") ?? panic("delta missing")
+    assert_eq(point.kind, QuantityKind.Point)
+    assert_eq(point.offset, UnitRatio{numerator: 5463, denominator: 20})
+    assert_eq(delta.kind, QuantityKind.Delta)
+    assert_eq(delta.offset, UnitRatio{numerator: 0, denominator: 1})
+    assert_eq(point.dimension, delta.dimension)
+}
+#Test("same_named_unit_families_from_different_packages_do_not_convert") {
+    source :: "pub #UnitFamily(Length, dimension, base: meter) {{ meter millimeter(scale: 1/1000) }}\npub fn sample() -> Meter {{ return 1meter }}\n"
+    left :: unit_test_input(source, "left", "foreign-left", "module.jet")
+    right :: unit_test_input(source, "right", "foreign-right", "module.jet")
+    main :: unit_test_input("use left\nuse right\nfn run() {{ bad :: left.sample() + right.sample()\n print(bad.raw()) }}\n", "main", "app", "main.jet")
+    graph :: unit_test_graph([SemaRegistrationModuleInput]{main, left, right}, [SemaRegistrationImportEdge]{unit_test_edge(main, left, 0), unit_test_edge(main, right, 1)})
+    lhs :: sema_registration_unit_fact_for_type(graph, Type.Named{name: "left::Meter"}, "main") ?? panic("left fact missing")
+    rhs :: sema_registration_unit_fact_for_type(graph, Type.Named{name: "right::Meter"}, "main") ?? panic("right fact missing")
+    assert(lhs.dimension != rhs.dimension)
+    assert(lhs.package != rhs.package)
+    assert(lhs.name != rhs.name)
+}
+#Test("unit_owner_deliberate_failure_control_is_a_real_negative") {
+    // Permanent negative control: deleting owner separation makes this fail.
+    source :: "#UnitFamily(Inventory, dimension, base: item) {{ item }}"
+    one :: unit_test_input(source, "one", "warehouse", "main.jet")
+    two :: unit_test_input(source, "two", "ledger", "main.jet")
+    inputs := [SemaRegistrationModuleInput]{one, two}
+    assert_eq(unit_test_resolve(&inputs, []).len(), 0)
+    assert(unit_test_dimension(inputs[0].program, "Inventory") != unit_test_dimension(inputs[1].program, "Inventory"))
+}
+
+// Original public API witnesses use the parsed ordinary declaration and the
+// canonical API writer, not handwritten metadata.
+#Test("scaled_family_metadata_is_public_api_identity") {
+    source :: "pub #UnitFamily(Length, dimension, base: meter) {{\n meter\n millimeter(scale: 2/2000)\n}}\npub fn length() -> Millimeter {{ return Millimeter.from_float(1.0) }}\n"
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    snapshot :: snapshot_from_items(parsed.program.items, "geometry", "1.0.0")
+    expected :: "fn length() Millimeter{{package=geometry; family=Length; base=Meter; dimension=geometry%3A%3ALength:1; scale=1/1000; provenance=Rational; offset=0}}"
+    assert_eq(snapshot.funcs[0].signature, expected)
+}
+#Test("affine_point_and_delta_have_distinct_public_identities") {
+    source :: "pub #UnitFamily(Temperature, dimension, base: kelvin) {{\n kelvin\n celsius(scale: 1, offset: 27315/100)\n}}\npub fn target() -> CelsiusPoint {{ return CelsiusPoint.from_float(20.0) }}\npub fn tolerance() -> CelsiusDelta {{ return CelsiusDelta.from_float(2.0) }}\n"
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    snapshot :: snapshot_from_items(parsed.program.items, "climate", "1.0.0")
+    point :: "fn target() CelsiusPoint{{package=climate; family=Temperature; base=Kelvin; dimension=climate%3A%3ATemperature:1; scale=1; provenance=Rational; offset=5463/20}}"
+    delta :: "fn tolerance() CelsiusDelta{{package=climate; family=Temperature; base=Kelvin; dimension=climate%3A%3ATemperature:1; scale=1; provenance=Rational; offset=0}}"
+    found_point := false
+    found_delta := false
+    loop function in snapshot.funcs {
+        if function.signature == point -> found_point = true
+        if function.signature == delta -> found_delta = true
+    }
+    assert(found_point && found_delta)
+}
+#Test("quantity_generic_bounds_are_frozen_into_public_api_identity") {
+    length :: parse_source("pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q {{ return value }}".bytes())
+    time :: parse_source("pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q {{ return value }}".bytes())
+    assert_eq(length.diagnostics.len(), 0)
+    assert_eq(time.diagnostics.len(), 0)
+    old :: snapshot_from_items(length.program.items, "units", "1.0.0")
+    new :: snapshot_from_items(time.program.items, "units", "1.0.0")
+    assert_eq(old.funcs[0].signature, "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q")
+    assert(old.funcs[0].signature != new.funcs[0].signature)
+}
+#Test("same_unit_arithmetic_compiles") {
+    source :: "#UnitFamily(Currency) {{ usd eur }}\nfn add(a: Usd, b: Usd) -> Usd {{ return a + b }}\nfn run() {{\n t :: add(Usd.from_float(1.0), Usd.from_float(2.0))\n print(\"{{(t.raw())}}\")\n}}\n"
+    assert_eq(unit_test_codes(source), [String]{})
+}
+#Test("cross_unit_mix_is_e0127") {
+    codes :: unit_test_codes("#UnitFamily(Currency) {{ usd eur }}\nfn run() {{\n bad :: Usd.from_float(1.0) + Eur.from_float(2.0)\n print(\"{{(bad.raw())}}\")\n}}\n")
+    found := false
+    loop code in codes { if code == "E0127" -> found = true }
+    assert(found)
+}
+#Test("bare_float_does_not_coerce_into_unit") {
+    assert(unit_test_codes("#UnitFamily(Currency) {{ usd eur }}\nfn take(p: Usd) {{ print(\"{{(p.raw())}}\") }}\nfn run() {{ take(9.99) }}\n").len() > 0)
+}
+#Test("multi_word_member_pascal_cases") {
+    assert_eq(unit_test_codes("#UnitFamily(Speed) {{ m_per_s }}\nfn run() {{\n v :: MPerS.from_float(3.0)\n print(\"{{(v.raw())}}\")\n}}\n"), [String]{})
+    assert_eq(unit_family_type_name("m_per_s"), "MPerS")
+}
+#Test("currency_keeps_nominal_arithmetic_behavior") {
+    assert_eq(unit_test_codes("#UnitFamily(Currency) {{ usd eur }}\nfn run() {{\n total :: 2usd * 3usd\n print(\"{{(total.raw())}}\")\n}}\n"), [String]{})
+}
+#Test("physical_dimension_mismatch_is_rejected_in_sema") {
+    assert_eq(unit_test_codes("#UnitFamily(Length, dimension) {{ meter }}\nfn run() {{ bad :: 1meter + 1s }}\n"), [String]{"E0359"})
+}
+#Test("physical_value_cannot_compare_with_scalar") {
+    assert_eq(unit_test_codes("#UnitFamily(Length, dimension) {{ meter }}\nfn run() {{ bad :: 1meter < 1.0 }}\n"), [String]{"E0359"})
+}
+#Test("dimension_exponent_limit_is_a_sema_error_not_a_panic") {
+    parts := [String]{"#UnitFamily(Length, dimension) {{ meter }}\nfn run() {{\n q0 :: 1meter\n"}
+    loop exponent in 1..<32 -> &parts.push(" q{exponent} :: q{exponent - 1} * q{exponent - 1}\n")
+    &parts.push("}}\n")
+    codes :: unit_test_codes(parts.join(""))
+    found := false
+    loop code in codes { if code == "E0359" -> found = true }
+    assert(found)
+}
+#Test("quantity_generic_bound_preserves_concrete_unit_and_kind") {
+    assert_eq(unit_test_codes("#UnitFamily(Length, dimension, base: meter) {{ meter }}\nfn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q {{ return value }}\nfn run() {{\n source :: 3meter\n value :: keep(^source)\n print(\"{{(value.raw())}}\")\n}}\n"), [String]{})
+}
+#Test("quantity_generic_bound_rejects_wrong_dimension_and_kind") {
+    assert_eq(unit_test_codes("#UnitFamily(Length, dimension) {{ meter }}\nfn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q {{ return value }}\nfn run() {{\n source :: 3s\n keep(^source)\n}}\n"), [String]{"E0905"})
+    assert_eq(unit_test_codes("#UnitFamily(Temperature, dimension, base: kelvin) {{ kelvin celsius(offset: 27315/100) }}\nfn keep<Q: Quantity<Temperature, .Delta>>(value: ^Q) -> Q {{ return value }}\nfn run() {{\n source :: CelsiusPoint.from_float(Float{{3.0}})\n keep(^source)\n}}\n"), [String]{"E0905"})
+    assert_eq(unit_test_codes("fn choose<Q: Quantity<Length, .Linear>>() {{}}\nfn run() {{ choose() }}\n"), [String]{"E0904"})
+}
+#Test("imported_explicit_quantity_argument_checks_its_bound") {
+    dep :: unit_test_input("pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q {{ return value }}\n", "units", "units", "units.jet")
+    main :: unit_test_input("use \"units\" as units\nfn run() {{\n source :: 1s\n bad :: units.keep<Duration>(^source)\n print(bad.raw())\n}}\n", "main", "units", "main.jet")
+    graph :: unit_test_graph([SemaRegistrationModuleInput]{main, dep}, [SemaRegistrationImportEdge]{unit_test_edge(main, dep, 0)})
+    stage :: sema_collect_comptime_declarations(graph, [], None)
+    root :: unit_test_native.canonicalize(unit_test_path.from_text(".", unit_test_path.PathPlatform.Unix)) ?? panic("fixture root missing")
+    checked :: sema_finalize_registration_graph(graph, stage, [], [], None, None, root)
+    found := false
+    loop diagnostic in checked.diagnostics { if diagnostic.code == "E0905" -> found = true }
+    assert(found)
+}
+#Test("unit_member_source_dimension_composition_registration_positive") {
+    // The complete original runtime fixture from unit_family.rs:282 is retained
+    // here for checked producer closure. Stdout=3.0 is a separate AOT gate.
+    source :: "#UnitFamily(Mass, dimension, base: kilogram) {{ kilogram }}\n#UnitFamily(Length, dimension, base: meter) {{ meter }}\n#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) {{ newton }}\nfn accept(force: Newton) {{ print(\"{{force.raw()}}\") }}\nfn keep<Q: Quantity<Force, .Linear>>(value: ^Q) -> Q {{ return value }}\nfn run() {{\n momentum :: 4kilogram * 3meter\n acceleration_step :: momentum / 2s\n force :: acceleration_step / 2s\n named :: 1newton\n keep(^named)\n keep(^force)\n accept(force)\n}}\n"
+    assert_eq(unit_test_codes(source), [String]{})
+}
+#Test("canonical_time_timeout_and_sleep_spellings_compile") {
+    assert_eq(unit_test_codes("use core.time.[sleep]\nfn run() {{\n #FX(authority: Time) {{\n  wait :: 500ms\n  task.timeout(wait)\n  sleep(500ms)\n }}\n}}\n"), [String]{})
+}
+#Test("scalar_unit_boundaries_and_nominal_currency_stay_rejected") {
+    affine :: "#UnitFamily(Temperature, dimension, base: kelvin) {{\n kelvin\n celsius(scale: 1, offset: 27315/100)\n}}\n"
+    assert_eq(unit_test_codes("{affine}fn run() {{ point :: CelsiusPoint.from_float(Float{{20.0}})\n bad :: point * 2 }}\n"), [String]{"E0109"})
+    assert_eq(unit_test_codes("{affine}fn run() {{ point :: CelsiusPoint.from_float(Float{{20.0}})\n bad :: point * point }}\n"), [String]{"E0127"})
+    length :: "#UnitFamily(Length, dimension, base: meter) {{ meter }}\n"
+    assert_eq(unit_test_codes("{length}fn run() {{ bad :: 2 / 1meter\n bad_float :: 2.0 / 1meter }}\n"), [String]{"E0109", "E0109"})
+    assert_eq(unit_test_codes("{length}fn run() {{ bad :: 1meter * true }}\n"), [String]{"E0109"})
+    assert_eq(unit_test_codes("{length}fn run() {{ scale :: 1.5\n bad :: 1meter * scale }}\n"), [String]{"E0109"})
+    assert_eq(unit_test_codes("{length}#UnitFamily(Mass, dimension, base: gram) {{ gram }}\nfn run() {{ bad :: 1meter + 1gram }}\n"), [String]{"E0359"})
+    currency :: "#UnitFamily(Currency) {{ usd eur }}\n"
+    assert_eq(unit_test_codes("{currency}fn run() {{ price :: Usd.from_float(Float{{2.0}})\n bad :: price * 2 }}\n"), [String]{"E0127"})
+    assert_eq(unit_test_codes("{currency}fn run() {{ left :: Usd.from_float(Float{{2.0}})\n right :: Eur.from_float(Float{{3.0}})\n bad :: left * right }}\n"), [String]{"E0127"})
+}
+
+#Test("symbolic_and_measured_standard_scales_keep_one_explicit_boundary") {
+    assert_eq(unit_test_codes("fn accept(value: Radian) {{}}\nfn run() {{ accept(1degree) }}\n"), [String]{})
+    assert_eq(unit_test_codes("fn run() {{\n mass :: Kilogram.from_dalton_rounded(1dalton, .NearestEven, digits: 30) ?? panic(\"rounded measured conversion\")\n print(mass.value())\n print(mass.uncertainty())\n}}\n"), [String]{})
+}
+#Test("measure_rules_cover_fixed_lengths_and_matrix_shapes") {
+    assert_eq(unit_test_codes("fn join(left: [Int#2], right: [Int#3]) -> [Int#5] {{ return left.concat(right) }}\nfn run() {{}}\n"), [String]{})
+    assert_eq(unit_test_codes("fn compose(left: Matrix<3, 4>, right: Matrix<4, 2>) -> Matrix<3, 2> ComputeError! {{ return left * right }}\nfn run() {{}}\n"), [String]{})
+}
+#Test("affine_point_delta_algebra_and_conversion_compile") {
+    source :: "#UnitFamily(Temperature, dimension, base: kelvin) {{\n kelvin\n celsius(scale: 1, offset: 27315/100)\n}}\nfn run() {{\n freezing :: CelsiusPoint.from_float(Float{{0.0}})\n step :: CelsiusDelta.from_float(Float{{5.0}})\n warmer :: freezing + step\n drift :: warmer - freezing\n total :: drift + step\n absolute :: KelvinPoint.from_celsius_point_rounded(warmer, .NearestEven, digits: 0) ?? panic(\"rounded point conversion\")\n relative :: KelvinDelta.from_celsius_delta(total) ?? panic(\"exact delta conversion\")\n print(\"{{(absolute.raw())}} {{(relative.raw())}}\")\n}}\n"
+    assert_eq(unit_test_codes(source), [String]{})
+}
+#Test("exact_same_dimension_conversion_covers_arithmetic_arguments_and_bindings") {
+    source :: "#UnitFamily(Length, dimension, base: meter) {{\n meter\n millimeter(scale: 1/1000)\n}}\nfn takes_millimeter(value: Millimeter) {{ print(\"{{(value.raw())}}\") }}\nfn run() {{\n coarse :: 3meter\n fine :: 42millimeter\n total :: coarse + fine\n takes_millimeter(3meter)\n binding :: Millimeter{{ 4meter }}\n print(\"{{(total.raw())}} {{(binding.raw())}}\")\n}}\n"
+    assert_eq(unit_test_codes(source), [String]{})
+}
+#Test("explicit_units_policy_requires_destination_owned_conversion") {
+    family :: "#UnitFamily(Length, dimension, base: meter) {{ meter millimeter(scale: 1/1000) }}\n"
+    assert_eq(unit_test_codes("{family}#Policy(explicit_units)\nfn run() {{ total :: 1meter + 1millimeter\n print(\"{{(total.raw())}}\") }}\n"), [String]{"E0127"})
+    assert_eq(unit_test_codes("{family}#Policy(explicit_units)\nfn run() {{ converted :: Meter.from_millimeter(1000millimeter) ?? panic(\"exact conversion\")\n total :: 1meter + converted\n print(\"{{(total.raw())}}\") }}\n"), [String]{})
+    assert_eq(unit_test_codes("#Policy(explicit_units)\n{family}fn run() {{ total :: 1meter + 1millimeter\n print(total.raw()) }}\n"), [String]{"E0127"})
+    assert_eq(unit_test_codes("{family}fn run() {{ #Policy(explicit_units) {{ total :: 1meter + 1millimeter\n print(total.raw()) }} }}\n"), [String]{"E0127"})
+}
+#Test("implicit_unit_conversion_rejects_rounding_and_overflow_boundaries") {
+    assert_eq(unit_test_codes("#UnitFamily(Length, dimension, base: meter) {{ meter thirdish(scale: 2/3) }}\nfn run() {{ value :: 1meter + 1thirdish\n print(\"{{(value.raw())}}\") }}\n"), [String]{"E0127"})
+    digits :: (loop _ in 0..<400 -> "9").join("")
+    family :: "#UnitFamily(Length, dimension, base: meter) {{ meter giant(scale: {digits}) }}\n"
+    assert_eq(unit_test_codes("{family}fn run() {{ value :: 1giant + 1meter\n print(\"{{(value.raw())}}\") }}\n"), [String]{"E0127"})
+    assert_eq(unit_test_codes("{family}fn run() {{ value :: Meter.from_giant(1giant)\n print(\"{{(value.raw())}}\") }}\n"), [String]{"E0127"})
+}
+#Test("unit_scalar_rewrap_lint_requires_the_direct_policy_free_identity") {
+    source :: "#UnitFamily(Length, base: meter) {{ meter half(scale: 1/2) }}\n#UnitFamily(Temperature, base: kelvin) {{ kelvin celsius(scale: 1, offset: 27315/100) }}\nfn external_scale(value: Float) -> Float -> calibrate(value)\nfn calibrate(value: Float) -> Float -> value * 2\nfn run() {{\n value :: Meter.from_float(Float{{4.0}})\n print(Meter.from_float(value.raw() * 2).raw())\n print(Meter.from_float(value.raw() * calibrate(2.0)).raw())\n print(Meter.from_float(value.raw() * external_scale(2.0)).raw())\n print(Meter.from_float(value.raw() * Float.from_float(calibrate(2.0))).raw())\n print(Meter.from_float(value.raw() * Float.from_float(external_scale(2.0))).raw())\n rounded :: Meter.from_half_rounded(1half, .NearestEven, digits: 0) ?? Meter.from_float(Float{{0.0}})\n print(rounded.raw())\n point :: CelsiusPoint.from_float(Float{{20.0}})\n print(CelsiusPoint.from_float(point.raw() * 2).raw())\n #Arithmetic(.Wrapping) {{ print(Meter.from_float(value.raw() * 2).raw()) }}\n}}\n"
+    checked :: unit_test_checked(source)
+    assert(checked.complete)
+    count := 0
+    loop diagnostic in checked.diagnostics { if diagnostic.code == "L0519" -> count += 1 }
+    assert_eq(count, 1)
+}
+
+#Test("imported_same_leaf_units_keep_distinct_dimensions") {
+    length :: unit_test_input("#UnitFamily(Length, dimension) {{ unit }}\npub fn sample() -> [[String: [Unit]]] {{ return [[\"values\": [1unit]]] }}\npub fn first(container: [[String: [Unit]]]) -> Unit {{ return container[0][\"values\"][0] }}\n", "length", "units", "length.jet")
+    time :: unit_test_input("#UnitFamily(Time, dimension) {{ unit }}\npub fn sample() -> [[String: [Unit]]] {{ return [[\"values\": [1unit]]] }}\npub fn first(container: [[String: [Unit]]]) -> Unit {{ return container[0][\"values\"][0] }}\n", "time", "units", "time.jet")
+    main :: unit_test_input("use \"length\" as length\nuse \"time\" as time\nfn run() {{ bad :: length.first(length.sample()) + time.first(time.sample()) }}\n", "main", "units", "main.jet")
+    checked :: unit_test_checked_modules([SemaRegistrationModuleInput]{main, length, time}, [SemaRegistrationImportEdge]{unit_test_edge(main, length, 0), unit_test_edge(main, time, 1)})
+    assert_eq(loop diagnostic in checked.diagnostics { if diagnostic.severity == 1 -> diagnostic.code }, [String]{"E0359"})
+}
+#Test("physical_dimensions_cross_file_boundaries_canonically_checked_producer") {
+    // Original's generated-text assertion is retained as a separate native
+    // backend witness; the complete original checked source is exercised here.
+    units :: unit_test_input("#UnitFamily(Length, dimension) {{ meter }}\npub fn distance() -> Meter {{ return 12meter }}\npub fn elapsed() -> Duration {{ return 3s }}\n", "units", "units", "units.jet")
+    main :: unit_test_input("use \"units\" as units\nfn run() {{\n speed :: units.distance() / units.elapsed()\n recovered :: speed * units.elapsed()\n print(\"ok\")\n}}\n", "main", "units", "main.jet")
+    checked :: unit_test_checked_modules([SemaRegistrationModuleInput]{main, units}, [SemaRegistrationImportEdge]{unit_test_edge(main, units, 0)})
+    assert(checked.complete)
+}
+#Test("exact_concrete_coercion_checked_conversion_paths") {
+    source :: "#UnitFamily(Length, dimension, base: meter) {{ meter millimeter(scale: 1/1000) }}\nfn takes_meter(value: Meter) {{ print(\"{{(value.raw())}}\") }}\nfn run() {{ takes_meter(3000millimeter) }}\n"
+    assert_eq(unit_test_codes(source), [String]{})
+    family :: "#UnitFamily(Length, dimension, base: meter) {{ meter double(scale: 2) }}\nfn takes_meter(value: Meter) {{ print(value.raw()) }}\n"
+    loop value in [String]{"0.25", "1.7976931348623157e308"} {
+        assert_eq(unit_test_codes("{family}fn relay(value: Double) {{ takes_meter(value) }}\nfn run() {{ relay(Double.from_float(Float{{{value}}})) }}\n"), [String]{"E0127"})
+    }
+    assert_eq(unit_test_codes("{family}fn run() {{ takes_meter(Double.from_float(Float{{-1.0}})) }}\n"), [String]{})
+    assert_eq(unit_test_codes("{family}fn run() {{ value :: Double.from_float(Float{{-2.0}})\n takes_meter(value) }}\n"), [String]{})
+    assert_eq(unit_test_codes("{family}fn run() {{ takes_meter(Double.from_float(Float{{-0.25}})) }}\n"), [String]{"E0127"})
+    assert_eq(unit_test_codes("#UnitFamily(Length, dimension, base: meter) {{ meter alias(scale: 1) }}\nfn takes_meter(value: Meter) {{ print(value.raw()) }}\nfn relay(value: Alias) {{ takes_meter(value) }}\nfn run() {{ relay(Alias.from_float(Float{{0.25}})) }}\n"), [String]{})
+}

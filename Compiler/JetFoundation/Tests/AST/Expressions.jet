@@ -1,0 +1,401 @@
+// Behavioral controls for Rust AST/expressions.rs: no inline original tests.
+// Integration corpus-policy originals remain owned by packets 1159/1160.
+fn expressions_test_span(start: Int) -> Span Never! { Span{start: start, end: start + 1} }
+fn expressions_test_leaf(start: Int) -> Expr Never! {
+    Expr.Int{value: start, span: expressions_test_span(start), width: None, raw: None}
+}
+fn expressions_test_arg(value: Expr) -> CallArg Never! {
+    CallArg{convention: AccessConvention.Read, expr: ~value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+}
+fn expressions_test_call(args: [CallArg]) -> Expr Never! {
+    Expr.Call{call: Call{name: "f", name_span: expressions_test_span(1), type_args: [Type]{}, args: args, resolved_ret: None, range_checked: false, widen_approx: false}}
+}
+fn expressions_test_lambda(body: LambdaBody) -> Expr Never! {
+    Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, result_type: None, error_type: None, effects: None, body: body, span: expressions_test_span(1), meta: ast_empty_lambda_meta()}}
+}
+struct ExpressionsReadVisitor { spans: [Span] }
+impl ExpressionsReadVisitor.ASTExprVisitor {
+    fn visit(&self, expression: Expr) Never! { &self.spans.push(expr_span(expression)) }
+}
+struct ExpressionsMutVisitor { spans: [Span] }
+impl ExpressionsMutVisitor.ASTExprMutVisitor {
+    fn visit(&self, expression: &Expr) Never! {
+        old :: expr_span(expression)
+        &self.spans.push(old)
+        expr_reanchor(&expression, expressions_test_span(old.start + 100))
+    }
+}
+struct ExpressionsCase { value: Expr, order: [Int] }
+fn expressions_case(value: Expr, order: [Int]) -> ExpressionsCase Never! { ExpressionsCase{value: value, order: order} }
+fn expressions_expected_spans(order: [Int], offset: Int) -> [Span] Never! {
+    spans := [Span]{}
+    loop start in order -> &spans.push(expressions_test_span(start + offset))
+    spans
+}
+fn expressions_test_walk(case: ExpressionsCase) Never! {
+    reader := ExpressionsReadVisitor{spans: [Span]{}}
+    ast_expr_for_each_expr<ExpressionsReadVisitor>(case.value, &reader)
+    assert_eq(reader.spans, expressions_expected_spans(case.order, 0))
+    value := ~case.value
+    writer := ExpressionsMutVisitor{spans: [Span]{}}
+    ast_expr_for_each_expr_mut<ExpressionsMutVisitor>(&value, &writer)
+    assert_eq(writer.spans, expressions_expected_spans(case.order, 0))
+    restored := ExpressionsReadVisitor{spans: [Span]{}}
+    ast_expr_for_each_expr<ExpressionsReadVisitor>(value, &restored)
+    assert_eq(restored.spans, expressions_expected_spans(case.order, 100))
+    unchanged := ExpressionsReadVisitor{spans: [Span]{}}
+    ast_expr_for_each_expr<ExpressionsReadVisitor>(case.value, &unchanged)
+    assert_eq(unchanged.spans, expressions_expected_spans(case.order, 0))
+}
+
+#Test("arithmetic_mode_operation_names_and_exact_unparenthesized_shapes") {
+    modes :: [ArithmeticMode]{.Checked, .Wrapping, .Saturating}
+    names :: [String]{"Checked", "Wrapping", "Saturating"}
+    builtins :: [String]{"__jet_arithmetic_checked", "wrapping", "saturating"}
+    span :: expressions_test_span(1)
+    loop index in 0..<modes.len() {
+        assert_eq(arithmetic_mode_as_str(modes[index]), names[index])
+        assert_eq(arithmetic_mode_builtin(modes[index]), builtins[index])
+        ident :: Expr.Ident{name: names[index], span: span}
+        assert_eq(arithmetic_mode_from_expr(ident), Val(modes[index]))
+        assert_eq(arithmetic_mode_from_expr(Expr.Field{base: expressions_test_leaf(2), member: names[index], span: span}), Val(modes[index]))
+        assert_eq(arithmetic_mode_from_expr(Expr.EnumLit{type_name: "Other", variant: names[index], variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span}), Val(modes[index]))
+        assert_eq(arithmetic_mode_from_expr(Expr.Paren{value: ident, span: span}), None)
+    }
+    assert_eq(arithmetic_mode_from_expr(Expr.Ident{name: "checked", span: span}), None)
+    assert_eq(arithmetic_mode_from_expr(expressions_test_leaf(1)), None)
+    operations :: [ArithmeticOperation]{.Add, .Sub, .Mul, .Neg, .Pow}
+    spellings :: [String]{"add", "sub", "mul", "neg", "pow"}
+    loop index in 0..<operations.len() -> assert_eq(arithmetic_operation_as_str(operations[index]), spellings[index])
+}
+#Test("every_binary_operator_spelling_comparison_and_compound_control") {
+    ops :: [BinOp]{.Add, .Sub, .Mul, .Div, .FloorDiv, .Mod, .Rem, .Pow, .BitAnd, .BitOr, .BitXor, .Shl, .Shr, .Eq, .Ne, .Lt, .Gt, .Le, .Ge, .Compare, .And, .Or}
+    spellings :: [String]{"+", "-", "*", "/", "/%", "%", "%%", "^", "&", "|", "~|", "<<", ">>", "==", "!=", "<", ">", "<=", ">=", "<=>", "&&", "||"}
+    compounds :: [String]{"+=", "-=", "*=", "/=", "/%=", "%=", "%%=", "^=", "&=", "|=", "~|=", "<<=", ">>="}
+    loop index in 0..<ops.len() {
+        assert_eq(bin_op_spell(ops[index]), spellings[index])
+        assert_eq(bin_op_is_comparison(ops[index]), index >= 13 && index <= 18)
+        if index < compounds.len() -> assert_eq(bin_op_compound_spell(ops[index]), Val(compounds[index])) else -> assert_eq(bin_op_compound_spell(ops[index]), None)
+    }
+}
+#Test("byte_text_preserves_ascii_and_arbitrary_explicit_bytes_rejects_unicode") {
+    assert_eq(typed_lit_byte_text_bytes([ByteTextPart]{}), Val([U8]{}))
+    assert_eq(typed_lit_byte_text_bytes([ByteTextPart]{.Lit{text: "A{TEXT_NUL}"}, .Byte{value: U8{255}}, .Lit{text: "\n"}, .Byte{value: U8{128}}}), Val([U8]{65, 0, 255, 10, 128}))
+    assert_eq(typed_lit_byte_text_bytes([ByteTextPart]{.Byte{value: U8{7}}, .Lit{text: "é"}, .Byte{value: U8{255}}}), None)
+    assert_eq(typed_lit_byte_text_bytes([ByteTextPart]{.Lit{text: "λ"}}), None)
+}
+#Test("marker_projections_preserve_expression_and_effect_row_span_ownership") {
+    marker :: MarkerCallArg.Expr{value: expressions_test_leaf(2)}
+    borrowed :: marker_call_arg_as_expr(marker) ?? panic("expression projection")
+    assert_eq(expr_span(borrowed), expressions_test_span(2))
+    assert_eq(marker_call_arg_span(marker), expressions_test_span(2))
+    row :: MarkerCallArg.EffectRow{effects: [EffectRowEntry]{EffectRowEntry{name: "FS.Read", span: expressions_test_span(4)}}, span: expressions_test_span(3)}
+    assert_eq(marker_call_arg_as_expr(row), None)
+    assert_eq(marker_call_arg_span(row), expressions_test_span(3))
+}
+#Test("without_parens_borrows_innermost_node_but_span_preserves_author_grouping") {
+    value :: Expr.Paren{value: Expr.Paren{value: expressions_test_leaf(3), span: expressions_test_span(2)}, span: expressions_test_span(1)}
+    assert_eq(expr_span(value), expressions_test_span(1))
+    assert_eq(expr_span(expr_without_parens(value)), expressions_test_span(3))
+    assert_eq(expr_span(expr_without_parens(expressions_test_leaf(4))), expressions_test_span(4))
+}
+#Test("typed_literal_direct_visitors_are_not_recursive") {
+    span :: expressions_test_span(1)
+    nested :: Expr.Paren{value: expressions_test_leaf(3), span: expressions_test_span(2)}
+    cases :: [TypedLitBody]{.Fields{fields: [ExprField]{ExprField{name: "x", name_span: span, value: nested}}}, .Elements{elements: [Expr]{nested}}, .Entries{entries: [ExprPair]{ExprPair{key: expressions_test_leaf(4), value: nested}}}, .Value{value: nested}, .ByteText{parts: [ByteTextPart]{.Byte{value: U8{255}}}}, .Empty}
+    orders :: [[Int]]{[Int]{2}, [Int]{2}, [Int]{4, 2}, [Int]{2}, [Int]{}, [Int]{}}
+    loop index in 0..<cases.len() {
+        reader := ExpressionsReadVisitor{spans: [Span]{}}
+        typed_lit_for_each_expr<ExpressionsReadVisitor>(cases[index], &reader)
+        assert_eq(reader.spans, expressions_expected_spans(orders[index], 0))
+        body := ~cases[index]
+        writer := ExpressionsMutVisitor{spans: [Span]{}}
+        typed_lit_for_each_expr_mut<ExpressionsMutVisitor>(&body, &writer)
+        assert_eq(writer.spans, reader.spans)
+        changed := ExpressionsReadVisitor{spans: [Span]{}}
+        typed_lit_for_each_expr<ExpressionsReadVisitor>(body, &changed)
+        assert_eq(changed.spans, expressions_expected_spans(orders[index], 100))
+    }
+}
+
+#Test("expression_walk_covers_every_payload_shape_in_source_preorder") {
+    span :: expressions_test_span(1)
+    cases :: [ExpressionsCase]{
+        expressions_case(Expr.Str{parts: [StrPart]{.Lit{text: "text"}, .Interp{expr: expressions_test_leaf(2), format: .Display}, .Interp{expr: expressions_test_leaf(3), format: .Debug}}, span: span}, [Int]{1, 2, 3}),
+        expressions_case(Expr.StrMatchLit{parts: [StrMatchPart]{.Hole{name: "x", ty: None, span: expressions_test_span(9)}}, span: span}, [Int]{1}),
+        expressions_case(Expr.BinMatchLit{parts: [BinMatchPart]{.Lit{bytes: [U8]{255}}}, span: span}, [Int]{1}),
+        expressions_case(expressions_test_leaf(1), [Int]{1}),
+        expressions_case(Expr.Float{value: 1.5, span: span, is_f32: true, raw: Val("1.5")}, [Int]{1}),
+        expressions_case(Expr.Bool{value: true, span: span}, [Int]{1}),
+        expressions_case(Expr.Unit{span: span}, [Int]{1}),
+        expressions_case(Expr.Char{value: "λ", span: span}, [Int]{1}),
+        expressions_case(Expr.ListLit{elements: [Expr]{expressions_test_leaf(2), expressions_test_leaf(3)}, span: span}, [Int]{1, 2, 3}),
+        expressions_case(Expr.MemberSpread{base: expressions_test_leaf(2), members: [ExprMember]{ExprMember{name: "x", span: expressions_test_span(9)}}, span: span}, [Int]{1, 2}),
+        expressions_case(Expr.Spread{value: expressions_test_leaf(2), span: span}, [Int]{1, 2}),
+        expressions_case(Expr.MapLit{entries: [ExprPair]{ExprPair{key: expressions_test_leaf(2), value: expressions_test_leaf(3)}}, span: span}, [Int]{1, 2, 3}),
+        expressions_case(Expr.Index{base: expressions_test_leaf(2), index: expressions_test_leaf(3), span: span, kind: .List}, [Int]{1, 2, 3}),
+        expressions_case(Expr.Slice{base: expressions_test_leaf(2), start: expressions_test_leaf(3), end: expressions_test_leaf(4), range: Val(expressions_test_leaf(5)), span: span}, [Int]{1, 2, 3, 4, 5}),
+        expressions_case(Expr.Range{start: expressions_test_leaf(2), end: expressions_test_leaf(3), exclusive: true, span: span}, [Int]{1, 2, 3}),
+        expressions_case(Expr.Ident{name: "x", span: span}, [Int]{1}),
+        expressions_case(expressions_test_call([CallArg]{expressions_test_arg(expressions_test_leaf(2)), expressions_test_arg(expressions_test_leaf(3))}), [Int]{1, 2, 3}),
+        expressions_case(Expr.Unary{op: .Neg, operand: expressions_test_leaf(2), span: span}, [Int]{1, 2}),
+        expressions_case(Expr.Binary{op: .Add, left: expressions_test_leaf(2), right: expressions_test_leaf(3), span: span}, [Int]{1, 2, 3}),
+        expressions_case(Expr.CompareChain{operands: [Expr]{expressions_test_leaf(2), expressions_test_leaf(3), expressions_test_leaf(4)}, ops: [BinOp]{.Lt, .Le}, hooks: [Bool]{false, true}, span: span}, [Int]{1, 2, 3, 4}),
+        expressions_case(Expr.UnitLit{raw: "12.5", int: None, float: Val(12.5), suffix: "ms", suffix_span: expressions_test_span(9), span: span}, [Int]{1}),
+        expressions_case(Expr.Deref{value: expressions_test_leaf(2), span: span}, [Int]{1, 2}),
+        expressions_case(Expr.RawOf{value: expressions_test_leaf(2), span: span}, [Int]{1, 2}),
+        expressions_case(Expr.Copy{value: expressions_test_leaf(2), span: span}, [Int]{1, 2}),
+        expressions_case(Expr.Place{value: expressions_test_leaf(2), access: .Take, span: span}, [Int]{1, 2}),
+        expressions_case(Expr.Field{base: expressions_test_leaf(2), member: "x", span: span}, [Int]{1, 2}),
+        expressions_case(Expr.OptField{base: expressions_test_leaf(2), member: "x", member_span: expressions_test_span(9), flatten: true, span: span}, [Int]{1, 2}),
+        expressions_case(Expr.MethodCall{receiver: expressions_test_leaf(2), method: "f", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{expressions_test_arg(expressions_test_leaf(3))}, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}, [Int]{1, 2, 3}),
+        expressions_case(Expr.OptMethodCall{receiver: expressions_test_leaf(2), method: "f", method_span: span, type_args: [Type]{}, args: [CallArg]{expressions_test_arg(expressions_test_leaf(3))}, span: expressions_test_span(7), receiver_span: expressions_test_span(8), call_span: expressions_test_span(9)}, [Int]{1, 2, 3}),
+        expressions_case(Expr.StructLit{type_name: "Point", type_args: [Type]{}, import_ns: None, as_trait: None, fields: [ExprField]{ExprField{name: "x", name_span: expressions_test_span(9), value: expressions_test_leaf(2)}}, inferred: false, span: span}, [Int]{1, 2}),
+        expressions_case(Expr.TypedLit{head: None, body: .Entries{entries: [ExprPair]{ExprPair{key: expressions_test_leaf(2), value: expressions_test_leaf(3)}}}, span: span}, [Int]{1, 2, 3}),
+        expressions_case(Expr.EnumLit{type_name: "E", variant: "V", variant_span: Val(expressions_test_span(9)), args: [EnumLitArg]{.Positional{value: expressions_test_leaf(2)}, .Named{label: "x", expr: expressions_test_leaf(3)}}, leading_dot: false, span: span}, [Int]{1, 2, 3}),
+        expressions_case(Expr.Tainted{value: expressions_test_leaf(2), tag: Val("Secret"), span: span}, [Int]{1, 2}),
+        expressions_case(Expr.Present{value: expressions_test_leaf(2), span: span}, [Int]{1, 2}),
+        expressions_case(Expr.Absent{span: span}, [Int]{1}),
+        expressions_case(Expr.Todo{span: span, expected_type: Val("Int")}, [Int]{1}),
+        expressions_case(Expr.NoElse{span: span}, [Int]{1}),
+        expressions_case(Expr.ReduceMarker{name: "Add", span: span}, [Int]{1}),
+        expressions_case(Expr.PatternTest{subject: expressions_test_leaf(2), pattern: .Or{alternatives: [Pattern]{.Struct{fields: [StructPatField]{.Value{field: "x", field_span: expressions_test_span(9), value: expressions_test_leaf(3)}}, rest: None, span: span}, .Absent{span: span}}, span: span}, span: span}, [Int]{1, 2, 3}),
+        expressions_case(Expr.Ok{value: expressions_test_leaf(2), span: span}, [Int]{1, 2}),
+        expressions_case(Expr.Err{value: expressions_test_leaf(2), span: span}, [Int]{1, 2}),
+        expressions_case(Expr.Try{value: expressions_test_leaf(2), span: span, conversion: .NoConversion, context: Val(expressions_test_leaf(3))}, [Int]{1, 2, 3}),
+        expressions_case(Expr.OrFallback{value: expressions_test_leaf(2), fallback: .Block{body: [Stmt]{.Expr{expr: expressions_test_leaf(3)}}, value: Val(expressions_test_leaf(4)), span: span}, is_option: true, span: span}, [Int]{1, 2, 3, 4}),
+        expressions_case(Expr.If{cond: expressions_test_leaf(2), then_body: [Stmt]{.Expr{expr: expressions_test_leaf(3)}}, then_value: expressions_test_leaf(4), else_body: [Stmt]{.Expr{expr: expressions_test_leaf(5)}}, else_value: expressions_test_leaf(6), span: span}, [Int]{1, 2, 3, 4, 5, 6}),
+        expressions_case(Expr.TupleLit{fields: [TupleField]{TupleField{name: "x", value: expressions_test_leaf(2)}, TupleField{name: "y", value: expressions_test_leaf(3)}}, span: span, ty: None}, [Int]{1, 2, 3}),
+        expressions_case(expressions_test_lambda(.Expr{value: expressions_test_leaf(2)}), [Int]{1, 2}),
+        expressions_case(expressions_test_lambda(.Block{body: [Stmt]{.Expr{expr: expressions_test_leaf(2)}}}), [Int]{1, 2}),
+        expressions_case(Expr.CallValue{callee: expressions_test_leaf(2), args: [CallArg]{expressions_test_arg(expressions_test_leaf(3))}, span: span}, [Int]{1, 2, 3}),
+        expressions_case(Expr.PtrFromAddr{alias: "mem", alias_span: expressions_test_span(9), elem: Type.Int, addr: expressions_test_leaf(2), span: span}, [Int]{1, 2}),
+        expressions_case(Expr.ComptimeName{name: "$n", span: span, value: None}, [Int]{1}),
+        expressions_case(Expr.Paren{value: expressions_test_leaf(2), span: span}, [Int]{1, 2}),
+    }
+    loop case in cases -> expressions_test_walk(case)
+}
+
+#Test("reanchor_changes_only_original_outer_and_named_diagnostic_slots") {
+    old :: expressions_test_span(1)
+    new :: expressions_test_span(100)
+    member := Expr.MemberSpread{base: expressions_test_leaf(2), members: [ExprMember]{ExprMember{name: "x", span: expressions_test_span(3)}}, span: old}
+    expr_reanchor(&member, new)
+    if member == .MemberSpread(base, members, span) { assert_eq(expr_span(base), expressions_test_span(2)); assert_eq(members[0].span, new); assert_eq(span, new) } else -> assert(false)
+    field := Expr.OptField{base: expressions_test_leaf(2), member: "x", member_span: expressions_test_span(3), flatten: true, span: old}
+    expr_reanchor(&field, new)
+    if field == .OptField(base, _, member_span, flatten, span) { assert_eq(expr_span(base), expressions_test_span(2)); assert_eq(member_span, new); assert(flatten); assert_eq(span, new) } else -> assert(false)
+    record := Expr.StructLit{type_name: "Point", type_args: [Type]{}, import_ns: None, as_trait: None, fields: [ExprField]{ExprField{name: "x", name_span: expressions_test_span(3), value: expressions_test_leaf(2)}}, inferred: false, span: old}
+    expr_reanchor(&record, new)
+    if record == .StructLit(_, _, _, _, fields, _, span) { assert_eq(fields[0].name_span, new); assert_eq(expr_span(fields[0].value), expressions_test_span(2)); assert_eq(span, new) } else -> assert(false)
+    unit := Expr.UnitLit{raw: "5", int: Val(5), float: None, suffix: "ms", suffix_span: expressions_test_span(3), span: old}
+    expr_reanchor(&unit, new)
+    if unit == .UnitLit(raw, _, _, _, suffix_span, span) { assert_eq(raw, "5"); assert_eq(suffix_span, expressions_test_span(3)); assert_eq(span, new) } else -> assert(false)
+    variant := Expr.EnumLit{type_name: "E", variant: "V", variant_span: Val(expressions_test_span(3)), args: [EnumLitArg]{.Positional{value: expressions_test_leaf(2)}}, leading_dot: true, span: old}
+    expr_reanchor(&variant, new)
+    if variant == .EnumLit(_, _, variant_span, args, leading_dot, span) { assert_eq(variant_span, Val(expressions_test_span(3))); assert_eq(span, new); assert(leading_dot); if args[0] == .Positional(value) -> assert_eq(expr_span(value), expressions_test_span(2)) } else -> assert(false)
+    pointer := Expr.PtrFromAddr{alias: "mem", alias_span: expressions_test_span(3), elem: Type.Int, addr: expressions_test_leaf(2), span: old}
+    expr_reanchor(&pointer, new)
+    if pointer == .PtrFromAddr(_, alias_span, _, addr, span) { assert_eq(alias_span, expressions_test_span(3)); assert_eq(expr_span(addr), expressions_test_span(2)); assert_eq(span, new) } else -> assert(false)
+}
+struct ExpressionsReplaceVisitor { spans: [Span] }
+impl ExpressionsReplaceVisitor.ASTExprMutVisitor {
+    fn visit(&self, expression: &Expr) Never! {
+        &self.spans.push(expr_span(expression))
+        if expr_span(expression).start == 1 -> expression = Expr.Paren{value: expressions_test_leaf(7), span: expressions_test_span(9)}
+    }
+}
+#Test("mutable_walk_matches_after_callback_replacement_not_before") {
+    value := Expr.ListLit{elements: [Expr]{expressions_test_leaf(2), expressions_test_leaf(3)}, span: expressions_test_span(1)}
+    visitor := ExpressionsReplaceVisitor{spans: [Span]{}}
+    ast_expr_for_each_expr_mut<ExpressionsReplaceVisitor>(&value, &visitor)
+    assert_eq(visitor.spans, [Span]{expressions_test_span(1), expressions_test_span(7)})
+    assert_eq(expr_span(value), expressions_test_span(9))
+}
+
+#Test("arithmetic_facts_preserve_duplicates_order_and_exclude_nonoperations") {
+    fact :: ArithmeticPolicyFact{mode: .Wrapping, scope_span: expressions_test_span(10), operation_span: expressions_test_span(11), operation: Val(ArithmeticOperation.Add)}
+    first := expressions_test_arg(expressions_test_leaf(2))
+    first.flags.arithmetic_policy = Val(fact)
+    second := expressions_test_arg(expressions_test_leaf(3))
+    second.flags.arithmetic_policy = Val(ArithmeticPolicyFact{mode: .Saturating, scope_span: expressions_test_span(12), operation_span: expressions_test_span(13), operation: None})
+    nested :: expressions_test_call([CallArg]{first})
+    outer :: expressions_test_call([CallArg]{first, second, expressions_test_arg(nested)})
+    assert_eq(arithmetic_policy_facts([Stmt]{.Expr{expr: outer}}), [ArithmeticPolicyFact]{fact, fact})
+    assert_eq(arithmetic_policy_facts([Stmt]{}), [ArithmeticPolicyFact]{})
+    assert_eq(arithmetic_policy_facts([Stmt]{.Expr{expr: expressions_test_leaf(1)}}), [ArithmeticPolicyFact]{})
+    // The top-level statement walker deliberately excludes a Val refutable
+    // fallback, while a Val nested under an expression lambda includes it.
+    binding := ast_binding("x", expressions_test_span(1), false, expressions_test_leaf(2), None)
+    binding.pattern = Val(BindPattern.Refutable{pattern: .Absent{span: expressions_test_span(1)}, fallback: .Value{value: nested}, names: [BindName]{}, span: expressions_test_span(1), synthesized: false})
+    assert_eq(arithmetic_policy_facts([Stmt]{.Val{binding: binding}}), [ArithmeticPolicyFact]{})
+    assert_eq(arithmetic_policy_facts([Stmt]{.Expr{expr: expressions_test_lambda(.Block{body: [Stmt]{.Val{binding: binding}}})}}), [ArithmeticPolicyFact]{fact})
+}
+
+struct ExpressionsStatementCase { statement: Stmt, order: [Int] }
+fn expressions_statement_case(statement: Stmt, order: [Int]) -> ExpressionsStatementCase Never! {
+    ExpressionsStatementCase{statement: statement, order: order}
+}
+#Test("nested_statement_walk_covers_every_statement_lvalue_for_kind_and_optional_route") {
+    span :: expressions_test_span(9)
+    body :: [Stmt]{.Expr{expr: expressions_test_leaf(4)}}
+    binding := ast_binding("x", span, false, expressions_test_leaf(2), None)
+    binding.pattern = Val(BindPattern.Refutable{pattern: .Struct{fields: [StructPatField]{.Value{field: "x", field_span: span, value: expressions_test_leaf(3)}}, rest: None, span: span}, fallback: .Value{value: expressions_test_leaf(5)}, names: [BindName]{}, span: span, synthesized: false})
+    marker :: Marker{name: "M", negated: false, name_span: span, args: [MarkerCallArg]{MarkerCallArg.Expr{value: expressions_test_leaf(8)}}, arg_labels: [CallLabel?]{None}, span: span, ct: None}
+    cases :: [ExpressionsStatementCase]{
+        expressions_statement_case(.Expr{expr: expressions_test_leaf(2)}, [Int]{2}),
+        expressions_statement_case(.DeferClose{close: expressions_test_leaf(2), span: span}, [Int]{2}),
+        expressions_statement_case(.Val{binding: binding}, [Int]{2, 3, 5}),
+        expressions_statement_case(.Assign{target: .Local{name: "x", name_span: span}, op: None, op_span: span, value: expressions_test_leaf(2)}, [Int]{2}),
+        expressions_statement_case(.Assign{target: .Index{base: expressions_test_leaf(2), index: expressions_test_leaf(3), span: span, kind: .List}, op: None, op_span: span, value: expressions_test_leaf(4)}, [Int]{2, 3, 4}),
+        expressions_statement_case(.Assign{target: .Field{base: expressions_test_leaf(2), field: "x", span: span}, op: None, op_span: span, value: expressions_test_leaf(4)}, [Int]{2, 4}),
+        expressions_statement_case(.Return{value: Val(expressions_test_leaf(2)), span: span}, [Int]{2}),
+        expressions_statement_case(.Return{value: None, span: span}, [Int]{}),
+        expressions_statement_case(.While{cond: expressions_test_leaf(2), body: body, span: span, arrow_body: false, label: None}, [Int]{2, 4}),
+        expressions_statement_case(.For{var: "i", var_span: span, var2: None, kind: .Range{start: expressions_test_leaf(2), end: expressions_test_leaf(3), step: Val(expressions_test_leaf(5)), exclusive: true}, body: body, span: span, arrow_body: false, label: None, auto_vectorization: None}, [Int]{2, 3, 5, 4}),
+        expressions_statement_case(.For{var: "i", var_span: span, var2: None, kind: .In{collection: expressions_test_leaf(2), step: Val(expressions_test_leaf(3))}, body: body, span: span, arrow_body: false, label: None, auto_vectorization: None}, [Int]{2, 3, 4}),
+        expressions_statement_case(.For{var: "i", var_span: span, var2: None, kind: .In{collection: expressions_test_leaf(2), step: None}, body: body, span: span, arrow_body: false, label: None, auto_vectorization: None}, [Int]{2, 4}),
+        expressions_statement_case(.Switch{subject: expressions_test_leaf(2), arms: [SwitchArm]{SwitchArm{cond: expressions_test_leaf(3), body: body, span: span}}, else_body: Val([Stmt]{.Expr{expr: expressions_test_leaf(5)}}), span: span}, [Int]{2, 3, 4, 5}),
+        expressions_statement_case(.ComptimeSwitch{subject: expressions_test_leaf(2), arms: [SwitchArm]{SwitchArm{cond: expressions_test_leaf(3), body: body, span: span}}, else_body: None, span: span}, [Int]{2, 3, 4}),
+        expressions_statement_case(.BreakValue{value: expressions_test_leaf(2), span: span}, [Int]{2}),
+        expressions_statement_case(.Yield{value: expressions_test_leaf(2), span: span}, [Int]{2}),
+        expressions_statement_case(.BreakLabelValue{name: "outer", name_span: span, value: expressions_test_leaf(2), span: span}, [Int]{2}),
+        expressions_statement_case(.Loop{body: body, span: span, arrow_body: false, label: None}, [Int]{4}),
+        expressions_statement_case(.Reactive{body: body, span: span}, [Int]{4}),
+        expressions_statement_case(.Shield{body: body, span: span}, [Int]{4}),
+        expressions_statement_case(.Switched{marker: marker, body: body, span: span}, [Int]{4}),
+        expressions_statement_case(.Region{name: "r", name_span: span, body: body, span: span}, [Int]{4}),
+        expressions_statement_case(.Policy{declarations: [PolicyDeclaration]{}, body: body, span: span}, [Int]{4}),
+        expressions_statement_case(.AuthorityScope{caps: [NamedSpan]{}, caps_span: span, binding: None, body: body, span: span}, [Int]{4}),
+        expressions_statement_case(.ComptimeBlock{body: body, is_template_loop: false, span: span}, [Int]{4}),
+        expressions_statement_case(.Live{body: body, span: span}, [Int]{4}),
+        expressions_statement_case(.Transact{name: None, name_span: None, body: body, implicit: false, span: span}, [Int]{4}),
+        expressions_statement_case(.Unsafe{audit: None, audit_expr: Val(expressions_test_leaf(2)), body: body, span: span}, [Int]{2, 4}),
+        expressions_statement_case(.Unsafe{audit: Val("literal"), audit_expr: None, body: body, span: span}, [Int]{4}),
+        expressions_statement_case(.Impure{reason: None, reason_expr: Val(expressions_test_leaf(2)), body: body, span: span}, [Int]{2, 4}),
+        expressions_statement_case(.Impure{reason: Val("literal"), reason_expr: None, body: body, span: span}, [Int]{4}),
+        // A CountedLoop walks init.init, not its refutable pattern/fallback.
+        expressions_statement_case(.CountedLoop{init: binding, cond: expressions_test_leaf(3), step: Val(Stmt.Expr{expr: expressions_test_leaf(5)}), body: body, span: span, arrow_body: false, label: None}, [Int]{2, 3, 5, 4}),
+        expressions_statement_case(.CountedLoop{init: binding, cond: expressions_test_leaf(3), step: None, body: body, span: span, arrow_body: false, label: None}, [Int]{2, 3, 4}),
+        expressions_statement_case(.TaskGroup{name: "g", name_span: span, limit: Val(expressions_test_leaf(2)), body: body, span: span}, [Int]{2, 4}),
+        expressions_statement_case(.TaskGroup{name: "g", name_span: span, limit: None, body: body, span: span}, [Int]{4}),
+        expressions_statement_case(.Layout{name: "l", name_span: span, body: body, span: span}, [Int]{4}),
+        expressions_statement_case(.ContextBlock{fields: [ContextField]{ContextField{name: "x", value: expressions_test_leaf(2), span: span}, ContextField{name: "y", value: expressions_test_leaf(3), span: span}}, body: body, span: span}, [Int]{2, 3, 4}),
+        expressions_statement_case(.AssumeDet{reason: "audit", reason_expr: expressions_test_leaf(2), body: body, span: span}, [Int]{2, 4}),
+        expressions_statement_case(.ComptimeIf{cond: expressions_test_leaf(2), cond_span: span, then_body: body, else_body: Val([Stmt]{.Expr{expr: expressions_test_leaf(5)}}), span: span, selected_then: Val(true)}, [Int]{2, 4, 5}),
+        expressions_statement_case(.ComptimeIf{cond: expressions_test_leaf(2), cond_span: span, then_body: body, else_body: None, span: span, selected_then: None}, [Int]{2, 4}),
+        expressions_statement_case(.ScopeMember{name: "m", name_span: span, args: [Expr]{expressions_test_leaf(2), expressions_test_leaf(3)}, args_span: None, body: body, dsl: false, dot_span: span, span: span}, [Int]{2, 3, 4}),
+        expressions_statement_case(.Break{span: span}, [Int]{}),
+        expressions_statement_case(.Continue{span: span}, [Int]{}),
+        expressions_statement_case(.BreakLabel{name: "outer", span: span}, [Int]{}),
+        expressions_statement_case(.ContinueLabel{name: "outer", span: span}, [Int]{}),
+    }
+    loop case in cases {
+        order := [Int]{1}
+        loop start in case.order -> &order.push(start)
+        expressions_test_walk(expressions_case(expressions_test_lambda(.Block{body: [Stmt]{case.statement}}), order))
+    }
+}
+
+#Test("fallback_and_typed_body_recursive_walk_branches_and_absent_controls") {
+    span :: expressions_test_span(1)
+    fallbacks :: [OrFallback]{
+        .Value{value: expressions_test_leaf(3)},
+        .Block{body: [Stmt]{.Expr{expr: expressions_test_leaf(3)}}, value: Val(expressions_test_leaf(4)), span: span},
+        .Block{body: [Stmt]{.Expr{expr: expressions_test_leaf(3)}}, value: None, span: span},
+        .Return{value: Val(expressions_test_leaf(3)), span: span},
+        .Return{value: None, span: span},
+        .Panic{name_span: span, args: [CallArg]{expressions_test_arg(expressions_test_leaf(3))}},
+        .Break{span: span}, .Continue{span: span},
+        .BreakLabel{name: "outer", span: span}, .ContinueLabel{name: "outer", span: span},
+    }
+    orders :: [[Int]]{[Int]{1, 2, 3}, [Int]{1, 2, 3, 4}, [Int]{1, 2, 3}, [Int]{1, 2, 3}, [Int]{1, 2}, [Int]{1, 2, 3}, [Int]{1, 2}, [Int]{1, 2}, [Int]{1, 2}, [Int]{1, 2}}
+    loop index in 0..<fallbacks.len() -> expressions_test_walk(expressions_case(Expr.OrFallback{value: expressions_test_leaf(2), fallback: fallbacks[index], is_option: false, span: span}, orders[index]))
+    bodies :: [TypedLitBody]{
+        .Fields{fields: [ExprField]{ExprField{name: "x", name_span: span, value: expressions_test_leaf(2)}}},
+        .Elements{elements: [Expr]{expressions_test_leaf(2)}},
+        .Entries{entries: [ExprPair]{ExprPair{key: expressions_test_leaf(2), value: expressions_test_leaf(3)}}},
+        .Value{value: expressions_test_leaf(2)},
+        .ByteText{parts: [ByteTextPart]{.Byte{value: U8{255}}}}, .Empty,
+    }
+    body_orders :: [[Int]]{[Int]{1, 2}, [Int]{1, 2}, [Int]{1, 2, 3}, [Int]{1, 2}, [Int]{1}, [Int]{1}}
+    loop index in 0..<bodies.len() -> expressions_test_walk(expressions_case(Expr.TypedLit{head: None, body: bodies[index], span: span}, body_orders[index]))
+    expressions_test_walk(expressions_case(Expr.Try{value: expressions_test_leaf(2), span: span, conversion: .NoConversion, context: None}, [Int]{1, 2}))
+    expressions_test_walk(expressions_case(Expr.Slice{base: expressions_test_leaf(2), start: expressions_test_leaf(3), end: expressions_test_leaf(4), range: None, span: span}, [Int]{1, 2, 3, 4}))
+}
+
+fn expressions_test_function(params: [Param]) -> Func Never! {
+    span :: expressions_test_span(1)
+    Func{
+        span: span, is_pub: false, is_package_pub: false, is_comptime: false,
+        external_type: None, name: "f", name_span: span, meta: None,
+        type_params: [TypeParam]{}, head_pattern: None, params: params,
+        return_type: None, return_type_span: None,
+        return_view_provenance: None, declared_return_view_provenance: None,
+        gc_return: false, diverges: false, gc_scope: false, is_unsafe: false,
+        unsafe_reason: None, unsafe_span: None, is_pure: false, is_sanitizer: false,
+        scrub_tag: None, declared_effects: None, effect_via: None,
+        state_requires: None, state_transition: None, is_reactive: false,
+        reactive_upgrades: [String]{}, is_replayable: false, replayable_span: None,
+        is_job: false, job_span: None, job_metadata: None, every: None,
+        is_must_use: false, must_use_span: None, maturity: None, maturity_span: None,
+        kernel: None, is_inline: false, is_inline_always: false, inline_span: None,
+        web_marker: None, pre: [ContractClause]{}, post: [ContractClause]{},
+        inline_foreign: None, undo: None, markers: [Marker]{},
+        compiler_generated: false, body: [Stmt]{},
+    }
+}
+fn expressions_test_param(name: String) -> Param Never! {
+    span :: expressions_test_span(1)
+    Param{convention: .Read, root: false, name: name, name_span: span, public_label: None, zone: .Either, ty: Type.Int, ty_span: span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None}
+}
+#Test("self_param_checks_only_the_first_parameter_and_borrows_it") {
+    empty :: expressions_test_function([Param]{})
+    assert_eq(func_self_param(empty), None)
+    nonself :: expressions_test_function([Param]{expressions_test_param("x"), expressions_test_param("self")})
+    assert_eq(func_self_param(nonself), None)
+    function :: expressions_test_function([Param]{expressions_test_param("self"), expressions_test_param("x")})
+    receiver :: func_self_param(function) ?? panic("first self parameter")
+    assert_eq(receiver.name, "self")
+    assert_eq(receiver.name_span, expressions_test_span(1))
+}
+#Test("call_argument_and_lambda_defaults_preserve_all_false_none_empty_slots") {
+    flags :: ast_empty_call_arg_flags()
+    assert(!flags.implicit_clone && !flags.shared_auto_clone && !flags.owned_last_use && !flags.shared_access_desugar && !flags.is_trailing_block)
+    assert_eq(flags.template_items, None)
+    assert(!flags.c_callback_symbol && !flags.c_callback_managed && !flags.trusted_html)
+    assert_eq(flags.c_callback_function_key, None)
+    assert_eq(flags.c_callback_plan_digest, None)
+    assert_eq(flags.c_callback_identity, None)
+    assert_eq(flags.source_index, None)
+    assert_eq(flags.binder_slot, None)
+    assert_eq(flags.binder_label, None)
+    assert_eq(flags.binder_site, None)
+    assert_eq(flags.binder_refs.len(), 0)
+    assert_eq(flags.callable_policy, None)
+    assert(!flags.authority_boundary)
+    assert_eq(flags.arithmetic_policy, None)
+    meta :: ast_empty_lambda_meta()
+    assert(!meta.escapes && !meta.runtime_erased && !meta.needs_fn_mut && !meta.effect_maximal)
+    assert_eq(meta.mut_captures.len(), 0)
+    assert_eq(meta.cloned_captures.len(), 0)
+    assert_eq(meta.effect_direct.len(), 0)
+    assert_eq(meta.effect_solved.len(), 0)
+    assert_eq(meta.effect_call_edges.len(), 0)
+    assert_eq(meta.effect_direct_spans.len(), 0)
+    assert_eq(meta.frozen_captures.len(), 0)
+    assert_eq(meta.materialized_captures.len(), 0)
+    assert_eq(meta.moved_captures.len(), 0)
+    assert(!meta.collecting_loop && !meta.result_loop && !meta.requires_exhaustion_route && !meta.exhaustion_route_attached && !meta.fallible_propagation)
+    assert_eq(meta.collect_item_type, None)
+    assert_eq(meta.exhaustion_span, None)
+    assert_eq(meta.loop_result_type, None)
+    assert_eq(meta.loop_label, None)
+    assert_eq(meta.guard_projection, None)
+    assert_eq(meta.return_view_provenance, None)
+    assert_eq(meta.cell_projection_path, None)
+    assert_eq(meta.fallible_carrier, None)
+    assert_eq(meta.frame_schedule_explanation, None)
+    assert_eq(meta.frame_schedule, None)
+    assert_eq(meta.frame_schedule_derivation, None)
+}

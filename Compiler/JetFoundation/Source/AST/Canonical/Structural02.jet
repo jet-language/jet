@@ -1,0 +1,2325 @@
+// PORT-PENDING 0094 crates-jet-foundation-src-resourceschedule-module-group: crates/jet-foundation/src/ResourceSchedule.rs:1-2125
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Canonical frame-resource scheduling facts shared by sema and every runtime.
+//RS //!
+//RS //! A schedule is derived from checked operation contracts.  This module never
+//RS //! guesses a device, an alias, or an asynchronous completion event.  The
+//RS //! serial reference plan keeps the source order and records only the edges and
+//RS //! conservative decisions needed by an optimizer or an inspector.
+//RS 
+//RS use std::cell::RefCell;
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::fmt;
+//RS use std::sync::{Arc, Mutex};
+//RS 
+//RS /// Access mode proved by a checked call signature.
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub enum JetResourceAccessMode {
+//RS     Read,
+//RS     Write,
+//RS     Move,
+//RS }
+//RS 
+//RS impl JetResourceAccessMode {
+//RS     pub const fn is_write(self) -> bool {
+//RS         matches!(self, Self::Write | Self::Move)
+//RS     }
+//RS 
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Read => "read",
+//RS             Self::Write => "write",
+//RS             Self::Move => "move",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Resource identity after sema has resolved an argument place.
+//RS ///
+//RS /// `Unknown` is an explicit checked fact.  It is never treated as disjoint
+//RS /// from a named resource, so a serial plan remains safe without fabricating an
+//RS /// alias proof.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub enum JetResourceIdentity {
+//RS     Named(String),
+//RS     Unknown,
+//RS }
+//RS 
+//RS impl JetResourceIdentity {
+//RS     pub fn named(name: impl Into<String>) -> Self {
+//RS         Self::Named(name.into())
+//RS     }
+//RS 
+//RS     pub const fn unknown() -> Self {
+//RS         Self::Unknown
+//RS     }
+//RS 
+//RS     pub fn as_str(&self) -> &str {
+//RS         match self {
+//RS             Self::Named(name) => name.as_str(),
+//RS             Self::Unknown => "unknown resource",
+//RS         }
+//RS     }
+//RS 
+//RS     fn overlaps(&self, other: &Self) -> bool {
+//RS         match (self, other) {
+//RS             (Self::Named(left), Self::Named(right)) => left == right,
+//RS             _ => true,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Proven resource region.  A whole/unknown region overlaps every region.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub enum JetResourceRegion {
+//RS     Whole,
+//RS     Bytes { start: u64, length: u64 },
+//RS     Unknown,
+//RS }
+//RS 
+//RS impl JetResourceRegion {
+//RS     pub const fn whole() -> Self {
+//RS         Self::Whole
+//RS     }
+//RS 
+//RS     pub const fn unknown() -> Self {
+//RS         Self::Unknown
+//RS     }
+//RS 
+//RS     pub const fn bytes(start: u64, length: u64) -> Self {
+//RS         Self::Bytes { start, length }
+//RS     }
+//RS 
+//RS     fn validate(&self, operation: &str, resource: &str) -> Result<(), JetFrameScheduleError> {
+//RS         if let Self::Bytes { start, length } = self {
+//RS             if *length == 0 || start.checked_add(*length).is_none() {
+//RS                 return Err(JetFrameScheduleError::InvalidAccess {
+//RS                     operation: operation.to_string(),
+//RS                     resource: resource.to_string(),
+//RS                     reason: "byte region must be non-empty and fit its checked range".to_string(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn overlaps(&self, other: &Self) -> bool {
+//RS         match (self, other) {
+//RS             (Self::Bytes { start: left, length: left_len },
+//RS              Self::Bytes { start: right, length: right_len }) => {
+//RS                 let left_end = left.saturating_add(*left_len);
+//RS                 let right_end = right.saturating_add(*right_len);
+//RS                 *left < right_end && *right < left_end
+//RS             }
+//RS             _ => true,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Layout/device facts required before temporary storage may be reused.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub struct JetResourceLayout {
+//RS     pub size: u64,
+//RS     pub align: u64,
+//RS     pub layout: String,
+//RS     /// Empty means that placement is unknown and must not be selected here.
+//RS     pub device: String,
+//RS }
+//RS 
+//RS impl JetResourceLayout {
+//RS     pub fn new(
+//RS         size: u64,
+//RS         align: u64,
+//RS         layout: impl Into<String>,
+//RS         device: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             size,
+//RS             align,
+//RS             layout: layout.into(),
+//RS             device: device.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn validate(&self, operation: &str, resource: &str) -> Result<(), JetFrameScheduleError> {
+//RS         if self.size == 0 || self.align == 0 || !self.align.is_power_of_two() {
+//RS             return Err(JetFrameScheduleError::InvalidAccess {
+//RS                 operation: operation.to_string(),
+//RS                 resource: resource.to_string(),
+//RS                 reason: "layout size must be positive and alignment must be a non-zero power of two"
+//RS                     .to_string(),
+//RS             });
+//RS         }
+//RS         if self.layout.trim().is_empty() {
+//RS             return Err(JetFrameScheduleError::InvalidAccess {
+//RS                 operation: operation.to_string(),
+//RS                 resource: resource.to_string(),
+//RS                 reason: "layout identity must not be empty".to_string(),
+//RS             });
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub struct JetResourceAccess {
+//RS     pub resource: JetResourceIdentity,
+//RS     pub mode: JetResourceAccessMode,
+//RS     pub region: JetResourceRegion,
+//RS     pub layout: Option<JetResourceLayout>,
+//RS     pub temporary: bool,
+//RS }
+//RS 
+//RS impl JetResourceAccess {
+//RS     pub fn named(resource: impl Into<String>, mode: JetResourceAccessMode) -> Self {
+//RS         Self {
+//RS             resource: JetResourceIdentity::named(resource),
+//RS             mode,
+//RS             region: JetResourceRegion::Whole,
+//RS             layout: None,
+//RS             temporary: false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn unknown(mode: JetResourceAccessMode) -> Self {
+//RS         Self {
+//RS             resource: JetResourceIdentity::Unknown,
+//RS             mode,
+//RS             region: JetResourceRegion::Unknown,
+//RS             layout: None,
+//RS             temporary: false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_region(mut self, region: JetResourceRegion) -> Self {
+//RS         self.region = region;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_layout(mut self, layout: JetResourceLayout) -> Self {
+//RS         self.layout = Some(layout);
+//RS         self
+//RS     }
+//RS 
+//RS     pub const fn temporary(mut self) -> Self {
+//RS         self.temporary = true;
+//RS         self
+//RS     }
+//RS 
+//RS     fn label(&self) -> &str {
+//RS         self.resource.as_str()
+//RS     }
+//RS }
+//RS 
+//RS /// Completion contract for one checked operation.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub enum JetFrameCompletion {
+//RS     /// All accesses finish before the operation returns.
+//RS     Synchronous,
+//RS     /// Accesses continue until a real driver event with this token occurs.
+//RS     Pending { token: String },
+//RS     /// This operation is the checked driver event for a pending token.
+//RS     Event { token: String },
+//RS }
+//RS 
+//RS impl Default for JetFrameCompletion {
+//RS     fn default() -> Self {
+//RS         Self::Synchronous
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub struct JetFrameOperation {
+//RS     pub name: String,
+//RS     pub source_index: usize,
+//RS     pub accesses: Vec<JetResourceAccess>,
+//RS     pub completion: JetFrameCompletion,
+//RS     /// Canonical provider identity for a real completion boundary. `None`
+//RS     /// means the operation is synchronous or has no runtime adapter.
+//RS     pub completion_provider: Option<String>,
+//RS     pub external_effect: bool,
+//RS }
+//RS 
+//RS impl JetFrameOperation {
+//RS     pub fn new(name: impl Into<String>, source_index: usize) -> Self {
+//RS         Self {
+//RS             name: name.into(),
+//RS             source_index,
+//RS             accesses: Vec::new(),
+//RS             completion: JetFrameCompletion::Synchronous,
+//RS             completion_provider: None,
+//RS             external_effect: false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_access(mut self, access: JetResourceAccess) -> Self {
+//RS         self.accesses.push(access);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_accesses(mut self, accesses: impl IntoIterator<Item = JetResourceAccess>) -> Self {
+//RS         self.accesses.extend(accesses);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn pending(mut self, token: impl Into<String>) -> Self {
+//RS         self.completion = JetFrameCompletion::Pending {
+//RS             token: token.into(),
+//RS         };
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn completion_event(mut self, token: impl Into<String>) -> Self {
+//RS         self.completion = JetFrameCompletion::Event {
+//RS             token: token.into(),
+//RS         };
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_completion_provider(mut self, provider: impl Into<String>) -> Self {
+//RS         self.completion_provider = Some(provider.into());
+//RS         self
+//RS     }
+//RS 
+//RS     pub const fn external_effect(mut self) -> Self {
+//RS         self.external_effect = true;
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Whether a caller explicitly requests operations that may overlap.
+//RS #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+//RS pub struct JetFrameScheduleOptions {
+//RS     pub permit_parallel: bool,
+//RS }
+//RS 
+//RS impl JetFrameScheduleOptions {
+//RS     pub const fn serial() -> Self {
+//RS         Self {
+//RS             permit_parallel: false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn parallel() -> Self {
+//RS         Self {
+//RS             permit_parallel: true,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One source-order dependency in the derived schedule.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub struct JetFrameDependency {
+//RS     pub before: usize,
+//RS     pub after: usize,
+//RS     pub resource: String,
+//RS     pub reason: String,
+//RS }
+//RS 
+//RS /// One checked device transfer; the scheduler never chooses either device.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub struct JetFrameTransfer {
+//RS     pub before: usize,
+//RS     pub after: usize,
+//RS     pub resource: String,
+//RS     pub from_device: String,
+//RS     pub to_device: String,
+//RS }
+//RS 
+//RS /// A temporary-storage reuse decision, including conservative refusals.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub struct JetFrameReuse {
+//RS     pub previous_resource: String,
+//RS     pub next_resource: String,
+//RS     pub previous_last_use: usize,
+//RS     pub next_first_use: usize,
+//RS     pub legal: bool,
+//RS     pub reason: String,
+//RS }
+//RS 
+//RS /// Ownership retained across asynchronous device work.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub struct JetFrameRetention {
+//RS     pub resource: String,
+//RS     pub operation: usize,
+//RS     pub owner: String,
+//RS     pub completion_token: Option<String>,
+//RS     pub completed: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+//RS pub struct JetFrameSchedule {
+//RS     pub operations: Vec<JetFrameOperation>,
+//RS     pub dependencies: Vec<JetFrameDependency>,
+//RS     pub transfers: Vec<JetFrameTransfer>,
+//RS     pub reuse: Vec<JetFrameReuse>,
+//RS     pub retentions: Vec<JetFrameRetention>,
+//RS     pub conservative: Vec<String>,
+//RS }
+//RS 
+//RS /// Runtime state for the completion tokens already proved by a frame
+//RS /// schedule. It is deliberately a consumer of the canonical rows: it never
+//RS /// derives dependencies, reuse, or retention decisions.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetFrameRetentionGuard {
+//RS     resource: String,
+//RS     owner: String,
+//RS     /// The guard is an owned lifetime carrier, not a second resource-name
+//RS     /// index. Runtime adapters clone it into the in-flight owner they submit.
+//RS     lifetime: Arc<()>,
+//RS }
+//RS 
+//RS impl JetFrameRetentionGuard {
+//RS     fn new(resource: impl Into<String>, owner: impl Into<String>) -> Self {
+//RS         Self {
+//RS             resource: resource.into(),
+//RS             owner: owner.into(),
+//RS             lifetime: Arc::new(()),
+//RS         }
+//RS     }
+//RS     fn is_live(&self) -> bool {
+//RS         Arc::strong_count(&self.lifetime) > 0
+//RS     }
+//RS 
+//RS 
+//RS     pub fn resource(&self) -> &str {
+//RS         &self.resource
+//RS     }
+//RS 
+//RS     pub fn owner(&self) -> &str {
+//RS         &self.owner
+//RS     }
+//RS }
+//RS 
+//RS /// Exact checked completion identity captured when a provider submits work.
+//RS /// The handle carries the owning retention guards until its provider signals
+//RS /// the matching event; provider-wide sweeps cannot complete another submit.
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetFrameCompletionHandle {
+//RS     state: Arc<Mutex<JetFrameCompletionState>>,
+//RS     token: String,
+//RS     event_provider: String,
+//RS     generation: u64,
+//RS     guards: Vec<JetFrameRetentionGuard>,
+//RS }
+//RS 
+//RS impl JetFrameCompletionHandle {
+//RS     pub fn token(&self) -> &str {
+//RS         &self.token
+//RS     }
+//RS 
+//RS     pub fn event_provider(&self) -> &str {
+//RS         &self.event_provider
+//RS     }
+//RS 
+//RS     pub fn signal(&self) -> Result<(), String> {
+//RS         signal_frame_completion_binding_in(
+//RS             &self.state,
+//RS             &self.event_provider,
+//RS             &self.token,
+//RS             self.generation,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn retention_guards(&self) -> &[JetFrameRetentionGuard] {
+//RS         &self.guards
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetFrameCompletionState {
+//RS     schedule: Option<Arc<JetFrameSchedule>>,
+//RS     generation: u64,
+//RS     completed_tokens: BTreeSet<String>,
+//RS     retained_resources: BTreeSet<String>,
+//RS     retention_guards: BTreeMap<String, Vec<JetFrameRetentionGuard>>,
+//RS     bound_tokens: BTreeSet<String>,
+//RS }
+//RS fn frame_retention_guards(
+//RS     schedule: &JetFrameSchedule,
+//RS ) -> (
+//RS     BTreeMap<String, Vec<JetFrameRetentionGuard>>,
+//RS     BTreeSet<String>,
+//RS ) {
+//RS     let mut guards = BTreeMap::<String, Vec<JetFrameRetentionGuard>>::new();
+//RS     for retention in &schedule.retentions {
+//RS         if let Some(token) = &retention.completion_token {
+//RS             guards
+//RS                 .entry(token.clone())
+//RS                 .or_default()
+//RS                 .push(JetFrameRetentionGuard::new(
+//RS                     retention.resource.clone(),
+//RS                     retention.owner.clone(),
+//RS                 ));
+//RS         }
+//RS     }
+//RS     let resources = guards
+//RS         .values()
+//RS         .flatten()
+//RS         .filter(|guard| guard.is_live())
+//RS         .map(|guard| guard.resource.clone())
+//RS         .collect();
+//RS     (guards, resources)
+//RS }
+//RS 
+//RS 
+//RS impl Default for JetFrameCompletionState {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             schedule: None,
+//RS             generation: 0,
+//RS             completed_tokens: BTreeSet::new(),
+//RS             retained_resources: BTreeSet::new(),
+//RS             retention_guards: BTreeMap::new(),
+//RS             bound_tokens: BTreeSet::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetFrameCompletionState {
+//RS     pub fn new(schedule: &JetFrameSchedule) -> Self {
+//RS         let (retention_guards, retained_resources) = frame_retention_guards(schedule);
+//RS         Self {
+//RS             schedule: Some(Arc::new(schedule.clone())),
+//RS             generation: 0,
+//RS             completed_tokens: BTreeSet::new(),
+//RS             retained_resources,
+//RS             retention_guards,
+//RS             bound_tokens: BTreeSet::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn begin_frame(&mut self) {
+//RS         self.generation = self.generation.saturating_add(1);
+//RS         self.completed_tokens.clear();
+//RS         self.bound_tokens.clear();
+//RS         if let Some(schedule) = self.schedule.clone() {
+//RS             let (retention_guards, retained_resources) = frame_retention_guards(&schedule);
+//RS             self.retention_guards = retention_guards;
+//RS             self.retained_resources = retained_resources;
+//RS         } else {
+//RS             self.retention_guards.clear();
+//RS             self.retained_resources.clear();
+//RS         }
+//RS     }
+//RS 
+//RS     /// Consume one checked completion event and release only the resources
+//RS     /// owned by that token. Unknown, duplicate, or stale tokens are rejected.
+//RS     pub fn complete(
+//RS         &mut self,
+//RS         schedule: &JetFrameSchedule,
+//RS         token: &str,
+//RS     ) -> Result<(), String> {
+//RS         if !schedule.operations.iter().any(|operation| {
+//RS             matches!(
+//RS                 &operation.completion,
+//RS                 JetFrameCompletion::Event { token: event } if event == token
+//RS             )
+//RS         }) {
+//RS             return Err(format!("completion token `{token}` is not in the checked schedule"));
+//RS         }
+//RS         if !self.completed_tokens.insert(token.to_string()) {
+//RS             return Err(format!("completion token `{token}` was already completed"));
+//RS         }
+//RS         let released = self.retention_guards.remove(token).unwrap_or_default();
+//RS         for guard in released {
+//RS             if !self
+//RS                 .retention_guards
+//RS                 .values()
+//RS                 .flatten()
+//RS                 .any(|other| other.resource == guard.resource)
+//RS             {
+//RS                 self.retained_resources.remove(&guard.resource);
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Signal one event from its provider. The provider claims exactly one
+//RS     /// unbound event in source order; it never sweeps every matching token.
+//RS     pub fn complete_from_provider(&mut self, provider: &str) -> Result<(), String> {
+//RS         let Some(schedule) = self.schedule.clone() else {
+//RS             return Err("completion state has no checked frame schedule".to_string());
+//RS         };
+//RS         let token = schedule.operations.iter().find_map(|operation| {
+//RS             let JetFrameCompletion::Event { token } = &operation.completion else {
+//RS                 return None;
+//RS             };
+//RS             (operation.completion_provider.as_deref() == Some(provider)
+//RS                 && !self.bound_tokens.contains(token)
+//RS                 && !self.completed_tokens.contains(token))
+//RS                 .then(|| token.clone())
+//RS         });
+//RS         if let Some(token) = token {
+//RS             self.bound_tokens.insert(token.clone());
+//RS             return self.complete(schedule.as_ref(), &token);
+//RS         }
+//RS         let has_provider = schedule
+//RS             .operations
+//RS             .iter()
+//RS             .any(|operation| operation.completion_provider.as_deref() == Some(provider));
+//RS         if !has_provider {
+//RS             return Err(format!(
+//RS                 "completion provider `{provider}` is not in the checked schedule"
+//RS             ));
+//RS         }
+//RS         let has_event = schedule.operations.iter().any(|operation| {
+//RS             matches!(operation.completion, JetFrameCompletion::Event { .. })
+//RS                 && operation.completion_provider.as_deref() == Some(provider)
+//RS         });
+//RS         if has_event {
+//RS             return Err(format!(
+//RS                 "completion provider `{provider}` has no unbound checked event"
+//RS             ));
+//RS         }
+//RS         // Synchronous providers may be called for their real completion
+//RS         // boundary, but have no event token to consume.
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn is_completed(&self, token: &str) -> bool {
+//RS         self.completed_tokens.contains(token)
+//RS     }
+//RS 
+//RS     pub fn retained_resources(&self) -> impl Iterator<Item = &str> {
+//RS         self.retained_resources.iter().map(String::as_str)
+//RS     }
+//RS 
+//RS     /// Verify that every legal canonical reuse row has crossed its checked
+//RS     /// completion boundary. A runtime cannot silently reuse a retained
+//RS     /// resource merely because the frame callback returned.
+//RS     pub fn assert_reuse_ready(&self, schedule: &JetFrameSchedule) -> Result<(), String> {
+//RS         for reuse in schedule.reuse.iter().filter(|reuse| reuse.legal) {
+//RS             for operation in schedule.operations.iter().take(reuse.next_first_use) {
+//RS                 for access in &operation.accesses {
+//RS                     if !matches!(
+//RS                         &access.resource,
+//RS                         JetResourceIdentity::Named(resource)
+//RS                             if resource == &reuse.previous_resource
+//RS                     ) {
+//RS                         continue;
+//RS                     }
+//RS                     if let JetFrameCompletion::Pending { token } = &operation.completion {
+//RS                         if !self.is_completed(token) {
+//RS                             return Err(format!(
+//RS                                 "resource `{}` cannot be reused before completion token `{token}`",
+//RS                                 reuse.previous_resource
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS /// Install the checked completion state while one runtime callback invokes
+//RS /// providers.  Core adapters signal only after their real wait/event boundary;
+//RS /// this scope is not a frame-end completion shortcut.
+//RS pub fn with_frame_completion_scope<T>(
+//RS     state: Arc<Mutex<JetFrameCompletionState>>,
+//RS     body: impl FnOnce() -> T,
+//RS ) -> T {
+//RS     FRAME_COMPLETION_STATE.with(|active| {
+//RS         state
+//RS             .lock()
+//RS             .expect("checked frame completion state is poisoned")
+//RS             .begin_frame();
+//RS         let previous = active.replace(Some(state));
+//RS         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+//RS         active.replace(previous);
+//RS         match result {
+//RS             Ok(value) => value,
+//RS             Err(payload) => std::panic::resume_unwind(payload),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS /// Return the callback's checked completion handle so an asynchronous provider
+//RS /// can retain the exact frame state until its later driver event.
+//RS pub fn current_frame_completion_state(
+//RS ) -> Option<Arc<Mutex<JetFrameCompletionState>>> {
+//RS     FRAME_COMPLETION_STATE.with(|active| active.borrow().as_ref().cloned())
+//RS }
+//RS 
+//RS /// Bind one pending submission to its unique checked event token. The returned
+//RS /// handle must travel with the submitted owner until the provider signals.
+//RS pub fn current_frame_completion_handle(
+//RS     provider: &str,
+//RS ) -> Result<Option<JetFrameCompletionHandle>, String> {
+//RS     let Some(state) = current_frame_completion_state() else {
+//RS         return Ok(None);
+//RS     };
+//RS     bind_frame_completion_in(&state, provider).map(Some)
+//RS }
+//RS 
+//RS pub fn bind_frame_completion_in(
+//RS     state: &Arc<Mutex<JetFrameCompletionState>>,
+//RS     provider: &str,
+//RS ) -> Result<JetFrameCompletionHandle, String> {
+//RS     let mut state_guard = state
+//RS         .lock()
+//RS         .map_err(|_| "checked frame completion state is poisoned".to_string())?;
+//RS     let Some(schedule) = state_guard.schedule.clone() else {
+//RS         return Err("completion state has no checked frame schedule".to_string());
+//RS     };
+//RS     let Some((token, event_provider)) = schedule.operations.iter().find_map(|operation| {
+//RS         let JetFrameCompletion::Pending { token } = &operation.completion else {
+//RS             return None;
+//RS         };
+//RS         if operation.completion_provider.as_deref() != Some(provider)
+//RS             || state_guard.bound_tokens.contains(token)
+//RS         {
+//RS             return None;
+//RS         }
+//RS         let event_provider = schedule.operations.iter().find_map(|event| {
+//RS             matches!(
+//RS                 &event.completion,
+//RS                 JetFrameCompletion::Event { token: event_token } if event_token == token
+//RS             )
+//RS             .then(|| event.completion_provider.as_deref())
+//RS             .flatten()
+//RS         })?;
+//RS         (event_provider == provider).then(|| (token.clone(), event_provider.to_string()))
+//RS     }) else {
+//RS         return Err(format!(
+//RS             "completion provider `{provider}` has no unbound checked submission"
+//RS         ));
+//RS     };
+//RS     state_guard.bound_tokens.insert(token.clone());
+//RS     let guards = state_guard
+//RS         .retention_guards
+//RS         .get(&token)
+//RS         .cloned()
+//RS         .unwrap_or_default();
+//RS     Ok(JetFrameCompletionHandle {
+//RS         state: Arc::clone(state),
+//RS         token,
+//RS         event_provider,
+//RS         generation: state_guard.generation,
+//RS         guards,
+//RS     })
+//RS }
+//RS 
+//RS /// Signal a checked completion from the provider that actually waited for or
+//RS /// observed it. Calls outside a checked callback fail closed. One call claims
+//RS /// one event; it never completes every event sharing a provider.
+//RS pub fn signal_frame_completion(provider: &str) -> Result<(), String> {
+//RS     let Some(state) = current_frame_completion_state() else {
+//RS         return Err(format!(
+//RS             "completion provider `{provider}` signalled without an active checked frame"
+//RS         ));
+//RS     };
+//RS     signal_frame_completion_in(&state, provider)
+//RS }
+//RS 
+//RS pub fn signal_frame_completion_in(
+//RS     state: &Arc<Mutex<JetFrameCompletionState>>,
+//RS     provider: &str,
+//RS ) -> Result<(), String> {
+//RS     let mut state = state
+//RS         .lock()
+//RS         .map_err(|_| "checked frame completion state is poisoned".to_string())?;
+//RS     state.complete_from_provider(provider)
+//RS }
+//RS 
+//RS pub fn signal_frame_completion_binding_in(
+//RS     state: &Arc<Mutex<JetFrameCompletionState>>,
+//RS     provider: &str,
+//RS     token: &str,
+//RS     generation: u64,
+//RS ) -> Result<(), String> {
+//RS     let mut state = state
+//RS         .lock()
+//RS         .map_err(|_| "checked frame completion state is poisoned".to_string())?;
+//RS     if state.generation != generation {
+//RS         return Err(format!(
+//RS             "completion token `{token}` belongs to stale frame generation {generation}"
+//RS         ));
+//RS     }
+//RS     let Some(schedule) = state.schedule.clone() else {
+//RS         return Err("completion state has no checked frame schedule".to_string());
+//RS     };
+//RS     let Some(event) = schedule.operations.iter().find(|operation| {
+//RS         matches!(
+//RS             &operation.completion,
+//RS             JetFrameCompletion::Event { token: event_token } if event_token == token
+//RS         )
+//RS     }) else {
+//RS         return Err(format!("completion token `{token}` is not in the checked schedule"));
+//RS     };
+//RS     if event.completion_provider.as_deref() != Some(provider) {
+//RS         return Err(format!(
+//RS             "completion token `{token}` belongs to provider `{}` not `{provider}`",
+//RS             event.completion_provider.as_deref().unwrap_or("<none>")
+//RS         ));
+//RS     }
+//RS     if !state.bound_tokens.contains(token) {
+//RS         return Err(format!(
+//RS             "completion token `{token}` was signalled without a checked submission"
+//RS         ));
+//RS     }
+//RS     state.complete(schedule.as_ref(), token)
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static FRAME_COMPLETION_STATE: RefCell<Option<Arc<Mutex<JetFrameCompletionState>>>> =
+//RS         const { RefCell::new(None) };
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS impl JetFrameSchedule {
+//RS     /// Stable human-readable inspection text.  This is a projection of the
+//RS     /// adopted schedule facts; no renderer rebuilds a second dependency graph.
+//RS     pub fn explain(&self) -> String {
+//RS         let mut lines = vec!["Why did these operations run in order?".to_string()];
+//RS         for operation in &self.operations {
+//RS             let accesses = if operation.accesses.is_empty() {
+//RS                 "no resource access".to_string()
+//RS             } else {
+//RS                 operation
+//RS                     .accesses
+//RS                     .iter()
+//RS                     .map(|access| format!("{} {}", access.mode.as_str(), access.label()))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ")
+//RS             };
+//RS             lines.push(format!("  {} {}", operation.name, accesses));
+//RS         }
+//RS         for dependency in &self.dependencies {
+//RS             lines.push(format!(
+//RS                 "  dependency: {} -> {} ({})",
+//RS                 self.operations[dependency.before].name,
+//RS                 self.operations[dependency.after].name,
+//RS                 dependency.reason
+//RS             ));
+//RS         }
+//RS         for transfer in &self.transfers {
+//RS             lines.push(format!(
+//RS                 "  transfer: {} {} -> {}",
+//RS                 transfer.resource, transfer.from_device, transfer.to_device
+//RS             ));
+//RS         }
+//RS         for reuse in &self.reuse {
+//RS             let verb = if reuse.legal { "reuse" } else { "reuse refused" };
+//RS             lines.push(format!(
+//RS                 "  {verb}: {} -> {} ({})",
+//RS                 reuse.previous_resource, reuse.next_resource, reuse.reason
+//RS             ));
+//RS         }
+//RS         for retention in &self.retentions {
+//RS             let state = if retention.completed {
+//RS                 "completed"
+//RS             } else {
+//RS                 "still retained"
+//RS             };
+//RS             let token = retention.completion_token.as_deref().unwrap_or("return");
+//RS             lines.push(format!(
+//RS                 "  retention: {} owner {} until {} ({state})",
+//RS                 retention.resource, retention.owner, token
+//RS             ));
+//RS         }
+//RS         for reason in &self.conservative {
+//RS             lines.push(format!("  conservative: {reason}"));
+//RS         }
+//RS         if self.dependencies.is_empty() {
+//RS             lines.push("  no conflicting resource accesses".to_string());
+//RS         }
+//RS         lines.join("\n")
+//RS     }
+//RS     /// Serialize the complete checked schedule into one deterministic wire
+//RS     /// record.  This is the canonical payload stored beside its derivation;
+//RS     /// `explain()` remains a human projection and is intentionally not used
+//RS     /// for persistence.
+//RS     pub fn canonical_json(&self) -> String {
+//RS         let operations = self
+//RS             .operations
+//RS             .iter()
+//RS             .map(encode_operation)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let dependencies = self
+//RS             .dependencies
+//RS             .iter()
+//RS             .map(encode_dependency)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let transfers = self
+//RS             .transfers
+//RS             .iter()
+//RS             .map(encode_transfer)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let reuse = self
+//RS             .reuse
+//RS             .iter()
+//RS             .map(encode_reuse)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let retentions = self
+//RS             .retentions
+//RS             .iter()
+//RS             .map(encode_retention)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let conservative = self
+//RS             .conservative
+//RS             .iter()
+//RS             .map(|reason| json_string(reason))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!(
+//RS             "{{\"schema\":\"jet.frame_schedule/v1\",\"operations\":[{operations}],\"dependencies\":[{dependencies}],\"transfers\":[{transfers}],\"reuse\":[{reuse}],\"retentions\":[{retentions}],\"conservative\":[{conservative}]}}"
+//RS         )
+//RS     }
+//RS 
+//RS     /// Decode one complete canonical schedule payload without deriving a new
+//RS     /// graph.  The decoder preserves every checked identity and decision,
+//RS     /// including conservative/refused reuse rows.
+//RS     pub fn from_canonical_json(input: &str) -> Result<Self, String> {
+//RS         let value = crate::EncodingJson::parse_json(input, true)
+//RS             .map_err(|error| format!("invalid frame schedule JSON: {}", error.message))?;
+//RS         let root = json_object(&value, "frame schedule")?;
+//RS         let schema = json_text(json_field(root, "schema")?, "schema")?;
+//RS         if schema != "jet.frame_schedule/v1" {
+//RS             return Err(format!("unsupported frame schedule schema `{schema}`"));
+//RS         }
+//RS         let operations = json_array(json_field(root, "operations")?, "operations")?
+//RS             .iter()
+//RS             .map(parse_operation)
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         let dependencies = json_array(json_field(root, "dependencies")?, "dependencies")?
+//RS             .iter()
+//RS             .map(parse_dependency)
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         let transfers = json_array(json_field(root, "transfers")?, "transfers")?
+//RS             .iter()
+//RS             .map(parse_transfer)
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         let reuse = json_array(json_field(root, "reuse")?, "reuse")?
+//RS             .iter()
+//RS             .map(parse_reuse)
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         let retentions = json_array(json_field(root, "retentions")?, "retentions")?
+//RS             .iter()
+//RS             .map(parse_retention)
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         let conservative = json_array(json_field(root, "conservative")?, "conservative")?
+//RS             .iter()
+//RS             .map(|value| json_text(value, "conservative reason"))
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         Ok(Self {
+//RS             operations,
+//RS             dependencies,
+//RS             transfers,
+//RS             reuse,
+//RS             retentions,
+//RS             conservative,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Byte-oriented alias for persistence layers that already carry opaque
+//RS     /// records.  The bytes are UTF-8 canonical JSON, not an explanation.
+//RS     pub fn encode_canonical(&self) -> Vec<u8> {
+//RS         self.canonical_json().into_bytes()
+//RS     }
+//RS 
+//RS     pub fn decode_canonical(bytes: &[u8]) -> Result<Self, String> {
+//RS         let text = std::str::from_utf8(bytes)
+//RS             .map_err(|error| format!("frame schedule payload is not UTF-8: {error}"))?;
+//RS         Self::from_canonical_json(text)
+//RS     }
+//RS 
+//RS }
+//RS 
+//RS fn json_string(value: &str) -> String {
+//RS     let mut out = String::with_capacity(value.len() + 2);
+//RS     out.push('"');
+//RS     for character in value.chars() {
+//RS         match character {
+//RS             '"' => out.push_str("\\\""),
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '\r' => out.push_str("\\r"),
+//RS             '\t' => out.push_str("\\t"),
+//RS             '\u{08}' => out.push_str("\\b"),
+//RS             '\u{0c}' => out.push_str("\\f"),
+//RS             character if character.is_control() => {
+//RS                 use std::fmt::Write as _;
+//RS                 let _ = write!(out, "\\u{:04x}", character as u32);
+//RS             }
+//RS             character => out.push(character),
+//RS         }
+//RS     }
+//RS     out.push('"');
+//RS     out
+//RS }
+//RS 
+//RS fn json_number(value: u64) -> String {
+//RS     json_string(&value.to_string())
+//RS }
+//RS 
+//RS fn encode_identity(identity: &JetResourceIdentity) -> String {
+//RS     match identity {
+//RS         JetResourceIdentity::Named(resource) => format!(
+//RS             "{{\"kind\":\"named\",\"value\":{}}}",
+//RS             json_string(resource)
+//RS         ),
+//RS         JetResourceIdentity::Unknown => "{\"kind\":\"unknown\"}".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_region(region: &JetResourceRegion) -> String {
+//RS     match region {
+//RS         JetResourceRegion::Whole => "{\"kind\":\"whole\"}".to_string(),
+//RS         JetResourceRegion::Unknown => "{\"kind\":\"unknown\"}".to_string(),
+//RS         JetResourceRegion::Bytes { start, length } => format!(
+//RS             "{{\"kind\":\"bytes\",\"start\":{},\"length\":{}}}",
+//RS             json_number(*start),
+//RS             json_number(*length)
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_layout(layout: &Option<JetResourceLayout>) -> String {
+//RS     match layout {
+//RS         None => "null".to_string(),
+//RS         Some(layout) => format!(
+//RS             "{{\"size\":{},\"align\":{},\"layout\":{},\"device\":{}}}",
+//RS             json_number(layout.size),
+//RS             json_number(layout.align),
+//RS             json_string(&layout.layout),
+//RS             json_string(&layout.device)
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_access(access: &JetResourceAccess) -> String {
+//RS     format!(
+//RS         "{{\"resource\":{},\"mode\":{},\"region\":{},\"layout\":{},\"temporary\":{}}}",
+//RS         encode_identity(&access.resource),
+//RS         json_string(access.mode.as_str()),
+//RS         encode_region(&access.region),
+//RS         encode_layout(&access.layout),
+//RS         access.temporary
+//RS     )
+//RS }
+//RS 
+//RS fn encode_completion(completion: &JetFrameCompletion) -> String {
+//RS     match completion {
+//RS         JetFrameCompletion::Synchronous => "{\"kind\":\"synchronous\"}".to_string(),
+//RS         JetFrameCompletion::Pending { token } => format!(
+//RS             "{{\"kind\":\"pending\",\"token\":{}}}",
+//RS             json_string(token)
+//RS         ),
+//RS         JetFrameCompletion::Event { token } => format!(
+//RS             "{{\"kind\":\"event\",\"token\":{}}}",
+//RS             json_string(token)
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_operation(operation: &JetFrameOperation) -> String {
+//RS     let accesses = operation
+//RS         .accesses
+//RS         .iter()
+//RS         .map(encode_access)
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let provider = operation
+//RS         .completion_provider
+//RS         .as_ref()
+//RS         .map(|provider| format!(",\"completion_provider\":{}", json_string(provider)))
+//RS         .unwrap_or_default();
+//RS     format!(
+//RS         "{{\"name\":{},\"source_index\":{},\"accesses\":[{}],\"completion\":{},\"external_effect\":{}{}}}",
+//RS         json_string(&operation.name),
+//RS         json_number(operation.source_index as u64),
+//RS         accesses,
+//RS         encode_completion(&operation.completion),
+//RS         operation.external_effect,
+//RS         provider
+//RS     )
+//RS }
+//RS 
+//RS fn encode_dependency(dependency: &JetFrameDependency) -> String {
+//RS     format!(
+//RS         "{{\"before\":{},\"after\":{},\"resource\":{},\"reason\":{}}}",
+//RS         json_number(dependency.before as u64),
+//RS         json_number(dependency.after as u64),
+//RS         json_string(&dependency.resource),
+//RS         json_string(&dependency.reason)
+//RS     )
+//RS }
+//RS 
+//RS fn encode_transfer(transfer: &JetFrameTransfer) -> String {
+//RS     format!(
+//RS         "{{\"before\":{},\"after\":{},\"resource\":{},\"from_device\":{},\"to_device\":{}}}",
+//RS         json_number(transfer.before as u64),
+//RS         json_number(transfer.after as u64),
+//RS         json_string(&transfer.resource),
+//RS         json_string(&transfer.from_device),
+//RS         json_string(&transfer.to_device)
+//RS     )
+//RS }
+//RS 
+//RS fn encode_reuse(reuse: &JetFrameReuse) -> String {
+//RS     format!(
+//RS         "{{\"previous_resource\":{},\"next_resource\":{},\"previous_last_use\":{},\"next_first_use\":{},\"legal\":{},\"reason\":{}}}",
+//RS         json_string(&reuse.previous_resource),
+//RS         json_string(&reuse.next_resource),
+//RS         json_number(reuse.previous_last_use as u64),
+//RS         json_number(reuse.next_first_use as u64),
+//RS         reuse.legal,
+//RS         json_string(&reuse.reason)
+//RS     )
+//RS }
+//RS 
+//RS fn encode_retention(retention: &JetFrameRetention) -> String {
+//RS     let completion = retention
+//RS         .completion_token
+//RS         .as_deref()
+//RS         .map(json_string)
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     format!(
+//RS         "{{\"resource\":{},\"operation\":{},\"owner\":{},\"completion_token\":{},\"completed\":{}}}",
+//RS         json_string(&retention.resource),
+//RS         json_number(retention.operation as u64),
+//RS         json_string(&retention.owner),
+//RS         completion,
+//RS         retention.completed
+//RS     )
+//RS }
+//RS 
+//RS fn json_object<'a>(
+//RS     value: &'a crate::DataTree::DataTree,
+//RS     what: &str,
+//RS ) -> Result<&'a [(String, crate::DataTree::DataTree)], String> {
+//RS     value
+//RS         .as_object()
+//RS         .map(Vec::as_slice)
+//RS         .map_err(|_| format!("expected {what} object"))
+//RS }
+//RS 
+//RS fn json_array<'a>(
+//RS     value: &'a crate::DataTree::DataTree,
+//RS     what: &str,
+//RS ) -> Result<&'a [crate::DataTree::DataTree], String> {
+//RS     value
+//RS         .as_array()
+//RS         .map(Vec::as_slice)
+//RS         .map_err(|_| format!("expected {what} array"))
+//RS }
+//RS 
+//RS fn json_field<'a>(
+//RS     object: &'a [(String, crate::DataTree::DataTree)],
+//RS     name: &str,
+//RS ) -> Result<&'a crate::DataTree::DataTree, String> {
+//RS     object
+//RS         .iter()
+//RS         .find_map(|(key, value)| (key == name).then_some(value))
+//RS         .ok_or_else(|| format!("frame schedule is missing `{name}`"))
+//RS }
+//RS 
+//RS fn json_text(value: &crate::DataTree::DataTree, what: &str) -> Result<String, String> {
+//RS     value
+//RS         .as_str()
+//RS         .map(str::to_string)
+//RS         .map_err(|_| format!("expected {what} text"))
+//RS }
+//RS 
+//RS fn json_bool(value: &crate::DataTree::DataTree, what: &str) -> Result<bool, String> {
+//RS     match value {
+//RS         crate::DataTree::DataTree::Bool(value) => Ok(*value),
+//RS         _ => Err(format!("expected {what} boolean")),
+//RS     }
+//RS }
+//RS 
+//RS fn json_u64(value: &crate::DataTree::DataTree, what: &str) -> Result<u64, String> {
+//RS     let text = match value {
+//RS         crate::DataTree::DataTree::Int(value) if *value >= 0 => value.to_string(),
+//RS         crate::DataTree::DataTree::Number(value)
+//RS         | crate::DataTree::DataTree::Text(value)
+//RS         | crate::DataTree::DataTree::TypedText(value) => value.clone(),
+//RS         _ => return Err(format!("expected {what} unsigned integer")),
+//RS     };
+//RS     text.parse::<u64>()
+//RS         .map_err(|_| format!("invalid {what} unsigned integer `{text}`"))
+//RS }
+//RS 
+//RS fn json_usize(value: &crate::DataTree::DataTree, what: &str) -> Result<usize, String> {
+//RS     let value = json_u64(value, what)?;
+//RS     usize::try_from(value).map_err(|_| format!("{what} does not fit in usize"))
+//RS }
+//RS 
+//RS fn json_optional_text(
+//RS     value: &crate::DataTree::DataTree,
+//RS     what: &str,
+//RS ) -> Result<Option<String>, String> {
+//RS     match value {
+//RS         crate::DataTree::DataTree::Null => Ok(None),
+//RS         _ => json_text(value, what).map(Some),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_identity(value: &crate::DataTree::DataTree) -> Result<JetResourceIdentity, String> {
+//RS     let object = json_object(value, "resource identity")?;
+//RS     match json_text(json_field(object, "kind")?, "resource identity kind")?.as_str() {
+//RS         "named" => Ok(JetResourceIdentity::Named(json_text(
+//RS             json_field(object, "value")?,
+//RS             "resource identity value",
+//RS         )?)),
+//RS         "unknown" => Ok(JetResourceIdentity::Unknown),
+//RS         kind => Err(format!("unsupported resource identity kind `{kind}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_mode(value: &crate::DataTree::DataTree) -> Result<JetResourceAccessMode, String> {
+//RS     match json_text(value, "resource access mode")?.as_str() {
+//RS         "read" => Ok(JetResourceAccessMode::Read),
+//RS         "write" => Ok(JetResourceAccessMode::Write),
+//RS         "move" => Ok(JetResourceAccessMode::Move),
+//RS         mode => Err(format!("unsupported resource access mode `{mode}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_region(value: &crate::DataTree::DataTree) -> Result<JetResourceRegion, String> {
+//RS     let object = json_object(value, "resource region")?;
+//RS     match json_text(json_field(object, "kind")?, "resource region kind")?.as_str() {
+//RS         "whole" => Ok(JetResourceRegion::Whole),
+//RS         "unknown" => Ok(JetResourceRegion::Unknown),
+//RS         "bytes" => Ok(JetResourceRegion::Bytes {
+//RS             start: json_u64(json_field(object, "start")?, "region start")?,
+//RS             length: json_u64(json_field(object, "length")?, "region length")?,
+//RS         }),
+//RS         kind => Err(format!("unsupported resource region kind `{kind}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_layout(
+//RS     value: &crate::DataTree::DataTree,
+//RS ) -> Result<Option<JetResourceLayout>, String> {
+//RS     if matches!(value, crate::DataTree::DataTree::Null) {
+//RS         return Ok(None);
+//RS     }
+//RS     let object = json_object(value, "resource layout")?;
+//RS     Ok(Some(JetResourceLayout {
+//RS         size: json_u64(json_field(object, "size")?, "layout size")?,
+//RS         align: json_u64(json_field(object, "align")?, "layout alignment")?,
+//RS         layout: json_text(json_field(object, "layout")?, "layout identity")?,
+//RS         device: json_text(json_field(object, "device")?, "layout device")?,
+//RS     }))
+//RS }
+//RS 
+//RS fn parse_access(value: &crate::DataTree::DataTree) -> Result<JetResourceAccess, String> {
+//RS     let object = json_object(value, "resource access")?;
+//RS     Ok(JetResourceAccess {
+//RS         resource: parse_identity(json_field(object, "resource")?)?,
+//RS         mode: parse_mode(json_field(object, "mode")?)?,
+//RS         region: parse_region(json_field(object, "region")?)?,
+//RS         layout: parse_layout(json_field(object, "layout")?)?,
+//RS         temporary: json_bool(json_field(object, "temporary")?, "temporary")?,
+//RS     })
+//RS }
+//RS 
+//RS fn parse_completion(
+//RS     value: &crate::DataTree::DataTree,
+//RS ) -> Result<JetFrameCompletion, String> {
+//RS     let object = json_object(value, "completion")?;
+//RS     let kind = json_text(json_field(object, "kind")?, "completion kind")?;
+//RS     match kind.as_str() {
+//RS         "synchronous" => Ok(JetFrameCompletion::Synchronous),
+//RS         "pending" => Ok(JetFrameCompletion::Pending {
+//RS             token: json_text(json_field(object, "token")?, "completion token")?,
+//RS         }),
+//RS         "event" => Ok(JetFrameCompletion::Event {
+//RS             token: json_text(json_field(object, "token")?, "completion token")?,
+//RS         }),
+//RS         _ => Err(format!("unsupported completion kind `{kind}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_operation(value: &crate::DataTree::DataTree) -> Result<JetFrameOperation, String> {
+//RS     let object = json_object(value, "frame operation")?;
+//RS     let accesses = json_array(json_field(object, "accesses")?, "operation accesses")?
+//RS         .iter()
+//RS         .map(parse_access)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let completion_provider = object
+//RS         .iter()
+//RS         .find_map(|(key, value)| (key == "completion_provider").then_some(value))
+//RS         .map(|value| json_optional_text(value, "completion provider"))
+//RS         .transpose()?
+//RS         .flatten();
+//RS     Ok(JetFrameOperation {
+//RS         name: json_text(json_field(object, "name")?, "operation name")?,
+//RS         source_index: json_usize(json_field(object, "source_index")?, "source index")?,
+//RS         accesses,
+//RS         completion: parse_completion(json_field(object, "completion")?)?,
+//RS         completion_provider,
+//RS         external_effect: json_bool(
+//RS             json_field(object, "external_effect")?,
+//RS             "external effect",
+//RS         )?,
+//RS     })
+//RS }
+//RS 
+//RS fn parse_dependency(value: &crate::DataTree::DataTree) -> Result<JetFrameDependency, String> {
+//RS     let object = json_object(value, "frame dependency")?;
+//RS     Ok(JetFrameDependency {
+//RS         before: json_usize(json_field(object, "before")?, "dependency before")?,
+//RS         after: json_usize(json_field(object, "after")?, "dependency after")?,
+//RS         resource: json_text(json_field(object, "resource")?, "dependency resource")?,
+//RS         reason: json_text(json_field(object, "reason")?, "dependency reason")?,
+//RS     })
+//RS }
+//RS 
+//RS fn parse_transfer(value: &crate::DataTree::DataTree) -> Result<JetFrameTransfer, String> {
+//RS     let object = json_object(value, "frame transfer")?;
+//RS     Ok(JetFrameTransfer {
+//RS         before: json_usize(json_field(object, "before")?, "transfer before")?,
+//RS         after: json_usize(json_field(object, "after")?, "transfer after")?,
+//RS         resource: json_text(json_field(object, "resource")?, "transfer resource")?,
+//RS         from_device: json_text(json_field(object, "from_device")?, "source device")?,
+//RS         to_device: json_text(json_field(object, "to_device")?, "destination device")?,
+//RS     })
+//RS }
+//RS 
+//RS fn parse_reuse(value: &crate::DataTree::DataTree) -> Result<JetFrameReuse, String> {
+//RS     let object = json_object(value, "frame reuse")?;
+//RS     Ok(JetFrameReuse {
+//RS         previous_resource: json_text(
+//RS             json_field(object, "previous_resource")?,
+//RS             "previous resource",
+//RS         )?,
+//RS         next_resource: json_text(json_field(object, "next_resource")?, "next resource")?,
+//RS         previous_last_use: json_usize(
+//RS             json_field(object, "previous_last_use")?,
+//RS             "previous last use",
+//RS         )?,
+//RS         next_first_use: json_usize(json_field(object, "next_first_use")?, "next first use")?,
+//RS         legal: json_bool(json_field(object, "legal")?, "reuse legality")?,
+//RS         reason: json_text(json_field(object, "reason")?, "reuse reason")?,
+//RS     })
+//RS }
+//RS 
+//RS fn parse_retention(value: &crate::DataTree::DataTree) -> Result<JetFrameRetention, String> {
+//RS     let object = json_object(value, "frame retention")?;
+//RS     Ok(JetFrameRetention {
+//RS         resource: json_text(json_field(object, "resource")?, "retained resource")?,
+//RS         operation: json_usize(json_field(object, "operation")?, "retention operation")?,
+//RS         owner: json_text(json_field(object, "owner")?, "retention owner")?,
+//RS         completion_token: json_optional_text(
+//RS             json_field(object, "completion_token")?,
+//RS             "retention completion token",
+//RS         )?,
+//RS         completed: json_bool(json_field(object, "completed")?, "retention completion")?,
+//RS     })
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum JetFrameScheduleError {
+//RS     InvalidOperation {
+//RS         index: usize,
+//RS         reason: String,
+//RS     },
+//RS     InvalidAccess {
+//RS         operation: String,
+//RS         resource: String,
+//RS         reason: String,
+//RS     },
+//RS     NonMonotonicSourceOrder {
+//RS         index: usize,
+//RS         previous: usize,
+//RS         current: usize,
+//RS     },
+//RS     ConflictingAccess {
+//RS         before: String,
+//RS         after: String,
+//RS         resource: String,
+//RS         before_mode: JetResourceAccessMode,
+//RS         after_mode: JetResourceAccessMode,
+//RS     },
+//RS     UnknownAlias {
+//RS         before: String,
+//RS         after: String,
+//RS     },
+//RS     MissingCompletion {
+//RS         operation: String,
+//RS         resource: String,
+//RS         token: String,
+//RS     },
+//RS }
+//RS 
+//RS impl fmt::Display for JetFrameScheduleError {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::InvalidOperation { index, reason } => {
+//RS                 write!(formatter, "operation {index} is invalid: {reason}")
+//RS             }
+//RS             Self::InvalidAccess {
+//RS                 operation,
+//RS                 resource,
+//RS                 reason,
+//RS             } => write!(
+//RS                 formatter,
+//RS                 "operation `{operation}` has invalid access to `{resource}`: {reason}"
+//RS             ),
+//RS             Self::NonMonotonicSourceOrder {
+//RS                 index,
+//RS                 previous,
+//RS                 current,
+//RS             } => write!(
+//RS                 formatter,
+//RS                 "operation {index} source index {current} follows {previous} out of order"
+//RS             ),
+//RS             Self::ConflictingAccess {
+//RS                 before,
+//RS                 after,
+//RS                 resource,
+//RS                 before_mode,
+//RS                 after_mode,
+//RS             } => write!(
+//RS                 formatter,
+//RS                 "parallel frame refused: `{before}` {} `{resource}` before `{after}` {} it",
+//RS                 before_mode.as_str(),
+//RS                 after_mode.as_str()
+//RS             ),
+//RS             Self::UnknownAlias { before, after } => write!(
+//RS                 formatter,
+//RS                 "parallel frame refused: `{before}` and `{after}` have unresolved aliasing"
+//RS             ),
+//RS             Self::MissingCompletion {
+//RS                 operation,
+//RS                 resource,
+//RS                 token,
+//RS             } => write!(
+//RS                 formatter,
+//RS                 "operation `{operation}` accesses `{resource}` before completion event `{token}`"
+//RS             ),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Derive the conservative source-order reference schedule.
+//RS pub fn derive_frame_schedule(
+//RS     operations: impl AsRef<[JetFrameOperation]>,
+//RS ) -> Result<JetFrameSchedule, JetFrameScheduleError> {
+//RS     derive_frame_schedule_with_options(operations, JetFrameScheduleOptions::serial())
+//RS }
+//RS 
+//RS /// Derive a schedule with an explicit parallel demand.  The normal frame path
+//RS /// calls [`derive_frame_schedule`]; this option is for a checked optimizer or
+//RS /// an expert placement request and refuses unresolved hazards.
+//RS pub fn derive_frame_schedule_with_options(
+//RS     operations: impl AsRef<[JetFrameOperation]>,
+//RS     options: JetFrameScheduleOptions,
+//RS ) -> Result<JetFrameSchedule, JetFrameScheduleError> {
+//RS     let operations = operations.as_ref().to_vec();
+//RS     validate_operations(&operations)?;
+//RS 
+//RS     let completion_events = completion_events(&operations)?;
+//RS     let mut dependencies = Vec::new();
+//RS     let mut dependency_keys = BTreeSet::new();
+//RS     let mut transfers = Vec::new();
+//RS     let mut transfer_keys = BTreeSet::new();
+//RS     let mut conservative = Vec::new();
+//RS 
+//RS     for (left_index, left) in operations.iter().enumerate() {
+//RS         for (right_index, right) in operations.iter().enumerate().skip(left_index + 1) {
+//RS 
+//RS             for left_access in &left.accesses {
+//RS                 for right_access in &right.accesses {
+//RS                     if !left_access
+//RS                         .resource
+//RS                         .overlaps(&right_access.resource)
+//RS                         || !left_access.region.overlaps(&right_access.region)
+//RS                     {
+//RS                         continue;
+//RS                     }
+//RS 
+//RS                     let unknown_alias = matches!(
+//RS                         (&left_access.resource, &right_access.resource),
+//RS                         (JetResourceIdentity::Unknown, _) | (_, JetResourceIdentity::Unknown)
+//RS                     );
+//RS                     let conflict = left_access.mode.is_write() || right_access.mode.is_write();
+//RS                     if unknown_alias {
+//RS                         if options.permit_parallel && conflict {
+//RS                             return Err(JetFrameScheduleError::UnknownAlias {
+//RS                                 before: left.name.clone(),
+//RS                                 after: right.name.clone(),
+//RS                             });
+//RS                         }
+//RS                         conservative.push(format!(
+//RS                             "{} and {} keep source order because aliasing is unknown",
+//RS                             left.name, right.name
+//RS                         ));
+//RS                         if !conflict {
+//RS                             push_dependency(
+//RS                                 &mut dependencies,
+//RS                                 &mut dependency_keys,
+//RS                                 left_index,
+//RS                                 right_index,
+//RS                                 "unknown resource".to_string(),
+//RS                                 "unknown aliasing".to_string(),
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                     if conflict {
+//RS                         if options.permit_parallel {
+//RS                             return Err(JetFrameScheduleError::ConflictingAccess {
+//RS                                 before: left.name.clone(),
+//RS                                 after: right.name.clone(),
+//RS                                 resource: left_access.label().to_string(),
+//RS                                 before_mode: left_access.mode,
+//RS                                 after_mode: right_access.mode,
+//RS                             });
+//RS                         }
+//RS                         let resource = if unknown_alias {
+//RS                             "unknown resource".to_string()
+//RS                         } else {
+//RS                             left_access.label().to_string()
+//RS                         };
+//RS                         push_dependency(
+//RS                             &mut dependencies,
+//RS                             &mut dependency_keys,
+//RS                             left_index,
+//RS                             right_index,
+//RS                             resource,
+//RS                             format!(
+//RS                                 "{} {} -> {} {}",
+//RS                                 left.name,
+//RS                                 left_access.mode.as_str(),
+//RS                                 right.name,
+//RS                                 right_access.mode.as_str()
+//RS                             ),
+//RS                         );
+//RS                     }
+//RS 
+//RS                     if let (
+//RS                         JetResourceIdentity::Named(resource),
+//RS                         Some(left_layout),
+//RS                         Some(right_layout),
+//RS                     ) = (&left_access.resource, &left_access.layout, &right_access.layout)
+//RS                     {
+//RS                         if !left_layout.device.is_empty()
+//RS                             && !right_layout.device.is_empty()
+//RS                             && left_layout.device != right_layout.device
+//RS                             && transfer_keys.insert((left_index, right_index, resource.clone()))
+//RS                         {
+//RS                             transfers.push(JetFrameTransfer {
+//RS                                 before: left_index,
+//RS                                 after: right_index,
+//RS                                 resource: resource.clone(),
+//RS                                 from_device: left_layout.device.clone(),
+//RS                                 to_device: right_layout.device.clone(),
+//RS                             });
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if left.external_effect || right.external_effect {
+//RS                 push_dependency(
+//RS                     &mut dependencies,
+//RS                     &mut dependency_keys,
+//RS                     left_index,
+//RS                     right_index,
+//RS                     "external effect".to_string(),
+//RS                     "visible external effects preserve source order".to_string(),
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let retentions = derive_retentions(&operations, &completion_events);
+//RS     ensure_async_uses_complete(
+//RS         &operations,
+//RS         &completion_events,
+//RS         &mut dependencies,
+//RS         &mut dependency_keys,
+//RS     )?;
+//RS     let reuse = derive_reuse(&operations, &completion_events, &mut conservative);
+//RS 
+//RS     dependencies.sort_by_key(|dependency| {
+//RS         (
+//RS             dependency.before,
+//RS             dependency.after,
+//RS             dependency.resource.clone(),
+//RS             dependency.reason.clone(),
+//RS         )
+//RS     });
+//RS     transfers.sort_by_key(|transfer| {
+//RS         (
+//RS             transfer.before,
+//RS             transfer.after,
+//RS             transfer.resource.clone(),
+//RS             transfer.from_device.clone(),
+//RS             transfer.to_device.clone(),
+//RS         )
+//RS     });
+//RS     conservative.sort();
+//RS     conservative.dedup();
+//RS 
+//RS     Ok(JetFrameSchedule {
+//RS         operations,
+//RS         dependencies,
+//RS         transfers,
+//RS         reuse,
+//RS         retentions,
+//RS         conservative,
+//RS     })
+//RS }
+//RS 
+//RS fn validate_operations(operations: &[JetFrameOperation]) -> Result<(), JetFrameScheduleError> {
+//RS     let mut previous_source = None;
+//RS     for (index, operation) in operations.iter().enumerate() {
+//RS         if operation.name.trim().is_empty() {
+//RS             return Err(JetFrameScheduleError::InvalidOperation {
+//RS                 index,
+//RS                 reason: "checked operation name must not be empty".to_string(),
+//RS             });
+//RS         }
+//RS         if let Some(previous) = previous_source {
+//RS             if operation.source_index < previous {
+//RS                 return Err(JetFrameScheduleError::NonMonotonicSourceOrder {
+//RS                     index,
+//RS                     previous,
+//RS                     current: operation.source_index,
+//RS                 });
+//RS             }
+//RS         }
+//RS         previous_source = Some(operation.source_index);
+//RS         match &operation.completion {
+//RS             JetFrameCompletion::Pending { token } | JetFrameCompletion::Event { token }
+//RS                 if token.trim().is_empty() =>
+//RS             {
+//RS                 return Err(JetFrameScheduleError::InvalidOperation {
+//RS                     index,
+//RS                     reason: "completion token must not be empty".to_string(),
+//RS                 });
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS         for access in &operation.accesses {
+//RS             if let JetResourceIdentity::Named(resource) = &access.resource {
+//RS                 if resource.trim().is_empty() {
+//RS                     return Err(JetFrameScheduleError::InvalidAccess {
+//RS                         operation: operation.name.clone(),
+//RS                         resource: resource.clone(),
+//RS                         reason: "resource identity must not be empty".to_string(),
+//RS                     });
+//RS                 }
+//RS             }
+//RS             access
+//RS                 .region
+//RS                 .validate(&operation.name, access.label())?;
+//RS             if let Some(layout) = &access.layout {
+//RS                 layout.validate(&operation.name, access.label())?;
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn completion_events(
+//RS     operations: &[JetFrameOperation],
+//RS ) -> Result<BTreeMap<String, usize>, JetFrameScheduleError> {
+//RS     let mut events = BTreeMap::new();
+//RS     for (index, operation) in operations.iter().enumerate() {
+//RS         if let JetFrameCompletion::Event { token } = &operation.completion {
+//RS             if let Some(previous) = events.insert(token.clone(), index) {
+//RS                 return Err(JetFrameScheduleError::InvalidOperation {
+//RS                     index,
+//RS                     reason: format!(
+//RS                         "completion token `{token}` has duplicate events at {previous} and {index}"
+//RS                     ),
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS     for (index, operation) in operations.iter().enumerate() {
+//RS         let JetFrameCompletion::Pending { token } = &operation.completion else {
+//RS             continue;
+//RS         };
+//RS         let Some(&event_index) = events.get(token) else {
+//RS             let resource = operation
+//RS                 .accesses
+//RS                 .first()
+//RS                 .map(JetResourceAccess::label)
+//RS                 .unwrap_or("unknown resource");
+//RS             return Err(JetFrameScheduleError::MissingCompletion {
+//RS                 operation: operation.name.clone(),
+//RS                 resource: resource.to_string(),
+//RS                 token: token.clone(),
+//RS             });
+//RS         };
+//RS         if event_index <= index {
+//RS             let resource = operation
+//RS                 .accesses
+//RS                 .first()
+//RS                 .map(JetResourceAccess::label)
+//RS                 .unwrap_or("unknown resource");
+//RS             return Err(JetFrameScheduleError::MissingCompletion {
+//RS                 operation: operation.name.clone(),
+//RS                 resource: resource.to_string(),
+//RS                 token: token.clone(),
+//RS             });
+//RS         }
+//RS     }
+//RS     Ok(events)
+//RS }
+//RS 
+//RS fn push_dependency(
+//RS     dependencies: &mut Vec<JetFrameDependency>,
+//RS     keys: &mut BTreeSet<(usize, usize, String)>,
+//RS     before: usize,
+//RS     after: usize,
+//RS     resource: String,
+//RS     reason: String,
+//RS ) {
+//RS     if keys.insert((before, after, resource.clone())) {
+//RS         dependencies.push(JetFrameDependency {
+//RS             before,
+//RS             after,
+//RS             resource,
+//RS             reason,
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn ensure_async_uses_complete(
+//RS     operations: &[JetFrameOperation],
+//RS     events: &BTreeMap<String, usize>,
+//RS     dependencies: &mut Vec<JetFrameDependency>,
+//RS     keys: &mut BTreeSet<(usize, usize, String)>,
+//RS ) -> Result<(), JetFrameScheduleError> {
+//RS     for (index, operation) in operations.iter().enumerate() {
+//RS         let JetFrameCompletion::Pending { token } = &operation.completion else {
+//RS             continue;
+//RS         };
+//RS         let Some(&event_index) = events.get(token) else {
+//RS             let resource = operation
+//RS                 .accesses
+//RS                 .first()
+//RS                 .map(JetResourceAccess::label)
+//RS                 .unwrap_or("unknown resource");
+//RS             return Err(JetFrameScheduleError::MissingCompletion {
+//RS                 operation: operation.name.clone(),
+//RS                 resource: resource.to_string(),
+//RS                 token: token.clone(),
+//RS             });
+//RS         };
+//RS         if event_index <= index {
+//RS             continue;
+//RS         }
+//RS         push_dependency(
+//RS             dependencies,
+//RS             keys,
+//RS             index,
+//RS             event_index,
+//RS             "completion".to_string(),
+//RS             format!("{} completes at event {token}", operation.name),
+//RS         );
+//RS         for later in operations.iter().enumerate().skip(event_index + 1) {
+//RS             let (later_index, later_operation) = later;
+//RS             for access in &later_operation.accesses {
+//RS                 if operation.accesses.iter().any(|submitted| {
+//RS                     submitted.resource.overlaps(&access.resource)
+//RS                         && submitted.region.overlaps(&access.region)
+//RS                 }) {
+//RS                     push_dependency(
+//RS                         dependencies,
+//RS                         keys,
+//RS                         event_index,
+//RS                         later_index,
+//RS                         "completion".to_string(),
+//RS                         format!("event {token} releases submitted owners"),
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     for (index, operation) in operations.iter().enumerate() {
+//RS         for access in &operation.accesses {
+//RS             for (pending_index, pending) in operations.iter().enumerate().take(index) {
+//RS                 let JetFrameCompletion::Pending { token } = &pending.completion else {
+//RS                     continue;
+//RS                 };
+//RS                 let overlaps = pending.accesses.iter().any(|submitted| {
+//RS                     submitted.resource.overlaps(&access.resource)
+//RS                         && submitted.region.overlaps(&access.region)
+//RS                 });
+//RS                 if !overlaps {
+//RS                     continue;
+//RS                 }
+//RS                 match events.get(token).copied() {
+//RS                     Some(event_index) if event_index < index => {}
+//RS                     _ => {
+//RS                         return Err(JetFrameScheduleError::MissingCompletion {
+//RS                             operation: operation.name.clone(),
+//RS                             resource: access.label().to_string(),
+//RS                             token: token.clone(),
+//RS                         });
+//RS                     }
+//RS                 }
+//RS                 let _ = pending_index;
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn derive_retentions(
+//RS     operations: &[JetFrameOperation],
+//RS     events: &BTreeMap<String, usize>,
+//RS ) -> Vec<JetFrameRetention> {
+//RS     let mut retentions = Vec::new();
+//RS     for (index, operation) in operations.iter().enumerate() {
+//RS         let JetFrameCompletion::Pending { token } = &operation.completion else {
+//RS             continue;
+//RS         };
+//RS         let completed = events.get(token).is_some_and(|event| *event > index);
+//RS         for access in &operation.accesses {
+//RS             retentions.push(JetFrameRetention {
+//RS                 resource: access.label().to_string(),
+//RS                 operation: index,
+//RS                 owner: operation.name.clone(),
+//RS                 completion_token: Some(token.clone()),
+//RS                 completed,
+//RS             });
+//RS         }
+//RS     }
+//RS     retentions
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ResourceUse {
+//RS     resource: String,
+//RS     first: usize,
+//RS     last: usize,
+//RS     temporary: bool,
+//RS     layouts: Vec<Option<JetResourceLayout>>,
+//RS }
+//RS 
+//RS fn derive_reuse(
+//RS     operations: &[JetFrameOperation],
+//RS     events: &BTreeMap<String, usize>,
+//RS     conservative: &mut Vec<String>,
+//RS ) -> Vec<JetFrameReuse> {
+//RS     let mut uses = BTreeMap::<String, ResourceUse>::new();
+//RS     for (index, operation) in operations.iter().enumerate() {
+//RS         for access in &operation.accesses {
+//RS             let JetResourceIdentity::Named(resource) = &access.resource else {
+//RS                 continue;
+//RS             };
+//RS             let entry = uses.entry(resource.clone()).or_insert_with(|| ResourceUse {
+//RS                 resource: resource.clone(),
+//RS                 first: index,
+//RS                 last: index,
+//RS                 temporary: access.temporary,
+//RS                 layouts: Vec::new(),
+//RS             });
+//RS             entry.first = entry.first.min(index);
+//RS             entry.last = entry.last.max(index);
+//RS             // Reuse is legal only when every checked use permits temporary
+//RS             // storage.  A single persistent use keeps the resource alive.
+//RS             entry.temporary &= access.temporary;
+//RS             entry.layouts.push(access.layout.clone());
+//RS         }
+//RS     }
+//RS 
+//RS     let candidates = uses
+//RS         .into_values()
+//RS         .filter(|usage| usage.temporary)
+//RS         .collect::<Vec<_>>();
+//RS     let mut result = Vec::new();
+//RS     for right in &candidates {
+//RS         let Some(left) = candidates
+//RS             .iter()
+//RS             .filter(|left| left.resource != right.resource && left.last < right.first)
+//RS             .max_by_key(|left| left.last)
+//RS         else {
+//RS             continue;
+//RS         };
+//RS         let reason = matching_layout_reason(left, right);
+//RS         let mut legal = reason.is_none();
+//RS         let mut reason_text = reason.unwrap_or_else(|| "lifetimes do not overlap".to_string());
+//RS         if legal {
+//RS             let pending_index = operations
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .filter(|(_, operation)| {
+//RS                     matches!(&operation.completion, JetFrameCompletion::Pending { .. })
+//RS                         && operation.accesses.iter().any(|access| {
+//RS                             matches!(&access.resource, JetResourceIdentity::Named(resource) if resource == &left.resource)
+//RS                         })
+//RS                 })
+//RS                 .filter(|(index, _)| *index <= left.last)
+//RS                 .max_by_key(|(index, _)| *index)
+//RS                 .map(|(index, _)| index);
+//RS             if let Some(pending_index) = pending_index {
+//RS                 if let JetFrameCompletion::Pending { token } = &operations[pending_index].completion {
+//RS                     let completed_at = events.get(token).copied();
+//RS                     if completed_at.is_none_or(|event| event >= right.first) {
+//RS                         legal = false;
+//RS                         reason_text = format!("completion event {token} has not occurred");
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         if !legal {
+//RS             conservative.push(format!(
+//RS                 "{} was not reused for {}: {}",
+//RS                 left.resource, right.resource, reason_text
+//RS             ));
+//RS         }
+//RS         result.push(JetFrameReuse {
+//RS             previous_resource: left.resource.clone(),
+//RS             next_resource: right.resource.clone(),
+//RS             previous_last_use: left.last,
+//RS             next_first_use: right.first,
+//RS             legal,
+//RS             reason: reason_text,
+//RS         });
+//RS     }
+//RS     result.sort_by_key(|reuse| {
+//RS         (
+//RS             reuse.previous_last_use,
+//RS             reuse.next_first_use,
+//RS             reuse.previous_resource.clone(),
+//RS             reuse.next_resource.clone(),
+//RS         )
+//RS     });
+//RS     result
+//RS }
+//RS 
+//RS fn matching_layout_reason(left: &ResourceUse, right: &ResourceUse) -> Option<String> {
+//RS     let Some(left_layout) = left.layouts.iter().flatten().next() else {
+//RS         return Some("layout/size/alignment/device facts are incomplete".to_string());
+//RS     };
+//RS     let Some(right_layout) = right.layouts.iter().flatten().next() else {
+//RS         return Some("layout/size/alignment/device facts are incomplete".to_string());
+//RS     };
+//RS     if left
+//RS         .layouts
+//RS         .iter()
+//RS         .any(|layout| layout.as_ref() != Some(left_layout))
+//RS         || right
+//RS             .layouts
+//RS             .iter()
+//RS             .any(|layout| layout.as_ref() != Some(right_layout))
+//RS     {
+//RS         return Some("every temporary use needs complete matching layout facts".to_string());
+//RS     }
+//RS     if left_layout.device.is_empty() || right_layout.device.is_empty() {
+//RS         return Some("placement/device facts are incomplete".to_string());
+//RS     }
+//RS     if left_layout != right_layout {
+//RS         return Some("size, alignment, layout, or device differs".to_string());
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn op(name: &str, index: usize, resource: &str, mode: JetResourceAccessMode) -> JetFrameOperation {
+//RS         JetFrameOperation::new(name, index).with_access(JetResourceAccess::named(resource, mode))
+//RS     }
+//RS 
+//RS     fn temp(name: &str, index: usize, resource: &str) -> JetFrameOperation {
+//RS         JetFrameOperation::new(name, index).with_access(
+//RS             JetResourceAccess::named(resource, JetResourceAccessMode::Write)
+//RS                 .with_layout(JetResourceLayout::new(64, 16, "rgba8", "gpu0"))
+//RS                 .temporary(),
+//RS         )
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn serial_plan_records_read_write_dependency_and_explanation() {
+//RS         let schedule = derive_frame_schedule([
+//RS             op("simulate", 0, "positions", JetResourceAccessMode::Write),
+//RS             op("draw", 1, "positions", JetResourceAccessMode::Read),
+//RS         ])
+//RS         .expect("serial schedule");
+//RS         assert_eq!(schedule.dependencies.len(), 1);
+//RS         assert!(schedule.explain().contains("dependency: simulate -> draw"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn read_read_is_legal_without_dependency() {
+//RS         let schedule = derive_frame_schedule([
+//RS             op("a", 0, "image", JetResourceAccessMode::Read),
+//RS             op("b", 1, "image", JetResourceAccessMode::Read),
+//RS         ])
+//RS         .expect("read/read schedule");
+//RS         assert!(schedule.dependencies.is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn overlapping_regions_preserve_source_order() {
+//RS         let left = JetResourceAccess::named("image", JetResourceAccessMode::Write)
+//RS             .with_region(JetResourceRegion::bytes(0, 8));
+//RS         let right = JetResourceAccess::named("image", JetResourceAccessMode::Read)
+//RS             .with_region(JetResourceRegion::bytes(4, 4));
+//RS         let schedule = derive_frame_schedule([
+//RS             JetFrameOperation::new("write", 0).with_access(left),
+//RS             JetFrameOperation::new("read", 1).with_access(right),
+//RS         ])
+//RS         .expect("overlapping regions need a serial dependency");
+//RS         assert_eq!(schedule.dependencies.len(), 1);
+//RS         assert_eq!(schedule.dependencies[0].resource, "image");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn unknown_alias_refuses_parallel_write() {
+//RS         let result = derive_frame_schedule_with_options(
+//RS             [
+//RS                 JetFrameOperation::new("a", 0)
+//RS                     .with_access(JetResourceAccess::unknown(JetResourceAccessMode::Write)),
+//RS                 op("b", 1, "image", JetResourceAccessMode::Read),
+//RS             ],
+//RS             JetFrameScheduleOptions::parallel(),
+//RS         );
+//RS         assert!(matches!(result, Err(JetFrameScheduleError::UnknownAlias { .. })));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn overlapping_writes_refuse_explicit_parallel_demand() {
+//RS         let result = derive_frame_schedule_with_options(
+//RS             [
+//RS                 op("a", 0, "image", JetResourceAccessMode::Write),
+//RS                 op("b", 1, "image", JetResourceAccessMode::Write),
+//RS             ],
+//RS             JetFrameScheduleOptions::parallel(),
+//RS         );
+//RS         assert!(matches!(result, Err(JetFrameScheduleError::ConflictingAccess { .. })));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn disjoint_regions_can_run_in_parallel() {
+//RS         let left = JetResourceAccess::named("image", JetResourceAccessMode::Write)
+//RS             .with_region(JetResourceRegion::bytes(0, 4));
+//RS         let right = JetResourceAccess::named("image", JetResourceAccessMode::Write)
+//RS             .with_region(JetResourceRegion::bytes(4, 4));
+//RS         let schedule = derive_frame_schedule_with_options(
+//RS             [
+//RS                 JetFrameOperation::new("a", 0).with_access(left),
+//RS                 JetFrameOperation::new("b", 1).with_access(right),
+//RS             ],
+//RS             JetFrameScheduleOptions::parallel(),
+//RS         )
+//RS         .expect("disjoint schedule");
+//RS         assert!(schedule.dependencies.is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn async_owner_is_retained_until_actual_event() {
+//RS         let schedule = derive_frame_schedule([
+//RS             JetFrameOperation::new("submit", 0)
+//RS                 .with_access(JetResourceAccess::named("image", JetResourceAccessMode::Read))
+//RS                 .pending("flight"),
+//RS             JetFrameOperation::new("finish", 1).completion_event("flight"),
+//RS             op("consume", 2, "image", JetResourceAccessMode::Read),
+//RS         ])
+//RS         .expect("completion schedule");
+//RS         assert_eq!(schedule.retentions[0].completion_token.as_deref(), Some("flight"));
+//RS         assert!(schedule
+//RS             .dependencies
+//RS             .iter()
+//RS             .any(|dependency| dependency.resource == "completion"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn completion_event_before_submit_is_refused() {
+//RS         let result = derive_frame_schedule([
+//RS             JetFrameOperation::new("finish", 0).completion_event("flight"),
+//RS             JetFrameOperation::new("submit", 1)
+//RS                 .with_access(JetResourceAccess::named("image", JetResourceAccessMode::Read))
+//RS                 .pending("flight"),
+//RS         ]);
+//RS         assert!(matches!(
+//RS             result,
+//RS             Err(JetFrameScheduleError::MissingCompletion { .. })
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn missing_async_completion_is_refused() {
+//RS         let result = derive_frame_schedule([
+//RS             JetFrameOperation::new("submit", 0)
+//RS                 .with_access(
+//RS                     JetResourceAccess::named("a", JetResourceAccessMode::Write)
+//RS                         .with_layout(JetResourceLayout::new(64, 16, "rgba8", "gpu0"))
+//RS                         .temporary(),
+//RS                 )
+//RS                 .pending("flight"),
+//RS             temp("next", 1, "b"),
+//RS         ]);
+//RS         assert!(matches!(
+//RS             result,
+//RS             Err(JetFrameScheduleError::MissingCompletion { .. })
+//RS         ));
+//RS     }
+//RS     #[test]
+//RS     fn canonical_codec_round_trips_complete_schedule() {
+//RS         let schedule = derive_frame_schedule([
+//RS             JetFrameOperation::new("submit", 0)
+//RS                 .with_access(
+//RS                     JetResourceAccess::named("image", JetResourceAccessMode::Write)
+//RS                         .with_region(JetResourceRegion::bytes(4, 8))
+//RS                         .with_layout(JetResourceLayout::new(64, 16, "rgba8", "gpu0"))
+//RS                         .temporary(),
+//RS                 )
+//RS                 .pending("flight"),
+//RS             JetFrameOperation::new("finish", 1).completion_event("flight"),
+//RS             temp("next", 2, "other"),
+//RS         ])
+//RS         .expect("schedule");
+//RS         let encoded = schedule.canonical_json();
+//RS         let decoded = JetFrameSchedule::from_canonical_json(&encoded).expect("canonical schedule");
+//RS         assert_eq!(decoded, schedule);
+//RS         assert_eq!(
+//RS             JetFrameSchedule::decode_canonical(&schedule.encode_canonical()).expect("wire schedule"),
+//RS             schedule
+//RS         );
+//RS     }
+//RS     #[test]
+//RS     fn persistent_use_blocks_temporary_reuse() {
+//RS         let first = temp("first", 0, "a");
+//RS         let persistent = op("keep", 1, "a", JetResourceAccessMode::Read);
+//RS         let next = temp("next", 2, "b");
+//RS         let schedule = derive_frame_schedule([first, persistent, next])
+//RS             .expect("persistent resource schedule");
+//RS         assert!(schedule.reuse.is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn matching_temporary_layout_allows_reuse_and_explains_transfer() {
+//RS         let schedule = derive_frame_schedule([
+//RS             temp("first", 0, "a"),
+//RS             temp("second", 1, "b"),
+//RS         ])
+//RS         .expect("temporary schedule");
+//RS         assert_eq!(schedule.reuse.len(), 1);
+//RS         assert!(schedule.reuse[0].legal);
+//RS         assert!(schedule.explain().contains("reuse: a -> b"));
+//RS 
+//RS         let transferred = derive_frame_schedule([
+//RS             JetFrameOperation::new("cpu", 0).with_access(
+//RS                 JetResourceAccess::named("image", JetResourceAccessMode::Read)
+//RS                     .with_layout(JetResourceLayout::new(64, 16, "rgba8", "cpu")),
+//RS             ),
+//RS             JetFrameOperation::new("gpu", 1).with_access(
+//RS                 JetResourceAccess::named("image", JetResourceAccessMode::Read)
+//RS                     .with_layout(JetResourceLayout::new(64, 16, "rgba8", "gpu")),
+//RS             ),
+//RS         ])
+//RS         .expect("transfer schedule");
+//RS         assert_eq!(transferred.transfers.len(), 1);
+//RS         assert!(transferred.explain().contains("transfer: image cpu -> gpu"));
+//RS     }
+//RS }
+// END-PORT-PENDING 0094 crates/jet-foundation/src/ResourceSchedule.rs:1-2125
+
+// PORT-PENDING 0094 crates-jet-foundation-src-resourceschedule-module-group: crates/jet-foundation/src/WebPartition.rs:1-192
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-WASM1=A (c123 M1): JS/WASM partition buckets and ABI-safe type checks.
+//RS 
+//RS use crate::Syntax;
+//RS use crate::AST::Type;
+//RS 
+//RS /// Compile target bucket for the web backend (D-WASM1).
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum WebBucket {
+//RS     JS,
+//RS     Wasm,
+//RS }
+//RS 
+//RS impl WebBucket {
+//RS     pub fn parse(name: &str) -> Option<Self> {
+//RS         match name {
+//RS             Syntax::WEB_BUCKET_JS => Some(WebBucket::JS),
+//RS             Syntax::WEB_BUCKET_WASM => Some(WebBucket::Wasm),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             WebBucket::JS => Syntax::WEB_BUCKET_JS,
+//RS             WebBucket::Wasm => Syntax::WEB_BUCKET_WASM,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Per-function web partition override (D-WASM1).
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum WebPartitionMarker {
+//RS     Wasm,
+//RS     JS,
+//RS     WasmExport,
+//RS }
+//RS 
+//RS impl WebPartitionMarker {
+//RS     pub fn bucket(self) -> WebBucket {
+//RS         match self {
+//RS             WebPartitionMarker::Wasm | WebPartitionMarker::WasmExport => WebBucket::Wasm,
+//RS             WebPartitionMarker::JS => WebBucket::JS,
+//RS         }
+//RS     }
+//RS 
+//RS     /// The marker's source spelling (without the leading `#`), for
+//RS     /// re-emission by `jet fmt`. D-MARK-TARGET1=A (ratified 2026-07-11, card
+//RS     /// #498): the per-function override now shares the `#Target(Wasm|JS)`
+//RS     /// spelling with the file/module ceiling — the old bare `#Wasm`/`#JS`
+//RS     /// markers are retired. `#WasmExport` (a different job) is untouched.
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             WebPartitionMarker::Wasm => "Target(Wasm)",
+//RS             WebPartitionMarker::JS => "Target(JS)",
+//RS             WebPartitionMarker::WasmExport => Syntax::MARKER_WASM_EXPORT,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Canonical web-partition map key for one function (D-WASM1 / #702).
+//RS ///
+//RS /// `file_prefix` is `Some(module.alias)` for non-entry file modules and `None` for
+//RS /// the entry module. `module_prefix` is `Some(inline_module_name)` inside `#module`.
+//RS pub fn partition_key(
+//RS     file_prefix: Option<&str>,
+//RS     module_prefix: Option<&str>,
+//RS     fn_name: &str,
+//RS ) -> String {
+//RS     match module_prefix {
+//RS         Some(module) => crate::Names::member_name(module, fn_name),
+//RS         None => file_prefix
+//RS             .map(|alias| crate::Names::member_name(alias, fn_name))
+//RS             .unwrap_or_else(|| fn_name.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS /// Effect-solver row key for a function collected from one loaded file.
+//RS pub fn partition_effect_key(file_alias: &str, local_key: &str) -> String {
+//RS     format!("{file_alias}::{local_key}")
+//RS }
+//RS 
+//RS /// D-JSBIND1=A: scalars, `String`, and homogeneous `[T]` / `[String:T]` of ABI-safe
+//RS /// element types. `Named` / `Apply` Codable structs and enums are checked in sema where
+//RS /// the bundle's type definitions are available.
+//RS pub fn is_abi_safe_type(ty: &Type) -> bool {
+//RS     match ty {
+//RS         Type::Int
+//RS         | Type::Float
+//RS         | Type::Bool
+//RS         | Type::String
+//RS         | Type::Char
+//RS         | Type::IntN { .. }
+//RS         | Type::InlineRange { .. }
+//RS         | Type::Float32 => true,
+//RS         Type::Named(n) if n == "String" => true,
+//RS         Type::List(inner) | Type::Option(inner) | Type::Shared(inner) => is_abi_safe_type(inner),
+//RS         Type::FixedList { elem, .. } => is_abi_safe_type(elem),
+//RS         Type::Map { key, value, .. } => matches!(**key, Type::String) && is_abi_safe_type(value),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// E-WEB-CROSS-PARTITION: a function in one web bucket calls a function in another.
+//RS pub fn web_cross_partition(
+//RS     caller: &str,
+//RS     callee: &str,
+//RS     caller_bucket: WebBucket,
+//RS     callee_bucket: WebBucket,
+//RS     span: Option<crate::Diagnostics::Span>,
+//RS ) -> crate::Diagnostics::Diagnostic {
+//RS     crate::Diagnostics::Diagnostic::error(
+//RS         "E-WEB-CROSS-PARTITION",
+//RS         format!(
+//RS             "`{caller}` is compiled to {} but calls `{callee}`, which lives in {}",
+//RS             caller_bucket.name(),
+//RS             callee_bucket.name(),
+//RS         ),
+//RS         "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet"
+//RS             .to_string(),
+//RS         format!(
+//RS             "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#{}(Wasm|JS)` markers",
+//RS             Syntax::MARKER_TARGET,
+//RS         ),
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS /// E-WEB-TARGET-BROWSER: a function pinned to Wasm also carries the `Browser` effect.
+//RS pub fn web_target_browser(
+//RS     fn_name: &str,
+//RS     span: Option<crate::Diagnostics::Span>,
+//RS ) -> crate::Diagnostics::Diagnostic {
+//RS     crate::Diagnostics::Diagnostic::error(
+//RS         "E-WEB-TARGET-BROWSER",
+//RS         format!("`{fn_name}` is pinned to Wasm but uses the `Browser` effect"),
+//RS         "the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly"
+//RS             .to_string(),
+//RS         format!(
+//RS             "remove the `#{}(Wasm)` pin, move browser work into a `#{}(JS)` function, or drop the browser API calls",
+//RS             Syntax::MARKER_TARGET,
+//RS             Syntax::MARKER_TARGET,
+//RS         ),
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS /// E-WEB-ABI-TYPE: a JS/WASM boundary type is not ABI-safe.
+//RS pub fn web_abi_type(
+//RS     ty_show: &str,
+//RS     context: &str,
+//RS     span: Option<crate::Diagnostics::Span>,
+//RS ) -> crate::Diagnostics::Diagnostic {
+//RS     crate::Diagnostics::Diagnostic::error(
+//RS         "E-WEB-ABI-TYPE",
+//RS         format!("`{ty_show}` cannot cross the JS/WASM boundary {context}"),
+//RS         "web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums)"
+//RS             .to_string(),
+//RS         "use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe"
+//RS             .to_string(),
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn abi_safe_scalars() {
+//RS         assert!(is_abi_safe_type(&Type::Int));
+//RS         assert!(is_abi_safe_type(&Type::String));
+//RS         assert!(is_abi_safe_type(&Type::List(Box::new(Type::Int))));
+//RS         assert!(!is_abi_safe_type(&Type::Named("Point".to_string())));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn partition_key_qualified_identities() {
+//RS         assert_eq!(partition_key(None, None, "run"), "run");
+//RS         assert_eq!(
+//RS             partition_key(Some("left"), None, "helper"),
+//RS             "__jet_left_dhelper"
+//RS         );
+//RS         assert_eq!(
+//RS             partition_key(None, Some("math"), "double"),
+//RS             "__jet_math_ddouble"
+//RS         );
+//RS         assert_eq!(
+//RS             partition_key(Some("left"), Some("inner"), "helper"),
+//RS             "__jet_inner_dhelper"
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 0094 crates/jet-foundation/src/WebPartition.rs:1-192
+

@@ -1,0 +1,1907 @@
+// PORT-PENDING 0468 crates-jet-codegen-src-codegen-plugin: crates/jet-codegen/src/Codegen/Plugin.rs:1-1903
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A (c81): `target: sandbox`
+//RS //! guest artifact projection. The checked MIR artifact plan owns the package
+//RS //! identity and export rows; this module only renders the guest-side WIT and
+//RS //! wrapper text around the already-emitted whole-program Rust.
+//RS //!
+//RS //! Export rows may use the checked scalar projection or a recursively closed
+//RS //! Component Model shape (`record`, `list`, `option`, and `result`). The same
+//RS //! compile-time descriptor drives WIT declarations and JIT marshalling; this
+//RS //! module does not inspect source AST, rerun semantic lowering, or reconstruct
+//RS //! visibility from public functions.
+//RS 
+//RS use std::collections::BTreeSet;
+//RS 
+//RS use jet_foundation::MIR::{
+//RS     MirAccess, MirArtifactId, MirArtifactKind, MirArtifactTarget, MirProgram, MirType,
+//RS     MirTypeDef, MirTypeDefKind, MirTypeKind,
+//RS };
+//RS use jet_foundation::Names::{mangle, mangle_generated, mangle_path};
+//RS use super::Embedding::{ComponentSignature, ComponentSignatureDescriptor, ComponentTypeDescriptor, ExportScalar};
+//RS 
+//RS /// The guest-side artifacts for a `target: sandbox` build.
+//RS #[derive(Debug, Clone)]
+//RS pub struct PluginArtifacts {
+//RS     /// The full `.wit` world text, e.g. `package jet:mathkit@0.1.0; world
+//RS     /// jetplugin { export scale: func(a: f64, b: f64) -> f64; … }`.
+//RS     pub wit: String,
+//RS     /// The complete guest Rust source (whole-program Rust plus the
+//RS     /// `#[export_name]` wrapper functions) — ready for
+//RS     /// `rustc --target wasm32-unknown-unknown --crate-type cdylib`.
+//RS     pub guest_rust: String,
+//RS     /// The `.wit` world name (`jetplugin`, fixed — the package name below is
+//RS     /// what varies per plugin).
+//RS     pub world_name: String,
+//RS     /// The sanitized artifact-plan name used as the package identity.
+//RS     pub export_name: String,
+//RS     /// The Jet names of every function actually exported (for the ApiFreeze
+//RS     /// snapshot / version-handshake diagnostics).
+//RS     pub exported_fns: Vec<String>,
+//RS     /// The same typed rows consumed by the native Library lowerer.
+//RS     pub exports: Vec<super::Embedding::ExportFunction>,
+//RS }
+//RS 
+//RS /// The one fixed `.wit` world name every plugin uses — only the `package`
+//RS /// identity (from the selected artifact-plan name) varies (D-PLUGIN-EXPORT1=A:
+//RS /// no new in-source keyword, so there is nothing else to name per-plugin).
+//RS const WORLD_NAME: &str = "jetplugin";
+//RS 
+//RS 
+//RS /// `snake_case` (or anything) -> `kebab-case`, the Component Model's required
+//RS /// identifier shape. Jet function names are ASCII identifiers, so a plain
+//RS /// `_` -> `-` swap is exact and total.
+//RS fn to_kebab(name: &str) -> String {
+//RS     name.replace('_', "-")
+//RS }
+//RS 
+//RS /// Sanitize an export/world identity into a valid `.wit` package name segment
+//RS /// (lowercase ASCII alphanumeric + `-`, must start with a letter).
+//RS fn sanitize_package_name(name: &str) -> String {
+//RS     let mut out = String::new();
+//RS     for c in name.chars() {
+//RS         if c.is_ascii_alphanumeric() {
+//RS             out.push(c.to_ascii_lowercase());
+//RS         } else if !out.is_empty() && !out.ends_with('-') {
+//RS             out.push('-');
+//RS         }
+//RS     }
+//RS     let out = out.trim_end_matches('-').to_string();
+//RS     if out.is_empty() || !out.chars().next().unwrap().is_ascii_alphabetic() {
+//RS         format!(
+//RS             "plugin-{}",
+//RS             if out.is_empty() {
+//RS                 "export".to_string()
+//RS             } else {
+//RS                 out
+//RS             }
+//RS         )
+//RS     } else {
+//RS         out
+//RS     }
+//RS }
+//RS 
+//RS fn rust_named_type_name(
+//RS     program: &MirProgram,
+//RS     id: jet_foundation::MIR::MirTypeId,
+//RS     fallback: &str,
+//RS ) -> String {
+//RS     program
+//RS         .types
+//RS         .iter()
+//RS         .find(|definition| definition.id == id)
+//RS         .map(|definition| mangle_path(&definition.key))
+//RS         .unwrap_or_else(|| mangle_path(fallback))
+//RS }
+//RS 
+//RS fn rust_type(program: &MirProgram, ty: &MirType) -> String {
+//RS     match ty.kind() {
+//RS         MirTypeKind::Int => "i64".to_string(),
+//RS         MirTypeKind::Float => "f64".to_string(),
+//RS         MirTypeKind::Bool => "bool".to_string(),
+//RS         MirTypeKind::String => "String".to_string(),
+//RS         MirTypeKind::List(inner) => format!("Vec<{}>", rust_type(program, inner)),
+//RS         MirTypeKind::Option(inner) => {
+//RS             format!("JetOutcome<{}, JetAbsent>", rust_type(program, inner))
+//RS         }
+//RS         MirTypeKind::Result { ok, err } => {
+//RS             format!("JetOutcome<{}, {}>", rust_type(program, ok), rust_type(program, err))
+//RS         }
+//RS         MirTypeKind::FixedList { elem, len } => {
+//RS             format!("[{}; {}]", rust_type(program, elem), len.expression())
+//RS         }
+//RS         MirTypeKind::InlineRange { base, .. } | MirTypeKind::Tagged { inner: base, .. } => {
+//RS             rust_type(program, base)
+//RS         }
+//RS         MirTypeKind::Apply { name, args } => {
+//RS             let head = rust_named_type_name(program, name.id, &name.name);
+//RS             if args.is_empty() {
+//RS                 head
+//RS             } else {
+//RS                 format!(
+//RS                     "{head}<{}>",
+//RS                     args.iter()
+//RS                         .map(|arg| rust_type(program, arg))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ")
+//RS                 )
+//RS             }
+//RS         }
+//RS         _ => "()".to_string(),
+//RS     }
+//RS }
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS enum PluginCoreSlot {
+//RS     I32,
+//RS     I64,
+//RS     F64,
+//RS }
+//RS 
+//RS impl PluginCoreSlot {
+//RS     fn rust_ty(self) -> &'static str {
+//RS         match self {
+//RS             Self::I32 => "i32",
+//RS             Self::I64 => "i64",
+//RS             Self::F64 => "f64",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn merge_plugin_slot(left: PluginCoreSlot, right: PluginCoreSlot) -> PluginCoreSlot {
+//RS     match (left, right) {
+//RS         (PluginCoreSlot::I32, PluginCoreSlot::I32) => PluginCoreSlot::I32,
+//RS         (PluginCoreSlot::F64, PluginCoreSlot::F64) => PluginCoreSlot::F64,
+//RS         (PluginCoreSlot::I64, PluginCoreSlot::I64)
+//RS         | (PluginCoreSlot::I32, PluginCoreSlot::I64)
+//RS         | (PluginCoreSlot::I64, PluginCoreSlot::I32)
+//RS         | (PluginCoreSlot::I64, PluginCoreSlot::F64)
+//RS         | (PluginCoreSlot::F64, PluginCoreSlot::I64)
+//RS         | (PluginCoreSlot::I32, PluginCoreSlot::F64)
+//RS         | (PluginCoreSlot::F64, PluginCoreSlot::I32) => PluginCoreSlot::I64,
+//RS     }
+//RS }
+//RS 
+//RS fn merge_plugin_slots(
+//RS     left: Vec<PluginCoreSlot>,
+//RS     right: Vec<PluginCoreSlot>,
+//RS ) -> Vec<PluginCoreSlot> {
+//RS     let length = left.len().max(right.len());
+//RS     (0..length)
+//RS         .filter_map(|index| match (left.get(index), right.get(index)) {
+//RS             (Some(left), Some(right)) => Some(merge_plugin_slot(*left, *right)),
+//RS             (Some(slot), None) | (None, Some(slot)) => Some(*slot),
+//RS             (None, None) => None,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn plugin_flat_slots(ty: &ComponentTypeDescriptor) -> Vec<PluginCoreSlot> {
+//RS     match ty {
+//RS         ComponentTypeDescriptor::Int => vec![PluginCoreSlot::I64],
+//RS         ComponentTypeDescriptor::Float => vec![PluginCoreSlot::F64],
+//RS         ComponentTypeDescriptor::Bool => vec![PluginCoreSlot::I32],
+//RS         ComponentTypeDescriptor::String | ComponentTypeDescriptor::List(_) => {
+//RS             vec![PluginCoreSlot::I32, PluginCoreSlot::I32]
+//RS         }
+//RS         ComponentTypeDescriptor::Option(inner) => {
+//RS             let mut slots = vec![PluginCoreSlot::I32];
+//RS             slots.extend(plugin_flat_slots(inner));
+//RS             slots
+//RS         }
+//RS         ComponentTypeDescriptor::Result { ok, err } => {
+//RS             let mut slots = vec![PluginCoreSlot::I32];
+//RS             slots.extend(merge_plugin_slots(
+//RS                 plugin_flat_slots(ok),
+//RS                 plugin_flat_slots(err),
+//RS             ));
+//RS             slots
+//RS         }
+//RS         ComponentTypeDescriptor::Record { fields, .. } => fields
+//RS             .iter()
+//RS             .flat_map(|(_, _, ty)| plugin_flat_slots(ty))
+//RS             .collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_align_to(value: usize, align: usize) -> usize {
+//RS     debug_assert!(align.is_power_of_two());
+//RS     (value + align - 1) & !(align - 1)
+//RS }
+//RS 
+//RS fn plugin_memory_layout(ty: &ComponentTypeDescriptor) -> (usize, usize) {
+//RS     match ty {
+//RS         ComponentTypeDescriptor::Int | ComponentTypeDescriptor::Float => (8, 8),
+//RS         ComponentTypeDescriptor::Bool => (1, 1),
+//RS         ComponentTypeDescriptor::String | ComponentTypeDescriptor::List(_) => (8, 4),
+//RS         ComponentTypeDescriptor::Option(inner) => {
+//RS             let (size, align) = plugin_memory_layout(inner);
+//RS             let payload = plugin_align_to(1, align);
+//RS             (plugin_align_to(payload + size, align), align)
+//RS         }
+//RS         ComponentTypeDescriptor::Result { ok, err } => {
+//RS             let (ok_size, ok_align) = plugin_memory_layout(ok);
+//RS             let (err_size, err_align) = plugin_memory_layout(err);
+//RS             let align = ok_align.max(err_align);
+//RS             let payload = plugin_align_to(1, align);
+//RS             (
+//RS                 plugin_align_to(payload + ok_size.max(err_size), align),
+//RS                 align,
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Record { fields, .. } => {
+//RS             let mut size = 0;
+//RS             let mut align = 1;
+//RS             for (_, _, field) in fields {
+//RS                 let (field_size, field_align) = plugin_memory_layout(field);
+//RS                 size = plugin_align_to(size, field_align) + field_size;
+//RS                 align = align.max(field_align);
+//RS             }
+//RS             (plugin_align_to(size, align), align)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_sequence_layout(types: &[ComponentTypeDescriptor]) -> (usize, usize) {
+//RS     let mut size = 0;
+//RS     let mut align = 1;
+//RS     for ty in types {
+//RS         let (field_size, field_align) = plugin_memory_layout(ty);
+//RS         size = plugin_align_to(size, field_align) + field_size;
+//RS         align = align.max(field_align);
+//RS     }
+//RS     (plugin_align_to(size, align), align)
+//RS }
+//RS 
+//RS fn plugin_record_offsets(
+//RS     fields: &[(usize, String, ComponentTypeDescriptor)],
+//RS ) -> Vec<(usize, &ComponentTypeDescriptor)> {
+//RS     let mut offset = 0;
+//RS     let mut result = Vec::with_capacity(fields.len());
+//RS     for (_, _, field) in fields {
+//RS         let (_, align) = plugin_memory_layout(field);
+//RS         offset = plugin_align_to(offset, align);
+//RS         result.push((offset, field));
+//RS         offset += plugin_memory_layout(field).0;
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn plugin_needs_post_return(ty: &ComponentTypeDescriptor) -> bool {
+//RS     match ty {
+//RS         ComponentTypeDescriptor::String | ComponentTypeDescriptor::List(_) => true,
+//RS         ComponentTypeDescriptor::Option(inner) => plugin_needs_post_return(inner),
+//RS         ComponentTypeDescriptor::Result { ok, err } => {
+//RS             plugin_needs_post_return(ok) || plugin_needs_post_return(err)
+//RS         }
+//RS         ComponentTypeDescriptor::Record { fields, .. } => fields
+//RS             .iter()
+//RS             .any(|(_, _, ty)| plugin_needs_post_return(ty)),
+//RS         ComponentTypeDescriptor::Int
+//RS         | ComponentTypeDescriptor::Float
+//RS         | ComponentTypeDescriptor::Bool => false,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_unwrap_transparent<'a>(program: &'a MirProgram, ty: &'a MirType) -> &'a MirType {
+//RS     match ty.kind() {
+//RS         MirTypeKind::InlineRange { base, .. } | MirTypeKind::Tagged { inner: base, .. } => {
+//RS             plugin_unwrap_transparent(program, base)
+//RS         }
+//RS         MirTypeKind::Apply { name: nominal, .. } => {
+//RS             let Some(definition) = program.types.iter().find(|definition| definition.id == nominal.id)
+//RS             else {
+//RS                 return ty;
+//RS             };
+//RS             match &definition.kind {
+//RS                 MirTypeDefKind::Alias { target } => plugin_unwrap_transparent(program, target),
+//RS                 _ => ty,
+//RS             }
+//RS         }
+//RS         _ => ty,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_record_definition<'a>(
+//RS     program: &'a MirProgram,
+//RS     ty: &'a MirType,
+//RS ) -> Option<&'a MirTypeDef> {
+//RS     let ty = plugin_unwrap_transparent(program, ty);
+//RS     let MirTypeKind::Apply { name: nominal, .. } = ty.kind() else {
+//RS         return None;
+//RS     };
+//RS     let definition = program
+//RS         .types
+//RS         .iter()
+//RS         .find(|definition| definition.id == nominal.id)?;
+//RS     matches!(&definition.kind, MirTypeDefKind::Struct { .. }).then_some(definition)
+//RS }
+//RS 
+//RS fn plugin_record_fields<'a>(
+//RS     program: &'a MirProgram,
+//RS     ty: &'a MirType,
+//RS ) -> Option<&'a [jet_foundation::MIR::MirField]> {
+//RS     let definition = plugin_record_definition(program, ty)?;
+//RS     match &definition.kind {
+//RS         MirTypeDefKind::Struct { fields, .. } => Some(fields),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_sequence_element<'a>(
+//RS     program: &'a MirProgram,
+//RS     ty: &'a MirType,
+//RS ) -> Option<&'a MirType> {
+//RS     match plugin_unwrap_transparent(program, ty).kind() {
+//RS         MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => Some(inner),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_fixed_list_len(
+//RS     program: &MirProgram,
+//RS     ty: &MirType,
+//RS ) -> Option<String> {
+//RS     match plugin_unwrap_transparent(program, ty).kind() {
+//RS         MirTypeKind::FixedList { len, .. } => Some(len.expression()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_option_element<'a>(
+//RS     program: &'a MirProgram,
+//RS     ty: &'a MirType,
+//RS ) -> Option<&'a MirType> {
+//RS     match plugin_unwrap_transparent(program, ty).kind() {
+//RS         MirTypeKind::Option(inner) => Some(inner),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_result_elements<'a>(
+//RS     program: &'a MirProgram,
+//RS     ty: &'a MirType,
+//RS ) -> Option<(&'a MirType, &'a MirType)> {
+//RS     match plugin_unwrap_transparent(program, ty).kind() {
+//RS         MirTypeKind::Result { ok, err } => Some((ok, err)),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_fresh(counter: &mut usize, stem: &str) -> String {
+//RS     let value = format!("__jet_plugin_{stem}_{counter}");
+//RS     *counter += 1;
+//RS     value
+//RS }
+//RS 
+//RS fn plugin_read_memory(ptr: &str, offset: usize, rust_ty: &str) -> String {
+//RS     format!(
+//RS         "unsafe {{ std::ptr::read_unaligned((({ptr}) as usize + {offset}) as *const {rust_ty}) }}"
+//RS     )
+//RS }
+//RS 
+//RS fn plugin_write_memory(ptr: &str, offset: usize, rust_ty: &str, value: &str) -> String {
+//RS     format!(
+//RS         "unsafe {{ std::ptr::write_unaligned((({ptr}) as usize + {offset}) as *mut {rust_ty}, {value}); }}"
+//RS     )
+//RS }
+//RS 
+//RS fn plugin_flat_lift_expr(
+//RS     program: &MirProgram,
+//RS     source_ty: &MirType,
+//RS     descriptor: &ComponentTypeDescriptor,
+//RS     args: &[String],
+//RS     arg_slots: &[PluginCoreSlot],
+//RS     cursor: &mut usize,
+//RS     counter: &mut usize,
+//RS     read_text: &str,
+//RS ) -> String {
+//RS     match descriptor {
+//RS         ComponentTypeDescriptor::Int => {
+//RS             let raw = args[*cursor].clone();
+//RS             *cursor += 1;
+//RS             format!("({raw} as i64)")
+//RS         }
+//RS         ComponentTypeDescriptor::Float => {
+//RS             let raw = args[*cursor].clone();
+//RS             let slot = arg_slots[*cursor];
+//RS             *cursor += 1;
+//RS             if slot == PluginCoreSlot::F64 {
+//RS                 raw
+//RS             } else {
+//RS                 format!("f64::from_bits(({raw} as u64))")
+//RS             }
+//RS         }
+//RS         ComponentTypeDescriptor::Bool => {
+//RS             let raw = args[*cursor].clone();
+//RS             let slot = arg_slots[*cursor];
+//RS             *cursor += 1;
+//RS             match slot {
+//RS                 PluginCoreSlot::F64 => {
+//RS                     format!("match {raw} {{ 0.0 => false, 1.0 => true, _ => panic!(\"invalid canonical bool\") }}")
+//RS                 }
+//RS                 PluginCoreSlot::I32 | PluginCoreSlot::I64 => {
+//RS                     format!("match {raw} {{ 0 => false, 1 => true, _ => panic!(\"invalid canonical bool\") }}")
+//RS                 }
+//RS             }
+//RS         }
+//RS         ComponentTypeDescriptor::String => {
+//RS             let ptr = args[*cursor].clone();
+//RS             let len = args[*cursor + 1].clone();
+//RS             *cursor += 2;
+//RS             format!("{read_text}(({ptr}) as i32, ({len}) as i32)")
+//RS         }
+//RS         ComponentTypeDescriptor::List(inner) => {
+//RS             let ptr = args[*cursor].clone();
+//RS             let len = args[*cursor + 1].clone();
+//RS             *cursor += 2;
+//RS             let element_ty = plugin_sequence_element(program, source_ty)
+//RS                 .expect("component list source type has no element");
+//RS             let base = plugin_fresh(counter, "list_base");
+//RS             let length = plugin_fresh(counter, "list_len");
+//RS             let output = plugin_fresh(counter, "list_out");
+//RS             let index = plugin_fresh(counter, "list_index");
+//RS             let element_ptr = plugin_fresh(counter, "list_element_ptr");
+//RS             let element = plugin_memory_lift_expr(
+//RS                 program,
+//RS                 element_ty,
+//RS                 inner,
+//RS                 &element_ptr,
+//RS                 counter,
+//RS                 read_text,
+//RS             );
+//RS             let output_type = rust_type(program, source_ty);
+//RS             let fixed = plugin_fixed_list_len(program, source_ty)
+//RS                 .map(|len| {
+//RS                     format!(
+//RS                         "let {output}: {output_type} = match {output}.try_into() {{ Ok(value) => value, Err(_) => panic!(\"canonical list length mismatch (expected {len})\") }}; {output}"
+//RS                     )
+//RS                 })
+//RS                 .unwrap_or_else(|| output.clone());
+//RS             format!(
+//RS                 "{{ let {base} = ({ptr}) as usize; let {length} = ({len}) as usize; let mut {output} = Vec::with_capacity({length}); for {index} in 0..{length} {{ let {element_ptr} = ({base} + {index} * {}) as i32; {output}.push({element}); }} {fixed} }}",
+//RS                 plugin_memory_layout(inner).0
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Option(inner) => {
+//RS             let tag = args[*cursor].clone();
+//RS             *cursor += 1;
+//RS             let payload_start = *cursor;
+//RS             let payload_slots = plugin_flat_slots(inner);
+//RS             let child = plugin_flat_lift_expr(
+//RS                 program,
+//RS                 plugin_option_element(program, source_ty)
+//RS                     .expect("component option source type has no element"),
+//RS                 inner,
+//RS                 args,
+//RS                 arg_slots,
+//RS                 cursor,
+//RS                 counter,
+//RS                 read_text,
+//RS             );
+//RS             *cursor = payload_start + payload_slots.len();
+//RS             format!(
+//RS                 "{{ match {tag} {{ 0 => Err(JetAbsent), 1 => Ok({child}), _ => panic!(\"invalid canonical option discriminant\") }} }}"
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Result { ok, err } => {
+//RS             let tag = args[*cursor].clone();
+//RS             *cursor += 1;
+//RS             let payload_start = *cursor;
+//RS             let payload_slots = merge_plugin_slots(plugin_flat_slots(ok), plugin_flat_slots(err));
+//RS             let (source_ok, source_err) = plugin_result_elements(program, source_ty)
+//RS                 .expect("component result source type has no variants");
+//RS             let mut ok_cursor = payload_start;
+//RS             let ok_expr = plugin_flat_lift_expr(
+//RS                 program,
+//RS                 source_ok,
+//RS                 ok,
+//RS                 args,
+//RS                 arg_slots,
+//RS                 &mut ok_cursor,
+//RS                 counter,
+//RS                 read_text,
+//RS             );
+//RS             let mut err_cursor = payload_start;
+//RS             let err_expr = plugin_flat_lift_expr(
+//RS                 program,
+//RS                 source_err,
+//RS                 err,
+//RS                 args,
+//RS                 arg_slots,
+//RS                 &mut err_cursor,
+//RS                 counter,
+//RS                 read_text,
+//RS             );
+//RS             *cursor = payload_start + payload_slots.len();
+//RS             format!(
+//RS                 "{{ match {tag} {{ 0 => Ok({ok_expr}), 1 => Err({err_expr}), _ => panic!(\"invalid canonical result discriminant\") }} }}"
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Record { fields: descriptor_fields, .. } => {
+//RS             let source_fields = plugin_record_fields(program, source_ty)
+//RS                 .expect("component record source type has no fields");
+//RS             let mut values = std::collections::BTreeMap::new();
+//RS             for (index, _, field_descriptor) in descriptor_fields {
+//RS                 let field = source_fields
+//RS                     .get(*index)
+//RS                     .expect("component record field index is out of range");
+//RS                 let value = plugin_flat_lift_expr(
+//RS                     program,
+//RS                     &field.ty,
+//RS                     field_descriptor,
+//RS                     args,
+//RS                     arg_slots,
+//RS                     cursor,
+//RS                     counter,
+//RS                     read_text,
+//RS                 );
+//RS                 values.insert(*index, value);
+//RS             }
+//RS             let record = plugin_record_definition(program, source_ty)
+//RS                 .expect("component record source definition disappeared");
+//RS             let name = rust_named_type_name(program, record.id, &record.name);
+//RS             let fields = match &record.kind {
+//RS                 MirTypeDefKind::Struct { fields, .. } => fields,
+//RS                 _ => unreachable!(),
+//RS             };
+//RS             let assignments = fields
+//RS                 .iter()
+//RS                 .filter(|field| !field.computed)
+//RS                 .map(|field| {
+//RS                     let value = if field.skip {
+//RS                         "Default::default()".to_string()
+//RS                     } else {
+//RS                         values
+//RS                             .get(&fields.iter().position(|candidate| candidate.id == field.id).unwrap())
+//RS                             .cloned()
+//RS                             .unwrap_or_else(|| "Default::default()".to_string())
+//RS                     };
+//RS                     format!("{}: {value}", mangle(&field.name))
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             format!("{name} {{ {assignments} }}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_memory_lift_expr(
+//RS     program: &MirProgram,
+//RS     source_ty: &MirType,
+//RS     descriptor: &ComponentTypeDescriptor,
+//RS     ptr: &str,
+//RS     counter: &mut usize,
+//RS     read_text: &str,
+//RS ) -> String {
+//RS     match descriptor {
+//RS         ComponentTypeDescriptor::Int => plugin_read_memory(ptr, 0, "i64"),
+//RS         ComponentTypeDescriptor::Float => plugin_read_memory(ptr, 0, "f64"),
+//RS         ComponentTypeDescriptor::Bool => {
+//RS             let raw = plugin_read_memory(ptr, 0, "u8");
+//RS             format!("match {raw} {{ 0 => false, 1 => true, _ => panic!(\"invalid canonical bool\") }}")
+//RS         }
+//RS         ComponentTypeDescriptor::String => {
+//RS             let data = plugin_read_memory(ptr, 0, "i32");
+//RS             let length = plugin_read_memory(ptr, 4, "i32");
+//RS             format!("{read_text}({data}, {length})")
+//RS         }
+//RS         ComponentTypeDescriptor::List(inner) => {
+//RS             let data = plugin_read_memory(ptr, 0, "i32");
+//RS             let length = plugin_read_memory(ptr, 4, "i32");
+//RS             let element_ty = plugin_sequence_element(program, source_ty)
+//RS                 .expect("component list source type has no element");
+//RS             let base = plugin_fresh(counter, "mem_list_base");
+//RS             let len = plugin_fresh(counter, "mem_list_len");
+//RS             let output = plugin_fresh(counter, "mem_list_out");
+//RS             let index = plugin_fresh(counter, "mem_list_index");
+//RS             let element_ptr = plugin_fresh(counter, "mem_list_element_ptr");
+//RS             let element = plugin_memory_lift_expr(
+//RS                 program,
+//RS                 element_ty,
+//RS                 inner,
+//RS                 &element_ptr,
+//RS                 counter,
+//RS                 read_text,
+//RS             );
+//RS             let output_type = rust_type(program, source_ty);
+//RS             let fixed = plugin_fixed_list_len(program, source_ty)
+//RS                 .map(|expected| {
+//RS                     format!(
+//RS                         "let {output}: {output_type} = match {output}.try_into() {{ Ok(value) => value, Err(_) => panic!(\"canonical list length mismatch (expected {expected})\") }}; {output}"
+//RS                     )
+//RS                 })
+//RS                 .unwrap_or_else(|| output.clone());
+//RS             format!(
+//RS                 "{{ let {base} = ({data}) as usize; let {len} = ({length}) as usize; let mut {output} = Vec::with_capacity({len}); for {index} in 0..{len} {{ let {element_ptr} = ({base} + {index} * {}) as i32; {output}.push({element}); }} {fixed} }}",
+//RS                 plugin_memory_layout(inner).0
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Option(inner) => {
+//RS             let raw = plugin_read_memory(ptr, 0, "u8");
+//RS             let payload_offset = plugin_align_to(1, plugin_memory_layout(inner).1);
+//RS             let child_ty = plugin_option_element(program, source_ty)
+//RS                 .expect("component option source type has no element");
+//RS             let child_ptr = format!("(({ptr}) as usize + {payload_offset}) as i32");
+//RS             let child = plugin_memory_lift_expr(
+//RS                 program,
+//RS                 child_ty,
+//RS                 inner,
+//RS                 &child_ptr,
+//RS                 counter,
+//RS                 read_text,
+//RS             );
+//RS             format!(
+//RS                 "{{ match {raw} {{ 0 => Err(JetAbsent), 1 => Ok({child}), _ => panic!(\"invalid canonical option discriminant\") }} }}"
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Result { ok, err } => {
+//RS             let raw = plugin_read_memory(ptr, 0, "u8");
+//RS             let (ok_size, ok_align) = plugin_memory_layout(ok);
+//RS             let (err_size, err_align) = plugin_memory_layout(err);
+//RS             let payload_offset = plugin_align_to(1, ok_align.max(err_align));
+//RS             let (source_ok, source_err) = plugin_result_elements(program, source_ty)
+//RS                 .expect("component result source type has no variants");
+//RS             let ok_ptr = format!("(({ptr}) as usize + {payload_offset}) as i32");
+//RS             let err_ptr = ok_ptr.clone();
+//RS             let ok_expr = plugin_memory_lift_expr(
+//RS                 program,
+//RS                 source_ok,
+//RS                 ok,
+//RS                 &ok_ptr,
+//RS                 counter,
+//RS                 read_text,
+//RS             );
+//RS             let err_expr = plugin_memory_lift_expr(
+//RS                 program,
+//RS                 source_err,
+//RS                 err,
+//RS                 &err_ptr,
+//RS                 counter,
+//RS                 read_text,
+//RS             );
+//RS             let _ = (ok_size, err_size);
+//RS             format!(
+//RS                 "{{ match {raw} {{ 0 => Ok({ok_expr}), 1 => Err({err_expr}), _ => panic!(\"invalid canonical result discriminant\") }} }}"
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Record { fields, .. } => {
+//RS             let source_fields = plugin_record_fields(program, source_ty)
+//RS                 .expect("component record source type has no fields");
+//RS             let offsets = plugin_record_offsets(fields);
+//RS             let mut values = std::collections::BTreeMap::new();
+//RS             for ((index, _, field_descriptor), (offset, _)) in fields.iter().zip(offsets) {
+//RS                 let field = source_fields
+//RS                     .get(*index)
+//RS                     .expect("component record field index is out of range");
+//RS                 let field_ptr = format!("(({ptr}) as usize + {offset}) as i32");
+//RS                 let value = plugin_memory_lift_expr(
+//RS                     program,
+//RS                     &field.ty,
+//RS                     field_descriptor,
+//RS                     &field_ptr,
+//RS                     counter,
+//RS                     read_text,
+//RS                 );
+//RS                 values.insert(*index, value);
+//RS             }
+//RS             let record = plugin_record_definition(program, source_ty)
+//RS                 .expect("component record source definition disappeared");
+//RS             let name = rust_named_type_name(program, record.id, &record.name);
+//RS             let fields = match &record.kind {
+//RS                 MirTypeDefKind::Struct { fields, .. } => fields,
+//RS                 _ => unreachable!(),
+//RS             };
+//RS             let assignments = fields
+//RS                 .iter()
+//RS                 .filter(|field| !field.computed)
+//RS                 .map(|field| {
+//RS                     let value = if field.skip {
+//RS                         "Default::default()".to_string()
+//RS                     } else {
+//RS                         values
+//RS                             .get(&fields.iter().position(|candidate| candidate.id == field.id).unwrap())
+//RS                             .cloned()
+//RS                             .unwrap_or_else(|| "Default::default()".to_string())
+//RS                     };
+//RS                     format!("{}: {value}", mangle(&field.name))
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             format!("{name} {{ {assignments} }}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_flat_lower_expr(
+//RS     program: &MirProgram,
+//RS     source_ty: &MirType,
+//RS     descriptor: &ComponentTypeDescriptor,
+//RS     value: &str,
+//RS ) -> String {
+//RS     match descriptor {
+//RS         ComponentTypeDescriptor::Int => format!("*({value})"),
+//RS         ComponentTypeDescriptor::Float => format!("*({value})"),
+//RS         ComponentTypeDescriptor::Bool => format!("if *({value}) {{ 1i32 }} else {{ 0i32 }}"),
+//RS         ComponentTypeDescriptor::Record { fields, .. } => {
+//RS             let source_fields = plugin_record_fields(program, source_ty)
+//RS                 .expect("component record source type has no fields");
+//RS             let (index, _, field_descriptor) = fields
+//RS                 .first()
+//RS                 .expect("zero-slot record cannot be lowered as a scalar");
+//RS             let field = source_fields
+//RS                 .get(*index)
+//RS                 .expect("component record field index is out of range");
+//RS             plugin_flat_lower_expr(
+//RS                 program,
+//RS                 &field.ty,
+//RS                 field_descriptor,
+//RS                 &format!("&({value}).{}", mangle(&field.name)),
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Option(inner) => {
+//RS             if plugin_flat_slots(inner).is_empty() {
+//RS                 format!("match {value} {{ Ok(_) => 1i32, Err(_) => 0i32 }}")
+//RS             } else {
+//RS                 panic!("multi-slot option value passed to flat lowering")
+//RS             }
+//RS         }
+//RS         ComponentTypeDescriptor::Result { ok, err } => {
+//RS             if plugin_flat_slots(ok).is_empty() && plugin_flat_slots(err).is_empty() {
+//RS                 format!("match {value} {{ Ok(_) => 0i32, Err(_) => 1i32 }}")
+//RS             } else {
+//RS                 panic!("multi-slot result value passed to flat lowering")
+//RS             }
+//RS         }
+//RS         ComponentTypeDescriptor::String | ComponentTypeDescriptor::List(_) => {
+//RS             panic!("multi-slot component value passed to flat lowering")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_memory_lower(
+//RS     program: &MirProgram,
+//RS     source_ty: &MirType,
+//RS     descriptor: &ComponentTypeDescriptor,
+//RS     value: &str,
+//RS     ptr: &str,
+//RS     counter: &mut usize,
+//RS     allocator: &str,
+//RS ) -> String {
+//RS     match descriptor {
+//RS         ComponentTypeDescriptor::Int => plugin_write_memory(ptr, 0, "i64", &format!("*({value})")),
+//RS         ComponentTypeDescriptor::Float => plugin_write_memory(ptr, 0, "f64", &format!("*({value})")),
+//RS         ComponentTypeDescriptor::Bool => plugin_write_memory(
+//RS             ptr,
+//RS             0,
+//RS             "u8",
+//RS             &format!("if *({value}) {{ 1u8 }} else {{ 0u8 }}"),
+//RS         ),
+//RS         ComponentTypeDescriptor::String => {
+//RS             let bytes = plugin_fresh(counter, "string_bytes");
+//RS             let length = plugin_fresh(counter, "string_len");
+//RS             let data = plugin_fresh(counter, "string_data");
+//RS             let statements = [
+//RS                 format!("let {bytes} = ({value}).as_bytes();"),
+//RS                 format!("let {length} = {bytes}.len();"),
+//RS                 format!(
+//RS                     "let {data} = {allocator}(0, 0, 1, {length} as i32); if {data} == 0 && {length} != 0 {{ panic!(\"canonical string allocation failed\") }}"
+//RS                 ),
+//RS                 format!(
+//RS                     "if {length} != 0 {{ unsafe {{ std::ptr::copy_nonoverlapping({bytes}.as_ptr(), {data} as *mut u8, {length}); }} }}"
+//RS                 ),
+//RS                 plugin_write_memory(ptr, 0, "i32", &format!("{data}")),
+//RS                 plugin_write_memory(ptr, 4, "i32", &format!("{length} as i32")),
+//RS             ];
+//RS             format!("{{ {} }}", statements.join(" "))
+//RS         }
+//RS         ComponentTypeDescriptor::List(inner) => {
+//RS             let element_ty = plugin_sequence_element(program, source_ty)
+//RS                 .expect("component list source type has no element");
+//RS             let length = plugin_fresh(counter, "write_list_len");
+//RS             let bytes = plugin_fresh(counter, "write_list_bytes");
+//RS             let data = plugin_fresh(counter, "write_list_data");
+//RS             let index = plugin_fresh(counter, "write_list_index");
+//RS             let item = plugin_fresh(counter, "write_list_item");
+//RS             let element_ptr = plugin_fresh(counter, "write_list_element_ptr");
+//RS             let nested = plugin_memory_lower(
+//RS                 program,
+//RS                 element_ty,
+//RS                 inner,
+//RS                 &item,
+//RS                 &element_ptr,
+//RS                 counter,
+//RS                 allocator,
+//RS             );
+//RS             format!(
+//RS                 "{{ let {length} = ({value}).len(); let {bytes} = {length}.checked_mul({}).expect(\"canonical list size overflow\"); let {data} = {allocator}(0, 0, {}, {bytes} as i32); if {data} == 0 && {bytes} != 0 {{ panic!(\"canonical list allocation failed\") }}; for ({index}, {item}) in ({value}).iter().enumerate() {{ let {element_ptr} = ({data} as usize + {index} * {}) as i32; {nested} }} {} {} }}",
+//RS                 plugin_memory_layout(inner).0,
+//RS                 plugin_memory_layout(inner).1,
+//RS                 plugin_memory_layout(inner).0,
+//RS                 plugin_write_memory(ptr, 0, "i32", &format!("{data}")),
+//RS                 plugin_write_memory(ptr, 4, "i32", &format!("{length} as i32")),
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Option(inner) => {
+//RS             let payload_offset = plugin_align_to(1, plugin_memory_layout(inner).1);
+//RS             let child_ty = plugin_option_element(program, source_ty)
+//RS                 .expect("component option source type has no element");
+//RS             let child_ptr = format!("(({ptr}) as usize + {payload_offset}) as i32");
+//RS             let child = plugin_memory_lower(
+//RS                 program,
+//RS                 child_ty,
+//RS                 inner,
+//RS                 "inner",
+//RS                 &child_ptr,
+//RS                 counter,
+//RS                 allocator,
+//RS             );
+//RS             format!(
+//RS                 "match {value} {{ Ok(inner) => {{ {} {} }}, Err(_) => {{ {} }} }}",
+//RS                 plugin_write_memory(ptr, 0, "u8", "1u8"),
+//RS                 child,
+//RS                 plugin_write_memory(ptr, 0, "u8", "0u8"),
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Result { ok, err } => {
+//RS             let (_, ok_align) = plugin_memory_layout(ok);
+//RS             let (_, err_align) = plugin_memory_layout(err);
+//RS             let payload_offset = plugin_align_to(1, ok_align.max(err_align));
+//RS             let (source_ok, source_err) = plugin_result_elements(program, source_ty)
+//RS                 .expect("component result source type has no variants");
+//RS             let ok_ptr = format!("(({ptr}) as usize + {payload_offset}) as i32");
+//RS             let err_ptr = ok_ptr.clone();
+//RS             let ok_code = plugin_memory_lower(
+//RS                 program,
+//RS                 source_ok,
+//RS                 ok,
+//RS                 "inner",
+//RS                 &ok_ptr,
+//RS                 counter,
+//RS                 allocator,
+//RS             );
+//RS             let err_code = plugin_memory_lower(
+//RS                 program,
+//RS                 source_err,
+//RS                 err,
+//RS                 "inner",
+//RS                 &err_ptr,
+//RS                 counter,
+//RS                 allocator,
+//RS             );
+//RS             format!(
+//RS                 "match {value} {{ Ok(inner) => {{ {} {} }}, Err(inner) => {{ {} {} }} }}",
+//RS                 plugin_write_memory(ptr, 0, "u8", "0u8"),
+//RS                 ok_code,
+//RS                 plugin_write_memory(ptr, 0, "u8", "1u8"),
+//RS                 err_code,
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Record { fields, .. } => {
+//RS             let source_fields = plugin_record_fields(program, source_ty)
+//RS                 .expect("component record source type has no fields");
+//RS             let offsets = plugin_record_offsets(fields);
+//RS             let mut statements = Vec::new();
+//RS             for ((index, _, field_descriptor), (offset, _)) in fields.iter().zip(offsets) {
+//RS                 let field = source_fields
+//RS                     .get(*index)
+//RS                     .expect("component record field index is out of range");
+//RS                 let field_value = format!("({value}).{}", mangle(&field.name));
+//RS                 let field_ptr = format!("(({ptr}) as usize + {offset}) as i32");
+//RS                 statements.push(plugin_memory_lower(
+//RS                     program,
+//RS                     &field.ty,
+//RS                     field_descriptor,
+//RS                     &format!("&({field_value})"),
+//RS                     &field_ptr,
+//RS                     counter,
+//RS                     allocator,
+//RS                 ));
+//RS             }
+//RS             statements.join(" ")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_memory_free(
+//RS     descriptor: &ComponentTypeDescriptor,
+//RS     ptr: &str,
+//RS     counter: &mut usize,
+//RS     allocator: &str,
+//RS ) -> String {
+//RS     match descriptor {
+//RS         ComponentTypeDescriptor::Int
+//RS         | ComponentTypeDescriptor::Float
+//RS         | ComponentTypeDescriptor::Bool => String::new(),
+//RS         ComponentTypeDescriptor::String => {
+//RS             let data = plugin_fresh(counter, "free_string_data");
+//RS             let length = plugin_fresh(counter, "free_string_len");
+//RS             format!(
+//RS                 "{{ let {data} = {}; let {length} = {}; if {data} != 0 && {length} != 0 {{ {allocator}({data}, {length}, 1, 0); }} }}",
+//RS                 plugin_read_memory(ptr, 0, "i32"),
+//RS                 plugin_read_memory(ptr, 4, "i32"),
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::List(inner) => {
+//RS             let data = plugin_fresh(counter, "free_list_data");
+//RS             let length = plugin_fresh(counter, "free_list_len");
+//RS             let index = plugin_fresh(counter, "free_list_index");
+//RS             let element_ptr = plugin_fresh(counter, "free_list_element_ptr");
+//RS             let child = plugin_memory_free(
+//RS                 inner,
+//RS                 &element_ptr,
+//RS                 counter,
+//RS                 allocator,
+//RS             );
+//RS             let (element_size, element_align) = plugin_memory_layout(inner);
+//RS             format!(
+//RS                 "{{ let {data} = {}; let {length} = {}; if {data} != 0 && {length} != 0 {{ for {index} in 0..({length} as usize) {{ let {element_ptr} = ({data} as usize + {index} * {element_size}) as i32; {child} }} {allocator}({data}, ({length} as usize * {element_size}) as i32, {element_align}, 0); }} }}",
+//RS                 plugin_read_memory(ptr, 0, "i32"),
+//RS                 plugin_read_memory(ptr, 4, "i32"),
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Option(inner) => {
+//RS             let tag = plugin_fresh(counter, "free_option_tag");
+//RS             let child_ptr = format!(
+//RS                 "(({ptr}) as usize + {}) as i32",
+//RS                 plugin_align_to(1, plugin_memory_layout(inner).1)
+//RS             );
+//RS             let child = plugin_memory_free(inner, &child_ptr, counter, allocator);
+//RS             format!(
+//RS                 "{{ let {tag} = {}; match {tag} {{ 0 => {{}}, 1 => {{ {child} }}, _ => panic!(\"invalid canonical option discriminant\") }} }}",
+//RS                 plugin_read_memory(ptr, 0, "u8"),
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Result { ok, err } => {
+//RS             let tag = plugin_fresh(counter, "free_result_tag");
+//RS             let (_, ok_align) = plugin_memory_layout(ok);
+//RS             let (_, err_align) = plugin_memory_layout(err);
+//RS             let child_ptr = format!(
+//RS                 "(({ptr}) as usize + {}) as i32",
+//RS                 plugin_align_to(1, ok_align.max(err_align))
+//RS             );
+//RS             let ok_code = plugin_memory_free(ok, &child_ptr, counter, allocator);
+//RS             let err_code = plugin_memory_free(err, &child_ptr, counter, allocator);
+//RS             format!(
+//RS                 "{{ let {tag} = {}; match {tag} {{ 0 => {{ {ok_code} }}, 1 => {{ {err_code} }}, _ => panic!(\"invalid canonical result discriminant\") }} }}",
+//RS                 plugin_read_memory(ptr, 0, "u8"),
+//RS             )
+//RS         }
+//RS         ComponentTypeDescriptor::Record { fields, .. } => {
+//RS             let mut statements = Vec::new();
+//RS             for ((_, _, field), (offset, _)) in fields.iter().zip(plugin_record_offsets(fields)) {
+//RS                 let field_ptr = format!("(({ptr}) as usize + {offset}) as i32");
+//RS                 statements.push(plugin_memory_free(field, &field_ptr, counter, allocator));
+//RS             }
+//RS             statements.join(" ")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_component_wrapper(
+//RS     program: &MirProgram,
+//RS     export: &super::Embedding::ExportFunction,
+//RS     component: &ComponentSignature,
+//RS     descriptor: &ComponentSignatureDescriptor,
+//RS     kebab: &str,
+//RS     wrapper_name: &str,
+//RS ) -> String {
+//RS     let allocator = mangle_generated("plugin_cabi_realloc_impl");
+//RS     let read_text = mangle_generated("plugin_read_component_text");
+//RS     let parameter_slots = descriptor
+//RS         .params
+//RS         .iter()
+//RS         .flat_map(plugin_flat_slots)
+//RS         .collect::<Vec<_>>();
+//RS     let indirect_params = parameter_slots.len() > 16;
+//RS     let mut counter = 0;
+//RS     let mut locals = Vec::new();
+//RS     let mut cleanup = Vec::new();
+//RS     let mut call_args = Vec::new();
+//RS     if indirect_params {
+//RS         let params_ptr = "__jet_plugin_params_ptr";
+//RS         let (params_size, params_align) = plugin_sequence_layout(&descriptor.params);
+//RS         let mut offset = 0;
+//RS         for (index, (source_ty, descriptor_ty)) in component
+//RS             .params
+//RS             .iter()
+//RS             .zip(&descriptor.params)
+//RS             .enumerate()
+//RS         {
+//RS             let (_, field_align) = plugin_memory_layout(descriptor_ty);
+//RS             offset = plugin_align_to(offset, field_align);
+//RS             let field_ptr = format!("(({params_ptr}) as usize + {offset}) as i32");
+//RS             let value = plugin_memory_lift_expr(
+//RS                 program,
+//RS                 source_ty,
+//RS                 descriptor_ty,
+//RS                 &field_ptr,
+//RS                 &mut counter,
+//RS                 &read_text,
+//RS             );
+//RS             let mutable = matches!(export.params[index], MirAccess::Write)
+//RS                 .then_some("mut ")
+//RS                 .unwrap_or_default();
+//RS             locals.push(format!("let {mutable}p{index} = {value};"));
+//RS             offset += plugin_memory_layout(descriptor_ty).0;
+//RS         }
+//RS         let mut free_offset = 0;
+//RS         for descriptor_ty in &descriptor.params {
+//RS             let (_, field_align) = plugin_memory_layout(descriptor_ty);
+//RS             free_offset = plugin_align_to(free_offset, field_align);
+//RS             let field_ptr = format!("(({params_ptr}) as usize + {free_offset}) as i32");
+//RS             let free = plugin_memory_free(descriptor_ty, &field_ptr, &mut counter, &allocator);
+//RS             if !free.is_empty() {
+//RS                 cleanup.push(free);
+//RS             }
+//RS             free_offset += plugin_memory_layout(descriptor_ty).0;
+//RS         }
+//RS         cleanup.push(format!("{allocator}({params_ptr}, {params_size}i32, {params_align}, 0);"));
+//RS     } else {
+//RS         let args = parameter_slots
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(index, _)| format!("a{index}"))
+//RS             .collect::<Vec<_>>();
+//RS         let mut cursor = 0;
+//RS         for (index, (source_ty, descriptor_ty)) in component
+//RS             .params
+//RS             .iter()
+//RS             .zip(&descriptor.params)
+//RS             .enumerate()
+//RS         {
+//RS             let value = plugin_flat_lift_expr(
+//RS                 program,
+//RS                 source_ty,
+//RS                 descriptor_ty,
+//RS                 &args,
+//RS                 &parameter_slots,
+//RS                 &mut cursor,
+//RS                 &mut counter,
+//RS                 &read_text,
+//RS             );
+//RS             let mutable = matches!(export.params[index], MirAccess::Write)
+//RS                 .then_some("mut ")
+//RS                 .unwrap_or_default();
+//RS             locals.push(format!("let {mutable}p{index} = {value};"));
+//RS         }
+//RS         assert_eq!(cursor, parameter_slots.len());
+//RS     }
+//RS     for (index, convention) in export.params.iter().enumerate() {
+//RS         call_args.push(match convention {
+//RS             MirAccess::Read => format!("&p{index}"),
+//RS             MirAccess::Write => format!("&mut p{index}"),
+//RS             MirAccess::Move => format!("p{index}"),
+//RS         });
+//RS     }
+//RS     let call = format!(
+//RS         "match {}({}) {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}",
+//RS         export.callee,
+//RS         call_args.join(", ")
+//RS     );
+//RS     let result_slots = plugin_flat_slots(&descriptor.result);
+//RS     let mut wrapper = format!(
+//RS         "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}(",
+//RS     );
+//RS     if indirect_params {
+//RS         wrapper.push_str("__jet_plugin_params_ptr: i32");
+//RS     } else {
+//RS         wrapper.push_str(
+//RS             &parameter_slots
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, slot)| format!("a{index}: {}", slot.rust_ty()))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", "),
+//RS         );
+//RS     }
+//RS     wrapper.push_str(")");
+//RS     if result_slots.is_empty() {
+//RS         wrapper.push_str(" { ");
+//RS     } else if result_slots.len() == 1 {
+//RS         wrapper.push_str(&format!(" -> {} {{ ", result_slots[0].rust_ty()));
+//RS     } else {
+//RS         wrapper.push_str(" -> i32 { ");
+//RS     }
+//RS     wrapper.push_str(&locals.join(" "));
+//RS     wrapper.push_str(&format!(
+//RS         " let __jet_plugin_value = jet_ffi_callback_boundary(|| {{ {call} }});"
+//RS     ));
+//RS     wrapper.push_str(&cleanup.join(" "));
+//RS     if result_slots.is_empty() {
+//RS         wrapper.push_str(" let _ = __jet_plugin_value; () }");
+//RS     } else if result_slots.len() == 1 {
+//RS         wrapper.push_str(&format!(
+//RS             " {} }}",
+//RS             plugin_flat_lower_expr(
+//RS                 program,
+//RS                 &component.result,
+//RS                 &descriptor.result,
+//RS                 "&__jet_plugin_value",
+//RS             )
+//RS         ));
+//RS     } else {
+//RS         let (ret_size, ret_align) = plugin_memory_layout(&descriptor.result);
+//RS         let lower = plugin_memory_lower(
+//RS             program,
+//RS             &component.result,
+//RS             &descriptor.result,
+//RS             "&__jet_plugin_value",
+//RS             "__jet_plugin_ret_ptr",
+//RS             &mut counter,
+//RS             &allocator,
+//RS         );
+//RS         wrapper.push_str(&format!(
+//RS             " let __jet_plugin_ret_ptr = {allocator}(0, 0, {ret_align}, {ret_size}); if __jet_plugin_ret_ptr == 0 && {ret_size} != 0 {{ panic!(\"canonical component result allocation failed\") }} {lower} __jet_plugin_ret_ptr }}"
+//RS         ));
+//RS     }
+//RS     wrapper.push('\n');
+//RS     if result_slots.len() > 1 && plugin_needs_post_return(&descriptor.result) {
+//RS         let post_name = mangle(&format!("plugin_post_{}", export.name));
+//RS         let free = plugin_memory_free(
+//RS             &descriptor.result,
+//RS             "ret_ptr",
+//RS             &mut counter,
+//RS             &allocator,
+//RS         );
+//RS         let (ret_size, ret_align) = plugin_memory_layout(&descriptor.result);
+//RS         wrapper.push_str(&format!(
+//RS             "#[export_name = \"cabi_post_{kebab}\"]\npub extern \"C\" fn {post_name}(ret_ptr: i32) {{ if ret_ptr != 0 {{ {free} {allocator}(ret_ptr, {ret_size}i32, {ret_align}, 0); }} }}\n"
+//RS         ));
+//RS     }
+//RS     wrapper
+//RS }
+//RS 
+//RS 
+//RS /// The host operations named by a sandbox package's checked
+//RS /// `authority.needs`.  These are deliberately a closed projection: the
+//RS /// generated WIT world cannot grow an ambient import merely because a guest
+//RS /// happens to mention a similarly named function.
+//RS fn plugin_declared_host_imports(program: &MirProgram) -> Vec<&'static str> {
+//RS     let mut imports = BTreeSet::new();
+//RS     for need in &program.facts.authority_needs {
+//RS         let root = need.split_once(':').map_or(need.as_str(), |(root, _)| root);
+//RS         match root {
+//RS             "FS.Read" => {
+//RS                 imports.insert("FS.Read");
+//RS             }
+//RS             "FS.Write" => {
+//RS                 imports.insert("FS.Write");
+//RS             }
+//RS             "Net.Connect" => {
+//RS                 imports.insert("Net.Connect");
+//RS             }
+//RS             "Exec" => {
+//RS                 imports.insert("Exec");
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     imports.into_iter().collect()
+//RS }
+//RS 
+//RS /// Emit the root WIT imports and the raw standard32 guest-side bridge.  The
+//RS /// Component Model owns the actual host adapter; this code only performs the
+//RS /// canonical pointer/length and return-area marshalling required by the
+//RS /// wasm32 core module.
+//RS fn plugin_host_import_bridge(imports: &[&str]) -> String {
+//RS     if imports.is_empty() {
+//RS         return String::new();
+//RS     }
+//RS     let allocator = mangle_generated("plugin_cabi_realloc_impl");
+//RS     let read_component_text = mangle_generated("plugin_read_component_text");
+//RS     let read_io_error = mangle_generated("plugin_read_io_error");
+//RS     let free_io_error = mangle_generated("plugin_free_io_error");
+//RS     let mut out = String::from(
+//RS         "\n// D-PLUGIN1=B: declared host imports use the standard32 canonical ABI.\n\
+//RS          #[link(wasm_import_module = \"cm32p2\")]\n\
+//RS          extern \"C\" {\n",
+//RS     );
+//RS     for import in imports {
+//RS         match *import {
+//RS             "FS.Read" => out.push_str(
+//RS                 "    #[link_name = \"host-read\"]\n\
+//RS                  fn __jet_plugin_import_read(path_ptr: i32, path_len: i32, ret_ptr: i32);\n",
+//RS             ),
+//RS             "FS.Write" => out.push_str(
+//RS                 "    #[link_name = \"host-write\"]\n\
+//RS                  fn __jet_plugin_import_write(path_ptr: i32, path_len: i32, text_ptr: i32, text_len: i32, ret_ptr: i32);\n",
+//RS             ),
+//RS             "Net.Connect" => out.push_str(
+//RS                 "    #[link_name = \"host-connect\"]\n\
+//RS                  fn __jet_plugin_import_connect(endpoint_ptr: i32, endpoint_len: i32) -> i32;\n",
+//RS             ),
+//RS             "Exec" => out.push_str(
+//RS                 "    #[link_name = \"host-exec\"]\n\
+//RS                  fn __jet_plugin_import_exec(program_ptr: i32, program_len: i32, args_ptr: i32, args_len: i32, ret_ptr: i32);\n",
+//RS             ),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     out.push_str("}\n");
+//RS     if imports.iter().any(|import| *import == "FS.Read") {
+//RS         out.push_str(&format!(
+//RS             r#"fn {wrapper}(path: &String) -> Result<String, jet_std::IOError> {{
+//RS     // result<string, io-error>: tag @0, payload @8, size 64, align 8.
+//RS     let ret_ptr = {allocator}(0, 0, 8, 64);
+//RS     if ret_ptr == 0 {{
+//RS         panic!("canonical host read return allocation failed")
+//RS     }}
+//RS     unsafe {{
+//RS         __jet_plugin_import_read(path.as_ptr() as i32, path.len() as i32, ret_ptr);
+//RS     }}
+//RS     let tag = unsafe {{ std::ptr::read_unaligned(ret_ptr as *const u8) }};
+//RS     let result = match tag {{
+//RS         0 => {{
+//RS             let (ptr, len) = unsafe {{
+//RS                 (
+//RS                     std::ptr::read_unaligned((ret_ptr as usize + 8) as *const i32),
+//RS                     std::ptr::read_unaligned((ret_ptr as usize + 12) as *const i32),
+//RS                 )
+//RS             }};
+//RS             let value = {read_component_text}(ptr, len);
+//RS             {allocator}(ptr, len, 1, 0);
+//RS             Ok(value)
+//RS         }}
+//RS         1 => {{
+//RS             let value = {read_io_error}((ret_ptr as usize + 8) as i32);
+//RS             {free_io_error}((ret_ptr as usize + 8) as i32);
+//RS             Err(value)
+//RS         }}
+//RS         _ => {{
+//RS             {allocator}(ret_ptr, 64, 8, 0);
+//RS             panic!("invalid canonical host read result discriminant")
+//RS         }}
+//RS     }};
+//RS     {allocator}(ret_ptr, 64, 8, 0);
+//RS     result
+//RS }}
+//RS "#,
+//RS             wrapper = mangle_generated("plugin_import_fs_read"),
+//RS             allocator = allocator,
+//RS             read_component_text = read_component_text,
+//RS             read_io_error = read_io_error,
+//RS             free_io_error = free_io_error,
+//RS         ));
+//RS     }
+//RS     if imports.iter().any(|import| *import == "FS.Write") {
+//RS         out.push_str(&format!(
+//RS             r#"fn {wrapper}(path: &String, text: &String) -> Result<(), jet_std::IOError> {{
+//RS     // result<_, io-error>: tag @0, payload @8, size 64, align 8.
+//RS     let ret_ptr = {allocator}(0, 0, 8, 64);
+//RS     if ret_ptr == 0 {{
+//RS         panic!("canonical host write return allocation failed")
+//RS     }}
+//RS     unsafe {{
+//RS         __jet_plugin_import_write(
+//RS             path.as_ptr() as i32,
+//RS             path.len() as i32,
+//RS             text.as_ptr() as i32,
+//RS             text.len() as i32,
+//RS             ret_ptr,
+//RS         );
+//RS     }}
+//RS     let tag = unsafe {{ std::ptr::read_unaligned(ret_ptr as *const u8) }};
+//RS     let result = match tag {{
+//RS         0 => Ok(()),
+//RS         1 => {{
+//RS             let value = {read_io_error}((ret_ptr as usize + 8) as i32);
+//RS             {free_io_error}((ret_ptr as usize + 8) as i32);
+//RS             Err(value)
+//RS         }}
+//RS         _ => {{
+//RS             {allocator}(ret_ptr, 64, 8, 0);
+//RS             panic!("invalid canonical host write result discriminant")
+//RS         }}
+//RS     }};
+//RS     {allocator}(ret_ptr, 64, 8, 0);
+//RS     result
+//RS }}
+//RS "#,
+//RS             wrapper = mangle_generated("plugin_import_fs_write"),
+//RS             allocator = allocator,
+//RS             read_io_error = read_io_error,
+//RS             free_io_error = free_io_error,
+//RS         ));
+//RS     }
+//RS     if imports.iter().any(|import| *import == "Net.Connect") {
+//RS         out.push_str(&format!(
+//RS             "fn {}(endpoint: &String) -> Result<bool, jet_std::IOError> {{\n\
+//RS              \x20    let connected = unsafe {{ __jet_plugin_import_connect(endpoint.as_ptr() as i32, endpoint.len() as i32) != 0 }};\n\
+//RS              \x20    Ok(connected)\n\
+//RS              }}\n",
+//RS             mangle_generated("plugin_import_net_connect"),
+//RS         ));
+//RS     }
+//RS     if imports.iter().any(|import| *import == "Exec") {
+//RS         out.push_str(&format!(
+//RS             "fn {}(program: &String, args: &Vec<String>) -> Result<String, jet_std::IOError> {{\n\
+//RS              \x20    let ret_ptr = {allocator}(0, 0, 4, 8);\n\
+//RS              \x20    if ret_ptr == 0 {{ panic!(\"canonical host exec return allocation failed\") }}\n\
+//RS              \x20    let args_bytes = args.len().checked_mul(8).expect(\"canonical host exec argument list is too large\");\n\
+//RS              \x20    let args_ptr = {allocator}(0, 0, 4, args_bytes as i32);\n\
+//RS              \x20    if args_ptr == 0 && args_bytes != 0 {{ panic!(\"canonical host exec argument allocation failed\") }}\n\
+//RS              \x20    for (index, argument) in args.iter().enumerate() {{\n\
+//RS              \x20        let bytes = argument.as_bytes();\n\
+//RS              \x20        let ptr = {allocator}(0, 0, 1, bytes.len() as i32);\n\
+//RS              \x20        if ptr == 0 && !bytes.is_empty() {{ panic!(\"canonical host exec argument allocation failed\") }}\n\
+//RS              \x20        if !bytes.is_empty() {{ unsafe {{ std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr as *mut u8, bytes.len()); }} }}\n\
+//RS              \x20        unsafe {{\n\
+//RS              \x20            std::ptr::write_unaligned((args_ptr as usize + index * 8) as *mut i32, ptr);\n\
+//RS              \x20            std::ptr::write_unaligned((args_ptr as usize + index * 8 + 4) as *mut i32, bytes.len() as i32);\n\
+//RS              \x20        }}\n\
+//RS              \x20    }}\n\
+//RS              \x20    unsafe {{ __jet_plugin_import_exec(program.as_ptr() as i32, program.len() as i32, args_ptr, args.len() as i32, ret_ptr); }}\n\
+//RS              \x20    for index in 0..args.len() {{\n\
+//RS              \x20        let (ptr, len) = unsafe {{\n\
+//RS              \x20            (std::ptr::read_unaligned((args_ptr as usize + index * 8) as *const i32),\n\
+//RS              \x20             std::ptr::read_unaligned((args_ptr as usize + index * 8 + 4) as *const i32))\n\
+//RS              \x20        }};\n\
+//RS              \x20        {allocator}(ptr, len, 1, 0);\n\
+//RS              \x20    }}\n\
+//RS              \x20    {allocator}(args_ptr, args_bytes as i32, 4, 0);\n\
+//RS              \x20    let (ptr, len) = unsafe {{\n\
+//RS              \x20        (std::ptr::read_unaligned(ret_ptr as *const i32),\n\
+//RS              \x20         std::ptr::read_unaligned((ret_ptr as usize + 4) as *const i32))\n\
+//RS              \x20    }};\n\
+//RS              \x20    let value = {read_component_text}(ptr, len);\n\
+//RS              \x20    {allocator}(ptr, len, 1, 0);\n\
+//RS              \x20    {allocator}(ret_ptr, 8, 4, 0);\n\
+//RS              \x20    Ok(value)\n\
+//RS              }}\n",
+//RS             mangle_generated("plugin_import_exec"),
+//RS             allocator = allocator,
+//RS             read_component_text = read_component_text,
+//RS         ));
+//RS     }
+//RS     out
+//RS }
+//RS fn plugin_host_import_wit(import: &str) -> &'static str {
+//RS     match import {
+//RS         "FS.Read" => "  import host-read: func(path: string) -> result<string, io-error>;\n",
+//RS         "FS.Write" => "  import host-write: func(path: string, text: string) -> result<_, io-error>;\n",
+//RS         "Net.Connect" => "  import host-connect: func(endpoint: string) -> bool;\n",
+//RS         "Exec" => "  import host-exec: func(program: string, args: list<string>) -> string;\n",
+//RS         _ => "",
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_host_io_wit_definitions() -> &'static str {
+//RS     "enum io-operation {\n\
+//RS      \x20 read,\n\
+//RS      \x20 write,\n\
+//RS      \x20 flush,\n\
+//RS      \x20 connect,\n\
+//RS      \x20 accept,\n\
+//RS      \x20 close,\n\
+//RS      \x20 resolve,\n\
+//RS      \x20 codec,\n\
+//RS      }\n\
+//RS      record io-context {\n\
+//RS      \x20 operation: io-operation,\n\
+//RS      \x20 resource: option<string>,\n\
+//RS      \x20 os-code: option<s64>,\n\
+//RS      \x20 cause: option<string>,\n\
+//RS      }\n\
+//RS      enum process-resource-limit {\n\
+//RS      \x20 wall-time,\n\
+//RS      \x20 cpu-time,\n\
+//RS      \x20 memory,\n\
+//RS      \x20 open-files,\n\
+//RS      \x20 output,\n\
+//RS      }\n\
+//RS      variant io-error {\n\
+//RS      \x20 invalid-input(io-context),\n\
+//RS      \x20 not-found(io-context),\n\
+//RS      \x20 permission-denied(io-context),\n\
+//RS      \x20 timed-out(io-context),\n\
+//RS      \x20 cancelled(io-context),\n\
+//RS      \x20 closed(io-context),\n\
+//RS      \x20 protocol(io-context),\n\
+//RS      \x20 other(io-context),\n\
+//RS      \x20 resource-limit(process-resource-limit),\n\
+//RS      }\n"
+//RS }
+//RS 
+//RS /// Build the guest artifacts from a checked `SandboxPlugin` MIR artifact.
+//RS pub fn emit_plugin(
+//RS     program: &MirProgram,
+//RS     artifact_id: MirArtifactId,
+//RS     whole_program_rust: &str,
+//RS ) -> PluginArtifacts {
+//RS     if let Err(error) = program.cffi.validate_boundaries() {
+//RS         panic!("MIR Plugin emission received invalid foreign boundary facts: {error}");
+//RS     }
+//RS     let artifact = super::Embedding::selected_artifact(program, artifact_id);
+//RS     if artifact.kind != MirArtifactKind::SandboxPlugin
+//RS         || artifact.target != MirArtifactTarget::RustAot
+//RS     {
+//RS         panic!(
+//RS             "MIR Plugin emission requires a RustAot SandboxPlugin artifact, got {:?}/{:?}",
+//RS             artifact.target, artifact.kind
+//RS         );
+//RS     }
+//RS     let sanitized = sanitize_package_name(&artifact.name);
+//RS     let exports = super::Embedding::export_surface(program, artifact_id);
+//RS 
+//RS     let mut wit_lines = Vec::new();
+//RS     let mut wit_definitions = Vec::new();
+//RS     let mut wit_defined = BTreeSet::new();
+//RS     let mut wrapper_fns = String::new();
+//RS     let mut has_text_export = false;
+//RS     let mut has_component_export = false;
+//RS     let plugin_read_text = mangle_generated("plugin_read_text");
+//RS     let plugin_return_text = mangle_generated("plugin_return_text");
+//RS     let plugin_post_text = mangle_generated("plugin_post_text");
+//RS     let host_imports = plugin_declared_host_imports(program);
+//RS     if host_imports
+//RS         .iter()
+//RS         .any(|import| matches!(*import, "FS.Read" | "FS.Write"))
+//RS     {
+//RS         wit_definitions.push(plugin_host_io_wit_definitions().to_string());
+//RS     }
+//RS     for import in &host_imports {
+//RS         wit_lines.push(plugin_host_import_wit(import).trim_end_matches('\n').to_string());
+//RS     }
+//RS 
+//RS     for export in &exports {
+//RS         let kebab = to_kebab(&export.symbol);
+//RS         let wrapper_name = mangle(&format!("plugin_export_{}", export.name));
+//RS         let callee = export.callee.as_str();
+//RS         if let Some(scalar) = export.scalar {
+//RS             let wit_params: Vec<String> = export
+//RS                 .params
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(i, _)| format!("p{i}: {}", scalar.wit_ty()))
+//RS                 .collect();
+//RS             wit_lines.push(format!(
+//RS                 "  export {kebab}: func({}) -> {};",
+//RS                 wit_params.join(", "),
+//RS                 scalar.wit_ty()
+//RS             ));
+//RS             if scalar == ExportScalar::Text {
+//RS                 has_text_export = true;
+//RS                 let rust_params: Vec<String> = export
+//RS                     .params
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .flat_map(|(i, _)| [format!("p{i}_ptr: i32"), format!("p{i}_len: i32")])
+//RS                     .collect();
+//RS                 let locals: Vec<String> = export
+//RS                     .params
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(i, convention)| {
+//RS                         let mutable = matches!(convention, MirAccess::Write)
+//RS                             .then_some("mut ")
+//RS                             .unwrap_or_default();
+//RS                         format!("let {mutable}p{i} = {plugin_read_text}(p{i}_ptr, p{i}_len);")
+//RS                     })
+//RS                     .collect();
+//RS                 let call_args: Vec<String> = export
+//RS                     .params
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(i, convention)| match convention {
+//RS                         MirAccess::Read => format!("&p{i}"),
+//RS                         MirAccess::Write => format!("&mut p{i}"),
+//RS                         MirAccess::Move => format!("p{i}"),
+//RS                     })
+//RS                     .collect();
+//RS                 let call = format!(
+//RS                     "match {}({}) {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}",
+//RS                     callee,
+//RS                     call_args.join(", ")
+//RS                 );
+//RS                 wrapper_fns.push_str(&format!(
+//RS                     "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> i32 {{ {locals} jet_ffi_callback_boundary(|| {{ {plugin_return_text}({call}) }}) }}\n#[export_name = \"cabi_post_{kebab}\"]\npub extern \"C\" fn {post_name}(ret_ptr: i32) {{ {plugin_post_text}(ret_ptr) }}\n",
+//RS                     wrapper_name = wrapper_name,
+//RS                     rust_params = rust_params.join(", "),
+//RS                     locals = locals.join(" "),
+//RS                     call = call,
+//RS                     post_name = mangle(&format!("plugin_post_{}", export.name)),
+//RS                     plugin_return_text = plugin_return_text,
+//RS                     plugin_post_text = plugin_post_text,
+//RS                 ));
+//RS             } else {
+//RS                 let rust_params: Vec<String> = export
+//RS                     .params
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(i, _)| format!("p{i}: {}", scalar.rust_ty()))
+//RS                     .collect();
+//RS                 let locals: Vec<String> = export
+//RS                     .params
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .filter(|(_, convention)| matches!(convention, MirAccess::Write))
+//RS                     .map(|(i, _)| format!("let mut p{i} = p{i};"))
+//RS                     .collect();
+//RS                 let call_args: Vec<String> = export
+//RS                     .params
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(i, convention)| match convention {
+//RS                         MirAccess::Write => format!("&mut p{i}"),
+//RS                         MirAccess::Read | MirAccess::Move => format!("p{i}"),
+//RS                     })
+//RS                     .collect();
+//RS                 let call = format!(
+//RS                     "match {}({}) {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}",
+//RS                     callee,
+//RS                     call_args.join(", ")
+//RS                 );
+//RS                 wrapper_fns.push_str(&format!(
+//RS                     "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> {ret} {{ {locals} jet_ffi_callback_boundary(|| {{ {call} }}) }}\n",
+//RS                     wrapper_name = wrapper_name,
+//RS                     rust_params = rust_params.join(", "),
+//RS                     ret = scalar.rust_ty(),
+//RS                     locals = locals.join(" "),
+//RS                     call = call,
+//RS                 ));
+//RS             }
+//RS             continue;
+//RS         }
+//RS 
+//RS         let component = export
+//RS             .component
+//RS             .as_ref()
+//RS             .expect("component export row has no checked signature");
+//RS         let descriptor = super::Embedding::component_descriptor(program, component)
+//RS             .expect("component export row has no checked descriptor");
+//RS         has_component_export = true;
+//RS         for definition in descriptor.wit_definitions() {
+//RS             let name = definition
+//RS                 .strip_prefix("record ")
+//RS                 .and_then(|rest| rest.split_whitespace().next())
+//RS                 .unwrap_or_default()
+//RS                 .to_string();
+//RS             if wit_defined.insert(name) {
+//RS                 wit_definitions.push(definition);
+//RS             }
+//RS         }
+//RS         let wit_params: Vec<String> = descriptor
+//RS             .params
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(i, ty)| format!("p{i}: {}", ty.wit_type()))
+//RS             .collect();
+//RS         let wit_result = descriptor.result.wit_type();
+//RS         wit_lines.push(format!(
+//RS             "  export {kebab}: func({}) -> {wit_result};",
+//RS             wit_params.join(", ")
+//RS         ));
+//RS         wrapper_fns.push_str(&plugin_component_wrapper(
+//RS             program,
+//RS             export,
+//RS             component,
+//RS             &descriptor,
+//RS             &kebab,
+//RS             &wrapper_name,
+//RS         ));
+//RS     }
+//RS 
+//RS     let wit = format!(
+//RS         "package jet:{sanitized}@0.1.0;\n\n{}\nworld {WORLD_NAME} {{\n{}\n}}\n",
+//RS         wit_definitions.join("\n"),
+//RS         wit_lines.join("\n")
+//RS     );
+//RS 
+//RS     let mut guest_rust = String::from(whole_program_rust);
+//RS     super::MIRRust::append_web_time_zones(&mut guest_rust)
+//RS         .unwrap_or_else(|error| panic!("cannot embed sandbox timezone data: {error}"));
+//RS     // Sandbox guests use the ordinary Prelude's Time implementation too, so
+//RS     // embed the complete wasm TZif closure that browser emission also uses.
+//RS     guest_rust.push_str(
+//RS         "\n// c81 / D-PLUGIN-EXPORT1=A: generated export wrappers (jet-codegen/Plugin.rs).\n",
+//RS     );
+//RS     if has_text_export || has_component_export || !host_imports.is_empty() {
+//RS         guest_rust.push_str(&plugin_text_helpers());
+//RS     }
+//RS     if host_imports
+//RS         .iter()
+//RS         .any(|import| matches!(*import, "FS.Read" | "FS.Write"))
+//RS     {
+//RS         guest_rust.push_str(&plugin_io_error_helpers());
+//RS     }
+//RS     guest_rust.push_str(&plugin_host_import_bridge(&host_imports));
+//RS     guest_rust.push_str(&wrapper_fns);
+//RS 
+//RS     PluginArtifacts {
+//RS         wit,
+//RS         guest_rust,
+//RS         world_name: WORLD_NAME.to_string(),
+//RS         export_name: sanitized,
+//RS         exported_fns: exports.iter().map(|export| export.name.clone()).collect(),
+//RS         exports,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_io_error_helpers() -> String {
+//RS     let allocator = mangle_generated("plugin_cabi_realloc_impl");
+//RS     let read_component_text = mangle_generated("plugin_read_component_text");
+//RS     let read_io_error = mangle_generated("plugin_read_io_error");
+//RS     let free_io_error = mangle_generated("plugin_free_io_error");
+//RS     PLUGIN_IO_ERROR_HELPERS
+//RS         .replace("JET_PLUGIN_CABI_REALLOC_IMPL", &allocator)
+//RS         .replace("JET_PLUGIN_READ_COMPONENT_TEXT", &read_component_text)
+//RS         .replace("JET_PLUGIN_READ_IO_ERROR", &read_io_error)
+//RS         .replace("JET_PLUGIN_FREE_IO_ERROR", &free_io_error)
+//RS }
+//RS 
+//RS const PLUGIN_IO_ERROR_HELPERS: &str = r#"
+//RS // result<string, io-error> and result<_, io-error> use the same canonical
+//RS // return area: one u8 discriminant at byte 0, payload at byte 8, size 64,
+//RS // alignment 8. The io-error payload is a variant of size 56/alignment 8.
+//RS fn JET_PLUGIN_READ_IO_ERROR(ptr: i32) -> jet_std::IOError {
+//RS     let tag = unsafe { std::ptr::read_unaligned(ptr as *const u8) };
+//RS     if tag <= 7 {
+//RS         // io-context: operation @0; option<string> resource @4; option<s64>
+//RS         // os-code @16; option<string> cause @32; total size 48/alignment 8.
+//RS         let context_ptr = (ptr as usize + 8) as i32;
+//RS         let operation = match unsafe {
+//RS             std::ptr::read_unaligned(context_ptr as *const u8)
+//RS         } {
+//RS             0 => jet_std::IOOperation::Read,
+//RS             1 => jet_std::IOOperation::Write,
+//RS             2 => jet_std::IOOperation::Flush,
+//RS             3 => jet_std::IOOperation::Connect,
+//RS             4 => jet_std::IOOperation::Accept,
+//RS             5 => jet_std::IOOperation::Close,
+//RS             6 => jet_std::IOOperation::Resolve,
+//RS             7 => jet_std::IOOperation::Codec,
+//RS             _ => panic!("invalid canonical io-operation discriminant"),
+//RS         };
+//RS         let resource = match unsafe {
+//RS             std::ptr::read_unaligned((context_ptr as usize + 4) as *const u8)
+//RS         } {
+//RS             0 => Err(JetAbsent),
+//RS             1 => {
+//RS                 let ptr = unsafe {
+//RS                     std::ptr::read_unaligned((context_ptr as usize + 8) as *const i32)
+//RS                 };
+//RS                 let len = unsafe {
+//RS                     std::ptr::read_unaligned((context_ptr as usize + 12) as *const i32)
+//RS                 };
+//RS                 Ok(JET_PLUGIN_READ_COMPONENT_TEXT(ptr, len))
+//RS             }
+//RS             _ => panic!("invalid canonical io-context resource discriminant"),
+//RS         };
+//RS         let os_code = match unsafe {
+//RS             std::ptr::read_unaligned((context_ptr as usize + 16) as *const u8)
+//RS         } {
+//RS             0 => Err(JetAbsent),
+//RS             1 => {
+//RS                 let value = unsafe {
+//RS                     std::ptr::read_unaligned((context_ptr as usize + 24) as *const i64)
+//RS                 };
+//RS                 Ok(value)
+//RS             }
+//RS             _ => panic!("invalid canonical io-context os-code discriminant"),
+//RS         };
+//RS         let cause = match unsafe {
+//RS             std::ptr::read_unaligned((context_ptr as usize + 32) as *const u8)
+//RS         } {
+//RS             0 => Err(JetAbsent),
+//RS             1 => {
+//RS                 let ptr = unsafe {
+//RS                     std::ptr::read_unaligned((context_ptr as usize + 36) as *const i32)
+//RS                 };
+//RS                 let len = unsafe {
+//RS                     std::ptr::read_unaligned((context_ptr as usize + 40) as *const i32)
+//RS                 };
+//RS                 Ok(JET_PLUGIN_READ_COMPONENT_TEXT(ptr, len))
+//RS             }
+//RS             _ => panic!("invalid canonical io-context cause discriminant"),
+//RS         };
+//RS         let context = jet_std::IOContext {
+//RS             operation,
+//RS             resource,
+//RS             os_code,
+//RS             cause,
+//RS         };
+//RS         match tag {
+//RS             0 => jet_std::IOError::InvalidInput(context),
+//RS             1 => jet_std::IOError::NotFound(context),
+//RS             2 => jet_std::IOError::PermissionDenied(context),
+//RS             3 => jet_std::IOError::TimedOut(context),
+//RS             4 => jet_std::IOError::Cancelled(context),
+//RS             5 => jet_std::IOError::Closed(context),
+//RS             6 => jet_std::IOError::Protocol(context),
+//RS             7 => jet_std::IOError::Other(context),
+//RS             _ => unreachable!(),
+//RS         }
+//RS     } else if tag == 8 {
+//RS         let limit = match unsafe {
+//RS             std::ptr::read_unaligned((ptr as usize + 8) as *const u8)
+//RS         } {
+//RS             0 => jet_std::ProcessResourceLimit::WallTime,
+//RS             1 => jet_std::ProcessResourceLimit::CpuTime,
+//RS             2 => jet_std::ProcessResourceLimit::Memory,
+//RS             3 => jet_std::ProcessResourceLimit::OpenFiles,
+//RS             4 => jet_std::ProcessResourceLimit::Output,
+//RS             _ => panic!("invalid canonical process-resource-limit discriminant"),
+//RS         };
+//RS         jet_std::IOError::ResourceLimit(limit)
+//RS     } else {
+//RS         panic!("invalid canonical io-error discriminant")
+//RS     }
+//RS }
+//RS 
+//RS fn JET_PLUGIN_FREE_IO_ERROR(ptr: i32) {
+//RS     let tag = unsafe { std::ptr::read_unaligned(ptr as *const u8) };
+//RS     if tag <= 7 {
+//RS         let context_ptr = (ptr as usize + 8) as i32;
+//RS         let resource_tag = unsafe {
+//RS             std::ptr::read_unaligned((context_ptr as usize + 4) as *const u8)
+//RS         };
+//RS         match resource_tag {
+//RS             0 => {}
+//RS             1 => {
+//RS                 let value_ptr = unsafe {
+//RS                     std::ptr::read_unaligned((context_ptr as usize + 8) as *const i32)
+//RS                 };
+//RS                 let value_len = unsafe {
+//RS                     std::ptr::read_unaligned((context_ptr as usize + 12) as *const i32)
+//RS                 };
+//RS                 JET_PLUGIN_CABI_REALLOC_IMPL(value_ptr, value_len, 1, 0);
+//RS             }
+//RS             _ => panic!("invalid canonical io-context resource discriminant"),
+//RS         }
+//RS         let cause_tag = unsafe {
+//RS             std::ptr::read_unaligned((context_ptr as usize + 32) as *const u8)
+//RS         };
+//RS         match cause_tag {
+//RS             0 => {}
+//RS             1 => {
+//RS                 let value_ptr = unsafe {
+//RS                     std::ptr::read_unaligned((context_ptr as usize + 36) as *const i32)
+//RS                 };
+//RS                 let value_len = unsafe {
+//RS                     std::ptr::read_unaligned((context_ptr as usize + 40) as *const i32)
+//RS                 };
+//RS                 JET_PLUGIN_CABI_REALLOC_IMPL(value_ptr, value_len, 1, 0);
+//RS             }
+//RS             _ => panic!("invalid canonical io-context cause discriminant"),
+//RS         }
+//RS     } else if tag == 8 {
+//RS         let limit = unsafe {
+//RS             std::ptr::read_unaligned((ptr as usize + 8) as *const u8)
+//RS         };
+//RS         if limit > 4 {
+//RS             panic!("invalid canonical process-resource-limit discriminant")
+//RS         }
+//RS     } else {
+//RS         panic!("invalid canonical io-error discriminant")
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS fn plugin_text_helpers() -> String {
+//RS     let cabi_realloc_impl = mangle_generated("plugin_cabi_realloc_impl");
+//RS     let cabi_realloc = mangle_generated("plugin_cabi_realloc");
+//RS     let read_text = mangle_generated("plugin_read_text");
+//RS     let read_component_text = mangle_generated("plugin_read_component_text");
+//RS     let return_text = mangle_generated("plugin_return_text");
+//RS     let post_text = mangle_generated("plugin_post_text");
+//RS     PLUGIN_TEXT_HELPERS
+//RS         .replace("JET_PLUGIN_CABI_REALLOC_IMPL", &cabi_realloc_impl)
+//RS         .replace("JET_PLUGIN_CABI_REALLOC", &cabi_realloc)
+//RS         .replace("JET_PLUGIN_READ_TEXT", &read_text)
+//RS         .replace("JET_PLUGIN_READ_COMPONENT_TEXT", &read_component_text)
+//RS         .replace("JET_PLUGIN_RETURN_TEXT", &return_text)
+//RS         .replace("JET_PLUGIN_POST_TEXT", &post_text)
+//RS }
+//RS 
+//RS const PLUGIN_TEXT_HELPERS: &str = r#"
+//RS fn JET_PLUGIN_CABI_REALLOC_IMPL(
+//RS     old_ptr: i32,
+//RS     old_len: i32,
+//RS     align: i32,
+//RS     new_len: i32,
+//RS ) -> i32 {
+//RS     let old_len = old_len as usize;
+//RS     let new_len = new_len as usize;
+//RS     let align = align as usize;
+//RS     if new_len == 0 {
+//RS         if old_ptr != 0 && old_len != 0 {
+//RS             if let Ok(layout) = std::alloc::Layout::from_size_align(old_len, align) {
+//RS                 unsafe { std::alloc::dealloc(old_ptr as *mut u8, layout) };
+//RS             }
+//RS         }
+//RS         return 0;
+//RS     }
+//RS     let Ok(new_layout) = std::alloc::Layout::from_size_align(new_len, align) else {
+//RS         return 0;
+//RS     };
+//RS     let ptr = if old_ptr == 0 {
+//RS         unsafe { std::alloc::alloc(new_layout) }
+//RS     } else {
+//RS         let Ok(old_layout) = std::alloc::Layout::from_size_align(old_len, align) else {
+//RS             return 0;
+//RS         };
+//RS         unsafe { std::alloc::realloc(old_ptr as *mut u8, old_layout, new_len) }
+//RS     };
+//RS     ptr as i32
+//RS }
+//RS 
+//RS #[export_name = "cabi_realloc"]
+//RS pub extern "C" fn JET_PLUGIN_CABI_REALLOC(
+//RS     old_ptr: i32,
+//RS     old_len: i32,
+//RS     align: i32,
+//RS     new_len: i32,
+//RS ) -> i32 {
+//RS     JET_PLUGIN_CABI_REALLOC_IMPL(old_ptr, old_len, align, new_len)
+//RS }
+//RS 
+//RS fn JET_PLUGIN_READ_TEXT(ptr: i32, len: i32) -> String {
+//RS     if ptr == 0 || len == 0 {
+//RS         return String::new();
+//RS     }
+//RS     unsafe {
+//RS         String::from_utf8_lossy(std::slice::from_raw_parts(ptr as *const u8, len as usize))
+//RS             .into_owned()
+//RS     }
+//RS }
+//RS 
+//RS fn JET_PLUGIN_READ_COMPONENT_TEXT(ptr: i32, len: i32) -> String {
+//RS     if ptr == 0 || len == 0 {
+//RS         return String::new();
+//RS     }
+//RS     unsafe {
+//RS         String::from_utf8(std::slice::from_raw_parts(ptr as *const u8, len as usize).to_vec())
+//RS             .unwrap_or_else(|_| panic!("invalid canonical UTF-8 string"))
+//RS     }
+//RS }
+//RS 
+//RS fn JET_PLUGIN_RETURN_TEXT(value: String) -> i32 {
+//RS     let bytes = value.into_bytes();
+//RS     let len = bytes.len();
+//RS     let ptr = JET_PLUGIN_CABI_REALLOC_IMPL(0, 0, 1, len as i32);
+//RS     if ptr == 0 && len != 0 {
+//RS         panic!("canonical string allocation failed");
+//RS     }
+//RS     if len != 0 {
+//RS         unsafe {
+//RS             std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr as *mut u8, len);
+//RS         }
+//RS     }
+//RS     let result = JET_PLUGIN_CABI_REALLOC_IMPL(0, 0, 4, 8);
+//RS     if result == 0 {
+//RS         if ptr != 0 && len != 0 {
+//RS             if let Ok(layout) = std::alloc::Layout::from_size_align(len, 1) {
+//RS                 unsafe { std::alloc::dealloc(ptr as *mut u8, layout) };
+//RS             }
+//RS         }
+//RS         panic!("canonical string return area allocation failed");
+//RS     }
+//RS     unsafe {
+//RS         std::ptr::write_unaligned(result as *mut i32, ptr);
+//RS         std::ptr::write_unaligned((result as usize + 4) as *mut i32, len as i32);
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn JET_PLUGIN_POST_TEXT(ret_ptr: i32) {
+//RS     if ret_ptr == 0 {
+//RS         return;
+//RS     }
+//RS     let (ptr, len) = unsafe {
+//RS         (
+//RS             std::ptr::read_unaligned(ret_ptr as *const i32),
+//RS             std::ptr::read_unaligned((ret_ptr as usize + 4) as *const i32),
+//RS         )
+//RS     };
+//RS     if ptr != 0 && len != 0 {
+//RS         if let Ok(layout) = std::alloc::Layout::from_size_align(len as usize, 1) {
+//RS             unsafe { std::alloc::dealloc(ptr as *mut u8, layout) };
+//RS         }
+//RS     }
+//RS     if let Ok(layout) = std::alloc::Layout::from_size_align(8, 4) {
+//RS         unsafe { std::alloc::dealloc(ret_ptr as *mut u8, layout) };
+//RS     }
+//RS }
+//RS "#;
+// END-PORT-PENDING 0468 crates/jet-codegen/src/Codegen/Plugin.rs:1-1903
+

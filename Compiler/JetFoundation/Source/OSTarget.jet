@@ -1,0 +1,91 @@
+use Syntax
+use Diagnostics.[Diagnostic, Span]
+use core.sys.target
+
+// Rust: crates/jet-foundation/src/OSTarget.rs:13
+pub enum OSTarget { Linux MacOS Windows }
+impl OSTarget {
+    // Rust: crates/jet-foundation/src/OSTarget.rs:20
+    pub fn parse(name: String) -> OSTarget? Never! {
+        return if name == {
+            Syntax.TARGET_OS_LINUX -> Val(.Linux)
+            Syntax.TARGET_OS_MACOS -> Val(.MacOS)
+            Syntax.TARGET_OS_WINDOWS -> Val(.Windows)
+            else -> None
+        }
+    }
+    // Rust: crates/jet-foundation/src/OSTarget.rs:29
+    pub fn name(self) -> String Never! {
+        return if self == {
+            .Linux -> Syntax.TARGET_OS_LINUX
+            .MacOS -> Syntax.TARGET_OS_MACOS
+            .Windows -> Syntax.TARGET_OS_WINDOWS
+        }
+    }
+    // Rust: crates/jet-foundation/src/OSTarget.rs:41
+    pub fn from_triple(triple: String) -> OSTarget? Never! {
+        if triple.contains("windows") -> return Val(.Windows)
+        if triple.contains("apple") || triple.contains("darwin") -> return Val(.MacOS)
+        if triple.contains("linux") -> return Val(.Linux)
+        None
+    }
+    // Rust: crates/jet-foundation/src/OSTarget.rs:55
+    pub fn host() -> OSTarget Never! {
+        // GATE #4483: OS of the compiler executable, not its code-generation target.
+        return if target.selected_os() == {
+            .Windows -> .Windows
+            .MacOS -> .MacOS
+            else -> .Linux
+        }
+    }
+    // Rust: crates/jet-foundation/src/OSTarget.rs:66
+    pub fn active(triple: String?) -> OSTarget Never! {
+        if triple == {
+            .Val(triple) -> {
+                if OSTarget.from_triple(triple) == {
+                    .Val(os) -> return os
+                    .None -> {}
+                }
+            }
+            .None -> {}
+        }
+        OSTarget.host()
+    }
+}
+// Rust: crates/jet-foundation/src/OSTarget.rs:76
+pub fn os_target_mixed_axis(item: String, os: OSTarget, web: String, span: Span?) -> Diagnostic Never! {
+    Diagnostic.error("E-OSTARGET-MIXED-AXIS",
+        "`#{Syntax.MARKER_TARGET}(OS.{os.name()})` can't combine with `#{Syntax.MARKER_TARGET}({web})` on `{item}`",
+        "the OS axis (OS.Linux/OS.MacOS/OS.Windows, native platform gating) and the web axis (Wasm/JS/Web, the browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket",
+        "pick one axis: remove the `#{Syntax.MARKER_TARGET}(OS.{os.name()})` marker or the web-axis marker", span)
+}
+// Rust: crates/jet-foundation/src/OSTarget.rs:101
+pub fn os_target_unmatched_call(caller: String, gated_type: String, os: OSTarget, span: Span?) -> Diagnostic Never! {
+    Diagnostic.error("E-OSTARGET-UNMATCHED-CALL",
+        "`{caller}` uses `{gated_type}`, whose `impl` is gated to `#{Syntax.MARKER_TARGET}(OS.{os.name()})`, without itself being gated to match",
+        "an OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error",
+        "only use `{gated_type}` from inside an `impl` already gated to `#{Syntax.MARKER_TARGET}(OS.{os.name()})`, or move `{caller}`'s body into one", span)
+}
+// Rust: crates/jet-foundation/src/OSTarget.rs:128
+pub fn os_target_build_context(span: Span?) -> Diagnostic Never! {
+    Diagnostic.error("E-OSTARGET-BUILD-CONTEXT",
+        "a `{Syntax.KW_PREP} {Syntax.KW_IF} … == {{ … }}` dispatch branches on `{Syntax.COMPILER_BUILD_FACT_OS}`",
+        "`{Syntax.COMPILER_BUILD_FACT_OS}` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)",
+        "write `{Syntax.KW_PREP} {Syntax.KW_IF} {Syntax.COMPILER_BUILD_FACT_OS} == {{ .{Syntax.TARGET_OS_LINUX} -> … .{Syntax.TARGET_OS_MACOS} -> … .{Syntax.TARGET_OS_WINDOWS} -> … }}`, or use a plain runtime `{Syntax.KW_IF}` for a value that isn't known at compile time", span)
+}
+// Rust: crates/jet-foundation/src/OSTarget.rs:160
+pub fn os_target_dispatch_arm(found: String, span: Span?) -> Diagnostic Never! {
+    Diagnostic.error("E-OSTARGET-DISPATCH-ARM",
+        "`{found}` is not an OS arm — a `{Syntax.COMPILER_BUILD_FACT_OS}` dispatch matches `.{Syntax.TARGET_OS_LINUX}`, `.{Syntax.TARGET_OS_MACOS}`, or `.{Syntax.TARGET_OS_WINDOWS}`",
+        "each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#{Syntax.MARKER_TARGET}(OS.*)` uses — and each OS appears at most once",
+        "write `.{Syntax.TARGET_OS_LINUX} -> …`, `.{Syntax.TARGET_OS_MACOS} -> …`, or `.{Syntax.TARGET_OS_WINDOWS} -> …` (add an `else -> …` for a shared fallback)", span)
+}
+// Rust: crates/jet-foundation/src/OSTarget.rs:191
+pub fn os_target_dispatch_exhaustive(missing: [String], span: Span?) -> Diagnostic Never! {
+    list :: missing.join(", ")
+    Diagnostic.error("E-OSTARGET-DISPATCH-EXHAUSTIVE",
+        "this `{Syntax.COMPILER_BUILD_FACT_OS}` dispatch doesn't cover every target OS — missing: {list}",
+        "a build can target any native OS, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run",
+        "add an arm for each missing OS ({list}), or an `else -> …` catch-all", span)
+}
+

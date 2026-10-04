@@ -1,0 +1,147 @@
+// PORT-PENDING 0358 crates-jet-sema-src-sema-bundle-pipeline-failureunion-module-group: crates/jet-sema/src/Sema/CheckerCore/control_flow.rs:1-143
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Sema::Checker;
+//RS use crate::AST::{Stmt, Type};
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     pub(crate) fn check_comptime_block(&mut self, stmt: &mut Stmt) {
+//RS         let Stmt::ComptimeBlock { body, .. } = stmt else {
+//RS             return;
+//RS         };
+//RS         // The block body is ordinary checked Jet: type it first so the build-time
+//RS         // fragment lowers with resolved call, binding and operator types (a
+//RS         // binding produced by a function call must compare and do arithmetic
+//RS         // like any other Int). The build-time run below stays the authority
+//RS         // for build-time validity (purity, fuel, failed checks).
+//RS         let saved_in_comptime = self.in_comptime;
+//RS         self.in_comptime = true;
+//RS         self.check_block(body, true);
+//RS         self.in_comptime = saved_in_comptime;
+//RS         if self.defer_ct_evaluation {
+//RS             return;
+//RS         }
+//RS         let result = {
+//RS             let globals = self.current_ct_globals();
+//RS             crate::Comptime::run_block_with_imports(
+//RS                 body,
+//RS                 self.ct_checked_funcs_for_evaluation(),
+//RS                 self.ct_externs,
+//RS                 self.ct_base_dir,
+//RS                 globals.as_ref(),
+//RS                 self.core_imports,
+//RS             )
+//RS         };
+//RS         match result {
+//RS             Ok(scope) => {
+//RS                 let current = self.ct_scopes.last_mut().unwrap();
+//RS                 for (name, value) in scope {
+//RS                     current.insert(name, value);
+//RS                 }
+//RS             }
+//RS             Err(diagnostic) => self.diags.push(diagnostic),
+//RS         }
+//RS     }
+//RS     pub(crate) fn check_comptime_if(&mut self, stmt: &mut Stmt) {
+//RS         let Stmt::ComptimeIf {
+//RS             cond,
+//RS             cond_span,
+//RS             then_body,
+//RS             else_body,
+//RS             selected_then,
+//RS             ..
+//RS         } = stmt
+//RS         else {
+//RS             return;
+//RS         };
+//RS         if self.defer_ct_evaluation {
+//RS             let saved_in_comptime = self.in_comptime;
+//RS             self.in_comptime = true;
+//RS             let _ = self.infer(cond);
+//RS             let saved_flow = self.flow.clone();
+//RS             self.check_block(then_body, true);
+//RS             self.flow = saved_flow.clone();
+//RS             if let Some(body) = else_body {
+//RS                 self.check_block(body, true);
+//RS             }
+//RS             self.flow = saved_flow;
+//RS             self.in_comptime = saved_in_comptime;
+//RS             *selected_then = None;
+//RS             return;
+//RS         }
+//RS         let selected = {
+//RS             let globals = self.current_ct_globals();
+//RS             crate::Comptime::evaluate_owned_with_imports_opts(
+//RS                 cond,
+//RS                 self.ct_checked_funcs_for_evaluation(),
+//RS                 self.ct_externs,
+//RS                 self.ct_base_dir,
+//RS                 globals.as_ref(),
+//RS                 self.core_imports,
+//RS                 self.gates,
+//RS                 self.ct_impure_depth,
+//RS             )
+//RS         };
+//RS         let selected = match selected {
+//RS             Ok(crate::Comptime::CtValue::Bool(value)) => value,
+//RS             Ok(_) => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0989",
+//RS                     format!(
+//RS                         "a `prep if` condition must be {}, not another type",
+//RS                         Type::Bool.show()
+//RS                     ),
+//RS                     "the condition selects a branch at compile time — it must be true or false"
+//RS                         .to_string(),
+//RS                     "write a Bool known-time expression, like `prep if flag { … }`".to_string(),
+//RS                     Some(*cond_span),
+//RS                 ));
+//RS                 return;
+//RS             }
+//RS             Err(_) => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0989",
+//RS                     "this `prep if` condition can't be known at compile time".to_string(),
+//RS                     "a `prep if` condition must be a known-time expression — a prepared value, a literal, or a pure function call with known arguments (D-WHEN1)".to_string(),
+//RS                     "prepare the value first: `flag :: prep { … }`, then write `prep if flag { … }`"
+//RS                         .to_string(),
+//RS                     Some(*cond_span),
+//RS                 ));
+//RS                 return;
+//RS             }
+//RS         };
+//RS         *selected_then = Some(selected);
+//RS 
+//RS         if selected {
+//RS             self.check_block(then_body, true);
+//RS         } else if let Some(body) = else_body {
+//RS             self.check_block(body, true);
+//RS         }
+//RS 
+//RS         let dropped_arm = if selected {
+//RS             else_body.as_mut()
+//RS         } else {
+//RS             Some(then_body)
+//RS         };
+//RS         if let Some(dropped) = dropped_arm {
+//RS             let diagnostic_start = self.diags.len();
+//RS             let previous = self.in_dropped_comptime_arm;
+//RS             // D-FACT-FLOW1: the dropped arm is walked for name resolution only.
+//RS             // It is not a path through this code, so nothing it does to the
+//RS             // flow facts survives it.
+//RS             let facts = self.flow.clone();
+//RS             self.in_dropped_comptime_arm = true;
+//RS             self.check_block(dropped, true);
+//RS             self.in_dropped_comptime_arm = previous;
+//RS             self.flow = facts;
+//RS             let diagnostics: Vec<Diagnostic> = self.diags.drain(diagnostic_start..).collect();
+//RS             self.diags.extend(
+//RS                 diagnostics
+//RS                     .into_iter()
+//RS                     .filter(|diagnostic| matches!(diagnostic.code.as_str(), "E0107" | "E0102")),
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0358 crates/jet-sema/src/Sema/CheckerCore/control_flow.rs:1-143
+

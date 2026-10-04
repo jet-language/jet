@@ -1,0 +1,479 @@
+// CP-DRIVER-INSPECT: Rust compiler_api.rs:211-262 and project_check.rs.
+// These tests use the real Driver, parser, Sema and checked carrier. Project
+// fixtures below retain their original expected outcomes; a dependency refusal
+// is NOT the original proof and must not close their acceptance gates.
+use jet_driver.[JetDriverCompileRequest, JetDriverCompileTarget, JetDriverCheckScope, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverHostFacts, JetDriverCompilerCheckInput, JetDriverCompilerCheckResult, jet_driver_embedded_core_sources, jet_driver_compiler_check, jet_driver_compiler_check_demand_index, jet_driver_receipt_closure]
+use jet_eval.[jet_eval_default_config, JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse, jet_eval_compiler_semantic_index_value]
+use jet_foundation.[GateSet, TComptimeValue, DIAGNOSTIC_ERROR, foundation_embedded_core, mir_sha256_hex]
+use jet_driver.[jet_driver_compiler_check_loaded_module_rows, jet_driver_compiler_check_with_overlays]
+use jet_sema.[SemaSourceOrigin]
+use jet_foundation.[BuildStamp]
+use core.files.runtime.kernel_path_components as inspect_os_path
+use jet_driver.[jet_driver_selected_project_root, jet_driver_find_repository_root, jet_driver_find_workspace_root_checked, jet_driver_find_package_root_checked]
+use core.files as inspect_root_files
+use core.files.host.retained_descriptor as inspect_root_native
+use core.sys.host.os_path_ingress as inspect_root_ingress
+
+fn inspect_file(relative: String, source: String) -> JetDriverAuthorizedSourceFile Never! {
+    JetDriverAuthorizedSourceFile{path: inspect_os_path.from_text("/inspect/{relative}", inspect_os_path.PathPlatform.Unix), relative_path: inspect_os_path.from_text(relative, inspect_os_path.PathPlatform.Unix), identity: "inspect:{relative}", source: source}
+}
+fn inspect_request(relative: String, source: String, extras: [JetDriverAuthorizedSourceFile]) -> JetDriverCompileRequest Never! {
+    files := [JetDriverAuthorizedSourceFile]{inspect_file(relative, source)}
+    loop file in extras -> &files.push(file)
+    core :: foundation_embedded_core()
+    JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: inspect_os_path.from_text("/inspect", inspect_os_path.PathPlatform.Unix), identity: "inspect-root", allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}, entry_root_identity: "inspect-root", entry_path: inspect_os_path.from_text("/inspect/{relative}", inspect_os_path.PathPlatform.Unix)},
+        canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core),
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("inspect-fixture"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
+        eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
+        record_store: None, trace_sink: None, mir_lint_every_pass: false,
+    }
+}
+fn inspect_check(request: JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
+    source := ""
+    loop root in request.authorized_sources.roots {
+        loop file in root.files {
+            if file.path == request.authorized_sources.entry_path -> source = file.source
+        }
+    }
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: source})}) ?? panic("original fixture has no canonical parse carrier")
+    jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request})
+}
+fn inspect_field(value: TComptimeValue, name: String) -> TComptimeValue Never! {
+    if value == .Struct(_, fields) {
+        loop field in fields { if field.name == name -> return field.value }
+    }
+    panic("canonical checked carrier omitted {name}")
+}
+fn inspect_index_absent(result: JetDriverCompilerCheckResult) -> Bool Never! {
+    checked :: result.checked ?? return true
+    if inspect_field(checked.value, "semantic_index") == .Failed(report) -> return report == .Clean(_)
+    false
+}
+
+#Test("normal_check_retains_checked_facts_without_eager_semantic_index") {
+    // Original compiler_api.rs:215 source, unchanged.
+    source :: "fn helper() -[]> Int {\n    return 41\n}\n\nfn run() {\n    print(helper() + 1)\n}\n"
+    request :: inspect_request("compiler_api_clean.jet", source, [JetDriverAuthorizedSourceFile]{})
+    result := inspect_check(request)
+    assert(result.complete)
+    assert_eq(result.internal_problem, None)
+    assert(inspect_index_absent(result))
+    assert_eq(result.semantic_index, None)
+    assert(result.registration != None && result.graph != None)
+    assert(jet_driver_compiler_check_demand_index(&result))
+    checked :: result.checked ?? panic("clean program lost checked carrier")
+    index :: inspect_field(checked.value, "semantic_index")
+    if index == .Present(value) {
+        retained :: result.semantic_index ?? panic("clean program lost full typed index")
+        graph :: result.graph ?? panic("clean program lost checked graph")
+        canonical :: jet_eval_compiler_semantic_index_value(retained, source, graph.fact_registry)
+        assert_eq("{value:Debug}", "{canonical:Debug}")
+        if value == .Struct(_, fields) {
+            names := [String]{}
+            loop field in fields -> &names.push(field.name)
+            assert_eq(names, [String]{"schema_version", "source_digest", "definitions", "references", "calls", "structural_nodes", "effects", "arithmetic", "outputs", "state_graphs", "fact_registry", "derivations"})
+        } else -> panic("compiler index is not the original struct")
+        assert_eq(inspect_field(value, "source_digest"), TComptimeValue.String{value: mir_sha256_hex(source)})
+    } else -> panic("demand did not attach semantic index")
+    before :: "{index:Debug}"
+    assert(jet_driver_compiler_check_demand_index(&result))
+    after :: result.checked ?? panic("second demand lost carrier")
+    assert_eq("{inspect_field(after.value, "semantic_index"):Debug}", before)
+}
+#Test("compiler_api_check_can_request_index_from_the_same_checked_graph") {
+    // Original compiler_api.rs:238 arithmetic witness, unchanged.
+    source :: "fn run() {\n    #Arithmetic(.Wrapping) {\n        value :: U8{250} + U8{10}\n        print(value)\n    }\n}\n"
+    request := inspect_request("compiler_api_arithmetic.jet", source, [JetDriverAuthorizedSourceFile]{})
+    request.semantic_index_requested = true
+    result :: inspect_check(request)
+    assert(result.complete)
+    assert(!inspect_index_absent(result))
+    checked :: result.checked ?? panic("arithmetic check has no carrier")
+    if inspect_field(checked.value, "semantic_index") == .Present(index) {
+        if inspect_field(index, "arithmetic") == .List(operations) {
+            assert(operations.len() > 0)
+            assert_eq(inspect_field(operations[0], "operation"), TComptimeValue.String{value: "add"})
+            assert_eq(inspect_field(operations[0], "policy"), TComptimeValue.String{value: "Wrapping"})
+        } else -> panic("arithmetic facts are not a list")
+    } else -> panic("requested index is absent")
+}
+#Test("compiler_api_user_error_keeps_real_diagnostics_and_absent_index") {
+    // Original compiler_api.rs:254 deliberate failure, unchanged.
+    source :: "fn run() {\n    missing_name()\n}\n"
+    request := inspect_request("compiler_api_bad.jet", source, [JetDriverAuthorizedSourceFile]{})
+    request.semantic_index_requested = true
+    result := inspect_check(request)
+    found := false
+    loop diagnostic in result.diagnostics { if diagnostic.severity == DIAGNOSTIC_ERROR -> found = true }
+    assert(found)
+    assert(!result.complete)
+    assert(inspect_index_absent(result))
+    // Original compiler reflection remains absent on errors; the real checked
+    // index is separately available to explicit with-diagnostics tool opens.
+    assert(result.semantic_index != None)
+    assert(jet_driver_compiler_check_demand_index(&result))
+    assert(inspect_index_absent(result))
+}
+
+// ProgramBundle/LoadedModule -> checked tool metadata: exercise the real
+// loader and retained check result, never a handwritten projection row.
+#Test("checked source provenance retains physical root loaded order and symbolfree source") {
+    source :: "#PubFile\nfn value() -> Int { return 1 }\n"
+    request :: inspect_request("nested/value.jet", source, [JetDriverAuthorizedSourceFile]{
+        inspect_file("package.jet", "name: \"provenance\"\nversion: \"1.0.0\"\n"),
+        inspect_file("empty.jet", "// no symbols\n"),
+    })
+    result :: inspect_check(request)
+    assert(result.complete)
+    assert_eq(result.project_root, Val(inspect_os_path.from_text("/inspect", inspect_os_path.PathPlatform.Unix)))
+    loaded :: jet_driver_compiler_check_loaded_module_rows(result)
+    assert_eq(loaded.len(), result.loaded_module_count)
+    assert(loaded.len() >= 2)
+    found_entry := false
+    found_empty := false
+    loop (index, row) in loaded {
+        module :: result.module_sources[row]
+        assert_eq(module.loaded_module_index, Val(index))
+        if module.display == "nested/value.jet" {
+            found_entry = true
+            assert_eq(module.path, "/inspect/nested/value.jet")
+            assert_eq(module.physical_path, Val(inspect_os_path.from_text("/inspect/nested/value.jet", inspect_os_path.PathPlatform.Unix)))
+            assert_eq(module.relative_path, "nested/value.jet")
+            assert_eq(module.loaded_source, source)
+            assert_eq(module.source, source)
+            assert_eq(module.alias, "value")
+            assert(module.pub_file)
+            assert_eq(module.source_origin, SemaSourceOrigin.Snapshot)
+        }
+        if module.display == "empty.jet" {
+            found_empty = true
+            assert_eq(module.loaded_source, "// no symbols\n")
+            assert_eq(module.physical_path, Val(inspect_os_path.from_text("/inspect/empty.jet", inspect_os_path.PathPlatform.Unix)))
+            assert(!module.pub_file)
+        }
+    }
+    assert(found_entry && found_empty)
+    assert(result.module_sources.len() >= loaded.len() + 1)
+    canonical :: result.module_sources[result.module_sources.len() - 1]
+    assert_eq(canonical.loaded_module_index, None)
+    assert_eq(canonical.physical_path, None)
+    assert_eq(canonical.source_origin, SemaSourceOrigin.CompilerGenerated)
+}
+
+#Test("checked source provenance keeps selected entry overlays and error-side facts") {
+    original :: "fn value() -> Int { return 1 }\n"
+    changed :: "fn value() -> Int { return 2 }\n"
+    request :: inspect_request("value.jet", original, [JetDriverAuthorizedSourceFile]{})
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: changed, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: changed})}) ?? panic("overlay source parse failed")
+    overlay_path :: inspect_os_path.from_text("/inspect/value.jet", inspect_os_path.PathPlatform.Unix)
+    overlays := [inspect_os_path.OsPath:String]{}
+    overlays[overlay_path] = changed
+    result :: jet_driver_compiler_check_with_overlays(JetDriverCompilerCheckInput{parsed: parsed, request: request}, overlays, Val(overlay_path), None)
+    assert(result.complete)
+    assert_eq(result.project_root, Val(inspect_os_path.from_text("/inspect", inspect_os_path.PathPlatform.Unix)))
+    loaded :: jet_driver_compiler_check_loaded_module_rows(result)
+    assert_eq(result.module_sources[loaded[0]].loaded_source, changed)
+    assert_eq(result.module_sources[loaded[0]].physical_path, Val(overlay_path))
+    assert_eq(request.authorized_sources.roots[0].files[0].source, original)
+    bad_source :: "fn run() { missing_name() }\n"
+    bad :: inspect_check(inspect_request("bad.jet", bad_source, [JetDriverAuthorizedSourceFile]{}))
+    assert(!bad.complete)
+    assert(bad.registration != None && bad.graph != None)
+    assert_eq(bad.project_root, Val(inspect_os_path.from_text("/inspect", inspect_os_path.PathPlatform.Unix)))
+    bad_loaded :: jet_driver_compiler_check_loaded_module_rows(bad)
+    assert_eq(bad.module_sources[bad_loaded[0]].loaded_source, bad_source)
+    assert_eq(bad.module_sources[bad_loaded[0]].path, "/inspect/bad.jet")
+}
+
+#Test("checked source provenance keeps loader bytes distinct from compiler masking") {
+    source :: "// heading\nfn value() -> Int { return 1 }\n"
+    masked :: "          \nfn value() -> Int { return 1 }\n"
+    request :: inspect_request("value.jet", source, [JetDriverAuthorizedSourceFile]{})
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: masked})}) ?? panic("masked source parse failed")
+    result :: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request})
+    assert(result.complete)
+    loaded :: jet_driver_compiler_check_loaded_module_rows(result)
+    assert_eq(result.module_sources[loaded[0]].source, masked)
+    assert_eq(result.module_sources[loaded[0]].loaded_source, source)
+}
+
+#Test("checked source root follows selected authorized entry not old request root") {
+    source :: "fn value() -> Int { return 1 }\n"
+    selected :: "fn other() -> Int { return 2 }\n"
+    request := inspect_request("value.jet", source, [JetDriverAuthorizedSourceFile]{})
+    &request.authorized_sources.roots.push(JetDriverAuthorizedSourceRoot{
+        canonical_path: inspect_os_path.from_text("/inspect2", inspect_os_path.PathPlatform.Unix), identity: "selected-root", allow_hardlinks: false,
+        files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{
+            path: inspect_os_path.from_text("/inspect2/nested/other.jet", inspect_os_path.PathPlatform.Unix), relative_path: inspect_os_path.from_text("nested/other.jet", inspect_os_path.PathPlatform.Unix), identity: "selected:other", source: selected,
+        }},
+        foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+    })
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: selected, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: selected})}) ?? panic("selected source parse failed")
+    result :: jet_driver_compiler_check_with_overlays(JetDriverCompilerCheckInput{parsed: parsed, request: request}, [inspect_os_path.OsPath:String]{}, Val(inspect_os_path.from_text("/inspect2/nested/other.jet", inspect_os_path.PathPlatform.Unix)), None)
+    assert(result.complete)
+    assert_eq(result.project_root, Val(inspect_os_path.from_text("/inspect2", inspect_os_path.PathPlatform.Unix)))
+    loaded :: jet_driver_compiler_check_loaded_module_rows(result)
+    assert_eq(result.module_sources[loaded[0]].path, "/inspect2/nested/other.jet")
+    assert_eq(result.module_sources[loaded[0]].display, "nested/other.jet")
+    assert_eq(result.module_sources[loaded[0]].relative_path, "nested/other.jet")
+    assert_eq(result.module_sources[loaded[0]].alias, "other")
+    assert_eq(result.module_sources[loaded[0]].loaded_source, selected)
+    assert_eq(request.authorized_sources.entry_root_identity, "inspect-root")
+    assert_eq(request.authorized_sources.entry_path, inspect_os_path.from_text("/inspect/value.jet", inspect_os_path.PathPlatform.Unix))
+}
+
+#Test("loaded Core retains generated origin without fabricating physical files") {
+    source :: "use core.math as math\nfn value() -> Float { return math.sqrt(Float{4.0}) }\n"
+    request :: inspect_request("value.jet", source, [JetDriverAuthorizedSourceFile]{})
+    result :: inspect_check(request)
+    assert(result.complete)
+    loaded :: jet_driver_compiler_check_loaded_module_rows(result)
+    found := false
+    loop (index, row) in loaded {
+        module :: result.module_sources[row]
+        assert_eq(module.loaded_module_index, Val(index))
+        if module.source_origin == SemaSourceOrigin.CompilerGenerated {
+            found = true
+            assert_eq(module.physical_path, None)
+            assert_eq(module.display, module.relative_path)
+            assert(module.path != module.display)
+            matching_alias := false
+            loop core_source in request.core_sources {
+                if core_source.path == module.display && core_source.alias == module.alias -> matching_alias = true
+            }
+            assert(matching_alias)
+            assert(module.loaded_source.len() > 0)
+        }
+    }
+    assert(found)
+}
+#Test("explicit_file_in_package_exports_scope_rows_and_only_consumed_revisions") {
+    source :: "fn value() -> Int { return 1 }\n"
+    request :: inspect_request("value.jet", source, [JetDriverAuthorizedSourceFile]{inspect_file("package.jet", "name: \"inspect-package\"\nversion: \"0.1.0\"\n"), inspect_file(".jet/unconsumed.jet", "not a module")})
+    result :: inspect_check(request)
+    assert(result.complete)
+    checked :: result.checked ?? panic("explicit member lost carrier")
+    if checked.value == .Struct(_, fields) -> assert_eq(fields.len(), 7)
+    assert_eq(result.proof_rows.len(), 4)
+    loop row in result.proof_rows {
+        assert_eq(row.status, "not applicable")
+        assert_eq(row.output, "not-applicable")
+    }
+    found := false
+    loop revision in result.loaded_source_files {
+        assert(revision.path != "/inspect/.jet/unconsumed.jet")
+        if revision.path == "/inspect/value.jet" {
+            found = true
+            assert_eq(revision.source, source)
+        }
+    }
+    assert(found)
+}
+#Test("request_profile_reaches_semantic_build_facts") {
+    request := inspect_request("profile.jet", "fn profile() -> String { return $build.profile }\n", [JetDriverAuthorizedSourceFile]{})
+    request.profile = "release"
+    result :: inspect_check(request)
+    assert(result.complete)
+    registration :: result.registration ?? panic("checked graph was discarded")
+    assert_eq(registration.build_facts.profile, "release")
+}
+#Test("request_options_participate_in_receipt_identity") {
+    request := inspect_request("identity.jet", "fn value() -> Int { return 1 }\n", [JetDriverAuthorizedSourceFile]{})
+    baseline :: jet_driver_receipt_closure("check", request, [String]{})
+    request.profile = "release"
+    assert(jet_driver_receipt_closure("check", request, [String]{}) != baseline)
+    request.profile = "dev"
+    request.setting_overrides["feature"] = "true"
+    assert(jet_driver_receipt_closure("check", request, [String]{}) != baseline)
+}
+
+// Frozen project_check fixtures. Expected proof codes/results stay original;
+// they are deliberately not substituted with a passing dependency-refusal test.
+// Enable these original acceptance calls only when the named producer lands.
+pub struct InspectGatedOriginal {
+    name: String
+    request: JetDriverCompileRequest
+    arguments: [String]{[String]{"check", "."}}
+    expected_codes: [String]
+    expected_output: String
+    prerequisite: String
+}
+pub fn inspect_gated_original_project_checks() -> [InspectGatedOriginal] Never! {
+    dogfood := inspect_request("src/cli/main.jet", "pub fn run() {\n    print(\"project-check dogfood\")\n}\n", [JetDriverAuthorizedSourceFile]{inspect_file("package.jet", "name: \"jetpack-dogfood\"\nversion: \"0.1.0\"\noutputs: {\n    dogfood: .Executable{\n        entry: main.run\n    }\n}\ndefaults: {\n    run: dogfood\n}\nauthority: {\n    holds: {\n        allow: [IO]\n    }\n}\n")})
+    dogfood.check_scope = JetDriverCheckScope.Project
+    entry := inspect_request("app/main.jet", "pub fn launch() {\n    print(\"named entry\")\n}\n", [JetDriverAuthorizedSourceFile]{inspect_file("package.jet", "name: \"project-check-entry\"\nversion: \"0.1.0\"\noutputs: {\n    release: .Executable{\n        entry: main.launch\n    }\n}\ndefaults: {\n    run: release\n}\nauthority: {\n    holds: {\n        allow: [IO]\n    }\n}\n")})
+    entry.check_scope = JetDriverCheckScope.Project
+    graph := inspect_request("run.jet", "fn run() {\n    relay()\n}\n", [JetDriverAuthorizedSourceFile]{inspect_file("middle.jet", "pub fn relay() {\n    finish()\n}\n"), inspect_file("leaf.jet", "pub fn finish() {\n    print(\"module graph\")\n}\n"), inspect_file("package.jet", "name: \"project-check-graph\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO]\n    }\n}\n")})
+    graph.check_scope = JetDriverCheckScope.Project
+    core := inspect_request("run.jet", "use core.math as math\n\nfn run() {\n    print(math.sqrt(Float{4.0}))\n}\n", [JetDriverAuthorizedSourceFile]{inspect_file("package.jet", "name: \"project-check-core\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO]\n    }\n}\n")})
+    core.check_scope = JetDriverCheckScope.Project
+    library := inspect_request("library_only.jet", "// A library package has no program entry, so `jet check` on its directory\n// must not demand `fn run` (E0101).\npub fn width(start: Int, end: Int) -> Int { end - start }\n", [JetDriverAuthorizedSourceFile]{inspect_file("package.jet", "name: \"library_only\"\nversion: \"0.1.0\"\nedition: \"2028\"\noutputs: {\n    core: .Library{\n        name: \"library_only\",\n    },\n}\n")})
+    library.check_scope = JetDriverCheckScope.Project
+    owning :: inspect_request("src/main.jet", "use project.services as services\n\nfn run() {\n}\n", [JetDriverAuthorizedSourceFile]{inspect_file("services.jet", "module services { }\n"), inspect_file("package.jet", "name: \"project-check-owning-context\"\nversion: \"0.1.0\"\n")})
+    missing :: inspect_request("orphan.jet", "use project.services as services\n\nfn run() {\n    print(\"missing context\")\n}\n", [JetDriverAuthorizedSourceFile]{})
+    effects := inspect_request("run.jet", "fn build(b: BuildContext) -> BuildPlan {\n    return b.plan()\n}\n\nfn run() {\n    print(\"effect facts\")\n}\n", [JetDriverAuthorizedSourceFile]{inspect_file("package.jet", "name: \"project-check-facts\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO]\n    }\n}\n")})
+    effects.check_scope = JetDriverCheckScope.Project
+    effects.gates = GateSet{bits: 2}
+    tier := inspect_request("run.jet", "#Target(Web)\n\n// @web_target\nfn run() {\n    task.group workers {\n        child :: task { 7 }\n        value :: child.join() ?? 0\n        print(\"{value}\")\n    }\n}\n", [JetDriverAuthorizedSourceFile]{inspect_file("package.jet", "name: \"project-check-tier\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO]\n    }\n}\n")})
+    tier.check_scope = JetDriverCheckScope.Project
+    tier.host_facts.target_triple = Val("wasm32-unknown-unknown")
+    [InspectGatedOriginal]{
+        InspectGatedOriginal{name: "frozen_dogfood", request: dogfood, expected_codes: [String]{}, expected_output: "dogfood", prerequisite: "CP-OUTPUT-CONTRACTS; CP-PACKAGE-GRAPH; Core closure and tier proof producers"},
+        InspectGatedOriginal{name: "entry_resolution; bare check writes no package/lock/generated artifacts", request: entry, expected_codes: [String]{}, expected_output: "release", prerequisite: "CP-OUTPUT-CONTRACTS; checked project proof producers"},
+        InspectGatedOriginal{name: "module_graph", request: graph, expected_codes: [String]{}, expected_output: "run", prerequisite: "checked project proof producers"},
+        InspectGatedOriginal{name: "core_closure", request: core, expected_codes: [String]{}, expected_output: "run", prerequisite: "Core closure and tier proof producers"},
+        InspectGatedOriginal{name: "library_package_check_needs_no_run_entry", request: library, expected_codes: [String]{}, expected_output: "default", prerequisite: "CP-OUTPUT-CONTRACTS; library project proof"},
+        InspectGatedOriginal{name: "explicit_file_uses_owning_project_context", request: owning, arguments: [String]{"check", "--verbose", "src/main.jet"}, expected_codes: [String]{}, expected_output: "not-applicable", prerequisite: "CP-PACKAGE-GRAPH project import producer"},
+        InspectGatedOriginal{name: "explicit_file_without_owning_project_context_teaches_missing_context", request: missing, arguments: [String]{"check", "orphan.jet"}, expected_codes: [String]{"E2393"}, expected_output: "", prerequisite: "CP-PACKAGE-GRAPH owning-context diagnostic"},
+        // stage-1 seam: compiled BuildPlan provider
+        InspectGatedOriginal{name: "missing_effect_facts_are_a_project_check_diagnostic", request: effects, arguments: [String]{"check", ".", "--gate=impure=allow"}, expected_codes: [String]{"E2391"}, expected_output: "", prerequisite: "CP-BUILD-PREFLIGHT; CP-S20-EFFECT-FACTS; CP-POLICY-SETTINGS"},
+        InspectGatedOriginal{name: "unsupported_web_tier_is_not_reported_clean", request: tier, arguments: [String]{"check", ".", "--target=web"}, expected_codes: [String]{"E2392"}, expected_output: "", prerequisite: "Web project proof producer"},
+    }
+}
+
+// Original assertions, callable by the focused harness after ALL prerequisite
+// producers named on each fixture land. Not a scheduled #Test while gated:
+// accepting the current internal refusal would narrow the original contract.
+pub fn inspect_original_project_acceptance(prepared: [JetDriverCompileRequest]) {
+    witnesses :: inspect_gated_original_project_checks()
+    assert_eq(prepared.len(), witnesses.len())
+    loop (index, witness) in witnesses {
+        request :: prepared[index]
+        // The composed CLI/Driver harness prepares the original argv, including
+        // the Web target's real assets/policy; this test must not invent them.
+        assert_eq("{request.authorized_sources:Debug}", "{witness.request.authorized_sources:Debug}")
+        assert_eq(request.check_scope, witness.request.check_scope)
+        if witness.arguments.contains("--target=web") {
+            if request.target == .Web(_, _, _) {} else -> panic("original Web request was not prepared")
+        }
+        before :: "{request.authorized_sources:Debug}"
+        result :: inspect_check(request)
+        assert_eq(result.internal_problem, None)
+        assert_eq("{request.authorized_sources:Debug}", before)
+        if witness.expected_codes.len() != 0 {
+            assert(!result.complete)
+            loop code in witness.expected_codes {
+                found := false
+                loop diagnostic in result.diagnostics { if diagnostic.code == code -> found = true }
+                assert(found)
+            }
+            next
+        }
+        assert(result.complete)
+        assert(result.checked != None)
+        assert_eq(result.proof_rows.len(), 4)
+        loop row in result.proof_rows {
+            assert_eq(row.output, witness.expected_output)
+            expected_status :: if witness.request.check_scope == JetDriverCheckScope.Project -> "proven" else -> "not applicable"
+            assert_eq(row.status, expected_status)
+        }
+    }
+}
+
+#Test("unsupported_invocation_options_are_not_silently_default_checked") {
+    source :: "fn value() -> Int { return 1 }\n"
+    request := inspect_request("options.jet", source, [JetDriverAuthorizedSourceFile]{})
+    request.setting_overrides["feature"] = "true"
+    settings :: inspect_check(request)
+    assert(!settings.complete)
+    assert(settings.internal_problem != None)
+    request.setting_overrides = [String:String]{}
+    request.gates = GateSet{bits: 1}
+    gates :: inspect_check(request)
+    assert(!gates.complete)
+    assert(gates.internal_problem != None)
+    request.gates = GateSet{bits: 0}
+    request.selected_output = Val("release")
+    output :: inspect_check(request)
+    assert(!output.complete)
+    assert(output.internal_problem != None)
+    request.selected_output = None
+    request.entry_function = Val("value")
+    entry :: inspect_check(request)
+    assert(!entry.complete)
+    assert(entry.internal_problem != None)
+    request.entry_function = None
+    request.run_mode = true
+    run :: inspect_check(request)
+    assert(!run.complete)
+    assert(run.internal_problem != None)
+}
+
+// Rust Loader.rs5858-5975 originals. These require actual native discovery,
+// checked workspace/package sources and symlink metadata, not root-fact mocks.
+fn inspect_root_path(path: String) -[FS, Env]> inspect_os_path.OsPath Never! {
+    cwd :: inspect_root_ingress.current_dir() ?? panic("native fixture cwd")
+    // The fixture created this exact UTF8 pathname; it is authored text, not
+    // a lossy display of an observed filesystem name.
+    inspect_os_path.from_text(path, cwd.platform)
+}
+fn inspect_root_tempdir(tag: String) -[FS, Env]> String Never! {
+    temp :: inspect_root_files.temp_dir(tag) ?? panic("root fixture temporary directory")
+    base := inspect_root_files.dirname(temp.path)
+    loop {
+        native :: inspect_root_path(base)
+        has_repository :: jet_driver_find_repository_root(native) != None
+        has_workspace :: if jet_driver_find_workspace_root_checked(native) == {
+            .Ok(root) -> root != None
+            .Err(_) -> true
+        }
+        has_package :: if jet_driver_find_package_root_checked(native) == {
+            .Ok(root) -> root != None
+            .Err(_) -> true
+        }
+        if !has_repository && !has_workspace && !has_package -> break
+        parent :: inspect_root_files.dirname(base)
+        if parent.len() == 0 || parent == base -> panic("could not find an authority-free root fixture directory")
+        base = parent
+    }
+    root :: inspect_root_files.join(base, inspect_root_files.basename(temp.path))
+    if root != temp.path {
+        inspect_root_files.remove_all(temp.path) ?? panic("original temporary directory cleanup")
+        inspect_root_files.mkdir(root, true) ?? panic("authority-free root fixture")
+    }
+    root
+}
+fn inspect_root_assert(start: String, expected: String) -[FS, Env]> Never! {
+    actual :: jet_driver_selected_project_root(inspect_root_path(start)) ?? panic("canonical project root selector")
+    canonical :: inspect_root_native.canonicalize(inspect_root_path(expected)) ?? panic("actual canonical fixture root")
+    assert(inspect_os_path.equals(actual, canonical))
+}
+#Test("selected_project_root_prefers_repository_over_nested_package") {
+    repository :: inspect_root_tempdir("loader-selected-repository")
+    source :: inspect_root_files.join(repository, "packages/app/src")
+    inspect_root_files.mkdir(source, true) ?? panic("source directories")
+    inspect_root_files.mkdir(inspect_root_files.join(repository, ".git"), false) ?? panic("repository marker")
+    inspect_root_files.write(inspect_root_files.join(repository, "packages/app/package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n") ?? panic("package manifest")
+    inspect_root_assert(source, repository)
+    inspect_root_files.remove_all(repository) ?? panic("cleanup")
+}
+#Test("selected_project_root_preserves_nested_workspace_precedence") {
+    repository :: inspect_root_tempdir("loader-selected-workspace")
+    workspace :: inspect_root_files.join(repository, "nested")
+    source :: inspect_root_files.join(workspace, "packages/app/src")
+    inspect_root_files.mkdir(source, true) ?? panic("source directories")
+    inspect_root_files.mkdir(inspect_root_files.join(repository, ".git"), false) ?? panic("repository marker")
+    inspect_root_files.write(inspect_root_files.join(repository, "package.jet"), "name: \"repository\"\nversion: \"0.1.0\"\n") ?? panic("repository package")
+    inspect_root_files.write(inspect_root_files.join(workspace, "workspace.jet"), "module workspace { members: [\"./packages/app\"] }\n") ?? panic("workspace declaration")
+    inspect_root_files.write(inspect_root_files.join(workspace, "packages/app/package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n") ?? panic("member package")
+    inspect_root_assert(source, workspace)
+    inspect_root_files.remove_all(repository) ?? panic("cleanup")
+}
+#Test("selected_project_root_uses_checked_package_without_repository") {
+    root :: inspect_root_tempdir("loader-selected-package")
+    package :: inspect_root_files.join(root, "package")
+    source :: inspect_root_files.join(package, "src")
+    inspect_root_files.mkdir(source, true) ?? panic("source directories")
+    inspect_root_files.write(inspect_root_files.join(package, "package.jet"), "name: \"package\"\nversion: \"0.1.0\"\n") ?? panic("package manifest")
+    inspect_root_assert(source, package)
+    inspect_root_files.remove_all(root) ?? panic("cleanup")
+}
+#Test("selected_project_root_uses_canonical_standalone_parent") {
+    root :: inspect_root_tempdir("loader-selected-standalone")
+    standalone :: inspect_root_files.join(root, "standalone")
+    inspect_root_files.mkdir(standalone, true) ?? panic("standalone directory")
+    inspect_root_files.write(inspect_root_files.join(standalone, "run.jet"), "fn run() {}\n") ?? panic("standalone source")
+    inspect_root_assert(standalone, standalone)
+    inspect_root_files.remove_all(root) ?? panic("cleanup")
+}

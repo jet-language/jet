@@ -8,15 +8,16 @@ use jet_foundation.[
     CallArg,
     CallLabel,
     Diagnostic,
-    DiagnosticFixApplicability,
-    DiagnosticFixSafety,
     EnumLitArg,
     Expr,
     ExprField,
     ExprMember,
     ExprPair,
+    FixApplicability,
+    FixSafety,
     IndexKind,
     Lambda,
+    InterpolationSelectorKind,
     LambdaBody,
     LambdaParam,
     NamedSpan,
@@ -38,6 +39,7 @@ use jet_foundation.[
     diagnostic_from_registry,
     diagnostic_with_edit_grade,
     expr_span,
+    interpolation_selector,
 ]
 use jet_lexer.[
     STRING_PART_BYTE,
@@ -361,7 +363,7 @@ fn parser_check_mixed_logic(state: &JetParserState, operand: ParsedExpr) {
         "`&&` binds tighter than `||`, but readers often misjudge that, so Jet asks you to show the grouping",
         "Write `{grouped}` to keep today's meaning, or regroup the conditions the way you intended",
     )
-    &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: operand.span, new_text: grouped}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: operand.span, new_text: grouped}, FixApplicability.Safe, FixSafety.BehaviorPreserving))
 }
 
 // Rebuild the source spelling of `span` from its tokens. Whitespace between
@@ -926,16 +928,19 @@ fn parser_parse_string_format(state: &JetParserState) -> StrFormat {
     selector :: parser_bump(&state)
     name :: selector.payload.decoded
     head :: ":{name}"
-    if name == "Debug" -> return StrFormat.Debug
-    if name == "Pretty" -> return StrFormat.Pretty
-    if name == "Bin" -> return StrFormat.Bin
-    if name == "Oct" -> return StrFormat.Oct
-    if name == "Fixed" -> return StrFormat.Fixed{digits: parser_parse_selector_argument(&state, head, "decimal places")}
-    if name == "Grouped" -> return StrFormat.Grouped{digits: parser_parse_selector_argument(&state, head, "decimal places")}
-    if name == "Sci" -> return StrFormat.Sci{digits: parser_parse_selector_argument(&state, head, "decimal places")}
-    if name == "Percent" -> return StrFormat.Percent{digits: parser_parse_selector_argument(&state, head, "decimal places")}
-    if name == "Hex" -> return StrFormat.Hex{digits: parser_parse_selector_argument(&state, head, "width")}
-    if name == "Pad" || name == "PadLeft" {
+    descriptor :: interpolation_selector(name)
+    if descriptor == .Val(registered) {
+        kind :: registered.kind
+        if kind == .Debug -> return StrFormat.Debug
+        if kind == .Pretty -> return StrFormat.Pretty
+        if kind == .Bin -> return StrFormat.Bin
+        if kind == .Oct -> return StrFormat.Oct
+        if kind == .Fixed -> return StrFormat.Fixed{digits: parser_parse_selector_argument(&state, head, "decimal places")}
+        if kind == .Grouped -> return StrFormat.Grouped{digits: parser_parse_selector_argument(&state, head, "decimal places")}
+        if kind == .Sci -> return StrFormat.Sci{digits: parser_parse_selector_argument(&state, head, "decimal places")}
+        if kind == .Percent -> return StrFormat.Percent{digits: parser_parse_selector_argument(&state, head, "decimal places")}
+        if kind == .Hex -> return StrFormat.Hex{digits: parser_parse_selector_argument(&state, head, "width")}
+        if kind == .Pad || kind == .PadLeft {
         parser_expect(&state, TOKEN_LPAREN, "after `{head}` in interpolation")
         width :: parser_parse_selector_integer(&state, head, "width")
         fill := ""
@@ -944,10 +949,10 @@ fn parser_parse_string_format(state: &JetParserState) -> StrFormat {
             fill = parser_parse_selector_fill(&state, head)
         }
         parser_expect(&state, TOKEN_RPAREN, "after the fill in `{head}(n, fill)`")
-        if name == "Pad" -> return StrFormat.Pad{width: width, fill: fill}
+        if kind == .Pad -> return StrFormat.Pad{width: width, fill: fill}
         return StrFormat.PadLeft{width: width, fill: fill}
     }
-    if name == "Unit" {
+        if kind == .Unit {
         parser_expect(&state, TOKEN_LPAREN, "after `{head}` in interpolation")
         style :: parser_expect_name(&state, "inside `{head}( )`")
         format := StrFormat.Unit{format: UnitFormat.Name}
@@ -957,6 +962,7 @@ fn parser_parse_string_format(state: &JetParserState) -> StrFormat {
         }
         parser_expect(&state, TOKEN_RPAREN, "after the style in `{head}( )`")
         return format
+    }
     }
     parser_add_error_code(&state, "E0914", selector.span, "unknown interpolation selector `{head}`", "string interpolation supports a closed selector set — use `:Debug`, `:Pretty`, `:Fixed(n)`, `:Grouped(n)`, `:Hex(n)`, `:Pad(n[, \"fill\"])`, `:PadLeft(n[, \"fill\"])`, `:Sci(n)`, `:Percent(n)`, `:Bin`, `:Oct`, or `:Unit(name|bare)`", "write `{{value:Debug}}`, `{{value:Pretty}}`, `{{value:Fixed(2)}}`, `{{value:Grouped(2)}}`, `{{value:Hex(2)}}`, `{{value:Pad(2, \" \")}}`, `{{value:PadLeft(2, \" \")}}`, `{{value:Sci(2)}}`, `{{value:Percent(2)}}`, `{{value:Bin}}`, `{{value:Oct}}`, `{{value:Unit(name)}}` or `{{value:Unit(bare)}}`, or `{{value}}`")
     StrFormat.Display
@@ -1484,6 +1490,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
     // and D-GENERIC-CALL1=A call-site arguments (`decode<Order>(raw)`).
     owner_type_args := [Type]{}
     call_type_args := [Type]{}
+    optional_receiver_span := initial.span
     loop {
         kind :: parser_current_kind(&state)
         if kind == TOKEN_LT {
@@ -1506,6 +1513,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
             break
         }
         if kind == TOKEN_LPAREN {
+            open_span :: parser_current(&state).span
             method_name :: if expression.expr == {
                 .Field(_, method, _) -> method
                 else -> ""
@@ -1571,7 +1579,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                 }
                 .OptField(receiver, method, method_span, _, _) -> {
                     expression = ParsedExpr{
-                        expr: Expr.OptMethodCall{receiver: receiver, method: method, method_span: method_span, type_args: [Type]{}, args: args, span: span},
+                        expr: Expr.OptMethodCall{receiver: receiver, method: method, method_span: method_span, type_args: [Type]{}, args: args, span: span, receiver_span: optional_receiver_span, call_span: parser_cover(open_span, end)},
                         span: span,
                     }
                 }
@@ -1691,6 +1699,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
             member :: if parser_current_kind(&state) == TOKEN_KW_COPY || parser_current_kind(&state) == TOKEN_KW_MOVE -> parser_bump(&state) else -> parser_expect_name(&state, "after the field-access operator")
             member_name :: if member.kind == TOKEN_KW_COPY || member.kind == TOKEN_KW_MOVE -> member.payload.text else -> member.payload.decoded
             span := parser_cover(expression.span, member.span)
+            if operator.kind == TOKEN_QUESTION_DOT -> optional_receiver_span = expression.span
             expression = if operator.kind == TOKEN_QUESTION_DOT -> ParsedExpr{expr: Expr.OptField{base: expression.expr, member: member_name, member_span: member.span, flatten: false, span: span}, span: span} else -> ParsedExpr{expr: Expr.Field{base: expression.expr, member: member_name, span: span}, span: span}
             next
         }
@@ -1796,7 +1805,7 @@ fn parser_report_retired_step(state: &JetParserState, operator: Token, operand: 
     why :: "Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another"
     if whole_statement && parser_retired_step_place(operand) != None {
         diagnostic :: diagnostic_from_registry("E0160", Val(whole), "`{spelling}` is not a Jet operator", why, "write `{replacement}`")
-        &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: whole, new_text: replacement}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+        &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: whole, new_text: replacement}, FixApplicability.Safe, FixSafety.BehaviorPreserving))
         return
     }
     fix :: if prefix -> "write `{replacement}` as its own statement before this line, then use `{place}` here" else -> "use `{place}` here, then write `{replacement}` as its own statement after this line"

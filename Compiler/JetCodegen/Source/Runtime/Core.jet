@@ -1,0 +1,112 @@
+// Codegen/mod.rs:2375-2474: Stream declarations force the shared Core closure
+// even without an optional Core call. Read canonical Foundation AST directly;
+// bodies/AST graphs are never copied into a second runtime source model.
+use jet_foundation.[Type, Param, Func, TraitMethodSig, TraitImplBlock, Item, Program]
+
+pub fn jet_runtime_type_uses_stream(ty: Type) -> Bool Never! {
+    if ty == {
+        .Apply(name, args) -> {
+            if name == "Stream" -> return true
+            loop argument in args { if jet_runtime_type_uses_stream(argument) -> return true }
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> return jet_runtime_type_uses_stream(inner)
+        .Map(key, _, value) | .Result(key, value) -> return jet_runtime_type_uses_stream(key) || jet_runtime_type_uses_stream(value)
+        .Tuple(fields) -> {
+            loop field in fields { if jet_runtime_type_uses_stream(field.ty) -> return true }
+        }
+        .Union(members) -> {
+            loop member in members { if jet_runtime_type_uses_stream(member) -> return true }
+        }
+        .Fn(params, ret, _, _, _, _) -> {
+            loop parameter in params { if jet_runtime_type_uses_stream(parameter) -> return true }
+            if ret == .Val(result) -> return jet_runtime_type_uses_stream(result)
+        }
+        else -> {}
+    }
+    false
+}
+
+fn jet_runtime_signature_uses_stream(params: View<Param>, result: Type?) -> Bool Never! {
+    loop parameter in params { if jet_runtime_type_uses_stream(parameter.ty) -> return true }
+    if result == .Val(ty) -> return jet_runtime_type_uses_stream(ty)
+    false
+}
+
+pub fn jet_runtime_func_uses_stream(function: Func) -> Bool Never! {
+    jet_runtime_signature_uses_stream(function.params.view(0..<function.params.len()), function.return_type)
+}
+
+pub fn jet_runtime_trait_method_uses_stream(method: TraitMethodSig) -> Bool Never! {
+    jet_runtime_signature_uses_stream(method.params.view(0..<method.params.len()), method.return_type)
+}
+
+fn jet_runtime_methods_use_stream(methods: View<Func>) -> Bool Never! {
+    loop method in methods { if jet_runtime_func_uses_stream(method) -> return true }
+    false
+}
+
+fn jet_runtime_trait_impls_use_stream(implementations: View<TraitImplBlock>) -> Bool Never! {
+    loop implementation in implementations {
+        if jet_runtime_methods_use_stream(implementation.methods.view(0..<implementation.methods.len())) -> return true
+        loop associated in implementation.assoc_type_impls { if jet_runtime_type_uses_stream(associated.ty) -> return true }
+    }
+    false
+}
+
+pub fn jet_runtime_items_use_stream(items: View<Item>) -> Bool Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> { if jet_runtime_func_uses_stream(function) -> return true }
+            .Struct(definition) -> {
+                loop field in definition.fields { if jet_runtime_type_uses_stream(field.ty) -> return true }
+                if jet_runtime_methods_use_stream(definition.methods.view(0..<definition.methods.len())) || jet_runtime_trait_impls_use_stream(definition.trait_impls.view(0..<definition.trait_impls.len())) -> return true
+            }
+            .Enum(definition) -> {
+                loop variant in definition.variants {
+                    if variant.payload == {
+                        .Unit -> {}
+                        .Single(ty, _) -> { if jet_runtime_type_uses_stream(ty) -> return true }
+                        .Named(fields) -> {
+                            loop field in fields { if jet_runtime_type_uses_stream(field.ty) -> return true }
+                        }
+                    }
+                }
+                if jet_runtime_methods_use_stream(definition.methods.view(0..<definition.methods.len())) || jet_runtime_trait_impls_use_stream(definition.trait_impls.view(0..<definition.trait_impls.len())) -> return true
+            }
+            .Distinct(definition) -> { if jet_runtime_type_uses_stream(definition.base) -> return true }
+            .TypeAlias(definition) -> { if jet_runtime_type_uses_stream(definition.target) -> return true }
+            .Trait(definition) -> {
+                loop method in definition.methods { if jet_runtime_trait_method_uses_stream(method) -> return true }
+            }
+            .Impl(definition) -> {
+                if jet_runtime_methods_use_stream(definition.methods.view(0..<definition.methods.len())) -> return true
+                loop associated in definition.assoc_type_impls { if jet_runtime_type_uses_stream(associated.ty) -> return true }
+            }
+            .ExternRust(definition) -> {
+                loop function in definition.functions {
+                    if jet_runtime_signature_uses_stream(function.params.view(0..<function.params.len()), function.return_type) -> return true
+                }
+            }
+            .ProtocolDecl(definition) -> {
+                loop message in definition.messages {
+                    loop field in message.fields { if jet_runtime_type_uses_stream(field.ty) -> return true }
+                }
+            }
+            .CodeModule(definition) -> {
+                if definition.body == .Val(body) {
+                    if jet_runtime_items_use_stream(body.view(0..<body.len())) -> return true
+                }
+            }
+            .GenericModule(definition) -> { if jet_runtime_items_use_stream(definition.body.view(0..<definition.body.len())) -> return true }
+            else -> {}
+        }
+    }
+    false
+}
+
+// Rust uses_stream/force_corelib_prelude share this predicate. The loading
+// owner supplies its parsed programs; this avoids importing Driver upward.
+pub fn jet_runtime_programs_use_stream(programs: View<Program>) -> Bool Never! {
+    loop program in programs { if jet_runtime_items_use_stream(program.items.view(0..<program.items.len())) -> return true }
+    false
+}

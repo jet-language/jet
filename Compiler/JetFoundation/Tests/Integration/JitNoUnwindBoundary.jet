@@ -1,0 +1,951 @@
+// PORT-PENDING 1103 tests-jit-no-unwind-boundary: tests/jit_no_unwind_boundary.rs:1-947
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-JITUNWIND1 (#1995 / #1997): the mechanical check behind the JIT's
+//RS //! no-unwind boundary, plus the cross-tier regression it protects.
+//RS //!
+//RS //! The invariant: **no Rust panic may be raised while a Cranelift frame is on
+//RS //! the stack, and no `extern "C"` frame `crates/jet-jit` exposes to generated
+//RS //! code may be reached by an unwind.** `cranelift-jit` registers no unwind
+//RS //! information for the code it emits, so a panic above a JIT frame cannot be
+//RS //! walked past — libgcc's phase 1 returns `_URC_END_OF_STACK` and the process
+//RS //! rtaborts with `fatal runtime error: failed to initiate panic, error 5`
+//RS //! before any outer `catch_unwind` can see it. A bare `SIGABRT` with no text is
+//RS //! not one of Jet's exit codes.
+//RS //!
+//RS //! The chosen mechanism is boundary conversion, and its recorded cost is that
+//RS //! the guarantee has to hold across ~1.7k host symbols — "so it needs a
+//RS //! mechanical check, not review discipline." This file is that check. The
+//RS //! decision record is `crates/jet-jit/src/host_seam.rs` and
+//RS //! `Docs/spec/architecture.md` R13.
+//RS //!
+//RS //! Why the checks below and not "does each seam catch?": the guarantee is
+//RS //! structural, not per-body.
+//RS //!
+//RS //! 1. A host seam is a plain Rust `fn`. rustc gives an `extern "C"` **body** an
+//RS //!    abort-on-unwind shim, so a panic inside one dies at that body's own edge
+//RS //!    as `thread caused non-unwinding panic` — a *different* abort from error
+//RS //!    5, and one no wrapper above it could ever catch. So a boundary can only
+//RS //!    be added by replacing the C frame. **Any** `extern` fn defined in this
+//RS //!    crate is therefore an unguardable seam by construction, whatever its ABI
+//RS //!    and whatever it is called; the one exception is stated positively, as the
+//RS //!    shim that *is* the boundary. The first form of this check banned
+//RS //!    `extern "C" fn jet_*` only, and `Ffi.rs`'s `jit_ffi_reporter` — the frame
+//RS //!    a foreign library enters when a foreign function has already failed, with
+//RS //!    a Cranelift frame below it — sat outside that family for as long as the
+//RS //!    family was the rule. There used to be a second exception, the OS signal
+//RS //!    handler, because this crate compiled its own copy of it; #2027 deleted
+//RS //!    that copy, so the handler is now checked where it actually lives (see
+//RS //!    `SIGNAL_HANDLER_OWNER`) and a copy reappearing here is a bug on both
+//RS //!    counts.
+//RS //! 2. The only `extern "C"` frames generated code can reach are the shims
+//RS //!    `host_seam::guarded` builds, and the only ways to reach one are the
+//RS //!    single `builder.symbol` call inside `host_fns!` and `guarded_addr`. Any
+//RS //!    other route from a host function to an address is an escape.
+//RS //! 3. The generator must still generate the guard. Without this, reverting one
+//RS //!    line of `host_fns!` would silently unguard every symbol and leave every
+//RS //!    other test green — and the same is true of the shim's own body, which is
+//RS //!    why check 1's `host_seam.rs` exemption is pinned rather than assumed.
+//RS //! 4. An abort may never become a *ledger row*. The structural checks above
+//RS //!    cover the frames this crate compiles; the example corpus is where an
+//RS //!    escape actually shows up, and every ratcheted section of
+//RS //!    `tests/jit_corpus_gate.txt` is shrink-only, so a filed abort is an abort
+//RS //!    under permanent protection. `corpus_gate_refuse_abort`
+//RS //!    (`tests/dev_parts/support.rs`) refuses to classify one on any tier, using
+//RS //!    the `ABORT_MARKERS` list below so the two checks cannot drift.
+//RS //!
+//RS //! Run: `Tools/agent/jet-env cargo test --test jit_no_unwind_boundary`
+//RS 
+//RS mod common;
+//RS 
+//RS /// The abort markers come from `tests/common` so this suite and the
+//RS /// example-corpus gate cannot drift: this suite proves one cancelled task never
+//RS /// aborts, and `corpus_gate_refuse_abort` proves no stem in the whole corpus may
+//RS /// be *classified* as one.
+//RS use common::ABORT_MARKERS;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS fn repo_root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+//RS     let Ok(entries) = fs::read_dir(dir) else {
+//RS         return;
+//RS     };
+//RS     for entry in entries.flatten() {
+//RS         let path = entry.path();
+//RS         if path.is_dir() {
+//RS             collect_rs_files(&path, out);
+//RS         } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+//RS             out.push(path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Every `.rs` file under `crates/jet-jit/src`, as `(label, contents)`.
+//RS fn jit_crate_sources() -> Vec<(String, String)> {
+//RS     let root = repo_root().join("crates/jet-jit/src");
+//RS     assert!(root.is_dir(), "jet-jit source root is missing: {root:?}");
+//RS     let mut files = Vec::new();
+//RS     collect_rs_files(&root, &mut files);
+//RS     files.sort();
+//RS     assert!(
+//RS         files.len() > 20,
+//RS         "the jet-jit scan found only {} files; the scan root moved",
+//RS         files.len()
+//RS     );
+//RS     files
+//RS         .into_iter()
+//RS         .map(|path| {
+//RS             let label = path
+//RS                 .strip_prefix(&root)
+//RS                 .unwrap_or(path.as_path())
+//RS                 .to_string_lossy()
+//RS                 .into_owned();
+//RS             let text =
+//RS                 fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+//RS             (label, text)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Line-comment lines are skipped: this file, `host_seam.rs`, and several
+//RS /// module docs all *describe* the banned forms, and describing them is the
+//RS /// point. Everything else is scanned verbatim.
+//RS fn code_lines(sources: &[(String, String)]) -> Vec<(String, usize, String)> {
+//RS     let mut out = Vec::new();
+//RS     for (label, text) in sources {
+//RS         for (index, line) in text.lines().enumerate() {
+//RS             let trimmed = line.trim_start();
+//RS             if trimmed.starts_with("//") {
+//RS                 continue;
+//RS             }
+//RS             out.push((label.clone(), index + 1, line.to_string()));
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// The `extern` fn *definitions* this crate compiles, as
+//RS /// `(label, line, name, text)`.
+//RS ///
+//RS /// A `fn`-pointer type (`type Pred = unsafe extern "C" fn(i64) -> i8`) and a
+//RS /// foreign declaration inside an `unsafe extern "C" { … }` block both have no
+//RS /// name in this position, so neither matches. What is left is exactly the set of
+//RS /// C frames this crate itself puts on the stack.
+//RS fn extern_fn_definitions(sources: &[(String, String)]) -> Vec<(String, usize, String, String)> {
+//RS     let mut out = Vec::new();
+//RS     for (label, number, line) in code_lines(sources) {
+//RS         let Some(at) = line.find("extern \"") else {
+//RS             continue;
+//RS         };
+//RS         let rest = &line[at + 8..];
+//RS         let Some(close) = rest.find('"') else {
+//RS             continue;
+//RS         };
+//RS         let tail = rest[close + 1..].trim_start();
+//RS         let Some(tail) = tail.strip_prefix("fn ") else {
+//RS             continue;
+//RS         };
+//RS         // `$` is a name here too: `extern "C" fn $name(…)` inside a macro is the
+//RS         // same unguardable body wearing a metavariable, and it must not read as
+//RS         // an anonymous `fn`-pointer type and slip past.
+//RS         let name: String = tail
+//RS             .trim_start()
+//RS             .chars()
+//RS             .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
+//RS             .collect();
+//RS         if name.is_empty() {
+//RS             continue;
+//RS         }
+//RS         out.push((label, number, name, line.trim().to_string()));
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// Check 1: an `extern "C"` seam body cannot be guarded from outside, so a C
+//RS /// frame this crate compiles is an unguardable seam unless it *is* the boundary.
+//RS ///
+//RS /// The permitted set is stated positively and is now ONE entry long:
+//RS /// `host_seam.rs` holds the generated shim — the boundary itself.
+//RS ///
+//RS /// It used to be two, because this crate compiled its own copy of the OS signal
+//RS /// handler. #2027 deleted that copy: the one signal handler lives in
+//RS /// [`SIGNAL_HANDLER_OWNER`] and this crate marshals to it, so a C frame named
+//RS /// `unix_mark`/`windows_mark`/`jet_interrupt_mark` appearing here again is a
+//RS /// re-fork of the handler AND an unguardable seam, and check 1 must say so.
+//RS ///
+//RS /// Every other `extern` fn definition is a hole, whatever it is called. The
+//RS /// previous form of this check banned `extern "C" fn jet_*` only, and
+//RS /// `Ffi.rs`'s `jit_ffi_reporter` — a C frame the bridge calls when a foreign
+//RS /// function already failed, with a Cranelift frame below it — sat outside that
+//RS /// name for exactly as long as the name was the rule (#1995).
+//RS fn unguardable_seam_definitions(sources: &[(String, String)]) -> Vec<String> {
+//RS     extern_fn_definitions(sources)
+//RS         .into_iter()
+//RS         .filter(|(label, _, _, _)| label.as_str() != "host_seam.rs")
+//RS         .map(|(label, number, _, line)| format!("{label}:{number}: {line}"))
+//RS         .collect()
+//RS }
+//RS 
+//RS /// The one signal handler's home (#2027). It is not in this crate and must not
+//RS /// come back: a signal handler runs on a borrowed stack that may have a JIT
+//RS /// frame under it, and `guard_seam` is the wrong tool there —
+//RS /// `jet_scheduler_install_panic_hook` takes the process panic-hook lock and
+//RS /// allocates on first call, so catching inside a handler would trade an
+//RS /// unreachable panic for a reachable deadlock. The guarantee is that the body
+//RS /// cannot panic, and it is checked, not stated.
+//RS ///
+//RS /// One file, because there is one handler: the Prelude owner AOT embeds in the
+//RS /// generated program and `jet_codegen::interrupt_runtime` compiles once for the
+//RS /// `jet` binary's interpreter ambient and Cranelift host alike.
+//RS const SIGNAL_HANDLER_OWNER: &str = "crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs";
+//RS 
+//RS /// The one handler's name. Both platform arms carry it, under mutually
+//RS /// exclusive `cfg`s, so the process has one mark whatever it is built for.
+//RS const SIGNAL_HANDLER: &str = "jet_interrupt_mark";
+//RS 
+//RS /// The complete set of statements a signal handler body may contain. Anything
+//RS /// that allocates, locks, formats, or reports would raise a panic in a frame
+//RS /// that may sit above JIT code — and would do it from a context where the
+//RS /// conversion boundary cannot be used.
+//RS const SIGNAL_HANDLER_STATEMENTS: &[&str] = &[
+//RS     "JET_INTERRUPT_PENDING.fetch_add(1, std::sync::atomic::Ordering::Relaxed);",
+//RS     "const CTRL_C_EVENT: u32 = 0;",
+//RS     "if kind == CTRL_C_EVENT {",
+//RS     "1",
+//RS     "} else {",
+//RS     "0",
+//RS     "}",
+//RS ];
+//RS 
+//RS /// The signal handler's own file, as the one-entry `(label, contents)` list the
+//RS /// scanners above take.
+//RS fn signal_handler_owner_source() -> Vec<(String, String)> {
+//RS     let path = repo_root().join(SIGNAL_HANDLER_OWNER);
+//RS     let text = fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+//RS     vec![(SIGNAL_HANDLER_OWNER.to_string(), text)]
+//RS }
+//RS 
+//RS /// The statements inside the definition that starts on `line_index`: the text
+//RS /// between its opening brace and the matching close, trimmed, blank lines and
+//RS /// line comments dropped.
+//RS fn definition_body(text: &str, line_index: usize) -> Vec<String> {
+//RS     let from: String = text
+//RS         .lines()
+//RS         .skip(line_index - 1)
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     let open = from.find('{').expect("an extern fn definition has a body");
+//RS     let mut depth = 0usize;
+//RS     let mut end = from.len();
+//RS     for (at, ch) in from[open..].char_indices() {
+//RS         match ch {
+//RS             '{' => depth += 1,
+//RS             '}' => {
+//RS                 depth -= 1;
+//RS                 if depth == 0 {
+//RS                     end = open + at;
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     from[open + 1..end]
+//RS         .lines()
+//RS         .map(str::trim)
+//RS         .filter(|line| !line.is_empty() && !line.starts_with("//"))
+//RS         .map(str::to_string)
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Check 2: a host function reaching an address by any route other than
+//RS /// `host_seam::guarded` / `guarded_addr` is an unguarded boundary.
+//RS ///
+//RS /// Both name families this crate uses, not just one: the seams `host_fns!`
+//RS /// declares are `jet_*`, and the callbacks it hands to foreign libraries are
+//RS /// `jit_*` (`Ffi.rs`). Scanning one prefix let the second family escape (#1995).
+//RS fn host_address_escapes(sources: &[(String, String)]) -> Vec<String> {
+//RS     code_lines(sources)
+//RS         .into_iter()
+//RS         .filter(|(label, _, _)| label.as_str() != "host_seam.rs")
+//RS         .filter(|(_, _, line)| {
+//RS             // Every cast on the line, not just the first: `a as usize as
+//RS             // *const u8` and `f(x as usize, jet_seam as *const u8)` both occur.
+//RS             line.match_indices(" as ").any(|(at, _)| {
+//RS                 let tail = line[at + 4..].trim_start();
+//RS                 if !(tail.starts_with("usize")
+//RS                     || tail.starts_with("*const")
+//RS                     || tail.starts_with("*mut"))
+//RS                 {
+//RS                     return false;
+//RS                 }
+//RS                 // The cast operand is the identifier just before ` as `. A
+//RS                 // parenthesised operand ends in `)`, which yields an empty
+//RS                 // token: those already went through `guarded_addr`.
+//RS                 let operand = line[..at]
+//RS                     .trim_end()
+//RS                     .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+//RS                     .next()
+//RS                     .unwrap_or("");
+//RS                 operand.starts_with("jet_") || operand.starts_with("jit_")
+//RS             })
+//RS         })
+//RS         .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Check 3: exactly one place registers a JIT host symbol, and it registers the
+//RS /// guard rather than the seam.
+//RS fn symbol_registrations(sources: &[(String, String)]) -> Vec<String> {
+//RS     code_lines(sources)
+//RS         .into_iter()
+//RS         .filter(|(_, _, line)| line.contains(".symbol("))
+//RS         .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
+//RS         .collect()
+//RS }
+//RS 
+//RS #[test]
+//RS fn no_unguardable_extern_c_seam_is_defined_in_the_jit_crate() {
+//RS     let offenders = unguardable_seam_definitions(&jit_crate_sources());
+//RS     assert!(
+//RS         offenders.is_empty(),
+//RS         "an `extern \"C\"` frame this crate compiles cannot be guarded from \
+//RS          outside: rustc aborts an escaping unwind at the body's own edge \
+//RS          (`thread caused non-unwinding panic`), before the shim \
+//RS          `host_seam::guarded` builds could catch it. Both directions are bugs, \
+//RS          so say which rail the new definition belongs on:\n\
+//RS          \x20 - generated code calls it -> make it a plain `fn` and let \
+//RS          `host_fns!` generate its boundary;\n\
+//RS          \x20 - foreign code calls it -> make it a plain `fn` and hand out \
+//RS          `host_seam::guarded(f)`, as `Ffi.rs` does for the bridge reporter;\n\
+//RS          \x20 - the kernel calls it -> it is a signal handler, and there is \
+//RS          exactly one, in `SIGNAL_HANDLER_OWNER`; marshal to it instead of \
+//RS          re-forking it here (#2027).\n\
+//RS          (crates/jet-jit/src/host_seam.rs, Docs/spec/architecture.md R13.) \
+//RS          Offending definitions:\n{}",
+//RS         offenders.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS /// The signal handler is entered by the kernel, not by generated code, so it
+//RS /// cannot be routed through the boundary — and it may interrupt a JIT frame, so
+//RS /// a panic raised in one is the very abort this file exists to prevent. The only
+//RS /// guarantee left is that the body cannot panic. Pin it, at the one owner.
+//RS #[test]
+//RS fn the_os_signal_handler_stays_panic_free_without_a_catch() {
+//RS     let sources = signal_handler_owner_source();
+//RS     let handlers: Vec<_> = extern_fn_definitions(&sources)
+//RS         .into_iter()
+//RS         .filter(|(_, _, name, _)| name == SIGNAL_HANDLER)
+//RS         .collect();
+//RS     assert_eq!(
+//RS         handlers.len(),
+//RS         2,
+//RS         "the one signal handler has exactly two platform arms — `extern \"C\"` \
+//RS          for unix and `extern \"system\"` for windows, both named \
+//RS          `{SIGNAL_HANDLER}` under mutually exclusive `cfg`s. Found {:?} in \
+//RS          {SIGNAL_HANDLER_OWNER}. A third arm, or a missing one, means the mark \
+//RS          was renamed or re-forked and this proof stopped covering it.",
+//RS         handlers
+//RS             .iter()
+//RS             .map(|(_, number, name, _)| format!("{name}:{number}"))
+//RS             .collect::<Vec<_>>()
+//RS     );
+//RS     for (label, number, name, _) in handlers {
+//RS         for statement in definition_body(&sources[0].1, number) {
+//RS             assert!(
+//RS                 SIGNAL_HANDLER_STATEMENTS.contains(&statement.as_str()),
+//RS                 "{label}:{number}: `{name}` gained the statement `{statement}`, \
+//RS                  which is not one of {:?}. A signal handler runs on a borrowed \
+//RS                  stack that may have a JIT frame under it: anything that \
+//RS                  allocates, locks, formats or reports can panic there, and \
+//RS                  `guard_seam` cannot be used to catch it. Move the work to the \
+//RS                  drain (`jet_interrupt_dispatch`) instead of widening this list.",
+//RS                 SIGNAL_HANDLER_STATEMENTS
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// #2027: the mechanism itself is singular, not just panic-free.
+//RS ///
+//RS /// One pending count, one arm path, one mark, and exactly one place that
+//RS /// compiles the owner for in-binary use. Before this check the handler existed
+//RS /// in three copies with three counts, and because `signal(SIGINT, …)` REPLACES
+//RS /// the process handler, whichever tier armed last silently disarmed the others'
+//RS /// counts — a divergence nothing could detect. Re-forking it must fail here
+//RS /// instead.
+//RS #[test]
+//RS fn exactly_one_signal_mechanism_owns_the_interrupt_count() {
+//RS     let mut sources = Vec::new();
+//RS     for root in [repo_root().join("crates"), repo_root().join("Source")] {
+//RS         assert!(root.is_dir(), "scan root moved: {root:?}");
+//RS         let mut files = Vec::new();
+//RS         collect_rs_files(&root, &mut files);
+//RS         files.sort();
+//RS         for path in files {
+//RS             let label = path
+//RS                 .strip_prefix(repo_root())
+//RS                 .unwrap_or(path.as_path())
+//RS                 .to_string_lossy()
+//RS                 .into_owned();
+//RS             let text =
+//RS                 fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+//RS             sources.push((label, text));
+//RS         }
+//RS     }
+//RS     let owner_label = SIGNAL_HANDLER_OWNER.to_string();
+//RS     assert!(
+//RS         sources.iter().any(|(label, _)| *label == owner_label),
+//RS         "the scan did not reach the owner {SIGNAL_HANDLER_OWNER}"
+//RS     );
+//RS 
+//RS     // The count, the arm state and the mark are declared only by the owner, and
+//RS     // each one is actually there — a rename that made the scan find nothing
+//RS     // would otherwise pass this check vacuously.
+//RS     let mark_definition = format!("fn {SIGNAL_HANDLER}(");
+//RS     for (fact, expected) in [
+//RS         ("static JET_INTERRUPT_PENDING", 1usize),
+//RS         ("static JET_INTERRUPT_ARMED", 1),
+//RS         (mark_definition.as_str(), 2),
+//RS     ] {
+//RS         let declarers: Vec<_> = code_lines(&sources)
+//RS             .into_iter()
+//RS             .filter(|(_, _, line)| line.contains(fact))
+//RS             .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
+//RS             .collect();
+//RS         assert!(
+//RS             declarers.len() == expected
+//RS                 && declarers
+//RS                     .iter()
+//RS                     .all(|entry| entry.starts_with(&owner_label)),
+//RS             "`{fact}` belongs to the one signal mechanism in \
+//RS              {SIGNAL_HANDLER_OWNER} (#2027), {expected} time(s) — the mark has \
+//RS              one `cfg`-exclusive arm per platform, everything else is single. A \
+//RS              second declaration elsewhere is a second interrupt count, and \
+//RS              `signal(SIGINT, …)` REPLACES the process handler, so the two would \
+//RS              not merely duplicate: the later arm would silently disarm the \
+//RS              earlier one's count. Marshal to \
+//RS              `jet_interrupt_arm`/`jet_interrupt_dispatch` instead. Found:\n{}",
+//RS             declarers.join("\n")
+//RS         );
+//RS     }
+//RS 
+//RS     // Exactly one module compiles the owner for in-binary use, so the `jet`
+//RS     // binary's interpreter ambient and Cranelift host share one count. AOT's
+//RS     // copy is a separate process and comes from `Codegen/mod.rs`'s
+//RS     // `include_str!`, which embeds text rather than compiling a second instance
+//RS     // here.
+//RS     let includers: Vec<_> = code_lines(&sources)
+//RS         .into_iter()
+//RS         .filter(|(_, _, line)| line.contains("include!(") && line.contains("Top/Interrupt.rs"))
+//RS         .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
+//RS         .collect();
+//RS     assert_eq!(
+//RS         includers.len(),
+//RS         1,
+//RS         "the owner must be compiled exactly once per binary — \
+//RS          `jet_codegen::interrupt_runtime`. Each extra `include!` is another \
+//RS          `JET_INTERRUPT_PENDING` static in the same process (#2027). Found:\n{}",
+//RS         includers.join("\n")
+//RS     );
+//RS     assert!(
+//RS         includers[0].starts_with("crates/jet-codegen/src/lib.rs:"),
+//RS         "the one in-binary instance lives in `jet-codegen/src/lib.rs` as \
+//RS          `pub mod interrupt_runtime`; found {}",
+//RS         includers[0]
+//RS     );
+//RS }
+//RS 
+//RS /// #2027: what a signal does inside `#Shield` is answered once, by construction.
+//RS ///
+//RS /// A shield defers a *cooperative* interrupt — a cancel or a blown deadline — at
+//RS /// the wait points of the shielded task
+//RS /// (`Prelude/Scheduler.rs::jet_scheduler_shielded`). An OS signal is not a
+//RS /// wait-point outcome: the mark only increments a count, and the drain runs
+//RS /// every registered handler once per counted interrupt. So a signal delivered
+//RS /// while a task is inside `#Shield { … }` is neither deferred to the region's
+//RS /// exit nor discarded — it is counted, and the handlers run on the next drain
+//RS /// while the shielded region keeps running.
+//RS ///
+//RS /// All three tiers answer that identically because they call this one drain and
+//RS /// it cannot see shield or task state. Pin the "cannot", so the three tiers
+//RS /// agree by construction rather than by three copies happening to match.
+//RS #[test]
+//RS fn the_interrupt_drain_cannot_consult_shield_or_task_state() {
+//RS     let owner = signal_handler_owner_source();
+//RS     let leaks: Vec<_> = code_lines(&owner)
+//RS         .into_iter()
+//RS         .filter(|(_, _, line)| {
+//RS             [
+//RS                 "shield",
+//RS                 "SHIELD",
+//RS                 "task_cancelled",
+//RS                 "current_task",
+//RS                 "panicking",
+//RS             ]
+//RS             .iter()
+//RS             .any(|probe| line.contains(probe))
+//RS         })
+//RS         .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
+//RS         .collect();
+//RS     assert!(
+//RS         leaks.is_empty(),
+//RS         "the one interrupt drain read shield or task state. That is how the \
+//RS          three tiers stop agreeing: a signal delivered inside `#Shield` would \
+//RS          then be deferred on whichever tier happened to be executing, and \
+//RS          counted on the others. Shield policy belongs to cooperative wait \
+//RS          points (`Prelude/Scheduler.rs`), not to the signal count (#2027). \
+//RS          Offending lines:\n{}",
+//RS         leaks.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn no_jit_host_address_escapes_the_generated_boundary() {
+//RS     let offenders = host_address_escapes(&jit_crate_sources());
+//RS     assert!(
+//RS         offenders.is_empty(),
+//RS         "a `jet_*` host function reached an address without the no-unwind \
+//RS          boundary. Generated code that calls it would have an unguarded seam \
+//RS          below it. Use `host_seam::guarded_addr(...)` (#1997). Offending \
+//RS          casts:\n{}",
+//RS         offenders.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS /// #1997 criterion 9: `Concurrency.rs` is the named call-site inventory for
+//RS /// scheduler control transfers. Its production host bodies must not grow a
+//RS /// bare panic/expect/unwrap: those either abort below a JIT frame or bypass
+//RS /// the shared status conversion. The test module has ordinary Rust assertions
+//RS /// by design, so stop the scan at its `#[cfg(test)]` boundary instead of
+//RS /// weakening the rule to an allowlist of test line numbers.
+//RS #[test]
+//RS fn concurrency_host_bodies_have_no_bare_panic_sites() {
+//RS     let path = repo_root().join("crates/jet-jit/src/Concurrency.rs");
+//RS     let source = fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+//RS     let marker = "\n#[cfg(test)]\nmod tests {";
+//RS     let (production, _) = source.split_once(marker).unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{path:?} lost its cfg(test) boundary; the panic-site check would scan the wrong scope"
+//RS         )
+//RS     });
+//RS     let offenders: Vec<String> = production
+//RS         .lines()
+//RS         .enumerate()
+//RS         .filter_map(|(index, line)| {
+//RS             let trimmed = line.trim_start();
+//RS             if trimmed.starts_with("//") {
+//RS                 return None;
+//RS             }
+//RS             (line.contains("panic!(") || line.contains(".expect(") || line.contains(".unwrap("))
+//RS                 .then(|| format!("Concurrency.rs:{}: {}", index + 1, line.trim()))
+//RS         })
+//RS         .collect();
+//RS     assert!(
+//RS         offenders.is_empty(),
+//RS         "a Concurrency host body gained a bare panic site below a JIT frame; \
+//RS          route the outcome through `wait_status`, `contain_seam_unwind`, or \
+//RS          the generated `host_seam` boundary:\n{}",
+//RS         offenders.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn the_host_fns_macro_still_generates_the_boundary() {
+//RS     let sources = jit_crate_sources();
+//RS     let registrations = symbol_registrations(&sources);
+//RS     assert_eq!(
+//RS         registrations.len(),
+//RS         1,
+//RS         "JIT host symbol registration must stay in the one `host_fns!` \
+//RS          expansion that generates the no-unwind boundary; found:\n{}",
+//RS         registrations.join("\n")
+//RS     );
+//RS     let lib = sources
+//RS         .iter()
+//RS         .find(|(label, _)| label.as_str() == "lib.rs")
+//RS         .map(|(_, text)| text.as_str())
+//RS         .expect("crates/jet-jit/src/lib.rs");
+//RS     assert!(
+//RS         lib.contains("builder.symbol($symbol, $crate::host_seam::guarded($host_fn));"),
+//RS         "`host_fns!` must register the generated guard. Registering the seam \
+//RS          address directly silently unguards every host symbol at once and no \
+//RS          other test can see it (#1997)."
+//RS     );
+//RS     assert!(
+//RS         !lib.contains("builder.symbol($symbol, $host_fn as *const u8)"),
+//RS         "the pre-#1997 unguarded registration is back in `host_fns!`"
+//RS     );
+//RS     // `host_seam.rs` is the one file check 1 exempts, because the shim it
+//RS     // generates is the boundary. That exemption is only sound while the shim
+//RS     // still runs the seam inside the conversion, so pin the body: without this,
+//RS     // dropping `guard_seam` from the shim would unguard every symbol at once and
+//RS     // leave the exemption looking like a rule.
+//RS     let seam = sources
+//RS         .iter()
+//RS         .find(|(label, _)| label.as_str() == "host_seam.rs")
+//RS         .map(|(_, text)| text.as_str())
+//RS         .expect("crates/jet-jit/src/host_seam.rs");
+//RS     assert!(
+//RS         seam.contains("guard_seam(move || zero_sized_callee::<F>()"),
+//RS         "the generated shim must still run the seam inside `guard_seam`; \
+//RS          without it every `extern \"C\"` shim is a bare unguarded seam again \
+//RS          and check 1's `host_seam.rs` exemption hides it (#1997)."
+//RS     );
+//RS     assert!(
+//RS         seam.contains("jet_scheduler_catch_foreign_boundary"),
+//RS         "`guard_seam` must keep converting through the shared Prelude boundary \
+//RS          rather than a second engine-local catch (I8/I9)."
+//RS     );
+//RS }
+//RS 
+//RS /// The checks above only earn their keep if they actually trip. Seeded text,
+//RS /// not seeded source: this proves the scanning logic without adding and
+//RS /// reverting a real hole in the crate.
+//RS #[test]
+//RS fn the_boundary_scan_trips_on_seeded_violations() {
+//RS     let seeded_seam = vec![(
+//RS         "Seeded.rs".to_string(),
+//RS         "extern \"C\" fn jet_jit_seeded(a: i64) -> i64 { a }\n".to_string(),
+//RS     )];
+//RS     assert_eq!(
+//RS         unguardable_seam_definitions(&seeded_seam).len(),
+//RS         1,
+//RS         "the seam scan must catch a hand-written `extern \"C\" fn jet_*`"
+//RS     );
+//RS 
+//RS     let seeded_macro_seam = vec![(
+//RS         "Seeded.rs".to_string(),
+//RS         "        extern \"C\" fn $name(handle: i64) -> i64 { handle }\n".to_string(),
+//RS     )];
+//RS     assert_eq!(
+//RS         unguardable_seam_definitions(&seeded_macro_seam).len(),
+//RS         1,
+//RS         "the seam scan must catch a macro-generated `extern \"C\"` seam"
+//RS     );
+//RS 
+//RS     // The name is not the rule: `Ffi.rs`'s bridge reporter was an `extern "C"`
+//RS     // body outside the `jet_*` family for as long as the family was the rule.
+//RS     let seeded_foreign_callback = vec![(
+//RS         "Seeded.rs".to_string(),
+//RS         "extern \"C\" fn jit_ffi_seeded(m: *const u8, n: usize) { report(m, n) }\n".to_string(),
+//RS     )];
+//RS     assert_eq!(
+//RS         unguardable_seam_definitions(&seeded_foreign_callback).len(),
+//RS         1,
+//RS         "the seam scan must catch an `extern \"C\"` callback handed to a foreign \
+//RS          library, whatever it is called (#1995)"
+//RS     );
+//RS 
+//RS     // A `"system"` handler and a `"C-unwind"` body are the same hole in a
+//RS     // different ABI, and both must be seen.
+//RS     let seeded_other_abis = vec![(
+//RS         "Seeded.rs".to_string(),
+//RS         concat!(
+//RS             "    unsafe extern \"system\" fn seeded_mark(kind: u32) -> i32 { 0 }\n",
+//RS             "    extern \"C-unwind\" fn seeded_unwinding(a: i64) -> i64 { a }\n",
+//RS         )
+//RS         .to_string(),
+//RS     )];
+//RS     assert_eq!(
+//RS         unguardable_seam_definitions(&seeded_other_abis).len(),
+//RS         2,
+//RS         "the seam scan must not be ABI-specific"
+//RS     );
+//RS 
+//RS     // A `fn`-pointer TYPE is not a body: this crate transmutes JIT code
+//RS     // addresses to these on every callback, and flagging them would be a wrong
+//RS     // refusal, which is equally a bug.
+//RS     let type_only = vec![(
+//RS         "Seeded.rs".to_string(),
+//RS         concat!(
+//RS             "type SpawnFn2 = extern \"C\" fn(i64, i64) -> i64;\n",
+//RS             "    let f: unsafe extern \"C\" fn(i64) -> i8 = std::mem::transmute(ptr);\n",
+//RS         )
+//RS         .to_string(),
+//RS     )];
+//RS     assert!(
+//RS         unguardable_seam_definitions(&type_only).is_empty(),
+//RS         "the seam scan must not fire on a `fn`-pointer type: {:?}",
+//RS         unguardable_seam_definitions(&type_only)
+//RS     );
+//RS 
+//RS     // The signal-handler body scan must trip on a statement that can panic.
+//RS     let grown_handler = vec![(
+//RS         SIGNAL_HANDLER_OWNER.to_string(),
+//RS         concat!(
+//RS             "    extern \"C\" fn jet_interrupt_mark(_: i32) {\n",
+//RS             "        eprintln!(\"interrupt\");\n",
+//RS             "        JET_INTERRUPT_PENDING.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n",
+//RS             "    }\n",
+//RS         )
+//RS         .to_string(),
+//RS     )];
+//RS     let (_, number, _, _) = extern_fn_definitions(&grown_handler)
+//RS         .into_iter()
+//RS         .find(|(_, _, name, _)| name == SIGNAL_HANDLER)
+//RS         .expect("the seeded handler");
+//RS     assert!(
+//RS         definition_body(&grown_handler[0].1, number)
+//RS             .iter()
+//RS             .any(|statement| !SIGNAL_HANDLER_STATEMENTS.contains(&statement.as_str())),
+//RS         "the handler body scan must catch a statement that can panic"
+//RS     );
+//RS 
+//RS     let seeded_escape = vec![(
+//RS         "Seeded.rs".to_string(),
+//RS         "    let ptr = jet_jit_seeded as usize as i64;\n".to_string(),
+//RS     )];
+//RS     assert_eq!(
+//RS         host_address_escapes(&seeded_escape).len(),
+//RS         1,
+//RS         "the escape scan must catch a raw host address handed to generated code"
+//RS     );
+//RS 
+//RS     // ... and must not fire on the guarded form, or on the JIT-code pointers
+//RS     // the hosts legitimately transmute in the other direction.
+//RS     let allowed = vec![(
+//RS         "Seeded.rs".to_string(),
+//RS         concat!(
+//RS             "    let a = crate::host_seam::guarded_addr(jet_jit_seeded) as i64;\n",
+//RS             "    let b = cb.fn_ptr as usize as *const u8;\n",
+//RS             "    let c = table[idx] as *const u8;\n",
+//RS         )
+//RS         .to_string(),
+//RS     )];
+//RS     assert!(
+//RS         host_address_escapes(&allowed).is_empty(),
+//RS         "the escape scan must not fire on the guarded form or on host->JIT \
+//RS          pointer reads: {:?}",
+//RS         host_address_escapes(&allowed)
+//RS     );
+//RS 
+//RS     let seeded_comment = vec![(
+//RS         "Seeded.rs".to_string(),
+//RS         "//! an `extern \"C\" fn jet_jit_example` in prose is documentation\n".to_string(),
+//RS     )];
+//RS     assert!(
+//RS         unguardable_seam_definitions(&seeded_comment).is_empty(),
+//RS         "the seam scan must ignore prose that names the banned form"
+//RS     );
+//RS }
+//RS 
+//RS /// The marker list is now load-bearing twice over: this suite asserts one
+//RS /// cancelled task never aborts, and `corpus_gate_refuse_abort` asserts no stem
+//RS /// in the example corpus may be *classified* as an abort. So prove the list
+//RS /// recognises every abort family by its real text, and — the half that matters
+//RS /// more, because this list can fail a whole corpus — prove it stays quiet on an
+//RS /// ordinary Jet report.
+//RS #[test]
+//RS fn the_abort_markers_name_every_abort_and_no_report() {
+//RS     for stderr in [
+//RS         "fatal runtime error: failed to initiate panic, error 5, aborting\n",
+//RS         "thread caused non-unwinding panic. aborting.\n",
+//RS         "panicked at library/core/src/panicking.rs: panic in a function that \
+//RS          cannot unwind\n",
+//RS         "panicked at library/core/src/panicking.rs:233:5:\npanic in a destructor \
+//RS          during cleanup\n",
+//RS         "thread 'main' has overflowed its stack\nfatal runtime error: stack \
+//RS          overflow\n",
+//RS         "   2: core::panicking::panic_fmt\n",
+//RS     ] {
+//RS         assert!(
+//RS             common::abort_marker(stderr).is_some(),
+//RS             "an abort went unrecognised, so it could be filed as an outcome \
+//RS              instead of failing: {stderr:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     // Every shape a real Jet stop takes, including the words `panic` and
+//RS     // `runtime`: a marker that fired here would refuse the whole example corpus
+//RS     // over correct output, which is the more expensive direction to get wrong.
+//RS     for stderr in [
+//RS         "",
+//RS         "Stop [E3001]: `panic: expected the answer, got none`\n",
+//RS         "Error: file not found\n Trail [E3002] (2 hops via ?, origin first):\n  \
+//RS          1. load (app.jet:7) — reading config\n  2. run (app.jet:12)\n",
+//RS         "Error [E3003]: deadline exceeded while waiting in task join\n",
+//RS         "Runtime fault [E3010]: the list has 2 items\n",
+//RS         "panic: can't view 1 items from 2 to 2 (inclusive)\n",
+//RS     ] {
+//RS         assert_eq!(
+//RS             common::abort_marker(stderr),
+//RS             None,
+//RS             "a Jet report was read as an abort: {stderr:?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn jet_run(args: &[&str], cache: &Path) -> std::process::Output {
+//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(args)
+//RS         .env("NO_COLOR", "1")
+//RS         .env("JET_RUN_CACHE_DIR", cache)
+//RS         .current_dir(repo_root())
+//RS         .output()
+//RS         .expect("run the jet driver")
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn terminating_signal(status: &std::process::ExitStatus) -> Option<i32> {
+//RS     use std::os::unix::process::ExitStatusExt;
+//RS     status.signal()
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn terminating_signal(_status: &std::process::ExitStatus) -> Option<i32> {
+//RS     None
+//RS }
+//RS 
+//RS /// #1995 criterion 4. A cancelled task unwinds at its next wait point
+//RS /// (`Prelude/Scheduler.rs::jet_task_deliver_cancel`), and under default
+//RS /// `jet run` that wait point can sit inside `jet_deopt_call`, i.e. below a
+//RS /// Cranelift frame. The outcome must be an exit code and a report, never a
+//RS /// signal — on every tier, and with the same observable result on each, because
+//RS /// a silent deopt otherwise hands back the right answer from the wrong tier.
+//RS ///
+//RS /// The program is the shipped `task_controls` example rather than an invented
+//RS /// one, so the expected bytes are the existing golden: it pauses, resumes and
+//RS /// cancels a task handle, and `task.any` cancels the losing sleeper — a cancel
+//RS /// delivered at a real wait point.
+//RS #[test]
+//RS fn a_cancelled_task_reaches_an_exit_code_on_every_tier_never_a_signal() {
+//RS     let example = repo_root().join("Examples/features/concurrency/task_controls.jet");
+//RS     let golden = repo_root().join("Examples/features/expected/concurrency/task_controls.out");
+//RS     let expected = fs::read_to_string(&golden).expect("task_controls golden");
+//RS     let shown = example.to_string_lossy().into_owned();
+//RS 
+//RS     let cache_root = std::env::temp_dir().join(format!("jet_no_unwind_{}", std::process::id()));
+//RS     let mut observed: Vec<(&str, String, i32)> = Vec::new();
+//RS 
+//RS     for (tier, args) in [
+//RS         ("default jet run", vec!["run", shown.as_str()]),
+//RS         (
+//RS             "forced interpreter",
+//RS             vec!["run", "--interpret", shown.as_str()],
+//RS         ),
+//RS     ] {
+//RS         let cache = cache_root.join(tier.replace(' ', "_"));
+//RS         fs::create_dir_all(&cache).expect("cache dir");
+//RS         let output = jet_run(&args, &cache);
+//RS         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+//RS         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+//RS 
+//RS         assert!(
+//RS             terminating_signal(&output.status).is_none(),
+//RS             "{tier}: a cancelled task killed the process with signal {:?} \
+//RS              instead of producing a report. An abort is never an outcome \
+//RS              (#1995/#1997, Docs/spec/architecture.md R13).\nstdout:\n{stdout}\nstderr:\n{stderr}",
+//RS             terminating_signal(&output.status)
+//RS         );
+//RS         for marker in ABORT_MARKERS {
+//RS             assert!(
+//RS                 !stderr.contains(marker),
+//RS                 "{tier}: stderr carries the abort marker `{marker}`, so a \
+//RS                  control transfer escaped a host boundary instead of being \
+//RS                  converted.\nstderr:\n{stderr}"
+//RS             );
+//RS         }
+//RS         let code = output
+//RS             .status
+//RS             .code()
+//RS             .expect("a non-signalled process always has a code");
+//RS         assert_eq!(
+//RS             code, 0,
+//RS             "{tier}: task_controls must complete.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+//RS         );
+//RS         assert_eq!(
+//RS             stdout, expected,
+//RS             "{tier}: stdout drifted from the shipped golden"
+//RS         );
+//RS         observed.push((tier, stdout, code));
+//RS     }
+//RS 
+//RS     let (first_tier, first_stdout, first_code) = &observed[0];
+//RS     for (tier, stdout, code) in &observed[1..] {
+//RS         assert_eq!(
+//RS             stdout, first_stdout,
+//RS             "{tier} disagreed with {first_tier} on stdout"
+//RS         );
+//RS         assert_eq!(
+//RS             code, first_code,
+//RS             "{tier} disagreed with {first_tier} on the exit code"
+//RS         );
+//RS     }
+//RS 
+//RS     let _ = fs::remove_dir_all(&cache_root);
+//RS }
+//RS 
+//RS /// #1997 criterion 8. The cancelled child is deliberately named-deopted by
+//RS /// `core.text.casefold` in an interpolated return; its wait point therefore
+//RS /// runs inside `jet_deopt_call` below a Cranelift frame. Cancellation must
+//RS /// become the ordinary child status consumed by `join` and render as a Jet
+//RS /// diagnostic with exit 70. A signal or an abort marker proves the boundary
+//RS /// was bypassed.
+//RS #[test]
+//RS fn cancelled_interpreter_wait_inside_deopt_is_a_diagnostic_not_a_signal() {
+//RS     let root =
+//RS         std::env::temp_dir().join(format!("jet_no_unwind_deopt_cancel_{}", std::process::id()));
+//RS     fs::create_dir_all(&root).expect("deopt cancellation fixture dir");
+//RS     let file = root.join("cancel_deopt.jet");
+//RS     fs::write(
+//RS         &file,
+//RS         r#"use core.text as text
+//RS use core.time as time
+//RS 
+//RS fn slow_deopt() -> String {
+//RS     time.sleep(200ms)
+//RS     return "{text.casefold("Straße")}"
+//RS }
+//RS 
+//RS fn run() {
+//RS     task_handle :: task slow_deopt()
+//RS     time.sleep(20ms)
+//RS     task_handle.cancel()
+//RS     print(task_handle.join() ?? panic("cancelled deopt task"))
+//RS }
+//RS "#,
+//RS     )
+//RS     .expect("write deopt cancellation fixture");
+//RS 
+//RS     let shown = file.to_string_lossy().into_owned();
+//RS     let cache = root.join("cache");
+//RS     fs::create_dir_all(&cache).expect("deopt cancellation cache dir");
+//RS     let output = jet_run(&["run", "--trace-tiers", shown.as_str()], &cache);
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS 
+//RS     assert!(
+//RS         terminating_signal(&output.status).is_none(),
+//RS         "deopt cancellation terminated with signal {:?}; stdout:\n{stdout}\nstderr:\n{stderr}",
+//RS         terminating_signal(&output.status)
+//RS     );
+//RS     for marker in ABORT_MARKERS {
+//RS         assert!(
+//RS             !stderr.contains(marker),
+//RS             "deopt cancellation escaped its boundary through `{marker}`:\n{stderr}"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(70),
+//RS         "cancelled deopt child must reach the runtime diagnostic rail:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("Stop [E3001]") && stderr.contains("task cancelled"),
+//RS         "missing cancellation runtime diagnostic:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("slow_deopt") && stderr.contains("tier0 interp"),
+//RS         "fixture did not prove the cancelled wait ran through named deopt:\n{stderr}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&root);
+//RS }
+// END-PORT-PENDING 1103 tests/jit_no_unwind_boundary.rs:1-947
+

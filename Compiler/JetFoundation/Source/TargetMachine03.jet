@@ -1,0 +1,437 @@
+use jet_foundation.RingLayer.[classify_prelude_closure, RuntimeLayer]
+use jet_foundation.Report.[StatusFields, StatusValue]
+use jet_foundation.Facts.[TargetDossier]
+use jet_foundation.SHA256.[sha256_hex]
+use jet_foundation.JSON.quote as json_str
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3588
+fn validate_memory_regions(regions: [MemoryRegion], errors: &[TargetMachineError]) Never! {
+    names := [String:Bool]{}
+    loop region in regions {
+        if region.size.bytes == U64{0} -> &errors.push(.EmptyMemoryRegion{ name: ~region.name })
+        if region.end() == None -> &errors.push(.MemoryAddressOverflow{ name: ~region.name })
+        if names.contains_key(region.name) -> &errors.push(.DuplicateMemoryRegion{ name: ~region.name })
+        else -> &names.insert(~region.name, true)
+    }
+    sorted :: regions.iter().collect()
+    &sorted.sort_by_key(region -> region.origin)
+    loop index in 1..<sorted.len() {
+        first :: sorted[index - 1]
+        second :: sorted[index]
+        if first.end() == .Val(end) && end > second.origin -> &errors.push(.OverlappingMemoryRegions{first: ~first.name, second: ~second.name})
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3624
+fn validate_linker(linker: LinkerInput, no_os: Bool, errors: &[TargetMachineError]) Never! {
+    if linker == {
+        .Unspecified -> { if no_os -> &errors.push(.MissingLinkerInput) }
+        .File(path, sha256) -> {
+            if path.trim().len() == 0 -> &errors.push(.LinkerFileMissingPath)
+            if !sha256.starts_with("sha256:") || sha256.len() <= "sha256:".len() -> &errors.push(.LinkerFileMissingHash{path: ~path})
+        }
+        else -> {}
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3639
+fn validate_allocator(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
+    if machine.allocator == {
+        .Unspecified -> { if machine.no_os -> &errors.push(.MissingAllocatorPolicy) }
+        .HostedDefault | .Counting(_) -> { if machine.no_os -> &errors.push(.HostedAllocatorRequiresOs) }
+        .Provider(provider) -> validate_provider_contract(.Allocator, provider, &errors)
+        .Fixed(region, size) -> {
+            found :: machine.memory.iter().find(row -> row.name == region)
+            if found == {
+                .Val(row) -> {
+                    if row.kind != .Ram -> &errors.push(.AllocatorRegionNotRam{region: ~region})
+                    else if size.bytes > row.size.bytes -> &errors.push(.AllocatorRegionTooSmall{region: ~region, requested_bytes: size.bytes, available_bytes: row.size.bytes})
+                }
+                .None -> &errors.push(.AllocatorRegionUnknown{region: ~region})
+            }
+        }
+        else -> {}
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3672
+fn validate_panic(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
+    if machine.no_os && (machine.panic == .Unspecified || machine.panic == .HostedDefault) -> &errors.push(.MissingPanicPolicy)
+    if machine.panic.provider() == .Val(provider) -> validate_provider_contract(.PanicReport, provider, &errors)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3686
+fn validate_startup_facts(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
+    if !machine.no_os || machine.startup != .Generated(_) -> return
+    if machine.startup_entry.trim().len() == 0 || machine.startup_vectors.trim().len() == 0 || machine.startup_placement.trim().len() == 0 -> push_unique(&errors, .MissingTargetCapability{capability: TargetCapability.Startup.as_str()})
+    if !machine.startup_abi.is_valid() && machine.startup.provider() == .Val(provider) -> push_unique(&errors, .InvalidProviderContract{capability: TargetCapability.Startup.as_str(), provider: ~provider.provider, sha256: ~provider.sha256})
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3715
+fn validate_ram_budget(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
+    if !machine.no_os -> return
+    loop kind in [MemoryKind]{.Flash, .Ram} {
+        if !machine.memory.iter().any(region -> region.kind == kind) -> &errors.push(.MissingMemoryKind{kind: kind})
+    }
+    ram_bytes := U64{0}
+    loop region in machine.memory { if region.kind == .Ram -> ram_bytes = ram_bytes.wrapping_add(region.size.bytes) }
+    used_bytes :: usage.stack_bytes.saturating_add(usage.static_ram_bytes).saturating_add(machine.allocator.fixed_size())
+    if ram_bytes > U64{0} && used_bytes > ram_bytes -> &errors.push(.RamOverflow{used_bytes: used_bytes, ram_bytes: ram_bytes})
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3746
+fn validate_core_usage(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
+    if usage.heap_required && !machine.provides_capability(.Allocator) -> &errors.push(.HeapRequiresAllocator)
+    available :: machine.max_runtime_layer()
+    loop (api, required) in classify_prelude_closure(usage.core_apis.iter()) {
+        if required > available -> &errors.push(.CoreApiUnavailable{api: ^api, required: required, available: available})
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3766
+fn validate_target_capabilities(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
+    validate_simple_capability(machine, .Mmio, machine.mmio.is_declared(), machine.mmio == .HostedDefault, machine.mmio.provider(), &errors)
+    validate_simple_capability(machine, .TimeWall, machine.wall_clock.is_declared(), machine.wall_clock == .HostedDefault, machine.wall_clock.provider(), &errors)
+    validate_simple_capability(machine, .TimeMonotonic, machine.monotonic_clock.is_declared(), machine.monotonic_clock == .HostedDefault, machine.monotonic_clock.provider(), &errors)
+    validate_simple_capability(machine, .TimeZoneData, machine.zone_data.is_declared(), machine.zone_data == .HostedDefault, machine.zone_data.provider(), &errors)
+    validate_simple_capability(machine, .TimeSleep, machine.sleep.is_declared(), machine.sleep == .HostedDefault, machine.sleep.provider(), &errors)
+    validate_simple_capability(machine, .Entropy, machine.entropy.is_declared(), machine.entropy == .HostedDefault, machine.entropy.provider(), &errors)
+    validate_simple_capability(machine, .Scheduler, machine.scheduler.is_declared(), machine.scheduler == .HostedDefault, machine.scheduler.provider(), &errors)
+    validate_simple_capability(machine, .Startup, machine.startup.is_declared(), machine.startup == .HostedDefault, machine.startup.provider(), &errors)
+    if machine.byte_sink == {
+        .HostedDefault -> {
+            if machine.no_os {
+                loop capability in [TargetCapability]{.IoRead, .IoWrite, .PanicReport} -> push_unique(&errors, .HostedCapabilityRequiresOs{capability: capability.as_str()})
+            }
+        }
+        .Unspecified -> {
+            if machine.no_os {
+                loop capability in [TargetCapability]{.IoRead, .IoWrite, .PanicReport} -> push_unique(&errors, .MissingTargetCapability{capability: capability.as_str()})
+            }
+        }
+        .Provider(read, write, report) -> {
+            if read == .Val(provider) -> validate_provider_contract(.IoRead, provider, &errors)
+            if write == .Val(provider) -> validate_provider_contract(.IoWrite, provider, &errors)
+            if report == .Val(provider) -> validate_provider_contract(.PanicReport, provider, &errors)
+        }
+        else -> {}
+    }
+    if machine.panic == .Report(_) && !machine.byte_sink.provides_report(machine.environment_identity() == "hosted") -> push_unique(&errors, .MissingTargetCapability{capability: TargetCapability.PanicReport.as_str()})
+    if usage.mmio.len() != 0 && !machine.provides_capability(.Mmio) -> push_unique(&errors, .MissingTargetCapability{capability: TargetCapability.Mmio.as_str()})
+    loop capability in usage.required_capabilities {
+        if !machine.provides_capability(capability) -> push_unique(&errors, .MissingTargetCapability{capability: capability.as_str()})
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3915
+pub fn target_dossier_json(dossier: TargetDossier, target_triple: String) -> String Never! {
+    artifact_key :: sha256_hex(dossier.cache_bytes(target_triple))
+    machine :: if dossier.machine == {
+        .Val(machine) -> "{{\"name\":{json_str(machine.name)},\"triple\":{json_str(machine.triple)},\"provider_identity\":{json_str(machine.provider_identity())},\"linker_identity\":{json_str(machine.linker_identity())}}}"
+        .None -> "null"
+    }
+    "{{\"machine\":{machine},\"layer\":{json_str(dossier.layer.as_str())},\"provider_identity\":{json_str(dossier.provider_identity)},\"closure_identity\":{json_str(dossier.closure_identity)},\"linker_identity\":{json_str(dossier.linker_identity)},\"tier_identity\":{json_str(dossier.tier_identity)},\"compiler_identity\":{json_str(dossier.compiler_identity)},\"environment_identity\":{json_str(dossier.environment_identity)},\"dependency_identity\":{json_str(dossier.dependency_identity)},\"artifact_key\":{json_str(artifact_key)}}}"
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3944
+trait StatusFieldsOptional {
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:3945
+    fn with_optional(^self, name: String, value: StatusValue?) -> StatusFields Never!
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:3946
+    fn with_optional_u64(^self, name: String, value: U64?) -> StatusFields Never!
+}
+impl StatusFields.StatusFieldsOptional {
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:3950
+    fn with_optional(^self, name: String, value: StatusValue?) -> StatusFields Never! { ^self.with(name, value ?? StatusValue.Null) }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:3954
+    fn with_optional_u64(^self, name: String, value: U64?) -> StatusFields Never! { ^self.with(name, value.map(word -> StatusValue.Integer{value: Int.from_u64(word)}) ?? StatusValue.Null) }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3959
+pub fn target_dossier_value(dossier: TargetDossier, target_triple: String) -> StatusValue Never! {
+    artifact_key :: sha256_hex(dossier.cache_bytes(target_triple))
+    machine :: dossier.machine.map(machine -> target_machine_identity_value(machine)) ?? StatusValue.Null
+    StatusValue.object(StatusFields.new()
+        .with("machine", machine)
+        .with("layer", .String{value: dossier.layer.as_str()})
+        .with("provider_identity", .String{value: ~dossier.provider_identity})
+        .with("closure_identity", .String{value: ~dossier.closure_identity})
+        .with("linker_identity", .String{value: ~dossier.linker_identity})
+        .with("tier_identity", .String{value: ~dossier.tier_identity})
+        .with("compiler_identity", .String{value: ~dossier.compiler_identity})
+        .with("environment_identity", .String{value: ~dossier.environment_identity})
+        .with("dependency_identity", .String{value: ~dossier.dependency_identity})
+        .with("artifact_key", .String{value: ^artifact_key}))
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3981
+fn target_machine_identity_value(machine: TargetMachine) -> StatusValue Never! {
+    StatusValue.object(StatusFields.new().with("name", .String{value: ~machine.name}).with("triple", .String{value: ~machine.triple}).with("provider_identity", .String{value: machine.provider_identity()}).with("linker_identity", .String{value: machine.linker_identity()}))
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:3991
+fn linker_value(linker: LinkerInput) -> StatusValue Never! {
+    if linker == {
+        .HostedDefault -> StatusValue.object(StatusFields.new().with("kind", .String{value: "hosted-default"}))
+        .Unspecified -> StatusValue.object(StatusFields.new().with("kind", .String{value: "unspecified"}))
+        .Generated -> StatusValue.object(StatusFields.new().with("kind", .String{value: "generated"}))
+        .File(path, sha256) -> StatusValue.object(StatusFields.new().with("kind", .String{value: "file"}).with("path", .String{value: ~path}).with("sha256", .String{value: ~sha256}))
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4011
+fn provider_contract_value(provider: ProviderContract) -> StatusValue Never! {
+    StatusValue.object(StatusFields.new()
+        .with("provider", .String{value: ~provider.provider})
+        .with("sha256", .String{value: ~provider.sha256})
+        .with("provenance", .String{value: ~provider.provenance})
+        .with("abi", StatusValue.object(StatusFields.new().with("calling_convention", .String{value: ~provider.abi.calling_convention}).with("version", .String{value: ~provider.abi.version})))
+        .with("limits", StatusValue.object(StatusFields.new().with_optional_u64("max_request_bytes", provider.limits.max_request_bytes).with_optional_u64("max_response_bytes", provider.limits.max_response_bytes).with_optional_u64("max_calls", provider.limits.max_calls))))
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4037
+fn allocator_value(policy: AllocatorPolicy) -> StatusValue Never! {
+    if policy == {
+        .HostedDefault -> StatusValue.object(StatusFields.new().with("kind", .String{value: "hosted-default"}))
+        .Unspecified -> StatusValue.object(StatusFields.new().with("kind", .String{value: "unspecified"}))
+        .None -> StatusValue.object(StatusFields.new().with("kind", .String{value: "none"}))
+        .Provider(provider) -> StatusValue.object(StatusFields.new().with("kind", .String{value: "provider"}).with("contract", provider_contract_value(provider)))
+        .Fixed(region, size) -> StatusValue.object(StatusFields.new().with("kind", .String{value: "fixed"}).with("region", .String{value: ~region}).with("size_bytes", .Integer{value: Int.from_u64(size.bytes)}))
+        .Counting(cap) -> StatusValue.object(StatusFields.new().with("kind", .String{value: "counting"}).with("wraps", .String{value: "system"}).with_optional_u64("cap_bytes", cap.map(size -> size.bytes)))
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4066
+fn panic_value(policy: PanicPolicy) -> StatusValue Never! {
+    if policy == {
+        .HostedDefault -> StatusValue.object(StatusFields.new().with("kind", .String{value: "hosted-default"}))
+        .Unspecified -> StatusValue.object(StatusFields.new().with("kind", .String{value: "unspecified"}))
+        .Abort -> StatusValue.object(StatusFields.new().with("kind", .String{value: "abort"}))
+        .Report(provider) -> StatusValue.object(StatusFields.new().with("kind", .String{value: "report"}).with("contract", provider_contract_value(provider)))
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4083
+fn clock_value(policy: ClockPolicy) -> StatusValue Never! {
+    if policy == {
+        .HostedDefault -> policy_value_with_provider("hosted-default", None)
+        .Unspecified -> policy_value_with_provider("unspecified", None)
+        .None -> policy_value_with_provider("none", None)
+        .Provider(provider) -> policy_value_with_provider("provider", Val(provider))
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4098
+fn entropy_value(policy: EntropyPolicy) -> StatusValue Never! {
+    if policy == {
+        .HostedDefault -> policy_value_with_provider("hosted-default", None)
+        .Unspecified -> policy_value_with_provider("unspecified", None)
+        .None -> policy_value_with_provider("none", None)
+        .Provider(provider) -> policy_value_with_provider("provider", Val(provider))
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4113
+fn scheduler_value(policy: SchedulerPolicy) -> StatusValue Never! {
+    if policy == {
+        .HostedDefault -> policy_value_with_provider("hosted-default", None)
+        .Unspecified -> policy_value_with_provider("unspecified", None)
+        .None -> policy_value_with_provider("none", None)
+        .Cooperative(provider) -> policy_value_with_provider("cooperative", Val(provider))
+        .InterruptDriven(provider) -> policy_value_with_provider("interrupt-driven", Val(provider))
+        .BoardRuntime(provider) -> policy_value_with_provider("board-runtime", Val(provider))
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4125
+fn mmio_policy_value(policy: MmioPolicy) -> StatusValue Never! {
+    if policy == {
+        .HostedDefault -> policy_value_with_provider("hosted-default", None)
+        .Unspecified -> policy_value_with_provider("unspecified", None)
+        .None -> policy_value_with_provider("none", None)
+        .Provider(provider) -> policy_value_with_provider("provider", Val(provider))
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4140
+fn policy_value_with_provider(kind: String, provider: ProviderContract?) -> StatusValue Never! {
+    fields :: StatusFields.new().with("kind", .String{value: ~kind})
+    if provider == { .Val(provider) -> StatusValue.object(^fields.with("contract", provider_contract_value(provider))) .None -> StatusValue.object(^fields) }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4148
+fn byte_sink_value(policy: ByteSinkPolicy) -> StatusValue Never! {
+    if policy == {
+        .HostedDefault -> StatusValue.object(StatusFields.new().with("kind", .String{value: "hosted-default"}))
+        .Unspecified -> StatusValue.object(StatusFields.new().with("kind", .String{value: "unspecified"}))
+        .None -> StatusValue.object(StatusFields.new().with("kind", .String{value: "none"}))
+        .Provider(read, write, report) -> StatusValue.object(StatusFields.new().with("kind", .String{value: "provider"}).with_optional("read", read.map(provider -> provider_contract_value(provider))).with_optional("write", write.map(provider -> provider_contract_value(provider))).with_optional("report", report.map(provider -> provider_contract_value(provider))))
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4171
+fn startup_value(policy: StartupPolicy) -> StatusValue Never! {
+    if policy == {
+        .HostedDefault -> policy_value_with_provider("hosted-default", None)
+        .Unspecified -> policy_value_with_provider("unspecified", None)
+        .Generated(provider) -> policy_value_with_provider("generated", Val(provider))
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4180
+fn provider_facts_value(machine: TargetMachine) -> StatusValue Never! {
+    values := [StatusValue]{}
+    loop capability in TargetCapability.ALL {
+        fact :: if capability == {
+            .Allocator -> allocator_value(machine.allocator)
+            .Atomic64 -> StatusValue.object(StatusFields.new().with("triple", .String{value: ~machine.triple}).with("supported", .Bool{value: machine.supports_atomic_word()}))
+            .Mmio -> mmio_policy_value(machine.mmio)
+            .Hardware -> hardware_value(machine.hardware)
+            .TimeWall -> clock_value(machine.wall_clock)
+            .TimeMonotonic -> clock_value(machine.monotonic_clock)
+            .TimeZoneData -> clock_value(machine.zone_data)
+            .TimeSleep -> clock_value(machine.sleep)
+            .Entropy -> entropy_value(machine.entropy)
+            .Scheduler -> scheduler_value(machine.scheduler)
+            .IoRead -> byte_sink_component_value(machine.byte_sink, .IoRead)
+            .IoWrite -> byte_sink_component_value(machine.byte_sink, .IoWrite)
+            .PanicReport -> StatusValue.object(StatusFields.new().with("panic", panic_value(machine.panic)).with("sink", byte_sink_component_value(machine.byte_sink, .PanicReport)))
+            .Startup -> StatusValue.object(StatusFields.new().with("policy", startup_value(machine.startup)).with("entry", .String{value: ~machine.startup_entry}).with("vectors", .String{value: ~machine.startup_vectors}).with("abi", StatusValue.object(StatusFields.new().with("calling_convention", .String{value: ~machine.startup_abi.calling_convention}).with("version", .String{value: ~machine.startup_abi.version}))).with("placement", .String{value: ~machine.startup_placement}))
+        }
+        &values.push(StatusValue.object(StatusFields.new().with("capability", .String{value: capability.as_str()}).with("fact", ^fact)))
+    }
+    StatusValue.array(^values)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4231
+fn byte_sink_component_value(policy: ByteSinkPolicy, capability: TargetCapability) -> StatusValue Never! {
+    contract :: if policy == {
+        .Provider(read, write, report) -> if capability == { .IoRead -> read.map(provider -> provider_contract_value(provider)) .IoWrite -> write.map(provider -> provider_contract_value(provider)) .PanicReport -> report.map(provider -> provider_contract_value(provider)) else -> None }
+        else -> None
+    }
+    kind :: if policy == { .HostedDefault -> "hosted-default" .Unspecified -> "unspecified" .None -> "none" .Provider(_, _, _) -> "provider" }
+    fields :: StatusFields.new().with("kind", .String{value: kind})
+    if policy == .Provider(_, _, _) -> StatusValue.object(^fields.with_optional("contract", contract)) else -> StatusValue.object(^fields)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4261
+fn memory_value(regions: [MemoryRegion]) -> StatusValue Never! {
+    values :: loop region in regions -> StatusValue.object(StatusFields.new().with("name", .String{value: ~region.name}).with("origin", .Integer{value: Int.from_u64(region.origin)}).with("size_bytes", .Integer{value: Int.from_u64(region.size.bytes)}).with("kind", .String{value: region.kind.as_str()}).with("access", .String{value: region.access.as_str()}))
+    StatusValue.array(^values)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4274
+fn hardware_value(hardware: TargetHardwareFacts) -> StatusValue Never! {
+    svd :: hardware.svd.map(svd -> StatusValue.object(StatusFields.new().with("source", .String{value: ~svd.source}).with("sha256", .String{value: ~svd.sha256}))) ?? StatusValue.Null
+    register_blocks :: loop block in hardware.register_blocks {
+        registers :: loop register in block.registers -> StatusValue.object(StatusFields.new().with("name", .String{value: ~register.name}).with("offset", .Integer{value: Int.from_u64(register.offset)}).with("width", .String{value: register.width.as_str()}).with("access", .String{value: register.access.as_str()}).with("volatile", .Bool{value: register.volatile}))
+        StatusValue.object(StatusFields.new().with("name", .String{value: ~block.name}).with("base", .Integer{value: Int.from_u64(block.base)}).with("size_bytes", .Integer{value: Int.from_u64(block.size.bytes)}).with("registers", StatusValue.array(^registers)))
+    }
+    interrupts :: loop interrupt in hardware.interrupts {
+        effects :: loop effect in interrupt.forbidden_effects -> StatusValue.String{value: effect.as_str()}
+        StatusValue.object(StatusFields.new().with("name", .String{value: ~interrupt.name}).with("vector", .Integer{value: Int.from_u64(U64.from_u16(interrupt.vector))}).with("forbidden_effects", StatusValue.array(^effects)).with("bounded", .Bool{value: interrupt.bounded}))
+    }
+    dma_channels :: loop channel in hardware.dma_channels -> StatusValue.object(StatusFields.new().with("name", .String{value: ~channel.name}).with("channel", .Integer{value: Int.from_u64(U64.from_u16(channel.channel))}).with("transfer_width", .String{value: channel.transfer_width.as_str()}).with("ownership", .String{value: channel.ownership.as_str()}).with_optional_u64("max_transfer_bytes", channel.max_transfer_bytes))
+    StatusValue.object(StatusFields.new().with("svd", svd).with("register_blocks", StatusValue.array(^register_blocks)).with("interrupts", StatusValue.array(^interrupts)).with("dma_channels", StatusValue.array(^dma_channels)))
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4338
+fn programmers_value(programmers: [TargetProgrammerFacts]) -> StatusValue Never! {
+    values :: loop programmer in programmers {
+        config :: loop value in programmer.config -> StatusValue.String{value: ~value}
+        StatusValue.object(StatusFields.new().with("adapter", .String{value: programmer.adapter.as_str()}).with_optional("chip", programmer.chip.map(value -> StatusValue.String{value: ~value})).with("config", StatusValue.array(^config)).with_optional("cpu", programmer.cpu.map(value -> StatusValue.String{value: ~value})).with("executable", .String{value: ~programmer.executable}).with_optional("interface", programmer.interface.map(value -> StatusValue.String{value: ~value})).with_optional("machine", programmer.machine.map(value -> StatusValue.String{value: ~value})).with("reset", .Bool{value: programmer.reset}).with_optional_u64("speed_khz", programmer.speed_khz.map(value -> U64.from_u32(value))))
+    }
+    StatusValue.array(^values)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4364
+fn unavailable_core_value(machine: TargetMachine, usage: TargetMachineUse) -> StatusValue Never! {
+    available :: machine.max_runtime_layer()
+    values := [StatusValue]{}
+    loop (api, required) in classify_prelude_closure(usage.core_apis.iter()) { if required > available -> &values.push(.String{value: ^api}) }
+    StatusValue.array(^values)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4374
+fn mmio_value(accesses: [MmioAccess]) -> StatusValue Never! {
+    values :: loop access in accesses -> StatusValue.object(StatusFields.new().with("address", .Integer{value: Int.from_u64(access.address)}).with("size_bytes", .Integer{value: Int.from_u64(access.size.bytes)}).with_optional("unsafe_reason", access.unsafe_gate.map(gate -> StatusValue.String{value: ~gate.reason})))
+    StatusValue.array(^values)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4392
+fn append_identity_frame(bytes: &[U8], label: String, value: String) Never! {
+    label_bytes :: label.bytes()
+    label_length :: U64{label_bytes.len()}
+    loop index in 0..<8 -> &bytes.push(U8.from_u64((label_length >> (8 * index)) & U64{255}) ?? panic("masked label length byte"))
+    loop byte in label_bytes -> &bytes.push(byte)
+    value_bytes :: value.bytes()
+    value_length :: U64{value_bytes.len()}
+    loop index in 0..<8 -> &bytes.push(U8.from_u64((value_length >> (8 * index)) & U64{255}) ?? panic("masked value length byte"))
+    loop byte in value_bytes -> &bytes.push(byte)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4399
+fn wasm_provider(name: String, implementation: String) -> ProviderContract Never! {
+    source := [U8]{}
+    append_identity_frame(&source, "provider", name)
+    append_identity_frame(&source, "implementation", implementation)
+    ProviderContract.from_source(name, source)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4406
+fn builtin_provider(name: String, source: String) -> ProviderContract Never! {
+    digest :: sha256_hex(source.bytes())
+    ProviderContract.from_source(name, source.bytes()).with_provenance("builtin:{name};sha256:{digest}")
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4412
+fn validate_simple_capability(machine: TargetMachine, capability: TargetCapability, declared: Bool, hosted_default: Bool, provider: ProviderContract?, errors: &[TargetMachineError]) Never! {
+    if machine.no_os {
+        if hosted_default -> push_unique(&errors, .HostedCapabilityRequiresOs{capability: capability.as_str()})
+        else if !declared -> push_unique(&errors, .MissingTargetCapability{capability: capability.as_str()})
+    }
+    if provider == .Val(provider) -> validate_provider_contract(capability, provider, &errors)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4442
+fn validate_provider_contract(capability: TargetCapability, provider: ProviderContract, errors: &[TargetMachineError]) Never! {
+    if !provider.is_valid() -> push_unique(&errors, .InvalidProviderContract{capability: capability.as_str(), provider: ~provider.provider, sha256: ~provider.sha256})
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4459
+fn push_unique(errors: &[TargetMachineError], error: ^TargetMachineError) Never! { if !errors.contains(error) -> &errors.push(^error) }
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4464
+fn validate_mmio(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
+    loop access in usage.mmio {
+        if !machine.memory.iter().any(region -> region.kind == .Mmio && region.contains(access.address, access.size)) -> &errors.push(.MmioOutsideRegion{address: access.address, size_bytes: access.size.bytes})
+        if access.unsafe_gate == {
+            .Val(gate) -> { if gate.reason.trim().len() == 0 -> &errors.push(.MmioEmptyUnsafeReason{address: access.address}) }
+            .None -> &errors.push(.MmioMissingUnsafeGate{address: access.address})
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4494
+fn format_length(bytes: U64) -> String Never! {
+    if bytes % U64{1024 * 1024} == U64{0} -> "{bytes / U64{1024 * 1024}}M"
+    else if bytes % U64{1024} == U64{0} -> "{bytes / U64{1024}}K"
+    else -> "{bytes}"
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4504
+fn execution_json(machine: TargetMachine) -> String Never! {
+    if machine.no_os -> "{{\"aot\":true,\"dev\":false,\"jit\":false}}" else -> "{{\"aot\":true,\"dev\":true,\"jit\":true}}"
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4512
+fn memory_json(regions: [MemoryRegion]) -> String Never! {
+    out := "["
+    loop (index, region) in regions {
+        if index > 0 -> &out.push(',')
+        &out.push_str("{{\"name\":{json_str(region.name)},\"origin\":{region.origin},\"size_bytes\":{region.size.bytes},\"kind\":\"{region.kind.as_str()}\",\"access\":\"{region.access.as_str()}\"}}")
+    }
+    &out.push(']')
+    ^out
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4532
+fn unavailable_core_json(machine: TargetMachine, usage: TargetMachineUse) -> String Never! {
+    available :: machine.max_runtime_layer()
+    unavailable := [String]{}
+    loop (api, required) in classify_prelude_closure(usage.core_apis.iter()) { if required > available -> &unavailable.push(^api) }
+    string_array_json(unavailable)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4542
+fn mmio_json(accesses: [MmioAccess]) -> String Never! {
+    out := "["
+    loop (index, access) in accesses {
+        if index > 0 -> &out.push(',')
+        reason :: access.unsafe_gate.map(gate -> json_str(gate.reason)) ?? "null"
+        &out.push_str("{{\"address\":{access.address},\"size_bytes\":{access.size.bytes},\"unsafe_reason\":{reason}}}")
+    }
+    &out.push(']')
+    ^out
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4563
+fn string_array_json(values: [String]) -> String Never! {
+    out := "["
+    loop (index, value) in values {
+        if index > 0 -> &out.push(',')
+        &out.push_str(json_str(value))
+    }
+    &out.push(']')
+    ^out
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4575
+fn push_field(out: &String, key: String, value: String, first: Bool) Never! {
+    if !first -> &out.push(',')
+    &out.push_str("\"{key}\":{value}")
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4582
+fn optional_contract_json(contract: ProviderContract?) -> String Never! { contract.map(provider -> provider.audit_json()) ?? "null" }
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4587
+fn optional_u64_json(value: U64?) -> String Never! { value.map(value -> "{value}") ?? "null" }
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4591
+// Original cfg(test) module and all twelve tests are in Tests/TargetMachine03.jet.

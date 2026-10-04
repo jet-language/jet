@@ -1,0 +1,155 @@
+// PORT-PENDING 0601 crates-jet-comptime-src-comptime-syncjetstd-module-group: crates/jet-comptime/src/Comptime/SyncJetStd.rs:1-151
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS // D-DBPOLICY1=A: the one closed row-policy language. `Top/Sync.rs` reaches it
+//RS // through `jet_std::jet_db_policy_compile` on this tier exactly as it does in
+//RS // the AOT Prelude, so comptime cannot accept a policy AOT rejects (I9).
+//RS use jet_foundation::Shape::ShapeProjection;
+//RS include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/RowPolicy.rs");
+//RS include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
+//RS include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+//RS // The carrier enum lives in Foundation (`jet_foundation::DataTree`); the
+//RS // included `DataTree.rs` is the runtime extension over it, exactly as the AOT
+//RS // Prelude splice and the Cranelift host arrange it.
+//RS pub use jet_foundation::DataTree::DataTree;
+//RS // The one FieldError projection (I9): `DataTree.rs`'s `JetShow`/`JetDisplay`
+//RS // impls call it, exactly as the AOT Prelude and the Cranelift host do.
+//RS include!("../../../jet-codegen/src/Prelude/Core/FieldError.rs");
+//RS include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+//RS jet_datatree_decode_helpers!();
+//RS 
+//RS // I9 marshalling adapters for the exact-`Int` carrier (D-INTBIG1). AOT packs
+//RS // out-of-range values into a std-only arena and the JIT parks them in its
+//RS // runtime heap; this comptime mirror of the `jet_std` wire surface keeps `Int`
+//RS // in a plain `i64`, so the packed carrier collapses to identity here. Text
+//RS // still goes through the same arbitrary-precision parse the AOT carrier uses,
+//RS // and only genuinely unrepresentable values are refused.
+//RS pub fn jet_int_from_i64(value: i64) -> i64 {
+//RS     value
+//RS }
+//RS 
+//RS pub fn jet_int_from_str(value: &str) -> Result<i64, String> {
+//RS     crate::Numeric::CtBigInt::from_str(value)?
+//RS         .try_i64()
+//RS         .ok_or_else(|| format!("exact Int `{value}` is out of range for this tier"))
+//RS }
+//RS 
+//RS pub fn jet_int_to_i64(value: i64) -> Option<i64> {
+//RS     Some(value)
+//RS }
+//RS 
+//RS pub fn jet_int_to_string(value: i64) -> String {
+//RS     value.to_string()
+//RS }
+//RS 
+//RS pub fn jet_int_to_f64(value: i64) -> f64 {
+//RS     jet_int_to_string(value).parse::<f64>().unwrap_or_else(|_| {
+//RS         if jet_int_to_string(value).starts_with('-') {
+//RS             f64::NEG_INFINITY
+//RS         } else {
+//RS             f64::INFINITY
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn quote_json(s: &str) -> String {
+//RS     let mut out = String::from("\"");
+//RS     for c in s.chars() {
+//RS         match c {
+//RS             '"' => out.push_str("\\\""),
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '\u{0008}' => out.push_str("\\b"),
+//RS             '\u{000c}' => out.push_str("\\f"),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '\r' => out.push_str("\\r"),
+//RS             '\t' => out.push_str("\\t"),
+//RS             c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+//RS             _ => out.push(c),
+//RS         }
+//RS     }
+//RS     out.push('"');
+//RS     out
+//RS }
+//RS 
+//RS pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> String {
+//RS     match tree {
+//RS         DataTree::Null => "null".to_string(),
+//RS         DataTree::Bool(value) => value.to_string(),
+//RS         DataTree::Int(value) => jet_int_to_string(*value),
+//RS         DataTree::Float(value) => {
+//RS             assert!(value.is_finite(), "JSON cannot encode a non-finite Float");
+//RS             format!("{:?}", value)
+//RS         }
+//RS         DataTree::Number(text) => text.clone(),
+//RS         DataTree::TypedText(text) => quote_json(text),
+//RS         DataTree::Text(value) => quote_json(value),
+//RS         DataTree::Bytes(values) => format!(
+//RS             "[{}]",
+//RS             values
+//RS                 .iter()
+//RS                 .map(u8::to_string)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         ),
+//RS         DataTree::Array(values) => {
+//RS             if values.is_empty() {
+//RS                 return "[]".to_string();
+//RS             }
+//RS             if !pretty {
+//RS                 return format!(
+//RS                     "[{}]",
+//RS                     values
+//RS                         .iter()
+//RS                         .map(|value| render_datatree_json(value, false, depth))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(",")
+//RS                 );
+//RS             }
+//RS             let pad = "  ".repeat(depth + 1);
+//RS             let end = "  ".repeat(depth);
+//RS             let parts = values
+//RS                 .iter()
+//RS                 .map(|value| format!("{}{}", pad, render_datatree_json(value, true, depth + 1)))
+//RS                 .collect::<Vec<_>>();
+//RS             format!("[\n{}\n{}]", parts.join(",\n"), end)
+//RS         }
+//RS         DataTree::Object(fields) => {
+//RS             if fields.is_empty() {
+//RS                 return "{}".to_string();
+//RS             }
+//RS             if !pretty {
+//RS                 return format!(
+//RS                     "{{{}}}",
+//RS                     fields
+//RS                         .iter()
+//RS                         .map(|(key, value)| {
+//RS                             format!(
+//RS                                 "{}:{}",
+//RS                                 quote_json(key),
+//RS                                 render_datatree_json(value, false, depth)
+//RS                             )
+//RS                         })
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(",")
+//RS                 );
+//RS             }
+//RS             let pad = "  ".repeat(depth + 1);
+//RS             let end = "  ".repeat(depth);
+//RS             let parts = fields
+//RS                 .iter()
+//RS                 .map(|(key, value)| {
+//RS                     format!(
+//RS                         "{}{}: {}",
+//RS                         pad,
+//RS                         quote_json(key),
+//RS                         render_datatree_json(value, true, depth + 1)
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             format!("{{\n{}\n{}}}", parts.join(",\n"), end)
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0601 crates/jet-comptime/src/Comptime/SyncJetStd.rs:1-151
+

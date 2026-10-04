@@ -1,0 +1,45 @@
+// MIROptimization.rs:4642-4711,7960-7982. Canonical MIR payload/identity are
+// the sole MIR owner ABI, not MIRProgramIdentity or an optimizer digest.
+// CanonicalPass/MIR.jet owns their actual structured source closure. #4494
+// remains the native journal activation gate, not a missing MIR serializer.
+pub trait MIRCanonicalPassOperation {
+    fn apply(self, program: &MIRProgram) Never!
+}
+// The operation is moved once and invoked exactly once on either branch. No
+// snapshots, premises, TLS borrow or derived hash on the disabled early route.
+pub fn mir_run_canonical_pass<F: MIRCanonicalPassOperation>(operation_id: String, source: String, program: &MIRProgram, apply: ^F) Never! {
+    if !canonical_pass_enabled() {
+        apply.apply(&program)
+        return
+    }
+    before_payload :: mir_canonical_payload(program)
+    before_identity :: mir_canonical_identity(program)
+    apply.apply(&program)
+    canonical_pass_record("optimization", operation_id, source, "mir", ^before_payload, ^before_identity, "mir", mir_canonical_payload(program), mir_canonical_identity(program), "preserve")
+}
+// Exact published ABI already consumed by Identity.jet:182.
+pub fn mir_record_canonical_check(operation_id: String, source: String, program: MIRProgram) Never! {
+    if !canonical_pass_enabled() -> return
+    canonical_pass_record("optimization", operation_id, source, "mir", mir_canonical_payload(program), mir_canonical_identity(program), "mir", mir_canonical_payload(program), mir_canonical_identity(program), "checked")
+}
+pub fn mir_record_canonical_transition(operation_id: String, source: String, before_payload: ^String?, before_identity: ^String?, after: MIRProgram) Never! {
+    payload :: before_payload ?? return
+    identity :: before_identity ?? return
+    canonical_pass_record("optimization", operation_id, source, "mir", ^payload, ^identity, "mir", mir_canonical_payload(after), mir_canonical_identity(after), "preserve")
+}
+pub fn mir_canonical_mark_pass(program: &MIRProgram, pass: MIROptimizationPassID) Never! {
+    // Original calls enabled independently for the two before snapshots.
+    before :: if canonical_pass_enabled() -> Val(mir_canonical_payload(program)) else -> None
+    before_identity :: if canonical_pass_enabled() -> Val(mir_canonical_identity(program)) else -> None
+    loop index in 0..<program.functions.len() {
+        count :: program.functions[index].optimization.pass_ids.len()
+        if count == 0 || program.functions[index].optimization.pass_ids[count - 1] != pass {
+            &program.functions[index].optimization.pass_ids.push(pass)
+        }
+    }
+    if before == .Val(payload) {
+        if before_identity == .Val(identity) {
+            canonical_pass_record("optimization", "mir.pass-order-facts", "crates/jet-foundation/src/MIR.rs", "mir", ^payload, ^identity, "mir", mir_canonical_payload(program), mir_canonical_identity(program), "checked")
+        }
+    }
+}

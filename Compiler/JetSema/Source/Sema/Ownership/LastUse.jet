@@ -22,7 +22,7 @@ fn sema_ownership_last_use_expr(expr: Expr, name: String) -> Bool {
                 if sema_ownership_last_use_expr(argument.expr, name) -> return true
             }
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _, _, _) -> {
             if sema_ownership_last_use_expr(receiver, name) -> return true
             loop argument in args {
                 if sema_ownership_last_use_expr(argument.expr, name) -> return true

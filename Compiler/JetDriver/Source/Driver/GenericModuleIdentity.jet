@@ -1,0 +1,234 @@
+// Rust Bundle/GenericModules/Identity.rs package_identity/canonical_lock_source.
+// Read only retained authorized bytes; there is no second filesystem reader.
+use jet_foundation.[record_blob_key]
+use core.text as unicode
+use core.files.runtime.kernel_path_components as genmod_os_path
+
+// Rust Identity::quoted_field: the first boundary-qualified, quoted field.
+fn jet_driver_genmod_quoted_field(text: String, field: String) -> String? Never! {
+    bytes :: text.bytes()
+    needle :: "{field}:".bytes()
+    if bytes.len() < needle.len() -> return None
+    loop offset in 0..<(bytes.len() - needle.len() + 1) {
+        matches := true
+        loop index in 0..<needle.len() {
+            if bytes[offset + index] != needle[index] {
+                matches = false
+                break
+            }
+        }
+        if !matches -> next
+        if offset != 0 {
+            previous := offset - 1
+            loop previous > 0 && (Int.from_u8(bytes[previous]) & 192) == 128 -> previous -= 1
+            scalar := String.from_bytes(bytes[previous..<offset]) ?? "" // #4303
+            if scalar == "_" || unicode.is_alphabetic(scalar) || unicode.is_numeric(scalar) -> next
+        }
+        rest := (String.from_bytes(bytes[(offset + needle.len())..<bytes.len()]) ?? "").trim_start().to_string() // #4303
+        tail :: rest.bytes()
+        if tail.len() == 0 || tail[0] != U8{34} -> next
+        end := 1
+        loop end < tail.len() && tail[end] != U8{34} -> end += 1
+        return Val(String.from_bytes(tail[1..<end]) ?? "")
+    }
+    None
+}
+
+fn jet_driver_genmod_frame(out: &[U8], text: String) Never! {
+    bytes :: text.bytes()
+    loop index in 0..<8 -> &out.push(U8{(bytes.len() >> ((7 - index) * 8)) & 255})
+    loop byte in bytes -> &out.push(byte)
+}
+fn jet_driver_genmod_semver(version: String) -> String Never! {
+    build_parts :: version.split("+").to_list()
+    core_pre :: build_parts[0]
+    pre_parts :: core_pre.split("-").to_list()
+    parts :: pre_parts[0].split(".").to_list()
+    if parts.len() != 3 -> return version.trim().to_string()
+    canonical := [String]{}
+    maximum :: "18446744073709551615".bytes()
+    loop part in parts {
+        bytes :: part.bytes()
+        if bytes.len() == 0 || (bytes.len() > 1 && bytes[0] == U8{48}) -> return version.trim().to_string()
+        loop byte in bytes {
+            if byte < U8{48} || byte > U8{57} -> return version.trim().to_string()
+        }
+        overflow := bytes.len() > 20
+        if bytes.len() == 20 {
+            loop index in 0..<20 {
+                if bytes[index] > maximum[index] {
+                    overflow = true
+                    break
+                }
+                if bytes[index] < maximum[index] -> break
+            }
+        }
+        &canonical.push(if overflow -> "0" else -> part)
+    }
+    suffix_start :: pre_parts[0].bytes().len()
+    bytes :: version.bytes()
+    suffix := String.from_bytes(bytes[suffix_start..<bytes.len()]) ?? "" // #4303
+    "{canonical.join(".")}{suffix}"
+}
+fn jet_driver_genmod_unquote(text: String) -> String Never! {
+    value := text.trim().to_string() // #4303
+    bytes :: value.bytes()
+    start := 0
+    end := bytes.len()
+    loop start < end && bytes[start] == U8{34} -> start += 1
+    loop end > start && bytes[end - 1] == U8{34} -> end -= 1
+    String.from_bytes(bytes[start..<end]) ?? ""
+}
+fn jet_driver_genmod_lock_value(line: String, field: String) -> String? Never! {
+    parts :: line.split("=").to_list()
+    if parts.len() < 2 -> return None
+    key := parts[0].trim().to_string() // #4303
+    if key != field -> return None
+    bytes :: line.bytes()
+    value := String.from_bytes(bytes[(parts[0].bytes().len() + 1)..<bytes.len()]) ?? "" // #4303
+    Val(jet_driver_genmod_unquote(value))
+}
+fn jet_driver_genmod_inline_value(table: String, field: String) -> String? Never! {
+    text := table.trim().to_string() // #4303
+    bytes :: text.bytes()
+    start := 0
+    end := bytes.len()
+    loop start < end && bytes[start] == U8{123} -> start += 1
+    loop end > start && bytes[end - 1] == U8{125} -> end -= 1
+    body := String.from_bytes(bytes[start..<end]) ?? "" // #4303
+    loop part in body.split(",") {
+        value :: jet_driver_genmod_lock_value(part.to_string(), field)
+        if value != None -> return value
+    }
+    None
+}
+fn jet_driver_genmod_clean_git(url: String) -> String Never! {
+    before_query :: url.split("?").to_list()[0]
+    clean :: before_query.split("#").to_list()[0]
+    pieces :: clean.split("://").to_list()
+    if pieces.len() < 2 -> return clean
+    scheme_bytes := [U8]{}
+    loop byte in pieces[0].bytes() {
+        code :: Int.from_u8(byte)
+        &scheme_bytes.push(U8{if code >= 65 && code <= 90 -> code + 32 else -> code})
+    }
+    scheme := String.from_bytes(scheme_bytes) ?? "" // #4303
+    authority_path :: pieces[1..].join("://")
+    path :: authority_path.split("/").to_list()
+    authority :: path[0].split("@").to_list()
+    host :: authority[authority.len() - 1]
+    rest :: path[1..].join("/")
+    if rest == "" -> "{scheme}://{host}" else -> "{scheme}://{host}/{rest}"
+}
+fn jet_driver_genmod_relative(path: String) -> String Never! {
+    parts := [String]{}
+    loop component in path.replace("\\", "/").split("/") {
+        if component != "" && component != "." -> &parts.push(component.to_string())
+    }
+    parts.join("/")
+}
+struct JetDriverGenmodLockRecord {
+    name: String
+    version: String
+    source: String
+    locked: String
+    content: String
+}
+struct JetDriverGenmodLockTable {
+    records: [JetDriverGenmodLockRecord]
+    first: [String:Int]
+}
+fn jet_driver_genmod_lock_table(raw: String) -> JetDriverGenmodLockTable Never! {
+    records := [JetDriverGenmodLockRecord]{}
+    current := false
+    record := JetDriverGenmodLockRecord{name: "", version: "", source: "", locked: "", content: ""}
+    loop original in raw.split("\n") {
+        line := original.trim().to_string() // #4303
+        if line == "" || line.starts_with("#") -> next
+        if line.starts_with("[") {
+            if current -> &records.push(record)
+            current = line == "[[package]]"
+            record = JetDriverGenmodLockRecord{name: "", version: "", source: "", locked: "", content: ""}
+            next
+        }
+        if !current -> next
+        if jet_driver_genmod_lock_value(line, "name") == .Val(value) -> record.name = value
+        else if jet_driver_genmod_lock_value(line, "version") == .Val(value) -> record.version = value
+        else if jet_driver_genmod_lock_value(line, "source") == .Val(value) -> record.source = value
+        else if jet_driver_genmod_lock_value(line, "locked") == .Val(value) -> record.locked = value
+        else if jet_driver_genmod_lock_value(line, "content-hash") == .Val(value) -> record.content = value
+    }
+    if current -> &records.push(record)
+    first := [String:Int]{}
+    loop (index, entry) in records {
+        if first.get(entry.name) == None -> first[entry.name] = index
+    }
+    JetDriverGenmodLockTable{records: records, first: first}
+}
+fn jet_driver_genmod_lock_source(table: JetDriverGenmodLockTable, wanted: String, package_name: String, fallback: String, platform: genmod_os_path.PathPlatform) -> String Never! {
+    index := table.first.get(wanted)
+    if table.first.get(package_name) == .Val(named) {
+        if index == None || named < (index ?? named) -> index = Val(named)
+    }
+    if index == .Val(selected) {
+        entry :: table.records[selected]
+        if jet_driver_genmod_inline_value(entry.source, "path") == .Val(path) {
+            if path.starts_with("registry:") -> return "{path}@{jet_driver_genmod_semver(entry.version)}#{entry.content}"
+            canonical :: if genmod_os_path.is_absolute(genmod_os_path.from_text(path, platform)) -> wanted else -> jet_driver_genmod_relative(path)
+            content :: if entry.content != "" -> entry.content else -> jet_driver_genmod_inline_value(entry.locked, "tree-hash") ?? "unlocked"
+            return "path:{canonical}#{content}"
+        }
+        if jet_driver_genmod_inline_value(entry.source, "git") == .Val(url) {
+            rev :: jet_driver_genmod_inline_value(entry.locked, "rev") ?? ""
+            tree :: jet_driver_genmod_inline_value(entry.locked, "tree-hash") ?? entry.content
+            return "git:{jet_driver_genmod_clean_git(url)}@{rev}#{tree}"
+        }
+    }
+    "path:{fallback}"
+}
+fn jet_driver_genmod_package_identity(root: JetDriverAuthorizedSourceRoot, project_root: genmod_os_path.OSPath, dependency_name: String?, lock: JetDriverGenmodLockTable) -> String Never! {
+    canonical := String?{None}
+    payload := String?{None}
+    loop file in root.files {
+        relative := genmod_os_path.to_str(file.relative_path) ?? "" // #4303
+        if relative == "package.jet" -> canonical = Val(file.source)
+        if relative == "pkg.jet" -> payload = Val(file.source)
+    }
+    manifest :: canonical ?? payload ?? ""
+    name :: jet_driver_genmod_quoted_field(manifest, "name") ?? dependency_name ?? "workspace"
+    version :: jet_driver_genmod_semver(jet_driver_genmod_quoted_field(manifest, "version") ?? "0.0.0+workspace")
+    root_text := genmod_os_path.to_str(root.canonical_path) ?? dependency_name ?? name // #4303
+    project := genmod_os_path.to_str(project_root) ?? "" // #4303
+    relative := if root_text.starts_with("{project}/") -> root_text.slice(project.bytes().len() + 1, root_text.bytes().len()).to_string() else -> dependency_name ?? name // #4303
+    source :: if dependency_name == .Val(wanted) -> jet_driver_genmod_lock_source(lock, wanted, name, relative, root.canonical_path.platform) else -> "workspace"
+    framed := [U8]{}
+    loop field in [String]{"jet.package.identity.v2", name, version, source} -> jet_driver_genmod_frame(&framed, field)
+    record_blob_key(framed.view(0..<framed.len()))
+}
+fn jet_driver_genmod_retained_lock(sources: JetDriverAuthorizedSourceSnapshot, project_root: genmod_os_path.OSPath) -> JetDriverGenmodLockTable Never! {
+    loop root in sources.roots {
+        if !genmod_os_path.equals(root.canonical_path, project_root) -> next
+        loop file in root.files {
+            relative := genmod_os_path.to_str(file.relative_path) ?? "" // #4303
+            if relative == ".jet/lock" -> return jet_driver_genmod_lock_table(file.source)
+        }
+    }
+    jet_driver_genmod_lock_table("")
+}
+pub fn jet_driver_generic_module_package_identity(sources: JetDriverAuthorizedSourceSnapshot, root_index: Int, dependency_name: String?) -> String Never! {
+    project :: jet_driver_source_view_entry_root_path(jet_driver_authorized_source_view(sources, None))
+    jet_driver_genmod_package_identity(sources.roots[root_index], project, dependency_name, jet_driver_genmod_retained_lock(sources, project))
+}
+fn jet_driver_genmod_package_identities(load: JetDriverLoadResult, sources: JetDriverAuthorizedSourceSnapshot) -> [String:String] Never! {
+    identities := [String:String]{}
+    dependencies := [Int:String]{}
+    loop parent in load.packages {
+        loop dependency in parent.dependencies -> dependencies[dependency.target_root_index] = dependency.name
+    }
+    lock :: jet_driver_genmod_retained_lock(sources, load.project_root)
+    loop package in load.packages {
+        dependency_name :: if genmod_os_path.equals(package.root_path, load.project_root) -> None else -> dependencies.get(package.root_index)
+        identities[package.identity] = jet_driver_genmod_package_identity(sources.roots[package.root_index], load.project_root, dependency_name, lock)
+    }
+    identities
+}

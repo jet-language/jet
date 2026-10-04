@@ -1,0 +1,154 @@
+// MIROptimization.rs:1145-1219. Validate each node once, in native child order.
+fn mir_native_verify_type(ty: MIRType, span: Span, function: MIRFunctionID) MIRLegalityError! {
+    if span.start > span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function), span: span})
+    if !mir_type_has_valid_layout(ty) -> return Err(MIRLegalityError.InvalidLayout{function: function, span: span})
+    mir_native_verify_type_kind(ty.kind, span, function)
+    return
+}
+fn mir_native_verify_type_kind(kind: MIRTypeKind, span: Span, function: MIRFunctionID) MIRLegalityError! {
+    if kind == {
+        .IntN(_, bits) -> {
+            // Preserve the native u8 carrier domain before its semantic width rule.
+            mir_image_schema_check_unsigned(bits, U64{255}, "u8") ?? return Err(MIRLegalityError.InvalidType{function: function, span: span})
+            if bits == 0 || bits > 64 -> return Err(MIRLegalityError.InvalidType{function: function, span: span})
+        }
+        .InlineRange(base, lo, hi) -> {
+            if lo > hi -> return Err(MIRLegalityError.InvalidType{function: function, span: span})
+            mir_native_verify_type(base, span, function)
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Quantity(inner, _) -> mir_native_verify_type(inner, span, function)
+        .Map(key, value) -> { mir_native_verify_type(key, span, function); mir_native_verify_type(value, span, function) }
+        .Result(ok, err) -> { mir_native_verify_type(ok, span, function); mir_native_verify_type(err, span, function) }
+        .Fn(signature) -> {
+            loop param in signature.params -> mir_native_verify_type(param, span, function)
+            if signature.ret == .Val(ret) -> mir_native_verify_type(ret, span, function)
+        }
+        .SendFn(params, ret, _) -> {
+            loop param in params -> mir_native_verify_type(param, span, function)
+            if ret == .Val(ret) -> mir_native_verify_type(ret, span, function)
+        }
+        .Apply(_, args) | .Union(args) -> { loop arg in args -> mir_native_verify_type(arg, span, function) }
+        .Tuple(fields) -> { loop field in fields -> mir_native_verify_type(field.ty, span, function) }
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .Float32 | .Measure(_) -> {}
+    }
+    return
+}
+
+// MIROptimization.rs:945-962,1070-1143.
+fn mir_native_valid_shape_field_names(names: MIRShapeFieldNames) -> Bool Never! {
+    // Keep native order, including mandatory text/args/env and optional codecs.
+    fields :: [String?]{Val(names.text), names.json, names.cbor, names.csv, names.toml, names.yaml, names.xml, Val(names.args), Val(names.env), names.db, names.layout}
+    loop field in fields {
+        if field == .Val(name) {
+            if name.trim().len() == 0 || name.contains(TEXT_NUL) -> return false
+        }
+    }
+    true
+}
+fn mir_native_verify_type_def(ty: MIRTypeDef, functions: [U64:Bool], fields: [U64:Bool]) MIRLegalityError! {
+    zero :: MIRFunctionID{value: U64{0}}
+    if ty.kind == {
+        .Struct(rows, methods) -> {
+            loop field in rows {
+                if fields.get(field.id.value) == None || field.name.len() == 0 || !mir_native_valid_shape_field_names(field.shape_names) -> return Err(mir_native_invalid_row("type {ty.key} field MirFieldId({field.id.value})", field.span))
+                mir_native_verify_type(field.ty, ty.span, zero)
+            }
+            loop method in methods {
+                if functions.get(method.value) == None -> return Err(mir_native_invalid_row("type {ty.key} method", ty.span))
+            }
+        }
+        .Enum(variants, methods) -> {
+            loop variant in variants {
+                if variant.name.len() == 0 || variant.wire_name.len() == 0 -> return Err(mir_native_invalid_row("type {ty.key} variant", variant.span))
+                if variant.payload == {
+                    .Unit -> {}
+                    .Single(value) -> mir_native_verify_type(value, variant.span, zero)
+                    .Named(rows) -> {
+                        loop field in rows {
+                            if fields.get(field.id.value) == None || field.name.len() == 0 || !mir_native_valid_shape_field_names(field.shape_names) -> return Err(mir_native_invalid_row("type {ty.key} field MirFieldId({field.id.value})", field.span))
+                            mir_native_verify_type(field.ty, field.span, zero)
+                        }
+                    }
+                }
+            }
+            loop method in methods {
+                if functions.get(method.value) == None -> return Err(mir_native_invalid_row("type {ty.key} method", ty.span))
+            }
+        }
+        .Distinct(base, _) | .Alias(base) -> mir_native_verify_type(base, ty.span, zero)
+        .UnitFamily(_) -> {}
+    }
+    return
+}
+
+// MIROptimization.rs:1511-1551,2544-2553.
+fn mir_native_verify_failure_carrier(carrier: MIRFailureCarrier, function: MIRFunction) MIRLegalityError! {
+    mir_native_verify_failure_carrier_at(carrier, function.id, function.span)
+    return
+}
+fn mir_native_verify_failure_carrier_at(carrier: MIRFailureCarrier, function: MIRFunctionID, span: Span) MIRLegalityError! {
+    if carrier == {
+        .Infallible -> {}
+        .Result(success, error) -> { mir_native_verify_type(success, span, function); mir_native_verify_type(error, span, function) }
+        .Optional(value) | .Diverges(value) -> mir_native_verify_type(value, span, function)
+    }
+    return
+}
+fn mir_native_verify_ownership(ownership: MIROwnership, span: Span, function: MIRFunctionID, value: MIRValueID) MIRLegalityError! {
+    valid :: if ownership.mode == {
+        .Copy -> ownership.drop == .NoDrop && !ownership.moved
+        .Owned | .Move -> ownership.drop == .Value || ownership.drop == .ForeignHandle
+        .Shared -> ownership.drop == .Shared
+        .ReadBorrow -> ownership.drop == .NoDrop || ownership.drop == .View
+        .WriteBorrow -> ownership.drop == .View
+    }
+    if !valid -> return Err(MIRLegalityError.InvalidOwnership{function: function, value: value, span: span})
+    return
+}
+fn mir_native_verify_call_fallibility(fallibility: MIRCallFallibility, function: MIRFunctionID, span: Span) MIRLegalityError! {
+    if fallibility == .Failure(carrier) -> mir_native_verify_failure_carrier_at(carrier, function, span)
+    return
+}
+
+// MIROptimization.rs:310-350. Map keys intentionally are not validated here.
+fn mir_native_verify_constant(constant: MIRConstant, span: Span) MIRLegalityError! {
+    if constant == {
+        .Int(_, _, _) | .Float(_, _, _) | .Bool(_) | .Char(_) | .String(_) | .Bytes(_) | .Unit | .BigInt(_) -> {}
+        .List(values) -> { loop value in values -> mir_native_verify_constant(value, span) }
+        .Map(entries) -> { loop entry in entries -> mir_native_verify_constant(entry.value, span) }
+        .Struct(_, fields) -> { loop field in fields -> mir_native_verify_constant(field.value, span) }
+        .Enum(_, _, args) -> { loop arg in args -> mir_native_verify_constant(arg.value, span) }
+        .Present(value) -> mir_native_verify_constant(value, span)
+        .Failed(report) -> {
+            if report == {
+                .Clean(ty) -> mir_native_verify_type(ty, span, MIRFunctionID{value: U64{0}})
+                .Told(value) -> mir_native_verify_constant(value, span)
+            }
+        }
+    }
+    return
+}
+
+// MIROptimization.rs:1890-1900,2005-2033.
+fn mir_native_type_is_copy(ty: MIRType) -> Bool Never! {
+    if mir_type_is_scalar(ty) || mir_type_is_char(ty) -> return true
+    if ty.kind == .Apply(name, args) -> return args.len() == 0 && (name.name == TYPE_COMPLEX || name.name == TYPE_RANGE)
+    false
+}
+fn mir_native_send_fn_signature_matches(source: MIRType, target: MIRType) -> Bool Never! {
+    if target.kind == .SendFn(target_params, target_ret, target_conventions) {
+        if source.kind == .SendFn(params, ret, conventions) {
+            if conventions != target_conventions || params.len() != target_params.len() -> return false
+            loop index in 0..<params.len() {
+                if !mir_type_same_checked_type(params[index], target_params[index]) -> return false
+            }
+            if ret == {
+                .None -> target_ret == None
+                .Val(ret) -> {
+                    target_ret :: target_ret ?? return false
+                    mir_type_same_checked_type(ret, target_ret)
+                }
+            }
+        } else -> false
+    } else -> false
+}

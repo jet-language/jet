@@ -1,0 +1,200 @@
+use std.fmt.[Write, Error]
+
+// Rust: crates/jet-foundation/src/MIR.rs:6687
+// MirFrameIdentity is MIRFrameIdentity in MIR/NativeCarriers.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:6688
+pub fn mir_frame_identity_write_canonical<W: Write>(identity: MIRFrameIdentity, out: &W) Error! {
+    // GATE #4494: Rust fmt::Write error-preserving writer transport.
+    &out.write_str("mir-frame-identity:{identity.schema_version};")
+    &out.write_str(mir_execution_identity_canonical_text(identity.execution))
+    &out.write_str(";function:{identity.function.value};")
+    if identity.block == {
+        .Val(block) -> &out.write_str("block:{block.value};")
+        .None -> &out.write_str("block:none;")
+    }
+    &out.write_str("sequence:{identity.sequence};")
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:6699
+// canonical_text -> MIR/NativeCarriers.jet::mir_frame_identity_canonical_text.
+// The existing body writes the same prefix, execution, optional block and sequence.
+
+// Rust: crates/jet-foundation/src/MIR.rs:6708
+// MirForeign -> MIR/MIR.jet::MIRForeign (module -> module_name).
+// Rust: crates/jet-foundation/src/MIR.rs:6739
+// MirInstruction -> MIR/MIR.jet::MIRInstruction.
+// Rust: crates/jet-foundation/src/MIR.rs:6749
+// MirBasicBlock -> MIR/MIR.jet::MIRBasicBlock.
+// Rust: crates/jet-foundation/src/MIR.rs:6758
+// MirSwitchArm -> MIR/MIR.jet::MIRSwitchArm.
+// Rust: crates/jet-foundation/src/MIR.rs:6765
+// MirTerminator -> MIR/MIR.jet::MIRTerminator (all eight variants retained).
+// Rust: crates/jet-foundation/src/MIR.rs:6780
+// targets -> MIR/MIR.jet::mir_terminator_targets; Switch retains arm order and
+// appends otherwise, Yield retains resume then cancel, Return/Unreachable are empty.
+// Rust: crates/jet-foundation/src/MIR.rs:6795
+// value_uses -> MIR/MIR.jet::mir_terminator_value_uses; Switch retains subject
+// before arm conditions; Return/Break emit only a present value.
+// Rust: crates/jet-foundation/src/MIR.rs:6811
+// MirDropEdge -> MIR/MIR.jet::MIRDropEdge.
+// Rust: crates/jet-foundation/src/MIR.rs:6819
+// MirDropAction -> MIR/MIR.jet::MIRDropAction.
+// Rust: crates/jet-foundation/src/MIR.rs:6826
+// MirFunction -> MIR/MIR.jet::MIRFunction; module -> module_name,
+// values -> MIRValueFact rows, memo_bound's outer presence -> memo_unbounded.
+
+// Rust: crates/jet-foundation/src/MIR.rs:6874
+// This is a production lookup, not a #[test] despite its Rust name.
+pub fn test_scope_member(function: MIRFunction, scope: MIRScopeID) -> MIRTestScopeMember? Never! {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .ScopeEnter(candidate, test_member) -> {
+                    if candidate == scope && test_member != None -> return test_member
+                }
+                else -> {}
+            }
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:6888
+pub fn is_decode_for(function: MIRFunction, target: MIRType) -> Bool Never! {
+    if function.form == {
+        .TraitMethod(owner, _, self_access, .Val(.Decode)) -> {
+            if self_access != None || function.generic_params.len() != 0 -> return false
+            if mir_type_same_checked_type(owner, target) -> return true
+            owner_name :: function.name.strip_suffix("::decode") ?? return false
+            owner_name == mir_type_display_name(target)
+        }
+        else -> false
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:6909
+// MirCoreCall -> MIR/MIR.jet::MIRCoreCall; module -> module_name,
+// effect -> effect_kind. native_int_result is part of this canonical row.
+// Rust: crates/jet-foundation/src/MIR.rs:6936
+pub fn from_record(record: CoreCallRecord) -> MIRCoreCall Never! {
+    key :: if record.receiver_types.len() == 0 -> "{record.module_name}.{record.member}" else -> "receiver({record.receiver_types.join("|")}).{record.member}"
+    MIRCoreCall{
+        id: MIRCoreCallID{value: stable_id("core-call", key)},
+        key: ^key,
+        module_name: ~record.module_name,
+        member: ~record.member,
+        receiver_types: ~record.receiver_types,
+        arity: record.signature.arity,
+        max_arity: record.signature.max_arity,
+        borrow_mask: ~record.signature.borrow_mask,
+        fallibility: record.fallibility,
+        effect_kind: record.effect_kind,
+        effect_leaf: ~record.effect_leaf,
+        sink_class: record.sink_class,
+        pure_route: record.pure_route,
+        interpreter_route: record.interpreter_route,
+        symbol: record.symbol,
+        coverage_bits: record.coverage.bits,
+        aot_direct: record.aot_direct,
+        jit_direct: record.jit_direct,
+        jit_symbol: ~record.jit_symbol,
+        native_int_result: record.native_int_result,
+        marker: ~record.marker
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:6973
+// MirRuntimePartId -> MIR/MIR.jet::MIRRuntimePartID; semantic IDs are retained,
+// including GC/UI/FSRuntime/HTTP's canonical Jet capitalization.
+// Rust: crates/jet-foundation/src/MIR.rs:7007
+pub fn as_str(part: MIRRuntimePartID) -> String Never! {
+    if part == {
+        .GC -> "gc"
+        .Event -> "event"
+        .Realtime -> "realtime"
+        .EmbeddedHardware -> "embedded-hardware"
+        .UI -> "ui"
+        .Devtools -> "devtools"
+        .Gtk -> "gtk"
+        .Apps -> "apps"
+        .Email -> "email"
+        .Game -> "game"
+        .Files -> "files"
+        .Interrupt -> "interrupt"
+        .FSRuntime -> "fs-runtime"
+        .Process -> "process"
+        .Crypto -> "crypto"
+        .Math -> "math"
+        .Encoding -> "encoding"
+        .Data -> "data"
+        .Fmt -> "fmt"
+        .DataFmt -> "data-fmt"
+        .Compute -> "compute"
+        .HTTP -> "http"
+        .WebSocket -> "websocket"
+        .Browser -> "browser"
+        .Args -> "args"
+        .Reflect -> "reflect"
+        .AuthTokens -> "auth-tokens"
+        .AuthSession -> "auth-session"
+        .Sync -> "sync"
+        .Services -> "services"
+        .Mod -> "mod"
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:7046
+// MirNameFacts -> MIR/MIR.jet::MIRNameFacts with the canonical MIRName* rows.
+// Rust: crates/jet-foundation/src/MIR.rs:7055
+// MirPackageFacts -> MIR/MIR.jet::MIRPackageFacts with canonical checked target,
+// app and hardware facts. Runtime part iteration retains sorted-ID order.
+// Rust: crates/jet-foundation/src/MIR.rs:7086
+// MirErasureReason -> MIR/MIR.jet::MIRErasureReason.
+// Rust: crates/jet-foundation/src/MIR.rs:7094
+// MirUnreachable -> MIR/MIR.jet::MIRUnreachable.
+// Rust: crates/jet-foundation/src/MIR.rs:7101
+// MirProgram -> MIR/MIR.jet::MIRProgram; codec_migrations retains keyed plans.
+
+// Rust: crates/jet-foundation/src/MIR.rs:7139
+// canonical_payload -> CanonicalPass/MIR.jet::mir_canonical_payload.
+// Rust: crates/jet-foundation/src/MIR.rs:7154
+// canonical_identity -> CanonicalPass/MIR.jet::mir_canonical_identity.
+// Rust: crates/jet-foundation/src/MIR.rs:7177
+// canonical_function -> CanonicalPass/MIR.jet::canonical_pass_mir_function.
+// Rust: crates/jet-foundation/src/MIR.rs:7197
+// canonical_block -> CanonicalPass/MIR.jet::canonical_pass_mir_block.
+// Rust: crates/jet-foundation/src/MIR.rs:7214
+// canonical_instruction -> CanonicalPass/MIR.jet::canonical_pass_mir_instruction.
+// Rust: crates/jet-foundation/src/MIR.rs:7248
+// operation_copy_materialization -> CanonicalPass/MIR.jet::canonical_pass_mir_copy_materialization.
+// Rust: crates/jet-foundation/src/MIR.rs:7259
+// canonical_type -> CanonicalPass/MIR.jet::canonical_pass_mir_type.
+// Rust: crates/jet-foundation/src/MIR.rs:7274
+// canonical_size -> CanonicalPass/MIR.jet::canonical_pass_mir_size.
+// Rust: crates/jet-foundation/src/MIR.rs:7281
+// canonical_terminator -> CanonicalPass/MIR.jet::canonical_pass_mir_terminator.
+// Rust: crates/jet-foundation/src/MIR.rs:7294
+// operation_kind -> CanonicalPass/MIR.jet::canonical_pass_mir_operation_kind.
+// These existing renderers preserve escaping, quoted IDs, null option/dynamic
+// size encodings, span/source-line facts and the complete operation-kind match.
+
+// Rust: crates/jet-foundation/src/MIR.rs:7361
+pub fn canonical_operation_payload(operation: MIROperation) -> String Never! {
+    uses :: loop value in mir_operation_value_uses(operation) -> "\"{value.value}\""
+    copy_materialization :: canonical_pass_mir_copy_materialization(operation)
+    "{{\"representation\":\"mir\",\"operation_kind\":\"{canonical_pass_mir_operation_kind(operation)}\",\"value_uses\":[{uses.join(",")}]{copy_materialization}}}"
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:7512
+// Closing boundary of the canonical MirValidationError formatter; its complete
+// typed error transport remains in MIR/Verification, not a second declaration.
+
+// Rust: crates/jet-foundation/src/MIR.rs:9151
+// Optimization publication is owned by the canonical MIR/Verification and
+// MIR/Digest providers: mir_program_bytes, mir_program_digest,
+// optimize_mir_program, require_canonical_mir_optimization, verify_mir_legality,
+// MIRLegalityError, MIROptimizationError, MIROptimizationPolicy,
+// MIR_OPTIMIZATION_PASS_ORDER. No compatibility re-export is introduced here.
+// Rust: crates/jet-foundation/src/MIR.rs:9156
+// Generated image codec inclusion -> MIR/ImageCodec.jet and MIR/ImageGenerator*.
+

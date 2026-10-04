@@ -1,0 +1,94 @@
+// Rust Comptime::evaluate_closed_value/fold_build_facts and MirBridge request.
+// The inward seam invokes the installed canonical checked-TIR/MIR evaluator.
+// It is not an AST evaluator and never consults native process globals.
+use jet_foundation.[Expr, Func, Item, CtValue, Diagnostic, Span, MIRTargetMachine, ast_comptime_value_expr, ast_comptime_value_from_tir, expr_span]
+
+pub struct SemaClosedSources {
+    pub inputs: [SemaRegistrationModuleInput]
+    pub edges: [SemaRegistrationImportEdge]
+    pub foreign_providers: [SemaForeignProviderInput]
+}
+pub struct SemaClosedValueContext {
+    pub build_facts: SemaBuildFacts
+    pub target_machine: MIRTargetMachine
+    pub canonical_effect: SemaRegistrationModuleInput
+    pub host_hooks: Shared<SemaRegistrationHostHooks>
+    pub sources: Shared<SemaClosedSources>
+}
+pub struct SemaClosedValueRequest {
+    pub expression: Expr
+    pub functions: [Func]
+    pub globals: [String:CtValue]
+    pub input: SemaRegistrationModuleInput
+    pub context: SemaClosedValueContext
+}
+pub fn sema_evaluate_closed_value(expression: Expr, functions: [Func], globals: [String:CtValue], input: SemaRegistrationModuleInput, context: SemaClosedValueContext) -> CtValue Diagnostic! {
+    rewrite := sema_inline_rewrite_empty()
+    rewrite.build_facts = Val(context.build_facts)
+    closed :: sema_inline_rewrite_expr(&rewrite, expression)
+    evaluator :: context.host_hooks.closed_value ?? panic("MIR eval bridge not installed — install the canonical closed-value evaluator")
+    evaluator(SemaClosedValueRequest{expression: closed, functions: functions, globals: globals, input: input, context: context})
+}
+fn sema_closed_fact_expr(expression: Expr, facts: SemaBuildFacts) -> Expr? {
+    path :: sema_genmod_expr_path(expression) ?? return None
+    span :: expr_span(expression)
+    if sema_fact_build_setting_key(path) == .Val(key) {
+        setting :: facts.settings.get(key) ?? return None
+        value :: ast_comptime_value_from_tir(setting.value) ?? panic("resolved build setting must be an AST compile-time value")
+        return Val(ast_comptime_value_expr(value, span))
+    }
+    resolved :: sema_fact_build_value(path, facts) ?? return None
+    value :: ast_comptime_value_from_tir(resolved.value) ?? panic("registered build fact must be an AST compile-time value")
+    Val(ast_comptime_value_expr(value, span))
+}
+fn sema_closed_functions(items: [Item]) -> [Func] Never! {
+    functions := [Func]{}
+    positions := [String:Int]{}
+    loop item in items {
+        if item == .Func(function) {
+            if positions.get(function.name) == .Val(index) -> functions[index] = function
+            else {
+                positions[function.name] = functions.len()
+                &functions.push(function)
+            }
+        }
+    }
+    functions
+}
+
+// Share the same substitution walk as module specialization, including locals
+// which shadow closed globals inside prep functions.
+pub fn sema_closed_input(request: SemaClosedValueRequest) -> SemaRegistrationModuleInput {
+    rewrite := sema_inline_rewrite_empty()
+    rewrite.build_facts = Val(request.context.build_facts)
+    loop (name, value) in request.globals -> rewrite.values[name] = ast_comptime_value_expr(value, expr_span(request.expression))
+    input := request.input
+    items := [Item]{}
+    loop item in input.program.items {
+        if item == {
+            .Func(_) | .Const(_) | .ModuleAlias(_) -> {}
+            else -> &items.push(item)
+        }
+    }
+    loop function in request.functions -> &items.push(Item.Func{value: sema_inline_rewrite_func(&rewrite, function)})
+    input.program.items = items
+    input.expand_generic_modules = false
+    input
+}
+pub fn sema_closed_expression(request: SemaClosedValueRequest) -> Expr {
+    rewrite := sema_inline_rewrite_empty()
+    rewrite.build_facts = Val(request.context.build_facts)
+    loop (name, value) in request.globals -> rewrite.values[name] = ast_comptime_value_expr(value, expr_span(request.expression))
+    sema_inline_rewrite_expr(&rewrite, request.expression)
+}
+
+pub fn sema_closed_registration(request: SemaClosedValueRequest) -> SemaRegistrationGraph {
+    inputs := [SemaRegistrationModuleInput]{}
+    loop retained in request.context.sources.inputs {
+        input := retained
+        input.expand_generic_modules = false
+        if input.module_identity == request.input.module_identity -> input = sema_closed_input(request)
+        &inputs.push(input)
+    }
+    sema_registration_prepare_graph(inputs, request.context.sources.edges, request.input.package_identity, request.input.module_identity, request.context.canonical_effect.module_identity, request.context.sources.foreign_providers, request.context.target_machine, request.context.build_facts, request.context.host_hooks)
+}

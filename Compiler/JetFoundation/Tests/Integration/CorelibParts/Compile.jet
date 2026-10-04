@@ -1,0 +1,1145 @@
+// PORT-PENDING 1013 tests-corelib-parts-compile: tests/corelib_parts/compile.rs:1-1141
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[test]
+//RS fn trivial_aot_without_scheduler_compiles() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_trivial_without_scheduler_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) =
+//RS         build_and_run(&dir, "trivial_without_scheduler", "fn run() {}", &[], None);
+//RS     assert_eq!(code, 0, "trivial AOT failed: {stderr}");
+//RS     assert_eq!(stdout, "");
+//RS     assert_eq!(stderr, "");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn range_interval_proves_fixed_array_index() {
+//RS     let src = r#"
+//RS tag Checked { deny: [Net] }
+//RS Die :: distinct Int(1..6)
+//RS 
+//RS fn pick(faces: [String#6], roll: Die) -[]> String {
+//RS     return faces[roll.raw() - 1]
+//RS }
+//RS 
+//RS fn run() {
+//RS     faces :: [String#6]{ "zero", "one", "two", "three", "four", "five" }
+//RS     print(pick(faces, Die.from_int(3)))
+//RS     print(pick(faces, #Checked Die.from_int(1)))
+//RS }
+//RS "#;
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_range_interval_index_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, aot_stdout, stderr) = build_and_run(&dir, "range_interval_index", src, &[], None);
+//RS     assert_eq!(code, 0, "fixed-list AOT failed: {stderr}");
+//RS     assert_eq!(aot_stdout, "two\nzero\n");
+//RS 
+//RS     let path = dir.join("range_interval_index.jet");
+//RS     for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
+//RS         if !force_interpreter {
+//RS             jet_jit::reset_jit_trace_for_test();
+//RS         }
+//RS         match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+//RS             jet::Interpreter::RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(exit_code, 0, "{tier} fixed-list run failed: {stderr}");
+//RS                 assert_eq!(stderr, "");
+//RS                 assert_eq!(stdout, aot_stdout, "{tier} fixed-list output drifted");
+//RS             }
+//RS             jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+//RS                 panic!("{tier} fixed-list run failed: {diagnostics:?}");
+//RS             }
+//RS         }
+//RS         if !force_interpreter {
+//RS             assert!(
+//RS                 jet_jit::jit_executed_for_test(),
+//RS                 "fixed-list fixture must execute resident JIT"
+//RS             );
+//RS             assert!(
+//RS                 !jet_jit::deopt_invoked_for_test(),
+//RS                 "fixed-list fixture must not deopt"
+//RS             );
+//RS             assert!(
+//RS                 !jet_jit::fallback_invoked_for_test(),
+//RS                 "fixed-list fixture must not fall back"
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     let web_src = r#"
+//RS #Target(Web)
+//RS tag Checked { deny: [Net] }
+//RS Die :: distinct Int(1..6)
+//RS 
+//RS #Target(JS)
+//RS fn pick(faces: [String#6], roll: Die) -[]> String {
+//RS     return faces[roll.raw() - 1]
+//RS }
+//RS 
+//RS #Target(JS)
+//RS fn run() {
+//RS     faces :: [String#6]{ "zero", "one", "two", "three", "four", "five" }
+//RS     print(pick(faces, Die.from_int(3)))
+//RS     print(pick(faces, #Checked Die.from_int(1)))
+//RS }
+//RS "#;
+//RS     if let Some(web_stdout) = run_web_js_source(&dir, "range_interval_index_web", web_src) {
+//RS         assert_eq!(web_stdout, "two\nzero\n");
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn canonical_time_plane_reaches_web_js() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_canonical_time_web_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src = r#"
+//RS #Target(Web)
+//RS use core.time as time
+//RS 
+//RS #Target(JS)
+//RS fn run() {
+//RS     wait :: 500ms
+//RS     origin :: time.instant()
+//RS     later :: origin + 5min
+//RS     speed :: 12meter / 2s
+//RS     print(wait.in(.Milliseconds) ?? panic("wait"))
+//RS     print((later - origin).in(.Minutes) ?? panic("delta"))
+//RS }
+//RS "#;
+//RS     if let Some(web_stdout) = run_web_js_source(&dir, "canonical_time_plane_web", src) {
+//RS         assert_eq!(web_stdout, "500\n5\n");
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn parenthesized_view_place_return_keeps_parameter_provenance() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping parenthesized View return test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn first(values: [Int]) -[]> View<Int> {
+//RS     return (values[0..1])
+//RS }
+//RS 
+//RS fn run() {
+//RS     values :: [7, 8]
+//RS     selected :: first(values)
+//RS     print(selected[0])
+//RS }
+//RS "#;
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_parenthesized_view_return_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, aot_stdout, stderr) = build_and_run(&dir, "parenthesized_view_return", src, &[], None);
+//RS     assert_eq!(code, 0, "parenthesized View return AOT failed: {stderr}");
+//RS     assert_eq!(aot_stdout, "7\n");
+//RS 
+//RS     let path = dir.join("parenthesized_view_return.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
+//RS         if !force_interpreter {
+//RS             jet_jit::reset_jit_trace_for_test();
+//RS         }
+//RS         match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+//RS             jet::Interpreter::RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(exit_code, 0, "{tier} View return failed: {stderr}");
+//RS                 assert_eq!(stderr, "");
+//RS                 assert_eq!(stdout, aot_stdout, "{tier} View return output drifted");
+//RS             }
+//RS             jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+//RS                 panic!("{tier} rejected parenthesized View return: {diagnostics:?}");
+//RS             }
+//RS         }
+//RS         if !force_interpreter {
+//RS             assert!(
+//RS                 jet_jit::jit_executed_for_test(),
+//RS                 "parenthesized View return must execute resident JIT"
+//RS             );
+//RS             assert!(
+//RS                 !jet_jit::deopt_invoked_for_test(),
+//RS                 "parenthesized View return must not deopt"
+//RS             );
+//RS             assert!(
+//RS                 !jet_jit::fallback_invoked_for_test(),
+//RS                 "parenthesized View return must not fall back"
+//RS             );
+//RS         }
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn fnmut_collection_callback_preserves_capture_storage() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping FnMut collection callback test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     values :: [1, 2, 3, 4]
+//RS     total := 0
+//RS     values.each((n: Int) -> { total = total + n })
+//RS     print(total)
+//RS }
+//RS "#;
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_fnmut_collection_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, aot_stdout, stderr) = build_and_run(&dir, "fnmut_collection", src, &[], None);
+//RS     assert_eq!(code, 0, "FnMut collection AOT failed: {stderr}");
+//RS     assert_eq!(aot_stdout, "10\n");
+//RS 
+//RS     let path = dir.join("fnmut_collection.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
+//RS         if !force_interpreter {
+//RS             jet_jit::reset_jit_trace_for_test();
+//RS         }
+//RS         match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+//RS             jet::Interpreter::RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(exit_code, 0, "{tier} FnMut run failed: {stderr}");
+//RS                 assert_eq!(stderr, "");
+//RS                 assert_eq!(stdout, aot_stdout, "{tier} FnMut capture update was lost");
+//RS             }
+//RS             jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+//RS                 panic!("{tier} rejected FnMut collection fixture: {diagnostics:?}");
+//RS             }
+//RS         }
+//RS         if !force_interpreter {
+//RS             assert!(
+//RS                 jet_jit::jit_executed_for_test(),
+//RS                 "FnMut collection fixture must execute resident JIT"
+//RS             );
+//RS             assert!(
+//RS                 !jet_jit::deopt_invoked_for_test(),
+//RS                 "FnMut collection fixture must not deopt"
+//RS             );
+//RS             assert!(
+//RS                 !jet_jit::fallback_invoked_for_test(),
+//RS                 "FnMut collection fixture must not fall back"
+//RS             );
+//RS         }
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_find_glob_records_sorted_lock_inputs() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_comptime_find_{}_{}",
+//RS         std::process::id(),
+//RS         "lock"
+//RS     ));
+//RS     fs::create_dir_all(dir.join("inputs/nested")).unwrap();
+//RS     fs::write(dir.join("inputs/alpha-1.txt"), "alpha").unwrap();
+//RS     fs::write(dir.join("inputs/nested/beta-2.txt"), "beta").unwrap();
+//RS     fs::write(dir.join("inputs/nested/gamma-3.txt"), "gamma").unwrap();
+//RS     fs::write(dir.join("inputs/nested/beta-2.md"), "skip").unwrap();
+//RS     let src = r#"
+//RS PATHS :: prep { find("inputs/**/{{alpha,beta}}-[0-9].t?t") }
+//RS 
+//RS fn run() {
+//RS     print(PATHS.join("|"))
+//RS }
+//RS "#;
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected find fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     let paths: Vec<&str> = out
+//RS         .comptime_inputs
+//RS         .iter()
+//RS         .map(|input| input.path.as_str())
+//RS         .collect();
+//RS     assert_eq!(
+//RS         paths,
+//RS         vec!["inputs/alpha-1.txt", "inputs/nested/beta-2.txt"]
+//RS     );
+//RS     assert!(out
+//RS         .comptime_inputs
+//RS         .iter()
+//RS         .all(|input| input.hash.len() == 64));
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn core_args_audit_surface_runs_and_reports_suggestions() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_corelib_args_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src = r#"
+//RS use core.args as args
+//RS 
+//RS fn run() {
+//RS     spec :: args.spec()
+//RS         .flag_short("verbose", "v", "print extra detail")
+//RS         .option_env("profile", "config profile", "NAME", "JET_ARGS_PROFILE")
+//RS         .option_int("jobs", "worker count", "N")
+//RS         .repeat("tag", "classification tag", "TAG")
+//RS     parsed :: spec.parse(["tool", "-vv", "--jobs", "8", "--tag", "a", "--tag=b"]) ?? panic("parse failed")
+//RS     print(parsed.flag("verbose"))
+//RS     print(parsed.option("profile") ?? "")
+//RS     print(parsed.option_int("jobs") ?? 0)
+//RS     print(parsed.options("tag").len())
+//RS     if spec.parse(["tool", "--verbse"]) == {
+//RS         .Ok(_) -> {
+//RS             print("unexpected")
+//RS         }
+//RS         .Err(e) -> {
+//RS             print(e)
+//RS         }
+//RS     }
+//RS }
+//RS "#;
+//RS     let (_code, stdout, stderr) = build_and_run(
+//RS         &dir,
+//RS         "args_audit",
+//RS         src,
+//RS         &[("JET_ARGS_PROFILE", "dev")],
+//RS         None,
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("unknown option `--verbse`")
+//RS             && stdout.contains("did you mean `--verbose`?"),
+//RS         "core.args suggestion missing:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+//RS     );
+//RS     assert!(stdout.starts_with("true\ndev\n8\n2\n"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_args_parse_or_exit_handles_cli_boundaries_and_keeps_parse_pure() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_args_exit_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src = r#"
+//RS use core.args as args
+//RS use core.term as io
+//RS 
+//RS fn run() {
+//RS     spec :: args.spec()
+//RS         .flag("verbose", "print extra detail")
+//RS     parsed :: spec.parse_or_exit(process.argv())
+//RS     embedded :: spec.parse(["embedded", "--verbose"]) ?? panic("pure parse failed")
+//RS     print(parsed.flag("verbose"))
+//RS     print(embedded.flag("verbose"))
+//RS }
+//RS "#;
+//RS     let path = dir.join("args_parse_or_exit.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected parse_or_exit fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     let rust = dir.join("args_parse_or_exit.rs");
+//RS     let bin = dir.join("args_parse_or_exit");
+//RS     let mut command = Command::new("rustc");
+//RS     let _runtime_lease = common::add_generated_rust(&mut command, &rust, &out.rust, out.ffi.is_some(), &[]);
+//RS     let built = command.arg("-o").arg(&bin).output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "rustc rejected generated code:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS 
+//RS     let normal = Command::new(&bin).arg("--verbose").output().unwrap();
+//RS     assert_eq!(normal.status.code(), Some(0));
+//RS     assert_eq!(String::from_utf8_lossy(&normal.stdout), "true\ntrue\n");
+//RS     assert!(normal.stderr.is_empty());
+//RS 
+//RS     let help = Command::new(&bin).arg("--help").output().unwrap();
+//RS     assert_eq!(help.status.code(), Some(0));
+//RS     let help_stdout = String::from_utf8_lossy(&help.stdout);
+//RS     assert!(help_stdout.contains("Usage: args_parse_or_exit [options]"));
+//RS     assert!(help_stdout.contains("--help"));
+//RS     assert!(help.stderr.is_empty());
+//RS 
+//RS     let bad = Command::new(&bin).arg("--verbse").output().unwrap();
+//RS     assert_eq!(bad.status.code(), Some(2));
+//RS     assert!(bad.stdout.is_empty());
+//RS     let bad_stderr = String::from_utf8_lossy(&bad.stderr);
+//RS     assert!(bad_stderr.contains("unknown option `--verbse`"));
+//RS     assert!(bad_stderr.contains("did you mean `--verbose`?"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_args_parse_or_exit_rejects_surplus_bare_arguments() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_args_surplus_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src = r#"
+//RS use core.args as args
+//RS use core.process as process
+//RS 
+//RS fn run() {
+//RS     spec :: args.spec()
+//RS         .option("name", "display name", "NAME")
+//RS         .positional("name", "display name")
+//RS     parsed :: spec.parse_or_exit(process.argv())
+//RS     print(parsed.option("name") ?? "none")
+//RS }
+//RS "#;
+//RS     let path = dir.join("args_surplus.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected surplus builder fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     let rust = dir.join("args_surplus.rs");
+//RS     let bin = dir.join("args_surplus");
+//RS     let mut command = Command::new("rustc");
+//RS     let _runtime_lease = common::add_generated_rust(&mut command, &rust, &out.rust, out.ffi.is_some(), &[]);
+//RS     let built = command.arg("-o").arg(&bin).output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "rustc rejected generated code:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS 
+//RS     let run = |args: &[&str]| Command::new(&bin).args(args).output().unwrap();
+//RS 
+//RS     let named = run(&["bare-loses", "--name", "named"]);
+//RS     assert_eq!(named.status.code(), Some(0));
+//RS     assert_eq!(String::from_utf8_lossy(&named.stdout), "named\n");
+//RS     assert!(named.stderr.is_empty());
+//RS 
+//RS     let help = run(&["--help"]);
+//RS     assert_eq!(help.status.code(), Some(0));
+//RS     let help_stdout = String::from_utf8_lossy(&help.stdout);
+//RS     assert!(help_stdout.contains("Usage:"), "{help_stdout}");
+//RS     assert!(help_stdout.contains("name"), "{help_stdout}");
+//RS     assert!(help.stderr.is_empty());
+//RS 
+//RS     let bad = run(&["first", "second", "third"]);
+//RS     assert_eq!(bad.status.code(), Some(2));
+//RS     assert!(bad.stdout.is_empty());
+//RS     let bad_stderr = String::from_utf8_lossy(&bad.stderr);
+//RS     assert!(bad_stderr.contains("unexpected arguments"), "{bad_stderr}");
+//RS     assert!(
+//RS         bad_stderr.contains("`second`") && bad_stderr.contains("`third`"),
+//RS         "{bad_stderr}"
+//RS     );
+//RS     assert!(bad_stderr.contains("Usage:"), "{bad_stderr}");
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_args_nested_subcommand_does_not_overflow() {
+//RS     let src = r#"
+//RS use core.args as args
+//RS 
+//RS fn run() {
+//RS     serve :: args.spec()
+//RS         .option_int("port", "listen port", "PORT")
+//RS     spec :: args.spec()
+//RS         .flag_short("verbose", "v", "print extra detail")
+//RS         .option_int("jobs", "worker count", "N")
+//RS         .option_default("mode", "run mode", "MODE", "fast")
+//RS         .option_choice("color", "color policy", "WHEN", "auto,always,never")
+//RS         .repeat("tag", "classification tag", "TAG")
+//RS         .subcommand("serve", "run the server", serve)
+//RS         .version("args-audit 1.0")
+//RS     print(spec.help().contains("serve"))
+//RS }
+//RS "#;
+//RS     let out = compile_temp("args_nested_subcommand.jet", src);
+//RS     assert!(out.rust.contains("jet_args_subcommand"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_os_facts_and_interrupt_hook_compile() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_corelib_os_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src = r#"
+//RS use core.sys as os
+//RS 
+//RS fn run() {
+//RS     os.on_interrupt(() -> {
+//RS         print("interrupted")
+//RS     })
+//RS     print(os.name().len() > 0)
+//RS     print(os.family().len() > 0)
+//RS     print(os.arch().len() > 0)
+//RS     print(os.cpu_count() >= 1)
+//RS     print(os.pid() >= 1)
+//RS     print(os.hostname().len() > 0)
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "os_facts", src, &[], None);
+//RS     assert_eq!(code, 0, "core.sys program failed: {stderr}");
+//RS     assert_eq!(stdout, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn source_core_plain_return_can_be_passed_as_argument() {
+//RS     let src = r#"
+//RS use core.sys as sys
+//RS 
+//RS fn consume(value: String) {}
+//RS 
+//RS fn run() {
+//RS     consume(sys.family())
+//RS }
+//RS "#;
+//RS     let _ = compile_temp("source_core_plain_return_argument.jet", src);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_os_interrupt_callback_forms_match_dev_tiers() {
+//RS     use std::io::{BufRead, Read};
+//RS     use std::process::Stdio;
+//RS     use std::time::{Duration, Instant};
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_interrupt_callback_forms_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS 
+//RS     let aot_source = r#"
+//RS use core.sys as os
+//RS use core.process as process
+//RS 
+//RS fn named_callback() {
+//RS     print("named")
+//RS }
+//RS 
+//RS fn run() {
+//RS     indirect :: named_callback
+//RS     os.on_interrupt(named_callback)
+//RS     os.on_interrupt(indirect)
+//RS     os.on_interrupt(() -> {
+//RS         print("inline")
+//RS         process.exit(0)
+//RS     })
+//RS     print("ready")
+//RS     loop { }
+//RS }
+//RS "#;
+//RS     let out = compile_temp("named_indirect_aot.jet", aot_source);
+//RS     let rs = dir.join("named_indirect_aot.rs");
+//RS     let bin = dir.join("named_indirect_aot");
+//RS     let mut rustc = Command::new("rustc");
+//RS     let _runtime_lease = common::add_generated_rust(&mut rustc, &rs, &out.rust, out.ffi.is_some(), &[]);
+//RS     let built = rustc.arg("-o").arg(&bin).output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "named/indirect/inline AOT rustc failed: {}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let mut child = Command::new(&bin)
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .expect("spawn AOT callback program");
+//RS     let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+//RS     let mut ready = String::new();
+//RS     stdout.read_line(&mut ready).unwrap();
+//RS     assert_eq!(ready, "ready\n", "AOT callback registration was not ready");
+//RS     unsafe extern "C" {
+//RS         fn kill(pid: i32, signal: i32) -> i32;
+//RS     }
+//RS     assert_eq!(unsafe { kill(child.id() as i32, 2) }, 0);
+//RS     let status = child.wait().unwrap();
+//RS     let mut rest = String::new();
+//RS     stdout.read_to_string(&mut rest).unwrap();
+//RS     let mut stderr = String::new();
+//RS     child
+//RS         .stderr
+//RS         .take()
+//RS         .unwrap()
+//RS         .read_to_string(&mut stderr)
+//RS         .unwrap();
+//RS     assert!(status.success(), "AOT callback program failed: {stderr}");
+//RS     assert_eq!(rest, "named\nnamed\ninline\n");
+//RS 
+//RS     let dev_source = r#"
+//RS use core.sys as os
+//RS 
+//RS fn named_callback() {
+//RS     print("named")
+//RS }
+//RS 
+//RS fn stop_callback() {
+//RS     print("stop")
+//RS     panic("stop")
+//RS }
+//RS 
+//RS fn run() {
+//RS     loop indirect := stop_callback, true {
+//RS         named_alias :: named_callback
+//RS         local_lambda :: () -> {
+//RS             print("lambda")
+//RS         }
+//RS         os.on_interrupt(() -> {
+//RS             named_alias()
+//RS         })
+//RS         os.on_interrupt(local_lambda)
+//RS         os.on_interrupt(named_callback)
+//RS         os.on_interrupt(indirect)
+//RS         print("ready")
+//RS         loop {
+//RS             tick :: 0
+//RS         }
+//RS     }
+//RS }
+//RS "#;
+//RS     let path = dir.join("named_indirect_dev.jet");
+//RS     fs::write(&path, dev_source).unwrap();
+//RS 
+//RS     for (tier, force_interpreter) in [("resident JIT", false), ("forced interpreter", true)] {
+//RS         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS         command
+//RS             .args(["dev", path.to_str().unwrap(), "--watch=off"])
+//RS             .current_dir(&dir)
+//RS             .stdout(Stdio::piped())
+//RS             .stderr(Stdio::piped());
+//RS         if force_interpreter {
+//RS             command.arg("--interpret");
+//RS         } else {
+//RS             command.arg("--trace-tiers");
+//RS         }
+//RS         let mut child = command
+//RS             .spawn()
+//RS             .unwrap_or_else(|error| panic!("spawn {tier} callback program: {error}"));
+//RS         let (lines_tx, lines_rx) = std::sync::mpsc::channel();
+//RS         let child_stdout = child.stdout.take().unwrap();
+//RS         std::thread::spawn(move || {
+//RS             for line in std::io::BufReader::new(child_stdout).lines() {
+//RS                 if lines_tx.send(line).is_err() {
+//RS                     break;
+//RS                 }
+//RS             }
+//RS         });
+//RS         let ready = match lines_rx.recv_timeout(Duration::from_secs(30)) {
+//RS             Ok(line) => line.unwrap_or_else(|error| panic!("read {tier} readiness: {error}")),
+//RS             Err(error) => {
+//RS                 let _ = child.kill();
+//RS                 let _ = child.wait();
+//RS                 panic!("{tier} callback program did not become ready: {error}");
+//RS             }
+//RS         };
+//RS         assert_eq!(ready, "ready", "{tier} callback registration was not ready");
+//RS         unsafe extern "C" {
+//RS             fn kill(pid: i32, signal: i32) -> i32;
+//RS         }
+//RS         assert_eq!(
+//RS             unsafe { kill(child.id() as i32, 2) },
+//RS             0,
+//RS             "send SIGINT to {tier} callback program"
+//RS         );
+//RS         let deadline = Instant::now() + Duration::from_secs(30);
+//RS         let status = loop {
+//RS             if let Some(status) = child.try_wait().unwrap() {
+//RS                 break status;
+//RS             }
+//RS             if Instant::now() >= deadline {
+//RS                 let _ = child.kill();
+//RS                 panic!(
+//RS                     "{tier} callback program did not exit after SIGINT"
+//RS                 );
+//RS             }
+//RS             std::thread::sleep(Duration::from_millis(25));
+//RS         };
+//RS         let mut stderr = String::new();
+//RS         child
+//RS             .stderr
+//RS             .take()
+//RS             .unwrap()
+//RS             .read_to_string(&mut stderr)
+//RS             .unwrap();
+//RS         let stdout = lines_rx
+//RS             .into_iter()
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .expect("callback stdout is readable")
+//RS             .join("\n")
+//RS             + "\n";
+//RS         assert!(
+//RS             status.code() == Some(70),
+//RS             "{tier} callback program failed: stdout={stdout:?} stderr={stderr:?}"
+//RS         );
+//RS         assert_eq!(
+//RS             stdout,
+//RS             "named\nlambda\nnamed\nstop\n",
+//RS             "{tier} callback dispatch drifted"
+//RS         );
+//RS         assert!(
+//RS             stderr.contains("panic: stop"),
+//RS             "{tier} callback lost the runtime panic diagnostic: {stderr:?}"
+//RS         );
+//RS         if force_interpreter {
+//RS             assert!(
+//RS                 !stderr.contains("unsupported"),
+//RS                 "{tier} emitted an unsupported-feature diagnostic: {stderr}"
+//RS             );
+//RS         } else {
+//RS             assert!(
+//RS                 stderr.contains("tier1 native"),
+//RS                 "{tier} proof did not report a native tier: {stderr}"
+//RS             );
+//RS         }
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_os_interrupt_prelude_is_emitted_only_when_used() {
+//RS     let facts_only = compile_temp(
+//RS         "os_facts_only.jet",
+//RS         r#"
+//RS use core.sys as os
+//RS 
+//RS fn run() {
+//RS     print(os.name())
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(
+//RS         !facts_only.rust.contains("mod jet_os_interrupt")
+//RS             && !facts_only.rust.contains("SetConsoleCtrlHandler")
+//RS             && !facts_only.rust.contains("jet_std_os_on_interrupt"),
+//RS         "ordinary core.sys facts should not inherit signal FFI"
+//RS     );
+//RS     assert!(
+//RS         facts_only.rust.contains("JET_INTERRUPT_HANDLER_DEPTH")
+//RS             && facts_only.rust.contains("fn jet_runtime_should_unwind()"),
+//RS         "safe central panic-boundary state must remain available without signal FFI"
+//RS     );
+//RS 
+//RS     let with_interrupt = compile_temp(
+//RS         "os_interrupt.jet",
+//RS         r#"
+//RS use core.sys as os
+//RS 
+//RS fn run() {
+//RS     os.on_interrupt(() -> {
+//RS         print("interrupted")
+//RS     })
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(
+//RS         with_interrupt.rust.contains("mod jet_os_interrupt")
+//RS             && with_interrupt.rust.contains("SetConsoleCtrlHandler")
+//RS             && with_interrupt.rust.contains("CTRL_C_EVENT")
+//RS             && with_interrupt.rust.contains("AtomicUsize")
+//RS             && with_interrupt.rust.contains("catch_unwind")
+//RS             && with_interrupt.rust.contains("struct PanicBoundary")
+//RS             && with_interrupt.rust.contains("impl Drop for PanicBoundary")
+//RS             && with_interrupt.rust.contains("#[cfg(not(any(unix, windows)))]")
+//RS             && with_interrupt.rust.contains("interrupt handling is unavailable on this target")
+//RS             && with_interrupt.rust.contains("jet_std_os_on_interrupt")
+//RS             && !with_interrupt.rust.contains("let _ = handler"),
+//RS         "on_interrupt should keep its Unix/Windows dispatcher and no silent no-op"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_os_interrupt_handlers_are_additive_and_ordered() {
+//RS     use std::io::{BufRead, Read};
+//RS     use std::process::Stdio;
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_corelib_interrupt_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src = r#"
+//RS use core.sys as os
+//RS use core.process as process
+//RS 
+//RS fn run() {
+//RS     os.on_interrupt(() -> { panic("first handler failed") })
+//RS     os.on_interrupt(() -> {
+//RS         print("second")
+//RS         process.exit(0)
+//RS     })
+//RS     print("ready")
+//RS     loop { }
+//RS }
+//RS 
+//RS "#;
+//RS     let out = compile_temp("os_interrupt_runtime.jet", src);
+//RS     let rs = dir.join("main.rs");
+//RS     let bin = dir.join("interrupt-runtime");
+//RS     let mut command = Command::new("rustc");
+//RS     let _runtime_lease = common::add_generated_rust(&mut command, &rs, &out.rust, out.ffi.is_some(), &[]);
+//RS     let rustc = command.arg("-o").arg(&bin).output().unwrap();
+//RS     assert!(rustc.status.success(), "rustc failed:\n{}", String::from_utf8_lossy(&rustc.stderr));
+//RS 
+//RS     let mut child = Command::new(&bin)
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS     let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+//RS     let mut ready = String::new();
+//RS     stdout.read_line(&mut ready).unwrap();
+//RS     assert_eq!(ready, "ready\n", "registration was not ready before run continued");
+//RS     unsafe extern "C" { fn kill(pid: i32, signal: i32) -> i32; }
+//RS     assert_eq!(unsafe { kill(child.id() as i32, 2) }, 0);
+//RS     let status = child.wait().unwrap();
+//RS     let mut rest = String::new();
+//RS     stdout.read_to_string(&mut rest).unwrap();
+//RS     let mut stderr = String::new();
+//RS     child
+//RS         .stderr
+//RS         .take()
+//RS         .unwrap()
+//RS         .read_to_string(&mut stderr)
+//RS         .unwrap();
+//RS     assert!(status.success(), "interrupt child failed: {status}");
+//RS     assert_eq!(rest, "second\n");
+//RS     assert!(
+//RS         stderr.contains("panic: first handler failed"),
+//RS         "first handler panic lost its interrupt boundary diagnostic: {stderr:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_os_interrupt_deadline_diagnostic_unwinds_inside_handler_boundary() {
+//RS     use std::io::{BufRead, Read};
+//RS     use std::process::Stdio;
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_interrupt_deadline_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src = r#"
+//RS use core.sys as os
+//RS use core.process as process
+//RS use core.time as time
+//RS 
+//RS fn run() {
+//RS     os.on_interrupt(() -> {
+//RS         #Context(deadline: time.now()) {
+//RS             time.sleep(5ms)
+//RS         }
+//RS     })
+//RS     os.on_interrupt(() -> {
+//RS         print("second")
+//RS         process.exit(0)
+//RS     })
+//RS     print("ready")
+//RS     loop { }
+//RS }
+//RS "#;
+//RS     let out = compile_temp("os_interrupt_deadline.jet", src);
+//RS     assert!(
+//RS         out.rust.contains("jet_interrupt_handler_panic_enter")
+//RS             && out.rust.contains("jet_interrupt_handler_panic_leave"),
+//RS         "interrupt handlers need a boundary distinct from scheduler-task identity"
+//RS     );
+//RS     let rs = dir.join("main.rs");
+//RS     let bin = dir.join("interrupt-deadline");
+//RS     let mut command = Command::new("rustc");
+//RS     let _runtime_lease = common::add_generated_rust(&mut command, &rs, &out.rust, out.ffi.is_some(), &[]);
+//RS     let rustc = command.arg("-o").arg(&bin).output().unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc failed:\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS 
+//RS     let mut child = Command::new(&bin)
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS     let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+//RS     let mut ready = String::new();
+//RS     stdout.read_line(&mut ready).unwrap();
+//RS     assert_eq!(ready, "ready\n");
+//RS     unsafe extern "C" {
+//RS         fn kill(pid: i32, signal: i32) -> i32;
+//RS     }
+//RS     assert_eq!(unsafe { kill(child.id() as i32, 2) }, 0);
+//RS     let output = child.wait_with_output().unwrap();
+//RS     let mut rest = String::new();
+//RS     stdout.read_to_string(&mut rest).unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "interrupt child failed: {}",
+//RS         output.status
+//RS     );
+//RS     assert_eq!(rest, "second\n");
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("Error [E3003]: deadline exceeded while waiting in time sleep"));
+//RS     assert!(stderr.contains("Why: this wait point observed the task context deadline"));
+//RS     assert!(stderr.contains("Fix: raise the deadline budget or shorten the work"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
+//RS     let task_mem = include_str!("../../crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs");
+//RS     let time = include_str!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs");
+//RS     let scheduler = include_str!("../../crates/jet-codegen/src/Prelude/Scheduler.rs");
+//RS     let scheduler_host = include_str!("../../crates/jet-codegen/src/SchedulerHost.rs");
+//RS     let stream = include_str!("../../crates/jet-codegen/src/Prelude/Stream.rs");
+//RS     let ffi = include_str!("../../crates/jet-pkg-model/src/FFI.rs");
+//RS     let codegen = include_str!("../../crates/jet-codegen/src/Codegen/mod.rs");
+//RS     let core = include_str!("../../crates/jet-codegen/src/Prelude/Core.rs");
+//RS     assert!(!task_mem.contains("process::exit(70)"));
+//RS     assert!(!time.contains("process::exit(70)"));
+//RS     assert_eq!(scheduler.matches("process::exit(70)").count(), 0);
+//RS     assert_eq!(scheduler_host.matches("process::exit(70)").count(), 0);
+//RS     assert_eq!(stream.matches("process::exit(70)").count(), 0);
+//RS     assert_eq!(ffi.matches("process::exit(70)").count(), 0);
+//RS     assert_eq!(codegen.matches("std::process::exit(70)").count(), 0);
+//RS     let test_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/tooling/bench.jet");
+//RS     let (test_rust, _) = jet::Driver::compile_tests(test_path.to_str().unwrap(), false).unwrap();
+//RS     assert!(test_rust.contains(
+//RS         r#"jet_runtime_boundary(|| jet_runtime_stop("E3001", "", 0, &message))"#
+//RS     ));
+//RS     assert!(scheduler_host.contains("std::panic::panic_any(rendered)"));
+//RS     assert!(task_mem.contains("super::jet_runtime_stop_with_context("));
+//RS     // The deadline helper binds the rendered E3003 to a local so it can feed
+//RS     // interrupt handlers, native wait boundaries, and explicitly typed deadline
+//RS     // tasks while ordinary scheduler tasks retain the exact process-fatal E3003
+//RS     // diagnostic. It still routes its fatal path through `jet_runtime_diagnostic`,
+//RS     // never `process::exit`.
+//RS     assert!(time.contains("jet_runtime_diagnostic(rendered)"));
+//RS     assert!(time.contains("jet_interrupt_handler_should_unwind()"));
+//RS     assert!(time.contains("jet_scheduler_wait_boundary_should_unwind()"));
+//RS     assert!(time.contains("jet_typed_deadline_boundary_should_unwind()"));
+//RS     assert!(scheduler.contains("fn jet_scheduler_fatal(msg: &str) -> !"));
+//RS     assert!(scheduler.contains("jet_scheduler_runtime_stop(msg)"));
+//RS     assert!(scheduler.contains("jet_runtime_diagnostic(rendered)"));
+//RS     assert!(scheduler.contains("struct JetSchedulerWaitBoundary"));
+//RS     assert!(scheduler.contains("let _boundary = JetSchedulerWaitBoundary::enter()"));
+//RS     assert!(scheduler.contains("struct JetTypedDeadlineBoundary"));
+//RS     let (ordinary_task_spawn, typed_task_spawn) = task_mem
+//RS         .split_once("pub(crate) fn spawn_typed_deadline")
+//RS         .expect("typed-deadline task spawn must remain explicit");
+//RS     assert!(!ordinary_task_spawn.contains("JetTypedDeadlineBoundary::enter()"));
+//RS     let typed_task_spawn = typed_task_spawn
+//RS         .split_once("pub fn pause")
+//RS         .expect("typed-deadline task spawn boundary")
+//RS         .0;
+//RS     assert!(typed_task_spawn.contains("let _typed_deadline_boundary"));
+//RS     assert!(typed_task_spawn.contains("super::JetTypedDeadlineBoundary::enter()"));
+//RS     assert_eq!(core.matches("std::process::exit(").count(), 1);
+//RS     assert!(core.contains("fn jet_runtime_process_exit(code: i32, report: Option<&str>) -> !"));
+//RS     assert!(core.contains(
+//RS         "Self::SchedulerFatal { msg } => jet_runtime_stop(\"E3001\", \"\", 0, &msg)"
+//RS     ));
+//RS     assert!(core.contains("fn jet_runtime_should_unwind() -> bool"));
+//RS     assert!(core.contains("jet_scheduler_in_task()"));
+//RS     assert!(core.contains("jet_interrupt_handler_should_unwind()"));
+//RS     assert!(core.contains("if jet_runtime_should_unwind()"));
+//RS     assert!(core.contains("if jet_interrupt_handler_should_unwind()"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_terminal_helpers_do_not_bypass_the_runtime_boundary() {
+//RS     let collections = include_str!("../../crates/jet-jit/src/Collections.rs");
+//RS     let core_host = include_str!("../../crates/jet-jit/src/CoreHost.rs");
+//RS     let runtime = include_str!("../../crates/jet-jit/src/jit/runtime_host.rs");
+//RS     assert!(collections.contains("runtime_host::runtime_stop_unwind(\"E3001\""));
+//RS     assert!(!collections.contains("std::process::exit"));
+//RS     assert!(core_host.contains("super::jet_jit_process_exit(code)"));
+//RS     assert!(core_host.contains("jet_jit_process_exit(1);"));
+//RS     assert!(!core_host.contains("std::process::exit"));
+//RS     assert!(runtime.contains("pub(crate) fn runtime_stop_unwind"));
+//RS }
+//RS 
+//RS /// #2027 criterion 3: one signal mechanism means one observable answer.
+//RS ///
+//RS /// The same program, the same real `SIGINT`, on all three tiers — AOT, default
+//RS /// `jet run` (resident Cranelift) and `jet run --interpret`. The assertion is
+//RS /// cross-tier EQUALITY first, then the pinned value, because the failure this
+//RS /// guards against is precisely two tiers disagreeing about a delivered signal.
+//RS ///
+//RS /// Only the unified part is asserted: that the interrupt is counted once, and
+//RS /// that both handlers run in registration order. A handler's *failure* shape is
+//RS /// the one thing that is still per-tier by design (AOT catches the unwind at the
+//RS /// dispatcher boundary, the resident host sets a runtime trap, the evaluator
+//RS /// returns a diagnostic), so no handler here fails.
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_os_interrupt_delivery_matches_aot_jit_and_interpreter() {
+//RS     use std::io::{BufRead, Read};
+//RS     use std::process::Stdio;
+//RS 
+//RS     let src = r#"
+//RS use core.sys as os
+//RS use core.process as process
+//RS 
+//RS fn run() {
+//RS     os.on_interrupt(() -> { print("first") })
+//RS     os.on_interrupt(() -> {
+//RS         print("second")
+//RS         process.exit(0)
+//RS     })
+//RS     print("ready")
+//RS     loop {
+//RS         tick :: 0
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_interrupt_tiers_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = dir.join("interrupt_tiers.jet");
+//RS     fs::write(&source, src).unwrap();
+//RS 
+//RS     /// Send SIGINT once the child prints `ready`, then collect what it did.
+//RS     /// Returns `(exit code, stdout)`.
+//RS     fn interrupt_and_collect(mut child: std::process::Child, tier: &str) -> (Option<i32>, String) {
+//RS         use std::time::{Duration, Instant};
+//RS         let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+//RS         let mut ready = String::new();
+//RS         stdout.read_line(&mut ready).unwrap();
+//RS         assert_eq!(ready, "ready\n", "{tier} did not finish registering");
+//RS         unsafe extern "C" {
+//RS             fn kill(pid: i32, signal: i32) -> i32;
+//RS         }
+//RS         assert_eq!(
+//RS             unsafe { kill(child.id() as i32, 2) },
+//RS             0,
+//RS             "send SIGINT to {tier}"
+//RS         );
+//RS         let deadline = Instant::now() + Duration::from_secs(30);
+//RS         let status = loop {
+//RS             if let Some(status) = child.try_wait().unwrap() {
+//RS                 break status;
+//RS             }
+//RS             if Instant::now() >= deadline {
+//RS                 let _ = child.kill();
+//RS                 let _ = child.wait();
+//RS                 panic!("{tier} did not exit after SIGINT");
+//RS             }
+//RS             std::thread::sleep(Duration::from_millis(25));
+//RS         };
+//RS         let mut rest = String::new();
+//RS         stdout.read_to_string(&mut rest).unwrap();
+//RS         let mut stderr = String::new();
+//RS         child
+//RS             .stderr
+//RS             .take()
+//RS             .unwrap()
+//RS             .read_to_string(&mut stderr)
+//RS             .unwrap();
+//RS         assert!(
+//RS             !stderr.contains("unsupported"),
+//RS             "{tier} refused the program instead of running it: {stderr}"
+//RS         );
+//RS         (status.code(), format!("{ready}{rest}"))
+//RS     }
+//RS 
+//RS     // AOT. `jet run --release` spawns the built binary as a grandchild, which a
+//RS     // SIGINT aimed at the CLI would never reach, so the AOT tier is signalled
+//RS     // through the binary the release path builds — the same generated Rust.
+//RS     let out = compile_temp("interrupt_tiers.jet", src);
+//RS     let rs = dir.join("main.rs");
+//RS     let bin = dir.join("interrupt-tiers");
+//RS     let mut rustc = Command::new("rustc");
+//RS     let _runtime_lease = common::add_generated_rust(&mut rustc, &rs, &out.rust, out.ffi.is_some(), &[]);
+//RS     let built = rustc.arg("-o").arg(&bin).output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "rustc failed:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let aot = interrupt_and_collect(
+//RS         Command::new(&bin)
+//RS             .stdout(Stdio::piped())
+//RS             .stderr(Stdio::piped())
+//RS             .spawn()
+//RS             .unwrap(),
+//RS         "aot",
+//RS     );
+//RS 
+//RS     assert_eq!(
+//RS         aot,
+//RS         (Some(0), "ready\nfirst\nsecond\n".to_string()),
+//RS         "AOT interrupt delivery drifted"
+//RS     );
+//RS 
+//RS     // Default `jet run` (resident Cranelift) and `jet run --interpret` both run
+//RS     // the program inside the CLI process, so the CLI's pid is the program's pid.
+//RS     for (tier, extra) in [("jit", None), ("interpreter", Some("--interpret"))] {
+//RS         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS         command.arg("run");
+//RS         if let Some(flag) = extra {
+//RS             command.arg(flag);
+//RS         }
+//RS         command
+//RS             .arg("interrupt_tiers.jet")
+//RS             .current_dir(&dir)
+//RS             .env("NO_COLOR", "1")
+//RS             .env("JET_STORE_DIR", dir.join(format!("cache-{tier}")))
+//RS             .env("JET_RUN_CACHE_DIR", dir.join(format!("run-cache-{tier}")))
+//RS             .stdout(Stdio::piped())
+//RS             .stderr(Stdio::piped());
+//RS         let observed = interrupt_and_collect(command.spawn().unwrap(), tier);
+//RS         assert_eq!(
+//RS             observed, aot,
+//RS             "{tier} and AOT disagree about a delivered signal — the three tiers \
+//RS              must share one interrupt count and one consumption rule (#2027)"
+//RS         );
+//RS     }
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+// END-PORT-PENDING 1013 tests/corelib_parts/compile.rs:1-1141
+

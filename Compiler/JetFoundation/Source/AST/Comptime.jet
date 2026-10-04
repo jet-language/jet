@@ -1,5 +1,37 @@
 // Compile-time values retained on AST nodes and semantic projections.
 
+// Rust AST/metaprogramming.rs CompilerStage: fact availability, not `$phase`.
+pub enum CompilerStage {
+    Parsed
+    Resolved
+    Typed
+    Prepared
+    Emitted
+}
+
+pub COMPILER_STAGE_ALL :: prep { [CompilerStage]{
+    CompilerStage.Parsed, CompilerStage.Resolved, CompilerStage.Typed,
+    CompilerStage.Prepared, CompilerStage.Emitted
+} }
+
+pub fn compiler_stage_as_str(stage: CompilerStage) -> String Never! {
+    if stage == {
+        .Parsed -> "Parsed"
+        .Resolved -> "Resolved"
+        .Typed -> "Typed"
+        .Prepared -> "Prepared"
+        .Emitted -> "Emitted"
+    }
+}
+
+// Rust AST/metaprogramming.rs MetadataProducerStatus: producer obligations
+// remain explicit; an unavailable producer never becomes a default value.
+pub enum MetadataProducerStatus {
+    ContractOnly
+    NotImplemented
+    ExistingCallableProducerNeedsExtension
+}
+
 pub enum CtFloat {
     F32(value: Float)
     F64(value: Float)
@@ -77,16 +109,18 @@ pub enum FailureContract {
     Explicit(success: Type, error: Type)
     Converted(success: Type, source: Type, target: Type)
     ProvenUnreachable(success: Type)
+    InferredNever(success: Type)
+    Inferred(success: Type, error: Type)
 }
 
 // The failure route a callable exposes to its callers.
 pub fn failure_contract_effective_type(contract: FailureContract) -> Type Never! {
     if contract == {
         .DeclaredNever -> Type.Named{name: "Never"}
-        .Default(success, error) | .Explicit(success, error) -> Type.Result{ok: success, err: error}
+        .Default(success, error) | .Explicit(success, error) | .Inferred(success, error) -> Type.Result{ok: success, err: error}
         .Optional(success) -> Type.Option{inner: success}
         .Converted(success, _, target) -> Type.Result{ok: success, err: target}
-        .ProvenUnreachable(success) -> Type.Result{ok: success, err: Type.Named{name: "Never"}}
+        .ProvenUnreachable(success) | .InferredNever(success) -> Type.Result{ok: success, err: Type.Named{name: "Never"}}
     }
 }
 
@@ -100,6 +134,24 @@ pub fn failure_contract_source(contract: FailureContract) -> String Never! {
         .Converted(_, source, target) -> "converted {type_name(source)} -> {type_name(target)}"
         .DeclaredNever -> "declared Never return"
         .ProvenUnreachable(_) -> "explicit !Never (proven unreachable)"
+        .InferredNever(_) -> "inferred: none"
+        .Inferred(_, error) -> "inferred: {type_name(error)}"
+    }
+}
+
+// Rust AST/comptime.rs::FailureContract::from_return_type.
+pub fn failure_contract_from_return_type(return_type: Type?) -> FailureContract Never! {
+    if return_type == {
+        .None -> FailureContract.Default{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
+        .Val(ty) -> if ty == {
+            .Named(name) -> if name == "Never" -> FailureContract.DeclaredNever else -> FailureContract.Default{success: ty, error: Type.Named{name: "Err"}}
+            .Result(ok, error) -> {
+                if error == .Named(name) && name == "Never" -> return FailureContract.ProvenUnreachable{success: ok}
+                FailureContract.Explicit{success: ok, error: error}
+            }
+            .Option(success) -> FailureContract.Optional{success: success}
+            else -> FailureContract.Default{success: ty, error: Type.Named{name: "Err"}}
+        }
     }
 }
 
@@ -144,5 +196,155 @@ pub fn ast_comptime_value_type(value: CtValue) -> Type Never! {
         }
         .Unit -> Type.Named{name: "Unit"}
         .Closure(_) -> Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    }
+}
+
+pub fn ast_comptime_char_scalar(character: Char) -> Int Never! {
+    bytes :: "{character}".bytes()
+    first :: Int.from_u8(bytes[0])
+    if first < 128 -> return first
+    value := first & (if bytes.len() == 2 -> 31 else -> if bytes.len() == 3 -> 15 else -> 7)
+    loop index in 1..<bytes.len() -> value = (value << 6) | (Int.from_u8(bytes[index]) & 63)
+    value
+}
+
+// Rust GenericModules::normalized_value. This is the Tier-0 nominal identity
+// encoding, deliberately distinct from ComptimeWire's ordered display encoding.
+fn ast_comptime_identity_integer(out: &[U8], value: Int, width: Int) Never! {
+    loop index in 0..<width -> &out.push(U8{(value >> ((width - index - 1) * 8)) & 255})
+}
+fn ast_comptime_identity_text(out: &[U8], text: String) Never! {
+    ast_comptime_identity_integer(&out, text.bytes().len(), 8)
+    loop byte in text.bytes() -> &out.push(byte)
+}
+pub fn ast_comptime_module_value_bytes(value: CtValue) -> [U8]? Never! {
+    out := [U8]{}
+    if value == {
+        .Bool(flag) -> {
+            &out.push(U8{1})
+            &out.push(U8{if flag -> 1 else -> 0})
+        }
+        .Int(number) -> {
+            &out.push(U8{2})
+            ast_comptime_identity_integer(&out, number, 8)
+        }
+        .Char(character) -> {
+            &out.push(U8{3})
+            ast_comptime_identity_integer(&out, ast_comptime_char_scalar(character), 4)
+        }
+        .Str(text) -> {
+            &out.push(U8{4})
+            ast_comptime_identity_text(&out, text)
+        }
+        .Enum(name, variant, args) -> {
+            if args.len() != 0 -> return None
+            &out.push(U8{5})
+            ast_comptime_identity_text(&out, name)
+            ast_comptime_identity_text(&out, variant)
+        }
+        else -> return None
+    }
+    Val(out)
+}
+
+// Rust Comptime::build_fact_expr / GenericModules::ct_value_expr / template
+// literal projection. Preserve carriers that cannot be written as a literal
+// on the existing value-carrying ComptimeName, never an invented global name.
+pub fn ast_comptime_value_expr(value: CtValue, span: Span) -> Expr Never! {
+    if value == {
+        .Int(number) -> Expr.Int{value: number, span: span, width: None, raw: None}
+        .BigInt(raw) -> Expr.Int{value: 0, span: span, width: None, raw: Val(raw)}
+        .Float(number) -> if number == {
+            .F32(v) -> Expr.Float{value: v, span: span, is_f32: true, raw: None}
+            .F64(v) -> Expr.Float{value: v, span: span, is_f32: false, raw: None}
+        }
+        .Bool(flag) -> Expr.Bool{value: flag, span: span}
+        .Char(character) -> Expr.Char{value: "{character}", span: span}
+        .Str(text) -> Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span}
+        .List(values) -> {
+            elements := [Expr]{}
+            loop element in values -> &elements.push(ast_comptime_value_expr(element, span))
+            Expr.ListLit{elements: elements, span: span}
+        }
+        .Map(entries) -> {
+            mapped := [ExprPair]{}
+            loop entry in entries -> &mapped.push(ExprPair{key: ast_comptime_value_expr(ast_comptime_key_value(entry.key), span), value: ast_comptime_value_expr(entry.value, span)})
+            Expr.MapLit{entries: mapped, span: span}
+        }
+        .Enum(name, variant, args) -> {
+            mapped := [EnumLitArg]{}
+            loop arg in args {
+                expression :: ast_comptime_value_expr(arg.value, span)
+                if arg.label == {
+                    .Val(label) -> &mapped.push(EnumLitArg.Named{label: label, expr: expression})
+                    .None -> &mapped.push(EnumLitArg.Positional{value: expression})
+                }
+            }
+            Expr.EnumLit{type_name: name, variant: variant, variant_span: None, args: mapped, leading_dot: false, span: span}
+        }
+        .Present(inner) -> Expr.Present{value: ast_comptime_value_expr(inner, span), span: span}
+        .Unit -> Expr.Unit{span: span}
+        else -> Expr.ComptimeName{name: "", span: span, value: Val(value)}
+    }
+}
+
+
+pub fn ast_comptime_key_from_tir(key: TComptimeKey) -> CtKey Never! {
+    if key == {
+        .Int(value) -> CtKey.Int{value: value}
+        .String(value) -> CtKey.Str{value: value}
+        .Bool(value) -> CtKey.Bool{value: value}
+        .Char(value) -> CtKey.Char{value: comptime_character(value).chars()[0]}
+        .Tuple(fields) -> {
+            mapped := [NamedCtKey]{}
+            loop field in fields -> &mapped.push(NamedCtKey{name: field.name, value: ast_comptime_key_from_tir(field.key)})
+            CtKey.Tuple{fields: mapped}
+        }
+        .Struct(name, fields) -> {
+            mapped := [NamedCtKey]{}
+            loop field in fields -> &mapped.push(NamedCtKey{name: field.name, value: ast_comptime_key_from_tir(field.key)})
+            CtKey.Struct{type_name: name, fields: mapped}
+        }
+        .Enum(name, variant) -> CtKey.Enum{type_name: name, variant: variant}
+    }
+}
+
+// Rust MirBridge::mir_to_ct_value. Closures cannot cross this boundary.
+pub fn ast_comptime_value_from_tir(value: TComptimeValue) -> CtValue? Never! {
+    if value == {
+        .Int(number) -> Val(CtValue.Int{value: number})
+        .BigInt(decimal) -> Val(CtValue.BigInt{value: decimal})
+        .Float(number, bits) -> Val(CtValue.Float{value: if bits == 32 -> CtFloat.F32{value: number} else -> CtFloat.F64{value: number}})
+        .Bool(flag) -> Val(CtValue.Bool{value: flag})
+        .Char(code) -> Val(CtValue.Char{value: comptime_character(code).chars()[0]})
+        .String(text) -> Val(CtValue.Str{value: text})
+        .Bytes(bytes) -> Val(CtValue.Bytes{value: bytes})
+        .List(values) -> {
+            mapped := [CtValue]{}
+            loop element in values -> &mapped.push(ast_comptime_value_from_tir(element) ?? return None)
+            Val(CtValue.List{values: mapped})
+        }
+        .Map(entries) -> {
+            mapped := [CtMapEntry]{}
+            loop entry in entries -> &mapped.push(CtMapEntry{key: ast_comptime_key_from_tir(entry.key), value: ast_comptime_value_from_tir(entry.value) ?? return None})
+            Val(CtValue.Map{entries: mapped})
+        }
+        .Struct(name, fields) -> {
+            mapped := [NamedCtValue]{}
+            loop field in fields -> &mapped.push(NamedCtValue{name: field.name, value: ast_comptime_value_from_tir(field.value) ?? return None})
+            Val(CtValue.Struct{type_name: name, fields: mapped})
+        }
+        .Enum(name, variant, args) -> {
+            mapped := [CtEnumArg]{}
+            loop arg in args -> &mapped.push(CtEnumArg{label: arg.name, value: ast_comptime_value_from_tir(arg.value) ?? return None})
+            Val(CtValue.Enum{type_name: name, variant: variant, args: mapped})
+        }
+        .Present(inner) -> Val(CtValue.Present{value: ast_comptime_value_from_tir(inner) ?? return None})
+        .Failed(report) -> if report == {
+            .Clean(ty) -> Val(CtValue.Failed{report: CtReport.Clean{ty: ty}})
+            .Told(error) -> Val(CtValue.Failed{report: CtReport.Told{value: ast_comptime_value_from_tir(error) ?? return None}})
+        }
+        .Unit -> Val(CtValue.Unit)
+        .Closure(_) -> None
     }
 }

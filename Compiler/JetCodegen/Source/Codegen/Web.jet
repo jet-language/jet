@@ -1,0 +1,608 @@
+// PORT-PENDING 0541 crates-jet-codegen-src-codegen-utils-module-group: crates/jet-codegen/src/Codegen/Web.rs:1-604
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Shared Web runtime/publication utilities.
+//RS //!
+//RS //! MIR Web owns target representation and emission. This module contains only
+//RS //! neutral assets shared by the MIR adapter, plugin guest generation, and the
+//RS //! artifact writer; it does not inspect compiler semantic state or emit a bundle.
+//RS 
+//RS use jet_foundation::MIR::MirRuntimePartId;
+//RS use std::collections::BTreeSet;
+//RS 
+//RS const DOM_RUNTIME: &str = include_str!("../Prelude/DomRuntime.js");
+//RS const JS_EXECUTION_PRELUDE: &str = concat!(
+//RS     include_str!("../Prelude/Core/RuntimeStop.js"),
+//RS     include_str!("../Prelude/Core/Keep.js"),
+//RS     include_str!("../Prelude/Core/Task.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Channel.js"),
+//RS     include_str!("../Prelude/Core/DeterministicWorld.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Time.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Stream.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Option.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/FixedList.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Collections.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Text.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/StringConcat.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/ViewCopy.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Values.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Gc.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/TypedText.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Expiring.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/ExactNumbers.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/NumericWeb.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Measurement.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Shared.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Host.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Ui.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/HttpRouter.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/OpenAPI.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/Authority.js"),
+//RS     "\n",
+//RS     include_str!("../Prelude/Core/InlineRange.js"),
+//RS );
+//RS 
+//RS const JS_EVENT_PRELUDE: &str = concat!(include_str!("../Prelude/Core/Event.js"), "\n");
+//RS const JS_REALTIME_PRELUDE: &str =
+//RS     concat!(include_str!("../Prelude/Core/Realtime.js"), "\n");
+//RS const JS_DATA_PRELUDE: &str = concat!(include_str!("../Prelude/Core/Data.js"), "\n");
+//RS const JS_TESTING_HISTORY_PRELUDE: &str =
+//RS     concat!(include_str!("../Prelude/Core/TestingHistory.js"), "\n");
+//RS const JS_COMPUTE_PRELUDE: &str =
+//RS     concat!(include_str!("../Prelude/Core/ComputeWebGpu.js"), "\n");
+//RS const JS_RAYLIB_PRELUDE: &str = concat!(include_str!("../Prelude/Core/Raylib.js"), "\n");
+//RS const JS_GAME_PRELUDE: &str = include_str!("../Prelude/Core/Game.js");
+//RS 
+//RS const JS_TASK_GROUP_PRELUDE: &str = r#"
+//RS function jet_task_group_body_failed() {
+//RS   return { tag: "Err", values: [{ tag: "Panicked", values: ["task body failed"] }] };
+//RS }
+//RS 
+//RS async function jet_task_all(tasks, resultCarriers = []) {
+//RS   const values = [];
+//RS   for (let index = 0; index < tasks.length; index += 1) {
+//RS     const joined = await jet_task_join(tasks[index]);
+//RS     if (joined?.tag !== "Ok") return joined;
+//RS     let value = joined.values[0];
+//RS     const resultCarrier = resultCarriers.length === 1
+//RS       ? resultCarriers[0]
+//RS       : resultCarriers[index];
+//RS     if (resultCarrier) {
+//RS       if (value?.tag !== "Ok") return jet_task_group_body_failed();
+//RS       value = value.values[0];
+//RS     }
+//RS     values.push(value);
+//RS   }
+//RS   return { tag: "Ok", values: [values] };
+//RS }
+//RS 
+//RS async function jet_task_all_named(tasks, authoredFields, resultFields, resultCarriers = []) {
+//RS   const values = Object.create(null);
+//RS   for (let index = 0; index < authoredFields.length; index += 1) {
+//RS     const field = authoredFields[index];
+//RS     const joined = await jet_task_join(tasks[field]);
+//RS     if (joined?.tag !== "Ok") return joined;
+//RS     let value = joined.values[0];
+//RS     if (resultCarriers[index]) {
+//RS       if (value?.tag !== "Ok") return jet_task_group_body_failed();
+//RS       value = value.values[0];
+//RS     }
+//RS     values[field] = value;
+//RS   }
+//RS   const result = {};
+//RS   for (const field of resultFields) result[field] = values[field];
+//RS   return { tag: "Ok", values: [result] };
+//RS }
+//RS "#;
+//RS 
+//RS /// The shared DOM runtime source used by MIR Web publication and assets.
+//RS pub(crate) fn dom_runtime_source() -> &'static str {
+//RS     DOM_RUNTIME
+//RS }
+//RS /// Raw canonical Web inputs for the Source Web emitter. This provider supplies
+//RS /// neutral assets only; it does not inspect MIR or select/combine features.
+//RS /// The self-hosted compiler's bootstrap host reads them through
+//RS /// `Codegen::canonical_web_raw_assets`.
+//RS pub struct CanonicalWebRawAssets {
+//RS     pub dom_runtime: &'static str,
+//RS     pub execution_prelude: &'static str,
+//RS     pub event_prelude: &'static str,
+//RS     pub realtime_prelude: &'static str,
+//RS     pub data_prelude: &'static str,
+//RS     pub history_prelude: &'static str,
+//RS     pub compute_prelude: &'static str,
+//RS     pub raylib_prelude: &'static str,
+//RS     pub game_prelude: &'static str,
+//RS     pub task_group_prelude: &'static str,
+//RS     pub runtime_stop_metadata: String,
+//RS     pub game_default_frame_budget: i64,
+//RS     pub game_frame_budget_error: &'static str,
+//RS     pub harfbuzz_wasm: &'static [u8],
+//RS     pub timezone_data: Vec<(String, Vec<u8>)>,
+//RS }
+//RS 
+//RS pub fn canonical_web_raw_assets() -> Result<CanonicalWebRawAssets, std::io::Error> {
+//RS     Ok(CanonicalWebRawAssets {
+//RS         dom_runtime: DOM_RUNTIME,
+//RS         execution_prelude: JS_EXECUTION_PRELUDE,
+//RS         event_prelude: JS_EVENT_PRELUDE,
+//RS         realtime_prelude: JS_REALTIME_PRELUDE,
+//RS         data_prelude: JS_DATA_PRELUDE,
+//RS         history_prelude: JS_TESTING_HISTORY_PRELUDE,
+//RS         compute_prelude: JS_COMPUTE_PRELUDE,
+//RS         raylib_prelude: JS_RAYLIB_PRELUDE,
+//RS         game_prelude: JS_GAME_PRELUDE,
+//RS         task_group_prelude: JS_TASK_GROUP_PRELUDE,
+//RS         runtime_stop_metadata: js_runtime_stop_metadata(),
+//RS         game_default_frame_budget: jet_foundation::Game::JetGameFrameBudget::DEFAULT_HEADLESS_FRAMES,
+//RS         game_frame_budget_error: jet_foundation::Game::JetGameFrameBudget::FRAME_BUDGET_ERROR,
+//RS         harfbuzz_wasm: canonical_web_harfbuzz_bytes()?,
+//RS         timezone_data: web_tzdb_files()?,
+//RS     })
+//RS }
+//RS 
+//RS /// Assemble the JavaScript runtime shared by MIR Web emission.
+//RS ///
+//RS /// The HarfBuzz bridge is a target capability, not baseline web startup
+//RS /// machinery. Keep its canonical bytes out of artifacts that cannot call
+//RS /// `core.font.shape`; this preserves the exact bridge for shaping programs
+//RS /// without making every Web module parse and retain an unused Wasm asset.
+//RS pub(crate) fn shared_js_prelude(
+//RS     include_harfbuzz: bool,
+//RS     runtime_parts: &BTreeSet<MirRuntimePartId>,
+//RS     include_history: bool,
+//RS ) -> Result<String, std::io::Error> {
+//RS     // `runtime_parts` is the checked artifact closure; never infer reachability
+//RS     // from a benchmark entry name or from the static Core registry.
+//RS     let mut out = String::from(JS_EXECUTION_PRELUDE);
+//RS     if runtime_parts.contains(&MirRuntimePartId::Event) {
+//RS         out.push_str(JS_EVENT_PRELUDE);
+//RS     }
+//RS     if runtime_parts.contains(&MirRuntimePartId::Realtime) {
+//RS         out.push_str(JS_REALTIME_PRELUDE);
+//RS     }
+//RS     if runtime_parts.contains(&MirRuntimePartId::Data) {
+//RS         out.push_str(JS_DATA_PRELUDE);
+//RS     }
+//RS     if include_history {
+//RS         out.push_str(JS_TESTING_HISTORY_PRELUDE);
+//RS     }
+//RS     if runtime_parts.contains(&MirRuntimePartId::Compute) {
+//RS         out.push_str(JS_COMPUTE_PRELUDE);
+//RS     }
+//RS     if runtime_parts.contains(&MirRuntimePartId::Game) {
+//RS         out.push_str(JS_RAYLIB_PRELUDE);
+//RS         out.push_str(JS_GAME_PRELUDE);
+//RS         out.push_str(&format!(
+//RS             "\nconst JET_GAME_DEFAULT_FRAME_BUDGET = {};\nconst JET_GAME_FRAME_BUDGET_ERROR = {};\n",
+//RS             jet_foundation::Game::JetGameFrameBudget::DEFAULT_HEADLESS_FRAMES,
+//RS             json_quote(jet_foundation::Game::JetGameFrameBudget::FRAME_BUDGET_ERROR),
+//RS         ));
+//RS     }
+//RS     if include_harfbuzz {
+//RS         out.push_str(&canonical_web_harfbuzz_asset()?);
+//RS     }
+//RS     if runtime_parts.contains(&MirRuntimePartId::Math) {
+//RS         out.push_str(&js_time_zone_prelude()?);
+//RS     }
+//RS     out.push_str(JS_TASK_GROUP_PRELUDE);
+//RS     out.push_str(&js_runtime_stop_metadata());
+//RS     Ok(out)
+//RS }
+//RS 
+//RS 
+//RS /// Embed the canonical HarfBuzz Wasm adapter. Ui.js initializes it through
+//RS /// `jet_ui_web_harfbuzz_imports()` and supplies its low-level functions to app.wasm.
+//RS /// Missing, malformed, or oversized artifacts fail web code generation rather
+//RS /// than leaving a callback or metric approximation in the generated bundle.
+//RS fn canonical_web_harfbuzz_bytes() -> Result<&'static [u8], std::io::Error> {
+//RS     const ARTIFACT_PATH: &str = "wasm/jet_harfbuzz.wasm";
+//RS     const MAX_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+//RS     const BYTES: &[u8] = include_bytes!("../../../../Docs/site/assets/wasm/jet_harfbuzz.wasm");
+//RS     if BYTES.len() > MAX_ARTIFACT_BYTES
+//RS         || BYTES.len() < 8
+//RS         || &BYTES[..4] != b"\0asm"
+//RS         || BYTES[4..8] != [1, 0, 0, 0]
+//RS     {
+//RS         return Err(std::io::Error::new(
+//RS             std::io::ErrorKind::InvalidData,
+//RS             format!("invalid canonical HarfBuzz Wasm artifact: {ARTIFACT_PATH}"),
+//RS         ));
+//RS     }
+//RS     Ok(BYTES)
+//RS }
+//RS fn canonical_web_harfbuzz_asset() -> Result<String, std::io::Error> {
+//RS     use std::fmt::Write as _;
+//RS 
+//RS     const ARTIFACT_PATH: &str = "wasm/jet_harfbuzz.wasm";
+//RS     let bytes = canonical_web_harfbuzz_bytes()?;
+//RS     let digest = jet_foundation::SHA256::sha256_hex(bytes);
+//RS     let mut out = String::from(
+//RS         "\n// D-FOUND-PLATFORM1=A: the checked HarfBuzz bridge travels with the app.\n\
+//RS          const __jetCanonicalHarfBuzzWasmAsset = Object.freeze({path:",
+//RS     );
+//RS     out.push_str(&json_quote(ARTIFACT_PATH));
+//RS     out.push_str(",sha256:");
+//RS     out.push_str(&json_quote(&digest));
+//RS     out.push_str(",bytes:new Uint8Array([");
+//RS     for (index, byte) in bytes.iter().enumerate() {
+//RS         if index != 0 {
+//RS             out.push(',');
+//RS         }
+//RS         write!(out, "{byte}").expect("writing canonical HarfBuzz Wasm byte");
+//RS     }
+//RS     out.push_str(
+//RS         "])});\n\
+//RS          globalThis.__jetCanonicalHarfBuzzWasm = __jetCanonicalHarfBuzzWasmAsset;\n",
+//RS     );
+//RS     Ok(out)
+//RS }
+//RS 
+//RS 
+//RS fn web_tzdb_files() -> Result<Vec<(String, Vec<u8>)>, std::io::Error> {
+//RS     fn collect(
+//RS         root: &std::path::Path,
+//RS         dir: &std::path::Path,
+//RS         files: &mut Vec<(String, Vec<u8>)>,
+//RS     ) -> Result<(), std::io::Error> {
+//RS         let mut entries = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+//RS         entries.sort_by_key(|entry| entry.file_name());
+//RS         for entry in entries {
+//RS             let path = entry.path();
+//RS             let file_type = entry.file_type()?;
+//RS             if file_type.is_dir() {
+//RS                 collect(root, &path, files)?;
+//RS                 continue;
+//RS             }
+//RS             if !file_type.is_file() {
+//RS                 continue;
+//RS             }
+//RS             let bytes = std::fs::read(&path)?;
+//RS             if !bytes.starts_with(b"TZif") {
+//RS                 continue;
+//RS             }
+//RS             let name = path
+//RS                 .strip_prefix(root)
+//RS                 .map_err(|_| {
+//RS                     std::io::Error::new(
+//RS                         std::io::ErrorKind::InvalidData,
+//RS                         "TZif path must be below the TZif root",
+//RS                     )
+//RS                 })?
+//RS                 .components()
+//RS                 .filter_map(|component| component.as_os_str().to_str())
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("/");
+//RS             files.push((name, bytes));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Core/time/tzdb");
+//RS     let mut files = Vec::new();
+//RS     collect(&root, &root, &mut files)?;
+//RS     files.sort_by(|left, right| left.0.cmp(&right.0));
+//RS     Ok(files)
+//RS }
+//RS 
+//RS fn js_time_zone_prelude() -> Result<String, std::io::Error> {
+//RS     use std::fmt::Write as _;
+//RS 
+//RS     let mut out =
+//RS         String::from("\n// D-TIMEDEPTH1: exact repository TZif inputs for browser named zones.\n");
+//RS     for (name, bytes) in web_tzdb_files()? {
+//RS         write!(
+//RS             out,
+//RS             "JET_TIME_ZONE_DATA[{}] = new Uint8Array([",
+//RS             json_quote(&name)
+//RS         )
+//RS         .expect("writing generated TZif JavaScript");
+//RS         for byte in bytes {
+//RS             write!(out, "{byte},").expect("writing generated TZif JavaScript byte");
+//RS         }
+//RS         out.push_str("]);\n");
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS /// Build a Wasm Source Map v3 from rustc DWARF rows and generated Jet markers.
+//RS pub fn build_wasm_jet_source_map(
+//RS     wasm: &[u8],
+//RS     rust_src: &str,
+//RS     source_names: &[String],
+//RS     source_contents: &[String],
+//RS ) -> Result<String, String> {
+//RS     let code_off = jet_foundation::WasmDebug::code_section_payload_offset(wasm)
+//RS         .map_err(|e| format!("wasm code section: {e:?}"))?
+//RS         .ok_or_else(|| "wasm module has no Code section".to_string())?;
+//RS     let dwarf = jet_foundation::WasmDebug::parse_debug_line(wasm)
+//RS         .map_err(|e| format!("wasm .debug_line: {e:?}"))?;
+//RS     let rust_to_jet = rust_marker_table(rust_src);
+//RS     let name_index: std::collections::HashMap<&str, usize> = source_names
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(i, name)| (name.as_str(), i))
+//RS         .collect();
+//RS 
+//RS     let mut mappings = Vec::new();
+//RS     let mut last_offset = None;
+//RS     for row in &dwarf {
+//RS         if !row.is_stmt || row.end_sequence || row.line == 0 {
+//RS             continue;
+//RS         }
+//RS         // Only rows that land in our generated guest Rust.
+//RS         if !row.file.ends_with("app_wasm.rs") && !row.file.contains("app_wasm.rs") {
+//RS             // rustc may record just the basename or a staging path.
+//RS             let base = std::path::Path::new(&row.file)
+//RS                 .file_name()
+//RS                 .and_then(|n| n.to_str())
+//RS                 .unwrap_or(row.file.as_str());
+//RS             if base != "app_wasm.rs" {
+//RS                 continue;
+//RS             }
+//RS         }
+//RS         let Some((source_name, jet_line)) = rust_to_jet.jet_for_rust_line(row.line as usize) else {
+//RS             continue;
+//RS         };
+//RS         let Some(&source) = name_index.get(source_name.as_str()) else {
+//RS             continue;
+//RS         };
+//RS         let file_offset = code_off
+//RS             .checked_add(row.address as usize)
+//RS             .ok_or_else(|| "wasm mapping offset overflow".to_string())?;
+//RS         if last_offset == Some(file_offset) {
+//RS             continue;
+//RS         }
+//RS         last_offset = Some(file_offset);
+//RS         mappings.push(JSMapping {
+//RS             generated_line: 0,
+//RS             generated_column: file_offset,
+//RS             source,
+//RS             original_line: jet_line.saturating_sub(1),
+//RS         });
+//RS     }
+//RS     mappings.sort_by_key(|m| {
+//RS         (
+//RS             m.generated_line,
+//RS             m.generated_column,
+//RS             m.source,
+//RS             m.original_line,
+//RS         )
+//RS     });
+//RS     let encoded = encode_source_mappings(&mappings);
+//RS     let names = source_names
+//RS         .iter()
+//RS         .map(|n| json_quote(n))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let contents = source_contents
+//RS         .iter()
+//RS         .map(|c| json_quote(c))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     Ok(format!(
+//RS         "{{\"version\":3,\"file\":\"app.wasm\",\"sources\":[{names}],\"sourcesContent\":[{contents}],\"names\":[],\"mappings\":{}}}\n",
+//RS         json_quote(&encoded)
+//RS     ))
+//RS }
+//RS 
+//RS struct RustMarkerTable {
+//RS     /// rust line -> (source_name, jet line)
+//RS     rows: std::collections::BTreeMap<usize, (String, usize)>,
+//RS }
+//RS 
+//RS impl RustMarkerTable {
+//RS     fn jet_for_rust_line(&self, rust_line: usize) -> Option<(String, usize)> {
+//RS         self.rows
+//RS             .range(..=rust_line)
+//RS             .next_back()
+//RS             .map(|(_, v)| v.clone())
+//RS     }
+//RS }
+//RS 
+//RS fn rust_marker_table(rust_src: &str) -> RustMarkerTable {
+//RS     let mut rows = std::collections::BTreeMap::new();
+//RS     let mut pending_source: Option<String> = None;
+//RS     let mut pending_line: Option<usize> = None;
+//RS     for (i, line) in rust_src.lines().enumerate() {
+//RS         let rust_line = i + 1;
+//RS         let trim = line.trim_start();
+//RS         if let Some(name) = trim.strip_prefix("// jet:source-map source=") {
+//RS             pending_source = Some(name.trim().to_string());
+//RS             continue;
+//RS         }
+//RS         if let Some(n) = trim.strip_prefix("// jet:line ") {
+//RS             pending_line = n.trim().parse().ok();
+//RS             continue;
+//RS         }
+//RS         if let (Some(source), Some(jet_line)) = (pending_source.as_ref(), pending_line.take()) {
+//RS             rows.entry(rust_line)
+//RS                 .or_insert_with(|| (source.clone(), jet_line));
+//RS         }
+//RS     }
+//RS     RustMarkerTable { rows }
+//RS }
+//RS 
+//RS fn json_quote(s: &str) -> String {
+//RS     let mut out = String::from("\"");
+//RS     for c in s.chars() {
+//RS         match c {
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '"' => out.push_str("\\\""),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '\r' => out.push_str("\\r"),
+//RS             '\t' => out.push_str("\\t"),
+//RS             c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+//RS             c => out.push(c),
+//RS         }
+//RS     }
+//RS     out.push('"');
+//RS     out
+//RS }
+//RS 
+//RS struct JSMapping {
+//RS     generated_line: usize,
+//RS     generated_column: usize,
+//RS     source: usize,
+//RS     original_line: usize,
+//RS }
+//RS 
+//RS fn encode_source_mappings(mappings: &[JSMapping]) -> String {
+//RS     let mut out = String::new();
+//RS     let mut generated_line = 0usize;
+//RS     let mut generated_column = 0i64;
+//RS     let mut source = 0i64;
+//RS     let mut original_line = 0i64;
+//RS     let mut original_column = 0i64;
+//RS     let mut first_segment = true;
+//RS 
+//RS     for mapping in mappings {
+//RS         while generated_line < mapping.generated_line {
+//RS             out.push(';');
+//RS             generated_line += 1;
+//RS             generated_column = 0;
+//RS             first_segment = true;
+//RS         }
+//RS         if !first_segment {
+//RS             out.push(',');
+//RS         }
+//RS         let next_generated_column = mapping.generated_column as i64;
+//RS         let next_source = mapping.source as i64;
+//RS         let next_original_line = mapping.original_line as i64;
+//RS         encode_base64_vlq(next_generated_column - generated_column, &mut out);
+//RS         encode_base64_vlq(next_source - source, &mut out);
+//RS         encode_base64_vlq(next_original_line - original_line, &mut out);
+//RS         encode_base64_vlq(-original_column, &mut out);
+//RS         generated_column = next_generated_column;
+//RS         source = next_source;
+//RS         original_line = next_original_line;
+//RS         original_column = 0;
+//RS         first_segment = false;
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn encode_base64_vlq(value: i64, out: &mut String) {
+//RS     const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+//RS     let mut value = if value < 0 {
+//RS         ((-value) << 1) | 1
+//RS     } else {
+//RS         value << 1
+//RS     };
+//RS     loop {
+//RS         let mut digit = (value & 31) as usize;
+//RS         value >>= 5;
+//RS         if value != 0 {
+//RS             digit |= 32;
+//RS         }
+//RS         out.push(BASE64[digit] as char);
+//RS         if value == 0 {
+//RS             break;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn js_runtime_stop_metadata() -> String {
+//RS     let report_template = |report: jet_foundation::Outcome::JetRuntimeDiagnostic| {
+//RS         let rich_location = format!(
+//RS             "  --> __JET_RUNTIME_FILE__:{} in __JET_RUNTIME_FUNCTION__\n",
+//RS             u32::MAX
+//RS         );
+//RS         let plain_location = format!("  --> __JET_RUNTIME_FILE__:{}\n", u32::MAX);
+//RS         report
+//RS             .rendered
+//RS             .replace(&rich_location, "")
+//RS             .replace(&plain_location, "")
+//RS             .replace(&u32::MAX.to_string(), "__JET_RUNTIME_LINE__")
+//RS             .replace("\n Why:", "\n__JET_RUNTIME_CONTEXT__\n Why:")
+//RS     };
+//RS     let default_report = jet_foundation::Outcome::jet_render_runtime_stop(
+//RS         "__JET_RUNTIME_STOP_CODE__",
+//RS         "__JET_RUNTIME_FILE__",
+//RS         u32::MAX,
+//RS         "__JET_RUNTIME_FUNCTION__",
+//RS         "",
+//RS         1,
+//RS         1,
+//RS         "__JET_RUNTIME_MESSAGE__",
+//RS         "",
+//RS     );
+//RS     let default_source = default_report.source;
+//RS     let default_exit_code = default_report.exit_code;
+//RS     let default_rendered = report_template(default_report);
+//RS     let mut out = format!(
+//RS         "const JET_RUNTIME_STACK = [];\n\
+//RS          const JET_RUNTIME_STACK_LIMIT = {};\n\
+//RS          const JET_STACK_OVERFLOW_MESSAGE = {};\n\
+//RS          const JET_RUNTIME_STOP_DEFAULT = Object.freeze({{ source: {}, exit_code: {}, rich_context: false, rendered: {} }});\n\
+//RS          const JET_RUNTIME_STOP_METADATA = Object.freeze({{\n",
+//RS         jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT,
+//RS         json_quote(&jet_foundation::Outcome::jet_stack_overflow_message(
+//RS             "__JET_RUNTIME_FUNCTION__",
+//RS         )),
+//RS         json_quote(&default_source),
+//RS         default_exit_code,
+//RS         json_quote(&default_rendered),
+//RS     );
+//RS     for row in jet_foundation::Registry::diagnostic_rows()
+//RS         .iter()
+//RS         .filter(|row| {
+//RS             row.stage == "runtime"
+//RS                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
+//RS         })
+//RS     {
+//RS         let message = if row.template_holes.iter().any(|hole| *hole == "type") {
+//RS             "__JET_RUNTIME_TODO_PREFIX__ — expected __JET_RUNTIME_TODO_TYPE__"
+//RS         } else {
+//RS             "__JET_RUNTIME_MESSAGE__"
+//RS         };
+//RS         let report = jet_foundation::Outcome::jet_render_runtime_stop(
+//RS             row.code,
+//RS             "__JET_RUNTIME_FILE__",
+//RS             u32::MAX,
+//RS             "__JET_RUNTIME_FUNCTION__",
+//RS             "",
+//RS             1,
+//RS             1,
+//RS             message,
+//RS             "",
+//RS         );
+//RS         let source = report.source;
+//RS         let exit_code = report.exit_code;
+//RS         let rich_context = jet_foundation::Outcome::jet_runtime_stop_has_context(report.code);
+//RS         let rendered = report_template(report);
+//RS         out.push_str(&format!(
+//RS             "  {}: Object.freeze({{ source: {}, exit_code: {}, rich_context: {}, rendered: {} }}),\n",
+//RS             json_quote(row.code),
+//RS             json_quote(&source),
+//RS             exit_code,
+//RS             rich_context,
+//RS             json_quote(&rendered),
+//RS         ));
+//RS     }
+//RS     out.push_str("});\n\n");
+//RS     out
+//RS }
+// END-PORT-PENDING 0541 crates/jet-codegen/src/Codegen/Web.rs:1-604
+

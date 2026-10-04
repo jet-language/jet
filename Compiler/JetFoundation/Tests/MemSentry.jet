@@ -1,0 +1,225 @@
+// MemSentry.rs:720-869 original runtime closure is explicitly gated below.
+// These executable tests exercise the real pure Foundation policy functions.
+// They are ADDITIONAL tests, not replacements for the four native originals.
+use jet_foundation.[JetSentryAllocation, JetSentryGate, JetSentryObligationStatus, MemoryLedgerWitness, MAX_MEMORY_LEDGER_BYTES]
+use jet_foundation.[jet_memory_ledger_row, jet_memory_ledger_within_limit, jet_sentry_access_end, jet_sentry_code_detail, jet_sentry_expired_range_contains, jet_sentry_expired_stack_lowest, jet_sentry_fault, jet_sentry_gate_name, jet_sentry_live_range_contains, jet_sentry_newest_expired_heap, jet_sentry_newest_expired_kind, jet_sentry_range_end, jet_sentry_repairs, jet_sentry_runtime_available, jet_sentry_starts_in_live_range, json_escape]
+use jet_foundation.[JetSentryStackAllocation, jet_sentry_next_seq, jet_sentry_register_heap_range, jet_sentry_register_frame_range, jet_sentry_quarantine_heap_ranges, jet_sentry_quarantine_owner_ranges]
+
+#Test("MemSentry record-vector fragments mutate the original vectors in order") {
+    sequence := U64{0}
+    heap := [JetSentryAllocation]{}
+    stack := [JetSentryStackAllocation]{}
+    first :: jet_sentry_next_seq(&sequence)
+    assert_eq(first, U64{1})
+    jet_sentry_register_heap_range(&heap, Val(U64{17}), U64{4096}, U64{0}, first)
+    jet_sentry_register_heap_range(&heap, None, U64{4096}, U64{8}, jet_sentry_next_seq(&sequence))
+    jet_sentry_register_heap_range(&heap, Val(U64{18}), U64{8192}, U64{8}, jet_sentry_next_seq(&sequence))
+    assert_eq(heap.len(), 3)
+    assert_eq(heap[0].len, U64{1})
+    assert_eq(heap[1].seq, U64{2})
+    assert_eq(heap[2].owner, Val(U64{18}))
+    jet_sentry_quarantine_owner_ranges(&heap, U64{17})
+    assert(!heap[0].live)
+    assert(heap[1].live && heap[2].live)
+    assert(jet_sentry_quarantine_heap_ranges(&heap, U64{4096}))
+    assert(!heap[0].live && !heap[1].live && heap[2].live)
+    assert(!jet_sentry_quarantine_heap_ranges(&heap, U64{4096}))
+    assert(!jet_sentry_quarantine_heap_ranges(&heap, U64{16384}))
+    loop _ in 0..<4 -> jet_sentry_register_frame_range(&stack, U64{4096}, U64{8}, jet_sentry_next_seq(&sequence))
+    assert_eq(stack.len(), 1)
+    assert_eq(stack[0].seq, sequence)
+    jet_sentry_register_frame_range(&stack, U64{4096}, U64{4}, jet_sentry_next_seq(&sequence))
+    assert_eq(stack.len(), 2)
+    assert_eq(stack[0].len, U64{8})
+    assert_eq(stack[1].len, U64{4})
+    jet_sentry_register_frame_range(&stack, U64{8192}, U64{0}, jet_sentry_next_seq(&sequence))
+    assert_eq(stack.len(), 3)
+    assert_eq(stack[2].len, U64{1})
+    // These vectors are NOT a mock for the missing native frame/expired maps.
+    // The original 10000-frame boundedness test remains explicitly gated.
+}
+
+#Test("MemSentry ledger uses the canonical Cc escape contract") {
+    controls :: String.from_bytes([U8]{0, 8, 9, 10, 12, 13, 31, 34, 92, 127, 194, 128, 194, 159}) ?? panic("control fixture UTF-8")
+    assert_eq(json_escape(controls), "\\u0000\\u0008\\t\\n\\u000c\\r\\u001f\\\"\\\\\\u007f\\u0080\\u009f")
+    assert_eq(json_escape("é界😀"), "é界😀")
+    assert_eq(json_escape(""), "")
+}
+#Test("MemSentry ledger preserves every ordered field and literal null") {
+    repairs :: [String]{"replace \"raw\"", "line\nrepair"}
+    witness :: MemoryLedgerWitness{kind: "sentry", code: "R0802", source: "stack.jet",
+        span_start: U64{4294967295}, span_end: U64{4294967295}, byte_spans: false,
+        scope: "same-scope", provenance: "source #Unsafe gate", detail: "the owning Jet frame has expired",
+        expected: None, repairs: repairs.view(0..<repairs.len())}
+    row :: String.from_bytes(jet_memory_ledger_row(witness)) ?? panic("ledger UTF-8")
+    assert_eq(row, "{{\"schema\":\"jet.memory.ledger\",\"version\":1,\"kind\":\"sentry\",\"code\":\"R0802\",\"source\":\"stack.jet\",\"span_start\":4294967295,\"span_end\":4294967295,\"byte_spans\":false,\"scope\":\"same-scope\",\"provenance\":\"source #Unsafe gate\",\"detail\":\"the owning Jet frame has expired\",\"expected\":null,\"repairs\":[\"replace \\\"raw\\\"\",\"line\\nrepair\"]}}\n")
+    no_repairs :: [String]{}
+    expected :: MemoryLedgerWitness{kind: "gc", code: "G0001", source: "é.jet",
+        span_start: U64{18446744073709551615}, span_end: U64{18446744073709551615}, byte_spans: true,
+        scope: "", provenance: "", detail: "", expected: Val("null"), repairs: no_repairs.view(0..<0)}
+    expected_row :: String.from_bytes(jet_memory_ledger_row(expected)) ?? panic("expected ledger UTF-8")
+    assert(expected_row.contains("\"source\":\"é.jet\""))
+    assert(expected_row.contains("\"span_start\":18446744073709551615,\"span_end\":18446744073709551615,\"byte_spans\":true"))
+    assert(expected_row.ends_with("\"expected\":\"null\",\"repairs\":[]}}\n"))
+}
+#Test("MemSentry ledger limit is bytes with saturating overflow behavior") {
+    assert(jet_memory_ledger_within_limit(U64{0}, MAX_MEMORY_LEDGER_BYTES))
+    assert(jet_memory_ledger_within_limit(MAX_MEMORY_LEDGER_BYTES, U64{0}))
+    assert(!jet_memory_ledger_within_limit(MAX_MEMORY_LEDGER_BYTES, U64{1}))
+    assert(!jet_memory_ledger_within_limit(U64{0}, MAX_MEMORY_LEDGER_BYTES + U64{1}))
+    assert(!jet_memory_ledger_within_limit(U64{18446744073709551615}, U64{0}))
+    assert(!jet_memory_ledger_within_limit(U64{18446744073709551615}, U64{1}))
+    assert(!jet_memory_ledger_within_limit(U64{1}, U64{18446744073709551615}))
+    assert(jet_memory_ledger_within_limit(MAX_MEMORY_LEDGER_BYTES - U64{2}, U64{2}))
+    assert(!jet_memory_ledger_within_limit(MAX_MEMORY_LEDGER_BYTES - U64{2}, U64{3}))
+}
+#Test("MemSentry gate availability is release hardened or current fence") {
+    loop release in [Bool]{false, true} {
+        loop hardened in [Bool]{false, true} {
+            loop depth in [U64]{U64{0}, U64{1}, U64{18446744073709551615}} {
+                assert_eq(jet_sentry_runtime_available(release, hardened, depth), !release || hardened || depth != (U64{0}))
+            }
+        }
+    }
+    assert_eq(jet_sentry_gate_name(JetSentryGate{enabled: true, file: "stack.jet", line: U32{1}, reason: "same-scope"}), "same-scope")
+    assert_eq(jet_sentry_gate_name(JetSentryGate{enabled: false, file: "", line: U32{0}, reason: ""}), ":0")
+    assert_eq(jet_sentry_gate_name(JetSentryGate{enabled: true, file: "x.jet", line: U32{4294967295}, reason: ""}), "x.jet:4294967295")
+    assert_eq(JetSentryObligationStatus.Failed.as_str(), "false")
+}
+#Test("MemSentry selected usize range math retains inclusive boundary distinction") {
+    max32 :: U64{4294967295}
+    max64 :: U64{18446744073709551615}
+    assert_eq(jet_sentry_access_end(U64{16}, U64{0}, max64), Val(U64{17}))
+    assert_eq(jet_sentry_access_end(max32, U64{0}, max32), None)
+    assert_eq(jet_sentry_access_end(max32 - U64{7}, U64{8}, max32), None)
+    assert_eq(jet_sentry_access_end(max32 - U64{8}, U64{8}, max32), Val(max32))
+    assert_eq(jet_sentry_access_end(max64 - U64{7}, U64{8}, max64), None)
+    assert_eq(jet_sentry_access_end(max64 - U64{8}, U64{8}, max64), Val(max64))
+    assert_eq(jet_sentry_range_end(max32 - U64{2}, U64{8}, max32), max32)
+    assert_eq(jet_sentry_range_end(max64 - U64{2}, U64{8}, max64), max64)
+    assert(jet_sentry_live_range_contains(U64{4096}, U64{8}, U64{4096}, U64{4104}, max64))
+    assert(!jet_sentry_live_range_contains(U64{4096}, U64{8}, U64{4100}, U64{4108}, max64))
+    assert(jet_sentry_starts_in_live_range(U64{4096}, U64{8}, U64{4104}, max64))
+    assert(!jet_sentry_expired_range_contains(U64{4096}, U64{8}, U64{4104}, max64))
+    assert(jet_sentry_expired_range_contains(U64{4096}, U64{8}, U64{4100}, max64))
+    assert_eq(jet_sentry_expired_stack_lowest(U64{4096}, U64{8}), U64{4089})
+    assert_eq(jet_sentry_expired_stack_lowest(U64{2}, U64{8}), U64{0})
+    assert_eq(jet_sentry_expired_stack_lowest(U64{2}, U64{0}), U64{2})
+}
+#Test("MemSentry expired attribution follows registration order and heap wins ties") {
+    max64 :: U64{18446744073709551615}
+    heap :: [JetSentryAllocation]{
+        JetSentryAllocation{start: U64{4096}, len: U64{8}, live: false, owner: None, seq: U64{3}},
+        JetSentryAllocation{start: U64{4096}, len: U64{8}, live: true, owner: Val(U64{17}), seq: U64{4}},
+        JetSentryAllocation{start: U64{4096}, len: U64{8}, live: false, owner: None, seq: U64{5}}
+    }
+    assert_eq(jet_sentry_newest_expired_heap(heap.view(0..<heap.len()), U64{4100}, max64), Val(U64{5}))
+    assert_eq(jet_sentry_newest_expired_heap(heap.view(0..<heap.len()), U64{4104}, max64), None)
+    assert_eq(jet_sentry_newest_expired_kind(None, None), None)
+    assert_eq(jet_sentry_newest_expired_kind(Val(U64{5}), None), Val(false))
+    assert_eq(jet_sentry_newest_expired_kind(None, Val(U64{4})), Val(true))
+    assert_eq(jet_sentry_newest_expired_kind(Val(U64{5}), Val(U64{4})), Val(false))
+    assert_eq(jet_sentry_newest_expired_kind(Val(U64{5}), Val(U64{5})), Val(false))
+    assert_eq(jet_sentry_newest_expired_kind(Val(U64{5}), Val(U64{6})), Val(true))
+}
+#Test("MemSentry raw and borrowed foreign fault precedence matches every branch") {
+    // The booleans below are policy inputs, NOT a mock native recorder.
+    assert_eq(jet_sentry_code_detail(U64{4096}, U64{8}, Val(U64{4104}), true, true, Val(true), true), None)
+    aligned :: jet_sentry_code_detail(U64{4097}, U64{8}, Val(U64{4105}), true, true, Val(true), true) ?? panic("alignment")
+    assert_eq(aligned.code, "R0803")
+    assert_eq(aligned.detail, "address 0x1001 is not aligned to 8 bytes")
+    stack :: jet_sentry_code_detail(U64{4097}, U64{8}, Val(U64{4105}), false, true, Val(true), true) ?? panic("expired")
+    assert_eq(stack.code, "R0802")
+    assert_eq(stack.detail, "the owning Jet frame has expired")
+    heap :: jet_sentry_code_detail(U64{4097}, U64{8}, Val(U64{4105}), false, true, Val(false), false) ?? panic("quarantine")
+    assert_eq(heap.code, "R0802")
+    assert_eq(heap.detail, "the address belongs to quarantined storage")
+    boundary :: jet_sentry_code_detail(U64{4104}, U64{8}, Val(U64{4112}), false, true, None, false) ?? panic("boundary")
+    assert_eq(boundary.code, "R0801")
+    assert_eq(boundary.detail, "the foreign access extends beyond a live allocation")
+    raw :: jet_sentry_code_detail(U64{4097}, U64{8}, Val(U64{4105}), false, false, None, true) ?? panic("raw provenance")
+    assert_eq(raw.code, "R0801")
+    assert_eq(raw.detail, "no live allocation contains this address")
+    assert_eq(jet_sentry_code_detail(U64{4096}, U64{8}, Val(U64{4104}), false, false, None, false), None)
+    foreign_align :: jet_sentry_code_detail(U64{4097}, U64{8}, Val(U64{4105}), false, false, None, false) ?? panic("foreign alignment")
+    assert_eq(foreign_align.code, "R0803")
+    null :: jet_sentry_code_detail(U64{0}, U64{8}, Val(U64{8}), false, false, None, false) ?? panic("null")
+    assert_eq(null.code, "R0801")
+    overflow :: jet_sentry_code_detail(U64{18446744073709551615}, U64{8}, None, false, false, None, false) ?? panic("overflow")
+    assert_eq(overflow.code, "R0801")
+    assert_eq(jet_sentry_code_detail(U64{4097}, U64{0}, Val(U64{4098}), false, false, None, false), None)
+}
+#Test("MemSentry fault retains component fence and exact repair rows") {
+    gate :: JetSentryGate{enabled: true, file: "task.jet", line: U32{2}, reason: "task-frame"}
+    detail :: (code: "R0802", detail: "the owning Jet frame has expired")
+    fault :: jet_sentry_fault(^gate, ^"read", ^"valid_ptr", ^Val("foreign"), U64{1}, ^detail)
+    assert_eq(fault.code, "R0802")
+    assert_eq(fault.file, "task.jet")
+    assert_eq(fault.line, U32{2})
+    assert_eq(fault.gate, "task-frame")
+    assert_eq(fault.operation, "read")
+    assert_eq(fault.obligation, "valid_ptr")
+    assert_eq(fault.obligation_status.as_str(), "false")
+    assert_eq(fault.foreign_component, Val("foreign"))
+    assert_eq(fault.foreign_fenced, Val(true))
+    assert_eq(fault.detail, "the owning Jet frame has expired")
+    empty_gate :: JetSentryGate{enabled: true, file: "x.jet", line: U32{3}, reason: ""}
+    empty_detail :: (code: "R0801", detail: "no live allocation contains this address")
+    empty :: jet_sentry_fault(^empty_gate, ^"read", ^"valid_ptr", ^Val(""), U64{1}, ^empty_detail)
+    assert_eq(empty.foreign_component, None)
+    assert_eq(empty.foreign_fenced, None)
+    assert_eq(empty.gate, "x.jet:3")
+    assert_eq(jet_sentry_repairs("R0802")[0], "move the raw access before the storage is released")
+    assert_eq(jet_sentry_repairs("R0802")[1], "replace the raw pointer with an owned value")
+    assert_eq(jet_sentry_repairs("R0803")[0], "derive an aligned pointer from the live allocation")
+    assert_eq(jet_sentry_repairs("R0803")[1], "use the typed memory operation instead of raw address arithmetic")
+    assert_eq(jet_sentry_repairs("R0801")[0], "derive the pointer from live storage inside this gate")
+    assert_eq(jet_sentry_repairs("R0801")[1], "remove the raw access")
+}
+
+// ORIGINAL NATIVE TEST GATES -- NOT counted as ported/exercised tests.
+// Rust 725 TEST_LOCK requires a real global serial lock, held for the WHOLE
+// fixture including the joined worker. All reset/cleanup scopes must execute
+// through actual native state and RAII, never through a pure policy input.
+//
+// 728 stack_registration_is_live_only_inside_its_frame (#4494/#4392/#4483):
+// reset; hardened=true; local I64=7; enter frame; actual address_of(local);
+// scope(true,"stack.jet",1,"same-scope"); register_stack(address,sizeof(I64));
+// check(address,8,8,"read","valid_ptr")==None; explicitly release frame;
+// check must produce code=R0802, detail="the owning Jet frame has expired";
+// release gate; reset. Needs real stack-address/lifetime ownership, not 0x1000.
+//
+// 749 frame_expiry_does_not_expire_heap_or_foreign_storage (#4494/#4483):
+// reset; hardened=true; local I64=17; enter frame; actual address_of(local);
+// scope(true,"persistent.jet",1,"persistent"); register_allocation(address,8);
+// release frame; check(address,8,8,"read","valid_ptr")==None;
+// check_foreign(0x1000,8,8,"ffi_ptr","ffi_contract")==None;
+// quarantine(address,8) must poison the real local bytes with 0xDD;
+// check(address,8,8,"read","valid_ptr") gives R0802 and
+// "the address belongs to quarantined storage"; release gate; reset.
+//
+// 772 nested_and_thread_frames_have_distinct_lifetimes (#4494/#4499/#4483):
+// reset; hardened=true; local I64=11; scope(true,"nested.jet",1,"nested-frame");
+// outer frame/current id; register_stack(actual address_of(local),8);
+// inner frame/current id != outer id; same registration; release inner;
+// check(address,8,8,"read","valid_ptr")==None; release outer;
+// check gives R0802. Spawn and JOIN one real native execution context:
+// its scope(true,"task.jet",2,"task-frame"), local I64=13, frame/current id
+// != outer id; register_stack(actual task address,8); live check==None;
+// release task frame; check gives R0802; release task scope on worker exit.
+// Join must succeed. Release caller gate; reset. Cooperative same-thread TLS
+// cannot replace this native-thread fixture or prove execution-context isolation.
+//
+// 817 repeated_frames_keep_dangling_stack_writes_exact_and_memory_bounded
+// (#4494/#4499/#4483): reset; hardened=true; local I64=23; actual address;
+// scope(true,"dangling.jet",1,"dangling-write"); 10000 times enter frame,
+// register_stack(address,8) four times, live write check(address,8,8)==None,
+// release frame. Under actual allocations lock assert frames.is_empty(),
+// expired_stack.len()==1, heap.is_empty(). Dangling write check(address,8,8)
+// gives R0802 and "the owning Jet frame has expired"; check(address+4,4,4)
+// gives R0802; check(address+8,8,8) gives R0801. Register heap(address,8),
+// quarantine(address,0): dangling check detail must be quarantined storage.
+// Enter new frame/register_stack(address,8); live write check==None; release
+// frame; dangling check detail must again be owning frame expired. Release
+// gate/reset. No expired-table length constant, private array registry, or
+// synthetic policy facts can stand in for those memory-boundedness assertions.

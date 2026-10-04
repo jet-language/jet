@@ -1,0 +1,750 @@
+// PORT-PENDING 0442 crates-jet-sema-src-sema-registration-serde-ast-module-group: crates/jet-sema/src/Sema/Registration/Serde/Ast.rs:1-746
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS 
+//RS pub(super) fn no_matching_enum(span: Span) -> Stmt {
+//RS     ret(
+//RS         err(
+//RS             list_literal(
+//RS                 vec![field_error("", "no matching enum variant", span)],
+//RS                 span,
+//RS             ),
+//RS             span,
+//RS         ),
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn no_matching_union(span: Span) -> Stmt {
+//RS     ret(
+//RS         err(
+//RS             list_literal(
+//RS                 vec![field_error("", "no matching union member", span)],
+//RS                 span,
+//RS             ),
+//RS             span,
+//RS         ),
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn enum_payload_type(variant: &crate::AST::Variant) -> Type {
+//RS     match &variant.payload {
+//RS         VariantPayload::Unit | VariantPayload::Named(_) => data_tree_type(),
+//RS         VariantPayload::Single(ty, _) => ty.clone(),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn payload_bindings(payload: &VariantPayload, prefix: &str) -> Vec<String> {
+//RS     let count = match payload {
+//RS         VariantPayload::Unit => 0,
+//RS         VariantPayload::Single(..) => 1,
+//RS         VariantPayload::Named(fields) => fields.len(),
+//RS     };
+//RS     (0..count).map(|index| format!("{prefix}{index}")).collect()
+//RS }
+//RS 
+//RS pub(super) fn pattern_test(
+//RS     subject: &str,
+//RS     variant: &crate::AST::Variant,
+//RS     bindings: Vec<String>,
+//RS     span: Span,
+//RS ) -> Expr {
+//RS     Expr::PatternTest {
+//RS         subject: Box::new(ident(subject, span)),
+//RS         pattern: Pattern::Variant {
+//RS             variant: variant.name.clone(),
+//RS             bindings: bindings
+//RS                 .into_iter()
+//RS                 .map(|name| PatSlot::Bind { name, span })
+//RS                 .collect(),
+//RS             leading_dot: true,
+//RS             span,
+//RS         },
+//RS         span,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn pattern_switch(
+//RS     subject: Expr,
+//RS     variant: &str,
+//RS     bindings: Vec<String>,
+//RS     body: Vec<Stmt>,
+//RS     else_body: Option<Vec<Stmt>>,
+//RS     span: Span,
+//RS ) -> Stmt {
+//RS     let pattern_subject = subject.clone();
+//RS     Stmt::Switch {
+//RS         subject,
+//RS         arms: vec![SwitchArm {
+//RS             cond: Expr::PatternTest {
+//RS                 subject: Box::new(pattern_subject),
+//RS                 pattern: Pattern::Variant {
+//RS                     variant: variant.to_string(),
+//RS                     bindings: bindings
+//RS                         .into_iter()
+//RS                         .map(|name| PatSlot::Bind { name, span })
+//RS                         .collect(),
+//RS                     leading_dot: true,
+//RS                     span,
+//RS                 },
+//RS                 span,
+//RS             },
+//RS             body,
+//RS             span,
+//RS         }],
+//RS         else_body,
+//RS         span,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn result_switch(
+//RS     subject: Expr,
+//RS     ok_binding: &str,
+//RS     ok_body: Vec<Stmt>,
+//RS     err_binding: &str,
+//RS     err_body: Vec<Stmt>,
+//RS     span: Span,
+//RS ) -> Stmt {
+//RS     let ok_subject = subject.clone();
+//RS     let err_subject = subject.clone();
+//RS     Stmt::Switch {
+//RS         subject,
+//RS         arms: vec![
+//RS             SwitchArm {
+//RS                 cond: Expr::PatternTest {
+//RS                     subject: Box::new(ok_subject),
+//RS                     pattern: Pattern::Variant {
+//RS                         variant: "Ok".to_string(),
+//RS                         bindings: vec![PatSlot::Bind {
+//RS                             name: ok_binding.to_string(),
+//RS                             span,
+//RS                         }],
+//RS                         leading_dot: true,
+//RS                         span,
+//RS                     },
+//RS                     span,
+//RS                 },
+//RS                 body: ok_body,
+//RS                 span,
+//RS             },
+//RS             SwitchArm {
+//RS                 cond: Expr::PatternTest {
+//RS                     subject: Box::new(err_subject),
+//RS                     pattern: Pattern::Variant {
+//RS                         variant: "Err".to_string(),
+//RS                         bindings: vec![PatSlot::Bind {
+//RS                             name: err_binding.to_string(),
+//RS                             span,
+//RS                         }],
+//RS                         leading_dot: true,
+//RS                         span,
+//RS                     },
+//RS                     span,
+//RS                 },
+//RS                 body: err_body,
+//RS                 span,
+//RS             },
+//RS         ],
+//RS         else_body: Some(Vec::new()),
+//RS         span,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn option_switch(
+//RS     subject: Expr,
+//RS     binding_name: &str,
+//RS     body: Vec<Stmt>,
+//RS     else_body: Vec<Stmt>,
+//RS     span: Span,
+//RS ) -> Stmt {
+//RS     pattern_switch(
+//RS         subject,
+//RS         "Val",
+//RS         vec![binding_name.to_string()],
+//RS         body,
+//RS         Some(else_body),
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn option_encode(subject: Expr, key: &str, field_names: Vec<String>, span: Span) -> Stmt {
+//RS     let binding_name = format!(
+//RS         "jet_serde_option_value_{}",
+//RS         field_names
+//RS             .first()
+//RS             .expect("one field for option encode")
+//RS             .replace('.', "_")
+//RS     );
+//RS     option_switch(
+//RS         subject,
+//RS         &binding_name,
+//RS         vec![assign_index(
+//RS             "out",
+//RS             string_expr(key, span),
+//RS             method(ident(&binding_name, span), "encode", Vec::new(), span),
+//RS             span,
+//RS         )],
+//RS         Vec::new(),
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn for_each_map(var: &str, var2: &str, collection: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
+//RS     Stmt::For {
+//RS         var: var.to_string(),
+//RS         var_span: span,
+//RS         var2: Some((var2.to_string(), span)),
+//RS         kind: ForKind::In {
+//RS             collection,
+//RS             step: None,
+//RS         },
+//RS         body,
+//RS         span,
+//RS         arrow_body: false,
+//RS         label: None,
+//RS         auto_vectorization: None,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn for_each(var: &str, collection: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
+//RS     Stmt::For {
+//RS         var: var.to_string(),
+//RS         var_span: span,
+//RS         var2: None,
+//RS         kind: ForKind::In {
+//RS             collection,
+//RS             step: None,
+//RS         },
+//RS         body,
+//RS         span,
+//RS         arrow_body: false,
+//RS         label: None,
+//RS         auto_vectorization: None,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn binding(name: &str, ty: Option<Type>, init: Expr, mutable: bool, span: Span) -> Stmt {
+//RS     Stmt::Val(crate::AST::Binding {
+//RS         mutable,
+//RS         markers: Vec::new(),
+//RS         reactive_upgrade: false,
+//RS         meta: None,
+//RS         name: name.to_string(),
+//RS         name_span: span,
+//RS         sigil_span: None,
+//RS         pattern: None,
+//RS         ty,
+//RS         ty_span: Some(span),
+//RS         init,
+//RS         is_comptime: false,
+//RS         ct: None,
+//RS         uninit: false,
+//RS         arena_view: false,
+//RS         string_view: false,
+//RS         gc_promotion: None,
+//RS         gc_transferred: false,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn assign_local(name: &str, value: Expr, span: Span) -> Stmt {
+//RS     Stmt::Assign {
+//RS         target: LValue::Local {
+//RS             name: name.to_string(),
+//RS             name_span: span,
+//RS         },
+//RS         op: None,
+//RS         op_span: span,
+//RS         value,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn assign_index(base: &str, index: Expr, value: Expr, span: Span) -> Stmt {
+//RS     Stmt::Assign {
+//RS         target: LValue::Index {
+//RS             base: Box::new(ident(base, span)),
+//RS             index: Box::new(index),
+//RS             span,
+//RS             kind: IndexKind::Unknown,
+//RS         },
+//RS         op: None,
+//RS         op_span: span,
+//RS         value,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn expr_stmt(expr: Expr) -> Stmt {
+//RS     Stmt::Expr(expr)
+//RS }
+//RS pub(super) fn ret(expr: Expr, span: Span) -> Stmt {
+//RS     Stmt::Return(Some(expr), span)
+//RS }
+//RS pub(super) fn ok(expr: Expr, span: Span) -> Expr {
+//RS     Expr::Ok(Box::new(expr), span)
+//RS }
+//RS pub(super) fn err(expr: Expr, span: Span) -> Expr {
+//RS     Expr::Err(Box::new(expr), span)
+//RS }
+//RS pub(super) fn copy(expr: Expr, span: Span) -> Expr {
+//RS     Expr::Copy(Box::new(expr), span)
+//RS }
+//RS pub(super) fn unary_not(expr: Expr, span: Span) -> Expr {
+//RS     Expr::Unary(crate::AST::UnOp::Not, Box::new(expr), span)
+//RS }
+//RS 
+//RS pub(super) fn ident(name: &str, span: Span) -> Expr {
+//RS     Expr::Ident(name.to_string(), span)
+//RS }
+//RS 
+//RS pub(super) fn binary(op: BinOp, left: Expr, right: Expr, span: Span) -> Expr {
+//RS     Expr::Binary(op, Box::new(left), Box::new(right), span)
+//RS }
+//RS 
+//RS pub(super) fn if_stmt(cond: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
+//RS     Stmt::Switch {
+//RS         subject: Expr::Bool(true, span),
+//RS         arms: vec![SwitchArm { cond, body, span }],
+//RS         else_body: Some(Vec::new()),
+//RS         span,
+//RS     }
+//RS }
+//RS 
+//RS /// A lexical block (`if true { … }`): locals declared in `body` end with it
+//RS /// instead of living to the end of the generated function.
+//RS pub(super) fn scope_stmt(body: Vec<Stmt>, span: Span) -> Stmt {
+//RS     if_stmt(Expr::Bool(true, span), body, span)
+//RS }
+//RS 
+//RS pub(super) fn string_expr(value: &str, span: Span) -> Expr {
+//RS     Expr::Str(vec![crate::AST::StrPart::Lit(value.to_string())], span)
+//RS }
+//RS 
+//RS pub(super) fn data_tree_type() -> Type {
+//RS     Type::Named("DataTree".to_string())
+//RS }
+//RS pub(super) fn field_error_type() -> Type {
+//RS     Type::Named("FieldError".to_string())
+//RS }
+//RS pub(super) fn field_error_list_type(_span: Span) -> Type {
+//RS     Type::List(Box::new(field_error_type()))
+//RS }
+//RS pub(super) fn result_type(ok: Type, _span: Span) -> Type {
+//RS     Type::Result {
+//RS         ok: Box::new(ok),
+//RS         err: Box::new(field_error_list_type(_span)),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn map_type(value: Type, _span: Span) -> Type {
+//RS     Type::Map {
+//RS         key: Box::new(Type::String),
+//RS         key_span: None,
+//RS         value: Box::new(value),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn target_type(name: &str, params: &[TypeParam]) -> Type {
+//RS     if params.is_empty() {
+//RS         Type::Named(name.to_string())
+//RS     } else {
+//RS         Type::Apply {
+//RS             name: name.to_string(),
+//RS             args: params
+//RS                 .iter()
+//RS                 .map(|param| Type::Named(param.name.clone()))
+//RS                 .collect(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn target_type_name(name: &str) -> String {
+//RS     name.to_string()
+//RS }
+//RS 
+//RS pub(super) fn type_args_from_params(params: &[TypeParam], _span: Span) -> Vec<Type> {
+//RS     params
+//RS         .iter()
+//RS         .map(|param| Type::Named(param.name.clone()))
+//RS         .collect()
+//RS }
+//RS 
+//RS pub(super) fn list_literal(values: Vec<Expr>, span: Span) -> Expr {
+//RS     Expr::ListLit(values, span)
+//RS }
+//RS pub(super) fn map_literal(values: Vec<(Expr, Expr)>, span: Span) -> Expr {
+//RS     Expr::MapLit(values, span)
+//RS }
+//RS 
+//RS pub(super) fn data_tree_object(entries: Vec<(Expr, Expr)>, span: Span) -> Expr {
+//RS     data_tree_variant("Object", vec![map_literal(entries, span)], span)
+//RS }
+//RS 
+//RS pub(super) fn data_tree_object_expr(map: Expr, span: Span) -> Expr {
+//RS     data_tree_variant("Object", vec![map], span)
+//RS }
+//RS 
+//RS pub(super) fn data_tree_null(span: Span) -> Expr {
+//RS     data_tree_variant("Null", Vec::new(), span)
+//RS }
+//RS pub(super) fn data_tree_text(value: &str, span: Span) -> Expr {
+//RS     data_tree_variant("Text", vec![string_expr(value, span)], span)
+//RS }
+//RS 
+//RS pub(super) fn data_tree_variant(variant: &str, args: Vec<Expr>, span: Span) -> Expr {
+//RS     if args.is_empty() {
+//RS         Expr::Field(Box::new(ident("DataTree", span)), variant.to_string(), span)
+//RS     } else {
+//RS         Expr::MethodCall {
+//RS             receiver: Box::new(ident("DataTree", span)),
+//RS             method: variant.to_string(),
+//RS             method_span: span,
+//RS             owner_type_args: Vec::new(),
+//RS             type_args: Vec::new(),
+//RS             args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
+//RS             recv_type: None,
+//RS             resolved_ret: None,
+//RS             operator_rhs: None,
+//RS             checked_widen: false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn struct_literal(
+//RS     name: String,
+//RS     type_args: Vec<Type>,
+//RS     fields: Vec<(String, Expr)>,
+//RS     span: Span,
+//RS ) -> Expr {
+//RS     Expr::StructLit {
+//RS         type_name: name,
+//RS         type_args,
+//RS         import_ns: None,
+//RS         as_trait: None,
+//RS         fields: fields
+//RS             .into_iter()
+//RS             .map(|(name, expr)| (name, span, expr))
+//RS             .collect(),
+//RS         inferred: false,
+//RS         span,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn field_error(path: &str, reason: &str, span: Span) -> Expr {
+//RS     field_error_expr_value(string_expr(path, span), string_expr(reason, span), span)
+//RS }
+//RS 
+//RS pub(super) fn field_error_expr_value(path: Expr, reason: Expr, span: Span) -> Expr {
+//RS     struct_literal(
+//RS         "FieldError".to_string(),
+//RS         Vec::new(),
+//RS         vec![("path".to_string(), path), ("reason".to_string(), reason)],
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn interpolated_string(prefix: &str, value: Expr, suffix: &str, span: Span) -> Expr {
+//RS     Expr::Str(
+//RS         vec![
+//RS             crate::AST::StrPart::Lit(prefix.to_string()),
+//RS             crate::AST::StrPart::Interp(Box::new(value), crate::AST::StrFormat::default()),
+//RS             crate::AST::StrPart::Lit(suffix.to_string()),
+//RS         ],
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn method(receiver: Expr, name: &str, args: Vec<Expr>, span: Span) -> Expr {
+//RS     method_with_owner_args(receiver, name, Vec::new(), args, span)
+//RS }
+//RS 
+//RS pub(super) fn method_with_owner_args(
+//RS     receiver: Expr,
+//RS     name: &str,
+//RS     owner_type_args: Vec<Type>,
+//RS     args: Vec<Expr>,
+//RS     span: Span,
+//RS ) -> Expr {
+//RS     Expr::MethodCall {
+//RS         receiver: Box::new(receiver),
+//RS         method: name.to_string(),
+//RS         method_span: span,
+//RS         owner_type_args,
+//RS         type_args: Vec::new(),
+//RS         args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
+//RS         recv_type: (name == "encode").then(|| "__SerdeEncode__".to_string()),
+//RS         resolved_ret: None,
+//RS         operator_rhs: None,
+//RS         checked_widen: false,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn method_with_type_args(receiver: Expr, name: &str, type_args: Vec<Type>, span: Span) -> Expr {
+//RS     Expr::MethodCall {
+//RS         receiver: Box::new(receiver),
+//RS         method: name.to_string(),
+//RS         method_span: span,
+//RS         owner_type_args: Vec::new(),
+//RS         type_args,
+//RS         args: Vec::new(),
+//RS         recv_type: (name == Syntax::METHOD_DATATREE_DECODE).then(|| Syntax::TYPE_DATA.to_string()),
+//RS         resolved_ret: None,
+//RS         operator_rhs: None,
+//RS         checked_widen: false,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn field_read(base: &str, field: &str, span: Span) -> Expr {
+//RS     Expr::Field(Box::new(ident(base, span)), field.to_string(), span)
+//RS }
+//RS 
+//RS pub(super) fn field_value(field: &crate::AST::Field, span: Span) -> Expr {
+//RS     field
+//RS         .computed
+//RS         .as_ref()
+//RS         .map(|computed| computed.as_ref().clone())
+//RS         .unwrap_or_else(|| field_read("self", &field.name, span))
+//RS }
+//RS 
+//RS pub(super) fn call_arg(expr: Expr, span: Span) -> CallArg {
+//RS     CallArg {
+//RS         convention: AccessConvention::Read,
+//RS         expr,
+//RS         span,
+//RS         flags: CallArgFlags::default(),
+//RS         label: None,
+//RS         spread: false,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn self_param(span: Span) -> Param {
+//RS     named_param("self", Type::Named(String::new()), span)
+//RS }
+//RS 
+//RS pub(super) fn named_param(name: &str, ty: Type, span: Span) -> Param {
+//RS     Param {
+//RS         convention: AccessConvention::Read,
+//RS         root: false,
+//RS         name: name.to_string(),
+//RS         name_span: span,
+//RS         public_label: None,
+//RS         zone: crate::AST::ParamZone::Either,
+//RS         ty,
+//RS         ty_span: span,
+//RS         default: None,
+//RS         variadic: false,
+//RS         variadic_bound_list: None,
+//RS         declared_view_from_names: None,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn try_expr(expr: Expr, span: Span) -> Expr {
+//RS     Expr::Try(Box::new(expr), span, TryConvert::None, None)
+//RS }
+//RS 
+//RS pub(super) fn or_fallback(value: Expr, fallback: Expr, span: Span) -> Expr {
+//RS     Expr::OrFallback {
+//RS         value: Box::new(value),
+//RS         fallback: crate::AST::OrFallback::Value(Box::new(fallback)),
+//RS         is_option: false,
+//RS         span,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn field_error_under(path: &str, value: Expr, span: Span) -> Expr {
+//RS     method(
+//RS         ident("FieldError", span),
+//RS         "under",
+//RS         vec![string_expr(path, span), value],
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn serde_zero_expr(ty: &Type, span: Span) -> Expr {
+//RS     match ty {
+//RS         Type::Int | Type::IntN { .. } => Expr::Int(0, span, None, None),
+//RS         Type::InlineRange { lo, .. } => Expr::Int(*lo, span, None, None),
+//RS         Type::Float | Type::Float32 => Expr::Float(0.0, span, matches!(ty, Type::Float32), None),
+//RS         Type::Bool => Expr::Bool(false, span),
+//RS         Type::String => string_expr("", span),
+//RS         Type::Option(_) => Expr::Absent(span),
+//RS         Type::List(_) | Type::Map { .. } => list_literal(Vec::new(), span),
+//RS         Type::Apply { name, args } => struct_literal(name.clone(), args.clone(), Vec::new(), span),
+//RS         Type::Named(name) => struct_literal(name.clone(), Vec::new(), Vec::new(), span),
+//RS         _ => struct_literal(ty.name(), Vec::new(), Vec::new(), span),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn serde_default_expr(field: &crate::AST::Field) -> Option<Expr> {
+//RS     if let Some(expr) = &field.default {
+//RS         return Some(expr.as_ref().clone());
+//RS     }
+//RS     let marker = field
+//RS         .serde_markers
+//RS         .iter()
+//RS         .find(|marker| marker.name == crate::Syntax::MARKER_DEFAULT)?;
+//RS     if let Some(expr) = marker.expr_arg(0) {
+//RS         if let Some(value) = marker.ct.as_ref() {
+//RS             return serde_ct_expr(value, expr.span());
+//RS         }
+//RS         return Some(expr.clone());
+//RS     }
+//RS     marker
+//RS         .ct
+//RS         .as_ref()
+//RS         .and_then(|value| serde_ct_expr(value, marker.span))
+//RS }
+//RS 
+//RS pub(super) fn serde_ct_expr(value: &CtValue, span: Span) -> Option<Expr> {
+//RS     Some(match value {
+//RS         CtValue::Int(value) => Expr::Int(*value, span, None, None),
+//RS         CtValue::Float(value) => Expr::Float(value.as_f64(), span, false, None),
+//RS         CtValue::Bool(value) => Expr::Bool(*value, span),
+//RS         CtValue::Char(value) => Expr::Char(*value, span),
+//RS         CtValue::Str(value) => string_expr(value, span),
+//RS         // Exact default `Int` values keep their decimal source spelling so the
+//RS         // ordinary literal pipeline owns parsing and lowering on every tier.
+//RS         CtValue::BigInt(value) => Expr::Int(0, span, None, Some(value.to_string_rep())),
+//RS         CtValue::Bytes(values) => list_literal(
+//RS             values
+//RS                 .iter()
+//RS                 .map(|value| Expr::Int(i64::from(*value), span, None, None))
+//RS                 .collect(),
+//RS             span,
+//RS         ),
+//RS         CtValue::List(values) => list_literal(
+//RS             values
+//RS                 .iter()
+//RS                 .map(|value| serde_ct_expr(value, span))
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS             span,
+//RS         ),
+//RS         CtValue::Map(values) => map_literal(
+//RS             values
+//RS                 .iter()
+//RS                 .map(|(key, value)| {
+//RS                     Some((
+//RS                         serde_ct_expr(&key.to_value(), span)?,
+//RS                         serde_ct_expr(value, span)?,
+//RS                     ))
+//RS                 })
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS             span,
+//RS         ),
+//RS         CtValue::Struct { type_name, fields } => struct_literal(
+//RS             type_name.clone(),
+//RS             Vec::new(),
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(name, value)| Some((name.clone(), serde_ct_expr(value, span)?)))
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS             span,
+//RS         ),
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } => Expr::EnumLit {
+//RS             type_name: type_name.clone(),
+//RS             variant: variant.clone(),
+//RS             variant_span: None,
+//RS             args: args
+//RS                 .iter()
+//RS                 .map(|(label, value)| {
+//RS                     Some(match label {
+//RS                         Some(label) => EnumLitArg::Named {
+//RS                             label: label.clone(),
+//RS                             expr: serde_ct_expr(value, span)?,
+//RS                         },
+//RS                         None => EnumLitArg::Positional(serde_ct_expr(value, span)?),
+//RS                     })
+//RS                 })
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS             leading_dot: false,
+//RS             span,
+//RS         },
+//RS         CtValue::Present(value) => Expr::Present(Box::new(serde_ct_expr(value, span)?), span),
+//RS         CtValue::Failed(CtReport::Clean(_)) => Expr::Absent(span),
+//RS         CtValue::Failed(CtReport::Told(value)) => {
+//RS             Expr::Err(Box::new(serde_ct_expr(value, span)?), span)
+//RS         }
+//RS         CtValue::Unit | CtValue::Closure(_) => return None,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn has_marker(markers: &[crate::AST::Marker], name: &str) -> bool {
+//RS     markers.iter().any(|marker| marker.name == name)
+//RS }
+//RS 
+//RS pub(super) fn serde_enum_variant_key(v: &crate::AST::Variant, style: Option<&str>) -> String {
+//RS     v.serde_markers
+//RS         .iter()
+//RS         .find(|marker| marker.name == crate::Syntax::MARKER_RENAME)
+//RS         .and_then(|marker| {
+//RS             marker_static_string_for(marker, "json").or_else(|| marker_static_string(marker))
+//RS         })
+//RS         .unwrap_or_else(|| serde_rename_all_name(style, &v.name))
+//RS }
+//RS 
+//RS pub(super) fn marker_static_string(marker: &crate::AST::Marker) -> Option<String> {
+//RS     if let Some(CtValue::Str(value)) = &marker.ct {
+//RS         return Some(value.clone());
+//RS     }
+//RS     marker.expr_arg(0).and_then(static_string_expr)
+//RS }
+//RS 
+//RS pub(super) fn marker_static_string_for(marker: &crate::AST::Marker, label: &str) -> Option<String> {
+//RS     marker
+//RS         .arg_labels
+//RS         .iter()
+//RS         .enumerate()
+//RS         .find(|(_, value)| value.as_ref().is_some_and(|(name, _)| name == label))
+//RS         .and_then(|(index, _)| marker.args.get(index))
+//RS         .and_then(crate::AST::MarkerCallArg::as_expr)
+//RS         .and_then(static_string_expr)
+//RS }
+//RS 
+//RS pub(super) fn static_string_expr(expression: &Expr) -> Option<String> {
+//RS     match expression {
+//RS         Expr::Str(parts, _) => parts.first().and_then(|part| match part {
+//RS             crate::AST::StrPart::Lit(value) => Some(value.clone()),
+//RS             crate::AST::StrPart::Interp(..) => None,
+//RS         }),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS pub(super) fn serde_rename_all_style(container: &[crate::AST::Marker]) -> Option<&str> {
+//RS     container
+//RS         .iter()
+//RS         .find(|marker| marker.name == crate::Syntax::MARKER_RENAME_ALL)
+//RS         .and_then(|marker| marker.expr_arg(0))
+//RS         .and_then(|expression| match expression {
+//RS             Expr::Ident(name, _) => Some(name.as_str()),
+//RS             _ => None,
+//RS         })
+//RS }
+//RS 
+//RS pub(super) fn serde_rename_all_name(style: Option<&str>, name: &str) -> String {
+//RS     match style {
+//RS         Some("camel") => crate::Syntax::to_camel_acronym(name),
+//RS         Some("kebab") => crate::Syntax::to_snake_acronym(name).replace('_', "-"),
+//RS         Some("screaming") => crate::Syntax::to_shouty_acronym(name),
+//RS         Some("pascal") => crate::Syntax::to_pascal_acronym(name),
+//RS         Some("snake") => crate::Syntax::to_snake_acronym(name),
+//RS         _ => name.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn serde_field_key(
+//RS     structure: &crate::AST::StructDef,
+//RS     field: &crate::AST::Field,
+//RS ) -> String {
+//RS     jet_foundation::CLISchema::shape_field_names(structure, field)
+//RS         .name_for(jet_foundation::Shape::ShapeProjectionKind::Json)
+//RS         .expect("checked serde field is missing its JSON shape name")
+//RS         .to_owned()
+//RS }
+//RS 
+// END-PORT-PENDING 0442 crates/jet-sema/src/Sema/Registration/Serde/Ast.rs:1-746
+

@@ -3,9 +3,7 @@
 // Type, rather than reconstructing it at call sites.
 use jet_foundation.[
     AccessConvention,
-    Call,
     CallContractRow,
-    CallLabel,
     CallablePolicy,
     CallablePolicyChain,
     EffectRowEntry,
@@ -14,28 +12,16 @@ use jet_foundation.[
     FunctionCallMetadata,
     FunctionDefaultRef,
     ParamZone,
-    StrPart,
     SymbolID,
     Type,
     expr_span,
-    type_name,
+    callable_policy_chain_parse,
+    failure_contract_from_return_type,
+    failure_contract_effective_type,
+    marker_expr_args_owned,
+    param_call_label,
     type_with_effective_fn_returns,
 ]
-
-pub fn sema_effective_return_type(return_type: Type?) -> Type Never! {
-    if return_type == None -> return Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}}
-    raw :: return_type
-    if raw == {
-        .Named(name) -> if name == "Never" -> return raw
-        .Option(_) -> return raw
-        .Result(ok, err) -> {
-            if err == .Named(name) && name == "Never" -> return Type.Result{ok: ok, err: err}
-            return raw
-        }
-        else -> {}
-    }
-    Type.Result{ok: raw, err: Type.Named{name: "Err"}}
-}
 
 // D-FAILURE-FOUNDATION1: these traits are raw protocol ABIs (String, Bool,
 // Ordering, DataTree, and same-type arithmetic), never the implicit failure
@@ -58,68 +44,20 @@ pub fn sema_raw_protocol_function_return(trait_name: String?, implementation_gen
 // (the Rust reference's `checked_return_types`).
 pub fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -> Type Never! {
     if raw_protocol_return -> return return_type ?? Type.Named{name: "Unit"}
-    sema_effective_return_type(return_type)
+    failure_contract_effective_type(failure_contract_from_return_type(return_type))
 }
 
-// The stable provenance of a callable's effective failure route, projected
-// from its written return type (the Rust reference's
-// `FailureContract::from_return_type(..).source()`).
-pub fn sema_failure_contract_source(return_type: Type?) -> String Never! {
-    declared :: return_type ?? return "implicit default !Err"
-    if declared == {
-        .Named(name) -> if name == "Never" -> return "declared Never return"
-        .Option(_) -> return "optional success"
-        .Result(_, error) -> {
-            if error == .Named(name) && name == "Never" -> return "explicit !Never (proven unreachable)"
-            return "explicit !{type_name(error)}"
-        }
-        else -> {}
-    }
-    "implicit default !Err"
-}
-
-fn sema_callable_policy_string_text(parts: [StrPart]) -> String Never! {
-    if parts.len() != 1 -> return "<string>"
-    if parts[0] == {
-        .Lit(text) -> "\"{text}\""
-        else -> "<string>"
-    }
-}
-
-fn sema_callable_policy_call_text(call: Call) -> String Never! {
-    args :: loop argument in call.args -> sema_callable_policy_argument_text(argument.expr)
-    "{call.name}({args.join(", ")})"
-}
-
-fn sema_callable_policy_argument_text(expr: Expr) -> String Never! {
-    if expr == {
-        .Str(parts, _) -> sema_callable_policy_string_text(parts)
-        .Int(value, _, _, raw) -> raw ?? "{value}"
-        .Float(value, _, _, raw) -> raw ?? "{value}"
-        .Bool(value, _) -> "{value}"
-        .Char(value, _) -> "'{value}'"
-        .Ident(name, _) -> name
-        .Field(base, member, _) -> "{sema_callable_policy_argument_text(base)}.{member}"
-        .Call(call) -> sema_callable_policy_call_text(call)
-        else -> "<expression>"
-    }
-}
-
+// Rust Sema/mod.rs func_sig: first Policy marker, valid chain or empty chain.
 fn sema_callable_policies(func: Func) -> CallablePolicyChain Never! {
-    policies := [CallablePolicy]{}
     loop marker in func.markers {
         if marker.name == "Policy" {
-            loop argument in marker.args {
-                if argument == .Expr(value) {
-                    if value == .Call(call) {
-                        arguments :: loop call_argument in call.args -> sema_callable_policy_argument_text(call_argument.expr)
-                        &policies.push(CallablePolicy{name: call.name, arguments: arguments})
-                    }
-                }
+            if callable_policy_chain_parse(marker_expr_args_owned(marker)) == {
+                .Ok(chain) -> return chain
+                .Err(_) -> return CallablePolicyChain{policies: [CallablePolicy]{}}
             }
         }
     }
-    CallablePolicyChain{policies: policies}
+    CallablePolicyChain{policies: [CallablePolicy]{}}
 }
 
 fn sema_function_param_types(func: Func) -> [Type] Never! {
@@ -135,9 +73,8 @@ fn sema_function_param_contract(func: Func) -> [CallContractRow]? {
     contract := [CallContractRow]{}
     has_contract := false
     loop parameter in func.params {
-        label := parameter.name
+        label := param_call_label(parameter)
         implicit_local_label :: parameter.zone == ParamZone.Either && parameter.public_label == None
-        if parameter.public_label != None -> label = (parameter.public_label ?? CallLabel{name: "", span: parameter.name_span}).name
         if parameter.zone == ParamZone.PositionalOnly || implicit_local_label -> label = ""
         &contract.push(CallContractRow{label: label, zone: parameter.zone})
         if label != "" || parameter.zone != ParamZone.Either -> has_contract = true

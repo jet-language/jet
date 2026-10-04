@@ -1,0 +1,162 @@
+// Devtools.rs:426-800,1989-1996. Sole typed first-party event-body owner.
+pub enum JetDevtoolsQueryState {
+    Fetching
+    Fresh
+    Stale
+    Invalidated
+}
+pub enum JetDevtoolsMutationLifecycle {
+    Started
+    Committed
+    Failed
+    RolledBack
+}
+pub enum JetDevtoolsFormState {
+    Pristine
+    Dirty
+    Valid
+    Invalid
+}
+pub enum JetDevtoolsTraceKind {
+    Request
+    Render
+    Job
+    Reload
+    Frame
+}
+pub fn jet_devtools_query_state_wire(value: JetDevtoolsQueryState) -> String Never! {
+    if value == {
+        .Fetching -> return "fetching"
+        .Fresh -> return "fresh"
+        .Stale -> return "stale"
+        .Invalidated -> return "invalidated"
+    }
+}
+pub fn jet_devtools_mutation_lifecycle_wire(value: JetDevtoolsMutationLifecycle) -> String Never! {
+    if value == {
+        .Started -> return "started"
+        .Committed -> return "committed"
+        .Failed -> return "failed"
+        .RolledBack -> return "rolled_back"
+    }
+}
+pub fn jet_devtools_form_state_wire(value: JetDevtoolsFormState) -> String Never! {
+    if value == {
+        .Pristine -> return "pristine"
+        .Dirty -> return "dirty"
+        .Valid -> return "valid"
+        .Invalid -> return "invalid"
+    }
+}
+pub fn jet_devtools_trace_kind_wire(value: JetDevtoolsTraceKind) -> String Never! {
+    if value == {
+        .Request -> return "request"
+        .Render -> return "render"
+        .Job -> return "job"
+        .Reload -> return "reload"
+        .Frame -> return "frame"
+    }
+}
+pub struct JetDevtoolsSourceSpan { pub source_id: String, pub file: String, pub start_line: U32, pub start_column: U32, pub end_line: U32, pub end_column: U32 }
+pub struct JetDevtoolsFunctionIdentity { pub function_id: String, pub name: String, pub source: JetDevtoolsSourceSpan }
+pub struct JetDevtoolsGameLaunchPhase { pub phase: String, pub status: String, pub detail: String }
+fn jet_devtools_validate_text(value: String, field: String) Err! {
+    if value.bytes().len() > 16384 -> return Err("jet.devtools.v1 {field} exceeds the Prelude text limit")
+    return
+}
+pub fn jet_devtools_source_span_new(^source_id: String, ^file: String, start_line: U32, start_column: U32, end_line: U32, end_column: U32) -> JetDevtoolsSourceSpan Never! {
+    JetDevtoolsSourceSpan{source_id: ^source_id, file: ^file, start_line: start_line, start_column: start_column, end_line: end_line, end_column: end_column}
+}
+pub fn jet_devtools_source_span_validate(value: JetDevtoolsSourceSpan) Err! {
+    jet_devtools_validate_text(value.source_id, "source id")
+    jet_devtools_validate_text(value.file, "source file")
+    if value.start_line == (U32{0}) || value.start_column == (U32{0}) || value.end_line == (U32{0}) || value.end_column == (U32{0}) -> return Err("jet.devtools.v1 source span starts or ends at zero")
+    if value.end_line < value.start_line || (value.end_line == value.start_line && value.end_column < value.start_column) -> return Err("jet.devtools.v1 source span ends before it starts")
+    return
+}
+pub fn jet_devtools_function_identity_new(^function_id: String, ^name: String, ^source: JetDevtoolsSourceSpan) -> JetDevtoolsFunctionIdentity Never! {
+    JetDevtoolsFunctionIdentity{function_id: ^function_id, name: ^name, source: ^source}
+}
+pub fn jet_devtools_function_identity_validate(value: JetDevtoolsFunctionIdentity) Err! {
+    jet_devtools_validate_text(value.function_id, "function id")
+    jet_devtools_validate_text(value.name, "function name")
+    jet_devtools_source_span_validate(value.source)
+}
+pub fn jet_devtools_game_launch_phase_new(^phase: String, ^status: String, ^detail: String) -> JetDevtoolsGameLaunchPhase Never! {
+    JetDevtoolsGameLaunchPhase{phase: ^phase, status: ^status, detail: ^detail}
+}
+pub fn jet_devtools_game_launch_phase_validate(value: JetDevtoolsGameLaunchPhase) Err! {
+    jet_devtools_validate_text(value.phase, "game launch phase")
+    jet_devtools_validate_text(value.status, "game launch phase status")
+    jet_devtools_validate_text(value.detail, "game launch phase detail")
+}
+pub enum JetDevtoolsEventBody {
+    Build(status: String, tier: String, diagnostics: [String], kept: U64, reset: U64)
+    Route(path: String, matched: Bool, render_mode: String, reason: String)
+    Query(name: String, state: JetDevtoolsQueryState, footprint: U64)
+    Mutation(name: String, lifecycle: JetDevtoolsMutationLifecycle, rollback: Bool)
+    Form(name: String, field: String, state: JetDevtoolsFormState, validation: String)
+    Table(name: String, viewport: U64, sort: String, filter: String)
+    Store(name: String, transaction: String, diff: String, cursor: U64)
+    Trace(name: String, kind: JetDevtoolsTraceKind, request: String, duration_ms: U64, status: String)
+    Cost(name: String, rule: String, bytes: U64, allocations: U64)
+    Gate(name: String, status: String, detail: String)
+    Structure(name: String, kind: String, status: String)
+    Test(name: String, status: String, duration_ms: U64, diagnostics: String)
+    Job(name: String, status: String, duration_ms: U64, diagnostics: String)
+    Frame(name: String, status: String, duration_ms: U64)
+    GameFrameSample(sequence: U64, frame_id: U64, scene: String, frame_index: U64, build: String, revision: String, trace_id: String, start_ns: U64, cpu_ns: U64, gpu_ns: U64?, responsible_function: JetDevtoolsFunctionIdentity?)
+    GameDrawEvent(sequence: U64, frame_id: U64, scene: String, frame_index: U64, build: String, revision: String, trace_id: String, event_index: U64, event_id: U64, function: JetDevtoolsFunctionIdentity, phase: String, domain: String, start_ns: U64, duration_ns: U64, object_id: String?, resource_id: String?)
+    GameLaunchProfile(target: String, run_mode: String, headless_compatible: Bool, phases: [JetDevtoolsGameLaunchPhase])
+    GameSwap(sequence: U64, path: String, kind: String, status: String, old_schema_id: String?, new_schema_id: String?, migration: String, reason: String)
+    Request(id: String, method: String, path: String, status: U16)
+    Response(id: String, status: U16, bytes: U64)
+}
+pub fn jet_devtools_event_body_family(value: JetDevtoolsEventBody) -> String Never! {
+    return if value == {
+        .Build(_, _, _, _, _) -> "Build"
+        .Route(_, _, _, _) -> "Route"
+        .Query(_, _, _) -> "Query"
+        .Mutation(_, _, _) -> "Mutation"
+        .Form(_, _, _, _) -> "Form"
+        .Table(_, _, _, _) -> "Table"
+        .Store(_, _, _, _) -> "Store"
+        .Trace(_, _, _, _, _) -> "Trace"
+        .Cost(_, _, _, _) -> "Cost"
+        .Gate(_, _, _) -> "Gate"
+        .Structure(_, _, _) -> "Structure"
+        .Test(_, _, _, _) -> "Test"
+        .Job(_, _, _, _) -> "Job"
+        .Frame(_, _, _) -> "Frame"
+        .GameFrameSample(_, _, _, _, _, _, _, _, _, _, _) -> "GameFrameSample"
+        .GameDrawEvent(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> "GameDrawEvent"
+        .GameLaunchProfile(_, _, _, _) -> "GameLaunchProfile"
+        .GameSwap(_, _, _, _, _, _, _, _) -> "GameSwap"
+        .Request(_, _, _, _) -> "Request"
+        .Response(_, _, _) -> "Response"
+    }
+}
+pub fn jet_devtools_event_body_entity(value: JetDevtoolsEventBody) -> String Never! {
+    return if value == {
+        .Build(_, _, _, _, _) -> "build"
+        .Route(path, _, _, _) -> path
+        .Query(name, _, _) -> name
+        .Mutation(name, _, _) -> name
+        .Form(name, _, _, _) -> name
+        .Table(name, _, _, _) -> name
+        .Store(name, _, _, _) -> name
+        .Trace(name, _, _, _, _) -> name
+        .Cost(name, _, _, _) -> name
+        .Gate(name, _, _) -> name
+        .Structure(name, _, _) -> name
+        .Test(name, _, _, _) -> name
+        .Job(name, _, _, _) -> name
+        .Frame(name, _, _) -> name
+        .GameFrameSample(_, _, scene, _, _, _, _, _, _, _, _) -> scene
+        .GameDrawEvent(_, _, scene, _, _, _, _, _, _, _, _, _, _, _, _, _) -> scene
+        .GameLaunchProfile(target, _, _, _) -> target
+        .GameSwap(_, path, _, _, _, _, _, _) -> path
+        .Request(id, _, _, _) -> id
+        .Response(id, _, _) -> id
+    }
+}

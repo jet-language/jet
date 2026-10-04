@@ -1,0 +1,44 @@
+// MIROptimization.rs:164-220. This is the single canonical native semantic
+// legality boundary. Root validation remains the original independent MIR
+// graph boundary; all typed native semantic checks run afterwards in order.
+pub fn mir_verify_legality(program: MIRProgram) MIRLegalityError! {
+    mir_validate_program(program) ?? return Err(MIRLegalityError.Validation{error: err})
+    mir_native_verify_operator_markers(program)
+    functions := [U64:Bool]{}
+    types := [U64:Bool]{}
+    fields := [U64:Bool]{}
+    sources := [U64:Bool]{}
+    foreign := [U64:Bool]{}
+    callbacks := [U64:Bool]{}
+    traits := [U64:Bool]{}
+    core := [U64:Int]{}
+    prelude := [U64:Int]{}
+    definitions := [U64:Int]{}
+    loop row in program.functions -> functions[row.id.value] = true
+    loop (position, row) in program.types { types[row.id.value] = true; if definitions.get(row.id.value) == None -> definitions[row.id.value] = position }
+    loop row in program.type_instances { if row.identity == .Val(identity) -> types[identity.value] = true }
+    loop row in program.fields -> fields[row.id.value] = true
+    loop row in program.source_files -> sources[row.id.value] = true
+    loop row in program.foreign -> foreign[row.id.value] = true
+    loop row in program.callbacks -> callbacks[row.id.value] = true
+    loop row in program.traits -> traits[row.id.value] = true
+    loop (position, row) in program.core_calls -> core[row.id.value] = position
+    loop (position, row) in program.prelude_calls -> prelude[row.id.value] = position
+    tables :: MIRNativeProgramIndex{functions: ^functions, types: ^types, fields: ^fields, sources: ^sources, foreign: ^foreign, callbacks: ^callbacks, traits: ^traits, core: ^core, prelude: ^prelude, type_definitions: ^definitions}
+    mir_native_verify_program_rows(program, tables.functions, tables.types, tables.fields, tables.sources)
+    mir_native_verify_hardware_setups(program)
+    mir_native_verify_prelude_rows(program, tables.types, tables.fields)
+    loop row in program.core_calls -> mir_native_verify_core_call(row)
+    loop row in program.types -> mir_native_verify_type_def(row, tables.functions, tables.fields)
+    zero :: Span{start: 0, end: 0}
+    loop row in program.type_instances -> mir_native_verify_type(row, zero, MIRFunctionID{value: U64{0}})
+    keys := [String:Bool]{}
+    loop function in program.functions {
+        if keys.get(function.key) != None -> return Err(MIRLegalityError.Validation{error: MIRValidationError.DuplicateKey{kind: "function", key: function.key}})
+        keys[function.key] = true
+        mir_native_verify_function(function, program, tables)
+        mir_native_verify_capture_operations(function)
+        mir_native_verify_transparent_conversions(function, program, tables.type_definitions)
+    }
+    return
+}

@@ -1,0 +1,1439 @@
+// PORT-PENDING 1020 tests-corelib-parts-platform: tests/corelib_parts/platform.rs:1-1435
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[test]
+//RS fn canonical_core_import_resolves() {
+//RS     let out = compile_temp(
+//RS         "core_imports.jet",
+//RS         r#"
+//RS use core.files as fs
+//RS 
+//RS fn run() {
+//RS     print(fs.exists("/tmp"))
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(out.rust.contains("jet_std_fs_exists"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn importing_core_without_calls_keeps_optional_helpers_unemitted() {
+//RS     let out = compile_temp(
+//RS         "core_import_only.jet",
+//RS         r#"
+//RS use core.files as fs
+//RS use core.term as io
+//RS use core.sys as env
+//RS use core.process as process
+//RS use core.math as math
+//RS use core.math.random as random
+//RS use core.time as time
+//RS use core.encoding.json as json
+//RS 
+//RS fn run() {
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(!out.rust.contains("mod jet_std"));
+//RS     assert!(!out.rust.contains("jet_std_fs_read"));
+//RS     assert!(out.rust.contains("fn main()"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_data_import_and_codegen_resolve() {
+//RS     let out = compile_temp(
+//RS         "core_data_import.jet",
+//RS         r#"
+//RS use core.data as data
+//RS 
+//RS #Codable
+//RS struct Ticket {
+//RS     team: String
+//RS     minutes: Float
+//RS }
+//RS 
+//RS fn run() {
+//RS     rows :: data.csv<Ticket>("team,minutes\nCore,4.0") ?? panic("bad csv")
+//RS     print(rows.len())
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(out.rust.contains("jet_enc_csv_decode"));
+//RS     assert!(
+//RS         out.rust.contains("jet_enc_csv_decode::<__jet_Ticket>"),
+//RS         "core.data.csv must lower its sema-owned list element type exactly:\n{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         !out.rust.contains("jet_enc_csv_decode::<Vec<__jet_Ticket>>"),
+//RS         "core.data.csv nested its list result at the runtime boundary:\n{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         !out.rust.contains("jet_data_count"),
+//RS         "ordinary list length must not lower through the removed data.count wrapper"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_files_parallel_walk_and_read_count_share_lowering() {
+//RS     let out = compile_temp(
+//RS         "core_files_parallel_count.jet",
+//RS         r#"
+//RS use core.files as fs
+//RS 
+//RS fn count_file(path: String, needle: String) -> Int ->
+//RS     (fs.read(path) ?? panic("read failed")).count(needle)
+//RS 
+//RS fn run() {
+//RS     entries :: fs.walk_parallel(".") ?? panic("walk failed")
+//RS     print(entries.len())
+//RS     print(count_file("README.md", "Jet"))
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_std_fs_walk_parallel"),
+//RS         "parallel filesystem walk must use the shared runtime helper"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_unicode_count"),
+//RS         "a String count after a fixed core read must lower to the shared text helper"
+//RS     );
+//RS     assert!(
+//RS         !out.rust.contains("return Ok(jet_todo_stop("),
+//RS         "fixed core MethodCall aliases must not leave a receiver-type Todo"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_files_optional_walk_keeps_jet_outcome_native_carrier() {
+//RS     let out = compile_temp(
+//RS         "core_files_optional_walk.jet",
+//RS         r#"
+//RS use core.files as fs
+//RS 
+//RS fn run() {
+//RS     entries :: fs.walk(".", ignore: ".git") ?? panic("walk failed")
+//RS     print(entries.len())
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("fn jet_std_fs_walk(")
+//RS             && out
+//RS                 .rust
+//RS                 .contains("ignore_name: JetOutcome<String, JetAbsent>"),
+//RS         "filesystem walk must keep its JetOutcome helper ABI"
+//RS     );
+//RS     let call = out
+//RS         .rust
+//RS         .lines()
+//RS         .find(|line| line.contains("jet_std_fs_walk(") && !line.contains("fn jet_std_fs_walk("))
+//RS         .expect("generated source must call the filesystem walk helper");
+//RS     assert!(
+//RS         !call.contains(").ok()"),
+//RS         "direct filesystem rows must not project JetOutcome to native Option:\n{call}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_http_server_optional_controls_project_to_native_options() {
+//RS     let out = compile_temp(
+//RS         "core_http_server_optional_controls.jet",
+//RS         r#"
+//RS use core.http.server as http_server
+//RS 
+//RS fn run() HTTPError! {
+//RS     mux :: http_server.mux()
+//RS     mux.get("/", (req: HTTPRequest) -> Ok(http_server.response(200, "hello")))
+//RS     server :: http_server.bind("127.0.0.1:18080", mux, deadline: 2s)
+//RS     server.serve()
+//RS }
+//RS "#,
+//RS     );
+//RS     let calls = out
+//RS         .rust
+//RS         .lines()
+//RS         .filter(|line| {
+//RS             line.contains("jet_http_server_bind(")
+//RS                 && !line.contains("fn jet_http_server_bind(")
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     assert!(
+//RS         calls.iter().any(|line| line.contains(").ok()")),
+//RS         "HTTP present optional carriers must project to native Option:\n{calls:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_files_depth_example_runs() {
+//RS     let jet = jet_bin();
+//RS     if !jet.exists() {
+//RS         return;
+//RS     }
+//RS     let out = Command::new(&jet)
+//RS         .args(["run", "Examples/features/io/files_depth.jet"])
+//RS         .output()
+//RS         .expect("run files_depth");
+//RS     let release = Command::new(&jet)
+//RS         .args(["run", "--release", "Examples/features/io/files_depth.jet"])
+//RS         .output()
+//RS         .expect("run files_depth release");
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "files_depth failed\nstdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&out.stdout),
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(
+//RS         release.status.success(),
+//RS         "files_depth release failed\nstdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&release.stdout),
+//RS         String::from_utf8_lossy(&release.stderr)
+//RS     );
+//RS     let expected = fs::read_to_string("Examples/features/expected/io/files_depth.out").unwrap();
+//RS     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+//RS     assert_eq!(release.stdout, out.stdout);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_files_stat_mode_matches_across_tiers() {
+//RS     let jet = jet_bin();
+//RS     if !jet.exists() {
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_corelib_stat_mode_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS 
+//RS     let regular = dir.join("regular.txt");
+//RS     fs::write(&regular, "regular").unwrap();
+//RS     let executable = dir.join("executable.sh");
+//RS     write_executable(&executable, "#!/bin/sh\nexit 0\n");
+//RS     let directory = dir.join("directory");
+//RS     fs::create_dir(&directory).unwrap();
+//RS     let symlink = dir.join("regular.link");
+//RS 
+//RS     let source_path = dir.join("stat_mode.jet");
+//RS     let source = r#"
+//RS use core.files as fs
+//RS use core.process as process
+//RS use core.sys as sys
+//RS 
+//RS fn run() {
+//RS     args :: process.argv().skip(1).to_list()
+//RS     family :: sys.family()
+//RS     absolute :: fs.absolute("regular.txt") ?? panic("absolute")
+//RS     fs.set_mode(args[0], 0o644) ?? panic("regular mode setup")
+//RS     fs.set_mode(args[2], 0o755) ?? panic("directory mode setup")
+//RS     fs.symlink(args[0], args[3]) ?? panic("symlink setup")
+//RS     regular :: fs.stat(args[0]) ?? panic("regular stat")
+//RS     executable :: fs.stat(args[1]) ?? panic("executable stat")
+//RS     directory :: fs.stat(args[2]) ?? panic("directory stat")
+//RS     symlink :: fs.stat(args[3]) ?? panic("symlink stat")
+//RS     fs.set_mode(args[0], 0o600) ?? panic("regular mode mutation")
+//RS     fs.set_mode(args[2], 0o700) ?? panic("directory mode mutation")
+//RS     regular_after :: fs.stat(args[0]) ?? panic("regular after stat")
+//RS     directory_after :: fs.stat(args[2]) ?? panic("directory after stat")
+//RS     print("family:{family}")
+//RS     print("absolute:{absolute}")
+//RS     print("{regular.mode},{executable.mode},{directory.mode},{symlink.mode},{regular_after.mode},{directory_after.mode}")
+//RS }
+//RS "#;
+//RS     fs::write(&source_path, source).unwrap();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"stat_mode\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Env, Exec, FS, IO, Mem.Alloc, Panic] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let source_arg = source_path.to_string_lossy().into_owned();
+//RS     let path_args = [
+//RS         regular.to_string_lossy().into_owned(),
+//RS         executable.to_string_lossy().into_owned(),
+//RS         directory.to_string_lossy().into_owned(),
+//RS         symlink.to_string_lossy().into_owned(),
+//RS     ];
+//RS 
+//RS     let run_tier = |extra: &[&str]| {
+//RS         let _ = fs::remove_file(&symlink);
+//RS         let mut command = Command::new(&jet);
+//RS         command.current_dir(&dir);
+//RS         command
+//RS             .arg("run")
+//RS             .args(extra)
+//RS             .arg(&source_arg)
+//RS             .arg("--");
+//RS         for path in &path_args {
+//RS             command.arg(path);
+//RS         }
+//RS         command.output().expect("run stat mode fixture")
+//RS     };
+//RS     let default = run_tier(&[]);
+//RS     let interpreted = run_tier(&["--interpret"]);
+//RS     let release = run_tier(&["--release"]);
+//RS 
+//RS     let observations = |output: &std::process::Output, tier: &str| {
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "{tier} stat mode failed\nstdout:\n{}\nstderr:\n{}",
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         let stdout = String::from_utf8_lossy(&output.stdout);
+//RS         let mut lines = stdout.lines();
+//RS         let family = lines
+//RS             .next()
+//RS             .and_then(|line| line.strip_prefix("family:"))
+//RS             .expect("platform family observation")
+//RS             .to_string();
+//RS         let absolute = lines
+//RS             .next()
+//RS             .and_then(|line| line.strip_prefix("absolute:"))
+//RS             .expect("absolute path observation")
+//RS             .to_string();
+//RS         let modes = lines
+//RS             .next()
+//RS             .expect("stat mode observation")
+//RS             .trim()
+//RS             .split(',')
+//RS             .map(|mode| mode.parse::<i64>().expect("numeric stat mode"))
+//RS             .collect::<Vec<_>>();
+//RS         (family, absolute, modes)
+//RS     };
+//RS     let (default_family, default_absolute, default_modes) = observations(&default, "default");
+//RS     let (interpreted_family, interpreted_absolute, interpreted_modes) =
+//RS         observations(&interpreted, "interpreter");
+//RS     let (release_family, release_absolute, release_modes) = observations(&release, "release");
+//RS     let expected_absolute = regular.to_string_lossy().into_owned();
+//RS     let expected_family = std::env::consts::FAMILY;
+//RS     assert_eq!(default_family, expected_family);
+//RS     assert_eq!(interpreted_family, expected_family);
+//RS     assert_eq!(release_family, expected_family);
+//RS     assert_eq!(default_absolute, expected_absolute);
+//RS     assert_eq!(interpreted_absolute, expected_absolute);
+//RS     assert_eq!(release_absolute, expected_absolute);
+//RS     assert_eq!(default_modes.len(), 6);
+//RS     assert_eq!(interpreted_modes, default_modes);
+//RS     assert_eq!(release_modes, default_modes);
+//RS 
+//RS     assert_eq!(default_modes[0] & 0o170000, 0o100000);
+//RS     assert_eq!(default_modes[0] & 0o777, 0o644);
+//RS     assert_eq!(default_modes[1] & 0o170000, 0o100000);
+//RS     assert_eq!(default_modes[1] & 0o777, 0o755);
+//RS     assert_eq!(default_modes[2] & 0o170000, 0o040000);
+//RS     assert_eq!(default_modes[2] & 0o777, 0o755);
+//RS     assert_eq!(default_modes[3] & 0o170000, 0o120000);
+//RS     assert_ne!(default_modes[3] & 0o111, 0);
+//RS     assert_eq!(default_modes[4] & 0o170000, 0o100000);
+//RS     assert_eq!(default_modes[4] & 0o777, 0o600);
+//RS     assert_eq!(default_modes[5] & 0o170000, 0o040000);
+//RS     assert_eq!(default_modes[5] & 0o777, 0o700);
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_files_fsync_is_consumed_across_tiers() {
+//RS     let jet = jet_bin();
+//RS     if !jet.exists() {
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_corelib_fsync_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let journal = dir.join("owned").join("closure.journal");
+//RS     let source_path = dir.join("fsync.jet");
+//RS     let source = r#"
+//RS use core.files as fs
+//RS 
+//RS fn run() {
+//RS     fs.create_dir_all("owned") ?? panic("mkdir")
+//RS     fs.write("owned/closure.journal", "closure") ?? panic("write")
+//RS     fs.fsync("owned/closure.journal") ?? panic("fsync")
+//RS     contents :: fs.read("owned/closure.journal") ?? panic("read")
+//RS     print(contents)
+//RS }
+//RS "#;
+//RS     fs::write(&source_path, source).unwrap();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"fsync\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc, Panic] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let source_arg = source_path.to_string_lossy().into_owned();
+//RS     let run_tier = |extra: &[&str]| {
+//RS         let _ = fs::remove_file(&journal);
+//RS         let mut command = Command::new(&jet);
+//RS         command.current_dir(&dir);
+//RS         command
+//RS             .arg("run")
+//RS             .args(extra)
+//RS             .arg(&source_arg);
+//RS         command.output().expect("run fsync fixture")
+//RS     };
+//RS 
+//RS     let default = run_tier(&[]);
+//RS     let interpreted = run_tier(&["--interpret"]);
+//RS     let release = run_tier(&["--release"]);
+//RS     for (tier, output) in [
+//RS         ("default", &default),
+//RS         ("interpreter", &interpreted),
+//RS         ("release", &release),
+//RS     ] {
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "{tier} fsync failed\nstdout:\n{}\nstderr:\n{}",
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         assert_eq!(output.stdout, b"closure\n", "{tier} fsync output");
+//RS     }
+//RS     assert_eq!(interpreted.stdout, default.stdout);
+//RS     assert_eq!(release.stdout, default.stdout);
+//RS     assert!(journal.exists(), "fsync fixture did not leave the owned file");
+//RS     assert_eq!(fs::read_to_string(&journal).unwrap(), "closure");
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_watcher_example_runs() {
+//RS     let jet = jet_bin();
+//RS     if !jet.exists() {
+//RS         return;
+//RS     }
+//RS     let out = Command::new(&jet)
+//RS         .args(["run", "Examples/features/io/watcher.jet"])
+//RS         .output()
+//RS         .expect("run watcher");
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "watcher failed\nstdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&out.stdout),
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let expected = fs::read_to_string("Examples/features/expected/io/watcher.out").unwrap();
+//RS     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_builder_pipeline_and_spawn_run() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_corelib_process_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let work = dir.join("work");
+//RS     fs::create_dir_all(&work).unwrap();
+//RS 
+//RS     let probe = dir.join("probe.sh");
+//RS     let emit = dir.join("emit.sh");
+//RS     let cat = dir.join("cat.sh");
+//RS     let lines = dir.join("lines.sh");
+//RS     write_executable(
+//RS         &probe,
+//RS         "#!/bin/sh\nprintf 'env=%s\\n' \"$JET_PROCESS_TEST\"\nprintf 'cwd=%s\\n' \"$(pwd)\"\nread line\nprintf 'stdin=%s\\n' \"$line\"\n",
+//RS     );
+//RS     write_executable(&emit, "#!/bin/sh\nprintf 'pipe-ok\\n'\n");
+//RS     write_executable(&cat, "#!/bin/sh\ncat\n");
+//RS     write_executable(&lines, "#!/bin/sh\nprintf 'line-one\\nline-two\\n'\n");
+//RS 
+//RS     let src = format!(
+//RS         r#"
+//RS use core.process as process
+//RS use core.time as time
+//RS 
+//RS fn run() {{
+//RS     timeout :: Duration.seconds(2) ?? panic("duration")
+//RS     spec :: process.cmd(["{probe}"]).cwd("{work}").env_clear().env("JET_PROCESS_TEST", "ok").stdin(.Capture).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(10000)
+//RS     probe_child :: spec.spawn() ?? panic("spawn failed")
+//RS     probe_child.stdin.write("from-stdin\n") ?? panic("write failed")
+//RS     result :: probe_child.wait() ?? panic("wait failed")
+//RS     print(result.success)
+//RS     print(result.code)
+//RS     print(result.timed_out)
+//RS     print(result.output)
+//RS 
+//RS     piped :: process.pipeline([process.cmd(["{emit}"]), process.cmd(["{cat}"])]) ?? panic("pipeline failed")
+//RS     print(piped.success)
+//RS     print(piped.output)
+//RS 
+//RS     child :: process.cmd(["{lines}"]).stdout(.Stream).spawn() ?? panic("spawn failed")
+//RS     loop line in child.stdout.lines() {{
+//RS         print(line)
+//RS     }}
+//RS     waited :: child.wait() ?? panic("wait failed")
+//RS     print(waited.success)
+//RS }}
+//RS "#,
+//RS         probe = jet_string_path(&probe),
+//RS         work = jet_string_path(&work),
+//RS         emit = jet_string_path(&emit),
+//RS         cat = jet_string_path(&cat),
+//RS         lines = jet_string_path(&lines)
+//RS     );
+//RS 
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "process_api", &src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert!(stdout.contains("true\n0\nfalse\n"), "{stdout}");
+//RS     assert!(stdout.contains("env=ok\n"), "{stdout}");
+//RS     assert!(
+//RS         stdout.contains(&format!("cwd={}\n", work.display())),
+//RS         "{stdout}"
+//RS     );
+//RS     assert!(stdout.contains("stdin=from-stdin\n"), "{stdout}");
+//RS     assert!(stdout.contains("pipe-ok\n"), "{stdout}");
+//RS     assert!(stdout.contains("line-one\n"), "{stdout}");
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_pipeline_honors_final_redirection_modes() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_core_process_pipeline_redirect_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let first = dir.join("first.sh");
+//RS     let last = dir.join("last.sh");
+//RS     write_executable(
+//RS         &first,
+//RS         "#!/bin/sh\nprintf 'edge\\n'\nprintf 'first-err\\n' >&2\n",
+//RS     );
+//RS     write_executable(
+//RS         &last,
+//RS         "#!/bin/sh\ncat\nprintf 'final-err\\n' >&2\n",
+//RS     );
+//RS     let src = format!(
+//RS         r#"
+//RS use core.process as process
+//RS 
+//RS fn run() {{
+//RS     result :: process.pipeline([
+//RS         process.cmd(["{first}"]),
+//RS         process.cmd(["{last}"]).stdout(.Inherit).stderr(.Inherit)
+//RS     ]) ?? panic("pipeline failed")
+//RS     print(result.success)
+//RS     print(result.output)
+//RS     print(result.errors)
+//RS }}
+//RS "#,
+//RS         first = jet_string_path(&first),
+//RS         last = jet_string_path(&last),
+//RS     );
+//RS     let (code, stdout, stderr) =
+//RS         build_and_run(&dir, "process_pipeline_redirect", &src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "edge\ntrue\n\nfirst-err\n\n");
+//RS     assert_eq!(stderr, "final-err\n");
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_pipeline_honors_stage_timeout() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_core_process_pipeline_timeout_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let slow = dir.join("slow.sh");
+//RS     write_executable(&slow, "#!/bin/sh\nsleep 1\n");
+//RS     let src = format!(
+//RS         r#"
+//RS use core.process as process
+//RS 
+//RS fn run() {{
+//RS     timeout :: Duration.milliseconds(100) ?? panic("duration failed")
+//RS     result :: process.pipeline([
+//RS         process.cmd(["{slow}"]).timeout(timeout),
+//RS         process.cmd(["cat"])
+//RS     ]) ?? panic("pipeline failed")
+//RS     print(result.timed_out)
+//RS }}
+//RS "#,
+//RS         slow = jet_string_path(&slow),
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "process_pipeline_timeout", &src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "true\n");
+//RS 
+//RS     let started = std::time::Instant::now();
+//RS     let rerun = Command::new(dir.join("process_pipeline_timeout"))
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         started.elapsed() < std::time::Duration::from_millis(800),
+//RS         "pipeline ignored stage timeout: {:?}",
+//RS         started.elapsed()
+//RS     );
+//RS     assert_eq!(rerun.status.code(), Some(0));
+//RS     assert_eq!(rerun.stdout, b"true\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_pipeline_limits_intermediate_stdout_without_deadlock() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_core_process_pipeline_output_limit_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let flood = dir.join("flood.sh");
+//RS     write_executable(
+//RS         &flood,
+//RS         "#!/bin/sh\ndd if=/dev/zero bs=8192 count=32 2>/dev/null | tr '\\000' x\n",
+//RS     );
+//RS     let src = format!(
+//RS         r#"
+//RS use core.process as process
+//RS 
+//RS fn run() {{
+//RS     bounded :: process.cmd(["{flood}"]).output_limit(1024)
+//RS     result :: process.pipeline([bounded, process.cmd(["cat"])])
+//RS     if result == {{
+//RS         .Ok(_) -> {{ print("limit:accepted") }}
+//RS         .Err(_) -> {{ print("limit:refused") }}
+//RS     }}
+//RS }}
+//RS "#,
+//RS         flood = jet_string_path(&flood),
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(
+//RS         &dir,
+//RS         "process_pipeline_output_limit",
+//RS         &src,
+//RS         &[],
+//RS         None,
+//RS     );
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "limit:refused\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_live_stream_does_not_block_on_sibling_output() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_core_process_live_backpressure_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let slow = dir.join("slow.sh");
+//RS     write_executable(
+//RS         &slow,
+//RS         "#!/bin/sh\n\
+//RS dd if=/dev/zero bs=131072 count=1 1>&2 2>/dev/null &\n\
+//RS writer=$!\n\
+//RS (sleep 2; kill -9 \"$writer\" 2>/dev/null) >/dev/null 2>&1 &\n\
+//RS killer=$!\n\
+//RS wait \"$writer\"\n\
+//RS kill \"$killer\" 2>/dev/null || true\n\
+//RS printf 'done\\n'\n",
+//RS     );
+//RS     let src = format!(
+//RS         r#"
+//RS use core.process as process
+//RS 
+//RS fn run() {{
+//RS     child :: process.cmd(["{slow}"]).stdout(.Stream).stderr(.Stream).spawn() ?? panic("spawn failed")
+//RS     loop line in child.stdout.lines() {{
+//RS         print(line)
+//RS     }}
+//RS     child.wait() ?? panic("wait failed")
+//RS     print("finished")
+//RS }}
+//RS "#,
+//RS         slow = jet_string_path(&slow),
+//RS     );
+//RS     let (code, stdout, stderr) =
+//RS         build_and_run(&dir, "process_live_backpressure", &src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "done\nfinished\n");
+//RS     assert!(stderr.is_empty(), "unexpected child stderr: {stderr:?}");
+//RS 
+//RS     let started = std::time::Instant::now();
+//RS     let rerun = Command::new(dir.join("process_live_backpressure"))
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         started.elapsed() < std::time::Duration::from_millis(1500),
+//RS         "live stream waited for the sibling pipe instead of draining it: {:?}",
+//RS         started.elapsed()
+//RS     );
+//RS     assert_eq!(rerun.status.code(), Some(0));
+//RS     assert_eq!(rerun.stdout, b"done\nfinished\n");
+//RS     assert!(
+//RS         rerun.stderr.is_empty(),
+//RS         "unexpected child stderr: {:?}",
+//RS         rerun.stderr
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_limits_kill_descendants_and_stop_output_early() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_core_process_limits_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let timeout_pid = dir.join("timeout.pid");
+//RS     let output_pid = dir.join("output.pid");
+//RS     let timeout_script = dir.join("timeout.sh");
+//RS     let output_script = dir.join("output.sh");
+//RS     write_executable(
+//RS         &timeout_script,
+//RS         &format!(
+//RS             "#!/bin/sh\nsleep 30 &\nprintf '%s\\n' \"$!\" > '{}'\nwait\n",
+//RS             timeout_pid.display()
+//RS         ),
+//RS     );
+//RS     write_executable(
+//RS         &output_script,
+//RS         &format!(
+//RS             "#!/bin/sh\nsleep 2 &\nprintf '%s\\n' \"$!\" > '{}'\nprintf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'\nwait\n",
+//RS             output_pid.display()
+//RS         ),
+//RS     );
+//RS     let src = format!(
+//RS         r#"
+//RS use core.process as process
+//RS use core.time as time
+//RS 
+//RS fn run() -[Exec, IO, Time.Wait]> {{
+//RS     timeout :: Duration.seconds(1) ?? panic("duration")
+//RS     timed :: process.run_spec(process.cmd(["{timeout_script}"]).timeout(timeout)) ?? panic("timeout run failed")
+//RS     print(timed.timed_out)
+//RS     limited :: process.run_spec(process.cmd(["{output_script}"]).output_limit(16))
+//RS     if limited == {{
+//RS         .Ok(_) -> {{ print("limit:accepted") }}
+//RS         .Err(_) -> {{ print("limit:refused") }}
+//RS     }}
+//RS }}
+//RS "#,
+//RS         timeout_script = jet_string_path(&timeout_script),
+//RS         output_script = jet_string_path(&output_script),
+//RS     );
+//RS     // Compile once, then time only the already-built production binary. Measuring
+//RS     // `build_and_run` here also measures rustc and makes the enforcement check
+//RS     // fail on a cold cache before the child even starts.
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "process_limits", &src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert!(stdout.contains("true\nlimit:refused\n"), "{stdout}");
+//RS     let started = std::time::Instant::now();
+//RS     let rerun = Command::new(dir.join("process_limits"))
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         started.elapsed() < std::time::Duration::from_secs(2),
+//RS         "output limit waited for the child instead of terminating it: {:?}",
+//RS         started.elapsed()
+//RS     );
+//RS     assert_eq!(rerun.status.code(), Some(0));
+//RS     assert_eq!(rerun.stdout, b"true\nlimit:refused\n");
+//RS 
+//RS     for pid_file in [&timeout_pid, &output_pid] {
+//RS         let pid = fs::read_to_string(pid_file).unwrap();
+//RS         let pid = pid.trim();
+//RS         let alive = Command::new("kill")
+//RS             .args(["-0", pid])
+//RS             .status()
+//RS             .unwrap()
+//RS             .success();
+//RS         if alive {
+//RS             let _ = Command::new("kill").args(["-9", pid]).status();
+//RS         }
+//RS         assert!(!alive, "process descendant {pid} survived enforcement");
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_streams_bound_both_pipes_and_close_stdin_after_wait() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_core_process_streams_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let flood = dir.join("flood.sh");
+//RS     write_executable(
+//RS         &flood,
+//RS         "#!/bin/sh\n\
+//RS dd if=/dev/zero bs=1048576 count=2 2>/dev/null | tr '\\000' x &\n\
+//RS out=$!\n\
+//RS dd if=/dev/zero bs=1048576 count=2 2>/dev/null | tr '\\000' y >&2 &\n\
+//RS err=$!\n\
+//RS wait \"$out\"\n\
+//RS wait \"$err\"\n",
+//RS     );
+//RS     let src = format!(
+//RS         r#"
+//RS use core.process as process
+//RS 
+//RS fn run() -[Exec, IO, Time.Wait]> {{
+//RS     limited :: process.run_spec(process.cmd(["{flood}"]).output_limit(1024))
+//RS     if limited == {{
+//RS         .Ok(_) -> {{ print("limit:accepted") }}
+//RS         .Err(_) -> {{ print("limit:refused") }}
+//RS     }}
+//RS     child :: process.cmd(["sh", "-c", "exit 0"]).stdin(.Capture).spawn() ?? panic("spawn failed")
+//RS     child.wait() ?? panic("wait failed")
+//RS     if child.stdin.write("late") == {{
+//RS         .Ok(_) -> {{ print("closed:accepted") }}
+//RS         .Err(_) -> {{ print("closed:typed-error") }}
+//RS     }}
+//RS }}
+//RS "#,
+//RS         flood = jet_string_path(&flood),
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "process_streams", &src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "limit:refused\nclosed:typed-error\n");
+//RS }
+//RS 
+//RS /// D-PROCESS-SESSION1=A (#1181): `.terminal()` is the one opt-in for a
+//RS /// terminal-backed session, and it lives on the same `ProcessSpec`. Argv
+//RS /// execution with no terminal stays the default. Unix run/spawn use a real PTY;
+//RS /// pipeline stages reject terminal specs rather than coercing them to pipes.
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_terminal_uses_unix_pty_for_run_and_spawn() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_core_process_terminal_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src = r#"
+//RS use core.process as process
+//RS 
+//RS fn run() -[Exec, IO, Time.Wait]> {
+//RS     plain :: process.run_spec(process.cmd(["echo", "plain-ok"]).stdout(.Capture)) ?? panic("default run failed")
+//RS     print(plain.output.trim())
+//RS 
+//RS     run_result :: process.run_spec(process.cmd(["printf", "run-ok"]).terminal()) ?? panic("terminal run failed")
+//RS     print(run_result.output.contains("run-ok"))
+//RS 
+//RS     child :: process.cmd(["printf", "spawn-ok"]).terminal().spawn() ?? panic("terminal spawn failed")
+//RS     if child.terminal == {
+//RS         .Val(session) -> {
+//RS             session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
+//RS             print("spawn: session")
+//RS         }
+//RS         .None -> { print("spawn: no session") }
+//RS     }
+//RS     waited :: child.wait() ?? panic("terminal wait failed")
+//RS     print(waited.output.contains("spawn-ok"))
+//RS 
+//RS     if process.pipeline([process.cmd(["echo", "a"]), process.cmd(["cat"]).terminal()]) == {
+//RS         .Ok(_) -> { print("pipeline: accepted") }
+//RS         .Err(_) -> { print("pipeline: refused") }
+//RS     }
+//RS     if process.run_spec(process.cmd([]).terminal()) == {
+//RS         .Ok(_) -> { print("empty: accepted") }
+//RS         .Err(e) -> {
+//RS             if e == {
+//RS                 .InvalidInput(_) -> { print("empty: invalid") }
+//RS                 else -> { print("empty: wrong error") }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "process_terminal", src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert!(stdout.starts_with("plain-ok\n"), "{stdout}");
+//RS     assert!(stdout.contains("true\nspawn: session\ntrue\npipeline: refused\nempty: invalid\n"), "{stdout}");
+//RS     // The production path carries the native PTY primitive into the emitted
+//RS     // program; this guards against a test-only or pipe fallback.
+//RS     let compiled = compile_temp("process_terminal_text.jet", src);
+//RS     assert!(
+//RS         compiled.rust.contains("posix_openpt"),
+//RS         "the Unix terminal path must include the native PTY backend"
+//RS     );
+//RS }
+//RS 
+//RS /// D-PROCESS-SESSION1=A (#1181): the Unix backend is a real bidirectional
+//RS /// terminal, not a pair of pipes. Prove tty identity, input, ANSI bytes, and
+//RS /// the requested window size through the shipped ProcessSpec path.
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_terminal_is_tty_bidirectional_and_preserves_control_bytes() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_core_process_terminal_bytes_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let probe = dir.join("terminal_probe.sh");
+//RS     write_executable(
+//RS         &probe,
+//RS         "#!/bin/sh
+//RS if [ ! -t 0 ] || [ ! -t 1 ]; then exit 41; fi
+//RS printf 'ready\\n'
+//RS IFS= read -r line
+//RS printf 'input:%s\\n' \"$line\"
+//RS printf '\\033[31mcontrol\\033[0m\\n'
+//RS stty size
+//RS ",
+//RS     );
+//RS     let src = format!(
+//RS         r#"
+//RS use core.process as process
+//RS 
+//RS fn run() {{
+//RS     policy :: TerminalPolicy{{
+//RS         size: TerminalSize{{ cols: 100, rows: 30 }},
+//RS         mode: .Raw
+//RS     }}
+//RS     child :: process.cmd(["{probe}"]).terminal(policy).spawn() ?? panic("terminal spawn failed")
+//RS     session :: child.terminal ?? panic("missing terminal session")
+//RS     session.resize(TerminalSize{{ cols: 100, rows: 30 }}) ?? panic("resize failed")
+//RS     child.stdin.write("typed\n") ?? panic("terminal write failed")
+//RS     result :: child.wait() ?? panic("terminal wait failed")
+//RS     print(result.success)
+//RS     print(result.output)
+//RS     if child.stdin.write("late") == {{
+//RS         .Ok(_) -> {{ print("closed:accepted") }}
+//RS         .Err(error) -> {{
+//RS             if error == {{
+//RS                 .Closed(_) -> {{ print("closed:typed-error") }}
+//RS                 else -> {{ print("closed:wrong-error") }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#,
+//RS         probe = jet_string_path(&probe)
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "process_terminal_bytes", &src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert!(stdout.starts_with("true\nready\ninput:typed\n"), "{stdout:?}");
+//RS     assert!(stdout.contains("\x1b[31mcontrol\x1b[0m"), "ANSI bytes lost: {stdout:?}");
+//RS     assert!(stdout.contains("30 100"), "resize lost: {stdout:?}");
+//RS     assert!(stdout.ends_with("closed:typed-error\n"), "{stdout:?}");
+//RS }
+//RS 
+//RS /// D-PROCESS-SESSION1=A (#1181): terminal lifecycle controls target the Unix
+//RS /// session process group. Each child leaves a descendant PID behind so the
+//RS /// host test can prove interrupt, terminate, kill, timeout, and drop reap it.
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_terminal_controls_reap_the_full_process_tree() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_core_process_terminal_tree_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let script = dir.join("tree.sh");
+//RS     let interrupt_pid = dir.join("interrupt.pid");
+//RS     let terminate_pid = dir.join("terminate.pid");
+//RS     let kill_pid = dir.join("kill.pid");
+//RS     let timeout_pid = dir.join("timeout.pid");
+//RS     let drop_pid = dir.join("drop.pid");
+//RS     write_executable(
+//RS         &script,
+//RS         "#!/bin/sh
+//RS sleep 30 &
+//RS printf '%s\\n' \"$!\" > \"$1\"
+//RS trap 'exit 130' INT
+//RS trap 'exit 143' TERM
+//RS while :; do sleep 1; done
+//RS ",
+//RS     );
+//RS     let src = format!(
+//RS         r#"
+//RS use core.process as process
+//RS use core.time as time
+//RS 
+//RS fn dropped(path: String) {{
+//RS     child :: process.cmd(["{script}", path]).terminal().spawn() ?? panic("drop spawn failed")
+//RS     time.sleep(100ms)
+//RS }}
+//RS 
+//RS fn run() -[Exec, IO, Time.Wait]> {{
+//RS     interrupt :: process.cmd(["{script}", "{interrupt_pid}"]).terminal().spawn() ?? panic("interrupt spawn failed")
+//RS     time.sleep(100ms)
+//RS     interrupt.interrupt() ?? panic("interrupt failed")
+//RS     interrupt_result :: interrupt.wait() ?? panic("interrupt wait failed")
+//RS     print(interrupt_result.success)
+//RS 
+//RS     terminate :: process.cmd(["{script}", "{terminate_pid}"]).terminal().spawn() ?? panic("terminate spawn failed")
+//RS     time.sleep(100ms)
+//RS     terminate.terminate() ?? panic("terminate failed")
+//RS     terminate_result :: terminate.wait() ?? panic("terminate wait failed")
+//RS     print(terminate_result.success)
+//RS 
+//RS     kill :: process.cmd(["{script}", "{kill_pid}"]).terminal().spawn() ?? panic("kill spawn failed")
+//RS     time.sleep(100ms)
+//RS     kill.kill() ?? panic("kill failed")
+//RS     kill_result :: kill.wait() ?? panic("kill wait failed")
+//RS     print(kill_result.success)
+//RS 
+//RS     timeout :: Duration.milliseconds(100) ?? panic("timeout duration failed")
+//RS     timed :: process.run_spec(process.cmd(["{script}", "{timeout_pid}"]).terminal().timeout(timeout)) ?? panic("timeout run failed")
+//RS     print(timed.timed_out)
+//RS 
+//RS     dropped("{drop_pid}")
+//RS     print("drop returned")
+//RS }}
+//RS "#,
+//RS         script = jet_string_path(&script),
+//RS         interrupt_pid = jet_string_path(&interrupt_pid),
+//RS         terminate_pid = jet_string_path(&terminate_pid),
+//RS         kill_pid = jet_string_path(&kill_pid),
+//RS         timeout_pid = jet_string_path(&timeout_pid),
+//RS         drop_pid = jet_string_path(&drop_pid),
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "process_terminal_tree", &src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "false\nfalse\nfalse\ntrue\ndrop returned\n");
+//RS 
+//RS     for pid_file in [
+//RS         interrupt_pid,
+//RS         terminate_pid,
+//RS         kill_pid,
+//RS         timeout_pid,
+//RS         drop_pid,
+//RS     ] {
+//RS         let pid = fs::read_to_string(&pid_file).unwrap();
+//RS         let pid = pid.trim();
+//RS         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+//RS         loop {
+//RS             let alive = Command::new("kill")
+//RS                 .args(["-0", pid])
+//RS                 .status()
+//RS                 .unwrap()
+//RS                 .success();
+//RS             if !alive {
+//RS                 break;
+//RS             }
+//RS             if std::time::Instant::now() >= deadline {
+//RS                 let _ = Command::new("kill").args(["-9", pid]).status();
+//RS                 panic!("terminal descendant {pid} survived {:?}", pid_file);
+//RS             }
+//RS             std::thread::sleep(std::time::Duration::from_millis(10));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Process wait is a cancellation wait point. Cancelling a task that owns a
+//RS /// live child must unwind the wait cleanup and terminate the child group,
+//RS /// including a deliberately forked descendant.
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_wait_cancellation_reaps_the_full_process_tree() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_core_process_cancel_tree_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let script = dir.join("cancel-tree.sh");
+//RS     let descendant_pid = dir.join("descendant.pid");
+//RS     write_executable(
+//RS         &script,
+//RS         &format!(
+//RS             "#!/bin/sh\nsleep 30 &\nprintf '%s\\n' \"$!\" > '{}'\nwhile :; do sleep 1; done\n",
+//RS             descendant_pid.display()
+//RS         ),
+//RS     );
+//RS     let src = format!(
+//RS         r#"
+//RS use core.process as process
+//RS use core.tasks as tasks
+//RS use core.time as time
+//RS 
+//RS fn run() {{
+//RS     (ready_tx, ready_rx) :: channel<Int>()
+//RS     worker :: task {{
+//RS         child :: process.cmd(["{script}"]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn failed")
+//RS         ready_tx.send(1)
+//RS         child.wait() ?? panic("cancelled wait returned")
+//RS     }}
+//RS     _ready :: ready_rx.receive() ?? panic("ready failed")
+//RS     time.sleep(100ms)
+//RS     worker.cancel()
+//RS     result :: worker.join()
+//RS     if result == {{
+//RS         .Err(error) -> {{
+//RS             if error == {{
+//RS                 .Cancelled -> {{ print("cancelled") }}
+//RS                 else -> {{ print("wrong cancellation") }}
+//RS             }}
+//RS         }}
+//RS         .Ok(_) -> {{ print("completed") }}
+//RS     }}
+//RS }}
+//RS "#,
+//RS         script = jet_string_path(&script),
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "process_cancel_tree", &src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "cancelled\n");
+//RS 
+//RS     let pid = fs::read_to_string(&descendant_pid).unwrap();
+//RS     let pid = pid.trim();
+//RS     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+//RS     loop {
+//RS         let alive = Command::new("kill")
+//RS             .args(["-0", pid])
+//RS             .status()
+//RS             .unwrap()
+//RS             .success();
+//RS         if !alive {
+//RS             break;
+//RS         }
+//RS         if std::time::Instant::now() >= deadline {
+//RS             let _ = Command::new("kill").args(["-9", pid]).status();
+//RS             panic!("cancelled process descendant {pid} survived task cleanup");
+//RS         }
+//RS         std::thread::sleep(std::time::Duration::from_millis(10));
+//RS     }
+//RS }
+//RS 
+//RS /// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D (#1181): the beginner and expert
+//RS /// forms share one ProcessSpec. Stable host facts advertise the Unix PTY and a
+//RS /// policy controls the initial terminal size and mode.
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_terminal_policy_and_capabilities_are_typed_and_resizable() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_core_process_terminal_policy_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src = r#"
+//RS use core.process as process
+//RS 
+//RS fn run() -[Exec, IO, Time.Wait]> {
+//RS     policy :: TerminalPolicy{
+//RS         size: TerminalSize{ cols: 120, rows: 40 },
+//RS         mode: .Raw
+//RS     }
+//RS     plan :: process.cmd(["echo", "hi"]).terminal(policy)
+//RS     facts :: plan.abilities()
+//RS     print(facts.has(TerminalFact.terminal))
+//RS     print(facts.has(TerminalFact.resize))
+//RS     print(facts.has(TerminalFact.raw))
+//RS     print(facts.has("preview_x"))
+//RS     if process.run_spec(plan) == {
+//RS         .Ok(_) -> { print("terminal:ok") }
+//RS         .Err(_) -> { print("terminal:unavailable") }
+//RS     }
+//RS     child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
+//RS     if child.terminal == {
+//RS         .Val(session) -> {
+//RS             session.resize(TerminalSize{ cols: 80, rows: 24 }) ?? panic("resize failed")
+//RS             print("plain child unexpectedly has terminal")
+//RS         }
+//RS         .None -> { print("plain child has no terminal") }
+//RS     }
+//RS     waited :: child.wait() ?? panic("wait failed")
+//RS     print(waited.output.trim())
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "process_terminal_policy", src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "true\ntrue\ntrue\nfalse\nterminal:ok\nplain child has no terminal\nplain\n"
+//RS     );
+//RS 
+//RS     let typo = jet::compile(
+//RS         r#"use core.process as process
+//RS fn run() {
+//RS     facts :: process.cmd(["echo", "x"]).abilities()
+//RS     print(facts.has(TerminalFact.reszie))
+//RS }
+//RS "#,
+//RS     )
+//RS     .expect_err("stable fact typos must fail in sema");
+//RS     assert!(
+//RS         typo.iter().any(|diag| {
+//RS             diag.code == "E0302"
+//RS                 && diag.what.contains("`TerminalFact` has no key `reszie`")
+//RS                 && diag.fix.contains("`TerminalFact.resize`")
+//RS         }),
+//RS         "{typo:?}"
+//RS     );
+//RS 
+//RS     let preview_typo = jet::compile(
+//RS         r#"use core.process as process
+//RS fn run() {
+//RS     facts :: process.cmd(["echo", "x"]).abilities()
+//RS     print(facts.has("reszie"))
+//RS }
+//RS "#,
+//RS     )
+//RS     .expect_err("close preview-string typos must suggest the stable fact");
+//RS     assert!(
+//RS         preview_typo.iter().any(|diag| {
+//RS             diag.code == "E0302"
+//RS                 && diag.what.contains("`reszie` looks like `resize`")
+//RS                 && diag.fix.contains("`TerminalFact.resize`")
+//RS         }),
+//RS         "{preview_typo:?}"
+//RS     );
+//RS 
+//RS     let plain_child_terminal = jet::compile(
+//RS         r#"use core.process as process
+//RS fn run() {
+//RS     child :: process.cmd(["echo", "plain"]).spawn() ?? panic("spawn failed")
+//RS     child.terminal.resize(TerminalSize{ cols: 80, rows: 24 })
+//RS }
+//RS "#,
+//RS     )
+//RS     .expect_err("a plain child must not expose a TerminalSession");
+//RS     assert!(
+//RS         plain_child_terminal
+//RS             .iter()
+//RS             .any(|diag| {
+//RS                 diag.code == "E0311"
+//RS                     && diag.what
+//RS                         == "`.resize()` needs `TerminalSession`, not `TerminalSession?`"
+//RS                     && diag.fix.contains("session.resize(size)")
+//RS             }),
+//RS         "{plain_child_terminal:?}"
+//RS     );
+//RS }
+//RS 
+//RS /// D-PROCESS-SESSION1=A / #1182: the Windows terminal path must create a real
+//RS /// ConPTY, preserve the combined byte stream, resize the console, and release
+//RS /// the pseudoconsole before `wait()` joins its output reader.
+//RS #[cfg(windows)]
+//RS #[test]
+//RS fn core_process_terminal_uses_windows_conpty_for_bytes_resize_and_close() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_core_process_terminal_conpty_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let script = dir.join("conpty_probe.cmd");
+//RS     fs::write(
+//RS         &script,
+//RS         format!(
+//RS             "@echo off\r\nmode con >nul 2>nul || exit /b 41\r\necho ready\r\nset /p line=\r\necho input:%line%\r\necho {red}control{reset}\r\nmode con\r\n",
+//RS             red = "\x1b[31m",
+//RS             reset = "\x1b[0m"
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let src = format!(
+//RS         r#"
+//RS use core.process as process
+//RS 
+//RS fn run() {{
+//RS     policy :: TerminalPolicy{{
+//RS         size: TerminalSize{{ cols: 80, rows: 24 }},
+//RS         mode: .Cooked
+//RS     }}
+//RS     child :: process.cmd(["cmd.exe", "/D", "/Q", "/C", "{script}"])
+//RS         .cwd("{dir}")
+//RS         .terminal(policy)
+//RS         .spawn() ?? panic("ConPTY spawn failed")
+//RS     session :: child.terminal ?? panic("missing ConPTY session")
+//RS     session.resize(TerminalSize{{ cols: 100, rows: 30 }}) ?? panic("ConPTY resize failed")
+//RS     child.stdin.write("typed\r\n") ?? panic("ConPTY input failed")
+//RS     result :: child.wait() ?? panic("ConPTY wait failed")
+//RS     print(result.success)
+//RS     print(result.output)
+//RS     if child.stdin.write("late") == {{
+//RS         .Ok(_) -> {{ print("closed:accepted") }}
+//RS         .Err(error) -> {{
+//RS             if error == {{
+//RS                 .Closed(_) -> {{ print("closed:typed") }}
+//RS                 else -> {{ print("closed:wrong") }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#,
+//RS         script = jet_string_path(&script),
+//RS         dir = jet_string_path(&dir),
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "process_terminal_conpty", &src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     let output = stdout.replace("\r\n", "\n");
+//RS     assert!(output.starts_with("true\n"), "{stdout:?}");
+//RS     assert!(output.contains("ready\n"), "ready marker lost: {stdout:?}");
+//RS     assert!(output.contains("input:typed\n"), "input bytes lost: {stdout:?}");
+//RS     assert!(output.contains("\x1b[31mcontrol\x1b[0m"), "VT bytes lost: {stdout:?}");
+//RS     assert!(output.contains("100") && output.contains("30"), "resize lost: {stdout:?}");
+//RS     assert!(output.ends_with("closed:typed\n"), "closed stdin was not typed: {stdout:?}");
+//RS 
+//RS     let compiled = compile_temp("process_terminal_conpty_text.jet", &src);
+//RS     assert!(compiled.rust.contains("CreatePseudoConsole"));
+//RS     assert!(compiled.rust.contains("PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE"));
+//RS     assert!(compiled.rust.contains("let native = jet_process_pty::spawn("));
+//RS     assert!(compiled.rust.contains("jet_process_pty::resize_console("));
+//RS     assert!(compiled.rust.contains("jet_std::ProcessHandle::Native"));
+//RS     assert!(compiled.rust.contains("TerminateJobObject"));
+//RS     assert!(compiled.rust.contains("ClosePseudoConsole"));
+//RS     assert!(compiled.rust.contains("input.write_all(&[3])"));
+//RS     assert!(!compiled.rust.contains("CREATE_NEW_PROCESS_GROUP"));
+//RS     assert!(!compiled.rust.contains("GenerateConsoleCtrlEvent"));
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn core_process_sh_typed_text_keeps_each_hole_one_argv_item() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_core_process_sh_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run(
+//RS         &dir,
+//RS         "process_sh_typed_text",
+//RS         r#"
+//RS use core.process as process
+//RS 
+//RS fn run() -[Exec, Time.Wait]> {
+//RS     hostile :: "two words;*.jet"
+//RS     first_spec :: process.cmd(["printf", "<%s>", hostile])
+//RS     first :: process.run_spec(first_spec) ?? panic("typed-head command failed")
+//RS     print(first.output)
+//RS 
+//RS     second_spec :: process.cmd(["printf", "[%s]", hostile])
+//RS     second :: process.run_spec(second_spec) ?? panic("second typed-head failed")
+//RS     print(second.output)
+//RS 
+//RS     audited :: process.cmd(["printf", "raw"])
+//RS     third :: process.run_spec(audited) ?? panic("raw command failed")
+//RS     print(third.output)
+//RS }
+//RS "#,
+//RS         &[],
+//RS         None,
+//RS     );
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "<two words;*.jet>\n[two words;*.jet]\nraw\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_time_calendar_zone_and_dst_run() {
+//RS     let source_zone = std::env::var_os("TZDIR")
+//RS         .map(|dir| PathBuf::from(dir).join("America/New_York"))
+//RS         .filter(|path| path.exists())
+//RS         .unwrap_or_else(|| PathBuf::from("/usr/share/zoneinfo/America/New_York"));
+//RS     if !source_zone.exists() {
+//RS         return;
+//RS     }
+//RS     let dir =
+//RS         std::env::temp_dir().join(format!("jet_corelib_time_calendar_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let tzdb = dir.join("tzdb");
+//RS     fs::create_dir_all(tzdb.join("America")).unwrap();
+//RS     fs::copy(&source_zone, tzdb.join("America/New_York")).unwrap();
+//RS     let src = r#"
+//RS use core.time as time
+//RS use core.time as date
+//RS 
+//RS fn run() {
+//RS     zone :: time.zone("America/New_York") ?? panic("missing zone")
+//RS     local :: time.zoned_local(date.new(2024, 3, 10), time.time(1, 30, 0), zone) ?? panic("local time")
+//RS     print(local.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+//RS     civil :: local.add_period(time.period_days(1))
+//RS     day :: Duration.hours(24) ?? panic("duration")
+//RS     absolute :: local.add_duration(day)
+//RS     print(civil.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+//RS     print(absolute.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+//RS     print(local.to_datetime().format_rfc3339())
+//RS     parsed :: time.parse_rfc3339("2024-03-10T06:30:00Z") ?? panic("bad parse")
+//RS     print(parsed.in_zone(zone).format("yyyy-MM-dd HH:mm:ss VV XXX"))
+//RS }
+//RS "#;
+//RS     let tzdb_env = tzdb.to_string_lossy().into_owned();
+//RS     let (code, stdout, stderr) = build_and_run(
+//RS         &dir,
+//RS         "time_calendar",
+//RS         src,
+//RS         &[("JET_TZDB_DIR", &tzdb_env)],
+//RS         None,
+//RS     );
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "2024-03-10 01:30:00 America/New_York -05:00\n2024-03-11 01:30:00 America/New_York -04:00\n2024-03-11 02:30:00 America/New_York -04:00\n2024-03-10T06:30:00Z\n2024-03-10 01:30:00 America/New_York -05:00\n"
+//RS     );
+//RS 
+//RS     // I9: default `jet run` must return the same ZonedDateTime the full build
+//RS     // does, not a flattened carrier. #2030 — the resident-JIT civil-time host
+//RS     // had no arm for a zoned `add_duration`/`add_period` receiver, so dispatch
+//RS     // fell through to a null handle and `format`/`to_string` rendered an
+//RS     // unrelated heap slot (the source file path) with offset 0 and is_dst false.
+//RS     let jet = jet_bin();
+//RS     if jet.exists() {
+//RS         let quick_path = dir.join("time_calendar.jet");
+//RS         fs::write(&quick_path, src).unwrap();
+//RS         let quick = Command::new(&jet)
+//RS             .arg("run")
+//RS             .arg(&quick_path)
+//RS             .current_dir(&dir)
+//RS             .env("JET_TZDB_DIR", &tzdb_env)
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             quick.status.success(),
+//RS             "default `jet run` failed:\n{}",
+//RS             String::from_utf8_lossy(&quick.stderr)
+//RS         );
+//RS         assert_eq!(
+//RS             String::from_utf8_lossy(&quick.stdout),
+//RS             stdout,
+//RS             "zoned arithmetic must mean the same thing on the default tier and AOT (I9)"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_url_mime_parse_join_query_and_http_url_run() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_corelib_url_mime_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src = r#"
+//RS use core.net.mime as mime
+//RS use core.net.url as url
+//RS 
+//RS fn run() {
+//RS     base :: url.parse("https://Bücher.example:443/a/./b/../c?x=1#frag") ?? panic("bad url")
+//RS     print(base.to_string())
+//RS     print(base.host() ?? "none")
+//RS     print(base.path())
+//RS     print(base.query_pairs()[0][0])
+//RS     print(base.query_pairs()[0][1])
+//RS     rel :: base.join("../notify?user=ada lovelace&user=grace#done") ?? panic("bad join")
+//RS     print(rel.to_string())
+//RS     print(rel.path_segments().join("|"))
+//RS     print(rel.fragment() ?? "none")
+//RS     print(url.query([["user", "ada lovelace"], ["user", "grace"], ["empty", ""]]))
+//RS     print(url.percent_encode("a b/c"))
+//RS     print(url.percent_decode("a%20b%2Fc") ?? "bad")
+//RS     html :: mime.parse("Text/HTML; charset=UTF-8") ?? panic("bad mime")
+//RS     print(html.essence())
+//RS     print(html.param("charset") ?? "none")
+//RS     print(mime.from_extension("png") ?? "none")
+//RS     print(mime.extension("image/png") ?? "none")
+//RS     png :: mime.parse("image/png") ?? panic("bad mime")
+//RS     print(url.data(png, "<h1>Hi</h1>").to_string())
+//RS     print(url.file("/tmp/a b.txt").to_string())
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "url_mime", src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "https://xn--bcher-kva.example:443/a/c?x=1#frag\nxn--bcher-kva.example\n/a/c\nx\n1\nhttps://xn--bcher-kva.example:443/notify?user=ada%20lovelace&user=grace#done\nnotify\ndone\nuser=ada%20lovelace&user=grace&empty=\na%20b%2Fc\na b/c\ntext/html\nUTF-8\nimage/png\npng\ndata:image/png,%3Ch1%3EHi%3C%2Fh1%3E\nfile:///tmp/a%20b.txt\n"
+//RS     );
+//RS }
+// END-PORT-PENDING 1020 tests/corelib_parts/platform.rs:1-1435
+

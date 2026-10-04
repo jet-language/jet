@@ -1,0 +1,160 @@
+use core.sys as cbor_budget_target_facts
+
+// CborBudget.rs:1-179 — sole whole-CBOR allocation-accounting owner.
+// The Int-facing signatures match Foundation's list lengths and CborKernel;
+// their inputs have the original Rust usize domain. Arithmetic is native U64,
+// bounded by the EXECUTION target's usize::MAX, never the compiler host.
+// #4483 / D-USIZE-TARGET1: core.sys.usize_max() -> U64 is a planned gate.
+// #4494: [T].capacity() and &values.try_reserve_exact(additional) must report
+// actual allocation capacity and actual fallible reservation, respectively.
+// These required primitives are not supplied by this module. No length-only
+// accounting, assumed exact capacity, Rust allocator bridge or fake success.
+pub DATA_TREE_SLOT_BYTES :: 32
+pub MAP_ENTRY_SLOT_BYTES :: 56
+
+fn cbor_budget_checked_add(left: U64, right: U64, maximum: U64) -> U64? Never! {
+    if left > maximum || right > maximum - left -> return None
+    Val(left + right)
+}
+fn cbor_budget_checked_mul(left: U64, right: U64, maximum: U64) -> U64? Never! {
+    if left == U64{0} || right == U64{0} -> return Val(U64{0})
+    if left > maximum /% right -> return None
+    Val(left * right)
+}
+fn cbor_budget_saturating_add(left: U64, right: U64, maximum: U64) -> U64 Never! {
+    cbor_budget_checked_add(left, right, maximum) ?? maximum
+}
+
+#Debug
+pub struct CborAllocationError {
+    limit: U64
+    what: String
+
+    // Rust 13-21: decimal zero has one digit.
+    fn limit_digits(self) -> Int Never! {
+        value := self.limit
+        digits := 1
+        loop value >= U64{10} {
+            value = value /% (U64{10})
+            digits += 1
+        }
+        digits
+    }
+
+    // Rust 23-28: byte length, with TWO separately saturating additions.
+    pub fn reason_len(self) -> Int Never! {
+        maximum :: cbor_budget_target_facts.usize_max()
+        prefix :: cbor_budget_saturating_add(U64{self.what.bytes().len()}, U64{" allocation exceeds max_bytes ".bytes().len()}, maximum)
+        Int.from_u64(cbor_budget_saturating_add(prefix, U64{self.limit_digits()}, maximum))
+    }
+
+    // Rust 30-37: append, not replace. Write directly into the borrowed String;
+    // no formatted temporary, decimal buffer or whole-output copy. Each digit
+    // is an ASCII literal; the bounded loop also handles usize::MAX exactly.
+    pub fn write_reason(self, output: &String) Never! {
+        output += self.what
+        output += " allocation exceeds max_bytes "
+        divisor := U64{1}
+        loop divisor <= self.limit /% (U64{10}) -> divisor *= U64{10}
+        loop {
+            digit :: Int.from_u64((self.limit /% divisor) % (U64{10}))
+            output += if digit == {
+                0 -> "0"
+                1 -> "1"
+                2 -> "2"
+                3 -> "3"
+                4 -> "4"
+                5 -> "5"
+                6 -> "6"
+                7 -> "7"
+                8 -> "8"
+                else -> "9"
+            }
+            if divisor == U64{1} -> return
+            divisor = divisor /% (U64{10})
+        }
+    }
+}
+
+pub struct CborAllocationBudget {
+    limit: U64
+    live: U64
+
+    // Rust 46-48. limit has the original usize domain.
+    pub fn new(limit: Int) -> CborAllocationBudget Never! {
+        CborAllocationBudget{limit: U64{limit}, live: U64{0}}
+    }
+
+    // Rust 50-75: checked multiply BEFORE checked add BEFORE limit comparison;
+    // every refusal leaves the old live charge unchanged.
+    pub fn reserve(&self, count: Int, unit: Int, what: String) -> Int CborAllocationError! {
+        maximum :: cbor_budget_target_facts.usize_max()
+        requested :: cbor_budget_checked_mul(U64{count}, U64{unit}, maximum) ?? return Err(CborAllocationError{limit: self.limit, what: what})
+        next_live :: cbor_budget_checked_add(self.live, requested, maximum) ?? return Err(CborAllocationError{limit: self.limit, what: what})
+        if next_live > self.limit -> return Err(CborAllocationError{limit: self.limit, what: what})
+        self.live = next_live
+        Ok(Int.from_u64(requested))
+    }
+
+    // Rust 77-79: saturating subtraction, even for an excessive release.
+    pub fn release(&self, requested: Int) Never! {
+        amount :: U64{requested}
+        self.live = if amount > self.live -> U64{0} else -> self.live - amount
+    }
+
+    // Rust 81-86: terminal diagnostics retain their exact path/reason even
+    // after the data limit is exhausted. Saturate at usize::MAX, NOT limit.
+    pub fn reserve_terminal_error(&self, requested: Int) Never! {
+        self.live = cbor_budget_saturating_add(self.live, U64{requested}, cbor_budget_target_facts.usize_max())
+    }
+
+    // Rust 88-178. All decoder vectors begin empty and grow through this
+    // method. The old allocation remains live during physical reservation.
+    // #4494 gates ONLY the actual capacity/reservation primitives; every
+    // arithmetic, allocator-error and cleanup branch remains here in full.
+    pub fn reserve_vec<T>(&self, values: &[T], additional: Int, unit: Int, what: String) CborAllocationError! {
+        maximum :: cbor_budget_target_facts.usize_max()
+        needed :: cbor_budget_checked_add(U64{values.len()}, U64{additional}, maximum) ?? return Err(CborAllocationError{limit: self.limit, what: what})
+        if needed <= U64{values.capacity()} -> return
+        slot :: U64{unit}
+        if slot == U64{0} {
+            if &values.try_reserve_exact(additional) == {
+                .Ok(_) -> {}
+                .Err(_) -> return Err(CborAllocationError{limit: self.limit, what: what})
+            }
+            return
+        }
+        old_bytes :: cbor_budget_checked_mul(U64{values.capacity()}, slot, maximum) ?? return Err(CborAllocationError{limit: self.limit, what: what})
+        requested_bytes :: cbor_budget_checked_mul(needed, slot, maximum) ?? return Err(CborAllocationError{limit: self.limit, what: what})
+        if old_bytes > self.live -> return Err(CborAllocationError{limit: self.limit, what: what})
+        retained :: self.live - old_bytes
+        planned_live :: cbor_budget_checked_add(retained, requested_bytes, maximum) ?? return Err(CborAllocationError{limit: self.limit, what: what})
+        if planned_live > self.limit -> return Err(CborAllocationError{limit: self.limit, what: what})
+        if &values.try_reserve_exact(additional) == {
+            .Ok(_) -> {}
+            .Err(_) -> return Err(CborAllocationError{limit: self.limit, what: what})
+        }
+        // Preserve Rust 156-163's distinct checked-multiply error rail: it
+        // returns before the subsequent take/drop/reset rail.
+        actual_bytes :: cbor_budget_checked_mul(U64{values.capacity()}, slot, maximum) ?? return Err(CborAllocationError{limit: self.limit, what: what})
+        next_live :: cbor_budget_checked_add(retained, actual_bytes, maximum)
+        if next_live == {
+            .Val(next) -> {
+                if next <= self.limit {
+                    self.live = next
+                    return
+                }
+            }
+            .None -> {}
+        }
+        // Rust 167-169: mem::take + drop. Move the SAME vector, replace it
+        // with empty storage, and destroy its elements/allocation at scope exit
+        // BEFORE resetting the charge. Never clone or clear-and-retain capacity.
+        {
+            old := ^values
+            values = [T]{}
+        }
+        self.live = retained
+        return Err(CborAllocationError{limit: self.limit, what: what})
+    }
+}

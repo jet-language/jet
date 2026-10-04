@@ -1,0 +1,412 @@
+// Resident front-end queries: Rust jet-driver/QueryService.rs:10–661.
+// One shared jet_queries engine owns all input/query dependency invalidation.
+// Callers supply sealed authority snapshots; this service never reads ambient
+// disk paths or invents source authority records for document overlays.
+use core.files.runtime.kernel_path_components as compiler_driver_os_path
+use jet_queries.[FileKey, InputKey, QueryEngine, QueryKey]
+use jet_foundation.[Item, Type, FailureContract, func_failure_contract, trait_method_failure_contract, failure_contract_effective_type, failure_contract_source, type_name, mir_sha256_hex, CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_bytes, canonical_json_sha256]
+use jet_lexer.[Token, lex]
+use jet_eval.[JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse]
+use jet_sema.[SemaSourceOrigin, SemaRegistrationHostHooks, SemaIncrementalSemaCache, sema_incremental_cache_new, sema_incremental_cache_stats, sema_incremental_cache_clear, sema_incremental_cache_clear_measurement, sema_incremental_item_has_comptime]
+use core.time as driver_query_time
+
+pub struct JetDriverCheckedQuery {
+    pub result: JetDriverCompilerCheckResult
+    pub dependencies: [compiler_driver_os_path.OsPath]
+    pub source_path: String
+    pub source: String
+    pub is_lsp: Bool
+}
+
+// Query identity and result discriminator are independent. Both checked modes
+// use the Checked carrier; tokens never clone their vector on a memo hit.
+pub enum JetDriverQueryMemo {
+    Checked(value: Shared<JetDriverCheckedQuery>)
+    Tokens(value: Shared<[Token]>)
+}
+
+pub struct JetDriverCompilerQueryStats {
+    pub hits: Int
+    pub recomputes: Int
+    pub live_inputs: Int
+    pub live_input_bytes: Int
+    pub live_memos: Int
+    pub live_query_counters: Int
+    pub item_hits: Int
+    pub item_recomputes: Int
+    pub live_items: Int
+    pub live_item_bytes: Int
+    pub recomputed_items: [String]
+}
+
+pub struct JetDriverCallableContractReceipt {
+    pub identity: String
+    pub failure_contract: String
+    pub failure_source: String
+}
+
+pub struct JetDriverReverdictReceipt {
+    pub source_path: String
+    pub source_bytes: Int
+    pub edit_bytes: Int
+    pub program_items: Int
+    pub reverified_items: [String]
+    pub elapsed_us: Int
+    pub query_recomputes: Int
+    pub item_hits: Int
+    pub item_recomputes: Int
+    pub callable_contracts: [JetDriverCallableContractReceipt]
+    pub dependency_paths: [String]
+    pub fn blast_radius(self) -> Int Never! { self.reverified_items.len() }
+
+    // Rust ReverdictReceipt::to_json: one shared Foundation canonical owner,
+    // including exact decimal integers, canonical escaping and terminal LF.
+    pub fn to_json(self) -> String Never! {
+        items :: CanonicalJSON.Array(loop item in self.reverified_items -> CanonicalJSON.String(item))
+        paths :: CanonicalJSON.Array(loop path in self.dependency_paths -> CanonicalJSON.String(path))
+        contracts := [CanonicalJSON]{}
+        loop contract in self.callable_contracts {
+            &contracts.push(jet_driver_query_receipt_object([CanonicalJSONField]{
+                CanonicalJSONField{key: "identity", value: CanonicalJSON.String(contract.identity)},
+                CanonicalJSONField{key: "failure_contract", value: CanonicalJSON.String(contract.failure_contract)},
+                CanonicalJSONField{key: "failure_source", value: CanonicalJSON.String(contract.failure_source)},
+            }))
+        }
+        content :: jet_driver_query_receipt_object([CanonicalJSONField]{
+            CanonicalJSONField{key: "claim", value: CanonicalJSON.String("D-DEVR-CONE1=A")},
+            CanonicalJSONField{key: "edit_bytes", value: CanonicalJSON.Integer("{self.edit_bytes}")},
+            CanonicalJSONField{key: "elapsed_us", value: CanonicalJSON.Integer("{self.elapsed_us}")},
+            CanonicalJSONField{key: "evidence", value: CanonicalJSON.String("observed")},
+            CanonicalJSONField{key: "item_hits", value: CanonicalJSON.Integer("{self.item_hits}")},
+            CanonicalJSONField{key: "item_recomputes", value: CanonicalJSON.Integer("{self.item_recomputes}")},
+            CanonicalJSONField{key: "program_items", value: CanonicalJSON.Integer("{self.program_items}")},
+            CanonicalJSONField{key: "reverified_items", value: items},
+            CanonicalJSONField{key: "callable_contracts", value: CanonicalJSON.Array(contracts)},
+            CanonicalJSONField{key: "dependency_scope", value: jet_driver_query_receipt_object([CanonicalJSONField]{
+                CanonicalJSONField{key: "kind", value: CanonicalJSON.String("checked_semantic")},
+                CanonicalJSONField{key: "paths", value: paths},
+            })},
+            CanonicalJSONField{key: "blast_radius", value: jet_driver_query_receipt_object([CanonicalJSONField]{
+                CanonicalJSONField{key: "count", value: CanonicalJSON.Integer("{self.blast_radius()}")},
+                CanonicalJSONField{key: "items", value: items},
+            })},
+            CanonicalJSONField{key: "source_bytes", value: CanonicalJSON.Integer("{self.source_bytes}")},
+            CanonicalJSONField{key: "source_path", value: CanonicalJSON.String(self.source_path)},
+            CanonicalJSONField{key: "query_recomputes", value: CanonicalJSON.Integer("{self.query_recomputes}")},
+        })
+        envelope :: jet_driver_query_receipt_object([CanonicalJSONField]{
+            CanonicalJSONField{key: "schema", value: CanonicalJSON.String("jet.reverdict-receipt")},
+            CanonicalJSONField{key: "version", value: CanonicalJSON.Integer("2")},
+            CanonicalJSONField{key: "receipt_id", value: CanonicalJSON.String(canonical_json_sha256(content))},
+            CanonicalJSONField{key: "content", value: content},
+        })
+        String.from_bytes(canonical_json_bytes(envelope)) ?? panic("canonical receipt bytes must be UTF-8")
+    }
+}
+
+fn jet_driver_query_receipt_object(fields: [CanonicalJSONField]) -> CanonicalJSON Never! {
+    canonical_json_object(fields) ?? panic("fixed receipt schema contains duplicate keys")
+}
+
+pub struct JetDriverMeasuredQuery {
+    pub checked: Shared<JetDriverCheckedQuery>
+    pub receipt: JetDriverReverdictReceipt
+}
+
+pub struct JetDriverCompilerQueries {
+    engine: QueryEngine<JetDriverQueryMemo>
+    sema: [compiler_driver_os_path.OsPath:Shared<SemaIncrementalSemaCache>]
+    external_files: [compiler_driver_os_path.OsPath:[compiler_driver_os_path.OsPath]]
+    overlays: [compiler_driver_os_path.OsPath:String]
+    volatile_roots: [compiler_driver_os_path.OsPath:Bool]
+    host_hooks: [compiler_driver_os_path.OsPath:Shared<SemaRegistrationHostHooks>]
+
+    pub fn new() -> JetDriverCompilerQueries Never! {
+        JetDriverCompilerQueries{engine: QueryEngine<JetDriverQueryMemo>.new(), sema: [compiler_driver_os_path.OsPath:Shared<SemaIncrementalSemaCache>]{}, external_files: [compiler_driver_os_path.OsPath:[compiler_driver_os_path.OsPath]]{}, overlays: [compiler_driver_os_path.OsPath:String]{}, volatile_roots: [compiler_driver_os_path.OsPath:Bool]{}, host_hooks: [compiler_driver_os_path.OsPath:Shared<SemaRegistrationHostHooks>]{}}
+    }
+
+    pub fn set_document(&self, cwd: compiler_driver_os_path.OsPath, path: compiler_driver_os_path.OsPath, text: String) Never! {
+        root :: jet_driver_query_path(cwd, path)
+        if self.overlays.get(root) != Val(text) -> self.overlays[root] = text
+        _ := &self.engine.set_input(InputKey.file(FileKey.new(compiler_driver_os_path.display(root))), text)
+    }
+
+    fn invalidate_file(&self, file: FileKey) Never! {
+        &self.engine.invalidate(QueryKey.for_file("checked", file))
+        &self.engine.invalidate(QueryKey.for_file("checked.lsp", file))
+    }
+
+    pub fn check_text(&self, snapshot: JetDriverQuerySnapshot, path: compiler_driver_os_path.OsPath, text: String) -> Shared<JetDriverCheckedQuery> {
+        &self.check_text_mode(snapshot, path, text, false)
+    }
+
+    pub fn check_text_lsp(&self, snapshot: JetDriverQuerySnapshot, path: compiler_driver_os_path.OsPath, text: String) -> Shared<JetDriverCheckedQuery> {
+        &self.check_text_mode(snapshot, path, text, true)
+    }
+
+    pub fn check_disk(&self, snapshot: JetDriverQuerySnapshot, path: compiler_driver_os_path.OsPath) -> Shared<JetDriverCheckedQuery> {
+        &self.check_disk_mode(snapshot, path, false)
+    }
+
+    pub fn check_disk_lsp(&self, snapshot: JetDriverQuerySnapshot, path: compiler_driver_os_path.OsPath) -> Shared<JetDriverCheckedQuery> {
+        &self.check_disk_mode(snapshot, path, true)
+    }
+
+    // Rust check_text: a hit returns the same shared owner; a miss still runs
+    // normal Driver declaration/body comptime and finalization, with one sema
+    // cache resident for this root across batch and LSP modes.
+    fn check_text_mode(&self, snapshot: JetDriverQuerySnapshot, path: compiler_driver_os_path.OsPath, text: String, is_lsp: Bool) -> Shared<JetDriverCheckedQuery> {
+        native_root :: jet_driver_query_path(snapshot.cwd, path)
+        root :: native_root
+        &self.set_document(snapshot.cwd, path, text)
+        file :: FileKey.new(compiler_driver_os_path.display(root))
+        paths :: self.external_files.get(root) ?? jet_driver_query_default_external_paths(snapshot, native_root)
+        fingerprint :: jet_driver_query_external_fingerprint(snapshot, native_root, paths, self.overlays)
+        _ := &self.engine.set_input(InputKey.new(jet_driver_query_external_key(root)), fingerprint)
+        policy :: jet_driver_query_policy_fingerprint(snapshot.request)
+        _ := &self.engine.set_input(InputKey.new("checked-policy:{compiler_driver_os_path.display(root)}"), policy)
+        if self.host_hooks.get(root) == .Val(previous) {
+            if !previous.same(snapshot.request.eval_config.host_hooks) {
+                &self.invalidate_file(file)
+                if self.sema.get(root) == .Val(storage) {
+                    permit := storage.guard_edit()
+                    sema_incremental_cache_clear(&permit.value)
+                }
+            }
+        }
+        self.host_hooks[root] = snapshot.request.eval_config.host_hooks
+        query :: QueryKey.for_file(if is_lsp -> "checked.lsp" else -> "checked", file)
+        if self.volatile_roots.has_key(root) -> &self.engine.invalidate(query)
+        if (&self.engine.query(query, "checked")) == .Val(memo) {
+            if memo == .Checked(checked) -> return checked
+            panic("checked result discriminator names a non-checked carrier")
+        }
+        source :: (&self.engine.input_text(InputKey.file(file))) ?? ""
+        _ := &self.engine.input_text(InputKey.new(jet_driver_query_external_key(root)))
+        _ := &self.engine.input_text(InputKey.new("checked-policy:{compiler_driver_os_path.display(root)}"))
+        cache := self.sema.get(root)
+        if cache == None {
+            storage :: shared sema_incremental_cache_new()
+            self.sema[root] = storage
+            cache = Val(storage)
+        }
+        parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: source})})
+        result := if parsed == {
+            .Val(facts) -> jet_driver_compiler_check_with_overlays(JetDriverCompilerCheckInput{parsed: facts, request: snapshot.request, incremental_cache: cache}, self.overlays, Val(native_root), None)
+            None -> jet_driver_compiler_check_failure(jet_driver_load_from_source_view(snapshot.request, jet_driver_authorized_source_view(snapshot.request.authorized_sources, Val(native_root)), self.overlays, None, None), JetDriverStage.Parse, Val("the canonical compiler-service parser could not project every lexical token"))
+        }
+        dependencies :: jet_driver_query_sorted_native_paths(result.physical_source_paths)
+        checked :: shared JetDriverCheckedQuery{result: result, dependencies: dependencies, source_path: compiler_driver_os_path.display(native_root), source: source, is_lsp: is_lsp}
+        _ := &self.engine.finish_query(query, "checked", ^JetDriverQueryMemo.Checked{value: checked})
+        &self.update_external_state(snapshot, native_root, checked)
+        checked
+    }
+
+    fn check_disk_mode(&self, snapshot: JetDriverQuerySnapshot, path: compiler_driver_os_path.OsPath, is_lsp: Bool) -> Shared<JetDriverCheckedQuery> {
+        root :: jet_driver_query_path(snapshot.cwd, path)
+        if jet_driver_query_snapshot_source(snapshot, root) == .Val(source) -> return &self.check_text_mode(snapshot, path, source, is_lsp)
+        &self.invalidate_file(FileKey.new(compiler_driver_os_path.display(root)))
+        // Preserve normal host-authority/load diagnostics on failed disk reads.
+        // No query result is committed for an unsuccessful root read.
+        result :: jet_driver_compiler_check_failure(jet_driver_load(snapshot.request), JetDriverStage.Load, None)
+        shared JetDriverCheckedQuery{result: result, dependencies: [compiler_driver_os_path.OsPath]{}, source_path: compiler_driver_os_path.display(root), source: "", is_lsp: is_lsp}
+    }
+
+    pub fn lex_text(&self, cwd: compiler_driver_os_path.OsPath, path: compiler_driver_os_path.OsPath, text: String) -> Shared<[Token]> {
+        root :: jet_driver_query_path(cwd, path)
+        &self.set_document(cwd, path, text)
+        file :: FileKey.new(compiler_driver_os_path.display(root))
+        key :: QueryKey.for_file("tokens", file)
+        if (&self.engine.query(key, "tokens")) == .Val(memo) {
+            if memo == .Tokens(tokens) -> return tokens
+            panic("tokens result discriminator names a non-token carrier")
+        }
+        source :: (&self.engine.input_text(InputKey.file(file))) ?? ""
+        tokens :: shared lex(source.bytes()).tokens
+        _ := &self.engine.finish_query(key, "tokens", ^JetDriverQueryMemo.Tokens{value: tokens})
+        tokens
+    }
+
+    pub fn remove_document(&self, cwd: compiler_driver_os_path.OsPath, path: compiler_driver_os_path.OsPath) Never! {
+        root :: jet_driver_query_path(cwd, path)
+        _ := &self.overlays.remove(root)
+        file :: FileKey.new(compiler_driver_os_path.display(root))
+        if &self.engine.remove_input(InputKey.file(file)) {
+            &self.invalidate_file(file)
+            _ := &self.engine.remove_input(InputKey.new(jet_driver_query_external_key(root)))
+            _ := &self.engine.remove_input(InputKey.new("checked-policy:{compiler_driver_os_path.display(root)}"))
+            _ := &self.sema.remove(root)
+            _ := &self.external_files.remove(root)
+            _ := &self.volatile_roots.remove(root)
+            _ := &self.host_hooks.remove(root)
+        }
+    }
+
+    pub fn recompute_count(self, key: QueryKey) -> Int Never! { self.engine.recompute_count(key) }
+
+    pub fn stats(self) -> JetDriverCompilerQueryStats Never! {
+        query :: self.engine.stats()
+        item_hits := 0
+        item_recomputes := 0
+        live_items := 0
+        live_item_bytes := 0
+        items := [String]{}
+        loop (_, storage) in self.sema {
+            permit :: storage.guard_read()
+            stats :: sema_incremental_cache_stats(permit.value)
+            item_hits += stats.hits
+            item_recomputes += stats.recomputes
+            live_items += stats.live_items
+            live_item_bytes += stats.live_item_bytes
+            loop item in stats.recomputed_items -> &items.push(item)
+        }
+        JetDriverCompilerQueryStats{hits: query.hits, recomputes: query.recomputes, live_inputs: query.live_inputs, live_input_bytes: query.live_input_bytes, live_memos: query.live_memos, live_query_counters: query.live_query_counters, item_hits: item_hits, item_recomputes: item_recomputes, live_items: live_items, live_item_bytes: live_item_bytes, recomputed_items: items}
+    }
+
+    pub fn check_text_with_receipt(&self, snapshot: JetDriverQuerySnapshot, path: compiler_driver_os_path.OsPath, text: String, is_lsp: Bool) -> JetDriverMeasuredQuery {
+        root :: jet_driver_query_path(snapshot.cwd, path)
+        edit_bytes :: jet_driver_query_edit_bytes(self.overlays.get(root), text)
+        before :: self.stats()
+        loop (_, storage) in self.sema {
+            permit := storage.guard_edit()
+            sema_incremental_cache_clear_measurement(&permit.value)
+        }
+        started :: driver_query_time.instant()
+        checked :: &self.check_text_mode(snapshot, path, text, is_lsp)
+        elapsed :: driver_query_time.instant() - started
+        elapsed_us :: elapsed.ns /% 1000
+        after :: self.stats()
+        permit :: checked.guard_read()
+        contracts :: jet_driver_query_callable_contracts(permit.value.result)
+        receipt :: JetDriverReverdictReceipt{source_path: compiler_driver_os_path.display(root), source_bytes: text.bytes().len(), edit_bytes: edit_bytes, program_items: after.live_items, reverified_items: jet_driver_query_sorted_paths(after.recomputed_items), elapsed_us: elapsed_us, query_recomputes: jet_driver_query_saturating_delta(after.recomputes, before.recomputes), item_hits: jet_driver_query_saturating_delta(after.item_hits, before.item_hits), item_recomputes: jet_driver_query_saturating_delta(after.item_recomputes, before.item_recomputes), callable_contracts: contracts, dependency_paths: loop path in permit.value.dependencies -> compiler_driver_os_path.display(path)}
+        JetDriverMeasuredQuery{checked: checked, receipt: receipt}
+    }
+
+    fn update_external_state(&self, snapshot: JetDriverQuerySnapshot, native_root: compiler_driver_os_path.OsPath, checked: Shared<JetDriverCheckedQuery>) Never! {
+        root :: native_root
+        permit :: checked.guard_read()
+        paths := ~permit.value.dependencies
+        loop path in jet_driver_query_default_external_paths(snapshot, native_root) -> &paths.push(path)
+        loop file in snapshot.external_files -> &paths.push(file.path)
+        if permit.value.result.registration == .Val(registration) {
+            volatile := false
+            loop registered_module in registration.modules {
+                loop item in registered_module.program.items {
+                    if sema_incremental_item_has_comptime(item) -> volatile = true
+                }
+            }
+            if volatile -> self.volatile_roots[root] = true else -> _ := &self.volatile_roots.remove(root)
+        } else {
+            external_paths :: self.external_files.get(root) ?? [compiler_driver_os_path.OsPath]{}
+            loop path in external_paths -> &paths.push(path)
+        }
+        kept := [compiler_driver_os_path.OsPath]{}
+        loop path in paths {
+            if !compiler_driver_os_path.equals(path, native_root) -> &kept.push(path)
+        }
+        files :: jet_driver_query_sorted_native_paths(kept)
+        self.external_files[root] = files
+        _ := &self.engine.set_input(InputKey.new(jet_driver_query_external_key(root)), jet_driver_query_external_fingerprint(snapshot, native_root, files, self.overlays))
+    }
+}
+
+fn jet_driver_query_saturating_delta(after: Int, before: Int) -> Int Never! {
+    if after < before -> 0 else -> after - before
+}
+
+fn jet_driver_query_policy_fingerprint(request: JetDriverCompileRequest) -> String Never! {
+    facts := [String]{"{request.authorized_sources.entry_root_identity:Debug}:{request.authorized_sources.entry_path:Debug}", "{request.host_facts:Debug}:{request.target:Debug}", "{request.canonical_effect_source:Debug}:{request.core_sources:Debug}", "{request.eval_config.fuel}:{request.eval_config.max_call_depth}:{request.eval_config.max_collection_len}:{request.eval_config.runtime_execution}:{request.eval_config.globals:Debug}"}
+    &facts.push("{request.check_scope:Debug}:{request.profile:Debug}:{request.selected_output:Debug}:{request.entry_function:Debug}:{request.run_mode}:{request.semantic_index_requested}")
+    &facts.push("{request.gates.bits}")
+    &facts.push("artifact-build:{request.artifact_build}")
+    loop writer in request.computed_setting_contributions -> &facts.push("computed-setting:{writer:Debug}")
+    setting_keys := request.setting_overrides.keys().to_list()
+    &setting_keys.sort()
+    loop key in setting_keys -> &facts.push("setting:{key:Debug}:{request.setting_overrides.get(key):Debug}")
+    loop root in request.authorized_sources.roots {
+        &facts.push("{root.canonical_path:Debug}:{root.identity:Debug}:{root.allow_hardlinks}")
+        loop file in root.files -> &facts.push("{file.path:Debug}:{file.relative_path:Debug}:{file.identity:Debug}")
+    }
+    mir_sha256_hex(facts.join("\n"))
+}
+
+fn jet_driver_query_join_identity(module_path: String, parent: String, name: String) -> String Never! {
+    local :: if parent == "" -> name else -> "{parent}::{name}"
+    if module_path == "" -> local else -> "{module_path}::{local}"
+}
+
+fn jet_driver_query_contract(output: &[JetDriverCallableContractReceipt], identity: String, contract: FailureContract) Never! {
+    &output.push(JetDriverCallableContractReceipt{identity: identity, failure_contract: type_name(failure_contract_effective_type(contract)), failure_source: failure_contract_source(contract)})
+}
+
+fn jet_driver_query_collect_contracts(items: [Item], module_path: String, parent: String, output: &[JetDriverCallableContractReceipt]) Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> jet_driver_query_contract(&output, jet_driver_query_join_identity(module_path, parent, function.name), func_failure_contract(function))
+            .Struct(definition) -> {
+                owner :: jet_driver_query_join_identity(module_path, parent, definition.name)
+                loop method in definition.methods -> jet_driver_query_contract(&output, "{owner}.{method.name}", func_failure_contract(method))
+                loop implementation in definition.trait_impls {
+                    loop method in implementation.methods -> jet_driver_query_contract(&output, "{owner}.{method.name}", func_failure_contract(method))
+                }
+            }
+            .Enum(definition) -> {
+                owner :: jet_driver_query_join_identity(module_path, parent, definition.name)
+                loop method in definition.methods -> jet_driver_query_contract(&output, "{owner}.{method.name}", func_failure_contract(method))
+                loop implementation in definition.trait_impls {
+                    loop method in implementation.methods -> jet_driver_query_contract(&output, "{owner}.{method.name}", func_failure_contract(method))
+                }
+            }
+            .Impl(implementation) -> {
+                owner :: jet_driver_query_join_identity(module_path, parent, implementation.type_name)
+                loop method in implementation.methods -> jet_driver_query_contract(&output, "{owner}.{method.name}", func_failure_contract(method))
+            }
+            .Trait(definition) -> {
+                owner :: jet_driver_query_join_identity(module_path, parent, definition.name)
+                loop method in definition.methods -> jet_driver_query_contract(&output, "{owner}.{method.name}", trait_method_failure_contract(method))
+            }
+            .CodeModule(definition) -> {
+                if definition.body == .Val(body) -> jet_driver_query_collect_contracts(body, module_path, jet_driver_query_join_identity(parent, "", definition.name), &output)
+            }
+            .GenericModule(definition) -> jet_driver_query_collect_contracts(definition.body, module_path, jet_driver_query_join_identity(parent, "", definition.name), &output)
+            else -> {}
+        }
+    }
+}
+
+fn jet_driver_query_callable_contracts(result: JetDriverCompilerCheckResult) -> [JetDriverCallableContractReceipt] Never! {
+    registration :: result.registration ?? return [JetDriverCallableContractReceipt]{}
+    contracts := [JetDriverCallableContractReceipt]{}
+    loop registered_module in registration.modules {
+        jet_driver_query_collect_contracts(registered_module.program.items, registered_module.module_path, "", &contracts)
+        if result.graph == .Val(graph) {
+            loop signature in graph.callable_returns {
+                if signature.module_identity != registered_module.module_identity -> next
+                identity :: jet_driver_query_join_identity(registered_module.module_path, "", signature.name)
+                loop index in 0..<contracts.len() {
+                    if contracts[index].identity != identity -> next
+                    contract :: signature.failure_contract
+                    contracts[index].failure_contract = type_name(failure_contract_effective_type(contract))
+                    contracts[index].failure_source = failure_contract_source(contract)
+                }
+            }
+        }
+    }
+    // Sort positions, not large checked rows; stable identity order retains
+    // source order for two same-identity methods, as Rust stable sort does.
+    positions := [Int]{}
+    keys := [String:[Int]]{}
+    names := [String]{}
+    loop (index, contract) in contracts {
+        rows := keys.get(contract.identity) ?? [Int]{}
+        if rows.len() == 0 -> &names.push(contract.identity)
+        &rows.push(index)
+        keys[contract.identity] = rows
+    }
+    &names.sort()
+    loop name in names {
+        matching_positions :: keys.get(name) ?? [Int]{}
+        loop index in matching_positions -> &positions.push(index)
+    }
+    loop index in positions -> contracts[index]
+}

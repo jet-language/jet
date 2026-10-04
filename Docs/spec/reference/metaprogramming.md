@@ -192,6 +192,19 @@ Jet has two related reflection paths:
 2. `T.reflect()` returns aggregate type information for a derive body, while
    `reflect.of(value)` returns the runtime reflection floor for a value.
 
+Compile-time marker reflection and declaration templates read the same catalog
+retained by declaration registration. Its rules come from the embedded
+`Prelude/Markers.jet` declarations, and its argument menus come from the
+canonical Core declaration projection. The catalog is available before template
+expansion; user-defined marker declarations are separate package rules, not
+replacements for the embedded vocabulary. A malformed embedded declaration is
+an internal compiler error, never an empty reflection catalog.
+Marker names, attachment sites and repeatability are checked against that
+retained vocabulary. Argument types are checked in the scope where they are
+written: callable parameters are available for callable markers, and preceding
+locals are available for statement and binding markers. A module-only check
+must not replace either live scope.
+
 [`reflect.jet`](../../../Examples/features/comptime/reflect.jet) combines typed
 fact reads with `T.reflect()`. [`reflect-value.jet`](../../../Examples/features/reflection/reflect-value.jet)
 shows the runtime floor:
@@ -228,6 +241,44 @@ view provenance, and maturity facts; consumers must use the registered fact
 record rather than infer a fact from a string. `fact_reads.jet` and
 `reflect-value.jet` are executable examples of those member names.
 
+Unit dimensions are produced before derives and nominal registration. The
+canonical Foundation embedded-source accessor publishes ordinary
+`Prelude/Units.jet`; Sema parses it with the compiler-generated lexer mode,
+selects source-mentioned families/members and their dimension dependencies,
+and anchors injected member diagnostics to the receiving source's UTF-8 bytes.
+`#NoPrelude` skips injection and a local family shadows its whole standard
+family. Base axes use the loader-retained owning package fingerprint and
+root-relative module path; standard axes retain `core.units` independently
+of the receiving package. Derived claims resolve local and public imported
+dimensions through exact import edges, recording alias uses in the name ledger.
+The sole registration unit-fact pass carries normalized dimensions, rational
+scale/offset, source provenance and Point/Delta/Linear kind. Its indexed,
+module-scoped literal facts feed both ordinary literals and job schedules;
+Duration and Instant are builtin types, not a fallback Time suffix catalog.
+Generated embedded payload publication and composed execution verification
+remain distinct from this source contract.
+
+## Compiler-value projection
+
+Foundation owns the ordered AST and checked TIR compiler-value writer. Compound
+map keys convert to values with the lowercase `tuple` identity and retain their
+authored field order. Struct projection omits only compiler-generated memo
+storage (`__jet_` followed by `__memo_`); user lookalikes remain visible.
+No field or map entry sorting or deduplication occurs.
+
+Strings, characters, field names, enum variants and argument labels use the
+same Foundation JSON escaper. An enum with all labeled arguments has an object
+payload; positional arguments have an array payload. In a mixed array, each
+labeled argument is a one-key object. Present values project as their payload,
+clean failures and Unit/closures as null, and told failures as an `err` object.
+
+Float text comes from the native-width scalar formatter: Float32 rounding and
+shortest spelling are not reconstructed from a Float64 string. Compiler-value
+notation remains JSON-like rather than a general JSON product format: map keys
+may themselves be numbers or compound values, and nonfinite floats retain their
+diagnostic spelling. The finite, string-key subset is strict JSON. This notation
+is distinct from ordered CLI status envelopes and sorted canonical JSON.
+
 ## The metadata contract
 
 The owner-controlled lexical ledger names these ratified fact roots
@@ -239,6 +290,16 @@ spelling until a ballot names their `$` root.
 ```text
 $build  $package  $phase  $program
 ```
+
+`$build.settings.<name>` reads a declared typed setting, not an evaluator
+global or an ambient environment value. The canonical package model supplies
+its declaration and default. Every profile is validated, including inactive
+profiles, before the selected profile, computed build contributions and explicit
+CLI overrides enter the shared fact resolver. The retained snapshot keeps the
+declared type and full ordered writer chain together; Sema folds each read and
+checks the caller's expected type. Fixed package, OS and lock-stamp leaves use
+that same resolver and provenance path. An undeclared setting is rejected rather
+than inferred from its spelling.
 
 `$phase` reports the evaluation-site `Phase` value. The shared AST contract
 contains exactly `Preparation`, `Build`, and `Runtime`. Do not confuse that

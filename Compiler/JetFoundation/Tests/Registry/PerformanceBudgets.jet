@@ -1,0 +1,23 @@
+// Rust Syntax/jetpack_config.rs::perf_budget_unit_scale, plus closed vocabulary
+// witnesses consumed by canonical Sema elaboration and CLI/Jetpack adapters.
+#Test("performance budget units use the canonical shared normalization scales") {
+    units :: [String]{"ns", "us", "ms", "s", "B", "KiB", "MiB", "GiB"}
+    scales :: [Int]{1, 1000, 1000000, 1000000000, 1, 1024, 1048576, 1073741824}
+    loop (index, unit) in units {
+        expected :: Val(scales[index])
+        assert(perf_budget_unit_scale(unit) == expected)
+    }
+    assert(perf_budget_unit_scale("pct") == None)
+    assert(perf_budget_unit_scale("MB") == None)
+    assert(perf_budget_unit_scale("NS") == None)
+    assert(perf_budget_unit_scale("") == None)
+}
+#Test("performance budget vocabulary is closed and retains exact spellings") {
+    assert(PERF_BUDGET_METRICS.len() == 18)
+    assert(PERF_BUDGET_METRICS.contains("CompileTime"))
+    assert(PERF_BUDGET_METRICS.contains("Throughput"))
+    assert(!PERF_BUDGET_METRICS.contains("compile_time"))
+    assert(PERF_BUDGET_PERCENTILES == [String]{"P50", "P90", "P95", "P99", "P999"})
+    assert(PERF_BUDGET_TARGET_CLASSES == [String]{"Native", "Web", "Freestanding", "Plugin", "OSImage"})
+    assert(PERF_BUDGET_SELECTIONS == [String]{"Current", "All", "Only"})
+}

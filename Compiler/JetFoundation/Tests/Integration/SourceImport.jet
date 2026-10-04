@@ -1,0 +1,831 @@
+// PORT-PENDING 1155 tests-source-import: tests/source_import.rs:1-827
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS static NONCE: AtomicU64 = AtomicU64::new(0);
+//RS 
+//RS fn jet() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn workspace(tag: &str) -> PathBuf {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet-source-import-{tag}-{}-{}",
+//RS         std::process::id(),
+//RS         NONCE.fetch_add(1, Ordering::Relaxed)
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(root.join("python/app")).unwrap();
+//RS     root
+//RS }
+//RS 
+//RS fn run(root: &Path, args: &[&str]) -> std::process::Output {
+//RS     Command::new(jet())
+//RS         .current_dir(root)
+//RS         .args(args)
+//RS         .output()
+//RS         .unwrap()
+//RS }
+//RS 
+//RS #[test]
+//RS fn python_source_import_translates_real_subset_and_reports_every_gap() {
+//RS     let root = workspace("vertical");
+//RS     fs::write(
+//RS         root.join("python/app/math.py"),
+//RS         r#"import decimal
+//RS 
+//RS def add(x: int, y: int) -> int:
+//RS     total = x + y
+//RS     return total
+//RS 
+//RS def test_add() -> None:
+//RS     assert add(2, 3) == 5
+//RS 
+//RS def risky(x: int) -> int:
+//RS     if x > 0:
+//RS         return x
+//RS     raise RuntimeError("negative")
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = run(&root, &["import", "py", "python/app"]);
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8(output.stdout).unwrap();
+//RS     assert_eq!(
+//RS         stdout.replace(&root.display().to_string(), "$ROOT"),
+//RS         include_str!("fixtures/source_import/vertical.stdout")
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("2 functions, 1 carried tests, 2 TODO diagnostics"),
+//RS         "{stdout}"
+//RS     );
+//RS     assert!(stdout.contains("JT0101"), "{stdout}");
+//RS 
+//RS     let generated = fs::read_to_string(root.join("jet/app/math.jet")).unwrap();
+//RS     assert!(
+//RS         generated.contains("fn add(x: Int, y: Int) -> Int {"),
+//RS         "{generated}"
+//RS     );
+//RS     assert!(generated.contains("total := x + y"), "{generated}");
+//RS     assert!(generated.contains("#Test fn test_add()"), "{generated}");
+//RS     assert!(generated.contains("assert_eq(add(2, 3), 5)"), "{generated}");
+//RS     assert!(
+//RS         !generated.contains("fn risky"),
+//RS         "unsupported body became fake code: {generated}"
+//RS     );
+//RS     assert!(
+//RS         !generated.contains("decimal"),
+//RS         "unsupported import leaked into output: {generated}"
+//RS     );
+//RS     let checked = run(&root, &["check", "jet/app/math.jet"]);
+//RS     assert_eq!(
+//RS         checked.status.code(),
+//RS         Some(0),
+//RS         "generated Jet failed its own front end:\n{}",
+//RS         String::from_utf8_lossy(&checked.stderr)
+//RS     );
+//RS 
+//RS     let report = fs::read_to_string(root.join("jet/app/import-report.json")).unwrap();
+//RS     assert!(jet_foundation::Registry::diagnostic("JT0101").is_some());
+//RS     assert!(
+//RS         report.contains("\"schema\":\"jet.source-import.v1\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(report.contains("\"code\":\"JT0101\""), "{report}");
+//RS     assert!(report.contains("\"what\":"), "{report}");
+//RS     assert!(report.contains("\"why\":"), "{report}");
+//RS     assert!(report.contains("\"fix\":"), "{report}");
+//RS     assert!(report.contains("\"source\":"), "{report}");
+//RS     assert!(report.contains("\"generated_target\":"), "{report}");
+//RS     assert!(
+//RS         report.contains("\"migration_status\":\"omitted-reported\""),
+//RS         "{report}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn source_import_reports_typed_operation_failure() {
+//RS     let root = workspace("operation");
+//RS     let output = run(&root, &["import", "py", "missing"]);
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stderr),
+//RS         include_str!("fixtures/source_import/operation.stderr")
+//RS     );
+//RS     assert!(!root.join("jet").exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn python_source_import_matches_python_oracle_fixed_corpus() {
+//RS     let root = workspace("differential");
+//RS     fs::write(
+//RS         root.join("python/app/corpus.py"),
+//RS         include_str!("fixtures/source_import/corpus.py"),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let imported = run(&root, &["import", "py", "python/app"]);
+//RS     assert_eq!(
+//RS         imported.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&imported.stderr)
+//RS     );
+//RS     let generated = root.join("jet/app/corpus.jet");
+//RS     assert_eq!(
+//RS         fs::read_to_string(&generated).unwrap(),
+//RS         include_str!("fixtures/source_import/corpus.jet")
+//RS     );
+//RS 
+//RS     let checked = run(&root, &["check", "jet/app/corpus.jet"]);
+//RS     assert_eq!(
+//RS         checked.status.code(),
+//RS         Some(0),
+//RS         "generated Jet failed its own front end:\n{}",
+//RS         String::from_utf8_lossy(&checked.stderr)
+//RS     );
+//RS 
+//RS     let oracle = Command::new("python3")
+//RS         .current_dir(&root)
+//RS         .args([
+//RS             "-c",
+//RS             "import runpy; runpy.run_path('python/app/corpus.py')['run']()",
+//RS         ])
+//RS         .output()
+//RS         .expect("Python 3 is the source-language differential oracle");
+//RS     assert_eq!(
+//RS         oracle.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&oracle.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         oracle.stdout.as_slice(),
+//RS         include_bytes!("fixtures/source_import/corpus.out").as_slice()
+//RS     );
+//RS 
+//RS     let translated = run(&root, &["run", "jet/app/corpus.jet"]);
+//RS     assert_eq!(
+//RS         translated.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&translated.stderr)
+//RS     );
+//RS     assert_eq!(translated.stderr, oracle.stderr);
+//RS     assert_eq!(
+//RS         translated.stdout, oracle.stdout,
+//RS         "imported output diverged from Python oracle"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn pascal_source_import_preserves_source_and_emits_binder_todo() {
+//RS     let root = workspace("pascal");
+//RS     let source_dir = root.join("pascal/app");
+//RS     fs::create_dir_all(&source_dir).unwrap();
+//RS     fs::write(
+//RS         source_dir.join("inventory.pas"),
+//RS         r#"library inventory;
+//RS function add_scalar(A, B: Int64): Int64; cdecl;
+//RS begin Result := A + B; end;
+//RS exports add_scalar;
+//RS begin end.
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = run(&root, &["import", "pascal", "pascal/app"]);
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8(output.stdout).unwrap();
+//RS     assert!(
+//RS         stdout.contains("0 functions, 0 carried tests, 1 TODO diagnostics"),
+//RS         "{stdout}"
+//RS     );
+//RS     assert!(stdout.contains("JT0101"), "{stdout}");
+//RS 
+//RS     let generated = fs::read_to_string(root.join("jet/app/inventory.jet")).unwrap();
+//RS     assert!(
+//RS         generated.contains("Generated by jet import pascal"),
+//RS         "{generated}"
+//RS     );
+//RS     assert!(
+//RS         generated.contains("use pascal.inventory as inventory"),
+//RS         "{generated}"
+//RS     );
+//RS     assert!(generated.contains("TODO JT0101"), "{generated}");
+//RS     assert!(
+//RS         generated.contains("canonical source of truth"),
+//RS         "{generated}"
+//RS     );
+//RS     assert!(
+//RS         !generated.contains("fn add_scalar"),
+//RS         "Pascal source became guessed Jet: {generated}"
+//RS     );
+//RS     let checked = run(&root, &["check", "jet/app/inventory.jet"]);
+//RS     assert_eq!(
+//RS         checked.status.code(),
+//RS         Some(0),
+//RS         "binder stub failed its own front end:\n{}",
+//RS         String::from_utf8_lossy(&checked.stderr)
+//RS     );
+//RS 
+//RS     let report = fs::read_to_string(root.join("jet/app/import-report.json")).unwrap();
+//RS     assert!(report.contains("\"language\":\"pascal\""), "{report}");
+//RS     assert!(report.contains("inventory.pas"), "{report}");
+//RS     assert!(report.contains("\"code\":\"JT0101\""), "{report}");
+//RS     assert!(
+//RS         report.contains("\"migration_status\":\"omitted-reported\""),
+//RS         "{report}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn ada_source_import_preserves_package_and_emits_binder_todo() {
+//RS     let root = workspace("ada");
+//RS     let source_dir = root.join("ada/app");
+//RS     fs::create_dir_all(&source_dir).unwrap();
+//RS     fs::write(
+//RS         source_dir.join("geodesy.ads"),
+//RS         r#"with Interfaces.C;
+//RS package Geodesy is
+//RS    subtype Latitude is Interfaces.C.double range -90.0 .. 90.0;
+//RS    function Double_Lat (Lat : Latitude) return Interfaces.C.double
+//RS      with Export, Convention => C, External_Name => "geo_double";
+//RS end Geodesy;
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         source_dir.join("geodesy.adb"),
+//RS         "package body Geodesy is begin null; end Geodesy;\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = run(&root, &["import", "ada", "ada/app"]);
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8(output.stdout).unwrap();
+//RS     assert!(
+//RS         stdout.contains("0 functions, 0 carried tests, 1 TODO diagnostics"),
+//RS         "{stdout}"
+//RS     );
+//RS     let generated = fs::read_to_string(root.join("jet/app/geodesy.jet")).unwrap();
+//RS     assert!(
+//RS         generated.contains("Generated by jet import ada"),
+//RS         "{generated}"
+//RS     );
+//RS     assert!(
+//RS         generated.contains("use ada.geodesy as geodesy"),
+//RS         "{generated}"
+//RS     );
+//RS     assert!(generated.contains("TODO JT0101"), "{generated}");
+//RS     assert!(
+//RS         generated.contains("canonical source of truth"),
+//RS         "{generated}"
+//RS     );
+//RS     assert!(
+//RS         !generated.contains("fn double_lat"),
+//RS         "Ada source became guessed Jet: {generated}"
+//RS     );
+//RS     let checked = run(&root, &["check", "jet/app/geodesy.jet"]);
+//RS     assert_eq!(
+//RS         checked.status.code(),
+//RS         Some(0),
+//RS         "generated Ada stub failed its own front end:\n{}",
+//RS         String::from_utf8_lossy(&checked.stderr)
+//RS     );
+//RS     let report = fs::read_to_string(root.join("jet/app/import-report.json")).unwrap();
+//RS     assert!(report.contains("\"language\":\"ada\""), "{report}");
+//RS     assert!(report.contains("geodesy.ads"), "{report}");
+//RS     assert!(report.contains("\"code\":\"JT0101\""), "{report}");
+//RS     assert!(
+//RS         report.contains("\"migration_status\":\"omitted-reported\""),
+//RS         "{report}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn source_import_dry_run_idempotence_and_three_way_update_are_honest() {
+//RS     let root = workspace("rerun");
+//RS     let source = root.join("python/app/main.py");
+//RS     fs::write(&source, "def answer() -> int:\n    return 42\n").unwrap();
+//RS 
+//RS     let preview = run(&root, &["import", "py", "python/app", "--dry-run"]);
+//RS     assert_eq!(preview.status.code(), Some(0));
+//RS     assert!(!root.join("jet").exists(), "dry-run wrote output");
+//RS 
+//RS     let first = run(&root, &["import", "py", "python/app"]);
+//RS     assert_eq!(first.status.code(), Some(0));
+//RS     let generated = root.join("jet/app/main.jet");
+//RS     let original = fs::read_to_string(&generated).unwrap();
+//RS 
+//RS     let rerun = run(&root, &["import", "py", "python/app"]);
+//RS     assert_eq!(
+//RS         rerun.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&rerun.stderr)
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&generated).unwrap(), original);
+//RS 
+//RS     let edited = format!("{original}\nfn owner_edit() {{}}\n");
+//RS     fs::write(&generated, &edited).unwrap();
+//RS     let create_conflict = run(&root, &["import", "py", "python/app"]);
+//RS     assert_eq!(create_conflict.status.code(), Some(1));
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&create_conflict.stderr)
+//RS             .replace(&root.display().to_string(), "$ROOT"),
+//RS         include_str!("fixtures/source_import/conflict.stderr")
+//RS     );
+//RS 
+//RS     let preserve = run(&root, &["import", "py", "python/app", "--update"]);
+//RS     assert_eq!(
+//RS         preserve.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&preserve.stderr)
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&generated).unwrap(), edited);
+//RS 
+//RS     let report = root.join("jet/app/import-report.json");
+//RS     let report_original = fs::read_to_string(&report).unwrap();
+//RS     let report_edited = format!("{report_original}\n{{\"owner_note\":true}}\n");
+//RS     fs::write(&report, &report_edited).unwrap();
+//RS     let report_preserve = run(&root, &["import", "py", "python/app", "--update"]);
+//RS     assert_eq!(report_preserve.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&report_preserve.stderr).contains("JT0199"));
+//RS     assert_eq!(fs::read_to_string(&report).unwrap(), report_edited);
+//RS 
+//RS     fs::write(&source, "def answer() -> int:\n    return 43\n").unwrap();
+//RS     let both_changed = run(&root, &["import", "py", "python/app", "--update"]);
+//RS     assert_eq!(both_changed.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&both_changed.stderr).contains("JT0199"));
+//RS     assert_eq!(fs::read_to_string(&generated).unwrap(), edited);
+//RS     assert_eq!(fs::read_to_string(&report).unwrap(), report_edited);
+//RS }
+//RS 
+//RS #[test]
+//RS fn source_import_rejects_unknown_language_and_does_not_follow_symlinks() {
+//RS     let root = workspace("hostile");
+//RS     fs::write(
+//RS         root.join("python/app/good.py"),
+//RS         "def Ok() -> int:\n    return 1\n",
+//RS     )
+//RS     .unwrap();
+//RS     let unknown = run(&root, &["import", "ruby", "python/app"]);
+//RS     assert_eq!(unknown.status.code(), Some(2));
+//RS     assert!(!root.join("jet").exists());
+//RS 
+//RS     #[cfg(unix)]
+//RS     {
+//RS         std::os::unix::fs::symlink("/etc", root.join("python/app/outside")).unwrap();
+//RS         let output = run(&root, &["import", "py", "python/app"]);
+//RS         assert_eq!(output.status.code(), Some(0));
+//RS         assert_eq!(
+//RS             fs::read_dir(root.join("jet/app"))
+//RS                 .unwrap()
+//RS                 .filter_map(Result::ok)
+//RS                 .filter(|entry| entry.path().extension().and_then(|v| v.to_str()) == Some("jet"))
+//RS                 .count(),
+//RS             1
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn enterprise_importers_match_scalar_behavior_fixtures_and_keep_source_unchanged() {
+//RS     let cases = [
+//RS         (
+//RS             "java",
+//RS             "java",
+//RS             include_str!("fixtures/source_import/enterprise/java/Math.java"),
+//RS             "fn add(left: Int, right: Int) -> Int {",
+//RS             "5\n",
+//RS         ),
+//RS         (
+//RS             "csharp",
+//RS             "cs",
+//RS             include_str!("fixtures/source_import/enterprise/csharp/Math.cs"),
+//RS             "fn add(left: Int, right: Int) -> Int {",
+//RS             "5\n",
+//RS         ),
+//RS         (
+//RS             "ts",
+//RS             "ts",
+//RS             include_str!("fixtures/source_import/enterprise/ts/math.ts"),
+//RS             "fn add(left: Float, right: Float) -> Float {",
+//RS             "5.0\n",
+//RS         ),
+//RS         (
+//RS             "js",
+//RS             "js",
+//RS             include_str!("fixtures/source_import/enterprise/js/math.js"),
+//RS             "fn add(left: Float, right: Float) -> Float {",
+//RS             "5.0\n",
+//RS         ),
+//RS         (
+//RS             "go",
+//RS             "go",
+//RS             include_str!("fixtures/source_import/enterprise/go/math.go"),
+//RS             "fn add(left: Int, right: Int) -> Int {",
+//RS             "5\n",
+//RS         ),
+//RS     ];
+//RS 
+//RS     for (language, extension, source, signature, expected_output) in cases {
+//RS         let root = workspace(&format!("enterprise-{language}"));
+//RS         let source_dir = root.join(language).join("app");
+//RS         fs::create_dir_all(&source_dir).unwrap();
+//RS         let source_path = source_dir.join(format!("program.{extension}"));
+//RS         fs::write(&source_path, source).unwrap();
+//RS         let source_arg = format!("{language}/app");
+//RS 
+//RS         let imported = run(&root, &["import", language, &source_arg]);
+//RS         assert_eq!(
+//RS             imported.status.code(),
+//RS             Some(0),
+//RS             "{language}: {}",
+//RS             String::from_utf8_lossy(&imported.stderr)
+//RS         );
+//RS         let generated_path = root.join("jet/app/program.jet");
+//RS         let generated = fs::read_to_string(&generated_path).unwrap();
+//RS         assert!(generated.contains(signature), "{language}: {generated}");
+//RS         assert!(
+//RS             generated.contains("// Source span:"),
+//RS             "{language}: {generated}"
+//RS         );
+//RS         assert!(
+//RS             generated.contains("D-MIGRATE-SRC1"),
+//RS             "{language}: {generated}"
+//RS         );
+//RS         assert!(
+//RS             !generated.contains("fn unsupported"),
+//RS             "{language}: {generated}"
+//RS         );
+//RS         assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
+//RS 
+//RS         let report = fs::read_to_string(root.join("jet/app/import-report.json")).unwrap();
+//RS         assert!(
+//RS             report.contains("\"law\":\"D-MIGRATE-SRC1\""),
+//RS             "{language}: {report}"
+//RS         );
+//RS         assert!(report.contains("\"source_span\":"), "{language}: {report}");
+//RS         assert!(
+//RS             report.contains("\"generated_target\":"),
+//RS             "{language}: {report}"
+//RS         );
+//RS         assert!(
+//RS             report.contains("\"code\":\"JT0101\""),
+//RS             "{language}: {report}"
+//RS         );
+//RS 
+//RS         let checked = run(&root, &["check", "jet/app/program.jet"]);
+//RS         assert_eq!(
+//RS             checked.status.code(),
+//RS             Some(0),
+//RS             "{language}: generated Jet failed its own front end:\n{}",
+//RS             String::from_utf8_lossy(&checked.stderr)
+//RS         );
+//RS         let translated = run(&root, &["run", "jet/app/program.jet"]);
+//RS         assert_eq!(
+//RS             translated.status.code(),
+//RS             Some(0),
+//RS             "{language}: {}",
+//RS             String::from_utf8_lossy(&translated.stderr)
+//RS         );
+//RS         assert_eq!(translated.stdout, expected_output.as_bytes(), "{language}");
+//RS 
+//RS         let rerun = run(&root, &["import", language, &source_arg]);
+//RS         assert_eq!(rerun.status.code(), Some(0), "{language}: rerun failed");
+//RS         assert_eq!(fs::read_to_string(generated_path).unwrap(), generated);
+//RS     }
+//RS }
+//RS 
+//RS /// The foreign program for one importer fixture, run by its own toolchain.
+//RS /// `None` means the toolchain is not installed on this host.
+//RS fn foreign_oracle(language: &str, source: &str, dir: &Path) -> Option<std::process::Output> {
+//RS     let have = |tool: &str, probe: &str| {
+//RS         Command::new(tool)
+//RS             .arg(probe)
+//RS             .output()
+//RS             .is_ok_and(|output| output.status.success())
+//RS     };
+//RS     fs::create_dir_all(dir).unwrap();
+//RS     match language {
+//RS         "js" if have("node", "--version") => {
+//RS             let program = dir.join("oracle.js");
+//RS             fs::write(&program, format!("{source}\nrun();\n")).unwrap();
+//RS             Command::new("node").arg(&program).output().ok()
+//RS         }
+//RS         "ts" if have("node", "--version") => {
+//RS             let program = dir.join("oracle.ts");
+//RS             fs::write(&program, format!("{source}\nrun();\n")).unwrap();
+//RS             Command::new("node")
+//RS                 .args(["--experimental-strip-types", "--no-warnings"])
+//RS                 .arg(&program)
+//RS                 .output()
+//RS                 .ok()
+//RS         }
+//RS         "go" if have("go", "version") => {
+//RS             let program = dir.join("oracle.go");
+//RS             let body = source.replacen("package demo", "package main", 1);
+//RS             fs::write(&program, format!("{body}\nfunc main() {{ run() }}\n")).unwrap();
+//RS             Command::new("go")
+//RS                 .arg("run")
+//RS                 .arg(&program)
+//RS                 .env("GOCACHE", dir.join("gocache"))
+//RS                 .env("GOPATH", dir.join("gopath"))
+//RS                 .env("GOTOOLCHAIN", "local")
+//RS                 .output()
+//RS                 .ok()
+//RS         }
+//RS         "java" if have("javac", "--version") && have("java", "--version") => {
+//RS             let package = dir.join("demo");
+//RS             fs::create_dir_all(&package).unwrap();
+//RS             fs::write(package.join("Math.java"), source).unwrap();
+//RS             fs::write(
+//RS                 package.join("Oracle.java"),
+//RS                 "package demo;\npublic final class Oracle {\n    public static void main(String[] args) { Math.run(); }\n}\n",
+//RS             )
+//RS             .unwrap();
+//RS             let compiled = Command::new("javac")
+//RS                 .current_dir(dir)
+//RS                 .args(["demo/Math.java", "demo/Oracle.java"])
+//RS                 .output()
+//RS                 .ok()?;
+//RS             if !compiled.status.success() {
+//RS                 return Some(compiled);
+//RS             }
+//RS             Command::new("java").current_dir(dir).arg("demo.Oracle").output().ok()
+//RS         }
+//RS         "csharp" if have("dotnet", "--version") => {
+//RS             fs::write(dir.join("Math.cs"), source).unwrap();
+//RS             fs::write(
+//RS                 dir.join("Oracle.cs"),
+//RS                 "public static class Oracle { public static void Main() { Demo.Math.run(); } }\n",
+//RS             )
+//RS             .unwrap();
+//RS             fs::write(
+//RS                 dir.join("oracle.csproj"),
+//RS                 "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>disable</ImplicitUsings></PropertyGroup></Project>\n",
+//RS             )
+//RS             .unwrap();
+//RS             Command::new("dotnet")
+//RS                 .current_dir(dir)
+//RS                 .args(["run", "--project", "oracle.csproj"])
+//RS                 .env("DOTNET_CLI_HOME", dir)
+//RS                 .env("DOTNET_NOLOGO", "1")
+//RS                 .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+//RS                 .output()
+//RS                 .ok()
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Scalar output lines as numbers, so the foreign `5` and Jet's `5.0` for a
+//RS /// JavaScript `number` compare as the same value.
+//RS fn numeric_lines(stdout: &[u8]) -> Vec<f64> {
+//RS     String::from_utf8_lossy(stdout)
+//RS         .lines()
+//RS         .map(|line| {
+//RS             line.trim()
+//RS                 .parse::<f64>()
+//RS                 .unwrap_or_else(|_| panic!("non-numeric scalar output line `{line}`"))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS /// D-ADOPT-TIER1: each tier-one importer's generated Jet must behave like the
+//RS /// foreign program it came from. A language whose toolchain is missing is
+//RS /// reported as unproven, never counted as a match.
+//RS #[test]
+//RS fn enterprise_importers_match_foreign_oracle_where_toolchain_present() {
+//RS     let cases = [
+//RS         ("java", "java", include_str!("fixtures/source_import/enterprise/java/Math.java")),
+//RS         ("csharp", "cs", include_str!("fixtures/source_import/enterprise/csharp/Math.cs")),
+//RS         ("ts", "ts", include_str!("fixtures/source_import/enterprise/ts/math.ts")),
+//RS         ("js", "js", include_str!("fixtures/source_import/enterprise/js/math.js")),
+//RS         ("go", "go", include_str!("fixtures/source_import/enterprise/go/math.go")),
+//RS     ];
+//RS     let mut matched = Vec::new();
+//RS     let mut unavailable = Vec::new();
+//RS     for (language, extension, source) in cases {
+//RS         let root = workspace(&format!("oracle-{language}"));
+//RS         let source_dir = root.join(language).join("app");
+//RS         fs::create_dir_all(&source_dir).unwrap();
+//RS         fs::write(source_dir.join(format!("program.{extension}")), source).unwrap();
+//RS         let Some(oracle) = foreign_oracle(language, source, &root.join("oracle")) else {
+//RS             unavailable.push(language);
+//RS             continue;
+//RS         };
+//RS         assert!(
+//RS             oracle.status.success(),
+//RS             "{language} oracle failed:\n{}",
+//RS             String::from_utf8_lossy(&oracle.stderr)
+//RS         );
+//RS         let imported = run(&root, &["import", language, &format!("{language}/app")]);
+//RS         assert_eq!(
+//RS             imported.status.code(),
+//RS             Some(0),
+//RS             "{language}: {}",
+//RS             String::from_utf8_lossy(&imported.stderr)
+//RS         );
+//RS         let translated = run(&root, &["run", "jet/app/program.jet"]);
+//RS         assert_eq!(
+//RS             translated.status.code(),
+//RS             Some(0),
+//RS             "{language}: {}",
+//RS             String::from_utf8_lossy(&translated.stderr)
+//RS         );
+//RS         assert_eq!(
+//RS             numeric_lines(&translated.stdout),
+//RS             numeric_lines(&oracle.stdout),
+//RS             "{language}: imported Jet diverged from its foreign oracle"
+//RS         );
+//RS         matched.push(language);
+//RS     }
+//RS     eprintln!("foreign oracle matched: {matched:?}");
+//RS     eprintln!("foreign oracle UNAVAILABLE (toolchain missing, not proven): {unavailable:?}");
+//RS     assert!(
+//RS         !matched.is_empty(),
+//RS         "no tier-one importer had a foreign toolchain; nothing was proven"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn enterprise_import_reports_ambiguity_malformed_input_and_no_cpp_importer() {
+//RS     let root = workspace("enterprise-failures");
+//RS     let source_dir = root.join("java/app");
+//RS     fs::create_dir_all(&source_dir).unwrap();
+//RS     let source_path = source_dir.join("Ambiguous.java");
+//RS     let source = include_str!("fixtures/source_import/enterprise/failures/ambiguous.java");
+//RS     fs::write(&source_path, source).unwrap();
+//RS 
+//RS     let imported = run(&root, &["import", "java", "java/app"]);
+//RS     assert_eq!(imported.status.code(), Some(0));
+//RS     let generated_path = root.join("jet/app/Ambiguous.jet");
+//RS     let generated = fs::read_to_string(&generated_path).unwrap();
+//RS     assert!(
+//RS         generated.contains("fn keep(value: Int) -> Int {"),
+//RS         "{generated}"
+//RS     );
+//RS     assert!(
+//RS         !generated.contains("fn add"),
+//RS         "ambiguous overload was guessed: {generated}"
+//RS     );
+//RS     assert!(
+//RS         !generated.contains("fn quotient"),
+//RS         "foreign division was guessed: {generated}"
+//RS     );
+//RS     assert!(
+//RS         !generated.contains("fn broken"),
+//RS         "malformed body was guessed: {generated}"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
+//RS 
+//RS     let report = fs::read_to_string(root.join("jet/app/import-report.json")).unwrap();
+//RS     assert!(
+//RS         report.contains("unsupported java dependency declaration"),
+//RS         "{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("ambiguous overloaded java function"),
+//RS         "{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("foreign division or remainder semantics"),
+//RS         "{report}"
+//RS     );
+//RS     assert!(report.contains("malformed java function"), "{report}");
+//RS     assert!(
+//RS         report.contains("\"migration_status\":\"omitted-reported\""),
+//RS         "{report}"
+//RS     );
+//RS 
+//RS     let checked = run(&root, &["check", "jet/app/Ambiguous.jet"]);
+//RS     assert_eq!(
+//RS         checked.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&checked.stderr)
+//RS     );
+//RS 
+//RS     for language in ["c", "c++"] {
+//RS         let unavailable = run(&root, &["import", language, "java/app"]);
+//RS         assert_eq!(unavailable.status.code(), Some(2), "{language}");
+//RS         let stderr = String::from_utf8_lossy(&unavailable.stderr);
+//RS         assert!(
+//RS             stderr.contains("intentionally unavailable"),
+//RS             "{language}: {stderr}"
+//RS         );
+//RS         assert!(stderr.contains("binder"), "{language}: {stderr}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn javascript_import_does_not_rewrite_foreign_names_inside_strings() {
+//RS     let root = workspace("javascript-string");
+//RS     let source_dir = root.join("javascript/app");
+//RS     fs::create_dir_all(&source_dir).unwrap();
+//RS     let source = r#"/** @returns {string} */
+//RS function label() {
+//RS     return "console.log(";
+//RS }
+//RS "#;
+//RS     let source_path = source_dir.join("labels.js");
+//RS     fs::write(&source_path, source).unwrap();
+//RS 
+//RS     let imported = run(&root, &["import", "js", "javascript/app"]);
+//RS     assert_eq!(imported.status.code(), Some(0));
+//RS     let generated = fs::read_to_string(root.join("jet/app/labels.jet")).unwrap();
+//RS     assert!(generated.contains("return \"console.log(\""), "{generated}");
+//RS     assert_eq!(fs::read_to_string(source_path).unwrap(), source);
+//RS 
+//RS     let translated = run(&root, &["run", "jet/app/labels.jet"]);
+//RS     assert_eq!(translated.status.code(), Some(0));
+//RS     assert_eq!(translated.stdout, b"console.log(\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn enterprise_import_preserves_source_for_partial_failure() {
+//RS     let root = workspace("enterprise-partial-failure");
+//RS     let source_dir = root.join("ts/app");
+//RS     fs::create_dir_all(&source_dir).unwrap();
+//RS     let source = include_str!("fixtures/source_import/enterprise/failures/partial.ts");
+//RS     let source_path = source_dir.join("partial.ts");
+//RS     fs::write(&source_path, source).unwrap();
+//RS 
+//RS     let imported = run(&root, &["import", "ts", "ts/app"]);
+//RS     assert_eq!(
+//RS         imported.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&imported.stderr)
+//RS     );
+//RS 
+//RS     let generated_path = root.join("jet/app/partial.jet");
+//RS     let generated = fs::read_to_string(&generated_path).unwrap();
+//RS     assert!(
+//RS         generated.contains("fn keep(value: Float) -> Float {"),
+//RS         "{generated}"
+//RS     );
+//RS     assert!(
+//RS         generated.contains("increment := value + 1.0"),
+//RS         "{generated}"
+//RS     );
+//RS     for omitted in ["unsupported", "broken", "duplicate", "readFile"] {
+//RS         assert!(
+//RS             !generated.contains(&format!("fn {omitted}")),
+//RS             "unproven function `{omitted}` was guessed: {generated}"
+//RS         );
+//RS     }
+//RS     assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
+//RS 
+//RS     let report = fs::read_to_string(root.join("jet/app/import-report.json")).unwrap();
+//RS     for reason in [
+//RS         "unsupported ts dependency declaration",
+//RS         "foreign type `number[]` is outside the scalar importer subset",
+//RS         "ts body `broken` was not translated",
+//RS         "ambiguous overloaded ts function `duplicate`",
+//RS     ] {
+//RS         assert!(report.contains(reason), "{reason}: {report}");
+//RS     }
+//RS     assert!(
+//RS         report
+//RS             .matches("\"migration_status\":\"omitted-reported\"")
+//RS             .count()
+//RS             >= 4,
+//RS         "{report}"
+//RS     );
+//RS 
+//RS     let checked = run(&root, &["check", "jet/app/partial.jet"]);
+//RS     assert_eq!(
+//RS         checked.status.code(),
+//RS         Some(0),
+//RS         "partial import generated invalid Jet:\n{}",
+//RS         String::from_utf8_lossy(&checked.stderr)
+//RS     );
+//RS }
+// END-PORT-PENDING 1155 tests/source_import.rs:1-827
+

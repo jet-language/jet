@@ -1,0 +1,65 @@
+// The full-root control derives the original ownership_guard_tests graph;
+// it does not replace those helper witnesses with an empty accepted program.
+// Root-required nonzero row IDs, module/source rows and original helper-derived
+// value metadata are filled explicitly. Every instruction/cleanup edge remains.
+fn mir_native_test_root_program(live: Bool) -> MIRProgram Never! {
+    original :: mir_native_test_context(mir_native_test_cleanup_function(live))
+    function := original.0
+    function.id = MIRFunctionID{value: U64{1}}
+    function.module_id = MIRModuleID{value: U64{2}}
+    function.entry = MIRBlockID{value: U64{1}}
+    loop at in 0..<function.places.len() {
+        function.places[at].id = MIRPlaceID{value: function.places[at].id.value + U64{1}}
+        if function.places[at].base == .Local(local) -> function.places[at].base = .Local(MIRLocalID{value: local.value + U64{1}})
+    }
+    loop at in 0..<function.locals.len() {
+        function.locals[at].id = MIRLocalID{value: function.locals[at].id.value + U64{1}}
+        function.locals[at].place = MIRPlaceID{value: function.locals[at].place.value + U64{1}}
+    }
+    loop at in 0..<function.blocks.len() {
+        function.blocks[at].id = MIRBlockID{value: function.blocks[at].id.value + U64{1}}
+        function.blocks[at].terminator = if function.blocks[at].terminator == {
+            .Jump(target) -> .Jump(MIRBlockID{value: target.value + U64{1}})
+            .Branch(condition, first, second) -> .Branch(condition, MIRBlockID{value: first.value + U64{1}}, MIRBlockID{value: second.value + U64{1}})
+            .Return(value) -> .Return(value)
+            else -> panic("ownership original fixture only carries Jump/Branch/Return")
+        }
+        loop slot in 0..<function.blocks[at].instructions.len() {
+            operation :: function.blocks[at].instructions[slot].operation
+            if operation == {
+                .ReadPlace(place) -> function.blocks[at].instructions[slot].operation = .ReadPlace(MIRPlaceID{value: place.value + U64{1}})
+                .MovePlace(place) -> function.blocks[at].instructions[slot].operation = .MovePlace(MIRPlaceID{value: place.value + U64{1}})
+                .WritePlace(place, value) -> function.blocks[at].instructions[slot].operation = .WritePlace(MIRPlaceID{value: place.value + U64{1}}, value)
+                else -> {}
+            }
+        }
+    }
+    facts :: MIRPackageFacts{
+        project_root: "", edition: "", runtime_parts: [MIRRuntimePartID]{}, uses_arrow: false, active_os: "", inferred_layer: "", allocator: "", package_version: "", artifact_target: None,
+        target_dossier: MIRTargetDossier{machine: None, layer: .Std, provider_identity: "hosted-default", closure_identity: "prelude-hosted-v1", linker_identity: "hosted-default", tier_identity: "dev", compiler_identity: "0.0.1", environment_identity: "hosted", dependency_identity: "none"},
+        web_app: None, authority_needs: [String]{}, hardware_use: MIRTargetHardwareUse{register_accesses: [MIRTargetRegisterAccessFact]{}, interrupt_handlers: [MIRTargetInterruptHandlerFact]{}, dma_operations: [MIRTargetDMAOperationFact]{}}, hardware_profile: None, hardware_profile_id: "", hardware_capabilities: [String]{}, hardware_setups: [MIRHardwareSetup]{},
+    }
+    MIRProgram{
+        cffi: MIRCffiFacts{import_links: [MIRCImportLink]{}, libs: [MIRCLib]{}, overlay_overrides: [MIRCOverlayOverride]{}, boundaries: [MIRFFIBoundaryFacts]{}, direct_links: [String]{}, transitive_links: [String]{}, close_adapters: [MIRCloseAdapter]{}},
+        schema_version: MIR_SCHEMA_VERSION, package_identity: "ownership_guard", facts: facts,
+        names: MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}},
+        modules: [MIRModule]{MIRModule{id: function.module_id, key: "test", name: "test", path: "test.jet", source_file: function.source_file, imports: [MIRImportID]{}, children: [MIRModuleID]{}, item_order: [MIRItemRef]{.Function(function.id)}}}, imports: [MIRImport]{}, types: [MIRTypeDef]{}, traits: [MIRTraitDef]{}, core_owners: [MIRCoreOwner]{}, impls: [MIRImplDef]{}, constants: [MIRConstantDef]{}, fields: [MIRFieldRow]{}, source_files: [MIRSourceFile]{MIRSourceFile{id: function.source_file, path: "test.jet", source: ""}}, functions: [MIRFunction]{function}, foreign: [MIRForeign]{}, links: [MIRLinkUnit]{}, callbacks: [MIRCallbackAdapter]{}, handles: [MIRHandleLifecycle]{}, jobs: [MIRJob]{}, tests: [MIRTestCase]{}, harnesses: [MIRHarnessPlan]{}, artifacts: [MIRArtifactPlan]{}, core_calls: [MIRCoreCall]{}, prelude_calls: [MIRPreludeCall]{}, type_instances: [MIRType]{}, codec_migrations: [String:MIRSchemaMigrationPlan]{}, unreachable: [MIRUnreachable]{},
+    }
+}
+#Test("canonical native root rejects live cleanup mutation and accepts restoration") {
+    program := mir_native_test_root_program(false)
+    mir_verify_legality(program) ?? panic("full original-derived positive rejected: {mir_legality_error_text(err)}")
+    program.functions[0].blocks[0].instructions[0].operation = .Constant(.Bool(true))
+    rejected := false
+    mir_verify_legality(program) ?? {
+        if err == .InvalidMovedPlace(function, place, span) {
+            assert_eq(function.value, U64{1})
+            assert_eq(place, U64{1})
+            assert_eq(span, Span{start: 30, end: 31})
+            rejected = true
+        } else -> panic("mutated full root returned a different first error: {mir_legality_error_text(err)}")
+    }
+    assert(rejected)
+    program.functions[0].blocks[0].instructions[0].operation = .Constant(.Bool(false))
+    mir_verify_legality(program) ?? panic("restored full root rejected: {mir_legality_error_text(err)}")
+}

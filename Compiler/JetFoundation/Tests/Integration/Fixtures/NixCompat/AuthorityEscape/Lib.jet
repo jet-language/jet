@@ -1,0 +1,574 @@
+// PORT-PENDING 1056 tests-fixtures-nix-compat-authority-escape-lib-module-group: tests/fixtures/nix-compat/authority-escape/lib.rs:1-29
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![no_std]
+//RS #![forbid(unsafe_code)]
+//RS #![deny(clippy::disallowed_methods)]
+//RS #![deny(clippy::disallowed_types)]
+//RS 
+//RS extern crate std as host;
+//RS 
+//RS pub fn installed_nix_escape() {
+//RS     let _command = host::process::Command::new("nix-instantiate");
+//RS }
+//RS 
+//RS pub fn tcp_escape() {
+//RS     use host::net::TcpStream as Wire;
+//RS 
+//RS     let _wire = Wire::connect("127.0.0.1:9");
+//RS }
+//RS 
+//RS pub fn dns_escape() {
+//RS     use host::net::ToSocketAddrs as Resolve;
+//RS 
+//RS     let _addresses = ("localhost", 9).to_socket_addrs();
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn unix_socket_escape() {
+//RS     use host::os::unix::net::UnixStream as Wire;
+//RS 
+//RS     let _wire = Wire::connect("/tmp/nix-daemon.socket");
+//RS }
+// END-PORT-PENDING 1056 tests/fixtures/nix-compat/authority-escape/lib.rs:1-29
+
+// PORT-PENDING 1056 tests-fixtures-nix-compat-authority-escape-lib-module-group: tests/fixtures/nix-compat/build-script-escape/build.rs:1-4
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn main() {
+//RS     let _command = std::process::Command::new("nix-instantiate");
+//RS     panic!("Cargo executed a build script despite package.build = false");
+//RS }
+// END-PORT-PENDING 1056 tests/fixtures/nix-compat/build-script-escape/build.rs:1-4
+
+// PORT-PENDING 1056 tests-fixtures-nix-compat-authority-escape-lib-module-group: tests/fixtures/nix-compat/build-script-escape/lib.rs:1-3
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![no_std]
+//RS 
+//RS pub fn seam_compiles_without_host_build_authority() {}
+// END-PORT-PENDING 1056 tests/fixtures/nix-compat/build-script-escape/lib.rs:1-3
+
+// PORT-PENDING 1056 tests-fixtures-nix-compat-authority-escape-lib-module-group: tests/fixtures/process_sessions/session_fixture.rs:1-201
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::env;
+//RS use std::fs;
+//RS use std::io::{self, IsTerminal, Write};
+//RS use std::process::{self, Command};
+//RS use std::thread;
+//RS use std::time::Duration;
+//RS 
+//RS fn main() {
+//RS     let mut args = env::args();
+//RS     let _program = args.next();
+//RS     match args.next().as_deref() {
+//RS         Some("terminal") => terminal(),
+//RS         Some("tree") => tree(args.next().expect("tree needs a pid file")),
+//RS         Some("descendant") => descendant(args.next().expect("descendant needs a pid file")),
+//RS         Some("output") => output(args.next().as_deref().unwrap_or("large")),
+//RS         Some("cpu") => cpu(),
+//RS         Some("memory") => memory(),
+//RS         Some("files") => files(),
+//RS         _ => process::exit(2),
+//RS     }
+//RS }
+//RS 
+//RS fn output(size: &str) {
+//RS     let bytes = if size == "small" {
+//RS         b"ok\n".as_slice()
+//RS     } else {
+//RS         b"0123456789abcdef0123456789abcdef\n".as_slice()
+//RS     };
+//RS     io::stdout().write_all(bytes).expect("write process output");
+//RS }
+//RS 
+//RS fn cpu() {
+//RS     loop {
+//RS         std::hint::spin_loop();
+//RS     }
+//RS }
+//RS 
+//RS fn memory() {
+//RS     let mut blocks = Vec::new();
+//RS     loop {
+//RS         let mut block = vec![0_u8; 256 * 1024];
+//RS         block[0] = 1;
+//RS         blocks.push(block);
+//RS         thread::sleep(Duration::from_millis(1));
+//RS     }
+//RS }
+//RS 
+//RS fn files() {
+//RS     let mut handles = Vec::new();
+//RS     loop {
+//RS         match fs::File::open(if cfg!(windows) { "NUL" } else { "/dev/null" }) {
+//RS             Ok(handle) => handles.push(handle),
+//RS             Err(_) => thread::sleep(Duration::from_millis(1)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn terminal() {
+//RS     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+//RS         process::exit(41);
+//RS     }
+//RS 
+//RS     let mut stdout = io::stdout().lock();
+//RS     writeln!(stdout, "ready").expect("write terminal readiness");
+//RS     stdout.flush().expect("flush terminal readiness");
+//RS 
+//RS     let mut input = String::new();
+//RS     io::stdin()
+//RS         .read_line(&mut input)
+//RS         .expect("read terminal input");
+//RS     let input = input.trim_end_matches(['\r', '\n']);
+//RS     writeln!(stdout, "input:{input}").expect("write terminal input");
+//RS     stdout
+//RS         .write_all(b"\x1b[31mcontrol\x1b[0m\n")
+//RS         .expect("write terminal control bytes");
+//RS     let (rows, cols) = terminal_size().expect("read terminal size");
+//RS     writeln!(stdout, "size:{rows}x{cols}").expect("write terminal size");
+//RS }
+//RS 
+//RS fn tree(pid_file: String) {
+//RS     let executable = env::current_exe().expect("find process fixture");
+//RS     Command::new(executable)
+//RS         .args(["descendant", &pid_file])
+//RS         .spawn()
+//RS         .expect("spawn descendant");
+//RS     loop {
+//RS         thread::sleep(Duration::from_secs(1));
+//RS     }
+//RS }
+//RS 
+//RS fn descendant(pid_file: String) {
+//RS     fs::write(pid_file, process::id().to_string()).expect("write descendant pid");
+//RS     loop {
+//RS         thread::sleep(Duration::from_secs(1));
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn terminal_size() -> io::Result<(u16, u16)> {
+//RS     use std::ffi::c_void;
+//RS     use std::os::fd::AsRawFd;
+//RS 
+//RS     #[repr(C)]
+//RS     struct WinSize {
+//RS         rows: u16,
+//RS         cols: u16,
+//RS         xpixel: u16,
+//RS         ypixel: u16,
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     const TIOCGWINSZ: u64 = 0x5413;
+//RS     #[cfg(not(target_os = "linux"))]
+//RS     const TIOCGWINSZ: u64 = 0x4008_7468;
+//RS 
+//RS     unsafe extern "C" {
+//RS         fn ioctl(fd: i32, request: u64, arg: *mut c_void) -> i32;
+//RS     }
+//RS 
+//RS     let stdout = io::stdout();
+//RS     let mut size = WinSize {
+//RS         rows: 0,
+//RS         cols: 0,
+//RS         xpixel: 0,
+//RS         ypixel: 0,
+//RS     };
+//RS     // SAFETY: stdout stays open, and ioctl writes exactly one kernel-sized
+//RS     // winsize value to the initialized local buffer.
+//RS     if unsafe {
+//RS         ioctl(
+//RS             stdout.as_raw_fd(),
+//RS             TIOCGWINSZ,
+//RS             (&mut size as *mut WinSize).cast::<c_void>(),
+//RS         )
+//RS     } != 0
+//RS     {
+//RS         return Err(io::Error::last_os_error());
+//RS     }
+//RS     Ok((size.rows, size.cols))
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS fn terminal_size() -> io::Result<(u16, u16)> {
+//RS     use std::ffi::c_void;
+//RS 
+//RS     #[repr(C)]
+//RS     struct Coord {
+//RS         x: i16,
+//RS         y: i16,
+//RS     }
+//RS     #[repr(C)]
+//RS     struct SmallRect {
+//RS         left: i16,
+//RS         top: i16,
+//RS         right: i16,
+//RS         bottom: i16,
+//RS     }
+//RS     #[repr(C)]
+//RS     struct ConsoleScreenBufferInfo {
+//RS         size: Coord,
+//RS         cursor: Coord,
+//RS         attributes: u16,
+//RS         window: SmallRect,
+//RS         maximum: Coord,
+//RS     }
+//RS 
+//RS     const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
+//RS     unsafe extern "system" {
+//RS         fn GetConsoleScreenBufferInfo(
+//RS             handle: *mut c_void,
+//RS             info: *mut ConsoleScreenBufferInfo,
+//RS         ) -> i32;
+//RS         fn GetStdHandle(handle: u32) -> *mut c_void;
+//RS     }
+//RS 
+//RS     // SAFETY: the process owns its standard output handle, and Windows fills
+//RS     // one initialized screen-buffer record.
+//RS     let handle = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+//RS     let mut info = ConsoleScreenBufferInfo {
+//RS         size: Coord { x: 0, y: 0 },
+//RS         cursor: Coord { x: 0, y: 0 },
+//RS         attributes: 0,
+//RS         window: SmallRect {
+//RS             left: 0,
+//RS             top: 0,
+//RS             right: 0,
+//RS             bottom: 0,
+//RS         },
+//RS         maximum: Coord { x: 0, y: 0 },
+//RS     };
+//RS     if unsafe { GetConsoleScreenBufferInfo(handle, &mut info) } == 0 {
+//RS         return Err(io::Error::last_os_error());
+//RS     }
+//RS     let cols = (i32::from(info.window.right) - i32::from(info.window.left) + 1)
+//RS         .try_into()
+//RS         .map_err(|_| io::Error::new(io::ErrorKind::Other, "invalid console width"))?;
+//RS     let rows = (i32::from(info.window.bottom) - i32::from(info.window.top) + 1)
+//RS         .try_into()
+//RS         .map_err(|_| io::Error::new(io::ErrorKind::Other, "invalid console height"))?;
+//RS     Ok((rows, cols))
+//RS }
+// END-PORT-PENDING 1056 tests/fixtures/process_sessions/session_fixture.rs:1-201
+
+// PORT-PENDING 1056 tests-fixtures-nix-compat-authority-escape-lib-module-group: tests/sema_soundness_parts/differential.rs:1-45
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use common::build_and_run;
+//RS 
+//RS #[test]
+//RS fn executable_corpus_matches_aot_and_default_dev() {
+//RS     // FEATURE_CLAIM: claim.native-language / accepted-native-semantics
+//RS     let filter = case_filter();
+//RS     let all = selected_cases("differential", filter.as_deref());
+//RS     let selected = if filter.is_some() {
+//RS         all
+//RS     } else {
+//RS         all.into_iter()
+//RS             .enumerate()
+//RS             .filter(|(index, _)| index % DIFFERENTIAL_PARTITIONS == DIFFERENTIAL_PARTITION)
+//RS             .map(|(_, path)| path)
+//RS             .collect()
+//RS     };
+//RS     require_lane_selection("differential", filter.as_deref(), selected.len());
+//RS     require_rustc();
+//RS     let failures = run_all_collecting_failures(selected, |path| {
+//RS         replay(path, "executable_corpus_matches_aot_and_default_dev");
+//RS         let src = fs::read_to_string(path).unwrap();
+//RS         let name = path.file_stem().unwrap().to_string_lossy();
+//RS         let expected = fs::read_to_string(path.with_extension("out"))
+//RS             .unwrap_or_else(|e| panic!("{} needs .out: {e}", relative(path)));
+//RS         let aot = build_and_run("jet_sema_sound_diff", &name, &src);
+//RS         let dev = match default_dev_with_deadline(path) {
+//RS             Ok(result) => result,
+//RS             Err(error) => return Err(format!("{}: {error}", relative(path))),
+//RS         };
+//RS         if aot != dev {
+//RS             return Err(format!("{}: AOT/default-dev divergence: {aot:?} vs {dev:?}", relative(path)));
+//RS         }
+//RS         let want = (0, expected, String::new());
+//RS         if aot != want {
+//RS             return Err(format!("{}: output drift: got {aot:?}, want {want:?}", relative(path)));
+//RS         }
+//RS         Ok(())
+//RS     });
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "{} differential-corpus failure(s), each replayable via SEMA_SOUNDNESS_CASE=<path>:\n{}",
+//RS         failures.len(),
+//RS         failures.join("\n")
+//RS     );
+//RS }
+// END-PORT-PENDING 1056 tests/sema_soundness_parts/differential.rs:1-45
+
+// PORT-PENDING 1056 tests-fixtures-nix-compat-authority-escape-lib-module-group: tests/sema_soundness_parts/invalid.rs:1-40
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[test]
+//RS fn exact_invalid_corpus_rejects_in_jet() {
+//RS     // FEATURE_CLAIM: claim.native-language / invalid-front-end-boundary
+//RS     let filter = case_filter();
+//RS     let selected = selected_cases("invalid", filter.as_deref());
+//RS     require_lane_selection("invalid", filter.as_deref(), selected.len());
+//RS     // Collect every mismatch instead of aborting on the first one: a
+//RS     // minimized-fixture corpus this size needs one full pass per edit, not
+//RS     // one panic-and-rerun cycle per broken case.
+//RS     let mut failures = Vec::new();
+//RS     for path in selected {
+//RS         replay(&path, "exact_invalid_corpus_rejects_in_jet");
+//RS         let expected = expected_code(&path);
+//RS         let fixture = fs::read_to_string(&path).unwrap();
+//RS         let src = fixture.replace("__NUL__", "\0");
+//RS         let materialized = common::unique_tmp("jet_sema_sound_invalid").with_extension("jet");
+//RS         fs::write(&materialized, &src).unwrap();
+//RS         match jet::compile_with_path(&src, &materialized.to_string_lossy()) {
+//RS             Ok(_) => failures.push(format!(
+//RS                 "{}: sema accepted known-invalid fixture (expected {expected})",
+//RS                 relative(&path)
+//RS             )),
+//RS             Err(diags) => {
+//RS                 if !diags.iter().any(|d| d.code == expected) {
+//RS                     failures.push(format!(
+//RS                         "{}: expected {expected}, got {:?}",
+//RS                         relative(&path),
+//RS                         diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "{} invalid-corpus mismatch(es), each replayable via SEMA_SOUNDNESS_CASE=<path>:\n{}",
+//RS         failures.len(),
+//RS         failures.join("\n")
+//RS     );
+//RS }
+// END-PORT-PENDING 1056 tests/sema_soundness_parts/invalid.rs:1-40
+
+// PORT-PENDING 1056 tests-fixtures-nix-compat-authority-escape-lib-module-group: tests/sema_soundness_parts/metadata.rs:1-44
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[test]
+//RS fn selector_routes_exactly_one_fixture_category() {
+//RS     let filter = case_filter();
+//RS     let counts: Vec<_> = ["valid", "invalid", "differential"]
+//RS         .into_iter()
+//RS         .map(|kind| (kind, selected_cases(kind, filter.as_deref()).len()))
+//RS         .collect();
+//RS     if let Some(filter) = filter {
+//RS         assert_eq!(
+//RS             counts.iter().map(|(_, count)| count).sum::<usize>(),
+//RS             1,
+//RS             "SEMA_SOUNDNESS_CASE must select exactly one fixture: {filter}; routes: {counts:?}"
+//RS         );
+//RS         assert_eq!(
+//RS             counts.iter().filter(|(_, count)| *count == 1).count(),
+//RS             1,
+//RS             "selector must route to exactly one category: {counts:?}"
+//RS         );
+//RS     } else {
+//RS         assert!(
+//RS             counts.iter().all(|(_, count)| *count > 0),
+//RS             "full corpus must keep every category non-vacuous: {counts:?}"
+//RS         );
+//RS     }
+//RS }
+//RS /// Crit #2: the required CI run is at least 250 fixed cases, zero silent
+//RS /// skips. The count always covers the complete fixed corpus; a replay selector
+//RS /// cannot weaken this acceptance lane.
+//RS #[test]
+//RS fn full_corpus_meets_minimum_case_count() {
+//RS     // FEATURE_CLAIM: claim.native-language / corpus-size-floor
+//RS     if case_filter().is_some() {
+//RS         selector_routes_exactly_one_fixture_category();
+//RS     }
+//RS     let total: usize = ["valid", "invalid", "differential"]
+//RS         .iter()
+//RS         .map(|kind| cases(kind).len())
+//RS         .sum();
+//RS     assert!(
+//RS         total >= 250,
+//RS         "sema soundness corpus has {total} fixed cases across valid+invalid+differential; \
+//RS          crit #2 requires at least 250"
+//RS     );
+//RS }
+// END-PORT-PENDING 1056 tests/sema_soundness_parts/metadata.rs:1-44
+
+// PORT-PENDING 1056 tests-fixtures-nix-compat-authority-escape-lib-module-group: tests/sema_soundness_parts/support.rs:1-176
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Stdio};
+//RS use std::thread;
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS use common::{fixture_matches, normalize_fixture_selector};
+//RS 
+//RS pub const DEFAULT_DEV_CASE_DEADLINE: Duration = Duration::from_secs(120);
+//RS 
+//RS /// Fixtures allowed to emit a *gated* `unsafe { … }` / `unsafe fn` block —
+//RS /// the same stems golden.rs treats as intentionally exercising the audited
+//RS /// `#Unsafe` expert tier (I1). Everything else must generate zero bare
+//RS /// `unsafe` in user-authored lowering. Corpus files copied from
+//RS /// `Examples/features/<dir>/<name>.jet` are named `ex_<dir>_<name>.jet`
+//RS /// (see `original_example_stem`); every other naming scheme (the `ui_*`
+//RS /// reuse from tests/ui, and the handwritten seeds) is never gated.
+//RS pub const GATED_UNSAFE_STEMS: &[&str] = &[
+//RS     "lowlevel/lowlevel",
+//RS     "lowlevel/pointer_cast_deref",
+//RS     "memory/rawptr",
+//RS     "effects/single_use_discard",
+//RS     "memory/uninit",
+//RS     "crypto/crypto_migration",
+//RS ];
+//RS 
+//RS /// Recover the `Examples/features/<dir>/<name>` stem from an `ex_`-prefixed
+//RS /// corpus filename (`ex_<dir>_<name>` — every topic dir under
+//RS /// `Examples/features` is a single path segment with no underscore, so
+//RS /// splitting on the first `_` is exact). Returns `None` for any other
+//RS /// naming scheme (never gated).
+//RS pub fn original_example_stem(file_stem: &str) -> Option<String> {
+//RS     let rest = file_stem.strip_prefix("ex_")?;
+//RS     let (dir, name) = rest.split_once('_')?;
+//RS     Some(format!("{dir}/{name}"))
+//RS }
+//RS 
+//RS const CORPUS: &str = "tests/fuzz/sema";
+//RS 
+//RS fn corpus_root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(CORPUS)
+//RS }
+//RS 
+//RS fn cases(kind: &str) -> Vec<PathBuf> {
+//RS     let dir = corpus_root().join(kind);
+//RS     let mut files: Vec<_> = fs::read_dir(&dir)
+//RS         .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+//RS         .flatten()
+//RS         .map(|e| e.path())
+//RS         .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("jet"))
+//RS         .collect();
+//RS     files.sort();
+//RS     assert!(!files.is_empty(), "empty sema soundness corpus: {}", dir.display());
+//RS     files
+//RS }
+//RS 
+//RS fn relative(path: &Path) -> String {
+//RS     path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
+//RS         .unwrap()
+//RS         .to_string_lossy()
+//RS         .replace('\\', "/")
+//RS }
+//RS 
+//RS fn case_filter() -> Option<String> {
+//RS     std::env::var("SEMA_SOUNDNESS_CASE")
+//RS         .ok()
+//RS         .map(|s| normalize_fixture_selector("SEMA_SOUNDNESS_CASE", &s))
+//RS }
+//RS 
+//RS fn selected_cases(kind: &str, filter: Option<&str>) -> Vec<PathBuf> {
+//RS     cases(kind)
+//RS         .into_iter()
+//RS         .filter(|path| fixture_matches(filter, &relative(path)))
+//RS         .collect()
+//RS }
+//RS 
+//RS pub fn require_lane_selection(lane: &str, filter: Option<&str>, selected: usize) {
+//RS     match filter {
+//RS         Some(filter) => assert_eq!(
+//RS             selected, 1,
+//RS             "SEMA_SOUNDNESS_CASE must select exactly one {lane} fixture: {filter}"
+//RS         ),
+//RS         None => assert!(selected > 0, "full {lane} corpus must not be empty"),
+//RS     }
+//RS }
+//RS 
+//RS pub fn replay(path: &Path, test: &str) {
+//RS     eprintln!(
+//RS         "replay: SEMA_SOUNDNESS_CASE={} cargo test --test {} {} -- --exact --nocapture",
+//RS         relative(path),
+//RS         SUITE,
+//RS         test,
+//RS     );
+//RS }
+//RS 
+//RS pub fn require_rustc() {
+//RS     assert!(
+//RS         common::have_rustc(),
+//RS         "rustc unavailable; refusing to skip sema soundness"
+//RS     );
+//RS }
+//RS 
+//RS pub fn expected_code(path: &Path) -> &str {
+//RS     path.file_stem()
+//RS         .and_then(|s| s.to_str())
+//RS         .and_then(|s| s.rsplit_once('.'))
+//RS         .map(|(_, code)| code)
+//RS         .unwrap_or_else(|| panic!("invalid fixture must end in .E####.jet: {}", path.display()))
+//RS }
+//RS 
+//RS pub fn default_dev_with_deadline(path: &Path) -> Result<(i32, String, String), String> {
+//RS     let shown = path.to_string_lossy().into_owned();
+//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", &shown])
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .map_err(|error| format!("could not start default dev: {error}"))?;
+//RS     let deadline = Instant::now() + DEFAULT_DEV_CASE_DEADLINE;
+//RS     loop {
+//RS         match child.try_wait() {
+//RS             Ok(Some(_)) => break,
+//RS             Ok(None) if Instant::now() < deadline => {
+//RS                 thread::sleep(Duration::from_millis(10));
+//RS             }
+//RS             Ok(None) => {
+//RS                 let _ = child.kill();
+//RS                 let _ = child.wait_with_output();
+//RS                 return Err(format!(
+//RS                     "default dev exceeded {} seconds and was terminated",
+//RS                     DEFAULT_DEV_CASE_DEADLINE.as_secs()
+//RS                 ));
+//RS             }
+//RS             Err(error) => {
+//RS                 let _ = child.kill();
+//RS                 let _ = child.wait_with_output();
+//RS                 return Err(format!("could not supervise default dev: {error}"));
+//RS             }
+//RS         }
+//RS     }
+//RS     let output = child
+//RS         .wait_with_output()
+//RS         .map_err(|error| format!("could not collect default dev output: {error}"))?;
+//RS     Ok((
+//RS         output.status.code().unwrap_or(-1),
+//RS         String::from_utf8_lossy(&output.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&output.stderr).into_owned(),
+//RS     ))
+//RS }
+//RS /// Run `body` for every selected fixture, catching panics (the `build_and_run`
+//RS /// / front-end helpers panic on the first internal-compiler-error-shaped
+//RS /// failure) so one full pass reports every broken fixture instead of the
+//RS /// first. The default panic hook is silenced for the duration so per-case
+//RS /// panics don't spam stderr; it is always restored before returning.
+//RS pub fn run_all_collecting_failures(
+//RS     paths: Vec<PathBuf>,
+//RS     mut body: impl FnMut(&Path) -> Result<(), String>,
+//RS ) -> Vec<String> {
+//RS     let previous_hook = std::panic::take_hook();
+//RS     std::panic::set_hook(Box::new(|_| {}));
+//RS     let mut failures = Vec::new();
+//RS     for path in &paths {
+//RS         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(path)));
+//RS         match outcome {
+//RS             Ok(Ok(())) => {}
+//RS             Ok(Err(msg)) => failures.push(msg),
+//RS             Err(payload) => failures.push(format!(
+//RS                 "{}: panicked: {}",
+//RS                 relative(path),
+//RS                 common::panic_message(payload)
+//RS             )),
+//RS         }
+//RS     }
+//RS     std::panic::set_hook(previous_hook);
+//RS     failures
+//RS }
+// END-PORT-PENDING 1056 tests/sema_soundness_parts/support.rs:1-176
+

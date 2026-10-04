@@ -1,0 +1,832 @@
+// PORT-PENDING 1063 tests-gate-ledger: tests/gate_ledger.rs:1-828
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-FACT-GATE1=A: one read model, stable projections, and compile-time cost.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::io::Write as _;
+//RS use std::path::Path;
+//RS use std::process::{Command, Output, Stdio};
+//RS 
+//RS fn jet() -> &'static Path {
+//RS     Path::new(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn run(root: &Path, args: &[&str]) -> Output {
+//RS     Command::new(jet())
+//RS         .current_dir(root)
+//RS         .args(args)
+//RS         .output()
+//RS         .expect("run jet")
+//RS }
+//RS 
+//RS fn stdout(output: &Output) -> String {
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "status={} stdout={} stderr={}",
+//RS         output.status,
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr),
+//RS     );
+//RS     String::from_utf8(output.stdout.clone()).expect("utf8 stdout")
+//RS }
+//RS 
+//RS fn write_gates(root: &Path) {
+//RS     fs::write(
+//RS         root.join("gates.jet"),
+//RS         r#"fn run() {
+//RS     #Unsafe("test unsafe reason") {
+//RS         print("unsafe row")
+//RS     }
+//RS     #Impure("test impure reason") {}
+//RS     #Nondeterministic("test nondeterministic reason") {}
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS }
+//RS 
+//RS fn write_source_gate_kinds(root: &Path) {
+//RS     fs::write(
+//RS         root.join("source-gates.jet"),
+//RS         r#"#UnitFamily(Length, base: meter) {
+//RS     meter
+//RS     thirdish(scale: 2/3)
+//RS }
+//RS tag Input { deny: [IO] }
+//RS #Scrub(Input) fn scrub(raw: #Input String) -> String { ~raw }
+//RS #MustUse fn discardable() -> Int { 1 }
+//RS 
+//RS fn run() {
+//RS     #FX(authority: IO) {}
+//RS     discardable().drop("intentional result discard")
+//RS     detached :: task 42
+//RS     detached.detach()
+//RS     approx(1)
+//RS     wrapping(1 + 2)
+//RS     Thirdish.from_meter_rounded(1meter, .NearestEven, digits: 0).drop("rounded conversion gate")
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS }
+//RS 
+//RS fn write_tier_fixture(root: &Path) {
+//RS     fs::write(root.join("tier.jet"), knowledge_tier_source()).unwrap();
+//RS }
+//RS 
+//RS fn knowledge_tier_source() -> &'static str {
+//RS     include_str!("fixtures/knowledge_tier.jet")
+//RS }
+//RS 
+//RS fn knowledge_tier_web_source() -> &'static str {
+//RS     include_str!("fixtures/knowledge_tier_web.jet")
+//RS }
+//RS 
+//RS // D-TYPE2-NUM1 / card #1550 / c9: the number grid keeps one executable
+//RS // meaning across every compiler-facing and hosted tier. Reuse the ratified
+//RS // range example and its golden output; this matrix adds the missing per-tier
+//RS // proof without creating a second numeric example or spelling.
+//RS const NUMBER_GRID_EXAMPLE: &str = include_str!("../Examples/features/types/range_types.jet");
+//RS const NUMBER_GRID_EXPECTED: &str =
+//RS     include_str!("../Examples/features/expected/types/range_types.out");
+//RS const NUMBER_GRID_WEB_SOURCE: &str = r#"#Target(Web)
+//RS fn set_brightness(level: Int(0..100)) -> Int(0..100) -> level
+//RS 
+//RS fn run() {
+//RS     print(set_brightness(42))
+//RS     print(Int(0..100).from_int(3))
+//RS }
+//RS "#;
+//RS 
+//RS fn have_tool(name: &str) -> bool {
+//RS     Command::new(name)
+//RS         .arg("--version")
+//RS         .output()
+//RS         .map(|output| output.status.success())
+//RS         .unwrap_or(false)
+//RS }
+//RS 
+//RS fn have_wasm_target() -> bool {
+//RS     Command::new("rustc")
+//RS         .args([
+//RS             "--print",
+//RS             "target-libdir",
+//RS             "--target",
+//RS             "wasm32-unknown-unknown",
+//RS         ])
+//RS         .output()
+//RS         .map(|output| output.status.success())
+//RS         .unwrap_or(false)
+//RS }
+//RS 
+//RS fn checked_number_grid_bundle(tag: &str) -> (common::Scratch, jet::AST::ProgramBundle) {
+//RS     let scratch = common::Scratch::new(tag);
+//RS     let entry = scratch.join("range_types.jet");
+//RS     fs::write(&entry, NUMBER_GRID_EXAMPLE).unwrap();
+//RS     let shown = entry.to_string_lossy().into_owned();
+//RS     let mut bundle = jet::Loader::load_entry(&shown).expect("number-grid example must load");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         diagnostics.is_empty(),
+//RS         "number-grid sema failed: {diagnostics:#?}"
+//RS     );
+//RS     (scratch, bundle)
+//RS }
+//RS 
+//RS fn assert_inline_int_range(ty: &jet::AST::Type, lo: i64, hi: i64) {
+//RS     match ty {
+//RS         jet::AST::Type::InlineRange {
+//RS             base,
+//RS             lo: actual_lo,
+//RS             hi: actual_hi,
+//RS         } => {
+//RS             assert_eq!(base.as_ref(), &jet::AST::Type::Int);
+//RS             assert_eq!((*actual_lo, *actual_hi), (lo, hi));
+//RS         }
+//RS         other => panic!("expected Int({lo}..{hi}), got {other:?}"),
+//RS     }
+//RS }
+//RS 
+//RS fn assert_tier_output(output: Output) {
+//RS     let text = stdout(&output);
+//RS     assert_tier_text(&text);
+//RS }
+//RS 
+//RS fn assert_tier_text(text: &str) {
+//RS     for expected in [
+//RS         "42",
+//RS         "comptime_range=9",
+//RS         "comptime_exactness=true",
+//RS         "comptime_unit=2.0",
+//RS         "comptime_state=state",
+//RS         "comptime_classification=world",
+//RS         "exactness=true",
+//RS         "unit=2.0",
+//RS         "state=state",
+//RS         "classification=world",
+//RS         "range=9",
+//RS     ] {
+//RS         assert!(text.contains(expected), "expected {expected:?}, got {text}");
+//RS     }
+//RS }
+//RS 
+//RS fn assert_knowledge_ledger(json: &str) {
+//RS     assert!(
+//RS         json.starts_with("{\"schema\":\"jet.status/v1\"")
+//RS             && json.contains("\"gates\":{\"entries\":["),
+//RS         "{json}"
+//RS     );
+//RS     for subject in [
+//RS         "approx",
+//RS         "wrapping",
+//RS         "from_half_rounded",
+//RS         ".raw",
+//RS         "#Transition(_, Pending)",
+//RS         "#Transition(Pending, Confirmed)",
+//RS         "#Scrub(Input)",
+//RS     ] {
+//RS         assert!(
+//RS             json.contains(&format!("\"subject\":\"{subject}\"")),
+//RS             "missing {subject} in {json}"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         json.matches("\"kind\":\"state_transition\"").count(),
+//RS         2,
+//RS         "{json}"
+//RS     );
+//RS     assert_eq!(
+//RS         json.matches("\"kind\":\"taint_scrub\"").count(),
+//RS         1,
+//RS         "{json}"
+//RS     );
+//RS     assert_eq!(
+//RS         json.matches("\"kind\":\"precision_demotion\"").count(),
+//RS         5,
+//RS         "{json}"
+//RS     );
+//RS     let scrub = json.find("\"kind\":\"taint_scrub\"").expect("taint row");
+//RS     let state = json
+//RS         .find("\"kind\":\"state_transition\"")
+//RS         .expect("state row");
+//RS     let precision = json
+//RS         .find("\"kind\":\"precision_demotion\"")
+//RS         .expect("precision row");
+//RS     assert!(
+//RS         scrub < state && state < precision,
+//RS         "knowledge rows drifted: {json}"
+//RS     );
+//RS     assert!(json.contains("\"span\":{\"start\":"), "{json}");
+//RS     assert!(
+//RS         json.contains("\"reason\":\"#Transition(Pending, Confirmed)\""),
+//RS         "{json}"
+//RS     );
+//RS     assert!(json.contains("tier.jet:"), "{json}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn full_and_filtered_views_keep_one_provenance_ledger() {
+//RS     let scratch = common::Scratch::new("gate-views");
+//RS     write_gates(&scratch.path);
+//RS 
+//RS     let human = stdout(&run(&scratch.path, &["inspect", "gates", "gates.jet"]));
+//RS     assert!(human.contains("gates:"), "{human}");
+//RS     assert!(human.contains("unsafe:"), "{human}");
+//RS     assert!(human.contains("impure:"), "{human}");
+//RS     assert!(human.contains("nondeterministic:"), "{human}");
+//RS 
+//RS     let json = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "gates", "--json", "gates.jet"],
+//RS     ));
+//RS     assert!(
+//RS         json.starts_with("{\"schema_version\":1,\"entries\":["),
+//RS         "{json}"
+//RS     );
+//RS     assert!(json.contains("\"provenance\":["), "{json}");
+//RS     assert!(json.contains("test unsafe reason"), "{json}");
+//RS 
+//RS     let kind = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "gates", "--kind", "impure", "gates.jet"],
+//RS     ));
+//RS     assert!(kind.contains("impure: 1"), "{kind}");
+//RS     assert!(!kind.contains("unsafe:"), "{kind}");
+//RS 
+//RS     let scope = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "gates", "--scope", "block", "gates.jet"],
+//RS     ));
+//RS     assert!(scope.contains("impure:"), "{scope}");
+//RS     assert!(!scope.contains("unsafe:"), "{scope}");
+//RS 
+//RS     let authority = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "authority", "--json", "gates.jet"],
+//RS     ));
+//RS     assert!(authority.contains("\"kind\":\"unsafe\""), "{authority}");
+//RS     assert!(!authority.contains("precision_demotion"), "{authority}");
+//RS 
+//RS     let unsafe_view = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "unsafe", "--json", "gates.jet"],
+//RS     ));
+//RS     assert!(unsafe_view.contains("\"gates\":["), "{unsafe_view}");
+//RS     assert!(!unsafe_view.contains("test impure reason"), "{unsafe_view}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn authority_ledger_mirrors_manifest_and_lock_block_shape() {
+//RS     let scratch = common::Scratch::new("authority-ledger");
+//RS     fs::write(
+//RS         scratch.join("package.jet"),
+//RS         r#"name: "ledger"
+//RS version: "0.1.0"
+//RS authority: {
+//RS     holds: { allow: [IO], deny: [Exec] },
+//RS     grants: { "image-codec": [FS.Read] },
+//RS     trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow } },
+//RS     providers: { nix: { registry: "nixpkgs", deny: ["openssl-1.0"] } },
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(scratch.join("run.jet"), "fn run() { print(\"ledger\") }\n").unwrap();
+//RS     fs::create_dir_all(scratch.join(".jet")).unwrap();
+//RS     fs::write(
+//RS         scratch.join(".jet/lock"),
+//RS         r#"version = 1
+//RS 
+//RS [root]
+//RS dependencies = []
+//RS authority = { holds: { allow: [IO], deny: [Exec] }, grants: { "image-codec": [FS.Read] }, trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow } }, providers: { nix: { registry: "nixpkgs", deny: ["openssl-1.0"] } } }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let json = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "authority", "--json", "run.jet"],
+//RS     ));
+//RS     for subject in [
+//RS         "authority.holds.allow",
+//RS         "authority.holds.deny",
+//RS         "image-codec",
+//RS         "authority.trust.default",
+//RS         "authority.trust.ci",
+//RS         "authority.trust.services.stripe",
+//RS         "authority.providers.nix",
+//RS     ] {
+//RS         assert!(
+//RS             json.contains(&format!("\"subject\":\"{subject}\"")),
+//RS             "{subject}: {json}"
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         json.contains(".jet/lock"),
+//RS         "lock authority provenance missing: {json}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn source_gate_kinds_keep_their_written_reasons() {
+//RS     let scratch = common::Scratch::new("gate-source-kinds");
+//RS     write_source_gate_kinds(&scratch.path);
+//RS 
+//RS     let json = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "gates", "--json", "source-gates.jet"],
+//RS     ));
+//RS     for kind in [
+//RS         "dependency_grant",
+//RS         "taint_scrub",
+//RS         "duty_drop",
+//RS         "precision_demotion",
+//RS     ] {
+//RS         assert!(
+//RS             json.contains(&format!("\"kind\":\"{kind}\"")),
+//RS             "{kind}: {json}"
+//RS         );
+//RS     }
+//RS     for subject in ["approx", "wrapping", "from_meter_rounded"] {
+//RS         let marker = format!("\"subject\":\"{subject}\"");
+//RS         let subject_at = json.find(&marker).expect("precision gate subject");
+//RS         let entry_at = json[..subject_at]
+//RS             .rfind("{\"kind\":\"")
+//RS             .expect("precision gate entry");
+//RS         assert!(
+//RS             json[entry_at..subject_at].starts_with("{\"kind\":\"precision_demotion\""),
+//RS             "precision gate {subject} did not use exact ledger kind: {json}"
+//RS         );
+//RS     }
+//RS     assert!(json.contains("intentional result discard"), "{json}");
+//RS     assert!(json.contains("#Scrub(Input)"), "{json}");
+//RS     assert!(
+//RS         json.contains("\"subject\":\"from_meter_rounded\""),
+//RS         "{json}"
+//RS     );
+//RS     assert!(json.contains("source-gates.jet:"), "{json}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn range_knowledge_gate_has_three_tier_example_parity() {
+//RS     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let example = "Examples/features/types/range_types.jet";
+//RS     let release = stdout(&run(root, &["run", "--release", example]));
+//RS     let default = stdout(&run(root, &["run", example]));
+//RS     let interpret = stdout(&run(root, &["run", "--interpret", example]));
+//RS     let expected =
+//RS         fs::read_to_string(root.join("Examples/features/expected/types/range_types.out"))
+//RS             .expect("range_types golden output");
+//RS     assert_eq!(release, expected);
+//RS     assert_eq!(default, expected);
+//RS     assert_eq!(interpret, expected);
+//RS }
+//RS 
+//RS #[test]
+//RS fn ledger_json_and_generated_rust_are_stable_across_two_builds() {
+//RS     let scratch = common::Scratch::new("gate-stability");
+//RS     fs::write(
+//RS         scratch.join("plain.jet"),
+//RS         "fn run() { print(\"stable\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let rust_a = stdout(&run(&scratch.path, &["emit", "--rust", "plain.jet"]));
+//RS     stdout(&run(&scratch.path, &["build", "plain.jet"]));
+//RS     let ledger_a = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "gates", "--json", "plain.jet"],
+//RS     ));
+//RS     let rust_after_ledger = stdout(&run(&scratch.path, &["emit", "--rust", "plain.jet"]));
+//RS     stdout(&run(&scratch.path, &["build", "plain.jet"]));
+//RS     let rust_b = stdout(&run(&scratch.path, &["emit", "--rust", "plain.jet"]));
+//RS     let ledger_b = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "gates", "--json", "plain.jet"],
+//RS     ));
+//RS 
+//RS     assert_eq!(rust_a, rust_b, "ledger inspection changed generated Rust");
+//RS     assert_eq!(
+//RS         rust_a, rust_after_ledger,
+//RS         "ledger inspection changed generated Rust"
+//RS     );
+//RS     assert_eq!(ledger_a, ledger_b, "ledger JSON changed between builds");
+//RS }
+//RS 
+//RS #[test]
+//RS fn structure_inspection_is_read_only_and_structure_facts_erase_before_runtime() {
+//RS     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let example = "Examples/features/tooling/structure_plane.jet";
+//RS 
+//RS     let rust_before = stdout(&run(root, &["emit", "--rust", example]));
+//RS     let run_before = stdout(&run(root, &["run", example]));
+//RS     let release_before = stdout(&run(root, &["run", "--release", example]));
+//RS 
+//RS     let structure = stdout(&run(root, &["inspect", "structure", example]));
+//RS     let structure_json = stdout(&run(root, &["inspect", "structure", "--json", example]));
+//RS     for fact in ["import-edge", "lifecycle", "liveness"] {
+//RS         assert!(structure.contains(fact), "missing {fact}: {structure}");
+//RS         assert!(
+//RS             structure_json.contains(fact),
+//RS             "missing {fact}: {structure_json}"
+//RS         );
+//RS     }
+//RS     assert!(structure.contains("provenance"), "{structure}");
+//RS     assert!(
+//RS         structure_json.contains("\"provenance\""),
+//RS         "{structure_json}"
+//RS     );
+//RS 
+//RS     let rust_after = stdout(&run(root, &["emit", "--rust", example]));
+//RS     let run_after = stdout(&run(root, &["run", example]));
+//RS     let release_after = stdout(&run(root, &["run", "--release", example]));
+//RS 
+//RS     assert_eq!(
+//RS         rust_before, rust_after,
+//RS         "structure inspection changed AOT Rust"
+//RS     );
+//RS     assert_eq!(
+//RS         run_before, run_after,
+//RS         "structure inspection changed JIT output"
+//RS     );
+//RS     assert_eq!(
+//RS         release_before, release_after,
+//RS         "structure inspection changed AOT output"
+//RS     );
+//RS     for erased in [
+//RS         "Structure.Liveness",
+//RS         "Structure.Lifecycle",
+//RS         "Structure.ImportEdge",
+//RS         "policy allow",
+//RS         "manifest rule edit",
+//RS     ] {
+//RS         assert!(
+//RS             !rust_before.contains(erased),
+//RS             "structure policy leaked into Rust: {erased}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn heavy_numeric_kind_is_summarized_after_security_rows() {
+//RS     let scratch = common::Scratch::new("gate-heavy");
+//RS     let mut source = String::from("fn run() {\n");
+//RS     for index in 0..20 {
+//RS         source.push_str(&format!("    value{index} :: wrapping(1 + 2)\n"));
+//RS     }
+//RS     source.push_str("}\n");
+//RS     fs::write(scratch.join("heavy.jet"), source).unwrap();
+//RS 
+//RS     let human = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "gates", "--gate", "unsafe=allow", "heavy.jet"],
+//RS     ));
+//RS     let security = human.find("build_flag:").expect(&human);
+//RS     let numeric = human.find("precision_demotion: 20 entries").expect(&human);
+//RS     assert!(
+//RS         security < numeric,
+//RS         "security rows must precede numeric summary: {human}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_parser_tier_keeps_the_gate_source() {
+//RS     let scratch = common::Scratch::new("gate-tier-parser");
+//RS     write_source_gate_kinds(&scratch.path);
+//RS     let parsed = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "compiler", "parse", "source-gates.jet"],
+//RS     ));
+//RS     assert!(parsed.contains("\"operation\":\"parse\""), "{parsed}");
+//RS     assert!(parsed.contains("#Scrub"), "{parsed}");
+//RS     assert!(parsed.contains("wrapping"), "{parsed}");
+//RS     assert!(parsed.contains("from_meter_rounded"), "{parsed}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_parser_tier_keeps_all_knowledge_plane_gate_sources() {
+//RS     let scratch = common::Scratch::new("gate-tier-parser-knowledge");
+//RS     write_tier_fixture(&scratch.path);
+//RS     let parsed = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "compiler", "parse", "tier.jet"],
+//RS     ));
+//RS     assert!(parsed.contains("\"operation\":\"parse\""), "{parsed}");
+//RS     for gate in [
+//RS         "approx",
+//RS         "wrapping",
+//RS         "from_half_rounded",
+//RS         "#Transition",
+//RS         "#Scrub",
+//RS     ] {
+//RS         assert!(parsed.contains(gate), "missing {gate} in {parsed}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_sema_tier_reads_the_same_gate_ledger() {
+//RS     let scratch = common::Scratch::new("gate-tier-sema");
+//RS     write_source_gate_kinds(&scratch.path);
+//RS     let ledger = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "gates", "--json", "source-gates.jet"],
+//RS     ));
+//RS     assert!(ledger.contains("\"schema_version\":1"), "{ledger}");
+//RS     assert!(ledger.contains("\"kind\":\"dependency_grant\""), "{ledger}");
+//RS     assert!(
+//RS         ledger.contains("\"kind\":\"precision_demotion\""),
+//RS         "{ledger}"
+//RS     );
+//RS     assert!(ledger.contains("\"subject\":\"approx\""), "{ledger}");
+//RS     assert!(ledger.contains("\"subject\":\"wrapping\""), "{ledger}");
+//RS     assert!(
+//RS         ledger.contains("\"subject\":\"from_meter_rounded\""),
+//RS         "{ledger}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_sema_tier_records_all_knowledge_plane_gates_stably() {
+//RS     let scratch = common::Scratch::new("gate-tier-sema-knowledge");
+//RS     write_tier_fixture(&scratch.path);
+//RS     let first = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "gates", "--json", "tier.jet"],
+//RS     ));
+//RS     let second = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "gates", "--json", "tier.jet"],
+//RS     ));
+//RS     assert_eq!(first, second, "knowledge ledger JSON is not stable");
+//RS     assert_knowledge_ledger(&first);
+//RS 
+//RS     let state = stdout(&run(
+//RS         &scratch.path,
+//RS         &["inspect", "gates", "--kind", "state_transition", "tier.jet"],
+//RS     ));
+//RS     assert!(state.contains("state_transition: 2"), "{state}");
+//RS     assert!(state.contains("#Transition(Pending, Confirmed)"), "{state}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_tir_tier_keeps_the_fixture_behavior() {
+//RS     let scratch = common::Scratch::new("gate-tier-tir");
+//RS     write_tier_fixture(&scratch.path);
+//RS     assert_tier_output(run(&scratch.path, &["run", "--interpret", "tier.jet"]));
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_aot_tier_keeps_the_fixture_behavior() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping gate AOT tier proof (need rustc)");
+//RS         return;
+//RS     }
+//RS     let scratch = common::Scratch::new("gate-tier-aot");
+//RS     write_tier_fixture(&scratch.path);
+//RS     assert_tier_output(run(&scratch.path, &["run", "--release", "tier.jet"]));
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_jit_and_dev_tiers_keep_the_fixture_behavior() {
+//RS     let scratch = common::Scratch::new("gate-tier-jit-dev");
+//RS     write_tier_fixture(&scratch.path);
+//RS     assert_tier_output(run(&scratch.path, &["run", "tier.jet"]));
+//RS     assert_tier_output(run(&scratch.path, &["dev", "tier.jet", "--watch=off"]));
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_comptime_tier_keeps_the_compile_time_value() {
+//RS     let scratch = common::Scratch::new("gate-tier-comptime");
+//RS     write_tier_fixture(&scratch.path);
+//RS     let text = stdout(&run(&scratch.path, &["run", "tier.jet"]));
+//RS     assert_eq!(
+//RS         text,
+//RS         "42\ncomptime_range=9\ncomptime_exactness=true\ncomptime_unit=2.0\ncomptime_state=state\ncomptime_classification=world\nexactness=true\nunit=2.0\nstate=state\nclassification=world\nrange=9\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_repl_tier_keeps_the_fixture_behavior() {
+//RS     let scratch = common::Scratch::new("gate-tier-repl");
+//RS     write_tier_fixture(&scratch.path);
+//RS     let mut child = Command::new(jet())
+//RS         .current_dir(&scratch.path)
+//RS         .args(["repl"])
+//RS         .env("XDG_STATE_HOME", scratch.path.join("state"))
+//RS         .env_remove("JET_REPL_HISTORY")
+//RS         .env("NO_COLOR", "1")
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .expect("start REPL");
+//RS     child
+//RS         .stdin
+//RS         .as_mut()
+//RS         .expect("REPL stdin")
+//RS         .write_all(b":load tier.jet\n:run\n:quit\n")
+//RS         .expect("write REPL input");
+//RS     let output = child.wait_with_output().expect("finish REPL");
+//RS     let text = stdout(&output);
+//RS     assert_tier_text(&text);
+//RS     assert!(
+//RS         text.contains("loaded"),
+//RS         "expected REPL fixture load, got {text}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_web_tier_keeps_the_fixture_buildable() {
+//RS     if !common::have_rustc() || !have_tool("node") {
+//RS         eprintln!("note: skipping gate web tier proof (need rustc and node)");
+//RS         return;
+//RS     }
+//RS     let scratch = common::Scratch::new("gate-tier-web");
+//RS     fs::write(scratch.join("web.jet"), knowledge_tier_web_source()).unwrap();
+//RS     let _ = stdout(&run(&scratch.path, &["build", "--target=web", "web.jet"]));
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_number_grid_parser_keeps_int_ranges_as_one_surface() {
+//RS     let (tokens, diagnostics) = jet::Lexer::lex(NUMBER_GRID_EXAMPLE);
+//RS     assert!(
+//RS         diagnostics.is_empty(),
+//RS         "number-grid lexer diagnostics: {diagnostics:?}"
+//RS     );
+//RS     let program = jet::Parser::parse(&tokens).expect("number-grid example must parse");
+//RS 
+//RS     let severity = program
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| match item {
+//RS             jet::AST::Item::Distinct(def) if def.name == "Severity" => Some(def),
+//RS             _ => None,
+//RS         })
+//RS         .expect("number-grid distinct range declaration");
+//RS     assert_eq!(severity.range.map(|(lo, hi, _)| (lo, hi)), Some((0, 10)));
+//RS 
+//RS     let setter = program
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| match item {
+//RS             jet::AST::Item::Func(func) if func.name == "set_brightness" => Some(func),
+//RS             _ => None,
+//RS         })
+//RS         .expect("number-grid inline range function");
+//RS     assert_inline_int_range(&setter.params[0].ty, 0, 100);
+//RS     assert_inline_int_range(
+//RS         setter.return_type.as_ref().expect("setter return type"),
+//RS         0,
+//RS         100,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_number_grid_sema_records_the_shared_interval_facts() {
+//RS     let (_scratch, bundle) = checked_number_grid_bundle("number-grid-sema");
+//RS     let module = &bundle.modules[bundle.entry];
+//RS     let severity = module
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| match item {
+//RS             jet::AST::Item::Distinct(def) if def.name == "Severity" => Some(def),
+//RS             _ => None,
+//RS         })
+//RS         .expect("sema must retain the distinct interval");
+//RS     assert_eq!(severity.range.map(|(lo, hi, _)| (lo, hi)), Some((0, 10)));
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn i9_number_grid_aot_keeps_the_golden_behavior() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping number-grid AOT tier proof (need rustc)");
+//RS         return;
+//RS     }
+//RS     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let output = stdout(&run(
+//RS         root,
+//RS         &[
+//RS             "run",
+//RS             "--release",
+//RS             "Examples/features/types/range_types.jet",
+//RS         ],
+//RS     ));
+//RS     assert_eq!(output, NUMBER_GRID_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_number_grid_jit_keeps_the_golden_behavior() {
+//RS     let scratch = common::Scratch::new("number-grid-jit");
+//RS     fs::write(scratch.join("range_types.jet"), NUMBER_GRID_EXAMPLE).unwrap();
+//RS     let output = stdout(&run(&scratch.path, &["run", "range_types.jet"]));
+//RS     assert_eq!(output, NUMBER_GRID_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_number_grid_dev_keeps_the_golden_behavior() {
+//RS     let scratch = common::Scratch::new("number-grid-dev");
+//RS     fs::write(scratch.join("range_types.jet"), NUMBER_GRID_EXAMPLE).unwrap();
+//RS     let output = stdout(&run(
+//RS         &scratch.path,
+//RS         &["dev", "range_types.jet", "--watch=off"],
+//RS     ));
+//RS     assert_eq!(output, NUMBER_GRID_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_number_grid_comptime_keeps_the_exact_inline_value() {
+//RS     let (_scratch, bundle) = checked_number_grid_bundle("number-grid-comptime");
+//RS     let constant = bundle.modules[bundle.entry]
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| match item {
+//RS             jet::AST::Item::Const(def) if def.name == "comptime_brightness" => Some(def),
+//RS             _ => None,
+//RS         })
+//RS         .expect("number-grid comptime binding");
+//RS     assert!(constant.is_comptime);
+//RS     assert!(matches!(
+//RS         constant.ct.as_ref(),
+//RS         Some(jet::AST::CtValue::Int(42))
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_number_grid_repl_keeps_the_inline_range_behavior() {
+//RS     let transcript = jet::REPL::run_transcript(
+//RS         &[
+//RS             "fn set_brightness(level: Int(0..100)) -> Int(0..100) -> level",
+//RS             "fn checked_inline(raw: Int) -> Int(0..100) String! -> Int(0..100).from_int(raw)",
+//RS             "print(set_brightness(42))",
+//RS             "print(checked_inline(3) ?? Int(0..100).from_int(0))",
+//RS         ],
+//RS         None,
+//RS     );
+//RS     assert_eq!(transcript, "ok\nok\n42\n3\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn i9_number_grid_web_keeps_the_shared_runtime_behavior() {
+//RS     let output =
+//RS         jet::compile_web_with_path(NUMBER_GRID_WEB_SOURCE, "tests/fixtures/number_grid_web.jet")
+//RS             .unwrap_or_else(|diagnostics| {
+//RS                 panic!("number-grid web source was rejected: {diagnostics:#?}")
+//RS             });
+//RS     let web = output
+//RS         .web
+//RS         .expect("number-grid web target must produce artifacts");
+//RS     assert!(web.js_app.contains("function jet_inline_range_from_int"));
+//RS     assert!(web.wasm_rust.contains("jet_inline_range_from_int"));
+//RS 
+//RS     if !have_tool("rustc") || !have_tool("node") || !have_wasm_target() {
+//RS         eprintln!("note: skipping number-grid web execution (need rustc, node, and wasm32 target)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let scratch = common::Scratch::new("number-grid-web");
+//RS     fs::write(scratch.join("app.js"), &web.js_app).unwrap();
+//RS     fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+//RS     fs::write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap();
+//RS     fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
+//RS 
+//RS     let wasm = Command::new("rustc")
+//RS         .current_dir(&scratch.path)
+//RS         .args([
+//RS             "--edition",
+//RS             "2021",
+//RS             "--target",
+//RS             "wasm32-unknown-unknown",
+//RS             "--crate-type",
+//RS             "cdylib",
+//RS             "-O",
+//RS             "app_wasm.rs",
+//RS             "-o",
+//RS             "app.wasm",
+//RS         ])
+//RS         .output()
+//RS         .expect("spawn number-grid web rustc");
+//RS     assert!(
+//RS         wasm.status.success(),
+//RS         "rustc rejected number-grid web output: {}",
+//RS         String::from_utf8_lossy(&wasm.stderr)
+//RS     );
+//RS 
+//RS     let node = Command::new("node")
+//RS         .current_dir(&scratch.path)
+//RS         .arg("app.js")
+//RS         .output()
+//RS         .expect("spawn number-grid web app");
+//RS     assert!(
+//RS         node.status.success(),
+//RS         "number-grid web app failed: stdout={} stderr={}",
+//RS         String::from_utf8_lossy(&node.stdout),
+//RS         String::from_utf8_lossy(&node.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&node.stdout), "42\n3\n");
+//RS }
+// END-PORT-PENDING 1063 tests/gate_ledger.rs:1-828
+

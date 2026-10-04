@@ -1,0 +1,60 @@
+#Test("embedded Core exposes real declarations Effects and builtin tags") {
+    core :: foundation_embedded_core()
+    declaration :: core_module_declaration_from_source(core.declaration_text(), "core.compiler.lang") ?? panic("real embedded Core declaration")
+    assert(declaration.type_exports.len() == 19)
+    assert(declaration.dependencies == [String]{"core.compiler"})
+    assert(core.effect_source().contains("effect FS.Write $irreversible"))
+    declarations :: core.effect_declarations()
+    assert(declarations.len() == 15)
+    assert(declarations[0].name == "Net")
+    assert(declarations[0].irreversible)
+    assert(declarations[2].name == "FS.Read")
+    assert(!declarations[2].irreversible)
+    assert(declarations[3].name == "FS.Write")
+    assert(declarations[3].irreversible)
+    assert(core.effect_roots() == [String]{"Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI", "Browser", "Secret"})
+    assert(core.builtin_tags() == [String]{"Input", "PII", "Secret", "Credential"})
+}
+
+#Test("embedded Core public and private sources contain native body text") {
+    core :: foundation_embedded_core()
+    public_rows :: core.public_sources()
+    assert(public_rows.len() == 110)
+    assert(public_rows[0].module_name == "app")
+    loop row in public_rows {
+        assert(row.owner == "")
+        assert(row.source.trim() != "")
+        assert(row.path.starts_with("Core/"))
+        assert(row.module_name != "__core_text_string")
+    }
+    private_rows :: core.private_sources()
+    assert(private_rows.len() == 1)
+    assert(private_rows[0].owner == "core.text")
+    assert(private_rows[0].module_name == "__core_text_string")
+    assert(private_rows[0].alias == "__core_text_string")
+    assert(private_rows[0].path == "Core/text/string.jet")
+    assert(private_rows[0].owned_members.len() == 0)
+    assert(private_rows[0].source.contains("String"))
+}
+
+// Frozen Prelude/Core.jet core.compiler.lang fixture; every projected menu is
+// compared in declaration order, including real Effects roots and tag order.
+#Test("embedded Core menus match frozen Prelude fixture") {
+    core :: foundation_embedded_core()
+    source :: "module core.compiler.lang exports {{ ABI, ArithmeticMode, Effect, FFILanguage, InlineMode, JobScope, KernelMode, Layout, Maturity, MemoBound, NamingCase, ObligationMode, Path, PolicySetting, Site, State, TaintKind, Target, Track }} types {{ ABI:plain(System|Cdecl|Stdcall|Fastcall|Win64|Sysv64), ArithmeticMode:plain(Checked|Wrapping|Saturating), Effect:plain(FS|Net|Crypto|Time|Random|Env|Proc|IO|DB|Exec|Browser|Secret), FFILanguage:plain(C|Cpp|Asm), InlineMode:plain(Hint|Always|Never), JobScope:plain(Dev|Ship|Internal), KernelMode:plain(Parallel), Layout:plain(C|Columnar), Maturity:plain(Experimental|Tested|Hardened), MemoBound:plain(Default|Unset), NamingCase:plain(Camel|Snake|Pascal|Kebab|Screaming), ObligationMode:plain(Unspecified|GateOnly|Obligations|PerSite|Track|Skip), Path:plain, PolicySetting:plain(Allow|Deny|Unsafe|GC|ExplicitUnits|Copies|Sentries|Explicit|On|Off), Site:plain(Package|File|Module|Function|Method|Block|Statement|Expression|Type|Impl|Declaration|Constant|Field|Variant|Parameter|Test|Operation|Text), State:plain, TaintKind:plain(Input|PII|Secret|Credential), Target:plain(Native|Web|Wasm|JS|Freestanding|OS), Track:plain(Frontend|Backend|Runtime|Tooling) }} depends_on [core.compiler]"
+    expected :: foundation_core_argument_menus_from_source(source, core.effect_roots(), core.builtin_tags()) ?? panic("frozen menu fixture")
+    actual :: foundation_core_argument_menus(core) ?? panic("real embedded Core menus")
+    assert(actual.len() == 20)
+    assert(actual.len() == expected.len())
+    loop index in 0..<expected.len() {
+        assert(actual[index].name == expected[index].name)
+        assert(actual[index].variants == expected[index].variants)
+        assert(actual[index].first_variant_segment == expected[index].first_variant_segment)
+    }
+    assert(rule_arg_declaration("Unknown", actual) == None)
+    effect_menu :: rule_arg_declaration("Effect", actual) ?? panic("Effect menu")
+    assert(effect_menu.variants == core.effect_roots())
+    assert(effect_menu.first_variant_segment)
+    tag_menu :: rule_arg_declaration("TaintKind", actual) ?? panic("TaintKind menu")
+    assert(tag_menu.variants == core.builtin_tags())
+}

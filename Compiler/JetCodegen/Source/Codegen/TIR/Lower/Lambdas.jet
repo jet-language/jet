@@ -1,0 +1,1127 @@
+// PORT-PENDING 0484 crates-jet-codegen-src-codegen-tir-lower-lambdas: crates/jet-codegen/src/Codegen/TIR/lower/lambdas.rs:1-1123
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::AST::{Expr, Lambda, LambdaBody, Stmt, Type};
+//RS use crate::Codegen::Cx;
+//RS use crate::Codegen::TIR::JitSpawnCapture;
+//RS use crate::Codegen::TIR::LowerEnv;
+//RS use crate::Codegen::TIR::TExpr;
+//RS use crate::Codegen::TIR::TExprKind;
+//RS use crate::Codegen::TIR::TJitSpawnBody;
+//RS use crate::Codegen::TIR::TJitSpawnLambda;
+//RS use crate::Codegen::TIR::TLambda;
+//RS use crate::Codegen::TIR::TLambdaBody;
+//RS use crate::Codegen::TIR::TLocal;
+//RS use crate::Codegen::TIR::TStmt;
+//RS use crate::Codegen::TIR::fork_panic;
+//RS use crate::Codegen::TIR::lambda_body_ty_expecting_with_return;
+//RS use crate::Codegen::TIR::lower::lambda_block_tail;
+//RS use crate::Codegen::TIR::lower::{
+//RS     lower_value_block, prepare_interrupt_callback_local_expr, prepare_interrupt_callback_locals,
+//RS     return_type_has_value, with_lambda_body_expr_cache,
+//RS };
+//RS use crate::Codegen::TIR::lower_expr;
+//RS use crate::Codegen::TIR::lower_owned_expr;
+//RS use crate::Codegen::TIR::lower_stmts;
+//RS use crate::Codegen::TIR::spawn_body_carrier_ty;
+//RS use crate::Codegen::TIR::unit_type;
+//RS use crate::Codegen::TIR::view_copy_kind;
+//RS use crate::Codegen::TIR::view_copy_owned_type;
+//RS use crate::Codegen::mangle;
+//RS use crate::Codegen::mangle_generated;
+//RS use std::collections::HashSet;
+//RS use std::sync::Arc;
+//RS 
+//RS fn lambda_jit_name(start: usize, end: usize) -> String {
+//RS     mangle_generated(&format!("lambda_{start}_{end}"))
+//RS }
+//RS /// Return the statically known identity for a task body, when it is a direct
+//RS /// named function call or function reference. Arbitrary expressions stay
+//RS /// unlabeled so the runtime owns the single `task@<site>` fallback.
+//RS pub(crate) fn spawn_label(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Option<String> {
+//RS     let body = match &lam.body {
+//RS         LambdaBody::Expr(expr) => expr.as_ref(),
+//RS         LambdaBody::Block(stmts) => {
+//RS             let [stmt] = stmts.as_slice() else {
+//RS                 return None;
+//RS             };
+//RS             match stmt {
+//RS                 Stmt::Expr(expr) | Stmt::Return(Some(expr), _) => expr,
+//RS                 _ => return None,
+//RS             }
+//RS         }
+//RS     };
+//RS     let mut expr = body;
+//RS     while let Expr::Paren(inner, _) | Expr::Try(inner, _, _, _) = expr {
+//RS         expr = inner;
+//RS     }
+//RS     match expr {
+//RS         Expr::Call(call) if matches!(cx.fn_types.get(&call.name), Some(Type::Fn { .. })) => {
+//RS             Some(call.name.clone())
+//RS         }
+//RS         Expr::Ident(name, _)
+//RS             if !env.locals.contains_key(name)
+//RS                 && matches!(cx.fn_types.get(name), Some(Type::Fn { .. })) =>
+//RS         {
+//RS             Some(name.clone())
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn reactive_capture_name(name: &str) -> String {
+//RS     mangle_generated(&format!(
+//RS         "cap_{}",
+//RS         crate::Syntax::generated_suffix(&mangle(name))
+//RS     ))
+//RS }
+//RS 
+//RS /// D-MEM-COPYSEM1=A: resolve the owning capture type and shared Prelude
+//RS /// operation for a read-only view. TIR classifies the checked source shape;
+//RS /// the shared `MirViewCopyKind::symbol` table names the kernel for every tier.
+//RS pub(super) fn materialized_capture_kind(
+//RS     name: &str,
+//RS     env: &LowerEnv,
+//RS ) -> Option<(&'static str, Type)> {
+//RS     if env.is_string_view_local(name) {
+//RS         let kind = view_copy_kind(&Type::String)?;
+//RS         return Some((kind.symbol(), Type::String));
+//RS     }
+//RS     let source = env.split_view_handle(name).or_else(|| env.ty_of(name))?;
+//RS     let owned = view_copy_owned_type(&source)?;
+//RS     let kind = view_copy_kind(&source)?;
+//RS     Some((kind.symbol(), owned))
+//RS }
+//RS 
+//RS fn is_write_split_view(name: &str, env: &LowerEnv) -> bool {
+//RS     matches!(
+//RS         env.split_view_handle(name),
+//RS         Some(Type::Apply { name, .. }) if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+//RS     )
+//RS }
+//RS 
+//RS /// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`.
+//RS /// Every capture/escape/Fn-vs-FnMut decision is the TOTAL `Lambda.meta` fact — no capture
+//RS /// analysis here. The body is lowered on a CLONED env extended with: the cloned
+//RS /// captures (rebound to `__jet___cap_<n>`, place = that name, and their checked
+//RS /// capture type) and the params (place = mangled name, type from the annotation).
+//RS /// The rendered closure body string is produced now so emit is a pure wrapper.
+//RS pub(crate) fn lower_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TLambda {
+//RS     lower_lambda_expecting(lam, cx, env, None)
+//RS }
+//RS 
+//RS /// `lower_lambda`, but with the expected parameter types from the fn-typed slot
+//RS /// this lambda flows into (a user fn-typed parameter). A bare lambda param
+//RS /// (`(x) => …`, no annotation) takes its Rust type from there so codegen emits
+//RS /// `move |user_x: i64| …` instead of an un-annotated `move |user_x| …` that
+//RS /// rustc can't infer (c142). Builtin closure methods use the host-borrow helper
+//RS /// below because their runtime helpers lend callback inputs directly.
+//RS pub(crate) fn lower_lambda_expecting(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     expected_params: Option<&[Type]>,
+//RS ) -> TLambda {
+//RS     lower_lambda_expecting_with_host_borrow(lam, cx, env, expected_params, None, false, None, None)
+//RS }
+//RS /// Lower a lambda for a checked function-value or host callback slot. The
+//RS /// slot's return is the ABI fact: effective `Result`/`Option` slots retain
+//RS /// their carrier, while raw host returns stay infallible.
+//RS pub(crate) fn lower_lambda_expecting_callable(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     expected: &Type,
+//RS ) -> TLambda {
+//RS     let Type::Fn { params, ret, .. } = expected else {
+//RS         return lower_lambda_expecting(lam, cx, env, None);
+//RS     };
+//RS     // A fn slot with no written return type is still a Unit-returning Rust
+//RS     // callable. Preserve that slot fact so inferred callback carriers cannot
+//RS     // widen an infallible callback behind the adapter's back.
+//RS     let slot_return = ret.as_deref().cloned().unwrap_or_else(unit_type);
+//RS     lower_lambda_expecting_with_host_borrow(
+//RS         lam,
+//RS         cx,
+//RS         env,
+//RS         Some(params.as_slice()),
+//RS         None,
+//RS         false,
+//RS         None,
+//RS         Some(&slot_return),
+//RS     )
+//RS }
+//RS 
+//RS /// Lower a callback for a native helper whose Rust contract consumes each
+//RS /// payload as `Fn(T)`, rather than applying Jet's ordinary read convention.
+//RS pub(crate) fn lower_lambda_expecting_value(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     expected_params: &[Type],
+//RS ) -> TLambda {
+//RS     lower_lambda_expecting_with_host_borrow(
+//RS         lam,
+//RS         cx,
+//RS         env,
+//RS         Some(expected_params),
+//RS         None,
+//RS         true,
+//RS         None,
+//RS         None,
+//RS     )
+//RS }
+//RS /// Lower an owning native callback while preserving its checked return slot.
+//RS /// `expected_return` is the host `Fn(T) -> R` ABI, not the enclosing Jet
+//RS /// function's failure carrier.
+//RS pub(crate) fn lower_lambda_expecting_value_with_return(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     expected_params: &[Type],
+//RS     expected_return: &Type,
+//RS ) -> TLambda {
+//RS     lower_lambda_expecting_with_host_borrow(
+//RS         lam,
+//RS         cx,
+//RS         env,
+//RS         Some(expected_params),
+//RS         None,
+//RS         true,
+//RS         None,
+//RS         Some(expected_return),
+//RS     )
+//RS }
+//RS 
+//RS /// Runtime helpers such as `Shared.read` and collection adapters already lend
+//RS /// their payload to the callback. Render that host borrow exactly once instead
+//RS /// of applying function-value Read rules on top of it (`&&T` / `&mut &T`).
+//RS pub(crate) fn lower_lambda_expecting_host_borrow(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     expected_params: &[Type],
+//RS     write: bool,
+//RS ) -> TLambda {
+//RS     lower_lambda_expecting_with_host_borrow(
+//RS         lam,
+//RS         cx,
+//RS         env,
+//RS         Some(expected_params),
+//RS         Some(write),
+//RS         false,
+//RS         None,
+//RS         None,
+//RS     )
+//RS }
+//RS /// Lower a collection comparator whose host callback has an explicit raw return.
+//RS /// The comparator is lent `&T` inputs like the ordinary collection callback, but
+//RS /// its return slot is part of the helper ABI and must not inherit Jet's ambient
+//RS /// failure carrier.
+//RS pub(crate) fn lower_lambda_expecting_host_borrow_with_return(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     expected_params: &[Type],
+//RS     write: bool,
+//RS     expected_return: &Type,
+//RS ) -> TLambda {
+//RS     lower_lambda_expecting_with_host_borrow(
+//RS         lam,
+//RS         cx,
+//RS         env,
+//RS         Some(expected_params),
+//RS         Some(write),
+//RS         false,
+//RS         None,
+//RS         Some(expected_return),
+//RS     )
+//RS }
+//RS 
+//RS /// D-FAILURE-FOUNDATION1: mirror sema's implicit `Error` carrier for a lambda
+//RS /// that writes a success/error annotation. The AST keeps those two source
+//RS /// slots separate, while the lowered callable must expose one Rust carrier.
+//RS pub(crate) fn lambda_explicit_failure_carrier(lam: &Lambda) -> Option<Type> {
+//RS     if lam.result_type.is_none() && lam.error_type.is_none() {
+//RS         return None;
+//RS     }
+//RS     Some(Type::Result {
+//RS         ok: Box::new(lam.result_type.clone().unwrap_or_else(unit_type)),
+//RS         err: Box::new(
+//RS             lam.error_type
+//RS                 .clone()
+//RS                 .unwrap_or_else(|| Type::Named(crate::Syntax::TYPE_ERR.to_string())),
+//RS         ),
+//RS     })
+//RS }
+//RS 
+//RS fn is_default_error_type(ty: &Type) -> bool {
+//RS     matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_ERR)
+//RS }
+//RS 
+//RS fn lambda_carrier_return_type(body_ty: &Type, carrier: &Type) -> Type {
+//RS     match (body_ty, carrier) {
+//RS         (
+//RS             Type::Result {
+//RS                 err: body_error, ..
+//RS             },
+//RS             Type::Result { err, .. },
+//RS         ) if body_error == err => body_ty.clone(),
+//RS         (
+//RS             Type::Result {
+//RS                 ok: body_ok,
+//RS                 err: body_error,
+//RS             },
+//RS             Type::Result {
+//RS                 ok: carrier_ok,
+//RS                 err,
+//RS             },
+//RS         ) if is_default_error_type(body_error) && body_ok == carrier_ok => Type::Result {
+//RS             ok: carrier_ok.clone(),
+//RS             err: err.clone(),
+//RS         },
+//RS         (Type::Option(_), Type::Option(_)) => body_ty.clone(),
+//RS         (_, Type::Result { err, .. }) => Type::Result {
+//RS             ok: Box::new(body_ty.clone()),
+//RS             err: err.clone(),
+//RS         },
+//RS         (body_ty, Type::Option(_)) => Type::Option(Box::new(body_ty.clone())),
+//RS         (_, other) => other.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn rehome_default_result_carrier(mut value: TExpr, carrier: Option<&Type>) -> TExpr {
+//RS     let Some(Type::Result {
+//RS         ok: carrier_ok,
+//RS         err: carrier_err,
+//RS     }) = carrier
+//RS     else {
+//RS         return value;
+//RS     };
+//RS     let Type::Result {
+//RS         ok: value_ok,
+//RS         err: value_err,
+//RS     } = &value.ty
+//RS     else {
+//RS         return value;
+//RS     };
+//RS     if is_default_error_type(value_err) && value_ok == carrier_ok {
+//RS         value.ty = Type::Result {
+//RS             ok: carrier_ok.clone(),
+//RS             err: carrier_err.clone(),
+//RS         };
+//RS     }
+//RS     value
+//RS }
+//RS 
+//RS fn lower_lambda_expecting_with_host_borrow(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     expected_params: Option<&[Type]>,
+//RS     host_borrow: Option<bool>,
+//RS     by_value: bool,
+//RS     shared_body: Option<Arc<[TStmt]>>,
+//RS     expected_return: Option<&Type>,
+//RS ) -> TLambda {
+//RS     let param_types: Vec<Type> = lam
+//RS         .params
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(i, param)| {
+//RS             param
+//RS                 .ty
+//RS                 .clone()
+//RS                 .or_else(|| expected_params.and_then(|types| types.get(i)).cloned())
+//RS                 .unwrap_or(Type::Int)
+//RS         })
+//RS         .collect();
+//RS     let mut body_ty = shared_body
+//RS         .as_ref()
+//RS         .map(|body| lowered_block_return_ty(body))
+//RS         .unwrap_or_else(|| {
+//RS             lambda_body_ty_expecting_with_return(lam, cx, env, expected_params, expected_return)
+//RS         });
+//RS     // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
+//RS     // lambda body dumps the lambda's lexical env (outer locals + captures + params) and
+//RS     // does not leak its own bindings into the enclosing function. The lambda's return
+//RS     // carrier is its own body result plus the callback slot's failure type; inheriting
+//RS     // the enclosing function's success type would erase a callback tail such as `true`
+//RS     // to `Unit`.
+//RS     let explicit_failure_carrier = lambda_explicit_failure_carrier(lam);
+//RS     let lambda_ret_ty = expected_return
+//RS         .or(explicit_failure_carrier.as_ref())
+//RS         .or(lam.meta.fallible_carrier.as_ref())
+//RS         .map(|ret| lambda_carrier_return_type(&body_ty, ret))
+//RS         .unwrap_or_else(|| body_ty.clone());
+//RS     // A lambda called immediately in a fallible outer expression still needs the
+//RS     // outer error carrier while lowering `??`, but it never escapes that call.
+//RS     let direct_fallible = expected_return.is_none()
+//RS         && lam.meta.fallible_carrier.is_none()
+//RS         && explicit_failure_carrier.is_none()
+//RS         && env
+//RS             .ret_ty
+//RS             .as_ref()
+//RS             .is_some_and(|ty| matches!(ty, Type::Result { .. } | Type::Option(_)))
+//RS         && !by_value
+//RS         && host_borrow.is_none();
+//RS     let mut lam_env = fork_panic(env);
+//RS     // A fallback marker belongs to the enclosing subject, never to a deferred
+//RS     // callback body or its type probe.
+//RS     lam_env.fallback_subject = false;
+//RS     lam_env.ret_ty = Some(lambda_ret_ty.clone());
+//RS     lam_env.raw_protocol_return = false;
+//RS     // Sema suspends transaction checks inside deferred lambdas. Do not attach a
+//RS     // foreign call in a closure to the outer transaction at codegen time.
+//RS     lam_env.txn_handle = None;
+//RS     lam_env.txn_undo_needed = None;
+//RS     // `move ` keyword: the AST emits it UNLESS the lambda is FnMut and does not escape.
+//RS     // Computed before the clone-capture prelude so a moving escape can also clone
+//RS     // borrowed/Fn captures rustc would otherwise reject (E0521).
+//RS     let is_move = !(lam.meta.needs_fn_mut && !lam.meta.escapes);
+//RS     // The clone/materialization capture prelude: `let __jet___cap_<n> =
+//RS     // (<outer place>).clone();` or its shared Prelude copy equivalent. The
+//RS     // outer place comes from the *outer* env (the capture is an outer local).
+//RS     // The cap rebinds the name with place `__jet___cap_<n>` and its checked
+//RS     // capture type.
+//RS     let mut extra_cloned: Vec<String> = Vec::new();
+//RS     let mut handle_shares: Vec<String> = Vec::new();
+//RS     let mut captures: Vec<(String, String, Type)> = Vec::new();
+//RS     let mut capture_origins = std::collections::BTreeMap::new();
+//RS     // Moving escape into `jet_iter_map` / similar hosts needs owned captures. A
+//RS     // borrowed Fn parameter (`&Box<dyn Fn…>`) is not always in `cloned_captures`
+//RS     // yet, and a bare `move || f(…)` trips rustc E0521. Clone it into an owned
+//RS     // temp so the move closure owns the Box.
+//RS     if is_move {
+//RS         let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
+//RS         let reads = match &lam.body {
+//RS             LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),
+//RS             LambdaBody::Expr(e) => crate::Sema::expr_free_reads_and_calls(e).0,
+//RS         };
+//RS         for name in reads {
+//RS             if param_names.contains(name.as_str())
+//RS                 || lam.meta.cloned_captures.iter().any(|c| c == &name)
+//RS                 || extra_cloned.iter().any(|c| c == &name)
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             if !env.locals.contains_key(&name) {
+//RS                 continue;
+//RS             }
+//RS             // A resource local is owned by its cleanup guard, not borrowed:
+//RS             // its Rust carrier has no `Clone`. Sema's move fact transfers it
+//RS             // out of the guard into the closure; any other capture borrows it.
+//RS             if env.is_resource(&name) {
+//RS                 if lam.meta.moved_captures.iter().any(|c| c == &name) {
+//RS                     env.resource_take_place(&name);
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             let needs_clone =
+//RS                 env.is_borrowed(&name) || matches!(env.ty_of(&name), Some(Type::Fn { .. }));
+//RS             // D-TASKBORROW1=A: a joined group child keeps the write window.
+//RS             // `through_ref` makes the alias look borrowed, and cloning it here
+//RS             // copies the element so owner writes never land.
+//RS             if needs_clone
+//RS                 && is_write_split_view(&name, env)
+//RS                 && !lam.meta.materialized_captures.iter().any(|c| c == &name)
+//RS             {
+//RS                 // Keep the TIR alias. MIR still records an owned handle so
+//RS                 // the child mutates the same heap record.
+//RS                 handle_shares.push(name);
+//RS             } else if needs_clone {
+//RS                 extra_cloned.push(name);
+//RS             }
+//RS         }
+//RS     }
+//RS     for name in lam.meta.cloned_captures.iter().chain(extra_cloned.iter()) {
+//RS         let cap = reactive_capture_name(name);
+//RS         // Clone temps must be `mut` when the closure body assigns through them
+//RS         // (FnMut / captured `:=` locals). Always emit `let mut` for cloned
+//RS         // captures — over-mutability is safe; missing mut is rustc E0594 (I2).
+//RS         let materialized = lam
+//RS             .meta
+//RS             .materialized_captures
+//RS             .iter()
+//RS             .any(|capture| capture == name);
+//RS         let copied_window = materialized
+//RS             .then(|| materialized_capture_kind(name, env))
+//RS             .flatten();
+//RS         let cap_ty = if let Some((_, ty)) = &copied_window {
+//RS             ty.clone()
+//RS         } else {
+//RS             env.ty_of(name)
+//RS                 .expect("checked capture local has no resolved type")
+//RS         };
+//RS         captures.push((name.clone(), cap.clone(), cap_ty.clone()));
+//RS         capture_origins.insert(name.clone(), env.local_of(name).name);
+//RS         let slot = TLocal::generated(&cap);
+//RS         lam_env.bind(name, slot, Some(cap_ty));
+//RS         // D-MEM-COPYSEM1=A: the capture slot now OWNS its bytes. Inside the
+//RS         // body the name is no longer a window, so an owning read of it clones
+//RS         // the owned value instead of calling the window kernel a second time
+//RS         // with an owned argument (rustc E0308 — I2).
+//RS         if copied_window.is_some() {
+//RS             lam_env.clear_view_marks(name);
+//RS         }
+//RS     }
+//RS     // Taken resources (`owned :: ~next`) are neither cloned nor moved-captured in
+//RS     // sema — AOT relies on Rust lexical capture. Cranelift needs an explicit pack.
+//RS     {
+//RS         let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
+//RS         let (mut reads, called) = match &lam.body {
+//RS             LambdaBody::Block(stmts) => crate::Sema::block_free_reads_and_calls(stmts),
+//RS             LambdaBody::Expr(e) => crate::Sema::expr_free_reads_and_calls(e),
+//RS         };
+//RS         reads.extend(lam.take_names.iter().map(|(name, _)| name.clone()));
+//RS         // A direct call carries its callee in `Call::name`, never an
+//RS         // `Expr::Ident`, so the free-read walker cannot see a fn-valued binding
+//RS         // invoked as `f(x)` — the pack used to ship without it and the body's
+//RS         // `Local` read had nothing to resolve against. Only a fn-typed local can
+//RS         // be that callee; every other spelling is a top-level function, a
+//RS         // builtin, or a module path, and none of those is a captured value.
+//RS         for name in called {
+//RS             if matches!(env.ty_of(&name), Some(Type::Fn { .. })) {
+//RS                 reads.insert(name);
+//RS             }
+//RS         }
+//RS         for name in reads {
+//RS             if param_names.contains(name.as_str()) {
+//RS                 continue;
+//RS             }
+//RS             if captures.iter().any(|(n, _, _)| n == &name) {
+//RS                 continue;
+//RS             }
+//RS             if !env.locals.contains_key(&name) {
+//RS                 continue;
+//RS             }
+//RS             let cap_ty = env
+//RS                 .ty_of(&name)
+//RS                 .expect("checked capture local has no resolved type");
+//RS             // Capture rows use TLocal's canonical slot name, not its rendered
+//RS             // Rust spelling.  Feeding `__jet_offset` back through
+//RS             // `TLocal::generated` turns it into the distinct generated lane
+//RS             // `__jet___offset`, leaving the checked local table with a name
+//RS             // that the body never bound.  A user slot therefore remains
+//RS             // `offset`; an already-generated slot keeps its generated name.
+//RS             captures.push((name.clone(), env.local_of(&name).name, cap_ty));
+//RS         }
+//RS     }
+//RS     // Params bind as `mangle(name)` (no deref), typed from the annotation, falling
+//RS     // back to `expected_params` at the same position (D-MEM1 S6: this fallback
+//RS     // already drove the RENDERED param text below — a bare param's ENV type must
+//RS     // match, or a chained field/method read off it resolves against the wrong
+//RS     // type, e.g. `Type::Int`'s `struct_field_type` default. `Shared<T>.read(s =>
+//RS     // s.field.method())` is the first caller to actually chain a method off a
+//RS     // bare closure param's field, which is what surfaced the gap).
+//RS     for (i, p) in lam.params.iter().enumerate() {
+//RS         let ty =
+//RS             p.ty.clone()
+//RS                 .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned());
+//RS         let place = if host_borrow.is_some()
+//RS             || (!by_value && ty.as_ref().is_some_and(|t| !t.is_scalar()))
+//RS         {
+//RS             TLocal::user(&p.name).through_ref()
+//RS         } else {
+//RS             TLocal::user(&p.name)
+//RS         };
+//RS         lam_env.bind(&p.name, place, ty);
+//RS     }
+//RS     // Body lowering uses executable TIR. AOT rendering is owned by MIR.
+//RS     let prev_in_stm = cx.in_stm_transact.replace(false);
+//RS     // The clone pack rebound each capture above, so this body resolves names
+//RS     // against `lam_env`, not the caller's env. Lower it on its own memo.
+//RS     let executable = with_lambda_body_expr_cache(|| match &lam.body {
+//RS         LambdaBody::Expr(e) => {
+//RS             prepare_interrupt_callback_local_expr(e, cx, &mut lam_env);
+//RS             let lowered = lower_owned_expr(e, cx, &mut lam_env);
+//RS             let lowered = fallible_lambda_value(lowered, lam, env, expected_return);
+//RS             body_ty = lowered.ty.clone();
+//RS             TLambdaBody::Expr(Box::new(lowered))
+//RS         }
+//RS         LambdaBody::Block(stmts) => {
+//RS             if let Some(shared) = shared_body.as_ref() {
+//RS                 TLambdaBody::SharedBlock(shared.clone())
+//RS             } else {
+//RS                 prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
+//RS                 let mut lowered = if matches!(stmts.last(), Some(Stmt::Expr(_))) {
+//RS                     lower_value_block(stmts, cx, &mut lam_env)
+//RS                 } else if return_type_has_value(&body_ty) {
+//RS                     lower_value_block(stmts, cx, &mut lam_env)
+//RS                 } else {
+//RS                     lower_stmts(stmts, cx, &mut lam_env)
+//RS                 };
+//RS                 if lam.meta.fallible_carrier.is_some()
+//RS                     || expected_return
+//RS                         .is_some_and(|ty| matches!(ty, Type::Result { .. } | Type::Option(_)))
+//RS                 {
+//RS                     lift_fallible_lambda_returns(&mut lowered, lam, env, expected_return);
+//RS                 }
+//RS                 body_ty = lowered_block_return_ty(&lowered);
+//RS                 TLambdaBody::Block(lowered)
+//RS             }
+//RS         }
+//RS     });
+//RS     cx.in_stm_transact.set(prev_in_stm);
+//RS     let uses_stack_sentry = lam_env.stack_sentry_needed();
+//RS     let mut capture_facts = crate::Codegen::TIR::lambda_capture_facts(lam);
+//RS     // `extra_cloned` is a producer-owned lifetime fact: unlike sema's
+//RS     // explicit clone list, these slots are inserted here to make a moving
+//RS     // closure own borrowed/Fn captures.  Carry the fact onto the target MIR
+//RS     // row so its capture parameter and the enclosing Closure operand agree.
+//RS     // A borrowed slot cannot be moved out of, so the clone replaces any
+//RS     // sema move fact for the same name (an escaping HTTP handler capturing a
+//RS     // borrowed `DBScope` resource is both); otherwise MIR would read the
+//RS     // closure-only `__jet___cap_<n>` slot from the enclosing function.
+//RS     capture_facts.cloned.extend(extra_cloned.iter().cloned());
+//RS     capture_facts.cloned.extend(handle_shares.iter().cloned());
+//RS     capture_facts.moved.retain(|name| !extra_cloned.contains(name));
+//RS     TLambda {
+//RS         executable,
+//RS         source_span: lam.span,
+//RS         frame_schedule: lam.meta.frame_schedule.clone(),
+//RS         frame_schedule_derivation: lam.meta.frame_schedule_derivation.clone(),
+//RS         capture_facts,
+//RS         effects: crate::Codegen::TIR::lambda_effect_facts(lam),
+//RS         // By-value host callbacks take ownership of each argument. Write
+//RS         // host borrows (`Shared.edit`, `Cell.edit`) take `&mut T`: AOT
+//RS         // renders that signature, and JIT passes a pointer to the cell
+//RS         // slot. Defaulting those params to Read made field writes hit a
+//RS         // non-writable place (AOT ICE) or mutate a copied handle (JIT).
+//RS         host_param_conventions: if by_value && host_borrow.is_none() {
+//RS             Some(vec![crate::AST::AccessConvention::Move; param_types.len()])
+//RS         } else if host_borrow == Some(true) {
+//RS             Some(vec![crate::AST::AccessConvention::Write; param_types.len()])
+//RS         } else {
+//RS             None
+//RS         },
+//RS         source_params: lam.params.iter().map(|p| p.name.clone()).collect(),
+//RS         jit_name: lambda_jit_name(lam.span.start, lam.span.end),
+//RS         param_types,
+//RS         failure_carrier: if expected_return.is_some() {
+//RS             // A checked callable slot owns the host ABI.  Its raw return is
+//RS             // already the boundary decision: `Unit`/a value is infallible,
+//RS             // while `Result`/`Option` carries its own failure rail.  Do not
+//RS             // reapply the lambda's implicit default `Result` here; that
+//RS             // default is for standalone Jet callables and would leave a
+//RS             // host `Fn() -> Unit` with a Result carrier and no return slot.
+//RS             crate::Codegen::TIR::TFailureCarrier::from_checked_type(&lambda_ret_ty)
+//RS         } else if lam.result_type.is_some()
+//RS             || lam.error_type.is_some()
+//RS             || lam.meta.fallible_carrier.is_some()
+//RS         {
+//RS             match crate::Codegen::TIR::lambda_failure_carrier(lam) {
+//RS                 crate::Codegen::TIR::TFailureCarrier::Infallible => {
+//RS                     crate::Codegen::TIR::TFailureCarrier::from_checked_type(&body_ty)
+//RS                 }
+//RS                 carrier => carrier,
+//RS             }
+//RS         } else {
+//RS             // Unannotated standalone lambda: the checked body type owns the
+//RS             // ABI. `from_return_type(None)` would default to Result<Unit>
+//RS             // even when the body is Int, so a nested `inner(4)` tail compiled
+//RS             // as a Unit-success Result while callers still expected Int.
+//RS             crate::Codegen::TIR::TFailureCarrier::from_checked_type(&body_ty)
+//RS         },
+//RS         ret: (!matches!(&body_ty, Type::Named(name) if name == "Unit")).then_some(body_ty),
+//RS         is_move,
+//RS         boxed: lam.meta.escapes && !direct_fallible,
+//RS         rc: lam.meta.escapes
+//RS             && !lam.meta.needs_fn_mut
+//RS             && !by_value
+//RS             && host_borrow.is_none()
+//RS             && !direct_fallible,
+//RS         arc: false,
+//RS         captures,
+//RS         capture_origins,
+//RS         materialized_captures: lam.meta.materialized_captures.clone(),
+//RS         frozen_captures: lam.meta.frozen_captures.clone(),
+//RS         uses_stack_sentry,
+//RS     }
+//RS }
+//RS 
+//RS /// Lift the successful result of a callback that propagates into its enclosing
+//RS /// failure carrier. The `?` nodes already carry failures out of the callback;
+//RS /// this supplies the matching `Ok`/`Some` on the success path.
+//RS fn fallible_lambda_value(
+//RS     value: TExpr,
+//RS     lam: &Lambda,
+//RS     _env: &LowerEnv,
+//RS     expected_return: Option<&Type>,
+//RS ) -> TExpr {
+//RS     let explicit_failure_carrier = lambda_explicit_failure_carrier(lam);
+//RS     let carrier = expected_return
+//RS         .or(explicit_failure_carrier.as_ref())
+//RS         .or(lam.meta.fallible_carrier.as_ref());
+//RS     if carrier.is_none() {
+//RS         return value;
+//RS     }
+//RS     let value = rehome_default_result_carrier(value, carrier);
+//RS     match carrier {
+//RS         Some(Type::Result { err, .. }) if !matches!(&value.ty, Type::Result { .. }) => TExpr {
+//RS             ty: Type::Result {
+//RS                 ok: Box::new(value.ty.clone()),
+//RS                 err: err.clone(),
+//RS             },
+//RS             kind: TExprKind::Ok(Box::new(value)),
+//RS         },
+//RS         Some(Type::Option(_)) if !matches!(&value.ty, Type::Option(_)) => TExpr {
+//RS             ty: Type::Option(Box::new(value.ty.clone())),
+//RS             kind: TExprKind::Present(Box::new(value)),
+//RS         },
+//RS         _ => value,
+//RS     }
+//RS }
+//RS 
+//RS /// A block callback may return through a tail, an explicit return, or a
+//RS /// nested control-flow arm. Every such route belongs to the callback, so a
+//RS /// propagated failure must leave the callback through its own carrier rather
+//RS /// than a raw success value.
+//RS fn lift_fallible_lambda_returns(
+//RS     stmts: &mut Vec<TStmt>,
+//RS     lam: &Lambda,
+//RS     env: &LowerEnv,
+//RS     expected_return: Option<&Type>,
+//RS ) {
+//RS     lift_fallible_lambda_return_block(stmts, lam, env, expected_return);
+//RS     if matches!(stmts.last(), Some(TStmt::Return(_))) {
+//RS         return;
+//RS     }
+//RS     if let Some(TStmt::ExprStmt(value)) = stmts.last_mut() {
+//RS         let return_value = std::mem::replace(
+//RS             value,
+//RS             TExpr {
+//RS                 ty: unit_type(),
+//RS                 kind: TExprKind::Unit,
+//RS             },
+//RS         );
+//RS         *value = fallible_lambda_value(return_value, lam, env, expected_return);
+//RS         return;
+//RS     }
+//RS     stmts.push(TStmt::Return(Some(fallible_lambda_value(
+//RS         TExpr {
+//RS             ty: unit_type(),
+//RS             kind: TExprKind::Unit,
+//RS         },
+//RS         lam,
+//RS         env,
+//RS         expected_return,
+//RS     ))));
+//RS }
+//RS 
+//RS fn lift_fallible_lambda_return_block(
+//RS     stmts: &mut Vec<TStmt>,
+//RS     lam: &Lambda,
+//RS     env: &LowerEnv,
+//RS     expected_return: Option<&Type>,
+//RS ) {
+//RS     for stmt in stmts {
+//RS         lift_fallible_lambda_return_stmt(stmt, lam, env, expected_return);
+//RS     }
+//RS }
+//RS 
+//RS fn lift_fallible_lambda_return_stmt(
+//RS     stmt: &mut TStmt,
+//RS     lam: &Lambda,
+//RS     env: &LowerEnv,
+//RS     expected_return: Option<&Type>,
+//RS ) {
+//RS     match stmt {
+//RS         TStmt::Return(value) => {
+//RS             let return_value = value.take().unwrap_or_else(|| TExpr {
+//RS                 ty: unit_type(),
+//RS                 kind: TExprKind::Unit,
+//RS             });
+//RS             *value = Some(fallible_lambda_value(
+//RS                 return_value,
+//RS                 lam,
+//RS                 env,
+//RS                 expected_return,
+//RS             ));
+//RS         }
+//RS         TStmt::ContractScope { body, .. }
+//RS         | TStmt::TaskGroup { body, .. }
+//RS         | TStmt::Loop { body, .. }
+//RS         | TStmt::While { body, .. }
+//RS         | TStmt::Range { body, .. }
+//RS         | TStmt::ForIn { body, .. }
+//RS         | TStmt::Inline(body)
+//RS         | TStmt::DebugOnly(body)
+//RS         | TStmt::Unsafe { body, .. }
+//RS         | TStmt::SentryPolicy { body, .. }
+//RS         | TStmt::Impure(body)
+//RS         | TStmt::Region(body)
+//RS         | TStmt::Layout { body, .. }
+//RS         | TStmt::ContextBlock { body, .. }
+//RS         | TStmt::Live { body }
+//RS         | TStmt::Shield { body }
+//RS         | TStmt::ScopeMember { body, .. }
+//RS         | TStmt::Transact { body, .. } => {
+//RS             lift_fallible_lambda_return_block(body, lam, env, expected_return)
+//RS         }
+//RS         TStmt::RefutableBind { fallback, .. } => {
+//RS             lift_fallible_lambda_return_block(fallback, lam, env, expected_return)
+//RS         }
+//RS         TStmt::GcEdit { stmt, .. } => {
+//RS             lift_fallible_lambda_return_stmt(stmt, lam, env, expected_return)
+//RS         }
+//RS         TStmt::CountedLoop {
+//RS             init, step, body, ..
+//RS         } => {
+//RS             lift_fallible_lambda_return_stmt(init, lam, env, expected_return);
+//RS             if let Some(step) = step {
+//RS                 lift_fallible_lambda_return_stmt(step, lam, env, expected_return);
+//RS             }
+//RS             lift_fallible_lambda_return_block(body, lam, env, expected_return);
+//RS         }
+//RS         TStmt::If {
+//RS             then_body,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             lift_fallible_lambda_return_block(then_body, lam, env, expected_return);
+//RS             if let Some(else_body) = else_body {
+//RS                 lift_fallible_lambda_return_block(else_body, lam, env, expected_return);
+//RS             }
+//RS         }
+//RS         TStmt::EnumMatch {
+//RS             arms, else_body, ..
+//RS         } => {
+//RS             for arm in arms {
+//RS                 lift_fallible_lambda_return_block(&mut arm.body, lam, env, expected_return);
+//RS             }
+//RS             if let Some(else_body) = else_body {
+//RS                 lift_fallible_lambda_return_block(else_body, lam, env, expected_return);
+//RS             }
+//RS         }
+//RS         TStmt::RangeSwitch {
+//RS             arms, else_body, ..
+//RS         } => {
+//RS             for (_, _, body) in arms {
+//RS                 lift_fallible_lambda_return_block(body, lam, env, expected_return);
+//RS             }
+//RS             lift_fallible_lambda_return_block(else_body, lam, env, expected_return);
+//RS         }
+//RS         TStmt::MixedSwitch {
+//RS             arms, else_body, ..
+//RS         } => {
+//RS             for (_, body) in arms {
+//RS                 lift_fallible_lambda_return_block(body, lam, env, expected_return);
+//RS             }
+//RS             if let Some(else_body) = else_body {
+//RS                 lift_fallible_lambda_return_block(else_body, lam, env, expected_return);
+//RS             }
+//RS         }
+//RS         // A reactive body owns a separate closure and therefore has its
+//RS         // own return carrier metadata.
+//RS         TStmt::Reactive { .. }
+//RS         | TStmt::Let { .. }
+//RS         | TStmt::ExprStmt(_)
+//RS         | TStmt::Contract { .. }
+//RS         | TStmt::SplitViews { .. }
+//RS         | TStmt::TupleDestructure { .. }
+//RS         | TStmt::StructDestructure { .. }
+//RS         | TStmt::ListDestructure { .. }
+//RS         | TStmt::Assign { .. }
+//RS         | TStmt::DeferClose { .. }
+//RS         | TStmt::Break(_)
+//RS         | TStmt::BreakValue { .. }
+//RS         | TStmt::Continue(_)
+//RS         | TStmt::IndexAssign { .. }
+//RS         | TStmt::IndexFieldAssign(_)
+//RS         | TStmt::IndexHookAssign { .. }
+//RS         | TStmt::MathSwizzleAssign { .. }
+//RS         | TStmt::LineMarker(_)
+//RS         | TStmt::SourceSpan(_)
+//RS         | TStmt::Erased { .. }
+//RS         | TStmt::InvariantViolation { .. } => {}
+//RS     }
+//RS }
+//RS 
+//RS fn lowered_block_return_ty(body: &[TStmt]) -> Type {
+//RS     match body.last() {
+//RS         Some(TStmt::ExprStmt(expr)) => expr.ty.clone(),
+//RS         Some(TStmt::Return(Some(expr))) => expr.ty.clone(),
+//RS         // `lower_return_value` keeps the value alive across a lexical temp
+//RS         // before emitting `return`, so a tail expression commonly finishes as
+//RS         // an inline `[let; return]` block rather than a bare `Return`.
+//RS         Some(TStmt::Inline(body)) | Some(TStmt::DebugOnly(body)) => lowered_block_return_ty(body),
+//RS         _ => unit_type(),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn lower_lambda_with_shared_block(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     body: Arc<[TStmt]>,
+//RS ) -> TLambda {
+//RS     lower_lambda_expecting_with_host_borrow(lam, cx, env, None, None, false, Some(body), None)
+//RS }
+//RS 
+//RS /// c139 M4: lower a spawn lambda to compilable TIR for the Cranelift JIT.
+//RS pub(crate) fn lower_spawn_lambda_for_jit(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TJitSpawnLambda {
+//RS     lower_spawn_lambda_for_jit_expecting(lam, cx, env, &[])
+//RS }
+//RS 
+//RS pub(crate) fn lower_spawn_lambda_for_jit_unit(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS ) -> TJitSpawnLambda {
+//RS     lower_spawn_lambda_for_jit(lam, cx, env)
+//RS }
+//RS 
+//RS /// Like [`lower_spawn_lambda_for_jit`], but bare params take types from
+//RS /// `expected_params` (watch/event callbacks pass `WatchEvent`, etc.).
+//RS pub(crate) fn lower_spawn_lambda_for_jit_expecting(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     expected_params: &[Type],
+//RS ) -> TJitSpawnLambda {
+//RS     lower_spawn_lambda_for_jit_expecting_with_body(lam, cx, env, expected_params, None)
+//RS }
+//RS 
+//RS fn lower_spawn_lambda_for_jit_expecting_with_body(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     expected_params: &[Type],
+//RS     shared_body: Option<Arc<[TStmt]>>,
+//RS ) -> TJitSpawnLambda {
+//RS     let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
+//RS     let cloned: HashSet<&str> = lam
+//RS         .meta
+//RS         .cloned_captures
+//RS         .iter()
+//RS         .map(|s| s.as_str())
+//RS         .collect();
+//RS     let moved: HashSet<&str> = lam.meta.moved_captures.iter().map(|s| s.as_str()).collect();
+//RS     let (reads, called) = match &lam.body {
+//RS         LambdaBody::Block(stmts) => crate::Sema::block_free_reads_and_calls(stmts),
+//RS         LambdaBody::Expr(e) => crate::Sema::expr_free_reads_and_calls(e),
+//RS     };
+//RS     let mut reads = reads;
+//RS     reads.extend(lam.take_names.iter().map(|(name, _)| name.clone()));
+//RS     // Same hole as the stored-lambda pack: `f(x)` keeps its callee in
+//RS     // `Call::name`, so a fn-valued local invoked by the body never reached the
+//RS     // free-read set. Only a fn-typed local can be that callee.
+//RS     for name in called {
+//RS         if matches!(env.ty_of(&name), Some(Type::Fn { .. })) {
+//RS             reads.insert(name);
+//RS         }
+//RS     }
+//RS     let mut captures: Vec<JitSpawnCapture> = reads
+//RS         .into_iter()
+//RS         .filter(|n| !param_names.contains(n.as_str()))
+//RS         .filter(|n| env.locals.contains_key(n))
+//RS         .map(|source| {
+//RS             let name = if shared_body.is_some() {
+//RS                 reactive_capture_name(&source)
+//RS             } else {
+//RS                 source.clone()
+//RS             };
+//RS             let materialize_at_spawn = lam
+//RS                 .meta
+//RS                 .materialized_captures
+//RS                 .iter()
+//RS                 .any(|capture| capture == &source)
+//RS                 || (shared_body.is_some() && materialized_capture_kind(&source, env).is_some());
+//RS             let source_ty = env
+//RS                 .split_view_handle(&source)
+//RS                 .or_else(|| env.ty_of(&source))
+//RS                 .expect("checked capture local has no resolved type");
+//RS             let ty = if materialize_at_spawn {
+//RS                 match materialized_capture_kind(&source, env) {
+//RS                     Some((_, ty)) => ty,
+//RS                     None => source_ty.clone(),
+//RS                 }
+//RS             } else {
+//RS                 source_ty
+//RS             };
+//RS             JitSpawnCapture {
+//RS                 materialize_at_spawn,
+//RS                 // Clone once when the closure owns a retained environment;
+//RS                 // an explicit consuming capture takes precedence.
+//RS                 clone_at_spawn: cloned.contains(source.as_str())
+//RS                     && !moved.contains(source.as_str()),
+//RS                 frozen_at_spawn: lam
+//RS                     .meta
+//RS                     .frozen_captures
+//RS                     .iter()
+//RS                     .any(|capture| capture == &source),
+//RS                 // D-TASKBORROW1=A: an unmaterialized borrowed split-view crosses
+//RS                 // as its window handle, not as the element type its Jet binding
+//RS                 // shows. Read-only captures marked for materialization use the
+//RS                 // owned target type above.
+//RS                 ty,
+//RS                 name,
+//RS                 source,
+//RS             }
+//RS         })
+//RS         .collect();
+//RS     captures.sort_by(|a, b| a.name.cmp(&b.name));
+//RS 
+//RS     let mut lam_env = fork_panic(env);
+//RS     lam_env.txn_handle = None;
+//RS     lam_env.txn_undo_needed = None;
+//RS     for cap in &captures {
+//RS         let slot = TLocal::user(&cap.name);
+//RS         lam_env.bind(&cap.name, slot, Some(cap.ty.clone()));
+//RS     }
+//RS     for (i, p) in lam.params.iter().enumerate() {
+//RS         let ty =
+//RS             p.ty.clone()
+//RS                 .or_else(|| expected_params.get(i).cloned())
+//RS                 .or_else(|| Some(Type::Int));
+//RS         lam_env.bind(&p.name, TLocal::user(&p.name), ty);
+//RS     }
+//RS 
+//RS     let ret = shared_body
+//RS         .as_ref()
+//RS         .map(|body| {
+//RS             let body_ty = lowered_block_return_ty(body);
+//RS             if let Some(Type::Result { err, .. }) = lam.meta.fallible_carrier.as_ref() {
+//RS                 Type::Result {
+//RS                     ok: Box::new(body_ty),
+//RS                     err: err.clone(),
+//RS                 }
+//RS             } else if lam.meta.fallible_propagation {
+//RS                 match env.ret_ty.as_ref() {
+//RS                     Some(Type::Result { err, .. }) => Type::Result {
+//RS                         ok: Box::new(body_ty),
+//RS                         err: err.clone(),
+//RS                     },
+//RS                     Some(Type::Option(_)) => Type::Option(Box::new(body_ty)),
+//RS                     _ => body_ty,
+//RS                 }
+//RS             } else {
+//RS                 body_ty
+//RS             }
+//RS         })
+//RS         .unwrap_or_else(|| spawn_body_carrier_ty(lam, cx, env));
+//RS     if shared_body.is_none() {
+//RS         match &lam.body {
+//RS             LambdaBody::Expr(expr) => prepare_interrupt_callback_local_expr(expr, cx, &mut lam_env),
+//RS             LambdaBody::Block(stmts) => prepare_interrupt_callback_locals(stmts, cx, &mut lam_env),
+//RS         }
+//RS     }
+//RS     // The spawn pack keeps every capture on its source slot, so this body must
+//RS     // NOT reuse a value the clone pack memoized under `__jet___cap_<n>`.
+//RS     let body = with_lambda_body_expr_cache(|| match &lam.body {
+//RS         LambdaBody::Expr(e) => TJitSpawnBody::Expr(Box::new(lower_expr(e, cx, &mut lam_env))),
+//RS         LambdaBody::Block(stmts) => {
+//RS             if let Some(shared) = shared_body.as_ref() {
+//RS                 TJitSpawnBody::SharedBlock {
+//RS                     body: shared.clone(),
+//RS                     tail: lambda_block_tail(stmts).is_some(),
+//RS                 }
+//RS             } else if let Some((prefix, tail)) = lambda_block_tail(stmts) {
+//RS                 let prefix_lowered = lower_stmts(prefix, cx, &mut lam_env);
+//RS                 let tail_lowered = Some(Box::new(match tail {
+//RS                     Stmt::Return(Some(e), _) => lower_expr(e, cx, &mut lam_env),
+//RS                     Stmt::Expr(e) => lower_expr(e, cx, &mut lam_env),
+//RS                     _ => TExpr {
+//RS                         ty: unit_type(),
+//RS                         kind: TExprKind::IntLit(0, None),
+//RS                     },
+//RS                 }));
+//RS                 TJitSpawnBody::Block {
+//RS                     prefix: prefix_lowered,
+//RS                     tail: tail_lowered,
+//RS                 }
+//RS             } else {
+//RS                 TJitSpawnBody::Block {
+//RS                     prefix: lower_stmts(stmts, cx, &mut lam_env),
+//RS                     tail: None,
+//RS                 }
+//RS             }
+//RS         }
+//RS     });
+//RS     let uses_stack_sentry = lam_env.stack_sentry_needed();
+//RS 
+//RS     TJitSpawnLambda {
+//RS         params: lam
+//RS             .params
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(i, p)| {
+//RS                 (
+//RS                     p.name.clone(),
+//RS                     p.ty.clone()
+//RS                         .or_else(|| expected_params.get(i).cloned())
+//RS                         .unwrap_or_else(|| Type::Int),
+//RS                 )
+//RS             })
+//RS             .collect(),
+//RS         captures,
+//RS         frozen_captures: lam.meta.frozen_captures.clone(),
+//RS         body,
+//RS         ret,
+//RS         uses_stack_sentry,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn lower_spawn_lambda_for_jit_with_shared_block(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     body: Arc<[TStmt]>,
+//RS ) -> TJitSpawnLambda {
+//RS     lower_spawn_lambda_for_jit_expecting_with_body(lam, cx, env, &[], Some(body))
+//RS }
+//RS 
+//RS /// D-CONC-SPAWN1: every AOT task closure returns the uniform `Result<T, Err>`
+//RS /// carrier. The source-level task still exposes `T`; `join` maps this private
+//RS /// error value onto the public `TaskFailure` rail.
+//RS fn reactive_capture_setup(stmts: &[Stmt], outer_env: &LowerEnv) -> (String, LowerEnv) {
+//RS     let reads = crate::Sema::block_free_var_reads(stmts);
+//RS     let mut caps: Vec<String> = reads
+//RS         .into_iter()
+//RS         .filter(|n| outer_env.locals.contains_key(n))
+//RS         .collect();
+//RS     caps.sort();
+//RS     let mut lam_env = fork_panic(outer_env);
+//RS     let mut prep = String::new();
+//RS     for name in &caps {
+//RS         let cap = reactive_capture_name(name);
+//RS         // Reactive bodies may update their private clone on every rerun. The
+//RS         // runtime serializes the resulting FnMut closure behind a Mutex.
+//RS         let copied_window = materialized_capture_kind(name, outer_env);
+//RS         let (cap_ty, init) = match &copied_window {
+//RS             Some((helper, ty)) => (
+//RS                 Some(ty.clone()),
+//RS                 format!("{helper}(({}))", outer_env.place_of(name)),
+//RS             ),
+//RS             None => (
+//RS                 outer_env.ty_of(name),
+//RS                 format!("({}).clone()", outer_env.place_of(name)),
+//RS             ),
+//RS         };
+//RS         prep.push_str(&format!("let mut {cap} = {init};\n    "));
+//RS         let slot = TLocal::generated(&cap);
+//RS         lam_env.bind(name, slot, cap_ty);
+//RS         // Same owning-slot fact as the stored-lambda prelude above: once the
+//RS         // window has been copied out, the body's name is an owned value.
+//RS         if copied_window.is_some() {
+//RS             lam_env.clear_view_marks(name);
+//RS         }
+//RS     }
+//RS     (prep, lam_env)
+//RS }
+//RS 
+//RS pub(super) fn reactive_block_env(stmts: &[Stmt], cx: &Cx, outer_env: &LowerEnv) -> LowerEnv {
+//RS     let (_, mut lam_env) = reactive_capture_setup(stmts, outer_env);
+//RS     prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
+//RS     lam_env
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     #[test]
+//RS     fn lambda_native_names_use_reserved_prefix() {
+//RS         assert_eq!(super::lambda_jit_name(12, 34), "__jet___lambda_12_34");
+//RS     }
+//RS }
+// END-PORT-PENDING 0484 crates/jet-codegen/src/Codegen/TIR/lower/lambdas.rs:1-1123
+

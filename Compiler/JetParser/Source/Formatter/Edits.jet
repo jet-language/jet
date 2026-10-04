@@ -1,0 +1,256 @@
+// Rust: jet-parser/src/Formatter/mod.rs::retired_*_edits/apply_source_edits.
+// Every edit span addresses original UTF-8 bytes; CLI/LSP share these functions.
+use jet_foundation.[ImportKind, Program, Span, TextEdit, interpolation_selector, rename_target]
+use jet_lexer.[Token, STRING_PART_INTERPOLATION, TOKEN_BLOCK_COMMENT, TOKEN_COMMA, TOKEN_DOT, TOKEN_EOF, TOKEN_HASH, TOKEN_IDENT, TOKEN_LBRACKET, TOKEN_LINE_COMMENT, TOKEN_LPAREN, TOKEN_QUESTION_DOT, TOKEN_RAW_STRING, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_STRING, lex]
+
+pub fn jet_format_retired_interpolation_selector_edits(source: String) -> [TextEdit] Never! {
+    lexed :: lex(source.bytes())
+    edits := [TextEdit]{}
+    if lexed.diagnostics.len() == 0 -> jet_format_collect_retired_selector_edits(lexed.tokens, &edits)
+    edits
+}
+fn jet_format_collect_retired_selector_edits(tokens: [Token], edits: &[TextEdit]) Never! {
+    loop token in tokens {
+        if token.kind != TOKEN_STRING -> next
+        loop part in token.payload.string_parts {
+            if part.kind != STRING_PART_INTERPOLATION -> next
+            loop index in 0..<part.tokens.len() - 1 {
+                first :: part.tokens[index]
+                second :: part.tokens[index + 1]
+                if first.kind == TOKEN_HASH && second.kind == TOKEN_IDENT && interpolation_selector(second.payload.decoded) != None -> &edits.push(TextEdit{span: first.span, new_text: ":"})
+            }
+            jet_format_collect_retired_selector_edits(part.tokens, &edits)
+        }
+    }
+}
+pub fn jet_format_retired_type_edits(source: String) -> [TextEdit] Never! {
+    lexed :: lex(source.bytes())
+    edits := [TextEdit]{}
+    if lexed.diagnostics.len() == 0 -> jet_format_collect_retired_type_edits(lexed.tokens, &edits)
+    edits
+}
+fn jet_format_collect_retired_type_edits(tokens: [Token], edits: &[TextEdit]) Never! {
+    loop token in tokens {
+        if token.kind == TOKEN_IDENT && token.payload.decoded != "plugin" {
+            if rename_target(token.payload.decoded) == .Val(canonical) -> &edits.push(TextEdit{span: token.span, new_text: canonical})
+        }
+        if token.kind == TOKEN_STRING {
+            loop part in token.payload.string_parts {
+                if part.kind == STRING_PART_INTERPOLATION -> jet_format_collect_retired_type_edits(part.tokens, &edits)
+            }
+        }
+    }
+}
+// Rust: apply_source_edits. Sorting scalar spans and one forward byte append
+// avoids repeatedly copying the whole source for every replacement.
+pub fn jet_format_apply_source_edits(source: String, edits: [TextEdit]) -> String? Never! {
+    ordered := ~edits
+    &ordered.sort_by_desc(edit -> edit.span.start)
+    bytes :: source.bytes()
+    replaced_start := bytes.len()
+    loop edit in ordered {
+        if edit.span.start < 0 || edit.span.end > bytes.len() || edit.span.start > edit.span.end || edit.span.end > replaced_start -> return None
+        if !jet_format_byte_boundary(bytes, edit.span.start) || !jet_format_byte_boundary(bytes, edit.span.end) -> return None
+        replaced_start = edit.span.start
+    }
+    &ordered.reverse()
+    out := [U8]{}
+    cursor := 0
+    loop edit in ordered {
+        jet_format_append_bytes(&out, bytes, cursor, edit.span.start)
+        loop byte in edit.new_text.bytes() -> &out.push(byte)
+        cursor = edit.span.end
+    }
+    jet_format_append_bytes(&out, bytes, cursor, bytes.len())
+    decoded :: String.from_bytes(out) ?? return None
+    Val(decoded)
+}
+fn jet_format_byte_boundary(bytes: [U8], index: Int) -> Bool Never! {
+    index == bytes.len() || (index >= 0 && index < bytes.len() && (Int.from_u8(bytes[index]) & 192) != 128)
+}
+fn jet_format_apply_retired_type_edits(source: String) -> String Never! {
+    jet_format_apply_source_edits(source, jet_format_retired_type_edits(source)) ?? panic("lexer retirement spans are nonoverlapping UTF-8 boundaries")
+}
+// Rust: retired_semicolon_edits/semicolon_has_same_line_code. The lexer also
+// emits zero-width synthetic terminators; only authored semicolons get edits.
+pub fn jet_format_retired_semicolon_edits(source: String) -> [TextEdit] Never! {
+    lexed :: lex(source.bytes())
+    edits := [TextEdit]{}
+    if lexed.diagnostics.len() > 0 -> return edits
+    bytes :: source.bytes()
+    loop index in 0..<lexed.tokens.len() {
+        token :: lexed.tokens[index]
+        if token.kind != TOKEN_SEMI || token.span.start >= token.span.end -> next
+        next := index + 1
+        loop next < lexed.tokens.len() {
+            kind :: lexed.tokens[next].kind
+            if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT && kind != TOKEN_SEMI && kind != TOKEN_EOF -> break
+            next += 1
+        }
+        same_line := next < lexed.tokens.len()
+        if same_line {
+            loop offset in token.span.end..<lexed.tokens[next].span.start {
+                if bytes[offset] == (U8{10}) || bytes[offset] == (U8{13}) -> same_line = false
+            }
+        }
+        &edits.push(TextEdit{span: token.span, new_text: if same_line -> "\n" else -> ""})
+    }
+    edits
+}
+fn jet_format_marker_group_contains(tokens: [Token], name_index: Int) -> Bool Never! {
+    nested := 0
+    index := name_index
+    loop index > 0 {
+        index -= 1
+        if {
+            tokens[index].kind == TOKEN_RBRACKET -> nested += 1
+            tokens[index].kind == TOKEN_LBRACKET && nested > 0 -> nested -= 1
+            tokens[index].kind == TOKEN_LBRACKET -> return index > 0 && tokens[index - 1].kind == TOKEN_HASH
+        }
+    }
+    false
+}
+pub fn jet_format_retired_html_marker_edits(source: String) -> [TextEdit] Never! {
+    lexed :: lex(source.bytes())
+    edits := [TextEdit]{}
+    if lexed.diagnostics.len() > 0 -> return edits
+    bytes :: source.bytes()
+    tokens :: lexed.tokens
+    loop index in 0..<tokens.len() - 4 {
+        previous :: tokens[index]
+        name :: tokens[index + 1]
+        open :: tokens[index + 2]
+        argument :: tokens[index + 3]
+        close :: tokens[index + 4]
+        direct :: previous.kind == TOKEN_HASH
+        grouped :: (previous.kind == TOKEN_COMMA || previous.kind == TOKEN_LBRACKET) && jet_format_marker_group_contains(tokens, index + 1)
+        if (!direct && !grouped) || name.kind != TOKEN_IDENT || name.payload.decoded != "HTML" || open.kind != TOKEN_LPAREN || (argument.kind != TOKEN_STRING && argument.kind != TOKEN_RAW_STRING) || close.kind != TOKEN_RPAREN -> next
+        literal :: String.from_bytes(bytes[argument.span.start..<argument.span.end]) ?? next
+        start :: if direct -> previous.span.start else -> name.span.start
+        prefix :: if direct -> "#" else -> ""
+        &edits.push(TextEdit{span: Span{start: start, end: close.span.end}, new_text: "{prefix}HTML(Path{{{literal}}})"})
+    }
+    edits
+}
+// Rust: RetiredPrintKind/RetiredPrintCall and import.walk_bindings filtering.
+enum JetFormatterRetiredPrintKind { Println Sprint Repr }
+struct JetFormatterRetiredPrintCall {
+    pub receiver_start: Int
+    pub method_span: Span
+    pub open_span: Span
+    pub close_span: Span
+    pub kind: JetFormatterRetiredPrintKind
+}
+fn jet_format_retired_print_kind(method: String) -> JetFormatterRetiredPrintKind? Never! {
+    target :: rename_target("io.{method}") ?? return None
+    expected_value :: "{{value}}"
+    expected_debug :: "{{value:Debug}}"
+    if {
+        target == "io.print" -> Val(JetFormatterRetiredPrintKind.Println)
+        target == expected_value -> Val(JetFormatterRetiredPrintKind.Sprint)
+        target == expected_debug -> Val(JetFormatterRetiredPrintKind.Repr)
+        else -> None
+    }
+}
+fn jet_format_print_aliases(program: Program) -> [String:Bool] Never! {
+    aliases := [String:Bool]{}
+    loop declaration in program.imports {
+        if declaration.kind == {
+            .Module(name, _) -> {
+                if name == "core.term" -> &aliases.add(declaration.alias, true).drop("repeated alias bindings")
+            }
+            .Unqualified(module_alias, _, items, _, _) -> {
+                loop item in items {
+                    path :: "{module_alias}.{item.original}"
+                    if path == "core.term" {
+                        parts :: item.original.split(".").to_list()
+                        local :: item.alias ?? parts[parts.len() - 1]
+                        &aliases.add(local, true).drop("repeated alias bindings")
+                    }
+                }
+            }
+            .File(_, _) -> {}
+        }
+    }
+    aliases
+}
+pub fn jet_format_retired_print_family_edits(source: String) -> [TextEdit] Never! {
+    lexed :: lex(source.bytes())
+    if lexed.diagnostics.len() > 0 -> return [TextEdit]{}
+    parsed :: parse_for_fmt(lexed.tokens)
+    program :: parsed.program ?? return [TextEdit]{}
+    aliases :: jet_format_print_aliases(program)
+    if aliases.len() == 0 -> return [TextEdit]{}
+    calls := [JetFormatterRetiredPrintCall]{}
+    jet_format_collect_retired_print_calls(lexed.tokens, aliases, &calls)
+    jet_format_print_family_edits(source, aliases, calls)
+}
+fn jet_format_collect_retired_print_calls(tokens: [Token], aliases: [String:Bool], calls: &[JetFormatterRetiredPrintCall]) Never! {
+    // Retain indices, not copies of the recursively nested token payloads.
+    code := [Int]{}
+    loop index in 0..<tokens.len() {
+        if tokens[index].kind != TOKEN_LINE_COMMENT && tokens[index].kind != TOKEN_BLOCK_COMMENT -> &code.push(index)
+    }
+    loop index in 0..<code.len() - 3 {
+        receiver :: tokens[code[index]]
+        if receiver.kind != TOKEN_IDENT || aliases.get(receiver.payload.decoded) == None -> next
+        if index > 0 {
+            previous :: tokens[code[index - 1]].kind
+            if previous == TOKEN_DOT || previous == TOKEN_QUESTION_DOT -> next
+        }
+        method :: tokens[code[index + 2]]
+        if tokens[code[index + 1]].kind != TOKEN_DOT || method.kind != TOKEN_IDENT || tokens[code[index + 3]].kind != TOKEN_LPAREN -> next
+        kind :: jet_format_retired_print_kind(method.payload.decoded) ?? next
+        close :: jet_format_matching_call_close(tokens, code, index + 3) ?? next
+        &calls.push(JetFormatterRetiredPrintCall{receiver_start: receiver.span.start, method_span: method.span, open_span: tokens[code[index + 3]].span, close_span: tokens[code[close]].span, kind: kind})
+    }
+    loop token in tokens {
+        if token.kind != TOKEN_STRING -> next
+        loop part in token.payload.string_parts {
+            if part.kind == STRING_PART_INTERPOLATION -> jet_format_collect_retired_print_calls(part.tokens, aliases, &calls)
+        }
+    }
+}
+fn jet_format_matching_call_close(tokens: [Token], code: [Int], open_index: Int) -> Int? Never! {
+    depth := 0
+    loop index in open_index..<code.len() {
+        kind :: tokens[code[index]].kind
+        if kind == TOKEN_LPAREN -> depth += 1
+        if kind == TOKEN_RPAREN {
+            if depth == 0 -> return None
+            depth -= 1
+            if depth == 0 -> return Val(index)
+        }
+    }
+    None
+}
+fn jet_format_print_family_edits(source: String, aliases: [String:Bool], calls: [JetFormatterRetiredPrintCall]) -> [TextEdit] Never! {
+    bytes :: source.bytes()
+    edits := [TextEdit]{}
+    loop call in calls {
+        inside := false
+        loop outer in calls {
+            if outer.kind != .Println && outer.receiver_start < call.receiver_start && outer.close_span.end >= call.close_span.end -> inside = true
+        }
+        if inside -> next
+        if call.kind == .Println {
+            &edits.push(TextEdit{span: call.method_span, new_text: "print"})
+        } else {
+            argument :: (String.from_bytes(bytes[call.open_span.end..<call.close_span.start]) ?? panic("lexer call delimiters are UTF-8 boundaries")).trim()
+            if argument == "" -> next
+            rewritten :: jet_format_rewrite_print_family_fragment(argument, aliases)
+            format :: if call.kind == .Repr -> ":Debug" else -> ""
+            &edits.push(TextEdit{span: Span{start: call.receiver_start, end: call.close_span.end}, new_text: "print(\"{{{rewritten}{format}}}\")"})
+        }
+    }
+    &edits.sort_by(edit -> edit.span.start)
+    edits
+}
+fn jet_format_rewrite_print_family_fragment(source: String, aliases: [String:Bool]) -> String Never! {
+    lexed :: lex(source.bytes())
+    if lexed.diagnostics.len() > 0 -> return ~source
+    calls := [JetFormatterRetiredPrintCall]{}
+    jet_format_collect_retired_print_calls(lexed.tokens, aliases, &calls)
+    edits :: jet_format_print_family_edits(source, aliases, calls)
+    jet_format_apply_source_edits(source, edits) ?? source
+}

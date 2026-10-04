@@ -1,0 +1,1815 @@
+// PORT-PENDING 1032 tests-dev-parts-routine-slice-1847: tests/dev_parts/routine.rs:1847-3657
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn dev_default_io_log_reports_jit_gap() {
+//RS     let file = "Examples/features/io/log.jet";
+//RS     assert_default_dev_jit_gap("io/log", file);
+//RS }
+//RS 
+//RS #[test]
+//RS fn dev_default_resident_boundaries_report_jit_gap() {
+//RS     for stem in ["memory/entity_tree", "memory/expiring_secret"] {
+//RS         let file = example_path(stem);
+//RS         assert_default_dev_jit_gap(stem, &file);
+//RS     }
+//RS }
+//RS 
+//RS /// c139 M4: scheduler/channel spawn stress example is resident-safe and runs.
+//RS #[test]
+//RS fn scheduler_spawn_runs_via_jit() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let file = "Examples/features/concurrency/scheduler_spawn.jet";
+//RS     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
+//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     let errors: Vec<_> = diags
+//RS         .into_iter()
+//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(errors.is_empty(), "scheduler_spawn must type-check");
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "scheduler_spawn must be resident-safe: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS         .unwrap_or_else(|e| panic!("scheduler_spawn JIT compile failed: {e}"));
+//RS 
+//RS     let got = match dev_iteration(file, false, false) {
+//RS         RunOutcome::Ran { stdout, .. } => stdout,
+//RS         RunOutcome::Problems(ds) => {
+//RS             panic!("scheduler_spawn must run via default dev/JIT, got: {ds:?}")
+//RS         }
+//RS     };
+//RS     assert_eq!(got.trim(), "1000");
+//RS }
+//RS 
+//RS #[test]
+//RS fn dev_default_interprets_display_debug_interpolation() {
+//RS     let file = "Examples/features/types/display_debug.jet";
+//RS     // Named Display + JetDebug with #[Redact] now lower on the resident JIT.
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     match dev_iteration_with_timeout("types/display_debug", file, false) {
+//RS         RunOutcome::Ran { stdout, .. } => {
+//RS             assert!(
+//RS                 jet_jit::jit_executed_for_test(),
+//RS                 "types/display_debug must run native JIT"
+//RS             );
+//RS             let gold = fs::read_to_string("Examples/features/expected/types/display_debug.out")
+//RS                 .expect("golden");
+//RS             assert_eq!(stdout, gold);
+//RS         }
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("types/display_debug must run: {diags:?}");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn fixed_interpolation_matches_interpreter_and_resident_jit_rounding() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     lower_tie :: Float{1.125}
+//RS     upper_tie :: Float{1.375}
+//RS     grouped :: Float{1234.5678}
+//RS     integer :: 1234
+//RS     print("{lower_tie:Fixed(2)}|{upper_tie:Fixed(2)}|{grouped:Fixed(2)}|{grouped:Grouped(2)}|{integer:Fixed(2)}|{integer:Grouped(2)}")
+//RS }
+//RS "#;
+//RS     let expected = ProgramOutput::ran("1.12|1.38|1234.57|1,234.57|1234.00|1,234.00\n".into(), String::new(), 0);
+//RS     let file = std::env::temp_dir().join("jet_fixed_interpolation_parity.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("fixed interpolation must run in the interpreter: {diags:?}")
+//RS         }
+//RS     };
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(src, "fixed_interpolation_parity");
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "fixed interpolation must execute in resident JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "fixed interpolation must not deopt or fall back"
+//RS     );
+//RS     assert_eq!(interpreted, expected);
+//RS     assert_eq!(resident, expected);
+//RS }
+//RS 
+//RS #[test]
+//RS fn dev_packed_enum_print_is_safe_across_run_processes() {
+//RS     let stamp = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .unwrap()
+//RS         .as_nanos();
+//RS     let cache = std::env::temp_dir().join(format!(
+//RS         "jet_dev_packed_enum_cache_{}_{}",
+//RS         std::process::id(),
+//RS         stamp
+//RS     ));
+//RS     let file = "Examples/features/errors/errors.jet";
+//RS     let expected = "42\n84\nBadDigit(\"x\")\n";
+//RS 
+//RS     for run in 1..=2 {
+//RS         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .args(["run", file])
+//RS             .env("JET_RUN_CACHE_DIR", &cache)
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "run {run} failed: {}",
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         assert_eq!(
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             expected,
+//RS             "run {run} must preserve the Jet enum name"
+//RS         );
+//RS     }
+//RS 
+//RS     let _ = fs::remove_dir_all(cache);
+//RS }
+//RS 
+//RS 
+//RS /// c139 M1: the Cranelift tier-1 backend runs `basics/hello.jet` with byte-identical
+//RS /// stdout to the interpreter baseline.
+//RS #[test]
+//RS fn cranelift_backend_matches_hello() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let file = "Examples/features/basics/hello.jet";
+//RS     // Load and check on the canonical compiler worker: doing it inline here is
+//RS     // what aborted the whole dev binary, since a 2 MiB libtest worker cannot
+//RS     // hold the loader and sema recursion. `checked_bundle_from_path` also
+//RS     // asserts the fixture type-checks, which is what the inline block did.
+//RS     let bundle = checked_bundle_from_path(file);
+//RS 
+//RS     let expected = match dev_iteration(file, false, true) {
+//RS         RunOutcome::Ran { stdout, .. } => stdout,
+//RS         RunOutcome::Problems(ds) => {
+//RS             panic!("interpreter baseline must run hello, got diagnostics: {ds:?}")
+//RS         }
+//RS     };
+//RS 
+//RS     let policy = common::development_policy();
+//RS     let mut backend = CraneliftBackend::new();
+//RS     let got = match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+//RS         RunOutcome::Ran { stdout, .. } => stdout,
+//RS         RunOutcome::Problems(ds) => panic!("cranelift backend did not run hello: {ds:?}"),
+//RS     };
+//RS     assert_eq!(got, expected, "cranelift output drifted from interpreter");
+//RS 
+//RS     let src = fs::read_to_string(file).expect("hello source should read");
+//RS     let compiled = jet::compile_with_path(&src, file).expect("hello should compile");
+//RS     let rs = std::env::temp_dir().join("jet_dev_cranelift_hello.rs");
+//RS     let bin = std::env::temp_dir().join("jet_dev_cranelift_hello");
+//RS     let mut command = Command::new("rustc");
+//RS     let _runtime_lease = add_generated_rust(
+//RS         &mut command,
+//RS         &rs,
+//RS         &compiled.rust,
+//RS         compiled.ffi.is_some(),
+//RS         &[],
+//RS     );
+//RS     let rustc = command.arg("-o").arg(&bin).output().expect("run rustc");
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc failed compiling hello fixture: {}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let run = Command::new(&bin).output().expect("run compiled hello");
+//RS     let compiled_stdout = String::from_utf8_lossy(&run.stdout).to_string();
+//RS     assert_eq!(
+//RS         got, compiled_stdout,
+//RS         "cranelift output drifted from AOT binary"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn post_contract_failure_matches_aot_under_quick_run() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS #Post(result == 99, "must equal 99")
+//RS fn get() -> Int {
+//RS     return 1
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(get())
+//RS }
+//RS "#;
+//RS     let dir = std::env::temp_dir().join(format!("jet_contract_parity_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("post_failure.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS 
+//RS     let quick = match dev_iteration(&shown, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(ds) => panic!("quick run returned diagnostics: {ds:?}"),
+//RS     };
+//RS     let aot = compiled_binary_output(&dir, "post_contract", 0, "contracts/post_failure", &shown);
+//RS 
+//RS     assert_eq!(quick.exit_code, 70, "quick run must trap: {quick:?}");
+//RS     assert!(quick
+//RS         .stderr
+//RS         .contains("#Post contract failed: must equal 99"));
+//RS     assert_eq!(quick, aot, "quick run and AOT contract behavior diverged");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn post_contract_success_and_failure_match_on_all_tiers() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS #Post(result > 0, "post sees the successful payload")
+//RS fn counted(value: Int) -> Int {
+//RS     print("body:{value}")
+//RS     if value > 0 {
+//RS         return value
+//RS     }
+//RS     return Err("sentinel")
+//RS }
+//RS 
+//RS fn run() {
+//RS     good :: counted(7)
+//RS     good ? value -> print("good:{value}") ! error -> print("good-error:{error.message}")
+//RS     bad :: counted(0)
+//RS     bad ? value -> print("bad:{value}") ! error -> print("bad-error:{error.message}")
+//RS }
+//RS "#;
+//RS     let expected = ProgramOutput::ran(
+//RS         "body:7\ngood:7\nbody:0\nbad-error:sentinel\n".to_string(),
+//RS         String::new(),
+//RS         0,
+//RS     );
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_contract_success_failure_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("post_contract_success_failure.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS 
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(ds) => panic!("contract interpreter failed: {ds:?}"),
+//RS     };
+//RS     let resident = run_cranelift_resident(src, "contracts_success_failure");
+//RS     let default = match dev_iteration(&shown, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(ds) => panic!("contract default run failed: {ds:?}"),
+//RS     };
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "post_contract_success_failure",
+//RS         0,
+//RS         "contracts/post_contract_success_failure",
+//RS         &shown,
+//RS     );
+//RS 
+//RS     assert_eq!(interpreted, expected, "contract interpreter output drifted");
+//RS     assert_eq!(resident, expected, "contract resident JIT output drifted");
+//RS     assert_eq!(default, expected, "contract default JIT output drifted");
+//RS     assert_eq!(aot, expected, "contract AOT output drifted");
+//RS 
+//RS     let have_node = Command::new("node")
+//RS         .arg("--version")
+//RS         .output()
+//RS         .map(|output| output.status.success())
+//RS         .unwrap_or(false);
+//RS     let have_wasm_target = Command::new("rustc")
+//RS         .args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"])
+//RS         .output()
+//RS         .map(|output| output.status.success())
+//RS         .unwrap_or(false);
+//RS     if have_node && have_wasm_target {
+//RS         let output = jet::compile_web_with_path(src, &shown)
+//RS             .unwrap_or_else(|diags| panic!("contract web source failed: {diags:?}"));
+//RS         let web = output.web.expect("contract web output should be present");
+//RS         let scratch = common::Scratch::new("contract-success-failure-web");
+//RS         fs::write(scratch.join("app.js"), &web.js_app).unwrap();
+//RS         fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+//RS         fs::write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap();
+//RS 
+//RS         let wasm = Command::new("rustc")
+//RS             .current_dir(&scratch.path)
+//RS             .args([
+//RS                 "--edition",
+//RS                 "2021",
+//RS                 "--target",
+//RS                 "wasm32-unknown-unknown",
+//RS                 "--crate-type",
+//RS                 "cdylib",
+//RS                 "-O",
+//RS                 "app_wasm.rs",
+//RS                 "-o",
+//RS                 "app.wasm",
+//RS             ])
+//RS             .output()
+//RS             .expect("spawn contract web wasm rustc");
+//RS         assert!(
+//RS             wasm.status.success(),
+//RS             "rustc rejected contract web output: {}",
+//RS             String::from_utf8_lossy(&wasm.stderr)
+//RS         );
+//RS 
+//RS         let js = Command::new("node")
+//RS             .current_dir(&scratch.path)
+//RS             .arg("app.js")
+//RS             .output()
+//RS             .expect("run contract web JS");
+//RS         assert!(
+//RS             js.status.success(),
+//RS             "contract web JS failed: {}",
+//RS             String::from_utf8_lossy(&js.stderr)
+//RS         );
+//RS         assert_eq!(
+//RS             String::from_utf8_lossy(&js.stdout),
+//RS             expected.stdout.as_str(),
+//RS             "contract JavaScript output drifted"
+//RS         );
+//RS 
+//RS         fs::write(
+//RS             scratch.join("wasm.mjs"),
+//RS             r#"
+//RS const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+//RS const instance = await instantiateWasm("./app.wasm");
+//RS const status = instance.exports.jet_export_run();
+//RS if (status !== 0) throw new Error(`contract Wasm status: ${status}`);
+//RS if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("contract Wasm stopped");
+//RS "#,
+//RS         )
+//RS         .unwrap();
+//RS         let wasm_run = Command::new("node")
+//RS             .current_dir(&scratch.path)
+//RS             .arg("wasm.mjs")
+//RS             .output()
+//RS             .expect("run contract web Wasm");
+//RS         assert!(
+//RS             wasm_run.status.success(),
+//RS             "contract web Wasm failed: {}",
+//RS             String::from_utf8_lossy(&wasm_run.stderr)
+//RS         );
+//RS         assert_eq!(
+//RS             String::from_utf8_lossy(&wasm_run.stdout),
+//RS             expected.stdout.as_str(),
+//RS             "contract Wasm output drifted"
+//RS         );
+//RS     } else {
+//RS         eprintln!("note: skipping contract web execution (need node and wasm32 target)");
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn unicode_string_and_core_text_match_aot_comptime_and_resident_jit() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let upper = char::from_u32(0xA7CE).unwrap();
+//RS     let lower = char::from_u32(0xA7CF).unwrap();
+//RS     let whitespace = char::from_u32(0x2003).unwrap();
+//RS     let source = format!(
+//RS         r#"use core.text as text
+//RS 
+//RS fn run() {{
+//RS     print("{upper}".to_lower() == "{lower}")
+//RS     print("{lower}".to_upper() == "{upper}")
+//RS     print("{whitespace}jet{whitespace}".trim())
+//RS     print(text.lower("{upper}") == "{lower}")
+//RS     print(text.upper("{lower}") == "{upper}")
+//RS     print(text.trim("{whitespace}jet{whitespace}"))
+//RS }}
+//RS "#,
+//RS     );
+//RS     let expected = "true\ntrue\njet\ntrue\ntrue\njet\n";
+//RS 
+//RS     let resident = run_cranelift_without_fallback(&source, "unicode_public_string");
+//RS     assert_eq!(resident.stdout, expected);
+//RS 
+//RS     let dir = common::unique_tmp("jet_unicode_public_string_aot");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let jet_path = dir.join("main.jet");
+//RS     let rust_path = dir.join("main.rs");
+//RS     let binary = dir.join("main");
+//RS     fs::write(&jet_path, &source).unwrap();
+//RS     let compiled = jet::compile_with_path(&source, &jet_path.to_string_lossy())
+//RS         .expect("pinned Unicode String fixture should compile");
+//RS     let mut command = Command::new("rustc");
+//RS     let _runtime_lease = add_generated_rust(
+//RS         &mut command,
+//RS         &rust_path,
+//RS         &compiled.rust,
+//RS         compiled.ffi.is_some(),
+//RS         &[],
+//RS     );
+//RS     let rustc = command.arg("-o").arg(&binary).output().unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "pinned Unicode AOT fixture rejected:\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let aot = Command::new(&binary).output().unwrap();
+//RS     assert!(aot.status.success());
+//RS     assert_eq!(String::from_utf8_lossy(&aot.stdout), expected);
+//RS     let _ = fs::remove_dir_all(dir);
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn exact_int_equality_matches_aot_in_resident_and_default_dev() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     left :: -999999999999999999999999999999
+//RS     same :: -999999999999999999999999999999
+//RS     other :: 999999999999999999999999999999
+//RS     print(left == same)
+//RS     print(left != same)
+//RS     print(left != other)
+//RS }
+//RS "#;
+//RS     let resident = run_cranelift_without_fallback(src, "exact_int_value_equality");
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_exact_int_equality_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("exact_int_value_equality.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let default = match dev_iteration(&shown, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("default dev failed exact Int equality: {diags:?}"),
+//RS     };
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "exact_int_value_equality",
+//RS         0,
+//RS         "exact_int_value_equality",
+//RS         &shown,
+//RS     );
+//RS     let expected = ProgramOutput::ran("true\nfalse\ntrue\n".to_string(), String::new(), 0);
+//RS     assert_eq!(resident, expected);
+//RS     assert_eq!(default, expected);
+//RS     assert_eq!(aot, expected);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn default_err_matches_interpreter_resident_jit_default_dev_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let file = "Examples/features/errors/default_err_edge.jet";
+//RS     let expected_stderr =
+//RS         fs::read_to_string("Examples/features/expected/errors/default_err_edge.err.out")
+//RS             .expect("default_err_edge.err.out");
+//RS     let expected = ProgramOutput::ran(String::new(), expected_stderr, 1);
+//RS 
+//RS     let interpreted = match dev_iteration(file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("default Err example must execute in interpreter tier: {diags:?}")
+//RS         }
+//RS     };
+//RS 
+//RS     let source = fs::read_to_string(file).unwrap();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(&source, "default_err");
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "default Err must execute as native JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "default Err must not use interpreter deopt or fallback"
+//RS     );
+//RS     let default = match dev_iteration(file, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("default dev failed default Err: {diags:?}"),
+//RS     };
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_default_err_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let aot = compiled_binary_output(&dir, "default_err", 0, "default_err", file);
+//RS 
+//RS     assert_eq!(interpreted, expected);
+//RS     assert_eq!(resident, expected);
+//RS     assert_eq!(default, expected);
+//RS     assert_eq!(aot, expected);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn exact_int_example_matches_interpreter_resident_jit_default_dev_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let file = "Examples/features/text/int_exact.jet";
+//RS     let expected = ProgramOutput::ran(golden_stdout("text/int_exact"), String::new(), 0);
+//RS 
+//RS     let interpreted = match dev_iteration(file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("exact Int example must execute in interpreter tier: {diags:?}")
+//RS         }
+//RS     };
+//RS 
+//RS     let source = fs::read_to_string(file).unwrap();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(&source, "exact_int_example");
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "exact Int example must execute as native JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "exact Int example must not use interpreter deopt or fallback"
+//RS     );
+//RS     let default = match dev_iteration(file, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("default dev failed exact Int example: {diags:?}"),
+//RS     };
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_exact_int_example_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let aot = compiled_binary_output(&dir, "exact_int_example", 0, "exact_int_example", file);
+//RS 
+//RS     assert_eq!(interpreted, expected);
+//RS     assert_eq!(resident, expected);
+//RS     assert_eq!(default, expected);
+//RS     assert_eq!(aot, expected);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn decimal_scale_arithmetic_matches_interpreter_default_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let dir = common::unique_tmp("jet_decimal_scale_parity");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("decimal_scale.jet");
+//RS     let source = r#"fn run() {
+//RS     left :: 1.20
+//RS     right :: 2.30
+//RS     print(left + right)
+//RS     print(right - left)
+//RS     print(9.5 * 2.0)
+//RS }
+//RS "#;
+//RS     fs::write(&file, source).unwrap();
+//RS     let shown = file.to_string_lossy().into_owned();
+//RS     let expected = ProgramOutput::ran("3.50\n1.10\n19.0\n".into(), String::new(), 0);
+//RS 
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("Decimal interpreter failed: {diags:?}"),
+//RS     };
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(source, "decimal_scale_parity");
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "Decimal scale arithmetic must execute in resident JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "Decimal scale arithmetic must not use interpreter fallback"
+//RS     );
+//RS     let default = match dev_iteration(&shown, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("Decimal default run failed: {diags:?}"),
+//RS     };
+//RS     let aot = compiled_binary_output(&dir, "decimal_scale_parity", 0, "decimal_scale", &shown);
+//RS 
+//RS     assert_eq!(interpreted, expected, "Decimal interpreter scale drift");
+//RS     assert_eq!(resident, expected, "Decimal resident JIT scale drift");
+//RS     assert_eq!(default, expected, "Decimal default JIT scale drift");
+//RS     assert_eq!(aot, expected, "Decimal AOT scale drift");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn type_alias_example_matches_golden_on_all_execution_tiers() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let file = "Examples/features/types/type_alias.jet";
+//RS     let expected = ProgramOutput::ran(golden_stdout("types/type_alias"), String::new(), 0);
+//RS 
+//RS     let interpreted = match dev_iteration(file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("type_alias example must execute in interpreter tier: {diags:?}")
+//RS         }
+//RS     };
+//RS 
+//RS     let source = fs::read_to_string(file).unwrap();
+//RS     let resident = run_cranelift_resident(&source, "type_alias_golden");
+//RS     let default = match dev_iteration(file, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("default dev failed type_alias example: {diags:?}"),
+//RS     };
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_type_alias_golden_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let aot = compiled_binary_output(&dir, "type_alias_golden", 0, "types/type_alias", file);
+//RS 
+//RS     assert_eq!(
+//RS         interpreted, expected,
+//RS         "type_alias interpreter output drifted"
+//RS     );
+//RS     assert_eq!(resident, expected, "type_alias resident JIT output drifted");
+//RS     assert_eq!(default, expected, "type_alias default dev output drifted");
+//RS     assert_eq!(aot, expected, "type_alias AOT output drifted");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn archive_matches_interpreter_resident_jit_default_dev_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let file = "Examples/features/io/archive.jet";
+//RS     let expected = ProgramOutput::ran(golden_stdout("io/archive"), String::new(), 0);
+//RS 
+//RS     let interpreted = match dev_iteration(file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("Archive example must execute in interpreter tier: {diags:?}")
+//RS         }
+//RS     };
+//RS 
+//RS     let source = fs::read_to_string(file).unwrap();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(&source, "archive");
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "Archive example must execute as native JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "Archive example must not use interpreter deopt or fallback"
+//RS     );
+//RS     let default = match dev_iteration(file, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("default dev failed Archive example: {diags:?}"),
+//RS     };
+//RS 
+//RS     let dir = common::test_scratch_root("dev_archive")
+//RS         .join(format!("jet_archive_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let aot = compiled_binary_output(&dir, "archive", 0, "archive", file);
+//RS 
+//RS     assert_eq!(interpreted, expected);
+//RS     assert_eq!(resident, expected);
+//RS     assert_eq!(default, expected);
+//RS     assert_eq!(aot, expected);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn progress_reporter_matches_interpreter_resident_jit_default_dev_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let file = "Examples/features/io/progress.jet";
+//RS     let expected = ProgramOutput::ran(golden_stdout("io/progress"), String::new(), 0);
+//RS 
+//RS     let interpreted = match dev_iteration_with_timeout("progress_reporter", file, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("progress example must execute in interpreter tier: {diags:?}")
+//RS         }
+//RS     };
+//RS 
+//RS     let source = fs::read_to_string(file).unwrap();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident_source = source.clone();
+//RS     let (resident, resident_flags, resident_trace) = with_jit_test_scope(move || {
+//RS         jet_jit::set_trace_tiers(true);
+//RS         let resident = run_cranelift_without_fallback(&resident_source, "progress_reporter");
+//RS         let flags = jet_jit::jit_trace_flags_for_test();
+//RS         let trace = jet_jit::take_last_trace();
+//RS         (resident, flags, trace)
+//RS     });
+//RS     jet_jit::merge_jit_trace_flags_for_test(resident_flags);
+//RS     assert!(
+//RS         !jet_jit::fallback_invoked_for_test(),
+//RS         "progress example must not fall back to a second runtime"
+//RS     );
+//RS     // A resident JIT may deopt an unsupported adapter. I9 requires the same
+//RS     // Prelude meaning after deopt; it does not require every collection shape
+//RS     // to have a native Cranelift lowering.
+//RS     let _native_jit = jet_jit::jit_executed_for_test();
+//RS     let _trace = resident_trace;
+//RS     let default = match dev_iteration_with_timeout("progress_reporter", file, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("default dev failed progress example: {diags:?}"),
+//RS     };
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_progress_reporter_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let aot = compiled_binary_output(&dir, "progress_reporter", 0, "progress_reporter", file);
+//RS 
+//RS     assert_eq!(interpreted, expected);
+//RS     assert_eq!(resident, expected);
+//RS     assert_eq!(default, expected);
+//RS     assert_eq!(aot, expected);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn set_union_matches_interpreter_resident_jit_default_dev_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let file = "Examples/features/collections/set.jet";
+//RS     let expected = ProgramOutput::ran(golden_stdout("collections/set"), String::new(), 0);
+//RS 
+//RS     let interpreted = match dev_iteration(file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("Set example must execute in interpreter tier: {diags:?}")
+//RS         }
+//RS     };
+//RS 
+//RS     let source = fs::read_to_string(file).unwrap();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_resident(&source, "set_union");
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "Set example must execute as native JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "Set example must not use interpreter deopt or fallback"
+//RS     );
+//RS     let default = match dev_iteration(file, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("default dev failed Set example: {diags:?}"),
+//RS     };
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_set_union_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let aot = compiled_binary_output(&dir, "set_union", 0, "set_union", file);
+//RS 
+//RS     assert_eq!(interpreted, expected);
+//RS     assert_eq!(resident, expected);
+//RS     assert_eq!(default, expected);
+//RS     assert_eq!(aot, expected);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn unified_loop_jit_tiers_are_explicit_and_match_aot() {
+//RS     let counted = "fn run() {\n    loop i in 0..<4 {\n        if i == 1 { next }\n        print(i)\n    }\n}\n";
+//RS     if !skip_if_cranelift_host_unsupported() {
+//RS         let native = run_cranelift_without_fallback(counted, "counted_next");
+//RS         assert_eq!(native.stdout, "0\n2\n3\n");
+//RS     }
+//RS 
+//RS     let stride = "fn run() {\n    xs := [0, 1, 2, 3, 4]\n    loop x in xs, 2 {\n        print(x)\n        if x == 0 { next }\n    }\n}\n";
+//RS     if !skip_if_cranelift_host_unsupported() {
+//RS         let native = run_cranelift_without_fallback(stride, "source_stride_next");
+//RS         assert_eq!(native.stdout, "0\n2\n4\n");
+//RS 
+//RS         let invalid = "fn run() {\n    xs := [1, 2]\n    stride := 0\n    loop x in xs, stride {\n        print(x)\n    }\n}\n";
+//RS         // AOT emits jet_panic("E0123: …") → exit 70 + panic: wording (I9).
+//RS         // Resident JIT must match that shape, not a Problems diagnostic.
+//RS         match run_cranelift_outcome_without_fallback(invalid, "source_stride_pre_pull") {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(
+//RS                     exit_code, 70,
+//RS                     "invalid stride must exit 70: out={stdout} err={stderr}"
+//RS                 );
+//RS                 assert!(
+//RS                     stdout.is_empty(),
+//RS                     "invalid dynamic stride must stop before the first source pull, got stdout={stdout:?}"
+//RS                 );
+//RS                 assert!(
+//RS                     stderr.contains("panic:") && stderr.contains("E0123"),
+//RS                     "invalid stride must carry E0123 in panic wording, got: {stderr}"
+//RS                 );
+//RS                 assert!(
+//RS                     !stderr.contains("E0953") && !stderr.contains("comptime"),
+//RS                     "invalid stride must not use comptime voice: {stderr}"
+//RS                 );
+//RS             }
+//RS             other => panic!("invalid dynamic stride expected runtime trap, got: {other:?}"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn range_values_run_in_resident_jit_without_fallback() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let unboxed = r#"
+//RS fn identity(band: ^Range) -> Range {
+//RS     return band
+//RS }
+//RS fn run() {
+//RS     band := 2..<5
+//RS     copied :: identity(band)
+//RS     print(copied)
+//RS     print(band.start)
+//RS     print(copied.contains(4))
+//RS     print(copied == band)
+//RS     bands :: [1..3, 8..<10]
+//RS     print("{bands[1]:Debug}")
+//RS     print(bands[0].start)
+//RS     print(bands[0].contains(3))
+//RS     total := 0
+//RS     loop n in copied {
+//RS         total += n
+//RS     }
+//RS     print(total)
+//RS     values :: [10, 20, 30, 40, 50, 60]
+//RS     print(~values[copied])
+//RS     band = 7..9
+//RS     print(band)
+//RS }
+//RS "#;
+//RS     // The unboxed block used to prove only stdout. `run_cranelift_without_fallback`
+//RS     // accepts a silent deopt to the interpreter, so the test's own name -- "run in
+//RS     // resident jit without fallback" -- was never checked for this fixture. Prove
+//RS     // the resident tier first, the same way the `src` block below does.
+//RS     //
+//RS     // Compile through the canonical MIR seam first: the resident safety
+//RS     // verdict is meaningful only after lowering has succeeded, so a lowering
+//RS     // failure cannot be mistaken for a covered function.
+//RS     let unboxed_proof = std::env::temp_dir().join("jet_jit_range_unboxed_safety.jet");
+//RS     fs::write(&unboxed_proof, unboxed).unwrap();
+//RS     let unboxed_bundle = checked_bundle_from_path(&unboxed_proof.to_string_lossy());
+//RS     common::compile_cranelift_bundle(&unboxed_bundle, &common::development_policy())
+//RS         .unwrap_or_else(|error| panic!("unboxed Range resident compilation failed: {error}"));
+//RS     assert_eq!(
+//RS         common::cranelift_func_safety(&unboxed_bundle, "run"),
+//RS         jet_jit::ResidentJitSafety::Covered,
+//RS         "unboxed Range values must stay in resident JIT"
+//RS     );
+//RS     jet_jit::reset_struct_new_count_for_test();
+//RS     let unboxed_run = run_cranelift_without_fallback(unboxed, "range_unboxed");
+//RS     assert_eq!(
+//RS         unboxed_run.stdout,
+//RS         "Range { start: 2, end: 5, exclusive: true }\n2\ntrue\ntrue\nRange { start: 8, end: 10, exclusive: true }\n1\ntrue\n9\n[30, 40, 50]\nRange { start: 7, end: 9, exclusive: false }\n"
+//RS     );
+//RS     assert_eq!(
+//RS         jet_jit::struct_new_count_for_test(),
+//RS         0,
+//RS         "Range construct/copy/pass/return/list/field/contains/show/equality/loop/slice must not call struct_new"
+//RS     );
+//RS 
+//RS     let src = r#"
+//RS fn identity(band: ^Range) -> Range {
+//RS     return band
+//RS }
+//RS fn run() {
+//RS     band :: 2..<5
+//RS     copied :: identity(band)
+//RS     print(copied == band)
+//RS     bands :: [1..3, 8..<10]
+//RS     print(bands[0])
+//RS     print("{bands[1]:Debug}")
+//RS     print(bands[0].contains(3))
+//RS     print(band)
+//RS     print("{band}")
+//RS     print("{band:Debug}")
+//RS     print(band == (2..<5))
+//RS     print(band == (2..5))
+//RS     print(band.start)
+//RS     print(band.end)
+//RS     print(band.contains(4))
+//RS     print((5..2).contains(3))
+//RS     total := 0
+//RS     loop n in band {
+//RS         total += n
+//RS     }
+//RS     print(total)
+//RS     values := [10, 20, 30, 40, 50, 60]
+//RS     print(~values[band])
+//RS     edit :: &values[band]
+//RS     edit[0] = 99
+//RS     print(values)
+//RS }
+//RS "#;
+//RS     let proof = std::env::temp_dir().join("jet_jit_range_value_safety.jet");
+//RS     fs::write(&proof, src).unwrap();
+//RS     let bundle = checked_bundle_from_path(&proof.to_string_lossy());
+//RS     // Same order as the unboxed block above, for the same reason:
+//RS     // Compile through the canonical MIR seam first for the same reason:
+//RS     // a lowering failure must report its actual compile error, not "covered".
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS         .unwrap_or_else(|error| panic!("Range resident compilation failed: {error}"));
+//RS     assert_eq!(
+//RS         common::cranelift_func_safety(&bundle, "run"),
+//RS         jet_jit::ResidentJitSafety::Covered,
+//RS         "Range values and windows must stay in resident JIT"
+//RS     );
+//RS     let native = run_cranelift_without_fallback(src, "range_values");
+//RS     let expected = "\
+//RS true
+//RS Range { start: 1, end: 3, exclusive: false }
+//RS Range { start: 8, end: 10, exclusive: true }
+//RS true
+//RS Range { start: 2, end: 5, exclusive: true }
+//RS Range { start: 2, end: 5, exclusive: true }
+//RS Range { start: 2, end: 5, exclusive: true }
+//RS true
+//RS false
+//RS 2
+//RS 5
+//RS true
+//RS false
+//RS 9
+//RS [30, 40, 50]
+//RS [10, 20, 99, 40, 50, 60]
+//RS ";
+//RS     assert_eq!(native.stdout, expected);
+//RS 
+//RS     let dir = common::unique_tmp("jet_range_value_interpreter");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     match dev_iteration(&path.to_string_lossy(), false, true) {
+//RS         RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("Range views must run in the canonical evaluator: {diags:?}")
+//RS         }
+//RS     }
+//RS     let _ = fs::remove_dir_all(dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn subjectless_guards_match_aot_in_resident_jit() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     n :: 7
+//RS     if n > 10 -> print("too big")
+//RS     if {
+//RS         n < 0 -> print("negative")
+//RS         n < 10 -> print("single digit")
+//RS     }
+//RS     label :: if {
+//RS         n < 5 -> "small"
+//RS         n < 10 -> "medium"
+//RS         else -> "large"
+//RS     }
+//RS     print(label)
+//RS }
+//RS "#;
+//RS     let jit = run_cranelift_without_fallback(src, "subjectless_guards");
+//RS     let dir = std::env::temp_dir().join(format!("jet_guard_jit_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("subjectless_guards.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "subjectless_guards",
+//RS         0,
+//RS         "subjectless_guards",
+//RS         file.to_str().unwrap(),
+//RS     );
+//RS     assert_eq!(jit, aot);
+//RS     assert_eq!(jit.stdout, "single digit\nmedium\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_numeric_methods_and_parse_are_native() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     Int.parse("41").drop("native parse proof")
+//RS     n :: 41
+//RS     print(Float.from_int(n))
+//RS     print(n.count_ones())
+//RS     one :: Float{1.0}
+//RS     print(one.is_finite())
+//RS     print(n.to_string())
+//RS }
+//RS "#;
+//RS     assert_eq!(
+//RS         run_cranelift_without_fallback(src, "numeric_parse"),
+//RS         ProgramOutput::ran("41.0\n3\ntrue\n41\n".into(), "".into(), 0)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn forced_interpreter_preserves_f32_width_like_aot() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping F32 dev differential");
+//RS         return;
+//RS     }
+//RS     let source = r#"fn pass(value: F32) -> F32 { return value }
+//RS fn run() {
+//RS     value :: F32{ 16777217.0 }
+//RS     one :: F32{ 1.0 }
+//RS     mutable := F32{ value }
+//RS     mutable += one
+//RS     print(pass(value))
+//RS     print(mutable)
+//RS     print([value, mutable])
+//RS }"#;
+//RS     let dir = common::unique_tmp("jet_dev_f32_width");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("f32_width.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     let file = path.to_string_lossy();
+//RS     let expected = compiled_binary_output(&dir, "f32_width", 0, "f32-width", &file);
+//RS     let actual = match dev_iteration(&file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("forced F32 interpreter failed: {diags:?}"),
+//RS     };
+//RS     assert_eq!(actual, expected);
+//RS     assert_eq!(
+//RS         actual.stdout,
+//RS         "16777216.0\n16777216.0\n[16777216.0, 16777216.0]\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn gzip_golden_matches_forced_interpreter_and_aot() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping gzip dev differential");
+//RS         return;
+//RS     }
+//RS     let source = r#"use core.archive.gzip as gzip
+//RS 
+//RS fn run() {
+//RS     bytes :: [U8]{ 72, 101, 108, 108, 111 }
+//RS     encoded :: gzip.compress(bytes) ?? [U8]{}
+//RS     gz :: gzip.decompress(encoded) ?? [U8]{}
+//RS     golden :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [U8]{}
+//RS     bad_size :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [U8]{ 255 }
+//RS     h :: U8{ 72 }
+//RS     lower_h :: U8{ 104 }
+//RS     o :: U8{ 111 }
+//RS     max :: U8{ 255 }
+//RS     print(gz.len() == 5)
+//RS     print(gz[0] == h)
+//RS     print(golden.len() == 5)
+//RS     print(golden[0] == lower_h)
+//RS     print(golden[4] == o)
+//RS     print(bad_size[0] == max)
+//RS }
+//RS "#;
+//RS     let dir = common::unique_tmp("jet_dev_compression");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("compression.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     let file = path.to_string_lossy();
+//RS     let expected = compiled_binary_output(&dir, "compression", 0, "compression", &file);
+//RS     let actual = match dev_iteration(&file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("forced compression interpreter failed: {diags:?}"),
+//RS     };
+//RS     assert_eq!(actual, expected);
+//RS     assert_eq!(actual.stdout, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn zstd_compress_runs_in_forced_interpreter_with_aot_wire_shape() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping zstd dev differential");
+//RS         return;
+//RS     }
+//RS     let source = r#"use core.archive.zstd as zstd
+//RS 
+//RS fn run() {
+//RS     frame :: zstd.compress([72, 101, 108, 108, 111]) ?? panic("compress")
+//RS     m0 :: U8{ 40 }
+//RS     m1 :: U8{ 181 }
+//RS     m2 :: U8{ 47 }
+//RS     m3 :: U8{ 253 }
+//RS     print(frame.len() > 9)
+//RS     print(frame[0] == m0 && frame[1] == m1 && frame[2] == m2 && frame[3] == m3)
+//RS }
+//RS "#;
+//RS     let dir = common::unique_tmp("jet_dev_zstd_compress");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("zstd_compress.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     let file = path.to_string_lossy();
+//RS     let expected = compiled_binary_output(&dir, "zstd_compress", 0, "zstd-compress", &file);
+//RS     let actual = match dev_iteration(&file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("forced zstd compressor failed: {diags:?}"),
+//RS     };
+//RS     assert_eq!(actual, expected);
+//RS     assert_eq!(actual.stdout, "true\ntrue\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_jit_checked_numeric_and_distinct_conversion_matrix_is_native() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS #Numeric UserID :: distinct Int
+//RS #Numeric Severity :: distinct Int(0..10)
+//RS #UnitFamily(Currency) { usd }
+//RS 
+//RS fn run() {
+//RS     print(I64.from_u8(255))
+//RS     byte_ok :: I32{ 100 }
+//RS     byte_bad :: I32{ 100000 }
+//RS     U8.from_i32(byte_ok).drop("checked conversion success proof")
+//RS     U8.from_i32(byte_bad).drop("checked conversion error proof")
+//RS     float_ok :: Float{42.9}
+//RS     float_bad :: Float{300.0}
+//RS     U8.from_float(float_ok).drop("checked float conversion success proof")
+//RS     U8.from_float(float_bad).drop("checked float conversion error proof")
+//RS     narrow_ok :: Float{2.5}
+//RS     narrow_bad :: Float{1e100}
+//RS     F32.from_float(narrow_ok).drop("checked F32 conversion success proof")
+//RS     F32.from_float(narrow_bad).drop("checked F32 conversion error proof")
+//RS     user_source :: U64.from_u8(8)
+//RS     UserID.from_u64(user_source).drop("checked distinct conversion proof")
+//RS     print(UserID.from_u8(8).raw())
+//RS     print(Severity.from_u8(8).raw())
+//RS     severity_source :: 7
+//RS     Severity.from_int(severity_source).drop("checked range conversion proof")
+//RS     print(Severity.from_int(7).raw())
+//RS     print(Usd.from_int(5).raw())
+//RS }
+//RS "#;
+//RS     assert_eq!(
+//RS         run_cranelift_without_fallback(src, "checked_numeric_distinct_matrix"),
+//RS         ProgramOutput::ran("255\n8\n8\n7\n5.0\n".into(), "".into(), 0,)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn physical_quantities_run_in_resident_jit_without_fallback() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let out = run_cranelift_without_fallback(
+//RS         r#"
+//RS #UnitFamily(Length, dimension, base: meter) {
+//RS     meter
+//RS     millimeter(scale: 1/1000)
+//RS     thirdish(scale: 2/3)
+//RS }
+//RS fn run() {
+//RS     distance :: 12meter
+//RS     elapsed :: 3s
+//RS     speed :: distance / elapsed
+//RS     recovered :: speed * elapsed
+//RS     ratio :: recovered / distance
+//RS     print(ratio)
+//RS     exact :: Meter.from_millimeter(3000millimeter)
+//RS     rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven, digits: 0)
+//RS     print("{(exact.raw())} {(rounded.raw())}")
+//RS }
+//RS "#,
+//RS         "physical_quantity",
+//RS     );
+//RS     assert_eq!(out.stdout, "1.0\n3.0 1.0\n");
+//RS 
+//RS     // `run_cranelift_without_fallback` writes each fixture at this exact path,
+//RS     // and every E3002 journey frame names it, so the expectations below must be
+//RS     // built from it rather than from a hand-written literal.
+//RS     let fixture_shown = |tag: &str| {
+//RS         std::env::temp_dir()
+//RS             .join(format!("jet_jit_no_fallback_{tag}.jet"))
+//RS             .to_string_lossy()
+//RS             .into_owned()
+//RS     };
+//RS 
+//RS     let failed = run_cranelift_without_fallback(
+//RS         r#"
+//RS #UnitFamily(Length, base: meter) {
+//RS     meter
+//RS     thirdish(scale: 2/3)
+//RS }
+//RS fn run() {
+//RS     Meter.from_thirdish(1thirdish)
+//RS }
+//RS "#,
+//RS         "physical_quantity_inexact",
+//RS     );
+//RS     // D-FAIL-CTX1=A (ratified 2026-08-06, card #1532): "Each automatic
+//RS     // propagation crossing joins the failure journey on every tier, whether it
+//RS     // has a note or not." The conversion call on line 7 is that hop, printed as one trail line under the root failure the
+//RS     // way E3002 now registers it: `  {n}. {fn} ({file}:{line})`, origin first,
+//RS     // under the root failure line. D-FAIL-ERROR1=A
+//RS     // (card #1528) + D-FAIL-EXIT1=A (card #1533): `fn run()` uses the implicit
+//RS     // default error, so the conversion's plain `String` error arrives as the
+//RS     // default error and `jet_render_err` prints `Error: {message}` -- no code,
+//RS     // because this error carries none -- at the process edge, then exits 1.
+//RS     let inexact_shown = fixture_shown("physical_quantity_inexact");
+//RS     assert_eq!(
+//RS         failed,
+//RS         ProgramOutput::ran(
+//RS             String::new(),
+//RS             format!(
+//RS                 "Error: unit conversion would round\n\
+//RS                  \x20Trail [E3002] (1 hop via ?, origin first):\n\
+//RS                  \x20 1. run ({inexact_shown}:7)\n"
+//RS             ),
+//RS             1
+//RS         )
+//RS     );
+//RS 
+//RS     let beyond_f64 = run_cranelift_without_fallback(
+//RS         r#"
+//RS #UnitFamily(Length, base: meter) {
+//RS     meter
+//RS     almost(scale: 9007199254740993/9007199254740992)
+//RS }
+//RS fn run() {
+//RS     Meter.from_almost(1almost)
+//RS }
+//RS "#,
+//RS         "physical_quantity_exact_rational_edge",
+//RS     );
+//RS     // Same ratified envelope as above (D-FAIL-CTX1=A / D-FAIL-ERROR1=A): the
+//RS     // exact conversion call is again on line 7 of the fixture.
+//RS     let rational_edge_shown = fixture_shown("physical_quantity_exact_rational_edge");
+//RS     assert_eq!(
+//RS         beyond_f64,
+//RS         ProgramOutput::ran(
+//RS             String::new(),
+//RS             format!(
+//RS                 "Error: unit conversion would round\n\
+//RS                  \x20Trail [E3002] (1 hop via ?, origin first):\n\
+//RS                  \x20 1. run ({rational_edge_shown}:7)\n"
+//RS             ),
+//RS             1
+//RS         )
+//RS     );
+//RS 
+//RS     let rational_edges = run_cranelift_without_fallback(
+//RS         r#"
+//RS #UnitFamily(Length, base: meter) {
+//RS     meter
+//RS     almost(scale: 9007199254740993/9007199254740992)
+//RS     half(scale: 1/2)
+//RS     above_half(scale: 9007199254740993/18014398509481984)
+//RS     three_halves(scale: 3/2)
+//RS }
+//RS #UnitFamily(Temperature, base: kelvin) {
+//RS     kelvin
+//RS     tie_offset(scale: 1, offset: 1/2)
+//RS     above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
+//RS     below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
+//RS }
+//RS fn run() {
+//RS     tie :: Meter.from_half_rounded(1half, .NearestEven, digits: 0)
+//RS     above :: Meter.from_above_half_rounded(1above_half, .NearestEven, digits: 0)
+//RS     negative_source :: ThreeHalves.from_float(-Float{1.0})
+//RS     negative :: Meter.from_three_halves_rounded(negative_source, .NearestEven, digits: 0)
+//RS     tie_point :: TieOffsetPoint.from_float(Float{0.0})
+//RS     above_point :: AboveOffsetPoint.from_float(Float{0.0})
+//RS     below_point :: BelowOffsetPoint.from_float(Float{0.0})
+//RS     affine_tie :: KelvinPoint.from_tie_offset_point_rounded(tie_point, .NearestEven, digits: 0)
+//RS     affine_above :: KelvinPoint.from_above_offset_point_rounded(above_point, .NearestEven, digits: 0)
+//RS     affine_below :: KelvinPoint.from_below_offset_point_rounded(below_point, .NearestEven, digits: 0)
+//RS     print("{(tie.raw())} {(above.raw())} {(negative.raw())} {(affine_tie.raw())} {(affine_above.raw())} {(affine_below.raw())}")
+//RS }
+//RS "#,
+//RS         "physical_quantity_rational_edges",
+//RS     );
+//RS     assert_eq!(
+//RS         rational_edges,
+//RS         ProgramOutput::ran("0.0 1.0 -2.0 0.0 1.0 -1.0\n".into(), "".into(), 0)
+//RS     );
+//RS 
+//RS     let overflow = r#"
+//RS #UnitFamily(Length, base: meter) { meter double(scale: 2) }
+//RS fn run() {
+//RS     source :: Double.from_float(Float{1.7976931348623157e308})
+//RS     Meter.from_double_rounded(source, .NearestEven, digits: 0)
+//RS }
+//RS "#;
+//RS     // Same ratified envelope (D-FAIL-CTX1=A / D-FAIL-ERROR1=A); this fixture's
+//RS     // The conversion call is on line 5, so its single trail hop names that line.
+//RS     let overflow_shown = fixture_shown("physical_quantity_rounded_overflow");
+//RS     assert_eq!(
+//RS         run_cranelift_without_fallback(overflow, "physical_quantity_rounded_overflow"),
+//RS         ProgramOutput::ran(
+//RS             String::new(),
+//RS             format!(
+//RS                 "Error: unit conversion overflows its runtime representation\n\
+//RS                  \x20Trail [E3002] (1 hop via ?, origin first):\n\
+//RS                  \x20 1. run ({overflow_shown}:5)\n"
+//RS             ),
+//RS             1
+//RS         )
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn rounded_physical_quantities_match_resident_default_dev_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS #UnitFamily(Length, base: meter) {
+//RS     meter
+//RS     half(scale: 1/2)
+//RS     near_quarter(scale: 249/1000)
+//RS     near_three_quarters(scale: 751/1000)
+//RS }
+//RS #UnitFamily(Temperature, base: kelvin) {
+//RS     kelvin
+//RS     shifted(scale: 1, offset: 249/1000)
+//RS }
+//RS fn run() {
+//RS     positive :: Half.from_float(Float{5.0})
+//RS     negative :: Half.from_float(-Float{5.0})
+//RS     toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)
+//RS     floor :: Meter.from_half_rounded(negative, .Floor, digits: 0)
+//RS     ceiling :: Meter.from_half_rounded(positive, .Ceiling, digits: 0)
+//RS     nearest_even :: Meter.from_near_quarter_rounded(1near_quarter, .NearestEven, digits: 2)
+//RS     nearest_odd :: Meter.from_near_three_quarters_rounded(1near_three_quarters, .NearestEven, digits: 2)
+//RS     point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(Float{0.0}), .Ceiling, digits: 2)
+//RS     delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(Float{0.0}), .Ceiling, digits: 2)
+//RS     print("{(toward_zero.raw())} {(floor.raw())} {(ceiling.raw())} {(nearest_even.raw())} {(nearest_odd.raw())} {(point.raw())} {(delta.raw())}")
+//RS }
+//RS "#;
+//RS     let expected = ProgramOutput::ran("2.0 -3.0 3.0 0.25 0.75 0.25 0.0\n".into(), "".into(), 0);
+//RS     let resident = run_cranelift_without_fallback(src, "rounded_quantity_parity");
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_rounded_quantity_parity_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("rounded_quantity_parity.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let default = match dev_iteration(&shown, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("default dev failed rounded quantity parity: {diags:?}")
+//RS         }
+//RS     };
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "rounded_quantity_parity",
+//RS         0,
+//RS         "rounded_quantity_parity",
+//RS         &shown,
+//RS     );
+//RS     assert_eq!(resident, expected);
+//RS     assert_eq!(default, expected);
+//RS     assert_eq!(aot, expected);
+//RS     let _ = fs::remove_dir_all(dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_module_instance_runs_identically_in_resident_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS module value(n: Int) { pub fn get() -> Int { return n } }
+//RS module three :: value(3)
+//RS module same :: value(3)
+//RS fn run() {
+//RS     print(three.get())
+//RS     print(same.get())
+//RS }
+//RS "#;
+//RS     let jit = run_cranelift_without_fallback(src, "generic_module_instance");
+//RS     assert_eq!(jit.stdout, "3\n3\n");
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_generic_module_jit_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("generic_module_instance.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "generic_module_instance",
+//RS         0,
+//RS         "generic_module_instance",
+//RS         file.to_str().unwrap(),
+//RS     );
+//RS     assert_eq!(jit, aot);
+//RS 
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_user_derive_multi_instantiation_matches_every_execution_tier() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS derive T.Access {
+//RS     info :: T.reflect()
+//RS     param :: info.type_params[0].name
+//RS     fn make(value: ^@param) -> @name<@param> {
+//RS         return @name<@param>{ value: value }
+//RS     }
+//RS     fn marker() -> Int -> 17
+//RS     fn get_value(self) -> @param -> ~self.value
+//RS     fn type_name(self) -> String -> T.$name
+//RS }
+//RS 
+//RS derive T.NumericAccess {
+//RS     info :: T.reflect()
+//RS     param :: info.type_params[0].name
+//RS     fn replace(&self, value: ^@param) -> @param {
+//RS         self.value = value
+//RS         return ~self.value
+//RS     }
+//RS     fn plus(self, rhs: @param) -> @param -> self.value + rhs
+//RS     fn equal_to(self, rhs: @param) -> Bool -> self.value == rhs
+//RS }
+//RS 
+//RS #Access
+//RS struct Box<T: Printable> { value: T }
+//RS #Access
+//RS struct StaticOnly<T: Printable> { value: T }
+//RS struct Wrapper<U: Printable> { boxed: Box<U> }
+//RS #NumericAccess
+//RS struct NumericBox<T: [Printable, Add, Equatable]> { value: T }
+//RS 
+//RS fn run() {
+//RS     number := Box<Int>.make(7)
+//RS     decimal := Box<Float>{ value: 2.5 }
+//RS     flag := Box<Bool>{ value: true }
+//RS     letter := Box<Char>{ value: 'J' }
+//RS     text := Box<String>.make("jet")
+//RS     numeric := NumericBox<Float>{ value: 1.5 }
+//RS     print(number.get_value())
+//RS     print(decimal.get_value())
+//RS     print(flag.get_value())
+//RS     print(letter.get_value())
+//RS     print(text.get_value())
+//RS     print(text.get_value())
+//RS     print(number.type_name())
+//RS     print(&numeric.replace(4.5))
+//RS     print(numeric.plus(0.5))
+//RS     print(numeric.equal_to(4.5))
+//RS     print(StaticOnly<Int>.marker())
+//RS     print(StaticOnly<String>.marker())
+//RS }
+//RS "#;
+//RS     let expected = ProgramOutput::ran(
+//RS         "7\n2.5\ntrue\nJ\njet\njet\nBox\n4.5\n5.0\ntrue\n17\n17\n".into(),
+//RS         "".into(),
+//RS         0,
+//RS     );
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_generic_user_derive_jit_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("generic_user_derive.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let bundle = checked_bundle_from_path(&shown);
+//RS     let run_func = bundle.modules[bundle.entry]
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| match item {
+//RS             jet::AST::Item::Func(func) if func.name == "run" => Some(func),
+//RS             _ => None,
+//RS         })
+//RS         .expect("run function");
+//RS     let numeric_binding = run_func
+//RS         .body
+//RS         .iter()
+//RS         .find_map(|stmt| match stmt {
+//RS             jet::AST::Stmt::Val(binding) if binding.name == "numeric" => Some(binding),
+//RS             _ => None,
+//RS         })
+//RS         .expect("numeric binding");
+//RS     assert_eq!(
+//RS         numeric_binding.ty,
+//RS         Some(jet::AST::Type::Apply {
+//RS             name: "NumericBox".to_string(),
+//RS             args: vec![jet::AST::Type::Float],
+//RS         }),
+//RS         "sema must retain the concrete generic binding identity"
+//RS     );
+//RS     let resident = run_cranelift_without_fallback(src, "generic_user_derive");
+//RS     let default = match dev_iteration(&shown, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => panic!("default dev failed generic user derive: {diags:?}"),
+//RS     };
+//RS     let interpreted = match dev_iteration(&shown, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("forced interpreter failed generic user derive: {diags:?}")
+//RS         }
+//RS     };
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "generic_user_derive",
+//RS         0,
+//RS         "generic_user_derive",
+//RS         &shown,
+//RS     );
+//RS     assert_eq!(resident, expected);
+//RS     assert_eq!(default, expected);
+//RS     assert_eq!(interpreted, expected);
+//RS     assert_eq!(aot, expected);
+//RS     let _ = fs::remove_dir_all(dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn nested_generic_user_derive_reaches_resident_jit() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS derive T.Access {
+//RS     info :: T.reflect()
+//RS     param :: info.type_params[0].name
+//RS     fn get_value(self) -> @param -> ~self.value
+//RS }
+//RS 
+//RS #Access
+//RS struct Inner<T: Printable> { value: T }
+//RS 
+//RS struct Outer<T: Printable> {
+//RS     value: T
+//RS 
+//RS     fn read(self) -> T {
+//RS         inner := Inner<T>{ value: ~self.value }
+//RS         return inner.get_value()
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     outer := Outer<Int>{ value: 7 }
+//RS     print(outer.read())
+//RS }
+//RS "#;
+//RS     let output = run_cranelift_without_fallback(src, "nested_generic_user_derive");
+//RS     assert_eq!(output, ProgramOutput::ran("7\n".into(), "".into(), 0));
+//RS }
+//RS 
+//RS #[test]
+//RS fn unused_expanding_generic_body_does_not_expand_jit_worklist() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS struct Grow<T: Printable> {
+//RS     value: T
+//RS 
+//RS     fn read(self) -> T { return ~self.value }
+//RS     fn unused(self) -> Int {
+//RS         nested := Grow<[T]>{ value: [~self.value] }
+//RS         return nested.unused()
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     value := Grow<Int>{ value: 7 }
+//RS     print(value.read())
+//RS }
+//RS "#;
+//RS     let output = run_cranelift_without_fallback(src, "unused_expanding_generic_body");
+//RS     assert_eq!(output, ProgramOutput::ran("7\n".into(), "".into(), 0));
+//RS 
+//RS     let reachable = src.replace("print(value.read())", "print(value.unused())");
+//RS     let file = std::env::temp_dir().join("reachable_expanding_generic_method.jet");
+//RS     fs::write(&file, reachable).unwrap();
+//RS     let bundle = checked_bundle_from_path(file.to_str().unwrap());
+//RS     let error = common::compile_cranelift_bundle(&bundle, &common::development_policy()).unwrap_err();
+//RS     assert!(
+//RS         error.contains("E0909: generic instantiation goes too deep"),
+//RS         "{error}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn nested_ordinary_module_generic_instance_matches_resident_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS module outer<T>(n: Int) {
+//RS     module plain {
+//RS         module inner<U> { pub fn total(value: U) -> Int { return n } }
+//RS         module closed :: inner<T>
+//RS         pub fn result(value: T) -> Int { return closed.total(value) }
+//RS     }
+//RS     pub fn result(value: T) -> Int { return plain.result(value) }
+//RS }
+//RS module selected :: outer<Int>(6)
+//RS fn run() { print(selected.result(1)) }
+//RS "#;
+//RS     let jit = run_cranelift_without_fallback(src, "nested_ordinary_generic_module");
+//RS     assert_eq!(jit.stdout, "6\n");
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_nested_ordinary_generic_module_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("nested_ordinary_generic_module.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     let aot = compiled_binary_output(
+//RS         &dir,
+//RS         "nested_ordinary_generic_module",
+//RS         0,
+//RS         "nested_ordinary_generic_module",
+//RS         file.to_str().unwrap(),
+//RS     );
+//RS     assert_eq!(jit, aot);
+//RS }
+//RS 
+//RS #[test]
+//RS fn solver_state_transitions_match_aot_in_resident_jit() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let source_path = "Examples/features/tooling/solve_puzzle.jet";
+//RS     let src = fs::read_to_string(source_path).expect("read solve_puzzle example");
+//RS     let jit = run_cranelift_without_fallback(&src, "solve_puzzle");
+//RS 
+//RS     let compiled = jet::compile_with_path(&src, source_path).expect("compile solve_puzzle");
+//RS     let dir = std::env::temp_dir().join(format!("jet_solver_jit_parity_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let rs = dir.join("solve_puzzle.rs");
+//RS     let bin = dir.join("solve_puzzle");
+//RS     let mut command = Command::new("rustc");
+//RS     let _runtime_lease = add_generated_rust(
+//RS         &mut command,
+//RS         &rs,
+//RS         &compiled.rust,
+//RS         compiled.ffi.is_some(),
+//RS         &[],
+//RS     );
+//RS     let rustc = command.arg("-o").arg(&bin).output().expect("run rustc");
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc failed: {}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let output = Command::new(&bin).output().expect("run AOT solve_puzzle");
+//RS     let aot = ProgramOutput::ran(
+//RS         String::from_utf8_lossy(&output.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&output.stderr).into_owned(),
+//RS         output.status.code().unwrap_or(1),
+//RS     );
+//RS     assert_eq!(
+//RS         jit, aot,
+//RS         "Solver state drifted between resident JIT and AOT"
+//RS     );
+//RS     assert_eq!(
+//RS         jit.stdout,
+//RS         "key=1 door=3\nkey=3 door=1\nwins=2\nstatus=failed\nfailures=7\n"
+//RS     );
+//RS     let _ = fs::remove_dir_all(dir);
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1032 tests/dev_parts/routine.rs:1847-3657
+

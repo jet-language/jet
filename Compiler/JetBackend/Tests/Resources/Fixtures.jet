@@ -1,0 +1,46 @@
+// Reuses the explicit checked-MIR construction convention of LowerFixtures.
+// These are metadata fixtures, not mocks of physical resource or native owners.
+use jet_foundation as source_resource_mir
+use jet_foundation.[MIRProgram, MIRFunction, MIRFunctionID, MIRModuleID, MIRType, MIRTypeKind, MIRArtifactID, MIRTraitID, MIRTraitMethodID, MIRAccess, MIRBlockID, Span, mir_type_from_kind, stable_id, mir_empty_optimization_facts]
+
+fn source_resource_metadata_program() -> MIRProgram Never! {
+    MIRProgram{
+        cffi: source_resource_mir.MIRCffiFacts{import_links: [], libs: [], overlay_overrides: [], boundaries: [], direct_links: [], transitive_links: [], close_adapters: []},
+        schema_version: source_resource_mir.MIR_SCHEMA_VERSION,
+        package_identity: "source-resource-metadata-fixture",
+        facts: source_resource_mir.MIRPackageFacts{
+            project_root: "", edition: "2026", runtime_parts: [], uses_arrow: false,
+            active_os: "linux", inferred_layer: "std", allocator: "", package_version: "0.0.1", artifact_target: None,
+            target_dossier: source_resource_mir.MIRTargetDossier{machine: None, layer: .Std, provider_identity: "", closure_identity: "", linker_identity: "", tier_identity: "", compiler_identity: "", environment_identity: "", dependency_identity: ""},
+            web_app: None, authority_needs: [],
+            hardware_use: source_resource_mir.MIRTargetHardwareUse{register_accesses: [], interrupt_handlers: [], dma_operations: [], unresolved_references: []},
+            hardware_profile: None, hardware_profile_id: "", hardware_capabilities: [], hardware_setups: [],
+        },
+        names: source_resource_mir.MIRNameFacts{modules: [], declarations: [], aliases: [], references: [], structure_facts: []},
+        modules: [], imports: [], types: [], traits: [], core_owners: [], impls: [], constants: [], fields: [], source_files: [],
+        functions: [], foreign: [], links: [], callbacks: [], handles: [], jobs: [], tests: [], harnesses: [], artifacts: [], core_calls: [], prelude_calls: [], type_instances: [],
+        codec_migrations: [String:source_resource_mir.MIRSchemaMigrationPlan]{}, unreachable: [],
+    }
+}
+fn source_resource_metadata_execution() -> source_resource_mir.MIRExecutionIdentity Never! {
+    identity :: source_resource_mir.MIRProgramIdentity{semantic_hash: "fixture", optimized_hash: "fixture", function_ids: [], core_ids: [], target_facts: [], source_map: []}
+    source_resource_mir.MIRExecutionIdentity{schema_version: source_resource_mir.MIR_IDENTITY_SCHEMA_VERSION, artifact: source_resource_mir.MIRArtifactIdentity{schema_version: source_resource_mir.MIR_IDENTITY_SCHEMA_VERSION, mir_schema_version: source_resource_mir.MIR_SCHEMA_VERSION, program_digest: [], package_identity: "source-resource-metadata-fixture", artifact: MIRArtifactID{value: U64{1}}, name: "fixture", kind: .NativeExecutable, target: .RustAOT, mode: .Dev, provider_identity: "fixture", closure_identity: "fixture", artifact_identity: "fixture", program_identity: shared identity}}
+}
+fn source_resource_metadata_function(id: U64) -> MIRFunction Never! {
+    ty :: mir_type_from_kind(.Int)
+    MIRFunction{
+        id: MIRFunctionID{value: id}, module_id: MIRModuleID{value: U64{1}}, source_file: source_resource_mir.MIRSourceFileID{value: U64{1}}, key: "fixture::{id}", module_name: "fixture", name: "f{id}", span: Span{start: 0, end: 0}, kind: .Jet, form: .TopLevel, visibility: .Private,
+        target_applicability: source_resource_mir.MIRTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: false}, web_bucket: None, web_marker: None, generic_params: [], capture_params: [], params: [], declared_return: Val(ty), return_type: ty, failure: .Infallible,
+        effects: source_resource_mir.MIREffectFacts{direct: [], solved: [], call_edges: [], maximal: false, direct_spans: []}, captures: None, generator: None, optimization: mir_empty_optimization_facts(), is_unsafe: false, unsafe_gate: None, is_pure: false, memo_bound: None, memo_unbounded: false, is_reactive: false, reactive_upgrades: [], is_inline: false, is_inline_always: false, is_scalar: false, kernel_proof: None, gc_return: false, return_view_provenance: None, web_param_reconstructions: [], blocks: [], entry: MIRBlockID{value: U64{1}}, locals: [], values: [], places: [], scopes: [], drops: [], foreign_language: None,
+    }
+}
+fn source_resource_metadata_method_program() -> MIRProgram Never! {
+    program := source_resource_metadata_program()
+    method :: source_resource_mir.MIRTraitMethod{id: MIRTraitMethodID{value: U64{3}}, name: "invoke", span: Span{start: 0, end: 0}, self_access: Val(MIRAccess.Read), params: [], declared_return: None, return_type: mir_type_from_kind(.Int), failure: .Infallible, effects: source_resource_mir.MIREffectFacts{direct: [], solved: [], call_edges: [], maximal: false, direct_spans: []}, is_pure: true, return_view_provenance: None, declared_return_view_provenance: None, default: None}
+    &program.traits.push(source_resource_mir.MIRTraitDef{id: MIRTraitID{value: U64{2}}, module_id: MIRModuleID{value: U64{1}}, key: "fixture::Interface", name: "Interface", span: Span{start: 0, end: 0}, visibility: .Private, associated_types: [], methods: [source_resource_mir.MIRTraitMethod]{method}})
+    &program.artifacts.push(source_resource_mir.MIRArtifactPlan{id: MIRArtifactID{value: U64{1}}, kind: .NativeExecutable, name: "fixture", target: .RustAOT, mode: .Dev, modules: [MIRModuleID]{MIRModuleID{value: U64{1}}}, links: [], jobs: [], runtime_parts: [], exports: [], provider_identity: "", closure_identity: "", artifact_identity: "", entry: None, harness: None})
+    program
+}
+fn source_resource_metadata_receiver() -> MIRType Never! {
+    mir_type_from_kind(.TraitObject{bounds: [source_resource_mir.MIRTraitRef]{source_resource_mir.MIRTraitRef{id: MIRTraitID{value: stable_id("mir-trait", "Interface")}, name: "Interface"}}})
+}

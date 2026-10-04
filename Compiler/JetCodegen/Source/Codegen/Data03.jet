@@ -1,0 +1,1030 @@
+// PORT-PENDING 0535 crates-jet-codegen-src-codegen-tir-tir-to-mir-expr-slice-10028: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:10028-11053
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn lower_datatree_access(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     recv: &TExpr,
+//RS     source_args: &[TExpr],
+//RS     op: &THandleOp,
+//RS     carrier: &TFailureCarrier,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let route = datatree_access_route(op, carrier)
+//RS         .expect("DataTree access route checked before structural lowering");
+//RS     let receiver = ctx.lower_child(recv)?;
+//RS     let args = source_args
+//RS         .iter()
+//RS         .map(|arg| ctx.lower_child(arg))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let call = ctx.intern_prelude_route(route)?;
+//RS     ctx.emit(
+//RS         "datatree-access",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Semantic(MirSemanticOp::HandleMethod {
+//RS             call,
+//RS             receiver,
+//RS             args,
+//RS             frame_schedule: None,
+//RS             frame_schedule_derivation: None,
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS fn typed_codec_target(ty: &Type) -> bool {
+//RS     match ty.without_user_tags() {
+//RS         Type::Int
+//RS         | Type::Float
+//RS         | Type::Bool
+//RS         | Type::String
+//RS         | Type::Char
+//RS         | Type::IntN { .. }
+//RS         | Type::Float32
+//RS         | Type::List(_)
+//RS         | Type::FixedList { .. }
+//RS         | Type::Option(_)
+//RS         | Type::InlineRange { .. } => true,
+//RS         Type::Map { key, .. } => matches!(key.without_user_tags(), Type::String),
+//RS         Type::Named(name) => {
+//RS             matches!(
+//RS                 name.as_str(),
+//RS                 "Data"
+//RS                     | "DataTree"
+//RS                     | "U8"
+//RS                     | "I8"
+//RS                     | "I16"
+//RS                     | "I32"
+//RS                     | "I64"
+//RS                     | "I128"
+//RS                     | "U16"
+//RS                     | "U32"
+//RS                     | "U64"
+//RS                     | "U128"
+//RS             ) || name == "Secret"
+//RS                 || name
+//RS                     .rsplit_once('.')
+//RS                     .is_some_and(|(_, leaf)| leaf == "Secret")
+//RS         }
+//RS         Type::Tagged { inner, .. } => typed_codec_target(inner),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_typed_codec(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     recv: &TExpr,
+//RS     type_arg: &Type,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let route = TPreludeRoute {
+//RS         family: MirPreludeFamily::StaticPrelude,
+//RS         module: "core.encoding.codec".to_string(),
+//RS         member: "decode_typed".to_string(),
+//RS         symbol: MirSymbol::Prelude("jet_codec_decode_typed".to_string()),
+//RS         signature: MirCallSignature {
+//RS             arity: 1,
+//RS             max_arity: 1,
+//RS             borrow_mask: vec![true],
+//RS         },
+//RS         effect: None,
+//RS         fallibility: TFailureCarrier::from_checked_type(&expr.ty),
+//RS         abi: MirPreludeAbi::Value,
+//RS         authority: None,
+//RS         db_metadata: None,
+//RS     };
+//RS     let call = ctx.intern_prelude_route(route)?;
+//RS     let value = ctx.lower_child(recv)?;
+//RS     let args = vec![mir_value_arg_with_access(ctx, value, MirAccess::Read)];
+//RS     let type_args = vec![ctx.mir_type(type_arg)?];
+//RS     ctx.emit(
+//RS         "serde-typed-decode-call",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+//RS             call,
+//RS             args,
+//RS             owner_type_args: Vec::new(),
+//RS             type_args,
+//RS         }),
+//RS     )
+//RS }
+//RS fn lower_typed_encode(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     recv: &TExpr,
+//RS     type_arg: &Type,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let route = TPreludeRoute {
+//RS         family: MirPreludeFamily::StaticPrelude,
+//RS         module: "core.encoding.codec".to_string(),
+//RS         member: "encode".to_string(),
+//RS         symbol: MirSymbol::Prelude("jet_codec_encode".to_string()),
+//RS         signature: MirCallSignature {
+//RS             arity: 2,
+//RS             max_arity: 2,
+//RS             borrow_mask: vec![false, true],
+//RS         },
+//RS         effect: None,
+//RS         fallibility: TFailureCarrier::from_checked_type(&expr.ty),
+//RS         abi: MirPreludeAbi::Value,
+//RS         authority: None,
+//RS         db_metadata: None,
+//RS     };
+//RS     let call = ctx.intern_prelude_route(route)?;
+//RS     // Generic `jet_codec_encode` keeps the builtin codec kind slot in its ABI;
+//RS     // its `T: __jet_Encode` implementation ignores this sentinel.
+//RS     let kind_value = ctx.emit(
+//RS         "serde-codec-kind",
+//RS         Some(Type::IntN {
+//RS             signed: true,
+//RS             bits: 64,
+//RS         }),
+//RS         MirOperation::Constant(MirConstant::Int {
+//RS             value: 0,
+//RS             width: Some((true, 64)),
+//RS             spelling: None,
+//RS         }),
+//RS     )?;
+//RS     let value = ctx.lower_child(recv)?;
+//RS     let args = vec![
+//RS         mir_value_arg_with_access(ctx, kind_value, MirAccess::Read),
+//RS         mir_value_arg_with_access(ctx, value, MirAccess::Read),
+//RS     ];
+//RS     let type_args = vec![ctx.mir_type(type_arg)?];
+//RS     ctx.emit(
+//RS         "serde-typed-encode-call",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+//RS             call,
+//RS             args,
+//RS             owner_type_args: Vec::new(),
+//RS             type_args,
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS fn missing_function_target(error: &LowerError) -> bool {
+//RS     error.message.starts_with("missing checked function target")
+//RS }
+//RS 
+//RS fn builtin_codec_kind(ty: &Type) -> Option<i64> {
+//RS     match super::builtin_codec_name(ty)? {
+//RS         "Date" => Some(0),
+//RS         "LocalDate" => Some(1),
+//RS         "LocalTime" => Some(2),
+//RS         "DateTime" => Some(3),
+//RS         "Duration" => Some(4),
+//RS         "Decimal" => Some(5),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_builtin_codec(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     recv: &TExpr,
+//RS     type_arg: &Type,
+//RS     kind: i64,
+//RS     encode: bool,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let member = if encode { "encode" } else { "decode" };
+//RS     let symbol = format!("jet_codec_{member}");
+//RS     let route = TPreludeRoute {
+//RS         family: MirPreludeFamily::StaticPrelude,
+//RS         module: "core.encoding.codec".to_string(),
+//RS         member: member.to_string(),
+//RS         symbol: MirSymbol::Prelude(symbol),
+//RS         signature: MirCallSignature {
+//RS             arity: 2,
+//RS             max_arity: 2,
+//RS             borrow_mask: vec![false, true],
+//RS         },
+//RS         effect: None,
+//RS         fallibility: TFailureCarrier::from_checked_type(&expr.ty),
+//RS         abi: MirPreludeAbi::Value,
+//RS         authority: None,
+//RS         db_metadata: None,
+//RS     };
+//RS     let call = ctx.intern_prelude_route(route)?;
+//RS     let kind_value = ctx.emit(
+//RS         "serde-codec-kind",
+//RS         Some(Type::IntN {
+//RS             signed: true,
+//RS             bits: 64,
+//RS         }),
+//RS         MirOperation::Constant(MirConstant::Int {
+//RS             value: kind,
+//RS             width: Some((true, 64)),
+//RS             spelling: None,
+//RS         }),
+//RS     )?;
+//RS     let value = ctx.lower_child(recv)?;
+//RS     let args = vec![
+//RS         mir_value_arg_with_access(ctx, kind_value, MirAccess::Read),
+//RS         mir_value_arg_with_access(ctx, value, MirAccess::Read),
+//RS     ];
+//RS     let type_args = vec![ctx.mir_type(type_arg)?];
+//RS     ctx.emit(
+//RS         "serde-codec-call",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+//RS             call,
+//RS             args,
+//RS             owner_type_args: Vec::new(),
+//RS             type_args,
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS fn lower_optional_encode(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     recv: &TExpr,
+//RS     inner: &Type,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let subject = ctx.lower_child(recv)?;
+//RS     let condition = ctx.emit(
+//RS         "encode-option-present",
+//RS         Some(Type::Bool),
+//RS         MirOperation::OptionIsSome { subject },
+//RS     )?;
+//RS     let present = ctx.new_block(ctx.span(), "encode-option-present")?;
+//RS     let absent = ctx.new_block(ctx.span(), "encode-option-absent")?;
+//RS     let join = ctx.new_block(ctx.span(), "encode-option-join")?;
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition,
+//RS         then_target: present,
+//RS         else_target: absent,
+//RS     });
+//RS     ctx.switch_to(present);
+//RS     let value = ctx.emit(
+//RS         "encode-option-value",
+//RS         Some(inner.clone()),
+//RS         MirOperation::OptionValue { subject },
+//RS     )?;
+//RS     let local = TLocal::generated(format!("encode_option_{}", subject.0));
+//RS     let place = ctx.bind_local(&local, inner.clone(), false, false, false)?;
+//RS     ctx.emit(
+//RS         "encode-option-bind",
+//RS         None,
+//RS         MirOperation::WritePlace { place, value },
+//RS     )?;
+//RS     let encoded = lower_serde_encode(
+//RS         ctx,
+//RS         expr,
+//RS         &TExpr {
+//RS             ty: inner.clone(),
+//RS             kind: TExprKind::Local(local),
+//RS         },
+//RS     )?;
+//RS     let present_end = ctx.current_block();
+//RS     ctx.terminate(MirTerminator::Jump { target: join });
+//RS     ctx.switch_to(absent);
+//RS     let type_id = ctx.type_id_for(crate::Syntax::TYPE_DATA)?;
+//RS     let null = ctx.emit(
+//RS         "encode-option-null",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Enum {
+//RS             type_id,
+//RS             variant: "Null".to_string(),
+//RS             args: Vec::new(),
+//RS         },
+//RS     )?;
+//RS     let absent_end = ctx.current_block();
+//RS     ctx.terminate(MirTerminator::Jump { target: join });
+//RS     ctx.switch_to(join);
+//RS     ctx.emit(
+//RS         "encode-option-result",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Phi {
+//RS             incoming: vec![(present_end, encoded), (absent_end, null)],
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn lower_ordered_object_encode(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     entries: &[(TExpr, TExpr)],
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let tree_ty = Type::Named(crate::Syntax::TYPE_DATA.to_string());
+//RS     let pair_ty = Type::Tuple(vec![
+//RS         ("key".to_string(), Box::new(Type::String)),
+//RS         ("value".to_string(), Box::new(tree_ty.clone())),
+//RS     ]);
+//RS     let pair_shape = vec![
+//RS         ("key".to_string(), Type::String),
+//RS         ("value".to_string(), tree_ty.clone()),
+//RS     ];
+//RS     let mut values = Vec::with_capacity(entries.len());
+//RS     for (key, value) in entries {
+//RS         let encoded = TExpr {
+//RS             ty: tree_ty.clone(),
+//RS             kind: TExprKind::HandleMethod {
+//RS                 recv: Box::new(value.clone()),
+//RS                 op: THandleOp::SerdeEncode,
+//RS                 args: Vec::new(),
+//RS             },
+//RS         };
+//RS         let pair = TExpr {
+//RS             ty: pair_ty.clone(),
+//RS             kind: TExprKind::TupleLit {
+//RS                 struct_name: crate::Codegen::Tuples::tuple_struct_name(&pair_shape),
+//RS                 fields: vec![
+//RS                     ("key".to_string(), key.clone()),
+//RS                     ("value".to_string(), encoded),
+//RS                 ],
+//RS             },
+//RS         };
+//RS         values.push(ctx.lower_child(&pair)?);
+//RS     }
+//RS     let payload_ty = Type::List(Box::new(pair_ty));
+//RS     let payload = ctx.emit(
+//RS         "encode-ordered-object",
+//RS         Some(payload_ty),
+//RS         MirOperation::BuildList {
+//RS             values,
+//RS             trait_coercion: None,
+//RS         },
+//RS     )?;
+//RS     let type_id = ctx.type_id_for(crate::Syntax::TYPE_DATA)?;
+//RS     ctx.emit(
+//RS         "encode-ordered-tree",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Enum {
+//RS             type_id,
+//RS             variant: "Object".to_string(),
+//RS             args: vec![MirEnumArg {
+//RS                 field: None,
+//RS                 value: payload,
+//RS                 boxed: false,
+//RS             }],
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn lower_container_encode(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     recv: &TExpr,
+//RS     element: &Type,
+//RS     map: bool,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let source_value = ctx.lower_child(recv)?;
+//RS     let source = TLocal::generated(format!("encode_source_{}", source_value.0));
+//RS     let source_place = ctx.bind_local(&source, recv.ty.clone(), false, false, false)?;
+//RS     ctx.emit(
+//RS         "encode-source",
+//RS         None,
+//RS         MirOperation::WritePlace {
+//RS             place: source_place,
+//RS             value: source_value,
+//RS         },
+//RS     )?;
+//RS     let source_expr = TExpr {
+//RS         ty: recv.ty.clone(),
+//RS         kind: TExprKind::Local(source),
+//RS     };
+//RS     let tree_ty = Type::Named(crate::Syntax::TYPE_DATA.to_string());
+//RS     let item = TLocal::generated(format!("encode_item_{}", source_value.0));
+//RS     let item_ty = if map {
+//RS         Type::Tuple(vec![
+//RS             ("key".to_string(), Box::new(Type::String)),
+//RS             ("value".to_string(), Box::new(element.clone())),
+//RS         ])
+//RS     } else {
+//RS         element.clone()
+//RS     };
+//RS     let item_expr = TExpr {
+//RS         ty: item_ty,
+//RS         kind: TExprKind::Local(item.clone()),
+//RS     };
+//RS     let item_value = if map {
+//RS         TExpr {
+//RS             ty: element.clone(),
+//RS             kind: TExprKind::Field {
+//RS                 recv: Box::new(item_expr.clone()),
+//RS                 field: "value".to_string(),
+//RS                 boxed: false,
+//RS             },
+//RS         }
+//RS     } else {
+//RS         item_expr.clone()
+//RS     };
+//RS     let mut encoded = TExpr {
+//RS         ty: tree_ty.clone(),
+//RS         kind: TExprKind::HandleMethod {
+//RS             recv: Box::new(item_value),
+//RS             op: THandleOp::SerdeEncode,
+//RS             args: Vec::new(),
+//RS         },
+//RS     };
+//RS     if map {
+//RS         let shape = vec![
+//RS             ("key".to_string(), Type::String),
+//RS             ("value".to_string(), tree_ty.clone()),
+//RS         ];
+//RS         encoded = TExpr {
+//RS             ty: Type::Tuple(
+//RS                 shape
+//RS                     .iter()
+//RS                     .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
+//RS                     .collect(),
+//RS             ),
+//RS             kind: TExprKind::TupleLit {
+//RS                 struct_name: crate::Codegen::Tuples::tuple_struct_name(&shape),
+//RS                 fields: vec![
+//RS                     (
+//RS                         "key".to_string(),
+//RS                         TExpr {
+//RS                             ty: Type::String,
+//RS                             kind: TExprKind::Field {
+//RS                                 recv: Box::new(item_expr),
+//RS                                 field: "key".to_string(),
+//RS                                 boxed: false,
+//RS                             },
+//RS                         },
+//RS                     ),
+//RS                     ("value".to_string(), encoded),
+//RS                 ],
+//RS             },
+//RS         };
+//RS     }
+//RS     let output_ty = Type::List(Box::new(encoded.ty.clone()));
+//RS     let output = TLocal::generated(format!("encode_output_{}", source_value.0)).as_mutable();
+//RS     let output_place = ctx.bind_local(&output, output_ty.clone(), true, false, false)?;
+//RS     let empty = ctx.emit(
+//RS         "encode-empty",
+//RS         Some(output_ty.clone()),
+//RS         MirOperation::BuildList {
+//RS             values: Vec::new(),
+//RS             trait_coercion: None,
+//RS         },
+//RS     )?;
+//RS     ctx.emit(
+//RS         "encode-output",
+//RS         None,
+//RS         MirOperation::WritePlace {
+//RS             place: output_place,
+//RS             value: empty,
+//RS         },
+//RS     )?;
+//RS     super::tir_to_mir_stmt::lower_stmt(
+//RS         ctx,
+//RS         &super::TStmt::ForIn {
+//RS             label: None,
+//RS             var: item.name,
+//RS             var2: None,
+//RS             source: source_expr.clone(),
+//RS             collection: source_expr,
+//RS             step: None,
+//RS             method_kind: None,
+//RS             columnar: false,
+//RS             by_value: false,
+//RS             source_stable: false,
+//RS             body: vec![super::TStmt::ExprStmt(TExpr {
+//RS                 ty: Type::Named("Unit".to_string()),
+//RS                 kind: TExprKind::BuiltinMethod {
+//RS                     recv: Box::new(TExpr {
+//RS                         ty: output_ty.clone(),
+//RS                         kind: TExprKind::Local(output.clone()),
+//RS                     }),
+//RS                     op: TBuiltinOp::Push,
+//RS                     args: vec![encoded],
+//RS                 },
+//RS             })],
+//RS         },
+//RS     )?;
+//RS     let output_place = lower_local_place(ctx, &output, MirAccess::Move)?;
+//RS     let payload = ctx.emit(
+//RS         "encode-container",
+//RS         Some(output_ty),
+//RS         MirOperation::MovePlace {
+//RS             place: output_place,
+//RS         },
+//RS     )?;
+//RS     let type_id = ctx.type_id_for(crate::Syntax::TYPE_DATA)?;
+//RS     ctx.emit(
+//RS         "encode-tree",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Enum {
+//RS             type_id,
+//RS             variant: if map { "Object" } else { "Array" }.to_string(),
+//RS             args: vec![MirEnumArg {
+//RS                 field: None,
+//RS                 value: payload,
+//RS                 boxed: false,
+//RS             }],
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn lower_serde_encode(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     recv: &TExpr,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let ty = recv.ty.without_user_tags();
+//RS     let function_name = match &ty {
+//RS         Type::Union(members) => {
+//RS             format!("{}::encode", crate::AST::union_enum_name(members))
+//RS         }
+//RS         _ => format!("{}::encode", ty.name()),
+//RS     };
+//RS     match ctx.function_id_for(&function_name) {
+//RS         Ok(function) => {
+//RS             let owner_ty = match &ty {
+//RS                 Type::Union(members) => Type::Named(crate::AST::union_enum_name(members)),
+//RS                 _ => recv.ty.clone(),
+//RS             };
+//RS             let owner = ctx.mir_type(&owner_ty)?;
+//RS             let args = vec![ctx.lower_plain_arg(recv)?];
+//RS             let call_return_type = ctx
+//RS                 .function_registry
+//RS                 .method_call_return_type_for(function, &[], &owner_ty)
+//RS                 .map_err(|message| ctx.error(ctx.span(), message))?
+//RS                 .unwrap_or_else(|| expr.ty.clone());
+//RS             return ctx.emit(
+//RS                 "serde-encode-call",
+//RS                 Some(call_return_type),
+//RS                 MirOperation::Call {
+//RS                     callee: MirCallee::Method { function, owner },
+//RS                     args,
+//RS                     type_args: Vec::new(),
+//RS                 },
+//RS             );
+//RS         }
+//RS         Err(error) if missing_function_target(&error) => {}
+//RS         Err(error) => return Err(error),
+//RS     }
+//RS     if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DATA) {
+//RS         return ctx.lower_child(recv);
+//RS     }
+//RS     if let Some(kind) = builtin_codec_kind(ty) {
+//RS         return lower_builtin_codec(ctx, expr, recv, ty, kind, true);
+//RS     }
+//RS     match ty {
+//RS         Type::List(inner) | Type::FixedList { elem: inner, .. }
+//RS             if !matches!(
+//RS                 inner.without_user_tags(),
+//RS                 Type::IntN {
+//RS                     signed: false,
+//RS                     bits: 8
+//RS                 }
+//RS             ) =>
+//RS         {
+//RS             return lower_container_encode(ctx, expr, recv, inner, false);
+//RS         }
+//RS         Type::Map { key, value, .. } if matches!(key.without_user_tags(), Type::String) => {
+//RS             return lower_container_encode(ctx, expr, recv, value, true);
+//RS         }
+//RS         Type::Option(inner) => return lower_optional_encode(ctx, expr, recv, inner),
+//RS         _ => {}
+//RS     }
+//RS     if typed_codec_target(ty) {
+//RS         return lower_typed_encode(ctx, expr, recv, ty);
+//RS     }
+//RS     let variant = data_tree_encode_variant(ty).ok_or_else(|| {
+//RS         ctx.error(
+//RS             ctx.span(),
+//RS             format!(
+//RS                 "serde encode of `{}` requires a checked encode method",
+//RS                 ty.name()
+//RS             ),
+//RS         )
+//RS     })?;
+//RS     let type_id = ctx.type_id_for(crate::Syntax::TYPE_DATA)?;
+//RS     let value = ctx.lower_child(recv)?;
+//RS     ctx.emit(
+//RS         "serde-encode-tree",
+//RS         Some(expr.ty.clone()),
+//RS         MirOperation::Enum {
+//RS             type_id,
+//RS             variant: variant.to_string(),
+//RS             args: vec![MirEnumArg {
+//RS                 field: None,
+//RS                 value,
+//RS                 boxed: false,
+//RS             }],
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn lower_datatree_decode(
+//RS     ctx: &mut LowerCtx,
+//RS     expr: &TExpr,
+//RS     recv: &TExpr,
+//RS     target: &Type,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     let target_ty = target.without_user_tags();
+//RS     let function_name = match &target_ty {
+//RS         Type::Union(members) => {
+//RS             format!("{}::decode", crate::AST::union_enum_name(members))
+//RS         }
+//RS         _ => format!("{}::decode", target.name()),
+//RS     };
+//RS     match ctx.function_id_for(&function_name) {
+//RS         Ok(function) => {
+//RS             let owner_ty = match &target_ty {
+//RS                 Type::Union(members) => Type::Named(crate::AST::union_enum_name(members)),
+//RS                 _ => target.clone(),
+//RS             };
+//RS             let owner = ctx.mir_type(&owner_ty)?;
+//RS             let args = vec![ctx.lower_plain_arg(recv)?];
+//RS             let call_return_type = ctx
+//RS                 .function_registry
+//RS                 .method_call_return_type_for(function, &[], &owner_ty)
+//RS                 .map_err(|message| ctx.error(ctx.span(), message))?
+//RS                 .unwrap_or_else(|| expr.ty.clone());
+//RS             return ctx.emit(
+//RS                 "datatree-decode-call",
+//RS                 Some(call_return_type),
+//RS                 MirOperation::Call {
+//RS                     callee: MirCallee::Associated { function, owner },
+//RS                     args,
+//RS                     type_args: Vec::new(),
+//RS                 },
+//RS             );
+//RS         }
+//RS         Err(error) if missing_function_target(&error) => {}
+//RS         Err(error) => return Err(error),
+//RS     }
+//RS     if let Some(kind) = builtin_codec_kind(target) {
+//RS         return lower_builtin_codec(ctx, expr, recv, target, kind, false);
+//RS     }
+//RS     if typed_codec_target(target) {
+//RS         return lower_typed_codec(ctx, expr, recv, target);
+//RS     }
+//RS     Err(ctx.error(
+//RS         ctx.span(),
+//RS         format!(
+//RS             "serde decode of `{}` requires a checked decode method",
+//RS             target.name()
+//RS         ),
+//RS     ))
+//RS }
+//RS 
+//RS fn data_tree_encode_variant(ty: &Type) -> Option<&'static str> {
+//RS     match ty.without_user_tags() {
+//RS         Type::Int | Type::IntN { .. } => Some("Int"),
+//RS         Type::Float | Type::Float32 => Some("Float"),
+//RS         Type::Bool => Some("Bool"),
+//RS         Type::String => Some("Text"),
+//RS         Type::Char => Some("Text"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn instance_method_lookup(method: &super::TMethodRef, recv_ty: &Type) -> String {
+//RS     let key = method_key(method);
+//RS     // Checked operator identities already include their canonical owner.
+//RS     // A source-facing imported receiver may still carry only its local leaf;
+//RS     // prefixing that leaf would hide the declaring module's method target.
+//RS     if method.operator_identity.is_some() {
+//RS         return key;
+//RS     }
+//RS     let owner = match recv_ty.without_user_tags() {
+//RS         Type::Named(name) => Some(name.clone()),
+//RS         Type::Apply { .. } => Some(recv_ty.name()),
+//RS         Type::Tagged { inner, .. } => {
+//RS             return instance_method_lookup(method, inner);
+//RS         }
+//RS         _ => None,
+//RS     };
+//RS     let Some(owner) = owner else {
+//RS         return key;
+//RS     };
+//RS     if key == owner || key.starts_with(&format!("{owner}::")) {
+//RS         return key;
+//RS     }
+//RS     format!("{owner}::{key}")
+//RS }
+//RS 
+//RS fn method_key(method: &super::TMethodRef) -> String {
+//RS     if let Some(identity) = &method.operator_identity {
+//RS         return identity.clone();
+//RS     }
+//RS     match &method.trait_owner {
+//RS         Some(owner) => format!("{owner}::{}", method.name),
+//RS         None => method.name.clone(),
+//RS     }
+//RS }
+//RS 
+//RS /// Project the fully checked TIR pattern into canonical MIR.  This mapper
+//RS /// consumes typed pattern shapes and never revisits source AST syntax.
+//RS pub(super) fn lower_pattern(
+//RS     ctx: &mut LowerCtx,
+//RS     pattern: &TPattern,
+//RS ) -> Result<MirPattern, LowerError> {
+//RS     let owner_name = pattern.enum_type.as_deref().or_else(|| {
+//RS         matches!(
+//RS             &pattern.shape,
+//RS             TPatternShape::Variant { variant, .. }
+//RS                 if crate::Codegen::is_key_variant(variant)
+//RS         )
+//RS         .then_some(crate::Syntax::TYPE_KEY)
+//RS     });
+//RS     let owner = owner_name.map(|key| ctx.type_id_for(key)).transpose()?;
+//RS     let position = match &pattern.position {
+//RS         TPatternPosition::Binding => MirPatternPosition::Binding,
+//RS         TPatternPosition::OptionBinding => MirPatternPosition::OptionBinding,
+//RS         TPatternPosition::Arm => MirPatternPosition::Arm,
+//RS         TPatternPosition::VariantPath => MirPatternPosition::VariantPath,
+//RS         TPatternPosition::DataEntries { temp } => {
+//RS             let owner = owner.ok_or_else(|| {
+//RS                 ctx.error(
+//RS                     ctx.span(),
+//RS                     "checked data-entry pattern is missing its owner",
+//RS                 )
+//RS             })?;
+//RS             let variant = match &pattern.shape {
+//RS                 TPatternShape::Variant { variant, .. } => variant,
+//RS                 _ => {
+//RS                     return Err(ctx.error(
+//RS                         ctx.span(),
+//RS                         "checked data-entry pattern is missing its enum variant",
+//RS                     ));
+//RS                 }
+//RS             };
+//RS             let local = super::TLocal::generated(temp);
+//RS             let temp_id = ctx.bind_data_entries_temp(&local, owner, variant)?;
+//RS             MirPatternPosition::DataEntries { temp: temp_id }
+//RS         }
+//RS     };
+//RS     let shape = lower_pattern_shape(ctx, &pattern.shape, owner)?;
+//RS     Ok(MirPattern {
+//RS         shape,
+//RS         owner,
+//RS         position,
+//RS         mutable: pattern.mutable,
+//RS         boxed: pattern.boxed,
+//RS     })
+//RS }
+//RS fn lower_pattern_type(
+//RS     ctx: &mut LowerCtx,
+//RS     ty: &Type,
+//RS ) -> Result<jet_foundation::MIR::MirTypeId, LowerError> {
+//RS     let mir = ctx.mir_type(ty)?;
+//RS     if let Some(identity) = mir.identity {
+//RS         Ok(identity)
+//RS     } else {
+//RS         Err(ctx.error(
+//RS             ctx.span(),
+//RS             "checked pattern type has no canonical MIR identity",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn lower_pattern_shape(
+//RS     ctx: &mut LowerCtx,
+//RS     shape: &TPatternShape,
+//RS     owner: Option<jet_foundation::MIR::MirTypeId>,
+//RS ) -> Result<MirPatternShape, LowerError> {
+//RS     Ok(match shape {
+//RS         TPatternShape::Variant {
+//RS             variant,
+//RS             bindings,
+//RS             leading_dot,
+//RS             span,
+//RS         } => {
+//RS             let bindings = bindings
+//RS                 .iter()
+//RS                 .map(|binding| lower_pattern_binding(ctx, binding))
+//RS                 .collect::<Result<Vec<_>, _>>()?;
+//RS             if bindings.is_empty() {
+//RS                 if let Some(leaves) = owner.and_then(|owner| ctx.enum_group_leaves(owner, variant))
+//RS                 {
+//RS                     MirPatternShape::Or {
+//RS                         alternatives: leaves
+//RS                             .into_iter()
+//RS                             .map(|variant| MirPatternShape::Variant {
+//RS                                 variant,
+//RS                                 bindings: Vec::new(),
+//RS                                 leading_dot: *leading_dot,
+//RS                                 span: *span,
+//RS                             })
+//RS                             .collect(),
+//RS                         span: *span,
+//RS                     }
+//RS                 } else {
+//RS                     MirPatternShape::Variant {
+//RS                         variant: variant.clone(),
+//RS                         bindings,
+//RS                         leading_dot: *leading_dot,
+//RS                         span: *span,
+//RS                     }
+//RS                 }
+//RS             } else {
+//RS                 MirPatternShape::Variant {
+//RS                     variant: variant.clone(),
+//RS                     bindings,
+//RS                     leading_dot: *leading_dot,
+//RS                     span: *span,
+//RS                 }
+//RS             }
+//RS         }
+//RS         TPatternShape::Present {
+//RS             binding,
+//RS             binding_span,
+//RS             inner,
+//RS             span,
+//RS         } => MirPatternShape::Present {
+//RS             binding: binding.clone(),
+//RS             binding_span: *binding_span,
+//RS             inner: lower_nested_pattern_shape(ctx, inner.as_deref())?,
+//RS             span: *span,
+//RS         },
+//RS         TPatternShape::Absent(span) => MirPatternShape::Absent(*span),
+//RS         TPatternShape::Ok {
+//RS             binding,
+//RS             binding_span,
+//RS             inner,
+//RS             span,
+//RS         } => MirPatternShape::Ok {
+//RS             binding: binding.clone(),
+//RS             binding_span: *binding_span,
+//RS             inner: lower_nested_pattern_shape(ctx, inner.as_deref())?,
+//RS             span: *span,
+//RS         },
+//RS         TPatternShape::Err {
+//RS             binding,
+//RS             binding_span,
+//RS             inner,
+//RS             span,
+//RS         } => MirPatternShape::Err {
+//RS             binding: binding.clone(),
+//RS             binding_span: *binding_span,
+//RS             inner: lower_nested_pattern_shape(ctx, inner.as_deref())?,
+//RS             span: *span,
+//RS         },
+//RS         TPatternShape::Range { lo, hi, span } => MirPatternShape::Range {
+//RS             lo: *lo,
+//RS             hi: *hi,
+//RS             span: *span,
+//RS         },
+//RS         TPatternShape::Or(alternatives, span) => MirPatternShape::Or {
+//RS             alternatives: alternatives
+//RS                 .iter()
+//RS                 .map(|alternative| lower_pattern_shape(ctx, alternative, owner))
+//RS                 .collect::<Result<Vec<_>, _>>()?,
+//RS             span: *span,
+//RS         },
+//RS         TPatternShape::Struct { fields, rest, span } => {
+//RS             let owner = owner.ok_or_else(|| {
+//RS                 ctx.error(*span, "checked struct pattern is missing its owner type")
+//RS             })?;
+//RS             let fields = fields
+//RS                 .iter()
+//RS                 .map(|field| match field {
+//RS                     TPatternField::Bind { field, local, span } => Ok(MirPatternField::Bind {
+//RS                         field: ctx.field_id_for(owner, field)?,
+//RS                         local: local.clone(),
+//RS                         span: *span,
+//RS                     }),
+//RS                     TPatternField::Value { field, value, span } => Ok(MirPatternField::Value {
+//RS                         field: ctx.field_id_for(owner, field)?,
+//RS                         value: ctx.lower_child(value)?,
+//RS                         span: *span,
+//RS                     }),
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, LowerError>>()?;
+//RS             MirPatternShape::Struct {
+//RS                 fields,
+//RS                 rest: *rest,
+//RS                 span: *span,
+//RS             }
+//RS         }
+//RS         TPatternShape::Text(parts, span) => MirPatternShape::Text(
+//RS             parts
+//RS                 .iter()
+//RS                 .map(|part| match part {
+//RS                     TTextPatternPart::Literal(text) => {
+//RS                         Ok(MirTextPatternPart::Literal(text.clone()))
+//RS                     }
+//RS                     TTextPatternPart::Hole { ty, span, .. } => Ok(MirTextPatternPart::Hole {
+//RS                         kind: lower_text_hole_kind(ctx, ty, *span)?,
+//RS                         ty: lower_pattern_type(ctx, ty)?,
+//RS                         span: *span,
+//RS                     }),
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, LowerError>>()?,
+//RS             *span,
+//RS         ),
+//RS         TPatternShape::Binary(parts, span) => MirPatternShape::Binary(
+//RS             parts
+//RS                 .iter()
+//RS                 .map(|part| match part {
+//RS                     TBinaryPatternPart::Literal(bytes) => {
+//RS                         Ok(MirBinaryPatternPart::Literal(bytes.clone()))
+//RS                     }
+//RS                     TBinaryPatternPart::Bits {
+//RS                         width,
+//RS                         big_endian,
+//RS                         ty,
+//RS                         span,
+//RS                         ..
+//RS                     } => Ok(MirBinaryPatternPart::Bits {
+//RS                         width: *width,
+//RS                         ty: lower_pattern_type(ctx, ty)?,
+//RS                         little: !*big_endian,
+//RS                         span: *span,
+//RS                     }),
+//RS                     TBinaryPatternPart::Rest { ty, span, .. } => Ok(MirBinaryPatternPart::Rest {
+//RS                         ty: lower_pattern_type(ctx, ty)?,
+//RS                         span: *span,
+//RS                     }),
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, LowerError>>()?,
+//RS             *span,
+//RS         ),
+//RS     })
+//RS }
+//RS fn lower_text_hole_kind(
+//RS     ctx: &mut LowerCtx,
+//RS     ty: &crate::AST::Type,
+//RS     _span: crate::Diagnostics::Span,
+//RS ) -> Result<MirTextHoleKind, LowerError> {
+//RS     Ok(match ty {
+//RS         crate::AST::Type::String | crate::AST::Type::Char => MirTextHoleKind::Text,
+//RS         crate::AST::Type::Int | crate::AST::Type::IntN { .. } | crate::AST::Type::Measure(_) => {
+//RS             MirTextHoleKind::Int
+//RS         }
+//RS         crate::AST::Type::Float | crate::AST::Type::Float32 => MirTextHoleKind::Float,
+//RS         crate::AST::Type::Bool => MirTextHoleKind::Bool,
+//RS         crate::AST::Type::InlineRange { lo, hi, .. } => {
+//RS             MirTextHoleKind::InlineRange { lo: *lo, hi: *hi }
+//RS         }
+//RS         _ => return unsupported_pattern(ctx, "TPatternShape::Text (invalid hole type)"),
+//RS     })
+//RS }
+//RS 
+//RS /// S31: a nested payload pattern. Its owner comes from the payload type when
+//RS /// MIR lowers the test, so it is lowered here without one.
+//RS fn lower_nested_pattern_shape(
+//RS     ctx: &mut LowerCtx,
+//RS     inner: Option<&TPatternShape>,
+//RS ) -> Result<Option<Box<MirPatternShape>>, LowerError> {
+//RS     inner
+//RS         .map(|inner| lower_pattern_shape(ctx, inner, None).map(Box::new))
+//RS         .transpose()
+//RS }
+//RS 
+//RS fn lower_pattern_binding(
+//RS     ctx: &mut LowerCtx,
+//RS     binding: &TPatternBinding,
+//RS ) -> Result<MirPatternBinding, LowerError> {
+//RS     Ok(match binding {
+//RS         TPatternBinding::Wildcard => MirPatternBinding::Wildcard,
+//RS         TPatternBinding::Bind { name, span } => MirPatternBinding::Bind {
+//RS             name: name.clone(),
+//RS             span: *span,
+//RS         },
+//RS         TPatternBinding::Range { lo, hi } => MirPatternBinding::Range { lo: *lo, hi: *hi },
+//RS         TPatternBinding::Nested(inner) => {
+//RS             MirPatternBinding::Nested(Box::new(lower_pattern_shape(ctx, inner, None)?))
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn default_constant(ty: &crate::AST::Type) -> crate::AST::CtValue {
+//RS     use crate::AST::{CtFloat, CtValue, Type};
+//RS     match ty {
+//RS         Type::Int | Type::IntN { .. } | Type::Measure(_) => CtValue::Int(0),
+//RS         Type::Float => CtValue::Float(CtFloat::f64(0.0)),
+//RS         Type::Float32 => CtValue::Float(CtFloat::f32(0.0)),
+//RS         Type::Bool => CtValue::Bool(false),
+//RS         Type::String => CtValue::Str(String::new()),
+//RS         Type::Char => CtValue::Char('\0'),
+//RS         Type::List(_) | Type::FixedList { .. } => CtValue::List(Vec::new()),
+//RS         Type::Map { .. } => CtValue::Map(BTreeMap::new()),
+//RS         Type::Shared(inner)
+//RS         | Type::InlineRange { base: inner, .. }
+//RS         | Type::Tagged { inner, .. }
+//RS         | Type::Quantity { base: inner, .. } => default_constant(inner),
+//RS         Type::Option(inner) => CtValue::absent((**inner).clone()),
+//RS         Type::Result { ok, .. } => CtValue::Present(Box::new(default_constant(ok))),
+//RS         Type::Tuple(fields) => CtValue::Struct {
+//RS             type_name: "Tuple".to_string(),
+//RS             fields: fields
+//RS                 .iter()
+//RS                 .map(|(name, ty)| (name.clone(), default_constant(ty)))
+//RS                 .collect(),
+//RS         },
+//RS         Type::Fn { .. }
+//RS         | Type::Named(_)
+//RS         | Type::Apply { .. }
+//RS         | Type::TraitObject(_)
+//RS         | Type::Union(_) => CtValue::Unit,
+//RS     }
+//RS }
+//RS 
+//RS fn unsupported_expr<T>(ctx: &mut LowerCtx, variant: impl Into<String>) -> Result<T, LowerError> {
+//RS     let span = ctx.span();
+//RS     let variant = variant.into();
+//RS     Err(ctx.error(span, format!("{variant} has no canonical MIR operation")))
+//RS }
+//RS 
+//RS fn unsupported_pattern<T>(ctx: &mut LowerCtx, variant: impl Into<String>) -> Result<T, LowerError> {
+//RS     let span = ctx.span();
+//RS     let variant = variant.into();
+//RS     Err(ctx.error(span, format!("{variant} has no canonical MIR projection")))
+//RS }
+// END-PORT-PENDING 0535 crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:10028-11053
+

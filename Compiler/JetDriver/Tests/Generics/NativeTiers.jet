@@ -1,0 +1,59 @@
+// Original tests/generics.rs process rows; JET_TEST_BIN is the actual CLI under test.
+// These are executable native receipts, not substitutes for Driver/SemIndex tests.
+use core.files as genmod_native_files
+use core.process as genmod_native_process
+
+fn genmod_native_command(binary: String, root: String, arguments: [String]) -> ProcessReceipt Never! -[Exec, Time.Wait]> {
+    argv := [String]{binary}
+    loop argument in arguments -> &argv.push(argument)
+    genmod_native_process.cmd(argv).cwd(root).env("NO_COLOR", "1").run() ?? panic("original generic-module process could not start")
+}
+fn genmod_native_output(binary: String, root: String, arguments: [String], expected: String) Never! -[Exec, Time.Wait]> {
+    receipt :: genmod_native_command(binary, root, arguments)
+    assert(receipt.success)
+    assert_eq(receipt.code, 0)
+    assert_eq(receipt.output, expected)
+}
+
+#Test fn generic_module_fact_value_example_has_profile_and_tier_parity() Never! -[FS, Env, Exec, Time.Wait]> {
+    binary :: genmod_native_process.env_get("JET_TEST_BIN") ?? panic("original tier test requires JET_TEST_BIN naming the actual compiled Jet CLI")
+    temporary :: genmod_native_files.temp_dir("jet_generic_module_fact_parity") ?? panic("create original isolated fact-value fixture")
+    root :: temporary.path
+    entry :: "{root}/fact_value_arguments.jet"
+    genmod_native_files.write(entry, GENMOD_FACT_EXAMPLE_SOURCE) ?? panic("write original fact-value example")
+    loop (position, profile) in [String]{"compact", "spacious"} {
+        setting :: if position == 0 -> "2" else -> "5"
+        expected :: "{setting}\n"
+        profile_arg :: "--profile={profile}"
+        setting_arg :: "cache_slots={setting}"
+        genmod_native_output(binary, root, [String]{"run", profile_arg, entry}, expected)
+        genmod_native_output(binary, root, [String]{"dev", entry, profile_arg, "--interpret", "--watch=off"}, expected)
+        genmod_native_output(binary, root, [String]{"run", "--release", "--set", setting_arg, entry}, expected)
+        genmod_native_output(binary, root, [String]{"run", "--set", setting_arg, entry}, expected)
+    }
+    explain :: genmod_native_command(binary, root, [String]{"explain", "tuned.slots", entry, "--profile=compact"})
+    assert(explain.success)
+    assert(explain.output.contains("value:2"))
+    assert(explain.output.contains("build.compact.settings.cache_slots"))
+    rows :: [[String]]{[String]{"run", "--release", entry}, [String]{"run", entry}, [String]{"run", "--interpret", entry}, [String]{"dev", entry, "--interpret", "--watch=off"}}
+    loop arguments in rows -> genmod_native_output(binary, root, arguments, "3\n")
+}
+#Test fn generic_module_local_bindings_shadow_substitution_values_native_tiers() Never! -[FS, Env, Exec, Time.Wait]> {
+    binary :: genmod_native_process.env_get("JET_TEST_BIN") ?? panic("original tier test requires JET_TEST_BIN")
+    temporary :: genmod_native_files.temp_dir("jet_generic_module_shadowing") ?? panic("create original shadowing fixture")
+    root :: temporary.path
+    genmod_native_files.write("{root}/package.jet", genmod_manifest("generic_module_shadowing")) ?? panic("write original shadowing package")
+    entry :: "{root}/main.jet"
+    genmod_native_files.write(entry, GENMOD_SHADOW_SOURCE) ?? panic("write original shadowing source")
+    genmod_native_output(binary, root, [String]{"run", entry}, "5\n5\n")
+    genmod_native_output(binary, root, [String]{"run", "--release", entry}, "5\n5\n")
+}
+#Test fn assert_nested_generic_module_execution_native() Never! -[FS, Env, Exec, Time.Wait]> {
+    binary :: genmod_native_process.env_get("JET_TEST_BIN") ?? panic("original nested test requires JET_TEST_BIN")
+    temporary :: genmod_native_files.temp_dir("jet_generic_modules_nested") ?? panic("create original nested fixture")
+    root :: temporary.path
+    genmod_native_files.write("{root}/package.jet", genmod_manifest("generic_modules_nested")) ?? panic("write original nested package")
+    entry :: "{root}/main.jet"
+    genmod_native_files.write(entry, GENMOD_NESTED_RUN_SOURCE) ?? panic("write original nested source")
+    genmod_native_output(binary, root, [String]{"run", entry}, "6\n")
+}

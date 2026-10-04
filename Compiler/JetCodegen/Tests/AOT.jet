@@ -1,0 +1,267 @@
+// MIRRust execution-config, ordinary-AOT metadata, and transitive codec tests.
+// Source-only until Main composes canonical identity, @ lowering, and runtime
+// source providers. Fixtures are real MIR graphs; no host/Rust emitter mock.
+use jet_foundation as f
+use jet_codegen as c
+use jet_optimizer as optimizer
+
+fn aot_span() -> f.Span Never! { f.Span{start: 0, end: 0} }
+fn aot_applicability() -> f.MIRTargetApplicability Never! {
+    f.MIRTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: false}
+}
+fn aot_effects() -> f.MIREffectFacts Never! {
+    f.MIREffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [f.MIRNamedSpan]{}}
+}
+fn aot_config() -> c.JetRustEmitConfig Never! {
+    c.jet_rust_emit_config_for_artifact(f.MIRArtifactID{value: 1}, f.jet_target_layout_from_triple("x86_64-unknown-linux-gnu", "0.1.0"), c.JetRustEmitTarget.Native)
+}
+fn aot_function(id: U64, module: U64, name: String) -> f.MIRFunction Never! {
+    ty :: f.mir_type_from_kind(f.MIRTypeKind.Float)
+    value :: f.MIRValueID{value: 0}
+    f.MIRFunction{
+        id: f.MIRFunctionID{value: id}, module_id: f.MIRModuleID{value: module}, source_file: f.MIRSourceFileID{value: 1},
+        key: "fixture::{name}", module_name: "fixture", name: name, span: aot_span(), kind: f.MIRFunctionKind.Jet,
+        form: f.MIRFunctionForm.TopLevel, visibility: f.MIRVisibility.Private, target_applicability: aot_applicability(),
+        web_bucket: None, web_marker: None, generic_params: [f.MIRGenericParam]{}, capture_params: [f.MIRCaptureParam]{},
+        params: [f.MIRParam]{}, declared_return: Val(ty), return_type: ty, failure: f.MIRFailureCarrier.Infallible,
+        effects: aot_effects(), captures: None, generator: None, optimization: f.mir_empty_optimization_facts(),
+        is_unsafe: false, unsafe_gate: None, is_pure: false, memo_bound: None, memo_unbounded: false, is_reactive: false,
+        reactive_upgrades: [String]{}, is_inline: false, is_inline_always: false, is_scalar: false, kernel_proof: None,
+        gc_return: false, return_view_provenance: None, web_param_reconstructions: [f.MIRWebParamReconstruction]{},
+        blocks: [f.MIRBasicBlock]{f.MIRBasicBlock{id: f.MIRBlockID{value: 0}, span: aot_span(), instructions: [f.MIRInstruction]{
+            f.MIRInstruction{id: f.MIROpID{value: 0}, span: aot_span(), source_line: Val(1), result: Val(value), ty: Val(ty), operation: f.MIROperation.Constant{value: f.MIRConstant.Float{value: 0.0, f32: false, spelling: None}}}
+        }, terminator: f.MIRTerminator.Return{value: Val(value)}}}, entry: f.MIRBlockID{value: 0}, locals: [f.MIRLocal]{},
+        values: [f.MIRValueFact]{f.MIRValueFact{id: value, ty: ty, span: aot_span(), ownership: f.mir_copy_ownership()}},
+        places: [f.MIRPlace]{}, scopes: [f.MIRScope]{}, drops: [f.MIRDropAction]{}, foreign_language: None,
+    }
+}
+fn aot_type(id: U64, module: U64, name: String) -> f.MIRTypeDef Never! {
+    f.MIRTypeDef{
+        id: f.MIRTypeID{value: id}, module_id: f.MIRModuleID{value: module}, key: "fixture::{name}", name: name,
+        span: aot_span(), public: false, package_public: false, generic_params: [f.MIRGenericParam]{}, derives: [f.MIRTraitID]{},
+        auto_derive_default: false, auto_printable: false, published_schema: false, single_use: false, must_use: false,
+        layout: None, c_layout_tag: None, enum_layout: None, layout_alignment: None, cli: None, serde: [f.MIRSerdeAttribute]{},
+        cli_bindings: [f.MIRCLIBinding]{}, ownership: f.MIROwnershipMode.Copy, boxed_edges: [String]{}, compiler_builtin: None,
+        kind: f.MIRTypeDefKind.Enum{variants: [f.MIRVariant]{
+            f.MIRVariant{name: "FloatCase", wire_name: "float-case", span: aot_span(), payload: f.MIRVariantPayload.Single{value: f.mir_type_from_kind(f.MIRTypeKind.Float)}, discriminant: None},
+            f.MIRVariant{name: "Empty", wire_name: "empty", span: aot_span(), payload: f.MIRVariantPayload.Unit, discriminant: None}
+        }, methods: [f.MIRFunctionID]{}}
+    }
+}
+fn aot_artifact(id: U64, module: U64) -> f.MIRArtifactPlan Never! {
+    f.MIRArtifactPlan{id: f.MIRArtifactID{value: id}, kind: f.MIRArtifactKind.NativeLibrary, name: "fixture-{id}",
+        target: f.MIRArtifactTarget.RustAOT, mode: f.MIRArtifactBuildMode.Dev, modules: [f.MIRModuleID]{f.MIRModuleID{value: module}},
+        links: [f.MIRLinkUnitID]{}, jobs: [f.MIRJobID]{}, runtime_parts: [f.MIRRuntimePartID]{}, exports: [f.MIRExport]{},
+        provider_identity: "fixture-provider", closure_identity: "fixture-closure", artifact_identity: "fixture-artifact-{id}", entry: None, harness: None}
+}
+fn aot_program() -> f.MIRProgram Never! {
+    f.MIRProgram{
+        cffi: f.MIRCffiFacts{import_links: [f.MIRCImportLink]{}, libs: [f.MIRCLib]{}, overlay_overrides: [f.MIRCOverlayOverride]{}, boundaries: [f.MIRFFIBoundaryFacts]{}, direct_links: [String]{}, transitive_links: [String]{}, close_adapters: [f.MIRCloseAdapter]{}},
+        schema_version: f.MIR_SCHEMA_VERSION, package_identity: "aot-fixture",
+        facts: f.MIRPackageFacts{project_root: "", edition: "2028", runtime_parts: [f.MIRRuntimePartID]{}, uses_arrow: false,
+            active_os: "linux", inferred_layer: "std", allocator: "", package_version: "0.1.0", artifact_target: None,
+            target_dossier: f.MIRTargetDossier{machine: None, layer: f.MIRRuntimeLayer.Std, provider_identity: "fixture-provider", closure_identity: "fixture-closure", linker_identity: "", tier_identity: "", compiler_identity: "", environment_identity: "", dependency_identity: ""},
+            web_app: None, authority_needs: [String]{}, hardware_use: f.MIRTargetHardwareUse{register_accesses: [f.MIRTargetRegisterAccessFact]{}, interrupt_handlers: [f.MIRTargetInterruptHandlerFact]{}, dma_operations: [f.MIRTargetDMAOperationFact]{}, unresolved_references: [f.MIRTargetHardwareUnresolvedReference]{}},
+            hardware_profile: None, hardware_profile_id: "", hardware_capabilities: [String]{}, hardware_setups: [f.MIRHardwareSetup]{}},
+        names: f.MIRNameFacts{modules: [f.MIRNameModule]{}, declarations: [f.MIRNameDeclaration]{}, aliases: [f.MIRNameAlias]{}, references: [f.MIRNameReference]{}, structure_facts: [f.MIRStructureFact]{}},
+        modules: [f.MIRModule]{
+            f.MIRModule{id: f.MIRModuleID{value: 1}, key: "fixture", name: "fixture", path: "fixture.jet", source_file: f.MIRSourceFileID{value: 1}, imports: [f.MIRImportID]{}, children: [f.MIRModuleID]{}, item_order: [f.MIRItemRef]{}},
+            f.MIRModule{id: f.MIRModuleID{value: 2}, key: "other", name: "other", path: "other.jet", source_file: f.MIRSourceFileID{value: 1}, imports: [f.MIRImportID]{}, children: [f.MIRModuleID]{}, item_order: [f.MIRItemRef]{}}
+        }, imports: [f.MIRImport]{}, types: [f.MIRTypeDef]{aot_type(1, 1, "PrivateOutput"), aot_type(2, 2, "Unselected")},
+        traits: [f.MIRTraitDef]{}, core_owners: [f.MIRCoreOwner]{}, impls: [f.MIRImplDef]{}, constants: [f.MIRConstantDef]{}, fields: [f.MIRFieldRow]{},
+        source_files: [f.MIRSourceFile]{f.MIRSourceFile{id: f.MIRSourceFileID{value: 1}, path: "fixture.jet", source: "fn private_factory() -> Float Never! { 0.0 }"}},
+        functions: [f.MIRFunction]{aot_function(1, 1, "private_factory"), aot_function(2, 2, "unselected")}, foreign: [f.MIRForeign]{}, links: [f.MIRLinkUnit]{},
+        callbacks: [f.MIRCallbackAdapter]{}, handles: [f.MIRHandleLifecycle]{}, jobs: [f.MIRJob]{}, tests: [f.MIRTestCase]{}, harnesses: [f.MIRHarnessPlan]{},
+        artifacts: [f.MIRArtifactPlan]{aot_artifact(1, 1), aot_artifact(2, 2)}, core_calls: [f.MIRCoreCall]{}, prelude_calls: [f.MIRPreludeCall]{},
+        type_instances: [f.MIRType]{}, codec_migrations: [String:f.MIRSchemaMigrationPlan]{}, unreachable: [f.MIRUnreachable]{}
+    }
+}
+fn aot_optimized() -> f.MIRProgram {
+    result :: optimizer.optimize_mir_program(aot_program(), true)
+    assert_eq(result.error, None)
+    result.program ?? panic("real AOT fixture optimization returned no program")
+}
+fn aot_metadata(program: f.MIRProgram, config: c.JetRustEmitConfig) -> c.JetRustEmitManifest {
+    if c.jet_rust_emit_aot_metadata(program, config) == {
+        .Complete(manifest) -> manifest
+        .Incomplete(failure) -> panic("AOT metadata failed: {failure.message}: {failure.detail}")
+    }
+}
+
+test "AOT artifact config preserves the whole reference defaults" {
+    config :: aot_config()
+    assert_eq(config.artifact.value, 1)
+    assert_eq(config.target_kind, c.JetRustEmitTarget.Native)
+    assert_eq(config.target.triple, "x86_64-unknown-linux-gnu")
+    assert_eq(config.ffi, None)
+    assert_eq(config.web_bucket, None)
+    assert_eq(config.root_prefix, "")
+    assert(config.emit_types && config.emit_foreign && config.emit_runtime)
+    assert(!config.emit_metadata && !config.emit_debug_linemap && !config.prune_unreachable_codecs)
+    assert_eq(config.semantic_digest, None)
+    assert_eq(config.release_devtools_policy, f.pkg_release_policy_development())
+}
+
+test "AOT metadata selects the exact artifact and private ordinary symbols" {
+    program :: aot_optimized()
+    config := aot_config()
+    first :: aot_metadata(program, config)
+    assert_eq(first.source_bytes, 0)
+    assert_eq(first.callable_metadata.len(), 1)
+    assert_eq(first.callable_metadata[0].function.value, 1)
+    assert_eq(first.callable_metadata[0].symbol, first.function_symbols.get("1") ?? panic("missing ordinary callable symbol"))
+    assert_eq(first.callable_metadata[0].parameter_types.len(), 0)
+    assert_eq(first.type_metadata.len(), 1)
+    assert_eq(first.type_metadata[0].ty.value, 1)
+    assert_eq(first.variant_metadata.len(), 2)
+    assert_eq(first.variant_metadata[0].source_name, "FloatCase")
+    assert_eq(first.variant_metadata[0].wire_name, "float-case")
+    assert_eq(first.variant_metadata[0].payload_types, [String]{"f64"})
+    assert_eq(first.variant_metadata[1].payload_types.len(), 0)
+    config.artifact = f.MIRArtifactID{value: 2}
+    second :: aot_metadata(program, config)
+    assert_eq(second.callable_metadata.len(), 1)
+    assert_eq(second.callable_metadata[0].function.value, 2)
+    assert_eq(second.type_metadata[0].ty.value, 2)
+}
+
+test "AOT metadata type gating leaves callables and zero source bytes" {
+    program :: aot_optimized()
+    config := aot_config()
+    config.emit_types = false
+    config.emit_metadata = true
+    config.emit_debug_linemap = true
+    config.prune_unreachable_codecs = true
+    result :: aot_metadata(program, config)
+    assert_eq(result.source_bytes, 0)
+    assert_eq(result.callable_metadata.len(), 1)
+    assert_eq(result.type_metadata.len(), 0)
+    assert_eq(result.variant_metadata.len(), 0)
+    assert_eq(result.traits.len(), 0)
+    assert_eq(result.trait_methods.len(), 0)
+}
+
+test "AOT metadata rejects missing artifact rather than selecting a target fallback" {
+    program :: aot_optimized()
+    config := aot_config()
+    config.artifact = f.MIRArtifactID{value: 99}
+    if c.jet_rust_emit_aot_metadata(program, config) == {
+        .Complete(_) -> panic("missing artifact accepted")
+        .Incomplete(failure) -> assert_eq(failure.kind, c.JetRustEmitFailureKind.MissingIdentity)
+    }
+}
+
+test "AOT metadata equals ordinary emission metadata without source scraping" {
+    program :: aot_optimized()
+    config := aot_config()
+    config.emit_runtime = false // An item-only printer test, not a standalone runtime proof.
+    config.emit_metadata = true
+    config.emit_debug_linemap = true
+    expected :: aot_metadata(program, config)
+    if c.jet_rust_emit_program(program, config, None) == {
+        .Complete(source, manifest) -> {
+            assert_eq(manifest.callable_metadata, expected.callable_metadata)
+            assert_eq(manifest.type_metadata, expected.type_metadata)
+            assert_eq(manifest.variant_metadata, expected.variant_metadata)
+            assert(source.contains("// jet-mir-identity:"))
+            assert(source.contains("// jet-mir-module: id=1 key=fixture"))
+            assert(source.contains("// jet:line 1"))
+            assert(!source.contains("// jet-mir-module: id=2"))
+        }
+        .Incomplete(failure) -> panic("ordinary AOT failed: {failure.message}: {failure.detail}")
+    }
+}
+
+fn aot_codec(id: U64, name: String, methods: [f.MIRFunctionID]) -> f.MIRImplDef Never! {
+    f.MIRImplDef{id: f.MIRImplID{value: id}, module_id: f.MIRModuleID{value: 1}, key: "fixture::{name}::Encode", span: aot_span(),
+        self_type: f.mir_type_from_kind(f.MIRTypeKind.Apply{name: f.mir_nominal_ref(name), args: [f.MIRType]{}}), trait_ref: None,
+        associated_types: [f.MIRAssociatedTypeValue]{}, methods: methods, delegation: None, compiler_generated: true,
+        serde: Val(f.MIRSerdeCodec.Encode), operator_marker: None, operator_rhs: None, target_os: None, target_applicability: aot_applicability()}
+}
+test "AOT codec demand traverses nested generic arguments and demanded method bodies" {
+    program := aot_program()
+    root := aot_function(1, 1, "root")
+    first := aot_function(2, 1, "first_codec")
+    second :: aot_function(3, 1, "second_codec")
+    unused :: aot_function(4, 1, "unused_codec")
+    inner :: f.mir_type_from_kind(f.MIRTypeKind.Apply{name: f.mir_nominal_ref("First"), args: [f.MIRType]{}})
+    nested :: f.mir_type_from_kind(f.MIRTypeKind.Option{inner: f.mir_type_from_kind(f.MIRTypeKind.List{inner: inner})})
+    &root.blocks[0].instructions.push(f.MIRInstruction{id: f.MIROpID{value: 1}, span: aot_span(), source_line: None, result: None, ty: None,
+        operation: f.MIROperation.Call{callee: f.MIRCallee.User{function: root.id}, args: [f.MIRCallArg]{}, type_args: [f.MIRType]{nested}}})
+    &first.blocks[0].instructions.push(f.MIRInstruction{id: f.MIROpID{value: 1}, span: aot_span(), source_line: None, result: None, ty: None,
+        operation: f.MIROperation.Call{callee: f.MIRCallee.User{function: second.id}, args: [f.MIRCallArg]{}, type_args: [f.MIRType]{}}})
+    program.functions = [f.MIRFunction]{root, first, second, unused}
+    program.impls = [f.MIRImplDef]{aot_codec(1, "First", [f.MIRFunctionID]{first.id}), aot_codec(2, "Second", [f.MIRFunctionID]{second.id}), aot_codec(3, "Unused", [f.MIRFunctionID]{unused.id})}
+    assert_eq(f.mir_demanded_codec_impls(program), [Bool]{true, true, false})
+    program.functions[0].blocks[0].instructions = [f.MIRInstruction]{}
+    assert_eq(f.mir_demanded_codec_impls(program), [Bool]{false, false, false})
+}
+
+test "AOT metadata retains field owners and exact trait method ABI rows" {
+    program := aot_program()
+    scalar :: f.mir_type_from_kind(f.MIRTypeKind.Float)
+    field :: f.MIRField{id: f.MIRFieldID{value: 30}, name: "count", shape_names: f.MIRShapeFieldNames{text: "count", json: None, cbor: None, csv: None, toml: None, yaml: None, xml: None, args: "count", env: "COUNT", db: None, layout: None},
+        skip: false, ty: scalar, span: aot_span(), public: false, package_public: false, computed: false, has_default: false, redact: false}
+    record := aot_type(3, 1, "Record")
+    record.kind = f.MIRTypeDefKind.Struct{fields: [f.MIRField]{field}, methods: [f.MIRFunctionID]{}}
+    &program.types.push(record)
+    &program.fields.push(f.MIRFieldRow{id: field.id, owner: record.id, field: field})
+    parameter :: f.MIRParam{index: 0, name: "amount", span: aot_span(), ty: scalar, access: f.MIRAccess.Write,
+        ownership: f.mir_ownership_from_access(f.MIRAccess.Write), public_label: "amount", variadic: false, default_present: false}
+    method :: f.MIRTraitMethod{id: f.MIRTraitMethodID{value: 50}, name: "update", span: aot_span(), self_access: Val(f.MIRAccess.Write),
+        params: [f.MIRParam]{parameter}, declared_return: Val(scalar), return_type: scalar, failure: f.MIRFailureCarrier.Infallible,
+        effects: aot_effects(), is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: None}
+    &program.traits.push(f.MIRTraitDef{id: f.MIRTraitID{value: 40}, module_id: f.MIRModuleID{value: 1}, key: "fixture::Updater", name: "Updater",
+        span: aot_span(), visibility: f.MIRVisibility.Private, associated_types: [f.MIRAssociatedTypeDecl]{}, methods: [f.MIRTraitMethod]{method}})
+    optimized :: optimizer.optimize_mir_program(^program, true)
+    assert_eq(optimized.error, None)
+    checked :: optimized.program ?? panic("field/trait fixture optimization returned no program")
+    config :: aot_config()
+    manifest :: aot_metadata(checked, config)
+    assert_eq(manifest.field_metadata.len(), 1)
+    assert_eq(manifest.field_metadata[0].field.value, 30)
+    assert_eq(manifest.field_metadata[0].owner.value, 3)
+    assert_eq(manifest.field_metadata[0].symbol, manifest.field_symbols.get("30") ?? panic("missing ordinary field symbol"))
+    assert_eq(manifest.traits.len(), 1)
+    assert_eq(manifest.traits[0].trait_id.value, 40)
+    assert_eq(manifest.trait_methods.len(), 1)
+    row :: manifest.trait_methods[0]
+    assert_eq(row.trait_id.value, 40)
+    assert_eq(row.method_id.value, 50)
+    assert_eq(row.key, "fixture::Updater::update")
+    assert_eq(row.receiver_access, Val(f.MIRAccess.Write))
+    assert_eq(row.parameter_types, [String]{"&mut f64"})
+    assert_eq(row.parameter_access, [f.MIRAccess]{f.MIRAccess.Write})
+    assert_eq(row.return_type, "f64")
+}
+
+test "AOT metadata pushes and restores generic enum payload scope" {
+    program := aot_program()
+    generic :: f.MIRGenericParam{name: "T", bounds: [f.MIRTraitRef]{}}
+    program.types[0].generic_params = [f.MIRGenericParam]{generic}
+    payload :: f.mir_type_from_kind(f.MIRTypeKind.Apply{name: f.mir_nominal_ref("T"), args: [f.MIRType]{}})
+    program.types[0].kind = f.MIRTypeDefKind.Enum{variants: [f.MIRVariant]{
+        f.MIRVariant{name: "Value", wire_name: "wire-value", span: aot_span(), payload: f.MIRVariantPayload.Single{value: payload}, discriminant: None}
+    }, methods: [f.MIRFunctionID]{}}
+    optimized :: optimizer.optimize_mir_program(^program, true)
+    assert_eq(optimized.error, None)
+    checked :: optimized.program ?? panic("generic fixture optimization returned no program")
+    config :: aot_config()
+    manifest :: aot_metadata(checked, config)
+    assert_eq(manifest.variant_metadata.len(), 1)
+    assert_eq(manifest.variant_metadata[0].source_name, "Value")
+    assert_eq(manifest.variant_metadata[0].wire_name, "wire-value")
+    assert_eq(manifest.variant_metadata[0].payload_types, [String]{"T"})
+    assert_eq(manifest.callable_metadata[0].return_type, "f64")
+}
+
+test "AOT metadata omits a selected-module callable outside target applicability" {
+    program := aot_program()
+    program.functions[0].target_applicability.rust_aot = false
+    optimized :: optimizer.optimize_mir_program(^program, true)
+    assert_eq(optimized.error, None)
+    checked :: optimized.program ?? panic("target applicability fixture optimization returned no program")
+    result :: aot_metadata(checked, aot_config())
+    assert_eq(result.callable_metadata.len(), 0)
+    assert_eq(result.type_metadata.len(), 1)
+}

@@ -1,0 +1,276 @@
+// MIROptimization.rs:3606-3678. Shared native checks retain original subjects.
+fn mir_native_reference(function: MIRFunctionID, subject: String, span: Span) -> MIRLegalityError Never! {
+    MIRLegalityError.InvalidReference{function: function, subject: subject, span: span}
+}
+fn mir_native_require_type(tables: MIRNativeProgramIndex, ty: MIRTypeID, function: MIRFunctionID, span: Span) MIRLegalityError! {
+    if tables.types.get(ty.value) == None -> return Err(mir_native_reference(function, "type MirTypeId({ty.value})", span))
+    return
+}
+fn mir_native_require_field(tables: MIRNativeProgramIndex, field: MIRFieldID, function: MIRFunctionID, span: Span) MIRLegalityError! {
+    if tables.fields.get(field.value) == None -> return Err(mir_native_reference(function, "field MirFieldId({field.value})", span))
+    return
+}
+fn mir_native_require_source(tables: MIRNativeProgramIndex, source: MIRSourceFileID, function: MIRFunctionID, span: Span) MIRLegalityError! {
+    if tables.sources.get(source.value) == None -> return Err(mir_native_reference(function, "source file MirSourceFileId({source.value})", span))
+    return
+}
+fn mir_native_require_prelude(tables: MIRNativeProgramIndex, call: MIRPreludeCallID, function: MIRFunctionID, span: Span) MIRLegalityError! {
+    if tables.prelude.get(call.value) == None -> return Err(mir_native_reference(function, "Prelude call MirPreludeCallId({call.value})", span))
+    return
+}
+fn mir_native_verify_call_callee(callee: MIRCallee, tables: MIRNativeProgramIndex, function: MIRFunctionID, span: Span) MIRLegalityError! {
+    if callee == {
+        .Associated(target, _) | .Method(target, _) -> { if tables.functions.get(target.value) == None -> return Err(mir_native_reference(function, "associated callee MirFunctionId({target.value})", span)) }
+        .User(target) -> { if tables.functions.get(target.value) == None -> return Err(mir_native_reference(function, "callee MirFunctionId({target.value})", span)) }
+        .Foreign(target) -> { if tables.foreign.get(target.value) == None -> return Err(mir_native_reference(function, "foreign callee MirForeignId({target.value})", span)) }
+        .Core(target) -> { if tables.core.get(target.value) == None -> return Err(mir_native_reference(function, "Core callee MirCoreCallId({target.value})", span)) }
+        .Prelude(target) -> { if tables.prelude.get(target.value) == None -> return Err(mir_native_reference(function, "Prelude callee MirPreludeCallId({target.value})", span)) }
+        .Indirect(_) | .TraitMethod(_, _, _) -> {}
+    }
+    return
+}
+fn mir_native_ensure_value_dominates(function: MIRFunctionID, index: MIRNativeFunctionIndex, dominance: MIRPassDominance, block: MIRBlockID, position: Int, value: MIRValueID, span: Span) MIRLegalityError! {
+    definition :: index.definitions.values.get(value.value) ?? return Err(mir_native_reference(function, "value MirValueId({value.value})", span))
+    if !mir_pass_definition_dominates(definition, block, position, dominance) -> return Err(mir_native_reference(function, "non-dominating value MirValueId({value.value})", span))
+    return
+}
+
+// MIROptimization.rs:1754-1888. Reachable phi operands are edge uses; cleanup
+// roots use the same canonical dominance as ownership and root validation.
+fn mir_native_verify_block_references(block: MIRBasicBlock, function: MIRFunction, index: MIRNativeFunctionIndex, program: MIRProgram, tables: MIRNativeProgramIndex, reachable: [U64:Bool], predecessors: [U64:[MIRBlockID]], dominance: MIRPassDominance) MIRLegalityError! {
+    block_predecessors := [U64:Bool]{}
+    loop predecessor in predecessors.get(block.id.value) ?? [MIRBlockID]{} -> block_predecessors[predecessor.value] = true
+    loop (position, instruction) in block.instructions {
+        operation :: instruction.operation
+        if reachable.get(block.id.value) != None {
+            if operation == {
+                .Phi(incoming) -> {
+                    seen := [U64:Bool]{}
+                    loop row in incoming {
+                        if seen.get(row.block.value) != None || index.blocks.get(row.block.value) == None || block_predecessors.get(row.block.value) == None || reachable.get(row.block.value) == None -> return Err(mir_native_reference(function.id, "phi predecessor MirBlockId({row.block.value})", instruction.span))
+                        seen[row.block.value] = true
+                        predecessor :: index.blocks.get(row.block.value) ?? return Err(mir_native_reference(function.id, "phi predecessor MirBlockId({row.block.value})", instruction.span))
+                        mir_native_ensure_value_dominates(function.id, index, dominance, row.block, function.blocks[predecessor].instructions.len(), row.value, instruction.span)
+                    }
+                    expected := 0
+                    loop predecessor in predecessors.get(block.id.value) ?? [MIRBlockID]{} {
+                        if reachable.get(predecessor.value) != None -> expected += 1
+                    }
+                    if seen.len() != expected -> return Err(mir_native_reference(function.id, "phi edges for block MirBlockId({block.id.value})", instruction.span))
+                }
+                else -> { loop value in mir_operation_value_uses(operation) -> mir_native_ensure_value_dominates(function.id, index, dominance, block.id, position, value, instruction.span) }
+            }
+            if operation == .ScopeEnter(scope, _) {
+                if index.scopes.get(scope.value) == .Val(scope_position) {
+                    if function.scopes[scope_position].deadline == .Val(deadline) -> mir_native_ensure_value_dominates(function.id, index, dominance, block.id, position, deadline, instruction.span)
+                }
+            }
+            loop place in mir_pass_operation_place_refs(operation) {
+                if index.definitions.places.get(place.value) == None -> return Err(mir_native_reference(function.id, "place MirPlaceId({place.value})", instruction.span))
+                loop value in mir_pass_place_value_uses(function.places, index.definitions.places, place) -> mir_native_ensure_value_dominates(function.id, index, dominance, block.id, position, value, instruction.span)
+            }
+        } else {
+            loop place in mir_pass_operation_place_refs(operation) {
+                if index.definitions.places.get(place.value) == None -> return Err(mir_native_reference(function.id, "place MirPlaceId({place.value})", instruction.span))
+            }
+        }
+        if operation == .TraitBox(_, target) {
+            result :: instruction.result ?? return Err(mir_native_reference(function.id, "trait boxing instruction has no result", instruction.span))
+            ty :: instruction.ty ?? return Err(mir_native_reference(function.id, "trait boxing result MirValueId({result.value}) has no type", instruction.span))
+            one_bound :: if ty.kind == .TraitObject(bounds) -> bounds.len() == 1 else -> false
+            if ty.identity != Val(target) || !one_bound -> return Err(mir_native_reference(function.id, "trait boxing result MirValueId({result.value}) does not match target MirTypeId({target.value})", instruction.span))
+        }
+        mir_native_verify_operation_metadata(operation, instruction.span, function, index, program, tables)
+    }
+    if reachable.get(block.id.value) != None {
+        loop value in mir_terminator_value_uses(block.terminator) -> mir_native_ensure_value_dominates(function.id, index, dominance, block.id, block.instructions.len(), value, block.span)
+    }
+    loop target in mir_terminator_targets(block.terminator) {
+        if index.blocks.get(target.value) == None -> return Err(mir_native_reference(function.id, "target MirBlockId({target.value})", block.span))
+    }
+    return
+}
+
+// MIROptimization.rs:2036-2487. Every native supported operation participates.
+fn mir_native_verify_operation_metadata(operation: MIROperation, span: Span, function: MIRFunction, index: MIRNativeFunctionIndex, program: MIRProgram, tables: MIRNativeProgramIndex) MIRLegalityError! {
+    loop place in mir_pass_operation_place_refs(operation) {
+        if index.definitions.places.get(place.value) == .Val(position) -> mir_native_verify_static_mutable_place(operation, function.places[position], function.id, span)
+    }
+    mir_native_verify_move_place_projection(operation, function, index, span)
+    if operation == {
+        .Binary(_, dispatch, _, _, _) -> {
+            if dispatch == .Prelude(call, location) {
+                mir_native_require_prelude(tables, call, function.id, span)
+                if location == .Val(location) -> mir_native_require_source(tables, location.file, function.id, span)
+            }
+        }
+        .Parameter(position, name) -> {
+            if position >= function.params.len() -> return Err(mir_native_reference(function.id, "parameter {position}", span))
+            if name.len() == 0 || name != function.params[position].name -> return Err(mir_native_reference(function.id, "parameter name {name:Debug} at index {position}", span))
+        }
+        .Capture(slot) -> { if slot >= function.capture_params.len() -> return Err(mir_native_reference(function.id, "capture slot {slot}", span)) }
+        .Call(callee, args, type_args) -> {
+            mir_native_verify_call_callee(callee, tables, function.id, span)
+            if callee == .Prelude(call) {
+                position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude callee MirPreludeCallId({call.value})", span))
+                route :: program.prelude_calls[position]
+                if args.len() < route.signature.arity || args.len() > route.signature.max_arity -> return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value}) arity {args.len()}", span))
+            }
+            if callee == .Associated(target, owner) | .Method(target, owner) {
+                if tables.functions.get(target.value) == None -> return Err(mir_native_reference(function.id, "associated callee MirFunctionId({target.value})", span))
+                identity :: owner.identity ?? return Err(mir_native_reference(function.id, "associated callee has no owner type identity", span))
+                if tables.types.get(identity.value) == None -> return Err(mir_native_reference(function.id, "associated owner type MirTypeId({identity.value})", span))
+                mir_native_verify_type(owner, span, function.id)
+            }
+            if callee == .TraitMethod(_, _, receiver) {
+                identity :: receiver.identity ?? return Err(mir_native_reference(function.id, "trait method callee has no receiver type identity", span))
+                if tables.types.get(identity.value) == None -> return Err(mir_native_reference(function.id, "trait method receiver type MirTypeId({identity.value})", span))
+                mir_native_verify_type(receiver, span, function.id)
+            }
+            mir_native_verify_call_args(args, function, index, tables.types, span)
+            loop ty in type_args -> mir_native_verify_type(ty, span, function.id)
+        }
+        .IndirectCall(_, args, type_args) -> {
+            mir_native_verify_call_args(args, function, index, tables.types, span)
+            loop ty in type_args -> mir_native_verify_type(ty, span, function.id)
+        }
+        .CoreCall(call, route_id, args, type_args, fallibility, data_plan) -> {
+            core_position :: tables.core.get(call.value) ?? return Err(mir_native_reference(function.id, "Core call MirCoreCallId({call.value})", span))
+            route_position :: tables.prelude.get(route_id.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({route_id.value})", span))
+            record :: program.core_calls[core_position]
+            route :: program.prelude_calls[route_position]
+            if args.len() < record.arity || args.len() > record.max_arity || args.len() < route.signature.arity || args.len() > route.signature.max_arity -> return Err(mir_native_reference(function.id, "Core call {record.key} arity {args.len()}", span))
+            if record.arity != route.signature.arity || record.max_arity != route.signature.max_arity || record.borrow_mask != route.signature.borrow_mask -> return Err(mir_native_reference(function.id, "Core call {record.key} signature disagrees with route {route_id.value}", span))
+            symbol_matches :: if record.symbol == {
+                .Prelude(core_symbol) -> { if route.symbol == .Prelude(route_symbol) -> core_symbol == route_symbol else -> false }
+                .Rust(core_symbol) -> { if route.symbol == .Runtime(route_symbol) -> core_symbol == route_symbol else -> false }
+            }
+            if !symbol_matches -> return Err(mir_native_reference(function.id, "Core call {record.key} symbol disagrees with route {route_id.value}", span))
+            if route.fallibility != fallibility -> return Err(mir_native_reference(function.id, "Core call {record.key} fallibility disagrees with route {route_id.value}", span))
+            mir_native_verify_call_args(args, function, index, tables.types, span)
+            loop ty in type_args -> mir_native_verify_type(ty, span, function.id)
+            mir_native_verify_call_fallibility(fallibility, function.id, span)
+            if data_plan == .Val(plan) {
+                if !mir_data_plan_validate(plan) -> return Err(mir_native_reference(function.id, "Core call {record.key} has an invalid data plan", span))
+                loop node in plan.logical {
+                    mir_native_verify_type(node.row_type, node.span, function.id)
+                    loop column in node.columns -> mir_native_verify_type(column.ty, node.span, function.id)
+                    if node.callable == .Val(callable) {
+                        mir_native_verify_type(callable.parameter, callable.span, function.id)
+                        mir_native_verify_type(callable.result, callable.span, function.id)
+                    }
+                }
+            }
+        }
+        .MovePlace(place) -> {
+            position :: index.definitions.places.get(place.value) ?? return Err(mir_native_reference(function.id, "move place MirPlaceId({place.value})", span))
+            row :: function.places[position]
+            if row.access != .Move -> return Err(mir_native_reference(function.id, "move place MirPlaceId({place.value}) is not a move-access place", span))
+            if row.base == .Static(_) {
+                if row.projections.len() != 0 -> return Err(mir_native_reference(function.id, "static move place MirPlaceId({place.value}) must target the whole static root", span))
+            }
+        }
+        .InitializeUninit(place) -> {
+            position :: index.definitions.places.get(place.value) ?? return Err(mir_native_reference(function.id, "uninitialized place MirPlaceId({place.value})", span))
+            row :: function.places[position]
+            if row.base == .Local(local) {
+                local_position :: index.locals.get(local.value) ?? return Err(mir_native_reference(function.id, "uninitialized place MirPlaceId({place.value}) has no local", span))
+                local_row :: function.locals[local_position]
+                if local_row.place != place || !local_row.uninit || row.projections.len() != 0 -> return Err(mir_native_reference(function.id, "uninitialized place MirPlaceId({place.value}) is not an uninitialized local root", span))
+            } else -> return Err(mir_native_reference(function.id, "uninitialized place MirPlaceId({place.value}) is not a local root", span))
+        }
+        .ProjectMembers(_, members) -> { loop member in members -> mir_native_require_field(tables, member, function.id, span) }
+        .Field(_, field) -> mir_native_require_field(tables, field, function.id, span)
+        .Index(call, _, _, kind, _, location, context) -> {
+            mir_native_require_prelude(tables, call, function.id, span)
+            position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+            route :: program.prelude_calls[position]
+            arity :: mir_native_index_route_arity(kind)
+            if route.signature.arity != arity || route.signature.max_arity != arity || route.abi != .Value -> return Err(mir_native_reference(function.id, "index route MirPreludeCallId({call.value}) must use Value ABI with arity {arity}", span))
+            mir_native_require_source(tables, location.file, function.id, span)
+            mir_native_verify_panic_context(context, function, index.locals, span)
+        }
+        .Slice(call, _, _, _, range, location) -> {
+            mir_native_require_prelude(tables, call, function.id, span)
+            position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+            route :: program.prelude_calls[position]
+            arity :: if range != None -> 4 else -> 5
+            if route.signature.arity != arity || route.signature.max_arity != arity || route.abi != .Value -> return Err(mir_native_reference(function.id, "slice route MirPreludeCallId({call.value}) must use Value ABI with arity {arity}", span))
+            mir_native_require_source(tables, location.file, function.id, span)
+        }
+        .Enum(ty, variant, args) -> {
+            mir_native_require_type(tables, ty, function.id, span)
+            if variant.len() == 0 -> return Err(mir_native_reference(function.id, "empty enum variant", span))
+            loop arg in args { if arg.field == .Val(field) -> mir_native_require_field(tables, field, function.id, span) }
+        }
+        .EnumIs(_, owner, variant) | .EnumPayload(_, owner, variant, _) -> {
+            mir_native_require_type(tables, owner, function.id, span)
+            if variant.len() == 0 -> return Err(mir_native_reference(function.id, "empty enum variant", span))
+        }
+        .LoopRangeInit(call, _, _, _, _) | .LoopIterInit(call, _, _, _, _) -> {
+            mir_native_require_prelude(tables, call, function.id, span)
+            position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+            route :: program.prelude_calls[position]
+            if route.signature.arity != 5 || route.signature.max_arity != 5 || route.signature.borrow_mask != [Bool]{false, false, false, false, false} || route.abi != .Value {
+                subject :: if operation == .LoopRangeInit(_, _, _, _, _) -> "loop range init route MirPreludeCallId({call.value}) must use Value ABI with arity 5" else -> "loop iterator init route MirPreludeCallId({call.value}) must use Value ABI with arity 5"
+                return Err(mir_native_reference(function.id, subject, span))
+            }
+            if operation == .LoopIterInit(_, _, _, _, source) {
+                if source == {
+                    .Plain | .Chars | .LinesFile | .LinesStdin | .LinesProcessStream | .ChannelReceiver -> {}
+                    .EncodingReader(reader) -> { if reader.len() == 0 -> return Err(mir_native_reference(function.id, "loop iterator encoding reader type is empty", span)) }
+                    .Iterable(collection, iterator, iter_symbol, next_symbol) -> {
+                        if collection.len() == 0 || iterator.len() == 0 || iter_symbol.len() == 0 || next_symbol.len() == 0 -> return Err(mir_native_reference(function.id, "loop iterator Iterable types or symbols are empty", span))
+                    }
+                }
+            }
+        }
+        .LoopRangeHasNext(call, _) | .LoopRangeValue(call, _) | .LoopRangeAdvance(call, _) | .LoopIterHasNext(call, _) | .LoopIterValue(call, _) | .LoopIterAdvance(call, _) -> mir_native_require_prelude(tables, call, function.id, span)
+        .Todo(call, location, expected) -> {
+            mir_native_require_prelude(tables, call, function.id, span)
+            mir_native_require_source(tables, location.file, function.id, span)
+            if expected == .Val(ty) -> mir_native_verify_type(ty, span, function.id)
+        }
+        .Closure(target, _, _) -> { if tables.functions.get(target.value) == None -> return Err(mir_native_reference(function.id, "closure function MirFunctionId({target.value})", span)) }
+        .ScopeEnter(scope, member) -> {
+            if index.scopes.get(scope.value) == None -> return Err(mir_native_reference(function.id, "scope MirScopeId({scope.value})", span))
+            if member == .Val(.Timeout(duration)) {
+                if index.definitions.values.get(duration.value) == None -> return Err(mir_native_reference(function.id, "timeout duration value MirValueId({duration.value}) has no definition", span))
+            }
+        }
+        .TraitBox(value, target) -> {
+            mir_native_require_type(tables, target, function.id, span)
+            source :: mir_native_definition_type(function, index, value) ?? return Err(mir_native_reference(function.id, "trait boxing value MirValueId({value.value}) has no definition", span))
+            if source.kind == .TraitObject(_) -> return Err(mir_native_reference(function.id, "trait boxing source is already a trait object", span))
+        }
+        .ScopeExit(scope) -> { if index.scopes.get(scope.value) == None -> return Err(mir_native_reference(function.id, "scope MirScopeId({scope.value})", span)) }
+        .Convert(value, parameters, target, conversion) -> {
+            mir_native_verify_type(target, span, function.id)
+            if conversion == {
+                .Transparent -> {}
+                .NumericCast -> {
+                    source :: mir_native_definition_type(function, index, value) ?? return Err(mir_native_reference(function.id, "numeric cast value MirValueId({value.value}) has no definition", span))
+                    if parameters.len() != 0 || !mir_type_is_numeric(source) || !mir_type_is_numeric(target) -> return Err(mir_native_reference(function.id, "numeric cast requires scalar numeric operands", span))
+                }
+                .SendFn -> {
+                    if parameters.len() != 0 -> return Err(mir_native_reference(function.id, "SendFn conversion has parameters", span))
+                    source :: mir_native_definition_type(function, index, value) ?? return Err(mir_native_reference(function.id, "SendFn conversion value MirValueId({value.value}) has no definition", span))
+                    if !mir_native_send_fn_signature_matches(source, target) -> return Err(mir_native_reference(function.id, "SendFn conversion source and target signatures disagree", span))
+                    if source.kind != .SendFn(_, _, _) -> return Err(mir_native_reference(function.id, "SendFn conversion requires a source already typed as SendFn", span))
+                }
+                .Prelude(call, location, fallibility) -> {
+                    mir_native_require_prelude(tables, call, function.id, span)
+                    position :: tables.prelude.get(call.value) ?? return Err(mir_native_reference(function.id, "Prelude call MirPreludeCallId({call.value})", span))
+                    if program.prelude_calls[position].fallibility != fallibility -> return Err(mir_native_reference(function.id, "conversion fallibility disagrees with route {call.value}", span))
+                    mir_native_require_source(tables, location.file, function.id, span)
+                    mir_native_verify_call_fallibility(fallibility, function.id, span)
+                }
+            }
+        }
+        .Semantic(semantic) -> mir_native_verify_semantic_operation(semantic, span, function, index, program, tables)
+        // These native alternatives have no extra metadata law here. Their
+        // operands and places were checked by root/dominance/ownership.
+        .Global(_) | .Phi(_) | .ReadPlace(_) | .WritePlace(_, _) | .ReplacePlace(_, _) | .Copy(_, _) | .Move(_) | .Constant(_) | .Unary(_, _) | .BuildString(_) | .BuildList(_, _) | .BuildMap(_) | .OptionIsSome(_) | .OptionValue(_) | .ResultIsOk(_) | .ResultValue(_, _) | .PatternCapture(_, _) | .PatternMatched(_) | .Range(_, _, _) | .Struct(_, _) | .Tuple(_, _) | .Present(_) | .Absent | .ResultOk(_) | .ResultErr(_) | .PtrFromAddr(_, _) | .Deref(_) | .RawAddressOf(_) | .AddressOf(_, _) | .AttachTag(_, _) | .Never(_) | .Drop(_, _) -> {}
+    }
+    return
+}

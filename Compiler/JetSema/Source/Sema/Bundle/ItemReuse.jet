@@ -1,0 +1,869 @@
+// PORT-PENDING 0353 crates-jet-sema-src-sema-bundle-itemreuse: crates/jet-sema/src/Sema/Bundle/ItemReuse.rs:1-865
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #2517 stage S3R: item reuse inside a checked package.
+//RS //!
+//RS //! In a package-record session (`PackageSeal`), every function and method
+//RS //! body of a checked module has an item check key: the module's reads (the
+//RS //! check environment, and the declarations and templates of every module
+//RS //! its package and its imports reach), the item's identity, and its
+//RS //! span-free syntax. A body whose key has a stored record is not checked
+//RS //! again. The record's outputs (effect summaries, address-taken names, name
+//RS //! references, import-alias uses, exact-`Int` use) are seeded where the
+//RS //! check would have produced them. Callers read signatures, not effect
+//RS //! rows, so a body edit that changes a summary keeps its callers green; the
+//RS //! effect, failure and post phases solve again over the seeded summaries
+//RS //! (item-level early cutoff).
+//RS //!
+//RS //! A body is recorded only when its check produced no diagnostic, pending
+//RS //! diagnostic, publication, discovered input, or structure fact. The record
+//RS //! carries the checked-body delta (`BodyDelta`): the parts of the function
+//RS //! the checker rewrote, as they were after the check. A reuse installs them
+//RS //! on the parsed function, so the bundle after a reuse is the bundle a cold
+//RS //! check builds and every later phase that walks bodies sees the same input.
+//RS //! A delta is recorded only when installing it on the parsed function
+//RS //! rebuilds the checked function exactly; the key covers the item's source
+//RS //! text, so its spans are exact, and the record's text and delta digests are
+//RS //! verified again when it is replayed.
+//RS //!
+//RS //! Spans in a record are relative to the item, so an edit that moves an
+//RS //! item does not invalidate it. A reference into another declaration is
+//RS //! anchored to the nearest callable of the defining module and must name
+//RS //! the same source text when replayed; otherwise the body is checked again.
+//RS 
+//RS use super::BodyProducts;
+//RS use super::PackageSeal::{
+//RS     decode_summary, encode_summary, map_edges, to_alias, to_identity, PackageRecordStore,
+//RS };
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Sema::Effects::EffectSummary;
+//RS use crate::AST::{Func, Item, LoadedModule, ProgramBundle};
+//RS use jet_foundation::Names::{NameLedger, NameReference};
+//RS use jet_foundation::PackageIdentity::KeyHasher;
+//RS use jet_foundation::RecordCodec::{
+//RS     encode_record, record_map, RecordReader, RecordSection, RecordValue,
+//RS };
+//RS use std::collections::{BTreeSet, HashMap, HashSet};
+//RS use std::sync::{Arc, Mutex};
+//RS 
+//RS /// Schema of one item check record (an action record under the item key).
+//RS const ITEM_CHECK_SCHEMA: &str = "jet.item-check/v1";
+//RS const SECTION_ITEM: u64 = 1;
+//RS 
+//RS /// A checked module whose bodies may be reused.
+//RS struct ModuleItems {
+//RS     /// Digest of everything a body of this module reads besides itself.
+//RS     reads: String,
+//RS     /// Loader display name, the prefix of this module's body cache keys.
+//RS     display: String,
+//RS }
+//RS 
+//RS /// One module's text and callable spans, for anchoring references.
+//RS struct Anchors {
+//RS     source: String,
+//RS     /// Spans of every function and method, ordered by start.
+//RS     callables: Vec<(usize, usize)>,
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct Tally {
+//RS     reused: usize,
+//RS     checked: Vec<String>,
+//RS     /// Why checked bodies could not be recorded, with counts.
+//RS     unrecordable: std::collections::BTreeMap<&'static str, usize>,
+//RS }
+//RS 
+//RS struct ItemState {
+//RS     store: Arc<dyn PackageRecordStore>,
+//RS     modules: HashMap<usize, ModuleItems>,
+//RS     anchors: Vec<Anchors>,
+//RS     /// The ledger path of every module (the key references use).
+//RS     paths: Vec<Option<String>>,
+//RS     by_path: HashMap<String, usize>,
+//RS     identity: Vec<Option<String>>,
+//RS     by_identity: HashMap<String, usize>,
+//RS     /// Loader alias to module identity, and back.
+//RS     identities: HashMap<String, String>,
+//RS     aliases: HashMap<String, String>,
+//RS     tally: Mutex<HashMap<usize, Tally>>,
+//RS     /// Store work of this check, done in one transaction at `end`: the keys
+//RS     /// of reused records and the records to publish. One store call per
+//RS     /// item costs a lock and a synced journal write each.
+//RS     pending: Mutex<Pending>,
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct Pending {
+//RS     touched: Vec<String>,
+//RS     records: Vec<(String, Vec<u8>)>,
+//RS }
+//RS 
+//RS static STATE: Mutex<Option<Arc<ItemState>>> = Mutex::new(None);
+//RS 
+//RS fn current() -> Option<Arc<ItemState>> {
+//RS     STATE
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS         .clone()
+//RS }
+//RS 
+//RS /// Plan item reuse for the modules of one sealed-aware check. `checked`
+//RS /// are the modules this check body-checks; `environment` is the compiler
+//RS /// identity and check environment every key starts from.
+//RS #[allow(clippy::too_many_arguments)]
+//RS pub(super) fn begin(
+//RS     store: Arc<dyn PackageRecordStore>,
+//RS     bundle: &ProgramBundle,
+//RS     ledger: &NameLedger,
+//RS     environment: &str,
+//RS     checked: &[usize],
+//RS     package_mates: &[Vec<usize>],
+//RS     identity: &[Option<String>],
+//RS     aliases: HashMap<String, String>,
+//RS ) {
+//RS     let displays = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(index, module)| (module.display.clone(), index))
+//RS         .collect::<HashMap<_, _>>();
+//RS     let dependencies = super::incremental_module_dependencies_with_ledger(bundle, ledger);
+//RS     let declarations = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .map(|module| {
+//RS             let mut hasher = KeyHasher::new(ITEM_CHECK_SCHEMA);
+//RS             hasher
+//RS                 .field(&jet_foundation::SHA256::sha256_hex(
+//RS                     &super::incremental_module_interface(module),
+//RS                 ))
+//RS                 .field(&template_digest(module));
+//RS             hasher.finish()
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let mut modules = HashMap::new();
+//RS     for &module in checked {
+//RS         // A body reads its own package's namespace (D-MOD-CYCLE1) and every
+//RS         // module its package imports, transitively.
+//RS         let mut reads = BTreeSet::new();
+//RS         let mut pending = package_mates[module].clone();
+//RS         pending.push(module);
+//RS         while let Some(next) = pending.pop() {
+//RS             if !reads.insert(next) {
+//RS                 continue;
+//RS             }
+//RS             if let Some(imported) = dependencies.get(&bundle.modules[next].display) {
+//RS                 pending.extend(imported.iter().filter_map(|display| displays.get(display).copied()));
+//RS             }
+//RS         }
+//RS         let mut hasher = KeyHasher::new(ITEM_CHECK_SCHEMA);
+//RS         hasher.field(environment);
+//RS         for &read in &reads {
+//RS             hasher
+//RS                 .field(
+//RS                     identity[read]
+//RS                         .as_deref()
+//RS                         .unwrap_or(bundle.modules[read].display.as_str()),
+//RS                 )
+//RS                 .field(&declarations[read]);
+//RS         }
+//RS         modules.insert(
+//RS             module,
+//RS             ModuleItems {
+//RS                 reads: hasher.finish(),
+//RS                 display: bundle.modules[module].display.clone(),
+//RS             },
+//RS         );
+//RS     }
+//RS     let paths = (0..bundle.modules.len())
+//RS         .map(|module| ledger.module_path(module).map(str::to_string))
+//RS         .collect::<Vec<_>>();
+//RS     let by_path = paths
+//RS         .iter()
+//RS         .enumerate()
+//RS         .filter_map(|(module, path)| path.clone().map(|path| (path, module)))
+//RS         .collect();
+//RS     let by_identity = identity
+//RS         .iter()
+//RS         .enumerate()
+//RS         .filter_map(|(module, identity)| identity.clone().map(|identity| (identity, module)))
+//RS         .collect();
+//RS     let anchors = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .map(|module| Anchors {
+//RS             source: module.source.clone(),
+//RS             callables: callable_spans(&module.items),
+//RS         })
+//RS         .collect();
+//RS     let identities = aliases
+//RS         .iter()
+//RS         .map(|(identity, alias)| (alias.clone(), identity.clone()))
+//RS         .collect();
+//RS     *STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(ItemState {
+//RS         store,
+//RS         modules,
+//RS         anchors,
+//RS         paths,
+//RS         by_path,
+//RS         identity: identity.to_vec(),
+//RS         by_identity,
+//RS         identities,
+//RS         aliases,
+//RS         tally: Mutex::new(HashMap::new()),
+//RS         pending: Mutex::new(Pending::default()),
+//RS     }));
+//RS }
+//RS 
+//RS /// End the item plan of the current check and flush its store work.
+//RS pub(super) fn end() {
+//RS     let state = STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+//RS     if let Some(state) = state {
+//RS         let pending = std::mem::take(
+//RS             &mut *state.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+//RS         );
+//RS         if !pending.touched.is_empty() || !pending.records.is_empty() {
+//RS             state.store.publish_batch(ITEM_CHECK_SCHEMA, &pending.touched, pending.records);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Whether bodies of `module` take part in item reuse.
+//RS pub(super) fn tracks(module: usize) -> bool {
+//RS     current().is_some_and(|state| state.modules.contains_key(&module))
+//RS }
+//RS 
+//RS /// The store-log summary of one package's items, or `None` when none of its
+//RS /// modules took part.
+//RS pub(super) fn package_detail(modules: &[usize]) -> Option<String> {
+//RS     let state = current()?;
+//RS     let tally = state.tally.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     let mut seen = false;
+//RS     let mut reused = 0;
+//RS     let mut unrecordable = std::collections::BTreeMap::<&'static str, usize>::new();
+//RS     let mut checked = Vec::new();
+//RS     for module in modules {
+//RS         if let Some(entry) = tally.get(module) {
+//RS             seen = true;
+//RS             reused += entry.reused;
+//RS             for (reason, count) in &entry.unrecordable {
+//RS                 *unrecordable.entry(*reason).or_default() += count;
+//RS             }
+//RS             checked.extend(entry.checked.iter().cloned());
+//RS         }
+//RS     }
+//RS     if !seen {
+//RS         return None;
+//RS     }
+//RS     checked.sort();
+//RS     let names = if !checked.is_empty() && checked.len() <= 8 {
+//RS         format!(" [{}]", checked.join(", "))
+//RS     } else {
+//RS         String::new()
+//RS     };
+//RS     let total = unrecordable.values().sum::<usize>();
+//RS     let reasons = if unrecordable.is_empty() {
+//RS         String::new()
+//RS     } else {
+//RS         let reasons = unrecordable
+//RS             .iter()
+//RS             .map(|(reason, count)| format!("{reason}: {count}"))
+//RS             .collect::<Vec<_>>();
+//RS         format!(" ({})", reasons.join(", "))
+//RS     };
+//RS     Some(format!(
+//RS         "items: {reused} reused, {} checked{names}, {total} not recordable{reasons}",
+//RS         checked.len()
+//RS     ))
+//RS }
+//RS 
+//RS /// Replay the stored check of one body when its key has a record: install
+//RS /// the stored checked-body delta on `function` and seed its outputs. Returns
+//RS /// `false` (nothing installed or seeded) on a miss.
+//RS #[allow(clippy::too_many_arguments)]
+//RS pub(super) fn reuse(
+//RS     module: usize,
+//RS     cache_key: &str,
+//RS     function: &mut Func,
+//RS     owner: Option<&str>,
+//RS     raw_protocol_return: bool,
+//RS     ledger: &mut NameLedger,
+//RS     products: &mut BodyProducts,
+//RS ) -> bool {
+//RS     let Some(state) = current() else {
+//RS         return false;
+//RS     };
+//RS     let Some(items) = state.modules.get(&module) else {
+//RS         return false;
+//RS     };
+//RS     let Some(text) = state.text_digest(module, function.span) else {
+//RS         return false;
+//RS     };
+//RS     let key = item_key(&items.reads, cache_key, function, &text, owner, raw_protocol_return);
+//RS     let Some(seed) = state
+//RS         .store
+//RS         .load_untouched(ITEM_CHECK_SCHEMA, &key)
+//RS         .and_then(|bytes| state.decode(module, function.span, &text, &bytes))
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     if super::BodyDelta::apply(function, &seed.body).is_none() {
+//RS         return false;
+//RS     }
+//RS     products.summaries.extend(seed.summaries);
+//RS     products.addr_taken.extend(seed.addr_taken);
+//RS     products.uses_exact_int |= seed.exact_int;
+//RS     for (start, end, reference) in seed.references {
+//RS         if let Some(path) = &state.paths[module] {
+//RS             ledger.record_reference(path.clone(), start, end, reference);
+//RS         }
+//RS     }
+//RS     for (alias_module, span) in seed.alias_uses {
+//RS         ledger.record_alias_use(alias_module, span);
+//RS     }
+//RS     state.defer(|pending| pending.touched.push(key));
+//RS     state.count(module, |tally| tally.reused += 1);
+//RS     true
+//RS }
+//RS 
+//RS /// Record one body's check for the next run. `pristine` is the function as
+//RS /// it was before `checked` went through the checker.
+//RS #[allow(clippy::too_many_arguments)]
+//RS pub(super) fn record(
+//RS     module: usize,
+//RS     cache_key: &str,
+//RS     pristine: Func,
+//RS     checked: &Func,
+//RS     owner: Option<&str>,
+//RS     raw_protocol_return: bool,
+//RS     diagnostics: &[Diagnostic],
+//RS     products: &BodyProducts,
+//RS     ledger: &NameLedger,
+//RS ) {
+//RS     let Some(state) = current() else {
+//RS         return;
+//RS     };
+//RS     let Some(items) = state.modules.get(&module) else {
+//RS         return;
+//RS     };
+//RS     let name = cache_key
+//RS         .strip_prefix(&format!("{}::", items.display))
+//RS         .unwrap_or(cache_key)
+//RS         .to_string();
+//RS     let reason = if !diagnostics.is_empty() {
+//RS         Some("diagnostics")
+//RS     } else if !products.pending_diagnostics.is_empty() {
+//RS         Some("pending diagnostics")
+//RS     } else if !products.devtools_publications.is_empty() {
+//RS         Some("publications")
+//RS     } else if !products.embed_inputs.is_empty() || products.ran_ct_evaluator {
+//RS         Some("compile-time evaluation")
+//RS     } else if !ledger.structure_facts().is_empty() {
+//RS         Some("structure facts")
+//RS     } else {
+//RS         None
+//RS     };
+//RS     let span = pristine.span;
+//RS     let recorded = match reason {
+//RS         Some(reason) => Err(reason),
+//RS         None => state
+//RS             .text_digest(module, span)
+//RS             .ok_or("item span outside its module")
+//RS             .and_then(|text| {
+//RS                 let key =
+//RS                     item_key(&items.reads, cache_key, &pristine, &text, owner, raw_protocol_return);
+//RS                 let delta = verified_delta(pristine, checked)?;
+//RS                 let bytes = state.encode(module, cache_key, span, &text, &delta, products, ledger)?;
+//RS                 Ok((key, bytes))
+//RS             }),
+//RS     };
+//RS     match recorded {
+//RS         Ok((key, bytes)) => {
+//RS             state.defer(|pending| pending.records.push((key, bytes)));
+//RS             state.count(module, |tally| tally.checked.push(name));
+//RS         }
+//RS         Err(reason) => state.count(module, |tally| {
+//RS             tally.checked.push(name);
+//RS             *tally.unrecordable.entry(reason).or_default() += 1;
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS /// The checked-body delta of `checked`, when installing it on `pristine`
+//RS /// rebuilds `checked` exactly.
+//RS fn verified_delta(mut pristine: Func, checked: &Func) -> Result<Vec<u8>, &'static str> {
+//RS     let delta = super::BodyDelta::encode(&pristine, checked)?;
+//RS     super::BodyDelta::apply(&mut pristine, &delta).ok_or("delta does not decode")?;
+//RS     if !same_debug(&pristine, checked) {
+//RS         return Err("delta does not rebuild the checked body");
+//RS     }
+//RS     Ok(delta)
+//RS }
+//RS 
+//RS /// Whether two values render the same `Debug` text. `expected` is rendered
+//RS /// once into a per-thread buffer and `actual` is streamed against it, stopping
+//RS /// at the first difference: no rendering is allocated per call.
+//RS pub(super) fn same_debug<T: std::fmt::Debug>(actual: &T, expected: &T) -> bool {
+//RS     use std::fmt::Write;
+//RS     struct Against<'a> {
+//RS         rest: &'a str,
+//RS     }
+//RS     impl Write for Against<'_> {
+//RS         fn write_str(&mut self, text: &str) -> std::fmt::Result {
+//RS             let rest = self.rest.strip_prefix(text).ok_or(std::fmt::Error)?;
+//RS             self.rest = rest;
+//RS             Ok(())
+//RS         }
+//RS     }
+//RS     thread_local! {
+//RS         static RENDERED: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+//RS     }
+//RS     RENDERED.with(|rendered| {
+//RS         let mut rendered = rendered.borrow_mut();
+//RS         rendered.clear();
+//RS         if write!(rendered, "{expected:?}").is_err() {
+//RS             return false;
+//RS         }
+//RS         let mut against = Against { rest: &rendered };
+//RS         write!(against, "{actual:?}").is_ok() && against.rest.is_empty()
+//RS     })
+//RS }
+//RS 
+//RS /// `text` is the digest of the item's source text: two parses of the same
+//RS /// text carry the same item-relative spans.
+//RS fn item_key(
+//RS     reads: &str,
+//RS     cache_key: &str,
+//RS     function: &Func,
+//RS     text: &str,
+//RS     owner: Option<&str>,
+//RS     raw_protocol_return: bool,
+//RS ) -> String {
+//RS     let mut hasher = KeyHasher::new(ITEM_CHECK_SCHEMA);
+//RS     hasher
+//RS         .field(reads)
+//RS         .field(cache_key)
+//RS         .field(owner.unwrap_or(""))
+//RS         .field(if raw_protocol_return { "raw" } else { "plain" })
+//RS         .field(text)
+//RS         .field(&jet_foundation::SHA256::sha256_hex(
+//RS             &crate::CanonicalAST::canonical_fragment(function),
+//RS         ));
+//RS     hasher.finish()
+//RS }
+//RS 
+//RS /// Bodies that importers and callers may instantiate: generic and
+//RS /// `#Inline(Always)` functions, methods of generic types, and traits.
+//RS fn template_digest(module: &LoadedModule) -> String {
+//RS     fn add(bytes: &mut Vec<u8>, function: &Func, generic_owner: bool) {
+//RS         if generic_owner || !function.type_params.is_empty() || function.is_inline_always {
+//RS             bytes.extend(crate::CanonicalAST::canonical_fragment(function));
+//RS         }
+//RS     }
+//RS     let generic_types = module
+//RS         .items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             Item::Struct(definition) if !definition.type_params.is_empty() => {
+//RS                 Some(definition.name.as_str())
+//RS             }
+//RS             Item::Enum(definition) if !definition.type_params.is_empty() => {
+//RS                 Some(definition.name.as_str())
+//RS             }
+//RS             _ => None,
+//RS         })
+//RS         .collect::<HashSet<_>>();
+//RS     let mut bytes = Vec::new();
+//RS     for item in &module.items {
+//RS         match item {
+//RS             Item::Func(function) => add(&mut bytes, function, false),
+//RS             Item::Struct(definition) => {
+//RS                 let generic = !definition.type_params.is_empty();
+//RS                 for function in &definition.methods {
+//RS                     add(&mut bytes, function, generic);
+//RS                 }
+//RS                 for block in &definition.trait_impls {
+//RS                     for function in &block.methods {
+//RS                         add(&mut bytes, function, generic);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Enum(definition) => {
+//RS                 let generic = !definition.type_params.is_empty();
+//RS                 for function in &definition.methods {
+//RS                     add(&mut bytes, function, generic);
+//RS                 }
+//RS                 for block in &definition.trait_impls {
+//RS                     for function in &block.methods {
+//RS                         add(&mut bytes, function, generic);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::Impl(implementation) => {
+//RS                 let generic = generic_types.contains(implementation.type_name.as_str());
+//RS                 for function in &implementation.methods {
+//RS                     add(&mut bytes, function, generic);
+//RS                 }
+//RS             }
+//RS             Item::Trait(definition) => {
+//RS                 bytes.extend(crate::CanonicalAST::canonical_fragment(definition))
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     jet_foundation::SHA256::sha256_hex(&bytes)
+//RS }
+//RS 
+//RS fn callable_spans(items: &[Item]) -> Vec<(usize, usize)> {
+//RS     let mut spans = Vec::new();
+//RS     for item in items {
+//RS         let mut push = |function: &Func| spans.push((function.span.start, function.span.end));
+//RS         match item {
+//RS             Item::Func(function) => push(function),
+//RS             Item::Struct(definition) => {
+//RS                 definition.methods.iter().for_each(&mut push);
+//RS                 for block in &definition.trait_impls {
+//RS                     block.methods.iter().for_each(&mut push);
+//RS                 }
+//RS             }
+//RS             Item::Enum(definition) => {
+//RS                 definition.methods.iter().for_each(&mut push);
+//RS                 for block in &definition.trait_impls {
+//RS                     block.methods.iter().for_each(&mut push);
+//RS                 }
+//RS             }
+//RS             Item::Impl(implementation) => implementation.methods.iter().for_each(&mut push),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     spans.sort_unstable();
+//RS     spans
+//RS }
+//RS 
+//RS /// Visit every span a summary carries; `false` when any visit refused.
+//RS fn each_span(summary: &mut EffectSummary, visit: &mut dyn FnMut(&mut Span) -> bool) -> bool {
+//RS     let mut ok = true;
+//RS     let mut go = |span: &mut Span| ok &= visit(span);
+//RS     summary.direct_spans.values_mut().for_each(&mut go);
+//RS     if let Some(span) = summary.maximal_span.as_mut() {
+//RS         go(span);
+//RS     }
+//RS     for region in &mut summary.regions {
+//RS         go(&mut region.caps_span);
+//RS     }
+//RS     for delegation in &mut summary.authority_delegations {
+//RS         go(&mut delegation.scope_span);
+//RS         go(&mut delegation.span);
+//RS     }
+//RS     for obligation in &mut summary.callback_obligations {
+//RS         go(&mut obligation.span);
+//RS     }
+//RS     for obligation in &mut summary.autodiff_obligations {
+//RS         go(&mut obligation.span);
+//RS     }
+//RS     for call in &mut summary.compute_calls {
+//RS         go(&mut call.span);
+//RS     }
+//RS     for event in &mut summary.memory.events {
+//RS         go(&mut event.span);
+//RS     }
+//RS     for dispatch in &mut summary.memory.open_dispatches {
+//RS         go(&mut dispatch.span);
+//RS     }
+//RS     summary.memory.unbounded_control.iter_mut().for_each(&mut go);
+//RS     for call in &mut summary.memory.calls {
+//RS         go(&mut call.span);
+//RS     }
+//RS     for fact in &mut summary.discarded_results {
+//RS         go(&mut fact.span);
+//RS     }
+//RS     ok
+//RS }
+//RS 
+//RS /// Where a referenced declaration sits, relative to something that moves
+//RS /// with it.
+//RS enum Anchor {
+//RS     /// Inside the referencing item; offset from its start.
+//RS     Own,
+//RS     /// Inside callable `n` of the defining module; offset from its start.
+//RS     In(usize),
+//RS     /// After callable `n` of the defining module; offset from its end.
+//RS     After(usize),
+//RS     /// Before every callable; offset from the start of the file.
+//RS     File,
+//RS }
+//RS 
+//RS /// Replayed outputs of one body.
+//RS struct Seed {
+//RS     summaries: Vec<(String, EffectSummary)>,
+//RS     addr_taken: Vec<String>,
+//RS     exact_int: bool,
+//RS     references: Vec<(usize, usize, NameReference)>,
+//RS     alias_uses: Vec<(usize, Span)>,
+//RS     /// The checked-body delta to install (`BodyDelta`).
+//RS     body: Vec<u8>,
+//RS }
+//RS 
+//RS fn int(value: usize) -> RecordValue {
+//RS     RecordValue::Int(value as i64)
+//RS }
+//RS 
+//RS impl ItemState {
+//RS     fn count(&self, module: usize, update: impl FnOnce(&mut Tally)) {
+//RS         let mut tally = self.tally.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         update(tally.entry(module).or_default());
+//RS     }
+//RS 
+//RS     fn defer(&self, update: impl FnOnce(&mut Pending)) {
+//RS         update(&mut self.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+//RS     }
+//RS 
+//RS     fn text(&self, module: usize, start: usize, end: usize) -> Option<&str> {
+//RS         self.anchors.get(module)?.source.get(start..end)
+//RS     }
+//RS 
+//RS     /// Digest of the source text of the item at `span`.
+//RS     fn text_digest(&self, module: usize, span: Span) -> Option<String> {
+//RS         let text = self.text(module, span.start, span.end)?;
+//RS         Some(jet_foundation::SHA256::sha256_hex(text.as_bytes()))
+//RS     }
+//RS 
+//RS     /// The record of one clean body, or why an output cannot be carried
+//RS     /// faithfully. `item_text` is the item's text digest and `delta` its
+//RS     /// verified checked-body delta.
+//RS     #[allow(clippy::too_many_arguments)]
+//RS     fn encode(
+//RS         &self,
+//RS         module: usize,
+//RS         cache_key: &str,
+//RS         span: Span,
+//RS         item_text: &str,
+//RS         delta: &[u8],
+//RS         products: &BodyProducts,
+//RS         ledger: &NameLedger,
+//RS     ) -> Result<Vec<u8>, &'static str> {
+//RS         let (start, end) = (span.start, span.end);
+//RS         let own_path = self.paths[module].as_deref().ok_or("module has no ledger path")?;
+//RS         let mut keys = products.summaries.keys().collect::<Vec<_>>();
+//RS         keys.sort();
+//RS         let mut summaries = Vec::with_capacity(keys.len());
+//RS         for key in keys {
+//RS             let mut summary = products.summaries[key].clone();
+//RS             map_edges(&mut summary, &|edge| to_identity(edge, &self.identities));
+//RS             let inside = each_span(&mut summary, &mut |span| {
+//RS                 if span.start < start || span.end > end {
+//RS                     return false;
+//RS                 }
+//RS                 *span = Span::new(span.start - start, span.end - start);
+//RS                 true
+//RS             });
+//RS             if !inside {
+//RS                 return Err("summary span outside the item");
+//RS             }
+//RS             summaries.push(record_map([
+//RS                 ("key", RecordValue::str(key.as_str())),
+//RS                 ("summary", encode_summary(&summary).map_err(|_| "summary not encodable")?),
+//RS             ]));
+//RS         }
+//RS         let mut sites = ledger.references().iter().collect::<Vec<_>>();
+//RS         sites.sort_by(|left, right| (left.0 .1, left.0 .2, &left.0 .0).cmp(&(right.0 .1, right.0 .2, &right.0 .0)));
+//RS         let mut references = Vec::with_capacity(sites.len());
+//RS         for ((source, site_start, site_end), reference) in sites {
+//RS             if source != own_path || *site_start < start || *site_end > end {
+//RS                 return Err("reference site outside the item");
+//RS             }
+//RS             let def = reference.def_span;
+//RS             let def_module = *self
+//RS                 .by_path
+//RS                 .get(&reference.module_path)
+//RS                 .ok_or("reference into an unknown module")?;
+//RS             let callables = &self.anchors[def_module].callables;
+//RS             let (anchor, offset) = if def_module == module && def.start >= start && def.end <= end {
+//RS                 (Anchor::Own, def.start - start)
+//RS             } else {
+//RS                 match callables.iter().rposition(|&(callable, _)| callable <= def.start) {
+//RS                     Some(index) if def.end <= callables[index].1 => {
+//RS                         (Anchor::In(index), def.start - callables[index].0)
+//RS                     }
+//RS                     Some(index) if def.start >= callables[index].1 => {
+//RS                         (Anchor::After(index), def.start - callables[index].1)
+//RS                     }
+//RS                     Some(_) => return Err("reference straddles a callable"),
+//RS                     None => (Anchor::File, def.start),
+//RS                 }
+//RS             };
+//RS             let text = match anchor {
+//RS                 Anchor::Own => String::new(),
+//RS                 _ => {
+//RS                     let text = self
+//RS                         .text(def_module, def.start, def.end)
+//RS                         .ok_or("reference span outside its module")?;
+//RS                     if text.is_empty() {
+//RS                         return Err("empty reference span");
+//RS                     }
+//RS                     text.to_string()
+//RS                 }
+//RS             };
+//RS             let (mode, index) = match anchor {
+//RS                 Anchor::Own => ("own", 0),
+//RS                 Anchor::In(index) => ("in", index),
+//RS                 Anchor::After(index) => ("after", index),
+//RS                 Anchor::File => ("file", 0),
+//RS             };
+//RS             references.push(record_map([
+//RS                 ("start", int(site_start - start)),
+//RS                 ("end", int(site_end - start)),
+//RS                 ("kind", RecordValue::str(reference.kind.as_str())),
+//RS                 (
+//RS                     "identity",
+//RS                     reference
+//RS                         .semantic_identity
+//RS                         .as_deref()
+//RS                         .map_or(RecordValue::Null, |identity| RecordValue::str(identity)),
+//RS                 ),
+//RS                 (
+//RS                     "module",
+//RS                     RecordValue::str(
+//RS                         self.identity[def_module].as_deref().ok_or("reference module has no identity")?,
+//RS                     ),
+//RS                 ),
+//RS                 ("mode", RecordValue::str(mode)),
+//RS                 ("index", int(index)),
+//RS                 ("offset", int(offset)),
+//RS                 ("len", int(def.end - def.start)),
+//RS                 ("text", RecordValue::Str(text)),
+//RS             ]));
+//RS         }
+//RS         let mut uses = ledger
+//RS             .alias_uses()
+//RS             .iter()
+//RS             .filter(|(alias_module, span)| !ledger.loader_alias_use(*alias_module, *span))
+//RS             .collect::<Vec<_>>();
+//RS         uses.sort_by_key(|(alias_module, span)| (*alias_module, span.start, span.end));
+//RS         let mut alias_uses = Vec::with_capacity(uses.len());
+//RS         for &(alias_module, span) in uses {
+//RS             let text = self
+//RS                 .text(alias_module, span.start, span.end)
+//RS                 .ok_or("alias span outside its module")?;
+//RS             if text.is_empty() {
+//RS                 return Err("empty alias span");
+//RS             }
+//RS             alias_uses.push(record_map([
+//RS                 (
+//RS                     "module",
+//RS                     RecordValue::str(
+//RS                         self.identity[alias_module].as_deref().ok_or("alias module has no identity")?,
+//RS                     ),
+//RS                 ),
+//RS                 ("start", int(span.start)),
+//RS                 ("end", int(span.end)),
+//RS                 ("text", RecordValue::str(text)),
+//RS             ]));
+//RS         }
+//RS         let mut addr_taken = products.addr_taken.iter().cloned().collect::<Vec<_>>();
+//RS         addr_taken.sort();
+//RS         let item = record_map([
+//RS             ("item", RecordValue::str(cache_key)),
+//RS             ("summaries", RecordValue::List(summaries)),
+//RS             ("addr_taken", RecordValue::list_of_str(&addr_taken)),
+//RS             ("exact_int", RecordValue::Bool(products.uses_exact_int)),
+//RS             ("references", RecordValue::List(references)),
+//RS             ("alias_uses", RecordValue::List(alias_uses)),
+//RS             ("text", RecordValue::str(item_text)),
+//RS             ("body", RecordValue::Bytes(delta.to_vec())),
+//RS             ("checked", RecordValue::str(jet_foundation::SHA256::sha256_hex(delta))),
+//RS         ]);
+//RS         encode_record(ITEM_CHECK_SCHEMA, &[RecordSection::new(SECTION_ITEM, vec![item])])
+//RS             .map_err(|_| "record not encodable")
+//RS     }
+//RS 
+//RS     /// The replayable outputs of a stored record for the item at `span`, or
+//RS     /// `None` when the record does not decode, was made from another item
+//RS     /// text (`item_text` digest), carries a delta that fails its digest, or
+//RS     /// a reference no longer names the declaration it named.
+//RS     fn decode(&self, module: usize, span: Span, item_text: &str, bytes: &[u8]) -> Option<Seed> {
+//RS         let start = span.start;
+//RS         let reader = RecordReader::open_schema(bytes, ITEM_CHECK_SCHEMA).ok()?;
+//RS         let item = reader.element(SECTION_ITEM, 0).ok()?;
+//RS         if item.field("text").ok()?.as_str().ok()? != item_text {
+//RS             return None;
+//RS         }
+//RS         let RecordValue::Bytes(body) = item.field("body").ok()? else {
+//RS             return None;
+//RS         };
+//RS         if jet_foundation::SHA256::sha256_hex(body) != item.field("checked").ok()?.as_str().ok()? {
+//RS             return None;
+//RS         }
+//RS         let mut summaries = Vec::new();
+//RS         for entry in item.field("summaries").ok()?.as_list().ok()? {
+//RS             let key = entry.field("key").ok()?.as_str().ok()?.to_string();
+//RS             let mut summary = decode_summary(entry.field("summary").ok()?).ok()?;
+//RS             map_edges(&mut summary, &|edge| to_alias(edge, &self.aliases));
+//RS             each_span(&mut summary, &mut |span| {
+//RS                 *span = Span::new(span.start + start, span.end + start);
+//RS                 true
+//RS             });
+//RS             summaries.push((key, summary));
+//RS         }
+//RS         let mut references = Vec::new();
+//RS         for entry in item.field("references").ok()?.as_list().ok()? {
+//RS             let number = |name: &str| entry.field(name).ok()?.as_usize().ok();
+//RS             let def_module = *self
+//RS                 .by_identity
+//RS                 .get(entry.field("module").ok()?.as_str().ok()?)?;
+//RS             let offset = number("offset")?;
+//RS             let index = number("index")?;
+//RS             let callables = &self.anchors.get(def_module)?.callables;
+//RS             let def_start = match entry.field("mode").ok()?.as_str().ok()? {
+//RS                 "own" if def_module == module => start + offset,
+//RS                 "in" => callables.get(index)?.0 + offset,
+//RS                 "after" => callables.get(index)?.1 + offset,
+//RS                 "file" => offset,
+//RS                 _ => return None,
+//RS             };
+//RS             let def_end = def_start + number("len")?;
+//RS             let text = entry.field("text").ok()?.as_str().ok()?;
+//RS             if !text.is_empty() && self.text(def_module, def_start, def_end)? != text {
+//RS                 return None;
+//RS             }
+//RS             let identity = entry.field("identity").ok()?;
+//RS             references.push((
+//RS                 start + number("start")?,
+//RS                 start + number("end")?,
+//RS                 NameReference {
+//RS                     module_path: self.paths[def_module].clone()?,
+//RS                     kind: entry.field("kind").ok()?.as_str().ok()?.to_string(),
+//RS                     def_span: Span::new(def_start, def_end),
+//RS                     semantic_identity: if identity.is_null() {
+//RS                         None
+//RS                     } else {
+//RS                         Some(identity.as_str().ok()?.to_string())
+//RS                     },
+//RS                 },
+//RS             ));
+//RS         }
+//RS         let mut alias_uses = Vec::new();
+//RS         for entry in item.field("alias_uses").ok()?.as_list().ok()? {
+//RS             let alias_module = *self
+//RS                 .by_identity
+//RS                 .get(entry.field("module").ok()?.as_str().ok()?)?;
+//RS             let span = Span::new(
+//RS                 entry.field("start").ok()?.as_usize().ok()?,
+//RS                 entry.field("end").ok()?.as_usize().ok()?,
+//RS             );
+//RS             if self.text(alias_module, span.start, span.end)? != entry.field("text").ok()?.as_str().ok()? {
+//RS                 return None;
+//RS             }
+//RS             alias_uses.push((alias_module, span));
+//RS         }
+//RS         Some(Seed {
+//RS             summaries,
+//RS             addr_taken: item.field("addr_taken").ok()?.str_list().ok()?,
+//RS             exact_int: item.field("exact_int").ok()?.as_bool().ok()?,
+//RS             references,
+//RS             alias_uses,
+//RS             body: body.clone(),
+//RS         })
+//RS     }
+//RS }
+// END-PORT-PENDING 0353 crates/jet-sema/src/Sema/Bundle/ItemReuse.rs:1-865
+

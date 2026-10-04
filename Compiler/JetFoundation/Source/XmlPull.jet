@@ -1,0 +1,1799 @@
+// PORT-PENDING 0111 crates-jet-foundation-src-xmlpull-slice-1: crates/jet-foundation/src/XmlPull.rs:1-1795
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Shared std-only encoding engines compiled by generated and comptime tiers.
+//RS //! The primary engine here is the XML 1.0 pull tokenizer.
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS 
+//RS /// D-ENCBASE-STRICT1=A edition-2026 compatibility engine. This module lives in
+//RS /// the existing std-only generated/comptime seam so both tiers compile exactly
+//RS /// one decoder source. Edition 2027 strict defaults remain toolchain-gated.
+//RS pub mod base_encoding_2026 {
+//RS     fn base64_digit(byte: u8) -> Option<u8> {
+//RS         match byte {
+//RS             b'A'..=b'Z' => Some(byte - b'A'),
+//RS             b'a'..=b'z' => Some(byte - b'a' + 26),
+//RS             b'0'..=b'9' => Some(byte - b'0' + 52),
+//RS             b'+' => Some(62),
+//RS             b'/' => Some(63),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn historical_aot(text: &str) -> Option<Vec<u8>> {
+//RS         let input: Vec<u8> = text.bytes().filter(|&b| !b.is_ascii_whitespace()).collect();
+//RS         if input.len() % 4 != 0 {
+//RS             return None;
+//RS         }
+//RS         let mut out = Vec::with_capacity(input.len() / 4 * 3);
+//RS         for chunk in input.chunks(4) {
+//RS             let a = base64_digit(chunk[0])?;
+//RS             let b = base64_digit(chunk[1])?;
+//RS             out.push((a << 2) | (b >> 4));
+//RS             if chunk[2] != b'=' {
+//RS                 let c = base64_digit(chunk[2])?;
+//RS                 out.push((b << 4) | (c >> 2));
+//RS                 if chunk[3] != b'=' {
+//RS                     let d = base64_digit(chunk[3])?;
+//RS                     out.push((c << 6) | d);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Some(out)
+//RS     }
+//RS 
+//RS     fn historical_comptime(text: &str) -> Option<Vec<u8>> {
+//RS         let input = text.trim_end_matches('=').as_bytes();
+//RS         if input.len() % 4 == 1 {
+//RS             return None;
+//RS         }
+//RS         let mut out = Vec::with_capacity(input.len() / 4 * 3);
+//RS         for chunk in input.chunks(4) {
+//RS             let digits: Vec<u8> = chunk
+//RS                 .iter()
+//RS                 .map(|&byte| base64_digit(byte))
+//RS                 .collect::<Option<_>>()?;
+//RS             out.push((digits[0] << 2) | (digits.get(1).copied().unwrap_or(0) >> 4));
+//RS             if digits.len() > 2 {
+//RS                 out.push((digits[1] << 4) | (digits[2] >> 2));
+//RS             }
+//RS             if digits.len() > 3 {
+//RS                 out.push((digits[2] << 6) | digits[3]);
+//RS             }
+//RS         }
+//RS         Some(out)
+//RS     }
+//RS 
+//RS     fn error(text: &str, url: bool) -> String {
+//RS         let label = if url { "base64url" } else { "base64" };
+//RS         let alphabet = if url {
+//RS             "URL-safe base64"
+//RS         } else {
+//RS             "standard base64"
+//RS         };
+//RS         for (offset, &byte) in text.as_bytes().iter().enumerate() {
+//RS             let accepted = byte.is_ascii_alphanumeric()
+//RS                 || matches!(byte, b'=' | b'+' | b'/')
+//RS                 || (url && matches!(byte, b'-' | b'_'))
+//RS                 || byte.is_ascii_whitespace();
+//RS             if !accepted {
+//RS                 return format!(
+//RS                     "invalid {label} at byte {offset}: byte 0x{byte:02X} is not in the {alphabet} alphabet"
+//RS                 );
+//RS             }
+//RS         }
+//RS         if let Some(offset) = text.as_bytes().iter().position(|&byte| byte == b'=') {
+//RS             if text.as_bytes()[offset + 1..]
+//RS                 .iter()
+//RS                 .any(|&byte| byte != b'=' && !byte.is_ascii_whitespace())
+//RS             {
+//RS                 return format!(
+//RS                     "invalid {label} at byte {offset}: padding may appear only at the end"
+//RS                 );
+//RS             }
+//RS         }
+//RS         format!(
+//RS             "invalid {label} at byte {}: encoded length cannot represent whole bytes",
+//RS             text.len()
+//RS         )
+//RS     }
+//RS 
+//RS     fn decode_base64_inner(text: &str, url: bool) -> Result<Vec<u8>, String> {
+//RS         let prepared = if url {
+//RS             let mut value = text.trim().replace('-', "+").replace('_', "/");
+//RS             while value.len() % 4 != 0 {
+//RS                 value.push('=');
+//RS             }
+//RS             value
+//RS         } else {
+//RS             text.to_string()
+//RS         };
+//RS         match (historical_aot(&prepared), historical_comptime(&prepared)) {
+//RS             (Some(aot), Some(comptime)) if aot != comptime => Err(format!(
+//RS                 "invalid {} at byte {}: historical decoders disagree",
+//RS                 if url { "base64url" } else { "base64" },
+//RS                 text.len()
+//RS             )),
+//RS             (Some(bytes), _) | (_, Some(bytes)) => Ok(bytes),
+//RS             (None, None) => Err(error(text, url)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn decode_base64(text: &str) -> Result<Vec<u8>, String> {
+//RS         decode_base64_inner(text, false)
+//RS     }
+//RS 
+//RS     pub fn decode_base64url(text: &str) -> Result<Vec<u8>, String> {
+//RS         decode_base64_inner(text, true)
+//RS     }
+//RS 
+//RS     pub fn decode_base32(text: &str) -> Result<Vec<u8>, String> {
+//RS         let mut out = Vec::new();
+//RS         let mut buffer = 0u32;
+//RS         let mut bits = 0u8;
+//RS         for (offset, byte) in text.bytes().enumerate() {
+//RS             if byte.is_ascii_whitespace() || byte == b'=' {
+//RS                 continue;
+//RS             }
+//RS             let value = match byte {
+//RS                 b'A'..=b'Z' => byte - b'A',
+//RS                 b'a'..=b'z' => byte - b'a',
+//RS                 b'2'..=b'7' => byte - b'2' + 26,
+//RS                 _ => {
+//RS                     return Err(format!(
+//RS                         "invalid base32 at byte {offset}: byte 0x{byte:02X} is not in the base32 alphabet"
+//RS                     ));
+//RS                 }
+//RS             };
+//RS             buffer = (buffer << 5) | value as u32;
+//RS             bits += 5;
+//RS             if bits >= 8 {
+//RS                 out.push(((buffer >> (bits - 8)) & 0xff) as u8);
+//RS                 bits -= 8;
+//RS             }
+//RS         }
+//RS         Ok(out)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct Name {
+//RS     pub raw: String,
+//RS     pub prefix: Option<String>,
+//RS     pub local: String,
+//RS     pub namespace_uri: Option<String>,
+//RS }
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct Namespace {
+//RS     pub prefix: Option<String>,
+//RS     pub namespace_uri: String,
+//RS     pub quote: char,
+//RS     pub raw: String,
+//RS }
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum Part {
+//RS     Text {
+//RS         value: String,
+//RS         raw: String,
+//RS     },
+//RS     Entity {
+//RS         name: String,
+//RS         resolved: Option<String>,
+//RS         raw: String,
+//RS     },
+//RS }
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct Attribute {
+//RS     pub name: Name,
+//RS     pub parts: Vec<Part>,
+//RS     pub normalized: Option<String>,
+//RS     pub quote: char,
+//RS     pub raw: String,
+//RS }
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum Event {
+//RS     DocumentStart,
+//RS     Declaration {
+//RS         version: String,
+//RS         encoding: Option<String>,
+//RS         standalone: Option<bool>,
+//RS         raw: String,
+//RS     },
+//RS     DocumentWhitespace {
+//RS         value: String,
+//RS         raw: String,
+//RS     },
+//RS     Doctype {
+//RS         name: String,
+//RS         public_id: Option<String>,
+//RS         system_id: Option<String>,
+//RS         internal_subset: Option<String>,
+//RS         raw: String,
+//RS     },
+//RS     ElementStart {
+//RS         name: Name,
+//RS         namespaces: Vec<Namespace>,
+//RS         attributes: Vec<Attribute>,
+//RS         empty: bool,
+//RS         raw: String,
+//RS     },
+//RS     Text {
+//RS         value: String,
+//RS         raw: String,
+//RS     },
+//RS     Cdata {
+//RS         value: String,
+//RS         raw: String,
+//RS     },
+//RS     EntityRef {
+//RS         name: String,
+//RS         resolved: Option<String>,
+//RS         raw: String,
+//RS     },
+//RS     Comment {
+//RS         value: String,
+//RS         raw: String,
+//RS     },
+//RS     ProcessingInstruction {
+//RS         target: String,
+//RS         value: String,
+//RS         raw: String,
+//RS     },
+//RS     ElementEnd {
+//RS         name: Name,
+//RS         raw: String,
+//RS     },
+//RS     DocumentEnd,
+//RS }
+//RS 
+//RS /// DataTree-compatible value used by both runtime and comptime adapters.
+//RS /// Keeping the fold here prevents either adapter from inventing a second XML
+//RS /// tree or subtly changing event ordering.
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum Value {
+//RS     Null,
+//RS     Bool(bool),
+//RS     Int(i64),
+//RS     Text(String),
+//RS     Array(Vec<Value>),
+//RS     Object(Vec<(String, Value)>),
+//RS }
+//RS 
+//RS fn text(value: impl Into<String>) -> Value {
+//RS     Value::Text(value.into())
+//RS }
+//RS 
+//RS fn optional_text(value: Option<String>) -> Value {
+//RS     value.map(Value::Text).unwrap_or(Value::Null)
+//RS }
+//RS 
+//RS fn object(entries: Vec<(&str, Value)>) -> Value {
+//RS     Value::Object(
+//RS         entries
+//RS             .into_iter()
+//RS             .map(|(key, value)| (key.to_string(), value))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS fn field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+//RS     let Value::Object(entries) = value else {
+//RS         return None;
+//RS     };
+//RS     entries
+//RS         .iter()
+//RS         .find(|(candidate, _)| candidate == key)
+//RS         .map(|(_, value)| value)
+//RS }
+//RS 
+//RS fn name_value(name: Name) -> Value {
+//RS     object(vec![
+//RS         ("raw", text(name.raw)),
+//RS         ("prefix", optional_text(name.prefix)),
+//RS         ("local", text(name.local)),
+//RS         ("namespace_uri", optional_text(name.namespace_uri)),
+//RS     ])
+//RS }
+//RS 
+//RS fn lexical(raw: String, semantic: Value) -> Value {
+//RS     object(vec![
+//RS         ("raw_text", text(raw)),
+//RS         ("raw_bytes", Value::Null),
+//RS         ("semantic", semantic),
+//RS     ])
+//RS }
+//RS 
+//RS fn strip_lexical(value: &Value) -> Value {
+//RS     match value {
+//RS         Value::Array(values) => Value::Array(values.iter().map(strip_lexical).collect()),
+//RS         Value::Object(entries) => Value::Object(
+//RS             entries
+//RS                 .iter()
+//RS                 .filter(|(key, _)| {
+//RS                     key != "lexical" && key != "open_lexical" && key != "close_lexical"
+//RS                 })
+//RS                 .map(|(key, value)| (key.clone(), strip_lexical(value)))
+//RS                 .collect(),
+//RS         ),
+//RS         other => other.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn has_exact_xml_keys(entries: &[(String, Value)], keys: &[&str]) -> bool {
+//RS     entries.len() == keys.len()
+//RS         && keys
+//RS             .iter()
+//RS             .all(|key| entries.iter().any(|(candidate, _)| candidate == key))
+//RS }
+//RS 
+//RS fn xml_entry<'a>(entries: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
+//RS     entries
+//RS         .iter()
+//RS         .find(|(candidate, _)| candidate == key)
+//RS         .map(|(_, value)| value)
+//RS }
+//RS 
+//RS /// Exact field order for every closed D-ENCXML1 object shape.
+//RS pub fn xml_schema_order(entries: &[(String, Value)]) -> Option<&'static [&'static str]> {
+//RS     let text_field = |key: &str| {
+//RS         entries.iter().find_map(|(candidate, value)| {
+//RS             (candidate == key)
+//RS                 .then_some(value)
+//RS                 .and_then(|value| match value {
+//RS                     Value::Text(value) => Some(value.as_str()),
+//RS                     _ => None,
+//RS                 })
+//RS         })
+//RS     };
+//RS     let has = |key: &str| entries.iter().any(|(candidate, _)| candidate == key);
+//RS     let order: &[&str] = if let Some(tag) = text_field("$xml") {
+//RS         match tag {
+//RS             "document" => &["$xml", "encoding", "bom", "children"],
+//RS             "document_whitespace" if has("lexical") => &["$xml", "value", "lexical"],
+//RS             "document_whitespace" => &["$xml", "value"],
+//RS             "declaration" if has("lexical") => {
+//RS                 &["$xml", "version", "encoding", "standalone", "lexical"]
+//RS             }
+//RS             "declaration" => &["$xml", "version", "encoding", "standalone"],
+//RS             "doctype" if has("lexical") => &[
+//RS                 "$xml",
+//RS                 "name",
+//RS                 "public_id",
+//RS                 "system_id",
+//RS                 "internal_subset",
+//RS                 "lexical",
+//RS             ],
+//RS             "doctype" => &["$xml", "name", "public_id", "system_id", "internal_subset"],
+//RS             "element" if has("open_lexical") => &[
+//RS                 "$xml",
+//RS                 "name",
+//RS                 "namespaces",
+//RS                 "attributes",
+//RS                 "children",
+//RS                 "empty_style",
+//RS                 "open_lexical",
+//RS                 "close_lexical",
+//RS             ],
+//RS             "element" => &[
+//RS                 "$xml",
+//RS                 "name",
+//RS                 "namespaces",
+//RS                 "attributes",
+//RS                 "children",
+//RS                 "empty_style",
+//RS             ],
+//RS             "namespace" if has("lexical") => {
+//RS                 &["$xml", "prefix", "namespace_uri", "quote", "lexical"]
+//RS             }
+//RS             "namespace" => &["$xml", "prefix", "namespace_uri", "quote"],
+//RS             "attribute" if has("lexical") => &[
+//RS                 "$xml",
+//RS                 "name",
+//RS                 "parts",
+//RS                 "normalized_value",
+//RS                 "quote",
+//RS                 "lexical",
+//RS             ],
+//RS             "attribute" => &["$xml", "name", "parts", "normalized_value", "quote"],
+//RS             "text" | "cdata" | "comment" if has("lexical") => &["$xml", "value", "lexical"],
+//RS             "text" | "cdata" | "comment" => &["$xml", "value"],
+//RS             "entity_ref" if has("lexical") => &["$xml", "name", "resolved_value", "lexical"],
+//RS             "entity_ref" => &["$xml", "name", "resolved_value"],
+//RS             "processing_instruction" if has("lexical") => &["$xml", "target", "value", "lexical"],
+//RS             "processing_instruction" => &["$xml", "target", "value"],
+//RS             _ => return None,
+//RS         }
+//RS     } else if let Some(tag) = text_field("$xml_event") {
+//RS         match tag {
+//RS             "document_start" => &["$xml_event", "encoding", "bom"],
+//RS             "document_whitespace" => &["$xml_event", "value", "lexical"],
+//RS             "declaration" => &["$xml_event", "version", "encoding", "standalone", "lexical"],
+//RS             "doctype" => &[
+//RS                 "$xml_event",
+//RS                 "name",
+//RS                 "public_id",
+//RS                 "system_id",
+//RS                 "internal_subset",
+//RS                 "lexical",
+//RS             ],
+//RS             "element_start" => &[
+//RS                 "$xml_event",
+//RS                 "name",
+//RS                 "namespaces",
+//RS                 "attributes",
+//RS                 "empty_style",
+//RS                 "open_lexical",
+//RS             ],
+//RS             "text" | "cdata" | "comment" => &["$xml_event", "value", "lexical"],
+//RS             "entity_ref" => &["$xml_event", "name", "resolved_value", "lexical"],
+//RS             "processing_instruction" => &["$xml_event", "target", "value", "lexical"],
+//RS             "element_end" => &["$xml_event", "name", "close_lexical"],
+//RS             "document_end" => &["$xml_event"],
+//RS             _ => return None,
+//RS         }
+//RS     } else {
+//RS         [
+//RS             &["raw", "prefix", "local", "namespace_uri"][..],
+//RS             &["raw_text", "raw_bytes", "semantic"],
+//RS             &["name", "namespaces", "attributes", "empty_style"],
+//RS             &["encoding", "bom"],
+//RS             &["version", "encoding", "standalone"],
+//RS             &["name", "public_id", "system_id", "internal_subset"],
+//RS             &["name", "resolved_value"],
+//RS             &["target", "value"],
+//RS             &["value"],
+//RS             &["name"],
+//RS         ]
+//RS         .into_iter()
+//RS         .find(|keys| has_exact_xml_keys(entries, keys))?
+//RS     };
+//RS     has_exact_xml_keys(entries, order).then_some(order)
+//RS }
+//RS 
+//RS fn xml_schema_types_are_valid(entries: &[(String, Value)]) -> bool {
+//RS     let text = |key| matches!(xml_entry(entries, key), Some(Value::Text(_)));
+//RS     let optional_text = |key| matches!(xml_entry(entries, key), Some(Value::Text(_) | Value::Null));
+//RS     let array = |key| matches!(xml_entry(entries, key), Some(Value::Array(_)));
+//RS     let object = |key| matches!(xml_entry(entries, key), Some(Value::Object(_)));
+//RS     let object_or_null = |key| {
+//RS         matches!(
+//RS             xml_entry(entries, key),
+//RS             Some(Value::Object(_) | Value::Null)
+//RS         )
+//RS     };
+//RS     let bool_or_null = |key| matches!(xml_entry(entries, key), Some(Value::Bool(_) | Value::Null));
+//RS     let has = |key| xml_entry(entries, key).is_some();
+//RS     let bytes = |key| match xml_entry(entries, key) {
+//RS         Some(Value::Array(values)) => values
+//RS             .iter()
+//RS             .all(|value| matches!(value, Value::Int(byte) if (0..=255).contains(byte))),
+//RS         _ => false,
+//RS     };
+//RS     let tag = |key| match xml_entry(entries, key) {
+//RS         Some(Value::Text(value)) => Some(value.as_str()),
+//RS         _ => None,
+//RS     };
+//RS 
+//RS     if let Some(tag) = tag("$xml") {
+//RS         return match tag {
+//RS             "document" => optional_text("encoding") && bytes("bom") && array("children"),
+//RS             "document_whitespace" => text("value") && (!has("lexical") || object("lexical")),
+//RS             "declaration" => {
+//RS                 text("version")
+//RS                     && optional_text("encoding")
+//RS                     && bool_or_null("standalone")
+//RS                     && (!has("lexical") || object("lexical"))
+//RS             }
+//RS             "doctype" => {
+//RS                 text("name")
+//RS                     && optional_text("public_id")
+//RS                     && optional_text("system_id")
+//RS                     && optional_text("internal_subset")
+//RS                     && (!has("lexical") || object("lexical"))
+//RS             }
+//RS             "element" => {
+//RS                 object("name")
+//RS                     && array("namespaces")
+//RS                     && array("attributes")
+//RS                     && array("children")
+//RS                     && text("empty_style")
+//RS                     && (!has("open_lexical")
+//RS                         || (object("open_lexical") && object_or_null("close_lexical")))
+//RS             }
+//RS             "namespace" => {
+//RS                 optional_text("prefix")
+//RS                     && text("namespace_uri")
+//RS                     && text("quote")
+//RS                     && (!has("lexical") || object("lexical"))
+//RS             }
+//RS             "attribute" => {
+//RS                 object("name")
+//RS                     && array("parts")
+//RS                     && optional_text("normalized_value")
+//RS                     && text("quote")
+//RS                     && (!has("lexical") || object("lexical"))
+//RS             }
+//RS             "text" | "cdata" | "comment" => text("value") && (!has("lexical") || object("lexical")),
+//RS             "entity_ref" => {
+//RS                 text("name")
+//RS                     && optional_text("resolved_value")
+//RS                     && (!has("lexical") || object("lexical"))
+//RS             }
+//RS             "processing_instruction" => {
+//RS                 text("target") && text("value") && (!has("lexical") || object("lexical"))
+//RS             }
+//RS             _ => false,
+//RS         };
+//RS     }
+//RS     if let Some(tag) = tag("$xml_event") {
+//RS         return match tag {
+//RS             "document_start" => optional_text("encoding") && bytes("bom"),
+//RS             "document_whitespace" => text("value") && object("lexical"),
+//RS             "declaration" => {
+//RS                 text("version")
+//RS                     && optional_text("encoding")
+//RS                     && bool_or_null("standalone")
+//RS                     && object("lexical")
+//RS             }
+//RS             "doctype" => {
+//RS                 text("name")
+//RS                     && optional_text("public_id")
+//RS                     && optional_text("system_id")
+//RS                     && optional_text("internal_subset")
+//RS                     && object("lexical")
+//RS             }
+//RS             "element_start" => {
+//RS                 object("name")
+//RS                     && array("namespaces")
+//RS                     && array("attributes")
+//RS                     && text("empty_style")
+//RS                     && object("open_lexical")
+//RS             }
+//RS             "text" | "cdata" | "comment" => text("value") && object("lexical"),
+//RS             "entity_ref" => text("name") && optional_text("resolved_value") && object("lexical"),
+//RS             "processing_instruction" => text("target") && text("value") && object("lexical"),
+//RS             "element_end" => object("name") && object("close_lexical"),
+//RS             "document_end" => true,
+//RS             _ => false,
+//RS         };
+//RS     }
+//RS     match entries
+//RS         .iter()
+//RS         .map(|(key, _)| key.as_str())
+//RS         .collect::<Vec<_>>()
+//RS         .as_slice()
+//RS     {
+//RS         ["raw", "prefix", "local", "namespace_uri"] => {
+//RS             text("raw")
+//RS                 && optional_text("prefix")
+//RS                 && text("local")
+//RS                 && optional_text("namespace_uri")
+//RS         }
+//RS         ["raw_text", "raw_bytes", "semantic"] => true,
+//RS         ["name", "namespaces", "attributes", "empty_style"] => {
+//RS             object("name") && array("namespaces") && array("attributes") && text("empty_style")
+//RS         }
+//RS         ["encoding", "bom"] => optional_text("encoding") && bytes("bom"),
+//RS         ["version", "encoding", "standalone"] => {
+//RS             text("version") && optional_text("encoding") && bool_or_null("standalone")
+//RS         }
+//RS         ["name", "public_id", "system_id", "internal_subset"] => {
+//RS             text("name")
+//RS                 && optional_text("public_id")
+//RS                 && optional_text("system_id")
+//RS                 && optional_text("internal_subset")
+//RS         }
+//RS         ["name", "resolved_value"] => text("name") && optional_text("resolved_value"),
+//RS         ["target", "value"] => text("target") && text("value"),
+//RS         ["value"] => text("value"),
+//RS         ["name"] => object("name"),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn has_canonical_xml_object(value: &Value) -> bool {
+//RS     let Value::Object(entries) = value else {
+//RS         return false;
+//RS     };
+//RS     xml_schema_order(entries).is_some_and(|order| {
+//RS         entries
+//RS             .iter()
+//RS             .map(|(key, _)| key.as_str())
+//RS             .eq(order.iter().copied())
+//RS     }) && xml_schema_types_are_valid(entries)
+//RS }
+//RS 
+//RS fn has_canonical_xml_shape(value: &Value) -> bool {
+//RS     match value {
+//RS         Value::Array(values) => values.iter().all(has_canonical_xml_shape),
+//RS         Value::Object(entries) => {
+//RS             has_canonical_xml_object(value)
+//RS                 && entries
+//RS                     .iter()
+//RS                     .all(|(_, value)| has_canonical_xml_shape(value))
+//RS         }
+//RS         _ => true,
+//RS     }
+//RS }
+//RS 
+//RS fn lexical_evidence_matches(lexical: &Value, expected: &Value) -> bool {
+//RS     let Value::Object(entries) = lexical else {
+//RS         return false;
+//RS     };
+//RS     if !entries
+//RS         .iter()
+//RS         .map(|(key, _)| key.as_str())
+//RS         .eq(["raw_text", "raw_bytes", "semantic"])
+//RS         || !has_canonical_xml_shape(expected)
+//RS     {
+//RS         return false;
+//RS     }
+//RS     let Some(semantic) = field(lexical, "semantic") else {
+//RS         return false;
+//RS     };
+//RS     if !has_canonical_xml_shape(semantic) || semantic != expected {
+//RS         return false;
+//RS     }
+//RS     match (field(lexical, "raw_text"), field(lexical, "raw_bytes")) {
+//RS         (Some(Value::Text(_)), Some(Value::Null)) | (Some(Value::Null), Some(Value::Null)) => true,
+//RS         (Some(Value::Null), Some(Value::Array(bytes))) => bytes
+//RS             .iter()
+//RS             .all(|byte| matches!(byte, Value::Int(value) if (0..=255).contains(value))),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn lexical_semantic(value: &Value, key: &str) -> Option<Value> {
+//RS     if !has_canonical_xml_object(value) {
+//RS         return None;
+//RS     }
+//RS     let whole_tag = match field(value, "$xml") {
+//RS         Some(Value::Text(tag)) => Some(tag.as_str()),
+//RS         _ => None,
+//RS     };
+//RS     let event_tag = match field(value, "$xml_event") {
+//RS         Some(Value::Text(tag)) => Some(tag.as_str()),
+//RS         _ => None,
+//RS     };
+//RS     match (whole_tag, event_tag, key) {
+//RS         (Some("element"), _, "open_lexical") | (_, Some("element_start"), "open_lexical") => {
+//RS             Some(strip_lexical(&object(vec![
+//RS                 ("name", field(value, "name")?.clone()),
+//RS                 ("namespaces", field(value, "namespaces")?.clone()),
+//RS                 ("attributes", field(value, "attributes")?.clone()),
+//RS                 ("empty_style", field(value, "empty_style")?.clone()),
+//RS             ])))
+//RS         }
+//RS         (Some("element"), _, "close_lexical") | (_, Some("element_end"), "close_lexical") => {
+//RS             Some(object(vec![("name", field(value, "name")?.clone())]))
+//RS         }
+//RS         (Some(tag), _, "lexical")
+//RS             if matches!(
+//RS                 tag,
+//RS                 "document_whitespace"
+//RS                     | "declaration"
+//RS                     | "doctype"
+//RS                     | "namespace"
+//RS                     | "attribute"
+//RS                     | "text"
+//RS                     | "cdata"
+//RS                     | "entity_ref"
+//RS                     | "comment"
+//RS                     | "processing_instruction"
+//RS             ) =>
+//RS         {
+//RS             let mut semantic = strip_lexical(value);
+//RS             if matches!(
+//RS                 tag,
+//RS                 "document_whitespace"
+//RS                     | "declaration"
+//RS                     | "doctype"
+//RS                     | "text"
+//RS                     | "cdata"
+//RS                     | "entity_ref"
+//RS                     | "comment"
+//RS                     | "processing_instruction"
+//RS             ) && matches!(
+//RS                 field(field(value, key)?, "raw_bytes"),
+//RS                 Some(Value::Array(_))
+//RS             ) {
+//RS                 let Value::Object(entries) = &mut semantic else {
+//RS                     return None;
+//RS                 };
+//RS                 entries.retain(|(name, _)| name != "$xml");
+//RS             }
+//RS             Some(semantic)
+//RS         }
+//RS         (_, Some(tag), "lexical")
+//RS             if matches!(
+//RS                 tag,
+//RS                 "document_whitespace"
+//RS                     | "declaration"
+//RS                     | "doctype"
+//RS                     | "text"
+//RS                     | "cdata"
+//RS                     | "entity_ref"
+//RS                     | "comment"
+//RS                     | "processing_instruction"
+//RS             ) =>
+//RS         {
+//RS             let Value::Object(entries) = value else {
+//RS                 return None;
+//RS             };
+//RS             Some(Value::Object(
+//RS                 entries
+//RS                     .iter()
+//RS                     .filter(|(name, _)| {
+//RS                         name != "$xml_event"
+//RS                             && name != "lexical"
+//RS                             && name != "open_lexical"
+//RS                             && name != "close_lexical"
+//RS                     })
+//RS                     .map(|(name, value)| (name.clone(), strip_lexical(value)))
+//RS                     .collect(),
+//RS             ))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Remove raw forms that would become falsely trusted after ordered Objects
+//RS /// cross comptime's sorted Map representation.
+//RS pub fn invalidate_untrusted_lexical_evidence(value: &mut Value) {
+//RS     for key in ["lexical", "open_lexical", "close_lexical"] {
+//RS         let Some(lexical) = field(value, key) else {
+//RS             continue;
+//RS         };
+//RS         let trusted = lexical_semantic(value, key)
+//RS             .as_ref()
+//RS             .is_some_and(|expected| lexical_evidence_matches(lexical, expected));
+//RS         if !trusted {
+//RS             if let Value::Object(entries) = value {
+//RS                 if let Some((_, Value::Object(lexical))) =
+//RS                     entries.iter_mut().find(|(candidate, _)| candidate == key)
+//RS                 {
+//RS                     for (field, value) in lexical {
+//RS                         if matches!(field.as_str(), "raw_text" | "raw_bytes") {
+//RS                             *value = Value::Null;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     match value {
+//RS         Value::Array(values) => {
+//RS             for value in values {
+//RS                 invalidate_untrusted_lexical_evidence(value);
+//RS             }
+//RS         }
+//RS         Value::Object(entries) => {
+//RS             for (_, value) in entries {
+//RS                 invalidate_untrusted_lexical_evidence(value);
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn leaf(tag: &str, fields: Vec<(&str, Value)>, raw: String) -> Value {
+//RS     let mut semantic_fields = vec![("$xml", text(tag))];
+//RS     semantic_fields.extend(fields.clone());
+//RS     let semantic = strip_lexical(&object(semantic_fields));
+//RS     let mut node_fields = vec![("$xml", text(tag))];
+//RS     node_fields.extend(fields);
+//RS     node_fields.push(("lexical", lexical(raw, semantic)));
+//RS     object(node_fields)
+//RS }
+//RS 
+//RS fn part_value(part: Part) -> Value {
+//RS     match part {
+//RS         Part::Text { value, raw } => leaf("text", vec![("value", text(value))], raw),
+//RS         Part::Entity {
+//RS             name,
+//RS             resolved,
+//RS             raw,
+//RS         } => leaf(
+//RS             "entity_ref",
+//RS             vec![
+//RS                 ("name", text(name)),
+//RS                 ("resolved_value", optional_text(resolved)),
+//RS             ],
+//RS             raw,
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn namespace_value(namespace: Namespace) -> Value {
+//RS     leaf(
+//RS         "namespace",
+//RS         vec![
+//RS             ("prefix", optional_text(namespace.prefix)),
+//RS             ("namespace_uri", text(namespace.namespace_uri)),
+//RS             (
+//RS                 "quote",
+//RS                 text(if namespace.quote == '\'' {
+//RS                     "single"
+//RS                 } else {
+//RS                     "double"
+//RS                 }),
+//RS             ),
+//RS         ],
+//RS         namespace.raw,
+//RS     )
+//RS }
+//RS 
+//RS fn attribute_value(attribute: Attribute) -> Value {
+//RS     leaf(
+//RS         "attribute",
+//RS         vec![
+//RS             ("name", name_value(attribute.name)),
+//RS             (
+//RS                 "parts",
+//RS                 Value::Array(attribute.parts.into_iter().map(part_value).collect()),
+//RS             ),
+//RS             ("normalized_value", optional_text(attribute.normalized)),
+//RS             (
+//RS                 "quote",
+//RS                 text(if attribute.quote == '\'' {
+//RS                     "single"
+//RS                 } else {
+//RS                     "double"
+//RS                 }),
+//RS             ),
+//RS         ],
+//RS         attribute.raw,
+//RS     )
+//RS }
+//RS 
+//RS fn wire_bytes(text: &str, encoding: WireEncoding) -> Vec<u8> {
+//RS     match encoding {
+//RS         WireEncoding::UTF8 => text.as_bytes().to_vec(),
+//RS         WireEncoding::Utf16Le => text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+//RS         WireEncoding::Utf16Be => text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn byte_lexical(raw: Vec<u8>, semantic: Value) -> Value {
+//RS     object(vec![
+//RS         ("raw_text", Value::Null),
+//RS         (
+//RS             "raw_bytes",
+//RS             Value::Array(raw.into_iter().map(|b| Value::Int(i64::from(b))).collect()),
+//RS         ),
+//RS         ("semantic", semantic),
+//RS     ])
+//RS }
+//RS fn lexical_value_to_wire(mut value: Value, encoding: WireEncoding) -> Value {
+//RS     if let Value::Object(entries) = &mut value {
+//RS         if let Some((_, Value::Object(lex))) = entries.iter_mut().find(|(k, _)| k == "lexical") {
+//RS             if let Some(index) = lex.iter().position(|(k, _)| k == "raw_text") {
+//RS                 if let Value::Text(raw) = &lex[index].1 {
+//RS                     let bytes = wire_bytes(raw, encoding);
+//RS                     lex[index].1 = Value::Null;
+//RS                     if let Some((_, slot)) = lex.iter_mut().find(|(k, _)| k == "raw_bytes") {
+//RS                         *slot = Value::Array(
+//RS                             bytes
+//RS                                 .into_iter()
+//RS                                 .map(|b| Value::Int(i64::from(b)))
+//RS                                 .collect(),
+//RS                         )
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     value
+//RS }
+//RS 
+//RS /// Exact public `$xml_event` DataTree projection for a byte-backed stream item.
+//RS pub fn stream_event_value(item: StreamEvent) -> Value {
+//RS     let encoding = item.encoding;
+//RS     let lex = |raw: Vec<u8>, semantic: Value| byte_lexical(raw, semantic);
+//RS     match item.event {
+//RS         Event::DocumentStart => object(vec![
+//RS             ("$xml_event", text("document_start")),
+//RS             (
+//RS                 "encoding",
+//RS                 text(match encoding {
+//RS                     WireEncoding::UTF8 => "UTF-8",
+//RS                     WireEncoding::Utf16Le => "UTF-16LE",
+//RS                     WireEncoding::Utf16Be => "UTF-16BE",
+//RS                 }),
+//RS             ),
+//RS             (
+//RS                 "bom",
+//RS                 Value::Array(
+//RS                     item.bom
+//RS                         .into_iter()
+//RS                         .map(|b| Value::Int(i64::from(b)))
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ]),
+//RS         Event::DocumentEnd => object(vec![("$xml_event", text("document_end"))]),
+//RS         Event::Declaration {
+//RS             version,
+//RS             encoding: declared,
+//RS             standalone,
+//RS             raw: _,
+//RS         } => {
+//RS             let fields = vec![
+//RS                 ("version", text(version)),
+//RS                 ("encoding", optional_text(declared)),
+//RS                 (
+//RS                     "standalone",
+//RS                     standalone.map(Value::Bool).unwrap_or(Value::Null),
+//RS                 ),
+//RS             ];
+//RS             let mut out = vec![("$xml_event", text("declaration"))];
+//RS             out.extend(fields.clone());
+//RS             out.push((
+//RS                 "lexical",
+//RS                 lex(item.raw_bytes, strip_lexical(&object(fields))),
+//RS             ));
+//RS             object(out)
+//RS         }
+//RS         Event::DocumentWhitespace { value, raw: _ } => leaf_event(
+//RS             "document_whitespace",
+//RS             vec![("value", text(value))],
+//RS             item.raw_bytes,
+//RS         ),
+//RS         Event::Text { value, raw: _ } => {
+//RS             leaf_event("text", vec![("value", text(value))], item.raw_bytes)
+//RS         }
+//RS         Event::Cdata { value, raw: _ } => {
+//RS             leaf_event("cdata", vec![("value", text(value))], item.raw_bytes)
+//RS         }
+//RS         Event::Comment { value, raw: _ } => {
+//RS             leaf_event("comment", vec![("value", text(value))], item.raw_bytes)
+//RS         }
+//RS         Event::EntityRef {
+//RS             name,
+//RS             resolved,
+//RS             raw: _,
+//RS         } => leaf_event(
+//RS             "entity_ref",
+//RS             vec![
+//RS                 ("name", text(name)),
+//RS                 ("resolved_value", optional_text(resolved)),
+//RS             ],
+//RS             item.raw_bytes,
+//RS         ),
+//RS         Event::ProcessingInstruction {
+//RS             target,
+//RS             value,
+//RS             raw: _,
+//RS         } => leaf_event(
+//RS             "processing_instruction",
+//RS             vec![("target", text(target)), ("value", text(value))],
+//RS             item.raw_bytes,
+//RS         ),
+//RS         Event::Doctype {
+//RS             name,
+//RS             public_id,
+//RS             system_id,
+//RS             internal_subset,
+//RS             raw: _,
+//RS         } => leaf_event(
+//RS             "doctype",
+//RS             vec![
+//RS                 ("name", text(name)),
+//RS                 ("public_id", optional_text(public_id)),
+//RS                 ("system_id", optional_text(system_id)),
+//RS                 ("internal_subset", optional_text(internal_subset)),
+//RS             ],
+//RS             item.raw_bytes,
+//RS         ),
+//RS         Event::ElementEnd { name, raw: _ } => {
+//RS             let semantic = object(vec![("name", name_value(name.clone()))]);
+//RS             object(vec![
+//RS                 ("$xml_event", text("element_end")),
+//RS                 ("name", name_value(name)),
+//RS                 ("close_lexical", lex(item.raw_bytes, semantic)),
+//RS             ])
+//RS         }
+//RS         Event::ElementStart {
+//RS             name,
+//RS             namespaces,
+//RS             attributes,
+//RS             empty,
+//RS             raw: _,
+//RS         } => {
+//RS             let ns = Value::Array(
+//RS                 namespaces
+//RS                     .into_iter()
+//RS                     .map(|n| lexical_value_to_wire(namespace_value(n), encoding))
+//RS                     .collect(),
+//RS             );
+//RS             let attrs = Value::Array(
+//RS                 attributes
+//RS                     .into_iter()
+//RS                     .map(|a| lexical_value_to_wire(attribute_value(a), encoding))
+//RS                     .collect(),
+//RS             );
+//RS             let style = text(if empty { "empty" } else { "explicit" });
+//RS             let semantic = strip_lexical(&object(vec![
+//RS                 ("name", name_value(name.clone())),
+//RS                 ("namespaces", ns.clone()),
+//RS                 ("attributes", attrs.clone()),
+//RS                 ("empty_style", style.clone()),
+//RS             ]));
+//RS             object(vec![
+//RS                 ("$xml_event", text("element_start")),
+//RS                 ("name", name_value(name)),
+//RS                 ("namespaces", ns),
+//RS                 ("attributes", attrs),
+//RS                 ("empty_style", style),
+//RS                 ("open_lexical", lex(item.raw_bytes, semantic)),
+//RS             ])
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn leaf_event(tag: &str, fields: Vec<(&str, Value)>, raw: Vec<u8>) -> Value {
+//RS     let semantic = strip_lexical(&object(fields.clone()));
+//RS     let mut out = vec![("$xml_event", text(tag))];
+//RS     out.extend(fields);
+//RS     out.push(("lexical", byte_lexical(raw, semantic)));
+//RS     object(out)
+//RS }
+//RS 
+//RS struct ElementFrame {
+//RS     name: Name,
+//RS     namespaces: Vec<Value>,
+//RS     attributes: Vec<Value>,
+//RS     children: Vec<Value>,
+//RS     open_raw: String,
+//RS }
+//RS 
+//RS struct ByteElementFrame {
+//RS     name: Value,
+//RS     namespaces: Value,
+//RS     attributes: Value,
+//RS     children: Vec<Value>,
+//RS     empty_style: Value,
+//RS     open_lexical: Value,
+//RS }
+//RS 
+//RS fn finish_element(frame: ElementFrame, close_raw: Option<String>) -> Value {
+//RS     let empty = close_raw.is_none();
+//RS     let name = name_value(frame.name.clone());
+//RS     let empty_style = text(if empty { "empty" } else { "explicit" });
+//RS     let open_semantic = strip_lexical(&object(vec![
+//RS         ("name", name.clone()),
+//RS         ("namespaces", Value::Array(frame.namespaces.clone())),
+//RS         ("attributes", Value::Array(frame.attributes.clone())),
+//RS         ("empty_style", empty_style.clone()),
+//RS     ]));
+//RS     let close_lexical =
+//RS         close_raw.map(|raw| lexical(raw, object(vec![("name", name_value(frame.name.clone()))])));
+//RS     object(vec![
+//RS         ("$xml", text("element")),
+//RS         ("name", name),
+//RS         ("namespaces", Value::Array(frame.namespaces)),
+//RS         ("attributes", Value::Array(frame.attributes)),
+//RS         ("children", Value::Array(frame.children)),
+//RS         ("empty_style", empty_style),
+//RS         ("open_lexical", lexical(frame.open_raw, open_semantic)),
+//RS         ("close_lexical", close_lexical.unwrap_or(Value::Null)),
+//RS     ])
+//RS }
+//RS 
+//RS fn finish_byte_element(frame: ByteElementFrame, close_lexical: Value) -> Value {
+//RS     object(vec![
+//RS         ("$xml", text("element")),
+//RS         ("name", frame.name),
+//RS         ("namespaces", frame.namespaces),
+//RS         ("attributes", frame.attributes),
+//RS         ("children", Value::Array(frame.children)),
+//RS         ("empty_style", frame.empty_style),
+//RS         ("open_lexical", frame.open_lexical),
+//RS         ("close_lexical", close_lexical),
+//RS     ])
+//RS }
+//RS 
+//RS /// Parse and fold the pull stream into the ratified ordered tagged XML tree.
+//RS pub fn parse_document(source: &str) -> Result<Value, Error> {
+//RS     parse_document_with(source, &ParseOptions::safe())
+//RS }
+//RS 
+//RS /// Parse a complete XML value with the ratified whole-value policy and limits.
+//RS pub fn parse_document_with(source: &str, options: &ParseOptions) -> Result<Value, Error> {
+//RS     options.limits.validate()?;
+//RS     let mut scanner = Scanner::with_options(source, options.clone())?;
+//RS     let mut document_children = Vec::new();
+//RS     let mut stack: Vec<ElementFrame> = Vec::new();
+//RS     while let Some(event) = scanner.next()? {
+//RS         let node = match event {
+//RS             Event::DocumentStart | Event::DocumentEnd => continue,
+//RS             Event::Declaration {
+//RS                 version,
+//RS                 encoding,
+//RS                 standalone,
+//RS                 raw,
+//RS             } => Some(leaf(
+//RS                 "declaration",
+//RS                 vec![
+//RS                     ("version", text(version)),
+//RS                     ("encoding", optional_text(encoding)),
+//RS                     (
+//RS                         "standalone",
+//RS                         standalone.map(Value::Bool).unwrap_or(Value::Null),
+//RS                     ),
+//RS                 ],
+//RS                 raw,
+//RS             )),
+//RS             Event::DocumentWhitespace { value, raw } => Some(leaf(
+//RS                 "document_whitespace",
+//RS                 vec![("value", text(value))],
+//RS                 raw,
+//RS             )),
+//RS             Event::Doctype {
+//RS                 name,
+//RS                 public_id,
+//RS                 system_id,
+//RS                 internal_subset,
+//RS                 raw,
+//RS             } => Some(leaf(
+//RS                 "doctype",
+//RS                 vec![
+//RS                     ("name", text(name)),
+//RS                     ("public_id", optional_text(public_id)),
+//RS                     ("system_id", optional_text(system_id)),
+//RS                     ("internal_subset", optional_text(internal_subset)),
+//RS                 ],
+//RS                 raw,
+//RS             )),
+//RS             Event::ElementStart {
+//RS                 name,
+//RS                 namespaces,
+//RS                 attributes,
+//RS                 empty,
+//RS                 raw,
+//RS             } => {
+//RS                 let frame = ElementFrame {
+//RS                     name,
+//RS                     namespaces: namespaces.into_iter().map(namespace_value).collect(),
+//RS                     attributes: attributes.into_iter().map(attribute_value).collect(),
+//RS                     children: Vec::new(),
+//RS                     open_raw: raw,
+//RS                 };
+//RS                 if empty {
+//RS                     Some(finish_element(frame, None))
+//RS                 } else {
+//RS                     stack.push(frame);
+//RS                     None
+//RS                 }
+//RS             }
+//RS             Event::Text { value, raw } => Some(leaf("text", vec![("value", text(value))], raw)),
+//RS             Event::Cdata { value, raw } => Some(leaf("cdata", vec![("value", text(value))], raw)),
+//RS             Event::EntityRef {
+//RS                 name,
+//RS                 resolved,
+//RS                 raw,
+//RS             } => Some(leaf(
+//RS                 "entity_ref",
+//RS                 vec![
+//RS                     ("name", text(name)),
+//RS                     ("resolved_value", optional_text(resolved)),
+//RS                 ],
+//RS                 raw,
+//RS             )),
+//RS             Event::Comment { value, raw } => {
+//RS                 Some(leaf("comment", vec![("value", text(value))], raw))
+//RS             }
+//RS             Event::ProcessingInstruction { target, value, raw } => Some(leaf(
+//RS                 "processing_instruction",
+//RS                 vec![("target", text(target)), ("value", text(value))],
+//RS                 raw,
+//RS             )),
+//RS             Event::ElementEnd { name: _, raw } => {
+//RS                 let frame = stack
+//RS                     .pop()
+//RS                     .ok_or_else(|| Error::at(scanner.offset, "element stack underflow"))?;
+//RS                 Some(finish_element(frame, Some(raw)))
+//RS             }
+//RS         };
+//RS         if let Some(node) = node {
+//RS             if let Some(parent) = stack.last_mut() {
+//RS                 parent.children.push(node);
+//RS             } else {
+//RS                 document_children.push(node);
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(object(vec![
+//RS         ("$xml", text("document")),
+//RS         ("encoding", Value::Null),
+//RS         ("bom", Value::Array(Vec::new())),
+//RS         ("children", Value::Array(document_children)),
+//RS     ]))
+//RS }
+//RS 
+//RS /// Parse bytes through the same pull scanner used by XMLReader, then fold its
+//RS /// exact event algebra into the ratified whole-value tree.
+//RS pub fn parse_document_bytes(bytes: &[u8]) -> Result<Value, Error> {
+//RS     parse_document_bytes_with(bytes, &ParseOptions::safe())
+//RS }
+//RS 
+//RS pub fn parse_document_bytes_with(bytes: &[u8], options: &ParseOptions) -> Result<Value, Error> {
+//RS     options.limits.validate()?;
+//RS     let mut scanner = StreamScanner::new(bytes.len().max(4), options.clone())?;
+//RS     scanner.push(bytes)?;
+//RS     scanner.finish_input()?;
+//RS     let mut events = Vec::new();
+//RS     while let Some(item) = scanner.next()? {
+//RS         events.push(stream_event_value(item));
+//RS     }
+//RS     fold_events(&events)
+//RS }
+//RS 
+//RS /// Fold a complete `$xml_event` stream into the ratified whole-value `$xml` document.
+//RS /// Inverse of [`unfold_events`]. Incomplete closure, mismatched ends, or missing
+//RS /// document_start/document_end reject with Shape (never a partial tree).
+//RS pub fn fold_events(events: &[Value]) -> Result<Value, Error> {
+//RS     let mut document_start = None;
+//RS     let mut document_children = Vec::new();
+//RS     let mut stack: Vec<ByteElementFrame> = Vec::new();
+//RS     let mut ended = false;
+//RS     for event in events {
+//RS         if ended {
+//RS             return Err(Error::shape("XML event after document_end"));
+//RS         }
+//RS         let tag = required_text(event, "$xml_event").map_err(Error::shape)?;
+//RS         let node = match tag {
+//RS             "document_start" => {
+//RS                 exact_keys(event, &["$xml_event", "encoding", "bom"])?;
+//RS                 if document_start.is_some() {
+//RS                     return Err(Error::shape("duplicate XML document_start"));
+//RS                 }
+//RS                 document_start = Some((
+//RS                     field(event, "encoding")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("document_start lacks encoding"))?,
+//RS                     field(event, "bom")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("document_start lacks bom"))?,
+//RS                 ));
+//RS                 None
+//RS             }
+//RS             "document_end" => {
+//RS                 exact_keys(event, &["$xml_event"])?;
+//RS                 if document_start.is_none() || !stack.is_empty() {
+//RS                     return Err(Error::shape(
+//RS                         "document_end requires one closed root element",
+//RS                     ));
+//RS                 }
+//RS                 ended = true;
+//RS                 None
+//RS             }
+//RS             "element_start" => {
+//RS                 if document_start.is_none() {
+//RS                     return Err(Error::shape("XML event before document_start"));
+//RS                 }
+//RS                 exact_keys(
+//RS                     event,
+//RS                     &[
+//RS                         "$xml_event",
+//RS                         "name",
+//RS                         "namespaces",
+//RS                         "attributes",
+//RS                         "empty_style",
+//RS                         "open_lexical",
+//RS                     ],
+//RS                 )?;
+//RS                 let empty = match required_text(event, "empty_style").map_err(Error::shape)? {
+//RS                     "empty" => true,
+//RS                     "explicit" => false,
+//RS                     _ => return Err(Error::shape("empty_style must be empty or explicit")),
+//RS                 };
+//RS                 let frame = ByteElementFrame {
+//RS                     name: field(event, "name")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("element_start lacks name"))?,
+//RS                     namespaces: field(event, "namespaces")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("element_start lacks namespaces"))?,
+//RS                     attributes: field(event, "attributes")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("element_start lacks attributes"))?,
+//RS                     children: Vec::new(),
+//RS                     empty_style: field(event, "empty_style")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("element_start lacks empty_style"))?,
+//RS                     open_lexical: field(event, "open_lexical")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("element_start lacks open_lexical"))?,
+//RS                 };
+//RS                 if empty {
+//RS                     Some(finish_byte_element(frame, Value::Null))
+//RS                 } else {
+//RS                     stack.push(frame);
+//RS                     None
+//RS                 }
+//RS             }
+//RS             "element_end" => {
+//RS                 exact_keys(event, &["$xml_event", "name", "close_lexical"])?;
+//RS                 let end_name = parse_name(
+//RS                     field(event, "name").ok_or_else(|| Error::shape("element_end lacks name"))?,
+//RS                 )?;
+//RS                 let frame = stack
+//RS                     .pop()
+//RS                     .ok_or_else(|| Error::shape("element stack underflow"))?;
+//RS                 let open_name = parse_name(&frame.name)?;
+//RS                 if open_name.local != end_name.local
+//RS                     || open_name.namespace_uri != end_name.namespace_uri
+//RS                 {
+//RS                     return Err(Error::at_kind(
+//RS                         0,
+//RS                         Reason::MismatchedTag,
+//RS                         "element_end does not match the open expanded name",
+//RS                     ));
+//RS                 }
+//RS                 Some(finish_byte_element(
+//RS                     frame,
+//RS                     field(event, "close_lexical")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("element_end lacks close_lexical"))?,
+//RS                 ))
+//RS             }
+//RS             _ => {
+//RS                 if document_start.is_none() {
+//RS                     return Err(Error::shape("XML event before document_start"));
+//RS                 }
+//RS                 let Value::Object(mut entries) = event.clone() else {
+//RS                     return Err(Error::shape("XML event must be an Object"));
+//RS                 };
+//RS                 let Some((key, _)) = entries.iter_mut().find(|(key, _)| key == "$xml_event") else {
+//RS                     return Err(Error::shape("XML event lacks $xml_event"));
+//RS                 };
+//RS                 *key = "$xml".to_string();
+//RS                 Some(Value::Object(entries))
+//RS             }
+//RS         };
+//RS         if let Some(node) = node {
+//RS             if let Some(parent) = stack.last_mut() {
+//RS                 parent.children.push(node);
+//RS             } else {
+//RS                 document_children.push(node);
+//RS             }
+//RS         }
+//RS     }
+//RS     if !ended || !stack.is_empty() {
+//RS         return Err(Error::shape(
+//RS             "XML event stream did not form a complete document",
+//RS         ));
+//RS     }
+//RS     let (encoding, bom) =
+//RS         document_start.ok_or_else(|| Error::shape("XML event stream lacks document_start"))?;
+//RS     let has_root = document_children
+//RS         .iter()
+//RS         .filter(|node| required_text(node, "$xml").ok() == Some("element"))
+//RS         .count()
+//RS         == 1;
+//RS     if !has_root {
+//RS         return Err(Error::shape(
+//RS             "XML document must contain exactly one root element",
+//RS         ));
+//RS     }
+//RS     Ok(object(vec![
+//RS         ("$xml", text("document")),
+//RS         ("encoding", encoding),
+//RS         ("bom", bom),
+//RS         ("children", Value::Array(document_children)),
+//RS     ]))
+//RS }
+//RS 
+//RS /// Unfold a whole-value `$xml` document into the exact `$xml_event` algebra.
+//RS /// Inverse of [`fold_events`].
+//RS pub fn unfold_events(value: &Value) -> Result<Vec<Value>, Error> {
+//RS     fn event_from_node(value: &Value) -> Result<Value, Error> {
+//RS         let Value::Object(mut entries) = value.clone() else {
+//RS             return Err(Error::shape("XML node must be an Object"));
+//RS         };
+//RS         let Some((key, _)) = entries.iter_mut().find(|(key, _)| key == "$xml") else {
+//RS             return Err(Error::shape("XML node lacks $xml"));
+//RS         };
+//RS         *key = "$xml_event".to_string();
+//RS         Ok(Value::Object(entries))
+//RS     }
+//RS 
+//RS     fn push_node(value: &Value, output: &mut Vec<Value>) -> Result<(), Error> {
+//RS         let tag = required_text(value, "$xml").map_err(Error::shape)?;
+//RS         if tag == "element" {
+//RS             exact_keys(
+//RS                 value,
+//RS                 &[
+//RS                     "$xml",
+//RS                     "name",
+//RS                     "namespaces",
+//RS                     "attributes",
+//RS                     "children",
+//RS                     "empty_style",
+//RS                     "open_lexical",
+//RS                     "close_lexical",
+//RS                 ],
+//RS             )?;
+//RS             let children = match field(value, "children") {
+//RS                 Some(Value::Array(children)) => children,
+//RS                 _ => return Err(Error::shape("XML element children must be an Array")),
+//RS             };
+//RS             let style = required_text(value, "empty_style").map_err(Error::shape)?;
+//RS             match (style, field(value, "close_lexical")) {
+//RS                 ("empty", Some(Value::Null)) if children.is_empty() => {}
+//RS                 ("explicit", Some(Value::Object(_))) => {}
+//RS                 ("empty", _) => {
+//RS                     return Err(Error::shape(
+//RS                         "empty element requires no children and null close_lexical",
+//RS                     ))
+//RS                 }
+//RS                 ("explicit", _) => {
+//RS                     return Err(Error::shape("explicit element requires close_lexical"))
+//RS                 }
+//RS                 _ => return Err(Error::shape("empty_style must be empty or explicit")),
+//RS             }
+//RS             output.push(object(vec![
+//RS                 ("$xml_event", text("element_start")),
+//RS                 (
+//RS                     "name",
+//RS                     field(value, "name")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("element lacks name"))?,
+//RS                 ),
+//RS                 (
+//RS                     "namespaces",
+//RS                     field(value, "namespaces")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("element lacks namespaces"))?,
+//RS                 ),
+//RS                 (
+//RS                     "attributes",
+//RS                     field(value, "attributes")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("element lacks attributes"))?,
+//RS                 ),
+//RS                 ("empty_style", text(style)),
+//RS                 (
+//RS                     "open_lexical",
+//RS                     field(value, "open_lexical")
+//RS                         .cloned()
+//RS                         .ok_or_else(|| Error::shape("element lacks open_lexical"))?,
+//RS                 ),
+//RS             ]));
+//RS             for child in children {
+//RS                 push_node(child, output)?;
+//RS             }
+//RS             if style == "explicit" {
+//RS                 output.push(object(vec![
+//RS                     ("$xml_event", text("element_end")),
+//RS                     (
+//RS                         "name",
+//RS                         field(value, "name")
+//RS                             .cloned()
+//RS                             .ok_or_else(|| Error::shape("element lacks name"))?,
+//RS                     ),
+//RS                     (
+//RS                         "close_lexical",
+//RS                         field(value, "close_lexical")
+//RS                             .cloned()
+//RS                             .ok_or_else(|| Error::shape("element lacks close_lexical"))?,
+//RS                     ),
+//RS                 ]));
+//RS             }
+//RS             return Ok(());
+//RS         }
+//RS         if !matches!(
+//RS             tag,
+//RS             "declaration"
+//RS                 | "document_whitespace"
+//RS                 | "doctype"
+//RS                 | "text"
+//RS                 | "cdata"
+//RS                 | "entity_ref"
+//RS                 | "comment"
+//RS                 | "processing_instruction"
+//RS         ) {
+//RS             return Err(Error::shape(format!(
+//RS                 "{tag} is not legal as an XML document or element child"
+//RS             )));
+//RS         }
+//RS         output.push(event_from_node(value)?);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     exact_keys(value, &["$xml", "encoding", "bom", "children"])?;
+//RS     if required_text(value, "$xml").map_err(Error::shape)? != "document" {
+//RS         return Err(Error::shape("XML whole value must be a document"));
+//RS     }
+//RS     let children = match field(value, "children") {
+//RS         Some(Value::Array(children)) => children,
+//RS         _ => return Err(Error::shape("XML document children must be an Array")),
+//RS     };
+//RS     let mut output = vec![object(vec![
+//RS         ("$xml_event", text("document_start")),
+//RS         (
+//RS             "encoding",
+//RS             field(value, "encoding")
+//RS                 .cloned()
+//RS                 .ok_or_else(|| Error::shape("document lacks encoding"))?,
+//RS         ),
+//RS         (
+//RS             "bom",
+//RS             field(value, "bom")
+//RS                 .cloned()
+//RS                 .ok_or_else(|| Error::shape("document lacks bom"))?,
+//RS         ),
+//RS     ])];
+//RS     for child in children {
+//RS         push_node(child, &mut output)?;
+//RS     }
+//RS     output.push(object(vec![("$xml_event", text("document_end"))]));
+//RS     Ok(output)
+//RS }
+//RS 
+//RS fn lexical_raw<'a>(value: &'a Value, key: &str, semantic: &Value) -> Option<&'a str> {
+//RS     let lexical_value = field(value, key)?;
+//RS     if !has_canonical_xml_object(value) || !lexical_evidence_matches(lexical_value, semantic) {
+//RS         return None;
+//RS     }
+//RS     match field(lexical_value, "raw_text")? {
+//RS         Value::Text(raw) => Some(raw),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn required_text<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
+//RS     match field(value, key) {
+//RS         Some(Value::Text(text)) => Ok(text),
+//RS         _ => Err(format!("XML {key} must be text")),
+//RS     }
+//RS }
+//RS 
+//RS fn optional_text_field<'a>(value: &'a Value, key: &str) -> Result<Option<&'a str>, String> {
+//RS     match field(value, key) {
+//RS         Some(Value::Text(text)) => Ok(Some(text)),
+//RS         Some(Value::Null) => Ok(None),
+//RS         _ => Err(format!("XML {key} must be text or null")),
+//RS     }
+//RS }
+//RS 
+//RS fn escape_text(value: &str) -> String {
+//RS     value.replace('&', "&amp;").replace('<', "&lt;")
+//RS }
+//RS 
+//RS fn escape_attribute(value: &str, quote: char) -> String {
+//RS     let escaped = escape_text(value);
+//RS     if quote == '\'' {
+//RS         escaped.replace('\'', "&apos;")
+//RS     } else {
+//RS         escaped.replace('"', "&quot;")
+//RS     }
+//RS }
+//RS 
+//RS fn deterministic_leaf(value: &Value, tag: &str) -> Result<String, String> {
+//RS     match tag {
+//RS         "document_whitespace" => Ok(required_text(value, "value")?.to_string()),
+//RS         "declaration" => {
+//RS             let mut output = format!("<?xml version=\"{}\"", required_text(value, "version")?);
+//RS             if let Some(encoding) = optional_text_field(value, "encoding")? {
+//RS                 output.push_str(&format!(" encoding=\"{encoding}\""));
+//RS             }
+//RS             match field(value, "standalone") {
+//RS                 Some(Value::Bool(true)) => output.push_str(" standalone=\"yes\""),
+//RS                 Some(Value::Bool(false)) => output.push_str(" standalone=\"no\""),
+//RS                 Some(Value::Null) => {}
+//RS                 _ => return Err("XML standalone must be bool or null".to_string()),
+//RS             }
+//RS             output.push_str("?>");
+//RS             Ok(output)
+//RS         }
+//RS         "doctype" => {
+//RS             let mut output = format!("<!DOCTYPE {}", required_text(value, "name")?);
+//RS             match (
+//RS                 optional_text_field(value, "public_id")?,
+//RS                 optional_text_field(value, "system_id")?,
+//RS             ) {
+//RS                 (Some(public), Some(system)) => {
+//RS                     output.push_str(&format!(" PUBLIC \"{public}\" \"{system}\""));
+//RS                 }
+//RS                 (None, Some(system)) => output.push_str(&format!(" SYSTEM \"{system}\"")),
+//RS                 (None, None) => {}
+//RS                 (Some(_), None) => {
+//RS                     return Err("XML PUBLIC identifier requires SYSTEM identifier".to_string());
+//RS                 }
+//RS             }
+//RS             if let Some(subset) = optional_text_field(value, "internal_subset")? {
+//RS                 output.push_str(&format!(" [{subset}]"));
+//RS             }
+//RS             output.push('>');
+//RS             Ok(output)
+//RS         }
+//RS         "text" => Ok(escape_text(required_text(value, "value")?)),
+//RS         "cdata" => {
+//RS             let body = required_text(value, "value")?;
+//RS             if body.contains("]]>") {
+//RS                 return Err("CDATA value contains ]]>".to_string());
+//RS             }
+//RS             Ok(format!("<![CDATA[{body}]]>"))
+//RS         }
+//RS         "entity_ref" => Ok(format!("&{};", required_text(value, "name")?)),
+//RS         "comment" => {
+//RS             let body = required_text(value, "value")?;
+//RS             if body.contains("--") || body.ends_with('-') {
+//RS                 return Err("XML comment contains forbidden --".to_string());
+//RS             }
+//RS             Ok(format!("<!--{body}-->"))
+//RS         }
+//RS         "processing_instruction" => {
+//RS             let body = required_text(value, "value")?;
+//RS             let separator = if body.is_empty() { "" } else { " " };
+//RS             Ok(format!(
+//RS                 "<?{}{separator}{body}?>",
+//RS                 required_text(value, "target")?
+//RS             ))
+//RS         }
+//RS         _ => Err(format!("unsupported XML node tag {tag}")),
+//RS     }
+//RS }
+//RS 
+//RS fn render_element_open(value: &Value, output: &mut String) -> Result<(), String> {
+//RS     let name = field(value, "name").ok_or("XML element lacks name")?;
+//RS     output.push('<');
+//RS     output.push_str(required_text(name, "raw")?);
+//RS     let Some(Value::Array(namespaces)) = field(value, "namespaces") else {
+//RS         return Err("XML namespaces must be an array".to_string());
+//RS     };
+//RS     for namespace in namespaces {
+//RS         output.push_str(" xmlns");
+//RS         if let Some(prefix) = optional_text_field(namespace, "prefix")? {
+//RS             output.push(':');
+//RS             output.push_str(prefix);
+//RS         }
+//RS         let quote = if required_text(namespace, "quote")? == "single" {
+//RS             '\''
+//RS         } else {
+//RS             '"'
+//RS         };
+//RS         output.push('=');
+//RS         output.push(quote);
+//RS         output.push_str(&escape_attribute(
+//RS             required_text(namespace, "namespace_uri")?,
+//RS             quote,
+//RS         ));
+//RS         output.push(quote);
+//RS     }
+//RS     let Some(Value::Array(attributes)) = field(value, "attributes") else {
+//RS         return Err("XML attributes must be an array".to_string());
+//RS     };
+//RS     for attribute in attributes {
+//RS         let attribute_name = field(attribute, "name").ok_or("XML attribute lacks name")?;
+//RS         let quote = if required_text(attribute, "quote")? == "single" {
+//RS             '\''
+//RS         } else {
+//RS             '"'
+//RS         };
+//RS         output.push(' ');
+//RS         output.push_str(required_text(attribute_name, "raw")?);
+//RS         output.push('=');
+//RS         output.push(quote);
+//RS         if let Some(normalized) = optional_text_field(attribute, "normalized_value")? {
+//RS             output.push_str(&escape_attribute(normalized, quote));
+//RS         } else {
+//RS             let Some(Value::Array(parts)) = field(attribute, "parts") else {
+//RS                 return Err("XML attribute parts must be an array".to_string());
+//RS             };
+//RS             for part in parts {
+//RS                 let tag = required_text(part, "$xml")?;
+//RS                 output.push_str(&deterministic_leaf(part, tag)?);
+//RS             }
+//RS         }
+//RS         output.push(quote);
+//RS     }
+//RS     if required_text(value, "empty_style")? == "empty" {
+//RS         output.push_str("/>");
+//RS     } else {
+//RS         output.push('>');
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Render the ratified tree. Valid unchanged token evidence is reused; edited
+//RS /// or constructed tokens render deterministically without trusting stale raw.
+//RS pub fn render_document(value: &Value) -> Result<String, String> {
+//RS     fn render_node(value: &Value, output: &mut String) -> Result<(), String> {
+//RS         let tag = required_text(value, "$xml")?;
+//RS         if tag == "document" {
+//RS             let Some(Value::Array(children)) = field(value, "children") else {
+//RS                 return Err("XML document children must be an array".to_string());
+//RS             };
+//RS             for child in children {
+//RS                 render_node(child, output)?;
+//RS             }
+//RS             return Ok(());
+//RS         }
+//RS         if tag == "element" {
+//RS             let open_semantic = strip_lexical(&object(vec![
+//RS                 (
+//RS                     "name",
+//RS                     field(value, "name")
+//RS                         .cloned()
+//RS                         .ok_or("XML element lacks name")?,
+//RS                 ),
+//RS                 (
+//RS                     "namespaces",
+//RS                     field(value, "namespaces")
+//RS                         .cloned()
+//RS                         .ok_or("XML element lacks namespaces")?,
+//RS                 ),
+//RS                 (
+//RS                     "attributes",
+//RS                     field(value, "attributes")
+//RS                         .cloned()
+//RS                         .ok_or("XML element lacks attributes")?,
+//RS                 ),
+//RS                 (
+//RS                     "empty_style",
+//RS                     field(value, "empty_style")
+//RS                         .cloned()
+//RS                         .ok_or("XML element lacks empty_style")?,
+//RS                 ),
+//RS             ]));
+//RS             if let Some(raw) = lexical_raw(value, "open_lexical", &open_semantic) {
+//RS                 output.push_str(raw);
+//RS             } else {
+//RS                 render_element_open(value, output)?;
+//RS             }
+//RS             let Some(Value::Array(children)) = field(value, "children") else {
+//RS                 return Err("XML element children must be an array".to_string());
+//RS             };
+//RS             for child in children {
+//RS                 render_node(child, output)?;
+//RS             }
+//RS             let close_semantic = object(vec![(
+//RS                 "name",
+//RS                 field(value, "name")
+//RS                     .cloned()
+//RS                     .ok_or("XML element lacks name")?,
+//RS             )]);
+//RS             if let Some(raw) = lexical_raw(value, "close_lexical", &close_semantic) {
+//RS                 output.push_str(raw);
+//RS             } else if required_text(value, "empty_style")? == "explicit" {
+//RS                 let name = field(value, "name").ok_or("XML element lacks name")?;
+//RS                 output.push_str("</");
+//RS                 output.push_str(required_text(name, "raw")?);
+//RS                 output.push('>');
+//RS             }
+//RS             return Ok(());
+//RS         }
+//RS         let semantic = strip_lexical(value);
+//RS         if let Some(raw) = lexical_raw(value, "lexical", &semantic) {
+//RS             output.push_str(raw);
+//RS         } else {
+//RS             output.push_str(&deterministic_leaf(value, tag)?);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     let mut output = String::new();
+//RS     render_node(value, &mut output)?;
+//RS     Ok(output)
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum RenderEncoding {
+//RS     UTF8,
+//RS     UTF8Bom,
+//RS     Utf16Le,
+//RS     Utf16Be,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum LexicalPolicy {
+//RS     PreserveValid,
+//RS     Deterministic,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+// END-PORT-PENDING 0111 crates/jet-foundation/src/XmlPull.rs:1-1795
+

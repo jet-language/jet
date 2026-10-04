@@ -1,0 +1,1590 @@
+// PORT-PENDING 1188 tests-web-dev-slice-1: tests/web_dev.rs:1-1586
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! c134 Phase 7: `jet dev <file>.jet --target=web` — the std-only watch +
+//RS //! rebuild-on-save + live-reload dev server (Source/CmdDevWeb.rs). Starts the
+//RS //! real `jet` binary as a child process, talks to it over a plain TCP socket
+//RS //! (no new dependency — matches the server's own std-only HTTP), edits a
+//RS //! throwaway temp copy of a fixture, and confirms the rebuild lands.
+//RS //!
+//RS //! Also covers c-devserver (owner-directed 2026-07-01): `jet dev <file>`
+//RS //! when the file defines a top-level `fn dev()` — the file configures and
+//RS //! starts its OWN `core.web.devserver` value instead of the CLI hardcoding
+//RS //! `--target=web --port=<N>`. Same spawn/TCP/rebuild harness, driven through
+//RS //! zero CLI flags — `jet dev app.jet`, no `--target=web`.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::collections::HashMap;
+//RS use std::fs;
+//RS use std::io::{Read, Write};
+//RS use std::net::{TcpListener, TcpStream};
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Stdio};
+//RS use std::sync::{mpsc, Mutex, OnceLock};
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS fn have_tool(name: &str) -> bool {
+//RS     Command::new(name).arg("--version").output().is_ok()
+//RS }
+//RS 
+//RS fn jet_bin() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn unused_local_port() -> u16 {
+//RS     TcpListener::bind(("127.0.0.1", 0))
+//RS         .expect("bind an ephemeral localhost port")
+//RS         .local_addr()
+//RS         .expect("read local addr")
+//RS         .port()
+//RS }
+//RS 
+//RS static CANVAS_SESSIONS: OnceLock<Mutex<HashMap<u16, String>>> = OnceLock::new();
+//RS 
+//RS fn canvas_session(port: u16) -> Option<String> {
+//RS     CANVAS_SESSIONS
+//RS         .get_or_init(|| Mutex::new(HashMap::new()))
+//RS         .lock()
+//RS         .unwrap()
+//RS         .get(&port)
+//RS         .cloned()
+//RS }
+//RS 
+//RS fn remember_canvas_session(port: u16, session: String) {
+//RS     CANVAS_SESSIONS
+//RS         .get_or_init(|| Mutex::new(HashMap::new()))
+//RS         .lock()
+//RS         .unwrap()
+//RS         .insert(port, session);
+//RS }
+//RS 
+//RS fn forget_canvas_session(port: u16) {
+//RS     if let Some(sessions) = CANVAS_SESSIONS.get() {
+//RS         sessions.lock().unwrap().remove(&port);
+//RS     }
+//RS }
+//RS 
+//RS /// Minimal blocking HTTP/1.1 GET over a raw `TcpStream` — the same shape of
+//RS /// client `jet dev --target=web`'s own std-only server (Source/CmdDevWeb.rs)
+//RS /// expects, so the test doesn't need `curl` or any HTTP crate.
+//RS fn http_get(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
+//RS     http_get_with_session(port, path, canvas_session(port).as_deref())
+//RS }
+//RS 
+//RS fn http_get_without_session(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
+//RS     http_get_with_session(port, path, None)
+//RS }
+//RS 
+//RS fn http_get_with_session(
+//RS     port: u16,
+//RS     path: &str,
+//RS     session: Option<&str>,
+//RS ) -> Option<(u16, Vec<u8>)> {
+//RS     let (status, _, body) = http_get_response_with_session(port, path, session)?;
+//RS     Some((status, body))
+//RS }
+//RS 
+//RS fn http_get_with_content_type(port: u16, path: &str) -> Option<(u16, String, Vec<u8>)> {
+//RS     http_get_response_with_session(port, path, None)
+//RS }
+//RS 
+//RS fn http_get_response_with_session(
+//RS     port: u16,
+//RS     path: &str,
+//RS     session: Option<&str>,
+//RS ) -> Option<(u16, String, Vec<u8>)> {
+//RS     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+//RS     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+//RS     let authorization = session
+//RS         .map(|session| format!("Authorization: Bearer {session}\r\n"))
+//RS         .unwrap_or_default();
+//RS     let req = format!(
+//RS         "GET {} HTTP/1.1\r\nHost: localhost:{}\r\n{}Sec-Fetch-Site: same-origin\r\nConnection: close\r\n\r\n",
+//RS         path, port, authorization
+//RS     );
+//RS     stream.write_all(req.as_bytes()).ok()?;
+//RS     let mut raw = Vec::new();
+//RS     stream.read_to_end(&mut raw).ok()?;
+//RS     let sep = b"\r\n\r\n";
+//RS     let split = raw
+//RS         .windows(sep.len())
+//RS         .position(|w| w == sep)
+//RS         .map(|i| i + sep.len())?;
+//RS     let header_text = String::from_utf8_lossy(&raw[..split]);
+//RS     let status: u16 = header_text
+//RS         .lines()
+//RS         .next()?
+//RS         .split_whitespace()
+//RS         .nth(1)?
+//RS         .parse()
+//RS         .ok()?;
+//RS     let content_type = header_text.lines().find_map(|line| {
+//RS         let (name, value) = line.split_once(':')?;
+//RS         name.eq_ignore_ascii_case("content-type")
+//RS             .then(|| value.trim().to_string())
+//RS     }).unwrap_or_default();
+//RS     Some((status, content_type, raw[split..].to_vec()))
+//RS }
+//RS fn raw_http_exchange(port: u16, request: &[u8]) -> Option<Vec<u8>> {
+//RS     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+//RS     stream
+//RS         .set_read_timeout(Some(Duration::from_secs(5)))
+//RS         .ok()?;
+//RS     stream.write_all(request).ok()?;
+//RS     stream.shutdown(std::net::Shutdown::Write).ok()?;
+//RS     let mut raw = Vec::new();
+//RS     stream.read_to_end(&mut raw).ok()?;
+//RS     Some(raw)
+//RS }
+//RS 
+//RS fn raw_get_request(target: &str, headers: &[String]) -> Vec<u8> {
+//RS     let mut request = format!("GET {target} HTTP/1.1\r\n").into_bytes();
+//RS     for header in headers {
+//RS         request.extend_from_slice(header.as_bytes());
+//RS         request.extend_from_slice(b"\r\n");
+//RS     }
+//RS     request.extend_from_slice(b"\r\n");
+//RS     request
+//RS }
+//RS 
+//RS fn http_post(port: u16, path: &str, body: &str) -> Option<(u16, Vec<u8>)> {
+//RS     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+//RS     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+//RS     let authorization = canvas_session(port)
+//RS         .map(|session| format!("Authorization: Bearer {session}\r\n"))
+//RS         .unwrap_or_default();
+//RS     let req = format!(
+//RS         "POST {} HTTP/1.1\r\nHost: localhost:{}\r\n{}Origin: http://localhost:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+//RS         path,
+//RS         port,
+//RS         authorization,
+//RS         port,
+//RS         body.len(),
+//RS         body
+//RS     );
+//RS     stream.write_all(req.as_bytes()).ok()?;
+//RS     let mut raw = Vec::new();
+//RS     stream.read_to_end(&mut raw).ok()?;
+//RS     let sep = b"\r\n\r\n";
+//RS     let split = raw
+//RS         .windows(sep.len())
+//RS         .position(|w| w == sep)
+//RS         .map(|i| i + sep.len())?;
+//RS     let header_text = String::from_utf8_lossy(&raw[..split]);
+//RS     let status: u16 = header_text
+//RS         .lines()
+//RS         .next()?
+//RS         .split_whitespace()
+//RS         .nth(1)?
+//RS         .parse()
+//RS         .ok()?;
+//RS     Some((status, raw[split..].to_vec()))
+//RS }
+//RS 
+//RS fn json_field(haystack: &str, field: &str) -> String {
+//RS     let key = format!("\"{field}\":\"");
+//RS     let start = haystack.find(&key).expect("json field") + key.len();
+//RS     let rest = &haystack[start..];
+//RS     rest[..rest.find('"').expect("json field terminator")].to_string()
+//RS }
+//RS 
+//RS fn debug_session_id(body: &str) -> String {
+//RS     let payload = body
+//RS         .split_once("\"protocol\":\"jet.canvas.debug\"")
+//RS         .map(|(_, rest)| rest)
+//RS         .expect("debug protocol payload");
+//RS     json_field(payload, "id")
+//RS }
+//RS 
+//RS fn json_number_after(haystack: &str, marker: &str) -> u16 {
+//RS     let start = haystack.find(marker).expect("json number marker") + marker.len();
+//RS     haystack[start..]
+//RS         .split(|ch: char| !ch.is_ascii_digit())
+//RS         .next()
+//RS         .expect("json number")
+//RS         .parse()
+//RS         .expect("json number value")
+//RS }
+//RS 
+//RS /// Polls `/__jet_dev_version` until it differs from `baseline`, or panics
+//RS /// after a generous timeout — the rebuild-on-save proof point.
+//RS fn wait_for_version_change(port: u16, baseline: &str, timeout: Duration) -> String {
+//RS     let start = Instant::now();
+//RS     loop {
+//RS         if let Some((200, body)) = http_get(port, "/__jet_dev_version") {
+//RS             let v = String::from_utf8_lossy(&body).trim().to_string();
+//RS             if v != baseline && !v.is_empty() {
+//RS                 return v;
+//RS             }
+//RS         }
+//RS         if start.elapsed() > timeout {
+//RS             panic!(
+//RS                 "/__jet_dev_version never changed from {:?} within {:?}",
+//RS                 baseline, timeout
+//RS             );
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(100));
+//RS     }
+//RS }
+//RS 
+//RS fn wait_for_status(port: u16, client: &str, state: &str, timeout: Duration) -> String {
+//RS     let start = Instant::now();
+//RS     let path = format!("/__jet_dev_status?client={client}");
+//RS     loop {
+//RS         if let Some((200, body)) = http_get(port, &path) {
+//RS             let body = String::from_utf8_lossy(&body).into_owned();
+//RS             if body.contains(&format!("\"state\":\"{state}\"")) {
+//RS                 return body;
+//RS             }
+//RS         }
+//RS         if start.elapsed() > timeout {
+//RS             panic!("dev status never reached {state:?} within {timeout:?}");
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(50));
+//RS     }
+//RS }
+//RS 
+//RS fn wait_for_file_text(path: &std::path::Path, needle: &str, timeout: Duration) -> String {
+//RS     let start = Instant::now();
+//RS     loop {
+//RS         let text = fs::read_to_string(path).unwrap_or_default();
+//RS         if text.contains(needle) {
+//RS             return text;
+//RS         }
+//RS         if start.elapsed() > timeout {
+//RS             panic!("PTY transcript never contained {needle:?} within {timeout:?}:\n{text}");
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(50));
+//RS     }
+//RS }
+//RS 
+//RS // ============================================================================
+//RS // Section: `--target=web` entry mode (was tests/web_dev.rs)
+//RS // ============================================================================
+//RS 
+//RS const FIXTURE_SRC: &str = r#"use core.ui as ui
+//RS 
+//RS fn run() {
+//RS     backend :: ui.null_backend()
+//RS     node :: ui.node("hello", 100.0, 20.0)
+//RS     constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
+//RS     size :: backend.measure(node, constraint)
+//RS     print(size.width)
+//RS     print(size.height)
+//RS }
+//RS "#;
+//RS 
+//RS /// Same source with one literal changed, so the compiled `app.js` differs
+//RS /// byte-for-byte from `FIXTURE_SRC`'s — proof a rebuild actually re-ran the
+//RS /// compiler rather than re-serving a cached response.
+//RS const FIXTURE_SRC_EDITED: &str = r#"use core.ui as ui
+//RS 
+//RS fn run() {
+//RS     backend :: ui.null_backend()
+//RS     node :: ui.node("hello there", 100.0, 20.0)
+//RS     constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
+//RS     size :: backend.measure(node, constraint)
+//RS     print(size.width)
+//RS     print(size.height)
+//RS }
+//RS "#;
+//RS 
+//RS fn port_from_url_line(line: &str, prefix: &str) -> Option<u16> {
+//RS     let url = line.strip_prefix(prefix)?;
+//RS     let authority = url.split("://").nth(1)?.split('/').next()?;
+//RS     authority.rsplit_once(':')?.1.parse().ok()
+//RS }
+//RS 
+//RS fn session_from_canvas_url_line(line: &str) -> Option<String> {
+//RS     let rest = line.strip_prefix("Canvas: ")?.split("session=").nth(1)?;
+//RS     rest.split(|c: char| !c.is_ascii_hexdigit())
+//RS         .next()
+//RS         .filter(|token| token.len() >= 32)
+//RS         .map(str::to_string)
+//RS }
+//RS 
+//RS /// Reads the app preview and Canvas lines `run_dev_web` prints on startup,
+//RS /// with a bounded wait — never a blind `sleep`.
+//RS #[derive(Clone, Copy)]
+//RS struct DevPorts {
+//RS     canvas: u16,
+//RS     application: u16,
+//RS }
+//RS 
+//RS fn wait_for_ports(child_stdout: std::process::ChildStdout) -> DevPorts {
+//RS     let (tx, rx) = mpsc::channel();
+//RS     std::thread::spawn(move || {
+//RS         use std::io::{BufRead, BufReader};
+//RS         let reader = BufReader::new(child_stdout);
+//RS         let mut canvas_port = None;
+//RS         let mut application_port = None;
+//RS         let mut session = None;
+//RS         for line in reader.lines().map_while(Result::ok) {
+//RS             if canvas_port.is_none() {
+//RS                 if let Some(port) = port_from_url_line(&line, "Canvas: ") {
+//RS                     canvas_port = Some(port);
+//RS                 }
+//RS             }
+//RS             if application_port.is_none() {
+//RS                 if let Some(port) = port_from_url_line(&line, "App preview: ") {
+//RS                     application_port = Some(port);
+//RS                 }
+//RS             }
+//RS             if session.is_none() {
+//RS                 if let Some(token) = session_from_canvas_url_line(&line) {
+//RS                     session = Some(token);
+//RS                 }
+//RS             }
+//RS             if let (Some(canvas), Some(application), Some(session)) =
+//RS                 (canvas_port, application_port, session.as_ref())
+//RS             {
+//RS                 if application != canvas {
+//RS                     forget_canvas_session(application);
+//RS                 }
+//RS                 remember_canvas_session(canvas, session.clone());
+//RS                 let _ = tx.send(DevPorts {
+//RS                     canvas,
+//RS                     application,
+//RS                 });
+//RS                 return;
+//RS             }
+//RS         }
+//RS     });
+//RS     rx.recv_timeout(Duration::from_secs(60))
+//RS         .expect("jet dev never printed its serving URL and Canvas session")
+//RS }
+//RS 
+//RS fn wait_for_app_preview(child_stdout: std::process::ChildStdout) -> u16 {
+//RS     let (tx, rx) = mpsc::channel();
+//RS     std::thread::spawn(move || {
+//RS         use std::io::{BufRead, BufReader};
+//RS         let reader = BufReader::new(child_stdout);
+//RS         let mut sent = false;
+//RS         for line in reader.lines().map_while(Result::ok) {
+//RS             if !sent {
+//RS                 if let Some(port) = port_from_url_line(&line, "App preview: ") {
+//RS                     forget_canvas_session(port);
+//RS                     let _ = tx.send(port);
+//RS                     sent = true;
+//RS                 }
+//RS             }
+//RS         }
+//RS     });
+//RS     rx.recv_timeout(Duration::from_secs(60))
+//RS         .expect("jet dev never printed its static app preview URL")
+//RS }
+//RS 
+//RS fn wait_for_canvas_port(path: &std::path::Path, timeout: Duration) -> u16 {
+//RS     let transcript = wait_for_file_text(path, "Canvas: http://", timeout);
+//RS     let (port, session) = transcript
+//RS         .lines()
+//RS         .find_map(|line| {
+//RS             Some((
+//RS                 port_from_url_line(line, "Canvas: ")?,
+//RS                 session_from_canvas_url_line(line)?,
+//RS             ))
+//RS         })
+//RS         .expect("PTY startup did not include a Canvas URL");
+//RS     remember_canvas_session(port, session);
+//RS     port
+//RS }
+//RS 
+//RS #[test]
+//RS fn ui_showcase_uses_builtin_host_and_keeps_companion_page_live() {
+//RS     if !have_tool("rustc") {
+//RS         eprintln!("note: skipping UI showcase dev host proof (need rustc)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_ui_showcase_dev_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     fs::write(
+//RS         dir.join("app.jet"),
+//RS         include_str!("../Examples/features/web/ui_web_click.jet"),
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         dir.join("ui_web_click.html"),
+//RS         include_str!("../Examples/features/web/ui_web_click.html"),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let port = unused_local_port();
+//RS     let child = Command::new(jet_bin())
+//RS         .args(["dev", "app.jet", &format!("--port={port}")])
+//RS         .current_dir(&dir)
+//RS         .stdout(Stdio::null())
+//RS         .stderr(Stdio::null())
+//RS         .spawn()
+//RS         .expect("start UI showcase dev host");
+//RS 
+//RS     struct KillOnDrop(std::process::Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS     let guard = KillOnDrop(child);
+//RS     wait_for_server_up(port, Duration::from_secs(30));
+//RS 
+//RS     for request in 0..3 {
+//RS         let (status, body) = http_get(port, "/").expect("GET showcase companion page");
+//RS         assert_eq!(status, 200, "request {request}");
+//RS         let html = String::from_utf8_lossy(&body);
+//RS         assert!(
+//RS             html.contains("<h1>Reactive counter, rendered live</h1>"),
+//RS             "request {request}: {html}"
+//RS         );
+//RS         assert!(
+//RS             html.contains("id=\"jet-app\"") && html.contains("jet_main"),
+//RS             "request {request}: showcase host served a generic shell"
+//RS         );
+//RS     }
+//RS     let (status, js) = http_get(port, "/app.js").expect("GET showcase app.js");
+//RS     assert_eq!(status, 200);
+//RS     assert!(String::from_utf8_lossy(&js).contains("function jet_main()"));
+//RS 
+//RS     drop(guard);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_dev_web_serves_and_rebuilds_on_save() {
+//RS     if !have_tool("rustc") {
+//RS         eprintln!("note: skipping jet_dev_web_serves_and_rebuilds_on_save (need rustc)");
+//RS         return;
+//RS     }
+//RS 
+//RS     // Isolated scratch dir so this test never touches a real example file or
+//RS     // races other tests' `build/` output (D-style: temp dirs under
+//RS     // std::env::temp_dir(), matching tests/web_build.rs's convention).
+//RS     let dir = std::env::temp_dir().join(format!("jet_dev_web_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src_path = dir.join("app.jet");
+//RS     fs::write(&src_path, FIXTURE_SRC).unwrap();
+//RS     let mut child = Command::new(jet_bin())
+//RS         .args(["dev", "app.jet", "--target=web"])
+//RS         .current_dir(&dir)
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .expect("failed to start `jet dev --target=web`");
+//RS 
+//RS     // Make sure the child dies even if an assertion below panics.
+//RS     struct KillOnDrop(std::process::Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS     let stdout = child.stdout.take().unwrap();
+//RS     let guard = KillOnDrop(child);
+//RS 
+//RS     let port = wait_for_app_preview(stdout);
+//RS     assert!(
+//RS         (8080..=8089).contains(&port),
+//RS         "default app preview port escaped the stable range: {}",
+//RS         port
+//RS     );
+//RS 
+//RS     for path in ["/C:/Windows/win.ini", "/\\Windows\\win.ini", "/\\\\server\\share\\secret"] {
+//RS         let (status, _) = http_get(port, path).expect("static-path hostile request failed");
+//RS         assert_eq!(
+//RS             status, 400,
+//RS             "Windows absolute static path escaped the build root: {path}"
+//RS         );
+//RS     }
+//RS 
+//RS     // The initial build must be live and match what the real compile
+//RS     // pipeline produces for the same source (in-process, same as
+//RS     // tests/web_build.rs's fixtures use).
+//RS     let expected_initial = jet::compile_web_with_path(FIXTURE_SRC, "app.jet")
+//RS         .expect("front end rejected fixture")
+//RS         .web
+//RS         .expect("web target compile must produce web artifacts")
+//RS         .js_app;
+//RS     let (status, body) = http_get(port, "/app.js").expect("GET /app.js failed");
+//RS     assert_eq!(status, 200);
+//RS     let served = String::from_utf8_lossy(&body);
+//RS     // The dev host appends a source-map reference for the workbench debugger;
+//RS     // everything before that trailer must match a plain compile byte-for-byte.
+//RS     let map_trailer = "//# sourceMappingURL=app.js.map\n";
+//RS     let stripped = served
+//RS         .strip_suffix(map_trailer)
+//RS         .unwrap_or_else(|| panic!("served app.js must end with the dev source-map trailer"));
+//RS     assert_eq!(
+//RS         stripped, expected_initial,
+//RS         "served app.js (minus the dev source-map trailer) should match a plain compile of the same source"
+//RS     );
+//RS     let (status, _map) = http_get(port, "/app.js.map").expect("GET /app.js.map failed");
+//RS     assert_eq!(status, 200, "the referenced source map must be served");
+//RS 
+//RS     let (status, version_body) =
+//RS         http_get(port, "/__jet_dev_version").expect("GET /__jet_dev_version failed");
+//RS     assert_eq!(status, 200);
+//RS     let baseline_version = String::from_utf8_lossy(&version_body).trim().to_string();
+//RS     let (status, status_body) =
+//RS         http_get(port, "/__jet_dev_status").expect("GET /__jet_dev_status failed");
+//RS     assert_eq!(status, 200);
+//RS     let status_text = String::from_utf8_lossy(&status_body);
+//RS     assert!(status_text.contains("\"state\":\"ready\""), "{status_text}");
+//RS     assert!(status_text.contains("\"clients\":"), "{status_text}");
+//RS 
+//RS     // index.html should carry the injected live-reload poller.
+//RS     let (status, html_body) = http_get_without_session(port, "/").expect("GET / failed");
+//RS     assert_eq!(status, 200);
+//RS     let html = String::from_utf8_lossy(&html_body);
+//RS     assert!(
+//RS         html.contains("__jet_dev_status") && html.contains("Build failed"),
+//RS         "served index.html should have the live-reload script injected"
+//RS     );
+//RS     let (status, _) =
+//RS         http_get_without_session(port, "/canvas").expect("GET app listener Canvas path");
+//RS     assert_eq!(
+//RS         status, 404,
+//RS         "the app listener must not expose the Canvas route"
+//RS     );
+//RS     // Edit the SAME file the dev server is watching (never a real example
+//RS     // file — this is the throwaway temp copy) and wait for the rebuild.
+//RS     fs::write(&src_path, FIXTURE_SRC_EDITED).unwrap();
+//RS     let new_version = wait_for_version_change(port, &baseline_version, Duration::from_secs(15));
+//RS     assert_ne!(new_version, baseline_version);
+//RS 
+//RS     let expected_edited = jet::compile_web_with_path(FIXTURE_SRC_EDITED, "app.jet")
+//RS         .expect("front end rejected edited fixture")
+//RS         .web
+//RS         .expect("web target compile must produce web artifacts")
+//RS         .js_app;
+//RS     let (status, body) = http_get(port, "/app.js").expect("GET /app.js (after edit) failed");
+//RS     assert_eq!(status, 200);
+//RS     let served_edited = String::from_utf8_lossy(&body);
+//RS     let served_edited = served_edited.strip_suffix(map_trailer).unwrap_or(&served_edited);
+//RS     assert_eq!(
+//RS         served_edited, expected_edited,
+//RS         "served app.js should reflect the rebuilt (edited) source"
+//RS     );
+//RS     assert_ne!(
+//RS         expected_initial, expected_edited,
+//RS         "sanity: the edit should actually change generated JS, or this test proves nothing"
+//RS     );
+//RS 
+//RS     // `guard`'s `Drop` kills and reaps the child process on scope exit.
+//RS     drop(guard);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// The project owns `.jet/build`, so web dev staging and publication anchor at
+//RS /// the project root: `jet dev --target=web` run from a repository
+//RS /// subdirectory publishes to `<repo>/.jet/build` and serves it.
+//RS #[test]
+//RS fn jet_dev_web_publishes_from_a_repository_subdirectory() {
+//RS     if !have_tool("rustc") {
+//RS         eprintln!("note: skipping jet_dev_web_publishes_from_a_repository_subdirectory (need rustc)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let root = std::env::temp_dir().join(format!("jet_dev_web_subdir_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(root.join(".git")).unwrap();
+//RS     let app = root.join("app");
+//RS     fs::create_dir_all(&app).unwrap();
+//RS     fs::write(app.join("app.jet"), "fn run() {\n    print(\"hello web\")\n}\n").unwrap();
+//RS     let port = unused_local_port();
+//RS     let mut child = Command::new(jet_bin())
+//RS         .args(["dev", "app.jet", "--target=web", &format!("--port={port}")])
+//RS         .current_dir(&app)
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::null())
+//RS         .spawn()
+//RS         .expect("failed to start `jet dev --target=web`");
+//RS 
+//RS     struct KillOnDrop(std::process::Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS     let stdout = child.stdout.take().unwrap();
+//RS     let guard = KillOnDrop(child);
+//RS 
+//RS     assert_eq!(wait_for_app_preview(stdout), port);
+//RS     let (status, body) = http_get(port, "/app.js").expect("GET /app.js failed");
+//RS     assert_eq!(status, 200);
+//RS     let trailer: &[u8] = b"//# sourceMappingURL=app.js.map\n";
+//RS     let published =
+//RS         fs::read(root.join(".jet/build/app.js")).expect("app.js published at the project root");
+//RS     assert_eq!(
+//RS         published.strip_suffix(trailer).unwrap_or(&published),
+//RS         body.strip_suffix(trailer).unwrap_or(&body),
+//RS         "served app.js must be the bundle published under the project root"
+//RS     );
+//RS 
+//RS     drop(guard);
+//RS     let _ = fs::remove_dir_all(&root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn tanstack_start_dev_reference_loop_recovers_last_good_browser_state() {
+//RS     if !have_tool("rustc") || !have_tool("node") || !have_tool("chromium") {
+//RS         eprintln!("note: skipping TanStack reference dev loop (need rustc + node + chromium)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_tanstack_reference_dev_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(root.join("public")).unwrap();
+//RS     for path in ["run.jet", "package.jet", "public/index.html", "public/app.css"] {
+//RS         let source = repo.join("Examples/features/web/tanstack_start").join(path);
+//RS         let destination = root.join(path);
+//RS         if let Some(parent) = destination.parent() {
+//RS             fs::create_dir_all(parent).unwrap();
+//RS         }
+//RS         fs::copy(source, destination).unwrap();
+//RS     }
+//RS 
+//RS     let output = Command::new("node")
+//RS         .env("CHROMIUM", "chromium")
+//RS         .arg(repo.join("Tools/web-dev-test/reference_app.mjs"))
+//RS         .args([
+//RS             "--metric",
+//RS             "error_to_fix",
+//RS             "--manifest",
+//RS         ])
+//RS         .arg(repo.join("Tools/agent-eval/dx/manifest.json"))
+//RS         .args(["--exercise", "--app", "tanstack-start-orders", "--jet-env"])
+//RS         .arg(repo.join("Tools/agent/jet-env"))
+//RS         .current_dir(&root)
+//RS         .output()
+//RS         .expect("run TanStack reference dev loop");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "TanStack reference dev loop failed\nstdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         stdout.contains("REFERENCE_METRIC:error_to_fix")
+//RS             && stdout.contains("diagnosis_ms=")
+//RS             && stdout.contains("repair_ms="),
+//RS         "reference dev loop did not report diagnosis and repair timing: {stdout}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_dev_web_rejects_windows_absolute_static_paths() {
+//RS     if !have_tool("rustc") {
+//RS         eprintln!(
+//RS             "note: skipping jet_dev_web_rejects_windows_absolute_static_paths (need rustc)"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_dev_windows_static_paths_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     fs::write(dir.join("app.jet"), FIXTURE_SRC).unwrap();
+//RS     let mut child = Command::new(jet_bin())
+//RS         .args(["dev", "app.jet", "--target=web"])
+//RS         .current_dir(&dir)
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::null())
+//RS         .spawn()
+//RS         .expect("failed to start `jet dev --target=web`");
+//RS 
+//RS     struct KillOnDrop(std::process::Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS     let stdout = child.stdout.take().unwrap();
+//RS     let guard = KillOnDrop(child);
+//RS     let port = wait_for_app_preview(stdout);
+//RS 
+//RS     for path in [
+//RS         "/C:/Windows/win.ini",
+//RS         "/C:\\Windows\\win.ini",
+//RS         "/\\Windows\\win.ini",
+//RS         "/\\\\server\\share\\secret",
+//RS     ] {
+//RS         let (status, _) = http_get(port, path)
+//RS             .expect("Windows absolute static-path request failed");
+//RS         assert_eq!(
+//RS             status, 400,
+//RS             "Windows absolute static path escaped the build root: {path}"
+//RS         );
+//RS     }
+//RS 
+//RS     drop(guard);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS struct WebTestStaticServer(std::process::Child);
+//RS 
+//RS impl Drop for WebTestStaticServer {
+//RS     fn drop(&mut self) {
+//RS         let _ = self.0.kill();
+//RS         let _ = self.0.wait();
+//RS     }
+//RS }
+//RS 
+//RS fn start_web_test_static_server(root: &Path) -> (u16, WebTestStaticServer) {
+//RS     let port = unused_local_port();
+//RS     let child = Command::new("node")
+//RS         .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Tools/web-test/serve.mjs"))
+//RS         .arg("--port")
+//RS         .arg(port.to_string())
+//RS         .arg("--root")
+//RS         .arg(root)
+//RS         .stdout(Stdio::null())
+//RS         .stderr(Stdio::null())
+//RS         .spawn()
+//RS         .expect("start web-test static server");
+//RS     let guard = WebTestStaticServer(child);
+//RS     let start = Instant::now();
+//RS     while start.elapsed() < Duration::from_secs(10) {
+//RS         if let Some((200, _)) = http_get_without_session(port, "/") {
+//RS             return (port, guard);
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(25));
+//RS     }
+//RS     panic!("web-test static server did not become ready");
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn web_test_static_server_rejects_symlink_escape() {
+//RS     if !have_tool("node") {
+//RS         eprintln!("note: skipping web_test_static_server_rejects_symlink_escape (need node)");
+//RS         return;
+//RS     }
+//RS 
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet-web-test-static-symlink-{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(root.join("index.html"), "safe\n").unwrap();
+//RS     let outside = root.with_file_name(format!(
+//RS         "jet-web-test-static-outside-{}",
+//RS         std::process::id()
+//RS     ));
+//RS     fs::write(&outside, "secret\n").unwrap();
+//RS     symlink(&outside, root.join("escape.js")).unwrap();
+//RS 
+//RS     let port = unused_local_port();
+//RS     let child = Command::new("node")
+//RS         .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Tools/web-test/serve.mjs"))
+//RS         .arg("--port")
+//RS         .arg(port.to_string())
+//RS         .arg("--root")
+//RS         .arg(&root)
+//RS         .stdout(Stdio::null())
+//RS         .stderr(Stdio::null())
+//RS         .spawn()
+//RS         .expect("start web-test static server");
+//RS     struct KillOnDrop(std::process::Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS     let _guard = KillOnDrop(child);
+//RS 
+//RS     let start = Instant::now();
+//RS     while start.elapsed() < Duration::from_secs(10) {
+//RS         if let Some((200, _)) = http_get(port, "/") {
+//RS             break;
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(25));
+//RS     }
+//RS     let (status, _) = http_get(port, "/escape.js").expect("static server request");
+//RS     assert_eq!(status, 400, "symlink outside the static root was served");
+//RS     assert_eq!(fs::read_to_string(&outside).unwrap(), "secret\n");
+//RS 
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     let _ = fs::remove_file(&outside);
+//RS }
+//RS 
+//RS #[test]
+//RS fn web_test_static_server_rejects_sibling_prefix_traversal() {
+//RS     if !have_tool("node") {
+//RS         eprintln!("note: skipping web_test_static_server_rejects_sibling_prefix_traversal (need node)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let base = std::env::temp_dir().join(format!(
+//RS         "jet-web-test-static-sibling-prefix-{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&base);
+//RS     let root = base.join("root");
+//RS     let sibling = base.join("root-sibling");
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::create_dir_all(&sibling).unwrap();
+//RS     fs::write(root.join("index.html"), "safe\n").unwrap();
+//RS     fs::write(sibling.join("secret.js"), "sibling-secret\n").unwrap();
+//RS 
+//RS     let (port, guard) = start_web_test_static_server(&root);
+//RS     let (status, content_type, _) =
+//RS         http_get_with_content_type(port, "/").expect("GET / from static server");
+//RS     assert_eq!(status, 200);
+//RS     assert_eq!(content_type, "text/html; charset=utf-8");
+//RS     let (status, body) = http_get_without_session(port, "/../root-sibling/secret.js")
+//RS         .expect("sibling-prefix traversal request");
+//RS     assert_eq!(status, 400);
+//RS     assert!(
+//RS         !body
+//RS             .windows(b"sibling-secret".len())
+//RS             .any(|window| window == b"sibling-secret"),
+//RS         "sibling-prefix traversal returned outside bytes"
+//RS     );
+//RS 
+//RS     drop(guard);
+//RS     let _ = fs::remove_dir_all(&base);
+//RS }
+//RS 
+//RS #[cfg(any(unix, windows))]
+//RS #[test]
+//RS fn web_test_static_server_rejects_hardlinked_file() {
+//RS     if !have_tool("node") {
+//RS         eprintln!("note: skipping web_test_static_server_rejects_hardlinked_file (need node)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let base = std::env::temp_dir().join(format!(
+//RS         "jet-web-test-static-hardlink-{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&base);
+//RS     let root = base.join("root");
+//RS     let outside = base.join("outside.js");
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(root.join("index.html"), "safe\n").unwrap();
+//RS     fs::write(&outside, "hardlink-secret\n").unwrap();
+//RS     fs::hard_link(&outside, root.join("hard.js")).unwrap();
+//RS 
+//RS     let (port, guard) = start_web_test_static_server(&root);
+//RS     let (status, body) =
+//RS         http_get_without_session(port, "/hard.js").expect("hardlink request");
+//RS     assert_eq!(status, 400);
+//RS     assert!(
+//RS         !body
+//RS             .windows(b"hardlink-secret".len())
+//RS             .any(|window| window == b"hardlink-secret"),
+//RS         "hardlinked outside bytes were served"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&outside).unwrap(), "hardlink-secret\n");
+//RS 
+//RS     drop(guard);
+//RS     let _ = fs::remove_dir_all(&base);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn web_test_static_server_final_swap_stays_inside_root() {
+//RS     if !have_tool("node") {
+//RS         eprintln!("note: skipping web_test_static_server_final_swap_stays_inside_root (need node)");
+//RS         return;
+//RS     }
+//RS 
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let base = std::env::temp_dir().join(format!(
+//RS         "jet-web-test-static-final-swap-{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&base);
+//RS     let root = base.join("root");
+//RS     let target = root.join("race.js");
+//RS     let parked = root.join("race.js.parked");
+//RS     let outside = base.join("outside.js");
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(root.join("index.html"), "safe\n").unwrap();
+//RS     fs::write(&target, "inside-final\n").unwrap();
+//RS     fs::write(&outside, "outside-final\n").unwrap();
+//RS 
+//RS     let (port, guard) = start_web_test_static_server(&root);
+//RS     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let leaked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let swaps = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+//RS     let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+//RS     let swap_stop = std::sync::Arc::clone(&stop);
+//RS     let swap_target = target.clone();
+//RS     let swap_parked = parked.clone();
+//RS     let swap_outside = outside.clone();
+//RS     let swap_count = std::sync::Arc::clone(&swaps);
+//RS     let swapper = std::thread::spawn(move || {
+//RS         while !swap_stop.load(std::sync::atomic::Ordering::Relaxed) {
+//RS             let _ = fs::remove_file(&swap_parked);
+//RS             if fs::rename(&swap_target, &swap_parked).is_ok() {
+//RS                 if symlink(&swap_outside, &swap_target).is_ok() {
+//RS                     swap_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS                 }
+//RS                 let _ = fs::remove_file(&swap_target);
+//RS                 let _ = fs::rename(&swap_parked, &swap_target);
+//RS                 std::thread::sleep(Duration::from_micros(50));
+//RS             }
+//RS         }
+//RS     });
+//RS 
+//RS     let mut requests = Vec::new();
+//RS     for _ in 0..4 {
+//RS         let request_leaked = std::sync::Arc::clone(&leaked);
+//RS         let request_served = std::sync::Arc::clone(&served);
+//RS         requests.push(std::thread::spawn(move || {
+//RS             for _ in 0..256 {
+//RS                 let Some((status, body)) = http_get_without_session(port, "/race.js") else {
+//RS                     continue;
+//RS                 };
+//RS                 if status == 200 {
+//RS                     request_served.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS                 }
+//RS                 if body
+//RS                     .windows(b"outside-final".len())
+//RS                     .any(|window| window == b"outside-final")
+//RS                 {
+//RS                     request_leaked.store(true, std::sync::atomic::Ordering::Relaxed);
+//RS                     break;
+//RS                 }
+//RS             }
+//RS         }));
+//RS     }
+//RS     for request in requests {
+//RS         request.join().unwrap();
+//RS     }
+//RS     stop.store(true, std::sync::atomic::Ordering::Relaxed);
+//RS     swapper.join().unwrap();
+//RS 
+//RS     assert!(!leaked.load(std::sync::atomic::Ordering::Relaxed));
+//RS     assert!(swaps.load(std::sync::atomic::Ordering::Relaxed) > 0);
+//RS     assert!(served.load(std::sync::atomic::Ordering::Relaxed) > 0);
+//RS 
+//RS     drop(guard);
+//RS     let _ = fs::remove_dir_all(&base);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn web_test_static_server_ancestor_swap_stays_inside_root() {
+//RS     if !have_tool("node") {
+//RS         eprintln!("note: skipping web_test_static_server_ancestor_swap_stays_inside_root (need node)");
+//RS         return;
+//RS     }
+//RS 
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let base = std::env::temp_dir().join(format!(
+//RS         "jet-web-test-static-ancestor-swap-{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&base);
+//RS     let root = base.join("root");
+//RS     let nested = root.join("nested");
+//RS     let parked = root.join("nested.parked");
+//RS     let outside = base.join("outside-parent");
+//RS     fs::create_dir_all(&nested).unwrap();
+//RS     fs::create_dir_all(&outside).unwrap();
+//RS     fs::write(root.join("index.html"), "safe\n").unwrap();
+//RS     fs::write(nested.join("race.js"), "inside-ancestor\n").unwrap();
+//RS     fs::write(outside.join("race.js"), "outside-ancestor\n").unwrap();
+//RS 
+//RS     let (port, guard) = start_web_test_static_server(&root);
+//RS     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let leaked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let swaps = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+//RS     let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+//RS     let swap_stop = std::sync::Arc::clone(&stop);
+//RS     let swap_nested = nested.clone();
+//RS     let swap_parked = parked.clone();
+//RS     let swap_outside = outside.clone();
+//RS     let swap_count = std::sync::Arc::clone(&swaps);
+//RS     let swapper = std::thread::spawn(move || {
+//RS         while !swap_stop.load(std::sync::atomic::Ordering::Relaxed) {
+//RS             let _ = fs::remove_dir_all(&swap_parked);
+//RS             if fs::rename(&swap_nested, &swap_parked).is_ok() {
+//RS                 if symlink(&swap_outside, &swap_nested).is_ok() {
+//RS                     swap_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS                 }
+//RS                 let _ = fs::remove_file(&swap_nested);
+//RS                 let _ = fs::rename(&swap_parked, &swap_nested);
+//RS                 std::thread::sleep(Duration::from_micros(50));
+//RS             }
+//RS         }
+//RS     });
+//RS 
+//RS     let mut requests = Vec::new();
+//RS     for _ in 0..4 {
+//RS         let request_leaked = std::sync::Arc::clone(&leaked);
+//RS         let request_served = std::sync::Arc::clone(&served);
+//RS         requests.push(std::thread::spawn(move || {
+//RS             for _ in 0..256 {
+//RS                 let Some((status, body)) =
+//RS                     http_get_without_session(port, "/nested/race.js")
+//RS                 else {
+//RS                     continue;
+//RS                 };
+//RS                 if status == 200 {
+//RS                     request_served.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS                 }
+//RS                 if body
+//RS                     .windows(b"outside-ancestor".len())
+//RS                     .any(|window| window == b"outside-ancestor")
+//RS                 {
+//RS                     request_leaked.store(true, std::sync::atomic::Ordering::Relaxed);
+//RS                     break;
+//RS                 }
+//RS             }
+//RS         }));
+//RS     }
+//RS     for request in requests {
+//RS         request.join().unwrap();
+//RS     }
+//RS     stop.store(true, std::sync::atomic::Ordering::Relaxed);
+//RS     swapper.join().unwrap();
+//RS 
+//RS     assert!(!leaked.load(std::sync::atomic::Ordering::Relaxed));
+//RS     assert!(swaps.load(std::sync::atomic::Ordering::Relaxed) > 0);
+//RS     assert!(served.load(std::sync::atomic::Ordering::Relaxed) > 0);
+//RS 
+//RS     drop(guard);
+//RS     let _ = fs::remove_dir_all(&base);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
+//RS     if !have_tool("rustc") {
+//RS         eprintln!(
+//RS             "note: skipping jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep (need rustc)"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_dev_hybrid_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src_path = dir.join("app.jet");
+//RS     fs::write(&src_path, FIXTURE_SRC).unwrap();
+//RS 
+//RS     let mut child = Command::new(jet_bin())
+//RS         .args(["dev", "app.jet", "--target=web", "--canvas", "--verbose"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .expect("failed to start hybrid `jet dev --target=web`");
+//RS 
+//RS     struct KillOnDrop(std::process::Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS 
+//RS     let stdout = child.stdout.take().unwrap();
+//RS     let stderr = child.stderr.take().unwrap();
+//RS     let (stderr_tx, stderr_rx) = mpsc::channel();
+//RS     std::thread::spawn(move || {
+//RS         let mut stderr = stderr;
+//RS         let mut bytes = Vec::new();
+//RS         let _ = stderr.read_to_end(&mut bytes);
+//RS         let _ = stderr_tx.send(String::from_utf8_lossy(&bytes).into_owned());
+//RS     });
+//RS     let guard = KillOnDrop(child);
+//RS     let ports = wait_for_ports(stdout);
+//RS     let port = ports.canvas;
+//RS     let application_port = ports.application;
+//RS 
+//RS     let ready = wait_for_status(port, "tab-a", "ready", Duration::from_secs(10));
+//RS     assert!(ready.contains("\"clients\":1"), "{ready}");
+//RS     assert!(
+//RS         ready.contains(&format!(
+//RS             "ready · localhost:{application_port} · 1 client"
+//RS         )),
+//RS         "{ready}"
+//RS     );
+//RS     let second_tab = wait_for_status(port, "tab-b", "ready", Duration::from_secs(2));
+//RS     assert!(second_tab.contains("\"clients\":2"), "{second_tab}");
+//RS 
+//RS     let (_, baseline_body) = http_get(port, "/__jet_dev_version").expect("baseline version");
+//RS     let baseline_version = String::from_utf8_lossy(&baseline_body).trim().to_string();
+//RS     let (_, initial_js) =
+//RS         http_get(application_port, "/app.js").expect("initial last-good app.js");
+//RS 
+//RS     let broken = FIXTURE_SRC.replace("print(size.height)", "missing_hybrid_symbol()");
+//RS     fs::write(&src_path, broken).unwrap();
+//RS     let error = wait_for_status(port, "tab-a", "error", Duration::from_secs(10));
+//RS     assert!(error.contains("\"code\":\"E0102\""), "{error}");
+//RS     assert!(error.contains("Error [E0102]"), "{error}");
+//RS     assert!(error.contains("missing_hybrid_symbol"), "{error}");
+//RS     assert!(error.contains("error · E0102 · "), "{error}");
+//RS 
+//RS     let (_, error_version_body) =
+//RS         http_get(port, "/__jet_dev_version").expect("version during error");
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&error_version_body).trim(),
+//RS         baseline_version,
+//RS         "error build must not trigger reload"
+//RS     );
+//RS     let (_, last_good_js) =
+//RS         http_get(application_port, "/app.js").expect("last-good app.js during error");
+//RS     assert_eq!(
+//RS         last_good_js, initial_js,
+//RS         "error build replaced last-good output"
+//RS     );
+//RS 
+//RS     let (_, html) = http_get(application_port, "/").expect("injected browser shell");
+//RS     let html = String::from_utf8_lossy(&html);
+//RS     for marker in [
+//RS         "overlayBody.textContent = s.diagnostic",
+//RS         "dismissedDiagnostic",
+//RS         "state === \"building\" || state === \"reconnecting\"",
+//RS         "location.reload()",
+//RS     ] {
+//RS         assert!(
+//RS             html.contains(marker),
+//RS             "browser hybrid control missing {marker}"
+//RS         );
+//RS     }
+//RS 
+//RS     fs::write(&src_path, FIXTURE_SRC_EDITED).unwrap();
+//RS     let recovered_version =
+//RS         wait_for_version_change(port, &baseline_version, Duration::from_secs(15));
+//RS     assert_ne!(recovered_version, baseline_version);
+//RS     let recovered = wait_for_status(port, "tab-a", "ready", Duration::from_secs(5));
+//RS     assert!(recovered.contains("\"diagnostic\":\"\""), "{recovered}");
+//RS     assert!(recovered.contains("\"code\":\"\""), "{recovered}");
+//RS     let expected_edited = jet::compile_web_with_path(FIXTURE_SRC_EDITED, "app.jet")
+//RS         .expect("front end rejected recovered fixture")
+//RS         .web
+//RS         .expect("web output after recovery")
+//RS         .js_app;
+//RS     let (_, recovered_js) = http_get(application_port, "/app.js").expect("recovered app.js");
+//RS     let recovered_js = String::from_utf8_lossy(&recovered_js);
+//RS     let recovered_js = recovered_js
+//RS         .strip_suffix("//# sourceMappingURL=app.js.map\n")
+//RS         .unwrap_or(&recovered_js);
+//RS     assert_eq!(recovered_js, expected_edited);
+//RS 
+//RS     drop(guard);
+//RS     let terminal = stderr_rx
+//RS         .recv_timeout(Duration::from_secs(5))
+//RS         .expect("collect append-only terminal transcript");
+//RS     assert!(
+//RS         !terminal.contains('\x1b'),
+//RS         "NO_COLOR transcript carried ANSI: {terminal}"
+//RS     );
+//RS     for marker in [
+//RS         "jet dev  [ready]",
+//RS         "jet dev  [building]",
+//RS         "jet dev  [error] E0102",
+//RS         "Error [E0102]",
+//RS         "missing_hybrid_symbol",
+//RS         "save app.jet  →  error E0102",
+//RS         "save app.jet  →  rebuilt",
+//RS         "GET  /app.js",
+//RS     ] {
+//RS         assert!(
+//RS             terminal.contains(marker),
+//RS             "terminal hybrid transcript missing {marker}:\n{terminal}"
+//RS         );
+//RS     }
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// #3782: the first save after `ready` must rebuild (the watcher baseline is
+//RS /// taken before the first build, not after the server reports ready); a
+//RS /// pending invalid edit reports its candidate revision next to the accepted
+//RS /// one on `/__jet_dev_status`; and `jet dev --json` emits a `jet.status/v1`
+//RS /// record with `jet.report/v3` diagnostics for every watch-cycle build.
+//RS #[test]
+//RS fn jet_dev_web_first_save_after_ready_rebuilds_with_revision_facts() {
+//RS     if !have_tool("rustc") {
+//RS         eprintln!(
+//RS             "note: skipping jet_dev_web_first_save_after_ready_rebuilds_with_revision_facts (need rustc)"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_dev_web_first_save_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src_path = dir.join("app.jet");
+//RS     fs::write(&src_path, FIXTURE_SRC).unwrap();
+//RS 
+//RS     let mut child = Command::new(jet_bin())
+//RS         .args(["dev", "app.jet", "--target=web", "--json"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::null())
+//RS         .spawn()
+//RS         .expect("failed to start `jet dev --target=web --json`");
+//RS 
+//RS     struct KillOnDrop(std::process::Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS 
+//RS     let stdout = child.stdout.take().unwrap();
+//RS     let guard = KillOnDrop(child);
+//RS     let (line_tx, line_rx) = mpsc::channel::<String>();
+//RS     std::thread::spawn(move || {
+//RS         use std::io::{BufRead, BufReader};
+//RS         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+//RS             if line_tx.send(line).is_err() {
+//RS                 return;
+//RS             }
+//RS         }
+//RS     });
+//RS     let next_line = |needle: &str, timeout: Duration| -> String {
+//RS         let deadline = Instant::now() + timeout;
+//RS         loop {
+//RS             let remaining = deadline.saturating_duration_since(Instant::now());
+//RS             match line_rx.recv_timeout(remaining) {
+//RS                 Ok(line) if line.contains(needle) => return line,
+//RS                 Ok(_) => {}
+//RS                 Err(_) => panic!("jet dev stdout never carried {needle:?} within {timeout:?}"),
+//RS             }
+//RS         }
+//RS     };
+//RS     let preview = next_line("App preview: ", Duration::from_secs(120));
+//RS     let port = port_from_url_line(&preview, "App preview: ").expect("app preview port");
+//RS     forget_canvas_session(port);
+//RS 
+//RS     // Save in place (truncate + write) the moment the server is ready.
+//RS     fs::write(&src_path, FIXTURE_SRC_EDITED).unwrap();
+//RS     let accepted = wait_for_version_change(port, "1", Duration::from_secs(60));
+//RS     assert_eq!(accepted, "2", "the first save after ready was not rebuilt");
+//RS     let rebuilt = next_line("\"action\":\"dev.rebuild\"", Duration::from_secs(10));
+//RS     assert!(rebuilt.starts_with("{\"schema\":\"jet.status/v1\""), "{rebuilt}");
+//RS     assert!(rebuilt.contains("\"ok\":true,\"reports\":[]"), "{rebuilt}");
+//RS     assert!(rebuilt.contains("\"candidate\":null"), "{rebuilt}");
+//RS     assert!(rebuilt.contains("\"accepted_revision\":2"), "{rebuilt}");
+//RS 
+//RS     // An atomic invalid save is rejected: the served revision stays 2 and the
+//RS     // diagnostic names the rejected candidate 3 on both surfaces.
+//RS     let broken = FIXTURE_SRC_EDITED.replace("print(size.height)", "print(size.height +)");
+//RS     let staged = dir.join("app.jet.tmp");
+//RS     fs::write(&staged, broken).unwrap();
+//RS     fs::rename(&staged, &src_path).unwrap();
+//RS     let error = wait_for_status(port, "tab-a", "error", Duration::from_secs(60));
+//RS     for fact in [
+//RS         "\"version\":2,",
+//RS         "\"code\":\"E0003\"",
+//RS         "\"candidate\":3,",
+//RS         "\"diagnostic_revision\":3,",
+//RS         "\"accepted_revision\":2,",
+//RS         "\"last_good_revision\":2}",
+//RS     ] {
+//RS         assert!(error.contains(fact), "dev status missing {fact}: {error}");
+//RS     }
+//RS     let rejected = next_line("\"action\":\"dev.rebuild\"", Duration::from_secs(10));
+//RS     for fact in [
+//RS         "\"ok\":false",
+//RS         "\"schema\":\"jet.report/v3\"",
+//RS         "E0003",
+//RS         "\"candidate\":3",
+//RS         "\"diagnostic_revision\":3",
+//RS         "\"accepted_revision\":2",
+//RS         "\"last_good_revision\":2",
+//RS     ] {
+//RS         assert!(rejected.contains(fact), "watch-cycle record missing {fact}: {rejected}");
+//RS     }
+//RS 
+//RS     // Recovery publishes exactly the rejected candidate.
+//RS     fs::write(&src_path, FIXTURE_SRC).unwrap();
+//RS     let recovered = wait_for_version_change(port, "2", Duration::from_secs(60));
+//RS     assert_eq!(recovered, "3");
+//RS     let ready = wait_for_status(port, "tab-a", "ready", Duration::from_secs(10));
+//RS     assert!(ready.contains("\"diagnostic_revision\":null,"), "{ready}");
+//RS     assert!(ready.contains("\"accepted_revision\":3,"), "{ready}");
+//RS 
+//RS     drop(guard);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region() {
+//RS     if !have_tool("rustc") || !have_tool("script") {
+//RS         eprintln!(
+//RS             "note: skipping jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region (need rustc + script)"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_dev_hybrid_pty_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src_path = dir.join("app.jet");
+//RS     let transcript_path = dir.join("terminal.typescript");
+//RS     fs::write(&src_path, FIXTURE_SRC).unwrap();
+//RS     let port = unused_local_port();
+//RS 
+//RS     // util-linux `script` allocates a real pseudoterminal. `-f` flushes each
+//RS     // redraw into the transcript so this test can drive the live process,
+//RS     // not inspect a post-exit string facade. NO_COLOR matches the owner's
+//RS     // host environment and proves color is not required for pinning/input.
+//RS     let command = format!(
+//RS         "env NO_COLOR=1 {} dev app.jet --target=web --canvas --port={port}",
+//RS         jet_bin().display()
+//RS     );
+//RS     let mut pty = Command::new("script")
+//RS         .args(["-qfec", &command])
+//RS         .arg(&transcript_path)
+//RS         .current_dir(&dir)
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::null())
+//RS         .stderr(Stdio::null())
+//RS         .spawn()
+//RS         .expect("start real PTY wrapper");
+//RS     let mut input = pty.stdin.take().expect("PTY stdin");
+//RS 
+//RS     struct KillOnDrop(std::process::Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS     let mut guard = KillOnDrop(pty);
+//RS     let canvas_port = wait_for_canvas_port(&transcript_path, Duration::from_secs(20));
+//RS     wait_for_server_up(canvas_port, Duration::from_secs(20));
+//RS 
+//RS     let ready = wait_for_status(canvas_port, "pty-tab", "ready", Duration::from_secs(5));
+//RS     assert!(ready.contains("\"clients\":1"), "{ready}");
+//RS     let pinned = wait_for_file_text(
+//RS         &transcript_path,
+//RS         &format!("jet dev  [ready] localhost:{port} · 1 client"),
+//RS         Duration::from_secs(5),
+//RS     );
+//RS     assert!(
+//RS         pinned.contains("watching app.jet · Canvas"),
+//RS         "pinned detail row missing:\n{pinned}"
+//RS     );
+//RS     assert!(
+//RS         !pinned.contains("\x1b[32m"),
+//RS         "NO_COLOR PTY emitted colored status: {pinned:?}"
+//RS     );
+//RS 
+//RS     input.write_all(b"v").unwrap();
+//RS     input.flush().unwrap();
+//RS     let verbose = wait_for_file_text(
+//RS         &transcript_path,
+//RS         "verbose request/rebuild log enabled · press v to collapse",
+//RS         Duration::from_secs(5),
+//RS     );
+//RS     assert!(
+//RS         verbose.contains("\x1b[3r") && verbose.contains("\x1b[3;1H"),
+//RS         "verbose mode never pinned rows 1-2 with a row-3 scroll region: {verbose:?}"
+//RS     );
+//RS 
+//RS     http_get(port, "/app.js").expect("request while verbose");
+//RS     wait_for_file_text(&transcript_path, "GET  /app.js", Duration::from_secs(5));
+//RS 
+//RS     let broken = FIXTURE_SRC.replace("print(size.height)", "missing_hybrid_symbol()");
+//RS     fs::write(&src_path, broken).unwrap();
+//RS     wait_for_status(canvas_port, "pty-tab", "error", Duration::from_secs(10));
+//RS     let error = wait_for_file_text(
+//RS         &transcript_path,
+//RS         "missing_hybrid_symbol",
+//RS         Duration::from_secs(5),
+//RS     );
+//RS     for marker in ["jet dev  [error] E0102", "Error [E0102]", "Why:", "Fix:"] {
+//RS         assert!(
+//RS             error.contains(marker),
+//RS             "verbose PTY diagnostic missing {marker}:\n{error}"
+//RS         );
+//RS     }
+//RS 
+//RS     input.write_all(b"v").unwrap();
+//RS     input.flush().unwrap();
+//RS     let collapsed = wait_for_file_text(
+//RS         &transcript_path,
+//RS         "\x1b[r\x1b[2J\x1b[H",
+//RS         Duration::from_secs(5),
+//RS     );
+//RS     let scroll_regions_before = collapsed.matches("\x1b[3r").count();
+//RS 
+//RS     // Re-enter verbose mode, then send EOF while DECSTBM is still active.
+//RS     // The prior version exited only after collapsing, so its cleanup assertion
+//RS     // could pass without the input guard doing any restoration.
+//RS     input.write_all(b"v").unwrap();
+//RS     input.flush().unwrap();
+//RS     let start = Instant::now();
+//RS     let before_eof = loop {
+//RS         let text = fs::read_to_string(&transcript_path).unwrap_or_default();
+//RS         if text.matches("\x1b[3r").count() > scroll_regions_before {
+//RS             break text.len();
+//RS         }
+//RS         if start.elapsed() > Duration::from_secs(5) {
+//RS             panic!("PTY did not reactivate verbose scroll region: {text:?}");
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(50));
+//RS     };
+//RS     input.write_all(&[4]).unwrap();
+//RS     input.flush().unwrap();
+//RS 
+//RS     let start = Instant::now();
+//RS     let after_eof = loop {
+//RS         let text = fs::read_to_string(&transcript_path).unwrap_or_default();
+//RS         if text[before_eof..].contains("\x1b[r") {
+//RS             break text;
+//RS         }
+//RS         if start.elapsed() > Duration::from_secs(5) {
+//RS             panic!("EOF did not restore active scroll region: {text:?}");
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(50));
+//RS     };
+//RS 
+//RS     // EOF leaves the server running in cooked mode. A later refresh must not
+//RS     // reinstall DECSTBM after its raw-input cleanup guard has gone away.
+//RS     let scroll_regions_after_eof = after_eof.matches("\x1b[3r").count();
+//RS     wait_for_status(canvas_port, "post-eof-tab", "error", Duration::from_secs(5));
+//RS     std::thread::sleep(Duration::from_millis(100));
+//RS     let after_refresh = fs::read_to_string(&transcript_path).unwrap();
+//RS     assert_eq!(
+//RS         after_refresh.matches("\x1b[3r").count(),
+//RS         scroll_regions_after_eof,
+//RS         "refresh reinstalled DECSTBM without raw controls: {after_refresh:?}"
+//RS     );
+//RS 
+//RS     // Cooked terminal now owns Ctrl-C; use it only to terminate the fixture.
+//RS     input.write_all(&[3]).unwrap();
+//RS     input.flush().unwrap();
+//RS 
+//RS     let start = Instant::now();
+//RS     loop {
+//RS         if let Some(status) = guard.0.try_wait().unwrap() {
+//RS             assert_eq!(status.code(), Some(130), "PTY wrapper exit: {status}");
+//RS             break;
+//RS         }
+//RS         if start.elapsed() > Duration::from_secs(5) {
+//RS             panic!("PTY wrapper did not exit after Ctrl-C");
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(50));
+//RS     }
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
+//RS     if !have_tool("rustc") || !have_tool("node") || !have_tool("chromium") || !have_tool("script") {
+//RS         eprintln!(
+//RS             "note: skipping jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix (need rustc + node + chromium + script)"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_dev_hybrid_browser_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src_path = dir.join("app.jet");
+//RS     let transcript_path = dir.join("browser-terminal.typescript");
+//RS     fs::write(&src_path, FIXTURE_SRC).unwrap();
+//RS     let port = unused_local_port();
+//RS 
+//RS     let command = format!(
+//RS         "env NO_COLOR=1 {} dev app.jet --target=web --canvas --verbose --port={port}",
+//RS         jet_bin().display()
+//RS     );
+//RS     let mut child = Command::new("script")
+//RS         .args(["-qfec", &command])
+//RS         .arg(&transcript_path)
+//RS         .current_dir(&dir)
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::null())
+//RS         .stderr(Stdio::null())
+//RS         .spawn()
+//RS         .expect("failed to start browser-matrix dev server in PTY");
+//RS     let mut input = child.stdin.take().expect("browser-matrix PTY stdin");
+//RS 
+//RS     struct KillOnDrop(std::process::Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS     let mut guard = KillOnDrop(child);
+//RS     wait_for_server_up(port, Duration::from_secs(20));
+//RS 
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let output = Command::new("node")
+//RS         .arg(repo.join("Tools/web-dev-test/hybrid.mjs"))
+//RS         .arg("--port")
+//RS         .arg(port.to_string())
+//RS         .arg("--source")
+//RS         .arg(&src_path)
+//RS         .arg("--terminal-transcript")
+//RS         .arg(&transcript_path)
+//RS         .current_dir(&repo)
+//RS         .output()
+//RS         .expect("run hybrid browser matrix");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "hybrid browser matrix failed\nstdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stdout).contains("PASS hybrid dev-server browser matrix"),
+//RS         "browser matrix did not report completion"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&src_path).unwrap(), FIXTURE_SRC_EDITED);
+//RS 
+//RS     let before_ctrl_c = fs::read_to_string(&transcript_path).unwrap().len();
+//RS     input.write_all(&[3]).unwrap();
+//RS     input.flush().unwrap();
+//RS     let start = Instant::now();
+//RS     loop {
+//RS         if let Some(status) = guard.0.try_wait().unwrap() {
+//RS             assert_eq!(
+//RS                 status.code(),
+//RS                 Some(130),
+//RS                 "browser PTY wrapper exit: {status}"
+//RS             );
+//RS             break;
+//RS         }
+//RS         if start.elapsed() > Duration::from_secs(5) {
+//RS             panic!("browser PTY wrapper did not exit after Ctrl-C");
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(50));
+//RS     }
+//RS     let final_transcript = fs::read_to_string(&transcript_path).unwrap();
+//RS     assert!(
+//RS         final_transcript[before_ctrl_c..].contains("\x1b[r"),
+//RS         "Ctrl-C did not restore active browser-matrix scroll region: {final_transcript:?}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1188 tests/web_dev.rs:1-1586
+

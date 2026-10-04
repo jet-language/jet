@@ -4,6 +4,7 @@
 // `emit_check_outcome`, Source/CmdDevTools.rs `run_explain`), so both front
 // doors print one meaning (I9). Writing the bytes and exiting stay with the
 // host that owns the process.
+use core.files.runtime.kernel_path_components as compiler_driver_os_path
 use jet_foundation.[
     Diagnostic,
     DiagnosticOrigin,
@@ -74,20 +75,33 @@ fn jet_driver_shift_span(span: Span, shift: Int) -> Span Never! {
 // `path` is the diagnostic's display path (`jet_driver_display_path`); a disk
 // origin keeps its canonical path beside the root-relative display, as the
 // Rust driver's origins do.
-fn jet_driver_present_origin(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> DiagnosticOrigin? Never! {
-    loop file in generated {
-        if file.path == path -> return Val(DiagnosticOrigin{display: path, path: path, source: file.source, revision: mir_sha256_hex(file.source)})
+fn jet_driver_present_origin(path: String, native_path: compiler_driver_os_path.OsPath?, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> DiagnosticOrigin? Never! {
+    if native_path == None {
+        loop file in generated {
+            if file.path == path -> return Val(DiagnosticOrigin{display: path, path: path, source: file.source, revision: mir_sha256_hex(file.source)})
+        }
     }
-    physical :: jet_driver_physical_path(jet_driver_entry_root_path(snapshot), path)
+    entry_root :: jet_driver_entry_root_path(snapshot)
+    found := DiagnosticOrigin?{None}
     loop root in snapshot.roots {
         loop file in root.files {
-            if file.path == physical -> return Val(DiagnosticOrigin{display: file.relative_path, path: physical, source: file.source, revision: mir_sha256_hex(file.source)})
+            matches :: if native_path == .Val(native) -> compiler_driver_os_path.equals(file.path, native) else -> jet_driver_display_path(entry_root, file.path) == path
+            if !matches -> next
+            origin :: DiagnosticOrigin{display: compiler_driver_os_path.display(file.relative_path), path: compiler_driver_os_path.display(file.path), source: file.source, revision: mir_sha256_hex(file.source)}
+            if native_path != None -> return Val(origin)
+            if found != None -> return None
+            found = Val(origin)
         }
         loop file in root.foreign_cache_files {
-            if file.path == physical -> return Val(DiagnosticOrigin{display: file.relative_path, path: physical, source: file.source, revision: mir_sha256_hex(file.source)})
+            matches :: if native_path == .Val(native) -> compiler_driver_os_path.equals(file.path, native) else -> jet_driver_display_path(entry_root, file.path) == path
+            if !matches -> next
+            origin :: DiagnosticOrigin{display: compiler_driver_os_path.display(file.relative_path), path: compiler_driver_os_path.display(file.path), source: file.source, revision: mir_sha256_hex(file.source)}
+            if native_path != None -> return Val(origin)
+            if found != None -> return None
+            found = Val(origin)
         }
     }
-    None
+    found
 }
 
 // Project one checked diagnostic onto the file that owns it, the way the
@@ -95,13 +109,13 @@ fn jet_driver_present_origin(path: String, snapshot: JetDriverAuthorizedSourceSn
 // source path becomes the origin (root-relative display; a generated source
 // shows its path), and the span, edit, and labels move from aggregate offsets
 // to offsets in that file's exact bytes.
-pub fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> Diagnostic Never! {
+fn jet_driver_present_with_origin(diagnostic: Diagnostic, origin: DiagnosticOrigin?) -> Diagnostic Never! {
     presented := ~diagnostic
-    path :: diagnostic.source_path ?? return presented
     if presented.origin == None {
-        presented.origin = jet_driver_present_origin(path, snapshot, generated)
+        presented.origin = origin
         if presented.origin == None -> return presented
     }
+    if diagnostic.source_path == None -> return presented
     shift :: (diagnostic.source_start ?? 0) - (diagnostic.source_offset ?? 0)
     if diagnostic.span == .Val(span) -> presented.span = Val(jet_driver_shift_span(span, shift))
     if diagnostic.edit == .Val(edit) -> presented.edit = Val(TextEdit{span: jet_driver_shift_span(edit.span, shift), new_text: edit.new_text})
@@ -109,9 +123,43 @@ pub fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriver
         presented.labels[index].span = jet_driver_shift_span(presented.labels[index].span, shift)
     }
     presented.source_path = None
+    presented.source_native_path = None
     presented.source_offset = None
     presented.source_start = None
     presented
+}
+
+pub fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> Diagnostic Never! {
+    path :: diagnostic.source_path ?? return diagnostic
+    jet_driver_present_with_origin(diagnostic, jet_driver_present_origin(path, diagnostic.source_native_path, snapshot, generated))
+}
+
+// Resident editor queries use retained overlay bytes, never the disk snapshot.
+fn jet_driver_checked_origin(diagnostic: Diagnostic, result: JetDriverCompilerCheckResult) -> DiagnosticOrigin? Never! {
+    path :: diagnostic.source_path ?? return diagnostic.origin
+    if diagnostic.source_native_path == .Val(native) {
+        index :: result.source_file_index.get(native) ?? return None
+        file :: result.loaded_source_files[index]
+        display :: if result.project_root == .Val(root) -> jet_driver_display_path(root, native) else -> compiler_driver_os_path.display(native)
+        return Val(DiagnosticOrigin{display: display, path: compiler_driver_os_path.display(native), source: file.source, revision: mir_sha256_hex(file.source)})
+    }
+    if result.generated_source_file_index.get(path) == .Val(index) {
+        file :: result.loaded_source_files[index]
+        return Val(DiagnosticOrigin{display: path, path: path, source: file.source, revision: mir_sha256_hex(file.source)})
+    }
+    // Older source-less diagnostics may carry only an output label. It is not
+    // authority: an ambiguous lossy label must never choose one physical file.
+    found := DiagnosticOrigin?{None}
+    loop file in result.loaded_source_files {
+        if file.path != path -> next
+        if found != None -> return None
+        found = Val(DiagnosticOrigin{display: path, path: path, source: file.source, revision: mir_sha256_hex(file.source)})
+    }
+    found
+}
+
+pub fn jet_driver_present_checked_diagnostics(result: JetDriverCompilerCheckResult) -> [Diagnostic] Never! {
+    loop diagnostic in result.diagnostics -> jet_driver_present_with_origin(diagnostic, jet_driver_checked_origin(diagnostic, result))
 }
 
 pub fn jet_driver_present_diagnostics(diagnostics: [Diagnostic], snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> [Diagnostic] Never! {

@@ -1026,33 +1026,9 @@ fn jet_web_js_binary(op: MIRBinaryOp, left: String, right: String) -> String Nev
 }
 
 fn jet_web_js_string_part(ctx: &JetWebEmitContext, part: MIRStringPart) -> String Never! {
-    if part.kind == {
-        .Literal(text) -> return jet_web_js_quote(text)
-        .Interpolation(value, format) -> {
-            inner :: jet_web_js_value(value)
-            if format == {
-                .Display -> return "jet_display({inner})"
-                .Debug -> return "jet_debug({inner})"
-                .Pretty -> return "jet_pretty({inner})"
-                .Fixed(digits) -> return "jet_fmt_fixed({inner}, {digits})"
-                .Grouped(digits) -> return "jet_fmt_grouped({inner}, {digits})"
-                .Hex(digits) -> return "jet_fmt_hex({inner}, {digits})"
-                .Pad(width, fill) -> return "jet_fmt_pad({inner}, {width}, {jet_web_js_quote(fill)})"
-                .PadLeft(width, fill) -> return "jet_fmt_pad_left({inner}, {width}, {jet_web_js_quote(fill)})"
-                .Sci(digits) -> return "jet_fmt_sci({inner}, {digits})"
-                .Percent(digits) -> return "jet_fmt_percent({inner}, {digits})"
-                .Bin -> return "jet_fmt_bin({inner})"
-                .Oct -> return "jet_fmt_oct({inner})"
-                .Unit(unit) -> {
-                    member :: if unit == {
-                        .Symbol -> "jet_unit_symbol"
-                        .Name -> "jet_unit_name"
-                        else -> "jet_unit_bare"
-                    }
-                    return "{member}({inner})"
-                }
-            }
-        }
+    if part == {
+        .Literal(text) -> jet_web_js_quote(text)
+        .Value(value) -> jet_web_js_value(value)
     }
 }
 

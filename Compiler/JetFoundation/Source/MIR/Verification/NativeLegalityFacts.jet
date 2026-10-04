@@ -1,0 +1,143 @@
+// MIROptimization.rs:42-50. Canonical order is shared by legality and the
+// actual optimizer/identity seal; no backend-local pass-order policy.
+pub MIR_OPTIMIZATION_PASS_ORDER :: prep { [MIROptimizationPassID]{
+    .LegalityVerification, .UnreachableBlockElimination, .CFGSimplification,
+    .ExactConstantFolding, .BoundsCheckElimination, .DeadPureValueElimination,
+    .CanonicalLoopFacts,
+} }
+fn mir_native_fixed_reduction_order_is_canonical(order: MIRFixedReductionOrder) -> Bool Never! {
+    order.lanes == 8 && order.seed_lane == 0 && order.tree == .AdjacentPairsThenRoot
+}
+// MIROptimization.rs:12061-12083, an out-of-region native called leaf.
+fn mir_native_is_default_int_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == { .Int -> true .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> mir_native_is_default_int_type(base) else -> false }
+}
+fn mir_native_is_packable_for_rule(rule: MIRVectorRule, ty: MIRType) -> Bool Never! {
+    default_int :: mir_native_is_default_int_type(ty)
+    (default_int || ty.kind == .Float || ty.kind == .Float32 || ty.kind == .IntN(_, _)) && (!default_int || rule == .EarlyExitSearch)
+}
+fn mir_native_invalid_fact(function: MIRFunctionID, span: Span) -> MIRLegalityError Never! { MIRLegalityError.InvalidFact{function: function, span: span} }
+
+// MIROptimization.rs:4301-4353.
+fn mir_native_verify_copy_facts(function: MIRFunction, index: MIRNativeFunctionIndex) MIRLegalityError! {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation != .Copy(value, fact) -> next
+            ty :: mir_native_definition_type(function, index, value) ?? next
+            ownership :: mir_native_definition_ownership(function, index, value)
+            admitted :: if fact == {
+                .Scalar -> ownership.mode == .Copy
+                .ViewMaterialize -> mir_view_copy_kind(ty) != None
+                .Explicit | .Materialize | .Share -> true
+            }
+            if !admitted -> return Err(MIRLegalityError.InvalidCopyFact{function: function.id, value: value, fact: fact, span: instruction.span})
+        }
+    }
+    return
+}
+fn mir_native_verify_drops(function: MIRFunction, index: MIRNativeFunctionIndex) MIRLegalityError! {
+    loop drop in function.drops {
+        position :: index.definitions.places.get(drop.place.value) ?? return Err(MIRLegalityError.InvalidDrop{function: function.id, place: drop.place.value, span: drop.span})
+        place :: function.places[position]
+        if drop.span.start > drop.span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(function.id), span: drop.span})
+        if mir_type_is_bool(place.ty) || mir_type_is_char(place.ty) || mir_type_is_float(place.ty) || mir_type_is_integer(place.ty) -> return Err(MIRLegalityError.InvalidDrop{function: function.id, place: drop.place.value, span: drop.span})
+        if drop.edge == .Failure(target) | .Unwind(target) {
+            if index.blocks.get(target.value) == None -> return Err(MIRLegalityError.InvalidFailureEdge{function: function.id, span: drop.span})
+        }
+    }
+    return
+}
+
+// MIROptimization.rs:4355-4571. Source-operation, place, seed and membership
+// indexes remove native repeated instruction scans and quadratic duplicate
+// searches without altering the original validation predicates or error order.
+fn mir_native_verify_facts(function: MIRFunction, index: MIRNativeFunctionIndex) MIRLegalityError! {
+    facts :: function.optimization
+    if facts.pass_ids.len() > MIR_OPTIMIZATION_PASS_ORDER.len() -> return Err(mir_native_invalid_fact(function.id, function.span))
+    loop (position, pass) in facts.pass_ids { if pass != MIR_OPTIMIZATION_PASS_ORDER[position] -> return Err(mir_native_invalid_fact(function.id, function.span)) }
+    loop row in facts.loop_facts {
+        invalid := index.blocks.get(row.header.value) == None || row.span.start > row.span.end
+        if row.body == .Val(block) { if index.blocks.get(block.value) == None -> invalid = true }
+        if row.exit == .Val(block) { if index.blocks.get(block.value) == None -> invalid = true }
+        if invalid -> return Err(mir_native_invalid_fact(function.id, row.span))
+    }
+    loop row in facts.bounds_facts {
+        invalid := index.instructions.get(row.operation.value) == None || (row.elided && !row.proven) || !row.failure_preserved || row.span.start > row.span.end
+        if row.place == .Val(place) { if index.definitions.places.get(place.value) == None -> invalid = true }
+        if row.index == .Val(value) { if index.definitions.values.get(value.value) == None -> invalid = true }
+        if invalid -> return Err(mir_native_invalid_fact(function.id, row.span))
+    }
+    operation_blocks := [U64:U64]{}
+    seed_reads := [U64:U64]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            operation_blocks[instruction.id.value] = block.id.value
+            if instruction.result == .Val(value) && instruction.operation == .ReadPlace(place) -> seed_reads[value.value] = place.value
+        }
+    }
+    has_eligible := false
+    all_no_aliasing := true
+    all_no_early_exit := true
+    all_no_cross_iteration := true
+    loop row in facts.vector_facts {
+        invalid_access := false
+        loop access in row.accesses {
+            invalid_root :: if access.root == { .Place(place) -> index.definitions.places.get(place.value) == None, .Value(value) -> index.definitions.values.get(value.value) == None }
+            invalid_column :: (access.column_index != None) != (access.layout == .ColumnarDirect && access.field != None)
+            if invalid_root || invalid_column -> invalid_access = true
+        }
+        body := [U64:Bool]{}
+        invalid_body := false
+        loop block in row.body_blocks {
+            body[block.value] = true
+            if index.blocks.get(block.value) == None -> invalid_body = true
+        }
+        invalid_fixed := false
+        if row.fixed_reduction == .Val(reduction) {
+            valid_rule :: row.rule == .Reduction || row.rule == .ConditionalAccumulate
+            valid_condition :: if row.rule == .ConditionalAccumulate {
+                if reduction.condition == .Val(condition) {
+                    if mir_native_definition_type(function, index, condition) == .Val(ty) -> mir_type_is_bool(ty) else -> false
+                } else -> false
+            } else -> reduction.condition == None
+            source_valid := reduction.source_operations.len() != 0
+            seen := [U64:Bool]{}
+            loop operation in reduction.source_operations {
+                if seen.get(operation.value) != None -> source_valid = false
+                seen[operation.value] = true
+                if operation_blocks.get(operation.value) == .Val(block) { if body.get(block) == None -> source_valid = false }
+                else -> source_valid = false
+            }
+            invalid_fixed = !valid_rule || !mir_native_fixed_reduction_order_is_canonical(reduction.order) || !valid_condition || index.definitions.places.get(reduction.accumulator.value) == None || index.definitions.values.get(reduction.addend.value) == None || index.definitions.values.get(reduction.seed.value) == None || seed_reads.get(reduction.seed.value) != Val(reduction.accumulator.value) || index.blocks.get(reduction.exit.value) == None || !source_valid
+        }
+        invalid := index.blocks.get(row.loop_header.value) == None || invalid_body || body.get(row.loop_header.value) != None || invalid_access || invalid_fixed || row.span.start > row.span.end
+        if row.cursor == .Val(value) { if index.definitions.values.get(value.value) == None -> invalid = true }
+        if row.advance_block == .Val(block) { if index.blocks.get(block.value) == None || body.get(block.value) != None -> invalid = true }
+        if invalid -> return Err(mir_native_invalid_fact(function.id, row.span))
+        if row.element_type == .Val(ty) -> mir_native_verify_type(ty, row.span, function.id)
+        lane_valid :: row.lane_width == None || row.lane_width == Val(2) || row.lane_width == Val(4) || row.lane_width == Val(8)
+        layout_matches := true
+        loop access in row.accesses { if access.layout != .Flat && access.layout != row.layout -> layout_matches = false }
+        fixed_proven :: if row.rule == {
+            .Reduction -> { if row.fixed_reduction == .Val(reduction) -> mir_native_fixed_reduction_order_is_canonical(reduction.order) && reduction.condition == None else -> false }
+            .ConditionalAccumulate -> { if row.fixed_reduction == .Val(reduction) -> mir_native_fixed_reduction_order_is_canonical(reduction.order) && reduction.condition != None else -> false }
+            .Elementwise | .FieldAccess | .EarlyExitSearch -> row.fixed_reduction == None
+        }
+        control_flow :: if row.rule == .EarlyExitSearch -> !row.no_early_exit else -> row.no_early_exit
+        packable :: if row.element_type == .Val(ty) -> mir_native_is_packable_for_rule(row.rule, ty) else -> false
+        eligible_proof :: row.cursor != None && row.body_blocks.len() != 0 && row.advance_block != None && row.accesses.len() != 0 && packable && row.packed && lane_valid && layout_matches && row.no_aliasing && control_flow && row.effect_free_body && row.no_cross_iteration_dependencies && fixed_proven
+        if row.decision == .Eligible {
+            if !eligible_proof -> return Err(mir_native_invalid_fact(function.id, row.span))
+            has_eligible = true
+            all_no_aliasing = all_no_aliasing && row.no_aliasing
+            all_no_early_exit = all_no_early_exit && row.no_early_exit
+            all_no_cross_iteration = all_no_cross_iteration && row.no_cross_iteration_dependencies
+        }
+    }
+    if facts.auto_vectorizable != has_eligible || facts.no_aliasing != (has_eligible && all_no_aliasing) || facts.no_early_exit != (has_eligible && all_no_early_exit) || facts.no_cross_iteration_dependencies != (has_eligible && all_no_cross_iteration) -> return Err(mir_native_invalid_fact(function.id, function.span))
+    loop row in facts.fusion_facts {
+        if index.blocks.get(row.first_loop.value) == None || index.blocks.get(row.second_loop.value) == None || row.span.start > row.span.end || (row.decision == .Eligible && !(row.packed && row.same_iteration_domain && row.no_aliasing && row.effect_free && row.no_cross_iteration_dependencies)) -> return Err(mir_native_invalid_fact(function.id, row.span))
+    }
+    loop row in facts.acceleration_facts { if index.blocks.get(row.loop_header.value) == None || row.span.start > row.span.end -> return Err(mir_native_invalid_fact(function.id, row.span)) }
+    return
+}

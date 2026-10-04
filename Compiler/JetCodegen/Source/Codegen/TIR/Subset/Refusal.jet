@@ -1,0 +1,111 @@
+// PORT-PENDING 0524 crates-jet-codegen-src-codegen-tir-subset-patterns-module-group: crates/jet-codegen/src/Codegen/TIR/subset/refusal.rs:1-107
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! I2 self-report for the TIR coverage gate.
+//RS //!
+//RS //! `tir_covers*` answers one bool and the emitter has no fallback, so a `false`
+//RS //! is an internal compiler error (I2/R7). Reporting only the enclosing function
+//RS //! name turned every gate/emitter disagreement into a bisect: the two instances
+//RS //! fixed on 2026-08-19 (an unlisted fallible payload, an unadmitted builtin
+//RS //! receiver) each cost a search over the whole body to attribute. So the gate
+//RS //! now leaves the construct it refused here and the `ice!` sites read it back.
+//RS //!
+//RS //! This is compiler-internal breadcrumb state. It is never a user diagnostic:
+//RS //! nothing renders it except `ice!`, it carries no registered code, and it says
+//RS //! "compiler bug" in the same voice as every other I2 abort.
+//RS 
+//RS use crate::Codegen::Cx;
+//RS use crate::Diagnostics::Span;
+//RS use std::cell::Cell;
+//RS 
+//RS /// The construct the gate refused: a noun phrase naming what kind of position
+//RS /// it is, plus its source span. `Copy`, so recording costs no allocation on the
+//RS /// refusal path — which the JIT walks for every function it declines to compile.
+//RS #[derive(Clone, Copy)]
+//RS struct Refusal {
+//RS     what: &'static str,
+//RS     span: Span,
+//RS }
+//RS 
+//RS pub(crate) const EXPR: &str = "expression";
+//RS pub(crate) const STMT: &str = "statement";
+//RS pub(crate) const PARAM_TY: &str = "parameter type";
+//RS pub(crate) const RETURN_TY: &str = "return type";
+//RS pub(crate) const SELF_PARAM: &str = "`self` parameter on a plain function";
+//RS pub(crate) const EXTRA_SELF_PARAM: &str = "`self` parameter after the first";
+//RS pub(crate) const MISSING_SELF_PARAM: &str = "trait method with no `self` receiver";
+//RS pub(crate) const UNCOVERED_OWNER: &str = "method whose owner type is not covered";
+//RS pub(crate) const TYPE_PARAMS: &str = "method's own type parameters";
+//RS pub(crate) const DEFAULTED_TRAIT_PARAM: &str = "defaulted trait-method parameter";
+//RS 
+//RS /// How much of the construct's source text an ICE line carries. Enough to name
+//RS /// it; not enough to paste a whole body into a panic message.
+//RS const MAX_SNIPPET_CHARS: usize = 60;
+//RS 
+//RS thread_local! {
+//RS     static FIRST: Cell<Option<Refusal>> = const { Cell::new(None) };
+//RS }
+//RS 
+//RS /// Open a fresh coverage question. Every `tir_covers*` entry point calls this,
+//RS /// so a speculative probe — the JIT gates every function before choosing which
+//RS /// ones it compiles — cannot leave its breadcrumb behind for the next question.
+//RS pub(crate) fn begin() {
+//RS     FIRST.with(|slot| slot.set(None));
+//RS }
+//RS 
+//RS /// Record a refused construct. The first record wins: the routers recurse
+//RS /// outside-in, so the innermost node records before the enclosing nodes that
+//RS /// only propagate its `false`.
+//RS pub(crate) fn note(what: &'static str, span: Span) {
+//RS     FIRST.with(|slot| {
+//RS         if slot.get().is_none() {
+//RS             slot.set(Some(Refusal { what, span }));
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// Render the recorded refusal for an `ice!` message: the construct's own
+//RS /// source text and `file:line:column`. A gate can still refuse without
+//RS /// reaching a recorded position, so the no-record case says so plainly instead
+//RS /// of inventing a location.
+//RS pub(crate) fn describe(cx: &Cx) -> String {
+//RS     let Some(refusal) = FIRST.with(|slot| slot.get()) else {
+//RS         return "no construct was recorded".to_string();
+//RS     };
+//RS     let (line, column) =
+//RS         crate::Diagnostics::span_line_col(&cx.src, refusal.span.start.min(cx.src.len()));
+//RS     format!(
+//RS         "the {} `{}` at {}:{}:{}",
+//RS         refusal.what,
+//RS         snippet(&cx.src, refusal.span),
+//RS         cx.file,
+//RS         line,
+//RS         column
+//RS     )
+//RS }
+//RS 
+//RS /// One bounded single-line rendering of a span's source text.
+//RS fn snippet(src: &str, span: Span) -> String {
+//RS     let start = span.start.min(src.len());
+//RS     let end = span.end.clamp(start, src.len());
+//RS     // A span can land off a character boundary in recovered source; say so
+//RS     // rather than panicking inside the panic path.
+//RS     let Some(text) = src.get(start..end) else {
+//RS         return "<span off a character boundary>".to_string();
+//RS     };
+//RS     let mut flat = String::with_capacity(text.len().min(MAX_SNIPPET_CHARS + 4));
+//RS     for (taken, ch) in text.chars().enumerate() {
+//RS         if taken == MAX_SNIPPET_CHARS {
+//RS             flat.push('…');
+//RS             break;
+//RS         }
+//RS         flat.push(if ch.is_control() { ' ' } else { ch });
+//RS     }
+//RS     let trimmed = flat.trim();
+//RS     if trimmed.is_empty() {
+//RS         "<empty span>".to_string()
+//RS     } else {
+//RS         trimmed.to_string()
+//RS     }
+//RS }
+// END-PORT-PENDING 0524 crates/jet-codegen/src/Codegen/TIR/subset/refusal.rs:1-107
+

@@ -37,6 +37,26 @@ when a rechecked package kept its interface digest. The JSON form is
 `jet.explain-build/v1`; text output contains one node per line. The compiler
 owns node identity and dependencies, while the store owns run evidence.
 
+### Checked job discovery
+
+Foundation's CLI-schema `JobRegistry` projects top-level `#Job` declarations
+from the retained source AST. `from_bundle` discovers all loaded modules in
+stable display/native-path order; `for_entry` exposes only the entry module's
+argv namespace. Neither projection discovers registration-only Prelude helpers,
+deduplicates declarations, or substitutes the TIR artifact list.
+
+Typed marker checking resolves a cadence once and publishes it on
+`Func.every.resolved`; runtime lowering consumes that checked fact. The registry's
+schedule string is presentation spelling, not a second schedule resolver.
+Arguments, defaults, documentation, visibility, and complete job policy come from
+the same AST declaration. Internal jobs remain available to dependency closure,
+but are excluded from visible discovery and completion.
+
+Registry accessors borrow their rows. Dependency validation indexes names once
+and walks declaration-ordered edges without copying job payloads; ambiguity,
+missing predecessors, zero bounds, and cycles retain the original refusal order
+and text. Discovery and graph admission are separate boundaries.
+
 ### Typed IR (TIR) — the codegen seam
 
 The [TIR lowering](../../crates/jet-codegen/src/Codegen/TIR/mod.rs) accepts the
@@ -52,6 +72,42 @@ lowers the checked bundle once and passes its selected artifact to
 The [execution seam](../../crates/jet-foundation/src/JitBackend.rs) instead
 passes canonical MIR and an artifact identity to the resident backends.
 These are consumers of one checked meaning, not separate front ends.
+
+### Runtime source production
+
+The shared runtime is canonical Jet Core/Prelude source, selected through
+Foundation's `FoundationEmbeddedCore` owner and compiled by the ordinary
+checked-source → MIR → emitter path. Runtime emission must not introduce a
+second source registry, language evaluator, or runtime filesystem lookup of
+Rust include files. Generated payload publication belongs to the same
+`Compiler/Bootstrap/generate-core-sources.mjs` integration step as the Core
+source registry; an unpublished runtime source graph is not permission to emit
+an empty or shortened runtime.
+
+`Compiler/JetCodegen/Source/Runtime` owns source-identity framing and emitted
+source transformations. Source identities retain sorted unique UTF-8 usage
+labels, canonical public registry order, and private source parts attached only
+to their selected public owner. Each field is framed with its byte length as a
+big-endian unsigned 64-bit integer. The emitted Core identity includes the
+complete unstripped body, including scheduler, application, UI, and edition
+data. Foundation supplies the sole SHA-256 implementation.
+
+Runtime part selection occurs once at lowering through
+`jet_ring_runtime_parts_for_used_core`; subsequent adapters consume those typed
+IDs. The Core fingerprint cache is bounded to 32 entries and evicts the least
+existing key in the original lexical field order, not the least recently used
+entry. Its key includes usage, selected OS, edition, Stream forcing, harness,
+release inspection, panel code, and stream code.
+
+Cached runtime/Core marker bytes delimit separate native cache units. A linked
+FFI reporter belongs before the fixed-runtime marker; the original no-FFI
+installation hook belongs inside it. Emitted-source test stripping uses
+Foundation's shared `RustSource::strip_test_items` lexical implementation only
+after cache identities have consumed the original bodies. Flat Rust imports
+are merged by binding identity, with `core`/`alloc` re-exports normalized against
+`std`; root-flat Foundation self-imports are suppressed. These transformations
+do not supply missing runtime algorithms, native provider bodies, or source
+graph publication.
 
 ### One reflection model
 
@@ -69,6 +125,30 @@ parameters, layout facts, or other compile-time facts. Those facts guide code
 generation and have no runtime use. A non-struct value keeps its type name, path,
 and display text, but its field list is empty. This makes `reflect.of` a read-only
 snapshot, not a dynamic type registry.
+
+### Erased fact registry and call-graph projections
+
+The checked bundle retains one `FactRegistry`, separate from the executable
+operation registry. Effect, State, and Tag declarations have distinct
+namespaces. Replacing a declaration replaces its membership and tag rules;
+state reflection also retains the labels' source order. Only the state
+validator attaches a `StateGraph`: nodes preserve terminal status and optional
+entry reachability, and transitions preserve operation, optional source, and
+destination. Tools read that retained graph, not a reconstructed AST view.
+
+One shared finite-set call-graph traversal projects effects, panic, taint,
+direct secret provenance, and calls to Exec. Every row uses the captured
+checked edges, including nested region, callback, autodiff, discarded-result,
+and memory-call identities. Cycles converge by union. First insertion in the
+ordered work queue fixes a deterministic proof path; a unique short-name
+alias changes only that proof's first node. Qualified declaration identities
+remain authoritative when short names collide.
+
+The final semantic effect packet owns these rows, checked declarations,
+memory proofs, the name ledger, and the checked application graph. Inspection
+and Driver package facts project this packet without a second solver or
+display-name inference. MIR CFG reachability is a separate control-flow
+analysis; it does not replace the shared call-graph fact result.
 
 ### Structure fact plane
 
@@ -141,6 +221,17 @@ Tower acceptance boundaries, not evidence supplied by this inventory.
 | [Loader and Driver](../../crates/jet-driver/src/Driver/mod.rs) ↔ [root entry](../../Source/lib.rs) | Front-end orchestration, #813 | Filesystem/process access, worker lifetime and stack, toolchain invocation and panic transport; no Cargo dependency from an inward seam back to the facade |
 | [Query service](../../crates/jet-driver/src/QueryService.rs) ↔ [query cache](../../crates/jet-queries/src/lib.rs) | Tooling projections of the checked result, #813 | Revision/dependency invalidation and cache storage; cached values retain the checked bundle and effect-fact association, not an independent analysis |
 | [Diagnostics](../../crates/jet-foundation/src/Diagnostics.rs) ↔ [CLI](../../crates/jet-cli/src/lib.rs) | Diagnostic construction and user-facing compiler/tooling policy, #813 | Render registered diagnostics and apply existing exit policy; an internal backend failure must not become a new user-language diagnostic |
+
+The canonical MIR semantic boundary is Foundation's
+`mir_verify_legality(MIRProgram) MIRLegalityError!`, after the independent
+`mir_validate_program` graph boundary. Legality preserves the original typed
+validation, span, identity, value, place and call payloads; consumers render
+them with `mir_legality_error_text` rather than reconstructing policy from
+backend symbols. Entry and failure/unwind cleanup targets are dominance roots.
+Ownership feasibility joins unknown or disagreeing Boolean facts conservatively;
+path-prefix move/reinitialization checks use a dominance-path index without
+changing native first-error order. The canonical pass-order constant is shared
+by legality, optimizer seals and execution identity.
 
 Compiler seams depend inward through local path dependencies, as in the
 [driver manifest](../../crates/jet-driver/Cargo.toml); the
@@ -222,6 +313,35 @@ pinned stage0-to-stage1 build, #815 is byte-identical stage1-to-stage2 output,
 and #816 is the Jet-built compiler full-suite closeout. The policy-family
 homes #808–#813 and the boundary inventory #218 cannot substitute for those
 bootstrap and fixed-point proofs.
+
+#### Source-coupled artifact inputs
+
+The private bootstrap source snapshot retains the authority that captured it:
+checked root, directory, manifest, source and foreign-cache handles live through
+the generated compiler invocation. Revalidation checks those same objects before
+the call; a path-only reopen is not an equivalent lease. Driver paths retain
+their original encoded `OsPath` bytes and platform. Display text is derived for
+diagnostics and the source-image wire contract, never used to reconstruct a
+native path or to replace checked filesystem identity.
+
+[`JetBootstrap/Source/BuildIdentity.jet`](../../Compiler/JetBootstrap/Source/BuildIdentity.jet)
+owns the pure build-identity framing. The domain and one NUL byte precede the
+caller-ordered build facts. Each fact key, value and source path is UTF-8,
+preceded by its eight-byte big-endian byte length; source payloads use the same
+length framing and remain raw bytes. Source rows sort by exact path and retain
+the first duplicate. The canonical Foundation streaming SHA-256 consumes these
+borrowed rows; it does not create an artifact-specific hash or copy the complete
+source set into a second framing buffer. Native capture must supply the real
+toolchain/profile/environment facts; package versions are not substitute stamps.
+
+The workspace catalog in
+[`WorkspaceCatalog.jet`](../../Compiler/JetBootstrap/Source/WorkspaceCatalog.jet)
+resolves whole generated `__jet_` identifiers to their first top-level
+definition. Indented trait methods are not unit owners. Strongly connected
+units form one component, with dependencies emitted before their dependents;
+iterative traversal avoids a native-stack requirement proportional to the
+module graph. Catalog rows do not substitute for runtime splitting, visibility
+export, sharding, held authority or an exercised native backend build.
 
 Behavioral parity between any two compiler binaries (#670) is a separate,
 reusable proof: [`Tools/agent/compiler-diff.mjs`](../../Tools/agent/compiler-diff.mjs)
@@ -658,12 +778,112 @@ check that the record does not declare with the same digest fails as an
 internal compiler error. `JET_CHECK_READS_INJECT` injects one undeclared read
 so tests can show the audit catches it.
 
+The Jet policy owner is `JetFoundation/Source/Reads/CheckReads.jet`. Sessions
+record process-wide, including checking worker threads: overlapping sessions
+share the same sorted read set, and differing rereads pin a `conflict` digest.
+Finishing a session atomically retrieves the native recorder's actual reads;
+unfinished destruction closes only that session. Callers must not reconstruct
+the read set from source snapshots or a map of intended inputs. Directory
+digests hash native-path-sorted, lossy entry names joined by newlines, without a
+trailing newline. An unset environment value records `missing`; a non-Unicode
+value hashes its platform lossy display but reads as unset through the text
+API. Raw injected paths and directory reopen tokens remain opaque OS bytes,
+never lossy pathnames. `current_digest` verifies without recording new reads.
+
 **Self-hosted compiler.** JetFoundation implements the same codec
 (`Record/RecordCodec.jet`) and key framing (`Record/PackageIdentity.jet`);
 `tests/record_conformance.rs` holds both implementations to identical bytes.
 JetDriver reaches the store only through the typed `JetDriverRecordStore`
 the host passes in the compile request. Without a store every lookup is a
 miss and the package is checked.
+
+Package target identity is produced from the same folded
+`Facts/BuildSnapshot.jet` retained by semantic registration. Its five ordered
+facts are `os`, `edition`, `web_partition`, `layer_ceiling`, and `build_facts`.
+The last fact hashes the native structural Debug bytes of the complete
+snapshot, with only the stamp clock, contribution chains, and setting
+provenance projected to empty values. Folded setting types and values,
+package/profile/artifact identity, git/dirty/toolchain, and the exact typed
+target triple and dossier remain inputs. Maps follow native UTF-8 key order;
+native optional and enum spelling and quoted spans are preserved.
+`AST/Canonical/DebugSink.jet` supplies the common scalar policy and streaming
+sink; the same typed target traversal serves byte fixtures, SHA-256 package
+identity, and native image hash comparison without cloning the checked graph.
+
+The checked Driver target-fact projection refuses a missing native triple or
+dossier explicitly; it does not synthesize a dossier from an internal Sema
+record, MIR digest, display string, or a new host lookup. A provided dossier
+whose optional machine is absent remains a real native value, distinct from
+missing authority input. The package graph's load root and source/interface
+partition are unchanged by this target-fact projection.
+
+Checked tool projections borrow the Driver's retained loader metadata: the
+physical selected authority root, original loaded-module order (including
+symbol-free and loaded Core modules), exact loader source, parsed-source
+masking, path/display/alias, and file visibility remain distinct. A generated
+source keeps its origin label and has no physical-file path. The injected
+registration-only Prelude is not an original loaded module. Documentation
+presentation may display the root as `.`, but never uses that display label as
+filesystem authority or reconstructs membership from registered symbols.
+Structural entry checks consume the caller-held captured authority snapshot and
+overlay bytes. An explicit relative-import directory selects paths inside the
+entry's original authority root; it does not replace that root, authorize a
+second root, reopen source files, or fall back to the old entry when a selection
+is absent. The already-parsed overlay entry is reused by Loader, and the same
+checked pass retains diagnostics-side facts. Loader membership order is distinct
+from the sorted, deduplicated immutable physical closure used for authority
+transport. Package effect attribution consumes original loaded callable keys,
+import boundary spans and dependency roots together with the checked solve's
+direct effects, edges and maximal facts; loaded but unreachable helpers do not
+become application provenance.
+Native root, entry, file, namespace and dependency paths use Core `OsPath`:
+encoded Unix bytes or canonical Windows WTF-8 plus an explicit platform.
+The native authority contract requires capture from checked native handles;
+a lossy display label cannot be converted back into authority. Prefix and
+equality checks use Core path components, so a sibling whose name shares a
+textual prefix is not inside the selected root. Overlays and retained native-source indices key by
+`OsPath` using the sole Core native Eq/Hash/Ord owner, never by a digest or Debug
+framing stand-in. A textual diagnostic/FileKey label is not native authority.
+Package partition providers borrow the original loaded path facts; generated
+and embedded Core rows retain no physical path. Snapshot source segments carry
+their retained native selector through diagnostics; generated segments have
+none. Editor presentation uses the checked result's exact overlay bytes and
+rebases spans, labels and edits once, never rereading the original disk text.
+Native authority capture, retained resource loans and lawful user-key map
+activation remain mechanism-gated until their actual Core producers land.
+The standalone artifact-root selector follows checked workspace, no-follow
+repository marker, checked package, then canonical standalone parent, with
+discovery failures preserved. It is not the loaded bundle's package/source
+`project_root`; those two original root laws must remain distinct.
+
+Driver lazily constructs one full `SemIndex` from the retained registration,
+checked graph, source rows, original loaded-module row indices, effect-budget
+program and same-solve summaries. Repeated opens borrow that memoized index;
+they do not parse/check again or clone a graph. Compiler reflection projects
+the original **12-field** `CompilerSemanticIndex` from that same typed index,
+entry source and fact registry. This is distinct from the **15-field**
+SemIndex JSON envelope: neither payload is a filtered or reparsed substitute
+for the other. The reflective `CompilerChecked` retains its original seven
+fields; consumed revisions and proof rows belong to the outer checked result.
+Compiler reflection leaves its nested index absent when checking has errors,
+while explicit with-diagnostics opens may retain the real full checked index.
+
+The package run-member selector consumes the inward authority resolver's held
+checked-file text in its discovery order. It skips `package.jet`, requires an
+empty lexer-diagnostic list and strict parsing, and selects the first actual
+top-level `fn run`. It neither reopens a selected file nor rebuilds authority
+from a display pathname. Native handle capture and native path-map traits
+remain real Core producer requirements, not successful metadata fallbacks.
+
+Machine projections build ordered, duplicate-refusing `StatusFields` and use
+the canonical Report emitter, including bare `StatusValue.json()`. Ordered
+entries alone determine wire order; a private name-to-index map maintains
+membership without scanning or rebuilding the entries on insertion. Status
+builders consume their receivers (`^self`); growing named builders move with
+`fields = ^fields.with(...)` or `envelope = ^envelope.with_field(...)`, rather
+than copying their accumulated state. Read access and rendering do not consume.
+S19 numeric atoms reuse Core JSON parsing and the original producer's finite-f64/i64
+domain; explicitly lexical raw payloads retain their own wire spelling.
 
 **Diagnostic replay.** Diagnostics are stored typed and rendered for each
 invocation. Warm output, text and `--json`, is byte-identical to
@@ -901,6 +1121,22 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   declaration paths, aliases, visibility, and reference origins; all Rust-name
   projections use its canonical mangle functions. This implements ratified
   D-NAME-TREE1 without adding a user-facing spelling.
+  The Source carrier is the indexed `NameLedger`: shared loader tables retain
+  import targets, modules, namespaces, declaration/display paths, aliases, and
+  loader alias-use roots. Body snapshots share those tables while keeping
+  body-local alias uses, references, and structure facts independent.
+  `name_ledger_display_path` and `name_ledger_display_path_at` shorten only an
+  unambiguous visible leaf; a shared span is evidence only for an exact key or
+  one declaration, never an arbitrary owner. Canonical-path, declaration,
+  semantic-identity, visibility, and module/alias queries read the same ledger.
+  References are keyed by source module and use-site span in the ledger,
+  independently of the native reference's resolved module and definition span.
+  Repeated writes replace that use-site; separate uses remain separate.
+  Only the MIR boundary calls `name_ledger_mir_facts`: the native `MIRNameFacts`
+  has exactly modules, declarations, aliases, references, and structure facts,
+  with native canonical sort order. Display paths, namespace roots, import
+  targets, and use-site keys remain in the source ledger, not wider native MIR.
+  Presentation never changes a nominal's package/path-qualified identity.
 - **R7 — Backend is swappable.** Rust emission stays in
   `crates/jet-codegen/src/`; native rustc invocation and ICE classification
   stay in `Source/CmdCompile.rs`. The lexer, parser, and sema crates do not

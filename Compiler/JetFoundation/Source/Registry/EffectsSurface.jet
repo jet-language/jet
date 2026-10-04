@@ -1,0 +1,257 @@
+// Rust Syntax/effects_surface.rs:1-924. Non-generated syntax vocabulary.
+// Main's assembly manifest imports this private fragment into the one Compiler
+// unit with Syntax/Spellings.jet, Registry/InterpolationSelectors.jet,
+// Generics.jet and Registry/PerformanceBudgets.jet. Existing spellings and
+// selector types/functions stay at their canonical owners. BUILTIN_TAGS reads
+// the generated Registry/EmbeddedCoreData.jet payload through EmbeddedCore.
+// Diagnostic tombstones are not accepted aliases: retain their exact bytes so
+// parser/formatter retirement diagnostics can distinguish them.
+
+// Rust:5-32. Explicit purity is -[]>; Pure only names a rejected marker.
+pub KW_TODO :: prep { "Todo" }
+pub KW_PURE :: prep { "Pure" }
+pub EFFECT_ARROW_OPEN :: prep { "-[" }
+pub EFFECT_ARROW_CLOSE :: prep { "]>" }
+pub KW_EFFECT_DECL :: prep { "effect" }
+// EFFECT_LEAF_EXEC_ARGS and BUILTIN_EFFECT_LEAVES: Syntax/Spellings.jet.
+
+// Rust:71-87. Declared fact tags, in Prelude declaration order.
+pub KW_TAINTED :: prep { "Tainted" }
+pub KW_CREDENTIAL :: prep { "Credential" }
+pub KW_SANITIZER :: prep { "Sanitizer" }
+pub KW_SCRUB :: prep { "Scrub" }
+// Rust:87 BUILTIN_TAGS -> FoundationEmbeddedCore.builtin_tags(), whose
+// generated payload stays exclusively in Registry/EmbeddedCoreData.jet.
+
+// Rust:97-162. Typestate, protocol, metadata and scoped authority names.
+pub KW_STATE :: prep { "State" }
+pub KW_TRANSITION :: prep { "Transition" }
+pub KW_STATE_DECL :: prep { "state" }
+pub KW_PROTOCOL :: prep { "protocol" }
+pub PROTO_CLIENT :: prep { "client" }
+pub PROTO_SERVER :: prep { "server" }
+pub KW_MARKER :: prep { "marker" }
+pub KW_FACT :: prep { "fact" }
+pub STATE_ENTRY :: prep { "_" }
+pub KW_FX :: prep { "FX" }
+pub RETIRED_MARKER_GRANT :: prep { "Grant" }
+pub AUTHORITY_HANDLE_TYPE :: prep { "Authority" }
+
+// Rust:165-203. NUL-prefixed names are compiler-private dispatch identities;
+// they cannot collide with a source identifier. \x00 is Jet's byte escape.
+pub INTERNAL_TASK_RECEIVER :: prep { "\x00jet.task" }
+pub INTERNAL_TASK_SURFACE_TYPE :: prep { "\x00jet.task.surface" }
+pub INTERNAL_TASK_GROUP_SURFACE_TYPE :: prep { "\x00jet.task.group.surface" }
+pub TYPE_TASKGROUP :: prep { "Group" }
+pub INTERNAL_TASK_SPAWN_METHOD :: prep { "\x00jet.task.spawn" }
+pub INTERNAL_TASK_TIMEOUT_METHOD :: prep { "\x00jet.task.timeout" }
+pub TASK_TIMEOUT_SELECTOR :: prep { "timeout" }
+pub INTERNAL_TASK_ALL_METHOD :: prep { "\x00jet.task.all" }
+pub INTERNAL_TASK_RACE_METHOD :: prep { "\x00jet.task.race" }
+pub INTERNAL_TASK_ANY_METHOD :: prep { "\x00jet.task.any" }
+pub METHOD_TASK_PAUSE :: prep { "pause" }
+pub METHOD_TASK_RESUME :: prep { "resume" }
+pub METHOD_TASK_CANCEL :: prep { "cancel" }
+
+// Rust:211-271. Hook contracts and their closed associated menus.
+pub KW_TRANSACT :: prep { "Transact" }
+pub TXN_ON_COMMIT :: prep { "on_commit" }
+pub TXN_ON_ROLLBACK :: prep { "on_rollback" }
+pub TRAIT_ROLLBACK :: prep { "Rollback" }
+// TRAIT_DISPLAY/DEBUG: Generics.jet DISPLAY/DEBUG.
+pub TRAIT_ITERABLE :: prep { "Iterable" }
+pub TRAIT_ITERATOR :: prep { "Iterator" }
+pub TRAIT_INDEX :: prep { "Index" }
+pub TRAIT_INDEX_MUT :: prep { "IndexMut" }
+// TRAIT_ADD/MUL: Syntax/Spellings.jet. TRAIT_SUB/DIV: Generics.jet SUB/DIV.
+// TRAIT_EQUATABLE/COMPARABLE: Generics.jet EQUATABLE/COMPARABLE.
+pub TYPE_ORDERING :: prep { "Ordering" }
+// TRAIT_NUMERIC: Syntax/Spellings.jet.
+pub NUMERIC_SUPERTRAITS :: prep { [String]{TRAIT_ADD, SUB, TRAIT_MUL, COMPARABLE} }
+pub NUMERIC_STATIC_MEMBERS :: prep { [String]{"zero", "one"} }
+pub ORDERING_VARIANTS :: prep { [String]{"Less", "Equal", "Greater"} }
+// TRAIT_IO_READER/IO_WRITER/DRIVER: Generics.jet IO_READER/IO_WRITER/DRIVER.
+// Rust:275-394 selectors: Registry/InterpolationSelectors.jet, including the
+// private INTERPOLATION_UNIT_STYLES in the UnitStyle row. Examples are owned
+// by Syntax/Spellings.jet. No second selector table belongs here.
+
+// Rust:430-506. Teaching words preserve context-sensitive rejection.
+pub MARKER_REDACT :: prep { "Redact" }
+pub TXN_HANDLE_TYPE :: prep { "Transaction" }
+pub FOREIGN_TEST :: prep { "test" }
+pub FOREIGN_TODO :: prep { "todo" }
+pub FOREIGN_SANITIZER :: prep { "sanitizer" }
+pub BUILTIN_CONSUME :: prep { "consume" }
+pub BUILTIN_EXPECT :: prep { "expect" }
+pub BUILTIN_SNAPSHOT :: prep { "snapshot" }
+pub KW_IT :: prep { "it" }
+pub FOREIGN_AS :: prep { "as" }
+pub FOREIGN_LAMBDA :: prep { "lambda" }
+pub FOREIGN_VEC :: prep { "Vec" }
+pub FOREIGN_DICT :: prep { "dict" }
+pub FOREIGN_APPEND :: prep { "append" }
+pub FOREIGN_THROW :: prep { "throw" }
+pub FOREIGN_RAISE :: prep { "raise" }
+pub FOREIGN_CATCH :: prep { "catch" }
+pub FOREIGN_EXCEPT :: prep { "except" }
+pub FOREIGN_UNWRAP :: prep { "unwrap" }
+pub FOREIGN_EXPECT :: prep { "expect" }
+pub FOREIGN_EPRINTLN :: prep { "eprintln" }
+pub FOREIGN_OPEN :: prep { "open" }
+pub FOREIGN_GETENV :: prep { "getenv" }
+pub FOREIGN_OS :: prep { "os" }
+pub FOREIGN_ASYNC :: prep { "async" }
+pub FOREIGN_AWAIT :: prep { "await" }
+pub FOREIGN_MUTEX :: prep { "Mutex" }
+pub FOREIGN_LOCK :: prep { "lock" }
+pub MARKER_PREFIX :: prep { "#" }
+pub MARKER_LIST_OPEN :: prep { "[" }
+pub MARKER_LIST_CLOSE :: prep { "]" }
+pub FOREIGN_AT_ATTR :: prep { "@" }
+
+// Rust:514-563. Package and ref punctuation; JETPACK_BINARY_NAME stays in
+// Syntax/Spellings.jet together with all REF_SOURCE_* constants/providers.
+pub SOURCE_ROOT_DIR :: prep { ".jet" }
+pub DEP_TABLE_JET :: prep { "dependencies" }
+pub DEP_TABLE_RUST :: prep { "dependencies:rust" }
+pub DEP_PROVIDER_C :: prep { "c" }
+pub SYSTEM_LIB_TARGET :: prep { "system" }
+pub JETOS_BINARY_NAME :: prep { "jetos" }
+pub PACK_LOCK_FILE :: prep { "pack.lock" }
+pub REF_SEPARATOR :: prep { ":" }
+pub REF_CHANNEL_MARKER :: prep { "#" }
+pub REF_CHANNEL_LATEST :: prep { "latest" }
+pub REF_CHANNEL_MAIN :: prep { "main" }
+pub REF_CHANNEL_AUTO :: prep { "auto" }
+
+// Rust:623-662. Verbs retain the Rust registry order, including imported
+// jetpack_config names CONFIG_SUBCOMMAND, OS_SUBCOMMAND, USER_SUBCOMMAND
+// (Rust jetpack_config.rs:25/422/468; Registry/PerformanceBudgets.jet).
+pub JETPACK_WHY :: prep { "why" }
+pub JETPACK_IMPORT_VERB :: prep { "import" }
+pub JETPACK_LOCK_VERB :: prep { "lock" }
+pub LOCK_DIFF_VERB :: prep { "diff" }
+pub LOCK_DIFF_FLAG_AGAINST :: prep { "--against" }
+pub JETPACK_VERBS :: prep { [String]{
+    "doctor", "env", "use", "hangar", "audit", "add", "remove", "update",
+    JETPACK_LOCK_VERB, "outdated", "search", "info", "explain", JETPACK_WHY,
+    JETPACK_IMPORT_VERB, "logs", "override", "push", TRUST_SUBCOMMAND,
+    OS_SUBCOMMAND, CONFIG_SUBCOMMAND, BRIDGE_SUBCOMMAND, SERVICES_SUBCOMMAND,
+    SECRETS_SUBCOMMAND, IMAGE_SUBCOMMAND, USER_SUBCOMMAND, TOOL_SUBCOMMAND,
+    PROFILE_SUBCOMMAND, BROWSER_SUBCOMMAND,
+} }
+
+// Rust:670-772. Environment controls, shell hooks and workspace selectors.
+pub ENV_FLAG_PACKAGE :: prep { "-p" }
+pub ENV_FLAG_PREP :: prep { "--prep" }
+pub ENV_FLAG_EXPLAIN :: prep { "--explain" }
+pub ENV_FLAG_PREP_RETIRED :: prep { "--prepare" }
+pub WS_FLAG_AFFECTED :: prep { "--affected" }
+pub WS_FLAG_AFFECTED_SINCE :: prep { "--affected-since" }
+pub ENV_FLAG_FLAKE :: prep { "--flake" }
+pub ENV_FLAG_PURE :: prep { "--pure" }
+pub BUILD_FLAG_SHELL_ON_FAIL :: prep { "--shell-on-fail" }
+pub BRIDGE_SUBCOMMAND :: prep { "bridge" }
+pub BRIDGE_VERB_FLAKE :: prep { "flake" }
+pub FOREIGN_FLAKE_FILE :: prep { "flake.nix" }
+pub FOREIGN_DEVENV_FILE :: prep { "devenv.nix" }
+pub FOREIGN_SHELL_FILE :: prep { "shell.nix" }
+pub FOREIGN_DEFAULT_FILE :: prep { "default.nix" }
+pub DEV_SUBCOMMAND :: prep { "dev" }
+pub ENV_HOOK_VERB :: prep { "hook" }
+pub ENV_EXPORT_VERB :: prep { "export" }
+pub ENV_TEST_VERB :: prep { "test" }
+pub ENV_SYNC_VERB :: prep { "sync" }
+pub ENV_INFO_VERB :: prep { "info" }
+pub ENV_REPORT_JOBS_KEY :: prep { "jobs" }
+pub ENV_REPORT_CHECKS_KEY :: prep { "checks" }
+pub ENV_DISABLE_VAR :: prep { "JET_ENV_DISABLE" }
+pub ENV_HOOK_ACTIVE_DIR_VAR :: prep { "JETPACK_ENV_DIR" }
+pub ENV_HOOK_OLD_PATH_VAR :: prep { "JETPACK_ENV_OLD_PATH" }
+pub ENV_HOOK_SHELLS :: prep { [String]{"bash", "zsh", "fish"} }
+
+// Rust:781-812. Image and global tool projection menus.
+pub SERVICES_SUBCOMMAND :: prep { "services" }
+pub IMAGE_SUBCOMMAND :: prep { "image" }
+pub IMAGE_FLAG_PUSH :: prep { "--push" }
+pub TOOL_SUBCOMMAND :: prep { "tool" }
+pub TOOL_VERB_INSTALL :: prep { "install" }
+pub TOOL_VERB_LIST :: prep { "list" }
+pub TOOL_VERB_UNINSTALL :: prep { "uninstall" }
+pub TOOL_VERBS :: prep { [String]{TOOL_VERB_INSTALL, TOOL_VERB_LIST, TOOL_VERB_UNINSTALL} }
+pub TOOL_FLAG_AS :: prep { "--as" }
+pub TOOL_PROFILE_NAME :: prep { "tools" }
+pub TOOL_BIN_DIR :: prep { "bin" }
+pub TOOL_STATE_DIR :: prep { "tools" }
+pub TOOL_EXTERNAL_PROVIDERS :: prep { [String]{"npm", "pypi", "cargo", "crates", "brew", "go", "gem"} }
+pub TOOL_DIAG_COLLIDE :: prep { "E1297" }
+pub TOOL_DIAG_PROVIDER :: prep { "E1298" }
+
+// Rust:817-847. Generation engine and browser provisioning menus.
+pub PROFILE_SUBCOMMAND :: prep { "profile" }
+pub PROFILE_VERB_PLAN :: prep { "plan" }
+pub PROFILE_VERB_BUILD :: prep { "build" }
+pub PROFILE_VERB_SWITCH :: prep { "switch" }
+pub PROFILE_VERB_ROLLBACK :: prep { "rollback" }
+pub PROFILE_VERB_GENERATIONS :: prep { "generations" }
+pub PROFILE_VERBS :: prep { [String]{
+    PROFILE_VERB_PLAN, PROFILE_VERB_BUILD, PROFILE_VERB_SWITCH,
+    PROFILE_VERB_ROLLBACK, PROFILE_VERB_GENERATIONS,
+} }
+pub BROWSER_SUBCOMMAND :: prep { "browser" }
+pub BROWSER_VERB_LOCK :: prep { "lock" }
+pub BROWSER_VERB_PROVISION :: prep { "provision" }
+pub BROWSER_VERB_RESOLVE :: prep { "resolve" }
+pub BROWSER_VERB_LIST :: prep { "list" }
+pub BROWSER_VERBS :: prep { [String]{
+    BROWSER_VERB_LOCK, BROWSER_VERB_PROVISION, BROWSER_VERB_RESOLVE, BROWSER_VERB_LIST,
+} }
+pub BROWSER_FLAG_BINARY :: prep { "--binary" }
+pub BROWSER_FLAG_VERSION :: prep { "--version" }
+pub BROWSER_FLAG_PROTOCOL :: prep { "--protocol" }
+pub BROWSER_ENGINES :: prep { [String]{"chromium", "firefox", "webkit"} }
+pub BROWSER_DEFAULT_PROTOCOL :: prep { "bidi-2025.5" }
+
+// Rust:852-887. Trust scopes and supervised service verbs.
+pub TRUST_SUBCOMMAND :: prep { "trust" }
+pub TRUST_VERB_GRANT :: prep { "grant" }
+pub TRUST_VERB_LIST :: prep { "list" }
+pub TRUST_VERB_EXPLAIN :: prep { "explain" }
+pub TRUST_VERB_REVOKE :: prep { "revoke" }
+pub TRUST_VERBS :: prep { [String]{
+    TRUST_VERB_GRANT, TRUST_VERB_LIST, TRUST_VERB_EXPLAIN, TRUST_VERB_REVOKE,
+} }
+pub TRUST_FLAG_SCOPE :: prep { "--scope" }
+pub TRUST_SCOPE_USER :: prep { "user" }
+pub TRUST_SCOPE_REPO :: prep { "repo" }
+pub SERVICES_VERB_UP :: prep { "up" }
+pub SERVICES_VERB_DOWN :: prep { "down" }
+pub SERVICES_VERB_HEALTH :: prep { "health" }
+pub SERVICES_VERB_LOGS :: prep { "logs" }
+pub SERVICES_VERB_RESTART :: prep { "restart" }
+pub SERVICES_VERB_WAIT :: prep { "wait" }
+pub SERVICES_VERB_WATCH :: prep { "watch" }
+pub SERVICES_VERBS :: prep { [String]{
+    SERVICES_VERB_UP, SERVICES_VERB_DOWN, SERVICES_VERB_HEALTH, SERVICES_VERB_LOGS,
+    SERVICES_VERB_RESTART, SERVICES_VERB_WAIT, SERVICES_VERB_WATCH,
+} }
+pub SERVICES_STATE_DIR :: prep { "services" }
+
+// Rust:895-923. Secret-store verbs and original import defaults.
+pub SECRETS_SUBCOMMAND :: prep { "secrets" }
+pub SECRETS_VERB_KEYGEN :: prep { "keygen" }
+pub SECRETS_VERB_SET :: prep { "set" }
+pub SECRETS_VERB_GET :: prep { "get" }
+pub SECRETS_VERB_UNSET :: prep { "unset" }
+pub SECRETS_VERB_LIST :: prep { "list" }
+pub SECRETS_VERB_IMPORT :: prep { "import" }
+pub SECRETS_VERB_RECIPIENTS :: prep { "recipients" }
+pub SECRETS_VERBS :: prep { [String]{
+    SECRETS_VERB_KEYGEN, SECRETS_VERB_SET, SECRETS_VERB_GET, SECRETS_VERB_UNSET,
+    SECRETS_VERB_LIST, SECRETS_VERB_IMPORT, SECRETS_VERB_RECIPIENTS,
+} }
+pub SECRETS_RECIPIENTS_VERB_ADD :: prep { "add" }
+pub SECRETS_RECIPIENTS_VERB_LIST :: prep { "list" }
+pub SECRETS_RECIPIENTS_VERBS :: prep { [String]{SECRETS_RECIPIENTS_VERB_ADD, SECRETS_RECIPIENTS_VERB_LIST} }
+pub SECRETS_FLAG_FORCE :: prep { "--force" }
+pub SECRETS_DEFAULT_IMPORT_FILE :: prep { ".env" }

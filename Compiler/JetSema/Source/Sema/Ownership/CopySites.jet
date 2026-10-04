@@ -9,9 +9,9 @@ use jet_foundation.[
     AccessConvention,
     Binding,
     Diagnostic,
-    DiagnosticFixApplicability,
-    DiagnosticFixSafety,
     Expr,
+    FixApplicability,
+    FixSafety,
     Span,
     SymbolKind,
     TextEdit,
@@ -75,7 +75,7 @@ fn sema_copy_site_report(site: SemaCopySite, what: String, why: String, environm
 fn sema_copy_site_push(diagnostic: Diagnostic, site: SemaCopySite, environment: SemaScopeEnvironment, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     facts :: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, context.generic_params, false)
     if facts.complete && facts.cloneable && !facts.resource {
-        &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: site.span.start, end: site.span.start}, new_text: "~"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+        &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: site.span.start, end: site.span.start}, new_text: "~"}, FixApplicability.Safe, FixSafety.BehaviorPreserving))
         return
     }
     &diagnostics.push(diagnostic)

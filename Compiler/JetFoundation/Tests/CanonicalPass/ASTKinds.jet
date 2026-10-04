@@ -1,0 +1,42 @@
+// Item fixtures reuse Foundation's actual AST constructors/carriers; all 25
+// original CanonicalPass.rs match arms, including often-missed FactDecl.
+#Test("canonical pass all 25 original AST item kinds and ordered indexes") {
+    span :: Span{start: 17, end: 29}
+    text :: Expr.Str{parts: [StrPart]{}, span: span}
+    items :: [Item]{
+        Item.Func{value: ast_func("x", span, span)},
+        Item.Struct{value: ast_struct("x", span, span)},
+        Item.Enum{value: ast_enum("x", span, span)},
+        Item.Distinct{value: DistinctDef{is_pub: false, is_package_pub: false, type_markers: [Marker]{}, derives: [NamedSpan]{}, quantity: None, name: "x", name_span: span, base: Type.Int, base_span: span, range: None, span: span}},
+        Item.TypeAlias{value: TypeAliasDef{is_pub: false, is_package_pub: false, name: "x", name_span: span, type_params: [TypeParam]{}, target: Type.Int, target_span: span, span: span}},
+        Item.UnitFamily{value: UnitFamilyDef{is_pub: false, is_package_pub: false, family: "x", family_span: span, dimension: None, resolved_dimension: None, resolved_owner: None, base: None, members: [UnitFamilyMember]{}, span: span}},
+        Item.Trait{value: TraitDef{span: span, is_pub: false, is_package_pub: false, name: "x", name_span: span, supertraits: [String]{}, assoc_types: [NamedSpan]{}, methods: [TraitMethodSig]{}}},
+        Item.Tag{value: TagDef{is_pub: false, is_package_pub: false, name: "x", name_span: span, deny: [NamedSpan]{}, from: [NamedSpan]{}, span: span}},
+        Item.EffectDecl{value: EffectDecl{name: "x", name_span: span, irreversible: false, span: span}},
+        Item.Impl{value: ImplDef{span: span, type_name: "x", type_span: span, trait_name: None, trait_span: None, operator_rhs: None, operator_marker: None, methods: [Func]{}, delegation_field: None, assoc_type_impls: [NamedType]{}, is_generated_serde: false, os_target: None}},
+        Item.Const{value: ast_const("x", span, span, text)},
+        Item.Test{value: TestDef{span: span, name: None, name_expr: None, faults_expr: None, faults: [String]{}, expected_fail_expr: None, expected_fail: false, marker_name_span: span, name_prefix: None, name_span: span, params: [Param]{}, fn_keyword_span: None, body: [Stmt]{}}},
+        Item.ExternRust{value: ExternRustBlock{crate_spec: "x", crate_span: span, functions: [ExternFn]{}, span: span}},
+        Item.Module{value: ModuleDecl{name: "x", name_span: span, auto_discovered: false, sources: [SourceDecl]{}, imports: [Expr]{}, members: [Expr]{}, contributions: [Contribution]{}, span: span}},
+        Item.CModule{value: CModule{kind: CModuleKind.Extern, lib: "x", path_span: span, functions: [ExternFn]{}, span: span}},
+        Item.CodeModule{value: CodeModule{name: "x", name_span: span, is_pub: false, is_package_pub: false, body: None, imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: span}},
+        Item.ErrorConv{value: ErrorConvDef{from_ty: "x", from_span: span, to_ty: "x", to_span: span, body: [Stmt]{}, body_span: span}},
+        Item.Migration{value: MigrationDecl{type_name: "x", type_span: span, ops: [MigrationOp]{}, span: span}},
+        Item.ProtocolDecl{value: ProtocolDecl{is_pub: false, is_package_pub: false, name: "x", name_span: span, messages: [ProtocolMessage]{}, span: span}},
+        Item.UserDerive{value: DeriveDef{trait_name: "x", trait_span: span, type_param: "x", body: [DeriveBodyItem]{}, span: span}},
+        Item.TemplateLoop{value: ItemTemplateLoop{var: "x", var_span: span, source: text, body: [DeriveBodyItem]{}, span: span}},
+        Item.GenericModule{value: GenericModuleDef{name: "x", name_span: span, is_pub: false, is_package_pub: false, params: [GenericModuleParam]{}, imports: [ImportDecl]{}, body: [Item]{}, span: span}},
+        Item.ModuleAlias{value: ModuleAliasDef{name: "x", name_span: span, is_pub: false, is_package_pub: false, target: "x", target_span: span, args: [ModuleArg]{}, span: span}},
+        Item.MarkerDecl{value: MarkerDecl{name: "x", name_span: span, params: [MarkerDeclParam]{}, body: None, span: span}},
+        Item.FactDecl{value: FactDecl{name: "x", name_span: span, params: [MarkerDeclParam]{}, span: span}},
+    }
+    expected :: [String]{"Func", "Struct", "Enum", "Distinct", "TypeAlias", "UnitFamily", "Trait", "Tag", "EffectDecl", "Impl", "Const", "Test", "ExternRust", "Module", "CModule", "CodeModule", "ErrorConv", "Migration", "ProtocolDecl", "UserDerive", "TemplateLoop", "GenericModule", "ModuleAlias", "MarkerDecl", "FactDecl"}
+    assert_eq(items.len(), 25)
+    rows := [String]{}
+    loop (index, item) in items {
+        assert_eq(canonical_pass_item_kind(item), expected[index])
+        &rows.push("{{\"index\":{index},\"kind\":{foundation_json_quote(expected[index])}}}")
+    }
+    assert_eq(canonical_pass_ast_items_payload(items), "{{\"representation\":\"ast\",\"items\":[{rows.join(",")}]}}")
+    assert_eq(canonical_pass_ast_items_identity(items), "{\"representation\":\"ast\",\"item_count\":25}")
+}

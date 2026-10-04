@@ -1,0 +1,262 @@
+// PORT-PENDING 0608 crates-jet-driver-src-budgetview-module-group: crates/jet-driver/src/BudgetView.rs:1-258
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Read-only projections over canonical performance budget reports.
+//RS //!
+//RS //! D-PERFBUDGET-INTEGRATION1: consumers never evaluate policy or measure.
+//RS //! They verify reports produced by the one budget engine, then project only
+//RS //! reports whose recorded source digests still match the requested source.
+//RS 
+//RS use jet_foundation::PerformanceBudget::{verify_budget_report, CanonicalJson};
+//RS use jet_foundation::Report::{StatusFields, StatusValue};
+//RS use std::fs;
+//RS use std::collections::BTreeMap;
+//RS use std::path::Path;
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct BudgetFact {
+//RS     pub report_id: String,
+//RS     pub evidence_id: String,
+//RS     pub budget_id: String,
+//RS     pub evidence: String,
+//RS     pub outcome: String,
+//RS     pub enforcement: String,
+//RS     pub statistical: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
+//RS pub struct BudgetProjection {
+//RS     pub facts: Vec<BudgetFact>,
+//RS     pub rejected: Vec<String>,
+//RS }
+//RS 
+//RS impl BudgetProjection {
+//RS     /// Stable read-only wire used by dossier, Canvas, and LSP. Projection
+//RS     /// never invents a second decision: every row retains report/evidence ids.
+//RS     pub fn to_json(&self) -> String {
+//RS         let facts = self.facts.iter().map(|fact| format!(
+//RS             "{{\"budget_id\":{},\"enforcement\":{},\"evidence\":{},\"evidence_id\":{},\"outcome\":{},\"report_id\":{},\"statistical\":{}}}",
+//RS             json(&fact.budget_id), json(&fact.enforcement), json(&fact.evidence),
+//RS             json(&fact.evidence_id), json(&fact.outcome), json(&fact.report_id), fact.statistical,
+//RS         )).collect::<Vec<_>>().join(",");
+//RS         let rejected = self
+//RS             .rejected
+//RS             .iter()
+//RS             .map(|reason| json(reason))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!("{{\"mode\":\"read_only\",\"rejected\":[{rejected}],\"reports\":[{facts}]}}")
+//RS     }
+//RS     /// Typed status projection for command envelopes. The report facts remain
+//RS     /// owned by the canonical budget engine; this method only carries them.
+//RS     pub fn to_status_value(&self) -> StatusValue {
+//RS         let reports = StatusValue::array(self.facts.iter().map(|fact| {
+//RS             StatusValue::object(
+//RS                 StatusFields::new()
+//RS                     .with("budget_id", fact.budget_id.as_str())
+//RS                     .with("enforcement", fact.enforcement.as_str())
+//RS                     .with("evidence", fact.evidence.as_str())
+//RS                     .with("evidence_id", fact.evidence_id.as_str())
+//RS                     .with("outcome", fact.outcome.as_str())
+//RS                     .with("report_id", fact.report_id.as_str())
+//RS                     .with("statistical", fact.statistical),
+//RS             )
+//RS         }));
+//RS         StatusValue::object(
+//RS             StatusFields::new()
+//RS                 .with("mode", "read_only")
+//RS                 .with(
+//RS                     "rejected",
+//RS                     StatusValue::array(self.rejected.iter().map(|reason| StatusValue::from(reason.as_str()))),
+//RS                 )
+//RS                 .with("reports", reports),
+//RS         )
+//RS     }
+//RS 
+//RS 
+//RS     pub fn render_text(&self) -> String {
+//RS         let mut out = String::from("Performance budgets (read-only)\n");
+//RS         if self.facts.is_empty() {
+//RS             out.push_str("  no compatible canonical report\n");
+//RS         }
+//RS         for fact in &self.facts {
+//RS             out.push_str(&format!(
+//RS                 "  {}  {} ({})  report {}  evidence {}\n",
+//RS                 fact.budget_id,
+//RS                 fact.outcome,
+//RS                 fact.evidence,
+//RS                 &fact.report_id[..12],
+//RS                 &fact.evidence_id[..12]
+//RS             ));
+//RS         }
+//RS         for reason in &self.rejected {
+//RS             out.push_str(&format!("  rejected: {reason}\n"));
+//RS         }
+//RS         out
+//RS     }
+//RS }
+//RS 
+//RS /// Reads canonical reports without creating, refreshing, or rewriting any file.
+//RS /// Newest compatible report wins per budget id; identity remains report-owned.
+//RS pub fn read_compatible(root: &Path, sources: &[(String, String)]) -> BudgetProjection {
+//RS     let dir = root.join(".jet/perf/reports");
+//RS     let Ok(entries) = fs::read_dir(&dir) else {
+//RS         return BudgetProjection::default();
+//RS     };
+//RS     let wanted = sources
+//RS         .iter()
+//RS         .map(|(path, digest)| (normalize(path), digest.as_str()))
+//RS         .collect::<BTreeMap<_, _>>();
+//RS     let mut paths = entries
+//RS         .filter_map(Result::ok)
+//RS         .map(|entry| entry.path())
+//RS         .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+//RS         .collect::<Vec<_>>();
+//RS     paths.sort();
+//RS     let mut by_budget = BTreeMap::<String, BudgetFact>::new();
+//RS     let mut rejected = Vec::new();
+//RS     for path in paths {
+//RS         let label = path
+//RS             .file_name()
+//RS             .and_then(|name| name.to_str())
+//RS             .unwrap_or("report")
+//RS             .to_string();
+//RS         let metadata = match fs::symlink_metadata(&path) {
+//RS             Ok(metadata) => metadata,
+//RS             Err(error) => {
+//RS                 rejected.push(format!("{label}: unreadable: {error}"));
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
+//RS             rejected.push(format!("{label}: not a regular no-follow report"));
+//RS             continue;
+//RS         }
+//RS         if metadata.len() > 16 * 1024 * 1024 {
+//RS             rejected.push(format!("{label}: report exceeds 16 MiB projection limit"));
+//RS             continue;
+//RS         }
+//RS         let bytes = match fs::read(&path) {
+//RS             Ok(bytes) => bytes,
+//RS             Err(error) => {
+//RS                 rejected.push(format!("{label}: unreadable: {error}"));
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         let report = match verify_budget_report(&bytes) {
+//RS             Ok(report) => report,
+//RS             Err(error) => {
+//RS                 rejected.push(format!("{label}: {error}"));
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         let Ok((report_id, evidence_id, members, measurements)) = report_parts(&report) else {
+//RS             rejected.push(format!("{label}: report projection fields are invalid"));
+//RS             continue;
+//RS         };
+//RS         if members.is_empty()
+//RS             || !members.iter().all(|(path, digest)| {
+//RS                 wanted
+//RS                     .get(&normalize(path))
+//RS                     .is_some_and(|wanted| *wanted == digest)
+//RS             })
+//RS         {
+//RS             continue;
+//RS         }
+//RS         for measurement in measurements {
+//RS             let Ok(fact) = measurement_fact(&report_id, &evidence_id, measurement) else {
+//RS                 rejected.push(format!(
+//RS                     "{label}: measurement projection fields are invalid"
+//RS                 ));
+//RS                 continue;
+//RS             };
+//RS             by_budget.insert(fact.budget_id.clone(), fact);
+//RS         }
+//RS     }
+//RS     BudgetProjection {
+//RS         facts: by_budget.into_values().collect(),
+//RS         rejected,
+//RS     }
+//RS }
+//RS 
+//RS fn report_parts(
+//RS     value: &CanonicalJson,
+//RS ) -> Result<(String, String, Vec<(String, String)>, &[CanonicalJson]), ()> {
+//RS     let report = object(value)?;
+//RS     let report_id = text(report.get("report_id"))?.to_string();
+//RS     let content = object(report.get("content").ok_or(())?)?;
+//RS     let evidence_id = text(content.get("evidence_id"))?.to_string();
+//RS     let subject = object(content.get("subject").ok_or(())?)?;
+//RS     let members = array(subject.get("member_sources"))?
+//RS         .iter()
+//RS         .map(|value| {
+//RS             let member = object(value)?;
+//RS             Ok((
+//RS                 text(member.get("path"))?.to_string(),
+//RS                 text(member.get("sha256"))?.to_string(),
+//RS             ))
+//RS         })
+//RS         .collect::<Result<Vec<_>, ()>>()?;
+//RS     Ok((
+//RS         report_id,
+//RS         evidence_id,
+//RS         members,
+//RS         array(content.get("measurements"))?,
+//RS     ))
+//RS }
+//RS 
+//RS fn measurement_fact(
+//RS     report_id: &str,
+//RS     evidence_id: &str,
+//RS     value: &CanonicalJson,
+//RS ) -> Result<BudgetFact, ()> {
+//RS     let measurement = object(value)?;
+//RS     let decision = object(measurement.get("decision").ok_or(())?)?;
+//RS     let comparison = object(measurement.get("comparison").ok_or(())?)?;
+//RS     Ok(BudgetFact {
+//RS         report_id: report_id.to_string(),
+//RS         evidence_id: evidence_id.to_string(),
+//RS         budget_id: text(measurement.get("budget_id"))?.to_string(),
+//RS         evidence: text(decision.get("evidence"))?.to_string(),
+//RS         outcome: text(decision.get("policy_outcome"))?.to_string(),
+//RS         enforcement: text(measurement.get("enforcement"))?.to_string(),
+//RS         statistical: text(comparison.get("kind"))? != "absolute",
+//RS     })
+//RS }
+//RS 
+//RS fn object(value: &CanonicalJson) -> Result<&BTreeMap<String, CanonicalJson>, ()> {
+//RS     if let CanonicalJson::Object(value) = value {
+//RS         Ok(value)
+//RS     } else {
+//RS         Err(())
+//RS     }
+//RS }
+//RS fn array(value: Option<&CanonicalJson>) -> Result<&[CanonicalJson], ()> {
+//RS     if let Some(CanonicalJson::Array(value)) = value {
+//RS         Ok(value)
+//RS     } else {
+//RS         Err(())
+//RS     }
+//RS }
+//RS fn text(value: Option<&CanonicalJson>) -> Result<&str, ()> {
+//RS     if let Some(CanonicalJson::String(value)) = value {
+//RS         Ok(value)
+//RS     } else {
+//RS         Err(())
+//RS     }
+//RS }
+//RS fn normalize(path: &str) -> String {
+//RS     path.trim_start_matches("./").replace('\\', "/")
+//RS }
+//RS fn json(value: &str) -> String {
+//RS     format!(
+//RS         "\"{}\"",
+//RS         value
+//RS             .replace('\\', "\\\\")
+//RS             .replace('\"', "\\\"")
+//RS             .replace('\n', "\\n")
+//RS             .replace('\r', "\\r")
+//RS             .replace('\t', "\\t")
+//RS     )
+//RS }
+// END-PORT-PENDING 0608 crates/jet-driver/src/BudgetView.rs:1-258
+

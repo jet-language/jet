@@ -1,0 +1,210 @@
+// Compiler/Bootstrap/Host/CompilerImage.rs: private current-format image owner.
+use jet_foundation.[MIRArtifactID, MIRFunctionID, MIRProgram, MIRExecutionIdentity, MIR_SCHEMA_VERSION, JetTargetLayout, mir_sha256_bytes, mir_validate_program, mir_validation_error_text, mir_execution_identity, mir_sealed_execution_identity, mir_identity_error_text, mir_program_image_bytes, mir_program_from_image_bytes]
+use jet_driver.JetDriverAuthorizedSourceSnapshot
+
+pub COMPILER_IMAGE_FORMAT_VERSION :: prep { 3 }
+pub COMPILER_IMAGE_MAGIC :: prep { [U8]{U8{74}, U8{69}, U8{84}, U8{67}, U8{73}, U8{77}, U8{71}, U8{0}} }
+
+#Error
+pub struct CompilerImageError { pub message: String }
+pub struct CompilerImageEnvelope {
+    pub source_authority_digest: [U8]
+    pub artifact: MIRArtifactID
+    pub entry_function: MIRFunctionID
+}
+pub struct CompilerImageHeader {
+    pub format_version: Int
+    pub mir_schema_version: Int
+    pub source_authority_digest: [U8]
+    pub artifact: MIRArtifactID
+    pub entry_function: MIRFunctionID
+    pub identity: MIRExecutionIdentity
+}
+pub struct RestoredCompilerImage { pub header: CompilerImageHeader, pub program: MIRProgram }
+struct EncodedCompilerImageHeader {
+    format_version: Int
+    mir_schema_version: Int
+    source_authority_digest: [U8]
+    artifact: MIRArtifactID
+    entry_function: MIRFunctionID
+}
+
+// MetadataWriter: fixed little-endian words, byte lengths rather than scalars.
+pub struct CompilerImageMetadataWriter {
+    bytes: [U8]
+    fn new() -> CompilerImageMetadataWriter Never! { CompilerImageMetadataWriter{bytes: [U8]{}} }
+    fn write_u8(&self, value: U8) Never! { &self.bytes.push(value) }
+    fn write_u16(&self, value: Int) Never! {
+        &self.bytes.push(U8{value & 255})
+        &self.bytes.push(U8{(value >> 8) & 255})
+    }
+    fn write_u64(&self, value: U64) Never! {
+        loop index in 0..<8 -> &self.bytes.push(U8.from_u64((value >> (8 * index)) & U64{255}) ?? U8{0})
+    }
+    fn write_raw(&self, value: View<U8>) Never! { loop byte in value -> &self.bytes.push(byte) }
+    fn write_len(&self, value: Int) CompilerImageError! {
+        if value < 0 || value > 18446744073709551615 -> return Err(CompilerImageError{message: "compiler-image length exceeds u64"})
+        &self.write_u64(U64{value})
+        return
+    }
+    fn write_bytes(&self, value: View<U8>) CompilerImageError! {
+        &self.write_len(value.len())
+        &self.write_raw(value)
+        return
+    }
+    fn write_string(&self, value: String) CompilerImageError! {
+        bytes :: value.bytes()
+        &self.write_bytes(bytes[0..<bytes.len()])
+    }
+    fn finish(self) -> [U8] Never! { self.bytes }
+}
+
+// MetadataReader: every returned extent borrows the original input. target is
+// the actual HOST layout, never the MIR artifact's possibly-cross target.
+pub struct CompilerImageMetadataReader {
+    bytes: View<U8>
+    cursor: Int
+    host_max: U64
+    fn new(bytes: View<U8>, host: JetTargetLayout) -> CompilerImageMetadataReader Never! {
+        CompilerImageMetadataReader{bytes: bytes, cursor: 0, host_max: if host.pointer_size >= 8 -> U64{18446744073709551615} else -> (U64{1} << (host.pointer_size * 8)) - U64{1}}
+    }
+    fn read_raw(&self, length: Int) -> View<U8> CompilerImageError! {
+        if length < 0 || U64{length} > self.host_max - U64{self.cursor} -> return Err(CompilerImageError{message: "compiler-image cursor overflow"})
+        if length > self.bytes.len() - self.cursor -> return Err(CompilerImageError{message: "truncated compiler-image archive"})
+        start :: self.cursor
+        self.cursor += length
+        Ok(self.bytes[start..<self.cursor])
+    }
+    fn read_u16(&self) -> Int CompilerImageError! {
+        bytes :: &self.read_raw(2)
+        Ok(Int.from_u8(bytes[0]) | (Int.from_u8(bytes[1]) << 8))
+    }
+    fn read_u64(&self) -> U64 CompilerImageError! {
+        bytes :: &self.read_raw(8)
+        value := U64{0}
+        loop index in 0..<8 -> value = value | (U64.from_u8(bytes[index]) << (8 * index))
+        Ok(value)
+    }
+    fn read_len(&self) -> Int CompilerImageError! {
+        raw :: &self.read_u64()
+        if raw > self.host_max -> return Err(CompilerImageError{message: "compiler-image length exceeds the host address space"})
+        remaining :: U64{self.bytes.len() - self.cursor}
+        limit :: if remaining < self.host_max -> remaining + U64{1} else -> self.host_max
+        if raw > limit -> return Err(CompilerImageError{message: "compiler-image length exceeds the remaining archive"})
+        Ok(Int.from_u64(raw))
+    }
+    fn read_bytes(&self) -> View<U8> CompilerImageError! {
+        length :: &self.read_len()
+        &self.read_raw(length)
+    }
+    fn read_string(&self) -> String CompilerImageError! {
+        bytes :: &self.read_bytes()
+        Ok(String.from_bytes(bytes.to_list()) ?? return Err(CompilerImageError{message: "compiler-image string is not valid UTF-8"}))
+    }
+    fn finish(self) CompilerImageError! {
+        if self.cursor != self.bytes.len() -> return Err(CompilerImageError{message: "compiler-image archive has trailing bytes"})
+        return
+    }
+}
+
+// Prefix decode deliberately does not read lengths, identity, payload or SHA.
+fn compiler_image_decode_envelope_prefix(reader: &CompilerImageMetadataReader) -> EncodedCompilerImageHeader CompilerImageError! {
+    magic :: &reader.read_raw(8)
+    if magic != COMPILER_IMAGE_MAGIC -> return Err(CompilerImageError{message: "invalid compiler-image magic"})
+    format :: &reader.read_u16()
+    if format != COMPILER_IMAGE_FORMAT_VERSION -> return Err(CompilerImageError{message: "unsupported private compiler-image format {format}"})
+    schema :: &reader.read_u16()
+    artifact :: MIRArtifactID{value: &reader.read_u64()}
+    entry :: MIRFunctionID{value: &reader.read_u64()}
+    if artifact.value == U64{0} || entry.value == U64{0} -> return Err(CompilerImageError{message: "compiler-image contains a zero artifact or entry identity"})
+    digest :: &reader.read_raw(32)
+    // The fixed-size public digest is the only metadata copied out of a prefix.
+    owned := [U8]{}
+    loop byte in digest -> &owned.push(byte)
+    Ok(EncodedCompilerImageHeader{format_version: format, mir_schema_version: schema, artifact: artifact, entry_function: entry, source_authority_digest: owned})
+}
+fn compiler_image_check_envelope(header: EncodedCompilerImageHeader, digest: View<U8>, artifact: MIRArtifactID, entry: MIRFunctionID) CompilerImageError! {
+    if header.mir_schema_version != MIR_SCHEMA_VERSION -> return Err(CompilerImageError{message: "compiler-image MIR schema {header.mir_schema_version} does not match current schema {MIR_SCHEMA_VERSION}"})
+    if header.source_authority_digest != digest -> return Err(CompilerImageError{message: "compiler-image source authority does not match the authorized source snapshot"})
+    if header.artifact != artifact -> return Err(CompilerImageError{message: "compiler-image artifact identity does not match the requested artifact"})
+    if header.entry_function != entry -> return Err(CompilerImageError{message: "compiler-image entry function does not match the requested entry"})
+    return
+}
+pub fn read_compiler_image_envelope(bytes: View<U8>, expected_source_authority_digest: View<U8>, expected_artifact: MIRArtifactID, expected_entry_function: MIRFunctionID, host: JetTargetLayout) -> CompilerImageEnvelope CompilerImageError! {
+    if bytes.len() < 108 -> return Err(CompilerImageError{message: "truncated compiler-image archive"})
+    reader := CompilerImageMetadataReader.new(bytes, host)
+    header :: compiler_image_decode_envelope_prefix(&reader)
+    compiler_image_check_envelope(header, expected_source_authority_digest, expected_artifact, expected_entry_function)
+    Ok(CompilerImageEnvelope{source_authority_digest: header.source_authority_digest, artifact: header.artifact, entry_function: header.entry_function})
+}
+
+struct DecodedCompilerImageArchive {
+    header: EncodedCompilerImageHeader
+    payload: View<U8>
+    identity: View<U8>
+}
+fn compiler_image_decode_archive(bytes: View<U8>, host: JetTargetLayout) -> DecodedCompilerImageArchive CompilerImageError! {
+    if bytes.len() < 108 -> return Err(CompilerImageError{message: "truncated compiler-image archive"})
+    content_end :: bytes.len() - 32
+    content :: bytes[0..<content_end]
+    checksum :: bytes[content_end..<bytes.len()]
+    computed :: mir_sha256_bytes(content)
+    if computed[0..<computed.len()] != checksum -> return Err(CompilerImageError{message: "compiler-image archive checksum mismatch"})
+    reader := CompilerImageMetadataReader.new(content, host)
+    header :: compiler_image_decode_envelope_prefix(&reader)
+    identity :: &reader.read_bytes()
+    payload :: &reader.read_bytes()
+    reader.finish()
+    Ok(DecodedCompilerImageArchive{header: header, payload: payload, identity: identity})
+}
+
+fn compiler_image_encode_archive(header: CompilerImageHeader, payload: View<U8>, host: JetTargetLayout) -> [U8] CompilerImageError! {
+    identity :: compiler_image_encode_identity(header.identity)
+    identity_len :: U64{identity.len()}
+    payload_len :: U64{payload.len()}
+    host_max :: if host.pointer_size >= 8 -> U64{18446744073709551615} else -> (U64{1} << (host.pointer_size * 8)) - U64{1}
+    if identity_len > host_max - U64{108} || payload_len > host_max - U64{108} - identity_len -> return Err(CompilerImageError{message: "compiler-image size overflows usize"})
+    capacity :: U64{108} + identity_len + payload_len
+    bytes :: List<U8>.try_with_capacity(Int.from_u64(capacity)) ?? return Err(CompilerImageError{message: "compiler-image is too large to allocate"})
+    writer := CompilerImageMetadataWriter{bytes: bytes}
+    &writer.write_raw(COMPILER_IMAGE_MAGIC[0..<COMPILER_IMAGE_MAGIC.len()])
+    &writer.write_u16(header.format_version)
+    &writer.write_u16(header.mir_schema_version)
+    &writer.write_u64(header.artifact.value)
+    &writer.write_u64(header.entry_function.value)
+    &writer.write_raw(header.source_authority_digest[0..<header.source_authority_digest.len()])
+    &writer.write_u64(identity_len)
+    &writer.write_raw(identity[0..<identity.len()])
+    &writer.write_u64(payload_len)
+    &writer.write_raw(payload)
+    checksum :: mir_sha256_bytes(writer.bytes[0..<writer.bytes.len()])
+    &writer.write_raw(checksum[0..<checksum.len()])
+    writer.finish()
+}
+pub fn archive_compiler_image(source_program: MIRProgram, program: MIRProgram, artifact: MIRArtifactID, entry_function: MIRFunctionID, source_authority: JetDriverAuthorizedSourceSnapshot, host: JetTargetLayout) -> [U8] CompilerImageError! {
+    mir_validate_program(program) ?? return Err(CompilerImageError{message: "invalid compiler-image MIR: {mir_validation_error_text(err)}"})
+    compiler_image_check_factory_root(program, artifact, entry_function)
+    identity :: mir_execution_identity(program, Val(artifact)) ?? return Err(CompilerImageError{message: "invalid compiler-image identity: {mir_identity_error_text(err)}"})
+    // Source MIR is now the canonical Foundation carrier: no runtime bridge.
+    // Retain the original source/canonical byte guard.
+    payload :: mir_program_image_bytes(source_program, host) ?? return Err(CompilerImageError{message: err.message})
+    canonical_payload :: mir_program_image_bytes(program, host) ?? return Err(CompilerImageError{message: err.message})
+    if payload != canonical_payload {
+        differences :: compiler_image_field_differences(program, source_program)
+        return Err(CompilerImageError{message: "Source MIR compiler image does not preserve every canonical native MIR field ({differences.len()} differing field paths; `path xCOUNT: first sample: native | restored`):\n{differences.join("\n")}"})
+    }
+    header :: CompilerImageHeader{format_version: COMPILER_IMAGE_FORMAT_VERSION, mir_schema_version: MIR_SCHEMA_VERSION, source_authority_digest: compiler_image_source_authority_digest(source_authority), artifact: artifact, entry_function: entry_function, identity: identity}
+    compiler_image_encode_archive(header, payload[0..<payload.len()], host)
+}
+pub fn restore_compiler_image(bytes: View<U8>, expected_source_authority_digest: View<U8>, expected_artifact: MIRArtifactID, expected_entry_function: MIRFunctionID, host: JetTargetLayout) -> RestoredCompilerImage CompilerImageError! {
+    decoded :: compiler_image_decode_archive(bytes, host)
+    raw :: decoded.header
+    compiler_image_check_envelope(raw, expected_source_authority_digest, expected_artifact, expected_entry_function)
+    program :: mir_program_from_image_bytes(decoded.payload, host) ?? return Err(CompilerImageError{message: err.message})
+    compiler_image_check_factory_root(program, expected_artifact, expected_entry_function)
+    identity :: mir_sealed_execution_identity(program, Val(expected_artifact)) ?? return Err(CompilerImageError{message: "invalid compiler-image identity: {mir_identity_error_text(err)}"})
+    encoded_identity :: compiler_image_encode_identity(identity)
+    if encoded_identity[0..<encoded_identity.len()] != decoded.identity -> return Err(CompilerImageError{message: "compiler-image execution identity does not match its MIR payload"})
+    header :: CompilerImageHeader{format_version: raw.format_version, mir_schema_version: raw.mir_schema_version, source_authority_digest: raw.source_authority_digest, artifact: raw.artifact, entry_function: raw.entry_function, identity: identity}
+    RestoredCompilerImage{header: header, program: program}
+}

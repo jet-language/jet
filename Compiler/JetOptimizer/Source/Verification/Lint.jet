@@ -1273,11 +1273,13 @@ fn mir_lint_terminator(ctx: MIRLintContext, block: MIRBasicBlock) -> MIRLintProb
             if function.generator != None -> return None
             mir_lint_expect_class(ctx, rule, "bare return of a function returning", function.return_type, [MIRLintClass]{MIRLintClass.Unit})
         }
-        .Yield(value, resume) -> {
+        .Yield(value, resume, cancel) -> {
             generator :: function.generator ?? return mir_lint_problem(rule, "yield outside a generator")
             problem :: mir_lint_expect_value(ctx, rule, "yielded value", generator.item, value)
             if problem != None -> return problem
-            mir_lint_target(ctx, resume)
+            resume_problem :: mir_lint_target(ctx, resume)
+            if resume_problem != None -> return resume_problem
+            mir_lint_target(ctx, cancel)
         }
         .Unreachable(_) -> None
     }

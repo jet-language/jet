@@ -1,0 +1,17 @@
+// MIRRust.rs:1122-1125 actual Debug tuple (&mut String,
+// MirArtifactIdentity, &String). Borrow each real value; never clone emitted
+// source or replace the actual artifact Debug with canonical JSON / a digest.
+// The MirArtifactIdentity.CanonicalPassDebug implementation belongs to the
+// full native typed Debug owner and is a SOURCE-CLOSURE gate until published.
+pub fn canonical_pass_emitter_payload(source: String, artifact: MIRArtifactIdentity, target: String) -> String Never! {
+    out := [U8]{}
+    canonical_ast_write(&out, "(")
+    canonical_ast_write_string(&out, source)
+    canonical_ast_write(&out, ", ")
+    artifact.write_canonical_pass_debug(&out)
+    canonical_ast_write(&out, ", ")
+    canonical_ast_write_string(&out, target)
+    canonical_ast_write(&out, ")")
+    debug :: String.from_bytes(^out) ?? panic("original tuple Debug writes UTF-8")
+    "{{\"representation\":\"mir\",\"operation_id\":\"mir.rust-emitter\",\"debug\":{foundation_json_quote(debug)}}}"
+}

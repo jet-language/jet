@@ -1,0 +1,33 @@
+use jet_foundation.[record_blob_key]
+
+#Test("bootstrap build identity uses original big endian byte length framing") {
+    facts :: [BootstrapBuildFact]{BootstrapBuildFact{key: "k", value: "v"}}
+    inputs :: [BootstrapBuildInput]{BootstrapBuildInput{path: "p", bytes: [U8]{U8{128}, U8{0}}}}
+    // domain + NUL, fact key/value and path use UTF8 byte lengths, not scalar
+    // lengths. File payload is raw bytes, including invalid UTF8.
+    framed :: [U8]{U8{100}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{1}, U8{107}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{1}, U8{118}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{1}, U8{112}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{2}, U8{128}, U8{0}}
+    assert_eq(bootstrap_semantic_id_from_inputs("d", facts, inputs), record_blob_key(framed))
+}
+#Test("bootstrap build identity sorts paths and retains the first duplicate") {
+    a :: BootstrapBuildInput{path: "a", bytes: "first".bytes()}
+    b :: BootstrapBuildInput{path: "b", bytes: "second".bytes()}
+    duplicate :: BootstrapBuildInput{path: "a", bytes: "ignored".bytes()}
+    expected :: bootstrap_semantic_id_from_inputs("d", [BootstrapBuildFact]{}, [BootstrapBuildInput]{a, b})
+    assert_eq(bootstrap_semantic_id_from_inputs("d", [BootstrapBuildFact]{}, [BootstrapBuildInput]{b, a, duplicate}), expected)
+    assert(bootstrap_semantic_id_from_inputs("other", [BootstrapBuildFact]{}, [BootstrapBuildInput]{a, b}) != expected)
+}
+#Test("bootstrap build identity does not reorder caller build facts") {
+    a :: BootstrapBuildFact{key: "a", value: "1"}
+    b :: BootstrapBuildFact{key: "b", value: "2"}
+    assert(bootstrap_semantic_id_from_inputs("d", [BootstrapBuildFact]{a, b}, [BootstrapBuildInput]{}) != bootstrap_semantic_id_from_inputs("d", [BootstrapBuildFact]{b, a}, [BootstrapBuildInput]{}))
+}
+#Test("bootstrap profile override keys retain original exhaustive order") {
+    keys :: bootstrap_profile_override_keys()
+    assert_eq(keys.len(), 38)
+    assert_eq(keys[0], "RUSTC_WRAPPER")
+    assert_eq(keys[1], "RUSTC_WORKSPACE_WRAPPER")
+    assert_eq(keys[2], "CARGO_PROFILE_RELEASE_PANIC")
+    assert_eq(keys[10], "CARGO_PROFILE_RELEASE_INCREMENTAL")
+    assert_eq(keys[11], "CARGO_PROFILE_DEV_PANIC")
+    assert_eq(keys[37], "CARGO_PROFILE_BENCH_INCREMENTAL")
+}

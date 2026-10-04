@@ -432,7 +432,7 @@ fn jet_target_provider_identity(machine: MIRTargetMachine) -> String Never! {
     jet_target_append_frame(&bytes, "hardware", jet_target_hardware_json(machine.hardware))
     jet_target_append_frame(&bytes, "programmers", jet_target_programmers_json(machine.programmers))
     jet_target_append_frame(&bytes, "layout_facts", jet_target_layout_cache_identity(machine.layout))
-    "target-providers-v1:{mir_sha256_hex_bytes(bytes)}"
+    "target-providers-v1:{mir_sha256_hex_bytes(bytes[0..<bytes.len()])}"
 }
 
 fn jet_target_linker_identity(machine: MIRTargetMachine) -> String Never! {
@@ -474,7 +474,7 @@ fn jet_target_wasm_provider(name: String, implementation: String) -> MIRProvider
     bytes := [U8]{}
     jet_target_append_frame(&bytes, "provider", name)
     jet_target_append_frame(&bytes, "implementation", implementation)
-    digest :: mir_sha256_hex_bytes(bytes)
+    digest :: mir_sha256_hex_bytes(bytes[0..<bytes.len()])
     MIRProviderContract{
         provider: name,
         sha256: "sha256:{digest}",
@@ -539,7 +539,7 @@ pub fn jet_target_dossier_for_usage(machine: MIRTargetMachine, used_core: [Strin
         machine: Val(machine),
         layer: layer,
         provider_identity: jet_target_provider_identity(machine),
-        closure_identity: "prelude-closure-v1:{mir_sha256_hex_bytes(closure_bytes)}",
+        closure_identity: "prelude-closure-v1:{mir_sha256_hex_bytes(closure_bytes[0..<closure_bytes.len()])}",
         linker_identity: jet_target_linker_identity(machine),
         tier_identity: tier,
         compiler_identity: compiler_identity,

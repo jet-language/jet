@@ -1,0 +1,1457 @@
+// PORT-PENDING 0566 crates-jet-comptime-src-comptime-build-plan-impl: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1-1453
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::actions_policy::{
+//RS     ActionCache, BuildAction, BuildCapability, BuildResourcePool, BuildResourcePoolSpec,
+//RS };
+//RS use super::cache_cas::{
+//RS     ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ContentDigest,
+//RS };
+//RS use super::errors_keys::{
+//RS     canonical_action_key, canonical_effective_action_key, stalled_cycle, target_cycle_error,
+//RS     BuildError,
+//RS };
+//RS use super::execution_helpers::{
+//RS     action_pools, cache_status_reason, collect_target_actions, default_resource_pools,
+//RS     execution_metrics, execution_stages,
+//RS };
+//RS use super::execution_runtime::BuildProbeFact;
+//RS use super::handles::{
+//RS     ActionHandle, ActionId, ProbeHandle, ProbeId, SigningIdentityHandle, TargetId, TargetRef,
+//RS     ToolchainHandle, ToolchainId,
+//RS };
+//RS use super::plan_graph::{
+//RS     BuildExecutionEvent, BuildExecutionModel, BuildExecutionNode, BuildExecutionReport,
+//RS     BuildExplanation, BuildGraph, BuildGraphAction, BuildGraphActionKey, BuildGraphCacheDelta,
+//RS     BuildGraphDiff, BuildGraphFile, BuildGraphFileDelta, BuildGraphKeyDelta, BuildGraphSubject,
+//RS     BuildGraphTarget, BuildPlan, CompilerPackageSpec, FileOwnership, RebuildExplanation,
+//RS     MAX_ACTIONS,
+//RS };
+//RS use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
+//RS use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
+//RS use super::targets::{BuildPath, BuildTarget, TargetKind};
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::path::Path;
+//RS 
+//RS impl BuildPlan {
+//RS     pub fn default_target(&self) -> Option<TargetRef> {
+//RS         self.default
+//RS     }
+//RS 
+//RS     pub fn targets(&self) -> &[BuildTarget] {
+//RS         &self.targets
+//RS     }
+//RS 
+//RS     pub fn actions(&self) -> &[BuildAction] {
+//RS         &self.actions
+//RS     }
+//RS 
+//RS     pub fn toolchains(&self) -> &[BuildToolchain] {
+//RS         &self.toolchains
+//RS     }
+//RS 
+//RS     pub fn signing_identities(&self) -> &[BuildSigningIdentity] {
+//RS         &self.signing_identities
+//RS     }
+//RS 
+//RS     pub fn probes(&self) -> &[BuildProbe] {
+//RS         &self.probes
+//RS     }
+//RS 
+//RS     pub fn plugins(&self) -> &[BuildPlugin] {
+//RS         &self.plugins
+//RS     }
+//RS 
+//RS     pub fn generated_modules(&self) -> &[BuildGeneratedModule] {
+//RS         &self.generated_modules
+//RS     }
+//RS 
+//RS     /// Generated modules reachable from the selected target's explicit source
+//RS     /// list or selected action outputs. A plan with no targets augments the
+//RS     /// canonical batteries program, so all of its generated modules are
+//RS     /// selected; once a target exists, unrelated generated modules stay out.
+//RS     pub fn selected_generated_modules(&self) -> Result<Vec<&BuildGeneratedModule>, BuildError> {
+//RS         if self.targets.is_empty() {
+//RS             let mut selected = self.generated_modules.iter().collect::<Vec<_>>();
+//RS             selected.sort_by(|left, right| {
+//RS                 left.path
+//RS                     .as_str()
+//RS                     .cmp(right.path.as_str())
+//RS                     .then_with(|| left.name.cmp(&right.name))
+//RS             });
+//RS             return Ok(selected);
+//RS         }
+//RS         let mut paths = self
+//RS             .selected_sources()?
+//RS             .into_iter()
+//RS             .map(|path| path.as_str().to_string())
+//RS             .collect::<BTreeSet<_>>();
+//RS         let actions = self.selected_action_ids()?;
+//RS         for action in self
+//RS             .actions
+//RS             .iter()
+//RS             .filter(|action| actions.contains(&action.id))
+//RS         {
+//RS             paths.extend(action.outputs.iter().map(|path| path.as_str().to_string()));
+//RS         }
+//RS         let mut selected = self
+//RS             .generated_modules
+//RS             .iter()
+//RS             .filter(|module| paths.contains(module.path.as_str()))
+//RS             .collect::<Vec<_>>();
+//RS         selected.sort_by(|left, right| {
+//RS             left.path
+//RS                 .as_str()
+//RS                 .cmp(right.path.as_str())
+//RS                 .then_with(|| left.name.cmp(&right.name))
+//RS         });
+//RS         Ok(selected)
+//RS     }
+//RS 
+//RS     /// Actions reachable from the selected default target. A plan without a
+//RS     /// default intentionally selects every registered target.
+//RS     pub fn selected_action_ids(&self) -> Result<BTreeSet<ActionId>, BuildError> {
+//RS         let mut selected = BTreeSet::new();
+//RS         if let Some(default) = self.default {
+//RS             collect_target_actions(self, default.id, &mut Vec::new(), &mut selected)?;
+//RS         } else {
+//RS             for target in &self.targets {
+//RS                 collect_target_actions(self, target.id, &mut Vec::new(), &mut selected)?;
+//RS             }
+//RS         }
+//RS         let prereqs = self.action_prereqs()?;
+//RS         let mut pending = selected.iter().copied().collect::<Vec<_>>();
+//RS         while let Some(action) = pending.pop() {
+//RS             for dependency in prereqs.get(&action).into_iter().flatten() {
+//RS                 if selected.insert(*dependency) {
+//RS                     pending.push(*dependency);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(selected)
+//RS     }
+//RS 
+//RS     /// Source closure compiled for the selected target, including target deps.
+//RS     pub fn selected_sources(&self) -> Result<Vec<BuildPath>, BuildError> {
+//RS         fn collect(
+//RS             plan: &BuildPlan,
+//RS             id: TargetId,
+//RS             visiting: &mut Vec<TargetId>,
+//RS             seen: &mut BTreeSet<String>,
+//RS             out: &mut Vec<BuildPath>,
+//RS         ) -> Result<(), BuildError> {
+//RS             if visiting.contains(&id) {
+//RS                 return Err(target_cycle_error(plan, visiting, id));
+//RS             }
+//RS             visiting.push(id);
+//RS             let target = plan
+//RS                 .targets
+//RS                 .get(id.0)
+//RS                 .ok_or(BuildError::UnknownTarget(id))?;
+//RS             for source in &target.sources {
+//RS                 if seen.insert(source.as_str().to_string()) {
+//RS                     out.push(source.clone());
+//RS                 }
+//RS             }
+//RS             for dep in &target.deps {
+//RS                 collect(plan, dep.id, visiting, seen, out)?;
+//RS             }
+//RS             visiting.pop();
+//RS             Ok(())
+//RS         }
+//RS         let mut out = Vec::new();
+//RS         let mut seen = BTreeSet::new();
+//RS         if let Some(default) = self.default {
+//RS             collect(self, default.id, &mut Vec::new(), &mut seen, &mut out)?;
+//RS         } else {
+//RS             for target in &self.targets {
+//RS                 collect(self, target.id, &mut Vec::new(), &mut seen, &mut out)?;
+//RS             }
+//RS         }
+//RS         Ok(out)
+//RS     }
+//RS 
+//RS     pub fn selected_probe_ids(&self) -> Result<BTreeSet<ProbeId>, BuildError> {
+//RS         let actions = self.selected_action_ids()?;
+//RS         let mut probes = self
+//RS             .actions
+//RS             .iter()
+//RS             .filter(|action| actions.contains(&action.id))
+//RS             .flat_map(|action| action.probes.iter().map(|probe| probe.id))
+//RS             .collect::<BTreeSet<_>>();
+//RS         let selected_targets = if let Some(default) = self.default {
+//RS             let mut targets = BTreeSet::new();
+//RS             fn visit(plan: &BuildPlan, id: TargetId, out: &mut BTreeSet<TargetId>) {
+//RS                 if out.insert(id) {
+//RS                     if let Some(target) = plan.targets.get(id.0) {
+//RS                         for dep in &target.deps {
+//RS                             visit(plan, dep.id, out);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             visit(self, default.id, &mut targets);
+//RS             targets
+//RS         } else {
+//RS             self.targets.iter().map(|target| target.id).collect()
+//RS         };
+//RS         for target in self
+//RS             .targets
+//RS             .iter()
+//RS             .filter(|target| selected_targets.contains(&target.id))
+//RS         {
+//RS             probes.extend(target.probes.iter().map(|probe| probe.id));
+//RS         }
+//RS         Ok(probes)
+//RS     }
+//RS 
+//RS     pub fn default_host_toolchain(&self) -> &BuildToolchain {
+//RS         &self.toolchains[0]
+//RS     }
+//RS 
+//RS     pub fn target(&self, target: impl Into<TargetRef>) -> Option<&BuildTarget> {
+//RS         let target = target.into();
+//RS         if target.context != self.context {
+//RS             return None;
+//RS         }
+//RS         self.targets.get(target.id.0)
+//RS     }
+//RS 
+//RS     pub fn action(&self, action: ActionHandle) -> Option<&BuildAction> {
+//RS         if action.context != self.context {
+//RS             return None;
+//RS         }
+//RS         self.actions.get(action.id.0)
+//RS     }
+//RS 
+//RS     pub fn action_handle(&self, action: ActionId) -> Option<ActionHandle> {
+//RS         self.actions.get(action.0).map(|_| ActionHandle {
+//RS             id: action,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Add the compiler-owned sealed package layer to an already evaluated
+//RS     /// build plan. The generated actions use the same graph, key, and CAS
+//RS     /// machinery as user actions; only their cache-miss execution is supplied
+//RS     /// by the driver.
+//RS     pub fn add_compiler_package_actions(
+//RS         &mut self,
+//RS         packages: &[CompilerPackageSpec],
+//RS         compiler_identity: impl AsRef<str>,
+//RS         target: impl AsRef<str>,
+//RS         profile: impl AsRef<str>,
+//RS     ) -> Result<Vec<ActionHandle>, BuildError> {
+//RS         if packages.is_empty() {
+//RS             return Ok(Vec::new());
+//RS         }
+//RS         if packages.len() > MAX_ACTIONS.saturating_sub(self.actions.len()) {
+//RS             return Err(BuildError::PackagedPlugin(format!(
+//RS                 "action graph exceeds {MAX_ACTIONS} actions"
+//RS             )));
+//RS         }
+//RS 
+//RS         let target_id = self
+//RS             .default
+//RS             .map(|target| target.id)
+//RS             .or_else(|| self.targets.first().map(|target| target.id))
+//RS             .ok_or(BuildError::UnknownTarget(TargetId(0)))?;
+//RS         if self.targets.get(target_id.0).is_none() {
+//RS             return Err(BuildError::UnknownTarget(target_id));
+//RS         }
+//RS         let toolchain_id = self
+//RS             .toolchains
+//RS             .first()
+//RS             .map(|toolchain| toolchain.id)
+//RS             .ok_or(BuildError::UnknownToolchain(ToolchainId(0)))?;
+//RS 
+//RS         let mut output_by_package = BTreeMap::new();
+//RS         let mut package_by_output = BTreeMap::new();
+//RS         let mut dependencies_by_package = BTreeMap::new();
+//RS         for package in packages {
+//RS             if package.name.trim().is_empty() {
+//RS                 return Err(BuildError::EmptyActionName);
+//RS             }
+//RS             if output_by_package.contains_key(&package.name) {
+//RS                 return Err(BuildError::DuplicateActionName(format!(
+//RS                     "compile-package:{}",
+//RS                     package.name
+//RS                 )));
+//RS             }
+//RS             let output = BuildPath::new(format!(
+//RS                 ".jet/package-artifacts/{}.sealed",
+//RS                 compiler_package_path_name(&package.name)
+//RS             ))?;
+//RS             if let Some(previous) = package_by_output.insert(output.clone(), package.name.clone()) {
+//RS                 return Err(BuildError::DuplicateActionName(format!(
+//RS                     "compile-package:{} (output also belongs to {})",
+//RS                     package.name, previous
+//RS                 )));
+//RS             }
+//RS             output_by_package.insert(package.name.clone(), output);
+//RS             dependencies_by_package.insert(
+//RS                 package.name.clone(),
+//RS                 package
+//RS                     .dependencies
+//RS                     .iter()
+//RS                     .cloned()
+//RS                     .collect::<BTreeSet<_>>(),
+//RS             );
+//RS         }
+//RS 
+//RS         for package in packages {
+//RS             let action_name = format!("compile-package:{}", package.name);
+//RS             if self.actions.iter().any(|action| action.name == action_name) {
+//RS                 return Err(BuildError::DuplicateActionName(action_name));
+//RS             }
+//RS 
+//RS             let output = output_by_package
+//RS                 .get(&package.name)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| BuildError::CompilerPackageDependencyMissing {
+//RS                     package: package.name.clone(),
+//RS                     dependency: package.name.clone(),
+//RS                 })?;
+//RS             if let Some(existing) = self.actions.iter().find(|action| {
+//RS                 action
+//RS                     .outputs
+//RS                     .iter()
+//RS                     .any(|existing_output| existing_output == &output)
+//RS             }) {
+//RS                 return Err(BuildError::DuplicateBuildOutput {
+//RS                     output: output.as_str().to_string(),
+//RS                     first_action: existing.name.clone(),
+//RS                     second_action: action_name,
+//RS                 });
+//RS             }
+//RS             if let Some(module) = self
+//RS                 .generated_modules
+//RS                 .iter()
+//RS                 .find(|module| module.path == output)
+//RS             {
+//RS                 return Err(BuildError::GeneratedModuleCycle {
+//RS                     module: module.name.clone(),
+//RS                     path: output.as_str().to_string(),
+//RS                 });
+//RS             }
+//RS         }
+//RS 
+//RS         for (package, dependencies) in &dependencies_by_package {
+//RS             for dependency in dependencies {
+//RS                 if !output_by_package.contains_key(dependency) {
+//RS                     return Err(BuildError::CompilerPackageDependencyMissing {
+//RS                         package: package.clone(),
+//RS                         dependency: dependency.clone(),
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         let mut remaining = dependencies_by_package
+//RS             .keys()
+//RS             .cloned()
+//RS             .collect::<BTreeSet<_>>();
+//RS         while !remaining.is_empty() {
+//RS             let ready = remaining
+//RS                 .iter()
+//RS                 .filter(|package| {
+//RS                     dependencies_by_package
+//RS                         .get(*package)
+//RS                         .expect("compiler package dependency preflight")
+//RS                         .iter()
+//RS                         .all(|dependency| !remaining.contains(dependency))
+//RS                 })
+//RS                 .cloned()
+//RS                 .collect::<Vec<_>>();
+//RS             if ready.is_empty() {
+//RS                 return Err(BuildError::ActionDependencyCycle(stalled_cycle(
+//RS                     &remaining,
+//RS                     |package: &String| {
+//RS                         dependencies_by_package
+//RS                             .get(package)
+//RS                             .into_iter()
+//RS                             .flatten()
+//RS                             .cloned()
+//RS                             .collect()
+//RS                     },
+//RS                     |package: &String| format!("compile-package:{package}"),
+//RS                 )));
+//RS             }
+//RS             for package in ready {
+//RS                 remaining.remove(&package);
+//RS             }
+//RS         }
+//RS 
+//RS         let compiler_identity = compiler_identity.as_ref().to_string();
+//RS         let target = target.as_ref().to_string();
+//RS         let profile = profile.as_ref().to_string();
+//RS         let mut handles = Vec::with_capacity(packages.len());
+//RS         for package in packages {
+//RS             let action_name = format!("compile-package:{}", package.name);
+//RS             let inputs = dependencies_by_package[&package.name]
+//RS                 .iter()
+//RS                 .map(|dependency| {
+//RS                     output_by_package
+//RS                         .get(dependency)
+//RS                         .cloned()
+//RS                         .expect("compiler package dependency output preflight")
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             let output = output_by_package
+//RS                 .get(&package.name)
+//RS                 .cloned()
+//RS                 .expect("compiler package output preflight");
+//RS             let id = ActionId(self.actions.len());
+//RS             let mut labels = BTreeMap::new();
+//RS             labels.insert("compiler.owner".to_string(), "jet".to_string());
+//RS             labels.insert("compiler.package".to_string(), package.name.clone());
+//RS             labels.insert(
+//RS                 "compiler.source-digest".to_string(),
+//RS                 package.source_digest.as_str().to_string(),
+//RS             );
+//RS             labels.insert("compiler.identity".to_string(), compiler_identity.clone());
+//RS             labels.insert("compiler.target".to_string(), target.clone());
+//RS             labels.insert("compiler.profile".to_string(), profile.clone());
+//RS             self.actions.push(BuildAction {
+//RS                 id,
+//RS                 name: action_name,
+//RS                 inputs,
+//RS                 outputs: vec![output],
+//RS                 argv: vec!["jet-compiler".to_string(), package.name.clone()],
+//RS                 env: BTreeMap::new(),
+//RS                 env_allowlist: BTreeSet::new(),
+//RS                 caps: BTreeSet::new(),
+//RS                 cache: ActionCache::Cached,
+//RS                 kind: super::actions_policy::ActionKind::Compile,
+//RS                 toolchain: ToolchainHandle {
+//RS                     id: toolchain_id,
+//RS                     context: self.context,
+//RS                 },
+//RS                 probes: Vec::new(),
+//RS                 signing_identity: None,
+//RS                 labels,
+//RS                 helper_versions: BTreeMap::new(),
+//RS                 resource_pools: BTreeSet::new(),
+//RS                 legacy_wrapper: None,
+//RS                 plugin: None,
+//RS                 variant_identity: None,
+//RS                 compiler_owned: true,
+//RS             });
+//RS             let handle = ActionHandle {
+//RS                 id,
+//RS                 context: self.context,
+//RS             };
+//RS             self.targets[target_id.0].actions.push(handle);
+//RS             handles.push(handle);
+//RS         }
+//RS         Ok(handles)
+//RS     }
+//RS 
+//RS     pub fn action_key(&self, action: ActionHandle) -> Result<ActionKey, BuildError> {
+//RS         self.action_key_with_inputs(action, &[])
+//RS     }
+//RS 
+//RS     /// Stable fingerprint over every action key in this plan — the complete
+//RS     /// recipe identity for Hangar `CacheIdentity.recipe_fingerprint` (E4-JP2).
+//RS     pub fn complete_recipe_fingerprint(&self) -> Result<String, BuildError> {
+//RS         let mut keys = Vec::new();
+//RS         for action in &self.actions {
+//RS             let key = self.action_key(ActionHandle {
+//RS                 id: action.id,
+//RS                 context: self.context,
+//RS             })?;
+//RS             keys.push(key.as_str().to_string());
+//RS         }
+//RS         keys.sort();
+//RS         let mut bytes = Vec::new();
+//RS         bytes.extend_from_slice(b"jet.plan-fingerprint.v1\0");
+//RS         for key in keys {
+//RS             bytes.extend_from_slice(key.as_bytes());
+//RS             bytes.push(0);
+//RS         }
+//RS         Ok(format!("plan-sha256:{}", crate::SHA256::sha256_hex(&bytes)))
+//RS     }
+//RS 
+//RS     pub fn action_key_with_inputs(
+//RS         &self,
+//RS         action: ActionHandle,
+//RS         inputs: &[ActionInputSnapshot],
+//RS     ) -> Result<ActionKey, BuildError> {
+//RS         if action.context != self.context {
+//RS             return Err(BuildError::UnknownAction(action.id));
+//RS         }
+//RS         let action = self
+//RS             .actions
+//RS             .get(action.id.0)
+//RS             .ok_or(BuildError::UnknownAction(action.id))?;
+//RS         Ok(canonical_action_key(self, action, inputs))
+//RS     }
+//RS 
+//RS     pub fn effective_action_key(
+//RS         &self,
+//RS         action: ActionHandle,
+//RS         inputs: &[ActionInputSnapshot],
+//RS         grants: &BTreeSet<BuildCapability>,
+//RS         executable: &Path,
+//RS         executable_digest: &ContentDigest,
+//RS         probe_facts: &[BuildProbeFact],
+//RS     ) -> Result<ActionKey, BuildError> {
+//RS         let action_ref = self
+//RS             .action(action)
+//RS             .ok_or(BuildError::UnknownAction(action.id))?;
+//RS         Ok(canonical_effective_action_key(
+//RS             self,
+//RS             action_ref,
+//RS             inputs,
+//RS             grants,
+//RS             executable,
+//RS             executable_digest,
+//RS             probe_facts,
+//RS         ))
+//RS     }
+//RS 
+//RS     pub fn toolchain(&self, toolchain: ToolchainHandle) -> Option<&BuildToolchain> {
+//RS         if toolchain.context != self.context {
+//RS             return None;
+//RS         }
+//RS         self.toolchains.get(toolchain.id.0)
+//RS     }
+//RS 
+//RS     pub fn signing_identity(
+//RS         &self,
+//RS         identity: SigningIdentityHandle,
+//RS     ) -> Option<&BuildSigningIdentity> {
+//RS         if identity.context != self.context {
+//RS             return None;
+//RS         }
+//RS         self.signing_identities.get(identity.id.0)
+//RS     }
+//RS 
+//RS     pub fn probe(&self, probe: ProbeHandle) -> Option<&BuildProbe> {
+//RS         if probe.context != self.context {
+//RS             return None;
+//RS         }
+//RS         self.probes.get(probe.id.0)
+//RS     }
+//RS 
+//RS     pub fn targets_by_kind(&self, kind: TargetKind) -> Vec<&BuildTarget> {
+//RS         self.targets.iter().filter(|t| t.kind == kind).collect()
+//RS     }
+//RS 
+//RS     pub fn phony_actions(&self) -> Vec<&BuildAction> {
+//RS         self.actions
+//RS             .iter()
+//RS             .filter(|a| a.cache == ActionCache::UncachedPhony)
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub fn resource_pools(&self) -> Vec<BuildResourcePoolSpec> {
+//RS         let mut pools = default_resource_pools();
+//RS         let mut custom_pools = Vec::new();
+//RS         for action in &self.actions {
+//RS             for pool in action_pools(action) {
+//RS                 if !pools.iter().any(|spec| spec.pool.as_str() == pool.as_str()) {
+//RS                     // Named pools are deliberately conservative: absent an
+//RS                     // explicit capacity declaration, one action owns the
+//RS                     // pool. This preserves deterministic serialization and
+//RS                     // prevents a custom pool from becoming an unbounded
+//RS                     // host escape.
+//RS                     custom_pools.push(BuildResourcePoolSpec::new(pool, 1));
+//RS                 }
+//RS             }
+//RS         }
+//RS         custom_pools.sort_by(|left, right| left.pool.as_str().cmp(right.pool.as_str()));
+//RS         pools.extend(custom_pools);
+//RS         pools
+//RS     }
+//RS 
+//RS     pub fn graph(&self) -> BuildGraph {
+//RS         let action_targets = self.action_targets();
+//RS         let file_index = self.file_index(&action_targets);
+//RS         BuildGraph {
+//RS             targets: self
+//RS                 .targets
+//RS                 .iter()
+//RS                 .map(|target| BuildGraphTarget {
+//RS                     id: target.id,
+//RS                     name: target.name.clone(),
+//RS                     kind: target.kind,
+//RS                     deps: target.deps.iter().map(|dep| dep.id).collect(),
+//RS                     actions: target.actions.iter().map(|action| action.id).collect(),
+//RS                     files: target
+//RS                         .sources
+//RS                         .iter()
+//RS                         .chain(target.inputs.iter())
+//RS                         .chain(target.outputs.iter())
+//RS                         .map(|path| path.as_str().to_string())
+//RS                         .collect(),
+//RS                     plugin: target.plugin.map(|plugin| plugin.id),
+//RS                 })
+//RS                 .collect(),
+//RS             actions: self
+//RS                 .actions
+//RS                 .iter()
+//RS                 .map(|action| BuildGraphAction {
+//RS                     id: action.id,
+//RS                     name: action.name.clone(),
+//RS                     kind: action.kind,
+//RS                     inputs: action
+//RS                         .inputs
+//RS                         .iter()
+//RS                         .map(|path| path.as_str().to_string())
+//RS                         .collect(),
+//RS                     outputs: action
+//RS                         .outputs
+//RS                         .iter()
+//RS                         .map(|path| path.as_str().to_string())
+//RS                         .collect(),
+//RS                     target: action_targets.get(&action.id).copied(),
+//RS                     caps: action.caps.iter().cloned().collect(),
+//RS                     pools: action_pools(action),
+//RS                     legacy_wrapper: action.legacy_wrapper,
+//RS                     plugin: action.plugin.map(|plugin| plugin.id),
+//RS                     compiler_owned: action.compiler_owned,
+//RS                     key: canonical_action_key(self, action, &[]),
+//RS                     cache_hit: None,
+//RS                 })
+//RS                 .collect(),
+//RS             files: file_index
+//RS                 .into_iter()
+//RS                 .map(|(path, ownership)| BuildGraphFile {
+//RS                     path,
+//RS                     owner: ownership.owner,
+//RS                     consumers: ownership.consumers,
+//RS                     targets: ownership.targets,
+//RS                 })
+//RS                 .collect(),
+//RS             nodes: self.compiler_nodes.clone(),
+//RS         }
+//RS     }
+//RS     /// Add execution receipt facts to the canonical graph projection. A plan
+//RS     /// without a report stays static, preserving `None` for unknown cache
+//RS     /// status instead of inventing a miss.
+//RS     pub fn graph_with_execution(
+//RS         &self,
+//RS         execution: Option<&BuildExecutionReport>,
+//RS     ) -> BuildGraph {
+//RS         let mut graph = self.graph();
+//RS         let Some(execution) = execution else {
+//RS             return graph;
+//RS         };
+//RS         let statuses = execution
+//RS             .events
+//RS             .iter()
+//RS             .filter_map(|event| match event {
+//RS                 BuildExecutionEvent::Finished { action, outcome } => Some((
+//RS                     *action,
+//RS                     matches!(outcome, ActionOutcome::RestoredFromCache),
+//RS                 )),
+//RS                 _ => None,
+//RS             })
+//RS             .collect::<BTreeMap<_, _>>();
+//RS         for action in &mut graph.actions {
+//RS             action.cache_hit = statuses.get(&action.id).copied();
+//RS         }
+//RS         graph
+//RS     }
+//RS 
+//RS     pub fn file_ownership(&self, path: impl AsRef<str>) -> FileOwnership {
+//RS         let path = path.as_ref().to_string();
+//RS         self.file_index(&self.action_targets())
+//RS             .remove(&path)
+//RS             .unwrap_or(FileOwnership {
+//RS                 path,
+//RS                 owner: None,
+//RS                 consumers: Vec::new(),
+//RS                 targets: Vec::new(),
+//RS             })
+//RS     }
+//RS 
+//RS     pub fn explain_target(&self, target: impl Into<TargetRef>) -> Option<BuildExplanation> {
+//RS         let target = self.target(target)?;
+//RS         Some(BuildExplanation {
+//RS             subject: BuildGraphSubject::Target(target.id),
+//RS             label: target.name.clone(),
+//RS             provenance: vec![
+//RS                 format!("kind={:?}", target.kind),
+//RS                 format!("sources={}", target.sources.len()),
+//RS                 format!("deps={}", target.deps.len()),
+//RS                 format!("actions={}", target.actions.len()),
+//RS             ],
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn explain_target_named(&self, name: &str) -> Option<BuildExplanation> {
+//RS         let target = self.targets.iter().find(|target| target.name == name)?;
+//RS         self.explain_target(TargetRef {
+//RS             id: target.id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn explain_action(&self, action: ActionHandle) -> Option<BuildExplanation> {
+//RS         let action = self.action(action)?;
+//RS         let mut provenance = vec![
+//RS             format!("argv={}", action.argv.join(" ")),
+//RS             format!("inputs={}", action.inputs.len()),
+//RS             format!("outputs={}", action.outputs.len()),
+//RS             format!("cache={:?}", action.cache),
+//RS         ];
+//RS         if let Some(wrapper) = action.legacy_wrapper {
+//RS             provenance.push(format!("legacy={}", wrapper.as_str()));
+//RS         }
+//RS         if let Some(plugin) = action.plugin {
+//RS             provenance.push(format!("plugin={}", self.plugins[plugin.id.0].name));
+//RS         }
+//RS         Some(BuildExplanation {
+//RS             subject: BuildGraphSubject::Action(action.id),
+//RS             label: action.name.clone(),
+//RS             provenance,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn explain_action_named(&self, name: &str) -> Option<BuildExplanation> {
+//RS         let action = self.actions.iter().find(|action| action.name == name)?;
+//RS         self.explain_action(ActionHandle {
+//RS             id: action.id,
+//RS             context: self.context,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn explain_file(&self, path: impl AsRef<str>) -> BuildExplanation {
+//RS         let ownership = self.file_ownership(path.as_ref());
+//RS         let mut provenance = vec![
+//RS             format!("owner={:?}", ownership.owner),
+//RS             format!("consumers={:?}", ownership.consumers),
+//RS             format!("targets={:?}", ownership.targets),
+//RS         ];
+//RS         if let Some(module) = self
+//RS             .generated_modules
+//RS             .iter()
+//RS             .find(|module| module.path.as_str() == ownership.path)
+//RS         {
+//RS             provenance.push(format!("generated={}", module.name));
+//RS             provenance.push(format!("digest={}", module.source_digest.as_str()));
+//RS         }
+//RS         BuildExplanation {
+//RS             subject: BuildGraphSubject::File,
+//RS             label: ownership.path,
+//RS             provenance,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn why_rebuilt(
+//RS         &self,
+//RS         action: ActionHandle,
+//RS         status: ActionCacheStatus,
+//RS     ) -> Result<RebuildExplanation, BuildError> {
+//RS         if action.context != self.context {
+//RS             return Err(BuildError::UnknownAction(action.id));
+//RS         }
+//RS         let action_ref = self
+//RS             .actions
+//RS             .get(action.id.0)
+//RS             .ok_or(BuildError::UnknownAction(action.id))?;
+//RS         Ok(RebuildExplanation {
+//RS             action: action.id,
+//RS             action_name: action_ref.name.clone(),
+//RS             status,
+//RS             reason: cache_status_reason(status).to_string(),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn execution_model(&self) -> Result<BuildExecutionModel, BuildError> {
+//RS         let selected = self.selected_action_ids()?;
+//RS         let prereqs = self.action_prereqs_for(&selected)?;
+//RS         let stages = execution_stages(self, &prereqs)?;
+//RS         let action_targets = self.action_targets();
+//RS         let nodes = self
+//RS             .actions
+//RS             .iter()
+//RS             .filter(|action| selected.contains(&action.id))
+//RS             .map(|action| BuildExecutionNode {
+//RS                 action: action.id,
+//RS                 name: action.name.clone(),
+//RS                 target: action_targets.get(&action.id).copied(),
+//RS                 prerequisites: prereqs.get(&action.id).cloned().unwrap_or_default(),
+//RS                 pools: action_pools(action),
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let events = stages
+//RS             .iter()
+//RS             .flat_map(|stage| {
+//RS                 stage
+//RS                     .actions
+//RS                     .iter()
+//RS                     .map(move |action| BuildExecutionEvent::Ready {
+//RS                         action: *action,
+//RS                         stage: stage.index,
+//RS                     })
+//RS             })
+//RS             .collect();
+//RS         let selected_actions = self
+//RS             .actions
+//RS             .iter()
+//RS             .filter(|action| selected.contains(&action.id))
+//RS             .cloned()
+//RS             .collect::<Vec<_>>();
+//RS         let metrics = execution_metrics(&selected_actions, &stages);
+//RS         Ok(BuildExecutionModel {
+//RS             pools: self.resource_pools(),
+//RS             nodes,
+//RS             stages,
+//RS             events,
+//RS             console_order: self
+//RS                 .actions
+//RS                 .iter()
+//RS                 .filter(|action| selected.contains(&action.id))
+//RS                 .map(|action| action.id)
+//RS                 .collect(),
+//RS             metrics,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn execution_report(
+//RS         &self,
+//RS         outcomes: &[(ActionHandle, ActionOutcome)],
+//RS     ) -> Result<BuildExecutionReport, BuildError> {
+//RS         let selected = self.selected_action_ids()?;
+//RS         let prereqs = self.action_prereqs_for(&selected)?;
+//RS         let stages = execution_stages(self, &prereqs)?;
+//RS         let mut supplied = BTreeMap::new();
+//RS         for (action, outcome) in outcomes {
+//RS             if action.context != self.context || action.id.0 >= self.actions.len() {
+//RS                 return Err(BuildError::UnknownAction(action.id));
+//RS             }
+//RS             supplied.insert(action.id, *outcome);
+//RS         }
+//RS 
+//RS         let mut failed = BTreeSet::new();
+//RS         let mut finished = BTreeSet::new();
+//RS         let mut events = Vec::new();
+//RS         let selected_actions = self
+//RS             .actions
+//RS             .iter()
+//RS             .filter(|action| selected.contains(&action.id))
+//RS             .cloned()
+//RS             .collect::<Vec<_>>();
+//RS         let mut metrics = execution_metrics(&selected_actions, &stages);
+//RS         for stage in &stages {
+//RS             for action in &stage.actions {
+//RS                 if let Some(failed_prereq) = prereqs
+//RS                     .get(action)
+//RS                     .into_iter()
+//RS                     .flat_map(|deps| deps.iter())
+//RS                     .find(|dep| failed.contains(*dep))
+//RS                 {
+//RS                     failed.insert(*action);
+//RS                     metrics.cancelled_actions += 1;
+//RS                     events.push(BuildExecutionEvent::Cancelled {
+//RS                         action: *action,
+//RS                         failed_prereq: *failed_prereq,
+//RS                     });
+//RS                     continue;
+//RS                 }
+//RS                 match supplied.get(action) {
+//RS                     Some(outcome) => {
+//RS                         finished.insert(*action);
+//RS                         if matches!(outcome, ActionOutcome::Failed { .. }) {
+//RS                             failed.insert(*action);
+//RS                             metrics.failed_actions += 1;
+//RS                         }
+//RS                         if matches!(outcome, ActionOutcome::RestoredFromCache) {
+//RS                             metrics.cache_restored_actions += 1;
+//RS                         }
+//RS                         events.push(BuildExecutionEvent::Finished {
+//RS                             action: *action,
+//RS                             outcome: *outcome,
+//RS                         });
+//RS                     }
+//RS                     None => {
+//RS                         metrics.pending_actions += 1;
+//RS                         events.push(BuildExecutionEvent::Pending { action: *action });
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(BuildExecutionReport { events, metrics })
+//RS     }
+//RS 
+//RS     pub(super) fn action_targets(&self) -> BTreeMap<ActionId, TargetId> {
+//RS         let mut out = BTreeMap::new();
+//RS         for target in &self.targets {
+//RS             for action in &target.actions {
+//RS                 out.entry(action.id).or_insert(target.id);
+//RS             }
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     fn file_index(
+//RS         &self,
+//RS         action_targets: &BTreeMap<ActionId, TargetId>,
+//RS     ) -> BTreeMap<String, FileOwnership> {
+//RS         let mut files = BTreeMap::<String, FileOwnership>::new();
+//RS         for action in &self.actions {
+//RS             for output in &action.outputs {
+//RS                 let entry = files
+//RS                     .entry(output.as_str().to_string())
+//RS                     .or_insert(FileOwnership {
+//RS                         path: output.as_str().to_string(),
+//RS                         owner: None,
+//RS                         consumers: Vec::new(),
+//RS                         targets: Vec::new(),
+//RS                     });
+//RS                 entry.owner = Some(action.id);
+//RS             }
+//RS             for input in &action.inputs {
+//RS                 let entry = files
+//RS                     .entry(input.as_str().to_string())
+//RS                     .or_insert(FileOwnership {
+//RS                         path: input.as_str().to_string(),
+//RS                         owner: None,
+//RS                         consumers: Vec::new(),
+//RS                         targets: Vec::new(),
+//RS                     });
+//RS                 entry.consumers.push(action.id);
+//RS             }
+//RS         }
+//RS         for target in &self.targets {
+//RS             for path in target
+//RS                 .sources
+//RS                 .iter()
+//RS                 .chain(target.inputs.iter())
+//RS                 .chain(target.outputs.iter())
+//RS             {
+//RS                 let entry = files
+//RS                     .entry(path.as_str().to_string())
+//RS                     .or_insert(FileOwnership {
+//RS                         path: path.as_str().to_string(),
+//RS                         owner: None,
+//RS                         consumers: Vec::new(),
+//RS                         targets: Vec::new(),
+//RS                     });
+//RS                 entry.targets.push(target.id);
+//RS             }
+//RS             for action in &target.actions {
+//RS                 if let Some(target_id) = action_targets.get(&action.id) {
+//RS                     for path in self.actions[action.id.0]
+//RS                         .inputs
+//RS                         .iter()
+//RS                         .chain(self.actions[action.id.0].outputs.iter())
+//RS                     {
+//RS                         let entry =
+//RS                             files
+//RS                                 .entry(path.as_str().to_string())
+//RS                                 .or_insert(FileOwnership {
+//RS                                     path: path.as_str().to_string(),
+//RS                                     owner: None,
+//RS                                     consumers: Vec::new(),
+//RS                                     targets: Vec::new(),
+//RS                                 });
+//RS                         if !entry.targets.contains(target_id) {
+//RS                             entry.targets.push(*target_id);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         files
+//RS     }
+//RS 
+//RS     fn action_prereqs(&self) -> Result<BTreeMap<ActionId, Vec<ActionId>>, BuildError> {
+//RS         let mut out = self
+//RS             .actions
+//RS             .iter()
+//RS             .map(|action| (action.id, BTreeSet::<ActionId>::new()))
+//RS             .collect::<BTreeMap<_, _>>();
+//RS         for target in &self.targets {
+//RS             let mut deps = BTreeSet::new();
+//RS             for dep in &target.deps {
+//RS                 collect_target_actions(self, dep.id, &mut Vec::new(), &mut deps)?;
+//RS             }
+//RS             for action in &target.actions {
+//RS                 out.entry(action.id)
+//RS                     .or_default()
+//RS                     .extend(deps.iter().copied());
+//RS             }
+//RS         }
+//RS         let action_targets = self.action_targets();
+//RS         for ownership in self.file_index(&action_targets).values() {
+//RS             let Some(owner) = ownership.owner else {
+//RS                 continue;
+//RS             };
+//RS             for consumer in &ownership.consumers {
+//RS                 if *consumer != owner {
+//RS                     out.entry(*consumer).or_default().insert(owner);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(out
+//RS             .into_iter()
+//RS             .map(|(action, deps)| (action, deps.into_iter().collect()))
+//RS             .collect())
+//RS     }
+//RS 
+//RS     fn action_prereqs_for(
+//RS         &self,
+//RS         selected: &BTreeSet<ActionId>,
+//RS     ) -> Result<BTreeMap<ActionId, Vec<ActionId>>, BuildError> {
+//RS         Ok(self
+//RS             .action_prereqs()?
+//RS             .into_iter()
+//RS             .filter(|(action, _)| selected.contains(action))
+//RS             .map(|(action, deps)| {
+//RS                 (
+//RS                     action,
+//RS                     deps.into_iter()
+//RS                         .filter(|dep| selected.contains(dep))
+//RS                         .collect(),
+//RS                 )
+//RS             })
+//RS             .collect())
+//RS     }
+//RS     /// Return the deterministic provider facts attached to this build plan.
+//RS     /// The provider owns serialization; comptime only exposes the facts.
+//RS     pub fn provider_plan_facts(&self) -> Result<BTreeMap<String, String>, String> {
+//RS         let mut facts = BTreeMap::new();
+//RS         facts.insert(
+//RS             "plan.recipe_fingerprint".to_string(),
+//RS             self.complete_recipe_fingerprint()
+//RS                 .map_err(|error| format!("cannot fingerprint build plan: {error:?}"))?,
+//RS         );
+//RS         facts.insert(
+//RS             "plan.default".to_string(),
+//RS             self.default_target()
+//RS                 .map(|target| target.id().0.to_string())
+//RS                 .unwrap_or_default(),
+//RS         );
+//RS         facts.insert("plan.targets".to_string(), self.targets().len().to_string());
+//RS         facts.insert("plan.actions".to_string(), self.actions().len().to_string());
+//RS         for (index, contribution) in self.fact_contributions().iter().enumerate() {
+//RS             let prefix = format!("fact_contribution.{index}");
+//RS             facts.insert(format!("{prefix}.key"), contribution.key.clone());
+//RS             facts.insert(
+//RS                 format!("{prefix}.value"),
+//RS                 format!("{:?}", contribution.value),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.scope"),
+//RS                 contribution.scope.name().to_string(),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.layer"),
+//RS                 contribution.layer.name().to_string(),
+//RS             );
+//RS             facts.insert(format!("{prefix}.source"), contribution.source.clone());
+//RS             facts.insert(
+//RS                 format!("{prefix}.reason"),
+//RS                 contribution.reason.clone().unwrap_or_default(),
+//RS             );
+//RS         }
+//RS         for (index, target) in self.targets().iter().enumerate() {
+//RS             let prefix = format!("target.{index}");
+//RS             facts.insert(format!("{prefix}.name"), target.name.clone());
+//RS             facts.insert(format!("{prefix}.kind"), format!("{:?}", target.kind));
+//RS             facts.insert(
+//RS                 format!("{prefix}.sources"),
+//RS                 target
+//RS                     .sources
+//RS                     .iter()
+//RS                     .map(|path| path.as_str())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\0"),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.inputs"),
+//RS                 target
+//RS                     .inputs
+//RS                     .iter()
+//RS                     .map(|path| path.as_str())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\0"),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.outputs"),
+//RS                 target
+//RS                     .outputs
+//RS                     .iter()
+//RS                     .map(|path| path.as_str())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\0"),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.deps"),
+//RS                 target
+//RS                     .deps
+//RS                     .iter()
+//RS                     .map(|dep| dep.id().0.to_string())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(","),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.actions"),
+//RS                 target
+//RS                     .actions
+//RS                     .iter()
+//RS                     .map(|action| action.id().0.to_string())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(","),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.toolchain"),
+//RS                 target.toolchain.id().0.to_string(),
+//RS             );
+//RS             facts.insert(format!("{prefix}.metadata"), map_debug(&target.metadata));
+//RS         }
+//RS         for (index, action) in self.actions().iter().enumerate() {
+//RS             let prefix = format!("action.{index}");
+//RS             facts.insert(format!("{prefix}.name"), action.name.clone());
+//RS             facts.insert(format!("{prefix}.kind"), action.kind.as_str().to_string());
+//RS             facts.insert(format!("{prefix}.cache"), format!("{:?}", action.cache));
+//RS             facts.insert(format!("{prefix}.argv"), action.argv.join("\0"));
+//RS             facts.insert(
+//RS                 format!("{prefix}.inputs"),
+//RS                 action
+//RS                     .inputs
+//RS                     .iter()
+//RS                     .map(|path| path.as_str())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\0"),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.outputs"),
+//RS                 action
+//RS                     .outputs
+//RS                     .iter()
+//RS                     .map(|path| path.as_str())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\0"),
+//RS             );
+//RS             facts.insert(format!("{prefix}.env"), map_debug(&action.env));
+//RS             facts.insert(
+//RS                 format!("{prefix}.env_allowlist"),
+//RS                 action
+//RS                     .env_allowlist
+//RS                     .iter()
+//RS                     .cloned()
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\0"),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.caps"),
+//RS                 action
+//RS                     .caps
+//RS                     .iter()
+//RS                     .map(|cap| cap.name().to_string())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\0"),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.toolchain"),
+//RS                 action.toolchain.id().0.to_string(),
+//RS             );
+//RS             facts.insert(format!("{prefix}.labels"), map_debug(&action.labels));
+//RS             facts.insert(
+//RS                 format!("{prefix}.helpers"),
+//RS                 map_debug(&action.helper_versions),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.pools"),
+//RS                 action
+//RS                     .resource_pools
+//RS                     .iter()
+//RS                     .map(pool_name)
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\0"),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.variant"),
+//RS                 action.variant_identity.clone().unwrap_or_default(),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.legacy"),
+//RS                 action
+//RS                     .legacy_wrapper
+//RS                     .map(|wrapper| wrapper.as_str().to_string())
+//RS                     .unwrap_or_default(),
+//RS             );
+//RS             facts.insert(
+//RS                 format!("{prefix}.action_key"),
+//RS                 self.action_key(super::ActionHandle {
+//RS                     id: action.id,
+//RS                     context: self.context,
+//RS                 })
+//RS                 .map_err(|error| format!("cannot key provider plan action: {error:?}"))?
+//RS                 .as_str()
+//RS                 .to_string(),
+//RS             );
+//RS         }
+//RS         for (index, toolchain) in self.toolchains().iter().enumerate() {
+//RS             facts.insert(format!("toolchain.{index}"), format!("{toolchain:?}"));
+//RS         }
+//RS         for (index, identity) in self.signing_identities().iter().enumerate() {
+//RS             facts.insert(format!("signing.{index}"), format!("{identity:?}"));
+//RS         }
+//RS         for (index, probe) in self.probes().iter().enumerate() {
+//RS             facts.insert(format!("probe.{index}"), format!("{probe:?}"));
+//RS         }
+//RS         for (index, plugin) in self.plugins().iter().enumerate() {
+//RS             facts.insert(format!("plugin.{index}"), format!("{plugin:?}"));
+//RS         }
+//RS         for (index, module) in self.generated_modules().iter().enumerate() {
+//RS             facts.insert(format!("generated.{index}"), format!("{module:?}"));
+//RS         }
+//RS         Ok(facts)
+//RS     }
+//RS }
+//RS 
+//RS impl BuildGraph {
+//RS     /// Files declared by the checked graph, in canonical path order.
+//RS     ///
+//RS     /// This is the static file universe, not the rebuild-impact closure in
+//RS     /// [`BuildGraphDiff::affected_files`].
+//RS     pub fn affected_files(&self) -> &[BuildGraphFile] {
+//RS         &self.files
+//RS     }
+//RS 
+//RS     /// Recipe keys for all actions, ordered by stable action name.
+//RS     pub fn action_keys(&self) -> Vec<BuildGraphActionKey> {
+//RS         let mut keys = self
+//RS             .actions
+//RS             .iter()
+//RS             .map(|action| BuildGraphActionKey {
+//RS                 action: action.name.clone(),
+//RS                 key: action.key.clone(),
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         keys.sort_by(|left, right| left.action.cmp(&right.action));
+//RS         keys
+//RS     }
+//RS 
+//RS     /// Return only actions with positive cache evidence.
+//RS     ///
+//RS     /// A static BuildPlan has no execution receipt, so its `cache_hit` values
+//RS     /// are `None`; unknown is intentionally not treated as a miss.
+//RS     pub fn cache_hits(&self) -> Vec<&BuildGraphAction> {
+//RS         let mut hits = self
+//RS             .actions
+//RS             .iter()
+//RS             .filter(|action| action.cache_hit == Some(true))
+//RS             .collect::<Vec<_>>();
+//RS         hits.sort_by(|left, right| left.name.cmp(&right.name));
+//RS         hits
+//RS     }
+//RS 
+//RS     /// Compare two checked graph projections without re-reading source files
+//RS     /// or reconstructing commands. `self` is the before graph and `after` is
+//RS     /// the graph being compared.
+//RS     pub fn diff(&self, after: &BuildGraph) -> BuildGraphDiff {
+//RS         let mut paths = BTreeSet::new();
+//RS         paths.extend(self.files.iter().map(|file| file.path.clone()));
+//RS         paths.extend(after.files.iter().map(|file| file.path.clone()));
+//RS 
+//RS         let file_deltas = paths
+//RS             .into_iter()
+//RS             .filter_map(|path| {
+//RS                 let before_file = self.files.iter().find(|file| file.path == path);
+//RS                 let after_file = after.files.iter().find(|file| file.path == path);
+//RS                 (file_identity(self, before_file) != file_identity(after, after_file)).then(|| {
+//RS                     BuildGraphFileDelta {
+//RS                         path,
+//RS                         before: before_file.cloned(),
+//RS                         after: after_file.cloned(),
+//RS                     }
+//RS                 })
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS 
+//RS         let mut action_names = BTreeSet::new();
+//RS         action_names.extend(self.actions.iter().map(|action| action.name.clone()));
+//RS         action_names.extend(after.actions.iter().map(|action| action.name.clone()));
+//RS 
+//RS         let mut changed_actions = BTreeSet::new();
+//RS         let mut key_deltas = Vec::new();
+//RS         let mut cache_deltas = Vec::new();
+//RS         for action_name in action_names {
+//RS             let before = self
+//RS                 .actions
+//RS                 .iter()
+//RS                 .find(|action| action.name == action_name);
+//RS             let after_action = after
+//RS                 .actions
+//RS                 .iter()
+//RS                 .find(|action| action.name == action_name);
+//RS             let action_changed = match (before, after_action) {
+//RS                 (Some(before), Some(after)) => {
+//RS                     before.key != after.key || before.inputs != after.inputs
+//RS                 }
+//RS                 _ => true,
+//RS             };
+//RS             if action_changed {
+//RS                 changed_actions.insert(action_name.clone());
+//RS             }
+//RS 
+//RS             let before_key = before.map(|action| action.key.clone());
+//RS             let after_key = after_action.map(|action| action.key.clone());
+//RS             if before_key != after_key {
+//RS                 key_deltas.push(BuildGraphKeyDelta {
+//RS                     action: action_name.clone(),
+//RS                     before: before_key,
+//RS                     after: after_key,
+//RS                 });
+//RS             }
+//RS             let before_hit = before.and_then(|action| action.cache_hit);
+//RS             let after_hit = after_action.and_then(|action| action.cache_hit);
+//RS             if before_hit != after_hit {
+//RS                 cache_deltas.push(BuildGraphCacheDelta {
+//RS                     action: action_name,
+//RS                     before: before_hit,
+//RS                     after: after_hit,
+//RS                 });
+//RS             }
+//RS         }
+//RS 
+//RS         let mut affected_files = graph_affected_files(self, &changed_actions);
+//RS         affected_files.extend(graph_affected_files(after, &changed_actions));
+//RS 
+//RS         BuildGraphDiff {
+//RS             file_deltas,
+//RS             affected_files: affected_files.into_iter().collect(),
+//RS             key_deltas,
+//RS             cache_deltas,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn graph_affected_files(
+//RS     graph: &BuildGraph,
+//RS     changed_actions: &BTreeSet<String>,
+//RS ) -> BTreeSet<String> {
+//RS     let mut pending_actions = graph
+//RS         .actions
+//RS         .iter()
+//RS         .filter(|action| changed_actions.contains(&action.name))
+//RS         .map(|action| action.id)
+//RS         .collect::<Vec<_>>();
+//RS     let mut pending_targets = Vec::new();
+//RS     let mut seen_actions = BTreeSet::new();
+//RS     let mut seen_targets = BTreeSet::new();
+//RS     let mut affected = BTreeSet::new();
+//RS 
+//RS     while !pending_actions.is_empty() || !pending_targets.is_empty() {
+//RS         while let Some(action_id) = pending_actions.pop() {
+//RS             if !seen_actions.insert(action_id) {
+//RS                 continue;
+//RS             }
+//RS             let Some(action) = graph
+//RS                 .actions
+//RS                 .iter()
+//RS                 .find(|action| action.id == action_id)
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             for output in &action.outputs {
+//RS                 affected.insert(output.clone());
+//RS                 if let Some(file) = graph.files.iter().find(|file| file.path == *output) {
+//RS                     pending_actions.extend(file.consumers.iter().copied());
+//RS                 }
+//RS             }
+//RS             let target_ids = graph
+//RS                 .targets
+//RS                 .iter()
+//RS                 .filter(|target| target.actions.contains(&action_id))
+//RS                 .map(|target| target.id);
+//RS             pending_targets.extend(target_ids);
+//RS         }
+//RS 
+//RS         while let Some(target_id) = pending_targets.pop() {
+//RS             if !seen_targets.insert(target_id) {
+//RS                 continue;
+//RS             }
+//RS             for target in graph
+//RS                 .targets
+//RS                 .iter()
+//RS                 .filter(|target| target.deps.contains(&target_id))
+//RS             {
+//RS                 pending_actions.extend(target.actions.iter().copied());
+//RS                 pending_targets.push(target.id);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     affected
+//RS }
+//RS 
+//RS 
+//RS fn file_identity(
+//RS     graph: &BuildGraph,
+//RS     file: Option<&BuildGraphFile>,
+//RS ) -> Option<(Option<String>, Vec<String>, Vec<String>)> {
+//RS     let file = file?;
+//RS     let action_name = |id| {
+//RS         graph
+//RS             .actions
+//RS             .iter()
+//RS             .find(|action| action.id == id)
+//RS             .map(|action| action.name.clone())
+//RS     };
+//RS     let target_name = |id| {
+//RS         graph
+//RS             .targets
+//RS             .iter()
+//RS             .find(|target| target.id == id)
+//RS             .map(|target| target.name.clone())
+//RS     };
+//RS     let mut consumers = file
+//RS         .consumers
+//RS         .iter()
+//RS         .filter_map(|id| action_name(*id))
+//RS         .collect::<Vec<_>>();
+//RS     let mut targets = file
+//RS         .targets
+//RS         .iter()
+//RS         .filter_map(|id| target_name(*id))
+//RS         .collect::<Vec<_>>();
+//RS     consumers.sort();
+//RS     consumers.dedup();
+//RS     targets.sort();
+//RS     targets.dedup();
+//RS     Some((
+//RS         file.owner.and_then(action_name),
+//RS         consumers,
+//RS         targets,
+//RS     ))
+//RS }
+//RS 
+//RS fn map_debug(map: &BTreeMap<String, String>) -> String {
+//RS     map.iter()
+//RS         .map(|(key, value)| format!("{}:{}:{}:{}", key.len(), key, value.len(), value))
+//RS         .collect::<Vec<_>>()
+//RS         .join("")
+//RS }
+//RS 
+//RS fn pool_name(pool: &BuildResourcePool) -> String {
+//RS     match pool {
+//RS         BuildResourcePool::Custom(name) => format!("custom:{name}"),
+//RS         _ => pool.as_str().to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn compiler_package_path_name(name: &str) -> String {
+//RS     let mut out = name
+//RS         .chars()
+//RS         .map(|character| {
+//RS             if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+//RS                 character
+//RS             } else {
+//RS                 '_'
+//RS             }
+//RS         })
+//RS         .collect::<String>();
+//RS     if out.is_empty() {
+//RS         out.push_str("package");
+//RS     }
+//RS     out
+//RS }
+// END-PORT-PENDING 0566 crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1-1453
+

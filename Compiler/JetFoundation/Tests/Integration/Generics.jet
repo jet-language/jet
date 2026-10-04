@@ -1,0 +1,1087 @@
+// PORT-PENDING 1064 tests-generics: tests/generics.rs:1-1083
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! M9 generic instantiation soundness — examples must compile under rustc.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::process::Command;
+//RS 
+//RS #[test]
+//RS fn generic_module_profile_fact_values_are_closed_and_fingerprinted() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_generic_module_profile_fact_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).expect("create profile fact fixture");
+//RS     std::fs::write(
+//RS         root.join("package.jet"),
+//RS         r#"name: "profile_fact"
+//RS version: "0.1.0"
+//RS settings: { cache_slots: Int = 3 }
+//RS build: {
+//RS     compact: Build{ optimize: full, settings: { cache_slots: 2 } },
+//RS     spacious: Build{ optimize: full, settings: { cache_slots: 5 } },
+//RS }
+//RS "#,
+//RS     )
+//RS     .expect("write profile fact manifest");
+//RS     let source = r#"
+//RS module cache<K>(capacity: Int) {
+//RS     pub struct Buffer { items: [K#capacity] }
+//RS     pub fn slots() -> Int -> capacity
+//RS }
+//RS PROFILE_SLOTS :: prep { $build.settings.cache_slots }
+//RS module tuned :: cache<Int>($build.settings.cache_slots)
+//RS module chained :: cache<Int>(PROFILE_SLOTS)
+//RS fn run() { print(tuned.slots()) }
+//RS "#;
+//RS     let entry = root.join("main.jet");
+//RS     std::fs::write(&entry, source).expect("write profile fact source");
+//RS 
+//RS     let mut fingerprints = Vec::new();
+//RS     for profile in ["compact", "spacious"] {
+//RS         let mut bundle = jet::Loader::load_entry_with_overlay(
+//RS             entry.to_str().expect("profile fact path"),
+//RS             None,
+//RS             false,
+//RS         )
+//RS         .expect("load profile fact source");
+//RS         jet::Driver::seed_build_facts(
+//RS             &mut bundle,
+//RS             profile,
+//RS             false,
+//RS             &std::collections::BTreeMap::new(),
+//RS         )
+//RS         .expect("seed profile settings");
+//RS         let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+//RS         assert!(
+//RS             diagnostics
+//RS                 .iter()
+//RS                 .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+//RS             "profile fact module should check: {diagnostics:#?}"
+//RS         );
+//RS         let identity = bundle
+//RS             .modules
+//RS             .iter()
+//RS             .flat_map(|module| module.items.iter())
+//RS             .find_map(|item| match item {
+//RS                 jet::AST::Item::CodeModule(module) if module.name == "tuned" => {
+//RS                     module.instance_identity.as_ref()
+//RS                 }
+//RS                 _ => None,
+//RS             })
+//RS             .expect("fact-fed module instance identity");
+//RS         assert_eq!(
+//RS             identity.argument_values[1],
+//RS             format!("value:{}", if profile == "compact" { 2 } else { 5 })
+//RS         );
+//RS         assert!(identity.argument_provenance[1]
+//RS             .iter()
+//RS             .any(|source| source.contains("settings.cache_slots")));
+//RS         assert!(identity.argument_provenance[1]
+//RS             .iter()
+//RS             .any(|source| source.contains(&format!("build.{profile}"))));
+//RS         assert!(
+//RS             identity
+//RS                 .applications
+//RS                 .iter()
+//RS                 .any(|application| application.name == "chained"),
+//RS             "a setting folded through the definition evaluator must reuse the direct fact specialization"
+//RS         );
+//RS         fingerprints.push(identity.fingerprint.clone());
+//RS     }
+//RS     assert_ne!(
+//RS         fingerprints[0], fingerprints[1],
+//RS         "profile values must not collide"
+//RS     );
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_module_fact_value_example_has_profile_and_tier_parity() {
+//RS     let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let fixture = repo.join("Examples/features/modules");
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_generic_module_fact_parity_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).expect("create isolated fact-value example");
+//RS     let entry = root.join("fact_value_arguments.jet");
+//RS     std::fs::copy(fixture.join("fact_value_arguments.jet"), &entry)
+//RS         .expect("copy fact-value module");
+//RS     let expected =
+//RS         std::fs::read(repo.join("Examples/features/expected/modules/fact_value_arguments.out"))
+//RS             .expect("fact-value module golden");
+//RS     for (profile, setting, expected_output) in [
+//RS         ("compact", "2", b"2\n".as_slice()),
+//RS         ("spacious", "5", b"5\n".as_slice()),
+//RS     ] {
+//RS         let profile_arg = format!("--profile={profile}");
+//RS         let setting_arg = format!("cache_slots={setting}");
+//RS         let profile_run = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .current_dir(&root)
+//RS             .arg("run")
+//RS             .arg(&profile_arg)
+//RS             .arg(&entry)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .expect("run fact-value module under named profile");
+//RS         assert_eq!(
+//RS             profile_run.status.code(),
+//RS             Some(0),
+//RS             "named profile `{profile}` failed:\n{}",
+//RS             String::from_utf8_lossy(&profile_run.stderr)
+//RS         );
+//RS         assert_eq!(
+//RS             profile_run.stdout, expected_output,
+//RS             "named profile `{profile}` size drifted"
+//RS         );
+//RS 
+//RS         let profile_dev = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .current_dir(&root)
+//RS             .args(["dev", entry.to_str().expect("fact-value module path")])
+//RS             .arg(&profile_arg)
+//RS             .args(["--interpret", "--watch=off"])
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .expect("dev-interpret fact-value module under named profile");
+//RS 
+//RS         // `--release` wins over `--profile`; `--set` keeps each named
+//RS         // profile's folded setting value while covering the release/AOT and
+//RS         // default lenses explicitly. The dev row keeps the named profile.
+//RS         let release = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .current_dir(&root)
+//RS             .args(["run", "--release", "--set"])
+//RS             .arg(&setting_arg)
+//RS             .arg(&entry)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .expect("run fact-value module through release AOT");
+//RS         let default = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .current_dir(&root)
+//RS             .args(["run", "--set"])
+//RS             .arg(&setting_arg)
+//RS             .arg(&entry)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .expect("run fact-value module through default JIT");
+//RS         for (tier, process) in [
+//RS             ("jet run --release", release),
+//RS             ("jet run", default),
+//RS             ("jet dev --interpret", profile_dev),
+//RS         ] {
+//RS             assert_eq!(
+//RS                 process.status.code(),
+//RS                 Some(0),
+//RS                 "{tier} failed for `{profile}`: {}",
+//RS                 String::from_utf8_lossy(&process.stderr)
+//RS             );
+//RS             assert_eq!(
+//RS                 process.stdout, expected_output,
+//RS                 "{tier} output drifted for `{profile}`"
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     let explain = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .current_dir(&root)
+//RS         .args(["explain", "tuned.slots"])
+//RS         .arg(&entry)
+//RS         .arg("--profile=compact")
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("explain fact-fed module value");
+//RS     assert!(
+//RS         explain.status.success(),
+//RS         "module explain failed: {}",
+//RS         String::from_utf8_lossy(&explain.stderr)
+//RS     );
+//RS     let explanation = String::from_utf8_lossy(&explain.stdout);
+//RS     assert!(
+//RS         explanation.contains("value:2"),
+//RS         "explain must show the folded value: {explanation}"
+//RS     );
+//RS     assert!(
+//RS         explanation.contains("build.compact.settings.cache_slots"),
+//RS         "explain must show profile provenance: {explanation}"
+//RS     );
+//RS 
+//RS     for args in [
+//RS         vec![
+//RS             "run",
+//RS             "--release",
+//RS             entry.to_str().expect("fact-value module path"),
+//RS         ],
+//RS         vec!["run", entry.to_str().expect("fact-value module path")],
+//RS         vec![
+//RS             "run",
+//RS             "--interpret",
+//RS             entry.to_str().expect("fact-value module path"),
+//RS         ],
+//RS         vec![
+//RS             "dev",
+//RS             entry.to_str().expect("fact-value module path"),
+//RS             "--interpret",
+//RS             "--watch=off",
+//RS         ],
+//RS     ] {
+//RS         let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .current_dir(&root)
+//RS             .args(args)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .expect("run fact-value module through execution tier");
+//RS         assert_eq!(
+//RS             run.status.code(),
+//RS             Some(0),
+//RS             "execution tier failed: {}",
+//RS             String::from_utf8_lossy(&run.stderr)
+//RS         );
+//RS         assert_eq!(run.stdout, expected, "execution tier output drifted");
+//RS     }
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_modules_canonical_spelling_keeps_comptime_bindings() {
+//RS     let source = r#"
+//RS BASE :: prep { 40 }
+//RS 
+//RS module cache<K>(capacity: Int) {
+//RS     COMPUTED_SIZE :: prep { BASE + capacity }
+//RS     pub struct Entry { items: [K#capacity] }
+//RS     pub fn size() -> Int -> COMPUTED_SIZE
+//RS }
+//RS 
+//RS module x :: cache<Int>(64)
+//RS 
+//RS module plain_template<K> {
+//RS     pub fn identity(value: K) -> K -> value
+//RS }
+//RS module plain :: plain_template<Int>
+//RS 
+//RS fn run() {
+//RS     print(x.size())
+//RS     print(plain.identity(7))
+//RS }
+//RS "#;
+//RS     jet::compile(source)
+//RS         .unwrap_or_else(|diags| panic!("canonical generic-module spelling failed: {diags:#?}"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_module_diagnostics_hide_instance_mangling() {
+//RS     let diagnostics = jet::compile(
+//RS         r#"
+//RS module box<T> {
+//RS     pub struct Entry { value: T }
+//RS }
+//RS module boxed :: box<Int>
+//RS fn wrong(value: boxed.Entry) -> String { return value }
+//RS fn run() {}
+//RS "#,
+//RS     )
+//RS     .expect_err("the return type mismatch must be diagnosed");
+//RS     let text = diagnostics
+//RS         .iter()
+//RS         .flat_map(|diagnostic| {
+//RS             [
+//RS                 diagnostic.what.as_str(),
+//RS                 diagnostic.why.as_str(),
+//RS                 diagnostic.fix.as_str(),
+//RS             ]
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     assert!(
+//RS         !text.contains("M5BoxedEntry"),
+//RS         "compiler-owned generic-module names leaked into a diagnostic: {text}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_modules_complete_instantiation() {
+//RS     // FEATURE_CLAIM: claim.generic-modules / complete-instantiation
+//RS     let complete = include_str!("../Examples/features/modules/generic_modules.jet");
+//RS     jet::compile(complete)
+//RS         .unwrap_or_else(|diags| panic!("closed generic-module surface failed: {diags:#?}"));
+//RS 
+//RS     let nested = r#"
+//RS module outer<T>(count: Int) {
+//RS     module inner<U>(extra: Int) {
+//RS         pub fn total(first: T, second: U) -> Int { return count + extra }
+//RS     }
+//RS     module closed :: inner<T>(count)
+//RS }
+//RS module instance :: outer<String>(3)
+//RS fn run() {}
+//RS "#;
+//RS     jet::compile(nested)
+//RS         .unwrap_or_else(|diags| panic!("nested generic-module instantiation failed: {diags:#?}"));
+//RS 
+//RS     let body_items = r#"
+//RS module complete<T>(count: Int, label: String) {
+//RS     #Meta(category: label)
+//RS     VALUE :: prep { count }
+//RS     COMPTIME_VALUE :: prep { count + 1 }
+//RS     tag Marked { deny: [Net] }
+//RS     trait Reveal { fn reveal(self) -> T }
+//RS     struct Wrapped { value: T }
+//RS     enum Maybe { Empty Value(T) }
+//RS     impl Wrapped.Reveal { fn reveal(self) -> T { return self.value } }
+//RS     enum SourceErr { Bad(T) }
+//RS     enum TargetErr { Wrapped(SourceErr) }
+//RS     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
+//RS     #Target(OS.Linux)
+//RS     impl Wrapped { fn linux_value(self) -> T { return self.value } }
+//RS     module plain { pub fn value() -> Int { return count } }
+//RS     module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+//RS     module nested_use :: nested<T>
+//RS     #Meta(category: label)
+//RS     pub fn marked(value: ^#Marked T) -> #Marked T {
+//RS         #Meta(category: label)
+//RS         local := T{ value }
+//RS         return local
+//RS     }
+//RS     #Test fn identity(value: T) { expect(count == count) }
+//RS     #Test("complete") { .measure { assert(label == label) } }
+//RS }
+//RS module complete_use :: complete<Int>(3, "generic module")
+//RS fn run() {}
+//RS "#;
+//RS     jet::compile(body_items)
+//RS         .unwrap_or_else(|diags| panic!("generic-module body substitution failed: {diags:#?}"));
+//RS 
+//RS     let distinct_generated_names = r#"
+//RS module with_bar_baz<T> { pub struct BarBaz { value: T } }
+//RS module with_baz<T> { pub struct Baz { value: T } }
+//RS module foo :: with_bar_baz<Int>
+//RS module foo_bar :: with_baz<Int>
+//RS fn run() {
+//RS     first :: foo.BarBaz{ value: 1 }
+//RS     second :: foo_bar.Baz{ value: 2 }
+//RS     print(first.value + second.value)
+//RS }
+//RS "#;
+//RS     jet::compile(distinct_generated_names)
+//RS         .unwrap_or_else(|diags| panic!("generic-module type names collided: {diags:#?}"));
+//RS 
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_generic_modules_complete_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).expect("create generic-module acceptance directory");
+//RS     std::fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"generic_modules_complete\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .expect("write generic-module package");
+//RS     std::fs::write(
+//RS         root.join("left.jet"),
+//RS         "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n",
+//RS     )
+//RS     .expect("write left template");
+//RS     std::fs::write(
+//RS         root.join("right.jet"),
+//RS         "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n",
+//RS     )
+//RS     .expect("write right template");
+//RS     let main = root.join("main.jet");
+//RS     std::fs::write(
+//RS         &main,
+//RS         r#"
+//RS module left
+//RS module right
+//RS use left.[boxed as left_boxed]
+//RS use right.[boxed as right_boxed]
+//RS module first :: left_boxed<Int>(3)
+//RS module equivalent :: left_boxed<Int>(3)
+//RS module different_type :: left_boxed<String>(3)
+//RS module different_value :: left_boxed<Int>(4)
+//RS module different_path :: right_boxed<Int>(3)
+//RS fn run() {}
+//RS "#,
+//RS     )
+//RS     .expect("write generic-module identity program");
+//RS 
+//RS     let index = jet_semindex::open(&main).expect("generic-module identity program checks");
+//RS     assert_eq!(
+//RS         index.instances().len(),
+//RS         4,
+//RS         "only complete full keys may reuse an instance"
+//RS     );
+//RS     let shared = index
+//RS         .instances()
+//RS         .iter()
+//RS         .find(|instance| {
+//RS             instance
+//RS                 .applications
+//RS                 .iter()
+//RS                 .any(|application| application.name == "first")
+//RS         })
+//RS         .expect("canonical first instance");
+//RS     assert_eq!(
+//RS         shared
+//RS             .applications
+//RS             .iter()
+//RS             .map(|application| application.name.as_str())
+//RS             .collect::<Vec<_>>(),
+//RS         vec!["first", "equivalent"]
+//RS     );
+//RS     let full_keys = index
+//RS         .instances()
+//RS         .iter()
+//RS         .map(|instance| instance.full_key_hex.as_str())
+//RS         .collect::<std::collections::HashSet<_>>();
+//RS     assert_eq!(
+//RS         full_keys.len(),
+//RS         4,
+//RS         "type, value, and defining module path remain identity inputs"
+//RS     );
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS     assert_nested_generic_module_execution();
+//RS     assert_closed_value_identity();
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_module_local_bindings_shadow_substitution_values() {
+//RS     let source = r#"
+//RS module box(capacity: Int) {
+//RS     BASE :: prep { capacity }
+//RS     pub fn shadowed() -> Int {
+//RS         base :: prep { 5 }
+//RS         return base
+//RS     }
+//RS     pub fn plain_shadowed() -> Int {
+//RS         capacity := 5
+//RS         return capacity
+//RS     }
+//RS }
+//RS module b32 :: box(32)
+//RS fn run() {
+//RS     print(b32.shadowed())
+//RS     print(b32.plain_shadowed())
+//RS }
+//RS "#;
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_generic_module_shadowing_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).expect("create generic-module shadowing directory");
+//RS     std::fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"generic_module_shadowing\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+//RS     )
+//RS     .expect("write generic-module shadowing package");
+//RS     let path = root.join("main.jet");
+//RS     std::fs::write(&path, source).expect("write generic-module shadowing program");
+//RS 
+//RS     for release in [false, true] {
+//RS         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS         command.arg("run");
+//RS         if release {
+//RS             command.arg("--release");
+//RS         }
+//RS         let output = command
+//RS             .arg(&path)
+//RS             .output()
+//RS             .unwrap_or_else(|error| panic!("run generic-module shadowing program: {error}"));
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "generic-module shadowing failed (release={release}):\n{}",
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         assert_eq!(
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             "5\n5\n",
+//RS             "generic-module local bindings must shadow substitutions (release={release})"
+//RS         );
+//RS     }
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS fn assert_nested_generic_module_execution() {
+//RS     let source = r#"
+//RS module outer<T>(count: Int) {
+//RS     module plain {
+//RS         module inner<U> {
+//RS             pub fn total(value: U) -> Int { return count }
+//RS         }
+//RS         module closed :: inner<T>
+//RS         module forwarded :: closed
+//RS         pub fn result(value: T) -> Int {
+//RS             return closed.total(value) + forwarded.total(value)
+//RS         }
+//RS     }
+//RS     pub fn result(value: T) -> Int {
+//RS         return plain.result(value)
+//RS     }
+//RS }
+//RS module selected :: outer<Int>(3)
+//RS fn run() {
+//RS     print(selected.result(1))
+//RS }
+//RS "#;
+//RS     jet::compile(source).unwrap_or_else(|diags| {
+//RS         panic!("nested ordinary-module generic template was dropped: {diags:#?}")
+//RS     });
+//RS     let root =
+//RS         std::env::temp_dir().join(format!("jet_generic_modules_nested_{}", std::process::id()));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).expect("create nested generic-module directory");
+//RS     std::fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"generic_modules_nested\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+//RS     )
+//RS     .expect("write nested generic-module package");
+//RS     let main = root.join("main.jet");
+//RS     std::fs::write(&main, source).expect("write nested generic-module program");
+//RS     let index = jet_semindex::open(&main).expect("nested generic modules should index");
+//RS     assert_eq!(
+//RS         index.instances().len(),
+//RS         2,
+//RS         "outer and nested applications each have one applicative identity"
+//RS     );
+//RS     let nested = index
+//RS         .instances()
+//RS         .iter()
+//RS         .find(|instance| {
+//RS             instance
+//RS                 .applications
+//RS                 .iter()
+//RS                 .any(|application| application.name == "selected_plain_closed")
+//RS         })
+//RS         .expect("nested generic-module instance fact");
+//RS     assert_eq!(
+//RS         nested
+//RS             .applications
+//RS             .iter()
+//RS             .map(|application| application.name.as_str())
+//RS             .collect::<Vec<_>>(),
+//RS         vec!["selected_plain_closed", "selected_plain_forwarded"]
+//RS     );
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .arg("run")
+//RS         .arg(&main)
+//RS         .output()
+//RS         .expect("run nested generic-module program");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "nested generic-module AOT run failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&output.stdout), "6\n");
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS fn assert_closed_value_identity() {
+//RS     let source = r#"
+//RS enum Mode { Fast Safe }
+//RS module keyed(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
+//RS     pub fn value() -> Int { return count }
+//RS }
+//RS module same :: keyed(true, 3, 'a', "x", Mode.Fast)
+//RS module equivalent :: keyed(1 < 2, 1 + 2, 'a', "x", Mode.Fast)
+//RS module different_bool :: keyed(false, 3, 'a', "x", Mode.Fast)
+//RS module different_int :: keyed(true, 4, 'a', "x", Mode.Fast)
+//RS module different_char :: keyed(true, 3, 'b', "x", Mode.Fast)
+//RS module different_string :: keyed(true, 3, 'a', "y", Mode.Fast)
+//RS module different_enum :: keyed(true, 3, 'a', "x", Mode.Safe)
+//RS fn run() {}
+//RS "#;
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_generic_module_value_identity_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).expect("create value-identity directory");
+//RS     std::fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"generic_modules_value_identity\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .expect("write value-identity package");
+//RS     let main = root.join("main.jet");
+//RS     std::fs::write(&main, source).expect("write value-identity program");
+//RS     let index = jet_semindex::open(&main).expect("closed values should index");
+//RS     assert_eq!(
+//RS         index.instances().len(),
+//RS         6,
+//RS         "normalized equivalents reuse one key; every closed value-kind change stays distinct"
+//RS     );
+//RS     let shared = index
+//RS         .instances()
+//RS         .iter()
+//RS         .find(|instance| {
+//RS             instance
+//RS                 .applications
+//RS                 .iter()
+//RS                 .any(|application| application.name == "same")
+//RS         })
+//RS         .expect("shared closed-value instance");
+//RS     assert_eq!(
+//RS         shared
+//RS             .applications
+//RS             .iter()
+//RS             .map(|application| application.name.as_str())
+//RS             .collect::<Vec<_>>(),
+//RS         vec!["same", "equivalent"]
+//RS     );
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_examples_build_and_run() {
+//RS     for name in [
+//RS         "Examples/features/types/traits.jet",
+//RS         "Examples/features/types/generic_types.jet",
+//RS         "Examples/features/basics/printable.jet",
+//RS     ] {
+//RS         let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .arg("run")
+//RS             .arg(name)
+//RS             .output()
+//RS             .unwrap_or_else(|e| panic!("failed to run {name}: {e}"));
+//RS         assert!(
+//RS             out.status.success(),
+//RS             "example {name} failed:\n{}\n{}",
+//RS             String::from_utf8_lossy(&out.stdout),
+//RS             String::from_utf8_lossy(&out.stderr)
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_scalar_matrix() {
+//RS     let types = ["1", "2.5", "true", "\"hi\"", "'a'"];
+//RS     for lit in types {
+//RS         let src = format!(
+//RS             r#"
+//RS fn twice<T>(x: ^T, y: ^T) -> Pair<T> {{
+//RS     return Pair<T>{{ first: x, second: y }}
+//RS }}
+//RS 
+//RS struct Pair<T> {{
+//RS     first: T
+//RS     second: T
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     p :: twice({lit}, {lit})
+//RS     print(p.first)
+//RS }}
+//RS "#
+//RS         );
+//RS         let diags = jet::compile(&src);
+//RS         assert!(diags.is_ok(), "scalar {lit} failed: {:?}", diags.err());
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_fn_with_scalar_types() {
+//RS     let src = r#"
+//RS fn twice<T>(x: ^T, y: ^T) -> Pair<T> {
+//RS     return Pair<T>{ first: x, second: y }
+//RS }
+//RS 
+//RS struct Pair<T> {
+//RS     first: T
+//RS     second: T
+//RS }
+//RS 
+//RS fn run() {
+//RS     a :: twice(1, 1)
+//RS     b :: twice(2.5, 2.5)
+//RS     print(a.first)
+//RS     print(b.first)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src);
+//RS     assert!(diags.is_ok(), "{:?}", diags.err());
+//RS }
+//RS 
+//RS /// c148: `is_type_var_name` only recognized single-char type params (`T`, `K`).
+//RS /// Multi-char names like `Kind`/`Elem` must compile identically to `T`.
+//RS #[test]
+//RS fn multi_char_type_param_struct() {
+//RS     // struct with multi-char type param used in a field
+//RS     let src = r#"
+//RS struct Wrap<Kind> {
+//RS     val: Kind
+//RS }
+//RS 
+//RS fn wrap<Kind>(x: ^Kind) -> Wrap<Kind> {
+//RS     return Wrap<Kind>{ val: x }
+//RS }
+//RS 
+//RS fn run() {
+//RS     b :: wrap(42)
+//RS     print(b.val)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src);
+//RS     assert!(
+//RS         diags.is_ok(),
+//RS         "multi-char type param (struct) failed: {:?}",
+//RS         diags.err()
+//RS     );
+//RS }
+//RS 
+//RS /// c148: multi-char type param in a free function (no struct) must infer correctly.
+//RS #[test]
+//RS fn multi_char_type_param_fn_only() {
+//RS     let src = r#"
+//RS fn identity<Elem>(x: ^Elem) -> Elem {
+//RS     return x
+//RS }
+//RS 
+//RS fn run() {
+//RS     n :: identity(7)
+//RS     s :: identity("hello")
+//RS     print(n)
+//RS     print(s)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src);
+//RS     assert!(
+//RS         diags.is_ok(),
+//RS         "multi-char type param (fn) failed: {:?}",
+//RS         diags.err()
+//RS     );
+//RS }
+//RS 
+//RS /// c148: multi-char must work as a drop-in for single-char — same program, renamed param.
+//RS #[test]
+//RS fn multi_char_matches_single_char() {
+//RS     // identical to generic_scalar_matrix but using `Elem` instead of `T`
+//RS     let src = r#"
+//RS fn twice<Elem>(x: ^Elem, y: ^Elem) -> Pair<Elem> {
+//RS     return Pair<Elem>{ first: x, second: y }
+//RS }
+//RS 
+//RS struct Pair<Elem> {
+//RS     first: Elem
+//RS     second: Elem
+//RS }
+//RS 
+//RS fn run() {
+//RS     p :: twice(1, 1)
+//RS     print(p.first)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src);
+//RS     assert!(
+//RS         diags.is_ok(),
+//RS         "multi-char matches single-char failed: {:?}",
+//RS         diags.err()
+//RS     );
+//RS }
+//RS 
+//RS /// D-GENERIC-CALL1=A: explicit type arguments are available on ordinary free
+//RS /// calls, including a result-only generic whose value arguments cannot infer T.
+//RS #[test]
+//RS fn explicit_generic_calls_cover_value_and_result_only_arguments() {
+//RS     let src = r#"
+//RS fn identity<T>(value: ^T) -> T {
+//RS     return value
+//RS }
+//RS 
+//RS fn empty<T>() -> [T] {
+//RS     ignored :: input()
+//RS     return []
+//RS }
+//RS 
+//RS fn run() {
+//RS     text :: identity<String>(input() ?? "ok")
+//RS     values :: empty<Int>()
+//RS     print(text)
+//RS     print(values.len())
+//RS }
+//RS "#;
+//RS     let root =
+//RS         std::env::temp_dir().join(format!("jet_explicit_generic_calls_{}", std::process::id()));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).expect("create explicit generic-call directory");
+//RS     std::fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"explicit_generic_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+//RS     )
+//RS     .expect("write explicit generic-call package");
+//RS     let path = root.join("main.jet");
+//RS     std::fs::write(&path, src).expect("write explicit generic-call source");
+//RS     let output = common::jet_cli_output_with_stdin(
+//RS         &["run", path.to_str().expect("explicit generic-call path")],
+//RS         "ok\n\n",
+//RS     );
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "explicit generic calls failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&output.stdout), "ok\n0\n");
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_call_formatter_keeps_adjacent_angles() {
+//RS     let source = "fn run() {\n    value :: identity<Int>(1)\n    nested :: empty<Map<String, Wrap<Int>>>()\n    comparison :: 1 < 2\n    json.decode<Wrap<Int>>(text)\n}";
+//RS     let formatted = jet::format_source(source).expect("generic call syntax should format");
+//RS     assert!(formatted.contains("identity<Int>(1)"), "{formatted}");
+//RS     assert!(
+//RS         formatted.contains("empty<Map<String, Wrap<Int>>>()"),
+//RS         "nested generic call arguments must keep both closing angles: {formatted}"
+//RS     );
+//RS     assert!(
+//RS         formatted.contains("comparison :: 1 < 2"),
+//RS         "spaced angles must remain a comparison: {formatted}"
+//RS     );
+//RS     assert!(
+//RS         formatted.contains("json.decode<Wrap<Int>>(text)"),
+//RS         "{formatted}"
+//RS     );
+//RS     assert_eq!(
+//RS         formatted,
+//RS         jet::format_source(&formatted).expect("formatted generic calls should reformat")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn namespaced_generic_calls_support_explicit_and_inferred_arguments() {
+//RS     let source = r#"
+//RS module helpers {
+//RS     pub fn identity<T>(value: ^T) -> T {
+//RS         return value
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     text :: helpers.identity<String>("ok")
+//RS     number :: helpers.identity(7)
+//RS     print(text)
+//RS     print(number)
+//RS }
+//RS "#;
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_namespaced_generic_calls_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).expect("create namespaced generic-call directory");
+//RS     std::fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"namespaced_generic_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+//RS     )
+//RS     .expect("write namespaced generic-call package");
+//RS     let path = root.join("main.jet");
+//RS     std::fs::write(&path, source).expect("write namespaced generic-call source");
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .arg("run")
+//RS         .arg(&path)
+//RS         .output()
+//RS         .expect("run namespaced generic calls");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "namespaced generic calls failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&output.stdout), "ok\n7\n");
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_call_diagnostics_cover_arity_and_bound_failures() {
+//RS     let wrong_arity = r#"
+//RS fn identity<T>(value: ^T) -> T { return value }
+//RS fn run() { value :: identity<Int, String>(1) }
+//RS "#;
+//RS     let arity_diags = jet::compile(wrong_arity).expect_err("wrong generic arity must fail");
+//RS     let arity = arity_diags
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0119")
+//RS         .unwrap_or_else(|| panic!("expected generic arity E0119: {arity_diags:#?}"));
+//RS     assert!(!arity.what.is_empty() && !arity.why.is_empty() && !arity.fix.is_empty());
+//RS 
+//RS     let wrong_bound = r#"
+//RS #!Comparable
+//RS struct NotComparable { value: Int }
+//RS fn choose<T: Comparable>(value: ^T) -> T { return value }
+//RS fn run() {
+//RS     value :: choose<NotComparable>(NotComparable{ value: 1 })
+//RS }
+//RS "#;
+//RS     let bound_diags = jet::compile(wrong_bound).expect_err("failed generic bound must fail");
+//RS     let bound = bound_diags
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0905")
+//RS         .unwrap_or_else(|| panic!("expected generic bound E0905: {bound_diags:#?}"));
+//RS     assert!(!bound.what.is_empty() && !bound.why.is_empty() && !bound.fix.is_empty());
+//RS 
+//RS     let non_generic = r#"
+//RS fn plain(value: Int) -> Int { return value }
+//RS fn run() { value :: plain<Int>(1) }
+//RS "#;
+//RS     let non_generic_diags = jet::compile(non_generic)
+//RS         .expect_err("non-generic functions must reject explicit call type arguments");
+//RS     assert!(
+//RS         non_generic_diags
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0119"),
+//RS         "expected non-generic call E0119: {non_generic_diags:#?}"
+//RS     );
+//RS 
+//RS     let spaced = r#"
+//RS fn identity<T>(value: ^T) -> T { return value }
+//RS fn run() { value :: identity < Int > (1) }
+//RS "#;
+//RS     assert!(
+//RS         jet::compile(spaced).is_err(),
+//RS         "spaced angle brackets must not become an explicit generic call"
+//RS     );
+//RS 
+//RS     let extra_decode_type = r#"
+//RS use core.encoding.json as json
+//RS fn run() { value :: json.decode<Int, String>("1") }
+//RS "#;
+//RS     let decode_diags = jet::compile(extra_decode_type)
+//RS         .expect_err("typed decode must reject extra call type arguments");
+//RS     assert!(
+//RS         decode_diags
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0119"),
+//RS         "expected typed decode E0119: {decode_diags:#?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn free_generic_calls_execute_in_the_resident_jit() {
+//RS     let source = r#"
+//RS fn identity<T>(value: ^T) -> T { return value }
+//RS fn empty<T>() -> [T] { return [] }
+//RS fn run() {
+//RS     text :: identity<String>("ok")
+//RS     values :: empty<Int>()
+//RS     print(text)
+//RS     print(values.len())
+//RS }
+//RS "#;
+//RS     let root = std::env::temp_dir().join(format!("jet_generic_free_calls_{}", std::process::id()));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).expect("create generic-free test directory");
+//RS     std::fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"generic_free_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+//RS     )
+//RS     .expect("write generic-free test package");
+//RS     let path = root.join("main.jet");
+//RS     std::fs::write(&path, source).expect("write generic-free test source");
+//RS     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
+//RS         .expect("generic-free test source should load");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+//RS         "generic-free test source should type-check: {diagnostics:?}"
+//RS     );
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS         .expect("generic free calls should compile in resident JIT");
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(exit_code, 0, "generic free call JIT run failed: {stderr}");
+//RS             assert_eq!(stderr, "");
+//RS             assert_eq!(stdout, "ok\n0\n");
+//RS         }
+//RS         other => panic!("generic free call JIT run did not complete: {other:?}"),
+//RS     }
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "generic free call test did not execute resident JIT"
+//RS     );
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_method_calls_keep_owner_and_method_arguments_separate() {
+//RS     let source = r#"
+//RS struct Box<T> {
+//RS     value: T
+//RS }
+//RS 
+//RS impl Box {
+//RS     fn new(value: ^T) -> Box<T> {
+//RS         return Box<T>{ value: value }
+//RS     }
+//RS 
+//RS     fn convert<U>(self, value: ^U, *, note: String{"unused"}) -> U {
+//RS         return value
+//RS     }
+//RS 
+//RS     fn make<U>(value: ^U) -> U {
+//RS         return value
+//RS         }
+//RS     }
+//RS 
+//RS fn run() {
+//RS     box :: Box<Int>.new(3)
+//RS     value :: box.convert<String>(note: "explicit", value: "ok")
+//RS     inferred :: box.convert(note: "inferred", value: "again")
+//RS     static_value :: Box.make<String>("static")
+//RS     static_inferred :: Box.make("inferred")
+//RS     print(value)
+//RS     print(inferred)
+//RS     print(static_value)
+//RS     print(static_inferred)
+//RS }
+//RS "#;
+//RS 
+//RS     let root =
+//RS         std::env::temp_dir().join(format!("jet_generic_method_calls_{}", std::process::id()));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).expect("create generic-method test directory");
+//RS     std::fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"generic_method_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+//RS     )
+//RS     .expect("write generic-method test package");
+//RS     let path = root.join("main.jet");
+//RS     std::fs::write(&path, source).expect("write generic-method test source");
+//RS     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
+//RS         .expect("generic-method test source should load");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+//RS         "generic-method test source should type-check: {diagnostics:?}"
+//RS     );
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS         .expect("generic methods should compile in resident JIT");
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(exit_code, 0, "generic method JIT run failed: {stderr}");
+//RS             assert_eq!(stderr, "");
+//RS             assert_eq!(stdout, "ok\nagain\nstatic\ninferred\n");
+//RS         }
+//RS         other => panic!("generic method JIT run did not complete: {other:?}"),
+//RS     }
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "generic method test did not execute resident JIT"
+//RS     );
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+// END-PORT-PENDING 1064 tests/generics.rs:1-1083
+

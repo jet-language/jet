@@ -76,6 +76,7 @@ use jet_foundation.[
     TExpr,
     TExprKind,
     TFailureCarrier,
+    TStrFormat,
     TForInMethod,
     TFunc,
     TGCEditKind,
@@ -597,7 +598,7 @@ fn jet_codegen_loop_terminator_targets(terminator: MIRTerminator) -> [MIRBlockID
             &targets.push(otherwise)
             targets
         }
-        .Yield(_, resume) -> [MIRBlockID]{resume}
+        .Yield(_, resume, cancel) -> [MIRBlockID]{resume, cancel}
         .Break(target, _) -> [MIRBlockID]{target}
         .Continue(target) -> [MIRBlockID]{target}
         .Return(_) -> [MIRBlockID]{}
@@ -2231,6 +2232,9 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
                             place := jet_codegen_bind_local(&builder, local, init.ty, local.mutable, None, None, string_view)
                             if gc_root -> jet_codegen_mark_gc_root(&builder, place)
                             _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: place, value: value})
+                            // Rust: tir_to_mir_stmt.rs::lower_stmt (`TStmt::Let`)
+                            // register_file_owner_binding after the write.
+                            jet_codegen_register_file_owner_binding(&builder, place, init.ty, value)
                         }
                     }
                 }
@@ -2254,7 +2258,17 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
                     jet_codegen_emit_value(&builder, span, place_ty, MIROperation.Binary{op: jet_codegen_lower_binary(operation), dispatch: dispatch, overflow: mir_overflow, left: old, right: right})
                 }
             }
-            _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: place, value: assigned})
+            // Rust: tir_to_mir_stmt.rs::lower_assign: a displaced live file
+            // owner is released first, and a file-owner slot is replaced.
+            owning_file_slot := jet_codegen_is_core_file_owner_type(builder, place_ty)
+            jet_codegen_emit_file_owner_replacement(&builder, place)
+            if {
+                owning_file_slot -> {
+                    _ := jet_codegen_emit(&builder, span, None, MIROperation.ReplacePlace{place: place, value: assigned})
+                } else -> {
+                    _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: place, value: assigned})
+                }
+            }
         }
         .IndexAssign(uninit, base, index, is_map, value, span) -> jet_codegen_lower_index_assign(&builder, uninit, base, index, is_map, value, span)
         .IndexFieldAssign(assign, span) -> jet_codegen_lower_index_field_assign(&builder, assign, span)
@@ -2801,7 +2815,7 @@ fn jet_codegen_lower_env_set(builder: &JetCodegenBuilder, expression: TExpr, nam
     jet_codegen_terminate(&builder, MIRTerminator.Branch{condition: condition, then_target: join, else_target: failure})
     jet_codegen_switch_block(&builder, failure)
     error := jet_codegen_emit_value(&builder, expression.span, error_type, MIROperation.ResultValue{subject: result, ok: false})
-    shown := jet_codegen_lower_direct_display(&builder, error, error_type, expression.span)
+    shown := jet_codegen_lower_string_render(&builder, error, error_type, TStrFormat.Display, expression.span)
     stop_call := jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.require", "require", "jet_require", 9, [Bool]{false, true, true, false, true, true, false, false, true}, Val(Effect.Panic), jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Control)
     locals := [MIRPanicLocal]{}
     loop local in location.locals {

@@ -1,0 +1,392 @@
+// JetTrace.rs:1316-1619,1833-1872,2224-2592. Closed schema validation.
+fn jettrace_keys_match(fields: View<CanonicalJSONField>, keys: [String]) -> Bool Never! {
+    if fields.len() != keys.len() -> return false
+    loop key in keys {
+        found := false
+        loop field in fields { if field.key == key -> found = true }
+        if !found -> return false
+    }
+    true
+}
+// Return only an index; callers project directly from the retained node.
+fn jettrace_get(fields: View<CanonicalJSONField>, key: String) -> Int Never! {
+    loop index in 0..<fields.len() { if fields[index].key == key -> return index }
+    panic("checked jettrace key missing: {key}")
+}
+fn jettrace_wrapper_fields(value: CanonicalJSON) -> View<CanonicalJSONField> JetTraceError! from value {
+    jettrace_object_view(value, "jettrace wrapper")
+}
+fn jettrace_object_view(value: CanonicalJSON, label: String) -> View<CanonicalJSONField> JetTraceError! from value {
+    if value == {
+        .Object(items) -> return Ok(items[0..<items.len()])
+        else -> return Err(jettrace_error("{label} is not an object"))
+    }
+}
+fn jettrace_integer_text(value: CanonicalJSON, label: String) -> String JetTraceError! {
+    if value == {
+        .Integer(number) -> return Ok(number)
+        else -> return Err(jettrace_error("{label} is not an integer"))
+    }
+}
+fn jettrace_object_keys(value: CanonicalJSON, label: String, keys: [String]) -> View<CanonicalJSONField> JetTraceError! from value {
+    fields :: jettrace_object_view(value, label)
+    if !jettrace_keys_match(fields, keys) -> return Err(jettrace_error("{label} has missing or unknown keys"))
+    Ok(fields)
+}
+fn jettrace_text(value: CanonicalJSON, label: String) -> String JetTraceError! {
+    if value == {
+        .String(text) -> return Ok(text)
+        else -> return Err(jettrace_error("{label} is not text"))
+    }
+}
+fn jettrace_array(value: CanonicalJSON, label: String) -> View<CanonicalJSON> JetTraceError! from value {
+    if value == {
+        .Array(items) -> return Ok(items[0..<items.len()])
+        else -> return Err(jettrace_error("{label} is not an array"))
+    }
+}
+fn jettrace_bool(value: CanonicalJSON, label: String) -> Bool JetTraceError! {
+    if value == {
+        .Bool(flag) -> return Ok(flag)
+        else -> return Err(jettrace_error("{label} is not a boolean"))
+    }
+}
+fn jettrace_unsigned(value: CanonicalJSON, label: String) -> U64 JetTraceError! {
+    text :: jettrace_integer_text(value, label)
+    raw :: text.bytes()
+    if raw.len() == 0 -> return Err(jettrace_error("{label} is not an unsigned integer"))
+    at := 0
+    // Rust u64::from_str accepts a leading plus, although canonical JSON does not.
+    if raw[0] == (U8{43}) -> at = 1
+    if at == raw.len() -> return Err(jettrace_error("{label} is not an unsigned integer"))
+    result := U64{0}
+    loop at < raw.len() {
+        byte :: Int.from_u8(raw[at])
+        if byte < 48 || byte > 57 -> return Err(jettrace_error("{label} is not an unsigned integer"))
+        digit :: U64.from_u8(raw[at]) - U64{48}
+        if result > (U64{18446744073709551615} - digit) /% (U64{10}) -> return Err(jettrace_error("{label} is not an unsigned integer"))
+        result = result * U64{10} + digit
+        at += 1
+    }
+    Ok(result)
+}
+fn jettrace_hex64(text: String) -> Bool Never! {
+    raw :: text.bytes()
+    if raw.len() != 64 -> return false
+    loop byte in raw {
+        number :: Int.from_u8(byte)
+        if !(number >= 48 && number <= 57) && !(number >= 97 && number <= 102) -> return false
+    }
+    true
+}
+fn jettrace_nonempty_game_text(value: CanonicalJSON, label: String) -> String JetTraceError! {
+    text :: jettrace_text(value, label)
+    if text.len() == 0 -> return Err(jettrace_error("{label} is empty"))
+    Ok(text)
+}
+fn jettrace_validate_symbol(value: CanonicalJSON, label: String) JetTraceError! {
+    fields :: jettrace_object_keys(value, label, [String]{"name", "path"})
+    _ :: jettrace_text(fields[jettrace_get(fields, "name")].value, "{label}.name")
+    _ :: jettrace_text(fields[jettrace_get(fields, "path")].value, "{label}.path")
+    return
+}
+fn jettrace_verify_digest(value: CanonicalJSON, claimed: String) JetTraceError! {
+    actual :: canonical_json_sha256(value)
+    if actual != claimed -> return Err(jettrace_error("content hash mismatch: claimed {claimed}, recomputed {actual}"))
+    return
+}
+fn jettrace_validate_hardware(value: CanonicalJSON) JetTraceError! {
+    fields :: jettrace_object_keys(value, "content.hardware", [String]{"cpu_arch", "fingerprint", "logical_cpus", "os", "target"})
+    keys :: [String]{"cpu_arch", "os", "target"}
+    loop key in keys { _ :: jettrace_text(fields[jettrace_get(fields, key)].value, "content.hardware.{key}") }
+    _ :: jettrace_unsigned(fields[jettrace_get(fields, "logical_cpus")].value, "content.hardware.logical_cpus")
+    claimed :: jettrace_text(fields[jettrace_get(fields, "fingerprint")].value, "content.hardware.fingerprint")
+    if !jettrace_hex64(claimed) -> return Err(jettrace_error("content.hardware.fingerprint is not lowercase Hex64"))
+    body :: jettrace_object([CanonicalJSONField]{jettrace_field("cpu_arch", ~fields[jettrace_get(fields, "cpu_arch")].value), jettrace_field("logical_cpus", ~fields[jettrace_get(fields, "logical_cpus")].value), jettrace_field("os", ~fields[jettrace_get(fields, "os")].value), jettrace_field("target", ~fields[jettrace_get(fields, "target")].value)})
+    jettrace_verify_digest(body, claimed)
+}
+struct JetTraceCaptureLimits { browser_rows: Int, io_rows: Int, native_rows: Int, span_rows: Int, task_rows: Int }
+// Main greenfield ruling: schemas 1–4 are retired; exactly schema 5 is readable.
+fn jettrace_validate_capture_policy(value: CanonicalJSON) -> JetTraceCaptureLimits JetTraceError! {
+    items :: jettrace_object_view(value, "capture_policy")
+    schema := CanonicalJSON.Null
+    loop field in items { if field.key == "schema" -> schema = ~field.value }
+    if schema == {
+        .Integer(number) -> {
+            if number != CAPTURE_POLICY_SCHEMA -> return Err(jettrace_error("unsupported capture_policy schema"))
+        }
+        else -> return Err(jettrace_error("capture_policy schema is not an integer"))
+    }
+    fields :: jettrace_object_keys(value, "capture_policy", [String]{"allowlist", "browser_row_limit", "browser_rows_truncated", "default_exclusions", "io_row_limit", "io_rows_truncated", "native_row_limit", "native_rows_truncated", "schema", "span_row_limit", "span_rows_truncated", "task_row_limit", "task_rows_truncated"})
+    exclusions :: jettrace_array(fields[jettrace_get(fields, "default_exclusions")].value, "capture_policy.default_exclusions")
+    expected := [CanonicalJSON]{}
+    loop item in DEFAULT_EXCLUSIONS -> &expected.push(.String(~item))
+    if exclusions.len() != expected.len() -> return Err(jettrace_error("capture_policy.default_exclusions does not match D-PERFSESSION1 defaults"))
+    loop index in 0..<exclusions.len() {
+        if exclusions[index] != expected[index] -> return Err(jettrace_error("capture_policy.default_exclusions does not match D-PERFSESSION1 defaults"))
+    }
+    if jettrace_unsigned(fields[jettrace_get(fields, "io_row_limit")].value, "capture_policy.io_row_limit") != TRACE_IO_ROW_LIMIT || jettrace_unsigned(fields[jettrace_get(fields, "task_row_limit")].value, "capture_policy.task_row_limit") != TRACE_TASK_ROW_LIMIT -> return Err(jettrace_error("capture_policy row limits do not match this schema"))
+    keys :: [String]{"io_rows_truncated", "task_rows_truncated"}
+    loop key in keys { _ :: jettrace_bool(fields[jettrace_get(fields, key)].value, "capture_policy.{key}") }
+    if jettrace_unsigned(fields[jettrace_get(fields, "browser_row_limit")].value, "capture_policy.browser_row_limit") != TRACE_BROWSER_ROW_LIMIT -> return Err(jettrace_error("capture_policy browser row limit does not match this schema"))
+    _ :: jettrace_bool(fields[jettrace_get(fields, "browser_rows_truncated")].value, "capture_policy.browser_rows_truncated")
+    if jettrace_unsigned(fields[jettrace_get(fields, "native_row_limit")].value, "capture_policy.native_row_limit") != TRACE_NATIVE_ROW_LIMIT -> return Err(jettrace_error("capture_policy native row limit does not match this schema"))
+    _ :: jettrace_bool(fields[jettrace_get(fields, "native_rows_truncated")].value, "capture_policy.native_rows_truncated")
+    if jettrace_unsigned(fields[jettrace_get(fields, "span_row_limit")].value, "capture_policy.span_row_limit") != TRACE_SPAN_ROW_LIMIT -> return Err(jettrace_error("capture_policy span row limit does not match this schema"))
+    _ :: jettrace_bool(fields[jettrace_get(fields, "span_rows_truncated")].value, "capture_policy.span_rows_truncated")
+    allowlist :: jettrace_array(fields[jettrace_get(fields, "allowlist")].value, "capture_policy.allowlist")
+    prior := String?{None}
+    loop item in allowlist {
+        text :: jettrace_text(item, "capture_policy.allowlist item")
+        if prior == {
+            .Val(previous) -> {
+                if previous > text -> return Err(jettrace_error("capture_policy.allowlist is not sorted"))
+            }
+            else -> {}
+        }
+        prior = Val(~text)
+    }
+    Ok(JetTraceCaptureLimits{browser_rows: 4096, io_rows: 4096, native_rows: 4096, span_rows: 4096, task_rows: 4096})
+}
+fn jettrace_validate_browser(value: CanonicalJSON, limit: Int) JetTraceError! {
+    items :: jettrace_array(value, "content.browser")
+    if items.len() > limit -> return Err(jettrace_error("content.browser exceeds capture_policy.browser_row_limit"))
+    loop index in 0..<items.len() {
+        label :: "content.browser[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"class", "clock", "duration_ns", "start_ns", "symbol"})
+        class :: jettrace_text(fields[jettrace_get(fields, "class")].value, "{label}.class")
+        if class != "event" && class != "wasm" && class != "dom" -> return Err(jettrace_error("{label}.class must be event, wasm, or dom"))
+        if jettrace_text(fields[jettrace_get(fields, "clock")].value, "{label}.clock") != "browser_monotonic_mapped" -> return Err(jettrace_error("{label}.clock must be browser_monotonic_mapped"))
+        _ :: jettrace_unsigned(fields[jettrace_get(fields, "duration_ns")].value, "{label}.duration_ns")
+        _ :: jettrace_unsigned(fields[jettrace_get(fields, "start_ns")].value, "{label}.start_ns")
+        jettrace_validate_symbol(fields[jettrace_get(fields, "symbol")].value, "{label}.symbol")
+    }
+    return
+}
+fn jettrace_validate_game_function(value: CanonicalJSON, label: String) JetTraceError! {
+    fields :: jettrace_object_keys(value, label, [String]{"function_id", "name", "source"})
+    _ :: jettrace_nonempty_game_text(fields[jettrace_get(fields, "function_id")].value, "{label}.function_id")
+    _ :: jettrace_nonempty_game_text(fields[jettrace_get(fields, "name")].value, "{label}.name")
+    source :: jettrace_object_keys(fields[jettrace_get(fields, "source")].value, "{label}.source", [String]{"end_column", "end_line", "file", "source_id", "start_column", "start_line"})
+    _ :: jettrace_nonempty_game_text(source[jettrace_get(source, "source_id")].value, "{label}.source.source_id")
+    _ :: jettrace_nonempty_game_text(source[jettrace_get(source, "file")].value, "{label}.source.file")
+    keys :: [String]{"end_column", "end_line", "start_column", "start_line"}
+    loop key in keys { _ :: jettrace_unsigned(source[jettrace_get(source, key)].value, "{label}.source.{key}") }
+    return
+}
+fn jettrace_validate_game_frames(value: CanonicalJSON) JetTraceError! {
+    items :: jettrace_array(value, "content.game_frames")
+    if items.len() > TRACE_GAME_FRAME_ROW_LIMIT -> return Err(jettrace_error("content.game_frames exceeds row limit {TRACE_GAME_FRAME_ROW_LIMIT}"))
+    loop index in 0..<items.len() {
+        label :: "content.game_frames[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"build", "cpu_ns", "frame_id", "frame_index", "gpu_ns", "responsible_function", "revision", "scene", "sequence", "start_ns", "trace_id"})
+        integers :: [String]{"frame_id", "frame_index", "sequence", "start_ns", "cpu_ns"}
+        loop key in integers { _ :: jettrace_unsigned(fields[jettrace_get(fields, key)].value, "{label}.{key}") }
+        texts :: [String]{"scene", "build", "revision", "trace_id"}
+        loop key in texts { _ :: jettrace_nonempty_game_text(fields[jettrace_get(fields, key)].value, "{label}.{key}") }
+        gpu :: fields[jettrace_get(fields, "gpu_ns")].value
+        if gpu != CanonicalJSON.Null { _ :: jettrace_unsigned(gpu, "{label}.gpu_ns") }
+        function :: fields[jettrace_get(fields, "responsible_function")].value
+        if function != CanonicalJSON.Null -> jettrace_validate_game_function(function, "{label}.responsible_function")
+    }
+    return
+}
+fn jettrace_validate_game_draw_events(value: CanonicalJSON) JetTraceError! {
+    items :: jettrace_array(value, "content.game_draw_events")
+    if items.len() > TRACE_GAME_DRAW_EVENT_ROW_LIMIT -> return Err(jettrace_error("content.game_draw_events exceeds row limit {TRACE_GAME_DRAW_EVENT_ROW_LIMIT}"))
+    loop index in 0..<items.len() {
+        label :: "content.game_draw_events[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"build", "domain", "duration_ns", "event_id", "event_index", "frame_id", "frame_index", "function", "object_id", "phase", "resource_id", "revision", "scene", "sequence", "start_ns", "trace_id"})
+        integers :: [String]{"duration_ns", "event_id", "event_index", "frame_id", "frame_index", "sequence", "start_ns"}
+        loop key in integers { _ :: jettrace_unsigned(fields[jettrace_get(fields, key)].value, "{label}.{key}") }
+        texts :: [String]{"build", "domain", "phase", "revision", "scene", "trace_id"}
+        loop key in texts { _ :: jettrace_nonempty_game_text(fields[jettrace_get(fields, key)].value, "{label}.{key}") }
+        jettrace_validate_game_function(fields[jettrace_get(fields, "function")].value, "{label}.function")
+        optional :: [String]{"object_id", "resource_id"}
+        loop key in optional {
+            item :: fields[jettrace_get(fields, key)].value
+            if item != CanonicalJSON.Null { _ :: jettrace_nonempty_game_text(item, "{label}.{key}") }
+        }
+    }
+    return
+}
+fn jettrace_validate_samples(value: CanonicalJSON) JetTraceError! {
+    items :: jettrace_array(value, "content.samples")
+    loop index in 0..<items.len() {
+        label :: "content.samples[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"domain", "duration_ns", "symbol"})
+        domain :: jettrace_text(fields[jettrace_get(fields, "domain")].value, "{label}.domain")
+        if domain != "wall" && domain != "cpu" -> return Err(jettrace_error("{label}.domain must be wall or cpu"))
+        _ :: jettrace_unsigned(fields[jettrace_get(fields, "duration_ns")].value, "{label}.duration_ns")
+        jettrace_validate_symbol(fields[jettrace_get(fields, "symbol")].value, "{label}.symbol")
+    }
+    return
+}
+fn jettrace_validate_allocations(value: CanonicalJSON) JetTraceError! {
+    items :: jettrace_array(value, "content.allocations")
+    loop index in 0..<items.len() {
+        label :: "content.allocations[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"bytes", "count", "symbol"})
+        _ :: jettrace_unsigned(fields[jettrace_get(fields, "bytes")].value, "{label}.bytes")
+        _ :: jettrace_unsigned(fields[jettrace_get(fields, "count")].value, "{label}.count")
+        jettrace_validate_symbol(fields[jettrace_get(fields, "symbol")].value, "{label}.symbol")
+    }
+    return
+}
+// Rust char::is_control: Unicode Cc, including C1 (not just ASCII).
+fn jettrace_has_control(text: String) -> Bool Never! {
+    bytes :: text.bytes()
+    loop index in 0..<bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        if byte <= 31 || byte == 127 -> return true
+        if byte == 194 && index + 1 < bytes.len() {
+            continuation :: Int.from_u8(bytes[index + 1])
+            if continuation >= 128 && continuation <= 159 -> return true
+        }
+    }
+    false
+}
+fn jettrace_validate_receipt_section(value: CanonicalJSON, label: String) -> String JetTraceError! {
+    fields :: jettrace_object_keys(value, label, [String]{"digest", "name", "type_name", "value"})
+    name :: jettrace_text(fields[jettrace_get(fields, "name")].value, "{label}.name")
+    if name.len() == 0 -> return Err(jettrace_error("{label}.name is empty"))
+    if name.bytes().len() > TRACE_RECEIPT_SECTION_NAME_BYTES -> return Err(jettrace_error("{label}.name is too long (maximum {TRACE_RECEIPT_SECTION_NAME_BYTES} bytes)"))
+    if jettrace_has_control(name) || name.contains("/") || name.contains("\\") -> return Err(jettrace_error("{label}.name is invalid"))
+    type_name :: jettrace_text(fields[jettrace_get(fields, "type_name")].value, "{label}.type_name")
+    if type_name.len() == 0 -> return Err(jettrace_error("{label}.type_name is empty"))
+    if type_name.bytes().len() > TRACE_RECEIPT_SECTION_TYPE_BYTES -> return Err(jettrace_error("{label}.type_name is too long (maximum {TRACE_RECEIPT_SECTION_TYPE_BYTES} bytes)"))
+    if jettrace_has_control(type_name) -> return Err(jettrace_error("{label}.type_name is invalid"))
+    digest :: jettrace_text(fields[jettrace_get(fields, "digest")].value, "{label}.digest")
+    if !jettrace_hex64(digest) -> return Err(jettrace_error("{label}.digest is not lowercase Hex64"))
+    body :: fields[jettrace_get(fields, "value")].value
+    if body == {
+        .Object(_) -> {}
+        else -> return Err(jettrace_error("{label}.value must be a canonical JSON object"))
+    }
+    if digest != canonical_json_sha256(body) -> return Err(jettrace_error("{label}.digest does not match value"))
+    Ok(name)
+}
+fn trace_receipt_section_from_json_at(value: CanonicalJSON, label: String) -> TraceReceiptSection JetTraceError! {
+    name :: jettrace_validate_receipt_section(value, label)
+    fields :: jettrace_object_keys(value, label, [String]{"digest", "name", "type_name", "value"})
+    type_name :: jettrace_text(fields[jettrace_get(fields, "type_name")].value, "{label}.type_name")
+    digest :: jettrace_text(fields[jettrace_get(fields, "digest")].value, "{label}.digest")
+    Ok(TraceReceiptSection{name: ~name, type_name: ~type_name, value: ~fields[jettrace_get(fields, "value")].value, digest: ~digest})
+}
+fn jettrace_validate_receipt_sections(value: CanonicalJSON) JetTraceError! {
+    items :: jettrace_array(value, "content.receipt_sections")
+    prior := String?{None}
+    loop index in 0..<items.len() {
+        label :: "content.receipt_sections[{index}]"
+        name :: jettrace_validate_receipt_section(items[index], label)
+        if prior == {
+            .Val(previous) -> {
+                if previous > name -> return Err(jettrace_error("content.receipt_sections is not sorted by name"))
+                if previous == name -> return Err(jettrace_error("{label}.name duplicates receipt section `{name}`"))
+            }
+            else -> {}
+        }
+        prior = Val(~name)
+    }
+    return
+}
+fn jettrace_validate_source_identity(value: CanonicalJSON) JetTraceError! {
+    items :: jettrace_array(value, "content.source_identity")
+    loop index in 0..<items.len() {
+        label :: "content.source_identity[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"path", "sha256", "symbols"})
+        _ :: jettrace_text(fields[jettrace_get(fields, "path")].value, "{label}.path")
+        hash :: jettrace_text(fields[jettrace_get(fields, "sha256")].value, "{label}.sha256")
+        if !jettrace_hex64(hash) -> return Err(jettrace_error("{label}.sha256 is not lowercase Hex64"))
+        symbols :: jettrace_array(fields[jettrace_get(fields, "symbols")].value, "{label}.symbols")
+        prior_name := ""
+        prior_kind := ""
+        loop j in 0..<symbols.len() {
+            slabel :: "{label}.symbols[{j}]"
+            sfields :: jettrace_object_keys(symbols[j], slabel, [String]{"kind", "name"})
+            kind :: jettrace_text(sfields[jettrace_get(sfields, "kind")].value, "{slabel}.kind")
+            name :: jettrace_text(sfields[jettrace_get(sfields, "name")].value, "{slabel}.name")
+            if j > 0 && (prior_name > name || (prior_name == name && prior_kind > kind)) -> return Err(jettrace_error("{label}.symbols is not sorted"))
+            prior_name = ~name
+            prior_kind = ~kind
+        }
+    }
+    return
+}
+fn jettrace_validate_source_maps(value: CanonicalJSON) JetTraceError! {
+    items :: jettrace_array(value, "content.source_maps")
+    prior := String?{None}
+    loop index in 0..<items.len() {
+        label :: "content.source_maps[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"kind", "map", "path", "sha256"})
+        kind :: jettrace_text(fields[jettrace_get(fields, "kind")].value, "{label}.kind")
+        if kind != "jet" && kind != "js" -> return Err(jettrace_error("{label}.kind must be jet or js"))
+        path :: jettrace_text(fields[jettrace_get(fields, "path")].value, "{label}.path")
+        if prior == {
+            .Val(previous) -> {
+                if previous > path -> return Err(jettrace_error("content.source_maps is not sorted by path"))
+            }
+            else -> {}
+        }
+        prior = Val(~path)
+        // Match the retained node directly: returning the potentially large map
+        // string from jettrace_text would make an unnecessary owned copy.
+        if fields[jettrace_get(fields, "map")].value == {
+            .String(map) -> {
+                hash :: jettrace_text(fields[jettrace_get(fields, "sha256")].value, "{label}.sha256")
+                if !jettrace_hex64(hash) -> return Err(jettrace_error("{label}.sha256 is not lowercase Hex64"))
+                raw :: map.bytes()
+                actual :: mir_sha256_bytes(raw[0..<raw.len()])
+                if hash != mir_sha256_hex_bytes(actual[0..<actual.len()]) -> return Err(jettrace_error("{label}.sha256 does not match map bytes"))
+            }
+            else -> return Err(jettrace_error("{label}.map is not text"))
+        }
+    }
+    return
+}
+fn jettrace_validate_toolchain(value: CanonicalJSON) JetTraceError! {
+    fields :: jettrace_object_keys(value, "toolchain", [String]{"compiler_build_id", "digest", "jet_version", "runner_id", "stdlib_id"})
+    keys :: [String]{"compiler_build_id", "jet_version", "runner_id", "stdlib_id"}
+    body_fields := [CanonicalJSONField]{}
+    loop key in keys {
+        text :: jettrace_text(fields[jettrace_get(fields, key)].value, "toolchain.{key}")
+        &body_fields.push(jettrace_field(~key, .String(~text)))
+    }
+    digest :: jettrace_text(fields[jettrace_get(fields, "digest")].value, "toolchain.digest")
+    if !jettrace_hex64(digest) -> return Err(jettrace_error("toolchain.digest is not lowercase Hex64"))
+    body :: jettrace_object(body_fields)
+    if canonical_json_sha256(body) != digest -> return Err(jettrace_error("toolchain digest mismatch"))
+    return
+}
+fn jettrace_validate_content(value: CanonicalJSON) JetTraceError! {
+    fields :: jettrace_object_keys(value, "content", [String]{"allocations", "argv", "browser", "capture_policy", "command", "game_draw_events", "game_frames", "hardware", "io", "locks", "native", "profile", "samples", "receipt_sections", "source_identity", "source_maps", "spans", "tasks", "toolchain"})
+    _ :: jettrace_text(fields[jettrace_get(fields, "command")].value, "content.command")
+    argv :: jettrace_array(fields[jettrace_get(fields, "argv")].value, "content.argv")
+    loop index in 0..<argv.len() { _ :: jettrace_text(argv[index], "content.argv[{index}]") }
+    arrays :: [String]{"browser", "game_draw_events", "game_frames", "native", "receipt_sections", "spans", "source_maps"}
+    loop key in arrays { _ :: jettrace_array(fields[jettrace_get(fields, key)].value, "content.{key}") }
+    jettrace_validate_hardware(fields[jettrace_get(fields, "hardware")].value)
+    limits :: jettrace_validate_capture_policy(fields[jettrace_get(fields, "capture_policy")].value)
+    jettrace_validate_browser(fields[jettrace_get(fields, "browser")].value, limits.browser_rows)
+    jettrace_validate_game_frames(fields[jettrace_get(fields, "game_frames")].value)
+    jettrace_validate_game_draw_events(fields[jettrace_get(fields, "game_draw_events")].value)
+    jettrace_validate_samples(fields[jettrace_get(fields, "samples")].value)
+    jettrace_validate_allocations(fields[jettrace_get(fields, "allocations")].value)
+    jettrace_validate_receipt_sections(fields[jettrace_get(fields, "receipt_sections")].value)
+    tasks :: jettrace_validate_tasks(fields[jettrace_get(fields, "tasks")].value, limits.task_rows)
+    jettrace_validate_locks(fields[jettrace_get(fields, "locks")].value)
+    jettrace_validate_io(fields[jettrace_get(fields, "io")].value, tasks, limits.io_rows)
+    jettrace_validate_native(fields[jettrace_get(fields, "native")].value, tasks, limits.native_rows)
+    jettrace_validate_spans(fields[jettrace_get(fields, "spans")].value, tasks, limits.span_rows)
+    jettrace_validate_source_identity(fields[jettrace_get(fields, "source_identity")].value)
+    jettrace_validate_profile(fields[jettrace_get(fields, "profile")].value, fields[jettrace_get(fields, "source_identity")].value)
+    jettrace_validate_source_maps(fields[jettrace_get(fields, "source_maps")].value)
+    jettrace_validate_toolchain(fields[jettrace_get(fields, "toolchain")].value)
+    return
+}
+pub fn trace_id(value: CanonicalJSON) -> String JetTraceError! {
+    fields :: jettrace_wrapper_fields(value)
+    loop field in fields { if field.key == "trace_id" -> return jettrace_text(field.value, "trace_id") }
+    Err(jettrace_error("jettrace missing trace_id"))
+}
+pub fn artifact_extension() -> String Never! { ARTIFACT_EXT_TRACE }

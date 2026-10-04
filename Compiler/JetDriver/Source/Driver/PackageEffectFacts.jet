@@ -1,0 +1,216 @@
+// Rust EffectBudget.rs:253-564 and SemIndexEffectFacts:1286-1305.
+// The canonical PackageModel MOVE is a publication gate for these imports;
+// no Driver-local budget carrier or alternate budget engine exists.
+use jet_foundation.[Diagnostic, Func, Item, diagnostic_from_registry, diagnostic_registry_row, authority_covers]
+use jet_pkg_model.[EffectBudgetImport, EffectBudgetOutput, EffectBudgetModule, EffectBudgetProgram, PackageEffectSummary, PackageEffects, PackageFacts, pkg_effect_key, pkg_compute_package_effects, pkg_effect_enforce, pkg_lint_policy_apply]
+use jet_sema.[SemaCompilerModuleSource, SemaGraphResult, SemaRegistrationGraph, SemaRegistrationPackagePolicy]
+
+// Rust ProgramBundle::package_guarantees and dep_roots, produced from the
+// retained typed Loader manifest and its one root-first dependency provider.
+// This is shared by native compilation and resident compiler queries.
+fn jet_driver_registration_package_policies(load: JetDriverLoadResult, roots: View<JetDriverAuthorizedSourceRoot>) -> [SemaRegistrationPackagePolicy] Never! {
+    dependency_roots := [String:compiler_driver_os_path.OsPath]{}
+    loop root in jet_driver_package_dependency_roots(load, roots) -> dependency_roots[root.name] = root.path
+    policies := [SemaRegistrationPackagePolicy]{}
+    loop package in load.packages {
+        names := [String:Bool]{}
+        loop dependency in package.dependencies -> names[dependency.name] = true
+        allowed := [String:Bool]?{None}
+        if package.manifest_facts == .Val(manifest) {
+            loop (name, _) in manifest.deps -> names[name] = true
+            if manifest.policy.deps == .Val(entries) {
+                allowlist := [String:Bool]{}
+                loop entry in entries -> allowlist[entry] = true
+                allowed = Val(allowlist)
+            }
+        }
+        selected_roots := [String:compiler_driver_os_path.OsPath]{}
+        if package.identity == load.package_identity -> selected_roots = dependency_roots
+        &policies.push(SemaRegistrationPackagePolicy{
+            package_identity: package.identity,
+            authority_allow: package.authority_allow,
+            authority_deny: package.authority_deny,
+            authority_needs: package.authority_needs,
+            runtime_ceiling: package.runtime_ceiling,
+            edition: package.edition,
+            dependency_names: names,
+            dep_roots: selected_roots,
+            dependency_allowlist: allowed,
+        })
+    }
+    policies
+}
+
+// Read the ORIGINAL loaded Program before registration lifts or expands items.
+// This compact traversal does not own, clone, or reconstruct the AST graph.
+fn jet_driver_effect_budget_function_keys(items: [Item]) -> [String] Never! {
+    keys := [String]{}
+    loop item in items {
+        if item == {
+            .Func(function) -> &keys.push(pkg_effect_key(None, function.name))
+            .Impl(implementation) -> {
+                loop method in implementation.methods -> &keys.push(pkg_effect_key(Val(implementation.type_name), method.name))
+            }
+            .Struct(definition) -> {
+                loop method in definition.methods -> &keys.push(pkg_effect_key(Val(definition.name), method.name))
+                loop implementation in definition.trait_impls {
+                    loop method in implementation.methods -> &keys.push(pkg_effect_key(Val(definition.name), method.name))
+                }
+            }
+            .Enum(definition) -> {
+                loop method in definition.methods -> &keys.push(pkg_effect_key(Val(definition.name), method.name))
+            }
+            else -> {}
+        }
+    }
+    keys
+}
+fn jet_driver_effect_budget_is_build_entry(function: Func) -> Bool Never! {
+    if function.name != "build" || function.params.len() != 1 -> return false
+    if function.params[0].ty == .Named(name) -> return name == "BuildContext"
+    false
+}
+fn jet_driver_effect_budget_program(load: JetDriverLoadResult, identity: JetDriverPackageIdentityFacts) -> EffectBudgetProgram Never! {
+    entry := -1
+    modules := [EffectBudgetModule]{}
+    // No output selected is a real checked fact until the checked declaration
+    // producer publishes one; Driver refuses unsupported output selection.
+    loop loaded in load.modules {
+        unit :: load.source_units[loaded.source_unit_index]
+        if !unit.bundle_module -> next
+        imports := [EffectBudgetImport]{}
+        loop declaration in jet_driver_module_program(load, loaded).imports {
+            if declaration.kind == {
+                .Module(name, span) -> &imports.push(EffectBudgetImport{name: name, span: span})
+                .Unqualified(name, span, _, _, _) -> &imports.push(EffectBudgetImport{name: name, span: span})
+                else -> {}
+            }
+        }
+        has_build_entry := false
+        loop item in jet_driver_module_program(load, loaded).items {
+            if item == .Func(function) && jet_driver_effect_budget_is_build_entry(function) -> has_build_entry = true
+        }
+        if loaded.module_identity == load.entry_module_identity -> entry = modules.len()
+        // Generated sources have authored virtual paths, not native opens.
+        path :: unit.physical_path ?? compiler_driver_os_path.from_text(unit.path, compiler_driver_os_path.PathPlatform.Unix)
+        &modules.push(EffectBudgetModule{path: path, alias: unit.alias, function_keys: jet_driver_effect_budget_function_keys(jet_driver_module_program(load, loaded).items), imports: imports, has_build_entry: has_build_entry})
+    }
+    roots := [String:compiler_driver_os_path.OsPath]{}
+    loop root in identity.dependency_roots -> roots[root.name] = root.path
+    EffectBudgetProgram{entry: entry, modules: modules, dep_roots: roots, selected_output: None}
+}
+
+// Publication of the selected output reads the checked declaration directly;
+// its module_id belongs to registration order, not the loaded module vector.
+fn jet_driver_effect_budget_selected_output(program: &EffectBudgetProgram, registration: SemaRegistrationGraph, graph: SemaGraphResult, module_sources: [SemaCompilerModuleSource]) {
+    loaded_indices := [String:Int]{}
+    loop source in module_sources {
+        if source.loaded_module_index == .Val(index) -> loaded_indices[source.module_identity] = index
+    }
+    loop module in registration.modules {
+        if module.module_identity != graph.entry_module_identity -> next
+        loop constant in module.constants {
+            if constant.declaration.resolved_output == .Val(output) && output.selected {
+                if output.module_id < 0 || output.module_id >= registration.modules.len() -> panic("selected checked output has no registered module owner")
+                identity :: registration.modules[output.module_id].module_identity
+                index :: loaded_indices.get(identity) ?? panic("selected checked output has no original loaded module owner")
+                program.selected_output = Val(EffectBudgetOutput{module_index: index, semantic_name: output.semantic_name})
+                return
+            }
+        }
+    }
+}
+fn jet_driver_effect_budget_summaries(graph: SemaGraphResult) -> [String:PackageEffectSummary] Never! {
+    summaries := [String:PackageEffectSummary]{}
+    loop (key, summary) in graph.effect_facts.summaries {
+        summaries[key] = PackageEffectSummary{direct: summary.direct, edges: summary.edges, maximal: summary.maximal}
+    }
+    summaries
+}
+
+// Rust Effects.rs:248-318. Solved rows are indexed once by module alias, not
+// rescanned for every module. Path rules are looked up from most specific to
+// least specific, retaining the exact `.`, stem, and descendant rule law.
+fn jet_driver_effect_policy_ceiling(ceilings: [String:[String]], path: String) -> [String]? Never! {
+    if ceilings.get(path) == .Val(ceiling) -> return Val(ceiling)
+    if path.ends_with(".jet") {
+        stem := path.removesuffix(".jet") // #4303
+        if ceilings.get(stem) == .Val(ceiling) -> return Val(ceiling)
+    }
+    parts :: path.split("/").to_list()
+    index := parts.len() - 1
+    end := path.len()
+    loop index > 0 {
+        end -= parts[index].len() + 1
+        index -= 1
+        if end <= 0 -> break
+        parent := path.slice(0, end) // #4303
+        if ceilings.get(parent) == .Val(ceiling) -> return Val(ceiling)
+    }
+    ceilings.get(".")
+}
+fn jet_driver_package_policy_diagnostic(rule: String, subject: String, path: String) -> Diagnostic Never! {
+    row :: diagnostic_registry_row("E2960") ?? panic("package policy diagnostic has no canonical registry row")
+    what :: row.what.replace("{{rule}}", rule).replace("{{subject}}", subject).replace("{{path}}", path)
+    why :: row.why.replace("{{rule}}", rule).replace("{{subject}}", subject).replace("{{path}}", path)
+    fix :: row.fix.replace("{{rule}}", rule).replace("{{subject}}", subject).replace("{{path}}", path)
+    diagnostic_from_registry("E2960", None, what, why, fix)
+}
+fn jet_driver_package_team_policy_diagnostics(load: JetDriverLoadResult, program: EffectBudgetProgram, graph: SemaGraphResult, manifest: PackageFacts) -> [Diagnostic] Never! {
+    diagnostics := [Diagnostic]{}
+    if manifest.policy.effects.len() > 0 {
+        effects_by_alias := [String:[String:Bool]]{}
+        loop (key, effects) in graph.effect_facts.solved {
+            if !key.contains("::") -> next
+            alias := key.before("::") // #4303
+            row := effects_by_alias.get(alias) ?? [String:Bool]{}
+            loop effect in effects -> row[effect] = true
+            effects_by_alias[alias] = row
+        }
+        loop module in program.modules {
+            extent :: compiler_driver_os_path.strip_prefix_span(module.path, load.project_root) ?? next
+            path := compiler_driver_os_path.display_span(module.path, extent).replace("\\", "/") // #4303
+            if path.starts_with("./") -> path = path.removeprefix("./")
+            if path == "" -> next
+            ceiling :: jet_driver_effect_policy_ceiling(manifest.policy.effects, path) ?? next
+            effects :: effects_by_alias.get(module.alias) ?? [String:Bool]{}
+            ordered := effects.keys().to_list()
+            &ordered.sort()
+            loop effect in ordered {
+                covered := false
+                loop bound in ceiling { if authority_covers(bound, effect) -> covered = true }
+                if !covered -> &diagnostics.push(jet_driver_package_policy_diagnostic("policy.effects", effect, path))
+            }
+        }
+    }
+    if manifest.policy.deps == .Val(allowed) {
+        dependencies := [String:Bool]{}
+        loop (name, _) in manifest.deps -> dependencies[name] = true
+        loop (name, _) in program.dep_roots -> dependencies[name] = true
+        loop package in load.packages {
+            if package.identity != load.package_identity -> next
+            loop dependency in package.dependencies -> dependencies[dependency.name] = true
+        }
+        ordered := dependencies.keys().to_list()
+        &ordered.sort()
+        loop dependency in ordered {
+            if allowed.contains(dependency) -> next
+            &diagnostics.push(jet_driver_package_policy_diagnostic("policy.deps", dependency, "package.jet"))
+        }
+    }
+    diagnostics
+}
+
+// Rust Driver::apply_package_effect_budget/apply_package_lint_policy. The
+// manifest is the canonical typed Loader product, never reopened or reparsed.
+fn jet_driver_checked_package_policy(load: JetDriverLoadResult, program: EffectBudgetProgram, graph: SemaGraphResult, entries: [PackageEffects], original: [Diagnostic]) -> [Diagnostic] Never! {
+    diagnostics := original
+    loop package in load.packages {
+        if package.identity != load.package_identity -> next
+        manifest :: package.manifest_facts ?? return diagnostics
+        loop diagnostic in jet_driver_package_team_policy_diagnostics(load, program, graph, manifest) -> &diagnostics.push(diagnostic)
+        loop diagnostic in pkg_effect_enforce(entries, manifest) -> &diagnostics.push(diagnostic)
+        return pkg_lint_policy_apply(manifest.policy.lints_deny ?? [String]{}, diagnostics)
+    }
+    diagnostics
+}

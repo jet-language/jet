@@ -3,10 +3,10 @@
 // into parser-ready values without consulting the Rust lexer.
 use jet_foundation.[
     Diagnostic,
-    DiagnosticLabel,
     Span,
     TextEdit,
     diagnostic_from_registry,
+    diagnostic_registry_row,
     diagnostic_with_edit,
 ]
 use core.text as unicode
@@ -344,9 +344,11 @@ fn shifted_diagnostic(diagnostic: &Diagnostic, offset: Int) Never! {
         }
         .None -> None
     }
-    shifted_labels := [DiagnosticLabel]{}
-    loop label in diagnostic.labels -> &shifted_labels.push(DiagnosticLabel{span: shifted_span(label.span, offset), message: label.message})
-    diagnostic.labels = shifted_labels
+    index := 0
+    loop index < diagnostic.labels.len() {
+        diagnostic.labels[index].span = shifted_span(diagnostic.labels[index].span, offset)
+        index += 1
+    }
 }
 
 fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int) -> Lexed {
@@ -374,9 +376,16 @@ fn lex_payload_at_depth(source: [U8], config_surface: Bool, allow_reserved_ident
     lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, depth)
 }
 
+// Rust Strings.rs `lex_interpolation`: nested tokens and every diagnostic span
+// (main, edit and labels, #4387) are rebased onto the enclosing source.
 fn lex_expression(source: [U8], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, span: Span, diagnostics: &[Diagnostic]) -> [Token] {
     if depth >= MAX_INTERPOLATION_DEPTH {
-        add_diagnostic(&diagnostics, "E1403", span.start, span.end, "source nesting exceeds the supported limit", "interpolated expressions are lexed as nested Jet source", "pull inner parts out into named bindings or helper functions")
+        // Rust `Diagnostic::source_nesting_exceeded(next_depth, span)`: the
+        // E1403 row owns the prose; its one `{depth}` hole is the new depth.
+        row :: diagnostic_registry_row("E1403") ?? panic("diagnostic `E1403` has no generated Source registry row")
+        next_depth :: depth + 1
+        what :: row.what.replace("{{depth}}", "{next_depth}")
+        &diagnostics.push(diagnostic_from_registry("E1403", Val(span), what, row.why, row.fix))
         return [Token]{}
     }
     nested_source := bytes_slice(source, start, end)
@@ -566,7 +575,7 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
                     literal_start = cursor
                     next
                 }
-                add_diagnostic(&diagnostics, "E0001", cursor, cursor + 4, "`\\x` needs two hexadecimal digits", "a byte escape writes one byte as `\\xNN`, where both digits are hexadecimal", "write two hexadecimal digits after `\\x`, for example `\\x00`")
+                invalid_byte_escape(source, cursor, &diagnostics)
                 cursor += 2
                 next
             }
@@ -575,7 +584,9 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
             escape_end := cursor + 1 + escape_width
             if {
                 escaped < 0 -> {
-                    escape_text :: bytes_text(source, cursor + 1, escape_end)
+                    // Rust Scan.rs `at` yields NUL beyond the source; keep
+                    // that diagnostic spelling while `pos` clamps its span.
+                    escape_text :: if next_value < 0 -> String.from_bytes([U8]{0}) ?? "" else -> bytes_text(source, cursor + 1, escape_end)
                     what := "`\\{escape_text}` isn't an escape Jet knows"
                     why :: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
                     add_diagnostic(&diagnostics, "E0001", cursor, escape_end, what, why, "write `\\\\` for a real backslash")
@@ -633,7 +644,8 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
             if only_whitespace(source, cursor + 1, close) {
                 add_diagnostic(&diagnostics, "E0003", cursor, close + 1, "there's nothing inside this `{{ }}` to show", "interpolation puts a value into the text, so the braces need a value", "put a value inside, like `{{name}}`, or write `{{{{}}}}` for literal braces")
                 cursor = close + 1
-                literal_start = cursor
+                // The existing literal still starts before an empty hole.
+                if literal.len() == 0 -> literal_start = cursor
                 next
             }
             if literal.len() > 0 {
@@ -664,6 +676,18 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
     }
     if literal.len() > 0 || parts.len() == 0 -> append_text_part(&parts, literal_start, end, text_from_bytes(literal))
     (decoded: text_from_bytes(decoded), interpolations: interpolations, parts: parts, valid: valid)
+}
+
+// Rust Strings.rs `invalid_byte_escape`: the span runs from `\` over four
+// scalars (`pos(at + 4)`), clamped to the source end for a truncated escape.
+fn invalid_byte_escape(source: [U8], at: Int, diagnostics: &[Diagnostic]) {
+    end := at
+    scalars := 0
+    loop scalars < 4 && end < source.len() {
+        end += utf8_width(source, end)
+        scalars += 1
+    }
+    add_diagnostic(&diagnostics, "E0001", at, end, "`\\x` needs two hexadecimal digits", "a byte escape writes one byte as `\\xNN`, where both digits are hexadecimal", "write two hexadecimal digits after `\\x`, for example `\\x00`")
 }
 
 fn decode_raw_string(text: String, source_start: Int) -> (decoded: String, parts: [StringPart]) Never! {

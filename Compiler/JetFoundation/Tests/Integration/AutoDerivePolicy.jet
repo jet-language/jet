@@ -1,0 +1,930 @@
+// PORT-PENDING 0970 tests-auto-derive-policy: tests/auto_derive_policy.rs:1-926
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use jet::JitBackend::JitBackend;
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS 
+//RS fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+//RS     let request = jet_foundation::MIR::MirArtifactRequest::new(
+//RS         jet_foundation::MIR::MirArtifactTarget::RustAot,
+//RS         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+//RS         jet_foundation::MIR::MirArtifactBuildMode::Dev,
+//RS     );
+//RS     let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+//RS         .expect("checked native artifact lowers through MIR");
+//RS     mir.validate()
+//RS         .expect("canonical MIR validates in auto-derive test");
+//RS     let mir = jet_foundation::MIR::optimize_mir_program(
+//RS         mir,
+//RS         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
+//RS     )
+//RS     .expect("canonical MIR optimizes in auto-derive test");
+//RS     jet::Codegen::MIRRust::emit_mir_program(
+//RS         &mir,
+//RS         &jet::Codegen::MIRRust::MirRustConfig {
+//RS             target: jet_foundation::Layout::TargetLayout::host(),
+//RS             target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
+//RS             root_prefix: String::new(),
+//RS             execution: jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS /// Number of `impl <rust_trait> for <type>` headers in generated Rust for the
+//RS /// program type `name`. Program types are emitted under their mangled
+//RS /// module-qualified key, whose last path segment `::<name>` mangles to
+//RS /// `_c_c<name>`.
+//RS fn impl_count(rust: &str, rust_trait: &str, name: &str) -> usize {
+//RS     let prefix = format!("impl {rust_trait} for __jet_");
+//RS     let bare = format!("{name} {{");
+//RS     let qualified = format!("_c_c{name} {{");
+//RS     rust.lines()
+//RS         .filter_map(|line| line.strip_prefix(&prefix))
+//RS         .filter(|rest| *rest == bare || rest.ends_with(&qualified))
+//RS         .count()
+//RS }
+//RS 
+//RS fn project_dir(name: &str) -> std::path::PathBuf {
+//RS     std::env::temp_dir().join(format!("jet_auto_derive_{name}_{}", std::process::id()))
+//RS }
+//RS 
+//RS fn loaded_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST::ProgramBundle {
+//RS     let dir = project_dir(name);
+//RS     let _ = std::fs::remove_dir_all(&dir);
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     std::fs::write(
+//RS         dir.join("package.jet"),
+//RS         format!("name: \"{name}\"\nversion: \"1.0.0\"\n{manifest_policy}\n"),
+//RS     )
+//RS     .unwrap();
+//RS     let entry = dir.join("main.jet");
+//RS     std::fs::write(&entry, source).unwrap();
+//RS     jet::Loader::load_entry(entry.to_str().unwrap()).unwrap()
+//RS }
+//RS 
+//RS fn checked_bundle(mut bundle: jet::AST::ProgramBundle) -> jet::AST::ProgramBundle {
+//RS     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+//RS         .into_iter()
+//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(errors.is_empty(), "{errors:#?}");
+//RS     bundle
+//RS }
+//RS 
+//RS fn checked_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST::ProgramBundle {
+//RS     checked_bundle(loaded_project(name, manifest_policy, source))
+//RS }
+//RS 
+//RS fn project_diagnostics(name: &str, manifest_policy: &str, source: &str) -> Vec<String> {
+//RS     let dir = project_dir(name);
+//RS     let _ = std::fs::remove_dir_all(&dir);
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     std::fs::write(
+//RS         dir.join("package.jet"),
+//RS         format!("name: \"{name}\"\nversion: \"1.0.0\"\n{manifest_policy}\n"),
+//RS     )
+//RS     .unwrap();
+//RS     let entry = dir.join("main.jet");
+//RS     std::fs::write(&entry, source).unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+//RS     jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+//RS         .into_iter()
+//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+//RS         .map(|diagnostic| diagnostic.code)
+//RS         .collect()
+//RS }
+//RS 
+//RS fn collect_struct_defaults(items: &[jet::AST::Item], out: &mut Vec<(String, bool)>) {
+//RS     for item in items {
+//RS         match item {
+//RS             jet::AST::Item::Struct(def) => {
+//RS                 out.push((def.name.clone(), def.auto_derive_default));
+//RS             }
+//RS             jet::AST::Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     collect_struct_defaults(body, out);
+//RS                 }
+//RS             }
+//RS             jet::AST::Item::GenericModule(module) => {
+//RS                 collect_struct_defaults(&module.body, out);
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct AotMeasurement {
+//RS     exit: i32,
+//RS     stdout: String,
+//RS     generated_rust_bytes: usize,
+//RS     binary_bytes: u64,
+//RS }
+//RS 
+//RS fn aot_measurement(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<AotMeasurement> {
+//RS     if !common::have_rustc() {
+//RS         return None;
+//RS     }
+//RS     let dir = project_dir(name);
+//RS     let _ = std::fs::remove_dir_all(&dir);
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let rust = dir.join("main.rs");
+//RS     let binary = dir.join("main_bin");
+//RS     let generated = emit_native_aot(bundle);
+//RS     std::fs::write(&rust, &generated).unwrap();
+//RS     let built = Command::new("rustc")
+//RS         .args(["--edition", "2021", "-O"])
+//RS         .arg(&rust)
+//RS         .arg("-o")
+//RS         .arg(&binary)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "AOT generated Rust failed:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let ran = Command::new(binary).output().unwrap();
+//RS     Some(AotMeasurement {
+//RS         exit: ran.status.code().unwrap_or(-1),
+//RS         stdout: String::from_utf8_lossy(&ran.stdout).into_owned(),
+//RS         generated_rust_bytes: generated.len(),
+//RS         binary_bytes: std::fs::metadata(dir.join("main_bin")).unwrap().len(),
+//RS     })
+//RS }
+//RS 
+//RS fn aot_output(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<(i32, String)> {
+//RS     aot_measurement(bundle, name).map(|measurement| (measurement.exit, measurement.stdout))
+//RS }
+//RS 
+//RS #[test]
+//RS fn signed_markers_gate_generated_traits_and_jit_behavior() {
+//RS     let bundle = checked_project(
+//RS         "signed",
+//RS         "",
+//RS         r#"
+//RS #[!Debug, !Equatable, Printable]
+//RS struct Mixed { value: Int }
+//RS 
+//RS fn run() {
+//RS     print(Mixed{ value: 7 })
+//RS }
+//RS "#,
+//RS     );
+//RS     let rust = emit_native_aot(&bundle);
+//RS     assert_eq!(impl_count(&rust, "JetShow", "Mixed"), 1);
+//RS     assert_eq!(impl_count(&rust, "JetDebug", "Mixed"), 0);
+//RS     assert_eq!(impl_count(&rust, "__jet_Equatable", "Mixed"), 0);
+//RS 
+//RS     let policy = common::development_policy();
+//RS     let mut backend = jet_jit::CraneliftBackend::new();
+//RS     let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+//RS     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
+//RS         panic!("signed auto-derive program did not run: {outcome:?}");
+//RS     };
+//RS     assert_eq!(stdout, "Mixed { value: 7 }\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn signed_codable_refuses_both_codec_directions() {
+//RS     let bundle = checked_project(
+//RS         "signed_codable",
+//RS         "",
+//RS         r#"
+//RS #!Codable
+//RS struct NoCodec { value: Int }
+//RS 
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+//RS     let facts = &facts[bundle.entry];
+//RS     assert!(!facts.auto_encode.contains("NoCodec"));
+//RS     assert!(!facts.auto_decode.contains("NoCodec"));
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn plain_struct_auto_codable_matches_all_execution_tiers() {
+//RS     let bundle = checked_project(
+//RS         "plain_codable",
+//RS         "",
+//RS         r#"
+//RS use core.encoding.json as json
+//RS 
+//RS struct Record { id: Int name: String }
+//RS 
+//RS fn run() {
+//RS     print(json.to_string(Record{ id: 7, name: "plain" }))
+//RS }
+//RS "#,
+//RS     );
+//RS     let expected = "{\"id\":7,\"name\":\"plain\"}\n";
+//RS     if let Some((exit, stdout)) = aot_output(&bundle, "plain_codable_aot") {
+//RS         assert_eq!(exit, 0);
+//RS         assert_eq!(stdout, expected);
+//RS     }
+//RS 
+//RS     let policy = common::development_policy();
+//RS     let mut backend = jet_jit::CraneliftBackend::new();
+//RS     let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+//RS     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
+//RS         panic!("plain Codable program did not run in the default JIT: {outcome:?}");
+//RS     };
+//RS     assert_eq!(stdout, expected);
+//RS 
+//RS     let outcome = jet::Interpreter::dev_iteration(
+//RS         project_dir("plain_codable")
+//RS             .join("main.jet")
+//RS             .to_str()
+//RS             .unwrap(),
+//RS         false,
+//RS         true,
+//RS     );
+//RS     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
+//RS         panic!("plain Codable program did not run in the forced interpreter: {outcome:?}");
+//RS     };
+//RS     assert_eq!(stdout, expected);
+//RS }
+//RS 
+//RS #[test]
+//RS fn auto_derive_keeps_compile_and_binary_measurements_stable() {
+//RS     let explicit_bundle = checked_project(
+//RS         "auto_measure_before",
+//RS         "",
+//RS         r#"
+//RS use core.encoding.json as json
+//RS 
+//RS #[Encode, Decode]
+//RS struct Record { id: Int name: String }
+//RS 
+//RS fn run() {
+//RS     print(json.to_string(Record{ id: 7, name: "plain" }))
+//RS }
+//RS "#,
+//RS     );
+//RS     let automatic_bundle = checked_project(
+//RS         "auto_measure_after",
+//RS         "",
+//RS         r#"
+//RS use core.encoding.json as json
+//RS 
+//RS struct Record { id: Int name: String }
+//RS 
+//RS fn run() {
+//RS     print(json.to_string(Record{ id: 7, name: "plain" }))
+//RS }
+//RS "#,
+//RS     );
+//RS     let Some(explicit) = aot_measurement(&explicit_bundle, "auto_measure_before_aot") else {
+//RS         return;
+//RS     };
+//RS     let Some(explicit_repeat) = aot_measurement(&explicit_bundle, "auto_measure_before_aot") else {
+//RS         return;
+//RS     };
+//RS     let Some(automatic) = aot_measurement(&automatic_bundle, "auto_measure_after_aot") else {
+//RS         return;
+//RS     };
+//RS     let Some(automatic_repeat) = aot_measurement(&automatic_bundle, "auto_measure_after_aot")
+//RS     else {
+//RS         return;
+//RS     };
+//RS     for (label, first, repeat) in [
+//RS         ("explicit", &explicit, &explicit_repeat),
+//RS         ("automatic", &automatic, &automatic_repeat),
+//RS     ] {
+//RS         assert_eq!(first.exit, repeat.exit, "{label} exit changed between runs");
+//RS         assert_eq!(
+//RS             first.stdout, repeat.stdout,
+//RS             "{label} stdout changed between runs"
+//RS         );
+//RS         assert_eq!(
+//RS             first.generated_rust_bytes, repeat.generated_rust_bytes,
+//RS             "{label} generated-Rust bytes changed between runs",
+//RS         );
+//RS         assert_eq!(
+//RS             first.binary_bytes, repeat.binary_bytes,
+//RS             "{label} binary bytes changed between runs",
+//RS         );
+//RS     }
+//RS     assert_eq!(explicit.exit, 0);
+//RS     assert_eq!(automatic.exit, 0);
+//RS     assert_eq!(explicit.stdout, automatic.stdout);
+//RS     let generated_rust_delta = explicit
+//RS         .generated_rust_bytes
+//RS         .abs_diff(automatic.generated_rust_bytes);
+//RS     let binary_delta = explicit.binary_bytes.abs_diff(automatic.binary_bytes);
+//RS     eprintln!(
+//RS         "auto-derive measurement: generated Rust {} -> {} ({generated_rust_delta} bytes); binary {} -> {} ({binary_delta} bytes)",
+//RS         explicit.generated_rust_bytes,
+//RS         automatic.generated_rust_bytes,
+//RS         explicit.binary_bytes,
+//RS         automatic.binary_bytes,
+//RS     );
+//RS     assert!(
+//RS         generated_rust_delta <= 64,
+//RS         "auto derive added {generated_rust_delta} generated-Rust bytes"
+//RS     );
+//RS     assert!(
+//RS         binary_delta <= 64,
+//RS         "auto derive changed the binary by {binary_delta} bytes"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn structural_defaults_cover_codable_and_refusals_are_silent() {
+//RS     let bundle = loaded_project(
+//RS         "structural_defaults",
+//RS         "",
+//RS         r#"
+//RS struct Plain { value: Int }
+//RS 
+//RS #!Codable
+//RS struct Refused { value: Int }
+//RS 
+//RS struct Opaque { value: Shared<Int> }
+//RS 
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+//RS     let facts = &facts[bundle.entry];
+//RS     for selected in [
+//RS         &facts.auto_printable,
+//RS         &facts.auto_debug,
+//RS         &facts.auto_equatable,
+//RS         &facts.auto_comparable,
+//RS         &facts.auto_encode,
+//RS         &facts.auto_decode,
+//RS     ] {
+//RS         assert!(selected.contains("Plain"), "{selected:?}");
+//RS         assert!(!selected.contains("Opaque"), "{selected:?}");
+//RS     }
+//RS     for selected in [
+//RS         &facts.auto_printable,
+//RS         &facts.auto_debug,
+//RS         &facts.auto_equatable,
+//RS         &facts.auto_comparable,
+//RS     ] {
+//RS         assert!(selected.contains("Refused"), "{selected:?}");
+//RS     }
+//RS     assert!(!facts.auto_encode.contains("Refused"));
+//RS     assert!(!facts.auto_decode.contains("Refused"));
+//RS     let _ = checked_bundle(bundle);
+//RS }
+//RS 
+//RS #[test]
+//RS fn recursive_container_dependencies_derive_without_approving_blocked_nominals() {
+//RS     let bundle = loaded_project(
+//RS         "recursive_containers",
+//RS         "",
+//RS         r#"
+//RS struct OptionalNode { next: OptionalNode? }
+//RS struct ListNode { children: [ListNode] }
+//RS struct MapNode { children: [String:MapNode] }
+//RS 
+//RS #!Printable
+//RS struct NoPrint { value: Int }
+//RS struct Blocked { child: NoPrint? }
+//RS 
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+//RS     let facts = &facts[bundle.entry];
+//RS     for name in ["OptionalNode", "ListNode", "MapNode"] {
+//RS         assert!(facts.auto_printable.contains(name), "{name}");
+//RS         assert!(facts.auto_debug.contains(name), "{name}");
+//RS         assert!(facts.auto_encode.contains(name), "{name}");
+//RS         assert!(facts.auto_decode.contains(name), "{name}");
+//RS     }
+//RS     for name in ["OptionalNode", "ListNode", "MapNode"] {
+//RS         assert!(facts.auto_equatable.contains(name), "{name}");
+//RS     }
+//RS     assert!(!facts.auto_printable.contains("Blocked"));
+//RS     let _ = checked_bundle(bundle);
+//RS }
+//RS 
+//RS #[test]
+//RS fn project_refusal_is_a_default_fact_and_explicit_codable_still_wins() {
+//RS     let bundle = loaded_project(
+//RS         "project_refusal_fact",
+//RS         "policy: { lints: { deny: [auto_derive] } }",
+//RS         r#"
+//RS struct Defaulted { value: Int }
+//RS 
+//RS #Codable
+//RS struct Explicit { value: Int }
+//RS 
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     let mut defaults = Vec::new();
+//RS     collect_struct_defaults(&bundle.modules[bundle.entry].items, &mut defaults);
+//RS     assert_eq!(
+//RS         defaults,
+//RS         vec![
+//RS             ("Defaulted".to_string(), false),
+//RS             ("Explicit".to_string(), false)
+//RS         ]
+//RS     );
+//RS     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+//RS     let facts = &facts[bundle.entry];
+//RS     assert!(!facts.auto_encode.contains("Defaulted"));
+//RS     assert!(!facts.auto_decode.contains("Defaulted"));
+//RS     assert!(facts.auto_encode.contains("Explicit"));
+//RS     assert!(facts.auto_decode.contains("Explicit"));
+//RS     let bundle = checked_bundle(bundle);
+//RS     let rust = emit_native_aot(&bundle);
+//RS     assert_eq!(impl_count(&rust, "__jet_Encode", "Defaulted"), 0);
+//RS     assert_eq!(impl_count(&rust, "__jet_Decode", "Defaulted"), 0);
+//RS     assert_eq!(impl_count(&rust, "__jet_Encode", "Explicit"), 1);
+//RS     assert_eq!(impl_count(&rust, "__jet_Decode", "Explicit"), 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_deny_list_refuses_auto_derive() {
+//RS     let bundle = checked_project(
+//RS         "package_off",
+//RS         "policy: { lints: { deny: [auto_derive] } }",
+//RS         r#"
+//RS #[Printable, Equatable, Debug]
+//RS struct Enabled { value: Int }
+//RS 
+//RS struct Missing { value: Int }
+//RS 
+//RS #!Debug
+//RS struct Manual { value: Int }
+//RS 
+//RS impl Manual.Debug {
+//RS     fn debug(self) -> String { return "manual" }
+//RS }
+//RS 
+//RS fn run() {
+//RS     a := Enabled{ value: 3 }
+//RS     print(a)
+//RS     print("{a:Debug}")
+//RS     print(a == Enabled{ value: 3 })
+//RS     print("{Manual{ value: 9 }:Debug}")
+//RS }
+//RS "#,
+//RS     );
+//RS     let rust = emit_native_aot(&bundle);
+//RS     for rust_trait in ["JetShow", "JetDebug", "__jet_Equatable"] {
+//RS         assert_eq!(impl_count(&rust, rust_trait, "Enabled"), 1, "{rust_trait} Enabled");
+//RS         assert_eq!(impl_count(&rust, rust_trait, "Missing"), 0, "{rust_trait} Missing");
+//RS     }
+//RS     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+//RS     let facts = &facts[bundle.entry];
+//RS     assert!(!facts.auto_encode.contains("Missing"));
+//RS     assert!(!facts.auto_decode.contains("Missing"));
+//RS     assert_eq!(impl_count(&rust, "JetDebug", "Manual"), 1);
+//RS 
+//RS     let policy = common::development_policy();
+//RS     let mut backend = jet_jit::CraneliftBackend::new();
+//RS     let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+//RS     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
+//RS         panic!("package-off auto-derive program did not run: {outcome:?}");
+//RS     };
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "Enabled { value: 3 }\nEnabled { value: 3 }\ntrue\nmanual\n"
+//RS     );
+//RS 
+//RS     let outcome = jet::Interpreter::dev_iteration(
+//RS         project_dir("package_off")
+//RS             .join("main.jet")
+//RS             .to_str()
+//RS             .unwrap(),
+//RS         false,
+//RS         true,
+//RS     );
+//RS     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
+//RS         panic!("package-off auto-derive program did not interpret: {outcome:?}");
+//RS     };
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "Enabled { value: 3 }\nEnabled { value: 3 }\ntrue\nmanual\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn old_auto_derive_key_is_rejected() {
+//RS     let dir = project_dir("old_key");
+//RS     let _ = std::fs::remove_dir_all(&dir);
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let legacy_key = ["auto", "derive"].join("_");
+//RS     std::fs::write(
+//RS         dir.join("package.jet"),
+//RS         format!("name: \"old-key\"\nversion: \"1\"\npolicy: {{ {legacy_key}: false }}\n"),
+//RS     )
+//RS     .unwrap();
+//RS     let entry = dir.join("main.jet");
+//RS     std::fs::write(&entry, "fn run() {}\n").unwrap();
+//RS 
+//RS     let diagnostics = jet::Loader::load_entry(entry.to_str().unwrap())
+//RS         .expect_err("retired policy key must be rejected");
+//RS     assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+//RS     assert_eq!(diagnostics[0].code, "E1206");
+//RS     assert!(
+//RS         diagnostics[0].what.contains("policy.auto_derive"),
+//RS         "{diagnostics:#?}"
+//RS     );
+//RS     assert!(
+//RS         diagnostics[0].fix.contains("policy.lints.deny"),
+//RS         "{diagnostics:#?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn rejected_auto_traits_fail_in_sema_before_codegen() {
+//RS     let diagnostics = project_diagnostics(
+//RS         "reject_use",
+//RS         "",
+//RS         r#"
+//RS #!Printable
+//RS struct NoPrint { value: Int }
+//RS struct OuterNoPrint { inner: NoPrint }
+//RS 
+//RS #!Debug
+//RS struct NoDebug { value: Int }
+//RS struct OuterNoDebug { inner: NoDebug }
+//RS 
+//RS #!Equatable
+//RS struct NoEquality { value: Int }
+//RS struct OuterNoEquality { inner: NoEquality }
+//RS 
+//RS struct OuterReader { reader: FileReader }
+//RS 
+//RS #[!Printable, !Debug, !Equatable]
+//RS struct Hidden<T> { value: T }
+//RS struct OuterHidden { value: Hidden<Int> }
+//RS 
+//RS fn reject_opaque_core(reader: FileReader) {
+//RS     print(reader)
+//RS     print("{reader:Debug}")
+//RS }
+//RS 
+//RS fn reject_outer_reader(value: OuterReader) {
+//RS     print(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(OuterNoPrint{ inner: NoPrint{ value: 1 } })
+//RS     print("{OuterNoDebug{ inner: NoDebug{ value: 2 } }:Debug}")
+//RS     print(OuterNoEquality{ inner: NoEquality{ value: 3 } } == OuterNoEquality{ inner: NoEquality{ value: 3 } })
+//RS     print(OuterHidden{ value: Hidden{ value: 4 } })
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .filter(|code| code.as_str() == "E0112")
+//RS             .count()
+//RS             >= 6,
+//RS         "{diagnostics:?}"
+//RS     );
+//RS     assert!(
+//RS         diagnostics.iter().any(|code| code == "E0312"),
+//RS         "{diagnostics:?}"
+//RS     );
+//RS 
+//RS     let entry = project_dir("reject_use").join("main.jet");
+//RS     let bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+//RS     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+//RS     let facts = &facts[bundle.entry];
+//RS     for (type_name, selected) in [
+//RS         ("OuterReader", &facts.auto_printable),
+//RS         ("OuterHidden", &facts.auto_printable),
+//RS         ("OuterHidden", &facts.auto_debug),
+//RS         ("OuterHidden", &facts.auto_equatable),
+//RS     ] {
+//RS         assert!(!selected.contains(type_name), "{type_name}");
+//RS     }
+//RS     for type_name in ["NoEquality", "OuterNoEquality"] {
+//RS         assert!(!facts.auto_equatable.contains(type_name), "{type_name}");
+//RS         assert!(facts.auto_comparable.contains(type_name), "{type_name}");
+//RS     }
+//RS     for (tier, force_interpreter) in [("JIT", false), ("interpreter", true)] {
+//RS         let outcome =
+//RS             jet::Interpreter::dev_iteration(entry.to_str().unwrap(), false, force_interpreter);
+//RS         let jet::Interpreter::RunOutcome::Problems(diagnostics) = outcome else {
+//RS             panic!("{tier} bypassed sema: {outcome:?}");
+//RS         };
+//RS         assert!(
+//RS             diagnostics
+//RS                 .iter()
+//RS                 .filter(|diagnostic| diagnostic.code == "E0112")
+//RS                 .count()
+//RS                 >= 6,
+//RS             "{tier}: {diagnostics:#?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn package_default_reaches_nested_and_dependency_modules() {
+//RS     let nested_dir = project_dir("nested");
+//RS     let _ = std::fs::remove_dir_all(&nested_dir);
+//RS     std::fs::create_dir_all(&nested_dir).unwrap();
+//RS     std::fs::write(
+//RS         nested_dir.join("package.jet"),
+//RS         "name: \"nested\"\nversion: \"1\"\npolicy: { lints: { deny: [auto_derive] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(
+//RS         nested_dir.join("main.jet"),
+//RS         "struct Outer { value: Int }\nmodule inner { struct Inner { value: Int } }\nfn run() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let nested = jet::Loader::load_entry(nested_dir.join("main.jet").to_str().unwrap()).unwrap();
+//RS     let mut defaults = Vec::new();
+//RS     for module in &nested.modules {
+//RS         collect_struct_defaults(&module.items, &mut defaults);
+//RS     }
+//RS     assert_eq!(
+//RS         defaults,
+//RS         vec![("Outer".to_string(), false), ("Inner".to_string(), false)]
+//RS     );
+//RS 
+//RS     let workspace = project_dir("multi_package");
+//RS     let app = workspace.join("app");
+//RS     let dep = workspace.join("dep");
+//RS     let _ = std::fs::remove_dir_all(&workspace);
+//RS     std::fs::create_dir_all(&app).unwrap();
+//RS     std::fs::create_dir_all(&dep).unwrap();
+//RS     std::fs::write(
+//RS         app.join("package.jet"),
+//RS         "name: \"app\"\nversion: \"1\"\ndeps: { dep: ../dep }\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(
+//RS         app.join("main.jet"),
+//RS         "use dep\nstruct AppType { value: Int }\nstruct ImportedOuter { value: dep.DepType }\nfn reject(value: ImportedOuter) { print(value) }\nfn run() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(
+//RS         dep.join("package.jet"),
+//RS         "name: \"dep\"\nversion: \"1\"\npolicy: { lints: { deny: [auto_derive] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(dep.join("dep.jet"), "pub struct DepType { value: Int }\n").unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
+//RS     let mut by_module = std::collections::HashMap::new();
+//RS     for module in &bundle.modules {
+//RS         let mut module_defaults = Vec::new();
+//RS         collect_struct_defaults(&module.items, &mut module_defaults);
+//RS         by_module.insert(module.path.clone(), module_defaults);
+//RS     }
+//RS     assert_eq!(
+//RS         by_module[&app.join("main.jet")],
+//RS         vec![
+//RS             ("AppType".to_string(), true),
+//RS             ("ImportedOuter".to_string(), true),
+//RS         ]
+//RS     );
+//RS     assert_eq!(
+//RS         by_module[&dep.join("dep.jet")],
+//RS         vec![("DepType".to_string(), false)]
+//RS     );
+//RS     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+//RS     let facts = &facts[bundle.entry];
+//RS     assert!(!facts.auto_printable.contains("ImportedOuter"));
+//RS     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+//RS         .into_iter()
+//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(
+//RS         errors.iter().any(|diagnostic| diagnostic.code == "E0112"),
+//RS         "{errors:#?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn same_named_dependency_type_keeps_its_own_auto_derive_policy() {
+//RS     let workspace = project_dir("same_named_types");
+//RS     let app = workspace.join("app");
+//RS     let dep = workspace.join("dep");
+//RS     let open_dep = workspace.join("open_dep");
+//RS     let _ = std::fs::remove_dir_all(&workspace);
+//RS     std::fs::create_dir_all(&app).unwrap();
+//RS     std::fs::create_dir_all(&dep).unwrap();
+//RS     std::fs::create_dir_all(&open_dep).unwrap();
+//RS     std::fs::write(
+//RS         app.join("package.jet"),
+//RS         "name: \"app\"\n\
+//RS          version: \"1\"\n\
+//RS          deps: {\n\
+//RS              dep: ../dep,\n\
+//RS              open_dep: ../open_dep,\n\
+//RS          }\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(
+//RS         app.join("main.jet"),
+//RS         r#"
+//RS use dep as vendor
+//RS 
+//RS struct Token { value: Int }
+//RS struct LocalEnvelope { token: Token }
+//RS struct DependencyEnvelope { token: vendor.Token }
+//RS struct SharedEnvelope { value: Shared<Int> }
+//RS 
+//RS fn reject(value: vendor.Token) {
+//RS     print(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(LocalEnvelope{ token: Token{ value: 7 } })
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(
+//RS         dep.join("package.jet"),
+//RS         "name: \"dep\"\nversion: \"1\"\npolicy: { lints: { deny: [auto_derive] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(dep.join("dep.jet"), "pub struct Token { value: Int }\n").unwrap();
+//RS     std::fs::write(
+//RS         open_dep.join("package.jet"),
+//RS         "name: \"open_dep\"\nversion: \"1\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(
+//RS         open_dep.join("open_dep.jet"),
+//RS         "pub struct Badge { pub value: Int }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let mut bundle = jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
+//RS     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+//RS     let app_facts = &facts[bundle.entry];
+//RS     for selected in [
+//RS         &app_facts.auto_printable,
+//RS         &app_facts.auto_debug,
+//RS         &app_facts.auto_equatable,
+//RS     ] {
+//RS         assert!(!selected.contains("SharedEnvelope"), "{selected:?}");
+//RS     }
+//RS     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+//RS         .into_iter()
+//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert_eq!(
+//RS         errors
+//RS             .iter()
+//RS             .filter(|diagnostic| diagnostic.code == "E0112")
+//RS             .count(),
+//RS         1,
+//RS         "{errors:#?}"
+//RS     );
+//RS 
+//RS     std::fs::write(
+//RS         app.join("main.jet"),
+//RS         r#"
+//RS use dep as vendor
+//RS use open_dep as library
+//RS use core.encoding.json as json
+//RS 
+//RS struct Token { value: Int }
+//RS struct LocalEnvelope { token: Token }
+//RS struct DependencyEnvelope { token: vendor.Token }
+//RS struct ImportedEnvelope { badge: library.Badge }
+//RS struct MapEnvelope { values: [String:Int] }
+//RS struct UnionEnvelope { value: Int | String }
+//RS 
+//RS fn run() {
+//RS     token :: Token{ value: 7 }
+//RS     print(token)
+//RS     print("{token:Debug}")
+//RS     print(token == Token{ value: 7 })
+//RS 
+//RS     badge :: library.Badge{ value: 9 }
+//RS     print(badge)
+//RS     print("{badge:Debug}")
+//RS     print(badge == library.Badge{ value: 9 })
+//RS 
+//RS     envelope :: ImportedEnvelope{ badge: library.Badge{ value: 9 } }
+//RS     print(envelope)
+//RS     print("{envelope:Debug}")
+//RS     print(envelope == ImportedEnvelope{ badge: library.Badge{ value: 9 } })
+//RS     print(envelope < ImportedEnvelope{ badge: library.Badge{ value: 10 } })
+//RS     wire :: json.to_string(envelope)
+//RS     print(wire)
+//RS     decoded :: json.decode<ImportedEnvelope>(wire) ?? panic("decode")
+//RS     print(decoded == envelope)
+//RS 
+//RS     map :: MapEnvelope{ values: [String:Int]{ "one": 1 } }
+//RS     print(map)
+//RS     print("{map:Debug}")
+//RS 
+//RS     union :: UnionEnvelope{ value: 3 }
+//RS     print(union)
+//RS     print("{union:Debug}")
+//RS     print(union == UnionEnvelope{ value: 3 })
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
+//RS     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+//RS     let app_facts = &facts[bundle.entry];
+//RS     let dep_idx = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .position(|module| module.path == dep.join("dep.jet"))
+//RS         .unwrap();
+//RS     let open_dep_idx = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .position(|module| module.path == open_dep.join("open_dep.jet"))
+//RS         .unwrap();
+//RS     let badge_identity = bundle
+//RS         .name_ledger
+//RS         .nominal_identity(open_dep_idx, "Badge")
+//RS         .unwrap();
+//RS     assert!(badge_identity.contains("::"), "{badge_identity}");
+//RS     let dep_facts = &facts[dep_idx];
+//RS     for selected in [
+//RS         &app_facts.auto_printable,
+//RS         &app_facts.auto_debug,
+//RS         &app_facts.auto_equatable,
+//RS     ] {
+//RS         assert!(selected.contains("Token"), "{selected:?}");
+//RS         assert!(selected.contains("LocalEnvelope"), "{selected:?}");
+//RS         assert!(selected.contains("UnionEnvelope"), "{selected:?}");
+//RS         assert!(!selected.contains("DependencyEnvelope"), "{selected:?}");
+//RS         assert!(!selected.contains("vendor.Token"), "{selected:?}");
+//RS         assert!(selected.contains(&badge_identity), "{selected:?}");
+//RS         assert!(selected.contains("ImportedEnvelope"), "{selected:?}");
+//RS     }
+//RS     // Anonymous unions support structural equality, but there is no total
+//RS     // ordering between members of different types.
+//RS     let comparable = &app_facts.auto_comparable;
+//RS     assert!(comparable.contains("Token"), "{comparable:?}");
+//RS     assert!(comparable.contains("LocalEnvelope"), "{comparable:?}");
+//RS     assert!(!comparable.contains("UnionEnvelope"), "{comparable:?}");
+//RS     assert!(!comparable.contains("DependencyEnvelope"), "{comparable:?}");
+//RS     assert!(!comparable.contains("vendor.Token"), "{comparable:?}");
+//RS     assert!(comparable.contains(&badge_identity), "{comparable:?}");
+//RS     assert!(comparable.contains("ImportedEnvelope"), "{comparable:?}");
+//RS     assert!(app_facts.auto_encode.contains("ImportedEnvelope"));
+//RS     assert!(app_facts.auto_decode.contains("ImportedEnvelope"));
+//RS     assert!(app_facts.auto_printable.contains("MapEnvelope"));
+//RS     assert!(app_facts.auto_debug.contains("MapEnvelope"));
+//RS     assert!(app_facts.auto_equatable.contains("MapEnvelope"));
+//RS     assert!(!app_facts.auto_comparable.contains("MapEnvelope"));
+//RS     for selected in [
+//RS         &dep_facts.auto_printable,
+//RS         &dep_facts.auto_debug,
+//RS         &dep_facts.auto_equatable,
+//RS         &dep_facts.auto_comparable,
+//RS     ] {
+//RS         assert!(!selected.contains("Token"), "{selected:?}");
+//RS     }
+//RS     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+//RS         .into_iter()
+//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(errors.is_empty(), "{errors:#?}");
+//RS 
+//RS     let expected = "\
+//RS Token { value: 7 }\n\
+//RS Token { value: 7 }\n\
+//RS true\n\
+//RS Badge { value: 9 }\n\
+//RS Badge { value: 9 }\n\
+//RS true\n\
+//RS ImportedEnvelope { badge: Badge { value: 9 } }\n\
+//RS ImportedEnvelope { badge: Badge { value: 9 } }\n\
+//RS true\n\
+//RS true\n\
+//RS {\"badge\":{\"value\":9}}\n\
+//RS true\n\
+//RS MapEnvelope { values: [\"one\": 1] }\n\
+//RS MapEnvelope { values: [\"one\": 1] }\n\
+//RS UnionEnvelope { value: 3 }\n\
+//RS UnionEnvelope { value: 3 }\n\
+//RS true\n";
+//RS     if let Some((exit, stdout)) = aot_output(&bundle, "same_named_types_aot") {
+//RS         assert_eq!(exit, 0);
+//RS         assert_eq!(stdout, expected);
+//RS     }
+//RS     let policy = common::development_policy();
+//RS     let mut backend = jet_jit::CraneliftBackend::new();
+//RS     let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+//RS     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
+//RS         panic!("same-name program did not run in the default JIT: {outcome:?}");
+//RS     };
+//RS     assert_eq!(stdout, expected);
+//RS     let outcome =
+//RS         jet::Interpreter::dev_iteration(app.join("main.jet").to_str().unwrap(), false, true);
+//RS     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
+//RS         panic!("same-name program did not run in the forced interpreter: {outcome:?}");
+//RS     };
+//RS     assert_eq!(stdout, expected);
+//RS }
+// END-PORT-PENDING 0970 tests/auto_derive_policy.rs:1-926
+

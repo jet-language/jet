@@ -1,0 +1,316 @@
+// Rust: Formatter/mod.rs:2459-2683; CanonicalAST.rs:200-229;
+// Syntax/retirements.rs:817-875; effects_surface.rs:400-425.
+// Composed formatter proofs require the complete formatter SCC, not mocks.
+use jet_foundation.[Expr, Item, Retirement, Span, Stmt, TextEdit, TryConvert, Type, ast_func, ast_program, canonical_ast_strip_spans, expr_span, interpolation_selector, interpolation_selector_for_kind, InterpolationSelectorKind, InterpolationSelectorArguments, RETIREMENTS, RetirementKind, rename_target, retirement_law_violations, retirement_law_violations_of]
+use jet_lexer.[Token, lex]
+
+fn fmt_core_ok(source: String) -> String {
+    result :: jet_format_source(source)
+    assert(result.diagnostics.len() == 0)
+    result.source.unwrap("fixture must be admitted and rendered")
+}
+fn fmt_core_stable(source: String) -> String {
+    formatted :: fmt_core_ok(source)
+    assert(fmt_core_ok(formatted) == formatted)
+    formatted
+}
+#Test("retired_selector_rewrites_through_the_parser_and_formatter") {
+    selectors :: [String]{"Debug", "Pretty", "Fixed", "Grouped", "Hex", "Unit", "Unit"}
+    arguments :: [String]{"", "", "(2)", "(2)", "(16)", "(name)", "(bare)"}
+    loop index in 0..<selectors.len() {
+        selector :: selectors[index]
+        argument :: arguments[index]
+        source :: "fn run() {{\n    print(\"{{x#{selector}{argument}}}\")\n}}\n"
+        edits :: jet_format_retired_interpolation_selector_edits(source)
+        assert(edits.len() == 1)
+        bytes :: source.bytes()
+        assert(String.from_bytes(bytes[edits[0].span.start..<edits[0].span.end]).unwrap("selector span is ASCII") == "#")
+        formatted :: fmt_core_ok(source)
+        fragment :: "print(\"{{x:{selector}{argument}}}\")"
+        assert(formatted.contains(fragment))
+        assert(jet_format_retired_interpolation_selector_edits(formatted).len() == 0)
+    }
+    ordinary :: "fn run() {{ print(\"#Debug\") }}\n"
+    assert(jet_format_retired_interpolation_selector_edits(ordinary).len() == 0)
+}
+#Test("retired_core_type_edits_skip_plain_strings") {
+    source :: "Deque.new()\nprint(\"Deque\")"
+    edits :: jet_format_retired_type_edits(source)
+    assert(edits.len() == 1)
+    assert(edits[0].new_text == "Queue")
+    expected :: "Queue.new()\nprint(\"Deque\")\n"
+    assert(fmt_core_ok(source) == expected)
+}
+#Test("trailing_transaction_comment_stays_inside_transaction_block") {
+    source :: `fn transfer(from: Shared<Account>, amount: Int) {
+    #Transact(tx) {
+        from.balance -= amount  // both land, or neither
+    }
+}
+`
+    formatted :: fmt_core_stable(source)
+    comment :: formatted.find("// both land, or neither").unwrap("trailing comment survives")
+    close :: formatted.rfind("}}").unwrap("function closes")
+    assert(comment < close)
+}
+#Test("inner_comment_stays_before_enclosing_block_close") {
+    formatted :: fmt_core_stable("fn run() {{\n    if ready {{ launch() /* go */ }}\n}}\n")
+    assert(formatted.find("/* go */").unwrap("comment survives") < formatted.find("}}").unwrap("inner block closes"))
+}
+#Test("inferred_braces_and_blocks_round_trip") {
+    source :: `struct Point {
+    x: Int
+    y: Int
+}
+
+fn make() -> Point { {x: 1, y: 2} }
+
+fn accepts(values: [String]) {}
+
+fn block() {
+    print("block")
+}
+
+fn run() {
+    accepts({"needle"})
+    p :: make()
+    block()
+}
+`
+    formatted :: fmt_core_stable(source)
+    assert(formatted.contains("{{x: 1, y: 2}}"))
+    assert(formatted.contains("accepts({{\"needle\"}})"))
+    assert(formatted.contains("fn block() {{"))
+}
+#Test("repeated_struct_list_heads_preserve_explicit_heads") {
+    source :: `struct Point {
+    x: Int
+}
+
+fn run() {
+    compact := [Point{x: 1}, Point{x: 2}]
+    spread := [
+        Point{x: 3},
+        Point{x: 4},
+    ]
+}
+`
+    plain :: fmt_core_ok(source)
+    fragment :: "compact := [Point{{x: 1}}, Point{{x: 2}}]"
+    assert(plain.contains(fragment))
+    assert(!plain.contains("compact := [Point]"))
+    options :: JetFormatOptions{simplify: true}
+    simplified :: jet_format_source_with_options(source, options).source.unwrap("simplify succeeds")
+    assert(simplified.contains(fragment))
+    assert(!simplified.contains("compact := [Point]"))
+    assert(jet_format_source_with_options(simplified, options).source == Val(simplified))
+}
+#Test("lambda_interface_round_trips_result_error_and_pure_effect_row") {
+    source :: `enum LambdaError { Invalid }
+
+fn run() {
+    increment :: (n: Int) -[]> Int LambdaError! { return Ok(n + 1) }
+}
+`
+    formatted :: fmt_core_stable(source)
+    assert(formatted.contains("(n: Int) -[]> Int LambdaError!"))
+    assert(!formatted.contains("(n: Int) ->"))
+}
+#Test("failure_formatter_keeps_prefix_and_contextual_roles") {
+    formatted :: fmt_core_stable("fn load() -> Int? IOError! {{ read()?(\n    \"loading\"\n) }}\n")
+    assert(formatted.contains("fn load() -> Int? IOError!"))
+    assert(formatted.contains("read()?(\"loading\")"))
+    source :: "fn load() -> Int IOError! {{ read() }}\n"
+    lexed :: lex(source.bytes())
+    assert(lexed.diagnostics.len() == 0)
+    program := parse_for_fmt(lexed.tokens).program.unwrap("fixture parses")
+    if program.items[0] == .Func(function) {
+        updated := function
+        if updated.body[0] == .Expr(inner) {
+            updated.body[0] = Stmt.Expr{expr: Expr.Try{value: inner, span: expr_span(inner), conversion: TryConvert.None, context: None}}
+        } else -> panic("expected expression body")
+        program.items[0] = Item.Func{value: updated}
+    } else -> panic("expected load function")
+    rendered :: jet_format_program(program, source, [Token]{})
+    assert(rendered.contains("read()"))
+    assert(!rendered.contains("read()?"))
+    assert(fmt_core_ok(rendered) == rendered)
+}
+#Test("fmt_source_failure_has_no_successful_raw_source_fallback") {
+    lexical :: jet_format_source("fn run() {{ \"unterminated")
+    assert(lexical.source == None)
+    assert(lexical.diagnostics.len() > 0)
+    syntax :: jet_format_source("fn run( {{")
+    assert(syntax.source == None)
+    assert(syntax.diagnostics.len() > 0)
+}
+#Test("fmt_unified_diff_exact_hunk_bytes_and_crlf") {
+    expected :: "--- x.jet\n+++ x.jet\n@@ -2,2 +2,2 @@\n-b\n-c\n+d\n+c\n"
+    assert(jet_format_unified_diff("x.jet", "a\nb\nc\n", "a\nd\nc\n") == expected)
+    assert(jet_format_unified_diff("x", "a\r\n", "a\n") == "--- x\n+++ x\n")
+    assert(jet_format_unified_diff("x", "", "a\n") == "--- x\n+++ x\n@@ -1,0 +1,1 @@\n+a\n")
+    assert(jet_format_unified_diff("x", "a\n", "") == "--- x\n+++ x\n@@ -1,1 +1,0 @@\n-a\n")
+    assert(jet_format_unified_diff("x", "", "") == "--- x\n+++ x\n")
+}
+#Test("fmt_utf8_edit_spans_and_overlaps") {
+    source :: "λ Deque.new()\nprint(\"λ Deque\")"
+    edits :: jet_format_retired_type_edits(source)
+    assert(edits.len() == 1)
+    assert(edits[0].span.start == 3)
+    assert(edits[0].span.end == 8)
+    expected :: "λ Queue.new()\nprint(\"λ Deque\")"
+    assert(jet_format_apply_source_edits(source, edits) == Val(expected))
+    assert(jet_format_apply_source_edits(source, [TextEdit]{TextEdit{span: Span{start: 1, end: 2}, new_text: ""}}) == None)
+    assert(jet_format_apply_source_edits("abcd", [TextEdit]{TextEdit{span: Span{start: 0, end: 2}, new_text: "x"}, TextEdit{span: Span{start: 1, end: 3}, new_text: "y"}}) == None)
+}
+#Test("fmt_source_list_item_spans_exclude_outer_depth_4396") {
+    // #4396: safe Jet regression; frozen Rust incorrectly returns [1..5].
+    program :: ast_program()
+    tokens :: lex("[a, b]".bytes()).tokens
+    context := jet_format_new_context(program, "[a, b]", [Token]{}, tokens, JetFormatOptions{simplify: false})
+    list :: jet_format_source_list_span_after(&context, 0, .Bracket).unwrap("bracket source list")
+    spans :: jet_format_source_list_item_spans(&context, list)
+    assert(spans == [Span]{Span{start: 1, end: 2}, Span{start: 4, end: 5}})
+}
+#Test("fmt_generated_label_lookalike_literals_keep_identity_4399") {
+    // #4399: never normalize a generated-looking user literal as a loop label.
+    first :: parse_for_fmt(lex("fn run() {{ print(\"__jet_value_loop_1\") }}\n".bytes()).tokens).program.unwrap("first parses")
+    second :: parse_for_fmt(lex("fn run() {{ print(\"__jet_value_loop_2\") }}\n".bytes()).tokens).program.unwrap("second parses")
+    assert(jet_format_canonical_program(first) != jet_format_canonical_program(second))
+}
+#Test("strip_spans_removes_span_renderings") {
+    first :: "Ident(\"x\", Span {{ start: 0, end: 1 }})"
+    second :: "Ident(\"x\", Span {{ start: 40, end: 41 }})"
+    assert(canonical_ast_strip_spans(first) == canonical_ast_strip_spans(second))
+    assert(String.from_bytes(canonical_ast_strip_spans(first)).unwrap("canonical bytes are UTF-8") == "Ident(\"x\", Span)")
+}
+#Test("strip_spans_keeps_span_lookalike_inside_string_literal") {
+    first :: "Str([Lit(\"Span {{ start: 1, end: 2 }}\")], Span {{ start: 5, end: 9 }})"
+    second :: "Str([Lit(\"Span {{ start: 7, end: 3 }}\")], Span {{ start: 5, end: 9 }})"
+    assert(canonical_ast_strip_spans(first) != canonical_ast_strip_spans(second))
+    assert(String.from_bytes(canonical_ast_strip_spans(first)).unwrap("valid debug").ends_with("], Span)"))
+}
+#Test("strip_spans_keeps_char_literal_with_quote") {
+    source :: "Char('\"', Span {{ start: 0, end: 3 }})"
+    assert(String.from_bytes(canonical_ast_strip_spans(source)).unwrap("canonical bytes are UTF-8") == "Char('\"', Span)")
+}
+#Test("the_table_obeys_its_own_law") { assert(retirement_law_violations().len() == 0) }
+#Test("a_rename_rewrites_and_a_semantic_change_does_not") {
+    assert(rename_target("main.jet") == Val("run.jet"))
+    assert(rename_target("pkg.jet") == Val("package.jet"))
+    assert(rename_target("{{value#Selector}}") == Val("{{value:Selector}}"))
+    assert(rename_target("@") == None)
+    assert(rename_target("io.println") == Val("io.print"))
+    assert(rename_target("io.sprint") == Val("{{value}}"))
+    assert(rename_target("io.repr") == Val("{{value:Debug}}"))
+    assert(rename_target("Deque") == Val("Queue"))
+    assert(rename_target("SortedSet") == Val("Rank"))
+    assert(rename_target("Bag") == Val("Tally"))
+    assert(rename_target("BitSet") == Val("Bits"))
+    assert(rename_target("ByteBuffer") == Val("Bytes"))
+    assert(rename_target("payload: {{") == None)
+    assert(rename_target("provider@target") == None)
+}
+#Test("every_semantic_retirement_names_the_code_that_refuses_it") {
+    loop row in RETIREMENTS { if row.kind == .Semantic -> assert(row.code != None) }
+}
+#Test("a_second_copy_of_a_row_fails_the_guard") {
+    doubled := ~RETIREMENTS
+    &doubled.push(RETIREMENTS[0])
+    failures :: retirement_law_violations_of(doubled)
+    found := false
+    loop line in failures { if line.contains("retired twice") -> found = true }
+    assert(found)
+}
+#Test("a_rename_that_names_a_code_fails_the_guard") {
+    wrong := [Retirement]{}
+    loop row in RETIREMENTS {
+        if row.kind == .Rename {
+            bad := row
+            bad.code = Val("E1206")
+            &wrong.push(bad)
+            break
+        }
+    }
+    assert(retirement_law_violations_of(wrong).len() > 0)
+}
+#Test("interpolation_selector_catalog_has_exact_argument_shapes") {
+    assert(interpolation_selector_for_kind(InterpolationSelectorKind.Unit).arguments == InterpolationSelectorArguments.UnitStyle{styles: [String]{"name", "bare"}})
+    assert(interpolation_selector_for_kind(InterpolationSelectorKind.Hex).arguments == .Width)
+    assert(interpolation_selector_for_kind(InterpolationSelectorKind.Pad).arguments == .WidthFill)
+    assert(interpolation_selector_for_kind(InterpolationSelectorKind.Debug).arguments == .NoArguments)
+    assert(interpolation_selector_for_kind(InterpolationSelectorKind.Pretty).arguments == .NoArguments)
+    assert(interpolation_selector_for_kind(InterpolationSelectorKind.Bin).arguments == .NoArguments)
+    assert(interpolation_selector_for_kind(InterpolationSelectorKind.Oct).arguments == .NoArguments)
+    assert(interpolation_selector("Repr") == None)
+}
+
+// Original tests/fmt.rs simplify witnesses; named functions remain braced
+// under Main's D-SIG-AFTER1=A contract, even for one short return.
+#Test("fmt_simplify_one_line_return_is_ast_equal_and_stable") {
+    source :: "fn answer() -> Int {{\n    return 42\n}}\n"
+    plain :: fmt_core_ok(source)
+    assert(plain.contains("fn answer() -> Int {{ return 42 }}"))
+    options :: JetFormatOptions{simplify: true}
+    once :: jet_format_source_with_options(source, options).source.unwrap("simplify formats")
+    assert(once.contains("fn answer() -> Int {{"))
+    assert(jet_format_source_with_options(once, options).source == Val(once))
+    before :: parse_for_fmt(lex(plain.bytes()).tokens).program.unwrap("plain parses")
+    after :: parse_for_fmt(lex(once.bytes()).tokens).program.unwrap("simplified parses")
+    assert(jet_format_canonical_simplify_program(before) == jet_format_canonical_simplify_program(after))
+    wide_name :: "wide_valuewide_valuewide_valuewide_valuewide_valuewide_valuewide_valuewide_valuewide_valuewide_valuewide_valuewide_value"
+    wide :: "fn wide() -> Int {{ return {wide_name} }}\n"
+    wide_out :: jet_format_source_with_options(wide, options).source.unwrap("wide formats")
+    assert(wide_out.contains("fn wide() -> Int {{"))
+    assert(wide_out.contains("\n    return "))
+    commented :: "fn noted() -> Int {{\n    // keep this note\n    return 42\n}}\n"
+    commented_out :: jet_format_source_with_options(commented, options).source.unwrap("commented formats")
+    assert(commented_out.contains("// keep this note"))
+    assert(commented_out.contains("\n    return 42"))
+}
+#Test("fmt_simplify_leaves_a_recovered_parse_alone") {
+    // Retired control-body recovery must disable all simplify rewrites.
+    source :: "fn answer() -> Int {{ return 42 }}\nfn run() {{\n    if true print(\"if\") else print(\"else\")\n    loop false print(\"loop\")\n}}\n"
+    plain :: jet_format_source(source)
+    simplified :: jet_format_source_with_options(source, JetFormatOptions{simplify: true})
+    assert(plain.source != None)
+    assert(simplified.source == plain.source)
+}
+#Test("fmt_simplify_drops_a_redundant_val_only_in_optional_returns") {
+    source :: "fn count() -> Int {{ return 1 }}\nfn find(n: Int) -> Int? {{\n    wrap :: (x) -> Val(x)\n    if n > 0 {{ return Val(n) }}\n    if n == 0 {{ return Val(count()) }}\n    Val(n)\n}}\n"
+    options :: JetFormatOptions{simplify: true}
+    once :: jet_format_source_with_options(source, options).source.unwrap("optional simplify formats")
+    assert(once.contains("return n"))
+    assert(!once.contains("Val(n)"))
+    assert(once.contains("Val(count())"))
+    assert(once.contains("(x) -> Val(x)"))
+    assert(jet_format_source_with_options(once, options).source == Val(once))
+}
+#Test("fmt_migrates_each_retired_print_spelling_to_one_canonical_job") {
+    source :: "use core.term as io\n\nfn run() {{\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}}\n"
+    assert(jet_format_retired_print_family_edits(source).len() == 3)
+    once :: fmt_core_stable(source)
+    assert(once.contains("io.print(\"line\")"))
+    assert(once.contains("print(\"{{value}}\")"))
+    assert(once.contains("print(\"{{value:Debug}}\")"))
+    assert(jet_format_retired_print_family_edits(once).len() == 0)
+}
+#Test("print_family_migration_ignores_unrelated_import_bindings") {
+    assert(jet_format_retired_print_family_edits("use helper as io\nfn run() {{ io.sprint(value) }}\n").len() == 0)
+}
+#Test("fmt_still_errors_on_real_parse_problems") {
+    broken :: jet_format_source("fn run() {{ x :: ; }}\n")
+    assert(broken.source == None)
+    assert(broken.diagnostics.len() > 0)
+}
+#Test("fmt_synthetic_program_uses_typed_ast_without_source_substitution") {
+    program := ast_program()
+    function := ast_func("answer", Span{start: 0, end: 0}, Span{start: 0, end: 0})
+    function.return_type = Val(Type.Int)
+    function.body = [Stmt]{Stmt.Return{value: Val(Expr.Int{value: 42, span: Span{start: 0, end: 0}, width: None, raw: None}), span: Span{start: 0, end: 0}}}
+    program.items = [Item]{Item.Func{value: function}}
+    rendered :: jet_format_synthetic_program(program)
+    assert(rendered == "fn answer() -> Int {{ return 42 }}\n")
+    assert(fmt_core_ok(rendered) == rendered)
+    assert(jet_format_synthetic_program(ast_program()) == "\n")
+}

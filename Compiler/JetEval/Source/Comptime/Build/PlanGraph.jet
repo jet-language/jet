@@ -1,0 +1,336 @@
+// PORT-PENDING 0601 crates-jet-comptime-src-comptime-syncjetstd-module-group: crates/jet-comptime/src/Comptime/Build/plan_graph.rs:1-332
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::actions_policy::{
+//RS     BuildAction, BuildCapability, BuildResourcePool, BuildResourcePoolSpec, LegacyWrapperKind,
+//RS };
+//RS use super::cache_cas::{ActionCacheStatus, ActionKey, ActionOutcome, ContentDigest};
+//RS use super::handles::{ActionId, PluginId, TargetId, TargetRef};
+//RS use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
+//RS use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
+//RS use super::targets::{BuildTarget, TargetKind};
+//RS use jet_foundation::SHA256::sha256_hex;
+//RS 
+//RS /// The compiler-owned nodes that share the BuildPlan graph with declared
+//RS /// actions. Their keys contain only logical names and content digests, never
+//RS /// checkout-specific paths.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum BuildNodeKind {
+//RS     Check,
+//RS     Compile,
+//RS     Link,
+//RS }
+//RS impl BuildNodeKind {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Check => "check",
+//RS             Self::Compile => "compile",
+//RS             Self::Link => "link",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A static compiler node in a BuildPlan. Runtime duration and cache reason
+//RS /// live in the store's BuildRecord; this value is the graph identity.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildPlanNode {
+//RS     pub kind: BuildNodeKind,
+//RS     pub key: String,
+//RS     pub subject: String,
+//RS     pub inputs: Vec<String>,
+//RS     pub input_digests: Vec<(String, String)>,
+//RS }
+//RS 
+//RS impl BuildPlanNode {
+//RS     pub fn new(
+//RS         kind: BuildNodeKind,
+//RS         subject: impl Into<String>,
+//RS         mut input_digests: Vec<(String, String)>,
+//RS     ) -> Self {
+//RS         input_digests.sort();
+//RS         input_digests.dedup();
+//RS         let inputs = input_digests
+//RS             .iter()
+//RS             .map(|(name, _)| name.clone())
+//RS             .collect::<Vec<_>>();
+//RS         let subject = subject.into();
+//RS         let key = compiler_node_key(kind, &subject, &input_digests);
+//RS         Self {
+//RS             kind,
+//RS             key,
+//RS             subject,
+//RS             inputs,
+//RS             input_digests,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Canonical content key for a compiler-owned BuildPlan node.
+//RS pub fn compiler_node_key(
+//RS     kind: BuildNodeKind,
+//RS     subject: &str,
+//RS     input_digests: &[(String, String)],
+//RS ) -> String {
+//RS     let mut inputs = input_digests.to_vec();
+//RS     inputs.sort();
+//RS     let mut bytes = Vec::new();
+//RS     for value in ["jet.action-key.v2", "compiler-node", kind.as_str(), subject] {
+//RS         bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+//RS         bytes.extend_from_slice(value.as_bytes());
+//RS     }
+//RS     for (name, digest) in inputs {
+//RS         for value in [name, digest] {
+//RS             bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+//RS             bytes.extend_from_slice(value.as_bytes());
+//RS         }
+//RS     }
+//RS     sha256_hex(&bytes)
+//RS }
+//RS 
+//RS pub(super) const MAX_ACTIONS: usize = 100_000;
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildPlan {
+//RS     pub(super) context: u64,
+//RS     pub(super) targets: Vec<BuildTarget>,
+//RS     pub(super) actions: Vec<BuildAction>,
+//RS     pub(super) toolchains: Vec<BuildToolchain>,
+//RS     pub(super) signing_identities: Vec<BuildSigningIdentity>,
+//RS     pub(super) probes: Vec<BuildProbe>,
+//RS     pub(super) plugins: Vec<BuildPlugin>,
+//RS     pub(super) generated_modules: Vec<BuildGeneratedModule>,
+//RS     /// Compiler-owned Check/Compile/Link nodes in deterministic order.
+//RS     pub(super) compiler_nodes: Vec<BuildPlanNode>,
+//RS     pub(super) default: Option<TargetRef>,
+//RS     /// D-CONF-SPLIT1=A: computed fact writers produced by the selected
+//RS     /// `fn build`. They remain compile-time data and enter action identity so
+//RS     /// a changed contribution cannot reuse an old runtime artifact.
+//RS     pub fact_contributions: Vec<jet_foundation::Policy::FactContribution>,
+//RS }
+//RS 
+//RS impl BuildPlan {
+//RS     pub fn fact_contributions(&self) -> &[jet_foundation::Policy::FactContribution] {
+//RS         &self.fact_contributions
+//RS     }
+//RS 
+//RS     pub fn compiler_nodes(&self) -> &[BuildPlanNode] {
+//RS         &self.compiler_nodes
+//RS     }
+//RS 
+//RS     pub fn set_compiler_nodes(&mut self, mut nodes: Vec<BuildPlanNode>) {
+//RS         nodes.sort_by(|left, right| {
+//RS             left.kind
+//RS                 .cmp(&right.kind)
+//RS                 .then_with(|| left.subject.cmp(&right.subject))
+//RS                 .then_with(|| left.key.cmp(&right.key))
+//RS         });
+//RS         self.compiler_nodes = nodes;
+//RS     }
+//RS }
+//RS 
+//RS /// One compiler-owned package artifact input to a generated compile action.
+//RS /// The source digest is captured after the ordinary loader/parser/sema pass;
+//RS /// dependency names become declared artifact-file inputs in the plan.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct CompilerPackageSpec {
+//RS     pub name: String,
+//RS     pub source_digest: ContentDigest,
+//RS     pub dependencies: Vec<String>,
+//RS }
+//RS 
+//RS impl CompilerPackageSpec {
+//RS     pub fn new(
+//RS         name: impl Into<String>,
+//RS         source_digest: ContentDigest,
+//RS         dependencies: Vec<String>,
+//RS     ) -> Self {
+//RS         CompilerPackageSpec {
+//RS             name: name.into(),
+//RS             source_digest,
+//RS             dependencies,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildGraph {
+//RS     pub targets: Vec<BuildGraphTarget>,
+//RS     pub actions: Vec<BuildGraphAction>,
+//RS     pub files: Vec<BuildGraphFile>,
+//RS     pub nodes: Vec<BuildPlanNode>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildGraphTarget {
+//RS     pub id: TargetId,
+//RS     pub name: String,
+//RS     pub kind: TargetKind,
+//RS     pub deps: Vec<TargetId>,
+//RS     pub actions: Vec<ActionId>,
+//RS     pub files: Vec<String>,
+//RS     pub plugin: Option<PluginId>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildGraphAction {
+//RS     pub id: ActionId,
+//RS     pub name: String,
+//RS     pub kind: super::actions_policy::ActionKind,
+//RS     pub inputs: Vec<String>,
+//RS     pub outputs: Vec<String>,
+//RS     pub target: Option<TargetId>,
+//RS     pub caps: Vec<BuildCapability>,
+//RS     pub pools: Vec<BuildResourcePool>,
+//RS     pub legacy_wrapper: Option<LegacyWrapperKind>,
+//RS     pub plugin: Option<PluginId>,
+//RS     pub compiler_owned: bool,
+//RS     /// The deterministic recipe key computed from the checked plan facts.
+//RS     ///
+//RS     /// This is the plan key, before runtime input snapshots and effective
+//RS     /// execution policy are joined by the store.
+//RS     pub key: ActionKey,
+//RS     /// Runtime cache evidence is absent from a static plan projection.
+//RS     /// `None` means unknown, rather than a cache miss.
+//RS     pub cache_hit: Option<bool>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildGraphActionKey {
+//RS     pub action: String,
+//RS     pub key: ActionKey,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildGraphFileDelta {
+//RS     pub path: String,
+//RS     pub before: Option<BuildGraphFile>,
+//RS     pub after: Option<BuildGraphFile>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildGraphKeyDelta {
+//RS     pub action: String,
+//RS     pub before: Option<ActionKey>,
+//RS     pub after: Option<ActionKey>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildGraphCacheDelta {
+//RS     pub action: String,
+//RS     pub before: Option<bool>,
+//RS     pub after: Option<bool>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
+//RS pub struct BuildGraphDiff {
+//RS     /// Files whose declared ownership, consumers, or target membership changed.
+//RS     pub file_deltas: Vec<BuildGraphFileDelta>,
+//RS     /// Outputs transitively affected by changed action keys or input paths.
+//RS     pub affected_files: Vec<String>,
+//RS     /// Actions whose stable recipe key was added, removed, or changed.
+//RS     pub key_deltas: Vec<BuildGraphKeyDelta>,
+//RS     /// Runtime cache evidence changes. `None` remains unknown.
+//RS     pub cache_deltas: Vec<BuildGraphCacheDelta>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildGraphFile {
+//RS     pub path: String,
+//RS     pub owner: Option<ActionId>,
+//RS     pub consumers: Vec<ActionId>,
+//RS     pub targets: Vec<TargetId>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum BuildGraphSubject {
+//RS     Target(TargetId),
+//RS     Action(ActionId),
+//RS     File,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildExplanation {
+//RS     pub subject: BuildGraphSubject,
+//RS     pub label: String,
+//RS     pub provenance: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct FileOwnership {
+//RS     pub path: String,
+//RS     pub owner: Option<ActionId>,
+//RS     pub consumers: Vec<ActionId>,
+//RS     pub targets: Vec<TargetId>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct RebuildExplanation {
+//RS     pub action: ActionId,
+//RS     pub action_name: String,
+//RS     pub status: ActionCacheStatus,
+//RS     pub reason: String,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildExecutionModel {
+//RS     pub pools: Vec<BuildResourcePoolSpec>,
+//RS     pub nodes: Vec<BuildExecutionNode>,
+//RS     pub stages: Vec<BuildExecutionStage>,
+//RS     pub events: Vec<BuildExecutionEvent>,
+//RS     pub console_order: Vec<ActionId>,
+//RS     pub metrics: BuildExecutionMetrics,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildExecutionNode {
+//RS     pub action: ActionId,
+//RS     pub name: String,
+//RS     pub target: Option<TargetId>,
+//RS     pub prerequisites: Vec<ActionId>,
+//RS     pub pools: Vec<BuildResourcePool>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildExecutionStage {
+//RS     pub index: usize,
+//RS     pub actions: Vec<ActionId>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum BuildExecutionEvent {
+//RS     Ready {
+//RS         action: ActionId,
+//RS         stage: usize,
+//RS     },
+//RS     Finished {
+//RS         action: ActionId,
+//RS         outcome: ActionOutcome,
+//RS     },
+//RS     Cancelled {
+//RS         action: ActionId,
+//RS         failed_prereq: ActionId,
+//RS     },
+//RS     Pending {
+//RS         action: ActionId,
+//RS     },
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
+//RS pub struct BuildExecutionMetrics {
+//RS     pub actions_total: usize,
+//RS     pub parallel_stages: usize,
+//RS     pub max_parallel_actions: usize,
+//RS     pub cacheable_actions: usize,
+//RS     pub phony_actions: usize,
+//RS     pub failed_actions: usize,
+//RS     pub cancelled_actions: usize,
+//RS     pub cache_restored_actions: usize,
+//RS     pub pending_actions: usize,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildExecutionReport {
+//RS     pub events: Vec<BuildExecutionEvent>,
+//RS     pub metrics: BuildExecutionMetrics,
+//RS }
+// END-PORT-PENDING 0601 crates/jet-comptime/src/Comptime/Build/plan_graph.rs:1-332
+

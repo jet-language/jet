@@ -1,0 +1,206 @@
+// Original Rust Names.rs tests use the indexed registration ledger, not fixtures
+// which append to MIR publication arrays. Main exercises this suite after Core
+// kernel_path_components is integrated; no provider substitution is permitted.
+fn names_test_span() -> Span Never! { Span{start: 3, end: 7} }
+fn names_test_ledger() -> NameLedger Never! {
+    ledger := name_ledger_new()
+    name_ledger_set_module(&ledger, 0, "app", "app.jet", "pkg")
+    name_ledger_set_module(&ledger, 1, "lib", "lib.jet", "pkg")
+    name_ledger_set_module(&ledger, 2, "dep", "dep.jet", "dep")
+    ledger
+}
+fn names_test_has_path(paths: [MIRNameCanonicalPath], name: String, path: String) -> Bool Never! {
+    paths.contains(MIRNameCanonicalPath{name: name, path: path})
+}
+
+// Rust:915
+#Test("ledger_projects_paths_and_visibility") {
+    ledger := names_test_ledger()
+    name_ledger_declare(&ledger, 1, "Thing", "lib.Thing", "type", names_test_span(), MIRNameVisibility.Package)
+    assert_eq(name_ledger_declaration_path(ledger, 1, "Thing"), Val("lib.Thing"))
+    assert(name_ledger_visible(ledger, 0, 1, "Thing"))
+    assert(!name_ledger_visible(ledger, 2, 1, "Thing"))
+}
+// Rust:949
+#Test("ledger_projects_alias_visibility") {
+    ledger := names_test_ledger()
+    name_ledger_record_alias(&ledger, 0, "Thing", "lib.Thing", Val(1), names_test_span(), MIRNameVisibility.Public)
+    assert(name_ledger_exported(ledger, 0, "Thing"))
+    assert(name_ledger_public(ledger, 0, "Thing"))
+    assert_eq((name_ledger_alias(ledger, 0, "Thing") ?? panic("alias")).target, "lib.Thing")
+    name_ledger_declare(&ledger, 0, "Thing", "app.Thing", "type", names_test_span(), MIRNameVisibility.Private)
+    assert(!name_ledger_exported(ledger, 0, "Thing"))
+    assert(name_ledger_effective_alias(ledger, 0, "Thing") != None)
+}
+// Rust:993
+#Test("file_module_declaration_keeps_visibility_and_alias_target") {
+    ledger := names_test_ledger()
+    name_ledger_declare(&ledger, 1, "helper", "lib.helper", "file_module", names_test_span(), MIRNameVisibility.Package)
+    assert(name_ledger_exported(ledger, 1, "helper"))
+    assert(!name_ledger_public(ledger, 1, "helper"))
+    assert(name_ledger_visible(ledger, 0, 1, "helper"))
+    assert(!name_ledger_visible(ledger, 2, 1, "helper"))
+    name_ledger_record_alias(&ledger, 1, "helper", "helper", Val(2), names_test_span(), MIRNameVisibility.Package)
+    assert_eq((name_ledger_alias(ledger, 1, "helper") ?? panic("synthetic file alias")).target_module, Val(2))
+    assert(name_ledger_effective_alias(ledger, 1, "helper") != None)
+}
+// Rust:1041
+#Test("alias_record_replaces_target_even_when_visibility_weakens") {
+    ledger := name_ledger_new()
+    name_ledger_record_alias(&ledger, 0, "helper", "first", Val(1), names_test_span(), MIRNameVisibility.Public)
+    name_ledger_record_alias(&ledger, 0, "helper", "second", Val(2), names_test_span(), MIRNameVisibility.Private)
+    alias :: name_ledger_alias(ledger, 0, "helper") ?? panic("latest alias")
+    assert_eq(alias.target, "second")
+    assert_eq(alias.target_module, Val(2))
+    assert_eq(alias.visibility, MIRNameVisibility.Private)
+    assert_eq(ledger.tables.alias_names.get("helper") ?? [], [(module_index: 0, name: "helper")])
+}
+// Rust:1066
+#Test("rust_names_use_one_projection") {
+    assert_eq(foundation_mangle("run"), "__jet_run")
+    assert_eq(foundation_mangle("$value"), "__jet_ct_value")
+    assert_eq(foundation_generated_path("Fire.Burn"), "__jet_Fire_dBurn")
+    assert_eq(foundation_member_name("math", "double"), "__jet_math_ddouble")
+    assert_eq(foundation_member_name(foundation_member_name("outer", "inner"), "helper"), "__jet_outer_dinner_dhelper")
+}
+// Rust:1078
+#Test("generated_names_use_a_collision_safe_lane") {
+    assert_eq(foundation_mangle_generated("value"), "__jet___value")
+    assert_eq(foundation_mangle_generated("__jet_value"), "__jet___value")
+    assert_eq(foundation_mangle_generated("__jet___value"), "__jet___value")
+    assert(foundation_mangle_generated("value") != foundation_mangle("value"))
+}
+// Rust:1085
+#Test("canonical_path_follows_declarations_and_aliases") {
+    ledger := names_test_ledger()
+    name_ledger_declare(&ledger, 1, "Thing", "lib.Thing", "type", names_test_span(), MIRNameVisibility.Public)
+    name_ledger_record_alias(&ledger, 0, "Alias", "lib.Thing", Val(1), names_test_span(), MIRNameVisibility.Public)
+    assert_eq(name_ledger_canonical_path(ledger, 1, "Thing"), Val("lib.Thing"))
+    assert(names_test_has_path(name_ledger_canonical_paths(ledger, 1), "pkg::lib.jet::Thing", "lib.Thing"))
+    assert_eq(name_ledger_canonical_path_at(ledger, 1, 3, 7), Val("lib.Thing"))
+    generated :: foundation_member_name("Inner", "helper")
+    name_ledger_declare(&ledger, 0, generated, "app.Inner.helper", "function", names_test_span(), MIRNameVisibility.Private)
+    assert_eq(name_ledger_display_path(ledger, 0, generated, Val(0)), Val("app.Inner.helper"))
+    assert_eq(name_ledger_canonical_path(ledger, 0, "Alias"), Val("lib.Thing"))
+    assert_eq(name_ledger_display_path(ledger, 0, "Alias", Val(1)), Val("Alias"))
+    name_ledger_record_alias(&ledger, 0, "lib", "lib", Val(1), names_test_span(), MIRNameVisibility.Public)
+    assert(names_test_has_path(name_ledger_canonical_paths(ledger, 0), "lib.Thing", "lib.Thing"))
+}
+// Rust:1164
+#Test("display_path_qualifies_ambiguous_visible_leaves") {
+    ledger := names_test_ledger()
+    name_ledger_set_module(&ledger, 1, "one", "one.jet", "pkg")
+    name_ledger_set_module(&ledger, 2, "two", "two.jet", "pkg")
+    name_ledger_declare(&ledger, 1, "Thing", "one.Thing", "type", names_test_span(), MIRNameVisibility.Public)
+    name_ledger_declare(&ledger, 2, "Thing", "two.Thing", "type", names_test_span(), MIRNameVisibility.Public)
+    assert_eq(name_ledger_display_path(ledger, 0, "Thing", Val(2)), Val("two.Thing"))
+}
+// Rust:1201
+#Test("display_path_at_projects_unique_and_ambiguous_definitions") {
+    ledger := names_test_ledger()
+    name_ledger_set_module(&ledger, 1, "one", "one.jet", "pkg")
+    name_ledger_set_module(&ledger, 2, "two", "two.jet", "pkg")
+    name_ledger_declare(&ledger, 0, "Point", "app.Point", "type", Span{start: 10, end: 15}, MIRNameVisibility.Public)
+    assert_eq(name_ledger_display_path_at(ledger, 0, 10, 15, "Point", None, Val(0)), Val("Point"))
+    name_ledger_declare(&ledger, 1, "Point", "one.Point", "type", names_test_span(), MIRNameVisibility.Public)
+    name_ledger_declare(&ledger, 2, "Point", "two.Point", "type", names_test_span(), MIRNameVisibility.Public)
+    assert_eq(name_ledger_display_path_at(ledger, 0, 3, 7, "Point", None, Val(2)), Val("two.Point"))
+}
+// Rust:1250
+#Test("display_path_at_projects_members_from_their_owner") {
+    ledger := name_ledger_new()
+    name_ledger_set_module(&ledger, 0, "app", "app.jet", "pkg")
+    name_ledger_declare(&ledger, 0, "Point", "app.Point", "type", Span{start: 10, end: 15}, MIRNameVisibility.Public)
+    name_ledger_declare(&ledger, 0, "Point.x", "app.Point.x", "field", Span{start: 20, end: 21}, MIRNameVisibility.Public)
+    assert_eq(name_ledger_display_path_at(ledger, 0, 20, 21, "x", Val("Point"), Val(0)), Val("Point.x"))
+}
+
+#Test("names_sparse_namespace_import_and_nominal_identity") {
+    imports := [(module_index: Int, start: Int, end: Int):Int]{}
+    imports[(module_index: 20, start: 3, end: 7)] = 80
+    ledger := name_ledger_with_imports(imports)
+    name_ledger_set_module(&ledger, 20, "app", "src/app.jet", "pkg")
+    name_ledger_set_module(&ledger, 80, "same", "src/type.jet", "pkg")
+    name_ledger_set_module(&ledger, 90, "same", "src/type.jet", "other")
+    name_ledger_set_module_namespace(&ledger, 20, "pkg-root")
+    name_ledger_set_module_namespace(&ledger, 80, "pkg-root")
+    assert_eq(name_ledger_namespace_siblings(ledger, 20), [80])
+    assert_eq(name_ledger_namespace_siblings(ledger, 90), [])
+    assert(name_ledger_same_namespace(ledger, 90, 90))
+    assert(!name_ledger_same_namespace(ledger, 20, 90))
+    assert_eq(name_ledger_import_target(ledger, 20, names_test_span()), Val(80))
+    name_ledger_record_import_target(&ledger, 20, Span{start: 9, end: 10}, 80)
+    assert_eq(name_ledger_import_edges(ledger), [(from_module: 20, target_module: 80)])
+    assert_eq(name_ledger_nominal_identity(ledger, 80, "Thing"), Val("pkg::src/type.jet::Thing"))
+    assert_eq(name_ledger_nominal_module(ledger, "pkg::src/type.jet::Thing"), Val(80))
+    assert_eq(name_ledger_nominal_module(ledger, "other::src/type.jet::Thing"), Val(90))
+    assert_eq(name_ledger_nominal_module(ledger, "Thing"), None)
+    name_ledger_declare(&ledger, 80, "Thing.method", "same.Thing.method", "method", names_test_span(), MIRNameVisibility.Private)
+    assert(name_ledger_visible(ledger, 20, 20, "Thing.method"))
+    assert(!name_ledger_visible(ledger, 90, 20, "Thing.method"))
+}
+#Test("names_loader_roots_snapshot_merge_and_refresh") {
+    ledger := names_test_ledger()
+    name_ledger_record_import_target(&ledger, 0, names_test_span(), 1)
+    name_ledger_set_module_namespace(&ledger, 0, "root")
+    name_ledger_record_alias(&ledger, 0, "dep", "lib", Val(1), names_test_span(), MIRNameVisibility.Private)
+    name_ledger_record_loader_alias_use(&ledger, 0, names_test_span())
+    assert_eq(name_ledger_alias_identity(ledger, 0, names_test_span()), Val("import:app.jet::3..7"))
+    assert(name_ledger_loader_alias_use(ledger, 0, names_test_span()))
+    fact :: structure_fact_new(MIRStructureFactKind.ImportEdge, "dep", "app.jet", names_test_span(), "live", "manifest root", None)
+    name_ledger_record_structure_fact(&ledger, fact)
+    name_ledger_record_structure_fact(&ledger, fact)
+    assert_eq(ledger.structure_facts.len(), 1)
+    snapshot := name_ledger_body_snapshot(ledger)
+    assert_eq(snapshot.structure_facts.len(), 0)
+    assert(name_ledger_alias_used(snapshot, 0, name_ledger_alias(ledger, 0, "dep") ?? panic("alias")))
+    name_ledger_record_alias_use(&snapshot, 0, Span{start: 9, end: 10})
+    reference :: MIRNameReference{module_path: "lib.jet", kind: "type", def_span: names_test_span(), semantic_identity: Val("pkg::lib.jet::Thing")}
+    name_ledger_record_reference(&snapshot, "app.jet", 20, 25, reference)
+    assert_eq(name_ledger_reference(ledger, "app.jet", 20, 25), None)
+    name_ledger_merge_references(&ledger, snapshot)
+    assert_eq((name_ledger_reference(ledger, "app.jet", 20, 25) ?? panic("merged reference")).def_span, names_test_span())
+    assert_eq(name_ledger_reference(ledger, "lib.jet", 20, 25), None)
+    name_ledger_record_structure_fact(&snapshot, structure_fact_new(MIRStructureFactKind.Liveness, "Thing", "app.jet", names_test_span(), "live", "checked", Val("gate")))
+    name_ledger_merge_structure_facts(&ledger, snapshot)
+    name_ledger_merge_structure_facts(&ledger, snapshot)
+    assert_eq(ledger.structure_facts.len(), 2)
+    name_ledger_declare(&snapshot, 1, "OnlySnapshot", "lib.OnlySnapshot", "type", names_test_span(), MIRNameVisibility.Public)
+    assert_eq(name_ledger_declaration(ledger, 1, "OnlySnapshot"), None)
+    name_ledger_clear_sema_facts(&ledger)
+    assert_eq(name_ledger_module(ledger, 0), None)
+    assert_eq(name_ledger_alias(ledger, 0, "dep"), None)
+    assert_eq(name_ledger_reference(ledger, "app.jet", 20, 25), None)
+    assert_eq(name_ledger_import_target(ledger, 0, names_test_span()), Val(1))
+    assert_eq(name_ledger_module_namespace(ledger, 0), Val("root"))
+    assert(name_ledger_alias_uses(ledger).contains((module_index: 0, start: 3, end: 7)))
+    assert(!name_ledger_alias_uses(ledger).contains((module_index: 0, start: 9, end: 10)))
+    assert_eq(ledger.structure_facts, [fact])
+}
+#Test("names_redeclaration_span_and_presentation_index") {
+    ledger := names_test_ledger()
+    name_ledger_declare(&ledger, 0, "Box", "app.Box", "type", names_test_span(), MIRNameVisibility.Public)
+    name_ledger_declare(&ledger, 0, "Box", "app.Box", "type", names_test_span(), MIRNameVisibility.Private)
+    assert_eq(ledger.tables.declaration_names.get("Box") ?? [], [(module_index: 0, name: "Box")])
+    name_ledger_declare(&ledger, 0, "Box.encode", "app.Box.encode", "method", names_test_span(), MIRNameVisibility.Public)
+    assert_eq(name_ledger_canonical_path_at(ledger, 0, 3, 7), None)
+    assert_eq((name_ledger_declaration_at(ledger, 0, 3, 7, Val("Box.encode")) ?? panic("exact key")).name, "Box.encode")
+    name_ledger_record_display_path(&ledger, 0, "app.Box", "source.Box")
+    assert_eq(name_ledger_display_path(ledger, 0, "Box", Val(0)), Val("source.Box"))
+    assert_eq(name_ledger_canonical_path(ledger, 0, "Box"), Val("app.Box"))
+    assert_eq(name_ledger_semantic_identity(ledger, 0, "Box"), Val("pkg::app.jet::Box"))
+    assert_eq(name_ledger_display_path(ledger, 0, "missing", None), None)
+    assert_eq(name_visibility_from_flags(true, true), MIRNameVisibility.Package)
+    assert_eq(name_visibility_from_flags(true, false), MIRNameVisibility.Public)
+    assert_eq(name_visibility_from_flags(false, false), MIRNameVisibility.Private)
+    assert_eq(structure_fact_kind_name(MIRStructureFactKind.ImportEdge), "import-edge")
+}
+#Test("names_package_scope_uses_platform_components_not_text_prefix") {
+    unix :: names_os_path.PathPlatform.Unix
+    windows :: names_os_path.PathPlatform.Windows
+    assert_eq(names_package_scope_for(names_os_path.from_text("/repo/src/../pkg/package.jet", unix), names_os_path.from_text("/repo", unix)), "pkg")
+    assert_eq(names_package_scope_for(names_os_path.from_text("/repo/package.jet", unix), names_os_path.from_text("/repo", unix)), ".")
+    assert_eq(names_package_scope_for(names_os_path.from_text("/repository/package.jet", unix), names_os_path.from_text("/repo", unix)), "/repository")
+    assert_eq(names_os_path.display(names_normalize_path(names_os_path.from_text("../../a/../b", unix))), "b")
+    assert_eq(names_package_scope_for(names_os_path.from_text("C:\\repo\\pkg\\package.jet", windows), names_os_path.from_text("C:\\repo", windows)), "pkg")
+}

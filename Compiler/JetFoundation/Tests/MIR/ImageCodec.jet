@@ -1,0 +1,178 @@
+// Frozen emitted primitive wire law; schema-generator witnesses belong to the
+// canonical ImageSchema owner. These exercise high-bit words and error controls.
+fn mir_image_test_host() -> JetTargetLayout Never! { jet_target_layout_from_triple("x86_64-unknown-linux-gnu") }
+fn mir_image_test_varint_error(bytes: View<U8>) -> String Never! {
+    reader := MIRImageReader.new(bytes, mir_image_test_host())
+    &reader.read_u64() ?? return err.message
+    "unexpected varint success"
+}
+#Test("MIR image canonical varints retain every u64 bit") {
+    values :: [U64]{U64{0}, U64{127}, U64{128}, U64{16384}, U64{9223372036854775808}, U64{18446744073709551615}}
+    writer := MIRImageWriter.new()
+    loop value in values -> &writer.write_u64(value)
+    bytes :: writer.finish()
+    reader := MIRImageReader.new(bytes[0..<bytes.len()], mir_image_test_host())
+    loop expected in values -> assert_eq(&reader.read_u64() ?? panic(err.message), expected)
+    reader.finish() ?? panic(err.message)
+}
+#Test("MIR image zigzag covers both signed endpoints") {
+    values :: [Int]{0, -1, 1, -9223372036854775808, 9223372036854775807}
+    writer := MIRImageWriter.new()
+    loop value in values -> &writer.write_signed(value)
+    bytes :: writer.finish()
+    reader := MIRImageReader.new(bytes[0..<bytes.len()], mir_image_test_host())
+    loop expected in values -> assert_eq(&reader.read_signed() ?? panic(err.message), expected)
+    reader.finish() ?? panic(err.message)
+}
+#Test("MIR image rejects overlong overflowing and truncated varints") {
+    overlong :: [U8]{U8{128}, U8{0}}
+    assert_eq(mir_image_test_varint_error(overlong[0..<overlong.len()]), "native MIR image varint is not canonical")
+    truncated :: [U8]{U8{128}}
+    assert_eq(mir_image_test_varint_error(truncated[0..<truncated.len()]), "truncated native MIR image")
+    overflow := [U8]{}
+    loop _ in 0..<9 -> &overflow.push(U8{128})
+    &overflow.push(U8{2})
+    assert_eq(mir_image_test_varint_error(overflow[0..<overflow.len()]), "native MIR image varint exceeds u64")
+}
+fn mir_image_test_count_error(bytes: View<U8>, host: JetTargetLayout) -> String Never! {
+    reader := MIRImageReader.new(bytes, host)
+    &reader.read_count() ?? return err.message
+    "unexpected count success"
+}
+#Test("MIR image count checks host range before remaining bytes") {
+    writer := MIRImageWriter.new()
+    &writer.write_u64(U64{4294967296})
+    bytes :: writer.finish()
+    host32 :: jet_target_layout_from_triple("i686-unknown-linux-gnu")
+    assert_eq(mir_image_test_count_error(bytes[0..<bytes.len()], host32), "native MIR image count exceeds host range")
+    assert_eq(mir_image_test_count_error(bytes[0..<bytes.len()], mir_image_test_host()), "native MIR image collection count exceeds remaining bytes")
+}
+#Test("MIR image fixed float words use exact little endian bits") {
+    writer := MIRImageWriter.new()
+    &writer.write_fixed_u32(U32{0x78563412})
+    &writer.write_fixed_u64(U64{0xffeeddccbbaa9988})
+    bytes :: writer.finish()
+    assert_eq(bytes, [U8]{U8{0x12}, U8{0x34}, U8{0x56}, U8{0x78}, U8{0x88}, U8{0x99}, U8{0xaa}, U8{0xbb}, U8{0xcc}, U8{0xdd}, U8{0xee}, U8{0xff}})
+    reader := MIRImageReader.new(bytes[0..<bytes.len()], mir_image_test_host())
+    assert_eq(&reader.read_fixed_u32() ?? panic(err.message), U32{0x78563412})
+    assert_eq(&reader.read_fixed_u64() ?? panic(err.message), U64{0xffeeddccbbaa9988})
+    reader.finish() ?? panic(err.message)
+}
+
+// Consumer laws only: the original Core Sip13 vectors remain in their owner.
+// No selected-machine or retained native byte-view facts are fabricated here.
+use core.collections.runtime.kernel_siphash13 as mir_image_hash_test
+
+#Test("MIR DebugDigest empty and raw writes never add the str terminator") {
+    empty := mir_image_debug_hasher_new()
+    expected_empty :: mir_image_hash_test.finish(mir_image_hash_test.new())
+    assert_eq(mir_image_debug_hasher_finish(empty), expected_empty)
+    mir_image_debug_hasher_write(&empty, "")
+    assert_eq(mir_image_debug_hasher_finish(empty), expected_empty)
+    framed := mir_image_hash_test.new()
+    mir_image_hash_test.write_str(&framed, "")
+    terminator := mir_image_hash_test.new()
+    mir_image_hash_test.write_u8(&terminator, U8{255})
+    assert_eq(mir_image_hash_test.finish(framed), mir_image_hash_test.finish(terminator))
+    assert(mir_image_debug_hasher_finish(empty) != mir_image_hash_test.finish(framed))
+    text :: "é😀"
+    raw := mir_image_debug_hasher_new()
+    mir_image_debug_hasher_write(&raw, text)
+    bytes :: text.bytes()
+    expected := mir_image_hash_test.new()
+    mir_image_hash_test.write(&expected, bytes[0..<bytes.len()])
+    assert_eq(mir_image_debug_hasher_finish(raw), mir_image_hash_test.finish(expected))
+    framed_text := mir_image_hash_test.new()
+    mir_image_hash_test.write_str(&framed_text, text)
+    assert(mir_image_debug_hasher_finish(raw) != mir_image_hash_test.finish(framed_text))
+}
+
+#Test("MIR DebugDigest fragmented Unicode writes retain the whole raw UTF8 stream") {
+    text :: "012345678é😀abcdefghijk終"
+    complete := mir_image_debug_hasher_new()
+    mir_image_debug_hasher_write(&complete, text)
+    expected :: mir_image_debug_hasher_finish(complete)
+    // String slice boundaries count scalars, so each fragment is valid UTF-8.
+    loop split in 0..text.len() {
+        fragments := mir_image_debug_hasher_new()
+        mir_image_debug_hasher_write(&fragments, text.slice(0, split))
+        mir_image_debug_hasher_write(&fragments, "")
+        mir_image_debug_hasher_write(&fragments, text.slice(split, text.len()))
+        assert_eq(mir_image_debug_hasher_finish(fragments), expected)
+    }
+    scalars := mir_image_debug_hasher_new()
+    loop index in 0..<text.len() -> mir_image_debug_hasher_write(&scalars, text.slice(index, index + 1))
+    assert_eq(mir_image_debug_hasher_finish(scalars), expected)
+}
+
+#Test("MIR DebugDigest finish is immutable and writing may continue afterward") {
+    state := mir_image_debug_hasher_new()
+    mir_image_debug_hasher_write(&state, "1234567é")
+    length :: state.length
+    tail :: state.tail
+    tail_len :: state.tail_len
+    digest :: mir_image_debug_hasher_finish(state)
+    assert_eq(mir_image_debug_hasher_finish(state), digest)
+    assert_eq(state.length, length)
+    assert_eq(state.tail, tail)
+    assert_eq(state.tail_len, tail_len)
+    mir_image_debug_hasher_write(&state, "😀xyz")
+    complete := mir_image_debug_hasher_new()
+    mir_image_debug_hasher_write(&complete, "1234567é😀xyz")
+    assert_eq(mir_image_debug_hasher_finish(state), mir_image_debug_hasher_finish(complete))
+}
+
+#Test("Tuple names retain authored Unicode field order exact str framing and lowercase hex") {
+    fields :: [TypeTupleField]{TypeTupleField{name: "é", ty: Type.Int}, TypeTupleField{name: "😀", ty: Type.String}}
+    // Independent framing fixture: UTF-8 name, 0xff, canonical type, 0xff.
+    bytes :: [U8]{U8{0xc3}, U8{0xa9}, U8{255}, U8{73}, U8{110}, U8{116}, U8{255},
+        U8{0xf0}, U8{0x9f}, U8{0x98}, U8{0x80}, U8{255},
+        U8{83}, U8{116}, U8{114}, U8{105}, U8{110}, U8{103}, U8{255}}
+    framed := mir_image_hash_test.new()
+    mir_image_hash_test.write(&framed, bytes[0..<bytes.len()])
+    hash :: mir_image_hash_test.finish(framed)
+    expected :: "__jet_JetTup_{tuple_name_hash_hex(Int.from_u64(hash))}"
+    assert_eq(type_tuple_struct_name(fields), expected)
+    reversed :: [TypeTupleField]{fields[1], fields[0]}
+    assert(type_tuple_struct_name(fields) != type_tuple_struct_name(reversed))
+    split :: [TypeTupleField]{TypeTupleField{name: "aa", ty: Type.Named{name: "bb"}}}
+    joined :: [TypeTupleField]{TypeTupleField{name: "aabb", ty: Type.Named{name: ""}}}
+    assert(type_tuple_struct_name(split) != type_tuple_struct_name(joined))
+    empty_fields :: [TypeTupleField]{}
+    empty_hash :: mir_image_hash_test.finish(mir_image_hash_test.new())
+    empty_name :: "__jet_JetTup_{tuple_name_hash_hex(Int.from_u64(empty_hash))}"
+    assert_eq(type_tuple_struct_name(empty_fields), empty_name)
+    assert_eq(tuple_name_hash_hex(0), "0")
+    assert_eq(tuple_name_hash_hex(0xabcdef), "abcdef")
+    assert_eq(tuple_name_hash_hex(0x10), "10")
+}
+
+#Test("native MIR Yield exposes both required targets and one yielded value") {
+    value :: MIRValueID{value: U64{11}}
+    resume :: MIRBlockID{value: U64{12}}
+    cancel :: MIRBlockID{value: U64{13}}
+    terminator :: MIRTerminator.Yield{value: value, resume: resume, cancel: cancel}
+    assert_eq(mir_terminator_targets(terminator), [MIRBlockID]{resume, cancel})
+    assert_eq(mir_terminator_value_uses(terminator), [MIRValueID]{value})
+}
+
+#Test("native MIR StringPart Debug is the literal/value enum without format metadata") {
+    assert_eq(mir_digest_string_part_debug(MIRStringPart.Literal{text: "a\nb"}), "Literal(\"a\\nb\")")
+    assert_eq(mir_digest_string_part_debug(MIRStringPart.Value{value: MIRValueID{value: U64{9}}}), "Value(MirValueId(9))")
+}
+
+#Test("native MIR capture facts retain full schedule and derivation Debug") {
+    retention :: MIRFrameRetention{resource: "buffer", operation: 2, owner: "driver", completion_token: Val("done"), completed: false}
+    schedule :: MIRFrameSchedule{operations: [], dependencies: [], transfers: [], reuse: [], retentions: [MIRFrameRetention]{retention}, conservative: [String]{"shared"}}
+    facts :: MIRCaptureFacts{escapes: true, needs_fn_mut: false, mutable: [String]{"z", "a", "z"}, cloned: [], frozen: [], materialized: [], moved: [], frame_schedule: Val(schedule), frame_schedule_derivation: Val(MIRDerivationRef{id: "proof"})}
+    expected :: "MirCaptureFacts {{ escapes: true, needs_fn_mut: false, mutable: {{\"a\", \"z\"}}, cloned: {{}}, frozen: {{}}, materialized: {{}}, moved: {{}}, frame_schedule: Some(JetFrameSchedule {{ operations: [], dependencies: [], transfers: [], reuse: [], retentions: [JetFrameRetention {{ resource: \"buffer\", operation: 2, owner: \"driver\", completion_token: Some(\"done\"), completed: false }}], conservative: [\"shared\"] }}), frame_schedule_derivation: Some(DerivationRef {{ id: \"proof\" }}) }}"
+    assert_eq(mir_digest_capture_facts_debug(facts), expected)
+    json :: mir_frame_schedule_json(schedule)
+    assert(json.contains("\"owner\":\"driver\""))
+    assert(json.contains("\"completion_token\":\"done\""))
+}
+
+#Test("native MIR kernel facts retain the original mode before proof fields") {
+    facts :: MIRKernelFacts{mode: MIRKernelMode.Parallel, bounds: true, alias_free: false, captures: true, race_free: false, barriers_uniform: true, control_flow: false}
+    assert_eq(mir_digest_kernel_facts_debug(Val(facts)), "Some(MirKernelFacts {{ mode: Parallel, bounds: true, alias_free: false, captures: true, race_free: false, barriers_uniform: true, control_flow: false }})")
+}

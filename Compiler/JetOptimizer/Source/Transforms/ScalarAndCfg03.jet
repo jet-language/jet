@@ -1,0 +1,942 @@
+// Scalar and canonical-loop continuation of MIROptimization. Reviewed exact
+// scalar/bounds helpers retain their existing owners; changed behavior is here.
+use jet_foundation.[MIRProgram, MIRFunction, MIRConstant, MIRValueID, MIRBlockID, MIRPlaceID, MIROpID, MIRInstruction, MIRType, MIRTypeDef, MIRIntegerWidth, MIRUnaryOp, MIRBinaryOp, MIRBinaryDispatch, MIROperation, MIRTerminator, MIRPlaceBase, MIROwnership, MIRPreludeCall, MIRPreludeCallID, MIRConversion, MIRSemanticOp, MIRLoopForm, MIRLoopFact, MIRVectorFact, MIRVectorRule, MIRVectorLayout, MIRVectorAccessRoot, MIRFusionFact, MIROptimizationDecision, MIROptimizationRejection, MIRAccelerationFact, MIRFixedReductionFact, mir_operation_value_uses, mir_terminator_value_uses, mir_terminator_targets, mir_type_same_checked_type, stable_id]
+use jet_foundation.MIROptimization.Acceleration.[AccelerationProof, AccelerationWorkloadFacts, AccelerationTransform, D_FRED1_FIXED_ORDER]
+use jet_optimizer.[block_positions, cyclic_block_positions, collect_loop_region, find_value_instruction, place_value_uses, operation_place_refs, loop_trip_count, loop_trip_count_for_cursor, loop_copy_cost, vector_accesses, vector_fact, fixed_reduction_plan, scalar_loop_condition, scalar_loop_advance, scalar_int_constant, is_default_int_type, value_type, places_overlap, value_depends_on_place, scalar_cursor_references_are_clean, scalar_loop_cursor_value]
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8184
+fn fold_exact_constants(program: &MIRProgram) Never! {
+    loop function_index in 0..<program.functions.len() {
+        function := &program.functions[function_index]
+        limit := 1
+        loop block in function.blocks -> limit += block.instructions.len()
+        loop _ in 0..<limit {
+            constants := mir_pass_collect_scalar_constants(function)
+            changed := false
+            loop block_index in 0..<function.blocks.len() {
+                loop instruction_index in 0..<function.blocks[block_index].instructions.len() {
+                    instruction := &function.blocks[block_index].instructions[instruction_index]
+                    replacement :: if instruction.operation == {
+                        .Phi(incoming) -> mir_pass_fold_phi(incoming, constants)
+                        .Unary(op, value) -> {
+                            if constants.get(value.value) == {
+                                Val(constant) -> if instruction.ty == { Val(ty) -> fold_unary(op, constant, ty) None -> None }
+                                None -> None
+                            }
+                        }
+                        .Binary(op, dispatch, _, left, right) -> {
+                            if dispatch == .Primitive && instruction.ty != None {
+                                if constants.get(left.value) == {
+                                    Val(l) -> if constants.get(right.value) == {
+                                        Val(r) -> fold_binary(op, l, r, instruction.ty ?? unreachable())
+                                        None -> None
+                                    }
+                                    None -> None
+                                }
+                            } else -> None
+                        }
+                        else -> None
+                    }
+                    if replacement == {
+                        Val(constant) -> {
+                            instruction.operation = .Constant(constant)
+                            if instruction.result == Val(result) -> constants[result.value] = constant
+                            changed = true
+                        }
+                        None -> {
+                            if instruction.result == Val(result) {
+                                if instruction.operation == .Constant(constant) {
+                                    if mir_pass_scalar_constant(constant) == Val(scalar) -> constants[result.value] = scalar
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if !changed -> break
+        }
+    }
+    mir_pass_simplify_cfg(&program)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8228
+// collect_scalar_constants -> ScalarAndCfg.jet::mir_pass_collect_scalar_constants, keyed by value.value.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8249
+// fold_phi -> ScalarAndCfg.jet::mir_pass_fold_phi, requiring every incoming value to be equal.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8262
+// scalar_constant -> ScalarAndCfg.jet::mir_pass_scalar_constant, discarding integer spelling.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8277
+// same_scalar -> ScalarAndCfg.jet::mir_pass_same_scalar, comparing integer width as well as value.
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8286
+fn fold_unary(op: MIRUnaryOp, value: MIRConstant, ty: MIRType) -> MIRConstant? Never! {
+    if op == .Not && value == .Bool(flag) -> return Val(MIRConstant.Bool(!flag))
+    if op == .Neg && value == .Int(number, width, _) {
+        result :: mir_pass_checked_sub(0, number) ?? return None
+        return make_integer_constant(result, ty, width)
+    }
+    None
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8297
+fn fold_binary(op: MIRBinaryOp, left: MIRConstant, right: MIRConstant, ty: MIRType) -> MIRConstant? Never! {
+    if left == .Bool(l) && right == .Bool(r) {
+        return if op == {
+            .And -> Val(MIRConstant.Bool(l && r))
+            .Or -> Val(MIRConstant.Bool(l || r))
+            .Eq -> Val(MIRConstant.Bool(l == r))
+            .Ne -> Val(MIRConstant.Bool(l != r))
+            else -> None
+        }
+    }
+    if left == .Char(l) && right == .Char(r) {
+        return if op == {
+            .Eq -> Val(MIRConstant.Bool(l == r))
+            .Ne -> Val(MIRConstant.Bool(l != r))
+            .Lt -> Val(MIRConstant.Bool(l < r))
+            .Gt -> Val(MIRConstant.Bool(l > r))
+            .Le -> Val(MIRConstant.Bool(l <= r))
+            .Ge -> Val(MIRConstant.Bool(l >= r))
+            else -> None
+        }
+    }
+    if left != .Int(l, width, _) -> return None
+    if right != .Int(r, _, _) -> return None
+    result :: if op == {
+        .Add -> mir_pass_checked_add(l, r) ?? return None
+        .Sub -> mir_pass_checked_sub(l, r) ?? return None
+        .Mul -> mir_pass_checked_mul(l, r) ?? return None
+        .Div -> {
+            if r == 0 || (l == mir_pass_int_min() && r == -1) -> return None
+            mir_pass_trunc_div(l, r)
+        }
+        .FloorDiv -> mir_pass_floor_div(l, r) ?? return None
+        .Mod -> mir_pass_floor_mod(l, r) ?? return None
+        .Rem -> { if r == 0 -> return None; l %% r }
+        .Pow -> {
+            if r < 0 || r > 4294967295 -> return None
+            power := 1
+            exponent := r
+            base := l
+            loop exponent > 0 {
+                if exponent % 2 == 1 -> power = mir_pass_checked_mul(power, base) ?? return None
+                exponent = exponent /% 2
+                if exponent > 0 -> base = mir_pass_checked_mul(base, base) ?? return None
+            }
+            power
+        }
+        .BitAnd -> l & r
+        .BitOr -> l | r
+        .BitXor -> l ~| r
+        .Shl -> {
+            if r < 0 || r >= 64 -> return None
+            // i64::checked_shl checks the shift count, not arithmetic overflow.
+            low :: (l << r) & 18446744073709551615
+            if low > 9223372036854775807 -> low - 18446744073709551616 else -> low
+        }
+        .Shr -> { if r < 0 || r >= 64 -> return None; l >> r }
+        .Eq -> return Val(MIRConstant.Bool(l == r))
+        .Ne -> return Val(MIRConstant.Bool(l != r))
+        .Lt -> return Val(MIRConstant.Bool(l < r))
+        .Gt -> return Val(MIRConstant.Bool(l > r))
+        .Le -> return Val(MIRConstant.Bool(l <= r))
+        .Ge -> return Val(MIRConstant.Bool(l >= r))
+        .And | .Or | .Compare -> return None
+    }
+    make_integer_constant(result, ty, width)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8373
+// floor_div -> ScalarAndCfg.jet::mir_pass_floor_div, including zero and MIN/-1 exclusions.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8384
+// floor_mod -> ScalarAndCfg.jet::mir_pass_floor_mod, including zero and MIN/-1 exclusions.
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8394
+fn make_integer_constant(value: Int, ty: MIRType, fallback: MIRIntegerWidth?) -> MIRConstant? Never! {
+    width := ty.fixed_int()
+    if width == None -> width = fallback
+    if width == Val(row) && !fits_integer(value, row.signed, row.bits) -> return None
+    Val(MIRConstant.Int{value: value, width: width, spelling: None})
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8404
+fn fits_integer(value: Int, signed: Bool, bits: Int) -> Bool Never! {
+    if bits <= 0 || bits > 64 -> return false
+    if signed {
+        min :: 0 - (1 << (bits - 1))
+        max :: (1 << (bits - 1)) - 1
+        value >= min && value <= max
+    } else -> value >= 0 && (bits == 64 || value <= (1 << bits) - 1)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8415
+// derive_bounds_facts -> Bounds.jet::mir_pass_derive_bounds / mir_pass_function_bounds_facts,
+// including operation and projection facts, proof flags, and (operation,place,index) ordering.
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8456
+fn eliminate_dead_pure_values(program: &MIRProgram) Never! {
+    prelude_calls := [U64:MIRPreludeCall]{}
+    loop call in program.prelude_calls -> prelude_calls[call.id.value] = call
+    loop function_index in 0..<program.functions.len() {
+        function := &program.functions[function_index]
+        loop {
+            uses :: value_use_counts(function)
+            metadata := [U64:MIROwnership]{}
+            loop value in function.values -> metadata[value.id.value] = value.ownership
+            removed := [U64:Bool]{}
+            loop block_index in 0..<function.blocks.len() {
+                kept := [MIRInstruction]{}
+                loop instruction in function.blocks[block_index].instructions {
+                    erase := false
+                    if instruction.result == Val(result) && (uses.get(result.value) ?? 0) == 0 {
+                        if metadata.get(result.value) == Val(ownership) {
+                            erase = removable_dead_operation(instruction.operation, instruction.ty, ownership, prelude_calls)
+                            if erase -> removed[result.value] = true
+                        }
+                    }
+                    if !erase -> &kept.push(instruction)
+                }
+                function.blocks[block_index].instructions = ^kept
+            }
+            if removed.len() == 0 -> break
+            function.values = loop value in function.values if removed.get(value.id.value) == None -> value
+        }
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8485
+fn value_use_counts(function: MIRFunction) -> [U64:Int] Never! {
+    uses := [U64:Int]{}
+    places := [U64:Int]{}
+    loop (index, place) in function.places -> places[place.id.value] = index
+    loop place in function.places {
+        loop value in place_value_uses(place) -> uses[value.value] = (uses.get(value.value) ?? 0) + 1
+    }
+    loop scope in function.scopes {
+        if scope.deadline == Val(deadline) -> uses[deadline.value] = (uses.get(deadline.value) ?? 0) + 1
+    }
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            loop value in mir_operation_value_uses(instruction.operation) -> uses[value.value] = (uses.get(value.value) ?? 0) + 1
+            loop place_id in operation_place_refs(instruction.operation) {
+                if places.get(place_id.value) == Val(index) {
+                    loop value in place_value_uses(function.places[index]) -> uses[value.value] = (uses.get(value.value) ?? 0) + 1
+                }
+            }
+        }
+        loop value in mir_terminator_value_uses(block.terminator) -> uses[value.value] = (uses.get(value.value) ?? 0) + 1
+    }
+    uses
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8512
+fn removable_dead_operation(operation: MIROperation, ty: MIRType?, ownership: MIROwnership, prelude_calls: [U64:MIRPreludeCall]) -> Bool Never! {
+    if ownership.mode != .Copy || ownership.drop != .NoDrop -> return false
+    if operation == {
+        .Constant(constant) -> if constant == { .Int(_, _, _) | .Float(_, _, _) | .Bool(_) | .Char(_) -> true else -> false }
+        .Unary(.Not, _) -> ty.map(value -> value.kind == .Bool) ?? false
+        .Binary(op, dispatch, _, _, _) -> {
+            pure_dispatch :: if dispatch == {
+                .Primitive -> true
+                .Prelude(call, _) -> prelude_call_is_pure(prelude_calls, call)
+            }
+            pure_dispatch && (op == .Eq || op == .Ne || op == .Lt || op == .Gt || op == .Le || op == .Ge || op == .BitAnd || op == .BitOr || op == .BitXor || op == .And || op == .Or)
+        }
+        .Phi(_) -> true
+        .Convert(_, _, _, conversion) -> conversion_is_pure(conversion, prelude_calls)
+        .Semantic(operation) -> semantic_operation_is_pure(operation, prelude_calls)
+        else -> false
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8556
+fn prelude_call_is_pure(prelude_calls: [U64:MIRPreludeCall], call: MIRPreludeCallID) -> Bool Never! {
+    record :: prelude_calls.get(call.value) ?? return false
+    record.effect_kind == None && record.abi != .Effect && record.fallibility == .Infallible
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8566
+fn conversion_is_pure(conversion: MIRConversion, prelude_calls: [U64:MIRPreludeCall]) -> Bool Never! {
+    if conversion == {
+        .Transparent | .NumericCast | .SendFn -> true
+        .Prelude(call, _, fallibility) -> prelude_call_is_pure(prelude_calls, call) && fallibility == .Infallible
+    }
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8578
+fn semantic_operation_is_pure(operation: MIRSemanticOp, prelude_calls: [U64:MIRPreludeCall]) -> Bool Never! {
+    // These mutate runtime-owned state or execute callbacks outside their own effect row.
+    if operation == {
+        .ClosureMethod(_, _, _) | .CoreClosureCall(_, _, _, _, _, _) | .HandleMethod(_, _, _, _, _) | .HostCall(_, _) -> return false
+        else -> {}
+    }
+    calls :: operation.prelude_calls()
+    if calls.len() == 0 -> return false
+    loop call in calls -> if !prelude_call_is_pure(prelude_calls, call) -> return false
+    true
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8602
+struct CanonicalLoopRange { pub start: MIRValueID; pub end: MIRValueID; pub step: MIRValueID?; pub exclusive: Bool }
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8610
+struct CanonicalLoopShape {
+    pub form: MIRLoopForm
+    pub cursor: MIRValueID?
+    pub cursor_place: MIRPlaceID?
+    pub range: CanonicalLoopRange?
+    pub body: MIRBlockID
+    pub exit: MIRBlockID?
+    pub advance: MIRBlockID?
+    pub blocks: [MIRBlockID]
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8622
+fn refresh_loop_summaries(function: &MIRFunction) Never! {
+    has_eligible := false
+    no_aliasing := true
+    no_early_exit := true
+    no_cross := true
+    loop fact in function.optimization.vector_facts {
+        if fact.decision != .Eligible -> next
+        has_eligible = true
+        no_aliasing = no_aliasing && fact.no_aliasing
+        no_early_exit = no_early_exit && fact.no_early_exit
+        no_cross = no_cross && fact.no_cross_iteration_dependencies
+    }
+    function.optimization.auto_vectorizable = has_eligible
+    function.optimization.no_aliasing = has_eligible && no_aliasing
+    function.optimization.no_early_exit = has_eligible && no_early_exit
+    function.optimization.no_cross_iteration_dependencies = has_eligible && no_cross
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8656
+fn fusion_facts_for_rows(rows: [MIRLoopFact], vectors: [MIRVectorFact]) -> [MIRFusionFact] Never! {
+    facts := [MIRFusionFact]{}
+    // First vector for a header is the Rust find() result; index it once.
+    vector_rows := [U64:Int]{}
+    loop (index, vector) in vectors -> if vector_rows.get(vector.loop_header.value) == None -> vector_rows[vector.loop_header.value] = index
+    loop index in 1..<rows.len() {
+        first :: rows[index - 1]
+        second :: rows[index]
+        a :: vector_rows.get(first.header.value).map(position -> vectors[position])
+        b :: vector_rows.get(second.header.value).map(position -> vectors[position])
+        same_domain :: first.trip_count != None && first.trip_count == second.trip_count
+        adjacent :: first.exit == Val(second.header)
+        packed :: (a.map(fact -> fact.packed) ?? false) && (b.map(fact -> fact.packed) ?? false)
+        no_aliasing :: (a.map(fact -> fact.no_aliasing) ?? false) && (b.map(fact -> fact.no_aliasing) ?? false)
+        effect_free :: (a.map(fact -> fact.effect_free_body) ?? false) && (b.map(fact -> fact.effect_free_body) ?? false)
+        no_cross :: (a.map(fact -> fact.no_cross_iteration_dependencies) ?? false) && (b.map(fact -> fact.no_cross_iteration_dependencies) ?? false)
+        decision :: if {
+            !same_domain || !adjacent -> MIROptimizationDecision.Rejected(.DynamicTripCount)
+            !packed -> MIROptimizationDecision.Rejected(.ScalarBoundary)
+            !no_aliasing -> MIROptimizationDecision.Rejected(.MayAlias)
+            !effect_free -> MIROptimizationDecision.Rejected(.HasEffects)
+            !no_cross -> MIROptimizationDecision.Rejected(.CrossIterationDependency)
+            else -> MIROptimizationDecision.Eligible
+        }
+        &facts.push(MIRFusionFact{first_loop: first.header, second_loop: second.header, packed: packed, same_iteration_domain: same_domain, no_aliasing: no_aliasing, effect_free: effect_free, no_cross_iteration_dependencies: no_cross, span: first.span, decision: decision})
+    }
+    &facts.sort_by((a: MIRFusionFact, b: MIRFusionFact) -> if a.first_loop != b.first_loop -> a.first_loop.value <=> b.first_loop.value else -> a.second_loop.value <=> b.second_loop.value)
+    facts
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8709
+fn reconcile_checked_vector_fact(derived: &MIRVectorFact, checked: [MIRVectorFact], explicit_scalar: Bool) Never! {
+    proofs := [Int]{}
+    loop (index, proof) in checked -> if proof.loop_header == derived.loop_header -> &proofs.push(index)
+    reject :: (reason: MIROptimizationRejection) -> {
+        derived.packed = false
+        if derived.decision == .Eligible -> derived.decision = .Rejected(reason)
+    }
+    if explicit_scalar { reject(.ScalarBoundary); return }
+    if proofs.len() != 1 { reject(.UnsupportedOperation); return }
+    proof :: checked[proofs[0]]
+    if proof.decision == .Rejected(.DynamicTripCount) {
+        derived.packed = false
+        derived.decision = proof.decision
+        return
+    }
+    allows_carried :: derived.rule == .ConditionalAccumulate || derived.rule == .Reduction
+    allows_exit :: derived.rule == .EarlyExitSearch
+    packing_exception :: allows_carried || allows_exit
+    checked_no_cross :: proof.no_cross_iteration_dependencies || allows_carried
+    checked_no_exit :: proof.no_early_exit || allows_exit
+    derived.no_aliasing = derived.no_aliasing && proof.no_aliasing
+    derived.no_early_exit = derived.no_early_exit && checked_no_exit
+    derived.effect_free_body = derived.effect_free_body && proof.effect_free_body
+    derived.no_cross_iteration_dependencies = derived.no_cross_iteration_dependencies && checked_no_cross
+    early_lane_exception :: allows_exit && proof.lane_width == None && derived.lane_width != None
+    if !proof.same_checked_scope(derived) || proof.layout != derived.layout || (!packing_exception && proof.packed != derived.packed) || (!early_lane_exception && proof.lane_width != derived.lane_width) {
+        reason :: if {
+            !derived.effect_free_body -> MIROptimizationRejection.HasEffects
+            !derived.no_aliasing -> MIROptimizationRejection.MayAlias
+            !derived.no_early_exit -> MIROptimizationRejection.HasEarlyExit
+            !derived.no_cross_iteration_dependencies -> MIROptimizationRejection.CrossIterationDependency
+            else -> MIROptimizationRejection.ScalarBoundary
+        }
+        reject(reason)
+        return
+    }
+    if derived.element_type == Val(derived_ty) && proof.element_type == Val(checked_ty) {
+        if !mir_type_same_checked_type(derived_ty, checked_ty) { reject(.UnsupportedOperation); return }
+    }
+    if derived.decision == .Eligible {
+        if !proof.no_aliasing -> reject(.MayAlias)
+        else if !checked_no_exit -> reject(.HasEarlyExit)
+        else if !proof.effect_free_body -> reject(.HasEffects)
+        else if !checked_no_cross -> reject(.CrossIterationDependency)
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8840
+fn checked_vector_scope_is_present(function: MIRFunction, proof: MIRVectorFact) -> Bool Never! {
+    blocks :: block_positions(function)
+    values := [U64:Bool]{}
+    places := [U64:Bool]{}
+    body := [U64:Bool]{}
+    loop value in function.values -> values[value.id.value] = true
+    loop place in function.places -> places[place.id.value] = true
+    loop id in proof.body_blocks -> body[id.value] = true
+    header_position :: blocks.get(proof.loop_header.value) ?? return false
+    if body.len() == 0 || proof.accesses.len() == 0 -> return false
+    enters_body := false
+    loop target in mir_terminator_targets(function.blocks[header_position].terminator) -> if body.get(target.value) != None -> enters_body = true
+    if !enters_body -> return false
+    returns := false
+    allows_exit :: proof.rule == .EarlyExitSearch
+    loop id in proof.body_blocks {
+        position :: blocks.get(id.value) ?? return false
+        loop target in mir_terminator_targets(function.blocks[position].terminator) {
+            back :: target == proof.loop_header || proof.advance_block == Val(target)
+            if back -> returns = true
+            if body.get(target.value) == None && !back && !allows_exit -> return false
+        }
+    }
+    if !returns -> return false
+    if proof.advance_block == Val(advance) {
+        position :: blocks.get(advance.value) ?? return false
+        if !mir_terminator_targets(function.blocks[position].terminator).contains(proof.loop_header) -> return false
+    }
+    if proof.cursor == Val(cursor) && values.get(cursor.value) == None -> return false
+    loop access in proof.accesses {
+        if access.root == {
+            .Place(place) -> if places.get(place.value) == None -> return false
+            .Value(value) -> if values.get(value.value) == None -> return false
+        }
+    }
+    true
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8915
+fn checked_vector_fallback_exit(function: MIRFunction, header: MIRBlockID, body_blocks: [MIRBlockID]) -> MIRBlockID? Never! {
+    body := [U64:Bool]{}
+    loop id in body_blocks -> body[id.value] = true
+    block :: function.blocks.find(block -> block.id == header) ?? return None
+    targets :: if block.terminator == {
+        .Branch(_, then_target, else_target) -> [MIRBlockID]{then_target, else_target}
+        .Jump(target) -> [MIRBlockID]{target}
+        else -> [MIRBlockID]{}
+    }
+    loop target in targets -> if body.get(target.value) == None -> return Val(target)
+    None
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8934
+fn lowered_loop_trip_count(function: MIRFunction, previous: MIRLoopFact) -> U64? Never! {
+    header :: function.blocks.find(block -> block.id == previous.header) ?? return None
+    comparison := (op: MIRBinaryOp, left: MIRValueID, right: MIRValueID)?{None}
+    if header.terminator == .Branch(condition, _, _) {
+        if find_value_instruction(function, condition) == Val(instruction) {
+            if instruction.operation == .Binary(op, _, _, left, right) && op.is_comparison() -> comparison = Val((op: op, left: left, right: right))
+        }
+    }
+    bounds := [Int]{}
+    if comparison == Val(row) {
+        loop value in [MIRValueID]{row.left, row.right} {
+            if scalar_int_constant_value(function, value) == Val(number) && number >= 0 -> &bounds.push(number)
+        }
+    }
+    if bounds.len() == 0 {
+        loop id in [MIRBlockID?]{Val(previous.header), previous.body, previous.exit} {
+            block_id :: id ?? next
+            block :: function.blocks.find(block -> block.id == block_id) ?? next
+            loop instruction in block.instructions -> if instruction.operation == .Constant(.Int(value, _, _)) && value >= 0 -> &bounds.push(value)
+        }
+    }
+    if bounds.len() == 0 {
+        loop block in function.blocks {
+            loop instruction in block.instructions -> if instruction.operation == .Constant(.Int(value, _, _)) && value >= 0 -> &bounds.push(value)
+        }
+    }
+    if bounds.len() == 0 -> return None
+    bound := bounds[0]
+    if previous.trip_count == Val(previous_trip) {
+        expected :: Int.from_u64(previous_trip)
+        difference := (bound - expected).abs()
+        loop value in bounds {
+            distance :: (value - expected).abs()
+            if distance < difference { bound = value; difference = distance }
+        }
+    } else {
+        loop value in bounds -> if value > bound -> bound = value
+    }
+    if comparison == Val(row) && (row.op == .Le || row.op == .Ge) -> bound += 1
+    U64.from_int(bound)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9006
+fn scalar_int_constant_value(function: MIRFunction, value: MIRValueID) -> Int? Never! {
+    current := value
+    seen := [U64:Bool]{}
+    loop {
+        if seen.get(current.value) != None -> return None
+        seen[current.value] = true
+        instruction :: find_value_instruction(function, current) ?? return None
+        if instruction.operation == {
+            .Constant(.Int(number, _, _)) -> return Val(number)
+            .Copy(value, _) | .Move(value) | .AttachTag(value, _) -> current = value
+            else -> return None
+        }
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9026
+fn checked_vector_fallback(function: MIRFunction, proof: MIRVectorFact, decision: MIROptimizationDecision, previous_loop_facts: [MIRLoopFact]) -> (row: MIRLoopFact, vector: MIRVectorFact) Never! {
+    trip_count := proof.cursor.and_then(cursor -> loop_trip_count_for_cursor(function, cursor))
+    if trip_count == None {
+        previous :: previous_loop_facts.find(fact -> fact.header == proof.loop_header)
+        trip_count = previous.and_then(fact -> lowered_loop_trip_count(function, fact))
+    }
+    effects :: function.effects.direct.len() != 0
+    selected :: if effects -> MIROptimizationDecision.Rejected(.HasEffects) else -> decision
+    row :: MIRLoopFact{header: proof.loop_header, body: proof.body_blocks.first(), exit: checked_vector_fallback_exit(function, proof.loop_header, proof.body_blocks), form: if proof.cursor != None -> MIRLoopForm.Counted else -> MIRLoopForm.Iterator, trip_count: trip_count, copy_cost: loop_copy_cost(function, proof.body_blocks), canonical: true, span: proof.span, decision: selected}
+    vector := ~proof
+    vector.decision = selected
+    positions :: block_positions(function)
+    places := [U64:Bool]{}
+    values := [U64:Bool]{}
+    loop place in function.places -> places[place.id.value] = true
+    loop value in function.values -> values[value.id.value] = true
+    vector.body_blocks = loop id in vector.body_blocks if positions.get(id.value) != None -> id
+    vector.advance_block = vector.advance_block.filter(id -> positions.get(id.value) != None)
+    vector.accesses = loop access in vector.accesses if if access.root == { .Place(place) -> places.get(place.value) != None .Value(value) -> values.get(value.value) != None } -> access
+    if effects -> vector.effect_free_body = false
+    (row: row, vector: vector)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9084
+fn refresh_vector_layout_from_mir(function: MIRFunction, vector: &MIRVectorFact, type_defs: [MIRTypeDef]) Never! {
+    cursor :: vector.cursor ?? return
+    cursor_place :: loop_cursor_place(function, vector.body_blocks, cursor)
+    accesses :: vector_accesses(function, vector.body_blocks, Val(cursor), cursor_place, type_defs)
+    layout := MIRVectorLayout?{None}
+    distinct := false
+    loop access in accesses {
+        if access.field == None && access.layout == .Flat -> next
+        if layout == None -> layout = Val(access.layout)
+        else if layout != Val(access.layout) -> distinct = true
+    }
+    if !distinct && layout == Val(single) { vector.accesses = accesses; vector.layout = single }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9105
+fn derive_loop_and_vector_facts(program: &MIRProgram, previous_loop_facts: [[MIRLoopFact]]) Never! {
+    prelude_calls := [U64:MIRPreludeCall]{}
+    loop call in program.prelude_calls -> prelude_calls[call.id.value] = call
+    loop function_index in 0..<program.functions.len() {
+        function := &program.functions[function_index]
+        previous :: previous_loop_facts.get(function_index) ?? [MIRLoopFact]{}
+        checked := ~function.optimization.checked_vector_facts
+        function.optimization.loop_facts = [MIRLoopFact]{}
+        function.optimization.vector_facts = [MIRVectorFact]{}
+        function.optimization.fusion_facts = [MIRFusionFact]{}
+        function.optimization.acceleration_facts = [MIRAccelerationFact]{}
+        shapes := [(row: MIRLoopFact, shape: CanonicalLoopShape)]{}
+        positions :: block_positions(function)
+        cyclic :: cyclic_block_positions(function, positions)
+        previous_rows := [U64:Int]{}
+        loop (index, row) in previous -> if previous_rows.get(row.header.value) == None -> previous_rows[row.header.value] = index
+        loop block in function.blocks {
+            if block.terminator == {
+                .Branch(_, then_target, else_target) -> {
+                    shape :: counted_shape(function, positions, cyclic, block.id, then_target, else_target) ?? next
+                    trip_count := shape.range.and_then(range -> loop_trip_count(function, range))
+                    if trip_count == None -> trip_count = shape.cursor.and_then(cursor -> loop_trip_count_for_cursor(function, cursor))
+                    if trip_count == None -> trip_count = previous_rows.get(block.id.value).and_then(index -> lowered_loop_trip_count(function, previous[index]))
+                    row :: MIRLoopFact{header: block.id, body: Val(shape.body), exit: shape.exit, form: shape.form, trip_count: trip_count, copy_cost: loop_copy_cost(function, shape.blocks), canonical: true, span: block.span, decision: .Eligible}
+                    &shapes.push((row: row, shape: shape))
+                }
+                .Jump(body) -> {
+                    position :: positions.get(body.value) ?? next
+                    if function.blocks[position].terminator != .Jump(block.id) -> next
+                    shape :: CanonicalLoopShape{form: .Unconditional, cursor: None, cursor_place: None, range: None, body: body, exit: None, advance: None, blocks: [MIRBlockID]{body}}
+                    row :: MIRLoopFact{header: block.id, body: Val(body), exit: None, form: .Unconditional, trip_count: None, copy_cost: loop_copy_cost(function, shape.blocks), canonical: true, span: block.span, decision: .Eligible}
+                    &shapes.push((row: row, shape: shape))
+                }
+                else -> {}
+            }
+        }
+        shape_rows := [U64:Int]{}
+        loop (index, entry) in shapes -> if shape_rows.get(entry.row.header.value) == None -> shape_rows[entry.row.header.value] = index
+        loop index in 0..<checked.len() {
+            proof := &checked[index]
+            current_trip := shape_rows.get(proof.loop_header.value).and_then(position -> shapes[position].row.trip_count)
+            if current_trip == None -> current_trip = proof.cursor.and_then(cursor -> loop_trip_count_for_cursor(function, cursor))
+            if current_trip == None -> current_trip = previous_rows.get(proof.loop_header.value).and_then(position -> lowered_loop_trip_count(function, previous[position]))
+            previous_position :: previous_rows.get(proof.loop_header.value) ?? next
+            if previous[previous_position].trip_count == Val(prior) && current_trip == Val(current) && prior != current -> proof.decision = .Rejected(.DynamicTripCount)
+        }
+        function.optimization.checked_vector_facts = ~checked
+        proof_counts := [U64:Int]{}
+        proof_first := [U64:Int]{}
+        loop (index, proof) in checked {
+            key :: proof.loop_header.value
+            proof_counts[key] = (proof_counts.get(key) ?? 0) + 1
+            if proof_first.get(key) == None -> proof_first[key] = index
+        }
+        loop entry in shapes {
+            row :: entry.row
+            vector := vector_fact(function, row, entry.shape, prelude_calls, program.types)
+            if (proof_counts.get(row.header.value) ?? 0) == 1 {
+                proof :: checked[proof_first.get(row.header.value) ?? unreachable()]
+                if proof.decision == .Rejected(.DynamicTripCount) { vector.packed = false; vector.decision = proof.decision }
+                else if checked_vector_scope_is_present(function, proof) {
+                    vector = ~proof
+                    if function.effects.direct.len() == 0 -> vector.decision = .Eligible
+                    else { vector.effect_free_body = false; vector.decision = .Rejected(.HasEffects) }
+                } else -> vector.decision = .Rejected(.MissingProof)
+            }
+            &function.optimization.loop_facts.push(row)
+            &function.optimization.vector_facts.push(vector)
+        }
+        fallback_headers := [U64:Bool]{}
+        loop proof in checked {
+            key :: proof.loop_header.value
+            if fallback_headers.get(key) != None || shape_rows.get(key) != None -> next
+            fallback_headers[key] = true
+            decision :: if {
+                (proof_counts.get(key) ?? 0) != 1 -> MIROptimizationDecision.Rejected(.UnsupportedOperation)
+                proof.decision == .Rejected(.DynamicTripCount) -> proof.decision
+                !checked_vector_scope_is_present(function, proof) -> MIROptimizationDecision.Rejected(.MissingProof)
+                else -> MIROptimizationDecision.Eligible
+            }
+            fallback :: checked_vector_fallback(function, proof, decision, previous)
+            &function.optimization.loop_facts.push(fallback.row)
+            &function.optimization.vector_facts.push(fallback.vector)
+        }
+        loop index in 0..<function.optimization.vector_facts.len() {
+            vector := &function.optimization.vector_facts[index]
+            reconcile_checked_vector_fact(&vector, checked, function.is_scalar)
+        }
+        refreshed_vectors := ~function.optimization.vector_facts
+        loop index in 0..<refreshed_vectors.len() {
+            vector := &refreshed_vectors[index]
+            refresh_vector_layout_from_mir(function, &vector, program.types)
+        }
+        function.optimization.vector_facts = ^refreshed_vectors
+        rows :: function.optimization.loop_facts
+        vectors :: function.optimization.vector_facts
+        row_index := [U64:Int]{}
+        loop (index, row) in rows -> if row_index.get(row.header.value) == None -> row_index[row.header.value] = index
+        loop vector in vectors {
+            position :: row_index.get(vector.loop_header.value) ?? next
+            loop fact in acceleration_facts_for_vector(rows[position], vector) -> &function.optimization.acceleration_facts.push(fact)
+        }
+        function.optimization.fusion_facts = fusion_facts_for_rows(rows, vectors)
+        &function.optimization.loop_facts.sort_by((a: MIRLoopFact, b: MIRLoopFact) -> a.header.value <=> b.header.value)
+        &function.optimization.vector_facts.sort_by((a: MIRVectorFact, b: MIRVectorFact) -> a.loop_header.value <=> b.loop_header.value)
+        &function.optimization.fusion_facts.sort_by((a: MIRFusionFact, b: MIRFusionFact) -> if a.first_loop != b.first_loop -> a.first_loop.value <=> b.first_loop.value else -> a.second_loop.value <=> b.second_loop.value)
+        &function.optimization.acceleration_facts.sort_by((a: MIRAccelerationFact, b: MIRAccelerationFact) -> if a.loop_header != b.loop_header -> a.loop_header.value <=> b.loop_header.value else -> a.transform <=> b.transform)
+        refresh_loop_summaries(&function)
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9339
+fn acceleration_facts_for_vector(row: MIRLoopFact, vector: MIRVectorFact) -> [MIRAccelerationFact] Never! {
+    nested_reuse :: vector.layout == .ColumnarDirect && row.copy_cost == .PerIteration(_)
+    workload :: AccelerationWorkloadFacts{nested_reuse: nested_reuse, single_pass: !nested_reuse}
+    source_proven :: vector.decision == .Eligible
+    independent :: source_proven && vector.no_aliasing && vector.no_cross_iteration_dependencies && vector.rule != .ConditionalAccumulate && vector.rule != .EarlyExitSearch && vector.rule != .Reduction
+    proof :: AccelerationProof{source_proven: source_proven, independent_iterations: independent, no_aliasing: vector.no_aliasing, no_cross_iteration_dependencies: vector.no_cross_iteration_dependencies, no_early_exit: vector.no_early_exit, effect_free_body: vector.effect_free_body, ownership_safe: source_proven && vector.no_aliasing, failure_order_preserved: source_proven && vector.effect_free_body && vector.no_early_exit}
+    [MIRAccelerationFact]{MIRAccelerationFact.source(vector.loop_header, .TransientColumnCopy, workload, proof, vector.span), MIRAccelerationFact.source(vector.loop_header, .PooledParallelChunks, workload, proof, vector.span)}
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9393
+fn refresh_acceleration_facts(program: &MIRProgram) Never! {
+    loop function_index in 0..<program.functions.len() {
+        function := &program.functions[function_index]
+        function.optimization.acceleration_facts = [MIRAccelerationFact]{}
+        rows :: function.optimization.loop_facts
+        vectors :: function.optimization.vector_facts
+        positions := [U64:Int]{}
+        loop (index, row) in rows -> if positions.get(row.header.value) == None -> positions[row.header.value] = index
+        loop vector in vectors {
+            position :: positions.get(vector.loop_header.value) ?? next
+            loop fact in acceleration_facts_for_vector(rows[position], vector) -> &function.optimization.acceleration_facts.push(fact)
+        }
+        &function.optimization.acceleration_facts.sort_by((a: MIRAccelerationFact, b: MIRAccelerationFact) -> if a.loop_header != b.loop_header -> a.loop_header.value <=> b.loop_header.value else -> a.transform <=> b.transform)
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9413
+fn normalized_fixed_reduction_identity(function: MIRFunction, header: MIRBlockID, role: String) -> String Never! { "{function.id.value}:{header.value}:{role}" }
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9421
+fn normalized_fixed_reduction_block_id(function: MIRFunction, header: MIRBlockID, role: String) -> MIRBlockID Never! { MIRBlockID{value: stable_id("mir-fixed-reduction-block", normalized_fixed_reduction_identity(function, header, role))} }
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9432
+fn normalized_fixed_reduction_op_id(function: MIRFunction, header: MIRBlockID, role: String) -> MIROpID Never! { MIROpID{value: stable_id("mir-fixed-reduction-op", normalized_fixed_reduction_identity(function, header, role))} }
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9443
+fn normalized_fixed_reduction_value_id(function: MIRFunction, header: MIRBlockID, role: String) -> MIRValueID Never! { MIRValueID{value: stable_id("mir-fixed-reduction-value", normalized_fixed_reduction_identity(function, header, role))} }
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9454
+fn normalized_fixed_reduction_shape(function: MIRFunction, header: MIRBlockID, then_target: MIRBlockID, else_target: MIRBlockID) -> CanonicalLoopShape? Never! {
+    dispatch_entry :: normalized_fixed_reduction_block_id(function, header, "dispatch-entry")
+    if then_target != dispatch_entry -> return None
+    positions :: block_positions(function)
+    header_block :: function.blocks[positions.get(header.value) ?? return None]
+    cursor := MIRValueID?{None}
+    loop instruction in header_block.instructions {
+        if instruction.operation == .LoopRangeHasNext(_, value) && instruction.result != None { cursor = Val(value); break }
+    }
+    cursor_value :: cursor ?? return None
+    range :: canonical_range_for_cursor(function, cursor_value) ?? return None
+    lane_dispatch :: normalized_fixed_reduction_block_id(function, header, "lane-dispatch-0")
+    lane_pre :: normalized_fixed_reduction_block_id(function, header, "lane-pre-0")
+    post_entry :: normalized_fixed_reduction_block_id(function, header, "post-entry")
+    post_seen_entry :: normalized_fixed_reduction_block_id(function, header, "post-seen-entry")
+    post_unseen_entry :: normalized_fixed_reduction_block_id(function, header, "post-unseen-entry")
+    tree :: normalized_fixed_reduction_block_id(function, header, "tree")
+    continuation :: normalized_fixed_reduction_block_id(function, header, "continuation")
+    dispatch :: function.blocks[positions.get(dispatch_entry.value) ?? return None]
+    if dispatch.terminator != .Jump(lane_dispatch) -> return None
+    lane_dispatch_block :: function.blocks[positions.get(lane_dispatch.value) ?? return None]
+    if lane_dispatch_block.terminator != .Branch(_, lane_then, _) -> return None
+    if lane_then != lane_pre -> return None
+    lane_pre_block :: function.blocks[positions.get(lane_pre.value) ?? return None]
+    if lane_pre_block.terminator != .Jump(body) -> return None
+    if body == header || body == else_target || body == dispatch_entry -> return None
+    post_entry_block :: function.blocks[positions.get(post_entry.value) ?? return None]
+    if post_entry_block.terminator != .Jump(post_seen_entry) -> return None
+    post_seen_block :: function.blocks[positions.get(post_seen_entry.value) ?? return None]
+    if post_seen_block.terminator != .Jump(normalized_fixed_reduction_block_id(function, header, "lane-seen-dispatch-0")) -> return None
+    post_unseen_block :: function.blocks[positions.get(post_unseen_entry.value) ?? return None]
+    if post_unseen_block.terminator != .Jump(normalized_fixed_reduction_block_id(function, header, "lane-unseen-dispatch-0")) -> return None
+    generated :: normalized_fixed_reduction_generated_blocks(function, header) ?? return None
+    if generated.get(else_target.value) != None -> return None
+    tree_block :: function.blocks[positions.get(tree.value) ?? return None]
+    if tree_block.terminator != .Jump(continuation) -> return None
+    exit_block :: function.blocks[positions.get(else_target.value) ?? return None]
+    if exit_block.terminator != .Branch(_, gate_then, gate_else) -> return None
+    if gate_then != tree || gate_else != continuation -> return None
+    advances := [MIRBlockID]{}
+    loop block in function.blocks {
+        if block.terminator != .Jump(header) -> next
+        loop instruction in block.instructions {
+            if instruction.operation == .LoopRangeAdvance(_, value) && value == cursor_value { &advances.push(block.id); break }
+        }
+    }
+    if advances.len() != 1 -> return None
+    advance :: advances[0]
+    body_blocks := collect_loop_region(function, positions, header, body, Val(post_entry))
+    body_blocks = loop id in body_blocks if id != advance -> id
+    if body_blocks.len() == 0 -> return None
+    reaches_post := false
+    loop id in body_blocks {
+        position :: positions.get(id.value) ?? next
+        if mir_terminator_targets(function.blocks[position].terminator).contains(post_entry) -> reaches_post = true
+    }
+    if !reaches_post -> return None
+    &body_blocks.push(advance)
+    &body_blocks.sort_by((a: MIRBlockID, b: MIRBlockID) -> a.value <=> b.value)
+    Val(CanonicalLoopShape{form: .Counted, cursor: Val(cursor_value), cursor_place: loop_cursor_place(function, body_blocks, cursor_value), range: Val(range), body: body, exit: Val(else_target), advance: Val(advance), blocks: body_blocks})
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9605
+fn normalized_fixed_reduction_generated_blocks(function: MIRFunction, header: MIRBlockID) -> [U64:Bool]? Never! {
+    order :: D_FRED1_FIXED_ORDER
+    if !order.is_canonical() -> return None
+    generated := [U64:Bool]{}
+    loop role in [String]{"dispatch-entry", "post-entry", "post-seen-entry", "post-unseen-entry", "tree", "continuation"} -> generated[normalized_fixed_reduction_block_id(function, header, role).value] = true
+    loop lane in 0..<order.lanes {
+        loop role in [String]{"lane-pre-{lane}", "lane-seen-post-{lane}", "lane-unseen-post-{lane}"} -> generated[normalized_fixed_reduction_block_id(function, header, role).value] = true
+        if lane + 1 < order.lanes {
+            loop role in [String]{"lane-dispatch-{lane}", "lane-seen-dispatch-{lane}", "lane-unseen-dispatch-{lane}"} -> generated[normalized_fixed_reduction_block_id(function, header, role).value] = true
+        }
+    }
+    positions :: block_positions(function)
+    loop (id, _) in generated -> if positions.get(id) == None -> return None
+    Val(generated)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9661
+fn normalized_fixed_reduction_fact(function: MIRFunction, fact: MIRVectorFact) -> MIRFixedReductionFact? Never! {
+    if fact.rule != .Reduction || fact.fixed_reduction != None -> return None
+    positions :: block_positions(function)
+    header_block :: function.blocks[positions.get(fact.loop_header.value) ?? return None]
+    if header_block.terminator != .Branch(_, then_target, else_target) -> return None
+    shape :: normalized_fixed_reduction_shape(function, fact.loop_header, then_target, else_target) ?? return None
+    advance :: shape.advance ?? return None
+    expected :: loop id in shape.blocks if id != advance -> id
+    if fact.body_blocks != expected -> return None
+    instructions := [MIRInstruction]{}
+    loop id in fact.body_blocks {
+        position :: positions.get(id.value) ?? next
+        loop instruction in function.blocks[position].instructions -> &instructions.push(instruction)
+    }
+    plan :: fixed_reduction_plan(function, instructions) ?? return None
+    seed_op :: normalized_fixed_reduction_op_id(function, fact.loop_header, "seed-read")
+    expected_seed :: normalized_fixed_reduction_value_id(function, fact.loop_header, "seed-read")
+    seed := MIRValueID?{None}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.id == seed_op && instruction.result == Val(expected_seed) {
+                if instruction.operation != .ReadPlace(place) -> return None
+                if place != plan.accumulator -> return None
+                seed = instruction.result
+                break
+            }
+        }
+        if seed != None -> break
+    }
+    seed_value :: seed ?? return None
+    continuation :: normalized_fixed_reduction_block_id(function, fact.loop_header, "continuation")
+    tree :: normalized_fixed_reduction_block_id(function, fact.loop_header, "tree")
+    tree_block :: function.blocks[positions.get(tree.value) ?? return None]
+    writes_accumulator := false
+    loop instruction in tree_block.instructions -> if instruction.operation == .WritePlace(place, _) && place == plan.accumulator -> writes_accumulator = true
+    if !writes_accumulator -> return None
+    source_operations :: loop instruction in instructions -> instruction.id
+    Val(MIRFixedReductionFact{accumulator: plan.accumulator, addend: plan.addend, seed: seed_value, condition: None, source_operations: source_operations, exit: continuation, order: D_FRED1_FIXED_ORDER})
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9747
+fn counted_shape(function: MIRFunction, positions: [U64:Int], cyclic: [Bool], header: MIRBlockID, then_target: MIRBlockID, else_target: MIRBlockID) -> CanonicalLoopShape? Never! {
+    if normalized_fixed_reduction_shape(function, header, then_target, else_target) == Val(shape) -> return Val(shape)
+    header_position :: positions.get(header.value) ?? return None
+    if !cyclic[header_position] -> return None
+    cursor_form := (form: MIRLoopForm, cursor: MIRValueID)?{None}
+    loop instruction in function.blocks[header_position].instructions {
+        if instruction.operation == {
+            .LoopRangeHasNext(_, cursor) -> { cursor_form = Val((form: MIRLoopForm.Counted, cursor: cursor)); break }
+            .LoopIterHasNext(_, cursor) -> { cursor_form = Val((form: MIRLoopForm.Iterator, cursor: cursor)); break }
+            else -> {}
+        }
+    }
+    blocks :: collect_loop_region(function, positions, header, then_target, Val(else_target))
+    if cursor_form == Val(row) {
+        has_value := false
+        advance := MIRBlockID?{None}
+        loop id in blocks {
+            position :: positions.get(id.value) ?? next
+            block :: function.blocks[position]
+            advances := false
+            loop instruction in block.instructions {
+                if instruction.operation == {
+                    .LoopRangeValue(_, cursor) | .LoopIterValue(_, cursor) -> if cursor == row.cursor -> has_value = true
+                    .LoopRangeAdvance(_, cursor) | .LoopIterAdvance(_, cursor) -> if cursor == row.cursor -> advances = true
+                    else -> {}
+                }
+            }
+            if advance == None && advances && block.terminator == .Jump(header) -> advance = Val(id)
+        }
+        if !has_value || advance == None -> return None
+        return Val(CanonicalLoopShape{form: row.form, cursor: Val(row.cursor), cursor_place: loop_cursor_place(function, blocks, row.cursor), range: canonical_range_for_cursor(function, row.cursor), body: then_target, exit: Val(else_target), advance: advance, blocks: blocks})
+    }
+    scalar_counted_shape(function, positions, header, then_target, else_target, blocks)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9826
+fn loop_cursor_place(function: MIRFunction, blocks: [MIRBlockID], cursor: MIRValueID) -> MIRPlaceID? Never! {
+    positions :: block_positions(function)
+    cursor_values := [U64:Bool]{}
+    loop id in blocks {
+        position :: positions.get(id.value) ?? next
+        loop instruction in function.blocks[position].instructions {
+            if instruction.operation == {
+                .LoopRangeValue(_, source) | .LoopIterValue(_, source) -> {
+                    if source == cursor && instruction.result == Val(result) -> cursor_values[result.value] = true
+                }
+                else -> {}
+            }
+        }
+    }
+    places := [U64:MIRPlaceID]{}
+    loop id in blocks {
+        position :: positions.get(id.value) ?? next
+        loop instruction in function.blocks[position].instructions {
+            if instruction.operation == .WritePlace(place, value) && cursor_values.get(value.value) != None -> places[place.value] = place
+        }
+    }
+    if places.len() != 1 -> return None
+    loop (_, place) in places -> return Val(place)
+    None
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9862
+fn canonical_range_for_cursor(function: MIRFunction, cursor: MIRValueID) -> CanonicalLoopRange? Never! {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.result != Val(cursor) -> next
+            if instruction.operation == .LoopRangeInit(_, start, end, step, exclusive) -> return Val(CanonicalLoopRange{start: start, end: end, step: step, exclusive: exclusive})
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:9890
+fn scalar_counted_shape(function: MIRFunction, positions: [U64:Int], header: MIRBlockID, then_target: MIRBlockID, else_target: MIRBlockID, blocks: [MIRBlockID]) -> CanonicalLoopShape? Never! {
+    if blocks.len() == 0 -> return None
+    header_block :: function.blocks[positions.get(header.value) ?? return None]
+    if header_block.terminator != .Branch(condition, _, _) -> return None
+    condition_shape :: scalar_loop_condition(function, condition) ?? return None
+    cursor_value :: condition_shape.cursor_value
+    cursor_place :: condition_shape.cursor_place
+    end :: condition_shape.end
+    exclusive :: condition_shape.exclusive
+    place :: function.places.find(place -> place.id == cursor_place) ?? return None
+    if place.base != .Local(_) || place.projections.len() != 0 || !is_default_int_type(place.ty) || !(value_type(function, cursor_value).map(ty -> is_default_int_type(ty)) ?? false) -> return None
+    region := [U64:Bool]{}
+    loop id in blocks -> region[id.value] = true
+    backedges := 0
+    loop id in blocks {
+        position :: positions.get(id.value) ?? next
+        if mir_terminator_targets(function.blocks[position].terminator).contains(header) -> backedges += 1
+    }
+    if backedges != 1 -> return None
+    advance := (block: MIRBlockID, write: MIROpID, step: MIRValueID)?{None}
+    loop id in blocks {
+        position :: positions.get(id.value) ?? next
+        if scalar_loop_advance(function, function.blocks[position], header, cursor_place) == Val(row) { advance = Val((block: id, write: row.write, step: row.step)); break }
+    }
+    advance_row :: advance ?? return None
+    cursor_writes := [(block: MIRBlockID, instruction: MIRInstruction)]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            references_cursor := false
+            loop referenced in operation_place_refs(instruction.operation) -> if places_overlap(function, referenced, cursor_place) -> references_cursor = true
+            if !references_cursor -> next
+            if instruction.operation == {
+                .WritePlace(_, _) -> &cursor_writes.push((block: block.id, instruction: instruction))
+                .ReadPlace(_) -> {}
+                else -> return None
+            }
+        }
+    }
+    if cursor_writes.len() != 2 -> return None
+    init := [(block: MIRBlockID, instruction: MIRInstruction)]{}
+    loop row in cursor_writes {
+        if row.block == advance_row.block || row.block == header || region.get(row.block.value) != None || row.instruction.id == advance_row.write -> next
+        position :: positions.get(row.block.value) ?? next
+        if function.blocks[position].terminator == .Jump(header) -> &init.push(row)
+    }
+    if init.len() != 1 -> return None
+    if init[0].instruction.operation != .WritePlace(_, start) -> return None
+    end_is_invariant := false
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.result == Val(end) && (instruction.operation == .Constant(_) || (block.id != header && region.get(block.id.value) == None)) -> end_is_invariant = true
+        }
+    }
+    constants :: mir_pass_collect_scalar_constants(function)
+    step :: scalar_int_constant(constants, advance_row.step) ?? return None
+    seen_start := [U64:Bool]{}
+    seen_end := [U64:Bool]{}
+    if step <= 0 || !end_is_invariant || value_depends_on_place(function, start, cursor_place, &seen_start) || value_depends_on_place(function, end, cursor_place, &seen_end) || !scalar_cursor_references_are_clean(function, header, cursor_value, blocks, advance_row.block, advance_row.write, cursor_place) -> return None
+    body_cursor :: scalar_loop_cursor_value(function, blocks, advance_row.block, cursor_place) ?? cursor_value
+    Val(CanonicalLoopShape{form: .Counted, cursor: Val(body_cursor), cursor_place: Val(cursor_place), range: Val(CanonicalLoopRange{start: start, end: end, step: Val(advance_row.step), exclusive: exclusive}), body: then_target, exit: Val(else_target), advance: Val(advance_row.block), blocks: blocks})
+}

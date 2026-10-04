@@ -1,0 +1,531 @@
+// PORT-PENDING 0613 crates-jet-driver-src-pluginexport-module-group: crates/jet-driver/src/ProjectParts.rs:1-527
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-SHAPE-MODULEINTERNAL1=A: one parsed project-part index shared by
+//RS //! explicit import resolution and user-facing tooling.
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::AST::{ImportKind, Item};
+//RS use crate::{Lexer, Parser, Syntax};
+//RS use jet_pkg_model::Authority::{AuthorityError, AuthorityResolver};
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum ProjectPartState {
+//RS     Automatic,
+//RS     Explicit,
+//RS     Skipped,
+//RS }
+//RS 
+//RS impl ProjectPartState {
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Automatic => "automatic",
+//RS             Self::Explicit => "explicit",
+//RS             Self::Skipped => "skipped",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct ProjectPart {
+//RS     pub name: String,
+//RS     pub path: PathBuf,
+//RS     pub state: ProjectPartState,
+//RS }
+//RS 
+//RS impl ProjectPart {
+//RS     /// The source spelling accepted by `use` and shown by user-facing
+//RS     /// projections. Keep the scanner's leaf `name` for lookup and storage.
+//RS     pub fn canonical_name(&self) -> String {
+//RS         format!("{}{}", Syntax::PROJECT_IMPORT_PREFIX, self.name)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct ProjectPartConflict {
+//RS     pub name: String,
+//RS     pub paths: Vec<PathBuf>,
+//RS }
+//RS 
+//RS impl ProjectPartConflict {
+//RS     pub fn canonical_name(&self) -> String {
+//RS         format!("{}{}", Syntax::PROJECT_IMPORT_PREFIX, self.name)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct ProjectPartScanFailure {
+//RS     pub path: PathBuf,
+//RS     pub module_names: Vec<String>,
+//RS     pub problem: Diagnostic,
+//RS     pub authority: bool,
+//RS }
+//RS 
+//RS impl ProjectPartScanFailure {
+//RS     pub fn diagnostic(&self, name: &str, root: &Path, span: Span) -> Diagnostic {
+//RS         let path = self
+//RS             .path
+//RS             .strip_prefix(root)
+//RS             .unwrap_or(&self.path)
+//RS             .to_string_lossy()
+//RS             .replace('\\', "/");
+//RS         Diagnostic::error(
+//RS             "E0603",
+//RS             format!(
+//RS                 "can't load project module `{}{}` from `{path}`",
+//RS                 Syntax::PROJECT_IMPORT_PREFIX,
+//RS                 name
+//RS             ),
+//RS             format!("`{path}` has a source error: {}", self.problem.what),
+//RS             format!(
+//RS                 "fix `{path}` first, then import `{}{}` again",
+//RS                 Syntax::PROJECT_IMPORT_PREFIX,
+//RS                 name
+//RS             ),
+//RS             Some(span),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl ProjectPartConflict {
+//RS     pub fn diagnostic(&self, root: &Path, span: Option<Span>) -> Diagnostic {
+//RS         let paths = self
+//RS             .paths
+//RS             .iter()
+//RS             .map(|path| {
+//RS                 path.strip_prefix(root)
+//RS                     .unwrap_or(path)
+//RS                     .to_string_lossy()
+//RS                     .replace('\\', "/")
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         Diagnostic::error(
+//RS             "E0606",
+//RS             format!(
+//RS                 "project module `{}` is declared more than once",
+//RS                 self.canonical_name()
+//RS             ),
+//RS             "a project module name must resolve to one declaration".to_string(),
+//RS             format!("keep one `module {}` declaration; found {paths}", self.name),
+//RS             span,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default, Eq, PartialEq)]
+//RS pub struct ProjectPartsReport {
+//RS     pub parts: Vec<ProjectPart>,
+//RS     pub conflicts: Vec<ProjectPartConflict>,
+//RS     /// Successfully parsed source files without a declared module part.
+//RS     /// These remain loaded project modules for tooling, but are not names
+//RS     /// accepted by `use project.…`.
+//RS     pub source_files: Vec<PathBuf>,
+//RS }
+//RS 
+//RS impl ProjectPartsReport {
+//RS     pub fn named(&self, name: &str) -> Vec<&ProjectPart> {
+//RS         self.parts.iter().filter(|part| part.name == name).collect()
+//RS     }
+//RS 
+//RS     /// Open files and files without module declarations remain visible.
+//RS     /// A file containing only unrequested internal parts stays out of automatic
+//RS     /// semantic indexes, while mixed and explicitly imported files stay in.
+//RS     pub fn should_index(&self, path: &Path) -> bool {
+//RS         let matching: Vec<_> = self.parts.iter().filter(|part| part.path == path).collect();
+//RS         matching.is_empty()
+//RS             || matching
+//RS                 .iter()
+//RS                 .any(|part| part.state != ProjectPartState::Skipped)
+//RS     }
+//RS }
+//RS 
+//RS pub fn scan(root: &Path) -> ProjectPartsReport {
+//RS     scan_with_diagnostics(root, &[]).0
+//RS }
+//RS 
+//RS pub fn scan_with_overlays(root: &Path, overlays: &[(PathBuf, String)]) -> ProjectPartsReport {
+//RS     scan_with_diagnostics(root, overlays).0
+//RS }
+//RS 
+//RS /// Every source file this package compiles, sorted, without `scan`'s parse
+//RS /// pass: the same authority-checked enumeration the part index is built from,
+//RS /// minus package manifests and nested packages. Tooling that must act on every
+//RS /// file in the package — bare `jet test` collecting `#Test` blocks package-wide
+//RS /// (spec S43) — enumerates here instead of walking the filesystem again, so the
+//RS /// file set stays the project scan's, not a second opinion about it. An
+//RS /// authority failure yields an empty set: the caller's ordinary compile path
+//RS /// reports the real error rather than a second, worse copy of it.
+//RS pub fn source_files(root: &Path) -> Vec<PathBuf> {
+//RS     let Ok(resolver) = AuthorityResolver::open(root) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let Ok(files) = resolver.discover_source_files() else {
+//RS         return Vec::new();
+//RS     };
+//RS     // A nested package is its own package: its files are that package's
+//RS     // modules, not this one's. Stop at every nested manifest — the boundary
+//RS     // package build-entry discovery already draws.
+//RS     let nested = files
+//RS         .iter()
+//RS         .filter(|file| {
+//RS             file.relative.file_name().and_then(|name| name.to_str()) == Some(Syntax::PACKAGE_FILE)
+//RS         })
+//RS         .filter_map(|file| file.relative.parent())
+//RS         .filter(|parent| !parent.as_os_str().is_empty() && *parent != Path::new("."))
+//RS         .map(Path::to_path_buf)
+//RS         .collect::<Vec<_>>();
+//RS     files
+//RS         .iter()
+//RS         .filter(|file| {
+//RS             !is_manifest_file(&file.relative)
+//RS                 && !is_command_role_file(&file.relative)
+//RS                 && !nested
+//RS                     .iter()
+//RS                     .any(|package| file.relative.starts_with(package))
+//RS         })
+//RS         .map(|file| file.path.clone())
+//RS         .collect()
+//RS }
+//RS 
+//RS /// The package manifest (and its migration-era spelling) carries package
+//RS /// facts, not project code: never a part, never a source file.
+//RS fn is_manifest_file(relative: &Path) -> bool {
+//RS     relative
+//RS         .file_name()
+//RS         .and_then(|name| name.to_str())
+//RS         .is_some_and(|name| name == Syntax::PACKAGE_FILE || name == Syntax::PAYLOAD_FILE)
+//RS }
+//RS 
+//RS /// D-ROLEFILE1=A: command homes are selected by the command resolver, not
+//RS /// indexed as automatic project modules or package test members.
+//RS fn is_command_role_file(relative: &Path) -> bool {
+//RS     relative
+//RS         .file_name()
+//RS         .and_then(|name| name.to_str())
+//RS         .is_some_and(|name| Syntax::COMMAND_ROLE_FILES.contains(&name))
+//RS }
+//RS 
+//RS pub fn scan_with_diagnostics(
+//RS     root: &Path,
+//RS     overlays: &[(PathBuf, String)],
+//RS ) -> (ProjectPartsReport, Vec<ProjectPartScanFailure>) {
+//RS     let (resolver, checked_files, authority_failure) = match AuthorityResolver::open(root) {
+//RS         Ok(resolver) => match resolver.discover_source_files() {
+//RS             Ok(files) => (Some(resolver), files, None),
+//RS             Err(error) => (
+//RS                 Some(resolver),
+//RS                 Vec::new(),
+//RS                 Some((root.to_path_buf(), error)),
+//RS             ),
+//RS         },
+//RS         Err(error) if error.is_missing() => (None, Vec::new(), None),
+//RS         Err(error) => (None, Vec::new(), Some((root.to_path_buf(), error))),
+//RS     };
+//RS     let mut files = checked_files
+//RS         .iter()
+//RS         .filter(|file| !is_manifest_file(&file.relative) && !is_command_role_file(&file.relative))
+//RS         .map(|file| file.path.clone())
+//RS         .collect::<Vec<_>>();
+//RS     files.extend(
+//RS         overlays
+//RS             .iter()
+//RS             .map(|(path, _)| path)
+//RS             .filter(|path| {
+//RS                 path.starts_with(root)
+//RS                     && path.extension().and_then(|ext| ext.to_str()) == Some(Syntax::FILE_EXT)
+//RS                     && !is_command_role_file(path.strip_prefix(root).unwrap_or(path))
+//RS             })
+//RS             .cloned(),
+//RS     );
+//RS     files.sort();
+//RS     files.dedup();
+//RS 
+//RS     let mut explicit = BTreeSet::new();
+//RS     let mut declarations: BTreeMap<String, Vec<(PathBuf, bool)>> = BTreeMap::new();
+//RS     let mut source_files = Vec::new();
+//RS     let mut failures = Vec::new();
+//RS     if let Some((path, error)) = authority_failure {
+//RS         failures.push(authority_failure_for(path, error));
+//RS         return (ProjectPartsReport::default(), failures);
+//RS     }
+//RS     for path in files {
+//RS         let source = if let Some((_, source)) = overlays.iter().rev().find(|(p, _)| p == &path) {
+//RS             source.clone()
+//RS         } else {
+//RS             let Some(file) = checked_files.iter().find(|file| file.path == path) else {
+//RS                 continue;
+//RS             };
+//RS             if let Some(resolver) = resolver.as_ref() {
+//RS                 if let Err(error) = resolver.revalidate_file(file) {
+//RS                     failures.push(authority_failure_for(file.path.clone(), error));
+//RS                     return (ProjectPartsReport::default(), failures);
+//RS                 }
+//RS             }
+//RS             match file.text() {
+//RS                 Ok(source) => source,
+//RS                 Err(error) => {
+//RS                     failures.push(ProjectPartScanFailure {
+//RS                         module_names: path
+//RS                             .file_stem()
+//RS                             .and_then(|stem| stem.to_str())
+//RS                             .map(|stem| vec![stem.to_string()])
+//RS                             .unwrap_or_default(),
+//RS                         problem: error.diagnostic(),
+//RS                         path,
+//RS                         authority: true,
+//RS                     });
+//RS                     return (ProjectPartsReport::default(), failures);
+//RS                 }
+//RS             }
+//RS         };
+//RS         let source_for_parse = match crate::Package::mask_inline_package_source(&source) {
+//RS             Ok((masked, _)) => masked,
+//RS             Err(error) => {
+//RS                 failures.push(ProjectPartScanFailure {
+//RS                     path,
+//RS                     module_names: Vec::new(),
+//RS                     problem: error.diagnostic(),
+//RS                     authority: false,
+//RS                 });
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
+//RS         if !lex_diags.is_empty() {
+//RS             failures.push(ProjectPartScanFailure {
+//RS                 path,
+//RS                 module_names: declared_module_names(&tokens),
+//RS                 problem: lex_diags[0].clone(),
+//RS                 authority: false,
+//RS             });
+//RS             continue;
+//RS         }
+//RS         let program = match Parser::parse_with_source(&tokens, &source_for_parse) {
+//RS             Ok(program) => program,
+//RS             Err(parse_diags) => {
+//RS                 failures.push(ProjectPartScanFailure {
+//RS                     path,
+//RS                     module_names: declared_module_names(&tokens),
+//RS                     problem: parse_diags[0].clone(),
+//RS                     authority: false,
+//RS                 });
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         source_files.push(path.clone());
+//RS         if let Some(file) = checked_files.iter().find(|file| file.path == path) {
+//RS             if let Some(resolver) = resolver.as_ref() {
+//RS                 if let Err(error) = resolver.revalidate_file(file) {
+//RS                     failures.push(authority_failure_for(file.path.clone(), error));
+//RS                     return (ProjectPartsReport::default(), failures);
+//RS                 }
+//RS             }
+//RS         }
+//RS         for import in &program.imports {
+//RS             let ImportKind::Module(name, _) = &import.kind else {
+//RS                 continue;
+//RS             };
+//RS             if let Some(name) = name.strip_prefix(Syntax::PROJECT_IMPORT_PREFIX) {
+//RS                 explicit.insert(name.to_string());
+//RS             }
+//RS         }
+//RS         for item in &program.items {
+//RS             let (name, automatic) = match item {
+//RS                 Item::Module(module) => (module.name.clone(), module.is_auto_discovered()),
+//RS                 Item::CodeModule(module) => (
+//RS                     module.name.clone(),
+//RS                     !module.name.starts_with(Syntax::MODULE_INTERNAL_PREFIX),
+//RS                 ),
+//RS                 _ => continue,
+//RS             };
+//RS             declarations
+//RS                 .entry(name)
+//RS                 .or_default()
+//RS                 .push((path.clone(), automatic));
+//RS         }
+//RS     }
+//RS 
+//RS     let declared_paths = declarations
+//RS         .values()
+//RS         .flat_map(|parts| parts.iter().map(|(path, _)| path.clone()))
+//RS         .collect::<BTreeSet<_>>();
+//RS     let mut report = ProjectPartsReport {
+//RS         source_files: source_files
+//RS             .into_iter()
+//RS             .filter(|path| !declared_paths.contains(path))
+//RS             .collect(),
+//RS         ..ProjectPartsReport::default()
+//RS     };
+//RS     for (name, declarations) in declarations {
+//RS         if declarations.len() > 1 {
+//RS             report.conflicts.push(ProjectPartConflict {
+//RS                 name: name.clone(),
+//RS                 paths: declarations.iter().map(|(path, _)| path.clone()).collect(),
+//RS             });
+//RS         }
+//RS         for (path, automatic) in declarations {
+//RS             let state = if automatic {
+//RS                 ProjectPartState::Automatic
+//RS             } else if explicit.contains(&name) {
+//RS                 ProjectPartState::Explicit
+//RS             } else {
+//RS                 ProjectPartState::Skipped
+//RS             };
+//RS             report.parts.push(ProjectPart {
+//RS                 name: name.clone(),
+//RS                 path,
+//RS                 state,
+//RS             });
+//RS         }
+//RS     }
+//RS     if let Some(resolver) = resolver {
+//RS         if let Err(error) = resolver.revalidate_root() {
+//RS             failures.push(authority_failure_for(root.to_path_buf(), error));
+//RS             return (ProjectPartsReport::default(), failures);
+//RS         }
+//RS     }
+//RS     (report, failures)
+//RS }
+//RS 
+//RS fn authority_failure_for(path: PathBuf, error: AuthorityError) -> ProjectPartScanFailure {
+//RS     ProjectPartScanFailure {
+//RS         path,
+//RS         module_names: Vec::new(),
+//RS         problem: error.diagnostic(),
+//RS         authority: true,
+//RS     }
+//RS }
+//RS 
+//RS fn declared_module_names(tokens: &[Lexer::Token]) -> Vec<String> {
+//RS     tokens
+//RS         .windows(2)
+//RS         .filter_map(|pair| match (&pair[0].kind, &pair[1].kind) {
+//RS             (Lexer::TokKind::KwModule, Lexer::TokKind::Ident(name)) => Some(name.clone()),
+//RS             _ => None,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn tempdir(tag: &str) -> PathBuf {
+//RS         let path =
+//RS             std::env::temp_dir().join(format!("jet-project-parts-{tag}-{}", std::process::id()));
+//RS         let _ = std::fs::remove_dir_all(&path);
+//RS         std::fs::create_dir_all(&path).unwrap();
+//RS         path
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn internal_part_is_skipped_until_explicitly_imported() {
+//RS         let root = tempdir("explicit");
+//RS         let internal = root.join("bench-config.jet");
+//RS         let source = "module _bench { }\n";
+//RS         std::fs::write(&internal, source).unwrap();
+//RS         let (tokens, diagnostics) = Lexer::lex(source);
+//RS         assert!(diagnostics.is_empty());
+//RS         let program = Parser::parse(&tokens).expect("parse exact internal module spelling");
+//RS         assert!(matches!(
+//RS             program.items.as_slice(),
+//RS             [Item::CodeModule(module)] if module.name == "_bench"
+//RS         ));
+//RS         let report = scan(&root);
+//RS         assert_eq!(report.parts[0].name, "_bench");
+//RS         assert_eq!(report.parts[0].state, ProjectPartState::Skipped);
+//RS         assert!(!report.should_index(&internal));
+//RS 
+//RS         std::fs::write(root.join("main.jet"), "use project._bench\nfn run() {}\n").unwrap();
+//RS         let report = scan(&root);
+//RS         assert_eq!(report.parts[0].state, ProjectPartState::Explicit);
+//RS         assert!(report.should_index(&internal));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn duplicate_declarations_are_conflicts_even_when_skipped() {
+//RS         let root = tempdir("conflict");
+//RS         std::fs::write(root.join("a.jet"), "module _bench { }\n").unwrap();
+//RS         std::fs::write(root.join("b.jet"), "module _bench { }\n").unwrap();
+//RS         let report = scan(&root);
+//RS         assert_eq!(report.conflicts.len(), 1);
+//RS         assert_eq!(report.conflicts[0].name, "_bench");
+//RS         assert_eq!(report.conflicts[0].paths.len(), 2);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_files_are_the_package_own_modules() {
+//RS         // Bare `jet test` enumerates here (spec S43): every module the package
+//RS         // compiles, no manifests, and nothing belonging to a nested package.
+//RS         let root = tempdir("source-files");
+//RS         std::fs::write(root.join(Syntax::PACKAGE_FILE), "name: \"outer\"\n").unwrap();
+//RS         std::fs::write(root.join("run.jet"), "fn run() {}\n").unwrap();
+//RS         std::fs::create_dir_all(root.join("src")).unwrap();
+//RS         std::fs::write(root.join("src/math.jet"), "fn double() -> Int -> 2\n").unwrap();
+//RS         std::fs::create_dir_all(root.join("vendor/inner")).unwrap();
+//RS         std::fs::write(
+//RS             root.join("vendor/inner").join(Syntax::PACKAGE_FILE),
+//RS             "name: \"inner\"\n",
+//RS         )
+//RS         .unwrap();
+//RS         std::fs::write(root.join("vendor/inner/lib.jet"), "fn theirs() {}\n").unwrap();
+//RS 
+//RS         let base = std::fs::canonicalize(&root).unwrap();
+//RS         let files = source_files(&root);
+//RS         let names = files
+//RS             .iter()
+//RS             .map(|path| {
+//RS                 path.strip_prefix(&base)
+//RS                     .unwrap_or(path.as_path())
+//RS                     .to_string_lossy()
+//RS                     .replace('\\', "/")
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         assert_eq!(
+//RS             names,
+//RS             vec!["run.jet".to_string(), "src/math.jet".to_string()]
+//RS         );
+//RS         let _ = std::fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn scan_ignores_non_regular_jet_entries() {
+//RS         let root = tempdir("non-regular");
+//RS         std::fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+//RS         let fifo = root.join("blocked.jet");
+//RS         assert!(std::process::Command::new("mkfifo")
+//RS             .arg(&fifo)
+//RS             .status()
+//RS             .unwrap()
+//RS             .success());
+//RS 
+//RS         let (opened, observed) = std::sync::mpsc::channel();
+//RS         let writer_fifo = fifo.clone();
+//RS         let writer = std::thread::spawn(move || {
+//RS             let file = std::fs::OpenOptions::new()
+//RS                 .write(true)
+//RS                 .open(writer_fifo)
+//RS                 .unwrap();
+//RS             opened.send(()).unwrap();
+//RS             drop(file);
+//RS         });
+//RS 
+//RS         let report = scan(&root);
+//RS         let scanned_fifo = observed.try_recv().is_ok();
+//RS         if !scanned_fifo {
+//RS             drop(std::fs::OpenOptions::new().read(true).open(&fifo).unwrap());
+//RS         }
+//RS         writer.join().unwrap();
+//RS         assert!(
+//RS             !scanned_fifo,
+//RS             "project scans must not open a FIFO as source"
+//RS         );
+//RS         assert!(report.parts.is_empty());
+//RS         let _ = std::fs::remove_dir_all(root);
+//RS     }
+//RS }
+// END-PORT-PENDING 0613 crates/jet-driver/src/ProjectParts.rs:1-527
+

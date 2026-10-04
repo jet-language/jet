@@ -1,0 +1,1075 @@
+// PORT-PENDING 1138 tests-reader-region-tiers-module-group: tests/reader_region_tiers.rs:1-128
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #2253: the one-million-read Reader witness is an executable I9
+//RS //! contract. Its output must agree on release/AOT, default JIT, and the forced
+//RS //! interpreter; the generated-code shape contract lives beside the TIR tests.
+//RS 
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS #[test]
+//RS fn reader_hot_loop_one_million_reads_matches_all_tiers() {
+//RS     let expected = include_str!("../Examples/features/expected/parsing/reader_hot_loop.out");
+//RS     tir_support::assert_example_cli_tiers_agree("parsing/reader_hot_loop", expected);
+//RS }
+//RS 
+//RS #[test]
+//RS fn reader_region_short_input_keeps_the_fallible_fallback() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     reader :: Reader.over([U8]{7})
+//RS     loop _ in 0..<2 {
+//RS         value :: reader.read_u16_le() ?? 99
+//RS         print(value)
+//RS     }
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("reader_region_short", source, "99\n99\n");
+//RS }
+//RS #[test]
+//RS fn bounded_fixed_width_to_int_keeps_the_native_carrier() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     values :: [U8]{ 7 }
+//RS     loop value in values {
+//RS         widened :: Int.from_u8(value)
+//RS         print(widened)
+//RS     }
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("bounded_int_cast", source, "7\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn reader_u32_to_int_modulo_uses_bounded_native_rail() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     reader :: Reader.over([U8]{9, 0, 0, 0})
+//RS     value :: Int.from_u32(reader.read_u32_le() ?? 0)
+//RS     print(value % 7)
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("reader_u32_int_modulo", source, "2\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn reader_over_moves_an_owned_bytes_last_use() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     bytes :: [U8]{7, 9}
+//RS     reader :: Reader.over(bytes)
+//RS     print(reader.remaining())
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("reader_over_owned_last_use", src, "2\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn reader_over_reuses_the_borrowing_clone_when_bytes_are_live() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     bytes :: [U8]{7, 9}
+//RS     reader :: Reader.over(bytes)
+//RS     print(bytes.len())
+//RS     print(reader.remaining())
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("reader_over_reused_bytes", src, "2\n2\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn reader_over_rejects_a_live_view_alias() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     bytes := [U8]{7, 9}
+//RS     alias :: bytes[0..1]
+//RS     reader :: Reader.over(bytes)
+//RS     print(alias.len())
+//RS     print(reader.remaining())
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("reader_over_live_alias", src, "2\n2\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn reader_over_rejects_a_later_capture() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     bytes :: [U8]{7, 9}
+//RS     reader :: Reader.over(bytes)
+//RS     _keep :: () -> bytes.len()
+//RS     print(reader.remaining())
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("reader_over_later_capture", src, "2\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn reader_fixed_frame_and_byte_checksum_keep_one_native_shape() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     payload :: [U8]{7, 1, 0x34, 0x12, 1, 0, 0, 0}
+//RS     checksum := U64{0}
+//RS     loop byte in payload -> checksum += U64.from_u8(byte)
+//RS     reader :: Reader.over(payload)
+//RS     frame :: reader.take_pattern([U8]{"{channel:U8}{flags:U8}{sample:U16le}{tick:U32le}"}) ?? panic("short frame")
+//RS     print(checksum)
+//RS     print(frame.channel)
+//RS     print(frame.flags)
+//RS     print(frame.sample)
+//RS     print(frame.tick)
+//RS     print(reader.remaining())
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree(
+//RS         "reader_fixed_frame_checksum",
+//RS         source,
+//RS         "79\n7\n1\n4660\n1\n0\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 1138 tests/reader_region_tiers.rs:1-128
+
+// PORT-PENDING 1138 tests-reader-region-tiers-module-group: tests/receiver_place_marks.rs:1-42
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-CAP-RECEIVER1=D: a line that starts with `&name` or `^name` begins a new
+//RS //! statement; a continued bitwise-and or power line keeps a space after its
+//RS //! operator, and `jet fmt` emits that space.
+//RS 
+//RS use jet::Lexer::TokKind;
+//RS 
+//RS fn semi_before(source: &str, mark: TokKind) -> bool {
+//RS     let (tokens, diagnostics) = jet::Lexer::lex(source);
+//RS     assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:#?}");
+//RS     let at = tokens
+//RS         .iter()
+//RS         .position(|token| token.kind == mark)
+//RS         .unwrap_or_else(|| panic!("{source:?} has no {mark:?}"));
+//RS     at > 0 && tokens[at - 1].kind == TokKind::Semi
+//RS }
+//RS 
+//RS #[test]
+//RS fn line_start_place_marks_begin_statements() {
+//RS     assert!(semi_before("x\n&buf.push(1)\n", TokKind::Amp));
+//RS     assert!(semi_before("x\n^buf.seal()\n", TokKind::Caret));
+//RS     assert!(semi_before("x\n&self.items.push(1)\n", TokKind::Amp));
+//RS }
+//RS 
+//RS #[test]
+//RS fn spaced_operators_continue_the_previous_line() {
+//RS     assert!(!semi_before("x\n& mask\n", TokKind::Amp));
+//RS     assert!(!semi_before("x\n^ 2\n", TokKind::Caret));
+//RS     assert!(!semi_before("x\n&(mask)\n", TokKind::Amp));
+//RS }
+//RS 
+//RS #[test]
+//RS fn formatter_spaces_continued_operators_and_keeps_place_marks() {
+//RS     let source = "fn run() {\n    total := 6\n    mask := total\n        & 3\n    power := total\n        ^ 2\n    buf := [1]\n    &buf.push(2)\n    print(\"{mask} {power} {buf}\")\n}\n";
+//RS     let formatted = jet::format_source(source).expect("receiver marks format");
+//RS     assert!(formatted.contains("mask := total & 3"), "{formatted}");
+//RS     assert!(formatted.contains("power := total ^ 2"), "{formatted}");
+//RS     assert!(formatted.contains("    &buf.push(2)\n"), "{formatted}");
+//RS     assert_eq!(
+//RS         jet::format_source(&formatted).expect("formatted source is stable"),
+//RS         formatted
+//RS     );
+//RS }
+// END-PORT-PENDING 1138 tests/receiver_place_marks.rs:1-42
+
+// PORT-PENDING 1138 tests-reader-region-tiers-module-group: tests/redundant_final_return.rs:1-43
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! L0530 proves the implicit-tail return lint and its safe source fix.
+//RS 
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS const SOURCE: &str = include_str!("ui_lint/redundant_final_return.jet");
+//RS const EXPECTED_STDOUT: &str = "42\n";
+//RS 
+//RS #[test]
+//RS fn final_return_fix_removes_keyword() {
+//RS     let output = tir_support::compile_source("redundant_final_return.jet", SOURCE)
+//RS         .expect("final return fixture must compile");
+//RS     let lint = output
+//RS         .lints
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "L0530")
+//RS         .expect("a final explicit return must be linted");
+//RS     assert_eq!(
+//RS         lint.applicability,
+//RS         Some(jet::Diagnostics::FixApplicability::Safe)
+//RS     );
+//RS     assert_eq!(lint.safety, Some(jet::Diagnostics::FixSafety::Formatting));
+//RS     let edits = lint.all_edits();
+//RS     assert_eq!(edits.len(), 1, "the fix removes the redundant keyword");
+//RS 
+//RS     let fixed = jet::FixEngine::apply_edits(SOURCE, &edits)
+//RS         .expect("the final-return edit must apply without overlap");
+//RS     assert!(!fixed.contains("return 42"), "final return survived: {fixed}");
+//RS     assert!(fixed.contains("    42\n"), "implicit tail was not formed: {fixed}");
+//RS     let formatted = jet::format_source(&fixed).expect("fixed source must format");
+//RS     assert!(formatted.contains("42"), "formatted tail lost its value: {formatted}");
+//RS 
+//RS     let fixed_output = tir_support::compile_source("redundant_final_return_fixed.jet", &formatted)
+//RS         .expect("fixed final-return fixture must compile");
+//RS     assert!(!fixed_output
+//RS         .lints
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.code == "L0530"));
+//RS     tir_support::assert_tiers_agree("redundant_final_return", SOURCE, EXPECTED_STDOUT);
+//RS     tir_support::assert_tiers_agree("redundant_final_return_fixed", &formatted, EXPECTED_STDOUT);
+//RS }
+//RS 
+// END-PORT-PENDING 1138 tests/redundant_final_return.rs:1-43
+
+// PORT-PENDING 1138 tests-reader-region-tiers-module-group: tests/refutable_test_bind.rs:1-125
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-CHOOSE-TEST1=A: subject-first refutable test-bind.
+//RS 
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS const EXAMPLE_OUTPUT: &str = "7\n7\ninvalid\ninvalid\n";
+//RS 
+//RS const VALID: &str = r#"
+//RS fn parse_age() -> Int String! {
+//RS     return .Ok(42)
+//RS }
+//RS 
+//RS fn run() {
+//RS     parse_age() == .Ok(age) ?? panic("invalid age")
+//RS     print(age)
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn parser_accepts_subject_first_test_bind_and_rejects_pattern_left_route() {
+//RS     let (tokens, lex_diags) = jet::Lexer::lex(VALID);
+//RS     assert!(
+//RS         lex_diags.is_empty(),
+//RS         "valid test-bind lexed with diagnostics: {lex_diags:#?}"
+//RS     );
+//RS     jet::Parser::parse(&tokens).expect("subject-first test-bind should parse");
+//RS 
+//RS     let (tokens, lex_diags) = jet::Lexer::lex("fn run() { .Ok(age) :: parse_age() ?? return }\n");
+//RS     assert!(
+//RS         lex_diags.is_empty(),
+//RS         "retired spelling lexed with diagnostics: {lex_diags:#?}"
+//RS     );
+//RS     assert!(
+//RS         jet::Parser::parse(&tokens).is_err(),
+//RS         "retired pattern-left refutable bind must not gain a parser path"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn sema_accepts_diverging_test_bind_and_keeps_the_name_afterward() {
+//RS     let output = jet::compile(VALID).expect("diverging test-bind should compile");
+//RS     assert!(
+//RS         output.rust.contains("age"),
+//RS         "generated program lost the bound name"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn sema_rejects_a_non_diverging_test_bind_route() {
+//RS     let source = r#"
+//RS fn parse_age() -> Int String! { return .Ok(42) }
+//RS fn run() {
+//RS     parse_age() == .Ok(age) ?? 0
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::check_for_eval(source, "refutable_test_bind.jet");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0405"),
+//RS         "non-diverging test-bind route must use registered E0405: {diagnostics:#?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn a_test_without_a_route_does_not_bind_pattern_names() {
+//RS     let source = r#"
+//RS fn parse_age() -> Int String! { return .Ok(42) }
+//RS fn run() {
+//RS     matched :: parse_age() == .Ok(age)
+//RS     print(age)
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::check_for_eval(source, "refutable_test_bind_no_route.jet");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0107"),
+//RS         "a pattern test without `??` must not bind `age`: {diagnostics:#?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn optional_shape_test_does_not_make_ambient_err_available() {
+//RS     let source = r#"
+//RS fn maybe() -> Int? { return null }
+//RS fn run() {
+//RS     maybe() == .Val(value) ?? panic(err)
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::check_for_eval(source, "refutable_test_bind_optional.jet");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0408"),
+//RS         "optional shape miss must reject ambient err with E0408: {diagnostics:#?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn user_enum_capture_and_miss_route_match_all_tiers() {
+//RS     let source = r#"
+//RS enum Choice {
+//RS     First(Int)
+//RS     Second
+//RS }
+//RS 
+//RS fn select(choice: Choice) -> Int {
+//RS     choice == .First(value) ?? return 0
+//RS     return value
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(select(Choice.First(7)))
+//RS     print(select(Choice.Second))
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("refutable-user-enum", source, "7\n0\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn example_matches_aot_default_jit_and_interpreter() {
+//RS     tir_support::assert_example_cli_tiers_agree("patterns/refutable_test_bind", EXAMPLE_OUTPUT);
+//RS }
+// END-PORT-PENDING 1138 tests/refutable_test_bind.rs:1-125
+
+// PORT-PENDING 1138 tests-reader-region-tiers-module-group: tests/regex.rs:1-384
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-REGEXENGINE1 — core.regex is std-only in the generated prelude. Regex-only
+//RS //! programs must not ask for the hidden FFI bridge or the old `regex` crate.
+//RS 
+//RS use std::fs;
+//RS 
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS use common::have_rustc;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS /// Compile, FFI-link, and run a regex program; return stdout.
+//RS fn run_regex(src: &str) -> String {
+//RS     // Unique dir per call so concurrent regex tests never clobber one another's
+//RS     // `regex_test.{jet,rs,_bin}` (the process id alone is shared across tests in
+//RS     // the same binary).
+//RS     use std::sync::atomic::{AtomicU64, Ordering};
+//RS     static SEQ: AtomicU64 = AtomicU64::new(0);
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_regex_{}_{}",
+//RS         std::process::id(),
+//RS         SEQ.fetch_add(1, Ordering::Relaxed)
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("regex_test.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS 
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected regex fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     assert!(
+//RS         out.ffi.is_none(),
+//RS         "core.regex must not produce an FFI bridge"
+//RS     );
+//RS     assert!(
+//RS         !out.rust.contains("regex::") && !out.rust.contains("extern crate regex"),
+//RS         "core.regex must not reference the old regex crate"
+//RS     );
+//RS     let user_rust = common::strip_vetted_prelude_modules(&out.rust);
+//RS     let unsafe_lines = user_rust
+//RS         .lines()
+//RS         .filter(|line| !common::unsafe_keyword_columns(line).is_empty())
+//RS         .collect::<Vec<_>>();
+//RS     assert!(
+//RS         unsafe_lines.is_empty(),
+//RS         "I1: regex output must not contain unsafe: {unsafe_lines:?}"
+//RS     );
+//RS 
+//RS     let rs = dir.join("regex_test.rs");
+//RS     let bin = dir.join("regex_test_bin");
+//RS     fs::write(&rs, &out.rust).unwrap();
+//RS     let status = Command::new("rustc")
+//RS         .args(["--edition", "2021"])
+//RS         .arg(&rs)
+//RS         .arg("-o")
+//RS         .arg(&bin)
+//RS         .status()
+//RS         .unwrap();
+//RS     assert!(status.success(), "I2: rustc rejected regex output");
+//RS 
+//RS     let run = Command::new(&bin).output().unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "regex program failed at runtime:\nstderr: {}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     String::from_utf8_lossy(&run.stdout).into_owned()
+//RS }
+//RS 
+//RS fn have_toolchain() -> bool {
+//RS     have_rustc() && Command::new("cargo").arg("--version").output().is_ok()
+//RS }
+//RS 
+//RS #[test]
+//RS fn match_groups_find_replace_split() {
+//RS     if !have_toolchain() {
+//RS         eprintln!("note: cargo/rustc not found; skipping core.regex integration test");
+//RS         return;
+//RS     }
+//RS     let src = r##"
+//RS use core.regex as re
+//RS 
+//RS fn run() {
+//RS     text :: "2024-06-21 build ok"
+//RS 
+//RS     // is_match. NB: `{N}` regex quantifiers are written `{{N}}` in Jet source —
+//RS     // single braces are string interpolation (S8).
+//RS     print(re.is_match(pattern: {"\\d{{4}}"}, text: text))
+//RS 
+//RS     // match + capture groups: whole + each group
+//RS     m :: re.match({"(\\d{{4}})-(\\d{{2}})-(\\d{{2}})"}, text)
+//RS     if m == Val(mat) {
+//RS         print(mat.group(0) ?? "x")
+//RS         print(mat.group(1) ?? "x")
+//RS         print(mat.group(2) ?? "x")
+//RS         print(mat.group(3) ?? "x")
+//RS         // out-of-range group is none
+//RS         print(mat.group(9) ?? "none")
+//RS     }
+//RS 
+//RS     // no match -> None optional
+//RS     none_match :: re.match({"zzz"}, text)
+//RS     if none_match == None {
+//RS         print("no-match")
+//RS     }
+//RS 
+//RS     // find / find_all
+//RS     first :: re.find({"\\d+"}, text)
+//RS     print(first ?? "none")
+//RS     nums :: re.find_all({"\\d+"}, text)
+//RS     print(nums.len())
+//RS 
+//RS     // replace (all matches) / explicit first-match sibling
+//RS     print(re.replace({"\\d"}, "#", text))
+//RS     print(re.replace_first({"\\d"}, "#", "1-2"))
+//RS 
+//RS     // split
+//RS     parts :: re.split({"-"}, "a-b-c")
+//RS     print(parts.len())
+//RS }
+//RS "##;
+//RS     let out = run_regex(src);
+//RS     let lines: Vec<&str> = out.lines().collect();
+//RS     assert_eq!(lines[0], "true", "is_match");
+//RS     assert_eq!(lines[1], "2024-06-21", "group(0) whole match");
+//RS     assert_eq!(lines[2], "2024", "group(1)");
+//RS     assert_eq!(lines[3], "06", "group(2)");
+//RS     assert_eq!(lines[4], "21", "group(3)");
+//RS     assert_eq!(lines[5], "none", "out-of-range group is none");
+//RS     assert_eq!(lines[6], "no-match", "non-matching pattern yields None");
+//RS     assert_eq!(lines[7], "2024", "find first match");
+//RS     assert_eq!(lines[8], "3", "find_all count (2024, 06, 21)");
+//RS     assert_eq!(lines[9], "####-##-## build ok", "replace all digits");
+//RS     assert_eq!(lines[10], "#-2", "first-mode digit");
+//RS     assert_eq!(lines[11], "3", "split into 3 parts");
+//RS }
+//RS 
+//RS #[test]
+//RS fn bad_pattern_is_a_recoverable_error_not_a_crash() {
+//RS     if !have_toolchain() {
+//RS         eprintln!("note: cargo/rustc not found; skipping core.regex error test");
+//RS         return;
+//RS     }
+//RS     // Runtime-built text stays fallible at the explicit compilation boundary.
+//RS     let src = r##"
+//RS use core.regex as re
+//RS 
+//RS fn run() {
+//RS     pattern :: "(unclosed"
+//RS     compiled :: re.compile(pattern) ?? {
+//RS         print("caught")
+//RS         return
+//RS     }
+//RS     print("unexpected-ok")
+//RS }
+//RS "##;
+//RS     let out = run_regex(src);
+//RS     assert_eq!(out.trim(), "caught", "bad pattern surfaces as Err");
+//RS }
+//RS 
+//RS #[test]
+//RS fn inferred_and_explicit_regex_literals_are_direct_values() {
+//RS     if !have_toolchain() {
+//RS         eprintln!("note: cargo/rustc not found; skipping typed Regex literal test");
+//RS         return;
+//RS     }
+//RS     let src = r##"
+//RS use core.regex as re
+//RS 
+//RS fn run() {
+//RS     print(re.find({"\\d+"}, "id=42") ?? "none")
+//RS     print(re.find(pattern: {"[a-z]+"}, text: "123jet") ?? "none")
+//RS     digits :: Regex{"\d+"}
+//RS     print(digits.is_match("room 7"))
+//RS     runtime_pattern :: "\\w+"
+//RS     runtime :: re.compile(runtime_pattern) ?? panic("runtime pattern")
+//RS     print("runtime-result")
+//RS }
+//RS "##;
+//RS     assert_eq!(
+//RS         run_regex(src),
+//RS         "42\njet\ntrue\nruntime-result\n",
+//RS         "typed patterns are direct; runtime compilation stays fallible"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn compiled_regex_flags_spans_names_limit_and_callback() {
+//RS     if !have_toolchain() {
+//RS         eprintln!("note: cargo/rustc not found; skipping core.regex API test");
+//RS         return;
+//RS     }
+//RS     let src = r##"
+//RS use core.regex as re
+//RS 
+//RS fn run() {
+//RS     flags :: re.flags(true, true, false)
+//RS     rx :: re.compile_with("^(?<word>[a-z]+)", flags) ?? panic("bad pattern")
+//RS     text :: "Ada\nlovelace"
+//RS     matches :: rx.matches(text)
+//RS     print(matches.len())
+//RS     first :: rx.match(text)
+//RS     if first == Val(mat) {
+//RS         print(mat.name("word") ?? "none")
+//RS         print(mat.start())
+//RS         print(mat.end())
+//RS         print(mat.group_start(1) ?? -1)
+//RS         print(mat.group_end(1) ?? -1)
+//RS     }
+//RS 
+//RS     sep :: re.compile(",\\s*") ?? panic("bad sep")
+//RS     pieces :: sep.split_limit("a, b, c", 2)
+//RS     print(pieces.len())
+//RS     print(pieces[1])
+//RS 
+//RS     word :: re.compile("\\w+") ?? panic("bad word")
+//RS     print(word.replace_all_with("a b", (m: Match) -> "hit"))
+//RS }
+//RS "##;
+//RS     let out = run_regex(src);
+//RS     let lines: Vec<&str> = out.lines().collect();
+//RS     assert_eq!(lines[0], "2", "multiline + case-insensitive flags");
+//RS     assert_eq!(lines[1], "Ada", "named group");
+//RS     assert_eq!(lines[2], "0", "match start");
+//RS     assert_eq!(lines[3], "3", "match end");
+//RS     assert_eq!(lines[4], "0", "group start");
+//RS     assert_eq!(lines[5], "3", "group end");
+//RS     assert_eq!(lines[6], "2", "split limit len");
+//RS     assert_eq!(lines[7], "b, c", "split limit remainder");
+//RS     assert_eq!(lines[8], "hit hit", "callback replacement");
+//RS }
+//RS 
+//RS #[test]
+//RS fn regex_value_fidelity_is_shared_by_all_tiers() {
+//RS     let src = r#"use core.regex as re
+//RS 
+//RS fn run() {
+//RS     rx :: Regex{"a"}
+//RS     print(&rx.replace("a-a", "x"))
+//RS     print(rx.replace_first("a-a", "x"))
+//RS 
+//RS     print(Regex{""}.replace("abc", "x"))
+//RS     zero_width :: Regex{""}.split("abc")
+//RS     print(zero_width.len())
+//RS     print(zero_width[1])
+//RS     print(zero_width[2])
+//RS     print(zero_width[3])
+//RS     limited_zero_width :: Regex{""}.split_limit("abc", 3)
+//RS     print(limited_zero_width.len())
+//RS     print(limited_zero_width[2])
+//RS 
+//RS     unicode_text :: "aé"
+//RS     unicode_zero_width :: Regex{""}.split(unicode_text)
+//RS     print(unicode_zero_width.len())
+//RS     print(unicode_zero_width[1])
+//RS     print(unicode_zero_width[2])
+//RS     print(unicode_zero_width[3] == "")
+//RS 
+//RS     m :: Regex{"(é)"}.match(unicode_text)
+//RS     if m == Val(mat) {
+//RS         print(mat.start())
+//RS         print(mat.end())
+//RS         print(mat.group_start(1) ?? -1)
+//RS         print(mat.group_end(1) ?? -1)
+//RS     }
+//RS 
+//RS     ascii_parts :: re.split(Regex{"[\t-\r ]+"}, "a\tb\nc d")
+//RS     print(ascii_parts.len())
+//RS     print(Regex{"(a+)+$"}.is_match("aaaaaaaaaaaaaaaaaaaaX"))
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree(
+//RS         "regex_value_fidelity",
+//RS         src,
+//RS         "x-x\nx-a\nxaxbxcx\n5\na\nb\nc\n3\nbc\n4\na\né\ntrue\n1\n2\n1\n2\n3\nfalse\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repeated_regex_queries_keep_exact_matches() {
+//RS     let src = r#"fn run() {
+//RS     rx :: Regex{"(?<word>[A-Za-z]+)-\d+"}
+//RS     print(rx.is_match("Jet-2026"))
+//RS     print(rx.is_match("Jet"))
+//RS     print(rx.find("prefix Rust-2025 suffix") ?? "none")
+//RS     print(rx.find("no match") ?? "none")
+//RS     print(rx.find_all("Jet-1 Rust-2").len())
+//RS }
+//RS "#;
+//RS     let expected = "true\nfalse\nRust-2025\nnone\n2\n";
+//RS     if have_toolchain() {
+//RS         assert_eq!(
+//RS             run_regex(src),
+//RS             expected,
+//RS             "AOT regex queries returned unexpected matches"
+//RS         );
+//RS     }
+//RS     tir_support::assert_tiers_agree("repeated_regex_queries", src, expected);
+//RS }
+//RS 
+//RS #[test]
+//RS fn anchored_required_literal_prefilter_preserves_controls() {
+//RS     let src = r#"use core.regex as re
+//RS 
+//RS fn run() {
+//RS     anchored :: Regex{"^(?:needle)"}
+//RS     print(anchored.is_match("needle suffix"))
+//RS     print(anchored.is_match("prefix needle"))
+//RS     print(anchored.find("prefix needle") ?? "none")
+//RS 
+//RS     multiline :: re.compile_with("^(?:needle)", re.flags(false, true, false)) ?? panic("bad pattern")
+//RS     print(multiline.is_match("prefix\nneedle suffix"))
+//RS     print(multiline.is_match("prefix\nxneedle suffix"))
+//RS 
+//RS     unanchored :: Regex{"(?:needle)"}
+//RS     print(unanchored.is_match("prefix needle"))
+//RS     print(unanchored.is_match("prefix absent"))
+//RS }
+//RS "#;
+//RS     let expected = "true\nfalse\nnone\ntrue\nfalse\ntrue\nfalse\n";
+//RS     if have_toolchain() {
+//RS         assert_eq!(
+//RS             run_regex(src),
+//RS             expected,
+//RS             "AOT anchored regex queries returned unexpected matches"
+//RS         );
+//RS     }
+//RS     tir_support::assert_tiers_agree("anchored_required_literal_prefilter", src, expected);
+//RS }
+//RS 
+//RS #[test]
+//RS fn anchored_api_log_prefilters_preserve_semantics() {
+//RS     let src = r#"fn run() {
+//RS     rx :: Regex{"^([0-9.]+) - - \[[^]]+\] \"GET /api/[^ ]+ HTTP/1\.1\" 5[0-9][0-9] "}
+//RS     print(rx.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /api/v1/resource/1 HTTP/1.1\" 500 42"))
+//RS     print(rx.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /static/file/1 HTTP/1.1\" 500 42"))
+//RS     print(rx.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /api/v1/resource/1 HTTP/1.1\" 200 42"))
+//RS     print(rx.is_match("prefix 192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /api/v1/resource/1 HTTP/1.1\" 500 42"))
+//RS }
+//RS "#;
+//RS     let expected = "true\nfalse\nfalse\nfalse\n";
+//RS     if have_toolchain() {
+//RS         assert_eq!(
+//RS             run_regex(src),
+//RS             expected,
+//RS             "anchored required literals must only reject impossible lines"
+//RS         );
+//RS     }
+//RS     tir_support::assert_tiers_agree("anchored_api_log_prefilters", src, expected);
+//RS }
+//RS 
+//RS #[test]
+//RS fn typed_head_raw_escapes_agree_across_tiers() {
+//RS     let src = r#"fn run() {
+//RS     digits :: Regex{"\d+"}
+//RS     print(digits.is_match("7"))
+//RS     slash_n :: Regex{"a\nb"}
+//RS     print(slash_n.is_match("7"))
+//RS     braces :: Regex{"x{{2}}"}
+//RS     print(braces.is_match("xx"))
+//RS }
+//RS "#;
+//RS     let expected = "true\nfalse\ntrue\n";
+//RS     let (jit_code, jit_out, jit_err) = tir_support::jit_run("typed_head_raw_escapes", src);
+//RS     assert_eq!(jit_code, 0, "jet run failed:\n{jit_err}");
+//RS     assert_eq!(jit_out, expected, "jet run disagreed:\n{jit_err}");
+//RS     let (interpreter_code, interpreter_out, interpreter_err) =
+//RS         tir_support::interpreter_run("typed_head_raw_escapes", src);
+//RS     assert_eq!(
+//RS         interpreter_code, jit_code,
+//RS         "interpreter exit disagreed:\n{interpreter_err}"
+//RS     );
+//RS     assert_eq!(
+//RS         interpreter_out, jit_out,
+//RS         "interpreter stdout disagreed:\n{interpreter_err}"
+//RS     );
+//RS     assert_eq!(interpreter_err, jit_err, "interpreter stderr disagreed");
+//RS }
+// END-PORT-PENDING 1138 tests/regex.rs:1-384
+
+// PORT-PENDING 1138 tests-reader-region-tiers-module-group: tests/registry_name_policy.rs:1-124
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #1912: publish rejects registry-name typosquats before mutation.
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Output};
+//RS 
+//RS fn scratch(label: &str) -> PathBuf {
+//RS     let path = std::env::temp_dir().join(format!(
+//RS         "jet_registry_name_policy_{label}_{}_{}",
+//RS         std::process::id(),
+//RS         std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .unwrap()
+//RS             .as_nanos()
+//RS     ));
+//RS     fs::create_dir_all(&path).unwrap();
+//RS     path
+//RS }
+//RS 
+//RS fn git(cwd: &Path, args: &[&str]) -> Output {
+//RS     let output = Command::new("git")
+//RS         .args(args)
+//RS         .current_dir(cwd)
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("git {args:?} failed to start: {error}"));
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "git {args:?} failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     output
+//RS }
+//RS 
+//RS fn seed_existing_name(registry: &Path) {
+//RS     Command::new("git")
+//RS         .args(["init", "--bare", registry.to_str().unwrap()])
+//RS         .status()
+//RS         .unwrap();
+//RS     Command::new("git")
+//RS         .args([
+//RS             "--git-dir",
+//RS             registry.to_str().unwrap(),
+//RS             "symbolic-ref",
+//RS             "HEAD",
+//RS             "refs/heads/main",
+//RS         ])
+//RS         .status()
+//RS         .unwrap();
+//RS     let work = registry.with_extension(format!("seed-{}", std::process::id()));
+//RS     let url = format!("file://{}", registry.to_str().unwrap());
+//RS     git(Path::new("."), &["clone", &url, work.to_str().unwrap()]);
+//RS 
+//RS     let entry = jet::Publish::IndexEntry {
+//RS         name: "librewolf".to_string(),
+//RS         version: "1.0.0".to_string(),
+//RS         content_hash: "sha256-existing".to_string(),
+//RS         fingerprint: "sha256-existing-fingerprint".to_string(),
+//RS         yanked: false,
+//RS         tier: jet::Publish::RegistryTier::Core,
+//RS         gate_status: jet::Publish::GateStatus::core_reviewed(),
+//RS         public_key: String::new(),
+//RS         signature: String::new(),
+//RS     };
+//RS     let index = work.join("index/librewolf/librewolf.jsonl");
+//RS     fs::create_dir_all(index.parent().unwrap()).unwrap();
+//RS     fs::write(&index, format!("{}\n", entry.to_jsonl())).unwrap();
+//RS     git(&work, &["config", "user.email", "test@jet.test"]);
+//RS     git(&work, &["config", "user.name", "Jet Test"]);
+//RS     git(&work, &["add", "."]);
+//RS     git(&work, &["commit", "-m", "seed package name"]);
+//RS     git(&work, &["push", "origin", "HEAD:main"]);
+//RS     fs::remove_dir_all(work).unwrap();
+//RS }
+//RS 
+//RS fn init_project(project: &Path) {
+//RS     fs::create_dir_all(project).unwrap();
+//RS     fs::write(
+//RS         project.join("package.jet"),
+//RS         "name: \"librewolf-fixed-bin\"\nversion: \"1.0.0\"\njet: \">=0.1.0\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         project.join("run.jet"),
+//RS         "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"hello\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     git(project, &["init", "-b", "main"]);
+//RS     git(project, &["config", "user.email", "test@jet.test"]);
+//RS     git(project, &["config", "user.name", "Jet Test"]);
+//RS     git(project, &["add", "."]);
+//RS     git(project, &["commit", "-m", "initial package"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn hostile_lookalike_publish_is_rejected_with_teaching_error() {
+//RS     let root = scratch("publish");
+//RS     let registry = root.join("registry.git");
+//RS     let project = root.join("project");
+//RS     let cache = root.join("registry-cache");
+//RS     let store = root.join("store");
+//RS     let keys = root.join("keys");
+//RS     seed_existing_name(&registry);
+//RS     init_project(&project);
+//RS 
+//RS     let url = format!("file://{}", registry.to_str().unwrap());
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["registry", "publish", "--no-sign", "--quiet"])
+//RS         .current_dir(&project)
+//RS         .env("JET_REGISTRY_URL", &url)
+//RS         .env("JET_REGISTRY_CACHE_DIR", &cache)
+//RS         .env("JET_PACKAGE_STORE_DIR", &store)
+//RS         .env("JET_KEYS_DIR", &keys)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success(), "hostile name must not publish");
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     let snapshot = include_str!("cli/registry_name_policy.txt");
+//RS     assert_eq!(stderr, snapshot, "publish diagnostic changed");
+//RS     assert!(!stderr.contains("registry source artifact"));
+//RS     assert!(!stderr.contains("index entry"));
+//RS 
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+// END-PORT-PENDING 1138 tests/registry_name_policy.rs:1-124
+
+// PORT-PENDING 1138 tests-reader-region-tiers-module-group: tests/report.rs:1-201
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS static NEXT: AtomicU64 = AtomicU64::new(0);
+//RS 
+//RS fn jet() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn scratch(tag: &str) -> PathBuf {
+//RS     let path = std::env::temp_dir().join(format!(
+//RS         "jet-report-{tag}-{}-{}",
+//RS         std::process::id(),
+//RS         NEXT.fetch_add(1, Ordering::Relaxed),
+//RS     ));
+//RS     fs::create_dir_all(&path).unwrap();
+//RS     path
+//RS }
+//RS 
+//RS #[test]
+//RS fn compile_cascade_json_snapshot_keeps_roots_and_pruned_sites() {
+//RS     let source = include_str!("ui/e2392_root_cascade.jet");
+//RS     let diagnostics = jet::check_with_path("tests/ui/e2392_root_cascade.jet");
+//RS     assert!(!diagnostics.is_empty(), "cascade fixture must be rejected");
+//RS     let actual = jet::render_all_json(
+//RS         &jet::Diagnostics::ReportPath::from_process("<e2392_root_cascade.jet>"),
+//RS         source,
+//RS         &diagnostics,
+//RS     );
+//RS     assert_eq!(
+//RS         actual,
+//RS         include_str!("ui/e2392_root_cascade.json"),
+//RS         "JSON must retain one report per failure domain after pruning repeated sites"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn compile_linked_cascade_json_snapshot_keeps_cause_chain() {
+//RS     let source = include_str!("ui/e2392_linked_cascade.jet");
+//RS     let diagnostics = jet::check_with_path("tests/ui/e2392_linked_cascade.jet");
+//RS     assert!(!diagnostics.is_empty(), "linked cascade fixture must be rejected");
+//RS     let actual = jet::render_all_json(
+//RS         &jet::Diagnostics::ReportPath::from_process("<e2392_linked_cascade.jet>"),
+//RS         source,
+//RS         &diagnostics,
+//RS     );
+//RS     assert_eq!(
+//RS         actual,
+//RS         include_str!("ui/e2392_linked_cascade.json"),
+//RS         "JSON must preserve the root-first cause chain"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn zero_telemetry_policy_docs_and_source_audit() {
+//RS     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let policy = fs::read_to_string(manifest.join("Docs/spec/reference/network-policy.md")).unwrap();
+//RS     assert!(policy.contains("D-TELEMETRY1=A"));
+//RS     assert!(policy.contains("Jet sends no telemetry"));
+//RS     assert!(policy.contains("Inventory of toolchain network paths"));
+//RS     assert!(!policy.contains("future send operation"));
+//RS 
+//RS     let forbidden_endpoints = [
+//RS         "reports.jet-lang.dev",
+//RS         "telemetry.jet-lang.dev",
+//RS         "/v1/telemetry",
+//RS         "sentry.io",
+//RS         "crashlytics",
+//RS         "segment.io",
+//RS         "gotelemetry",
+//RS     ];
+//RS     let roots = [
+//RS         manifest.join("Source"),
+//RS         manifest.join("crates/jet-cli"),
+//RS         manifest.join("crates/jetpack/src"),
+//RS     ];
+//RS     for root in roots {
+//RS         for entry in walkdir(&root) {
+//RS             let path = entry.as_path();
+//RS             if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+//RS                 continue;
+//RS             }
+//RS             let text = fs::read_to_string(path).unwrap();
+//RS             for needle in forbidden_endpoints {
+//RS                 assert!(
+//RS                     !text.contains(needle),
+//RS                     "{} must not name telemetry endpoint `{needle}`",
+//RS                     path.display()
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn walkdir(root: &Path) -> Vec<PathBuf> {
+//RS     let mut out = Vec::new();
+//RS     let mut stack = vec![root.to_path_buf()];
+//RS     while let Some(dir) = stack.pop() {
+//RS         let Ok(entries) = fs::read_dir(&dir) else {
+//RS             continue;
+//RS         };
+//RS         for entry in entries.flatten() {
+//RS             let path = entry.path();
+//RS             if path.is_dir() {
+//RS                 stack.push(path);
+//RS             } else {
+//RS                 out.push(path);
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn traced_network_calls(
+//RS     root: &Path,
+//RS     tag: &str,
+//RS     args: &[&str],
+//RS ) -> (std::process::Output, Vec<String>) {
+//RS     Command::new("strace")
+//RS         .arg("-V")
+//RS         .output()
+//RS         .expect("strace is required for the Linux no-network proof");
+//RS     let trace = root.join(format!("{tag}.network.trace"));
+//RS     let output = Command::new("strace")
+//RS         .args(["-f", "-qq", "-e", "trace=network", "-o"])
+//RS         .arg(&trace)
+//RS         .arg(jet())
+//RS         .args(args)
+//RS         .current_dir(root)
+//RS         .output()
+//RS         .unwrap();
+//RS     let calls = fs::read_to_string(&trace)
+//RS         .unwrap()
+//RS         .lines()
+//RS         .filter(|line| !line.contains("--- SIG"))
+//RS         .map(str::to_string)
+//RS         .collect();
+//RS     (output, calls)
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS #[test]
+//RS fn ordinary_build_opens_no_network_connection() {
+//RS     let build_root = scratch("build-network");
+//RS     fs::write(
+//RS         build_root.join("main.jet"),
+//RS         "fn run() { print(\"offline\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let (build, calls) = traced_network_calls(&build_root, "build", &["build", "main.jet"]);
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "build failed:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&build.stdout),
+//RS         String::from_utf8_lossy(&build.stderr),
+//RS     );
+//RS     // rustc uses one local AF_UNIX socket pair to learn whether spawning its
+//RS     // linker succeeded. strace classifies that process IPC as "network", even
+//RS     // though it cannot address a host. Permit only that exact request/reply.
+//RS     let spawn_sockets = calls
+//RS         .iter()
+//RS         .filter(|line| {
+//RS             line.contains("socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0,")
+//RS                 && line.ends_with("= 0")
+//RS         })
+//RS         .count();
+//RS     let spawn_replies = calls
+//RS         .iter()
+//RS         .filter(|line| line.contains("recvfrom(") && line.ends_with("\", 8, 0, NULL, NULL) = 0"))
+//RS         .count();
+//RS     // sendfile between local fds is process I/O; strace still labels it network.
+//RS     let unexpected = calls
+//RS         .iter()
+//RS         .filter(|line| {
+//RS             !(line.contains("socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0,")
+//RS                 && line.ends_with("= 0"))
+//RS                 && !(line.contains("recvfrom(") && line.ends_with("\", 8, 0, NULL, NULL) = 0"))
+//RS                 && !line.contains("sendfile(")
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     assert!(
+//RS         unexpected.is_empty(),
+//RS         "ordinary build made an unexpected network syscall:\n{}",
+//RS         unexpected
+//RS             .iter()
+//RS             .map(|line| line.as_str())
+//RS             .collect::<Vec<_>>()
+//RS             .join("\n")
+//RS     );
+//RS     assert_eq!(
+//RS         spawn_sockets, spawn_replies,
+//RS         "rustc's local exec-status socket/reply must stay paired"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(build_root);
+//RS }
+// END-PORT-PENDING 1138 tests/report.rs:1-201
+

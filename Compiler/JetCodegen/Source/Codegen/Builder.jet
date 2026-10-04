@@ -10,6 +10,7 @@ use jet_foundation.[
     MIRCaptureParam,
     MIRConstant,
     MIRCoreCall,
+    MIRDropAction,
     MIRDropKind,
     MIRFieldID,
     MIRFieldRow,
@@ -81,9 +82,22 @@ struct JetCodegenDropLive {
     pub kind: MIRDropKind
     pub span: Span
 }
+// One Core file owner a binding holds at `place` (the binding itself or a
+// record/tuple field path below it), released at scope end while `live`
+// reads true (Rust `DeferredCleanup::FileOwner`).
+struct JetCodegenFileOwnerLeaf {
+    pub place: MIRPlaceID
+    pub live: MIRPlaceID
+}
+// One field step of a file-owner leaf path below its binding.
+struct JetCodegenFileOwnerStep {
+    pub name: String
+    pub ty: Type
+}
 enum JetCodegenCleanupAction {
     DeferredCall(thunk: MIRValueID)
     DropPlace(record: JetCodegenDropLive)
+    FileOwner(leaf: JetCodegenFileOwnerLeaf)
 }
 struct JetCodegenCleanupFrame {
     pub owner: MIRScopeID?
@@ -331,6 +345,12 @@ struct JetCodegenBuilder {
     // Every drop-live record the function registered, kept after its frame
     // closes for the last-use pass (jet_codegen_move_last_uses).
     pub drop_live_all: [JetCodegenDropLive]
+    // Function-level drop rows (Rust `LowerCtx::drops`), the cleanup roots
+    // the drop-flag and last-use passes read.
+    pub drops: [MIRDropAction]
+    // Every file-owner leaf place registered for cleanup in this function
+    // (Rust `LowerCtx::file_owner_places`).
+    pub file_owner_places: [MIRPlaceID]
     pub cleanup_frames: [JetCodegenCleanupFrame]
     // The final block (id value) of each shared drop chain, by exit target key.
     pub exit_tails: [String:U64]
@@ -726,6 +746,8 @@ fn jet_codegen_new_builder(function: TFunc, function_index: JetCodegenFunctionIn
         transactions: [JetCodegenTransactionState]{},
         drop_live_places: [JetCodegenDropLive]{},
         drop_live_all: [JetCodegenDropLive]{},
+        drops: [MIRDropAction]{},
+        file_owner_places: [MIRPlaceID]{},
         transaction_cleanup_active: false,
         cleanup_frames: [JetCodegenCleanupFrame]{JetCodegenCleanupFrame{
             owner: None,
@@ -793,6 +815,8 @@ struct JetCodegenFunctionState {
     pub transaction_cleanup_active: Bool
     pub drop_live_places: [JetCodegenDropLive]
     pub drop_live_all: [JetCodegenDropLive]
+    pub drops: [MIRDropAction]
+    pub file_owner_places: [MIRPlaceID]
     pub cleanup_frames: [JetCodegenCleanupFrame]
     pub exit_tails: [String:U64]
     pub exit_value_slots: [JetCodegenExitValueSlot]
@@ -852,6 +876,8 @@ fn jet_codegen_begin_function(builder: &JetCodegenBuilder, function: TFunc) Neve
         transaction_cleanup_active: false,
         drop_live_places: [JetCodegenDropLive]{},
         drop_live_all: [JetCodegenDropLive]{},
+        drops: [MIRDropAction]{},
+        file_owner_places: [MIRPlaceID]{},
         cleanup_frames: [JetCodegenCleanupFrame]{JetCodegenCleanupFrame{
             owner: None,
             depth: 0,
@@ -916,6 +942,8 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder) -> JetCodegenFunctionS
         transaction_cleanup_active: builder.transaction_cleanup_active,
         drop_live_places: builder.drop_live_places,
         drop_live_all: builder.drop_live_all,
+        drops: builder.drops,
+        file_owner_places: builder.file_owner_places,
         cleanup_frames: builder.cleanup_frames,
         exit_tails: builder.exit_tails,
         exit_value_slots: builder.exit_value_slots,
@@ -966,6 +994,8 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, state: JetCod
     builder.transaction_cleanup_active = state.transaction_cleanup_active
     builder.drop_live_places = state.drop_live_places
     builder.drop_live_all = state.drop_live_all
+    builder.drops = state.drops
+    builder.file_owner_places = state.file_owner_places
     builder.cleanup_frames = state.cleanup_frames
     builder.exit_tails = state.exit_tails
     builder.exit_value_slots = state.exit_value_slots
@@ -1041,6 +1071,7 @@ fn jet_codegen_emit(builder: &JetCodegenBuilder, span: Span, ty: Type?, requeste
     instruction := MIRInstruction{id: op_id, span: span, source_line: None, result: result, ty: mir_ty, operation: operation}
     at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen emitted into a missing MIR block")
     &builder.blocks[at].instructions.push(instruction)
+    jet_codegen_set_file_owner_live(&builder, span, operation)
     if operation == {
         .MovePlace(place) -> jet_codegen_set_drop_live(&builder, place, false)
         .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, place, true)
@@ -1064,6 +1095,7 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, span: Span, ty: MIRTyp
     instruction := MIRInstruction{id: op_id, span: span, source_line: None, result: Val(value), ty: Val(ty), operation: operation}
     at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen emitted into a missing MIR block")
     &builder.blocks[at].instructions.push(instruction)
+    jet_codegen_set_file_owner_live(&builder, span, operation)
     if operation == {
         .MovePlace(place) -> jet_codegen_set_drop_live(&builder, place, false)
         .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, place, true)
@@ -1171,23 +1203,18 @@ fn jet_codegen_retain_place_access(builder: &JetCodegenBuilder, place: MIRPlaceI
     }
 }
 
-// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::register_owned_drop
-fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID, ty: Type, ownership: MIROwnership, initialized: Bool) Never! {
-    if ownership.drop == MIRDropKind.NoDrop || jet_codegen_ownership(ty).mode == MIROwnershipMode.Copy -> return
-    identity := "{builder.function.key}|drop-live|{place.value}"
+// The Bool live flag of one cleanup-owned place: a mutable local written
+// false in the entry block, so the flag reads false on every path that never
+// reached the registration (Rust `bind_local` + `clear_live_flag_at_entry`).
+// An exit's drop chain releases every place its frame registers, including
+// ones bound after that exit; entry-block writes dominate every path.
+fn jet_codegen_bind_live_flag(builder: &JetCodegenBuilder, identity: String, name: String, owner_span: Span) -> MIRPlaceID Never! {
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
     live_place := MIRPlaceID{value: stable_id("mir-place", "{identity}|place")}
-    owner_span := builder.current_span
-    loop owner in builder.places {
-        if owner.id == place {
-            owner_span = owner.span
-            break
-        }
-    }
     live_ty := jet_codegen_lower_type_for_function(Type.Bool, builder)
     jet_codegen_push_local(&builder, MIRLocal{
         id: local_id,
-        name: "$drop-live.{place.value}",
+        name: name,
         span: owner_span,
         ty: live_ty,
         place: live_place,
@@ -1208,14 +1235,26 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID
         access: MIRAccess.Write,
         persist_key: None,
     })
-    // The flag reads false on every path that never reached the binding: an
-    // exit's drop chain releases every local its frame registers, including
-    // ones bound after that exit. Entry-block writes dominate every path.
     resume_block := builder.current
     builder.current = builder.entry
     cleared := jet_codegen_emit_value(&builder, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
     _ := jet_codegen_emit(&builder, owner_span, None, MIROperation.WritePlace{place: live_place, value: cleared})
     builder.current = resume_block
+    live_place
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::register_owned_drop
+fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID, ty: Type, ownership: MIROwnership, initialized: Bool) Never! {
+    if ownership.drop == MIRDropKind.NoDrop || jet_codegen_ownership(ty).mode == MIROwnershipMode.Copy -> return
+    owner_span := builder.current_span
+    loop owner in builder.places {
+        if owner.id == place {
+            owner_span = owner.span
+            break
+        }
+    }
+    identity := "{builder.function.key}|drop-live|{place.value}"
+    live_place := jet_codegen_bind_live_flag(&builder, identity, "$drop-live.{place.value}", owner_span)
     record := JetCodegenDropLive{
         place: place,
         live: live_place,
@@ -1230,6 +1269,266 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID
     &builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DropPlace{record: record})
     initial := jet_codegen_emit_value(&builder, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: initialized}})
     _ := jet_codegen_emit(&builder, owner_span, None, MIROperation.WritePlace{place: live_place, value: initial})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::owned_file_paths
+// Every field path from `ty` to a Core file owner it holds by value: the
+// type itself, a tuple field, or a non-computed field of an owned record, in
+// declaration order. A recursive record edge ends its walk.
+fn jet_codegen_owned_file_paths(builder: JetCodegenBuilder, ty: Type, path: &[JetCodegenFileOwnerStep], visiting: &[String], output: &[[JetCodegenFileOwnerStep]]) Never! {
+    if jet_codegen_is_core_file_owner_type(builder, ty) {
+        &output.push(~path)
+        return
+    }
+    if ty == .Tuple(fields) {
+        loop field in fields {
+            &path.push(JetCodegenFileOwnerStep{name: field.name, ty: field.ty})
+            jet_codegen_owned_file_paths(builder, field.ty, &path, &visiting, &output)
+            _ := &path.pop()
+        }
+        return
+    }
+    name := if ty == {
+        .Named(value) | .Apply(value, _) -> value
+        else -> {
+            return
+        }
+    }
+    identity :: jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, name, builder.generic_type_names) ?? {
+        return
+    }
+    if visiting.contains(identity.key) -> return
+    row :: builder.owners.type_def_rows.get(jet_codegen_qualified_function_key(identity.module_identity, identity.name)) ?? {
+        return
+    }
+    definition :: builder.modules[row.module_index].declarations.type_defs[row.definition_index]
+    if definition.ownership == {
+        .Owned | .Move -> {}
+        else -> return
+    }
+    if definition.kind == .Struct(fields, _) {
+        &visiting.push(identity.key)
+        loop field in fields {
+            if field.computed -> next
+            field_ty :: jet_codegen_checked_host_field_type(builder, ty, field.name)
+            &path.push(JetCodegenFileOwnerStep{name: field.name, ty: field_ty})
+            jet_codegen_owned_file_paths(builder, field_ty, &path, &visiting, &output)
+            _ := &path.pop()
+        }
+        _ := &visiting.pop()
+    }
+}
+
+// The instruction that defines `value`, if any block holds it.
+fn jet_codegen_value_instruction(builder: JetCodegenBuilder, value: MIRValueID) -> MIRInstruction? Never! {
+    loop row in builder.blocks {
+        loop instruction in row.instructions {
+            if instruction.result == .Val(result) {
+                if result == value -> return Val(instruction)
+            }
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::binding_borrow_access
+// The access a binding initializer borrows its storage with: a place read or
+// an address-of, seen through moves, tags, projections and phis.
+fn jet_codegen_binding_borrow_access(builder: JetCodegenBuilder, value: MIRValueID, seen: &[MIRValueID]) -> MIRAccess? Never! {
+    if seen.contains(value) -> return None
+    &seen.push(value)
+    instruction :: jet_codegen_value_instruction(builder, value) ?? { return None }
+    if instruction.operation == {
+        .ReadPlace(_) -> Val(MIRAccess.Read)
+        .AddressOf(_, access) -> {
+            if access == {
+                .Read -> Val(MIRAccess.Read)
+                .Write -> Val(MIRAccess.Write)
+                else -> None
+            }
+        }
+        .Move(inner) | .AttachTag(inner, _) -> jet_codegen_binding_borrow_access(builder, inner, &seen)
+        .Field(base, _) | .ProjectMembers(base, _) | .Index(_, base, _, _, _, _, _) -> jet_codegen_binding_borrow_access(builder, base, &seen)
+        .Phi(incoming) -> {
+            loop input in incoming {
+                found :: jet_codegen_binding_borrow_access(builder, input.value, &seen)
+                if found != None -> return found
+            }
+            None
+        }
+        else -> None
+    }
+}
+
+// The file-owner field paths of a binding of `ty` (jet_codegen_owned_file_paths
+// from the binding itself).
+fn jet_codegen_file_owner_paths(builder: JetCodegenBuilder, ty: Type) -> [[JetCodegenFileOwnerStep]] Never! {
+    paths := [[JetCodegenFileOwnerStep]]{}
+    path := [JetCodegenFileOwnerStep]{}
+    visiting := [String]{}
+    jet_codegen_owned_file_paths(builder, ty, &path, &visiting, &paths)
+    paths
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::register_file_owner_binding
+// A binding initialized from a borrow of other storage holds no file owner of
+// its own, including a borrow carried through moves, projections or phis.
+fn jet_codegen_register_file_owner_binding(builder: &JetCodegenBuilder, place: MIRPlaceID, ty: Type, initializer: MIRValueID) Never! {
+    seen := [MIRValueID]{}
+    if jet_codegen_binding_borrow_access(builder, initializer, &seen) != None -> return
+    jet_codegen_register_file_owner(&builder, place, ty)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::register_file_owner
+// Only owned record/tuple storage participates; views, shared storage,
+// containers and recursive back-edges retain their existing lifecycle.
+// Rust reads the binding's MIR type from its place row; callers pass the
+// checked type that row was lowered from.
+fn jet_codegen_register_file_owner(builder: &JetCodegenBuilder, place: MIRPlaceID, ty: Type) Never! {
+    row :: jet_codegen_find_place(builder, place) ?? panic("file owner cleanup has no place")
+    owned := false
+    if row.projections.len() == 0 {
+        if row.base == {
+            .Local(id) -> {
+                loop local in builder.locals {
+                    if local.id == id && local.place == place {
+                        if local.ownership.mode == {
+                            .Owned | .Move -> owned = true
+                            else -> {}
+                        }
+                    }
+                }
+            }
+            .Parameter(value) -> {
+                if jet_codegen_value_instruction(builder, value) == .Val(instruction) {
+                    if instruction.operation == .Parameter(index, _) {
+                        loop parameter in builder.params {
+                            if parameter.index == index && parameter.access == MIRAccess.Move -> owned = true
+                        }
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    if !owned -> return
+    paths :: jet_codegen_file_owner_paths(builder, ty)
+    if paths.len() == 0 -> return
+    jet_codegen_register_file_owner_paths(&builder, place, ty, paths)
+}
+
+fn jet_codegen_register_file_owner_paths(builder: &JetCodegenBuilder, place: MIRPlaceID, ty: Type, paths: [[JetCodegenFileOwnerStep]]) Never! {
+    span := builder.current_span
+    // Deferred bindings unwind in reverse order; record fields unwind in
+    // declaration order within each binding.
+    index := paths.len()
+    loop index > 0 {
+        index -= 1
+        leaf := place
+        owner_type := ty
+        loop step in paths[index] {
+            field := jet_codegen_host_field_id(builder, owner_type, step.name)
+            leaf = jet_codegen_project_field_place(&builder, leaf, span, step.ty, field)
+            owner_type = step.ty
+        }
+        jet_codegen_register_file_owner_leaf(&builder, leaf)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::register_file_owner_leaf
+fn jet_codegen_register_file_owner_leaf(builder: &JetCodegenBuilder, place: MIRPlaceID) Never! {
+    span := builder.current_span
+    identity := "{builder.function.key}|file-owner-live|{place.value}"
+    flag := jet_codegen_bind_live_flag(&builder, identity, "file_owner_live_{place.value}", span)
+    initialized := jet_codegen_emit_value(&builder, span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: flag, value: initialized})
+    jet_codegen_retain_place_access(&builder, place, MIRAccess.Move)
+    &builder.file_owner_places.push(place)
+    if builder.cleanup_frames.len() == 0 -> panic("file owner cleanup registered without an active cleanup frame")
+    frame_index := builder.cleanup_frames.len() - 1
+    &builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.FileOwner{leaf: JetCodegenFileOwnerLeaf{place: place, live: flag}})
+    builder.cleanup_frames[frame_index].explicit = builder.cleanup_frames[frame_index].explicit + 1
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::file_owner_leaves
+// The registered file-owner leaves at or below `place`: the same base, with
+// `place`'s record field path a prefix of the leaf's, innermost frame and
+// latest registration first.
+fn jet_codegen_file_owner_leaves(builder: JetCodegenBuilder, place: MIRPlaceID) -> [JetCodegenFileOwnerLeaf] Never! {
+    leaves := [JetCodegenFileOwnerLeaf]{}
+    if builder.file_owner_places.len() == 0 -> return leaves
+    root :: jet_codegen_find_place(builder, place) ?? { return leaves }
+    frame_index := builder.cleanup_frames.len()
+    loop frame_index > 0 {
+        frame_index -= 1
+        actions :: builder.cleanup_frames[frame_index].actions
+        action_index := actions.len()
+        loop action_index > 0 {
+            action_index -= 1
+            if actions[action_index] == .FileOwner(leaf) {
+                leaf_row :: jet_codegen_find_place(builder, leaf.place) ?? next
+                if root.base != leaf_row.base || root.projections.len() > leaf_row.projections.len() -> next
+                prefix := true
+                loop (depth, projection) in root.projections {
+                    if projection == .Field(field, _) {
+                        if leaf_row.projections[depth] == .Field(leaf_field, _) {
+                            if field != leaf_field -> prefix = false
+                        } else {
+                            prefix = false
+                        }
+                    } else {
+                        prefix = false
+                    }
+                }
+                if prefix -> &leaves.push(leaf)
+            }
+        }
+    }
+    leaves
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit_mir_type_with_ownership
+// (`file_live_places`): moving a place clears the live flag of every file
+// owner at or below it, and writing or replacing it sets them.
+fn jet_codegen_set_file_owner_live(builder: &JetCodegenBuilder, span: Span, operation: MIROperation) Never! {
+    if builder.file_owner_places.len() == 0 -> return
+    place := MIRPlaceID{value: 0}
+    live := false
+    if operation == {
+        .MovePlace(moved) -> place = moved
+        .WritePlace(written, _) | .ReplacePlace(written, _) -> {
+            place = written
+            live = true
+        }
+        else -> return
+    }
+    leaves :: jet_codegen_file_owner_leaves(builder, place)
+    loop leaf in leaves {
+        next_state := jet_codegen_emit_value(&builder, span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: live}})
+        _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: leaf.live, value: next_state})
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit_file_owner_cleanup
+fn jet_codegen_emit_file_owner_cleanup(builder: &JetCodegenBuilder, leaf: JetCodegenFileOwnerLeaf) Never! {
+    span := builder.current_span
+    condition := jet_codegen_emit_value(&builder, span, Type.Bool, MIROperation.ReadPlace{place: leaf.live})
+    drop_block := jet_codegen_new_block(&builder, span, "file.owner.drop")
+    after := jet_codegen_new_block(&builder, span, "file.owner.after-drop")
+    jet_codegen_terminate(&builder, MIRTerminator.Branch{condition: condition, then_target: drop_block, else_target: after})
+    jet_codegen_switch_block(&builder, drop_block)
+    row :: jet_codegen_find_place(builder, leaf.place) ?? panic("file owner cleanup has no place")
+    value := jet_codegen_emit_mir_type(&builder, span, row.ty, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: leaf.place})
+    _ := jet_codegen_emit(&builder, span, None, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+    jet_codegen_terminate(&builder, MIRTerminator.Jump{target: after})
+    jet_codegen_switch_block(&builder, after)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit_file_owner_replacement
+// Assigning over a place first releases every still-live file owner it holds.
+fn jet_codegen_emit_file_owner_replacement(builder: &JetCodegenBuilder, place: MIRPlaceID) Never! {
+    leaves :: jet_codegen_file_owner_leaves(builder, place)
+    loop leaf in leaves -> jet_codegen_emit_file_owner_cleanup(&builder, leaf)
 }
 fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, record: JetCodegenDropLive) Never! {
     if !jet_codegen_current_is_open(builder) -> return
@@ -1259,13 +1558,14 @@ fn jet_codegen_emit_cleanup_action(builder: &JetCodegenBuilder, action: JetCodeg
             _ := jet_codegen_emit(&builder, current_span, None, MIROperation.IndirectCall{callee: thunk, args: [MIRCallArg]{}, type_args: [MIRType]{}})
         }
         .DropPlace(record) -> jet_codegen_emit_drop_cleanup(&builder, record)
+        .FileOwner(leaf) -> jet_codegen_emit_file_owner_cleanup(&builder, leaf)
     }
 }
 
 fn jet_codegen_cleanup_action_is_drop(action: JetCodegenCleanupAction) -> Bool {
     if action == {
         .DropPlace(_) -> true
-        .DeferredCall(_) -> false
+        .DeferredCall(_) | .FileOwner(_) -> false
     }
 }
 

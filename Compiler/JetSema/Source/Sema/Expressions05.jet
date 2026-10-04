@@ -1,0 +1,1783 @@
+// PORT-PENDING 0400 crates-jet-sema-src-sema-checkerinfer-calls-direct-calls-slice-1106: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:1106-2884
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     fn check_call_inner(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
+//RS         if call.name == "measurement"
+//RS             && self.funcs.get(&call.name).is_none()
+//RS             && self.lookup(&call.name).is_none()
+//RS         {
+//RS             return Some(self.check_measurement(call));
+//RS         }
+//RS         if call.name == Syntax::KW_FREEZE
+//RS             && self.funcs.get(&call.name).is_none()
+//RS             && self.lookup(&call.name).is_none()
+//RS         {
+//RS             return Some(self.check_freeze(call));
+//RS         }
+//RS         if call.name == "apply"
+//RS             && self.funcs.get(&call.name).is_none()
+//RS             && self.lookup(&call.name).is_none()
+//RS         {
+//RS             return self.check_callable_policy_apply(call).map(Some);
+//RS         }
+//RS         // D-SHAPE-RESOURCE2=A: `close(^value)` is ambient syntax sugar for
+//RS         // the sole nominal `Close.close(^self)` protocol. It is not a
+//RS         // name-based/free-function cleanup hook.
+//RS         if call.name == Syntax::RESOURCE_CLOSE {
+//RS             if call.args.len() != 1 {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                         "E0104",
+//RS                         format!("`close` takes exactly one resource, got {}", call.args.len()),
+//RS                         "`close` consumes one value through its nominal `Close` implementation and the move marker `^`"
+//RS                             .to_string(),
+//RS                         "write `close(^resource)` with the move marker `^`".to_string(),
+//RS                         Some(call.name_span),
+//RS                     ));
+//RS                 for arg in call.args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return Some(None);
+//RS             }
+//RS             let arg = &mut call.args[0];
+//RS             let ty = self.infer(&mut arg.expr);
+//RS             if arg.convention != AccessConvention::Move {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                         "E0201",
+//RS                         "`close` takes ownership of its resource".to_string(),
+//RS                         "`Close.close(^self)` is consuming through the move marker `^`, so cleanup runs on exactly one owner"
+//RS                             .to_string(),
+//RS                         "write `close(^resource)` with the move marker `^`".to_string(),
+//RS                         Some(arg.span),
+//RS                     ));
+//RS             } else if let Some(ty) = &ty {
+//RS                 let nominal = match ty {
+//RS                     Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+//RS                     Type::String => Some(Syntax::TYPE_STRING),
+//RS                     _ => None,
+//RS                 };
+//RS                 if !nominal.is_some_and(|name| {
+//RS                     self.type_implements_trait_for_name(name, Syntax::TRAIT_CLOSE)
+//RS                 }) {
+//RS                     self.diags.push(e0905(
+//RS                         &ty.name(),
+//RS                         Syntax::TRAIT_CLOSE,
+//RS                         arg.expr.span(),
+//RS                         false,
+//RS                     ));
+//RS                 }
+//RS                 if let Expr::Ident(name, span) = &arg.expr {
+//RS                     if !ty.is_scalar() {
+//RS                         self.mark_moved_by(name.clone(), *span, call.name.clone());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             return Some(None);
+//RS         }
+//RS         // D-NUMOPS1: `wrapping`/`saturating`/`checked` opt-ins wrap a single integer
+//RS         // `+`/`-`/`*`/`/`. A user-defined function of the same name shadows them.
+//RS         if matches!(
+//RS             call.name.as_str(),
+//RS             Syntax::BUILTIN_WRAPPING | Syntax::BUILTIN_SATURATING | Syntax::BUILTIN_CHECKED
+//RS         ) && !self.funcs.contains_key(&call.name)
+//RS         {
+//RS             return Some(self.check_overflow_opt_in(call));
+//RS         }
+//RS         if call.name == Syntax::BUILTIN_APPROX && !self.funcs.contains_key(&call.name) {
+//RS             return self.check_numeric_approx(call).map(Some);
+//RS         }
+//RS         // D-DBG1=A: `debug(value)` is the ambient development trace. It adds
+//RS         // no effect, so it is legal in `-[]>`, `#Memo`, and comptime code.
+//RS         // A user declaration, local, or import of the same name wins.
+//RS         if call.name == Syntax::INTERNAL_DEBUG_TRACE
+//RS             || (call.name == Syntax::BUILTIN_DEBUG
+//RS                 && !self.no_prelude
+//RS                 && !self.funcs.contains_key(&call.name)
+//RS                 && !self.core_item_imports.contains_key(&call.name)
+//RS                 && !self.unqualified.contains_key(&call.name)
+//RS                 && !self.unqualified_file.contains_key(&call.name)
+//RS                 && self.lookup(&call.name).is_none())
+//RS         {
+//RS             return Some(self.check_debug_trace(call));
+//RS         }
+//RS         // D-EFF1: an ambient prelude builtin (`print`/`input`) contributes the `IO`
+//RS         // effect, unless a user function of the same name shadows it (in which
+//RS         // case the edge to that user function is recorded below).
+//RS         if !self.funcs.contains_key(&call.name) {
+//RS             if let Some(e) = builtin_effect(&call.name) {
+//RS                 self.record_effect(e.name(), call.name_span);
+//RS             }
+//RS         }
+//RS         if call.name == Syntax::FOREIGN_PRINTLN || call.name == Syntax::FOREIGN_EPRINTLN {
+//RS             let target = if call.name == Syntax::FOREIGN_EPRINTLN {
+//RS                 "io.eprint"
+//RS             } else {
+//RS                 Syntax::BUILTIN_PRINT
+//RS             };
+//RS             let diagnostic = Diagnostic::error(
+//RS                 "E0037",
+//RS                 format!(
+//RS                     "{} calls it `{}`, not `{}`",
+//RS                     Syntax::LANG_NAME,
+//RS                     target,
+//RS                     call.name
+//RS                 ),
+//RS                 "`print` writes to stdout; `io.eprint` is the stderr twin in `core.term`"
+//RS                     .to_string(),
+//RS                 format!("replace `{}` with `{}`", call.name, target),
+//RS                 Some(call.name_span),
+//RS             )
+//RS             .with_edit(TextEdit {
+//RS                 span: call.name_span,
+//RS                 new_text: target.to_string(),
+//RS             });
+//RS             self.diags.push(diagnostic);
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             return None;
+//RS         }
+//RS 
+//RS         if call.name == Syntax::FOREIGN_OPEN {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0038",
+//RS                 "`open` is not the M10 file API".to_string(),
+//RS                 "M10 uses whole-file helpers in `core.files`, not a bare `open` handle call"
+//RS                     .to_string(),
+//RS                 "import `core.files as fs` and call `fs.read(path)` or `fs.write(path, text)` \
+//RS                      (or `fs.open(path)` for a streaming handle)"
+//RS                     .to_string(),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             return None;
+//RS         }
+//RS 
+//RS         if call.name == Syntax::FOREIGN_GETENV {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0039",
+//RS                 "`getenv` is written `env.get` in Jet".to_string(),
+//RS                 "environment access lives in the `core.sys` module".to_string(),
+//RS                 "import `core.sys as env` and call `env.get(name)`".to_string(),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             return None;
+//RS         }
+//RS 
+//RS         if matches!(
+//RS             call.name.as_str(),
+//RS             Syntax::FOREIGN_ASYNC | Syntax::FOREIGN_AWAIT
+//RS         ) {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0040",
+//RS                 format!(
+//RS                     "`{}` is not in Jet; use the `task` keyword instead",
+//RS                     call.name
+//RS                 ),
+//RS                 "Jet uses blocking tasks and channels, not async/await — simpler and race-free"
+//RS                     .to_string(),
+//RS                 "write `task your_work()` or `task { … }`".to_string(),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             for a in call.args.iter_mut() {
+//RS                 self.infer(&mut a.expr);
+//RS             }
+//RS             return None;
+//RS         }
+//RS 
+//RS         if matches!(
+//RS             call.name.as_str(),
+//RS             Syntax::FOREIGN_MUTEX
+//RS                 | Syntax::FOREIGN_LOCK
+//RS                 | "RwLock"
+//RS                 | "mutex"
+//RS                 | "Semaphore"
+//RS                 | "semaphore"
+//RS         ) {
+//RS             let semaphore = matches!(call.name.as_str(), "Semaphore" | "semaphore");
+//RS             self.diags.push(Diagnostic::error(
+//RS                     "E0041",
+//RS                     if semaphore {
+//RS                         format!(
+//RS                             "`{}` is not in Jet; use a bounded channel as a token pool",
+//RS                             call.name
+//RS                         )
+//RS                     } else {
+//RS                         format!(
+//RS                             "`{}` is not a Jet API; use a channel, or `Shared<T>` with `Condition`",
+//RS                             call.name
+//RS                         )
+//RS                     },
+//RS                     if semaphore {
+//RS                         "each received token admits one worker until that worker sends the token back"
+//RS                             .to_string()
+//RS                     } else {
+//RS                         "tasks pass owned values over channels; when tasks must share memory, `Shared<T>` guards the state under a lock and `Condition` coordinates predicate waits"
+//RS                             .to_string()
+//RS                     },
+//RS                     if semaphore {
+//RS                         "create `channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward"
+//RS                             .to_string()
+//RS                     } else {
+//RS                         "create `channel<T>()` and send owned values, or write `shared value` and edit it through `guard_edit()` (a guard can `wait` on a `Condition`)"
+//RS                             .to_string()
+//RS                     },
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS             for a in call.args.iter_mut() {
+//RS                 self.infer(&mut a.expr);
+//RS             }
+//RS             return None;
+//RS         }
+//RS 
+//RS         // D-NAME-ALIAS1=A / D-PRELUDEX1=A: every readable prelude name
+//RS         // follows the one file-level opt-out. print and input retain their
+//RS         // detailed diagnostics below.
+//RS         if self.no_prelude
+//RS             && call.name != Syntax::BUILTIN_PRINT
+//RS             && call.name != Syntax::BUILTIN_INPUT
+//RS             && !self.funcs.contains_key(&call.name)
+//RS             && self.lookup(&call.name).is_none()
+//RS             && CorePrelude::entry(&call.name).is_some()
+//RS         {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0429",
+//RS                 format!(
+//RS                     "{} is not ambient here — this file opted out with #{}",
+//RS                     call.name,
+//RS                     Syntax::MARKER_NO_PRELUDE
+//RS                 ),
+//RS                 format!(
+//RS                     "#{} closes the readable Core prelude for this file",
+//RS                     Syntax::MARKER_NO_PRELUDE
+//RS                 ),
+//RS                 "write the qualified Core call, or remove #NoPrelude".to_string(),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             return Some(None);
+//RS         }
+//RS 
+//RS         if call.name == Syntax::BUILTIN_CHANNEL
+//RS             && self.funcs.get(&call.name).is_none()
+//RS             && self.lookup(&call.name).is_none()
+//RS         {
+//RS             return Some(self.check_channel(call));
+//RS         }
+//RS 
+//RS         if call.name == Syntax::BUILTIN_PRINT
+//RS             && self.funcs.get(Syntax::BUILTIN_PRINT).is_none()
+//RS             && self.lookup(Syntax::BUILTIN_PRINT).is_none()
+//RS         {
+//RS             if self.no_prelude {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0429",
+//RS                     format!(
+//RS                         "`{}` is not ambient here — this file opted out with `#{}`",
+//RS                         Syntax::BUILTIN_PRINT,
+//RS                         Syntax::MARKER_NO_PRELUDE
+//RS                     ),
+//RS                     format!(
+//RS                         "`#{}` disables the curated prelude auto-imports (`{}` / `{}`)",
+//RS                         Syntax::MARKER_NO_PRELUDE,
+//RS                         Syntax::BUILTIN_PRINT,
+//RS                         Syntax::BUILTIN_INPUT,
+//RS                     ),
+//RS                     format!(
+//RS                         "write `use core.term as io` and call `io.{}(…)`, or remove `#{}`",
+//RS                         Syntax::BUILTIN_PRINT,
+//RS                         Syntax::MARKER_NO_PRELUDE
+//RS                     ),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 for arg in call.args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return Some(None);
+//RS             }
+//RS             if call.args.is_empty() {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0103",
+//RS                     format!(
+//RS                         "`{}` needs at least one thing to print",
+//RS                         Syntax::BUILTIN_PRINT
+//RS                     ),
+//RS                     "printing nothing isn't meaningful".to_string(),
+//RS                     format!("e.g. {}(\"hello\")", Syntax::BUILTIN_PRINT),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 return None;
+//RS             }
+//RS             // D-VERDICT-1321-1: variadic print — every argument renders on
+//RS             // its own line. Each argument passes the same printable checks.
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.borrow_ctx = true; // print borrows via `.jet_show()`
+//RS                 if let Some(t) = self.infer(&mut arg.expr) {
+//RS                     if !(is_printable(&t, self.registry, self.trait_reg)
+//RS                         || is_displayable(&t, self.registry, self.trait_reg))
+//RS                         && !self.is_unit_type(&t)
+//RS                         && !matches!(&t, Type::Named(name) if name == Syntax::TYPE_NEVER)
+//RS                         && !matches!(
+//RS                             &t,
+//RS                             Type::Named(name)
+//RS                                 if name == "Unknown" && !self.registry.contains(name)
+//RS                         )
+//RS                     {
+//RS                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E0112",
+//RS                                     format!("secret-bearing `{}` cannot be printed", t.name()),
+//RS                                     "printing could copy cryptographic secret material into terminal output or logs".to_string(),
+//RS                                     "print a public operation label or key identifier instead".to_string(),
+//RS                                     Some(arg.expr.span()),
+//RS                                 ));
+//RS                         } else if crate::Sema::Diagnostics::is_one_pass_source(&t) {
+//RS                             let fix = crate::Sema::Diagnostics::one_pass_materializer(&t)
+//RS                                     .map_or_else(
+//RS                                         || {
+//RS                                             "consume it with a `loop` and print each item instead"
+//RS                                                 .to_string()
+//RS                                         },
+//RS                                         |call| {
+//RS                                             if crate::Collections::is_iter_type(&t) {
+//RS                                                 format!(
+//RS                                                     "materialize it first: add `{call}` before printing; `.lazy()` or another Iter source enters the one-pass plane"
+//RS                                                 )
+//RS                                             } else {
+//RS                                                 format!(
+//RS                                                     "materialize it first: add `{call}` before printing"
+//RS                                                 )
+//RS                                             }
+//RS                                         },
+//RS                                     );
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E0112",
+//RS                                     format!("`{}` cannot show the one-pass source {}", Syntax::BUILTIN_PRINT, t.show()),
+//RS                                     "reading this value consumes it, so showing it would spend the only pass".to_string(),
+//RS                                     fix,
+//RS                                     Some(arg.expr.span()),
+//RS                                 ));
+//RS                         } else {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0112",
+//RS                                 format!(
+//RS                                     "`{}` doesn't know how to show {}",
+//RS                                     Syntax::BUILTIN_PRINT,
+//RS                                     t.show()
+//RS                                 ),
+//RS                                 "print shows values that have a display".to_string(),
+//RS                                 "print one of its parts instead".to_string(),
+//RS                                 Some(arg.expr.span()),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             return Some(None);
+//RS         }
+//RS 
+//RS         // D-NAME-ALIAS1=A: `input` is prelude-declared — no `use core.term` needed.
+//RS         // Resolves to the same semantics as `io.input`: optional String prompt,
+//RS         // returns Result(String, IOError). Shadowed by any user-defined `input`.
+//RS         // D-PRELUDEX1=A: `#NoPrelude` turns the readable prelude off.
+//RS         if call.name == Syntax::BUILTIN_INPUT
+//RS             && self.funcs.get(Syntax::BUILTIN_INPUT).is_none()
+//RS             && self.lookup(Syntax::BUILTIN_INPUT).is_none()
+//RS         {
+//RS             if self.no_prelude {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0429",
+//RS                     format!(
+//RS                         "`{}` is not ambient here — this file opted out with `#{}`",
+//RS                         Syntax::BUILTIN_INPUT,
+//RS                         Syntax::MARKER_NO_PRELUDE
+//RS                     ),
+//RS                     format!(
+//RS                         "`#{}` disables the curated prelude auto-imports (`{}` / `{}`)",
+//RS                         Syntax::MARKER_NO_PRELUDE,
+//RS                         Syntax::BUILTIN_PRINT,
+//RS                         Syntax::BUILTIN_INPUT,
+//RS                     ),
+//RS                     format!(
+//RS                         "write `use core.term as io` and call `io.{}(…)`, or remove `#{}`",
+//RS                         Syntax::BUILTIN_INPUT,
+//RS                         Syntax::MARKER_NO_PRELUDE
+//RS                     ),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 for arg in call.args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return Some(None);
+//RS             }
+//RS             if call.args.len() > 1 {
+//RS                 self.diags.push(wrong_core_arity(
+//RS                     Syntax::BUILTIN_INPUT,
+//RS                     1,
+//RS                     call.args.len(),
+//RS                     call.name_span,
+//RS                 ));
+//RS             }
+//RS             if let Some(arg) = call.args.get_mut(0) {
+//RS                 self.expect_core_arg(Syntax::BUILTIN_INPUT, 0, &Type::String, arg);
+//RS             }
+//RS             return Some(Some(result_ty(Type::String, io_error_ty())));
+//RS         }
+//RS 
+//RS         if call.name == Syntax::BUILTIN_PANIC
+//RS             && self.funcs.get(Syntax::BUILTIN_PANIC).is_none()
+//RS             && self.lookup(Syntax::BUILTIN_PANIC).is_none()
+//RS         {
+//RS             self.check_panic_call(call);
+//RS             return Some(None);
+//RS         }
+//RS 
+//RS         if call.name == Syntax::BUILTIN_ASSERT
+//RS             && self.funcs.get(Syntax::BUILTIN_ASSERT).is_none()
+//RS             && self.lookup(Syntax::BUILTIN_ASSERT).is_none()
+//RS         {
+//RS             self.check_assert_call(call);
+//RS             return Some(None);
+//RS         }
+//RS 
+//RS         if call.name == Syntax::BUILTIN_ASSERT_EQ {
+//RS             self.check_assert_eq_call(call);
+//RS             return Some(None);
+//RS         }
+//RS 
+//RS         if call.name == Syntax::BUILTIN_FIND
+//RS             && self.in_comptime
+//RS             && self.funcs.get(Syntax::BUILTIN_FIND).is_none()
+//RS             && self.lookup(Syntax::BUILTIN_FIND).is_none()
+//RS         {
+//RS             if call.args.len() != 1 {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0103",
+//RS                     "`find` needs exactly one glob".to_string(),
+//RS                     "`find(glob)` expands one build-time glob inside a `comptime` binding"
+//RS                         .to_string(),
+//RS                     "write `find(\"content/**/*.md\")`".to_string(),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 for arg in call.args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS             self.expect_core_arg(Syntax::BUILTIN_FIND, 0, &Type::String, &mut call.args[0]);
+//RS             return Some(Some(Type::List(Box::new(Type::String))));
+//RS         }
+//RS 
+//RS         if matches!(
+//RS             call.name.as_str(),
+//RS             Syntax::BUILTIN_EMBED_FILE | Syntax::BUILTIN_EMBED_BYTES
+//RS         ) && self.in_comptime
+//RS             && self.funcs.get(&call.name).is_none()
+//RS             && self.lookup(&call.name).is_none()
+//RS         {
+//RS             let builtin = call.name.clone();
+//RS             if call.args.len() != 1 {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0103",
+//RS                     format!("`{builtin}` needs exactly one path"),
+//RS                     format!("`{builtin}(path)` bakes one file into the binary at compile time"),
+//RS                     format!("write `{builtin}(\"motd.txt\")`"),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 for arg in call.args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS             self.expect_core_arg(&builtin, 0, &Type::String, &mut call.args[0]);
+//RS             let ty = if builtin == Syntax::BUILTIN_EMBED_BYTES {
+//RS                 Type::List(Box::new(Type::IntN {
+//RS                     signed: false,
+//RS                     bits: 8,
+//RS                 }))
+//RS             } else {
+//RS                 Type::String
+//RS             };
+//RS             return Some(Some(ty));
+//RS         }
+//RS 
+//RS         // D-LIN1-DROP (ratified 2026-06-25): `drop(x)` deliberately discards a
+//RS         // value by moving it to nowhere — its `Drop` runs. The blessed use is to
+//RS         // satisfy a `#SingleUse` value's consume duty when there is genuinely no
+//RS         // job left to do; that decision must be audited, so `drop` of a
+//RS         // `#SingleUse` value is legal only inside an `#Unsafe("reason")`
+//RS         // region/fn (the reason IS the audit note) — otherwise E0143. Shadowed
+//RS         // by any user `drop` fn or local of that name.
+//RS         if call.name == Syntax::BUILTIN_CONSUME
+//RS             && self.funcs.get(Syntax::BUILTIN_CONSUME).is_none()
+//RS             && self.lookup(Syntax::BUILTIN_CONSUME).is_none()
+//RS         {
+//RS             if call.args.len() != 1 {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0103",
+//RS                     format!("`{}` discards exactly one value", Syntax::BUILTIN_CONSUME),
+//RS                     "`drop` throws a single value away, running its cleanup".to_string(),
+//RS                     format!("e.g. {}(x)", Syntax::BUILTIN_CONSUME),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 for a in call.args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(None);
+//RS             }
+//RS             self.infer(&mut call.args[0].expr);
+//RS             if let Expr::Ident(name, span) = &call.args[0].expr {
+//RS                 let single_use = self
+//RS                     .lookup(name)
+//RS                     .map(|info| info.single_use_span.is_some())
+//RS                     .unwrap_or(false);
+//RS                 if single_use && !self.in_unsafe {
+//RS                     self.diags.push(e0143_drop_unaudited(name, *span));
+//RS                 }
+//RS                 // The value is given away for real — discharges the consume duty
+//RS                 // (E0140/E0141) and prevents any later reuse (E0121). Mark it
+//RS                 // consumed even on the E0143 path so the unaudited-drop error is
+//RS                 // not buried under a cascade E0140 "unconsumed" at scope end.
+//RS                 self.mark_moved_by(name.clone(), *span, call.name.clone());
+//RS             }
+//RS             return Some(None);
+//RS         }
+//RS 
+//RS         // D-TOOL4 (E2-M11): `expect(x)` — test-only builtin that wraps a value
+//RS         // for snapshot testing. The expression `expect(x).snapshot()` is the
+//RS         // full form; `.snapshot()` is handled in the method-call path below.
+//RS         if call.name == Syntax::BUILTIN_EXPECT {
+//RS             if call.args.len() != 1 {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E2901",
+//RS                     format!(
+//RS                         "`{}` needs exactly one value to test",
+//RS                         Syntax::BUILTIN_EXPECT
+//RS                     ),
+//RS                     "snapshot testing wraps one value at a time".to_string(),
+//RS                     format!("e.g. {}(my_value).snapshot()", Syntax::BUILTIN_EXPECT),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS             } else {
+//RS                 self.infer(&mut call.args[0].expr);
+//RS             }
+//RS             // Returns a Named type marker so the `.snapshot()` call can detect it.
+//RS             return Some(Some(Type::Named("__JetExpect__".to_string())));
+//RS         }
+//RS 
+//RS         if self.funcs.get(&call.name).is_none() {
+//RS             if let Some(info) = self.lookup(&call.name) {
+//RS                 if matches!(info.ty, Type::Fn { .. }) {
+//RS                     let name_span = call.name_span;
+//RS                     let mut callee = Box::new(Expr::Ident(call.name.clone(), name_span));
+//RS                     let mut args = std::mem::take(&mut call.args);
+//RS                     let end = args
+//RS                         .last()
+//RS                         .map(|a| a.expr.span().end)
+//RS                         .unwrap_or(name_span.end);
+//RS                     let span = Span::new(name_span.start, end);
+//RS                     let ret = self.infer_call_value(&mut callee, &mut args, span);
+//RS                     call.args = args;
+//RS                     return Some(ret);
+//RS                 }
+//RS             }
+//RS             if let Some((alias, mod_idx, fn_name)) = self.resolve_import_call_path(&call.name) {
+//RS                 self.inferred_call_type_args = None;
+//RS                 let result = self.infer_import_call(
+//RS                     &alias,
+//RS                     mod_idx,
+//RS                     &fn_name,
+//RS                     call.name_span,
+//RS                     call.name_span,
+//RS                     &call.type_args,
+//RS                     &mut call.args,
+//RS                     &mut call.resolved_ret,
+//RS                 );
+//RS                 self.record_inferred_call_type_args(&mut call.type_args);
+//RS                 return Some(result);
+//RS             }
+//RS             // D-NAME-WALK1=A: an inline body overlays its enclosing file's
+//RS             // unqualified maps with its own imports. The local scope wins;
+//RS             // the fallback preserves ordinary file-level `use` behavior.
+//RS             let inline_mangled = self
+//RS                 .inline_module
+//RS                 .as_ref()
+//RS                 .and_then(|module| {
+//RS                     self.inline_unqualified
+//RS                         .get(&(module.clone(), call.name.clone()))
+//RS                 })
+//RS                 .cloned();
+//RS             // D-MOD3: check unqualified inline-module imports (e.g. `use math.clamp`).
+//RS             if let Some(mangled) =
+//RS                 inline_mangled.or_else(|| self.unqualified.get(&call.name).cloned())
+//RS             {
+//RS                 if self.funcs.contains_key(&mangled)
+//RS                     && self.name_ledger.exported(self.module_idx, &mangled)
+//RS                 {
+//RS                     self.record_import_alias_reference(&call.name, call.name_span);
+//RS                 }
+//RS                 let alias = mangled.split("__").next().unwrap_or(&mangled).to_string();
+//RS                 self.inferred_call_type_args = None;
+//RS                 let result = self.infer_code_module_call(
+//RS                     &alias,
+//RS                     &mangled,
+//RS                     call.name_span,
+//RS                     call.name_span,
+//RS                     &call.type_args,
+//RS                     &mut call.args,
+//RS                     &mut call.resolved_ret,
+//RS                 );
+//RS                 self.record_inferred_call_type_args(&mut call.type_args);
+//RS                 return Some(result);
+//RS             }
+//RS             let inline_file = self
+//RS                 .inline_module
+//RS                 .as_ref()
+//RS                 .and_then(|module| {
+//RS                     self.inline_unqualified_file
+//RS                         .get(&(module.clone(), call.name.clone()))
+//RS                 })
+//RS                 .cloned();
+//RS             // D-MOD3: check unqualified file-module imports (e.g. `use math.clamp` for a file module).
+//RS             if let Some((fn_name, mod_idx)) =
+//RS                 inline_file.or_else(|| self.unqualified_file.get(&call.name).cloned())
+//RS             {
+//RS                 self.inferred_call_type_args = None;
+//RS                 let result = self.infer_import_call(
+//RS                     &call.name,
+//RS                     mod_idx,
+//RS                     &fn_name,
+//RS                     call.name_span,
+//RS                     call.name_span,
+//RS                     &call.type_args,
+//RS                     &mut call.args,
+//RS                     &mut call.resolved_ret,
+//RS                 );
+//RS                 self.record_inferred_call_type_args(&mut call.type_args);
+//RS                 return Some(result);
+//RS             }
+//RS         }
+//RS 
+//RS         // D-SIMD2 / D-LINALG1: `F32x4(a,b,c,d)` / `Vec3(x,y,z)` / `Mat3(…)` —
+//RS         // positional construction of a built-in math value type. Each argument is
+//RS         // elaborated against the component type (so `1.0` becomes `F32` for a
+//RS         // `F32x4`) and checked in order; arity is fixed by the type.
+//RS         if self.funcs.get(&call.name).is_none() && !self.registry.contains(&call.name) {
+//RS             if let Some(arg_types) = math_constructor_arg_types(&call.name) {
+//RS                 let arity = arg_types.len();
+//RS                 if call.args.len() != arity {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0103",
+//RS                         format!(
+//RS                             "`{}` takes exactly {} component{}, got {}",
+//RS                             call.name,
+//RS                             arity,
+//RS                             if arity == 1 { "" } else { "s" },
+//RS                             call.args.len()
+//RS                         ),
+//RS                         format!(
+//RS                             "`{}` is a built-in {} type — construct it from its {} components",
+//RS                             call.name,
+//RS                             if is_simd_lane_type(&call.name) {
+//RS                                 "SIMD lane"
+//RS                             } else {
+//RS                                 "linear-algebra"
+//RS                             },
+//RS                             arity
+//RS                         ),
+//RS                         format!("write `{}({})`", call.name, vec!["…"; arity].join(", ")),
+//RS                         Some(call.name_span),
+//RS                     ));
+//RS                     for a in call.args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return Some(Some(Type::Named(call.name.clone())));
+//RS                 }
+//RS                 for (i, want) in arg_types.iter().enumerate() {
+//RS                     let old = self.expected_type.replace(want.clone());
+//RS                     let got = self.infer(&mut call.args[i].expr);
+//RS                     self.expected_type = old;
+//RS                     if let Some(at) = got {
+//RS                         if at != *want {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0128",
+//RS                                 format!(
+//RS                                     "component {} of `{}` must be `{}`, got `{}`",
+//RS                                     i + 1,
+//RS                                     call.name,
+//RS                                     want.name(),
+//RS                                     at.name()
+//RS                                 ),
+//RS                                 format!(
+//RS                                     "every component of `{}` is a `{}`",
+//RS                                     call.name,
+//RS                                     want.name()
+//RS                                 ),
+//RS                                 format!("write a `{}` value here", want.name()),
+//RS                                 Some(call.args[i].expr.span()),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 return Some(Some(Type::Named(call.name.clone())));
+//RS             }
+//RS         }
+//RS 
+//RS         // D-ZIPPAD1: free `zip`/`zip_short`/`zip_pad` calls are built-in
+//RS         // sequence family calls when no user function shadows the name.
+//RS         // Check them before ordinary function lookup so arbitrary input
+//RS         // counts keep their concrete element types.
+//RS         if self.funcs.get(&call.name).is_none()
+//RS             && self.lookup(&call.name).is_none()
+//RS             && matches!(call.name.as_str(), "zip" | "zip_short" | "zip_pad")
+//RS         {
+//RS             if let Some(result) = self.check_zip_family_free(call) {
+//RS                 return Some(result);
+//RS             }
+//RS         }
+//RS 
+//RS         // D-DECIMAL1: `Decimal("12.34")` — exact base-10 parse.
+//RS         if self.funcs.get(&call.name).is_none()
+//RS             && !self.registry.contains(&call.name)
+//RS             && call.name == crate::Syntax::TYPE_DECIMAL
+//RS         {
+//RS             if call.args.len() != 1 {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0103",
+//RS                     format!(
+//RS                         "`Decimal` takes exactly one argument, got {}",
+//RS                         call.args.len()
+//RS                     ),
+//RS                     "`Decimal` parses an exact base-10 decimal from a `String`".to_string(),
+//RS                     "write `Decimal(\"12.34\")`".to_string(),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 for a in call.args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(Some(Type::Named(call.name.clone())));
+//RS             }
+//RS             self.expect_core_arg("Decimal", 0, &Type::String, &mut call.args[0]);
+//RS             return Some(Some(Type::Named(call.name.clone())));
+//RS         }
+//RS 
+//RS         // D-TYPE2-IMAG1=A: `Complex(real, imaginary)` is the canonical
+//RS         // constructor used by the unit-literal rewrite and remains
+//RS         // available for explicit expert construction.
+//RS         if self.funcs.get(&call.name).is_none()
+//RS             && !self.registry.contains(&call.name)
+//RS             && call.name == crate::Syntax::TYPE_COMPLEX
+//RS         {
+//RS             if call.args.len() != 2 {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0103",
+//RS                     format!(
+//RS                         "`Complex` takes exactly two arguments, got {}",
+//RS                         call.args.len()
+//RS                     ),
+//RS                     "`Complex` takes the real part first and the imaginary part second".to_string(),
+//RS                     "write `Complex(real, imaginary)`".to_string(),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 for a in call.args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(Some(Type::Named(call.name.clone())));
+//RS             }
+//RS             self.expect_core_arg("Complex", 0, &Type::Float, &mut call.args[0]);
+//RS             self.expect_core_arg("Complex", 1, &Type::Float, &mut call.args[1]);
+//RS             return Some(Some(Type::Named(call.name.clone())));
+//RS         }
+//RS 
+//RS         // D-SHAPE-CONVERT1=A: `Type(value)` is not a conversion alias.
+//RS         // Distinct and unit values use the same destination-owned spelling
+//RS         // as every other explicit conversion.
+//RS         if self.funcs.get(&call.name).is_none() {
+//RS             if let Some(base_ty) = self.registry.distinct_base(&call.name).cloned() {
+//RS                 let method = Syntax::conversion_method_for_source(&base_ty.name());
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0128",
+//RS                     format!("`{}(value)` is not a distinct conversion", call.name),
+//RS                     "explicit conversions are owned by the destination type and name their source"
+//RS                         .to_string(),
+//RS                     format!("write `{}.{method}(value)`", call.name),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS                 for arg in call.args.iter_mut() {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS         }
+//RS 
+//RS         // D-ZIPPAD1: free zip-family calls are compiler-owned variadic
+//RS         // forms. Keep them ahead of the ordinary unknown-function error;
+//RS         // a user declaration still wins through the shadowing check in
+//RS         // `check_zip_family_free`.
+//RS         if let Some(result) = self.check_zip_family_free(call) {
+//RS             return Some(result);
+//RS         }
+//RS 
+//RS         // D-CLAIM-WORD1=B: keep the retired spelling teachable without
+//RS         // preserving it as a second assertion mechanism.
+//RS         if matches!(call.name.as_str(), "require" | "require_eq")
+//RS             && self.funcs.get(&call.name).is_none()
+//RS             && self.lookup(&call.name).is_none()
+//RS         {
+//RS             let replacement = if call.name == "require" {
+//RS                 "assert"
+//RS             } else {
+//RS                 "assert_eq"
+//RS             };
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0102",
+//RS                 format!("`{}` is a retired assertion spelling", call.name),
+//RS                 "Jet has one assertion family: `assert` and `assert_eq`".to_string(),
+//RS                 format!("write `{replacement}` instead"),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             return Some(None);
+//RS         }
+//RS 
+//RS         let Some(mut sig) = self.funcs.get(&call.name).cloned() else {
+//RS             let mut fix = format!(
+//RS                 "define it first ({} {}() {{ ... }}), or call one that exists",
+//RS                 Syntax::KW_FN,
+//RS                 call.name
+//RS             );
+//RS             let mut candidates = Vec::new();
+//RS             let prelude_cands: Vec<&str> = if self.no_prelude {
+//RS                 Vec::new()
+//RS             } else {
+//RS                 CorePrelude::names().collect()
+//RS             };
+//RS             for cand in self
+//RS                 .funcs
+//RS                 .keys()
+//RS                 .map(|s| s.as_str())
+//RS                 .chain(prelude_cands.iter().copied())
+//RS             {
+//RS                 let d = edit_distance(&call.name, cand);
+//RS                 // Distance 0 is the rejected spelling itself: suggesting it
+//RS                 // (and the `with_edit` that rewrites the call to the same
+//RS                 // text) would tell the reader to write what just failed to
+//RS                 // resolve (#2002). This keeps the unique-minimum policy
+//RS                 // below; only the echo is dropped.
+//RS                 if d > 0 && d <= 2 && !candidates.iter().any(|(known, _)| *known == cand) {
+//RS                     candidates.push((cand, d));
+//RS                 }
+//RS             }
+//RS             let suggestion = candidates
+//RS                 .iter()
+//RS                 .map(|(_, distance)| *distance)
+//RS                 .min()
+//RS                 .map(|distance| {
+//RS                     candidates
+//RS                         .iter()
+//RS                         .filter(|(_, candidate_distance)| *candidate_distance == distance)
+//RS                         .map(|(candidate, _)| *candidate)
+//RS                         .collect::<Vec<_>>()
+//RS                 })
+//RS                 .filter(|matches| matches.len() == 1)
+//RS                 .map(|matches| matches[0]);
+//RS             if let Some(cand) = suggestion {
+//RS                 fix = format!("did you mean `{}`?", cand);
+//RS             }
+//RS             let mut diagnostic = Diagnostic::error(
+//RS                     "E0102",
+//RS                     format!("nothing named `{}` exists here", call.name),
+//RS                     format!(
+//RS                         "only functions that have been defined (or built in, like `{}` / `{}`) can be called",
+//RS                         Syntax::BUILTIN_PRINT, Syntax::BUILTIN_INPUT
+//RS                     ),
+//RS                     fix,
+//RS                     Some(call.name_span),
+//RS                 );
+//RS             if let Some(cand) = suggestion {
+//RS                 diagnostic = diagnostic.with_edit(TextEdit {
+//RS                     span: call.name_span,
+//RS                     new_text: cand.to_string(),
+//RS                 });
+//RS             }
+//RS             self.diags.push(diagnostic);
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             return None;
+//RS         };
+//RS         self.record_current_function_reference(&call.name, call.name_span);
+//RS 
+//RS         if let Some(dep) = sig.deprecation.as_ref() {
+//RS             self.check_deprecation(&call.name, dep, call.name_span);
+//RS         }
+//RS 
+//RS         self.check_foreign_transaction_call(&sig, &call.name, call.name_span);
+//RS 
+//RS         // D-EFF1: record the call-graph edge for transitive effect inference.
+//RS         // A foreign (`extern`) callee has an un-inspectable body, so it forces
+//RS         // the maximal effect set; a Jet callee's effects flow in via its edge.
+//RS         if sig.is_extern {
+//RS             if let Some(effect) = &sig.foreign_effect_root {
+//RS                 self.record_open_memory_dispatch(call.name_span, "foreign function body");
+//RS                 self.record_effect(effect, call.name_span);
+//RS             } else {
+//RS                 self.record_maximal(call.name_span);
+//RS             }
+//RS         } else {
+//RS             self.record_edge(call.name.clone(), call.name_span);
+//RS         }
+//RS 
+//RS         // D-FFI-CAP1/E0702: use the shared safe/#Unsafe gate for direct
+//RS         // calls and qualified/module calls alike.
+//RS         if let Some(diagnostic) = crate::Sema::FFI::foreign_call_boundary_error(
+//RS             &sig,
+//RS             &call.name,
+//RS             self.in_unsafe,
+//RS             call.name_span,
+//RS         ) {
+//RS             self.diags.push(diagnostic);
+//RS         }
+//RS 
+//RS         // D-APILABEL1=A: one binder resolves labels, zones, reordering, and
+//RS         // skipped defaults. It rewrites `call.args` into declaration order
+//RS         // and marks each argument with where the caller wrote it, so
+//RS         // lowering can keep the source evaluation order.
+//RS         let params = crate::Sema::CallBinder::bind_params_from_sig(&sig);
+//RS         let bound = crate::Sema::CallBinder::bind_call_args(
+//RS             &call.name,
+//RS             &params,
+//RS             &mut call.args,
+//RS             call.name_span,
+//RS             &mut self.diags,
+//RS         );
+//RS         self.register_binder_refs(&call.args);
+//RS         if bound.is_none() {
+//RS             // The call's arguments never resolved to parameters, so
+//RS             // arity and per-position type errors below would all be
+//RS             // about slots that do not exist. Report the argument
+//RS             // expressions' own problems and stop.
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             let (_, return_type) =
+//RS                 self.checked_return_types(sig.return_type.clone(), sig.is_extern);
+//RS             return Some(Some(return_type));
+//RS         }
+//RS 
+//RS         // E3211 (card #436): a `String` literal with a known interior NUL
+//RS         // byte can't cross into a C-boundary function — `CString::new`
+//RS         // would fail (C strings are NUL-terminated, not length-prefixed).
+//RS         // Run this after the shared binder so a reordered labelled call is
+//RS         // checked against the declaration slot it actually reaches. A
+//RS         // runtime-built String is caught by the codegen panic instead (see
+//RS         // `Codegen/CModule.rs`'s `NUL_PANIC`).
+//RS         if sig.is_c_abi {
+//RS             for (index, arg) in call.args.iter().enumerate() {
+//RS                 // The binder has already rewritten `call.args` into
+//RS                 // declaration order. `source_index` is only the caller's
+//RS                 // original position for evaluation-order lowering.
+//RS                 let declaration_index = index;
+//RS                 let is_string_param =
+//RS                     matches!(sig.params.get(declaration_index), Some((_, Type::String)));
+//RS                 if !is_string_param {
+//RS                     continue;
+//RS                 }
+//RS                 if let Expr::Str(parts, span) = &arg.expr {
+//RS                     let literal: Option<String> = parts
+//RS                         .iter()
+//RS                         .map(|p| match p {
+//RS                             StrPart::Lit(s) => Some(s.clone()),
+//RS                             StrPart::Interp(..) => None,
+//RS                         })
+//RS                         .collect();
+//RS                     if let Some(text) = literal {
+//RS                         if text.contains('\0') {
+//RS                             self.diags.push(e3211(*span));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         let variadic = sig.param_variadic.last().copied().unwrap_or(false);
+//RS         // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic
+//RS         // (`...Trait` / `...[A, B]`) can't be packed into one `[T]` list —
+//RS         // its elements can have different concrete types, so there's no single
+//RS         // element type a real list literal could carry. Bound-check the tail
+//RS         // arguments (E1313) against a temporarily *removed* slice so the
+//RS         // ordinary per-index checking below (moves, borrows, type-compat) never
+//RS         // sees them and never re-`infer`s them; `sig` is shrunk (a local, owned
+//RS         // clone) the same way, so the two arg counts still line up. The tail is
+//RS         // spliced back onto `call.args` right before this function returns, so
+//RS         // codegen reads the arity straight off `call.args.len()` same as any
+//RS         // other call.
+//RS         let bound_variadic = variadic
+//RS             .then(|| sig.variadic_bounds.clone())
+//RS             .flatten()
+//RS             .or_else(|| {
+//RS                 if !variadic {
+//RS                     return None;
+//RS                 }
+//RS                 match sig.params.last() {
+//RS                     Some((_, Type::List(elem))) => match elem.as_ref() {
+//RS                         Type::Named(n) if self.trait_reg.is_trait_name(n) => Some(vec![n.clone()]),
+//RS                         _ => None,
+//RS                     },
+//RS                     _ => None,
+//RS                 }
+//RS             });
+//RS         let mut bound_variadic_tail: Option<Vec<crate::AST::CallArg>> = None;
+//RS         if let Some(bounds) = bound_variadic {
+//RS             let fixed = sig.params.len().saturating_sub(1);
+//RS             if call.args.len() < fixed {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0104",
+//RS                     format!(
+//RS                         "`{}` expects at least {} argument{}, got {}",
+//RS                         call.name,
+//RS                         fixed,
+//RS                         if fixed == 1 { "" } else { "s" },
+//RS                         call.args.len()
+//RS                     ),
+//RS                     "every fixed parameter must receive a value before the variadic tail"
+//RS                         .to_string(),
+//RS                     format!("check the definition of `{}`", call.name),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS             }
+//RS             let mut tail = if call.args.len() > fixed {
+//RS                 call.args.split_off(fixed)
+//RS             } else {
+//RS                 Vec::new()
+//RS             };
+//RS             self.check_variadic_bound_tail(call, &sig, &mut tail, &bounds);
+//RS             sig.params.pop();
+//RS             sig.param_info.pop();
+//RS             sig.defaults.pop();
+//RS             sig.param_variadic.pop();
+//RS             bound_variadic_tail = Some(tail);
+//RS         } else {
+//RS             if variadic {
+//RS                 self.normalize_variadic_call(call, &sig);
+//RS             } else if call.args.iter().any(|a| a.spread) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                         "E1312",
+//RS                         format!("`{}` doesn't accept a spread argument", call.name),
+//RS                         "call spread `f(...xs)` only works when the callee has a final `...` rest parameter"
+//RS                             .to_string(),
+//RS                         "pass arguments individually, or call a function whose last parameter is variadic"
+//RS                             .to_string(),
+//RS                         Some(call.name_span),
+//RS                     ));
+//RS                 for arg in call.args.iter_mut() {
+//RS                     if arg.spread {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                 }
+//RS             }
+//RS 
+//RS             if call.args.len() != sig.params.len() {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0104",
+//RS                     format!(
+//RS                         "`{}` expects {} argument{}, got {}",
+//RS                         call.name,
+//RS                         sig.params.len(),
+//RS                         if sig.params.len() == 1 { "" } else { "s" },
+//RS                         call.args.len()
+//RS                     ),
+//RS                     "every argument must match a parameter".to_string(),
+//RS                     format!("check the definition of `{}`", call.name),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS 
+//RS         let fn_type_params = self
+//RS             .trait_reg
+//RS             .fn_params
+//RS             .get(&call.name)
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let mut call_access = self.call_access_frame();
+//RS         let mut generic_subst = HashMap::new();
+//RS         let mut pre_inferred: Vec<Option<Type>> = Vec::new();
+//RS         if !fn_type_params.is_empty() && !call.type_args.is_empty() {
+//RS             if call.type_args.len() != fn_type_params.len() {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0119",
+//RS                     format!(
+//RS                         "`{}` expects {} type argument{}, got {}",
+//RS                         call.name,
+//RS                         fn_type_params.len(),
+//RS                         if fn_type_params.len() == 1 { "" } else { "s" },
+//RS                         call.type_args.len()
+//RS                     ),
+//RS                     "a generic call must provide one type for every declared type parameter"
+//RS                         .to_string(),
+//RS                     format!(
+//RS                         "write {} with {} type argument{}",
+//RS                         call.name,
+//RS                         fn_type_params.len(),
+//RS                         if fn_type_params.len() == 1 { "" } else { "s" }
+//RS                     ),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS             } else {
+//RS                 for (param, actual) in fn_type_params.iter().zip(&call.type_args) {
+//RS                     let actual = self.resolve_type(actual.clone());
+//RS                     // D-CALLBACK-ERR1=A: `Never` fills a failure-domain
+//RS                     // parameter (`apply<Never>(plain)`).
+//RS                     if !actual.is_never() {
+//RS                         self.check_declared_type(&actual, call.name_span);
+//RS                     }
+//RS                     for bound in &param.bounds {
+//RS                         if !self.type_satisfies_bound(&actual, bound) {
+//RS                             let diagnostic =
+//RS                                 generic_bound_failure(self, &actual, bound, call.name_span);
+//RS                             self.diags.push(diagnostic);
+//RS                         }
+//RS                     }
+//RS                     generic_subst.insert(param.name.clone(), actual);
+//RS                 }
+//RS             }
+//RS         } else if !fn_type_params.is_empty() {
+//RS             let inference = self.infer_generic_call_args(
+//RS                 &sig,
+//RS                 &fn_type_params,
+//RS                 &mut call.args,
+//RS                 &mut call_access,
+//RS                 call.name_span,
+//RS                 !sig.is_extern,
+//RS             );
+//RS             if inference.complete {
+//RS                 if let Some((ty, bound)) = fn_type_params.iter().find_map(|param| {
+//RS                     let ty = inference.subst.get(&param.name)?;
+//RS                     param
+//RS                         .bounds
+//RS                         .iter()
+//RS                         .find(|bound| !self.type_satisfies_bound(ty, bound))
+//RS                         .map(|bound| (ty, bound))
+//RS                 }) {
+//RS                     let diagnostic = generic_bound_failure(self, ty, bound, call.name_span);
+//RS                     self.diags.push(diagnostic);
+//RS                 }
+//RS             }
+//RS             pre_inferred = inference.pre_inferred;
+//RS             generic_subst = inference.subst;
+//RS         } else if !call.type_args.is_empty() {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0119",
+//RS                 format!("`{}` is not generic", call.name),
+//RS                 "only functions declared with type parameters accept call-site type arguments"
+//RS                     .to_string(),
+//RS                 format!("call {} without type arguments", call.name),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS         }
+//RS         // D-GENERIC-CALL1=A: carry a successful inferred instantiation on the
+//RS         // call node exactly like an explicit `call<T>(...)` spelling. Codegen
+//RS         // and the resident TIR use this one resolved fact to record and lower
+//RS         // the concrete call shape; leaving it local to sema makes a callable
+//RS         // parameter retain `Fn(T) U` and loses the inferred `U` downstream.
+//RS         if call.type_args.is_empty()
+//RS             && generic_subst.len() == fn_type_params.len()
+//RS             && !generic_subst.is_empty()
+//RS         {
+//RS             call.type_args = fn_type_params
+//RS                 .iter()
+//RS                 .map(|param| {
+//RS                     generic_subst
+//RS                         .get(&param.name)
+//RS                         .cloned()
+//RS                         .expect("complete generic substitution has every type parameter")
+//RS                 })
+//RS                 .collect();
+//RS         }
+//RS         let effective_params: Vec<(AccessConvention, Type)> = if generic_subst.is_empty() {
+//RS             sig.params.clone()
+//RS         } else {
+//RS             sig.params
+//RS                 .iter()
+//RS                 .map(|(c, t)| (*c, self.trait_reg.instantiate_type(t, &generic_subst)))
+//RS                 .collect()
+//RS         };
+//RS         let args_pre_inferred = !fn_type_params.is_empty() && pre_inferred.len() == call.args.len();
+//RS 
+//RS         for (i, arg) in call.args.iter_mut().enumerate() {
+//RS             if !sig.is_extern {
+//RS                 // A `&name` argument grants the named place itself, so it is a
+//RS                 // borrow position: the owning-slot copy below must never turn
+//RS                 // a `&` parameter passed onward into `~name` (E0202). A write
+//RS                 // parameter is a borrow slot too: a bare name reaching it must
+//RS                 // stay a name so the missing `&` is reported, never copied.
+//RS                 if arg.convention == AccessConvention::Write {
+//RS                     self.borrow_ctx = true;
+//RS                 }
+//RS                 match effective_params.get(i) {
+//RS                     Some((AccessConvention::Write, _)) => self.borrow_ctx = true,
+//RS                     Some((AccessConvention::Read, pty)) if !pty.is_scalar() => {
+//RS                         self.borrow_ctx = true;
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS             } else if let Some((_, pty)) = effective_params.get(i) {
+//RS                 if !pty.is_scalar() {
+//RS                     arg.flags.implicit_clone = true;
+//RS                 }
+//RS             }
+//RS             // D-MEM1/S2 vs D-MEM-COPYSEM1. The owning-slot materialization
+//RS             // below rewrites a bare name into `Expr::Copy`, and E0209 /
+//RS             // E0201 are stated over exactly that bare name ("a named binding passed
+//RS             // where it would be silently cloned — Move-param arg without the move
+//RS             // marker `^`, the registered Diagnostics.jet row). A parameter-rooted
+//RS             // name reaches `implicit_copy_target`'s
+//RS             // borrowed-place arm, so the copy landed BEFORE the convention
+//RS             // check read the name, and the hard error the law demands was
+//RS             // never reported — a clone became silent, which is the one thing
+//RS             // D-MEM1/S2 forbids. `~name` and `^name` are not bare names
+//RS             // (`Expr::Copy` / `AccessConvention::Move`), so the caller's own
+//RS             // ownership decision is still recognized and still exempt.
+//RS             let bare_arg_name = match &arg.expr {
+//RS                 Expr::Ident(name, span) => Some((name.clone(), *span)),
+//RS                 _ => None,
+//RS             };
+//RS             let saved_exp = self.expected_type.clone();
+//RS             let saved_esc = self.lambda_escapes;
+//RS             let callback_boundary = effective_params.get(i).is_some_and(|(_, ty)| {
+//RS                 crate::Sema::FFI::is_callback_boundary_param(sig.is_c_abi, ty)
+//RS             });
+//RS             if let Some((param_conv, param_ty)) = effective_params.get(i) {
+//RS                 // The enclosing expectation belongs to the call, not to its
+//RS                 // arguments: a parameter the rules below give no slot fact is
+//RS                 // checked without one, so a caller's Result tail carrier cannot
+//RS                 // keep a `T Never!` argument call's carrier.
+//RS                 self.expected_type = None;
+//RS                 if matches!(param_conv, AccessConvention::Move) {
+//RS                     // D-MEM-COPYSEM1: a move parameter is an owning slot.
+//RS                     // Give read-only views the same expected destination type
+//RS                     // as every other owning store so infer_checked can insert
+//RS                     // the shared implicit-copy node.
+//RS                     self.expected_type = Some(param_ty.clone());
+//RS                 }
+//RS                 if matches!(param_ty, Type::Fn { .. }) {
+//RS                     self.expected_type = Some(param_ty.clone());
+//RS                     self.lambda_escapes =
+//RS                         matches!(param_conv, AccessConvention::Move) || callback_boundary;
+//RS                 } else if matches!(
+//RS                     param_ty,
+//RS                     Type::Int
+//RS                         | Type::IntN { .. }
+//RS                         | Type::Float
+//RS                         | Type::Float32
+//RS                         | Type::InlineRange { .. }
+//RS                 ) {
+//RS                     // D-SG9/D-TYPE2-DEFAULT1: let a numeric literal argument adopt the
+//RS                     // parameter's carrier or width and be checked at the literal.
+//RS                     self.expected_type = Some(param_ty.clone());
+//RS                 } else if matches!(param_ty, Type::Named(_) | Type::Option(_) | Type::Result { .. }) {
+//RS                     // D-ENUMDOT2=A: named/optional type so `.Variant` can
+//RS                     // resolve from context. D-FAIL-CARRIER1=A: a `T !E`
+//RS                     // parameter is the carrier itself; without this slot
+//RS                     // fact, a fallible argument auto-propagates into the
+//RS                     // caller's default `Err` and the callee never sees it.
+//RS                     self.expected_type = Some(param_ty.clone());
+//RS                 } else if crate::Sema::CheckerCore::is_core_view_generic(param_ty) {
+//RS                     // D-MEM-COPYSEM1=A: a `View`/`ViewMut`/`Pin` parameter is a
+//RS                     // borrowed-window slot, not an owning one. The slot fact has to
+//RS                     // reach inference: without it a wrapper around the window
+//RS                     // (`Val(v) ?? v`, an optional payload) is treated as an owning
+//RS                     // slot and materialized into `[T]` by `infer_owning_value`,
+//RS                     // which both drops the window's loan and makes the argument
+//RS                     // unassignable to its own parameter. Method arguments already
+//RS                     // carry the slot fact (`CheckerItems.rs:935` propagates the
+//RS                     // whole parameter type), so this is the same rule, not a new one.
+//RS                     self.expected_type = Some(param_ty.clone());
+//RS                 }
+//RS             }
+//RS             // D-EFF2 (callback param bound): snapshot the effect accumulator
+//RS             // before walking a function-typed argument so the callback's own
+//RS             // effect contribution (the delta) can be checked against the
+//RS             // parameter's declared bound after the walk.
+//RS             let cb_bound: Option<Vec<(String, Span)>> = match effective_params.get(i) {
+//RS                 Some((
+//RS                     _,
+//RS                     Type::Fn {
+//RS                         effect_bound: Some(b),
+//RS                         ..
+//RS                     },
+//RS                 )) => Some(b.clone()),
+//RS                 _ => None,
+//RS             };
+//RS             let cb_snapshot = cb_bound.as_ref().map(|_| {
+//RS                 (
+//RS                     self.fx_direct.clone(),
+//RS                     self.fx_edges.clone(),
+//RS                     self.fx_maximal,
+//RS                 )
+//RS             });
+//RS             let memory_multiplier = self.memory_control_multiplier;
+//RS             if matches!(effective_params.get(i), Some((_, Type::Fn { .. }))) {
+//RS                 self.memory_control_multiplier = None;
+//RS             }
+//RS             let arg_ty = if args_pre_inferred {
+//RS                 let inferred = pre_inferred.get(i).and_then(|t| t.clone());
+//RS                 if let (Some((AccessConvention::Move, param_ty)), Some(source_ty)) =
+//RS                     (effective_params.get(i), inferred.as_ref())
+//RS                 {
+//RS                     let param_ty = self.resolve_type(param_ty.clone());
+//RS                     if !self.copies_explicit() {
+//RS                         if let Some(target) = self.implicit_copy_target(&arg.expr, source_ty) {
+//RS                             if target == param_ty && self.is_cloneable_type(&target) {
+//RS                                 Some(self.insert_implicit_copy(&mut arg.expr, source_ty, &target))
+//RS                             } else {
+//RS                                 inferred
+//RS                             }
+//RS                         } else {
+//RS                             inferred
+//RS                         }
+//RS                     } else {
+//RS                         inferred
+//RS                     }
+//RS                 } else {
+//RS                     inferred
+//RS                 }
+//RS             } else {
+//RS                 self.with_call_access(&mut call_access, |checker| {
+//RS                     if let Some((param_conv, param_ty)) = effective_params.get(i) {
+//RS                         checker.check_call_argument_access(
+//RS                             arg,
+//RS                             *param_conv,
+//RS                             param_ty,
+//RS                             !sig.is_extern,
+//RS                         );
+//RS                     }
+//RS                     // Move sites are diagnosed as E0219 (pin/change), not E0220.
+//RS                     let suppress = checker.suppress_partial_move_root_read;
+//RS                     if arg.convention == AccessConvention::Move {
+//RS                         checker.suppress_partial_move_root_read = true;
+//RS                     }
+//RS                     let inferred = checker.infer(&mut arg.expr);
+//RS                     checker.suppress_partial_move_root_read = suppress;
+//RS                     checker.check_call_argument_captures(&arg.expr);
+//RS                     inferred
+//RS                 })
+//RS             };
+//RS             if sig.is_pure
+//RS                 && effective_params
+//RS                     .get(i)
+//RS                     .is_some_and(|(_, ty)| crate::Sema::Diagnostics::is_clock_type(ty))
+//RS                 && arg_ty
+//RS                     .as_ref()
+//RS                     .is_some_and(|ty| !crate::Sema::Diagnostics::is_deterministic_clock_type(ty))
+//RS             {
+//RS                 self.diags.push(crate::Sema::e3403(
+//RS                     &format!("an unproven Clock passed to pure `{}`", call.name),
+//RS                     Some(arg.expr.span()),
+//RS                 ));
+//RS             }
+//RS             self.memory_control_multiplier = memory_multiplier;
+//RS             if callback_boundary {
+//RS                 let managed = sig
+//RS                     .callback_transport
+//RS                     .as_deref()
+//RS                     .is_some_and(|transport| transport != "none");
+//RS                 let safe = match &arg.expr {
+//RS                     Expr::Ident(callback, _) => {
+//RS                         self.callback_function_is_safe(callback)
+//RS                             || arg_ty.as_ref().is_some_and(|ty| {
+//RS                                 crate::Sema::FFI::cpp_callback_abi_type(ty).is_some()
+//RS                             })
+//RS                     }
+//RS                     Expr::Lambda(lam) if managed => {
+//RS                         crate::Sema::foreign_managed_callback_lambda(lam)
+//RS                     }
+//RS                     Expr::Lambda(lam) => crate::Sema::foreign_thread_safe_lambda(lam),
+//RS                     _ => false,
+//RS                 };
+//RS                 let metadata_complete = !managed
+//RS                     || (sig.callback_plan_digest.as_deref().is_some_and(|digest| !digest.is_empty())
+//RS                         && sig
+//RS                             .callback_identity
+//RS                             .as_deref()
+//RS                             .is_some_and(|identity| !identity.is_empty())
+//RS                         && sig.foreign_effect_root.as_deref() == Some("FFI.C"));
+//RS                 if safe && metadata_complete {
+//RS                     arg.flags.c_callback_symbol = true;
+//RS                     arg.flags.c_callback_function_key = match &arg.expr {
+//RS                         Expr::Ident(callback, _) => self.callback_function_key(callback),
+//RS                         Expr::Lambda(..) => None,
+//RS                         _ => None,
+//RS                     };
+//RS                     arg.flags.c_callback_managed = managed;
+//RS                     arg.flags.c_callback_plan_digest = sig.callback_plan_digest.clone();
+//RS                     arg.flags.c_callback_identity = sig.callback_identity.clone();
+//RS                 } else if let Some((_, param_ty)) = effective_params.get(i) {
+//RS                     self.diags.push(if managed && !metadata_complete {
+//RS                         crate::Sema::FFI::callback_contract_error(param_ty, arg.expr.span())
+//RS                     } else {
+//RS                         crate::Sema::FFI::e3203(param_ty, arg.expr.span())
+//RS                     });
+//RS                 }
+//RS             }
+//RS             self.expected_type = saved_exp;
+//RS             self.lambda_escapes = saved_esc;
+//RS             let Some((param_conv, param_ty)) = effective_params.get(i) else {
+//RS                 continue;
+//RS             };
+//RS             // D-EFF2: a function value passed to a function-typed parameter flows
+//RS             // its effects through to this caller (transparent flow-through).
+//RS             if matches!(param_ty, Type::Fn { .. }) {
+//RS                 self.attribute_fn_arg(&arg.expr);
+//RS             }
+//RS             // D-EFF2 (callback param bound): record the obligation now that the
+//RS             // callback's effects are in the accumulator (including the edge added
+//RS             // by `attribute_fn_arg` for a named-fn callback). Checked post-solve.
+//RS             if let (Some(bound), Some((bd, be, bm))) = (&cb_bound, &cb_snapshot) {
+//RS                 self.record_callback_obligation(bound, bd, be, *bm, arg.expr.span());
+//RS             }
+//RS             // D-SHAPE-PLACE1=A: `&place` is a name followed by field, index, or
+//RS             // range projections; only a temporary or call result lacks a place.
+//RS             let write_needs_a_place = arg.convention == AccessConvention::Write
+//RS                 && crate::Sema::Diagnostics::expr_root_ident(&arg.expr).is_none();
+//RS             // A range window is fixed-length: it fills a list write parameter
+//RS             // only when the callee is proven never to resize that list.
+//RS             let write_range_window = arg.convention == AccessConvention::Write
+//RS                 && matches!(arg.expr, Expr::Slice { .. })
+//RS                 && !self
+//RS                     .fixed_length_write_params
+//RS                     .contains(&(call.name.clone(), i));
+//RS             if write_needs_a_place {
+//RS                 self.diags
+//RS                     .push(crate::Sema::Diagnostics::write_place_required(arg.span));
+//RS             } else if write_range_window {
+//RS                 self.diags.push(
+//RS                     crate::Sema::Diagnostics::write_range_window_argument(arg.span),
+//RS                 );
+//RS             }
+//RS 
+//RS             if let Some(arg_ty) = &arg_ty {
+//RS                 let param_ty = self.resolve_type(param_ty.clone());
+//RS                 let mut arg_ty = self.resolve_type(arg_ty.clone());
+//RS                 if *param_conv == AccessConvention::Write
+//RS                     && matches!(
+//RS                         &param_ty,
+//RS                         Type::Apply { name, .. }
+//RS                             if name == crate::Syntax::TYPE_SHARED_GUARD
+//RS                     )
+//RS                     && !matches!(
+//RS                         &arg_ty,
+//RS                         Type::Tagged { marker, .. }
+//RS                             if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit))
+//RS                     )
+//RS                     && !matches!(
+//RS                         &arg.expr,
+//RS                         Expr::Ident(name, _)
+//RS                             if self.lookup(name).is_some_and(|info| {
+//RS                                 info.param_conv == Some(AccessConvention::Write)
+//RS                             })
+//RS                     )
+//RS                 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0205",
+//RS                             "a read `SharedGuard` cannot enter a write helper".to_string(),
+//RS                             "the helper can edit through this parameter, so its caller must hold an exclusive Shared guard".to_string(),
+//RS                             "create the guard with `guard_edit()` before passing it with the write-access marker `&`"
+//RS                                 .to_string(),
+//RS                             Some(arg.expr.span()),
+//RS                         ));
+//RS                 }
+//RS                 if param_ty != arg_ty
+//RS                     && self.implicitly_convert_unit(&mut arg.expr, &param_ty, &arg_ty)
+//RS                 {
+//RS                     arg_ty = param_ty.clone();
+//RS                 }
+//RS                 if *param_conv != AccessConvention::Write
+//RS                     && param_ty != arg_ty
+//RS                     && arg_ty.numeric_widening_to(&param_ty).is_some()
+//RS                 {
+//RS                     self.widen_numeric_expr(&mut arg.expr, &arg_ty, &param_ty);
+//RS                     arg_ty = param_ty.clone();
+//RS                 }
+//RS                 // D-OPT-LIFT1=A: a plain payload fills a `T?` parameter.
+//RS                 arg_ty = self.lift_optional_argument(&mut arg.expr, arg_ty, &param_ty, *param_conv);
+//RS                 let reads_expiring_secret_loan = arg.convention == AccessConvention::Read
+//RS                     && crate::Sema::Diagnostics::expiring_secret_loan_matches(&param_ty, &arg_ty);
+//RS                 // E0202 already told the writer this argument needs a place or
+//RS                 // a whole list; a follow-up type mismatch on the same span is noise.
+//RS                 let reported = write_needs_a_place
+//RS                     || write_range_window
+//RS                     || reads_expiring_secret_loan
+//RS                     || self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
+//RS                 // D-FIXARR1: [T#N] widens to [T] at a call site — compatible but codegen
+//RS                 // will emit .to_vec() on the argument.
+//RS                 let fixed_widens = matches!((&param_ty, &arg_ty),
+//RS                         (Type::List(pe), Type::FixedList { elem: ae, .. })
+//RS                             if pe == ae && Type::obligations_satisfy(pe, ae));
+//RS                 let union_widens = matches!(
+//RS                     &param_ty,
+//RS                     Type::Union(members) if members.iter().any(|m| {
+//RS                         m == &arg_ty && Type::obligations_satisfy(m, &arg_ty)
+//RS                     })
+//RS                 );
+//RS                 let exact_or_obligation_compatible =
+//RS                     if matches!(&param_ty, Type::Fn { .. }) && matches!(&arg_ty, Type::Fn { .. }) {
+//RS                         fn_types_compatible(&param_ty, &arg_ty)
+//RS                             && Type::obligations_satisfy(&param_ty, &arg_ty)
+//RS                     } else {
+//RS                         arg_ty == param_ty && Type::obligations_satisfy(&param_ty, &arg_ty)
+//RS                     };
+//RS                 // S48: a concrete value meets a trait-typed parameter and is
+//RS                 // boxed invisibly (`TCallArg::box_as_trait` at lowering).
+//RS                 let boxes_as_trait = self.trait_slot_accepts(&param_ty, &arg_ty);
+//RS                 let compatible = exact_or_obligation_compatible
+//RS                     || fixed_widens
+//RS                     || union_widens
+//RS                     || boxes_as_trait
+//RS                     || reads_expiring_secret_loan;
+//RS                 if boxes_as_trait {
+//RS                     // The box owns the concrete value, exactly as a trait-object
+//RS                     // list element does (`infer_owned_list_element` →
+//RS                     // `note_move_if_direct_ident`), so a direct name gives its
+//RS                     // value away here. A caller that needs to keep it writes
+//RS                     // `~c` (the copy marker) — no clone is ever silent (D-MEM1/S2).
+//RS                     self.note_move_if_direct_ident(&arg.expr, &format!("`{}`", call.name));
+//RS                 }
+//RS                 if !reported && !compatible {
+//RS                     // D-TYPEDTEXT1=D: a plain runtime `String` reaching a `SQL`/
+//RS                     // `HTML` parameter — teach the injection-safety fix instead of
+//RS                     // a generic E0112.
+//RS                     if let Some(diag) = typed_text_mismatch(&param_ty, &arg_ty, arg.expr.span()) {
+//RS                         self.diags.push(diag);
+//RS                     } else {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0112",
+//RS                             format!(
+//RS                                 "`{}` wants {} for argument {}, but this is {}",
+//RS                                 call.name,
+//RS                                 param_ty.show(),
+//RS                                 i + 1,
+//RS                                 arg_ty.show()
+//RS                             ),
+//RS                             "every argument must match its parameter's type".to_string(),
+//RS                             type_fix_hint(&param_ty, &arg_ty),
+//RS                             Some(arg.expr.span()),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS 
+//RS             // D-LIN1 / E0142: a `#SingleUse` value may only be moved/consumed. If
+//RS             // it reaches a parameter that does not take ownership (`^`), the call
+//RS             // would borrow it (`&`/`view`/read) or copy it (an implicit clone) —
+//RS             // both are forbidden, since the value has exactly one use to give.
+//RS             if !matches!(param_conv, AccessConvention::Move) {
+//RS                 if let Expr::Ident(name, span) = &arg.expr {
+//RS                     let is_single_use = self
+//RS                         .lookup(name)
+//RS                         .map(|info| info.single_use_span.is_some())
+//RS                         .unwrap_or(false);
+//RS                     if is_single_use {
+//RS                         self.diags.push(e0142_aliased(name, &call.name, *span));
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS             }
+//RS 
+//RS             match (param_conv, arg.convention) {
+//RS                 (AccessConvention::Move, AccessConvention::Read) => {
+//RS                     if let Some((name, span)) = &bare_arg_name {
+//RS                         if type_is_copy(param_ty) {
+//RS                             // Copy values cross an owning parameter by bits.
+//RS                         } else if !self.is_resource_type(param_ty)
+//RS                             && self.is_cloneable_type(param_ty)
+//RS                         {
+//RS                             arg.flags.implicit_clone = true;
+//RS                             // D-MEM1/S2 (was D-L0201 lint): a hard error now,
+//RS                             // regardless of liveness — no clone is ever silent.
+//RS                             let diag = self.e0209_implicit_clone(
+//RS                                 format!("implicit clone of `{}`", name),
+//RS                                 format!("`{}` expects to take ownership of this value", call.name),
+//RS                                 name,
+//RS                                 *span,
+//RS                             );
+//RS                             self.diags.push(diag);
+//RS                         } else {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E0201",
+//RS                                     format!(
+//RS                                         "`{}` needs the move marker `^` here — this value can't be copied",
+//RS                                         call.name,
+//RS                                     ),
+//RS                                     format!(
+//RS                                         "parameter {} takes ownership through the move marker `^`; passing `{}` without that marker would have to copy it, but this type can't be copied",
+//RS                                         i + 1,
+//RS                                         name
+//RS                                     ),
+//RS                                     format!(
+//RS                                         "write the move marker `^` (`{}{}`) to move ownership to `{}`",
+//RS                                         Syntax::SIGIL_MOVE,
+//RS                                         name,
+//RS                                         call.name
+//RS                                     ),
+//RS                                     Some(*span),
+//RS                                 ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 (AccessConvention::Move, AccessConvention::Move) => {
+//RS                     if self.reject_noncanonical_move_place(
+//RS                         &arg.expr,
+//RS                         arg_ty.as_ref(),
+//RS                         &call.name,
+//RS                         arg.span,
+//RS                     ) {
+//RS                         continue;
+//RS                     }
+//RS                     // The value is given away for real.
+//RS                     if let Expr::Ident(name, span) = &arg.expr {
+//RS                         if !type_is_copy(param_ty) {
+//RS                             self.mark_moved_by(name.clone(), *span, call.name.clone());
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 (AccessConvention::Write, AccessConvention::Read) => {
+//RS                     if let Expr::Ident(name, span) = &arg.expr {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                                 "E0202",
+//RS                                 format!(
+//RS                                     "parameter `{}` requires the write-access marker `&` at the call site",
+//RS                                     name
+//RS                                 ),
+//RS                                 format!(
+//RS                                     "`{}` needs to edit this value with the write-access marker `&`; passing it without that marker grants only read access",
+//RS                                     call.name
+//RS                                 ),
+//RS                                 format!(
+//RS                                     "write the write-access marker `&` (`{}{}`) when calling `{}`",
+//RS                                     Syntax::SIGIL_WRITE,
+//RS                                     name,
+//RS                                     call.name
+//RS                                 ),
+//RS                                 Some(*span),
+//RS                             ));
+//RS                     }
+//RS                 }
+//RS                 (AccessConvention::Write, AccessConvention::Write) => {
+//RS                     // `&x` / `&x.field[i]` at the call site: the root binding
+//RS                     // must be changeable.
+//RS                     let root = crate::Sema::Diagnostics::expr_root_ident(&arg.expr).map(|name| {
+//RS                         let span = match &arg.expr {
+//RS                             Expr::Ident(_, span) => *span,
+//RS                             _ => arg.span,
+//RS                         };
+//RS                         (name.to_string(), span)
+//RS                     });
+//RS                     if let Some((name, span)) = root.as_ref() {
+//RS                         if let Some(info) = self.lookup(name) {
+//RS                             if !info.mutable {
+//RS                                 let mut diagnostic = Diagnostic::error(
+//RS                                     "E0111",
+//RS                                     format!(
+//RS                                         "`{}` was made with `{}`, so it can't be changed",
+//RS                                         name,
+//RS                                         Syntax::SIGIL_BIND_IMMUT
+//RS                                     ),
+//RS                                     format!(
+//RS                                         "`{}` will change this value, so it must be mutable (`{}`)",
+//RS                                         call.name,
+//RS                                         Syntax::SIGIL_BIND_MUT
+//RS                                     ),
+//RS                                     format!(
+//RS                                         "declare it with `{} {} ...`",
+//RS                                         name,
+//RS                                         Syntax::SIGIL_BIND_MUT
+//RS                                     ),
+//RS                                     Some(*span),
+//RS                                 );
+//RS                                 if let Some(sigil_span) = info.binding_sigil_span {
+//RS                                     diagnostic = diagnostic.with_edit(TextEdit {
+//RS                                         span: sigil_span,
+//RS                                         new_text: Syntax::SIGIL_BIND_MUT.to_string(),
+//RS                                     });
+//RS                                 }
+//RS                                 self.diags.push(diagnostic);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 (AccessConvention::Read | AccessConvention::Write, AccessConvention::Move) => {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0203",
+//RS                             "a value was passed with the move marker `^` to a parameter that does not consume".to_string(),
+//RS                             "only parameters declared with the move marker `^` accept a moved value at the call site"
+//RS                                 .to_string(),
+//RS                             "remove the move marker `^`, or declare the parameter with that marker to take ownership".to_string(),
+//RS                             Some(arg.span),
+//RS                         ));
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS 
+//RS             self.check_write_arg_change(arg);
+//RS 
+//RS             if self.loop_depth > 0 {
+//RS                 if let Expr::Ident(name, span) = &arg.expr {
+//RS                     if let Some(info) = self.lookup(name) {
+//RS                         if matches!(info.ty, Type::Shared(_)) {
+//RS                             arg.flags.shared_auto_clone = true;
+//RS                             self.record_memory_event(crate::Sema::MemoryEvent::new(
+//RS                                 crate::Sema::MemoryEventKind::RetainRelease,
+//RS                                 *span,
+//RS                                 format!("loop use of `{name}` auto-retains a shared reference"),
+//RS                             ));
+//RS                             self.diags.push(Diagnostic::lint(
+//RS                                 "L0202",
+//RS                                 format!(
+//RS                                     "auto-cloned `{}` inside a loop; consider hoisting or caching",
+//RS                                     name
+//RS                                 ),
+//RS                                 "shared handles are cloned when used across a loop boundary"
+//RS                                     .to_string(),
+//RS                                 format!("hoist `{}` before the loop, or clone once outside", name),
+//RS                                 Some(*span),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         self.check_param_view_from_requirements(&sig, &call.args);
+//RS         // D-ANY-JAI1: put the (already fully checked) trait-bounded variadic
+//RS         // tail back so codegen sees the real call shape.
+//RS         if let Some(tail) = bound_variadic_tail {
+//RS             call.args.extend(tail);
+//RS         }
+//RS 
+//RS         let resolved_declared = sig.return_type.clone().map(|return_type| {
+//RS             if generic_subst.is_empty() {
+//RS                 return_type
+//RS             } else {
+//RS                 self.trait_reg
+//RS                     .instantiate_type(&return_type, &generic_subst)
+//RS             }
+//RS         });
+//RS         let (resolved_ret, effective_ret) =
+//RS             self.checked_return_types(resolved_declared, sig.is_extern);
+//RS         // Keep the callee's declared return fact on the call node. This is
+//RS         // distinct from the effective failure carrier returned below: a plain
+//RS         // callee return is non-fallible, while `!E`/`Outcome` remains fallible.
+//RS         call.resolved_ret = Some(resolved_ret);
+//RS         Some(Some(effective_ret))
+//RS     }
+//RS }
+// END-PORT-PENDING 0400 crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:1106-2884
+

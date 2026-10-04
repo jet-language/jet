@@ -1,0 +1,131 @@
+// PORT-PENDING 0066 crates-jet-foundation-src-hex-module-group: crates/jet-foundation/src/LiveLifecycle.rs:1-127
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn now_ms() -> u64 {
+//RS     std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .ok()
+//RS         .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS /// Tier-neutral live publication lifecycle. Payload ownership and execution
+//RS /// remain in each adapter; generation, cancellation, and publication rules do
+//RS /// not.
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetLiveLifecycle {
+//RS     pub generation: u64,
+//RS     pub active: bool,
+//RS     pub dirty: bool,
+//RS     pub error: String,
+//RS     pub fresh_at_ms: u64,
+//RS     pub invalidation_cause: String,
+//RS     pub refreshing: bool,
+//RS     pub cancelled: bool,
+//RS }
+//RS 
+//RS impl JetLiveLifecycle {
+//RS     pub fn active(now_ms: u64) -> Self {
+//RS         Self {
+//RS             generation: 1,
+//RS             active: true,
+//RS             dirty: false,
+//RS             error: String::new(),
+//RS             fresh_at_ms: now_ms,
+//RS             invalidation_cause: String::new(),
+//RS             refreshing: false,
+//RS             cancelled: false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn active_now() -> Self {
+//RS         Self::active(now_ms())
+//RS     }
+//RS 
+//RS     pub fn error(error: &str) -> Self {
+//RS         Self {
+//RS             generation: 0,
+//RS             active: false,
+//RS             dirty: false,
+//RS             error: error.to_string(),
+//RS             fresh_at_ms: 0,
+//RS             invalidation_cause: String::new(),
+//RS             refreshing: false,
+//RS             cancelled: false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn is_current(&self, generation: u64) -> bool {
+//RS         self.active && !self.cancelled && self.generation == generation
+//RS     }
+//RS 
+//RS     pub fn invalidate(&mut self, cause: &str) -> bool {
+//RS         if !self.active {
+//RS             return false;
+//RS         }
+//RS         self.generation = self.generation.saturating_add(1);
+//RS         self.dirty = true;
+//RS         self.cancelled = false;
+//RS         self.error.clear();
+//RS         self.invalidation_cause = cause.to_string();
+//RS         true
+//RS     }
+//RS 
+//RS     pub fn begin_refresh(&mut self, generation: u64) -> bool {
+//RS         if !self.is_current(generation) || self.refreshing {
+//RS             return false;
+//RS         }
+//RS         self.refreshing = true;
+//RS         true
+//RS     }
+//RS 
+//RS     pub fn publish(&mut self, generation: u64, fresh_at_ms: u64) -> bool {
+//RS         let current = self.is_current(generation);
+//RS         self.refreshing = false;
+//RS         if !current {
+//RS             return false;
+//RS         }
+//RS         self.dirty = false;
+//RS         self.error.clear();
+//RS         self.fresh_at_ms = fresh_at_ms;
+//RS         true
+//RS     }
+//RS 
+//RS     pub fn fail(&mut self, generation: u64, error: String) -> bool {
+//RS         let current = self.is_current(generation);
+//RS         self.refreshing = false;
+//RS         if !current {
+//RS             return false;
+//RS         }
+//RS         self.error = error;
+//RS         self.dirty = true;
+//RS         true
+//RS     }
+//RS 
+//RS     pub fn cancel(&mut self) -> bool {
+//RS         if !self.active {
+//RS             return false;
+//RS         }
+//RS         self.generation = self.generation.saturating_add(1);
+//RS         self.dirty = true;
+//RS         self.refreshing = false;
+//RS         self.cancelled = true;
+//RS         self.invalidation_cause = "cancelled".to_string();
+//RS         true
+//RS     }
+//RS 
+//RS     pub fn close(&mut self) -> bool {
+//RS         if !self.active {
+//RS             return false;
+//RS         }
+//RS         self.active = false;
+//RS         self.refreshing = false;
+//RS         self.cancelled = true;
+//RS         true
+//RS     }
+//RS 
+//RS     pub fn freshness_ms(&self) -> u64 {
+//RS         now_ms().saturating_sub(self.fresh_at_ms)
+//RS     }
+//RS }
+// END-PORT-PENDING 0066 crates/jet-foundation/src/LiveLifecycle.rs:1-127
+

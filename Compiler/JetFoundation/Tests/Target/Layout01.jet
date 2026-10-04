@@ -1,0 +1,74 @@
+// Rust: crates/jet-foundation/src/Layout.rs:1212
+fn layout01_test_field(name: String, ty: Type) -> Field Never! {
+    Field{is_pub: true, is_package_pub: false, name: name,
+        name_span: Span{start: 0, end: 0}, ty: ty, ty_span: Span{start: 0, end: 0},
+        serde_markers: [Marker]{}, redact: false, computed: None,
+        default: None, default_ct: None}
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:1228
+fn layout01_test_structure(layout: StructLayout, fields: [Field]) -> StructDef Never! {
+    StructDef{span: Span{start: 0, end: 0}, is_pub: true, is_package_pub: false,
+        name: "Packet", name_span: Span{start: 0, end: 0},
+        type_params: [TypeParam]{}, fields: fields, state: None,
+        methods: [Func]{}, cli_bindings: [CLICommandBinding]{},
+        trait_impls: [TraitImplBlock]{}, derives: [NamedSpan]{},
+        auto_derive_default: false, is_published_schema: false,
+        published_schema_span: None, is_single_use: false, single_use_span: None,
+        is_must_use: false, must_use_span: None, layout: Val(layout), layout_span: None,
+        serde_markers: [Marker]{}, type_markers: [Marker]{},
+        validate_block: [Stmt]{}, validate_span: None}
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:1259
+#Test("c_layout_reports_padding_and_offsets") {
+    definition :: layout01_test_structure(StructLayout.C, [Field]{
+        layout01_test_field("tag", Type.IntN{signed: false, bits: 8}),
+        layout01_test_field("value", Type.IntN{signed: false, bits: 64}),
+        layout01_test_field("tail", Type.IntN{signed: false, bits: 8}),
+    })
+    engine :: jet_target_layout_engine([Item]{}, jet_target_layout_from_triple("x86_64-unknown-linux-gnu", PKG_BUILD_STAMP_TOOLCHAIN))
+    facts :: jet_target_layout_struct_facts(engine, definition)
+    assert_eq(facts.bytes, Val(ByteLayout{size: 24, alignment: 8, stride: 24}))
+    assert_eq(facts.fields[0].offset, Val(0))
+    assert_eq(facts.fields[1].offset, Val(8))
+    assert_eq(facts.fields[2].offset, Val(16))
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:1305
+#Test("aligned_c_layout_uses_requested_alignment_for_size_and_stride") {
+    definition :: layout01_test_structure(StructLayout.CAligned{alignment: 64, target: false}, [Field]{
+        layout01_test_field("value", Type.IntN{signed: true, bits: 32}),
+    })
+    engine :: jet_target_layout_engine([Item]{}, jet_target_layout_from_triple("x86_64-unknown-linux-gnu", PKG_BUILD_STAMP_TOOLCHAIN))
+    facts :: jet_target_layout_struct_facts(engine, definition)
+    assert_eq(facts.bytes, Val(ByteLayout{size: 64, alignment: 64, stride: 64}))
+    assert_eq(facts.fields[0].offset, Val(0))
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:1336
+#Test("atomic_scalar_set_includes_signed_i64") {
+    assert(jet_target_layout_atomic_scalar_type(Type.Int))
+    assert(jet_target_layout_atomic_scalar_type(Type.IntN{signed: true, bits: 64}))
+    assert(jet_target_layout_atomic_scalar_type(Type.IntN{signed: false, bits: 64}))
+    assert(!jet_target_layout_atomic_scalar_type(Type.IntN{signed: true, bits: 16}))
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:1353
+#Test("default_layout_keeps_byte_facts_absent") {
+    definition := layout01_test_structure(StructLayout.C, [Field]{layout01_test_field("value", Type.Int)})
+    definition.layout = None
+    engine :: jet_target_layout_engine_host([Item]{})
+    facts :: jet_target_layout_struct_facts(engine, definition)
+    assert_eq(facts.bytes, None)
+    assert_eq(facts.fields[0].size, None)
+}
+
+// Rust: crates/jet-foundation/src/Layout.rs:1363
+#Test("target_pointer_width_changes_physical_facts") {
+    definition :: layout01_test_structure(StructLayout.Columnar, [Field]{layout01_test_field("label", Type.String)})
+    engine :: jet_target_layout_engine([Item]{}, jet_target_layout_from_triple("wasm32-unknown-unknown", PKG_BUILD_STAMP_TOOLCHAIN))
+    facts :: jet_target_layout_struct_facts(engine, definition)
+    assert_eq(facts.bytes, Val(ByteLayout{size: 12, alignment: 4, stride: 12}))
+    assert_eq(facts.fields[0].size, Val(12))
+}

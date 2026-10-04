@@ -63,6 +63,7 @@ use jet_foundation.[
     ast_struct,
     diagnostic_from_registry,
     diagnostic_with_edit,
+    type_name,
 ]
 use jet_lexer.[
     TOKEN_AMP,
@@ -2138,6 +2139,12 @@ fn parser_apply_type_markers(value: &StructDef, markers: [Marker]) Never! {
 fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) -> TraitDef {
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "after `trait`")
+    // Rust Parser/Items/marker_groups.rs:1999-2006.
+    supertraits := [String]{}
+    if parser_current_kind(&state) == TOKEN_COLON {
+        parser_bump(&state)
+        supertraits = parser_parse_supertrait_bounds(&state)
+    }
     parser_expect(&state, TOKEN_LBRACE, "`{{` before trait members")
     methods := [TraitMethodSig]{}
     assoc_types := [NamedSpan]{}
@@ -2172,7 +2179,62 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after trait members")
-    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, assoc_types: assoc_types, methods: methods}
+    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, methods: methods}
+}
+
+// Rust Parser/Types.rs:528-600: a single bound or bracketed trait list.
+fn parser_parse_supertrait_bounds(state: &JetParserState) -> [String] {
+    bounds := [String]{}
+    if parser_current_kind(&state) == TOKEN_LBRACKET {
+        parser_bump(&state)
+        loop {
+            bound :: parser_expect_name(&state, "for a trait bound")
+            &bounds.push(bound.payload.decoded)
+            if parser_current_kind(&state) != TOKEN_COMMA -> break
+            parser_bump(&state)
+            if parser_current_kind(&state) == TOKEN_RBRACKET -> break
+        }
+        parser_expect(&state, TOKEN_RBRACKET, "to close the trait-bound list")
+        return bounds
+    }
+    bound :: parser_expect_name(&state, "for a trait bound")
+    name :: bound.payload.decoded
+    if (name == "Add" || name == "Sub" || name == "Mul" || name == "Div") && parser_current_kind(&state) == TOKEN_LT {
+        parser_bump(&state)
+        rhs :: parser_parse_type(&state, 0)
+        if parser_current_kind(&state) == TOKEN_COMMA {
+            error_span :: parser_current(&state).span
+            parser_add_error(&state, error_span, "operator bound `{name}` accepts exactly one RHS type", "an operator bound names one right-hand operand", "write one type between `<` and `>`")
+        }
+        parser_expect_supertrait_close(&state, "after the operator bound")
+        &bounds.push("{name}<{type_name(rhs.ty)}>")
+        return bounds
+    }
+    if name == "Quantity" && parser_current_kind(&state) == TOKEN_LT {
+        parser_bump(&state)
+        dimension :: parser_expect_name(&state, "for a quantity dimension")
+        parser_expect(&state, TOKEN_COMMA, "after the quantity dimension")
+        parser_expect(&state, TOKEN_DOT, "before the quantity kind")
+        kind :: parser_expect_name(&state, "for a quantity kind")
+        if kind.payload.decoded != "Linear" && kind.payload.decoded != "Point" && kind.payload.decoded != "Delta" {
+            written :: kind.payload.decoded
+            parser_add_error(&state, kind.span, "`.{written}` is not a quantity kind", "Quantity bounds distinguish linear values, affine points, and affine deltas", "use `.Linear`, `.Point`, or `.Delta`")
+        }
+        parser_expect_supertrait_close(&state, "after the quantity bound")
+        &bounds.push("Quantity<{dimension.payload.decoded}, .{kind.payload.decoded}>")
+        return bounds
+    }
+    &bounds.push(name)
+    bounds
+}
+// Rust Parser/Types.rs:760-783: retain the generic closer's exact diagnostic.
+fn parser_expect_supertrait_close(state: &JetParserState, context: String) {
+    if parser_type_close_here(&state) {
+        parser_take_type_close(&state)
+    } else {
+        token :: parser_current(&state)
+        parser_add_error(&state, token.span, "expected `>` {context}, found {parser_describe_token(token)}", "close a generic type with `>` — nested types may end with `>>`", "add `>` here")
+    }
 }
 
 // D-FOUND-OPMIX1=A: the one parenthesized right-hand type allowed on an

@@ -1,0 +1,587 @@
+use core.encoding.cbor.[CBOROptions, CBORError, CBORErrorKind]
+use core.math as cbor_math
+
+// CborKernel.rs:1-1248. This is the whole-value kernel, not a DataTree
+// facade: Bytes and ordered duplicate-detecting Object belong to this internal
+// carrier. Core retains ownership of options and diagnostics.
+// Publication gates: packet 0055 supplies the canonical CborAllocationBudget,
+// CborAllocationError and slot constants. #4494 supplies its real fallible
+// capacity-aware allocator. No allocation accounting is reimplemented here.
+// The diagnostic/index-path byte builders also require the canonical exact-
+// capacity buffer + owned UTF-8 transfer substrate before allocation parity:
+// reserve the counted bytes before physical allocation (Rust with_capacity).
+// Ordinary [] growth below is not evidence for that native allocation gate.
+// #4483 D-USIZE-TARGET1: CBOR_KERNEL_USIZE_MAX below is intentionally UNBOUND
+// pending the owner's target-fact ballot. It denotes the execution target,
+// not the program-under-compilation target. No host default/API is invented.
+pub enum CborKernelValue {
+    Null
+    Bool(Bool)
+    Int(I64)
+    Float(Float)
+    Text(String)
+    Bytes([U8])
+    Array([CborKernelValue])
+    Object([CborKernelEntry])
+}
+pub struct CborKernelEntry { pub key: String, pub value: CborKernelValue }
+
+pub fn cbor_kernel_options_safe() -> CBOROptions Never! {
+    CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}
+}
+pub fn cbor_kernel_options_from_fields(max_depth: Int?, max_items: Int?, max_bytes: Int?, require_canonical: Bool?) -> CBOROptions CBORError! {
+    safe :: cbor_kernel_options_safe()
+    options :: CBOROptions{max_depth: max_depth ?? safe.max_depth, max_items: max_items ?? safe.max_items, max_bytes: max_bytes ?? safe.max_bytes, require_canonical: require_canonical ?? safe.require_canonical}
+    cbor_kernel_options_validate(options)
+    Ok(options)
+}
+pub fn cbor_kernel_options_validate(options: CBOROptions) CBORError! {
+    if options.max_depth < 1 || options.max_depth > 4096 -> return Err(cbor_kernel_error_new(CBORErrorKind.Limit, 0, "$", "max_depth must be in 1..4096"))
+    if options.max_items < 1 || options.max_items > 1000000000 -> return Err(cbor_kernel_error_new(CBORErrorKind.Limit, 0, "$", "max_items must be in 1..1000000000"))
+    if options.max_bytes < 0 || options.max_bytes > 1073741824 -> return Err(cbor_kernel_error_new(CBORErrorKind.Limit, 0, "$", "max_bytes must be in 0..1073741824"))
+}
+fn cbor_kernel_error_new(kind: CBORErrorKind, byte_offset: Int, path: String, reason: String) -> CBORError Never! {
+    CBORError{kind: kind, byte_offset: byte_offset, path: path, reason: reason}
+}
+fn cbor_kernel_append(out: &[U8], bytes: [U8]) Never! { loop byte in bytes -> &out.push(byte) }
+fn cbor_kernel_push_be(out: &[U8], value: Int, width: Int) Never! {
+    index := width
+    loop index > 0 {
+        index -= 1
+        &out.push(U8{(value >> (index * 8)) & 255})
+    }
+}
+fn cbor_kernel_push_len(out: &[U8], major: Int, n: Int) Never! {
+    if n < 24 -> &out.push(U8{(major << 5) | n})
+    else {
+        width :: if { n <= 255 -> 1 n <= 65535 -> 2 n <= 4294967295 -> 4 else -> 8 }
+        additional :: if width == { 1 -> 24 2 -> 25 4 -> 26 else -> 27 }
+        &out.push(U8{(major << 5) | additional})
+        cbor_kernel_push_be(&out, n, width)
+    }
+}
+fn cbor_kernel_negative_magnitude(value: Int) -> Int Never! { -value - 1 }
+
+// Rust's f32_to_half_bits is a bit algorithm. Its input here is the IEEE32
+// word rather than a native float, avoiding checked F32 conversions (which
+// reject overflow/nonfinite values that Rust's cast intentionally accepts).
+fn cbor_kernel_f32_to_half_bits(bits: Int) -> Int Never! {
+    sign :: (bits >> 16) & 0x8000
+    exponent :: (bits >> 23) & 255
+    fraction :: bits & 0x7fffff
+    if exponent == 255 -> return sign | 0x7c00 | if fraction == 0 -> 0 else -> 0x0200
+    half_exponent :: exponent - 127 + 15
+    if half_exponent >= 31 -> return sign | 0x7c00
+    if half_exponent <= 0 {
+        if half_exponent < -10 -> return sign
+        mantissa :: fraction | 0x800000
+        shift :: 14 - half_exponent
+        rounded := mantissa >> shift
+        remainder :: mantissa & ((1 << shift) - 1)
+        halfway :: 1 << (shift - 1)
+        if remainder > halfway || (remainder == halfway && (rounded & 1) != 0) -> rounded += 1
+        return sign | rounded
+    }
+    rounded := fraction >> 13
+    remainder :: fraction & 0x1fff
+    if remainder > 0x1000 || (remainder == 0x1000 && (rounded & 1) != 0) -> rounded += 1
+    if rounded == 0x0400 -> return sign | ((half_exponent + 1) << 10)
+    sign | (half_exponent << 10) | rounded
+}
+fn cbor_kernel_half_to_f64(bits: Int) -> Float Never! {
+    sign :: (bits >> 15) << 63
+    exponent :: (bits >> 10) & 31
+    fraction :: bits & 1023
+    if exponent == 0 {
+        if fraction == 0 -> return cbor_math.from_bits(sign)
+        mantissa := fraction
+        power := -14
+        loop (mantissa & 1024) == 0 { mantissa <<= 1; power -= 1 }
+        return cbor_math.from_bits(sign | ((power + 1023) << 52) | ((mantissa & 1023) << 42))
+    }
+    if exponent == 31 -> return cbor_math.from_bits(sign | (0x7ff << 52) | (fraction << 42))
+    cbor_math.from_bits(sign | ((exponent - 15 + 1023) << 52) | (fraction << 42))
+}
+fn cbor_kernel_f32_to_f64(bits: Int) -> Float Never! {
+    sign :: ((bits >> 31) & 1) << 63
+    exponent :: (bits >> 23) & 255
+    fraction :: bits & 0x7fffff
+    if exponent == 0 {
+        if fraction == 0 -> return cbor_math.from_bits(sign)
+        mantissa := fraction
+        power := -126
+        loop (mantissa & 0x800000) == 0 { mantissa <<= 1; power -= 1 }
+        return cbor_math.from_bits(sign | ((power + 1023) << 52) | ((mantissa & 0x7fffff) << 29))
+    }
+    if exponent == 255 -> return cbor_math.from_bits(sign | (0x7ff << 52) | (fraction << 29))
+    cbor_math.from_bits(sign | ((exponent - 127 + 1023) << 52) | (fraction << 29))
+}
+fn cbor_kernel_round_shift(value: Int, shift: Int) -> Int Never! {
+    if shift <= 0 -> return value << -shift
+    rounded :: value >> shift
+    remainder :: value & ((1 << shift) - 1)
+    halfway :: 1 << (shift - 1)
+    rounded + if remainder > halfway || (remainder == halfway && (rounded & 1) != 0) -> 1 else -> 0
+}
+// Exact IEEE nearest-even binary64 -> binary32 narrowing, including signed
+// zero, subnormals, infinities, carry into infinity, and NaN classification.
+fn cbor_kernel_f64_to_f32_bits(value: Float) -> Int Never! {
+    bits :: cbor_math.to_bits(value) & 0xffffffffffffffff
+    sign :: (bits >> 32) & 0x80000000
+    exponent :: (bits >> 52) & 2047
+    fraction :: bits & 0xfffffffffffff
+    if exponent == 2047 -> return sign | 0x7f800000 | if fraction == 0 -> 0 else -> 0x400000
+    if exponent == 0 -> return sign
+    power :: exponent - 1023
+    if power > 127 -> return sign | 0x7f800000
+    mantissa :: fraction | 0x10000000000000
+    if power < -126 {
+        if power < -150 -> return sign
+        return sign | cbor_kernel_round_shift(mantissa, -power - 97)
+    }
+    rounded :: cbor_kernel_round_shift(mantissa, 29)
+    if rounded == 0x1000000 -> return sign | ((power + 128) << 23)
+    sign | ((power + 127) << 23) | (rounded & 0x7fffff)
+}
+fn cbor_kernel_half_exact(value: Float) -> Int? Never! {
+    if cbor_math.is_nan(value) -> return Val(0x7e00)
+    narrowed :: cbor_kernel_f64_to_f32_bits(value)
+    if cbor_math.to_bits(cbor_kernel_f32_to_f64(narrowed)) != cbor_math.to_bits(value) -> return None
+    bits :: cbor_kernel_f32_to_half_bits(narrowed)
+    if cbor_math.to_bits(cbor_kernel_half_to_f64(bits)) == cbor_math.to_bits(value) -> Val(bits) else -> None
+}
+fn cbor_kernel_push_preferred_float(out: &[U8], value: Float) Never! {
+    half :: cbor_kernel_half_exact(value)
+    if half != None {
+        &out.push(U8{249})
+        cbor_kernel_push_be(&out, half ?? panic("half checked"), 2)
+        return
+    }
+    narrowed :: cbor_kernel_f64_to_f32_bits(value)
+    if cbor_math.to_bits(cbor_kernel_f32_to_f64(narrowed)) == cbor_math.to_bits(value) {
+        &out.push(U8{250})
+        cbor_kernel_push_be(&out, narrowed, 4)
+    } else {
+        &out.push(U8{251})
+        cbor_kernel_push_be(&out, cbor_math.to_bits(value), 8)
+    }
+}
+struct CborKernelEncodedEntry { key: [U8], value: [U8] }
+fn cbor_kernel_compare_bytes(left: [U8], right: [U8]) -> Int Never! {
+    index := 0
+    loop index < left.len() && index < right.len() {
+        if left[index] != right[index] -> return Int.from_u8(left[index]) <=> Int.from_u8(right[index])
+        index += 1
+    }
+    left.len() <=> right.len()
+}
+fn cbor_kernel_encode_value(value: CborKernelValue, out: &[U8], canonical: Bool) CBORError! {
+    if value == {
+        .Null -> &out.push(U8{246})
+        .Bool(flag) -> &out.push(if flag -> U8{245} else -> U8{244})
+        .Int(number) -> {
+            wide :: Int.from_i64(number)
+            if wide >= 0 -> cbor_kernel_push_len(&out, 0, wide)
+            else -> cbor_kernel_push_len(&out, 1, cbor_kernel_negative_magnitude(wide))
+        }
+        .Float(number) -> cbor_kernel_push_preferred_float(&out, number)
+        .Text(text) -> { cbor_kernel_push_len(&out, 3, text.bytes().len()); cbor_kernel_append(&out, text.bytes()) }
+        .Bytes(bytes) -> { cbor_kernel_push_len(&out, 2, bytes.len()); cbor_kernel_append(&out, bytes) }
+        .Array(values) -> {
+            cbor_kernel_push_len(&out, 4, values.len())
+            loop child in values -> cbor_kernel_encode_value(child, &out, canonical)
+        }
+        .Object(entries) -> {
+            // Preserve Rust's duplicate-before-child-error precedence. Borrow
+            // keys in the original scan: no extra hash table charged to CBOR.
+            loop (index, entry) in entries {
+                loop old in 0..<index {
+                    if entries[old].key == entry.key -> return Err(cbor_kernel_error_new(CBORErrorKind.Unsupported, 0, "$", "duplicate encoded CBOR map key"))
+                }
+            }
+            encoded := [CborKernelEncodedEntry]{}
+            loop entry in entries {
+                key := [U8]{}
+                cbor_kernel_push_len(&key, 3, entry.key.bytes().len())
+                cbor_kernel_append(&key, entry.key.bytes())
+                child := [U8]{}
+                cbor_kernel_encode_value(entry.value, &child, canonical)
+                &encoded.push(CborKernelEncodedEntry{key: key, value: child})
+            }
+            if canonical -> &encoded.sort_by((left: CborKernelEncodedEntry, right: CborKernelEncodedEntry) -> cbor_kernel_compare_bytes(left.key, right.key))
+            cbor_kernel_push_len(&out, 5, encoded.len())
+            loop entry in encoded { cbor_kernel_append(&out, entry.key); cbor_kernel_append(&out, entry.value) }
+        }
+    }
+}
+pub fn cbor_kernel_encode(value: CborKernelValue, canonical: Bool) -> [U8] CBORError! {
+    out := [U8]{}
+    cbor_kernel_encode_value(value, &out, canonical)
+    Ok(out)
+}
+
+// State is exclusively borrowed; recursion does not clone the input, value
+// tree, options or budget. Canonical budget methods are packet 0055's owner.
+struct CborKernelDecoder {
+    input: [U8]
+    cursor: Int
+    items: Int
+    options: CBOROptions
+    budget: CborAllocationBudget
+    usize_max: Int
+}
+// ErrorLength counts before allocating the owned diagnostic. Rust's only
+// formatted arguments in this kernel are literals, nonnegative decimal
+// counters and a length-category word; explicit writers cover every one.
+struct CborKernelErrorLength { bytes: Int }
+fn cbor_kernel_error_length_write_str(length: &CborKernelErrorLength, value: String, usize_max: Int) Never! {
+    length.bytes += value.bytes().len()
+    if length.bytes > usize_max -> length.bytes = usize_max
+}
+fn cbor_kernel_charge_error(decoder: &CborKernelDecoder, path: String, reason_length: Int) Never! {
+    requested :: path.bytes().len() + reason_length
+    if requested <= decoder.usize_max {
+        if &decoder.budget.reserve(requested, 1, "CBOR error") == {
+            .Ok(_) -> {}
+            .Err(_) -> &decoder.budget.reserve_terminal_error(requested)
+        }
+    }
+}
+fn cbor_kernel_error_with_budget(decoder: &CborKernelDecoder, kind: CBORErrorKind, offset: Int, path: String, reason: String) -> CBORError Never! {
+    length := CborKernelErrorLength{bytes: 0}
+    cbor_kernel_error_length_write_str(&length, reason, decoder.usize_max)
+    cbor_kernel_charge_error(&decoder, path, length.bytes)
+    cbor_kernel_error_new(kind, offset, path, reason)
+}
+fn cbor_kernel_decimal_digits(value: Int) -> Int Never! {
+    count := 1
+    remaining := value
+    loop remaining >= 10 { remaining = remaining /% 10; count += 1 }
+    count
+}
+fn cbor_kernel_write_decimal(out: &[U8], value: Int) Never! {
+    divisor := 1
+    loop divisor <= value /% 10 -> divisor *= 10
+    loop divisor > 0 {
+        &out.push(U8{48 + (value /% divisor) %% 10})
+        divisor = divisor /% 10
+    }
+}
+fn cbor_kernel_error_with_number(decoder: &CborKernelDecoder, kind: CBORErrorKind, offset: Int, path: String, prefix: String, value: Int, suffix: String) -> CBORError Never! {
+    length := CborKernelErrorLength{bytes: cbor_kernel_decimal_digits(value)}
+    cbor_kernel_error_length_write_str(&length, prefix, decoder.usize_max)
+    cbor_kernel_error_length_write_str(&length, suffix, decoder.usize_max)
+    cbor_kernel_charge_error(&decoder, path, length.bytes)
+    out := [U8]{}
+    cbor_kernel_append(&out, prefix.bytes())
+    cbor_kernel_write_decimal(&out, value)
+    cbor_kernel_append(&out, suffix.bytes())
+    cbor_kernel_error_new(kind, offset, path, String.from_bytes(out) ?? panic("decimal diagnostics preserve UTF-8"))
+}
+fn cbor_kernel_budget_error(decoder: &CborKernelDecoder, error: CborAllocationError, offset: Int, path: String) -> CBORError Never! {
+    requested :: path.bytes().len() + error.reason_len()
+    if requested <= decoder.usize_max {
+        if &decoder.budget.reserve(requested, 1, "CBOR error") == {
+            .Ok(_) -> {}
+            .Err(_) -> &decoder.budget.reserve_terminal_error(requested)
+        }
+    }
+    reason := ""
+    error.write_reason(&reason)
+    cbor_kernel_error_new(CBORErrorKind.Limit, offset, path, reason)
+}
+fn cbor_kernel_reserve_vec<T>(decoder: &CborKernelDecoder, values: &[T], additional: Int, unit: Int, offset: Int, path: String, what: String) CBORError! {
+    if &decoder.budget.reserve_vec(&values, additional, unit, what) == {
+        .Ok(_) -> {}
+        .Err(error) -> return Err(cbor_kernel_budget_error(&decoder, error, offset, path))
+    }
+}
+fn cbor_kernel_read_len(decoder: &CborKernelDecoder, additional: Int, start: Int, canonical: Bool, path: String) -> Int CBORError! {
+    if additional < 24 -> return Ok(additional)
+    need :: if additional == {
+        24 -> 1
+        25 -> 2
+        26 -> 4
+        27 -> 8
+        else -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Unsupported, start, path, "indefinite/reserved CBOR length is unsupported by whole-value decoding"))
+    }
+    if decoder.cursor + need > decoder.input.len() -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Truncated, decoder.input.len(), path, "CBOR length argument is truncated"))
+    value := 0
+    loop _ in 0..<need {
+        value = (value << 8) | Int.from_u8(decoder.input[decoder.cursor])
+        decoder.cursor += 1
+    }
+    if canonical && ((additional == 24 && value < 24) || (additional == 25 && value <= 255) || (additional == 26 && value <= 65535) || (additional == 27 && value <= 4294967295)) -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.NonCanonical, start, path, "CBOR argument does not use its shortest form"))
+    Ok(value)
+}
+struct CborKernelPath { text: String, charged: Int }
+fn cbor_kernel_index_path(decoder: &CborKernelDecoder, path: String, index: Int, offset: Int) -> CborKernelPath CBORError! {
+    value := index
+    digits := 1
+    loop value >= 10 { value = value /% 10; digits += 1 }
+    capacity :: path.bytes().len() + digits + 2
+    if capacity > decoder.usize_max -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Limit, offset, path, "CBOR path allocation exceeds target capacity"))
+    charged :: if &decoder.budget.reserve(capacity, 1, "CBOR path") == {
+        .Ok(amount) -> amount
+        .Err(error) -> return Err(cbor_kernel_budget_error(&decoder, error, offset, path))
+    }
+    out := [U8]{}
+    cbor_kernel_append(&out, path.bytes())
+    &out.push(U8{91})
+    cbor_kernel_write_decimal(&out, index)
+    &out.push(U8{93})
+    Ok(CborKernelPath{text: String.from_bytes(out) ?? panic("index paths preserve UTF-8"), charged: charged})
+}
+// #4494 ESCAPE-DEBUG gate, Rust key_path (455-495): no body is published
+// until canonical Core supplies allocation-free char::escape_debug length/
+// write and retained UTF-8 scalar->Char traversal. Planned owner:
+// core.text.runtime.kernel_escape_debug (Main's ESCAPE-DEBUG-ABI.md).
+// Its current Single/Double/None quote ABI does not express Rust's BOTH
+// quotes; key.chars() returns an allocated list, while canonical scalar_at
+// returns Int and cannot yet supply that ABI's Char without allocation.
+// Required algorithm: sum each scalar's escaped UTF-8 byte count, checked
+// add path.len()+escaped+4 against target usize, reserve "CBOR path", then
+// write path + [" + every escaped scalar + "] into one exact-capacity owner.
+// Return that owner and charged bytes; the caller releases the charge after
+// decoding the value, including its error branch. Both quotes, nonprintable
+// scalars and every Grapheme_Extend scalar must retain Rust's exact spelling.
+// Char/String :Debug temporaries are NOT substitutes. The private call below
+// remains unresolved so publication cannot silently omit this capability.
+fn cbor_kernel_count_item(decoder: &CborKernelDecoder, offset: Int, path: String) CBORError! {
+    if decoder.items == 9223372036854775807 -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Limit, offset, path, "max_items counter overflow"))
+    decoder.items += 1
+    if decoder.items > decoder.options.max_items -> return Err(cbor_kernel_error_with_number(&decoder, CBORErrorKind.Limit, offset, path, "max_items ", decoder.options.max_items, " exceeded"))
+}
+fn cbor_kernel_indefinite(decoder: &CborKernelDecoder, offset: Int, path: String) CBORError! {
+    if decoder.options.require_canonical -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.NonCanonical, offset, path, "indefinite-length CBOR is not Core deterministic"))
+}
+fn cbor_kernel_target_length(decoder: &CborKernelDecoder, length: Int, offset: Int, path: String, what: String) -> Int CBORError! {
+    if length > decoder.usize_max {
+        cbor_kernel_charge_error(&decoder, path, 5 + what.bytes().len() + " length exceeds target capacity".bytes().len())
+        out := [U8]{}
+        cbor_kernel_append(&out, "CBOR ".bytes())
+        cbor_kernel_append(&out, what.bytes())
+        cbor_kernel_append(&out, " length exceeds target capacity".bytes())
+        return Err(cbor_kernel_error_new(CBORErrorKind.Limit, offset, path, String.from_bytes(out) ?? panic("length diagnostic preserves UTF-8")))
+    }
+    Ok(length)
+}
+fn cbor_kernel_decode_indefinite_string(decoder: &CborKernelDecoder, depth: Int, path: String, major: Int, start: Int, allow_bytes: Bool) -> CborKernelValue CBORError! {
+    cbor_kernel_indefinite(&decoder, start, path)
+    if depth + 1 > decoder.options.max_depth -> return Err(cbor_kernel_error_with_number(&decoder, CBORErrorKind.Limit, start, path, "max_depth ", decoder.options.max_depth, " exceeded"))
+    if major == 2 && !allow_bytes -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>"))
+    bytes := [U8]{}
+    loop {
+        if decoder.cursor >= decoder.input.len() -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Truncated, decoder.input.len(), path, "indefinite CBOR string ended before its break"))
+        if decoder.input[decoder.cursor] == U8{255} { decoder.cursor += 1; break }
+        chunk_start :: decoder.cursor
+        head :: Int.from_u8(decoder.input[decoder.cursor])
+        decoder.cursor += 1
+        cbor_kernel_count_item(&decoder, chunk_start, path)
+        if (head >> 5) != major || (head & 31) == 31 -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Syntax, chunk_start, path, "indefinite CBOR string contains a wrong or indefinite chunk"))
+        raw_length :: cbor_kernel_read_len(&decoder, head & 31, chunk_start, false, path)
+        length :: cbor_kernel_target_length(&decoder, raw_length, chunk_start, path, "string chunk")
+        if length > decoder.input.len() - decoder.cursor -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Truncated, decoder.input.len(), path, "CBOR byte/text string chunk is truncated"))
+        // Empty chunks are legal; validation borrows the input without slicing.
+        if major == 3 && !cbor_kernel_utf8_valid(decoder.input, decoder.cursor, length) -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Syntax, chunk_start, path, "CBOR text chunk is not UTF-8"))
+        what :: if major == 2 -> "CBOR byte string" else -> "CBOR text string"
+        cbor_kernel_reserve_vec(&decoder, &bytes, length, 1, chunk_start, path, what)
+        loop index in 0..<length -> &bytes.push(decoder.input[decoder.cursor + index])
+        decoder.cursor += length
+    }
+    if major == 2 -> return Ok(CborKernelValue.Bytes(bytes))
+    text :: String.from_bytes(bytes) ?? return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Syntax, start, path, "CBOR text is not UTF-8"))
+    Ok(CborKernelValue.Text(text))
+}
+// Allocation-free std::str::from_utf8 validation over the borrowed chunk.
+fn cbor_kernel_utf8_valid(bytes: [U8], start: Int, length: Int) -> Bool Never! {
+    index := start
+    end :: start + length
+    loop index < end {
+        first :: Int.from_u8(bytes[index])
+        if first < 128 { index += 1; next }
+        width :: if { first >= 194 && first <= 223 -> 2 first >= 224 && first <= 239 -> 3 first >= 240 && first <= 244 -> 4 else -> return false }
+        if width > end - index -> return false
+        second :: Int.from_u8(bytes[index + 1])
+        if second < 128 || second > 191 -> return false
+        if (first == 224 && second < 160) || (first == 237 && second >= 160) || (first == 240 && second < 144) || (first == 244 && second >= 144) -> return false
+        loop part in 2..<width {
+            byte :: Int.from_u8(bytes[index + part])
+            if byte < 128 || byte > 191 -> return false
+        }
+        index += width
+    }
+    true
+}
+fn cbor_kernel_compare_input_ranges(input: [U8], old_start: Int, old_end: Int, start: Int, end: Int) -> Int Never! {
+    index := 0
+    loop old_start + index < old_end && start + index < end {
+        left :: Int.from_u8(input[old_start + index])
+        right :: Int.from_u8(input[start + index])
+        if left != right -> return left <=> right
+        index += 1
+    }
+    (old_end - old_start) <=> (end - start)
+}
+fn cbor_kernel_decode_value(decoder: &CborKernelDecoder, depth: Int, path: String, allow_bytes: Bool) -> CborKernelValue CBORError! {
+    if decoder.cursor >= decoder.input.len() -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Truncated, decoder.input.len(), path, "CBOR value is missing"))
+    start :: decoder.cursor
+    head :: Int.from_u8(decoder.input[decoder.cursor])
+    decoder.cursor += 1
+    cbor_kernel_count_item(&decoder, start, path)
+    major :: head >> 5
+    additional :: head & 31
+    if major == 0 || major == 1 {
+        value :: cbor_kernel_read_len(&decoder, additional, start, decoder.options.require_canonical, path)
+        if value > 9223372036854775807 -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Unsupported, start, path, "CBOR integer is outside Jet Int"))
+        return Ok(CborKernelValue.Int(I64{if major == 0 -> value else -> -value - 1}))
+    }
+    if major == 2 || major == 3 {
+        if additional == 31 -> return cbor_kernel_decode_indefinite_string(&decoder, depth, path, major, start, allow_bytes)
+        raw_length :: cbor_kernel_read_len(&decoder, additional, start, decoder.options.require_canonical, path)
+        length :: cbor_kernel_target_length(&decoder, raw_length, start, path, "string")
+        if length > decoder.input.len() - decoder.cursor -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Truncated, decoder.input.len(), path, "CBOR byte/text string is truncated"))
+        if major == 2 && !allow_bytes -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>"))
+        bytes := [U8]{}
+        cbor_kernel_reserve_vec(&decoder, &bytes, length, 1, start, path, if major == 2 -> "CBOR byte string" else -> "CBOR text string")
+        loop index in 0..<length -> &bytes.push(decoder.input[decoder.cursor + index])
+        decoder.cursor += length
+        if major == 2 -> return Ok(CborKernelValue.Bytes(bytes))
+        text :: String.from_bytes(bytes) ?? return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Syntax, start, path, "CBOR text is not UTF-8"))
+        return Ok(CborKernelValue.Text(text))
+    }
+    if major == 4 {
+        if depth + 1 > decoder.options.max_depth -> return Err(cbor_kernel_error_with_number(&decoder, CBORErrorKind.Limit, start, path, "max_depth ", decoder.options.max_depth, " exceeded"))
+        values := [CborKernelValue]{}
+        if additional == 31 {
+            cbor_kernel_indefinite(&decoder, start, path)
+            index := 0
+            loop {
+                if decoder.cursor >= decoder.input.len() -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Truncated, decoder.input.len(), path, "indefinite CBOR array ended before its break"))
+                if decoder.input[decoder.cursor] == U8{255} { decoder.cursor += 1; break }
+                child_path :: cbor_kernel_index_path(&decoder, path, index, decoder.cursor)
+                if decoder.items >= decoder.options.max_items {
+                    error :: cbor_kernel_error_with_number(&decoder, CBORErrorKind.Limit, decoder.cursor, child_path.text, "max_items ", decoder.options.max_items, " exceeded")
+                    &decoder.budget.release(child_path.charged)
+                    return Err(error)
+                }
+                cbor_kernel_reserve_vec(&decoder, &values, 1, DATA_TREE_SLOT_BYTES, decoder.cursor, child_path.text, "CBOR array")
+                if cbor_kernel_decode_value(&decoder, depth + 1, child_path.text, allow_bytes) == {
+                    .Ok(value) -> {
+                        &decoder.budget.release(child_path.charged)
+                        &values.push(value)
+                    }
+                    .Err(error) -> {
+                        &decoder.budget.release(child_path.charged)
+                        return Err(error)
+                    }
+                }
+                index += 1
+            }
+        } else {
+            raw_length :: cbor_kernel_read_len(&decoder, additional, start, decoder.options.require_canonical, path)
+            length :: cbor_kernel_target_length(&decoder, raw_length, start, path, "array")
+            cbor_kernel_reserve_vec(&decoder, &values, length, DATA_TREE_SLOT_BYTES, start, path, "CBOR array")
+            loop index in 0..<length {
+                child_path :: cbor_kernel_index_path(&decoder, path, index, start)
+                if cbor_kernel_decode_value(&decoder, depth + 1, child_path.text, allow_bytes) == {
+                    .Ok(value) -> {
+                        &decoder.budget.release(child_path.charged)
+                        &values.push(value)
+                    }
+                    .Err(error) -> {
+                        &decoder.budget.release(child_path.charged)
+                        return Err(error)
+                    }
+                }
+            }
+        }
+        return Ok(CborKernelValue.Array(values))
+    }
+    if major == 5 {
+        if depth + 1 > decoder.options.max_depth -> return Err(cbor_kernel_error_with_number(&decoder, CBORErrorKind.Limit, start, path, "max_depth ", decoder.options.max_depth, " exceeded"))
+        entries := [CborKernelEntry]{}
+        length :: if additional == 31 {
+            cbor_kernel_indefinite(&decoder, start, path)
+            None
+        } else {
+            raw_length :: cbor_kernel_read_len(&decoder, additional, start, decoder.options.require_canonical, path)
+            Val(cbor_kernel_target_length(&decoder, raw_length, start, path, "map"))
+        }
+        if length != None -> cbor_kernel_reserve_vec(&decoder, &entries, length ?? panic("length checked"), MAP_ENTRY_SLOT_BYTES, start, path, "CBOR map")
+        prior_start := 0
+        prior_end := 0
+        index := 0
+        loop {
+            if length != None {
+                if index == (length ?? panic("length checked")) -> break
+            } else {
+                if decoder.cursor >= decoder.input.len() -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Truncated, decoder.input.len(), path, "indefinite CBOR map ended before its break"))
+                if decoder.input[decoder.cursor] == U8{255} { decoder.cursor += 1; break }
+                if decoder.items >= decoder.options.max_items -> return Err(cbor_kernel_error_with_number(&decoder, CBORErrorKind.Limit, decoder.cursor, path, "max_items ", decoder.options.max_items, " exceeded"))
+                cbor_kernel_reserve_vec(&decoder, &entries, 1, MAP_ENTRY_SLOT_BYTES, decoder.cursor, path, "CBOR map")
+            }
+            key_start :: decoder.cursor
+            key_value :: cbor_kernel_decode_value(&decoder, depth + 1, path, false)
+            key :: if key_value == {
+                .Text(text) -> text
+                else -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Unsupported, key_start, path, "CBOR map key must be text"))
+            }
+            key_end :: decoder.cursor
+            if decoder.options.require_canonical && index != 0 && cbor_kernel_compare_input_ranges(decoder.input, prior_start, prior_end, key_start, key_end) >= 0 -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.NonCanonical, key_start, path, "CBOR map keys are not in Core deterministic bytewise order"))
+            loop old in entries {
+                if old.key == key -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Unsupported, key_start, path, "duplicate CBOR text map key"))
+            }
+            prior_start = key_start
+            prior_end = key_end
+            if length == None && decoder.cursor >= decoder.input.len() -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Truncated, decoder.input.len(), path, "indefinite CBOR map ended before its value"))
+            if length == None && decoder.input[decoder.cursor] == U8{255} -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Syntax, decoder.cursor, path, "indefinite CBOR map break appears where a value is required"))
+            child_path :: cbor_kernel_key_path(&decoder, path, key, key_start)
+            value :: if cbor_kernel_decode_value(&decoder, depth + 1, child_path.text, allow_bytes) == {
+                .Ok(value) -> {
+                    &decoder.budget.release(child_path.charged)
+                    value
+                }
+                .Err(error) -> {
+                    &decoder.budget.release(child_path.charged)
+                    return Err(error)
+                }
+            }
+            &entries.push(CborKernelEntry{key: key, value: value})
+            index += 1
+        }
+        return Ok(CborKernelValue.Object(entries))
+    }
+    if major == 6 -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Unsupported, start, path, "CBOR tags are unsupported"))
+    if major == 7 {
+        if additional == 20 -> return Ok(CborKernelValue.Bool(false))
+        if additional == 21 -> return Ok(CborKernelValue.Bool(true))
+        if additional == 22 -> return Ok(CborKernelValue.Null)
+        if additional == 25 || additional == 26 || additional == 27 {
+            width :: if additional == { 25 -> 2 26 -> 4 else -> 8 }
+            if decoder.cursor + width > decoder.input.len() {
+                reason :: if additional == { 25 -> "CBOR Float16 is truncated" 26 -> "CBOR Float32 is truncated" else -> "CBOR Float64 is truncated" }
+                return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Truncated, decoder.input.len(), path, reason))
+            }
+            bits := 0
+            loop _ in 0..<width { bits = (bits << 8) | Int.from_u8(decoder.input[decoder.cursor]); decoder.cursor += 1 }
+            value :: if additional == { 25 -> cbor_kernel_half_to_f64(bits) 26 -> cbor_kernel_f32_to_f64(bits) else -> cbor_math.from_bits(bits) }
+            if decoder.options.require_canonical {
+                if additional == 25 && cbor_math.is_nan(value) && bits != 0x7e00 -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.NonCanonical, start, path, "CBOR NaN is not the canonical 0xf97e00 encoding"))
+                if additional != 25 && (cbor_math.is_nan(value) || cbor_kernel_half_exact(value) != None || (additional == 27 && cbor_math.to_bits(cbor_kernel_f32_to_f64(cbor_kernel_f64_to_f32_bits(value))) == cbor_math.to_bits(value))) -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.NonCanonical, start, path, "CBOR Float does not use its preferred shortest encoding"))
+            }
+            return Ok(CborKernelValue.Float(value))
+        }
+        if additional == 31 -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.Syntax, start, path, "CBOR break outside an indefinite container"))
+        return Err(cbor_kernel_error_with_number(&decoder, CBORErrorKind.Unsupported, start, path, "unsupported CBOR simple value ", additional, ""))
+    }
+    Err(cbor_kernel_error_with_number(&decoder, CBORErrorKind.Unsupported, start, path, "unsupported CBOR major type ", major, ""))
+}
+pub fn cbor_kernel_decode(bytes: [U8], options: CBOROptions, allow_bytes: Bool) -> CborKernelValue CBORError! {
+    cbor_kernel_options_validate(options)
+    decoder := CborKernelDecoder{input: bytes, cursor: 0, items: 0, options: options, budget: CborAllocationBudget.new(options.max_bytes), usize_max: CBOR_KERNEL_USIZE_MAX}
+    if bytes.len() > options.max_bytes -> return Err(cbor_kernel_error_with_number(&decoder, CBORErrorKind.Limit, 0, "$", "input exceeds max_bytes ", options.max_bytes, ""))
+    value :: cbor_kernel_decode_value(&decoder, 0, "$", allow_bytes)
+    if decoder.cursor != bytes.len() -> return Err(cbor_kernel_error_with_budget(&decoder, CBORErrorKind.TrailingData, decoder.cursor, "$", "trailing CBOR data after root value"))
+    Ok(value)
+}

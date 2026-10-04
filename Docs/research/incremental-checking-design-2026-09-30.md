@@ -324,6 +324,33 @@ The record is keyed by content and made of canonical sections. Each
 exported item carries its own fingerprint. The **interface digest** is the
 SHA-256 of the canonical encoding of the sections marked "digest" below.
 
+The S1 fingerprint contract in Foundation's `PackageIdentity` is narrower
+than this proposed complete checked-interface record. Its `jet.iface/v1`
+digest has four RecordCodec sections: header (tag 1, package identity),
+declarations (tag 2, module/name/fingerprint), visible reexports (tag 3,
+module/fingerprint), and caller-supplied semantic summaries (tag 4,
+identity/value). Declaration and reexport tuples sort lexically; summary
+keys retain their semantic identity and sort lexically. The checksum of that
+canonical record is the interface digest, not a hash of a debug report.
+
+That fingerprint projects the original loaded AST without copying it:
+ordinary callable bodies disappear, generic and `#Inline(Always)` bodies
+remain, trait defaults remain, and private inherent methods disappear unless
+the source file is public. Code-module bodies recurse through the same
+visibility projection. A private-body or comment edit therefore changes the
+source digest but does not by itself change the interface; inferred changes
+reach the interface through the supplied summaries. Membership and edges
+come from retained loader/name facts, including symbol-free loaded modules,
+not from an emitted declaration inventory. Core forms one package and is an
+implicit dependency of every other package when loaded. Path labels require
+host-platform component semantics; textual directory prefixes are not
+package boundaries.
+The shared source-key API hashes raw file and optional manifest bytes, including
+non-UTF8 bytes; it has no text-only alternate framing. A compiler packet retains
+each loader source hash once, so resident graph queries need not retain or
+rehash source text. Dependency labels reuse the resolved root policy ledger,
+not a second dependency traversal.
+
 | Section | Contents | Digest |
 |---|---|---|
 | Header | schema `jet.iface/v1`, package identity, compiler and Core identity, edition, direct dependency identities with the interface digests this record was checked against | yes |

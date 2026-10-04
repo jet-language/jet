@@ -1,0 +1,1304 @@
+// PORT-PENDING 0386 crates-jet-sema-src-sema-checkercorelib-fixed-sigs-slice-1224: crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1224-2523
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn core_fixed_sig_impl(
+//RS     module: &str,
+//RS     name: &str,
+//RS ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+//RS     let read = AccessConvention::Read;
+//RS     let moved = AccessConvention::Move;
+//RS     let string = Type::String;
+//RS     let int = Type::Int;
+//RS     let float = Type::Float;
+//RS     let bool_ = Type::Bool;
+//RS     let unit = unit_ty();
+//RS     let measurement = Type::Apply {
+//RS         name: Syntax::TYPE_MEASUREMENT.to_string(),
+//RS         args: vec![Type::Float],
+//RS     };
+//RS     let io = io_error_ty();
+//RS     let time_error = Type::Named("TimeError".to_string());
+//RS     let archive_error = Type::Named("ArchiveError".to_string());
+//RS     let gzip_error = Type::Named("GzipFileError".to_string());
+//RS     let zstd_error = Type::Named("ZstdFileError".to_string());
+//RS     let json = json_ty();
+//RS     let list_u8 = Type::List(Box::new(u8_ty()));
+//RS     let list_float = Type::List(Box::new(Type::Float));
+//RS     let list_int = Type::List(Box::new(Type::Int));
+//RS     let list_bool = Type::List(Box::new(Type::Bool));
+//RS     let list_list_int = Type::List(Box::new(list_int.clone()));
+//RS     let list_string = Type::List(Box::new(Type::String));
+//RS     let counter = Type::Named("Counter".to_string());
+//RS     let ordered_map = Type::Named("OrderedMap".to_string());
+//RS     let chain = Type::Named("Chain".to_string());
+//RS     let string_set = Type::Named("StringSet".to_string());
+//RS 
+//RS     let path = Type::Union(vec![Type::String, Type::Named("Path".to_string())]);
+//RS     let io_unit = result_ty(unit.clone(), io.clone());
+//RS     let ui_error = Type::Named("UIHostError".to_string());
+//RS     let ui_result = |ok| result_ty(ok, ui_error.clone());
+//RS     let ui_preview = Type::Named("UIPreview".to_string());
+//RS     let ui_node_callback = Type::Fn {
+//RS         params: vec![],
+//RS         ret: Some(Box::new(Type::Named("UINode".to_string()))),
+//RS         effect_bound: None,
+//RS         return_view_provenance: None,
+//RS         param_contract: None,
+//RS         call_metadata: None,
+//RS     };
+//RS     let comparison_data = Type::Named("DataTree".to_string());
+//RS     let comparison_fn = Type::Fn {
+//RS         params: vec![comparison_data.clone()],
+//RS         ret: Some(Box::new(comparison_data.clone())),
+//RS         effect_bound: None,
+//RS         return_view_provenance: None,
+//RS         param_contract: None,
+//RS         call_metadata: None,
+//RS     };
+//RS     if let Some(signature) = web_fixed_sig(module, name) {
+//RS         return Some(signature);
+//RS     }
+//RS 
+//RS     match (module, name) {
+//RS         ("core.files", "scope") => Some((
+//RS             vec![(read, Type::Named(Syntax::TYPE_AUTHORITY.to_string()))],
+//RS             Some(Type::Named("FileScope".to_string())),
+//RS         )),
+//RS         ("core.files", "read") => Some((vec![(read, path)], Some(result_ty(string, io.clone())))),
+//RS         ("core.files", "read_bytes") => Some((
+//RS             vec![(
+//RS                 read,
+//RS                 Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
+//RS             )],
+//RS             Some(result_ty(list_u8, io.clone())),
+//RS         )),
+//RS         ("core.files", "map") => Some((
+//RS             vec![(read, path)],
+//RS             Some(result_ty(Type::Named("MappedFile".to_string()), io)),
+//RS         )),
+//RS         // D-FILES-WRITE1 (merge) + D-FILES-APPEND1=A: `write`/`append_all` are the
+//RS         // whole-file convenience twins of the streaming `open`/`create`/`append`
+//RS         // handle constructors below. `append_all` (not `append`) so it doesn't
+//RS         // collide with the streaming handle's `.append(text)` method in the same
+//RS         // `core.files` namespace.
+//RS         ("core.files", "write" | "append_all") => {
+//RS             Some((vec![(read, path), (read, Type::String)], Some(io_unit)))
+//RS         }
+//RS         ("core.files", "write_bytes") => {
+//RS             Some((vec![(read, path), (read, list_u8.clone())], Some(io_unit)))
+//RS         }
+//RS         ("core.files", "exists" | "is_dir") => Some((vec![(read, path)], Some(bool_))),
+//RS         (
+//RS             "core.files",
+//RS             "remove" | "create_dir" | "create_dir_all" | "remove_dir" | "remove_all",
+//RS         ) => Some((
+//RS             vec![(read, path)],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "stat" | "lstat") => Some((
+//RS             vec![(read, path)],
+//RS             Some(result_ty(Type::Named("Stat".to_string()), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "is_fifo" | "is_socket") => Some((
+//RS             vec![(read, path.clone())],
+//RS             Some(result_ty(Type::Bool, io_error_ty())),
+//RS         )),
+//RS         ("core.files", "chown") => Some((
+//RS             vec![(read, path.clone()), (read, int.clone()), (read, int)],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "mkdtemp") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::String, io_error_ty())),
+//RS         )),
+//RS         ("core.files", "mktemp") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.files", "set_mode") => Some((
+//RS             vec![(read, path), (read, int)],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "canonicalize" | "absolute") => Some((
+//RS             vec![(read, path)],
+//RS             Some(result_ty(Type::String, io_error_ty())),
+//RS         )),
+//RS         // D-LSDIR1=A: returns [DirEntry] ({name, path, is_dir}) — full path + type in one step.
+//RS         ("core.files", "list_dir") => Some((
+//RS             vec![(read, path)],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::Named("DirEntry".to_string()))),
+//RS                 io_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.files", "copy" | "rename") => Some((
+//RS             vec![(read, path.clone()), (read, path.clone())],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "copy_dir") => Some((
+//RS             vec![(read, path.clone()), (read, path.clone())],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "symlink" | "hard_link") => Some((
+//RS             vec![(read, path.clone()), (read, path.clone())],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "read_link") => Some((
+//RS             vec![(read, path)],
+//RS             Some(result_ty(Type::String, io_error_ty())),
+//RS         )),
+//RS         // `walk` and `walk_parallel` share one ignore-aware surface and one
+//RS         // result shape; the second argument names the ignore file.
+//RS         ("core.files", "walk" | "walk_parallel" | "walk_files") => Some((
+//RS             vec![(read, path), (read, Type::Option(Box::new(Type::String)))],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::Named("WalkEntry".to_string()))),
+//RS                 io_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.files", "glob") => Some((
+//RS             vec![(read, path)],
+//RS             Some(result_ty(Type::List(Box::new(Type::String)), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "read_at") => Some((
+//RS             vec![(read, path), (read, Type::Int), (read, Type::Int)],
+//RS             Some(result_ty(Type::List(Box::new(u8_ty())), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "write_at") => Some((
+//RS             vec![
+//RS                 (read, path),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS             ],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "fsync") => Some((
+//RS             vec![(read, path.clone())],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "write_atomic") => Some((
+//RS             vec![(read, path), (read, Type::List(Box::new(u8_ty())))],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "temp_dir") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::Named("TempDir".to_string()), io_error_ty())),
+//RS         )),
+//RS         ("core.files", "temp_file") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(
+//RS                 Type::Named("TempFile".to_string()),
+//RS                 io_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.files", "lock") => Some((
+//RS             vec![(
+//RS                 read,
+//RS                 Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
+//RS             )],
+//RS             Some(result_ty(
+//RS                 Type::Named("FileLock".to_string()),
+//RS                 io_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.watcher", "files") => Some((
+//RS             vec![(
+//RS                 read,
+//RS                 Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
+//RS             )],
+//RS             Some(result_ty(
+//RS                 Type::Named("WatchHandle".to_string()),
+//RS                 io_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.watcher", "process_pid") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::Named("WatchHandle".to_string())),
+//RS         )),
+//RS         ("core.watcher", "port") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(Type::Named("WatchHandle".to_string())),
+//RS         )),
+//RS         ("core.watcher", "set") => Some((vec![], Some(Type::Named("WatchSet".to_string())))),
+//RS         ("core.process", "argv" | "args") => {
+//RS             Some((vec![], Some(Type::List(Box::new(Type::String)))))
+//RS         }
+//RS         ("core.process", "check") => Some((
+//RS             vec![(read, Type::Named("ProcessReceipt".to_string()))],
+//RS             Some(result_ty(unit.clone(), io.clone())),
+//RS         )),
+//RS         ("core.process", "status_ok") => Some((
+//RS             vec![(read, Type::Named("ProcessReceipt".to_string()))],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.term", "confirm") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+//RS         ("core.term", "choose") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::List(Box::new(Type::String))),
+//RS             ],
+//RS             Some(result_ty(Type::String, io_error_ty())),
+//RS         )),
+//RS         ("core.term", "input_secret") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::String, io_error_ty())),
+//RS         )),
+//RS         ("core.term", "read_all_input") => {
+//RS             Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
+//RS         }
+//RS         // #1480: remaining core.term ledger gaps — thin wrappers over existing IO.
+//RS         ("core.term", "readline") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
+//RS         ("core.term", "read_until") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::String, io_error_ty())),
+//RS         )),
+//RS         ("core.term", "take") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(result_ty(list_u8.clone(), io_error_ty())),
+//RS         )),
+//RS         ("core.term", "buffered") => Some((vec![], Some(Type::Named("StdinHandle".to_string())))),
+//RS         ("core.term", "binread") => Some((
+//RS             vec![(
+//RS                 read,
+//RS                 Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
+//RS             )],
+//RS             Some(result_ty(list_u8.clone(), io_error_ty())),
+//RS         )),
+//RS         ("core.term", "binwrite") => Some((
+//RS             vec![
+//RS                 (
+//RS                     read,
+//RS                     Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
+//RS                 ),
+//RS                 (read, list_u8.clone()),
+//RS             ],
+//RS             Some(result_ty(unit.clone(), io_error_ty())),
+//RS         )),
+//RS         // D-STDIN1=A: streaming line-by-line stdin.
+//RS         ("core.term", "stdin") => Some((vec![], Some(Type::Named("StdinHandle".to_string())))),
+//RS         ("core.term", "stdout") => Some((vec![], Some(Type::Named("Stdout".to_string())))),
+//RS         ("core.term", "stderr") => Some((vec![], Some(Type::Named("Stderr".to_string())))),
+//RS         ("core.term", "terminal_width" | "terminal_height") => Some((vec![], Some(Type::Int))),
+//RS         ("core.term", "style" | "style_force") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.term", "progress") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.sys", "get") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Option(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.sys", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
+//RS         ("core.sys", "unset") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::Bool, Type::Named("EnvError".to_string()))),
+//RS         )),
+//RS         ("core.sys", "vars") => Some((
+//RS             vec![],
+//RS             Some(result_ty(
+//RS                 Type::List(Box::new(Type::String)),
+//RS                 Type::Named("EnvError".to_string()),
+//RS             )),
+//RS         )),
+//RS         ("core.sys", "current_dir") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
+//RS         ("core.sys", "home_dir") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
+//RS         (
+//RS             "core.sys",
+//RS             "name" | "family" | "arch" | "temp_dir" | "executable" | "hostname" | "username"
+//RS             | "release" | "version",
+//RS         ) => Some((vec![], Some(Type::String))),
+//RS         ("core.sys", "expand") => Some((vec![(read, Type::String)], Some(Type::String))),
+//RS         (
+//RS             "core.sys",
+//RS             "pid" | "getpid" | "cpu_count" | "getppid" | "getuid" | "geteuid" | "getgid"
+//RS             | "getegid" | "getpgrp",
+//RS         ) => Some((vec![], Some(Type::Int))),
+//RS         ("core.sys", "umask" | "exitcode") => Some((vec![(read, Type::Int)], Some(Type::Int))),
+//RS         ("core.sys", "success") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
+//RS         ("core.sys", "uptime") => Some((vec![], Some(Type::Float))),
+//RS         ("core.sys", "getgroups") => Some((vec![], Some(Type::List(Box::new(Type::Int))))),
+//RS         ("core.sys", "loadavg" | "times") => {
+//RS             Some((vec![], Some(Type::List(Box::new(Type::Float)))))
+//RS         }
+//RS         ("core.sys", "getpgid" | "getsid") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(result_ty(Type::Int, io_error_ty())),
+//RS         )),
+//RS         ("core.sys", "getpriority") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(result_ty(Type::Int, io_error_ty())),
+//RS         )),
+//RS         ("core.sys", "setpriority") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.sys", "utime") => Some((
+//RS             vec![(read, path), (read, Type::Int), (read, Type::Int)],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.sys", "sync") => Some((vec![], None)),
+//RS         ("core.sys", "stop") => Some((vec![(read, Type::Int)], None)),
+//RS         ("core.sys", "atexit") => Some((
+//RS             vec![(
+//RS                 read,
+//RS                 Type::Fn {
+//RS                     params: vec![],
+//RS                     ret: None,
+//RS                     effect_bound: None,
+//RS                     return_view_provenance: None,
+//RS                     param_contract: None,
+//RS                     call_metadata: None,
+//RS                 },
+//RS             )],
+//RS             None,
+//RS         )),
+//RS         ("core.sys", "set_current_dir") => Some((
+//RS             vec![(read, path)],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.sys", "fork" | "setsid" | "wait") => {
+//RS             Some((vec![], Some(result_ty(Type::Int, io_error_ty()))))
+//RS         }
+//RS         ("core.sys", "waitpid") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(result_ty(Type::Int, io_error_ty())),
+//RS         )),
+//RS         ("core.sys", "setuid" | "setgid") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.sys", "setpgrp") => Some((vec![], Some(result_ty(unit_ty(), io_error_ty())))),
+//RS         ("core.sys", "setpgid" | "kill") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.sys", "initgroups") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         ("core.sys", "pipe") => Some((
+//RS             vec![],
+//RS             Some(result_ty(Type::List(Box::new(Type::Int)), io_error_ty())),
+//RS         )),
+//RS         ("core.sys", "close_fd") => Some((vec![(read, Type::Int)], None)),
+//RS         ("core.sys", "mkfifo") => Some((
+//RS             vec![(read, path), (read, Type::Int)],
+//RS             Some(result_ty(unit_ty(), io_error_ty())),
+//RS         )),
+//RS         // U13 (D-JPK-SECRETCRYPTO1): `core.crypto.vault.get(name)` — a decrypted repo
+//RS         // secret, `None` if `name` isn't in the store. Same "may be missing"
+//RS         // shape as `core.sys.get`.
+//RS         ("core.crypto.vault", "get") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::Option(Box::new(Type::String))),
+//RS         )),
+//RS         // D-AUTH2=A / D-AUTH-TOKENPOLICY1=A: closed token verification. The
+//RS         // three-argument form is the beginner surface; verify_jwt's fixed
+//RS         // signature also describes its five-parameter registry ABI. The
+//RS         // arity-sensitive optional controls remain in core_call.rs.
+//RS         ("core.auth", "verify_jwt") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Named("Duration".into())),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Claims".into()),
+//RS                 Type::Named("AuthError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.auth", "verify_paseto") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::List(Box::new(u8_ty()))),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(result_ty(
+//RS                 Type::Named("Claims".into()),
+//RS                 Type::Named("AuthError".into()),
+//RS             )),
+//RS         )),
+//RS         ("core.auth", "register_user") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(result_ty(unit_ty(), Type::String)),
+//RS         )),
+//RS         ("core.auth", "password_login" | "oauth_finish") => Some((
+//RS             vec![
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(result_ty(Type::Named("Session".into()), Type::String)),
+//RS         )),
+//RS         ("core.auth", "magic_link_consume") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+//RS             Some(result_ty(Type::Named("Session".into()), Type::String)),
+//RS         )),
+//RS         ("core.auth", "session_validate") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(result_ty(Type::Named("Session".into()), Type::String)),
+//RS         )),
+//RS         ("core.auth", "session_show" | "session_user" | "session_cookie" | "session_id") => Some((
+//RS             vec![(read, Type::Named("Session".into()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.auth", "magic_link_issue") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+//RS             Some(result_ty(Type::String, Type::String)),
+//RS         )),
+//RS         ("core.auth", "oauth_begin") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(result_ty(Type::String, Type::String)),
+//RS         )),
+//RS         ("core.sync", "text_new") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(Type::Named("SyncText".into())),
+//RS         )),
+//RS         ("core.sync", "text_set") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SyncText".into())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Named("SyncText".into())),
+//RS         )),
+//RS         ("core.sync", "text_merge") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SyncText".into())),
+//RS                 (read, Type::Named("SyncText".into())),
+//RS             ],
+//RS             Some(Type::Named("SyncText".into())),
+//RS         )),
+//RS         ("core.sync", "text_show") => Some((
+//RS             vec![(read, Type::Named("SyncText".into()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         // D-SYNC1: a positioned edit is what makes
+//RS         // SyncText a text CRDT rather than a whole-document overwrite.
+//RS         ("core.sync", "text_edit") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SyncText".into())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Named("SyncText".into())),
+//RS         )),
+//RS         // D-SYNC1: the expert view of the merge bookkeeping.
+//RS         ("core.sync", "text_metadata") => Some((
+//RS             vec![(read, Type::Named("SyncText".into()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.sync", "counter_new") => Some((
+//RS             vec![(read, Type::String), (read, Type::Int)],
+//RS             Some(Type::Named("SyncCounter".into())),
+//RS         )),
+//RS         ("core.sync", "counter_inc") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SyncCounter".into())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::Named("SyncCounter".into())),
+//RS         )),
+//RS         ("core.sync", "counter_merge") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SyncCounter".into())),
+//RS                 (read, Type::Named("SyncCounter".into())),
+//RS             ],
+//RS             Some(Type::Named("SyncCounter".into())),
+//RS         )),
+//RS         ("core.sync", "counter_value") => Some((
+//RS             vec![(read, Type::Named("SyncCounter".into()))],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.sync", "map_new") => Some((vec![], Some(Type::Named("SyncMap".into())))),
+//RS         ("core.sync", "list_new") => Some((vec![], Some(Type::Named("SyncList".into())))),
+//RS         ("core.sync", "map_set") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SyncMap".into())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Named("SyncMap".into())),
+//RS         )),
+//RS         ("core.sync", "map_get") => Some((
+//RS             vec![(read, Type::Named("SyncMap".into())), (read, Type::String)],
+//RS             Some(Type::Option(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.sync", "map_merge") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SyncMap".into())),
+//RS                 (read, Type::Named("SyncMap".into())),
+//RS             ],
+//RS             Some(Type::Named("SyncMap".into())),
+//RS         )),
+//RS         ("core.sync", "map_show") => Some((
+//RS             vec![(read, Type::Named("SyncMap".into()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.sync", "list_push") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SyncList".into())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Named("SyncList".into())),
+//RS         )),
+//RS         ("core.sync", "list_merge") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("SyncList".into())),
+//RS                 (read, Type::Named("SyncList".into())),
+//RS             ],
+//RS             Some(Type::Named("SyncList".into())),
+//RS         )),
+//RS         ("core.sync", "list_show") => Some((
+//RS             vec![(read, Type::Named("SyncList".into()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.sync", "policy_new") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(result_ty(Type::Named("RowPolicy".into()), Type::String)),
+//RS         )),
+//RS         ("core.sync", "policy_allows") => Some((
+//RS             vec![
+//RS                 (read, Type::Named("RowPolicy".into())),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.sync", "policy_show") => Some((
+//RS             vec![(read, Type::Named("RowPolicy".into()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.process", "exit") => Some((
+//RS             vec![(read, int)],
+//RS             Some(Type::Named(Syntax::TYPE_NEVER.to_string())),
+//RS         )),
+//RS         // D-FOUND-LIFECYCLE1=A: subscribe the root cancellation lifecycle to a process signal.
+//RS         ("core.process", "on_signal") => Some((
+//RS             vec![(read, Type::Named("ProcessSignal".to_string()))],
+//RS             Some(unit.clone()),
+//RS         )),
+//RS         ("core.process", "cmd") => Some((
+//RS             vec![(read, Type::List(Box::new(Type::String)))],
+//RS             Some(Type::Named("ProcessSpec".to_string())),
+//RS         )),
+//RS         // D-PROCESS1=A: pipeline takes a list of `ProcessSpec` (built via
+//RS         // `process.cmd(argv)...`), not raw argv lists — one canonical builder (I8).
+//RS         ("core.process", "pipeline") => Some((
+//RS             vec![(
+//RS                 read,
+//RS                 Type::List(Box::new(Type::Named("ProcessSpec".to_string()))),
+//RS             )],
+//RS             Some(result_ty(
+//RS                 Type::Named("ProcessReceipt".to_string()),
+//RS                 io_error_ty(),
+//RS             )),
+//RS         )),
+//RS         ("core.testing", "snap" | "golden") => Some((
+//RS             vec![(read, Type::String), (read, Type::String)],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.testing", "fixture" | "temp_dir") => {
+//RS             Some((vec![(read, Type::String)], Some(Type::String)))
+//RS         }
+//RS         ("core.testing", "corpus") => Some((
+//RS             vec![(read, Type::String)],
+//RS             Some(Type::List(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.testing", "fake_clock") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::Named("Clock".to_string())),
+//RS         )),
+//RS         ("core.testing", "fake_rng") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::Named("RNG".to_string())),
+//RS         )),
+//RS         ("core.testing", "fake_data") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::Named("Fake".to_string())),
+//RS         )),
+//RS         ("core.testing", "test_suite") => {
+//RS             Some((vec![], Some(Type::Named("TestSuite".to_string()))))
+//RS         }
+//RS         ("core.testing", "world") => Some((
+//RS             vec![(
+//RS                 read,
+//RS                 Type::Fn {
+//RS                     params: vec![Type::Named(
+//RS                         Syntax::DETERMINISTIC_WORLD_TYPE.to_string(),
+//RS                     )],
+//RS                     ret: Some(Box::new(unit.clone())),
+//RS                     effect_bound: None,
+//RS                     return_view_provenance: None,
+//RS                     param_contract: None,
+//RS                     call_metadata: None,
+//RS                 },
+//RS             )],
+//RS             Some(unit.clone()),
+//RS         )),
+//RS         ("core.testing", "compare") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(comparison_data.clone()))),
+//RS                 (read, comparison_fn.clone()),
+//RS                 (read, comparison_fn),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(Type::Named("TestComparison".to_string())),
+//RS         )),
+//RS         ("core.testing", "assert_equal") => Some((
+//RS             vec![(read, Type::Named("TestComparison".to_string()))],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.testing", "status") => Some((
+//RS             vec![(read, Type::Named("TestComparison".to_string()))],
+//RS             Some(Type::String),
+//RS         )),
+//RS         ("core.math", "abs_float" | "log1p") => {
+//RS             Some((vec![(read, float.clone())], Some(float)))
+//RS         }
+//RS         ("core.math", "min_float" | "max_float" | "midpoint") => Some((
+//RS             vec![(read, float.clone()), (read, float.clone())],
+//RS             Some(float),
+//RS         )),
+//RS         ("core.math", "clamp_float") => Some((
+//RS             vec![
+//RS                 (read, float.clone()),
+//RS                 (read, float.clone()),
+//RS                 (read, float.clone()),
+//RS             ],
+//RS             Some(float),
+//RS         )),
+//RS         ("core.math", "hypot3") => Some((
+//RS             vec![
+//RS                 (read, float.clone()),
+//RS                 (read, float.clone()),
+//RS                 (read, float.clone()),
+//RS             ],
+//RS             Some(float),
+//RS         )),
+//RS         ("core.math", "tau_const" | "random") => Some((vec![], Some(float.clone()))),
+//RS         ("core.math", "gcd_many" | "lcm_many" | "sum_int" | "prod_int") => Some((
+//RS             vec![(read, Type::List(Box::new(int.clone())))],
+//RS             Some(int.clone()),
+//RS         )),
+//RS         ("core.math", "powmod") => Some((
+//RS             vec![
+//RS                 (read, int.clone()),
+//RS                 (read, int.clone()),
+//RS                 (read, int.clone()),
+//RS             ],
+//RS             Some(Type::Option(Box::new(int.clone()))),
+//RS         )),
+//RS         ("core.math", "abs_diff" | "xor") => Some((
+//RS             vec![(read, int.clone()), (read, int.clone())],
+//RS             Some(int.clone()),
+//RS         )),
+//RS         ("core.math", "even" | "odd") => {
+//RS             Some((vec![(read, int.clone())], Some(Type::Bool)))
+//RS         }
+//RS         ("core.math", "in_range") => Some((
+//RS             vec![
+//RS                 (read, int.clone()),
+//RS                 (read, int.clone()),
+//RS                 (read, int.clone()),
+//RS             ],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.math", "sqrt" | "floor" | "ceil" | "fabs" | "expm1") => {
+//RS             Some((vec![(read, float.clone())], Some(float)))
+//RS         }
+//RS         ("core.math", "round") => Some((vec![(read, float.clone())], Some(int.clone()))),
+//RS         ("core.math", "pow") => Some((
+//RS             vec![(read, Type::Float), (read, Type::Float)],
+//RS             Some(Type::Float),
+//RS         )),
+//RS         ("core.math", "fmod" | "remainder") => Some((
+//RS             vec![(read, float.clone()), (read, float.clone())],
+//RS             Some(Type::Float),
+//RS         )),
+//RS         ("core.math", "isclose") => Some((
+//RS             vec![
+//RS                 (read, float.clone()),
+//RS                 (read, float.clone()),
+//RS                 (read, float.clone()),
+//RS                 (read, float.clone()),
+//RS             ],
+//RS             Some(Type::Bool),
+//RS         )),
+//RS         ("core.math", "dist") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(Type::Float))),
+//RS                 (read, Type::List(Box::new(Type::Float))),
+//RS             ],
+//RS             Some(Type::Float),
+//RS         )),
+//RS         (
+//RS             "core.math.combinatorics",
+//RS             "permutations"
+//RS             | "combinations"
+//RS             | "combinations_with_replacement"
+//RS             | "product"
+//RS             | "batched"
+//RS             | "tee"
+//RS             | "windows",
+//RS         ) => Some((
+//RS             vec![(read, list_int.clone()), (read, int.clone())],
+//RS             Some(list_list_int.clone()),
+//RS         )),
+//RS         ("core.math.combinatorics", "cartesian") => Some((
+//RS             vec![(read, list_int.clone()), (read, list_int.clone())],
+//RS             Some(list_list_int.clone()),
+//RS         )),
+//RS         (
+//RS             "core.math.combinatorics",
+//RS             "pairwise" | "groupby" | "powerset",
+//RS         ) => Some((
+//RS             vec![(read, list_int.clone())],
+//RS             Some(list_list_int.clone()),
+//RS         )),
+//RS         ("core.math.combinatorics", "zip_longest") => Some((
+//RS             vec![
+//RS                 (read, list_int.clone()),
+//RS                 (read, list_int.clone()),
+//RS                 (read, int.clone()),
+//RS             ],
+//RS             Some(list_list_int.clone()),
+//RS         )),
+//RS         ("core.math.combinatorics", "flatten" | "starmap") => Some((
+//RS             vec![(read, list_list_int.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.math.combinatorics", "chain") => Some((
+//RS             vec![(read, list_int.clone()), (read, list_int.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.math.combinatorics", "compress") => Some((
+//RS             vec![(read, list_int.clone()), (read, list_bool.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.math.combinatorics", "drop") => Some((
+//RS             vec![(read, list_int.clone()), (read, int.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         (
+//RS             "core.math.combinatorics",
+//RS             "takewhile" | "dropwhile" | "filterfalse",
+//RS         ) => Some((
+//RS             vec![(read, list_int.clone()), (read, bool_.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.math.combinatorics", "islice") => Some((
+//RS             vec![
+//RS                 (read, list_int.clone()),
+//RS                 (read, int.clone()),
+//RS                 (read, int.clone()),
+//RS                 (read, int.clone()),
+//RS             ],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.math.combinatorics", "unique") => {
+//RS             Some((vec![(read, list_int.clone())], Some(list_int.clone())))
+//RS         }
+//RS         ("core.math.combinatorics", "repeat") => Some((
+//RS             vec![(read, int.clone()), (read, int.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.math.combinatorics", "count_from" | "count") => Some((
+//RS             vec![
+//RS                 (read, int.clone()),
+//RS                 (read, int.clone()),
+//RS                 (read, int.clone()),
+//RS             ],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.math.combinatorics", "cycle") => Some((
+//RS             vec![(read, list_int.clone()), (read, int.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.math.combinatorics", "accumulate" | "reverse") => {
+//RS             Some((vec![(read, list_int.clone())], Some(list_int.clone())))
+//RS         }
+//RS         (
+//RS             "core.math.combinatorics",
+//RS             "factorial",
+//RS         ) => Some((
+//RS             vec![(read, int.clone())],
+//RS             Some(Type::Option(Box::new(Type::Int))),
+//RS         )),
+//RS         (
+//RS             "core.math.combinatorics",
+//RS             "binomial"
+//RS             | "permutations_count"
+//RS             | "combinations_count"
+//RS             | "npr"
+//RS             | "ncr"
+//RS             | "falling_factorial"
+//RS             | "rising_factorial",
+//RS         ) => Some((
+//RS             vec![(read, int.clone()), (read, int.clone())],
+//RS             Some(Type::Option(Box::new(Type::Int))),
+//RS         )),
+//RS         ("core.math.combinatorics", "multinomial") => Some((
+//RS             vec![(read, Type::List(Box::new(Type::Int)))],
+//RS             Some(Type::Option(Box::new(Type::Int))),
+//RS         )),
+//RS         ("core.collections", "heapify") => Some((
+//RS             vec![(read, list_int.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.collections", "heappush") => Some((
+//RS             vec![(read, list_int.clone()), (read, int.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.collections", "heappop") => Some((
+//RS             vec![(read, list_int.clone())],
+//RS             Some(Type::Tuple(vec![
+//RS                 ("heap".to_string(), Box::new(list_int.clone())),
+//RS                 (
+//RS                     "value".to_string(),
+//RS                     Box::new(Type::Option(Box::new(Type::Int))),
+//RS                 ),
+//RS             ])),
+//RS         )),
+//RS         ("core.collections", "heappushpop") => Some((
+//RS             vec![(read, list_int.clone()), (read, int.clone())],
+//RS             Some(Type::Tuple(vec![
+//RS                 ("heap".to_string(), Box::new(list_int.clone())),
+//RS                 ("value".to_string(), Box::new(Type::Int)),
+//RS             ])),
+//RS         )),
+//RS         ("core.collections", "heapreplace") => Some((
+//RS             vec![(read, list_int.clone()), (read, int.clone())],
+//RS             Some(Type::Tuple(vec![
+//RS                 ("heap".to_string(), Box::new(list_int.clone())),
+//RS                 (
+//RS                     "value".to_string(),
+//RS                     Box::new(Type::Option(Box::new(Type::Int))),
+//RS                 ),
+//RS             ])),
+//RS         )),
+//RS         ("core.collections", "bisect_left" | "bisect_right") => Some((
+//RS             vec![(read, list_int.clone()), (read, int.clone())],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.collections", "insort_left" | "insort_right") => Some((
+//RS             vec![(read, list_int.clone()), (read, int.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.collections", "merge_sorted") => Some((
+//RS             vec![(read, list_int.clone()), (read, list_int.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.collections", "nsmallest" | "nlargest") => Some((
+//RS             vec![(read, int.clone()), (read, list_int.clone())],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.collections", "counter") => Some((vec![], Some(counter.clone()))),
+//RS         ("core.collections", "counter_from") => Some((
+//RS             vec![(read, list_string.clone())],
+//RS             Some(counter.clone()),
+//RS         )),
+//RS         ("core.collections", "add" | "set_count") => Some((
+//RS             vec![
+//RS                 (read, counter.clone()),
+//RS                 (read, Type::String),
+//RS                 (read, int.clone()),
+//RS             ],
+//RS             Some(counter.clone()),
+//RS         )),
+//RS         ("core.collections", "inc" | "dec") => Some((
+//RS             vec![(read, counter.clone()), (read, Type::String)],
+//RS             Some(counter.clone()),
+//RS         )),
+//RS         ("core.collections", "get") => Some((
+//RS             vec![(read, counter.clone()), (read, Type::String)],
+//RS             Some(int.clone()),
+//RS         )),
+//RS         ("core.collections", "total") => Some((
+//RS             vec![(read, counter.clone())],
+//RS             Some(int.clone()),
+//RS         )),
+//RS         ("core.collections", "names" | "elements") => Some((
+//RS             vec![(read, counter.clone())],
+//RS             Some(list_string.clone()),
+//RS         )),
+//RS         ("core.collections", "most_common") => Some((
+//RS             vec![(read, counter.clone()), (read, int.clone())],
+//RS             Some(counter.clone()),
+//RS         )),
+//RS         ("core.collections", "subtract" | "merge_add") => Some((
+//RS             vec![(read, counter.clone()), (read, counter.clone())],
+//RS             Some(counter.clone()),
+//RS         )),
+//RS         ("core.collections", "clear_counter") => Some((
+//RS             vec![(read, counter.clone())],
+//RS             Some(counter.clone()),
+//RS         )),
+//RS         ("core.collections", "ordered_map") => {
+//RS             Some((vec![], Some(ordered_map.clone())))
+//RS         }
+//RS         ("core.collections", "map_get") => Some((
+//RS             vec![(read, ordered_map.clone()), (read, Type::String)],
+//RS             Some(Type::Option(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.collections", "map_set") => Some((
+//RS             vec![
+//RS                 (read, ordered_map.clone()),
+//RS                 (read, Type::String),
+//RS                 (read, Type::String),
+//RS             ],
+//RS             Some(ordered_map.clone()),
+//RS         )),
+//RS         ("core.collections", "map_remove") => Some((
+//RS             vec![(read, ordered_map.clone()), (read, Type::String)],
+//RS             Some(ordered_map.clone()),
+//RS         )),
+//RS         ("core.collections", "map_keys" | "map_values") => Some((
+//RS             vec![(read, ordered_map.clone())],
+//RS             Some(list_string.clone()),
+//RS         )),
+//RS         ("core.collections", "map_contains") => Some((
+//RS             vec![(read, ordered_map.clone()), (read, Type::String)],
+//RS             Some(bool_.clone()),
+//RS         )),
+//RS         ("core.collections", "map_len") => Some((
+//RS             vec![(read, ordered_map.clone())],
+//RS             Some(int.clone()),
+//RS         )),
+//RS         ("core.collections", "chain") => Some((vec![], Some(chain.clone()))),
+//RS         ("core.collections", "chain_push") => Some((
+//RS             vec![
+//RS                 (read, chain.clone()),
+//RS                 (read, list_string.clone()),
+//RS                 (read, list_string.clone()),
+//RS             ],
+//RS             Some(chain.clone()),
+//RS         )),
+//RS         ("core.collections", "chain_get") => Some((
+//RS             vec![(read, chain.clone()), (read, Type::String)],
+//RS             Some(Type::Option(Box::new(Type::String))),
+//RS         )),
+//RS         ("core.collections", "chain_contains") => Some((
+//RS             vec![(read, chain.clone()), (read, Type::String)],
+//RS             Some(bool_.clone()),
+//RS         )),
+//RS         ("core.collections.set", "new") => Some((vec![], Some(string_set.clone()))),
+//RS         ("core.collections.set", "from_list") => Some((
+//RS             vec![(read, list_string.clone())],
+//RS             Some(string_set.clone()),
+//RS         )),
+//RS         ("core.collections.set", "add" | "discard") => Some((
+//RS             vec![(read, string_set.clone()), (read, Type::String)],
+//RS             Some(string_set.clone()),
+//RS         )),
+//RS         ("core.collections.set", "remove") => Some((
+//RS             vec![(read, string_set.clone()), (read, Type::String)],
+//RS             Some(Type::Option(Box::new(string_set.clone()))),
+//RS         )),
+//RS         ("core.collections.set", "contains") => Some((
+//RS             vec![(read, string_set.clone()), (read, Type::String)],
+//RS             Some(bool_.clone()),
+//RS         )),
+//RS         ("core.collections.set", "len" | "is_empty") => Some((
+//RS             vec![(read, string_set.clone())],
+//RS             Some(if name == "len" {
+//RS                 int.clone()
+//RS             } else {
+//RS                 bool_.clone()
+//RS             }),
+//RS         )),
+//RS         ("core.collections.set", "to_list") => Some((
+//RS             vec![(read, string_set.clone())],
+//RS             Some(list_string.clone()),
+//RS         )),
+//RS         ("core.collections.set", "clear" | "clone_set") => Some((
+//RS             vec![(read, string_set.clone())],
+//RS             Some(string_set.clone()),
+//RS         )),
+//RS         (
+//RS             "core.collections.set",
+//RS             "union" | "intersection" | "difference" | "symmetric_difference",
+//RS         ) => Some((
+//RS             vec![(read, string_set.clone()), (read, string_set.clone())],
+//RS             Some(string_set.clone()),
+//RS         )),
+//RS         (
+//RS             "core.collections.set",
+//RS             "issubset" | "issuperset" | "isdisjoint",
+//RS         ) => Some((
+//RS             vec![(read, string_set.clone()), (read, string_set.clone())],
+//RS             Some(bool_.clone()),
+//RS         )),
+//RS         ("core.math", "comb" | "perm") => Some((
+//RS             vec![(read, int.clone()), (read, int.clone())],
+//RS             Some(Type::Option(Box::new(Type::Int))),
+//RS         )),
+//RS         ("core.math", "isnan" | "isinf" | "isfinite") => {
+//RS             Some((vec![(read, Type::Float)], Some(Type::Bool)))
+//RS         }
+//RS         ("core.math", "fsum") => Some((
+//RS             vec![(read, Type::List(Box::new(Type::Float)))],
+//RS             Some(Type::Float),
+//RS         )),
+//RS         ("core.math", "sumprod") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(Type::Float))),
+//RS                 (read, Type::List(Box::new(Type::Float))),
+//RS             ],
+//RS             Some(Type::Float),
+//RS         )),
+//RS         ("core.math", "prod") => Some((
+//RS             vec![(read, Type::List(Box::new(Type::Int)))],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.math.stats", "sum" | "prod") => {
+//RS             Some((vec![(read, list_float.clone())], Some(Type::Float)))
+//RS         }
+//RS         ("core.math.stats", "count") => {
+//RS             Some((vec![(read, list_float.clone())], Some(Type::Int)))
+//RS         }
+//RS         (
+//RS             "core.math.stats",
+//RS             "cumsum" | "cumprod" | "diff" | "rank" | "zscore",
+//RS         ) => Some((vec![(read, list_float.clone())], Some(list_float.clone()))),
+//RS         ("core.math.stats", "moving_average") => Some((
+//RS             vec![(read, list_float.clone()), (read, Type::Int)],
+//RS             Some(list_float.clone()),
+//RS         )),
+//RS         ("core.math.stats", "ewma") => Some((
+//RS             vec![(read, list_float.clone()), (read, Type::Float)],
+//RS             Some(list_float.clone()),
+//RS         )),
+//RS         ("core.math.stats", "clip") => Some((
+//RS             vec![
+//RS                 (read, list_float.clone()),
+//RS                 (read, Type::Float),
+//RS                 (read, Type::Float),
+//RS             ],
+//RS             Some(list_float.clone()),
+//RS         )),
+//RS         (
+//RS             "core.math.stats",
+//RS             "mean"
+//RS             | "fmean"
+//RS             | "geometric_mean"
+//RS             | "harmonic_mean"
+//RS             | "median"
+//RS             | "median_low"
+//RS             | "median_high"
+//RS             | "mode"
+//RS             | "pvariance"
+//RS             | "pstdev"
+//RS             | "variance"
+//RS             | "stdev"
+//RS             | "min"
+//RS             | "max"
+//RS             | "range"
+//RS             | "iqr"
+//RS             | "mad"
+//RS             | "mean_abs_deviation"
+//RS             | "skew"
+//RS             | "kurtosis",
+//RS         ) => Some((
+//RS             vec![(read, list_float.clone())],
+//RS             Some(Type::Option(Box::new(Type::Float))),
+//RS         )),
+//RS         (
+//RS             "core.math.stats",
+//RS             "median_grouped" | "quantile" | "percentile",
+//RS         ) => Some((
+//RS             vec![(read, list_float.clone()), (read, Type::Float)],
+//RS             Some(Type::Option(Box::new(Type::Float))),
+//RS         )),
+//RS         (
+//RS             "core.math.stats",
+//RS             "covariance"
+//RS             | "correlation"
+//RS             | "sumprod"
+//RS             | "weighted_mean"
+//RS             | "spearman"
+//RS             | "pearson"
+//RS             | "covariance_population",
+//RS         ) => Some((
+//RS             vec![(read, list_float.clone()), (read, list_float.clone())],
+//RS             Some(Type::Option(Box::new(Type::Float))),
+//RS         )),
+//RS         ("core.math.stats", "multimode") => {
+//RS             Some((vec![(read, list_float.clone())], Some(list_float.clone())))
+//RS         }
+//RS         ("core.math.stats", "kde" | "winsorize") => Some((
+//RS             vec![(read, list_float.clone()), (read, Type::Float)],
+//RS             Some(list_float.clone()),
+//RS         )),
+//RS         ("core.math.stats", "kde_random") => Some((
+//RS             vec![
+//RS                 (read, list_float.clone()),
+//RS                 (read, Type::Float),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(list_float.clone()),
+//RS         )),
+//RS         ("core.math.stats", "quantiles") => Some((
+//RS             vec![(read, list_float.clone()), (read, Type::Int)],
+//RS             Some(list_float.clone()),
+//RS         )),
+//RS         ("core.math.stats", "residuals") => Some((
+//RS             vec![(read, list_float.clone()), (read, list_float.clone())],
+//RS             Some(list_float.clone()),
+//RS         )),
+//RS         ("core.math.stats", "histogram") => Some((
+//RS             vec![(read, list_float.clone()), (read, Type::Int)],
+//RS             Some(list_int.clone()),
+//RS         )),
+//RS         ("core.math.random", "int" | "randint") => {
+//RS             Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Int)))
+//RS         }
+//RS         ("core.math.random", "float" | "random") => Some((vec![], Some(Type::Float))),
+//RS         ("core.math.random", "float_range" | "uniform") => Some((
+//RS             vec![(read, Type::Float), (read, Type::Float)],
+//RS             Some(Type::Float),
+//RS         )),
+//RS         ("core.math.random", "bool") => Some((vec![], Some(Type::Bool))),
+//RS         ("core.math.random", "normal" | "normalvariate" | "gauss") => Some((
+//RS             vec![(read, Type::Float), (read, Type::Float)],
+//RS             Some(Type::Float),
+//RS         )),
+//RS         ("core.math.random", "exponential" | "expovariate") => {
+//RS             Some((vec![(read, Type::Float)], Some(Type::Float)))
+//RS         }
+//RS         ("core.math.random", "seed") => Some((vec![(read, Type::Int)], None)),
+//RS         // D-RANDSPLIT1=A: seedable PRNG bytes — fast, NOT cryptographically secure.
+//RS         // Returns raw `[Int8N]`; for crypto contexts use `core.crypto.random.bytes`.
+//RS         ("core.math.random", "bytes" | "randbytes") => {
+//RS             Some((vec![(read, Type::Int)], Some(Type::List(Box::new(u8_ty())))))
+//RS         }
+//RS         ("core.math.random", "getrandbits") => {
+//RS             Some((vec![(read, Type::Int)], Some(Type::Int)))
+//RS         }
+//RS         ("core.math.random", "randrange") => Some((
+//RS             vec![(read, Type::Int), (read, Type::Int)],
+//RS             Some(Type::Int),
+//RS         )),
+//RS         ("core.math.random", "choice") => Some((
+//RS             vec![(read, Type::List(Box::new(Type::Int)))],
+//RS             Some(Type::Option(Box::new(Type::Int))),
+//RS         )),
+//RS         ("core.math.random", "choices") => Some((
+//RS             vec![
+//RS                 (read, Type::List(Box::new(Type::Int))),
+//RS                 (read, Type::Int),
+//RS             ],
+//RS             Some(Type::List(Box::new(Type::Int))),
+//RS         )),
+//RS         ("core.math.random", "triangular") => Some((
+//RS             vec![
+//RS                 (read, Type::Float),
+//RS                 (read, Type::Float),
+//RS                 (read, Type::Float),
+//RS             ],
+//RS             Some(Type::Float),
+//RS         )),
+//RS         (
+//RS             "core.math.random",
+//RS             "gammavariate"
+//RS                 | "betavariate"
+//RS                 | "lognormvariate"
+//RS                 | "weibullvariate"
+//RS                 | "vonmisesvariate",
+//RS         ) => Some((
+//RS             vec![(read, Type::Float), (read, Type::Float)],
+//RS             Some(Type::Float),
+//RS         )),
+//RS         ("core.math.random", "paretovariate") => {
+//RS             Some((vec![(read, Type::Float)], Some(Type::Float)))
+//RS         }
+//RS         // D-CRYPTO-RNG1=A: the fail-closed OS CSPRNG kernel behind the Jet
+//RS         // `core.crypto.random.bytes` wrapper. A missing or rejected provider is
+//RS         // `None` here; the wrapper surfaces it as `CryptoError.Unavailable`.
+//RS         ("core.crypto.random", "bytes") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::Option(Box::new(list_u8.clone()))),
+//RS         )),
+//RS         // D-SHAPE-RESOURCE1=A: the Core-internal wipe that each secret-bearing
+//RS         // crypto type's `Close` hands its owned bytes to.
+//RS         ("core.crypto", "__zeroize") => Some((vec![(moved, list_u8.clone())], None)),
+//RS         // D-DET1: deterministic injected RNG capability. `random.rng(seed)` builds a
+//RS         // reproducible `Rng` from a caller-supplied seed (a pure value); a `#Pure fn`
+//RS         // may draw randomness through it (`rng.int(lo, hi)` / `rng.float()`) while the
+//RS         // ambient `random.int(…)` stays E3403.
+//RS         ("core.math.random", "rng") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::Named(crate::Syntax::RNG_TYPE.to_string())),
+//RS         )),
+//RS         ("core.math.random", "split") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::Named(crate::Syntax::RNG_TYPE.to_string())),
+//RS         )),
+//RS         ("core.units", "from") => Some((
+//RS             vec![(read, float.clone()), (read, float)],
+//RS             Some(measurement),
+//RS         )),
+//RS         ("core.time", "sleep") => Some((
+//RS             vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],
+//RS             None,
+//RS         )),
+//RS         ("core.time", "sleep_until") => Some((
+//RS             vec![(read, Type::Named("Instant".to_string()))],
+//RS             None,
+//RS         )),
+//RS         ("core.rt", "callback") => Some((
+//RS             vec![
+//RS                 (read, Type::Int),
+//RS                 (read, Type::Int),
+//RS                 (
+//RS                     read,
+//RS                     Type::Fn {
+//RS                         params: vec![Type::List(Box::new(Type::Float))],
+//RS                         ret: None,
+//RS                         effect_bound: Some(Vec::new()),
+//RS                         return_view_provenance: None,
+//RS                         param_contract: None,
+//RS                         call_metadata: Some(FunctionCallMetadata {
+//RS                             conventions: vec![AccessConvention::Read],
+//RS                             ..FunctionCallMetadata::default()
+//RS                         }),
+//RS                     },
+//RS                 ),
+//RS             ],
+//RS             Some(Type::Named("RealtimeStream".to_string())),
+//RS         )),
+//RS         ("core.tasks", "timeout") => Some((
+//RS             vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],
+//RS             Some(unit),
+//RS         )),
+//RS         ("core.tasks", "interval") => Some((
+//RS             vec![(read, Type::Named("Duration".to_string()))],
+//RS             Some(Type::Apply {
+//RS                 name: "Receiver".to_string(),
+//RS                 args: vec![Type::Int],
+//RS             }),
+//RS         )),
+//RS         ("core.tasks", "yield_now") => Some((vec![], Some(unit))),
+//RS         ("core.tasks", "current_task") => Some((vec![], Some(string.clone()))),
+//RS         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
+//RS         ("core.time", "instant") => Some((vec![], Some(Type::Named("Instant".to_string())))),
+//RS         ("core.time", "now") | ("core.time", "now_utc") => {
+//RS             Some((vec![], Some(Type::Named("DateTime".to_string()))))
+//RS         }
+//RS         ("core.time", "from_unix_ms") => Some((
+//RS             vec![(read, Type::Int)],
+//RS             Some(Type::Named("DateTime".to_string())),
+//RS         )),
+//RS         ("core.time", "from_unix_seconds")
+//RS         | ("core.time", "from_unix_microseconds")
+// END-PORT-PENDING 0386 crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1224-2523
+

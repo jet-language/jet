@@ -1,0 +1,1109 @@
+// PORT-PENDING 0399 crates-jet-sema-src-sema-checkerinfer-calls-direct-calls-slice-1: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:1-1105
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+//RS use crate::Generics::{e0904, e0905, substitute_type, unify_types};
+//RS use crate::Sema::Bundle::fn_types_compatible;
+//RS use crate::Sema::CheckerCoreLib::{
+//RS     io_error_ty, is_simd_lane_type, math_constructor_arg_types, overflow_opt_in_error, result_ty,
+//RS     wrong_core_arity,
+//RS };
+//RS use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
+//RS use crate::Sema::Diagnostics::{
+//RS     edit_distance, is_debuggable, is_displayable, is_printable,
+//RS     owned_type_for_read_view, type_fix_hint, type_is_copy, typed_text_mismatch,
+//RS };
+//RS use crate::Sema::Effects::builtin_effect;
+//RS use crate::Sema::FFI::e3211;
+//RS use crate::Sema::{Checker, KnowledgeGate};
+//RS use crate::Syntax;
+//RS use crate::AST::{AccessConvention, BinOp, Call, CallablePolicyChain, Expr, StrPart, Type};
+//RS use jet_foundation::Prelude as CorePrelude;
+//RS use std::collections::{HashMap, HashSet};
+//RS 
+//RS #[derive(Clone)]
+//RS struct GenericInferenceConflict {
+//RS     param: String,
+//RS     first: Type,
+//RS     first_source: String,
+//RS     second: Type,
+//RS     second_source: String,
+//RS }
+//RS 
+//RS /// The type arguments one generic call's arguments determine.
+//RS pub(crate) struct GenericArgInference {
+//RS     pub(crate) subst: HashMap<String, Type>,
+//RS     /// Each argument's type from the inference pass, in argument order.
+//RS     pub(crate) pre_inferred: Vec<Option<Type>>,
+//RS     /// Every type parameter was bound without a conflict; the caller checks
+//RS     /// the declared bounds.
+//RS     pub(crate) complete: bool,
+//RS }
+//RS 
+//RS /// E0905 for a generic call bound. A caller's own type parameter can only
+//RS /// satisfy the bound by declaring it, so its repair names the declaration
+//RS /// rather than an impl on a concrete type.
+//RS fn generic_bound_failure(checker: &Checker<'_>, ty: &Type, bound: &str, span: Span) -> Diagnostic {
+//RS     if let Type::Named(name) = ty {
+//RS         if checker.type_param_scope.iter().any(|param| param.name == *name) {
+//RS             return Diagnostic::error(
+//RS                 "E0905",
+//RS                 format!("`{name}` isn't `{bound}`"),
+//RS                 format!(
+//RS                     "type parameter `{name}` doesn't declare the `{bound}` bound, so a caller may choose a type without it"
+//RS                 ),
+//RS                 format!("declare the bound where `{name}` is introduced: `<{name}: {bound}>`"),
+//RS                 Some(span),
+//RS             );
+//RS         }
+//RS     }
+//RS     e0905(&ty.name(), bound, span, false)
+//RS }
+//RS 
+//RS fn bind_inferred_type(
+//RS     param: &str,
+//RS     found: &Type,
+//RS     source: &str,
+//RS     type_params: &HashSet<String>,
+//RS     subst: &mut HashMap<String, Type>,
+//RS     origins: &mut HashMap<String, (Type, String)>,
+//RS     conflict: &mut Option<GenericInferenceConflict>,
+//RS ) -> bool {
+//RS     if !type_params.contains(param) {
+//RS         return false;
+//RS     }
+//RS     let found = substitute_type(found, subst);
+//RS     if let Some(previous) = subst.get(param) {
+//RS         if previous == &found {
+//RS             return true;
+//RS         }
+//RS         if conflict.is_none() {
+//RS             let (first, first_source) = origins
+//RS                 .get(param)
+//RS                 .cloned()
+//RS                 .unwrap_or_else(|| (previous.clone(), "an earlier argument".to_string()));
+//RS             *conflict = Some(GenericInferenceConflict {
+//RS                 param: param.to_string(),
+//RS                 first,
+//RS                 first_source,
+//RS                 second: found,
+//RS                 second_source: source.to_string(),
+//RS             });
+//RS         }
+//RS         return false;
+//RS     }
+//RS     subst.insert(param.to_string(), found.clone());
+//RS     origins.insert(param.to_string(), (found, source.to_string()));
+//RS     true
+//RS }
+//RS 
+//RS /// Seed generic inference with the concrete slots of a typed argument.
+//RS /// `unify_types` remains the authority for the leaf cases; this wrapper
+//RS /// mirrors its structural recursion and adds the missing `Fn` traversal plus
+//RS /// provenance for a useful conflict diagnostic.
+//RS fn seed_generic_type(
+//RS     expected: &Type,
+//RS     found: &Type,
+//RS     source: &str,
+//RS     type_params: &HashSet<String>,
+//RS     subst: &mut HashMap<String, Type>,
+//RS     origins: &mut HashMap<String, (Type, String)>,
+//RS     conflict: &mut Option<GenericInferenceConflict>,
+//RS ) -> bool {
+//RS     // Bind a callee type parameter before the identity shortcut: a caller's
+//RS     // in-scope parameter with the same spelling (`outer<P>` forwarding `shape: P`
+//RS     // to `inner<P>`) is still the concrete argument for the callee's `P`.
+//RS     if let Type::Named(param) = expected {
+//RS         if type_params.contains(param) {
+//RS             return bind_inferred_type(param, found, source, type_params, subst, origins, conflict);
+//RS         }
+//RS     }
+//RS     if expected == found {
+//RS         return true;
+//RS     }
+//RS     if let Type::Named(param) = found {
+//RS         if type_params.contains(param) {
+//RS             return bind_inferred_type(
+//RS                 param,
+//RS                 expected,
+//RS                 source,
+//RS                 type_params,
+//RS                 subst,
+//RS                 origins,
+//RS                 conflict,
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     match (expected, found) {
+//RS         (Type::List(expected), Type::List(found))
+//RS         | (Type::Option(expected), Type::Option(found)) => seed_generic_type(
+//RS             expected,
+//RS             found,
+//RS             source,
+//RS             type_params,
+//RS             subst,
+//RS             origins,
+//RS             conflict,
+//RS         ),
+//RS         (
+//RS             Type::Result {
+//RS                 ok: expected_ok,
+//RS                 err: expected_err,
+//RS             },
+//RS             Type::Result {
+//RS                 ok: found_ok,
+//RS                 err: found_err,
+//RS             },
+//RS         ) => {
+//RS             let ok = seed_generic_type(
+//RS                 expected_ok,
+//RS                 found_ok,
+//RS                 source,
+//RS                 type_params,
+//RS                 subst,
+//RS                 origins,
+//RS                 conflict,
+//RS             );
+//RS             let err = seed_generic_type(
+//RS                 expected_err,
+//RS                 found_err,
+//RS                 source,
+//RS                 type_params,
+//RS                 subst,
+//RS                 origins,
+//RS                 conflict,
+//RS             );
+//RS             ok && err
+//RS         }
+//RS         (
+//RS             Type::Apply {
+//RS                 name: expected_name,
+//RS                 args: expected_args,
+//RS             },
+//RS             Type::Apply {
+//RS                 name: found_name,
+//RS                 args: found_args,
+//RS             },
+//RS         ) if expected_name == found_name && expected_args.len() == found_args.len() => {
+//RS             let mut compatible = true;
+//RS             for (expected, found) in expected_args.iter().zip(found_args) {
+//RS                 compatible &= seed_generic_type(
+//RS                     expected,
+//RS                     found,
+//RS                     source,
+//RS                     type_params,
+//RS                     subst,
+//RS                     origins,
+//RS                     conflict,
+//RS                 );
+//RS             }
+//RS             compatible
+//RS         }
+//RS         (
+//RS             Type::Fn {
+//RS                 params: expected_params,
+//RS                 ret: expected_ret,
+//RS                 ..
+//RS             },
+//RS             Type::Fn {
+//RS                 params: found_params,
+//RS                 ret: found_ret,
+//RS                 ..
+//RS             },
+//RS         ) => {
+//RS             // Callable labels/zones are checked by the final assignment pass;
+//RS             // generic inference uses only the structural type slots. Keep
+//RS             // walking after a parameter mismatch so a conflicting return
+//RS             // still records its provenance.
+//RS             let mut params_ok = expected_params.len() == found_params.len();
+//RS             for (expected, found) in expected_params.iter().zip(found_params) {
+//RS                 params_ok &= seed_generic_type(
+//RS                     expected,
+//RS                     found,
+//RS                     "the lambda parameter",
+//RS                     type_params,
+//RS                     subst,
+//RS                     origins,
+//RS                     conflict,
+//RS                 );
+//RS             }
+//RS             let ret_ok = match (expected_ret, found_ret) {
+//RS                 (Some(expected), Some(found)) => match expected.as_ref() {
+//RS                     // Callable parameter signatures store an effective Result
+//RS                     // carrier, while lambda values retain their raw success
+//RS                     // return. Pair the carrier's success slot with that raw
+//RS                     // return; two carrier values still use structural matching
+//RS                     // so explicit error domains remain checked.
+//RS                     Type::Result {
+//RS                         ok: expected_ok,
+//RS                         err: expected_err,
+//RS                     } if !matches!(found.as_ref(), Type::Result { .. }) => {
+//RS                         let ok = seed_generic_type(
+//RS                             expected_ok.as_ref(),
+//RS                             found.as_ref(),
+//RS                             "the lambda return",
+//RS                             type_params,
+//RS                             subst,
+//RS                             origins,
+//RS                             conflict,
+//RS                         );
+//RS                         // D-CALLBACK-ERR1=A: a raw callable return carries the
+//RS                         // implicit default `Err`, so a failure-domain type
+//RS                         // parameter it fills binds to `Err`.
+//RS                         if let Type::Named(param) = expected_err.as_ref() {
+//RS                             if type_params.contains(param) && !subst.contains_key(param) {
+//RS                                 bind_inferred_type(
+//RS                                     param,
+//RS                                     &Type::Named(Syntax::TYPE_ERR.to_string()),
+//RS                                     "the lambda return",
+//RS                                     type_params,
+//RS                                     subst,
+//RS                                     origins,
+//RS                                     conflict,
+//RS                                 );
+//RS                             }
+//RS                         }
+//RS                         ok
+//RS                     }
+//RS                     _ => seed_generic_type(
+//RS                         expected.as_ref(),
+//RS                         found.as_ref(),
+//RS                         "the lambda return",
+//RS                         type_params,
+//RS                         subst,
+//RS                         origins,
+//RS                         conflict,
+//RS                     ),
+//RS                 },
+//RS                 (None, None) => true,
+//RS                 _ => false,
+//RS             };
+//RS             params_ok && ret_ok
+//RS         }
+//RS         _ => {
+//RS             let already_bound: HashSet<String> = subst.keys().cloned().collect();
+//RS             let compatible = unify_types(expected, found, subst, type_params);
+//RS             for param in type_params {
+//RS                 if !already_bound.contains(param) {
+//RS                     if let Some(ty) = subst.get(param) {
+//RS                         origins
+//RS                             .entry(param.clone())
+//RS                             .or_insert_with(|| (ty.clone(), source.to_string()));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             compatible
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn generic_conflict_diagnostic(span: Span, conflict: &GenericInferenceConflict) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0904",
+//RS         format!("can't figure out what `{}` should be here", conflict.param),
+//RS         "one generic type parameter received incompatible concrete types".to_string(),
+//RS         format!(
+//RS             "{} is {} from {} but {} from {}; make those types agree",
+//RS             conflict.param,
+//RS             conflict.first.name(),
+//RS             conflict.first_source,
+//RS             conflict.second.name(),
+//RS             conflict.second_source,
+//RS         ),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     /// D-STRUCT-POLICY1=A: user policy calls use the same declaration-order
+//RS     /// binder as ordinary functions, including default expressions and
+//RS     /// their private earlier-parameter references.
+//RS     fn bind_user_policy_arguments(&mut self, arguments: &mut [crate::AST::CallArg], span: Span) {
+//RS         for argument in arguments {
+//RS             let Expr::Call(policy) = &mut argument.expr else {
+//RS                 continue;
+//RS             };
+//RS             if CallablePolicyChain::is_builtin(&policy.name) {
+//RS                 continue;
+//RS             }
+//RS             let Some((_, declaration)) = self
+//RS                 .callable_policy_declarations
+//RS                 .get(&(self.package_scope.to_string(), policy.name.clone()))
+//RS                 .cloned()
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             let params = declaration
+//RS                 .params
+//RS                 .iter()
+//RS                 .map(|param| crate::Sema::CallBinder::BindParam {
+//RS                     label: param.call_label(),
+//RS                     name: &param.name,
+//RS                     zone: param.zone,
+//RS                     default: param.default.as_deref(),
+//RS                     convention: param.convention,
+//RS                     ty: Some(&param.ty),
+//RS                     variadic: param.variadic,
+//RS                     core_default: None,
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             let _ = crate::Sema::CallBinder::bind_call_args(
+//RS                 &policy.name,
+//RS                 &params,
+//RS                 &mut policy.args,
+//RS                 span,
+//RS                 &mut self.diags,
+//RS             );
+//RS             self.register_binder_refs(&policy.args);
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-VARIADIC1: the policy call has the same fixed list-slot ABI as an
+//RS     /// ordinary function call. Bind first so defaults occupy their slots,
+//RS     /// then pack the user declaration's homogeneous rest tail once.
+//RS     fn normalize_user_policy_arguments(&mut self, arguments: &mut [crate::AST::CallArg]) {
+//RS         for argument in arguments {
+//RS             let Expr::Call(policy) = &mut argument.expr else {
+//RS                 continue;
+//RS             };
+//RS             if CallablePolicyChain::is_builtin(&policy.name) {
+//RS                 continue;
+//RS             }
+//RS             let Some((_, declaration)) = self
+//RS                 .callable_policy_declarations
+//RS                 .get(&(self.package_scope.to_string(), policy.name.clone()))
+//RS                 .cloned()
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             if !declaration
+//RS                 .params
+//RS                 .last()
+//RS                 .is_some_and(|param| param.variadic)
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             let mut synthetic = crate::AST::Func::implicit_run(Vec::new(), declaration.span);
+//RS             synthetic.name = policy.name.clone();
+//RS             synthetic.params = declaration.params;
+//RS             let signature = crate::Sema::func_to_sig(&synthetic);
+//RS             self.normalize_variadic_call(policy, &signature);
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-CONC-FREEZE1=A: validate one owned, deeply snapshot-able value.
+//RS     /// The result keeps the source type; the frozen proof lives in the
+//RS     /// flow store when a binding receives this call.
+//RS     fn check_freeze(&mut self, call: &mut Call) -> Option<Type> {
+//RS         if call.args.len() != 1 {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0104",
+//RS                 format!("`freeze` takes exactly one value, got {}", call.args.len()),
+//RS                 "`freeze(x)` creates one deeply immutable owned snapshot for a crossing"
+//RS                     .to_string(),
+//RS                 "write `freeze(value)` with exactly one value".to_string(),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             for arg in &mut call.args {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             return None;
+//RS         }
+//RS         let arg = &mut call.args[0];
+//RS         let saved_borrow = self.borrow_ctx;
+//RS         self.borrow_ctx = true;
+//RS         let source_ty = self.infer(&mut arg.expr);
+//RS         self.borrow_ctx = saved_borrow;
+//RS         let source_ty = source_ty?;
+//RS         let result_ty = owned_type_for_read_view(&source_ty).unwrap_or_else(|| source_ty.clone());
+//RS         let reason = if self.type_contains_shared(&source_ty) {
+//RS             Some(
+//RS                 "the value contains `Shared`, whose lock-backed handle would keep shared mutation"
+//RS                     .to_string(),
+//RS             )
+//RS         } else if self.is_resource_type(&source_ty) {
+//RS             Some(
+//RS                 "a resource has one cleanup owner and cannot be duplicated into a snapshot"
+//RS                     .to_string(),
+//RS             )
+//RS         } else if !self.is_cloneable_type(&result_ty) {
+//RS             Some("the value contains a resource, function, trait value, or mutable view that Jet cannot duplicate".to_string())
+//RS         } else {
+//RS             None
+//RS         };
+//RS         if let Some(reason) = reason {
+//RS             let shown_ty = source_ty.show();
+//RS             self.diags.push(Diagnostic::from_row(
+//RS                 "E1114",
+//RS                 &[("ty", &shown_ty), ("reason", &reason)],
+//RS                 Some(arg.expr.span()),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         if let Some(problem) =
+//RS             self.crossing_problem(&result_ty, crate::Sema::SendCrossing::TaskCapture, true)
+//RS         {
+//RS             self.report_unsendable(
+//RS                 "this frozen value",
+//RS                 &result_ty,
+//RS                 problem,
+//RS                 crate::Sema::SendCrossing::TaskCapture,
+//RS                 arg.expr.span(),
+//RS             );
+//RS             return None;
+//RS         }
+//RS         call.resolved_ret = Some(result_ty.clone());
+//RS         Some(result_ty)
+//RS     }
+//RS 
+//RS     /// D-CALLPOLICY1=E: `apply(p1, …, fn)` replaces the callable's policy
+//RS     /// chain exactly. The last argument is the callable value; policy
+//RS     /// expressions are checked as typed values and are not ordinary calls.
+//RS     fn check_callable_policy_apply(&mut self, call: &mut Call) -> Option<Type> {
+//RS         let Some((callee, policy_args)) = call.args.split_last_mut() else {
+//RS             self.diags.push(Diagnostic::error(
+//RS                     "E0104",
+//RS                     "`apply` needs a callable value".to_string(),
+//RS                     "a callable policy is applied to one function value; an empty chain is written `apply(fn)`"
+//RS                         .to_string(),
+//RS                     "write `apply(load_user)` or `apply(retry(3), load_user)`".to_string(),
+//RS                     Some(call.name_span),
+//RS                 ));
+//RS             return None;
+//RS         };
+//RS         let parsed_policy_exprs: Vec<Expr> =
+//RS             policy_args.iter().map(|arg| arg.expr.clone()).collect();
+//RS         let chain = match CallablePolicyChain::parse(&parsed_policy_exprs) {
+//RS             Ok(chain) => chain,
+//RS             Err(reason) => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                         "E0355",
+//RS                         format!("`apply` received an invalid callable policy: {reason}"),
+//RS                         "policy values are checked before application and cannot change a callable's signature"
+//RS                             .to_string(),
+//RS                         "use `cache(…)`, `retry(…)`, `trace(…)`, `registration(…)`, or `route(…)`"
+//RS                             .to_string(),
+//RS                         Some(call.name_span),
+//RS                     ));
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         self.bind_user_policy_arguments(policy_args, call.name_span);
+//RS         let policy_exprs: Vec<Expr> = policy_args.iter().map(|arg| arg.expr.clone()).collect();
+//RS         if !self.validate_callable_policy_values(&policy_exprs, call.name_span) {
+//RS             return None;
+//RS         }
+//RS         for argument in &mut *policy_args {
+//RS             if let Expr::Call(policy_call) = &mut argument.expr {
+//RS                 for value in &mut policy_call.args {
+//RS                     self.infer(&mut value.expr);
+//RS                 }
+//RS             }
+//RS         }
+//RS         self.normalize_user_policy_arguments(policy_args);
+//RS         if callee.label.is_some() || callee.spread {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0764",
+//RS                 "the callable value in `apply` cannot have a label or spread".to_string(),
+//RS                 "the final argument is the value being wrapped; policy values come before it"
+//RS                     .to_string(),
+//RS                 "write `apply(policy(…), function)`".to_string(),
+//RS                 Some(callee.span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         let callee_ty = match &callee.expr {
+//RS                 Expr::Ident(name, span) => self.funcs.get(name).cloned().map(|sig| {
+//RS                     self.record_current_function_reference(name, *span);
+//RS                     if let Some((idx, (convention, _))) = sig
+//RS                         .params
+//RS                         .iter()
+//RS                         .enumerate()
+//RS                         .find(|(_, (convention, _))| *convention != AccessConvention::Read)
+//RS                     {
+//RS                         let capability = match convention {
+//RS                             AccessConvention::Write => "the write-access marker `&`",
+//RS                             AccessConvention::Move => "the move marker `^`",
+//RS                             AccessConvention::Read => unreachable!(),
+//RS                         };
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0112",
+//RS                             format!("`{name}` cannot be used as a function value"),
+//RS                             format!(
+//RS                                 "parameter {} requires {capability}, but `fn(T)` function values take every parameter with plain read access",
+//RS                                 idx + 1
+//RS                             ),
+//RS                             "call this function directly; function values cannot erase write or ownership requirements"
+//RS                                 .to_string(),
+//RS                             Some(*span),
+//RS                         ));
+//RS                     }
+//RS                     self.checked_func_sig_to_fn_type(&sig)
+//RS                 }),
+//RS                 _ => self.infer(&mut callee.expr),
+//RS             }?;
+//RS         let Some(replaced) = callee_ty.replace_callable_policies(chain.clone()) else {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0803",
+//RS                 format!(
+//RS                     "`apply` can wrap only a function value, not {}",
+//RS                     callee_ty.show()
+//RS                 ),
+//RS                 "a callable policy is a function-to-function value with the same checked signature"
+//RS                     .to_string(),
+//RS                 "pass a function or function-typed binding as the final argument".to_string(),
+//RS                 Some(callee.span),
+//RS             ));
+//RS             return None;
+//RS         };
+//RS         if !fn_types_compatible(&callee_ty, &replaced)
+//RS             || !Type::obligations_satisfy(&callee_ty, &replaced)
+//RS         {
+//RS             self.diags.push(Diagnostic::error(
+//RS                     "E0803",
+//RS                     "callable policy replacement changed the checked function signature"
+//RS                         .to_string(),
+//RS                     "a policy is a function-to-function value with the same labels, access, effects, errors, variadics, and view provenance"
+//RS                         .to_string(),
+//RS                     "apply only a typed callable policy chain".to_string(),
+//RS                     Some(callee.span),
+//RS                 ));
+//RS             return None;
+//RS         }
+//RS         // This fact is consumed by the shared lowerer. It lives on the
+//RS         // callable argument so no engine invents a second policy path.
+//RS         callee.flags.callable_policy = Some(chain);
+//RS         Some(replaced)
+//RS     }
+//RS 
+//RS     /// Check a call. Returns:
+//RS     ///   None             — problem already reported
+//RS     ///   Some(None)       — fine, no value handed back
+//RS     ///   Some(Some(ty))   — fine, hands back `ty`
+//RS     /// D-NUMOPS1: type a `wrapping`/`saturating`/`checked` opt-in. The single
+//RS     /// argument must be one integer `+`/`-`/`*`/`/`; `wrapping`/`saturating`
+//RS     /// return the operand width, `checked` returns it optional (`null` on
+//RS     /// overflow). E1005 otherwise.
+//RS     fn check_overflow_opt_in(&mut self, call: &mut Call) -> Option<Type> {
+//RS         let kind = call.name.clone();
+//RS         if call.args.len() != 1 {
+//RS             let mut ty = None;
+//RS             for a in call.args.iter_mut() {
+//RS                 ty = ty.or(self.infer(&mut a.expr));
+//RS             }
+//RS             self.diags
+//RS                 .push(overflow_opt_in_error(&kind, call.name_span));
+//RS             // Hand back a plausible type so the use site doesn't cascade.
+//RS             return ty.filter(Type::is_integer).or(Some(Type::Int));
+//RS         }
+//RS         let is_arith = matches!(
+//RS             &call.args[0].expr,
+//RS             Expr::Binary(op, _, _, _)
+//RS                 if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+//RS         );
+//RS         let arg_ty = if is_arith {
+//RS             self.with_knowledge_gate(KnowledgeGate::BoundedArithmetic, |checker| {
+//RS                 checker.infer(&mut call.args[0].expr)
+//RS             })
+//RS         } else {
+//RS             self.infer(&mut call.args[0].expr)
+//RS         };
+//RS         let int_ok = arg_ty.as_ref().is_some_and(|t| t.is_integer());
+//RS         if !is_arith || !int_ok {
+//RS             self.diags
+//RS                 .push(overflow_opt_in_error(&kind, call.name_span));
+//RS             return arg_ty.filter(Type::is_integer).or(Some(Type::Int));
+//RS         }
+//RS         let t = arg_ty.unwrap();
+//RS         if kind == Syntax::BUILTIN_CHECKED {
+//RS             Some(Type::Option(Box::new(t)))
+//RS         } else {
+//RS             Some(t)
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-NUMWIDEN-CROSS1=E: mark one integer value as accepting an inexact
+//RS     /// float crossing. The surrounding widening consumes this marker.
+//RS     fn check_numeric_approx(&mut self, call: &mut Call) -> Option<Type> {
+//RS         if call.args.len() != 1 {
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0104",
+//RS                 format!("`{}` takes one whole number", Syntax::BUILTIN_APPROX),
+//RS                 "`approx(value)` accepts possible precision loss at one integer-to-float crossing"
+//RS                     .to_string(),
+//RS                 format!("write `{}(value)`", Syntax::BUILTIN_APPROX),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         let ty = self.infer(&mut call.args[0].expr)?;
+//RS         if !ty.is_integer() {
+//RS             self.diags.push(Diagnostic::error(
+//RS                     "E0109",
+//RS                     format!("`{}` needs a whole number, but this is {}", Syntax::BUILTIN_APPROX, ty.show()),
+//RS                     "`approx(value)` only opts one integer-to-float crossing out of its exactness check".to_string(),
+//RS                     "remove `approx`, or pass a whole number that is crossing into a decimal".to_string(),
+//RS                     Some(call.args[0].expr.span()),
+//RS                 ));
+//RS             return None;
+//RS         }
+//RS         call.widen_approx = true;
+//RS         Some(ty)
+//RS     }
+//RS 
+//RS     /// D-DBG1=A: check `debug(value)`. The trace has the value's own type
+//RS     /// and adds no effect. Sema records the site text (`file.jet:LINE expr`)
+//RS     /// once as a second argument and renames the call to the internal trace,
+//RS     /// so every evaluator prints the same line. A shipped artifact or a
+//RS     /// release-profile build rejects the trace with a `jet fix` edit that
+//RS     /// keeps the traced expression.
+//RS     fn check_debug_trace(&mut self, call: &mut Call) -> Option<Type> {
+//RS         if call.name == Syntax::INTERNAL_DEBUG_TRACE {
+//RS             return self.infer(&mut call.args.first_mut()?.expr);
+//RS         }
+//RS         if call.args.len() != 1 || call.args[0].label.is_some() || call.args[0].spread {
+//RS             for arg in call.args.iter_mut() {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0104",
+//RS                 format!("`{}` takes exactly one value", Syntax::BUILTIN_DEBUG),
+//RS                 "`debug(value)` shows one value and returns it unchanged".to_string(),
+//RS                 format!("write `{}(value)`", Syntax::BUILTIN_DEBUG),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         let ty = self.infer(&mut call.args[0].expr);
+//RS         let value_span = call.args[0].expr.span();
+//RS         if let Some(ty) = &ty {
+//RS             if !is_debuggable(ty, self.registry, self.trait_reg) {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0112",
+//RS                     format!("`{}` can't show {}", Syntax::BUILTIN_DEBUG, ty.show()),
+//RS                     "`debug` writes the value's Debug form".to_string(),
+//RS                     "implement `Debug`, or trace a debuggable part of the value".to_string(),
+//RS                     Some(value_span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         let source = self.source;
+//RS         // Method-call, field, index, and binary nodes span only their own
+//RS         // suffix or operator, so the traced text starts at the leftmost
+//RS         // operand: `word.len() * 3`, not `len() * 3`.
+//RS         fn trace_start(expr: &Expr) -> usize {
+//RS             match expr {
+//RS                 Expr::Binary(_, left, _, _) => trace_start(left),
+//RS                 Expr::Index { base, .. } | Expr::Slice { base, .. } => trace_start(base),
+//RS                 Expr::Field(base, _, _) => trace_start(base),
+//RS                 Expr::OptField { base, .. } => trace_start(base),
+//RS                 Expr::MethodCall { receiver, .. } => trace_start(receiver),
+//RS                 _ => crate::Sema::source_expr_start(expr),
+//RS             }
+//RS         }
+//RS         let text_start = trace_start(&call.args[0].expr).min(value_span.start);
+//RS         let value_text = source.get(text_start..value_span.end).unwrap_or_default();
+//RS         let expr_text = value_text
+//RS             .lines()
+//RS             .map(str::trim)
+//RS             .filter(|line| !line.is_empty())
+//RS             .collect::<Vec<_>>()
+//RS             .join(" ");
+//RS         let (line, _) = crate::Diagnostics::span_line_col(source, call.name_span.start);
+//RS         let file = std::path::Path::new(self.module_path)
+//RS             .file_name()
+//RS             .and_then(|name| name.to_str())
+//RS             .unwrap_or(self.module_path);
+//RS         let site = format!("{file}:{line}");
+//RS         let rejects = self
+//RS             .modules
+//RS             .and_then(|modules| modules.get(self.module_idx))
+//RS             .is_some_and(|state| state.build_facts.rejects_debug_traces());
+//RS         if rejects {
+//RS             // The fix removes `debug(` and its closing `)`, keeping the
+//RS             // traced expression exactly as written.
+//RS             let close = source.get(value_span.end..).and_then(|rest| {
+//RS                 let offset = rest.find(|ch: char| !ch.is_whitespace() && ch != ',')?;
+//RS                 rest[offset..]
+//RS                     .starts_with(')')
+//RS                     .then_some(value_span.end + offset + 1)
+//RS             });
+//RS             let mut diagnostic =
+//RS                 Diagnostic::from_row("E3405", &[("site", site.as_str())], Some(call.name_span));
+//RS             if let Some(end) = close {
+//RS                 diagnostic = diagnostic.with_edit(TextEdit {
+//RS                     span: Span::new(call.name_span.start, end),
+//RS                     new_text: value_text.to_string(),
+//RS                 });
+//RS             }
+//RS             self.diags.push(diagnostic);
+//RS         }
+//RS         call.name = Syntax::INTERNAL_DEBUG_TRACE.to_string();
+//RS         call.args.push(crate::AST::CallArg {
+//RS             convention: AccessConvention::Read,
+//RS             expr: Expr::Str(vec![StrPart::Lit(format!("{site} {expr_text}"))], value_span),
+//RS             span: value_span,
+//RS             flags: Default::default(),
+//RS             label: None,
+//RS             spread: false,
+//RS         });
+//RS         ty
+//RS     }
+//RS 
+//RS     /// D-TYPE2-UNCERT1=A: the one measured-value constructor. The
+//RS     /// uncertainty label is semantic, so every entry point sees the same
+//RS     /// checked call shape without a `core.units` module alias.
+//RS     fn check_measurement(&mut self, call: &mut Call) -> Option<Type> {
+//RS         if call.args.len() != 2
+//RS             || call.args[0].label.is_some()
+//RS             || !matches!(
+//RS                 call.args[1].label.as_ref(),
+//RS                 Some((label, _)) if label == "uncertainty"
+//RS             )
+//RS         {
+//RS             for argument in &mut call.args {
+//RS                 self.infer(&mut argument.expr);
+//RS             }
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0104",
+//RS                 "`measurement` needs a value and labeled uncertainty".to_string(),
+//RS                 "a measured value enters the exactness plane at one explicit constructor"
+//RS                     .to_string(),
+//RS                 "write `measurement(value, uncertainty: standard_uncertainty)`".to_string(),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             return None;
+//RS         }
+//RS         self.expect_core_arg("measurement", 0, &Type::Float, &mut call.args[0]);
+//RS         self.expect_core_arg("measurement", 1, &Type::Float, &mut call.args[1]);
+//RS         let ty = Type::Apply {
+//RS             name: Syntax::TYPE_MEASUREMENT.to_string(),
+//RS             args: vec![Type::Float],
+//RS         };
+//RS         call.resolved_ret = Some(ty.clone());
+//RS         Some(ty)
+//RS     }
+//RS 
+//RS     /// D-CONC-CHAN1=A: `channel` is the readable constructor. Its runtime
+//RS     /// implementation remains the shared channel Prelude route.
+//RS     fn check_channel(&mut self, call: &mut Call) -> Option<Type> {
+//RS         if call.args.len() > 1 {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0104",
+//RS                 format!(
+//RS                     "`channel` takes an optional capacity, got {} arguments",
+//RS                     call.args.len()
+//RS                 ),
+//RS                 "a channel may be unbounded or have one whole-number backpressure bound"
+//RS                     .to_string(),
+//RS                 "write `channel<T>()` or `channel<T>(capacity: 1)".to_string(),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             for argument in &mut call.args {
+//RS                 self.infer(&mut argument.expr);
+//RS             }
+//RS             return None;
+//RS         }
+//RS         if let Some(argument) = call.args.get_mut(0) {
+//RS             if argument
+//RS                 .label
+//RS                 .as_ref()
+//RS                 .is_some_and(|(label, _)| label != "capacity")
+//RS             {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0104",
+//RS                     "`channel` has one labeled argument: `capacity`".to_string(),
+//RS                     "the capacity label makes the backpressure bound explicit".to_string(),
+//RS                     "write `channel<T>(capacity: 8)".to_string(),
+//RS                     Some(argument.span),
+//RS                 ));
+//RS             }
+//RS             let cap_ty = self.infer(&mut argument.expr)?;
+//RS             if !(matches!(&cap_ty, Type::Int | Type::InlineRange { .. })
+//RS                 || matches!(&cap_ty, Type::Named(name) if name == "Int" || name == "I64" || name == "I32"))
+//RS             {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0112",
+//RS                     format!(
+//RS                         "`channel<T>(capacity: …)` needs an integer capacity, not {}",
+//RS                         cap_ty.show()
+//RS                     ),
+//RS                     "bounded channels use a whole-number memory/backpressure limit".to_string(),
+//RS                     "write `channel<T>(capacity: 1)".to_string(),
+//RS                     Some(argument.expr.span()),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         let Some(element) = call.type_args.first().cloned() else {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0904",
+//RS                 "`channel` needs a type argument to infer the element type".to_string(),
+//RS                 "the element type `T` cannot be guessed from an empty channel".to_string(),
+//RS                 "call it with an explicit type argument: `channel<T>()`".to_string(),
+//RS                 Some(call.name_span),
+//RS             ));
+//RS             return None;
+//RS         };
+//RS         let result = Type::Tuple(vec![
+//RS             (
+//RS                 "sender".to_string(),
+//RS                 Box::new(Type::Apply {
+//RS                     name: Syntax::TYPE_SENDER.to_string(),
+//RS                     args: vec![element.clone()],
+//RS                 }),
+//RS             ),
+//RS             (
+//RS                 "receiver".to_string(),
+//RS                 Box::new(Type::Apply {
+//RS                     name: Syntax::TYPE_RECEIVER.to_string(),
+//RS                     args: vec![element],
+//RS                 }),
+//RS             ),
+//RS         ]);
+//RS         call.resolved_ret = Some(result.clone());
+//RS         Some(result)
+//RS     }
+//RS 
+//RS     /// Infer a generic call's type arguments from its arguments. Local,
+//RS     /// file-module, inline-module and source-owned Core calls share this one
+//RS     /// rule, so a callback argument binds the same parameters on every route:
+//RS     /// a lambda is checked against its callable parameter once the earlier
+//RS     /// arguments pin the type parameters, and a failure-domain parameter
+//RS     /// (`fn(T) -> U E!`, D-CALLBACK-ERR1=A) binds to the callback's own
+//RS     /// failure type. Conflicts and unresolved parameters are reported here;
+//RS     /// the caller checks the declared bounds when `complete` is true.
+//RS     pub(crate) fn infer_generic_call_args(
+//RS         &mut self,
+//RS         sig: &crate::AST::FuncSig,
+//RS         fn_type_params: &[crate::AST::TypeParam],
+//RS         args: &mut [crate::AST::CallArg],
+//RS         call_access: &mut crate::Sema::CallAccessFrame,
+//RS         name_span: Span,
+//RS         owned_access: bool,
+//RS     ) -> GenericArgInference {
+//RS         let mut pre_inferred: Vec<Option<Type>> = Vec::new();
+//RS         let prepass_type_params: HashSet<String> = fn_type_params
+//RS             .iter()
+//RS             .map(|param| param.name.clone())
+//RS             .collect();
+//RS         for (index, arg) in args.iter_mut().enumerate() {
+//RS             let param_conv = sig.params.get(index).map(|(conv, _)| *conv);
+//RS             // A lambda argument is checked against its callable parameter
+//RS             // once the arguments before it pin every type parameter. Its
+//RS             // parameters then need no annotation, and a body that cannot
+//RS             // fail meets a `Never!` callback slot, as it does at a
+//RS             // non-generic call.
+//RS             let lambda_expected = match (&arg.expr, sig.params.get(index)) {
+//RS                 (Expr::Lambda(_), Some((_, param_ty @ Type::Fn { .. }))) => {
+//RS                     let mut subst = HashMap::new();
+//RS                     let mut origins = HashMap::new();
+//RS                     let mut conflict = None;
+//RS                     for (earlier, found) in pre_inferred.iter().enumerate() {
+//RS                         let (Some(found), Some((_, earlier_ty))) =
+//RS                             (found, sig.params.get(earlier))
+//RS                         else {
+//RS                             continue;
+//RS                         };
+//RS                         if !matches!(earlier_ty, Type::Fn { .. }) {
+//RS                             seed_generic_type(
+//RS                                 earlier_ty,
+//RS                                 found,
+//RS                                 &format!("argument {}", earlier + 1),
+//RS                                 &prepass_type_params,
+//RS                                 &mut subst,
+//RS                                 &mut origins,
+//RS                                 &mut conflict,
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                     // D-CALLBACK-ERR1=A: a failure-domain parameter the
+//RS                     // callback itself fills is checked as `Never`; the lambda
+//RS                     // then publishes the failure its body really has, and
+//RS                     // that binds the parameter below.
+//RS                     if let Type::Fn { ret: Some(ret), .. } = param_ty {
+//RS                         if let Type::Result { err, .. } = ret.as_ref() {
+//RS                             if let Type::Named(param) = err.as_ref() {
+//RS                                 if prepass_type_params.contains(param)
+//RS                                     && !subst.contains_key(param)
+//RS                                 {
+//RS                                     subst.insert(
+//RS                                         param.clone(),
+//RS                                         Type::Named(Syntax::TYPE_NEVER.to_string()),
+//RS                                     );
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     (conflict.is_none() && subst.len() == prepass_type_params.len())
+//RS                         .then(|| substitute_type(param_ty, &subst))
+//RS                 }
+//RS                 _ => None,
+//RS             };
+//RS             pre_inferred.push(self.with_call_access(call_access, |checker| {
+//RS                 if let Some((param_conv, param_ty)) = sig.params.get(index) {
+//RS                     checker.check_call_argument_access(arg, *param_conv, param_ty, owned_access);
+//RS                 }
+//RS                 // Move sites are diagnosed as E0219 (pin/change), not E0220.
+//RS                 let suppress = checker.suppress_partial_move_root_read;
+//RS                 if arg.convention == AccessConvention::Move {
+//RS                     checker.suppress_partial_move_root_read = true;
+//RS                 }
+//RS                 let saved_string_view_read = checker.allow_string_view_read;
+//RS                 if !checker.copies_explicit() && param_conv == Some(AccessConvention::Move) {
+//RS                     // Generic inference has not resolved the owning
+//RS                     // destination yet. Permit the read-only view to be typed
+//RS                     // now; the concrete Move parameter decides whether this
+//RS                     // exact value gets the shared implicit-copy node.
+//RS                     checker.allow_string_view_read = true;
+//RS                 }
+//RS                 let saved_expected =
+//RS                     lambda_expected.map(|expected| checker.expected_type.replace(expected));
+//RS                 let inferred = checker.infer(&mut arg.expr);
+//RS                 if let Some(saved) = saved_expected {
+//RS                     checker.expected_type = saved;
+//RS                 }
+//RS                 checker.allow_string_view_read = saved_string_view_read;
+//RS                 checker.suppress_partial_move_root_read = suppress;
+//RS                 checker.check_call_argument_captures(&arg.expr);
+//RS                 inferred
+//RS             }));
+//RS         }
+//RS         let mut inference = GenericArgInference {
+//RS             subst: HashMap::new(),
+//RS             pre_inferred,
+//RS             complete: false,
+//RS         };
+//RS         let arg_types: Vec<Type> = inference
+//RS             .pre_inferred
+//RS             .iter()
+//RS             .filter_map(|t| t.clone())
+//RS             .collect();
+//RS         if arg_types.len() != args.len() {
+//RS             return inference;
+//RS         }
+//RS         let mut inferred_subst = HashMap::new();
+//RS         let mut origins = HashMap::new();
+//RS         let mut conflict = None;
+//RS         // Ordinary arguments establish the first concrete candidate. This
+//RS         // makes a later lambda return report the actual argument that
+//RS         // disagrees with it, instead of suggesting a generic annotation that
+//RS         // cannot repair the call.
+//RS         for (index, arg_ty) in arg_types.iter().enumerate() {
+//RS             let Some((_, param_ty)) = sig.params.get(index) else {
+//RS                 continue;
+//RS             };
+//RS             if !matches!(param_ty, Type::Fn { .. }) {
+//RS                 seed_generic_type(
+//RS                     param_ty,
+//RS                     arg_ty,
+//RS                     &format!("argument {}", index + 1),
+//RS                     &prepass_type_params,
+//RS                     &mut inferred_subst,
+//RS                     &mut origins,
+//RS                     &mut conflict,
+//RS                 );
+//RS             }
+//RS         }
+//RS         // Function types are structural inference sources too. The lambda
+//RS         // prepass has already made both its annotated parameter and return
+//RS         // types concrete, so use those slots to bind the callee's generic
+//RS         // parameters.
+//RS         for (index, arg_ty) in arg_types.iter().enumerate() {
+//RS             let Some((_, param_ty)) = sig.params.get(index) else {
+//RS                 continue;
+//RS             };
+//RS             if matches!(param_ty, Type::Fn { .. }) && matches!(arg_ty, Type::Fn { .. }) {
+//RS                 seed_generic_type(
+//RS                     param_ty,
+//RS                     arg_ty,
+//RS                     "the lambda",
+//RS                     &prepass_type_params,
+//RS                     &mut inferred_subst,
+//RS                     &mut origins,
+//RS                     &mut conflict,
+//RS                 );
+//RS             }
+//RS         }
+//RS         if let Some(conflict) = conflict {
+//RS             self.diags.push(generic_conflict_diagnostic(name_span, &conflict));
+//RS             // Keep the non-conflicting candidates so the final pass checks
+//RS             // each argument once against the most informative partial
+//RS             // signature.
+//RS             inference.subst = inferred_subst;
+//RS             return inference;
+//RS         }
+//RS         let remaining_params: Vec<_> = fn_type_params
+//RS             .iter()
+//RS             .filter(|param| !inferred_subst.contains_key(&param.name))
+//RS             .cloned()
+//RS             .collect();
+//RS         let mut inference_sig = sig.clone();
+//RS         for (index, (_, param_ty)) in sig.params.iter().enumerate() {
+//RS             let Some(arg_ty) = arg_types.get(index) else {
+//RS                 continue;
+//RS             };
+//RS             if matches!(param_ty, Type::Fn { .. }) && matches!(arg_ty, Type::Fn { .. }) {
+//RS                 inference_sig.params[index].1 = arg_ty.clone();
+//RS             } else {
+//RS                 inference_sig.params[index].1 = substitute_type(param_ty, &inferred_subst);
+//RS             }
+//RS         }
+//RS         inference_sig.return_type = sig
+//RS             .return_type
+//RS             .as_ref()
+//RS             .map(|ret| substitute_type(ret, &inferred_subst));
+//RS         match self.trait_reg.infer_fn_subst_without_bounds(
+//RS             &inference_sig,
+//RS             &arg_types,
+//RS             &remaining_params,
+//RS             self.expected_type.as_ref(),
+//RS         ) {
+//RS             Ok(s) => {
+//RS                 inferred_subst.extend(s);
+//RS                 inference.complete = true;
+//RS             }
+//RS             Err(p) => self.diags.push(e0904(name_span, &p)),
+//RS         }
+//RS         inference.subst = inferred_subst;
+//RS         inference
+//RS     }
+//RS 
+//RS     /// Record a qualified module call's inferred type arguments on the call's
+//RS     /// AST node (D-GENERIC-CALL1=A); spelled type arguments stay as written.
+//RS     pub(crate) fn record_inferred_call_type_args(&mut self, type_args: &mut Vec<Type>) {
+//RS         if let Some(inferred) = self.inferred_call_type_args.take() {
+//RS             if type_args.is_empty() {
+//RS                 *type_args = inferred;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn check_call(&mut self, call: &mut Call, as_value: bool) -> Option<Option<Type>> {
+//RS         let diagnostics_start = self.diags.len();
+//RS         let result = self.check_call_inner(call, as_value);
+//RS         if self.failure_auto_depth > 0 {
+//RS             let recheck = self.diags.split_off(diagnostics_start);
+//RS             let mut kept = Vec::with_capacity(recheck.len());
+//RS             for diagnostic in recheck {
+//RS                 let duplicate_generic_call_diagnostic =
+//RS                     matches!(diagnostic.code.as_str(), "E0904" | "E0112" | "E0113")
+//RS                         && self.diags.iter().chain(kept.iter()).any(|previous| {
+//RS                             previous.code == diagnostic.code
+//RS                                 && previous.span == diagnostic.span
+//RS                                 && previous.what == diagnostic.what
+//RS                         });
+//RS                 if duplicate_generic_call_diagnostic {
+//RS                     continue;
+//RS                 }
+//RS                 kept.push(diagnostic);
+//RS             }
+//RS             self.diags.extend(kept);
+//RS         }
+//RS         result
+//RS     }
+//RS 
+// END-PORT-PENDING 0399 crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:1-1105
+

@@ -1,0 +1,1810 @@
+// PORT-PENDING 1035 tests-dev-parts-support-slice-1: tests/dev_parts/support.rs:1-1806
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Shared helpers for every `tests/dev*.rs` target (`include!`d, never a module
+//RS // of its own — see tests/cli_parts and tests/corelib_parts for the same shape).
+//RS //
+//RS // #2020: `tests/dev.rs` used to be one 11.8k-line binary carrying all 166 of
+//RS // these tests. Its whole-corpus batteries run serially against one
+//RS // `dev_diff_lock`, so the binary needed longer than the 900s suite guard and
+//RS // aborted with about 30 of its own declared tests never started — every pass/fail
+//RS // number it ever printed was a partial measurement. The guard is right and the
+//RS // budget is not raisable, so the cost is split across targets instead: one routine
+//RS // target plus one
+//RS // per whole-corpus battery. This file is the single copy of everything they
+//RS // share, so the split cannot fork a helper into two versions (AGENTS.md I8).
+//RS 
+//RS use std::fs;
+//RS use std::io::Write as _;
+//RS use std::path::PathBuf;
+//RS use std::process::{Command, Output, Stdio};
+//RS use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS use common::{add_generated_rust, have_rustc, panic_message, test_worker_count};
+//RS use jet::Interpreter::{dev_iteration, run_jit_once, RunOutcome};
+//RS use jet::JitBackend::JitBackend;
+//RS use jet_jit::CraneliftBackend;
+//RS 
+//RS fn emit_native_aot(bundle: &jet::AST::ProgramBundle, ffi: Option<&jet::AST::FfiLink>) -> String {
+//RS     let request = jet_foundation::MIR::MirArtifactRequest::new(
+//RS         jet_foundation::MIR::MirArtifactTarget::RustAot,
+//RS         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+//RS         jet_foundation::MIR::MirArtifactBuildMode::Dev,
+//RS     );
+//RS     let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+//RS         .expect("checked native artifact lowers through MIR");
+//RS     mir.validate()
+//RS         .expect("canonical MIR validates in dev support");
+//RS     let mir = jet_foundation::MIR::optimize_mir_program(
+//RS         mir,
+//RS         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
+//RS     )
+//RS     .expect("canonical MIR optimizes in dev support");
+//RS     let mut execution = jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+//RS     execution.ffi = ffi;
+//RS     jet::Codegen::MIRRust::emit_mir_program(
+//RS         &mir,
+//RS         &jet::Codegen::MIRRust::MirRustConfig {
+//RS             target: jet_foundation::Layout::TargetLayout::host(),
+//RS             target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
+//RS             root_prefix: String::new(),
+//RS             execution,
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS // A stem that has never been built pays a cold AOT compile, and this battery
+//RS // runs eight of them at once. Thirty seconds was a warm-cache number, so a
+//RS // cold or freshly pruned runtime cache turned real passes into timeouts.
+//RS // JET_TIER_PARITY_TIMEOUT_SECS raises it without hiding a genuine hang.
+//RS static DEV_DIFF_TIMEOUT: std::sync::LazyLock<Duration> = std::sync::LazyLock::new(|| {
+//RS     Duration::from_secs(
+//RS         std::env::var("JET_TIER_PARITY_TIMEOUT_SECS")
+//RS             .ok()
+//RS             .and_then(|v| v.parse().ok())
+//RS             .unwrap_or(30),
+//RS     )
+//RS });
+//RS 
+//RS fn dev_diff_lock() -> &'static Mutex<()> {
+//RS     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+//RS     LOCK.get_or_init(|| Mutex::new(()))
+//RS }
+//RS 
+//RS /// Acquire a harness mutex whose guarded value CANNOT be left half-written by an
+//RS /// unwind, and say out loud when the lock was already poisoned.
+//RS ///
+//RS /// Every dev test serializes on `dev_diff_lock`, so one test that unwinds while
+//RS /// holding it poisons the lock for the whole binary. With `.lock().unwrap()`
+//RS /// each later test then dies with a bare `PoisonError { .. }` reported at *its
+//RS /// own* line, so a single real defect manufactures an unbounded run of false
+//RS /// failures — the same slander the old abort-on-first-failure behavior produced.
+//RS ///
+//RS /// `PoisonError::into_inner()` is sound at these sites because the guarded value
+//RS /// has no multi-step invariant to break: `dev_diff_lock` guards `()`, the work
+//RS /// queues are only ever `pop_front`ed under the guard, and the report vectors are
+//RS /// only ever `push`ed. `VecDeque::pop_front` and `Vec::push` either complete or
+//RS /// do nothing, so no torn state can outlive an unwind.
+//RS ///
+//RS /// The poison flag is deliberately NOT cleared: every later acquisition keeps
+//RS /// tagging its test as post-cascade. This changes attribution only — the calling
+//RS /// test still stands or falls on its own assertions.
+//RS fn lock_recovered<'a, T>(lock: &'a Mutex<T>, what: &str) -> MutexGuard<'a, T> {
+//RS     match lock.lock() {
+//RS         Ok(guard) => guard,
+//RS         Err(poisoned) => {
+//RS             eprintln!(
+//RS                 "note: cascade, not a fresh defect — `{what}` was poisoned by an EARLIER panic \
+//RS                  in this test binary. The guard holds no partially written state, so it is \
+//RS                  recovered and this test keeps its own verdict; fix the first panic of the run."
+//RS             );
+//RS             poisoned.into_inner()
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Read a worker-collected report the caller is about to assert on.
+//RS ///
+//RS /// `into_inner()` is WRONG here. Poison means a worker thread unwound while
+//RS /// holding the report, so the row that is missing is exactly the row that would
+//RS /// have failed the test, and `assert!(report.is_empty())` over a recovered
+//RS /// report can go GREEN across a real defect. Fail instead, name the cascade, and
+//RS /// print the rows that survived so the first panic stays visible.
+//RS fn judged_report<'a>(lock: &'a Mutex<Vec<String>>, what: &str) -> MutexGuard<'a, Vec<String>> {
+//RS     match lock.lock() {
+//RS         Ok(guard) => guard,
+//RS         Err(poisoned) => {
+//RS             let partial = poisoned.into_inner();
+//RS             panic!(
+//RS                 "cascade, not a fresh defect: `{what}` was poisoned — a worker of this test \
+//RS                  unwound while holding the report, so it is incomplete and cannot be judged \
+//RS                  (an absent row reads as success). {} row(s) survived:\n{}",
+//RS                 partial.len(),
+//RS                 partial.join("\n\n")
+//RS             )
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn skip_if_cranelift_host_unsupported() -> bool {
+//RS     if jet_jit::cranelift_host_supported() {
+//RS         false
+//RS     } else if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
+//RS         // c730: CI parity must never green-skip on an unsupported host.
+//RS         panic!(
+//RS             "cranelift-jit host path unsupported on this architecture \
+//RS              (JET_REQUIRE_CRANELIFT_HOST=1); remove the host from the parity \
+//RS              matrix or restore native JIT support"
+//RS         );
+//RS     } else {
+//RS         eprintln!("note: cranelift-jit host path unsupported on this architecture; skipping resident JIT assertion");
+//RS         true
+//RS     }
+//RS }
+//RS 
+//RS fn require_multi_head_parity_prereqs() {
+//RS     assert!(
+//RS         jet_jit::cranelift_host_supported(),
+//RS         "multi-head parity requires a supported Cranelift host; project harness must provision one"
+//RS     );
+//RS     assert!(
+//RS         have_rustc(),
+//RS         "multi-head parity requires rustc; project harness must provision it"
+//RS     );
+//RS }
+//RS 
+//RS /// Keep JIT trace state scoped to each test operation.
+//RS ///
+//RS /// `jet_jit::on_compiler_stack` is the product boundary: it installs the sized
+//RS /// compiler stack and carries the trace flags, tier rows, `struct_new` tally
+//RS /// and tier artifact back to this thread. Re-entrancy makes it inline when an
+//RS /// outer entry already crossed, so nesting it is free.
+//RS fn with_jit_test_scope<T, F>(f: F) -> T
+//RS where
+//RS     F: FnOnce() -> T + Send,
+//RS     T: Send,
+//RS {
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     jet_jit::on_compiler_stack(f)
+//RS }
+//RS 
+//RS /// c77: the differential battery covers EVERY `Examples/features/*.jet`, not a
+//RS /// hand-curated subset — so the battery can never quietly shrink. Each example
+//RS /// either runs in the interpreter (and its stdout/stderr/exit code must match
+//RS /// the compiled binary; stdout also matches its golden `.out`) or stops at a named boundary
+//RS /// (E2202 fuel, E0956 unsupported-at-runtime, or a named effect boundary). A silent skip is
+//RS /// a test failure.
+//RS fn example_path(stem: &str) -> String {
+//RS     format!("Examples/features/{}.jet", stem)
+//RS }
+//RS 
+//RS fn host_expected_stdout(stem: &str) -> Option<&'static str> {
+//RS     match stem {
+//RS         "lowlevel/os_target_gating" if cfg!(target_os = "macos") => Some("macos: appkit\n"),
+//RS         "lowlevel/os_target_gating" if cfg!(target_os = "windows") => Some("windows: win32\n"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn uses_ffi_bridge(stem: &str) -> bool {
+//RS     matches!(
+//RS         stem,
+//RS         "lowlevel/ffi"
+//RS             | "lowlevel/inline_c"
+//RS             | "lowlevel/inline_asm"
+//RS             | "io/archive"
+//RS             | "io/db"
+//RS             | "crypto/crypto_envelope"
+//RS             | "crypto/crypto_sign"
+//RS             | "crypto/crypto_migration"
+//RS             | "crypto/crypto_suite"
+//RS             | "crypto/vault_secret"
+//RS             | "crypto/auth_tokens"
+//RS             | "io/compress_gzip"
+//RS             | "io/compress_zstd"
+//RS     )
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS struct ProgramOutput {
+//RS     stdout: String,
+//RS     stderr: String,
+//RS     exit_code: i32,
+//RS }
+//RS 
+//RS impl ProgramOutput {
+//RS     fn ran(stdout: String, stderr: String, exit_code: i32) -> Self {
+//RS         Self {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The oracle binary path for one `compiled_binary_output` invocation.
+//RS ///
+//RS /// A generated CLI's usage banner names argv[0], on purpose: it flows from the
+//RS /// one renderer at `Prelude/CoreLib/Top/Args.rs::JetArgsSpec::help` through
+//RS /// `Prelude/Job.rs::jet_args_source_program_name`, which takes the basename and
+//RS /// strips a trailing `.jet`. The resident JIT and the interpreter are handed
+//RS /// the source path (`positionals.jet` -> `positionals`), and a real `jet build`
+//RS /// names the binary after the source stem — `tests/cli_parts/surface.rs::
+//RS /// derived_help_uses_program_basename_for_compiled_and_jet_run_paths` pins
+//RS /// `build/typed` -> `Usage: typed` — so a user's tiers always agree. Only this
+//RS /// oracle disagreed, because it built `jet_<tag>_<i>` and that harness-specific
+//RS /// name leaked into argv[0].
+//RS ///
+//RS /// So give the oracle the real program name instead of teaching a comparison to
+//RS /// scrub it: `tests/golden.rs` already has to rewrite `Usage: <binary>` back to
+//RS /// the source stem for exactly this reason, and a second copy of that
+//RS /// workaround would spread it. `jet_<tag>_<i>` becomes the containing
+//RS /// directory, preserving the per-invocation uniqueness the old file name
+//RS /// carried. A caller that needs the built program's identity (argv[0] for a
+//RS /// re-exec) asks here rather than restating the layout.
+//RS fn compiled_binary_path(
+//RS     dir: &std::path::Path,
+//RS     tag: &str,
+//RS     i: usize,
+//RS     file: &str,
+//RS ) -> std::path::PathBuf {
+//RS     let program_name = std::path::Path::new(file)
+//RS         .file_stem()
+//RS         .and_then(|name| name.to_str())
+//RS         .expect("oracle source name is utf8");
+//RS     dir.join(format!("jet_{tag}_{i}_bin")).join(program_name)
+//RS }
+//RS 
+//RS /// #2017: the one place a dev-side harness turns shared answers into something
+//RS /// a child can read.
+//RS ///
+//RS /// The answers arrive as bytes from `common::example_stdin`, and each tier gets
+//RS /// its OWN file so three children can each read the whole sequence — a single
+//RS /// pipe would be drained by whichever tier ran first, which is a silent
+//RS /// no-input run for the other two, the exact defect this card is about.
+//RS fn answer_file(dir: &std::path::Path, tag: &str, i: usize, answers: &str) -> std::path::PathBuf {
+//RS     let path = dir.join(format!("jet_{tag}_{i}.stdin"));
+//RS     fs::create_dir_all(dir).unwrap_or_else(|e| panic!("create answer dir: {e}"));
+//RS     fs::write(&path, answers).unwrap_or_else(|e| panic!("write answers for `{tag}`: {e}"));
+//RS     path
+//RS }
+//RS 
+//RS // ── #2076: the run-scoped oracle-binary cache ───────────────────────────────
+//RS //
+//RS // Every dev battery pays an optimized (`-O`) rustc build per example, and the
+//RS // six battery targets walk overlapping slices of the same corpus, so one full
+//RS // dev run compiled the same binary up to ~958 times. That build is a pure
+//RS // function of its inputs — the generated Rust, the toolchain, the flags, the
+//RS // link inputs — so the second caller of one key can reuse the first caller's
+//RS // artifact instead of paying for it again.
+//RS //
+//RS // `Tools/agent/verify-full.sh` gives every run a fresh disk-backed root via
+//RS // `JET_DEV_ORACLE_CACHE_DIR`, shared by all six battery processes and removed
+//RS // at run end. Ad-hoc runs get a process-scoped disk root below the same
+//RS // gitignored scratch area; no developer cache crosses runs.
+//RS //
+//RS // The key covers everything that decides the bytes rustc emits, and every hit
+//RS // is digest-verified. Everything else — a changed key input, a truncated
+//RS // artifact, an unwritable root — is a MISS, and a miss is the old build path
+//RS // unchanged.
+//RS // Nothing here can turn a failing battery green: the cache sits strictly
+//RS // between "generated Rust ready" and "binary on disk", and a failed build is
+//RS // never published.
+//RS 
+//RS /// The oracle's rustc flags. ONE list, because it goes into the command AND
+//RS /// into the cache key: a flag cannot enter the build without entering the key.
+//RS const ORACLE_RUSTC_FLAGS: &[&str] = &["-O"];
+//RS 
+//RS /// What stopped an oracle build. The strict caller renders each case as the
+//RS /// panic it always did, the `try_` caller reports every case as `None`, and
+//RS /// neither one carries its own copy of the build (AGENTS.md I8).
+//RS enum OracleBuildFailure {
+//RS     Io(std::io::Error),
+//RS     FrontEnd(Vec<jet::Diagnostics::Diagnostic>),
+//RS     CLinks(Vec<jet::Diagnostics::Diagnostic>),
+//RS     Rustc(Output),
+//RS }
+//RS 
+//RS impl OracleBuildFailure {
+//RS     /// The panic text each failure has always carried, in one place, so the two
+//RS     /// callers cannot disagree about which failure is which (AGENTS.md I8).
+//RS     fn describe(&self, stem: &str, file: &str) -> String {
+//RS         let rendered = |diags: &[jet::Diagnostics::Diagnostic]| {
+//RS             let src = fs::read_to_string(file).unwrap_or_default();
+//RS             jet::render_diagnostics(file, &src, diags)
+//RS         };
+//RS         match self {
+//RS             OracleBuildFailure::Io(error) => format!(
+//RS                 "`{stem}` ran in dev but its oracle I/O failed (source read or scratch dir): {error}"
+//RS             ),
+//RS             OracleBuildFailure::FrontEnd(diags) => format!(
+//RS                 "`{}` ran in dev but failed the front end:\n{}",
+//RS                 stem,
+//RS                 rendered(diags.as_slice())
+//RS             ),
+//RS             OracleBuildFailure::CLinks(diags) => format!(
+//RS                 "`{}` ran in dev but AOT C-link resolution failed:\n{}",
+//RS                 stem,
+//RS                 rendered(diags.as_slice())
+//RS             ),
+//RS             OracleBuildFailure::Rustc(out) => format!(
+//RS                 "`{}` ran in dev but generated Rust failed to build (status: {}):\nstdout:\n{}\nstderr:\n{}",
+//RS                 stem,
+//RS                 out.status,
+//RS                 String::from_utf8_lossy(&out.stdout),
+//RS                 String::from_utf8_lossy(&out.stderr)
+//RS             ),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The current run's oracle artifact directory, or `None` when it cannot be
+//RS /// created — then every caller builds exactly as it did before #2076.
+//RS ///
+//RS /// An explicit run root is used as-is. The ad-hoc fallback is salted with the
+//RS /// rustc identity as well as the process, while the key below still carries
+//RS /// `rustc -vV` so the inputs remain self-describing.
+//RS static ORACLE_CACHE_ROOT: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
+//RS     common::assert_test_environment_is_safe();
+//RS     let root = match std::env::var_os("JET_DEV_ORACLE_CACHE_DIR") {
+//RS         Some(dir) => {
+//RS             let root = PathBuf::from(dir);
+//RS             common::assert_test_path_on_disk(&root, "JET_DEV_ORACLE_CACHE_DIR");
+//RS             root
+//RS         }
+//RS         None => {
+//RS             let rustc_salt = ORACLE_RUSTC_IDENTITY
+//RS                 .as_deref()
+//RS                 .map(|identity| jet::SHA256::sha256_hex(identity.as_bytes()))
+//RS                 .unwrap_or_else(|| "unknown".to_string());
+//RS             common::test_scratch_root("dev-oracle-cache")
+//RS                 .join(format!("run-{}-{rustc_salt}", std::process::id()))
+//RS         }
+//RS     };
+//RS     fs::create_dir_all(&root).ok().map(|()| root)
+//RS });
+//RS 
+//RS /// The identity of the oracle toolchain: `rustc -vV` names the release, the
+//RS /// commit hash AND the `host:` triple — which is the oracle's target, because
+//RS /// no `--target` is ever passed here. One probe per process.
+//RS ///
+//RS /// `None` disables the cache instead of failing a battery: a harness that
+//RS /// cannot ask rustc who it is has no business claiming two builds match.
+//RS static ORACLE_RUSTC_IDENTITY: LazyLock<Option<String>> = LazyLock::new(|| {
+//RS     let out = Command::new("rustc").arg("-vV").output().ok()?;
+//RS     out.status
+//RS         .success()
+//RS         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+//RS });
+//RS 
+//RS /// The cache entry for one oracle build, or `None` when there is no usable
+//RS /// cache.
+//RS ///
+//RS /// The key is a length-prefixed digest — the shape
+//RS /// `Source/RuntimeCache.rs::cache_key` uses, so no two field lists can collide
+//RS /// — over every input that decides the bytes rustc emits:
+//RS ///
+//RS ///   1. the generated Rust, which already carries the example's own bytes and
+//RS ///      the compiler that lowered them,
+//RS ///   2. `rustc -vV`: toolchain release, commit hash, host/target triple,
+//RS ///   3. the rustc flags, from the one `ORACLE_RUSTC_FLAGS` list,
+//RS ///   4. the FFI bridge link inputs when the example has one — crate name, rlib
+//RS ///      path (itself content-keyed by the bridge signature), the rlib's OWN
+//RS ///      digest, its `artifacts.sha256` manifest digest because that bridge is
+//RS ///      rebuilt in place under the same path, and every dependency search dir,
+//RS ///   5. the resolved C link flags.
+//RS fn oracle_cache_entry(
+//RS     rust: &str,
+//RS     ffi: Option<&jet::FFI::FfiLink>,
+//RS     clinks: &[String],
+//RS ) -> Option<PathBuf> {
+//RS     let root = ORACLE_CACHE_ROOT.as_ref()?;
+//RS     let mut data = Vec::new();
+//RS     push_oracle_key_field(&mut data, b"jet-dev-oracle-bin-v1");
+//RS     push_oracle_key_field(&mut data, rust.as_bytes());
+//RS     push_oracle_key_field(&mut data, ORACLE_RUSTC_IDENTITY.as_deref()?.as_bytes());
+//RS     for flag in ORACLE_RUSTC_FLAGS {
+//RS         push_oracle_key_field(&mut data, flag.as_bytes());
+//RS     }
+//RS     match ffi {
+//RS         None => push_oracle_key_field(&mut data, b"no-ffi"),
+//RS         Some(link) => {
+//RS             push_oracle_key_field(&mut data, link.crate_name.as_bytes());
+//RS             push_oracle_key_field(&mut data, link.rlib_path.to_string_lossy().as_bytes());
+//RS             push_oracle_key_field(
+//RS                 &mut data,
+//RS                 jet::SHA256::sha256_file_hex(&link.rlib_path)
+//RS                     .ok()?
+//RS                     .as_bytes(),
+//RS             );
+//RS             let artifacts_manifest = link
+//RS                 .rlib_path
+//RS                 .parent()?
+//RS                 .join(format!("{}.sha256", link.crate_name));
+//RS             push_oracle_key_field(&mut data, b"ffi-artifacts.sha256");
+//RS             push_oracle_key_field(&mut data, artifacts_manifest.to_string_lossy().as_bytes());
+//RS             push_oracle_key_field(
+//RS                 &mut data,
+//RS                 jet::SHA256::sha256_file_hex(&artifacts_manifest)
+//RS                     .ok()?
+//RS                     .as_bytes(),
+//RS             );
+//RS             for deps_dir in link.dependency_dirs() {
+//RS                 push_oracle_key_field(&mut data, deps_dir.to_string_lossy().as_bytes());
+//RS             }
+//RS         }
+//RS     }
+//RS     for arg in clinks {
+//RS         push_oracle_key_field(&mut data, arg.as_bytes());
+//RS     }
+//RS     Some(root.join(jet::SHA256::sha256_hex(&data)))
+//RS }
+//RS 
+//RS /// Length-prefix every key field, so two different field lists cannot hash to
+//RS /// the same bytes (`Source/RuntimeCache.rs::push_bytes`).
+//RS fn push_oracle_key_field(out: &mut Vec<u8>, value: &[u8]) {
+//RS     out.extend_from_slice(&(value.len() as u64).to_be_bytes());
+//RS     out.extend_from_slice(value);
+//RS }
+//RS 
+//RS /// Put this entry's artifact at `bin`, or say the entry cannot be trusted.
+//RS ///
+//RS /// Verified on every hit: a recorded digest that does not match the bytes on
+//RS /// disk is a miss, never a reused artifact — `Source/RuntimeCache.rs` verifies
+//RS /// its rlibs the same way. The link lands at the caller's own
+//RS /// `compiled_binary_path`, so argv[0] stays the program's own name and a
+//RS /// generated CLI's usage banner reads the same as it did when this call built
+//RS /// its own binary.
+//RS fn reuse_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) -> bool {
+//RS     let ready = entry.join("ready");
+//RS     let artifact = ready.join("artifact");
+//RS     let digest = ready.join("artifact.sha256");
+//RS     let Ok(recorded) = fs::read_to_string(&digest) else {
+//RS         return false;
+//RS     };
+//RS     if !fs::symlink_metadata(&artifact).is_ok_and(|metadata| metadata.file_type().is_file())
+//RS         || !fs::symlink_metadata(&digest).is_ok_and(|metadata| metadata.file_type().is_file())
+//RS     {
+//RS         return false;
+//RS     }
+//RS     match jet::SHA256::sha256_file_hex(&artifact) {
+//RS         Ok(actual) if actual == recorded.trim() => {}
+//RS         _ => return false,
+//RS     }
+//RS     let _ = fs::remove_file(bin);
+//RS     // A hard link keeps reuse O(1); `copy` covers a caller whose scratch is on
+//RS     // another filesystem than the cache root.
+//RS     if fs::hard_link(&artifact, bin).is_err() && fs::copy(&artifact, bin).is_err() {
+//RS         return false;
+//RS     }
+//RS     record_oracle_event("hit", entry);
+//RS     true
+//RS }
+//RS 
+//RS /// Publish the freshly built `bin` as this entry's artifact, best effort.
+//RS ///
+//RS /// The artifact and its digest are staged in a private directory and the whole
+//RS /// directory is renamed into place, so a reader can never meet an artifact whose
+//RS /// digest has not landed yet. `ready` already existing means another process
+//RS /// published this key first: same key, same inputs, nothing to do.
+//RS ///
+//RS /// A hard link, not a copy: the run then holds exactly ONE copy of the bytes per
+//RS /// distinct oracle, whoever built it and however many batteries reuse it. The
+//RS /// run-scoped root keeps that copy available to every battery in the run. A
+//RS /// later build that writes over that same scratch path in place can change the
+//RS /// published bytes — and that is caught rather than served, because a hit
+//RS /// re-hashes the artifact against its recorded digest and a mismatch is a miss.
+//RS fn publish_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) {
+//RS     let ready = entry.join("ready");
+//RS     if ready.is_dir() {
+//RS         return;
+//RS     }
+//RS     let staged = entry.join(format!(
+//RS         "staged.{}.{}",
+//RS         std::process::id(),
+//RS         next_oracle_index()
+//RS     ));
+//RS     let published = (|| -> std::io::Result<()> {
+//RS         fs::create_dir_all(&staged)?;
+//RS         if fs::hard_link(bin, staged.join("artifact")).is_err() {
+//RS             fs::copy(bin, staged.join("artifact"))?;
+//RS         }
+//RS         fs::write(
+//RS             staged.join("artifact.sha256"),
+//RS             jet::SHA256::sha256_file_hex(&staged.join("artifact"))?,
+//RS         )?;
+//RS         fs::rename(&staged, &ready)
+//RS     })();
+//RS     if published.is_err() {
+//RS         let _ = fs::remove_dir_all(&staged);
+//RS     }
+//RS }
+//RS 
+//RS /// Same-key oracle builds race across the six test processes. The atomic
+//RS /// publish prevents torn hits; this lock prevents duplicate cold rustc work.
+//RS struct OracleCacheLock {
+//RS     dir: PathBuf,
+//RS }
+//RS 
+//RS impl OracleCacheLock {
+//RS     fn acquire(entry: &std::path::Path) -> std::io::Result<Self> {
+//RS         fs::create_dir_all(entry)?;
+//RS         let dir = entry.join(".build-lock");
+//RS         loop {
+//RS             match fs::create_dir(&dir) {
+//RS                 Ok(()) => return Ok(Self { dir }),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+//RS                     let stale = fs::metadata(&dir)
+//RS                         .and_then(|meta| meta.modified())
+//RS                         .and_then(|modified| modified.elapsed().map_err(std::io::Error::other))
+//RS                         .is_ok_and(|age| age > Duration::from_secs(120));
+//RS                     if stale {
+//RS                         let _ = fs::remove_dir(&dir);
+//RS                     } else {
+//RS                         std::thread::sleep(Duration::from_millis(50));
+//RS                     }
+//RS                 }
+//RS                 Err(error) => return Err(error),
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for OracleCacheLock {
+//RS     fn drop(&mut self) {
+//RS         let _ = fs::remove_dir(&self.dir);
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct OracleCacheCounts {
+//RS     hits: usize,
+//RS     misses: usize,
+//RS     builds: usize,
+//RS }
+//RS 
+//RS static ORACLE_CACHE_COUNTS: LazyLock<Mutex<OracleCacheCounts>> =
+//RS     LazyLock::new(|| Mutex::new(OracleCacheCounts::default()));
+//RS 
+//RS fn report_oracle_cache_counts() {
+//RS     let counts = ORACLE_CACHE_COUNTS
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     if counts.hits + counts.misses + counts.builds > 0 {
+//RS         eprintln!(
+//RS             "oracle cache: {} hits, {} misses, {} builds",
+//RS             counts.hits, counts.misses, counts.builds
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// One line per oracle event in the shared cache root — the #2076 ledger.
+//RS ///
+//RS /// Six battery processes share the root, so a per-process counter cannot state
+//RS /// a combined count and an appended line can. The run file is cumulative; total
+//RS /// builds against the number of DISTINCT keys built is the duplicate-compile
+//RS /// count the card gates on:
+//RS ///
+//RS /// ```text
+//RS /// events="$JET_DEV_ORACLE_CACHE_DIR/events"
+//RS /// builds=$(grep -c '^build ' "$events")
+//RS /// distinct=$(awk '$1=="build"{print $2}' "$events" | sort -u | wc -l)
+//RS /// hits=$(grep -c '^hit ' "$events")
+//RS /// echo "duplicate optimized oracle compiles: $((builds - distinct)) (was $((hits + builds - distinct)))"
+//RS /// ```
+//RS ///
+//RS /// Every `hit` is a compile the current or an earlier run did not pay and the
+//RS /// old harness did, so the cumulative ledger still exposes reuse without a
+//RS /// cache-off run.
+//RS ///
+//RS /// `miss` records a caller that needed the lock, `hit` a reuse, `build` a paid
+//RS /// compile, and `fail` a compile rustc rejected. A rejection is deliberately
+//RS /// NOT published, so the few examples whose oracle is known broken
+//RS /// (`AOT_BROKEN_HELD_OUT`) still pay their compile in every battery that reaches
+//RS /// them, and the ledger says so by name instead of hiding them in the duplicate
+//RS /// count.
+//RS ///
+//RS /// Best effort by construction: this ledger measures the cache and never gates
+//RS /// a battery, so a failed append costs a number, never a verdict.
+//RS fn record_oracle_event(event: &str, entry: &std::path::Path) {
+//RS     if let Ok(mut counts) = ORACLE_CACHE_COUNTS.lock() {
+//RS         match event {
+//RS             "hit" => counts.hits += 1,
+//RS             "miss" => counts.misses += 1,
+//RS             "build" => counts.builds += 1,
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     let Some(root) = ORACLE_CACHE_ROOT.as_ref() else {
+//RS         return;
+//RS     };
+//RS     let Some(key) = entry.file_name() else {
+//RS         return;
+//RS     };
+//RS     let key = key.to_string_lossy();
+//RS     if let Ok(mut log) = fs::OpenOptions::new()
+//RS         .append(true)
+//RS         .create(true)
+//RS         .open(root.join("events"))
+//RS     {
+//RS         use std::io::Write;
+//RS         let _ = log.write_all(format!("{event} {key}\n").as_bytes());
+//RS     }
+//RS }
+//RS 
+//RS /// Per-stem AOT scratch on the gitignored disk root. The process id keeps two
+//RS /// simultaneous batteries from writing the same generated source; the oracle
+//RS /// cache above supplies same-run reuse.
+//RS fn aot_scratch_dir(tag: &str, stem: &str) -> PathBuf {
+//RS     let stem = stem.replace('/', "_");
+//RS     common::test_scratch_root("aot").join(format!("{tag}_{stem}_{}", std::process::id()))
+//RS }
+//RS 
+//RS /// Build the optimized AOT oracle for one example, or reuse the run-scoped
+//RS /// artifact for the same inputs (#2076).
+//RS ///
+//RS /// The shared path where dev batteries turn generated Rust into an oracle
+//RS /// binary. Both source and checked-bundle callers route through it, so the
+//RS /// cache cannot be half-applied and their `rustc` invocations cannot drift
+//RS /// apart (AGENTS.md I8).
+//RS fn build_oracle_binary(
+//RS     dir: &std::path::Path,
+//RS     tag: &str,
+//RS     i: usize,
+//RS     stem: &str,
+//RS     file: &str,
+//RS ) -> Result<std::path::PathBuf, OracleBuildFailure> {
+//RS     common::assert_test_environment_is_safe();
+//RS     common::assert_test_path_on_disk(dir, "AOT scratch");
+//RS     let src = fs::read_to_string(file).map_err(OracleBuildFailure::Io)?;
+//RS     let compiled = jet::compile_with_path(&src, file).map_err(OracleBuildFailure::FrontEnd)?;
+//RS     let clinks = jet::resolve_c_links(file).map_err(OracleBuildFailure::CLinks)?;
+//RS     build_oracle_binary_from_parts(dir, tag, i, stem, file, compiled.rust, compiled.ffi, clinks)
+//RS }
+//RS 
+//RS /// Build an AOT oracle from the bundle already checked by the strict
+//RS /// three-tier harness. This keeps conformance policy and build facts identical
+//RS /// across interpreter, resident JIT, and AOT.
+//RS fn build_oracle_binary_from_bundle(
+//RS     dir: &std::path::Path,
+//RS     tag: &str,
+//RS     i: usize,
+//RS     stem: &str,
+//RS     file: &str,
+//RS     bundle: &jet::AST::ProgramBundle,
+//RS ) -> Result<std::path::PathBuf, OracleBuildFailure> {
+//RS     common::assert_test_environment_is_safe();
+//RS     common::assert_test_path_on_disk(dir, "AOT scratch");
+//RS     let ffi = jet::FFI::prepare(bundle).map_err(OracleBuildFailure::FrontEnd)?;
+//RS     let rust = emit_native_aot(bundle, ffi.as_ref());
+//RS     let clinks =
+//RS         jet::resolve_c_links_for_bundle(bundle, None).map_err(OracleBuildFailure::CLinks)?;
+//RS     build_oracle_binary_from_parts(dir, tag, i, stem, file, rust, ffi, clinks)
+//RS }
+//RS 
+//RS fn build_oracle_binary_from_parts(
+//RS     dir: &std::path::Path,
+//RS     tag: &str,
+//RS     i: usize,
+//RS     stem: &str,
+//RS     file: &str,
+//RS     rust: String,
+//RS     ffi: Option<jet::FFI::FfiLink>,
+//RS     clinks: Vec<String>,
+//RS ) -> Result<std::path::PathBuf, OracleBuildFailure> {
+//RS     // I8: `compiled_binary_path` is the ONE oracle-binary naming rule, and it
+//RS     // exists precisely so argv[0] is the program's own name (see its doc). The
+//RS     // corpus gate's own build site used to keep the old `jet_<tag>_<i>` name, so
+//RS     // its oracle ran as `jet_corpus_gate_aot_0` and the gate read its own
+//RS     // harness binary name back out of a usage banner as a run-tier divergence.
+//RS     let bin = compiled_binary_path(dir, tag, i, file);
+//RS     fs::create_dir_all(bin.parent().expect("oracle binary has a parent"))
+//RS         .map_err(OracleBuildFailure::Io)?;
+//RS     let entry = oracle_cache_entry(&rust, ffi.as_ref(), &clinks);
+//RS     if let Some(entry) = &entry {
+//RS         if reuse_cached_oracle(entry, &bin) {
+//RS             return Ok(bin);
+//RS         }
+//RS         record_oracle_event("miss", entry);
+//RS     }
+//RS     let _cache_lock = entry
+//RS         .as_ref()
+//RS         .and_then(|entry| match OracleCacheLock::acquire(entry) {
+//RS             Ok(lock) => Some(lock),
+//RS             Err(error) => {
+//RS                 eprintln!(
+//RS                     "note: oracle cache lock unavailable for {}: {error}; building uncached",
+//RS                     entry.display()
+//RS                 );
+//RS                 None
+//RS             }
+//RS         });
+//RS     if let Some(entry) = &entry {
+//RS         if reuse_cached_oracle(entry, &bin) {
+//RS             return Ok(bin);
+//RS         }
+//RS         if _cache_lock.is_some() {
+//RS             let _ = fs::remove_dir_all(entry.join("ready"));
+//RS         }
+//RS     }
+//RS     let rs = dir.join(format!("jet_{tag}_{i}.rs"));
+//RS     let mut rustc_cmd = Command::new("rustc");
+//RS     // Match default optimized AOT behavior. `add_generated_rust` caches the
+//RS     // runtime dependency; the entry above is what keeps the USER program from
+//RS     // being compiled and linked again for every battery that walks this stem.
+//RS     let _runtime_lease = add_generated_rust(
+//RS         &mut rustc_cmd,
+//RS         &rs,
+//RS         &rust,
+//RS         ffi.is_some(),
+//RS         ORACLE_RUSTC_FLAGS,
+//RS     );
+//RS     rustc_cmd.arg("-o").arg(&bin);
+//RS     if let Some(link) = &ffi {
+//RS         rustc_cmd
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc_cmd
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     for arg in &clinks {
+//RS         rustc_cmd.arg(arg);
+//RS     }
+//RS     let out = command_output_with_timeout(
+//RS         rustc_cmd,
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &format!("rustc build for `{stem}`"),
+//RS     );
+//RS     if let Some(entry) = &entry {
+//RS         record_oracle_event(
+//RS             if out.status.success() {
+//RS                 "build"
+//RS             } else {
+//RS                 "fail"
+//RS             },
+//RS             entry,
+//RS         );
+//RS     }
+//RS     if !out.status.success() {
+//RS         return Err(OracleBuildFailure::Rustc(out));
+//RS     }
+//RS     if let Some(entry) = &entry {
+//RS         publish_cached_oracle(entry, &bin);
+//RS     }
+//RS     Ok(bin)
+//RS }
+//RS 
+//RS /// `dir` is the caller's fixture directory; AOT output is always redirected to
+//RS /// `aot_scratch_dir` so one shared helper owns the storage policy.
+//RS fn compiled_binary_output(
+//RS     dir: &std::path::Path,
+//RS     tag: &str,
+//RS     i: usize,
+//RS     stem: &str,
+//RS     file: &str,
+//RS ) -> ProgramOutput {
+//RS     compiled_binary_output_with_stdin(dir, tag, i, stem, file, None)
+//RS }
+//RS 
+//RS fn compiled_binary_output_from_bundle(
+//RS     _dir: &std::path::Path,
+//RS     tag: &str,
+//RS     i: usize,
+//RS     stem: &str,
+//RS     file: &str,
+//RS     bundle: &jet::AST::ProgramBundle,
+//RS ) -> ProgramOutput {
+//RS     let dir = aot_scratch_dir(tag, stem);
+//RS     let bin = build_oracle_binary_from_bundle(&dir, tag, i, stem, file, bundle)
+//RS         .unwrap_or_else(|failure| panic!("{}", failure.describe(stem, file)));
+//RS     let run = command_output_with_timeout(
+//RS         Command::new(&bin),
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &format!("compiled binary run for `{stem}`"),
+//RS     );
+//RS     ProgramOutput::ran(
+//RS         String::from_utf8_lossy(&run.stdout).to_string(),
+//RS         String::from_utf8_lossy(&run.stderr).to_string(),
+//RS         run.status.code().unwrap_or(1),
+//RS     )
+//RS }
+//RS 
+//RS /// #2017: every harness states the ANSWERS, never a path. The three suites that
+//RS /// feed an interactive example used to disagree on the type of the input —
+//RS /// inline bytes in `tests/golden.rs`, an `Option<&Path>` here — so a call site
+//RS /// had to convert before it could share a fixture. `common::example_stdin` is
+//RS /// the one home for the answers themselves (I8); materializing them is this
+//RS /// function's private business, because `command_output_with_timeout` owns the
+//RS /// spawn and never services a pipe, so a child needs a real fd 0.
+//RS fn compiled_binary_output_with_stdin(
+//RS     _dir: &std::path::Path,
+//RS     tag: &str,
+//RS     i: usize,
+//RS     stem: &str,
+//RS     file: &str,
+//RS     answers: Option<&str>,
+//RS ) -> ProgramOutput {
+//RS     let dir = aot_scratch_dir(tag, stem);
+//RS     let bin = build_oracle_binary(&dir, tag, i, stem, file)
+//RS         .unwrap_or_else(|failure| panic!("{}", failure.describe(stem, file)));
+//RS     let mut run_cmd = Command::new(&bin);
+//RS     if let Some(answers) = answers {
+//RS         run_cmd.stdin(fs::File::open(answer_file(&dir, tag, i, answers)).unwrap());
+//RS     }
+//RS     // Match golden / ui_and_web three-way: GTK `present` opens a real window
+//RS     // unless headless — AOT would hang the 30s timeout otherwise.
+//RS     if stem == "ui/ui_native_linux" {
+//RS         run_cmd.env("JET_UI_HEADLESS", "1");
+//RS     }
+//RS     // `os.sync` flushes the shared build filesystem and can exceed the normal
+//RS     // short example timeout when the workspace is busy.
+//RS     let runtime_timeout = if stem == "io/os_process_control" {
+//RS         Duration::from_secs(120)
+//RS     } else {
+//RS         *DEV_DIFF_TIMEOUT
+//RS     };
+//RS     let run = command_output_with_timeout(
+//RS         run_cmd,
+//RS         runtime_timeout,
+//RS         &format!("compiled binary run for `{stem}`"),
+//RS     );
+//RS     ProgramOutput::ran(
+//RS         String::from_utf8_lossy(&run.stdout).to_string(),
+//RS         String::from_utf8_lossy(&run.stderr).to_string(),
+//RS         run.status.code().unwrap_or(1),
+//RS     )
+//RS }
+//RS 
+//RS /// Builds the AOT binary and stops. #2016: a service entry serves until it is
+//RS /// stopped, so the gate cannot RUN it, but its AOT compile is still the proof
+//RS /// that the stem is real. Splitting build from run is what lets the gate keep
+//RS /// that proof while leaving the stem out of the run universe.
+//RS fn try_compiled_binary_build(
+//RS     _dir: &std::path::Path,
+//RS     tag: &str,
+//RS     i: usize,
+//RS     stem: &str,
+//RS     file: &str,
+//RS ) -> Option<std::path::PathBuf> {
+//RS     let dir = aot_scratch_dir(tag, stem);
+//RS     build_oracle_binary(&dir, tag, i, stem, file).ok()
+//RS }
+//RS 
+//RS fn try_compiled_binary_output(
+//RS     dir: &std::path::Path,
+//RS     tag: &str,
+//RS     i: usize,
+//RS     stem: &str,
+//RS     file: &str,
+//RS ) -> Option<ProgramOutput> {
+//RS     let bin = try_compiled_binary_build(dir, tag, i, stem, file)?;
+//RS     let run = command_output_with_timeout(
+//RS         Command::new(&bin),
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &format!("compiled binary run for `{stem}`"),
+//RS     );
+//RS     Some(ProgramOutput::ran(
+//RS         String::from_utf8_lossy(&run.stdout).to_string(),
+//RS         String::from_utf8_lossy(&run.stderr).to_string(),
+//RS         run.status.code().unwrap_or(1),
+//RS     ))
+//RS }
+//RS 
+//RS fn command_output_with_timeout(mut cmd: Command, timeout: Duration, label: &str) -> Output {
+//RS     let stamp = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .unwrap()
+//RS         .as_nanos();
+//RS     let base =
+//RS         std::env::temp_dir().join(format!("jet_dev_timeout_{}_{}", std::process::id(), stamp));
+//RS     let stdout_path = base.with_extension("stdout");
+//RS     let stderr_path = base.with_extension("stderr");
+//RS     let stdout_file = fs::File::create(&stdout_path)
+//RS         .unwrap_or_else(|e| panic!("{label}: failed to create stdout temp file: {e}"));
+//RS     let stderr_file = fs::File::create(&stderr_path)
+//RS         .unwrap_or_else(|e| panic!("{label}: failed to create stderr temp file: {e}"));
+//RS     let mut child = cmd
+//RS         .stdout(Stdio::from(stdout_file))
+//RS         .stderr(Stdio::from(stderr_file))
+//RS         .spawn()
+//RS         .unwrap_or_else(|e| panic!("{label}: failed to spawn: {e}"));
+//RS     let start = Instant::now();
+//RS     loop {
+//RS         match child.try_wait() {
+//RS             Ok(Some(_)) => {
+//RS                 let status = child
+//RS                     .wait()
+//RS                     .unwrap_or_else(|e| panic!("{label}: failed to collect status: {e}"));
+//RS                 let stdout = fs::read(&stdout_path).unwrap_or_default();
+//RS                 let stderr = fs::read(&stderr_path).unwrap_or_default();
+//RS                 let _ = fs::remove_file(&stdout_path);
+//RS                 let _ = fs::remove_file(&stderr_path);
+//RS                 return Output {
+//RS                     status,
+//RS                     stdout,
+//RS                     stderr,
+//RS                 };
+//RS             }
+//RS             Ok(None) if start.elapsed() >= timeout => {
+//RS                 let _ = child.kill();
+//RS                 let _ = child.wait();
+//RS                 let stdout = fs::read(&stdout_path).unwrap_or_default();
+//RS                 let stderr = fs::read(&stderr_path).unwrap_or_default();
+//RS                 let _ = fs::remove_file(&stdout_path);
+//RS                 let _ = fs::remove_file(&stderr_path);
+//RS                 panic!(
+//RS                     "{label}: timed out after {:?}\nstdout:\n{}\nstderr:\n{}",
+//RS                     timeout,
+//RS                     String::from_utf8_lossy(&stdout),
+//RS                     String::from_utf8_lossy(&stderr)
+//RS                 );
+//RS             }
+//RS             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+//RS             Err(e) => panic!("{label}: failed to poll child: {e}"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// #2017: run one tier of one example in its own child, with the answers the
+//RS /// golden was recorded with on its own fd 0.
+//RS ///
+//RS /// The choice, recorded here because the card asks for it: a SUBPROCESS, not an
+//RS /// injected reader. The in-process entry points (`dev_iteration`,
+//RS /// `CraneliftBackend::run`) read the test binary's own fd 0, which every thread
+//RS /// of a parallel suite shares, so there is nothing per-run to redirect there;
+//RS /// and an injected reader would exercise an input path no user has, which is
+//RS /// exactly the sort of harness-only seam an I9 differential is supposed to
+//RS /// catch rather than contain. A child reads stdin the way a user's program
+//RS /// does, through the same CLI entry point.
+//RS ///
+//RS /// `trace` asks the run for `--trace-tiers`, which puts the tier attribution on
+//RS /// stderr and therefore makes stderr unusable as a byte comparison — so a
+//RS /// caller that needs both takes two runs: one to learn WHICH tier answered, one
+//RS /// to collect what it printed. `tests/terminal.rs` splits the same way.
+//RS fn cli_tier_output_with_answers(
+//RS     file: &str,
+//RS     stem: &str,
+//RS     answers: &str,
+//RS     interpret: bool,
+//RS     trace: bool,
+//RS ) -> Output {
+//RS     let tag = format!(
+//RS         "{}_{}",
+//RS         stem.replace('/', "_"),
+//RS         if interpret { "interp" } else { "default" }
+//RS     );
+//RS     let cache = common::unique_tmp(&format!("jet_stdin_{tag}_cache"));
+//RS     fs::create_dir_all(&cache).unwrap();
+//RS     let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS     cmd.arg("run").arg(file);
+//RS     if interpret {
+//RS         cmd.arg("--interpret");
+//RS     }
+//RS     // `--quiet` on every run: the banner is the CLI's, not the program's, and
+//RS     // `tests/terminal.rs` compares this same golden from this same CLI with it.
+//RS     cmd.arg("--quiet");
+//RS     if trace {
+//RS         cmd.arg("--trace-tiers");
+//RS     }
+//RS     cmd.current_dir(env!("CARGO_MANIFEST_DIR"))
+//RS         .env("NO_COLOR", "1")
+//RS         .env("JET_RUN_CACHE_DIR", &cache)
+//RS         .env("JET_STORE_DIR", cache.join("build"))
+//RS         .stdin(fs::File::open(answer_file(&cache, &tag, 0, answers)).unwrap());
+//RS     let output = command_output_with_timeout(
+//RS         cmd,
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &format!("`jet run` with answers for `{stem}` ({tag})"),
+//RS     );
+//RS     let _ = fs::remove_dir_all(&cache);
+//RS     output
+//RS }
+//RS 
+//RS /// The tier that answered, proved from the trace of a run fed the same answers.
+//RS ///
+//RS /// Stated as a positive AND a negative, because a differential that only checks
+//RS /// "the tier I wanted appears" passes when BOTH tiers ran and one deopted.
+//RS fn assert_cli_tier_answered(file: &str, stem: &str, answers: &str, interpret: bool) {
+//RS     let traced = cli_tier_output_with_answers(file, stem, answers, interpret, true);
+//RS     assert!(
+//RS         traced.status.success(),
+//RS         "traced `jet run{}` failed for `{stem}`:\nstdout:\n{}\nstderr:\n{}",
+//RS         if interpret { " --interpret" } else { "" },
+//RS         String::from_utf8_lossy(&traced.stdout),
+//RS         String::from_utf8_lossy(&traced.stderr)
+//RS     );
+//RS     let trace = String::from_utf8_lossy(&traced.stderr);
+//RS     let (wanted, forbidden) = if interpret {
+//RS         ("tier0 interp", "tier1 native")
+//RS     } else {
+//RS         ("tier1 native", "tier0 interp")
+//RS     };
+//RS     assert!(
+//RS         trace.contains(wanted),
+//RS         "`{stem}` did not report `{wanted}` when fed its answers:\n{trace}"
+//RS     );
+//RS     assert!(
+//RS         !trace.contains(forbidden),
+//RS         "`{stem}` reached `{forbidden}` when it had to stay on `{wanted}`:\n{trace}"
+//RS     );
+//RS }
+//RS 
+//RS /// One tier of one interactive example, byte-for-byte, with no trace on stderr.
+//RS fn cli_tier_program_output(
+//RS     file: &str,
+//RS     stem: &str,
+//RS     answers: &str,
+//RS     interpret: bool,
+//RS ) -> ProgramOutput {
+//RS     let output = cli_tier_output_with_answers(file, stem, answers, interpret, false);
+//RS     ProgramOutput::ran(
+//RS         String::from_utf8_lossy(&output.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&output.stderr).into_owned(),
+//RS         output.status.code().unwrap_or(1),
+//RS     )
+//RS }
+//RS 
+//RS fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> RunOutcome {
+//RS     let stem = stem.to_string();
+//RS     let file = file.to_string();
+//RS     let worker_file = file.clone();
+//RS     let (tx, rx) = std::sync::mpsc::channel();
+//RS     std::thread::Builder::new()
+//RS         .name(format!("dev-iter-{stem}"))
+//RS         .spawn(move || {
+//RS             jet_jit::reset_jit_trace_for_test();
+//RS             let out = dev_iteration(&worker_file, false, use_interpreter);
+//RS             let flags = jet_jit::jit_trace_flags_for_test();
+//RS             let _ = tx.send((out, flags));
+//RS         })
+//RS         .expect("dev_iteration worker");
+//RS     let (out, flags) = rx.recv_timeout(*DEV_DIFF_TIMEOUT).unwrap_or_else(|_| {
+//RS         panic!(
+//RS             "dev_iteration timed out after {:?} for `{}` ({}) with use_interpreter={}",
+//RS             *DEV_DIFF_TIMEOUT, stem, file, use_interpreter
+//RS         )
+//RS     });
+//RS     jet_jit::merge_jit_trace_flags_for_test(flags);
+//RS     out
+//RS }
+//RS 
+//RS /// All `.jet` files directly under a topic directory of `Examples/features/`
+//RS /// (one level: `Examples/features/<topic>/<name>.jet`). Skips `expected/`
+//RS /// and skips project-directory examples (`<topic>/<name>/main.jet`) — those
+//RS /// have their own multi-file drivers and are not single-entry dev targets.
+//RS ///
+//RS /// A `package.jet` beside the examples is a package MANIFEST, not an example:
+//RS /// a manifest binds `name: "…"`, which is E0003 in source. Discovering one as
+//RS /// an example put a permanent unjudgeable row into `out_of_universe`, the
+//RS /// corpus gate's `frontend_rejected:`, and `typechecked_example_stems`'s
+//RS /// rejected list at the same time (#2018). Removing it HERE, at the one
+//RS /// discovery seam every oracle reads, removes it from all three at once, and
+//RS /// is not a skip list: the name comes from `Syntax::PACKAGE_FILE`, the same
+//RS /// constant the package loader resolves manifests by, so a renamed manifest
+//RS /// cannot silently reappear as a broken example.
+//RS fn topic_jet_files(root: &std::path::Path) -> Vec<PathBuf> {
+//RS     let ex_dir = root.join("Examples/features");
+//RS     let mut files = Vec::new();
+//RS     for topic_entry in fs::read_dir(&ex_dir).unwrap().flatten() {
+//RS         let topic_path = topic_entry.path();
+//RS         if !topic_path.is_dir() {
+//RS             continue;
+//RS         }
+//RS         let topic_name = topic_path
+//RS             .file_name()
+//RS             .unwrap()
+//RS             .to_string_lossy()
+//RS             .into_owned();
+//RS         if topic_name == "expected" {
+//RS             continue;
+//RS         }
+//RS         for e in fs::read_dir(&topic_path).unwrap().flatten() {
+//RS             let path = e.path();
+//RS             if path.extension().and_then(|s| s.to_str()) != Some("jet") {
+//RS                 continue;
+//RS             }
+//RS             if path.file_name().and_then(|n| n.to_str()) == Some(jet::Syntax::PACKAGE_FILE) {
+//RS                 continue;
+//RS             }
+//RS             files.push(path);
+//RS         }
+//RS     }
+//RS     files
+//RS }
+//RS 
+//RS /// The "topic/name" stem for a `.jet` file found via `topic_jet_files`.
+//RS fn stem_of(root: &std::path::Path, path: &std::path::Path) -> String {
+//RS     let ex_dir = root.join("Examples/features");
+//RS     let rel = path.strip_prefix(&ex_dir).unwrap().with_extension("");
+//RS     rel.to_string_lossy().replace('\\', "/")
+//RS }
+//RS 
+//RS /// Every top-level example stem under `Examples/features/<topic>/`, sorted
+//RS /// for determinism. (Subdirectory examples — imports, modules, packages —
+//RS /// have their own multi-file drivers and are not single-entry dev targets.)
+//RS fn all_example_stems() -> Vec<String> {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let mut stems: Vec<String> = topic_jet_files(&root)
+//RS         .iter()
+//RS         .map(|p| stem_of(&root, p))
+//RS         .collect();
+//RS     stems.sort();
+//RS     stems
+//RS }
+//RS 
+//RS /// Every generated Core conformance witness, including nested module paths.
+//RS /// Keep this walk separate from `all_example_stems`: the ordinary example
+//RS /// batteries have their own denominator and must not silently absorb the
+//RS /// registry corpus. The strict gate below is the single consumer.
+//RS fn core_conformance_corpus_entries() -> Vec<(String, String)> {
+//RS     fn walk(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
+//RS         for entry in fs::read_dir(dir).unwrap_or_else(|error| {
+//RS             panic!(
+//RS                 "Core conformance corpus directory `{}` unreadable: {error}",
+//RS                 dir.display()
+//RS             )
+//RS         }) {
+//RS             let path = entry.expect("Core conformance corpus entry").path();
+//RS             let name = path
+//RS                 .file_name()
+//RS                 .and_then(|value| value.to_str())
+//RS                 .unwrap_or("");
+//RS             if name.starts_with(".") || name == "package.jet" {
+//RS                 continue;
+//RS             }
+//RS             if path.is_dir() {
+//RS                 walk(&path, files);
+//RS             } else if path.extension().and_then(|value| value.to_str()) == Some("jet") {
+//RS                 files.push(path);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let corpus = root.join("tests/conformance/corpus");
+//RS     if !corpus.is_dir() {
+//RS         return Vec::new();
+//RS     }
+//RS     let mut files = Vec::new();
+//RS     walk(&corpus, &mut files);
+//RS     let mut entries: Vec<(String, String)> = files
+//RS         .into_iter()
+//RS         .map(|path| {
+//RS             let relative = path
+//RS                 .strip_prefix(&corpus)
+//RS                 .expect("conformance path belongs to conformance corpus")
+//RS                 .with_extension("");
+//RS             let stem = format!(
+//RS                 "conformance/{}",
+//RS                 relative.to_string_lossy().replace('\\', "/")
+//RS             );
+//RS             (stem, path.to_string_lossy().into_owned())
+//RS         })
+//RS         .collect();
+//RS     entries.sort_by(|left, right| left.0.cmp(&right.0));
+//RS     entries
+//RS }
+//RS 
+//RS /// The same weighted LPT shard used by `Tools/ci/test-shards.sh`, applied to
+//RS /// corpus stems when the gate is split for a bounded run.
+//RS fn corpus_gate_shard_config() -> Option<(usize, usize)> {
+//RS     let index = std::env::var("JET_CORPUS_GATE_SHARD_INDEX").ok();
+//RS     let count = std::env::var("JET_CORPUS_GATE_SHARD_COUNT").ok();
+//RS     match (index, count) {
+//RS         (None, None) => None,
+//RS         (Some(index), Some(count)) => {
+//RS             let index = index.parse::<usize>().unwrap_or_else(|_| {
+//RS                 panic!("JET_CORPUS_GATE_SHARD_INDEX must be a non-negative integer, got `{index}`")
+//RS             });
+//RS             let count = count.parse::<usize>().unwrap_or_else(|_| {
+//RS                 panic!("JET_CORPUS_GATE_SHARD_COUNT must be a positive integer, got `{count}`")
+//RS             });
+//RS             assert!(
+//RS                 count > 0,
+//RS                 "JET_CORPUS_GATE_SHARD_COUNT must be >= 1, got {count}"
+//RS             );
+//RS             assert!(
+//RS                 index < count,
+//RS                 "JET_CORPUS_GATE_SHARD_INDEX ({index}) must be < JET_CORPUS_GATE_SHARD_COUNT ({count})"
+//RS             );
+//RS             Some((index, count))
+//RS         }
+//RS         (Some(_), None) | (None, Some(_)) => panic!(
+//RS             "JET_CORPUS_GATE_SHARD_INDEX and JET_CORPUS_GATE_SHARD_COUNT must be set together"
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS /// Static work estimate for one corpus stem. The current ledger class is the
+//RS /// cheapest honest cost signal available before a run: frontend/held-out rows
+//RS /// stop before the tier differential, AOT-broken rows reach the oracle, and
+//RS /// resident/deopt rows run all tiers. New stems take the expensive default so
+//RS /// they cannot silently skew a shard.
+//RS fn corpus_gate_stem_weight(class: Option<&CorpusGateClass>) -> u64 {
+//RS     match class {
+//RS         Some(
+//RS             CorpusGateClass::FrontendRejected
+//RS             | CorpusGateClass::GateExcluded
+//RS             | CorpusGateClass::NonRunnable
+//RS             | CorpusGateClass::OracleUnavailable,
+//RS         ) => 1,
+//RS         Some(CorpusGateClass::ExpectedExit) => 2,
+//RS         Some(CorpusGateClass::AotBroken | CorpusGateClass::RunTierBroken) => 3,
+//RS         Some(
+//RS             CorpusGateClass::ResidentJit
+//RS             | CorpusGateClass::DeoptInterp
+//RS             | CorpusGateClass::TierDivergent,
+//RS         )
+//RS         | None => 4,
+//RS     }
+//RS }
+//RS 
+//RS fn corpus_gate_shard_stems(stems: Vec<String>) -> Vec<String> {
+//RS     let Some((index, count)) = corpus_gate_shard_config() else {
+//RS         return stems;
+//RS     };
+//RS 
+//RS     let weights: std::collections::BTreeMap<String, CorpusGateClass> = parse_corpus_gate_manifest()
+//RS         .into_iter()
+//RS         .map(|record| (record.stem, record.class))
+//RS         .collect();
+//RS     let mut input = String::new();
+//RS     for stem in &stems {
+//RS         input.push_str(&corpus_gate_stem_weight(weights.get(stem)).to_string());
+//RS         input.push('\t');
+//RS         input.push_str(stem);
+//RS         input.push('\n');
+//RS     }
+//RS 
+//RS     let mut child = Command::new("bash")
+//RS         .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Tools/ci/weighted-shards.sh"))
+//RS         .args([index.to_string(), count.to_string()])
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .expect("spawn shared weighted shard engine");
+//RS     child
+//RS         .stdin
+//RS         .as_mut()
+//RS         .expect("shared weighted shard stdin")
+//RS         .write_all(input.as_bytes())
+//RS         .expect("write corpus stems to shared weighted shard engine");
+//RS     let output = child
+//RS         .wait_with_output()
+//RS         .expect("wait for shared weighted shard engine");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "shared weighted shard engine failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS 
+//RS     let known: std::collections::BTreeSet<&str> = stems.iter().map(String::as_str).collect();
+//RS     let mut selected: Vec<String> = String::from_utf8_lossy(&output.stdout)
+//RS         .lines()
+//RS         .filter(|stem| !stem.is_empty())
+//RS         .map(str::to_string)
+//RS         .collect();
+//RS     assert!(
+//RS         selected.iter().all(|stem| known.contains(stem.as_str())),
+//RS         "shared weighted shard engine emitted a stem outside its input: {selected:?}"
+//RS     );
+//RS     selected.sort();
+//RS     assert!(
+//RS         selected.windows(2).all(|pair| pair[0] != pair[1]),
+//RS         "shared weighted shard engine emitted a duplicate stem: {selected:?}"
+//RS     );
+//RS     selected
+//RS }
+//RS 
+//RS fn corpus_gate_selected_stems() -> Vec<String> {
+//RS     let mut stems = all_example_stems();
+//RS     if let Ok(filter) = std::env::var("JET_CORPUS_GATE_FILTER") {
+//RS         stems.retain(|stem| stem.contains(&filter));
+//RS     }
+//RS     corpus_gate_shard_stems(stems)
+//RS }
+//RS 
+//RS /// Stems the corpus gate already classifies as frontend-rejected (compile errors).
+//RS /// Interpreter parity batteries skip them — they cannot run or hit an interpreter boundary.
+//RS fn frontend_rejected_stems() -> std::collections::HashSet<String> {
+//RS     parse_corpus_gate_manifest()
+//RS         .into_iter()
+//RS         .filter(|r| r.class == CorpusGateClass::FrontendRejected)
+//RS         .map(|r| r.stem)
+//RS         .collect()
+//RS }
+//RS 
+//RS fn interpreter_example_stems() -> Vec<String> {
+//RS     let rejected = frontend_rejected_stems();
+//RS     all_example_stems()
+//RS         .into_iter()
+//RS         .filter(|stem| !rejected.contains(stem))
+//RS         .collect()
+//RS }
+//RS 
+//RS /// How many shipped examples the default `jet dev` battery is still allowed to
+//RS /// lose to a run-path sema error (#2020).
+//RS ///
+//RS /// Shrink-only, exactly like `OUT_OF_UNIVERSE_CEILING` and for the same reason.
+//RS /// `typechecked_example_stems` used to `filter` a sema-failing stem out and say
+//RS /// nothing, so a stem could leave this battery's universe by BREAKING: on
+//RS /// 2026-08-14 a mechanical `x ?? panic(…)` -> `x?` rewrite across 39 files was
+//RS /// made against a conversion rail that had been removed eight days earlier, 28
+//RS /// net/serde examples stopped type-checking, and this battery still reported
+//RS /// green because the broken stems were simply no longer in it. That is the hole
+//RS /// #1998 closed in `observe_jit_coverage` and #2012 closed in the retired
+//RS /// `jit_covered_example_stems`, reproduced in a third oracle.
+//RS ///
+//RS /// Every row is a defect to fix — fix the example, or the rail it trips — never
+//RS /// a stem to write out of the battery. The rows are DERIVED from the compiler's
+//RS /// own diagnostic at battery time, so this is a counted ceiling and not an
+//RS /// allowlist: no stem can be excused by name.
+//RS ///
+//RS /// Provenance: 28, the count traced on this branch while #2020 was open. It is a
+//RS /// recorded observation, not a measurement of this assertion — correct it to the
+//RS /// first count this battery observes, in the same diff as that observation, and
+//RS /// only downward afterwards.
+//RS /// 54 is the first OBSERVED count, taken at 76bb19ba9 once this assertion
+//RS /// existed to measure it. The 28 it replaced was a hand-traced estimate from a
+//RS /// different oracle (the JIT coverage universe, which walks a slightly
+//RS /// different set) and was never a measurement of this battery. Correcting an
+//RS /// estimate to its measurement is not raising a guard: the number may only fall
+//RS /// from here, and card #2018 owns driving it down.
+//RS ///
+//RS /// 1 is the count #2018 drove it to. The 11 it replaces was never measured by
+//RS /// anything: it was written in the same uncommitted snapshot that also renamed
+//RS /// the modules examples, so the number moved without evidence while the ledger
+//RS /// beside it still carried 40 rows. The four #2018 recovered, each by its own
+//RS /// root cause and not by editing the ceiling:
+//RS ///   * the E2402 core-error family, by the ratified `impl <CoreError> => Err`
+//RS ///     rail (D-FAIL-CONV2=A) — 36 net/serde stems, every cascading E0311/E0302/
+//RS ///     E0107/E0114 with them;
+//RS ///   * `crypto/vault_secret`, by dropping the D-CRYPTOENV1 `#Unsafe` demand from
+//RS ///     `core.crypto.vault.get`, whose gate is the `Secret` effect;
+//RS ///   * `memory/shared_guard_queue`, by putting `Condition` on the shared-handle
+//RS ///     rail it was always Arc-backed for;
+//RS ///   * `modules/package`, which was never an example — it is that topic's
+//RS ///     manifest, now excluded at `topic_jet_files`, the one discovery seam.
+//RS ///
+//RS /// Build entries use the full staged build front end, so compiler-only calls
+//RS /// and generated runtime declarations are checked in their real context.
+//RS const SEMA_REJECTED_CEILING: usize = 0;
+//RS 
+//RS /// The stems the run-path front end accepts, and the ones it rejects together
+//RS /// with the reason the compiler gave (#2020). Nothing is discarded.
+//RS fn typechecked_example_stems() -> (Vec<String>, Vec<String>) {
+//RS     let mut accepted = Vec::new();
+//RS     let mut rejected = Vec::new();
+//RS     for stem in all_example_stems() {
+//RS         let file = example_path(&stem);
+//RS         let diags = if let Ok(source) = fs::read_to_string(&file) {
+//RS             if jet::Driver::selects_build_entry(&source, None) {
+//RS                 jet::Driver::compile_bundle_path_build(
+//RS                     &file,
+//RS                     jet::Driver::BuildRunOptions::default(),
+//RS                 )
+//RS                 .map(|_| Vec::new())
+//RS                 .unwrap_or_else(|diags| diags)
+//RS             } else {
+//RS                 jet::check_with_path(&file)
+//RS             }
+//RS         } else {
+//RS             jet::check_with_path(&file)
+//RS         };
+//RS         if diags
+//RS             .iter()
+//RS             .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS         {
+//RS             rejected.push(format!("{stem}: {}", first_diagnostic_summary(&diags)));
+//RS         } else {
+//RS             accepted.push(stem);
+//RS         }
+//RS     }
+//RS     (accepted, rejected)
+//RS }
+//RS 
+//RS /// The one-line `CODE: message` reason a stem carries when the compile oracle
+//RS /// could not judge it.
+//RS ///
+//RS /// #1998: the reason is DERIVED from the compiler's own diagnostic, never
+//RS /// declared here, so the out-of-universe list can never become an allowlist. A
+//RS /// stem leaves the oracle only for as long as the compiler still says why.
+//RS fn first_diagnostic_summary(diagnostics: &[jet::Diagnostics::Diagnostic]) -> String {
+//RS     let first = diagnostics
+//RS         .iter()
+//RS         .find(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS         .or_else(|| diagnostics.first());
+//RS     match first {
+//RS         Some(d) => format!("{}: {}", d.code, d.what.replace('\n', " ")),
+//RS         None => "failed without a diagnostic".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS /// What the in-process compile oracle can say about one example stem.
+//RS ///
+//RS /// #1998: there used to be a fourth outcome with no name. A stem whose
+//RS /// in-process `Loader` or `Sema` pass failed fell out of the loop on a bare
+//RS /// `continue`, so it joined neither set, and the audit then reported `gaps: 0`
+//RS /// over a denominator it never stated. The fourth outcome is named here and the
+//RS /// match on it is exhaustive, so a stem can no longer leave the audit silently.
+//RS ///
+//RS /// #2012: `Covered` carries the resident gate too. The three-way differential
+//RS /// battery needs a stricter fact — the lowerer accepted the bundle AND the
+//RS /// resident JIT will run it — and it used to answer that from a second walk of
+//RS /// the same corpus (`jit_covered_example_stems`) carrying the same two silent
+//RS /// `continue`s this enum exists to remove. One oracle now answers both
+//RS /// questions, so the two can no longer disagree (AGENTS.md I8).
+//RS enum JitCompileVerdict {
+//RS     /// The JIT lowerer accepted the bundle. `resident_refusal` is `None` when
+//RS     /// the resident JIT will also RUN it, or the
+//RS     /// `cranelift_resident_safe_detail` reason it will not.
+//RS     Covered { resident_refusal: Option<String> },
+//RS     /// The lowerer rejected the bundle: a live I9 compile gap, and its reason.
+//RS     Gap(String),
+//RS     /// The harness never reached the lowerer, so this run judged nothing about
+//RS     /// the stem. Carries the diagnostic that stopped it.
+//RS     OutOfUniverse(String),
+//RS }
+//RS 
+//RS /// How many example stems the compile oracle must still see (#1998).
+//RS ///
+//RS /// A floor, because examples get added: deleting one, or making
+//RS /// `topic_jet_files` stop seeing one, must lower a reviewed constant. It lives
+//RS /// here, outside `Examples/features/`, so deleting an example cannot silently
+//RS /// shrink the measured universe.
+//RS ///
+//RS /// #2012: every reader of `collect_jit_coverage` asserts this, not just the
+//RS /// coverage audit, so no battery scoped to a slice of this universe can report
+//RS /// success while the universe itself shrank.
+//RS ///
+//RS /// #2018 lowered it 498 -> 497 in the same diff as the deletion the rule above
+//RS /// demands: `topic_jet_files` no longer discovers `Examples/features/modules/
+//RS /// package.jet`, because that file is the `modules` topic's MANIFEST and never
+//RS /// was an example. It stays on disk — `modules/fact_value_arguments.jet` reads
+//RS /// the `cache_slots` setting it declares — so this is one fewer stem measured,
+//RS /// not one fewer example shipped. `Examples/features/expected/` corroborates it:
+//RS /// 19 stems carry no golden, and every one of the other 18 is a deliberate
+//RS /// panic/trap/abort example whose whole point is the failure path.
+//RS /// `modules/package` is the only one that is not a program at all.
+//RS ///
+//RS /// 497 is the last REVIEWED value minus that one deletion, deliberately not the
+//RS /// count on disk. `topic_jet_files` saw 500 files while this card was open, so
+//RS /// the honest observed floor was 499 — but the extra stems are examples other
+//RS /// work added concurrently and this card does not own them. Leaving the floor at
+//RS /// the reviewed-minus-one value keeps a real deletion loud without making this
+//RS /// diff fail when a sibling change is integrated in a different order. Raise it
+//RS /// to the observed count in the same diff as the next observed run.
+//RS const EXAMPLE_CORPUS_FLOOR: usize = 497;
+//RS 
+//RS /// How many stems the compile oracle is still allowed to be blind to (#1998).
+//RS ///
+//RS /// Shrink-only. Every row is a stem this oracle cannot judge, so every row is a
+//RS /// defect to fix — build the
+//RS /// context the harness is missing, or fix the frontend the stem trips — never a
+//RS /// skip to accept. The rows are derived from the compiler's own diagnostics at
+//RS /// audit time, so this is a counted ceiling and not an allowlist: no stem can be
+//RS /// written out of the universe by hand.
+//RS ///
+//RS /// #2018 drove it to 1. It was 53 when the card opened and 11 when the card was
+//RS /// picked up, and that 11 was never measured — it was written in an uncommitted
+//RS /// snapshot while `tests/jit_corpus_gate.txt` beside it still carried 40
+//RS /// `frontend_rejected:` rows, so the exclusion set had been tightened without
+//RS /// evidence. What actually recovered the stems is recorded on
+//RS /// `SEMA_REJECTED_CEILING` above, plus one gap closed HERE: `classify_jit_compile`
+//RS /// now seeds the build-fact snapshot before sema, exactly as
+//RS /// `classify_corpus_stem` does, so the two in-process front ends can no longer
+//RS /// judge the same `@build.*`-reading stem in two different contexts.
+//RS ///
+//RS /// Build entries now use the same staged runtime bundle as `jet run`, so
+//RS /// generated declarations enter this oracle instead of being reported outside
+//RS /// it.
+//RS const OUT_OF_UNIVERSE_CEILING: usize = 0;
+//RS 
+//RS /// How many compile-covered stems the resident JIT must still be willing to run
+//RS /// — the universe `cranelift_three_way_differential_battery` is scoped to
+//RS /// (#2012).
+//RS ///
+//RS /// A floor for the same reason `EXAMPLE_CORPUS_FLOOR` is one: the corpus grows,
+//RS /// and a stem that quietly stops being resident-safe silently leaves the
+//RS /// battery's denominator, which is exactly how that battery could run a
+//RS /// shrinking slice of the corpus and still pass.
+//RS ///
+//RS /// Last recorded observation: `344 ran / 353 resident-safe`, from the #1251
+//RS /// verification at 0f5505640 (2026-07-28), when the corpus was smaller than the
+//RS /// `EXAMPLE_CORPUS_FLOOR` above. It is therefore a conservative floor, to raise
+//RS /// to the observed count in the same diff as the next observed run.
+//RS const RESIDENT_SAFE_FLOOR: usize = 353;
+//RS 
+//RS /// How many stems the three-way differential battery must still execute (#2012).
+//RS ///
+//RS /// `RESIDENT_SAFE_FLOOR` pins the universe; this pins how much of it the battery
+//RS /// actually ran, so deleting a golden — which moves a stem out of the run set
+//RS /// without moving it out of the universe — cannot pass quietly either. Same
+//RS /// provenance as `RESIDENT_SAFE_FLOOR`: `344 ran` at 0f5505640. It replaces the
+//RS /// original `ran >= 9` M3 seed floor, which stopped saying anything once the
+//RS /// battery reached the hundreds.
+//RS const THREE_WAY_RAN_FLOOR: usize = 344;
+//RS 
+//RS /// The audit's whole answer, together with the denominator it was measured over.
+//RS ///
+//RS /// `covered`, `gaps` and `out_of_universe` partition `corpus` exactly, and
+//RS /// `resident_safe` and `resident_refused` partition `covered` exactly;
+//RS /// `observe_jit_coverage` asserts both.
+//RS #[derive(Clone)]
+//RS struct JitCoverage {
+//RS     /// Every stem `topic_jet_files` yielded — the audit's universe.
+//RS     corpus: usize,
+//RS     covered: Vec<String>,
+//RS     /// #2012: the subset of `covered` the resident JIT will also RUN — the
+//RS     /// universe `cranelift_three_way_differential_battery` is scoped to.
+//RS     resident_safe: Vec<String>,
+//RS     /// `stem: reason`, one row per compile-covered stem the resident gate turns
+//RS     /// away. The battery cannot run these, so it states how many it held back
+//RS     /// and why, instead of quietly narrowing to the ones it can.
+//RS     resident_refused: Vec<String>,
+//RS     gaps: Vec<String>,
+//RS     /// `stem: where: CODE: message`, one row per stem the oracle could not
+//RS     /// judge. Shrink-only: each row is a defect to fix, never a skip to accept.
+//RS     out_of_universe: Vec<String>,
+//RS }
+//RS 
+//RS /// Observe which examples `compile_cranelift_bundle` accepts, once per test binary.
+//RS ///
+//RS /// The answer is a pure function of the example corpus and the compiler, and
+//RS /// producing it compiles the whole corpus (~80s in CI). Both ratchet entry
+//RS /// points want the same answer, so pay for it once.
+//RS fn collect_jit_coverage() -> JitCoverage {
+//RS     static COVERAGE: LazyLock<JitCoverage> = LazyLock::new(observe_jit_coverage);
+//RS     (*COVERAGE).clone()
+//RS }
+//RS 
+//RS fn observe_jit_coverage() -> JitCoverage {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     // `topic_jet_files` yields `read_dir` order, which is the host filesystem's
+//RS     // and not the corpus's. This walk compiles every bundle into one process, so
+//RS     // an order-dependent verdict would make the ledger a property of the machine
+//RS     // that dumped it. Sort the walk, exactly as `all_example_stems` already does.
+//RS     let mut paths = topic_jet_files(&root);
+//RS     paths.sort();
+//RS     let corpus = paths.len();
+//RS     let mut covered = Vec::new();
+//RS     let mut resident_safe = Vec::new();
+//RS     let mut resident_refused = Vec::new();
+//RS     let mut gaps = Vec::new();
+//RS     let mut out_of_universe = Vec::new();
+//RS     for path in paths {
+//RS         let stem = stem_of(&root, &path);
+//RS         match classify_jit_compile(&path) {
+//RS             JitCompileVerdict::Covered { resident_refusal } => {
+//RS                 // #2012: the resident split is recorded on the same pass, so the
+//RS                 // three-way battery reads this observation instead of walking the
+//RS                 // corpus a second time with an oracle that could disagree.
+//RS                 match resident_refusal {
+//RS                     None => resident_safe.push(stem.clone()),
+//RS                     Some(reason) => resident_refused.push(format!("{stem}: {reason}")),
+//RS                 }
+//RS                 covered.push(stem);
+//RS             }
+//RS             JitCompileVerdict::Gap(reason) => gaps.push(format!("{stem}: {reason}")),
+//RS             JitCompileVerdict::OutOfUniverse(reason) => {
+//RS                 out_of_universe.push(format!("{stem}: {reason}"));
+//RS             }
+//RS         }
+//RS     }
+//RS     covered.sort();
+//RS     resident_safe.sort();
+//RS     resident_refused.sort();
+//RS     gaps.sort();
+//RS     out_of_universe.sort();
+//RS     assert_eq!(
+//RS         covered.len() + gaps.len() + out_of_universe.len(),
+//RS         corpus,
+//RS         "the compile oracle lost a stem: {corpus} discovered, {} covered, {} gap(s), {} \
+//RS          outside the universe. Every discovered stem lands in exactly one bucket (#1998)",
+//RS         covered.len(),
+//RS         gaps.len(),
+//RS         out_of_universe.len()
+//RS     );
+//RS     // #2012: and the resident split partitions `covered` exactly, so the
+//RS     // battery's universe cannot lose a stem without this arithmetic failing.
+//RS     assert_eq!(
+//RS         resident_safe.len() + resident_refused.len(),
+//RS         covered.len(),
+//RS         "the resident gate lost a stem: {} compile-covered, {} resident-safe, {} refused. \
+//RS          Every compile-covered stem lands in exactly one of the two (#2012)",
+//RS         covered.len(),
+//RS         resident_safe.len(),
+//RS         resident_refused.len()
+//RS     );
+//RS     JitCoverage {
+//RS         corpus,
+//RS         covered,
+//RS         resident_safe,
+//RS         resident_refused,
+//RS         gaps,
+//RS         out_of_universe,
+//RS     }
+//RS }
+//RS 
+//RS /// Put one example in front of the JIT lowerer, or say what stopped it.
+//RS fn classify_jit_compile(path: &std::path::Path) -> JitCompileVerdict {
+//RS     let file = path.to_string_lossy();
+//RS     if fs::read_to_string(path)
+//RS         .ok()
+//RS         .is_some_and(|source| jet::Driver::selects_build_entry(&source, None))
+//RS     {
+//RS         return match jet::Driver::compile_bundle_path_build(
+//RS             &file,
+//RS             jet::Driver::BuildRunOptions::default(),
+//RS         ) {
+//RS             Ok(output) => match output.runtime {
+//RS                 Some(bundle) => classify_jit_bundle(bundle),
+//RS                 None => JitCompileVerdict::OutOfUniverse(
+//RS                     "build front end returned no runtime bundle".to_string(),
+//RS                 ),
+//RS             },
+//RS             Err(diagnostics) => JitCompileVerdict::OutOfUniverse(format!(
+//RS                 "build: {}",
+//RS                 first_diagnostic_summary(&diagnostics)
+//RS             )),
+//RS         };
+//RS     }
+//RS     // #1998: this arm was `Err(_) => continue`, which dropped the stem.
+//RS     let mut bundle = match jet::Loader::load_entry(&file) {
+//RS         Ok(bundle) => bundle,
+//RS         Err(diagnostics) => {
+//RS             return JitCompileVerdict::OutOfUniverse(format!(
+//RS                 "loader: {}",
+//RS                 first_diagnostic_summary(&diagnostics)
+//RS             ));
+//RS         }
+//RS     };
+//RS     // #2018: seed the ONE build-fact snapshot before sema, exactly as
+//RS     // `classify_corpus_stem` does. This was the only difference between the two
+//RS     // in-process front ends, and it is the whole of the card's (a) class: an
+//RS     // example reading `@build.settings.*` was judged by this oracle against the
+//RS     // harness's defaults while the corpus gate judged it against the manifest's
+//RS     // locked stamp, so the two oracles could disagree about the same stem and
+//RS     // neither reader could tell which context produced the verdict (AGENTS.md
+//RS     // I8; I9: engines marshal one snapshot, they do not each invent one).
+//RS     if let Err(diagnostics) = jet::Driver::seed_build_facts(
+//RS         &mut bundle,
+//RS         "dev",
+//RS         false,
+//RS         &std::collections::BTreeMap::new(),
+//RS     ) {
+//RS         // Named for what it is. #1998's whole point is that the reason a stem
+//RS         // left the universe is the compiler's own, so a seeding failure must not
+//RS         // be reported as a sema rejection.
+//RS         return JitCompileVerdict::OutOfUniverse(format!(
+//RS             "build facts: {}",
+//RS             first_diagnostic_summary(&diagnostics)
+//RS         ));
+//RS     }
+//RS     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+//RS         .into_iter()
+//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     // #1998: this arm was `if !errors.is_empty() { continue }`, same drop.
+//RS     if !errors.is_empty() {
+//RS         return JitCompileVerdict::OutOfUniverse(format!(
+//RS             "sema: {}",
+//RS             first_diagnostic_summary(&errors)
+//RS         ));
+//RS     }
+//RS     classify_jit_bundle(bundle)
+//RS }
+//RS 
+//RS fn classify_jit_bundle(bundle: jet::AST::ProgramBundle) -> JitCompileVerdict {
+//RS     match common::compile_cranelift_bundle(&bundle, &common::development_policy()) {
+//RS         // #2012: one more question about a bundle the lowerer already accepted:
+//RS         // will the resident JIT run it? `cranelift_resident_safe_detail` is a
+//RS         // pure analysis of the lowered MIR, so ask it here rather than in a
+//RS         // second corpus walk.
+//RS         Ok(()) => {
+//RS             let refusal = common::cranelift_resident_safe_detail(&bundle);
+//RS             JitCompileVerdict::Covered {
+//RS                 resident_refusal: (!refusal.is_empty()).then_some(refusal),
+//RS             }
+//RS         }
+//RS         Err(reason) => JitCompileVerdict::Gap(reason),
+//RS     }
+//RS }
+//RS 
+//RS fn is_manifested_parity_divergence(stem: &str, entries: &[String]) -> bool {
+//RS     entries.iter().any(|entry| {
+//RS         entry
+//RS             .strip_prefix(stem)
+//RS             .is_some_and(|rest| rest.starts_with(':'))
+//RS     })
+//RS }
+//RS 
+//RS fn normalize_for_parity(stem: &str, mut out: ProgramOutput) -> ProgramOutput {
+//RS     if matches!(stem, "io/log" | "io/log_structured" | "serde/json_coerce") {
+//RS         out.stderr = normalize_json_log_timestamps(&out.stderr);
+//RS     }
+//RS     if stem == "io/log_human" {
+//RS         out.stderr = normalize_text_log_timestamps(&out.stderr);
+//RS     }
+//RS     if stem == "ui/ui_native_linux" {
+//RS         out.stderr = normalize_gtk_loader_path(&out.stderr);
+//RS     }
+//RS     // AOT prints `?` propagation trails on uncaught Err; the golden and the
+//RS     // interpreter keep stdout-only. Strip the trail so parity compares the
+//RS     // program result, not the reporting envelope.
+//RS     if stem == "errors/typed_error_families" {
+//RS         out.stderr = out
+//RS             .stderr
+//RS             .lines()
+//RS             .filter(|line| {
+//RS                 let hop = line.strip_prefix("  ").is_some_and(|rest| {
+//RS                     rest.split_once(". ")
+//RS                         .is_some_and(|(index, _)| index.parse::<u32>().is_ok())
+//RS                 });
+//RS                 !line.starts_with(" Trail [E3002] (") && !hop
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join("\n");
+//RS         if !out.stderr.is_empty() && !out.stderr.ends_with('\n') {
+//RS             out.stderr.push('\n');
+//RS         }
+//RS     }
+//RS     // E3001 local values are explicitly debug-build-only. They are diagnostic
+//RS     // context, not program semantics, so optimized AOT and resident/interpreter
+//RS     // outputs compare without this build-profile-dependent line.
+//RS     out.stderr = strip_panic_locals(&out.stderr);
+//RS     out
+//RS }
+//RS 
+//RS fn normalize_gtk_loader_path(s: &str) -> String {
+//RS     let marker = ": symbol lookup error: ";
+//RS     if !s.contains("libgtk-4.so.1") || !s.contains("undefined symbol") {
+//RS         return s.to_string();
+//RS     }
+//RS     if let Some((_, rest)) = s.split_once(marker) {
+//RS         format!("<jet-ui-binary>{marker}{rest}")
+//RS     } else {
+//RS         s.to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn normalize_json_log_timestamps(s: &str) -> String {
+//RS     let mut out = String::with_capacity(s.len());
+//RS     let mut rest = s;
+//RS     while let Some(pos) = rest.find("\"ts\":") {
+//RS         out.push_str(&rest[..pos]);
+//RS         out.push_str("\"ts\":<ts>");
+//RS         let mut tail = &rest[pos + "\"ts\":".len()..];
+//RS         // Optional whitespace between colon and digits (emitters may vary).
+//RS         let ws = tail.bytes().take_while(|b| b.is_ascii_whitespace()).count();
+//RS         tail = &tail[ws..];
+//RS         let digits = tail.bytes().take_while(|b| b.is_ascii_digit()).count();
+//RS         tail = &tail[digits..];
+//RS         rest = tail;
+//RS     }
+//RS     out.push_str(rest);
+//RS     out
+//RS }
+//RS 
+//RS fn normalize_text_log_timestamps(s: &str) -> String {
+//RS     s.lines()
+//RS         .map(|line| {
+//RS             let Some((level, rest)) = line.split_once(' ') else {
+//RS                 return line.to_string();
+//RS             };
+//RS             let Some((_, msg)) = rest.split_once(" | ") else {
+//RS                 return line.to_string();
+//RS             };
+//RS             format!("{level} <ts> | {msg}")
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n")
+//RS         + if s.ends_with('\n') { "\n" } else { "" }
+//RS }
+//RS 
+// END-PORT-PENDING 1035 tests/dev_parts/support.rs:1-1806
+

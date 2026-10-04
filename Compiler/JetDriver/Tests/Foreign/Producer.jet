@@ -1,0 +1,315 @@
+// CP-CFFI-PRODUCER-RECONCILE: exercise the actual captured-source loader,
+// canonical cache/sidecar codecs and synthetic producer, not report filters.
+use jet_driver.[JetDriverCompileRequest, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, jet_driver_load, jet_driver_assemble_foreign_providers]
+use jet_foundation.[CModule, CModuleKind, LoadedModule, ForeignLanguage, pkg_binder_descriptor, mir_sha256_hex_bytes]
+use jet_pkg_model.[ForeignBoundaryContract, ForeignBoundaryIdentity, ForeignArtifactCoverage, ForeignBridgeError, pkg_bridge_render_provenance, pkg_cffi_read_boundary_facts]
+use core.files.runtime.kernel_path_components as producer_path
+use core.files as producer_files
+
+fn producer_file(root: String, relative: String, source: String) -> JetDriverAuthorizedSourceFile Never! {
+    JetDriverAuthorizedSourceFile{path: producer_path.from_text("{root}/{relative}", producer_path.PathPlatform.Unix), relative_path: producer_path.from_text(relative, producer_path.PathPlatform.Unix), identity: "producer:{root}:{relative}", source: source, bytes: Val(source.bytes())}
+}
+fn producer_cache(library: String, source: String) -> JetDriverAuthorizedSourceFile Never! {
+    producer_file("/inspect", ".jet/bindings/c/{library}.jet", source)
+}
+fn producer_request(source: String, caches: [JetDriverAuthorizedSourceFile], extras: [JetDriverAuthorizedSourceFile]) -> JetDriverCompileRequest Never! {
+    request := inspect_request("main.jet", source, extras)
+    request.authorized_sources.roots[0].foreign_cache_files = caches
+    request
+}
+fn producer_module(load: JetDriverLoadResult, alias: String, root_index: Int) -> JetDriverModuleFacts Never! {
+    loop module in load.modules {
+        unit :: load.source_units[module.source_unit_index]
+        if module.module_name == alias && unit.root_index == root_index -> return module
+    }
+    panic("the actual producer omitted {alias} in root {root_index}")
+}
+fn producer_alias_count(load: JetDriverLoadResult, alias: String) -> Int Never! {
+    count := 0
+    loop module in load.modules { if module.module_name == alias -> count += 1 }
+    count
+}
+fn producer_has_code(load: JetDriverLoadResult, code: String) -> Bool Never! {
+    loop diagnostic in load.diagnostics { if diagnostic.code == code -> return true }
+    false
+}
+fn producer_loaded(load: JetDriverLoadResult, module: JetDriverModuleFacts) -> LoadedModule Never! {
+    permit :: load.bundle.guard_read()
+    permit.value.modules[module.bundle_index ?? panic("the actual loaded AST was omitted")]
+}
+fn producer_surface(load: JetDriverLoadResult, module: JetDriverModuleFacts) -> CModule Never! {
+    ast :: producer_loaded(load, module)
+    assert(ast.items.len() > 0)
+    if ast.items[0] == .CModule(value) -> return value
+    panic("the synthetic module must contain the actual CModule first")
+}
+
+#Test("CFFI cache and synthetic modules retain distinct original source identities") {
+    cache_source :: "#PubFile\n#NoPrelude\npub fn helper() -> Int {{ return 7 }}\n#Bindgen module c.probe.__bindgen__ {{\n    fn ping() -> Int = \"ping\"\n}}\n"
+    request :: producer_request("use c.probe as c\nfn run() {{}}\n", [JetDriverAuthorizedSourceFile]{producer_cache("probe", cache_source)}, [])
+    load := jet_driver_load(request)
+    providers :: jet_driver_assemble_foreign_providers(request, &load)
+    assert(load.complete)
+    assert_eq(providers.len(), 1)
+    cache :: producer_module(load, "__c_cache_probe", 0)
+    cache_unit :: load.source_units[cache.source_unit_index]
+    assert_eq(cache_unit.path, ".jet/bindings/c/probe.jet")
+    assert_eq(cache_unit.alias, "__c_cache_probe")
+    assert(cache_unit.foreign_cache_index != None)
+    assert_eq(cache_unit.provenance_source_file, None)
+    cache_ast :: producer_loaded(load, cache)
+    assert(cache_ast.pub_file && cache_ast.no_prelude)
+    assert_eq(cache_ast.source, cache_source)
+    assert_eq(load.source_files[load.source_file_index[cache_unit.physical_path ?? panic("physical cache path")]].source, cache_source)
+    loop item in cache_ast.items { if item == .CModule(_) -> panic("the physical cache CModule was not drained") }
+    assert_eq(cache_ast.items.len(), 1)
+    synthetic :: producer_module(load, "__c_probe", 0)
+    unit :: load.source_units[synthetic.source_unit_index]
+    assert_eq(unit.path, "<c.probe>")
+    assert_eq(unit.relative_path, "c.probe")
+    assert_eq(unit.alias, "__c_probe")
+    assert_eq(unit.physical_path, None)
+    assert_eq(unit.foreign_cache_index, None)
+    assert(unit.provenance_source_file != None)
+    assert_eq(load.source_files[load.generated_source_file_index[unit.path]].source, "")
+    synthetic_ast :: producer_loaded(load, synthetic)
+    assert_eq(synthetic_ast.source, "")
+    assert_eq(synthetic_ast.display, "c.probe")
+    assert(!synthetic_ast.pub_file && !synthetic_ast.no_prelude)
+    assert_eq(synthetic_ast.imports.len(), 0)
+    assert_eq(synthetic_ast.policy_declarations.len(), 0)
+    assert_eq(synthetic_ast.user_policy_declarations.len(), 0)
+    assert_eq(synthetic.parse_metadata.applied_rules.len(), 0)
+    assert_eq(synthetic_ast.rule_facts.len(), 0)
+    surface :: producer_surface(load, synthetic)
+    assert_eq(surface.kind, CModuleKind.Extern)
+    assert_eq(surface.functions.len(), 1)
+    assert_eq(surface.functions[0].name, "ping")
+    assert(load.imports.len() > 0)
+}
+
+#Test("CFFI no-surface import emits a real empty synthetic CModule") {
+    request :: producer_request("use c.absent as c\nfn run() {{}}\n", [], [])
+    load := jet_driver_load(request)
+    providers :: jet_driver_assemble_foreign_providers(request, &load)
+    assert(load.complete)
+    assert_eq(providers.len(), 1)
+    module :: producer_module(load, "__c_absent", 0)
+    assert_eq(producer_surface(load, module).functions.len(), 0)
+    assert_eq(producer_surface(load, module).lib, "absent")
+    assert_eq(producer_alias_count(load, "__c_cache_absent"), 0)
+    assert_eq(providers[0].direct_links, [String]{"absent"})
+}
+
+#Test("CFFI a cache without CModules remains a full cache beside the empty surface") {
+    cache_source :: "#PubFile\n#NoPrelude\npub fn helper() -> Int {{ return 7 }}\n"
+    request :: producer_request("use c.probe as c\nfn run() {{}}\n", [JetDriverAuthorizedSourceFile]{producer_cache("probe", cache_source)}, [])
+    load := jet_driver_load(request)
+    providers :: jet_driver_assemble_foreign_providers(request, &load)
+    assert(load.complete)
+    assert_eq(providers.len(), 1)
+    cache :: producer_module(load, "__c_cache_probe", 0)
+    cache_ast :: producer_loaded(load, cache)
+    assert(cache_ast.pub_file && cache_ast.no_prelude)
+    assert_eq(cache_ast.items.len(), 1)
+    assert_eq(producer_surface(load, producer_module(load, "__c_probe", 0)).functions.len(), 0)
+}
+
+#Test("CFFI cache imports reach the fixed point through the canonical loader") {
+    alpha :: "#NoPrelude\nuse c.beta as beta\nuse \"../../../helpers/extra.jet\" as extra\n#Bindgen module c.alpha.__bindgen__ {{ fn alpha() -> Int = \"alpha\" }}\n"
+    beta :: "#NoPrelude\nuse c.alpha as alpha\n#Bindgen module c.beta.__bindgen__ {{ fn beta() -> Int = \"beta\" }}\n"
+    gamma :: "#Bindgen module c.gamma.__bindgen__ {{ fn gamma() -> Int = \"gamma\" }}\n"
+    request :: producer_request("use c.alpha as alpha\nfn run() {{}}\n", [JetDriverAuthorizedSourceFile]{producer_cache("alpha", alpha), producer_cache("beta", beta), producer_cache("gamma", gamma)}, [JetDriverAuthorizedSourceFile]{inspect_file("helpers/extra.jet", "use c.gamma as gamma\npub fn helper() -> Int {{ return 1 }}\n")})
+    load := jet_driver_load(request)
+    providers :: jet_driver_assemble_foreign_providers(request, &load)
+    assert(load.complete)
+    assert_eq(providers.len(), 3)
+    loop library in [String]{"alpha", "beta", "gamma"} {
+        assert_eq(producer_alias_count(load, "__c_cache_{library}"), 1)
+        assert_eq(producer_alias_count(load, "__c_{library}"), 1)
+    }
+    assert_eq(producer_loaded(load, producer_module(load, "__c_cache_alpha", 0)).imports.len(), 2)
+    assert_eq(producer_loaded(load, producer_module(load, "__c_cache_beta", 0)).imports.len(), 1)
+    extra_found := false
+    loop module in load.modules { if load.source_units[module.source_unit_index].relative_path == "helpers/extra.jet" -> extra_found = true }
+    assert(extra_found)
+    assert(load.imports.len() >= 5)
+}
+
+#Test("CFFI duplicate imports across modules retain one physical and one synthetic module") {
+    request :: producer_request("use c.probe as c\nuse helper as helper\nfn run() {{}}\n", [JetDriverAuthorizedSourceFile]{producer_cache("probe", "#Bindgen module c.probe.__bindgen__ {{ fn ping() -> Int = \"ping\" }}\n")}, [JetDriverAuthorizedSourceFile]{inspect_file("helper.jet", "use c.probe as c\npub fn helper() {{}}\n")})
+    load := jet_driver_load(request)
+    providers :: jet_driver_assemble_foreign_providers(request, &load)
+    assert(load.complete)
+    assert_eq(providers.len(), 1)
+    assert_eq(producer_alias_count(load, "__c_cache_probe"), 1)
+    assert_eq(producer_alias_count(load, "__c_probe"), 1)
+}
+
+#Test("CFFI the same library in two package roots has distinct actual identities") {
+    request := producer_request("use c.probe as c\nuse dep.api as api\nfn run() {{}}\n", [JetDriverAuthorizedSourceFile]{producer_cache("probe", "#Bindgen module c.probe.__bindgen__ {{ fn ping() -> Int = \"ping\" }}\n")}, [JetDriverAuthorizedSourceFile]{inspect_file("package.jet", "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ dep: {{ path: \"dep\" }} }}\n")})
+    &request.authorized_sources.roots.push(JetDriverAuthorizedSourceRoot{canonical_path: producer_path.from_text("/inspect/dep", producer_path.PathPlatform.Unix), identity: "producer-dep-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{producer_file("/inspect/dep", "package.jet", "name: \"dep\"\nversion: \"0.1.0\"\n"), producer_file("/inspect/dep", "api.jet", "use c.probe as c\npub fn api() {{}}\n")}, foreign_cache_files: [JetDriverAuthorizedSourceFile]{producer_file("/inspect/dep", ".jet/bindings/c/probe.jet", "#Bindgen module c.probe.__bindgen__ {{ fn other() -> Int = \"other\" }}\n")}})
+    load := jet_driver_load(request)
+    providers :: jet_driver_assemble_foreign_providers(request, &load)
+    assert(load.complete)
+    assert_eq(providers.len(), 2)
+    first :: producer_module(load, "__c_probe", 0)
+    second :: producer_module(load, "__c_probe", 1)
+    assert(first.module_identity != second.module_identity)
+    assert(first.source_identity != second.source_identity)
+    assert_eq(producer_surface(load, first).functions[0].name, "ping")
+    assert_eq(producer_surface(load, second).functions[0].name, "other")
+    assert_eq(producer_alias_count(load, "__c_cache_probe"), 2)
+}
+
+#Test("CFFI one close adapter updates both constructors sharing a handle") {
+    cache :: "#NoPrelude\npub struct Widget {{}}\n#Bindgen module c.probe.__bindgen__ {{\n    #Close(release)\n    fn first() -> Widget = \"first\"\n    #Close(release)\n    fn second() -> Widget = \"second\"\n    fn release(handle: ^Widget) -> Int = \"release\"\n}}\n"
+    metadata :: "schema=jet-c-binding-metadata-v1\nlibrary=probe\nclosure.direct=probe\nhandle=probe|Widget|Widget|release|conventional|unspecified\n"
+    request :: producer_request("use c.probe as c\nfn run() {{}}\n", [JetDriverAuthorizedSourceFile]{producer_cache("probe", cache), producer_file("/inspect", ".jet/bindings/c/probe.metadata", metadata)}, [])
+    load := jet_driver_load(request)
+    providers :: jet_driver_assemble_foreign_providers(request, &load)
+    assert(load.complete)
+    assert_eq(providers[0].close_adapters.len(), 1)
+    assert_eq(providers[0].close_adapters[0].adapter_function, "__jet_ffi_close_Widget")
+    module :: producer_module(load, "__c_probe", 0)
+    constructors := 0
+    loop function in producer_surface(load, module).functions {
+        if function.name == "first" || function.name == "second" {
+            assert_eq((function.close ?? panic("constructor close contract")).name, "__jet_ffi_close_Widget")
+            constructors += 1
+        }
+    }
+    assert_eq(constructors, 2)
+    ast :: producer_loaded(load, module)
+    assert_eq(ast.items.len(), 2)
+    if ast.items[1] == .Func(adapter) {
+        assert(adapter.is_unsafe && adapter.compiler_generated)
+        assert_eq(adapter.name, "__jet_ffi_close_Widget")
+    } else -> panic("the actual close adapter function was omitted")
+}
+
+#Test("CFFI stale original generated descriptor is rejected before cache loading") {
+    // Original CFFI.rs:4095 cache witness, unchanged except string escaping.
+    source :: "// jet-ffi-descriptor=stale\n#Bindgen module c.probe.__bindgen__ {{\n    fn ping() -> Int = \"ping\"\n}}\n"
+    request :: producer_request("use c.probe as c\nfn run() {{}}\n", [JetDriverAuthorizedSourceFile]{producer_cache("probe", source)}, [])
+    load := jet_driver_load(request)
+    providers :: jet_driver_assemble_foreign_providers(request, &load)
+    assert(!load.complete)
+    assert(producer_has_code(load, "E3208"))
+    assert_eq(providers.len(), 0)
+    assert_eq(producer_alias_count(load, "__c_cache_probe"), 0)
+}
+
+#Test("CFFI canonical metadata decoder retains original percent escape errors") {
+    request :: producer_request("use c.probe as c\nfn run() {{}}\n", [JetDriverAuthorizedSourceFile]{producer_cache("probe", "#Bindgen module c.probe.__bindgen__ {{}}\n"), producer_file("/inspect", ".jet/bindings/c/probe.metadata", "schema=jet-c-binding-metadata-v1\nlibrary=probe%\n")}, [])
+    load := jet_driver_load(request)
+    providers :: jet_driver_assemble_foreign_providers(request, &load)
+    assert(!load.complete)
+    assert(producer_has_code(load, "E3208"))
+    assert_eq(providers.len(), 0)
+    found := false
+    loop diagnostic in load.diagnostics { if diagnostic.code == "E3208" && diagnostic.why == "truncated percent escape" -> found = true }
+    assert(found)
+}
+
+#Test("CFFI original declaration conflicts retain their registered errors") {
+    duplicate :: producer_request("use c.probe as c\nuse \"probe.h\" as header\nfn run() {{}}\n", [], [])
+    duplicate_load := jet_driver_load(duplicate)
+    jet_driver_assemble_foreign_providers(duplicate, &duplicate_load)
+    assert(producer_has_code(duplicate_load, "E3204"))
+    authored :: producer_request("#Bindgen module c.probe.__bindgen__ {{ fn ping() -> Int = \"ping\" }}\nfn run() {{}}\n", [], [])
+    authored_load := jet_driver_load(authored)
+    jet_driver_assemble_foreign_providers(authored, &authored_load)
+    assert(producer_has_code(authored_load, "E3207"))
+    mismatch :: producer_request("use c.probe as c\n#Import module c.probe {{ fn ping() -> Float = \"ping\" }}\nfn run() {{}}\n", [JetDriverAuthorizedSourceFile]{producer_cache("probe", "#Bindgen module c.probe.__bindgen__ {{ fn ping() -> Int = \"ping\" }}\n")}, [])
+    mismatch_load := jet_driver_load(mismatch)
+    jet_driver_assemble_foreign_providers(mismatch, &mismatch_load)
+    assert(producer_has_code(mismatch_load, "E3205"))
+}
+
+fn producer_provenance(cache: String, library: String) -> String ForeignBridgeError! -[Env]> {
+    descriptor :: pkg_binder_descriptor(ForeignLanguage.C) ?? panic("canonical C descriptor")
+    digest :: mir_sha256_hex_bytes(cache.bytes())
+    identity :: ForeignBoundaryIdentity.new("probe.h", "none", "c-bind:jet-c-bind-v1", "cache:{digest}", "recorded", "x86_64-unknown-linux-gnu")
+    coverage :: ForeignArtifactCoverage.new("probe.jet:sha256-{digest}", "x86_64-unknown-linux-gnu", "jet-c-bind-v1")
+    contract :: ForeignBoundaryContract.new(descriptor, library, identity).with_artifact_coverage(coverage)
+    fields := contract.provenance_fields()
+    &fields.push((name: "cache", value: "/inspect/.jet/bindings/c/probe.jet"))
+    &fields.push((name: "cache-sha256", value: digest))
+    pkg_bridge_render_provenance("producer-identity", fields, [(name: String, digest: String)]{(name: "probe.jet", digest: digest)})
+}
+
+#Test("CFFI canonical provenance validates checked bytes and rejects changed or absent artifacts") {
+    cache :: "#Bindgen module c.probe.__bindgen__ {{ fn ping() -> Int = \"ping\" }}\n"
+    provenance :: producer_provenance(cache, "probe") ?? panic("canonical provenance writer")
+    valid :: producer_request("use c.probe as c\nfn run() {{}}\n", [JetDriverAuthorizedSourceFile]{producer_cache("probe", cache), producer_file("/inspect", ".jet/bindings/c/probe.provenance", provenance)}, [])
+    valid_load := jet_driver_load(valid)
+    providers :: jet_driver_assemble_foreign_providers(valid, &valid_load)
+    assert(valid_load.complete)
+    assert_eq(providers.len(), 1)
+    assert(providers[0].boundary != None)
+    changed := valid
+    changed.authorized_sources.roots[0].foreign_cache_files[0] = producer_cache("probe", "{cache}// changed implementation bytes\n")
+    changed_load := jet_driver_load(changed)
+    changed_providers :: jet_driver_assemble_foreign_providers(changed, &changed_load)
+    assert(!changed_load.complete)
+    assert(producer_has_code(changed_load, "E3208"))
+    assert_eq(changed_providers.len(), 0)
+    absent := valid
+    absent.authorized_sources.roots[0].foreign_cache_files[0].bytes = None
+    absent_load := jet_driver_load(absent)
+    absent_providers :: jet_driver_assemble_foreign_providers(absent, &absent_load)
+    assert(!absent_load.complete)
+    assert(producer_has_code(absent_load, "E3208"))
+    assert_eq(absent_providers.len(), 0)
+    wrong_library := valid
+    wrong_library.authorized_sources.roots[0].foreign_cache_files[1] = producer_file("/inspect", ".jet/bindings/c/probe.provenance", producer_provenance(cache, "other") ?? panic("canonical mismatch provenance"))
+    wrong_load := jet_driver_load(wrong_library)
+    wrong_providers :: jet_driver_assemble_foreign_providers(wrong_library, &wrong_load)
+    assert(!wrong_load.complete)
+    assert(producer_has_code(wrong_load, "E3208"))
+    assert_eq(wrong_providers.len(), 0)
+}
+
+// Native #4494/#4483 admission is required; this is a real filesystem witness,
+// not a substituted digest or a mock read result. The artifact is deliberately
+// absent in a fresh directory while the actual canonical sidecar is present.
+#Test("CFFI native wrong-library refusal precedes the same fixture's actual artifact read failure") {
+    directory :: producer_files.temp_dir("cffi-native-error-order") ?? panic("native CFFI temporary fixture")
+    provenance_path :: producer_files.join(directory.path, "probe.provenance")
+    cache_path :: inspect_root_path(producer_files.join(directory.path, "probe.jet"))
+    source :: "#Bindgen module c.probe.__bindgen__ {{ fn ping() -> Int = \"ping\" }}\n"
+    wrong :: producer_provenance(source, "other") ?? panic("canonical wrong-library provenance")
+    producer_files.write(provenance_path, wrong) ?? panic("publish actual provenance fixture")
+    if pkg_cffi_read_boundary_facts(cache_path, ForeignLanguage.C, "probe", "probe") == {
+        .Err(error) -> assert_eq(error.message, "foreign boundary library `other` does not match `probe`")
+        .Ok(_) -> panic("wrong library was admitted")
+    }
+    correct :: producer_provenance(source, "probe") ?? panic("canonical matching-library provenance")
+    producer_files.write(provenance_path, correct) ?? panic("replace actual provenance fixture")
+    if pkg_cffi_read_boundary_facts(cache_path, ForeignLanguage.C, "probe", "probe") == {
+        .Err(error) -> {
+            assert(error.message.starts_with("could not read "))
+            assert(error.message.contains("probe.jet"))
+        }
+        .Ok(_) -> panic("the absent native artifact was admitted")
+    }
+    producer_files.remove_all(directory.path) ?? panic("native CFFI fixture cleanup")
+}
+
+#Test("CFFI retained cache adaptation facade merges its actual override once") {
+    source :: "#NoPrelude\n#Bindgen module c.probe.__bindgen__ {{ fn ping() -> Int = \"raw_ping\" }}\n#Import module c.probe {{ fn ping() -> Int = \"safe_ping\" }}\n"
+    request :: producer_request("use c.probe as c\nfn run() {{}}\n", [JetDriverAuthorizedSourceFile]{producer_cache("probe", source)}, [])
+    load := jet_driver_load(request)
+    providers :: jet_driver_assemble_foreign_providers(request, &load)
+    assert(load.complete)
+    assert_eq(providers.len(), 1)
+    assert_eq(providers[0].overrides.len(), 1)
+    assert_eq(providers[0].overrides[0].generated_symbol, "raw_ping")
+    assert_eq(providers[0].overrides[0].overlay_symbol, "safe_ping")
+    surface :: producer_surface(load, producer_module(load, "__c_probe", 0))
+    assert_eq(surface.functions.len(), 1)
+    assert_eq(surface.functions[0].rust_path, "safe_ping")
+    assert(surface.functions[0].effect_root != None)
+    assert_eq(producer_loaded(load, producer_module(load, "__c_cache_probe", 0)).items.len(), 0)
+}

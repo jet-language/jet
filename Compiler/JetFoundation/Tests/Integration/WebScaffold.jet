@@ -1,0 +1,1057 @@
+// PORT-PENDING 1191 tests-web-scaffold-module-group: tests/web_scaffold.rs:1-373
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #2239: `jet new <name> --template web` to a served browser page.
+//RS #![allow(non_snake_case)]
+//RS 
+//RS mod common;
+//RS 
+//RS use common::Scratch;
+//RS use std::fs;
+//RS use std::io::{Read, Write};
+//RS use std::net::{TcpListener, TcpStream};
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Child, Command, Stdio};
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS fn have_tool(name: &str) -> bool {
+//RS     Command::new(name).arg("--version").output().is_ok()
+//RS }
+//RS 
+//RS fn jet_bin() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn unused_local_port() -> u16 {
+//RS     TcpListener::bind(("127.0.0.1", 0))
+//RS         .expect("bind an ephemeral localhost port")
+//RS         .local_addr()
+//RS         .expect("read local addr")
+//RS         .port()
+//RS }
+//RS 
+//RS fn http_get(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
+//RS     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+//RS     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+//RS     write!(
+//RS         stream,
+//RS         "GET {path} HTTP/1.1\r\nHost: localhost:{port}\r\nConnection: close\r\n\r\n"
+//RS     )
+//RS     .ok()?;
+//RS     let mut raw = Vec::new();
+//RS     stream.read_to_end(&mut raw).ok()?;
+//RS     let separator = b"\r\n\r\n";
+//RS     let split = raw
+//RS         .windows(separator.len())
+//RS         .position(|window| window == separator)
+//RS         .map(|index| index + separator.len())?;
+//RS     let status = String::from_utf8_lossy(&raw[..split])
+//RS         .lines()
+//RS         .next()?
+//RS         .split_whitespace()
+//RS         .nth(1)?
+//RS         .parse()
+//RS         .ok()?;
+//RS     Some((status, raw[split..].to_vec()))
+//RS }
+//RS 
+//RS fn wait_for_server(port: u16, timeout: Duration) {
+//RS     let deadline = Instant::now() + timeout;
+//RS     loop {
+//RS         if matches!(http_get(port, "/__jet_dev_version"), Some((200, _))) {
+//RS             return;
+//RS         }
+//RS         if Instant::now() >= deadline {
+//RS             panic!("web scaffold server did not start on {port}");
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(100));
+//RS     }
+//RS }
+//RS 
+//RS const WEB_DOM_HARNESS: &str = r#"
+//RS class FakeElement {
+//RS   constructor(tag) {
+//RS     this.tagName = tag;
+//RS     this.style = {};
+//RS     this.dataset = {};
+//RS     this.children = [];
+//RS     this.textContent = "";
+//RS     this.id = "";
+//RS     this.attributes = new Map();
+//RS     this.listeners = new Map();
+//RS     this.parentNode = null;
+//RS   }
+//RS   appendChild(child) {
+//RS     child.parentNode = this;
+//RS     this.children.push(child);
+//RS     return child;
+//RS   }
+//RS   remove() {
+//RS     if (!this.parentNode) return;
+//RS     this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+//RS   }
+//RS   addEventListener(name, handler) {
+//RS     const handlers = this.listeners.get(name) ?? [];
+//RS     handlers.push(handler);
+//RS     this.listeners.set(name, handlers);
+//RS   }
+//RS   setAttribute(name, value) { this.attributes.set(name, String(value)); }
+//RS   removeAttribute(name) { this.attributes.delete(name); }
+//RS   focus() {}
+//RS }
+//RS class FakeDocument {
+//RS   constructor() {
+//RS     this.body = new FakeElement("body");
+//RS     this.body.ownerDocument = this;
+//RS     this.activeElement = null;
+//RS     this._byId = new Map();
+//RS   }
+//RS   createElement(tag) {
+//RS     const element = new FakeElement(tag);
+//RS     element.ownerDocument = this;
+//RS     return element;
+//RS   }
+//RS   getElementById(id) { return this._byId.get(id) ?? null; }
+//RS }
+//RS const document = new FakeDocument();
+//RS const appendBody = document.body.appendChild.bind(document.body);
+//RS document.body.appendChild = (element) => {
+//RS   if (element.id) document._byId.set(element.id, element);
+//RS   return appendBody(element);
+//RS };
+//RS globalThis.document = document;
+//RS 
+//RS const { jet_main } = await import("./app.js");
+//RS await jet_main();
+//RS const root = document.getElementById("jet-app");
+//RS const text = root?.children.map((child) => child.textContent).join("") ?? "";
+//RS if (!text.includes("hello, world")) {
+//RS   throw new Error(`expected rendered greeting, got ${JSON.stringify(text)}`);
+//RS }
+//RS console.log(text);
+//RS "#;
+//RS 
+//RS fn assert_web_dom_output(project: &Path) {
+//RS     let build = project.join(".jet/build");
+//RS     let harness = build.join("web_dom_harness.mjs");
+//RS     fs::write(&harness, WEB_DOM_HARNESS).expect("write Web DOM harness");
+//RS     let output = Command::new("node")
+//RS         .current_dir(&build)
+//RS         .arg("web_dom_harness.mjs")
+//RS         .output()
+//RS         .expect("spawn Web DOM harness");
+//RS     let _ = fs::remove_file(harness);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "generated Web app did not render the greeting:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_no_scaffold_diagnostic("Web DOM harness", &output.stdout, &output.stderr);
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stdout).contains("hello, world"),
+//RS         "generated Web DOM omitted the greeting:\n{}",
+//RS         String::from_utf8_lossy(&output.stdout)
+//RS     );
+//RS }
+//RS 
+//RS fn assert_no_scaffold_diagnostic(label: &str, stdout: &[u8], stderr: &[u8]) {
+//RS     let output = format!(
+//RS         "{}\n{}",
+//RS         String::from_utf8_lossy(stdout),
+//RS         String::from_utf8_lossy(stderr)
+//RS     );
+//RS     for code in ["E-WEB-TIR-UNSUPPORTED", "E2937", "ICE"] {
+//RS         assert!(
+//RS             !output.contains(code),
+//RS             "{label} emitted scaffold drift diagnostic {code}:\n{output}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_new_web_scaffold_runs_from_new_to_browser() {
+//RS     if !have_tool("rustc") {
+//RS         eprintln!("note: skipping jet_new_web_scaffold_runs_from_new_to_browser (need rustc)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let scratch = Scratch::new("web-scaffold");
+//RS     let project_root = scratch.path.clone();
+//RS     let created = Command::new(jet_bin())
+//RS         .current_dir(&project_root)
+//RS         .args(["new", "web_app", "--template", "web"])
+//RS         .output()
+//RS         .expect("spawn jet new web scaffold");
+//RS     assert!(
+//RS         created.status.success(),
+//RS         "jet new --template web failed:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&created.stdout),
+//RS         String::from_utf8_lossy(&created.stderr)
+//RS     );
+//RS 
+//RS     let project = project_root.join("web_app");
+//RS     let source = fs::read_to_string(project.join("run.jet")).expect("web scaffold source");
+//RS     assert!(source.contains("#Target(Web)"), "web target missing:\n{source}");
+//RS     assert!(source.contains("reactive.signal"), "reactive example missing:\n{source}");
+//RS     assert!(source.contains("ui.button"), "editable button example missing:\n{source}");
+//RS     for command in ["jet dev", "jet test", "jet build --target web"] {
+//RS         assert!(source.contains(command), "scaffold comment missing `{command}`");
+//RS     }
+//RS     assert!(
+//RS         !project.join("run.html").exists(),
+//RS         "web scaffold must use the generated default page"
+//RS     );
+//RS 
+//RS     let manifest = fs::read_to_string(project.join("package.jet")).expect("web scaffold manifest");
+//RS     let manifest_facts = jet::Package::PackageFacts::parse(&manifest, "package.jet")
+//RS         .expect("web scaffold manifest must remain valid");
+//RS     let allowed_effects = manifest_facts
+//RS         .authority
+//RS         .holds
+//RS         .allow
+//RS         .as_ref()
+//RS         .expect("web scaffold authority must declare allowed effects");
+//RS     assert!(
+//RS         allowed_effects.iter().any(|effect| effect == "Browser"),
+//RS         "web scaffold authority must grant Browser:\n{manifest}"
+//RS     );
+//RS 
+//RS     let build = Command::new(jet_bin())
+//RS         .current_dir(&project)
+//RS         .args(["build", "--target", "web"])
+//RS         .output()
+//RS         .expect("spawn jet build for web scaffold");
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "web scaffold build failed:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&build.stdout),
+//RS         String::from_utf8_lossy(&build.stderr)
+//RS     );
+//RS     assert_no_scaffold_diagnostic("web scaffold build", &build.stdout, &build.stderr);
+//RS     assert!(project.join(".jet/build/index.html").is_file());
+//RS 
+//RS     let test = Command::new(jet_bin())
+//RS         .current_dir(&project)
+//RS         .arg("test")
+//RS         .output()
+//RS         .expect("spawn jet test for web scaffold");
+//RS     assert!(
+//RS         test.status.success(),
+//RS         "web scaffold test failed:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&test.stdout),
+//RS         String::from_utf8_lossy(&test.stderr)
+//RS     );
+//RS     assert_no_scaffold_diagnostic("web scaffold test", &test.stdout, &test.stderr);
+//RS 
+//RS     let port = unused_local_port();
+//RS     struct KillOnDrop(Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS     let _server = KillOnDrop(
+//RS         Command::new(jet_bin())
+//RS             .current_dir(&project)
+//RS             .args(["dev", &format!("--port={port}")])
+//RS             .stdout(Stdio::null())
+//RS             .stderr(Stdio::null())
+//RS             .spawn()
+//RS             .expect("spawn jet dev for web scaffold"),
+//RS     );
+//RS     wait_for_server(port, Duration::from_secs(30));
+//RS 
+//RS     let (status, body) = http_get(port, "/").expect("GET scaffold page");
+//RS     assert_eq!(status, 200, "web scaffold page was not served");
+//RS     let page = String::from_utf8_lossy(&body);
+//RS     assert!(
+//RS         page.contains("type=\"module\"") && page.contains("src=\"./app.js\""),
+//RS         "generated scaffold page must load its Web module: {page}"
+//RS     );
+//RS     assert!(
+//RS         !page.contains("jet_main"),
+//RS         "generated scaffold page must not know an export name: {page}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_new_native_scaffold_builds_for_explicit_web_target() {
+//RS     if !have_tool("rustc") || !have_tool("node") {
+//RS         eprintln!("note: skipping native scaffold Web DOM proof (need rustc + node)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let scratch = Scratch::new("web-target-native-scaffold");
+//RS     let project_root = scratch.path.clone();
+//RS     let created = Command::new(jet_bin())
+//RS         .current_dir(&project_root)
+//RS         .args(["new", "demo", "--template", "ui"])
+//RS         .output()
+//RS         .expect("spawn jet new native scaffold");
+//RS     assert!(
+//RS         created.status.success(),
+//RS         "jet new failed:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&created.stdout),
+//RS         String::from_utf8_lossy(&created.stderr)
+//RS     );
+//RS 
+//RS     let project = project_root.join("demo");
+//RS     let manifest = fs::read_to_string(project.join("package.jet")).expect("native scaffold manifest");
+//RS     let manifest_facts = jet::Package::PackageFacts::parse(&manifest, "package.jet")
+//RS         .expect("native scaffold manifest must remain valid");
+//RS     let allowed_effects = manifest_facts
+//RS         .authority
+//RS         .holds
+//RS         .allow
+//RS         .as_ref()
+//RS         .expect("native scaffold authority must declare allowed effects");
+//RS     // A new project holds only the `Exec.Args` leaf, never the `Exec` root.
+//RS     for effect in [jet::Syntax::EFFECT_LEAF_EXEC_ARGS, "Browser"] {
+//RS         assert!(
+//RS             allowed_effects.iter().any(|declared| declared == effect),
+//RS             "native scaffold authority must grant {effect}:\n{manifest}"
+//RS         );
+//RS     }
+//RS     let native = Command::new(jet_bin())
+//RS         .current_dir(&project)
+//RS         .arg("run")
+//RS         .output()
+//RS         .expect("spawn native run for scaffold");
+//RS     assert!(
+//RS         native.status.success(),
+//RS         "native scaffold run failed:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&native.stdout),
+//RS         String::from_utf8_lossy(&native.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&native.stdout),
+//RS         "hello, world\n",
+//RS         "native scaffold output changed"
+//RS     );
+//RS     assert_no_scaffold_diagnostic("native scaffold run", &native.stdout, &native.stderr);
+//RS 
+//RS     let build = Command::new(jet_bin())
+//RS         .current_dir(&project)
+//RS         .args(["build", "--target", "web"])
+//RS         .output()
+//RS         .expect("spawn explicit Web build for native scaffold");
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "native scaffold Web build failed:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&build.stdout),
+//RS         String::from_utf8_lossy(&build.stderr)
+//RS     );
+//RS     assert_no_scaffold_diagnostic("native scaffold Web build", &build.stdout, &build.stderr);
+//RS     for artifact in [".jet/build/index.html", ".jet/build/app.js", ".jet/build/app.wasm"] {
+//RS         assert!(
+//RS             project.join(artifact).is_file(),
+//RS             "missing Web scaffold artifact {artifact}"
+//RS         );
+//RS     }
+//RS 
+//RS     let port = unused_local_port();
+//RS     struct KillOnDrop(Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS     let _server = KillOnDrop(
+//RS         Command::new(jet_bin())
+//RS             .current_dir(&project)
+//RS             .args(["dev", &format!("--port={port}")])
+//RS             .stdout(Stdio::null())
+//RS             .stderr(Stdio::null())
+//RS             .spawn()
+//RS             .expect("spawn jet dev for native scaffold"),
+//RS     );
+//RS     wait_for_server(port, Duration::from_secs(30));
+//RS     let (status, _) = http_get(port, "/").expect("GET native scaffold page");
+//RS     assert_eq!(status, 200, "native scaffold page was not served");
+//RS 
+//RS     assert_web_dom_output(&project);
+//RS }
+// END-PORT-PENDING 1191 tests/web_scaffold.rs:1-373
+
+// PORT-PENDING 1191 tests-web-scaffold-module-group: tests/cli_parts/compile_latency.rs:1-192
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS 
+//RS /// #677 / D-PERFBUDGET-COMPILE1=C: the typed compile-latency proof.
+//RS ///
+//RS /// Keep the production measurement loop in its own Cargo target so it cannot
+//RS /// exhaust another suite's deadline. D-PERFBUDGET-COMPILE1 owns the sampling
+//RS /// rule; the provider executes it.
+//RS ///
+//RS /// The compiles this test pays for are the ones the criteria require. Per
+//RS /// command: 21 cold `Clean` builds, 1 cold + 20 warm `NoChange` builds, and 1
+//RS /// primed clean build plus 21 measured patched rebuilds for `Edit`
+//RS /// (Source/BudgetProviders.rs `compile_latency_samples`).
+//RS #[test]
+//RS fn budget_check_measures_typed_compile_workloads_and_records_provenance() {
+//RS     use jet_foundation::PerformanceBudget::CanonicalJson;
+//RS     let dir = compile_latency_budget_project("budget_compile_latency");
+//RS     let bootstrap = Command::new(jet())
+//RS         .args([
+//RS             "budget",
+//RS             "update",
+//RS             "--baseline",
+//RS             "ci/linux-x64",
+//RS             "--bootstrap",
+//RS             "--reason",
+//RS             "initial compile latency",
+//RS             "--yes",
+//RS             "--json",
+//RS         ])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         bootstrap.status.code(),
+//RS         Some(0),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&bootstrap.stdout),
+//RS         String::from_utf8_lossy(&bootstrap.stderr)
+//RS     );
+//RS     let CanonicalJson::Object(bootstrap_command) =
+//RS         CanonicalJson::parse_canonical(&bootstrap.stdout).unwrap()
+//RS     else {
+//RS         panic!("bootstrap command")
+//RS     };
+//RS     assert_eq!(
+//RS         *canonical_field(&bootstrap_command["budget"], "applied"),
+//RS         CanonicalJson::Bool(true)
+//RS     );
+//RS     let CanonicalJson::Object(bootstrap_report) =
+//RS         canonical_field(&bootstrap_command["budget"], "report")
+//RS     else {
+//RS         panic!("bootstrap report")
+//RS     };
+//RS     let CanonicalJson::Object(bootstrap_content) = &bootstrap_report["content"] else {
+//RS         panic!("bootstrap content")
+//RS     };
+//RS     let CanonicalJson::Array(bootstrap_measurements) = &bootstrap_content["measurements"] else {
+//RS         panic!("bootstrap measurements")
+//RS     };
+//RS     assert_eq!(bootstrap_measurements.len(), 3);
+//RS     for measurement in bootstrap_measurements {
+//RS         let CanonicalJson::Object(measurement) = measurement else {
+//RS             panic!("bootstrap measurement")
+//RS         };
+//RS         assert_eq!(
+//RS             measurement["unit"],
+//RS             CanonicalJson::String("Duration".into())
+//RS         );
+//RS         let CanonicalJson::Object(statistics) = &measurement["statistics"] else {
+//RS             panic!("bootstrap statistics")
+//RS         };
+//RS         assert_eq!(statistics["count"], CanonicalJson::Integer("20".into()));
+//RS     }
+//RS     let check = Command::new(jet())
+//RS         .args(["budget", "check", "--json"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         check.status.code(),
+//RS         Some(0),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&check.stdout),
+//RS         String::from_utf8_lossy(&check.stderr)
+//RS     );
+//RS     let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&check.stdout).unwrap()
+//RS     else {
+//RS         panic!("command")
+//RS     };
+//RS     let CanonicalJson::Object(report) = canonical_field(&command["budget"], "report") else {
+//RS         panic!("report")
+//RS     };
+//RS     let CanonicalJson::Object(content) = &report["content"] else {
+//RS         panic!("content")
+//RS     };
+//RS     let CanonicalJson::Array(measurements) = &content["measurements"] else {
+//RS         panic!("measurements")
+//RS     };
+//RS     assert_eq!(measurements.len(), 3);
+//RS     let mut cache_states = std::collections::BTreeSet::new();
+//RS     for measurement in measurements {
+//RS         let CanonicalJson::Object(measurement) = measurement else {
+//RS             panic!("measurement")
+//RS         };
+//RS         let CanonicalJson::Object(provider) = &measurement["provider"] else {
+//RS             panic!("provider")
+//RS         };
+//RS         assert_eq!(
+//RS             provider["kind"],
+//RS             CanonicalJson::String("CompilerProbe".into())
+//RS         );
+//RS         assert_eq!(
+//RS             measurement["unit"],
+//RS             CanonicalJson::String("Duration".into())
+//RS         );
+//RS         let CanonicalJson::Array(samples) = &measurement["samples"] else {
+//RS             panic!("samples")
+//RS         };
+//RS         assert_eq!(samples.len(), 20);
+//RS         let CanonicalJson::Object(statistics) = &measurement["statistics"] else {
+//RS             panic!("statistics")
+//RS         };
+//RS         assert_eq!(statistics["count"], CanonicalJson::Integer("20".into()));
+//RS         let CanonicalJson::Object(compile) = &measurement["compile"] else {
+//RS             panic!("compile metadata")
+//RS         };
+//RS         let CanonicalJson::String(cache_state) = &compile["cache_state"] else {
+//RS             panic!("cache state")
+//RS         };
+//RS         cache_states.insert(cache_state.clone());
+//RS         let CanonicalJson::Integer(edit_bytes) = &compile["edit_bytes"] else {
+//RS             panic!("edit byte count")
+//RS         };
+//RS         assert_eq!(cache_state == "Edit", edit_bytes != "0");
+//RS         assert_eq!(compile["warmups"], CanonicalJson::Integer("1".into()));
+//RS         assert_eq!(compile["samples"], CanonicalJson::Integer("20".into()));
+//RS         if cache_state == "Clean" || cache_state == "NoChange" || cache_state == "Edit" {
+//RS             assert_eq!(
+//RS                 compile["backend"],
+//RS                 CanonicalJson::String("cranelift-jit".into())
+//RS             );
+//RS             assert_eq!(compile["profile"], CanonicalJson::String("dev".into()));
+//RS         }
+//RS         for key in [
+//RS             "source_tree_sha256",
+//RS             "compiler_digest",
+//RS             "core_digest",
+//RS             "clock",
+//RS             "target",
+//RS             "profile",
+//RS             "backend",
+//RS             "linker",
+//RS             "host",
+//RS             "cache_state",
+//RS             "warmups",
+//RS             "samples",
+//RS             "variance",
+//RS             "phase_totals",
+//RS             "sample_records",
+//RS             "edit_bytes",
+//RS             "edit_sha256",
+//RS             "workload_bytes",
+//RS         ] {
+//RS             assert!(
+//RS                 compile.contains_key(key),
+//RS                 "missing compile metadata field {key}"
+//RS             );
+//RS         }
+//RS         assert_eq!(
+//RS             compile["clock"],
+//RS             CanonicalJson::String("process_cpu".into())
+//RS         );
+//RS         assert!(
+//RS             compile.contains_key("peak_rss_bytes"),
+//RS             "missing compile metadata field peak_rss_bytes"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         cache_states,
+//RS         ["Clean", "NoChange", "Edit"]
+//RS             .into_iter()
+//RS             .map(String::from)
+//RS             .collect()
+//RS     );
+//RS     let report_path = fs::read_dir(dir.join(".jet/perf/reports"))
+//RS         .unwrap()
+//RS         .next()
+//RS         .unwrap()
+//RS         .unwrap()
+//RS         .path();
+//RS     jet_foundation::PerformanceBudget::verify_budget_report(&fs::read(report_path).unwrap())
+//RS         .unwrap();
+//RS }
+// END-PORT-PENDING 1191 tests/cli_parts/compile_latency.rs:1-192
+
+// PORT-PENDING 1191 tests-web-scaffold-module-group: tests/compiler-proof/toolchain/fixtures/valid/compiler-source.rs:1-2
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Pinned source identity for the compiler-proof fixture.
+//RS pub const COMPILER_PROOF_FIXTURE: &str = "compiler-proof-fixture-v1";
+// END-PORT-PENDING 1191 tests/compiler-proof/toolchain/fixtures/valid/compiler-source.rs:1-2
+
+// PORT-PENDING 1191 tests-web-scaffold-module-group: tests/compiler-proof/toolchain/fixtures/valid/implementation.rs:1-3
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub fn identity(value: u64) -> u64 {
+//RS     value
+//RS }
+// END-PORT-PENDING 1191 tests/compiler-proof/toolchain/fixtures/valid/implementation.rs:1-3
+
+// PORT-PENDING 1191 tests-web-scaffold-module-group: tests/corelib_parts/email.rs:1-467
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod email_native {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     trait JetShow {
+//RS         fn jet_show(&self) -> String;
+//RS     }
+//RS     trait JetDisplay {
+//RS         fn jet_display(&self) -> String;
+//RS     }
+//RS     include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+//RS     include!("../../crates/jet-codegen/src/Prelude/CoreLib/Email.rs");
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_email_mime_bytes_use_crlf_and_keep_bcc_envelope_only() {
+//RS     use email_native::jet_email;
+//RS     let from = jet_email::address(&"Mara ☕ <mara@example.com>".to_string()).unwrap();
+//RS     let to = jet_email::address(&"Ada <ada@example.net>".to_string()).unwrap();
+//RS     let bcc = jet_email::address(&"secret@example.org".to_string()).unwrap();
+//RS     let attachment = jet_email::attachment(
+//RS         &"notes.txt".to_string(),
+//RS         &"text/plain".to_string(),
+//RS         &b"hi".to_vec(),
+//RS     ).unwrap();
+//RS     let message = jet_email::message(
+//RS         &from, &vec![to], &vec![bcc], &"Welcome ☕".to_string(),
+//RS         &"plain".to_string(), &"<b>html</b>".to_string(), &vec![attachment],
+//RS     ).unwrap();
+//RS     let first = jet_email::serialize(&message).unwrap();
+//RS     let second = jet_email::serialize(&message).unwrap();
+//RS     assert_eq!(first, second);
+//RS     let wire = String::from_utf8(first).unwrap();
+//RS     assert!(wire.contains("Content-Type: multipart/mixed"));
+//RS     assert!(wire.contains("Content-Type: multipart/alternative"));
+//RS     assert!(wire.contains("aGk="));
+//RS     assert!(!wire.contains("Bcc:"));
+//RS     assert!(!wire.contains("secret@example.org"));
+//RS     assert!(!wire.replace("\r\n", "").contains('\n'));
+//RS     assert!(wire.split_inclusive("\r\n").all(|line| line.len() <= jet_email::MAX_HEADER_BYTES || !line.contains(':')));
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_email_headers_and_wire_bounds_are_prospective() {
+//RS     use email_native::jet_email;
+//RS     let quoted = jet_email::address(&"\"Doe, \\\"Ada\\\"\" <ada@example.net>".to_string()).unwrap();
+//RS     assert!(jet_email::address(&"\"a@b\"@example.net".to_string()).is_ok());
+//RS     let unicode_name = format!("{} <mara@example.com>", "界".repeat(120));
+//RS     let from = jet_email::address(&unicode_name).unwrap();
+//RS     let message = jet_email::message(
+//RS         &from, &vec![quoted], &vec![], &"界".repeat(120),
+//RS         &"plain".to_string(), &String::new(), &vec![],
+//RS     ).unwrap();
+//RS     let wire = String::from_utf8(jet_email::serialize(&message).unwrap()).unwrap();
+//RS     assert!(wire.contains("\"Doe, \\\"Ada\\\"\" <ada@example.net>"));
+//RS     for word in wire.split_whitespace().filter(|word| word.starts_with("=?UTF-8?B?")) {
+//RS         assert!(word.len() <= 75, "encoded word too long: {}", word.len());
+//RS     }
+//RS     for line in wire.split_inclusive("\r\n") {
+//RS         if line.contains(':') || line.starts_with(' ') {
+//RS             assert!(line.len() <= jet_email::MAX_HEADER_BYTES, "header line too long: {}", line.len());
+//RS         }
+//RS     }
+//RS 
+//RS     let sender = jet_email::address(&"sender@example.com".to_string()).unwrap();
+//RS     let recipient = jet_email::address(&"recipient@example.com".to_string()).unwrap();
+//RS     let at_body_limit = "x".repeat(jet_email::MAX_BODY_BYTES);
+//RS     assert!(jet_email::message(
+//RS         &sender, &vec![recipient.clone()], &vec![], &"subject".to_string(),
+//RS         &at_body_limit, &String::new(), &vec![],
+//RS     ).is_ok());
+//RS     let over_body_limit = "x".repeat(jet_email::MAX_BODY_BYTES + 1);
+//RS     assert!(jet_email::message(
+//RS         &sender, &vec![recipient.clone()], &vec![], &"subject".to_string(),
+//RS         &over_body_limit, &String::new(), &vec![],
+//RS     ).is_err());
+//RS 
+//RS     let max_subject = "s".repeat(jet_email::MAX_HEADER_BYTES - "Subject: ".len() - 2);
+//RS     assert!(jet_email::message(
+//RS         &sender, &vec![recipient.clone()], &vec![], &max_subject,
+//RS         &"body".to_string(), &String::new(), &vec![],
+//RS     ).is_ok());
+//RS     assert!(jet_email::message(
+//RS         &sender, &vec![recipient], &vec![], &format!("{max_subject}s"),
+//RS         &"body".to_string(), &String::new(), &vec![],
+//RS     ).is_err());
+//RS 
+//RS     assert!(jet_email::attachment(
+//RS         &format!("{}.txt", "a".repeat(900)), &"application/octet-stream".to_string(), &vec![],
+//RS     ).is_ok());
+//RS     assert!(jet_email::attachment(
+//RS         &format!("{}.txt", "a".repeat(960)), &"application/octet-stream".to_string(), &vec![],
+//RS     ).is_err());
+//RS 
+//RS     let tiny = jet_email::attachment(
+//RS         &"tiny.bin".to_string(), &"application/octet-stream".to_string(), &vec![0],
+//RS     ).unwrap();
+//RS     assert!(jet_email::message(
+//RS         &sender, &vec![jet_email::address(&"to@example.com".to_string()).unwrap()], &vec![],
+//RS         &"subject".to_string(), &"body".to_string(), &String::new(),
+//RS         &vec![tiny; jet_email::MAX_ATTACHMENTS + 1],
+//RS     ).is_err());
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_email_envelope_reports_and_errors_follow_smtp_law() {
+//RS     use email_native::jet_email;
+//RS     let from = jet_email::address(&"sender@example.com".to_string()).unwrap();
+//RS     let visible = jet_email::address(&"visible@example.net".to_string()).unwrap();
+//RS     let hidden = jet_email::address(&"hidden@example.org".to_string()).unwrap();
+//RS     let message = jet_email::message(
+//RS         &from, &vec![visible.clone()], &vec![hidden.clone()], &"subject".to_string(),
+//RS         &"body".to_string(), &String::new(), &vec![],
+//RS     ).unwrap();
+//RS     assert_eq!(message.envelope().recipients, vec![visible.clone(), hidden.clone()]);
+//RS     let replacement = jet_email::envelope(&from, &vec![hidden.clone()]).unwrap();
+//RS     let replaced = message.with_envelope(&replacement).unwrap();
+//RS     assert_eq!(replaced.envelope().recipients, vec![hidden]);
+//RS     assert!(!String::from_utf8(jet_email::serialize(&replaced).unwrap()).unwrap().contains("Bcc:"));
+//RS     let error = jet_email::envelope(&from, &vec![]).unwrap_err();
+//RS     match error {
+//RS         jet_email::Error::Configuration { operation, server, code, reason } => {
+//RS             assert_eq!(operation, "envelope");
+//RS             assert_eq!((server, code), (None, None));
+//RS             assert!(reason.contains("recipient"));
+//RS         }
+//RS         other => panic!("unexpected envelope error: {other:?}"),
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
+//RS     use email_native::jet_email;
+//RS     let safe = jet_email::Limits::safe();
+//RS     assert_eq!(
+//RS         (
+//RS             safe.max_reply_line_bytes,
+//RS             safe.max_reply_lines,
+//RS             safe.max_capabilities,
+//RS             safe.max_recipients,
+//RS             safe.max_message_bytes,
+//RS             safe.max_auth_challenge_bytes,
+//RS         ),
+//RS         (512, 100, 100, 100, 33_554_432, 4096),
+//RS     );
+//RS     let mut invalid = safe.clone();
+//RS     invalid.max_reply_line_bytes = 63;
+//RS     invalid.max_reply_lines = 0;
+//RS     let first = invalid.validate().unwrap_err();
+//RS     assert!(matches!(first, jet_email::Error::Configuration { reason, .. }
+//RS         if reason.starts_with("max_reply_line_bytes")));
+//RS 
+//RS     let pem = b"-----BEGIN CERTIFICATE-----\nMAMCAQE=\n-----END CERTIFICATE-----\n".to_vec();
+//RS     let mut config: jet_email::SMTPConfig<()> = jet_email::SMTPConfig {
+//RS         host: "smtp.example.com".to_string(),
+//RS         port: 587,
+//RS         security: jet_email::SMTPSecurity::StartTLS,
+//RS         auth: jet_email::SMTPAuth::None,
+//RS         recipient_policy: jet_email::RecipientPolicy::RequireAll,
+//RS         trust: jet_email::TLSTrust::SystemPlusCa { pem },
+//RS         limits: safe.clone(),
+//RS         dkim: Err(JetAbsent),
+//RS     };
+//RS     jet_email::validate_smtp_config(&config).unwrap();
+//RS     config.dkim = Ok(jet_email::DkimConfig {
+//RS         domain: "example.com".to_string(), selector: "login-2026".to_string(),
+//RS         private_key: (), signed_headers: vec!["subject".to_string()],
+//RS     });
+//RS     assert!(matches!(jet_email::validate_smtp_config(&config),
+//RS         Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("include `from`")));
+//RS     config.dkim.as_mut().unwrap().signed_headers = vec!["from".to_string(), "FROM".to_string()];
+//RS     assert!(matches!(jet_email::validate_smtp_config(&config),
+//RS         Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("duplicate")));
+//RS     config.dkim.as_mut().unwrap().signed_headers = vec!["from".to_string(), "received".to_string()];
+//RS     assert!(matches!(jet_email::validate_smtp_config(&config),
+//RS         Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("hop header")));
+//RS 
+//RS     let malformed: jet_email::SMTPConfig<()> = jet_email::SMTPConfig {
+//RS         host: "smtp.example.com".to_string(),
+//RS         port: 465,
+//RS         security: jet_email::SMTPSecurity::TLS,
+//RS         auth: jet_email::SMTPAuth::None,
+//RS         recipient_policy: jet_email::RecipientPolicy::DeliverAccepted,
+//RS         trust: jet_email::TLSTrust::SystemPlusCa {
+//RS             pem: b"-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----".to_vec(),
+//RS         },
+//RS         limits: safe,
+//RS         dkim: Err(JetAbsent),
+//RS     };
+//RS     assert!(matches!(jet_email::validate_smtp_config(&malformed),
+//RS         Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("certificate")));
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_email_smtp_reply_parser_bounds_and_tls_auth_order_are_real() {
+//RS     use email_native::jet_email;
+//RS     let limits = jet_email::Limits::safe();
+//RS     let mut wire = &b"250-smtp.example\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n"[..];
+//RS     let reply = jet_email::read_smtp_reply(&mut wire, &limits).unwrap();
+//RS     let caps = jet_email::smtp_capabilities(&reply, &limits).unwrap();
+//RS     assert_eq!(caps.names, vec!["STARTTLS", "AUTH"]);
+//RS 
+//RS     let mut state = jet_email::SMTPState::new();
+//RS     state.greeting(&jet_email::SMTPReply { code: 220, lines: vec!["ready".to_string()] }).unwrap();
+//RS     let caps = state.ehlo(&reply, &limits).unwrap();
+//RS     assert!(state.authenticate("PLAIN", 10, &limits).is_err());
+//RS     state.start_tls(&caps).unwrap();
+//RS     state.verified_tls();
+//RS     assert!(state.authenticate("PLAIN", 10, &limits).is_err());
+//RS     state.ehlo(&reply, &limits).unwrap();
+//RS     state.authenticate("PLAIN", 10, &limits).unwrap();
+//RS     assert!(state.authenticate("PLAIN", 4097, &limits).is_err());
+//RS 
+//RS     let mut tight = limits;
+//RS     tight.max_reply_line_bytes = 64;
+//RS     let oversized = format!("250 {}\r\n", "x".repeat(61));
+//RS     assert!(jet_email::read_smtp_reply(&mut oversized.as_bytes(), &tight).is_err());
+//RS     let mut changed = &b"250-first\r\n251 final\r\n"[..];
+//RS     assert!(jet_email::read_smtp_reply(&mut changed, &tight).is_err());
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_email_smtp_transaction_starttls_auth_rcpt_and_data_are_real() {
+//RS     use email_native::jet_email;
+//RS     use std::io::{Read, Write};
+//RS 
+//RS     struct Script {
+//RS         replies: std::io::Cursor<Vec<u8>>,
+//RS         writes: Vec<u8>,
+//RS         verified_tls: bool,
+//RS         upgrades: usize,
+//RS         closed: bool,
+//RS     }
+//RS     impl Read for Script {
+//RS         fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> { self.replies.read(out) }
+//RS     }
+//RS     impl Write for Script {
+//RS         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+//RS             self.writes.extend_from_slice(bytes);
+//RS             Ok(bytes.len())
+//RS         }
+//RS         fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+//RS     }
+//RS     impl jet_email::SMTPTransport for Script {
+//RS         fn verified_tls(&self) -> bool { self.verified_tls }
+//RS         fn start_tls(&mut self, _server: &str, _trust: &jet_email::TLSTrust) -> Result<(), String> {
+//RS             self.verified_tls = true;
+//RS             self.upgrades += 1;
+//RS             Ok(())
+//RS         }
+//RS         fn close(&mut self) { self.closed = true; }
+//RS     }
+//RS 
+//RS     let sender = jet_email::address(&"sender@example.com".to_string()).unwrap();
+//RS     let accepted = jet_email::address(&"ok@example.net".to_string()).unwrap();
+//RS     let rejected = jet_email::address(&"no@example.org".to_string()).unwrap();
+//RS     let message = jet_email::message(
+//RS         &sender, &vec![accepted.clone(), rejected.clone()], &vec![], &"subject".to_string(),
+//RS         &"first\r\n.second".to_string(), &String::new(), &vec![],
+//RS     ).unwrap();
+//RS     let config = jet_email::SMTPConfig {
+//RS         host: "smtp.example.com".to_string(),
+//RS         port: 587,
+//RS         security: jet_email::SMTPSecurity::StartTLS,
+//RS         auth: jet_email::SMTPAuth::Password {
+//RS             username: "mailer".to_string(),
+//RS             password: b"secret".to_vec(),
+//RS         },
+//RS         recipient_policy: jet_email::RecipientPolicy::DeliverAccepted,
+//RS         trust: jet_email::TLSTrust::System,
+//RS         limits: jet_email::Limits::safe(),
+//RS         dkim: Err(JetAbsent),
+//RS     };
+//RS     let replies = concat!(
+//RS         "220 relay ready\r\n",
+//RS         "250-relay\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n",
+//RS         "220 begin TLS\r\n",
+//RS         "250-relay\r\n250 AUTH PLAIN LOGIN\r\n",
+//RS         "235 authenticated\r\n",
+//RS         "250 sender accepted\r\n",
+//RS         "250 recipient accepted\r\n",
+//RS         "550 recipient rejected\r\n",
+//RS         "354 send data\r\n",
+//RS         "250 queued as q-1\r\n",
+//RS         "221 bye\r\n",
+//RS     );
+//RS     let mut transport = Script {
+//RS         replies: std::io::Cursor::new(replies.as_bytes().to_vec()),
+//RS         writes: Vec::new(), verified_tls: false, upgrades: 0, closed: false,
+//RS     };
+//RS     let report = jet_email::smtp_transaction(
+//RS         &mut transport, &config, &message, &jet_email::NoopSmtpControl,
+//RS     ).unwrap();
+//RS     assert_eq!((report.accepted.len(), report.rejected.len()), (1, 1));
+//RS     assert_eq!((report.response_code, report.response.as_str()), (250, "queued as q-1"));
+//RS     assert!(!report.accepted_at.is_empty());
+//RS     assert_eq!(transport.upgrades, 1);
+//RS     assert!(transport.closed);
+//RS     let wire = String::from_utf8(transport.writes).unwrap();
+//RS     assert!(wire.starts_with("EHLO localhost\r\nSTARTTLS\r\nEHLO localhost\r\nAUTH PLAIN "));
+//RS     assert!(!wire.contains("secret"));
+//RS     assert!(wire.contains("MAIL FROM:<sender@example.com>\r\n"));
+//RS     assert!(wire.contains("RCPT TO:<ok@example.net>\r\nRCPT TO:<no@example.org>\r\nDATA\r\n"));
+//RS     assert!(wire.contains("\r\n.\r\nQUIT\r\n"));
+//RS     assert_eq!(
+//RS         jet_email::smtp_dot_stuff(b"first\r\n.second\r\n").unwrap(),
+//RS         b"first\r\n..second\r\n.\r\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_email_smtp_transaction_require_all_and_delivery_unknown_are_honest() {
+//RS     use email_native::jet_email;
+//RS     use std::io::{Read, Write};
+//RS 
+//RS     struct Script { replies: std::io::Cursor<Vec<u8>>, writes: Vec<u8>, closed: bool }
+//RS     impl Read for Script {
+//RS         fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> { self.replies.read(out) }
+//RS     }
+//RS     impl Write for Script {
+//RS         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+//RS             self.writes.extend_from_slice(bytes); Ok(bytes.len())
+//RS         }
+//RS         fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+//RS     }
+//RS     impl jet_email::SMTPTransport for Script {
+//RS         fn verified_tls(&self) -> bool { true }
+//RS         fn start_tls(&mut self, _server: &str, _trust: &jet_email::TLSTrust) -> Result<(), String> {
+//RS             panic!("implicit TLS must not upgrade")
+//RS         }
+//RS         fn close(&mut self) { self.closed = true; }
+//RS     }
+//RS     struct Stop(jet_email::SMTPStop);
+//RS     impl jet_email::SMTPControl for Stop {
+//RS         fn checkpoint(&self, _operation: &str) -> Result<(), jet_email::SMTPStop> { Err(self.0) }
+//RS         fn accepted_at(&self) -> String { panic!("stopped transaction cannot be accepted") }
+//RS     }
+//RS 
+//RS     let sender = jet_email::address(&"sender@example.com".to_string()).unwrap();
+//RS     let recipient = jet_email::address(&"recipient@example.net".to_string()).unwrap();
+//RS     let message = jet_email::message(
+//RS         &sender, &vec![recipient], &vec![], &"subject".to_string(),
+//RS         &"body".to_string(), &String::new(), &vec![],
+//RS     ).unwrap();
+//RS     let config = |policy| jet_email::SMTPConfig {
+//RS         host: "smtp.example.com".to_string(), port: 465,
+//RS         security: jet_email::SMTPSecurity::TLS, auth: jet_email::SMTPAuth::None,
+//RS         recipient_policy: policy, trust: jet_email::TLSTrust::System,
+//RS         limits: jet_email::Limits::safe(),
+//RS         dkim: Err(JetAbsent),
+//RS     };
+//RS 
+//RS     for (stop, timed_out) in [
+//RS         (jet_email::SMTPStop::Cancelled, false),
+//RS         (jet_email::SMTPStop::TimedOut, true),
+//RS     ] {
+//RS         let mut stopped = Script {
+//RS             replies: std::io::Cursor::new(Vec::new()), writes: Vec::new(), closed: false,
+//RS         };
+//RS         let error = jet_email::smtp_transaction(
+//RS             &mut stopped, &config(jet_email::RecipientPolicy::RequireAll), &message, &Stop(stop),
+//RS         ).unwrap_err();
+//RS         assert_eq!(matches!(error, jet_email::Error::TimedOut { .. }), timed_out);
+//RS         assert_eq!(matches!(error, jet_email::Error::Cancelled { .. }), !timed_out);
+//RS         assert!(stopped.writes.is_empty());
+//RS         assert!(stopped.closed);
+//RS     }
+//RS 
+//RS     let reject_replies = concat!(
+//RS         "220 ready\r\n", "250 relay\r\n", "250 sender\r\n", "550 no\r\n",
+//RS     );
+//RS     let mut reject = Script {
+//RS         replies: std::io::Cursor::new(reject_replies.as_bytes().to_vec()),
+//RS         writes: Vec::new(), closed: false,
+//RS     };
+//RS     assert!(matches!(jet_email::smtp_transaction(
+//RS         &mut reject, &config(jet_email::RecipientPolicy::RequireAll), &message,
+//RS         &jet_email::NoopSmtpControl,
+//RS     ), Err(jet_email::Error::Rejected { code: Some(550), .. })));
+//RS     assert!(!String::from_utf8(reject.writes).unwrap().contains("DATA\r\n"));
+//RS     assert!(reject.closed);
+//RS 
+//RS     let unknown_replies = concat!(
+//RS         "220 ready\r\n", "250 relay\r\n", "250 sender\r\n", "250 recipient\r\n",
+//RS         "354 continue\r\n",
+//RS     );
+//RS     let mut unknown = Script {
+//RS         replies: std::io::Cursor::new(unknown_replies.as_bytes().to_vec()),
+//RS         writes: Vec::new(), closed: false,
+//RS     };
+//RS     assert!(matches!(jet_email::smtp_transaction(
+//RS         &mut unknown, &config(jet_email::RecipientPolicy::DeliverAccepted), &message,
+//RS         &jet_email::NoopSmtpControl,
+//RS     ), Err(jet_email::Error::DeliveryUnknown { operation, .. }) if operation == "data_response"));
+//RS     assert_eq!(String::from_utf8(unknown.writes).unwrap().matches("DATA\r\n").count(), 1);
+//RS     assert!(unknown.closed);
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_email_limits_are_constructible_real_jet_values() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_email_limits_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "email_limits", r#"
+//RS use core.email as email
+//RS 
+//RS fn run() {
+//RS     safe := email.Limits.safe()
+//RS     print("{safe.max_reply_line_bytes},{safe.max_reply_lines},{safe.max_capabilities},{safe.max_recipients},{safe.max_message_bytes},{safe.max_auth_challenge_bytes}")
+//RS     strict := email.Limits{
+//RS         max_reply_line_bytes: 64,
+//RS         max_reply_lines: 1,
+//RS         max_capabilities: 2,
+//RS         max_recipients: 3,
+//RS         max_message_bytes: 4,
+//RS         max_auth_challenge_bytes: 5,
+//RS     }
+//RS     print("{strict.max_reply_line_bytes},{strict.max_auth_challenge_bytes}")
+//RS }
+//RS "#, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(stdout, "512,100,100,100,33554432,4096\n64,5\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_email_mailer_surface_constructs_with_real_secret() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_email_mailer_surface_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "email_mailer_surface", r#"
+//RS use core.email as email
+//RS use core.crypto as crypto
+//RS 
+//RS fn run() {
+//RS     password :: crypto.Secret.from_text("not-logged")
+//RS     dkim_key :: crypto.Secret.from_text("0123456789abcdef0123456789abcdef")
+//RS     dkim :: email.DKIMConfig{
+//RS         domain: "example.com",
+//RS         selector: "login-2026",
+//RS         private_key: dkim_key,
+//RS         signed_headers: ["from", "subject", "mime-version", "content-type"],
+//RS     }
+//RS     auth :: SMTPAuth{ .Password{ username: "mailer", password: password } }
+//RS     config :: email.SMTPConfig{
+//RS         host: "localhost",
+//RS         port: 465,
+//RS         security: .TLS,
+//RS         auth: auth,
+//RS         recipient_policy: .RequireAll,
+//RS         trust: .System,
+//RS         limits: email.Limits.safe(),
+//RS         dkim: Val(dkim),
+//RS     }
+//RS     mailer :: email.smtp(config) ?? panic("mailer config")
+//RS     env_mailer :: email.smtp_from_env() ?? panic("environment mailer config")
+//RS     sender :: email.address("sender@example.com") ?? panic("sender")
+//RS     recipient :: email.address("recipient@example.net") ?? panic("recipient")
+//RS     message :: email.message(sender, [recipient], [Address]{}, "subject", "body", HTML{""}, [Attachment]{}) ?? panic("message")
+//RS     if false {
+//RS         report :: mailer.send(message) ?? panic("send")
+//RS         print(report.response_code)
+//RS     }
+//RS     print("mailer-ready")
+//RS }
+//RS "#, &[("SMTP_HOST", "localhost"), ("SMTP_SECURITY", "tls"), ("SMTP_PORT", "465")], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "mailer-ready\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+// END-PORT-PENDING 1191 tests/corelib_parts/email.rs:1-467
+

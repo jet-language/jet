@@ -29,6 +29,12 @@ pub struct SemaScopeMembersMarkerRegistry {
     pub function_allowed_markers: [String]
     pub block_allowed_markers: [String]
     pub derive_provider_names: [String]
+    pub marker_rule_rows: [String:Int]{[String:Int]{}}
+    pub applied_rule_rows: [String:Int]{[String:Int]{}}
+    pub known_marker_rows: [String:Bool]{[String:Bool]{}}
+    pub function_allowed_rows: [String:Bool]{[String:Bool]{}}
+    pub block_allowed_rows: [String:Bool]{[String:Bool]{}}
+    pub derive_provider_rows: [String:Bool]{[String:Bool]{}}
 }
 
 pub struct SemaScopeMembersDeclaredTypeArgument {
@@ -45,10 +51,9 @@ pub struct SemaScopeMembersDSLHeaderResult {
     pub diagnostics: [Diagnostic]
 }
 
-fn sema_scope_members_append_name(values: &[String], name: String) Never! {
-    loop existing in values {
-        if existing == name -> return
-    }
+fn sema_scope_members_append_name(values: &[String], seen: &[String:Bool], name: String) Never! {
+    if seen.get(name) != None -> return
+    seen[name] = true
     &values.push(name)
 }
 
@@ -112,11 +117,10 @@ fn sema_scope_members_first_parameter_is_type(declaration: MarkerDecl) -> Bool N
 }
 
 fn sema_scope_members_registry_add_declaration(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl) -> Bool Never! {
-    loop existing in registry.marker_rules {
-        if existing.name == declaration.name -> return false
-    }
+    if registry.marker_rule_rows.get(declaration.name) != None -> return false
     sites :: sema_scope_members_declared_sites(declaration) ?? return false
     repeatable :: sema_scope_members_declared_repeatable(declaration) ?? return false
+    registry.marker_rule_rows[declaration.name] = registry.marker_rules.len()
     &registry.marker_rules.push(SemaScopeMembersMarkerRule{
         name: declaration.name,
         sites: sites,
@@ -124,10 +128,10 @@ fn sema_scope_members_registry_add_declaration(registry: &SemaScopeMembersMarker
         repeatable: repeatable,
         params: declaration.params,
     })
-    sema_scope_members_append_name(&registry.known_marker_names, declaration.name)
+    sema_scope_members_append_name(&registry.known_marker_names, &registry.known_marker_rows, declaration.name)
     loop site in sites {
-        if site == "Function" -> sema_scope_members_append_name(&registry.function_allowed_markers, declaration.name)
-        if site == "Block" -> sema_scope_members_append_name(&registry.block_allowed_markers, declaration.name)
+        if site == "Function" -> sema_scope_members_append_name(&registry.function_allowed_markers, &registry.function_allowed_rows, declaration.name)
+        if site == "Block" -> sema_scope_members_append_name(&registry.block_allowed_markers, &registry.block_allowed_rows, declaration.name)
     }
     true
 }
@@ -139,8 +143,8 @@ fn sema_scope_members_registry_add_items(registry: &SemaScopeMembersMarkerRegist
                 if !sema_scope_members_registry_add_declaration(&registry, declaration) -> return false
             }
             .UserDerive(derive_definition) -> {
-                sema_scope_members_append_name(&registry.derive_provider_names, derive_definition.trait_name)
-                sema_scope_members_append_name(&registry.known_marker_names, derive_definition.trait_name)
+                sema_scope_members_append_name(&registry.derive_provider_names, &registry.derive_provider_rows, derive_definition.trait_name)
+                sema_scope_members_append_name(&registry.known_marker_names, &registry.known_marker_rows, derive_definition.trait_name)
             }
             .CodeModule(code_module) -> {
                 if code_module.body != None {
@@ -164,25 +168,25 @@ fn sema_scope_members_rule_is_active(rule: TAppliedRule) -> Bool Never! {
 }
 
 fn sema_scope_members_registry_add_applied_catalog(registry: &SemaScopeMembersMarkerRegistry, catalog: TAppliedRuleCatalog) -> Bool Never! {
-    seen := [String]{}
-    loop rule in catalog.rows {
-        if seen.contains(rule.name) -> return false
-        &seen.push(rule.name)
+    loop (index, rule) in catalog.rows {
+        if registry.applied_rule_rows.get(rule.name) != None -> return false
+        registry.applied_rule_rows[rule.name] = index
         if !sema_scope_members_rule_is_active(rule) -> next
-        sema_scope_members_append_name(&registry.known_marker_names, rule.name)
+        sema_scope_members_append_name(&registry.known_marker_names, &registry.known_marker_rows, rule.name)
         loop site in rule.sites {
-            if site == "Function" -> sema_scope_members_append_name(&registry.function_allowed_markers, rule.name)
-            if site == "Block" -> sema_scope_members_append_name(&registry.block_allowed_markers, rule.name)
+            if site == "Function" -> sema_scope_members_append_name(&registry.function_allowed_markers, &registry.function_allowed_rows, rule.name)
+            if site == "Block" -> sema_scope_members_append_name(&registry.block_allowed_markers, &registry.block_allowed_rows, rule.name)
         }
     }
     true
 }
 
-// `catalog` must be built from the complete embedded Prelude/Markers.jet
-// source. The graph must be complete because source-declared marker and derive
-// names are package-wide. Occurrence facts never authorize marker sites.
-pub fn sema_scope_members_build_marker_registry(graph: SemaRegistrationGraph, module_identity: String, program: Program, catalog: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
+// The retained canonical catalog precedes user-template expansion. Source
+// declarations remain separate, package-wide rules; occurrence facts never
+// authorize marker sites or replace the embedded applied-rule catalog.
+pub fn sema_scope_members_build_marker_registry(graph: SemaRegistrationGraph, module_identity: String, program: Program) -> SemaScopeMembersMarkerRegistry? {
     if !graph.complete -> return None
+    catalog :: graph.applied_rule_catalog
     registry := SemaScopeMembersMarkerRegistry{
         applied_rules: catalog.rows,
         argument_menus: catalog.argument_menus,
@@ -207,21 +211,11 @@ pub fn sema_scope_members_build_marker_registry(graph: SemaRegistrationGraph, mo
 }
 
 fn sema_scope_members_rule_index(registry: SemaScopeMembersMarkerRegistry, name: String) -> Int? {
-    index := 0
-    loop index < registry.marker_rules.len() {
-        if registry.marker_rules[index].name == name -> return Val(index)
-        index += 1
-    }
-    None
+    registry.marker_rule_rows.get(name)
 }
 
 fn sema_scope_members_applied_rule_index(registry: SemaScopeMembersMarkerRegistry, name: String) -> Int? {
-    index := 0
-    loop index < registry.applied_rules.len() {
-        if registry.applied_rules[index].name == name -> return Val(index)
-        index += 1
-    }
-    None
+    registry.applied_rule_rows.get(name)
 }
 
 fn sema_scope_members_has_name(values: [String], name: String) -> Bool Never! {

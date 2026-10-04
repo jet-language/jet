@@ -1,0 +1,148 @@
+// MIROptimization.rs:3787-3911. Projection tokens preserve native enum
+// payload wrapping, including owner*31+variant modulo 2^64.
+enum MIRNativePlaceUse { Read Borrow Move Reinitialize }
+struct MIRNativePlaceUseRow { place: MIRPlaceID, kind: MIRNativePlaceUse }
+fn mir_native_call_arg_consumes(arg: MIRCallArg) -> Bool Never! {
+    !arg.implicit_clone && !arg.shared_auto_clone && (arg.access == .Move || arg.owned_last_use)
+}
+fn mir_native_call_arg_place_use(arg: MIRCallArg) -> MIRNativePlaceUse Never! {
+    if mir_native_call_arg_consumes(arg) -> .Move else if arg.access == .Write -> .Borrow else -> .Read
+}
+fn mir_native_operation_place_uses(operation: MIROperation) -> [MIRNativePlaceUseRow] Never! {
+    uses := [MIRNativePlaceUseRow]{}
+    if operation == {
+        .ReadPlace(place) -> &uses.push(MIRNativePlaceUseRow{place: place, kind: .Read})
+        .MovePlace(place) -> &uses.push(MIRNativePlaceUseRow{place: place, kind: .Move})
+        .InitializeUninit(place) | .WritePlace(place, _) | .ReplacePlace(place, _) -> &uses.push(MIRNativePlaceUseRow{place: place, kind: .Reinitialize})
+        .RawAddressOf(place) | .AddressOf(place, _) -> &uses.push(MIRNativePlaceUseRow{place: place, kind: .Borrow})
+        .Closure(_, captures, _) -> { loop capture in captures { if capture == .Place(place) -> &uses.push(MIRNativePlaceUseRow{place: place, kind: .Borrow}) } }
+        .Semantic(.BuiltinMethod(_, _, .Val(place), _, _)) -> &uses.push(MIRNativePlaceUseRow{place: place, kind: .Borrow})
+        else -> {}
+    }
+    if operation == {
+        .Call(_, args, _) | .CoreCall(_, _, args, _, _, _) | .IndirectCall(_, args, _) | .Semantic(.StaticPreludeCall(_, args, _, _)) | .Semantic(.HardwareCall(_, _, _, args)) | .Semantic(.ClosureMethod(_, args, _)) | .Semantic(.HostCall(_, args)) -> {
+            loop arg in args { if arg.place == .Val(place) -> &uses.push(MIRNativePlaceUseRow{place: place, kind: mir_native_call_arg_place_use(arg)}) }
+        }
+        else -> {}
+    }
+    uses
+}
+struct MIRNativePathNode { parent: Int, children: [String:Int], enter: Int, exit: Int }
+struct MIRNativePathTrie { nodes: [MIRNativePathNode], places: [U64:Int], size: Int }
+fn mir_native_projection_token(projection: MIRProjection) -> String Never! {
+    if projection == {
+        .Field(field, _) -> "0:{field.value}"
+        .Index(kind, index, _, _, _, _, _) -> "{mir_native_index_route_key(kind)}:{index.value}"
+        .Deref(_) -> "6:0"
+        .Payload(kind, _) -> {
+            if kind == {
+                .Option -> "7:0"
+                .Result(ok) -> if ok -> "8:1" else -> "8:0"
+                .Enum(owner, index, _) -> "9:{owner.value.wrapping_mul(U64{31}).wrapping_add(U64{index})}"
+            }
+        }
+        .Range(range, _, _) -> "10:{range.value}"
+    }
+}
+fn mir_native_index_route_key(kind: MIRIndexKind) -> Int Never! {
+    if kind == { .List -> 1, .FixedListProof -> 2, .Map -> 3, .Lane -> 4, .Pool -> 5 }
+}
+fn mir_native_place_root(base: MIRPlaceBase) -> String Never! {
+    if base == {
+        .Local(local) -> "local:{local.value}"
+        .Parameter(value) -> "parameter:{value.value}"
+        .Capture(value) -> "capture:{value.value}"
+        .Temporary(value) -> "temporary:{value.value}"
+        .Static(name) -> "static:{name}"
+    }
+}
+fn mir_native_path_trie(function: MIRFunction) -> MIRNativePathTrie Never! {
+    nodes := [MIRNativePathNode]{}
+    roots := [String:Int]{}
+    places := [U64:Int]{}
+    child_order := [[Int]]{}
+    loop place in function.places {
+        root :: mir_native_place_root(place.base)
+        node := roots.get(root) ?? -1
+        if node < 0 {
+            node = nodes.len()
+            roots[root] = node
+            &nodes.push(MIRNativePathNode{parent: -1, children: [String:Int]{}, enter: -1, exit: -1})
+            &child_order.push([Int]{})
+        }
+        loop projection in place.projections {
+            token :: mir_native_projection_token(projection)
+            child := nodes[node].children.get(token) ?? -1
+            if child < 0 {
+                child = nodes.len()
+                nodes[node].children[token] = child
+                &child_order[node].push(child)
+                &nodes.push(MIRNativePathNode{parent: node, children: [String:Int]{}, enter: -1, exit: -1})
+                &child_order.push([Int]{})
+            }
+            node = child
+        }
+        places[place.id.value] = node
+    }
+    stack := [MIRNativeTrieFrame]{}
+    loop (position, node) in nodes { if node.parent < 0 -> &stack.push(MIRNativeTrieFrame{node: position, exit: false}) }
+    clock := 0
+    loop stack.len() > 0 {
+        frame :: &stack.pop() ?? panic("nonempty path stack")
+        if frame.exit -> nodes[frame.node].exit = clock
+        else {
+            nodes[frame.node].enter = clock
+            clock += 1
+            &stack.push(MIRNativeTrieFrame{node: frame.node, exit: true})
+            loop child in child_order[frame.node] -> &stack.push(MIRNativeTrieFrame{node: child, exit: false})
+        }
+    }
+    MIRNativePathTrie{nodes: nodes, places: places, size: clock}
+}
+struct MIRNativeTrieFrame { node: Int, exit: Bool }
+
+// A persistent sparse range tree is the dominance-path move set. A write to
+// prefix P clears P's entire subtree. A later move at P survives a simultaneous
+// write because writes are applied before moves, matching strict `precedes`.
+// Forks share unchanged nodes: O(events*log(paths)) space/time, not root-event
+// cross products or full facts copies per CFG edge.
+struct MIRNativeMoveNode { left: Int, right: Int, count: Int }
+fn mir_native_move_count(tree: [MIRNativeMoveNode], node: Int) -> Int Never! { if node < 0 -> 0 else -> tree[node].count }
+fn mir_native_move_update(tree: &[MIRNativeMoveNode], node: Int, lo: Int, hi: Int, start: Int, end: Int, insert: Bool) -> Int Never! {
+    if end <= lo || hi <= start -> return node
+    if !insert && start <= lo && hi <= end -> return -1
+    if hi - lo == 1 {
+        if !insert -> return -1
+        result :: tree.len()
+        &tree.push(MIRNativeMoveNode{left: -1, right: -1, count: 1})
+        return result
+    }
+    if !insert && node < 0 -> return -1
+    middle :: lo + (hi - lo) / 2
+    left :: if node < 0 -> -1 else -> tree[node].left
+    right :: if node < 0 -> -1 else -> tree[node].right
+    next_left :: mir_native_move_update(&tree, left, lo, middle, start, end, insert)
+    next_right :: mir_native_move_update(&tree, right, middle, hi, start, end, insert)
+    if next_left == left && next_right == right -> return node
+    count :: mir_native_move_count(tree, next_left) + mir_native_move_count(tree, next_right)
+    if count == 0 -> return -1
+    result :: tree.len()
+    &tree.push(MIRNativeMoveNode{left: next_left, right: next_right, count: count})
+    result
+}
+fn mir_native_move_query(tree: [MIRNativeMoveNode], node: Int, lo: Int, hi: Int, start: Int, end: Int) -> Bool Never! {
+    if node < 0 || end <= lo || hi <= start -> return false
+    if start <= lo && hi <= end -> return tree[node].count > 0
+    middle :: lo + (hi - lo) / 2
+    mir_native_move_query(tree, tree[node].left, lo, middle, start, end) || mir_native_move_query(tree, tree[node].right, middle, hi, start, end)
+}
+fn mir_native_has_live_move(trie: MIRNativePathTrie, tree: [MIRNativeMoveNode], version: Int, node: Int, kind: MIRNativePlaceUse) -> Bool Never! {
+    ancestor := trie.nodes[node].parent
+    loop ancestor >= 0 {
+        at :: trie.nodes[ancestor].enter
+        if mir_native_move_query(tree, version, 0, trie.size, at, at + 1) -> return true
+        ancestor = trie.nodes[ancestor].parent
+    }
+    if kind == .Reinitialize -> return false
+    mir_native_move_query(tree, version, 0, trie.size, trie.nodes[node].enter, trie.nodes[node].exit)
+}

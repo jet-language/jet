@@ -1,0 +1,24 @@
+// CanonicalPass.rs:140-162. Native provider activation/retained file owner is
+// #4494, not an erased resource id or text-path recovery. Open MUST use the
+// compiler's actual process-held authority with create+append (never truncate).
+use core.files.host.retained_descriptor as canonical_pass_files
+use core.sys.host.os_path_ingress as canonical_pass_process_env
+use core.files.runtime.kernel_path_components as canonical_pass_process_path
+
+// Effects are real environment reads followed, only for the selected process,
+// by best-effort native file append. Errors ignored are ONLY open/write errors.
+pub fn canonical_pass_persist_process(process: String) -[Env, FS]> Never! {
+    process_os :: canonical_pass_process_env.var_os("JET_ADAPTER_CANONICAL_PASS_PROCESS") ?? return
+    selected :: canonical_pass_process_path.to_str(process_os) ?? return
+    if selected != process -> return
+    path :: canonical_pass_process_env.var_os("JET_ADAPTER_CANONICAL_PASS_PATH") ?? return
+    records :: canonical_pass_take()
+    if records.len() == 0 -> return
+    payload :: canonical_pass_process_json(process, records)
+    // Drain BEFORE the open: a failed open/write must not restore records.
+    file := canonical_pass_files.open_append_create(path) ?? return
+    bytes :: payload.bytes()
+    _ := canonical_pass_files.write_all(&file, bytes[0..<bytes.len()])
+    // Registered retained owner's drop closes on every exit; no extra flush,
+    // retry, stdout fallback, raw-JSON validation or close error suppression.
+}

@@ -1,0 +1,52 @@
+// Canonical AST's borrowed default-expression provider. The keyed selection is
+// sema_registration_resolve_default (Registration/Items.jet), but the selected
+// expression is written in place instead of being returned/copied.
+use jet_foundation.[CanonicalASTDefaultProvider, FunctionDefaultRef, canonical_ast_write_expression]
+
+impl SemaRegistrationGraph.CanonicalASTDefaultProvider {
+    fn write_default(self, reference: FunctionDefaultRef, out: &[U8]) Never! {
+        if self.callable_rows.get(reference.owner_key) == .Val(row) {
+            if row == {
+                .Function(module_index, index) -> {
+                    if reference.source_file != "" {
+                        source :: sema_source_file_at(self.modules[module_index].source_segments, self.modules[module_index].source_file, self.modules[module_index].source_origin, reference.span)
+                        assert(source == reference.source_file, "canonical default reference must name its registered source")
+                    }
+                    assert(sema_canonical_write_parameter_default(self, self.modules[module_index].functions[index].parameters, reference, &out), "canonical default reference must select a registered default")
+                    return
+                }
+                .NominalMethod(module_index, owner, index) -> {
+                    assert(sema_canonical_write_parameter_default(self, self.modules[module_index].nominals[owner].methods[index].parameters, reference, &out), "canonical default reference must select a registered default")
+                    return
+                }
+                .ImplMethod(module_index, owner, index) -> {
+                    assert(sema_canonical_write_parameter_default(self, self.modules[module_index].impls[owner].methods[index].parameters, reference, &out), "canonical default reference must select a registered default")
+                    return
+                }
+                .Foreign(_, _) -> {}
+            }
+        }
+        loop module_row in self.modules {
+            loop nominal in module_row.nominals {
+                loop method in nominal.trait_methods {
+                    if method.symbol.id.key == reference.owner_key {
+                        assert(sema_canonical_write_parameter_default(self, method.parameters, reference, &out), "canonical default reference must select a registered trait default")
+                        return
+                    }
+                }
+            }
+        }
+        panic("canonical default reference must name a registered callable or trait method")
+    }
+}
+
+fn sema_canonical_write_parameter_default(graph: SemaRegistrationGraph, parameters: [SemaRegistrationParameter], reference: FunctionDefaultRef, out: &[U8]) -> Bool Never! {
+    if reference.parameter_index < 0 || reference.parameter_index >= parameters.len() -> return false
+    parameter :: parameters[reference.parameter_index]
+    if parameter.default_ref != reference -> return false
+    if parameter.default == .Val(expression) {
+        canonical_ast_write_expression<SemaRegistrationGraph>(&out, graph, expression)
+        return true
+    }
+    false
+}

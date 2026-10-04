@@ -1,0 +1,2157 @@
+// PORT-PENDING 0557 crates-jet-comptime-src-comptime-applite-slice-1793: crates/jet-comptime/src/Comptime/AppLite.rs:1793-3945
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn web_int_pairs(
+//RS     value: &CtValue,
+//RS     what: &str,
+//RS     span: Span,
+//RS ) -> Result<Vec<(i64, i64)>, Diagnostic> {
+//RS     let CtValue::List(values) = value else {
+//RS         return Err(unsupported(what, span));
+//RS     };
+//RS     values
+//RS         .iter()
+//RS         .map(|value| {
+//RS             let CtValue::Struct { fields, .. } = value else {
+//RS                 return Err(unsupported(what, span));
+//RS             };
+//RS             let field = |name: &str| {
+//RS                 fields
+//RS                     .iter()
+//RS                     .find(|(field, _)| field == name)
+//RS                     .map(|(_, value)| value)
+//RS             };
+//RS             let index = field("index")
+//RS                 .or_else(|| fields.first().map(|(_, value)| value))
+//RS                 .ok_or_else(|| unsupported(what, span))?;
+//RS             let size = field("size")
+//RS                 .or_else(|| fields.get(1).map(|(_, value)| value))
+//RS                 .ok_or_else(|| unsupported(what, span))?;
+//RS             Ok((
+//RS                 web_int(index, "measurement index", span)?,
+//RS                 web_int(size, "measurement size", span)?,
+//RS             ))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn web_string_map(
+//RS     value: &CtValue,
+//RS     what: &str,
+//RS     span: Span,
+//RS ) -> Result<std::collections::BTreeMap<String, String>, Diagnostic> {
+//RS     let CtValue::Map(values) = value else {
+//RS         return Err(unsupported(what, span));
+//RS     };
+//RS     values
+//RS         .iter()
+//RS         .map(|(key, value)| {
+//RS             let CtKey::Str(key) = key else {
+//RS                 return Err(unsupported(what, span));
+//RS             };
+//RS             Ok((key.clone(), web_string(value, what, span)?))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn web_string_map_value(values: std::collections::BTreeMap<String, String>) -> CtValue {
+//RS     CtValue::Map(
+//RS         values
+//RS             .into_iter()
+//RS             .map(|(key, value)| (CtKey::Str(key), CtValue::Str(value)))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS fn web_navigation(value: web_kernel::JetWebNavigation) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "WebNavigation".to_string(),
+//RS         fields: vec![
+//RS             ("url".to_string(), CtValue::Str(value.url)),
+//RS             ("route".to_string(), CtValue::Str(value.route)),
+//RS             ("params".to_string(), web_string_map_value(value.params)),
+//RS             ("search".to_string(), web_string_map_value(value.search)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn web_navigation_status(value: web_kernel::JetWebNavigationStatus) -> CtValue {
+//RS     let variant = match value {
+//RS         web_kernel::JetWebNavigationStatus::Idle => "Idle",
+//RS         web_kernel::JetWebNavigationStatus::Preloading => "Preloading",
+//RS         web_kernel::JetWebNavigationStatus::Pending => "Pending",
+//RS         web_kernel::JetWebNavigationStatus::Ready => "Ready",
+//RS         web_kernel::JetWebNavigationStatus::Error => "Error",
+//RS         web_kernel::JetWebNavigationStatus::Aborted => "Aborted",
+//RS     };
+//RS     CtValue::Enum {
+//RS         type_name: "WebNavigationStatus".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn web_optional_string(value: Option<String>) -> CtValue {
+//RS     value
+//RS         .map(CtValue::Str)
+//RS         .map(|value| CtValue::Present(Box::new(value)))
+//RS         .unwrap_or_else(|| CtValue::absent(Type::String))
+//RS }
+//RS 
+//RS fn web_navigation_state(value: web_kernel::JetWebNavigationState) -> CtValue {
+//RS     let pending_boundary_id = value
+//RS         .pending_boundary_id
+//RS         .map(|boundary| boundary.as_str().to_string());
+//RS     let error_boundary_id = value
+//RS         .error_boundary_id
+//RS         .map(|boundary| boundary.as_str().to_string());
+//RS     let island_identity = value.island_identity.map(|identity| identity.compact());
+//RS     let hydration_trigger = value
+//RS         .hydration_trigger
+//RS         .map(|trigger| trigger.as_str().to_string());
+//RS     CtValue::Struct {
+//RS         type_name: "WebNavigationState".to_string(),
+//RS         fields: vec![
+//RS             ("status".to_string(), web_navigation_status(value.status)),
+//RS             (
+//RS                 "current".to_string(),
+//RS                 value
+//RS                     .current
+//RS                     .map(web_navigation)
+//RS                     .map(|value| CtValue::Present(Box::new(value)))
+//RS                     .unwrap_or_else(|| CtValue::absent(Type::Named("WebNavigation".to_string()))),
+//RS             ),
+//RS             ("data".to_string(), CtValue::Str(value.data)),
+//RS             ("error".to_string(), CtValue::Str(value.error)),
+//RS             ("pending_boundary_id".to_string(), web_optional_string(pending_boundary_id)),
+//RS             ("error_boundary_id".to_string(), web_optional_string(error_boundary_id)),
+//RS             ("island_identity".to_string(), web_optional_string(island_identity)),
+//RS             ("hydration_trigger".to_string(), web_optional_string(hydration_trigger)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn web_query_status(value: web_kernel::JetWebQueryStatus) -> CtValue {
+//RS     let variant = match value {
+//RS         web_kernel::JetWebQueryStatus::Pending => "Pending",
+//RS         web_kernel::JetWebQueryStatus::Fresh => "Fresh",
+//RS         web_kernel::JetWebQueryStatus::Stale => "Stale",
+//RS         web_kernel::JetWebQueryStatus::Fetching => "Fetching",
+//RS         web_kernel::JetWebQueryStatus::Error => "Error",
+//RS         web_kernel::JetWebQueryStatus::Offline => "Offline",
+//RS     };
+//RS     CtValue::Enum {
+//RS         type_name: "WebQueryStatus".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn web_query_state(value: web_kernel::JetWebQueryState) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "WebQueryState".to_string(),
+//RS         fields: vec![
+//RS             ("status".to_string(), web_query_status(value.status)),
+//RS             ("value".to_string(), CtValue::Str(value.value)),
+//RS             ("error".to_string(), CtValue::Str(value.error)),
+//RS             ("generation".to_string(), CtValue::Int(value.generation as i64)),
+//RS             ("queued".to_string(), CtValue::Int(value.queued as i64)),
+//RS             ("offline".to_string(), CtValue::Bool(value.offline)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn web_router_value_type(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<web_kernel::JetWebRouterValueType, Diagnostic> {
+//RS     let CtValue::Enum { type_name, variant, .. } = value else {
+//RS         return Err(unsupported("WebRouterValueType", span));
+//RS     };
+//RS     if type_name != "WebRouterValueType" {
+//RS         return Err(unsupported("WebRouterValueType", span));
+//RS     }
+//RS     match variant.as_str() {
+//RS         "String" => Ok(web_kernel::JetWebRouterValueType::String),
+//RS         "Int" => Ok(web_kernel::JetWebRouterValueType::Int),
+//RS         "Bool" => Ok(web_kernel::JetWebRouterValueType::Bool),
+//RS         "Float" => Ok(web_kernel::JetWebRouterValueType::Float),
+//RS         "JSON" => Ok(web_kernel::JetWebRouterValueType::Json),
+//RS         _ => Err(unsupported("WebRouterValueType", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn web_router_codec(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<web_kernel::JetWebRouterSearchCodec, Diagnostic> {
+//RS     let CtValue::Enum { type_name, variant, .. } = value else {
+//RS         return Err(unsupported("WebRouterSearchCodec", span));
+//RS     };
+//RS     if type_name != "WebRouterSearchCodec" {
+//RS         return Err(unsupported("WebRouterSearchCodec", span));
+//RS     }
+//RS     match variant.as_str() {
+//RS         "Query" => Ok(web_kernel::JetWebRouterSearchCodec::Query),
+//RS         "JSON" => Ok(web_kernel::JetWebRouterSearchCodec::Json),
+//RS         _ => Err(unsupported("WebRouterSearchCodec", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn web_optional_string_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<Option<String>, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Present(value) => Ok(Some(web_string(value, "router field default", span)?)),
+//RS         CtValue::Failed(jet_foundation::AST::CtReport::Clean(_)) => Ok(None),
+//RS         _ => Err(unsupported("router field default", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn web_router_fields(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<Vec<web_kernel::JetWebRouterField>, Diagnostic> {
+//RS     let CtValue::List(values) = value else {
+//RS         return Err(unsupported("WebRouterField list", span));
+//RS     };
+//RS     values
+//RS         .iter()
+//RS         .map(|value| {
+//RS             let CtValue::Struct { type_name, fields } = value else {
+//RS                 return Err(unsupported("WebRouterField", span));
+//RS             };
+//RS             if type_name != "WebRouterField" {
+//RS                 return Err(unsupported("WebRouterField", span));
+//RS             }
+//RS             let field = |name: &str| {
+//RS                 fields
+//RS                     .iter()
+//RS                     .find(|(field, _)| field == name)
+//RS                     .map(|(_, value)| value)
+//RS             };
+//RS             let name = web_string(
+//RS                 field("name").ok_or_else(|| unsupported("WebRouterField.name", span))?,
+//RS                 "WebRouterField.name",
+//RS                 span,
+//RS             )?;
+//RS             let value_type = web_router_value_type(
+//RS                 field("value_type")
+//RS                     .ok_or_else(|| unsupported("WebRouterField.value_type", span))?,
+//RS                 span,
+//RS             )?;
+//RS             let required = web_bool(
+//RS                 field("required")
+//RS                     .ok_or_else(|| unsupported("WebRouterField.required", span))?,
+//RS                 "WebRouterField.required",
+//RS                 span,
+//RS             )?;
+//RS             let default = web_optional_string_value(
+//RS                 field("default")
+//RS                     .ok_or_else(|| unsupported("WebRouterField.default", span))?,
+//RS                 span,
+//RS             )?;
+//RS             Ok(web_kernel::JetWebRouterField {
+//RS                 name,
+//RS                 value_type,
+//RS                 required,
+//RS                 default,
+//RS             })
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn web_mutation_state(value: web_kernel::JetWebMutationState) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "WebMutationState".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "status".to_string(),
+//RS                 CtValue::Enum {
+//RS                     type_name: "WebMutationStatus".to_string(),
+//RS                     variant: value.status.name().to_string(),
+//RS                     args: Vec::new(),
+//RS                 },
+//RS             ),
+//RS             ("generation".to_string(), CtValue::Int(value.generation as i64)),
+//RS             ("optimistic".to_string(), CtValue::Bool(value.optimistic)),
+//RS             ("value".to_string(), CtValue::Str(value.value)),
+//RS             ("result".to_string(), CtValue::Str(value.result)),
+//RS             ("error".to_string(), CtValue::Str(value.error)),
+//RS             ("context".to_string(), CtValue::Str(value.context)),
+//RS             ("rollback".to_string(), CtValue::Bool(value.rollback)),
+//RS             ("paused".to_string(), CtValue::Bool(value.paused)),
+//RS             ("queued".to_string(), CtValue::Int(value.queued as i64)),
+//RS             ("replayed".to_string(), CtValue::Int(value.replayed as i64)),
+//RS         ],
+//RS     }
+//RS }
+//RS fn web_query_mode(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<web_kernel::JetWebQueryNetworkMode, Diagnostic> {
+//RS     let CtValue::Enum {
+//RS         type_name,
+//RS         variant,
+//RS         ..
+//RS     } = value
+//RS     else {
+//RS         return Err(unsupported("WebQueryNetworkMode", span));
+//RS     };
+//RS     if type_name != "WebQueryNetworkMode" {
+//RS         return Err(unsupported("WebQueryNetworkMode", span));
+//RS     }
+//RS     match variant.as_str() {
+//RS         "Online" => Ok(web_kernel::JetWebQueryNetworkMode::Online),
+//RS         "Always" => Ok(web_kernel::JetWebQueryNetworkMode::Always),
+//RS         "OfflineFirst" => Ok(web_kernel::JetWebQueryNetworkMode::OfflineFirst),
+//RS         _ => Err(unsupported("WebQueryNetworkMode", span)),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn web_virtual_window(value: web_kernel::JetWebVirtualWindow) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "WebVirtualWindow".to_string(),
+//RS         fields: vec![
+//RS             ("total_count".to_string(), CtValue::Int(value.total_count)),
+//RS             ("scroll_offset".to_string(), CtValue::Int(value.scroll_offset)),
+//RS             ("viewport_size".to_string(), CtValue::Int(value.viewport_size)),
+//RS             (
+//RS                 "estimated_item_size".to_string(),
+//RS                 CtValue::Int(value.estimated_item_size),
+//RS             ),
+//RS             ("overscan".to_string(), CtValue::Int(value.overscan)),
+//RS             ("start".to_string(), CtValue::Int(value.start)),
+//RS             ("end".to_string(), CtValue::Int(value.end)),
+//RS             ("total_size".to_string(), CtValue::Int(value.total_size)),
+//RS             ("measured_count".to_string(), CtValue::Int(value.measured_count)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn web_virtual_window_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<web_kernel::JetWebVirtualWindow, Diagnostic> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return Err(unsupported("WebVirtualWindow", span));
+//RS     };
+//RS     if type_name != "WebVirtualWindow" {
+//RS         return Err(unsupported("WebVirtualWindow", span));
+//RS     }
+//RS     let field = |name: &str| {
+//RS         fields
+//RS             .iter()
+//RS             .find(|(field, _)| field == name)
+//RS             .map(|(_, value)| value)
+//RS             .ok_or_else(|| unsupported("WebVirtualWindow field", span))
+//RS     };
+//RS     Ok(web_kernel::JetWebVirtualWindow {
+//RS         total_count: web_int(field("total_count")?, "total_count", span)?,
+//RS         scroll_offset: web_int(field("scroll_offset")?, "scroll_offset", span)?,
+//RS         viewport_size: web_int(field("viewport_size")?, "viewport_size", span)?,
+//RS         estimated_item_size: web_int(field("estimated_item_size")?, "estimated_item_size", span)?,
+//RS         overscan: web_int(field("overscan")?, "overscan", span)?,
+//RS         start: web_int(field("start")?, "start", span)?,
+//RS         end: web_int(field("end")?, "end", span)?,
+//RS         total_size: web_int(field("total_size")?, "total_size", span)?,
+//RS         measured_count: web_int(field("measured_count")?, "measured_count", span)?,
+//RS     })
+//RS }
+//RS 
+//RS fn web_virtual_plan(value: web_kernel::JetWebVirtualPlan) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "WebVirtualPlan".to_string(),
+//RS         fields: vec![
+//RS             ("total_count".to_string(), CtValue::Int(value.total_count)),
+//RS             ("scroll_offset".to_string(), CtValue::Int(value.scroll_offset)),
+//RS             ("viewport_width".to_string(), CtValue::Int(value.viewport_width)),
+//RS             ("viewport_height".to_string(), CtValue::Int(value.viewport_height)),
+//RS             (
+//RS                 "estimated_item_size".to_string(),
+//RS                 CtValue::Int(value.estimated_item_size),
+//RS             ),
+//RS             ("overscan".to_string(), CtValue::Int(value.overscan)),
+//RS             ("start".to_string(), CtValue::Int(value.start)),
+//RS             ("end".to_string(), CtValue::Int(value.end)),
+//RS             ("total_size".to_string(), CtValue::Int(value.total_size)),
+//RS             ("measured_count".to_string(), CtValue::Int(value.measured_count)),
+//RS             ("anchor_index".to_string(), CtValue::Int(value.anchor_index)),
+//RS             ("anchor_offset".to_string(), CtValue::Int(value.anchor_offset)),
+//RS             (
+//RS                 "measurements".to_string(),
+//RS                 CtValue::List(
+//RS                     value
+//RS                         .measurements
+//RS                         .into_iter()
+//RS                         .map(|(index, size)| CtValue::Struct {
+//RS                             type_name: "WebVirtualMeasurement".to_string(),
+//RS                             fields: vec![
+//RS                                 ("index".to_string(), CtValue::Int(index)),
+//RS                                 ("size".to_string(), CtValue::Int(size)),
+//RS                             ],
+//RS                         })
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn web_virtual_plan_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<web_kernel::JetWebVirtualPlan, Diagnostic> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return Err(unsupported("WebVirtualPlan", span));
+//RS     };
+//RS     if type_name != "WebVirtualPlan" {
+//RS         return Err(unsupported("WebVirtualPlan", span));
+//RS     }
+//RS     let field = |name: &str| {
+//RS         fields
+//RS             .iter()
+//RS             .find(|(field, _)| field == name)
+//RS             .map(|(_, value)| value)
+//RS             .ok_or_else(|| unsupported("WebVirtualPlan field", span))
+//RS     };
+//RS     let CtValue::List(values) = field("measurements")? else {
+//RS         return Err(unsupported("WebVirtualPlan measurements", span));
+//RS     };
+//RS     let mut measurements = Vec::with_capacity(values.len());
+//RS     for value in values {
+//RS         let CtValue::Struct { type_name, fields } = value else {
+//RS             return Err(unsupported("WebVirtualMeasurement", span));
+//RS         };
+//RS         if type_name != "WebVirtualMeasurement" && type_name != "tuple" {
+//RS             return Err(unsupported("WebVirtualMeasurement", span));
+//RS         }
+//RS         let field_value = |name: &str| {
+//RS             fields
+//RS                 .iter()
+//RS                 .find(|(field, _)| field == name)
+//RS                 .map(|(_, value)| value)
+//RS         };
+//RS         let index = field_value("index")
+//RS             .or_else(|| fields.first().map(|(_, value)| value))
+//RS             .ok_or_else(|| unsupported("WebVirtualMeasurement index", span))?;
+//RS         let size = field_value("size")
+//RS             .or_else(|| fields.get(1).map(|(_, value)| value))
+//RS             .ok_or_else(|| unsupported("WebVirtualMeasurement size", span))?;
+//RS         measurements.push((
+//RS             web_int(index, "measurement index", span)?,
+//RS             web_int(size, "measurement size", span)?,
+//RS         ));
+//RS     }
+//RS     Ok(web_kernel::JetWebVirtualPlan {
+//RS         total_count: web_int(field("total_count")?, "total_count", span)?,
+//RS         scroll_offset: web_int(field("scroll_offset")?, "scroll_offset", span)?,
+//RS         viewport_width: web_int(field("viewport_width")?, "viewport_width", span)?,
+//RS         viewport_height: web_int(field("viewport_height")?, "viewport_height", span)?,
+//RS         estimated_item_size: web_int(
+//RS             field("estimated_item_size")?,
+//RS             "estimated_item_size",
+//RS             span,
+//RS         )?,
+//RS         overscan: web_int(field("overscan")?, "overscan", span)?,
+//RS         start: web_int(field("start")?, "start", span)?,
+//RS         end: web_int(field("end")?, "end", span)?,
+//RS         total_size: web_int(field("total_size")?, "total_size", span)?,
+//RS         measured_count: web_int(field("measured_count")?, "measured_count", span)?,
+//RS         anchor_index: web_int(field("anchor_index")?, "anchor_index", span)?,
+//RS         anchor_offset: web_int(field("anchor_offset")?, "anchor_offset", span)?,
+//RS         measurements,
+//RS     })
+//RS }
+//RS 
+//RS fn web_table_direction(value: web_kernel::JetWebTableSortDirection) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: "WebTableSortDirection".to_string(),
+//RS         variant: if matches!(
+//RS             value,
+//RS             web_kernel::JetWebTableSortDirection::Descending
+//RS         ) {
+//RS             "Descending".to_string()
+//RS         } else {
+//RS             "Ascending".to_string()
+//RS         },
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn web_table_page_mode(value: web_kernel::JetWebTablePageMode) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: "WebTablePageMode".to_string(),
+//RS         variant: if matches!(value, web_kernel::JetWebTablePageMode::Server) {
+//RS             "Server".to_string()
+//RS         } else {
+//RS             "Client".to_string()
+//RS         },
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn web_table_state(value: web_kernel::JetWebTableState) -> CtValue {
+//RS     let sort = value
+//RS         .sort
+//RS         .map(|sort| {
+//RS             CtValue::Present(Box::new(CtValue::Struct {
+//RS                 type_name: "WebTableSort".to_string(),
+//RS                 fields: vec![
+//RS                     ("column".to_string(), CtValue::Str(sort.column)),
+//RS                     ("direction".to_string(), web_table_direction(sort.direction)),
+//RS                 ],
+//RS             }))
+//RS         })
+//RS         .unwrap_or_else(|| CtValue::absent(Type::Named("WebTableSort".to_string())));
+//RS     let filter = value
+//RS         .filter
+//RS         .map(|filter| {
+//RS             CtValue::Present(Box::new(CtValue::Struct {
+//RS                 type_name: "WebTableFilter".to_string(),
+//RS                 fields: vec![
+//RS                     ("column".to_string(), CtValue::Str(filter.column)),
+//RS                     ("value".to_string(), CtValue::Str(filter.value)),
+//RS                 ],
+//RS             }))
+//RS         })
+//RS         .unwrap_or_else(|| CtValue::absent(Type::Named("WebTableFilter".to_string())));
+//RS     let selection_anchor = value
+//RS         .selection_anchor
+//RS         .map(CtValue::Str)
+//RS         .map(|value| CtValue::Present(Box::new(value)))
+//RS         .unwrap_or_else(|| CtValue::absent(Type::String));
+//RS     CtValue::Struct {
+//RS         type_name: "WebTableState".to_string(),
+//RS         fields: vec![
+//RS             ("sort".to_string(), sort),
+//RS             ("filter".to_string(), filter),
+//RS             ("page_index".to_string(), CtValue::Int(value.page_index)),
+//RS             ("page_size".to_string(), CtValue::Int(value.page_size)),
+//RS             (
+//RS                 "selected_keys".to_string(),
+//RS                 CtValue::List(value.selected_keys.into_iter().map(CtValue::Str).collect()),
+//RS             ),
+//RS             ("selection_anchor".to_string(), selection_anchor),
+//RS             ("page_mode".to_string(), web_table_page_mode(value.page_mode)),
+//RS         ],
+//RS     }
+//RS }
+//RS fn web_table_page(value: web_kernel::JetWebTablePage<CtValue>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "WebTablePage".to_string(),
+//RS         fields: vec![
+//RS             ("rows".to_string(), CtValue::List(value.rows)),
+//RS             (
+//RS                 "row_keys".to_string(),
+//RS                 CtValue::List(value.row_keys.into_iter().map(CtValue::Str).collect()),
+//RS             ),
+//RS             ("total_rows".to_string(), CtValue::Int(value.total_rows)),
+//RS             ("page_index".to_string(), CtValue::Int(value.page_index)),
+//RS             ("page_size".to_string(), CtValue::Int(value.page_size)),
+//RS             ("page_count".to_string(), CtValue::Int(value.page_count)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS fn web_table_direction_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<web_kernel::JetWebTableSortDirection, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Enum { variant, .. } if variant == "Descending" => {
+//RS             Ok(web_kernel::JetWebTableSortDirection::Descending)
+//RS         }
+//RS         CtValue::Enum { variant, .. } if variant == "Ascending" => {
+//RS             Ok(web_kernel::JetWebTableSortDirection::Ascending)
+//RS         }
+//RS         _ => Err(unsupported("WebTableSortDirection", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn web_table_page_value(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<web_kernel::JetWebTablePage<CtValue>, Diagnostic> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return Err(unsupported("WebTablePage", span));
+//RS     };
+//RS     if type_name != "WebTablePage" {
+//RS         return Err(unsupported("WebTablePage", span));
+//RS     }
+//RS     let field = |name: &str| {
+//RS         fields
+//RS             .iter()
+//RS             .find(|(field, _)| field == name)
+//RS             .map(|(_, value)| value)
+//RS             .ok_or_else(|| unsupported("WebTablePage field", span))
+//RS     };
+//RS     let CtValue::List(rows) = field("rows")? else {
+//RS         return Err(unsupported("WebTablePage rows", span));
+//RS     };
+//RS     let row_keys = web_strings(field("row_keys")?, "WebTablePage row_keys", span)?;
+//RS     Ok(web_kernel::JetWebTablePage {
+//RS         rows: rows.clone(),
+//RS         row_keys,
+//RS         total_rows: web_int(field("total_rows")?, "total_rows", span)?,
+//RS         page_index: web_int(field("page_index")?, "page_index", span)?,
+//RS         page_size: web_int(field("page_size")?, "page_size", span)?,
+//RS         page_count: web_int(field("page_count")?, "page_count", span)?,
+//RS     })
+//RS }
+//RS 
+//RS fn web_table_rows(value: Vec<web_kernel::JetWebTableRow<CtValue>>) -> CtValue {
+//RS     CtValue::List(
+//RS         value
+//RS             .into_iter()
+//RS             .map(|row| CtValue::Struct {
+//RS                 type_name: "WebTableRow".to_string(),
+//RS                 fields: vec![
+//RS                     ("key".to_string(), CtValue::Str(row.key)),
+//RS                     ("value".to_string(), row.value),
+//RS                 ],
+//RS             })
+//RS             .collect(),
+//RS     )
+//RS }
+//RS fn web_store_transaction(value: web_kernel::JetWebStoreTransaction<CtValue>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "WebStoreTransaction".to_string(),
+//RS         fields: vec![
+//RS             ("generation".to_string(), CtValue::Int(value.generation as i64)),
+//RS             ("action".to_string(), CtValue::Str(value.action)),
+//RS             (
+//RS                 "changed_fields".to_string(),
+//RS                 CtValue::List(value.changed_fields.into_iter().map(CtValue::Str).collect()),
+//RS             ),
+//RS             ("before".to_string(), value.before),
+//RS             ("after".to_string(), value.after),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn web_store_event(value: web_kernel::JetWebStoreEvent) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "WebStoreEvent".to_string(),
+//RS         fields: vec![
+//RS             ("sequence".to_string(), CtValue::Int(value.sequence as i64)),
+//RS             ("generation".to_string(), CtValue::Int(value.generation as i64)),
+//RS             ("action".to_string(), CtValue::Str(value.action)),
+//RS             ("changed_fields".to_string(), CtValue::List(
+//RS                 value.changed_fields.into_iter().map(CtValue::Str).collect(),
+//RS             )),
+//RS             ("cursor".to_string(), CtValue::Int(value.cursor as i64)),
+//RS             ("kind".to_string(), CtValue::Enum {
+//RS                 type_name: "WebStoreEventKind".to_string(),
+//RS                 variant: match value.kind {
+//RS                     web_kernel::JetWebStoreEventKind::Transaction => "Transaction",
+//RS                     web_kernel::JetWebStoreEventKind::Navigation => "Navigation",
+//RS                     web_kernel::JetWebStoreEventKind::Rollback => "Rollback",
+//RS                 }.to_string(),
+//RS                 args: Vec::new(),
+//RS             }),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn web_store_inspection(value: web_kernel::JetWebStoreInspection<CtValue>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "WebStoreInspection".to_string(),
+//RS         fields: vec![
+//RS             ("value".to_string(), value.value),
+//RS             ("generation".to_string(), CtValue::Int(value.generation as i64)),
+//RS             ("cursor".to_string(), CtValue::Int(value.cursor as i64)),
+//RS             ("history".to_string(), CtValue::List(
+//RS                 value.history.into_iter().map(web_store_transaction).collect(),
+//RS             )),
+//RS             ("events".to_string(), CtValue::List(
+//RS                 value.events.into_iter().map(web_store_event).collect(),
+//RS             )),
+//RS             ("history_limit".to_string(), CtValue::Int(value.history_limit as i64)),
+//RS             ("history_enabled".to_string(), CtValue::Bool(value.history_enabled)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn web_optional_value(
+//RS     value: Option<CtValue>,
+//RS     result_type: Option<&Type>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     match value {
+//RS         Some(value) => Ok(CtValue::Present(Box::new(value))),
+//RS         None => match result_type {
+//RS             Some(Type::Option(element)) => Ok(CtValue::absent((**element).clone())),
+//RS             _ => Err(unsupported("Web optional result requires its checked element type", span)),
+//RS         },
+//RS     }
+//RS }
+//RS /// Install the folded release-policy projection for the current interpreter
+//RS /// invocation. Kernel callbacks consult this shared context instead of the
+//RS /// compiler's build profile. Dropping the guard restores the enclosing
+//RS /// invocation's policy.
+//RS pub struct WebRuntimePolicyGuard {
+//RS     previous: (bool, bool),
+//RS }
+//RS 
+//RS impl Drop for WebRuntimePolicyGuard {
+//RS     fn drop(&mut self) {
+//RS         WEB_RUNTIME_POLICY.with(|policy| policy.set(self.previous));
+//RS     }
+//RS }
+//RS 
+//RS pub fn set_web_runtime_policy(
+//RS     devtools_enabled: bool,
+//RS     history_enabled: bool,
+//RS ) -> WebRuntimePolicyGuard {
+//RS     let previous = WEB_RUNTIME_POLICY.with(|policy| {
+//RS         policy.replace((devtools_enabled, history_enabled))
+//RS     });
+//RS     WebRuntimePolicyGuard { previous }
+//RS }
+//RS 
+//RS pub fn apply_suite_with_policy(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS     devtools_enabled: bool,
+//RS     history_enabled: bool,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let _policy_guard = set_web_runtime_policy(devtools_enabled, history_enabled);
+//RS     apply_suite(module, method, args, span, None)
+//RS }
+//RS 
+//RS 
+//RS fn web_result(
+//RS     value: Result<CtValue, String>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     Ok(match value {
+//RS         Ok(value) => CtValue::Present(Box::new(value)),
+//RS         Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn callback_result(value: CtValue, span: Span) -> Result<CtValue, CtValue> {
+//RS     match value {
+//RS         CtValue::Present(value) => Ok(*value),
+//RS         CtValue::Failed(jet_foundation::AST::CtReport::Told(value)) => Err(*value),
+//RS         _ => std::panic::panic_any(unsupported("checked web callback outcome", span)),
+//RS     }
+//RS }
+//RS 
+//RS /// The Web kernels currently store callback failures as text. Keep the
+//RS /// canonical default `Err` carrier intact until this one documented boundary.
+//RS fn callback_result_for_kernel(value: CtValue, span: Span) -> Result<CtValue, String> {
+//RS     callback_result(value, span).map_err(|error| {
+//RS         let error = error
+//RS             .to_jet_err()
+//RS             .unwrap_or_else(|| std::panic::panic_any(unsupported("web callback default Err report", span)));
+//RS         jet_foundation::Outcome::jet_err_message(&error)
+//RS     })
+//RS }
+//RS 
+//RS fn callback_result_string(value: CtValue, span: Span) -> Result<String, String> {
+//RS     callback_result_for_kernel(value, span).map(|value| match value {
+//RS         CtValue::Str(value) => value,
+//RS         _ => std::panic::panic_any(unsupported("web callback String payload", span)),
+//RS     })
+//RS }
+//RS 
+//RS fn callback_result_unit(value: CtValue, span: Span) -> Result<(), String> {
+//RS     callback_result_for_kernel(value, span).map(|value| match value {
+//RS         CtValue::Unit => (),
+//RS         _ => std::panic::panic_any(unsupported("web callback Unit payload", span)),
+//RS     })
+//RS }
+//RS 
+//RS /// Interpreter/comptime adapter for the six headless first-party web modules.
+//RS /// The kernel files above are the only owners of their state transitions;
+//RS /// these branches only marshal CtValue handles and records.
+//RS pub fn apply_suite(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS     result_type: Option<&Type>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let one = |index: usize| {
+//RS         args.get(index)
+//RS             .ok_or_else(|| unsupported(&format!("{module}.{method} argument {index}"), span))
+//RS     };
+//RS     match (module, method) {
+//RS         ("core.reactive", "effect") => {
+//RS             let callback = one(0)?.clone();
+//RS             Ok(opaque_web(web_kernel::jet_reactive_effect(move || {
+//RS                 super::Methods::invoke_standalone_closure(&callback, Vec::new(), span)
+//RS                     .unwrap_or_else(|error| std::panic::panic_any(error));
+//RS             })))
+//RS         }
+//RS         ("core.ui", "reactive_render") => {
+//RS             let callback = one(0)?.clone();
+//RS             web_kernel::jet_reactive_effect_rooted(move || {
+//RS                 super::Methods::invoke_standalone_closure(&callback, Vec::new(), span)
+//RS                     .unwrap_or_else(|error| std::panic::panic_any(error));
+//RS             });
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("core.reactive", "signal") => Ok(opaque_web(
+//RS             web_kernel::JetSignal::new(one(0)?.clone()),
+//RS         )),
+//RS         ("core.reactive", "derived" | "computed") => {
+//RS             let callback = one(0)?.clone();
+//RS             Ok(opaque_web(web_kernel::JetDerived::new(move || {
+//RS                 super::Methods::invoke_standalone_closure(&callback, Vec::new(), span)
+//RS                     .unwrap_or_else(|error| std::panic::panic_any(error))
+//RS             })))
+//RS         }
+//RS         // D-WEBAPP1=D: the same Prelude page constructor AOT and the JIT call;
+//RS         // the record shape is what `callback_page` reads back at the route edge.
+//RS         ("core.web", "page") => {
+//RS             let title = web_string(one(0)?, "page title", span)?;
+//RS             let body = web_string(one(1)?, "page body", span)?;
+//RS             let page = web_kernel::jet_web_page(title, body);
+//RS             Ok(CtValue::Struct {
+//RS                 type_name: "WebPage".to_string(),
+//RS                 fields: vec![
+//RS                     ("title".to_string(), CtValue::Str(page.title)),
+//RS                     ("body".to_string(), CtValue::Str(page.body)),
+//RS                 ],
+//RS             })
+//RS         }
+//RS         ("core.web.router", "new") => {
+//RS             Ok(opaque_web(WebRouterHandle(web_kernel::jet_web_router_new())))
+//RS         }
+//RS         ("core.web.router", "route") => {
+//RS             let router = web_router(one(0)?, span)?;
+//RS             let pattern = web_string(one(1)?, "router pattern", span)?;
+//RS             let params = web_router_fields(one(2)?, span)?;
+//RS             let search = web_router_fields(one(3)?, span)?;
+//RS             let callback = one(4)?.clone();
+//RS             web_result(
+//RS                 web_kernel::jet_web_router_route(
+//RS                     router,
+//RS                     pattern,
+//RS                     params,
+//RS                     search,
+//RS                     move |navigation| {
+//RS                         let value = super::Methods::invoke_standalone_closure(
+//RS                             &callback,
+//RS                             vec![web_navigation(navigation.clone())],
+//RS                             span,
+//RS                         )
+//RS                         .unwrap_or_else(|error| std::panic::panic_any(error));
+//RS                         callback_result_string(value, span)
+//RS                     },
+//RS                 )
+//RS                 .map(|router| opaque_web(WebRouterHandle(router))),
+//RS             )
+//RS         }
+//RS         ("core.web.router", "route_with_search_codec") => {
+//RS             let router = web_router(one(0)?, span)?;
+//RS             let pattern = web_string(one(1)?, "router pattern", span)?;
+//RS             let params = web_router_fields(one(2)?, span)?;
+//RS             let search = web_router_fields(one(3)?, span)?;
+//RS             let codec = web_router_codec(one(4)?, span)?;
+//RS             let callback = one(5)?.clone();
+//RS             web_result(
+//RS                 web_kernel::jet_web_router_route_with_search_codec(
+//RS                     router,
+//RS                     pattern,
+//RS                     params,
+//RS                     search,
+//RS                     codec,
+//RS                     move |navigation| {
+//RS                         let value = super::Methods::invoke_standalone_closure(
+//RS                             &callback,
+//RS                             vec![web_navigation(navigation.clone())],
+//RS                             span,
+//RS                         )
+//RS                         .unwrap_or_else(|error| std::panic::panic_any(error));
+//RS                         callback_result_string(value, span)
+//RS                     },
+//RS                 )
+//RS                 .map(|router| opaque_web(WebRouterHandle(router))),
+//RS             )
+//RS         }
+//RS         ("core.web.router", "not_found") => {
+//RS             let router = web_router(one(0)?, span)?;
+//RS             let callback = one(1)?.clone();
+//RS             web_result(
+//RS                 web_kernel::jet_web_router_not_found(router, move |path| {
+//RS                     super::Methods::invoke_standalone_closure(
+//RS                         &callback,
+//RS                         vec![CtValue::Str(path.to_string())],
+//RS                         span,
+//RS                     )
+//RS                     .map_err(|_| "router not_found callback failed".to_string())
+//RS                     .and_then(|value| callback_result_string(value, span))
+//RS                     .unwrap_or_else(|error| {
+//RS                         format!("router not_found callback failed: {error}")
+//RS                     })
+//RS                 })
+//RS                 .map(|router| opaque_web(WebRouterHandle(router))),
+//RS             )
+//RS         }
+//RS         ("core.web.router", "navigate" | "preload") => {
+//RS             let router = web_router(one(0)?, span)?;
+//RS             let url = web_string(one(1)?, "router URL", span)?;
+//RS             let result = if method == "navigate" {
+//RS                 web_kernel::jet_web_router_navigate(router, url)
+//RS             } else {
+//RS                 web_kernel::jet_web_router_preload(router, url)
+//RS             };
+//RS             web_result(result.map(web_navigation))
+//RS         }
+//RS         ("core.web.router", "current") => {
+//RS             Ok(web_navigation_state(web_kernel::jet_web_router_current(
+//RS                 web_router(one(0)?, span)?,
+//RS             )))
+//RS         }
+//RS         ("core.web.router", "show") => Ok(CtValue::Str(
+//RS             web_kernel::jet_web_router_show(web_router(one(0)?, span)?),
+//RS         )),
+//RS         ("core.web.router", "link") => {
+//RS             let router = web_router(one(0)?, span)?;
+//RS             let pattern = web_string(one(1)?, "router pattern", span)?;
+//RS             let params = web_string_map(one(2)?, "router params", span)?;
+//RS             let search = web_string_map(one(3)?, "router search", span)?;
+//RS             web_result(web_kernel::jet_web_router_link(
+//RS                 router, pattern, params, search,
+//RS             ).map(CtValue::Str))
+//RS         }
+//RS         ("core.web.query", "new") => {
+//RS             let key = web_string(one(0)?, "query key", span)?;
+//RS             let live = ct_to_live(one(1)?, span)?;
+//RS             Ok(opaque_web(WebQueryHandle(web_kernel::app_web_query_new(
+//RS                 key, &live,
+//RS             ))))
+//RS         }
+//RS         ("core.web.query", "mutate") => {
+//RS             let query = web_query(one(0)?, span)?;
+//RS             let payload = web_string(one(1)?, "query mutation payload", span)?;
+//RS             let optimistic = web_optional_string_value(one(2)?, span)?;
+//RS             let callback = one(3)?.clone();
+//RS             Ok(web_mutation_state(web_kernel::jet_web_query_mutate(
+//RS                 query,
+//RS                 payload,
+//RS                 optimistic,
+//RS                 move |payload| {
+//RS                     let value = super::Methods::invoke_standalone_closure(
+//RS                         &callback,
+//RS                         vec![CtValue::Str(payload)],
+//RS                         span,
+//RS                     )
+//RS                     .unwrap_or_else(|error| std::panic::panic_any(error));
+//RS                     callback_result_string(value, span)
+//RS                 },
+//RS             )))
+//RS         }
+//RS         ("core.web.query", "mutate_with_invalidations") => {
+//RS             let query = web_query(one(0)?, span)?;
+//RS             let payload = web_string(one(1)?, "query mutation payload", span)?;
+//RS             let optimistic = web_optional_string_value(one(2)?, span)?;
+//RS             let invalidations = web_strings(one(3)?, "query invalidations", span)?;
+//RS             let callback = one(4)?.clone();
+//RS             Ok(web_mutation_state(
+//RS                 web_kernel::jet_web_query_mutate_with_invalidations(
+//RS                     query,
+//RS                     payload,
+//RS                     optimistic,
+//RS                     invalidations,
+//RS                     move |payload| {
+//RS                         let value = super::Methods::invoke_standalone_closure(
+//RS                             &callback,
+//RS                             vec![CtValue::Str(payload)],
+//RS                             span,
+//RS                         )
+//RS                         .unwrap_or_else(|error| std::panic::panic_any(error));
+//RS                         callback_result_string(value, span)
+//RS                     },
+//RS                 ),
+//RS             ))
+//RS         }
+//RS         ("core.web.query", "retry") => {
+//RS             let query = web_query(one(0)?, span)?;
+//RS             let callback = one(1)?.clone();
+//RS             web_result(
+//RS                 web_kernel::jet_web_query_retry(query, move |payload| {
+//RS                     let value = super::Methods::invoke_standalone_closure(
+//RS                         &callback,
+//RS                         vec![CtValue::Str(payload)],
+//RS                         span,
+//RS                     )
+//RS                     .unwrap_or_else(|error| std::panic::panic_any(error));
+//RS                     callback_result_unit(value, span)
+//RS                 })
+//RS                 .map(CtValue::Int),
+//RS             )
+//RS         }
+//RS         ("core.web.query", "facts") => Ok(CtValue::Str(web_kernel::jet_web_query_facts(
+//RS             web_query(one(0)?, span)?,
+//RS         ))),
+//RS         ("core.web.query", "live") => {
+//RS             let key = web_string(one(0)?, "query key", span)?;
+//RS             let footprint = web_string(one(1)?, "query footprint", span)?;
+//RS             let initial = web_string(one(2)?, "query initial", span)?;
+//RS             let fetch = one(3)?.clone();
+//RS             Ok(opaque_web(WebQueryHandle(web_kernel::jet_web_query_live(
+//RS                 key, footprint, initial, move || {
+//RS                     let value = super::Methods::invoke_standalone_closure(
+//RS                         &fetch, vec![], span,
+//RS                     ).unwrap_or_else(|error| std::panic::panic_any(error));
+//RS                     callback_result_string(value, span)
+//RS                 },
+//RS             ))))
+//RS         }
+//RS         ("core.web.query", "subscribe") => Ok(opaque_web(WebQueryHandle(
+//RS             web_kernel::jet_web_query_subscribe(web_string(one(0)?, "query source", span)?),
+//RS         ))),
+//RS         ("core.web.query", "invalidate") => Ok(CtValue::Int(
+//RS             web_kernel::jet_web_query_invalidate(web_query(one(0)?, span)?),
+//RS         )),
+//RS         ("core.web.query", "cancel") => Ok(CtValue::Bool(
+//RS             web_kernel::jet_web_query_cancel(web_query(one(0)?, span)?),
+//RS         )),
+//RS         ("core.web.query", "get") => Ok(CtValue::Str(web_kernel::jet_web_query_get(
+//RS             web_query(one(0)?, span)?,
+//RS         ))),
+//RS         ("core.web.query", "show") => Ok(CtValue::Str(web_kernel::jet_web_query_show(
+//RS             web_query(one(0)?, span)?,
+//RS         ))),
+//RS         ("core.web.query", "state") => Ok(web_query_state(web_kernel::jet_web_query_state(
+//RS             web_query(one(0)?, span)?,
+//RS         ))),
+//RS         ("core.web.query", "mutation_state") => Ok(web_mutation_state(
+//RS             web_kernel::jet_web_query_mutation_state(web_query(one(0)?, span)?),
+//RS         )),
+//RS         ("core.web.query", "state_signal") => Ok(opaque_web(
+//RS             web_kernel::jet_web_query_state_signal(web_query(one(0)?, span)?),
+//RS         )),
+//RS         ("core.web.query", "mutation_signal") => Ok(opaque_web(
+//RS             web_kernel::jet_web_query_mutation_signal(web_query(one(0)?, span)?),
+//RS         )),
+//RS         ("core.web.query", "queue") => web_result(
+//RS             web_kernel::jet_web_query_queue(
+//RS                 web_query(one(0)?, span)?,
+//RS                 web_string(one(1)?, "query payload", span)?,
+//RS             )
+//RS             .map(|value| CtValue::Int(value)),
+//RS         ),
+//RS         ("core.web.query", "refresh") => web_result(
+//RS             web_kernel::jet_web_query_refresh(web_query(one(0)?, span)?)
+//RS                 .map(|()| CtValue::Unit),
+//RS         ),
+//RS         ("core.web.query", "set_online") => {
+//RS             let query = web_query(one(0)?, span)?;
+//RS             let online = web_bool(one(1)?, "query online", span)?;
+//RS             web_kernel::jet_web_query_set_online(query, online);
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("core.web.query", "set_mode") => {
+//RS             let query = web_query(one(0)?, span)?;
+//RS             let mode = web_query_mode(one(1)?, span)?;
+//RS             web_kernel::jet_web_query_set_mode(query, mode);
+//RS             Ok(CtValue::Unit)
+//RS         },
+//RS         ("core.web.forms", "new") => Ok(opaque_web(WebFormHandle(
+//RS             web_kernel::jet_web_forms_new(web_string(one(0)?, "form action", span)?),
+//RS         ))),
+//RS         ("core.web.forms", "field") => web_result(
+//RS             web_kernel::jet_web_forms_field(
+//RS                 web_form(one(0)?, span)?,
+//RS                 web_string(one(1)?, "form field name", span)?,
+//RS                 web_string(one(2)?, "form field type", span)?,
+//RS                 web_bool(one(3)?, "form required", span)?,
+//RS             )
+//RS             .map(|form| opaque_web(WebFormHandle(form))),
+//RS         ),
+//RS         ("core.web.forms", "set") => web_result(
+//RS             web_kernel::jet_web_forms_set(
+//RS                 web_form(one(0)?, span)?,
+//RS                 web_string(one(1)?, "form field name", span)?,
+//RS                 web_string(one(2)?, "form value", span)?,
+//RS             )
+//RS             .map(|()| CtValue::Unit),
+//RS         ),
+//RS         ("core.web.forms", "blur") => web_result(
+//RS             web_kernel::jet_web_forms_blur(
+//RS                 web_form(one(0)?, span)?,
+//RS                 web_string(one(1)?, "form field name", span)?,
+//RS             )
+//RS             .map(|()| CtValue::Unit),
+//RS         ),
+//RS         ("core.web.forms", "validate") => web_result(
+//RS             web_kernel::jet_web_forms_validate(web_form(one(0)?, span)?)
+//RS                 .map(|()| CtValue::Unit),
+//RS         ),
+//RS         ("core.web.forms", "validate_async") => Ok(opaque_web(WebFormHandle(
+//RS             web_kernel::jet_web_forms_validate_async(web_form(one(0)?, span)?),
+//RS         ))),
+//RS         ("core.web.forms", "submit" | "no_script") => {
+//RS             let result = if method == "submit" {
+//RS                 web_kernel::jet_web_forms_submit(web_form(one(0)?, span)?)
+//RS             } else {
+//RS                 web_kernel::jet_web_forms_no_script(web_form(one(0)?, span)?)
+//RS             };
+//RS             web_result(result.map(CtValue::Str))
+//RS         }
+//RS         ("core.web.forms", "html") => Ok(CtValue::Str(web_kernel::jet_web_forms_html(
+//RS             web_form(one(0)?, span)?,
+//RS         ))),
+//RS         ("core.web.forms", "show") => Ok(CtValue::Str(web_kernel::jet_web_forms_show(
+//RS             web_form(one(0)?, span)?,
+//RS         ))),
+//RS         ("core.web.forms", "input") => {
+//RS             let CtValue::List(fields) = one(1)? else {
+//RS                 return Err(unsupported("form input fields", span));
+//RS             };
+//RS             let mut specs = Vec::with_capacity(fields.len());
+//RS             for field in fields {
+//RS                 match web_form_field_spec(field, span)? {
+//RS                     Ok(spec) => specs.push(spec),
+//RS                     Err(error) => return web_result(Err(error)),
+//RS                 }
+//RS             }
+//RS             web_result(web_kernel::jet_web_forms_input(
+//RS                 web_string(one(0)?, "form input type name", span)?, specs,
+//RS             ).map(opaque_web))
+//RS         }
+//RS         ("core.web.forms", "input_rename" | "input_exclude" | "input_group" | "input_replace") => {
+//RS             let input = web_opaque::<web_kernel::JetWebFormInput>(one(0)?, span)?.clone();
+//RS             let name = web_string(one(1)?, "form input field", span)?;
+//RS             let input = match method {
+//RS                 "input_rename" => web_kernel::jet_web_forms_input_rename(
+//RS                     input, name, web_string(one(2)?, "form wire name", span)?,
+//RS                 ),
+//RS                 "input_exclude" => web_kernel::jet_web_forms_input_exclude(input, name),
+//RS                 "input_group" => web_kernel::jet_web_forms_input_group(
+//RS                     input, name, web_string(one(2)?, "form group", span)?,
+//RS                 ),
+//RS                 _ => match web_form_field_spec(one(2)?, span)? {
+//RS                     Ok(field) => web_kernel::jet_web_forms_input_replace(input, name, field),
+//RS                     Err(error) => Err(error),
+//RS                 },
+//RS             };
+//RS             web_result(input.map(opaque_web))
+//RS         }
+//RS         ("core.web", "form") => Ok(opaque_web(web_kernel::jet_web_form(
+//RS             web_opaque::<web_kernel::JetWebFormInput>(one(0)?, span)?,
+//RS             web_string(one(1)?, "form action", span)?,
+//RS         ))),
+//RS         ("core.web.forms", "typed") => web_result(web_kernel::jet_web_forms_typed(
+//RS             web_opaque::<web_kernel::JetWebFormInput>(one(0)?, span)?,
+//RS             web_string(one(1)?, "form action", span)?,
+//RS         ).map(opaque_web)),
+//RS         ("core.web.forms", "typed_set" | "typed_blur" | "typed_validate" | "typed_focus") => {
+//RS             let form = web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?;
+//RS             let result = match method {
+//RS                 "typed_set" => web_kernel::jet_web_forms_typed_set(
+//RS                     form, web_string(one(1)?, "form field", span)?,
+//RS                     web_string(one(2)?, "form field value", span)?,
+//RS                 ),
+//RS                 "typed_blur" => web_kernel::jet_web_forms_typed_blur(
+//RS                     form, web_string(one(1)?, "form field", span)?,
+//RS                 ),
+//RS                 "typed_focus" => web_kernel::jet_web_forms_typed_focus(
+//RS                     form, web_string(one(1)?, "form field", span)?,
+//RS                 ),
+//RS                 _ => web_kernel::jet_web_forms_typed_validate(form),
+//RS             };
+//RS             web_result(result.map(|()| CtValue::Unit))
+//RS         }
+//RS         ("core.web.forms", "typed_validate_field") => {
+//RS             let timing = match web_enum_variant(one(2)?, "WebFormValidationTiming", span)? {
+//RS                 "Blur" => web_kernel::JetWebFormValidationTiming::Blur,
+//RS                 "Submit" => web_kernel::JetWebFormValidationTiming::Submit,
+//RS                 "Change" => web_kernel::JetWebFormValidationTiming::Change,
+//RS                 _ => return Err(unsupported("WebFormValidationTiming", span)),
+//RS             };
+//RS             let callback = one(3)?.clone();
+//RS             Ok(opaque_web(web_kernel::jet_web_forms_typed_validate_field(
+//RS                 web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?,
+//RS                 web_string(one(1)?, "form validated field", span)?,
+//RS                 timing,
+//RS                 move |value| callback_result_unit(
+//RS                     super::Methods::invoke_standalone_closure(
+//RS                         &callback,
+//RS                         vec![CtValue::Str(value)],
+//RS                         span,
+//RS                     )
+//RS                     .unwrap_or_else(|error| std::panic::panic_any(error)),
+//RS                     span,
+//RS                 ),
+//RS             )))
+//RS         }
+//RS         ("core.web.forms", "typed_submit" | "typed_no_script" | "typed_post") => {
+//RS             let form = web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?;
+//RS             let result = match method {
+//RS                 "typed_submit" => web_kernel::jet_web_forms_typed_submit(form),
+//RS                 "typed_no_script" => web_kernel::jet_web_forms_typed_no_script(form),
+//RS                 _ => web_kernel::jet_web_forms_typed_post(
+//RS                     form, web_string(one(1)?, "form POST body", span)?,
+//RS                 ),
+//RS             };
+//RS             web_result(result.map(CtValue::Str))
+//RS         }
+//RS         ("core.web.forms", "typed_decode_post") => web_result(
+//RS             web_kernel::jet_web_forms_typed_decode_post(
+//RS                 web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?,
+//RS                 web_string(one(1)?, "form POST body", span)?,
+//RS             ).map(web_form_decoded),
+//RS         ),
+//RS         ("core.web.forms", "typed_html" | "typed_show") => {
+//RS             let form = web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?;
+//RS             Ok(CtValue::Str(if method == "typed_html" {
+//RS                 web_kernel::jet_web_forms_typed_html(form)
+//RS             } else {
+//RS                 web_kernel::jet_web_forms_typed_show(form)
+//RS             }))
+//RS         }
+//RS         ("core.web.forms", "typed_validation_render") => Ok(CtValue::Str(
+//RS             web_kernel::jet_web_forms_typed_validation_render(
+//RS                 web_opaque::<web_kernel::JetWebFormValidationChain>(one(0)?, span)?,
+//RS             ),
+//RS         )),
+//RS         ("core.web.forms", "typed_state") => Ok(web_form_state(
+//RS             web_kernel::jet_web_forms_typed_state(
+//RS                 web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?,
+//RS             ),
+//RS         )),
+//RS         ("core.web.forms", "typed_lifecycle") => {
+//RS             let value = web_kernel::jet_web_forms_typed_lifecycle(
+//RS                 web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?,
+//RS             );
+//RS             Ok(CtValue::Struct {
+//RS                 type_name: "WebFormLifecycle".to_string(),
+//RS                 fields: vec![
+//RS                     ("status".to_string(), web_enum_value("WebFormLifecycleStatus", value.status)),
+//RS                     ("result".to_string(), CtValue::Str(value.result)),
+//RS                     ("error".to_string(), CtValue::Str(value.error)),
+//RS                     ("generation".to_string(), CtValue::Int(value.generation as i64)),
+//RS                 ],
+//RS             })
+//RS         }
+//RS         ("core.web.forms", "typed_errors") => {
+//RS             let value = web_kernel::jet_web_forms_typed_errors(
+//RS                 web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?,
+//RS             );
+//RS             Ok(CtValue::Struct {
+//RS                 type_name: "WebFormErrorState".to_string(),
+//RS                 fields: vec![
+//RS                     ("fields".to_string(), web_error_map_value(value.fields)),
+//RS                     ("form".to_string(), CtValue::List(
+//RS                         value.form.into_iter().map(CtValue::Str).collect(),
+//RS                     )),
+//RS                 ],
+//RS             })
+//RS         }
+//RS         ("core.web.forms", "typed_cancel") => {
+//RS             web_kernel::jet_web_forms_typed_cancel(
+//RS                 web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?,
+//RS             );
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("core.web.forms", "typed_select_field") => web_result(
+//RS             web_kernel::jet_web_forms_typed_select_field(
+//RS                 web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?,
+//RS                 web_string(one(1)?, "form selected field", span)?,
+//RS             ).map(opaque_web),
+//RS         ),
+//RS         ("core.web.forms", "typed_validate_async") => Ok(opaque_web(
+//RS             WebFormValidationHandle::new(Some(web_kernel::jet_web_forms_typed_validate_async(
+//RS                 web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?,
+//RS             ))),
+//RS         )),
+//RS         ("core.web.forms", "typed_submit_async") => Ok(opaque_web(
+//RS             WebFormSubmissionHandle::new(Some(web_kernel::jet_web_forms_typed_submit_async(
+//RS                 web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?,
+//RS             ))),
+//RS         )),
+//RS         ("core.web.forms", "typed_validation_wait" | "typed_validation_cancel") => {
+//RS             let handle = web_opaque::<WebFormValidationHandle>(one(0)?, span)?;
+//RS             let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
+//RS             if method == "typed_validation_cancel" {
+//RS                 web_kernel::jet_web_forms_typed_validation_cancel(
+//RS                     slot.as_ref().ok_or_else(|| unsupported("consumed form validation", span))?,
+//RS                 );
+//RS                 Ok(CtValue::Unit)
+//RS             } else {
+//RS                 let validation = slot.take()
+//RS                     .ok_or_else(|| unsupported("consumed form validation", span))?;
+//RS                 drop(slot);
+//RS                 web_result(web_kernel::jet_web_forms_typed_validation_wait(validation)
+//RS                     .map(|()| CtValue::Unit))
+//RS             }
+//RS         }
+//RS         ("core.web.forms", "typed_submission_wait" | "typed_submission_cancel") => {
+//RS             let handle = web_opaque::<WebFormSubmissionHandle>(one(0)?, span)?;
+//RS             let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
+//RS             if method == "typed_submission_cancel" {
+//RS                 web_kernel::jet_web_forms_typed_submission_cancel(
+//RS                     slot.as_ref().ok_or_else(|| unsupported("consumed form submission", span))?,
+//RS                 );
+//RS                 Ok(CtValue::Unit)
+//RS             } else {
+//RS                 let submission = slot.take()
+//RS                     .ok_or_else(|| unsupported("consumed form submission", span))?;
+//RS                 drop(slot);
+//RS                 web_result(web_kernel::jet_web_forms_typed_submission_wait(submission)
+//RS                     .map(CtValue::Str))
+//RS             }
+//RS         }
+//RS         ("core.web.forms", "typed_set_async_validator") => {
+//RS             let timing = match web_enum_variant(one(2)?, "WebFormValidationTiming", span)? {
+//RS                 "Blur" => web_kernel::JetWebFormValidationTiming::Blur,
+//RS                 "Submit" => web_kernel::JetWebFormValidationTiming::Submit,
+//RS                 "Change" => web_kernel::JetWebFormValidationTiming::Change,
+//RS                 _ => return Err(unsupported("WebFormValidationTiming", span)),
+//RS             };
+//RS             let debounce = web_int(one(3)?, "form validation debounce", span)? as u64;
+//RS             let callback = one(4)?.clone();
+//RS             web_result(web_kernel::jet_web_forms_typed_set_async_validator(
+//RS                 web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?,
+//RS                 web_string(one(1)?, "form validated field", span)?, timing, debounce,
+//RS                 move |value| callback_result_unit(
+//RS                     super::Methods::invoke_standalone_closure(
+//RS                         &callback, vec![CtValue::Str(value)], span,
+//RS                     ).unwrap_or_else(|error| std::panic::panic_any(error)),
+//RS                     span,
+//RS                 ),
+//RS             ).map(|()| CtValue::Unit))
+//RS         }
+//RS         ("core.web.forms", "action_error") => Ok(web_form_action_error(
+//RS             web_kernel::jet_web_forms_action_error(),
+//RS         )),
+//RS         ("core.web.forms", "action_field_error" | "action_form_error") => {
+//RS             let error = web_form_action_error_read(one(0)?, span)?;
+//RS             Ok(web_form_action_error(if method == "action_field_error" {
+//RS                 web_kernel::jet_web_forms_action_field_error(
+//RS                     error, web_string(one(1)?, "form error field", span)?,
+//RS                     web_string(one(2)?, "form field error", span)?,
+//RS                 )
+//RS             } else {
+//RS                 web_kernel::jet_web_forms_action_form_error(
+//RS                     error, web_string(one(1)?, "form error", span)?,
+//RS                 )
+//RS             }))
+//RS         }
+//RS         ("core.web.forms", "typed_set_action") => {
+//RS             let callback = one(1)?.clone();
+//RS             web_kernel::jet_web_forms_typed_set_action(
+//RS                 web_opaque::<web_kernel::JetWebFormTyped>(one(0)?, span)?,
+//RS                 move |input| {
+//RS                     let result = super::Methods::invoke_standalone_closure(
+//RS                         &callback, vec![web_form_decoded(input)], span,
+//RS                     ).unwrap_or_else(|error| std::panic::panic_any(error));
+//RS                     match result {
+//RS                         CtValue::Present(value) => Ok(web_string(
+//RS                             &value, "form action result", span,
+//RS                         ).unwrap_or_else(|error| std::panic::panic_any(error))),
+//RS                         value => Err(web_form_action_error_read(
+//RS                             value.told_report().unwrap_or_else(|| {
+//RS                                 std::panic::panic_any(unsupported("form action result", span))
+//RS                             }),
+//RS                             span,
+//RS                         ).unwrap_or_else(|error| std::panic::panic_any(error))),
+//RS                     }
+//RS                 },
+//RS             );
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("core.web.table", "new" | "new_keyed") => {
+//RS             let name = web_string(one(0)?, "table name", span)?;
+//RS             let CtValue::List(rows) = one(1)? else {
+//RS                 return Err(unsupported("table rows", span));
+//RS             };
+//RS             let callback = if method == "new_keyed" {
+//RS                 Some(one(2)?.clone())
+//RS             } else {
+//RS                 args.get(2).cloned()
+//RS             };
+//RS             if let Some(callback) = callback {
+//RS                 let table = web_kernel::jet_web_table_with_key(
+//RS                     name,
+//RS                     rows.clone(),
+//RS                     move |row: &CtValue| {
+//RS                         super::Methods::invoke_standalone_closure(
+//RS                             &callback,
+//RS                             vec![row.clone()],
+//RS                             span,
+//RS                         )
+//RS                         .map_err(|_| "table key callback failed".to_string())
+//RS                         .and_then(|value| callback_result_string(value, span))
+//RS                         .unwrap_or_else(|error| format!("table key callback failed: {error}"))
+//RS                     },
+//RS                 );
+//RS                 Ok(opaque_web(WebTableHandle(table)))
+//RS             } else {
+//RS                 Ok(opaque_web(WebTableHandle(web_kernel::jet_web_table(
+//RS                     name,
+//RS                     rows.clone(),
+//RS                 ))))
+//RS             }
+//RS         }
+//RS         ("core.web.table", "with_column") => {
+//RS             let table = web_table(one(0)?, span)?.clone();
+//RS             let column = web_table_column(one(1)?, span)?.clone();
+//RS             Ok(opaque_web(WebTableHandle(table.with_column(column))))
+//RS         }
+//RS         ("core.web.table", "with_server_page") => {
+//RS             let table = web_table(one(0)?, span)?.clone();
+//RS             let callback = one(1)?.clone();
+//RS             let table = table.with_server_page(move |state| {
+//RS                 let state = web_table_state(state);
+//RS                 let value = super::Methods::invoke_standalone_closure(
+//RS                     &callback,
+//RS                     vec![state],
+//RS                     span,
+//RS                 )
+//RS                 .unwrap_or_else(|error| std::panic::panic_any(error));
+//RS                 callback_result_for_kernel(value, span).map(|page| {
+//RS                     web_table_page_value(&page, span)
+//RS                         .unwrap_or_else(|error| std::panic::panic_any(error))
+//RS                 })
+//RS             });
+//RS             Ok(opaque_web(WebTableHandle(table)))
+//RS         }
+//RS         ("core.web.table", "state") => Ok(web_table_state(
+//RS             web_table(one(0)?, span)?.state(),
+//RS         )),
+//RS         ("core.web.table", "facts") => Ok(CtValue::Str(
+//RS             web_table(one(0)?, span)?.facts_json(),
+//RS         )),
+//RS         ("core.web.table", "keys") => web_result(
+//RS             web_table(one(0)?, span)?
+//RS                 .row_keys()
+//RS                 .map(|keys| CtValue::List(keys.into_iter().map(CtValue::Str).collect())),
+//RS         ),
+//RS         ("core.web.table", "page_state") => web_result(
+//RS             web_table(one(0)?, span)?
+//RS                 .page()
+//RS                 .map(web_table_page),
+//RS         ),
+//RS         ("core.web.table", "sort_by") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             let column = web_string(one(1)?, "table sort column", span)?;
+//RS             let direction = web_table_direction_value(one(2)?, span)?;
+//RS             Ok(opaque_web(WebTableHandle(table.sort_by(column, direction))))
+//RS         }
+//RS         ("core.web.table", "filter_by") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             let column = web_string(one(1)?, "table filter column", span)?;
+//RS             let value = web_string(one(2)?, "table filter value", span)?;
+//RS             Ok(opaque_web(WebTableHandle(table.filter_by(column, value))))
+//RS         }
+//RS         ("core.web.table", "paginate") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             Ok(opaque_web(WebTableHandle(table.paginate(
+//RS                 web_int(one(1)?, "table page index", span)?,
+//RS                 web_int(one(2)?, "table page size", span)?,
+//RS             ))))
+//RS         }
+//RS         ("core.web.table", "set_rows") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             let CtValue::List(rows) = one(1)? else {
+//RS                 return Err(unsupported("table rows", span));
+//RS             };
+//RS             web_result(table.replace_rows(rows.clone()).map(|()| CtValue::Unit))
+//RS         }
+//RS         ("core.web.table", "set_selected") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             let key = web_string(one(1)?, "table selection key", span)?;
+//RS             let selected = web_bool(one(2)?, "table selection state", span)?;
+//RS             web_result(
+//RS                 table
+//RS                     .set_selected(key, selected)
+//RS                     .map(|table| opaque_web(WebTableHandle(table))),
+//RS             )
+//RS         }
+//RS         ("core.web.table", "toggle_selection") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             let key = web_string(one(1)?, "table selection key", span)?;
+//RS             web_result(table.toggle_selection(key).map(|table| opaque_web(WebTableHandle(table))))
+//RS         }
+//RS         ("core.web.table", "clear_selection") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             Ok(opaque_web(WebTableHandle(table.clear_selection())))
+//RS         }
+//RS         ("core.web.table", "selected_keys") => Ok(CtValue::List(
+//RS             web_table(one(0)?, span)?
+//RS                 .selected_keys()
+//RS                 .into_iter()
+//RS                 .map(CtValue::Str)
+//RS                 .collect(),
+//RS         )),
+//RS         ("core.web.table", "selected_rows") => web_result(
+//RS             web_table(one(0)?, span)?
+//RS                 .selected_rows()
+//RS                 .map(web_table_rows),
+//RS         ),
+//RS         ("core.web.table", "insert_row") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             web_result(
+//RS                 table
+//RS                     .insert_row(one(1)?.clone())
+//RS                     .map(CtValue::Str),
+//RS             )
+//RS         }
+//RS         ("core.web.table", "replace_row") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             let key = web_string(one(1)?, "table row key", span)?;
+//RS             web_result(
+//RS                 table
+//RS                     .replace_row(&key, one(2)?.clone())
+//RS                     .map(|()| CtValue::Unit),
+//RS             )
+//RS         }
+//RS         ("core.web.table", "update_row") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             let key = web_string(one(1)?, "table row key", span)?;
+//RS             let callback = one(2)?.clone();
+//RS             let mut callback_failed = false;
+//RS             let result = table.update_row(&key, |row| {
+//RS                 match super::Methods::invoke_standalone_closure(
+//RS                     &callback,
+//RS                     vec![row.clone()],
+//RS                     span,
+//RS                 ) {
+//RS                     Ok(value) => *row = value,
+//RS                     Err(_) => callback_failed = true,
+//RS                 }
+//RS             });
+//RS             if callback_failed {
+//RS                 web_result(Err("table row update callback failed".to_string()))
+//RS             } else {
+//RS                 web_result(result.map(|()| CtValue::Unit))
+//RS             }
+//RS         }
+//RS         ("core.web.table", "remove_row") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             let key = web_string(one(1)?, "table row key", span)?;
+//RS             web_result(table.remove_row(&key))
+//RS         }
+//RS         ("core.web.table", "first_page" | "next_page") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             let table = if method == "first_page" {
+//RS                 table.first_page()
+//RS             } else {
+//RS                 table.next_page()
+//RS             };
+//RS             Ok(opaque_web(WebTableHandle(table)))
+//RS         }
+//RS         ("core.web.table", "last_page") => {
+//RS             web_result(web_table(one(0)?, span)?.last_page()
+//RS                 .map(|table| opaque_web(WebTableHandle(table))))
+//RS         }
+//RS         ("core.web.table", "visible_rows") => {
+//RS             let table = web_table(one(0)?, span)?;
+//RS             let plan = web_virtual_plan_value(one(1)?, span)?;
+//RS             web_result(table.visible_rows(&plan).map(web_table_rows))
+//RS         }
+//RS         ("core.web.table", "page") => {
+//RS             let CtValue::List(rows) = one(0)? else {
+//RS                 return Err(unsupported("table rows", span));
+//RS             };
+//RS             Ok(web_table_page(web_kernel::jet_web_table_page(
+//RS                 rows,
+//RS                 web_int(one(1)?, "table page index", span)?,
+//RS                 web_int(one(2)?, "table page size", span)?,
+//RS             )))
+//RS         }
+//RS         ("core.web.table", "column") => {
+//RS             let name = web_string(one(0)?, "table column name", span)?;
+//RS             let cell_type = web_string(one(1)?, "table column type", span)?;
+//RS             let callback = one(2)?.clone();
+//RS             let column =
+//RS                 web_kernel::jet_web_table_column(name, cell_type, move |row: &CtValue| {
+//RS                     super::Methods::invoke_standalone_closure(
+//RS                         &callback,
+//RS                         vec![row.clone()],
+//RS                         span,
+//RS                     )
+//RS                     .map_err(|_| "table column callback failed".to_string())
+//RS                     .and_then(|value| callback_result_string(value, span))
+//RS                     .unwrap_or_else(|error| {
+//RS                         format!("table column callback failed: {error}")
+//RS                     })
+//RS                 });
+//RS             Ok(opaque_web(WebTableColumnHandle(column)))
+//RS         }
+//RS         ("core.web.table", "sort") => {
+//RS             let CtValue::List(rows) = one(0)? else {
+//RS                 return Err(unsupported("table rows", span));
+//RS             };
+//RS             let descending = web_bool(one(1)?, "table descending", span)?;
+//RS             let callback = one(2)?.clone();
+//RS             let mut keys = Vec::with_capacity(rows.len());
+//RS             for row in rows {
+//RS                 let value = super::Methods::invoke_standalone_closure(
+//RS                     &callback,
+//RS                     vec![row.clone()],
+//RS                     span,
+//RS                 )?;
+//RS                 keys.push((row.clone(), web_string(&value, "table sort key", span)?));
+//RS             }
+//RS             let sorted = web_kernel::jet_web_table_sort(rows, descending, move |row| {
+//RS                 keys.iter()
+//RS                     .find(|(candidate, _)| candidate == row)
+//RS                     .map(|(_, key)| key.clone())
+//RS                     .unwrap_or_default()
+//RS             });
+//RS             Ok(CtValue::List(sorted))
+//RS         }
+//RS         ("core.web.table", "filter") => {
+//RS             let CtValue::List(rows) = one(0)? else {
+//RS                 return Err(unsupported("table rows", span));
+//RS             };
+//RS             let callback = one(1)?.clone();
+//RS             let mut keep = Vec::with_capacity(rows.len());
+//RS             for row in rows {
+//RS                 let value = super::Methods::invoke_standalone_closure(
+//RS                     &callback,
+//RS                     vec![row.clone()],
+//RS                     span,
+//RS                 )?;
+//RS                 keep.push((row.clone(), web_bool(&value, "table predicate", span)?));
+//RS             }
+//RS             let filtered = web_kernel::jet_web_table_filter(rows, move |row| {
+//RS                 keep.iter()
+//RS                     .find(|(candidate, _)| candidate == row)
+//RS                     .is_some_and(|(_, keep)| *keep)
+//RS             });
+//RS             Ok(CtValue::List(filtered))
+//RS         }
+//RS         ("core.web.virtual", "window") => Ok(web_virtual_window(
+//RS             web_kernel::jet_web_virtual_window(
+//RS                 web_int(one(0)?, "virtual total count", span)?,
+//RS                 web_int(one(1)?, "virtual scroll offset", span)?,
+//RS                 web_int(one(2)?, "virtual viewport size", span)?,
+//RS                 web_int(one(3)?, "virtual item size", span)?,
+//RS                 web_int(one(4)?, "virtual overscan", span)?,
+//RS             ),
+//RS         )),
+//RS         ("core.web.virtual", "window_measured") => {
+//RS             let measurements = web_ints(one(5)?, "virtual measurements", span)?;
+//RS             Ok(web_virtual_window(web_kernel::jet_web_virtual_window_measured(
+//RS                 web_int(one(0)?, "virtual total count", span)?,
+//RS                 web_int(one(1)?, "virtual scroll offset", span)?,
+//RS                 web_int(one(2)?, "virtual viewport size", span)?,
+//RS                 web_int(one(3)?, "virtual item size", span)?,
+//RS                 web_int(one(4)?, "virtual overscan", span)?,
+//RS                 &measurements,
+//RS             )))
+//RS         }
+//RS         ("core.web.virtual", "slice") => {
+//RS             let CtValue::List(rows) = one(0)? else {
+//RS                 return Err(unsupported("virtual rows", span));
+//RS             };
+//RS             let window = web_virtual_window_value(one(1)?, span)?;
+//RS             Ok(CtValue::List(web_kernel::jet_web_virtual_slice(rows, &window)))
+//RS         }
+//RS         ("core.web.virtual", "indices") => {
+//RS             let window = web_virtual_window_value(one(0)?, span)?;
+//RS             Ok(CtValue::List(
+//RS                 web_kernel::jet_web_virtual_indices(&window)
+//RS                     .into_iter()
+//RS                     .map(CtValue::Int)
+//RS                     .collect(),
+//RS             ))
+//RS         }
+//RS         ("core.web.virtual", "plan") => Ok(web_virtual_plan(
+//RS             web_kernel::jet_web_virtual_plan(
+//RS                 web_int(one(0)?, "virtual total count", span)?,
+//RS                 web_int(one(1)?, "virtual scroll offset", span)?,
+//RS                 web_int(one(2)?, "virtual viewport width", span)?,
+//RS                 web_int(one(3)?, "virtual viewport height", span)?,
+//RS                 web_int(one(4)?, "virtual item size", span)?,
+//RS                 web_int(one(5)?, "virtual overscan", span)?,
+//RS             ),
+//RS         )),
+//RS         ("core.web.virtual", "plan_measured") => {
+//RS             let measurements = web_int_pairs(one(6)?, "virtual measurements", span)?;
+//RS             Ok(web_virtual_plan(web_kernel::jet_web_virtual_plan_measured(
+//RS                 web_int(one(0)?, "virtual total count", span)?,
+//RS                 web_int(one(1)?, "virtual scroll offset", span)?,
+//RS                 web_int(one(2)?, "virtual viewport width", span)?,
+//RS                 web_int(one(3)?, "virtual viewport height", span)?,
+//RS                 web_int(one(4)?, "virtual item size", span)?,
+//RS                 web_int(one(5)?, "virtual overscan", span)?,
+//RS                 &measurements,
+//RS             )))
+//RS         }
+//RS         ("core.web.virtual", "plan_from_sizes") => {
+//RS             let measurements = web_ints(one(6)?, "virtual measurements", span)?;
+//RS             Ok(web_virtual_plan(web_kernel::jet_web_virtual_plan_from_sizes(
+//RS                 web_int(one(0)?, "virtual total count", span)?,
+//RS                 web_int(one(1)?, "virtual scroll offset", span)?,
+//RS                 web_int(one(2)?, "virtual viewport width", span)?,
+//RS                 web_int(one(3)?, "virtual viewport height", span)?,
+//RS                 web_int(one(4)?, "virtual item size", span)?,
+//RS                 web_int(one(5)?, "virtual overscan", span)?,
+//RS                 &measurements,
+//RS             )))
+//RS         }
+//RS         ("core.web.virtual", "plan_measure") => {
+//RS             let plan = web_virtual_plan_value(one(0)?, span)?;
+//RS             Ok(web_virtual_plan(plan.with_measurement(
+//RS                 web_int(one(1)?, "measurement index", span)?,
+//RS                 web_int(one(2)?, "measurement size", span)?,
+//RS             )))
+//RS         }
+//RS         ("core.web.virtual", "plan_slice") => {
+//RS             let CtValue::List(rows) = one(0)? else {
+//RS                 return Err(unsupported("virtual rows", span));
+//RS             };
+//RS             let plan = web_virtual_plan_value(one(1)?, span)?;
+//RS             Ok(CtValue::List(web_kernel::jet_web_virtual_plan_slice(
+//RS                 rows, &plan,
+//RS             )))
+//RS         }
+//RS         ("core.web.virtual", "plan_indices") => {
+//RS             let plan = web_virtual_plan_value(one(0)?, span)?;
+//RS             Ok(CtValue::List(
+//RS                 web_kernel::jet_web_virtual_plan_indices(&plan)
+//RS                     .into_iter()
+//RS                     .map(CtValue::Int)
+//RS                     .collect(),
+//RS             ))
+//RS         }
+//RS         ("core.web.virtual", "plan_facts") => {
+//RS             let plan = web_virtual_plan_value(one(0)?, span)?;
+//RS             Ok(CtValue::Str(web_kernel::jet_web_virtual_plan_facts(&plan)))
+//RS         }
+//RS         ("core.web.virtual", "plan_viewport") => Ok(opaque_web(
+//RS             WebVirtualPlanViewportHandle(web_kernel::jet_web_virtual_plan_viewport(
+//RS                 web_virtual_plan_value(one(0)?, span)?,
+//RS             )),
+//RS         )),
+//RS         ("core.web.virtual", "plan_viewport_state") => Ok(web_virtual_plan(
+//RS             web_virtual_plan_viewport(one(0)?, span)?.plan(),
+//RS         )),
+//RS         ("core.web.virtual", "plan_scroll_to") => {
+//RS             let viewport = web_virtual_plan_viewport(one(0)?, span)?;
+//RS             viewport.scroll_to(web_int(one(1)?, "virtual scroll offset", span)?);
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("core.web.virtual", "plan_resize") => {
+//RS             let viewport = web_virtual_plan_viewport(one(0)?, span)?;
+//RS             viewport.resize(
+//RS                 web_int(one(1)?, "virtual viewport width", span)?,
+//RS                 web_int(one(2)?, "virtual viewport height", span)?,
+//RS             );
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("core.web.virtual", "plan_viewport_measure") => {
+//RS             let viewport = web_virtual_plan_viewport(one(0)?, span)?;
+//RS             viewport.measure(
+//RS                 web_int(one(1)?, "measurement index", span)?,
+//RS                 web_int(one(2)?, "measurement size", span)?,
+//RS             );
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("core.web.store", "new") => Ok(opaque_web(WebStoreHandle(web_kernel::jet_web_store(
+//RS             web_string(one(0)?, "store name", span)?,
+//RS             one(1)?.clone(),
+//RS         )))),
+//RS         ("core.web.store", "with_history") => Ok(opaque_web(WebStoreHandle(
+//RS             web_kernel::jet_web_store_with_history(
+//RS                 web_string(one(0)?, "store name", span)?,
+//RS                 one(1)?.clone(),
+//RS                 web_int(one(2)?, "store history limit", span)?,
+//RS             ),
+//RS         ))),
+//RS         ("core.web.store", "signal" | "state_signal") => {
+//RS             let store = web_store(one(0)?, span)?;
+//RS             Ok(opaque_web(if method == "signal" {
+//RS                 web_kernel::jet_web_store_signal(store)
+//RS             } else {
+//RS                 web_kernel::jet_web_store_state_signal(store)
+//RS             }))
+//RS         }
+//RS         ("core.web.store", "derived" | "selector") => {
+//RS             let store = web_store(one(0)?, span)?;
+//RS             let callback = one(1)?.clone();
+//RS             let compute = move |value| super::Methods::invoke_standalone_closure(
+//RS                 &callback, vec![value], span,
+//RS             ).unwrap_or_else(|error| std::panic::panic_any(error));
+//RS             Ok(opaque_web(if method == "derived" {
+//RS                 web_kernel::jet_web_store_derived(store, compute)
+//RS             } else {
+//RS                 web_kernel::jet_web_store_selector(store, compute)
+//RS             }))
+//RS         }
+//RS         ("core.web.store", "value") => Ok(web_kernel::jet_web_store_value(
+//RS             web_store(one(0)?, span)?,
+//RS         )),
+//RS         ("core.web.store", "set" | "set_state") => {
+//RS             let store = web_store(one(0)?, span)?;
+//RS             let value = one(1)?.clone();
+//RS             Ok(web_store_transaction(if method == "set" {
+//RS                 web_kernel::jet_web_store_set(store, value)
+//RS             } else {
+//RS                 web_kernel::jet_web_store_set_state(store, value)
+//RS             }))
+//RS         }
+//RS         ("core.web.store", "transaction" | "update" | "batch" | "optimistic" | "patch") => {
+//RS             let store = web_store(one(0)?, span)?;
+//RS             let action = web_string(one(1)?, "store action", span)?;
+//RS             let fields = web_strings(one(2)?, "store changed fields", span)?;
+//RS             let callback = one(3)?.clone();
+//RS             let update = move |state: &mut CtValue| {
+//RS                 super::Methods::invoke_standalone_closure_mut(&callback, state, span)
+//RS                     .unwrap_or_else(|error| std::panic::panic_any(error));
+//RS             };
+//RS             match method {
+//RS                 "optimistic" | "patch" => {
+//RS                     let patch = if method == "optimistic" {
+//RS                         web_kernel::jet_web_store_optimistic(store, action, fields, update)
+//RS                     } else {
+//RS                         web_kernel::jet_web_store_patch(store, action, fields, update)
+//RS                     };
+//RS                     Ok(opaque_web(WebStorePatchHandle(std::sync::Mutex::new(Some(patch)))))
+//RS                 }
+//RS                 "transaction" => Ok(web_store_transaction(web_kernel::jet_web_store_transaction(
+//RS                     store, action, fields, update,
+//RS                 ))),
+//RS                 "batch" => Ok(web_store_transaction(web_kernel::jet_web_store_batch(
+//RS                     store, action, fields, update,
+//RS                 ))),
+//RS                 _ => Ok(web_store_transaction(web_kernel::jet_web_store_update(
+//RS                     store, action, fields, update,
+//RS                 ))),
+//RS             }
+//RS         }
+//RS         ("core.web.store", "back" | "forward" | "jump" | "scrub" | "restore") => {
+//RS             let store = web_store(one(0)?, span)?;
+//RS             let value = match method {
+//RS                 "back" => web_kernel::jet_web_store_back(store),
+//RS                 "forward" => web_kernel::jet_web_store_forward(store),
+//RS                 "jump" => web_kernel::jet_web_store_jump(
+//RS                     store, web_int(one(1)?, "store generation", span)?,
+//RS                 ),
+//RS                 "scrub" => web_kernel::jet_web_store_scrub(
+//RS                     store, web_int(one(1)?, "store generation", span)?,
+//RS                 ),
+//RS                 _ => web_kernel::jet_web_store_restore(
+//RS                     store, web_int(one(1)?, "store generation", span)?,
+//RS                 ),
+//RS             };
+//RS             web_optional_value(value, result_type, span)
+//RS         }
+//RS         ("core.web.store", "history") => Ok(CtValue::List(
+//RS             web_kernel::jet_web_store_history(web_store(one(0)?, span)?)
+//RS                 .into_iter().map(web_store_transaction).collect(),
+//RS         )),
+//RS         ("core.web.store", "history_at") => web_optional_value(
+//RS             web_kernel::jet_web_store_history_at(
+//RS                 web_store(one(0)?, span)?, web_int(one(1)?, "store history index", span)?,
+//RS             ).map(web_store_transaction),
+//RS             result_type,
+//RS             span,
+//RS         ),
+//RS         ("core.web.store", "events" | "events_since") => {
+//RS             let store = web_store(one(0)?, span)?;
+//RS             let events = if method == "events" {
+//RS                 web_kernel::jet_web_store_events(store)
+//RS             } else {
+//RS                 web_kernel::jet_web_store_events_since(
+//RS                     store, web_int(one(1)?, "store event sequence", span)?,
+//RS                 )
+//RS             };
+//RS             Ok(CtValue::List(events.into_iter().map(web_store_event).collect()))
+//RS         }
+//RS         ("core.web.store", "clear_history") => {
+//RS             web_kernel::jet_web_store_clear_history(web_store(one(0)?, span)?);
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("core.web.store", "set_history_limit") => {
+//RS             web_kernel::jet_web_store_set_history_limit(
+//RS                 web_store(one(0)?, span)?, web_int(one(1)?, "store history limit", span)?,
+//RS             );
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         ("core.web.store", "history_enabled") => Ok(CtValue::Bool(
+//RS             web_kernel::jet_web_store_history_enabled(web_store(one(0)?, span)?),
+//RS         )),
+//RS         ("core.web.store", "history_limit" | "cursor" | "current_generation") => {
+//RS             let store = web_store(one(0)?, span)?;
+//RS             Ok(CtValue::Int(match method {
+//RS                 "history_limit" => web_kernel::jet_web_store_history_limit(store),
+//RS                 "cursor" => web_kernel::jet_web_store_cursor(store),
+//RS                 _ => web_kernel::jet_web_store_current_generation(store),
+//RS             }))
+//RS         }
+//RS         ("core.web.store", "facts_json" | "event_json") => {
+//RS             let store = web_store(one(0)?, span)?;
+//RS             Ok(CtValue::Str(if method == "facts_json" {
+//RS                 web_kernel::jet_web_store_facts_json(store)
+//RS             } else {
+//RS                 web_kernel::jet_web_store_event_json(store)
+//RS             }))
+//RS         }
+//RS         ("core.web.store", "inspect") => Ok(web_store_inspection(
+//RS             web_kernel::jet_web_store_inspect(web_store(one(0)?, span)?),
+//RS         )),
+//RS         ("core.web.store", "patch_generation" | "patch_transaction" | "patch_active"
+//RS             | "patch_commit" | "patch_rollback") => {
+//RS             let handle = web_opaque::<WebStorePatchHandle>(one(0)?, span)?;
+//RS             let mut slot = handle.0.lock().unwrap_or_else(|error| error.into_inner());
+//RS             let patch = slot.as_ref().ok_or_else(|| unsupported("consumed WebStorePatch", span))?;
+//RS             match method {
+//RS                 "patch_generation" => Ok(CtValue::Int(web_kernel::jet_web_store_patch_generation(patch))),
+//RS                 "patch_transaction" => Ok(web_store_transaction(
+//RS                     web_kernel::jet_web_store_patch_transaction(patch),
+//RS                 )),
+//RS                 "patch_active" => Ok(CtValue::Bool(web_kernel::jet_web_store_patch_active(patch))),
+//RS                 "patch_commit" => {
+//RS                     let patch = slot.take().expect("checked live WebStorePatch");
+//RS                     drop(slot);
+//RS                     Ok(web_store_transaction(web_kernel::jet_web_store_patch_commit(patch)))
+//RS                 }
+//RS                 _ => {
+//RS                     let patch = slot.take().expect("checked live WebStorePatch");
+//RS                     drop(slot);
+//RS                     web_optional_value(
+//RS                         web_kernel::jet_web_store_patch_rollback(patch), result_type, span,
+//RS                     )
+//RS                 }
+//RS             }
+//RS         }
+//RS         ("core.web.store", "subscribe") => {
+//RS             let callback = one(1)?.clone();
+//RS             Ok(opaque_web(WebStoreSubscriptionHandle(
+//RS                 web_kernel::jet_web_store_subscribe(web_store(one(0)?, span)?, move |value| {
+//RS                     super::Methods::invoke_standalone_closure(&callback, vec![value], span)
+//RS                         .unwrap_or_else(|error| std::panic::panic_any(error));
+//RS                 }),
+//RS             )))
+//RS         }
+//RS         ("core.web.store", "subscribe_selector") => {
+//RS             let selector = one(1)?.clone();
+//RS             let callback = one(2)?.clone();
+//RS             Ok(opaque_web(WebStoreSubscriptionHandle(
+//RS                 web_kernel::jet_web_store_subscribe_selector(
+//RS                     web_store(one(0)?, span)?,
+//RS                     move |value| super::Methods::invoke_standalone_closure(
+//RS                         &selector, vec![value], span,
+//RS                     ).unwrap_or_else(|error| std::panic::panic_any(error)),
+//RS                     move |value| {
+//RS                         super::Methods::invoke_standalone_closure(&callback, vec![value], span)
+//RS                             .unwrap_or_else(|error| std::panic::panic_any(error));
+//RS                     },
+//RS                 ),
+//RS             )))
+//RS         }
+//RS         ("core.web.store", "subscription_unsubscribe" | "subscription_active") => {
+//RS             let subscription = &web_opaque::<WebStoreSubscriptionHandle>(one(0)?, span)?.0;
+//RS             if method == "subscription_active" {
+//RS                 Ok(CtValue::Bool(web_kernel::jet_web_store_subscription_active(subscription)))
+//RS             } else {
+//RS                 web_kernel::jet_web_store_subscription_unsubscribe(subscription);
+//RS                 Ok(CtValue::Unit)
+//RS             }
+//RS         }
+//RS         _ => Err(unsupported(&format!("`{module}.{method}()`"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn web_query_state_read(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<web_kernel::JetWebQueryState, Diagnostic> {
+//RS     let field = |name| web_record_field(value, name, span);
+//RS     let status = match web_enum_variant(field("status")?, "WebQueryStatus", span)? {
+//RS         "Pending" => web_kernel::JetWebQueryStatus::Pending,
+//RS         "Fresh" => web_kernel::JetWebQueryStatus::Fresh,
+//RS         "Stale" => web_kernel::JetWebQueryStatus::Stale,
+//RS         "Fetching" => web_kernel::JetWebQueryStatus::Fetching,
+//RS         "Error" => web_kernel::JetWebQueryStatus::Error,
+//RS         "Offline" => web_kernel::JetWebQueryStatus::Offline,
+//RS         _ => return Err(unsupported("WebQueryStatus", span)),
+//RS     };
+//RS     Ok(web_kernel::JetWebQueryState {
+//RS         status,
+//RS         value: web_string(field("value")?, "query value", span)?,
+//RS         error: web_string(field("error")?, "query error", span)?,
+//RS         generation: web_int(field("generation")?, "query generation", span)? as u64,
+//RS         queued: web_int(field("queued")?, "query queued count", span)? as usize,
+//RS         offline: web_bool(field("offline")?, "query offline state", span)?,
+//RS     })
+//RS }
+//RS 
+//RS fn web_mutation_state_read(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<web_kernel::JetWebMutationState, Diagnostic> {
+//RS     let field = |name| web_record_field(value, name, span);
+//RS     let status = match web_enum_variant(field("status")?, "WebMutationStatus", span)? {
+//RS         "Idle" => web_kernel::JetWebMutationStatus::Idle,
+//RS         "Pending" => web_kernel::JetWebMutationStatus::Pending,
+//RS         "Success" => web_kernel::JetWebMutationStatus::Success,
+//RS         "Error" => web_kernel::JetWebMutationStatus::Error,
+//RS         "Settled" => web_kernel::JetWebMutationStatus::Settled,
+//RS         _ => return Err(unsupported("WebMutationStatus", span)),
+//RS     };
+//RS     Ok(web_kernel::JetWebMutationState {
+//RS         status,
+//RS         generation: web_int(field("generation")?, "mutation generation", span)? as u64,
+//RS         optimistic: web_bool(field("optimistic")?, "optimistic mutation", span)?,
+//RS         value: web_string(field("value")?, "mutation value", span)?,
+//RS         result: web_string(field("result")?, "mutation result", span)?,
+//RS         error: web_string(field("error")?, "mutation error", span)?,
+//RS         context: web_string(field("context")?, "mutation context", span)?,
+//RS         rollback: web_bool(field("rollback")?, "mutation rollback", span)?,
+//RS         paused: web_bool(field("paused")?, "mutation paused state", span)?,
+//RS         queued: web_int(field("queued")?, "queued mutation count", span)? as usize,
+//RS         replayed: web_int(field("replayed")?, "replayed mutation count", span)? as u64,
+//RS     })
+//RS }
+//RS 
+//RS fn web_signal_method<T: Clone + Send + Sync + 'static>(
+//RS     signal: &web_kernel::JetSignal<T>,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     encode: fn(T) -> CtValue,
+//RS     decode: fn(&CtValue, Span) -> Result<T, Diagnostic>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     match method {
+//RS         "get" => Ok(encode(signal.get())),
+//RS         "set" => {
+//RS             let value = args.first().ok_or_else(|| unsupported("Signal.set value", span))?;
+//RS             signal.set(decode(value, span)?);
+//RS             Ok(CtValue::Unit)
+//RS         }
+//RS         _ => Err(unsupported(&format!("Signal.{method}"), span)),
+//RS     }
+//RS }
+//RS 
+//RS fn normalize_web_handle_method(method: &str) -> &str {
+//RS     match method {
+//RS         "Signal.get" | "Derived.get" => "get",
+//RS         "Signal.set" => "set",
+//RS         "Effect.active" => "active",
+//RS         "Effect.unsubscribe" => "unsubscribe",
+//RS         _ => method,
+//RS     }
+//RS }
+//RS 
+//RS /// Preserve live Prelude owners across the interpreter's private handle boundary.
+//RS /// This is method-name/value marshalling, not a second reactive graph.
+//RS pub fn apply_web_handle(
+//RS     receiver: &CtValue,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS     result_type: Option<&Type>,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     let CtValue::Closure(data) = receiver else {
+//RS         return None;
+//RS     };
+//RS     let opaque = data.opaque.as_ref()?;
+//RS     if let Some(file_result) =
+//RS         crate::Comptime::TextLite::apply_file_handle(receiver, method, args, span)
+//RS     {
+//RS         return Some(file_result);
+//RS     }
+//RS     let method = normalize_web_handle_method(method);
+//RS     if let Some(effect) = opaque.downcast_ref::<web_kernel::JetReactiveEffect>() {
+//RS         return Some(match method {
+//RS             "active" => Ok(CtValue::Bool(effect.active())),
+//RS             "unsubscribe" => {
+//RS                 effect.unsubscribe();
+//RS                 Ok(CtValue::Unit)
+//RS             }
+//RS             _ => Err(unsupported(&format!("Effect.{method}"), span)),
+//RS         });
+//RS     }
+//RS     if let Some(signal) = opaque.downcast_ref::<web_kernel::JetSignal<CtValue>>() {
+//RS         return Some(web_signal_method(
+//RS             signal, method, args, |value| value, |value, _| Ok(value.clone()), span,
+//RS         ));
+//RS     }
+//RS     if let Some(signal) = opaque.downcast_ref::<web_kernel::JetSignal<web_kernel::JetWebQueryState>>() {
+//RS         return Some(web_signal_method(
+//RS             signal, method, args, web_query_state, web_query_state_read, span,
+//RS         ));
+//RS     }
+//RS     if let Some(signal) = opaque.downcast_ref::<web_kernel::JetSignal<web_kernel::JetWebMutationState>>() {
+//RS         return Some(web_signal_method(
+//RS             signal, method, args, web_mutation_state, web_mutation_state_read, span,
+//RS         ));
+//RS     }
+//RS     if let Some(derived) = opaque.downcast_ref::<web_kernel::JetDerived<CtValue>>() {
+//RS         return Some(match method {
+//RS             "get" => Ok(derived.get()),
+//RS             _ => Err(unsupported(&format!("Derived.{method}"), span)),
+//RS         });
+//RS     }
+//RS     if let Some(derived) = opaque.downcast_ref::<web_kernel::JetDerived<web_kernel::JetWebFormFieldState>>() {
+//RS         return Some(match method {
+//RS             "get" => Ok(web_form_field_state(derived.get())),
+//RS             _ => Err(unsupported(&format!("Derived.{method}"), span)),
+//RS         });
+//RS     }
+//RS     let (module, prefix) = if opaque.downcast_ref::<WebRouterHandle>().is_some() {
+//RS         ("core.web.router", "")
+//RS     } else if opaque.downcast_ref::<WebQueryHandle>().is_some() {
+//RS         ("core.web.query", "")
+//RS     } else if opaque.downcast_ref::<WebFormHandle>().is_some() {
+//RS         ("core.web.forms", "")
+//RS     } else if opaque.downcast_ref::<web_kernel::JetWebFormInput>().is_some() {
+//RS         ("core.web.forms", "input_")
+//RS     } else if opaque.downcast_ref::<web_kernel::JetWebFormTyped>().is_some() {
+//RS         ("core.web.forms", "typed_")
+//RS     } else if opaque.downcast_ref::<web_kernel::JetWebFormValidationChain>().is_some() {
+//RS         ("core.web.forms", "typed_validation_")
+//RS     } else if opaque.downcast_ref::<WebFormValidationHandle>().is_some() {
+//RS         ("core.web.forms", "typed_validation_")
+//RS     } else if opaque.downcast_ref::<WebFormSubmissionHandle>().is_some() {
+//RS         ("core.web.forms", "typed_submission_")
+//RS     } else if opaque.downcast_ref::<WebTableHandle>().is_some() {
+//RS         ("core.web.table", "")
+//RS     } else if opaque.downcast_ref::<WebVirtualPlanViewportHandle>().is_some() {
+//RS         ("core.web.virtual", "plan_viewport_")
+//RS     } else if opaque.downcast_ref::<WebStoreHandle>().is_some() {
+//RS         ("core.web.store", "")
+//RS     } else if opaque.downcast_ref::<WebStorePatchHandle>().is_some() {
+//RS         ("core.web.store", "patch_")
+//RS     } else if opaque.downcast_ref::<WebStoreSubscriptionHandle>().is_some() {
+//RS         ("core.web.store", "subscription_")
+//RS     } else {
+//RS         return None;
+//RS     };
+//RS     let projected;
+//RS     let method = if prefix.is_empty() {
+//RS         method
+//RS     } else {
+//RS         projected = format!("{prefix}{method}");
+//RS         &projected
+//RS     };
+//RS     if args.is_empty() {
+//RS         return Some(apply_suite(module, method, std::slice::from_ref(receiver), span, result_type));
+//RS     }
+//RS     let mut values = Vec::with_capacity(args.len() + 1);
+//RS     values.push(receiver.clone());
+//RS     values.extend_from_slice(args);
+//RS     Some(apply_suite(module, method, &values, span, result_type))
+//RS }
+//RS 
+//RS fn web_ints(value: &CtValue, what: &str, span: Span) -> Result<Vec<i64>, Diagnostic> {
+//RS     let CtValue::List(values) = value else {
+//RS         return Err(unsupported(what, span));
+//RS     };
+//RS     values.iter().map(|value| web_int(value, what, span)).collect()
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS fn _type_anchor() -> Type {
+//RS     Type::Named("LiveQuery".to_string())
+//RS }
+// END-PORT-PENDING 0557 crates/jet-comptime/src/Comptime/AppLite.rs:1793-3945
+

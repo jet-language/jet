@@ -1,0 +1,88 @@
+// Rust: Compiler/Bootstrap/BuildIdentity.rs. Filesystem/environment capture
+// requires the canonical native OsPath and retained-descriptor provider; these
+// pure functions consume the original captured facts/bytes without reopening.
+use jet_foundation.[MIRSHA256, mir_sha256_new, mir_sha256_update, mir_sha256_finish, mir_sha256_hex_bytes]
+
+pub BOOTSTRAP_COMPILER_DOMAIN :: "jet.compiler.v2"
+pub BOOTSTRAP_COMPILER_SOURCES :: [String]{
+    "Cargo.toml", "Compiler", "build.rs", "Core", "Source",
+    "crates/jet-foundation", "crates/jet-unicode", "crates/jet-lexer",
+    "crates/jet-parser", "crates/jet-net", "crates/jet-comptime",
+    "crates/jet-sema", "crates/jet-codegen", "crates/jet-driver",
+    "crates/jet-pkg-model", "crates/jet-env-model", "crates/jet-nix-eval",
+    "crates/jetpack", "crates/jet-queries", "crates/jet-semindex",
+    "crates/jet-impact", "crates/jet-jit", "crates/jet-rt", "crates/jet-repl",
+    "crates/jet-debug", "crates/jet-cli", "crates/jet-canvas",
+    "crates/jet-devserver", "Docs/spec/reference/core-library.md",
+    "Docs/spec/diagnostics.md", "Examples/features/collections/wordcount.jet",
+    "tests/fixtures/nix-compat/oracle.json",
+}
+
+pub struct BootstrapBuildFact {
+    pub key: String
+    pub value: String
+}
+pub struct BootstrapBuildInput {
+    pub path: String
+    pub bytes: [U8]
+}
+
+// Original profile/setting order, including empty override values at capture.
+pub fn bootstrap_profile_override_keys() -> [String] Never! {
+    keys := [String]{"RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"}
+    profiles :: [String]{"RELEASE", "DEV", "TEST", "BENCH"}
+    settings :: [String]{"PANIC", "OVERFLOW_CHECKS", "DEBUG_ASSERTIONS", "LTO", "CODEGEN_UNITS", "OPT_LEVEL", "DEBUG", "STRIP", "INCREMENTAL"}
+    loop profile in profiles {
+        loop setting in settings -> &keys.push("CARGO_PROFILE_{profile}_{setting}")
+    }
+    keys
+}
+
+fn bootstrap_identity_update(hash: &MIRSHA256, bytes: [U8]) Never! {
+    view :: bytes[0..<bytes.len()]
+    mir_sha256_update(&hash, view)
+}
+fn bootstrap_identity_length(hash: &MIRSHA256, length: Int) Never! {
+    bytes := [U8]{}
+    shift := 56
+    loop shift >= 0 {
+        &bytes.push(U8{(length >> shift) & 255})
+        shift -= 8
+    }
+    bootstrap_identity_update(&hash, bytes)
+}
+fn bootstrap_identity_text(hash: &MIRSHA256, value: String) Never! {
+    bytes :: value.bytes()
+    bootstrap_identity_length(&hash, bytes.len())
+    bootstrap_identity_update(&hash, bytes)
+}
+
+// Rust stable path sort/dedup keeps the first row for each exact path. Only
+// index keys are sorted; source bytes stay borrowed and are streamed once.
+// Facts deliberately retain caller order, matching the Rust framing contract.
+pub fn bootstrap_semantic_id_from_inputs(domain: String, facts: [BootstrapBuildFact], inputs: [BootstrapBuildInput]) -> String Never! {
+    by_path := [String:Int]{}
+    paths := [String]{}
+    loop index in 0..<inputs.len() {
+        path :: inputs[index].path
+        if by_path.get(path) == None {
+            by_path[path] = index
+            &paths.push(path)
+        }
+    }
+    &paths.sort()
+    hash := mir_sha256_new()
+    bootstrap_identity_update(&hash, domain.bytes())
+    bootstrap_identity_update(&hash, [U8]{U8{0}})
+    loop fact in facts {
+        bootstrap_identity_text(&hash, fact.key)
+        bootstrap_identity_text(&hash, fact.value)
+    }
+    loop path in paths {
+        index :: by_path.get(path) ?? panic("identity path index is complete")
+        bootstrap_identity_text(&hash, path)
+        bootstrap_identity_length(&hash, inputs[index].bytes.len())
+        bootstrap_identity_update(&hash, inputs[index].bytes)
+    }
+    mir_sha256_hex_bytes(mir_sha256_finish(^hash))
+}

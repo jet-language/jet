@@ -1,0 +1,2355 @@
+// PORT-PENDING 1037 tests-dev-parts-support-module-group-slice-3657: tests/dev_parts/support.rs:3657-5449
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn assert_resident_clif_shape(
+//RS     tag: &str,
+//RS     source: &str,
+//RS     require_funcs: &[&str],
+//RS     expected_stdout: &str,
+//RS ) {
+//RS     let dir = std::env::temp_dir().join(format!("jet_clif_shape_{tag}_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join(format!("{tag}.jet"));
+//RS     fs::write(&file, source).unwrap();
+//RS     let shown = file.to_string_lossy().to_string();
+//RS     let bundle = checked_bundle_from_path(&shown);
+//RS 
+//RS     let funcs = common::cranelift_func_names(&bundle);
+//RS     for want in require_funcs {
+//RS         assert!(
+//RS             funcs.iter().any(|name| name.as_str() == *want),
+//RS             "`{tag}` no longer emits `{want}`, so it cannot pin that site; emitted: {funcs:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy()).unwrap_or_else(|reason| {
+//RS         panic!("`{tag}` emitted CLIF that Cranelift's own verifier rejects: {reason}")
+//RS     });
+//RS 
+//RS     let plan = common::cranelift_tier_plan(&bundle);
+//RS     assert!(
+//RS         !plan.whole_interp && plan.deopt.is_empty(),
+//RS         "`{tag}` must plan entirely on the resident tier or its output proves nothing \
+//RS          about emitted CLIF: whole_interp={}, deopt={:?}, safety={:?}",
+//RS         plan.whole_interp,
+//RS         plan.deopt,
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident = run_cranelift_without_fallback(source, tag);
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "`{tag}` did not execute resident Cranelift"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "`{tag}` used deopt or fallback, so its output is not resident-JIT evidence"
+//RS     );
+//RS     assert_eq!(
+//RS         resident.stdout, expected_stdout,
+//RS         "`{tag}` resident JIT output drifted (stderr: {:?})",
+//RS         resident.stderr
+//RS     );
+//RS     assert_eq!(
+//RS         resident.exit_code, 0,
+//RS         "`{tag}` resident JIT exited {} (stderr: {:?})",
+//RS         resident.exit_code, resident.stderr
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// State the universe the compile audit measured, every time it reports.
+//RS ///
+//RS /// #1998: `gaps: 0` is only ever a claim about the stems the in-process harness
+//RS /// could put in front of the lowerer. Printing how many stems it could NOT, in
+//RS /// the same breath, is what stops the zero from being quoted on its own.
+//RS fn report_jit_universe(
+//RS     corpus: usize,
+//RS     covered: &[String],
+//RS     gaps: &[String],
+//RS     out_of_universe: &[String],
+//RS ) {
+//RS     eprintln!(
+//RS         "jit compile-coverage universe: {corpus} example stem(s) = {} compile-covered + {} \
+//RS          compile gap(s) + {} outside this oracle",
+//RS         covered.len(),
+//RS         gaps.len(),
+//RS         out_of_universe.len()
+//RS     );
+//RS     if out_of_universe.is_empty() {
+//RS         eprintln!("jit stems outside this oracle: none — the audit judged the whole corpus");
+//RS         return;
+//RS     }
+//RS     eprintln!(
+//RS         "jit stems outside this oracle ({}): the {} gap row(s) are scoped to the {} stem(s) \
+//RS          this oracle could judge, NOT to the {corpus}-stem corpus (#1998)",
+//RS         out_of_universe.len(),
+//RS         gaps.len(),
+//RS         covered.len() + gaps.len()
+//RS     );
+//RS     for row in out_of_universe {
+//RS         eprintln!("  {row}");
+//RS     }
+//RS }
+//RS 
+//RS fn jit_coverage_audit_inner() {
+//RS     let JitCoverage {
+//RS         corpus,
+//RS         covered,
+//RS         gaps,
+//RS         out_of_universe,
+//RS         // #2012: the resident split of `covered` belongs to
+//RS         // `cranelift_three_way_differential_battery`, which states and pins it
+//RS         // there. This ratchet is about compile coverage only.
+//RS         ..
+//RS     } = collect_jit_coverage();
+//RS     let run_gaps = corpus_gate_run_gaps(&parse_corpus_gate_manifest());
+//RS     eprintln!(
+//RS         "jit coverage: gaps: {}, run_gaps: {}",
+//RS         gaps.len(),
+//RS         run_gaps.len()
+//RS     );
+//RS     report_jit_universe(corpus, &covered, &gaps, &out_of_universe);
+//RS     eprintln!("jit compile-covered ({}):", covered.len());
+//RS     for s in &covered {
+//RS         eprintln!("  {s}");
+//RS     }
+//RS     // #1998: never print a bare `gaps: N`. The count is over the stems this
+//RS     // oracle could judge, and the line says so wherever it is quoted.
+//RS     eprintln!(
+//RS         "jit gaps ({} of {} stem(s) judged; {} stem(s) unjudged):",
+//RS         gaps.len(),
+//RS         covered.len() + gaps.len(),
+//RS         out_of_universe.len()
+//RS     );
+//RS     for g in &gaps {
+//RS         eprintln!("  {g}");
+//RS     }
+//RS     print_jit_op_report();
+//RS 
+//RS     // #1998: the universe pins the corpus and the compile oracle, so coverage
+//RS     // cannot be greened by a stem quietly leaving the denominator.
+//RS     assert!(
+//RS         corpus >= EXAMPLE_CORPUS_FLOOR,
+//RS         "the example corpus shrank to {corpus} stem(s) (floor {EXAMPLE_CORPUS_FLOOR}). A stem \
+//RS          leaving `Examples/features/<topic>/` shrinks every claim this audit makes: restore \
+//RS          it, or lower the floor in the same diff as the deletion."
+//RS     );
+//RS 
+//RS     // Every out-of-universe row is a defect to fix; the count is derived, never
+//RS     // an allowlist.
+//RS     assert!(
+//RS         out_of_universe.len() <= OUT_OF_UNIVERSE_CEILING,
+//RS         "{} stem(s) sit outside the compile oracle (ceiling {OUT_OF_UNIVERSE_CEILING}); this \
+//RS          count may only fall:\n{}",
+//RS         out_of_universe.len(),
+//RS         out_of_universe.join("\n")
+//RS     );
+//RS     assert!(
+//RS         !out_of_universe.is_empty() || OUT_OF_UNIVERSE_CEILING == 0,
+//RS         "the oracle now judges the whole corpus: set OUT_OF_UNIVERSE_CEILING to 0 in the same \
+//RS          diff, so the universe hole cannot reopen unnoticed"
+//RS     );
+//RS     assert!(
+//RS         gaps.is_empty(),
+//RS         "JIT compile coverage has {} gap(s); fix the lowering path before changing the corpus \
+//RS          claim:\n{}",
+//RS         gaps.len(),
+//RS         gaps.join("\n")
+//RS     );
+//RS     assert!(
+//RS         run_gaps.is_empty(),
+//RS         "JIT run-tier parity has {} gap(s); fix the shared semantics:\n{}",
+//RS         run_gaps.len(),
+//RS         run_gaps.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS fn cranelift_three_way_differential_battery_inner() {
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let have_rustc = have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: rustc not found; skipping three-way JIT differential battery");
+//RS         return;
+//RS     }
+//RS 
+//RS     // Focused stem: `JET_THREE_WAY_STEM=io/files_depth cargo test --test dev_corpus cranelift_three_way_differential_battery`
+//RS     if let Ok(stem) = std::env::var("JET_THREE_WAY_STEM") {
+//RS         assert_cranelift_three_way(&example_path(&stem), &stem);
+//RS         eprintln!(
+//RS             "three-way battery: focused stem `{stem}` ok — this run is scoped to that ONE stem \
+//RS              and is NOT the battery"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     // #2012: one oracle, one universe. This battery is scoped to the
+//RS     // `resident_safe` bucket of the shared `collect_jit_coverage` walk — the same
+//RS     // observation `jit_coverage_audit` ratchets.
+//RS     //
+//RS     // It used to walk the corpus itself, in `jit_covered_example_stems`, with the
+//RS     // two silent drops #1998 removed from the audit: `Err(_) => continue` on a
+//RS     // loader failure and a bare `continue` on a sema error. A stem this battery
+//RS     // could not even load was therefore never reported as untested — it left the
+//RS     // denominator without a word and the battery still passed. Reading the shared
+//RS     // observation makes that impossible twice over: the walk is total, and a
+//RS     // second oracle that could disagree with the first no longer exists.
+//RS     let JitCoverage {
+//RS         corpus,
+//RS         covered,
+//RS         resident_safe,
+//RS         resident_refused,
+//RS         gaps,
+//RS         out_of_universe,
+//RS     } = collect_jit_coverage();
+//RS 
+//RS     // State the universe before spending an hour of AOT builds inside it, and
+//RS     // pin it before trusting anything measured over it. These are the audit's own
+//RS     // pins, asserted here because this battery inherits the audit's denominator:
+//RS     // a stem cannot leave this battery by leaving the corpus, by becoming
+//RS     // unjudgeable by the compile oracle, or by quietly failing the resident gate.
+//RS     report_jit_universe(corpus, &covered, &gaps, &out_of_universe);
+//RS     assert!(
+//RS         corpus >= EXAMPLE_CORPUS_FLOOR,
+//RS         "the example corpus shrank to {corpus} stem(s) (floor {EXAMPLE_CORPUS_FLOOR}); this \
+//RS          battery is scoped to a subset of it, so a smaller corpus silently shrinks the battery"
+//RS     );
+//RS     assert!(
+//RS         out_of_universe.len() <= OUT_OF_UNIVERSE_CEILING,
+//RS         "{} stem(s) sit outside the compile oracle (ceiling {OUT_OF_UNIVERSE_CEILING}), so this \
+//RS          battery never judged them; the count may only fall:\n{}",
+//RS         out_of_universe.len(),
+//RS         out_of_universe.join("\n")
+//RS     );
+//RS     assert!(
+//RS         resident_safe.len() >= RESIDENT_SAFE_FLOOR,
+//RS         "the resident-safe universe shrank to {} stem(s) of {} compile-covered (floor \
+//RS          {RESIDENT_SAFE_FLOOR}). A stem leaving the resident gate leaves this battery: fix the \
+//RS          gate or the lowering it refuses, and only lower the floor in a reviewed diff. Refused \
+//RS          now:\n{}",
+//RS         resident_safe.len(),
+//RS         covered.len(),
+//RS         resident_refused.join("\n")
+//RS     );
+//RS 
+//RS     // Say it before running, not only after: a differential failure inside the
+//RS     // loop must not be the reason nobody learns what the battery was scoped to.
+//RS     eprintln!(
+//RS         "three-way battery scope: {} resident-safe stem(s) of {} compile-covered in a \
+//RS          {corpus}-stem corpus; {} compile-covered stem(s) refused by the resident gate, {} \
+//RS          compile gap(s) and {} stem(s) outside the compile oracle are NOT tested here",
+//RS         resident_safe.len(),
+//RS         covered.len(),
+//RS         resident_refused.len(),
+//RS         gaps.len(),
+//RS         out_of_universe.len()
+//RS     );
+//RS 
+//RS     // Every stem of the stated universe lands in exactly one of these three, so
+//RS     // no stem can drop out of the battery without a counted reason.
+//RS     let mut to_run: Vec<String> = Vec::new();
+//RS     let mut no_golden = Vec::new();
+//RS     let mut held_back = Vec::new();
+//RS     for stem in &resident_safe {
+//RS         if !root
+//RS             .join(format!("Examples/features/expected/{stem}.out"))
+//RS             .exists()
+//RS         {
+//RS             no_golden.push(stem.clone());
+//RS             continue;
+//RS         }
+//RS         // #2016: a service entry serves until it is stopped, so running it here
+//RS         // spends the battery's timeout and, for the three `App` examples, races
+//RS         // a fixed port. Held back by the DERIVED predicate rather than by name,
+//RS         // so a fourth service example is classified instead of being discovered
+//RS         // by a timeout. Still counted with a reason, per the #1998 rule.
+//RS         {
+//RS             let file = example_path(stem);
+//RS             if let Ok(mut bundle) = jet::Loader::load_entry(&file) {
+//RS                 let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS                 if jet::AST::bundle_serves_until_stopped(&bundle) {
+//RS                     held_back.push(format!("{stem}: service entry serves until stopped"));
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS         }
+//RS         // JIT lowers only `tir_covers` entry-module funcs; AOT still walks every
+//RS         // top-level item. `web/app_hello` keeps unused web.page/app helpers that
+//RS         // miss the TIR gate (ICE on `home`) while `run` stays resident-JIT safe.
+//RS         if stem == "web/app_hello" {
+//RS             held_back.push(format!("{stem}: AOT TIR gate miss on unused web helpers"));
+//RS             continue;
+//RS         }
+//RS         to_run.push(stem.clone());
+//RS     }
+//RS     // #2020: the classification above stays sequential and unchanged, so the
+//RS     // three buckets still partition the universe exactly; only the expensive
+//RS     // judging is spread across workers.
+//RS     let ran = run_three_way_battery_parallel(to_run);
+//RS 
+//RS     // #2012: totality. The three buckets partition the universe exactly, so the
+//RS     // battery cannot run fewer stems than it speaks for.
+//RS     assert_eq!(
+//RS         ran + no_golden.len() + held_back.len(),
+//RS         resident_safe.len(),
+//RS         "the three-way battery lost a stem: {} resident-safe, {ran} ran, {} without a golden, {} \
+//RS          held back. Every stem of the universe lands in exactly one bucket (#2012)",
+//RS         resident_safe.len(),
+//RS         no_golden.len(),
+//RS         held_back.len()
+//RS     );
+//RS 
+//RS     // #2012: never print a bare `N ran`. This battery speaks for the
+//RS     // resident-safe stems only, and the line that reports it says so, together
+//RS     // with everything it is NOT a claim about.
+//RS     eprintln!(
+//RS         "three-way battery universe: {} resident-safe stem(s) of {} compile-covered, out of a \
+//RS          {corpus}-stem corpus = {ran} ran + {} with no golden + {} held back at a named AOT gate. \
+//RS          This battery says NOTHING about the {} compile-covered stem(s) the resident gate \
+//RS          refuses, the {} compile gap(s), or the {} stem(s) outside the compile oracle.",
+//RS         resident_safe.len(),
+//RS         covered.len(),
+//RS         no_golden.len(),
+//RS         held_back.len(),
+//RS         resident_refused.len(),
+//RS         gaps.len(),
+//RS         out_of_universe.len()
+//RS     );
+//RS     for row in &resident_refused {
+//RS         eprintln!("  resident gate refused: {row}");
+//RS     }
+//RS     for stem in &no_golden {
+//RS         eprintln!("  no golden: {stem}");
+//RS     }
+//RS     for row in &held_back {
+//RS         eprintln!("  held back: {row}");
+//RS     }
+//RS 
+//RS     // Raised from the original `ran >= 9` M3 seed floor, which stopped saying
+//RS     // anything once the battery reached the hundreds: a deleted golden moves a
+//RS     // stem from `ran` to `no_golden` without moving it out of the universe, and
+//RS     // only this floor notices.
+//RS     assert!(
+//RS         ran >= THREE_WAY_RAN_FLOOR,
+//RS         "the three-way battery ran {ran} of its {} resident-safe stem(s) (floor \
+//RS          {THREE_WAY_RAN_FLOOR}); it may only grow. A fallen count means goldens or resident-safe \
+//RS          stems left the battery: restore them, or lower the floor in the same reviewed diff.",
+//RS         resident_safe.len()
+//RS     );
+//RS     report_oracle_cache_counts();
+//RS }
+//RS 
+//RS // ── c727: differential example-corpus gate (D-LENS-RUN1 / #688 C1) ─────────
+//RS 
+//RS /// Stable exclusion for examples outside the native JIT↔AOT oracle lens.
+//RS fn corpus_gate_exclusion(stem: &str) -> Option<&'static str> {
+//RS     match stem {
+//RS         "game/raylib_window" => Some("interactive display required"),
+//RS         "lowlevel/cross" => Some("cross-target demo"),
+//RS         "net/http_server"
+//RS         | "net/http_server_lifecycle"
+//RS         | "net/http_server_middleware"
+//RS         | "net/http_server_tasks"
+//RS         | "net/http_server_trailers"
+//RS         | "net/socket_echo" => Some("network service"),
+//RS         "ui/ui_native_linux" => Some("native GTK shell"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn example_has_err_golden(stem: &str) -> bool {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join(format!("Examples/features/expected/{stem}.err.out"))
+//RS         .is_file()
+//RS }
+//RS 
+//RS fn example_has_out_golden(stem: &str) -> bool {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join(format!("Examples/features/expected/{stem}.out"))
+//RS         .is_file()
+//RS }
+//RS 
+//RS /// Unique diagnostic codes in encounter order — run_tier_broken records codes only
+//RS /// so concurrent E0956 wording churn does not thrash the manifest.
+//RS fn corpus_gate_unique_codes<'a>(codes: impl IntoIterator<Item = &'a str>) -> String {
+//RS     let mut seen = std::collections::HashSet::new();
+//RS     let mut out = Vec::new();
+//RS     for code in codes {
+//RS         if seen.insert(code) {
+//RS             out.push(code);
+//RS         }
+//RS     }
+//RS     out.join("; ")
+//RS }
+//RS 
+//RS fn corpus_gate_interpreter_refusal_detail<'a>(codes: impl IntoIterator<Item = &'a str>) -> String {
+//RS     format!("interpreter_refused: {}", corpus_gate_unique_codes(codes))
+//RS }
+//RS 
+//RS /// R13 (#1997): an abort is never an outcome, so it is never a ledger row
+//RS /// either.
+//RS ///
+//RS /// Every other classification below records a real observable — a diagnostic, an
+//RS /// exit code, a diverging stream. An abort records none of those: the process
+//RS /// died before the report boundary could run, and the exit code it leaves behind
+//RS /// describes the corpse rather than the program. Filing one is worse than
+//RS /// missing it, because every ratcheted section here is shrink-only, so the row
+//RS /// then *protects* the abort from ever failing this suite again.
+//RS ///
+//RS /// That is not hypothetical. `streams/generators` cancelled a generator at a
+//RS /// wait point inside drop glue, raised a second time, and died with `panic in a
+//RS /// destructor during cleanup`; the classifier saw only `exit_code != 0` and
+//RS /// filed the benign-looking `aot_broken` row `AOT exit 1`. So the check lives
+//RS /// where the bytes are first seen, on every tier, rather than in the manifest
+//RS /// where the abort has already been turned into a number.
+//RS fn corpus_gate_refuse_abort(stem: &str, tier: &str, out: &ProgramOutput) {
+//RS     if let Some(marker) = common::abort_marker(&out.stderr) {
+//RS         panic!(
+//RS             "`{stem}`: the {tier} run carries the abort marker `{marker}`, so a Rust \
+//RS              control transfer killed the process instead of becoming a report. An \
+//RS              abort is never an outcome and never a gate row either — fix the \
+//RS              boundary, do not file the stem (Docs/spec/architecture.md R13, \
+//RS              crates/jet-jit/src/host_seam.rs).\nexit: {}\nstdout:\n{}\nstderr:\n{}",
+//RS             out.exit_code, out.stdout, out.stderr
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// Which observable stream(s) diverged, as stable tokens.
+//RS ///
+//RS /// The old detail for a divergence was the single word `parity`, which named the
+//RS /// CHECK rather than the finding: a stem could sit in `run_tier_broken` reading
+//RS /// `parity` while the default run had exited 0 with correct-looking output. These
+//RS /// tokens are the finding, and they stay free of program text so a divergence
+//RS /// cannot thrash the ledger with its own payload.
+//RS fn corpus_gate_divergent_streams(jit: &ProgramOutput, aot: &ProgramOutput) -> String {
+//RS     let mut streams = Vec::new();
+//RS     if jit.stdout != aot.stdout {
+//RS         streams.push("stdout");
+//RS     }
+//RS     if jit.stderr != aot.stderr {
+//RS         streams.push("stderr");
+//RS     }
+//RS     if jit.exit_code != aot.exit_code {
+//RS         streams.push("exit");
+//RS     }
+//RS     streams.join("+")
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+//RS enum CorpusGateClass {
+//RS     FrontendRejected,
+//RS     GateExcluded,
+//RS     NonRunnable,
+//RS     /// The HOST has no rustc, so no AOT oracle could be built for ANY stem. This
+//RS     /// states a fact about the machine, never about the program: membership is
+//RS     /// all-or-nothing and flips when a toolchain is installed. That is exactly
+//RS     /// why it is neither `expected_exit` nor `aot_broken` — a shrink-only
+//RS     /// ratchet over a set the host decides cannot be held honestly, and a stem
+//RS     /// whose oracle was never built is no evidence that anything is broken or
+//RS     /// repaired (#2016). Detail names the missing tool.
+//RS     OracleUnavailable,
+//RS     /// The GOLDEN expects a non-zero exit (an `.err` golden is present), so the
+//RS     /// stem has no exit-0 oracle to differentiate against. Exactly ONE fact.
+//RS     ///
+//RS     /// It used to carry four: this one, `rustc unavailable`, `AOT compile or run
+//RS     /// failed`, and `AOT exit N`. A broken oracle therefore sat in a
+//RS     /// benign-sounding section and was dropped from the differential entirely,
+//RS     /// so a cross-tier divergence in any of those stems was permanently
+//RS     /// unobservable — the same shape as the `parity` rows that hid in
+//RS     /// `run_tier_broken` (#2016).
+//RS     ExpectedExit,
+//RS     /// The AOT ORACLE ITSELF is broken: the optimized AOT build failed, or the
+//RS     /// binary it produced exited non-zero for a stem whose golden expects exit
+//RS     /// 0. No tier comparison runs for such a stem, so this is a HOLE in the
+//RS     /// differential, not an outcome the gate accepts. Shrink-only against
+//RS     /// `AOT_BROKEN_HELD_OUT`.
+//RS     ///
+//RS     /// A build failure here is also where an I2 violation surfaces: rustc
+//RS     /// rejecting GENERATED code is an internal compiler error, never a
+//RS     /// user-facing outcome. Detail is `AOT compile or run failed` or `AOT exit
+//RS     /// N`.
+//RS     AotBroken,
+//RS     ResidentJit,
+//RS     DeoptInterp,
+//RS     /// AOT-green (oracle exit 0) but the default tiered run REFUSES to run the
+//RS     /// program: sema rejects it on the run path, or the tiered backend answers
+//RS     /// `Problems`. Shrink-only burndown (D-VERDICT-1254-1 / D-LENS-RUN1). Detail
+//RS     /// is diagnostic codes only — a record with any other detail is not this
+//RS     /// class, which is how `parity` rows hid eight non-refusals here.
+//RS     RunTierBroken,
+//RS     /// AOT-green and the default tiered run ALSO ran to completion, but their
+//RS     /// normalized stdout/stderr/exit differ. That is a tier-semantics divergence,
+//RS     /// not a run-tier refusal: the program runs under `jet run` and prints the
+//RS     /// wrong thing (or the oracle does). Kept separate because `run_tier_broken`
+//RS     /// asserts "fails under default `jet run`", and a stem that ran did not fail
+//RS     /// (D-ONECORE1=A, the same law `jit_coverage_audit` states).
+//RS     /// Detail names the diverging stream(s): `stdout`, `stderr`, `exit`.
+//RS     TierDivergent,
+//RS }
+//RS 
+//RS /// The stems whose default `jet run` is KNOWN to refuse an AOT-green program,
+//RS /// with the codes it stops on and the card that owes the fix. Stem-sorted, and
+//RS /// the gate compares its observed `run_tier_broken` class against this list
+//RS /// EXACTLY — so a new refusal fails, and a repaired one fails until its row is
+//RS /// deleted here.
+//RS ///
+//RS /// It lives in source, not in `tests/jit_corpus_gate.txt`: the ledger is
+//RS /// regenerated from an observed run, so a row there cannot hold a law that
+//RS /// regeneration is meant to be unable to silence (#2013).
+//RS ///
+//RS /// Empty since #2016: the one row here, `lowlevel/layout_columnar`, cannot be
+//RS /// observed in this class at all while its AOT oracle is broken, because an
+//RS /// exit-0 oracle is the precondition for reaching the run tier. The stem is
+//RS /// held out in `AOT_BROKEN_HELD_OUT` instead, which names #1988 too, and the
+//RS /// diff that repairs the AOT build moves the row back here — one section owns a
+//RS /// stem, so the two lists never double-count it.
+//RS const RUN_TIER_BROKEN_HELD_OUT: &[(&str, &str, &str)] = &[];
+//RS 
+//RS /// The stems whose AOT ORACLE is KNOWN to be broken, with the observed detail
+//RS /// and the card that owes the fix. Stem-sorted, compared EXACTLY against the
+//RS /// observed `aot_broken` class for the same reason `RUN_TIER_BROKEN_HELD_OUT`
+//RS /// is: a new breakage fails, and a repaired stem fails until its row is deleted
+//RS /// here.
+//RS ///
+//RS /// Every row is a stem the three-tier differential does not cover, so the list
+//RS /// is the honest size of the hole. It may only SHRINK. Raising it is not a fix
+//RS /// — repair the oracle (#2016).
+//RS const AOT_BROKEN_HELD_OUT: &[(&str, &str, &str)] = &[
+//RS     (
+//RS         "devloop/schedule_every",
+//RS         "AOT compile or run failed",
+//RS         "#2016: the optimized AOT build or run of the example fails, so the gate \
+//RS          has no oracle to compare the tiers against",
+//RS     ),
+//RS     (
+//RS         "operators/spaceship",
+//RS         "AOT compile or run failed",
+//RS         "#2016: the optimized AOT build or run of the example fails, so the gate \
+//RS          has no oracle to compare the tiers against",
+//RS     ),
+//RS     (
+//RS         "reflection/reflect-value",
+//RS         "AOT exit 70",
+//RS         "#2016: the AOT binary exits 70 for a stem whose golden expects exit 0, \
+//RS          so the oracle disagrees with the golden and cannot arbitrate the tiers",
+//RS     ),
+//RS     (
+//RS         "serde/hand_codec",
+//RS         "AOT exit 1",
+//RS         "#2016: the AOT binary exits 1 for a stem whose golden expects exit 0, \
+//RS          so the oracle disagrees with the golden and cannot arbitrate the tiers",
+//RS     ),
+//RS     (
+//RS         "types/typed_literal_forms",
+//RS         "AOT compile or run failed",
+//RS         "#2016: the optimized AOT build or run of the example fails, so the gate \
+//RS          has no oracle to compare the tiers against",
+//RS     ),
+//RS ];
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+//RS struct CorpusGateRecord {
+//RS     stem: String,
+//RS     class: CorpusGateClass,
+//RS     detail: String,
+//RS }
+//RS 
+//RS fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
+//RS     let file = example_path(stem);
+//RS     if let Some(reason) = corpus_gate_exclusion(stem) {
+//RS         return CorpusGateRecord {
+//RS             stem: stem.to_string(),
+//RS             class: CorpusGateClass::GateExcluded,
+//RS             detail: reason.to_string(),
+//RS         };
+//RS     }
+//RS 
+//RS     let build_entry = fs::read_to_string(&file)
+//RS         .ok()
+//RS         .is_some_and(|source| jet::Driver::selects_build_entry(&source, None));
+//RS     let mut bundle = if build_entry {
+//RS         match jet::Driver::compile_bundle_path_build(&file, jet::Driver::BuildRunOptions::default())
+//RS         {
+//RS             Ok(output) => match output.runtime {
+//RS                 Some(bundle) => bundle,
+//RS                 None => {
+//RS                     return CorpusGateRecord {
+//RS                         stem: stem.to_string(),
+//RS                         class: CorpusGateClass::FrontendRejected,
+//RS                         detail: "build front end returned no runtime bundle".to_string(),
+//RS                     }
+//RS                 }
+//RS             },
+//RS             Err(diags) => {
+//RS                 let detail = diags
+//RS                     .first()
+//RS                     .map(|d| format!("{}: {}", d.code, d.what))
+//RS                     .unwrap_or_else(|| "build failed".to_string());
+//RS                 return CorpusGateRecord {
+//RS                     stem: stem.to_string(),
+//RS                     class: CorpusGateClass::FrontendRejected,
+//RS                     detail,
+//RS                 };
+//RS             }
+//RS         }
+//RS     } else {
+//RS         match jet::Loader::load_entry(&file) {
+//RS             Ok(b) => b,
+//RS             Err(diags) => {
+//RS                 let detail = diags
+//RS                     .first()
+//RS                     .map(|d| format!("{}: {}", d.code, d.what))
+//RS                     .unwrap_or_else(|| "load failed".to_string());
+//RS                 return CorpusGateRecord {
+//RS                     stem: stem.to_string(),
+//RS                     class: CorpusGateClass::FrontendRejected,
+//RS                     detail,
+//RS                 };
+//RS             }
+//RS         }
+//RS     };
+//RS     // The run tier's bundle is the one `jet run` builds, not a load+check
+//RS     // lookalike. `Interpreter::checked_bundle_with_entry` seeds the single
+//RS     // build-fact snapshot before sema, and the AOT oracle below gets it too
+//RS     // (`compile_with_path` -> `Driver::seed_build_facts_from_stamp`). Skipping it
+//RS     // here left every `@build.*` read folding to a default on the tiered side
+//RS     // only, so `comptime/build_stamp` printed the harness's defaults against the
+//RS     // oracle's locked `.jet/lock` stamp and the gate blamed the run tier for a
+//RS     // snapshot the gate itself never took (I9: engines marshal one snapshot).
+//RS     let errors: Vec<_> = if build_entry {
+//RS         Vec::new()
+//RS     } else {
+//RS         match jet::Driver::seed_build_facts(
+//RS             &mut bundle,
+//RS             "dev",
+//RS             false,
+//RS             &std::collections::BTreeMap::new(),
+//RS         ) {
+//RS             // Seeding answers with errors only, so they are already the run-path
+//RS             // rejection the block below classifies.
+//RS             Err(diags) => diags,
+//RS             Ok(()) => jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+//RS                 .into_iter()
+//RS                 .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS                 .collect(),
+//RS         }
+//RS     };
+//RS     if !errors.is_empty() {
+//RS         let detail = errors
+//RS             .iter()
+//RS             .map(|d| format!("{}: {}", d.code, d.what))
+//RS             .collect::<Vec<_>>()
+//RS             .join("; ");
+//RS         // Run-path frontend rejection of an AOT/golden-green example is a
+//RS         // run-tier parity hole, not a true frontend reject (D-VERDICT-1254-1).
+//RS         if have_rustc && example_has_out_golden(stem) && !example_has_err_golden(stem) {
+//RS             let aot_dir = aot_scratch_dir("corpus_gate", stem);
+//RS             if let Some(aot) =
+//RS                 try_compiled_binary_output(&aot_dir, "corpus_gate_aot", 0, stem, &file)
+//RS             {
+//RS                 if aot.exit_code == 0 {
+//RS                     return CorpusGateRecord {
+//RS                         stem: stem.to_string(),
+//RS                         class: CorpusGateClass::RunTierBroken,
+//RS                         detail: corpus_gate_unique_codes(errors.iter().map(|d| d.code.as_str())),
+//RS                     };
+//RS                 }
+//RS             }
+//RS         }
+//RS         return CorpusGateRecord {
+//RS             stem: stem.to_string(),
+//RS             class: CorpusGateClass::FrontendRejected,
+//RS             detail,
+//RS         };
+//RS     }
+//RS 
+//RS     // A HOST fact, kept out of every ratcheted section: without rustc there is
+//RS     // no oracle for ANY stem, so nothing here can be read as a property of the
+//RS     // program (#2016).
+//RS     if !have_rustc {
+//RS         return CorpusGateRecord {
+//RS             stem: stem.to_string(),
+//RS             class: CorpusGateClass::OracleUnavailable,
+//RS             detail: "rustc unavailable; oracle skipped".to_string(),
+//RS         };
+//RS     }
+//RS 
+//RS     // #2016: a service entry serves until it is stopped, so it has no
+//RS     // terminating observable for a three-tier differential to compare, and
+//RS     // running it costs the gate its whole timeout. It leaves the RUN universe
+//RS     // and stays in the COMPILE universe: the AOT build below is the only proof
+//RS     // left that the stem is real, so a build failure is asserted, not skipped.
+//RS     //
+//RS     // The reason is DERIVED from the program, never a stem list. Before this,
+//RS     // "entry returns App" lived as four private copies with no shared
+//RS     // predicate, which is why nothing forced the gate to notice when three
+//RS     // examples became services.
+//RS     if jet::AST::bundle_serves_until_stopped(&bundle) {
+//RS         let aot_dir = aot_scratch_dir("corpus_gate_service", stem);
+//RS         assert!(
+//RS             try_compiled_binary_build(&aot_dir, "corpus_gate_service", 0, stem, &file).is_some(),
+//RS             "`{stem}` is a service entry outside the gate's run universe, so its AOT compile is \
+//RS              the only proof left: that compile failed"
+//RS         );
+//RS         return CorpusGateRecord {
+//RS             stem: stem.to_string(),
+//RS             class: CorpusGateClass::GateExcluded,
+//RS             detail: "service entry serves until stopped".to_string(),
+//RS         };
+//RS     }
+//RS 
+//RS     if example_has_err_golden(stem) {
+//RS         return CorpusGateRecord {
+//RS             stem: stem.to_string(),
+//RS             class: CorpusGateClass::ExpectedExit,
+//RS             detail: "golden expects non-zero exit".to_string(),
+//RS         };
+//RS     }
+//RS 
+//RS     let aot_dir = aot_scratch_dir("corpus_gate", stem);
+//RS     let aot = try_compiled_binary_output(&aot_dir, "corpus_gate_aot", 0, stem, &file);
+//RS     let aot = match aot {
+//RS         Some(out) => out,
+//RS         None => {
+//RS             return CorpusGateRecord {
+//RS                 stem: stem.to_string(),
+//RS                 class: CorpusGateClass::AotBroken,
+//RS                 detail: "AOT compile or run failed".to_string(),
+//RS             };
+//RS         }
+//RS     };
+//RS     corpus_gate_refuse_abort(stem, "AOT oracle", &aot);
+//RS     if aot.exit_code != 0 {
+//RS         return CorpusGateRecord {
+//RS             stem: stem.to_string(),
+//RS             class: CorpusGateClass::AotBroken,
+//RS             detail: format!("AOT exit {}", aot.exit_code),
+//RS         };
+//RS     }
+//RS 
+//RS     let policy = common::development_policy();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let mut backend = CraneliftBackend::new();
+//RS     let jit = jet_jit::with_program_args(&[file.clone()], || {
+//RS         common::run_cranelift_bundle(&mut backend, &bundle, false, &policy)
+//RS     });
+//RS     assert!(
+//RS         !jet_jit::fallback_invoked_for_test(),
+//RS         "`{stem}` must not invoke forbidden interpreter/AOT fallback under tiered Cranelift"
+//RS     );
+//RS 
+//RS     match jit {
+//RS         RunOutcome::Problems(diags) => {
+//RS             assert!(
+//RS                 !diags.iter().any(|diagnostic| diagnostic.code == "E2211"),
+//RS                 "`{stem}` must not emit retired E2211: {diags:?}"
+//RS             );
+//RS             // AOT already green above — Problems under default tiered run is a
+//RS             // shrink-only run_tier_broken entry, never an accepted deopt class.
+//RS             CorpusGateRecord {
+//RS                 stem: stem.to_string(),
+//RS                 class: CorpusGateClass::RunTierBroken,
+//RS                 detail: corpus_gate_unique_codes(diags.iter().map(|d| d.code.as_str())),
+//RS             }
+//RS         }
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             let jit_raw = ProgramOutput::ran(stdout, stderr, exit_code);
+//RS             corpus_gate_refuse_abort(stem, "default `jet run`", &jit_raw);
+//RS             let jit_out = normalize_for_parity(stem, jit_raw);
+//RS             let aot_out = normalize_for_parity(stem, aot);
+//RS             // The program RAN under the default tier. If its normalized output
+//RS             // differs from the oracle's, that is a tier-semantics divergence, not
+//RS             // the run-tier refusal `run_tier_broken` asserts — recording it there
+//RS             // made that section's own message ("fail under default `jet run`")
+//RS             // false for every `parity` row it held.
+//RS             if jit_out != aot_out {
+//RS                 return CorpusGateRecord {
+//RS                     stem: stem.to_string(),
+//RS                     class: CorpusGateClass::TierDivergent,
+//RS                     detail: corpus_gate_divergent_streams(&jit_out, &aot_out),
+//RS                 };
+//RS             }
+//RS             // Criterion #5: tiered must match AOT (above). The forced
+//RS             // interpreter must match when the canonical MIR evaluator covers
+//RS             // the program. A known E0956 boundary is recorded on the backend
+//RS             // row; it is not an interpreter comparison.
+//RS             let interpreter_detail = match common::run_interpreter_checked_bundle(
+//RS                 &bundle,
+//RS                 true,
+//RS                 jet::Interpreter::InterpreterInvocation::RunInterpret,
+//RS                 &policy,
+//RS             ) {
+//RS                 RunOutcome::Ran {
+//RS                     stdout,
+//RS                     stderr,
+//RS                     exit_code,
+//RS                 } => {
+//RS                     let interp_raw = ProgramOutput::ran(stdout, stderr, exit_code);
+//RS                     corpus_gate_refuse_abort(stem, "forced interpreter", &interp_raw);
+//RS                     let interp_out = normalize_for_parity(stem, interp_raw);
+//RS                     assert_eq!(
+//RS                         interp_out, aot_out,
+//RS                         "`{stem}` pure-interpreter must match AOT stdout/stderr/exit"
+//RS                     );
+//RS                     String::new()
+//RS                 }
+//RS                 RunOutcome::Problems(diags) => {
+//RS                     assert!(
+//RS                         diags.iter().any(|d| d.code == "E0956"),
+//RS                         "`{stem}` pure-interpreter failed without the canonical evaluator boundary: {diags:?}"
+//RS                     );
+//RS                     corpus_gate_interpreter_refusal_detail(
+//RS                         diags.iter().map(|diagnostic| diagnostic.code.as_str()),
+//RS                     )
+//RS                 }
+//RS             };
+//RS 
+//RS             if jet_jit::deopt_invoked_for_test() || !common::cranelift_resident_safe(&bundle) {
+//RS                 CorpusGateRecord {
+//RS                     stem: stem.to_string(),
+//RS                     class: CorpusGateClass::DeoptInterp,
+//RS                     detail: interpreter_detail,
+//RS                 }
+//RS             } else {
+//RS                 assert!(
+//RS                     jet_jit::jit_executed_for_test(),
+//RS                     "`{stem}` must execute resident Cranelift when AOT succeeds without deopt"
+//RS                 );
+//RS                 CorpusGateRecord {
+//RS                     stem: stem.to_string(),
+//RS                     class: CorpusGateClass::ResidentJit,
+//RS                     detail: interpreter_detail,
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
+//RS     common::assert_test_environment_is_safe();
+//RS     let _ = common::test_scratch_root("aot");
+//RS     let have_rustc = have_rustc();
+//RS     let stems = corpus_gate_selected_stems();
+//RS     let jobs = Arc::new(Mutex::new(std::collections::VecDeque::from(stems)));
+//RS     let records = Arc::new(Mutex::new(Vec::<CorpusGateRecord>::new()));
+//RS     let failures = Arc::new(Mutex::new(Vec::<String>::new()));
+//RS     let mut handles = Vec::new();
+//RS     for worker in 0..test_worker_count(8) {
+//RS         let jobs = Arc::clone(&jobs);
+//RS         let records = Arc::clone(&records);
+//RS         let failures = Arc::clone(&failures);
+//RS         handles.push(
+//RS             std::thread::Builder::new()
+//RS                 .name(format!("corpus-gate-{worker}"))
+//RS                 // Corpus classification runs the full front end, TIR, and AOT
+//RS                 // oracle on this worker. Match the compiler's sized-stack seam
+//RS                 // instead of inheriting Rust's 2 MiB spawned-thread default.
+//RS                 .stack_size(32 * 1024 * 1024)
+//RS                 .spawn(move || loop {
+//RS                     let Some(stem) = lock_recovered(&jobs, "corpus gate work queue").pop_front()
+//RS                     else {
+//RS                         break;
+//RS                     };
+//RS                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS                         classify_corpus_stem(&stem, have_rustc)
+//RS                     }));
+//RS                     match result {
+//RS                         Ok(record) => {
+//RS                             lock_recovered(&records, "corpus gate record set").push(record)
+//RS                         }
+//RS                         Err(payload) => lock_recovered(&failures, "corpus gate failure report")
+//RS                             .push(format!("{stem}: {}", panic_message(payload))),
+//RS                     }
+//RS                 })
+//RS                 .expect("corpus gate worker"),
+//RS         );
+//RS     }
+//RS     for handle in handles {
+//RS         handle.join().expect("corpus gate worker panicked");
+//RS     }
+//RS     let failures = judged_report(&failures, "corpus gate failure report");
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "corpus gate classification failures:\n{}",
+//RS         failures.join("\n")
+//RS     );
+//RS     // NOT `into_inner()`: poison here means a worker unwound while holding the
+//RS     // record set, so the classification is missing stems. A partial corpus
+//RS     // would read as agreement. Fail with the cause named.
+//RS     let mut records = match records.lock() {
+//RS         Ok(records) => records.clone(),
+//RS         Err(poisoned) => panic!(
+//RS             "cascade, not a fresh defect: the corpus gate record set was poisoned — a worker \
+//RS              unwound while holding it, so the classification is incomplete ({} stem(s) \
+//RS              recorded) and no ledger cross-check may be judged against it; fix the first \
+//RS              panic of the run",
+//RS             poisoned.into_inner().len()
+//RS         ),
+//RS     };
+//RS     records.sort_by(|left, right| left.stem.cmp(&right.stem));
+//RS 
+//RS     // #2016 + #1998 rule: an excluded stem carries a named reason AND is
+//RS     // counted, so the number can only shrink. A bare skip list is what let
+//RS     // stems leave a gate's universe unnoticed; a ceiling makes leaving cost a
+//RS     // reviewed edit. Raising this is not a fix — drive the stem instead.
+//RS     //
+//RS     // #2013: the constant moved to module scope because the LEDGER needs the
+//RS     // same ceiling as this live observation, and two copies of one ceiling is
+//RS     // how a ledger drifts away from what was observed (AGENTS.md I8).
+//RS     let excluded = records
+//RS         .iter()
+//RS         .filter(|record| record.class == CorpusGateClass::GateExcluded)
+//RS         .count();
+//RS     assert!(
+//RS         excluded <= CORPUS_GATE_EXCLUDED_CEILING,
+//RS         "the corpus gate excludes {excluded} stem(s) but the ceiling is \
+//RS          {CORPUS_GATE_EXCLUDED_CEILING}; exclusions may only SHRINK. Drive the stem instead of \
+//RS          excluding it, or lower the ceiling in the same reviewed diff"
+//RS     );
+//RS     report_oracle_cache_counts();
+//RS     records
+//RS }
+//RS 
+//RS /// Live run-tier parity failures from the observed corpus gate.
+//RS ///
+//RS /// The retired hand ledger called these `run_gaps:` rows. Keep the name in the
+//RS /// audit output, but derive it from the one run-tier observation instead of
+//RS /// maintaining a second list.
+//RS fn corpus_gate_run_gaps(records: &[CorpusGateRecord]) -> Vec<String> {
+//RS     let mut gaps: Vec<String> = records
+//RS         .iter()
+//RS         .filter(|record| {
+//RS             matches!(
+//RS                 record.class,
+//RS                 CorpusGateClass::RunTierBroken | CorpusGateClass::TierDivergent
+//RS             ) || (record.class == CorpusGateClass::DeoptInterp
+//RS                 && !record.detail.is_empty()
+//RS                 && !record.detail.starts_with("interpreter_refused: "))
+//RS         })
+//RS         .map(|record| {
+//RS             if record.detail.is_empty() {
+//RS                 record.stem.clone()
+//RS             } else {
+//RS                 format!("{}: {}", record.stem, record.detail)
+//RS             }
+//RS         })
+//RS         .collect();
+//RS     gaps.sort();
+//RS     gaps
+//RS }
+//RS 
+//RS fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
+//RS     let mut out = String::from(
+//RS         "# c727: differential example-corpus gate manifest.\n\
+//RS          # Every top-level Examples/features/<topic>/*.jet appears in exactly one section.\n\
+//RS          # Update only for intentional ratchet moves.\n\
+//RS          # D-VERDICT-1254-1 / D-LENS-RUN1: run_tier_broken may only shrink — AOT-green\n\
+//RS          # examples whose default jet run REFUSES to run. Record stem + diagnostic code only.\n\
+//RS          # tier_divergent is the other half: it ran under both tiers and the observables\n\
+//RS          # differ. Record stem + the diverging stream(s) only.\n\
+//RS          # aot_broken may only shrink too (#2016): the AOT oracle failed to build or exited\n\
+//RS          # non-zero, so NO tier comparison ran for the stem. expected_exit means one thing\n\
+//RS          # and one thing only — the golden itself expects a non-zero exit. oracle_unavailable\n\
+//RS          # is a HOST fact (no rustc), so it carries no ratchet and says nothing about a stem.\n\
+//RS          # A resident_jit or deopt_interp row may carry interpreter_refused: CODE.\n\
+//RS          # That row has no interpreter output comparison. A resident_jit or\n\
+//RS          # deopt_interp row without that detail does.\n\
+//RS          #\n\
+//RS          # That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR\n\
+//RS          # and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many\n\
+//RS          # stems this file classifies and how many it still says nothing about; both live\n\
+//RS          # outside this file so a hand-edit cannot green the check by deleting the row that\n\
+//RS          # fails. Rows may only GROW, unclassified stems may only SHRINK, and\n\
+//RS          # tests/dev_corpus_gate.rs::corpus_gate_manifest_accounts_for_every_example checks\n\
+//RS          # both with no run at all.\n\
+//RS          #\n\
+//RS          # Never hand-write a classification: a row states an OBSERVED tier. Regenerate with\n\
+//RS          #   JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \\\n\
+//RS          #     bash Tools/ci/jit-aot-parity.sh\n\n",
+//RS     );
+//RS     for class in CORPUS_GATE_SECTION_ORDER {
+//RS         let section = corpus_gate_section_name(&class);
+//RS         let mut section_records: Vec<_> = records
+//RS             .iter()
+//RS             .filter(|record| record.class == class)
+//RS             .collect();
+//RS         section_records.sort_by(|left, right| left.stem.cmp(&right.stem));
+//RS         out.push_str(section);
+//RS         out.push_str(":\n");
+//RS         for record in section_records {
+//RS             if record.detail.is_empty() {
+//RS                 out.push_str("  ");
+//RS                 out.push_str(&record.stem);
+//RS                 out.push('\n');
+//RS             } else {
+//RS                 out.push_str("  ");
+//RS                 out.push_str(&record.stem);
+//RS                 out.push_str(": ");
+//RS                 out.push_str(&record.detail);
+//RS                 out.push('\n');
+//RS             }
+//RS         }
+//RS         out.push('\n');
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// The one section order. The writer and the `JET_DUMP_CORPUS_GATE` printer used
+//RS /// to carry a private copy of this list each, so a new class could reach the
+//RS /// ledger and never be printed (AGENTS.md I8).
+//RS const CORPUS_GATE_SECTION_ORDER: [CorpusGateClass; 10] = [
+//RS     CorpusGateClass::FrontendRejected,
+//RS     CorpusGateClass::GateExcluded,
+//RS     CorpusGateClass::NonRunnable,
+//RS     CorpusGateClass::OracleUnavailable,
+//RS     CorpusGateClass::ExpectedExit,
+//RS     CorpusGateClass::AotBroken,
+//RS     CorpusGateClass::ResidentJit,
+//RS     CorpusGateClass::DeoptInterp,
+//RS     CorpusGateClass::RunTierBroken,
+//RS     CorpusGateClass::TierDivergent,
+//RS ];
+//RS 
+//RS fn corpus_gate_section_name(class: &CorpusGateClass) -> &'static str {
+//RS     match class {
+//RS         CorpusGateClass::FrontendRejected => "frontend_rejected",
+//RS         CorpusGateClass::GateExcluded => "gate_excluded",
+//RS         CorpusGateClass::NonRunnable => "non_runnable",
+//RS         CorpusGateClass::OracleUnavailable => "oracle_unavailable",
+//RS         CorpusGateClass::ExpectedExit => "expected_exit",
+//RS         CorpusGateClass::AotBroken => "aot_broken",
+//RS         CorpusGateClass::ResidentJit => "resident_jit",
+//RS         CorpusGateClass::DeoptInterp => "deopt_interp",
+//RS         CorpusGateClass::RunTierBroken => "run_tier_broken",
+//RS         CorpusGateClass::TierDivergent => "tier_divergent",
+//RS     }
+//RS }
+//RS 
+//RS fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
+//RS     // The section names come from `corpus_gate_section_name`, not from a private
+//RS     // copy of the list: a header this parser did not know used to be silently
+//RS     // impossible to add (AGENTS.md I8).
+//RS     let mut section: Option<CorpusGateClass> = None;
+//RS     let mut records = Vec::new();
+//RS     for raw in include_str!("../jit_corpus_gate.txt").lines() {
+//RS         let trimmed = raw.trim();
+//RS         if trimmed.is_empty() || trimmed.starts_with('#') {
+//RS             continue;
+//RS         }
+//RS         if let Some(name) = trimmed.strip_suffix(':') {
+//RS             // `e2211:` is a retired section that folded into deopt_interp.
+//RS             section = Some(if name == "e2211" {
+//RS                 CorpusGateClass::DeoptInterp
+//RS             } else {
+//RS                 CORPUS_GATE_SECTION_ORDER
+//RS                     .into_iter()
+//RS                     .find(|class| corpus_gate_section_name(class) == name)
+//RS                     .unwrap_or_else(|| panic!("unknown manifest section: {trimmed}"))
+//RS             });
+//RS             continue;
+//RS         }
+//RS         let (stem, detail) = match trimmed.split_once(": ") {
+//RS             Some((stem, detail)) => (stem.to_string(), detail.to_string()),
+//RS             None => (trimmed.to_string(), String::new()),
+//RS         };
+//RS         let class = section
+//RS             .clone()
+//RS             .unwrap_or_else(|| panic!("manifest entry outside a section: {trimmed}"));
+//RS         records.push(CorpusGateRecord {
+//RS             stem,
+//RS             class,
+//RS             detail,
+//RS         });
+//RS     }
+//RS     records.sort_by(|left, right| left.stem.cmp(&right.stem));
+//RS     records
+//RS }
+//RS 
+//RS /// How many stems `tests/jit_corpus_gate.txt` must classify (#2013).
+//RS ///
+//RS /// A floor: rows may only GROW. The file states its own invariant — "Every
+//RS /// top-level Examples/features/<topic>/*.jet appears in exactly one section" —
+//RS /// and until #2013 nothing outside the expensive gate checked it. On 2026-08-16
+//RS /// the file held 374 rows against a 496-stem corpus: 122 stems had no row in ANY
+//RS /// section, `tooling/data_plot` among them, while open cards cited its
+//RS /// `resident_jit:` rows as current evidence about which tier runs a stem.
+//RS ///
+//RS /// This lives here, outside the file it guards, for the same reason
+//RS /// its row floor does: a hand-edit cannot green the ledger by deleting
+//RS /// the row that fails. A row that LEAVES is either a deleted example — lower this
+//RS /// in the same diff as the deletion — or the defect this pins.
+//RS const CORPUS_GATE_ROW_FLOOR: usize = 496;
+//RS 
+//RS /// How many examples the gate ledger is still allowed to say nothing about (#2013).
+//RS ///
+//RS /// Shrink-only, exactly like `OUT_OF_UNIVERSE_CEILING` and for the same reason:
+//RS /// every stem counted here is a stem no section names, so no reader can tell
+//RS /// whether it runs resident, deopts, or fails. The count is DERIVED from the
+//RS /// corpus walk on every run and never an allowlist, so a new example without a
+//RS /// row raises it and fails. Burn it down with a regeneration run; raising it is
+//RS /// not a fix.
+//RS const CORPUS_GATE_UNCLASSIFIED_CEILING: usize = 0;
+//RS 
+//RS /// How many stems the corpus gate may exclude outright (#2016 / #1998 / #2013).
+//RS ///
+//RS /// One constant for two readers: `collect_corpus_gate_records` applies it to the
+//RS /// live classification, `assert_corpus_gate_manifest_covers_corpus` applies it to
+//RS /// the checked-in ledger. Exclusions may only SHRINK.
+//RS const CORPUS_GATE_EXCLUDED_CEILING: usize = 12;
+//RS 
+//RS /// The gate ledger's own stated invariant, asserted without an observed run (#2013).
+//RS ///
+//RS /// The gate that owns `tests/jit_corpus_gate.txt` needs a Cranelift host and an
+//RS /// AOT build per stem, and it returns green early where the host is unsupported,
+//RS /// so the completeness of that file was only ever checked behind ~500
+//RS /// classifications. This check reads the ledger and walks
+//RS /// `Examples/features/<topic>/`, nothing more, so a stem that falls out of every
+//RS /// section fails on any host in milliseconds.
+//RS ///
+//RS /// State the polarity plainly, because both directions are bugs:
+//RS ///
+//RS /// - `CORPUS_GATE_ROW_FLOOR` may only grow — a vanished row is a stem that left
+//RS ///   the ledger.
+//RS /// - `CORPUS_GATE_UNCLASSIFIED_CEILING` may only shrink — a stem with no row is
+//RS ///   a claim nobody made.
+//RS ///
+//RS /// Nothing here decides which section a stem belongs in. This check cannot and
+//RS /// must not classify: a classification needs an observed run, and the rows this
+//RS /// an earlier hand ledger was falsified three times by exactly the hand-edit
+//RS /// that guessing here would invite. Regenerate the rows
+//RS /// from an observation:
+//RS ///
+//RS /// ```text
+//RS /// JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \
+//RS ///   bash Tools/ci/jit-aot-parity.sh
+//RS /// ```
+//RS fn assert_corpus_gate_manifest_covers_corpus() {
+//RS     let manifest = parse_corpus_gate_manifest();
+//RS     let corpus = all_example_stems();
+//RS     let audit = audit_corpus_gate_ledger(&manifest, &corpus);
+//RS 
+//RS     // Printed on every run, pass or fail, for the same reason `jit_coverage_audit`
+//RS     // prints its unjudged stems: the denominator is stated, never implied.
+//RS     eprintln!(
+//RS         "corpus gate ledger: {} of {} stem(s) classified; {} stem(s) in no section:",
+//RS         audit.classified,
+//RS         corpus.len(),
+//RS         audit.unclassified.len()
+//RS     );
+//RS     for stem in &audit.unclassified {
+//RS         eprintln!("  {stem}");
+//RS     }
+//RS 
+//RS     // Named apart, and named first: the gate's blob compare reports the first
+//RS     // diverging record, so a row naming a file that does not exist reads exactly
+//RS     // like a classification that changed. That is how the nonexistent stem
+//RS     // `tooling/data_line` held a battery down for ten days.
+//RS     assert!(
+//RS         audit.ghosts.is_empty(),
+//RS         "tests/jit_corpus_gate.txt names {} stem(s) with no \
+//RS          Examples/features/<topic>/<name>.jet file: {:?}. A nonexistent stem is a stale row to \
+//RS          delete, never a classification that failed.",
+//RS         audit.ghosts.len(),
+//RS         audit.ghosts
+//RS     );
+//RS     assert!(
+//RS         audit.duplicated.is_empty(),
+//RS         "{} stem(s) appear in more than one section of tests/jit_corpus_gate.txt, breaking that \
+//RS          file's own invariant that every top-level example appears in exactly one:\n{}",
+//RS         audit.duplicated.len(),
+//RS         audit.duplicated.join("\n")
+//RS     );
+//RS 
+//RS     // #2016 + #1998 rule applied to the ledger, not only to the live
+//RS     // observation: a stem held out of the run tier carries a named reason AND is
+//RS     // counted. `classify_corpus_stem` never emits one of those classes with an
+//RS     // empty detail, so a bare stem in one of those sections is a hand-edit.
+//RS     assert!(
+//RS         audit.reasonless.is_empty(),
+//RS         "{} row(s) in tests/jit_corpus_gate.txt hold a stem out of the run tier without saying \
+//RS          why:\n{}\nA stem held out states its reason, or it is not held out — it is hidden.",
+//RS         audit.reasonless.len(),
+//RS         audit.reasonless.join("\n")
+//RS     );
+//RS 
+//RS     // The pin is an identity against the corpus, not a bare row count. With no
+//RS     // ghosts and no duplicates, classified + unclassified IS the corpus, so
+//RS     // neither pin below can be satisfied by moving a stem out of the accounting.
+//RS     assert_eq!(
+//RS         audit.classified + audit.unclassified.len(),
+//RS         corpus.len(),
+//RS         "gate ledger accounting is broken: {} classified + {} unclassified != {} discovered \
+//RS          stem(s). The pins below only mean something while this identity holds.",
+//RS         audit.classified,
+//RS         audit.unclassified.len(),
+//RS         corpus.len()
+//RS     );
+//RS     assert!(
+//RS         corpus.len() >= EXAMPLE_CORPUS_FLOOR,
+//RS         "the example corpus shrank to {} stem(s) (floor {EXAMPLE_CORPUS_FLOOR}). A stem leaving \
+//RS          `Examples/features/<topic>/` shrinks every claim this ledger makes: restore it, or \
+//RS          lower the floor in the same diff as the deletion.",
+//RS         corpus.len()
+//RS     );
+//RS     assert!(
+//RS         audit.classified >= CORPUS_GATE_ROW_FLOOR,
+//RS         "tests/jit_corpus_gate.txt classifies {} stem(s) but the ratchet floor is \
+//RS          {CORPUS_GATE_ROW_FLOOR}; rows may only GROW. A stem that lost its row did not change \
+//RS          class — it left the ledger, and every card citing this file then cites a silence. \
+//RS          Regenerate from an observed run; lower the floor only in the same diff as a deleted \
+//RS          example.",
+//RS         audit.classified
+//RS     );
+//RS     assert!(
+//RS         audit.unclassified.len() <= CORPUS_GATE_UNCLASSIFIED_CEILING,
+//RS         "{} example(s) appear in NO section of tests/jit_corpus_gate.txt (ceiling \
+//RS          {CORPUS_GATE_UNCLASSIFIED_CEILING}), breaking that file's own invariant that every \
+//RS          top-level example appears in exactly one:\n  {}\nThis count may only FALL. Regenerate \
+//RS          the manifest from an observed run; a missing row is not a class change, and guessing \
+//RS          one by hand is how the sibling ledger was falsified three times.",
+//RS         audit.unclassified.len(),
+//RS         audit.unclassified.join("\n  ")
+//RS     );
+//RS     assert!(
+//RS         !audit.unclassified.is_empty() || CORPUS_GATE_UNCLASSIFIED_CEILING == 0,
+//RS         "every example now carries a row: set CORPUS_GATE_UNCLASSIFIED_CEILING to 0 in the same \
+//RS          diff, so the hole cannot reopen unnoticed"
+//RS     );
+//RS     assert!(
+//RS         audit.excluded <= CORPUS_GATE_EXCLUDED_CEILING,
+//RS         "tests/jit_corpus_gate.txt excludes {} stem(s) but the ceiling is \
+//RS          {CORPUS_GATE_EXCLUDED_CEILING}; exclusions may only SHRINK. Drive the stem instead of \
+//RS          excluding it, or lower the ceiling in the same reviewed diff",
+//RS         audit.excluded
+//RS     );
+//RS }
+//RS 
+//RS /// What the ledger accounts for, and what it does not (#2013).
+//RS struct CorpusGateLedgerAudit {
+//RS     /// Distinct stems the ledger names, each of which exists on disk.
+//RS     classified: usize,
+//RS     /// Rows in `gate_excluded:` — the same ceiling the live observation applies.
+//RS     excluded: usize,
+//RS     /// Rows naming a file that is not there.
+//RS     ghosts: Vec<String>,
+//RS     /// Stems named by more than one section, with the sections that claim them.
+//RS     duplicated: Vec<String>,
+//RS     /// Discovered examples no section names at all.
+//RS     unclassified: Vec<String>,
+//RS     /// Held-out rows with an empty reason.
+//RS     reasonless: Vec<String>,
+//RS }
+//RS 
+//RS /// The whole law as a pure function, so a negative control can prove it fires.
+//RS ///
+//RS /// `assert_corpus_gate_manifest_covers_corpus` is the only caller that reads the
+//RS /// real ledger; this half takes both sides as arguments so
+//RS /// `corpus_gate_ledger_audit_fires_on_a_missing_row` can hand it a corpus with a
+//RS /// stem the manifest forgot. Without that, "the ledger is complete" would rest on
+//RS /// an assertion nothing ever watched fail — which is exactly how the sibling
+//RS /// ledger stayed green through three falsifications (#1509 c4 keeps the same
+//RS /// negative control).
+//RS fn audit_corpus_gate_ledger(
+//RS     manifest: &[CorpusGateRecord],
+//RS     corpus: &[String],
+//RS ) -> CorpusGateLedgerAudit {
+//RS     let discovered: std::collections::HashSet<&str> = corpus.iter().map(String::as_str).collect();
+//RS 
+//RS     // "exactly one section" has two halves, and nothing checked this one, so a
+//RS     // regeneration that appended instead of replacing would read as agreement
+//RS     // for whichever copy sorted first.
+//RS     let mut sections: std::collections::BTreeMap<&str, Vec<&'static str>> =
+//RS         std::collections::BTreeMap::new();
+//RS     for record in manifest {
+//RS         sections
+//RS             .entry(record.stem.as_str())
+//RS             .or_default()
+//RS             .push(corpus_gate_section_name(&record.class));
+//RS     }
+//RS 
+//RS     let ghosts: Vec<String> = sections
+//RS         .keys()
+//RS         .filter(|stem| !discovered.contains(**stem))
+//RS         .map(|stem| (*stem).to_string())
+//RS         .collect();
+//RS     let duplicated: Vec<String> = sections
+//RS         .iter()
+//RS         .filter(|(_, listed)| listed.len() > 1)
+//RS         .map(|(stem, listed)| format!("  {stem}: {}", listed.join(", ")))
+//RS         .collect();
+//RS     let unclassified: Vec<String> = corpus
+//RS         .iter()
+//RS         .filter(|stem| !sections.contains_key(stem.as_str()))
+//RS         .cloned()
+//RS         .collect();
+//RS     let reasonless: Vec<String> = manifest
+//RS         .iter()
+//RS         .filter(|record| {
+//RS             matches!(
+//RS                 record.class,
+//RS                 CorpusGateClass::FrontendRejected
+//RS                     | CorpusGateClass::GateExcluded
+//RS                     | CorpusGateClass::NonRunnable
+//RS                     | CorpusGateClass::OracleUnavailable
+//RS                     | CorpusGateClass::ExpectedExit
+//RS                     | CorpusGateClass::AotBroken
+//RS                     | CorpusGateClass::RunTierBroken
+//RS                     | CorpusGateClass::TierDivergent
+//RS             ) && record.detail.is_empty()
+//RS         })
+//RS         .map(|record| {
+//RS             format!(
+//RS                 "  {}: in `{}:` with no reason",
+//RS                 record.stem,
+//RS                 corpus_gate_section_name(&record.class)
+//RS             )
+//RS         })
+//RS         .collect();
+//RS 
+//RS     CorpusGateLedgerAudit {
+//RS         classified: sections.len() - ghosts.len(),
+//RS         excluded: manifest
+//RS             .iter()
+//RS             .filter(|record| record.class == CorpusGateClass::GateExcluded)
+//RS             .count(),
+//RS         ghosts,
+//RS         duplicated,
+//RS         unclassified,
+//RS         reasonless,
+//RS     }
+//RS }
+//RS 
+//RS fn print_corpus_gate_manifest(records: &[CorpusGateRecord]) {
+//RS     for class in CORPUS_GATE_SECTION_ORDER {
+//RS         let section = corpus_gate_section_name(&class);
+//RS         let mut section_records: Vec<_> = records
+//RS             .iter()
+//RS             .filter(|record| record.class == class)
+//RS             .collect();
+//RS         section_records.sort_by(|left, right| left.stem.cmp(&right.stem));
+//RS         if section_records.is_empty() {
+//RS             continue;
+//RS         }
+//RS         eprintln!("{section}:");
+//RS         for record in section_records {
+//RS             if record.detail.is_empty() {
+//RS                 eprintln!("  {}", record.stem);
+//RS             } else {
+//RS                 eprintln!("  {}: {}", record.stem, record.detail);
+//RS             }
+//RS         }
+//RS         eprintln!();
+//RS     }
+//RS }
+//RS 
+//RS /// c730 report bundle: case list + backend attribution + timing for CI upload.
+//RS fn write_corpus_gate_report(records: &[CorpusGateRecord], elapsed: std::time::Duration) {
+//RS     let Ok(dir) = std::env::var("JET_CORPUS_GATE_REPORT_DIR") else {
+//RS         return;
+//RS     };
+//RS     let dir = PathBuf::from(dir);
+//RS     fs::create_dir_all(&dir).expect("create JET_CORPUS_GATE_REPORT_DIR");
+//RS     fs::write(
+//RS         dir.join("cases.txt"),
+//RS         corpus_gate_manifest_from_records(records),
+//RS     )
+//RS     .expect("write cases.txt");
+//RS     let mut backend_trace = String::from(
+//RS         "# backend attribution (c727/c730)\n\
+//RS          # resident_jit = native Cranelift; deopt_interp = tiered deopt to tier-0\n\
+//RS          # run_tier_broken = AOT-green but the default jet run refuses (D-VERDICT-1254-1)\n\
+//RS          # tier_divergent = both tiers ran and the named stream(s) disagree\n\
+//RS          # parity = pure-interpreter + default tiered + optimized AOT identity\n\
+//RS          # only when the row has no interpreter_refused: CODE detail\n",
+//RS     );
+//RS     for record in records {
+//RS         let backend = corpus_gate_section_name(&record.class);
+//RS         if record.detail.is_empty() {
+//RS             backend_trace.push_str(&format!("{}\t{}\n", record.stem, backend));
+//RS         } else {
+//RS             backend_trace.push_str(&format!(
+//RS                 "{}\t{}\t{}\n",
+//RS                 record.stem, backend, record.detail
+//RS             ));
+//RS         }
+//RS     }
+//RS     fs::write(dir.join("backend_trace.txt"), backend_trace).expect("write backend_trace.txt");
+//RS     fs::write(
+//RS         dir.join("timing.txt"),
+//RS         format!(
+//RS             "shard_index={}\nshard_count={}\nelapsed_ms={}\nelapsed_s={:.3}\n",
+//RS             corpus_gate_shard_config().map_or(-1_i32, |(index, _)| index as i32),
+//RS             corpus_gate_shard_config().map_or(1, |(_, count)| count),
+//RS             elapsed.as_millis(),
+//RS             elapsed.as_secs_f64()
+//RS         ),
+//RS     )
+//RS     .expect("write timing.txt");
+//RS     fs::write(dir.join("result.txt"), "ok\n").expect("write result.txt");
+//RS     // Empty on success; failures leave cargo assert diffs in gate.log instead.
+//RS     fs::write(dir.join("output_diff.txt"), "").expect("write output_diff.txt");
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS struct MultiHeadDiagnosticEntries {
+//RS     sema: Vec<jet::Diagnostics::Diagnostic>,
+//RS     aot: Vec<jet::Diagnostics::Diagnostic>,
+//RS     jit: RunOutcome,
+//RS     default_dev: RunOutcome,
+//RS     interpreter_gate: RunOutcome,
+//RS     forced_interpreter: ProgramOutput,
+//RS }
+//RS 
+//RS fn multi_head_diagnostic_entries(file: &str, src: &str) -> MultiHeadDiagnosticEntries {
+//RS     let file = file.to_owned();
+//RS     let src = src.to_owned();
+//RS     let (tx, rx) = std::sync::mpsc::channel();
+//RS     let worker = std::thread::Builder::new()
+//RS         .name("multi-head-diagnostic".into())
+//RS         .spawn(move || {
+//RS             let mut bundle =
+//RS                 jet::Loader::load_entry(&file).expect("missing-head fixture should load");
+//RS             let sema = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS             let aot = jet::compile_with_path(&src, &file)
+//RS                 .err()
+//RS                 .expect("AOT entry must reject missing multi-head coverage");
+//RS             let jit = run_jit_once(&file);
+//RS             let default_dev = dev_iteration(&file, false, false);
+//RS             // Keep the invalid fixture as the interpreter diagnostic gate. Use a
+//RS             // valid multi-head fixture for the separate backend entry below.
+//RS             let interpreter_gate = dev_iteration(&file, false, true);
+//RS             let valid_file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS                 .join("tests/ui_lint/multi_head_unreachable.jet");
+//RS             let valid_shown = valid_file.to_string_lossy().into_owned();
+//RS             let forced_interpreter = match dev_iteration(&valid_shown, false, true) {
+//RS                 RunOutcome::Ran {
+//RS                     stdout,
+//RS                     stderr,
+//RS                     exit_code,
+//RS                 } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS                 RunOutcome::Problems(diags) => {
+//RS                     panic!("valid multi-head entry must reach forced interpreter: {diags:?}")
+//RS                 }
+//RS             };
+//RS             let entries = MultiHeadDiagnosticEntries {
+//RS                 sema,
+//RS                 aot,
+//RS                 jit,
+//RS                 default_dev,
+//RS                 interpreter_gate,
+//RS                 forced_interpreter,
+//RS             };
+//RS             tx.send(entries).expect("multi-head diagnostic receiver");
+//RS         })
+//RS         .expect("spawn multi-head diagnostic worker");
+//RS     let entries = rx
+//RS         .recv_timeout(*DEV_DIFF_TIMEOUT)
+//RS         .expect("multi-head diagnostic worker");
+//RS     worker
+//RS         .join()
+//RS         .expect("multi-head diagnostic worker panicked");
+//RS     entries
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS struct DiagnosticShape {
+//RS     severity: jet::Diagnostics::Severity,
+//RS     code: String,
+//RS     what: String,
+//RS     why: String,
+//RS     fix: String,
+//RS     span: Option<(usize, usize)>,
+//RS }
+//RS 
+//RS fn diagnostic_shapes(diags: &[jet::Diagnostics::Diagnostic]) -> Vec<DiagnosticShape> {
+//RS     diags
+//RS         .iter()
+//RS         .map(|diagnostic| DiagnosticShape {
+//RS             severity: diagnostic.severity,
+//RS             code: diagnostic.code.clone(),
+//RS             what: diagnostic.what.clone(),
+//RS             why: diagnostic.why.clone(),
+//RS             fix: diagnostic.fix.clone(),
+//RS             span: diagnostic.span.map(|span| (span.start, span.end)),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn cranelift_hot_swap_preserves_live_state_inner() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     fn checked_bundle(src: &str, tag: &str) -> jet::AST::ProgramBundle {
+//RS         let mut b = bundle_of(src, tag);
+//RS         let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+//RS         let errors: Vec<_> = diags
+//RS             .into_iter()
+//RS             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS             .collect();
+//RS         assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
+//RS         b
+//RS     }
+//RS 
+//RS     let v1 = checked_bundle("fn run() {\n    print(\"v1\")\n}\n", "jit_swap_v1");
+//RS     let v2 = checked_bundle("fn run() {\n    print(\"v2\")\n}\n", "jit_swap_v2");
+//RS 
+//RS     let policy = common::development_policy();
+//RS     let mut backend = CraneliftBackend::new();
+//RS     let out1 = match common::run_cranelift_bundle(&mut backend, &v1, false, &policy) {
+//RS         RunOutcome::Ran { stdout, .. } => stdout,
+//RS         RunOutcome::Problems(ds) => panic!("first run failed: {ds:?}"),
+//RS     };
+//RS     assert_eq!(out1, "v1\n");
+//RS     assert_eq!(jet_jit::resident_invocations_for_test(), 1);
+//RS 
+//RS     let out2 = match common::hot_swap_cranelift_bundle(
+//RS         &mut backend,
+//RS         "run",
+//RS         &v2,
+//RS         false,
+//RS         &policy,
+//RS     ) {
+//RS         Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+//RS         Ok(RunOutcome::Problems(ds)) => panic!("hot_swap produced diagnostics: {ds:?}"),
+//RS         Err(ds) => panic!("hot_swap failed: {ds:?}"),
+//RS     };
+//RS     assert_eq!(out2, "v2\n");
+//RS     assert_eq!(
+//RS         jet_jit::resident_invocations_for_test(),
+//RS         2,
+//RS         "hot_swap must preserve resident invocation count (live state)"
+//RS     );
+//RS 
+//RS     let mut backend2 = CraneliftBackend::new();
+//RS     let out3 = match common::hot_swap_cranelift_bundle(
+//RS         &mut backend2,
+//RS         "run",
+//RS         &v1,
+//RS         false,
+//RS         &policy,
+//RS     ) {
+//RS         Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+//RS         Ok(RunOutcome::Problems(ds)) => panic!("second backend hot_swap failed: {ds:?}"),
+//RS         Err(ds) => panic!("second backend hot_swap errored: {ds:?}"),
+//RS     };
+//RS     assert_eq!(out3, "v1\n");
+//RS     assert_eq!(jet_jit::resident_invocations_for_test(), 3);
+//RS 
+//RS     let out4 = match common::restart_cranelift_bundle(&mut backend, &v2, false, &policy) {
+//RS         RunOutcome::Ran { stdout, .. } => stdout,
+//RS         RunOutcome::Problems(ds) => panic!("restart failed: {ds:?}"),
+//RS     };
+//RS     assert_eq!(out4, "v2\n");
+//RS     assert_eq!(
+//RS         jet_jit::resident_invocations_for_test(),
+//RS         1,
+//RS         "restart must reset resident live state"
+//RS     );
+//RS }
+//RS 
+//RS fn cranelift_trap_then_hot_swap_continues_inner() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     fn checked_bundle(src: &str, tag: &str) -> jet::AST::ProgramBundle {
+//RS         let mut b = bundle_of(src, tag);
+//RS         let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+//RS         let errors: Vec<_> = diags
+//RS             .into_iter()
+//RS             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS             .collect();
+//RS         assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
+//RS         b
+//RS     }
+//RS 
+//RS     let panics = checked_bundle(
+//RS         "fn run() {\n    xs :: [Int]{ 1, 2, 3 }\n    print(xs[99])\n}\n",
+//RS         "jit_trap_v1",
+//RS     );
+//RS     let recovers = checked_bundle("fn run() {\n    print(\"recovered\")\n}\n", "jit_trap_v2");
+//RS 
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&panics),
+//RS         "trap fixture must be resident-safe: {}",
+//RS         common::cranelift_resident_safe_detail(&panics)
+//RS     );
+//RS 
+//RS     let policy = common::development_policy();
+//RS     let mut backend = CraneliftBackend::new();
+//RS     match common::run_cranelift_bundle(&mut backend, &panics, false, &policy) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(
+//RS                 exit_code, 70,
+//RS                 "a list index OOB is a runtime stop: out={stdout} err={stderr}"
+//RS             );
+//RS             // Empty stdout is the proof the trap actually fired: the only way
+//RS             // to skip the `print` is `emit_trap_check` cutting the run at the
+//RS             // indexing. A missed trap would have printed the host's `0`.
+//RS             assert!(
+//RS                 stdout.is_empty(),
+//RS                 "the trap must cut the run before `print`, got stdout {stdout:?}"
+//RS             );
+//RS             assert!(
+//RS                 stderr.contains("Stop [E3010]"),
+//RS                 "expected the registered E3010 bounds stop, got {stderr:?}"
+//RS             );
+//RS             assert!(
+//RS                 !stderr.contains("E0953") && !stderr.contains("comptime"),
+//RS                 "a live-program trap must not wear the comptime voice (#1483): {stderr}"
+//RS             );
+//RS         }
+//RS         RunOutcome::Problems(diags) => panic!(
+//RS             "a live-program trap is a runtime stop, not a build diagnostic (#1483): {:?}",
+//RS             diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+//RS         ),
+//RS     }
+//RS 
+//RS     // Same resident process (thread-local module/runtime), next hot-reload
+//RS     // iteration: must run to completion, not carry over the trapped flag or
+//RS     // the crashed run's partial heap.
+//RS     let out = match common::hot_swap_cranelift_bundle(
+//RS         &mut backend,
+//RS         "run",
+//RS         &recovers,
+//RS         false,
+//RS         &policy,
+//RS     ) {
+//RS         Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+//RS         Ok(RunOutcome::Problems(ds)) => {
+//RS             panic!("hot_swap after a trap produced diagnostics: {ds:?}")
+//RS         }
+//RS         Err(ds) => panic!("hot_swap after a trap errored: {ds:?}"),
+//RS     };
+//RS     assert_eq!(out, "recovered\n");
+//RS }
+//RS 
+//RS // ── c77: hot-swap type-surface stability (D-HOTSWAP1 / E2210) ──────────
+//RS 
+//RS /// Parse `src` to a bundle via a temp file (the only loader entry point).
+//RS ///
+//RS /// Runs on the canonical compiler worker. `Loader::load_entry` reaches the same
+//RS /// unbounded-depth recursive descent every compile does, so a caller that skips
+//RS /// the driver's own entry seams -- as this helper does, and as any embedder
+//RS /// calling the loader directly would -- must install the sized stack itself.
+//RS /// Without it a 2 MiB libtest worker aborts the whole binary and reports every
+//RS /// other in-flight test in this file as failed.
+//RS fn bundle_of(src: &str, tag: &str) -> jet::AST::ProgramBundle {
+//RS     let p = std::env::temp_dir().join(format!("jet_hotswap_{tag}.jet"));
+//RS     fs::write(&p, src).unwrap();
+//RS     let path = p.to_str().expect("temp path is utf-8").to_string();
+//RS     jet::run_compiler_work(move || jet::Loader::load_entry(&path)).expect("bundle should load")
+//RS }
+//RS 
+//RS const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn run() {\n    print(f(P{x: 1}))\n}\n";
+//RS 
+//RS fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
+//RS     fn load_checked(path: &std::path::Path) -> jet::AST::ProgramBundle {
+//RS         let mut b = jet::Loader::load_entry(path.to_str().unwrap()).expect("bundle should load");
+//RS         let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+//RS         let errors: Vec<_> = diags
+//RS             .into_iter()
+//RS             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS             .collect();
+//RS         assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
+//RS         b
+//RS     }
+//RS 
+//RS     // Same on-disk path across reloads — matches `jet dev` editing one file
+//RS     // (module alias identity is the file stem).
+//RS     let path = std::env::temp_dir().join(format!("jet_persist_reload_{}.jet", std::process::id()));
+//RS     let write = |src: &str| {
+//RS         fs::write(&path, src).unwrap();
+//RS     };
+//RS 
+//RS     jet_foundation::Persist::shared_clear();
+//RS 
+//RS     write("#Persist counter := 0\nfn run() {\n    counter += 1\n    print(counter)\n}\n");
+//RS     let v1 = load_checked(&path);
+//RS     write("#Persist counter := 99\nfn run() {\n    counter += 1\n    print(counter)\n}\n");
+//RS     let v2 = load_checked(&path);
+//RS     write("#Persist counter := true\nfn run() {\n    print(counter)\n}\n");
+//RS     let v3 = load_checked(&path);
+//RS 
+//RS     // Interpreter tier (always available): value must survive compatible reload.
+//RS     {
+//RS         use jet::JitBackend::InterpreterBackend;
+//RS         jet_foundation::Persist::shared_clear();
+//RS         let policy = common::development_policy();
+//RS         let mut backend =
+//RS             InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
+//RS         let out1 = match common::run_interpreter_bundle(&mut backend, &v1, false, &policy) {
+//RS             RunOutcome::Ran { stdout, .. } => stdout,
+//RS             RunOutcome::Problems(ds) => panic!("interp run failed: {ds:?}"),
+//RS         };
+//RS         assert_eq!(out1, "1\n");
+//RS 
+//RS         let out2 = match common::hot_swap_interpreter_bundle(
+//RS             &mut backend,
+//RS             "run",
+//RS             &v2,
+//RS             false,
+//RS             &policy,
+//RS         ) {
+//RS             Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+//RS             Ok(RunOutcome::Problems(ds)) => panic!("interp hot_swap problems: {ds:?}"),
+//RS             Err(ds) => panic!("interp hot_swap failed: {ds:?}"),
+//RS         };
+//RS         assert_eq!(
+//RS             out2, "2\n",
+//RS             "compatible `#Persist` reload must keep the mutated Int value, not reinit to 99"
+//RS         );
+//RS 
+//RS         let out3 = match common::hot_swap_interpreter_bundle(
+//RS             &mut backend,
+//RS             "run",
+//RS             &v3,
+//RS             false,
+//RS             &policy,
+//RS         ) {
+//RS             Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+//RS             Ok(RunOutcome::Problems(ds)) => panic!("interp shape-change problems: {ds:?}"),
+//RS             Err(ds) => panic!("interp shape-change failed: {ds:?}"),
+//RS         };
+//RS         assert_eq!(
+//RS             out3, "true\n",
+//RS             "incompatible shape must reinitialize from the new Bool initializer"
+//RS         );
+//RS 
+//RS         let out4 = match common::restart_interpreter_bundle(&mut backend, &v2, false, &policy) {
+//RS             RunOutcome::Ran { stdout, .. } => stdout,
+//RS             RunOutcome::Problems(ds) => panic!("interp restart failed: {ds:?}"),
+//RS         };
+//RS         assert_eq!(
+//RS             out4, "100\n",
+//RS             "restart must clear persist and use the new initializer"
+//RS         );
+//RS     }
+//RS 
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS 
+//RS     // Cranelift tier: same contract at the shared-heap boundary.
+//RS     {
+//RS         jet_foundation::Persist::shared_clear();
+//RS         let policy = common::development_policy();
+//RS         let mut backend = CraneliftBackend::new();
+//RS         let out1 = match common::run_cranelift_bundle(&mut backend, &v1, false, &policy) {
+//RS             RunOutcome::Ran { stdout, .. } => stdout,
+//RS             RunOutcome::Problems(ds) => panic!("jit run failed: {ds:?}"),
+//RS         };
+//RS         assert_eq!(out1, "1\n");
+//RS 
+//RS         let out2 = match common::hot_swap_cranelift_bundle(
+//RS             &mut backend,
+//RS             "run",
+//RS             &v2,
+//RS             false,
+//RS             &policy,
+//RS         ) {
+//RS             Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+//RS             Ok(RunOutcome::Problems(ds)) => panic!("jit hot_swap problems: {ds:?}"),
+//RS             Err(ds) => panic!("jit hot_swap failed: {ds:?}"),
+//RS         };
+//RS         assert_eq!(
+//RS             out2, "2\n",
+//RS             "JIT hot_swap must keep the mutated `#Persist` Int across compatible reload"
+//RS         );
+//RS 
+//RS         let out3 = match common::hot_swap_cranelift_bundle(
+//RS             &mut backend,
+//RS             "run",
+//RS             &v3,
+//RS             false,
+//RS             &policy,
+//RS         ) {
+//RS             Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+//RS             Ok(RunOutcome::Problems(ds)) => panic!("jit shape-change problems: {ds:?}"),
+//RS             Err(ds) => panic!("jit shape-change failed: {ds:?}"),
+//RS         };
+//RS         assert_eq!(out3, "true\n");
+//RS 
+//RS         let out4 = match common::restart_cranelift_bundle(&mut backend, &v2, false, &policy) {
+//RS             RunOutcome::Ran { stdout, .. } => stdout,
+//RS             RunOutcome::Problems(ds) => panic!("jit restart failed: {ds:?}"),
+//RS         };
+//RS         assert_eq!(out4, "100\n");
+//RS     }
+//RS 
+//RS     jet_foundation::Persist::shared_clear();
+//RS     let _ = fs::remove_file(&path);
+//RS }
+// END-PORT-PENDING 1037 tests/dev_parts/support.rs:3657-5449
+
+// PORT-PENDING 1037 tests-dev-parts-support-module-group-slice-3657: tests/dev_parts/tier_parity.rs:1-554
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Curated per-topic three-way tier batteries (#2020).
+//RS //
+//RS // Each stem is judged by a fresh child run of its own test, and
+//RS // `run_child_stem_battery` spends `test_worker_count(8)` of them at a time.
+//RS // Before that these ~160 child builds ran strictly in series, which is most of
+//RS // why `--test dev` could not finish inside the suite guard.
+//RS 
+//RS #[test]
+//RS fn language_callables_and_types_match_interpreter_jit_and_aot() {
+//RS     const CHILD_STEM: &str = "JET_1215_STEM";
+//RS     if let Ok(stem) = std::env::var(CHILD_STEM) {
+//RS         assert_cranelift_three_way(&example_path(&stem), &stem);
+//RS         return;
+//RS     }
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stems = [
+//RS         "basics/bare_lambda_param",
+//RS         "basics/default_refs",
+//RS         "basics/callbacks",
+//RS         "basics/pattern_matching",
+//RS         "basics/variadics_spread",
+//RS         "effects/effect_higher_order",
+//RS         "memory/parameter_modes",
+//RS         "patterns/struct_destructure",
+//RS         "syntax/trailing_block",
+//RS         "syntax/byte_literals",
+//RS         "types/anonymous_unions",
+//RS         "types/generic_types",
+//RS         "types/measurement",
+//RS         "types/nested_enum_groups",
+//RS         "types/no_any_alternatives",
+//RS         "types/optional_result_variants",
+//RS         "types/patchable",
+//RS         "types/refinements",
+//RS         "types/renderable-varargs-multi",
+//RS         "types/renderable-varargs",
+//RS         "types/traits",
+//RS         "types/type_alias",
+//RS         "types/value_tag_type",
+//RS     ];
+//RS     run_child_stem_battery(
+//RS         "language_callables_and_types_match_interpreter_jit_and_aot",
+//RS         CHILD_STEM,
+//RS         "language/callable/type parity",
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &stems,
+//RS         &[],
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
+//RS     const CHILD_STEM: &str = "JET_1217_STEM";
+//RS     if let Ok(stem) = std::env::var(CHILD_STEM) {
+//RS         assert_cranelift_three_way(&example_path(&stem), &stem);
+//RS         return;
+//RS     }
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stems = [
+//RS         "comptime/comptime_if",
+//RS         "comptime/comptime_table",
+//RS         "devloop/persist",
+//RS         "effects/determinism",
+//RS         "effects/effect_higher_order",
+//RS         "effects/effect_levers",
+//RS         "effects/single_use_discard",
+//RS         "effects/smart_context",
+//RS         "errors/default_err_edge",
+//RS         "errors/error_context",
+//RS         "errors/must_use",
+//RS         "errors/panic",
+//RS         // #1967: `?? panic(…)` on a failing carrier. Named here so a tier that
+//RS         // reports the stop without ending the program fails by name.
+//RS         "errors/qq_panic",
+//RS         "errors/rollback_trait",
+//RS         "errors/transact",
+//RS         "errors/default_error_conversion",
+//RS         // #3689: `err.message` in a `??` fallback after a declared
+//RS         // `impl T -> Err` must read the converted message on every tier.
+//RS         "errors/converted_err_message",
+//RS         "errors/typed_error_families",
+//RS     ];
+//RS     run_child_stem_battery(
+//RS         "comptime_effects_and_errors_match_interpreter_jit_and_aot",
+//RS         CHILD_STEM,
+//RS         "comptime/effect/error parity",
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &stems,
+//RS         &[],
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
+//RS     const CHILD_STEM: &str = "JET_1216_STEM";
+//RS     if let Ok(stem) = std::env::var(CHILD_STEM) {
+//RS         assert_cranelift_three_way(&example_path(&stem), &stem);
+//RS         return;
+//RS     }
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stems = [
+//RS         "collections/index_hook",
+//RS         "collections/iter_hook",
+//RS         "collections/iter_tools_audit",
+//RS         // The `[2,3].join(",")` element-renderer divergence in this stem was
+//RS         // caught only by the corpus-wide gate, because no per-stem battery
+//RS         // named it. Named here so the next such regression fails by name.
+//RS         "collections/lists",
+//RS         "memory/arena",
+//RS         "memory/arena_parse",
+//RS         "memory/arena_regions",
+//RS         "memory/entity_tree",
+//RS         "memory/entity_world",
+//RS         "memory/expiring_secret",
+//RS         "memory/ownership",
+//RS         "memory/parameter_modes",
+//RS         "memory/pool_stale_id",
+//RS         "memory/rawptr",
+//RS         "memory/returned_views",
+//RS         "memory/shared_config",
+//RS         "memory/shared_transact",
+//RS         "memory/copy_verb",
+//RS         "memory/string_view",
+//RS         "streams/generators",
+//RS     ];
+//RS     run_child_stem_battery(
+//RS         "collections_memory_and_streams_match_interpreter_jit_and_aot",
+//RS         CHILD_STEM,
+//RS         "collection/memory/stream parity",
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &stems,
+//RS         &[],
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn stream_pull_hostile_matrix_matches_interpreter_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let stem = "streams/generators";
+//RS     let file = example_path(stem);
+//RS     let expected = golden_stdout(stem);
+//RS     match dev_iteration_with_timeout(stem, &file, true) {
+//RS         RunOutcome::Ran { stdout, .. } => {
+//RS             assert_eq!(stdout, expected, "hostile Stream matrix drifted from its golden");
+//RS         }
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("hostile Stream matrix did not run in the interpreter: {diags:?}");
+//RS         }
+//RS     }
+//RS     assert_cranelift_three_way(&file, stem);
+//RS }
+//RS 
+//RS #[test]
+//RS fn stream_producer_failure_matches_interpreter_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let source = r#"fn failing() -> Stream<Int> {
+//RS     yield 1
+//RS     if true {
+//RS         panic("producer failure")
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     loop value in failing() {
+//RS         print("value: {value}")
+//RS     }
+//RS }
+//RS "#;
+//RS     let file = std::env::temp_dir().join(format!("jet_stream_failure_{}.jet", std::process::id()));
+//RS     fs::write(&file, source).expect("write Stream failure fixture");
+//RS     let file = file.to_string_lossy().into_owned();
+//RS     let interpreted = match dev_iteration(&file, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("Stream producer failure did not run in the interpreter: {diags:?}");
+//RS         }
+//RS     };
+//RS 
+//RS     let bundle = checked_bundle_from_path(&file);
+//RS     let policy = common::development_policy();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let mut backend = CraneliftBackend::new();
+//RS     let jit = jet_jit::with_program_args(std::slice::from_ref(&file), || {
+//RS         match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
+//RS             RunOutcome::Problems(diags) => {
+//RS                 panic!("Stream producer failure did not run in JIT: {diags:?}");
+//RS             }
+//RS         }
+//RS     });
+//RS     let aot_dir = std::env::temp_dir().join(format!("jet_stream_failure_aot_{}", std::process::id()));
+//RS     let aot = compiled_binary_output(&aot_dir, "stream_failure", 0, "streams/generators", &file);
+//RS 
+//RS     assert_eq!(jit, interpreted, "Stream producer failure drifted in JIT");
+//RS     assert_eq!(aot, interpreted, "Stream producer failure drifted in AOT");
+//RS     assert_eq!(interpreted.exit_code, 70, "producer failure must remain a panic");
+//RS     assert_eq!(interpreted.stdout, "value: 1\n");
+//RS     assert!(interpreted.stderr.contains("panic: producer failure"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn crypto_auth_and_vault_match_interpreter_jit_and_aot() {
+//RS     const CHILD_STEM: &str = "JET_1222_STEM";
+//RS     if let Ok(stem) = std::env::var(CHILD_STEM) {
+//RS         assert_crypto_auth_vault_three_way(&example_path(&stem), &stem);
+//RS         return;
+//RS     }
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stems = [
+//RS         "crypto/auth_tokens",
+//RS         "crypto/crypto_envelope",
+//RS         "crypto/crypto_migration",
+//RS         "crypto/crypto_sign",
+//RS         "crypto/hash",
+//RS         "crypto/random_api_split",
+//RS         "crypto/typed_crypto",
+//RS         "crypto/vault_key_wrap",
+//RS         "crypto/vault_keys",
+//RS         "crypto/vault_secret",
+//RS     ];
+//RS     run_child_stem_battery(
+//RS         "crypto_auth_and_vault_match_interpreter_jit_and_aot",
+//RS         CHILD_STEM,
+//RS         "crypto/auth/vault parity",
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &stems,
+//RS         &[],
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn network_http_and_browser_match_interpreter_jit_and_aot() {
+//RS     const CHILD_STEM: &str = "JET_1221_STEM";
+//RS     if let Ok(stem) = std::env::var(CHILD_STEM) {
+//RS         assert_network_http_browser_three_way(&example_path(&stem), &stem);
+//RS         return;
+//RS     }
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stems = [
+//RS         "net/browser_bidi_profiles",
+//RS         "net/email_dkim",
+//RS         "net/email_message",
+//RS         "net/http_client",
+//RS         "net/http_get",
+//RS         "net/http_rest_service",
+//RS         "net/http_routes",
+//RS         "net/http_server",
+//RS         "net/http_server_lifecycle",
+//RS         "net/http_server_limits",
+//RS         "net/http_server_middleware",
+//RS         "net/http_server_tasks",
+//RS         "net/http_server_trailers",
+//RS         "net/socket_echo",
+//RS         "net/url_mime",
+//RS         "net/ws_echo",
+//RS     ];
+//RS     run_child_stem_battery(
+//RS         "network_http_and_browser_match_interpreter_jit_and_aot",
+//RS         CHILD_STEM,
+//RS         "network/http/browser parity",
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &stems,
+//RS         &[],
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn concurrency_and_game_match_interpreter_jit_and_aot() {
+//RS     const CHILD_STEM: &str = "JET_1218_STEM";
+//RS     if let Ok(stem) = std::env::var(CHILD_STEM) {
+//RS         assert_concurrency_and_game_three_way(&example_path(&stem), &stem);
+//RS         return;
+//RS     }
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stems = [
+//RS         "concurrency/deadline_context",
+//RS         "concurrency/detached_task",
+//RS         "concurrency/parallel_iter",
+//RS         "concurrency/parallel_scan",
+//RS         "concurrency/task_controls",
+//RS         "concurrency/task_runtime_audit",
+//RS         "game/core_game_headless",
+//RS         "game/raylib_window",
+//RS     ];
+//RS     run_child_stem_battery(
+//RS         "concurrency_and_game_match_interpreter_jit_and_aot",
+//RS         CHILD_STEM,
+//RS         "concurrency/game parity",
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &stems,
+//RS         &[],
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn ui_and_web_match_interpreter_jit_and_aot() {
+//RS     const CHILD_STEM: &str = "JET_1225_STEM";
+//RS     if let Ok(stem) = std::env::var(CHILD_STEM) {
+//RS         assert_ui_and_web_three_way(&example_path(&stem), &stem);
+//RS         return;
+//RS     }
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stems = [
+//RS         "ui/events",
+//RS         "ui/layout_basic",
+//RS         "ui/loadable",
+//RS         "ui/reactive",
+//RS         "ui/reactive_scope",
+//RS         "ui/ui_a11y",
+//RS         "ui/ui_component_kit",
+//RS         "ui/ui_motion",
+//RS         "ui/ui_native_linux",
+//RS         "ui/ui_null_backend",
+//RS         "ui/ui_tui_reactive",
+//RS         "ui/ui_typed_style",
+//RS         "ui/ui_view_tree",
+//RS         "web/ui_showcase",
+//RS         "web/ui_web_click",
+//RS         "web/ui_web_reactive",
+//RS         "web/web_app",
+//RS         "web/web_hello",
+//RS         "web/web_wasm_callback",
+//RS     ];
+//RS     run_child_stem_battery(
+//RS         "ui_and_web_match_interpreter_jit_and_aot",
+//RS         CHILD_STEM,
+//RS         "ui/web parity",
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &stems,
+//RS         &[("JET_UI_HEADLESS", "1")],
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn reflection_value_matches_interpreter_jit_aot_and_jet_run() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stem = "reflection/reflect-value";
+//RS     let file = example_path(stem);
+//RS     assert_data_pipelines_parsing_three_way(&file, stem);
+//RS     let cli_run = run_cli_default_resident("run", &file, "reflection_value_cli_run");
+//RS     assert_eq!(
+//RS         cli_run,
+//RS         golden_program_output(stem),
+//RS         "default `jet run` drifted from reflection golden output"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn typed_fact_reads_match_interpreter_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stem = "reflection/fact_reads";
+//RS     assert_data_pipelines_parsing_three_way(&example_path(stem), stem);
+//RS }
+//RS 
+//RS #[test]
+//RS fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
+//RS     const CHILD_STEM: &str = "JET_1223_STEM";
+//RS     if let Ok(stem) = std::env::var(CHILD_STEM) {
+//RS         assert_data_pipelines_parsing_three_way(&example_path(&stem), &stem);
+//RS         return;
+//RS     }
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stems = [
+//RS         // #1223 — data pipelines / schemas
+//RS         "tooling/data_analysis",
+//RS         "tooling/data_bridges",
+//RS         "tooling/data_core",
+//RS         "tooling/data_hostile",
+//RS         "tooling/data_json",
+//RS         "tooling/data_pipeline",
+//RS         "tooling/data_plot",
+//RS         "tooling/data_schema",
+//RS         "tooling/data_stream_bounds",
+//RS         // #1224 — parsing / reflection / tooling
+//RS         "parsing/binary-reader",
+//RS         "parsing/binary_pattern",
+//RS         "parsing/parse_interpolation",
+//RS         "parsing/text-cursor",
+//RS         "tooling/debug_native",
+//RS         "tooling/fuzz_demo",
+//RS         "tooling/panic_report",
+//RS         "tooling/property_tests",
+//RS         "tooling/provenance_track",
+//RS         "tooling/testing_helpers",
+//RS         "tooling/todo_hole",
+//RS     ];
+//RS     run_child_stem_battery(
+//RS         "data_pipelines_and_parsing_match_interpreter_jit_and_aot",
+//RS         CHILD_STEM,
+//RS         "data/parse/tooling parity",
+//RS         *DEV_DIFF_TIMEOUT,
+//RS         &stems,
+//RS         &[],
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS 
+//RS fn io_cli_terminal_and_time_match_interpreter_jit_and_aot() {
+//RS     const CHILD_STEM: &str = "JET_1219_STEM";
+//RS     if let Ok(stem) = std::env::var(CHILD_STEM) {
+//RS         assert_io_cli_terminal_time_three_way(&example_path(&stem), &stem);
+//RS         return;
+//RS     }
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stems = [
+//RS         "cli/positionals",
+//RS         "cli/subcommands",
+//RS         "cli/typed_entry_args",
+//RS         "io/db_checked_sql",
+//RS         "io/scope_guard",
+//RS         "io/stdin_filter",
+//RS         "io/stream",
+//RS         "io/terminal",
+//RS         "io/terminal_parity",
+//RS         "io/watcher",
+//RS         "text/dates",
+//RS         "text/datetime",
+//RS         "text/decimal",
+//RS         "text/format_selectors",
+//RS         "text/regex",
+//RS         "text/time_calendar",
+//RS     ];
+//RS     run_child_stem_battery(
+//RS         "io_cli_terminal_and_time_match_interpreter_jit_and_aot",
+//RS         CHILD_STEM,
+//RS         "io/cli/terminal/time parity",
+//RS         Duration::from_secs(120),
+//RS         &stems,
+//RS         &[],
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_os_examples_match_interpreter_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     std::thread::Builder::new()
+//RS         .stack_size(64 * 1024 * 1024)
+//RS         .spawn(core_os_examples_match_interpreter_jit_and_aot_inner)
+//RS         .expect("spawn core.sys parity worker")
+//RS         .join()
+//RS         .expect("core.sys parity worker must not panic");
+//RS }
+//RS 
+//RS #[test]
+//RS fn explicit_exit_cleanup_matches_interpreter_jit_and_aot() {
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     // The cleanup graph is intentionally deep enough to exceed the small
+//RS     // default test-thread stack. Keep this focused proof on the same generous
+//RS     // stack used by the resident-JIT coverage tests.
+//RS     std::thread::Builder::new()
+//RS         .name("explicit-process-exit-cleanup".into())
+//RS         .stack_size(16 * 1024 * 1024)
+//RS         .spawn(|| {
+//RS             assert_io_cli_terminal_time_three_way(
+//RS                 &example_path("io/process_exit_cleanup"),
+//RS                 "io/process_exit_cleanup",
+//RS             );
+//RS             assert_io_cli_terminal_time_three_way(
+//RS                 &example_path("io/os_stop_cleanup"),
+//RS                 "io/os_stop_cleanup",
+//RS             );
+//RS         })
+//RS         .expect("cleanup parity worker")
+//RS         .join()
+//RS         .expect("cleanup parity worker must not panic");
+//RS }
+//RS 
+//RS #[test]
+//RS fn lowlevel_and_safety_match_interpreter_jit_and_aot() {
+//RS     const CHILD_STEM: &str = "JET_1220_STEM";
+//RS     if let Ok(stem) = std::env::var(CHILD_STEM) {
+//RS         assert_lowlevel_and_safety_three_way(&example_path(&stem), &stem);
+//RS         return;
+//RS     }
+//RS     if skip_if_cranelift_host_unsupported() || !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+//RS     let stems = [
+//RS         "lowlevel/ffi",
+//RS         "lowlevel/freestanding",
+//RS         "lowlevel/inline_asm",
+//RS         "lowlevel/inline_c",
+//RS         "lowlevel/layout_columnar",
+//RS         "lowlevel/linalg_simd",
+//RS         "lowlevel/lowlevel",
+//RS         "lowlevel/os_target_gating",
+//RS         "lowlevel/pointer_cast_deref",
+//RS         "lowlevel/sized_floats",
+//RS         "lowlevel/swizzle",
+//RS         "lowlevel/target_machine_board",
+//RS         "lowlevel/unsafe_obligations",
+//RS         "safety/sh_checked_text",
+//RS         "safety/checked_text_sql",
+//RS     ];
+//RS     run_child_stem_battery(
+//RS         "lowlevel_and_safety_match_interpreter_jit_and_aot",
+//RS         CHILD_STEM,
+//RS         "lowlevel/safety parity",
+//RS         Duration::from_secs(180),
+//RS         &stems,
+//RS         &[],
+//RS     );
+//RS }
+// END-PORT-PENDING 1037 tests/dev_parts/tier_parity.rs:1-554
+

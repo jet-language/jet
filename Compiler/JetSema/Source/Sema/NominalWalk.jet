@@ -1,0 +1,213 @@
+// PORT-PENDING 0436 crates-jet-sema-src-sema-nominalwalk-module-group: crates/jet-sema/src/Sema/NominalWalk.rs:1-209
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-COMPILE-SPEED1 (#3661): one walk shape for structural questions about
+//RS //! named types: can a value of this type be cloned, does it own heap data,
+//RS //! can it cross a task boundary, does it hold a view, a Cell guard or a
+//RS //! `Shared` handle.
+//RS //!
+//RS //! Each question recurses through struct fields and enum payloads. A walk
+//RS //! that only guards the current path re-walks a type once for every path
+//RS //! that reaches it, which is exponential in the depth of sharing (every node
+//RS //! of a compiler AST reaches `Expr`, `Type` and `Span`), and each binding
+//RS //! asked again from scratch. Checking the self-hosted compiler's parser
+//RS //! slice spent minutes in those walks.
+//RS //!
+//RS //! Every such question stops at its first non-neutral answer (a problem
+//RS //! found, a field that cannot be cloned), so a named instantiation whose
+//RS //! walk finished while the query is still running finished neutral, and a
+//RS //! revisit adds nothing: `finished` makes one query linear in the type
+//RS //! graph. A type still on the path is assumed neutral (coinduction), as
+//RS //! before. When a whole query ends neutral, no problem is reachable from any
+//RS //! instantiation it entered, so those instantiations are neutral outright;
+//RS //! while body checking runs, the registry is final and its memo keeps them
+//RS //! for every later query. Parallel body checkers share one memo: a row only
+//RS //! records a proven answer, so the order in which checkers add rows cannot
+//RS //! change any answer.
+//RS 
+//RS use std::sync::{PoisonError, RwLock};
+//RS use std::collections::{HashMap, HashSet};
+//RS 
+//RS use super::TypeRegistry;
+//RS use crate::AST::Type;
+//RS 
+//RS /// Which structural question a walk answers. Answers of different questions
+//RS /// never share memo rows.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+//RS pub(crate) enum NominalQuery {
+//RS     Cloneable,
+//RS     OwnsHeap,
+//RS     Sendable {
+//RS         strict_callable: bool,
+//RS         cell_only: bool,
+//RS     },
+//RS     ViewBoundary,
+//RS     CellGuard,
+//RS     SharedHandle,
+//RS     /// Can a value hold an observable `Clock`. Keyed by nominal name in the
+//RS     /// checked module's own registry (see `type_contains_observable_clock`).
+//RS     ObservableClock,
+//RS }
+//RS 
+//RS /// Named instantiations proven neutral for each question while the
+//RS /// registry is final.
+//RS #[derive(Default)]
+//RS struct NominalMemo {
+//RS     neutral: HashMap<NominalQuery, HashSet<String>>,
+//RS }
+//RS 
+//RS /// The memo field of `TypeRegistry`: closed (`None`) while registration can
+//RS /// still change the registered types, so no answer can go stale. A copy of a
+//RS /// registry may be changed afterwards, so it starts closed too.
+//RS #[derive(Default)]
+//RS pub(crate) struct NominalMemoCell(RwLock<Option<NominalMemo>>);
+//RS 
+//RS impl Clone for NominalMemoCell {
+//RS     fn clone(&self) -> Self {
+//RS         Self::default()
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) struct NominalWalk<'r> {
+//RS     query: NominalQuery,
+//RS     registry: &'r TypeRegistry,
+//RS     /// Named types on the current path, by name alone, so a generic type
+//RS     /// that recurses with growing arguments still terminates.
+//RS     active: HashSet<String>,
+//RS     /// Instantiations this query already walked to completion.
+//RS     finished: HashSet<String>,
+//RS }
+//RS 
+//RS impl<'r> NominalWalk<'r> {
+//RS     pub(crate) fn new(query: NominalQuery, registry: &'r TypeRegistry) -> Self {
+//RS         Self {
+//RS             query,
+//RS             registry,
+//RS             active: HashSet::new(),
+//RS             finished: HashSet::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Enter the named instantiation `name<args>`. `None` means the caller
+//RS     /// answers neutral without walking it: it is on the current path, this
+//RS     /// query already finished it, or the registry memo holds it. `Some(key)`
+//RS     /// must be handed back to `leave` once its fields are walked.
+//RS     pub(crate) fn enter(&mut self, name: &str, args: &[Type]) -> Option<String> {
+//RS         if self.active.contains(name) {
+//RS             return None;
+//RS         }
+//RS         let key = instantiation_key(name, args);
+//RS         if self.finished.contains(&key) || self.memo_holds(&key) {
+//RS             return None;
+//RS         }
+//RS         self.active.insert(name.to_string());
+//RS         Some(key)
+//RS     }
+//RS 
+//RS     pub(crate) fn leave(&mut self, name: &str, key: String) {
+//RS         self.active.remove(name);
+//RS         self.finished.insert(key);
+//RS     }
+//RS 
+//RS     /// End the query. A neutral answer proves every entered instantiation
+//RS     /// neutral, so the open registry memo keeps them.
+//RS     pub(crate) fn finish(self, neutral: bool) {
+//RS         if !neutral || self.finished.is_empty() {
+//RS             return;
+//RS         }
+//RS         self.registry.record_neutral_nominals(self.query, self.finished);
+//RS     }
+//RS 
+//RS     fn memo_holds(&self, key: &str) -> bool {
+//RS         self.registry.nominal_memo_holds(self.query, key)
+//RS     }
+//RS }
+//RS 
+//RS fn instantiation_key(name: &str, args: &[Type]) -> String {
+//RS     if args.is_empty() {
+//RS         return name.to_string();
+//RS     }
+//RS     let mut key = String::with_capacity(name.len() + 16 * args.len());
+//RS     key.push_str(name);
+//RS     key.push('<');
+//RS     for (index, arg) in args.iter().enumerate() {
+//RS         if index > 0 {
+//RS             key.push_str(", ");
+//RS         }
+//RS         key.push_str(&arg.name());
+//RS     }
+//RS     key.push('>');
+//RS     key
+//RS }
+//RS 
+//RS /// Keeps the registry memo open for one body-checking pass and closes it
+//RS /// when dropped. A nested scope over an already open memo leaves it to the
+//RS /// outer one.
+//RS pub(crate) struct NominalMemoScope<'r> {
+//RS     registry: &'r TypeRegistry,
+//RS     opened: bool,
+//RS }
+//RS 
+//RS impl TypeRegistry {
+//RS     /// Open the memo once the registered types are final: the caller holds
+//RS     /// the registry shared for the whole scope, so no type can change
+//RS     /// underneath a remembered answer.
+//RS     pub(crate) fn open_nominal_memo(&self) -> NominalMemoScope<'_> {
+//RS         let mut memo = self
+//RS             .nominal_memo
+//RS             .0
+//RS             .write()
+//RS             .unwrap_or_else(PoisonError::into_inner);
+//RS         let opened = memo.is_none();
+//RS         if opened {
+//RS             *memo = Some(NominalMemo::default());
+//RS         }
+//RS         NominalMemoScope {
+//RS             registry: self,
+//RS             opened,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Whether the open memo already proved `key` neutral for `query`.
+//RS     pub(crate) fn nominal_memo_holds(&self, query: NominalQuery, key: &str) -> bool {
+//RS         self.nominal_memo
+//RS             .0
+//RS             .read()
+//RS             .unwrap_or_else(PoisonError::into_inner)
+//RS             .as_ref()
+//RS             .and_then(|memo| memo.neutral.get(&query))
+//RS             .is_some_and(|neutral| neutral.contains(key))
+//RS     }
+//RS 
+//RS     /// Record `keys` as neutral for `query` while the memo is open; a closed
+//RS     /// memo keeps nothing.
+//RS     pub(crate) fn record_neutral_nominals(
+//RS         &self,
+//RS         query: NominalQuery,
+//RS         keys: impl IntoIterator<Item = String>,
+//RS     ) {
+//RS         if let Some(memo) = self
+//RS             .nominal_memo
+//RS             .0
+//RS             .write()
+//RS             .unwrap_or_else(PoisonError::into_inner)
+//RS             .as_mut()
+//RS         {
+//RS             memo.neutral.entry(query).or_default().extend(keys);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for NominalMemoScope<'_> {
+//RS     fn drop(&mut self) {
+//RS         if self.opened {
+//RS             *self
+//RS                 .registry
+//RS                 .nominal_memo
+//RS                 .0
+//RS                 .write()
+//RS                 .unwrap_or_else(PoisonError::into_inner) = None;
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0436 crates/jet-sema/src/Sema/NominalWalk.rs:1-209
+

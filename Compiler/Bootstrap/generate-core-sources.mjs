@@ -1,13 +1,8 @@
 #!/usr/bin/env node
-// Generate the Jet-hosted CLI's view of the host tables the Rust bootstrap
-// host reads when it builds a JetDriverCompileRequest
-// (Compiler/Bootstrap/Host/Native.rs `__jet_bootstrap_request_from_host`):
-// every public Core source module row (`CoreModuleExports::CORE_SOURCE_MODULES`,
-// itself generated from Prelude/Core.jet), then the compiler-private parts
-// (`CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS`), and the canonical effect
-// source (`Effects::EFFECT_SOURCE`). The rows carry no body text: the CLI reads
-// `<toolchain root>/<path>` at run time, so a Core edit needs no regeneration
-// unless the row set changes.
+// Generate the private payload for Foundation's canonical embedded-Core
+// accessor from the frozen native metadata and the source files it embeds.
+// Public rows and private parts retain native order and carry real body text.
+// CLI, Driver and tools consume Foundation; no client owns another table.
 // usage: node Compiler/Bootstrap/generate-core-sources.mjs [--check]
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
@@ -19,7 +14,11 @@ const repoRoot = resolve(bootstrapDir, "../..");
 const exportsPath = "crates/jet-foundation/src/CoreModuleExports.rs";
 const partsPath = "crates/jet-foundation/src/CoreSourceParts.rs";
 const effectsPath = "crates/jet-foundation/src/Effects.rs";
-const outputPath = resolve(repoRoot, "Compiler/JetCli/Source/Cli/CoreSources.jet");
+const declarationPath = "crates/jet-codegen/src/Prelude/Core.jet";
+const markerPath = "crates/jet-codegen/src/Prelude/Markers.jet";
+const unitsPath = "crates/jet-codegen/src/Prelude/Units.jet";
+const tagsPath = "crates/jet-foundation/src/Syntax/effects_surface.rs";
+const outputPath = resolve(repoRoot, "Compiler/JetFoundation/Source/Registry/EmbeddedCoreData.jet");
 
 function fail(message) {
   throw new Error(`core-source-generator: ${message}`);
@@ -47,6 +46,10 @@ const read = (path) => readFile(resolve(repoRoot, path), "utf8").catch((error) =
 const exportsSource = await read(exportsPath);
 const partsSource = await read(partsPath);
 const effectsRust = await read(effectsPath);
+const declarationSource = await read(declarationPath);
+const markerSource = await read(markerPath);
+const unitsSource = await read(unitsPath);
+const tagsSource = await read(tagsPath);
 
 const members = (list) => [...list.matchAll(/"([^"]*)"/g)].map((match) => match[1]);
 
@@ -62,6 +65,7 @@ for (const match of exportsSource.slice(tableStart, tableEnd).matchAll(rowPatter
 }
 const tableRowCount = (exportsSource.slice(tableStart, tableEnd).match(/CoreSourceModule \{/g) ?? []).length;
 if (rows.length === 0 || rows.length !== tableRowCount) fail(`${exportsPath}: parsed ${rows.length} of ${tableRowCount} CORE_SOURCE_MODULES rows`);
+const publicRowCount = rows.length;
 
 // Private parts, in CORE_PRIVATE_SOURCE_PARTS order. Their fields name
 // string constants declared in the same file.
@@ -98,30 +102,76 @@ const effectSourcePath = resolve(dirname(resolve(repoRoot, effectsPath)), effect
 const effectSourceDisplay = effectSourcePath.replace(`${repoRoot}/`, "");
 const effectSource = await readFile(effectSourcePath, "utf8").catch((error) => fail(`cannot read ${effectSourceDisplay}: ${error.message}`));
 
+const tagsMatch = tagsSource.match(/pub const BUILTIN_TAGS: &\[&str\] = &\[([^\]]*)\];/);
+if (!tagsMatch) fail(`${tagsPath}: missing BUILTIN_TAGS`);
+const tags = members(tagsMatch[1]);
+const effects = [];
+for (const line of effectSource.split("\n")) {
+  const text = line.trim();
+  if (!text || text.startsWith("//")) continue;
+  const match = text.match(/^effect ([A-Za-z_][A-Za-z0-9_.]*)( \$irreversible)?$/);
+  if (!match) fail(`${effectSourceDisplay}: invalid declaration ${text}`);
+  effects.push({ name: match[1], irreversible: Boolean(match[2]) });
+}
+if (!effects.length || !tags.length) fail("empty effect or tag vocabulary");
 const digest = createHash("sha256");
-for (const text of [exportsSource, partsSource, effectSource]) digest.update(text);
+for (const text of [exportsSource, partsSource, declarationSource, markerSource, unitsSource, effectSource, tagsSource]) digest.update(text);
+for (const row of rows) {
+  row.source = await read(row.path);
+  if (!row.source.trim()) fail(`${row.path}: empty Core source body`);
+  digest.update(row.source);
+}
 const sourceHash = digest.digest("hex");
 const list = (values) => `[String]{${values.map((value) => jetStringLiteral(value, exportsPath)).join(", ")}}`;
-const renderRow = (row) =>
-  `    JetDriverCoreSource{module_name: ${jetStringLiteral(row.module, exportsPath)}, alias: ${jetStringLiteral(row.alias, exportsPath)}, path: ${jetStringLiteral(row.path, exportsPath)}, owner: ${jetStringLiteral(row.owner, partsPath)}, owned_members: ${list(row.members)}, source: ""},`;
+const renderRow = (row, index) => [
+  `fn foundation_embedded_core_source_${index}() -> FoundationCoreSource Never! {`,
+  `    FoundationCoreSource{module_name: ${jetStringLiteral(row.module, exportsPath)}, alias: ${jetStringLiteral(row.alias, exportsPath)}, path: ${jetStringLiteral(row.path, exportsPath)}, owner: ${jetStringLiteral(row.owner, partsPath)}, owned_members: ${list(row.members)}, source: ${jetStringLiteral(row.source, row.path)}}`,
+  "}",
+  "",
+].join("\n");
+const sourceList = (name, start, end) => [
+  `fn foundation_embedded_core_${name}_sources() -> [FoundationCoreSource] Never! {`,
+  "    [FoundationCoreSource]{",
+  ...rows.slice(start, end).map((_, index) => `        foundation_embedded_core_source_${start + index}(),`),
+  "    }",
+  "}",
+  "",
+].join("\n");
 const output = [
-  `// Sources: ${exportsPath} (CORE_SOURCE_MODULES), ${partsPath} (CORE_PRIVATE_SOURCE_PARTS), ${effectSourceDisplay} (Effects::EFFECT_SOURCE)`,
+  `// Sources: ${exportsPath}, ${partsPath}, ${declarationPath}, ${markerPath}, ${unitsPath}, ${effectSourceDisplay}, ${tagsPath}, and their Core source bodies.`,
   `// Source SHA-256: ${sourceHash}`,
-  "// This file is generated by Compiler/Bootstrap/generate-core-sources.mjs; do not edit.",
-  "use jet_driver.[",
-  "    JetDriverCoreSource,",
-  "]",
+  "// Generated by Compiler/Bootstrap/generate-core-sources.mjs; do not edit.",
+  "// Private payload of FoundationEmbeddedCore, never a client-owned registry.",
   "",
-  "// The canonical effect source the Rust host embeds as `Effects::EFFECT_SOURCE`.",
-  `pub JET_CLI_EFFECT_SOURCE :: prep { ${jetStringLiteral(effectSource, effectSourceDisplay)} }`,
+  "fn foundation_embedded_core_declaration_text() -> String Never! {",
+  `    ${jetStringLiteral(declarationSource, declarationPath)}`,
+  "}",
   "",
-  "// Every public Core source module row in table order, then each",
-  "// compiler-private part with the public module that owns it. `source` is",
-  "// empty here; the host reads `<toolchain root>/<path>` before compiling.",
-  "pub JET_CLI_CORE_SOURCE_ROWS :: prep { [JetDriverCoreSource]{",
+  "fn foundation_embedded_core_marker_source() -> String Never! {",
+  `    ${jetStringLiteral(markerSource, markerPath)}`,
+  "}",
+  "",
+  "fn foundation_embedded_core_unit_source() -> String Never! {",
+  `    ${jetStringLiteral(unitsSource, unitsPath)}`,
+  "}",
+  "",
+  "fn foundation_embedded_core_effect_source() -> String Never! {",
+  `    ${jetStringLiteral(effectSource, effectSourceDisplay)}`,
+  "}",
+  "",
+  "fn foundation_embedded_core_builtin_tags() -> [String] Never! {",
+  `    ${list(tags)}`,
+  "}",
+  "",
+  "fn foundation_embedded_core_effect_declarations() -> [FoundationCoreEffectDeclaration] Never! {",
+  "    [FoundationCoreEffectDeclaration]{",
+  ...effects.map((effect) => `        FoundationCoreEffectDeclaration{name: ${jetStringLiteral(effect.name, effectSourceDisplay)}, irreversible: ${effect.irreversible}},`),
+  "    }",
+  "}",
+  "",
+  sourceList("public", 0, publicRowCount),
+  sourceList("private", publicRowCount, rows.length),
   ...rows.map(renderRow),
-  "} }",
-  "",
 ].join("\n");
 
 if (process.argv.includes("--check")) {
@@ -130,8 +180,8 @@ if (process.argv.includes("--check")) {
     console.error(`${outputPath.replace(`${repoRoot}/`, "")} is stale; run node Compiler/Bootstrap/generate-core-sources.mjs`);
     process.exit(1);
   }
-  console.log(`core source rows are current (${rows.length} rows, source ${sourceHash})`);
+  console.log(`embedded Core payload is current (${rows.length} source bodies, source ${sourceHash})`);
 } else {
   await writeFile(outputPath, output, "utf8");
-  console.log(`generated ${outputPath.replace(`${repoRoot}/`, "")} (${rows.length} rows, source ${sourceHash})`);
+  console.log(`generated ${outputPath.replace(`${repoRoot}/`, "")} (${rows.length} source bodies, source ${sourceHash})`);
 }

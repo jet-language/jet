@@ -1,0 +1,729 @@
+// MIR cleanup regressions for the static drop-flag pass (Rust
+// tir_to_mir_drop_flags.rs, #4155), the last-use pass (Rust
+// tir_to_mir_last_use.rs, D-MEM-COPYSEM1) and the file-owner cleanup rows
+// both read (Rust mir.rs register_file_owner through
+// emit_file_owner_replacement). Each test builds one function through the
+// real builder producers, runs the pass, and checks exact MIR facts: the
+// operations, terminators, flag rows and source lines it leaves behind.
+// Composed runtime witnesses remain in tests/core_files_opaque_handles.rs:
+// file_owner_cleanup_tracks_lexical_exits_and_checked_transfers,
+// owned_file_replacement_releases_only_the_displaced_live_owner,
+// aggregate_partial_moves_preserve_siblings_and_reinitialize_across_branches,
+// moved_aggregate_parameter_drops_only_its_remaining_owned_sibling, and
+// precondition_read_temporary_does_not_release_its_callers_owners.
+// Yield cancellation is an explicit CFG edge using the same checked Return cleanup.
+// GcEdit's index_temp currently lowers as an expression, not Rust's
+// lower_let_like binding; that producer counterpart remains a parity residual.
+use jet_foundation.[
+    AccessConvention,
+    Diagnostic,
+    MIRAccess,
+    MIRBlockID,
+    MIRConstant,
+    MIRDropAction,
+    MIRDropEdge,
+    MIRDropKind,
+    MIROperation,
+    MIROwnershipMode,
+    MIRTargetDMAOperationFact,
+    MIRTargetHardwareUnresolvedReference,
+    MIRTargetHardwareUse,
+    MIRTargetInterruptHandlerFact,
+    MIRTargetRegisterAccessFact,
+    MIRPlaceID,
+    MIRProjection,
+    MIRSourceFile,
+    MIRTerminator,
+    MIRType,
+    MIRTypeKind,
+    TExpr,
+    TExprKind,
+    MIRValueID,
+    Span,
+    ParamZone,
+    SymbolID,
+    TConstantDef,
+    TCoreBuiltinOwner,
+    TDeclarationFacts,
+    TDeclarationOwnership,
+    TEffectFacts,
+    TEffectSpan,
+    TFailureCarrier,
+    TFunc,
+    TFuncKind,
+    TGenericParam,
+    TImplDef,
+    TLocal,
+    TParameter,
+    TStmt,
+    TTargetApplicability,
+    TTraitDef,
+    TTypeDef,
+    TVisibility,
+    TWebParamReconstruction,
+    Type,
+    TypeTupleField,
+    mir_field_id,
+    mir_nominal_ref,
+    mir_operation_place_uses,
+    mir_terminator_targets,
+    mir_type_from_kind,
+    mir_type_id,
+]
+use jet_sema.[
+    SemaCallSiteFact,
+    SemaCheckedForeignFunction,
+    SemaCheckedForeignProvider,
+    SemaComptimeBodySource,
+    SemaComptimeRequest,
+    SemaComputeFunctionFacts,
+    SemaCopyEvent,
+    SemaGraphModuleResult,
+    SemaNameReferenceFact,
+    SemaRegistrationConstant,
+    SemaRegistrationExport,
+    SemaRegistrationImpl,
+    SemaRegistrationImport,
+    SemaRegistrationNominal,
+]
+
+fn cleanup_span() -> Span Never! {
+    Span{start: 0, end: 0}
+}
+
+fn cleanup_builder(name: String) -> JetCodegenBuilder Never! {
+    function := TFunc{
+        name: name,
+        module_name: "cleanup",
+        module_identity: "cleanup.test",
+        key: "cleanup.test::{name}",
+        source_file: "cleanup.jet",
+        source_span: cleanup_span(),
+        failure_carrier: TFailureCarrier.Infallible,
+        effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
+        target_applicability: TTargetApplicability{rust_aot: true, cranelift: false, interpreter: false, web: false},
+        web_bucket: None,
+        web_marker: None,
+        visibility: TVisibility.Private,
+        foreign: None,
+        params: [TParameter]{},
+        web_param_reconstructions: [TWebParamReconstruction]{},
+        ret: None,
+        gc_return: false,
+        gc_scope: false,
+        return_view_provenance: None,
+        generic_params: [TGenericParam]{},
+        clone_types: [Type]{},
+        is_main: false,
+        line: 0,
+        synthetic: true,
+        is_unsafe: false,
+        unsafe_gate: None,
+        is_pure: false,
+        memo_bound: None,
+        memo_unbounded: false,
+        is_reactive: false,
+        reactive_upgrades: [String]{},
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar: false,
+        kernel_proof: None,
+        memo_field: None,
+        uses_stack_sentry: false,
+        body: [TStmt]{},
+        kind: TFuncKind.TopLevel,
+    }
+    modules := [SemaGraphModuleResult]{}
+    jet_codegen_new_builder(function, jet_codegen_function_index([TFunc]{}), modules, jet_codegen_field_symbol_index(modules), [MIRSourceFile]{}, jet_codegen_source_index([MIRSourceFile]{}))
+}
+
+fn cleanup_local(name: String, mutable: Bool) -> TLocal Never! {
+    TLocal{
+        name: name,
+        symbol_id: None,
+        span: cleanup_span(),
+        generated: false,
+        deref: false,
+        address_lifetime: None,
+        persist_key: None,
+        persist_ty: None,
+        mutable: mutable,
+        string_bytes_source: None,
+        integer_bounds: None,
+        uninit_scalar: false,
+        uninit_fixed: false,
+        direct_closure: false,
+    }
+}
+
+// An owned String local bound and initialized in the current block, with the
+// drop-live record its binding registered.
+fn cleanup_owned_local(builder: &JetCodegenBuilder, name: String) -> JetCodegenDropLive Never! {
+    value := jet_codegen_emit_value(&builder, cleanup_span(), Type.String, MIROperation.Constant{value: MIRConstant.String{value: name}})
+    place := jet_codegen_bind_local(&builder, cleanup_local(name, true), Type.String, true, None, None, false)
+    _ := jet_codegen_emit(&builder, cleanup_span(), None, MIROperation.WritePlace{place: place, value: value})
+    loop record in builder.drop_live_all {
+        if record.place == place -> return record
+    }
+    panic("owned String local registered no drop-live record")
+}
+
+fn cleanup_block_index(builder: JetCodegenBuilder, id: MIRBlockID) -> Int Never! {
+    loop (index, row) in builder.blocks {
+        if row.id == id -> return index
+    }
+    panic("cleanup test block is missing")
+}
+
+// Blocks reachable from the entry along terminator edges.
+fn cleanup_reachable(builder: JetCodegenBuilder) -> [Bool] Never! {
+    reached := [Bool]{}
+    loop filler in 0..<builder.blocks.len() -> &reached.push(false)
+    entry :: cleanup_block_index(builder, builder.entry)
+    reached[entry] = true
+    pending := [Int]{entry}
+    loop pending.len() > 0 {
+        block :: &pending.pop() ?? { break }
+        loop target in mir_terminator_targets(builder.blocks[block].terminator) {
+            position :: cleanup_block_index(builder, target)
+            if !reached[position] {
+                reached[position] = true
+                &pending.push(position)
+            }
+        }
+    }
+    reached
+}
+
+// MovePlace operations of `place` on blocks the entry reaches: each one
+// releases the value, so a second one is a double drop.
+fn cleanup_reachable_moves(builder: JetCodegenBuilder, place: MIRPlaceID) -> Int Never! {
+    reached :: cleanup_reachable(builder)
+    count := 0
+    loop (block, row) in builder.blocks {
+        if !reached[block] -> next
+        loop instruction in row.instructions {
+            if instruction.operation == .MovePlace(moved) {
+                if moved == place -> count += 1
+            }
+        }
+    }
+    count
+}
+
+fn cleanup_move_count(builder: JetCodegenBuilder, place: MIRPlaceID) -> Int Never! {
+    count := 0
+    loop row in builder.blocks {
+        loop instruction in row.instructions {
+            if instruction.operation == .MovePlace(moved) {
+                if moved == place -> count += 1
+            }
+        }
+    }
+    count
+}
+
+fn cleanup_branch_count(builder: JetCodegenBuilder) -> Int Never! {
+    count := 0
+    loop row in builder.blocks {
+        if row.terminator == .Branch(_, _, _) -> count += 1
+    }
+    count
+}
+
+// Whether any instruction still names `place`.
+fn cleanup_mentions(builder: JetCodegenBuilder, place: MIRPlaceID) -> Bool Never! {
+    loop row in builder.blocks {
+        loop instruction in row.instructions {
+            loop used in mir_operation_place_uses(instruction.operation) {
+                if used == place -> return true
+            }
+        }
+    }
+    false
+}
+
+fn cleanup_has_place_row(builder: JetCodegenBuilder, place: MIRPlaceID) -> Bool Never! {
+    loop row in builder.places {
+        if row.id == place -> return true
+    }
+    false
+}
+
+// The (block, index) of the instruction defining `value`.
+fn cleanup_position(builder: JetCodegenBuilder, value: MIRValueID) -> [Int] Never! {
+    loop (block, row) in builder.blocks {
+        loop (index, instruction) in row.instructions {
+            if instruction.result == .Val(result) {
+                if result == value -> return [Int]{block, index}
+            }
+        }
+    }
+    panic("cleanup test value has no defining instruction")
+}
+
+fn cleanup_set_line(builder: &JetCodegenBuilder, value: MIRValueID, line: Int) Never! {
+    at :: cleanup_position(builder, value)
+    builder.blocks[at[0]].instructions[at[1]].source_line = Val(line)
+}
+
+fn cleanup_reads_place(builder: JetCodegenBuilder, at: [Int], place: MIRPlaceID) -> Bool Never! {
+    if builder.blocks[at[0]].instructions[at[1]].operation == .ReadPlace(read) -> return read == place
+    false
+}
+
+fn cleanup_moves_place(builder: JetCodegenBuilder, at: [Int], place: MIRPlaceID) -> Bool Never! {
+    if builder.blocks[at[0]].instructions[at[1]].operation == .MovePlace(moved) -> return moved == place
+    false
+}
+
+// One owned local read once and returned, with its scope-end guard and
+// cleanup between the read and the return.
+fn cleanup_returned_read(builder: &JetCodegenBuilder, name: String) -> MIRValueID Never! {
+    record := cleanup_owned_local(&builder, name)
+    read := jet_codegen_emit_value(&builder, cleanup_span(), Type.String, MIROperation.ReadPlace{place: record.place})
+    jet_codegen_emit_drop_cleanup(&builder, record)
+    jet_codegen_terminate(&builder, MIRTerminator.Return{value: Val(read)})
+    read
+}
+
+// An owned local whose scope-end guard sits in its own block, entered from
+// the entry and, with `edge`, named as a function-level drop row:
+// 0 none, 1 Normal, 2 Return, 3 Failure, 4 Unwind.
+fn cleanup_rooted(edge: Int) -> JetCodegenBuilder Never! {
+    builder := cleanup_builder("rooted{edge}")
+    record := cleanup_owned_local(&builder, "rooted")
+    guard := jet_codegen_new_block(&builder, cleanup_span(), "guard")
+    jet_codegen_terminate(&builder, MIRTerminator.Jump{target: guard})
+    jet_codegen_switch_block(&builder, guard)
+    jet_codegen_emit_drop_cleanup(&builder, record)
+    jet_codegen_terminate(&builder, MIRTerminator.Return{value: None})
+    rows := [MIRDropAction]{}
+    if edge == 1 -> &rows.push(MIRDropAction{place: record.place, edge: MIRDropEdge.Normal, span: cleanup_span()})
+    if edge == 2 -> &rows.push(MIRDropAction{place: record.place, edge: MIRDropEdge.Return, span: cleanup_span()})
+    if edge == 3 -> &rows.push(MIRDropAction{place: record.place, edge: MIRDropEdge.Failure{target: guard}, span: cleanup_span()})
+    if edge == 4 -> &rows.push(MIRDropAction{place: record.place, edge: MIRDropEdge.Unwind{target: guard}, span: cleanup_span()})
+    builder.drops = rows
+    builder
+}
+
+fn cleanup_two_locals(reverse: Bool) -> JetCodegenBuilder Never! {
+    builder := cleanup_builder("two")
+    first := cleanup_owned_local(&builder, "first")
+    second := cleanup_owned_local(&builder, "second")
+    moved := jet_codegen_emit_value(&builder, cleanup_span(), Type.String, MIROperation.MovePlace{place: first.place})
+    jet_codegen_emit_drop_cleanup(&builder, second)
+    jet_codegen_emit_drop_cleanup(&builder, first)
+    jet_codegen_terminate(&builder, MIRTerminator.Return{value: Val(moved)})
+    if reverse {
+        records := [JetCodegenDropLive]{}
+        index := builder.drop_live_all.len()
+        loop index > 0 {
+            index -= 1
+            &records.push(builder.drop_live_all[index])
+        }
+        builder.drop_live_all = records
+    }
+    builder
+}
+
+#Test("drop flag live on every path resolves its guard and loses its traffic") {
+    builder := cleanup_builder("kept")
+    record := cleanup_owned_local(&builder, "kept")
+    jet_codegen_emit_drop_cleanup(&builder, record)
+    jet_codegen_terminate(&builder, MIRTerminator.Return{value: None})
+    assert_eq(cleanup_branch_count(builder), 1)
+    jet_codegen_resolve_drop_flags(&builder)
+    assert_eq(cleanup_branch_count(builder), 0)
+    assert_eq(cleanup_reachable_moves(builder, record.place), 1)
+    assert(!cleanup_mentions(builder, record.live))
+    assert(!cleanup_has_place_row(builder, record.live))
+    assert_eq(builder.drop_live_all.len(), 0)
+}
+
+#Test("drop flag cleared by a move resolves its guard past the cleanup") {
+    builder := cleanup_builder("moved")
+    record := cleanup_owned_local(&builder, "moved")
+    moved := jet_codegen_emit_value(&builder, cleanup_span(), Type.String, MIROperation.MovePlace{place: record.place})
+    jet_codegen_emit_drop_cleanup(&builder, record)
+    jet_codegen_terminate(&builder, MIRTerminator.Return{value: Val(moved)})
+    jet_codegen_resolve_drop_flags(&builder)
+    assert_eq(cleanup_branch_count(builder), 0)
+    // The cleanup's move stays only on the unreachable drop block.
+    assert_eq(cleanup_move_count(builder, record.place), 2)
+    assert_eq(cleanup_reachable_moves(builder, record.place), 1)
+    assert(!cleanup_mentions(builder, record.live))
+}
+
+#Test("normal and return drop rows leave the entry-only flag state known") {
+    edges := [Int]{0, 1, 2}
+    loop edge in edges {
+        builder := cleanup_rooted(edge)
+        jet_codegen_resolve_drop_flags(&builder)
+        assert_eq(cleanup_branch_count(builder), 0)
+    }
+}
+
+#Test("failure and unwind cleanup roots seed the guard block unknown") {
+    edges := [Int]{3, 4}
+    loop edge in edges {
+        builder := cleanup_rooted(edge)
+        live := builder.drop_live_all[0].live
+        jet_codegen_resolve_drop_flags(&builder)
+        assert_eq(cleanup_branch_count(builder), 1)
+        assert(cleanup_mentions(builder, live))
+        assert(cleanup_has_place_row(builder, live))
+        assert_eq(builder.drop_live_all.len(), 1)
+    }
+}
+
+#Test("drop flag candidates follow flag place ID order, not registration order") {
+    forward := cleanup_two_locals(false)
+    reversed := cleanup_two_locals(true)
+    jet_codegen_resolve_drop_flags(&forward)
+    jet_codegen_resolve_drop_flags(&reversed)
+    assert_eq(cleanup_branch_count(forward), 0)
+    assert(forward.blocks == reversed.blocks)
+    assert(forward.locals == reversed.locals)
+}
+
+#Test("last consumed read moves, clears its flag on its source line, and drops once") {
+    builder := cleanup_builder("last")
+    read := cleanup_returned_read(&builder, "last")
+    record := builder.drop_live_all[0]
+    cleanup_set_line(&builder, read, 42)
+    jet_codegen_move_last_uses(&builder)
+    at :: cleanup_position(builder, read)
+    assert(cleanup_moves_place(builder, at, record.place))
+    state :: builder.blocks[at[0]].instructions[at[1] + 1]
+    update :: builder.blocks[at[0]].instructions[at[1] + 2]
+    assert_eq(state.source_line, Val(42))
+    assert_eq(update.source_line, Val(42))
+    cleared := false
+    if state.operation == .Constant(constant) {
+        if constant == .Bool(value) -> cleared = !value
+    }
+    assert(cleared)
+    updates_flag := false
+    if update.operation == .WritePlace(place, value) {
+        updates_flag = place == record.live && Val(value) == state.result
+    }
+    assert(updates_flag)
+    place_row :: jet_codegen_find_place(builder, record.place) ?? panic("moved place row is missing")
+    assert_eq(place_row.access, MIRAccess.Move)
+    fact :: builder.values[builder.value_positions.get(read.value) ?? panic("moved value fact is missing")]
+    assert_eq(fact.ownership.mode, MIROwnershipMode.Move)
+    jet_codegen_resolve_drop_flags(&builder)
+    assert_eq(cleanup_branch_count(builder), 0)
+    assert_eq(cleanup_reachable_moves(builder, record.place), 1)
+}
+
+#Test("a function-level drop row keeps its root's reads copies") {
+    builder := cleanup_builder("dropped")
+    read := cleanup_returned_read(&builder, "dropped")
+    record := builder.drop_live_all[0]
+    builder.drops = [MIRDropAction]{MIRDropAction{place: record.place, edge: MIRDropEdge.Normal, span: cleanup_span()}}
+    jet_codegen_move_last_uses(&builder)
+    assert(cleanup_reads_place(builder, cleanup_position(builder, read), record.place))
+}
+
+#Test("a registered file owner keeps its root's reads copies") {
+    builder := cleanup_builder("filed")
+    record := cleanup_owned_local(&builder, "filed")
+    jet_codegen_register_file_owner_leaf(&builder, record.place)
+    assert_eq(builder.file_owner_places.len(), 1)
+    assert_eq(builder.file_owner_places[0], record.place)
+    read := jet_codegen_emit_value(&builder, cleanup_span(), Type.String, MIROperation.ReadPlace{place: record.place})
+    jet_codegen_terminate(&builder, MIRTerminator.Return{value: Val(read)})
+    jet_codegen_move_last_uses(&builder)
+    assert(cleanup_reads_place(builder, cleanup_position(builder, read), record.place))
+}
+
+#Test("View and ViewMut places keep their reads while other nominals move") {
+    names := [String]{"View", "ViewMut", "Viewer"}
+    loop (index, name) in names {
+        builder := cleanup_builder("view{index}")
+        read := cleanup_returned_read(&builder, "view")
+        record := builder.drop_live_all[0]
+        row :: builder.place_positions.get(record.place.value) ?? panic("view place row is missing")
+        element := jet_codegen_lower_type_for_function(Type.Int, builder)
+        builder.places[row].ty = mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref(name), args: [MIRType]{element}})
+        jet_codegen_move_last_uses(&builder)
+        at :: cleanup_position(builder, read)
+        if index < 2 {
+            assert(cleanup_reads_place(builder, at, record.place))
+        } else {
+            assert(cleanup_moves_place(builder, at, record.place))
+        }
+    }
+}
+
+#Test("a payload take keeps the source line of the arm's first binding") {
+    builder := cleanup_builder("payload")
+    span := cleanup_span()
+    subject := jet_codegen_emit_value(&builder, span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: "subject"}})
+    owner := mir_type_id("cleanup.test::Choice")
+    _ := jet_codegen_emit_value(&builder, span, Type.Bool, MIROperation.EnumIs{subject: subject, owner: owner, variant: "Some"})
+    payload := jet_codegen_emit_value(&builder, span, Type.String, MIROperation.EnumPayload{subject: subject, owner: owner, variant: "Some", index: 0})
+    cleanup_set_line(&builder, payload, 9)
+    jet_codegen_terminate(&builder, MIRTerminator.Return{value: Val(payload)})
+    jet_codegen_move_last_uses(&builder)
+    at :: cleanup_position(builder, payload)
+    moved_subject :: builder.blocks[at[0]].instructions[at[1] - 1]
+    assert_eq(moved_subject.source_line, Val(9))
+    takes_subject := false
+    if moved_subject.operation == .Move(value) -> takes_subject = value == subject
+    assert(takes_subject)
+    reads_take := false
+    if builder.blocks[at[0]].instructions[at[1]].operation == .EnumPayload(taken, _, _, _) -> reads_take = Val(taken) == moved_subject.result
+    assert(reads_take)
+}
+
+#Test("a file owner flag follows moves and writes, and cleanup releases explicit owners first") {
+    builder := cleanup_builder("owner")
+    record := cleanup_owned_local(&builder, "owner")
+    jet_codegen_register_file_owner_leaf(&builder, record.place)
+    frame :: builder.cleanup_frames[builder.cleanup_frames.len() - 1]
+    assert_eq(frame.explicit, 1)
+    flag := MIRPlaceID{value: 0}
+    loop action in frame.actions {
+        if action == .FileOwner(leaf) {
+            assert_eq(leaf.place, record.place)
+            flag = leaf.live
+        }
+    }
+    assert(flag != MIRPlaceID{value: 0})
+    moved := jet_codegen_emit_value(&builder, cleanup_span(), Type.String, MIROperation.MovePlace{place: record.place})
+    at :: cleanup_position(builder, moved)
+    // Rust emit order: the file-owner flag update, then the drop-live update.
+    file_state :: builder.blocks[at[0]].instructions[at[1] + 1]
+    file_update :: builder.blocks[at[0]].instructions[at[1] + 2]
+    drop_update :: builder.blocks[at[0]].instructions[at[1] + 4]
+    file_cleared := false
+    if file_state.operation == .Constant(constant) {
+        if constant == .Bool(value) -> file_cleared = !value
+    }
+    assert(file_cleared)
+    file_written := false
+    if file_update.operation == .WritePlace(place, _) -> file_written = place == flag
+    assert(file_written)
+    drop_written := false
+    if drop_update.operation == .WritePlace(place, _) -> drop_written = place == record.live
+    assert(drop_written)
+    frame_index :: builder.cleanup_frames.len() - 1
+    jet_codegen_emit_cleanup_frame(&builder, frame_index)
+    jet_codegen_terminate(&builder, MIRTerminator.Return{value: Val(moved)})
+    // Explicit file-owner cleanup reads its flag before the automatic drop
+    // guard reads the drop-live flag.
+    guards := [MIRPlaceID]{}
+    loop row in builder.blocks {
+        if row.terminator == .Branch(condition, _, _) {
+            guard_at :: cleanup_position(builder, condition)
+            if builder.blocks[guard_at[0]].instructions[guard_at[1]].operation == .ReadPlace(read) -> &guards.push(read)
+        }
+    }
+    assert_eq(guards.len(), 2)
+    assert_eq(guards[0], flag)
+    assert_eq(guards[1], record.live)
+}
+
+#Test("assigning over a file owner releases the displaced live owner first") {
+    builder := cleanup_builder("replace")
+    record := cleanup_owned_local(&builder, "replace")
+    jet_codegen_register_file_owner_leaf(&builder, record.place)
+    replacement := jet_codegen_emit_value(&builder, cleanup_span(), Type.String, MIROperation.Constant{value: MIRConstant.String{value: "next"}})
+    blocks_before :: builder.blocks.len()
+    jet_codegen_emit_file_owner_replacement(&builder, record.place)
+    assert_eq(builder.blocks.len(), blocks_before + 2)
+    _ := jet_codegen_emit(&builder, cleanup_span(), None, MIROperation.ReplacePlace{place: record.place, value: replacement})
+    jet_codegen_terminate(&builder, MIRTerminator.Return{value: None})
+    drop_block :: builder.blocks[blocks_before]
+    assert(drop_block.instructions[0].operation == .MovePlace(_))
+    releases := 0
+    loop instruction in drop_block.instructions {
+        if instruction.operation == .Drop(_, kind) {
+            assert_eq(kind, MIRDropKind.Value)
+            releases += 1
+        }
+    }
+    assert_eq(releases, 1)
+    assert(drop_block.terminator == .Jump(_))
+}
+
+#Test("file owner leaves cover only places at or below the owner") {
+    builder := cleanup_builder("leaves")
+    record := cleanup_owned_local(&builder, "leaves")
+    other := cleanup_owned_local(&builder, "other")
+    span := cleanup_span()
+    left := jet_codegen_project_field_place(&builder, record.place, span, Type.String, mir_field_id("cleanup.test::Pair::left"))
+    right := jet_codegen_project_field_place(&builder, record.place, span, Type.String, mir_field_id("cleanup.test::Pair::right"))
+    assert_eq(jet_codegen_file_owner_leaves(builder, record.place).len(), 0)
+    jet_codegen_register_file_owner_leaf(&builder, left)
+    assert_eq(jet_codegen_file_owner_leaves(builder, record.place).len(), 1)
+    assert_eq(jet_codegen_file_owner_leaves(builder, record.place)[0].place, left)
+    assert_eq(jet_codegen_file_owner_leaves(builder, left).len(), 1)
+    assert_eq(jet_codegen_file_owner_leaves(builder, right).len(), 0)
+    assert_eq(jet_codegen_file_owner_leaves(builder, other.place).len(), 0)
+}
+
+// Checked Core owner facts are the real nominal identity input used by
+// register_file_owner; unlike register_file_owner_leaf tests above, these
+// exercise the binding/parameter/type-path producers, not injected leaf rows.
+fn cleanup_files_builder(name: String) -> JetCodegenBuilder Never! {
+    builder := cleanup_builder(name)
+    semantic_module := SemaGraphModuleResult{
+        module_identity: "cleanup.core.files",
+        module_name: "core.files",
+        package_identity: "cleanup.core",
+        module_path: "core.files",
+        source_file: "cleanup-core-files.jet",
+        declarations: TDeclarationFacts{
+            type_defs: [TTypeDef]{},
+            traits: [TTraitDef]{},
+            impls: [TImplDef]{},
+            constants: [TConstantDef]{},
+            core_builtin_owners: [TCoreBuiltinOwner]{TCoreBuiltinOwner{
+                symbol: SymbolID{key: "cleanup.core.files::TempFile"},
+                module_identity: Val("cleanup.core.files"),
+                name: "TempFile",
+                ownership: TDeclarationOwnership.Owned,
+            }},
+        },
+        functions: [TFunc]{},
+        nominals: [SemaRegistrationNominal]{},
+        nominal_positions: [String:Int]{},
+        constants: [SemaRegistrationConstant]{},
+        impls: [SemaRegistrationImpl]{},
+        exports: [SemaRegistrationExport]{},
+        imports: [SemaRegistrationImport]{},
+        foreign_functions: [SemaCheckedForeignFunction]{},
+        foreign_providers: [SemaCheckedForeignProvider]{},
+        call_facts: [SemaCallSiteFact]{},
+        hardware_use: MIRTargetHardwareUse{
+            register_accesses: [MIRTargetRegisterAccessFact]{},
+            interrupt_handlers: [MIRTargetInterruptHandlerFact]{},
+            dma_operations: [MIRTargetDMAOperationFact]{},
+            unresolved_references: [MIRTargetHardwareUnresolvedReference]{},
+        },
+        name_references: [SemaNameReferenceFact]{},
+        comptime_requests: [SemaComptimeRequest]{},
+        comptime_body_sources: [SemaComptimeBodySource]{},
+        compute_facts: [SemaComputeFunctionFacts]{},
+        exact_int_reachable: false,
+        copy_events: [SemaCopyEvent]{},
+        diagnostics: [Diagnostic]{},
+        complete: true,
+    }
+    builder.modules = [SemaGraphModuleResult]{semantic_module}
+    builder.owners = jet_codegen_owner_index(builder.modules)
+    builder
+}
+
+fn cleanup_file_type() -> Type Never! {
+    Type.Named{name: "cleanup.core.files::TempFile"}
+}
+
+#Test("real owner registration requires Core identity and owned whole storage") {
+    builder := cleanup_files_builder("identity")
+    ty := cleanup_file_type()
+    place := jet_codegen_bind_local(&builder, cleanup_local("owner", true), ty, true, None, None, false)
+    assert_eq(jet_codegen_file_owner_paths(builder, ty).len(), 1)
+    // A lookalike module has no Core file-owner lifecycle.
+    builder.modules[0].module_name = "user.files"
+    jet_codegen_register_file_owner(&builder, place, ty)
+    assert_eq(builder.file_owner_places.len(), 0)
+    builder.modules[0].module_name = "core.files"
+    // Read aliases never acquire an independent owner.
+    alias := jet_codegen_bind_local_alias(&builder, cleanup_local("alias", false), ty, place, false)
+    assert_eq(alias, place)
+    // Register the real owned storage once.
+    jet_codegen_register_file_owner(&builder, place, ty)
+    assert_eq(builder.file_owner_places.len(), 1)
+    assert_eq(builder.file_owner_places[0], place)
+    assert_eq(builder.cleanup_frames[0].explicit, 1)
+}
+
+#Test("a borrowed initializer carried through a move does not register a file owner") {
+    builder := cleanup_files_builder("borrowed")
+    ty := cleanup_file_type()
+    source := jet_codegen_bind_local(&builder, cleanup_local("source", true), ty, true, None, None, false)
+    target := jet_codegen_bind_local(&builder, cleanup_local("target", true), ty, true, None, None, false)
+    borrowed := jet_codegen_emit_value(&builder, cleanup_span(), ty, MIROperation.ReadPlace{place: source})
+    carried := jet_codegen_emit_value(&builder, cleanup_span(), ty, MIROperation.Move{value: borrowed})
+    jet_codegen_register_file_owner_binding(&builder, target, ty, carried)
+    assert_eq(builder.file_owner_places.len(), 0)
+    transferred := jet_codegen_emit_value(&builder, cleanup_span(), ty, MIROperation.MovePlace{place: source})
+    jet_codegen_register_file_owner_binding(&builder, target, ty, transferred)
+    assert_eq(builder.file_owner_places.len(), 1)
+    assert_eq(builder.file_owner_places[0], target)
+}
+
+#Test("real tuple owners register reversed paths and clean fields in declaration order") {
+    builder := cleanup_files_builder("tuple")
+    file_ty := cleanup_file_type()
+    ty := Type.Tuple{fields: [TypeTupleField]{
+        TypeTupleField{name: "left", ty: file_ty},
+        TypeTupleField{name: "right", ty: file_ty},
+    }}
+    place := jet_codegen_bind_local(&builder, cleanup_local("pair", true), ty, true, None, None, false)
+    jet_codegen_register_file_owner(&builder, place, ty)
+    assert_eq(builder.file_owner_places.len(), 2)
+    leaves := jet_codegen_file_owner_leaves(builder, place)
+    assert_eq(leaves.len(), 2)
+    left := jet_codegen_find_place(builder, leaves[0].place) ?? panic("left owner missing")
+    right := jet_codegen_find_place(builder, leaves[1].place) ?? panic("right owner missing")
+    assert(left.projections == [MIRProjection]{MIRProjection.Field{field: jet_codegen_host_field_id(builder, ty, "left"), span: cleanup_span()}})
+    assert(right.projections == [MIRProjection]{MIRProjection.Field{field: jet_codegen_host_field_id(builder, ty, "right"), span: cleanup_span()}})
+    assert_eq(builder.file_owner_places[0], leaves[1].place)
+    read := jet_codegen_emit_value(&builder, cleanup_span(), ty, MIROperation.ReadPlace{place: place})
+    jet_codegen_terminate(&builder, MIRTerminator.Return{value: Val(read)})
+    jet_codegen_move_last_uses(&builder)
+    assert(cleanup_reads_place(builder, cleanup_position(builder, read), place))
+}
+
+#Test("real parameter producer registers file owners only for Move access") {
+    conventions := [AccessConvention]{AccessConvention.Read, AccessConvention.Write, AccessConvention.Move}
+    loop (index, access) in conventions {
+        builder := cleanup_files_builder("parameter{index}")
+        parameter := TParameter{
+            local: cleanup_local("owner", access == AccessConvention.Write),
+            name: "owner",
+            span: cleanup_span(),
+            ty: cleanup_file_type(),
+            convention: access,
+            public_label: "owner",
+            zone: ParamZone.Either,
+            default: None,
+            variadic: false,
+        }
+        jet_codegen_lower_parameter(&builder, parameter, 0)
+        assert_eq(builder.params.len(), 1)
+        if access == AccessConvention.Move {
+            assert_eq(builder.file_owner_places.len(), 1)
+            assert_eq(builder.drop_live_all.len(), 1)
+        } else {
+            assert_eq(builder.file_owner_places.len(), 0)
+            assert_eq(builder.drop_live_all.len(), 0)
+        }
+    }
+}
+
+#Test("native Yield cancel edge retains live-owner cleanup and resumes separately") {
+    builder := cleanup_builder("yield-cancel")
+    owner :: cleanup_owned_local(&builder, "held")
+    yielded :: TExpr{ty: Type.Int, kind: TExprKind.IntLit{value: 7, width: None}, span: cleanup_span(), integer_bounds: None, cost: None}
+    _ :: jet_codegen_lower_yield_send(&builder, yielded, yielded)
+    entry :: builder.blocks[cleanup_block_index(builder, builder.entry)]
+    if entry.terminator == .Yield(_, resume, cancel) {
+        assert(resume != cancel)
+        assert_eq(mir_terminator_targets(entry.terminator), [MIRBlockID]{resume, cancel})
+        assert_eq(builder.current, resume)
+        assert(builder.blocks[cleanup_block_index(builder, cancel)].terminator == .Jump(_))
+        assert(jet_codegen_terminate_with_owned_cleanup(&builder, MIRTerminator.Return{value: None}, -1))
+        jet_codegen_seal_exit_chains(&builder, 0)
+        jet_codegen_resolve_drop_flags(&builder)
+        assert_eq(cleanup_reachable_moves(builder, owner.place), 1)
+        return
+    }
+    panic("native Yield producer did not retain resume and cancellation targets")
+}

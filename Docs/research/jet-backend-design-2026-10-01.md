@@ -662,15 +662,40 @@ function (a `validate` block or a default expression). Skipped, defaulted and
 computed fields, `#[Flatten]`, `#[DenyUnknownFields]`, `#[Tag]` and
 `#[Untagged]` keep the template.
 
-**Codec reachability.** Derived serde impls whose type no emitted body
-demands are skipped: a body demands an impl by calling one of its methods or
-by naming its type anywhere in a call's type arguments (generic Prelude
-codecs reach impls through trait bounds), and a demanded impl's methods are
-scanned in turn (`Compiler/JetFoundation/Source/MIR/Reachability.jet`
-`mir_demanded_codec_impls`, used by the Jet emitter for every program;
-MIRRust `demanded_codec_impls`, enabled only for stage zero through
-`MirRustExecutionConfig.prune_unreachable_codecs`). A missed demand fails
-rustc with E0277 rather than changing behavior.
+**Codec reachability.** Codec pruning is opt-in through
+`JetRustEmitConfig.prune_unreachable_codecs`, matching
+`MirRustExecutionConfig.prune_unreachable_codecs`; the artifact constructor
+defaults it to false. When enabled, a body demands a derived serde impl by
+calling one of its methods or naming its type recursively in call type
+arguments. Demanded methods join the same work stack until the transitive
+closure is exhausted. `mir_demanded_codec_impls` in
+`Compiler/JetFoundation/Source/MIR/Reachability.jet` is the shared implementation.
+Non-derived impls remain roots. A missed demand fails rustc with E0277 rather
+than changing behavior.
+
+**AOT execution and metadata.** `JetRustEmitConfig` carries the selected
+artifact ID, checked target layout and native/WebWasm partition, optional
+borrowed Foundation `FfiLink`, optional 32-byte semantic digest, emission and
+debug-line flags, the shared typed release-devtools policy, and the pruning
+flag. `jet_rust_emit_config_for_artifact` preserves the reference defaults,
+including runtime emission enabled. `jet_rust_emit_aot_metadata` uses the
+ordinary emitter's single indexed state and six existing metadata carriers;
+it does not emit or scrape source. That state borrows the checked MIR and
+configuration, and transfers its symbol maps into the result manifest.
+Both paths require the Foundation owner's canonical artifact identity.
+
+`FfiLink`, descriptors, foreign boundary facts, and close/handle/link facts
+have one compiler-owned home in `JetFoundation/Source/AST/ForeignLink.jet`.
+Artifact paths remain native `OsPath` values. Dependency-directory and native
+library iterators borrow their carriers rather than materializing copied
+lists; the memory-reference field/return lowering prerequisite is #4500.
+
+The complete Jet-owned cached Prelude/selected Core runtime-source provider
+is a separate prerequisite. Until that producer is composed, requesting
+`emit_runtime` returns an explicit missing-provider emission failure, not
+an incomplete runtime or Rust-prefix wrapper. Disabling runtime emission
+is valid only for an enclosing backend that already supplies the complete
+runtime. These source contracts are not executable/native parity evidence.
 
 **Proof.** The repro above and both `Core/app/app.jet` patterns, compiled
 from the Rust compiler's checked MIR through the Jet emitter (MIR from

@@ -1,0 +1,158 @@
+use jet_foundation.TargetMachine.[TargetMachine, TargetMachineUse, TargetMachineError, TargetCapability, MemoryRegion, MemoryKind, MemoryAccess, ByteSize, AllocatorPolicy, PanicPolicy, MmioPolicy, ClockPolicy, EntropyPolicy, SchedulerPolicy, ByteSinkPolicy, StartupPolicy, ProviderContract, MmioAccess, UnsafeGate, ExecutionTier]
+use jet_foundation.RingLayer.[RuntimeLayer]
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4595
+fn valid_machine() -> TargetMachine Never! {
+    machine := TargetMachine.bare_metal("board.sensor_v1", "thumbv7em-none-eabihf")
+    machine.memory = [MemoryRegion]{
+        MemoryRegion.new("flash", U64{0x0800_0000}, ByteSize.kib(U64{512}), .Flash, .Rx),
+        MemoryRegion.new("ram", U64{0x2000_0000}, ByteSize.kib(U64{128}), .Ram, .Rw),
+        MemoryRegion.new("gpio", U64{0x4002_0000}, ByteSize.kib(U64{1}), .Mmio, .Rw)
+    }
+    machine.allocator = .Fixed{region: "ram", size: ByteSize.kib(U64{16})}
+    machine.panic = .Abort
+    machine.mmio = .Provider{provider: ProviderContract.new("test.mmio", "sha256:test-mmio")}
+    machine.wall_clock = .None
+    machine.monotonic_clock = .Provider{provider: ProviderContract.new("test.monotonic", "sha256:test-monotonic")}
+    machine.zone_data = .None
+    machine.sleep = .Provider{provider: ProviderContract.new("test.sleep", "sha256:test-sleep")}
+    machine.entropy = .None
+    machine.scheduler = .None
+    machine.byte_sink = .None
+    machine.startup = .Generated{provider: ProviderContract.new("test.startup", "sha256:test-startup")}
+    ^machine
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4646
+#Test("target_capability_facts_validate_provider_contracts") {
+    machine := valid_machine()
+    assert(machine.provides_capability(.Mmio))
+    assert(machine.provides_capability(.TimeMonotonic))
+    assert(!machine.provides_capability(.TimeWall))
+    assert(!machine.provides_capability(.Entropy))
+    usage := TargetMachineUse.default()
+    usage.required_capabilities = [TargetCapability]{.TimeMonotonic, .TimeWall}
+    errors :: machine.validate(usage)
+    assert(errors.contains(TargetMachineError.MissingTargetCapability{capability: "Time.Wall"}))
+    machine.mmio = .Provider{provider: ProviderContract.new("", "not-a-digest")}
+    invalid :: machine.validate(TargetMachineUse.default())
+    assert(invalid.contains(TargetMachineError.InvalidProviderContract{capability: "Target.MMIO", provider: "", sha256: "not-a-digest"}))
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4677
+#Test("hosted_default_keeps_full_runtime") {
+    machine :: TargetMachine.hosted("x86_64-unknown-linux-gnu")
+    usage := TargetMachineUse.default()
+    usage.core_apis = [String]{"core.files", "core.http.client"}
+    usage.heap_required = true
+    assert(machine.max_runtime_layer() == RuntimeLayer.Std)
+    assert(machine.validate(usage).len() == 0)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4689
+#Test("hosted_counting_allocator_is_typed_and_auditable") {
+    machine := TargetMachine.hosted("x86_64-unknown-linux-gnu")
+    machine.allocator = .Counting{cap: Val(ByteSize.bytes(U64{2 * 1024 * 1024 * 1024}))}
+    assert(machine.validate(TargetMachineUse.default()).len() == 0)
+    assert(machine.allocator.audit_json() == "{{\"kind\":\"counting\",\"wraps\":\"system\",\"cap_bytes\":2147483648}}")
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4702
+#Test("no_os_machine_rejects_hosted_counting_wrapper") {
+    machine := valid_machine()
+    machine.allocator = .Counting{cap: None}
+    errors :: machine.validate(TargetMachineUse.default())
+    assert(errors.contains(TargetMachineError.HostedAllocatorRequiresOs))
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4710
+#Test("valid_no_os_machine_passes") {
+    usage :: TargetMachineUse{
+        stack_bytes: ByteSize.kib(U64{4}).bytes,
+        static_ram_bytes: ByteSize.kib(U64{8}).bytes,
+        heap_required: true,
+        core_apis: [String]{"core.encoding.json"},
+        mmio: [MmioAccess]{MmioAccess{address: U64{0x4002_0000}, size: ByteSize.bytes(U64{4}), unsafe_gate: Val(UnsafeGate{reason: "GPIO register write"})}},
+        required_capabilities: [TargetCapability]{}
+    }
+    assert(valid_machine().validate(usage).len() == 0)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4729
+#Test("validation_reports_missing_required_no_os_facts") {
+    machine :: TargetMachine.bare_metal("", "")
+    errors :: machine.validate(TargetMachineUse.default())
+    assert(errors.contains(TargetMachineError.MissingTargetTriple))
+    assert(errors.contains(TargetMachineError.MissingMemoryKind{kind: .Flash}))
+    assert(errors.contains(TargetMachineError.MissingMemoryKind{kind: .Ram}))
+    assert(errors.contains(TargetMachineError.MissingAllocatorPolicy))
+    assert(errors.contains(TargetMachineError.MissingPanicPolicy))
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4744
+#Test("validation_reports_ram_heap_core_and_mmio_errors") {
+    machine := valid_machine()
+    machine.allocator = .None
+    usage :: TargetMachineUse{
+        stack_bytes: ByteSize.kib(U64{96}).bytes,
+        static_ram_bytes: ByteSize.kib(U64{64}).bytes,
+        heap_required: true,
+        core_apis: [String]{"core.files"},
+        mmio: [MmioAccess]{MmioAccess{address: U64{0x5000_0000}, size: ByteSize.bytes(U64{4}), unsafe_gate: None}},
+        required_capabilities: [TargetCapability]{}
+    }
+    errors :: machine.validate(usage)
+    assert(errors.contains(TargetMachineError.RamOverflow{used_bytes: ByteSize.kib(U64{160}).bytes, ram_bytes: ByteSize.kib(U64{128}).bytes}))
+    assert(errors.contains(TargetMachineError.HeapRequiresAllocator))
+    assert(errors.contains(TargetMachineError.CoreApiUnavailable{api: "core.files", required: .Std, available: .Core}))
+    assert(errors.contains(TargetMachineError.MmioOutsideRegion{address: U64{0x5000_0000}, size_bytes: U64{4}}))
+    assert(errors.contains(TargetMachineError.MmioMissingUnsafeGate{address: U64{0x5000_0000}}))
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4780
+#Test("audit_json_is_stable") {
+    usage := TargetMachineUse.default()
+    usage.core_apis = [String]{"core.files"}
+    usage.mmio = [MmioAccess]{MmioAccess{address: U64{0x4002_0000}, size: ByteSize.bytes(U64{4}), unsafe_gate: Val(UnsafeGate{reason: "GPIO register write"})}}
+    json :: valid_machine().audit_json(usage)
+    repeat :: valid_machine().audit_json(usage)
+    assert(json == repeat)
+    assert(json.contains("\"provider_identity\":\"target-providers-v1:"))
+    assert(json.contains("\"target_dossier\":"))
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4800
+#Test("named_wasm_profiles_have_distinct_provider_identities") {
+    browser :: TargetMachine.wasm_browser()
+    wasi :: TargetMachine.wasm_wasi()
+    no_os :: TargetMachine.wasm_no_os()
+    assert(browser.environment_identity() == "browser")
+    assert(wasi.environment_identity() == "wasi")
+    assert(no_os.environment_identity() == "no-os")
+    assert(browser.max_runtime_layer() == RuntimeLayer.Std)
+    assert(wasi.max_runtime_layer() == RuntimeLayer.Std)
+    assert(no_os.max_runtime_layer() == RuntimeLayer.Core)
+    assert(browser.provider_identity() != wasi.provider_identity())
+    assert(browser.provider_identity() != no_os.provider_identity())
+    assert(wasi.provider_identity() != no_os.provider_identity())
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4816
+#Test("target_dossier_carries_closure_and_execution_identity") {
+    machine :: TargetMachine.wasm_no_os()
+    usage :: TargetMachineUse.from_core_apis([String]{"core.encoding.json"})
+    dossier :: machine.target_dossier(usage, .Aot, "jet@2300", "deps:none")
+    assert(dossier.layer == RuntimeLayer.Core)
+    assert(dossier.closure_identity.starts_with("prelude-closure-v1:"))
+    assert(dossier.tier_identity == "aot")
+    assert(dossier.compiler_identity == "jet@2300")
+    assert(dossier.dependency_identity == "deps:none")
+    assert(dossier.cache_bytes(machine.triple) != machine.target_dossier(usage, .Jit, "jet@2300", "deps:none").cache_bytes(machine.triple))
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4839
+#Test("generated_linker_script_is_deterministic") {
+    script :: valid_machine().generate_linker_script() ?? panic("valid machine linker generation failed")
+    assert(script.contains("MEMORY {{"))
+    assert(script.contains("flash (rx) : ORIGIN = 0x08000000, LENGTH = 512K"))
+    assert(script.contains("ram (rwx) : ORIGIN = 0x20000000, LENGTH = 128K"))
+    assert(script.contains("ENTRY(Reset_Handler)"))
+    assert(script == (valid_machine().generate_linker_script() ?? panic("repeated linker generation failed")))
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:4849
+#Test("no_os_rejects_dev_and_jit_tiers") {
+    machine :: valid_machine()
+    assert(machine.supports_execution_tier(.Aot).is_ok())
+    assert(if machine.supports_execution_tier(.Dev) == { .Err(.ExecutionTierUnsupported(_, _)) -> true else -> false })
+    assert(if machine.supports_execution_tier(.Jit) == { .Err(.ExecutionTierUnsupported(_, _)) -> true else -> false })
+    assert(TargetMachine.hosted("x86_64-unknown-linux-gnu").supports_execution_tier(.Jit).is_ok())
+}

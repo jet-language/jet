@@ -1,0 +1,1968 @@
+// PORT-PENDING 0381 crates-jet-sema-src-sema-checkercorelib-core-call-slice-5645: crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5645-7608
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS                     Some(Type::Named(n)) if n == "HTTPRouter" => {}
+//RS                     Some(other) => {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                                 "E0112",
+//RS                                 format!("`http.dispatch` needs an HTTPRouter, not {}", other.show()),
+//RS                                 "build a router with `http.router()` and register routes with `.get/.post/…`".to_string(),
+//RS                                 "write `http.dispatch(router, req)`".to_string(),
+//RS                                 Some(args[0].expr.span()),
+//RS                             ));
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS                 if let Some(arg) = args.get_mut(1) {
+//RS                     let req_ty = self.infer(&mut arg.expr);
+//RS                     match &req_ty {
+//RS                         Some(Type::Named(n)) if n == "HTTPRequest" => {}
+//RS                         Some(other) => {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0112",
+//RS                                 format!(
+//RS                                     "`http.dispatch` needs an HTTPRequest, not {}",
+//RS                                     other.show()
+//RS                                 ),
+//RS                                 "parse the raw request with `http.parse(raw)`".to_string(),
+//RS                                 "write `http.dispatch(router, req)` where `req` is an HTTPRequest"
+//RS                                     .to_string(),
+//RS                                 Some(arg.expr.span()),
+//RS                             ));
+//RS                         }
+//RS                         _ => {}
+//RS                     }
+//RS                 }
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 });
+//RS             }
+//RS             // D-FOUND-LIFECYCLE1=A: the beginner surface binds a loopback
+//RS             // server with one shared per-request Context deadline. The legacy
+//RS             // address/handler form remains below for expert compatibility.
+//RS             ("core.http", "serve") => {
+//RS                 let first_ty = args
+//RS                     .get_mut(0)
+//RS                     .map(|arg| self.infer(&mut arg.expr));
+//RS                 if matches!(
+//RS                     first_ty.as_ref(),
+//RS                     Some(Some(Type::Named(name))) if name == "HTTPMux"
+//RS                 ) {
+//RS                     if args.len() != 2 {
+//RS                         self.diags
+//RS                             .push(wrong_core_arity("serve", 2, args.len(), span));
+//RS                         for arg in args.iter_mut().skip(1) {
+//RS                             self.infer(&mut arg.expr);
+//RS                         }
+//RS                         return None;
+//RS                     }
+//RS                     super::net_text_time::require_exact_labels(
+//RS                         "http.serve",
+//RS                         args,
+//RS                         &[(1, "deadline")],
+//RS                         span,
+//RS                         &mut self.diags,
+//RS                     );
+//RS                     self.expect_core_arg(
+//RS                         "serve",
+//RS                         1,
+//RS                         &Type::Named("Duration".to_string()),
+//RS                         &mut args[1],
+//RS                     );
+//RS                     return Some(Type::Named("HTTPServer".to_string()));
+//RS                 }
+//RS 
+//RS                 // E2-M10: jet.http.serve(addr, handler) — blocking accept
+//RS                 // loop. handler is a function or HTTPRouter.
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("serve", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
+//RS                 let saved_http_depth = self.http_handler_depth;
+//RS                 let saved_escapes = self.lambda_escapes;
+//RS                 self.http_handler_depth += 1;
+//RS                 self.lambda_escapes = true;
+//RS                 let handler_ty = self.infer(&mut args[1].expr);
+//RS                 self.http_handler_depth = saved_http_depth;
+//RS                 self.lambda_escapes = saved_escapes;
+//RS                 match &handler_ty {
+//RS                     Some(Type::Fn { .. }) => {}
+//RS                     Some(Type::Named(n)) if n == "HTTPRouter" => {}
+//RS                     Some(other) => {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0112",
+//RS                             format!(
+//RS                                 "`http.serve` handler must be a function or HTTPRouter, not {}",
+//RS                                 other.show()
+//RS                             ),
+//RS                             "the handler is called with each incoming `HTTPRequest`"
+//RS                                 .to_string(),
+//RS                             "pass a router (`http.router()`) or a lambda: `(req) -> HTTPResponse { … }`"
+//RS                                 .to_string(),
+//RS                             Some(args[1].expr.span()),
+//RS                         ));
+//RS                     }
+//RS                     None => {}
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS             // D-TEST-WORLD1=A: execute a callback inside one scoped deterministic
+//RS             // world. The callback receives the world handle and cannot escape
+//RS             // the call's checked lifetime.
+//RS             ("core.testing", "world") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("world", 1, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let saved_world_depth = self.deterministic_world_depth;
+//RS                 self.deterministic_world_depth += 1;
+//RS                 let callback_ty = self.infer_with_expected(
+//RS                     &mut args[0].expr,
+//RS                     &deterministic_world_callback_type(),
+//RS                 );
+//RS                 self.deterministic_world_depth = saved_world_depth;
+//RS                 match &callback_ty {
+//RS                     Some(Type::Fn { params, .. }) if params.len() == 1 => {
+//RS                         if params[0]
+//RS                             != Type::Named(crate::Syntax::DETERMINISTIC_WORLD_TYPE.to_string())
+//RS                         {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0104",
+//RS                                 format!(
+//RS                                     "`testing.world` callback needs a DeterministicWorld parameter, got {}",
+//RS                                     params[0].show()
+//RS                                 ),
+//RS                                 "the callback receives the active controlled execution world"
+//RS                                     .to_string(),
+//RS                                 "write `testing.world(world -> { … })`".to_string(),
+//RS                                 Some(args[0].expr.span()),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                     Some(Type::Fn { params, .. }) => {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0104",
+//RS                             format!(
+//RS                                 "`testing.world` callback needs one parameter, got {}",
+//RS                                 params.len()
+//RS                             ),
+//RS                             "the callback receives exactly one scoped execution world"
+//RS                                 .to_string(),
+//RS                             "write `testing.world(world -> { … })`".to_string(),
+//RS                             Some(args[0].expr.span()),
+//RS                         ));
+//RS                     }
+//RS                     Some(other) => {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0112",
+//RS                             format!(
+//RS                                 "`testing.world` needs a lambda, not {}",
+//RS                                 other.show()
+//RS                             ),
+//RS                             "the world callback runs with controlled time and scheduling"
+//RS                                 .to_string(),
+//RS                             "write `testing.world(world -> { … })`".to_string(),
+//RS                             Some(args[0].expr.span()),
+//RS                         ));
+//RS                     }
+//RS                     None => {}
+//RS                 }
+//RS                 return Some(unit_ty());
+//RS             }
+//RS             // D-TEST-STRATEGY1=A: one optional explicit strategy replaces the
+//RS             // compiler-derived strategy when present. The runner remains the
+//RS             // shared Foundation implementation and keeps typed callbacks.
+//RS             ("core.testing", "histories") => {
+//RS                 if type_args.len() == 1 {
+//RS                     self.check_declared_type(&type_args[0], span);
+//RS                 } else {
+//RS                     let _ = exactly_one_type_arg(self, name, type_args, span);
+//RS                 }
+//RS                 let command = type_args
+//RS                     .first()
+//RS                     .cloned()
+//RS                     .unwrap_or_else(|| Type::Named("DataTree".to_string()));
+//RS                 let data_tree = Type::Named("DataTree".to_string());
+//RS                 let command_callback = data_callback_type(
+//RS                     Type::List(Box::new(command.clone())),
+//RS                     data_tree.clone(),
+//RS                 );
+//RS                 let observe_callback = data_callback_type(data_tree.clone(), data_tree);
+//RS                 let strategy_callback = Type::Option(Box::new(history_strategy_type(command)));
+//RS                 let expected = vec![
+//RS                     Type::Int,
+//RS                     Type::Int,
+//RS                     strategy_callback,
+//RS                     command_callback.clone(),
+//RS                     command_callback,
+//RS                     observe_callback,
+//RS                 ];
+//RS                 if args.len() != expected.len() {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity(name, expected.len(), args.len(), span));
+//RS                 }
+//RS                 for (index, expected) in expected.iter().enumerate() {
+//RS                     if let Some(arg) = args.get_mut(index) {
+//RS                         self.expect_core_arg(name, index, expected, arg);
+//RS                     }
+//RS                 }
+//RS                 for arg in args.iter_mut().skip(expected.len()) {
+//RS                     self.infer(&mut arg.expr);
+//RS                 }
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("TestComparison".to_string())),
+//RS                     err: Box::new(Type::String),
+//RS                 });
+//RS             }
+//RS             // D-DEFER1 option B: scope.guard(() -> { … }) → ScopeGuard
+//RS             // The argument must be a zero-parameter lambda. LIFO drop order is
+//RS             // guaranteed by Rust's reverse-declaration semantics.
+//RS             ("core.mem.scope", "guard") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("guard", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let lam_ty =
+//RS                     self.infer_with_expected(&mut args[0].expr, &unit_callback_type());
+//RS                 match &lam_ty {
+//RS                     Some(Type::Fn { params, .. }) => {
+//RS                         if !params.is_empty() {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E0104",
+//RS                                     format!(
+//RS                                         "`scope.guard` needs a zero-parameter lambda, got {} parameter{}",
+//RS                                         params.len(),
+//RS                                         if params.len() == 1 { "" } else { "s" }
+//RS                                     ),
+//RS                                     "the guard body takes no arguments — it captures what it needs via closure".to_string(),
+//RS                                     "write `scope.guard(() -> { cleanup_code })` with no parameters".to_string(),
+//RS                                     Some(args[0].expr.span()),
+//RS                                 ));
+//RS                         }
+//RS                     }
+//RS                     Some(other) => {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                                 "E0112",
+//RS                                 format!("`scope.guard` needs a lambda, not {}", other.show()),
+//RS                                 "a scope guard runs a cleanup lambda when the binding goes out of scope".to_string(),
+//RS                                 "write `scope.guard(() -> { cleanup_code })`".to_string(),
+//RS                                 Some(args[0].expr.span()),
+//RS                             ));
+//RS                     }
+//RS                     None => {}
+//RS                 }
+//RS                 return Some(Type::Named("ScopeGuard".to_string()));
+//RS             }
+//RS             // D-REACT1=B: reactive.signal(initial) → Signal<T>. The value type is
+//RS             // inferred from the initial value; an explicit annotation may guide an
+//RS             // empty/ambiguous literal via `expected_type`.
+//RS             ("core.reactive", "signal") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("signal", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 // If the binding is annotated `Signal<T>`, push `T` as the expected
+//RS                 // type for the initial value so an ambiguous literal elaborates.
+//RS                 let saved = self.expected_type.clone();
+//RS                 if let Some(Type::Apply { name, args: ta }) = &self.expected_type {
+//RS                     if name == crate::Syntax::TYPE_SIGNAL && ta.len() == 1 {
+//RS                         self.expected_type = Some(ta[0].clone());
+//RS                     }
+//RS                 }
+//RS                 let init_ty = self.infer(&mut args[0].expr);
+//RS                 self.expected_type = saved;
+//RS                 let Some(elem) = init_ty else {
+//RS                     return None;
+//RS                 };
+//RS                 if !self.reactive_value_ok(&elem, args[0].expr.span(), "signal") {
+//RS                     return None;
+//RS                 }
+//RS                 return Some(Type::Apply {
+//RS                     name: crate::Syntax::TYPE_SIGNAL.to_string(),
+//RS                     args: vec![elem],
+//RS                 });
+//RS             }
+//RS             // D-REACT1=B: reactive.derived(() => expr) → Derived<T>. The compute
+//RS             // closure takes no parameters; `T` is its return type. Reading a signal
+//RS             // (`.get()`) inside the body subscribes the derived to it.
+//RS             ("core.reactive", "derived") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("derived", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let lam_ty = self.infer_retained_callback(&mut args[0].expr, None);
+//RS                 let elem = match &lam_ty {
+//RS                     Some(Type::Fn { params, ret, .. }) => {
+//RS                         if !params.is_empty() {
+//RS                             self.diags.push(reactive_lambda_arity(
+//RS                                 "derived",
+//RS                                 params.len(),
+//RS                                 args[0].expr.span(),
+//RS                             ));
+//RS                             return None;
+//RS                         }
+//RS                         match ret {
+//RS                             Some(r)
+//RS                                 if matches!(
+//RS                                     r.as_ref(),
+//RS                                     Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE
+//RS                                 ) =>
+//RS                             {
+//RS                                 self.diags.push(reactive_derived_unit(args[0].expr.span()));
+//RS                                 return None;
+//RS                             }
+//RS                             Some(r) => (**r).clone(),
+//RS                             None => {
+//RS                                 self.diags.push(reactive_derived_unit(args[0].expr.span()));
+//RS                                 return None;
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     Some(other) => {
+//RS                         self.diags
+//RS                             .push(reactive_not_lambda("derived", other, args[0].expr.span()));
+//RS                         return None;
+//RS                     }
+//RS                     None => return None,
+//RS                 };
+//RS                 if !self.reactive_value_ok(&elem, args[0].expr.span(), "derived") {
+//RS                     return None;
+//RS                 }
+//RS                 return Some(Type::Apply {
+//RS                     name: crate::Syntax::TYPE_DERIVED.to_string(),
+//RS                     args: vec![elem],
+//RS                 });
+//RS             }
+//RS             // D-SIGNAL1: `reactive.computed` is a canonical alias for `derived`.
+//RS             ("core.reactive", "computed") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("computed", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let lam_ty = self.infer_retained_callback(&mut args[0].expr, None);
+//RS                 let elem = match &lam_ty {
+//RS                     Some(Type::Fn { params, ret, .. }) => {
+//RS                         if !params.is_empty() {
+//RS                             self.diags.push(reactive_lambda_arity(
+//RS                                 "computed",
+//RS                                 params.len(),
+//RS                                 args[0].expr.span(),
+//RS                             ));
+//RS                             return None;
+//RS                         }
+//RS                         match ret {
+//RS                             Some(r)
+//RS                                 if matches!(
+//RS                                     r.as_ref(),
+//RS                                     Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE
+//RS                                 ) =>
+//RS                             {
+//RS                                 self.diags.push(reactive_derived_unit(args[0].expr.span()));
+//RS                                 return None;
+//RS                             }
+//RS                             Some(r) => (**r).clone(),
+//RS                             None => {
+//RS                                 self.diags.push(reactive_derived_unit(args[0].expr.span()));
+//RS                                 return None;
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     Some(other) => {
+//RS                         self.diags.push(reactive_not_lambda(
+//RS                             "computed",
+//RS                             other,
+//RS                             args[0].expr.span(),
+//RS                         ));
+//RS                         return None;
+//RS                     }
+//RS                     None => return None,
+//RS                 };
+//RS                 if !self.reactive_value_ok(&elem, args[0].expr.span(), "computed") {
+//RS                     return None;
+//RS                 }
+//RS                 return Some(Type::Apply {
+//RS                     name: crate::Syntax::TYPE_COMPUTED.to_string(),
+//RS                     args: vec![elem],
+//RS                 });
+//RS             }
+//RS             // D-RENDERTGT2=A (c133 M2): `ui.reactive_render(() -> { … })` — reactive
+//RS             // measure/layout/paint loop; re-runs when a signal read inside changes.
+//RS             ("core.ui", "reactive_render") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("reactive_render", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let lam_ty =
+//RS                     self.infer_retained_callback(&mut args[0].expr, Some(&unit_callback_type()));
+//RS                 match &lam_ty {
+//RS                     Some(Type::Fn { params, .. }) => {
+//RS                         if !params.is_empty() {
+//RS                             self.diags.push(reactive_lambda_arity(
+//RS                                 "reactive_render",
+//RS                                 params.len(),
+//RS                                 args[0].expr.span(),
+//RS                             ));
+//RS                             return None;
+//RS                         }
+//RS                     }
+//RS                     Some(other) => {
+//RS                         self.diags.push(reactive_not_lambda(
+//RS                             "reactive_render",
+//RS                             other,
+//RS                             args[0].expr.span(),
+//RS                         ));
+//RS                         return None;
+//RS                     }
+//RS                     None => return None,
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS             // D-UI-CLOSURE1=A: the optional shortcut and accessible label
+//RS             // are metadata on one canonical button node. A callback uses the
+//RS             // trailing block spelling and is lowered to one fixed four-word
+//RS             // runtime route.
+//RS             ("core.ui", "button") => {
+//RS                 if args.len() == 1 {
+//RS                     self.expect_core_arg("button", 0, &Type::String, &mut args[0]);
+//RS                     return Some(Type::Named("UINode".to_string()));
+//RS                 }
+//RS                 if args.len() != 4 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("button", 4, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("button", 0, &Type::String, &mut args[0]);
+//RS                 self.expect_core_optional_arg(
+//RS                     "button",
+//RS                     1,
+//RS                     &Type::Named("UIShortcut".to_string()),
+//RS                     &mut args[1],
+//RS                 );
+//RS                 self.expect_core_optional_arg("button", 2, &Type::String, &mut args[2]);
+//RS                 if !args[3].flags.is_trailing_block
+//RS                     || matches!(args[3].expr, Expr::Absent(_))
+//RS                 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0335",
+//RS                         "button callbacks use a trailing block".to_string(),
+//RS                         "the callback is the button's trailing closure, after its labeled metadata"
+//RS                             .to_string(),
+//RS                         "write `button(\"Save\") { save() }`".to_string(),
+//RS                         Some(args[3].span),
+//RS                     ));
+//RS                     self.infer(&mut args[3].expr);
+//RS                     return Some(Type::Named("UINode".to_string()));
+//RS                 }
+//RS                 let callback_ty =
+//RS                     self.infer_retained_callback(&mut args[3].expr, Some(&unit_callback_type()));
+//RS                 if let Some(Type::Fn { params, .. }) = callback_ty {
+//RS                     if !params.is_empty() {
+//RS                         self.diags.push(reactive_lambda_arity(
+//RS                             "button on_click",
+//RS                             params.len(),
+//RS                             args[3].expr.span(),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 return Some(Type::Named("UINode".to_string()));
+//RS             }
+//RS             // D-UI-DROP1=A: text input keeps its existing two-value node
+//RS             // constructor and adds one typed `on_drop` closure slot.
+//RS             ("core.ui", "text_input") => {
+//RS                 if args.len() == 2 {
+//RS                     self.expect_core_arg("text_input", 0, &Type::String, &mut args[0]);
+//RS                     self.expect_core_arg(
+//RS                         "text_input",
+//RS                         1,
+//RS                         &Type::Named("UIIMEMode".to_string()),
+//RS                         &mut args[1],
+//RS                     );
+//RS                     return Some(Type::Named("UINode".to_string()));
+//RS                 }
+//RS                 if args.len() != 3 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("text_input", 3, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 if !matches!(args[2].expr, Expr::Absent(_)) {
+//RS                     let callback_ty = self.infer_retained_callback(
+//RS                         &mut args[2].expr,
+//RS                         Some(&ui_drop_callback_type()),
+//RS                     );
+//RS                     if let Some(Type::Fn { params, .. }) = callback_ty {
+//RS                         if params.len() != 1 {
+//RS                             self.diags.push(reactive_lambda_arity(
+//RS                                 "text_input on_drop",
+//RS                                 params.len(),
+//RS                                 args[2].expr.span(),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 return Some(Type::Named("UINode".to_string()));
+//RS             }
+//RS             // D-UI-MOUNT1=A: `ui.mount(backend, tree)` or `ui.mount(backend, tree, constraint)`.
+//RS             ("core.ui", "mount") => {
+//RS                 if args.len() != 2 && args.len() != 3 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("mount", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let backend_ty = self.infer(&mut args[0].expr);
+//RS                 let tree_ty = self.infer(&mut args[1].expr);
+//RS                 if let Some(ty) = &backend_ty {
+//RS                     match ty.name().as_str() {
+//RS                         "NullBackend" | "TUIBackend" | "GtkBackend" => {}
+//RS                         _ => {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E0108",
+//RS                                     format!(
+//RS                                         "`ui.mount` needs a UI backend, but the first argument is {}",
+//RS                                         ty.show()
+//RS                                     ),
+//RS                                     "pass `ui.null_backend()`, `ui.tui_backend()`, or `ui.gtk_backend()`"
+//RS                                         .to_string(),
+//RS                                     "backend :: ui.tui_backend()\nui.mount(backend, tree)".to_string(),
+//RS                                     Some(args[0].expr.span()),
+//RS                                 ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 if let Some(ty) = &tree_ty {
+//RS                     if ty.name() != "UINode" {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0108",
+//RS                             format!(
+//RS                                 "`ui.mount` needs a `UINode` tree, but the second argument is {}",
+//RS                                 ty.show()
+//RS                             ),
+//RS                             "build the tree with `ui.text` / `ui.box` / `ui.node` / …".to_string(),
+//RS                             "ui.mount(backend, ui.box([ui.text(\"hi\")]))".to_string(),
+//RS                             Some(args[1].expr.span()),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 if args.len() == 3 {
+//RS                     if let Some(ty) = self.infer(&mut args[2].expr) {
+//RS                         if ty.name() != "SizeConstraint" {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                     "E0108",
+//RS                                     format!(
+//RS                                         "`ui.mount` optional third argument is a `SizeConstraint`, but got {}",
+//RS                                         ty.show()
+//RS                                     ),
+//RS                                     "use `ui.constraint(min_w, min_h, max_w, max_h)`".to_string(),
+//RS                                     "ui.mount(backend, tree, ui.constraint(0.0, 0.0, 80.0, 24.0))"
+//RS                                         .to_string(),
+//RS                                     Some(args[2].expr.span()),
+//RS                                 ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 return Some(unit_ty());
+//RS             }
+//RS             // D-REACT1=B: reactive.effect(() => { … }) runs the body now and again
+//RS             // whenever a signal it read changes. The body is a zero-parameter,
+//RS             // unit-returning closure; the call returns a retained Effect.
+//RS             ("core.reactive", "effect") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("effect", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let lam_ty =
+//RS                     self.infer_retained_callback(&mut args[0].expr, Some(&unit_callback_type()));
+//RS                 match &lam_ty {
+//RS                     Some(Type::Fn { params, .. }) => {
+//RS                         if !params.is_empty() {
+//RS                             self.diags.push(reactive_lambda_arity(
+//RS                                 "effect",
+//RS                                 params.len(),
+//RS                                 args[0].expr.span(),
+//RS                             ));
+//RS                             return None;
+//RS                         }
+//RS                     }
+//RS                     Some(other) => {
+//RS                         self.diags
+//RS                             .push(reactive_not_lambda("effect", other, args[0].expr.span()));
+//RS                         return None;
+//RS                     }
+//RS                     None => return None,
+//RS                 }
+//RS                 return Some(Type::Named(crate::Syntax::TYPE_EFFECT.to_string()));
+//RS             }
+//RS             // D-EVENT1=D: first-party typed Event/Hook family. Constructors are
+//RS             // module functions so the semantic family is one Core library surface,
+//RS             // not new syntax.
+//RS             ("core.event", "scope") => {
+//RS                 if !args.is_empty() {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("scope", 0, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 return Some(Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()));
+//RS             }
+//RS             ("core.event", "policy_sync") => {
+//RS                 if !args.is_empty() {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("policy_sync", 0, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 return Some(Type::Named(crate::Syntax::TYPE_EVENT_POLICY.to_string()));
+//RS             }
+//RS             ("core.event", "new") => {
+//RS                 if !args.is_empty() {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("new", 0, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 if type_args.len() != 1 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0904",
+//RS                         "`event.new` needs one payload type".to_string(),
+//RS                         "`Event<T>` carries exactly one typed payload for each emit".to_string(),
+//RS                         "call it with an explicit type argument: `event.new<Click>()`".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return None;
+//RS                 }
+//RS                 self.check_declared_type(&type_args[0], span);
+//RS                 return Some(Type::Apply {
+//RS                     name: crate::Syntax::TYPE_EVENT.to_string(),
+//RS                     args: vec![type_args[0].clone()],
+//RS                 });
+//RS             }
+//RS             ("core.event", "with_policy") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("with_policy", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 if type_args.len() != 1 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0904",
+//RS                             "`event.with_policy` needs one payload type".to_string(),
+//RS                             "`Event<T>` carries exactly one typed payload for each emit".to_string(),
+//RS                             "call it with an explicit type argument: `event.with_policy<Click>(policy)`".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     return None;
+//RS                 }
+//RS                 self.check_declared_type(&type_args[0], span);
+//RS                 self.expect_core_arg(
+//RS                     "with_policy",
+//RS                     0,
+//RS                     &Type::Named(crate::Syntax::TYPE_EVENT_POLICY.to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 return Some(Type::Apply {
+//RS                     name: crate::Syntax::TYPE_EVENT.to_string(),
+//RS                     args: vec![type_args[0].clone()],
+//RS                 });
+//RS             }
+//RS             ("core.event", "async_result") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("async_result", 2, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 if type_args.len() != 2 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0904",
+//RS                             "`event.async_result` needs payload and error types".to_string(),
+//RS                             "`AsyncEvent<T, E>` dispatches typed payloads and preserves typed handler failures".to_string(),
+//RS                             "call it with explicit type arguments: `event.async_result<Job, JobError>(policy, failures)`".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     return None;
+//RS                 }
+//RS                 self.check_declared_type(&type_args[0], span);
+//RS                 self.check_declared_type(&type_args[1], span);
+//RS                 self.expect_core_arg(
+//RS                     "async_result",
+//RS                     0,
+//RS                     &Type::Named(crate::Syntax::TYPE_ASYNC_POLICY.to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 self.expect_core_arg(
+//RS                     "async_result",
+//RS                     1,
+//RS                     &Type::Named(crate::Syntax::TYPE_FAILURE_POLICY.to_string()),
+//RS                     &mut args[1],
+//RS                 );
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Apply {
+//RS                         name: crate::Syntax::TYPE_ASYNC_EVENT.to_string(),
+//RS                         args: vec![type_args[0].clone(), type_args[1].clone()],
+//RS                     }),
+//RS                     err: Box::new(Type::Named(
+//RS                         crate::Syntax::TYPE_EVENT_CONFIG_ERROR.to_string(),
+//RS                     )),
+//RS                 });
+//RS             }
+//RS             ("core.event", "hook") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("hook", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 if type_args.len() != 2 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0904",
+//RS                             "`event.hook` needs payload and result types".to_string(),
+//RS                             "`Hook<T, R>` receives a typed payload and combines handler results into one `R`".to_string(),
+//RS                             "call it with explicit type arguments: `event.hook<Request, Decision>(fallback)`".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     return None;
+//RS                 }
+//RS                 self.check_declared_type(&type_args[0], span);
+//RS                 self.check_declared_type(&type_args[1], span);
+//RS                 self.expect_core_arg("hook", 0, &type_args[1], &mut args[0]);
+//RS                 return Some(Type::Apply {
+//RS                     name: crate::Syntax::TYPE_HOOK.to_string(),
+//RS                     args: vec![type_args[0].clone(), type_args[1].clone()],
+//RS                 });
+//RS             }
+//RS             ("core.event", "decision_hook") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("decision_hook", 1, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 if type_args.len() != 2 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0904",
+//RS                             "`event.decision_hook` needs payload and error types".to_string(),
+//RS                             "`DecisionHook<T, E>` transforms or cancels a typed payload and preserves typed failures".to_string(),
+//RS                             "call it with explicit type arguments: `event.decision_hook<Request, Err>(HookPolicy.FirstCancelElseTransform)`".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     return None;
+//RS                 }
+//RS                 self.check_declared_type(&type_args[0], span);
+//RS                 self.check_declared_type(&type_args[1], span);
+//RS                 self.expect_core_arg(
+//RS                     "decision_hook",
+//RS                     0,
+//RS                     &Type::Named(crate::Syntax::TYPE_HOOK_POLICY.to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 return Some(Type::Apply {
+//RS                     name: crate::Syntax::TYPE_DECISION_HOOK.to_string(),
+//RS                     args: vec![type_args[0].clone(), type_args[1].clone()],
+//RS                 });
+//RS             }
+//RS             // D-PENDING1=B: Loadable<T,E> constructors — idle/loading/loaded/failed.
+//RS             ("core.reactive.loadable", "idle") => {
+//RS                 if !args.is_empty() {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("idle", 0, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 return Some(Type::Apply {
+//RS                     name: "Loadable".to_string(),
+//RS                     args: vec![unit_ty(), unit_ty()],
+//RS                 });
+//RS             }
+//RS             ("core.reactive.loadable", "loading") => {
+//RS                 if !args.is_empty() {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("loading", 0, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 return Some(Type::Apply {
+//RS                     name: "Loadable".to_string(),
+//RS                     args: vec![unit_ty(), unit_ty()],
+//RS                 });
+//RS             }
+//RS             ("core.reactive.loadable", "loaded") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("loaded", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let val_ty = self
+//RS                     .infer(&mut args[0].expr)
+//RS                     .unwrap_or(Type::Named("Unknown".to_string()));
+//RS                 return Some(Type::Apply {
+//RS                     name: "Loadable".to_string(),
+//RS                     args: vec![val_ty, unit_ty()],
+//RS                 });
+//RS             }
+//RS             ("core.reactive.loadable", "failed") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("failed", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let err_ty = self
+//RS                     .infer(&mut args[0].expr)
+//RS                     .unwrap_or(Type::Named("Unknown".to_string()));
+//RS                 return Some(Type::Apply {
+//RS                     name: "Loadable".to_string(),
+//RS                     args: vec![unit_ty(), err_ty],
+//RS                 });
+//RS             }
+//RS             // D-SHAPE-CTORVERB1=C: recover after the retired module factory
+//RS             // as if `ExpiringValue.new` had been written.
+//RS             ("core.time.expiring", "new") => {
+//RS                 self.diags.push(unknown_core_item(module, name, span));
+//RS                 if args.len() != 3 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("new", 3, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let value_ty = self
+//RS                     .infer(&mut args[0].expr)
+//RS                     .unwrap_or(Type::Named("Unknown".to_string()));
+//RS                 self.expect_core_arg(
+//RS                     "new",
+//RS                     1,
+//RS                     &Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
+//RS                     &mut args[1],
+//RS                 );
+//RS                 self.expect_core_arg(
+//RS                     "new",
+//RS                     2,
+//RS                     &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
+//RS                     &mut args[2],
+//RS                 );
+//RS                 return Some(Type::Apply {
+//RS                     name: crate::Syntax::EXPIRING_VALUE_TYPE.to_string(),
+//RS                     args: vec![value_ty],
+//RS                 });
+//RS             }
+//RS             // #1465: POSIX process/session control requires `#Unsafe` (I1).
+//RS             (
+//RS                 "core.sys",
+//RS                 "fork" | "setuid" | "setgid" | "setpgid" | "setpgrp" | "setsid" | "initgroups"
+//RS                 | "kill" | "wait" | "waitpid" | "pipe" | "close_fd" | "mkfifo" | "umask"
+//RS                 | "getpriority" | "setpriority" | "utime" | "atexit" | "stop",
+//RS             ) => {
+//RS                 if !self.in_unsafe {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E3101",
+//RS                             format!("`core.sys.{name}` requires an audited `#Unsafe` region"),
+//RS                             "POSIX process and session control can change credentials, signals, and process topology (I1)".to_string(),
+//RS                             format!("wrap the call in `#Unsafe(\"posix {name}: …\") {{ … }}` and gate the host OS with `prep if $build.os` / `#Target(OS.*)`"),
+//RS                             Some(span),
+//RS                         ));
+//RS                 }
+//RS                 // Continue into shared fixed-signature checking below.
+//RS             }
+//RS             // U13 (D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` reads a
+//RS             // decrypted repo secret and returns `String?`; it is not a raw
+//RS             // key-material operation, so the expert arm below must not
+//RS             // claim it. `Docs/spec/spec.md` § Secrets states its whole gate:
+//RS             // the `Secret` effect (E1264, and `Secret` is the one effect
+//RS             // denied even with no declared row at all) plus unconditional
+//RS             // denial at build/comptime time (E1265, no `#Impure` escape).
+//RS             // The catch-all demanded a third gate it describes as "raw key
+//RS             // import", which this call is not, and that rejected the shipped
+//RS             // executable spec `Examples/features/crypto/vault_secret.jet`
+//RS             // — which declares `-[Secret, IO]>` exactly as the spec says
+//RS             // (I5, #2018). Empty body: fall through to the shared
+//RS             // fixed-signature check like every other gated arm here.
+//RS             ("core.crypto.vault", "get") => {}
+//RS             // D-CRYPTOENV1=A: expert-only raw crypto — requires import + #Unsafe gate.
+//RS             ("core.crypto.expert" | "core.crypto.vault", _) => {
+//RS                 let has_import = self
+//RS                     .core_imports
+//RS                     .values()
+//RS                     .any(|imported| imported == module);
+//RS                 if !has_import {
+//RS                     let (what, why, fix) = if module == "core.crypto.expert" {
+//RS                         (
+//RS                                 format!("`core.crypto.expert.{name}` bypasses the misuse-resistant envelope"),
+//RS                                 "raw AES/ChaCha primitives are expert-only and hide none of the footguns that `crypto.seal`/`open` prevent (D-CRYPTOENV1)".to_string(),
+//RS                                 "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `#Unsafe(\"reason\")` region".to_string(),
+//RS                             )
+//RS                     } else {
+//RS                         (
+//RS                                 format!("`{module}.{name}` is an expert-only key material operation"),
+//RS                                 "raw key material operations bypass the misuse-resistant typed surface".to_string(),
+//RS                                 format!("import `{module}` and call it inside an audited `#Unsafe(\"reason\")` region"),
+//RS                             )
+//RS                     };
+//RS                     self.diags
+//RS                         .push(Diagnostic::error("E0510", what, why, fix, Some(span)));
+//RS                 } else if !self.in_unsafe {
+//RS                     let (what, why, fix) = if module == "core.crypto.expert" {
+//RS                         (
+//RS                                 format!("`core.crypto.expert.{name}` requires an audited `#Unsafe` region"),
+//RS                                 "raw crypto primitives may only run inside an explicit expert-tier gate (I1)".to_string(),
+//RS                                 "wrap the call in `#Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
+//RS                             )
+//RS                     } else {
+//RS                         (
+//RS                             format!("`{module}.{name}` requires an audited `#Unsafe` region"),
+//RS                             "raw key import may only run inside an explicit expert-tier gate (I1)"
+//RS                                 .to_string(),
+//RS                             "wrap the call in `#Unsafe(\"vault key import: …\") { … }`".to_string(),
+//RS                         )
+//RS                     };
+//RS                     self.diags
+//RS                         .push(Diagnostic::error("E0510", what, why, fix, Some(span)));
+//RS                 }
+//RS                 // Continue into shared fixed-signature checking below. The
+//RS                 // unsafe gate is additional policy, never a type/arity bypass.
+//RS             }
+//RS             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
+//RS             ("core.http.client", "get") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("get", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_url_arg("get", 0, &mut args[0]);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.http.client", "post") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("post", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_url_arg("post", 0, &mut args[0]);
+//RS                 self.expect_core_arg("post", 1, &Type::String, &mut args[1]);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.http.client", "request") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("request", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("request", 0, &Type::String, &mut args[0]);
+//RS                 self.expect_url_arg("request", 1, &mut args[1]);
+//RS                 return Some(Type::Named("HTTPRequest".to_string()));
+//RS             }
+//RS             // D-WS1=B: WebSocket entry points.
+//RS             ("core.net.ws", "connect") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("connect", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("connect", 0, &Type::String, &mut args[0]);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("WsConn".to_string())),
+//RS                     err: Box::new(Type::Named("WsError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.net.ws", "upgrade") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("upgrade", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg(
+//RS                     "upgrade",
+//RS                     0,
+//RS                     &Type::Named("HTTPRequest".to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("WsConn".to_string())),
+//RS                     err: Box::new(Type::Named("WsError".to_string())),
+//RS                 });
+//RS             }
+//RS             // D-BROWSER-AUTO1=A: versioned native BiDi protocol core.
+//RS             ("core.web.browser", "profile") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("profile", 1, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("profile", 0, &Type::String, &mut args[0]);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("BrowserProfile".to_string())),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.web.browser", "timeout") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("timeout", 1, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("timeout", 0, &Type::Int, &mut args[0]);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("BrowserTimeout".to_string())),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.web.browser", "locked") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("locked", 1, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("locked", 0, &Type::String, &mut args[0]);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("BrowserLocked".to_string())),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.web.browser", "connect") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("connect", 1, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("connect", 0, &Type::String, &mut args[0]);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("Browser".to_string())),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.web.browser", "connect_profile") => {
+//RS                 if args.len() != 3 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("connect_profile", 3, args.len(), span));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("connect_profile", 0, &Type::String, &mut args[0]);
+//RS                 self.expect_core_arg(
+//RS                     "connect_profile",
+//RS                     1,
+//RS                     &Type::Named("BrowserProfile".to_string()),
+//RS                     &mut args[1],
+//RS                 );
+//RS                 self.expect_core_arg(
+//RS                     "connect_profile",
+//RS                     2,
+//RS                     &Type::Named("BrowserTimeout".to_string()),
+//RS                     &mut args[2],
+//RS                 );
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("Browser".to_string())),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.http.server", "mux") => {
+//RS                 for a in args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(Type::Named("HTTPMux".to_string()));
+//RS             }
+//RS             ("core.http.server", "bind") => {
+//RS                 // The shared Core parameter binder materializes both optional
+//RS                 // labeled slots before this checked branch reaches the
+//RS                 // backend. Keeping one four-value shape makes the AOT, JIT,
+//RS                 // and evaluator routes agree on the server ABI.
+//RS                 if args.len() != 4 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0104",
+//RS                             format!("`bind` expects address, mux, optional `tls:`, and optional `deadline:`, got {}", args.len()),
+//RS                             "HTTPS binding and request deadlines use named options while plaintext keeps the same entry point".to_string(),
+//RS                             "write `Server.bind(addr, mux)`, add `tls: Server.tls(cert, key)`, or add `deadline: duration`".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("bind", 0, &Type::String, &mut args[0]);
+//RS                 self.expect_core_arg("bind", 1, &Type::Named("HTTPMux".to_string()), &mut args[1]);
+//RS                 self.expect_core_optional_arg(
+//RS                     "bind",
+//RS                     2,
+//RS                     &Type::Named("HTTPServerTLS".to_string()),
+//RS                     &mut args[2],
+//RS                 );
+//RS                 self.expect_core_optional_arg(
+//RS                     "bind",
+//RS                     3,
+//RS                     &Type::Named("Duration".to_string()),
+//RS                     &mut args[3],
+//RS                 );
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPServer".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.http.server", "serve") => {
+//RS                 if args.len() != 4 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0104",
+//RS                             format!("`serve` expects address, mux, optional `tls:`, and optional `deadline:`, got {}", args.len()),
+//RS                             "HTTPS serving and request deadlines use named options while plaintext keeps the same entry point".to_string(),
+//RS                             "write `Server.serve(addr, mux)`, add `tls: Server.tls(cert, key)`, or add `deadline: duration`".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     for arg in args.iter_mut() {
+//RS                         self.infer(&mut arg.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
+//RS                 // second arg is a Mux — just infer it
+//RS                 self.infer(&mut args[1].expr);
+//RS                 self.expect_core_optional_arg(
+//RS                     "serve",
+//RS                     2,
+//RS                     &Type::Named("HTTPServerTLS".to_string()),
+//RS                     &mut args[2],
+//RS                 );
+//RS                 self.expect_core_optional_arg(
+//RS                     "serve",
+//RS                     3,
+//RS                     &Type::Named("Duration".to_string()),
+//RS                     &mut args[3],
+//RS                 );
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(unit_ty()),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.http.server", "serve_once") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("serve_once", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("serve_once", 0, &Type::String, &mut args[0]);
+//RS                 self.infer(&mut args[1].expr);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(unit_ty()),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.http.server", "serve_once_listener") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("serve_once_listener", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg(
+//RS                     "serve_once_listener",
+//RS                     0,
+//RS                     &Type::Named("TCPListener".to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 self.infer(&mut args[1].expr);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(unit_ty()),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.http.server", "tls") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("tls", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("tls", 0, &Type::String, &mut args[0]);
+//RS                 self.expect_core_arg("tls", 1, &Type::String, &mut args[1]);
+//RS                 return Some(Type::Named("HTTPServerTLS".to_string()));
+//RS             }
+//RS             ("core.http.server", "response") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("response", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("response", 0, &Type::Int, &mut args[0]);
+//RS                 self.expect_core_arg("response", 1, &Type::String, &mut args[1]);
+//RS                 return Some(Type::Named("HTTPResponse".to_string()));
+//RS             }
+//RS             ("core.http.server", "sse") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("sse", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("sse", 0, &Type::String, &mut args[0]);
+//RS                 return Some(Type::Named("HTTPResponse".to_string()));
+//RS             }
+//RS             ("core.http.server", "static_file") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("static_file", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("static_file", 0, &Type::String, &mut args[0]);
+//RS                 self.expect_core_arg("static_file", 1, &Type::String, &mut args[1]);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.http.server", "static_file_range") => {
+//RS                 if args.len() != 3 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("static_file_range", 3, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg(
+//RS                     "static_file_range",
+//RS                     0,
+//RS                     &Type::Named("HTTPRequest".to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 self.expect_core_arg("static_file_range", 1, &Type::String, &mut args[1]);
+//RS                 self.expect_core_arg("static_file_range", 2, &Type::String, &mut args[2]);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.http.server", "access_log") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("access_log", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg(
+//RS                     "access_log",
+//RS                     0,
+//RS                     &Type::Named("HTTPRequest".to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 self.expect_core_arg("access_log", 1, &Type::Int, &mut args[1]);
+//RS                 return Some(Type::String);
+//RS             }
+//RS             ("core.http.server", "request_id") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("request_id", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg(
+//RS                     "request_id",
+//RS                     0,
+//RS                     &Type::Named("HTTPMux".to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 return Some(Type::Named("Unit".to_string()));
+//RS             }
+//RS             ("core.http.server", "mux_handler") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("mux_handler", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg(
+//RS                     "mux_handler",
+//RS                     0,
+//RS                     &Type::Named("HTTPMux".to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 return Some(Type::Named("HTTPHandler".to_string()));
+//RS             }
+//RS             // D-HTTP-STATIC-FILES1=A: mount a directory under a prefix. The
+//RS             // trailing `index`, `dotfiles`, and `follow_links` options are
+//RS             // the expert opt-in; leaving them off keeps the safe defaults.
+//RS             ("core.http.server", "static_files") => {
+//RS                 if args.len() < 3 || args.len() > 6 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("static_files", 3, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg(
+//RS                     "static_files",
+//RS                     0,
+//RS                     &Type::Named("HTTPMux".to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 self.expect_core_arg("static_files", 1, &Type::String, &mut args[1]);
+//RS                 self.expect_core_arg("static_files", 2, &Type::String, &mut args[2]);
+//RS                 for index in 3..args.len() {
+//RS                     self.expect_core_arg("static_files", index, &Type::Bool, &mut args[index]);
+//RS                 }
+//RS                 return Some(Type::Named("Unit".to_string()));
+//RS             }
+//RS             ("core.http.middleware", "timeout") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("timeout", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg(
+//RS                     "timeout",
+//RS                     0,
+//RS                     &Type::Named("Duration".to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 self.expect_core_arg(
+//RS                     "timeout",
+//RS                     1,
+//RS                     &Type::Named("HTTPHandler".to_string()),
+//RS                     &mut args[1],
+//RS                 );
+//RS                 return Some(Type::Named("HTTPHandler".to_string()));
+//RS             }
+//RS             ("core.http.middleware", "body_limit") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("body_limit", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("body_limit", 0, &Type::Int, &mut args[0]);
+//RS                 self.expect_core_arg(
+//RS                     "body_limit",
+//RS                     1,
+//RS                     &Type::Named("HTTPHandler".to_string()),
+//RS                     &mut args[1],
+//RS                 );
+//RS                 return Some(Type::Named("HTTPHandler".to_string()));
+//RS             }
+//RS             // D-HTTP-CORS1=A: one policy value, then one install on the mux.
+//RS             // `origins` takes a plain `[String]` list or the `.Any` case.
+//RS             ("core.http.server", "cors_policy") => {
+//RS                 if args.is_empty() || args.len() > 5 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("cors_policy", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 let origins = self.infer(&mut args[0].expr);
+//RS                 let list_form = matches!(&origins, Some(Type::List(_)));
+//RS                 let case_form =
+//RS                     matches!(&origins, Some(Type::Named(name)) if name == "HTTPCorsOrigins");
+//RS                 if !list_form && !case_form {
+//RS                     self.expect_core_arg(
+//RS                         "cors_policy",
+//RS                         0,
+//RS                         &Type::Named("HTTPCorsOrigins".to_string()),
+//RS                         &mut args[0],
+//RS                     );
+//RS                 }
+//RS                 let string_list = Type::List(Box::new(Type::String));
+//RS                 for (index, want) in [
+//RS                     (1, &string_list),
+//RS                     (2, &string_list),
+//RS                     (3, &Type::Bool),
+//RS                     (4, &Type::Int),
+//RS                 ] {
+//RS                     if let Some(arg) = args.get_mut(index) {
+//RS                         self.expect_core_arg("cors_policy", index, want, arg);
+//RS                     }
+//RS                 }
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPCorsPolicy".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.http.server", "cors") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("cors", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("cors", 0, &Type::Named("HTTPMux".to_string()), &mut args[0]);
+//RS                 self.expect_core_arg(
+//RS                     "cors",
+//RS                     1,
+//RS                     &Type::Named("HTTPCorsPolicy".to_string()),
+//RS                     &mut args[1],
+//RS                 );
+//RS                 return Some(Type::Named("Unit".to_string()));
+//RS             }
+//RS             // D-HTTP-JSON1=A: one typed JSON response.
+//RS             ("core.http.server", "json") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("json", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("json", 0, &Type::Int, &mut args[0]);
+//RS                 if let Some(value) = self.infer(&mut args[1].expr) {
+//RS                     self.check_encodable(&value, args[1].expr.span());
+//RS                 }
+//RS                 return Some(Type::Named("HTTPResponse".to_string()));
+//RS             }
+//RS             ("core.http.middleware", "compress") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("compress", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg(
+//RS                     "compress",
+//RS                     0,
+//RS                     &Type::Named("HTTPCompressEncoding".to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 self.expect_core_arg(
+//RS                     "compress",
+//RS                     1,
+//RS                     &Type::Named("HTTPHandler".to_string()),
+//RS                     &mut args[1],
+//RS                 );
+//RS                 return Some(Type::Named("HTTPHandler".to_string()));
+//RS             }
+//RS             ("core.http.middleware", "access_log") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("access_log", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg(
+//RS                     "access_log",
+//RS                     0,
+//RS                     &Type::Named("HTTPHandler".to_string()),
+//RS                     &mut args[0],
+//RS                 );
+//RS                 return Some(Type::Named("HTTPHandler".to_string()));
+//RS             }
+//RS             // D-TIMEDEPTH1=A: civil-time constructors.
+//RS             ("core.time", "new") => {
+//RS                 if args.len() != 3 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("new", 3, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
+//RS                 self.expect_core_arg("new", 1, &Type::Int, &mut args[1]);
+//RS                 self.expect_core_arg("new", 2, &Type::Int, &mut args[2]);
+//RS                 return Some(Type::Named("LocalDate".to_string()));
+//RS             }
+//RS             ("core.time", "today") => {
+//RS                 for a in args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(Type::Named("LocalDate".to_string()));
+//RS             }
+//RS             ("core.time", "parse") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("parse", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("parse", 0, &Type::String, &mut args[0]);
+//RS                 return Some(Type::Result {
+//RS                     ok: Box::new(Type::Named("LocalDate".to_string())),
+//RS                     err: Box::new(Type::Named("TimeError".to_string())),
+//RS                 });
+//RS             }
+//RS             ("core.time", "from_timestamp") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("from_timestamp", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("from_timestamp", 0, &Type::Int, &mut args[0]);
+//RS                 return Some(Type::Named("DateTime".to_string()));
+//RS             }
+//RS             // D-APPROX1=A: sketch constructors.
+//RS             ("core.data.sketch.hll", "new") => {
+//RS                 for a in args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(Type::Named("HyperLogLog".to_string()));
+//RS             }
+//RS             ("core.data.sketch.tdigest", "new") => {
+//RS                 for a in args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(Type::Named("TDigest".to_string()));
+//RS             }
+//RS             ("core.data.sketch.cms", "new") => {
+//RS                 for a in args.iter_mut() {
+//RS                     self.infer(&mut a.expr);
+//RS                 }
+//RS                 return Some(Type::Named("CountMinSketch".to_string()));
+//RS             }
+//RS             ("core.data.sketch.reservoir", "new") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("new", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
+//RS                 return Some(Type::Named("ReservoirSampler".to_string()));
+//RS             }
+//RS             // D-NUMTYPE1=A: core.math.fraction(top, bottom) answers an exact
+//RS             // ratio, or nothing when the bottom is zero.
+//RS             ("core.math", "fraction") => {
+//RS                 if args.len() != 2 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("fraction", 2, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("fraction", 0, &Type::Int, &mut args[0]);
+//RS                 self.expect_core_arg("fraction", 1, &Type::Int, &mut args[1]);
+//RS                 return Some(Type::Option(Box::new(Type::Named(
+//RS                     crate::Syntax::TYPE_FRACTION.to_string(),
+//RS                 ))));
+//RS             }
+//RS             // D-CORE-NUMERIC1=A: `core.math.decimal(s)` → `Decimal`.
+//RS             ("core.math", "decimal") => {
+//RS                 if args.len() != 1 {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("decimal", 1, args.len(), span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 self.expect_core_arg("decimal", 0, &Type::String, &mut args[0]);
+//RS                 return Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()));
+//RS             }
+//RS             // D-TEXTWIDTH1=B: `text.display_width(s)` (portable default,
+//RS             // returns bare `Int`) vs `text.display_width(s, policy: cjk)`
+//RS             // (the `.Reject` control policy can fail, so it returns
+//RS             // `Int !TextError`). Named-arg dispatch mirrors `game.run`.
+//RS             ("core.text", "display_width") => match args.len() {
+//RS                 1 => {
+//RS                     self.expect_core_arg("display_width", 0, &Type::String, &mut args[0]);
+//RS                     return Some(Type::Int);
+//RS                 }
+//RS                 2 => {
+//RS                     let params = vec![
+//RS                         crate::Sema::CallBinder::BindParam {
+//RS                             label: "text",
+//RS                             name: "text",
+//RS                             zone: ParamZone::PositionalOnly,
+//RS                             default: None,
+//RS                             convention: AccessConvention::Read,
+//RS                             ty: None,
+//RS                             variadic: false,
+//RS                             core_default: None,
+//RS                         },
+//RS                         crate::Sema::CallBinder::BindParam {
+//RS                             label: "policy",
+//RS                             name: "policy",
+//RS                             zone: ParamZone::Either,
+//RS                             default: None,
+//RS                             convention: AccessConvention::Read,
+//RS                             ty: None,
+//RS                             variadic: false,
+//RS                             core_default: None,
+//RS                         },
+//RS                     ];
+//RS                     if crate::Sema::CallBinder::bind_call_args(
+//RS                         "display_width",
+//RS                         &params,
+//RS                         args,
+//RS                         span,
+//RS                         &mut self.diags,
+//RS                     )
+//RS                     .is_none()
+//RS                     {
+//RS                         for arg in args.iter_mut() {
+//RS                             self.infer(&mut arg.expr);
+//RS                         }
+//RS                         return Some(Type::Result {
+//RS                             ok: Box::new(Type::Int),
+//RS                             err: Box::new(Type::Named("TextError".to_string())),
+//RS                         });
+//RS                     }
+//RS                     self.expect_core_arg("display_width", 0, &Type::String, &mut args[0]);
+//RS                     self.expect_core_arg(
+//RS                         "display_width",
+//RS                         1,
+//RS                         &Type::Named("TextWidth".to_string()),
+//RS                         &mut args[1],
+//RS                     );
+//RS                     return Some(Type::Result {
+//RS                         ok: Box::new(Type::Int),
+//RS                         err: Box::new(Type::Named("TextError".to_string())),
+//RS                     });
+//RS                 }
+//RS                 n => {
+//RS                     self.diags
+//RS                         .push(wrong_core_arity("display_width", 1, n, span));
+//RS                     for a in args.iter_mut() {
+//RS                         self.infer(&mut a.expr);
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS             },
+//RS             _ => {}
+//RS         }
+//RS 
+//RS 
+//RS         // D-PLUGIN-AUTHORITY1: plugin loading has one exact ABI. The path and
+//RS         // tightened Authority are both required; omitted authority is never
+//RS         // replaced with ambient host policy. A static artifact also selects a
+//RS         // frozen Component interface before body checking can see methods.
+//RS         if module == "core.plugin" && name == "load" {
+//RS             if args.len() != 2 {
+//RS                 self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+//RS             }
+//RS             if let Some(arg) = args.get_mut(0) {
+//RS                 self.expect_core_arg(name, 0, &Type::String, arg);
+//RS             }
+//RS             if let Some(arg) = args.get_mut(1) {
+//RS                 self.expect_core_arg(
+//RS                     name,
+//RS                     1,
+//RS                     &Type::Named(crate::Syntax::AUTHORITY_HANDLE_TYPE.to_string()),
+//RS                     arg,
+//RS                 );
+//RS                 crate::Sema::Effects::check_authority_boundary_scope(self, &arg.expr);
+//RS                 arg.flags.authority_boundary = true;
+//RS             }
+//RS             for arg in args.iter_mut().skip(2) {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS 
+//RS             let artifact = args.first().and_then(|arg| match &arg.expr {
+//RS                 Expr::Str(parts, _) => match parts.as_slice() {
+//RS                     [crate::AST::StrPart::Lit(path)] => Some(path.as_str()),
+//RS                     _ => None,
+//RS                 },
+//RS                 _ => None,
+//RS             });
+//RS             let interface = artifact.and_then(|path| self.plugin_interfaces.interface_for_artifact(path));
+//RS             let Some(interface) = interface else {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E1257",
+//RS                     "plugin.load needs a registered Component interface".to_string(),
+//RS                     "plugin members are available only when the artifact is a literal with a frozen interface snapshot"
+//RS                         .to_string(),
+//RS                     "pass a literal registered artifact path, or publish its plugin interface snapshot"
+//RS                         .to_string(),
+//RS                     args.first()
+//RS                         .map(|arg| arg.expr.span())
+//RS                         .or(Some(span)),
+//RS                 ));
+//RS                 return Some(Type::Named("Plugin".to_string()));
+//RS             };
+//RS             return Some(Type::Apply {
+//RS                 name: "Plugin".to_string(),
+//RS                 args: vec![Type::Named(interface.identity.clone())],
+//RS             });
+//RS         }
+//RS 
+//RS         let compute_alias_ret = if module == "core.compute" {
+//RS             compute_alias_return(name, args)
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let Some((params, ret)) = sig else {
+//RS             self.diags.push(unknown_core_item(module, name, span));
+//RS             for a in args.iter_mut() {
+//RS                 self.infer(&mut a.expr);
+//RS             }
+//RS             let _ = alias_span;
+//RS             return None;
+//RS         };
+//RS         // D-COMPUTE-RAW1/I1: a raw kernel contract is an expert escape
+//RS         // hatch, not a safe compute constructor. Keep the fixed signature
+//RS         // and normal type checking, but require the same lexical audit
+//RS         // gate as the other low-level memory/device operations.
+//RS         if module == "core.crypto.expert" && name == "x25519_raw" {
+//RS             let validation_diag_start = self.diags.len();
+//RS             if !(2..=3).contains(&args.len()) {
+//RS                 self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+//RS             }
+//RS             for (i, ((conv, param_ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
+//RS                 debug_assert_eq!(*conv, AccessConvention::Read);
+//RS                 self.expect_core_arg(name, i, param_ty, arg);
+//RS             }
+//RS             for arg in args.iter_mut().skip(params.len()) {
+//RS                 self.infer(&mut arg.expr);
+//RS             }
+//RS             if self.in_unsafe
+//RS                 && self
+//RS                     .core_imports
+//RS                     .values()
+//RS                     .any(|imported| imported == module)
+//RS                 && (2..=3).contains(&args.len())
+//RS                 && self.diags.len() == validation_diag_start
+//RS             {
+//RS                 if let Some(diagnostic) = crypto_misuse_diagnostic(self, module, name, args) {
+//RS                     self.fx_pending_diagnostics.push(diagnostic);
+//RS                 }
+//RS             }
+//RS             return ret;
+//RS         }
+//RS         let validation_diag_start = self.diags.len();
+//RS         let raw_envelope_diagnostic = safe_envelope_raw_argument(module, name, args, params.len());
+//RS         if args.len() != params.len() && raw_envelope_diagnostic.is_none() {
+//RS             self.diags
+//RS                 .push(wrong_core_arity(name, params.len(), args.len(), span));
+//RS         }
+//RS         for (i, ((conv, param_ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
+//RS             let retained_ui_callback = matches!(
+//RS                 (module, name),
+//RS                 ("core.ui", "preview" | "playground")
+//RS             ) && matches!(param_ty, Type::Fn { .. });
+//RS             let saved_callback_escapes = self.lambda_escapes;
+//RS             if retained_ui_callback {
+//RS                 self.lambda_escapes = true;
+//RS             }
+//RS             if *conv == AccessConvention::Move {
+//RS                 self.expect_core_arg_moving(name, i, param_ty, arg);
+//RS                 if retained_ui_callback {
+//RS                     self.lambda_escapes = saved_callback_escapes;
+//RS                     if !matches!(arg.expr, Expr::Absent(_)) {
+//RS                         self.check_stream_callback_expr(&arg.expr, param_ty);
+//RS                     }
+//RS                 }
+//RS                 self.finish_core_call_ownership(name, i, arg, *conv, param_ty);
+//RS                 continue;
+//RS             }
+//RS             if *conv == AccessConvention::Write && arg.convention != AccessConvention::Write {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0202",
+//RS                     format!(
+//RS                         "argument {} to `{}` requires the write-access marker `&`",
+//RS                         i + 1,
+//RS                         name
+//RS                     ),
+//RS                     "this standard library call edits that value in place".to_string(),
+//RS                     format!(
+//RS                         "write the write-access marker `&`: `{}value` for this argument",
+//RS                         Syntax::SIGIL_WRITE
+//RS                     ),
+//RS                     Some(arg.span),
+//RS                 ));
+//RS             } else if *conv == AccessConvention::Write {
+//RS                 if let Expr::Ident(ident, ident_span) = &arg.expr {
+//RS                     if let Some(info) = self.lookup(ident) {
+//RS                         if !info.mutable {
+//RS                             let mut diagnostic = Diagnostic::error(
+//RS                                 "E0111",
+//RS                                 format!(
+//RS                                     "`{}` was made with `{}`, so it can't be changed",
+//RS                                     ident,
+//RS                                     Syntax::SIGIL_BIND_IMMUT
+//RS                                 ),
+//RS                                 format!(
+//RS                                     "`{}` will change this value, so it must be mutable (`{}`)",
+//RS                                     name,
+//RS                                     Syntax::SIGIL_BIND_MUT
+//RS                                 ),
+//RS                                 format!(
+//RS                                     "declare it with `{} {} ...`",
+//RS                                     ident,
+//RS                                     Syntax::SIGIL_BIND_MUT
+//RS                                 ),
+//RS                                 Some(*ident_span),
+//RS                             );
+//RS                             if let Some(sigil_span) = info.binding_sigil_span {
+//RS                                 diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit {
+//RS                                     span: sigil_span,
+//RS                                     new_text: Syntax::SIGIL_BIND_MUT.to_string(),
+//RS                                 });
+//RS                             }
+//RS                             self.diags.push(diagnostic);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             self.expect_core_arg(name, i, param_ty, arg);
+//RS             if retained_ui_callback {
+//RS                 self.lambda_escapes = saved_callback_escapes;
+//RS                 if !matches!(arg.expr, Expr::Absent(_)) {
+//RS                     self.check_stream_callback_expr(&arg.expr, param_ty);
+//RS                 }
+//RS             }
+//RS         }
+//RS         for arg in args.iter_mut().skip(params.len()) {
+//RS             self.infer(&mut arg.expr);
+//RS         }
+//RS         let expert_gate_ok = module != "core.crypto.expert"
+//RS             || (self.in_unsafe
+//RS                 && self
+//RS                     .core_imports
+//RS                     .values()
+//RS                     .any(|imported| imported == "core.crypto.expert"));
+//RS         if expert_gate_ok
+//RS             && (args.len() == params.len() || raw_envelope_diagnostic.is_some())
+//RS             && self.diags.len() == validation_diag_start
+//RS         {
+//RS             if let Some(diagnostic) = raw_envelope_diagnostic
+//RS                 .or_else(|| crypto_misuse_diagnostic(self, module, name, args))
+//RS             {
+//RS                 self.fx_pending_diagnostics.push(diagnostic);
+//RS             }
+//RS         }
+//RS         if module == "core.time" && name == "clock" {
+//RS             ret.map(crate::Sema::Diagnostics::deterministic_clock_type)
+//RS         } else {
+//RS             compute_alias_ret.or(ret)
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0381 crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5645-7608
+

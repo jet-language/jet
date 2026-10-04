@@ -1,0 +1,95 @@
+use jet_foundation.[MIRType, MIRTypeKind, MIRTypeID, MIRCoreOwner, MIROwnershipMode, MIRHandleID, MIRNominalRef, MIRLoopSourceKind, mir_type_from_kind, stable_id]
+
+fn source_resource_test_owner(name: String, mode: MIROwnershipMode) -> MIRCoreOwner Never! {
+    MIRCoreOwner{id: MIRTypeID{value: U64{1}}, nominal_id: MIRTypeID{value: U64{2}}, module_id: None, key: "core.test::{name}", name: name, ownership: mode}
+}
+fn source_resource_test_loop_failure(source: MIRLoopSourceKind, expected: String) Never! {
+    _ :: source_resource_kind_from_loop_source(source) ?? { assert_eq(err, expected); return }
+    panic("invalid Source loop source was accepted")
+}
+fn source_resource_test_kind_failure(kind: SourceResourceKind, expected: String) Never! {
+    _ :: source_resource_kind_as_loop_source(kind) ?? { assert_eq(err, expected); return }
+    panic("nonproducer Source kind was accepted")
+}
+fn source_resource_test_owner_failure(owner: MIRCoreOwner, ty: MIRType, expected: String) Never! {
+    _ :: source_resource_kind_from_core_owner_type(owner, ty) ?? { assert_eq(err, expected); return }
+    panic("invalid Source owner metadata was accepted")
+}
+fn source_resource_test_raw_failure(raw: I64) Never! {
+    _ :: source_resource_decode_raw(raw) ?? { assert_eq(err, "invalid or stale Source resource capability"); return }
+    panic("invalid Source capability word was accepted")
+}
+#Test("source_resource_loop_kinds_preserve_checked_roundtrip") {
+    sources :: [MIRLoopSourceKind]{.Plain, .LinesFile, .LinesStdin, .LinesProcessStream, .ChannelReceiver, .EncodingReader{reader_type: "JSONReader"}}
+    loop source in sources {
+        kind :: source_resource_kind_from_loop_source(source) ?? panic(err)
+        assert(source_resource_kind_matches_loop_source(kind, source))
+        restored :: source_resource_kind_as_loop_source(kind) ?? panic(err)
+        assert_eq(restored, source)
+    }
+    assert(!source_resource_kind_matches_loop_source(.EncodingReader{reader_type: "XMLReader"}, .EncodingReader{reader_type: "JSONReader"}))
+    source_resource_test_loop_failure(.Chars, "character iteration is not a resource slot")
+    source_resource_test_loop_failure(.Iterable{coll_type: "x", iter_type: "y", iter_symbol: "i", next_symbol: "n"}, "UserIterable is not a native resource slot")
+}
+#Test("source_resource_nonproducers_have_exact_refusals") {
+    kinds :: [SourceResourceKind]{.FileWriter, .ChannelSender, .EncodingWriter{writer_type: "JSONWriter"}, .SharedInteropRoot{type_identity: U64{1}}, .SharedInteropWeakRoot{type_identity: U64{1}}, .NativeBinding, .NativeCursor}
+    messages :: [String]{"file writer is not a loop producer kind", "channel sender is not a loop producer kind", "encoding writer is not a loop producer kind", "Source Shared owners are not loop producer kinds", "Source Shared owners are not loop producer kinds", "native binding is not a loop producer kind", "native cursor is not a loop producer kind"}
+    loop (index, kind) in kinds -> source_resource_test_kind_failure(kind, messages[index])
+}
+#Test("source_resource_checked_owner_selection_covers_every_reference_kind") {
+    names :: [String]{"Stream", "FileReader", "FileWriter", "StdinHandle", "ProcessStdoutStream", "ProcessStderrStream", "Receiver", "Sender", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "XMLReader", "XMLWriter", "CBORReader", "CBORWriter"}
+    expected :: [SourceResourceKind]{.PlainStream, .LinesFile, .FileWriter, .LinesStdin, .LinesProcessStream, .LinesProcessStream, .ChannelReceiver, .ChannelSender, .EncodingReader{reader_type: "JSONReader"}, .EncodingWriter{writer_type: "JSONWriter"}, .EncodingReader{reader_type: "JSONLReader"}, .EncodingWriter{writer_type: "JSONLWriter"}, .EncodingReader{reader_type: "CSVReader"}, .EncodingWriter{writer_type: "CSVWriter"}, .EncodingReader{reader_type: "XMLReader"}, .EncodingWriter{writer_type: "XMLWriter"}, .EncodingReader{reader_type: "CBORReader"}, .EncodingWriter{writer_type: "CBORWriter"}}
+    loop (index, name) in names {
+        owner :: source_resource_test_owner(name, .Owned)
+        args := [MIRType]{}
+        if name == "Stream" || name == "Receiver" || name == "Sender" -> &args.push(mir_type_from_kind(.Int))
+        ty :: mir_type_from_kind(.Apply{name: MIRNominalRef{id: owner.nominal_id, name: name}, args: args})
+        actual :: source_resource_kind_from_core_owner_type(owner, ty) ?? panic(err)
+        assert_eq(actual, expected[index])
+    }
+}
+#Test("source_resource_checked_owner_refuses_identity_access_and_arity_mismatch") {
+    owner := source_resource_test_owner("FileReader", .Owned)
+    ty := mir_type_from_kind(.Apply{name: MIRNominalRef{id: owner.nominal_id, name: "FileReader"}, args: [MIRType]{}})
+    owner.id = MIRTypeID{value: U64{0}}
+    source_resource_test_owner_failure(owner, ty, "checked Core owner registration has a zero identity")
+    owner.id = MIRTypeID{value: U64{1}}
+    owner.ownership = .ReadBorrow
+    source_resource_test_owner_failure(owner, ty, "checked Core owner registration is not owned")
+    owner.ownership = .Move
+    ty = mir_type_from_kind(.Apply{name: MIRNominalRef{id: MIRTypeID{value: U64{3}}, name: "FileReader"}, args: [MIRType]{}})
+    source_resource_test_owner_failure(owner, ty, "checked Core owner `FileReader` identity disagrees with its nominal registration")
+    ty = mir_type_from_kind(.Apply{name: MIRNominalRef{id: owner.nominal_id, name: "FileReader"}, args: [MIRType]{mir_type_from_kind(.Int)}})
+    source_resource_test_owner_failure(owner, ty, "checked Core resource owner `FileReader` has 1 type arguments; expected 0")
+}
+#Test("source_resource_capability_words_are_bits_not_addresses") {
+    value :: source_resource_decode_raw(I64{-1}) ?? panic(err)
+    assert_eq(value.0, U32{4294967295})
+    assert_eq(value.1, U32{4294967295})
+    ordinary :: source_resource_decode_raw(I64{4294967298}) ?? panic(err)
+    assert_eq(ordinary.0, U32{2})
+    assert_eq(ordinary.1, U32{1})
+    bad :: [I64]{I64{0}, I64{1}, I64{4294967296}}
+    loop raw in bad -> source_resource_test_raw_failure(raw)
+    handle :: SourceResourceHandle{handle: MIRHandleID{value: U64{7}}, raw: I64{4294967298}, kind: .LinesFile, generation: U32{1}}
+    key :: source_resource_handle_native_loop_key(handle) ?? panic(err)
+    assert_eq(key.handle, handle.handle)
+    assert_eq(key.raw, handle.raw)
+    assert_eq(key.source_kind, MIRLoopSourceKind.LinesFile)
+}
+#Test("source_resource_handle_namespaces_are_canonical") {
+    assert_eq(loop_cursor_handle_id().value, stable_id("mir-handle", "core.prelude::loop_iter_cursor"))
+    assert_eq(native_binding_handle_id().value, stable_id("mir-handle", "core.prelude::native_binding"))
+    assert_eq(shared_interop_root_handle_id().value, stable_id("mir-handle", "jet.internal::source_shared_interop_root"))
+    assert_eq(shared_interop_weak_root_handle_id().value, stable_id("mir-handle", "jet.internal::source_shared_interop_weak_root"))
+}
+#Test("source_native_binding_identity_matches_exact_scope_and_checked_type") {
+    execution :: source_resource_metadata_execution()
+    first :: SourceNativeBindingIdentity.Interface{execution: ~execution, artifact: source_resource_mir.MIRArtifactID{value: U64{1}}, receiver_type: mir_type_from_kind(.Int)}
+    same :: SourceNativeBindingIdentity.Interface{execution: ~execution, artifact: source_resource_mir.MIRArtifactID{value: U64{1}}, receiver_type: mir_type_from_kind(.Int)}
+    different :: SourceNativeBindingIdentity.Interface{execution: ~execution, artifact: source_resource_mir.MIRArtifactID{value: U64{2}}, receiver_type: mir_type_from_kind(.Int)}
+    different_type :: SourceNativeBindingIdentity.Interface{execution: ~execution, artifact: source_resource_mir.MIRArtifactID{value: U64{1}}, receiver_type: mir_type_from_kind(.String)}
+    assert(source_native_binding_identity_same_scope_and_type(first, same))
+    assert(!source_native_binding_identity_same_scope_and_type(first, different))
+    assert(!source_native_binding_identity_same_scope_and_type(first, different_type))
+}

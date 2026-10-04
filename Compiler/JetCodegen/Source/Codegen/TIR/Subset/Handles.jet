@@ -1,0 +1,770 @@
+// PORT-PENDING 0519 crates-jet-codegen-src-codegen-tir-subset-module-group: crates/jet-codegen/src/Codegen/TIR/subset/handles.rs:1-766
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::AST::{Expr, Type};
+//RS use crate::Codegen::Cx;
+//RS use crate::Codegen::TIR::THandleOp;
+//RS use crate::Codegen::TIR::expr_in_subset;
+//RS use crate::Codegen::TIR::lambda_in_subset;
+//RS use crate::Codegen::TIR::unit_type;
+//RS use crate::Codegen::is_db_value_type_name;
+//RS use crate::Syntax;
+//RS use std::collections::HashSet;
+//RS 
+//RS /// c109 Phase 13: resolve a handle method `(handle, method, nargs)` into a total
+//RS /// `THandleOp`, reproducing built-in method lowering. Returns `None` for anything not
+//RS /// covered (so the caller
+//RS /// caller falls through to other shapes). Excluded (with reason): `lines` on
+//RS /// FileReader/StdinHandle (dead — E2502, loop-source-only); all HTTPRouter `get`/
+//RS /// `post`/`put`/`delete` (closure handler → `emit_router_handler`); HTTPRequest/
+//RS /// HTTPResponse accessors (serve-lambda-param slot may be unresolved → AST handle arm
+//RS /// wouldn't fire); Arena/Bump/Pool/Fixed (`alloc`/`reset` — the producer
+//RS /// `mem.*.new` isn't a covered call, so an allocator never binds in a covered fn);
+//RS /// Channel/Sender/Task (`receive`/`send`/`sender`/`detach` — producers not covered);
+//RS /// `Match.group` (the `Option<Match>` unwrap chain isn't cleanly reachable).
+//RS 
+//RS /// D-SOLVER-LIB1=A: is this `solve.Solver.new(seed)`?
+//RS pub(crate) fn solve_new_type<'a>(
+//RS     receiver: &'a Expr,
+//RS     method: &str,
+//RS     cx: &Cx,
+//RS     locals: &HashSet<String>,
+//RS ) -> Option<&'a str> {
+//RS     if method != "new" {
+//RS         return None;
+//RS     }
+//RS     let Expr::Field(inner, solver_type, _) = receiver else {
+//RS         return None;
+//RS     };
+//RS     let Expr::Ident(alias, _) = &**inner else {
+//RS         return None;
+//RS     };
+//RS     if locals.contains(alias) {
+//RS         return None;
+//RS     }
+//RS     if cx.any_core_import_module(alias) != Some(Syntax::CORE_SOLVE_MODULE) {
+//RS         return None;
+//RS     }
+//RS     (solver_type == Syntax::SOLVER_TYPE).then_some(solver_type.as_str())
+//RS }
+//RS 
+//RS /// D-SHAPE-DURATION1=A: resolve a bare type-owned runtime constructor.
+//RS pub(crate) fn duration_new_unit(
+//RS     receiver: &Expr,
+//RS     method: &str,
+//RS     locals: &HashSet<String>,
+//RS ) -> Option<&'static str> {
+//RS     let Expr::Ident(type_name, _) = receiver else {
+//RS         return None;
+//RS     };
+//RS     if type_name != Syntax::DURATION_TYPE || locals.contains(type_name) {
+//RS         return None;
+//RS     }
+//RS     Syntax::duration_unit_for_constructor(method)
+//RS }
+//RS 
+//RS pub(crate) fn game_static_type<'a>(
+//RS     receiver: &'a Expr,
+//RS     method: &str,
+//RS     cx: &Cx,
+//RS     locals: &HashSet<String>,
+//RS ) -> Option<&'a str> {
+//RS     let Expr::Field(inner, static_type, _) = receiver else {
+//RS         return None;
+//RS     };
+//RS     let Expr::Ident(alias, _) = &**inner else {
+//RS         return None;
+//RS     };
+//RS     if locals.contains(alias) || cx.any_core_import_module(alias) != Some("core.game") {
+//RS         return None;
+//RS     }
+//RS     match (static_type.as_str(), method) {
+//RS         ("Scene", "new") | ("Replay", "record") | ("Backend", "headless") => {
+//RS             Some(static_type.as_str())
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn tls_static_op(
+//RS     receiver: &Expr,
+//RS     method: &str,
+//RS     cx: &Cx,
+//RS     locals: &HashSet<String>,
+//RS ) -> Option<THandleOp> {
+//RS     let Expr::Field(inner, static_type, _) = receiver else {
+//RS         return None;
+//RS     };
+//RS     let Expr::Ident(alias, _) = &**inner else {
+//RS         return None;
+//RS     };
+//RS     if locals.contains(alias) || cx.any_core_import_module(alias) != Some("core.net.tls") {
+//RS         return None;
+//RS     }
+//RS     match (static_type.as_str(), method) {
+//RS         ("ClientConfig", "default") => Some(THandleOp::TLSClientConfigDefault),
+//RS         ("RootCertificates", "from_pem") => Some(THandleOp::TLSRootCertificatesFromPem),
+//RS         ("ClientIdentity", "from_pem") => Some(THandleOp::TLSClientIdentityFromPem),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn http_client_static_op(
+//RS     receiver: &Expr,
+//RS     method: &str,
+//RS     cx: &Cx,
+//RS     locals: &HashSet<String>,
+//RS ) -> Option<THandleOp> {
+//RS     let Expr::Field(inner, static_type, _) = receiver else {
+//RS         return None;
+//RS     };
+//RS     let Expr::Ident(alias, _) = &**inner else {
+//RS         return None;
+//RS     };
+//RS     if locals.contains(alias) || cx.any_core_import_module(alias) != Some("core.http.client") {
+//RS         return None;
+//RS     }
+//RS     matches!((static_type.as_str(), method), ("Client", "new")).then_some(THandleOp::HTTPClientNew)
+//RS }
+//RS 
+//RS /// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
+//RS /// the subset? Reproduces router-handler lowering: the
+//RS /// handler (arg 1) must be either a BARE TOP-LEVEL FN name (an `Ident` not in locals —
+//RS /// the `env.get(name).is_none()` branch → the `move |__req| __jet_<fn>(&__req)` wrapper)
+//RS /// or an in-subset literal LAMBDA (the `Box::new(<lambda>)` branch). The path (arg 0) is
+//RS /// any in-subset value. No labels.
+//RS pub(crate) fn router_register_in_subset(
+//RS     receiver: &Expr,
+//RS     args: &[crate::AST::CallArg],
+//RS     cx: &Cx,
+//RS     locals: &HashSet<String>,
+//RS ) -> bool {
+//RS     if args.iter().any(|a| a.label.is_some()) {
+//RS         return false;
+//RS     }
+//RS     if !expr_in_subset(receiver, cx, locals) {
+//RS         return false;
+//RS     }
+//RS     if !expr_in_subset(&args[0].expr, cx, locals) {
+//RS         return false;
+//RS     }
+//RS     match &args[1].expr {
+//RS         // A bare top-level fn name (the `env.get(name).is_none()` named-fn branch). It
+//RS         // must NOT be a local (a local handler would take the `Box::new(emit_expr(…))`
+//RS         // path, which for a fn-typed local emits its own `Box::new` — still covered, but
+//RS         // we keep to the simple named-fn + lambda shapes the live suite uses).
+//RS         Expr::Ident(name, _) => !locals.contains(name),
+//RS         // A literal in-subset lambda (the `Box::new(<lambda>)` branch).
+//RS         Expr::Lambda(lam) => lambda_in_subset(lam, cx, locals),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleOp> {
+//RS     let handle = match crate::Sema::core_net_handle_dispatch_name(handle) {
+//RS         Some("TCPStream") => "TcpStream",
+//RS         Some("TCPListener") => "TcpListener",
+//RS         Some(_) => unreachable!("core TCP handle dispatch mapping is closed"),
+//RS         None => crate::Sema::core_file_handle_dispatch_name(handle).unwrap_or(handle),
+//RS     };
+//RS     let op = match (handle, method, nargs) {
+//RS         (Syntax::INTERNAL_RECEIPT_HANDLE, Syntax::METHOD_RECEIPT_ATTACH, 1) => {
+//RS             THandleOp::ReceiptAttach
+//RS         }
+//RS         ("FileReader", "read_line", 0) => THandleOp::FileReaderReadLine,
+//RS         ("MappedFile", "window", 2) => THandleOp::MappedFileWindow,
+//RS         ("MappedFile", "window_len", 2) => THandleOp::MappedFileWindowLen,
+//RS         ("MappedFile", "lines", 0) => THandleOp::MappedFileLines,
+//RS         ("MappedFile", "len", 0) => THandleOp::MappedFileLen,
+//RS         ("MappedFile", "is_empty", 0) => THandleOp::MappedFileIsEmpty,
+//RS         ("FileWriter", "write_line", 1) => THandleOp::FileWriterWriteLine,
+//RS         ("FileWriter", "flush", 0) => THandleOp::FileWriterFlush,
+//RS         ("JSONReader", "next", 0) => THandleOp::JSONReaderNext,
+//RS         ("JSONWriter", "write", 1) => THandleOp::JSONWriterWrite,
+//RS         ("JSONWriter", "flush", 0) => THandleOp::JSONWriterFlush,
+//RS         ("JSONWriter", "finish", 0) => THandleOp::JSONWriterFinish,
+//RS         ("JSONLReader", "next", 0) => THandleOp::JSONLReaderNext,
+//RS         ("JSONLWriter", "write", 1) => THandleOp::JSONLWriterWrite,
+//RS         ("JSONLWriter", "flush", 0) => THandleOp::JSONLWriterFlush,
+//RS         ("JSONLWriter", "finish", 0) => THandleOp::JSONLWriterFinish,
+//RS         ("CSVReader", "next", 0) => THandleOp::CSVReaderNext,
+//RS         ("DataStream", "next", 0) => THandleOp::DataStreamNext,
+//RS         // D-FOUND-COREAPI1 / #2853: event-time Stream handles.
+//RS         ("Stream", "with_event_time", 1) => THandleOp::StreamWithEventTime,
+//RS         ("StreamEventTime", "key_by", 1) => THandleOp::StreamKeyBy,
+//RS         ("KeyedStream", "window", 3) => THandleOp::StreamWindow,
+//RS         ("CSVWriter", "write", 1) => THandleOp::CSVWriterWrite,
+//RS         ("CSVWriter", "flush", 0) => THandleOp::CSVWriterFlush,
+//RS         ("CSVWriter", "finish", 0) => THandleOp::CSVWriterFinish,
+//RS         ("XMLReader", "next", 0) => THandleOp::XMLReaderNext,
+//RS         ("XMLWriter", "write", 1) => THandleOp::XMLWriterWrite,
+//RS         ("XMLWriter", "flush", 0) => THandleOp::XMLWriterFlush,
+//RS         ("XMLWriter", "finish", 0) => THandleOp::XMLWriterFinish,
+//RS         ("CBORReader", "next", 0) => THandleOp::CBORReaderNext,
+//RS         ("CBORWriter", "write", 1) => THandleOp::CBORWriterWrite,
+//RS         ("CBORWriter", "flush", 0) => THandleOp::CBORWriterFlush,
+//RS         ("CBORWriter", "finish", 0) => THandleOp::CBORWriterFinish,
+//RS         ("StdinHandle", "read_line", 0) => THandleOp::StdinReadLine,
+//RS         ("Stdout", "write", 1) => THandleOp::StdoutWrite,
+//RS         ("Stdout", "write_line", 1) => THandleOp::StdoutWriteLine,
+//RS         ("Stdout", "write_bytes", 1) => THandleOp::StdoutWriteBytes,
+//RS         ("Stdout", "flush", 0) => THandleOp::StdoutFlush,
+//RS         ("Stdout", "is_tty", 0) => THandleOp::StdoutIsTty,
+//RS         ("Stderr", "write", 1) => THandleOp::StderrWrite,
+//RS         ("Stderr", "write_line", 1) => THandleOp::StderrWriteLine,
+//RS         ("Stderr", "write_bytes", 1) => THandleOp::StderrWriteBytes,
+//RS         ("Stderr", "flush", 0) => THandleOp::StderrFlush,
+//RS         ("Stderr", "is_tty", 0) => THandleOp::StderrIsTty,
+//RS         ("TestSuite", "run", 0) => THandleOp::TestSuiteRun,
+//RS         // D-DET1: deterministic injected Clock/Rng capability methods.
+//RS         ("Clock", "now", 0) => THandleOp::ClockNow,
+//RS         ("Clock", "tick", 1) => THandleOp::ClockTick,
+//RS         (Syntax::DETERMINISTIC_WORLD_TYPE, "now", 0) => THandleOp::WorldNow,
+//RS         (Syntax::DETERMINISTIC_WORLD_TYPE, "advance", 1) => THandleOp::WorldAdvance,
+//RS         (Syntax::DETERMINISTIC_WORLD_TYPE, "wait_idle", 0) => THandleOp::WorldWaitIdle,
+//RS         (Syntax::DETERMINISTIC_WORLD_TYPE, "history", 0) => THandleOp::WorldHistory,
+//RS         // D-DET-CAPAPI: absolute set + Duration advance; the widened Rng draws; Duration read.
+//RS         ("Clock", "advance", 1) => THandleOp::ClockAdvance,
+//RS         ("Clock", "wait", 1) => THandleOp::ClockWait,
+//RS         ("RealtimeStream", "next_deadline", 0) => THandleOp::RealtimeNextDeadline,
+//RS         ("RealtimeStream", "receipt", 0) => THandleOp::RealtimeReceipt,
+//RS         ("RealtimeStream", "cancel", 0) => THandleOp::RealtimeCancel,
+//RS         ("RealtimeStream", "is_cancelled", 0) => THandleOp::RealtimeIsCancelled,
+//RS         ("RNG", "int", 2) => THandleOp::RngInt,
+//RS         ("RNG", "float", 0) => THandleOp::RngFloat,
+//RS         ("RNG", "float_range", 2) => THandleOp::RngFloatRange,
+//RS         ("RNG", "bool", 0) => THandleOp::RngBool,
+//RS         ("RNG", "bool", 1) => THandleOp::RngBoolP,
+//RS         ("RNG", "normal", 2) => THandleOp::RngNormal,
+//RS         ("RNG", "exponential", 1) => THandleOp::RngExponential,
+//RS         ("RNG", "bytes", 1) => THandleOp::RngBytes,
+//RS         ("RNG", "split", 0) => THandleOp::RngSplit,
+//RS         ("RNG", "pick", 1) => THandleOp::RngPick,
+//RS         ("RNG", "weighted_pick", 2) => THandleOp::RngWeightedPick,
+//RS         ("RNG", "sample", 2) => THandleOp::RngSample,
+//RS         ("RNG", "shuffle", 1) => THandleOp::RngShuffle,
+//RS         ("HistoryRNG", "next_u64", 0) => THandleOp::HistoryRngNextU64,
+//RS         ("HistoryRNG", "below", 1) => THandleOp::HistoryRngBelow,
+//RS         ("Fake", "locale", 1) => THandleOp::FakeLocale,
+//RS         ("Fake", "name", 0) => THandleOp::FakeName,
+//RS         ("Fake", "email", 0) => THandleOp::FakeEmail,
+//RS         ("Fake", "host", 0) => THandleOp::FakeHost,
+//RS         ("Fake", "address", 0) => THandleOp::FakeAddress,
+//RS         ("Solver", "require", 1) => THandleOp::SolverRequire,
+//RS         ("Solver", "failure_count", 0) => THandleOp::SolverFailureCount,
+//RS         ("Solver", "status", 0) => THandleOp::SolverStatus,
+//RS         ("GameScene", "on_frame", 1) => THandleOp::GameSceneOnFrame {
+//RS             schedule: None,
+//RS             derivation: None,
+//RS         },
+//RS         ("GameScene", "component", 1) => THandleOp::GameSceneComponent,
+//RS         ("GameScene", "query", 1) => THandleOp::GameSceneQuery,
+//RS         ("GameAssets", "image", 1) => THandleOp::GameAssetsImage,
+//RS         ("GameAssets", "sound", 1) => THandleOp::GameAssetsSound,
+//RS         ("GameInputMap", "bind", 2) => THandleOp::GameInputBind,
+//RS         ("GameInputSnapshot", "pressed", 1) => THandleOp::GameInputPressed,
+//RS         ("GameBackend", "should_continue", 0) => THandleOp::GameBackendShouldContinue,
+//RS         ("GameBackend", "present", 0) => THandleOp::GameBackendPresent,
+//RS         ("Duration", "in", 1) => THandleOp::DurationIn { unit: None },
+//RS         ("Duration", "is_zero", 0) => THandleOp::DurationIsZero,
+//RS         ("Duration", "total_seconds", 0) => THandleOp::DurationTotalSeconds,
+//RS         ("Duration", "difference", 1) => THandleOp::DurationDifference,
+//RS         ("Duration", "abs", 0) => THandleOp::DurationAbs,
+//RS         ("Duration", "negated", 0) => THandleOp::DurationNegated,
+//RS         ("Duration", "sign", 0) => THandleOp::DurationSign,
+//RS         ("Duration", "total_in", 1) => THandleOp::DurationTotalIn,
+//RS         ("Duration", "round", 1..=3) => THandleOp::DurationRound,
+//RS         ("Decimal", "add" | "sub" | "mul" | "equal" | "compare", 1) => THandleOp::PreciseMethod {
+//RS             type_name: "Decimal".to_string(),
+//RS             method: method.to_string(),
+//RS         },
+//RS         ("Decimal", "to_float" | "to_string", 0) => THandleOp::PreciseMethod {
+//RS             type_name: "Decimal".to_string(),
+//RS             method: method.to_string(),
+//RS         },
+//RS         // D-NUMTYPE1=A: exact ratios take the same precise-method path.
+//RS         ("Fraction", "add" | "sub" | "mul" | "div" | "equal", 1) => THandleOp::PreciseMethod {
+//RS             type_name: "Fraction".to_string(),
+//RS             method: method.to_string(),
+//RS         },
+//RS         ("Fraction", "numerator" | "denominator" | "to_string" | "to_float" | "is_zero", 0) => {
+//RS             THandleOp::PreciseMethod {
+//RS                 type_name: "Fraction".to_string(),
+//RS                 method: method.to_string(),
+//RS             }
+//RS         }
+//RS         ("TcpListener", "accept", 0) => THandleOp::TcpListenerAccept,
+//RS         ("TcpListener", "accept", 1) => THandleOp::TcpListenerAcceptDeadline,
+//RS         ("TcpListener", "local_addr", 0) => THandleOp::TcpListenerLocalAddr,
+//RS         ("TcpStream", "read", 0) => THandleOp::TcpStreamRead,
+//RS         ("TcpStream", "read", 1) => THandleOp::TcpStreamReadBytes,
+//RS         ("TcpStream", "read", 2) => THandleOp::TcpStreamReadBytesDeadline,
+//RS         ("TcpStream", "read_text", 1) => THandleOp::TcpStreamReadText,
+//RS         ("TcpStream", "read_text", 2) => THandleOp::TcpStreamReadTextDeadline,
+//RS         ("TcpStream", "write", 1) => THandleOp::TcpStreamWriteBytes,
+//RS         ("TcpStream", "write", 2) => THandleOp::TcpStreamWriteBytesDeadline,
+//RS         ("TcpStream", "write_all", 1) => THandleOp::TcpStreamWriteAllBytes,
+//RS         ("TcpStream", "write_all", 2) => THandleOp::TcpStreamWriteAllBytesDeadline,
+//RS         ("TcpStream", "write_text", 1) => THandleOp::TcpStreamWriteText,
+//RS         ("TcpStream", "write_text", 2) => THandleOp::TcpStreamWriteTextDeadline,
+//RS         ("TcpStream", "shutdown", 1) => THandleOp::TcpStreamShutdown,
+//RS         ("TcpStream", "ready", 2) => THandleOp::TcpStreamReady,
+//RS         ("TcpStream", "peer_addr", 0) => THandleOp::TcpStreamPeerAddr,
+//RS         ("TcpStream", "local_addr", 0) => THandleOp::TcpStreamLocalAddr,
+//RS         ("TcpStream", "close", 0) => THandleOp::TcpStreamClose,
+//RS         ("UdpSocket", "ready", 2) => THandleOp::UdpSocketReady,
+//RS         ("UdpSocket", "close", 0) => THandleOp::UdpSocketClose,
+//RS         ("UdpSocket", "receive", 2) => THandleOp::UdpSocketReceiveDeadline,
+//RS         ("UdpSocket", "send_to", 3) => THandleOp::UdpSocketSendToDeadline,
+//RS         ("UnixListener", "accept", 1) => THandleOp::UnixListenerAcceptDeadline,
+//RS         ("UnixStream", "read", 2) => THandleOp::UnixStreamReadDeadline,
+//RS         ("UnixStream", "write_all", 2) => THandleOp::UnixStreamWriteAllDeadline,
+//RS         ("UnixStream", "ready", 2) => THandleOp::UnixStreamReady,
+//RS         ("UnixStream", "close", 0) => THandleOp::UnixStreamClose,
+//RS         ("UnixStream", "set_timeout", 1) => THandleOp::UnixStreamSetTimeout,
+//RS         ("TLSStream", "read", 2) => THandleOp::TLSStreamReadDeadline,
+//RS         ("TLSStream", "write_all", 2) => THandleOp::TLSStreamWriteAllDeadline,
+//RS         ("TLSStream", "ready", 2) => THandleOp::TLSStreamReady,
+//RS         ("TLSStream", "close", 0) => THandleOp::TLSStreamClose,
+//RS         ("TLSStream", "close_write", 1) => THandleOp::TLSStreamCloseWrite,
+//RS         ("TLSStream", "peer_identity", 0) => THandleOp::TLSStreamPeerIdentity,
+//RS         ("TLSClientConfig", "with_alpn", 1) => THandleOp::TLSClientConfigWithAlpn,
+//RS         ("TLSClientConfig", "with_trust", 1) => THandleOp::TLSClientConfigWithTrust,
+//RS         ("TLSClientConfig", "with_client_identity", 1) => THandleOp::TLSClientConfigWithIdentity,
+//RS         ("TLSClientConfig", "with_version_bounds", 2) => {
+//RS             THandleOp::TLSClientConfigWithVersionBounds
+//RS         }
+//RS         // c109 Phase 19: the four arena allocators (`alloc`/`reset`). Sema sets
+//RS         // `recv_type == Some(<allocator>)` via `alloc_method_return`; the AST
+//RS         // `emit_builtin_method` arms key on the same `rty`. `Arena`/`Bump`/`Pool`/`Fixed`
+//RS         // share identical Rust method names (the engines differ; the surface doesn't).
+//RS         // D-ARGS1: ArgsSpec builder methods.
+//RS         ("ArgsSpec", "flag", 2) => THandleOp::ArgsSpecFlag,
+//RS         ("ArgsSpec", "flag_short", 3) => THandleOp::ArgsSpecFlagShort,
+//RS         ("ArgsSpec", "option", 3) => THandleOp::ArgsSpecOption,
+//RS         ("ArgsSpec", "option_short", 4) => THandleOp::ArgsSpecOptionShort,
+//RS         ("ArgsSpec", "option_default", 4) => THandleOp::ArgsSpecOptionDefault,
+//RS         ("ArgsSpec", "option_env", 4) => THandleOp::ArgsSpecOptionEnv,
+//RS         ("ArgsSpec", "option_int", 3) => THandleOp::ArgsSpecOptionInt,
+//RS         ("ArgsSpec", "option_float", 3) => THandleOp::ArgsSpecOptionFloat,
+//RS         ("ArgsSpec", "option_choice", 4) => THandleOp::ArgsSpecOptionChoice,
+//RS         ("ArgsSpec", "repeat", 3) => THandleOp::ArgsSpecRepeat,
+//RS         ("ArgsSpec", "required_option", 3) => THandleOp::ArgsSpecRequiredOption,
+//RS         ("ArgsSpec", "positional", 2) => THandleOp::ArgsSpecPositional,
+//RS         ("ArgsSpec", "description", 1) => THandleOp::ArgsSpecDescription,
+//RS         ("ArgsSpec", "subcommand", 3) => THandleOp::ArgsSpecSubcommand,
+//RS         ("ArgsSpec", "version", 1) => THandleOp::ArgsSpecVersion,
+//RS         ("ArgsSpec", "completion", 1) => THandleOp::ArgsSpecCompletion,
+//RS         ("ArgsSpec", "help", 0) => THandleOp::ArgsSpecHelp,
+//RS         ("ArgsSpec", "parse", 1) => THandleOp::ArgsSpecParse,
+//RS         ("ArgsSpec", "parse_or_exit", 1) => THandleOp::ArgsSpecParseOrExit,
+//RS         // D-ANY-JAI1 (c7jaiany §6): reflect.of(x)'s Value/Field handle methods.
+//RS         ("Value", "type_name", 0) => THandleOp::ReflectValueTypeName,
+//RS         ("Value", "path", 0) => THandleOp::ReflectValuePath,
+//RS         ("Value", "display", 0) => THandleOp::ReflectValueDisplay,
+//RS         ("Value", "fields", 0) => THandleOp::ReflectValueFields,
+//RS         ("Field", "name", 0) => THandleOp::ReflectFieldName,
+//RS         ("Field", "value", 0) => THandleOp::ReflectFieldValue,
+//RS         // D-ARGS1: ParsedArgs query methods.
+//RS         ("ParsedArgs", "flag", 1) => THandleOp::ParsedArgsFlag,
+//RS         ("ParsedArgs", "option", 1) => THandleOp::ParsedArgsOption,
+//RS         ("ParsedArgs", "option_int", 1) => THandleOp::ParsedArgsOptionInt,
+//RS         ("ParsedArgs", "option_float", 1) => THandleOp::ParsedArgsOptionFloat,
+//RS         ("ParsedArgs", "options", 1) => THandleOp::ParsedArgsOptions,
+//RS         ("ParsedArgs", "positional", 1) => THandleOp::ParsedArgsPositional,
+//RS         ("ParsedArgs", "subcommand", 0) => THandleOp::ParsedArgsSubcommand,
+//RS         ("Arena" | "Bump" | "Pool" | "Fixed", "alloc", 1) => THandleOp::AllocAlloc,
+//RS         ("Arena" | "Bump" | "Pool" | "Fixed", "try_alloc", 1) => THandleOp::AllocTryAlloc,
+//RS         ("Arena" | "Bump" | "Pool" | "Fixed", "reset", 0) => THandleOp::AllocReset,
+//RS         // c109 Phase 20: HTTPRequest/HTTPResponse accessors (E2-M10, D-ROUTE1=A).
+//RS         // Now reachable because the `http.serve` lambda param type is written back
+//RS         // onto `p.ty` (sema), so the slot type is total. The AST `emit_builtin_method`
+//RS         // arms key on the same `rty == Some(HTTPRequest|HTTPResponse)`. Reproduced
+//RS         // byte-for-byte in `emit_tir_handle_method`.
+//RS         ("HTTPRequest", "method", 0) => THandleOp::HTTPReqField("method"),
+//RS         ("HTTPRequest", "path", 0) => THandleOp::HTTPReqField("path"),
+//RS         ("HTTPRequest", "body", 0) => THandleOp::HTTPReqField("body"),
+//RS         ("HTTPRequest", "body_len", 0) => THandleOp::HTTPReqField("body_len"),
+//RS         ("HTTPRequest", "under_limit", 1) => THandleOp::HTTPReqField("under_limit"),
+//RS         ("HTTPRequest", "header", 1) => THandleOp::HTTPReqHeader,
+//RS         ("HTTPRequest", "param", 1) => THandleOp::HTTPReqParam,
+//RS         ("HTTPRequest", "trailers", 0) => THandleOp::HTTPReqTrailers,
+//RS         ("HTTPResponse", "status", 0) => THandleOp::HTTPRespField("status"),
+//RS         ("HTTPResponse", "body", 0) => THandleOp::HTTPRespField("body"),
+//RS         ("HTTPResponse", "header", 1) => THandleOp::HTTPRespHeader,
+//RS         ("HTTPResponse", "trailers", 1) => THandleOp::HTTPRespTrailers,
+//RS         // D-SERDE-ACCESS=B: DataTree accessor methods.
+//RS         ("DataTree", "field", 1) => THandleOp::DataTreeField,
+//RS         ("DataTree", "at", 1) => THandleOp::DataTreeAt,
+//RS         ("DataTree", "int", 0) => THandleOp::DataTreeInt,
+//RS         ("DataTree", "text", 0) => THandleOp::DataTreeText,
+//RS         ("DataTree", "bool", 0) => THandleOp::DataTreeBool,
+//RS         ("DataTree", "float", 0) => THandleOp::DataTreeFloat,
+//RS         ("DataTree", "to_text", 0) => THandleOp::DataTreeToText,
+//RS         ("DataTree", "equal_unordered", 1) => THandleOp::DataTreeEqualUnordered,
+//RS         // D-SERDE-ACCESS=B: same accessors on JSON/Data (the dynamic parse result).
+//RS         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "field", 1) => THandleOp::JSONField,
+//RS         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "at", 1) => THandleOp::JSONAt,
+//RS         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "int", 0) => THandleOp::JSONInt,
+//RS         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "text", 0) => THandleOp::JSONText,
+//RS         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "bool", 0) => THandleOp::JSONBool,
+//RS         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "float", 0) => THandleOp::JSONFloat,
+//RS         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "to_text", 0) => THandleOp::JSONToText,
+//RS         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "equal_unordered", 1) => {
+//RS             THandleOp::JSONEqualUnordered
+//RS         }
+//RS         ("MIME", "media_type" | "subtype" | "essence" | "params" | "to_string", 0) => {
+//RS             THandleOp::UrlMimeMethod {
+//RS                 kind: "MIME".to_string(),
+//RS                 method: method.to_string(),
+//RS             }
+//RS         }
+//RS         ("MIME", "param", 1) => THandleOp::UrlMimeMethod {
+//RS             kind: "MIME".to_string(),
+//RS             method: method.to_string(),
+//RS         },
+//RS         ("Message", "envelope", 0) | ("Message", "with_envelope", 1) | ("Mailer", "send", 1) => {
+//RS             THandleOp::EmailMethod {
+//RS                 method: method.to_string(),
+//RS             }
+//RS         }
+//RS         ("Regex", "pattern" | "source" | "flags" | "options" | "names", 0) => {
+//RS             THandleOp::RegexMethod {
+//RS                 kind: "Regex".to_string(),
+//RS                 method: method.to_string(),
+//RS             }
+//RS         }
+//RS         (
+//RS             "Regex",
+//RS             "is_match" | "full_match" | "match" | "find" | "find_all" | "matches" | "split"
+//RS             | "count",
+//RS             1,
+//RS         ) => THandleOp::RegexMethod {
+//RS             kind: "Regex".to_string(),
+//RS             method: method.to_string(),
+//RS         },
+//RS         ("Regex", "replace" | "replace_first", 2) => THandleOp::RegexMethod {
+//RS             kind: "Regex".to_string(),
+//RS             method: method.to_string(),
+//RS         },
+//RS         ("Regex", "replace_all_with" | "split_limit", 2) => THandleOp::RegexMethod {
+//RS             kind: "Regex".to_string(),
+//RS             method: method.to_string(),
+//RS         },
+//RS         ("Match", "start" | "end" | "named_captures", 0) => THandleOp::RegexMethod {
+//RS             kind: "Match".to_string(),
+//RS             method: method.to_string(),
+//RS         },
+//RS         ("Match", "group" | "name" | "group_start" | "group_end", 1) => THandleOp::RegexMethod {
+//RS             kind: "Match".to_string(),
+//RS             method: method.to_string(),
+//RS         },
+//RS         // D-PATHFS1: typed Path instance methods.
+//RS         ("Path", "home", 0) => THandleOp::PathHome,
+//RS         ("Path", "join", 1) => THandleOp::PathJoin,
+//RS         ("Path", "parent", 0) => THandleOp::PathParent,
+//RS         ("Path", "extension", 0) => THandleOp::PathExtension,
+//RS         ("Path", "stem", 0) => THandleOp::PathStem,
+//RS         ("Path", "normalize", 0) => THandleOp::PathNormalize,
+//RS         ("Path", "is_within", 1) => THandleOp::PathIsWithin,
+//RS         ("Path", "to_string", 0) => THandleOp::PathToString,
+//RS         ("Path", "write_atomic", 1) => THandleOp::PathWriteAtomic,
+//RS         ("Path", "walk", 0) => THandleOp::PathWalk,
+//RS         // D-DBPOLICY-BIND1: only a DBScope can perform row reads/writes.
+//RS         ("DBConnection", "with_policy", 2) => THandleOp::DBWithPolicy,
+//RS         ("DBPool", "acquire", 0) => THandleOp::DBPoolAcquire,
+//RS         ("DBPool", "acquire", 1) => THandleOp::DBPoolAcquireDeadline,
+//RS         ("DBPool", "ready", 0) => THandleOp::DBPoolReady,
+//RS         ("DBPool", "drain", 0) => THandleOp::DBPoolDrain,
+//RS         ("DBPool", "receipt", 0) => THandleOp::DBPoolReceipt,
+//RS         ("DBLease", "close", 0) => THandleOp::DBLeaseClose,
+//RS         // D-SERVICE-AUTHORITY1: durable send/retry lifecycle is a handle
+//RS         // operation so AOT, JIT deopt, and the ambient interpreter share it.
+//RS         ("ServiceRuntime", "send", 3) => THandleOp::ServiceRuntimeSend,
+//RS         ("ServiceRuntime", "retry", 1) => THandleOp::ServiceRuntimeRetry,
+//RS         ("ServiceRuntime", "dead_letter", 1) => THandleOp::ServiceRuntimeDeadLetter,
+//RS         ("ServiceRuntime", "retain", 1) => THandleOp::ServiceRuntimeRetain,
+//RS         ("DBScope", "query", 1) => THandleOp::DBQuery { metadata: None },
+//RS         ("DBScope", "query_one", 1) => THandleOp::DBQueryOne { metadata: None },
+//RS         ("DBScope", "execute", 1) => THandleOp::DBExecute { metadata: None },
+//RS         ("DBScope", "live", 1) => THandleOp::DBLive,
+//RS         ("DBConnection", "begin", 0) => THandleOp::DBBegin,
+//RS         ("DBConnection", "commit", 0) => THandleOp::DBCommit,
+//RS         ("DBConnection", "rollback", 0) => THandleOp::DBRollback,
+//RS         ("DBConnection", "close", 0) => THandleOp::DBClose,
+//RS         ("DBScope", "begin", 0) => THandleOp::DBBegin,
+//RS         ("DBScope", "commit", 0) => THandleOp::DBCommit,
+//RS         ("DBScope", "rollback", 0) => THandleOp::DBRollback,
+//RS         ("DBScope", "close", 0) => THandleOp::DBClose,
+//RS         // D-DBDRIVER1: `DBValue` accessor methods.
+//RS         ("DBValue", "int", 0) => THandleOp::DBValueInt,
+//RS         ("DBValue", "float", 0) => THandleOp::DBValueFloat,
+//RS         ("DBValue", "text", 0) => THandleOp::DBValueText,
+//RS         ("DBValue", "bool", 0) => THandleOp::DBValueBool,
+//RS         ("DBValue", "blob", 0) => THandleOp::DBValueBlob,
+//RS         ("DBValue", "is_null", 0) => THandleOp::DBValueIsNull,
+//RS         // D-LIB-CALLGRANT1=A: the first pinned-library call is a checked
+//RS         // homogeneous Int entry point.
+//RS         ("Mod", "on_tick", 1) => THandleOp::ModOnTick,
+//RS         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): `Reader`
+//RS         // instance methods. `take_pattern` isn't here — an argument-dependent
+//RS         // method (like Cursor's), resolved at its call site.
+//RS         ("Reader", "read_u8", 0) => THandleOp::ReaderReadU8,
+//RS         ("Reader", "read_i8", 0) => THandleOp::ReaderReadI8,
+//RS         ("Reader", "read_u16_le", 0) => THandleOp::ReaderReadU16Le,
+//RS         ("Reader", "read_u16_be", 0) => THandleOp::ReaderReadU16Be,
+//RS         ("Reader", "read_i16_le", 0) => THandleOp::ReaderReadI16Le,
+//RS         ("Reader", "read_i16_be", 0) => THandleOp::ReaderReadI16Be,
+//RS         ("Reader", "read_u32_le", 0) => THandleOp::ReaderReadU32Le,
+//RS         ("Reader", "read_u32_be", 0) => THandleOp::ReaderReadU32Be,
+//RS         ("Reader", "read_i32_le", 0) => THandleOp::ReaderReadI32Le,
+//RS         ("Reader", "read_i32_be", 0) => THandleOp::ReaderReadI32Be,
+//RS         ("Reader", "read_u64_le", 0) => THandleOp::ReaderReadU64Le,
+//RS         ("Reader", "read_u64_be", 0) => THandleOp::ReaderReadU64Be,
+//RS         ("Reader", "read_i64_le", 0) => THandleOp::ReaderReadI64Le,
+//RS         ("Reader", "read_i64_be", 0) => THandleOp::ReaderReadI64Be,
+//RS         ("Reader", "read_f32_le", 0) => THandleOp::ReaderReadF32Le,
+//RS         ("Reader", "read_f32_be", 0) => THandleOp::ReaderReadF32Be,
+//RS         ("Reader", "read_f64_le", 0) => THandleOp::ReaderReadF64Le,
+//RS         ("Reader", "read_f64_be", 0) => THandleOp::ReaderReadF64Be,
+//RS         ("Reader", "peek", 0) => THandleOp::ReaderPeek,
+//RS         ("Reader", "seek", 1) => THandleOp::ReaderSeek,
+//RS         ("Reader", "skip", 1) => THandleOp::ReaderSkip,
+//RS         ("Reader", "take", 1) => THandleOp::ReaderTake,
+//RS         ("Reader", "remaining", 0) => THandleOp::ReaderRemaining,
+//RS         ("Reader", "is_at_end", 0) => THandleOp::ReaderAtEnd,
+//RS         // D-SHIFT1: `Cursor` instance methods (excluding `take_pattern`).
+//RS         ("Cursor", "take_until", 1) => THandleOp::CursorTakeUntil,
+//RS         ("Cursor", "skip_ws", 0) => THandleOp::CursorSkipWs,
+//RS         // D-SIMD2 / D-LINALG1 math methods are handled by a dedicated gate + lowering
+//RS         // block (user-type-aware via `cx.type_names`), NOT here — `handle_method_op`
+//RS         // has no `cx`, and a user struct may share a math name.
+//RS         _ => return None,
+//RS     };
+//RS     if matches!(
+//RS         handle,
+//RS         Syntax::CLOCK_TYPE
+//RS             | Syntax::RNG_TYPE
+//RS             | "HistoryRNG"
+//RS             | Syntax::FAKE_TYPE
+//RS             | Syntax::SOLVER_TYPE
+//RS     ) {
+//RS         let emitted_borrow = match &op {
+//RS             THandleOp::ClockTick
+//RS             | THandleOp::ClockAdvance
+//RS             | THandleOp::ClockWait
+//RS             | THandleOp::RngInt
+//RS             | THandleOp::RngFloat
+//RS             | THandleOp::RngFloatRange
+//RS             | THandleOp::RngBool
+//RS             | THandleOp::RngBoolP
+//RS             | THandleOp::RngNormal
+//RS             | THandleOp::RngExponential
+//RS             | THandleOp::RngBytes
+//RS             | THandleOp::RngSplit
+//RS             | THandleOp::RngPick
+//RS             | THandleOp::RngWeightedPick
+//RS             | THandleOp::RngSample
+//RS             | THandleOp::RngShuffle
+//RS             | THandleOp::HistoryRngNextU64
+//RS             | THandleOp::HistoryRngBelow
+//RS             | THandleOp::FakeName
+//RS             | THandleOp::FakeEmail
+//RS             | THandleOp::FakeHost
+//RS             | THandleOp::FakeAddress
+//RS             | THandleOp::SolverRequire => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
+//RS             _ => crate::Collections::BuiltinReceiverBorrow::Read,
+//RS         };
+//RS         debug_assert_eq!(
+//RS             crate::Collections::builtin_receiver_borrow(&Type::Named(handle.to_string()), method),
+//RS             emitted_borrow
+//RS         );
+//RS     }
+//RS     Some(op)
+//RS }
+//RS 
+//RS /// c109 Phase 13: resolve a covered handle method using sema's exact return when
+//RS /// it is arg-dependent, then the authoritative fixed handle tables. The resolved
+//RS /// receiver type keeps generic receiver arguments available to those tables.
+//RS /// A throwaway diags vec absorbs their diagnostic side-channel (sema already
+//RS /// validated, so none fire here).
+//RS pub(crate) fn handle_method_return_ty(
+//RS     handle: &str,
+//RS     method: &str,
+//RS     nargs: usize,
+//RS     receiver_ty: &Type,
+//RS     resolved_ret: Option<&Type>,
+//RS ) -> Type {
+//RS     let handle = crate::Sema::core_net_handle_dispatch_name(handle)
+//RS         .or_else(|| crate::Sema::core_file_handle_dispatch_name(handle))
+//RS         .unwrap_or(handle);
+//RS     if let Some(ret) = resolved_ret {
+//RS         return ret.clone();
+//RS     }
+//RS     if handle == "HistoryRNG" {
+//RS         return match (method, nargs) {
+//RS             ("next_u64", 0) | ("below", 1) => Type::IntN {
+//RS                 signed: false,
+//RS                 bits: 64,
+//RS             },
+//RS             _ => unit_type(),
+//RS         };
+//RS     }
+//RS     if handle == "RealtimeStream" {
+//RS         return crate::Sema::realtime_stream_method_return(method, nargs)
+//RS             .flatten()
+//RS             .unwrap_or_else(unit_type);
+//RS     }
+//RS     if handle == crate::Syntax::DETERMINISTIC_WORLD_TYPE {
+//RS         return match (method, nargs) {
+//RS             ("now", 0) | ("advance", 1) => Type::Int,
+//RS             ("history", 0) => Type::String,
+//RS             ("wait_idle", 0) => unit_type(),
+//RS             _ => unit_type(),
+//RS         };
+//RS     }
+//RS     if handle == "TestSuite" && method == "run" && nargs == 0 {
+//RS         return Type::Int;
+//RS     }
+//RS     let span = crate::Diagnostics::Span { start: 0, end: 0 };
+//RS     let mut sink = Vec::new();
+//RS     let ret = crate::Codegen::is_json_type_name(handle)
+//RS         .then(|| crate::Sema::datatree_method_return(method, nargs).map(Some))
+//RS         .flatten()
+//RS         .or_else(|| crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink))
+//RS         .or_else(|| crate::Sema::encoding_handle_method_return(handle, method, nargs))
+//RS         .or_else(|| crate::Sema::net_method_return(handle, method, nargs, span, &mut sink))
+//RS         .or_else(|| crate::Sema::path_method_return(handle, method, nargs, span, &mut sink))
+//RS         .or_else(|| {
+//RS             if handle == "DBConnection" {
+//RS                 Some(crate::Sema::db_connection_method_return_ty(method))
+//RS             } else if handle == "DBScope" {
+//RS                 Some(crate::Sema::db_scope_method_return_ty(method))
+//RS             } else if handle == "DBPool" {
+//RS                 Some(crate::Sema::db_pool_method_return_ty(method))
+//RS             } else if handle == "ServiceRuntime" {
+//RS                 crate::Sema::service_runtime_method_return_ty(method).map(Some)
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         })
+//RS         .or_else(|| {
+//RS             if is_db_value_type_name(handle) {
+//RS                 Some(crate::Sema::db_value_method_return(method, nargs))
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         })
+//RS         .or_else(|| {
+//RS             // D-ANY-JAI1 (c7jaiany §6): `Value`/`Field` (`reflect.of(x)`) —
+//RS             // needed so `.fields()`'s element type (`[Field]`) is total for a
+//RS             // chained/looped access (`loop f in v.fields() { f.name() }`).
+//RS             if crate::Sema::is_reflect_type_name(handle) {
+//RS                 Some(crate::Sema::reflect_method_return(handle, method, nargs))
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         })
+//RS         .or_else(|| {
+//RS             if handle == crate::Syntax::TYPE_DECIMAL
+//RS                 || handle == crate::Syntax::TYPE_FRACTION
+//RS                 || handle == crate::Syntax::DURATION_TYPE
+//RS             {
+//RS                 crate::Collections::builtin_method_return(receiver_ty, method, nargs, false)
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         })
+//RS         .or_else(|| match (handle, method, nargs) {
+//RS             ("MIME", "media_type" | "subtype" | "essence" | "to_string", 0) => {
+//RS                 Some(Some(Type::String))
+//RS             }
+//RS             ("MIME", "param", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+//RS             ("MIME", "params", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
+//RS                 Type::String,
+//RS             )))))),
+//RS             ("Message", "envelope", 0) => Some(Some(Type::Named("Envelope".to_string()))),
+//RS             ("Message", "with_envelope", 1) => Some(Some(Type::Result {
+//RS                 ok: Box::new(Type::Named("Message".to_string())),
+//RS                 err: Box::new(Type::Named("EmailError".to_string())),
+//RS             })),
+//RS             ("Mailer", "send", 1) => Some(Some(Type::Result {
+//RS                 ok: Box::new(Type::Named("SendReport".to_string())),
+//RS                 err: Box::new(Type::Named("EmailError".to_string())),
+//RS             })),
+//RS             ("Regex", "pattern" | "source" | "flags" | "options", 0) => Some(Some(Type::String)),
+//RS             ("Regex", "names", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+//RS             ("Regex", "count", 1) => Some(Some(Type::Int)),
+//RS             ("Regex", "is_match" | "full_match", 1) => Some(Some(Type::Bool)),
+//RS             ("Regex", "match", 1) => Some(Some(Type::Option(Box::new(Type::Named(
+//RS                 "Match".to_string(),
+//RS             ))))),
+//RS             ("Regex", "find", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+//RS             ("Regex", "replace" | "replace_first", 2) => Some(Some(Type::String)),
+//RS             ("Regex", "split_limit", 2) => Some(Some(Type::List(Box::new(Type::String)))),
+//RS             ("Match", "group" | "name", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+//RS             ("Match", "start" | "end", 0) => Some(Some(Type::Int)),
+//RS             ("Match", "named_captures", 0) => Some(Some(Type::List(Box::new(Type::List(
+//RS                 Box::new(Type::String),
+//RS             ))))),
+//RS             ("Match", "group_start" | "group_end", 1) => {
+//RS                 Some(Some(Type::Option(Box::new(Type::Int))))
+//RS             }
+//RS             _ => None,
+//RS         })
+//RS         // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — `take_pattern`
+//RS         // is excluded (like `Arena.alloc` above), resolved
+//RS         // directly at its call site since its return type depends on the
+//RS         // pattern literal's holes.
+//RS         .or_else(|| crate::Sema::binary_reader_method_return(handle, method, nargs))
+//RS         .or_else(|| crate::Sema::text_cursor_method_return(handle, method, nargs))
+//RS         .or_else(|| {
+//RS             if handle == crate::Syntax::SOLVER_TYPE {
+//RS                 crate::Collections::builtin_method_return(receiver_ty, method, nargs, false)
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         })
+//RS         .or_else(|| match (handle, method, nargs) {
+//RS             ("GameAssets", "image", 1) => Some(Some(Type::Result {
+//RS                 ok: Box::new(Type::Named("GameImage".to_string())),
+//RS                 err: Box::new(Type::String),
+//RS             })),
+//RS             ("GameAssets", "sound", 1) => Some(Some(Type::Result {
+//RS                 ok: Box::new(Type::Named("GameSound".to_string())),
+//RS                 err: Box::new(Type::String),
+//RS             })),
+//RS             ("GameScene", "query", 1) => Some(Some(Type::List(Box::new(Type::String)))),
+//RS             ("GameInputSnapshot", "pressed", 1) => Some(Some(Type::Bool)),
+//RS             ("GameBackend", "should_continue", 0) => Some(Some(Type::Bool)),
+//RS             ("GameBackend", "present", 0) => Some(None),
+//RS             ("GameScene", "on_frame" | "component", 1) | ("GameInputMap", "bind", 2) => Some(None),
+//RS             _ => None,
+//RS         });
+//RS     match ret {
+//RS         Some(Some(t)) => t,
+//RS         _ => unit_type(),
+//RS     }
+//RS }
+//RS 
+//RS /// c109 Phase 13: the resolved return type of a closure-taking core call, matching
+//RS /// `infer_core_call` (Source/Sema/CheckerCoreLib.rs). `spawn` → `Task<elem>` (the
+//RS /// closure's body type — total from the lowered lambda's return); `serve` → Unit (runs
+//RS /// forever); `guard` → `ScopeGuard`. These types are rarely load-bearing in emit (a
+//RS /// binding carries sema's `b.ty`), but kept total per the design principle.
+//RS pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, body_ty: Type) -> Type {
+//RS     match (module, method) {
+//RS         ("core.tasks", "spawn") => Type::Apply {
+//RS             name: "Task".to_string(),
+//RS             args: vec![body_ty],
+//RS         },
+//RS         ("core.mem.scope", "guard") => Type::Named("ScopeGuard".to_string()),
+//RS         ("core.reactive", "effect") => Type::Named(crate::Syntax::TYPE_EFFECT.to_string()),
+//RS         _ => unit_type(),
+//RS     }
+//RS }
+//RS 
+//RS // ---------------------------------------------------------------------------
+//RS // Lowering: AST -> TIR. This is where every fact is resolved ONCE.
+//RS // ---------------------------------------------------------------------------
+// END-PORT-PENDING 0519 crates/jet-codegen/src/Codegen/TIR/subset/handles.rs:1-766
+

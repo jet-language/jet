@@ -46,3 +46,49 @@ pub struct TAppliedRuleCatalog {
     pub rows: [TAppliedRule]
     pub argument_menus: [TAppliedRuleArgumentMenu]
 }
+
+// Rust Policy.rs::RuleSite::name; the AST enum is the sole site vocabulary.
+pub fn rule_site_name(site: RuleSite) -> String Never! {
+    if site == {
+        .Package -> "Package"
+        .File -> "File"
+        .Module -> "Module"
+        .Function -> "Function"
+        .Method -> "Method"
+        .Block -> "Block"
+        .Statement -> "Statement"
+        .Expression -> "Expression"
+        .Type -> "Type"
+        .Impl -> "Impl"
+        .Declaration -> "Declaration"
+        .Constant -> "Constant"
+        .Field -> "Field"
+        .Variant -> "Variant"
+        .Parameter -> "Parameter"
+        .Test -> "Test"
+        .Operation -> "Operation"
+        .Text -> "Text"
+    }
+}
+
+// Rust Policy.rs::rule_allows. Main-ratified retained-catalog seam: Sema's
+// canonical marker-source producer supplies the rows; no second/global registry.
+pub fn rule_allows(catalog: TAppliedRuleCatalog, name: String, site: RuleSite) -> Bool Never! {
+    expected :: rule_site_name(site)
+    loop row in catalog.rows {
+        if row.name == name -> return row.sites.contains(expected)
+    }
+    false
+}
+
+// Rust Policy.rs::rule_allows_with_companions: same target's marker names.
+pub fn rule_allows_with_companions(catalog: TAppliedRuleCatalog, name: String, site: RuleSite, companions: [String]) -> Bool Never! {
+    if rule_allows(catalog, name, site) -> return true
+    expected :: rule_site_name(site)
+    loop row in catalog.rows {
+        if row.name != name -> next
+        if row.companion_site == .Val(companion) -> return companion.site == expected && companions.contains(companion.rule)
+        return false
+    }
+    false
+}

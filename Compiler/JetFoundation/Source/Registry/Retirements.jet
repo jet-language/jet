@@ -1,0 +1,149 @@
+// Rust: Syntax/retirements.rs. Ratified retirement data, not compatibility.
+pub enum RetirementKind { Rename Semantic }
+pub struct Retirement {
+    pub id: String
+    pub retired: String
+    pub canonical: String
+    pub kind: RetirementKind
+    pub decision: String
+    pub since: String
+    pub code: String?
+}
+fn retirement_rename(id: String, retired: String, canonical: String, decision: String, since: String) -> Retirement Never! {
+    Retirement{id: id, retired: retired, canonical: canonical, kind: .Rename, decision: decision, since: since, code: None}
+}
+fn retirement_semantic(id: String, retired: String, canonical: String, decision: String, since: String, code: String) -> Retirement Never! {
+    Retirement{id: id, retired: retired, canonical: canonical, kind: .Semantic, decision: decision, since: since, code: Val(code)}
+}
+fn retirement_ffi(id: String, retired: String) -> Retirement Never! {
+    retirement_semantic("effect-flat-ffi-{id}", retired, "FFI.{retired}", "D-AUTHORITY-ROOTS1=A", "2026-08-06", "E0119")
+}
+fn retirement_core(id: String, retired: String, canonical: String) -> Retirement Never! {
+    retirement_semantic("core-namespace-{id}", retired, canonical, "D-CORE-TREE1=A", "2026-08-06", "E1001")
+}
+pub RETIREMENTS :: prep { [Retirement]{
+    retirement_ffi("go", "Go"), retirement_ffi("java", "Java"), retirement_ffi("dotnet", "DotNet"),
+    retirement_ffi("fortran", "Fortran"), retirement_ffi("cobol", "Cobol"), retirement_ffi("tcl", "Tcl"),
+    retirement_ffi("lua", "Lua"), retirement_ffi("ada", "Ada"), retirement_ffi("pascal", "Pascal"),
+    retirement_ffi("dart", "Dart"), retirement_ffi("powershell", "PowerShell"), retirement_ffi("perl", "Perl"),
+    retirement_ffi("ruby", "Ruby"), retirement_ffi("php", "Php"), retirement_ffi("r", "R"),
+    retirement_ffi("com", "Com"), retirement_ffi("cpp", "Cpp"), retirement_ffi("py", "Py"), retirement_ffi("octave", "Octave"),
+    retirement_rename("entry-file", "main.jet", "run.jet", "D-VERDICT-678-1", "2026-07-17"),
+    retirement_rename("manifest-file", "pkg.jet", "package.jet", "D-ECO-FILEROOT1", "2026-06-30"),
+    retirement_semantic("jetpack-file", "jetpack.toml", "package.jet + env.jet", "D-ONCE-RETIRE1", "2026-08-07", "E1225"),
+    retirement_semantic("manifest-identity", "payload: {{", "name:", "D-CONF-NAME1", "2026-08-06", "E1206"),
+    retirement_semantic("lint-policy-code", "policy.lints.deny: [L####] / #allow(L####)", "policy.lints.deny: [lint_name] / #allow(lint_name)", "D-LINTPOLICY1", "2026-08-07", "E1206"),
+    retirement_semantic("auto-derive-policy", "policy.auto_derive", "policy.lints.deny: [auto_derive]", "D-ONCE-AUTODERIVE1", "2026-08-08", "E1206"),
+    retirement_semantic("package-ref-order", "provider@target / target#version@provider", "target@provider#version", "D-VERDICT-2190-1", "2026-08-25", "E1317"),
+    retirement_rename("interpolation-selector-rail", "{{value#Selector}}", "{{value:Selector}}", "D-ONCE-HASH1", "2026-08-07"),
+    retirement_rename("core-io-println", "io.println", "io.print", "D-ONCE-PRINT1", "2026-08-08"),
+    retirement_rename("core-io-sprint", "io.sprint", "{{value}}", "D-ONCE-PRINT1", "2026-08-08"),
+    retirement_rename("core-io-repr", "io.repr", "{{value:Debug}}", "D-ONCE-PRINT1", "2026-08-08"),
+    retirement_semantic("fact-mark", "@", "$", "D-COMPILER-NS1=A", "2026-09-30", "E0003"),
+    retirement_rename("set-take", "Set.take", "Set.pop", "D-ONCE-VERB1", "2026-08-07"),
+    retirement_rename("map-replace", "Map.replace", "Map.add", "D-ONCE-VERB1", "2026-08-07"),
+    retirement_rename("set-replace", "Set.replace", "Set.add", "D-ONCE-VERB1", "2026-08-07"),
+    retirement_semantic("allow-impure", "--allow-impure", "--gate impure=allow", "D-ONCE-GATE1=A", "2026-08-07", "E1343"),
+    retirement_semantic("freestanding-flag", "--freestanding", "--target=<name>", "D-FREESTAND-SELECT1=B", "2026-09-02", "E2102"),
+    retirement_semantic("scope-marker-grant", "#Grant", "#FX", "D-ABILITY-NAME2", "2026-08-25", "E0077"),
+    retirement_semantic("core-path-free-functions", "core.path.join/parent/extension/normalize", "Path.from(value).join(part), .parent(), .extension(), .normalize()", "D-CORE-PATH1", "2026-08-06", "E1001"),
+    retirement_core("io", "core.io", "core.term, core.process, or the prelude"),
+    retirement_core("path", "core.path", "core.files"),
+    retirement_core("time-date", "core.time.date", "core.time"),
+    retirement_core("time-datetime", "core.time.datetime", "core.time"),
+    retirement_core("text-unicode", "core.text.unicode", "core.text"),
+    retirement_core("fmt", "core.fmt", "core.text.fmt"),
+    retirement_core("random", "core.random", "core.math.random"),
+    retirement_core("env", "core.env", "core.sys"),
+    retirement_core("os", "core.os", "core.sys"),
+    retirement_core("tls", "core.tls", "core.net.tls"),
+    retirement_core("ws", "core.ws", "core.net.ws"),
+    retirement_core("url", "core.url", "core.net.url"),
+    retirement_core("mime", "core.mime", "core.net.mime"),
+    retirement_core("uuid", "core.uuid", "core.crypto.uuid"),
+    retirement_core("vault", "core.vault", "core.crypto.vault"),
+    retirement_core("raylib", "core.raylib", "core.game.raylib"),
+    retirement_core("browser", "core.browser", "core.web.browser"),
+    retirement_core("solve", "core.solve", "core.compute.solve"),
+    retirement_core("sketch", "core.sketch", "core.data.sketch.*"),
+    retirement_core("sketch-hll", "core.sketch.hll", "core.data.sketch.hll"),
+    retirement_core("sketch-tdigest", "core.sketch.tdigest", "core.data.sketch.tdigest"),
+    retirement_core("sketch-reservoir", "core.sketch.reservoir", "core.data.sketch.reservoir"),
+    retirement_core("sketch-cms", "core.sketch.cms", "core.data.sketch.cms"),
+    retirement_core("compress", "core.compress", "core.archive.gzip or core.archive.zstd"),
+    retirement_core("compress-gzip", "core.compress.gzip", "core.archive.gzip"),
+    retirement_core("compress-zstd", "core.compress.zstd", "core.archive.zstd"),
+    retirement_core("measurement", "core.science.measurement", "core.units"),
+    retirement_core("mem-alloc", "core.mem.alloc", "core.mem"),
+    retirement_core("scope", "core.scope", "core.mem.scope"),
+    retirement_core("lang", "core.lang", "core.compiler.lang"),
+    retirement_core("binary", "core.binary", "core.encoding and core.term.Reader"),
+    retirement_rename("target-plugin", "plugin", "Sandbox", "D-ONCE-SANDBOX1=A", "2026-08-07"),
+    retirement_rename("core-container-queue", "Deque", "Queue", "D-COLLNAME1=A", "2026-08-05"),
+    retirement_rename("core-container-rank", "SortedSet", "Rank", "D-COLLNAME1=A", "2026-08-05"),
+    retirement_rename("core-container-tally", "Bag", "Tally", "D-COLLNAME1=A", "2026-08-05"),
+    retirement_rename("core-container-bits", "BitSet", "Bits", "D-COLLNAME1=A", "2026-08-05"),
+    retirement_rename("core-container-bytes", "ByteBuffer", "Bytes", "D-COLLNAME1=A", "2026-08-05"),
+    retirement_rename("jet-time-now", "jet.time.now", "core.time.now", "D-ONCE-LAYER1", "2026-08-08"),
+    retirement_rename("jet-time-format", "jet.time.format", "DateTime.format_rfc3339()", "D-ONCE-LAYER1", "2026-08-08"),
+    retirement_semantic("operator-plus-plus", "++", "x += 1", "D-INCR1", "2026-09-28", "E0160"),
+    retirement_semantic("operator-minus-minus", "--", "x -= 1", "D-INCR1", "2026-09-28", "E0160"),
+    retirement_semantic("outcome-nested-ok-pattern", ".Ok(.Val(x)) / .Ok(.None)", ".Val(x) / .None", "D-OUTCOME-SHAPE1=A", "2026-09-29", "E0392"),
+    retirement_semantic("comptime-constant-mark", "@NAME :: value", "NAME :: prep {{ value }}", "D-PREP-SURFACE2=A", "2026-09-30", "E0388"),
+    retirement_semantic("template-name-splice-mark", "fn @method / self.@field / .@left", "fn $method / self.$field / .$left", "D-NAME-SPLICE1=B", "2026-09-30", "E0388"),
+} }
+// Rust: retirement/rename_target/retired_core_module.
+pub fn retirement(id: String) -> Retirement? Never! {
+    loop row in RETIREMENTS { if row.id == id -> return Val(row) }
+    None
+}
+pub fn rename_target(retired: String) -> String? Never! {
+    loop row in RETIREMENTS { if row.kind == .Rename && row.retired == retired -> return Val(row.canonical) }
+    None
+}
+pub fn retired_core_module(name: String) -> Retirement? Never! {
+    found := Retirement?{None}
+    best := -1
+    loop row in RETIREMENTS {
+        if row.kind != .Semantic || row.code != (Val("E1001")) -> next
+        prefix :: "{row.retired}."
+        if (row.retired == name || name.starts_with(prefix)) && row.retired.len() > best {
+            best = row.retired.len()
+            found = Val(row)
+        }
+    }
+    found
+}
+pub fn retired_core_module_diagnostic(name: String, span: Span) -> Diagnostic? Never! {
+    row :: retired_core_module(name) ?? return None
+    Val(diagnostic_from_registry("E1001", Val(span), "core module `{name}` was retired", "{row.decision} removed this free namespace; the canonical home is {row.canonical}", "use one of: {row.canonical}"))
+}
+// Rust: law_violations_of. Keep source-order error text, including duplicates.
+pub fn retirement_law_violations() -> [String] Never! { retirement_law_violations_of(RETIREMENTS) }
+pub fn retirement_law_violations_of(rows: [Retirement]) -> [String] Never! {
+    out := [String]{}
+    loop index in 0..<rows.len() {
+        row :: rows[index]
+        if row.retired == "" || row.canonical == "" -> &out.push("{row.id}: a row names an empty spelling")
+        if row.retired == row.canonical -> &out.push("{row.id}: retires the form it names as canonical")
+        if row.decision == "" -> &out.push("{row.id}: names no decision")
+        hyphens := 0
+        loop byte in row.since.bytes() { if byte == (U8{45}) -> hyphens += 1 }
+        if row.since.bytes().len() != 10 || hyphens != 2 -> &out.push("{row.id}: `{row.since}` is not a YYYY-MM-DD date")
+        if row.kind == .Rename {
+            if row.code == .Val(code) -> &out.push("{row.id}: a rename rewrites and refuses nothing, so it must name no code (`{code}`)")
+        } else {
+            if row.code == .Val(code) {
+                bytes :: code.bytes()
+                registered := bytes.len() == 5 && bytes[0] == U8{69}
+                loop position in 1..<bytes.len() { if bytes[position] < (U8{48}) || bytes[position] > (U8{57}) -> registered = false }
+                if !registered -> &out.push("{row.id}: `{code}` is not a registered code")
+            } else { &out.push("{row.id}: a semantic change is refused, so it must name its code") }
+        }
+        loop other in index + 1..<rows.len() {
+            if rows[other].id == row.id -> &out.push("{row.id}: two rows claim this id")
+            if rows[other].retired == row.retired -> &out.push("{row.id}: `{row.retired}` is retired twice, so the two rows can disagree")
+        }
+    }
+    out
+}

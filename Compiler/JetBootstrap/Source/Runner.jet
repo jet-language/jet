@@ -1,0 +1,59 @@
+// Rust: Compiler/Bootstrap/Runner.rs::entry_artifact_for_target,
+// artifact_for_function_target and single_artifact_for_target. Selection uses
+// the original checked MIR rows; zero or multiple matches is not a selection.
+use jet_foundation.[MIRArtifactID, MIRArtifactTarget, MIRFunctionID, MIRProgram]
+
+pub fn bootstrap_entry_artifact_for_target(program: MIRProgram, entry_function: MIRFunctionID, target: MIRArtifactTarget) -> MIRArtifactID? Never! {
+    selected := -1
+    loop index in 0..<program.artifacts.len() {
+        artifact :: program.artifacts[index]
+        if artifact.target != target -> next
+        if artifact.entry == .Val(entry) {
+            if entry.function == .Val(function) {
+                if function != entry_function -> next
+                if selected >= 0 -> return None
+                selected = index
+            }
+        }
+    }
+    if selected >= 0 -> Val(program.artifacts[selected].id) else -> None
+}
+
+pub fn bootstrap_artifact_for_function_target(program: MIRProgram, function: MIRFunctionID, target: MIRArtifactTarget) -> MIRArtifactID? Never! {
+    module := -1
+    loop index in 0..<program.functions.len() {
+        if program.functions[index].id == function {
+            module = index
+            break
+        }
+    }
+    if module < 0 -> return None
+    module_id :: program.functions[module].module_id
+    selected := -1
+    loop index in 0..<program.artifacts.len() {
+        artifact :: program.artifacts[index]
+        if artifact.target != target -> next
+        contains := false
+        loop member in artifact.modules {
+            if member == module_id {
+                contains = true
+                break
+            }
+        }
+        if !contains -> next
+        if selected >= 0 -> return None
+        selected = index
+    }
+    if selected >= 0 -> Val(program.artifacts[selected].id) else -> None
+}
+
+pub fn bootstrap_single_artifact_for_target(program: MIRProgram, target: MIRArtifactTarget) -> MIRArtifactID? Never! {
+    selected := -1
+    loop index in 0..<program.artifacts.len() {
+        artifact :: program.artifacts[index]
+        if artifact.target != target -> next
+        if selected >= 0 -> return None
+        selected = index
+    }
+    if selected >= 0 -> Val(program.artifacts[selected].id) else -> None
+}

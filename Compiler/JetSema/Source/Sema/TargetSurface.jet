@@ -1,0 +1,238 @@
+// PORT-PENDING 0445 crates-jet-sema-src-sema-sharedaccess-module-group: crates/jet-sema/src/Sema/TargetSurface.rs:1-234
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Syntax;
+//RS use crate::AST::{walk_imports, ProgramBundle};
+//RS use std::collections::BTreeSet;
+//RS 
+//RS const SOCKET_SURFACES: &[&str] = &[
+//RS     "core.net",
+//RS     "core.net.tls",
+//RS     "core.net.ws",
+//RS     "core.http",
+//RS     "core.http.client",
+//RS     "core.http.server",
+//RS     "core.email",
+//RS ];
+//RS 
+//RS const WASIP2_UNSUPPORTED_SURFACES: &[&str] = &[
+//RS     "core.net.tls",
+//RS     "core.net.ws",
+//RS     "core.http.client",
+//RS     "core.email",
+//RS ];
+//RS 
+//RS /// D-WASISRV1=A: reject a reachable Core socket surface before codegen when
+//RS /// the selected target has no socket runtime that the Prelude can use.
+//RS pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnostic> {
+//RS     let socket_target = socket_target_supported(target);
+//RS     let web_target =
+//RS         target == Syntax::BUILD_TARGET_WEB || bundle.web_partition_enforced;
+//RS     // D-PLUGIN-AUTHORITY1: the browser web backend cannot host the native
+//RS     // Wasmtime Component Model boundary. Reachability comes from sema's
+//RS     // canonical Core-use set, not from an unused import.
+//RS     let plugin_reachable = web_target
+//RS         && bundle
+//RS             .used_core
+//RS             .iter()
+//RS             .any(|usage| usage == "core.plugin" || usage.starts_with("core.plugin::"));
+//RS     let wasip2 = target == Syntax::BUILD_TARGET_WASI_SERVER;
+//RS     let wasip2_unsupported_surfaces = if wasip2 {
+//RS         wasip2_unsupported_surfaces(bundle)
+//RS     } else {
+//RS         BTreeSet::new()
+//RS     };
+//RS     let wasip2_unsupported = if target == Syntax::BUILD_TARGET_WASI_SERVER {
+//RS         wasip2_unsupported_operations(bundle)
+//RS     } else {
+//RS         BTreeSet::new()
+//RS     };
+//RS     if socket_target
+//RS         && wasip2_unsupported.is_empty()
+//RS         && wasip2_unsupported_surfaces.is_empty()
+//RS         && !plugin_reachable
+//RS     {
+//RS         return Vec::new();
+//RS     }
+//RS 
+//RS     let mut seen = BTreeSet::<(String, usize, usize, String)>::new();
+//RS     let mut diagnostics = Vec::new();
+//RS     if plugin_reachable {
+//RS         let mut anchored = false;
+//RS         for module in &bundle.modules {
+//RS             for (_, import) in walk_imports(module) {
+//RS                 for binding in import.walk_bindings() {
+//RS                     let module_path = binding.path();
+//RS                     if module_path != "core.plugin"
+//RS                         && !module_path.starts_with("core.plugin.")
+//RS                     {
+//RS                         continue;
+//RS                     }
+//RS                     anchored = true;
+//RS                     let span = binding.items_span.unwrap_or(binding.module_alias_span);
+//RS                     let key = (
+//RS                         module.display.clone(),
+//RS                         span.start,
+//RS                         span.end,
+//RS                         "E3306".to_string(),
+//RS                     );
+//RS                     if seen.insert(key) {
+//RS                         diagnostics.push(Diagnostic::from_row(
+//RS                             "E3306",
+//RS                             &[("module", "core.plugin"), ("target", target)],
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         // A generated or re-exported Core use may have no source import in
+//RS         // this bundle; still issue the target verdict rather than allowing a
+//RS         // browser backend to reach codegen without a host boundary.
+//RS         if !anchored {
+//RS             diagnostics.push(Diagnostic::from_row(
+//RS                 "E3306",
+//RS                 &[("module", "core.plugin"), ("target", target)],
+//RS                 None,
+//RS             ));
+//RS         }
+//RS     }
+//RS     for module in &bundle.modules {
+//RS         for (_, import) in walk_imports(module) {
+//RS             for binding in import.walk_bindings() {
+//RS                 let module_path = binding.path();
+//RS                 let Some(surface) = socket_surface(&module_path) else {
+//RS                     continue;
+//RS                 };
+//RS                 let span = binding.items_span.unwrap_or(binding.module_alias_span);
+//RS                 let key = (
+//RS                     module.display.clone(),
+//RS                     span.start,
+//RS                     span.end,
+//RS                     "E3304".to_string(),
+//RS                 );
+//RS                 if !socket_target && seen.insert(key) {
+//RS                     diagnostics.push(Diagnostic::from_row(
+//RS                         "E3304",
+//RS                         &[("module", surface), ("target", target)],
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 if wasip2_unsupported_surfaces.contains(surface) {
+//RS                     let operation_key = (
+//RS                         module.display.clone(),
+//RS                         span.start,
+//RS                         span.end,
+//RS                         format!("E3305:{surface}"),
+//RS                     );
+//RS                     if seen.insert(operation_key) {
+//RS                         diagnostics.push(Diagnostic::from_row(
+//RS                             "E3305",
+//RS                             &[("operation", surface), ("target", target)],
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 for operation in &wasip2_unsupported {
+//RS                     if operation_surface(operation) != Some(surface) {
+//RS                         continue;
+//RS                     }
+//RS                     let operation_key = (
+//RS                         module.display.clone(),
+//RS                         span.start,
+//RS                         span.end,
+//RS                         format!("E3305:{operation}"),
+//RS                     );
+//RS                     if seen.insert(operation_key) {
+//RS                         diagnostics.push(Diagnostic::from_row(
+//RS                             "E3305",
+//RS                             &[("operation", operation.as_str()), ("target", target)],
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     diagnostics
+//RS }
+//RS 
+//RS fn wasip2_unsupported_surfaces(bundle: &ProgramBundle) -> BTreeSet<String> {
+//RS     let mut surfaces = BTreeSet::new();
+//RS     for module in &bundle.modules {
+//RS         for (_, import) in walk_imports(module) {
+//RS             for binding in import.walk_bindings() {
+//RS                 if let Some(surface) = socket_surface(&binding.path()) {
+//RS                     if WASIP2_UNSUPPORTED_SURFACES.contains(&surface) {
+//RS                         surfaces.insert(surface.to_string());
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     surfaces
+//RS }
+//RS 
+//RS fn operation_surface(operation: &str) -> Option<&str> {
+//RS     operation.rsplit_once('.').map(|(surface, _)| surface)
+//RS }
+//RS 
+//RS fn socket_surface(path: &str) -> Option<&'static str> {
+//RS     if let Some(surface) = SOCKET_SURFACES.iter().find(|surface| **surface == path) {
+//RS         return Some(*surface);
+//RS     }
+//RS     if Syntax::is_known_core_module(path) {
+//RS         return None;
+//RS     }
+//RS     let module = path.rsplit_once('.')?.0;
+//RS     SOCKET_SURFACES
+//RS         .iter()
+//RS         .find(|surface| **surface == module)
+//RS         .copied()
+//RS }
+//RS 
+//RS fn wasip2_unsupported_operations(bundle: &ProgramBundle) -> BTreeSet<String> {
+//RS     bundle
+//RS         .used_core
+//RS         .iter()
+//RS         .filter_map(|usage| {
+//RS             let (module, call) = usage.split_once("::")?;
+//RS             let unsupported = match module {
+//RS                 "core.net" => {
+//RS                     matches!(
+//RS                         call,
+//RS                         "tcp_connect_happy"
+//RS                             | "tcp_ready"
+//RS                             | "udp_ready"
+//RS                             | "tls_connect"
+//RS                             | "tls_read"
+//RS                             | "tls_write"
+//RS                             | "tls_close"
+//RS                             | "dns_a"
+//RS                             | "dns_aaaa"
+//RS                             | "dns_txt"
+//RS                             | "dns_ptr"
+//RS                             | "dns_srv"
+//RS                     ) || call.starts_with("unix_")
+//RS                 }
+//RS                 "core.http" => matches!(call, "get" | "post" | "request"),
+//RS                 "core.http.server" => call == "tls",
+//RS                 "core.net.tls" => true,
+//RS                 "core.http.client" | "core.email" => true,
+//RS                 _ => false,
+//RS             };
+//RS             unsupported.then(|| format!("{module}.{call}"))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn socket_target_supported(target: &str) -> bool {
+//RS     target == Syntax::BUILD_TARGET_WASI_SERVER
+//RS         || [
+//RS             "linux", "android", "apple", "darwin", "windows", "freebsd", "openbsd", "netbsd",
+//RS         ]
+//RS         .iter()
+//RS         .any(|os| target.contains(os))
+//RS }
+// END-PORT-PENDING 0445 crates/jet-sema/src/Sema/TargetSurface.rs:1-234
+

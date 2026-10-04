@@ -1,0 +1,817 @@
+// Rust: crates/jet-foundation/src/TargetMachine.rs:1
+// D-TARGET-* typed target machine facts.
+use jet_foundation.Layout.[LayoutCapabilityFacts, TargetLayout]
+use jet_foundation.RingLayer.[classify_prelude_closure, RuntimeLayer]
+use jet_foundation.Report.[StatusFields, StatusValue]
+use jet_foundation.JSON.[quote as json_str]
+use jet_foundation.Effects.[EffectSet]
+use jet_foundation.Facts.[TargetDossier]
+use jet_foundation.SHA256.[sha256_hex]
+use jet_foundation.Authority.[parse_right]
+// Policy types, validation and serialization helpers continue in the paired
+// TargetMachine02/03 source parts of this same module.
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:18
+pub struct SvdProvenance {
+    pub source: String
+    pub sha256: String
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:24
+    pub fn new(^source: String, ^sha256: String) -> SvdProvenance Never! {
+        SvdProvenance{source: ^source, sha256: ^sha256}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:31
+    pub fn from_source(^source: String, contents: [U8]) -> SvdProvenance Never! {
+        SvdProvenance.new(^source, "sha256:{sha256_hex(contents)}")
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:38
+    pub fn is_valid(self) -> Bool Never! {
+        digest :: self.sha256.strip_prefix("sha256:") ?? return false
+        !self.source.trim().is_empty() && !digest.trim().is_empty()
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:46
+    fn audit_json(self) -> String Never! {
+        "{{\"source\":{json_str(self.source)},\"sha256\":{json_str(self.sha256)}}}"
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:57
+pub enum RegisterWidth {
+    U8
+    U16
+    U32
+    U64
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:66
+    pub fn bytes(self) -> U64 Never! {
+        if self == { .U8 -> U64{1} .U16 -> U64{2} .U32 -> U64{4} .U64 -> U64{8} }
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:75
+    pub fn bits(self) -> U16 Never! { U16{self.bytes() * U64{8}} }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:79
+    pub fn as_str(self) -> String Never! {
+        if self == { .U8 -> "u8" .U16 -> "u16" .U32 -> "u32" .U64 -> "u64" }
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:91
+pub enum TargetRegisterAccessMode {
+    ReadOnly
+    WriteOnly
+    ReadWrite
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:99
+    pub fn can_read(self) -> Bool Never! { self == .ReadOnly || self == .ReadWrite }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:103
+    pub fn can_write(self) -> Bool Never! { self == .WriteOnly || self == .ReadWrite }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:107
+    pub fn as_str(self) -> String Never! {
+        if self == { .ReadOnly -> "read-only" .WriteOnly -> "write-only" .ReadWrite -> "read-write" }
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:118
+pub struct TargetRegisterFact {
+    pub name: String
+    pub offset: U64
+    pub width: RegisterWidth
+    pub access: TargetRegisterAccessMode
+    pub volatile: Bool
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:127
+    pub fn new(^name: String, offset: U64, width: RegisterWidth, access: TargetRegisterAccessMode, volatile: Bool) -> TargetRegisterFact Never! {
+        TargetRegisterFact{name: ^name, offset: offset, width: width, access: access, volatile: volatile}
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:147
+pub struct TargetRegisterBlockFact {
+    pub name: String
+    pub base: U64
+    pub size: ByteSize
+    pub registers: [TargetRegisterFact]
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:155
+    pub fn new(^name: String, base: U64, size: ByteSize, ^registers: [TargetRegisterFact]) -> TargetRegisterBlockFact Never! {
+        TargetRegisterBlockFact{name: ^name, base: base, size: size, registers: ^registers}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:169
+    pub fn register(self, name: String) -> TargetRegisterFact? from self {
+        loop register in self.registers { if register.name == name -> return Val(register) }
+        None
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:178
+pub enum TargetRegisterOperation { Read Write }
+// Rust: crates/jet-foundation/src/TargetMachine.rs:184
+pub struct TargetRegisterAccessFact {
+    pub block: String
+    pub register: String
+    pub operation: TargetRegisterOperation
+    pub width: RegisterWidth
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:192
+    pub fn read(^block: String, ^register: String, width: RegisterWidth) -> TargetRegisterAccessFact Never! {
+        TargetRegisterAccessFact{block: ^block, register: ^register, operation: .Read, width: width}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:205
+    pub fn write(^block: String, ^register: String, width: RegisterWidth) -> TargetRegisterAccessFact Never! {
+        TargetRegisterAccessFact{block: ^block, register: ^register, operation: .Write, width: width}
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:223
+pub struct TargetInterruptFact {
+    pub name: String
+    pub vector: U16
+    pub forbidden_effects: EffectSet
+    pub bounded: Bool
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:231
+    pub fn new(^name: String, vector: U16) -> TargetInterruptFact Never! {
+        forbidden_effects := EffectSet.new()
+        _ :: &forbidden_effects.insert("Mem.Alloc")
+        _ :: &forbidden_effects.insert("Time.Wait")
+        TargetInterruptFact{name: ^name, vector: vector, forbidden_effects: ^forbidden_effects, bounded: true}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:243
+    pub fn with_effects(^name: String, vector: U16, forbidden_effects: [String]) -> TargetInterruptFact Never! {
+        effects := EffectSet.new()
+        loop effect in forbidden_effects -> _ :: &effects.insert(~effect)
+        TargetInterruptFact{name: ^name, vector: vector, forbidden_effects: ^effects, bounded: true}
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:268
+pub struct TargetInterruptHandlerFact {
+    pub interrupt: String
+    pub handler: String
+    pub effects: EffectSet
+    pub forbidden_effects: EffectSet
+    pub bounded: Bool
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:278
+    pub fn new(^interrupt: String, ^handler: String, ^effects: EffectSet, bounded: Bool) -> TargetInterruptHandlerFact Never! {
+        TargetInterruptHandlerFact{interrupt: ^interrupt, handler: ^handler, effects: ^effects, forbidden_effects: EffectSet.new(), bounded: bounded}
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:296
+pub enum TargetDmaOwnership {
+    Borrowed
+    Transfer
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:302
+    pub fn as_str(self) -> String Never! { if self == { .Borrowed -> "borrowed" .Transfer -> "transfer" } }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:312
+pub struct TargetDmaChannelFact {
+    pub name: String
+    pub channel: U16
+    pub transfer_width: RegisterWidth
+    pub ownership: TargetDmaOwnership
+    pub max_transfer_bytes: U64?
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:321
+    pub fn new(^name: String, channel: U16) -> TargetDmaChannelFact Never! {
+        TargetDmaChannelFact{name: ^name, channel: channel, transfer_width: .U8, ownership: .Transfer, max_transfer_bytes: None}
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:335
+pub enum TargetDmaOperation { Start Wait UseBuffer }
+// Rust: crates/jet-foundation/src/TargetMachine.rs:344
+pub enum TargetDmaOwner { Cpu Device }
+// Rust: crates/jet-foundation/src/TargetMachine.rs:351
+pub struct TargetDmaOperationFact {
+    pub channel: String
+    pub buffer: String
+    pub operation: TargetDmaOperation
+    pub owner: TargetDmaOwner
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:360
+    pub fn start(^channel: String, ^buffer: String) -> TargetDmaOperationFact Never! {
+        TargetDmaOperationFact{channel: ^channel, buffer: ^buffer, operation: .Start, owner: .Cpu}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:369
+    pub fn wait(^channel: String, ^buffer: String) -> TargetDmaOperationFact Never! {
+        TargetDmaOperationFact{channel: ^channel, buffer: ^buffer, operation: .Wait, owner: .Device}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:378
+    pub fn use_buffer(^buffer: String) -> TargetDmaOperationFact Never! {
+        TargetDmaOperationFact{channel: "", buffer: ^buffer, operation: .UseBuffer, owner: .Cpu}
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:390
+pub enum TargetProgrammerAdapter {
+    Emulator
+    ProbeRs
+    OpenOcd
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:397
+    pub fn as_str(self) -> String Never! {
+        if self == { .Emulator -> "emulator" .ProbeRs -> "probe-rs" .OpenOcd -> "openocd" }
+    }
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:410
+pub struct TargetProgrammerFacts {
+    pub adapter: TargetProgrammerAdapter
+    pub executable: String
+    pub chip: String?
+    pub interface: String?
+    pub config: [String]
+    pub speed_khz: U32?
+    pub reset: Bool
+    pub machine: String?
+    pub cpu: String?
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:423
+    pub fn emulator(^executable: String, ^machine: String, ^cpu: String) -> TargetProgrammerFacts Never! {
+        TargetProgrammerFacts{adapter: .Emulator, executable: ^executable, chip: None, interface: None, config: [], speed_khz: None, reset: false, machine: Val(^machine), cpu: Val(^cpu)}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:441
+    pub fn missing_fact(self) -> String? Never! {
+        if self.executable.trim().is_empty() -> return Val("executable")
+        loop value in self.config { if value.trim().is_empty() -> return Val("config") }
+        if self.adapter == {
+            .Emulator -> {
+                machine :: self.machine ?? return Val("machine")
+                if machine.trim().is_empty() -> return Val("machine")
+                cpu :: self.cpu ?? return Val("cpu")
+                if cpu.trim().is_empty() -> return Val("cpu")
+            }
+            .ProbeRs -> {
+                chip :: self.chip ?? return Val("chip")
+                if chip.trim().is_empty() -> return Val("chip")
+            }
+            .OpenOcd -> {
+                has_interface :: if self.interface == .Val(value) -> !value.trim().is_empty() else -> false
+                if !has_interface && self.config.is_empty() -> return Val("interface or config")
+            }
+        }
+        None
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:485
+    pub fn audit_json(self) -> String Never! {
+        config := [String]{}
+        loop value in self.config -> &config.push(json_str(value))
+        chip :: if self.chip == .Val(value) -> json_str(value) else -> "null"
+        cpu :: if self.cpu == .Val(value) -> json_str(value) else -> "null"
+        interface :: if self.interface == .Val(value) -> json_str(value) else -> "null"
+        machine :: if self.machine == .Val(value) -> json_str(value) else -> "null"
+        speed :: if self.speed_khz == .Val(value) -> "{value}" else -> "null"
+        "{{\"adapter\":{json_str(self.adapter.as_str())},\"chip\":{chip},\"config\":[{config.join(",")}],\"cpu\":{cpu},\"executable\":{json_str(self.executable)},\"interface\":{interface},\"machine\":{machine},\"reset\":{self.reset},\"speed_khz\":{speed}}}"
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:520
+pub struct TargetHardwareFacts {
+    pub svd: SvdProvenance?
+    pub register_blocks: [TargetRegisterBlockFact]
+    pub interrupts: [TargetInterruptFact]
+    pub dma_channels: [TargetDmaChannelFact]
+    pub fn default() -> TargetHardwareFacts Never! {
+        TargetHardwareFacts{svd: None, register_blocks: [], interrupts: [], dma_channels: []}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:527
+    pub fn register_block(self, name: String) -> TargetRegisterBlockFact? from self {
+        loop block in self.register_blocks { if block.name == name -> return Val(block) }
+        None
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:533
+    pub fn interrupt(self, selector: String) -> TargetInterruptFact? from self {
+        loop interrupt in self.interrupts {
+            if interrupt.name == selector || "{interrupt.vector}" == selector -> return Val(interrupt)
+        }
+        None
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:539
+    pub fn dma_channel(self, name: String) -> TargetDmaChannelFact? from self {
+        loop channel in self.dma_channels { if channel.name == name -> return Val(channel) }
+        None
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:543
+    pub fn validate(self, memory: [MemoryRegion]) -> [TargetMachineError] Never! {
+        errors := [TargetMachineError]{}
+        self.validate_into(memory, &errors)
+        ^errors
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:549
+    fn validate_into(self, memory: [MemoryRegion], errors: &[TargetMachineError]) Never! {
+        if self.svd == .Val(svd) {
+            if !svd.is_valid() -> &errors.push(TargetMachineError.InvalidHardwareSvd{source: ~svd.source, sha256: ~svd.sha256})
+        }
+        block_names := [String: Bool]{}
+        loop block in self.register_blocks {
+            if block.name.trim().is_empty() -> &errors.push(TargetMachineError.HardwareFactEmptyName{kind: "register block"})
+            if block_names.contains_key(block.name) -> &errors.push(TargetMachineError.DuplicateRegisterBlock{name: ~block.name})
+            &block_names.insert(~block.name, true)
+            if block.size.bytes == U64{0} -> &errors.push(TargetMachineError.RegisterBlockEmpty{name: ~block.name})
+            if block.base.checked_add(block.size.bytes) == None {
+                &errors.push(TargetMachineError.RegisterBlockAddressOverflow{name: ~block.name})
+            } else {
+                inside := false
+                loop region in memory {
+                    if region.kind == .Mmio && region.contains(block.base, block.size) { inside = true; break }
+                }
+                if !inside -> &errors.push(TargetMachineError.RegisterBlockOutsideRegion{name: ~block.name, address: block.base, size_bytes: block.size.bytes})
+            }
+            register_names := [String: Bool]{}
+            loop register in block.registers {
+                if register.name.trim().is_empty() -> &errors.push(TargetMachineError.HardwareFactEmptyName{kind: "register in `{block.name}`"})
+                if register_names.contains_key(register.name) -> &errors.push(TargetMachineError.DuplicateRegister{block: ~block.name, register: ~register.name})
+                &register_names.insert(~register.name, true)
+                if register.offset.checked_add(register.width.bytes()) == None {
+                    &errors.push(TargetMachineError.RegisterAddressOverflow{block: ~block.name, register: ~register.name})
+                } else if register.offset.saturating_add(register.width.bytes()) > block.size.bytes {
+                    &errors.push(TargetMachineError.RegisterOutsideBlock{block: ~block.name, register: ~register.name})
+                }
+            }
+        }
+        vectors := [U16: Bool]{}
+        interrupt_names := [String: Bool]{}
+        loop interrupt in self.interrupts {
+            if interrupt.name.trim().is_empty() -> &errors.push(TargetMachineError.HardwareFactEmptyName{kind: "interrupt"})
+            if interrupt_names.contains_key(interrupt.name) -> &errors.push(TargetMachineError.DuplicateInterrupt{name: ~interrupt.name})
+            &interrupt_names.insert(~interrupt.name, true)
+            if vectors.contains_key(interrupt.vector) -> &errors.push(TargetMachineError.DuplicateInterruptVector{vector: interrupt.vector})
+            &vectors.insert(interrupt.vector, true)
+            loop effect in interrupt.forbidden_effects {
+                if parse_right(effect) == None -> &errors.push(TargetMachineError.InvalidInterruptEffect{interrupt: ~interrupt.name, effect: ~effect})
+            }
+        }
+        channels := [String: Bool]{}
+        channel_numbers := [U16: Bool]{}
+        loop channel in self.dma_channels {
+            if channel.name.trim().is_empty() -> &errors.push(TargetMachineError.HardwareFactEmptyName{kind: "DMA channel"})
+            if channels.contains_key(channel.name) -> &errors.push(TargetMachineError.DuplicateDmaChannel{name: ~channel.name})
+            &channels.insert(~channel.name, true)
+            if channel_numbers.contains_key(channel.channel) -> &errors.push(TargetMachineError.DuplicateDmaChannelNumber{channel: channel.channel})
+            &channel_numbers.insert(channel.channel, true)
+            if channel.max_transfer_bytes == Val(U64{0}) -> &errors.push(TargetMachineError.DmaTransferSizeZero{channel: ~channel.name})
+        }
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:672
+    fn validate_register_accesses(self, accesses: [TargetRegisterAccessFact], errors: &[TargetMachineError]) Never! {
+        loop access in accesses {
+            block :: self.register_block(access.block) ?? {
+                &errors.push(TargetMachineError.UnknownRegisterBlock{block: ~access.block})
+                continue
+            }
+            register :: block.register(access.register) ?? {
+                &errors.push(TargetMachineError.UnknownRegister{block: ~access.block, register: ~access.register})
+                continue
+            }
+            if register.width != access.width -> &errors.push(TargetMachineError.RegisterWidthMismatch{block: ~access.block, register: ~access.register, expected: register.width, actual: access.width})
+            if access.operation == {
+                .Read -> { if !register.access.can_read() -> &errors.push(TargetMachineError.RegisterReadDenied{block: ~access.block, register: ~access.register}) }
+                .Write -> { if !register.access.can_write() -> &errors.push(TargetMachineError.RegisterWriteDenied{block: ~access.block, register: ~access.register}) }
+            }
+        }
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:717
+    pub fn audit_json(self) -> String Never! {
+        svd :: if self.svd == .Val(value) -> value.audit_json() else -> "null"
+        out := "{{\"svd\":{svd},\"register_blocks\":["
+        loop index in 0..<self.register_blocks.len() {
+            if index > 0 -> out += ","
+            block :: self.register_blocks[index]
+            out += "{{\"name\":{json_str(block.name)},\"base\":{block.base},\"size_bytes\":{block.size.bytes},\"registers\":["
+            loop register_index in 0..<block.registers.len() {
+                if register_index > 0 -> out += ","
+                register :: block.registers[register_index]
+                out += "{{\"name\":{json_str(register.name)},\"offset\":{register.offset},\"width\":\"{register.width.as_str()}\",\"access\":\"{register.access.as_str()}\",\"volatile\":{register.volatile}}}"
+            }
+            out += "]}"
+        }
+        out += "],\"interrupts\":["
+        loop index in 0..<self.interrupts.len() {
+            if index > 0 -> out += ","
+            interrupt :: self.interrupts[index]
+            effects := [String]{}
+            effect_keys := interrupt.forbidden_effects.keys()
+            &effect_keys.sort()
+            loop effect in effect_keys -> &effects.push(json_str(effect))
+            out += "{{\"name\":{json_str(interrupt.name)},\"vector\":{interrupt.vector},\"forbidden_effects\":[{effects.join(",")}],\"bounded\":{interrupt.bounded}}}"
+        }
+        out += "],\"dma_channels\":["
+        loop index in 0..<self.dma_channels.len() {
+            if index > 0 -> out += ","
+            channel :: self.dma_channels[index]
+            maximum :: if channel.max_transfer_bytes == .Val(value) -> "{value}" else -> "null"
+            out += "{{\"name\":{json_str(channel.name)},\"channel\":{channel.channel},\"transfer_width\":\"{channel.transfer_width.as_str()}\",\"ownership\":\"{channel.ownership.as_str()}\",\"max_transfer_bytes\":{maximum}}}"
+        }
+        out += "]}"
+        ^out
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:797
+pub enum TargetHardwareUnresolvedReference {
+    RegisterBlock(block: String)
+    Register(block: String, register: String)
+    DmaChannel(channel: String)
+    Interrupt(interrupt: String)
+}
+// Rust: crates/jet-foundation/src/TargetMachine.rs:808
+pub struct TargetHardwareUse {
+    pub register_accesses: [TargetRegisterAccessFact]
+    pub interrupt_handlers: [TargetInterruptHandlerFact]
+    pub dma_operations: [TargetDmaOperationFact]
+    pub unresolved_references: [TargetHardwareUnresolvedReference]
+    pub fn default() -> TargetHardwareUse Never! {
+        TargetHardwareUse{register_accesses: [], interrupt_handlers: [], dma_operations: [], unresolved_references: []}
+    }
+}
+
+// Rust: crates/jet-foundation/src/TargetMachine.rs:819
+pub struct TargetMachine {
+    pub name: String
+    pub triple: String
+    pub layout: LayoutCapabilityFacts
+    pub no_os: Bool
+    pub memory: [MemoryRegion]
+    pub linker: LinkerInput
+    pub allocator: AllocatorPolicy
+    pub panic: PanicPolicy
+    pub mmio: MmioPolicy
+    pub wall_clock: ClockPolicy
+    pub monotonic_clock: ClockPolicy
+    pub zone_data: ClockPolicy
+    pub sleep: ClockPolicy
+    pub entropy: EntropyPolicy
+    pub scheduler: SchedulerPolicy
+    pub byte_sink: ByteSinkPolicy
+    pub startup: StartupPolicy
+    pub startup_entry: String
+    pub startup_vectors: String
+    pub startup_abi: ProviderAbi
+    pub startup_placement: String
+    pub hardware: TargetHardwareFacts
+    pub programmers: [TargetProgrammerFacts]
+    pub audit: AuditPolicy
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:858
+    pub fn hosted(^triple: String) -> TargetMachine Never! {
+        layout :: TargetLayout.from_triple(triple).layout_facts
+        TargetMachine{name: "hosted", triple: ^triple, layout: layout, no_os: false, memory: [], linker: .HostedDefault, allocator: .HostedDefault, panic: .HostedDefault, mmio: .HostedDefault, wall_clock: .HostedDefault, monotonic_clock: .HostedDefault, zone_data: .HostedDefault, sleep: .HostedDefault, entropy: .HostedDefault, scheduler: .HostedDefault, byte_sink: .HostedDefault, startup: .HostedDefault, startup_entry: "", startup_vectors: "", startup_abi: ProviderAbi.default(), startup_placement: "", hardware: TargetHardwareFacts.default(), programmers: [], audit: AuditPolicy.default()}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:889
+    pub fn bare_metal(^name: String, ^triple: String) -> TargetMachine Never! {
+        layout :: TargetLayout.from_triple(triple).layout_facts
+        TargetMachine{name: ^name, triple: ^triple, layout: layout, no_os: true, memory: [], linker: .Generated, allocator: .Unspecified, panic: .Unspecified, mmio: .Unspecified, wall_clock: .Unspecified, monotonic_clock: .Unspecified, zone_data: .Unspecified, sleep: .Unspecified, entropy: .Unspecified, scheduler: .Unspecified, byte_sink: .Unspecified, startup: .Unspecified, startup_entry: "Reset_Handler", startup_vectors: "vectors", startup_abi: ProviderAbi.c(), startup_placement: ".vectors", hardware: TargetHardwareFacts.default(), programmers: [], audit: AuditPolicy.default()}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:922
+    pub fn with_startup_facts(^self, ^entry: String, ^vectors: String, abi: ProviderAbi, ^placement: String) -> TargetMachine Never! {
+        machine := ^self
+        machine.startup_entry = ^entry
+        machine.startup_vectors = ^vectors
+        machine.startup_abi = abi
+        machine.startup_placement = ^placement
+        ^machine
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:938
+    pub fn with_programmer(^self, ^programmer: TargetProgrammerFacts) -> TargetMachine Err! {
+        if programmer.missing_fact() == .Val(missing) -> return Err("target programmer `{programmer.adapter.as_str()}` is missing explicit `{missing}` fact")
+        machine := ^self
+        &machine.programmers.push(^programmer)
+        ^machine
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:952
+    pub fn environment_identity(self) -> String Never! {
+        if self.no_os -> "no-os"
+        else if self.triple.contains("wasip") -> "wasi"
+        else if self.triple == "wasm32-unknown-unknown" -> "browser"
+        else -> "hosted"
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:969
+    pub fn is_browser_target(self) -> Bool Never! { self.environment_identity() == "browser" && !self.no_os }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:974
+    pub fn is_wasi_target(self) -> Bool Never! { self.environment_identity() == "wasi" && !self.no_os }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:980
+    pub fn is_web_target(self) -> Bool Never! { self.is_browser_target() }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:987
+    pub fn supports_atomic_word(self) -> Bool Never! {
+        // GATE #4483: selected target triple, never the compiler host.
+        self.triple.starts_with("x86_64-") || self.triple.starts_with("aarch64-") || self.triple.starts_with("wasm32-")
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:997
+    pub fn provider_fact_list(self) -> [(TargetCapability, String)] Never! {
+        facts := [(TargetCapability, String)]{}
+        loop capability in TargetCapability.ALL {
+            fact :: if capability == {
+                .Allocator -> self.allocator.audit_json()
+                .Atomic64 -> "{{\"triple\":{json_str(self.triple)},\"supported\":{self.supports_atomic_word()}}}"
+                .Mmio -> self.mmio.audit_json()
+                .Hardware -> self.hardware.audit_json()
+                .TimeWall -> self.wall_clock.audit_json()
+                .TimeMonotonic -> self.monotonic_clock.audit_json()
+                .TimeZoneData -> self.zone_data.audit_json()
+                .TimeSleep -> self.sleep.audit_json()
+                .Entropy -> self.entropy.audit_json()
+                .Scheduler -> self.scheduler.audit_json()
+                .IoRead -> self.byte_sink.audit_component_json(.IoRead)
+                .IoWrite -> self.byte_sink.audit_component_json(.IoWrite)
+                .PanicReport -> "{{\"panic\":{self.panic.audit_json()},\"sink\":{self.byte_sink.audit_component_json(.PanicReport)}}}"
+                .Startup -> "{{\"policy\":{self.startup.audit_json()},\"entry\":{json_str(self.startup_entry)},\"vectors\":{json_str(self.startup_vectors)},\"abi\":{self.startup_abi.audit_json()},\"placement\":{json_str(self.startup_placement)}}}"
+            }
+            &facts.push((capability, ^fact))
+        }
+        ^facts
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1042
+    fn provider_facts_json(self) -> String Never! {
+        out := "["
+        facts :: self.provider_fact_list()
+        loop index in 0..<facts.len() {
+            if index > 0 -> out += ","
+            (capability, fact) :: facts[index]
+            out += "{{\"capability\":{json_str(capability.as_str())},\"fact\":{fact}}}"
+        }
+        out += "]"
+        ^out
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1058
+    fn programmer_facts_json(self) -> String Never! {
+        out := "["
+        loop index in 0..<self.programmers.len() {
+            if index > 0 -> out += ","
+            out += self.programmers[index].audit_json()
+        }
+        out += "]"
+        ^out
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1071
+    pub fn provider_identity(self) -> String Never! {
+        bytes := [U8]{}
+        append_identity_frame(&bytes, "environment", self.environment_identity())
+        append_identity_frame(&bytes, "linker", self.linker.audit_json())
+        append_identity_frame(&bytes, "allocator", self.allocator.audit_json())
+        append_identity_frame(&bytes, "panic", self.panic.audit_json())
+        append_identity_frame(&bytes, "memory", memory_json(self.memory))
+        append_identity_frame(&bytes, "mmio", self.mmio.audit_json())
+        append_identity_frame(&bytes, "time_wall", self.wall_clock.audit_json())
+        append_identity_frame(&bytes, "time_monotonic", self.monotonic_clock.audit_json())
+        append_identity_frame(&bytes, "time_zone_data", self.zone_data.audit_json())
+        append_identity_frame(&bytes, "time_sleep", self.sleep.audit_json())
+        append_identity_frame(&bytes, "entropy", self.entropy.audit_json())
+        append_identity_frame(&bytes, "scheduler", self.scheduler.audit_json())
+        append_identity_frame(&bytes, "byte_sink", self.byte_sink.audit_json())
+        append_identity_frame(&bytes, "startup", self.startup.audit_json())
+        append_identity_frame(&bytes, "provider_facts", self.provider_facts_json())
+        append_identity_frame(&bytes, "hardware", self.hardware.audit_json())
+        append_identity_frame(&bytes, "programmers", self.programmer_facts_json())
+        append_identity_frame(&bytes, "layout_facts", self.layout.cache_identity())
+        "target-providers-v1:{sha256_hex(bytes)}"
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1103
+    pub fn linker_identity(self) -> String Never! {
+        if self.linker == .Generated {
+            script :: self.generate_linker_script() catch { _ -> return self.linker.identity() }
+            return "linker-generated-v2:{sha256_hex(script.bytes())}"
+        }
+        self.linker.identity()
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1122
+    pub fn target_dossier(self, usage: TargetMachineUse, tier: ExecutionTier, compiler_identity: String, dependency_identity: String) -> TargetDossier Never! {
+        closure :: classify_prelude_closure(usage.core_apis)
+        closure_bytes := [U8]{}
+        loop (api, layer) in closure {
+            append_identity_frame(&closure_bytes, "api", api)
+            append_identity_frame(&closure_bytes, "layer", layer.as_str())
+        }
+        TargetDossier{machine: Val(~self), layer: self.max_runtime_layer(), provider_identity: self.provider_identity(), closure_identity: "prelude-closure-v1:{sha256_hex(closure_bytes)}", linker_identity: self.linker_identity(), tier_identity: tier.as_str(), compiler_identity: ~compiler_identity, environment_identity: self.environment_identity(), dependency_identity: ~dependency_identity}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1152
+    pub fn max_runtime_layer(self) -> RuntimeLayer Never! {
+        if !self.no_os -> .Std else if self.allocator.provides_heap() -> .Alloc else -> .Core
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1164
+    pub fn provides_capability(self, capability: TargetCapability) -> Bool Never! {
+        hosted :: self.environment_identity() == "hosted"
+        if capability == {
+            .Allocator -> if self.allocator == {
+                .HostedDefault | .Counting(_) -> hosted
+                .Provider(_) | .Fixed(_, _) -> true
+                .Unspecified | .None -> false
+            }
+            .Atomic64 -> self.supports_atomic_word()
+            .Mmio -> self.mmio.provides(hosted)
+            .Hardware -> !self.hardware.register_blocks.is_empty() || !self.hardware.interrupts.is_empty() || !self.hardware.dma_channels.is_empty()
+            .TimeWall -> self.wall_clock.provides(hosted)
+            .TimeMonotonic -> self.monotonic_clock.provides(hosted)
+            .TimeZoneData -> self.zone_data.provides(hosted)
+            .TimeSleep -> self.sleep.provides(hosted)
+            .Entropy -> self.entropy.provides(hosted)
+            .Scheduler -> self.scheduler.provides(hosted)
+            .IoRead -> self.byte_sink.provides_read(hosted)
+            .IoWrite -> self.byte_sink.provides_write(hosted)
+            .PanicReport -> self.byte_sink.provides_report(hosted)
+            .Startup -> self.startup.provides(hosted)
+        }
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1193
+    pub fn validate(self, usage: TargetMachineUse) -> [TargetMachineError] Never! {
+        errors := [TargetMachineError]{}
+        if self.triple.trim().is_empty() -> &errors.push(TargetMachineError.MissingTargetTriple)
+        validate_memory_regions(self.memory, &errors)
+        validate_linker(self.linker, self.no_os, &errors)
+        validate_allocator(self, &errors)
+        validate_panic(self, &errors)
+        validate_ram_budget(self, usage, &errors)
+        validate_core_usage(self, usage, &errors)
+        validate_target_capabilities(self, usage, &errors)
+        validate_startup_facts(self, &errors)
+        validate_mmio(self, usage, &errors)
+        &errors.extend(self.hardware.validate(self.memory))
+        ^errors
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1217
+    pub fn validate_hardware(self, usage: TargetHardwareUse) -> [TargetMachineError] Never! {
+        errors := self.hardware.validate(self.memory)
+        loop reference in usage.unresolved_references {
+            if reference == {
+                .RegisterBlock(block) -> &errors.push(TargetMachineError.UnknownRegisterBlock{block: ~block})
+                .Register(block, register) -> &errors.push(TargetMachineError.UnknownRegister{block: ~block, register: ~register})
+                .DmaChannel(channel) -> &errors.push(TargetMachineError.UnknownDmaChannel{channel: ~channel})
+                .Interrupt(interrupt) -> &errors.push(TargetMachineError.UnknownInterrupt{interrupt: ~interrupt})
+            }
+        }
+        self.hardware.validate_register_accesses(usage.register_accesses, &errors)
+        ^errors
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1251
+    pub fn audit_value(self, usage: TargetMachineUse) -> StatusValue Never! {
+        dossier :: self.target_dossier(usage, .Aot, "unspecified", "unspecified")
+        StatusValue.object(StatusFields.new()
+            .with("name", self.name)
+            .with("triple", self.triple)
+            .with("environment", self.environment_identity())
+            .with("provider_identity", self.provider_identity())
+            .with("linker", linker_value(self.linker))
+            .with("allocator", allocator_value(self.allocator))
+            .with("panic", panic_value(self.panic))
+            .with("memory", memory_value(self.memory))
+            .with("mmio_capability", mmio_policy_value(self.mmio))
+            .with("time_wall", clock_value(self.wall_clock))
+            .with("time_monotonic", clock_value(self.monotonic_clock))
+            .with("time_zone_data", clock_value(self.zone_data))
+            .with("time_sleep", clock_value(self.sleep))
+            .with("entropy", entropy_value(self.entropy))
+            .with("scheduler", scheduler_value(self.scheduler))
+            .with("byte_sink", byte_sink_value(self.byte_sink))
+            .with("startup", startup_value(self.startup))
+            .with("provider_facts", provider_facts_value(self))
+            .with("hardware", hardware_value(self.hardware))
+            .with("programmers", programmers_value(self.programmers))
+            .with("target_dossier", target_dossier_value(dossier, self.triple))
+            .with("unavailable_core_apis", unavailable_core_value(self, usage))
+            .with("mmio", mmio_value(usage.mmio))
+            .with("execution", StatusValue.object(StatusFields.new().with("aot", true).with("dev", !self.no_os).with("jit", !self.no_os))))
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1290
+    pub fn audit_json(self, usage: TargetMachineUse) -> String Never! { self.audit_json_with_budget(usage, None) }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1294
+    pub fn audit_json_with_budget(self, usage: TargetMachineUse, budget: SizeBudgetReport?) -> String Never! {
+        out := "{"
+        push_field(&out, "name", json_str(self.name), true)
+        push_field(&out, "triple", json_str(self.triple), false)
+        push_field(&out, "environment", json_str(self.environment_identity()), false)
+        push_field(&out, "provider_identity", json_str(self.provider_identity()), false)
+        push_field(&out, "linker", self.linker.audit_json(), false)
+        push_field(&out, "allocator", self.allocator.audit_json(), false)
+        push_field(&out, "panic", self.panic.audit_json(), false)
+        push_field(&out, "memory", memory_json(self.memory), false)
+        push_field(&out, "mmio_capability", self.mmio.audit_json(), false)
+        push_field(&out, "time_wall", self.wall_clock.audit_json(), false)
+        push_field(&out, "time_monotonic", self.monotonic_clock.audit_json(), false)
+        push_field(&out, "time_zone_data", self.zone_data.audit_json(), false)
+        push_field(&out, "time_sleep", self.sleep.audit_json(), false)
+        push_field(&out, "entropy", self.entropy.audit_json(), false)
+        push_field(&out, "scheduler", self.scheduler.audit_json(), false)
+        push_field(&out, "byte_sink", self.byte_sink.audit_json(), false)
+        push_field(&out, "startup", self.startup.audit_json(), false)
+        push_field(&out, "provider_facts", self.provider_facts_json(), false)
+        push_field(&out, "hardware", self.hardware.audit_json(), false)
+        push_field(&out, "programmers", self.programmer_facts_json(), false)
+        dossier :: self.target_dossier(usage, .Aot, "unspecified", "unspecified")
+        push_field(&out, "target_dossier", target_dossier_json(dossier, self.triple), false)
+        push_field(&out, "unavailable_core_apis", unavailable_core_json(self, usage), false)
+        push_field(&out, "mmio", mmio_json(usage.mmio), false)
+        push_field(&out, "execution", execution_json(self), false)
+        if budget == .Val(value) -> push_field(&out, "size_budget", value.to_json(), false)
+        out += "}"
+        ^out
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1363
+    pub fn generate_linker_script(self) -> String TargetMachineError! {
+        if !self.no_os -> return Err(TargetMachineError.HostedHasNoLinkerScript)
+        flash :: self.memory.find(|region| region.kind == .Flash) ?? return Err(TargetMachineError.MissingMemoryKind{kind: .Flash})
+        ram :: self.memory.find(|region| region.kind == .Ram) ?? return Err(TargetMachineError.MissingMemoryKind{kind: .Ram})
+        out := "/* generated by Jet target machine */\nMEMORY {\n"
+        loop region in self.memory {
+            attrs :: if region.kind == { .Flash -> "rx" .Ram -> "rwx" .Mmio -> "rw" .Reserved -> "r" }
+            out += "  {region.name} ({attrs}) : ORIGIN = 0x{region.origin:08X}, LENGTH = {format_length(region.size.bytes)}\n"
+        }
+        out += "}\nENTRY({self.startup_entry})\nSECTIONS {{\n"
+        out += "  .text : {{\n    KEEP(*({self.startup_placement}))\n    *(.text*)\n    *(.rodata*)\n  }} > {flash.name}\n"
+        out += "  .data : ALIGN(4) {{\n    __jet_data_start = .;\n    *(.data*)\n    __jet_data_end = .;\n  }} > {ram.name} AT > {flash.name}\n  __jet_data_load = LOADADDR(.data);\n"
+        out += "  .bss (NOLOAD) : ALIGN(4) {{\n    __jet_bss_start = .;\n    *(.bss*)\n    *(COMMON)\n    __jet_bss_end = .;\n  }} > {ram.name}\n"
+        out += "  __jet_stack_top = ORIGIN({ram.name}) + LENGTH({ram.name});\n"
+        if self.allocator == {
+            .Fixed(region, size) -> out += "  __jet_heap_start = ORIGIN({region});\n  __jet_heap_end = ORIGIN({region}) + {size.bytes};\n"
+            .Provider(_) -> out += "  __jet_heap_start = __jet_bss_end;\n  __jet_heap_end = ORIGIN({ram.name}) + LENGTH({ram.name});\n"
+            .None | .Unspecified | .HostedDefault | .Counting(_) -> out += "  __jet_heap_start = __jet_bss_end;\n  __jet_heap_end = __jet_bss_end;\n"
+        }
+        out += "}\n"
+        ^out
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1453
+    pub fn generate_startup_source(self) -> StartupSource TargetMachineError! {
+        if !self.no_os -> return Err(TargetMachineError.HostedHasNoStartup)
+        name :: self.name
+        abi :: self.startup_abi.calling_convention
+        abi_version :: self.startup_abi.version
+        entry :: self.startup_entry
+        vectors :: self.startup_vectors
+        placement :: self.startup_placement
+        if self.triple.contains("thumb") || self.triple.starts_with("arm") {
+            _ :: self.memory.find(|region| region.kind == .Ram) ?? return Err(TargetMachineError.MissingMemoryKind{kind: .Ram})
+            contents := "/* generated by Jet target machine `{name}` */\n/* ABI: {abi} {abi_version} */\n"
+            contents += "typedef void (*vec_t)(void);\ntypedef __UINTPTR_TYPE__ uintptr_t;\ntypedef __UINT32_TYPE__ uint32_t;\n"
+            contents += "extern unsigned char __jet_stack_top;\nextern unsigned char __jet_data_load;\nextern unsigned char __jet_data_start;\nextern unsigned char __jet_data_end;\nextern unsigned char __jet_bss_start;\nextern unsigned char __jet_bss_end;\n"
+            contents += "#if defined(__ARM_FP) && (__ARM_FP != 0)\nstatic void __jet_enable_fpu(void) {{\n  volatile uint32_t *cpacr = (volatile uint32_t *)(uintptr_t)0xE000ED88u;\n  *cpacr |= (uint32_t)(0xFu << 20);\n  __asm__ volatile (\"dsb\" ::: \"memory\");\n  __asm__ volatile (\"isb\" ::: \"memory\");\n}}\n#else\nstatic void __jet_enable_fpu(void) {{}}\n#endif\n"
+            contents += "void __jet_target_init(void);\nvoid __jet_program_entry(void);\nvoid {entry}(void);\nvoid SysTick_Handler(void);\nvoid Default_Handler(void) {{ for (;;) {{ __asm__ volatile (\"wfi\"); }} }}\n"
+            contents += "__attribute__((section(\"{placement}\"), used, aligned(128)))\nvec_t const {vectors}[] = {{\n  (vec_t)&__jet_stack_top,\n  (vec_t){entry},\n  (vec_t)Default_Handler,\n  (vec_t)Default_Handler,\n  (vec_t)Default_Handler,\n  (vec_t)Default_Handler,\n  (vec_t)Default_Handler,\n  (vec_t)0,\n  (vec_t)0,\n  (vec_t)0,\n  (vec_t)0,\n  (vec_t)Default_Handler,\n  (vec_t)Default_Handler,\n  (vec_t)0,\n  (vec_t)Default_Handler,\n  (vec_t)SysTick_Handler\n}};\n"
+            contents += "void {entry}(void) {{\n  unsigned char *src = &__jet_data_load;\n  unsigned char *dst = &__jet_data_start;\n  while (dst < &__jet_data_end) {{ *dst++ = *src++; }}\n  dst = &__jet_bss_start;\n  while (dst < &__jet_bss_end) {{ *dst++ = 0; }}\n  __jet_enable_fpu();\n  __jet_target_init();\n  __jet_program_entry();\n  for (;;) {{ __asm__ volatile (\"wfi\"); }}\n}}\n"
+            return StartupSource{filename: "startup.c", contents: ^contents}
+        } else if self.triple.contains("aarch64") {
+            contents := "/* generated by Jet target machine `{name}` */\n/* ABI: {abi} {abi_version}; placement: {placement} */\n.text\n.global {entry}\n.type {entry}, %function\n"
+            contents += ".extern __jet_target_init\n.extern __jet_program_entry\n.extern __jet_stack_top\n.extern __jet_data_load\n.extern __jet_data_start\n.extern __jet_data_end\n.extern __jet_bss_start\n.extern __jet_bss_end\n"
+            contents += "{entry}:\n  ldr x0, =__jet_stack_top\n  mov sp, x0\n  ldr x0, =__jet_data_load\n  ldr x1, =__jet_data_start\n  ldr x2, =__jet_data_end\n1:\n  cmp x1, x2\n  b.hs 2f\n  ldrb w3, [x0], #1\n  strb w3, [x1], #1\n  b 1b\n2:\n  ldr x1, =__jet_bss_start\n  ldr x2, =__jet_bss_end\n3:\n  cmp x1, x2\n  b.hs 4f\n  strb wzr, [x1], #1\n  b 3b\n4:\n  bl __jet_target_init\n  bl __jet_program_entry\n5: wfe\n  b 5b\n.size {entry}, .-{entry}\n"
+            return StartupSource{filename: "startup.S", contents: ^contents}
+        }
+        Err(TargetMachineError.UnsupportedStartupTriple{triple: ~self.triple})
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1595
+    pub fn generate_provider_source(self) -> TargetProviderSource TargetMachineError! {
+        if !self.no_os -> return Err(TargetMachineError.FirmwareBuildFailed{detail: "hosted targets do not emit portable target adapters"})
+        contents :: if self.name == {
+            "board.sensor_v1" -> {
+                uart :: self.hardware.register_blocks.find(|block| block.name == "UART0") ?? return Err(TargetMachineError.FirmwareBuildFailed{detail: "board.sensor_v1 requires UART0 hardware facts"})
+                register_address :: |name: String| -> U64? {
+                    register :: uart.register(name) ?? return None
+                    Val(uart.base.saturating_add(register.offset))
+                }
+                data :: register_address("data") ?? return Err(TargetMachineError.FirmwareBuildFailed{detail: "board.sensor_v1 requires UART0.data hardware fact"})
+                state :: register_address("state") ?? return Err(TargetMachineError.FirmwareBuildFailed{detail: "board.sensor_v1 requires UART0.state hardware fact"})
+                ctrl :: register_address("ctrl") ?? return Err(TargetMachineError.FirmwareBuildFailed{detail: "board.sensor_v1 requires UART0.ctrl hardware fact"})
+                bauddiv :: register_address("bauddiv") ?? return Err(TargetMachineError.FirmwareBuildFailed{detail: "board.sensor_v1 requires UART0.bauddiv hardware fact"})
+                systick :: U64{0xE000_E018}
+                sensor_provider_source_contents(ctrl, state, data, bauddiv, systick)
+            }
+            "board.virt_aarch64" -> {
+                uart :: self.memory.find(|region| region.name == "uart0") ?? return Err(TargetMachineError.FirmwareBuildFailed{detail: "board.virt_aarch64 requires uart0 memory fact"})
+                virt_provider_source_contents(uart.origin)
+            }
+            else -> return Err(TargetMachineError.FirmwareBuildFailed{detail: "no checked target adapter implementation for `{self.name}`"})
+        }
+        self.verify_provider_bindings(contents)!
+        TargetProviderSource{filename: "target_providers.c", contents: ^contents}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1668
+    fn verify_provider_bindings(self, source: String) TargetMachineError! {
+        source_bytes :: source.bytes()
+        check :: |capability: TargetCapability, provider: ProviderContract| TargetMachineError! {
+            if !provider.provenance.starts_with("builtin:") || !provider.matches_source(source_bytes) -> return Err(TargetMachineError.InvalidProviderContract{capability: capability.as_str(), provider: ~provider.provider, sha256: ~provider.sha256})
+        }
+        if self.name == {
+            "board.sensor_v1" -> {
+                if self.mmio == .Provider(provider) -> check(.Mmio, provider)!
+                if self.monotonic_clock == .Provider(provider) -> check(.TimeMonotonic, provider)!
+                if self.sleep == .Provider(provider) -> check(.TimeSleep, provider)!
+                if self.scheduler == .Cooperative(provider) -> check(.Scheduler, provider)!
+                if self.panic.provider() == .Val(provider) -> check(.PanicReport, provider)!
+                if self.byte_sink == .Provider(read, write, report) {
+                    if read == .Val(provider) -> check(.IoRead, provider)!
+                    if write == .Val(provider) -> check(.IoWrite, provider)!
+                    if report == .Val(provider) -> check(.PanicReport, provider)!
+                }
+            }
+            "board.virt_aarch64" -> {
+                if self.mmio == .Provider(provider) -> check(.Mmio, provider)!
+                if self.byte_sink == .Provider(_, write, report) {
+                    if write == .Val(provider) -> check(.IoWrite, provider)!
+                    if report == .Val(provider) -> check(.PanicReport, provider)!
+                }
+            }
+            else -> panic("provider implementation matched above")
+        }
+        if self.startup == .Generated(provider) {
+            startup :: self.generate_startup_source()!.contents
+            if !provider.provenance.starts_with("builtin:") || !provider.matches_source(startup.bytes()) -> return Err(TargetMachineError.InvalidProviderContract{capability: TargetCapability.Startup.as_str(), provider: ~provider.provider, sha256: ~provider.sha256})
+        }
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1750
+    pub fn size_budget(self, usage: TargetMachineUse, artifact_bytes: U64) -> SizeBudgetReport Never! {
+        flash_bytes := U64{0}
+        ram_bytes := U64{0}
+        loop region in self.memory {
+            if region.kind == .Flash -> flash_bytes += region.size.bytes
+            if region.kind == .Ram -> ram_bytes += region.size.bytes
+        }
+        ram_used :: usage.stack_bytes.saturating_add(usage.static_ram_bytes).saturating_add(self.allocator.fixed_size())
+        SizeBudgetReport{artifact_bytes: artifact_bytes, flash_bytes: flash_bytes, flash_ok: flash_bytes == U64{0} || artifact_bytes <= flash_bytes, ram_bytes: ram_bytes, ram_used_bytes: ram_used, ram_ok: ram_bytes == U64{0} || ram_used <= ram_bytes}
+    }
+    // Rust: crates/jet-foundation/src/TargetMachine.rs:1778
+    pub fn supports_execution_tier(self, tier: ExecutionTier) TargetMachineError! {
+        if self.no_os && (tier == .Dev || tier == .Jit) -> return Err(TargetMachineError.ExecutionTierUnsupported{tier: tier.as_str(), machine: ~self.name})
+    }
+}

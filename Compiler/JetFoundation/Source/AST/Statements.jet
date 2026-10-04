@@ -38,6 +38,28 @@ pub enum Stmt {
     DeferClose(close: Expr, span: Span)
 }
 
+// Rust AST/statements.rs::Stmt::span: explicit spans or the anchoring subpart.
+pub fn stmt_span(statement: Stmt) -> Span Never! {
+    if statement == {
+        .Expr(expr) -> expr_span(expr)
+        .Val(binding) -> binding.name_span
+        .Assign(target, _, _, _) -> if target == {
+            .Local(_, span) | .Index(_, _, span, _) | .Field(_, _, span) -> span
+        }
+        .Return(_, span) | .Break(span) | .BreakValue(_, span) | .Continue(span) |
+        .BreakLabel(_, span) | .BreakLabelValue(_, _, _, span) | .ContinueLabel(_, span) |
+        .While(_, _, span, _, _) | .For(_, _, _, _, _, span, _, _, _) |
+        .Switch(_, _, _, span) | .Loop(_, span, _, _) | .CountedLoop(_, _, _, _, span, _, _) |
+        .Unsafe(_, _, _, span) | .Impure(_, _, _, span) | .Reactive(_, span) | .Shield(_, span) |
+        .Switched(_, _, span) | .Region(_, _, _, span) | .Policy(_, _, span) |
+        .TaskGroup(_, _, _, _, span) | .Layout(_, _, _, span) | .AuthorityScope(_, _, _, _, span) |
+        .ComptimeIf(_, _, _, _, span, _) | .ComptimeSwitch(_, _, _, span) |
+        .ComptimeBlock(_, _, span) | .ContextBlock(_, _, span) | .Live(_, span) |
+        .AssumeDet(_, _, _, span) | .Transact(_, _, _, _, span) |
+        .Yield(_, span) | .ScopeMember(_, _, _, _, _, _, _, span) | .DeferClose(_, span) -> span
+    }
+}
+
 pub struct IfStmt {
     pub cond: Expr
     pub then_body: [Stmt]
@@ -178,6 +200,15 @@ pub struct Marker {
     pub arg_labels: [CallLabel?]
     pub span: Span
     pub ct: CtValue?
+}
+
+// Rust AST/items.rs::Marker::expr_args_owned: effect-row arguments are not Expr.
+pub fn marker_expr_args_owned(marker: Marker) -> [Expr] Never! {
+    expressions := [Expr]{}
+    loop argument in marker.args {
+        if argument == .Expr(value) -> &expressions.push(~value)
+    }
+    expressions
 }
 
 pub struct AutoVectorizationFacts {

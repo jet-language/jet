@@ -1,0 +1,693 @@
+// PORT-PENDING 0829 crates-jet-jit-build: crates/jet-jit/build.rs:1-689
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::path::PathBuf;
+//RS 
+//RS fn main() {
+//RS     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+//RS     write_yaml_std(&manifest);
+//RS     write_layout_rt(&manifest);
+//RS     write_reactive_rt(&manifest);
+//RS     write_web_kernel_std(&manifest);
+//RS     write_data_schema_std(&manifest);
+//RS     write_regex_rt(&manifest);
+//RS     write_math_rt(&manifest);
+//RS     write_collection_rt(&manifest);
+//RS     write_prelude_enum_meta(&manifest);
+//RS }
+//RS 
+//RS /// The `jet_std::JetTask` / `jet_std::JetShared` / `JetSharedSnapshot`
+//RS /// kernels that `WebForms.rs` / `WebStore.rs` name are cut from
+//RS /// `MathTaskMem.rs` with the same markers `jet-comptime`'s build uses, so the
+//RS /// resident web host runs the one Prelude task/Shared source rather than a
+//RS /// mirror. `crate::` inside the Shared kernel is the flat AOT program root;
+//RS /// here that root is `Memory::shared_protocol`.
+//RS fn write_web_kernel_std(manifest: &PathBuf) {
+//RS     let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs");
+//RS     println!("cargo:rerun-if-changed={}", src.display());
+//RS     let raw = std::fs::read_to_string(&src).expect("read MathTaskMem.rs");
+//RS     let unindent = |s: &str| -> String {
+//RS         s.lines()
+//RS             .map(|line| line.strip_prefix("    ").unwrap_or(line))
+//RS             .collect::<Vec<_>>()
+//RS             .join("\n")
+//RS     };
+//RS     let task_start = raw
+//RS         .find("    struct JetTaskState<T: Send + 'static> {")
+//RS         .expect("JetTaskState marker");
+//RS     let task_end = raw
+//RS         .find("    fn jet_task_entries<T: Send + 'static>(")
+//RS         .expect("jet_task_entries marker");
+//RS     let shared_start = raw
+//RS         .find(
+//RS             "    #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n    pub enum JetSharedRevisionError",
+//RS         )
+//RS         .expect("JetSharedRevisionError marker");
+//RS     let shared_end = raw
+//RS         .find("    enum JetPoolSlot<T>")
+//RS         .expect("JetPoolSlot marker");
+//RS     let mut body = unindent(&raw[task_start..task_end]);
+//RS     body.push('\n');
+//RS     // The Source Shared interop section names `::jet_jit::` for generated
+//RS     // programs; inside this crate that root is `crate::`.
+//RS     body.push_str(
+//RS         &unindent(&raw[shared_start..shared_end])
+//RS             .replace("crate::", "crate::Memory::shared_protocol::")
+//RS             .replace("::jet_jit::", "crate::"),
+//RS     );
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("web_kernel_std.rs");
+//RS     std::fs::write(&out, body).expect("write web_kernel_std.rs");
+//RS }
+//RS 
+//RS /// `DataQuery.rs` infers loader schemas through `jet_std::DataSchema::infer`
+//RS /// (`CommonTypes.rs`). The resident query host compiles that one inference
+//RS /// kernel — `DataColumn`, `DataSchema` and its `impl`, and `DataFormat` —
+//RS /// selected by declaration boundaries rather than explanatory doc comments.
+//RS fn write_data_schema_std(manifest: &PathBuf) {
+//RS     let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs");
+//RS     println!("cargo:rerun-if-changed={}", src.display());
+//RS     let raw = std::fs::read_to_string(&src).expect("read CommonTypes.rs");
+//RS     let schema_start = raw
+//RS         .find("#[derive(Clone, Debug, PartialEq)]\npub struct DataColumn {")
+//RS         .expect("DataColumn declaration");
+//RS     let schema_end = raw
+//RS         .find("#[derive(Clone, Debug, PartialEq)]\npub struct DataStatus {")
+//RS         .expect("DataStatus declaration");
+//RS     let format_start = raw
+//RS         .find("#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]\npub enum DataFormat {")
+//RS         .expect("DataFormat marker");
+//RS     let format_end = raw
+//RS         .find("#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]\npub enum DataFreshness {")
+//RS         .expect("DataFreshness marker");
+//RS     let mut body = String::new();
+//RS     body.push_str(&raw[schema_start..schema_end]);
+//RS     body.push('\n');
+//RS     body.push_str(&raw[format_start..format_end]);
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("data_schema_std.rs");
+//RS     std::fs::write(&out, body).expect("write data_schema_std.rs");
+//RS }
+//RS 
+//RS 
+//RS fn strip_rust_comments(source: &str) -> String {
+//RS     let mut out = String::with_capacity(source.len());
+//RS     let bytes = source.as_bytes();
+//RS     let mut i = 0;
+//RS     while i < bytes.len() {
+//RS         if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+//RS             i += 2;
+//RS             while i < bytes.len() && bytes[i] != b'\n' {
+//RS                 i += 1;
+//RS             }
+//RS             if i < bytes.len() {
+//RS                 out.push('\n');
+//RS                 i += 1;
+//RS             }
+//RS         } else if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+//RS             i += 2;
+//RS             while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+//RS                 if bytes[i] == b'\n' {
+//RS                     out.push('\n');
+//RS                 }
+//RS                 i += 1;
+//RS             }
+//RS             i = (i + 2).min(bytes.len());
+//RS         } else {
+//RS             out.push(bytes[i] as char);
+//RS             i += 1;
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn rust_enum_variants(source: &str, rust_name: &str) -> Vec<String> {
+//RS     let source = strip_rust_comments(source);
+//RS     let needle = format!("enum {rust_name}");
+//RS     let mut search = 0;
+//RS     let start = loop {
+//RS         let Some(found) = source[search..].find(&needle) else {
+//RS             panic!("enum {rust_name} not found in Prelude source")
+//RS         };
+//RS         let found = search + found;
+//RS         let after = found + needle.len();
+//RS         let boundary = source[after..].chars().next();
+//RS         if !boundary.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+//RS             break found;
+//RS         }
+//RS         search = after;
+//RS     };
+//RS     let open = source[start..]
+//RS         .find('{')
+//RS         .map(|offset| start + offset)
+//RS         .expect("Prelude enum opening brace");
+//RS     let bytes = source.as_bytes();
+//RS     let mut depth = 1usize;
+//RS     let mut segment_start = open + 1;
+//RS     let mut variants = Vec::new();
+//RS     let mut push_segment = |segment: &str| {
+//RS         let mut segment = segment.trim();
+//RS         while segment.starts_with("#[") {
+//RS             let Some(end) = segment.find(']') else {
+//RS                 break;
+//RS             };
+//RS             segment = segment[end + 1..].trim();
+//RS         }
+//RS         let name: String = segment
+//RS             .chars()
+//RS             .skip_while(|ch| !ch.is_ascii_alphabetic() && *ch != '_')
+//RS             .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+//RS             .collect();
+//RS         if !name.is_empty() {
+//RS             variants.push(name);
+//RS         }
+//RS     };
+//RS     for i in open + 1..bytes.len() {
+//RS         match bytes[i] {
+//RS             b'(' | b'[' | b'{' => depth += 1,
+//RS             b')' | b']' => depth = depth.saturating_sub(1),
+//RS             b'}' if depth == 1 => {
+//RS                 push_segment(&source[segment_start..i]);
+//RS                 return variants;
+//RS             }
+//RS             b'}' => depth = depth.saturating_sub(1),
+//RS             b',' if depth == 1 => {
+//RS                 push_segment(&source[segment_start..i]);
+//RS                 segment_start = i + 1;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     panic!("Prelude enum {rust_name} has no closing brace")
+//RS }
+//RS 
+//RS fn write_prelude_enum_meta(manifest: &PathBuf) {
+//RS     let specs = [
+//RS         (
+//RS             "TaskFailure",
+//RS             "../jet-foundation/src/Outcome.rs",
+//RS             "JetTaskFailure",
+//RS         ),
+//RS         (
+//RS             "ProcessStreamMode",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+//RS             "ProcessStreamMode",
+//RS         ),
+//RS         (
+//RS             "IOOperation",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs",
+//RS             "IOOperation",
+//RS         ),
+//RS         (
+//RS             "IOError",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs",
+//RS             "IOError",
+//RS         ),
+//RS         (
+//RS             "ProcessResourceLimit",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs",
+//RS             "ProcessResourceLimit",
+//RS         ),
+//RS         (
+//RS             "TextWidthAmbiguous",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs",
+//RS             "TextWidthAmbiguous",
+//RS         ),
+//RS         (
+//RS             "TextWidthControls",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs",
+//RS             "TextWidthControls",
+//RS         ),
+//RS         (
+//RS             "TerminalMode",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+//RS             "TerminalMode",
+//RS         ),
+//RS         (
+//RS             "WatchDomain",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+//RS             "WatchDomain",
+//RS         ),
+//RS         (
+//RS             "WatchKind",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+//RS             "WatchKind",
+//RS         ),
+//RS         (
+//RS             "Key",
+//RS             "../jet-codegen/src/Prelude/Core/TermKey.rs",
+//RS             "JetKey",
+//RS         ),
+//RS         (
+//RS             "EncodingErrorKind",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs",
+//RS             "EncodingErrorKind",
+//RS         ),
+//RS         (
+//RS             "DataEvent",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+//RS             "DataEvent",
+//RS         ),
+//RS         (
+//RS             "AuthError",
+//RS             "../jet-codegen/src/Prelude/CoreLib/Top/Auth.rs",
+//RS             "JetAuthError",
+//RS         ),
+//RS         (
+//RS             "HTTPError",
+//RS             "../jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs",
+//RS             "JetHTTPError",
+//RS         ),
+//RS         (
+//RS             "HookOutcome",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+//RS             "JetHookOutcome",
+//RS         ),
+//RS         (
+//RS             "HookDecision",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+//RS             "JetHookDecision",
+//RS         ),
+//RS         (
+//RS             "HookPolicy",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+//RS             "JetHookPolicy",
+//RS         ),
+//RS         (
+//RS             "Loadable",
+//RS             "../jet-codegen/src/Prelude/Core/Values.rs",
+//RS             "JetLoadable",
+//RS         ),
+//RS         (
+//RS             "Overflow",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+//RS             "JetEventOverflow",
+//RS         ),
+//RS         (
+//RS             "FailurePolicy",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+//RS             "JetFailurePolicy",
+//RS         ),
+//RS         (
+//RS             "EventResult",
+//RS             "../jet-codegen/src/Prelude/Ui.rs",
+//RS             "JetEventResult",
+//RS         ),
+//RS         (
+//RS             "DispatchState",
+//RS             "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+//RS             "JetDispatchState",
+//RS         ),
+//RS         (
+//RS             "DeliveryState",
+//RS             "../jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs",
+//RS             "JetDeliveryState",
+//RS         ),
+//RS         (
+//RS             "TaskOutcome",
+//RS             "../jet-codegen/src/Prelude/CoreLib/Top/Services.rs",
+//RS             "JetTaskOutcome",
+//RS         ),
+//RS         (
+//RS             "TaskStatus",
+//RS             "../jet-codegen/src/Prelude/CoreLib/Top/Services.rs",
+//RS             "JetTaskStatus",
+//RS         ),
+//RS         (
+//RS             "SMTPSecurity",
+//RS             "../jet-codegen/src/Prelude/CoreLib/Email.rs",
+//RS             "SMTPSecurity",
+//RS         ),
+//RS         (
+//RS             "RecipientPolicy",
+//RS             "../jet-codegen/src/Prelude/CoreLib/Email.rs",
+//RS             "RecipientPolicy",
+//RS         ),
+//RS         (
+//RS             "SMTPAuth",
+//RS             "../jet-codegen/src/Prelude/CoreLib/Email.rs",
+//RS             "SMTPAuth",
+//RS         ),
+//RS         (
+//RS             "TLSTrust",
+//RS             "../jet-codegen/src/Prelude/CoreLib/Email.rs",
+//RS             "TLSTrust",
+//RS         ),
+//RS         (
+//RS             "EmailError",
+//RS             "../jet-codegen/src/Prelude/CoreLib/Email.rs",
+//RS             "Error",
+//RS         ),
+//RS         (
+//RS             "TLSVersion",
+//RS             "../jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs",
+//RS             "JetTLSVersion",
+//RS         ),
+//RS         // The carrier enum lives in Foundation; Codegen embeds this same file
+//RS         // (`Codegen/mod.rs` DATATREE_PRELUDE_REEXPORT), so one source feeds
+//RS         // both the AOT Prelude and the resident discriminant table.
+//RS         (
+//RS             "DataTree",
+//RS             "../jet-foundation/src/DataTree.rs",
+//RS             "DataTree",
+//RS         ),
+//RS     ];
+//RS     let mut entries = Vec::new();
+//RS     for (jet_name, relative, rust_name) in specs {
+//RS         let path = manifest.join(relative);
+//RS         println!("cargo:rerun-if-changed={}", path.display());
+//RS         let source = std::fs::read_to_string(&path)
+//RS             .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+//RS         entries.push((jet_name, rust_enum_variants(&source, rust_name)));
+//RS     }
+//RS     let data_tree = entries
+//RS         .iter()
+//RS         .find(|(name, _)| *name == "DataTree")
+//RS         .map(|(_, variants)| variants.clone())
+//RS         .expect("DataTree metadata");
+//RS     for alias in ["JSON", "TOML", "YAML", "CSV"] {
+//RS         entries.push((alias, data_tree.clone()));
+//RS     }
+//RS 
+//RS     let mut body = String::from(
+//RS         "pub(crate) fn all() -> &'static [(&'static str, &'static [&'static str])] {\n    &[\n",
+//RS     );
+//RS     for (name, variants) in &entries {
+//RS         body.push_str(&format!("        ({name:?}, &["));
+//RS         for variant in variants {
+//RS             body.push_str(&format!("{variant:?}, "));
+//RS         }
+//RS         body.push_str("]),\n");
+//RS     }
+//RS     body.push_str("        (jet_foundation::Syntax::TYPE_ORDERING, jet_foundation::Syntax::ORDERING_VARIANTS),\n");
+//RS     body.push_str("    ]\n}\n");
+//RS     if let Some((_, variants)) = entries.iter().find(|(name, _)| *name == "DataTree") {
+//RS         for (index, variant) in variants.iter().enumerate() {
+//RS             body.push_str(&format!(
+//RS                 "\npub(crate) const PRELUDE_DATATREE_{}: i64 = {index};\n",
+//RS                 variant.to_ascii_uppercase()
+//RS             ));
+//RS         }
+//RS     }
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("prelude_enum_meta.rs");
+//RS     std::fs::write(&out, body).expect("write prelude_enum_meta.rs");
+//RS }
+//RS 
+//RS fn write_math_rt(manifest: &PathBuf) {
+//RS     let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
+//RS     println!("cargo:rerun-if-changed={}", src.display());
+//RS     let raw = std::fs::read_to_string(&src).expect("read MathLibPure.rs");
+//RS     // Pub crate-visible so CoreHost shims can call Prelude symbols by name.
+//RS     let body = raw
+//RS         .replace("\npub fn jet_std_math_", "\npub(crate) fn jet_std_math_")
+//RS         .replace("\nfn jet_std_math_", "\npub(crate) fn jet_std_math_");
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("math_rt.rs");
+//RS     std::fs::write(&out, body).expect("write math_rt.rs");
+//RS }
+//RS  
+//RS fn write_collection_rt(manifest: &PathBuf) {
+//RS     let src = manifest.join("../jet-codegen/src/Prelude/Core/Collections.rs");
+//RS     println!("cargo:rerun-if-changed={}", src.display());
+//RS     let raw = std::fs::read_to_string(&src).expect("read Core/Collections.rs");
+//RS     let marker = "// D-CORE-COLLECTIONS1=A:";
+//RS     let start = raw.find(marker).expect("nominal collection marker");
+//RS     let body = &raw[start..];
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("collection_rt.rs");
+//RS     std::fs::write(&out, format!("{body}\n")).expect("write collection_rt.rs");
+//RS }
+//RS 
+//RS fn write_reactive_rt(manifest: &PathBuf) {
+//RS     let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs");
+//RS     println!("cargo:rerun-if-changed={}", src.display());
+//RS     let raw = std::fs::read_to_string(&src).expect("read ReactiveEventWatch.rs");
+//RS     // File is indented 4 spaces for jet_std string-concat embedding.
+//RS     let unindent = |s: &str| -> String {
+//RS         s.lines()
+//RS             .map(|line| line.strip_prefix("    ").unwrap_or(line))
+//RS             .collect::<Vec<_>>()
+//RS             .join("\n")
+//RS     };
+//RS     let start = raw
+//RS         .find("// ── D-REACT1=B + D-DATARACE1=C")
+//RS         .expect("reactive marker");
+//RS     // Sync reactive + Event core, then include the complete canonical
+//RS     // scheduler-backed AsyncEvent implementation. JIT supplies only the
+//RS     // task/scheduler bridge below; queue, overflow, failure, and lifecycle
+//RS     // policy remain in ReactiveEventWatch.rs.
+//RS     let start_async_policy = raw
+//RS         .find("    #[derive(Clone, Copy)]\n    pub struct JetAsyncPolicy")
+//RS         .expect("JetAsyncPolicy marker");
+//RS     let end_async_policy = raw
+//RS         .find("    struct JetHookListener<")
+//RS         .expect("JetHookListener marker");
+//RS     let end_sync = start_async_policy;
+//RS     let start_hooks = end_async_policy;
+//RS     let end_hooks = raw
+//RS         .find("    pub struct WatchHandle")
+//RS         .expect("WatchHandle marker");
+//RS     fn strip_orphan_derives(body: &mut String) {
+//RS         loop {
+//RS             let trimmed = body.trim_end();
+//RS             let orphan = trimmed.ends_with("#[derive(Clone)]")
+//RS                 || trimmed.ends_with("#[derive(Clone, Copy)]")
+//RS                 || trimmed.ends_with("#[derive(Clone, Copy, Debug, Eq, PartialEq)]")
+//RS                 || trimmed.ends_with("#[derive(Clone, Copy, Debug, PartialEq, Eq)]");
+//RS             if !orphan {
+//RS                 break;
+//RS             }
+//RS             if let Some(i) = body.rfind("#[derive") {
+//RS                 body.truncate(i);
+//RS                 *body = body.trim_end().to_string();
+//RS             } else {
+//RS                 break;
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut body = unindent(&raw[start..end_sync]);
+//RS     strip_orphan_derives(&mut body);
+//RS     body.push_str("\n");
+//RS     body.push_str(&unindent(&raw[start_async_policy..end_async_policy]));
+//RS     strip_orphan_derives(&mut body);
+//RS     body.push_str("\n");
+//RS     body.push_str(&unindent(&raw[start_hooks..end_hooks]));
+//RS     strip_orphan_derives(&mut body);
+//RS     // Pub types/fns JIT hosts need. Longest-first + already-pub skip so
+//RS     // `JetEvent` does not smash `JetEventScope` into `pub pub`.
+//RS     fn ensure_pub(body: &mut String, kind: &str, name: &str) {
+//RS         let bare = format!("{kind} {name}");
+//RS         let mut out = String::with_capacity(body.len() + 16);
+//RS         let bytes = body.as_str();
+//RS         let mut rest = bytes;
+//RS         while let Some(i) = rest.find(&bare) {
+//RS             let next = rest[i + bare.len()..].chars().next();
+//RS             let ident_continue = next.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+//RS             out.push_str(&rest[..i]);
+//RS             if ident_continue {
+//RS                 out.push_str(&bare);
+//RS             } else {
+//RS                 let before = &rest[..i];
+//RS                 let already = before.ends_with("pub ") || before.ends_with("pub(crate) ");
+//RS                 if already {
+//RS                     out.push_str(&bare);
+//RS                 } else {
+//RS                     out.push_str("pub ");
+//RS                     out.push_str(&bare);
+//RS                 }
+//RS             }
+//RS             rest = &rest[i + bare.len()..];
+//RS         }
+//RS         out.push_str(rest);
+//RS         *body = out;
+//RS     }
+//RS     for name in [
+//RS         "JetReactiveEffect",
+//RS         "JetSignal",
+//RS         "JetDerived",
+//RS         "JetEventPolicy",
+//RS         "JetEventTrace",
+//RS         "JetEventScope",
+//RS         "JetEventOverflow",
+//RS         "JetEventConfigError",
+//RS         "JetSubscription",
+//RS         "JetEvent",
+//RS         "JetHookPolicy",
+//RS         "JetHookDecision",
+//RS         "JetHookOutcome",
+//RS         "JetHook",
+//RS         "JetDecisionHook",
+//RS         "JetAsyncEvent",
+//RS         "JetAsyncPolicy",
+//RS         "JetFailurePolicy",
+//RS         "JetDispatchReport",
+//RS         "JetDispatchState",
+//RS     ] {
+//RS         ensure_pub(&mut body, "struct", name);
+//RS         ensure_pub(&mut body, "enum", name);
+//RS     }
+//RS     for name in [
+//RS         "jet_reactive_effect_rooted",
+//RS         "jet_reactive_effect",
+//RS         "jet_reactive_scope",
+//RS     ] {
+//RS         ensure_pub(&mut body, "fn", name);
+//RS     }
+//RS     // Observe lives in Prelude::Observe; keep the existing local carrier stub.
+//RS     // AsyncEvent itself is canonical above; only its JIT task bridge is local.
+//RS     let stub = r#"
+//RS #[derive(Clone)]
+//RS pub struct JetObserveEvent {
+//RS     pub sequence: u64,
+//RS     pub source: &'static str,
+//RS     pub event_id: u64,
+//RS     pub owner_id: u64,
+//RS     pub subscription_id: u64,
+//RS     pub dispatch_id: u64,
+//RS     pub lifecycle: &'static str,
+//RS     pub queued: i64,
+//RS     pub blocked: i64,
+//RS     pub running: i64,
+//RS     pub capacity: i64,
+//RS     pub overflow: &'static str,
+//RS     pub priority: i64,
+//RS     pub failure: &'static str,
+//RS     pub terminal: &'static str,
+//RS }
+//RS pub fn jet_observe_event(_event: JetObserveEvent) {}
+//RS "#;
+//RS     let task_adapter = r#"
+//RS struct JetTaskState<T: Send + 'static> {
+//RS     handle: std::sync::Mutex<Option<super::JetSchedulerJoin<T>>>,
+//RS     control: std::sync::Arc<super::JetTaskControl>,
+//RS     // AsyncEvent converts an inherited deadline into its typed dispatch
+//RS     // report; joining must not replace that report with a parent E3003.
+//RS     skip_join_deadline: bool,
+//RS }
+//RS 
+//RS pub(crate) struct JetTask<T: Send + 'static> {
+//RS     state: std::sync::Arc<JetTaskState<T>>,
+//RS }
+//RS 
+//RS impl<T: Send + 'static> JetTask<T> {
+//RS     pub(crate) fn spawn_typed_deadline<F: FnOnce() -> T + Send + 'static>(
+//RS         f: F,
+//RS         control: std::sync::Arc<super::JetTaskControl>,
+//RS     ) -> Self {
+//RS         let inherited_deadline = super::jet_ctx_deadline_ms();
+//RS         let task_control = control.clone();
+//RS         let handle = super::jet_scheduler_spawn_blocking_with_control_at(
+//RS             0,
+//RS             "async event dispatch",
+//RS             move || {
+//RS                 let _deadline = inherited_deadline.map(super::jet_ctx_push_deadline);
+//RS                 let _typed_deadline_boundary = super::JetTypedDeadlineBoundary::enter();
+//RS                 super::with_async_runtime(f)
+//RS             },
+//RS             task_control,
+//RS         );
+//RS         Self {
+//RS             state: std::sync::Arc::new(JetTaskState {
+//RS                 handle: std::sync::Mutex::new(Some(handle)),
+//RS                 control,
+//RS                 skip_join_deadline: true,
+//RS             }),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn cancel(&self) {
+//RS         self.state.control.cancel();
+//RS     }
+//RS 
+//RS     pub(crate) fn join(self) -> Result<T, super::JetTaskFailure> {
+//RS         let state = self.state;
+//RS         let skip_join_deadline = state.skip_join_deadline;
+//RS         if !skip_join_deadline {
+//RS             super::jet_task_join_deadline_check();
+//RS         }
+//RS         let mut handle = state
+//RS             .handle
+//RS             .lock()
+//RS             .unwrap()
+//RS             .take()
+//RS             .expect("task already joined");
+//RS         super::jet_scheduler_blocking_wait_enter();
+//RS         let joined = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle.join()));
+//RS         super::jet_scheduler_blocking_wait_leave();
+//RS         let result = match joined {
+//RS             Ok(result) => result,
+//RS             Err(payload) => {
+//RS                 state.control.cancel();
+//RS                 std::panic::resume_unwind(payload);
+//RS             }
+//RS         };
+//RS         if !skip_join_deadline {
+//RS             super::jet_task_join_deadline_check();
+//RS         }
+//RS         result
+//RS     }
+//RS }
+//RS "#;
+//RS     body = body.replace("super::jet_observe_event", "jet_observe_event");
+//RS     body = body.replace("super::JetObserveEvent", "JetObserveEvent");
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("reactive_rt.rs");
+//RS     std::fs::write(&out, format!("{stub}\n{task_adapter}\n{body}\n"))
+//RS         .expect("write reactive_rt.rs");
+//RS }
+//RS 
+//RS fn write_layout_rt(manifest: &PathBuf) {
+//RS     let src = manifest.join("../jet-codegen/src/Prelude/Layout.rs");
+//RS     println!("cargo:rerun-if-changed={}", src.display());
+//RS     let raw = std::fs::read_to_string(&src).expect("read Prelude/Layout.rs");
+//RS     let start = raw
+//RS         .find("mod jet_layout {")
+//RS         .expect("jet_layout module in Layout.rs");
+//RS     let body = &raw[start + "mod jet_layout {".len()..];
+//RS     let body = body.trim_end();
+//RS     let body = body
+//RS         .strip_suffix('}')
+//RS         .expect("Layout.rs closing brace")
+//RS         .trim_end();
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("layout_rt.rs");
+//RS     std::fs::write(&out, format!("{body}\n")).expect("write layout_rt.rs");
+//RS }
+//RS 
+//RS fn write_yaml_std(manifest: &PathBuf) {
+//RS     let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs");
+//RS     println!("cargo:rerun-if-changed={}", src.display());
+//RS     let raw = std::fs::read_to_string(&src).expect("read JetStd/YAML.rs");
+//RS     // YAML.rs ends with an extra `}` for corelib string-concat embedding.
+//RS     let trimmed = {
+//RS         let t = raw.trim_end();
+//RS         let without = t.strip_suffix('}').expect("YAML.rs trailing }");
+//RS         let without = without.trim_end();
+//RS         // Keep a trailing newline for include!
+//RS         format!("{without}\n")
+//RS     };
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("yaml_std.rs");
+//RS     std::fs::write(&out, trimmed).expect("write yaml_std.rs");
+//RS }
+//RS 
+//RS fn write_regex_rt(manifest: &PathBuf) {
+//RS     let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs");
+//RS     println!("cargo:rerun-if-changed={}", src.display());
+//RS     let raw = std::fs::read_to_string(&src).expect("read Regex.rs");
+//RS     let mut body = raw;
+//RS     while let Some(impl_at) = body.find("impl crate::JetShow for ") {
+//RS         let rest = &body[impl_at..];
+//RS         let close = rest
+//RS             .find("\n}\n")
+//RS             .map(|i| i + 3)
+//RS             .or_else(|| rest.find("\n    }\n").map(|i| i + 6))
+//RS             .expect("JetShow impl close");
+//RS         body.replace_range(impl_at..impl_at + close, "");
+//RS     }
+//RS     while let Some(impl_at) = body.find("impl crate::JetDebug for ") {
+//RS         let rest = &body[impl_at..];
+//RS         let close = rest
+//RS             .find("\n}\n")
+//RS             .map(|i| i + 3)
+//RS             .or_else(|| rest.find("\n    }\n").map(|i| i + 6))
+//RS             .expect("JetDebug impl close");
+//RS         body.replace_range(impl_at..impl_at + close, "");
+//RS     }
+//RS     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("regex_rt.rs");
+//RS     std::fs::write(&out, body).expect("write regex_rt.rs");
+//RS }
+// END-PORT-PENDING 0829 crates/jet-jit/build.rs:1-689
+

@@ -1,0 +1,563 @@
+// PORT-PENDING 0397 crates-jet-sema-src-sema-checkerinfer-calls-module-group: crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints.rs:1-559
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Semantic guidance for the two block-shaped standard-library replacements.
+//RS //!
+//RS //! Expression-shaped guidance lives beside the expression inference that
+//RS //! proves its types. These rules need the surrounding statement sequence, so
+//RS //! they use the same sema checker but keep their structural probes here.
+//RS 
+//RS mod display_lint;
+//RS mod loop_lints;
+//RS 
+//RS pub(crate) use display_lint::{
+//RS     debug_interpolation_edit, explicit_copy_edit, is_display_migration_candidate,
+//RS };
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+//RS use crate::Sema::Checker;
+//RS use std::collections::HashSet;
+//RS use crate::AST::{Expr, ForKind, LValue, Stmt, StrPart, Type};
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     /// Precompute a complete ASCII ladder before checking its first statement.
+//RS     /// The candidate is keyed by the binding statement so a statement-local
+//RS     /// `#allow(complete_ascii_case_ladder)` is already active when it emits.
+//RS     pub(crate) fn prepare_stdlib_lint_block(&mut self, stmts: &[Stmt]) {
+//RS         let mut ascii_lower_landed = None;
+//RS         let mut ascii_upper_landed = None;
+//RS         let mut replace_landed = None;
+//RS         for index in 0..stmts.len() {
+//RS             let Some((binding, lower, last_end)) = ascii_ladder(stmts, index) else {
+//RS                 continue;
+//RS             };
+//RS             let direction_landed = if lower {
+//RS                 *ascii_lower_landed.get_or_insert_with(|| {
+//RS                     crate::Collections::builtin_method_return(
+//RS                         &Type::String,
+//RS                         "to_ascii_lower",
+//RS                         0,
+//RS                         false,
+//RS                     ) == Some(Some(Type::String))
+//RS                 })
+//RS             } else {
+//RS                 *ascii_upper_landed.get_or_insert_with(|| {
+//RS                     crate::Collections::builtin_method_return(
+//RS                         &Type::String,
+//RS                         "to_ascii_upper",
+//RS                         0,
+//RS                         false,
+//RS                     ) == Some(Some(Type::String))
+//RS                 })
+//RS             };
+//RS             if !direction_landed {
+//RS                 continue;
+//RS             }
+//RS             if !*replace_landed.get_or_insert_with(|| {
+//RS                 crate::Collections::builtin_method_return(&Type::String, "replace", 2, false)
+//RS                     == Some(Some(Type::String))
+//RS             }) {
+//RS                 continue;
+//RS             }
+//RS             let direction = if lower {
+//RS                 "to_ascii_lower"
+//RS             } else {
+//RS                 "to_ascii_upper"
+//RS             };
+//RS             let Some(prefix) = self
+//RS                 .source
+//RS                 .get(binding.name_span.start..binding.init.span().start)
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             let Some(init) = self
+//RS                 .source
+//RS                 .get(binding.init.span().start..binding.init.span().end)
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             let edit = TextEdit {
+//RS                 span: Span::new(binding.name_span.start, last_end),
+//RS                 new_text: format!("{prefix}{init}.{direction}()"),
+//RS             };
+//RS             self.stdlib_lint_candidates
+//RS                 .insert(binding.name_span.start, (binding.name_span, edit));
+//RS         }
+//RS     }
+//RS 
+//RS     /// Emit block-shaped guidance after marker facts have been consumed. This
+//RS     /// ordering preserves the existing statement-scoped `#allow` behavior.
+//RS     pub(crate) fn emit_stdlib_lints_for_stmt(&mut self, stmt: &Stmt) {
+//RS         let typed_mutable_string = matches!(
+//RS             stmt,
+//RS             Stmt::Val(binding)
+//RS                 if binding.mutable
+//RS                     && self
+//RS                         .lookup(&binding.name)
+//RS                         .is_some_and(|info| info.ty == Type::String)
+//RS         );
+//RS         if typed_mutable_string && self.flow.reachable {
+//RS             if let Some((span, edit)) = self.stdlib_lint_candidates.remove(&stmt.span().start) {
+//RS                 self.diags
+//RS                     .push(Diagnostic::from_row("L0521", &[], Some(span)).with_edit(edit));
+//RS             }
+//RS         }
+//RS 
+//RS         if let Stmt::For {
+//RS             var,
+//RS             var2: None,
+//RS             kind: ForKind::In { collection, .. },
+//RS             body,
+//RS             ..
+//RS         } = stmt
+//RS         {
+//RS             self.check_stdlib_walk_filter(var, collection, body);
+//RS         }
+//RS     }
+//RS 
+//RS     fn check_stdlib_walk_filter(&mut self, var: &str, collection: &Expr, body: &[Stmt]) {
+//RS         if !self.flow.reachable {
+//RS             return;
+//RS         }
+//RS         let Some((receiver, method_span)) = direct_fs_walk(self, collection) else {
+//RS             return;
+//RS         };
+//RS         let Some(filter) = body.first() else {
+//RS             return;
+//RS         };
+//RS         // A matching filter after the first statement was already rejected;
+//RS         // checking only the first statement avoids a second body walk.
+//RS         if !is_directory_filter(filter, var) {
+//RS             return;
+//RS         }
+//RS         let mut path_uses = 0usize;
+//RS         for stmt in body.iter().skip(1) {
+//RS             let facts = stmt_lint_facts(stmt, var);
+//RS             if facts.has_control_flow(stmt) || !facts.uses_only_path() {
+//RS                 return;
+//RS             }
+//RS             path_uses += facts.path_uses;
+//RS         }
+//RS         if path_uses == 0 {
+//RS             return;
+//RS         }
+//RS         let Some(edit) = walk_files_edit(self, receiver, method_span) else {
+//RS             return;
+//RS         };
+//RS         self.diags
+//RS             .push(Diagnostic::from_row("L0522", &[], Some(edit.span)).with_edit(edit));
+//RS     }
+//RS }
+//RS fn direct_fs_walk<'a>(checker: &Checker<'_>, expr: &'a Expr) -> Option<(&'a Expr, Span)> {
+//RS     match expr.without_parens() {
+//RS         Expr::OrFallback { value, .. } | Expr::Try(value, ..) => {
+//RS             return direct_fs_walk(checker, value);
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS     let Expr::MethodCall {
+//RS         receiver,
+//RS         method,
+//RS         method_span,
+//RS         args,
+//RS         ..
+//RS     } = expr.without_parens()
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     (method == "walk"
+//RS         && matches!(args.len(), 1 | 2)
+//RS         && args.iter().enumerate().all(|(index, arg)| {
+//RS             let label_ok = if index == 1 {
+//RS                 matches!(
+//RS                     arg.label.as_ref().map(|(label, _)| label.as_str()),
+//RS                     None | Some("ignore")
+//RS                 )
+//RS             } else {
+//RS                 arg.label.is_none()
+//RS             };
+//RS             !arg.spread && label_ok
+//RS         })
+//RS         && checker
+//RS             .core_module_path_from_receiver(receiver)
+//RS             .is_some_and(|(module, alias, _)| module == "core.files" && alias == "fs")
+//RS         && super::expr::landed_core_call("core.files", "walk", 2)
+//RS         && super::expr::landed_core_call("core.files", "walk_files", 2))
+//RS     .then_some((receiver.as_ref(), *method_span))
+//RS }
+//RS 
+//RS fn walk_files_edit(checker: &Checker<'_>, receiver: &Expr, method_span: Span) -> Option<TextEdit> {
+//RS     let start = crate::Sema::source_expr_start(receiver);
+//RS     let end = crate::Sema::source_call_end(checker.source, method_span)?;
+//RS     let prefix = checker.source.get(start..method_span.start)?;
+//RS     let suffix = checker.source.get(method_span.end..end)?;
+//RS     Some(TextEdit {
+//RS         span: Span::new(start, end),
+//RS         new_text: format!("{prefix}walk_files{suffix}"),
+//RS     })
+//RS }
+//RS 
+//RS fn is_directory_filter(stmt: &Stmt, var: &str) -> bool {
+//RS     let Stmt::Switch {
+//RS         subject,
+//RS         arms,
+//RS         else_body: None,
+//RS         span,
+//RS     } = stmt
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     if !crate::AST::is_subjectless_guard(subject, *span) || arms.len() != 1 {
+//RS         return false;
+//RS     }
+//RS     let arm = &arms[0];
+//RS     matches!(
+//RS         arm.cond.without_parens(),
+//RS         Expr::Field(base, field, _)
+//RS             if field == "is_dir"
+//RS                 && matches!(base.without_parens(), Expr::Ident(name, _) if name == var)
+//RS     ) && arm.body.len() == 1
+//RS         && matches!(arm.body[0], Stmt::Continue(_))
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct StmtLintFacts {
+//RS     path_uses: usize,
+//RS     allowed_path_bases: HashSet<Span>,
+//RS     variable_uses: Vec<Span>,
+//RS     has_fallback_exit: bool,
+//RS }
+//RS 
+//RS impl StmtLintFacts {
+//RS     fn uses_only_path(&self) -> bool {
+//RS         self.variable_uses
+//RS             .iter()
+//RS             .all(|span| self.allowed_path_bases.contains(span))
+//RS     }
+//RS 
+//RS     fn has_control_flow(&self, stmt: &Stmt) -> bool {
+//RS         self.has_fallback_exit || stmt_has_structural_control_flow(stmt)
+//RS     }
+//RS }
+//RS 
+//RS fn stmt_lint_facts(stmt: &Stmt, var: &str) -> StmtLintFacts {
+//RS     let mut copy = stmt.clone();
+//RS     let mut facts = StmtLintFacts::default();
+//RS     scan_stmt_exprs(&mut copy, var, &mut facts);
+//RS     facts
+//RS }
+//RS 
+//RS fn scan_expr(expr: &mut Expr, var: &str, facts: &mut StmtLintFacts, check_fallback: bool) {
+//RS     expr.for_each_expr_mut(|nested| {
+//RS         let shape = nested.without_parens();
+//RS         if let Expr::Field(base, field, _) = shape {
+//RS             if field == "path" {
+//RS                 if let Expr::Ident(name, span) = base.without_parens() {
+//RS                     if name == var {
+//RS                         facts.allowed_path_bases.insert(*span);
+//RS                         facts.path_uses += 1;
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Expr::Ident(name, span) = shape {
+//RS             if name == var {
+//RS                 facts.variable_uses.push(*span);
+//RS             }
+//RS         }
+//RS         if check_fallback && is_fallback_exit_expr(nested) {
+//RS             facts.has_fallback_exit = true;
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn scan_lvalue(lvalue: &mut LValue, var: &str, facts: &mut StmtLintFacts) {
+//RS     match lvalue {
+//RS         LValue::Local { .. } => {}
+//RS         LValue::Index { base, index, .. } => {
+//RS             scan_expr(base, var, facts, false);
+//RS             scan_expr(index, var, facts, false);
+//RS         }
+//RS         LValue::Field { base, .. } => scan_expr(base, var, facts, false),
+//RS     }
+//RS }
+//RS 
+//RS fn scan_for_kind(kind: &mut ForKind, var: &str, facts: &mut StmtLintFacts) {
+//RS     match kind {
+//RS         ForKind::Range {
+//RS             start, end, step, ..
+//RS         } => {
+//RS             scan_expr(start, var, facts, true);
+//RS             scan_expr(end, var, facts, true);
+//RS             if let Some(step) = step {
+//RS                 scan_expr(step, var, facts, true);
+//RS             }
+//RS         }
+//RS         ForKind::In { collection, step } => {
+//RS             scan_expr(collection, var, facts, true);
+//RS             if let Some(step) = step {
+//RS                 scan_expr(step, var, facts, true);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn scan_body(body: &mut [Stmt], var: &str, facts: &mut StmtLintFacts) {
+//RS     for stmt in body {
+//RS         scan_stmt_exprs(stmt, var, facts);
+//RS     }
+//RS }
+//RS 
+//RS fn scan_stmt_exprs(stmt: &mut Stmt, var: &str, facts: &mut StmtLintFacts) {
+//RS     match stmt {
+//RS         Stmt::Expr(expr) => scan_expr(expr, var, facts, true),
+//RS         Stmt::Val(binding) => scan_expr(&mut binding.init, var, facts, true),
+//RS         Stmt::Assign { target, value, .. } => {
+//RS             scan_lvalue(target, var, facts);
+//RS             scan_expr(value, var, facts, true);
+//RS         }
+//RS         Stmt::Return(value, ..) => {
+//RS             if let Some(value) = value {
+//RS                 scan_expr(value, var, facts, true);
+//RS             }
+//RS         }
+//RS         Stmt::While { cond, body, .. } => {
+//RS             scan_expr(cond, var, facts, true);
+//RS             scan_body(body, var, facts);
+//RS         }
+//RS         Stmt::For { kind, body, .. } => {
+//RS             scan_for_kind(kind, var, facts);
+//RS             scan_body(body, var, facts);
+//RS         }
+//RS         Stmt::Switch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         }
+//RS         | Stmt::ComptimeSwitch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             scan_expr(subject, var, facts, false);
+//RS             for arm in arms {
+//RS                 scan_expr(&mut arm.cond, var, facts, true);
+//RS                 scan_body(&mut arm.body, var, facts);
+//RS             }
+//RS             if let Some(body) = else_body {
+//RS                 scan_body(body, var, facts);
+//RS             }
+//RS         }
+//RS         Stmt::BreakValue(value, ..) | Stmt::Yield(value, ..) => scan_expr(value, var, facts, true),
+//RS         Stmt::BreakLabelValue(_, _, value, ..) => scan_expr(value, var, facts, true),
+//RS         Stmt::Loop { body, .. }
+//RS         | Stmt::Reactive { body, .. }
+//RS         | Stmt::Shield { body, .. }
+//RS         | Stmt::Switched { body, .. }
+//RS         | Stmt::Region { body, .. }
+//RS         | Stmt::Policy { body, .. }
+//RS         | Stmt::ComptimeBlock { body, .. }
+//RS         | Stmt::Live { body, .. }
+//RS         | Stmt::Transact { body, .. } => scan_body(body, var, facts),
+//RS         Stmt::CountedLoop {
+//RS             init,
+//RS             cond,
+//RS             step,
+//RS             body,
+//RS             ..
+//RS         } => {
+//RS             scan_expr(&mut init.init, var, facts, true);
+//RS             scan_expr(cond, var, facts, true);
+//RS             if let Some(step) = step {
+//RS                 scan_stmt_exprs(step, var, facts);
+//RS             }
+//RS             scan_body(body, var, facts);
+//RS         }
+//RS         Stmt::Unsafe {
+//RS             audit_expr, body, ..
+//RS         } => {
+//RS             if let Some(audit_expr) = audit_expr {
+//RS                 scan_expr(audit_expr, var, facts, false);
+//RS             }
+//RS             scan_body(body, var, facts);
+//RS         }
+//RS         Stmt::Impure {
+//RS             reason_expr, body, ..
+//RS         } => {
+//RS             if let Some(reason_expr) = reason_expr {
+//RS                 scan_expr(reason_expr, var, facts, false);
+//RS             }
+//RS             scan_body(body, var, facts);
+//RS         }
+//RS         Stmt::TaskGroup { limit, body, .. } => {
+//RS             if let Some(limit) = limit {
+//RS                 scan_expr(limit, var, facts, true);
+//RS             }
+//RS             scan_body(body, var, facts);
+//RS         }
+//RS         Stmt::Layout { body, .. } => scan_body(body, var, facts),
+//RS         Stmt::AuthorityScope { body, .. } => scan_body(body, var, facts),
+//RS         Stmt::ComptimeIf {
+//RS             cond,
+//RS             then_body,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             scan_expr(cond, var, facts, true);
+//RS             scan_body(then_body, var, facts);
+//RS             if let Some(body) = else_body {
+//RS                 scan_body(body, var, facts);
+//RS             }
+//RS         }
+//RS         Stmt::ContextBlock { fields, body, .. } => {
+//RS             for (_, value, _) in fields {
+//RS                 scan_expr(value, var, facts, false);
+//RS             }
+//RS             scan_body(body, var, facts);
+//RS         }
+//RS         Stmt::AssumeDet {
+//RS             reason_expr, body, ..
+//RS         } => {
+//RS             scan_expr(reason_expr, var, facts, false);
+//RS             scan_body(body, var, facts);
+//RS         }
+//RS         Stmt::ScopeMember { args, body, .. } => {
+//RS             for arg in args {
+//RS                 scan_expr(arg, var, facts, false);
+//RS             }
+//RS             scan_body(body, var, facts);
+//RS         }
+//RS         Stmt::DeferClose { close, .. } => scan_expr(close, var, facts, true),
+//RS         Stmt::Break(..) | Stmt::Continue(..) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
+//RS     }
+//RS }
+//RS 
+//RS fn stmt_has_structural_control_flow(stmt: &Stmt) -> bool {
+//RS     match stmt {
+//RS         Stmt::Return(..)
+//RS         | Stmt::Break(..)
+//RS         | Stmt::BreakValue(..)
+//RS         | Stmt::Continue(..)
+//RS         | Stmt::BreakLabel(..)
+//RS         | Stmt::BreakLabelValue(..)
+//RS         | Stmt::ContinueLabel(..)
+//RS         | Stmt::Yield(..)
+//RS         | Stmt::While { .. }
+//RS         | Stmt::For { .. }
+//RS         | Stmt::Loop { .. }
+//RS         | Stmt::CountedLoop { .. }
+//RS         | Stmt::Switch { .. }
+//RS         | Stmt::ComptimeSwitch { .. }
+//RS         | Stmt::ComptimeIf { .. }
+//RS         | Stmt::TaskGroup { .. } => true,
+//RS         Stmt::Unsafe { body, .. }
+//RS         | Stmt::Impure { body, .. }
+//RS         | Stmt::Reactive { body, .. }
+//RS         | Stmt::Shield { body, .. }
+//RS         | Stmt::Switched { body, .. }
+//RS         | Stmt::Region { body, .. }
+//RS         | Stmt::Policy { body, .. }
+//RS         | Stmt::ComptimeBlock { body, .. }
+//RS         | Stmt::ContextBlock { body, .. }
+//RS         | Stmt::AuthorityScope { body, .. }
+//RS         | Stmt::Live { body, .. }
+//RS         | Stmt::AssumeDet { body, .. }
+//RS         | Stmt::Transact { body, .. }
+//RS         | Stmt::ScopeMember { body, .. }
+//RS         | Stmt::Layout { body, .. } => body.iter().any(stmt_has_structural_control_flow),
+//RS         Stmt::Expr(..) | Stmt::Val(..) | Stmt::Assign { .. } | Stmt::DeferClose { .. } => false,
+//RS     }
+//RS }
+//RS 
+//RS fn is_fallback_exit_expr(expr: &Expr) -> bool {
+//RS     matches!(
+//RS         expr,
+//RS         Expr::OrFallback { .. } | Expr::Try(..) | Expr::Todo { .. }
+//RS     ) || matches!(
+//RS         expr,
+//RS         Expr::Call(crate::AST::Call { name, .. })
+//RS             if name == crate::Syntax::BUILTIN_PANIC
+//RS     )
+//RS }
+//RS 
+//RS fn ascii_ladder(stmts: &[Stmt], index: usize) -> Option<(&crate::AST::Binding, bool, usize)> {
+//RS     let Stmt::Val(binding) = stmts.get(index)? else {
+//RS         return None;
+//RS     };
+//RS     if binding.name.is_empty() || binding.pattern.is_some() || binding.is_comptime {
+//RS         return None;
+//RS     }
+//RS     let mut lower = None;
+//RS     let mut last_end = binding.init.span().end;
+//RS     for offset in 0..26usize {
+//RS         let Stmt::Assign {
+//RS             target: LValue::Local { name, .. },
+//RS             op: None,
+//RS             value,
+//RS             ..
+//RS         } = stmts.get(index + offset + 1)?
+//RS         else {
+//RS             return None;
+//RS         };
+//RS         if name != &binding.name {
+//RS             return None;
+//RS         }
+//RS         let (from, to) = ascii_replace(value, &binding.name)?;
+//RS         let upper = char::from(b'A' + offset as u8);
+//RS         let lower_char = char::from(b'a' + offset as u8);
+//RS         let this_lower = if from == upper && to == lower_char {
+//RS             true
+//RS         } else if from == lower_char && to == upper {
+//RS             false
+//RS         } else {
+//RS             return None;
+//RS         };
+//RS         if let Some(previous) = lower {
+//RS             if previous != this_lower {
+//RS                 return None;
+//RS             }
+//RS         } else {
+//RS             lower = Some(this_lower);
+//RS         }
+//RS         last_end = value.span().end;
+//RS     }
+//RS     Some((binding, lower?, last_end))
+//RS }
+//RS 
+//RS fn ascii_replace(expr: &Expr, binding: &str) -> Option<(char, char)> {
+//RS     let Expr::MethodCall {
+//RS         receiver,
+//RS         method,
+//RS         args,
+//RS         ..
+//RS     } = expr.without_parens()
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     if method != "replace"
+//RS         || !matches!(receiver.without_parens(), Expr::Ident(name, _) if name == binding)
+//RS         || args.len() != 2
+//RS         || args.iter().any(|arg| arg.label.is_some() || arg.spread)
+//RS     {
+//RS         return None;
+//RS     }
+//RS     Some((
+//RS         single_literal(&args[0].expr)?,
+//RS         single_literal(&args[1].expr)?,
+//RS     ))
+//RS }
+//RS 
+//RS fn single_literal(expr: &Expr) -> Option<char> {
+//RS     let Expr::Str(parts, _) = expr.without_parens() else {
+//RS         return None;
+//RS     };
+//RS     let [StrPart::Lit(text)] = parts.as_slice() else {
+//RS         return None;
+//RS     };
+//RS     let mut chars = text.chars();
+//RS     let character = chars.next()?;
+//RS     chars.next().is_none().then_some(character)
+//RS }
+// END-PORT-PENDING 0397 crates/jet-sema/src/Sema/CheckerInfer/stdlib_lints.rs:1-559
+

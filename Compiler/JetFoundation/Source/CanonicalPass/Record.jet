@@ -1,0 +1,59 @@
+// CanonicalPass.rs:14-42. Raw payload/identity are owned JSON, not digests.
+pub CANONICAL_PASS_SCHEMA :: "jet.canonical-pass-record.v1"
+pub CANONICAL_PASS_PROTOCOL :: "jet.canonical-pass.v1"
+pub CANONICAL_PASS_BASE_PREMISES :: prep { [String]{
+    "source_origin_is_retained",
+    "typed_failure_is_retained",
+    "mutation_is_retained",
+    "input_consumption_is_exact",
+    "ordered_effects_are_retained",
+    "cleanup_edges_are_retained",
+    "resource_premises_are_explicit",
+    "target_applicability_is_checked",
+} }
+
+pub struct CanonicalPassRecord {
+    pub stage: String
+    pub operation_id: String
+    pub occurrence: Int
+    pub order: Int
+    pub source: String
+    pub input_representation: String
+    pub input_payload: String
+    pub input_identity: String
+    pub output_representation: String
+    pub output_payload: String
+    pub output_identity: String
+    pub premises: [String]
+    pub disposition: String
+}
+
+// CanonicalPass.rs:79-85: private per-thread index replaces the prior-record
+// filter/count. One hash lookup/update per append, across ALL stages. The
+// native storage owner retains this state and never copies it per operation.
+struct CanonicalPassState {
+    records: [CanonicalPassRecord]
+    occurrences: [String:Int]
+}
+fn canonical_pass_state_new() -> CanonicalPassState Never! {
+    CanonicalPassState{records: [CanonicalPassRecord]{}, occurrences: [String:Int]{}}
+}
+fn canonical_pass_state_clear(state: &CanonicalPassState) Never! {
+    &state.records.clear()
+    &state.occurrences.clear()
+}
+fn canonical_pass_state_take(state: &CanonicalPassState) -> [CanonicalPassRecord] Never! {
+    records :: ^state.records
+    state.records = [CanonicalPassRecord]{}
+    &state.occurrences.clear()
+    records
+}
+fn canonical_pass_state_append(state: &CanonicalPassState, record: ^CanonicalPassRecord) Never! {
+    // #4494 native usize increment must preserve Rust checked-build panic /
+    // release wrapping. Exact Int addition alone is NOT that native law.
+    record := ^record
+    record.occurrence = canonical_pass_native_usize_increment(state.occurrences.get(record.operation_id) ?? 0)
+    record.order = canonical_pass_native_usize_increment(state.records.len())
+    state.occurrences[record.operation_id] = record.occurrence
+    &state.records.push(^record)
+}

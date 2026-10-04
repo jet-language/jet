@@ -1,0 +1,178 @@
+// Original MIROptimization.rs::ownership_guard_tests:15857-16098. All ten
+// ownership/copy witnesses retain their original graph and exact assertions.
+fn mir_native_test_instruction(id: U64, operation: MIROperation, kind: MIRTypeKind?) -> MIRInstruction Never! {
+    offset :: Int.from_u64(id) ?? panic("test instruction ID fits Int")
+    MIRInstruction{id: MIROpID{value: id}, span: Span{start: offset, end: offset + 1}, source_line: None, result: if kind != None -> Val(MIRValueID{value: id}) else -> None, ty: if kind == .Val(kind) -> Val(mir_type_from_kind(kind)) else -> None, operation: operation}
+}
+fn mir_native_test_write_flag(id: U64, place: MIRPlaceID, value: Bool) -> [MIRInstruction] Never! {
+    [MIRInstruction]{mir_native_test_instruction(id, .Constant(.Bool(value)), Val(MIRTypeKind.Bool)), mir_native_test_instruction(id + U64{1}, .WritePlace(place, MIRValueID{value: id}), None)}
+}
+fn mir_native_test_block(id: U64, instructions: [MIRInstruction], terminator: MIRTerminator) -> MIRBasicBlock Never! {
+    MIRBasicBlock{id: MIRBlockID{value: id}, span: Span{start: 0, end: 100}, instructions: instructions, terminator: terminator}
+}
+fn mir_native_test_cleanup_function(live: Bool) -> MIRFunction Never! {
+    owner :: MIRPlaceID{value: U64{0}}
+    flag :: MIRPlaceID{value: U64{1}}
+    entry := mir_native_test_write_flag(U64{10}, flag, live)
+    &entry.push(mir_native_test_instruction(U64{12}, .Constant(.String("owned")), Val(MIRTypeKind.String)))
+    &entry.push(mir_native_test_instruction(U64{13}, .WritePlace(owner, MIRValueID{value: U64{12}}), None))
+    &entry.push(mir_native_test_instruction(U64{14}, .MovePlace(owner), Val(MIRTypeKind.String)))
+    &entry.push(mir_native_test_instruction(U64{15}, .Parameter(0, "condition"), Val(MIRTypeKind.Bool)))
+    places :: [MIRPlace]{
+        MIRPlace{id: owner, span: Span{start: 0, end: 100}, ty: mir_type_from_kind(.String), base: .Local(MIRLocalID{value: owner.value}), projections: [MIRProjection]{}, access: .Move, persist_key: None},
+        MIRPlace{id: flag, span: Span{start: 0, end: 100}, ty: mir_type_from_kind(.Bool), base: .Local(MIRLocalID{value: flag.value}), projections: [MIRProjection]{}, access: .Move, persist_key: None},
+    }
+    locals := [MIRLocal]{}
+    loop place in places {
+        &locals.push(MIRLocal{id: MIRLocalID{value: place.id.value}, name: "local{place.id.value}", span: place.span, ty: place.ty, place: place.id, mutable: true, ownership: if mir_type_is_bool(place.ty) -> mir_copy_ownership() else -> mir_owned_ownership(), is_comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false})
+    }
+    MIRFunction{
+        id: MIRFunctionID{value: U64{0}}, module_id: MIRModuleID{value: U64{0}}, source_file: MIRSourceFileID{value: stable_id("mir-source-file", "test.jet")}, key: "ownership_guard", module_name: "test", name: "ownership_guard", span: Span{start: 0, end: 100}, kind: .Jet, form: .TopLevel, visibility: .Private,
+        target_applicability: MIRTargetApplicability{rust_aot: false, cranelift: false, interpreter: false, web: false}, web_bucket: None, web_marker: None,
+        generic_params: [MIRGenericParam]{}, capture_params: [MIRCaptureParam]{}, params: [MIRParam]{MIRParam{index: 0, name: "condition", span: Span{start: 0, end: 1}, ty: mir_type_from_kind(.Bool), access: .Read, ownership: mir_copy_ownership(), public_label: "condition", variadic: false, default_present: false}},
+        declared_return: None, return_type: mir_type_from_kind(.Tuple([MIRTupleField]{})), failure: .Infallible, effects: MIREffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [MIRNamedSpan]{}}, captures: None, generator: None, optimization: mir_empty_optimization_facts(),
+        is_unsafe: false, unsafe_gate: None, is_pure: false, memo_bound: None, memo_unbounded: false, is_reactive: false, reactive_upgrades: [String]{}, is_inline: false, is_inline_always: false, is_scalar: false, kernel_proof: None, gc_return: false, return_view_provenance: None, web_param_reconstructions: [MIRWebParamReconstruction]{},
+        blocks: [MIRBasicBlock]{
+            mir_native_test_block(U64{0}, entry, .Jump(MIRBlockID{value: U64{1}})),
+            mir_native_test_block(U64{1}, [MIRInstruction]{mir_native_test_instruction(U64{20}, .ReadPlace(flag), Val(MIRTypeKind.Bool))}, .Branch(MIRValueID{value: U64{20}}, MIRBlockID{value: U64{2}}, MIRBlockID{value: U64{3}})),
+            mir_native_test_block(U64{2}, [MIRInstruction]{mir_native_test_instruction(U64{30}, .MovePlace(owner), Val(MIRTypeKind.String))}, .Return(None)),
+            mir_native_test_block(U64{3}, [MIRInstruction]{}, .Return(None)),
+        }, entry: MIRBlockID{value: U64{0}}, locals: locals, values: [MIRValueFact]{}, places: places, scopes: [MIRScope]{}, drops: [MIRDropAction]{}, foreign_language: None,
+    }
+}
+// The native test harness gives Bool definitions Copy and all other definitions
+// Owned, independently of the empty value-metadata table. Retain exactly that
+// input law while feeding the real canonical borrowed verifier indexes.
+fn mir_native_test_context(function: MIRFunction) -> (MIRFunction, MIRNativeFunctionIndex) Never! {
+    adapted := function
+    adapted.values = [MIRValueFact]{}
+    blocks := [U64:Int]{}
+    places := [U64:Int]{}
+    locals := [U64:Int]{}
+    scopes := [U64:Int]{}
+    metadata := [U64:Int]{}
+    values := [U64:MIRPassDefinition]{}
+    instructions := [U64:Bool]{}
+    loop (position, block) in adapted.blocks {
+        blocks[block.id.value] = position
+        loop (at, instruction) in block.instructions {
+            instructions[instruction.id.value] = true
+            if instruction.result == .Val(value) && instruction.ty == .Val(ty) {
+                metadata[value.value] = adapted.values.len()
+                &adapted.values.push(MIRValueFact{id: value, ty: ty, span: instruction.span, ownership: if mir_type_is_bool(ty) -> mir_copy_ownership() else -> mir_owned_ownership()})
+                values[value.value] = MIRPassDefinition{value: value, block: block.id, index: at}
+            }
+        }
+    }
+    loop (position, place) in adapted.places -> places[place.id.value] = position
+    loop (position, local) in adapted.locals -> locals[local.id.value] = position
+    loop (position, scope) in adapted.scopes -> scopes[scope.id.value] = position
+    (adapted, MIRNativeFunctionIndex{definitions: MIRPassDefinitions{values: values, places: places, metadata: metadata}, blocks: blocks, locals: locals, scopes: scopes, instructions: instructions})
+}
+fn mir_native_test_verify_ownership(function: MIRFunction) MIRLegalityError! {
+    context :: mir_native_test_context(function)
+    reachable := [U64:Bool]{}
+    loop block in mir_pass_reachable(context.0) -> reachable[block.value] = true
+    mir_native_verify_moves_and_borrows(context.0, context.1, mir_pass_dominators(context.0), reachable)
+    return
+}
+fn mir_native_test_rejects_second_move(function: MIRFunction) Never! {
+    mir_native_test_verify_ownership(function) ?? {
+        if err == .InvalidMovedPlace(_, place, span) { assert_eq(place, U64{0}); assert_eq(span, Span{start: 30, end: 31}); return }
+        panic("expected original InvalidMovedPlace: {mir_legality_error_text(err)}")
+    }
+    panic("expected original second move rejection")
+}
+#Test("dead_cleanup_edge_accepts_prior_move") {
+    function :: mir_native_test_cleanup_function(false)
+    mir_native_test_verify_ownership(function) ?? panic(mir_legality_error_text(err))
+    context :: mir_native_test_context(function)
+    assert(mir_native_reachable_with_boolean_locals(context.0, context.1).get(U64{2}) == None)
+}
+#Test("reachable_cleanup_edge_rejects_second_move") { mir_native_test_rejects_second_move(mir_native_test_cleanup_function(true)) }
+#Test("reinitialization_dominates_use_despite_block_storage_order") {
+    function := mir_native_test_cleanup_function(true)
+    replacement :: [MIRInstruction]{mir_native_test_instruction(U64{16}, .Constant(.String("replacement")), Val(MIRTypeKind.String)), mir_native_test_instruction(U64{17}, .ReplacePlace(MIRPlaceID{value: U64{0}}, MIRValueID{value: U64{16}}), None)}
+    instructions := replacement
+    loop instruction in function.blocks[1].instructions -> &instructions.push(instruction)
+    function.blocks[1].instructions = instructions
+    join :: function.blocks[1]
+    function.blocks[1] = function.blocks[2]
+    function.blocks[2] = join
+    mir_native_test_verify_ownership(function) ?? panic(mir_legality_error_text(err))
+}
+#Test("reinitialization_on_one_branch_does_not_restore_other_branch") {
+    function := mir_native_test_cleanup_function(true)
+    function.blocks[0].terminator = .Branch(MIRValueID{value: U64{15}}, MIRBlockID{value: U64{4}}, MIRBlockID{value: U64{1}})
+    extra :: mir_native_test_block(U64{4}, [MIRInstruction]{mir_native_test_instruction(U64{16}, .Constant(.String("replacement")), Val(MIRTypeKind.String)), mir_native_test_instruction(U64{17}, .ReplacePlace(MIRPlaceID{value: U64{0}}, MIRValueID{value: U64{16}}), None)}, .Jump(MIRBlockID{value: U64{1}}))
+    blocks := [MIRBasicBlock]{function.blocks[0], extra}
+    loop at in 1..<function.blocks.len() -> &blocks.push(function.blocks[at])
+    function.blocks = blocks
+    mir_native_test_rejects_second_move(function)
+}
+#Test("conflicting_boolean_predecessors_keep_cleanup_reachable") {
+    function := mir_native_test_cleanup_function(false)
+    function.blocks[0].terminator = .Branch(MIRValueID{value: U64{15}}, MIRBlockID{value: U64{4}}, MIRBlockID{value: U64{5}})
+    &function.blocks.push(mir_native_test_block(U64{4}, mir_native_test_write_flag(U64{40}, MIRPlaceID{value: U64{1}}, false), .Jump(MIRBlockID{value: U64{1}})))
+    &function.blocks.push(mir_native_test_block(U64{5}, mir_native_test_write_flag(U64{50}, MIRPlaceID{value: U64{1}}, true), .Jump(MIRBlockID{value: U64{1}})))
+    mir_native_test_rejects_second_move(function)
+}
+#Test("conflicting_boolean_backedge_keeps_cleanup_reachable") {
+    function := mir_native_test_cleanup_function(false)
+    function.blocks[3].instructions = mir_native_test_write_flag(U64{40}, MIRPlaceID{value: U64{1}}, true)
+    function.blocks[3].terminator = .Jump(MIRBlockID{value: U64{1}})
+    mir_native_test_rejects_second_move(function)
+}
+fn mir_native_test_with_copy(source: U64, fact: MIRCopyFact, kind: MIRTypeKind) -> MIRFunction Never! {
+    function := mir_native_test_cleanup_function(false)
+    &function.blocks[0].instructions.push(mir_native_test_instruction(U64{18}, .Copy(MIRValueID{value: source}, fact), Val(kind)))
+    function
+}
+fn mir_native_test_verify_copies(function: MIRFunction) MIRLegalityError! {
+    context :: mir_native_test_context(function)
+    mir_native_verify_copy_facts(context.0, context.1)
+    return
+}
+fn mir_native_test_bad_copy(source: U64, fact: MIRCopyFact, kind: MIRTypeKind) Never! {
+    mir_native_test_verify_copies(mir_native_test_with_copy(source, fact, kind)) ?? {
+        if err == .InvalidCopyFact(_, value, actual_fact, _) { assert_eq(value.value, source); assert_eq(actual_fact, fact); return }
+        panic("expected original copy fact rejection: {mir_legality_error_text(err)}")
+    }
+    panic("expected original copy fact rejection")
+}
+#Test("copy_fact_must_fit_the_operand_type") {
+    mir_native_test_verify_copies(mir_native_test_with_copy(U64{10}, .Scalar, .Bool)) ?? panic(mir_legality_error_text(err))
+    mir_native_test_verify_copies(mir_native_test_with_copy(U64{12}, .Materialize, .String)) ?? panic(mir_legality_error_text(err))
+    mir_native_test_verify_copies(mir_native_test_with_copy(U64{12}, .ViewMaterialize, .String)) ?? panic(mir_legality_error_text(err))
+    mir_native_test_bad_copy(U64{12}, .Scalar, .String)
+    mir_native_test_bad_copy(U64{10}, .ViewMaterialize, .Bool)
+}
+#Test("second_consuming_use_of_an_owned_value_is_rejected") {
+    function := mir_native_test_cleanup_function(false)
+    &function.blocks[0].instructions.push(mir_native_test_instruction(U64{18}, .Move(MIRValueID{value: U64{12}}), Val(MIRTypeKind.String)))
+    &function.blocks[0].instructions.push(mir_native_test_instruction(U64{19}, .Move(MIRValueID{value: U64{12}}), Val(MIRTypeKind.String)))
+    rejected := false
+    mir_native_test_verify_ownership(function) ?? { if err == .InvalidMove(_, value, _) { assert_eq(value.value, U64{12}); rejected = true } else -> panic(mir_legality_error_text(err)) }
+    assert(rejected)
+    copied := mir_native_test_cleanup_function(false)
+    &copied.blocks[0].instructions.push(mir_native_test_instruction(U64{18}, .Copy(MIRValueID{value: U64{12}}, .Share), Val(MIRTypeKind.String)))
+    &copied.blocks[0].instructions.push(mir_native_test_instruction(U64{19}, .Move(MIRValueID{value: U64{12}}), Val(MIRTypeKind.String)))
+    mir_native_test_verify_ownership(copied) ?? panic(mir_legality_error_text(err))
+}
+#Test("borrowed_boolean_alias_is_not_treated_as_constant") {
+    function := mir_native_test_cleanup_function(false)
+    alias := function.places[1]
+    alias.id = MIRPlaceID{value: U64{2}}
+    alias.access = .Write
+    &function.places.push(alias)
+    &function.blocks[0].instructions.push(mir_native_test_instruction(U64{16}, .AddressOf(MIRPlaceID{value: U64{2}}, .Write), Val(MIRTypeKind.Bool)))
+    mir_native_test_rejects_second_move(function)
+}
+#Test("boolean_write_through_duplicate_place_updates_local_fact") {
+    function := mir_native_test_cleanup_function(false)
+    alias := function.places[1]
+    alias.id = MIRPlaceID{value: U64{2}}
+    &function.places.push(alias)
+    loop instruction in mir_native_test_write_flag(U64{16}, MIRPlaceID{value: U64{2}}, true) -> &function.blocks[0].instructions.push(instruction)
+    mir_native_test_rejects_second_move(function)
+}

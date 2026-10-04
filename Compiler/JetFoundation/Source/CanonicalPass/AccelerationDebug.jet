@@ -1,0 +1,87 @@
+// Actual CanonicalPass generic callees: Acceleration.rs:619-623. These
+// carriers are the original typed gate input/result, not an AST wire or hash.
+// items/sample_items retain native usize facts; activation remains #4494.
+pub enum AccelerationPin { Scalar Local }
+pub enum AccelerationGateStatus {
+    BelowStaticFloor Pinned(pin: AccelerationPin) NotReleaseBuild
+    CrossModeParityMissing ColumnCopyNotApplicable ProofIncomplete SampleNotTimed
+    SpawnCostNotMeasured BandwidthFloorNotMeasured InvalidMeasurement
+    ProjectedGainBelowThreshold Selected
+}
+pub struct AccelerationGateInput {
+    pub items: Int
+    pub sample_items: Int
+    pub sample_nanos: U64
+    pub spawn_nanos: U64
+    pub bandwidth_floor_nanos: U64
+    pub first_chunk_serial_timed: Bool
+    pub spawn_cost_once_per_process: Bool
+    pub bandwidth_floor_measured: Bool
+    pub release_build: Bool
+    pub cross_mode_parity_proven: Bool
+    pub pin: AccelerationPin?
+    pub workload: MIRAccelerationWorkloadFacts
+    pub proof: MIRAccelerationProof
+}
+pub struct AccelerationMeasurement {
+    pub items: Int
+    pub sample_items: Int
+    pub sample_nanos: U64
+    pub spawn_nanos: U64
+    pub bandwidth_floor_nanos: U64
+    pub floor_nanos: U64
+    pub projected_serial_nanos: U64?
+    pub required_serial_nanos: U64?
+}
+pub struct AccelerationDecision {
+    pub transform: MIRAccelerationTransform
+    pub status: AccelerationGateStatus
+    pub measurement: AccelerationMeasurement
+}
+fn canonical_pass_acceleration_pin(pin: AccelerationPin) -> String Never! {
+    if pin == { .Scalar -> "Scalar" .Local -> "Local" }
+}
+fn canonical_pass_acceleration_status(status: AccelerationGateStatus) -> String Never! {
+    if status == {
+        .BelowStaticFloor -> "BelowStaticFloor"
+        .Pinned(pin) -> "Pinned({canonical_pass_acceleration_pin(pin)})"
+        .NotReleaseBuild -> "NotReleaseBuild"
+        .CrossModeParityMissing -> "CrossModeParityMissing"
+        .ColumnCopyNotApplicable -> "ColumnCopyNotApplicable"
+        .ProofIncomplete -> "ProofIncomplete"
+        .SampleNotTimed -> "SampleNotTimed"
+        .SpawnCostNotMeasured -> "SpawnCostNotMeasured"
+        .BandwidthFloorNotMeasured -> "BandwidthFloorNotMeasured"
+        .InvalidMeasurement -> "InvalidMeasurement"
+        .ProjectedGainBelowThreshold -> "ProjectedGainBelowThreshold"
+        .Selected -> "Selected"
+    }
+}
+fn canonical_pass_acceleration_transform(transform: MIRAccelerationTransform) -> String Never! {
+    if transform == { .TransientColumnCopy -> "TransientColumnCopy" .PooledParallelChunks -> "PooledParallelChunks" }
+}
+fn canonical_pass_debug_optional_u64(value: U64?) -> String Never! {
+    if value == { .None -> "None" .Val(number) -> "Some({number})" }
+}
+fn canonical_pass_debug_acceleration_measurement(out: &[U8], value: AccelerationMeasurement) Never! {
+    canonical_ast_write(&out, "AccelerationMeasurement {{ items: {value.items}, sample_items: {value.sample_items}, sample_nanos: {value.sample_nanos}, spawn_nanos: {value.spawn_nanos}, bandwidth_floor_nanos: {value.bandwidth_floor_nanos}, floor_nanos: {value.floor_nanos}, projected_serial_nanos: {canonical_pass_debug_optional_u64(value.projected_serial_nanos)}, required_serial_nanos: {canonical_pass_debug_optional_u64(value.required_serial_nanos)} }}")
+}
+impl AccelerationGateInput.CanonicalPassDebug {
+    fn write_canonical_pass_debug(self, out: &[U8]) Never! {
+        pin :: if self.pin == { .None -> "None" .Val(value) -> "Some({canonical_pass_acceleration_pin(value)})" }
+        canonical_ast_write(&out, "AccelerationGateInput {{ items: {self.items}, sample_items: {self.sample_items}, sample_nanos: {self.sample_nanos}, spawn_nanos: {self.spawn_nanos}, bandwidth_floor_nanos: {self.bandwidth_floor_nanos}, first_chunk_serial_timed: {self.first_chunk_serial_timed:Debug}, spawn_cost_once_per_process: {self.spawn_cost_once_per_process:Debug}, bandwidth_floor_measured: {self.bandwidth_floor_measured:Debug}, release_build: {self.release_build:Debug}, cross_mode_parity_proven: {self.cross_mode_parity_proven:Debug}, pin: {pin}, workload: AccelerationWorkloadFacts {{ nested_reuse: {self.workload.nested_reuse:Debug}, single_pass: {self.workload.single_pass:Debug} }}, proof: AccelerationProof {{ source_proven: {self.proof.source_proven:Debug}, independent_iterations: {self.proof.independent_iterations:Debug}, no_aliasing: {self.proof.no_aliasing:Debug}, no_cross_iteration_dependencies: {self.proof.no_cross_iteration_dependencies:Debug}, no_early_exit: {self.proof.no_early_exit:Debug}, effect_free_body: {self.proof.effect_free_body:Debug}, ownership_safe: {self.proof.ownership_safe:Debug}, failure_order_preserved: {self.proof.failure_order_preserved:Debug} }} }}")
+    }
+}
+impl AccelerationDecision.CanonicalPassDebug {
+    fn write_canonical_pass_debug(self, out: &[U8]) Never! {
+        canonical_ast_write(&out, "AccelerationDecision {{ transform: {canonical_pass_acceleration_transform(self.transform)}, status: {canonical_pass_acceleration_status(self.status)}, measurement: ")
+        canonical_pass_debug_acceleration_measurement(&out, self.measurement)
+        canonical_ast_write(&out, " }}")
+    }
+}
+// Actual evaluation owner must invoke this immediately after constructing its
+// real decision; no decision-ledger reconstruction or synthesized producer.
+pub fn canonical_pass_record_acceleration(input: AccelerationGateInput, decision: AccelerationDecision) Never! {
+    if !canonical_pass_enabled() -> return
+    canonical_pass_record("optimization", "mir.acceleration-gate", "crates/jet-foundation/src/MIROptimization/Acceleration.rs", "mir", canonical_pass_debug_payload("mir", "mir.acceleration-gate", input), canonical_pass_debug_identity("mir", "mir.acceleration-gate", input), "mir", canonical_pass_debug_payload("mir", "mir.acceleration-gate", decision), canonical_pass_debug_identity("mir", "mir.acceleration-gate", decision), "checked")
+}

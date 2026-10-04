@@ -1,0 +1,85 @@
+// CompilerImage.rs:334-503: checked private root, signature-only projection.
+use jet_foundation.[MIRFunction, MIRType, MIRTypeID, MIRArtifactTarget, MIRFunctionKind, MIRFunctionForm, MIRAccess, MIROwnershipMode, MIRBasicBlock, MIRLocal, MIRValueFact, MIRPlace, MIRScope, MIRDropAction, MIRExecutionIdentity, mir_artifact_kind_name, mir_artifact_target_name, mir_artifact_mode_name]
+
+fn compiler_image_nominal_id(ty: MIRType) -> MIRTypeID? Never! {
+    if ty.identity != None -> return ty.identity
+    if ty.kind == {
+        .Apply(name, _) -> Val(name.id)
+        .TraitObject(bounds) -> if bounds.len() == 1 -> Val(MIRTypeID{value: bounds[0].id.value}) else -> None
+        else -> None
+    }
+}
+fn compiler_image_module_member(modules: View<jet_foundation.MIRModuleID>, module_id: jet_foundation.MIRModuleID) -> Bool Never! {
+    loop candidate in modules { if candidate == module_id -> return true }
+    false
+}
+fn compiler_image_check_factory_root(program: MIRProgram, artifact: MIRArtifactID, entry_function: MIRFunctionID) CompilerImageError! {
+    artifact_index := Int?{None}
+    loop (index, row) in program.artifacts { if row.id == artifact { artifact_index = Val(index); break } }
+    index :: artifact_index ?? return Err(CompilerImageError{message: "compiler-image artifact is absent from MIR"})
+    selected :: program.artifacts[index]
+    if selected.target != MIRArtifactTarget.RustAOT -> return Err(CompilerImageError{message: "compiler-image artifact is not a Rust AOT target"})
+    factory_index := Int?{None}
+    loop (position, row) in program.functions { if row.id == entry_function { factory_index = Val(position); break } }
+    position :: factory_index ?? return Err(CompilerImageError{message: "compiler-image factory function is absent from MIR"})
+    factory :: program.functions[position]
+    if !compiler_image_module_member(selected.modules[0..<selected.modules.len()], factory.module_id) -> return Err(CompilerImageError{message: "compiler-image factory module is outside the selected artifact closure"})
+    if factory.name != "jet_bootstrap_compile" || factory.kind != MIRFunctionKind.Jet || factory.form != MIRFunctionForm.TopLevel || !factory.target_applicability.rust_aot || factory.generic_params.len() != 0 || factory.capture_params.len() != 0 || factory.params.len() != 1 -> return Err(CompilerImageError{message: "compiler-image root is not the checked Rust AOT jet_bootstrap_compile factory"})
+    request :: factory.params[0]
+    owned :: request.ownership.mode == MIROwnershipMode.Owned || request.ownership.mode == MIROwnershipMode.Move
+    if request.index != 0 || request.access != MIRAccess.Move || !owned || request.variadic || request.default_present -> return Err(CompilerImageError{message: "compiler-image factory must take one owned compile request"})
+    request_id :: compiler_image_nominal_id(request.ty) ?? return Err(CompilerImageError{message: "compiler-image factory request is not a checked nominal type"})
+    request_index := Int?{None}
+    loop (type_index, row) in program.types { if row.id == request_id { request_index = Val(type_index); break } }
+    request_position :: request_index ?? return Err(CompilerImageError{message: "compiler-image factory request is not a checked nominal type"})
+    result_id :: compiler_image_nominal_id(factory.return_type) ?? return Err(CompilerImageError{message: "compiler-image factory result is not a checked nominal type"})
+    result_index := Int?{None}
+    loop (type_index, row) in program.types { if row.id == result_id { result_index = Val(type_index); break } }
+    result_position :: result_index ?? return Err(CompilerImageError{message: "compiler-image factory result is not a checked nominal type"})
+    request_type :: program.types[request_position]
+    result_type :: program.types[result_position]
+    if !compiler_image_module_member(selected.modules[0..<selected.modules.len()], request_type.module_id) || !compiler_image_module_member(selected.modules[0..<selected.modules.len()], result_type.module_id) -> return Err(CompilerImageError{message: "compiler-image factory request/result types are outside the selected artifact closure"})
+    if request_type.name != "JetDriverCompileRequest" || result_type.name != "JetDriverCompileResult" -> return Err(CompilerImageError{message: "compiler-image factory signature is not JetDriverCompileRequest -> JetDriverCompileResult"})
+    return
+}
+fn compiler_image_function_signature(function: MIRFunction) -> MIRFunction Never! {
+    MIRFunction{id: function.id, module_id: function.module_id, source_file: function.source_file, key: ~function.key, module_name: ~function.module_name, name: ~function.name, span: function.span, kind: function.kind, form: ~function.form, visibility: function.visibility, target_applicability: function.target_applicability, web_bucket: function.web_bucket, web_marker: function.web_marker, generic_params: ~function.generic_params, capture_params: ~function.capture_params, params: ~function.params, declared_return: ~function.declared_return, return_type: ~function.return_type, failure: ~function.failure, effects: ~function.effects, captures: ~function.captures, generator: ~function.generator, optimization: ~function.optimization, is_unsafe: function.is_unsafe, unsafe_gate: ~function.unsafe_gate, is_pure: function.is_pure, memo_bound: function.memo_bound, memo_unbounded: function.memo_unbounded, is_reactive: function.is_reactive, reactive_upgrades: ~function.reactive_upgrades, is_inline: function.is_inline, is_inline_always: function.is_inline_always, is_scalar: function.is_scalar, kernel_proof: ~function.kernel_proof, gc_return: function.gc_return, return_view_provenance: ~function.return_view_provenance, web_param_reconstructions: ~function.web_param_reconstructions, blocks: [MIRBasicBlock]{}, entry: function.entry, locals: [MIRLocal]{}, values: [MIRValueFact]{}, places: [MIRPlace]{}, scopes: [MIRScope]{}, drops: [MIRDropAction]{}, foreign_language: ~function.foreign_language}
+}
+pub fn compiler_image_signature_program(program: MIRProgram) -> MIRProgram Never! {
+    MIRProgram{cffi: ~program.cffi, schema_version: program.schema_version, package_identity: ~program.package_identity, facts: ~program.facts, names: ~program.names, modules: ~program.modules, imports: ~program.imports, types: ~program.types, traits: ~program.traits, core_owners: ~program.core_owners, impls: ~program.impls, constants: ~program.constants, fields: ~program.fields, source_files: ~program.source_files, functions: program.functions.map(function -> compiler_image_function_signature(function)), foreign: ~program.foreign, links: ~program.links, callbacks: ~program.callbacks, handles: ~program.handles, jobs: ~program.jobs, tests: ~program.tests, harnesses: ~program.harnesses, artifacts: ~program.artifacts, core_calls: ~program.core_calls, prelude_calls: ~program.prelude_calls, type_instances: ~program.type_instances, codec_migrations: ~program.codec_migrations, unreachable: ~program.unreachable}
+}
+
+// CompilerImage.rs:656-727: the full identity, not only the program digest.
+fn compiler_image_encode_identity(identity: MIRExecutionIdentity) -> [U8] CompilerImageError! {
+    writer := CompilerImageMetadataWriter.new()
+    &writer.write_u16(identity.schema_version)
+    artifact :: identity.artifact
+    &writer.write_u16(artifact.schema_version)
+    &writer.write_u16(artifact.mir_schema_version)
+    &writer.write_raw(artifact.program_digest[0..<artifact.program_digest.len()])
+    &writer.write_string(artifact.package_identity)
+    &writer.write_u64(artifact.artifact.value)
+    &writer.write_string(artifact.name)
+    &writer.write_string(mir_artifact_kind_name(artifact.kind))
+    &writer.write_string(mir_artifact_target_name(artifact.target))
+    &writer.write_string(mir_artifact_mode_name(artifact.mode))
+    &writer.write_string(artifact.provider_identity)
+    &writer.write_string(artifact.closure_identity)
+    &writer.write_string(artifact.artifact_identity)
+    guard :: artifact.program_identity.guard_read()
+    program :: guard.value
+    &writer.write_string(program.semantic_hash)
+    &writer.write_string(program.optimized_hash)
+    compiler_image_write_u64_values(&writer, program.function_ids[0..<program.function_ids.len()])
+    compiler_image_write_u64_values(&writer, program.core_ids[0..<program.core_ids.len()])
+    &writer.write_len(program.target_facts.len())
+    loop (key, value) in program.target_facts { &writer.write_string(key); &writer.write_string(value) }
+    &writer.write_len(program.source_map.len())
+    loop source in program.source_map { &writer.write_u64(source.id); &writer.write_string(source.path); &writer.write_string(source.digest) }
+    Ok(writer.finish())
+}
+fn compiler_image_write_u64_values(writer: &CompilerImageMetadataWriter, values: View<U64>) CompilerImageError! {
+    &writer.write_len(values.len())
+    loop value in values -> &writer.write_u64(value)
+    return
+}

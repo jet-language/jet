@@ -1,0 +1,1231 @@
+// PORT-PENDING 0474 crates-jet-codegen-src-codegen-tir-lower-core-calls: crates/jet-codegen/src/Codegen/TIR/lower/core_calls.rs:1-1227
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::AST::{Expr, Lambda, Type};
+//RS use crate::Codegen::Cx;
+//RS use crate::Codegen::TIR::LowerEnv;
+//RS use crate::Codegen::TIR::TCoreClosureKind;
+//RS use crate::Codegen::TIR::TExpr;
+//RS use crate::Codegen::TIR::TExprKind;
+//RS use crate::Codegen::TIR::TFailureCarrier;
+//RS use crate::Codegen::TIR::TJitSpawnLambda;
+//RS use crate::Codegen::TIR::TLambda;
+//RS use crate::Codegen::TIR::clone_env;
+//RS use crate::Codegen::TIR::core_closure_call_return_ty;
+//RS use crate::Codegen::TIR::data_plan_for_core_call;
+//RS use crate::Codegen::TIR::fixed_list_elem_compatible;
+//RS use crate::Codegen::TIR::lambda_body_ty;
+//RS use crate::Codegen::TIR::lambda_body_ty_expecting;
+//RS use crate::Codegen::TIR::lower_expr;
+//RS use crate::Codegen::TIR::lower_lambda;
+//RS use crate::Codegen::TIR::lower_lambda_expecting_callable;
+//RS use crate::Codegen::TIR::lower_lambda_expecting_value;
+//RS use crate::Codegen::TIR::lower_lambda_expecting_value_with_return;
+//RS use crate::Codegen::TIR::lower_owned_expr;
+//RS use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
+//RS use crate::Codegen::TIR::lower_spawn_lambda_for_jit_expecting;
+//RS use crate::Codegen::TIR::lower_spawn_lambda_for_jit_unit;
+//RS use crate::Codegen::TIR::spawn_body_carrier_ty;
+//RS use crate::Codegen::TIR::spawn_label;
+//RS use crate::Codegen::TIR::unit_type;
+//RS use crate::Diagnostics::Span;
+//RS 
+//RS fn invariant_violation_expr(span: Span, construct: impl Into<String>) -> TExpr {
+//RS     TExpr {
+//RS         ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+//RS         kind: TExprKind::InvariantViolation {
+//RS             construct: construct.into(),
+//RS             span,
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn checked_core_record(
+//RS     module: &str,
+//RS     method: &str,
+//RS     arity: usize,
+//RS     span: Span,
+//RS ) -> Result<&'static crate::Syntax::CoreCallRecord, TExpr> {
+//RS     crate::Syntax::core_call_projection(
+//RS         module,
+//RS         method,
+//RS         crate::Syntax::CoreCallCoverage::TIR_SUBSET,
+//RS         arity,
+//RS     )
+//RS     .map_err(|error| {
+//RS         invariant_violation_expr(
+//RS             span,
+//RS             format!(
+//RS                 "checked Core call `{module}.{method}` has no canonical TIR projection ({error:?})"
+//RS             ),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn lambda_from_expr(expr: &Expr) -> Option<&Lambda> {
+//RS     match expr {
+//RS         Expr::Paren(inner, _) => lambda_from_expr(inner),
+//RS         Expr::Lambda(lam) => Some(lam),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn required_lambda<'a>(
+//RS     args: &'a [crate::AST::CallArg],
+//RS     index: usize,
+//RS     module: &str,
+//RS     method: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a Lambda, TExpr> {
+//RS     args.get(index)
+//RS         .and_then(|arg| lambda_from_expr(&arg.expr))
+//RS         .ok_or_else(|| {
+//RS             invariant_violation_expr(
+//RS                 span,
+//RS                 format!("checked Core call `{module}.{method}` has no lambda at argument {index}"),
+//RS             )
+//RS         })
+//RS }
+//RS fn unit_callback_type() -> Type {
+//RS     Type::Fn {
+//RS         params: Vec::new(),
+//RS         ret: Some(Box::new(unit_type())),
+//RS         effect_bound: None,
+//RS         param_contract: None,
+//RS         call_metadata: None,
+//RS         return_view_provenance: None,
+//RS     }
+//RS }
+//RS fn ui_drop_callback_type() -> Type {
+//RS     Type::Fn {
+//RS         params: vec![Type::List(Box::new(Type::Named("UIDropItem".to_string())))],
+//RS         ret: Some(Box::new(unit_type())),
+//RS         effect_bound: None,
+//RS         param_contract: None,
+//RS         call_metadata: None,
+//RS         return_view_provenance: None,
+//RS     }
+//RS }
+//RS fn ui_preview_callback_type() -> Type {
+//RS     Type::Fn {
+//RS         params: Vec::new(),
+//RS         ret: Some(Box::new(Type::Named("UINode".to_string()))),
+//RS         effect_bound: None,
+//RS         param_contract: None,
+//RS         call_metadata: None,
+//RS         return_view_provenance: None,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_optional_core_arg(
+//RS     arg: &crate::AST::CallArg,
+//RS     expected: &Type,
+//RS     cx: &Cx,
+//RS     env: &mut LowerEnv,
+//RS ) -> TExpr {
+//RS     let option_ty = Type::Option(Box::new(expected.clone()));
+//RS     if matches!(arg.expr, Expr::Absent(_)) {
+//RS         TExpr {
+//RS             ty: option_ty,
+//RS             kind: TExprKind::Absent,
+//RS         }
+//RS     } else {
+//RS         let value = lower_owned_expr(&arg.expr, cx, env);
+//RS         TExpr {
+//RS             ty: option_ty,
+//RS             kind: TExprKind::Present(Box::new(value)),
+//RS         }
+//RS     }
+//RS }
+//RS fn typed_lambda_value(source: &Lambda, lowered: TLambda) -> TExpr {
+//RS     let ty = Type::Fn {
+//RS         params: lowered.param_types.clone(),
+//RS         ret: lowered.ret.clone().map(Box::new),
+//RS         effect_bound: None,
+//RS         param_contract: None,
+//RS         call_metadata: None,
+//RS         return_view_provenance: source.meta.return_view_provenance.clone(),
+//RS     };
+//RS     TExpr {
+//RS         ty,
+//RS         kind: TExprKind::Lambda(Box::new(lowered)),
+//RS     }
+//RS }
+//RS /// Return the checked raw return of a query callback whose native ABI fixes it.
+//RS /// Generic query callbacks keep their source-inferred return because that type
+//RS /// becomes the host generic; fixed slots must not inherit Jet's default carrier.
+//RS fn query_callback_return_type(method: &str, index: usize) -> Option<Type> {
+//RS     match method {
+//RS         "filter" => Some(Type::Bool),
+//RS         "sort_by" => Some(Type::String),
+//RS         "inner_join" | "left_join" if index >= 1 => Some(Type::String),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn no_widening(args: &[TExpr]) -> Vec<bool> {
+//RS     vec![false; args.len()]
+//RS }
+//RS 
+//RS fn data_widening(args: &[TExpr], expected_lists: &[(usize, &Type)]) -> Vec<bool> {
+//RS     let mut widening = no_widening(args);
+//RS     for &(index, expected) in expected_lists {
+//RS         if let Some(arg) = args.get(index) {
+//RS             widening[index] = match &arg.ty {
+//RS                 Type::FixedList { elem, .. } => fixed_list_elem_compatible(elem, expected),
+//RS                 _ => false,
+//RS             };
+//RS         }
+//RS     }
+//RS     widening
+//RS }
+//RS 
+//RS /// The JIT spawn-lambda table index for one source callback.
+//RS ///
+//RS /// One source lambda is ONE table entry. A lambda body is lowered once per
+//RS /// pass — the AOT closure text, the `executable` TIR, and the JIT spawn body —
+//RS /// and a callback nested in that body is reached again on every one of them.
+//RS /// Pushing per lowering would grow `jit_spawn_lambdas` while
+//RS /// `count_spawn_sites` still sees a single site, and the resident tier planner
+//RS /// requires those two to be equal (jet-jit `tiers.rs` `spawn_ok`). Keying by
+//RS /// `(enclosing fn, lambda span)` keeps that identity true by construction.
+//RS ///
+//RS /// This is the ONE place a spawn-lambda table entry is minted. `lower` builds
+//RS /// the entry and runs only when the key is new, so a nested callback inside
+//RS /// this body takes the lower index and is itself minted exactly once.
+//RS pub(crate) fn jit_spawn_site_with(
+//RS     lam: &Lambda,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS     lower: impl FnOnce(&Lambda, &Cx, &LowerEnv) -> TJitSpawnLambda,
+//RS ) -> usize {
+//RS     let key = (env.fn_name.clone(), lam.span.start, lam.span.end);
+//RS     let existing = cx.jit_spawn_sites.borrow().get(&key).copied();
+//RS     if let Some(site) = existing {
+//RS         return site;
+//RS     }
+//RS     let jit_lambda = lower(lam, cx, env);
+//RS     let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
+//RS     cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+//RS     cx.jit_spawn_sites.borrow_mut().insert(key, site);
+//RS     site
+//RS }
+//RS 
+//RS /// [`jit_spawn_site_with`] for a callback that needs no parameter seeding.
+//RS pub(crate) fn jit_spawn_site(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> usize {
+//RS     jit_spawn_site_with(lam, cx, env, lower_spawn_lambda_for_jit)
+//RS }
+//RS /// [`jit_spawn_site_with`] for a zero-parameter unit-returning callback.
+//RS pub(crate) fn jit_spawn_site_unit(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> usize {
+//RS     jit_spawn_site_with(lam, cx, env, lower_spawn_lambda_for_jit_unit)
+//RS }
+//RS 
+//RS fn interrupt_callback_value(value: TExpr) -> TExpr {
+//RS     let ty = value.ty.clone();
+//RS     TExpr {
+//RS         ty,
+//RS         kind: TExprKind::FnValue {
+//RS             kind: crate::Codegen::TIR::TFnValueKind::Send {
+//RS                 value: Box::new(value),
+//RS             },
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn normalize_interrupt_named_value(value: TExpr) -> TExpr {
+//RS     value
+//RS }
+//RS 
+//RS fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+//RS     match expr {
+//RS         Expr::Paren(inner, _) => lower_interrupt_callback(inner, cx, env),
+//RS         Expr::Lambda(lam) => {
+//RS             let mut tl = lower_lambda_expecting_value(lam, cx, env, &[]);
+//RS             tl.arc = true;
+//RS             tl.rc = false;
+//RS             let ty = Type::Fn {
+//RS                 params: tl.param_types.clone(),
+//RS                 ret: tl.ret.clone().map(Box::new),
+//RS                 effect_bound: None,
+//RS                 param_contract: None,
+//RS                 call_metadata: None,
+//RS                 return_view_provenance: lam.meta.return_view_provenance.clone(),
+//RS             };
+//RS             interrupt_callback_value(TExpr {
+//RS                 ty,
+//RS                 kind: TExprKind::Lambda(Box::new(tl)),
+//RS             })
+//RS         }
+//RS         Expr::Ident(name, _) if !env.locals.contains_key(name) && !cx.consts.contains_key(name) => {
+//RS             let Some(ty) = cx.fn_types.get(name).cloned() else {
+//RS                 return invariant_violation_expr(
+//RS                     expr.span(),
+//RS                     "checked interrupt callback is missing its function type",
+//RS                 );
+//RS             };
+//RS             if !matches!(ty, Type::Fn { .. }) {
+//RS                 return invariant_violation_expr(
+//RS                     expr.span(),
+//RS                     "checked interrupt callback is not a function value",
+//RS                 );
+//RS             }
+//RS             interrupt_callback_value(TExpr {
+//RS                 ty: ty.clone(),
+//RS                 kind: TExprKind::FnValue {
+//RS                     kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
+//RS                         name: Some(name.clone()),
+//RS                         lambda: None,
+//RS                     },
+//RS                 },
+//RS             })
+//RS         }
+//RS         _ => interrupt_callback_value(normalize_interrupt_named_value(lower_expr(expr, cx, env))),
+//RS     }
+//RS }
+//RS 
+//RS /// c109 Phase 13: lower a closure-taking core call (`tasks.spawn`, `http.serve`,
+//RS /// or `scope.guard`) into a bespoke `CoreClosureCall` node. Returns `None`
+//RS /// when `(module, method)` has no closure-specific lowering, including a
+//RS /// sema-approved alternate plain-call form such as `serve(addr, router)`.
+//RS /// Checked closure shapes that reach this function must lower completely or
+//RS /// become a typed `InvariantViolation`.
+//RS pub(super) fn core_module_path_from_receiver(
+//RS     receiver: &Expr,
+//RS     cx: &Cx,
+//RS     env: &LowerEnv,
+//RS ) -> Option<String> {
+//RS     match receiver {
+//RS         Expr::Ident(alias, _) if !env.locals.contains_key(alias) => cx
+//RS             .core_import_module_for_function(&env.fn_name, alias)
+//RS             .map(str::to_owned),
+//RS         Expr::Field(base, leaf, _) => {
+//RS             let module = core_module_path_from_receiver(base, cx, env)?;
+//RS             let submodule = format!("{module}.{leaf}");
+//RS             crate::Syntax::is_known_core_module(&submodule).then_some(submodule)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-QUERY-RETAIN1=A: `Query<T>` / grouped-query receiver methods and the
+//RS /// checked-SQL list door `[T].query(SQL)` are projections onto the receiver
+//RS /// Core rows. The receiver is the first Core argument; each callback is
+//RS /// lowered against the checked row type so every tier receives one typed
+//RS /// callable. Returns `None` when the call is not a query receiver call.
+//RS pub(crate) fn lower_query_receiver_call(
+//RS     receiver: &Expr,
+//RS     method: &str,
+//RS     method_span: Span,
+//RS     args: &[crate::AST::CallArg],
+//RS     recv_type: &Option<String>,
+//RS     resolved_ret: Option<&Type>,
+//RS     cx: &Cx,
+//RS     env: &mut LowerEnv,
+//RS     lowered_receiver: Option<&TExpr>,
+//RS ) -> Option<TExpr> {
+//RS     let (receiver_type, callback_row_index): (&str, usize) = match recv_type.as_deref() {
+//RS         Some("Query")
+//RS             if matches!(
+//RS                 method,
+//RS                 "filter"
+//RS                     | "sort_by"
+//RS                     | "map"
+//RS                     | "min"
+//RS                     | "max"
+//RS                     | "inner_join"
+//RS                     | "left_join"
+//RS                     | "collect"
+//RS                     | "plan"
+//RS                     | "group_by"
+//RS                     | "watch"
+//RS             ) =>
+//RS         {
+//RS             ("Query", 0)
+//RS         }
+//RS         Some("DataTracked") if matches!(method, "query" | "insert" | "replace" | "remove") => {
+//RS             ("DataTracked", 0)
+//RS         }
+//RS         Some("DataWatch") if matches!(method, "get" | "status" | "cancel") => ("DataWatch", 0),
+//RS         Some("DataGroupedQuery") if matches!(method, "count" | "sum" | "mean") => {
+//RS             ("DataGroupedQuery", 0)
+//RS         }
+//RS         None if method == "query"
+//RS             && args.len() == 1
+//RS             && resolved_ret.is_some_and(|ty| matches!(ty, Type::Result { .. }))
+//RS             && core_module_path_from_receiver(receiver, cx, env).is_none() =>
+//RS         {
+//RS             (crate::Syntax::INTERNAL_LIST_QUERY_HANDLE, 0)
+//RS         }
+//RS         _ => return None,
+//RS     };
+//RS     let Some(record) = crate::Syntax::core_receiver_method(receiver_type, method) else {
+//RS         return Some(invariant_violation_expr(
+//RS             method_span,
+//RS             format!("checked query method `{method}` has no canonical receiver Core row"),
+//RS         ));
+//RS     };
+//RS     let Some(result_ty) = resolved_ret.cloned() else {
+//RS         return Some(invariant_violation_expr(
+//RS             method_span,
+//RS             format!("checked query method `{method}` has no resolved return type"),
+//RS         ));
+//RS     };
+//RS     let receiver = lowered_receiver
+//RS         .cloned()
+//RS         .unwrap_or_else(|| lower_expr(receiver, cx, env));
+//RS     let row_ty = match receiver.ty.without_user_tags() {
+//RS         Type::Apply { name, args }
+//RS             if (name == "Query" && args.len() == 1)
+//RS                 || (name == "DataGroupedQuery" && args.len() == 2)
+//RS                 || (name == "DataTracked" && args.len() == 2)
+//RS                 || (name == "DataWatch" && args.len() == 1) =>
+//RS         {
+//RS             Some(args[callback_row_index].clone())
+//RS         }
+//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
+//RS         Type::Apply { name, args } if name == "DataStream" && args.len() == 1 => {
+//RS             Some(args[0].clone())
+//RS         }
+//RS         _ => None,
+//RS     };
+//RS     let Some(row_ty) = row_ty else {
+//RS         return Some(invariant_violation_expr(
+//RS             method_span,
+//RS             format!("checked query method `{method}` did not retain its row type"),
+//RS         ));
+//RS     };
+//RS     let mut call_args = Vec::with_capacity(args.len() + 1);
+//RS     call_args.push(receiver);
+//RS     for (index, arg) in args.iter().enumerate() {
+//RS         let takes_callback = if matches!(method, "inner_join" | "left_join") {
+//RS             index >= 1
+//RS         } else {
+//RS             matches!(
+//RS                 method,
+//RS                 "filter" | "sort_by" | "map" | "min" | "max" | "group_by" | "sum" | "mean"
+//RS             )
+//RS         };
+//RS         if takes_callback {
+//RS             let lam = match required_lambda(args, index, "core.data", method, method_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let callback_row = if matches!(method, "inner_join" | "left_join") && index == 2 {
+//RS                 call_args
+//RS                     .get(1)
+//RS                     .and_then(|other| match other.ty.without_user_tags() {
+//RS                         Type::Apply { name, args } if name == "Query" && args.len() == 1 => {
+//RS                             Some(args[0].clone())
+//RS                         }
+//RS                         _ => None,
+//RS                     })
+//RS                     .unwrap_or_else(|| row_ty.clone())
+//RS             } else {
+//RS                 row_ty.clone()
+//RS             };
+//RS             let lowered = if let Some(callback_return) = query_callback_return_type(method, index) {
+//RS                 lower_lambda_expecting_value_with_return(
+//RS                     lam,
+//RS                     cx,
+//RS                     env,
+//RS                     &[callback_row],
+//RS                     &callback_return,
+//RS                 )
+//RS             } else {
+//RS                 lower_lambda_expecting_value(lam, cx, env, &[callback_row])
+//RS             };
+//RS             call_args.push(typed_lambda_value(lam, lowered));
+//RS         } else {
+//RS             call_args.push(lower_expr(&arg.expr, cx, env));
+//RS         }
+//RS     }
+//RS     if !record.accepts_arity(call_args.len()) {
+//RS         return Some(invariant_violation_expr(
+//RS             method_span,
+//RS             format!(
+//RS                 "checked query Core row `{method}` has wrong arity {}",
+//RS                 call_args.len()
+//RS             ),
+//RS         ));
+//RS     }
+//RS     let data_plan = match data_plan_for_core_call(record, &call_args, &result_ty, method_span) {
+//RS         Ok(plan) => plan,
+//RS         Err(error) => return Some(invariant_violation_expr(method_span, error)),
+//RS     };
+//RS     let widen_to_vec = if receiver_type == crate::Syntax::INTERNAL_LIST_QUERY_HANDLE {
+//RS         data_widening(&call_args, &[(0, &row_ty)])
+//RS     } else {
+//RS         no_widening(&call_args)
+//RS     };
+//RS     Some(TExpr {
+//RS         ty: result_ty.clone(),
+//RS         kind: TExprKind::CoreCall {
+//RS             record,
+//RS             args: call_args,
+//RS             source_span: method_span,
+//RS             type_args: if receiver_type == crate::Syntax::INTERNAL_LIST_QUERY_HANDLE {
+//RS                 vec![row_ty.clone()]
+//RS             } else {
+//RS                 Vec::new()
+//RS             },
+//RS             widen_to_vec,
+//RS             data_plan,
+//RS             fallibility: TFailureCarrier::from_checked_type(&result_ty),
+//RS         },
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn lower_core_closure_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     source_span: Span,
+//RS     args: &[crate::AST::CallArg],
+//RS     cx: &Cx,
+//RS     env: &mut LowerEnv,
+//RS ) -> Option<TExpr> {
+//RS     if module == "core.term" && method == "progress" {
+//RS         let Some(first) = args.first() else {
+//RS             return Some(invariant_violation_expr(
+//RS                 source_span,
+//RS                 "checked progress call has no source",
+//RS             ));
+//RS         };
+//RS         let mut source = lower_owned_expr(&first.expr, cx, env);
+//RS         let (member, result_ty) = match &source.ty {
+//RS             Type::String => {
+//RS                 let Some((_, result)) = crate::Sema::core_call_semantic_signature(module, method)
+//RS                 else {
+//RS                     return Some(invariant_violation_expr(
+//RS                         source_span,
+//RS                         "checked text progress has no signature",
+//RS                     ));
+//RS                 };
+//RS                 ("progress", result)
+//RS             }
+//RS             Type::List(elem) | Type::FixedList { elem, .. } => {
+//RS                 let result = crate::Collections::iter_ty((**elem).clone());
+//RS                 source = TExpr {
+//RS                     ty: result.clone(),
+//RS                     kind: TExprKind::BuiltinMethod {
+//RS                         recv: Box::new(source),
+//RS                         op: crate::Codegen::TIR::TBuiltinOp::ListLazy,
+//RS                         args: Vec::new(),
+//RS                     },
+//RS                 };
+//RS                 ("progress_iter", result)
+//RS             }
+//RS             Type::Apply { name, args } if name == crate::Syntax::TYPE_ITER && args.len() == 1 => {
+//RS                 ("progress_iter", source.ty.clone())
+//RS             }
+//RS             _ => {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked progress source is not text or a sequence",
+//RS                 ));
+//RS             }
+//RS         };
+//RS         let mut values = vec![source];
+//RS         values.extend(
+//RS             args.iter()
+//RS                 .skip(1)
+//RS                 .map(|arg| lower_owned_expr(&arg.expr, cx, env)),
+//RS         );
+//RS         if member == "progress_iter" {
+//RS             while values.len() < 3 {
+//RS                 values.push(TExpr {
+//RS                     ty: Type::String,
+//RS                     kind: TExprKind::StrLit(Vec::new()),
+//RS                 });
+//RS             }
+//RS         }
+//RS         let record = match checked_core_record(module, member, values.len(), source_span) {
+//RS             Ok(record) => record,
+//RS             Err(error) => return Some(error),
+//RS         };
+//RS         return Some(TExpr {
+//RS             ty: result_ty.clone(),
+//RS             kind: TExprKind::CoreCall {
+//RS                 record,
+//RS                 args: values,
+//RS                 source_span,
+//RS                 type_args: Vec::new(),
+//RS                 widen_to_vec: Vec::new(),
+//RS                 data_plan: None,
+//RS                 fallibility: TFailureCarrier::from_checked_type(&result_ty),
+//RS             },
+//RS         });
+//RS     }
+//RS     if module == "core.data" && method == "query" {
+//RS         if args.len() != 1 {
+//RS             return Some(invariant_violation_expr(
+//RS                 source_span,
+//RS                 "checked Core call `core.data.query` has the wrong arity",
+//RS             ));
+//RS         }
+//RS         let record = match checked_core_record(module, method, args.len(), source_span) {
+//RS             Ok(record) => record,
+//RS             Err(error) => return Some(error),
+//RS         };
+//RS         let rows = lower_expr(&args[0].expr, cx, env);
+//RS         let Some(row_ty) = (match &rows.ty {
+//RS             Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
+//RS             Type::Apply { name, args } if name == "DataStream" && args.len() == 1 => {
+//RS                 Some(args[0].clone())
+//RS             }
+//RS             _ => None,
+//RS         }) else {
+//RS             return Some(invariant_violation_expr(
+//RS                 source_span,
+//RS                 "checked Core call `core.data.query` did not retain its row type",
+//RS             ));
+//RS         };
+//RS         let rows_is_stream = matches!(
+//RS             &rows.ty,
+//RS             Type::Apply { name, args } if name == "DataStream" && args.len() == 1
+//RS         );
+//RS         let widen_to_vec = data_widening(std::slice::from_ref(&rows), &[(0, &row_ty)]);
+//RS         let call_args = if rows_is_stream
+//RS             && !matches!(&rows.kind, TExprKind::Move(_) | TExprKind::ResourceTake(_))
+//RS         {
+//RS             vec![TExpr {
+//RS                 ty: rows.ty.clone(),
+//RS                 kind: TExprKind::Move(Box::new(rows)),
+//RS             }]
+//RS         } else {
+//RS             vec![rows]
+//RS         };
+//RS         let result_ty = Type::Apply {
+//RS             name: "Query".to_string(),
+//RS             args: vec![row_ty.clone()],
+//RS         };
+//RS         let data_plan = match data_plan_for_core_call(record, &call_args, &result_ty, source_span) {
+//RS             Ok(plan) => plan,
+//RS             Err(error) => return Some(invariant_violation_expr(source_span, error)),
+//RS         };
+//RS         return Some(TExpr {
+//RS             ty: result_ty.clone(),
+//RS             kind: TExprKind::CoreCall {
+//RS                 record,
+//RS                 args: call_args,
+//RS                 source_span,
+//RS                 type_args: if rows_is_stream {
+//RS                     vec![row_ty.clone()]
+//RS                 } else {
+//RS                     Vec::new()
+//RS                 },
+//RS                 widen_to_vec,
+//RS                 data_plan,
+//RS                 fallibility: TFailureCarrier::from_checked_type(&result_ty),
+//RS             },
+//RS         });
+//RS     }
+//RS 
+//RS     if module == "core.rt" && method == "callback" {
+//RS         if args.len() != 3 {
+//RS             return Some(invariant_violation_expr(
+//RS                 source_span,
+//RS                 "checked Core call `core.rt.callback` has the wrong arity",
+//RS             ));
+//RS         }
+//RS         let lam = match required_lambda(args, 2, module, method, source_span) {
+//RS             Ok(lam) => lam,
+//RS             Err(error) => return Some(error),
+//RS         };
+//RS         let callback_fn = Type::Fn {
+//RS             params: vec![Type::List(Box::new(Type::Float))],
+//RS             ret: Some(Box::new(unit_type())),
+//RS             effect_bound: Some(vec![
+//RS                 ("Mem.Alloc".to_string(), source_span),
+//RS                 ("Time.Wait".to_string(), source_span),
+//RS             ]),
+//RS             return_view_provenance: None,
+//RS             param_contract: None,
+//RS             call_metadata: None,
+//RS         };
+//RS         return Some(TExpr {
+//RS             ty: Type::Named("RealtimeStream".to_string()),
+//RS             kind: TExprKind::CoreClosureCall {
+//RS                 kind: TCoreClosureKind::Realtime {
+//RS                     rate: Box::new(lower_expr(&args[0].expr, cx, env)),
+//RS                     frames: Box::new(lower_expr(&args[1].expr, cx, env)),
+//RS                     executable: Box::new(lower_lambda_expecting_callable(
+//RS                         lam,
+//RS                         cx,
+//RS                         env,
+//RS                         &callback_fn,
+//RS                     )),
+//RS                 },
+//RS             },
+//RS         });
+//RS     }
+//RS     if module == "core.tasks" && method == "spawn" {
+//RS         if args.len() != 1 {
+//RS             return Some(invariant_violation_expr(
+//RS                 source_span,
+//RS                 "checked Core call `core.tasks.spawn` has the wrong arity",
+//RS             ));
+//RS         }
+//RS         let lam = match required_lambda(args, 0, module, method, source_span) {
+//RS             Ok(lam) => lam,
+//RS             Err(error) => return Some(error),
+//RS         };
+//RS         let carrier_ty = spawn_body_carrier_ty(lam, cx, env);
+//RS         // Sema keeps Task<T> as source metadata; the TIR handle retains the
+//RS         // closure carrier so its join adapter can propagate the inner E.
+//RS         let mut spawn_env = clone_env(env);
+//RS         spawn_env.ret_ty = Some(carrier_ty.clone());
+//RS         let site = jit_spawn_site(lam, cx, env);
+//RS         let label = spawn_label(lam, cx, env);
+//RS         let executable = Box::new(lower_lambda_expecting_value_with_return(
+//RS             lam,
+//RS             cx,
+//RS             &spawn_env,
+//RS             &[],
+//RS             &carrier_ty,
+//RS         ));
+//RS         return Some(TExpr {
+//RS             ty: core_closure_call_return_ty(module, method, carrier_ty),
+//RS             kind: TExprKind::CoreClosureCall {
+//RS                 kind: TCoreClosureKind::Spawn {
+//RS                     group: None,
+//RS                     site,
+//RS                     label,
+//RS                     executable,
+//RS                 },
+//RS             },
+//RS         });
+//RS     }
+//RS     let data_err = || Type::Named("DataError".to_string());
+//RS     let wrap_data = |ok: Type| -> Type {
+//RS         Type::Result {
+//RS             ok: Box::new(ok),
+//RS             err: Box::new(data_err()),
+//RS         }
+//RS     };
+//RS     let data_row_ty = |ty: &Type| -> Option<Type> {
+//RS         match ty {
+//RS             Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
+//RS             Type::Apply { name, args } if name == "DataStream" && args.len() == 1 => {
+//RS                 Some(args[0].clone())
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     };
+//RS     let kind = match (module, method) {
+//RS         ("core.sys", "on_interrupt") => {
+//RS             if args.len() != 1 {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.sys.on_interrupt` has the wrong arity",
+//RS                 ));
+//RS             }
+//RS             TCoreClosureKind::OnInterrupt {
+//RS                 callback: Box::new(lower_interrupt_callback(&args[0].expr, cx, env)),
+//RS             }
+//RS         }
+//RS         ("core.http", "serve") => {
+//RS             if args.len() != 2 {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.http.serve` has the wrong arity",
+//RS                 ));
+//RS             }
+//RS             let Some(lam) = args.get(1).and_then(|arg| lambda_from_expr(&arg.expr)) else {
+//RS                 // `serve(addr, router)` is a valid alternate analytical form;
+//RS                 // ordinary CoreCall lowering owns it.
+//RS                 return None;
+//RS             };
+//RS             let Some(address_arg) = args.first() else {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.http.serve` is missing its address",
+//RS                 ));
+//RS             };
+//RS             let addr = lower_expr(&address_arg.expr, cx, env);
+//RS             let executable = Box::new(lower_lambda_expecting_value(
+//RS                 lam,
+//RS                 cx,
+//RS                 env,
+//RS                 &[Type::Named("HTTPRequest".to_string())],
+//RS             ));
+//RS             TCoreClosureKind::Serve {
+//RS                 addr: Box::new(addr),
+//RS                 executable,
+//RS             }
+//RS         }
+//RS         ("core.mem.scope", "guard") => {
+//RS             if args.len() != 1 {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.mem.scope.guard` has the wrong arity",
+//RS                 ));
+//RS             }
+//RS             let lam = match required_lambda(args, 0, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let tl = lower_lambda_expecting_callable(lam, cx, env, &unit_callback_type());
+//RS             TCoreClosureKind::Guard {
+//RS                 executable: Box::new(tl),
+//RS             }
+//RS         }
+//RS         ("core.data", "track") => {
+//RS             let record = match checked_core_record(module, method, args.len(), source_span) {
+//RS                 Ok(record) => record,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             if args.len() != 2 {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.data.track` has the wrong arity",
+//RS                 ));
+//RS             }
+//RS             let rows = lower_expr(&args[0].expr, cx, env);
+//RS             let Some(row_ty) = data_row_ty(&rows.ty) else {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.data.track` did not retain its row type",
+//RS                 ));
+//RS             };
+//RS             let lam = match required_lambda(args, 1, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let key = lower_lambda_expecting_value(lam, cx, env, &[row_ty.clone()]);
+//RS             let key_ty = key
+//RS                 .ret
+//RS                 .clone()
+//RS                 .unwrap_or_else(|| lambda_body_ty_expecting(lam, cx, env, Some(&[row_ty.clone()])));
+//RS             let tracked = Type::Apply {
+//RS                 name: "DataTracked".to_string(),
+//RS                 args: vec![row_ty.clone(), key_ty],
+//RS             };
+//RS             let result_ty = wrap_data(tracked);
+//RS             let key = typed_lambda_value(lam, key);
+//RS             let call_args = vec![rows, key];
+//RS             let widen_to_vec = data_widening(&call_args, &[(0, &row_ty)]);
+//RS             let data_plan =
+//RS                 match data_plan_for_core_call(record, &call_args, &result_ty, source_span) {
+//RS                     Ok(plan) => plan,
+//RS                     Err(error) => return Some(invariant_violation_expr(source_span, error)),
+//RS                 };
+//RS             return Some(TExpr {
+//RS                 ty: result_ty.clone(),
+//RS                 kind: TExprKind::CoreCall {
+//RS                     record,
+//RS                     args: call_args,
+//RS                     source_span,
+//RS                     type_args: Vec::new(),
+//RS                     widen_to_vec,
+//RS                     data_plan,
+//RS                     fallibility: TFailureCarrier::from_checked_type(&result_ty),
+//RS                 },
+//RS             });
+//RS         }
+//RS         ("core.data", "inner_join" | "left_join") => {
+//RS             let record = match checked_core_record(module, method, args.len(), source_span) {
+//RS                 Ok(record) => record,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let Some(left_arg) = args.first() else {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     format!("checked Core call `{module}.{method}` is missing its left table"),
+//RS                 ));
+//RS             };
+//RS             let Some(right_arg) = args.get(1) else {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     format!("checked Core call `{module}.{method}` is missing its right table"),
+//RS                 ));
+//RS             };
+//RS             let left = lower_expr(&left_arg.expr, cx, env);
+//RS             let right = lower_expr(&right_arg.expr, cx, env);
+//RS             let left_ty = match &left.ty {
+//RS                 Type::List(inner) | Type::FixedList { elem: inner, .. } => (**inner).clone(),
+//RS                 _ => {
+//RS                     return Some(invariant_violation_expr(
+//RS                         source_span,
+//RS                         format!(
+//RS                             "checked Core call `{module}.{method}` did not retain its left row type"
+//RS                         ),
+//RS                     ));
+//RS                 }
+//RS             };
+//RS             let right_ty = match &right.ty {
+//RS                 Type::List(inner) | Type::FixedList { elem: inner, .. } => (**inner).clone(),
+//RS                 _ => {
+//RS                     return Some(invariant_violation_expr(
+//RS                         source_span,
+//RS                         format!(
+//RS                             "checked Core call `{module}.{method}` did not retain its right row type"
+//RS                         ),
+//RS                     ));
+//RS                 }
+//RS             };
+//RS             let left_lam = match required_lambda(args, 2, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let right_lam = match required_lambda(args, 3, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let left_key = lower_lambda_expecting_value(left_lam, cx, env, &[left_ty.clone()]);
+//RS             let right_key = lower_lambda_expecting_value(right_lam, cx, env, &[right_ty.clone()]);
+//RS             let call_args = vec![
+//RS                 left,
+//RS                 right,
+//RS                 typed_lambda_value(left_lam, left_key),
+//RS                 typed_lambda_value(right_lam, right_key),
+//RS             ];
+//RS             let widen_to_vec = data_widening(&call_args, &[(0, &left_ty), (1, &right_ty)]);
+//RS             let joined_right = if method == "left_join" {
+//RS                 Type::Option(Box::new(right_ty))
+//RS             } else {
+//RS                 right_ty
+//RS             };
+//RS             let result_ty = wrap_data(Type::List(Box::new(Type::Apply {
+//RS                 name: "DataJoin".to_string(),
+//RS                 args: vec![left_ty, joined_right],
+//RS             })));
+//RS             return Some(TExpr {
+//RS                 ty: result_ty.clone(),
+//RS                 kind: TExprKind::CoreCall {
+//RS                     record,
+//RS                     args: call_args,
+//RS                     source_span,
+//RS                     type_args: Vec::new(),
+//RS                     widen_to_vec,
+//RS                     data_plan: None,
+//RS                     fallibility: TFailureCarrier::from_checked_type(&result_ty),
+//RS                 },
+//RS             });
+//RS         }
+//RS         ("core.data", "pivot_sum") => {
+//RS             let record = match checked_core_record(module, method, args.len(), source_span) {
+//RS                 Ok(record) => record,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let Some(rows_arg) = args.first() else {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.data.pivot_sum` is missing its table",
+//RS                 ));
+//RS             };
+//RS             let rows = lower_expr(&rows_arg.expr, cx, env);
+//RS             let Some(row_ty) = data_row_ty(&rows.ty) else {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.data.pivot_sum` did not retain its row type",
+//RS                 ));
+//RS             };
+//RS             let row_lam = match required_lambda(args, 1, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let col_lam = match required_lambda(args, 2, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let value_lam = match required_lambda(args, 3, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let row_key = lower_lambda_expecting_value(row_lam, cx, env, &[row_ty.clone()]);
+//RS             let col_key = lower_lambda_expecting_value(col_lam, cx, env, &[row_ty.clone()]);
+//RS             let value = lower_lambda_expecting_value(value_lam, cx, env, &[row_ty.clone()]);
+//RS             let cell = Type::Named("DataPivotCell".to_string());
+//RS             let call_args = vec![
+//RS                 rows,
+//RS                 typed_lambda_value(row_lam, row_key),
+//RS                 typed_lambda_value(col_lam, col_key),
+//RS                 typed_lambda_value(value_lam, value),
+//RS             ];
+//RS             let widen_to_vec = data_widening(&call_args, &[(0, &row_ty)]);
+//RS             let result_ty = wrap_data(Type::List(Box::new(cell)));
+//RS             return Some(TExpr {
+//RS                 ty: result_ty.clone(),
+//RS                 kind: TExprKind::CoreCall {
+//RS                     record,
+//RS                     args: call_args,
+//RS                     source_span,
+//RS                     type_args: Vec::new(),
+//RS                     widen_to_vec,
+//RS                     data_plan: None,
+//RS                     fallibility: TFailureCarrier::from_checked_type(&result_ty),
+//RS                 },
+//RS             });
+//RS         }
+//RS         // D-REACT1=B: the `derived` closure's body type is the `Derived<T>` element.
+//RS         ("core.reactive", "derived") => {
+//RS             if args.len() != 1 {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.reactive.derived` has the wrong arity",
+//RS                 ));
+//RS             }
+//RS             let lam = match required_lambda(args, 0, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let body_ty = lambda_body_ty(lam, cx, env);
+//RS             let executable = Box::new(lower_lambda(lam, cx, env));
+//RS             // Captured signals need the spawn-lambda ABI (explicit capture params).
+//RS             let site = jit_spawn_site(lam, cx, env);
+//RS             return Some(TExpr {
+//RS                 ty: Type::Apply {
+//RS                     name: crate::Syntax::TYPE_DERIVED.to_string(),
+//RS                     args: vec![body_ty],
+//RS                 },
+//RS                 kind: TExprKind::CoreClosureCall {
+//RS                     kind: TCoreClosureKind::ReactiveDerived { executable, site },
+//RS                 },
+//RS             });
+//RS         }
+//RS         ("core.reactive", "effect") => {
+//RS             if args.len() != 1 {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.reactive.effect` has the wrong arity",
+//RS                 ));
+//RS             }
+//RS             let lam = match required_lambda(args, 0, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let executable = Box::new(lower_lambda_expecting_callable(
+//RS                 lam,
+//RS                 cx,
+//RS                 env,
+//RS                 &unit_callback_type(),
+//RS             ));
+//RS             let site = jit_spawn_site_unit(lam, cx, env);
+//RS             TCoreClosureKind::ReactiveEffect { executable, site }
+//RS         }
+//RS         ("core.ui", "reactive_render") => {
+//RS             if args.len() != 1 {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.ui.reactive_render` has the wrong arity",
+//RS                 ));
+//RS             }
+//RS             let lam = match required_lambda(args, 0, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let executable = Box::new(lower_lambda_expecting_callable(
+//RS                 lam,
+//RS                 cx,
+//RS                 env,
+//RS                 &unit_callback_type(),
+//RS             ));
+//RS             let site = jit_spawn_site_unit(lam, cx, env);
+//RS             TCoreClosureKind::UiReactiveRender { executable, site }
+//RS         }
+//RS         // D-SIGNAL1: `computed` is a canonical alias for `derived`.
+//RS         ("core.reactive", "computed") => {
+//RS             if args.len() != 1 {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.reactive.computed` has the wrong arity",
+//RS                 ));
+//RS             }
+//RS             let lam = match required_lambda(args, 0, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let body_ty = lambda_body_ty(lam, cx, env);
+//RS             let executable = Box::new(lower_lambda(lam, cx, env));
+//RS             let site = jit_spawn_site(lam, cx, env);
+//RS             return Some(TExpr {
+//RS                 ty: Type::Apply {
+//RS                     name: crate::Syntax::TYPE_COMPUTED.to_string(),
+//RS                     args: vec![body_ty],
+//RS                 },
+//RS                 kind: TExprKind::CoreClosureCall {
+//RS                     kind: TCoreClosureKind::ReactiveDerived { executable, site },
+//RS                 },
+//RS             });
+//RS         }
+//RS         // D-UI-PREVIEW1=A: preview/playground carries a checked zero-argument
+//RS         // UiNode callback plus an optional viewport value. The callback may be
+//RS         // normalized before or after the labelled optional argument, so locate
+//RS         // it by syntax and keep only ordinary values in MIR.
+//RS         ("core.ui", "preview" | "playground") if (2..=3).contains(&args.len()) => {
+//RS             let callback_index = if args
+//RS                 .get(1)
+//RS                 .and_then(|arg| lambda_from_expr(&arg.expr))
+//RS                 .is_some()
+//RS             {
+//RS                 1
+//RS             } else if args
+//RS                 .get(2)
+//RS                 .and_then(|arg| lambda_from_expr(&arg.expr))
+//RS                 .is_some()
+//RS             {
+//RS                 2
+//RS             } else {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     format!("checked Core call `core.ui.{method}` has no callback"),
+//RS                 ));
+//RS             };
+//RS             let name_arg = args.first().expect("preview arity includes name");
+//RS             let viewport_index =
+//RS                 (args.len() == 3).then_some(if callback_index == 1 { 2 } else { 1 });
+//RS             let viewport = if let Some(index) = viewport_index {
+//RS                 Box::new(lower_optional_core_arg(
+//RS                     &args[index],
+//RS                     &Type::Named("UIPreviewViewport".to_string()),
+//RS                     cx,
+//RS                     env,
+//RS                 ))
+//RS             } else {
+//RS                 Box::new(TExpr {
+//RS                     ty: Type::Option(Box::new(Type::Named("UIPreviewViewport".to_string()))),
+//RS                     kind: TExprKind::Absent,
+//RS                 })
+//RS             };
+//RS             let lam = match required_lambda(args, callback_index, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let executable = Box::new(lower_lambda_expecting_callable(
+//RS                 lam,
+//RS                 cx,
+//RS                 env,
+//RS                 &ui_preview_callback_type(),
+//RS             ));
+//RS             let site = jit_spawn_site(lam, cx, env);
+//RS             return Some(TExpr {
+//RS                 ty: Type::Named("UIPreview".to_string()),
+//RS                 kind: TExprKind::CoreClosureCall {
+//RS                     kind: TCoreClosureKind::UiPreview {
+//RS                         name: Box::new(lower_owned_expr(&name_arg.expr, cx, env)),
+//RS                         viewport: Some(viewport),
+//RS                         executable,
+//RS                         site,
+//RS                         playground: method == "playground",
+//RS                         source_file: cx.file.clone(),
+//RS                         source_span,
+//RS                         source_start_line: cx.src_line_col(source_span.start).0 as u32,
+//RS                         source_start_column: cx.src_line_col(source_span.start).1 as u32,
+//RS                         source_end_line: cx.src_line_col(source_span.end).0 as u32,
+//RS                         source_end_column: cx.src_line_col(source_span.end).1 as u32,
+//RS                         build_id: cx.preview_build_id.clone(),
+//RS                         revision: cx.preview_revision.clone(),
+//RS                     },
+//RS                 },
+//RS             });
+//RS         }
+//RS         ("core.ui", "preview" | "playground") => {
+//RS             return Some(invariant_violation_expr(
+//RS                 source_span,
+//RS                 "checked Core preview call has the wrong arity",
+//RS             ));
+//RS         }
+//RS         // D-UI-CLOSURE1=A: one fixed four-word ABI
+//RS         // `(display, shortcut, accessible_label, closure)`.
+//RS         ("core.ui", "button") if args.len() == 4 => {
+//RS             let lam = match required_lambda(args, 3, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let Some(display_arg) = args.first() else {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.ui.button` is missing its display text",
+//RS                 ));
+//RS             };
+//RS             let display = Box::new(lower_owned_expr(&display_arg.expr, cx, env));
+//RS             let shortcut = Box::new(lower_optional_core_arg(
+//RS                 &args[1],
+//RS                 &Type::Named("UIShortcut".to_string()),
+//RS                 cx,
+//RS                 env,
+//RS             ));
+//RS             let accessible_label =
+//RS                 Box::new(lower_optional_core_arg(&args[2], &Type::String, cx, env));
+//RS             let executable = Box::new(lower_lambda_expecting_callable(
+//RS                 lam,
+//RS                 cx,
+//RS                 env,
+//RS                 &unit_callback_type(),
+//RS             ));
+//RS             let site = jit_spawn_site_unit(lam, cx, env);
+//RS             return Some(TExpr {
+//RS                 ty: Type::Named("UINode".to_string()),
+//RS                 kind: TExprKind::CoreClosureCall {
+//RS                     kind: TCoreClosureKind::UiButtonOnClick {
+//RS                         label: display,
+//RS                         shortcut,
+//RS                         accessible_label,
+//RS                         executable,
+//RS                         site,
+//RS                     },
+//RS                 },
+//RS             });
+//RS         }
+//RS         ("core.ui", "button") if args.len() == 1 => return None,
+//RS         ("core.ui", "text_input") if args.len() == 3 => {
+//RS             let lam = match required_lambda(args, 2, module, method, source_span) {
+//RS                 Ok(lam) => lam,
+//RS                 Err(error) => return Some(error),
+//RS             };
+//RS             let Some(state_arg) = args.first() else {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.ui.text_input` is missing its state",
+//RS                 ));
+//RS             };
+//RS             let Some(ime_arg) = args.get(1) else {
+//RS                 return Some(invariant_violation_expr(
+//RS                     source_span,
+//RS                     "checked Core call `core.ui.text_input` is missing its IME mode",
+//RS                 ));
+//RS             };
+//RS             let callback_type = ui_drop_callback_type();
+//RS             let state = Box::new(lower_owned_expr(&state_arg.expr, cx, env));
+//RS             let ime = Box::new(lower_owned_expr(&ime_arg.expr, cx, env));
+//RS             let executable = Box::new(lower_lambda_expecting_callable(
+//RS                 lam,
+//RS                 cx,
+//RS                 env,
+//RS                 &callback_type,
+//RS             ));
+//RS             let site = jit_spawn_site_with(lam, cx, env, |lam, cx, env| {
+//RS                 lower_spawn_lambda_for_jit_expecting(
+//RS                     lam,
+//RS                     cx,
+//RS                     env,
+//RS                     &[Type::List(Box::new(Type::Named("UIDropItem".to_string())))],
+//RS                 )
+//RS             });
+//RS             return Some(TExpr {
+//RS                 ty: Type::Named("UINode".to_string()),
+//RS                 kind: TExprKind::CoreClosureCall {
+//RS                     kind: TCoreClosureKind::UiTextInputOnDrop {
+//RS                         state,
+//RS                         ime,
+//RS                         executable,
+//RS                         site,
+//RS                     },
+//RS                 },
+//RS             });
+//RS         }
+//RS         ("core.ui", "text_input") if args.len() == 2 => return None,
+//RS         ("core.ui", "button" | "text_input") => {
+//RS             return Some(invariant_violation_expr(
+//RS                 source_span,
+//RS                 "checked Core UI call has the wrong arity",
+//RS             ));
+//RS         }
+//RS         _ => return None,
+//RS     };
+//RS     Some(TExpr {
+//RS         ty: core_closure_call_return_ty(module, method, unit_type()),
+//RS         kind: TExprKind::CoreClosureCall { kind },
+//RS     })
+//RS }
+// END-PORT-PENDING 0474 crates/jet-codegen/src/Codegen/TIR/lower/core_calls.rs:1-1227
+

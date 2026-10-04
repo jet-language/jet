@@ -1,0 +1,201 @@
+// Shared source-debugger boundary: a noun phrase plus the original AST span.
+use jet_foundation.[ASTExprVisitor, AccessConvention, CallArg, Diagnostic, Expr, ImportKind, Item, ProgramBundle, Span, Stmt, CORE_MEM_MODULE, ast_stmt_for_each_expr, diagnostic_from_registry]
+// pending Foundation AST/program_imports, CLISchema and Syntax ambient-route
+// ABI reconciliation. Bind Rust owner names, never private resolver clones.
+use jet_foundation.[core_import_maps, entry_schema_for_bundle, core_call_ambient_routes]
+
+pub enum InterpreterInvocation {
+    RunInterpret
+    DevInterpret
+    RunDefault
+    DevDefault
+
+    pub fn command(self) -> String Never! {
+        if self == {
+            .RunInterpret -> "jet run --interpret"
+            .DevInterpret -> "jet dev --interpret"
+            .RunDefault -> "jet run"
+            .DevDefault -> "jet dev"
+        }
+    }
+    pub fn uses_interpreter(self) -> Bool Never! {
+        self == InterpreterInvocation.RunInterpret || self == InterpreterInvocation.DevInterpret
+    }
+}
+struct Boundary {
+    feature: String
+    span: Span?
+}
+pub fn debug_boundary_scan(bundle: ProgramBundle) -> Diagnostic? Never! {
+    boundary :: boundary_scan(bundle, true) ?? return None
+    Val(diagnostic_from_registry("E2203", boundary.span, "`jet debug` can't step through this program yet — it uses {boundary.feature}", "The interpreter debugger cannot model threads, foreign code, raw memory, or host state. The native `jet debug` CLI normally selects the LLDB backend for this program.", "Use the native `jet debug <file>` path with LLDB installed, or use `jet run <file>` when native debugging is unavailable."))
+}
+fn boundary_scan(bundle: ProgramBundle, debug_impure: Bool) -> Boundary? Never! {
+    has_typed_cli :: entry_schema_for_bundle(bundle) != None
+    interpreted_functions := [String:Bool]{}
+    loop module in bundle.modules {
+        loop item in module.items {
+            if item == .Func(function) {
+                if function.inline_foreign == None -> interpreted_functions[function.name] = true
+            }
+        }
+    }
+    loop module in bundle.modules {
+        maps :: core_import_maps(module.imports[0..module.imports.len()])
+        loop (index, import) in module.imports {
+            if import.kind == .Module(name, span) {
+                if native_module_feature(name, debug_impure) == .Val(feature) -> return Val(Boundary{feature: feature, span: Val(span)})
+            }
+            if debug_impure {
+                imported :: core_import_maps(module.imports[index..<(index + 1)])
+                aliases := imported.modules.keys().to_list()
+                &aliases.sort()
+                loop alias in aliases {
+                    name :: imported.modules.get(alias) ?? panic("import alias came from map")
+                    if native_module_feature(name, true) == .Val(feature) -> return Val(Boundary{feature: feature, span: Val(import.span)})
+                }
+            }
+        }
+        loop item in module.items {
+            if item == {
+                .ExternRust(block) -> return Val(Boundary{feature: "Rust code called through `extern rust`", span: Val(block.span)})
+                .CModule(foreign) -> {
+                    loop function in foreign.functions {
+                        if !function.hidden_c_bridge_compatible() -> return Val(Boundary{feature: "a C library", span: Val(foreign.span)})
+                    }
+                }
+                .Func(function) -> {
+                    if function.is_unsafe -> return Val(Boundary{feature: "an `#Unsafe` function", span: Val(function.name_span)})
+                    if function.name == "run" && function.params.len() != 0 && !has_typed_cli -> return Val(Boundary{feature: "a typed CLI entry signature (`fn run(args: T)`)", span: Val(function.name_span)})
+                    if scan_stmts_for_process_edge(function.body, maps.modules, maps.items) == .Val(boundary) -> return Val(boundary)
+                    if scan_stmts_for_mut_arg(function.body, interpreted_functions, maps.items) == .Val(boundary) -> return Val(boundary)
+                }
+                else -> {}
+            }
+        }
+    }
+    None
+}
+fn native_module_feature(name: String, debug_impure: Bool) -> String? Never! {
+    if name == CORE_MEM_MODULE -> return Val("the low-level `core.mem` tier")
+    if name == "core.files" && debug_impure -> return Val("a file read or write")
+    if name == "core.sys" && debug_impure -> return Val("an environment read")
+    None
+}
+fn process_leaf_feature(module: String, item: String) -> String? Never! {
+    if module == "core.process" {
+        if item == "argv" || item == "args" || item == "cmd" || item == "exit" || item == "run" || item == "pipeline" || item == "workspace" -> return None
+        return Val("a process launch or an early exit")
+    }
+    if module == "core.sys" {
+        // Ambient dispatcher membership is stricter than a row merely carrying
+        // an Ambient interpreter tag. Use the exact generated Rust projection.
+        loop route in core_call_ambient_routes() {
+            if route.module == module && route.item == item -> return None
+        }
+        return Val("an OS fact or process control call")
+    }
+    None
+}
+struct ProcessBoundaryVisitor {
+    core_modules: [String:String]
+    core_items: [String:String]
+    boundary: Boundary?
+}
+impl ProcessBoundaryVisitor.ASTExprVisitor {
+    fn visit(&self, expression: Expr) Never! {
+        if self.boundary == None -> self.boundary = process_edge_boundary(expression, self.core_modules, self.core_items)
+    }
+}
+fn scan_stmts_for_process_edge(stmts: [Stmt], core_modules: [String:String], core_items: [String:String]) -> Boundary? Never! {
+    // Borrow original nodes through Foundation's canonical preorder visitor.
+    visitor := ProcessBoundaryVisitor{core_modules: core_modules, core_items: core_items, boundary: None}
+    loop stmt in stmts {
+        ast_stmt_for_each_expr<ProcessBoundaryVisitor>(stmt, &visitor)
+        if visitor.boundary != None -> return visitor.boundary
+    }
+    None
+}
+fn process_edge_boundary(expr: Expr, core_modules: [String:String], core_items: [String:String]) -> Boundary? Never! {
+    if expr == {
+        .Call(call) -> {
+            module :: core_modules.get(call.name) ?? return None
+            item :: core_items.get(call.name) ?? return None
+            feature :: process_leaf_feature(module, item) ?? return None
+            return Val(Boundary{feature: feature, span: Val(call.name_span)})
+        }
+        .MethodCall(receiver, method, span, _, _, _, _, _, _, _) -> {
+            if receiver == .Ident(alias, _) {
+                module :: core_modules.get(alias) ?? return None
+                feature :: process_leaf_feature(module, method) ?? return None
+                return Val(Boundary{feature: feature, span: Val(span)})
+            }
+        }
+        else -> {}
+    }
+    None
+}
+fn scan_stmts_for_mut_arg(stmts: [Stmt], interpreted_functions: [String:Bool], core_items: [String:String]) -> Boundary? Never! {
+    loop stmt in stmts {
+        if scan_stmt_for_mut_arg(stmt, interpreted_functions, core_items) == .Val(boundary) -> return Val(boundary)
+    }
+    None
+}
+fn scan_stmt_for_mut_arg(stmt: Stmt, interpreted_functions: [String:Bool], core_items: [String:String]) -> Boundary? Never! {
+    if stmt == {
+        .Expr(expr) | .DeferClose(expr, _) -> return expr_mut_arg(expr, interpreted_functions, core_items)
+        .Val(binding) -> return expr_mut_arg(binding.init, interpreted_functions, core_items)
+        .Assign(_, _, _, value) -> return expr_mut_arg(value, interpreted_functions, core_items)
+        .Return(value, _) -> {
+            if value == .Val(expr) -> return expr_mut_arg(expr, interpreted_functions, core_items)
+        }
+        .While(cond, body, _, _, _) | .CountedLoop(_, cond, _, body, _, _, _) -> {
+            if expr_mut_arg(cond, interpreted_functions, core_items) == .Val(boundary) -> return Val(boundary)
+            return scan_stmts_for_mut_arg(body, interpreted_functions, core_items)
+        }
+        .Loop(body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) -> return scan_stmts_for_mut_arg(body, interpreted_functions, core_items)
+        .Switch(_, arms, else_body, _) -> {
+            loop arm in arms {
+                if scan_stmts_for_mut_arg(arm.body, interpreted_functions, core_items) == .Val(boundary) -> return Val(boundary)
+            }
+            if else_body == .Val(body) -> return scan_stmts_for_mut_arg(body, interpreted_functions, core_items)
+        }
+        else -> {}
+    }
+    None
+}
+fn direct_call_writeback_is_interpreted(name: String, interpreted_functions: [String:Bool], core_items: [String:String]) -> Bool Never! {
+    interpreted_functions.has_key(name) || core_items.has_key(name)
+}
+fn unwritten_arg(arg: CallArg, interpreted_functions: [String:Bool], core_items: [String:String]) -> Boundary? Never! {
+    if arg.convention == AccessConvention.Write {
+        if arg.expr == .Ident(_, _) -> return Val(Boundary{feature: "a `&` writeback argument passed to a function", span: Val(arg.span)})
+    }
+    expr_mut_arg(arg.expr, interpreted_functions, core_items)
+}
+fn expr_mut_arg(expr: Expr, interpreted_functions: [String:Bool], core_items: [String:String]) -> Boundary? Never! {
+    // Intentionally the Rust boundary's narrow walk, NOT the general visitor:
+    // MethodCall/CallValue never reject their own Write argument conventions.
+    if expr == {
+        .Call(call) -> {
+            interpreted :: direct_call_writeback_is_interpreted(call.name, interpreted_functions, core_items)
+            loop arg in call.args {
+                boundary :: if interpreted -> expr_mut_arg(arg.expr, interpreted_functions, core_items) else -> unwritten_arg(arg, interpreted_functions, core_items)
+                if boundary != None -> return boundary
+            }
+        }
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .CallValue(receiver, args, _) -> {
+            if expr_mut_arg(receiver, interpreted_functions, core_items) == .Val(boundary) -> return Val(boundary)
+            loop arg in args {
+                if expr_mut_arg(arg.expr, interpreted_functions, core_items) == .Val(boundary) -> return Val(boundary)
+            }
+        }
+        .Unary(_, inner, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Field(inner, _, _) -> return expr_mut_arg(inner, interpreted_functions, core_items)
+        .Binary(_, left, right, _) | .Index(left, right, _, _) -> {
+            if expr_mut_arg(left, interpreted_functions, core_items) == .Val(boundary) -> return Val(boundary)
+            return expr_mut_arg(right, interpreted_functions, core_items)
+        }
+        else -> {}
+    }
+    None
+}

@@ -30,92 +30,24 @@ use jet_foundation.[
     type_name,
 ]
 
-fn sema_expression_unit_literal_type_name(name: String) -> String Never! {
-    output := ""
-    loop piece in name.split("_") {
-        if piece == "" -> next
-        bytes := piece.bytes()
-        if bytes.len() == 0 -> next
-        code :: Int.from_u8(bytes[0])
-        if code >= 97 && code <= 122 -> bytes[0] = U8{code - 32}
-        output = "{output}{String.from_bytes(bytes) ?? piece}"
-    }
-    if output == "" -> name else -> output
+
+fn sema_expression_unit_literal_time_fact(suffix: String, graph: SemaRegistrationGraph, module_identity: String) -> SemaRegistrationUnitFact? {
+    module :: sema_registration_module_index(graph, module_identity) ?? return None
+    local :: graph.modules[module].unit_literal_facts.get(suffix) ?? return None
+    if local.name != "Duration" || local.family != "Time" || local.package != "core.units" -> return None
+    graph.time_unit_facts.get(suffix)
 }
 
-fn sema_expression_unit_literal_time_fact(suffix: String, graph: SemaRegistrationGraph) -> SemaRegistrationUnitFact? {
-    loop module_row in graph.modules {
-        loop item in module_row.program.items {
-            if item == {
-                .UnitFamily(definition) -> {
-                    owner :: definition.resolved_owner ?? ""
-                    if definition.family != "Time" || owner != "core.units" -> next
-                    loop member in definition.members {
-                        if member.name == suffix {
-                            return Val(SemaRegistrationUnitFact{
-                                name: "Duration",
-                                package: definition.resolved_owner ?? "core.units",
-                                family: "Time",
-                                member: member.name,
-                                dimension: definition.resolved_dimension,
-                                scale: member.scale,
-                                scale_provenance: member.scale_provenance,
-                                offset: UnitRatio{numerator: 0, denominator: 1},
-                                kind: QuantityKind.Delta,
-                            })
-                        }
-                    }
-                }
-                else -> {}
-            }
-        }
-    }
-    None
-}
-
-fn sema_expression_unit_literal_fact(suffix: String, graph: SemaRegistrationGraph) -> SemaRegistrationUnitFact? {
-    time_fact :: sema_expression_unit_literal_time_fact(suffix, graph)
-    if time_fact == .Val(fact) -> return Val(fact)
-    type_name :: sema_expression_unit_literal_type_name(suffix)
-    registered :: sema_registration_unit_fact_for_type(graph, Type.Named{name: type_name})
-    if registered == .Val(fact) && fact.member == suffix && fact.kind == QuantityKind.Linear -> return Val(fact)
-    loop module_row in graph.modules {
-        loop item in module_row.program.items {
-            if item == {
-                .UnitFamily(definition) -> {
-                    owner :: definition.resolved_owner ?? ""
-                    if definition.family == "Time" && owner == "core.units" -> next
-                    has_offset_member :: loop member in definition.members {
-                        if member.offset.numerator != 0 -> break true
-                    } ?? false
-                    if definition.base != None && has_offset_member -> next
-                    loop member in definition.members {
-                        if member.name == suffix {
-                            return Val(SemaRegistrationUnitFact{
-                                name: sema_expression_unit_literal_type_name(member.name),
-                                package: definition.resolved_owner ?? module_row.package_identity,
-                                family: definition.family,
-                                member: member.name,
-                                dimension: definition.resolved_dimension,
-                                scale: member.scale,
-                                scale_provenance: member.scale_provenance,
-                                offset: member.offset,
-                                kind: QuantityKind.Linear,
-                            })
-                        }
-                    }
-                }
-                else -> {}
-            }
-        }
-    }
-    None
+fn sema_expression_unit_literal_fact(suffix: String, graph: SemaRegistrationGraph, module_identity: String) -> SemaRegistrationUnitFact? {
+    if sema_expression_unit_literal_time_fact(suffix, graph, module_identity) == .Val(fact) -> return Val(fact)
+    module :: sema_registration_module_index(graph, module_identity) ?? return None
+    graph.modules[module].unit_literal_facts.get(suffix)
 }
 
 fn sema_expression_unit_literal(raw: String, int_value: Int?, float_value: Float?, suffix: String, suffix_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     graph :: environment.registration_graph
     if suffix != "" && graph == .Val(facts_graph) {
-        fact :: sema_expression_unit_literal_fact(suffix, facts_graph)
+        fact :: sema_expression_unit_literal_fact(suffix, facts_graph, environment.module_identity)
         if fact == .Val(unit) {
             if unit.name == "Duration" && unit.family == "Time" {
                 is_float := float_value != None

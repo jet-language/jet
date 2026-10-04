@@ -1,0 +1,434 @@
+// Checked Arrow C-data ownership boundary (D-COLUMNAR-BOUNDARY1=A).
+// Rust owner: crates/jet-foundation/src/ArrowData.rs. No Arrow dependency.
+// Descriptor validation is independent of foreign memory. Size arithmetic uses
+// the selected JetTargetLayout, not the machine running the compiler (#4483).
+// Native ownership remains an explicit #4494 gate; see the anchor list below.
+// This module does NOT substitute a descriptor for a producer-buffer owner.
+
+pub ARROW_FLAG_NULLABLE :: prep { I64{2} }
+pub ARROW_FLAG_DICTIONARY_ORDERED :: prep { I64{1} }
+pub ARROW_FLAG_MAP_KEYS_SORTED :: prep { I64{4} }
+pub ARROW_MAX_C_STRING_BYTES :: prep { 4096 }
+
+// Rust 61-114. These are the registered Arrow result codes, not IOError kinds.
+pub enum ArrowErrorCode {
+    UnsupportedSchema
+    MalformedLayout
+    Ownership
+    Limit
+    CopyRefused
+    ProducerFailure
+
+    pub fn code(self) -> String Never! {
+        if self == {
+            .UnsupportedSchema -> "E4301"
+            .MalformedLayout -> "E4302"
+            .Ownership -> "E4303"
+            .Limit -> "E4304"
+            .CopyRefused -> "E4305"
+            .ProducerFailure -> "E4306"
+        }
+    }
+}
+#Error
+pub struct ArrowError {
+    pub code: String
+    pub kind: ArrowErrorCode
+    pub operation: String
+    pub reason: String
+
+    pub fn new(kind: ArrowErrorCode, ^operation: String, ^reason: String) -> ArrowError Never! {
+        ArrowError{code: kind.code(), kind: kind, operation: ^operation, reason: ^reason}
+    }
+    pub fn display(self) -> String Never! { "{self.code} {self.operation}: {self.reason}" }
+}
+
+// Rust 118-144. U64 carries the full usize magnitude; selected-width overflow
+// is checked at each arithmetic/conversion site, before narrowing to an index.
+pub struct ArrowLimits {
+    pub max_rows: I64
+    pub max_columns: I64
+    pub max_children: I64
+    pub max_dictionary_values: I64
+    pub max_buffer_bytes: U64
+    pub max_total_bytes: U64
+
+    pub fn safe() -> ArrowLimits Never! {
+        ArrowLimits{max_rows: 1000000, max_columns: 1024, max_children: 1024,
+            max_dictionary_values: 1000000, max_buffer_bytes: 536870912,
+            max_total_bytes: 2147483648}
+    }
+    pub fn default() -> ArrowLimits Never! { ArrowLimits.safe() }
+}
+pub enum ArrowImportMode {
+    Shared
+    NoCopy
+    Copy
+}
+
+// Rust 159-198. Width includes the Boolean sentinel; bitmap sizing is separate.
+pub enum ArrowPhysicalType {
+    Boolean
+    Signed(bits: U16)
+    Unsigned(bits: U16)
+    Float(bits: U16)
+    Utf8
+    Binary
+
+    pub fn width(self) -> U64? Never! {
+        if self == {
+            .Boolean -> Val(U64{1})
+            .Signed(bits) -> Val(U64.from_u16(bits / U16{8}))
+            .Unsigned(bits) -> Val(U64.from_u16(bits / U16{8}))
+            .Float(bits) -> Val(U64.from_u16(bits / U16{8}))
+            .Utf8 -> None
+            .Binary -> None
+        }
+    }
+    pub fn parse(format: String) -> ArrowPhysicalType? Never! {
+        if format == {
+            "b" -> Val(ArrowPhysicalType.Boolean)
+            "c" -> Val(ArrowPhysicalType.Signed{bits: 8})
+            "s" -> Val(ArrowPhysicalType.Signed{bits: 16})
+            "i" -> Val(ArrowPhysicalType.Signed{bits: 32})
+            "l" -> Val(ArrowPhysicalType.Signed{bits: 64})
+            "C" -> Val(ArrowPhysicalType.Unsigned{bits: 8})
+            "S" -> Val(ArrowPhysicalType.Unsigned{bits: 16})
+            "I" -> Val(ArrowPhysicalType.Unsigned{bits: 32})
+            "L" -> Val(ArrowPhysicalType.Unsigned{bits: 64})
+            "e" -> Val(ArrowPhysicalType.Float{bits: 16})
+            "f" -> Val(ArrowPhysicalType.Float{bits: 32})
+            "g" -> Val(ArrowPhysicalType.Float{bits: 64})
+            "u" -> Val(ArrowPhysicalType.Utf8)
+            "z" -> Val(ArrowPhysicalType.Binary)
+            else -> None
+        }
+    }
+}
+
+// Rust 203-247. Recursive optional dictionaries use the existing recursive
+// Jet aggregate mechanism, as the Foundation AST does; no parallel Box type.
+pub struct ArrowFieldSpec {
+    pub name: String
+    pub format: String
+    pub nullable: Bool
+    pub metadata: String?
+    pub dictionary: ArrowFieldSpec?
+
+    pub fn new(^name: String, ^format: String, nullable: Bool) -> ArrowFieldSpec Never! {
+        ArrowFieldSpec{name: ^name, format: ^format, nullable: nullable, metadata: None, dictionary: None}
+    }
+    pub fn physical_type(self) -> ArrowPhysicalType ArrowError! {
+        ArrowPhysicalType.parse(self.format) ?? return Err(ArrowError.new(
+            ArrowErrorCode.UnsupportedSchema, "arrow.schema", "unsupported physical format `{self.format}`"))
+    }
+}
+pub struct ArrowSchemaSpec {
+    pub fields: [ArrowFieldSpec]
+    pub metadata: String?
+
+    pub fn new(^fields: [ArrowFieldSpec]) -> ArrowSchemaSpec Never! {
+        ArrowSchemaSpec{fields: ^fields, metadata: None}
+    }
+}
+pub struct ArrowBufferSpec {
+    pub present: Bool
+    pub bytes: U64
+
+    pub fn absent() -> ArrowBufferSpec Never! { ArrowBufferSpec{present: false, bytes: 0} }
+    pub fn present(bytes: U64) -> ArrowBufferSpec Never! { ArrowBufferSpec{present: true, bytes: bytes} }
+}
+pub struct ArrowArraySpec {
+    pub length: I64
+    pub null_count: I64
+    pub offset: I64
+    pub buffers: [ArrowBufferSpec]
+    pub children: [ArrowArraySpec]
+    pub dictionary: ArrowArraySpec?
+    pub offsets: [I64]?
+
+    pub fn primitive(length: I64, offset: I64, null_count: I64, value_bytes: U64) -> ArrowArraySpec Never! {
+        ArrowArraySpec{length: length, null_count: null_count, offset: offset,
+            buffers: [ArrowBufferSpec]{ArrowBufferSpec.absent(), ArrowBufferSpec.present(value_bytes)},
+            children: [ArrowArraySpec]{}, dictionary: None, offsets: None}
+    }
+    // Rust 298-318: saturating usize multiplication, selected target width.
+    pub fn utf8(length: I64, offset: I64, null_count: I64, ^offsets: [I64], data_bytes: U64, target: JetTargetLayout) -> ArrowArraySpec Never! {
+        bytes :: arrow_size_mul(U64{offsets.len()}, U64{4}, target) ?? arrow_size_max(target)
+        ArrowArraySpec{length: length, null_count: null_count, offset: offset,
+            buffers: [ArrowBufferSpec]{ArrowBufferSpec.absent(), ArrowBufferSpec.present(bytes), ArrowBufferSpec.present(data_bytes)},
+            children: [ArrowArraySpec]{}, dictionary: None, offsets: Val(^offsets)}
+    }
+}
+
+pub enum ArrowCopyDisposition {
+    Shared(retained_bytes: U64)
+    Copied(copied_bytes: U64, reason: String)
+
+    pub fn is_shared(self) -> Bool Never! { if self == { .Shared(_) -> true else -> false } }
+}
+pub struct ArrowImportReport {
+    pub rows: Int
+    pub columns: Int
+    pub dictionary_columns: Int
+    pub buffers_bytes: U64
+    pub disposition: ArrowCopyDisposition
+
+    pub fn copy_label(self) -> String Never! { if self.disposition.is_shared() -> "shared" else -> "copied" }
+}
+
+// Rust 359-400: the scalar view does not materialize text or binary payloads.
+// @String is the canonical memory-reference spelling (#4500 native lowering);
+// it is not an owning String slot. Both payloads retain the owner provenance.
+pub enum ArrowCell {
+    Null
+    Bool(value: Bool)
+    Signed(value: I64)
+    Unsigned(value: U64)
+    Float(value: F64)
+    Utf8(value: @String)
+    Binary(value: View<U8>)
+}
+enum ArrowOwnedCell {
+    Null
+    Bool(value: Bool)
+    Signed(value: I64)
+    Unsigned(value: U64)
+    Float(value: F64)
+    Utf8(value: String)
+    Binary(value: [U8])
+
+    fn as_cell(self) -> ArrowCell from self {
+        if self == {
+            .Null -> ArrowCell.Null
+            .Bool(value) -> ArrowCell.Bool{value: value}
+            .Signed(value) -> ArrowCell.Signed{value: value}
+            .Unsigned(value) -> ArrowCell.Unsigned{value: value}
+            .Float(value) -> ArrowCell.Float{value: value}
+            .Utf8(value) -> ArrowCell.Utf8{value: @value}
+            .Binary(value) -> ArrowCell.Binary{value: value[0..<value.len()]}
+        }
+    }
+}
+struct ArrowOwnedStorage { rows: [[ArrowOwnedCell]] }
+
+// Rust 803-814. Half values and the powers of two are exactly representable in
+// F64. This decodes IEEE half, including negative zero, subnormal, infinity/NaN.
+fn arrow_f16_to_f64(bits: U16) -> F64 Never! {
+    sign :: if (bits & U16{0x8000}) == U16{0} -> F64{1.0} else -> F64{-1.0}
+    exponent :: Int.from_u16((bits >> 10) & U16{0x1f})
+    fraction :: Float.from_u16(bits & U16{0x03ff})
+    if exponent == 0 {
+        if fraction == F64{0.0} -> return sign * F64{0.0}
+        return sign * fraction * F64{0.000000059604644775390625}
+    }
+    if exponent == 31 {
+        if fraction == F64{0.0} -> return sign * F64.INFINITY
+        return F64.NAN
+    }
+    // Exponent lies in -14..15, so integer shift and one reciprocal give the
+    // same exact power as Rust powi, without a host math dependency.
+    scale :: if exponent >= 15 -> Float.from_int(1 << (exponent - 15)) else -> F64{1.0} / Float.from_int(1 << (15 - exponent))
+    sign * (F64{1.0} + fraction / F64{1024.0}) * scale
+}
+
+// Rust usize conversions and checked operations. Reuse the canonical selected
+// target carrier from JetFoundation/Source/Target/Layout.jet. Int is exact, not
+// isize: it is used only as the list index after selected-size range checks.
+fn arrow_size_max(target: JetTargetLayout) -> U64 Never! {
+    if target.pointer_size >= 8 -> U64{18446744073709551615} else -> (U64{1} << (target.pointer_size * 8)) - U64{1}
+}
+fn arrow_size_from_i64(value: I64, target: JetTargetLayout) -> U64? Never! {
+    if value < I64{0} -> return None
+    magnitude :: U64.from_i64(value) ?? return None
+    if magnitude > arrow_size_max(target) -> None else -> Val(magnitude)
+}
+fn arrow_size_add(left: U64, right: U64, target: JetTargetLayout) -> U64? Never! {
+    sum :: left.checked_add(right) ?? return None
+    if sum > arrow_size_max(target) -> None else -> Val(sum)
+}
+fn arrow_size_mul(left: U64, right: U64, target: JetTargetLayout) -> U64? Never! {
+    product :: left.checked_mul(right) ?? return None
+    if product > arrow_size_max(target) -> None else -> Val(product)
+}
+fn arrow_index_range(array: ArrowArraySpec, target: JetTargetLayout) -> U64? Never! {
+    offset :: arrow_size_from_i64(array.offset, target) ?? return None
+    length :: arrow_size_from_i64(array.length, target) ?? return None
+    arrow_size_add(offset, length, target)
+}
+fn arrow_nonnegative_limit(value: I64, target: JetTargetLayout) -> U64 Never! {
+    arrow_size_from_i64(value, target) ?? U64{0}
+}
+
+// Rust 1053-1212. Schema refusal precedes every array error. Byte totals include
+// absent descriptors' declared bytes, exactly as Rust does. No child-length
+// equality check is invented here; scalar reads own the immediate extent check.
+pub fn arrow_validate_import(schema: ArrowSchemaSpec, array: ArrowArraySpec, expected: [ArrowFieldSpec]?, limits: ArrowLimits, mode: ArrowImportMode, target: JetTargetLayout) -> ArrowImportReport ArrowError! {
+    arrow_validate_schema(schema, expected, limits, mode == ArrowImportMode.Copy, target)
+    if array.length < I64{0} || array.offset < I64{0} -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "length and offset must be non-negative"))
+    if array.length > limits.max_rows -> return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "row count {array.length} exceeds limit {limits.max_rows}"))
+    if U64{array.children.len()} > arrow_nonnegative_limit(limits.max_children, target) -> return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "child count exceeds configured limit"))
+    if array.children.len() != schema.fields.len() -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "root child count {array.children.len()} does not match schema field count {schema.fields.len()}"))
+    if array.null_count < I64{-1} || array.null_count > array.length -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "root array has an invalid null count"))
+    if array.buffers.len() > 1 -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "root struct array exposes more than one buffer"))
+    if array.null_count > I64{0} {
+        if array.buffers.len() == 0 || !array.buffers[0].present -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "root array has nulls but no validity buffer"))
+    }
+    total_bytes := U64{0}
+    loop buffer in array.buffers {
+        if buffer.present && buffer.bytes > limits.max_buffer_bytes -> return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "root validity buffer exceeds byte limit"))
+        total_bytes = arrow_size_add(total_bytes, buffer.bytes, target) ?? return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "root buffer byte total overflow"))
+    }
+    if array.buffers.len() > 0 && array.buffers[0].present {
+        count :: arrow_index_range(array, target) ?? return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "root validity range overflows"))
+        rounded :: arrow_size_add(count, U64{7}, target) ?? return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "root validity byte count overflows"))
+        required :: rounded / U64{8}
+        if array.buffers[0].bytes < required -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "root validity buffer is shorter than its logical range"))
+    }
+    dictionary_columns := 0
+    loop index in 0..<schema.fields.len() {
+        bytes :: arrow_validate_array(schema.fields[index], array.children[index], limits, 0, target)
+        total_bytes = arrow_size_add(total_bytes, bytes, target) ?? return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "buffer byte total overflow"))
+        if schema.fields[index].dictionary != None -> dictionary_columns += 1
+    }
+    if total_bytes > limits.max_total_bytes -> return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "buffer bytes {total_bytes} exceed limit {limits.max_total_bytes}"))
+    disposition :: if mode == ArrowImportMode.Copy -> ArrowCopyDisposition.Copied{copied_bytes: total_bytes, reason: "explicit owned import requested"} else -> ArrowCopyDisposition.Shared{retained_bytes: total_bytes}
+    rows :: arrow_size_from_i64(array.length, target) ?? return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "row count does not fit the host index type"))
+    Ok(ArrowImportReport{rows: Int.from_u64(rows), columns: schema.fields.len(), dictionary_columns: dictionary_columns, buffers_bytes: total_bytes, disposition: disposition})
+}
+
+// Rust 428-454: the bounds branch shared by the unit row decoder and generic
+// row dispatch. A decoder is still required to construct Row.
+fn arrow_check_row_index(report: ArrowImportReport, row: Int) ArrowError! {
+    if row < 0 || row >= report.rows -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.row", "row index is outside the checked batch"))
+    return
+}
+
+// Rust 1214-1291. Hash-based name uniqueness is the canonical Set<String>, not
+// a linear scan or composite-key string encoding (#4499 is not used).
+fn arrow_validate_schema(schema: ArrowSchemaSpec, expected: [ArrowFieldSpec]?, limits: ArrowLimits, allow_conversion: Bool, target: JetTargetLayout) ArrowError! {
+    if U64{schema.fields.len()} > arrow_nonnegative_limit(limits.max_columns, target) -> return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.schema", "column count exceeds configured limit"))
+    names := Set<String>{}
+    loop field in schema.fields {
+        if field.name.len() == 0 || !(&names.add(field.name)) -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.schema", "field names must be non-empty and unique"))
+        physical :: field.physical_type()
+        if field.dictionary == .Val(dictionary) {
+            integer :: if physical == { .Signed(_) -> true .Unsigned(_) -> true else -> false }
+            if !integer -> return Err(ArrowError.new(ArrowErrorCode.UnsupportedSchema, "arrow.schema", "dictionary index `{field.format}` is not an integer"))
+            if dictionary.dictionary != None -> return Err(ArrowError.new(ArrowErrorCode.UnsupportedSchema, "arrow.schema", "nested dictionaries are not supported"))
+            _ :: dictionary.physical_type()
+        }
+    }
+    if expected == .Val(wanted_fields) {
+        if wanted_fields.len() != schema.fields.len() {
+            if !allow_conversion -> return Err(ArrowError.new(ArrowErrorCode.CopyRefused, "arrow.schema", "requested row schema has a different column count"))
+        } else {
+            loop index in 0..<schema.fields.len() {
+                actual :: @schema.fields[index]
+                wanted :: @wanted_fields[index]
+                if actual.name != wanted.name || actual.format != wanted.format {
+                    if !allow_conversion -> return Err(ArrowError.new(ArrowErrorCode.CopyRefused, "arrow.schema", "field `{actual.name}` requires conversion from `{actual.format}` to `{wanted.format}`"))
+                }
+                if !wanted.nullable && actual.nullable && !allow_conversion -> return Err(ArrowError.new(ArrowErrorCode.CopyRefused, "arrow.schema", "nullable field `{actual.name}` cannot fill a non-nullable row"))
+            }
+        }
+    }
+    return
+}
+
+// Rust 1293-1515. Each validation branch and its precedence is preserved.
+fn arrow_validate_array(field: ArrowFieldSpec, array: ArrowArraySpec, limits: ArrowLimits, depth: Int, target: JetTargetLayout) -> U64 ArrowError! {
+    if depth > Int.from_i64(limits.max_children) -> return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "nested child depth exceeds configured limit"))
+    if array.length < I64{0} || array.offset < I64{0} -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` has a negative length or offset"))
+    if array.length > limits.max_rows -> return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "field `{field.name}` exceeds row limit"))
+    if array.null_count < I64{-1} || array.null_count > array.length -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` has an invalid null count"))
+    if array.null_count > I64{0} {
+        if array.buffers.len() == 0 || !array.buffers[0].present -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` has nulls but no validity buffer"))
+    }
+    physical :: field.physical_type()
+    variable :: physical == ArrowPhysicalType.Utf8 || physical == ArrowPhysicalType.Binary
+    expected_buffers :: if variable -> 3 else -> 2
+    if array.buffers.len() != expected_buffers -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` has {array.buffers.len()} buffers; expected {expected_buffers}"))
+    bytes := U64{0}
+    loop buffer in array.buffers {
+        if buffer.present && buffer.bytes > limits.max_buffer_bytes -> return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "field `{field.name}` buffer exceeds byte limit"))
+        bytes = arrow_size_add(bytes, buffer.bytes, target) ?? return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "buffer byte total overflow"))
+    }
+    if physical.width() == .Val(width) {
+        count :: arrow_index_range(array, target) ?? return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` index range overflows"))
+        required :: if physical == ArrowPhysicalType.Boolean {
+            rounded :: arrow_size_add(count, U64{7}, target) ?? return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "field `{field.name}` value byte count overflows"))
+            rounded / U64{8}
+        } else {
+            arrow_size_mul(count, width, target) ?? return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "field `{field.name}` value byte count overflows"))
+        }
+        if required > U64{0} && (!array.buffers[1].present || array.buffers[1].bytes < required) -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` values buffer is shorter than its logical range"))
+    } else {
+        offsets :: if array.offsets == {
+            .Val(values) -> @values
+            .None -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` does not disclose variable-width offsets"))
+        }
+        range :: arrow_index_range(array, target) ?? return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` offset range overflows"))
+        count :: arrow_size_add(range, U64{1}, target) ?? return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` offset range overflows"))
+        if U64{offsets.len()} < count -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` offsets buffer is too short"))
+        start_size :: arrow_size_from_i64(array.offset, target) ?? return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` offset does not fit host index"))
+        start :: Int.from_u64(start_size)
+        previous := offsets[start]
+        if previous < I64{0} -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` has a negative first offset"))
+        loop index in (start + 1)..<Int.from_u64(count) {
+            next :: offsets[index]
+            if next < previous -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` offsets are not monotonic"))
+            previous = next
+        }
+        data_bytes :: arrow_size_from_i64(previous, target) ?? return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` final offset is too large"))
+        offsets_bytes :: arrow_size_mul(count, U64{4}, target) ?? return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "field `{field.name}` offsets byte count overflows"))
+        if offsets_bytes > U64{0} && (!array.buffers[1].present || array.buffers[1].bytes < offsets_bytes) -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` offsets buffer is shorter than its logical range"))
+        if data_bytes > U64{0} && (!array.buffers[2].present || array.buffers[2].bytes < data_bytes) -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` data buffer is shorter than its final offset"))
+    }
+    if array.children.len() != 0 -> return Err(ArrowError.new(ArrowErrorCode.UnsupportedSchema, "arrow.array", "field `{field.name}` has unsupported child arrays"))
+    if field.dictionary == .Val(dictionary_field) {
+        dictionary :: if array.dictionary == {
+            .Val(value) -> @value
+            .None -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "dictionary field `{field.name}` has no dictionary array"))
+        }
+        if dictionary.length > limits.max_dictionary_values -> return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "dictionary field `{field.name}` exceeds value limit"))
+        dictionary_bytes :: arrow_validate_array(dictionary_field, dictionary, limits, depth + 1, target)
+        bytes = arrow_size_add(bytes, dictionary_bytes, target) ?? return Err(ArrowError.new(ArrowErrorCode.Limit, "arrow.array", "dictionary byte total overflow"))
+    } else if array.dictionary != None -> return Err(ArrowError.new(ArrowErrorCode.MalformedLayout, "arrow.array", "field `{field.name}` has an undeclared dictionary"))
+    Ok(bytes)
+}
+
+// Native capability gate #4494 (Main owns D-RT-NATIVE-CAP1): no native import
+// callable is declared here until its real primitives exist. In particular,
+// from_spec must construct the SAME ArrowImported<Row> owner as import_c; it
+// must not create an alternative owner/carrier or promise shared scalar reads.
+// Exact blocked reference anchors:
+// 31 ArrowSchema / 46 ArrowArray: #Layout(c), raw pointers and NULLABLE C-ABI
+//   release function-pointer fields (not an Option<Jet closure>).
+// 404 ArrowImported<Row>, 417 ColumnBatch<Row>, 423 ArrowRow, 424/428 from_arrow,
+//   442 row, 462 cell, 818 Debug, 829 from_spec: process-local immutable
+//   reference-counted token, cheap clone, deterministic final release, dynamic
+//   provider keepalive; generic Row is a phantom, not a stored row/default.
+// 577 read_arrow_cell / 661 read_arrow_cell_inner: native-endian unaligned
+//   I8/I16/I32/I64/U8/U16/U32/U64/F32/F64 loads; pointer-table and bitmap loads;
+//   raw byte/text views whose lifetime follows the borrowed ArrowImported.
+// 856 import_c / 866 import_c_with_provider_owner / 959 release_unclaimed_records:
+//   nullable callback invocation, cleanup on ALL null/missing-callback/claim/
+//   decode/validation/copy failures, same-address exclusion, schema-then-array
+//   releases, provider retained through the callbacks, no child callback calls.
+// 976 ArrowImported.drop / 984 ArrowOwner / 992 ArrowOwner.drop: local refcounted
+//   resource destructor; clone drop cannot release the base; final drop releases
+//   each base then removes its claim even when callback clears release itself.
+// 1018 CLAIMED / 1020 claimed_pointers / 1024 claim_pointer /
+//   1038 pointer_is_claimed / 1045 release_claim: process-global lazy mutex with
+//   poison recovery and hash-set address keys (not a linear private registry).
+// 1517 read_schema / 1562 read_field / 1595 read_root_array / 1716 read_array:
+//   raw pointer arithmetic/tables and C-string-to-owned-UTF8; retain field flags,
+//   dictionary recursion, native I32 offsets and each original error precedence.
+// 1916 copy_owned_cells / 2043 root_row_is_valid / 2072 read_c_string: borrowed
+//   scalar reads and owned copy, selected-target sizeof list/cell storage (#4483),
+//   root bitmap offset and callback-safe release before exposing copied storage.
+//   read_c_string reads the producer-contract NUL terminator BEFORE enforcing
+//   the 4096-byte ceiling, then distinguishes invalid UTF8 from the byte limit.
+// #4499 not applicable: only String names and primitive pointer addresses hash.
+// #4409 not applicable: ArrowError has its own registered result, not OS IO.

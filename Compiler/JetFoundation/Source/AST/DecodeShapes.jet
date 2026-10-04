@@ -1,0 +1,415 @@
+use core.text.runtime.kernel_unicode_string as ast_items_text
+
+// Rust jet-foundation/src/AST/items.rs:2482-2648: canonical Decode wire shapes.
+// Borrowed substitution frames resolve generic arguments in their authored outer
+// frame. This is the resolver's substitution seam, not a second Type rewriter.
+struct DecodeShapeFrame {
+    params: View<TypeParam>
+    args: View<Type>
+    outer: Int
+}
+
+fn decode_shape_finish(shapes: [SerdeWireShape]) -> [SerdeWireShape]? {
+    if shapes.len() == 0 -> return None
+    result := [SerdeWireShape]{}
+    // Rust enum declaration order (Ord); the result is sorted and deduplicated.
+    if shapes.contains(SerdeWireShape.Null) -> &result.push(SerdeWireShape.Null)
+    if shapes.contains(SerdeWireShape.Bool) -> &result.push(SerdeWireShape.Bool)
+    if shapes.contains(SerdeWireShape.Int) -> &result.push(SerdeWireShape.Int)
+    if shapes.contains(SerdeWireShape.Float) -> &result.push(SerdeWireShape.Float)
+    if shapes.contains(SerdeWireShape.Text) -> &result.push(SerdeWireShape.Text)
+    if shapes.contains(SerdeWireShape.Array) -> &result.push(SerdeWireShape.Array)
+    if shapes.contains(SerdeWireShape.Object) -> &result.push(SerdeWireShape.Object)
+    if shapes.contains(SerdeWireShape.Number) -> &result.push(SerdeWireShape.Number)
+    Val(result)
+}
+fn decode_shape_derives(derives: [NamedSpan]) -> Bool Never! {
+    loop derivation in derives { if derivation.name == "Decode" -> return true }
+    false
+}
+fn decode_shape_has_marker(markers: [Marker], name: String) -> Bool Never! {
+    loop marker in markers { if marker.name == name -> return true }
+    false
+}
+fn decode_shape_extend(output: &[SerdeWireShape], shapes: [SerdeWireShape]) Never! {
+    loop shape in shapes -> &output.push(shape)
+}
+fn decode_shape_named(items: [Item], name: String, args: [Type], frames: &[DecodeShapeFrame], frame: Int, seen: &Set<String>) -> [SerdeWireShape]? {
+    if !(&seen.add(name)) -> return None
+    result :: decode_shape_named_body(items, name, args, &frames, frame, &seen)
+    &seen.remove(name)
+    result
+}
+fn decode_shape_named_body(items: [Item], name: String, args: [Type], frames: &[DecodeShapeFrame], frame: Int, seen: &Set<String>) -> [SerdeWireShape]? {
+    loop item in items {
+        if item == {
+            .Struct(def) -> {
+                if def.name == name -> return if decode_shape_derives(def.derives) -> Val([SerdeWireShape]{SerdeWireShape.Object}) else -> None
+            }
+            .Enum(def) -> {
+                if def.name != name -> next
+                if !decode_shape_derives(def.derives) -> return None
+                if decode_shape_has_marker(def.serde_markers, "Discriminant") -> return Val([SerdeWireShape]{SerdeWireShape.Object})
+                shapes := [SerdeWireShape]{}
+                if !decode_shape_has_marker(def.serde_markers, "Untagged") {
+                    loop variant in def.variants -> &shapes.push(if variant.payload == {
+                        .Unit -> SerdeWireShape.Text
+                        else -> SerdeWireShape.Object
+                    })
+                    return decode_shape_finish(shapes)
+                }
+                &frames.push(DecodeShapeFrame{params: def.type_params[0..<def.type_params.len()], args: args[0..<args.len()], outer: frame})
+                inner_frame :: frames.len() - 1
+                complete := true
+                loop variant in def.variants {
+                    if variant.payload == {
+                        .Unit -> &shapes.push(SerdeWireShape.Null)
+                        .Named(_) -> &shapes.push(SerdeWireShape.Object)
+                        .Single(payload, _) -> {
+                            if decode_shape_resolve(items, payload, &frames, inner_frame, &seen) == {
+                                .Val(values) -> decode_shape_extend(&shapes, values)
+                                .None -> {
+                                    complete = false
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+                &frames.pop().drop("completed Decode substitution frame")
+                if !complete -> return None
+                return decode_shape_finish(shapes)
+            }
+            .Distinct(def) -> {
+                if def.name == name -> return if decode_shape_derives(def.derives) -> decode_shape_resolve(items, def.base, &frames, -1, &seen) else -> None
+            }
+            .TypeAlias(def) -> {
+                if def.name != name -> next
+                &frames.push(DecodeShapeFrame{params: def.type_params[0..<def.type_params.len()], args: args[0..<args.len()], outer: frame})
+                inner_frame :: frames.len() - 1
+                result :: decode_shape_resolve(items, def.target, &frames, inner_frame, &seen)
+                &frames.pop().drop("completed Decode alias substitution frame")
+                return result
+            }
+            .UnitFamily(family) -> {
+                // Rust UnitFamilyDef::distinct_defs: canonical Time mints none;
+                // ordinary resolved families mint Decode Float-backed units.
+                if family.family == "Time" && family.resolved_owner == (Val("core.units")) -> next
+                if family.resolved_dimension == None -> next
+                affine := false
+                if family.base != None { loop member in family.members { if member.offset.numerator != 0 -> affine = true } }
+                loop member in family.members {
+                    unit_name :: unit_family_type_name(member.name)
+                    point_name :: "{unit_name}Point"
+                    delta_name :: "{unit_name}Delta"
+                    if (!affine && unit_name == name) || (affine && (point_name == name || delta_name == name)) -> return Val([SerdeWireShape]{SerdeWireShape.Float, SerdeWireShape.Number})
+                }
+            }
+            .CodeModule(definition) -> {
+                if definition.body == .Val(body) {
+                    prefix :: foundation_member_name(definition.name, "")
+                    if name.starts_with(prefix) {
+                        inner :: name.slice(prefix.len(), name.len())
+                        if decode_shape_named(body, inner, args, &frames, frame, &seen) == .Val(shapes) -> return Val(shapes)
+                    }
+                    if decode_shape_named(body, name, args, &frames, frame, &seen) == .Val(shapes) -> return Val(shapes)
+                }
+            }
+            else -> {}
+        }
+    }
+    None
+}
+fn decode_shape_resolve(items: [Item], ty: Type, frames: &[DecodeShapeFrame], frame: Int, seen: &Set<String>) -> [SerdeWireShape]? {
+    if ty == {
+        .Int -> Val([SerdeWireShape]{SerdeWireShape.Int, SerdeWireShape.Number})
+        .IntN(_, _) -> Val([SerdeWireShape]{SerdeWireShape.Int, SerdeWireShape.Number})
+        .InlineRange(_, _, _) -> Val([SerdeWireShape]{SerdeWireShape.Int, SerdeWireShape.Number})
+        .Float -> Val([SerdeWireShape]{SerdeWireShape.Float, SerdeWireShape.Number})
+        .Float32 -> Val([SerdeWireShape]{SerdeWireShape.Float, SerdeWireShape.Number})
+        .Bool -> Val([SerdeWireShape]{SerdeWireShape.Bool})
+        .String -> Val([SerdeWireShape]{SerdeWireShape.Text})
+        .Char -> Val([SerdeWireShape]{SerdeWireShape.Text})
+        .List(_) -> Val([SerdeWireShape]{SerdeWireShape.Array})
+        .FixedList(_, _) -> Val([SerdeWireShape]{SerdeWireShape.Array})
+        .Map(_, _, _) -> Val([SerdeWireShape]{SerdeWireShape.Object})
+        .Tuple(_) -> Val([SerdeWireShape]{SerdeWireShape.Object})
+        .Shared(inner) -> decode_shape_resolve(items, inner, &frames, frame, &seen)
+        .Quantity(base, _) -> decode_shape_resolve(items, base, &frames, frame, &seen)
+        .Tagged(_, inner) -> decode_shape_resolve(items, inner, &frames, frame, &seen)
+        .Option(inner) -> {
+            shapes := [SerdeWireShape]{SerdeWireShape.Null}
+            child :: decode_shape_resolve(items, inner, &frames, frame, &seen) ?? return None
+            decode_shape_extend(&shapes, child)
+            decode_shape_finish(shapes)
+        }
+        .Union(members) -> {
+            shapes := [SerdeWireShape]{}
+            loop member in members {
+                child :: decode_shape_resolve(items, member, &frames, frame, &seen) ?? return None
+                decode_shape_extend(&shapes, child)
+            }
+            decode_shape_finish(shapes)
+        }
+        .Apply(name, args) -> decode_shape_named(items, name, args, &frames, frame, &seen)
+        .Named(name) -> {
+            if frame >= 0 {
+                params :: ~frames[frame].params
+                arguments :: ~frames[frame].args
+                outer :: ~frames[frame].outer
+                loop index in 0..<params.len() {
+                    if params[index].name == name && index < arguments.len() -> return decode_shape_resolve(items, arguments[index], &frames, outer, &seen)
+                }
+            }
+            decode_shape_named(items, name, [Type]{}, &frames, frame, &seen)
+        }
+        .Result(_, _) -> None
+        .Fn(_, _, _, _, _, _) -> None
+        .TraitObject(_) -> None
+        .Measure(_) -> None
+    }
+}
+pub fn resolved_decode_wire_shapes(items: [Item], ty: Type) -> [SerdeWireShape]? {
+    frames := [DecodeShapeFrame]{}
+    seen := Set.from([String]{})
+    decode_shape_resolve(items, ty, &frames, -1, &seen)
+}
+
+// Rust AST/items.rs:1491-1651. These facts are selected-target facts, never
+// inferred from the machine running the compiler.
+pub enum InlineAsmTargetArch {
+    X86_64
+    X86
+    Aarch64
+    Arm
+    Riscv64
+}
+impl InlineAsmTargetArch {
+    pub fn for_target(target: String) -> InlineAsmTargetArch? Never! {
+        // Exact first-component matching without collecting split components
+        // or copying a slice. All comparisons stop at a fixed prefix length.
+        if target == "x86_64" || target.starts_with("x86_64-") -> return Val(InlineAsmTargetArch.X86_64)
+        if target == "i386" || target.starts_with("i386-") ||
+            target == "i586" || target.starts_with("i586-") ||
+            target == "i686" || target.starts_with("i686-") ||
+            target == "x86" || target.starts_with("x86-") -> return Val(InlineAsmTargetArch.X86)
+        if target == "aarch64" || target.starts_with("aarch64-") -> return Val(InlineAsmTargetArch.Aarch64)
+        if target == "arm" || target.starts_with("arm-") ||
+            target == "armv7" || target.starts_with("armv7-") ||
+            target.starts_with("thumb") -> return Val(InlineAsmTargetArch.Arm)
+        if target.starts_with("riscv64") -> return Val(InlineAsmTargetArch.Riscv64)
+        None
+    }
+    pub fn register_known(self, register: String) -> Bool Never! {
+        // Strip exactly one %, and fold only ASCII. Use the one canonical
+        // UTF-8 seam; #4318/#4392/#4500 still gate its native borrowed-result
+        // leaf (current bootstrap bytes materialize). No lowercase copy here.
+        raw :: ast_items_text.utf8_bytes(register)
+        bytes :: raw.view(0..<raw.len())
+        start :: if bytes.len() > 0 && bytes[0] == (U8{37}) -> 1 else -> 0
+        if self == {
+            .X86_64 -> x86_register_known_bytes(bytes, start, true)
+            .X86 -> x86_register_known_bytes(bytes, start, false)
+            .Aarch64 -> {
+                number :: inline_asm_register_number(bytes, start, U8{120}, Val(U8{119})) ?? return false
+                number <= 30
+            }
+            .Arm -> {
+                number :: inline_asm_register_number(bytes, start, U8{114}, None) ?? return false
+                number <= 12 || number == 14
+            }
+            .Riscv64 -> {
+                number :: inline_asm_register_number(bytes, start, U8{120}, None) ?? return false
+                number >= 1 && number <= 31
+            }
+        }
+    }
+}
+fn inline_asm_ascii_lower(byte: U8) -> U8 Never! {
+    if byte >= (U8{65}) && byte <= (U8{90}) -> byte + (U8{32}) else -> byte
+}
+// Rust u8::from_str: one optional leading +, at least one ASCII digit,
+// leading zeroes accepted, no whitespace, and overflow rejected.
+fn inline_asm_register_number(bytes: View<U8>, start: Int, prefix: U8, other: U8?) -> Int? Never! {
+    if start >= bytes.len() -> return None
+    first :: inline_asm_ascii_lower(bytes[start])
+    if first != prefix && other != Val(first) -> return None
+    index := start + 1
+    if index < bytes.len() && bytes[index] == (U8{43}) -> index += 1
+    if index == bytes.len() -> return None
+    number := 0
+    loop index < bytes.len() {
+        byte :: bytes[index]
+        if byte < (U8{48}) || byte > (U8{57}) -> return None
+        number = number * 10 + Int.from_u8(byte - (U8{48}))
+        if number > 255 -> return None
+        index += 1
+    }
+    Val(number)
+}
+// Exact closed register menus from x86_64_register_known / x86_register_known.
+// No stack/frame/IP registers, vector registers, aliases, or numeric guesses.
+fn x86_register_known_bytes(bytes: View<U8>, start: Int, extended: Bool) -> Bool Never! {
+    length :: bytes.len() - start
+    if length < 2 || length > 4 -> return false
+    a :: inline_asm_ascii_lower(bytes[start])
+    b :: inline_asm_ascii_lower(bytes[start + 1])
+    if length == 2 {
+        if (a == (U8{97}) || a == (U8{98}) || a == (U8{99}) || a == (U8{100})) &&
+            (b == (U8{120}) || b == (U8{108}) || b == (U8{104})) -> return true
+        if (a == (U8{115}) || a == (U8{100})) && b == (U8{105}) -> return true
+        return extended && a == (U8{114}) && (b == (U8{56}) || b == (U8{57}))
+    }
+    c :: inline_asm_ascii_lower(bytes[start + 2])
+    if length == 3 {
+        if a == (U8{101}) || (extended && a == (U8{114})) {
+            if (b == (U8{97}) || b == (U8{98}) || b == (U8{99}) || b == (U8{100})) && c == (U8{120}) -> return true
+            if (b == (U8{115}) || b == (U8{100})) && c == (U8{105}) -> return true
+        }
+        if (a == (U8{115}) || a == (U8{100})) && b == (U8{105}) && c == (U8{108}) -> return true
+        if !extended || a != (U8{114}) -> return false
+        if b == (U8{56}) || b == (U8{57}) -> return c == (U8{100}) || c == (U8{119}) || c == (U8{98})
+        return b == (U8{49}) && c >= (U8{48}) && c <= (U8{53})
+    }
+    d :: inline_asm_ascii_lower(bytes[start + 3])
+    extended && a == (U8{114}) && b == (U8{49}) && c >= (U8{48}) && c <= (U8{53}) &&
+        (d == (U8{100}) || d == (U8{119}) || d == (U8{98}))
+}
+impl InlineAsmContract {
+    pub fn target_arch(self) -> InlineAsmTargetArch? Never! {
+        InlineAsmTargetArch.for_target(self.target)
+    }
+    pub fn register_known(self, register: String) -> Bool Never! {
+        arch :: self.target_arch() ?? return false
+        arch.register_known(register)
+    }
+}
+pub fn inline_asm_target_arch(target: String) -> InlineAsmTargetArch? Never! {
+    InlineAsmTargetArch.for_target(target)
+}
+pub fn inline_asm_register_known(target: String, register: String) -> Bool Never! {
+    arch :: InlineAsmTargetArch.for_target(target) ?? return false
+    arch.register_known(register)
+}
+
+// Remaining Rust AST/items.rs:1-1814 callable gaps. Nominal AST payloads stay
+// at Items.jet; no duplicate declarations or alternate metadata universe.
+// #4500: this is a real loan of the enum payload, not an owned name snapshot.
+pub fn generic_module_param_name(parameter: GenericModuleParam) -> @String Never! from parameter {
+    if parameter == {
+        .Type(name, _, _) -> @name
+        .Value(name, _, _) -> @name
+    }
+}
+pub fn generic_module_param_name_span(parameter: GenericModuleParam) -> Span Never! {
+    if parameter == {
+        .Type(_, span, _) -> span
+        .Value(_, span, _) -> span
+    }
+}
+pub fn module_is_auto_discovered(module: ModuleDecl) -> Bool Never! {
+    module.auto_discovered
+}
+pub fn contrib_value_span(value: ContribValue) -> Span Never! {
+    if value == {
+        .Expr(expr) -> expr_span(expr)
+        .Env(env) -> env.span
+        .System(system) -> system.span
+        .Image(image) -> image.span
+        .Fleet(fleet) -> fleet.span
+        .VMTest(test) -> test.span
+        .Profile(profile) -> profile.span
+        .Perf(perf) -> perf.span
+    }
+}
+impl MaturityTag {
+    pub fn as_str(self) -> String Never! {
+        // Canonical Syntax constants requested in SPELLINGS-REQUESTS.md.
+        if self == {
+            .Experimental -> MARKER_EXPERIMENTAL
+            .Tested -> MARKER_TESTED
+            .Hardened -> MARKER_HARDENED
+        }
+    }
+}
+impl KernelMode {
+    pub fn as_str(self) -> String Never! { "parallel" }
+}
+impl KernelProof {
+    pub fn parallel() -> KernelProof Never! {
+        KernelProof{mode: KernelMode.Parallel, bounds: true, alias_free: true,
+            captures: true, race_free: true, barriers_uniform: true, control_flow: true}
+    }
+    pub fn is_complete(self) -> Bool Never! {
+        self.mode == KernelMode.Parallel && self.bounds && self.alias_free &&
+            self.captures && self.race_free && self.barriers_uniform && self.control_flow
+    }
+}
+pub DEFAULT_MEMO_BOUND :: prep { 128 }
+// Jet rejects nested optionals (E0309). Preserve all three Rust states with
+// an optional closed payload: None, Val(Unbounded), Val(Bounded(128)).
+pub enum MemoBound {
+    Unbounded
+    Bounded(value: Int)
+}
+pub fn memo_bound_from_markers(markers: [Marker]) -> MemoBound? Never! {
+    loop marker in markers {
+        if marker.name != MARKER_MEMO -> next
+        if marker.args.len() == 1 && marker.arg_labels.len() > 0 {
+            if marker.arg_labels[0] == .Val(label) && label.name == "bound" {
+                if marker.args[0] == .Expr(expr) {
+                    if expr == .Ident(name, _) && name == "none" -> return Val(MemoBound.Unbounded)
+                }
+            }
+        }
+        return Val(MemoBound.Bounded(DEFAULT_MEMO_BOUND))
+    }
+    None
+}
+// The ordinary constructor already owns every default field. Move the script
+// body once into the same Func and override only Rust implicit_run's fields.
+pub fn func_implicit_run(^body: [Stmt], span: Span) -> Func Never! {
+    function := ast_func("run", span, span)
+    function.return_type = Val(Type.Result{ok: Type.Named{name: INTERNAL_UNIT_TYPE}, err: Type.Named{name: TYPE_ERR}})
+    function.body = ^body
+    ^function
+}
+// ProgramBundle/LoadedModule stay at AST/ProgramImports.jet (CompW36 owner).
+// #4500: Items.jet::app_entry_run_fn must publish its original borrowed Func
+// result before native parity; this consumer never adds an owned clone/shim.
+pub fn bundle_serves_until_stopped(bundle: ProgramBundle) -> Bool Never! {
+    if bundle.entry < 0 || bundle.entry >= bundle.modules.len() -> return false
+    app_entry_run_fn(bundle.modules[bundle.entry].items) != None
+}
+impl JobSkip {
+    pub fn reason_for_host(self, host: String) -> String? Never! {
+        if self == {
+            .Always(reason) -> Val(~reason)
+            .UnlessPlatform(platform) -> {
+                if !matches_host_platform(platform, host) -> return Val("host platform is not {platform}")
+                None
+            }
+        }
+    }
+}
+fn matches_host_platform(expected: String, host: String) -> Bool Never! {
+    if expected == {
+        "Linux" -> host.ends_with("-linux")
+        "MacOS" -> host.ends_with("-macos")
+        "Windows" -> host.ends_with("-windows")
+        "FreeBSD" -> host.ends_with("-freebsd")
+        else -> false
+    }
+}
+impl JobScope {
+    pub fn default() -> JobScope Never! { JobScope.Dev }
+}
+impl JobCachePolicy {
+    pub fn default() -> JobCachePolicy Never! { JobCachePolicy.Uncached }
+}
+impl JobMetadata {
+    pub fn default() -> JobMetadata Never! { ast_job_metadata() }
+}
+impl ParamZone {
+    pub fn default() -> ParamZone Never! { ParamZone.Either }
+}

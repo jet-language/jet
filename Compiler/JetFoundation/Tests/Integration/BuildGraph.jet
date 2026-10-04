@@ -1,0 +1,1832 @@
+// PORT-PENDING 0979 tests-build-graph-slice-1: tests/build_graph.rs:1-1828
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS use jet::Comptime::Build::{
+//RS     execute_build_plan_with_front_end_and_compiler as execute_build_plan_with_front_end_and_compiler_with_store,
+//RS     execute_build_plan_with_front_end_and_remote as execute_build_plan_with_front_end_and_remote_with_store,
+//RS     read_packaged_file_bounded, remote_execution_identity, remote_policy_digest, ActionCache,
+//RS     ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome,
+//RS     ActionHandle, ActionKind, ActionOutputRecord, ActionResultRecord, ActionSpec, BuildArtifactStore,
+//RS     BuildCapability, BuildContext, BuildError, BuildExecutionEvent, BuildExecutionResult,
+//RS     BuildGraphSubject,
+//RS     BuildPath, BuildPlan, BuildNodeKind, BuildPlanNode, BuildPolicy, BuildProvenance,
+//RS     BuildResourcePool, BuildExecutionError, CacheHitReason, CacheMissReason, CompilerActionRunner,
+//RS     CompilerPackageSpec, ContentDigest, FrontEndCompletion, GeneratedModuleSpec,
+//RS     LegacyWrapperKind, LegacyWrapperSpec, capture_declared_outputs, restore_action_outputs,
+//RS     restore_declared_outputs, snapshot_declared_inputs,
+//RS     LinkerIdentity, LockRecord, PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource,
+//RS     RemoteActionRequest, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy,
+//RS     RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest, RemoteExecutionResult,
+//RS     RemoteSandboxProof, ReproducibilityClass, SdkIdentity, SigningIdentitySpec, SysrootIdentity,
+//RS     TargetKind, TargetSpec, ToolchainResolution, ToolchainRole, ToolchainSpec,
+//RS     WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
+//RS };
+//RS use jet_driver::Driver::BuildArtifactStoreHandle;
+//RS use std::fs;
+//RS use std::sync::{Arc, Barrier, Mutex};
+//RS 
+//RS fn test_artifact_store(root: &std::path::Path) -> BuildArtifactStoreHandle {
+//RS     BuildArtifactStoreHandle::at(root.join(".jet-store")).expect("open test artifact store")
+//RS }
+//RS 
+//RS fn execute_build_plan_with_front_end_and_remote(
+//RS     plan: &BuildPlan,
+//RS     project_root: &std::path::Path,
+//RS     grants: &std::collections::BTreeSet<BuildCapability>,
+//RS     front_end: FrontEndCompletion,
+//RS     remote_binding: Option<&RemoteBuildBinding>,
+//RS ) -> Result<BuildExecutionResult, BuildExecutionError> {
+//RS     let artifact_store = test_artifact_store(project_root);
+//RS     execute_build_plan_with_front_end_and_remote_with_store(
+//RS         plan,
+//RS         project_root,
+//RS         &artifact_store,
+//RS         grants,
+//RS         front_end,
+//RS         remote_binding,
+//RS     )
+//RS }
+//RS 
+//RS fn execute_build_plan_with_front_end_and_compiler(
+//RS     plan: &BuildPlan,
+//RS     project_root: &std::path::Path,
+//RS     grants: &std::collections::BTreeSet<BuildCapability>,
+//RS     front_end: FrontEndCompletion,
+//RS     runner: &CompilerActionRunner<'_>,
+//RS ) -> Result<BuildExecutionResult, BuildExecutionError> {
+//RS     let artifact_store = test_artifact_store(project_root);
+//RS     execute_build_plan_with_front_end_and_compiler_with_store(
+//RS         plan,
+//RS         project_root,
+//RS         &artifact_store,
+//RS         grants,
+//RS         front_end,
+//RS         runner,
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS static REMOTE_HOST_ENV_LOCK: Mutex<()> = Mutex::new(());
+//RS 
+//RS fn remote_empty_log_digests(
+//RS     transport: &RemoteCacheTransport,
+//RS     policy: &RemoteCachePolicy,
+//RS ) -> (ContentDigest, ContentDigest) {
+//RS     (
+//RS         transport.upload_execution_blob(b"", policy).unwrap(),
+//RS         transport.upload_execution_blob(b"", policy).unwrap(),
+//RS     )
+//RS }
+//RS 
+//RS #[test]
+//RS fn registers_typed_targets_and_default_plan() {
+//RS     let mut b = BuildContext::new();
+//RS     let gen = b
+//RS         .action(
+//RS             "generate-assets",
+//RS             ActionSpec::cached(["jet-tool", "pack"])
+//RS                 .with_inputs(["assets/sprite.png"])
+//RS                 .with_outputs([".jet/generated/assets.jet"])
+//RS                 .with_cap(BuildCapability::FS),
+//RS         )
+//RS         .unwrap();
+//RS     let lib = b
+//RS         .add_library(
+//RS             "engine",
+//RS             TargetSpec::new()
+//RS                 .with_source("src/engine.jet")
+//RS                 .with_action(gen),
+//RS         )
+//RS         .unwrap();
+//RS     let app = b
+//RS         .add_executable(
+//RS             "game",
+//RS             TargetSpec::new().with_source("src/main.jet").with_dep(lib),
+//RS         )
+//RS         .unwrap();
+//RS     b.add_test("unit", TargetSpec::new().with_dep(app)).unwrap();
+//RS     b.add_test("frame-time", TargetSpec::new().with_dep(app))
+//RS         .unwrap();
+//RS     b.add_asset_bundle("assets", TargetSpec::new().with_action(gen))
+//RS         .unwrap();
+//RS     b.add_doc("manual", TargetSpec::new().with_source("docs/manual.md"))
+//RS         .unwrap();
+//RS     b.add_install("install", TargetSpec::new().with_dep(app))
+//RS         .unwrap();
+//RS     b.add_package("package", TargetSpec::new().with_dep(app))
+//RS         .unwrap();
+//RS     b.add_publish("publish", TargetSpec::new().with_dep(app))
+//RS         .unwrap();
+//RS 
+//RS     let plan = b.plan_with_default(app).unwrap();
+//RS 
+//RS     assert_eq!(plan.default_target(), Some(app.into()));
+//RS     assert_eq!(plan.target(app).unwrap().kind, TargetKind::Executable);
+//RS     assert_eq!(
+//RS         plan.target(app).unwrap().toolchain,
+//RS         b.default_host_toolchain()
+//RS     );
+//RS     assert_eq!(plan.default_host_toolchain().role, ToolchainRole::Host);
+//RS     assert_eq!(
+//RS         plan.default_host_toolchain().provenance.source,
+//RS         ProvenanceSource::InferredHost
+//RS     );
+//RS     assert_eq!(plan.target(lib).unwrap().kind, TargetKind::Library);
+//RS     assert_eq!(plan.targets_by_kind(TargetKind::AssetBundle).len(), 1);
+//RS     assert_eq!(plan.actions().len(), 1);
+//RS     assert_eq!(
+//RS         plan.action(gen).unwrap().outputs[0].as_str(),
+//RS         ".jet/generated/assets.jet"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn selected_default_executes_only_its_target_dependency_closure() {
+//RS     let mut b = BuildContext::new();
+//RS     let selected_action = b
+//RS         .action(
+//RS             "selected",
+//RS             ActionSpec::cached(["tool"]).with_outputs(["selected.out"]),
+//RS         )
+//RS         .unwrap();
+//RS     let unrelated_action = b
+//RS         .action(
+//RS             "unrelated",
+//RS             ActionSpec::cached(["tool"]).with_outputs(["unrelated.out"]),
+//RS         )
+//RS         .unwrap();
+//RS     let selected = b
+//RS         .add_executable(
+//RS             "selected",
+//RS             TargetSpec::new()
+//RS                 .with_source("main.jet")
+//RS                 .with_action(selected_action),
+//RS         )
+//RS         .unwrap();
+//RS     b.add_test(
+//RS         "unrelated",
+//RS         TargetSpec::new()
+//RS             .with_source("other.jet")
+//RS             .with_action(unrelated_action),
+//RS     )
+//RS     .unwrap();
+//RS     let plan = b.plan_with_default(selected).unwrap();
+//RS     let model = plan.execution_model().unwrap();
+//RS     assert_eq!(model.nodes.len(), 1);
+//RS     assert_eq!(model.nodes[0].name, "selected");
+//RS     assert_eq!(plan.selected_sources().unwrap()[0].as_str(), "main.jet");
+//RS }
+//RS 
+//RS #[test]
+//RS fn records_explicit_toolchains_sdks_linkers_and_signers() {
+//RS     let mut b = BuildContext::new();
+//RS     let sdk_lock = LockRecord::new("sdk:core.embedded-sdk#1.4", "sha256:sdk");
+//RS     let linker_lock = LockRecord::new("linker:lld#18", "sha256:linker");
+//RS     let toolchain_lock = LockRecord::new("toolchain:aarch64-linux-musl", "sha256:toolchain");
+//RS     let toolchain = b
+//RS         .toolchain(
+//RS             "arm-musl",
+//RS             ToolchainSpec::target(
+//RS                 "aarch64-linux-musl",
+//RS                 BuildProvenance::jetpack_dependency(
+//RS                     "toolchain.aarch64-linux-musl#2026.07",
+//RS                     toolchain_lock,
+//RS                 ),
+//RS             )
+//RS             .with_host_triple("x86_64-linux")
+//RS             .with_sdk(SdkIdentity::new(
+//RS                 "core.embedded-sdk",
+//RS                 "1.4",
+//RS                 BuildProvenance::jetpack_dependency("core.embedded-sdk#1.4", sdk_lock),
+//RS             ))
+//RS             .with_linker(LinkerIdentity::new(
+//RS                 "lld",
+//RS                 BuildProvenance::jetpack_dependency("lld#18", linker_lock),
+//RS             )),
+//RS         )
+//RS         .unwrap();
+//RS     let signer = b
+//RS         .signing_identity(
+//RS             "mac-release",
+//RS             SigningIdentitySpec::new(
+//RS                 "developer-id:ACME",
+//RS                 BuildProvenance::user_declared(
+//RS                     "keychain:mac-release",
+//RS                     Some(LockRecord::new("signing:mac-release", "sha256:signer")),
+//RS                 ),
+//RS             ),
+//RS         )
+//RS         .unwrap();
+//RS     let link = b
+//RS         .action(
+//RS             "link-firmware",
+//RS             ActionSpec::cached(["ld.lld", "-o", "build/sensor"])
+//RS                 .with_outputs(["build/sensor"])
+//RS                 .with_cap(BuildCapability::Exec)
+//RS                 .with_toolchain(toolchain),
+//RS         )
+//RS         .unwrap();
+//RS     let app = b
+//RS         .add_executable(
+//RS             "sensor",
+//RS             TargetSpec::new()
+//RS                 .with_source("src/sensor.jet")
+//RS                 .with_action(link)
+//RS                 .with_toolchain(toolchain)
+//RS                 .with_signing_identity(signer),
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS     let plan = b.plan_with_default(app).unwrap();
+//RS     let recorded_toolchain = plan.toolchain(toolchain).unwrap();
+//RS     assert_eq!(recorded_toolchain.role, ToolchainRole::Target);
+//RS     assert_eq!(recorded_toolchain.host_triple, "x86_64-linux");
+//RS     assert_eq!(recorded_toolchain.target_triple, "aarch64-linux-musl");
+//RS     assert_eq!(
+//RS         recorded_toolchain
+//RS             .sdk
+//RS             .as_ref()
+//RS             .unwrap()
+//RS             .provenance
+//RS             .lock
+//RS             .as_ref()
+//RS             .unwrap()
+//RS             .digest,
+//RS         "sha256:sdk"
+//RS     );
+//RS     assert_eq!(
+//RS         recorded_toolchain
+//RS             .linker
+//RS             .as_ref()
+//RS             .unwrap()
+//RS             .provenance
+//RS             .lock
+//RS             .as_ref()
+//RS             .unwrap()
+//RS             .digest,
+//RS         "sha256:linker"
+//RS     );
+//RS     assert_eq!(plan.target(app).unwrap().toolchain, toolchain);
+//RS     assert_eq!(plan.action(link).unwrap().toolchain, toolchain);
+//RS     assert_eq!(plan.target(app).unwrap().signing_identity, Some(signer));
+//RS     assert_eq!(
+//RS         plan.signing_identity(signer).unwrap().label,
+//RS         "developer-id:ACME"
+//RS     );
+//RS     assert_eq!(
+//RS         plan.signing_identity(signer)
+//RS             .unwrap()
+//RS             .provenance
+//RS             .lock
+//RS             .as_ref()
+//RS             .unwrap()
+//RS             .digest,
+//RS         "sha256:signer"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn typed_probes_record_reproducibility_and_provenance() {
+//RS     let mut b = BuildContext::new();
+//RS     let cc = b.find_program("cc", "cc").unwrap();
+//RS     let sqlite = b
+//RS         .probe(
+//RS             "sqlite",
+//RS             ProbeSpec::pkg_config("sqlite3")
+//RS                 .with_min_version("3.42")
+//RS                 .with_reproducibility(ReproducibilityClass::Reproducible)
+//RS                 .with_provenance(BuildProvenance::jetpack_dependency(
+//RS                     "pkg-config:sqlite3#3.42",
+//RS                     LockRecord::new("probe:sqlite3", "sha256:sqlite"),
+//RS                 )),
+//RS         )
+//RS         .unwrap();
+//RS     let header = b.header_check("sqlite-header", "sqlite3.h").unwrap();
+//RS     let compile = b
+//RS         .compile_check(
+//RS             "sqlite-wal",
+//RS             "sqlite-wal",
+//RS             ["sqlite3.h"],
+//RS             "sqlite3_wal_checkpoint_v2",
+//RS         )
+//RS         .unwrap();
+//RS     let lib = b
+//RS         .add_library(
+//RS             "sqlite-bridge",
+//RS             TargetSpec::new()
+//RS                 .with_probe(cc)
+//RS                 .with_probe(sqlite)
+//RS                 .with_probe(header)
+//RS                 .with_probe(compile),
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS     let plan = b.plan_with_default(lib).unwrap();
+//RS     assert_eq!(plan.probes().len(), 4);
+//RS     assert_eq!(
+//RS         plan.probe(cc).unwrap().reproducibility,
+//RS         ReproducibilityClass::Ambient
+//RS     );
+//RS     assert_eq!(
+//RS         plan.probe(sqlite).unwrap().reproducibility,
+//RS         ReproducibilityClass::Reproducible
+//RS     );
+//RS     assert_eq!(
+//RS         plan.probe(sqlite)
+//RS             .unwrap()
+//RS             .provenance
+//RS             .lock
+//RS             .as_ref()
+//RS             .unwrap()
+//RS             .digest,
+//RS         "sha256:sqlite"
+//RS     );
+//RS     assert!(matches!(
+//RS         plan.probe(sqlite).unwrap().kind,
+//RS         ProbeKind::PkgConfig { ref package, .. } if package == "sqlite3"
+//RS     ));
+//RS     assert!(matches!(
+//RS         plan.probe(header).unwrap().kind,
+//RS         ProbeKind::HeaderCheck { ref header } if header == "sqlite3.h"
+//RS     ));
+//RS     assert!(matches!(
+//RS         plan.probe(compile).unwrap().kind,
+//RS         ProbeKind::CompileCheck { ref name, .. } if name == "sqlite-wal"
+//RS     ));
+//RS     assert_eq!(
+//RS         plan.target(lib).unwrap().probes,
+//RS         vec![cc, sqlite, header, compile]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn declared_target_toolchain_wins_over_ambient_host_tool() {
+//RS     let false_path = std::env::var_os("PATH")
+//RS         .into_iter()
+//RS         .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+//RS         .map(|directory| directory.join("false"))
+//RS         .find(|path| path.is_file())
+//RS         .expect("the test host needs a `false` executable");
+//RS     let declared_false = fs::canonicalize(&false_path).unwrap();
+//RS     let mut b = BuildContext::new();
+//RS     let toolchain = b
+//RS         .toolchain(
+//RS             "declared-native",
+//RS             ToolchainSpec::target(
+//RS                 "x86_64-linux-gnu",
+//RS                 BuildProvenance::jetpack_dependency(
+//RS                     "toolchain.native#1",
+//RS                     LockRecord::new("toolchain:native", "sha256:native"),
+//RS                 ),
+//RS             )
+//RS             .with_host_triple("x86_64-linux-gnu")
+//RS             .with_tool("cc", false_path.to_string_lossy()),
+//RS         )
+//RS         .unwrap();
+//RS     let probe = b
+//RS         .probe(
+//RS             "declared-cc",
+//RS             ProbeSpec::header_check("stddef.h").with_toolchain(toolchain),
+//RS         )
+//RS         .unwrap();
+//RS     let target = b
+//RS         .add_library(
+//RS             "declared-native-probe",
+//RS             TargetSpec::new()
+//RS                 .with_toolchain(toolchain)
+//RS                 .with_probe(probe),
+//RS         )
+//RS         .unwrap();
+//RS     let plan = b.plan_with_default(target).unwrap();
+//RS     let root = std::env::temp_dir().join(format!("jet-declared-toolchain-{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     let grants = [BuildCapability::Exec]
+//RS         .into_iter()
+//RS         .collect::<std::collections::BTreeSet<_>>();
+//RS     let error = execute_build_plan_with_front_end_and_remote(
+//RS         &plan,
+//RS         &root,
+//RS         &grants,
+//RS         FrontEndCompletion::all_complete(),
+//RS         None,
+//RS     )
+//RS     .unwrap_err();
+//RS     assert!(
+//RS         matches!(
+//RS             &error,
+//RS             jet::Comptime::Build::BuildExecutionError::ProbeFailed { detail, .. }
+//RS                 if detail.contains(declared_false.to_string_lossy().as_ref())
+//RS         ),
+//RS         "declared target tool must be used instead of ambient PATH: {error:?}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn foreign_toolchain_probe_and_signer_handles_are_rejected() {
+//RS     let mut a = BuildContext::new();
+//RS     let mut b = BuildContext::new();
+//RS     let toolchain = b
+//RS         .toolchain(
+//RS             "other",
+//RS             ToolchainSpec::target(
+//RS                 "wasm32-wasi",
+//RS                 BuildProvenance::jetpack_dependency(
+//RS                     "toolchain.wasm32-wasi#2026.07",
+//RS                     LockRecord::new("toolchain:wasm32-wasi", "sha256:wasm"),
+//RS                 ),
+//RS             ),
+//RS         )
+//RS         .unwrap();
+//RS     let signer = b
+//RS         .signing_identity(
+//RS             "other-signer",
+//RS             SigningIdentitySpec::new(
+//RS                 "developer-id:OTHER",
+//RS                 BuildProvenance::user_declared("keychain:other", None),
+//RS             ),
+//RS         )
+//RS         .unwrap();
+//RS     let probe = b.find_program("other-cc", "cc").unwrap();
+//RS 
+//RS     let err = a
+//RS         .add_executable("bad-toolchain", TargetSpec::new().with_toolchain(toolchain))
+//RS         .unwrap_err();
+//RS     assert_eq!(err, BuildError::UnknownToolchain(toolchain.id()));
+//RS     let err = a
+//RS         .add_executable(
+//RS             "bad-signer",
+//RS             TargetSpec::new().with_signing_identity(signer),
+//RS         )
+//RS         .unwrap_err();
+//RS     assert_eq!(err, BuildError::UnknownSigningIdentity(signer.id()));
+//RS     let err = a
+//RS         .add_library("bad-probe", TargetSpec::new().with_probe(probe))
+//RS         .unwrap_err();
+//RS     assert_eq!(err, BuildError::UnknownProbe(probe.id()));
+//RS }
+//RS 
+//RS #[test]
+//RS fn invalid_toolchain_probe_and_signer_specs_do_not_reserve_names() {
+//RS     let mut b = BuildContext::new();
+//RS     let bad_toolchain = b
+//RS         .toolchain(
+//RS             "cross",
+//RS             ToolchainSpec::target("", BuildProvenance::inferred_host()),
+//RS         )
+//RS         .unwrap_err();
+//RS     assert_eq!(
+//RS         bad_toolchain,
+//RS         BuildError::EmptyToolchainTriple("cross".to_string())
+//RS     );
+//RS     let toolchain = b
+//RS         .toolchain(
+//RS             "cross",
+//RS             ToolchainSpec::target(
+//RS                 "wasm32-wasi",
+//RS                 BuildProvenance::jetpack_dependency(
+//RS                     "toolchain.wasm32-wasi#2026.07",
+//RS                     LockRecord::new("toolchain:wasm32-wasi", "sha256:wasm"),
+//RS                 ),
+//RS             ),
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS     let bad_signer = b
+//RS         .signing_identity(
+//RS             "release",
+//RS             SigningIdentitySpec::new("", BuildProvenance::user_declared("keychain:release", None)),
+//RS         )
+//RS         .unwrap_err();
+//RS     assert_eq!(
+//RS         bad_signer,
+//RS         BuildError::EmptyIdentityField("release".to_string())
+//RS     );
+//RS     b.signing_identity(
+//RS         "release",
+//RS         SigningIdentitySpec::new(
+//RS             "developer-id:ACME",
+//RS             BuildProvenance::user_declared("keychain:release", None),
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let bad_probe = b.probe("sqlite", ProbeSpec::pkg_config("")).unwrap_err();
+//RS     assert_eq!(bad_probe, BuildError::EmptyProbeField("sqlite".to_string()));
+//RS     b.probe(
+//RS         "sqlite",
+//RS         ProbeSpec::pkg_config("sqlite3").with_toolchain(toolchain),
+//RS     )
+//RS     .unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn duplicate_target_or_action_names_are_rejected() {
+//RS     let mut b = BuildContext::new();
+//RS     b.add_executable("app", TargetSpec::new()).unwrap();
+//RS     let err = b.add_library("app", TargetSpec::new()).unwrap_err();
+//RS     assert_eq!(err, BuildError::DuplicateTargetName("app".to_string()));
+//RS 
+//RS     b.action(
+//RS         "codegen",
+//RS         ActionSpec::cached(["tool"]).with_outputs(["out.jet"]),
+//RS     )
+//RS     .unwrap();
+//RS     let err = b
+//RS         .action(
+//RS             "codegen",
+//RS             ActionSpec::cached(["tool"]).with_outputs(["other.jet"]),
+//RS         )
+//RS         .unwrap_err();
+//RS     assert_eq!(err, BuildError::DuplicateActionName("codegen".to_string()));
+//RS }
+//RS 
+//RS #[test]
+//RS fn cached_actions_need_outputs() {
+//RS     let mut b = BuildContext::new();
+//RS     let err = b
+//RS         .action("probe", ActionSpec::cached(["cc", "--version"]))
+//RS         .unwrap_err();
+//RS     assert_eq!(
+//RS         err,
+//RS         BuildError::CachedActionWithoutOutputs("probe".to_string())
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn outputless_commands_are_explicit_uncached_phony_actions() {
+//RS     let mut b = BuildContext::new();
+//RS     let clean = b
+//RS         .action(
+//RS             "clean-generated",
+//RS             ActionSpec::uncached_phony(["rm", "-rf", ".jet/generated"])
+//RS                 .with_cap(BuildCapability::FS),
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS     let plan = b.plan().unwrap();
+//RS     let action = plan.action(clean).unwrap();
+//RS     assert_eq!(action.cache, ActionCache::UncachedPhony);
+//RS     assert!(action.outputs.is_empty());
+//RS     assert_eq!(plan.phony_actions(), vec![action]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn phony_actions_need_a_declared_capability() {
+//RS     let mut b = BuildContext::new();
+//RS     let err = b
+//RS         .action(
+//RS             "clean-generated",
+//RS             ActionSpec::uncached_phony(["rm", "-rf", ".jet/generated"]),
+//RS         )
+//RS         .unwrap_err();
+//RS     assert_eq!(
+//RS         err,
+//RS         BuildError::PhonyActionWithoutCaps("clean-generated".to_string())
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn action_outputs_have_one_owner_in_the_plan() {
+//RS     let mut b = BuildContext::new();
+//RS     b.action(
+//RS         "generate-a",
+//RS         ActionSpec::cached(["tool-a"]).with_outputs([".jet/generated/out.jet"]),
+//RS     )
+//RS     .unwrap();
+//RS     b.action(
+//RS         "generate-b",
+//RS         ActionSpec::cached(["tool-b"]).with_outputs([".jet/generated/out.jet"]),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let err = b.plan().unwrap_err();
+//RS     assert_eq!(
+//RS         err,
+//RS         BuildError::DuplicateBuildOutput {
+//RS             output: ".jet/generated/out.jet".to_string(),
+//RS             first_action: "generate-a".to_string(),
+//RS             second_action: "generate-b".to_string(),
+//RS         }
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn action_keys_are_deterministic_and_cover_cache_contract() {
+//RS     fn key(
+//RS         argv: &[&str],
+//RS         env_value: &str,
+//RS         input: &str,
+//RS         output: &str,
+//RS         cap: BuildCapability,
+//RS         target_triple: &str,
+//RS         probe_package: &str,
+//RS         signer_label: &str,
+//RS         label_value: &str,
+//RS     ) -> String {
+//RS         let mut b = BuildContext::new();
+//RS         let toolchain = b
+//RS             .toolchain(
+//RS                 "tc",
+//RS                 ToolchainSpec::target(
+//RS                     target_triple,
+//RS                     BuildProvenance::jetpack_dependency(
+//RS                         format!("toolchain.{target_triple}#2026.07"),
+//RS                         LockRecord::new(format!("toolchain:{target_triple}"), "sha256:tc"),
+//RS                     ),
+//RS                 ),
+//RS             )
+//RS             .unwrap();
+//RS         let probe = b
+//RS             .probe(
+//RS                 "probe",
+//RS                 ProbeSpec::pkg_config(probe_package)
+//RS                     .with_reproducibility(ReproducibilityClass::Reproducible)
+//RS                     .with_provenance(BuildProvenance::jetpack_dependency(
+//RS                         format!("pkg-config:{probe_package}#1"),
+//RS                         LockRecord::new(format!("probe:{probe_package}"), "sha256:probe"),
+//RS                     )),
+//RS             )
+//RS             .unwrap();
+//RS         let signer = b
+//RS             .signing_identity(
+//RS                 "signer",
+//RS                 SigningIdentitySpec::new(
+//RS                     signer_label,
+//RS                     BuildProvenance::user_declared(
+//RS                         format!("keychain:{signer_label}"),
+//RS                         Some(LockRecord::new("signing:release", "sha256:signer")),
+//RS                     ),
+//RS                 ),
+//RS             )
+//RS             .unwrap();
+//RS         let action = b
+//RS             .action(
+//RS                 "compile",
+//RS                 ActionSpec::cached(argv.iter().copied())
+//RS                     .with_inputs([input])
+//RS                     .with_outputs([output])
+//RS                     .with_env("MODE", env_value)
+//RS                     .with_cap(cap)
+//RS                     .with_toolchain(toolchain)
+//RS                     .with_probe(probe)
+//RS                     .with_signing_identity(signer)
+//RS                     .with_label("profile", label_value),
+//RS             )
+//RS             .unwrap();
+//RS         let plan = b.plan().unwrap();
+//RS         plan.action_key(action).unwrap().as_str().to_string()
+//RS     }
+//RS 
+//RS     let base = key(
+//RS         &["jetc", "--emit", "obj"],
+//RS         "release",
+//RS         "src/main.jet",
+//RS         "build/main.o",
+//RS         BuildCapability::Exec,
+//RS         "x86_64-linux",
+//RS         "sqlite3",
+//RS         "developer-id:ACME",
+//RS         "release",
+//RS     );
+//RS     assert_eq!(
+//RS         base,
+//RS         key(
+//RS             &["jetc", "--emit", "obj"],
+//RS             "release",
+//RS             "src/main.jet",
+//RS             "build/main.o",
+//RS             BuildCapability::Exec,
+//RS             "x86_64-linux",
+//RS             "sqlite3",
+//RS             "developer-id:ACME",
+//RS             "release",
+//RS         )
+//RS     );
+//RS     assert_ne!(
+//RS         base,
+//RS         key(
+//RS             &["jetc", "--emit", "asm"],
+//RS             "release",
+//RS             "src/main.jet",
+//RS             "build/main.o",
+//RS             BuildCapability::Exec,
+//RS             "x86_64-linux",
+//RS             "sqlite3",
+//RS             "developer-id:ACME",
+//RS             "release",
+//RS         )
+//RS     );
+//RS     assert_ne!(
+//RS         base,
+//RS         key(
+//RS             &["jetc", "--emit", "obj"],
+//RS             "debug",
+//RS             "src/main.jet",
+//RS             "build/main.o",
+//RS             BuildCapability::Exec,
+//RS             "x86_64-linux",
+//RS             "sqlite3",
+//RS             "developer-id:ACME",
+//RS             "release",
+//RS         )
+//RS     );
+//RS     assert_ne!(
+//RS         base,
+//RS         key(
+//RS             &["jetc", "--emit", "obj"],
+//RS             "release",
+//RS             "src/lib.jet",
+//RS             "build/main.o",
+//RS             BuildCapability::Exec,
+//RS             "x86_64-linux",
+//RS             "sqlite3",
+//RS             "developer-id:ACME",
+//RS             "release",
+//RS         )
+//RS     );
+//RS     assert_ne!(
+//RS         base,
+//RS         key(
+//RS             &["jetc", "--emit", "obj"],
+//RS             "release",
+//RS             "src/main.jet",
+//RS             "build/lib.o",
+//RS             BuildCapability::Exec,
+//RS             "x86_64-linux",
+//RS             "sqlite3",
+//RS             "developer-id:ACME",
+//RS             "release",
+//RS         )
+//RS     );
+//RS     assert_ne!(
+//RS         base,
+//RS         key(
+//RS             &["jetc", "--emit", "obj"],
+//RS             "release",
+//RS             "src/main.jet",
+//RS             "build/main.o",
+//RS             BuildCapability::FS,
+//RS             "x86_64-linux",
+//RS             "sqlite3",
+//RS             "developer-id:ACME",
+//RS             "release",
+//RS         )
+//RS     );
+//RS     assert_ne!(
+//RS         base,
+//RS         key(
+//RS             &["jetc", "--emit", "obj"],
+//RS             "release",
+//RS             "src/main.jet",
+//RS             "build/main.o",
+//RS             BuildCapability::Exec,
+//RS             "aarch64-linux-musl",
+//RS             "sqlite3",
+//RS             "developer-id:ACME",
+//RS             "release",
+//RS         )
+//RS     );
+//RS     assert_ne!(
+//RS         base,
+//RS         key(
+//RS             &["jetc", "--emit", "obj"],
+//RS             "release",
+//RS             "src/main.jet",
+//RS             "build/main.o",
+//RS             BuildCapability::Exec,
+//RS             "x86_64-linux",
+//RS             "openssl",
+//RS             "developer-id:ACME",
+//RS             "release",
+//RS         )
+//RS     );
+//RS     assert_ne!(
+//RS         base,
+//RS         key(
+//RS             &["jetc", "--emit", "obj"],
+//RS             "release",
+//RS             "src/main.jet",
+//RS             "build/main.o",
+//RS             BuildCapability::Exec,
+//RS             "x86_64-linux",
+//RS             "sqlite3",
+//RS             "developer-id:OTHER",
+//RS             "release",
+//RS         )
+//RS     );
+//RS     assert_ne!(
+//RS         base,
+//RS         key(
+//RS             &["jetc", "--emit", "obj"],
+//RS             "release",
+//RS             "src/main.jet",
+//RS             "build/main.o",
+//RS             BuildCapability::Exec,
+//RS             "x86_64-linux",
+//RS             "sqlite3",
+//RS             "developer-id:ACME",
+//RS             "coverage",
+//RS         )
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn artifact_store_round_trips_blobs_and_restores_declared_outputs() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_artifact_store_{}_{}",
+//RS         std::process::id(),
+//RS         "restore"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(root.join("work/build")).unwrap();
+//RS 
+//RS     let store = test_artifact_store(&root);
+//RS     let digest = store.put_blob(b"hello artifact").unwrap();
+//RS     assert_eq!(
+//RS         store.get_blob(&digest).unwrap().unwrap(),
+//RS         b"hello artifact"
+//RS     );
+//RS 
+//RS     let mut b = BuildContext::new();
+//RS     let action = b
+//RS         .action(
+//RS             "emit",
+//RS             ActionSpec::cached(["jetc", "src/main.jet"]).with_outputs(["build/out.txt"]),
+//RS         )
+//RS         .unwrap();
+//RS     let plan = b.plan().unwrap();
+//RS     let key = plan.action_key(action).unwrap();
+//RS     fs::write(root.join("work/build/out.txt"), "compiled bytes").unwrap();
+//RS 
+//RS     let record = capture_declared_outputs(
+//RS         &store,
+//RS         &root.join("work"),
+//RS         plan.action(action).unwrap(),
+//RS         key,
+//RS         ActionOutcome::Succeeded { exit_code: 0 },
+//RS         ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(root.join("work/build/out.txt"), "stale").unwrap();
+//RS 
+//RS     restore_action_outputs(&store, &root.join("work"), plan.action(action).unwrap(), &record)
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         fs::read_to_string(root.join("work/build/out.txt")).unwrap(),
+//RS         "compiled bytes"
+//RS     );
+//RS     assert_eq!(record.outputs[0].byte_len, "compiled bytes".len() as u64);
+//RS     let _ = fs::remove_dir_all(&root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cas_rejects_malformed_digests_without_panicking() {
+//RS     for malformed in [
+//RS         "",
+//RS         "sha256:",
+//RS         "sha256:abc",
+//RS         "md5:0000",
+//RS         &format!("sha256:{}", "g".repeat(64)),
+//RS     ] {
+//RS         assert!(ContentDigest::parse(malformed).is_err());
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn cache_restore_rejects_symlinked_parent_without_outside_write() {
+//RS     use std::os::unix::fs::symlink;
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_artifact_store_{}_parent_symlink",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(root.join("work/real")).unwrap();
+//RS     fs::create_dir_all(root.join("outside")).unwrap();
+//RS     let store = test_artifact_store(&root);
+//RS     let mut b = BuildContext::new();
+//RS     let action = b
+//RS         .action(
+//RS             "emit",
+//RS             ActionSpec::cached(["jetc"]).with_outputs(["real/out.txt"]),
+//RS         )
+//RS         .unwrap();
+//RS     let plan = b.plan().unwrap();
+//RS     fs::write(root.join("work/real/out.txt"), "safe").unwrap();
+//RS     let record = capture_declared_outputs(
+//RS         &store,
+//RS         &root.join("work"),
+//RS         plan.action(action).unwrap(),
+//RS         plan.action_key(action).unwrap(),
+//RS         ActionOutcome::Succeeded { exit_code: 0 },
+//RS         ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+//RS     )
+//RS     .unwrap();
+//RS     fs::remove_dir_all(root.join("work/real")).unwrap();
+//RS     symlink(root.join("outside"), root.join("work/real")).unwrap();
+//RS     assert!(restore_action_outputs(
+//RS         &store,
+//RS         &root.join("work"),
+//RS         plan.action(action).unwrap(),
+//RS         &record
+//RS     )
+//RS     .is_err());
+//RS     assert!(!root.join("outside/out.txt").exists());
+//RS     let _ = fs::remove_dir_all(&root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn action_key_changes_when_declared_input_contents_change() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_artifact_store_{}_{}",
+//RS         std::process::id(),
+//RS         "inputs"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(root.join("work/src")).unwrap();
+//RS 
+//RS     let store = test_artifact_store(&root);
+//RS     let mut b = BuildContext::new();
+//RS     let action = b
+//RS         .action(
+//RS             "compile",
+//RS             ActionSpec::cached(["jetc", "src/main.jet"])
+//RS                 .with_inputs(["src/main.jet"])
+//RS                 .with_outputs(["build/main.o"]),
+//RS         )
+//RS         .unwrap();
+//RS     let plan = b.plan().unwrap();
+//RS     let action_ref = plan.action(action).unwrap();
+//RS 
+//RS     fs::write(root.join("work/src/main.jet"), "fn run() { print(1) }").unwrap();
+//RS     let first_inputs = snapshot_declared_inputs(&store, &root.join("work"), action_ref).unwrap();
+//RS     let first = plan.action_key_with_inputs(action, &first_inputs).unwrap();
+//RS 
+//RS     fs::write(root.join("work/src/main.jet"), "fn run() { print(2) }").unwrap();
+//RS     let second_inputs = snapshot_declared_inputs(&store, &root.join("work"), action_ref).unwrap();
+//RS     let second = plan.action_key_with_inputs(action, &second_inputs).unwrap();
+//RS 
+//RS     assert_ne!(first, second);
+//RS     assert_eq!(first_inputs[0].path.as_str(), "src/main.jet");
+//RS     assert_ne!(first_inputs[0].digest, second_inputs[0].digest);
+//RS     let _ = fs::remove_dir_all(&root);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn cache_restore_replaces_output_symlink_instead_of_following_it() {
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_artifact_store_{}_{}",
+//RS         std::process::id(),
+//RS         "symlink"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(root.join("work/build")).unwrap();
+//RS     fs::write(root.join("outside.txt"), "outside").unwrap();
+//RS 
+//RS     let store = test_artifact_store(&root);
+//RS     let mut b = BuildContext::new();
+//RS     let action = b
+//RS         .action(
+//RS             "emit",
+//RS             ActionSpec::cached(["jetc", "src/main.jet"]).with_outputs(["build/out.txt"]),
+//RS         )
+//RS         .unwrap();
+//RS     let plan = b.plan().unwrap();
+//RS     let key = plan.action_key(action).unwrap();
+//RS     fs::write(root.join("work/build/out.txt"), "compiled bytes").unwrap();
+//RS     let record = capture_declared_outputs(
+//RS         &store,
+//RS         &root.join("work"),
+//RS         plan.action(action).unwrap(),
+//RS         key,
+//RS         ActionOutcome::Succeeded { exit_code: 0 },
+//RS         ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     fs::remove_file(root.join("work/build/out.txt")).unwrap();
+//RS     symlink(root.join("outside.txt"), root.join("work/build/out.txt")).unwrap();
+//RS     restore_declared_outputs(&store, &root.join("work"), &record).unwrap();
+//RS 
+//RS     assert_eq!(
+//RS         fs::read_to_string(root.join("outside.txt")).unwrap(),
+//RS         "outside"
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(root.join("work/build/out.txt")).unwrap(),
+//RS         "compiled bytes"
+//RS     );
+//RS     assert!(!fs::symlink_metadata(root.join("work/build/out.txt"))
+//RS         .unwrap()
+//RS         .file_type()
+//RS         .is_symlink());
+//RS     let _ = fs::remove_dir_all(&root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cache_provenance_records_hit_miss_and_remote_denial() {
+//RS     let hit = ActionCacheProvenance::hit(CacheHitReason::LocalActionRecordMatched);
+//RS     assert_eq!(
+//RS         hit.status,
+//RS         ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched)
+//RS     );
+//RS     let miss = ActionCacheProvenance::miss(CacheMissReason::ActionKeyChanged);
+//RS     assert_eq!(
+//RS         miss.status,
+//RS         ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged)
+//RS     );
+//RS 
+//RS     let policy = RemoteCachePolicy::disabled_until_grant_and_sandbox_proof();
+//RS     for request in [
+//RS         RemoteActionRequest::CacheRead,
+//RS         RemoteActionRequest::CacheWrite,
+//RS         RemoteActionRequest::Execute,
+//RS     ] {
+//RS         let denial = policy.check(request).unwrap_err();
+//RS         assert_eq!(denial.request, request);
+//RS         assert_eq!(
+//RS             denial.reason,
+//RS             RemoteDeniedReason::MissingGrantAndSandboxProof
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_transport_{}_{}",
+//RS         std::process::id(),
+//RS         "roundtrip"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     let binding = RemoteBuildBinding::new("builder-roundtrip", &root, b"remote-test-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_worker_id("worker-roundtrip")
+//RS         .with_platform("linux-x86_64")
+//RS         .with_abi("native");
+//RS     let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
+//RS     let key = ActionKey::new("compile:app");
+//RS     let provenance_digest = ContentDigest::from_bytes(b"provenance");
+//RS     let sandbox = transport
+//RS         .sandbox_proof(
+//RS             "remote:builder-roundtrip:trusted:sandbox-1",
+//RS             "attempt-roundtrip-1",
+//RS             key.as_str(),
+//RS             provenance_digest.clone(),
+//RS         )
+//RS         .unwrap();
+//RS     let policy = RemoteCachePolicy::granted(sandbox.clone());
+//RS     let output_digest = transport.upload_blob(b"compiled", &policy).unwrap();
+//RS     assert_eq!(
+//RS         transport.download_blob(&output_digest, &policy).unwrap(),
+//RS         b"compiled"
+//RS     );
+//RS 
+//RS     let output = ActionOutputRecord {
+//RS         path: BuildPath::new("build/app").unwrap(),
+//RS         digest: output_digest.clone(),
+//RS         byte_len: 8,
+//RS     };
+//RS     let record = ActionResultRecord {
+//RS         key: key.clone(),
+//RS         outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS         outputs: vec![output.clone()],
+//RS         failure_report: None,
+//RS         provenance: ActionCacheProvenance::hit(CacheHitReason::LocalActionRecordMatched),
+//RS     };
+//RS     transport.upload_action_record(&record, &policy).unwrap();
+//RS     assert_eq!(
+//RS         transport.download_action_record(&key, &policy).unwrap(),
+//RS         record
+//RS     );
+//RS     let mut wrong_length = record.clone();
+//RS     wrong_length.outputs[0].byte_len = 7;
+//RS     assert!(matches!(
+//RS         transport.upload_action_record(&wrong_length, &policy),
+//RS         Err(RemoteCacheError::InvalidRecord(_))
+//RS     ));
+//RS 
+//RS     let request = RemoteExecutionRequest {
+//RS         key: key.clone(),
+//RS         attempt_id: sandbox.attempt_id.clone(),
+//RS         argv: vec!["jetc".to_string(), "src/main.jet".to_string()],
+//RS         inputs: vec![ActionInputSnapshot {
+//RS             path: BuildPath::new("src/main.jet").unwrap(),
+//RS             digest: transport.upload_execution_blob(b"source", &policy).unwrap(),
+//RS             byte_len: 6,
+//RS         }],
+//RS         outputs: vec![output.path.clone()],
+//RS         toolchain_digest: ContentDigest::from_bytes(b"toolchain"),
+//RS         sandbox: sandbox.clone(),
+//RS     };
+//RS     transport.submit_execution(&request, &policy).unwrap();
+//RS     let (stdout_digest, stderr_digest) = remote_empty_log_digests(&transport, &policy);
+//RS     let result = RemoteExecutionResult {
+//RS         key: key.clone(),
+//RS         attempt_id: request.attempt_id.clone(),
+//RS         execution_id: remote_execution_identity(&request),
+//RS         outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS         outputs: vec![output],
+//RS         toolchain_digest: request.toolchain_digest.clone(),
+//RS         sandbox,
+//RS         stdout_digest,
+//RS         stderr_digest,
+//RS         provenance_signer: request.sandbox.worker_id.clone(),
+//RS     };
+//RS     transport
+//RS         .publish_execution_result(&result, &policy)
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         transport.download_execution_result(&key, &policy).unwrap(),
+//RS         result
+//RS     );
+//RS     let mut disagreement = result.clone();
+//RS     disagreement.outcome = ActionOutcome::Failed { exit_code: 7 };
+//RS     assert!(matches!(
+//RS         transport.publish_execution_result(&disagreement, &policy),
+//RS         Err(RemoteCacheError::InvalidRecord(message))
+//RS             if message.contains("disagrees with the already published result")
+//RS     ));
+//RS     assert_eq!(
+//RS         transport.download_execution_result(&key, &policy).unwrap(),
+//RS         result
+//RS     );
+//RS 
+//RS     let wrong_policy = RemoteCachePolicy::granted(
+//RS         transport
+//RS             .sandbox_proof(
+//RS                 "remote:builder-roundtrip:trusted:sandbox-other",
+//RS                 "attempt-roundtrip-other",
+//RS                 "other-action",
+//RS                 provenance_digest,
+//RS             )
+//RS             .unwrap(),
+//RS     );
+//RS     let error = transport
+//RS         .download_action_record(&key, &wrong_policy)
+//RS         .unwrap_err();
+//RS     assert!(matches!(
+//RS         error,
+//RS         jet::Comptime::Build::RemoteCacheError::Denied(denied)
+//RS             if denied.reason == RemoteDeniedReason::ProofDoesNotMatchAction
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn remote_worker_identity_and_cancellation_reject_late_or_mismatched_results() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_identity_{}_{}",
+//RS         std::process::id(),
+//RS         "proof"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     let binding = RemoteBuildBinding::new("builder-proof", &root, b"identity-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_worker_id("worker-a")
+//RS         .with_platform("linux-x86_64")
+//RS         .with_abi("native");
+//RS     let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
+//RS     let key = ActionKey::new("proof-action");
+//RS     let proof = transport
+//RS         .sandbox_proof(
+//RS             "remote:builder-proof:trusted:sandbox-1",
+//RS             "attempt-proof-1",
+//RS             key.as_str(),
+//RS             ContentDigest::from_bytes(b"provenance"),
+//RS         )
+//RS         .unwrap();
+//RS     let policy = RemoteCachePolicy::with_grants(false, false, true, proof.clone());
+//RS     let request = RemoteExecutionRequest {
+//RS         key: key.clone(),
+//RS         attempt_id: proof.attempt_id.clone(),
+//RS         argv: vec!["remote-tool".to_string()],
+//RS         inputs: Vec::new(),
+//RS         outputs: Vec::new(),
+//RS         toolchain_digest: ContentDigest::from_bytes(b"toolchain"),
+//RS         sandbox: proof.clone(),
+//RS     };
+//RS 
+//RS     let mutations: [fn(&mut RemoteSandboxProof); 4] = [
+//RS         |proof: &mut RemoteSandboxProof| proof.worker_id = "worker-b".to_string(),
+//RS         |proof: &mut RemoteSandboxProof| proof.platform = "windows-x86_64".to_string(),
+//RS         |proof: &mut RemoteSandboxProof| proof.abi = "foreign".to_string(),
+//RS         |proof: &mut RemoteSandboxProof| proof.worker_receipt = "forged".to_string(),
+//RS     ];
+//RS     for mutate in mutations {
+//RS         let mut wrong_proof = proof.clone();
+//RS         mutate(&mut wrong_proof);
+//RS         let wrong_policy = RemoteCachePolicy::with_grants(false, false, true, wrong_proof.clone());
+//RS         let mut wrong_request = request.clone();
+//RS         wrong_request.sandbox = wrong_proof;
+//RS         assert!(matches!(
+//RS             transport.submit_execution(&wrong_request, &wrong_policy),
+//RS             Err(RemoteCacheError::InvalidRecord(_))
+//RS         ));
+//RS     }
+//RS 
+//RS     transport.submit_execution(&request, &policy).unwrap();
+//RS     transport.cancel_execution(&key, &policy).unwrap();
+//RS     assert!(matches!(
+//RS         transport.submit_execution(&request, &policy),
+//RS         Err(RemoteCacheError::InvalidRecord(message))
+//RS             if message.contains("attempt id was already cancelled")
+//RS     ));
+//RS     let late = RemoteExecutionResult {
+//RS         key: key.clone(),
+//RS         attempt_id: request.attempt_id.clone(),
+//RS         execution_id: remote_execution_identity(&request),
+//RS         outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS         outputs: Vec::new(),
+//RS         toolchain_digest: request.toolchain_digest.clone(),
+//RS         sandbox: proof.clone(),
+//RS         stdout_digest: ContentDigest::from_bytes(b""),
+//RS         stderr_digest: ContentDigest::from_bytes(b""),
+//RS         provenance_signer: proof.worker_id.clone(),
+//RS     };
+//RS     assert!(matches!(
+//RS         transport.publish_execution_result(&late, &policy),
+//RS         Err(RemoteCacheError::InvalidRecord(_))
+//RS     ));
+//RS     assert!(matches!(
+//RS         transport.download_execution_result(&key, &policy),
+//RS         Err(RemoteCacheError::Io(error))
+//RS             if error.kind() == std::io::ErrorKind::NotFound
+//RS     ));
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn remote_cancelled_attempt_history_rejects_replay_after_later_submission() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_cancel_history_{}_{}",
+//RS         std::process::id(),
+//RS         "replay"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     let binding = RemoteBuildBinding::new("builder-history", &root, b"history-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_worker_id("worker-history")
+//RS         .with_platform("linux-x86_64")
+//RS         .with_abi("native");
+//RS     let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
+//RS     let key = ActionKey::new("history-action");
+//RS     let proof_a = transport
+//RS         .sandbox_proof(
+//RS             "remote:builder-history:trusted:sandbox-a",
+//RS             "attempt-history-a",
+//RS             key.as_str(),
+//RS             ContentDigest::from_bytes(b"history-provenance"),
+//RS         )
+//RS         .unwrap();
+//RS     let policy_a = RemoteCachePolicy::with_grants(false, false, true, proof_a.clone());
+//RS     let request_a = RemoteExecutionRequest {
+//RS         key: key.clone(),
+//RS         attempt_id: proof_a.attempt_id.clone(),
+//RS         argv: vec!["remote-tool".to_string()],
+//RS         inputs: Vec::new(),
+//RS         outputs: Vec::new(),
+//RS         toolchain_digest: ContentDigest::from_bytes(b"history-toolchain"),
+//RS         sandbox: proof_a.clone(),
+//RS     };
+//RS     transport.submit_execution(&request_a, &policy_a).unwrap();
+//RS     transport.cancel_execution(&key, &policy_a).unwrap();
+//RS 
+//RS     let proof_b = transport
+//RS         .sandbox_proof(
+//RS             "remote:builder-history:trusted:sandbox-b",
+//RS             "attempt-history-b",
+//RS             key.as_str(),
+//RS             ContentDigest::from_bytes(b"history-provenance"),
+//RS         )
+//RS         .unwrap();
+//RS     let policy_b = RemoteCachePolicy::with_grants(false, false, true, proof_b.clone());
+//RS     let request_b = RemoteExecutionRequest {
+//RS         attempt_id: proof_b.attempt_id.clone(),
+//RS         sandbox: proof_b.clone(),
+//RS         ..request_a.clone()
+//RS     };
+//RS     transport.submit_execution(&request_b, &policy_b).unwrap();
+//RS     assert!(matches!(
+//RS         transport.submit_execution(&request_a, &policy_a),
+//RS         Err(RemoteCacheError::InvalidRecord(message))
+//RS             if message.contains("attempt id was already cancelled")
+//RS     ));
+//RS 
+//RS     let (stdout_digest, stderr_digest) = remote_empty_log_digests(&transport, &policy_b);
+//RS     let result_b = RemoteExecutionResult {
+//RS         key: key.clone(),
+//RS         attempt_id: request_b.attempt_id.clone(),
+//RS         execution_id: remote_execution_identity(&request_b),
+//RS         outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS         outputs: Vec::new(),
+//RS         toolchain_digest: request_b.toolchain_digest.clone(),
+//RS         sandbox: proof_b.clone(),
+//RS         stdout_digest,
+//RS         stderr_digest,
+//RS         provenance_signer: proof_b.worker_id.clone(),
+//RS     };
+//RS     transport
+//RS         .publish_execution_result(&result_b, &policy_b)
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         transport
+//RS             .download_execution_result(&key, &policy_b)
+//RS             .unwrap(),
+//RS         result_b
+//RS     );
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn remote_cancel_and_publish_are_one_commit_race() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_cancel_race_{}_{}",
+//RS         std::process::id(),
+//RS         "commit"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     let binding = RemoteBuildBinding::new("builder-race", &root, b"race-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_worker_id("worker-race")
+//RS         .with_platform("linux-x86_64")
+//RS         .with_abi("native");
+//RS     let transport = RemoteCacheTransport::for_binding(&binding).unwrap();
+//RS     let key = ActionKey::new("race-action");
+//RS     let proof = transport
+//RS         .sandbox_proof(
+//RS             "remote:builder-race:trusted:race",
+//RS             "attempt-race-1",
+//RS             key.as_str(),
+//RS             ContentDigest::from_bytes(b"provenance"),
+//RS         )
+//RS         .unwrap();
+//RS     let policy = RemoteCachePolicy::with_grants(false, false, true, proof.clone());
+//RS     let request = RemoteExecutionRequest {
+//RS         key: key.clone(),
+//RS         attempt_id: proof.attempt_id.clone(),
+//RS         argv: vec!["remote-tool".to_string()],
+//RS         inputs: Vec::new(),
+//RS         outputs: Vec::new(),
+//RS         toolchain_digest: ContentDigest::from_bytes(b"toolchain"),
+//RS         sandbox: proof.clone(),
+//RS     };
+//RS     transport.submit_execution(&request, &policy).unwrap();
+//RS     let (stdout_digest, stderr_digest) = remote_empty_log_digests(&transport, &policy);
+//RS     let result = RemoteExecutionResult {
+//RS         key: key.clone(),
+//RS         attempt_id: request.attempt_id.clone(),
+//RS         execution_id: remote_execution_identity(&request),
+//RS         outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS         outputs: Vec::new(),
+//RS         toolchain_digest: request.toolchain_digest.clone(),
+//RS         sandbox: proof.clone(),
+//RS         stdout_digest,
+//RS         stderr_digest,
+//RS         provenance_signer: proof.worker_id.clone(),
+//RS     };
+//RS 
+//RS     let barrier = Arc::new(Barrier::new(3));
+//RS     let publish_transport = transport.clone();
+//RS     let publish_policy = policy.clone();
+//RS     let publish_result = result.clone();
+//RS     let publish_barrier = barrier.clone();
+//RS     let cancel_transport = transport.clone();
+//RS     let cancel_policy = policy.clone();
+//RS     let cancel_key = key.clone();
+//RS     let cancel_barrier = barrier.clone();
+//RS     let (publish, cancel) = std::thread::scope(|scope| {
+//RS         let publish = scope.spawn(move || {
+//RS             publish_barrier.wait();
+//RS             publish_transport.publish_execution_result(&publish_result, &publish_policy)
+//RS         });
+//RS         let cancel = scope.spawn(move || {
+//RS             cancel_barrier.wait();
+//RS             cancel_transport.cancel_execution(&cancel_key, &cancel_policy)
+//RS         });
+//RS         barrier.wait();
+//RS         (publish.join().unwrap(), cancel.join().unwrap())
+//RS     });
+//RS     assert!(publish.is_ok() || matches!(publish, Err(RemoteCacheError::InvalidRecord(_))));
+//RS     assert!(cancel.is_ok());
+//RS     assert!(matches!(
+//RS         transport.download_execution_result(&key, &policy),
+//RS         Err(RemoteCacheError::Io(error))
+//RS             if error.kind() == std::io::ErrorKind::NotFound
+//RS     ));
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn remote_host_binding_registry_round_trips_without_storing_secret() {
+//RS     let _guard = REMOTE_HOST_ENV_LOCK.lock().unwrap();
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_registry_{}_{}",
+//RS         std::process::id(),
+//RS         "binding"
+//RS     ));
+//RS     let config = root.join("config");
+//RS     let remote_root = root.join("remote");
+//RS     let credential = root.join("credential");
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&remote_root).unwrap();
+//RS     fs::write(&credential, b"registry-secret").unwrap();
+//RS     let previous_config = std::env::var_os("XDG_CONFIG_HOME");
+//RS     std::env::set_var("XDG_CONFIG_HOME", &config);
+//RS 
+//RS     let binding = RemoteBuildBinding::bind_host(
+//RS         "registry-builder",
+//RS         &remote_root,
+//RS         &credential,
+//RS         "trusted",
+//RS         "worker-a",
+//RS         "linux-x86_64",
+//RS         "native",
+//RS         true,
+//RS         true,
+//RS         true,
+//RS         true,
+//RS         4321,
+//RS     )
+//RS     .unwrap();
+//RS     let record = config
+//RS         .join("jet")
+//RS         .join("remote-bindings")
+//RS         .join("registry-builder.conf");
+//RS     let record_text = fs::read_to_string(record).unwrap();
+//RS     assert!(!record_text.contains("registry-secret"));
+//RS     assert_eq!(
+//RS         RemoteBuildBinding::list_host().unwrap(),
+//RS         vec!["registry-builder"]
+//RS     );
+//RS     assert_eq!(
+//RS         RemoteBuildBinding::load_host("registry-builder").unwrap(),
+//RS         binding
+//RS     );
+//RS     RemoteBuildBinding::remove_host("registry-builder").unwrap();
+//RS     assert!(RemoteBuildBinding::list_host().unwrap().is_empty());
+//RS 
+//RS     match previous_config {
+//RS         Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+//RS         None => std::env::remove_var("XDG_CONFIG_HOME"),
+//RS     }
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn remote_driver_consumes_authenticated_worker_result() {
+//RS     let project_root = std::env::temp_dir().join(format!(
+//RS         "jet_remote_driver_{}_{}",
+//RS         std::process::id(),
+//RS         "worker"
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&project_root);
+//RS     fs::create_dir_all(&project_root).unwrap();
+//RS     let remote_root = project_root.join("remote-transport");
+//RS     fs::create_dir_all(project_root.join("src")).unwrap();
+//RS     fs::write(project_root.join("src/remote-input"), b"remote input").unwrap();
+//RS     let mut b = BuildContext::new();
+//RS     let action = b
+//RS         .action(
+//RS             "remote-action",
+//RS             ActionSpec::cached(["remote-tool"])
+//RS                 .with_inputs(["src/remote-input"])
+//RS                 .with_outputs(["build/remote-app"])
+//RS                 .with_cap(BuildCapability::Net),
+//RS         )
+//RS         .unwrap();
+//RS     let target = b
+//RS         .add_executable("remote-app", TargetSpec::new().with_action(action))
+//RS         .unwrap();
+//RS     let plan = b.plan_with_default(target).unwrap();
+//RS     let grants = [BuildCapability::Net].into_iter().collect();
+//RS     let store = test_artifact_store(&project_root);
+//RS     let snapshots =
+//RS         snapshot_declared_inputs(&store, &project_root, plan.action(action).unwrap()).unwrap();
+//RS     let key = plan
+//RS         .effective_action_key(
+//RS             action,
+//RS             &snapshots,
+//RS             &grants,
+//RS             std::path::Path::new("remote-tool"),
+//RS             &ContentDigest::from_bytes(b"remote-tool"),
+//RS             &[],
+//RS         )
+//RS         .unwrap();
+//RS     let expected_policy = remote_policy_digest(plan.action(action).unwrap().caps.iter().cloned());
+//RS     let toolchain_identity = plan
+//RS         .toolchain(plan.action(action).unwrap().toolchain)
+//RS         .map(|value| format!("{value:?}"))
+//RS         .unwrap_or_else(|| "missing-toolchain".to_string());
+//RS     let toolchain_digest = ContentDigest::from_bytes(toolchain_identity.as_bytes());
+//RS     let expected_remote_provenance = ContentDigest::from_bytes(
+//RS         format!(
+//RS             "jet.remote-provenance.v1\ntoolchain={}\npolicy={}\n",
+//RS             toolchain_digest.as_str(),
+//RS             expected_policy.as_str(),
+//RS         )
+//RS         .as_bytes(),
+//RS     );
+//RS     let binding = RemoteBuildBinding::new("builder-a", &remote_root, b"driver-worker-key")
+//RS         .unwrap()
+//RS         .with_trust_domain("trusted")
+//RS         .with_worker_id("worker-a")
+//RS         .with_platform(format!(
+//RS             "{}-{}",
+//RS             std::env::consts::OS,
+//RS             std::env::consts::ARCH
+//RS         ))
+//RS         .with_abi("native")
+//RS         .with_execute(true)
+//RS         .with_timeout_ms(2_000);
+//RS 
+//RS     let worker_key = key.clone();
+//RS     let worker_binding = binding.clone();
+//RS     let worker = std::thread::spawn(move || {
+//RS         let transport = RemoteCacheTransport::for_binding(&worker_binding).unwrap();
+//RS         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+//RS         loop {
+//RS             match transport.read_execution_request(&worker_key) {
+//RS                 Ok(request) => {
+//RS                     assert_eq!(
+//RS                         request.sandbox.provenance_digest, expected_remote_provenance,
+//RS                         "remote worker proof must bind toolchain and declared capabilities"
+//RS                     );
+//RS                     let policy =
+//RS                         RemoteCachePolicy::with_grants(false, false, true, request.sandbox.clone());
+//RS                     assert_eq!(request.inputs.len(), 1);
+//RS                     assert_eq!(request.inputs[0].path.as_str(), "src/remote-input");
+//RS                     assert_eq!(
+//RS                         transport
+//RS                             .download_execution_blob(&request.inputs[0].digest, &policy)
+//RS                             .unwrap(),
+//RS                         b"remote input"
+//RS                     );
+//RS                     assert_eq!(request.inputs[0].byte_len, 12);
+//RS                     let bytes = b"remote worker output";
+//RS                     let digest = transport.upload_execution_blob(bytes, &policy).unwrap();
+//RS                     let (stdout_digest, stderr_digest) =
+//RS                         remote_empty_log_digests(&transport, &policy);
+//RS                     transport
+//RS                         .publish_execution_result(
+//RS                             &RemoteExecutionResult {
+//RS                                 key: request.key.clone(),
+//RS                                 attempt_id: request.attempt_id.clone(),
+//RS                                 execution_id: remote_execution_identity(&request),
+//RS                                 outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS                                 outputs: vec![ActionOutputRecord {
+//RS                                     path: request.outputs[0].clone(),
+//RS                                     digest,
+//RS                                     byte_len: bytes.len() as u64,
+//RS                                 }],
+//RS                                 toolchain_digest: request.toolchain_digest.clone(),
+//RS                                 sandbox: request.sandbox.clone(),
+//RS                                 stdout_digest,
+//RS                                 stderr_digest,
+//RS                                 provenance_signer: request.sandbox.worker_id.clone(),
+//RS                             },
+//RS                             &policy,
+//RS                         )
+//RS                         .unwrap();
+//RS                     return;
+//RS                 }
+//RS                 Err(RemoteCacheError::Io(error))
+//RS                     if error.kind() == std::io::ErrorKind::NotFound
+//RS                         && std::time::Instant::now() < deadline =>
+//RS                 {
+//RS                     std::thread::sleep(std::time::Duration::from_millis(2));
+//RS                 }
+//RS                 Err(error) => panic!("remote worker could not read request: {error}"),
+//RS             }
+//RS         }
+//RS     });
+//RS 
+//RS     let execution = execute_build_plan_with_front_end_and_remote(
+//RS         &plan,
+//RS         &project_root,
+//RS         &grants,
+//RS         FrontEndCompletion::all_complete(),
+//RS         Some(&binding),
+//RS     )
+//RS     .unwrap();
+//RS     worker.join().unwrap();
+//RS     assert!(execution.report.events.iter().any(|event| {
+//RS         matches!(
+//RS             event,
+//RS             BuildExecutionEvent::Finished {
+//RS                 action: finished,
+//RS                 outcome: ActionOutcome::Succeeded { exit_code: 0 },
+//RS             } if *finished == action.id()
+//RS         )
+//RS     }));
+//RS     assert_eq!(
+//RS         fs::read(project_root.join("build/remote-app")).unwrap(),
+//RS         b"remote worker output"
+//RS     );
+//RS     let _ = fs::remove_dir_all(project_root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn build_failure_report_survives_local_remote_cache_and_replay() {
+//RS     // `false` is a coreutils applet on some hosts; sandbox canonicalization
+//RS     // can change argv[0] and make its stderr host-dependent. Use `sh -c` so
+//RS     // the failed action has the same empty stderr as the remote fixture.
+//RS     let shell_path = std::env::var_os("PATH")
+//RS         .into_iter()
+//RS         .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+//RS         .map(|directory| directory.join("sh"))
+//RS         .find(|path| path.is_file())
+//RS         .expect("the test host needs a `sh` executable");
+//RS 
+//RS     let local_root = std::env::temp_dir().join(format!(
+//RS         "jet_build_failure_report_{}_local",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&local_root);
+//RS     fs::create_dir_all(&local_root).unwrap();
+//RS     let mut local_context = BuildContext::new();
+//RS     let local_action = local_context
+//RS         .action(
+//RS             "parity-failure",
+//RS             ActionSpec::cached([
+//RS                 shell_path.to_string_lossy().to_string(),
+//RS                 "-c".to_string(),
+//RS                 "exit 1".to_string(),
+//RS             ])
+//RS                 .with_outputs(["build/failure"])
+//RS                 .with_cap(BuildCapability::Exec),
+//RS         )
+//RS         .unwrap();
+//RS     let local_target = local_context
+//RS         .add_executable("local-failure", TargetSpec::new().with_action(local_action))
+//RS         .unwrap();
+//RS     let local_plan = local_context.plan_with_default(local_target).unwrap();
+//RS     let exec_grants = [BuildCapability::Exec]
+//RS         .into_iter()
+//RS         .collect::<std::collections::BTreeSet<_>>();
+//RS     let local_error = execute_build_plan_with_front_end_and_remote(
+//RS         &local_plan,
+//RS         &local_root,
+//RS         &exec_grants,
+//RS         FrontEndCompletion::all_complete(),
+//RS         None,
+//RS     )
+//RS     .unwrap_err();
+//RS     let local_report = match local_error {
+//RS         jet::Comptime::Build::BuildExecutionError::Reported { report } => report,
+//RS         error => panic!("local action did not return its structured report: {error:?}"),
+//RS     };
+//RS     let local_replay_error = execute_build_plan_with_front_end_and_remote(
+//RS         &local_plan,
+//RS         &local_root,
+//RS         &exec_grants,
+//RS         FrontEndCompletion::all_complete(),
+//RS         None,
+//RS     )
+//RS     .unwrap_err();
+//RS     assert_eq!(local_replay_error.report(), Some(&local_report));
+//RS 
+//RS     let remote_project = std::env::temp_dir().join(format!(
+//RS         "jet_build_failure_report_{}_remote",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&remote_project);
+//RS     fs::create_dir_all(&remote_project).unwrap();
+//RS     let remote_root = remote_project.join("remote-transport");
+//RS     let mut remote_context = BuildContext::new();
+//RS     let remote_action = remote_context
+//RS         .action(
+//RS             "parity-failure",
+//RS             ActionSpec::cached(["remote-tool"])
+//RS                 .with_outputs(["build/failure"])
+//RS                 .with_cap(BuildCapability::Net),
+//RS         )
+//RS         .unwrap();
+//RS     let remote_target = remote_context
+//RS         .add_executable("remote-failure", TargetSpec::new().with_action(remote_action))
+//RS         .unwrap();
+//RS     let remote_plan = remote_context.plan_with_default(remote_target).unwrap();
+//RS     let remote_grants = [BuildCapability::Net]
+//RS         .into_iter()
+//RS         .collect::<std::collections::BTreeSet<_>>();
+//RS     let remote_key = remote_plan
+//RS         .effective_action_key(
+//RS             remote_action,
+//RS             &[],
+//RS             &remote_grants,
+//RS             std::path::Path::new("remote-tool"),
+//RS             &ContentDigest::from_bytes(b"remote-tool"),
+//RS             &[],
+//RS         )
+//RS         .unwrap();
+//RS     let binding = RemoteBuildBinding::new(
+//RS         "builder-failure-report",
+//RS         &remote_root,
+//RS         b"failure-report-key",
+//RS     )
+//RS     .unwrap()
+//RS     .with_trust_domain("trusted")
+//RS     .with_worker_id("worker-failure-report")
+//RS     .with_platform(format!(
+//RS         "{}-{}",
+//RS         std::env::consts::OS,
+//RS         std::env::consts::ARCH
+//RS     ))
+//RS     .with_abi("native")
+//RS     .with_cache_read(true)
+//RS     .with_cache_write(true)
+//RS     .with_execute(true)
+//RS     .with_timeout_ms(2_000);
+//RS     let worker_binding = binding.clone();
+//RS     let worker_key = remote_key.clone();
+//RS     let worker = std::thread::spawn(move || {
+//RS         let transport = RemoteCacheTransport::for_binding(&worker_binding).unwrap();
+//RS         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+//RS         loop {
+//RS             match transport.read_execution_request(&worker_key) {
+//RS                 Ok(request) => {
+//RS                     let policy = RemoteCachePolicy::with_grants(
+//RS                         false,
+//RS                         false,
+//RS                         true,
+//RS                         request.sandbox.clone(),
+//RS                     );
+//RS                     let output = b"unused";
+//RS                     let output_digest = transport.upload_execution_blob(output, &policy).unwrap();
+//RS                     let (stdout_digest, stderr_digest) =
+//RS                         remote_empty_log_digests(&transport, &policy);
+//RS                     transport
+//RS                         .publish_execution_result(
+//RS                             &RemoteExecutionResult {
+//RS                                 key: request.key.clone(),
+//RS                                 attempt_id: request.attempt_id.clone(),
+//RS                                 execution_id: remote_execution_identity(&request),
+//RS                                 outcome: ActionOutcome::Failed { exit_code: 1 },
+//RS                                 outputs: vec![ActionOutputRecord {
+//RS                                     path: request.outputs[0].clone(),
+//RS                                     digest: output_digest,
+//RS                                     byte_len: output.len() as u64,
+//RS                                 }],
+//RS                                 toolchain_digest: request.toolchain_digest.clone(),
+//RS                                 sandbox: request.sandbox.clone(),
+//RS                                 stdout_digest,
+//RS                                 stderr_digest,
+//RS                                 provenance_signer: request.sandbox.worker_id.clone(),
+//RS                             },
+//RS                             &policy,
+//RS                         )
+//RS                         .unwrap();
+//RS                     return;
+//RS                 }
+//RS                 Err(RemoteCacheError::Io(error))
+//RS                     if error.kind() == std::io::ErrorKind::NotFound
+//RS                         && std::time::Instant::now() < deadline =>
+//RS                 {
+//RS                     std::thread::sleep(std::time::Duration::from_millis(2));
+//RS                 }
+//RS                 Err(error) => panic!("remote failure worker could not read request: {error}"),
+//RS             }
+//RS         }
+//RS     });
+//RS     let remote_error = execute_build_plan_with_front_end_and_remote(
+//RS         &remote_plan,
+//RS         &remote_project,
+//RS         &remote_grants,
+//RS         FrontEndCompletion::all_complete(),
+//RS         Some(&binding),
+//RS     )
+//RS     .unwrap_err();
+//RS     worker.join().unwrap();
+//RS     let remote_report = match remote_error {
+//RS         jet::Comptime::Build::BuildExecutionError::Reported { report } => report,
+//RS         error => panic!("remote action did not return its structured report: {error:?}"),
+//RS     };
+//RS     assert_eq!(remote_report, local_report);
+//RS 
+//RS     let remote_replayed_error = execute_build_plan_with_front_end_and_remote(
+//RS         &remote_plan,
+//RS         &remote_project,
+//RS         &remote_grants,
+//RS         FrontEndCompletion::all_complete(),
+//RS         Some(&binding),
+//RS     )
+//RS     .unwrap_err();
+//RS     assert_eq!(remote_replayed_error.report(), Some(&local_report));
+//RS 
+//RS     let _ = fs::remove_dir_all(local_root);
+//RS     let _ = fs::remove_dir_all(remote_project);
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 0979 tests/build_graph.rs:1-1828
+

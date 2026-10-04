@@ -1,0 +1,1203 @@
+// PORT-PENDING 0565 crates-jet-comptime-src-comptime-build-execution-runtime-slice-1812: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1812-3010
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn run_probe_sandboxed(
+//RS     executable: &Path,
+//RS     args: &[String],
+//RS     source: Option<(&Path, &str)>,
+//RS ) -> Result<Output, BuildExecutionError> {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet-build-probe-{}-{}",
+//RS         std::process::id(),
+//RS         REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+//RS     ));
+//RS     if let Err(error) = fs::create_dir_all(&root) {
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         return Err(BuildExecutionError::IO {
+//RS             action: "build probe sandbox".to_string(),
+//RS             detail: error.to_string(),
+//RS         });
+//RS     }
+//RS     if let Some((path, contents)) = source {
+//RS         if let Err(error) = fs::write(root.join(path), contents) {
+//RS             let _ = fs::remove_dir_all(&root);
+//RS             return Err(BuildExecutionError::IO {
+//RS                 action: "build probe input".to_string(),
+//RS                 detail: error.to_string(),
+//RS             });
+//RS         }
+//RS     }
+//RS     let result = run_native_sandboxed(executable, args, &root, None, &BTreeMap::new(), false);
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     result
+//RS         .map(|output| output.output)
+//RS         .map_err(|error| match error {
+//RS             NativeSandboxError::Unsupported(_) => BuildExecutionError::SandboxUnavailable,
+//RS             NativeSandboxError::Io(detail) => BuildExecutionError::IO {
+//RS                 action: "build probe sandbox".to_string(),
+//RS                 detail,
+//RS             },
+//RS         })
+//RS }
+//RS 
+//RS fn run_compile_probe(
+//RS     plan: &BuildPlan,
+//RS     toolchain: ToolchainHandle,
+//RS     source: &str,
+//RS ) -> Result<(bool, String), BuildExecutionError> {
+//RS     let compiler = ["cc", "clang", "gcc"]
+//RS         .into_iter()
+//RS         .find_map(|name| resolve_program_path(plan, toolchain, name));
+//RS     let Some(compiler) = compiler else {
+//RS         return Ok((
+//RS             false,
+//RS             "no C compiler (`cc`, `clang`, or `gcc`) was found".to_string(),
+//RS         ));
+//RS     };
+//RS     let args = vec![
+//RS         "-x".to_string(),
+//RS         "c".to_string(),
+//RS         "-fsyntax-only".to_string(),
+//RS         "probe.c".to_string(),
+//RS     ];
+//RS     let output = run_probe_sandboxed(&compiler, &args, Some((Path::new("probe.c"), source)))?;
+//RS     Ok(if output.status.success() {
+//RS         (
+//RS             true,
+//RS             format!("{} accepted the syntax probe", compiler.display()),
+//RS         )
+//RS     } else {
+//RS         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+//RS         (
+//RS             false,
+//RS             if detail.is_empty() {
+//RS                 format!("{} rejected the syntax probe", compiler.display())
+//RS             } else {
+//RS                 format!("{}: {detail}", compiler.display())
+//RS             },
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn find_program_path(program: &str) -> Option<PathBuf> {
+//RS     let direct = Path::new(program);
+//RS     if direct.components().count() > 1 && direct.is_file() {
+//RS         return fs::canonicalize(direct).ok();
+//RS     }
+//RS     std::env::var_os("PATH").and_then(|paths| {
+//RS         std::env::split_paths(&paths).find_map(|dir| {
+//RS             let candidate = dir.join(program);
+//RS             candidate
+//RS                 .is_file()
+//RS                 .then(|| fs::canonicalize(candidate).ok())
+//RS                 .flatten()
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn resolve_program_path(
+//RS     plan: &BuildPlan,
+//RS     toolchain_handle: ToolchainHandle,
+//RS     program: &str,
+//RS ) -> Option<PathBuf> {
+//RS     let toolchain = plan.toolchain(toolchain_handle)?;
+//RS     if let Some(declared) = toolchain.tools.get(program) {
+//RS         return canonical_tool_path(toolchain, declared);
+//RS     }
+//RS     let basename = Path::new(program)
+//RS         .file_name()
+//RS         .and_then(|name| name.to_str());
+//RS     if let Some(basename) = basename {
+//RS         if let Some(declared) = toolchain.tools.get(basename) {
+//RS             return canonical_tool_path(toolchain, declared);
+//RS         }
+//RS     }
+//RS     if matches!(toolchain.resolution, ToolchainResolution::DeclaredOnly) {
+//RS         return None;
+//RS     }
+//RS     if Path::new(program).components().count() > 1 {
+//RS         if let Some(path) = canonical_executable_path(program) {
+//RS             return Some(path);
+//RS         }
+//RS     }
+//RS     // The host toolchain is explicitly ambient. A target toolchain must name
+//RS     // the executable in its declaration; falling through to PATH here would
+//RS     // make a cross build depend on whichever host tool happens to be installed.
+//RS     if matches!(
+//RS         toolchain.role,
+//RS         super::provenance_toolchains::ToolchainRole::Host
+//RS     ) {
+//RS         find_program_path(program)
+//RS     } else if target_matches_running_host(&toolchain.target_triple) {
+//RS         // An explicit native target still runs on the host. Keep the target
+//RS         // identity in the graph, but resolve its tools from the ambient host
+//RS         // toolchain just as the documented `native` build example requires.
+//RS         find_program_path(program)
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS fn target_matches_running_host(triple: &str) -> bool {
+//RS     let arch = std::env::consts::ARCH;
+//RS     let linux = [
+//RS         format!("{arch}-linux"),
+//RS         format!("{arch}-linux-gnu"),
+//RS         format!("{arch}-unknown-linux-gnu"),
+//RS     ];
+//RS     let macos = [format!("{arch}-macos"), format!("{arch}-apple-darwin")];
+//RS     let windows = [
+//RS         format!("{arch}-windows"),
+//RS         format!("{arch}-pc-windows-msvc"),
+//RS         format!("{arch}-pc-windows-gnu"),
+//RS     ];
+//RS     match std::env::consts::OS {
+//RS         "linux" => linux.iter().any(|candidate| candidate == triple),
+//RS         "macos" => macos.iter().any(|candidate| candidate == triple),
+//RS         "windows" => windows.iter().any(|candidate| candidate == triple),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn canonical_executable_path(program: &str) -> Option<PathBuf> {
+//RS     let path = Path::new(program);
+//RS     path.is_file()
+//RS         .then(|| fs::canonicalize(path).ok())
+//RS         .flatten()
+//RS }
+//RS 
+//RS fn canonical_tool_path(
+//RS     toolchain: &super::provenance_toolchains::BuildToolchain,
+//RS     declared: &str,
+//RS ) -> Option<PathBuf> {
+//RS     let declared_path = Path::new(declared);
+//RS     for mount in &toolchain.mounts {
+//RS         let destination = Path::new(&mount.destination);
+//RS         if let Ok(relative) = declared_path.strip_prefix(destination) {
+//RS             if relative
+//RS                 .components()
+//RS                 .any(|component| matches!(component, Component::ParentDir))
+//RS             {
+//RS                 return None;
+//RS             }
+//RS             let source = PathBuf::from(&mount.source).join(relative);
+//RS             return canonical_executable_path(&source.to_string_lossy());
+//RS         }
+//RS     }
+//RS     canonical_executable_path(declared)
+//RS }
+//RS 
+//RS /// Linux gives the action a mount namespace, so declared virtual toolchain
+//RS /// paths stay virtual in argv and the environment. macOS and Windows enforce
+//RS /// the same read-only policy with ACL/sandbox rules but do not project a
+//RS /// second filesystem namespace; translate only the declared mount paths at
+//RS /// that adapter boundary. The action key still contains the canonical virtual
+//RS /// spelling and therefore remains machine-independent.
+//RS fn runtime_toolchain_arguments(
+//RS     plan: &BuildPlan,
+//RS     toolchain: ToolchainHandle,
+//RS     args: &[String],
+//RS ) -> Vec<String> {
+//RS     #[cfg(target_os = "linux")]
+//RS     {
+//RS         let _ = (plan, toolchain);
+//RS         return args.to_vec();
+//RS     }
+//RS 
+//RS     #[cfg(not(target_os = "linux"))]
+//RS     {
+//RS         let Some(toolchain) = plan.toolchain(toolchain) else {
+//RS             return args.to_vec();
+//RS         };
+//RS         args.iter()
+//RS             .map(|argument| runtime_toolchain_argument(toolchain, argument))
+//RS             .collect()
+//RS     }
+//RS }
+//RS 
+//RS fn runtime_toolchain_environment(
+//RS     plan: &BuildPlan,
+//RS     toolchain: ToolchainHandle,
+//RS     env: &BTreeMap<String, String>,
+//RS ) -> BTreeMap<String, String> {
+//RS     #[cfg(target_os = "linux")]
+//RS     {
+//RS         let _ = (plan, toolchain);
+//RS         return env.clone();
+//RS     }
+//RS 
+//RS     #[cfg(not(target_os = "linux"))]
+//RS     {
+//RS         let Some(toolchain) = plan.toolchain(toolchain) else {
+//RS             return env.clone();
+//RS         };
+//RS         env.iter()
+//RS             .map(|(key, value)| (key.clone(), runtime_toolchain_argument(toolchain, value)))
+//RS             .collect()
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(not(target_os = "linux"))]
+//RS fn runtime_toolchain_argument(
+//RS     toolchain: &super::provenance_toolchains::BuildToolchain,
+//RS     argument: &str,
+//RS ) -> String {
+//RS     if let Some(path) = runtime_mount_path(toolchain, argument) {
+//RS         return path;
+//RS     }
+//RS     for prefix in [
+//RS         "--sysroot=",
+//RS         "-isysroot=",
+//RS         "-I",
+//RS         "-L",
+//RS         "-include",
+//RS         "-isystem",
+//RS         "-iquote",
+//RS         "-idirafter",
+//RS         "-imacros",
+//RS     ] {
+//RS         let Some(value) = argument.strip_prefix(prefix) else {
+//RS             continue;
+//RS         };
+//RS         if let Some(path) = runtime_mount_path(toolchain, value) {
+//RS             return format!("{prefix}{path}");
+//RS         }
+//RS     }
+//RS     argument.to_string()
+//RS }
+//RS 
+//RS #[cfg(not(target_os = "linux"))]
+//RS fn runtime_mount_path(
+//RS     toolchain: &super::provenance_toolchains::BuildToolchain,
+//RS     value: &str,
+//RS ) -> Option<String> {
+//RS     for mount in &toolchain.mounts {
+//RS         let destination = mount
+//RS             .destination
+//RS             .trim_end_matches(|character| character == '/' || character == '\\');
+//RS         if value == destination {
+//RS             return Some(mount.source.clone());
+//RS         }
+//RS         let Some(relative) = value.strip_prefix(destination).and_then(|suffix| {
+//RS             suffix
+//RS                 .strip_prefix('/')
+//RS                 .or_else(|| suffix.strip_prefix('\\'))
+//RS         }) else {
+//RS             continue;
+//RS         };
+//RS         let path = Path::new(&mount.source).join(relative);
+//RS         return Some(path.to_string_lossy().into_owned());
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn toolchain_provenance_digest(plan: &BuildPlan, toolchain: ToolchainHandle) -> ContentDigest {
+//RS     let identity = plan
+//RS         .toolchain(toolchain)
+//RS         .map(|value| format!("{value:?}"))
+//RS         .unwrap_or_else(|| "missing-toolchain".to_string());
+//RS     ContentDigest::from_bytes(identity.as_bytes())
+//RS }
+//RS 
+//RS fn remote_provenance_digest(plan: &BuildPlan, action: &BuildAction) -> ContentDigest {
+//RS     let toolchain = toolchain_provenance_digest(plan, action.toolchain);
+//RS     let policy = remote_policy_digest(action.caps.iter().cloned());
+//RS     let statement = format!(
+//RS         "jet.remote-provenance.v1\ntoolchain={toolchain}\npolicy={policy}\n",
+//RS         toolchain = toolchain.as_str(),
+//RS         policy = policy.as_str(),
+//RS     );
+//RS     ContentDigest::from_bytes(statement.as_bytes())
+//RS }
+//RS 
+//RS fn write_action_record(
+//RS     artifact_store: &dyn BuildArtifactStore,
+//RS     key: &ActionKey,
+//RS     record: &ActionResultRecord,
+//RS ) -> io::Result<()> {
+//RS     let mut text = format!(
+//RS         "{}\noutcome={}\n",
+//RS         record.key.as_str(),
+//RS         encode_local_outcome(record.outcome)
+//RS     );
+//RS     if let Some(report) = &record.failure_report {
+//RS         text.push_str("failure=");
+//RS         text.push_str(&hex_encode(report.to_json().as_bytes()));
+//RS         text.push('\n');
+//RS     }
+//RS     for output in &record.outputs {
+//RS         text.push_str(&format!(
+//RS             "{}\t{}\t{}\n",
+//RS             output.path.as_str(),
+//RS             output.digest.as_str(),
+//RS             output.byte_len
+//RS         ));
+//RS     }
+//RS     artifact_store.put_record(key.as_str(), text.as_bytes())
+//RS }
+//RS 
+//RS fn encode_local_outcome(outcome: ActionOutcome) -> String {
+//RS     match outcome {
+//RS         ActionOutcome::Succeeded { exit_code } => format!("succeeded:{exit_code}"),
+//RS         ActionOutcome::Failed { exit_code } => format!("failed:{exit_code}"),
+//RS         ActionOutcome::RestoredFromCache => "restored".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_local_outcome(value: &str) -> io::Result<ActionOutcome> {
+//RS     if value == "restored" {
+//RS         return Ok(ActionOutcome::RestoredFromCache);
+//RS     }
+//RS     let (kind, code) = value.split_once(':').ok_or_else(|| {
+//RS         io::Error::new(
+//RS             io::ErrorKind::InvalidData,
+//RS             "action record outcome is malformed",
+//RS         )
+//RS     })?;
+//RS     let exit_code = code.parse::<i32>().map_err(|_| {
+//RS         io::Error::new(
+//RS             io::ErrorKind::InvalidData,
+//RS             "action record outcome exit code is not a number",
+//RS         )
+//RS     })?;
+//RS     match kind {
+//RS         "succeeded" => Ok(ActionOutcome::Succeeded { exit_code }),
+//RS         "failed" => Ok(ActionOutcome::Failed { exit_code }),
+//RS         _ => Err(io::Error::new(
+//RS             io::ErrorKind::InvalidData,
+//RS             "action record outcome is unknown",
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn cache_restore_miss_reason(error: &io::Error) -> CacheMissReason {
+//RS     match error.kind() {
+//RS         io::ErrorKind::NotFound => CacheMissReason::DeclaredOutputMissing,
+//RS         io::ErrorKind::InvalidData => CacheMissReason::CacheRecordInvalid,
+//RS         _ => CacheMissReason::CacheRestoreFailed,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn read_action_record(
+//RS     artifact_store: &dyn BuildArtifactStore,
+//RS     key: ActionKey,
+//RS ) -> io::Result<Option<ActionResultRecord>> {
+//RS     let Some(bytes) = artifact_store.get_record(key.as_str())? else {
+//RS         return Ok(None);
+//RS     };
+//RS     let text = String::from_utf8(bytes)
+//RS         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "action record is not UTF-8"))?;
+//RS     let mut lines = text.lines();
+//RS     if lines.next() != Some(key.as_str()) {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::InvalidData,
+//RS             "action record key does not match its cache path",
+//RS         ));
+//RS     }
+//RS     let mut outcome = None;
+//RS     let mut failure_report = None;
+//RS     let mut outputs = Vec::new();
+//RS     for line in lines {
+//RS         if let Some(value) = line.strip_prefix("outcome=") {
+//RS             if outcome.is_some() {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::InvalidData,
+//RS                     "action record has duplicate outcome",
+//RS                 ));
+//RS             }
+//RS             outcome = Some(parse_local_outcome(value)?);
+//RS             continue;
+//RS         }
+//RS         if let Some(value) = line.strip_prefix("failure=") {
+//RS             if failure_report.is_some() || value.is_empty() {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::InvalidData,
+//RS                     "action record has an invalid failure report",
+//RS                 ));
+//RS             }
+//RS             let bytes = hex_decode(value)
+//RS                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+//RS             let text = String::from_utf8(bytes).map_err(|_| {
+//RS                 io::Error::new(
+//RS                     io::ErrorKind::InvalidData,
+//RS                     "action failure report is not UTF-8",
+//RS                 )
+//RS             })?;
+//RS             failure_report = Some(
+//RS                 jet_foundation::Outcome::JetErrorReport::from_json(&text).map_err(|error| {
+//RS                     io::Error::new(
+//RS                         io::ErrorKind::InvalidData,
+//RS                         format!("action failure report is invalid: {error}"),
+//RS                     )
+//RS                 })?,
+//RS             );
+//RS             continue;
+//RS         }
+//RS         let mut parts = line.split('\t');
+//RS         let invalid =
+//RS             || io::Error::new(io::ErrorKind::InvalidData, "malformed action output record");
+//RS         let path = BuildPath::new(parts.next().ok_or_else(invalid)?).map_err(|_| invalid())?;
+//RS         let digest = ContentDigest::parse(parts.next().ok_or_else(invalid)?)?;
+//RS         let byte_len = parts
+//RS             .next()
+//RS             .ok_or_else(invalid)?
+//RS             .parse()
+//RS             .map_err(|_| invalid())?;
+//RS         if parts.next().is_some() {
+//RS             return Err(invalid());
+//RS         }
+//RS         outputs.push(ActionOutputRecord {
+//RS             path,
+//RS             digest,
+//RS             byte_len,
+//RS         });
+//RS     }
+//RS     let outcome = outcome.ok_or_else(|| {
+//RS         io::Error::new(io::ErrorKind::InvalidData, "action record has no outcome")
+//RS     })?;
+//RS     if matches!(outcome, ActionOutcome::Failed { .. }) != failure_report.is_some() {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::InvalidData,
+//RS             "failed action record and failure report disagree",
+//RS         ));
+//RS     }
+//RS     if failure_report.is_some() && !outputs.is_empty() {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::InvalidData,
+//RS             "failed action record contains outputs",
+//RS         ));
+//RS     }
+//RS     Ok(Some(ActionResultRecord {
+//RS         key,
+//RS         outcome,
+//RS         outputs,
+//RS         failure_report,
+//RS         provenance: ActionCacheProvenance::hit(CacheHitReason::LocalActionRecordMatched),
+//RS     }))
+//RS }
+//RS 
+//RS fn io_action(action: &BuildAction, error: io::Error) -> BuildExecutionError {
+//RS     BuildExecutionError::IO {
+//RS         action: action.name.clone(),
+//RS         detail: error.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn native_sandbox_error(action: &BuildAction, error: NativeSandboxError) -> BuildExecutionError {
+//RS     match error {
+//RS         NativeSandboxError::Unsupported(_) => BuildExecutionError::SandboxUnavailable,
+//RS         NativeSandboxError::Io(detail) => BuildExecutionError::IO {
+//RS             action: action.name.clone(),
+//RS             detail,
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[derive(Default)]
+//RS     struct TestArtifactStore {
+//RS         blobs: std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
+//RS         records: std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
+//RS     }
+//RS 
+//RS     impl BuildArtifactStore for TestArtifactStore {
+//RS         fn put_blob(&self, bytes: &[u8]) -> std::io::Result<ContentDigest> {
+//RS             let digest = ContentDigest::from_bytes(bytes);
+//RS             self.blobs
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .insert(digest.as_str().to_string(), bytes.to_vec());
+//RS             Ok(digest)
+//RS         }
+//RS 
+//RS         fn get_blob(&self, digest: &ContentDigest) -> std::io::Result<Option<Vec<u8>>> {
+//RS             Ok(self
+//RS                 .blobs
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .get(digest.as_str())
+//RS                 .cloned())
+//RS         }
+//RS 
+//RS         fn put_record(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
+//RS             self.records
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .insert(key.to_string(), bytes.to_vec());
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn get_record(&self, key: &str) -> std::io::Result<Option<Vec<u8>>> {
+//RS             Ok(self
+//RS                 .records
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .get(key)
+//RS                 .cloned())
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn shared_hostile_corpus_is_consumable_by_hermetic_execution() {
+//RS         let corpus = include_str!(concat!(
+//RS             env!("CARGO_MANIFEST_DIR"),
+//RS             "/../../tests/fixtures/build_sandbox/hostile-corpus.tsv"
+//RS         ));
+//RS         let rows = corpus
+//RS             .lines()
+//RS             .filter(|line| !line.is_empty() && !line.starts_with('#'))
+//RS             .map(|line| line.split('\t').collect::<Vec<_>>())
+//RS             .collect::<Vec<_>>();
+//RS         assert_eq!(rows.len(), 7);
+//RS         for row in rows {
+//RS             assert_eq!(row.len(), 4, "malformed hostile corpus row");
+//RS             assert_eq!(row[3], "blocked-or-unsupported");
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn shared_hostile_corpus_runs_through_hermetic_backend() {
+//RS         use std::net::TcpListener;
+//RS         use std::thread;
+//RS         use std::time::{Duration, Instant};
+//RS 
+//RS         let status = native_sandbox_status();
+//RS         if !status.available {
+//RS             assert_eq!(status.policy, "not-enforced");
+//RS             assert!(
+//RS                 status.mechanism.contains("unavailable") || status.mechanism == "unsupported",
+//RS                 "unsupported backend must be named: {status:?}"
+//RS             );
+//RS         }
+//RS 
+//RS         let corpus = include_str!(concat!(
+//RS             env!("CARGO_MANIFEST_DIR"),
+//RS             "/../../tests/fixtures/build_sandbox/hostile-corpus.tsv"
+//RS         ));
+//RS         let cases: Vec<_> = corpus
+//RS             .lines()
+//RS             .filter(|line| !line.is_empty() && !line.starts_with('#'))
+//RS             .map(|line| {
+//RS                 let fields: Vec<_> = line.split('\t').collect();
+//RS                 assert_eq!(fields.len(), 4, "malformed hostile corpus row: {line}");
+//RS                 (fields[0], fields[1], fields[2], fields[3])
+//RS             })
+//RS             .collect();
+//RS         assert_eq!(cases.len(), 7, "hostile corpus lost a required case");
+//RS 
+//RS         let shell = std::env::split_paths(
+//RS             &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+//RS         )
+//RS         .map(|directory| directory.join("bash"))
+//RS         .find(|candidate| candidate.is_file())
+//RS         .or_else(|| {
+//RS             std::env::split_paths(
+//RS                 &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+//RS             )
+//RS             .map(|directory| directory.join("sh"))
+//RS             .find(|candidate| candidate.is_file())
+//RS         })
+//RS         .expect("a shell is required for the hostile corpus");
+//RS         let shell_quote =
+//RS             |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
+//RS         let link_tool = std::env::split_paths(
+//RS             &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+//RS         )
+//RS         .map(|directory| directory.join("ln"))
+//RS         .find(|candidate| candidate.is_file())
+//RS         .expect("ln is required for the hostile corpus");
+//RS         let fill_name = format!("/tmp/jet-hermetic-hostile-fill-{}", std::process::id());
+//RS 
+//RS         for (case_id, _category, _attempt, _expected) in cases {
+//RS             let root = std::env::temp_dir().join(format!(
+//RS                 "jet-hermetic-hostile-{case_id}-{}-{}",
+//RS                 std::process::id(),
+//RS                 REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+//RS             ));
+//RS             let source = root.join("source");
+//RS             let output = root.join("output");
+//RS             let host_secret = root.with_file_name(format!(
+//RS                 "jet-hermetic-hostile-{case_id}-{}-secret",
+//RS                 std::process::id()
+//RS             ));
+//RS             let host_marker = root.with_file_name(format!(
+//RS                 "jet-hermetic-hostile-{case_id}-{}-marker",
+//RS                 std::process::id()
+//RS             ));
+//RS             fs::create_dir_all(&source).unwrap();
+//RS             fs::create_dir_all(&output).unwrap();
+//RS             fs::write(&host_secret, "host-only-secret").unwrap();
+//RS             if case_id == "source-symlink" {
+//RS                 std::os::unix::fs::symlink(&host_secret, source.join("link")).unwrap();
+//RS             }
+//RS 
+//RS             let mut network_thread = None;
+//RS             let command = match case_id {
+//RS                 "host-read" => format!(
+//RS                     "if test -r {}; then printf escaped; else printf blocked; fi",
+//RS                     shell_quote(&host_secret)
+//RS                 ),
+//RS                 "host-write" => format!(
+//RS                     "if printf escaped > {}; then printf escaped; else printf blocked; fi",
+//RS                     shell_quote(&host_marker)
+//RS                 ),
+//RS                 "source-symlink" => {
+//RS                     "if test -r \"$PWD/link\"; then printf escaped; else printf blocked; fi"
+//RS                         .to_string()
+//RS                 }
+//RS                 "output-symlink" => format!(
+//RS                     "if {} -s {} \"$JET_BUILD_OUTPUT/link\" && printf escaped > \"$JET_BUILD_OUTPUT/link\"; then printf escaped; else printf blocked; fi",
+//RS                     shell_quote(&link_tool),
+//RS                     shell_quote(&host_marker)
+//RS                 ),
+//RS                 "network-exfiltration" => {
+//RS                     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS                     listener.set_nonblocking(true).unwrap();
+//RS                     let port = listener.local_addr().unwrap().port();
+//RS                     network_thread = Some(thread::spawn(move || {
+//RS                         let deadline = Instant::now() + Duration::from_millis(750);
+//RS                         loop {
+//RS                             match listener.accept() {
+//RS                                 Ok(_) => return true,
+//RS                                 Err(error)
+//RS                                     if error.kind() == std::io::ErrorKind::WouldBlock =>
+//RS                                 {
+//RS                                     if Instant::now() >= deadline {
+//RS                                         return false;
+//RS                                     }
+//RS                                     thread::sleep(Duration::from_millis(5));
+//RS                                 }
+//RS                                 Err(_) => return false,
+//RS                             }
+//RS                         }
+//RS                     }));
+//RS                     format!(
+//RS                         "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf escaped; else printf blocked; fi"
+//RS                     )
+//RS                 }
+//RS                 "child-process" => format!(
+//RS                     "(printf escaped > {}) & printf blocked",
+//RS                     shell_quote(&host_marker)
+//RS                 ),
+//RS                 "tmpfs-exhaustion" => format!(
+//RS                     "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> {fill_name}; then printf blocked; exit 0; fi; i=$((i + 1)); done; printf escaped"
+//RS                 ),
+//RS                 other => panic!("unmapped hostile corpus case {other}"),
+//RS             };
+//RS             let result = run_native_sandboxed(
+//RS                 &shell,
+//RS                 &["-c".to_string(), command],
+//RS                 &source,
+//RS                 Some(&output),
+//RS                 &BTreeMap::new(),
+//RS                 false,
+//RS             );
+//RS             if !status.available {
+//RS                 assert!(
+//RS                     matches!(result, Err(NativeSandboxError::Unsupported(_))),
+//RS                     "unsupported backend must refuse {case_id} before launch: {result:?}"
+//RS                 );
+//RS                 assert!(!host_marker.exists(), "{case_id} wrote the host marker");
+//RS                 if let Some(network_thread) = network_thread {
+//RS                     assert!(
+//RS                         !network_thread.join().unwrap(),
+//RS                         "{case_id} reached the network"
+//RS                     );
+//RS                 }
+//RS                 fs::remove_file(&host_secret).ok();
+//RS                 fs::remove_file(&host_marker).ok();
+//RS                 fs::remove_file(&fill_name).ok();
+//RS                 fs::remove_dir_all(&root).ok();
+//RS                 continue;
+//RS             }
+//RS             let result = result.unwrap_or_else(|error| {
+//RS                 panic!("{case_id} unexpectedly lost enforcement: {error:?}")
+//RS             });
+//RS             assert_eq!(
+//RS                 result.mechanism, status.mechanism,
+//RS                 "{case_id} backend receipt"
+//RS             );
+//RS             for policy in [
+//RS                 "filesystem=",
+//RS                 "process=",
+//RS                 "network=",
+//RS                 "environment=",
+//RS                 "devices=",
+//RS                 "resources=",
+//RS             ] {
+//RS                 assert!(
+//RS                     result.policy.contains(policy),
+//RS                     "{case_id} receipt lost {policy}: {}",
+//RS                     result.policy
+//RS                 );
+//RS             }
+//RS             assert!(
+//RS                 result.output.status.success(),
+//RS                 "{case_id} backend failed: stdout={} stderr={}",
+//RS                 String::from_utf8_lossy(&result.output.stdout),
+//RS                 String::from_utf8_lossy(&result.output.stderr)
+//RS             );
+//RS             assert_eq!(
+//RS                 String::from_utf8_lossy(&result.output.stdout),
+//RS                 "blocked",
+//RS                 "{case_id} escaped through the hermetic backend"
+//RS             );
+//RS             assert!(!host_marker.exists(), "{case_id} wrote the host marker");
+//RS             if let Some(network_thread) = network_thread {
+//RS                 assert!(
+//RS                     !network_thread.join().unwrap(),
+//RS                     "{case_id} reached the network"
+//RS                 );
+//RS             }
+//RS             if case_id == "child-process" {
+//RS                 thread::sleep(Duration::from_millis(100));
+//RS                 assert!(
+//RS                     !host_marker.exists(),
+//RS                     "{case_id} left a hostile child behind"
+//RS                 );
+//RS             }
+//RS             fs::remove_file(&host_secret).ok();
+//RS             fs::remove_file(&host_marker).ok();
+//RS             fs::remove_file(&fill_name).ok();
+//RS             fs::remove_dir_all(&root).ok();
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn shared_hostile_corpus_runs_through_hermetic_executor() {
+//RS         use crate::Comptime::Build::{ActionSpec, BuildCapability, BuildContext, TargetSpec};
+//RS         use std::net::TcpListener;
+//RS         use std::thread;
+//RS         use std::time::{Duration, Instant};
+//RS 
+//RS         let capability = native_sandbox_status();
+//RS         let corpus = include_str!(concat!(
+//RS             env!("CARGO_MANIFEST_DIR"),
+//RS             "/../../tests/fixtures/build_sandbox/hostile-corpus.tsv"
+//RS         ));
+//RS         let cases: Vec<_> = corpus
+//RS             .lines()
+//RS             .filter(|line| !line.is_empty() && !line.starts_with('#'))
+//RS             .map(|line| {
+//RS                 let fields: Vec<_> = line.split('\t').collect();
+//RS                 assert_eq!(fields.len(), 4, "malformed hostile corpus row: {line}");
+//RS                 (fields[0], fields[1], fields[2], fields[3])
+//RS             })
+//RS             .collect();
+//RS         assert_eq!(cases.len(), 7, "hostile corpus lost a required case");
+//RS 
+//RS         let shell = std::env::split_paths(
+//RS             &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+//RS         )
+//RS         .map(|directory| directory.join("bash"))
+//RS         .find(|candidate| candidate.is_file())
+//RS         .expect("bash is required for the hostile corpus");
+//RS         let link_tool = std::env::split_paths(
+//RS             &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+//RS         )
+//RS         .map(|directory| directory.join("ln"))
+//RS         .find(|candidate| candidate.is_file())
+//RS         .expect("ln is required for the hostile corpus");
+//RS         let shell_quote =
+//RS             |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
+//RS 
+//RS         for (case_id, _category, _attempt, expected) in cases {
+//RS             assert_eq!(expected, "blocked-or-unsupported");
+//RS             let root = std::env::temp_dir().join(format!(
+//RS                 "jet-hermetic-executor-hostile-{case_id}-{}-{}",
+//RS                 std::process::id(),
+//RS                 REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+//RS             ));
+//RS             let host_secret = root.with_file_name(format!(
+//RS                 "jet-hermetic-executor-hostile-{case_id}-{}-secret",
+//RS                 std::process::id()
+//RS             ));
+//RS             let host_marker = root.with_file_name(format!(
+//RS                 "jet-hermetic-executor-hostile-{case_id}-{}-marker",
+//RS                 std::process::id()
+//RS             ));
+//RS             let fill_name = format!(
+//RS                 "/tmp/jet-hermetic-executor-hostile-fill-{}-{case_id}",
+//RS                 std::process::id()
+//RS             );
+//RS             fs::create_dir_all(&root).unwrap();
+//RS             fs::write(&host_secret, "host-only-secret").unwrap();
+//RS 
+//RS             let mut network_thread = None;
+//RS             let command = match case_id {
+//RS                 "host-read" => format!(
+//RS                     "if test -r {}; then printf leaked > status; else printf blocked > status; fi",
+//RS                     shell_quote(&host_secret)
+//RS                 ),
+//RS                 "host-write" => format!(
+//RS                     "if printf escaped > {}; then printf escaped > status; else printf blocked > status; fi",
+//RS                     shell_quote(&host_marker)
+//RS                 ),
+//RS                 "source-symlink" => format!(
+//RS                     "if {} -s {} link && test -r link; then printf leaked > status; else printf blocked > status; fi",
+//RS                     shell_quote(&link_tool),
+//RS                     shell_quote(&host_secret)
+//RS                 ),
+//RS                 "output-symlink" => format!(
+//RS                     "if {} -s {} link && printf escaped > link; then printf escaped > status; else printf blocked > status; fi",
+//RS                     shell_quote(&link_tool),
+//RS                     shell_quote(&host_marker)
+//RS                 ),
+//RS                 "network-exfiltration" => {
+//RS                     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS                     listener.set_nonblocking(true).unwrap();
+//RS                     let port = listener.local_addr().unwrap().port();
+//RS                     network_thread = Some(thread::spawn(move || {
+//RS                         let deadline = Instant::now() + Duration::from_millis(750);
+//RS                         loop {
+//RS                             match listener.accept() {
+//RS                                 Ok(_) => return true,
+//RS                                 Err(error)
+//RS                                     if error.kind() == std::io::ErrorKind::WouldBlock =>
+//RS                                 {
+//RS                                     if Instant::now() >= deadline {
+//RS                                         return false;
+//RS                                     }
+//RS                                     thread::sleep(Duration::from_millis(5));
+//RS                                 }
+//RS                                 Err(_) => return false,
+//RS                             }
+//RS                         }
+//RS                     }));
+//RS                     format!(
+//RS                         "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf leaked > status; else printf blocked > status; fi"
+//RS                     )
+//RS                 }
+//RS                 "child-process" => format!(
+//RS                     "(printf escaped > {}) & child=$!; wait \"$child\"; if test -e {}; then printf escaped > status; else printf blocked > status; fi",
+//RS                     shell_quote(&host_marker),
+//RS                     shell_quote(&host_marker)
+//RS                 ),
+//RS                 "tmpfs-exhaustion" => format!(
+//RS                     "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> {fill_name}; then break; fi; i=$((i + 1)); done; if [ \"$i\" -ge 1025 ]; then printf escaped > status; else printf blocked > status; fi"
+//RS                 ),
+//RS                 other => panic!("unmapped hostile corpus case {other}"),
+//RS             };
+//RS 
+//RS             let mut context = BuildContext::new();
+//RS             let action = context
+//RS                 .action(
+//RS                     format!("hostile-{case_id}"),
+//RS                     ActionSpec::cached(vec![
+//RS                         shell.to_string_lossy().into_owned(),
+//RS                         "-c".to_string(),
+//RS                         command,
+//RS                     ])
+//RS                     .with_outputs(["status"])
+//RS                     .with_cap(BuildCapability::Exec),
+//RS                 )
+//RS                 .unwrap();
+//RS             let target = context
+//RS                 .add_executable(
+//RS                     format!("hostile-target-{case_id}"),
+//RS                     TargetSpec::new().with_action(action),
+//RS                 )
+//RS                 .unwrap();
+//RS             let plan = context.plan_with_default(target).unwrap();
+//RS             let grants = [BuildCapability::Exec].into_iter().collect();
+//RS             let artifact_store = TestArtifactStore::default();
+//RS             let result = execute_build_plan(&plan, &root, &artifact_store, &grants);
+//RS 
+//RS             if capability.available {
+//RS                 result.unwrap_or_else(|error| {
+//RS                     panic!("{case_id} hermetic executor lost enforcement: {error:?}")
+//RS                 });
+//RS                 assert_eq!(
+//RS                     fs::read_to_string(root.join("status")).unwrap().trim(),
+//RS                     "blocked",
+//RS                     "{case_id} escaped through the hermetic BuildPlan executor"
+//RS                 );
+//RS             } else {
+//RS                 assert!(
+//RS                     matches!(&result, Err(BuildExecutionError::SandboxUnavailable)),
+//RS                     "unsupported backend must refuse {case_id} before launch: {result:?}"
+//RS                 );
+//RS             }
+//RS             assert!(!host_marker.exists(), "{case_id} wrote the host marker");
+//RS             if let Some(network_thread) = network_thread {
+//RS                 assert!(
+//RS                     !network_thread.join().unwrap(),
+//RS                     "{case_id} reached the network"
+//RS                 );
+//RS             }
+//RS             fs::remove_file(&host_secret).ok();
+//RS             fs::remove_file(&host_marker).ok();
+//RS             fs::remove_file(&fill_name).ok();
+//RS             fs::remove_dir_all(&root).ok();
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn remote_output_restore_rolls_back_until_committed() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-remote-restore-guard-{}-{}",
+//RS             std::process::id(),
+//RS             REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+//RS         ));
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         let path = root.join("build/out");
+//RS         fs::create_dir_all(path.parent().unwrap()).unwrap();
+//RS         fs::write(&path, b"old").unwrap();
+//RS 
+//RS         fs::write(&path, b"new").unwrap();
+//RS         {
+//RS             let _restore = RemoteOutputRestore {
+//RS                 project_root: &root,
+//RS                 backups: vec![(path.clone(), Some(b"old".to_vec()))],
+//RS                 committed: false,
+//RS             };
+//RS         }
+//RS         assert_eq!(fs::read(&path).unwrap(), b"old");
+//RS 
+//RS         fs::write(&path, b"new").unwrap();
+//RS         let restore = RemoteOutputRestore {
+//RS             project_root: &root,
+//RS             backups: vec![(path.clone(), Some(b"old".to_vec()))],
+//RS             committed: false,
+//RS         };
+//RS         restore.commit();
+//RS         assert_eq!(fs::read(&path).unwrap(), b"new");
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn remote_ineligible_builder_honors_declared_local_fallback() {
+//RS         use crate::Comptime::Build::{ActionSpec, BuildContext, BuildResourcePool, TargetSpec};
+//RS 
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-remote-ineligible-fallback-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let mut context = BuildContext::new();
+//RS         let action = context
+//RS             .action(
+//RS                 "gpu-action",
+//RS                 ActionSpec::cached(["remote-tool"])
+//RS                     .with_outputs(["out/gpu"])
+//RS                     .with_cap(BuildCapability::Net)
+//RS                     .with_pool(BuildResourcePool::GPU),
+//RS             )
+//RS             .unwrap();
+//RS         let target = context
+//RS             .add_executable("gpu-target", TargetSpec::new().with_action(action))
+//RS             .unwrap();
+//RS         let plan = context.plan_with_default(target).unwrap();
+//RS         let binding = RemoteBuildBinding::new("cpu-builder", &root, b"fallback-key")
+//RS             .unwrap()
+//RS             .with_trust_domain("trusted")
+//RS             .with_execute(true)
+//RS             .with_local_fallback(true);
+//RS         let scheduler =
+//RS             RemoteScheduler::new([RemoteBuilder::from_binding(binding.clone())]).unwrap();
+//RS         let grants = [BuildCapability::Net].into_iter().collect();
+//RS 
+//RS         let result = remote_for_action(
+//RS             &plan,
+//RS             plan.action(action).unwrap(),
+//RS             &ActionKey::new("gpu-action-key"),
+//RS             &grants,
+//RS             Some(&binding),
+//RS             Some(&scheduler),
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS         assert!(result.is_none());
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     fn sandbox_bash() -> PathBuf {
+//RS         std::env::split_paths(
+//RS             &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+//RS         )
+//RS         .map(|directory| directory.join("bash"))
+//RS         .find(|candidate| candidate.is_file())
+//RS         .expect("bash is required for sandbox descendant tests")
+//RS     }
+//RS 
+//RS     fn delayed_descendant_script(marker: &str, rest: &str) -> String {
+//RS         // The sandbox PATH is `/nix/store`, so `sleep` is not a command.
+//RS         // Bash `SECONDS` is a builtin clock and does not need a host tool.
+//RS         format!(
+//RS             "(start=$SECONDS; while [ $((SECONDS-start)) -lt 2 ]; do :; done; printf leaked > {marker}) & {rest}"
+//RS         )
+//RS     }
+//RS 
+//RS     fn assert_descendant_reaped(marker: &Path) {
+//RS         std::thread::sleep(Duration::from_secs(3));
+//RS         assert!(
+//RS             !marker.exists(),
+//RS             "sandbox left a pipe-holding descendant alive"
+//RS         );
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn native_sandbox_exit_reaps_pipe_holding_descendant() {
+//RS         let shell = sandbox_bash();
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-build-action-exit-tree-{}-{}",
+//RS             std::process::id(),
+//RS             REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+//RS         ));
+//RS         let descendant_marker = root.join("exit-descendant-marker");
+//RS         fs::create_dir_all(&root).unwrap();
+//RS 
+//RS         let started = Instant::now();
+//RS         let result = run_native_sandboxed_with_timeout(
+//RS             &shell,
+//RS             &[
+//RS                 "-c".to_string(),
+//RS                 delayed_descendant_script("exit-descendant-marker", "exit 0"),
+//RS             ],
+//RS             &root,
+//RS             None,
+//RS             &BTreeMap::new(),
+//RS             false,
+//RS             Some(Duration::from_secs(5)),
+//RS         );
+//RS         let elapsed = started.elapsed();
+//RS         let status = native_sandbox_status();
+//RS         if !status.available {
+//RS             assert!(
+//RS                 matches!(result, Err(NativeSandboxError::Unsupported(_))),
+//RS                 "unsupported backend must refuse the exit action: {result:?}"
+//RS             );
+//RS         } else {
+//RS             let output = result.expect("exit cleanup regression should run");
+//RS             assert!(
+//RS                 output.output.status.success(),
+//RS                 "exit cleanup regression failed: stdout={} stderr={}",
+//RS                 String::from_utf8_lossy(&output.output.stdout),
+//RS                 String::from_utf8_lossy(&output.output.stderr)
+//RS             );
+//RS             assert!(
+//RS                 elapsed < Duration::from_secs(3),
+//RS                 "exit cleanup waited for the pipe holder: {elapsed:?}"
+//RS             );
+//RS             assert_descendant_reaped(&descendant_marker);
+//RS         }
+//RS 
+//RS         fs::remove_dir_all(&root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn native_sandbox_timeout_stops_a_hanging_build_action() {
+//RS         let shell = sandbox_bash();
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-build-action-timeout-{}-{}",
+//RS             std::process::id(),
+//RS             REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+//RS         ));
+//RS         let descendant_marker = root.join("timeout-descendant-marker");
+//RS         fs::create_dir_all(&root).unwrap();
+//RS 
+//RS         let started = Instant::now();
+//RS         let result = run_native_sandboxed_with_timeout(
+//RS             &shell,
+//RS             &[
+//RS                 "-c".to_string(),
+//RS                 delayed_descendant_script(
+//RS                     "timeout-descendant-marker",
+//RS                     "while :; do :; done",
+//RS                 ),
+//RS             ],
+//RS             &root,
+//RS             None,
+//RS             &BTreeMap::new(),
+//RS             false,
+//RS             Some(Duration::from_millis(100)),
+//RS         );
+//RS         let elapsed = started.elapsed();
+//RS         let status = native_sandbox_status();
+//RS         if !status.available {
+//RS             assert!(
+//RS                 matches!(result, Err(NativeSandboxError::Unsupported(_))),
+//RS                 "unsupported backend must refuse the hanging action: {result:?}"
+//RS             );
+//RS         } else {
+//RS             match result {
+//RS                 Err(NativeSandboxError::Io(detail)) => {
+//RS                     assert!(
+//RS                         detail.contains("timed out"),
+//RS                         "timeout regression returned the wrong error: {detail}"
+//RS                     );
+//RS                 }
+//RS                 other => panic!("hanging action was not stopped: {other:?}"),
+//RS             }
+//RS             assert!(
+//RS                 elapsed < Duration::from_secs(3),
+//RS                 "timeout took too long: {elapsed:?}"
+//RS             );
+//RS             assert_descendant_reaped(&descendant_marker);
+//RS         }
+//RS 
+//RS         fs::remove_dir_all(&root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn native_sandbox_output_limit_stops_a_flooding_build_action() {
+//RS         let shell = sandbox_bash();
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-build-action-output-{}-{}",
+//RS             std::process::id(),
+//RS             REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+//RS         ));
+//RS         let descendant_marker = root.join("output-descendant-marker");
+//RS         fs::create_dir_all(&root).unwrap();
+//RS 
+//RS         let started = Instant::now();
+//RS         let result = run_native_sandboxed_with_timeout(
+//RS             &shell,
+//RS             &[
+//RS                 "-c".to_string(),
+//RS                 delayed_descendant_script(
+//RS                     "output-descendant-marker",
+//RS                     "while :; do printf %s 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; done",
+//RS                 ),
+//RS             ],
+//RS             &root,
+//RS             None,
+//RS             &BTreeMap::new(),
+//RS             false,
+//RS             Some(Duration::from_secs(5)),
+//RS         );
+//RS         let elapsed = started.elapsed();
+//RS         let status = native_sandbox_status();
+//RS         if !status.available {
+//RS             assert!(
+//RS                 matches!(result, Err(NativeSandboxError::Unsupported(_))),
+//RS                 "unsupported backend must refuse the flooding action: {result:?}"
+//RS             );
+//RS         } else {
+//RS             match result {
+//RS                 Err(NativeSandboxError::Io(detail)) => {
+//RS                     assert!(
+//RS                         detail.contains("output exceeded"),
+//RS                         "output-limit regression returned the wrong error: {detail}"
+//RS                     );
+//RS                 }
+//RS                 other => panic!("flooding action was not stopped: {other:?}"),
+//RS             }
+//RS             assert!(
+//RS                 elapsed < Duration::from_secs(5),
+//RS                 "output limit took too long: {elapsed:?}"
+//RS             );
+//RS             assert_descendant_reaped(&descendant_marker);
+//RS         }
+//RS 
+//RS         fs::remove_dir_all(&root).unwrap();
+//RS     }
+//RS }
+// END-PORT-PENDING 0565 crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1812-3010
+

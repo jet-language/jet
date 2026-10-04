@@ -1,0 +1,154 @@
+// tests/generics.rs: original closed-module acceptance through real Driver/SemIndex.
+use jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileRequest, JetDriverCompileTarget, JetDriverHostFacts, JetDriverCompilerCheckInput, JetDriverCompilerCheckResult, jet_driver_compiler_check, jet_driver_compiler_check_demand_index, jet_driver_embedded_core_sources, jet_driver_compile]
+use jet_eval.[JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse, jet_eval_default_config, jet_eval_function, jet_eval_retire_result]
+use jet_foundation.[foundation_embedded_core, TComptimeValue, Span, Item, CanonicalASTParsedDefaults, canonical_ast_fragment, DIAGNOSTIC_ERROR]
+use jet_semindex.[InstanceFact]
+use jet_parser.[parse_source]
+use core.files.runtime.kernel_path_components as genmod_test_path
+
+fn genmod_file(relative: String, source: String) -> JetDriverAuthorizedSourceFile Never! {
+    JetDriverAuthorizedSourceFile{path: genmod_test_path.from_text("/generics/{relative}", genmod_test_path.PathPlatform.Unix), relative_path: genmod_test_path.from_text(relative, genmod_test_path.PathPlatform.Unix), identity: "generic-fixture:{relative}", source: source}
+}
+fn genmod_request(source: String, manifest: String, members: [JetDriverAuthorizedSourceFile]) -> JetDriverCompileRequest Never! {
+    files := [JetDriverAuthorizedSourceFile]{genmod_file("main.jet", source), genmod_file("package.jet", manifest)}
+    loop file in members -> &files.push(file)
+    core :: foundation_embedded_core()
+    JetDriverCompileRequest{authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: genmod_test_path.from_text("/generics", genmod_test_path.PathPlatform.Unix), identity: "generic-root", allow_hardlinks: false, files: files, foreign_cache_files: []}}, entry_root_identity: "generic-root", entry_path: genmod_test_path.from_text("/generics/main.jet", genmod_test_path.PathPlatform.Unix)}, canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core), host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("jet@0.1.0#generic-module-test")}, eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native, record_store: None, trace_sink: None, mir_lint_every_pass: false}
+}
+fn genmod_manifest(name: String) -> String Never! {
+    "name: \"{name}\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }} }}\n"
+}
+fn genmod_check(request: JetDriverCompileRequest, source: String) -> JetDriverCompilerCheckResult {
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: source})}) ?? panic("original generic fixture did not parse")
+    jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request})
+}
+fn genmod_clean(result: JetDriverCompilerCheckResult) Never! {
+    assert_eq(result.internal_problem, None)
+    assert(result.complete)
+    loop diagnostic in result.diagnostics -> assert(diagnostic.severity != DIAGNOSTIC_ERROR)
+}
+fn genmod_instances(result: &JetDriverCompilerCheckResult) -> [InstanceFact] {
+    genmod_clean(result)
+    assert(jet_driver_compiler_check_demand_index(&result))
+    index :: result.semantic_index ?? panic("actual generic instance index missing")
+    index.instances().to_list()
+}
+fn genmod_instance(instances: [InstanceFact], application: String) -> InstanceFact Never! {
+    loop instance in instances {
+        loop applied in instance.applications {
+            if applied.name == application -> return instance
+        }
+    }
+    panic("original application {application} absent from actual index")
+}
+fn genmod_application_names(instance: InstanceFact) -> [String] Never! {
+    loop application in instance.applications -> application.name
+}
+fn genmod_run_mir(request: JetDriverCompileRequest, expected: String) {
+    compiled :: jet_driver_compile(^request)
+    assert_eq(compiled.internal_problem, None)
+    assert(compiled.complete)
+    program :: compiled.mir ?? panic("original source did not lower to MIR")
+    entry :: compiled.entry_function ?? panic("run function missing")
+    config := request.eval_config
+    config.runtime_execution = true
+    evaluated := jet_eval_function(^program, entry, [TComptimeValue]{}, ^config)
+    assert_eq(evaluated.internal_problem, None)
+    assert_eq(evaluated.error, None)
+    assert(evaluated.complete)
+    assert_eq(evaluated.stdout, expected)
+    assert(jet_eval_retire_result(&evaluated, Span{start: 0, end: 0}))
+}
+
+#Test("generic_module_profile_fact_values_are_closed_and_fingerprinted") {
+    manifest :: "name: \"profile_fact\"\nversion: \"0.1.0\"\nsettings: {{ cache_slots: Int = 3 }}\nbuild: {{ compact: Build{{ optimize: full, settings: {{ cache_slots: 2 }} }}, spacious: Build{{ optimize: full, settings: {{ cache_slots: 5 }} }} }}\n"
+    fingerprints := [String]{}
+    loop (position, profile) in [String]{"compact", "spacious"} {
+        request := genmod_request(GENMOD_PROFILE_SOURCE, manifest, [])
+        request.profile = profile
+        result := genmod_check(request, GENMOD_PROFILE_SOURCE)
+        instances :: genmod_instances(&result)
+        identity :: genmod_instance(instances, "tuned")
+        expected :: if position == 0 -> 2 else -> 5
+        assert_eq(identity.argument_values[1], "value:{expected}")
+        setting := false
+        selected_profile := false
+        loop origin in identity.argument_provenance[1] {
+            if origin.contains("settings.cache_slots") -> setting = true
+            if origin.contains("build.{profile}") -> selected_profile = true
+        }
+        assert(setting && selected_profile)
+        assert(genmod_application_names(identity).contains("chained"))
+        assert(identity.full_key_hex != "")
+        &fingerprints.push(identity.fingerprint)
+    }
+    assert(fingerprints[0] != fingerprints[1])
+}
+#Test("generic_modules_canonical_spelling_keeps_comptime_bindings") {
+    request :: genmod_request(GENMOD_CANONICAL_SOURCE, genmod_manifest("canonical"), [])
+    genmod_clean(genmod_check(request, GENMOD_CANONICAL_SOURCE))
+    genmod_run_mir(request, "104\n7\n")
+}
+#Test("generic_module_diagnostics_hide_instance_mangling") {
+    result :: genmod_check(genmod_request(GENMOD_DIAGNOSTIC_SOURCE, genmod_manifest("diagnostics"), []), GENMOD_DIAGNOSTIC_SOURCE)
+    assert(!result.complete)
+    assert(result.diagnostics.len() != 0)
+    loop diagnostic in result.diagnostics {
+        assert(!diagnostic.what.contains("M5BoxedEntry"))
+        assert(!diagnostic.why.contains("M5BoxedEntry"))
+        assert(!diagnostic.fix.contains("M5BoxedEntry"))
+    }
+}
+#Test("generic_modules_complete_instantiation: every original body witness") {
+    loop source in [String]{GENMOD_COMPLETE_SOURCE, GENMOD_NESTED_SOURCE, GENMOD_BODY_SOURCE, GENMOD_BOUNDARIES_SOURCE} {
+        genmod_clean(genmod_check(genmod_request(source, genmod_manifest("complete"), []), source))
+    }
+}
+#Test("generic_modules_complete_instantiation: four full identities and ordered applications") {
+    members :: [JetDriverAuthorizedSourceFile]{genmod_file("left.jet", "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n"), genmod_file("right.jet", "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n")}
+    result := genmod_check(genmod_request(GENMOD_MULTI_SOURCE, genmod_manifest("generic_modules_complete"), members), GENMOD_MULTI_SOURCE)
+    instances :: genmod_instances(&result)
+    assert_eq(instances.len(), 4)
+    shared :: genmod_instance(instances, "first")
+    assert_eq(genmod_application_names(shared), [String]{"first", "equivalent"})
+    keys := [String:Bool]{}
+    loop instance in instances -> keys[instance.full_key_hex] = true
+    assert_eq(keys.len(), 4)
+}
+#Test("generic_module_local_bindings_shadow_substitution_values") {
+    request :: genmod_request(GENMOD_SHADOW_SOURCE, genmod_manifest("generic_module_shadowing"), [])
+    genmod_clean(genmod_check(request, GENMOD_SHADOW_SOURCE))
+    genmod_run_mir(request, "5\n5\n")
+}
+#Test("assert_nested_generic_module_execution: original nested identity and execution") {
+    request :: genmod_request(GENMOD_NESTED_RUN_SOURCE, genmod_manifest("generic_modules_nested"), [])
+    result := genmod_check(request, GENMOD_NESTED_RUN_SOURCE)
+    instances :: genmod_instances(&result)
+    assert_eq(instances.len(), 2)
+    nested :: genmod_instance(instances, "selected_plain_closed")
+    assert_eq(genmod_application_names(nested), [String]{"selected_plain_closed", "selected_plain_forwarded"})
+    genmod_run_mir(request, "6\n")
+}
+#Test("assert_closed_value_identity: every original scalar and enum kind") {
+    result := genmod_check(genmod_request(GENMOD_CLOSED_SOURCE, genmod_manifest("generic_modules_value_identity"), []), GENMOD_CLOSED_SOURCE)
+    instances :: genmod_instances(&result)
+    assert_eq(instances.len(), 6)
+    shared :: genmod_instance(instances, "same")
+    assert_eq(genmod_application_names(shared), [String]{"same", "equivalent"})
+}
+#Test("generic_template_snapshot_never_filters_parser_admitted_items") {
+    parsed :: parse_source(GENMOD_SNAPSHOT_SOURCE.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    found := false
+    loop item in parsed.program.items {
+        if item == .GenericModule(template) {
+            snapshot := template
+            assert_eq(snapshot.body.len(), template.body.len())
+            loop (position, original) in template.body {
+                assert_eq(canonical_ast_fragment<CanonicalASTParsedDefaults>(snapshot.body[position], .Parsed, false), canonical_ast_fragment<CanonicalASTParsedDefaults>(original, .Parsed, false))
+            }
+            found = true
+        }
+    }
+    assert(found)
+}

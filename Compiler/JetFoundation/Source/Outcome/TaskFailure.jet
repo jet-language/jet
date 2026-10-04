@@ -1,0 +1,20 @@
+// Outcome.rs:2166-2186. One task-failure transport carrier; scheduler adapters
+// marshal it rather than inventing tier-specific failure wording.
+#Error
+pub enum JetTaskFailure { Cancelled DeadlineBlown Panicked(reason: String) }
+pub fn jet_task_failure_message(failure: JetTaskFailure) -> String Never! {
+    if failure == {
+        .Cancelled -> "task cancelled"
+        .DeadlineBlown -> "task deadline exceeded"
+        .Panicked(reason) -> ~reason
+    }
+}
+// Rust derived Debug is observable in SourceDeoptError::CallbackJob. Only the
+// scalar String uses runtime Debug; the enum shape is emitted explicitly.
+pub fn jet_task_failure_debug(failure: JetTaskFailure) -> String Never! {
+    if failure == {
+        .Cancelled -> "Cancelled"
+        .DeadlineBlown -> "DeadlineBlown"
+        .Panicked(reason) -> "Panicked({reason:Debug})"
+    }
+}

@@ -1,0 +1,264 @@
+// Rust CLISchema.rs:150-473. The AST projection, not the TIR artifact registry.
+use core.files.runtime.kernel_path_traits as job_registry_path
+
+pub struct JobArgumentSchema {
+    pub name: String
+    pub label: String
+    pub ty: String
+    pub required: Bool
+    pub default: String?
+    pub variadic: Bool
+    pub zone: ParamZone
+
+    pub fn display(self) -> String Never! {
+        prefix :: if self.variadic -> "..." else -> ""
+        "{self.label}: {prefix}{self.ty}"
+    }
+
+    pub fn from_param(parameter: Param) -> JobArgumentSchema Never! {
+        optional :: if parameter.ty == { .Option(_) -> true, else -> false }
+        default :: if parameter.default == .Val(value) -> job_argument_default_text(value) else -> None
+        JobArgumentSchema{name: parameter.name, label: param_call_label(parameter), ty: type_name(parameter.ty), required: !parameter.variadic && !optional && parameter.ty != Type.Bool && parameter.default == None, default: default, variadic: parameter.variadic, zone: parameter.zone}
+    }
+}
+
+// CLISchema::expr_default; only literal native values are a CLI default.
+fn job_argument_default_text(expression: Expr) -> String? Never! {
+    if expression == {
+        .Paren(value, _) -> job_argument_default_text(value)
+        .Int(value, _, _, _) -> Val("{value}")
+        .Float(value, _, is_f32, _) -> {
+            if !is_f32 -> return Val("{value:Debug}")
+            narrow :: if {
+                value == Float.INFINITY -> F32.INFINITY
+                value == Float.NEG_INFINITY -> F32.NEG_INFINITY
+                value != value -> F32.NAN
+                else -> F32.from_float(value) ?? return None
+            }
+            Val("{narrow:Debug}")
+        }
+        .Bool(value, _) -> Val("{value}")
+        .Str(parts, _) -> {
+            if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
+            None
+        }
+        else -> None
+    }
+}
+
+pub struct JobFact {
+    pub name: String
+    pub scope: JobScope
+    pub doc: String?
+    pub arguments: [JobArgumentSchema]
+    pub after: [String]
+    pub packages: [String]
+    pub cwd: String?
+    pub inputs: [String]
+    pub outputs: [String]
+    pub skip: JobSkip?
+    pub cache: JobCachePolicy
+    pub parallel: Int
+    pub limits: [StringMapEntry]
+    // Presentation spelling only. Runtime cadence remains Func.every.resolved.
+    pub schedule: String?
+
+    pub fn from_function(function: Func) -> JobFact Never! {
+        metadata :: function.job_metadata ?? ast_job_metadata()
+        arguments := [JobArgumentSchema]{}
+        loop parameter in function.params {
+            if parameter.name != "self" -> &arguments.push(JobArgumentSchema.from_param(parameter))
+        }
+        schedule :: if function.every == .Val(every) -> job_schedule_text(every) else -> None
+        JobFact{name: function.name, scope: metadata.scope, doc: job_function_doc(function), arguments: arguments, after: ~metadata.after, packages: ~metadata.packages, cwd: ~metadata.cwd, inputs: ~metadata.inputs, outputs: ~metadata.outputs, skip: ~metadata.skip, cache: metadata.cache, parallel: metadata.parallel ?? 1, limits: ~metadata.limits, schedule: schedule}
+    }
+
+    pub fn metadata(self) -> JobMetadata Never! {
+        JobMetadata{scope: self.scope, after: ~self.after, packages: ~self.packages, cwd: ~self.cwd, inputs: ~self.inputs, outputs: ~self.outputs, skip: ~self.skip, cache: self.cache, parallel: Val(self.parallel), limits: ~self.limits}
+    }
+
+    pub fn scope_name(self) -> String Never! {
+        if self.scope == { .Dev -> "dev", .Ship -> "ship", .Internal -> "internal" }
+    }
+}
+
+pub fn job_function_doc(function: Func) -> String? Never! {
+    loop marker in function.markers {
+        if marker.name != "Doc" -> next
+        if marker.args.len() == 0 -> return None
+        if marker.args[0] == .Expr(expression) && expression == .Str(parts, _) {
+            if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
+        }
+        return None
+    }
+    None
+}
+
+fn job_schedule_text(marker: EveryMarker) -> String? Never! {
+    if marker.arg == {
+        .Duration(int, float, suffix, _) -> {
+            value :: if int == .Val(value) -> "{value}" else -> if float == .Val(value) -> "{value}" else -> ""
+            Val("{value}{suffix}")
+        }
+        .WallClock(text, _) -> Val("day {text}")
+        .Expression(_) -> None
+    }
+}
+
+pub struct JobRegistry {
+    rows: [JobFact]
+
+    pub fn default() -> JobRegistry Never! { JobRegistry{rows: []} }
+
+    pub fn from_items(items: View<Item>) -> JobRegistry Never! {
+        registry := JobRegistry.default()
+        loop item in items {
+            if item == .Func(function) && function.is_job -> &registry.rows.push(JobFact.from_function(function))
+        }
+        registry
+    }
+
+    pub fn from_program(program: Program) -> JobRegistry Never! {
+        JobRegistry.from_items(program.items.view(0..<program.items.len()))
+    }
+
+    // Uses the sole retained Foundation loader owner (#4494), never registration
+    // modules/Prelude helpers. Explicit original index makes equal keys stable.
+    pub fn from_modules(modules: View<LoadedModule>) -> JobRegistry Never! {
+        order := [Int]{}
+        loop index in 0..<modules.len() -> &order.push(index)
+        &order.sort_by((left: Int, right: Int) -> {
+            if modules[left].display != modules[right].display -> return modules[left].display <=> modules[right].display
+            path_order :: job_registry_path.compare(modules[left].path, modules[right].path)
+            if path_order != Ordering.Equal -> return path_order
+            left <=> right
+        })
+        registry := JobRegistry.default()
+        loop index in order -> &registry.append(JobRegistry.from_items(modules[index].items.view(0..<modules[index].items.len())))
+        registry
+    }
+
+    pub fn from_bundle(bundle: ProgramBundle) -> JobRegistry Never! {
+        JobRegistry.from_modules(bundle.modules.view(0..<bundle.modules.len()))
+    }
+
+    pub fn for_entry(bundle: ProgramBundle) -> JobRegistry Never! {
+        if bundle.entry < 0 || bundle.entry >= bundle.modules.len() -> return JobRegistry.default()
+        items :: bundle.modules[bundle.entry].items
+        JobRegistry.from_items(items.view(0..<items.len()))
+    }
+
+    pub fn append(&self, ^other: JobRegistry) Never! {
+        &self.rows.extend(^other.rows)
+    }
+
+    pub fn into_jobs(^self) -> [JobFact] Never! { ^self.rows }
+    pub fn jobs(self) -> View<JobFact> Never! from self { self.rows.view(0..<self.rows.len()) }
+
+    pub fn visible_jobs(self) -> [@JobFact] Never! from self {
+        visible := [@JobFact]{}
+        loop index in 0..<self.rows.len() {
+            if self.rows[index].scope != JobScope.Internal -> &visible.push(@self.rows[index])
+        }
+        visible
+    }
+
+    pub fn find(self, name: String) -> ?@JobFact Never! from self {
+        loop index in 0..<self.rows.len() {
+            if self.rows[index].name == name -> return Val(@self.rows[index])
+        }
+        None
+    }
+
+    pub fn find_visible(self, name: String) -> ?@JobFact Never! from self {
+        loop index in 0..<self.rows.len() {
+            if self.rows[index].name == name && self.rows[index].scope != JobScope.Internal -> return Val(@self.rows[index])
+        }
+        None
+    }
+
+    pub fn dependency_closure(self, root: String) -> [@JobFact] String! from self {
+        index :: job_registry_name_index(self.rows.view(0..<self.rows.len()))
+        state := [Int]{}
+        loop _ in self.rows -> &state.push(0)
+        order :: job_registry_visit(self.rows.view(0..<self.rows.len()), root, index, &state) ?? return Err(err)
+        jobs := [@JobFact]{}
+        loop position in order -> &jobs.push(@self.rows[position])
+        Ok(jobs)
+    }
+
+    pub fn validate_graph(self) String! {
+        index :: job_registry_name_index(self.rows.view(0..<self.rows.len()))
+        names := [String]{}
+        loop (name, _) in index -> &names.push(name)
+        &names.sort_by((left: String, right: String) -> left <=> right)
+        state := [Int]{}
+        loop _ in self.rows -> &state.push(0)
+        loop name in names { job_registry_visit(self.rows.view(0..<self.rows.len()), name, index, &state) ?? return Err(err) }
+        Ok(())
+    }
+
+    pub fn completion_words(self) -> [String] Never! {
+        seen := [String:Bool]{}
+        words := [String]{}
+        loop job in self.rows {
+            if job.scope == JobScope.Internal || seen.get(job.name) != None -> next
+            seen[job.name] = true
+            &words.push(job.name)
+        }
+        words
+    }
+}
+
+// A single O(V) name index preserves ambiguity (negative index), not dedup.
+// Iterative declaration-order DFS is O(V+E), with no recursive host stack or
+// copied JobFact payload. validate_graph shares only successful visited states;
+// sorted roots and the first error/cycle spelling remain Rust's exact order.
+fn job_registry_name_index(rows: View<JobFact>) -> [String:Int] Never! {
+    index := [String:Int]{}
+    loop (position, row) in rows {
+        if index.get(row.name) != None -> index[row.name] = -1
+        else -> index[row.name] = position
+    }
+    index
+}
+
+struct JobRegistryVisitFrame { position: Int, next_dependency: Int }
+
+fn job_registry_visit(rows: View<JobFact>, root: String, index: [String:Int], state: &[Int]) -> [Int] String! {
+    stack := [JobRegistryVisitFrame]{}
+    order := [Int]{}
+    pending := String?{Val(root)}
+    active := [Int:Int]{}
+    loop pending != None || stack.len() > 0 {
+        if pending == .Val(name) {
+            pending = None
+            position :: index.get(name) ?? return Err("job graph references unknown job `{name}`")
+            if position < 0 -> return Err("job `{name}` has an ambiguous declaration")
+            if state[position] == 2 -> next
+            if state[position] == 1 {
+                start :: active.get(position) ?? 0
+                cycle := [String]{}
+                loop offset in start..<stack.len() -> &cycle.push(rows[stack[offset].position].name)
+                &cycle.push(name)
+                return Err("job graph contains a cycle: {cycle.join(" -> ")}")
+            }
+            if rows[position].parallel == 0 -> return Err("job `{name}` declares a zero parallel bound")
+            state[position] = 1
+            active[position] = stack.len()
+            &stack.push(JobRegistryVisitFrame{position: position, next_dependency: 0})
+        }
+        top :: stack.len() - 1
+        frame :: stack[top]
+        if frame.next_dependency < rows[frame.position].after.len() {
+            pending = Val(rows[frame.position].after[frame.next_dependency])
+            stack[top].next_dependency += 1
+        } else {
+            state[frame.position] = 2
+            &active.remove(frame.position).drop("the completed frame no longer participates in a cycle")
+            &stack.pop().drop("the completed frame has been emitted")
+            &order.push(frame.position)
+        }
+    }
+    Ok(order)
+}

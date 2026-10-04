@@ -1,0 +1,119 @@
+// MIR.rs:7135-7288,7290-7355: actual structured pass snapshots, NOT
+// MIRProgramIdentity canonical JSON and NOT full program Debug. Every row is
+// read from the original borrowed MIR program in retained order.
+pub fn mir_canonical_payload(program: MIRProgram) -> String Never! {
+    functions :: loop function in program.functions -> canonical_pass_mir_function(function)
+    "{{\"representation\":\"mir\",\"schema_version\":{program.schema_version},\"package\":{foundation_json_quote(program.package_identity)},\"functions\":[{functions.join(",")}]}}"
+}
+pub fn mir_canonical_identity(program: MIRProgram) -> String Never! {
+    functions :: loop function in program.functions -> "{{\"id\":\"{function.id.value}\",\"key\":{foundation_json_quote(function.key)},\"span\":{{\"start\":{function.span.start},\"end\":{function.span.end}}}}}"
+    "{{\"representation\":\"mir\",\"schema_version\":{program.schema_version},\"package\":{foundation_json_quote(program.package_identity)},\"functions\":[{functions.join(",")}]}}"
+}
+fn canonical_pass_mir_function(function: MIRFunction) -> String Never! {
+    blocks :: loop block in function.blocks -> canonical_pass_mir_block(block)
+    // Jet's actual module_name field retains Rust MirFunction.module.
+    "{{\"id\":\"{function.id.value}\",\"key\":{foundation_json_quote(function.key)},\"module\":{foundation_json_quote(function.module_name)},\"name\":{foundation_json_quote(function.name)},\"span\":{{\"start\":{function.span.start},\"end\":{function.span.end}}},\"return_type\":{canonical_pass_mir_type(function.return_type)},\"blocks\":[{blocks.join(",")}]}}"
+}
+fn canonical_pass_mir_block(block: MIRBasicBlock) -> String Never! {
+    instructions :: loop instruction in block.instructions -> canonical_pass_mir_instruction(instruction)
+    "{{\"id\":\"{block.id.value}\",\"span\":{{\"start\":{block.span.start},\"end\":{block.span.end}}},\"instructions\":[{instructions.join(",")}],\"terminator\":{foundation_json_quote(canonical_pass_mir_terminator(block.terminator))}}}"
+}
+fn canonical_pass_mir_instruction(instruction: MIRInstruction) -> String Never! {
+    result :: if instruction.result == { .Val(id) -> "\"{id.value}\"" .None -> "null" }
+    ty :: if instruction.ty == { .Val(value) -> canonical_pass_mir_type(value) .None -> "null" }
+    line :: if instruction.source_line == { .Val(value) -> "{value}" .None -> "null" }
+    uses :: loop value in mir_operation_value_uses(instruction.operation) -> "\"{value.value}\""
+    "{{\"id\":\"{instruction.id.value}\",\"span\":{{\"start\":{instruction.span.start},\"end\":{instruction.span.end}}},\"source_line\":{line},\"result\":{result},\"type\":{ty},\"operation\":{{\"kind\":{foundation_json_quote(canonical_pass_mir_operation_kind(instruction.operation))},\"value_uses\":[{uses.join(",")}]{canonical_pass_mir_copy_materialization(instruction.operation)}}}}}"
+}
+fn canonical_pass_mir_copy_materialization(operation: MIROperation) -> String Never! {
+    if operation == {
+        .Copy(_, fact) -> ",\"copy_fact\":{foundation_json_quote(mir_copy_fact_name(fact))}"
+        .TraitBox(_, target) -> ",\"trait_box_target\":\"{target.value}\""
+        else -> ""
+    }
+}
+fn canonical_pass_mir_type(ty: MIRType) -> String Never! {
+    identity :: if ty.identity == { .Val(id) -> "\"{id.value}\"" .None -> "null" }
+    "{{\"key\":{foundation_json_quote(mir_type_canonical_key(ty))},\"identity\":{identity},\"abi\":{foundation_json_quote(mir_digest_abi_debug(ty.layout.abi))},\"size\":{canonical_pass_mir_size(ty.layout.size)},\"align\":{canonical_pass_mir_size(ty.layout.align)}}}"
+}
+fn canonical_pass_mir_size(size: MIRSize) -> String Never! {
+    if size == { .Static(value) -> "{value}" .Dynamic -> "null" }
+}
+fn canonical_pass_mir_terminator(terminator: MIRTerminator) -> String Never! {
+    if terminator == {
+        .Jump(_) -> "Jump"
+        .Branch(_, _, _) -> "Branch"
+        .Switch(_, _, _) -> "Switch"
+        .Return(_) -> "Return"
+        .Yield(_, _, _) -> "Yield"
+        .Break(_, _) -> "Break"
+        .Continue(_) -> "Continue"
+        .Unreachable(_) -> "Unreachable"
+    }
+}
+fn canonical_pass_mir_operation_kind(operation: MIROperation) -> String Never! {
+    if operation == {
+        .Parameter(_, _) -> "Parameter"
+        .Capture(_) -> "Capture"
+        .Global(_) -> "Global"
+        .Phi(_) -> "Phi"
+        .ReadPlace(_) -> "ReadPlace"
+        .MovePlace(_) -> "MovePlace"
+        .WritePlace(_, _) -> "WritePlace"
+        .ReplacePlace(_, _) -> "ReplacePlace"
+        .InitializeUninit(_) -> "InitializeUninit"
+        .Copy(_, _) -> "Copy"
+        .Move(_) -> "Move"
+        .TraitBox(_, _) -> "TraitBox"
+        .Constant(_) -> "Constant"
+        .Unary(_, _) -> "Unary"
+        .Binary(_, _, _, _, _) -> "Binary"
+        .BuildString(_) -> "BuildString"
+        .BuildList(_, _) -> "BuildList"
+        .BuildMap(_) -> "BuildMap"
+        .EnumIs(_, _, _) -> "EnumIs"
+        .EnumPayload(_, _, _, _) -> "EnumPayload"
+        .OptionIsSome(_) -> "OptionIsSome"
+        .OptionValue(_) -> "OptionValue"
+        .ResultIsOk(_) -> "ResultIsOk"
+        .ResultValue(_, _) -> "ResultValue"
+        .PatternCapture(_, _) -> "PatternCapture"
+        .PatternMatched(_) -> "PatternMatched"
+        .ProjectMembers(_, _) -> "ProjectMembers"
+        .Index(_, _, _, _, _, _, _) -> "Index"
+        .Slice(_, _, _, _, _, _) -> "Slice"
+        .Range(_, _, _) -> "Range"
+        .Field(_, _) -> "Field"
+        .Struct(_, _) -> "Struct"
+        .Enum(_, _, _) -> "Enum"
+        .Tuple(_, _) -> "Tuple"
+        .Present(_) -> "Present"
+        .Convert(_, _, _, _) -> "Convert"
+        .Absent -> "Absent"
+        .ResultOk(_) -> "ResultOk"
+        .ResultErr(_) -> "ResultErr"
+        .Call(_, _, _) -> "Call"
+        .IndirectCall(_, _, _) -> "IndirectCall"
+        .Closure(_, _, _) -> "Closure"
+        .PtrFromAddr(_, _) -> "PtrFromAddr"
+        .Deref(_) -> "Deref"
+        .RawAddressOf(_) -> "RawAddressOf"
+        .AddressOf(_, _) -> "AddressOf"
+        .CoreCall(_, _, _, _, _, _) -> "CoreCall"
+        .AttachTag(_, _) -> "AttachTag"
+        .Todo(_, _, _) -> "Todo"
+        .Never(_) -> "Never"
+        .Semantic(_) -> "Semantic"
+        .LoopRangeInit(_, _, _, _, _) -> "LoopRangeInit"
+        .LoopRangeHasNext(_, _) -> "LoopRangeHasNext"
+        .LoopRangeValue(_, _) -> "LoopRangeValue"
+        .LoopRangeAdvance(_, _) -> "LoopRangeAdvance"
+        .LoopIterInit(_, _, _, _, _) -> "LoopIterInit"
+        .LoopIterHasNext(_, _) -> "LoopIterHasNext"
+        .LoopIterValue(_, _) -> "LoopIterValue"
+        .LoopIterAdvance(_, _) -> "LoopIterAdvance"
+        .ScopeEnter(_, _) -> "ScopeEnter"
+        .ScopeExit(_) -> "ScopeExit"
+        .Drop(_, _) -> "Drop"
+    }
+}

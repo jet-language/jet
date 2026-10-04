@@ -1,0 +1,159 @@
+fn dimension_test_exponent(value: Int) -> Measure Never! { Measure.SignedLiteral{kind: "exponent", value: value} }
+
+fn dimension_test_names(dimension: Dimension) -> [String] Never! { loop axis in dimension.axes -> axis.name }
+
+fn dimension_test_exponent_of(dimension: Dimension, name: String) -> Measure? {
+    loop axis in dimension.axes {
+        if axis.name == name -> return Val(axis.exponent)
+    }
+    None
+}
+
+fn dimension_test_identity(identity: String) -> Dimension Never! {
+    dimension_from_identity(identity) ?? panic("canonical dimension identity must parse")
+}
+
+// Rust AST/types.rs::physical_dimensions_normalize_and_serialize_stably.
+#Test("physical_dimensions_normalize_and_serialize_stably") {
+    mass :: dimension_base("pkg::Mass")
+    length :: dimension_base("pkg::Length")
+    time :: dimension_base("pkg::Time")
+    mass_length :: dimension_multiply(mass, length) ?? panic("mass * length")
+    per_time :: dimension_divide(mass_length, time) ?? panic("/ time")
+    force :: dimension_divide(per_time, time) ?? panic("/ time")
+    assert(dimension_identity(force) == "pkg%3A%3ALength:1;pkg%3A%3AMass:1;pkg%3A%3ATime:-2")
+    assert(dimension_test_exponent_of(force, "pkg::Time") == (Val(dimension_test_exponent(-2))))
+    assert(dimension_from_identity(dimension_identity(force)) == (Val(force)))
+    max :: dimension_test_identity("pkg%3A%3ALength:2147483647")
+    assert(dimension_multiply(max, length) == None)
+}
+
+#Test("combine keeps byte-ordered unique axes whatever the operand order") {
+    length :: dimension_base("pkg::Length")
+    time :: dimension_base("pkg::Time")
+    forward :: dimension_multiply(length, time) ?? panic("length * time")
+    backward :: dimension_multiply(time, length) ?? panic("time * length")
+    assert(dimension_test_names(forward) == [String]{"pkg::Length", "pkg::Time"})
+    assert(dimension_test_names(backward) == [String]{"pkg::Length", "pkg::Time"})
+    assert(forward == backward)
+    assert(dimension_identity(backward) == "pkg%3A%3ALength:1;pkg%3A%3ATime:1")
+    upper :: dimension_multiply(dimension_base("b"), dimension_base("B")) ?? panic("byte order")
+    assert(dimension_test_names(upper) == [String]{"B", "b"})
+}
+
+#Test("combine merges a repeated axis and removes a zero sum") {
+    length :: dimension_base("pkg::Length")
+    area :: dimension_multiply(length, length) ?? panic("length * length")
+    assert(dimension_identity(area) == "pkg%3A%3ALength:2")
+    assert(dimension_test_exponent_of(area, "pkg::Length") == (Val(dimension_test_exponent(2))))
+    scalar :: dimension_divide(length, length) ?? panic("length / length")
+    assert(scalar.axes.len() == 0)
+    assert(dimension_identity(scalar) == "")
+    assert(dimension_display_name(scalar) == "Scalar")
+    speed :: dimension_divide(length, dimension_base("pkg::Time")) ?? panic("length / time")
+    back :: dimension_multiply(speed, dimension_base("pkg::Time")) ?? panic("speed * time")
+    assert(back == length)
+}
+
+#Test("combine keeps untouched left axes verbatim") {
+    authored :: Dimension{axes: [DimensionAxis]{
+        DimensionAxis{name: "pkg::Big", exponent: Measure.Literal{kind: "exponent", value: 18446744073709551615}},
+        DimensionAxis{name: "pkg::N", exponent: Measure.Symbol{kind: "exponent", name: "N"}},
+        DimensionAxis{name: "pkg::Z", exponent: dimension_test_exponent(0)},
+    }}
+    combined :: dimension_multiply(authored, dimension_base("pkg::Length")) ?? panic("untouched left axes")
+    assert(dimension_test_names(combined) == [String]{"pkg::Big", "pkg::Length", "pkg::N", "pkg::Z"})
+    assert(dimension_test_exponent_of(combined, "pkg::N") == (Val(Measure.Symbol{kind: "exponent", name: "N"})))
+    assert(dimension_test_exponent_of(combined, "pkg::Z") == (Val(dimension_test_exponent(0))))
+    assert(dimension_test_exponent_of(combined, "pkg::Big") == (Val(Measure.Literal{kind: "exponent", value: 18446744073709551615})))
+    assert(dimension_multiply(authored, dimension_base("pkg::N")) == None)
+    zero_hit :: dimension_multiply(authored, dimension_base("pkg::Z")) ?? panic("zero axis plus one")
+    assert(dimension_test_exponent_of(zero_hit, "pkg::Z") == (Val(dimension_test_exponent(1))))
+    assert(dimension_multiply(authored, dimension_base("pkg::Big")) == None)
+}
+
+#Test("combine rejects a right axis that is not a concrete same-kind exponent") {
+    length :: dimension_base("pkg::Length")
+    symbolic :: Dimension{axes: [DimensionAxis]{DimensionAxis{name: "pkg::Length", exponent: Measure.Symbol{kind: "exponent", name: "N"}}}}
+    assert(dimension_multiply(length, symbolic) == None)
+    assert(dimension_multiply(dimension_base("pkg::Time"), symbolic) == None)
+    foreign :: Dimension{axes: [DimensionAxis]{DimensionAxis{name: "pkg::Time", exponent: Measure.SignedLiteral{kind: "length", value: 1}}}}
+    assert(dimension_multiply(length, foreign) == None)
+    mismatched_left :: Dimension{axes: [DimensionAxis]{DimensionAxis{name: "pkg::Length", exponent: Measure.SignedLiteral{kind: "length", value: 1}}}}
+    assert(dimension_multiply(mismatched_left, length) == None)
+    assert(dimension_multiply(mismatched_left, dimension_base("pkg::Time")) != None)
+}
+
+#Test("combine keeps exponents inside i32") {
+    length :: dimension_base("pkg::Length")
+    high :: dimension_test_identity("pkg%3A%3ALength:2147483646")
+    top :: dimension_multiply(high, length) ?? panic("2147483647 fits i32")
+    assert(dimension_identity(top) == "pkg%3A%3ALength:2147483647")
+    assert(dimension_multiply(top, length) == None)
+    low :: dimension_test_identity("pkg%3A%3ALength:-2147483647")
+    bottom :: dimension_divide(low, length) ?? panic("-2147483648 fits i32")
+    assert(dimension_identity(bottom) == "pkg%3A%3ALength:-2147483648")
+    assert(dimension_divide(bottom, length) == None)
+    assert(dimension_divide(length, bottom) == None)
+}
+
+#Test("from_identity parses canonical parts and rejects malformed ones") {
+    assert(dimension_from_identity("") == (Val(Dimension{axes: [DimensionAxis]{}})))
+    unsorted :: dimension_test_identity("b:1;a:-2")
+    assert(dimension_test_names(unsorted) == [String]{"a", "b"})
+    assert(dimension_identity(unsorted) == "a:-2;b:1")
+    escaped :: dimension_test_identity("a%3Bb%3Ac%25:+3")
+    assert(dimension_test_names(escaped) == [String]{"a;b:c%"})
+    assert(dimension_test_exponent_of(escaped, "a;b:c%") == (Val(dimension_test_exponent(3))))
+    assert(dimension_test_identity("x:-2147483648").axes.len() == 1)
+    rejected :: [String]{"a:0", "a:1;a:2", "a:1;", "a", "a:", "a:+", "a:-", "a: 1", "a:1x", "a:2147483648", "a:-2147483649", "%41:1", "a%3b:1", "a%3:1", "a%:1"}
+    loop identity in rejected -> assert(dimension_from_identity(identity) == None, identity)
+}
+
+// The Rust reference pushes each non-ASCII byte as a char (reported defect);
+// Jet keeps the UTF-8 axis so identity round-trips.
+#Test("from_identity round-trips non-ASCII axes") {
+    axis :: dimension_base("物理::長さ")
+    assert(dimension_identity(axis) == "物理%3A%3A長さ:1")
+    assert(dimension_from_identity(dimension_identity(axis)) == (Val(axis)))
+    combined :: dimension_divide(axis, dimension_base("物理::時間")) ?? panic("non-ASCII combine")
+    assert(dimension_from_identity(dimension_identity(combined)) == (Val(combined)))
+}
+
+#Test("measure literal values keep the exact u64 and i64 carriers") {
+    max :: Measure.Literal{kind: "length", value: 18446744073709551615}
+    one :: Measure.Literal{kind: "length", value: 1}
+    zero :: Measure.Literal{kind: "length", value: 0}
+    assert(measure_literal_value(max) == (Val(18446744073709551615)))
+    assert(measure_literal_value(Measure.Combined{kind: "length", rule: MeasureRule.Add, left: max, right: one}) == None)
+    overflowed :: Measure.Combined{kind: "length", rule: MeasureRule.Add, left: max, right: one}
+    assert(measure_literal_value(Measure.Combined{kind: "length", rule: MeasureRule.Mul, left: overflowed, right: zero}) == None)
+    assert(measure_signed_value(Measure.Literal{kind: "length", value: 9223372036854775807}) == (Val(9223372036854775807)))
+    assert(measure_signed_value(Measure.Literal{kind: "length", value: 9223372036854775808}) == None)
+    signed_max :: Measure.SignedLiteral{kind: "exponent", value: 9223372036854775807}
+    signed_one :: Measure.SignedLiteral{kind: "exponent", value: 1}
+    signed_minus :: Measure.SignedLiteral{kind: "exponent", value: -1}
+    past :: Measure.Combined{kind: "exponent", rule: MeasureRule.Add, left: signed_max, right: signed_one}
+    assert(measure_signed_value(past) == None)
+    assert(measure_signed_value(Measure.Combined{kind: "exponent", rule: MeasureRule.Add, left: past, right: signed_minus}) == None)
+    signed_min :: Measure.SignedLiteral{kind: "exponent", value: -9223372036854775808}
+    assert(measure_signed_value(signed_min) == (Val(-9223372036854775808)))
+    assert(measure_signed_value(Measure.Combined{kind: "exponent", rule: MeasureRule.Mul, left: signed_min, right: signed_minus}) == None)
+}
+
+// Rust AST/types.rs `Measure::combine`.
+#Test("measure combine folds unsigned then signed and keeps symbols") {
+    two :: Measure.Literal{kind: "length", value: 2}
+    three :: Measure.Literal{kind: "length", value: 3}
+    max :: Measure.Literal{kind: "length", value: 18446744073709551615}
+    minus :: Measure.SignedLiteral{kind: "length", value: -7}
+    symbol :: Measure.Symbol{kind: "length", name: "N"}
+    assert(measure_combine(two, three, MeasureRule.Add) == (Val(Measure.Literal{kind: "length", value: 5})))
+    assert(measure_combine(two, three, MeasureRule.Mul) == (Val(Measure.Literal{kind: "length", value: 6})))
+    assert(measure_combine(max, two, MeasureRule.Add) == None)
+    assert(measure_combine(two, minus, MeasureRule.Add) == (Val(Measure.SignedLiteral{kind: "length", value: -5})))
+    assert(measure_combine(symbol, two, MeasureRule.Add) == (Val(Measure.Combined{kind: "length", rule: MeasureRule.Add, left: symbol, right: two})))
+    assert(measure_combine(symbol, symbol, MeasureRule.Match) == (Val(symbol)))
+    assert(measure_combine(symbol, two, MeasureRule.Match) == None)
+    assert(measure_combine(two, Measure.Literal{kind: "shape", value: 2}, MeasureRule.Add) == None)
+}

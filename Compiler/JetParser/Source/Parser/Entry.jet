@@ -2,9 +2,9 @@
 use jet_foundation.[
     DebugTraceSite,
     Diagnostic,
-    DiagnosticFixApplicability,
-    DiagnosticFixSafety,
     Expr,
+    FixApplicability,
+    FixSafety,
     ImportDecl,
     Item,
     Marker,
@@ -660,7 +660,7 @@ fn parser_retire_const_mark(state: &JetParserState, token: Token) -> String {
     // constant is ALL_CAPS, so the mark is dropped and the case kept.
     plain :: String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
     diagnostic :: diagnostic_from_registry("E0388", Val(token.span), "`{name}` is retired; write `{plain}`", "compile time is always explicit, `NAME :: prep {{ value }}`; prefix `@` now marks a live link", "replace `{name}` with `{plain}`")
-    &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: token.span, new_text: plain}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: token.span, new_text: plain}, FixApplicability.Safe, FixSafety.BehaviorPreserving))
     plain
 }
 
@@ -734,4 +734,55 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
     loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
     kind :: parser_kind_at(&state, offset)
     parser_item_declaration_ahead_at(&state, offset) || parser_comptime_const_ahead(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME) || (kind == TOKEN_IDENT && parser_lookahead(&state, offset).payload.decoded == "alias")
+}
+
+// Rust: Parser/mod.rs::parse_inner/parse_for_check_inner. Keep the recovered
+// parser API distinct from admission: a rejected AST is never a fmt success.
+pub struct JetParseAdmission {
+    pub program: Program?
+    pub diagnostics: [Diagnostic]
+}
+pub fn parse_strict_source(source: [U8]) -> JetParseAdmission {
+    parsed :: parse_source(source)
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == 1 -> return JetParseAdmission{program: None, diagnostics: parsed.diagnostics}
+    }
+    JetParseAdmission{program: Val(parsed.program), diagnostics: [Diagnostic]{}}
+}
+// Rust Parser/mod.rs::parse_with_source: strict admission from the caller's
+// already lexed tokens and their exact original bytes, without lexing twice.
+pub fn parse_with_source(tokens: [Token], source: [U8]) -> JetParseAdmission {
+    parsed :: parser_parse_lexed_lines(Lexed{tokens: tokens, diagnostics: [Diagnostic]{}}, source, parser_line_starts(source))
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == 1 -> return JetParseAdmission{program: None, diagnostics: parsed.diagnostics}
+    }
+    JetParseAdmission{program: Val(parsed.program), diagnostics: [Diagnostic]{}}
+}
+pub fn parse_for_check_with_source(tokens: [Token], source: [U8]) -> JetParseAdmission {
+    parsed :: parser_parse_lexed_lines(Lexed{tokens: tokens, diagnostics: [Diagnostic]{}}, source, parser_line_starts(source))
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity != 2 && !parser_is_teaching_parse_diag(diagnostic.code) && diagnostic.code != "E0081" -> return JetParseAdmission{program: None, diagnostics: parsed.diagnostics}
+    }
+    JetParseAdmission{program: Val(parsed.program), diagnostics: parsed.diagnostics}
+}
+pub fn parse_for_fmt(tokens: [Token]) -> JetParseAdmission {
+    parsed :: parse_tokens(tokens)
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == 1 && !parser_is_teaching_parse_diag(diagnostic.code) -> return JetParseAdmission{program: None, diagnostics: parsed.diagnostics}
+    }
+    JetParseAdmission{program: Val(parsed.program), diagnostics: [Diagnostic]{}}
+}
+// Rust: Parser/mod.rs::is_teaching_parse_diag. This is the parser's single
+// recovered-diagnostic admission catalog, shared by check and formatting.
+fn parser_is_teaching_parse_diag(code: String) -> Bool Never! {
+    if code == {
+        "E0031" | "E0034" | "E0048" | "E0049" | "E0055" | "E0057" |
+        "E0065" | "E0066" | "E0068" | "E0070" | "E0080" | "E0082" |
+        "E0077" | "E0146" | "E0154" | "E0210" | "E0986" | "E0320" |
+        "E0992" | "E0994" | "E0366" | "E0367" | "E0372" | "E0373" |
+        "E0374" | "E0378" | "E0379" | "E0383" | "E0384" | "E0385" |
+        "E0386" | "E0999" | "E0412" | "E0413" | "E0414" | "E0415" |
+        "E0417" | "E0418" | "E0998" | "E0927" | "E1115" -> true
+        else -> false
+    }
 }

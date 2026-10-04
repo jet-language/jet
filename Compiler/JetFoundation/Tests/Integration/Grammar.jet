@@ -1,0 +1,877 @@
+// PORT-PENDING 1066 tests-grammar: tests/grammar.rs:1-873
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! c46 drift-guard: TextMate grammar keyword patterns must track Syntax::JET_KEYWORD_LIST.
+//RS //!
+//RS //! Reads `Tools/editors/vscode/syntaxes/jet.tmLanguage.json`, extracts every word
+//RS //! from the keyword `"match"` regex alternation groups, and asserts:
+//RS //!   1. Every word in `Syntax::JET_KEYWORD_LIST` is covered (no silent omissions).
+//RS //!   2. No `FOREIGN_*` word from `crates/jet-foundation/src/Syntax.rs` appears in a keyword pattern
+//RS //!      (those are teaching-error-only words that must not get syntax highlighting).
+//RS //!
+//RS //! The test does NOT rewrite the grammar — it is a tripwire so that a keyword
+//RS //! addition that wasn't mirrored in the grammar fails loudly.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::collections::BTreeSet;
+//RS use std::fs;
+//RS 
+//RS const GENERATED_START: &str = "BEGIN GENERATED JET SYNTAX HIGHLIGHTS";
+//RS const GENERATED_END: &str = "END GENERATED JET SYNTAX HIGHLIGHTS";
+//RS 
+//RS fn generated_section(path: &str) -> String {
+//RS     let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+//RS     generated_section_from_text(path, &text)
+//RS }
+//RS 
+//RS fn generated_section_from_text(path: &str, text: &str) -> String {
+//RS     let start = text
+//RS         .find(GENERATED_START)
+//RS         .unwrap_or_else(|| panic!("{path} is missing {GENERATED_START}"));
+//RS     let line_start = text[..start].rfind('\n').map_or(0, |idx| idx + 1);
+//RS     let after_start = &text[start..];
+//RS     let end = after_start
+//RS         .find(GENERATED_END)
+//RS         .unwrap_or_else(|| panic!("{path} is missing {GENERATED_END}"));
+//RS     let end_marker = start + end + GENERATED_END.len();
+//RS     let line_end = text[end_marker..]
+//RS         .find('\n')
+//RS         .map_or(text.len(), |idx| end_marker + idx);
+//RS     text[line_start..line_end].to_string()
+//RS }
+//RS 
+//RS fn generated_section_matches(text: &str, path: &str, expected: &str) -> bool {
+//RS     generated_section_from_text(path, text) == expected.trim_end()
+//RS }
+//RS 
+//RS #[test]
+//RS fn editor_grammars_have_generated_sections() {
+//RS     for path in [
+//RS         "Tools/editors/vscode/syntaxes/jet.tmLanguage.json",
+//RS         "Tools/editors/jet.tmGrammar",
+//RS         "Tools/editors/tree-sitter/grammar.js",
+//RS         "Tools/editors/zed/languages/jet/highlights.scm",
+//RS     ] {
+//RS         let section = generated_section(path);
+//RS         assert!(section.contains(GENERATED_START), "{path}");
+//RS         assert!(section.contains(GENERATED_END), "{path}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn tree_sitter_map_type_grammar_keeps_colon_adjacent() {
+//RS     let grammar = fs::read_to_string("Tools/editors/tree-sitter/grammar.js").unwrap();
+//RS     assert!(
+//RS         grammar.contains("seq(\"[\", $._type, \":\", $._type, \"]\")"),
+//RS         "tree-sitter map types must use the canonical adjacent colon"
+//RS     );
+//RS     assert!(
+//RS         !grammar.contains("seq(\"[\", $._type, \": \", $._type, \"]\")"),
+//RS         "tree-sitter grammar must not encode retired map type spacing"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn tree_sitter_result_handler_grammar_keeps_the_canonical_shape() {
+//RS     let grammar = fs::read_to_string("Tools/editors/tree-sitter/grammar.js").unwrap();
+//RS     let start = grammar
+//RS         .find("result_handler_expr:")
+//RS         .expect("result handler rule");
+//RS     let rule = &grammar[start..grammar[start..].find("paren_expr:").unwrap() + start];
+//RS     assert!(
+//RS         rule.contains("field(\"ok\", $.identifier)")
+//RS             && rule.contains("field(\"error\", $.identifier)")
+//RS             && rule.contains("field(\"success\"")
+//RS             && rule.contains("field(\"failure\"")
+//RS     );
+//RS     assert!(
+//RS         !rule.contains("\":>\""),
+//RS         "retired arrow leaked into Result handler grammar"
+//RS     );
+//RS     assert!(
+//RS         !rule.contains("\"=>\""),
+//RS         "retired arrow leaked into Result handler grammar"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn editor_grammars_match_generated_sections() {
+//RS     let cases = [
+//RS         (
+//RS             "Tools/editors/vscode/syntaxes/jet.tmLanguage.json",
+//RS             jet::Syntax::render_vscode_generated_highlights(),
+//RS         ),
+//RS         (
+//RS             "Tools/editors/jet.tmGrammar",
+//RS             jet::Syntax::render_vscode_generated_highlights(),
+//RS         ),
+//RS         (
+//RS             "Tools/editors/tree-sitter/grammar.js",
+//RS             jet::Syntax::render_tree_sitter_generated_highlights(),
+//RS         ),
+//RS         (
+//RS             "Tools/editors/zed/languages/jet/highlights.scm",
+//RS             jet::Syntax::render_zed_generated_highlights(),
+//RS         ),
+//RS     ];
+//RS 
+//RS     for (path, expected) in cases {
+//RS         assert_eq!(
+//RS             generated_section(path),
+//RS             expected.trim_end(),
+//RS             "{path} generated section drifted; run `jet self devtools grammars`"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn seeded_tree_sitter_drift_fails_the_generated_section_guard() {
+//RS     let path = "Tools/editors/tree-sitter/grammar.js";
+//RS     let source = fs::read_to_string(path).unwrap();
+//RS     let seeded = source.replacen(
+//RS         GENERATED_END,
+//RS         "// seeded generated-grammar drift\nEND GENERATED JET SYNTAX HIGHLIGHTS",
+//RS         1,
+//RS     );
+//RS     assert!(
+//RS         !generated_section_matches(
+//RS             &seeded,
+//RS             path,
+//RS             &jet::Syntax::render_tree_sitter_generated_highlights(),
+//RS         ),
+//RS         "the seeded generated-tree-sitter drift must fail the same guard"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn vscode_strings_do_not_relex_interpolations() {
+//RS     for path in [
+//RS         "Tools/editors/vscode/syntaxes/jet.tmLanguage.json",
+//RS         "Tools/editors/jet.tmGrammar",
+//RS     ] {
+//RS         let grammar = fs::read_to_string(path).unwrap();
+//RS         assert!(
+//RS             !grammar.contains("\"include\": \"$self\""),
+//RS             "{path} must not re-lex string interpolations as Jet source"
+//RS         );
+//RS         assert!(
+//RS             grammar.contains("\"include\": \"#string-interpolation\""),
+//RS             "{path} must consume {{interpolation}} as string scope"
+//RS         );
+//RS         assert!(
+//RS             !grammar.contains("constant.character.escape.jet"),
+//RS             "{path} must not paint in-string escapes a second color"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn classic_textmate_grammar_matches_vscode_source() {
+//RS     assert_eq!(
+//RS         fs::read_to_string("Tools/editors/jet.tmGrammar").unwrap(),
+//RS         fs::read_to_string("Tools/editors/vscode/syntaxes/jet.tmLanguage.json").unwrap(),
+//RS         "Tools/editors/jet.tmGrammar must mirror the canonical VS Code TextMate grammar"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn every_highlight_token_is_in_each_generated_section() {
+//RS     let sections = [
+//RS         (
+//RS             "Tools/editors/vscode/syntaxes/jet.tmLanguage.json",
+//RS             generated_section("Tools/editors/vscode/syntaxes/jet.tmLanguage.json"),
+//RS         ),
+//RS         (
+//RS             "Tools/editors/tree-sitter/grammar.js",
+//RS             generated_section("Tools/editors/tree-sitter/grammar.js"),
+//RS         ),
+//RS     ];
+//RS 
+//RS     for token in jet::Syntax::highlighted_tokens_sorted() {
+//RS         if matches!(token.text, "{" | "}" | "[" | "]" | "(" | ")") {
+//RS             continue;
+//RS         }
+//RS         for (path, section) in &sections {
+//RS             assert!(
+//RS                 section_has_token(section, token.text),
+//RS                 "{path} generated section missing `{}` ({:?})",
+//RS                 token.text,
+//RS                 token.class
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn zed_generated_query_covers_anonymous_highlight_words() {
+//RS     let anonymous = extract_anonymous_node_types("Tools/editors/tree-sitter/src/node-types.json");
+//RS     let section = generated_section("Tools/editors/zed/languages/jet/highlights.scm");
+//RS     let actual = extract_zed_query_string_literals(&section)
+//RS         .into_iter()
+//RS         .collect::<BTreeSet<_>>();
+//RS     let expected = jet::Syntax::highlighted_tokens_sorted()
+//RS         .into_iter()
+//RS         .filter(|token| zed_generated_class(token.class))
+//RS         .filter(|token| is_word_token(token.text))
+//RS         .filter(|token| anonymous.contains(token.text))
+//RS         .map(|token| token.text.to_string())
+//RS         .collect::<BTreeSet<_>>();
+//RS 
+//RS     assert_eq!(
+//RS         actual, expected,
+//RS         "Zed generated query drifted from anonymous grammar literals"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn syntax_keyword_list_tokens_are_classified_for_highlighting() {
+//RS     for keyword in jet::Syntax::JET_KEYWORD_LIST {
+//RS         assert!(
+//RS             jet::Syntax::highlighted_tokens_sorted()
+//RS                 .iter()
+//RS                 .any(|token| token.text == *keyword),
+//RS             "JET_KEYWORD_LIST token `{keyword}` has no highlight class"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn zed_highlight_query_mentions_only_grammar_literals() {
+//RS     let anonymous = extract_anonymous_node_types("Tools/editors/tree-sitter/src/node-types.json");
+//RS     let query = fs::read_to_string("Tools/editors/zed/languages/jet/highlights.scm")
+//RS         .expect("read zed highlights query");
+//RS     let mut bad = Vec::new();
+//RS 
+//RS     for token in extract_zed_query_string_literals(&query) {
+//RS         if !anonymous.contains(&token) {
+//RS             bad.push(token);
+//RS         }
+//RS     }
+//RS 
+//RS     bad.sort();
+//RS     bad.dedup();
+//RS     assert!(
+//RS         bad.is_empty(),
+//RS         "Zed rejects query strings that are not anonymous grammar literals: {bad:?}"
+//RS     );
+//RS }
+//RS 
+//RS fn section_has_token(section: &str, token: &str) -> bool {
+//RS     let escaped = regex_escape(token);
+//RS     let json_escaped = escaped.replace('\\', "\\\\");
+//RS     section.contains(token) || section.contains(&escaped) || section.contains(&json_escaped)
+//RS }
+//RS 
+//RS fn zed_generated_class(class: jet::Syntax::HighlightClass) -> bool {
+//RS     !matches!(class, jet::Syntax::HighlightClass::MarkerRule)
+//RS }
+//RS 
+//RS fn is_word_token(s: &str) -> bool {
+//RS     s.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
+//RS         && s.chars()
+//RS             .next()
+//RS             .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+//RS }
+//RS 
+//RS fn extract_anonymous_node_types(path: &str) -> BTreeSet<String> {
+//RS     let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+//RS     let mut out = BTreeSet::new();
+//RS     let mut current_type: Option<String> = None;
+//RS     let mut current_named: Option<bool> = None;
+//RS 
+//RS     for line in text.lines() {
+//RS         let trimmed = line.trim();
+//RS         if line.starts_with("  {") {
+//RS             current_type = None;
+//RS             current_named = None;
+//RS         } else if trimmed.starts_with("\"type\":") && current_type.is_none() {
+//RS             current_type = json_field_string_value(trimmed).map(str::to_string);
+//RS         } else if trimmed.starts_with("\"named\":") && current_named.is_none() {
+//RS             current_named = Some(trimmed.contains("true"));
+//RS         } else if line.starts_with("  }") {
+//RS             if current_named == Some(false) {
+//RS                 if let Some(t) = current_type.take() {
+//RS                     out.insert(t);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     out
+//RS }
+//RS 
+//RS fn extract_zed_query_string_literals(query: &str) -> Vec<String> {
+//RS     let mut out = Vec::new();
+//RS     for line in query.lines() {
+//RS         let trimmed = line.trim();
+//RS         if trimmed.starts_with(';') {
+//RS             continue;
+//RS         }
+//RS         let mut rest = trimmed;
+//RS         while let Some(start) = rest.find('"') {
+//RS             rest = &rest[start + 1..];
+//RS             let Some(end) = rest.find('"') else {
+//RS                 break;
+//RS             };
+//RS             out.push(rest[..end].to_string());
+//RS             rest = &rest[end + 1..];
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn json_string_value(line: &str) -> Option<&str> {
+//RS     let first = line.find('"')?;
+//RS     let rest = &line[first + 1..];
+//RS     let second = rest.find('"')?;
+//RS     Some(&rest[..second])
+//RS }
+//RS 
+//RS fn json_field_string_value(line: &str) -> Option<&str> {
+//RS     let colon = line.find(':')?;
+//RS     json_string_value(line[colon + 1..].trim())
+//RS }
+//RS 
+//RS fn regex_escape(s: &str) -> String {
+//RS     let mut out = String::new();
+//RS     for ch in s.chars() {
+//RS         if matches!(
+//RS             ch,
+//RS             '\\' | '.'
+//RS                 | '+'
+//RS                 | '*'
+//RS                 | '?'
+//RS                 | '^'
+//RS                 | '$'
+//RS                 | '('
+//RS                 | ')'
+//RS                 | '['
+//RS                 | ']'
+//RS                 | '{'
+//RS                 | '}'
+//RS                 | '|'
+//RS                 | '/'
+//RS                 | '-'
+//RS         ) {
+//RS             out.push('\\');
+//RS         }
+//RS         out.push(ch);
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// Extract every literal word from `\b(word1|word2|...)\b`-style match patterns
+//RS /// in the grammar's keywords section.
+//RS ///
+//RS /// Strategy: parse line by line; look for `"match":` lines inside the keywords
+//RS /// block and extract the alternation content between `\b(` and `)\b`.
+//RS fn extract_grammar_keyword_words(grammar_text: &str) -> BTreeSet<String> {
+//RS     let mut words = BTreeSet::new();
+//RS     let mut in_keywords = false;
+//RS     let mut depth = 0i32;
+//RS 
+//RS     for line in grammar_text.lines() {
+//RS         let trimmed = line.trim();
+//RS 
+//RS         // Enter the "keywords" object.
+//RS         if trimmed.contains("\"keywords\"") {
+//RS             in_keywords = true;
+//RS         }
+//RS         if in_keywords {
+//RS             depth += trimmed.chars().filter(|&c| c == '{').count() as i32;
+//RS             depth -= trimmed.chars().filter(|&c| c == '}').count() as i32;
+//RS             if depth <= 0 && in_keywords && !trimmed.contains("\"keywords\"") {
+//RS                 in_keywords = false;
+//RS             }
+//RS 
+//RS             // Find `"match": "...\b(...)\b..."` lines.
+//RS             if let Some(match_start) = trimmed.find("\"match\"") {
+//RS                 let after = &trimmed[match_start..];
+//RS                 // The value is a JSON string after the colon.
+//RS                 if let Some(val_start) = after.find('"').and_then(|_| {
+//RS                     let rest = &after[after.find(':').unwrap_or(0) + 1..];
+//RS                     let rest = rest.trim_start();
+//RS                     if rest.starts_with('"') {
+//RS                         Some(rest)
+//RS                     } else {
+//RS                         None
+//RS                     }
+//RS                 }) {
+//RS                     // val_start is the string value (starts with `"`).
+//RS                     let inner = &val_start[1..];
+//RS                     if let Some(end) = inner.rfind('"') {
+//RS                         let pattern = &inner[..end];
+//RS                         // Extract alternation groups: content between `\b(` and `)\b`
+//RS                         // or just `(` and `)` for patterns without word boundaries.
+//RS                         extract_alternation_words(pattern, &mut words);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     words
+//RS }
+//RS 
+//RS /// Pull words out of `\b(a|b|c)\b` or `(a|b|c)` patterns.
+//RS fn extract_alternation_words(pattern: &str, out: &mut BTreeSet<String>) {
+//RS     // Find all `(...)` groups and split on `|`.
+//RS     let mut rest = pattern;
+//RS     while let Some(open) = rest.find('(') {
+//RS         let inner_start = open + 1;
+//RS         if let Some(close) = rest[inner_start..].find(')') {
+//RS             let group = &rest[inner_start..inner_start + close];
+//RS             // Only process groups that look like alternations of simple words
+//RS             // (no nested parens, no backslashes inside).
+//RS             if !group.contains('(') && !group.contains('\\') {
+//RS                 for word in group.split('|') {
+//RS                     let w = word.trim();
+//RS                     if !w.is_empty() && w.chars().all(|c| c.is_alphanumeric() || c == '_') {
+//RS                         out.insert(w.to_string());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             rest = &rest[inner_start + close + 1..];
+//RS         } else {
+//RS             break;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Collect FOREIGN_* constant values from crates/jet-foundation/src/Syntax.rs by scanning for
+//RS /// lines like `pub const FOREIGN_XXX: &str = "word";`.
+//RS fn extract_foreign_words_from_syntax(syntax_text: &str) -> BTreeSet<String> {
+//RS     let mut words = BTreeSet::new();
+//RS     for line in syntax_text.lines() {
+//RS         let trimmed = line.trim();
+//RS         if trimmed.starts_with("pub const FOREIGN_") {
+//RS             // Extract the value between the last `"` pair.
+//RS             if let Some(start) = trimmed.rfind('"') {
+//RS                 let before = &trimmed[..start];
+//RS                 if let Some(end) = before.rfind('"') {
+//RS                     let word = &before[end + 1..];
+//RS                     // Skip multi-character sigils / operators and multi-word strings.
+//RS                     if !word.is_empty()
+//RS                         && !word.contains(' ')
+//RS                         && word.chars().all(|c| c.is_alphanumeric() || c == '_')
+//RS                     {
+//RS                         words.insert(word.to_string());
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     words
+//RS }
+//RS 
+//RS #[test]
+//RS fn grammar_covers_jet_keyword_list() {
+//RS     let grammar_path = "Tools/editors/vscode/syntaxes/jet.tmLanguage.json";
+//RS     let grammar_text =
+//RS         fs::read_to_string(grammar_path).expect("Tools/editors/vscode/syntaxes/jet.tmLanguage.json");
+//RS 
+//RS     let grammar_words = extract_grammar_keyword_words(&grammar_text);
+//RS 
+//RS     // JET_KEYWORD_LIST values — kept in sync with crates/jet-foundation/src/Syntax.rs constants.
+//RS     // This list must be updated whenever JET_KEYWORD_LIST changes.
+//RS     let jet_keywords: BTreeSet<&str> = jet::Syntax::JET_KEYWORD_LIST.iter().copied().collect();
+//RS 
+//RS     let missing: Vec<&&str> = jet_keywords
+//RS         .iter()
+//RS         .filter(|kw| {
+//RS             let w = kw.to_string();
+//RS             !grammar_words.contains(&w)
+//RS         })
+//RS         .collect();
+//RS 
+//RS     assert!(
+//RS         missing.is_empty(),
+//RS         "Grammar file `{grammar_path}` is missing keyword(s) from JET_KEYWORD_LIST: {:?}\n\
+//RS          Add them to the appropriate \\b(...)\\b pattern in the keywords section.",
+//RS         missing
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn grammar_excludes_foreign_words() {
+//RS     let grammar_path = "Tools/editors/vscode/syntaxes/jet.tmLanguage.json";
+//RS     let grammar_text =
+//RS         fs::read_to_string(grammar_path).expect("Tools/editors/vscode/syntaxes/jet.tmLanguage.json");
+//RS     let syntax_text = fs::read_to_string("crates/jet-foundation/src/Syntax.rs")
+//RS         .expect("crates/jet-foundation/src/Syntax.rs");
+//RS 
+//RS     let grammar_words = extract_grammar_keyword_words(&grammar_text);
+//RS     let foreign_words = extract_foreign_words_from_syntax(&syntax_text);
+//RS 
+//RS     // JET_KEYWORD_LIST words are allowed even if their constant is FOREIGN_*-named —
+//RS     // but in practice no FOREIGN_* constant is in JET_KEYWORD_LIST.
+//RS     let jet_keywords: BTreeSet<&str> = jet::Syntax::JET_KEYWORD_LIST.iter().copied().collect();
+//RS 
+//RS     let intruders: Vec<String> = foreign_words
+//RS         .iter()
+//RS         .filter(|w| {
+//RS             // Present in grammar keywords AND not in the real keyword list.
+//RS             grammar_words.contains(*w) && !jet_keywords.contains(w.as_str())
+//RS         })
+//RS         .cloned()
+//RS         .collect();
+//RS 
+//RS     assert!(
+//RS         intruders.is_empty(),
+//RS         "Grammar file `{grammar_path}` contains FOREIGN_* teaching-error word(s) in its keyword patterns: {:?}\n\
+//RS          These words must NOT be highlighted as keywords — remove them from the match pattern.",
+//RS         intruders
+//RS     );
+//RS }
+//RS 
+//RS // ============================================================================
+//RS // Section: lexer smoke (was tests/m3_lexer_smoke.rs)
+//RS // ============================================================================
+//RS 
+//RS #[test]
+//RS fn enum_is_keyword() {
+//RS     let (toks, diags) = jet::Lexer::lex("enum x { A; }");
+//RS     assert!(diags.is_empty(), "{diags:?}");
+//RS     assert!(
+//RS         matches!(toks[0].kind, jet::Lexer::TokKind::KwEnum),
+//RS         "{:?}",
+//RS         toks[0].kind
+//RS     );
+//RS }
+//RS 
+//RS /// S6-R: the lexer inserts a synthetic statement terminator at line ends after
+//RS /// a statement-ending token, with continuation suppression. Pins the four cases
+//RS /// the design doc calls out: dot-chain, broken boolean, broken arithmetic, and
+//RS /// the negative case (a genuine statement on the next line gets a terminator).
+//RS #[test]
+//RS fn s6r_terminator_insertion_and_suppression() {
+//RS     use jet::Lexer::TokKind;
+//RS     let count_semis = |src: &str| -> usize {
+//RS         let (toks, diags) = jet::Lexer::lex(src);
+//RS         assert!(diags.is_empty(), "lex diags for {src:?}: {diags:?}");
+//RS         toks.iter()
+//RS             .filter(|t| matches!(t.kind, TokKind::Semi))
+//RS             .count()
+//RS     };
+//RS 
+//RS     // Negative case: two real statements → a terminator between them (+ one
+//RS     // before the closing `}`), so 2 synthetic terminators inside the body.
+//RS     assert_eq!(count_semis("fn run() {\n    x :: 1\n    y :: 2\n}\n"), 2);
+//RS 
+//RS     // Dot-chain continuation (S69): a leading `.` suppresses insertion, so the
+//RS     // whole `a.b()` is one statement → just the pre-`}` terminator.
+//RS     assert_eq!(count_semis("fn run() {\n    a()\n        .b()\n}\n"), 1);
+//RS 
+//RS     // Broken boolean: a leading `&&` suppresses insertion → one statement.
+//RS     assert_eq!(count_semis("fn run() {\n    x :: a\n        && b\n}\n"), 1);
+//RS 
+//RS     // Broken arithmetic: a leading `+` suppresses insertion → one statement.
+//RS     assert_eq!(count_semis("fn run() {\n    x :: a\n        + b\n}\n"), 1);
+//RS 
+//RS     // A closing `)` on its own line never gets a terminator before it
+//RS     // (multi-line call args) → one statement.
+//RS     assert_eq!(count_semis("fn run() {\n    f(\n        a\n    )\n}\n"), 1);
+//RS 
+//RS     // D-IF3 / D-ENUMDOT1: a leading-dot dispatch arm is a new statement, not a
+//RS     // fluent chain — otherwise a braceless prior arm body glues onto `.Empty`.
+//RS     // Two arm bodies + pre-`}` terminator → 3 semis inside the outer fn body
+//RS     // (the `if` itself is one statement; semis live inside its dispatch block).
+//RS     assert_eq!(
+//RS         count_semis(
+//RS             "fn run() {\n    if s == {\n        .Circle(r) -> print(r)\n        .Empty -> print(0)\n    }\n}\n"
+//RS         ),
+//RS         3
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn parse_braceless_leading_dot_dispatch_arms() {
+//RS     // Regression: S6-R must terminate before `.Empty ->` so braceless arm bodies
+//RS     // parse (D-IF2 Q2). Without the terminator, `print(r).Empty` ate the head.
+//RS     let src = r#"
+//RS enum Shape {
+//RS     Circle(Float)
+//RS     Empty
+//RS }
+//RS fn area(s: Shape) -> Float {
+//RS     if s == {
+//RS         .Circle(r) -> return r
+//RS         .Empty -> return 0.0
+//RS     }
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     let (toks, lex_diags) = jet::Lexer::lex(src);
+//RS     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+//RS     let prog = jet::Parser::parse(&toks).expect("parse");
+//RS     let jet::AST::Item::Func(func) = &prog.items[1] else {
+//RS         panic!("expected area function");
+//RS     };
+//RS     let jet::AST::Stmt::Switch {
+//RS         arms, else_body, ..
+//RS     } = &func.body[0]
+//RS     else {
+//RS         panic!("expected switch");
+//RS     };
+//RS     assert_eq!(arms.len(), 2);
+//RS     assert!(else_body.is_none());
+//RS     assert!(matches!(&arms[0].body[..], [jet::AST::Stmt::Return(..)]));
+//RS     assert!(matches!(&arms[1].body[..], [jet::AST::Stmt::Return(..)]));
+//RS }
+//RS 
+//RS #[test]
+//RS fn dot_zero_in_statement_lexes_as_dot_then_int() {
+//RS     let (toks, diags) = jet::Lexer::lex("fn run() { x :: p.0 }");
+//RS     assert!(diags.is_empty(), "{diags:?}");
+//RS     let dot = toks
+//RS         .iter()
+//RS         .position(|t| matches!(t.kind, jet::Lexer::TokKind::Dot))
+//RS         .expect("dot");
+//RS     assert!(
+//RS         matches!(toks[dot + 1].kind, jet::Lexer::TokKind::Int(0, _)),
+//RS         "{:?}",
+//RS         toks[dot + 1].kind
+//RS     );
+//RS }
+//RS 
+//RS // ============================================================================
+//RS // Section: parser smoke (was tests/m3_parse_smoke.rs)
+//RS // ============================================================================
+//RS 
+//RS #[test]
+//RS fn parse_option_fn() {
+//RS     let src = r#"
+//RS fn find_even(limit: Int) -> Int? {
+//RS     loop i in 1..limit {
+//RS         if i % 2 == 0 {
+//RS             return Val(i)
+//RS         }
+//RS     }
+//RS     return None
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     let (toks, _) = jet::Lexer::lex(src);
+//RS     let prog = jet::Parser::parse(&toks).expect("parse");
+//RS     assert_eq!(prog.items.len(), 2);
+//RS }
+//RS 
+//RS #[test]
+//RS fn parse_value_tail_stays_an_expression_statement() {
+//RS     let src = r#"
+//RS fn label() -> String {
+//RS     "label"
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     let (tokens, diagnostics) = jet::Lexer::lex(src);
+//RS     assert!(diagnostics.is_empty(), "lex diagnostics: {diagnostics:?}");
+//RS     let program = jet::Parser::parse(&tokens).expect("value tail parses");
+//RS     let jet::AST::Item::Func(function) = &program.items[0] else {
+//RS         panic!("expected label function");
+//RS     };
+//RS     assert!(matches!(
+//RS         function.body.last(),
+//RS         Some(jet::AST::Stmt::Expr(jet::AST::Expr::Str(..)))
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn parse_pipe_switch_arms_as_subject_tests() {
+//RS     // D-IF3: explicit `if subject == { … }` dispatch. A bare value arm becomes
+//RS     // `subject == value`; a `|` chain of bare values re-applies the comparison
+//RS     // to each (`orange | mango` ≡ `fruit == orange || fruit == mango`).
+//RS     let src = r#"
+//RS fn run() {
+//RS     fruit :: "orange"
+//RS     if fruit == {
+//RS         apple -> { print("Apple Juice") }
+//RS         orange | mango -> { print("Orange Juice") }
+//RS         tangerine | yuzu -> { print("Citrus Juice") }
+//RS         else -> { print("Water") }
+//RS     }
+//RS     print("done")
+//RS }
+//RS "#;
+//RS     let (toks, lex_diags) = jet::Lexer::lex(src);
+//RS     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+//RS     let prog = jet::Parser::parse(&toks).expect("parse");
+//RS     let jet::AST::Item::Func(func) = &prog.items[0] else {
+//RS         panic!("expected function");
+//RS     };
+//RS     let jet::AST::Stmt::Switch {
+//RS         subject,
+//RS         arms,
+//RS         else_body,
+//RS         ..
+//RS     } = &func.body[1]
+//RS     else {
+//RS         panic!("expected switch");
+//RS     };
+//RS     assert!(matches!(subject, jet::AST::Expr::Ident(name, _) if name == "fruit"));
+//RS     assert_eq!(arms.len(), 3);
+//RS     assert!(else_body.is_some());
+//RS     assert!(matches!(
+//RS         &arms[0].cond,
+//RS         jet::AST::Expr::Binary(jet::AST::BinOp::Eq, _, _, _)
+//RS     ));
+//RS     assert!(matches!(
+//RS         &arms[1].cond,
+//RS         jet::AST::Expr::Binary(jet::AST::BinOp::Or, _, _, _)
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn parse_subjectless_guard_tables_reuse_if_dispatch() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     ready :: false
+//RS     stale :: true
+//RS     if {
+//RS         ready -> print("ready")
+//RS         stale -> print("stale")
+//RS     }
+//RS     label :: if {
+//RS         ready -> "ready"
+//RS         stale -> "stale"
+//RS         else -> "waiting"
+//RS     }
+//RS     if ready { print(label) }
+//RS }
+//RS "#;
+//RS     let (toks, lex_diags) = jet::Lexer::lex(src);
+//RS     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+//RS     let program = jet::Parser::parse(&toks).expect("subjectless guards should parse");
+//RS     let jet::AST::Item::Func(run) = &program.items[0] else {
+//RS         panic!("expected function");
+//RS     };
+//RS     let jet::AST::Stmt::Switch {
+//RS         subject,
+//RS         arms,
+//RS         else_body,
+//RS         span,
+//RS     } = &run.body[2]
+//RS     else {
+//RS         panic!("braced statement guards must reuse dispatch AST");
+//RS     };
+//RS     assert!(matches!(subject, jet::AST::Expr::Bool(true, s) if s == span));
+//RS     assert_eq!(arms.len(), 2);
+//RS     assert!(else_body.is_none(), "statement guard fallback is optional");
+//RS     let jet::AST::Stmt::Val(label) = &run.body[3] else {
+//RS         panic!("expected value guard binding");
+//RS     };
+//RS     assert!(matches!(label.init, jet::AST::Expr::If { .. }));
+//RS     assert!(matches!(run.body[4], jet::AST::Stmt::Switch { .. }));
+//RS }
+//RS 
+//RS #[test]
+//RS fn dispatch_atom_boolean_groups_are_required_and_machine_fixable() {
+//RS     let invalid = r#"
+//RS fn run() {
+//RS     n :: 48
+//RS     ready :: true
+//RS     if n < {
+//RS         48 | 45 && ready -> print("hit")
+//RS         else -> print("miss")
+//RS     }
+//RS }
+//RS "#;
+//RS     let (tokens, lex_diags) = jet::Lexer::lex(invalid);
+//RS     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+//RS     let (_, diagnostics) = jet::Parser::parse_for_check_with_source(&tokens, invalid)
+//RS         .expect("the new teaching diagnostic should recover the arm table");
+//RS     let diagnostic = diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0386")
+//RS         .expect("unparenthesized distributed group diagnostic");
+//RS     let edit = diagnostic
+//RS         .edit
+//RS         .as_ref()
+//RS         .expect("machine-applicable grouping edit");
+//RS     assert_eq!(&invalid[edit.span.start..edit.span.end], "48 | 45");
+//RS     assert_eq!(edit.new_text, "(48 | 45)");
+//RS     assert_eq!(
+//RS         diagnostic.applicability,
+//RS         Some(jet::Diagnostics::FixApplicability::Safe)
+//RS     );
+//RS     assert_eq!(
+//RS         diagnostic.safety,
+//RS         Some(jet::Diagnostics::FixSafety::Formatting)
+//RS     );
+//RS 
+//RS     let legal = invalid.replace("48 | 45", "(48 | 45)");
+//RS     let (tokens, lex_diags) = jet::Lexer::lex(&legal);
+//RS     assert!(lex_diags.is_empty(), "fixed lex diagnostics: {lex_diags:?}");
+//RS     assert!(
+//RS         jet::Parser::parse(&tokens).is_ok(),
+//RS         "fixed arm head should parse"
+//RS     );
+//RS 
+//RS     let untouched = r#"
+//RS fn run() {
+//RS     value :: 1
+//RS     if value == {
+//RS         301 | 302 -> print("atom")
+//RS         value >= 500 -> print("predicate")
+//RS         .Err(e) && e.fatal -> print("guard")
+//RS         else -> print("other")
+//RS     }
+//RS }
+//RS "#;
+//RS     let (tokens, lex_diags) = jet::Lexer::lex(untouched);
+//RS     assert!(
+//RS         lex_diags.is_empty(),
+//RS         "untouched lex diagnostics: {lex_diags:?}"
+//RS     );
+//RS     let (_, diagnostics) = jet::Parser::parse_for_check_with_source(&tokens, untouched)
+//RS         .expect("untouched arm forms should parse");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .all(|diagnostic| diagnostic.code != "E0386"),
+//RS         "pure atoms, predicates, and pattern guards are unchanged: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn parse_bracket_collection_types_and_semicolon_list_items() {
+//RS     let src = r#"
+//RS pub fn shell() -> [JSON] {
+//RS     return [
+//RS         JSON.Null;
+//RS     ];
+//RS }
+//RS 
+//RS fn use_collections(items: [String], counts: [String:Int]) {}
+//RS "#;
+//RS     let (toks, lex_diags) = jet::Lexer::lex(src);
+//RS     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+//RS     let prog = jet::Parser::parse(&toks).expect("parse");
+//RS     let jet::AST::Item::Func(shell) = &prog.items[0] else {
+//RS         panic!("expected shell function");
+//RS     };
+//RS     assert!(matches!(shell.return_type, Some(jet::AST::Type::List(_))));
+//RS     let jet::AST::Item::Func(use_collections) = &prog.items[1] else {
+//RS         panic!("expected use_collections function");
+//RS     };
+//RS     assert!(matches!(
+//RS         use_collections.params[0].ty,
+//RS         jet::AST::Type::List(_)
+//RS     ));
+//RS     assert!(matches!(
+//RS         use_collections.params[1].ty,
+//RS         jet::AST::Type::Map { .. }
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn parse_numeric_field_emits_e0049() {
+//RS     let src = "fn run() { x :: p.0 }";
+//RS     let (toks, _) = jet::Lexer::lex(src);
+//RS     let (_prog, diags) = jet::Parser::parse_for_check(&toks).expect("recoverable parse");
+//RS     assert!(
+//RS         diags.iter().any(|d| d.code == "E0049"),
+//RS         "expected E0049 for `.0` access, got: {diags:?}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1066 tests/grammar.rs:1-873
+

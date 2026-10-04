@@ -1,0 +1,865 @@
+// PORT-PENDING 0440 crates-jet-sema-src-sema-registration-items-slice-1709: crates/jet-sema/src/Sema/Registration/Items.rs:1709-2569
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub(crate) fn register_struct(
+//RS     s: &StructDef,
+//RS     registry: &mut TypeRegistry,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     funcs: &HashMap<String, FuncSig>,
+//RS     consts: &HashMap<String, Type>,
+//RS     target: &jet_foundation::Layout::TargetLayout,
+//RS ) {
+//RS     if is_reserved_type(&s.name) {
+//RS         diags.push(Diagnostic::error(
+//RS             "E0106",
+//RS             format!("the name `{}` is built in and can't be redefined", s.name),
+//RS             format!("`{}` is provided by the language itself", s.name),
+//RS             "choose a different name for this struct".to_string(),
+//RS             Some(s.name_span),
+//RS         ));
+//RS         return;
+//RS     }
+//RS     if name_defined(&s.name, funcs, registry, consts) {
+//RS         diags.push(defined_twice(
+//RS             &s.name,
+//RS             "every struct needs a unique name",
+//RS             s.name_span,
+//RS         ));
+//RS         return;
+//RS     }
+//RS     validate_layout_alignment(s, target, diags);
+//RS     let mut field_names = HashSet::new();
+//RS     let mut fields = Vec::new();
+//RS     // D-FIELDPOL1: struct name → computed field name → (span, type). A
+//RS     // computed field is never a stored field — it's excluded from `fields`
+//RS     // entirely (so it's never required/allowed in a struct literal, E0339)
+//RS     // and resolved for reads through this side table instead.
+//RS     let mut computed_fields: HashMap<String, (Span, Type)> = HashMap::new();
+//RS     // D-DEFAULT-SHAPE1=B: stored fields with `{}` defaults for omitted construction.
+//RS     let mut field_defaults: HashMap<String, crate::AST::Expr> = HashMap::new();
+//RS     for f in &s.fields {
+//RS         crate::Sema::CheckerCore::reject_never_value_positions(
+//RS             &f.ty,
+//RS             f.ty_span,
+//RS             false,
+//RS             diags,
+//RS         );
+//RS         if !field_names.insert(f.name.clone()) {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0105",
+//RS                 format!("field `{}` is defined twice in `{}`", f.name, s.name),
+//RS                 "each field name may appear only once".to_string(),
+//RS                 "rename or remove the duplicate field".to_string(),
+//RS                 Some(f.name_span),
+//RS             ));
+//RS         }
+//RS         if f.computed.is_some() {
+//RS             computed_fields.insert(f.name.clone(), (f.name_span, f.ty.clone()));
+//RS         } else {
+//RS             fields.push((f.name.clone(), f.name_span, f.ty.clone()));
+//RS             if let Some(default) = &f.default {
+//RS                 field_defaults.insert(f.name.clone(), (**default).clone());
+//RS             }
+//RS             if declared_type_contains_cell_guard(&f.ty) {
+//RS                 diags.push(cell_guard_storage_diagnostic(
+//RS                     &format!("struct field `{}`", f.name),
+//RS                     f.name_span,
+//RS                 ));
+//RS             }
+//RS         }
+//RS         if matches!(&f.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP) {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E1110",
+//RS                 "`Group` cannot be stored in a struct field".to_string(),
+//RS                 "a task group is a scoped spawn authority, not a value that can escape its call stack"
+//RS                     .to_string(),
+//RS                 "pass `group: Group` directly to a helper function or method instead".to_string(),
+//RS                 Some(f.name_span),
+//RS             ));
+//RS         }
+//RS         if f.ty.is_float()
+//RS             && is_money_like_name(&f.name)
+//RS             && !allows_float_money(&f.serde_markers)
+//RS             && !allows_float_money(&s.serde_markers)
+//RS         {
+//RS             diags.push(Diagnostic::lint(
+//RS                 "L0504",
+//RS                 format!(
+//RS                     "field `{}` looks like money but has type `Float`",
+//RS                     f.name
+//RS                 ),
+//RS                 "floating-point money loses cents on common values like `0.1 + 0.2`".to_string(),
+//RS                 "use `Decimal` for exact money, or suppress with `#[allow(float_money)]` on the field".to_string(),
+//RS                 Some(f.name_span),
+//RS             ));
+//RS         }
+//RS     }
+//RS     // D-FOUND-RECEIPT1: the marker is a declaration fact, not a runtime
+//RS     // string. Preserve the section name and schema digest for TIR lowering.
+//RS     if let Some(marker) = s
+//RS         .type_markers
+//RS         .iter()
+//RS         .find(|marker| marker.name == Syntax::MARKER_RECEIPT && !marker.negated)
+//RS     {
+//RS         let codable = s
+//RS             .type_markers
+//RS             .iter()
+//RS             .any(|candidate| candidate.name == Syntax::MARKER_CODABLE && !candidate.negated);
+//RS         if !codable {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E2411",
+//RS                 format!("receipt section type `{}` must be `#Codable`", s.name),
+//RS                 "typed receipt sections use the shared Codable wire contract".to_string(),
+//RS                 "add `#Codable` beside `#Receipt`".to_string(),
+//RS                 Some(marker.span),
+//RS             ));
+//RS         } else if let Some(crate::AST::CtValue::Str(section_name)) = marker.ct.as_ref() {
+//RS             if section_name.is_empty()
+//RS                 || section_name.len() > 128
+//RS                 || !section_name
+//RS                     .chars()
+//RS                     .all(|ch| !ch.is_control() && ch != '/' && ch != '\\')
+//RS             {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E0103",
+//RS                     "`#Receipt` section name is invalid".to_string(),
+//RS                     "section names are bounded and cannot contain path separators".to_string(),
+//RS                     "use a non-empty name of at most 128 bytes".to_string(),
+//RS                     Some(marker.span),
+//RS                 ));
+//RS             } else {
+//RS                 registry.receipt_sections.insert(
+//RS                     s.name.clone(),
+//RS                     ReceiptSectionMeta {
+//RS                         name: section_name.clone(),
+//RS                         type_name: s.name.clone(),
+//RS                         schema_digest: receipt_schema_digest(&s.name, &fields),
+//RS                         span: marker.span,
+//RS                     },
+//RS                 );
+//RS             }
+//RS         } else {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0103",
+//RS                 "`#Receipt` requires one compile-time string name".to_string(),
+//RS                 "receipt section identity is fixed at declaration time".to_string(),
+//RS                 "write `#Receipt(\"name\")`".to_string(),
+//RS                 Some(marker.span),
+//RS             ));
+//RS         }
+//RS     }
+//RS     registry.types.insert(
+//RS         s.name.clone(),
+//RS         TypeDef::Struct {
+//RS             fields,
+//RS             methods: HashMap::new(),
+//RS             deprecation: super::super::deprecation_from_markers(&s.type_markers),
+//RS             single_use: s.is_single_use,
+//RS             must_use: s.is_must_use,
+//RS             columnar: s
+//RS                 .layout
+//RS                 .as_ref()
+//RS                 .is_some_and(|layout| matches!(layout, crate::AST::StructLayout::Columnar)),
+//RS             is_c_layout: s
+//RS                 .layout
+//RS                 .as_ref()
+//RS                 .is_some_and(crate::AST::StructLayout::is_c),
+//RS             // `#[PublishedSchema, Codable]` spelling leaves the marker in
+//RS             // `derives` — accept both (mirrors `Sema::desugar_migrations`).
+//RS             published: s.is_published_schema
+//RS                 || s.derives
+//RS                     .iter()
+//RS                     .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA),
+//RS         },
+//RS     );
+//RS     if s.type_markers
+//RS         .iter()
+//RS         .any(|marker| marker.name == Syntax::MARKER_ERROR)
+//RS     {
+//RS         registry.error_types.insert(s.name.clone());
+//RS     }
+//RS     if !computed_fields.is_empty() {
+//RS         registry
+//RS             .computed_fields
+//RS             .insert(s.name.clone(), computed_fields);
+//RS     }
+//RS     if !field_defaults.is_empty() {
+//RS         registry
+//RS             .field_defaults
+//RS             .insert(s.name.clone(), field_defaults);
+//RS     }
+//RS     if s
+//RS         .layout
+//RS         .as_ref()
+//RS         .is_some_and(crate::AST::StructLayout::is_c)
+//RS     {
+//RS         for f in &s.fields {
+//RS             let growable = matches!(&f.ty, Type::List(_) | Type::Map { .. } | Type::String);
+//RS             if growable {
+//RS                 let layout_span = s.layout_span.unwrap_or(s.name_span);
+//RS                 let layout_name = match s.layout.as_ref() {
+//RS                     Some(crate::AST::StructLayout::CAligned { target: true, .. }) => {
+//RS                         "#Layout(c, align(target, N))"
+//RS                     }
+//RS                     Some(crate::AST::StructLayout::CAligned { .. }) => "#Layout(c, align(N))",
+//RS                     _ => "#Layout(c)",
+//RS                 };
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E1104",
+//RS                     format!(
+//RS                         "{layout_name} struct `{}` has a growable field `{}` ({})",
+//RS                         s.name,
+//RS                         f.name,
+//RS                         f.ty.name()
+//RS                     ),
+//RS                     "growable types (`[T]`, `Map`, `String`) don't have a stable C layout"
+//RS                         .to_string(),
+//RS                     format!("use a fixed-size array `[T#N]` instead, or remove {layout_name}"),
+//RS                     Some(layout_span),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-SHARED-CYCLE1=C: reject strong `Shared` fields that can form a reference
+//RS /// cycle. Expert cycles use `Shared.Weak<T>` (weak edges do not count).
+//RS pub(crate) fn check_strong_shared_cycles(
+//RS     states: &[ModuleState],
+//RS     name_ledger: &NameLedger,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     let mut graph = StrongSharedCycleGraph::new(states, name_ledger);
+//RS     let mut struct_ids: Vec<StructId> = graph.structs.keys().cloned().collect();
+//RS     struct_ids.sort();
+//RS 
+//RS     for owner in struct_ids {
+//RS         let Some(fields) = graph.structs.get(&owner).cloned() else {
+//RS             continue;
+//RS         };
+//RS         for (fname, fspan, fty) in &fields {
+//RS             if let Some(through) =
+//RS                 graph.strong_shared_cycle_witness(&owner, owner.module, fty, &mut Vec::new())
+//RS             {
+//RS                 diags.push(Diagnostic::error(
+//RS                     "E0221",
+//RS                     format!(
+//RS                         "field `{fname}` on `{}` can form a strong `Shared` cycle",
+//RS                         owner.name
+//RS                     ),
+//RS                     format!(
+//RS                         "a strong `Shared` edge through `{through}` can point back at `{}`, so reference counting alone cannot free the graph",
+//RS                         owner.name
+//RS                     ),
+//RS                     "use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong `Shared` handle".to_string(),
+//RS                     Some(*fspan),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One graph and memo table make cycle results independent of module order and
+//RS /// avoid re-walking the same type paths for every strong edge.
+//RS struct StrongSharedCycleGraph<'a> {
+//RS     states: &'a [ModuleState],
+//RS     name_ledger: &'a NameLedger,
+//RS     structs: HashMap<StructId, Vec<(String, Span, Type)>>,
+//RS     reaches: HashMap<(StructId, StructId), bool>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+//RS struct StructId {
+//RS     module: usize,
+//RS     name: String,
+//RS }
+//RS 
+//RS impl StructId {
+//RS     fn new(module: usize, name: &str) -> Self {
+//RS         Self {
+//RS             module,
+//RS             name: name.to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<'a> StrongSharedCycleGraph<'a> {
+//RS     fn new(states: &'a [ModuleState], name_ledger: &'a NameLedger) -> Self {
+//RS         let mut structs = HashMap::new();
+//RS         for (module, state) in states.iter().enumerate() {
+//RS             for (name, def) in &state.registry.types {
+//RS                 if let TypeDef::Struct { fields, .. } = def {
+//RS                     structs.insert(StructId::new(module, name), fields.clone());
+//RS                 }
+//RS             }
+//RS         }
+//RS         Self {
+//RS             states,
+//RS             name_ledger,
+//RS             structs,
+//RS             reaches: HashMap::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn struct_key(&self, module: usize, name: &str) -> Option<StructId> {
+//RS         let key = StructId::new(module, name);
+//RS         self.structs.contains_key(&key).then_some(key)
+//RS     }
+//RS 
+//RS     fn imported_struct(&self, from_module: usize, namespace: &str, name: &str) -> Option<StructId> {
+//RS         let owner = self
+//RS             .states
+//RS             .get(from_module)?
+//RS             .imports
+//RS             .get(namespace)
+//RS             .copied()
+//RS             .or_else(|| {
+//RS                 self.name_ledger
+//RS                     .alias(from_module, namespace)
+//RS                     .and_then(|alias| alias.target_module)
+//RS             })?;
+//RS         let key = self.struct_key(owner, name)?;
+//RS         self.name_ledger
+//RS             .visible(from_module, owner, name)
+//RS             .then_some(key)
+//RS     }
+//RS 
+//RS     fn resolve_struct(&self, from_module: usize, name: &str) -> Option<StructId> {
+//RS         if let Some(key) = self.struct_key(from_module, name) {
+//RS             return Some(key);
+//RS         }
+//RS 
+//RS         if let Some((namespace, leaf)) = name.rsplit_once("::") {
+//RS             if let Some(owner) = self.name_ledger.nominal_module(name) {
+//RS                 if let Some(key) = self.struct_key(owner, leaf) {
+//RS                     return Some(key);
+//RS                 }
+//RS             }
+//RS             return self.imported_struct(from_module, namespace, leaf);
+//RS         }
+//RS         if let Some((namespace, leaf)) = name.rsplit_once('.') {
+//RS             if let Some(key) = self.imported_struct(from_module, namespace, leaf) {
+//RS                 return Some(key);
+//RS             }
+//RS         }
+//RS 
+//RS         if let Some(alias) = self.name_ledger.alias(from_module, name) {
+//RS             if let Some(owner) = alias.target_module {
+//RS                 let leaf = alias
+//RS                     .target
+//RS                     .rsplit_once("::")
+//RS                     .or_else(|| alias.target.rsplit_once('.'))
+//RS                     .map_or(alias.target.as_str(), |(_, leaf)| leaf);
+//RS                 if let Some(key) = self.struct_key(owner, leaf) {
+//RS                     if self.name_ledger.visible(from_module, owner, leaf) {
+//RS                         return Some(key);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         let mut found = None;
+//RS         for key in self.structs.keys().filter(|key| key.name == name) {
+//RS             if !self.name_ledger.visible(from_module, key.module, name) {
+//RS                 continue;
+//RS             }
+//RS             if found.as_ref().is_some_and(|previous| previous != key) {
+//RS                 return None;
+//RS             }
+//RS             found = Some(key.clone());
+//RS         }
+//RS         found
+//RS     }
+//RS 
+//RS     /// Returns the payload type name that closes a strong Shared cycle, if any.
+//RS     fn strong_shared_cycle_witness(
+//RS         &mut self,
+//RS         owner: &StructId,
+//RS         from_module: usize,
+//RS         ty: &Type,
+//RS         stack: &mut Vec<StructId>,
+//RS     ) -> Option<String> {
+//RS         match ty {
+//RS             Type::Shared(inner) => {
+//RS                 if self.payload_can_reach_owner(owner, from_module, inner) {
+//RS                     Some(inner.name())
+//RS                 } else {
+//RS                     None
+//RS                 }
+//RS             }
+//RS             Type::Option(inner)
+//RS             | Type::List(inner)
+//RS             | Type::FixedList { elem: inner, .. }
+//RS             | Type::Tagged { inner, .. } => {
+//RS                 self.strong_shared_cycle_witness(owner, from_module, inner, stack)
+//RS             }
+//RS             Type::Map { key, value, .. }
+//RS             | Type::Result {
+//RS                 ok: key,
+//RS                 err: value,
+//RS             } => self
+//RS                 .strong_shared_cycle_witness(owner, from_module, key, stack)
+//RS                 .or_else(|| self.strong_shared_cycle_witness(owner, from_module, value, stack)),
+//RS             Type::Tuple(fields) => fields.iter().find_map(|(_, fty)| {
+//RS                 self.strong_shared_cycle_witness(owner, from_module, fty, stack)
+//RS             }),
+//RS             Type::Union(members) => members
+//RS                 .iter()
+//RS                 .find_map(|m| self.strong_shared_cycle_witness(owner, from_module, m, stack)),
+//RS             // Weak edges never contribute to a strong cycle.
+//RS             Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_WEAK => None,
+//RS             Type::Apply { args, .. } => args
+//RS                 .iter()
+//RS                 .find_map(|m| self.strong_shared_cycle_witness(owner, from_module, m, stack)),
+//RS             Type::Named(n) => {
+//RS                 let Some(target) = self.resolve_struct(from_module, n) else {
+//RS                     return None;
+//RS                 };
+//RS                 if stack.iter().any(|s| s == &target) {
+//RS                     return None;
+//RS                 }
+//RS                 stack.push(target.clone());
+//RS                 let fields = self.structs.get(&target).cloned();
+//RS                 let hit = fields.as_deref().and_then(|fields| {
+//RS                     fields.iter().find_map(|(_, _, fty)| {
+//RS                         self.strong_shared_cycle_witness(owner, target.module, fty, stack)
+//RS                     })
+//RS                 });
+//RS                 stack.pop();
+//RS                 hit
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn payload_can_reach_owner(&mut self, owner: &StructId, from_module: usize, ty: &Type) -> bool {
+//RS         let mut active = HashSet::new();
+//RS         self.payload_can_reach_owner_inner(owner, from_module, ty, &mut active)
+//RS             .0
+//RS     }
+//RS 
+//RS     fn payload_can_reach_owner_inner(
+//RS         &mut self,
+//RS         owner: &StructId,
+//RS         from_module: usize,
+//RS         ty: &Type,
+//RS         active: &mut HashSet<StructId>,
+//RS     ) -> (bool, bool) {
+//RS         match ty {
+//RS             Type::Named(n) => {
+//RS                 let Some(target) = self.resolve_struct(from_module, n) else {
+//RS                     return (false, false);
+//RS                 };
+//RS                 if &target == owner {
+//RS                     return (true, false);
+//RS                 }
+//RS                 let key = (owner.clone(), target.clone());
+//RS                 if let Some(reaches) = self.reaches.get(&key) {
+//RS                     return (*reaches, false);
+//RS                 }
+//RS                 if !active.insert(target.clone()) {
+//RS                     // Do not memoize this negative: the active node may find
+//RS                     // the owner through a later sibling edge in this walk.
+//RS                     return (false, true);
+//RS                 }
+//RS                 let fields = self.structs.get(&target).cloned();
+//RS                 let mut reaches = false;
+//RS                 let mut cycle_cut = false;
+//RS                 if let Some(fields) = fields {
+//RS                     for (_, _, fty) in &fields {
+//RS                         let (hit, cut) =
+//RS                             self.payload_can_reach_owner_inner(owner, target.module, fty, active);
+//RS                         cycle_cut |= cut;
+//RS                         if hit {
+//RS                             reaches = true;
+//RS                             break;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 active.remove(&target);
+//RS                 if reaches || !cycle_cut {
+//RS                     self.reaches.insert(key, reaches);
+//RS                 }
+//RS                 (reaches, cycle_cut)
+//RS             }
+//RS             Type::Shared(inner)
+//RS             | Type::Option(inner)
+//RS             | Type::List(inner)
+//RS             | Type::FixedList { elem: inner, .. }
+//RS             | Type::Tagged { inner, .. } => {
+//RS                 self.payload_can_reach_owner_inner(owner, from_module, inner, active)
+//RS             }
+//RS             Type::Map { key, value, .. }
+//RS             | Type::Result {
+//RS                 ok: key,
+//RS                 err: value,
+//RS             } => {
+//RS                 let (key_reaches, key_cycle) =
+//RS                     self.payload_can_reach_owner_inner(owner, from_module, key, active);
+//RS                 if key_reaches {
+//RS                     return (true, key_cycle);
+//RS                 }
+//RS                 let (value_reaches, value_cycle) =
+//RS                     self.payload_can_reach_owner_inner(owner, from_module, value, active);
+//RS                 (value_reaches, key_cycle || value_cycle)
+//RS             }
+//RS             Type::Tuple(fields) => {
+//RS                 let mut cycle_cut = false;
+//RS                 for (_, fty) in fields {
+//RS                     let (reaches, cut) =
+//RS                         self.payload_can_reach_owner_inner(owner, from_module, fty, active);
+//RS                     cycle_cut |= cut;
+//RS                     if reaches {
+//RS                         return (true, cycle_cut);
+//RS                     }
+//RS                 }
+//RS                 (false, cycle_cut)
+//RS             }
+//RS             Type::Union(members) => {
+//RS                 let mut cycle_cut = false;
+//RS                 for member in members {
+//RS                     let (reaches, cut) =
+//RS                         self.payload_can_reach_owner_inner(owner, from_module, member, active);
+//RS                     cycle_cut |= cut;
+//RS                     if reaches {
+//RS                         return (true, cycle_cut);
+//RS                     }
+//RS                 }
+//RS                 (false, cycle_cut)
+//RS             }
+//RS             Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_WEAK => (false, false),
+//RS             Type::Apply { args, .. } => {
+//RS                 let mut cycle_cut = false;
+//RS                 for member in args {
+//RS                     let (reaches, cut) =
+//RS                         self.payload_can_reach_owner_inner(owner, from_module, member, active);
+//RS                     cycle_cut |= cut;
+//RS                     if reaches {
+//RS                         return (true, cycle_cut);
+//RS                     }
+//RS                 }
+//RS                 (false, cycle_cut)
+//RS             }
+//RS             _ => (false, false),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn register_enum(
+//RS     e: &EnumDef,
+//RS     registry: &mut TypeRegistry,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     funcs: &HashMap<String, FuncSig>,
+//RS     consts: &HashMap<String, Type>,
+//RS ) {
+//RS     if is_reserved_type(&e.name) {
+//RS         diags.push(Diagnostic::error(
+//RS             "E0106",
+//RS             format!("the name `{}` is built in and can't be redefined", e.name),
+//RS             format!("`{}` is provided by the language itself", e.name),
+//RS             "choose a different name for this enum".to_string(),
+//RS             Some(e.name_span),
+//RS         ));
+//RS         return;
+//RS     }
+//RS     if name_defined(&e.name, funcs, registry, consts) {
+//RS         diags.push(defined_twice(
+//RS             &e.name,
+//RS             "every enum needs a unique name",
+//RS             e.name_span,
+//RS         ));
+//RS         return;
+//RS     }
+//RS     let mut variants = HashMap::new();
+//RS     let mut variant_order = Vec::new();
+//RS     let mut seen = HashSet::new();
+//RS     // D-TAG1: leaf names are full dotted paths; the flattened Rust variant name
+//RS     // joins segments with `__`, so two distinct paths that mangle identically
+//RS     // (`Fire.Burn` vs `Fire__Burn`) must be rejected here, not by rustc (I2).
+//RS     let mut mangled = HashMap::new();
+//RS     for v in &e.variants {
+//RS         if !seen.insert(v.name.clone()) {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0105",
+//RS                 format!("variant `{}` is defined twice in `{}`", v.name, e.name),
+//RS                 "each variant name may appear only once".to_string(),
+//RS                 "rename or remove the duplicate variant".to_string(),
+//RS                 Some(v.name_span),
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         if let Some(other) =
+//RS             mangled.insert(jet_foundation::Names::mangle_path(&v.name), v.name.clone())
+//RS         {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0105",
+//RS                 format!(
+//RS                     "variant `{}` collides with `{}` in `{}`",
+//RS                     v.name, other, e.name
+//RS                 ),
+//RS                 "a grouped path and an underscored name flatten to the same variant".to_string(),
+//RS                 "rename one of the two variants".to_string(),
+//RS                 Some(v.name_span),
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         variant_order.push(v.name.clone());
+//RS         match &v.payload {
+//RS             VariantPayload::Unit => {}
+//RS             VariantPayload::Single(ty, span) => {
+//RS                 if declared_type_contains_cell_guard(ty) {
+//RS                     diags.push(cell_guard_storage_diagnostic(
+//RS                         &format!("enum variant `{}`", v.name),
+//RS                         *span,
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             VariantPayload::Named(fields) => {
+//RS                 for field in fields {
+//RS                     if declared_type_contains_cell_guard(&field.ty) {
+//RS                         diags.push(cell_guard_storage_diagnostic(
+//RS                             &format!("enum field `{}`", field.name),
+//RS                             field.name_span,
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         let mut payload = v.payload.clone();
+//RS         super::Derives::normalize_variant_payload(&mut payload, &e.name);
+//RS         variants.insert(v.name.clone(), (v.name_span, payload));
+//RS     }
+//RS     // D-TAG1: record each group's subtree (ordered leaf paths). A group path
+//RS     // that also names a leaf is a duplicate definition (one name, two meanings).
+//RS     let mut groups: HashMap<String, (Span, Vec<String>)> = HashMap::new();
+//RS     for g in &e.groups {
+//RS         if variants.contains_key(&g.path) || groups.contains_key(&g.path) {
+//RS             diags.push(Diagnostic::error(
+//RS                 "E0105",
+//RS                 format!("variant `{}` is defined twice in `{}`", g.path, e.name),
+//RS                 "a group name and a variant name share one namespace".to_string(),
+//RS                 "rename or remove the duplicate variant".to_string(),
+//RS                 Some(g.name_span),
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         let prefix = format!("{}.", g.path);
+//RS         let leaves: Vec<String> = variant_order
+//RS             .iter()
+//RS             .filter(|v| v.starts_with(&prefix))
+//RS             .cloned()
+//RS             .collect();
+//RS         groups.insert(g.path.clone(), (g.name_span, leaves));
+//RS     }
+//RS     registry.types.insert(
+//RS         e.name.clone(),
+//RS         TypeDef::Enum {
+//RS             variants,
+//RS             variant_order,
+//RS             groups,
+//RS             methods: HashMap::new(),
+//RS             deprecation: super::super::deprecation_from_markers(&e.type_markers),
+//RS             single_use: e.is_single_use,
+//RS             must_use: e.is_must_use,
+//RS             c_layout_tag: e.c_layout_tag(),
+//RS         },
+//RS     );
+//RS     if e.type_markers
+//RS         .iter()
+//RS         .any(|marker| marker.name == Syntax::MARKER_ERROR)
+//RS     {
+//RS         registry.error_types.insert(e.name.clone());
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn register_type_methods(
+//RS     items: &[Item],
+//RS     registry: &mut TypeRegistry,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     register_type_methods_inner(items, registry, diags, true);
+//RS }
+//RS 
+//RS pub(crate) fn register_missing_type_methods(
+//RS     items: &[Item],
+//RS     registry: &mut TypeRegistry,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     register_type_methods_inner(items, registry, diags, false);
+//RS }
+//RS 
+//RS fn register_type_methods_inner(
+//RS     items: &[Item],
+//RS     registry: &mut TypeRegistry,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     error_on_duplicate: bool,
+//RS ) {
+//RS     for item in items {
+//RS         let (type_name, methods, field_names) = match item {
+//RS             Item::Struct(s) => (
+//RS                 s.name.as_str(),
+//RS                 s.methods
+//RS                     .iter()
+//RS                     .chain(s.trait_impls.iter().flat_map(|block| block.methods.iter()))
+//RS                     .collect::<Vec<_>>(),
+//RS                 registry.field_names(&s.name),
+//RS             ),
+//RS             Item::Enum(e) => (
+//RS                 e.name.as_str(),
+//RS                 e.methods
+//RS                     .iter()
+//RS                     .chain(e.trait_impls.iter().flat_map(|block| block.methods.iter()))
+//RS                     .collect::<Vec<_>>(),
+//RS                 Vec::new(),
+//RS             ),
+//RS             _ => continue,
+//RS         };
+//RS         let Some(type_def) = registry.types.get_mut(type_name) else {
+//RS             continue;
+//RS         };
+//RS         let methods_map = match type_def {
+//RS             TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
+//RS             TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
+//RS         };
+//RS         for m in methods {
+//RS             if field_names.iter().any(|f| f == &m.name) {
+//RS                 diags.push(method_field_clash(&m.name, type_name, m.name_span));
+//RS             }
+//RS             if methods_map.contains_key(&m.name) {
+//RS                 if !error_on_duplicate {
+//RS                     continue;
+//RS                 }
+//RS                 let is_ctor = m.self_param().is_none();
+//RS                 diags.push(method_defined_twice(
+//RS                     &m.name,
+//RS                     type_name,
+//RS                     m.name_span,
+//RS                     is_ctor,
+//RS                 ));
+//RS             } else {
+//RS                 // L2401 (D-NARG1): pub method with a positional Bool param.
+//RS                 if m.is_pub {
+//RS                     for p in m.params.iter().filter(|p| p.name != "self") {
+//RS                         if matches!(p.ty, Type::Bool) && p.default.is_none() {
+//RS                             diags.push(Diagnostic::lint(
+//RS                                 "L2401",
+//RS                                 format!(
+//RS                                     "public method `{}` has a positional `Bool` parameter `{}`",
+//RS                                     m.name, p.name
+//RS                                 ),
+//RS                                 "positional booleans are easy to transpose at the call site"
+//RS                                     .to_string(),
+//RS                                 format!(
+//RS                                     "callers can write `{}: true` to make the intent clear (S61 labels)",
+//RS                                     p.name
+//RS                                 ),
+//RS                                 Some(p.name_span),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 // D-NARG-D2 (E0126): check defaults don't ref later params.
+//RS                 let non_self: Vec<_> = m
+//RS                     .params
+//RS                     .iter()
+//RS                     .filter(|p| p.name != "self")
+//RS                     .cloned()
+//RS                     .collect();
+//RS                 check_default_forward_refs(&non_self, &m.name, diags);
+//RS                 methods_map.insert(m.name.clone(), func_to_method_sig(m));
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn register_impl_methods(
+//RS     items: &[Item],
+//RS     registry: &mut TypeRegistry,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     for item in items {
+//RS         let Item::Impl(i) = item else { continue };
+//RS         if !registry.contains(&i.type_name) {
+//RS             continue;
+//RS         }
+//RS         let field_names = registry.field_names(&i.type_name);
+//RS         let Some(type_def) = registry.types.get_mut(&i.type_name) else {
+//RS             continue;
+//RS         };
+//RS         let methods_map = match type_def {
+//RS             TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
+//RS             TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
+//RS         };
+//RS         for m in &i.methods {
+//RS             if field_names.iter().any(|f| f == &m.name) {
+//RS                 diags.push(method_field_clash(&m.name, &i.type_name, m.name_span));
+//RS             }
+//RS             if methods_map.contains_key(&m.name) {
+//RS                 let is_ctor = m.self_param().is_none();
+//RS                 diags.push(method_defined_twice(
+//RS                     &m.name,
+//RS                     &i.type_name,
+//RS                     m.name_span,
+//RS                     is_ctor,
+//RS                 ));
+//RS             } else {
+//RS                 // L2401 (D-NARG1): pub method with a positional Bool param.
+//RS                 if m.is_pub {
+//RS                     for p in m.params.iter().filter(|p| p.name != "self") {
+//RS                         if matches!(p.ty, Type::Bool) && p.default.is_none() {
+//RS                             diags.push(Diagnostic::lint(
+//RS                                 "L2401",
+//RS                                 format!(
+//RS                                     "public method `{}` has a positional `Bool` parameter `{}`",
+//RS                                     m.name, p.name
+//RS                                 ),
+//RS                                 "positional booleans are easy to transpose at the call site"
+//RS                                     .to_string(),
+//RS                                 format!(
+//RS                                     "callers can write `{}: true` to make the intent clear (S61 labels)",
+//RS                                     p.name
+//RS                                 ),
+//RS                                 Some(p.name_span),
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 // D-NARG-D2 (E0126): check defaults don't ref later params.
+//RS                 let non_self: Vec<_> = m
+//RS                     .params
+//RS                     .iter()
+//RS                     .filter(|p| p.name != "self")
+//RS                     .cloned()
+//RS                     .collect();
+//RS                 check_default_forward_refs(&non_self, &m.name, diags);
+//RS                 methods_map.insert(m.name.clone(), func_to_method_sig(m));
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Return the compiler-private receiver function for one String method.
+//RS ///
+//RS /// The private source part is not a nominal `String` registry entry and its
+//RS /// functions are never public imports. This registry only admits the
+//RS /// receiver-first, read-only primitive shape; the ordinary String contract
+//RS /// checker remains authoritative for arity, arguments, mutation, and failure.
+//RS pub(crate) fn core_string_source_method<'a>(
+//RS     modules: &'a [ModuleState],
+//RS     method: &str,
+//RS ) -> Option<&'a Func> {
+//RS     let module = modules.iter().find(|module| {
+//RS         module.module_alias == jet_foundation::CoreSourceParts::CORE_TEXT_STRING_ALIAS
+//RS     })?;
+//RS     let function = module.items.iter().find_map(|item| match item {
+//RS         Item::Func(function)
+//RS             if !function.is_pub && function.name == method && function.params.first().is_some() =>
+//RS         {
+//RS             Some(function)
+//RS         }
+//RS         _ => None,
+//RS     })?;
+//RS     let receiver = function.params.first()?;
+//RS     (receiver.convention == AccessConvention::Read && receiver.ty == Type::String).then_some(function)
+//RS }
+// END-PORT-PENDING 0440 crates/jet-sema/src/Sema/Registration/Items.rs:1709-2569
+

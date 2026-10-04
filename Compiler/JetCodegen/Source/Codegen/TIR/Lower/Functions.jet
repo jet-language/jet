@@ -1,0 +1,1465 @@
+// PORT-PENDING 0483 crates-jet-codegen-src-codegen-tir-lower-functions: crates/jet-codegen/src/Codegen/TIR/lower/functions.rs:1-1461
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code)]
+//RS use crate::AST::{AccessConvention, BinOp, ContractClause, Expr, Func, Param, Type};
+//RS use crate::Codegen::Cx;
+//RS use crate::Codegen::TIR::LowerEnv;
+//RS use crate::Codegen::TIR::SerdeCodec;
+//RS use crate::Codegen::TIR::TLocal;
+//RS use crate::Codegen::TIR::TUnsafeGate;
+//RS use crate::Codegen::TIR::TWebParamReconstruction;
+//RS use crate::Codegen::TIR::lower::lower_value_block;
+//RS use crate::Codegen::TIR::lower::note_stack_sentry_in_tir;
+//RS use crate::Codegen::TIR::lower::prepare_interrupt_callback_locals;
+//RS use crate::Codegen::TIR::lower::return_type_has_value;
+//RS use crate::Codegen::TIR::lower_expr;
+//RS use crate::Codegen::TIR::lower_stmts;
+//RS use crate::Codegen::TIR::resolve_self_ty;
+//RS use crate::Codegen::TIR::{
+//RS     TContract, TContractDisposition, TContractKind, TContractResult, TContractResultMode,
+//RS     TEffectFacts, TExpr, TExprKind, TFailureCarrier, TFunc, TFuncKind, TGenericParam, TStmt,
+//RS     TTargetApplicability, TVisibility, function_effect_facts, function_failure_carrier,
+//RS     function_foreign_provenance, function_semantic_key, function_target_applicability,
+//RS     function_visibility,
+//RS };
+//RS use crate::Codegen::mangle_generated;
+//RS use crate::Syntax;
+//RS use std::cell::Cell;
+//RS use std::collections::HashMap;
+//RS use std::rc::Rc;
+//RS 
+//RS /// D-COV1: 1-based line number of a byte offset in the source, for coverage probes.
+//RS pub(crate) fn cov_line(cx: &Cx, offset: usize) -> usize {
+//RS     cx.src_line_col(offset).0
+//RS }
+//RS 
+//RS /// Construct the checked identity for a method implementation. The owner is
+//RS /// part of the identity because the source leaf (`equal`, `compare`, etc.) is
+//RS /// shared by every type in a module. Keep operator trait identity (including
+//RS /// its RHS) when sema supplied it; generated protocol impls do not always have
+//RS /// a normalized RHS yet, so the owner-plus-trait spelling remains the safe
+//RS /// fallback.
+//RS fn method_semantic_key(
+//RS     module: &str,
+//RS     owner: &Type,
+//RS     trait_name: Option<&str>,
+//RS     operator_rhs: Option<&Type>,
+//RS     method: &str,
+//RS ) -> String {
+//RS     let owner_name = owner.name();
+//RS     let method_name = match trait_name {
+//RS         Some(trait_name)
+//RS             if matches!(
+//RS                 trait_name,
+//RS                 crate::Syntax::TRAIT_ADD
+//RS                     | crate::Syntax::TRAIT_SUB
+//RS                     | crate::Syntax::TRAIT_MUL
+//RS                     | crate::Syntax::TRAIT_DIV
+//RS                     | crate::Syntax::TRAIT_EQUATABLE
+//RS                     | crate::Syntax::TRAIT_COMPARABLE
+//RS             ) =>
+//RS         {
+//RS             crate::Traits::operator_method_identity(
+//RS                 &owner_name,
+//RS                 trait_name,
+//RS                 method,
+//RS                 operator_rhs.unwrap_or(owner),
+//RS             )
+//RS         }
+//RS         Some(trait_name) => format!("{owner_name}::{trait_name}::{method}"),
+//RS         None => format!("{owner_name}::{method}"),
+//RS     };
+//RS     if !module.is_empty() && method_name.starts_with(&format!("{module}::")) {
+//RS         method_name
+//RS     } else {
+//RS         function_semantic_key(module, &method_name)
+//RS     }
+//RS }
+//RS 
+//RS fn generic_params_from(type_params: &[crate::AST::TypeParam]) -> Vec<TGenericParam> {
+//RS     type_params
+//RS         .iter()
+//RS         .map(|param| TGenericParam {
+//RS             name: param.name.clone(),
+//RS             bounds: param.bounds.clone(),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn type_param_names(f: &Func) -> Vec<String> {
+//RS     f.type_params
+//RS         .iter()
+//RS         .map(|param| param.name.clone())
+//RS         .collect()
+//RS }
+//RS 
+//RS fn default_target_applicability() -> TTargetApplicability {
+//RS     TTargetApplicability {
+//RS         rust_aot: true,
+//RS         cranelift: true,
+//RS         interpreter: true,
+//RS         web: true,
+//RS     }
+//RS }
+//RS 
+//RS fn sentries_enabled_for_function(f: &Func, cx: &Cx) -> bool {
+//RS     let declarations = cx
+//RS         .policy_declarations
+//RS         .iter()
+//RS         .filter(|declaration| {
+//RS             declaration.key == crate::Policy::PolicyKey::Sentries
+//RS                 && (matches!(
+//RS                     declaration.scope,
+//RS                     crate::Policy::PolicyScope::Organization
+//RS                         | crate::Policy::PolicyScope::Package
+//RS                         | crate::Policy::PolicyScope::Module
+//RS                 ) || declaration.target == Some(f.span))
+//RS         })
+//RS         .cloned();
+//RS     crate::Policy::resolve(crate::Policy::PolicyKey::Sentries, declarations)
+//RS         .ok()
+//RS         .flatten()
+//RS         .is_none_or(|policy| policy.value == crate::Policy::PolicyValue::On)
+//RS }
+//RS 
+//RS fn unsafe_gate(f: &Func, cx: &Cx, enabled: bool) -> Option<TUnsafeGate> {
+//RS     f.is_unsafe.then(|| {
+//RS         let span = f.unsafe_span.unwrap_or(f.span);
+//RS         TUnsafeGate {
+//RS             file: cx.file.clone(),
+//RS             line: cov_line(cx, span.start) as u32,
+//RS             reason: f.unsafe_reason.clone().unwrap_or_default(),
+//RS             enabled,
+//RS             fenced: cx.dependency_fenced,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn bind_resource_param(
+//RS     source_name: &str,
+//RS     ty: &Type,
+//RS     convention: AccessConvention,
+//RS     cx: &Cx,
+//RS     env: &mut LowerEnv,
+//RS     guards: &mut Vec<TStmt>,
+//RS     ordinary_slot: TLocal,
+//RS ) {
+//RS     let resource = matches!(convention, AccessConvention::Move)
+//RS         && matches!(ty, Type::Named(name) | Type::Apply { name, .. } if cx.has_close_type(name));
+//RS     if !resource {
+//RS         let local_ty = match ty {
+//RS             Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_GUARD => Type::Tagged {
+//RS                 marker: crate::AST::TagMarker::Internal(if convention == AccessConvention::Write {
+//RS                     crate::AST::InternalTag::SharedGuardEdit
+//RS                 } else {
+//RS                     crate::AST::InternalTag::SharedGuardRead
+//RS                 }),
+//RS                 inner: Box::new(ty.clone()),
+//RS             },
+//RS             _ => ty.clone(),
+//RS         };
+//RS         env.bind(source_name, ordinary_slot, Some(local_ty));
+//RS         return;
+//RS     }
+//RS     let guard_name = mangle_generated(&format!("resource_param_{source_name}"));
+//RS     guards.push(TStmt::Let {
+//RS         name: guard_name.clone(),
+//RS         kw: "let mut",
+//RS         let_ty: crate::Codegen::TIR::TLetTy::resource(ty.clone()),
+//RS         init: TExpr {
+//RS             ty: ty.clone(),
+//RS             kind: TExprKind::ResourceNew(Box::new(TExpr {
+//RS                 ty: ty.clone(),
+//RS                 kind: TExprKind::Move(Box::new(TExpr {
+//RS                     ty: ty.clone(),
+//RS                     kind: TExprKind::Local(TLocal::user(source_name)),
+//RS                 })),
+//RS             })),
+//RS         },
+//RS         gc_promotion: None,
+//RS         gc_transferred: false,
+//RS     });
+//RS     env.bind(
+//RS         source_name,
+//RS         TLocal::user(&guard_name).through_ref(),
+//RS         Some(ty.clone()),
+//RS     );
+//RS     env.mark_resource(source_name);
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use jet_foundation::Diagnostics::LineIndex;
+//RS 
+//RS     #[test]
+//RS     fn coverage_line_accepts_offsets_inside_multibyte_prefixes() {
+//RS         let src = "é🚀—λ\nfn run() {}\n";
+//RS         let lines = LineIndex::new(src);
+//RS         let line_at = |offset| lines.line_col(src, offset).0;
+//RS         for offset in 0..="é🚀—λ".len() {
+//RS             assert_eq!(line_at(offset), 1, "offset {offset}");
+//RS         }
+//RS         assert_eq!(line_at("é🚀—λ\n".len()), 2);
+//RS         assert_eq!(line_at(usize::MAX), 3);
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
+//RS     lower_func_with_web_boundary(f, cx, false)
+//RS }
+//RS 
+//RS pub(crate) fn lower_error_conv(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFunc {
+//RS     lower_error_conv_inner(conversion, cx)
+//RS }
+//RS 
+//RS fn lower_error_conv_inner(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFunc {
+//RS     let name = crate::Sema::error_conv_fn_name(&conversion.from_ty, &conversion.to_ty);
+//RS     let from_ty = Type::Named(conversion.from_ty.clone());
+//RS     let to_ty = Type::Named(conversion.to_ty.clone());
+//RS     let mut env = LowerEnv::new(name.clone());
+//RS     env.sentries_fenced = cx.dependency_fenced;
+//RS     env.ret_ty = Some(to_ty.clone());
+//RS     env.bind(
+//RS         Syntax::KW_SELF,
+//RS         TLocal::user(Syntax::KW_SELF),
+//RS         Some(from_ty.clone()),
+//RS     );
+//RS     prepare_interrupt_callback_locals(&conversion.body, cx, &mut env);
+//RS     // The conversion body is a value block: its trailing expression is the
+//RS     // converted target value, exactly as in an ordinary value-returning fn.
+//RS     let body = lower_value_block(&conversion.body, cx, &mut env);
+//RS     note_stack_sentry_in_tir(&body, &env);
+//RS     TFunc {
+//RS         name: name.clone(),
+//RS         module: cx.module_identity.clone(),
+//RS         key: function_semantic_key(&cx.module_identity, &name),
+//RS         source_file: cx.file.clone(),
+//RS         source_span: conversion.from_span,
+//RS         failure_carrier: TFailureCarrier::from_checked_type(&to_ty),
+//RS         effects: TEffectFacts::default(),
+//RS         target_applicability: default_target_applicability(),
+//RS         web_bucket: None,
+//RS         web_marker: None,
+//RS         visibility: TVisibility::Private,
+//RS         foreign: None,
+//RS         params: vec![(Syntax::KW_SELF.to_string(), from_ty, AccessConvention::Move)],
+//RS         web_param_reconstructions: Vec::new(),
+//RS         ret: Some(to_ty),
+//RS         gc_return: false,
+//RS         gc_scope: false,
+//RS         return_view_provenance: None,
+//RS         generic_params: Vec::new(),
+//RS         clone_types: Vec::new(),
+//RS         is_main: false,
+//RS         line: cov_line(cx, conversion.from_span.start),
+//RS         synthetic: false,
+//RS         is_unsafe: false,
+//RS         unsafe_gate: None,
+//RS         is_pure: true,
+//RS         memo_bound: None,
+//RS         is_reactive: false,
+//RS         reactive_upgrades: Vec::new(),
+//RS         is_inline: false,
+//RS         is_inline_always: false,
+//RS         is_scalar: false,
+//RS         kernel_proof: None,
+//RS         memo_field: None,
+//RS         uses_stack_sentry: env.stack_sentry_needed(),
+//RS         body,
+//RS         kind: TFuncKind::TopLevel,
+//RS     }
+//RS }
+//RS 
+//RS /// Lower a web function through the same executable TIR as every other target,
+//RS /// but retain the one target-boundary fact a flattened `#WasmExport` needs:
+//RS /// an all-integer Codable struct parameter is an owned typed local inside the
+//RS /// function and scalar fields only at the external ABI. Sema already proved the
+//RS /// export type legal; this pass only materializes resolved names/types.
+//RS pub(crate) fn lower_web_func(f: &Func, cx: &Cx) -> TFunc {
+//RS     lower_func_with_web_boundary(
+//RS         f,
+//RS         cx,
+//RS         f.web_marker == Some(crate::Syntax::WebPartitionMarker::WasmExport),
+//RS     )
+//RS }
+//RS 
+//RS fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool) -> TFunc {
+//RS     // D-STREAMYIELD1: a stream producer's declared `Stream<T>` is its
+//RS     // executable protocol, not an ordinary fallible value carrier. Keep that
+//RS     // raw type in TIR so Web can select the generator path and every engine
+//RS     // sees the same yield contract.
+//RS     let return_type = f
+//RS         .return_type
+//RS         .as_ref()
+//RS         .filter(|ty| {
+//RS             matches!(
+//RS                 ty,
+//RS                 Type::Apply { name, args }
+//RS                     if name == Syntax::TYPE_STREAM && args.len() == 1
+//RS             )
+//RS         })
+//RS         .cloned()
+//RS         .unwrap_or_else(|| f.effective_return_type());
+//RS     let type_param_names = type_param_names(f);
+//RS     let return_type = cx.canonicalize_checked_type(&return_type, &type_param_names);
+//RS     let mut env = LowerEnv::new(f.name.clone());
+//RS     env.sentries_enabled = sentries_enabled_for_function(f, cx);
+//RS     env.sentries_fenced = cx.dependency_fenced;
+//RS     env.gc_return = f.gc_return;
+//RS     env.ret_ty = Some(return_type.clone());
+//RS     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
+//RS     // (String, Char) is a borrow in Rust and reads as `(*name)`.
+//RS     let mut params = Vec::new();
+//RS     let mut resource_param_guards = Vec::new();
+//RS     let mut web_param_reconstructions = Vec::new();
+//RS     for p in &f.params {
+//RS         let rust_name = p.name.clone();
+//RS         let declared_param_ty = if p.variadic {
+//RS             Type::List(Box::new(p.ty.clone()))
+//RS         } else {
+//RS             p.ty.clone()
+//RS         };
+//RS         // Function parameters expose their source return spelling to users, but
+//RS         // callable values cross the executable boundary through the shared
+//RS         // Result carrier. Keep TIR on that ABI shape, as sema does in
+//RS         // `func_to_sig`.
+//RS         let effective_param_ty = cx
+//RS             .expand_type_aliases(&declared_param_ty)
+//RS             .with_effective_fn_returns();
+//RS         let param_ty = cx.canonicalize_checked_type(&effective_param_ty, &type_param_names);
+//RS         // c109 Phase 17: a param TYPED as a bare type parameter (`item: T`) is forced to
+//RS         // the `Move` convention for the slot deref (it is passed by value — `rust_param_type`
+//RS         // renders it `T`, no `&`), EXACTLY as `emit_func` forces `conv = Move` for an
+//RS         // `is_type_param` param. A param typed `Stack<T>` is NOT a type-var param — it keeps
+//RS         // its source convention (`Read` → `&__jet_Stack<T>`, deref'd place `(*__jet_s)`).
+//RS         if reconstruct_web_params {
+//RS             if let Type::Named(type_name) = &param_ty {
+//RS                 if let Some(fields) = cx.struct_fields.get(type_name) {
+//RS                     if !fields.is_empty()
+//RS                         && fields.iter().all(|(_, ty)| {
+//RS                             matches!(ty, Type::Int | Type::IntN { .. } | Type::InlineRange { .. })
+//RS                         })
+//RS                     {
+//RS                         let flat_fields = fields
+//RS                             .iter()
+//RS                             .map(|(field, ty)| {
+//RS                                 (
+//RS                                     field.to_string(),
+//RS                                     format!("{}_{}", p.name, field),
+//RS                                     ty.clone(),
+//RS                                 )
+//RS                             })
+//RS                             .collect();
+//RS                         env.bind(&p.name, TLocal::user(&p.name), Some(param_ty.clone()));
+//RS                         params.push((rust_name.clone(), param_ty.clone(), p.convention));
+//RS                         web_param_reconstructions.push(TWebParamReconstruction {
+//RS                             local: TLocal::user(&p.name),
+//RS                             ty: Type::Named(type_name.to_string()),
+//RS                             fields: flat_fields,
+//RS                         });
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         let mut slot_param = p.clone();
+//RS         slot_param.ty = param_ty.clone();
+//RS         let convention = effective_generic_convention(&slot_param, &f.type_params);
+//RS         slot_param.convention = convention;
+//RS         let place = param_place_generic(&p.name, &slot_param, &f.type_params);
+//RS         bind_resource_param(
+//RS             &p.name,
+//RS             &param_ty,
+//RS             convention,
+//RS             cx,
+//RS             &mut env,
+//RS             &mut resource_param_guards,
+//RS             place,
+//RS         );
+//RS         params.push((rust_name, param_ty, convention));
+//RS     }
+//RS     let mut body = resource_param_guards;
+//RS     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
+//RS     let lowered_body = if return_type_has_value(&return_type) {
+//RS         lower_value_block(&f.body, cx, &mut env)
+//RS     } else {
+//RS         lower_stmts(&f.body, cx, &mut env)
+//RS     };
+//RS     body.extend(lowered_body);
+//RS     let mut clone_types = env.cloned_types.borrow().clone();
+//RS     for param in &f.params {
+//RS         collect_signature_clone_types(&param.ty, cx, &mut clone_types);
+//RS     }
+//RS     collect_signature_clone_types(&return_type, cx, &mut clone_types);
+//RS     let body = wrap_contract_scope(
+//RS         f,
+//RS         body,
+//RS         None,
+//RS         Some(return_type.clone()),
+//RS         &env.stack_sentry_needed,
+//RS         cx,
+//RS     );
+//RS     note_stack_sentry_in_tir(&body, &env);
+//RS     let uses_stack_sentry = env.stack_sentry_needed();
+//RS     // #3740: an empty failure set returns its success value directly. The body
+//RS     // above keeps the checked carrier; MIR unwraps it at each return. A
+//RS     // `Never Never!` function has no success value to return, so it keeps the
+//RS     // `Result<Never, Never>` carrier and its callers' `Try` proves both edges
+//RS     // unreachable.
+//RS     let plain_return = crate::Codegen::TIR::function_has_plain_return(f)
+//RS         .then(|| match &return_type {
+//RS             Type::Result { ok, err } if err.is_never() && !ok.is_never() => {
+//RS                 Some(ok.as_ref().clone())
+//RS             }
+//RS             _ => None,
+//RS         })
+//RS         .flatten();
+//RS     // A plain `T? Never!` return has the executable shape of a `T?` function:
+//RS     // a `?` on an absent value inside it returns `None`.
+//RS     let failure_carrier = match &plain_return {
+//RS         Some(Type::Option(value)) => TFailureCarrier::Optional {
+//RS             value: value.as_ref().clone(),
+//RS         },
+//RS         Some(_) => TFailureCarrier::Infallible,
+//RS         None => function_failure_carrier(f),
+//RS     };
+//RS     TFunc {
+//RS         name: f.name.clone(),
+//RS         module: cx.module_identity.clone(),
+//RS         key: function_semantic_key(&cx.module_identity, &f.name),
+//RS         source_file: cx.file.clone(),
+//RS         source_span: f.span,
+//RS         failure_carrier,
+//RS         effects: function_effect_facts(f),
+//RS         target_applicability: function_target_applicability(f),
+//RS         web_bucket: None,
+//RS         web_marker: f.web_marker.clone(),
+//RS         visibility: function_visibility(f),
+//RS         foreign: function_foreign_provenance(f),
+//RS         params,
+//RS         web_param_reconstructions,
+//RS         ret: Some(plain_return.unwrap_or(return_type)),
+//RS         gc_return: f.gc_return,
+//RS         gc_scope: f.gc_scope,
+//RS         return_view_provenance: f.return_view_provenance.clone(),
+//RS         generic_params: generic_params_from(&f.type_params),
+//RS         clone_types,
+//RS         is_main: false,
+//RS         line: cov_line(cx, f.name_span.start),
+//RS         synthetic: f.compiler_generated,
+//RS         is_unsafe: f.is_unsafe,
+//RS         unsafe_gate: unsafe_gate(f, cx, env.sentries_enabled),
+//RS         is_pure: f.is_pure,
+//RS         memo_bound: crate::AST::memo_bound_from_markers(&f.markers),
+//RS         is_reactive: f.is_reactive,
+//RS         reactive_upgrades: f.reactive_upgrades.clone(),
+//RS         is_inline: f.is_inline,
+//RS         is_inline_always: f.is_inline_always,
+//RS         is_scalar: f
+//RS             .markers
+//RS             .iter()
+//RS             .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
+//RS         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
+//RS         memo_field: None,
+//RS         uses_stack_sentry,
+//RS         body,
+//RS         kind: TFuncKind::TopLevel,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_contract_cond(
+//RS     f: &Func,
+//RS     cond: &Expr,
+//RS     result_binding: Option<(&str, &Type)>,
+//RS     owner_type: Option<&str>,
+//RS     stack_sentry_needed: &Rc<Cell<bool>>,
+//RS     cx: &Cx,
+//RS ) -> TExpr {
+//RS     let mut env = LowerEnv::new(f.name.clone());
+//RS     env.sentries_enabled = sentries_enabled_for_function(f, cx);
+//RS     env.sentries_fenced = cx.dependency_fenced;
+//RS     env.gc_return = f.gc_return;
+//RS     let type_param_names = type_param_names(f);
+//RS     for p in &f.params {
+//RS         let mut param_ty = if p.variadic {
+//RS             Type::List(Box::new(p.ty.clone()))
+//RS         } else {
+//RS             p.ty.clone()
+//RS         };
+//RS         if let Some(owner) = owner_type {
+//RS             param_ty = resolve_self_ty(&param_ty, owner);
+//RS         }
+//RS         let param_ty = cx.canonicalize_checked_type(&param_ty, &type_param_names);
+//RS         let mut slot_param = p.clone();
+//RS         slot_param.ty = param_ty.clone();
+//RS         let place = if owner_type.is_some() && p.name == Syntax::KW_SELF {
+//RS             if matches!(p.convention, AccessConvention::Write) {
+//RS                 TLocal::generated(Syntax::KW_SELF).through_ref()
+//RS             } else if matches!(p.convention, AccessConvention::Read) {
+//RS                 TLocal::generated(Syntax::KW_SELF)
+//RS                     .with_address_lifetime(crate::Codegen::TIR::TAddressLifetime::Borrowed)
+//RS             } else {
+//RS                 TLocal::generated(Syntax::KW_SELF)
+//RS             }
+//RS         } else {
+//RS             param_place_generic(&p.name, &slot_param, &f.type_params)
+//RS         };
+//RS         env.bind(&p.name, place, Some(param_ty));
+//RS     }
+//RS     if let Some((rust_name, ty)) = result_binding {
+//RS         env.bind(
+//RS             "result",
+//RS             TLocal::generated(rust_name),
+//RS             Some(cx.canonicalize_checked_type(ty, &type_param_names)),
+//RS         );
+//RS     }
+//RS     env.stack_sentry_needed = stack_sentry_needed.clone();
+//RS     lower_expr(cond, cx, &mut env)
+//RS }
+//RS 
+//RS fn contract_interval(expr: &Expr, bindings: &HashMap<String, Type>, cx: &Cx) -> Option<(i64, i64)> {
+//RS     match expr {
+//RS         Expr::Int(value, ..) => Some((*value, *value)),
+//RS         Expr::Ident(name, _) => match bindings.get(name)? {
+//RS             Type::Named(type_name) => cx.distinct_ranges.get(type_name).copied(),
+//RS             Type::Tagged { inner, .. } => match inner.as_ref() {
+//RS                 Type::Named(type_name) => cx.distinct_ranges.get(type_name).copied(),
+//RS                 _ => None,
+//RS             },
+//RS             _ => None,
+//RS         },
+//RS         // D-RANGETYPE1: a distinct value's raw integer projection preserves
+//RS         // the declaration interval. This fact only controls disposition;
+//RS         // the condition itself still lowers as an ordinary TIR expression.
+//RS         Expr::MethodCall {
+//RS             receiver, method, ..
+//RS         } if method == "raw" => contract_interval(receiver, bindings, cx),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn interval_comparison(op: BinOp, left: (i64, i64), right: (i64, i64)) -> bool {
+//RS     let (left_lo, left_hi) = left;
+//RS     let (right_lo, right_hi) = right;
+//RS     match op {
+//RS         BinOp::Eq => left_lo == left_hi && left == right,
+//RS         BinOp::Ne => left_hi < right_lo || right_hi < left_lo,
+//RS         BinOp::Lt => left_hi < right_lo,
+//RS         BinOp::Gt => left_lo > right_hi,
+//RS         BinOp::Le => left_hi <= right_lo,
+//RS         BinOp::Ge => left_lo >= right_hi,
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-FAIL-TIER1: a range fact is a proof disposition, not an engine-local
+//RS /// optimization.  The resulting `Proven` node is retained in TIR so every
+//RS /// backend honors the same erasure disposition.
+//RS pub(crate) fn contract_expr_proven(expr: &Expr, bindings: &HashMap<String, Type>, cx: &Cx) -> bool {
+//RS     match expr {
+//RS         Expr::Bool(value, _) => *value,
+//RS         Expr::Binary(BinOp::And, left, right, _) => {
+//RS             contract_expr_proven(left, bindings, cx) && contract_expr_proven(right, bindings, cx)
+//RS         }
+//RS         Expr::Binary(BinOp::Or, left, right, _) => {
+//RS             contract_expr_proven(left, bindings, cx) || contract_expr_proven(right, bindings, cx)
+//RS         }
+//RS         Expr::Binary(op, left, right, _) if op.is_comparison() => {
+//RS             match (
+//RS                 contract_interval(left, bindings, cx),
+//RS                 contract_interval(right, bindings, cx),
+//RS             ) {
+//RS                 (Some(left), Some(right)) => interval_comparison(*op, left, right),
+//RS                 _ => false,
+//RS             }
+//RS         }
+//RS         Expr::CompareChain { operands, ops, .. } => {
+//RS             operands.windows(2).zip(ops).all(|(pair, op)| {
+//RS                 match (
+//RS                     contract_interval(&pair[0], bindings, cx),
+//RS                     contract_interval(&pair[1], bindings, cx),
+//RS                 ) {
+//RS                     (Some(left), Some(right)) => interval_comparison(*op, left, right),
+//RS                     _ => false,
+//RS                 }
+//RS             })
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn contract_fact_bindings(
+//RS     f: &Func,
+//RS     result_binding: Option<(&str, &Type)>,
+//RS     owner_type: Option<&str>,
+//RS     cx: &Cx,
+//RS ) -> HashMap<String, Type> {
+//RS     let mut bindings = HashMap::new();
+//RS     let type_param_names = type_param_names(f);
+//RS     for param in &f.params {
+//RS         let mut ty = if param.variadic {
+//RS             Type::List(Box::new(param.ty.clone()))
+//RS         } else {
+//RS             param.ty.clone()
+//RS         };
+//RS         if let Some(owner) = owner_type {
+//RS             ty = resolve_self_ty(&ty, owner);
+//RS         }
+//RS         let ty = cx.canonicalize_checked_type(&ty, &type_param_names);
+//RS         bindings.insert(param.name.clone(), ty);
+//RS     }
+//RS     if let Some((name, ty)) = result_binding {
+//RS         let ty = cx.canonicalize_checked_type(ty, &type_param_names);
+//RS         bindings.insert(name.to_string(), ty.clone());
+//RS         bindings.insert("result".to_string(), ty);
+//RS     }
+//RS     bindings
+//RS }
+//RS 
+//RS fn lower_contract_clause(
+//RS     f: &Func,
+//RS     clause: &ContractClause,
+//RS     result_binding: Option<(&str, &Type)>,
+//RS     kind: TContractKind,
+//RS     owner_type: Option<&str>,
+//RS     stack_sentry_needed: &Rc<Cell<bool>>,
+//RS     cx: &Cx,
+//RS ) -> TContract {
+//RS     let (_, line, _) =
+//RS         crate::Codegen::TIR::tir_src_line_at(&cx.src, cx.src_lines(), clause.span.start);
+//RS     let bindings = contract_fact_bindings(f, result_binding, owner_type, cx);
+//RS     TContract {
+//RS         kind,
+//RS         condition: lower_contract_cond(
+//RS             f,
+//RS             &clause.cond,
+//RS             result_binding,
+//RS             owner_type,
+//RS             stack_sentry_needed,
+//RS             cx,
+//RS         ),
+//RS         message: lower_contract_cond(
+//RS             f,
+//RS             &clause.message_expr,
+//RS             result_binding,
+//RS             owner_type,
+//RS             stack_sentry_needed,
+//RS             cx,
+//RS         ),
+//RS         file: cx.file.clone(),
+//RS         line,
+//RS         span: clause.span,
+//RS         disposition: if contract_expr_proven(&clause.cond, &bindings, cx) {
+//RS             TContractDisposition::Proven
+//RS         } else {
+//RS             TContractDisposition::Check
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn contract_result_mode(carrier_ty: &Type, binding_ty: &Type) -> TContractResultMode {
+//RS     if carrier_ty == binding_ty {
+//RS         return TContractResultMode::Direct;
+//RS     }
+//RS     match carrier_ty {
+//RS         Type::Result { .. } => TContractResultMode::ResultPayload,
+//RS         Type::Option(_) => TContractResultMode::OptionPayload,
+//RS         Type::Tagged { inner, .. } => contract_result_mode(inner, binding_ty),
+//RS         other => {
+//RS             debug_assert_eq!(
+//RS                 other, binding_ty,
+//RS                 "contract result binding must match a non-carrier return type"
+//RS             );
+//RS             TContractResultMode::Direct
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn contract_result_for_scope(
+//RS     f: &Func,
+//RS     owner_type: Option<&str>,
+//RS     ret: Option<Type>,
+//RS     cx: &Cx,
+//RS ) -> TContractResult {
+//RS     let type_param_names = type_param_names(f);
+//RS     let declared = f
+//RS         .return_type
+//RS         .clone()
+//RS         .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+//RS     let declared = owner_type
+//RS         .map(|owner| resolve_self_ty(&declared, owner))
+//RS         .unwrap_or(declared);
+//RS     let binding_ty = canonical_owner_type(
+//RS         cx,
+//RS         &cx.canonicalize_checked_type(&declared, &type_param_names),
+//RS     );
+//RS     let carrier_ty = ret
+//RS         .map(|ty| cx.canonicalize_checked_type(&ty, &type_param_names))
+//RS         .map(|ty| canonical_owner_type(cx, &ty))
+//RS         .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+//RS     let mode = contract_result_mode(&carrier_ty, &binding_ty);
+//RS     let binding_local = TLocal::generated("result");
+//RS     let carrier_local = match mode {
+//RS         TContractResultMode::Direct => binding_local.clone(),
+//RS         TContractResultMode::ResultPayload | TContractResultMode::OptionPayload => {
+//RS             TLocal::generated("result_carrier")
+//RS         }
+//RS     };
+//RS     TContractResult {
+//RS         carrier_ty,
+//RS         binding_ty,
+//RS         carrier_local,
+//RS         binding_local,
+//RS         mode,
+//RS     }
+//RS }
+//RS 
+//RS fn lower_post_contracts_for_owner(
+//RS     f: &Func,
+//RS     owner_type: Option<&str>,
+//RS     result: &TContractResult,
+//RS     stack_sentry_needed: &Rc<Cell<bool>>,
+//RS     cx: &Cx,
+//RS ) -> Vec<TContract> {
+//RS     f.post
+//RS         .iter()
+//RS         .map(|clause| {
+//RS             lower_contract_clause(
+//RS                 f,
+//RS                 clause,
+//RS                 Some((&result.binding_local.name, &result.binding_ty)),
+//RS                 TContractKind::Post,
+//RS                 owner_type,
+//RS                 stack_sentry_needed,
+//RS                 cx,
+//RS             )
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn wrap_contract_scope(
+//RS     f: &Func,
+//RS     body: Vec<TStmt>,
+//RS     owner_type: Option<&str>,
+//RS     ret: Option<Type>,
+//RS     stack_sentry_needed: &Rc<Cell<bool>>,
+//RS     cx: &Cx,
+//RS ) -> Vec<TStmt> {
+//RS     let result = contract_result_for_scope(f, owner_type, ret, cx);
+//RS     let post = lower_post_contracts_for_owner(f, owner_type, &result, stack_sentry_needed, cx);
+//RS     if post.is_empty() {
+//RS         body
+//RS     } else {
+//RS         vec![TStmt::ContractScope {
+//RS             // D-FAIL-TIER1: #Pre is a call-site node. Keeping it out of the
+//RS             // callee scope prevents duplicate checks and keeps its source
+//RS             // arrow on the caller that supplied the bad arguments.
+//RS             pre: Vec::new(),
+//RS             body,
+//RS             post,
+//RS             result,
+//RS         }]
+//RS     }
+//RS }
+//RS 
+//RS /// Collect the concrete arguments that a derived `Clone` implementation
+//RS /// requires. A generic nominal can be nested under any container or another
+//RS /// generic nominal, so the walk is structural and uses only canonical Cx keys.
+//RS fn collect_signature_clone_types(ty: &Type, cx: &Cx, out: &mut Vec<Type>) {
+//RS     let expanded = cx.expand_type_aliases(ty);
+//RS     match &expanded {
+//RS         Type::Apply { name, args } => {
+//RS             let carries_clone_bound = cx
+//RS                 .struct_type_params
+//RS                 .get(name)
+//RS                 .is_some_and(|params| !params.is_empty())
+//RS                 && cx.cloneable.contains(name);
+//RS             if carries_clone_bound {
+//RS                 out.extend(args.iter().cloned());
+//RS             }
+//RS             for arg in args {
+//RS                 collect_signature_clone_types(arg, cx, out);
+//RS             }
+//RS         }
+//RS         Type::List(inner)
+//RS         | Type::Option(inner)
+//RS         | Type::FixedList { elem: inner, .. }
+//RS         | Type::Tagged { inner, .. }
+//RS         | Type::Quantity { base: inner, .. }
+//RS         | Type::InlineRange { base: inner, .. } => {
+//RS             collect_signature_clone_types(inner, cx, out);
+//RS         }
+//RS         Type::Map { key, value, .. }
+//RS         | Type::Result {
+//RS             ok: key,
+//RS             err: value,
+//RS         } => {
+//RS             collect_signature_clone_types(key, cx, out);
+//RS             collect_signature_clone_types(value, cx, out);
+//RS         }
+//RS         Type::Shared(_) | Type::Fn { .. } | Type::TraitObject(_) => {}
+//RS         Type::Tuple(fields) => {
+//RS             for (_, field) in fields {
+//RS                 collect_signature_clone_types(field, cx, out);
+//RS             }
+//RS         }
+//RS         Type::Union(members) => {
+//RS             for member in members {
+//RS                 collect_signature_clone_types(member, cx, out);
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS /// Bare generic parameters keep the source access convention. A default `Read`
+//RS /// remains a borrowed `&T` slot; explicit `Move` (for example `^T`) is owned.
+//RS fn effective_generic_convention(
+//RS     p: &Param,
+//RS     _type_params: &[crate::AST::TypeParam],
+//RS ) -> AccessConvention {
+//RS     p.convention
+//RS }
+//RS 
+//RS /// c109 Phase 17: `param_place` for a (possibly generic) free function.
+//RS /// Explicit access conventions stay aligned with the emitted Rust signature.
+//RS /// Callers have already applied `effective_generic_convention` to `p`; keep
+//RS /// this projection borrowed so lowering does not clone the complete parameter
+//RS /// metadata just to read its convention.
+//RS pub(crate) fn param_place_generic(
+//RS     name: &str,
+//RS     p: &Param,
+//RS     _type_params: &[crate::AST::TypeParam],
+//RS ) -> TLocal {
+//RS     param_place(name, p)
+//RS }
+//RS 
+//RS /// Project a method owner through the same canonical nominal identities used
+//RS /// by field and MIR lowering. Trait-generated methods can otherwise retain a
+//RS /// bare local owner and become ambiguous when an imported type shares its leaf.
+//RS fn canonical_owner_type(cx: &Cx, ty: &Type) -> Type {
+//RS     let entry_local = cx.jit_local_call_prefix.is_none();
+//RS     let mapped = ty.map_named_types(&|name| {
+//RS         if entry_local && cx.local_type_names.contains(name) {
+//RS             return None;
+//RS         }
+//RS         let canonical = crate::Codegen::TIR::canonical_enum_owner(cx, name);
+//RS         (canonical != name).then_some(canonical)
+//RS     });
+//RS     match mapped {
+//RS         Type::Apply { name, args } => Type::Apply {
+//RS             name: crate::Codegen::TIR::canonical_enum_owner(cx, &name),
+//RS             args,
+//RS         },
+//RS         other => other,
+//RS     }
+//RS }
+//RS 
+//RS fn canonical_owner_name(cx: &Cx, name: &str) -> String {
+//RS     crate::Codegen::TIR::canonical_enum_owner(cx, name)
+//RS }
+//RS 
+//RS /// c109 Phase 7: lower an inherent method (instance or static) of `type_name` to a
+//RS /// `TFunc`. Mirrors `emit_method`'s slot construction exactly:
+//RS ///  - the `self` parameter (if any) becomes a slot whose place is the bare `self`
+//RS ///    (rust_name `self`, NO deref — `self.field` reads emit `(self).field`, and a
+//RS ///    `when self` match scrutinee emits `self` with no clone, exactly as the AST
+//RS ///    path does for a `&self`/`&mut self`/`self` receiver) and whose type is `None`
+//RS ///    (matching `emit_method`'s `jet_ty: None` so overflow decisions are identical);
+//RS ///  - non-self params get the same `param_place` deref logic as a free function.
+//RS /// The `self_conv` (instance) / `None` (static) and the resolved return type drive
+//RS /// the receiver/signature in `emit_tir_func`.
+//RS pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
+//RS     let owner_ty = match cx.struct_type_param_order.get(type_name) {
+//RS         Some(params) if !params.is_empty() => Type::Apply {
+//RS             name: type_name.to_string(),
+//RS             args: params.iter().cloned().map(Type::Named).collect(),
+//RS         },
+//RS         _ => Type::Named(type_name.to_string()),
+//RS     };
+//RS     lower_method_for_owner_inner(f, type_name, owner_ty, cx, false)
+//RS }
+//RS 
+//RS /// `raw_protocol_return` is supplied by the enclosing generated-trait
+//RS /// provenance. Ordinary owner-specialized methods keep the fallible ABI.
+//RS pub(crate) fn lower_method_for_owner(
+//RS     f: &Func,
+//RS     type_name: &str,
+//RS     owner_ty: Type,
+//RS     cx: &Cx,
+//RS     raw_protocol_return: bool,
+//RS ) -> TFunc {
+//RS     lower_method_for_owner_inner(f, type_name, owner_ty, cx, raw_protocol_return)
+//RS }
+//RS 
+//RS fn lower_method_for_owner_inner(
+//RS     f: &Func,
+//RS     type_name: &str,
+//RS     owner_ty: Type,
+//RS     cx: &Cx,
+//RS     raw_protocol_return: bool,
+//RS ) -> TFunc {
+//RS     let owner_ty = canonical_owner_type(cx, &owner_ty);
+//RS     let declared_return_type = f
+//RS         .return_type
+//RS         .clone()
+//RS         .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+//RS     let return_type = if raw_protocol_return {
+//RS         debug_assert!(
+//RS             f.return_type.is_some(),
+//RS             "state-transition methods must declare their raw return type",
+//RS         );
+//RS         resolve_self_ty(&declared_return_type, type_name)
+//RS     } else {
+//RS         resolve_self_ty(&f.effective_return_type(), type_name)
+//RS     };
+//RS     let previous_type_params = cx.current_type_params.borrow().clone();
+//RS     let mut method_type_params = previous_type_params.clone();
+//RS     if let Some(owner_params) = cx.struct_type_param_order.get(type_name) {
+//RS         method_type_params.extend(owner_params.iter().cloned());
+//RS     }
+//RS     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
+//RS     cx.current_type_params.replace(method_type_params.clone());
+//RS     let return_type = canonical_owner_type(
+//RS         cx,
+//RS         &cx.canonicalize_checked_type(&return_type, &method_type_params),
+//RS     );
+//RS     let mut env = LowerEnv::new(f.name.clone());
+//RS     env.sentries_fenced = cx.dependency_fenced;
+//RS     env.gc_return = f.gc_return;
+//RS     env.ret_ty = Some(return_type.clone());
+//RS     env.raw_protocol_return = raw_protocol_return;
+//RS     env.self_owner = Some(canonical_owner_name(cx, type_name));
+//RS     let mut params = Vec::new();
+//RS     let mut resource_param_guards = Vec::new();
+//RS     let mut self_conv: Option<AccessConvention> = None;
+//RS     let mut is_static = true;
+//RS     for p in &f.params {
+//RS         if p.name == Syntax::KW_SELF {
+//RS             // The self slot, parity with `emit_method`: place `self`, type None. A
+//RS             // `mut self` receiver is `&mut Self`, so its place DEREFS (`(*self)`) —
+//RS             // `self.field = v` → `((*self)).field = v`, whole-`self` `self = New{}` →
+//RS             // `(*self) = New{}` (D-MUTSELF1). `self`/`take self` carry no deref.
+//RS             let place = if matches!(p.convention, AccessConvention::Write) {
+//RS                 TLocal::generated("self").through_ref()
+//RS             } else if matches!(p.convention, AccessConvention::Read) {
+//RS                 TLocal::generated("self")
+//RS                     .with_address_lifetime(crate::Codegen::TIR::TAddressLifetime::Borrowed)
+//RS             } else {
+//RS                 TLocal::generated("self")
+//RS             };
+//RS             env.bind(Syntax::KW_SELF, place, Some(owner_ty.clone()));
+//RS             if matches!(p.convention, AccessConvention::Read) {
+//RS                 env.mark_borrowed(Syntax::KW_SELF);
+//RS             }
+//RS             self_conv = Some(p.convention);
+//RS             is_static = false;
+//RS             continue;
+//RS         }
+//RS         let rust_name = p.name.clone();
+//RS         // Callable parameters use the effective carrier in TIR. The source
+//RS         // declaration remains available to diagnostics and callback bindings.
+//RS         let mut pty = resolve_self_ty(&p.ty.with_effective_fn_returns(), type_name);
+//RS         if p.variadic {
+//RS             pty = Type::List(Box::new(pty));
+//RS         }
+//RS         pty = canonical_owner_type(cx, &cx.canonicalize_checked_type(&pty, &method_type_params));
+//RS         let mut slot_param = p.clone();
+//RS         slot_param.ty = pty.clone();
+//RS         let convention = effective_generic_convention(&slot_param, &f.type_params);
+//RS         slot_param.convention = convention;
+//RS         let place = param_place_generic(&p.name, &slot_param, &f.type_params);
+//RS         bind_resource_param(
+//RS             &p.name,
+//RS             &pty,
+//RS             convention,
+//RS             cx,
+//RS             &mut env,
+//RS             &mut resource_param_guards,
+//RS             place,
+//RS         );
+//RS         params.push((rust_name, pty, convention));
+//RS     }
+//RS     let mut body = resource_param_guards;
+//RS     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
+//RS     let lowered_body = if return_type_has_value(&return_type) {
+//RS         lower_value_block(&f.body, cx, &mut env)
+//RS     } else {
+//RS         lower_stmts(&f.body, cx, &mut env)
+//RS     };
+//RS     body.extend(lowered_body);
+//RS     let body = wrap_contract_scope(
+//RS         f,
+//RS         body,
+//RS         Some(type_name),
+//RS         Some(return_type.clone()),
+//RS         &env.stack_sentry_needed,
+//RS         cx,
+//RS     );
+//RS     let mut clone_types = env.cloned_types.borrow().clone();
+//RS     collect_signature_clone_types(&owner_ty, cx, &mut clone_types);
+//RS     for param in &f.params {
+//RS         collect_signature_clone_types(&param.ty, cx, &mut clone_types);
+//RS     }
+//RS     collect_signature_clone_types(&return_type, cx, &mut clone_types);
+//RS     cx.current_type_params.replace(previous_type_params);
+//RS     // An instance method carries `Some(conv)`; a static method carries `None`.
+//RS     let semantic_key = method_semantic_key(&cx.module_identity, &owner_ty, None, None, &f.name);
+//RS     let kind = TFuncKind::Method {
+//RS         self_conv: if is_static { None } else { self_conv },
+//RS         owner_type: owner_ty,
+//RS     };
+//RS     let memo_field = cx
+//RS         .memo_fields
+//RS         .get(type_name)
+//RS         .and_then(|fields| fields.contains_key(&f.name).then(|| f.name.clone()));
+//RS     note_stack_sentry_in_tir(&body, &env);
+//RS     let uses_stack_sentry = env.stack_sentry_needed();
+//RS     TFunc {
+//RS         name: f.name.clone(),
+//RS         module: cx.module_identity.clone(),
+//RS         key: semantic_key,
+//RS         source_file: cx.file.clone(),
+//RS         source_span: f.span,
+//RS         failure_carrier: function_failure_carrier(f),
+//RS         effects: function_effect_facts(f),
+//RS         target_applicability: function_target_applicability(f),
+//RS         web_bucket: None,
+//RS         web_marker: f.web_marker.clone(),
+//RS         visibility: function_visibility(f),
+//RS         foreign: function_foreign_provenance(f),
+//RS         params,
+//RS         web_param_reconstructions: Vec::new(),
+//RS         ret: Some(return_type),
+//RS         gc_return: f.gc_return,
+//RS         gc_scope: f.gc_scope,
+//RS         return_view_provenance: f.return_view_provenance.clone(),
+//RS         generic_params: generic_params_from(&f.type_params),
+//RS         clone_types,
+//RS         is_main: false,
+//RS         line: cov_line(cx, f.name_span.start),
+//RS         synthetic: f.compiler_generated,
+//RS         is_unsafe: f.is_unsafe,
+//RS         unsafe_gate: unsafe_gate(f, cx, env.sentries_enabled),
+//RS         is_pure: f.is_pure,
+//RS         memo_bound: None,
+//RS         is_reactive: f.is_reactive,
+//RS         reactive_upgrades: f.reactive_upgrades.clone(),
+//RS         is_inline: f.is_inline,
+//RS         is_inline_always: f.is_inline_always,
+//RS         is_scalar: f
+//RS             .markers
+//RS             .iter()
+//RS             .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
+//RS         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
+//RS         memo_field,
+//RS         uses_stack_sentry,
+//RS         body,
+//RS         kind,
+//RS     }
+//RS }
+//RS 
+//RS /// c109 Phase 12: lower a TRAIT-IMPL method of `type_name` to a `TFunc`. Mirrors
+//RS /// `emit_trait_method`'s slot construction (Source/Codegen/Items.rs) EXACTLY — which
+//RS /// differs from `emit_method`:
+//RS ///  - the `self` slot's type is `Some(Type::Named(type_name))` (NOT `None` as in
+//RS ///    `emit_method`); place `self`, no deref. This is load-bearing for overflow-trap
+//RS ///    decisions that consult the self slot — though in the covered subset `self` is a
+//RS ///    struct/enum (never a bare arithmetic operand), so the decision never differs.
+//RS ///  - non-self params use the same deref logic, but `emit_trait_method` has no
+//RS ///    `Read if scalar` short-circuit branch — it computes `deref = !p.ty.is_scalar()`
+//RS ///    for `Read`, which is identical to `param_place` for `Read` (scalar → false).
+//RS /// The `TraitMethod` kind drives a bare name, no `pub`, always-`&self` signature.
+//RS ///
+//RS /// D-SERDE2 (card #131 S1-bridge): `trait_name` selects a codec bridge when it is
+//RS /// `Encode`/`Decode` — a hand `impl T.Encode`/`impl T.Decode` whose user-facing
+//RS /// `encode`/`decode` verbs + Jet signatures must lower to the Rust trait's
+//RS /// `jet_encode`/`jet_decode`. `Encode` is an ordinary instance method (`&self`),
+//RS /// only its NAME is bridged. `Decode` is STATIC: the by-value `tree: Data` param
+//RS /// binds as an owned local (a clone the emit prepends), so its place is the bare
+//RS /// mangled name — no receiver, no `param_place` deref.
+//RS pub(crate) fn lower_trait_method(
+//RS     f: &Func,
+//RS     type_name: &str,
+//RS     cx: &Cx,
+//RS     trait_name: &str,
+//RS     raw_protocol_return: bool,
+//RS     operator_rhs: Option<&Type>,
+//RS ) -> TFunc {
+//RS     lower_trait_method_inner(
+//RS         f,
+//RS         type_name,
+//RS         cx,
+//RS         trait_name,
+//RS         raw_protocol_return,
+//RS         operator_rhs,
+//RS     )
+//RS }
+//RS 
+//RS fn lower_trait_method_inner(
+//RS     f: &Func,
+//RS     type_name: &str,
+//RS     cx: &Cx,
+//RS     trait_name: &str,
+//RS     raw_protocol_return: bool,
+//RS     operator_rhs: Option<&Type>,
+//RS ) -> TFunc {
+//RS     // D-FAILURE-FOUNDATION1: protocol bodies keep their declared ABI. Encode,
+//RS     // Decode, Display, Debug, Equatable, Comparable, Close, and same-type
+//RS     // arithmetic are Rust trait methods (`String`, `bool`, `Ordering`, the
+//RS     // owner type, and unit — never `Result`), so projecting an omitted contract
+//RS     // onto a hand-written body would emit `Result<raw, Err>` and violate the
+//RS     // trait ABI just as it would for a compiler-generated body.
+//RS     // Other user trait methods still use the implicit Error carrier.
+//RS     let raw_protocol_return = raw_protocol_return
+//RS         || matches!(
+//RS             trait_name,
+//RS             crate::Generics::ENCODE
+//RS                 | crate::Generics::DECODE
+//RS                 | crate::Generics::DISPLAY
+//RS                 | crate::Generics::DEBUG
+//RS                 | crate::Generics::EQUATABLE
+//RS                 | crate::Generics::COMPARABLE
+//RS                 | crate::Generics::CLOSE
+//RS                 | crate::Syntax::TRAIT_ROLLBACK
+//RS                 | crate::Generics::ADD
+//RS                 | crate::Generics::SUB
+//RS                 | crate::Generics::MUL
+//RS                 | crate::Generics::DIV
+//RS         );
+//RS     let declared_return_type = f
+//RS         .return_type
+//RS         .clone()
+//RS         .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+//RS     let return_type = if raw_protocol_return {
+//RS         debug_assert!(
+//RS             f.return_type.is_some()
+//RS                 || matches!(
+//RS                     trait_name,
+//RS                     crate::Generics::CLOSE | crate::Syntax::TRAIT_ROLLBACK
+//RS                 ),
+//RS             "protocol methods must declare their raw return type"
+//RS         );
+//RS         resolve_self_ty(&declared_return_type, type_name)
+//RS     } else {
+//RS         resolve_self_ty(&f.effective_return_type(), type_name)
+//RS     };
+//RS     let serde = match trait_name {
+//RS         crate::Generics::ENCODE => Some(SerdeCodec::Encode),
+//RS         crate::Generics::DECODE => Some(SerdeCodec::Decode),
+//RS         _ => None,
+//RS     };
+//RS     let owner_ty = if let Some(builtin) = crate::AST::numeric_type_from_name(type_name) {
+//RS         builtin
+//RS     } else {
+//RS         match cx.struct_type_param_order.get(type_name) {
+//RS             Some(params) if !params.is_empty() => Type::Apply {
+//RS                 name: type_name.to_string(),
+//RS                 args: params.iter().cloned().map(Type::Named).collect(),
+//RS             },
+//RS             _ => Type::Named(type_name.to_string()),
+//RS         }
+//RS     };
+//RS     let owner_ty = canonical_owner_type(cx, &owner_ty);
+//RS     let previous_type_params = cx.current_type_params.borrow().clone();
+//RS     let mut method_type_params = previous_type_params.clone();
+//RS     if let Some(owner_params) = cx.struct_type_param_order.get(type_name) {
+//RS         method_type_params.extend(owner_params.iter().cloned());
+//RS     }
+//RS     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
+//RS     cx.current_type_params.replace(method_type_params.clone());
+//RS     let return_type = canonical_owner_type(
+//RS         cx,
+//RS         &cx.canonicalize_checked_type(&return_type, &method_type_params),
+//RS     );
+//RS     let mut env = LowerEnv::new(f.name.clone());
+//RS     env.sentries_enabled = sentries_enabled_for_function(f, cx);
+//RS     env.sentries_fenced = cx.dependency_fenced;
+//RS     env.gc_return = f.gc_return;
+//RS     env.ret_ty = Some(return_type.clone());
+//RS     env.raw_protocol_return = raw_protocol_return;
+//RS     env.self_owner = Some(canonical_owner_name(cx, type_name));
+//RS     let mut params = Vec::new();
+//RS     let mut resource_param_guards = Vec::new();
+//RS     let mut self_conv = None;
+//RS     for p in &f.params {
+//RS         if p.name == Syntax::KW_SELF {
+//RS             self_conv = Some(p.convention);
+//RS             // The self slot, EXACTLY `emit_trait_method`'s: type `Some(Named(type_name))`
+//RS             // (NOT `None` like `emit_method`). D-MUTSELF1: a `mut self` receiver is
+//RS             // `&mut self`, so its place DEREFS (`(*self)`); `self`/`take self` do not.
+//RS             let place = if matches!(p.convention, AccessConvention::Write) {
+//RS                 TLocal::generated("self").through_ref()
+//RS             } else if matches!(p.convention, AccessConvention::Read) {
+//RS                 TLocal::generated("self")
+//RS                     .with_address_lifetime(crate::Codegen::TIR::TAddressLifetime::Borrowed)
+//RS             } else {
+//RS                 TLocal::generated("self")
+//RS             };
+//RS             env.bind(Syntax::KW_SELF, place, Some(owner_ty.clone()));
+//RS             if matches!(p.convention, AccessConvention::Read) {
+//RS                 env.mark_borrowed(Syntax::KW_SELF);
+//RS             }
+//RS             continue;
+//RS         }
+//RS         let rust_name = p.name.clone();
+//RS         // D-SERDE2: a `Decode.decode(tree: Data)` param is emitted as `&jet_std::DataTree`
+//RS         // and re-bound to an owned clone at the function head, so the body sees an owned
+//RS         // `Data` local — its place is the bare name, NOT `param_place`'s non-scalar deref.
+//RS         let place = if serde == Some(SerdeCodec::Decode) {
+//RS             TLocal::user(&p.name)
+//RS         } else {
+//RS             param_place(&p.name, p)
+//RS         };
+//RS         let pty = canonical_owner_type(
+//RS             cx,
+//RS             &cx.canonicalize_checked_type(&resolve_self_ty(&p.ty, type_name), &method_type_params),
+//RS         );
+//RS         bind_resource_param(
+//RS             &p.name,
+//RS             &pty,
+//RS             p.convention,
+//RS             cx,
+//RS             &mut env,
+//RS             &mut resource_param_guards,
+//RS             place,
+//RS         );
+//RS         params.push((rust_name, pty, p.convention));
+//RS     }
+//RS     let mut body = resource_param_guards;
+//RS     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
+//RS     let lowered_body = if return_type_has_value(&return_type) {
+//RS         lower_value_block(&f.body, cx, &mut env)
+//RS     } else {
+//RS         lower_stmts(&f.body, cx, &mut env)
+//RS     };
+//RS     body.extend(lowered_body);
+//RS     let body = wrap_contract_scope(
+//RS         f,
+//RS         body,
+//RS         Some(type_name),
+//RS         Some(return_type.clone()),
+//RS         &env.stack_sentry_needed,
+//RS         cx,
+//RS     );
+//RS     let mut body = body;
+//RS     if serde == Some(SerdeCodec::Encode) && cx.published_schemas.contains(type_name) {
+//RS         for stmt in &mut body {
+//RS             if let TStmt::Return(Some(value)) = stmt {
+//RS                 let known = std::mem::replace(
+//RS                     value,
+//RS                     TExpr {
+//RS                         ty: Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()),
+//RS                         kind: TExprKind::Unit,
+//RS                     },
+//RS                 );
+//RS                 let holder = TExpr {
+//RS                     ty: Type::Named(Syntax::TYPE_DATA.to_string()),
+//RS                     kind: TExprKind::Field {
+//RS                         recv: Box::new(TExpr {
+//RS                             ty: owner_ty.clone(),
+//RS                             kind: TExprKind::Local(TLocal::generated(Syntax::KW_SELF)),
+//RS                         }),
+//RS                         field: Syntax::PUBLISHED_UNKNOWN_FIELDS.to_string(),
+//RS                         boxed: false,
+//RS                     },
+//RS                 };
+//RS                 let known_ty = known.ty.clone();
+//RS                 *value = TExpr {
+//RS                     ty: known_ty.clone(),
+//RS                     kind: match crate::Syntax::core_call_projection(
+//RS                         "core.encoding",
+//RS                         "__published_schema_merge",
+//RS                         crate::Syntax::CoreCallCoverage::TIR_SUBSET,
+//RS                         2,
+//RS                     ) {
+//RS                         Ok(record) => TExprKind::CoreCall {
+//RS                             record,
+//RS                             args: vec![known, holder],
+//RS                             source_span: f.span,
+//RS                             type_args: Vec::new(),
+//RS                             widen_to_vec: vec![false, false],
+//RS                             data_plan: None,
+//RS                             fallibility: TFailureCarrier::from_checked_type(&known_ty),
+//RS                         },
+//RS                         Err(_) => known.kind,
+//RS                     },
+//RS                 };
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut clone_types = env.cloned_types.borrow().clone();
+//RS     collect_signature_clone_types(&owner_ty, cx, &mut clone_types);
+//RS     for param in &f.params {
+//RS         collect_signature_clone_types(&param.ty, cx, &mut clone_types);
+//RS     }
+//RS     collect_signature_clone_types(&return_type, cx, &mut clone_types);
+//RS     cx.current_type_params.replace(previous_type_params);
+//RS     note_stack_sentry_in_tir(&body, &env);
+//RS     let uses_stack_sentry = env.stack_sentry_needed();
+//RS     TFunc {
+//RS         name: f.name.clone(),
+//RS         module: cx.module_identity.clone(),
+//RS         key: method_semantic_key(
+//RS             &cx.module_identity,
+//RS             &owner_ty,
+//RS             Some(trait_name),
+//RS             operator_rhs,
+//RS             &f.name,
+//RS         ),
+//RS         source_file: cx.file.clone(),
+//RS         source_span: f.span,
+//RS         failure_carrier: function_failure_carrier(f),
+//RS         effects: function_effect_facts(f),
+//RS         target_applicability: function_target_applicability(f),
+//RS         web_bucket: None,
+//RS         web_marker: f.web_marker.clone(),
+//RS         visibility: function_visibility(f),
+//RS         foreign: function_foreign_provenance(f),
+//RS         params,
+//RS         web_param_reconstructions: Vec::new(),
+//RS         ret: Some(return_type),
+//RS         gc_return: f.gc_return,
+//RS         gc_scope: f.gc_scope,
+//RS         return_view_provenance: f.return_view_provenance.clone(),
+//RS         generic_params: generic_params_from(&f.type_params),
+//RS         clone_types,
+//RS         is_main: false,
+//RS         line: cov_line(cx, f.name_span.start),
+//RS         synthetic: f.compiler_generated,
+//RS         // The trait-method `unsafe` prefix rides on `TFuncKind::TraitMethod.is_unsafe`
+//RS         // (the dedicated trait-method emit reads it there); the top-level flag is unused
+//RS         // for this kind, but keep it consistent.
+//RS         is_unsafe: f.is_unsafe,
+//RS         unsafe_gate: unsafe_gate(f, cx, env.sentries_enabled),
+//RS         is_pure: f.is_pure,
+//RS         memo_bound: None,
+//RS         is_reactive: f.is_reactive,
+//RS         reactive_upgrades: f.reactive_upgrades.clone(),
+//RS         is_inline: f.is_inline,
+//RS         is_inline_always: f.is_inline_always,
+//RS         is_scalar: f
+//RS             .markers
+//RS             .iter()
+//RS             .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
+//RS         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
+//RS         memo_field: None,
+//RS         uses_stack_sentry,
+//RS         body,
+//RS         kind: TFuncKind::TraitMethod {
+//RS             is_unsafe: f.is_unsafe,
+//RS             self_conv,
+//RS             owner_type: owner_ty,
+//RS             trait_name: trait_name.to_string(),
+//RS             serde,
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS /// c109 Phase 15: is a DELEGATION trait method (`using field`) coverable? Always — the
+//RS /// method is purely structural: a fixed forwarding call `(self).<field>.<method>(args)`
+//RS /// with the bare trait method name, and a signature rendered by the SAME
+//RS /// `rust_param_type`/`rust_return_type` the AST path uses. There is no body to lower, no
+//RS /// type to re-infer; the forward + signature are deterministic. (The `field`/method/
+//RS /// args come straight off the `ImplDef`; nothing here can produce code rustc rejects
+//RS /// that the AST path wouldn't.) Returns `true` for any delegation method.
+//RS pub(crate) fn tir_covers_delegation_method(_f: &Func, _field: &str, _cx: &Cx) -> bool {
+//RS     true
+//RS }
+//RS 
+//RS /// c109 Phase 15: lower a delegation trait method to a `TFunc` with a `Delegation` kind,
+//RS /// reproducing `emit_delegation_method` (Source/Codegen/Items.rs) byte-for-byte: the
+//RS /// signature line (incl. its quirky two-space `  {`), and the forwarding call. There is
+//RS /// no body — the method only forwards to the delegated field with the BARE trait method
+//RS /// name (no `__jet_` mangle, as the trait owns it in Rust).
+//RS pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
+//RS     lower_delegation_method_inner(f, field, cx)
+//RS }
+//RS 
+//RS fn lower_delegation_method_inner(f: &Func, _field: &str, cx: &Cx) -> TFunc {
+//RS     let type_param_names = type_param_names(f);
+//RS     let return_type = cx.canonicalize_checked_type(&f.effective_return_type(), &type_param_names);
+//RS     let owner_ty = f
+//RS         .params
+//RS         .iter()
+//RS         .find(|param| param.name == Syntax::KW_SELF)
+//RS         .map(|param| cx.canonicalize_checked_type(&param.ty, &type_param_names))
+//RS         .unwrap_or_else(|| Type::Named(Syntax::KW_SELF.to_string()));
+//RS     let self_conv = f
+//RS         .params
+//RS         .iter()
+//RS         .find(|param| param.name == Syntax::KW_SELF)
+//RS         .map(|param| param.convention);
+//RS     let params = f
+//RS         .params
+//RS         .iter()
+//RS         .filter(|param| param.name != Syntax::KW_SELF)
+//RS         .map(|param| {
+//RS             (
+//RS                 param.name.clone(),
+//RS                 cx.canonicalize_checked_type(&param.ty, &type_param_names),
+//RS                 param.convention,
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     TFunc {
+//RS         name: f.name.clone(),
+//RS         module: cx.module_identity.clone(),
+//RS         key: method_semantic_key(&cx.module_identity, &owner_ty, None, None, &f.name),
+//RS         source_file: cx.file.clone(),
+//RS         source_span: f.span,
+//RS         failure_carrier: function_failure_carrier(f),
+//RS         effects: function_effect_facts(f),
+//RS         target_applicability: function_target_applicability(f),
+//RS         web_bucket: None,
+//RS         web_marker: f.web_marker.clone(),
+//RS         visibility: function_visibility(f),
+//RS         foreign: function_foreign_provenance(f),
+//RS         params,
+//RS         web_param_reconstructions: Vec::new(),
+//RS         ret: Some(return_type),
+//RS         gc_return: f.gc_return,
+//RS         gc_scope: f.gc_scope,
+//RS         return_view_provenance: f.return_view_provenance.clone(),
+//RS         generic_params: generic_params_from(&f.type_params),
+//RS         clone_types: Vec::new(),
+//RS         is_main: false,
+//RS         line: cov_line(cx, f.name_span.start),
+//RS         synthetic: f.compiler_generated,
+//RS         is_unsafe: false,
+//RS         unsafe_gate: None,
+//RS         is_pure: false,
+//RS         memo_bound: None,
+//RS         is_reactive: false,
+//RS         reactive_upgrades: Vec::new(),
+//RS         is_inline: false,
+//RS         is_inline_always: false,
+//RS         is_scalar: false,
+//RS         kernel_proof: None,
+//RS         memo_field: None,
+//RS         uses_stack_sentry: false,
+//RS         body: Vec::new(),
+//RS         kind: TFuncKind::TraitMethod {
+//RS             is_unsafe: false,
+//RS             self_conv,
+//RS             owner_type: owner_ty,
+//RS             trait_name: String::new(),
+//RS             serde: None,
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS /// The Rust place a parameter reads as, mirroring `emit_func`'s `deref` logic:
+//RS /// a `Read` parameter of non-scalar type (String/Char) is a `&T` and must be
+//RS /// dereferenced; `Mutate` is `&mut T` (deref'd); `Move`/scalar-`Read` is by value.
+//RS pub(crate) fn param_place(name: &str, p: &Param) -> TLocal {
+//RS     let deref = match p.convention {
+//RS         AccessConvention::Read if p.ty.is_scalar() => false,
+//RS         AccessConvention::Read => true,
+//RS         AccessConvention::Write => true,
+//RS         AccessConvention::Move => false,
+//RS     };
+//RS     let slot = TLocal::user(name);
+//RS     if deref { slot.through_ref() } else { slot }
+//RS }
+// END-PORT-PENDING 0483 crates/jet-codegen/src/Codegen/TIR/lower/functions.rs:1-1461
+

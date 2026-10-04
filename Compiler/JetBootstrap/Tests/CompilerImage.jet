@@ -1,0 +1,62 @@
+// Bootstrap/Tests.rs:3546-3611: every original expectation, including the
+// intentionally invalid payload/checksum accepted only by the prefix reader.
+use jet_foundation.[MIR_SCHEMA_VERSION, MIRArtifactID, MIRFunctionID, JetTargetLayout, jet_target_layout_from_triple]
+fn compiler_image_test_digest(byte: U8) -> [U8] Never! {
+    result := [U8]{}
+    loop _ in 0..<32 -> &result.push(byte)
+    result
+}
+fn compiler_image_test_host() -> JetTargetLayout Never! { jet_target_layout_from_triple("x86_64-unknown-linux-gnu") }
+fn compiler_image_test_archive(schema: Int) -> [U8] CompilerImageError! {
+    writer := CompilerImageMetadataWriter.new()
+    digest :: compiler_image_test_digest(U8{7})
+    zero :: compiler_image_test_digest(U8{0})
+    identity :: "identity".bytes()
+    payload :: "not a MIR payload".bytes()
+    &writer.write_raw(COMPILER_IMAGE_MAGIC[0..<COMPILER_IMAGE_MAGIC.len()])
+    &writer.write_u16(COMPILER_IMAGE_FORMAT_VERSION)
+    &writer.write_u16(schema)
+    &writer.write_u64(U64{11})
+    &writer.write_u64(U64{13})
+    &writer.write_raw(digest[0..<digest.len()])
+    &writer.write_bytes(identity[0..<identity.len()])
+    &writer.write_bytes(payload[0..<payload.len()])
+    &writer.write_raw(zero[0..<zero.len()])
+    writer.finish()
+}
+fn compiler_image_test_envelope_error(bytes: View<U8>, digest: View<U8>, artifact: U64, entry: U64) -> String Never! {
+    read_compiler_image_envelope(bytes, digest, MIRArtifactID{value: artifact}, MIRFunctionID{value: entry}, compiler_image_test_host()) ?? return err.message
+    "unexpected envelope success"
+}
+fn compiler_image_test_restore_error(bytes: View<U8>, digest: View<U8>) -> String Never! {
+    restore_compiler_image(bytes, digest, MIRArtifactID{value: U64{11}}, MIRFunctionID{value: U64{13}}, compiler_image_test_host()) ?? return err.message
+    "unexpected restore success"
+}
+#Test("compiler_image_envelope_reads_only_the_checked_prefix") {
+    digest :: compiler_image_test_digest(U8{7})
+    zero :: compiler_image_test_digest(U8{0})
+    bytes :: compiler_image_test_archive(MIR_SCHEMA_VERSION) ?? panic(err.message)
+    envelope :: read_compiler_image_envelope(bytes[0..<bytes.len()], digest[0..<digest.len()], MIRArtifactID{value: U64{11}}, MIRFunctionID{value: U64{13}}, compiler_image_test_host()) ?? panic("envelope rejected a well-formed prefix: {err.message}")
+    assert_eq(envelope.source_authority_digest, digest)
+    assert_eq(envelope.artifact, MIRArtifactID{value: U64{11}})
+    assert_eq(envelope.entry_function, MIRFunctionID{value: U64{13}})
+    assert_eq(compiler_image_test_restore_error(bytes[0..<bytes.len()], digest[0..<digest.len()]), "compiler-image archive checksum mismatch")
+    assert_eq(compiler_image_test_envelope_error(bytes[0..<bytes.len()], zero[0..<zero.len()], U64{11}, U64{13}), "compiler-image source authority does not match the authorized source snapshot")
+    assert_eq(compiler_image_test_envelope_error(bytes[0..<bytes.len()], digest[0..<digest.len()], U64{12}, U64{13}), "compiler-image artifact identity does not match the requested artifact")
+    assert_eq(compiler_image_test_envelope_error(bytes[0..<bytes.len()], digest[0..<digest.len()], U64{11}, U64{14}), "compiler-image entry function does not match the requested entry")
+    stale :: compiler_image_test_archive(MIR_SCHEMA_VERSION + 1) ?? panic(err.message)
+    assert(compiler_image_test_envelope_error(stale[0..<stale.len()], digest[0..<digest.len()], U64{11}, U64{13}).starts_with("compiler-image MIR schema "))
+    bad_magic := ~bytes
+    bad_magic[0] = bad_magic[0] ~| U8{1}
+    assert_eq(compiler_image_test_envelope_error(bad_magic[0..<bad_magic.len()], digest[0..<digest.len()], U64{11}, U64{13}), "invalid compiler-image magic")
+    assert_eq(compiler_image_test_envelope_error(bytes[0..<40], digest[0..<digest.len()], U64{11}, U64{13}), "truncated compiler-image archive")
+}
+#Test("compiler image envelope rejects stale format and zero root identities") {
+    digest :: compiler_image_test_digest(U8{7})
+    bytes := compiler_image_test_archive(MIR_SCHEMA_VERSION) ?? panic(err.message)
+    bytes[8] = U8{4}
+    assert(compiler_image_test_envelope_error(bytes[0..<bytes.len()], digest[0..<digest.len()], U64{11}, U64{13}).starts_with("compiler-image format "))
+    bytes[8] = U8{3}
+    loop index in 12..<20 -> bytes[index] = U8{0}
+    assert_eq(compiler_image_test_envelope_error(bytes[0..<bytes.len()], digest[0..<digest.len()], U64{11}, U64{13}), "compiler-image contains a zero artifact or entry identity")
+}

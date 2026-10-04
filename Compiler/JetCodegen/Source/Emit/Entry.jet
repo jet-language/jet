@@ -36,18 +36,13 @@ use jet_foundation.[
     mir_type_same_checked_type,
 ]
 
+// MIRRust artifact_identity: select the requested plan, never a target fallback.
 fn jet_rust_emit_selected_artifact(ctx: &JetRustEmitContext) -> MIRArtifactPlan? {
-    wanted :: if ctx.config.target == "web" -> MIRArtifactTarget.Web else -> MIRArtifactTarget.RustAOT
-    selected := MIRArtifactPlan?{None}
     loop artifact in ctx.program.artifacts {
-        if artifact.target != wanted -> next
-        if selected != None {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR program has more than one artifact for the emission target", "source emission assembles exactly one checked artifact plan per target", None)
-            return None
-        }
-        selected = Val(artifact)
+        if artifact.id == ctx.config.artifact -> return Val(artifact)
     }
-    selected
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR Rust emission requires canonical artifact identity", "MIR artifact MirArtifactId({ctx.config.artifact.value}) is missing", None)
+    None
 }
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::function_row
@@ -439,7 +434,7 @@ fn jet_rust_emit_entry_error_exit(ctx: &JetRustEmitContext, function: MIRFunctio
     root :: ~ctx.config.root_prefix
     is_jet_err :: if error_ty == .Val(ty) -> jet_rust_emit_is_jet_err_type(ty) else -> false
     has_jet_show :: if error_ty == .Val(ty) -> !is_jet_err && jet_rust_emit_type_has_entry_show(&ctx, ty) else -> false
-    if ctx.config.target == "web" {
+    if ctx.config.target_kind == JetRustEmitTarget.WebWasm {
         if is_jet_err -> return "{root}jet_wasm_store_error(&{error})"
         if error_ty == None -> return "{root}jet_wasm_store_error(&{root}jet_err_from_message(\"entry returned no value\".to_string()))"
         if has_jet_show -> return "{root}jet_wasm_store_error(&{root}jet_err_from_message({root}jet_entry_error_text_show(&{error})))"
@@ -626,7 +621,7 @@ fn jet_rust_emit_web_entry(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, 
 }
 
 fn jet_rust_emit_entry(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, lines: &[String]) Never! {
-    if ctx.config.target == "web" {
+    if ctx.config.target_kind == JetRustEmitTarget.WebWasm {
         jet_rust_emit_web_entry(&ctx, artifact, &lines)
         return
     }
@@ -1084,7 +1079,7 @@ fn jet_rust_emit_web_exports(ctx: &JetRustEmitContext, lines: &[String]) Never! 
 fn jet_rust_emit_exports(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, lines: &[String]) Never! {
     // Library and sandbox adapters own their checked boundary wrappers.
     if artifact.kind == MIRArtifactKind.NativeLibrary || artifact.kind == MIRArtifactKind.SandboxPlugin -> return
-    if ctx.config.target == "web" {
+    if ctx.config.target_kind == JetRustEmitTarget.WebWasm {
         jet_rust_emit_web_exports(&ctx, &lines)
         return
     }

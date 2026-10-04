@@ -1,0 +1,1260 @@
+// PORT-PENDING 1174 tests-tir-language-features: tests/tir_language_features.rs:1-1256
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! TIR language features integration tests.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS 
+//RS use tir_support::{
+//RS     build_and_run, build_and_run_full, build_and_run_full_with_cfg, build_and_run_multi, compile,
+//RS     have_rustc, interpreter_run, jit_run,
+//RS };
+//RS 
+//RS /// D-BOUND-HEAD1=A: one typed-head hole law across AOT, `jet run`, and the
+//RS /// interpreter path behind it. Runtime constructors remain ordinary parsers;
+//RS /// only the typed head supplies URL/Path interpolation policy.
+//RS #[test]
+//RS fn boundary_typed_heads_keep_one_meaning_across_tiers() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     name :: "ada lovelace"
+//RS     path_part :: "ada/../etc"
+//RS     endpoint :: URL{"https://api.example.com/v2/{name}"}
+//RS     opaque_endpoint :: URL{"https://api.example.com/v2/opaque/{path_part}"}
+//RS     log_path :: Path{"/var/log/{path_part}.log"}
+//RS     stamp :: DateTime{"2026-08-07T12:00:00Z"}
+//RS     print(endpoint.to_string())
+//RS     print(opaque_endpoint.to_string())
+//RS     print(log_path.to_string())
+//RS     print(stamp.to_string())
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree(
+//RS         "boundary_typed_heads",
+//RS         src,
+//RS         "https://api.example.com/v2/ada%20lovelace\nhttps://api.example.com/v2/opaque/ada%2F..%2Fetc\n/var/log/ada%2F..%2Fetc.log\n2026-08-07 12:00:00 UTC\n",
+//RS     );
+//RS }
+//RS 
+//RS /// D-BOUND-RAW1=A: the lexer gives a typed head's body to the head grammar,
+//RS /// while an ordinary string still owns the four-entry escape table.
+//RS #[test]
+//RS fn typed_head_raw_escape_keeps_plain_string_cooked_across_tiers() {
+//RS     let src = r#"
+//RS use core.regex as re
+//RS 
+//RS fn run() {
+//RS     plain :: "\n"
+//RS     print(plain.len())
+//RS     print(re.is_match({"\d+"}, "id=42"))
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("typed_head_raw_escape", src, "1\ntrue\n");
+//RS }
+//RS 
+//RS /// D-SHAPE3a=A: inferred fresh construction rewrites to the ordinary static
+//RS /// method call before TIR lowering. Expected types flow through bindings,
+//RS /// returns, fields, and call arguments; explicit `Type.new` remains valid.
+//RS #[test]
+//RS fn inferred_new_expected_type_routes_through_tir() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS struct Counter {
+//RS     value: Int
+//RS }
+//RS 
+//RS struct Holder {
+//RS     counter: Counter
+//RS }
+//RS 
+//RS struct GenericHolder<T> {
+//RS     value: T
+//RS     step: fn(Int) -> Int
+//RS }
+//RS 
+//RS impl GenericHolder {
+//RS     fn new(value: ^T) -> GenericHolder<T> {
+//RS         return GenericHolder<T>{ value: value, step: (n: Int) -> n + 9 }
+//RS     }
+//RS 
+//RS     fn marker(self) -> Int {
+//RS         return self.step(0)
+//RS     }
+//RS }
+//RS 
+//RS impl Counter {
+//RS     fn new(value: Int) -> Counter {
+//RS         return Counter{ value: value }
+//RS     }
+//RS }
+//RS 
+//RS fn fresh(value: Int) -> Counter {
+//RS     return .new(value)
+//RS }
+//RS 
+//RS fn read(counter: Counter) -> Int {
+//RS     return counter.value
+//RS }
+//RS 
+//RS fn increment(value: Int) -> Int {
+//RS     return value + 1
+//RS }
+//RS 
+//RS fn run() {
+//RS     bound :: Counter.new(1)
+//RS     holder :: Holder{ counter: .new(2) }
+//RS     pool :: Pool<Holder>.new()
+//RS     nested_pool :: Pool<Pool<Holder>>.new()
+//RS     nested :: GenericHolder<GenericHolder<Int>>.new(.new(7))
+//RS     nested_explicit :: GenericHolder<GenericHolder<Int>>.new(GenericHolder<Int>.new(8))
+//RS     callback :: increment
+//RS     callback_holder :: GenericHolder<fn(Int) -> Int>.new(^callback)
+//RS     explicit :: Counter.new(4)
+//RS     print(read(.new(5)))
+//RS     print("{bound.value}{holder.counter.value}{explicit.value}")
+//RS     print(fresh(6).value)
+//RS     print("{nested.value.value}{nested_explicit.value.value}")
+//RS     print(callback_holder.marker())
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("tir_inferred_new", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "5\n124\n6\n78\n9\n");
+//RS }
+//RS 
+//RS /// D-SHAPE-OPAQUE-INFER1=A: a generic constructor receiver may omit its
+//RS /// arguments when ordinary input/expected-type inference determines one answer.
+//RS #[test]
+//RS fn generic_constructor_arguments_infer_through_tir() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS struct Box<T> {
+//RS     value: T
+//RS }
+//RS 
+//RS impl Box {
+//RS     fn new(value: ^T) -> Box<T> {
+//RS         return Box<T>{ value: value }
+//RS     }
+//RS }
+//RS 
+//RS struct Pair<A, B> {
+//RS     first: A
+//RS     second: B
+//RS }
+//RS 
+//RS impl Pair {
+//RS     fn new(first: ^A, second: ^B) -> Pair<A, B> {
+//RS         return Pair<A, B>{ first: first, second: second }
+//RS     }
+//RS }
+//RS 
+//RS fn returned() -> Box<Int> {
+//RS     return Box.new(4)
+//RS }
+//RS 
+//RS fn expected_box() -> Box<[Int]> {
+//RS     return Box.new([])
+//RS }
+//RS 
+//RS fn run() {
+//RS     direct :: Box.new(1)
+//RS     expected :: expected_box()
+//RS     nested :: Box.new(Box.new(2))
+//RS     pair :: Pair.new("three", 3)
+//RS     explicit :: Box<Int>.new(5)
+//RS     print("{direct.value}{nested.value.value}")
+//RS     print("{pair.first}{pair.second}{returned().value}{explicit.value}")
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("tir_generic_constructor_infer", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "12\nthree345\n");
+//RS }
+//RS 
+//RS // ===========================================================================
+//RS // c109 Phase 23: #Pure / #Todo / default params / named args / distinct / tuples
+//RS // ===========================================================================
+//RS 
+//RS /// c109 Phase 23: a `#Pure fn` (S60) routes through the TIR — purity is a sema-only
+//RS /// check (E3401), erased at codegen, so the fn lowers byte-identically to a plain fn.
+//RS #[test]
+//RS fn pure_fn() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn double(n: Int) -[]> Int {
+//RS     return (n * 2)
+//RS }
+//RS fn greeting(name: String) -[]> String {
+//RS     return \"hi, {name}\"
+//RS }
+//RS fn run() {
+//RS     print(double(21))
+//RS     print(greeting(\"jet\"))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_pure", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "42\nhi, jet\n");
+//RS }
+//RS 
+//RS /// c109 Phase 23: a `#Todo` typed goal (`Expr::Todo`) emits the E3011 Prelude
+//RS /// stop. The fn compiles + routes; the goal is never
+//RS /// reached at runtime here (only the implemented fn is called).
+//RS #[test]
+//RS fn todo_hole() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn double(n: Int) -> Int {
+//RS     return (n * 2)
+//RS }
+//RS fn not_yet(n: Int) -> Int {
+//RS     return #Todo
+//RS }
+//RS fn run() {
+//RS     print(double(21))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_todo", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "42\n");
+//RS }
+//RS 
+//RS /// c109 Phase 23: default parameter values (S61/D-NARG-D2). Sema fills omitted trailing
+//RS /// args at the call site (substituting earlier-param refs), so the defaulted fn lowers
+//RS /// byte-identically and the call routes through the TIR.
+//RS #[test]
+//RS fn default_param_values() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn box_dims(w: Int, h: Int{w}, d: Int{h}) -> String {
+//RS     return \"{w}x{h}x{d}\"
+//RS }
+//RS fn run() {
+//RS     print(box_dims(4))
+//RS     print(box_dims(4, 2))
+//RS     print(box_dims(4, 2, 1))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_defaults", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "4x4x4\n4x2x2\n4x2x1\n");
+//RS }
+//RS 
+//RS /// Card #2152 / D-DEFAULT-SHAPE1=B: declaration defaults that reference
+//RS /// earlier parameters keep one meaning on AOT, default `jet run`, and the
+//RS /// forced interpreter path.
+//RS #[test]
+//RS fn default_parameter_references_keep_tier_parity() {
+//RS     let src = r#"
+//RS fn dimensions(width: Int, height: Int{width}, depth: Int{height}) -> String {
+//RS     return "{width}x{height}x{depth}"
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(dimensions(4))
+//RS     print(dimensions(4, 2))
+//RS     print(dimensions(4, 2, 1))
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("default_parameter_references", src, "4x4x4\n4x2x2\n4x2x1\n");
+//RS }
+//RS 
+//RS /// D-APILABEL1=A: call-site labels bind by name. Sema hands TIR declaration-order
+//RS /// arguments, and lowering pins observable reordered expressions to written order.
+//RS #[test]
+//RS fn named_args() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn area(width: Int, height: Int) -> Int {
+//RS     return (width * height)
+//RS }
+//RS fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String {
+//RS     return \"{host} t={seconds} tls={tls}\"
+//RS }
+//RS fn identity<T>(value: T, *, note: String{\"unused\"}) -> T {
+//RS     return value
+//RS }
+//RS fn force(*, force: Bool) -> Int -> 1
+//RS fn apply(action: fn(*, force: Bool) -> Int) -> Int {
+//RS     return action(force: true)
+//RS }
+//RS struct Logger {
+//RS     id: Int
+//RS }
+//RS impl Logger {
+//RS     fn write(self, level: String, parts: ...String) -> String {
+//RS         return [level, ...parts].join(\" \")
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(area(width: 4, height: 3))
+//RS     print(area(4, height: 3))
+//RS     print(connect(\"db\", tls: false, timeout: 5))
+//RS     print(connect(\"db\", tls: false))
+//RS     print(identity<Int>(note: \"generic\", value: 7))
+//RS     print(apply(force))
+//RS     logger :: Logger{id: 0}
+//RS     print(logger.write(parts: \"a\", level: \"L\"))
+//RS     print(logger.write(\"M\", \"b\", \"c\"))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_named_args", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "12\n12\ndb t=5 tls=false\ndb t=30 tls=false\n7\n1\nL a\nM b c\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn named_arg_diagnostic_covers_zero_parameter_calls() {
+//RS     let src = "fn nothing() {}\nfn run() { nothing(value: 1) }\n";
+//RS     let diagnostics = jet::compile(src).expect_err("a label on a zero-parameter call must fail");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0764"),
+//RS         "expected E0764 for a label on a zero-parameter call: {diagnostics:#?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn named_arg_diagnostic_covers_unlabelled_function_values() {
+//RS     let src = "\
+//RS fn apply(action: fn(Int) -> Int) -> Int { return action(value: 1) }
+//RS fn run() { _ :: apply((value: Int) -> value) }
+//RS ";
+//RS     let diagnostics =
+//RS         jet::compile(src).expect_err("an unlabelled function type must reject labels");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0764"),
+//RS         "expected E0764 for a label on an unlabelled function value: {diagnostics:#?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn function_value_arguments_preserve_public_callable_contracts() {
+//RS     let src = "\
+//RS fn factory(action: fn(*, force: Bool) -> Int) -> Int { return action(force: true) }
+//RS fn invoke(callback: fn(fn(*, force: Bool) -> Int) -> Int) -> Int { return callback(plain) }
+//RS fn plain(value: Bool) -> Int -> 1
+//RS fn run() { _ :: invoke(factory) }
+//RS ";
+//RS     let diagnostics = jet::compile(src)
+//RS         .expect_err("a function value with the wrong public label must be rejected");
+//RS     assert!(
+//RS         diagnostics.iter().any(|diagnostic| diagnostic.code == "E0112"),
+//RS         "expected E0112 for a callable-contract mismatch: {diagnostics:#?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn unannotated_function_values_do_not_erase_strict_callable_contracts() {
+//RS     let src = "\
+//RS fn factory(action: fn(*, force: Bool) -> Int) -> Int { return action(force: true) }
+//RS fn invoke(callback: fn(fn(*, force: Bool) -> Int) -> Int, plain: fn(Bool) -> Int) -> Int { return callback(plain) }
+//RS fn run() { _ :: invoke(factory, (value: Bool) -> 1) }
+//RS ";
+//RS     let diagnostics = jet::compile(src)
+//RS         .expect_err("an unannotated function value must not satisfy a strict callable type");
+//RS     assert!(
+//RS         diagnostics.iter().any(|diagnostic| diagnostic.code == "E0112"),
+//RS         "expected E0112 for a missing strict callable contract: {diagnostics:#?}"
+//RS     );
+//RS }
+//RS 
+//RS /// c109 Phase 23: distinct types (D-DIST1/D-DIST3). Destination conversion
+//RS /// `Name.from_kind(x)` → newtype
+//RS /// `__jet_Name(x)`; `.raw()` → `(recv).0`; `#Numeric` distinct `+`/`==` use the native
+//RS /// operator. A distinct value type passes/returns/binds byte-identically.
+//RS #[test]
+//RS fn distinct_types() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS UserID :: distinct Int
+//RS #Numeric Meters :: distinct Float
+//RS #UnitFamily(Currency) { usd }
+//RS 
+//RS fn greet(id: UserID) -> String {
+//RS     return \"user {(id.raw())}\"
+//RS }
+//RS fn run() {
+//RS     uid :: UserID.from_int(42)
+//RS     print(greet(uid))
+//RS     a :: Meters.from_float(3.0)
+//RS     b :: Meters.from_float(1.5)
+//RS     c :: a + b
+//RS     print(\"{(c.raw())} m\")
+//RS     x :: UserID.from_int(7)
+//RS     y :: UserID.from_int(7)
+//RS     print(\"{(x == y)}\")
+//RS     from_byte :: UserID.from_u8(8)
+//RS     from_float :: UserID.from_float(9.9) ?? UserID.from_int(0)
+//RS     print(\"{(from_byte.raw())} {(from_float.raw())}\")
+//RS     meters :: Meters.from_int(3)
+//RS     dollars :: Usd.from_int(5)
+//RS     print(\"{(meters.raw())} {(dollars.raw())}\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_distinct", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "user 42\n4.5 m\ntrue\n8 9\n3.0 5.0\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn numeric_distinct_operator_borrows_synthetic_rhs() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "#UnitFamily(Length, base: meter) { meter }\n\
+//RS fn run() {\n\
+//RS     distance :: 12meter\n\
+//RS     area :: distance * distance\n\
+//RS     print(area)\n\
+//RS }\n";
+//RS     let out = jet::compile(src).expect("unit multiplication must compile");
+//RS     assert!(
+//RS         out.rust
+//RS             .contains("__jet_Mul::__jet_mul_at(&(__jet_distance), &(__jet_distance),"),
+//RS         "synthetic numeric operators must borrow both trait operands:\n{}",
+//RS         out.rust
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn distinct_and_unit_numeric_source_matrix() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS UserID :: distinct Int
+//RS Label :: distinct String
+//RS #UnitFamily(Currency) { usd }
+//RS 
+//RS fn checked_user(value: U64) -> UserID String! { return UserID.from_u64(value) }
+//RS fn pass_user(value: UserID String!) -> UserID String! { return ~value }
+//RS 
+//RS fn run() {
+//RS     fallback :: UserID.from_int(0)
+//RS     print(UserID.from_i8(-8).raw())
+//RS     print(UserID.from_i16(-16).raw())
+//RS     print(UserID.from_i32(-32).raw())
+//RS     print(UserID.from_int(-64).raw())
+//RS     print(UserID.from_u8(8).raw())
+//RS     print(UserID.from_u16(16).raw())
+//RS     print(UserID.from_u32(32).raw())
+//RS     print((pass_user(checked_user(64)) ?? fallback).raw())
+//RS     print((UserID.from_f32(3.75) ?? fallback).raw())
+//RS     print((UserID.from_float(4.75) ?? fallback).raw())
+//RS     print(Usd.from_i8(-8).raw())
+//RS     print(Usd.from_i16(-16).raw())
+//RS     print(Usd.from_i32(-32).raw())
+//RS     print(Usd.from_int(-64).raw())
+//RS     print(Usd.from_u8(8).raw())
+//RS     print(Usd.from_u16(16).raw())
+//RS     print(Usd.from_u32(32).raw())
+//RS     print(Usd.from_u64(64).raw())
+//RS     print(Usd.from_f32(3.75).raw())
+//RS     print(Usd.from_float(4.75).raw())
+//RS     label :: Label.from_string(\"converted\")
+//RS     print(label.raw())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_distinct_source_matrix", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "-8\n-16\n-32\n-64\n8\n16\n32\n64\n3\n4\n\
+//RS -8.0\n-16.0\n-32.0\n-64.0\n8.0\n16.0\n32.0\n64.0\n3.75\n4.75\nconverted\n"
+//RS     );
+//RS }
+//RS 
+//RS /// D-RANGETYPE1/D-SHAPE-CONVERT1: range-constrained distinct conversions are
+//RS /// fallible for runtime values (`Severity.from_int(raw)`), and arithmetic
+//RS /// loosens to the base `Int` only at the written `wrapping` gate.
+//RS #[test]
+//RS fn range_type_runtime_try_and_spelled_arithmetic_gate() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS #Numeric Severity :: distinct Int(0..10)
+//RS 
+//RS fn checked(raw: Int) -> Severity String! {
+//RS     return Ok(Severity.from_int(raw))
+//RS }
+//RS 
+//RS fn pass_checked(value: Severity String!) -> Severity String! { return ~value }
+//RS fn direct() -> Severity { return Severity.from_u8(8) }
+//RS 
+//RS fn run() {
+//RS     a :: pass_checked(checked(4)) ?? panic(\"range\")
+//RS     b :: checked(6) ?? panic(\"range\")
+//RS     widened :: wrapping(a + b)
+//RS     print(\"{widened}\")
+//RS     print(direct().raw())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_range_type_checked", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "10\n8\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn range_type_literal_proofs_cover_every_numeric_source_family() {
+//RS     let src = r#"
+//RS #Numeric Severity :: distinct Int(0..10)
+//RS 
+//RS fn run() {
+//RS     signed :: Severity.from_i8(11)
+//RS     unsigned :: Severity.from_u8(12)
+//RS     narrow_float :: Severity.from_f32(13.0)
+//RS     float :: Severity.from_float(14.0)
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::compile(src).expect_err("all four literals exceed Severity's range");
+//RS     let range_errors = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "E0135")
+//RS         .count();
+//RS     assert_eq!(range_errors, 4, "diagnostics: {diagnostics:#?}");
+//RS }
+//RS 
+//RS fn normalize_contract_source_arrow(stderr: &str) -> String {
+//RS     let mut normalized = stderr
+//RS         .lines()
+//RS         .map(|line| {
+//RS             let Some(index) = line.find("  --> ") else {
+//RS                 return line.to_string();
+//RS             };
+//RS             let location = &line[index + "  --> ".len()..];
+//RS             let line_number = location.rsplit_once(':').map_or("?", |(_, number)| number);
+//RS             format!("{}  --> <source>:{line_number}", &line[..index])
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     if stderr.ends_with('\n') {
+//RS         normalized.push('\n');
+//RS     }
+//RS     normalized
+//RS }
+//RS 
+//RS fn generated_function<'a>(rust: &'a str, name: &str) -> &'a str {
+//RS     let signature = format!("pub fn {name}");
+//RS     let start = rust.find(&signature).expect("generated function");
+//RS     let end = rust[start..]
+//RS         .find("\npub fn __jet_run")
+//RS         .map_or(rust.len(), |offset| start + offset);
+//RS     &rust[start..end]
+//RS }
+//RS 
+//RS fn generated_run_function<'a>(rust: &'a str) -> &'a str {
+//RS     let start = rust.find("pub fn __jet_run").expect("run function");
+//RS     &rust[start..]
+//RS }
+//RS 
+//RS fn assert_contract_breach_tiers(name: &str, src: &str, marker: &str, line: u32) {
+//RS     let (aot_code, aot_stdout, aot_stderr) = build_and_run_full("jet_contract_tiers", name, src);
+//RS     let (jit_code, jit_stdout, jit_stderr) = jit_run(name, src);
+//RS     let (interpreter_code, interpreter_stdout, interpreter_stderr) = interpreter_run(name, src);
+//RS     let (release_code, release_stdout, release_stderr) =
+//RS         build_and_run_full_with_cfg("jet_contract_release", name, src, "jet_release");
+//RS 
+//RS     assert_eq!(aot_code, 70);
+//RS     assert_eq!(jit_code, aot_code, "default `jet run` exit drifted");
+//RS     assert_eq!(
+//RS         interpreter_code, aot_code,
+//RS         "forced interpreter exit drifted"
+//RS     );
+//RS     assert_eq!(release_code, aot_code, "release AOT exit drifted");
+//RS     assert_eq!(aot_stdout, "");
+//RS     assert_eq!(jit_stdout, aot_stdout);
+//RS     assert_eq!(interpreter_stdout, aot_stdout);
+//RS     assert_eq!(release_stdout, aot_stdout);
+//RS     let expected = normalize_contract_source_arrow(&aot_stderr);
+//RS     assert_eq!(normalize_contract_source_arrow(&jit_stderr), expected);
+//RS     assert_eq!(
+//RS         normalize_contract_source_arrow(&interpreter_stderr),
+//RS         expected
+//RS     );
+//RS     assert_eq!(normalize_contract_source_arrow(&release_stderr), expected);
+//RS     assert!(expected.contains(&format!("#{marker} contract failed")));
+//RS     assert!(
+//RS         expected.contains(&format!("  --> <source>:{line}")),
+//RS         "wrong contract arrow: {expected}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn contract_breach_output_matches_aot_jit_and_interpreter() {
+//RS     assert_contract_breach_tiers(
+//RS         "contract_pre_failure",
+//RS         r#"
+//RS #Pre(value > 0, "positive") fn checked(value: Int) -> Int {
+//RS     return value
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(checked(0))
+//RS }
+//RS "#,
+//RS         "Pre",
+//RS         7,
+//RS     );
+//RS     assert_contract_breach_tiers(
+//RS         "contract_post_failure",
+//RS         r#"
+//RS #Post(result == 99, "must equal 99")
+//RS fn get() -> Int {
+//RS     return 1
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(get())
+//RS }
+//RS "#,
+//RS         "Post",
+//RS         2,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn contract_interval_proof_erases_only_the_runtime_check() {
+//RS     let unproven = r#"
+//RS #Pre(value > 0, "positive") fn checked(value: Int) -> Int {
+//RS     return value
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(checked(1))
+//RS }
+//RS "#;
+//RS     let proven = r#"
+//RS #Numeric Positive :: distinct Int(1..10)
+//RS #Pre(value.raw() > 0, "positive") fn checked(value: Positive) -> Int {
+//RS     return value.raw()
+//RS }
+//RS 
+//RS fn run() {
+//RS     value :: Positive.from_int(1)
+//RS     print(checked(value))
+//RS }
+//RS "#;
+//RS     let unproven_rust = compile("contract_unproven", unproven);
+//RS     let proven_rust = compile("contract_proven", proven);
+//RS     let unproven_checked = generated_function(&unproven_rust, "__jet_checked");
+//RS     let proven_checked = generated_function(&proven_rust, "__jet_checked");
+//RS     let unproven_run = generated_run_function(&unproven_rust);
+//RS     let proven_run = generated_run_function(&proven_rust);
+//RS     assert!(
+//RS         !unproven_checked.contains("jet_contract_check")
+//RS             && unproven_run.contains("jet_contract_check"),
+//RS         "unproven call-site contract lost its runtime check"
+//RS     );
+//RS     assert_eq!(
+//RS         unproven_run.matches("jet_contract_check").count(),
+//RS         1,
+//RS         "the call-site contract must not be duplicated in the callee"
+//RS     );
+//RS     assert!(
+//RS         !proven_checked.contains("jet_contract_check")
+//RS             && !proven_run.contains("jet_contract_check"),
+//RS         "range fact did not erase the proven contract: {proven_checked}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn method_precondition_reports_the_call_site() {
+//RS     assert_contract_breach_tiers(
+//RS         "contract_method_pre_failure",
+//RS         r#"
+//RS struct Boxed {
+//RS     value: Int
+//RS }
+//RS 
+//RS impl Boxed {
+//RS     #Pre(self.value > 0, "positive") fn get(self) -> Int {
+//RS         return self.value
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     item :: Boxed{value: 0}
+//RS     print(item.get())
+//RS }
+//RS "#,
+//RS         "Pre",
+//RS         14,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn static_method_precondition_reports_the_call_site() {
+//RS     assert_contract_breach_tiers(
+//RS         "contract_static_method_pre_failure",
+//RS         r#"
+//RS struct Boxed {
+//RS     value: Int
+//RS }
+//RS 
+//RS impl Boxed {
+//RS     #Pre(value > 0, "positive") fn make(value: Int) -> Boxed {
+//RS         return Boxed{value: value}
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(Boxed.make(0).value)
+//RS }
+//RS "#,
+//RS         "Pre",
+//RS         13,
+//RS     );
+//RS }
+//RS 
+//RS /// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated
+//RS /// `JetTup_<hash>` struct lit (canonical field order); field access `p.x` → `(p).__jet_x`;
+//RS /// destructure `(a, b) :: ~p` → the borrow-temp + per-field `.clone()` form;
+//RS /// equality is native. The tuple type passes/returns byte-identically.
+//RS #[test]
+//RS fn named_tuples() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn bounds() -> (max: Int, min: Int) {
+//RS     return (min: 0, max: 10)
+//RS }
+//RS fn run() {
+//RS     p :: (x: 1, y: 2)
+//RS     q :: (y: 3, x: 4)
+//RS     same_shape :: (p == q)
+//RS     (a, b) :: ~p
+//RS     print(\"{p.x} {p.y} {a} {b} {same_shape}\")
+//RS     pair :: bounds()
+//RS     print(\"{pair.min} {pair.max}\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_tuples", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "1 2 1 2 false\n0 10\n");
+//RS }
+//RS 
+//RS /// c109 Phase 24: JSON value type + construction + if-let matching + render/parse
+//RS /// round-trip (the coupled prelude-`JSON` slice). `main` routes through the TIR:
+//RS /// `json.parse(raw) ?? panic`, `if data == Object(entries)` (JSON if-let), `JSON.Text`/
+//RS /// `JSON.Boolean`/`JSON.Object` construction (non-mangled `jet_std::JSON::…`), a Map
+//RS /// index over `[String:JSON]`, and `json.to_string`. rustc accepting proves byte-parity.
+//RS #[test]
+//RS fn json_value_construct_match_render() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.encoding.json as json
+//RS fn run() {
+//RS     raw :: \"{{\\\"name\\\":\\\"jet\\\",\\\"ok\\\":true}}\"
+//RS     data :: json.parse(raw) ?? panic(\"bad json\")
+//RS     if data == .Object(entries) {
+//RS         print(entries.len())
+//RS     }
+//RS     obj := [String:JSON]{}
+//RS     obj[\"name\"] = JSON.Text(\"jet\")
+//RS     obj[\"ok\"] = JSON.Bool(true)
+//RS     obj[\"none\"] = JSON.Null
+//RS     print(json.to_string(JSON.Object(obj)))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_json", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "2\n{\"name\":\"jet\",\"none\":null,\"ok\":true}\n");
+//RS }
+//RS 
+//RS /// c109 Phase 24: nested JSON if-let matching coercing typed payloads (`73_json_coerce`).
+//RS /// `if data == Object(entries)` then `if port == Number(n)` / `Text(s)` / `Boolean(b)`
+//RS /// — each binds a typed payload (Float/String/Bool) off `core_json_pattern_types`.
+//RS #[test]
+//RS fn json_nested_variant_matching() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.encoding.json as json
+//RS fn run() {
+//RS     raw :: \"{{\\\"port\\\":\\\"8080\\\",\\\"name\\\":\\\"api\\\"}}\"
+//RS     data :: json.decode(raw) ?? panic(\"bad json\")
+//RS     if data == .Object(entries) {
+//RS         port :: entries[\"port\"]
+//RS         name :: entries[\"name\"]
+//RS         if port == .Int(n) {
+//RS             print(n + 1)
+//RS         }
+//RS         if name == .Text(s) {
+//RS             print(s)
+//RS         }
+//RS     }
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_json_coerce", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "8081\napi\n");
+//RS }
+//RS 
+//RS /// D-REGEXENGINE1=A: regex `Match` value type + `.group(n)` accessor. Regex is
+//RS /// std-only now, so this pins `Match.group` to the opaque match-value method.
+//RS #[test]
+//RS fn regex_match_group() {
+//RS     let src = "\
+//RS use core.regex as re
+//RS fn run() {
+//RS     text :: \"order 42 shipped\"
+//RS     m :: re.match({\"(\\d+) shipped\"}, text)
+//RS     if m == .Val(mat) {
+//RS         whole :: mat.group(0) ?? \"none\"
+//RS         print(whole)
+//RS     }
+//RS }
+//RS ";
+//RS     let dir = std::env::temp_dir().join(format!("jet_tir_regex_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("regex.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy().into_owned();
+//RS     let out = jet::compile_with_path(src, &shown).expect("front end rejected regex fixture");
+//RS     // The `if let Ok(__jet_mat)` outcome match binds the `Match`; `.group(0)` reads it.
+//RS     assert!(
+//RS         out.rust.contains("if let Ok(__jet_mat) ="),
+//RS         "Match value not bound via if-let:\n{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("(__jet_mat).group(0i64)"),
+//RS         "Match.group lowering not byte-exact:\n{}",
+//RS         out.rust
+//RS     );
+//RS }
+//RS 
+//RS /// c109 Phase 24: a comptime const inlined at the use site (`{HEADER}` in interpolation).
+//RS /// `wrap` routes — the const inlines its pre-rendered value (`cx.consts`).
+//RS #[test]
+//RS fn comptime_const_inline() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS VERSION :: prep { \"1.0\" }
+//RS BANNER :: prep { \"logbook {VERSION}\" }
+//RS fn wrap(s: String) -> String {
+//RS     return \"{BANNER}: {s}\"
+//RS }
+//RS fn run() {
+//RS     print(wrap(\"hi\"))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_const", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "logbook 1.0: hi\n");
+//RS }
+//RS 
+//RS /// c109 Phase 24: foreign-enum matching + a local enum with a foreign-enum payload, plus
+//RS /// a foreign struct with enum/optional fields — the logbook `note`/`search` shapes. The
+//RS /// `note` module defines `NoteType`/`Note`; `search` (entry) matches over the foreign
+//RS /// `NoteType` directly AND over a local `Query` whose `Kind` payload is the foreign enum,
+//RS /// constructs `NoteType.User` cross-module, and reads a foreign struct's enum field.
+//RS #[test]
+//RS fn foreign_enum_matching_and_payload() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     // The foreign struct `Note` is CONSTRUCTED in its own module (`make_note`, matching the
+//RS     // real logbook — an unqualified cross-module `Note {…}` literal is a separate pre-existing
+//RS     // lowering bug, omitted of `import_ns`, outside this fixture). `kind_str` matches
+//RS     // the foreign-LOCAL `NoteType`; the entry matches the foreign `NoteType` via a local
+//RS     // `Query`'s `Kind(NoteType)` payload + constructs `NoteType.User` cross-module.
+//RS     let note = "\
+//RS pub enum NoteType { User Feedback Project Reference }
+//RS pub struct Note {
+//RS     pub name: String
+//RS     pub note_type: NoteType
+//RS     pub parent: String?
+//RS }
+//RS 
+//RS pub fn make_note(name: ^String, t: ^NoteType) -> Note {
+//RS     return Note{name: name, note_type: t, parent: None}
+//RS }
+//RS pub fn kind_str(n: Note) -> String {
+//RS     k :: ~n.note_type
+//RS     if k == {
+//RS         .User -> { return \"user\" }
+//RS         .Feedback -> { return \"feedback\" }
+//RS         .Project -> { return \"project\" }
+//RS         .Reference -> { return \"reference\" }
+//RS     }
+//RS }
+//RS fn run() { print(\"note\") }
+//RS ";
+//RS     let entry = "\
+//RS use \"note\"
+//RS enum Query {
+//RS     Tag(String)
+//RS     Kind(NoteType)
+//RS }
+//RS fn classify(raw: String) -> Query {
+//RS     if raw == \"user\" {
+//RS         return Query.Kind(NoteType.User)
+//RS     }
+//RS     return Query.Tag(~raw)
+//RS }
+//RS fn describe(n: Note, q: ^Query) -> String {
+//RS     if q == {
+//RS         .Tag(t) -> { return \"tag:{t}\" }
+//RS         .Kind(k) -> { return \"kind:{note.kind_str(n)}\" }
+//RS     }
+//RS }
+//RS fn run() {
+//RS     n :: note.make_note(\"x\", NoteType.User)
+//RS     q :: classify(\"user\")
+//RS     print(describe(n, ^q))
+//RS     q2 :: classify(\"design\")
+//RS     print(describe(n, ^q2))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run_multi(
+//RS         "tir_foreign_enum",
+//RS         "main.jet",
+//RS         &[("main.jet", entry), ("note.jet", note)],
+//RS     );
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "kind:user\ntag:design\n");
+//RS }
+//RS 
+//RS /// D-SHAPE3b: Result spellings stay contextual identifiers, and dotted
+//RS /// Optional-looking names remain ordinary variants on user enums.
+//RS #[test]
+//RS fn result_names_do_not_reserve_user_functions_or_variants() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS enum Wrapped {
+//RS     Val(Int)
+//RS     Ok(Int)
+//RS     Err(Int)
+//RS }
+//RS 
+//RS fn Ok(value: Int) -> Int {
+//RS     return (value + 10)
+//RS }
+//RS 
+//RS fn Err(value: Int) -> Int {
+//RS     return (value + 20)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(Ok(1))
+//RS     print(Err(2))
+//RS     wrapped :: Wrapped.Val(7)
+//RS     if wrapped == {
+//RS         .Val(value) -> { print(value) }
+//RS         .Ok(value) -> { print(value) }
+//RS         .Err(value) -> { print(value) }
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("tir_contextual_result_names", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "11\n22\n7\n");
+//RS }
+//RS 
+//RS /// c109 Phase 25: a STATIC constructor `Type.new(args)` (D-NARG1, 63_named_args). `new`
+//RS /// is in `is_intercepted_method_name` (the instance-method intercept stays), but the
+//RS /// STATIC shape (`recv_type == None`, type-name receiver, `(Type, "new") ∈ method_sigs`)
+//RS /// is the Phase-7 `__jet_<Type>::__jet_new(args)` form — not a builtin intercept — so it
+//RS /// now routes. The instance method named `area` still routes too.
+//RS #[test]
+//RS fn static_new_constructor() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Rect {
+//RS     width: Int
+//RS     height: Int
+//RS }
+//RS impl Rect {
+//RS     fn new(width: Int, height: Int) -> Rect {
+//RS         return Rect{width: width, height: height}
+//RS     }
+//RS     fn area(self) -> Int {
+//RS         return (self.width * self.height)
+//RS     }
+//RS }
+//RS fn run() {
+//RS     r :: Rect.new(4, 3)
+//RS     print(r.area())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_static_new", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "12\n");
+//RS }
+//RS 
+//RS /// c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B, 65_io_prelude). A bare
+//RS /// `input()` with NO user `input` fn lowers to `jet_std_io_input(None)` → `Result<String,
+//RS /// IOError>`, composing with the `??` fallback. No stdin is provided, so `input()` errs and
+//RS /// the fallback value is used (deterministic).
+//RS #[test]
+//RS fn ambient_input() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn greet() -> String {
+//RS     name :: input() ?? \"world\"
+//RS     return \"hello, {name}\"
+//RS }
+//RS fn run() {
+//RS     print(greet())
+//RS }
+//RS ";
+//RS     // No stdin is piped, so `input()` reads EOF and yields Ok("") — the `??` fallback is
+//RS     // NOT taken (it fires only on Err), so `name` is the empty string. (The point of the
+//RS     // test is that the ambient `input()` lowers + runs through the TIR, not the fallback.)
+//RS     let (code, stdout) = build_and_run("tir_ambient_input", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "hello, \n");
+//RS }
+//RS 
+//RS /// c109 Phase 25: the HTTPRouter handle surface (D-ROUTE1=A, 76_http_routes). `http.router()`
+//RS /// (producer), `router.get(path, handler)` with a named-fn handler (the boxed-closure
+//RS /// `emit_router_handler` reproduction), and `http.dispatch(router, req)` — all without
+//RS /// networking (dispatch a directly-parsed request). The handler routes too.
+//RS #[test]
+//RS fn http_router_dispatch() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.http as http
+//RS use core.http.server as server
+//RS fn handle_root(req: HTTPRequest) -> HTTPResponse HTTPError! {
+//RS     return Ok(server.response(200, \"welcome\"))
+//RS }
+//RS 
+//RS fn handle_user(id: String) -> HTTPResponse HTTPError! {
+//RS     return Ok(server.response(200, \"user={id}\"))
+//RS }
+//RS fn run() {
+//RS     router :: http.router()
+//RS     router.get(\"/\", handle_root)
+//RS     router.get(\"/users/:id\", handle_user)
+//RS     req :: http.parse(\"GET / HTTP/1.1\\nHost: localhost\")
+//RS     resp :: http.dispatch(router, req) ?? panic(\"dispatch\")
+//RS     print(resp.body().text(1024) ?? panic(\"body\"))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_http_router", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "welcome\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn http_mux_unannotated_handler_lambda_is_owned_in_aot() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.http.server as server
+//RS fn run() {
+//RS     mux :: server.mux()
+//RS     mux.get(\"/\", (req) -> Ok(server.response(200, req.path())))
+//RS     print(\"registered\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_http_unannotated_handler", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "registered\n");
+//RS }
+//RS 
+//RS /// c109 Phase 25 / E2804: duplicate routes are user runtime errors. They must
+//RS /// print Jet-owned panic text with the Jet source line, not Rust's panic banner.
+//RS #[test]
+//RS fn http_router_duplicate_route_is_jet_runtime_error() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.http as http
+//RS use core.http.server as server
+//RS fn handle(id: String, name: String) -> HTTPResponse HTTPError! {
+//RS     return Ok(server.response(200, \"ok\"))
+//RS }
+//RS     router :: http.router()
+//RS     router.get(\"/users/:id\", handle)
+//RS     router.get(\"/users/:name\", handle)
+//RS }
+//RS ";
+//RS     let (code, _stdout, stderr) =
+//RS         build_and_run_full("jet_tir_test", "tir_http_duplicate_route", src);
+//RS     assert_ne!(code, 0);
+//RS     assert!(
+//RS         stderr.contains("panic: E2804: duplicate route `GET /users/:name`"),
+//RS         "missing Jet-owned E2804 runtime text:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("tir_http_duplicate_route.jet:9"),
+//RS         "missing Jet source location:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("thread 'main' panicked"),
+//RS         "raw Rust panic banner leaked:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn http_router_named_catchall_and_encoded_marker_literals() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.http as http
+//RS use core.http.server as server
+//RS fn asset(path: String) -> HTTPResponse HTTPError! {
+//RS     return Ok(server.response(200, \"{path}\"))
+//RS }
+//RS fn literal(req: HTTPRequest) -> HTTPResponse HTTPError! {
+//RS     return Ok(server.response(200, \"literal\"))
+//RS }
+//RS fn catch(rest: String) -> HTTPResponse HTTPError! {
+//RS     return Ok(server.response(200, \"catch\"))
+//RS }
+//RS fn param_catch(id: String, rest: String) -> HTTPResponse HTTPError! {
+//RS     return Ok(server.response(200, \"param-catch\"))
+//RS }
+//RS fn param_first(first: String) -> HTTPResponse HTTPError! {
+//RS     return Ok(server.response(200, \"param-first\"))
+//RS }
+//RS fn static_first(last: String) -> HTTPResponse HTTPError! {
+//RS     return Ok(server.response(200, \"static-first\"))
+//RS }
+//RS fn run() {
+//RS     router :: http.router()
+//RS     router.get(\"/assets/*path\", asset)
+//RS     router.get(\"/literal/%3Aadmin/%2Astar\", literal)
+//RS     router.get(\"/a/*rest\", catch)
+//RS     router.get(\"/a/:id/*rest\", param_catch)
+//RS     router.get(\"/tie/:first/static\", param_first)
+//RS     router.get(\"/tie/static/:last\", static_first)
+//RS     first :: http.dispatch(router, http.parse(\"GET /assets/css/site.css HTTP/1.1\\nHost: localhost\")) ?? panic(\"dispatch\")
+//RS     second :: http.dispatch(router, http.parse(\"GET /literal/%3Aadmin/%2Astar HTTP/1.1\\nHost: localhost\")) ?? panic(\"dispatch\")
+//RS     third :: http.dispatch(router, http.parse(\"GET /a/x/y HTTP/1.1\\nHost: localhost\")) ?? panic(\"dispatch\")
+//RS     fourth :: http.dispatch(router, http.parse(\"GET /tie/static/static HTTP/1.1\\nHost: localhost\")) ?? panic(\"dispatch\")
+//RS     print(first.body().text(1024) ?? panic(\"body\"))
+//RS     print(second.body().text(1024) ?? panic(\"body\"))
+//RS     print(third.body().text(1024) ?? panic(\"body\"))
+//RS     print(fourth.body().text(1024) ?? panic(\"body\"))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_http_route_syntax", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "css/site.css\nliteral\nparam-catch\nstatic-first\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn http_router_retired_bare_catchall_is_jet_runtime_error() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS use core.http as http
+//RS use core.http.server as server
+//RS use core.sys as env
+//RS fn handle(req: HTTPRequest) -> HTTPResponse HTTPError! {
+//RS     return Ok(server.response(200, \"ok\"))
+//RS }
+//RS fn run() {
+//RS     router :: http.router()
+//RS     dynamic :: env.get(\"JET_HTTP_TEST_MARKER\") ?? \"*\"
+//RS     pattern :: \"/assets/{dynamic}\"
+//RS     router.get(pattern, handle)
+//RS }
+//RS ";
+//RS     let (code, _stdout, stderr) =
+//RS         build_and_run_full("jet_tir_test", "tir_http_retired_catchall", src);
+//RS     assert_ne!(code, 0);
+//RS     assert!(
+//RS         stderr.contains("panic: E2805: invalid HTTP route `/assets/*`: write a named catch-all such as `*wildcard`"),
+//RS         "missing Jet-owned E2805 runtime text:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("tir_http_retired_catchall.jet:11"),
+//RS         "missing source location:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("thread 'main' panicked"),
+//RS         "raw Rust panic banner leaked:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS /// c109 Phase 26: the `assert(cond[, msg])` / `assert_eq` rich-report builtins (S36,
+//RS /// 14_panic). A satisfied assertion is a no-op; the program continues. (The failing
+//RS /// branch's rich panic is exercised by the golden suite; here we prove the TIR
+//RS /// renders + runs the guard byte-for-byte.)
+//RS #[test]
+//RS fn assert_builtins() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     assert(((1 + 1) == 2))
+//RS     assert(true, \"unreachable\")
+//RS     assert_eq(6, (2 * 3))
+//RS     print(\"ok\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_assert", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "ok\n");
+//RS }
+//RS 
+//RS /// D-AUTHORITY-SCOPE1: bare and named `#FX` regions have one meaning on AOT,
+//RS /// default `jet run`, and the forced interpreter. The named handle is sema-only
+//RS /// and the body remains an ordinary lexical block on every tier.
+//RS #[test]
+//RS fn authority_scope() {
+//RS     let src = "\
+//RS fn announce(label: String, n: Int) -[IO]> {
+//RS     print(\"{label}: {n}\")
+//RS }
+//RS fn run() {
+//RS     #FX(authority: IO) {
+//RS         announce(\"answer\", 42)
+//RS     }
+//RS }
+//RS ";
+//RS     tir_support::assert_tiers_agree("tir_authority", src, "answer: 42\n");
+//RS }
+// END-PORT-PENDING 1174 tests/tir_language_features.rs:1-1256
+

@@ -1,0 +1,1826 @@
+// PORT-PENDING 0580 crates-jet-comptime-src-comptime-datapipeline-slice-1: crates/jet-comptime/src/Comptime/DataPipeline.rs:1-1822
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-QUERY-RETAIN1=A: one typed `Query<T>` surface over ordinary lists,
+//RS //! checked readers, and checked SQL. Query plans and grouped reductions stay
+//RS //! in this per-interpreter state; materialized results are ordinary lists.
+//RS //! `DataStream<T>` remains one-shot and fallible, while typed loaders preserve
+//RS //! ownership, authority, and snapshot state.
+//RS //!
+//RS //! `csv<T>`/`json<T>` use the call-site type argument at runtime; query
+//RS //! callbacks use the same closure path as `list.map`/`.filter`/`.sort_by`.
+//RS //! The shared query kernel is also used by the AOT and JIT tiers.
+//RS //! parity: guard tests/dataflow_stream.rs::rolling_mean_nonfinite_matches_aot_and_default_dev
+//RS //!
+//RS //! Legacy carrier wrappers are intentionally absent.
+//RS //! 
+//RS //! 
+//RS 
+//RS use std::collections::{BTreeMap, HashMap};
+//RS 
+//RS use super::CollectionEval::collection_semantics::{JetTableColumn, JetTableTypeId};
+//RS mod sql_query {
+//RS     include!("../../../jet-codegen/src/Prelude/Core/SqlQuery.rs");
+//RS }
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::AST::{CtFloat, CtKey, Type};
+//RS 
+//RS use super::Diagnostics::unsupported;
+//RS use super::Interpreter::Interp;
+//RS use super::Methods::as_string;
+//RS use super::Methods::data_plot_rt;
+//RS use crate::AST::{CtReport, CtValue};
+//RS 
+//RS fn ct_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: fields
+//RS             .into_iter()
+//RS             .map(|(n, v)| (n.to_string(), v))
+//RS             .collect(),
+//RS     }
+//RS }
+//RS fn struct_field<'a>(v: &'a CtValue, type_name: &str, field: &str) -> Option<&'a CtValue> {
+//RS     match v {
+//RS         CtValue::Struct {
+//RS             type_name: t,
+//RS             fields,
+//RS         } if t == type_name => fields.iter().find(|(n, _)| n == field).map(|(_, v)| v),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS fn expect_list<'a>(v: &'a CtValue, what: &str, span: Span) -> Result<&'a Vec<CtValue>, Diagnostic> {
+//RS     match v {
+//RS         CtValue::List(xs) => Ok(xs),
+//RS         _ => Err(unsupported(
+//RS             &format!("`data.{}` needs a list-backed value", what),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn query_row_field<'a>(row: &'a CtValue, field: &str) -> Option<&'a CtValue> {
+//RS     match row {
+//RS         CtValue::Struct { fields, .. } => fields
+//RS             .iter()
+//RS             .find(|(name, _)| name == field)
+//RS             .map(|(_, value)| value),
+//RS         CtValue::Enum { type_name, .. } if matches!(
+//RS             type_name.as_str(),
+//RS             "DataTree" | "TOML" | "YAML" | "CSV"
+//RS         ) => {
+//RS             match super::JSONInterp::json_payload(row, "Object") {
+//RS                 Some(CtValue::Map(entries)) => entries.iter().find_map(|(key, value)| match key {
+//RS                     CtKey::Str(name) if name == field => Some(value),
+//RS                     _ => None,
+//RS                 }),
+//RS                 Some(CtValue::Struct { fields, .. }) => fields
+//RS                     .iter()
+//RS                     .find(|(name, _)| name == field)
+//RS                     .map(|(_, value)| value),
+//RS                 _ => None,
+//RS             }
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn query_cell_text(value: &CtValue) -> String {
+//RS     match value {
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") => {
+//RS             match variant.as_str() {
+//RS                 "Null" => String::new(),
+//RS                 _ => args
+//RS                     .first()
+//RS                     .map(|(_, payload)| query_cell_text(payload))
+//RS                     .unwrap_or_default(),
+//RS             }
+//RS         }
+//RS         CtValue::Str(text) => text.clone(),
+//RS         CtValue::Int(value) => value.to_string(),
+//RS         CtValue::BigInt(value) => value.to_string_rep(),
+//RS         CtValue::Float(value) => value.to_json(),
+//RS         CtValue::Bool(value) => value.to_string(),
+//RS         _ => super::JSONInterp::render_json_pretty(value, false, 0),
+//RS     }
+//RS }
+//RS fn query_cell_sql_value(value: &CtValue) -> Option<sql_query::JetSqlValue> {
+//RS     match value {
+//RS         CtValue::Unit => Some(sql_query::JetSqlValue::Null),
+//RS         CtValue::Bool(value) => Some(sql_query::JetSqlValue::Bool(*value)),
+//RS         CtValue::Int(value) => Some(sql_query::JetSqlValue::Int(*value)),
+//RS         CtValue::BigInt(value) => value
+//RS             .to_string_rep()
+//RS             .parse::<i64>()
+//RS             .map(sql_query::JetSqlValue::Int)
+//RS             .ok()
+//RS             .or_else(|| Some(sql_query::JetSqlValue::Text(value.to_string_rep()))),
+//RS         CtValue::Float(value) => Some(sql_query::JetSqlValue::Float(value.as_f64())),
+//RS         CtValue::Str(value) => Some(sql_query::JetSqlValue::Text(value.clone())),
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") => {
+//RS             match variant.as_str() {
+//RS                 "Null" => Some(sql_query::JetSqlValue::Null),
+//RS                 "Bool" | "Int" | "Number" | "Float" | "TypedText" | "Text" => args
+//RS                     .first()
+//RS                     .and_then(|(_, value)| query_cell_sql_value(value)),
+//RS                 _ => Some(sql_query::JetSqlValue::Text(query_cell_text(value))),
+//RS             }
+//RS         }
+//RS         _ => Some(sql_query::JetSqlValue::Text(query_cell_text(value))),
+//RS     }
+//RS }
+//RS 
+//RS fn query_sql_value_ct(value: sql_query::JetSqlValue) -> CtValue {
+//RS     match value {
+//RS         sql_query::JetSqlValue::Null => CtValue::Unit,
+//RS         sql_query::JetSqlValue::Bool(value) => CtValue::Bool(value),
+//RS         sql_query::JetSqlValue::Int(value) => CtValue::Int(value),
+//RS         sql_query::JetSqlValue::Float(value) => CtValue::Float(CtFloat::f64(value)),
+//RS         sql_query::JetSqlValue::Text(value) => CtValue::Str(value),
+//RS     }
+//RS }
+//RS 
+//RS fn query_runtime_fields(rows: &[CtValue]) -> Vec<String> {
+//RS     rows.iter()
+//RS         .find_map(|row| match row {
+//RS             CtValue::Struct { fields, .. } => Some(fields.iter().map(|(name, _)| name.clone()).collect()),
+//RS             CtValue::Enum { .. } => super::JSONInterp::json_payload(row, "Object").and_then(|value| {
+//RS                 match value {
+//RS                     CtValue::Struct { fields, .. } => {
+//RS                         Some(fields.iter().map(|(name, _)| name.clone()).collect())
+//RS                     }
+//RS                     CtValue::Map(entries) => Some(
+//RS                         entries
+//RS                             .iter()
+//RS                             .filter_map(|(key, _)| match key {
+//RS                                 CtKey::Str(name) => Some(name.clone()),
+//RS                                 _ => None,
+//RS                             })
+//RS                             .collect(),
+//RS                     ),
+//RS                     _ => None,
+//RS                 }
+//RS             }),
+//RS             _ => None,
+//RS         })
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn data_schema_elem_ty(arg_ty: &Type) -> Option<&Type> {
+//RS     match arg_ty {
+//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => Some(inner.as_ref()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS fn data_join_right_type(call_ret: Option<&Type>) -> Option<Type> {
+//RS     let joined = match call_ret? {
+//RS         Type::Result { ok, .. } => ok.as_ref(),
+//RS         ty => ty,
+//RS     };
+//RS     let Type::List(join) = joined else {
+//RS         return None;
+//RS     };
+//RS     let Type::Apply { name, args } = join.as_ref() else {
+//RS         return None;
+//RS     };
+//RS     if name != "DataJoin" || args.len() != 2 {
+//RS         return None;
+//RS     }
+//RS     match &args[1] {
+//RS         Type::Option(inner) => Some((**inner).clone()),
+//RS         right => Some(right.clone()),
+//RS     }
+//RS }
+//RS fn query_join_right_type(call_ret: Option<&Type>) -> Option<Type> {
+//RS     let Type::Apply { name, args } = call_ret? else {
+//RS         return None;
+//RS     };
+//RS     if name != "Query" || args.len() != 1 {
+//RS         return None;
+//RS     }
+//RS     let Type::Apply {
+//RS         name: join_name,
+//RS         args: join_args,
+//RS     } = &args[0]
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     if join_name != "DataJoin" || join_args.len() != 2 {
+//RS         return None;
+//RS     }
+//RS     match &join_args[1] {
+//RS         Type::Option(inner) => Some((**inner).clone()),
+//RS         right => Some(right.clone()),
+//RS     }
+//RS }
+//RS fn query_sql_rows(
+//RS     rows: Vec<CtValue>,
+//RS     sql: &str,
+//RS     declared_fields: Option<Vec<String>>,
+//RS ) -> Result<Vec<CtValue>, CtValue> {
+//RS     let query = sql_query::parse_sql_query(sql)
+//RS         .map_err(|error| super::TypedDecode::decode_error(format!("`data.query()`: {error}")))?;
+//RS     sql_query::validate_sql_query_schema(
+//RS         &query,
+//RS         |field| match declared_fields.as_ref() {
+//RS             Some(fields) => fields.iter().any(|known| known == field),
+//RS             None if rows.is_empty() => true,
+//RS             None => rows
+//RS                 .iter()
+//RS                 .any(|row| query_row_field(row, field).is_some()),
+//RS         },
+//RS         "`data.query()`",
+//RS     )
+//RS     .map_err(super::TypedDecode::decode_error)?;
+//RS     if query.needs_projection_execution() {
+//RS         let fields = declared_fields.unwrap_or_else(|| query_runtime_fields(&rows));
+//RS         let result = sql_query::execute_sql_rows(
+//RS             &fields,
+//RS             rows.len(),
+//RS             &query,
+//RS             |index, field| query_row_field(&rows[index], field).and_then(query_cell_sql_value),
+//RS         )
+//RS         .map_err(|error| {
+//RS             super::TypedDecode::decode_error(format!("`data.query()`: {error}"))
+//RS         })?;
+//RS         let type_name = rows
+//RS             .iter()
+//RS             .find_map(|row| match row {
+//RS                 CtValue::Struct { type_name, .. } => Some(type_name.clone()),
+//RS                 _ => None,
+//RS             })
+//RS             .unwrap_or_else(|| "SqlRow".to_string());
+//RS         Ok(result
+//RS             .into_iter()
+//RS             .map(|row| CtValue::Struct {
+//RS                 type_name: type_name.clone(),
+//RS                 fields: row
+//RS                     .fields
+//RS                     .into_iter()
+//RS                     .map(|(name, value)| (name, query_sql_value_ct(value)))
+//RS                     .collect(),
+//RS             })
+//RS             .collect())
+//RS     } else {
+//RS         let selected = sql_query::select_sql_indices(rows.len(), &query, |index, field| {
+//RS             query_row_field(&rows[index], field).map(query_cell_text)
+//RS         });
+//RS         Ok(selected
+//RS             .into_iter()
+//RS             .map(|index| rows[index].clone())
+//RS             .collect())
+//RS     }
+//RS }
+//RS fn query_declared_fields(
+//RS     arg0_ty: Option<&Type>,
+//RS     call_ret: Option<&Type>,
+//RS     structs: &HashMap<String, &crate::AST::StructDef>,
+//RS ) -> Option<Vec<String>> {
+//RS     let elem_ty = arg0_ty.and_then(data_schema_elem_ty).or_else(|| {
+//RS         let Type::Result { ok, .. } = call_ret? else {
+//RS             return None;
+//RS         };
+//RS         data_schema_elem_ty(ok)
+//RS     })?;
+//RS     let struct_name = elem_ty.base_name()?;
+//RS     let definition = structs.get(struct_name)?;
+//RS     Some(
+//RS         definition
+//RS             .fields
+//RS             .iter()
+//RS             .map(|field| field.name.clone())
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS 
+//RS fn data_column(name: &str, type_name: &str) -> CtValue {
+//RS     let id = JetTableColumn::new(
+//RS         name.to_string(),
+//RS         JetTableTypeId::new(type_name.to_string()),
+//RS     )
+//RS     .id
+//RS     .as_str()
+//RS     .to_string();
+//RS     ct_struct(
+//RS         "DataColumn",
+//RS         vec![
+//RS             ("id", CtValue::Str(id)),
+//RS             ("name", CtValue::Str(name.to_string())),
+//RS             ("type_name", CtValue::Str(type_name.to_string())),
+//RS             ("nullable", CtValue::Bool(type_name.ends_with('?'))),
+//RS         ],
+//RS     )
+//RS }
+//RS fn data_loader_enum(type_name: &str, variant: &str) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: type_name.to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn data_loader_error_value(kind: &str, operation: &str, reason: impl Into<String>) -> CtValue {
+//RS     ct_struct(
+//RS         "DataError",
+//RS         vec![
+//RS             ("kind", data_loader_enum("DataErrorKind", kind)),
+//RS             ("operation", CtValue::Str(operation.to_string())),
+//RS             ("row", CtValue::absent(Type::Int)),
+//RS             ("column", CtValue::absent(Type::Int)),
+//RS             ("index", CtValue::absent(Type::Int)),
+//RS             (
+//RS                 "reason",
+//RS                 CtValue::Str(jet_foundation::PreludeDataFlow::status_text(&reason.into())),
+//RS             ),
+//RS             (
+//RS                 "cause",
+//RS                 CtValue::absent(Type::Named("EncodingError".to_string())),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn data_loader_failure(kind: &str, operation: &str, reason: impl Into<String>) -> CtValue {
+//RS     CtValue::failed(Box::new(data_loader_error_value(kind, operation, reason)))
+//RS }
+//RS 
+//RS fn data_loader_kernel_failure(
+//RS     error: jet_foundation::PreludeDataFlow::KernelError,
+//RS ) -> CtValue {
+//RS     let kind = match error.kind {
+//RS         jet_foundation::PreludeDataFlow::ErrorKind::InvalidArgument => "InvalidArgument",
+//RS         jet_foundation::PreludeDataFlow::ErrorKind::Limit => "Limit",
+//RS         jet_foundation::PreludeDataFlow::ErrorKind::State => "State",
+//RS         jet_foundation::PreludeDataFlow::ErrorKind::Bridge => "Bridge",
+//RS     };
+//RS     data_loader_failure(kind, &error.operation, error.reason)
+//RS }
+//RS 
+//RS fn data_loader_bridge(operation: &str) -> CtValue {
+//RS     data_loader_failure(
+//RS         "Bridge",
+//RS         operation,
+//RS         "provider payload is missing; bind a canonical provider response",
+//RS     )
+//RS }
+//RS 
+//RS fn data_snapshot_reusable_value(left: &CtValue, right: &CtValue) -> Option<bool> {
+//RS     if let (Some(left), Some(right)) = (
+//RS         matches!(left, CtValue::Struct { type_name, .. } if type_name == "DataSnapshotIdentity")
+//RS             .then_some(left),
+//RS         matches!(right, CtValue::Struct { type_name, .. } if type_name == "DataSnapshotIdentity")
+//RS             .then_some(right),
+//RS     ) {
+//RS         return Some(
+//RS             ["id", "source", "content", "schema", "format"]
+//RS                 .iter()
+//RS                 .all(|field| {
+//RS                     struct_field(left, "DataSnapshotIdentity", field)
+//RS                         == struct_field(right, "DataSnapshotIdentity", field)
+//RS                 }),
+//RS         );
+//RS     }
+//RS     let (CtValue::Struct { type_name: left_type, .. }, CtValue::Struct {
+//RS         type_name: right_type,
+//RS         ..
+//RS     }) = (left, right) else {
+//RS         return None;
+//RS     };
+//RS     if left_type != "DataLoader" || right_type != "DataSnapshot" {
+//RS         return None;
+//RS     }
+//RS     let provenance = struct_field(right, "DataSnapshot", "provenance")?;
+//RS     Some(
+//RS         struct_field(provenance, "DataProvenance", "source")
+//RS             == struct_field(left, "DataLoader", "source")
+//RS             && struct_field(provenance, "DataProvenance", "authority")
+//RS                 == struct_field(left, "DataLoader", "authority")
+//RS             && struct_field(provenance, "DataProvenance", "format")
+//RS                 == struct_field(left, "DataLoader", "format"),
+//RS     )
+//RS }
+//RS 
+//RS type DataKernel = jet_foundation::PreludeDataFlow::LoaderState;
+//RS type DataKernelLimits = jet_foundation::PreludeDataFlow::Limits;
+//RS type DataKernelStatus = jet_foundation::PreludeDataFlow::Status;
+//RS 
+//RS #[derive(Clone)]
+//RS struct ComptimeLoader {
+//RS     state: DataKernel,
+//RS     seed: Option<CtValue>,
+//RS     decode_ty: Option<Type>,
+//RS }
+//RS 
+//RS struct ComptimeStream {
+//RS     rows: Vec<CtValue>,
+//RS     cursor: usize,
+//RS     cancelled: bool,
+//RS     row_ty: Option<Type>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS enum ComptimeQueryOperation {
+//RS     Filter(CtValue),
+//RS     SortBy(CtValue),
+//RS     Map(CtValue),
+//RS     Extreme {
+//RS         key: CtValue,
+//RS         maximum: bool,
+//RS     },
+//RS     Join {
+//RS         right: CtValue,
+//RS         left_key: CtValue,
+//RS         right_key: CtValue,
+//RS         left: bool,
+//RS         right_type: Type,
+//RS     },
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ComptimeQuery {
+//RS     rows: Vec<CtValue>,
+//RS     tracked: Option<usize>,
+//RS     operations: Vec<ComptimeQueryOperation>,
+//RS     plan: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ComptimeTrackedChange {
+//RS     revision: u64,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ComptimeTracked {
+//RS     rows: Vec<(u64, CtValue)>,
+//RS     key: CtValue,
+//RS     next_order: u64,
+//RS     revision: u64,
+//RS     changes: Vec<ComptimeTrackedChange>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ComptimeWatch {
+//RS     query: ComptimeQuery,
+//RS     lifecycle: jet_foundation::LiveLifecycle::JetLiveLifecycle,
+//RS     source_revision: u64,
+//RS     retained_rows: usize,
+//RS     entries: Vec<CtValue>,
+//RS     mode: String,
+//RS     recomputations: u64,
+//RS }
+//RS 
+//RS /// All mutable data-pipeline handles belong to one interpreter invocation.
+//RS /// CtValue carriers contain only slot identities; no process-global registry
+//RS /// can make a stale carrier accidentally resolve in another invocation.
+//RS pub struct DataPipelineState {
+//RS     loaders: Vec<Option<ComptimeLoader>>,
+//RS     streams: Vec<Option<ComptimeStream>>,
+//RS     queries: Vec<Option<ComptimeQuery>>,
+//RS     tracked: Vec<Option<ComptimeTracked>>,
+//RS     watches: Vec<Option<ComptimeWatch>>,
+//RS     plots: Vec<Option<data_plot_rt::JetDataPlot<CtValue>>>,
+//RS }
+//RS 
+//RS impl Default for DataPipelineState {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             loaders: Vec::new(),
+//RS             streams: Vec::new(),
+//RS             queries: Vec::new(),
+//RS             tracked: Vec::new(),
+//RS             watches: Vec::new(),
+//RS             plots: Vec::new(),
+//RS         }
+//RS     }
+//RS }
+//RS fn store_query(
+//RS     state: &mut DataPipelineState,
+//RS     rows: Vec<CtValue>,
+//RS     plan: Vec<String>,
+//RS ) -> CtValue {
+//RS     store_query_source(state, rows, None, plan)
+//RS }
+//RS 
+//RS fn store_query_source(
+//RS     state: &mut DataPipelineState,
+//RS     rows: Vec<CtValue>,
+//RS     tracked: Option<usize>,
+//RS     plan: Vec<String>,
+//RS ) -> CtValue {
+//RS     state.queries.push(Some(ComptimeQuery {
+//RS         rows,
+//RS         tracked,
+//RS         operations: Vec::new(),
+//RS         plan,
+//RS     }));
+//RS     ct_struct(
+//RS         "Query",
+//RS         vec![(
+//RS             "slot",
+//RS             CtValue::Int(i64::try_from(state.queries.len()).unwrap_or(i64::MAX)),
+//RS         )],
+//RS     )
+//RS }
+//RS 
+//RS fn store_tracked(
+//RS     state: &mut DataPipelineState,
+//RS     rows: Vec<(u64, CtValue)>,
+//RS     key: CtValue,
+//RS     revision: u64,
+//RS ) -> CtValue {
+//RS     let next_order = rows
+//RS         .last()
+//RS         .map(|(order, _)| order.saturating_add(1))
+//RS         .unwrap_or(0);
+//RS     state.tracked.push(Some(ComptimeTracked {
+//RS         rows,
+//RS         key,
+//RS         next_order,
+//RS         revision,
+//RS         changes: Vec::new(),
+//RS     }));
+//RS     ct_struct(
+//RS         "DataTracked",
+//RS         vec![(
+//RS             "slot",
+//RS             CtValue::Int(i64::try_from(state.tracked.len()).unwrap_or(i64::MAX)),
+//RS         )],
+//RS     )
+//RS }
+//RS 
+//RS fn tracked_id(
+//RS     state: &DataPipelineState,
+//RS     tracked: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<usize, Diagnostic> {
+//RS     let Some(CtValue::Int(id)) = struct_field(tracked, "DataTracked", "slot") else {
+//RS         return Err(unsupported("`DataTracked` carrier has no state slot", span));
+//RS     };
+//RS     if *id <= 0 {
+//RS         return Err(unsupported("`DataTracked` state slot is invalid", span));
+//RS     }
+//RS     let id = usize::try_from(*id)
+//RS         .map_err(|_| unsupported("`DataTracked` state slot is invalid", span))?;
+//RS     if state.tracked.get(id - 1).and_then(Option::as_ref).is_none() {
+//RS         return Err(unsupported("`DataTracked` state slot is stale", span));
+//RS     }
+//RS     Ok(id)
+//RS }
+//RS 
+//RS fn store_watch(
+//RS     state: &mut DataPipelineState,
+//RS     query: ComptimeQuery,
+//RS     entries: Vec<CtValue>,
+//RS     source_revision: u64,
+//RS     retained_rows: usize,
+//RS     mode: String,
+//RS ) -> CtValue {
+//RS     state.watches.push(Some(ComptimeWatch {
+//RS         query,
+//RS         lifecycle: jet_foundation::LiveLifecycle::JetLiveLifecycle::active_now(),
+//RS         source_revision,
+//RS         retained_rows,
+//RS         entries,
+//RS         mode,
+//RS         recomputations: 0,
+//RS     }));
+//RS     ct_struct(
+//RS         "DataWatch",
+//RS         vec![(
+//RS             "slot",
+//RS             CtValue::Int(i64::try_from(state.watches.len()).unwrap_or(i64::MAX)),
+//RS         )],
+//RS     )
+//RS }
+//RS 
+//RS fn watch_id(
+//RS     state: &DataPipelineState,
+//RS     watch: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<usize, Diagnostic> {
+//RS     let Some(CtValue::Int(id)) = struct_field(watch, "DataWatch", "slot") else {
+//RS         return Err(unsupported("`DataWatch` carrier has no state slot", span));
+//RS     };
+//RS     if *id <= 0 {
+//RS         return Err(unsupported("`DataWatch` state slot is invalid", span));
+//RS     }
+//RS     let id = usize::try_from(*id)
+//RS         .map_err(|_| unsupported("`DataWatch` state slot is invalid", span))?;
+//RS     if state.watches.get(id - 1).and_then(Option::as_ref).is_none() {
+//RS         return Err(unsupported("`DataWatch` state slot is stale", span));
+//RS     }
+//RS     Ok(id)
+//RS }
+//RS 
+//RS fn query_id(
+//RS     state: &DataPipelineState,
+//RS     query: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<usize, Diagnostic> {
+//RS     let Some(CtValue::Int(id)) = struct_field(query, "Query", "slot") else {
+//RS         return Err(unsupported("`Query` carrier has no state slot", span));
+//RS     };
+//RS     if *id <= 0 {
+//RS         return Err(unsupported("`Query` state slot is invalid", span));
+//RS     }
+//RS     let id = usize::try_from(*id)
+//RS         .map_err(|_| unsupported("`Query` state slot is invalid", span))?;
+//RS     if state.queries.get(id - 1).and_then(Option::as_ref).is_none() {
+//RS         return Err(unsupported("`Query` state slot is stale", span));
+//RS     }
+//RS     Ok(id)
+//RS }
+//RS 
+//RS fn clone_query(
+//RS     state: &DataPipelineState,
+//RS     query: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ComptimeQuery, Diagnostic> {
+//RS     let id = query_id(state, query, span)?;
+//RS     state.queries[id - 1]
+//RS         .as_ref()
+//RS         .cloned()
+//RS         .ok_or_else(|| unsupported("`Query` state slot is stale", span))
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS fn data_loader_format(format: &str) -> Option<&'static str> {
+//RS     match format.to_ascii_lowercase().as_str() {
+//RS         "csv" => Some("csv"),
+//RS         "json" => Some("json"),
+//RS         "jsonl" | "ndjson" => Some("jsonl"),
+//RS         "parquet" => Some("parquet"),
+//RS         "arrow" | "arrow-ipc" | "feather" => Some("arrow"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn data_loader_format_for_locator(locator: &str) -> Result<String, CtValue> {
+//RS     let path = locator
+//RS         .split(|character| character == '?' || character == '#')
+//RS         .next()
+//RS         .unwrap_or(locator);
+//RS     let path = path.rsplit_once('/').map_or(path, |(_, path)| path);
+//RS     let Some(extension) = path.rsplit_once('.').map(|(_, extension)| extension) else {
+//RS         return Err(data_loader_failure(
+//RS             "Bridge",
+//RS             "data.load",
+//RS             "source has no core format; import a provider package",
+//RS         ));
+//RS     };
+//RS     data_loader_format(extension)
+//RS         .map(str::to_string)
+//RS         .ok_or_else(|| {
+//RS             data_loader_failure(
+//RS                 "Bridge",
+//RS                 "data.load",
+//RS                 format!("format `{extension}` is provider-owned; import its package"),
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS fn data_kernel_limits_safe() -> DataKernelLimits {
+//RS     DataKernelLimits {
+//RS         buffer_bytes: 65_536,
+//RS         max_depth: 256,
+//RS         max_item_bytes: 16_777_216,
+//RS         max_total_bytes: None,
+//RS         max_expansion_depth: 32,
+//RS         max_expansion_bytes: 8_388_608,
+//RS         max_groups: 100_000,
+//RS         max_sort_rows: 1_000_000,
+//RS         max_join_rows: 1_000_000,
+//RS         max_output_rows: 1_000_000,
+//RS     }
+//RS }
+//RS 
+//RS fn data_int_field(value: Option<&CtValue>, fallback: i64) -> i64 {
+//RS     match value {
+//RS         Some(CtValue::Int(value)) => *value,
+//RS         _ => fallback,
+//RS     }
+//RS }
+//RS 
+//RS fn data_optional_int(value: Option<&CtValue>) -> Option<i64> {
+//RS     match value {
+//RS         Some(CtValue::Int(value)) => Some(*value),
+//RS         Some(CtValue::Present(value)) => match value.as_ref() {
+//RS             CtValue::Int(value) => Some(*value),
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS fn build_tracked(
+//RS     state: &mut DataPipelineState,
+//RS     rows: Vec<CtValue>,
+//RS     key: CtValue,
+//RS     call: QueryCallback<'_>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let max_rows = usize::try_from(data_kernel_limits_safe().max_output_rows)
+//RS         .unwrap_or(usize::MAX);
+//RS     if rows.len() > max_rows {
+//RS         return Err(unsupported(
+//RS             "`data.track()` rows exceed max_output_rows",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let mut keyed = Vec::with_capacity(rows.len());
+//RS     for (order, row) in rows.into_iter().enumerate() {
+//RS         let key_value = call(&key, vec![row.clone()], span)?;
+//RS         if keyed.iter().any(|(_, existing): &(u64, CtValue)| *existing == key_value) {
+//RS             return Err(unsupported(
+//RS                 "`data.track()` key callback returned a duplicate key",
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         keyed.push((u64::try_from(order).unwrap_or(u64::MAX), row));
+//RS     }
+//RS     Ok(store_tracked(state, keyed, key, 0))
+//RS }
+//RS 
+//RS fn invalidate_tracked_watches(state: &mut DataPipelineState, tracked_id: usize, cause: &str) {
+//RS     let affected: Vec<usize> = state
+//RS         .watches
+//RS         .iter()
+//RS         .enumerate()
+//RS         .filter_map(|(index, watch)| {
+//RS             let watch = watch.as_ref()?;
+//RS             query_depends_on_tracked(state, &watch.query, tracked_id).then_some(index)
+//RS         })
+//RS         .collect();
+//RS     for index in affected {
+//RS         if let Some(watch) = state.watches[index].as_mut() {
+//RS             let _ = watch.lifecycle.invalidate(cause);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn query_depends_on_tracked(
+//RS     state: &DataPipelineState,
+//RS     query: &ComptimeQuery,
+//RS     tracked_id: usize,
+//RS ) -> bool {
+//RS     if query.tracked == Some(tracked_id) {
+//RS         return true;
+//RS     }
+//RS     query.operations.iter().any(|operation| {
+//RS         let ComptimeQueryOperation::Join { right, .. } = operation else {
+//RS             return false;
+//RS         };
+//RS         let Some(CtValue::Int(id)) = struct_field(right, "Query", "slot") else {
+//RS             return false;
+//RS         };
+//RS         let Ok(id) = usize::try_from(*id) else {
+//RS             return false;
+//RS         };
+//RS         state
+//RS             .queries
+//RS             .get(id.saturating_sub(1))
+//RS             .and_then(Option::as_ref)
+//RS             .is_some_and(|right_query| query_depends_on_tracked(state, right_query, tracked_id))
+//RS     })
+//RS }
+//RS fn query_is_maintained(state: &DataPipelineState, query: &ComptimeQuery) -> bool {
+//RS     query.tracked.is_some()
+//RS         || query.operations.iter().any(|operation| {
+//RS             let ComptimeQueryOperation::Join { right, .. } = operation else {
+//RS                 return false;
+//RS             };
+//RS             let Some(CtValue::Int(id)) = struct_field(right, "Query", "slot") else {
+//RS                 return false;
+//RS             };
+//RS             let Ok(id) = usize::try_from(*id) else {
+//RS                 return false;
+//RS             };
+//RS             state
+//RS                 .queries
+//RS                 .get(id.saturating_sub(1))
+//RS                 .and_then(Option::as_ref)
+//RS                 .is_some_and(|right_query| query_is_maintained(state, right_query))
+//RS         })
+//RS }
+//RS 
+//RS fn bump_tracked_revision(
+//RS     tracked: &mut ComptimeTracked,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     tracked.revision = tracked
+//RS         .revision
+//RS         .checked_add(1)
+//RS         .ok_or_else(|| unsupported("`DataTracked` revision overflowed", span))?;
+//RS     tracked.changes.push(ComptimeTrackedChange {
+//RS         revision: tracked.revision,
+//RS     });
+//RS     let max_history = usize::try_from(data_kernel_limits_safe().max_output_rows)
+//RS         .unwrap_or(usize::MAX);
+//RS     if tracked.changes.len() > max_history {
+//RS         let overflow = tracked.changes.len() - max_history;
+//RS         tracked.changes.drain(..overflow);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn tracked_insert(
+//RS     state: &mut DataPipelineState,
+//RS     tracked: &CtValue,
+//RS     row: CtValue,
+//RS     call: QueryCallback<'_>,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let id = tracked_id(state, tracked, span)?;
+//RS     let key_callback = state.tracked[id - 1]
+//RS         .as_ref()
+//RS         .map(|slot| slot.key.clone())
+//RS         .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))?;
+//RS     let key_value = call(&key_callback, vec![row.clone()], span)?;
+//RS     let existing_rows = state.tracked[id - 1]
+//RS         .as_ref()
+//RS         .map(|slot| slot.rows.iter().map(|(_, row)| row.clone()).collect::<Vec<_>>())
+//RS         .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))?;
+//RS     for existing in existing_rows.iter().cloned() {
+//RS         if call(&key_callback, vec![existing], span)? == key_value {
+//RS             return Err(unsupported("`DataTracked.insert()` found a duplicate key", span));
+//RS         }
+//RS     }
+//RS     let max_rows = usize::try_from(data_kernel_limits_safe().max_output_rows)
+//RS         .unwrap_or(usize::MAX);
+//RS     if existing_rows.len() >= max_rows {
+//RS         return Err(unsupported(
+//RS             "`DataTracked.insert()` rows exceed max_output_rows",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let slot = state.tracked[id - 1]
+//RS         .as_mut()
+//RS         .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))?;
+//RS     let order = slot.next_order;
+//RS     slot.next_order = slot
+//RS         .next_order
+//RS         .checked_add(1)
+//RS         .ok_or_else(|| unsupported("`DataTracked` source order overflowed", span))?;
+//RS     slot.rows.push((order, row.clone()));
+//RS     bump_tracked_revision(slot, span)?;
+//RS     invalidate_tracked_watches(state, id - 1, "insert");
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn tracked_replace(
+//RS     state: &mut DataPipelineState,
+//RS     tracked: &CtValue,
+//RS     key_value: CtValue,
+//RS     row: CtValue,
+//RS     call: QueryCallback<'_>,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let id = tracked_id(state, tracked, span)?;
+//RS     let key_callback = state.tracked[id - 1]
+//RS         .as_ref()
+//RS         .map(|slot| slot.key.clone())
+//RS         .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))?;
+//RS     let existing_rows = state.tracked[id - 1]
+//RS         .as_ref()
+//RS         .map(|slot| slot.rows.clone())
+//RS         .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))?;
+//RS     let mut found = None;
+//RS     for (index, (order, existing)) in existing_rows.iter().enumerate() {
+//RS         if call(&key_callback, vec![existing.clone()], span)? == key_value {
+//RS             found = Some((index, *order));
+//RS             break;
+//RS         }
+//RS     }
+//RS     let Some((index, order)) = found else {
+//RS         return Err(unsupported("`DataTracked.replace()` key is missing", span));
+//RS     };
+//RS     let row_key = call(&key_callback, vec![row.clone()], span)?;
+//RS     if row_key != key_value {
+//RS         return Err(unsupported(
+//RS             "`DataTracked.replace()` row key does not match the requested key",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let slot = state.tracked[id - 1]
+//RS         .as_mut()
+//RS         .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))?;
+//RS     slot.rows[index] = (order, row.clone());
+//RS     bump_tracked_revision(slot, span)?;
+//RS     invalidate_tracked_watches(state, id - 1, "replace");
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn tracked_remove(
+//RS     state: &mut DataPipelineState,
+//RS     tracked: &CtValue,
+//RS     key_value: CtValue,
+//RS     call: QueryCallback<'_>,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let id = tracked_id(state, tracked, span)?;
+//RS     let key_callback = state.tracked[id - 1]
+//RS         .as_ref()
+//RS         .map(|slot| slot.key.clone())
+//RS         .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))?;
+//RS     let existing_rows = state.tracked[id - 1]
+//RS         .as_ref()
+//RS         .map(|slot| slot.rows.clone())
+//RS         .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))?;
+//RS     let mut found = None;
+//RS     for (index, (order, existing)) in existing_rows.iter().enumerate() {
+//RS         if call(&key_callback, vec![existing.clone()], span)? == key_value {
+//RS             found = Some((index, *order));
+//RS             break;
+//RS         }
+//RS     }
+//RS     let Some((index, order)) = found else {
+//RS         return Err(unsupported("`DataTracked.remove()` key is missing", span));
+//RS     };
+//RS     let slot = state.tracked[id - 1]
+//RS         .as_mut()
+//RS         .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))?;
+//RS     let removed = slot.rows.remove(index);
+//RS     debug_assert_eq!(removed.0, order);
+//RS     bump_tracked_revision(slot, span)?;
+//RS     invalidate_tracked_watches(state, id - 1, "remove");
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn tracked_revision(
+//RS     state: &DataPipelineState,
+//RS     tracked: usize,
+//RS     span: Span,
+//RS ) -> Result<u64, Diagnostic> {
+//RS     state
+//RS         .tracked
+//RS         .get(tracked)
+//RS         .and_then(Option::as_ref)
+//RS         .map(|slot| {
+//RS             slot
+//RS                 .changes
+//RS                 .last()
+//RS                 .map(|change| change.revision)
+//RS                 .unwrap_or(slot.revision)
+//RS                 .max(slot.revision)
+//RS         })
+//RS         .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))
+//RS }
+//RS 
+//RS fn watch_refresh(
+//RS     state: &mut DataPipelineState,
+//RS     watch: &CtValue,
+//RS     call: QueryCallback<'_>,
+//RS     span: Span,
+//RS ) -> Result<Vec<CtValue>, Diagnostic> {
+//RS     let id = watch_id(state, watch, span)?;
+//RS     let (query, source_revision, entries, generation, active, cancelled) = {
+//RS         let slot = state.watches[id - 1]
+//RS             .as_ref()
+//RS             .ok_or_else(|| unsupported("`DataWatch` state slot is stale", span))?;
+//RS         let source_revision = query_source_revision(state, &slot.query, span)?;
+//RS         (
+//RS             slot.query.clone(),
+//RS             source_revision,
+//RS             slot.entries.clone(),
+//RS             slot.lifecycle.generation,
+//RS             slot.lifecycle.active,
+//RS             slot.lifecycle.cancelled,
+//RS         )
+//RS     };
+//RS     if !active || cancelled {
+//RS         return Err(unsupported("`DataWatch` is inactive", span));
+//RS     }
+//RS     if source_revision == state.watches[id - 1].as_ref().unwrap().source_revision {
+//RS         return Ok(entries);
+//RS     }
+//RS     if !state.watches[id - 1]
+//RS         .as_mut()
+//RS         .unwrap()
+//RS         .lifecycle
+//RS         .begin_refresh(generation)
+//RS     {
+//RS         return Err(unsupported("`DataWatch` refresh was superseded", span));
+//RS     }
+//RS     let refreshed = match collect_query_rows(state, &query, call, span) {
+//RS         Ok(rows) if rows.len() <= data_kernel_limits_safe().max_output_rows as usize => rows,
+//RS         Ok(_) => {
+//RS             let error = unsupported("`DataWatch` output exceeds max_output_rows", span);
+//RS             let _ = state.watches[id - 1]
+//RS                 .as_mut()
+//RS                 .unwrap()
+//RS                 .lifecycle
+//RS                 .fail(generation, error.what.clone());
+//RS             return Err(error);
+//RS         }
+//RS         Err(error) => {
+//RS             let _ = state.watches[id - 1]
+//RS                 .as_mut()
+//RS                 .unwrap()
+//RS                 .lifecycle
+//RS                 .fail(generation, error.what.clone());
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     let fresh_at_ms =
+//RS         jet_foundation::LiveLifecycle::JetLiveLifecycle::active_now().fresh_at_ms;
+//RS     let retained_rows = query_retained_rows(state, &query, span)?;
+//RS     let slot = state.watches[id - 1]
+//RS         .as_mut()
+//RS         .ok_or_else(|| unsupported("`DataWatch` state slot is stale", span))?;
+//RS     if !slot.lifecycle.publish(generation, fresh_at_ms) {
+//RS         return Err(unsupported("`DataWatch` refresh was superseded", span));
+//RS     }
+//RS     slot.entries = refreshed.clone();
+//RS     slot.source_revision = source_revision;
+//RS     slot.retained_rows = retained_rows;
+//RS     slot.recomputations = slot.recomputations.saturating_add(1);
+//RS     Ok(refreshed)
+//RS }
+//RS 
+//RS fn query_source_revision(
+//RS     state: &DataPipelineState,
+//RS     query: &ComptimeQuery,
+//RS     span: Span,
+//RS ) -> Result<u64, Diagnostic> {
+//RS     let mut revision = query
+//RS         .tracked
+//RS         .map(|tracked| tracked_revision(state, tracked, span))
+//RS         .transpose()?
+//RS         .unwrap_or(0);
+//RS     for operation in &query.operations {
+//RS         let ComptimeQueryOperation::Join { right, .. } = operation else {
+//RS             continue;
+//RS         };
+//RS         let right_query = clone_query(state, right, span)?;
+//RS         let right_revision = query_source_revision(state, &right_query, span)?;
+//RS         revision = revision
+//RS             .wrapping_mul(1_000_003)
+//RS             .wrapping_add(right_revision.saturating_add(1));
+//RS     }
+//RS     Ok(revision)
+//RS }
+//RS fn query_retained_rows(
+//RS     state: &DataPipelineState,
+//RS     query: &ComptimeQuery,
+//RS     span: Span,
+//RS ) -> Result<usize, Diagnostic> {
+//RS     let mut retained = query
+//RS         .tracked
+//RS         .map(|tracked| {
+//RS             state
+//RS                 .tracked
+//RS                 .get(tracked)
+//RS                 .and_then(Option::as_ref)
+//RS                 .map(|slot| slot.rows.len())
+//RS                 .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))
+//RS         })
+//RS         .transpose()?
+//RS         .unwrap_or(query.rows.len());
+//RS     for operation in &query.operations {
+//RS         let ComptimeQueryOperation::Join { right, .. } = operation else {
+//RS             continue;
+//RS         };
+//RS         let right_query = clone_query(state, right, span)?;
+//RS         retained = retained
+//RS             .checked_add(query_retained_rows(state, &right_query, span)?)
+//RS             .ok_or_else(|| unsupported("query retained row count overflowed", span))?;
+//RS     }
+//RS     Ok(retained)
+//RS }
+//RS 
+//RS fn data_limits_from_value(value: Option<&CtValue>) -> DataKernelLimits {
+//RS     let defaults = data_kernel_limits_safe();
+//RS     let Some(value) = value else {
+//RS         return defaults;
+//RS     };
+//RS     let encoding = struct_field(value, "DataLimits", "encoding").unwrap_or(value);
+//RS     DataKernelLimits {
+//RS         buffer_bytes: data_int_field(
+//RS             struct_field(encoding, "EncodingLimits", "buffer_bytes"),
+//RS             defaults.buffer_bytes,
+//RS         ),
+//RS         max_depth: data_int_field(
+//RS             struct_field(encoding, "EncodingLimits", "max_depth"),
+//RS             defaults.max_depth,
+//RS         ),
+//RS         max_item_bytes: data_int_field(
+//RS             struct_field(encoding, "EncodingLimits", "max_item_bytes"),
+//RS             defaults.max_item_bytes,
+//RS         ),
+//RS         max_total_bytes: data_optional_int(struct_field(
+//RS             encoding,
+//RS             "EncodingLimits",
+//RS             "max_total_bytes",
+//RS         )),
+//RS         max_expansion_depth: data_int_field(
+//RS             struct_field(encoding, "EncodingLimits", "max_expansion_depth"),
+//RS             defaults.max_expansion_depth,
+//RS         ),
+//RS         max_expansion_bytes: data_int_field(
+//RS             struct_field(encoding, "EncodingLimits", "max_expansion_bytes"),
+//RS             defaults.max_expansion_bytes,
+//RS         ),
+//RS         max_groups: data_int_field(
+//RS             struct_field(value, "DataLimits", "max_groups"),
+//RS             defaults.max_groups,
+//RS         ),
+//RS         max_sort_rows: data_int_field(
+//RS             struct_field(value, "DataLimits", "max_sort_rows"),
+//RS             defaults.max_sort_rows,
+//RS         ),
+//RS         max_join_rows: data_int_field(
+//RS             struct_field(value, "DataLimits", "max_join_rows"),
+//RS             defaults.max_join_rows,
+//RS         ),
+//RS         max_output_rows: data_int_field(
+//RS             struct_field(value, "DataLimits", "max_output_rows"),
+//RS             defaults.max_output_rows,
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn data_kernel_kind_value(kind: jet_foundation::PreludeDataFlow::LoaderKind) -> CtValue {
+//RS     data_loader_enum(
+//RS         "DataLoaderKind",
+//RS         match kind {
+//RS             jet_foundation::PreludeDataFlow::LoaderKind::File => "File",
+//RS             jet_foundation::PreludeDataFlow::LoaderKind::URL => "URL",
+//RS             jet_foundation::PreludeDataFlow::LoaderKind::Database => "Database",
+//RS             jet_foundation::PreludeDataFlow::LoaderKind::Value => "Value",
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn data_kernel_format_value(format: &str) -> CtValue {
+//RS     data_loader_enum(
+//RS         "DataFormat",
+//RS         match format {
+//RS             "csv" => "CSV",
+//RS             "json" => "JSON",
+//RS             "jsonl" => "JSONL",
+//RS             "parquet" => "Parquet",
+//RS             "arrow" => "Arrow",
+//RS             _ => "JSON",
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn data_kernel_authority_value(
+//RS     authority: &jet_foundation::PreludeDataFlow::Authority,
+//RS ) -> CtValue {
+//RS     ct_struct(
+//RS         "DataAuthority",
+//RS         vec![
+//RS             ("scope", CtValue::Str(authority.scope.clone())),
+//RS             ("revision", CtValue::Str(authority.revision.clone())),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn data_kernel_source_value(
+//RS     source: &jet_foundation::PreludeDataFlow::SourceIdentity,
+//RS ) -> CtValue {
+//RS     ct_struct(
+//RS         "DataSourceIdentity",
+//RS         vec![
+//RS             ("kind", data_kernel_kind_value(source.kind)),
+//RS             ("locator", CtValue::Str(source.locator.clone())),
+//RS             ("member", CtValue::Str(source.member.clone())),
+//RS             (
+//RS                 "parameters",
+//RS                 CtValue::List(
+//RS                     source
+//RS                         .parameters
+//RS                         .iter()
+//RS                         .cloned()
+//RS                         .map(CtValue::Str)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn data_kernel_limits_value(limits: &DataKernelLimits) -> CtValue {
+//RS     let max_total_bytes = limits
+//RS         .max_total_bytes
+//RS         .map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
+//RS         .unwrap_or_else(|| CtValue::absent(Type::Int));
+//RS     ct_struct(
+//RS         "DataLimits",
+//RS         vec![
+//RS             (
+//RS                 "encoding",
+//RS                 ct_struct(
+//RS                     "EncodingLimits",
+//RS                     vec![
+//RS                         ("buffer_bytes", CtValue::Int(limits.buffer_bytes)),
+//RS                         ("max_depth", CtValue::Int(limits.max_depth)),
+//RS                         ("max_item_bytes", CtValue::Int(limits.max_item_bytes)),
+//RS                         ("max_total_bytes", max_total_bytes),
+//RS                         (
+//RS                             "max_expansion_depth",
+//RS                             CtValue::Int(limits.max_expansion_depth),
+//RS                         ),
+//RS                         (
+//RS                             "max_expansion_bytes",
+//RS                             CtValue::Int(limits.max_expansion_bytes),
+//RS                         ),
+//RS                     ],
+//RS                 ),
+//RS             ),
+//RS             ("max_groups", CtValue::Int(limits.max_groups)),
+//RS             ("max_sort_rows", CtValue::Int(limits.max_sort_rows)),
+//RS             ("max_join_rows", CtValue::Int(limits.max_join_rows)),
+//RS             ("max_output_rows", CtValue::Int(limits.max_output_rows)),
+//RS         ],
+//RS     )
+//RS }
+//RS pub(super) fn data_limits_safe_value() -> CtValue {
+//RS     data_kernel_limits_value(&data_kernel_limits_safe())
+//RS }
+//RS 
+//RS fn data_kernel_status_value(status: &DataKernelStatus) -> CtValue {
+//RS     ct_struct(
+//RS         "DataLoaderStatus",
+//RS         vec![
+//RS             ("identity", CtValue::Str(status.identity.clone())),
+//RS             (
+//RS                 "freshness",
+//RS                 data_loader_enum(
+//RS                     "DataFreshness",
+//RS                     match status.freshness {
+//RS                         jet_foundation::PreludeDataFlow::Freshness::Pending => "Pending",
+//RS                         jet_foundation::PreludeDataFlow::Freshness::Fresh => "Fresh",
+//RS                         jet_foundation::PreludeDataFlow::Freshness::Stale => "Stale",
+//RS                         jet_foundation::PreludeDataFlow::Freshness::Error => "Error",
+//RS                         jet_foundation::PreludeDataFlow::Freshness::Offline => "Offline",
+//RS                         jet_foundation::PreludeDataFlow::Freshness::Cancelled => "Cancelled",
+//RS                     },
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "invalidated_by",
+//RS                 data_loader_enum(
+//RS                     "DataInvalidationCause",
+//RS                     match status.invalidated_by {
+//RS                         jet_foundation::PreludeDataFlow::InvalidationCause::NoCause => "NoCause",
+//RS                         jet_foundation::PreludeDataFlow::InvalidationCause::Loader => "Loader",
+//RS                         jet_foundation::PreludeDataFlow::InvalidationCause::Input => "Input",
+//RS                         jet_foundation::PreludeDataFlow::InvalidationCause::ArchiveMember => {
+//RS                             "ArchiveMember"
+//RS                         }
+//RS                         jet_foundation::PreludeDataFlow::InvalidationCause::Parameters => {
+//RS                             "Parameters"
+//RS                         }
+//RS                         jet_foundation::PreludeDataFlow::InvalidationCause::Credential => {
+//RS                             "Credential"
+//RS                         }
+//RS                         jet_foundation::PreludeDataFlow::InvalidationCause::Capability => {
+//RS                             "Capability"
+//RS                         }
+//RS                         jet_foundation::PreludeDataFlow::InvalidationCause::Manual => "Manual",
+//RS                     },
+//RS                 ),
+//RS             ),
+//RS             ("error", CtValue::Str(status.error.clone())),
+//RS             ("cleanup", CtValue::Str(status.cleanup.clone())),
+//RS             ("buffered_bytes", CtValue::Int(status.buffered_bytes)),
+//RS             ("backpressure", CtValue::Bool(status.backpressure)),
+//RS             ("last_good", CtValue::Bool(status.last_good)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn data_bytes_value(bytes: Option<&Vec<u8>>) -> CtValue {
+//RS     bytes
+//RS         .map(|bytes| CtValue::Present(Box::new(CtValue::Bytes(bytes.clone()))))
+//RS         .unwrap_or_else(|| CtValue::absent(Type::List(Box::new(Type::Named("U8".to_string())))))
+//RS }
+//RS 
+//RS fn data_loader_state_field() -> String {
+//RS     jet_foundation::Names::mangle_generated("data_loader_state")
+//RS }
+//RS 
+//RS fn data_stream_state_field() -> String {
+//RS     jet_foundation::Names::mangle_generated("data_stream_state")
+//RS }
+//RS 
+//RS fn data_loader_carrier(id: usize, state: &DataKernel) -> CtValue {
+//RS     ct_struct(
+//RS         "DataLoader",
+//RS         vec![
+//RS             ("source", data_kernel_source_value(&state.source)),
+//RS             ("format", data_kernel_format_value(&state.format)),
+//RS             ("authority", data_kernel_authority_value(&state.authority)),
+//RS             ("limits", data_kernel_limits_value(&state.limits)),
+//RS             ("payload", data_bytes_value(state.payload.as_ref())),
+//RS             ("last_good", data_bytes_value(state.last_good.as_ref())),
+//RS             ("cancelled", CtValue::Bool(state.cancelled)),
+//RS             ("offline", CtValue::Bool(state.offline)),
+//RS             (
+//RS                 data_loader_state_field().as_str(),
+//RS                 CtValue::Int(
+//RS                     i64::try_from(id).expect("data loader state slot exceeds Jet Int range"),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn data_stream_carrier(id: usize) -> CtValue {
+//RS     ct_struct(
+//RS         "DataStream",
+//RS         vec![(
+//RS             data_stream_state_field().as_str(),
+//RS             CtValue::Int(
+//RS                 i64::try_from(id).expect("data stream state slot exceeds Jet Int range"),
+//RS             ),
+//RS         )],
+//RS     )
+//RS }
+//RS 
+//RS fn store_data_loader(state: &mut DataPipelineState, loader: ComptimeLoader) -> CtValue {
+//RS     state.loaders.push(Some(loader));
+//RS     let id = state.loaders.len();
+//RS     let loader_state = state.loaders[id - 1]
+//RS         .as_ref()
+//RS         .map(|loader| loader.state.clone())
+//RS         .expect("loader inserted");
+//RS     CtValue::Present(Box::new(data_loader_carrier(id, &loader_state)))
+//RS }
+//RS 
+//RS fn store_data_stream(state: &mut DataPipelineState, stream: ComptimeStream) -> CtValue {
+//RS     state.streams.push(Some(stream));
+//RS     data_stream_carrier(state.streams.len())
+//RS }
+//RS 
+//RS fn data_loader_state_id(
+//RS     state: &DataPipelineState,
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<usize, Diagnostic> {
+//RS     let field = data_loader_state_field();
+//RS     let Some(CtValue::Int(id)) = struct_field(value, "DataLoader", &field) else {
+//RS         return Err(unsupported(
+//RS             "`DataLoader` carrier has no canonical state identity",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     if *id <= 0 {
+//RS         return Err(unsupported("`DataLoader` state identity is invalid", span));
+//RS     }
+//RS     let id = usize::try_from(*id)
+//RS         .map_err(|_| unsupported("`DataLoader` state identity is invalid", span))?;
+//RS     state
+//RS         .loaders
+//RS         .get(id - 1)
+//RS         .and_then(Option::as_ref)
+//RS         .map(|_| id)
+//RS         .ok_or_else(|| unsupported("`DataLoader` state identity is stale", span))
+//RS }
+//RS 
+//RS fn data_stream_state_id(
+//RS     state: &DataPipelineState,
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<usize, Diagnostic> {
+//RS     let field = data_stream_state_field();
+//RS     let Some(CtValue::Int(id)) = struct_field(value, "DataStream", &field) else {
+//RS         return Err(unsupported(
+//RS             "`DataStream` carrier has no canonical state identity",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     if *id <= 0 {
+//RS         return Err(unsupported("`DataStream` state identity is invalid", span));
+//RS     }
+//RS     let id = usize::try_from(*id)
+//RS         .map_err(|_| unsupported("`DataStream` state identity is invalid", span))?;
+//RS     state
+//RS         .streams
+//RS         .get(id - 1)
+//RS         .and_then(Option::as_ref)
+//RS         .map(|_| id)
+//RS         .ok_or_else(|| unsupported("`DataStream` state identity is stale", span))
+//RS }
+//RS 
+//RS fn data_loader_string_arg(
+//RS     args: &[CtValue],
+//RS     index: usize,
+//RS     name: &str,
+//RS     span: Span,
+//RS ) -> Result<String, Diagnostic> {
+//RS     args.get(index)
+//RS         .ok_or_else(|| unsupported(&format!("`data.{name}()` is missing argument {}", index + 1), span))
+//RS         .and_then(|value| as_string(value, span).map(str::to_string))
+//RS }
+//RS 
+//RS fn data_loader_parameters(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<Vec<String>, Diagnostic> {
+//RS     expect_list(value, "database", span)?.iter().map(|item| match item {
+//RS         CtValue::Str(value) => Ok(value.clone()),
+//RS         _ => Err(unsupported("`data.database()` parameters need String values", span)),
+//RS     }).collect()
+//RS }
+//RS 
+//RS fn data_loader_authority(
+//RS     scope: &str,
+//RS     revision: &str,
+//RS ) -> Result<jet_foundation::PreludeDataFlow::Authority, CtValue> {
+//RS     jet_foundation::PreludeDataFlow::authority(scope, revision)
+//RS         .map_err(data_loader_kernel_failure)
+//RS }
+//RS 
+//RS fn data_loader_new(
+//RS     registry: &mut DataPipelineState,
+//RS     kind: jet_foundation::PreludeDataFlow::LoaderKind,
+//RS     locator: String,
+//RS     member: String,
+//RS     parameters: Vec<String>,
+//RS     format: String,
+//RS     limits: DataKernelLimits,
+//RS     authority: jet_foundation::PreludeDataFlow::Authority,
+//RS     payload: Option<Vec<u8>>,
+//RS     decode_ty: Option<Type>,
+//RS     seed: Option<CtValue>,
+//RS ) -> Result<CtValue, CtValue> {
+//RS     let mut state = match jet_foundation::PreludeDataFlow::new_loader(
+//RS         kind,
+//RS         locator,
+//RS         member,
+//RS         parameters,
+//RS         format,
+//RS         limits,
+//RS         authority,
+//RS     ) {
+//RS         Ok(state) => state,
+//RS         Err(error) => return Err(data_loader_kernel_failure(error)),
+//RS     };
+//RS     if let Some(payload) = payload {
+//RS         if let Err(error) = jet_foundation::PreludeDataFlow::check_payload(
+//RS             &state.limits,
+//RS             payload.len(),
+//RS             "data.value",
+//RS         ) {
+//RS             return Err(data_loader_kernel_failure(error));
+//RS         }
+//RS         state.payload = Some(payload);
+//RS     }
+//RS     Ok(store_data_loader(
+//RS         registry,
+//RS         ComptimeLoader {
+//RS             state,
+//RS             seed,
+//RS             decode_ty,
+//RS         },
+//RS     ))
+//RS }
+//RS fn loader_type_from_resolved(value: Option<&Type>) -> Option<Type> {
+//RS     match value? {
+//RS         Type::Result { ok, .. } | Type::Option(ok) => loader_type_from_resolved(Some(ok)),
+//RS         Type::Apply { name, args }
+//RS             if matches!(name.as_str(), "DataLoader" | "DataSnapshot" | "DataStream")
+//RS                 && args.len() == 1 =>
+//RS         {
+//RS             Some(args[0].clone())
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn typed_decode_failure_text(value: &CtValue) -> String {
+//RS     let CtValue::List(errors) = value else {
+//RS         return value.jet_show();
+//RS     };
+//RS     let reasons = errors
+//RS         .iter()
+//RS         .filter_map(|error| {
+//RS             let path = struct_field(error, "FieldError", "path").map(query_cell_text)?;
+//RS             let reason = struct_field(error, "FieldError", "reason").map(query_cell_text)?;
+//RS             Some(if path.is_empty() {
+//RS                 reason
+//RS             } else {
+//RS                 format!("{path}: {reason}")
+//RS             })
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     if reasons.is_empty() {
+//RS         value.jet_show()
+//RS     } else {
+//RS         reasons.join("; ")
+//RS     }
+//RS }
+//RS fn data_typed_tree(value: &CtValue) -> CtValue {
+//RS     match value {
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if type_name == "DataTree" && variant == "TypedText" => {
+//RS             super::JSONInterp::json_variant(
+//RS                 "Text",
+//RS                 args.first().map(|(_, value)| data_typed_tree(value)),
+//RS             )
+//RS         }
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if type_name == "DataTree" => CtValue::Enum {
+//RS             type_name: type_name.clone(),
+//RS             variant: variant.clone(),
+//RS             args: args
+//RS                 .iter()
+//RS                 .map(|(name, value)| (name.clone(), data_typed_tree(value)))
+//RS                 .collect(),
+//RS         },
+//RS         _ => value.clone(),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn data_dynamic_object(fields: Vec<(String, CtValue)>) -> CtValue {
+//RS     super::JSONInterp::json_variant(
+//RS         "Object",
+//RS         Some(CtValue::Struct {
+//RS             type_name: "JSONObject".to_string(),
+//RS             fields,
+//RS         }),
+//RS     )
+//RS }
+//RS 
+//RS fn loader_type_for_call(type_args: &[Type], resolved_ret: Option<&Type>) -> Option<Type> {
+//RS     type_args
+//RS         .first()
+//RS         .cloned()
+//RS         .or_else(|| loader_type_from_resolved(resolved_ret))
+//RS }
+//RS 
+//RS fn data_dynamic_array(values: Vec<CtValue>) -> CtValue {
+//RS     super::JSONInterp::json_variant("Array", Some(CtValue::List(values)))
+//RS }
+//RS 
+//RS fn data_dynamic_rows(tree: &CtValue) -> Vec<CtValue> {
+//RS     super::JSONInterp::json_payload(tree, "Array")
+//RS         .and_then(|value| match value {
+//RS             CtValue::List(values) => Some(values.clone()),
+//RS             _ => None,
+//RS         })
+//RS         .unwrap_or_else(|| vec![tree.clone()])
+//RS }
+//RS 
+//RS fn data_arrow_limits(
+//RS     limits: &DataKernelLimits,
+//RS ) -> Result<jet_foundation::ArrowData::ArrowLimits, CtValue> {
+//RS     let max_buffer_bytes = usize::try_from(limits.max_expansion_bytes).map_err(|_| {
+//RS         data_loader_failure(
+//RS             "Limit",
+//RS             "data.loader.parquet",
+//RS             "max_expansion_bytes cannot be represented by this target",
+//RS         )
+//RS     })?;
+//RS     let max_total_i64 = limits.max_total_bytes.unwrap_or_else(|| {
+//RS         limits
+//RS             .max_item_bytes
+//RS             .max(limits.max_expansion_bytes)
+//RS     });
+//RS     let max_total_bytes = usize::try_from(max_total_i64).map_err(|_| {
+//RS         data_loader_failure(
+//RS             "Limit",
+//RS             "data.loader.parquet",
+//RS             "max_total_bytes cannot be represented by this target",
+//RS         )
+//RS     })?;
+//RS     Ok(jet_foundation::ArrowData::ArrowLimits {
+//RS         max_rows: limits.max_output_rows,
+//RS         max_columns: 1024,
+//RS         max_children: limits.max_depth,
+//RS         max_dictionary_values: limits.max_output_rows,
+//RS         max_buffer_bytes,
+//RS         max_total_bytes,
+//RS     })
+//RS }
+//RS 
+//RS fn data_arrow_tree_value(value: jet_foundation::DataTree::DataTree) -> CtValue {
+//RS     match value {
+//RS         jet_foundation::DataTree::DataTree::Null => super::JSONInterp::json_variant("Null", None),
+//RS         jet_foundation::DataTree::DataTree::Bool(value) => {
+//RS             super::JSONInterp::json_variant("Bool", Some(CtValue::Bool(value)))
+//RS         }
+//RS         jet_foundation::DataTree::DataTree::Int(value) => {
+//RS             super::JSONInterp::json_variant("Int", Some(CtValue::Int(value)))
+//RS         }
+//RS         jet_foundation::DataTree::DataTree::Float(value) => super::JSONInterp::json_variant(
+//RS             "Float",
+//RS             Some(CtValue::Float(CtFloat::f64(value))),
+//RS         ),
+//RS         jet_foundation::DataTree::DataTree::Number(value) => {
+//RS             super::JSONInterp::json_variant("Number", Some(CtValue::Str(value)))
+//RS         }
+//RS         jet_foundation::DataTree::DataTree::TypedText(value)
+//RS         | jet_foundation::DataTree::DataTree::Text(value) => {
+//RS             super::JSONInterp::json_variant("Text", Some(CtValue::Str(value)))
+//RS         }
+//RS         jet_foundation::DataTree::DataTree::Bytes(value) => {
+//RS             super::JSONInterp::json_variant("Bytes", Some(CtValue::Bytes(value)))
+//RS         }
+//RS         jet_foundation::DataTree::DataTree::Array(values) => data_dynamic_array(
+//RS             values
+//RS                 .into_iter()
+//RS                 .map(data_arrow_tree_value)
+//RS                 .collect(),
+//RS         ),
+//RS         jet_foundation::DataTree::DataTree::Object(fields) => data_dynamic_object(
+//RS             fields
+//RS                 .into_iter()
+//RS                 .map(|(key, value)| (key, data_arrow_tree_value(value)))
+//RS                 .collect(),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn data_arrow_tree_failure(error: jet_foundation::ArrowData::ArrowError) -> CtValue {
+//RS     let kind = match error.kind {
+//RS         jet_foundation::ArrowData::ArrowErrorCode::Limit => "Limit",
+//RS         jet_foundation::ArrowData::ArrowErrorCode::ProducerFailure => "Bridge",
+//RS         _ => "Decode",
+//RS     };
+//RS     data_loader_failure(kind, "data.loader.parquet", error.to_string())
+//RS }
+//RS 
+//RS fn data_arrow_tree(
+//RS     payload: &[u8],
+//RS     limits: &DataKernelLimits,
+//RS ) -> Result<CtValue, CtValue> {
+//RS     let arrow_limits = data_arrow_limits(limits)?;
+//RS     jet_foundation::ArrowFileReader::read_tree(
+//RS         jet_foundation::ArrowFileReader::FORMAT_PARQUET,
+//RS         payload,
+//RS         &arrow_limits,
+//RS     )
+//RS     .map(data_arrow_tree_value)
+//RS     .map_err(data_arrow_tree_failure)
+//RS }
+//RS 
+//RS fn data_dynamic_tree(
+//RS     payload: &[u8],
+//RS     format: &str,
+//RS     limits: &DataKernelLimits,
+//RS ) -> Result<CtValue, CtValue> {
+//RS     if format == "parquet" {
+//RS         return data_arrow_tree(payload, limits);
+//RS     }
+//RS     if format == "arrow" {
+//RS         return Err(data_loader_failure(
+//RS             "Bridge",
+//RS             "data.loader",
+//RS             "Arrow IPC has a separate provider boundary; Parquet is the registered reader",
+//RS         ));
+//RS     }
+//RS     let text = String::from_utf8(payload.to_vec()).map_err(|error| {
+//RS         data_loader_failure(
+//RS             "Decode",
+//RS             "data.loader",
+//RS             format!("payload is not UTF-8: {error}"),
+//RS         )
+//RS     })?;
+//RS     let tree = match format {
+//RS         "json" => super::JSONInterp::parse_json_typed_ordered(&text).map_err(|error| {
+//RS             data_loader_failure(
+//RS                 "Decode",
+//RS                 "data.loader.json",
+//RS                 format!("invalid JSON (line {}): {}", error.line, error.message),
+//RS             )
+//RS         })?,
+//RS         "jsonl" => {
+//RS             let mut values = Vec::new();
+//RS             for (line_index, line) in text.lines().enumerate() {
+//RS                 let line = line.trim();
+//RS                 if line.is_empty() {
+//RS                     continue;
+//RS                 }
+//RS                 if values.len() as i64 >= limits.max_output_rows {
+//RS                     return Err(data_loader_failure(
+//RS                         "Limit",
+//RS                         "data.loader.jsonl",
+//RS                         format!("max_output_rows {} exceeded", limits.max_output_rows),
+//RS                     ));
+//RS                 }
+//RS                 let value = super::JSONInterp::parse_json_typed_ordered(line).map_err(|error| {
+//RS                     data_loader_failure(
+//RS                         "Decode",
+//RS                         "data.loader.jsonl",
+//RS                         format!(
+//RS                             "invalid JSONL record at line {} (line {}): {}",
+//RS                             line_index + 1,
+//RS                             error.line,
+//RS                             error.message
+//RS                         ),
+//RS                     )
+//RS                 })?;
+//RS                 values.push(value);
+//RS             }
+//RS             data_dynamic_array(values)
+//RS         }
+//RS         "csv" => {
+//RS             let records = super::EncodingLite::csv_parse(&text, ",", false, false)
+//RS                 .map_err(|reason| data_loader_failure("Decode", "data.loader.csv", reason))?;
+//RS             let Some(header) = records.first() else {
+//RS                 return Ok(data_dynamic_array(Vec::new()));
+//RS             };
+//RS             let mut header_names = std::collections::BTreeSet::new();
+//RS             for name in &header.fields {
+//RS                 if let Err(error) =
+//RS                     jet_foundation::PreludeDataFlow::validate_public_text("CSV header", name, false)
+//RS                 {
+//RS                     return Err(data_loader_kernel_failure(error));
+//RS                 }
+//RS                 if !header_names.insert(name.clone()) {
+//RS                     return Err(data_loader_failure(
+//RS                         "Decode",
+//RS                         "data.loader.csv",
+//RS                         format!("duplicate CSV header `{name}`"),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             let mut values = Vec::new();
+//RS             for record in records.iter().skip(1) {
+//RS                 if values.len() as i64 >= limits.max_output_rows {
+//RS                     return Err(data_loader_failure(
+//RS                         "Limit",
+//RS                         "data.loader.csv",
+//RS                         format!("max_output_rows {} exceeded", limits.max_output_rows),
+//RS                     ));
+//RS                 }
+//RS                 if record.fields.len() > header.fields.len() {
+//RS                     return Err(data_loader_failure(
+//RS                         "Decode",
+//RS                         "data.loader.csv",
+//RS                         format!(
+//RS                             "CSV row has {} fields; header has {}",
+//RS                             record.fields.len(),
+//RS                             header.fields.len()
+//RS                         ),
+//RS                     ));
+//RS                 }
+//RS                 let fields = header
+//RS                     .fields
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(index, name)| {
+//RS                         (
+//RS                             name.clone(),
+//RS                             record
+//RS                                 .fields
+//RS                                 .get(index)
+//RS                                 .map(|value| {
+//RS                                     super::JSONInterp::json_variant(
+//RS                                         "TypedText",
+//RS                                         Some(CtValue::Str(value.clone())),
+//RS                                     )
+//RS                                 })
+//RS                                 .unwrap_or_else(|| super::JSONInterp::json_variant("Null", None)),
+//RS                         )
+//RS                     })
+//RS                     .collect();
+//RS                 values.push(data_dynamic_object(fields));
+//RS             }
+//RS             data_dynamic_array(values)
+//RS         }
+//RS         "parquet" | "arrow" => {
+//RS             return Err(data_loader_bridge("data.loader"));
+//RS         }
+//RS         _ => {
+//RS             return Err(data_loader_failure(
+//RS                 "Bridge",
+//RS                 "data.loader",
+//RS                 format!("format `{format}` is provider-owned; import its package"),
+//RS             ));
+//RS         }
+//RS     };
+//RS     if data_dynamic_rows(&tree).len() as i64 > limits.max_output_rows {
+//RS         return Err(data_loader_failure(
+//RS             "Limit",
+//RS             "data.loader",
+//RS             format!("max_output_rows {} exceeded", limits.max_output_rows),
+//RS         ));
+//RS     }
+//RS     Ok(tree)
+//RS }
+//RS 
+// END-PORT-PENDING 0580 crates/jet-comptime/src/Comptime/DataPipeline.rs:1-1822
+

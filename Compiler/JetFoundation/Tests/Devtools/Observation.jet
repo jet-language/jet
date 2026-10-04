@@ -1,0 +1,128 @@
+// Devtools.rs:2083-2149 original tests and exact protocol closure witnesses.
+#Test("envelope_uses_one_canonical_wire_shape_and_payload_is_opt_in") {
+    envelope := JetDevtoolsEnvelope.new("session", U64{10})
+    body :: JetDevtoolsEventBody.Query{name: "orders", state: .Fresh, footprint: U64{3}}
+    event :: JetDevtoolsEvent.try_new(U64{11}, "test", body) ?? panic(err)
+    _ :: &envelope.push(event)
+    &envelope.set_selection(Val(JetDevtoolsSelection.new("Queries", Val("orders"))))
+    events := envelope.events()
+    first :: &events.next() ?? panic("event")
+    assert_eq(first.sequence(), U64{1})
+    assert_eq(first.payload_json(), None)
+    expected :: `{"protocol":"jet.devtools.v1","session_id":"session","started_at_ms":10,"events":[{"sequence":1,"timestamp_ms":11,"source":"test","kind":"Query","entity":"orders","fields":{"name":"orders","state":"fresh","footprint":3},"payload":null}],"selection":{"panel_id":"Queries","item_key":"orders"},"cursor":1}`
+    assert_eq(envelope.serialize() ?? panic(err), expected)
+}
+#Test("typed_publication_attaches_opt_in_payload_without_reframing_envelope") {
+    envelope := JetDevtoolsEnvelope.new("game", U64{1})
+    body :: JetDevtoolsEventBody.Frame{name: "scene", status: "ready", duration_ms: U64{1}}
+    event :: JetDevtoolsEvent.try_new(U64{2}, "game", body) ?? panic(err)
+    payload :: JetDevtoolsPayload.one("index", JetDevtoolsValue.Int(I64{1}))
+    published :: ^event.publish(payload) ?? panic(err)
+    _ :: &envelope.push(published)
+    json :: envelope.serialize() ?? panic(err)
+    assert(json.contains("\"protocol\":\"jet.devtools.v1\""))
+    assert(json.contains(`"payload":{"fields":{"index":1}}`))
+}
+#Test("state_ring_returns_the_newest_past_cursor_and_drops_oldest") {
+    ring := JetDevtoolsStateRing.with_capacity(U64{2})
+    cursors :: [U64]{U64{10}, U64{20}, U64{30}}
+    loop cursor in cursors {
+        store :: [JetDevtoolsStateEntry]{JetDevtoolsStateEntry.new("cart", "ready", cursor)}
+        queries :: [JetDevtoolsStateEntry]{JetDevtoolsStateEntry.new("orders", "fresh", cursor)}
+        snapshot :: JetDevtoolsStateSnapshot.new(cursor, store, queries)
+        _ :: &ring.push(snapshot) ?? panic(err)
+    }
+    assert_eq(ring.at(U64{10}), None)
+    past :: ring.at(U64{25}) ?? panic("past cursor")
+    assert_eq(past.cursor, U64{20})
+    store :: ring.store_at(U64{30}) ?? panic("store")
+    assert_eq(store[0].revision, U64{30})
+    queries :: ring.query_cache_at(U64{30}) ?? panic("query cache")
+    assert_eq(queries[0].key, "orders")
+}
+#Test("Devtools framing is not a second JSON parser and preserves supplied bytes") {
+    fragments :: [String]{`{not_json}`, `{}{}`, ` {"x":"\q"} `}
+    loop fragment in fragments {
+        event :: JetDevtoolsEvent.from_parts(U64{0}, "host", "custom", "entity", ~fragment) ?? panic(err)
+        assert_eq(event.fields_json(), fragment)
+        assert_eq(event.body(), None)
+    }
+    bad :: [String]{"[]", `{`, `{{}`, `{"x":"unterminated}`, "{{\"x\":\"\n\"}}", "{{\"x\":\"\u0085\"}}"}
+    loop fragment in bad {
+        if JetDevtoolsEvent.from_parts(U64{0}, "host", "custom", "entity", ~fragment) == { .Err(_) -> {}, else -> panic("bad framing accepted") }
+    }
+    body :: JetDevtoolsEventBody.Query{name: "orders", state: .Fresh, footprint: U64{3}}
+    event :: JetDevtoolsEvent.from_wire(U64{9}, U64{11}, "host", ~body, `{supplied}`, None) ?? panic(err)
+    assert_eq(event.fields_json(), `{supplied}`)
+    assert_eq(event.sequence(), U64{9})
+    retained :: event.body() ?? panic("typed body")
+    assert_eq(retained, body)
+}
+#Test("Devtools quote retains original DEL C1 and backspace form") {
+    out := [U8]{}
+    _ :: render_text("\u0008\u000c\u007f\u0085\u009f\n\r\t\"\\é", &out) ?? panic(err)
+    actual :: String.from_bytes(out) ?? panic("UTF8")
+    expected :: "\"\\u0008\\u000c\\u007f\\u0085\\u009f\\n\\r\\t\\\"\\\\é\""
+    assert_eq(actual, expected)
+}
+#Test("Devtools ring ingest rejects identity before mutation and preserves payload privacy") {
+    policy := JetDevtoolsPolicy.development()
+    policy.max_events = U64{1}
+    destination := JetDevtoolsEnvelope.with_policy("session", U64{0}, policy)
+    body :: JetDevtoolsEventBody.Frame{name: "frame", status: "ready", duration_ms: U64{1}}
+    plain :: JetDevtoolsEvent.try_new(U64{1}, "source", ~body) ?? panic(err)
+    private_copy :: ~plain
+    private :: ^private_copy.publish(JetDevtoolsPayload.one("value", JetDevtoolsValue.Int(I64{1}))) ?? panic(err)
+    assert_eq(&destination.push(private), U64{1})
+    assert_eq(&destination.push(~plain), U64{2})
+    assert(destination.truncated)
+    assert(destination.privacy.published_payloads)
+    assert_eq(destination.oldest_sequence(), Val(U64{2}))
+    foreign := JetDevtoolsEnvelope.new("other", U64{0})
+    _ :: &foreign.push(~plain)
+    if &destination.ingest(foreign) == { .Err(error) -> assert_eq(error, "jet.devtools.v1 envelope session identity mismatch"), else -> panic("foreign session accepted") }
+    assert_eq(destination.latest_sequence(), Val(U64{2}))
+    incoming := JetDevtoolsEnvelope.new("session", U64{0})
+    _ :: &incoming.push(~plain)
+    incoming.source_identity = Val(JetDevtoolsSourceIdentityFact.new(Val("é".repeat(8193)), None, None, None))
+    if &destination.ingest(incoming) == { .Err(_) -> {}, else -> panic("invalid identity accepted") }
+    assert_eq(destination.latest_sequence(), Val(U64{2}))
+    incoming.source_identity = None
+    assert_eq(&destination.ingest(incoming) ?? panic(err), 1)
+    assert_eq(destination.latest_sequence(), Val(U64{3}))
+    assert_eq(destination.cursor(), Val(U64{1}))
+}
+#Test("Devtools payload sorts keys and duplicate error precedes later validation") {
+    fields :: [JetDevtoolsField]{JetDevtoolsField.new("z", .Text("\"\\\n")), JetDevtoolsField.new("a", .Bool(true))}
+    payload :: JetDevtoolsPayload.new(fields)
+    body :: JetDevtoolsEventBody.Frame{name: "scene", status: "ready", duration_ms: U64{1}}
+    event :: JetDevtoolsEvent.try_new(U64{0}, "game", body) ?? panic(err)
+    published_copy :: ~event
+    published :: ^published_copy.publish(payload) ?? panic(err)
+    actual :: published.payload_json() ?? panic("payload")
+    expected :: `{"fields":{"a":true,"z":"\"\\\n"}}`
+    assert_eq(actual, expected)
+    duplicates :: [JetDevtoolsField]{JetDevtoolsField.new("x", .Bool(true)), JetDevtoolsField.new("", .Bool(false)), JetDevtoolsField.new("x", .Bool(false))}
+    duplicate_copy :: ~event
+    if ^duplicate_copy.publish(JetDevtoolsPayload.new(duplicates)) == { .Err(error) -> assert_eq(error, "jet.devtools.v1 payload contains duplicate field `x`"), else -> panic("duplicate accepted") }
+}
+#Test("Devtools method ABI retains timestamps selection freshness and explicit payload") {
+    event :: JetDevtoolsEvent.from_parts_with_payload(U64{18446744073709551615}, "host", "custom", "id", `{facts}`, Val(`{value}`)) ?? panic(err)
+    assert_eq(event.timestamp_ms, U64{18446744073709551615})
+    assert_eq(event.kind(), "custom")
+    assert_eq(event.fields_json(), `{facts}`)
+    assert_eq(event.payload_json(), Val(`{value}`))
+    envelope := JetDevtoolsEnvelope.new("session", U64{0})
+    &envelope.set_freshness(JetDevtoolsFreshnessFact.stale(U64{42}))
+    &envelope.set_selection(Val(JetDevtoolsSelection.new("Store", None)))
+    &envelope.set_cursor(Val(U64{9}))
+    selection :: envelope.view().selection() ?? panic("selection")
+    assert_eq(selection.panel_id, "Store")
+    assert_eq(envelope.view().cursor(), Val(U64{9}))
+    assert_eq(envelope.freshness.state, .Stale)
+    assert_eq(envelope.freshness.observed_at_ms, U64{42})
+    assert(!envelope.reset && !envelope.truncated)
+    out := [U8]{}
+    _ :: render_value(JetDevtoolsValue.Int(I64{1}), &out) ?? panic(err)
+    assert_eq(String.from_bytes(out) ?? panic("UTF8"), "1")
+}

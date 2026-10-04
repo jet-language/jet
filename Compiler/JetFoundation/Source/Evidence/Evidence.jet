@@ -1,0 +1,559 @@
+// Canonical typed evidence; Rust jet-foundation/Evidence.rs:12–1300.
+// Evidence never implies a stronger claim than the producer actually observed.
+// Planned canonical Rust str Debug writer: explicit publication gate; never
+// substitute JSON escaping (NUL, DEL, C1 and grapheme extension differ).
+use core.text.runtime.kernel_escape_debug.[debug_str_into]
+EVIDENCE_REPORT_SCHEMA :: "jet.evidence"
+EVIDENCE_REPORT_VERSION :: U16{3}
+EVIDENCE_REPORT_MAGIC :: "JETEVID3"
+EVIDENCE_REPORT_ENV :: "JET_EVIDENCE_REPORT"
+EVIDENCE_REPORT_ID_ENV :: "JET_EVIDENCE_REPORT_ID"
+EVIDENCE_TOOLCHAIN_ENV :: "JET_EVIDENCE_TOOLCHAIN"
+EVIDENCE_TARGET_ENV :: "JET_EVIDENCE_TARGET"
+EVIDENCE_PROFILE_ENV :: "JET_EVIDENCE_PROFILE"
+EVIDENCE_SOURCE_REVISION_ENV :: "JET_EVIDENCE_SOURCE_REVISION"
+EVIDENCE_BUILD_REVISION_ENV :: "JET_EVIDENCE_BUILD_REVISION"
+EVIDENCE_REVISION_ENV :: "JET_EVIDENCE_REVISION"
+
+pub enum EvidenceProducerKind { Test Prove Compile Runtime }
+pub enum EvidenceKind { Unit Contract Runtime Property Doctest }
+pub enum EvidenceFacet { All Refinements Effects Taint Contracts Tests Budgets Replay Solver }
+pub enum EvidenceOutcome { Proved Generated Passed Failed Checked Unchecked Unavailable Incomplete NotObserved Skipped Error }
+pub enum EvidenceExpectation { Ordinary ExpectedFailure }
+pub enum EvidenceCompleteness { Complete Incomplete(String) Unavailable(String) }
+pub struct EvidenceIdentity { pub report_id: String, pub claim_id: String, pub evidence_id: String }
+pub struct EvidenceSource { pub path: String, pub line: U32, pub column: U32 }
+pub struct EvidenceBuild { pub toolchain: String, pub target: String, pub profile: String }
+pub struct EvidenceRevision { pub source: String, pub build: String, pub revision: String }
+pub struct EvidenceAttachment { pub name: String, pub value: String }
+pub struct EvidenceDiagnostic { pub code: String, pub message: String, pub source: EvidenceSource? }
+pub struct EvidenceChainLink { pub evidence_id: String, pub relation: String }
+pub struct EvidenceRecord {
+    pub identity: EvidenceIdentity
+    pub kind: EvidenceKind
+    pub facet: EvidenceFacet
+    pub producer: EvidenceProducerKind
+    pub outcome: EvidenceOutcome
+    pub expectation: EvidenceExpectation
+    pub count: U64
+    pub source: EvidenceSource
+    pub build: EvidenceBuild
+    pub revision: EvidenceRevision
+    pub detail: String
+    pub attachments: [EvidenceAttachment]
+    pub diagnostics: [EvidenceDiagnostic]
+    pub completeness: EvidenceCompleteness
+    pub chain: [EvidenceChainLink]
+    pub derivation: MIRDerivationRef?
+}
+pub struct EvidenceReport {
+    pub schema_version: U16
+    pub identity: EvidenceIdentity
+    pub producer: EvidenceProducerKind
+    pub source: EvidenceSource
+    pub build: EvidenceBuild
+    pub revision: EvidenceRevision
+    pub records: [EvidenceRecord]
+    pub derivations: [DerivationRecord]
+    pub attachments: [EvidenceAttachment]
+    pub diagnostics: [EvidenceDiagnostic]
+    pub completeness: EvidenceCompleteness
+}
+pub struct EvidenceProjection {
+    pub evidence_id: String
+    pub claim_id: String
+    pub kind: EvidenceKind
+    pub facet: EvidenceFacet
+    pub producer: EvidenceProducerKind
+    pub expectation: EvidenceExpectation
+    pub outcome: EvidenceOutcome
+    pub source: EvidenceSource
+    pub completeness: EvidenceCompleteness
+    pub chain: [EvidenceChainLink]
+    pub derivation: MIRDerivationRef?
+}
+#Error
+pub enum EvidenceMergeError {
+    Empty
+    SchemaConflict(expected: U16, found: U16)
+    IdentityConflict(field: String, expected: String, found: String)
+    RecordConflict(String)
+    MissingDerivation(evidence_id: String, derivation_id: String)
+    InvalidDerivation(String)
+    InvalidExpectation(expectation: EvidenceExpectation, outcome: EvidenceOutcome)
+}
+#Error
+pub struct EvidenceCodecError { pub message: String }
+#Error
+pub struct EvidenceExpectationError { pub expectation: EvidenceExpectation, pub outcome: EvidenceOutcome }
+
+pub fn evidence_producer_code(value: EvidenceProducerKind) -> Int Never! {
+    if value == {
+        .Test -> 0
+        .Prove -> 1
+        .Compile -> 2
+        .Runtime -> 3
+    }
+}
+pub fn evidence_producer_from_code(code: Int) -> EvidenceProducerKind? Never! {
+    if code == {
+        0 -> Val(EvidenceProducerKind.Test)
+        1 -> Val(EvidenceProducerKind.Prove)
+        2 -> Val(EvidenceProducerKind.Compile)
+        3 -> Val(EvidenceProducerKind.Runtime)
+        else -> None
+    }
+}
+pub fn evidence_producer_name(value: EvidenceProducerKind) -> String Never! {
+    if value == {
+        .Test -> "jet-test"
+        .Prove -> "jet-prove"
+        .Compile -> "jet-compile"
+        .Runtime -> "jet-runtime"
+    }
+}
+pub fn evidence_kind_code(value: EvidenceKind) -> Int Never! {
+    if value == {
+        .Unit -> 0
+        .Contract -> 1
+        .Runtime -> 2
+        .Property -> 3
+        .Doctest -> 4
+    }
+}
+pub fn evidence_kind_from_code(code: Int) -> EvidenceKind? Never! {
+    if code == {
+        0 -> Val(EvidenceKind.Unit)
+        1 -> Val(EvidenceKind.Contract)
+        2 -> Val(EvidenceKind.Runtime)
+        3 -> Val(EvidenceKind.Property)
+        4 -> Val(EvidenceKind.Doctest)
+        else -> None
+    }
+}
+pub fn evidence_kind_name(value: EvidenceKind) -> String Never! {
+    if value == {
+        .Unit -> "unit"
+        .Contract -> "contract"
+        .Runtime -> "runtime"
+        .Property -> "property"
+        .Doctest -> "doctest"
+    }
+}
+pub fn evidence_facet_code(value: EvidenceFacet) -> Int Never! {
+    if value == {
+        .All -> 0
+        .Refinements -> 1
+        .Effects -> 2
+        .Taint -> 3
+        .Contracts -> 4
+        .Tests -> 5
+        .Budgets -> 6
+        .Replay -> 7
+        .Solver -> 8
+    }
+}
+pub fn evidence_facet_from_code(code: Int) -> EvidenceFacet? Never! {
+    if code == {
+        0 -> Val(EvidenceFacet.All)
+        1 -> Val(EvidenceFacet.Refinements)
+        2 -> Val(EvidenceFacet.Effects)
+        3 -> Val(EvidenceFacet.Taint)
+        4 -> Val(EvidenceFacet.Contracts)
+        5 -> Val(EvidenceFacet.Tests)
+        6 -> Val(EvidenceFacet.Budgets)
+        7 -> Val(EvidenceFacet.Replay)
+        8 -> Val(EvidenceFacet.Solver)
+        else -> None
+    }
+}
+pub fn evidence_facet_name(value: EvidenceFacet) -> String Never! {
+    if value == {
+        .All -> "all"
+        .Refinements -> "refinements"
+        .Effects -> "effects"
+        .Taint -> "taint"
+        .Contracts -> "contracts"
+        .Tests -> "tests"
+        .Budgets -> "budgets"
+        .Replay -> "replay"
+        .Solver -> "solver"
+    }
+}
+pub fn evidence_facet_for_kind(kind: EvidenceKind) -> EvidenceFacet Never! { if kind == EvidenceKind.Contract -> EvidenceFacet.Contracts else -> EvidenceFacet.Tests }
+pub fn evidence_outcome_code(value: EvidenceOutcome) -> Int Never! {
+    if value == {
+        .Proved -> 0
+        .Generated -> 1
+        .Passed -> 2
+        .Failed -> 3
+        .Checked -> 4
+        .Unchecked -> 5
+        .Unavailable -> 6
+        .Incomplete -> 7
+        .NotObserved -> 8
+        .Skipped -> 9
+        .Error -> 10
+    }
+}
+pub fn evidence_outcome_from_code(code: Int) -> EvidenceOutcome? Never! {
+    if code == {
+        0 -> Val(EvidenceOutcome.Proved)
+        1 -> Val(EvidenceOutcome.Generated)
+        2 -> Val(EvidenceOutcome.Passed)
+        3 -> Val(EvidenceOutcome.Failed)
+        4 -> Val(EvidenceOutcome.Checked)
+        5 -> Val(EvidenceOutcome.Unchecked)
+        6 -> Val(EvidenceOutcome.Unavailable)
+        7 -> Val(EvidenceOutcome.Incomplete)
+        8 -> Val(EvidenceOutcome.NotObserved)
+        9 -> Val(EvidenceOutcome.Skipped)
+        10 -> Val(EvidenceOutcome.Error)
+        else -> None
+    }
+}
+pub fn evidence_outcome_name(value: EvidenceOutcome) -> String Never! {
+    if value == {
+        .Proved -> "proved"
+        .Generated -> "generated"
+        .Passed -> "passed"
+        .Failed -> "failed"
+        .Checked -> "checked"
+        .Unchecked -> "unchecked"
+        .Unavailable -> "unavailable"
+        .Incomplete -> "incomplete"
+        .NotObserved -> "not_observed"
+        .Skipped -> "skipped"
+        .Error -> "error"
+    }
+}
+pub fn evidence_outcome_is_failure(value: EvidenceOutcome) -> Bool Never! { value == EvidenceOutcome.Failed || value == EvidenceOutcome.Error }
+pub fn evidence_outcome_is_incomplete(value: EvidenceOutcome) -> Bool Never! { value == EvidenceOutcome.Unavailable || value == EvidenceOutcome.Incomplete || value == EvidenceOutcome.NotObserved || value == EvidenceOutcome.Skipped }
+pub fn evidence_outcome_from_test_state(state: Int) -> EvidenceOutcome? Never! {
+    if state == {
+        0 -> Val(EvidenceOutcome.Passed)
+        1 -> Val(EvidenceOutcome.Failed)
+        2 -> Val(EvidenceOutcome.Skipped)
+        3 -> Val(EvidenceOutcome.Unavailable)
+        4 -> Val(EvidenceOutcome.Error)
+        else -> None
+    }
+}
+pub fn evidence_outcome_test_state(value: EvidenceOutcome) -> Int? Never! {
+    if value == {
+        .Passed -> Val(0)
+        .Failed -> Val(1)
+        .Skipped -> Val(2)
+        .Unavailable -> Val(3)
+        .Error -> Val(4)
+        else -> None
+    }
+}
+pub fn evidence_expectation_name(value: EvidenceExpectation) -> String Never! { if value == EvidenceExpectation.Ordinary -> "ordinary" else -> "expected_failure" }
+pub fn evidence_expectation_code(value: EvidenceExpectation) -> Int Never! { if value == EvidenceExpectation.Ordinary -> 0 else -> 1 }
+pub fn evidence_expectation_from_code(code: Int) -> EvidenceExpectation? Never! {
+    if code == {
+        0 -> Val(EvidenceExpectation.Ordinary)
+        1 -> Val(EvidenceExpectation.ExpectedFailure)
+        else -> None
+    }
+}
+pub fn evidence_expectation_validate(expectation: EvidenceExpectation, outcome: EvidenceOutcome) EvidenceExpectationError! {
+    if expectation == EvidenceExpectation.ExpectedFailure && outcome != EvidenceOutcome.Failed && outcome != EvidenceOutcome.Passed -> return Err(EvidenceExpectationError{expectation: expectation, outcome: outcome})
+    return
+}
+pub fn evidence_expectation_error_text(error: EvidenceExpectationError) -> String Never! { "evidence expectation {evidence_expectation_name(error.expectation)} cannot describe outcome {evidence_outcome_name(error.outcome)}" }
+pub fn evidence_merge_error_text(error: EvidenceMergeError) -> String Never! {
+    if error == {
+        .Empty -> "cannot merge an empty evidence report set"
+        .SchemaConflict(expected, found) -> "evidence report schema conflict: {expected} versus {found}"
+        .IdentityConflict(field, expected, found) -> "evidence report identity conflict for {field}: {expected} versus {found}"
+        .RecordConflict(id) -> "evidence record conflict for {id}"
+        .MissingDerivation(id, reason) -> "evidence record {id} references missing derivation {reason}"
+        .InvalidDerivation(message) -> "invalid derivation: {message}"
+        .InvalidExpectation(expectation, outcome) -> evidence_expectation_error_text(EvidenceExpectationError{expectation: expectation, outcome: outcome})
+    }
+}
+fn evidence_merge_error_from_expectation(error: EvidenceExpectationError) -> EvidenceMergeError Never! {
+    EvidenceMergeError.InvalidExpectation{expectation: error.expectation, outcome: error.outcome}
+}
+pub fn evidence_completeness_code(value: EvidenceCompleteness) -> Int Never! {
+    if value == {
+        .Complete -> 0
+        .Incomplete(_) -> 1
+        .Unavailable(_) -> 2
+    }
+}
+pub fn evidence_completeness_state(value: EvidenceCompleteness) -> String Never! {
+    if value == {
+        .Complete -> "complete"
+        .Incomplete(_) -> "incomplete"
+        .Unavailable(_) -> "unavailable"
+    }
+}
+pub fn evidence_completeness_reason(value: EvidenceCompleteness) -> String? Never! {
+    if value == {
+        .Complete -> None
+        .Incomplete(reason) -> Val(reason)
+        .Unavailable(reason) -> Val(reason)
+    }
+}
+pub fn evidence_completeness_merge(value: &EvidenceCompleteness, other: EvidenceCompleteness) Never! { if evidence_completeness_code(other) > evidence_completeness_code(value) -> value = ~other }
+pub fn evidence_source_empty() -> EvidenceSource Never! { EvidenceSource{path: "", line: U32{0}, column: U32{0}} }
+pub fn evidence_build_empty() -> EvidenceBuild Never! { EvidenceBuild{toolchain: "", target: "", profile: ""} }
+pub fn evidence_revision_empty() -> EvidenceRevision Never! { EvidenceRevision{source: "", build: "", revision: ""} }
+// Rust stable_token: reuse the identical canonical derivation framed hash.
+pub fn evidence_identity_for_record(report_id: String, claim_id: String, producer: EvidenceProducerKind, kind: EvidenceKind, source: EvidenceSource, count: U64, detail: String) -> EvidenceIdentity Never! {
+    state := DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
+    derivation_hash_frame(&state, report_id)
+    derivation_hash_frame(&state, claim_id)
+    derivation_hash_frame(&state, evidence_producer_name(producer))
+    derivation_hash_frame(&state, evidence_kind_name(kind))
+    derivation_hash_frame(&state, source.path)
+    derivation_hash_frame(&state, source.line.to_string())
+    derivation_hash_frame(&state, source.column.to_string())
+    derivation_hash_frame(&state, count.to_string())
+    derivation_hash_frame(&state, detail)
+    EvidenceIdentity{report_id: report_id, claim_id: claim_id, evidence_id: derivation_hash_hex(state)}
+}
+pub fn evidence_record_new(identity: EvidenceIdentity, kind: EvidenceKind, producer: EvidenceProducerKind, outcome: EvidenceOutcome, count: U64, source: EvidenceSource, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceRecord Never! {
+    completeness :: if {
+        outcome == EvidenceOutcome.Unavailable -> EvidenceCompleteness.Unavailable("producer unavailable")
+        evidence_outcome_is_incomplete(outcome) -> EvidenceCompleteness.Incomplete(evidence_outcome_name(outcome))
+        else -> EvidenceCompleteness.Complete
+    }
+    EvidenceRecord{identity: identity, kind: kind, facet: evidence_facet_for_kind(kind), producer: producer, outcome: outcome, expectation: EvidenceExpectation.Ordinary, count: count, source: source, build: build, revision: revision, detail: "", attachments: [EvidenceAttachment]{}, diagnostics: [EvidenceDiagnostic]{}, completeness: completeness, chain: [EvidenceChainLink]{}, derivation: None}
+}
+pub fn evidence_record_validate(record: EvidenceRecord) EvidenceExpectationError! { evidence_expectation_validate(record.expectation, record.outcome) }
+pub fn evidence_record_is_expected_failure(record: EvidenceRecord) -> Bool Never! { record.outcome == EvidenceOutcome.Failed && record.expectation == EvidenceExpectation.ExpectedFailure }
+pub fn evidence_record_is_unexpected_pass(record: EvidenceRecord) -> Bool Never! { record.outcome == EvidenceOutcome.Passed && record.expectation == EvidenceExpectation.ExpectedFailure }
+pub fn evidence_record_set_expectation(record: &EvidenceRecord, expectation: EvidenceExpectation) EvidenceExpectationError! {
+    evidence_expectation_validate(expectation, record.outcome)
+    record.expectation = expectation
+    return
+}
+pub fn evidence_record_with_expectation(record: ^EvidenceRecord, expectation: EvidenceExpectation) -> EvidenceRecord EvidenceExpectationError! {
+    value := record
+    evidence_record_set_expectation(&value, expectation)
+    Ok(value)
+}
+// Evidence.rs:708–727. Consuming builders retain the record's single owner;
+// the setters borrow only the canonical payload/reference.
+pub fn evidence_record_with_facet(record: ^EvidenceRecord, facet: EvidenceFacet) -> EvidenceRecord Never! {
+    value := record
+    value.facet = facet
+    value
+}
+pub fn evidence_record_set_facet(record: &EvidenceRecord, facet: EvidenceFacet) Never! { record.facet = facet }
+pub fn evidence_record_with_derivation(record: ^EvidenceRecord, derivation: DerivationRecord) -> EvidenceRecord Never! {
+    value := record
+    value.derivation = Val(derivation_record_reference(derivation))
+    value
+}
+pub fn evidence_record_set_derivation(record: &EvidenceRecord, derivation: DerivationRecord) Never! { record.derivation = Val(derivation_record_reference(derivation)) }
+pub fn evidence_record_clear_derivation(record: &EvidenceRecord) Never! { record.derivation = None }
+pub fn evidence_record_claim_name(record: EvidenceRecord) -> String Never! { record.identity.claim_id }
+// Despite its name the Rust accessor returns the source path, not detail.
+pub fn evidence_record_seed_or_detail(record: EvidenceRecord) -> String Never! { record.source.path }
+pub fn evidence_record_with_report_id(record: ^EvidenceRecord, report_id: String) -> EvidenceRecord Never! {
+    value := record
+    if value.identity.report_id != report_id -> value.identity = evidence_identity_for_record(report_id, value.identity.claim_id, value.producer, value.kind, value.source, value.count, value.detail)
+    value
+}
+pub fn evidence_record_state_code(record: EvidenceRecord) -> Int Never! {
+    evidence_outcome_test_state(record.outcome) ?? return if {
+        evidence_outcome_is_failure(record.outcome) -> 1
+        evidence_outcome_is_incomplete(record.outcome) -> 3
+        else -> 0
+    }
+}
+pub fn evidence_record_checked_derivation(record: EvidenceRecord) -> DerivationRecord Never! {
+    method :: if record.kind == EvidenceKind.Property -> MIRDerivationMethod.SampledAgreement else -> MIRDerivationMethod.RecordedExecution
+    value := derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), method, "evidence-record", [String]{record.identity.claim_id, record.identity.evidence_id}, derivation_identity(record.revision.source, record.revision.build, record.revision.revision, record.build.target))
+    if evidence_outcome_is_incomplete(record.outcome) || record.outcome == EvidenceOutcome.Unchecked -> value.disposition = MIRDerivationDisposition.Unavailable
+    value
+}
+pub fn evidence_report_new(report_id: String, producer: EvidenceProducerKind, source: EvidenceSource, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceReport Never! {
+    EvidenceReport{schema_version: EVIDENCE_REPORT_VERSION, identity: EvidenceIdentity{report_id: report_id, claim_id: "", evidence_id: ""}, producer: producer, source: source, build: build, revision: revision, records: [EvidenceRecord]{}, derivations: [DerivationRecord]{}, attachments: [EvidenceAttachment]{}, diagnostics: [EvidenceDiagnostic]{}, completeness: EvidenceCompleteness.Complete}
+}
+pub fn evidence_report_derivation(report: EvidenceReport, reference: MIRDerivationRef) -> DerivationRecord? Never! {
+    loop item in report.derivations {
+        if item.id == reference.id -> return Val(item)
+    }
+    None
+}
+pub fn evidence_report_intern_derivation(report: &EvidenceReport, derivation: ^DerivationRecord) -> MIRDerivationRef Never! {
+    loop item in report.derivations { if item.id == derivation.id -> return derivation_record_reference(item) }
+    reference :: derivation_record_reference(derivation)
+    &report.derivations.push(derivation)
+    &report.derivations.sort_by((left: DerivationRecord, right: DerivationRecord) -> left.id <=> right.id)
+    reference
+}
+pub fn evidence_report_invalidate_derivations(report: &EvidenceReport, current: DerivationIdentity) -> Int Never! {
+    count := 0
+    loop index in 0..<report.derivations.len() { if derivation_record_invalidate_if_identity_changed(&report.derivations[index], current) -> count += 1 }
+    count
+}
+pub fn evidence_report_add_record_with_derivation(report: &EvidenceReport, record: ^EvidenceRecord, derivation: ^DerivationRecord) EvidenceMergeError! {
+    if !derivation_record_validate(derivation) -> return Err(EvidenceMergeError.InvalidDerivation("derivation {derivation.id} has a non-canonical identity"))
+    value := record
+    value.derivation = Val(evidence_report_intern_derivation(&report, ^derivation))
+    evidence_report_add_record(&report, ^value)
+}
+pub fn evidence_report_add_record(report: &EvidenceReport, record: ^EvidenceRecord) EvidenceMergeError! {
+    if evidence_record_validate(record) == {
+        .Err(error) -> return Err(evidence_merge_error_from_expectation(error))
+        .Ok(_) -> {}
+    }
+    if record.identity.report_id != report.identity.report_id -> return Err(EvidenceMergeError.IdentityConflict{field: "report_id", expected: report.identity.report_id, found: record.identity.report_id})
+    if record.derivation == { .Val(reference) -> {
+        derivation :: evidence_report_derivation(report, reference) ?? return Err(EvidenceMergeError.MissingDerivation{evidence_id: record.identity.evidence_id, derivation_id: reference.id})
+        if derivation.identity != derivation_identity(record.revision.source, record.revision.build, record.revision.revision, record.build.target) -> return Err(EvidenceMergeError.InvalidDerivation("derivation {derivation.id} provenance does not match evidence {record.identity.evidence_id}"))
+    }
+    .None -> {} }
+    loop existing in report.records {
+        if existing.identity.evidence_id == record.identity.evidence_id {
+            if existing == record -> return
+            return Err(EvidenceMergeError.RecordConflict(record.identity.evidence_id))
+        }
+    }
+    evidence_completeness_merge(&report.completeness, record.completeness)
+    &report.records.push(record)
+    &report.records.sort_by((left: EvidenceRecord, right: EvidenceRecord) -> evidence_record_order(left, right))
+    return
+}
+pub fn evidence_report_try_from_records(report_id: String, records: ^[EvidenceRecord], derivations: ^[DerivationRecord]) -> EvidenceReport EvidenceMergeError! {
+    report := evidence_report_new(report_id, EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
+    if records.len() > 0 {
+        report.producer = records[0].producer
+        report.source = ~records[0].source
+        report.build = ~records[0].build
+        report.revision = ~records[0].revision
+    }
+    loop derivation_item in derivations {
+        if !derivation_record_validate(derivation_item) -> return Err(EvidenceMergeError.InvalidDerivation("derivation {derivation_item.id} has a non-canonical identity"))
+        _ :: evidence_report_intern_derivation(&report, ^derivation_item)
+    }
+    loop record_item in records {
+        if record_item.derivation != None -> evidence_report_add_record(&report, ^record_item)
+        else {
+            derivation :: evidence_record_checked_derivation(record_item)
+            evidence_report_add_record_with_derivation(&report, ^record_item, ^derivation)
+        }
+    }
+    Ok(report)
+}
+// Evidence.rs:842–852: infallible construction is an assertion, not a
+// fabricated empty report or a swallowed merge error.
+pub fn evidence_report_from_records(report_id: String, records: ^[EvidenceRecord]) -> EvidenceReport Never! {
+    evidence_report_try_from_records(report_id, ^records, [DerivationRecord]{}) ?? panic("evidence records in one report must share report identity")
+}
+pub fn evidence_report_merge(reports: [EvidenceReport]) -> EvidenceReport EvidenceMergeError! {
+    if reports.len() == 0 -> return Err(EvidenceMergeError.Empty)
+    merged := ~reports[0]
+    loop record in reports[0].records -> evidence_report_add_record(&merged, ~record)
+    loop index in 1..<reports.len() {
+        report :: reports[index]
+        if report.schema_version != merged.schema_version -> return Err(EvidenceMergeError.SchemaConflict{expected: merged.schema_version, found: report.schema_version})
+        evidence_check_identity("report_id", merged.identity.report_id, report.identity.report_id)
+        evidence_check_identity("claim_id", merged.identity.claim_id, report.identity.claim_id)
+        evidence_check_identity("evidence_id", merged.identity.evidence_id, report.identity.evidence_id)
+        evidence_completeness_merge(&merged.completeness, report.completeness)
+        loop item in report.derivations -> _ :: evidence_report_intern_derivation(&merged, ~item)
+        loop record in report.records -> evidence_report_add_record(&merged, ~record)
+        loop item in report.attachments { if !merged.attachments.contains(item) -> &merged.attachments.push(~item) }
+        loop item in report.diagnostics { if !merged.diagnostics.contains(item) -> &merged.diagnostics.push(~item) }
+    }
+    &merged.attachments.sort_by((left: EvidenceAttachment, right: EvidenceAttachment) -> evidence_attachment_order(left, right))
+    &merged.diagnostics.sort_by((left: EvidenceDiagnostic, right: EvidenceDiagnostic) -> evidence_diagnostic_order(left, right))
+    Ok(merged)
+}
+fn evidence_check_identity(field: String, expected: String, found: String) EvidenceMergeError! {
+    if expected != found {
+        expected_debug := [U8]{}
+        found_debug := [U8]{}
+        debug_str_into(&expected_debug, expected)
+        debug_str_into(&found_debug, found)
+        return Err(EvidenceMergeError.IdentityConflict{field: field, expected: String.from_bytes(^expected_debug) ?? panic("Debug preserves UTF-8"), found: String.from_bytes(^found_debug) ?? panic("Debug preserves UTF-8")})
+    }
+    return
+}
+pub fn evidence_report_is_complete(report: EvidenceReport) -> Bool Never! {
+    if report.completeness != EvidenceCompleteness.Complete -> return false
+    loop record in report.records { if record.completeness != EvidenceCompleteness.Complete -> return false }
+    true
+}
+pub fn evidence_report_query(report: EvidenceReport, claim_id: String?) -> [EvidenceProjection] Never! {
+    rows := [EvidenceProjection]{}
+    loop record in report.records {
+        if claim_id == {
+            .Val(claim) -> { if claim != record.identity.claim_id -> next }
+            .None -> {}
+        }
+        &rows.push(evidence_projection_from_record(record))
+    }
+    &rows.sort_by((left: EvidenceProjection, right: EvidenceProjection) -> evidence_projection_order(left, right))
+    rows
+}
+fn evidence_projection_from_record(record: EvidenceRecord) -> EvidenceProjection Never! {
+    chain := ~record.chain
+    &chain.sort_by((left: EvidenceChainLink, right: EvidenceChainLink) -> evidence_chain_order(left, right))
+    EvidenceProjection{evidence_id: record.identity.evidence_id, claim_id: record.identity.claim_id, kind: record.kind, facet: record.facet, producer: record.producer, expectation: record.expectation, outcome: record.outcome, source: record.source, completeness: record.completeness, chain: chain, derivation: record.derivation}
+}
+pub fn evidence_projection_name(row: EvidenceProjection) -> String Never! { "{row.source.path}:{row.source.line} via {evidence_producer_name(row.producer)}" }
+fn evidence_source_order(left: EvidenceSource, right: EvidenceSource) -> Ordering Never! {
+    order :: left.path <=> right.path
+    if order != Ordering.Equal -> return order
+    line :: left.line <=> right.line
+    if line != Ordering.Equal -> return line
+    left.column <=> right.column
+}
+fn evidence_record_order(left: EvidenceRecord, right: EvidenceRecord) -> Ordering Never! {
+    source :: evidence_source_order(left.source, right.source)
+    if source != Ordering.Equal -> return source
+    producer :: evidence_producer_code(left.producer) <=> evidence_producer_code(right.producer)
+    if producer != Ordering.Equal -> return producer
+    kind :: evidence_kind_code(left.kind) <=> evidence_kind_code(right.kind)
+    if kind != Ordering.Equal -> return kind
+    facet :: evidence_facet_code(left.facet) <=> evidence_facet_code(right.facet)
+    if facet != Ordering.Equal -> return facet
+    left.identity.evidence_id <=> right.identity.evidence_id
+}
+fn evidence_projection_order(left: EvidenceProjection, right: EvidenceProjection) -> Ordering Never! {
+    source :: evidence_source_order(left.source, right.source)
+    if source != Ordering.Equal -> return source
+    producer :: evidence_producer_code(left.producer) <=> evidence_producer_code(right.producer)
+    if producer != Ordering.Equal -> return producer
+    facet :: evidence_facet_code(left.facet) <=> evidence_facet_code(right.facet)
+    if facet != Ordering.Equal -> return facet
+    left.evidence_id <=> right.evidence_id
+}
+fn evidence_attachment_order(left: EvidenceAttachment, right: EvidenceAttachment) -> Ordering Never! {
+    (left.name <=> right.name).then(left.value <=> right.value)
+}
+fn evidence_chain_order(left: EvidenceChainLink, right: EvidenceChainLink) -> Ordering Never! {
+    (left.evidence_id <=> right.evidence_id).then(left.relation <=> right.relation)
+}
+fn evidence_diagnostic_order(left: EvidenceDiagnostic, right: EvidenceDiagnostic) -> Ordering Never! {
+    code :: left.code <=> right.code
+    if code != Ordering.Equal -> return code
+    message :: left.message <=> right.message
+    if message != Ordering.Equal -> return message
+    if left.source == {
+        .None -> {
+            if right.source == None -> return Ordering.Equal
+            return Ordering.Less
+        }
+        .Val(source) -> {
+            other :: right.source ?? return Ordering.Greater
+            return evidence_source_order(source, other)
+        }
+    }
+}
+// Sorted index vectors borrow payloads; canonical output never clones records.
+fn evidence_sorted_record_indices(report: EvidenceReport) -> [Int] Never! {
+    indices := [Int]{}
+    loop index in 0..<report.records.len() -> &indices.push(index)
+    &indices.sort_by((left: Int, right: Int) -> evidence_record_order(report.records[left], report.records[right]))
+    indices
+}

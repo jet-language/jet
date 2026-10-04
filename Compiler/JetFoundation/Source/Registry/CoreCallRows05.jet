@@ -1,0 +1,1863 @@
+// PORT-PENDING 0489 crates-jet-codegen-src-codegen-tir-lower-method-calls-slice-7394: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:7394-9252
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS                 Type::Apply { args, .. } => args.first().cloned(),
+//RS                 _ => None,
+//RS             }
+//RS             .unwrap_or_else(unit_type);
+//RS             let (op, ty) = match method {
+//RS                 "get" => (THandleOp::ReactiveGet, elem),
+//RS                 "set" => (THandleOp::ReactiveSet, unit_type()),
+//RS                 _ => unreachable!("is_reactive_method_name admitted only get/set"),
+//RS             };
+//RS             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+//RS             return TExpr {
+//RS                 ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op,
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     if recv_type.as_deref() == Some(crate::Syntax::TYPE_EFFECT)
+//RS         && is_reactive_effect_method_name(method, args.len())
+//RS     {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let ty = if method == "is_active" {
+//RS                 Type::Bool
+//RS             } else {
+//RS                 unit_type()
+//RS             };
+//RS             return TExpr {
+//RS                 ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::ReactiveEffectMethod {
+//RS                         method: method.to_string(),
+//RS                     },
+//RS                     args: Vec::new(),
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     if recv_type.as_deref() == Some("FfiCallbackEvent") && method == "stop" && args.is_empty() {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             TExpr {
+//RS                 ty: unit_type(),
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::FfiCallbackEventStop,
+//RS                     args: Vec::new(),
+//RS                 },
+//RS             }
+//RS         });
+//RS     }
+//RS     // D-EVENT1=D: Event/Hook/Subscription/EventScope/EventTrace methods.
+//RS     if is_event_handle_type(recv_type.as_deref()) && is_event_method_name(method, args.len()) {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let unit = unit_type();
+//RS             let result_ty = in_own_frame(|| {
+//RS                 if matches!(
+//RS                     (recv_type.as_deref(), method),
+//RS                     (Some("AsyncEvent"), "emit_async")
+//RS                 ) {
+//RS                     if let Some(ret) = resolved_ret {
+//RS                         return ret.clone();
+//RS                     }
+//RS                 }
+//RS                 match (recv_type.as_deref(), method) {
+//RS                     (Some("Event"), "emit") => Type::Named("EventTrace".to_string()),
+//RS                     (Some("AsyncEvent"), "emit_async") => match &recv_t.ty {
+//RS                         Type::Apply { args, .. } if args.len() >= 2 => Type::Apply {
+//RS                             name: "Task".to_string(),
+//RS                             args: vec![Type::Apply {
+//RS                                 name: "DispatchReport".to_string(),
+//RS                                 args: vec![args[1].clone()],
+//RS                             }],
+//RS                         },
+//RS                         _ => Type::Named("Unknown".to_string()),
+//RS                     },
+//RS                     (Some("Event"), "on" | "once" | "on_priority")
+//RS                     | (Some("AsyncEvent"), "on" | "once" | "on_priority")
+//RS                     | (Some("Hook"), "on" | "once" | "on_priority")
+//RS                     | (Some("DecisionHook"), "on" | "once" | "on_priority") => {
+//RS                         Type::Named("Subscription".to_string())
+//RS                     }
+//RS                     (Some("Hook"), "run") => match &recv_t.ty {
+//RS                         Type::Apply { args, .. } if args.len() >= 2 => args[1].clone(),
+//RS                         _ => Type::Named("Unknown".to_string()),
+//RS                     },
+//RS                     (Some("DecisionHook"), "run") => match &recv_t.ty {
+//RS                         Type::Apply { args, .. } if args.len() >= 2 => Type::Apply {
+//RS                             name: "HookOutcome".to_string(),
+//RS                             args: vec![args[0].clone(), args[1].clone()],
+//RS                         },
+//RS                         _ => Type::Named("Unknown".to_string()),
+//RS                     },
+//RS                     (Some("DispatchReport"), "failures") => {
+//RS                         let error = match &recv_t.ty {
+//RS                             Type::Apply { args, .. } => {
+//RS                                 args.first().cloned().unwrap_or(Type::String)
+//RS                             }
+//RS                             _ => Type::String,
+//RS                         };
+//RS                         Type::List(Box::new(Type::Apply {
+//RS                             name: crate::Syntax::TYPE_DISPATCH_FAILURE.to_string(),
+//RS                             args: vec![error],
+//RS                         }))
+//RS                     }
+//RS                     (Some("DispatchReport"), "trace") => Type::Named("EventTrace".to_string()),
+//RS                     (
+//RS                         _,
+//RS                         "listener_count" | "queued_count" | "active_count" | "delivered" | "queued"
+//RS                         | "dropped" | "running_count" | "blocked_count" | "delivered_handlers",
+//RS                     ) => Type::Int,
+//RS                     (_, "is_active" | "accepted") => Type::Bool,
+//RS                     (Some("DispatchReport"), "state") => Type::Named("DispatchState".to_string()),
+//RS                     _ => unit,
+//RS                 }
+//RS             });
+//RS             let expected_payload = match &recv_t.ty {
+//RS                 Type::Apply { args, .. } => args.first().cloned(),
+//RS                 _ => None,
+//RS             };
+//RS             let expected_hook_result = match &recv_t.ty {
+//RS                 Type::Apply { name, args } if name == "AsyncEvent" && args.len() >= 2 => {
+//RS                     Some(Type::Result {
+//RS                         ok: Box::new(Type::Named("Unit".to_string())),
+//RS                         err: Box::new(args[1].clone()),
+//RS                     })
+//RS                 }
+//RS                 Type::Apply { name, args } if name == "DecisionHook" && args.len() >= 2 => {
+//RS                     Some(Type::Apply {
+//RS                         name: "HookDecision".to_string(),
+//RS                         args: vec![args[0].clone(), args[1].clone()],
+//RS                     })
+//RS                 }
+//RS                 Type::Apply { args, .. } if args.len() >= 2 => args.get(1).cloned(),
+//RS                 _ => None,
+//RS             };
+//RS             // AsyncEvent's host adapter owns the final error carrier. Keep a
+//RS             // callback's checked `Err` return intact so the AOT/JIT boundary
+//RS             // can normalize default `Err` into the event's public `E` (String
+//RS             // in the observation fixture). DecisionHook has no such adapter,
+//RS             // so its concrete HookDecision return remains required here.
+//RS             let expected_callback_return = match &recv_t.ty {
+//RS                 Type::Apply { name, .. } if name == "DecisionHook" => expected_hook_result.clone(),
+//RS                 _ => None,
+//RS             };
+//RS             let targs: Vec<TExpr> = args
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(i, a)| {
+//RS                     let handler_idx = matches!(
+//RS                         (method, args.len(), i),
+//RS                         ("on" | "once", 2, 1) | ("on_priority", 3, 2)
+//RS                     );
+//RS                     if handler_idx {
+//RS                         if let Expr::Lambda(lam) = route_strip_parens(&a.expr) {
+//RS                             let params = expected_payload.clone().into_iter().collect::<Vec<_>>();
+//RS                             let payload_ty = expected_payload.clone();
+//RS                             jit_spawn_site_with(
+//RS                                 lam,
+//RS                                 cx,
+//RS                                 env,
+//RS                                 |lam: &crate::AST::Lambda, cx: &Cx, env: &LowerEnv| {
+//RS                                     let mut jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+//RS                                     if let Some(ty) = payload_ty {
+//RS                                         if jit_lambda.params.is_empty() {
+//RS                                             jit_lambda.params.push(("__payload".into(), ty));
+//RS                                         } else {
+//RS                                             for (_, pty) in &mut jit_lambda.params {
+//RS                                                 *pty = ty.clone();
+//RS                                             }
+//RS                                         }
+//RS                                     }
+//RS                                     jit_lambda
+//RS                                 },
+//RS                             );
+//RS                             let tl = expected_callback_return.as_ref().map_or_else(
+//RS                                 || lower_lambda_expecting_value(lam, cx, env, params.as_slice()),
+//RS                                 |expected| {
+//RS                                     let mut lowered = lower_lambda_expecting_value_with_return(
+//RS                                         lam,
+//RS                                         cx,
+//RS                                         env,
+//RS                                         params.as_slice(),
+//RS                                         expected,
+//RS                                     );
+//RS                                     lowered.ret = Some(expected.clone());
+//RS                                     lowered
+//RS                                 },
+//RS                             );
+//RS                             let callback_arity = params.len();
+//RS                             let callback_ty = Type::Fn {
+//RS                                 params: params.clone(),
+//RS                                 ret: tl.ret.clone().map(Box::new),
+//RS                                 effect_bound: None,
+//RS                                 param_contract: None,
+//RS                                 // Event-family host helpers invoke handlers as `Fn(T)`,
+//RS                                 // not the ordinary Jet read callback `Fn(&T)`.
+//RS                                 call_metadata: Some(crate::AST::FunctionCallMetadata {
+//RS                                     conventions: vec![AccessConvention::Move; callback_arity],
+//RS                                     ..Default::default()
+//RS                                 }),
+//RS                                 return_view_provenance: None,
+//RS                             };
+//RS                             let callback = TExpr {
+//RS                                 ty: callback_ty.clone(),
+//RS                                 kind: TExprKind::Lambda(Box::new(tl)),
+//RS                             };
+//RS                             return if matches!(
+//RS                                 &recv_t.ty,
+//RS                                 Type::Apply { name, .. } if name == "AsyncEvent"
+//RS                             ) {
+//RS                                 TExpr {
+//RS                                     ty: callback_ty,
+//RS                                     kind: TExprKind::FnValue {
+//RS                                         kind: TFnValueKind::Send {
+//RS                                             value: Box::new(callback),
+//RS                                         },
+//RS                                     },
+//RS                                 }
+//RS                             } else {
+//RS                                 callback
+//RS                             };
+//RS                         }
+//RS                     }
+//RS                     lower_expr(&a.expr, cx, env)
+//RS                 })
+//RS                 .collect();
+//RS             return TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::EventMethod {
+//RS                         method: method.to_string(),
+//RS                     },
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-WATCH-SCOPE1: WatchHandle/WatchSet methods. Callback lambdas receive
+//RS     // a WatchEvent payload, matching the shared Core event/callback model.
+//RS     if is_watch_handle_type(recv_type.as_deref()) && is_watch_method_name(method, args.len()) {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let result_ty = match (recv_type.as_deref(), method) {
+//RS                 (_, "poll" | "events") => {
+//RS                     Type::List(Box::new(Type::Named("WatchEvent".to_string())))
+//RS                 }
+//RS                 (Some("WatchHandle"), "on" | "once") => Type::Named("Subscription".to_string()),
+//RS                 (_, "summary") => Type::String,
+//RS                 (_, "is_active") => Type::Bool,
+//RS                 _ => unit_type(),
+//RS             };
+//RS             let mut callback_index = None;
+//RS             let targs: Vec<TExpr> = args
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(i, a)| {
+//RS                     if matches!(
+//RS                         (recv_type.as_deref(), method, args.len(), i),
+//RS                         (Some("WatchHandle"), "on" | "once", 2, 1)
+//RS                     ) {
+//RS                         if let Expr::Lambda(lam) = &a.expr {
+//RS                             let params = vec![Type::Named("WatchEvent".to_string())];
+//RS                             let tl = lower_lambda_expecting_value(lam, cx, env, params.as_slice());
+//RS                             let idx = jit_spawn_site_with(
+//RS                                 lam,
+//RS                                 cx,
+//RS                                 env,
+//RS                                 |lam: &crate::AST::Lambda, cx: &Cx, env: &LowerEnv| {
+//RS                                     lower_spawn_lambda_for_jit_expecting(
+//RS                                         lam,
+//RS                                         cx,
+//RS                                         env,
+//RS                                         &[Type::Named("WatchEvent".to_string())],
+//RS                                     )
+//RS                                 },
+//RS                             );
+//RS                             callback_index = Some(idx);
+//RS                             return TExpr {
+//RS                                 ty: Type::Fn {
+//RS                                     params,
+//RS                                     ret: None,
+//RS                                     effect_bound: None,
+//RS                                     return_view_provenance: None,
+//RS                                     param_contract: None,
+//RS                                     call_metadata: None,
+//RS                                 },
+//RS                                 kind: TExprKind::Lambda(Box::new(tl)),
+//RS                             };
+//RS                         }
+//RS                     }
+//RS                     lower_expr(&a.expr, cx, env)
+//RS                 })
+//RS                 .collect();
+//RS             return TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::WatchMethod {
+//RS                         method: method.to_string(),
+//RS                         callback_index,
+//RS                     },
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-PROCESS1: ProcessSpec/ProcessChild methods lower to explicit prelude
+//RS     // helpers; sema already proved arity and argument types.
+//RS     if matches!(
+//RS         recv_type.as_deref(),
+//RS         Some("ProcessSpec") | Some("ProcessChild") | Some("TerminalSession")
+//RS     ) {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+//RS             let result_ty = in_own_frame(|| match (recv_type.as_deref(), method) {
+//RS                 (Some("ProcessSpec"), "run" | "run_checked") => Type::Result {
+//RS                     ok: Box::new(Type::Named("ProcessReceipt".to_string())),
+//RS                     err: Box::new(Type::Named("IOError".to_string())),
+//RS                 },
+//RS                 (Some("ProcessSpec"), "plan") => Type::Result {
+//RS                     ok: Box::new(Type::Named("ProcessPlan".to_string())),
+//RS                     err: Box::new(Type::Named("IOError".to_string())),
+//RS                 },
+//RS                 (Some("ProcessSpec"), "spawn") => Type::Result {
+//RS                     ok: Box::new(Type::Named("ProcessChild".to_string())),
+//RS                     err: Box::new(Type::Named("IOError".to_string())),
+//RS                 },
+//RS                 (Some("ProcessSpec"), "abilities") => Type::Apply {
+//RS                     name: "Set".to_string(),
+//RS                     args: vec![Type::String],
+//RS                 },
+//RS                 (Some("ProcessSpec"), _) => Type::Named("ProcessSpec".to_string()),
+//RS                 (Some("ProcessChild"), "id") => Type::Int,
+//RS                 (Some("ProcessChild"), "wait") => Type::Result {
+//RS                     ok: Box::new(Type::Named("ProcessReceipt".to_string())),
+//RS                     err: Box::new(Type::Named("IOError".to_string())),
+//RS                 },
+//RS                 (Some("ProcessChild"), "exited") => Type::Result {
+//RS                     ok: Box::new(Type::Bool),
+//RS                     err: Box::new(Type::Named("IOError".to_string())),
+//RS                 },
+//RS                 (Some("ProcessChild"), _) => Type::Result {
+//RS                     ok: Box::new(unit_type()),
+//RS                     err: Box::new(Type::Named("IOError".to_string())),
+//RS                 },
+//RS                 (Some("TerminalSession"), "resize") => Type::Result {
+//RS                     ok: Box::new(unit_type()),
+//RS                     err: Box::new(Type::Named("IOError".to_string())),
+//RS                 },
+//RS                 _ => unit_type(),
+//RS             });
+//RS             let op = if recv_type.as_deref() == Some("ProcessSpec") {
+//RS                 THandleOp::ProcessSpecMethod {
+//RS                     method: method.to_string(),
+//RS                     args_len: args.len(),
+//RS                 }
+//RS             } else if recv_type.as_deref() == Some("ProcessChild") {
+//RS                 THandleOp::ProcessChildMethod {
+//RS                     method: method.to_string(),
+//RS                 }
+//RS             } else {
+//RS                 THandleOp::TerminalSessionResize
+//RS             };
+//RS             return TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op,
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-PROCESS1=A / D-FOUND-LIFECYCLE1=A: `.close()` on `child.stdin`
+//RS     // drops the writer through the shared Prelude, making the child's next
+//RS     // read observe EOF.
+//RS     if recv_type.as_deref() == Some("ProcessStdin") && method == "close" {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             TExpr {
+//RS                 ty: unit_type(),
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::ProcessStdinClose,
+//RS                     args: Vec::new(),
+//RS                 },
+//RS             }
+//RS         });
+//RS     }
+//RS     // D-PROCESS1=A: `.write(text)` on `child.stdin` — the receiver LOWERS to the
+//RS     // real `ProcessChild.stdin` Rust field (a writer handle), and the write goes
+//RS     // through the generic `jet_process_stdin_write` prelude helper.
+//RS     if recv_type.as_deref() == Some("ProcessStdin") && method == "write" {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+//RS             return TExpr {
+//RS                 ty: Type::Result {
+//RS                     ok: Box::new(unit_type()),
+//RS                     err: Box::new(Type::Named("IOError".to_string())),
+//RS                 },
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::ProcessStdinWrite,
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-HONESTNUM1=A: a `Measurement<Float>` method (gate shape d6).
+//RS     if recv_type.as_deref() == Some("Measurement") && is_measurement_method_name(method, args.len())
+//RS     {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let result_ty = match method {
+//RS                 "value" | "uncertainty" => Type::Float,
+//RS                 _ => recv_t.ty.clone(),
+//RS             };
+//RS             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+//RS             let lowered = TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::MeasurementMethod {
+//RS                         method: method.to_string(),
+//RS                     },
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS             return match source_arg_order(args) {
+//RS                 Some(order) => {
+//RS                     preserve_source_arg_order(lowered, &order, args.len(), method_span.start as u32)
+//RS                 }
+//RS                 None => lowered,
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-PENDING1=B: a `Loadable<T,E>` method (gate shape d7).
+//RS     if recv_type.as_deref() == Some("Loadable") && is_loadable_method_name(method, args.len()) {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let result_ty = match method {
+//RS                 "is_loading" | "is_loaded" | "is_failed" | "is_idle" => Type::Bool,
+//RS                 // .loaded() → Option<T> (extract T from Loadable<T,E>)
+//RS                 "loaded" => match &recv_t.ty {
+//RS                     Type::Apply { args: targs, .. } if !targs.is_empty() => {
+//RS                         Type::Option(Box::new(targs[0].clone()))
+//RS                     }
+//RS                     _ => Type::Option(Box::new(Type::Named("Unknown".to_string()))),
+//RS                 },
+//RS                 // .or_else(default) → T
+//RS                 "or_else" => match &recv_t.ty {
+//RS                     Type::Apply { args: targs, .. } if !targs.is_empty() => targs[0].clone(),
+//RS                     _ => Type::Named("Unknown".to_string()),
+//RS                 },
+//RS                 _ => recv_t.ty.clone(),
+//RS             };
+//RS             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+//RS             return TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::LoadableMethod {
+//RS                         method: method.to_string(),
+//RS                     },
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-SHAPE-CTORVERB1=C: generic `ExpiringValue<T>` uses type-owned construction.
+//RS     if recv_type.as_deref() == Some(Syntax::EXPIRING_VALUE_TYPE)
+//RS         && matches!(method, "get" | "is_valid" | "force")
+//RS     {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let result_ty = match method {
+//RS                 "get" => Type::Result {
+//RS                     ok: Box::new(match &recv_t.ty {
+//RS                         Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+//RS                         _ => Type::Named("Unknown".to_string()),
+//RS                     }),
+//RS                     err: Box::new(Type::Named("Expired".to_string())),
+//RS                 },
+//RS                 "is_valid" => Type::Bool,
+//RS                 _ => recv_t.ty.clone(),
+//RS             };
+//RS             let targs: Vec<TExpr> = args
+//RS                 .iter()
+//RS                 .map(|arg| lower_expr(&arg.expr, cx, env))
+//RS                 .collect();
+//RS             return TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::ExpiringMethod {
+//RS                         method: method.to_string(),
+//RS                     },
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-RENDERTGT2=A (c133 M1/M2): a UI backend method (gate shape d7b).
+//RS     if matches!(
+//RS         recv_type.as_deref(),
+//RS         Some("NullBackend" | "TUIBackend" | "GtkBackend")
+//RS     ) && is_ui_backend_method_name(recv_type.as_deref(), method, args.len())
+//RS     {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let result_ty = match method {
+//RS                 "measure" => Type::Named("Size".to_string()),
+//RS                 "on_event" => Type::Named("EventResult".to_string()),
+//RS                 "commands" | "frame_lines" => Type::List(Box::new(Type::String)),
+//RS                 "render_count" => Type::Int,
+//RS                 // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing.
+//RS                 "focused_label" => Type::String,
+//RS                 // D-UIDEVSHELL1=A (c134 Phase 8): native GTK4 widget handles.
+//RS                 "label" | "button" => Type::Int,
+//RS                 _ => unit_type(),
+//RS             };
+//RS             // Resident JIT registers `on_click` via spawn-site (Game on_frame pattern).
+//RS             if method == "on_click" {
+//RS                 if let Some(Expr::Lambda(lam)) = args.get(1).map(|a| &a.expr) {
+//RS                     jit_spawn_site(lam, cx, env);
+//RS                 }
+//RS             }
+//RS             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+//RS             let route_method = if method == "mount" && args.len() == 1 {
+//RS                 "mount_default"
+//RS             } else {
+//RS                 method
+//RS             };
+//RS             return TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::UiBackendMethod {
+//RS                         method: route_method.to_string(),
+//RS                     },
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-DATA-PLOT1=A: JetDataPlot receiver methods are projections onto the
+//RS     // checked receiver Core rows. Leading-dot fields become the private typed
+//RS     // column constructor marker, which MIR lowers to the canonical ClosureMethod
+//RS     // route consumed by AOT and JIT.
+//RS     if recv_type.as_deref() == Some("JetDataPlot") {
+//RS         let core_method = if method == "text" {
+//RS             "text_channel"
+//RS         } else {
+//RS             method
+//RS         };
+//RS         if let Some(record) = Syntax::core_receiver_method("JetDataPlot", core_method) {
+//RS             return in_own_frame(|| {
+//RS                 let lowered_receiver = lowered_receiver.borrow_mut().take();
+//RS                 let receiver = lowered_receiver.unwrap_or_else(|| lower_expr(receiver, cx, env));
+//RS                 let row_ty = match receiver.ty.without_user_tags() {
+//RS                     Type::Apply { name, args } if name == "JetDataPlot" => args.first().cloned(),
+//RS                     _ => None,
+//RS                 };
+//RS                 let Some(row_ty) = row_ty else {
+//RS                     return invariant_method_expr(
+//RS                         method_span,
+//RS                         "checked plot receiver has no row type",
+//RS                     );
+//RS                 };
+//RS                 let selector_method = matches!(
+//RS                     core_method,
+//RS                     "x" | "y" | "color" | "size" | "text_channel" | "detail" | "facet"
+//RS                 );
+//RS                 let mut lowered_args = Vec::with_capacity(args.len() + 1);
+//RS                 lowered_args.push(receiver);
+//RS                 for (index, arg) in args.iter().enumerate() {
+//RS                     if selector_method && index == 0 {
+//RS                         let Some(field_name) = plot_selector_name(&arg.expr) else {
+//RS                             return invariant_method_expr(
+//RS                                 method_span,
+//RS                                 format!(
+//RS                                     "checked plot `{method}` argument is not a leading-dot field"
+//RS                                 ),
+//RS                             );
+//RS                         };
+//RS                         match lower_plot_column(field_name, &row_ty, method_span, cx, env) {
+//RS                             Ok(column) => lowered_args.push(column),
+//RS                             Err(expr) => return expr,
+//RS                         }
+//RS                     } else {
+//RS                         lowered_args.push(lower_expr(&arg.expr, cx, env));
+//RS                     }
+//RS                 }
+//RS                 if !record.accepts_arity(lowered_args.len()) {
+//RS                     return invariant_method_expr(
+//RS                         method_span,
+//RS                         format!(
+//RS                             "checked plot Core row `{core_method}` has wrong arity {}",
+//RS                             lowered_args.len()
+//RS                         ),
+//RS                     );
+//RS                 }
+//RS                 let Some(ty) = resolved_ret.cloned() else {
+//RS                     return invariant_method_expr(
+//RS                         method_span,
+//RS                         format!("checked plot `{method}` has no resolved return type"),
+//RS                     );
+//RS                 };
+//RS                 TExpr {
+//RS                     ty: ty.clone(),
+//RS                     kind: TExprKind::CoreCall {
+//RS                         record,
+//RS                         args: lowered_args,
+//RS                         source_span: method_span,
+//RS                         type_args: Vec::new(),
+//RS                         widen_to_vec: vec![false; args.len() + 1],
+//RS                         data_plan: None,
+//RS                         fallibility: TFailureCarrier::from_checked_type(&ty),
+//RS                     },
+//RS                 }
+//RS             });
+//RS         }
+//RS     }
+//RS     // D-DATAFLOW1=A: typed DataStream methods are Core calls, not ordinary
+//RS     // handle calls. The Core projection owns the single row-type metadata word
+//RS     // used by AOT/JIT/interpreter; keeping `next` on THandleOp drops it.
+//RS     if recv_type.as_deref() == Some("DataStream") && matches!(method, "next" | "collect") {
+//RS         return in_own_frame(|| {
+//RS             let lowered_receiver = lowered_receiver.borrow_mut().take();
+//RS             let lowered_receiver =
+//RS                 lowered_receiver.unwrap_or_else(|| lower_expr(receiver, cx, env));
+//RS             // Stream pulls mutate the opaque handle.  Receiver syntax has no
+//RS             // explicit `&`, so project the checked receiver as the canonical
+//RS             // mutable borrow before entering the Core row.
+//RS             let receiver = if let TExprKind::Borrow { place, .. } = &lowered_receiver.kind {
+//RS                 TExpr {
+//RS                     ty: lowered_receiver.ty.clone(),
+//RS                     kind: TExprKind::Borrow {
+//RS                         place: place.clone(),
+//RS                         mutable: true,
+//RS                     },
+//RS                 }
+//RS             } else {
+//RS                 TExpr {
+//RS                     ty: lowered_receiver.ty.clone(),
+//RS                     kind: TExprKind::Borrow {
+//RS                         place: Box::new(lowered_receiver),
+//RS                         mutable: true,
+//RS                     },
+//RS                 }
+//RS             };
+//RS             let row_ty = match receiver.ty.without_user_tags() {
+//RS                 Type::Apply { name, args } if name == "DataStream" && args.len() == 1 => {
+//RS                     args[0].clone()
+//RS                 }
+//RS                 _ => {
+//RS                     return invariant_method_expr(
+//RS                         method_span,
+//RS                         format!("DataStream.{method} lost its checked row type"),
+//RS                     );
+//RS                 }
+//RS             };
+//RS             let result_ty = resolved_ret.cloned().unwrap_or_else(|| {
+//RS                 let ok = if method == "next" {
+//RS                     Type::Option(Box::new(row_ty.clone()))
+//RS                 } else {
+//RS                     Type::List(Box::new(row_ty.clone()))
+//RS                 };
+//RS                 Type::Result {
+//RS                     ok: Box::new(ok),
+//RS                     err: Box::new(Type::Named("DataError".to_string())),
+//RS                 }
+//RS             });
+//RS             let record = match checked_core_record("core.data.stream", method, 1, method_span) {
+//RS                 Ok(record) => record,
+//RS                 Err(expr) => return expr,
+//RS             };
+//RS             TExpr {
+//RS                 ty: result_ty.clone(),
+//RS                 kind: TExprKind::CoreCall {
+//RS                     record,
+//RS                     args: vec![receiver],
+//RS                     source_span: method_span,
+//RS                     type_args: vec![row_ty],
+//RS                     widen_to_vec: vec![false],
+//RS                     data_plan: None,
+//RS                     fallibility: TFailureCarrier::from_checked_type(&result_ty),
+//RS                 },
+//RS             }
+//RS         });
+//RS     }
+//RS 
+//RS     // D-FLAGSHIP-WEBAPI1=A: instance web operations are projections onto the
+//RS     // checked Core rows, never a second receiver dispatch table.  The source
+//RS     // receiver is the first Core argument; sema has already supplied the
+//RS     // generic element type and result carrier.
+//RS     if recv_type.as_deref() == Some("WebVirtualWindow") && method == "facts_json" && args.is_empty()
+//RS     {
+//RS         return in_own_frame(|| {
+//RS             let Some(result_ty) = resolved_ret.cloned() else {
+//RS                 return invariant_method_expr(
+//RS                     method_span,
+//RS                     "virtual window facts has no resolved return type".to_string(),
+//RS                 );
+//RS             };
+//RS             TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(lower_expr(receiver, cx, env)),
+//RS                     op: THandleOp::WebVirtualWindowFacts,
+//RS                     args: Vec::new(),
+//RS                 },
+//RS             }
+//RS         });
+//RS     }
+//RS     let web_projection = web_receiver_projection(recv_type.as_deref(), method, args.len());
+//RS     if let Some((module, core_method)) = web_projection {
+//RS         return in_own_frame(|| {
+//RS             let receiver = lower_expr(receiver, cx, env);
+//RS             let mut lowered_args = Vec::with_capacity(args.len() + 1);
+//RS             lowered_args.push(receiver);
+//RS             lowered_args.extend(args.iter().map(|arg| {
+//RS                 let lowered = lower_expr(&arg.expr, cx, env);
+//RS                 if matches!(lowered.ty, Type::Fn { .. })
+//RS                     && !matches!(
+//RS                         lowered.kind,
+//RS                         TExprKind::FnValue {
+//RS                             kind: TFnValueKind::Send { .. }
+//RS                         }
+//RS                     )
+//RS                 {
+//RS                     // Callback rows take the send-safe carrier, exactly as
+//RS                     // the module-call spelling of the same Core row.
+//RS                     let ty = lowered.ty.clone();
+//RS                     TExpr {
+//RS                         ty,
+//RS                         kind: TExprKind::FnValue {
+//RS                             kind: TFnValueKind::Send {
+//RS                                 value: Box::new(lowered),
+//RS                             },
+//RS                         },
+//RS                     }
+//RS                 } else {
+//RS                     lowered
+//RS                 }
+//RS             }));
+//RS             let Some(ty) = resolved_ret.cloned() else {
+//RS                 return invariant_method_expr(
+//RS                     method_span,
+//RS                     format!("web receiver `{method}` has no resolved return type"),
+//RS                 );
+//RS             };
+//RS             let record =
+//RS                 match checked_core_record(module, core_method, lowered_args.len(), method_span) {
+//RS                     Ok(record) => record,
+//RS                     Err(expr) => return expr,
+//RS                 };
+//RS             TExpr {
+//RS                 ty: ty.clone(),
+//RS                 kind: TExprKind::CoreCall {
+//RS                     record,
+//RS                     widen_to_vec: vec![false; lowered_args.len()],
+//RS                     type_args: Vec::new(),
+//RS                     fallibility: TFailureCarrier::from_checked_type(&ty),
+//RS                     args: lowered_args,
+//RS                     source_span: method_span,
+//RS                     data_plan: None,
+//RS                 },
+//RS             }
+//RS         });
+//RS     }
+//RS 
+//RS     // c-devserver (owner-directed 2026-07-01): a DevServer builder method.
+//RS     if recv_type.as_deref() == Some("DevServer") && is_devserver_method_name(method, args.len()) {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let result_ty = match method {
+//RS                 "serve" => unit_type(),
+//RS                 _ => Type::Named("DevServer".to_string()),
+//RS             };
+//RS             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+//RS             return TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::DevServerMethod {
+//RS                         method: method.to_string(),
+//RS                     },
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-WEBAPP1=D / D-DX-ROUTER1=A: App builder methods remain one typed handle
+//RS     // operation.  Route, loader, form, and server-function handlers are handed
+//RS     // over as send-safe borrow callbacks; route, loader, and form handlers also
+//RS     // carry the sema-checked input binding so the runtime decodes each typed
+//RS     // parameter from the navigation or progressive form instead of guessing.
+//RS     if recv_type.as_deref() == Some("App") && is_app_method_name(method, args.len()) {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let result_ty = match method {
+//RS                 "serve" | "serve_on" => unit_type(),
+//RS                 "facts_json" => Type::String,
+//RS                 _ => Type::Named("App".to_string()),
+//RS             };
+//RS             let mut targs: Vec<TExpr> = args
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, arg)| {
+//RS                     if matches!(
+//RS                         (method, index),
+//RS                         ("route" | "page" | "layout", 1)
+//RS                             | ("loader", 1)
+//RS                             | ("pending" | "not_found" | "error", 0)
+//RS                             | ("action" | "form" | "data", 1)
+//RS                     ) {
+//RS                         lower_app_route_callback(&arg.expr, cx, env)
+//RS                     } else if matches!(
+//RS                         (method, index),
+//RS                         ("mount" | "mount_with_effect" | "mount_with_policy", 1)
+//RS                     ) {
+//RS                         lower_app_callback(&arg.expr, cx, env)
+//RS                     } else {
+//RS                         lower_expr(&arg.expr, cx, env)
+//RS                     }
+//RS                 })
+//RS                 .collect();
+//RS             if matches!(method, "route" | "page" | "layout" | "loader" | "form") {
+//RS                 let handler = args.get(1).map(|arg| &arg.expr);
+//RS                 targs.push(devtools_text(app_route_binding(method, handler, cx)));
+//RS             }
+//RS             TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::AppMethod {
+//RS                         method: method.to_string(),
+//RS                         args_len: args.len(),
+//RS                     },
+//RS                     args: targs,
+//RS                 },
+//RS             }
+//RS         });
+//RS     }
+//RS     // D-NETDEP1=A / D-HTTPLIB1=A: an HTTP type method (gate shape d10).
+//RS     let http_route_registration =
+//RS         matches!(recv_type.as_deref(), Some("HTTPRouter") | Some("HTTPMux"))
+//RS             && matches!(
+//RS                 method,
+//RS                 "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
+//RS             )
+//RS             && args.len() == 2;
+//RS     if is_http_type(recv_type.as_deref())
+//RS         && is_http_method_name(recv_type.as_deref(), method)
+//RS         && !http_route_registration
+//RS     {
+//RS         return in_own_frame(|| {
+//RS             let kind = recv_type.as_deref().unwrap_or("HTTPRequest").to_string();
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let result_ty = in_own_frame(|| match (kind.as_str(), method) {
+//RS                 (
+//RS                     "HTTPRequest",
+//RS                     "header" | "body" | "timeout" | "connect_timeout" | "read_timeout"
+//RS                     | "total_timeout" | "dns_timeout" | "tls_timeout" | "write_timeout"
+//RS                     | "first_byte_timeout" | "redirects" | "proxy" | "cookie" | "form"
+//RS                     | "multipart_text",
+//RS                 ) if !args.is_empty() && !(method == "header" && args.len() == 1) => {
+//RS                     Type::Named("HTTPRequest".to_string())
+//RS                 }
+//RS                 ("HTTPRequest", "json") if args.len() == 1 => {
+//RS                     Type::Named("HTTPRequest".to_string())
+//RS                 }
+//RS                 ("HTTPRequest", "send") => Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("HTTPRequest", "method" | "path") => Type::String,
+//RS                 ("HTTPRequest", "text") => Type::Result {
+//RS                     ok: Box::new(Type::String),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("HTTPRequest", "body") => Type::Named("Body".to_string()),
+//RS                 ("HTTPRequest", "trailers") => Type::Result {
+//RS                     ok: Box::new(Type::Named("Headers".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("HTTPRequest", "body_len") => Type::Int,
+//RS                 ("HTTPRequest", "under_limit") => Type::Bool,
+//RS                 ("HTTPRequest", "param" | "header") => Type::Option(Box::new(Type::String)),
+//RS                 (
+//RS                     "HTTPClient",
+//RS                     "cookies"
+//RS                     | "redirects"
+//RS                     | "protocols"
+//RS                     | "timeouts"
+//RS                     | "raw_encoding"
+//RS                     | "proxy"
+//RS                     | "tls"
+//RS                     | "allow_http_downgrade"
+//RS                     | "retries",
+//RS                 ) => Type::Named("HTTPClient".to_string()),
+//RS                 ("HTTPClient", "send") => Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("HTTPResponse", "header") if args.len() == 2 => {
+//RS                     Type::Named("HTTPResponse".to_string())
+//RS                 }
+//RS                 ("HTTPResponse", "status") => Type::Int,
+//RS                 ("HTTPResponse", "text") => Type::Result {
+//RS                     ok: Box::new(Type::String),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("HTTPResponse", "body") => Type::Named("Body".to_string()),
+//RS                 ("HTTPResponse", "header") => Type::Option(Box::new(Type::String)),
+//RS                 ("HTTPResponse", "cookies") => Type::List(Box::new(Type::String)),
+//RS                 ("HTTPResponse", "trailers") => Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("HTTPResponse", "protocol" | "remote_address") => Type::String,
+//RS                 ("HTTPResponse", "redirect_history") => Type::List(Box::new(Type::String)),
+//RS                 ("HTTPResponse", "timings") => Type::List(Box::new(Type::Int)),
+//RS                 ("HTTPResponse", "reused_connection") => Type::Bool,
+//RS                 ("HTTPResponse", "raw_content_encoding") => Type::Option(Box::new(Type::String)),
+//RS                 ("Headers", "first") => Type::Option(Box::new(Type::String)),
+//RS                 ("Headers", "all") => Type::List(Box::new(Type::String)),
+//RS                 ("Headers", "append" | "set") => Type::Result {
+//RS                     ok: Box::new(Type::Named("Headers".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("Headers", "remove") => Type::Named("Headers".to_string()),
+//RS                 ("HTTPMux", _) => unit_type(),
+//RS                 ("HTTPHandler", "handle") => Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("Body", "bytes") => Type::Result {
+//RS                     ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("Body", "text") => Type::Result {
+//RS                     ok: Box::new(Type::String),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("Body", "json") => type_args.first().map_or_else(
+//RS                     || {
+//RS                         resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+//RS                             ok: Box::new(Type::Named("Unknown".to_string())),
+//RS                             err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                         })
+//RS                     },
+//RS                     |target| Type::Result {
+//RS                         ok: Box::new(target.clone()),
+//RS                         err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                     },
+//RS                 ),
+//RS                 // D-HTTP-JSON1=A: `req.json<T>()` / `resp.json<T>(limit)`.
+//RS                 ("HTTPRequest", "json") | ("HTTPResponse", "json") => {
+//RS                     type_args.first().map_or_else(
+//RS                         || {
+//RS                             resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+//RS                                 ok: Box::new(Type::Named("Unknown".to_string())),
+//RS                                 err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                             })
+//RS                         },
+//RS                         |target| Type::Result {
+//RS                             ok: Box::new(target.clone()),
+//RS                             err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                         },
+//RS                     )
+//RS                 }
+//RS                 ("Body", "chunks") => Type::Named("HTTPBodyChunks".to_string()),
+//RS                 ("Body", "copy_to") => Type::Result {
+//RS                     ok: Box::new(Type::Int),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("HTTPServer", "local_addr") => Type::Result {
+//RS                     ok: Box::new(Type::String),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("HTTPServer", "serve" | "shutdown" | "wait") => Type::Result {
+//RS                     ok: Box::new(Type::Named("HTTPShutdownReport".to_string())),
+//RS                     err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                 },
+//RS                 ("WsConn", "send_text" | "send_bytes" | "close") => Type::Result {
+//RS                     ok: Box::new(unit_type()),
+//RS                     err: Box::new(Type::Named("WsError".to_string())),
+//RS                 },
+//RS                 ("WsConn", "recv") => Type::Result {
+//RS                     ok: Box::new(Type::Named("WsMessage".to_string())),
+//RS                     err: Box::new(Type::Named("WsError".to_string())),
+//RS                 },
+//RS                 ("WsMessage", "is_text" | "is_binary" | "is_close") => Type::Bool,
+//RS                 ("WsMessage", "text") => Type::Result {
+//RS                     ok: Box::new(Type::String),
+//RS                     err: Box::new(Type::Named("WsError".to_string())),
+//RS                 },
+//RS                 ("WsMessage", "bytes") => Type::Result {
+//RS                     ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
+//RS                     err: Box::new(Type::Named("WsError".to_string())),
+//RS                 },
+//RS                 ("Browser", "abilities") => Type::Named("BrowserAbilities".to_string()),
+//RS                 ("Browser", "context") => Type::Result {
+//RS                     ok: Box::new(Type::Named("BrowserContext".to_string())),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 ("Browser", "subscribe" | "close") => Type::Result {
+//RS                     ok: Box::new(unit_type()),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 ("Browser", "next_event") => Type::Result {
+//RS                     ok: Box::new(Type::Named("BrowserEvent".to_string())),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 ("Browser", "add_intercept" | "add_intercept_url") => Type::Result {
+//RS                     ok: Box::new(Type::Named("BrowserIntercept".to_string())),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 (
+//RS                     "Browser",
+//RS                     "continue_request" | "fail_request" | "fulfill_request" | "allow_downloads",
+//RS                 ) => Type::Result {
+//RS                     ok: Box::new(unit_type()),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 ("Browser", "protocol") => Type::Result {
+//RS                     ok: Box::new(Type::Named("BrowserProtocol".to_string())),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 ("Browser", "trace") => Type::Named("BrowserTrace".to_string()),
+//RS                 ("Browser", "privacy") => Type::Named("BrowserPrivacy".to_string()),
+//RS                 ("Browser", "receipt") => Type::Named("BrowserReceipt".to_string()),
+//RS                 ("BrowserContext", "page" | "tab") => Type::Result {
+//RS                     ok: Box::new(Type::Named("BrowserPage".to_string())),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 ("BrowserContext", "isolated") => Type::Bool,
+//RS                 ("BrowserContext", "user_hash") => Type::String,
+//RS                 ("BrowserContext", "close")
+//RS                 | (
+//RS                     "BrowserPage",
+//RS                     "goto" | "close" | "clear_cookies" | "set_cookie" | "storage_set"
+//RS                     | "storage_clear",
+//RS                 )
+//RS                 | ("BrowserFrame", "close")
+//RS                 | ("BrowserIntercept", "remove")
+//RS                 | (
+//RS                     "BrowserLocator",
+//RS                     "wait" | "wait_gone" | "click" | "hover" | "fill" | "press" | "set_files",
+//RS                 ) => Type::Result {
+//RS                     ok: Box::new(unit_type()),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 ("BrowserPage", "screenshot" | "pdf") => Type::Result {
+//RS                     ok: Box::new(Type::String),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 ("BrowserPage", "cookie" | "storage_get") => Type::Result {
+//RS                     ok: Box::new(Type::Option(Box::new(Type::String))),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 ("BrowserPage", "main_frame") => Type::Result {
+//RS                     ok: Box::new(Type::Named("BrowserFrame".to_string())),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 ("BrowserPage", "frames") => Type::Result {
+//RS                     ok: Box::new(Type::List(Box::new(Type::Named(
+//RS                         "BrowserFrame".to_string(),
+//RS                     )))),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 (
+//RS                     "BrowserPage",
+//RS                     "get_by_role" | "get_by_text" | "get_by_label" | "get_by_placeholder"
+//RS                     | "get_by_test_id" | "get_by_css",
+//RS                 ) => Type::Named("BrowserLocator".to_string()),
+//RS                 (
+//RS                     "BrowserEvent",
+//RS                     "kind"
+//RS                     | "request_id"
+//RS                     | "request_method"
+//RS                     | "url_hash"
+//RS                     | "download_id"
+//RS                     | "suggested_filename_hash",
+//RS                 )
+//RS                 | ("BrowserAbilities", "profile")
+//RS                 | ("BrowserTrace", "summary")
+//RS                 | ("BrowserReceipt", "summary")
+//RS                 | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Type::String,
+//RS                 ("BrowserEvent", "status_code") => Type::Int,
+//RS                 ("BrowserProtocol", "send") => Type::Result {
+//RS                     ok: Box::new(Type::String),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 ("BrowserEvent", "is_blocked")
+//RS                 | ("BrowserAbilities", "bidi" | "cdp")
+//RS                 | ("BrowserTrace", "redacted")
+//RS                 | ("BrowserReceipt", "redacted" | "isolated" | "cleaned")
+//RS                 | ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles") => {
+//RS                     Type::Bool
+//RS                 }
+//RS                 ("BrowserTrace", "entry_count") | ("BrowserReceipt", "entry_count") => Type::Int,
+//RS                 ("BrowserLocked", "verify") => Type::Result {
+//RS                     ok: Box::new(unit_type()),
+//RS                     err: Box::new(Type::Named("BrowserError".to_string())),
+//RS                 },
+//RS                 _ => unit_type(),
+//RS             });
+//RS             let targs: Vec<TExpr> = args
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(i, a)| {
+//RS                     if kind == "HTTPMux" && method == "middleware" && i == 0 {
+//RS                         return lower_http_middleware_callback(&a.expr, cx, env);
+//RS                     }
+//RS                     if kind == "HTTPMux"
+//RS                         && matches!(
+//RS                             method,
+//RS                             "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
+//RS                         )
+//RS                         && i == 1
+//RS                     {
+//RS                         if let Expr::Lambda(lam) = &a.expr {
+//RS                             let params = if lam.params.is_empty() {
+//RS                                 Vec::new()
+//RS                             } else {
+//RS                                 vec![Type::Named("HTTPRequest".to_string())]
+//RS                             };
+//RS                             let ret = Type::Result {
+//RS                                 ok: Box::new(Type::Named("HTTPResponse".to_string())),
+//RS                                 err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                             };
+//RS                             return TExpr {
+//RS                                 ty: Type::Fn {
+//RS                                     params: params.clone(),
+//RS                                     ret: Some(Box::new(ret.clone())),
+//RS                                     effect_bound: None,
+//RS                                     return_view_provenance: None,
+//RS                                     param_contract: None,
+//RS                                     call_metadata: None,
+//RS                                 },
+//RS                                 kind: TExprKind::Lambda(Box::new(
+//RS                                     lower_lambda_expecting_value_with_return(
+//RS                                         lam, cx, env, &params, &ret,
+//RS                                     ),
+//RS                                 )),
+//RS                             };
+//RS                         }
+//RS                     }
+//RS                     lower_expr(&a.expr, cx, env)
+//RS                 })
+//RS                 .collect();
+//RS             let server_message_method = matches!(
+//RS                 (kind.as_str(), method, args.len()),
+//RS                 (
+//RS                     "HTTPRequest",
+//RS                     "method" | "path" | "param" | "body_len" | "under_limit",
+//RS                     _
+//RS                 ) | ("HTTPRequest", "header", 1)
+//RS                     | ("HTTPRequest", "body", 0)
+//RS                     | ("HTTPRequest", "text", 0 | 1)
+//RS                     | ("HTTPRequest", "json", 0)
+//RS                     | ("HTTPRequest", "trailers", 0)
+//RS                     | ("HTTPResponse", "header", 2)
+//RS                     | ("HTTPResponse", "trailers", 1)
+//RS             );
+//RS             let op = match (kind.as_str(), method, args.len()) {
+//RS                 // These request/response operations already have typed handle
+//RS                 // rows in the canonical registry. Keep them as those rows
+//RS                 // instead of routing through the broad HTTPServerMethod bucket,
+//RS                 // whose only Prelude projection is the HTTPServer receiver.
+//RS                 ("HTTPRequest", "body_len", 0) => THandleOp::HTTPReqField("body_len"),
+//RS                 ("HTTPRequest", "under_limit", 1) => THandleOp::HTTPReqField("under_limit"),
+//RS                 ("HTTPRequest", "header", 1) => THandleOp::HTTPReqHeader,
+//RS                 ("HTTPRequest", "param", 1) => THandleOp::HTTPReqParam,
+//RS                 ("HTTPRequest", "trailers", 0) => THandleOp::HTTPReqTrailers,
+//RS                 ("HTTPResponse", "trailers", 1) => THandleOp::HTTPRespTrailers,
+//RS                 ("HTTPResponse", "header", 1) => THandleOp::HTTPRespHeader,
+//RS                 _ if server_message_method
+//RS                     || kind.starts_with("HTTPServer")
+//RS                     || kind == "HTTPMux"
+//RS                     || kind == "HTTPHandler"
+//RS                     || kind == "WsConn"
+//RS                     || kind == "WsMessage"
+//RS                     || matches!(
+//RS                         kind.as_str(),
+//RS                         "Browser"
+//RS                             | "BrowserContext"
+//RS                             | "BrowserPage"
+//RS                             | "BrowserFrame"
+//RS                             | "BrowserLocator"
+//RS                             | "BrowserIntercept"
+//RS                             | "BrowserEvent"
+//RS                             | "BrowserTrace"
+//RS                             | "BrowserReceipt"
+//RS                             | "BrowserPrivacy"
+//RS                             | "BrowserAbilities"
+//RS                             | "BrowserProtocol"
+//RS                             | "BrowserLocked"
+//RS                     ) =>
+//RS                 {
+//RS                     THandleOp::HTTPServerMethod {
+//RS                         kind,
+//RS                         method: method.to_string(),
+//RS                     }
+//RS                 }
+//RS                 _ => THandleOp::HTTPClientMethod {
+//RS                     kind,
+//RS                     method: method.to_string(),
+//RS                 },
+//RS             };
+//RS             return TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op,
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-TIMEDEPTH1=A: a civil-time method (gate shape d9).
+//RS     if matches!(
+//RS         recv_type.as_deref(),
+//RS         Some(
+//RS             "Date"
+//RS                 | "LocalDate"
+//RS                 | "LocalTime"
+//RS                 | "DateTime"
+//RS                 | "Instant"
+//RS                 | "Period"
+//RS                 | "Zone"
+//RS                 | "ZonedDateTime"
+//RS         )
+//RS     ) && is_civil_time_method_name(recv_type.as_deref(), method)
+//RS     {
+//RS         return in_own_frame(|| {
+//RS             let kind = recv_type.as_deref().unwrap_or("Date").to_string();
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let result_ty = in_own_frame(|| match (kind.as_str(), method) {
+//RS                 ("Date" | "LocalDate", "year")
+//RS                 | ("Date" | "LocalDate", "month")
+//RS                 | ("Date" | "LocalDate", "day")
+//RS                 | ("Date" | "LocalDate", "diff_days")
+//RS                 | ("Date" | "LocalDate", "weekday")
+//RS                 | ("Date" | "LocalDate", "iso_weekday")
+//RS                 | ("Date" | "LocalDate", "day_of_year")
+//RS                 | ("Date" | "LocalDate", "iso_week")
+//RS                 | ("Date" | "LocalDate", "iso_week_year")
+//RS                 | ("Date" | "LocalDate", "quarter_of_year")
+//RS                 | ("Date" | "LocalDate", "days_in_month") => Type::Int,
+//RS                 ("Date" | "LocalDate", "is_leap_year") => Type::Bool,
+//RS                 (
+//RS                     "Date" | "LocalDate",
+//RS                     "add_days" | "add_months" | "add_period" | "subtract_period" | "truncate"
+//RS                     | "replace",
+//RS                 ) => Type::Named("LocalDate".to_string()),
+//RS                 ("Date" | "LocalDate", "with") => Type::Result {
+//RS                     ok: Box::new(Type::Named("LocalDate".to_string())),
+//RS                     err: Box::new(Type::String),
+//RS                 },
+//RS                 ("Date" | "LocalDate", "to_string" | "format") => Type::String,
+//RS                 ("Date" | "LocalDate", "format_checked") => Type::Result {
+//RS                     ok: Box::new(Type::String),
+//RS                     err: Box::new(Type::Named("TextError".to_string())),
+//RS                 },
+//RS                 ("Date" | "LocalDate", "until" | "since") => Type::Named("Duration".to_string()),
+//RS                 (
+//RS                     "LocalTime",
+//RS                     "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond",
+//RS                 ) => Type::Int,
+//RS                 (
+//RS                     "LocalTime",
+//RS                     "add_duration" | "subtract_duration" | "round" | "truncate" | "floor" | "ceil",
+//RS                 ) => Type::Named("LocalTime".to_string()),
+//RS                 ("LocalTime", "until" | "since") => Type::Named("Duration".to_string()),
+//RS                 ("LocalTime", "to_string" | "format") => Type::String,
+//RS                 ("LocalTime", "format_checked") => Type::Result {
+//RS                     ok: Box::new(Type::String),
+//RS                     err: Box::new(Type::Named("TextError".to_string())),
+//RS                 },
+//RS                 (
+//RS                     "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "ZonedDateTime",
+//RS                     "equal",
+//RS                 ) => Type::Bool,
+//RS                 (
+//RS                     "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "ZonedDateTime",
+//RS                     "compare",
+//RS                 ) => Type::Named(crate::Syntax::TYPE_ORDERING.to_string()),
+//RS                 ("DateTime", "hour")
+//RS                 | ("DateTime", "minute")
+//RS                 | ("DateTime", "second")
+//RS                 | ("DateTime", "millisecond")
+//RS                 | ("DateTime", "microsecond")
+//RS                 | ("DateTime", "nanosecond")
+//RS                 | ("DateTime", "to_timestamp")
+//RS                 | ("DateTime", "to_unix_ms")
+//RS                 | ("DateTime", "to_unix_s") => Type::Int,
+//RS                 ("DateTime", "to_unix_us" | "to_unix_ns") => Type::Result {
+//RS                     ok: Box::new(Type::Int),
+//RS                     err: Box::new(Type::Named("RangeError".to_string())),
+//RS                 },
+//RS                 ("DateTime", "date") => Type::Named("LocalDate".to_string()),
+//RS                 ("DateTime", "time") => Type::Named("LocalTime".to_string()),
+//RS                 (
+//RS                     "DateTime",
+//RS                     "plus_duration" | "subtract_duration" | "add_nanoseconds" | "add_period"
+//RS                     | "subtract_period" | "truncate" | "round" | "floor" | "ceil" | "replace",
+//RS                 ) => Type::Named("DateTime".to_string()),
+//RS                 ("DateTime", "with") => Type::Result {
+//RS                     ok: Box::new(Type::Named("DateTime".to_string())),
+//RS                     err: Box::new(Type::String),
+//RS                 },
+//RS                 ("DateTime", "difference" | "until" | "since") => {
+//RS                     Type::Named("Duration".to_string())
+//RS                 }
+//RS                 ("DateTime", "in_zone") => Type::Named("ZonedDateTime".to_string()),
+//RS                 ("DateTime", "to_string" | "format_rfc3339" | "format") => Type::String,
+//RS                 ("DateTime", "format_checked") => Type::Result {
+//RS                     ok: Box::new(Type::String),
+//RS                     err: Box::new(Type::Named("TextError".to_string())),
+//RS                 },
+//RS                 ("Instant", "elapsed_millis") => Type::Int,
+//RS                 ("Instant", "elapsed") => Type::Named("Duration".to_string()),
+//RS                 ("Period", "years" | "months" | "days" | "sign") => Type::Int,
+//RS                 ("Period", "is_zero") => Type::Bool,
+//RS                 ("Period", "abs" | "negated" | "add" | "sub") => Type::Named("Period".to_string()),
+//RS                 ("Period", "total_in") => Type::Float,
+//RS                 ("Period", "to_string") => Type::String,
+//RS                 ("Zone", "name") => Type::String,
+//RS                 ("Zone", "next_transition" | "previous_transition") => {
+//RS                     Type::Option(Box::new(Type::Int))
+//RS                 }
+//RS                 ("Zone", "start_of_day") => Type::Named("ZonedDateTime".to_string()),
+//RS                 ("Zone", "hours_in_day") => Type::Int,
+//RS                 ("ZonedDateTime", "date") => Type::Named("LocalDate".to_string()),
+//RS                 ("ZonedDateTime", "time") => Type::Named("LocalTime".to_string()),
+//RS                 ("ZonedDateTime", "offset_seconds") => Type::Int,
+//RS                 ("ZonedDateTime", "is_dst") => Type::Bool,
+//RS                 ("ZonedDateTime", "to_datetime") => Type::Named("DateTime".to_string()),
+//RS                 ("ZonedDateTime", "zone") => Type::Named("Zone".to_string()),
+//RS                 (
+//RS                     "ZonedDateTime",
+//RS                     "add_duration" | "subtract_duration" | "add_period" | "subtract_period",
+//RS                 ) => Type::Named("ZonedDateTime".to_string()),
+//RS                 ("ZonedDateTime", "with_zone" | "start_of_day") => {
+//RS                     Type::Named("ZonedDateTime".to_string())
+//RS                 }
+//RS                 ("ZonedDateTime", "with_time") => Type::Result {
+//RS                     ok: Box::new(Type::Named("ZonedDateTime".to_string())),
+//RS                     err: Box::new(Type::String),
+//RS                 },
+//RS                 ("ZonedDateTime", "until" | "since") => Type::Named("Duration".to_string()),
+//RS                 ("ZonedDateTime", "next_transition" | "previous_transition") => {
+//RS                     Type::Option(Box::new(Type::Int))
+//RS                 }
+//RS                 ("ZonedDateTime", "hours_in_day") => Type::Int,
+//RS                 ("ZonedDateTime", "to_string" | "format" | "format_rfc9557") => Type::String,
+//RS                 ("ZonedDateTime", "format_checked") => Type::Result {
+//RS                     ok: Box::new(Type::String),
+//RS                     err: Box::new(Type::Named("TextError".to_string())),
+//RS                 },
+//RS                 _ => unit_type(),
+//RS             });
+//RS             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+//RS             return TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::CivilTimeMethod {
+//RS                         kind,
+//RS                         method: method.to_string(),
+//RS                     },
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-TIMEDEPTH1=A: Duration is represented as raw nanoseconds in TIR/JIT,
+//RS     // so its comparison hook reuses the typed binary node. The node's Compare
+//RS     // form emits the same Prelude Comparable symbol as the release hook, while
+//RS     // evaluator and JIT already marshal Duration comparisons there.
+//RS     if recv_type.as_deref() == Some(crate::Syntax::DURATION_TYPE)
+//RS         && matches!(method, "equal" | "compare")
+//RS         && args.len() == 1
+//RS     {
+//RS         let op = if method == "equal" {
+//RS             crate::AST::BinOp::Eq
+//RS         } else {
+//RS             crate::AST::BinOp::Compare
+//RS         };
+//RS         let operator = Expr::Binary(
+//RS             op,
+//RS             Box::new(receiver.clone()),
+//RS             Box::new(args[0].expr.clone()),
+//RS             method_span,
+//RS         );
+//RS         return lower_expr(&operator, cx, env);
+//RS     }
+//RS     // D-APPROX1=A: a sketch method (gate shape d8). Sema normally persists the
+//RS     // nominal receiver in `recv_type`; comptime fragments can retain the same
+//RS     // concrete receiver only in the environment. Derive that name from the
+//RS     // checked receiver type as the fallback so all engines select one sketch
+//RS     // operation rather than the generic method/math fallback.
+//RS     let sketch = recv_type.clone().or_else(|| {
+//RS         let Type::Named(name) = tir_recv_jet_ty(receiver, env)? else {
+//RS             return None;
+//RS         };
+//RS         is_sketch_type(Some(name.as_str())).then_some(name)
+//RS     });
+//RS     if is_sketch_type(sketch.as_deref()) && is_sketch_method_name(sketch.as_deref(), method) {
+//RS         return in_own_frame(|| {
+//RS             let sketch = sketch.as_deref().unwrap_or("").to_string();
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let result_ty = match (sketch.as_str(), method) {
+//RS                 ("HyperLogLog", "add")
+//RS                 | ("TDigest", "add")
+//RS                 | ("CountMinSketch", "add")
+//RS                 | ("ReservoirSampler", "add") => unit_type(),
+//RS                 ("HyperLogLog", "count") | ("CountMinSketch", "count") => Type::Int,
+//RS                 ("TDigest", "quantile") => Type::Float,
+//RS                 ("ReservoirSampler", "sample") => Type::List(Box::new(Type::String)),
+//RS                 _ => unit_type(),
+//RS             };
+//RS             let targs: Vec<TExpr> = args
+//RS                 .iter()
+//RS                 .map(|a| {
+//RS                     let value = lower_expr(&a.expr, cx, env);
+//RS                     if sketch == "TDigest" && matches!(method, "add" | "quantile") {
+//RS                         let source_name = value.ty.without_user_tags().name();
+//RS                         if let Some((type_name, func)) =
+//RS                             crate::Numeric::precise_conversion_route("Float", &source_name)
+//RS                         {
+//RS                             return TExpr {
+//RS                                 ty: Type::Float,
+//RS                                 kind: TExprKind::PreciseBuiltin {
+//RS                                     type_name: type_name.to_string(),
+//RS                                     func: func.to_string(),
+//RS                                     args: vec![value],
+//RS                                 },
+//RS                             };
+//RS                         }
+//RS                         if source_name != "Float"
+//RS                             && crate::AST::numeric_type_from_name(&source_name).is_some()
+//RS                         {
+//RS                             if let Some(op) = resolve_numeric_conversion_op("Float", &source_name) {
+//RS                                 return TExpr {
+//RS                                     ty: Type::Float,
+//RS                                     kind: TExprKind::NumericMethod {
+//RS                                         recv: Box::new(value),
+//RS                                         op,
+//RS                                     },
+//RS                                 };
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     value
+//RS                 })
+//RS                 .collect();
+//RS             return TExpr {
+//RS                 ty: result_ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op: THandleOp::SketchMethod {
+//RS                         sketch,
+//RS                         method: method.to_string(),
+//RS                     },
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // c109 Phase 21 / D-TUPLE-DESTRUCT1: a Task/Receiver/Sender concurrency method
+//RS     // (gate shape d3). The gate proved `recv_type == None` + a disjoint concurrency
+//RS     // name+arity. Resolve the op + result type HERE (totality). The result type comes
+//RS     // from `Collections::builtin_method_return`'s `Type::Apply` arms
+//RS     // (Source/Collections.rs), read off the receiver's already-resolved type
+//RS     // `Task<T>`/`Receiver<T>`/`Sender<T>` (the LOWERED receiver's `.ty`, total from the
+//RS     // binding's annotated/inferred slot — never re-inferred in emit, I3): `join`
+//RS     // → `T !TaskFailure`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
+//RS     // `receive` → `Result<T, Closed>`. Args lowered PLAINLY (the AST
+//RS     // `emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
+//RS     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
+//RS         return in_own_frame(|| {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             // `Task<T>` is source-shaped in sema, while a spawned closure may
+//RS             // store its effective `Result<T, E>` carrier in the handle.  `join`
+//RS             // exposes the source success value, so project one private carrier
+//RS             // layer before constructing its public `T !TaskFailure` result.
+//RS             let elem = match &recv_t.ty {
+//RS                 Type::Apply { name, args } if name == "Task" => match args.first() {
+//RS                     Some(Type::Result { ok, .. }) | Some(Type::Option(ok)) => Some((**ok).clone()),
+//RS                     Some(other) => Some(other.clone()),
+//RS                     None => None,
+//RS                 },
+//RS                 Type::Apply { args, .. } => args.first().cloned(),
+//RS                 _ => None,
+//RS             };
+//RS             let elem = elem.unwrap_or_else(unit_type);
+//RS             let (op, ty) = in_own_frame(|| match method {
+//RS                 "join" => (
+//RS                     THandleOp::TaskJoin,
+//RS                     resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+//RS                         ok: Box::new(elem),
+//RS                         err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+//RS                     }),
+//RS                 ),
+//RS                 "detach" => (THandleOp::TaskDetach, unit_type()),
+//RS                 "pause" => (THandleOp::TaskPause, unit_type()),
+//RS                 "resume" => (THandleOp::TaskResume, unit_type()),
+//RS                 "cancel" => (THandleOp::TaskCancel, unit_type()),
+//RS                 "receive" => (
+//RS                     THandleOp::ChannelReceive,
+//RS                     Type::Result {
+//RS                         ok: Box::new(elem.clone()),
+//RS                         err: Box::new(Type::Named("Closed".to_string())),
+//RS                     },
+//RS                 ),
+//RS                 "try_receive" => (
+//RS                     THandleOp::ChannelTryReceive,
+//RS                     Type::Option(Box::new(elem.clone())),
+//RS                 ),
+//RS                 "is_timer" => (THandleOp::ChannelIsTimer, Type::Bool),
+//RS                 "is_interval" => (THandleOp::ChannelIsInterval, Type::Bool),
+//RS                 "is_cancelled" => (THandleOp::ChannelIsCancelled, Type::Bool),
+//RS                 "is_ready" => (THandleOp::ChannelIsReady, Type::Bool),
+//RS                 "delay_ms" => (THandleOp::ChannelDelayMs, Type::Int),
+//RS                 "close" => (THandleOp::ChannelClose, unit_type()),
+//RS                 "send" => (THandleOp::SenderSend, unit_type()),
+//RS                 _ => unreachable!("is_concurrency_method_name admitted only these names"),
+//RS             });
+//RS             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+//RS             return TExpr {
+//RS                 ty,
+//RS                 kind: TExprKind::HandleMethod {
+//RS                     recv: Box::new(recv_t),
+//RS                     op,
+//RS                     args: targs,
+//RS                 },
+//RS             };
+//RS         });
+//RS     }
+//RS     // D-MEM1 S6 (D-POOLID-API1=A / D-SHARED-API1=A): `Pool<T>.add/remove/ids`
+//RS     // and `Shared<T>.read/edit`. Both lower to a PLAIN Rust method call on the
+//RS     // receiver (`(recv).add(val)`, …) — `add`/`remove`/`ids` are genuine
+//RS     // inherent methods on `JetPool<T>` and `read`/`edit` on `JetShared<T>`
+//RS     // (Prelude/CoreLib.rs), so there's no free-function indirection to model
+//RS     // (unlike `Pool`/`Shared` INDEXING, which needs a real mutable-place
+//RS     // helper — see the `Expr::Index`/`LValue::Field` arms). `ConstInline` is
+//RS     // the pragmatic vehicle, same as the concurrency/SQL/HTML escapes nearby.
+//RS     {
+//RS         let recv_peek = tir_recv_jet_ty(receiver, env);
+//RS         // Sema normally sets `recv_type` to `"Pool"`/`"Shared"` explicitly for
+//RS         // these calls. Comptime fragments can omit that name while retaining the
+//RS         // resolved receiver type, so recognize `Pool<T>` from either source.
+//RS         let is_pool = recv_type.as_deref() == Some("Pool")
+//RS             || matches!(
+//RS                 &recv_peek,
+//RS                 Some(Type::Apply { name, .. }) if name == "Pool"
+//RS             );
+//RS         let is_shared =
+//RS             recv_type.as_deref() == Some("Shared") || matches!(&recv_peek, Some(Type::Shared(_)));
+//RS         let is_shared_snapshot = recv_type.as_deref() == Some(Syntax::TYPE_SHARED_SNAPSHOT)
+//RS             || matches!(
+//RS                 &recv_peek,
+//RS                 Some(Type::Apply { name, .. }) if name == Syntax::TYPE_SHARED_SNAPSHOT
+//RS             );
+//RS         if is_shared_snapshot && method == "value" && args.is_empty() {
+//RS             return in_own_frame(|| {
+//RS                 let ty = resolved_ret.cloned().unwrap_or_else(|| match &recv_peek {
+//RS                     Some(Type::Apply { args, .. }) if args.len() == 2 => args[1].clone(),
+//RS                     _ => Type::Int,
+//RS                 });
+//RS                 return TExpr {
+//RS                     ty,
+//RS                     kind: TExprKind::HostCall(Box::new(THostCall::Method {
+//RS                         recv: Box::new(lower_expr(receiver, cx, env)),
+//RS                         method: method.to_string(),
+//RS                         args: Vec::new(),
+//RS                     })),
+//RS                 };
+//RS             });
+//RS         }
+//RS         let cell_receiver = recv_type
+//RS             .as_deref()
+//RS             .filter(|name| matches!(*name, "Cell" | "CellReadGuard" | "CellEditGuard"));
+//RS         let is_expiring_secret = recv_type.as_deref() == Some("ExpiringSecret");
+//RS         if is_pool && matches!(method, "add" | "remove" | "ids") && args.len() <= 1 {
+//RS             return in_own_frame(|| {
+//RS                 let recv_t = lower_expr(receiver, cx, env);
+//RS                 let elem = match &recv_t.ty {
+//RS                     Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 let id_ty = Type::Apply {
+//RS                     name: "ID".to_string(),
+//RS                     args: vec![elem.clone()],
+//RS                 };
+//RS                 let ty = match method {
+//RS                     "add" => id_ty,
+//RS                     "remove" => Type::Option(Box::new(elem)),
+//RS                     "ids" => Type::List(Box::new(id_ty)),
+//RS                     _ => unreachable!("matches! above admitted only these"),
+//RS                 };
+//RS                 let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+//RS                 return TExpr {
+//RS                     ty,
+//RS                     kind: TExprKind::HostCall(Box::new(THostCall::Method {
+//RS                         recv: Box::new(recv_t),
+//RS                         method: method.to_string(),
+//RS                         args: targs,
+//RS                     })),
+//RS                 };
+//RS             });
+//RS         }
+//RS         if is_shared && method == "capture" && args.len() <= 1 {
+//RS             return in_own_frame(|| {
+//RS                 let recv_t = lower_expr(receiver, cx, env);
+//RS                 let inner = match recv_peek.as_ref().unwrap_or(&recv_t.ty) {
+//RS                     Type::Shared(inner) => (**inner).clone(),
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 let (targs, projection_ty) = if let Some(arg) = args.first() {
+//RS                     let Expr::Lambda(lam) = &arg.expr else {
+//RS                         unreachable!("sema's finish_shared_capture requires a lambda argument");
+//RS                     };
+//RS                     let expected = std::slice::from_ref(&inner);
+//RS                     let lowered = lower_lambda_expecting_host_borrow(lam, cx, env, expected, false);
+//RS                     let projection_ty = lambda_body_ty_expecting(lam, cx, env, Some(expected));
+//RS                     (
+//RS                         vec![TExpr {
+//RS                             ty: Type::Fn {
+//RS                                 params: vec![inner.clone()],
+//RS                                 ret: Some(Box::new(projection_ty.clone())),
+//RS                                 effect_bound: None,
+//RS                                 param_contract: None,
+//RS                                 call_metadata: None,
+//RS                                 return_view_provenance: None,
+//RS                             },
+//RS                             kind: TExprKind::Lambda(Box::new(lowered)),
+//RS                         }],
+//RS                         projection_ty,
+//RS                     )
+//RS                 } else {
+//RS                     (Vec::new(), inner.clone())
+//RS                 };
+//RS                 let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Apply {
+//RS                     name: Syntax::TYPE_SHARED_SNAPSHOT.to_string(),
+//RS                     args: vec![inner, projection_ty],
+//RS                 });
+//RS                 let method_out = if cx.in_stm_transact.get() {
+//RS                     cx.stm_touched.set(true);
+//RS                     "capture_txn"
+//RS                 } else {
+//RS                     "capture"
+//RS                 };
+//RS                 return TExpr {
+//RS                     ty,
+//RS                     kind: TExprKind::HostCall(Box::new(THostCall::Method {
+//RS                         recv: Box::new(recv_t),
+//RS                         method: method_out.to_string(),
+//RS                         args: targs,
+//RS                     })),
+//RS                 };
+//RS             });
+//RS         }
+//RS         if is_shared && method == "try_replace" && args.len() == 2 {
+//RS             return in_own_frame(|| {
+//RS                 let recv_t = lower_expr(receiver, cx, env);
+//RS                 let targs = args
+//RS                     .iter()
+//RS                     .map(|arg| lower_expr(&arg.expr, cx, env))
+//RS                     .collect();
+//RS                 let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+//RS                     ok: Box::new(Type::Bool),
+//RS                     err: Box::new(Type::Named(Syntax::TYPE_SHARED_REVISION_ERROR.to_string())),
+//RS                 });
+//RS                 return TExpr {
+//RS                     ty,
+//RS                     kind: TExprKind::HostCall(Box::new(THostCall::Method {
+//RS                         recv: Box::new(recv_t),
+//RS                         method: method.to_string(),
+//RS                         args: targs,
+//RS                     })),
+//RS                 };
+//RS             });
+//RS         }
+//RS         if is_shared && matches!(method, "read" | "edit") && args.len() == 1 {
+//RS             return in_own_frame(|| {
+//RS                 let recv_t = lower_expr(receiver, cx, env);
+//RS                 // A field receiver (`graph.hooks.read(...)`, also the sema
+//RS                 // rewrite of `graph.hooks.name`) has no env slot type to peek;
+//RS                 // its lowered type carries the checked `Shared<T>`.
+//RS                 let inner = match recv_peek.as_ref().unwrap_or(&recv_t.ty) {
+//RS                     Type::Shared(inner) => (**inner).clone(),
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 let Expr::Lambda(lam) = &args[0].expr else {
+//RS                     unreachable!(
+//RS                         "sema's finish_shared_read/finish_shared_edit require a lambda arg"
+//RS                     );
+//RS                 };
+//RS                 let expected = std::slice::from_ref(&inner);
+//RS                 // `JetShared::read`/`edit` lend `&T`/`&mut T` directly. This host
+//RS                 // borrow is not an unmarked function-value parameter and must not
+//RS                 // receive another D-MEM-PARAM1 Read borrow.
+//RS                 let mut tl =
+//RS                     lower_lambda_expecting_host_borrow(lam, cx, env, expected, method == "edit");
+//RS                 // D-CONC-STM1=A: a Shared read inside a transaction registers
+//RS                 // its participant before doing the ordinary immediate read.
+//RS                 // A write still defers to commit. The Prelude then acquires
+//RS                 // every registered participant in one stable address order.
+//RS                 let (method_out, ty) = if cx.in_stm_transact.get() {
+//RS                     cx.stm_touched.set(true);
+//RS                     if method == "edit" {
+//RS                         // The closure is stored past the call, so it must move
+//RS                         // its captures. A transactional edit yields Unit.
+//RS                         tl.is_move = true;
+//RS                         ("edit_txn", Type::Tuple(vec![]))
+//RS                     } else {
+//RS                         (
+//RS                             "read_txn",
+//RS                             lambda_body_ty_expecting(lam, cx, env, Some(expected)),
+//RS                         )
+//RS                     }
+//RS                 } else {
+//RS                     (
+//RS                         method,
+//RS                         lambda_body_ty_expecting(lam, cx, env, Some(expected)),
+//RS                     )
+//RS                 };
+//RS                 return TExpr {
+//RS                     ty,
+//RS                     kind: TExprKind::HostCall(Box::new(THostCall::Method {
+//RS                         recv: Box::new(recv_t),
+//RS                         method: method_out.to_string(),
+//RS                         args: vec![TExpr {
+//RS                             ty: Type::Fn {
+//RS                                 params: vec![inner],
+//RS                                 ret: None,
+//RS                                 effect_bound: None,
+//RS                                 return_view_provenance: None,
+//RS                                 param_contract: None,
+//RS                                 call_metadata: None,
+//RS                             },
+//RS                             kind: TExprKind::Lambda(Box::new(tl)),
+//RS                         }],
+//RS                     })),
+//RS                 };
+//RS             });
+//RS         }
+//RS         if is_shared && matches!(method, "guard_read" | "guard_edit") && args.is_empty() {
+//RS             return in_own_frame(|| {
+//RS                 let inner = match &recv_peek {
+//RS                     Some(Type::Shared(inner)) => (**inner).clone(),
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 let marker = if method == "guard_edit" {
+//RS                     crate::AST::InternalTag::SharedGuardEdit
+//RS                 } else {
+//RS                     crate::AST::InternalTag::SharedGuardRead
+//RS                 };
+//RS                 let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Tagged {
+//RS                     marker: crate::AST::TagMarker::Internal(marker),
+//RS                     inner: Box::new(Type::Apply {
+//RS                         name: Syntax::TYPE_SHARED_GUARD.to_string(),
+//RS                         args: vec![inner],
+//RS                     }),
+//RS                 });
+//RS                 return TExpr {
+//RS                     ty,
+//RS                     kind: TExprKind::HostCall(Box::new(THostCall::Method {
+//RS                         recv: Box::new(lower_expr(receiver, cx, env)),
+//RS                         method: method.to_string(),
+//RS                         args: Vec::new(),
+//RS                     })),
+//RS                 };
+//RS             });
+//RS         }
+//RS         // D-SHARED-CYCLE1=C: Shared.downgrade / strong_count → inherent JetShared methods.
+//RS         if is_shared && matches!(method, "downgrade" | "strong_count") && args.is_empty() {
+//RS             return in_own_frame(|| {
+//RS                 let inner = match &recv_peek {
+//RS                     Some(Type::Shared(inner)) => (**inner).clone(),
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 let ty = resolved_ret.cloned().unwrap_or_else(|| {
+//RS                     if method == "strong_count" {
+//RS                         Type::Int
+//RS                     } else {
+//RS                         Type::Apply {
+//RS                             name: Syntax::TYPE_SHARED_WEAK.to_string(),
+//RS                             args: vec![inner],
+//RS                         }
+//RS                     }
+//RS                 });
+//RS                 return TExpr {
+//RS                     ty,
+//RS                     kind: TExprKind::HostCall(Box::new(THostCall::Method {
+//RS                         recv: Box::new(lower_expr(receiver, cx, env)),
+//RS                         method: method.to_string(),
+//RS                         args: Vec::new(),
+//RS                     })),
+//RS                 };
+//RS             });
+//RS         }
+//RS         // Owner ruling: `a.same(b)` is identity only, like `Rc::ptr_eq`.
+//RS         if is_shared && method == "same" && args.len() == 1 {
+//RS             return in_own_frame(|| {
+//RS                 let recv_t = lower_expr(receiver, cx, env);
+//RS                 let other = lower_expr(&args[0].expr, cx, env);
+//RS                 return TExpr {
+//RS                     ty: resolved_ret.cloned().unwrap_or(Type::Bool),
+//RS                     kind: TExprKind::HostCall(Box::new(THostCall::Method {
+//RS                         recv: Box::new(recv_t),
+//RS                         method: method.to_string(),
+//RS                         args: vec![other],
+//RS                     })),
+//RS                 };
+//RS             });
+//RS         }
+//RS         let is_shared_weak = recv_type.as_deref() == Some(Syntax::TYPE_SHARED_WEAK)
+//RS             || matches!(
+//RS                 &recv_peek,
+//RS                 Some(Type::Apply { name, .. }) if name == Syntax::TYPE_SHARED_WEAK
+//RS             );
+//RS         if is_shared_weak && method == "upgrade" && args.is_empty() {
+//RS             return in_own_frame(|| {
+//RS                 let inner = match &recv_peek {
+//RS                     Some(Type::Apply { args, .. }) if !args.is_empty() => args[0].clone(),
+//RS                     _ => Type::Int,
+//RS                 };
+//RS                 let ty = resolved_ret
+//RS                     .cloned()
+//RS                     .unwrap_or_else(|| Type::Option(Box::new(Type::Shared(Box::new(inner)))));
+//RS                 return TExpr {
+//RS                     ty,
+//RS                     kind: TExprKind::HostCall(Box::new(THostCall::Method {
+//RS                         recv: Box::new(lower_expr(receiver, cx, env)),
+//RS                         method: method.to_string(),
+//RS                         args: Vec::new(),
+//RS                     })),
+//RS                 };
+//RS             });
+//RS         }
+//RS         if let Some(cell_receiver) = cell_receiver {
+//RS             let recv_t = lower_expr(receiver, cx, env);
+//RS             let inner = match &recv_t.ty {
+// END-PORT-PENDING 0489 crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:7394-9252
+

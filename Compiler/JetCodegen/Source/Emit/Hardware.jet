@@ -3,6 +3,7 @@
 // emit_hardware_interrupt_runtime / emit_hardware_setups / hardware_call so the
 // Jet emitter produces the same statics and helper names for the same MIR.
 use jet_foundation.[
+    foundation_generated_path,
     MIRAccess,
     MIRCallArg,
     MIRFailureCarrier,
@@ -20,33 +21,6 @@ use jet_foundation.[
     mir_type_same_checked_type,
 ]
 
-// Syntax::generated_path: `__jet_` plus the byte-escaped canonical path.
-fn jet_rust_emit_generated_path(name: String) -> String Never! {
-    hex :: "0123456789abcdef"
-    out := [U8]{}
-    loop byte in name.bytes() {
-        code :: Int.from_u8(byte)
-        if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) {
-            &out.push(byte)
-            next
-        }
-        &out.push(U8{95})
-        if {
-            code == 95 -> &out.push(U8{117})
-            code == 46 -> &out.push(U8{100})
-            code == 58 -> &out.push(U8{99})
-            code == 47 -> &out.push(U8{115})
-            code == 92 -> &out.push(U8{98})
-            code == 45 -> &out.push(U8{104})
-            else -> {
-                &out.push(U8{120})
-                &out.push(hex.bytes()[code /% 16])
-                &out.push(hex.bytes()[code % 16])
-            }
-        }
-    }
-    "__jet_{String.from_bytes(out) ?? ""}"
-}
 
 fn jet_rust_emit_is_no_os(ctx: &JetRustEmitContext) -> Bool Never! {
     machine :: ctx.program.facts.target_dossier.machine ?? return false
@@ -102,7 +76,7 @@ fn jet_rust_emit_dma_ownership_name(ownership: MIRTargetDMAOwnership) -> String 
 fn jet_rust_emit_bool_text(value: Bool) -> String Never! { if value -> "true" else -> "false" }
 
 fn jet_rust_emit_hardware_register_helper_name(operation: String, profile_id: String, block: String, register: String) -> String Never! {
-    jet_rust_emit_generated_path("hardware_register_{operation}.{profile_id}.{block}.{register}")
+    foundation_generated_path("hardware_register_{operation}.{profile_id}.{block}.{register}")
 }
 
 fn jet_rust_emit_hardware_register_helper(ctx: &JetRustEmitContext, block_index: Int, block: MIRTargetRegisterBlockFact, register: MIRTargetRegisterFact, operation: String, lines: &[String]) Never! {

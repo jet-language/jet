@@ -1,0 +1,362 @@
+// Declaration regressions ported from tests/fmt.rs and fmt_round_trip_regressions.rs.
+// All fixtures go through the real formatter SCC and canonical Foundation AST.
+use jet_parser.[jet_format_source, jet_format_synthetic_program, jet_format_canonical_program, parse_for_fmt]
+use jet_lexer.[lex]
+use jet_foundation.[Item, Type, TypeParam, NamedSpan, Span, SerdeWireShape, TypeAliasDef, Variant, VariantPayload, Marker, MarkerCallArg, ast_enum, ast_struct, resolved_decode_wire_shapes, foundation_generated_path, foundation_member_name, foundation_decode_generated_path_suffix, callable_marker_needs_line_break]
+
+fn item_test_format(source: String) -> String Never! { jet_format_source(source).source ?? panic("declaration fixture did not format") }
+fn item_test_identity(source: String) -> [U8] Never! {
+    tokens :: lex(source.bytes())
+    assert_eq(tokens.diagnostics.len(), 0)
+    parsed :: parse_for_fmt(tokens.tokens)
+    jet_format_canonical_program(parsed.program ?? panic("declaration fixture did not parse"))
+}
+fn item_test_stable(source: String) -> String Never! {
+    output :: item_test_format(source)
+    assert_eq(item_test_identity(source), item_test_identity(output))
+    assert_eq(output, item_test_format(output))
+    output
+}
+fn item_test_keeps(source: String, needles: [String]) Never! {
+    output :: item_test_stable(source)
+    loop needle in needles -> assert(output.contains(needle))
+}
+fn item_test_order(source: String, needles: [String]) Never! {
+    output :: item_test_stable(source)
+    previous := -1
+    loop needle in needles {
+        offset :: output.index_of(needle) ?? panic("source-ordered member lost")
+        assert(offset > previous)
+        previous = offset
+    }
+}
+
+// tests/fmt.rs:59-83,226-255,279-315,347-353.
+#Test("type_alias_binding_sigils_are_canonical_and_idempotent") {
+    output :: item_test_stable("alias Result<T> :: T Int!;\nfn run() {{}}\n")
+    assert(output.contains("alias Result<T> :: T Int!"))
+    assert(!output.contains("alias Result<T> ="))
+}
+#Test("fmt_preserves_module_declaration_and_function_source_order") {
+    item_test_order("MESSAGE :: \"module global\"\n\nfn helper() -> Int {{\n    return 42\n}}\n\nfn run() {{\n    print(MESSAGE)\n    print(helper())\n}}\n", ["MESSAGE ::", "fn helper", "fn run"])
+}
+#Test("fmt_preserves_root_receiver_declarations") {
+    item_test_keeps("fn show(#Root value: Int) {{ print(value) }}\n", ["fn show(#Root value: Int)"])
+}
+#Test("fmt_canonicalizes_unit_return_types") {
+    item_test_keeps("fn run() Err! {{ return Err(\"boom\") }}\n", ["fn run() Err!"])
+    assert(jet_format_source("fn run() ? {{ return Err(\"boom\") }}\n").source == None)
+    assert(jet_format_source("fn run() => Void ! {{ return Err(\"boom\") }}\n").source == None)
+}
+#Test("repr_c_enum_surface_is_stable") {
+    item_test_keeps("#Layout(c, tag: U8)\nenum Packet {{ Ping(Int) = 3; Data(x: I32, y: I32) = 7 }}\n", ["#Layout(c, tag: U8)", "Ping(Int) = 3", "Data(x: I32, y: I32) = 7"])
+}
+#Test("computed_declaration_values_format_stably") {
+    item_test_keeps("LANES :: prep {{ 2 }}\nBASE :: prep {{ 40 }}\nstruct Frame {{ values: [Int#(LANES * 2)] }}\n#Layout(c, tag: U8) enum Code {{ First = BASE + 1 Second }}\n", ["[Int#(LANES * 2)]", "First = BASE + 1"])
+}
+// D-SIG-AFTER1=A: Main reconciled stale arrow-body goldens to named-function braces.
+#Test("multi_head_function_surface_round_trips") {
+    item_test_keeps("enum Shape {{ Circle(Float) Rect(w: Float, h: Float) }}\n\nfn area(Circle(r: Float)) -> Float -> r * r\nfn area(Rect(w: Float, h: Float)) -> Float -> w * h\n", ["fn area(Circle(r: Float)) -> Float {{ r * r }}", "fn area(Rect(w: Float, h: Float)) -> Float {{ w * h }}"])
+}
+#Test("typestate_section_stays_inside_its_struct") {
+    output :: item_test_stable("struct Door {{ state {{ Open, Closed }} value: Int }}\nfn run() {{}}\n")
+    assert(output.contains("state {{ Open, Closed }}"))
+    assert(!output.contains("\nstate Door"))
+}
+
+// tests/fmt.rs:420-439,1635-1694,2144-2441.
+#Test("fmt_preserves_typed_performance_budget_role") {
+    item_test_keeps("module perf.release{{compile_workloads:{{rename_route:CompilerWorkload.Edit{{target:\"cli\",patch:\"edits/rename-route.patch\"}}}}budgets:[Budget{{name:\"compile\",scope:.Target(\"cli\"),metric:.CompileTime(.P95),provider:.CompilerProbe(.Edit(\"rename_route\")),comparison:.RelativeTo(\"ci/linux-x64\"),limit:.RegressionAtMost(5pct)}}]}}", ["module perf.release", "compile_workloads:", "CompilerWorkload.Edit{{", "patch: \"edits/rename-route.patch\"", "budgets:", "Budget{{", ".Target(\"cli\")", ".CompileTime(.P95)", ".CompilerProbe(.Edit(\"rename_route\"))", ".RegressionAtMost(5pct)"])
+}
+#Test("fmt_preserves_ambiguous_codable_union_source_order") {
+    _ :: item_test_stable("use core.encoding.json as json\n\n#Codable\nstruct Row {{\n    // String and Char both encode as Text — decode cannot pick uniquely.\n    value: String | Char\n}}\n\nfn run() {{\n    print(\"x\")\n}}\n")
+    _ :: item_test_stable("#Codable\nenum Envelope {{\n    Value(Int | I32)\n}}\n\nfn run() {{\n    print(\"x\")\n}}\n")
+}
+#Test("fmt_preserves_comments_in_ambiguous_decode_unions") {
+    item_test_keeps("#Decode\nstruct Row {{\n    value: String /* Text */ | Char\n}}\n", ["value: String /* Text */ | Char"])
+    item_test_keeps("#Decode\nstruct Row {{\n    value: String | Char // note\n}}\n", ["value: String | Char", "// note"])
+}
+#Test("fmt_still_canonicalizes_valid_codable_union") {
+    item_test_keeps("#Codable\nstruct Row {{\n    value: String | Int\n}}\n", ["value: Int | String"])
+}
+#Test("fmt_canonicalizes_skipped_decode_union") {
+    item_test_keeps("#Decode\nstruct Row {{\n    #Skip value: String | Char\n}}\n", ["value: Char | String"])
+}
+#Test("fmt_nested_enum_groups_stability") {
+    item_test_keeps("enum Damage {{\n    Physical {{ Blunt, Pierce }}\n    Fire {{ Burn, Scald }}\n    Cold\n}}\n\nfn run() {{\n    d := Damage.Fire.Burn\n    if d == {{\n        .Physical -> {{ print(\"physical\") }}\n        .Fire -> {{ print(\"fire\") }}\n        .Cold -> {{ print(\"cold\") }}\n    }}\n}}\n", ["Physical {{", "Blunt", "Pierce", ".Fire ->", "Fire {{"])
+}
+#Test("fmt_keeps_codable_and_field_rename_and_turbofish") {
+    item_test_keeps("#Codable\nstruct Order {{\n    id: Int\n    #Rename(\"customer\") who: String\n}}\n\nfn run() {{\n    raw :: \"x\"\n    back :: json.decode<Order>(raw) ?? panic(\"bad\")\n    print(back.who)\n}}\n", ["#Codable", "#Rename(\"customer\")", "decode<Order>"])
+}
+// Main ratified callable marker-list placement inline; frozen Rust differs.
+#Test("fmt_rewrites_marker_stacking_to_one_shape_and_is_stable") {
+    single :: item_test_stable("#[Codable]\nstruct Invoice {{ id: Int }}\n")
+    assert(single.contains("#Codable\nstruct Invoice"))
+    stacked :: item_test_stable("#Job #Every(5min) fn prune() {{\n}}\n")
+    assert(stacked.contains("#[Job, Every(5min)] fn prune"))
+}
+#Test("fmt_preserves_memo_bound_marker") {
+    _ :: item_test_stable("#Memo(bound: none) fn cube(value: Int) -[]> Int -> value * value * value\n\nfn run() {{}}\n")
+}
+#Test("fmt_keeps_cli_doc_and_default_field_markers") {
+    item_test_keeps("#CLI\nstruct ServeArgs {{\n    #[Doc(\"port to listen on\")] port: Int{{3000}}\n    #Doc(\"print extra detail\") verbose: Bool\n}}\n\nfn run(args: ServeArgs) {{\n    print(args.port)\n    print(args.verbose)\n}}\n", ["#Doc(\"port to listen on\")", "port: Int{{3000}}", "#CLI"])
+}
+#Test("fmt_keeps_cli_command_bindings") {
+    item_test_keeps("#CLI\nstruct Commands {{\n    #Doc(\"preview changes\") plan = plan_impl\n\n    fn serve(self) {{}}\n}}\n\nfn plan_impl(args: Commands) {{}}\nfn run(args: Commands) {{}}\n", ["#Doc(\"preview changes\")", "plan = plan_impl", "#CLI"])
+}
+#Test("fmt_keeps_container_rename_all") {
+    item_test_keeps("#[Codable, RenameAll(camel)]\nstruct Person {{\n    full_name: String\n}}\n", ["#[Codable, RenameAll(camel)]"])
+}
+#Test("fmt_keeps_layout_columnar_and_codable") {
+    source :: "#[Codable, Layout(columnar)]\nstruct Particle {{\n    x: Float\n}}\n"
+    output :: item_test_stable(source)
+    assert(output.contains("#[Codable, Layout(columnar)]"))
+    assert(!output.contains("derive Encode"))
+    assert(!output.contains("derive Decode"))
+}
+#Test("fmt_stable_at_marked_fn_and_struct") {
+    _ :: item_test_stable("fn double(n: Int) -[]> Int {{\n    return (n * 2)\n}}\n")
+    _ :: item_test_stable("#[Codable, Layout(columnar)]\nstruct Particle {{\n    x: Float\n}}\n")
+}
+#Test("fmt_stable_effect_arrows") {
+    _ :: item_test_stable("fn load(path: String) -[FS.Read, ..E]> String {{\n    return path\n}}\n\nfn visit(callback: fn(Int) -[IO]>) -[via callback]> {{\n    callback(1)\n}}\n\n// `-[]>` replaces the retired `#Pure` marker without moving this comment.\nfn hash(n: Int) -[]> Int {{\n    return n\n}}\n")
+}
+#Test("fmt_keeps_single_use_marker") { item_test_keeps("#SingleUse struct Lock {{\n    resource: String\n}}\n", ["#SingleUse struct Lock"]) }
+#Test("fmt_keeps_layout_c_struct") { item_test_keeps("#Layout(c)\nstruct Header {{\n    magic: Int\n}}\n", ["#Layout(c)"]) }
+#Test("fmt_rejects_retired_body_derive_line") { assert(jet_format_source("struct Score {{\n    points: Int\n\n    derive Comparable\n}}\n").source == None) }
+#Test("fmt_keeps_enum_variant_rename_and_tag") {
+    item_test_keeps("#[Codable, Discriminant(\"type\")]\nenum Shape {{\n    #Rename(\"circle\") Circle(Float)\n    Square(Float)\n}}\n", ["#[Codable, Discriminant(\"type\")]", "#Rename(\"circle\")"])
+}
+#Test("fmt_keeps_replayable_marker") { item_test_keeps("#Replayable fn replay_turn(seed: Int) -> Int {{\n    return seed + 1\n}}\n", ["#Replayable fn replay_turn"]) }
+#Test("fmt_keeps_typestate_markers") {
+    item_test_keeps("struct Reservation {{\n    state {{ Pending, Confirmed }}\n    guest: String\n\n    #Transition(_, Pending) fn book(guest: String) -> Reservation {{\n        return Reservation{{guest: ~guest}}\n    }}\n\n    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -> Reservation {{\n        return self\n    }}\n\n    #State(Confirmed) fn check_in(self) {{\n        print(self.guest)\n    }}\n}}\n", ["#Transition(_, Pending)", "#Transition(Pending, Confirmed)", "#State(Confirmed)"])
+}
+
+// tests/fmt.rs:2747-2823,2899-2971,3252-3285.
+#Test("fmt_impl_dot_trait_stability") {
+    item_test_keeps("trait Greet {{\n    fn hello(self) -> String\n}}\n\nstruct Foo {{}}\n\nimpl Foo.Greet {{\n    fn hello(self) -> String {{\n        return \"hi\"\n    }}\n}}\n", ["impl Foo.Greet"])
+}
+#Test("fmt_test_paren_name_stability") {
+    item_test_keeps("fn run() {{}}\n#Test(\"double returns twice\") {{\n    assert_eq(2 * 2, 4)\n}}\n", ["#Test(\"double returns twice\")"])
+}
+#Test("fmt_test_faults_stability") {
+    item_test_keeps("#Test(faults: [FS.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {{\n    assert(true)\n}}\nfn run() {{}}\n", ["#Test(faults: [FS.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic()"])
+}
+#Test("fmt_write_sigil_d_mem1_stability") {
+    item_test_keeps("struct Player {{\n    hp: Int\n}}\n\nimpl Player {{\n    fn show(self) -> Int {{ return self.hp }}\n\n    fn heal(&self, amount: Int) {{ self.hp = self.hp + amount }}\n}}\n\nfn damage(p: &Player, amount: Int) {{\n    p.hp = p.hp - amount\n}}\n\nfn archive(p: ^Player) -> Int {{\n    return p.hp\n}}\n\nfn run() {{\n    p := Player{{hp: 100}}\n    damage(&p, 10)\n    p.heal(5)\n    print(archive(^p))\n}}\n", ["fn heal(&self, amount: Int)", "fn damage(p: &Player, amount: Int)", "fn archive(p: ^Player) -> Int {{", "damage(&p, 10)", "archive(^p)"])
+}
+#Test("fmt_memory_denial_d_authority_mem1_stability") { item_test_keeps("fn run() -[!Mem.Alloc]> {{\n    print(\"ok\")\n}}\n", ["fn run() -[!Mem.Alloc]>"]) }
+#Test("fmt_copies_policy_d_mem_copysem1_stability") { item_test_keeps("#Policy(copies: .Explicit)\n\nfn run() {{\n    print(\"ok\")\n}}\n", ["#Policy(copies: .Explicit)"]) }
+#Test("fmt_selective_import_d_selimport1_stability") {
+    item_test_keeps("module math {{\n    pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {{\n        if x < lo {{ return lo }}\n        if x > hi {{ return hi }}\n        return x\n    }}\n}}\n\nuse math.[clamp, clamp as c2]\nuse core.math.[abs as absolute, min]\nuse core.encoding.[json, csv]\nuse c.[raylib as rl, sqlite3]\n\nfn run() {{\n    print(clamp(15, 0, 10))\n    print(c2(5, 0, 3))\n}}\n", ["use math.[clamp, clamp as c2]", "use core.math.[abs as absolute, min]", "use core.encoding.[json, csv]", "use c.[raylib as rl, sqlite3]"])
+}
+
+// tests/fmt.rs:3435-3454,3476-3489,3649-3768.
+#Test("fmt_preserves_scaled_affine_unit_declaration") { _ :: item_test_stable("#UnitFamily(Temperature, base: kelvin) {{\n    kelvin\n    celsius(scale: 1, offset: 27315/100)\n}}\n") }
+#Test("fmt_preserves_open_dimension_and_scale_provenance") { _ :: item_test_stable("#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) {{\n    newton\n    standard_gravity(scale: conventional(9.80665, source: \"BIPM-2026\"))\n}}\n") }
+#Test("fmt_preserves_range_constraint") { _ :: item_test_stable("Severity :: distinct Int(0..10)\n\nfn run() {{\n    sev :: Severity.from_int(3)\n    print(\"{{sev.raw()}}\")\n}}\n") }
+#Test("fmt_preserves_capbundle_markers") { _ :: item_test_stable("#[Numeric, Comparable] Usd :: distinct Int\n\n#[Printable, CodableAsBase] CustomerID :: distinct Int\n\nfn run() {{\n    a :: Usd.from_int(100)\n    print(a.raw())\n}}\n") }
+#Test("fmt_preserves_contracts") { _ :: item_test_stable("#[Pre(cents > 0, \"cents must be positive\"), Post(result > cents, \"result must exceed cents\")] fn add_fee(cents: Int) -> Int {{\n    return cents + 5\n}}\n\nfn run() {{\n    print(\"{{(add_fee(100))}}\")\n}}\n") }
+#Test("fmt_preserves_persist") {
+    _ :: item_test_stable("#Persist counter := 0\n\nfn run() {{\n    print(\"{{counter}}\")\n}}\n")
+    _ :: item_test_stable("#Persist counter :: 0\n\nfn run() {{\n    print(\"{{counter}}\")\n}}\n")
+}
+#Test("fmt_preserves_variadic_trait_bound_bare") { _ :: item_test_stable("fn log_all(parts: ...Renderable) {{\n    loop p in parts {{ print(\"{{p}}\") }}\n}}\n\nfn run() {{\n    log_all(1, \"two\", true)\n}}\n") }
+#Test("fmt_preserves_variadic_trait_bound_list") { _ :: item_test_stable("fn log_all(prefix: String, parts: ...[Renderable]) {{\n    print(prefix)\n    loop p in parts {{ print(\"{{p}}\") }}\n}}\n\nfn run() {{\n    log_all(\"first:\", 1, \"two\")\n    log_all(\"second:\", 3.5, false, \"x\")\n}}\n") }
+#Test("fmt_preserves_generic_type_param_bound_list") { _ :: item_test_stable("trait Loud {{\n    fn shout(self) -> String\n}}\n\nfn describe<T: [Renderable, Loud]>(item: T) -> String {{\n    return item.shout()\n}}\n") }
+#Test("fmt_preserves_quantity_dimension_kind_bound") { _ :: item_test_stable("fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q {{\n    return value\n}}\n") }
+
+// tests/fmt.rs:3834-3883,3935-4000,4024-4247,4335-4353,4429-4450.
+#Test("fmt_preserves_computed_fields") { _ :: item_test_stable("struct Stats {{\n    strength: Int\n    gear_mod: Int\n    attack: Int => strength * 2 + gear_mod\n    threat: Int => attack + gear_mod\n}}\n\nfn run() {{\n    s := Stats{{strength: 10, gear_mod: 3}}\n    print(\"attack: {{s.attack}}\")\n}}\n") }
+#Test("fmt_preserves_inline_contracts") { _ :: item_test_stable("#Inline fn square(x: Int) -> Int {{\n    return x * x\n}}\n\n#Inline(Always) fn double(x: Int) -> Int {{\n    return x * 2\n}}\n\nstruct Meters {{\n    value: Int\n\n    #Inline(Always) fn plus(self, other: Int) -> Int {{\n        return self.value + other\n    }}\n}}\n\nfn run() {{\n    m :: Meters{{value: 7}}\n    print(\"{{square(4)}} {{double(5)}} {{m.plus(3)}}\")\n}}\n") }
+#Test("fmt_os_target_marker_stability") { _ :: item_test_stable("trait Backend {{\n    fn label(self) -> String\n}}\n\nstruct LinuxBackend {{\n    name: String\n}}\n\n#Target(OS.Linux)\nimpl LinuxBackend.Backend {{\n    fn label(self) -> String {{\n        return \"linux: {{self.name}}\"\n    }}\n}}\n\nfn run() {{\n    print(\"hi\")\n}}\n") }
+#Test("fmt_typed_derive_body_comment_not_duplicated") {
+    output :: item_test_stable("derive T.Label {{\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: $tname\n    fn label(self) -> String -> $lbl\n}}\n\n#Label\nstruct Cube {{\n    side: Int\n}}\n\nfn run() {{\n    c :: Cube{{side: 5}}\n    print(c.label())\n}}\n")
+    assert_eq(output.split("resolves to the same value as `tname`").to_list().len() - 1, 1)
+}
+#Test("fmt_preserves_trait_associated_type") {
+    item_test_keeps("trait Indexed {{\n    type Elem\n    fn at(self, i: Int) -> Elem\n    fn count(self) -> Int\n}}\n\nstruct Nums {{\n    vals: [Int]\n}}\n\nimpl Nums.Indexed {{\n    type Elem = Int\n\n    fn at(self, i: Int) -> Int {{\n        return self.vals[i]\n    }}\n\n    fn count(self) -> Int {{\n        return self.vals.len()\n    }}\n}}\n\nfn run() {{\n    n :: Nums{{vals: [10, 20, 30]}}\n    print(n.at(0))\n    print(n.count())\n}}\n", ["type Elem\n"])
+}
+#Test("fmt_preserves_effect_leaf_declarations") { item_test_keeps("effect Log.Audit\n\neffect Metrics.Emit\n\nfn run() -[Log.Audit]> {{}}\n", ["effect Log.Audit", "effect Metrics.Emit"]) }
+#Test("fmt_preserves_web_partition_markers") {
+    item_test_keeps("#Target(JS)\nfn render_stat(label: String) -> String {{\n    return \"<div>{{label}}</div>\"\n}}\n\n#Target(Wasm)\nfn crunch(n: Int) -> Int {{\n    return n * n\n}}\n\n#WasmExport\nfn bridge_total(n: Int) -> Int {{\n    return crunch(n)\n}}\n\nfn run() {{\n    print(\"{{bridge_total(4)}}\")\n}}\n", ["#Target(JS)\n", "#Target(Wasm)\n", "#WasmExport\n"])
+}
+#Test("fmt_preserves_inline_dep_version") {
+    _ :: item_test_stable("use textkit#1.4.2\n\nfn run() {{\n    print(\"hi\")\n}}\n")
+    _ :: item_test_stable("use textkit#1.4\n\nfn run() {{\n    print(\"hi\")\n}}\n")
+    output :: item_test_stable("use textkit#1.4.2;\n\nfn run() {{\n    print(\"hi\")\n}}\n")
+    assert(output.contains("use textkit#1.4.2\n"))
+    assert(!output.contains("use textkit#1.4.2;"))
+}
+#Test("fmt_preserves_maturity_tags") { _ :: item_test_stable("#Meta(maturity: .Experimental)\nfn experimental_label() -> String {{\n    return \"exp\"\n}}\n\n#Meta(maturity: .Tested)\nfn tested_label() -> String {{\n    return \"tested\"\n}}\n\n#Meta(maturity: .Hardened)\nfn hardened_label() -> String {{\n    return \"hard\"\n}}\n\nfn run() {{\n    print(experimental_label())\n    print(tested_label())\n    print(hardened_label())\n}}\n") }
+#Test("fmt_preserves_maturity_tags_next_line") { item_test_keeps("#Meta(maturity: .Experimental)\nfn experimental_label() -> String {{\n    return \"exp\"\n}}\n\nfn run() {{\n    print(experimental_label())\n}}\n", ["#Meta(maturity: .Experimental)"]) }
+#Test("fmt_preserves_schedule_markers") { _ :: item_test_stable("#[Job, Doc(\"Prune old sessions\"), Every(5min)] fn prune_sessions() {{\n    print(\"pruning\")\n}}\n\n#[Job, Every(\"03:00\")] fn nightly_backup() {{\n    print(\"backing up\")\n}}\n\n#Job fn manual_only() {{\n    print(\"manual\")\n}}\n\nfn run() {{\n    prune_sessions()\n    nightly_backup()\n    manual_only()\n}}\n") }
+#Test("fmt_preserves_per_function_c_abi") { item_test_keeps("use c.demo as c\n#Import module c.demo {{\n    #ABI(system) fn portable(x: I32) -> I32 = \"portable\"\n    #ABI(sysv64) fn native(x: I32) -> I32 = \"native\"\n}}\nfn run() {{}}\n", ["#ABI(system)", "#ABI(sysv64)"]) }
+#Test("fmt_preserves_casing_errors_for_sema") { item_test_keeps("struct bad_type {{ BadField: Int }}\nfn BadFunction() {{}}\n", ["bad_type", "BadField", "BadFunction"]) }
+#Test("external_module_format_remains_parseable_and_idempotent") { _ :: item_test_stable("module helper\nfn run() {{ print(helper.value()) }}\n") }
+#Test("generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains") {
+    item_test_keeps("module ring<T>(capacity: Int, label: String) {{\n#Meta(category: label)\nSIZE :: prep {{ capacity }}\npub struct Buffer {{ slots: [T#capacity] }}\nmodule nested<U> {{ pub fn keep(value: U) -> U {{ return ~value }} }}\nmodule inner :: nested<T>\n#Meta(category: label)\npub fn adjusted() -> Int {{ return capacity + 1 }}\n}}\nmodule a :: ring<Int>(2 + 2, \"ring\")\nmodule b :: a\nfn run() {{}}\n", ["module ring<T>(capacity: Int, label: String)", "#Meta(category: label)", "[T#capacity]", "module nested<U>", "capacity + 1", "ring<Int>(2 + 2, \"ring\")", "module b :: a"])
+}
+#Test("fmt_preserves_parameter_zones_and_public_labels") { item_test_keeps("fn connect(host: String, /, *, timeout seconds: Int{{30}}, tls: Bool{{true}}) -> String -> host\n", ["host: String", ", /,", ", *,", "timeout seconds: Int{{30}}", "tls: Bool{{true}}"])
+}
+#Test("fmt_empty_marker_parentheses_canonicalize_and_are_stable") {
+    output :: item_test_stable("#Inline()\nfn double(x: Int) -> Int {{\n    return x * 2\n}}\n\n#Job()\nfn refresh() {{\n    print(\"refresh\")\n}}\n")
+    assert(output.contains("#Inline fn double") || output.contains("#Inline\nfn double"))
+    assert(!output.contains("#Inline()") && !output.contains("#Job()"))
+}
+
+// fmt_round_trip_regressions.rs:22-42,133-181.
+#Test("generic_module_template_struct_heads_round_trip") {
+    output :: item_test_stable("module cache<K>(capacity: Int) {{\n    struct Entry {{ key: K }}\n    fn entry(k: K) -[]> Entry {{ return Entry{{key: k}} }}\n}}\n\n")
+    assert(output.contains("Entry{{"))
+    assert(!output.contains("Entry.{{"))
+}
+#Test("inline_module_struct_heads_round_trip") {
+    output :: item_test_stable("module arith {{\n    struct Tally {{ total: Int }}\n    fn tally(value: Int) -[]> Tally {{ return Tally{{total: value}} }}\n}}\n")
+    assert(output.contains("Tally{{"))
+    assert(!output.contains("Tally.{{"))
+}
+#Test("effect_arrows_round_trip_beside_foreign_bodies") {
+    output :: item_test_stable("#Import module c.demo {{\n    fn probe(value: Int) -> Int = \"probe\"\n}}\n\nfn run() -[IO]> Int {{\n    return 1\n}}\n")
+    assert(output.contains("fn probe(value: Int) -> Int = \"probe\""))
+    assert(output.contains("fn run() -[IO]> Int"))
+    assert(!output.contains("=[IO]=>") && !output.contains("Int) => Int"))
+}
+
+// Items.rs source-order regression witnesses: Unicode offsets/comments belong
+// to the next authored member, not to a later vector category.
+#Test("type_body_members_preserve_authored_interleaving_and_comments") {
+    item_test_order("#CLI\nstruct Commands {{\n    // λ before method\n    fn before(self) {{}}\n    // 命 before field\n    first: Int\n    // before impl\n    impl Show {{ fn show(self) -> String {{ \"ok\" }} }}\n    // before CLI binding\n    plan = plan_impl\n    // before validation\n    validate {{ assert(true) }}\n    second: Int\n    fn after(self) {{}}\n}}\nfn plan_impl(args: Commands) {{}}\n", ["// λ before method", "fn before", "// 命 before field", "first:", "// before impl", "impl Show", "// before CLI binding", "plan =", "// before validation", "validate {{", "second:", "fn after"])
+}
+#Test("impl_associated_types_preserve_authored_interleaving") {
+    item_test_order("impl Collection {{\n    fn before(self) {{}}\n    // Elem belongs here\n    type Elem = Int\n    fn after(self) {{}}\n    type Other = String\n}}\n", ["fn before", "// Elem belongs here", "type Elem = Int", "fn after", "type Other = String"])
+}
+#Test("module_imports_and_items_preserve_authored_interleaving") {
+    item_test_order("module bank {{\n    fn before() {{}}\n    // local import\n    use core.math as math\n    VALUE :: 1\n    fn after() {{}}\n    // tail λ\n}}\n", ["fn before", "// local import", "use core.math", "VALUE ::", "fn after", "// tail λ"])
+}
+#Test("trait_supertraits_round_trip_bare_list_operator_quantity") {
+    item_test_keeps("trait Single: Show {{ fn display(self) -> String }}\ntrait Multiple: [Show, Hash] {{ type Elem fn at(self) -> Elem }}\ntrait Operator: Add<Int> {{}}\ntrait Measured: Quantity<Length, .Linear> {{}}\n", ["trait Single: Show", "trait Multiple: [Show, Hash]", "trait Operator: Add<Int>", "trait Measured: Quantity<Length, .Linear>"])
+}
+
+// Canonical Foundation resolver and name seam tests (not source-shape assertions).
+#Test("decode_wire_shapes_alias_substitution_cycles_and_ambiguity") {
+    span :: Span{start: 0, end: 0}
+    generic :: TypeParam{name: "T", name_span: span, bounds: [String]{}, prep: None}
+    alias :: TypeAliasDef{is_pub: false, is_package_pub: false, name: "Alias", name_span: span, type_params: [TypeParam]{generic}, target: Type.Option{inner: Type.Named{name: "T"}}, target_span: span, span: span}
+    cycle :: TypeAliasDef{is_pub: false, is_package_pub: false, name: "Cycle", name_span: span, type_params: [TypeParam]{}, target: Type.Named{name: "Cycle"}, target_span: span, span: span}
+    items :: [Item]{Item.TypeAlias{value: alias}, Item.TypeAlias{value: cycle}}
+    assert_eq(resolved_decode_wire_shapes(items, Type.Apply{name: "Alias", args: [Type]{Type.String}}), Val([SerdeWireShape]{SerdeWireShape.Null, SerdeWireShape.Text}))
+    assert_eq(resolved_decode_wire_shapes(items, Type.Named{name: "Cycle"}), None)
+    assert_eq(resolved_decode_wire_shapes(items, Type.Union{members: [Type]{Type.Char, Type.String}}), Val([SerdeWireShape]{SerdeWireShape.Text}))
+    assert_eq(resolved_decode_wire_shapes(items, Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}), None)
+}
+#Test("decode_wire_shapes_tagged_untagged_and_generic_enum") {
+    span :: Span{start: 0, end: 0}
+    definition := ast_enum("Envelope", span, span)
+    &definition.derives.push(NamedSpan{name: "Decode", span: span})
+    &definition.type_params.push(TypeParam{name: "T", name_span: span, bounds: [String]{}, prep: None})
+    &definition.variants.push(Variant{name: "Empty", name_span: span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+    &definition.variants.push(Variant{name: "Value", name_span: span, payload: VariantPayload.Single{ty: Type.Named{name: "T"}, span: span}, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+    assert_eq(resolved_decode_wire_shapes([Item]{Item.Enum{value: definition}}, Type.Apply{name: "Envelope", args: [Type]{Type.Int}}), Val([SerdeWireShape]{SerdeWireShape.Text, SerdeWireShape.Object}))
+    &definition.serde_markers.push(Marker{name: "Untagged", negated: false, name_span: span, args: [MarkerCallArg]{}, arg_labels: [], span: span, ct: None})
+    assert_eq(resolved_decode_wire_shapes([Item]{Item.Enum{value: definition}}, Type.Apply{name: "Envelope", args: [Type]{Type.Int}}), Val([SerdeWireShape]{SerdeWireShape.Null, SerdeWireShape.Int, SerdeWireShape.Number}))
+    &definition.serde_markers.push(Marker{name: "Discriminant", negated: false, name_span: span, args: [MarkerCallArg]{}, arg_labels: [], span: span, ct: None})
+    assert_eq(resolved_decode_wire_shapes([Item]{Item.Enum{value: definition}}, Type.Apply{name: "Envelope", args: [Type]{Type.Int}}), Val([SerdeWireShape]{SerdeWireShape.Object}))
+}
+#Test("generated_paths_are_injective_across_identity_separators") {
+    identities :: [String]{"a::b", "a/b", "a\\b", "a_b", "a.b", "a-b", "a:x", "λ.命"}
+    symbols := [String]{}
+    loop identity in identities {
+        symbol :: foundation_generated_path(identity)
+        assert(!symbols.contains(symbol))
+        &symbols.push(symbol)
+        assert_eq(foundation_decode_generated_path_suffix(symbol.slice(6, symbol.len())), Val(identity))
+    }
+    assert_eq(foundation_member_name("bank", "open"), "__jet_bank_dopen")
+    assert_eq(foundation_member_name("__jet_bank", "open"), "__jet_bank_dopen")
+    assert_eq(foundation_decode_generated_path_suffix("broken_xQ0"), None)
+    assert_eq(foundation_decode_generated_path_suffix("_xff"), None)
+}
+#Test("callable_marker_line_break_projection") {
+    names :: [String]{"Meta", "Unsafe", "FFI", "Target", "WasmExport"}
+    loop name in names -> assert(callable_marker_needs_line_break(name))
+    assert(!callable_marker_needs_line_break("Inline"))
+    assert(!callable_marker_needs_line_break("Unknown"))
+}
+
+// Original typed-template fixtures: fmt_round_trip_regressions.rs:45-70.
+// Named-body expectations reconciled by Main to D-SIG-AFTER1=A, not weakened.
+#Test("derive_template_bodies_round_trip_retired_signatures") {
+    item_test_keeps("// D-STRUCT-ONCE1=A: one typed `prep loop` mechanism reaches derive/marker bodies,\n// root impl items, and interpolated test declarations.\nderive T.FieldNames {{\n    prep loop field in T.$fields {{\n        method :: \"field_{{field.$name}}\"\n        fn $method(self) -> String {{ field.$name }}\n    }}\n}}\n\nmarker AddMarkerFields($sites: [.Type]) {{\n    type_name :: target.$name\n    prep loop field in target.$fields {{\n        method :: \"marked_{{field.$name}}\"\n        impl $type_name {{\n            fn $method(self) -> String {{ field.$name }}\n        }}\n    }}\n}}\n\n#[FieldNames, AddMarkerFields]\nstruct Point {{\n    x: Int\n    y: Int\n}}\n\nstruct Case {{\n    n: Int\n}}\n\nCASES :: prep {{ [Case]{{Case{{n: 1}}, Case{{n: 2}}}} }}\n\nprep loop T in [Point] {{\n    impl T {{\n        fn generated(self) -> String {{ \"generated\" }}\n    }}\n}}\n\nprep loop case in CASES {{\n    #Test(\"case {{case.n}}\") {{\n        .measure {{\n            assert(case.n > 0)\n        }}\n    }}\n}}\n\nfn run() {{\n    point := Point{{x: 1, y: 2}}\n    print(point.field_x())\n    print(point.field_y())\n    print(point.marked_x())\n    print(point.marked_y())\n    print(point.generated())\n}}\n", ["fn $method(self) -> String {{", "field.$name", "prep loop T in [Point]", "#Test(\"case {{case.n}}\")"])
+}
+#Test("marker_template_bodies_round_trip_retired_signatures") {
+    item_test_keeps("// D-META-USER1=A: a source rule with a body adds an ordinary method. A\n// template binding is spliced with `$` (D-NAME-SPLICE1=B): `impl $tname`\n// names the target type and `$marker_count` reads the build-time value.\nmarker Audited($sites: [.Type])\n\nmarker AddGreeting($sites: [.Type]) {{\n    tname :: target.name\n    marker_count :: target.markers.len()\n    impl $tname {{\n        fn greeting(self) -> String {{ \"hello\" }}\n\n        fn marker_count(self) -> Int {{ $marker_count }}\n    }}\n}}\n\n#[Audited, AddGreeting]\nstruct Person {{\n    name: String\n}}\n\nfn run() {{\n    person :: Person{{name: \"ada\"}}\n    print(person.greeting())\n    print(person.marker_count())\n}}\n", ["fn greeting(self) -> String {{", "\"hello\"", "impl $tname", "$marker_count"])
+}
+#Test("fmt_comptime_splice_stability") {
+    _ :: item_test_stable("derive T.Debug {{\n    fn tag(self) -> String -> \"ok\"\n}}\n\nfn run() {{\n    print(\"ok\")\n}}\n")
+    item_test_keeps("derive T.Named {{\n    tname :: \"test\"\n    x :: $tname\n    fn $tname(self) -> String -> $tname\n}}\n\nfn run() {{}}\n", ["x :: $tname", "fn $tname(self)"])
+}
+#Test("fmt_layout_compiler_fact_and_field_selector_stability") {
+    item_test_keeps("derive T.LayoutFacts {{\n    info :: T.$layout\n    selected :: info[.count]\n    full :: T.reflect().layout\n}}\n\nfn run() {{}}\n", ["T.$layout", "info[.count]", "T.reflect().layout"])
+}
+#Test("fmt_output_callable_stability") {
+    item_test_keeps("APP :: Output.Executable{{ name: \"demo\", entry: start }}\n\nfn start() {{}}\n", ["APP ::", "Output.Executable{{", "name: \"demo\"", "entry: start"])
+}
+#Test("fmt_one_placement_law_round_trips_every_target_kind") {
+    item_test_keeps("#Codable\nstruct Widget {{\n    #Doc(\"display name\") label: String\n}}\n\nLIMIT :: prep {{ 32 }}\n\n#Inline\nfn hot(a: Int) -> Int {{\n    return a * LIMIT\n}}\n\nfn run() {{\n    #Off print(\"off\")\n    #Impure(\"reads the wall clock\") {{\n        print(\"now\")\n    }}\n}}\n", ["#Codable", "#Doc(\"display name\") label: String", "LIMIT :: prep {{ 32 }}", "#Inline", "#Off print(\"off\")", "#Impure(\"reads the wall clock\") {{"])
+}
+#Test("trait_member_comments_and_associated_type_order_remain_inside_the_trait") {
+    // STATIC frozen Rust defect Items.rs:876-969; canonical cursor fix retained.
+    item_test_order("trait Indexed {{\n    // λ belongs to before\n    fn before()\n    // Elem belongs here\n    type Elem\n    fn after()\n    // 命 remains inside the trait\n}}\nfn run() {{}}\n", ["trait Indexed", "// λ belongs to before", "fn before", "// Elem belongs here", "type Elem", "fn after", "// 命 remains inside the trait", "fn run"])
+}
+#Test("synthetic_declarations_render_real_ast_without_source_passthrough") {
+    source :: "trait Shape: [Show, Hash] {{ type Elem fn width(self) -> Int }}\nstruct Size {{ width: Int }}\nimpl Size.Shape {{ type Elem = Int fn width(self) -> Int {{ return self.width }} }}\nfn run() {{}}\n"
+    tokens :: lex(source.bytes())
+    program :: parse_for_fmt(tokens.tokens).program ?? panic("synthetic source did not parse")
+    output :: jet_format_synthetic_program(program)
+    assert(output.contains("trait Shape: [Show, Hash]"))
+    assert(output.contains("type Elem = Int"))
+    assert(output.contains("width: Int"))
+    assert_eq(item_test_identity(source), item_test_identity(output))
+    assert_eq(item_test_format(output), item_test_format(item_test_format(output)))
+}
+
+#Test("trait_operator_bound_diagnostic_and_byte_span_are_exact") {
+    tokens :: lex("trait Broken: Add<Int, String> {{}}\n".bytes())
+    parsed :: parse_for_fmt(tokens.tokens)
+    assert_eq(parsed.diagnostics.len(), 1)
+    diagnostic :: parsed.diagnostics[0]
+    assert_eq(diagnostic.code, "E0003")
+    assert_eq(diagnostic.what, "operator bound `Add` accepts exactly one RHS type")
+    assert_eq(diagnostic.why, "an operator bound names one right-hand operand")
+    assert_eq(diagnostic.fix, "write one type between `<` and `>`")
+    assert_eq(diagnostic.span, Val(Span{start: 21, end: 22}))
+}
+#Test("trait_quantity_kind_diagnostic_and_byte_span_are_exact") {
+    tokens :: lex("trait Broken: Quantity<Length, .Unknown> {{}}\n".bytes())
+    parsed :: parse_for_fmt(tokens.tokens)
+    assert_eq(parsed.diagnostics.len(), 1)
+    diagnostic :: parsed.diagnostics[0]
+    assert_eq(diagnostic.code, "E0003")
+    assert_eq(diagnostic.what, "`.Unknown` is not a quantity kind")
+    assert_eq(diagnostic.why, "Quantity bounds distinguish linear values, affine points, and affine deltas")
+    assert_eq(diagnostic.fix, "use `.Linear`, `.Point`, or `.Delta`")
+    assert_eq(diagnostic.span, Val(Span{start: 32, end: 39}))
+}
+#Test("trait_generic_bound_does_not_accept_a_missing_closer") {
+    tokens :: lex("trait Broken: Add<Int {{}}\n".bytes())
+    parsed :: parse_for_fmt(tokens.tokens)
+    assert_eq(parsed.diagnostics.len(), 1)
+    diagnostic :: parsed.diagnostics[0]
+    assert_eq(diagnostic.code, "E0003")
+    assert(diagnostic.what.starts_with("expected `>` after the operator bound"))
+    assert_eq(diagnostic.why, "close a generic type with `>` — nested types may end with `>>`")
+    assert_eq(diagnostic.fix, "add `>` here")
+    assert_eq(diagnostic.span, Val(Span{start: 22, end: 23}))
+}
+
+// fmt_round_trip_regressions.rs:73-95, original complete module/library fixtures.
+#Test("generic_module_and_library_bodies_round_trip_retired_signatures") {
+    item_test_keeps("// D-CONF-GENSPELL1=A: generic module templates and aliases.\n//\n// A generic module is a module template parameterised by types and values.\n// `module cache<K>(capacity: Int)` defines the template; `module int_cache :: cache<Int>(32)`\n// instantiates it, producing a concrete module with all type params resolved.\nmodule cache<K>(capacity: Int) {{\n    BASE :: prep {{ capacity }}\n\n    COMPUTED_SIZE :: prep {{ BASE + 1 }}\n\n    pub struct Entry {{\n        key: K\n        limit: Int -> capacity\n    }}\n\n    pub enum Slot {{\n        Empty\n        Value(K)\n    }}\n\n    pub fn entry(k: K) -> Entry {{ return Entry{{key: k}} }}\n\n    pub fn slot(k: K) -> Slot {{ Slot.Value(k) }}\n\n    pub fn key_of(k: K) -> String {{ return \"key\" }}\n\n    pub fn describe() -> String {{ \"generic cache\" }}\n\n    pub fn size() -> Int {{ COMPUTED_SIZE }}\n}}\n\n// Forward alias chain: declaration order does not affect resolution.\nmodule forward_cache :: int_cache\n\nmodule int_cache :: cache<Int>(32)\n\nenum Mode {{\n    Fast\n    Safe\n}}\n\nmodule tier_zero(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {{\n    // A marker argument is fixed metadata; module value parameters reach the\n    // body, not the marker.\n    #Meta(category: \"tier zero\")\n    pub fn show() {{\n        print(flag)\n        print(count)\n        print(letter)\n        print(label)\n        print(mode == Mode.Fast)\n    }}\n}}\n\nmodule values :: tier_zero(true, 7, 'J', \"jet\", Mode.Fast)\n\ntrait Token {{\n}}\n\nstruct GoodToken {{\n\n}}\n\nimpl GoodToken.Token {{\n\n}}\n\n// The annotation decides the kind: `Item` is a type slot because `Token` is a\n// trait, while `count` is an `Int` value slot. Their spelling follows that kind.\nmodule annotation_kinds<Item: Token>(count: Int) {{\n    pub fn count() -> Int {{ count }}\n}}\n\nmodule kinds :: annotation_kinds<GoodToken>(8)\n\nmodule fixed_buffer<T>(capacity: Int) {{\n    pub struct Buffer {{\n        items: [T#capacity]\n    }}\n\n    pub fn echo(values: [T#capacity]) -> [T#capacity] {{ return ~values }}\n}}\n\nmodule three_ints :: fixed_buffer<Int>(3)\n\nmodule local_laws<T> {{\n    pub trait Reveal {{\n        type Output\n        fn reveal(self) -> T\n    }}\n\n    pub struct Wrapped {{\n        value: T\n    }}\n\n    impl Wrapped.Reveal {{\n        type Output = T\n\n        fn reveal(self) -> T {{ self.value }}\n    }}\n\n    pub enum SourceErr {{\n        Bad(T)\n    }}\n\n    pub enum TargetErr {{\n        Wrapped(SourceErr)\n    }}\n\n    impl SourceErr -> TargetErr {{ return TargetErr.Wrapped(self) }}\n}}\n\nmodule int_laws :: local_laws<Int>\n\nfn run() {{\n    k :: int_cache.key_of(42)\n    d :: int_cache.describe()\n    n :: int_cache.size()\n    e :: int_cache.entry(42)\n    s :: int_cache.slot(7)\n    print(k)\n    print(d)\n    print(n)\n    print(e.key)\n    print(e.limit)\n    forwarded :: forward_cache.entry(9)\n    print(forward_cache.size())\n    print(forwarded.key)\n    if s == {{\n        .Value(v) -> {{ print(v) }}\n        .Empty -> {{ print(0) }}\n    }}\n\n    values.show()\n    print(kinds.count())\n    input :: [Int#3]{{1, 2, 3}}\n    fixed :: three_ints.echo(input)\n    buffer :: three_ints.Buffer{{items: fixed}}\n    print(buffer.items[2])\n    wrapped :: int_laws.Wrapped{{value: 91}}\n    print(wrapped.reveal())\n}}\n", ["pub fn slot(k: K) -> Slot {{", "Slot.Value(k)"])
+    item_test_keeps("// E2-M6: library authoring ergonomics\n// Demonstrates S61 (labels/defaults), S62 (delegation), S77 (field punning),\n// D-LIB2 (default method bodies), D-LIB3 (declared ! conversion).\n// --- S61: argument labels and trailing defaults ---\nfn greet(name: String, loud: Bool{{false}}) -> String {{\n    if loud -> return \"HELLO {{name}}!\"\n    return \"hello {{name}}.\"\n}}\n\n// --- D-LIB2: trait with a default method body ---\ntrait Greetable {{\n    fn greeting(self) -> String\n    fn announce(self) -> String {{\n        g :: self.greeting()\n        return \"[ {{g}} ]\"\n    }}\n}}\n\nstruct Person {{\n    name: String\n}}\n\nimpl Person.Greetable {{\n    fn greeting(self) -> String {{\n        n :: self.name\n        return \"hi, I'm {{n}}\"\n    }}\n}}\n\n// `announce` uses the default from the trait\n// --- S77: field punning ---\nstruct Point {{\n    x: Int\n    y: Int\n}}\n\nfn make_point(x: Int, y: Int) -> Point {{\n    return Point{{x: x, y: y}}  // S77 puns: x:x, y:y\n}}\n\n// --- S62: trait delegation ---\ntrait Logger {{\n    fn log(self, msg: String)\n}}\n\nstruct ConsoleLogger {{\n    prefix: String\n}}\n\nimpl ConsoleLogger.Logger {{\n    fn log(self, msg: String) {{\n        p :: self.prefix\n        print(\"{{p}}: {{msg}}\")\n    }}\n}}\n\nstruct App {{\n    logger: ConsoleLogger\n}}\n\nimpl App.Logger using logger  // S62: forwards Logger methods to `logger`\n\nfn run() {{\n    // S61 labels + defaults\n    print(greet(\"world\"))\n    print(greet(\"world\", true))\n    // D-LIB2 default method body\n    p :: Person{{name: \"Ada\"}}\n    print(p.greeting())\n    print(p.announce())\n    // S77 field punning\n    pt :: make_point(3, 4)\n    print(pt.x)\n    print(pt.y)\n    // S62 delegation\n    app :: App{{logger: ConsoleLogger{{prefix: \"INFO\"}}}}\n    app.log(\"delegation works\")\n}}\n", ["fn greeting(self) -> String\n"])
+}

@@ -1,0 +1,59 @@
+// DevtoolsNative.rs has no original tests. These test its actual pure closure;
+// native registry/callback reentrancy/destruction still requires #4494.
+#Test("native relay checks direction session framing and bounded identity") {
+    request :: jet_devtools_game_control_request_new("session", "request", .Pause) ?? panic(err)
+    envelope := jet_devtools_command_envelope_new("session", U64{7})
+    _ :: jet_devtools_command_envelope_enqueue_command(&envelope, .GameControl(request)) ?? panic(err)
+    frame :: jet_devtools_command_envelope_serialize(envelope) ?? panic(err)
+    _ :: jet_devtools_validate_relay_frame(frame, "session") ?? panic(err)
+    if jet_devtools_validate_relay_frame(frame, "foreign") == {
+        .Err(error) -> assert_eq(error, "game control relay belongs to another devtools session")
+        else -> panic("foreign relay accepted")
+    }
+    invalid :: `{"protocol":"jet.devtools.v1","session_id":"session","direction":"runtime_to_host","commands":[{"kind":"GameControl","payload":{}}]}`
+    if jet_devtools_validate_relay_frame(invalid, "session") == {
+        .Err(error) -> assert_eq(error, "game control relay direction is unsupported")
+        else -> panic("wrong direction accepted")
+    }
+    if jet_devtools_relay_string_field(`{"session_id":"\u0061"}`, "session_id") == {
+        .Err(error) -> assert_eq(error, "game control relay `session_id` contains an unsupported escape")
+        else -> panic("relay Unicode escape broadened")
+    }
+    assert_eq(jet_devtools_relay_string_field(`{"session_id":"é\"a"}`, "session_id") ?? panic(err), "é\"a")
+}
+#Test("native window frame and color preserve original typed widths") {
+    color :: jet_devtools_native_color_new(U8{0}, U8{1}, U8{254}, U8{255})
+    assert_eq(color.alpha, U8{255})
+    assert_eq(JET_DEVTOOLS_NATIVE_WHITE.red, U8{255})
+    window :: jet_devtools_native_window_new("session", U32{4294967295}, U32{0})
+    frame :: jet_devtools_native_frame_new("session", U64{18446744073709551615}, window.width, window.height)
+    assert_eq(frame.width, U32{4294967295})
+    assert_eq(frame.height, U32{0})
+    assert_eq(frame.frame_index, U64{18446744073709551615})
+}
+#Test("Foundation live-value admission uses ASCII redaction and Unicode controls") {
+    assert(jet_live_value_sensitive("UserCREDENTIAL"))
+    assert(jet_live_value_sensitive("SecretType"))
+    assert(jet_live_value_sensitive("PII"))
+    assert(!jet_live_value_sensitive("ordinary"))
+    assert(!jet_live_value_identity_valid(""))
+    assert(!jet_live_value_identity_valid("slot\u0085"))
+    assert(jet_live_value_text_valid("é".repeat(8192)))
+    assert(!jet_live_value_text_valid("é".repeat(8193)))
+}
+#Test("LiveValue decision is kept with exact absent rejected redacted rendered reasons") {
+    assert_eq(jet_devtools_live_value_decision("", "Int", None), None)
+    absent :: jet_devtools_live_value_decision("slot", "Int", None) ?? panic("decision")
+    assert_eq(absent.disposition, "kept")
+    assert_eq(absent.reason, "runtime assignment")
+    assert_eq(absent.rendered_value, None)
+    rejected :: jet_devtools_live_value_decision("SECRET", "Text", Val("\u0085")) ?? panic("decision")
+    assert_eq(rejected.reason, "rendered value rejected by policy")
+    assert_eq(rejected.rendered_value, None)
+    redacted :: jet_devtools_live_value_decision("SECRET", "Text", Val("private")) ?? panic("decision")
+    assert_eq(redacted.reason, "rendered value redacted by policy")
+    assert_eq(redacted.rendered_value, None)
+    rendered :: jet_devtools_live_value_decision("slot", "Int", Val("123")) ?? panic("decision")
+    assert_eq(rendered.reason, "runtime assignment")
+    assert_eq(rendered.rendered_value, Val("123"))
+}

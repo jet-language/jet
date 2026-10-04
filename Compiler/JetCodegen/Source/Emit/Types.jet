@@ -1,6 +1,7 @@
 // MIR type, declaration, and constant projections. All names are derived from
 // canonical MIR identities; no source or Rust AST lookup is performed here.
 use jet_foundation.[
+    foundation_generated_path,
     CORE_MODULE_EXPORTS,
     ByteLayout,
     FieldLayoutFacts,
@@ -181,7 +182,7 @@ fn jet_rust_emit_c_abi_unit_enum(variants: [MIRVariant]) -> Bool Never! {
 }
 
 fn jet_rust_emit_c_abi_nominal_name(definition: MIRTypeDef, kind: String) -> String Never! {
-    jet_rust_emit_generated_path("__jet_c_abi_{kind}::{definition.key}")
+    foundation_generated_path("__jet_c_abi_{kind}::{definition.key}")
 }
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::c_abi_record_def
@@ -642,7 +643,7 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
             }
             else -> {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR nominal type is missing from the emitter registry", "checked Apply types must resolve to a declared or canonical runtime type", None)
-            head = jet_rust_emit_generated_path(name.name)
+            head = foundation_generated_path(name.name)
             }
         }
     }
@@ -1301,7 +1302,7 @@ fn jet_rust_emit_columnar_row_adapter(ctx: &JetRustEmitContext, definition: MIRT
     }
     generic_args :: jet_rust_emit_columnar_generic_args(definition.generic_params)
     impl_generics :: jet_rust_emit_columnar_impl_generics(&ctx, definition.generic_params)
-    cell_name :: jet_rust_emit_generated_path("{definition.name}_cell")
+    cell_name :: foundation_generated_path("{definition.name}_cell")
     cell_type :: "{cell_name}{generic_args}"
     row_type :: "{jet_rust_emit_type_name(&ctx, definition.id)}{generic_args}"
     derives :: if debug_capable -> "Clone, Debug" else -> "Clone"

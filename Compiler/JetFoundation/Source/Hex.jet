@@ -1,0 +1,45 @@
+// PORT-PENDING 0066 crates-jet-foundation-src-hex-module-group: crates/jet-foundation/src/Hex.rs:1-41
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Lowercase hexadecimal byte encoding shared by host tools.
+//RS //!
+//RS //! Encoding always writes two lowercase digits per byte. Decoding accepts
+//RS //! either case, requires an even number of digits, and rejects anything else
+//RS //! (signs, whitespace, non-ASCII). Callers that need a stricter alphabet or a
+//RS //! different error shape map the `None` themselves.
+//RS 
+//RS const DIGITS: &[u8; 16] = b"0123456789abcdef";
+//RS 
+//RS /// Two lowercase hex digits per byte.
+//RS pub fn encode(bytes: &[u8]) -> String {
+//RS     let mut text = String::with_capacity(bytes.len() * 2);
+//RS     for byte in bytes {
+//RS         text.push(DIGITS[(byte >> 4) as usize] as char);
+//RS         text.push(DIGITS[(byte & 0x0f) as usize] as char);
+//RS     }
+//RS     text
+//RS }
+//RS 
+//RS /// Value of one ASCII hex digit in either case.
+//RS pub fn nibble(byte: u8) -> Option<u8> {
+//RS     match byte {
+//RS         b'0'..=b'9' => Some(byte - b'0'),
+//RS         b'a'..=b'f' => Some(byte - b'a' + 10),
+//RS         b'A'..=b'F' => Some(byte - b'A' + 10),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Decode an even-length run of hex digits in either case.
+//RS pub fn decode(text: &str) -> Option<Vec<u8>> {
+//RS     let bytes = text.as_bytes();
+//RS     if bytes.len() % 2 != 0 {
+//RS         return None;
+//RS     }
+//RS     let mut decoded = Vec::with_capacity(bytes.len() / 2);
+//RS     for pair in bytes.chunks_exact(2) {
+//RS         decoded.push((nibble(pair[0])? << 4) | nibble(pair[1])?);
+//RS     }
+//RS     Some(decoded)
+//RS }
+// END-PORT-PENDING 0066 crates/jet-foundation/src/Hex.rs:1-41
+

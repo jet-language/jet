@@ -8,10 +8,10 @@
 // emission, in Program.fenced_statements.
 use jet_foundation.[
     Diagnostic,
-    DiagnosticFixApplicability,
-    DiagnosticFixSafety,
     FencedNames,
     FencedStatement,
+    FixApplicability,
+    FixSafety,
     NameRange,
     NamedSpan,
     Span,
@@ -527,7 +527,7 @@ fn parser_fence_rejected_position(span: Span, what: String) -> Diagnostic {
 // with a reviewed edit: a missing `<:` is the other possible intent.
 fn parser_fence_stray_close(span: Span) -> Diagnostic {
     diagnostic :: diagnostic_from_registry("E0070", Val(span), "this `:>` has no opening `<:`", "`:>` only closes a `<: … :>` fence; callables, arms, and lambdas use one arrow: `->`", "write `->` for an arrow, or add the missing `<:`")
-    diagnostic_with_edit_grade(diagnostic, TextEdit{span: span, new_text: "->"}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
+    diagnostic_with_edit_grade(diagnostic, TextEdit{span: span, new_text: "->"}, FixApplicability.Suggested, FixSafety.NeedsReview)
 }
 
 // Entry-shape rejection: the fence sits in a legal position but one of its

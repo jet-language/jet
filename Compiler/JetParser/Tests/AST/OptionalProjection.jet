@@ -1,0 +1,50 @@
+// Rust Parser/Expressions/postfix.rs:316–331,367–371 token-derived spans.
+use jet_foundation.[Span]
+use jet_parser.[parse_source]
+
+#Test("optional_method_retains_real_receiver_and_parenthesis_token_extents") {
+    source :: "fn run() { make()?.read(true) }"
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    if parsed.program.items[0] == {
+        .Func(function) -> if function.body[0] == {
+            .Expr(expression) -> if expression == {
+                .OptMethodCall(receiver, method, method_span, type_args, args, span, receiver_span, call_span) -> {
+                    assert_eq(receiver_span, Span{start: 11, end: 17})
+                    assert_eq(method_span, Span{start: 19, end: 23})
+                    assert_eq(call_span, Span{start: 23, end: 29})
+                    assert_eq(span, Span{start: 11, end: 29})
+                    assert_eq(method, "read")
+                    assert_eq(type_args.len(), 0)
+                    assert_eq(args.len(), 1)
+                    if receiver == { .Call(call) -> assert_eq(call.name_span, Span{start: 11, end: 15}), else -> assert(false) }
+                }
+                else -> assert(false)
+            }
+            else -> assert(false)
+        }
+        else -> assert(false)
+    }
+}
+#Test("optional_method_chains_keep_actual_receiver_text_not_expr_span_guess") {
+    source :: "fn run() { make()?.child?.read() }"
+    bytes :: source.bytes()
+    parsed :: parse_source(bytes)
+    assert_eq(parsed.diagnostics.len(), 0)
+    if parsed.program.items[0] == {
+        .Func(function) -> if function.body[0] == {
+            .Expr(expression) -> if expression == {
+                .OptMethodCall(_, _, _, _, args, _, receiver_span, call_span) -> {
+                    receiver_bytes := bytes[receiver_span.start..<receiver_span.end] // #4303
+                    paren_bytes := bytes[call_span.start..<call_span.end] // #4303
+                    assert_eq(String.from_bytes(receiver_bytes), Val("make()?.child"))
+                    assert_eq(String.from_bytes(paren_bytes), Val("()"))
+                    assert_eq(args.len(), 0)
+                }
+                else -> assert(false)
+            }
+            else -> assert(false)
+        }
+        else -> assert(false)
+    }
+}

@@ -1,0 +1,202 @@
+// Rust AST/items.rs:1-1814 has no original inline tests. These behavioral
+// controls pin its closed selected-target and metadata laws.
+use jet_foundation as f
+
+test "inline assembly selects only the authored target architecture" {
+    loop target in [String]{"x86_64", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"} -> assert_eq(f.inline_asm_target_arch(target), Val(f.InlineAsmTargetArch.X86_64))
+    loop target in [String]{"i386", "i586-linux", "i686-pc-windows", "x86"} -> assert_eq(f.InlineAsmTargetArch.for_target(target), Val(f.InlineAsmTargetArch.X86))
+    assert_eq(f.inline_asm_target_arch("aarch64-apple-darwin"), Val(f.InlineAsmTargetArch.Aarch64))
+    loop target in [String]{"arm", "armv7-linux", "thumb", "thumbv7em-none-eabi"} -> assert_eq(f.inline_asm_target_arch(target), Val(f.InlineAsmTargetArch.Arm))
+    loop target in [String]{"riscv64", "riscv64gc-unknown-linux-gnu"} -> assert_eq(f.inline_asm_target_arch(target), Val(f.InlineAsmTargetArch.Riscv64))
+    loop target in [String]{"", "-x86_64", "X86_64-linux", "riscv32", "armv6", "wasm32-unknown-unknown", "unknown-x86_64"} -> assert_eq(f.inline_asm_target_arch(target), None)
+}
+
+test "inline assembly x86 menus preserve every explicit register and rejection" {
+    legacy :: [String]{"eax", "ax", "al", "ah", "ebx", "bx", "bl", "bh", "ecx", "cx", "cl", "ch", "edx", "dx", "dl", "dh", "esi", "si", "sil", "edi", "di", "dil"}
+    loop register in legacy {
+        assert(f.inline_asm_register_known("i686-linux", register))
+        assert(f.inline_asm_register_known("x86_64-linux", register))
+        assert(f.inline_asm_register_known("i686-linux", "%{register}"))
+    }
+    loop register in [String]{"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "r8d", "r8w", "r8b", "r9d", "r9w", "r9b", "r10d", "r10w", "r10b", "r11d", "r11w", "r11b", "r12d", "r12w", "r12b", "r13d", "r13w", "r13b", "r14d", "r14w", "r14b", "r15d", "r15w", "r15b"} {
+        assert(f.inline_asm_register_known("x86_64-linux", register))
+        assert(!f.inline_asm_register_known("i686-linux", register))
+    }
+    assert(f.inline_asm_register_known("x86_64-linux", "%R15D"))
+    assert(f.inline_asm_register_known("i686-linux", "%EAX"))
+    loop register in [String]{"", "%", "%%rax", "rsp", "esp", "sp", "spl", "rbp", "ebp", "rip", "eip", "xmm0", "r0", "r7", "r16", "r08", "r+8", "r10h", "rax ", " rax", "RÄX"} -> assert(!f.inline_asm_register_known("x86_64-linux", register))
+}
+
+test "inline assembly numeric register parsing retains Rust u8 laws" {
+    loop register in [String]{"x0", "x30", "w0", "w30", "%X30", "W+030", "x0000000000000000000000001"} -> assert(f.inline_asm_register_known("aarch64-linux", register))
+    loop register in [String]{"x31", "w31", "sp", "xzr", "wzr", "x256", "x+", "x-1", "x 1", "x1 ", "x١", "%%x1"} -> assert(!f.inline_asm_register_known("aarch64-linux", register))
+    loop register in [String]{"r0", "r12", "r14", "%R+014"} -> assert(f.inline_asm_register_known("thumbv7em-none-eabi", register))
+    loop register in [String]{"r13", "r15", "sp", "lr", "pc", "x0"} -> assert(!f.inline_asm_register_known("arm-linux", register))
+    loop register in [String]{"x1", "x31", "%X+001"} -> assert(f.inline_asm_register_known("riscv64gc-linux", register))
+    loop register in [String]{"x0", "x32", "zero", "ra", "a0", "w1"} -> assert(!f.inline_asm_register_known("riscv64-linux", register))
+}
+
+test "inline assembly contract methods preserve carriers and never use host facts" {
+    contract := f.InlineAsmContract{target: "aarch64-linux", output: Val(f.InlineAsmOutput.Parameter(2)), clobbers: [String]{"x1", "x3"}}
+    assert_eq(contract.target_arch(), Val(f.InlineAsmTargetArch.Aarch64))
+    assert(contract.register_known("%W30"))
+    assert(!contract.register_known("rax"))
+    assert_eq(contract.output, Val(f.InlineAsmOutput.Parameter(2)))
+    assert_eq(contract.clobbers, [String]{"x1", "x3"})
+    contract.target = "x86_64-linux"
+    contract.output = Val(f.InlineAsmOutput.Register("rax"))
+    assert(contract.register_known("rax"))
+    assert(!contract.register_known("x1"))
+    contract.target = "unknown"
+    assert_eq(contract.target_arch(), None)
+    assert(!contract.register_known("rax"))
+    contract.target = "aarch64-linux"
+    assert(contract.register_known("x1"))
+    assert(!f.inline_asm_register_known("unknown", "rax"))
+}
+
+fn items_slice_span(start: Int) -> f.Span Never! { f.Span{start: start, end: start + 3} }
+fn items_slice_marker(name: String, args: [f.MarkerCallArg], labels: [f.CallLabel?]) -> f.Marker Never! {
+    span :: items_slice_span(5)
+    f.Marker{name: name, negated: false, name_span: span, args: args, arg_labels: labels, span: span, ct: None}
+}
+test "generic module parameters borrow names and preserve authored spans" {
+    span :: items_slice_span(41)
+    ty :: f.GenericModuleParam.Type("key", span, Val(f.Type.String))
+    value :: f.GenericModuleParam.Value("capacity", span, f.Type.Int)
+    assert_eq(f.generic_module_param_name_span(ty), span)
+    assert_eq(f.generic_module_param_name_span(value), span)
+    key :: f.generic_module_param_name(ty)
+    capacity :: f.generic_module_param_name(value)
+    assert(key.starts_with("key"))
+    assert_eq(key.len(), 3)
+    assert(capacity.starts_with("capacity"))
+    assert_eq(capacity.len(), 8)
+}
+test "module discovery reads the checked flag not a guessed name" {
+    span :: items_slice_span(20)
+    module := f.ModuleDecl{name: "_private", name_span: span, auto_discovered: true,
+        sources: [f.SourceDecl]{}, imports: [f.Expr]{}, members: [f.Expr]{}, contributions: [f.Contribution]{}, span: span}
+    assert(f.module_is_auto_discovered(module))
+    module.name = "public"
+    module.auto_discovered = false
+    assert(!f.module_is_auto_discovered(module))
+    module.auto_discovered = true
+    assert(f.module_is_auto_discovered(module))
+}
+test "every contribution projects its own span" {
+    span :: items_slice_span(100)
+    values :: [f.ContribValue]{
+        f.ContribValue.Expr(f.Expr.Unit{span: span}),
+        f.ContribValue.Env(f.EnvLit{fields: [f.NamedExpr]{}, services: [f.ServiceEntry]{}, span: span}),
+        f.ContribValue.System(f.SystemLit{explicit_type: None, fields: [f.SystemField]{}, span: span}),
+        f.ContribValue.Image(f.ImageLit{explicit_type: None, fields: [f.ImageField]{}, span: span}),
+        f.ContribValue.Fleet(f.FleetLit{explicit_type: None, fields: [f.FleetField]{}, span: span}),
+        f.ContribValue.VMTest(f.VMTestLit{explicit_type: None, fields: [f.VMTestField]{}, span: span}),
+        f.ContribValue.Profile(f.ProfileLit{fields: [f.NamedExpr]{}, span: span}),
+        f.ContribValue.Perf(f.PerfLit{budgets: [f.BudgetDecl]{}, budgets_span: items_slice_span(2),
+            compile_workloads: [f.CompileWorkloadDecl]{}, compile_workloads_span: None, list_span: items_slice_span(9), span: span})
+    }
+    loop value in values -> assert_eq(f.contrib_value_span(value), span)
+}
+test "maturity and kernel spellings use the closed menu" {
+    assert_eq(f.MaturityTag.Experimental.as_str(), "Experimental")
+    assert_eq(f.MaturityTag.Tested.as_str(), "Tested")
+    assert_eq(f.MaturityTag.Hardened.as_str(), "Hardened")
+    assert_eq(f.KernelMode.Parallel.as_str(), "parallel")
+}
+test "kernel proof requires all six checked safety facts" {
+    loop missing in 0..<6 {
+        proof := f.KernelProof.parallel()
+        assert(proof.is_complete())
+        if missing == {
+            0 -> proof.bounds = false
+            1 -> proof.alias_free = false
+            2 -> proof.captures = false
+            3 -> proof.race_free = false
+            4 -> proof.barriers_uniform = false
+            5 -> proof.control_flow = false
+            else -> {}
+        }
+        assert(!proof.is_complete())
+        proof = f.KernelProof.parallel()
+        assert(proof.is_complete())
+    }
+}
+test "memo markers distinguish absent bounded and unbounded using first match" {
+    span :: items_slice_span(10)
+    none_arg :: f.MarkerCallArg.Expr(f.Expr.Ident{name: "none", span: span})
+    bound :: Val(f.CallLabel{name: "bound", span: span})
+    empty :: items_slice_marker("Memo", [f.MarkerCallArg]{}, [f.CallLabel?]{})
+    unlimited :: items_slice_marker("Memo", [f.MarkerCallArg]{none_arg}, [f.CallLabel?]{bound})
+    assert_eq(f.DEFAULT_MEMO_BOUND, 128)
+    assert_eq(f.memo_bound_from_markers([f.Marker]{}), None)
+    assert_eq(f.memo_bound_from_markers([f.Marker]{items_slice_marker("Other", [f.MarkerCallArg]{}, [f.CallLabel?]{})}), None)
+    assert_eq(f.memo_bound_from_markers([f.Marker]{empty}), Val(f.MemoBound.Bounded(128)))
+    assert_eq(f.memo_bound_from_markers([f.Marker]{unlimited}), Val(f.MemoBound.Unbounded))
+    assert_eq(f.memo_bound_from_markers([f.Marker]{empty, unlimited}), Val(f.MemoBound.Bounded(128)))
+    assert_eq(f.memo_bound_from_markers([f.Marker]{unlimited, empty}), Val(f.MemoBound.Unbounded))
+    loop labels in [[f.CallLabel?]]{[f.CallLabel?]{}, [f.CallLabel?]{None}, [f.CallLabel?]{Val(f.CallLabel{name: "wrong", span: span})}} {
+        assert_eq(f.memo_bound_from_markers([f.Marker]{items_slice_marker("Memo", [f.MarkerCallArg]{none_arg}, labels)}), Val(f.MemoBound.Bounded(128)))
+    }
+    effect :: f.MarkerCallArg.EffectRow{effects: [f.EffectRowEntry]{}, span: span}
+    assert_eq(f.memo_bound_from_markers([f.Marker]{items_slice_marker("Memo", [f.MarkerCallArg]{effect}, [f.CallLabel?]{bound})}), Val(f.MemoBound.Bounded(128)))
+    assert_eq(f.memo_bound_from_markers([f.Marker]{items_slice_marker("Memo", [f.MarkerCallArg]{none_arg, none_arg}, [f.CallLabel?]{bound, bound})}), Val(f.MemoBound.Bounded(128)))
+    negated := unlimited
+    negated.negated = true
+    assert_eq(f.memo_bound_from_markers([f.Marker]{negated}), Val(f.MemoBound.Unbounded))
+}
+test "implicit script entry is an ordinary run with explicit default Err carrier" {
+    span :: items_slice_span(71)
+    body :: [f.Stmt]{f.Stmt.Expr(f.Expr.Unit{span: span})}
+    function :: f.func_implicit_run(~body, span)
+    assert_eq(function.body, body)
+    assert_eq(function.name, "run")
+    assert_eq(function.span, span)
+    assert_eq(function.name_span, span)
+    assert_eq(function.return_type, Val(f.Type.Result{ok: f.Type.Named{name: "Unit"}, err: f.Type.Named{name: "Err"}}))
+    assert_eq(function.return_type_span, None)
+    assert_eq(f.func_failure_contract(function), f.FailureContract.Explicit{success: f.Type.Named{name: "Unit"}, error: f.Type.Named{name: "Err"}})
+    assert_eq(f.func_effective_return_type(function), function.return_type ?? panic("implicit return absent"))
+    assert(!function.is_pub && !function.is_package_pub && !function.is_comptime && !function.compiler_generated)
+    assert(!function.gc_return && !function.diverges && !function.gc_scope && !function.is_unsafe && !function.is_pure)
+    assert(!function.is_sanitizer && !function.is_reactive && !function.is_replayable && !function.is_job && !function.is_must_use)
+    assert(!function.is_inline && !function.is_inline_always)
+    assert_eq(function.type_params.len(), 0)
+    assert_eq(function.params.len(), 0)
+    assert_eq(function.pre.len(), 0)
+    assert_eq(function.post.len(), 0)
+    assert_eq(function.markers.len(), 0)
+    assert_eq(function.inline_foreign, None)
+    assert_eq(function.return_view_provenance, None)
+    assert_eq(function.declared_return_view_provenance, None)
+}
+test "job skip preserves exact reasons suffix matching and unknown rejection" {
+    always :: f.JobSkip.Always("deliberate skip")
+    assert_eq(always.reason_for_host("anything"), Val("deliberate skip"))
+    loop (platform, suffix) in [(String, String)]{("Linux", "-linux"), ("MacOS", "-macos"), ("Windows", "-windows"), ("FreeBSD", "-freebsd")} {
+        rule :: f.JobSkip.UnlessPlatform(platform)
+        assert_eq(rule.reason_for_host("x86_64{suffix}"), None)
+        assert_eq(rule.reason_for_host("x86_64{suffix}-gnu"), Val("host platform is not {platform}"))
+        assert_eq(rule.reason_for_host("not-a-host"), Val("host platform is not {platform}"))
+        assert_eq(rule.reason_for_host("x86_64{suffix}"), None)
+    }
+    assert_eq(f.JobSkip.UnlessPlatform("linux").reason_for_host("x86_64-linux"), Val("host platform is not linux"))
+    assert_eq(f.JobSkip.UnlessPlatform("Unknown").reason_for_host("x86_64-linux"), Val("host platform is not Unknown"))
+}
+test "job and parameter defaults preserve the original empty metadata" {
+    assert_eq(f.JobScope.default(), f.JobScope.Dev)
+    assert_eq(f.JobCachePolicy.default(), f.JobCachePolicy.Uncached)
+    assert_eq(f.ParamZone.default(), f.ParamZone.Either)
+    metadata :: f.JobMetadata.default()
+    assert_eq(metadata.scope, f.JobScope.Dev)
+    assert_eq(metadata.cache, f.JobCachePolicy.Uncached)
+    assert_eq(metadata.after.len(), 0)
+    assert_eq(metadata.packages.len(), 0)
+    assert_eq(metadata.inputs.len(), 0)
+    assert_eq(metadata.outputs.len(), 0)
+    assert_eq(metadata.limits.len(), 0)
+    assert_eq(metadata.cwd, None)
+    assert_eq(metadata.skip, None)
+    assert_eq(metadata.parallel, None)
+}

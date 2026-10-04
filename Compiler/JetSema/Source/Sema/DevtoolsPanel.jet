@@ -1,0 +1,390 @@
+// PORT-PENDING 0413 crates-jet-sema-src-sema-checkerinline-module-group: crates/jet-sema/src/Sema/DevtoolsPanel.rs:1-386
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::AST::{CallArg, Expr, Func, Item, Type};
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Syntax;
+//RS use jet_foundation::AST::{
+//RS     DevtoolsFactPublication, DevtoolsPanel, DevtoolsRegistry, DevtoolsRegistryError,
+//RS     DevtoolsStateField,
+//RS };
+//RS 
+//RS /// Registered diagnostic rows owned by the public panel contract.
+//RS pub const E_DEVTOOLS_PUBLISH_GATE: &str = "E1404";
+//RS pub const E_DEVTOOLS_DUPLICATE_PANEL: &str = "E1410";
+//RS pub const E_DEVTOOLS_INVALID_PANEL: &str = "E1411";
+//RS pub const E_DEVTOOLS_UNKNOWN_FIELD: &str = "E1412";
+//RS pub const E_DEVTOOLS_FIELD_TYPE: &str = "E1413";
+//RS pub const E_DEVTOOLS_UNFED_FIELD: &str = "E1414";
+//RS 
+//RS /// Validate every `#DevPanel` function in one source module and project it into
+//RS /// the one package-wide devtools registry. Struct declarations are package
+//RS /// scoped, while the module identity remains the stable source module path.
+//RS pub fn check_devtools_panels(
+//RS     package: &str,
+//RS     module: &str,
+//RS     package_items: &[&Item],
+//RS     module_items: &[Item],
+//RS     registry: &mut DevtoolsRegistry,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     let structs = package_items.iter().filter_map(|item| match *item {
+//RS         Item::Struct(def) => Some((def.name.as_str(), def)),
+//RS         _ => None,
+//RS     });
+//RS     let structs = structs.collect::<std::collections::BTreeMap<_, _>>();
+//RS 
+//RS     for function in module_items.iter().filter_map(|item| match item {
+//RS         Item::Func(function) if has_dev_panel_marker(function) => Some(function),
+//RS         _ => None,
+//RS     }) {
+//RS         let Some(marker) = function.dev_panel_marker() else {
+//RS             continue;
+//RS         };
+//RS         let markers = function
+//RS             .markers
+//RS             .iter()
+//RS             .filter_map(|marker| marker.dev_panel_marker())
+//RS             .collect::<Vec<_>>();
+//RS         if markers.len() != 1 {
+//RS             diags.push(panel_error(
+//RS                 E_DEVTOOLS_DUPLICATE_PANEL,
+//RS                 &function.name,
+//RS                 "a devtools panel is registered once per function",
+//RS                 "keep one `#DevPanel` marker on the public `panel` function",
+//RS                 marker.span,
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         if !marker.is_valid() {
+//RS             diags.push(panel_error(
+//RS                 E_DEVTOOLS_INVALID_PANEL,
+//RS                 &function.name,
+//RS                 "`#DevPanel` has no arguments and cannot be negated",
+//RS                 "write `#DevPanel` without `!` or marker arguments",
+//RS                 marker.span,
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         let Some(state_type) = validate_panel_signature(function, diags) else {
+//RS             continue;
+//RS         };
+//RS         let Type::Named(state_name) = &state_type else {
+//RS             // `validate_panel_signature` already emitted the source diagnostic;
+//RS             // this guard keeps the state lookup total for future Type variants.
+//RS             continue;
+//RS         };
+//RS         let Some(state) = structs.get(state_name.as_str()) else {
+//RS             diags.push(panel_error(
+//RS                 E_DEVTOOLS_INVALID_PANEL,
+//RS                 &function.name,
+//RS                 &format!("panel state type `{state_name}` is not a declared struct"),
+//RS                 &format!("declare `struct {state_name}` in the same package"),
+//RS                 function.params[0].ty_span,
+//RS             ));
+//RS             continue;
+//RS         };
+//RS         let state_fields = state
+//RS             .fields
+//RS             .iter()
+//RS             .map(|field| {
+//RS                 DevtoolsStateField::new(
+//RS                     field.name.clone(),
+//RS                     field.ty.clone(),
+//RS                     field.name_span,
+//RS                     field.default.is_some(),
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         for field in &state_fields {
+//RS             if !field.is_ready_before_publication() {
+//RS                 diags.push(panel_error(
+//RS                     E_DEVTOOLS_INVALID_PANEL,
+//RS                     &function.name,
+//RS                     &format!(
+//RS                         "state field `{}` has neither an absence default nor an optional type",
+//RS                         field.name
+//RS                     ),
+//RS                     &format!(
+//RS                         "give `{}` a default value or declare it as `{}?`",
+//RS                         field.name,
+//RS                         field.ty.name()
+//RS                     ),
+//RS                     field.span,
+//RS                 ));
+//RS             }
+//RS         }
+//RS         let panel = DevtoolsPanel::new(
+//RS             package,
+//RS             module,
+//RS             function.name.clone(),
+//RS             state_type,
+//RS             state_fields,
+//RS             function.span,
+//RS         );
+//RS         if let Err(error) = registry.register_panel(panel) {
+//RS             diags.push(registry_error(error));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Check and record one `core.devtools.publish` call after its arguments have
+//RS /// been bound and its value expression has been inferred. The explicit
+//RS /// `field:` and `value:` labels are the only publication gate.
+//RS pub(crate) fn check_devtools_publish(
+//RS     package: &str,
+//RS     module: &str,
+//RS     args: &mut [CallArg],
+//RS     value_type: Option<Type>,
+//RS     span: Span,
+//RS     registry: &DevtoolsRegistry,
+//RS     facts: &mut Vec<DevtoolsFactPublication>,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) -> bool {
+//RS     if args.len() != 2
+//RS         || arg_label(args, 0) != Some("field")
+//RS         || arg_label(args, 1) != Some("value")
+//RS     {
+//RS         diags.push(Diagnostic::error(
+//RS             E_DEVTOOLS_PUBLISH_GATE,
+//RS             "this published value has no gate".to_string(),
+//RS             "a published value must name itself with `field:` and `value:`".to_string(),
+//RS             "write `devtools.publish(field: .state_field, value: <expr>)`".to_string(),
+//RS             Some(span),
+//RS         ));
+//RS         return false;
+//RS     }
+//RS 
+//RS     let Some(field) = leading_field_name(&args[0].expr) else {
+//RS         diags.push(panel_error(
+//RS             E_DEVTOOLS_UNKNOWN_FIELD,
+//RS             "publish",
+//RS             "the `field:` argument must be a leading-dot state field selector",
+//RS             "write `field: .state_field` for a field in the marked panel state",
+//RS             args[0].expr.span(),
+//RS         ));
+//RS         return false;
+//RS     };
+//RS     let Some(value_type) = value_type else {
+//RS         return false;
+//RS     };
+//RS     let Some(panel) = registry
+//RS         .panel_for_field(package, module, &field)
+//RS         .or_else(|| registry.unique_panel_for_field(package, &field))
+//RS     else {
+//RS         diags.push(panel_error(
+//RS             E_DEVTOOLS_UNKNOWN_FIELD,
+//RS             "publish",
+//RS             &format!("the package has no uniquely identified panel field `{field}`"),
+//RS             "publish a field declared by the package's marked `panel` state",
+//RS             args[0].expr.span(),
+//RS         ));
+//RS         return false;
+//RS     };
+//RS 
+//RS     let publication = DevtoolsFactPublication::new(
+//RS         package,
+//RS         panel.module.clone(),
+//RS         panel.identity(),
+//RS         field,
+//RS         value_type,
+//RS         span,
+//RS     );
+//RS     if let Err(error) = registry.validate_publication(&publication) {
+//RS         diags.push(registry_error(error));
+//RS         return false;
+//RS     }
+//RS     // The body checker keeps this row with the body's other products, after
+//RS     // inference, so no downstream phase needs to re-infer the publication
+//RS     // value or reconstruct its source identity. Duplicate inference visits at
+//RS     // one source span do not create duplicate protocol rows.
+//RS     if !facts.iter().any(|existing| existing.span == publication.span) {
+//RS         facts.push(publication);
+//RS     }
+//RS     true
+//RS }
+//RS 
+//RS fn arg_label(args: &[CallArg], index: usize) -> Option<&str> {
+//RS     args.get(index)
+//RS         .and_then(|arg| arg.label.as_ref())
+//RS         .map(|(label, _)| label.as_str())
+//RS }
+//RS 
+//RS /// Return the package's state fields that have no publication site.
+//RS pub fn unfed_state_fields<'a, 'p>(
+//RS     package: &'p str,
+//RS     registry: &'a DevtoolsRegistry,
+//RS ) -> impl Iterator<Item = (&'a DevtoolsPanel, &'a DevtoolsStateField)> + use<'a, 'p> {
+//RS     registry
+//RS         .panels()
+//RS         .filter(move |panel| panel.package == package)
+//RS         .flat_map(move |panel| {
+//RS             panel
+//RS                 .state_fields
+//RS                 .iter()
+//RS                 .filter(move |field| {
+//RS                     !registry.publications().iter().any(|publication| {
+//RS                         publication.panel == panel.identity() && publication.field == field.name
+//RS                     })
+//RS                 })
+//RS                 .map(move |field| (panel, field))
+//RS         })
+//RS }
+//RS 
+//RS /// Emit the registered diagnostic for every panel state field that has no
+//RS /// checked publication site. This runs after all module body checks.
+//RS pub fn check_unfed_state_fields(registry: &DevtoolsRegistry, diags: &mut Vec<Diagnostic>) {
+//RS     for panel in registry.panels() {
+//RS         for field in &panel.state_fields {
+//RS             let fed = registry.publications().iter().any(|publication| {
+//RS                 publication.panel == panel.identity() && publication.field == field.name
+//RS             });
+//RS             if fed {
+//RS                 continue;
+//RS             }
+//RS             diags.push(Diagnostic::error(
+//RS                 E_DEVTOOLS_UNFED_FIELD,
+//RS                 format!(
+//RS                     "devtools panel `{}` state field `{}` has no publication",
+//RS                     panel.identity(),
+//RS                     field.name
+//RS                 ),
+//RS                 "every panel state field must have a checked `core.devtools.publish` site"
+//RS                     .to_string(),
+//RS                 format!("publish `field: .{}` with the field's declared type", field.name),
+//RS                 Some(field.span),
+//RS             ));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn has_dev_panel_marker(function: &Func) -> bool {
+//RS     function
+//RS         .markers
+//RS         .iter()
+//RS         .any(|marker| marker.name == Syntax::MARKER_DEV_PANEL)
+//RS }
+//RS 
+//RS fn validate_panel_signature(function: &Func, diags: &mut Vec<Diagnostic>) -> Option<Type> {
+//RS     if !function.is_pub || function.is_package_pub {
+//RS         diags.push(panel_error(
+//RS             E_DEVTOOLS_INVALID_PANEL,
+//RS             &function.name,
+//RS             "a devtools panel is a public package entry point",
+//RS             "write `pub fn panel(state: State) -> UINode { ... }`",
+//RS             function.name_span,
+//RS         ));
+//RS         return None;
+//RS     }
+//RS     if function.name != "panel"
+//RS         || !function.type_params.is_empty()
+//RS         || function.params.len() != 1
+//RS         || function.params[0].name != "state"
+//RS         || function.params[0].default.is_some()
+//RS         || function.params[0].variadic
+//RS     {
+//RS         diags.push(panel_error(
+//RS             E_DEVTOOLS_INVALID_PANEL,
+//RS             &function.name,
+//RS             "a devtools panel must be the public `panel(state: State)` function",
+//RS             "write one non-generic `state` parameter without a default or variadic marker",
+//RS             function.name_span,
+//RS         ));
+//RS         return None;
+//RS     }
+//RS     let Some(return_type) = function.return_type.as_ref() else {
+//RS         diags.push(panel_error(
+//RS             E_DEVTOOLS_INVALID_PANEL,
+//RS             &function.name,
+//RS             "a devtools panel must return a `UINode` tree",
+//RS             "declare `UINode` before the function body arrow",
+//RS             function.name_span,
+//RS         ));
+//RS         return None;
+//RS     };
+//RS     if !matches!(return_type, Type::Named(name) if name == Syntax::TYPE_UI_NODE) {
+//RS         diags.push(panel_error(
+//RS             E_DEVTOOLS_INVALID_PANEL,
+//RS             &function.name,
+//RS             &format!("a devtools panel returns `{}` instead of `UINode`", return_type.show()),
+//RS             "return the portable `UINode` tree from the panel function",
+//RS             function.return_type_span.unwrap_or(function.name_span),
+//RS         ));
+//RS         return None;
+//RS     }
+//RS     Some(function.params[0].ty.clone())
+//RS }
+//RS 
+//RS fn leading_field_name(expr: &Expr) -> Option<String> {
+//RS     match expr {
+//RS         Expr::Field(base, field, _)
+//RS             if matches!(base.as_ref(), Expr::Ident(name, _) if name.is_empty()) =>
+//RS         {
+//RS             Some(field.clone())
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn panel_error(code: &str, panel: &str, why: &str, fix: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         code,
+//RS         format!("devtools panel `{panel}` is invalid"),
+//RS         why.to_string(),
+//RS         fix.to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn registry_error(error: DevtoolsRegistryError) -> Diagnostic {
+//RS     match error {
+//RS         DevtoolsRegistryError::DuplicatePanel {
+//RS             identity,
+//RS             first,
+//RS             duplicate,
+//RS         } => Diagnostic::error(
+//RS             E_DEVTOOLS_DUPLICATE_PANEL,
+//RS             format!("devtools panel `{identity}` is registered twice"),
+//RS             format!(
+//RS                 "one package/module/function identity may describe only one panel (first at {}..{})",
+//RS                 first.start, first.end
+//RS             ),
+//RS             "keep one marked public `panel` function for this package".to_string(),
+//RS             Some(duplicate),
+//RS         ),
+//RS         DevtoolsRegistryError::UnknownStateField {
+//RS             package,
+//RS             module,
+//RS             panel,
+//RS             field,
+//RS             span,
+//RS         } => Diagnostic::error(
+//RS             E_DEVTOOLS_UNKNOWN_FIELD,
+//RS             format!("devtools publication names unknown state field `{field}`"),
+//RS             format!(
+//RS                 "package `{package}` module `{module}` has no marked panel `{panel}` field with that name"
+//RS             ),
+//RS             format!("write `field: .{field}` using a field from the package's `panel` state"),
+//RS             Some(span),
+//RS         ),
+//RS         DevtoolsRegistryError::StateFieldTypeMismatch {
+//RS             package,
+//RS             module,
+//RS             panel,
+//RS             field,
+//RS             expected,
+//RS             actual,
+//RS             span,
+//RS         } => Diagnostic::error(
+//RS             E_DEVTOOLS_FIELD_TYPE,
+//RS             format!(
+//RS                 "published value for `{package}::{module}::{panel}::{field}` has type `{}`",
+//RS                 actual.show()
+//RS             ),
+//RS             format!("the panel state field has type `{}`", expected.show()),
+//RS             format!("publish a value with type `{}` or change the state field", expected.show()),
+//RS             Some(span),
+//RS         ),
+//RS     }
+//RS }
+// END-PORT-PENDING 0413 crates/jet-sema/src/Sema/DevtoolsPanel.rs:1-386
+

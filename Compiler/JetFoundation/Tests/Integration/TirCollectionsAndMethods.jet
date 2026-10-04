@@ -1,0 +1,1908 @@
+// PORT-PENDING 1170 tests-tir-collections-and-methods: tests/tir_collections_and_methods.rs:1-1904
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! TIR collections and methods integration tests.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use jet::Interpreter::{dev_iteration, RunOutcome};
+//RS use tir_support::{
+//RS     assert_release_error_tiers_agree, assert_release_tiers_agree, assert_tiers_agree, build_and_run,
+//RS     compile, have_rustc,
+//RS };
+//RS 
+//RS #[test]
+//RS fn generated_temporaries_do_not_collide_with_collection_locals() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     value :: 2
+//RS     v :: 3
+//RS     k :: "apple"
+//RS     item :: 0
+//RS     i :: 9
+//RS     if i < 0 {
+//RS         print(item)
+//RS     }
+//RS     xs := [value, v]
+//RS     xs[1] = value
+//RS     loop (list_index, list_item) in xs {
+//RS         print("{list_index}:{list_item}")
+//RS     }
+//RS     counts := [String:Int]{}
+//RS     counts[k] = value
+//RS     loop (map_key, map_value) in counts {
+//RS         print("{map_key}={map_value}")
+//RS     }
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_generated_name_collections", src, "0:2\n1:2\napple=2\n");
+//RS }
+//RS 
+//RS // c109 Phase 5: collections — list/map literals, indexing/slicing, index-assign,
+//RS // and `loop x in coll` / `loop (k, v) in map` iteration. The `IndexKind` (List/Map)
+//RS // is carried as a total fact from sema and dispatched at lowering (never
+//RS // re-inferred). All asserts prove rustc accepts the output (I2) and runs correctly.
+//RS 
+//RS /// A list literal, indexing, a slice, and single-binding iteration over a
+//RS /// list-typed param — all in one covered function pair.
+//RS #[test]
+//RS fn list_literal_index_slice_and_iteration() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn total(xs: [Int]) -[]> Int {
+//RS     sum := 0
+//RS     loop x in xs {
+//RS         sum = (sum + x)
+//RS     }
+//RS     return sum
+//RS }
+//RS fn run() {
+//RS     nums := [10, 20, 30, 40]
+//RS     print(nums[0])
+//RS     print(nums[1..2])
+//RS     print(total(nums))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_list", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "10\n[20, 30]\n100\n");
+//RS }
+//RS 
+//RS /// D-RANGE-EXCL1=C: two-binding yields index then item; `indexes` is always in bounds.
+//RS #[test]
+//RS fn list_two_binding_and_indexes() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     xs := [10, 20, 30]
+//RS     loop (i, v) in xs {
+//RS         print(\"{i}:{v}\")
+//RS     }
+//RS     loop i in xs.indexes() {
+//RS         print(i)
+//RS     }
+//RS     empty := [Int]{}
+//RS     count := 0
+//RS     loop i in empty.indexes() {
+//RS         count = (count + 1)
+//RS     }
+//RS     print(count)
+//RS     loop pair in xs.indexed() {
+//RS         print(\"{pair.idx}:{pair.item}\")
+//RS     }
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_list_index_idioms", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "0:10\n1:20\n2:30\n0\n1\n2\n0\n0:10\n1:20\n2:30\n");
+//RS }
+//RS 
+//RS /// Indexed assignment into a list (`xs[i] = v`) — the `LValue::Index` vec form.
+//RS #[test]
+//RS fn list_index_assignment() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     nums := [1, 2, 3]
+//RS     nums[1] = 99
+//RS     print(nums[0])
+//RS     print(nums[1])
+//RS     print(nums[2])
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_list_assign", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "1\n99\n3\n");
+//RS }
+//RS 
+//RS /// Nested list/map projections are mutable places, not value reads. The
+//RS /// side-effecting `pop` indexes also prove that every base/index/RHS is
+//RS /// evaluated once while the three-level list proves recursive write-back.
+//RS #[test]
+//RS fn nested_index_assignment_updates_live_collections() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     list_lists := [[1, 2], [3, 4]]
+//RS     list_lists[1][0] = 9
+//RS     print(list_lists[1][0])
+//RS 
+//RS     map_lists := [String:[Int]]{}
+//RS     map_lists["row"] = [5, 6]
+//RS     map_lists["row"][1] = 8
+//RS     print(map_lists["row"][1])
+//RS 
+//RS     list_maps := [[String:Int]]{[String:Int]{}, [String:Int]{}}
+//RS     list_maps[1]["new"] = 7
+//RS     print(list_maps[1]["new"])
+//RS 
+//RS     map_maps := [String:[String:Int]]{}
+//RS     map_maps["outer"] = [String:Int]{}
+//RS     map_maps["outer"]["inner"] = 6
+//RS     print(map_maps["outer"]["inner"])
+//RS 
+//RS     cube := [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+//RS     cube[1][0][1] = 42
+//RS     print(cube[1][0][1])
+//RS 
+//RS     selectors := [8, 0, 0, 1]
+//RS     rows := [[10, 11], [12, 13]]
+//RS     rows[&selectors.pop() ?? 0][&selectors.pop() ?? 0] = &selectors.pop() ?? 0
+//RS     print(selectors.len())
+//RS     print(rows[0][0])
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_nested_index_assignment", src, "9\n8\n7\n6\n42\n1\n1\n");
+//RS }
+//RS 
+//RS /// A map literal (`[]`), map indexing, map insert (`m[k] = v`), and two-binding
+//RS /// `loop (k, v) in map` iteration — the map-specific helpers and the `.iter()` clone
+//RS /// form. BTreeMap iterates in sorted key order, so output is deterministic.
+//RS #[test]
+//RS fn map_literal_index_insert_and_iteration() {
+//RS     let src = "\
+//RS fn run() {
+//RS     counts := [String:Int]{}
+//RS     counts[\"banana\"] = 3
+//RS     counts[\"apple\"] = 5
+//RS     print(counts[\"apple\"])
+//RS     loop (k, v) in counts {
+//RS         print(\"{k}={v}\")
+//RS     }
+//RS     loop entry in counts {
+//RS         print(\"{entry.key}:{entry.value}\")
+//RS     }
+//RS }
+//RS ";
+//RS     assert_tiers_agree("tir_map", src, "5\napple=5\nbanana=3\napple:5\nbanana:3\n");
+//RS }
+//RS 
+//RS /// E0163/E0164 teach this total update. Empty-map input proves a missing key
+//RS /// uses the default instead of panicking during the read-modify-write.
+//RS #[test]
+//RS fn map_get_update_is_total_for_missing_key() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     counts := [String:Int]{}
+//RS     counts["missing"] = (counts.get("missing") ?? 0) + 1
+//RS     counts["other"] = (counts.get("other") ?? 0) - 1
+//RS     counts["product"] = (counts.get("product") ?? 1) * 2
+//RS     print(counts["missing"])
+//RS     print(counts["other"])
+//RS     print(counts["product"])
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_map_get_update", src, "1\n-1\n2\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn list_get_fallback_classifies_option_carrier() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     values :: [Int]{}
+//RS     print(values.get(0) ?? 0)
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_list_get_fallback_option", src, "0\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn numeric_methods_resolve_literal_and_bound_receivers() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     value :: -17
+//RS     print(17.div_euclid(5))
+//RS     print(value.div_euclid(5))
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_numeric_method_return_type", src, "3\n-4\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn bare_run_rejects_non_unit_entry_contract() {
+//RS     let src = r#"
+//RS fn run() -> Int {
+//RS     return 42
+//RS }
+//RS "#;
+//RS     let diagnostics = tir_support::compile_source("bare_run_contract", src)
+//RS         .expect_err("a bare executable run must have a unit return");
+//RS     let diagnostic = diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E1321")
+//RS         .unwrap_or_else(|| panic!("missing E1321: {diagnostics:?}"));
+//RS     assert_eq!(
+//RS         diagnostic.what,
+//RS         "Output entry `run` has the wrong callable contract"
+//RS     );
+//RS     assert_eq!(
+//RS         diagnostic.why,
+//RS         "an Executable takes zero or one typed CLI parameter and returns `()` or `() ?`"
+//RS     );
+//RS     assert_eq!(
+//RS         diagnostic.fix,
+//RS         "declare the entry as `fn run()` or `fn run() ()?`"
+//RS     );
+//RS     assert!(diagnostic.span.is_some(), "{diagnostic:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn map_top_n_keeps_rank_order_and_bounds() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     counts := [String:Int]{}
+//RS     counts["b"] = 2
+//RS     counts["d"] = 1
+//RS     counts["a"] = 2
+//RS     counts["c"] = 3
+//RS     loop item in counts.top_n(2) -> print("{item.key}:{item.value}")
+//RS     print(counts.top_n(0).len())
+//RS     print(counts.top_n(-1).len())
+//RS     loop item in counts.top_n(10) -> print("{item.key}:{item.value}")
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_map_top_n_bounds",
+//RS         src,
+//RS         "c:3\na:2\n0\n0\nc:3\na:2\nb:2\nd:1\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_variable_operands_use_shared_hot_kernels() {
+//RS     let src = r#"
+//RS fn kernels(left: Int, right: Int, suffix: String) {
+//RS     print(left + right)
+//RS     print(left - right)
+//RS     print(left * right)
+//RS     print(left < right)
+//RS     text := "a"
+//RS     print("{text}{suffix}")
+//RS     text += suffix
+//RS     print(text)
+//RS }
+//RS fn run() {
+//RS     kernels(7, 2, "b")
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2254_variable_kernels", src);
+//RS     assert!(
+//RS         rust.contains("jet_std::jet_int_add_hot!")
+//RS             && rust.contains("jet_std::jet_int_sub_hot!")
+//RS             && rust.contains("jet_std::jet_int_mul_hot!")
+//RS             && rust.contains("jet_std::jet_int_compare_hot!")
+//RS             && rust.contains("jet_string_concat_hot!(&("),
+//RS         "variable operands must use the shared hot kernels:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree(
+//RS         "card_2254_variable_kernels",
+//RS         src,
+//RS         "9\n5\n14\nfalse\nab\nab\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_map_hoist_requires_unique_owner() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     counts := [String:Int]{}
+//RS     alias := counts.copy()
+//RS     loop key in ["hot"] {
+//RS         counts[key] = (counts.get(key) ?? 0) + 1
+//RS     }
+//RS     print(alias.get("hot") ?? 0)
+//RS     print(counts.get("hot") ?? 0)
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2254_map_alias", src);
+//RS     assert!(
+//RS         !rust.contains("let mut __jet_counts = jet_map_make_mut(&mut (__jet_counts));"),
+//RS         "an aliased map must keep the ordinary COW path:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree("card_2254_map_alias", src, "0\n1\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_map_hoist_rejects_unknown_calls() {
+//RS     let src = r#"
+//RS fn observe(value: Int) -> Int {
+//RS     return value
+//RS }
+//RS fn run() {
+//RS     counts := [String:Int]{}
+//RS     loop key in ["hot"] {
+//RS         observe(1)
+//RS         counts[key] = (counts.get(key) ?? 0) + 1
+//RS     }
+//RS     print(counts.get("hot") ?? 0)
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2254_map_call", src);
+//RS     assert!(
+//RS         !rust.contains("let mut __jet_counts = jet_map_make_mut(&mut (__jet_counts));"),
+//RS         "a loop with an unknown call must keep the ordinary map path:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree("card_2254_map_call", src, "1\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_witnesses_keep_tier_parity() {
+//RS     let int_src = include_str!("fixtures/card_2254_int_loop.jet");
+//RS     let int_rust = compile("card_2254_int_loop_shape", int_src);
+//RS     assert!(
+//RS         int_rust.contains("jet_std::jet_int_add_hot!") && int_rust.contains("jet_keep"),
+//RS         "integer witness must keep the packed fast path and its observable value:\n{int_rust}"
+//RS     );
+//RS     let map_src = include_str!("fixtures/card_2254_map_insert.jet");
+//RS     let map_rust = compile("card_2254_map_insert_shape", map_src);
+//RS     assert!(
+//RS         map_rust.contains("let mut __jet_counts = jet_map_make_mut(&mut (__jet_counts));"),
+//RS         "map witness must hoist one make_mut borrow outside its mutation loop:\n{map_rust}"
+//RS     );
+//RS     assert_tiers_agree(
+//RS         "card_2254_int_loop",
+//RS         int_src,
+//RS         "49999995000000\n",
+//RS     );
+//RS     assert_tiers_agree(
+//RS         "card_2254_sized_int_loop",
+//RS         include_str!("fixtures/card_2254_sized_int_loop.jet"),
+//RS         "100000\n",
+//RS     );
+//RS     assert_tiers_agree(
+//RS         "card_2254_map_insert",
+//RS         map_src,
+//RS         "1000\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_list_hoist_requires_unique_owner() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     values := [Int]{0, 0, 0, 0}
+//RS     loop i in [0, 1, 2, 3] {
+//RS         values[i] = i + 1
+//RS     }
+//RS     print(values)
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2254_list_unique", src);
+//RS     assert!(
+//RS         rust.contains("let mut __jet_values = &mut *(__jet_values);"),
+//RS         "list witness must hoist one make_mut borrow outside its mutation loop:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree("card_2254_list_unique", src, "[1, 2, 3, 4]\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_list_hoist_rejects_aliases() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     values := [Int]{0, 0, 0, 0}
+//RS     alias := values.copy()
+//RS     loop i in [0, 1, 2, 3] {
+//RS         values[i] = i + 1
+//RS     }
+//RS     print(alias)
+//RS     print(values)
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2254_list_alias", src);
+//RS     assert!(
+//RS         !rust.contains("let mut __jet_values = &mut *(__jet_values);"),
+//RS         "an aliased list must keep the ordinary COW path:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree(
+//RS         "card_2254_list_alias",
+//RS         src,
+//RS         "[0, 0, 0, 0]\n[1, 2, 3, 4]\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_string_bytes_map_update_borrows_key() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     counts := [String:Int]{}
+//RS     token := [U8]{97, 98}
+//RS     key :: String.from_bytes(token) ?? panic("invalid utf8")
+//RS     counts[key] = (counts.get(key) ?? 0) + 1
+//RS     print(counts["ab"])
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2254_string_bytes_map", src);
+//RS     assert!(
+//RS         rust.contains("jet_map_update_string_bytes(&mut")
+//RS             && !rust.contains("jet_map_update_string(&mut"),
+//RS         "a strict byte-key update must borrow bytes without a temporary String:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree("card_2254_string_bytes_map", src, "1\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_string_bytes_invalid_utf8_keeps_fallback() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     tokens := [[U8]]{{255}}
+//RS     counts := [String:Int]{}
+//RS     loop token in tokens {
+//RS         key :: String.from_bytes(token) ?? panic("invalid utf8")
+//RS         counts[key] = (counts.get(key) ?? 0) + 1
+//RS     }
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2254_string_bytes_invalid", src);
+//RS     assert!(
+//RS         rust.contains("JetStringCountBuilder::new")
+//RS             && rust.contains("jet_map_update_string_bytes(&mut")
+//RS             && rust.contains("invalid utf8"),
+//RS         "invalid UTF-8 must stay on the strict helper's original fallback:\n{rust}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_string_count_loop_uses_hash_builder_then_restores_order() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     tokens :: [[U8]]{{97}, {98}, {97}}
+//RS     counts := [String:Int]{}
+//RS     loop token in tokens {
+//RS         key :: String.from_bytes(token) ?? panic("invalid utf8")
+//RS         counts[key] = (counts.get(key) ?? 0) + 1
+//RS     }
+//RS     print(counts)
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2254_string_count_builder", src);
+//RS     assert!(
+//RS         rust.contains("JetStringCountBuilder::new")
+//RS             && rust.contains("JetStringCountBuildHasher")
+//RS             && rust.contains("HashMap<Vec<u8>, i64, JetStringCountBuildHasher>")
+//RS             && rust.contains("jet_map_update_string_bytes(&mut"),
+//RS         "an isolated String:Int count loop must use byte-key hashing and restore the ordered map:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree("card_2254_string_count_builder", src, "[a: 2, b: 1]\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_string_count_loop_rejects_visible_map_reads() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     tokens :: [[U8]]{{97}, {98}}
+//RS     counts := [String:Int]{}
+//RS     loop token in tokens {
+//RS         key :: String.from_bytes(token) ?? panic("invalid utf8")
+//RS         counts[key] = (counts.get(key) ?? 0) + 1
+//RS         print(counts.len())
+//RS     }
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2254_string_count_visible_read", src);
+//RS     assert!(
+//RS         !rust.contains("JetStringCountBuilder::new"),
+//RS         "a map read inside the loop must retain immediate ordered-map updates:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree("card_2254_string_count_visible_read", src, "1\n2\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_string_bytes_alias_keeps_ordinary_update() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     counts := [String:Int]{}
+//RS     token := [U8]{97}
+//RS     key :: String.from_bytes(token) ?? panic("invalid utf8")
+//RS     alias := key
+//RS     counts[alias] = (counts.get(alias) ?? 0) + 1
+//RS     print(counts["a"])
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2254_string_bytes_alias", src);
+//RS     assert!(
+//RS         !rust.contains("jet_map_update_string_bytes(&mut"),
+//RS         "an aliased decoded key must retain the ordinary update path:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree("card_2254_string_bytes_alias", src, "1\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2269_ascii_whitespace_scan_borrows_tokens() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     input := [U8]{97, 32, 98, 10, 99}
+//RS     counts := [String:Int]{}
+//RS     total := 0
+//RS     token := [U8]{}
+//RS     space :: U8{32}
+//RS     ascii_ws_start :: U8{9}
+//RS     ascii_ws_end :: U8{13}
+//RS     loop byte in input {
+//RS         if {
+//RS             byte == space || (byte >= ascii_ws_start && byte <= ascii_ws_end) -> {
+//RS                 if !token.is_empty() {
+//RS                     word :: String.from_bytes(token) ?? panic("invalid utf8")
+//RS                     counts[word] = (counts.get(word) ?? 0) + 1
+//RS                     total += 1
+//RS                     &token.clear()
+//RS                 }
+//RS             }
+//RS             else -> &token.push(byte)
+//RS         }
+//RS     }
+//RS     if !token.is_empty() {
+//RS         word :: String.from_bytes(token) ?? panic("invalid utf8")
+//RS         counts[word] = (counts.get(word) ?? 0) + 1
+//RS         total += 1
+//RS     }
+//RS     loop item in counts.top_n(20) -> print("{item.value} {item.key}")
+//RS     print("distinct {counts.len()} total {total}")
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2269_ascii_whitespace_scan", src);
+//RS     assert!(
+//RS         rust.contains("jet_bytes_ascii_whitespace_for_each")
+//RS             && rust.contains("JetStringCountBuilder::new"),
+//RS         "a unique-owner ASCII token loop must scan borrowed slices into the count builder:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree(
+//RS         "card_2269_ascii_whitespace_scan",
+//RS         src,
+//RS         "1 a\n1 b\n1 c\ndistinct 3 total 3\n",
+//RS     );
+//RS }
+//RS #[test]
+//RS fn card_2269_wordfreq_source_uses_ascii_whitespace_scan() {
+//RS     let src = include_str!("../Tools/gauntlet/entries/wordfreq/jet/run.jet");
+//RS     let rust = compile("card_2269_wordfreq_source", src);
+//RS     assert!(
+//RS         rust.contains("jet_bytes_ascii_whitespace_for_each(&("),
+//RS         "the wordfreq corpus shape must use the borrowed ASCII token scanner:\n{rust}"
+//RS     );
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn card_2254_bounded_induction_uses_native_integer_paths() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     total := 0
+//RS     loop i in 0..<10 {
+//RS         a :: i + 1
+//RS         b :: a * 2
+//RS         c :: b - 1
+//RS         total = total + c + (i /% 2) + (i % 2)
+//RS     }
+//RS     print(total)
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2254_bounded_integer_paths", src);
+//RS     assert!(
+//RS         rust.contains("jet_std::jet_int_add_inline!")
+//RS             && rust.contains("jet_std::jet_int_mul_inline!")
+//RS             && rust.contains("jet_std::jet_int_sub_inline!")
+//RS             && rust.contains("((__jet_i) / (")
+//RS             && rust.contains("((__jet_i) % (")
+//RS             && !rust.contains("jet_std::jet_int_floor_div")
+//RS             && !rust.contains("jet_std::jet_int_mod"),
+//RS         "bounded induction must remove checked arithmetic and floor/mod helpers:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree("card_2254_bounded_integer_paths", src, "125\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2872_exact_int_division_family_uses_hot_kernels() {
+//RS     let src = r#"
+//RS fn probe(value: Int) -> Int {
+//RS     return (value /% 3) + (value % 3) + (value %% 3) + (value << 1) + (value >> 1)
+//RS }
+//RS fn run() {
+//RS     total := 0
+//RS     loop i in 0..<10 {
+//RS         total = total + (i /% 3)
+//RS         total = total + (i % 3)
+//RS         total = total + (i %% 3)
+//RS         total = total + (i << 1)
+//RS         total = total + (i >> 1)
+//RS     }
+//RS     print(total)
+//RS     print(probe(9223372036854775808))
+//RS }
+//RS "#;
+//RS     let rust = compile("card_2872_exact_int_division_family", src);
+//RS     assert!(
+//RS         rust.contains("jet_std::jet_int_floor_div_hot!")
+//RS             && rust.contains("jet_std::jet_int_mod_hot!")
+//RS             && rust.contains("jet_std::jet_int_rem_hot!")
+//RS             && rust.contains("jet_std::jet_int_shl_hot!")
+//RS             && rust.contains("jet_std::jet_int_shr_hot!"),
+//RS         "exact-Int division-family operations must use shared hot kernels:\n{rust}"
+//RS     );
+//RS     assert_tiers_agree(
+//RS         "card_2872_exact_int_division_family",
+//RS         src,
+//RS         "140\n26132887437755198128\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn card_2254_integer_paths_reject_uncertain_negative_and_overflow() {
+//RS     let uncertain = r#"
+//RS fn body(limit: Int) {
+//RS     loop i in 0..<limit {
+//RS         print(i + 1)
+//RS     }
+//RS }
+//RS fn run() {
+//RS     body(3)
+//RS }
+//RS "#;
+//RS     let uncertain_rust = compile("card_2254_uncertain_integer", uncertain);
+//RS     assert!(
+//RS         !uncertain_rust.contains("jet_std::jet_int_add_inline!")
+//RS             && uncertain_rust.contains("jet_std::jet_int_add_hot!"),
+//RS         "an uncertain loop bound must retain checked integer arithmetic:\n{uncertain_rust}"
+//RS     );
+//RS 
+//RS     let negative = r#"
+//RS fn run() {
+//RS     loop i in -5..<5 {
+//RS         print((i /% 2))
+//RS         print((i % 2))
+//RS     }
+//RS }
+//RS "#;
+//RS     let negative_rust = compile("card_2254_negative_floor", negative);
+//RS     assert!(
+//RS         negative_rust.contains("jet_std::jet_int_floor_div")
+//RS             && negative_rust.contains("jet_std::jet_int_mod")
+//RS             && !negative_rust.contains("((__jet_i) / (")
+//RS             && !negative_rust.contains("((__jet_i) % ("),
+//RS         "sign-crossing floor/mod must retain exact helpers:\n{negative_rust}"
+//RS     );
+//RS 
+//RS     let overflow = r#"
+//RS fn run() {
+//RS     max :: 4611686018427387903
+//RS     print(max + 1)
+//RS }
+//RS "#;
+//RS     let overflow_rust = compile("card_2254_integer_overflow", overflow);
+//RS     assert!(
+//RS         !overflow_rust.contains("jet_std::jet_int_add_inline!")
+//RS             && overflow_rust.contains("jet_std::jet_int_add_hot!"),
+//RS         "an affine result outside signed-63 must retain checked addition:\n{overflow_rust}"
+//RS     );
+//RS }
+//RS 
+//RS // --- c109 Phase 6: methods + clones -----------------------------------------
+//RS 
+//RS /// The sema-inserted `.clone()` inside a COVERED function (no `self`): `p.name`
+//RS /// is an owning non-`Copy` String field read, which sema rewrites to a
+//RS /// `(p.name).clone()` MethodCall. Phases 3–5 excluded this (the getter that moves
+//RS /// a field out); Phase 6 covers it, so `name_of` now routes through the TIR.
+//RS #[test]
+//RS fn covered_fn_returns_cloned_string_field() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Person {
+//RS     name: String
+//RS     age: Int
+//RS }
+//RS fn name_of(p: Person) -[]> String {
+//RS     return ~p.name
+//RS }
+//RS fn run() {
+//RS     p :: Person{ name: \"Grace\", age: 40 }
+//RS     print(name_of(p))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_clone_getter", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "Grace\n");
+//RS }
+//RS 
+//RS /// A user-defined instance method with scalar args on a covered struct. The
+//RS /// caller `run` routes through the TIR; `(c).__jet_add(10i64, 20i64)` is emitted
+//RS /// from the resolved `method_sigs` conventions; the method body with `self`
+//RS /// also routes through executable TIR.
+//RS #[test]
+//RS fn user_method_with_scalar_args() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Calc {
+//RS     base: Int
+//RS 
+//RS     fn add(self, x: Int, y: Int) -[]> Int {
+//RS         return ((self.base + x) + y)
+//RS     }
+//RS }
+//RS fn calc(c: Calc) -[]> Int {
+//RS     return c.add(10, 20)
+//RS }
+//RS fn run() {
+//RS     c :: Calc{ base: 1 }
+//RS     print(calc(c))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_method_args", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "31\n");
+//RS }
+//RS 
+//RS /// A user method taking a String argument by value — the arg carries an implicit
+//RS /// clone (`(name).clone()`), reproduced from the total `CallArg.flags` exactly as
+//RS /// `emit_call_args` does. The caller `run` routes through the TIR.
+//RS #[test]
+//RS fn user_method_with_string_arg_implicit_clone() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Crate {
+//RS     label: String
+//RS 
+//RS     fn combine(self, other: String) -[]> String {
+//RS         return \"{self.label}-{other}\"
+//RS     }
+//RS }
+//RS fn calc(b: Crate) -[..E]> String {
+//RS     name :: \"x\"
+//RS     return b.combine(name)
+//RS }
+//RS fn run() {
+//RS     b :: Crate{ label: \"t\" }
+//RS     print(calc(b))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_method_string_arg", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "t-x\n");
+//RS }
+//RS 
+//RS /// Generated protocol methods use a shared provider span. Their checked
+//RS /// identities must still include the owner, while the ordinary operator and
+//RS /// helper calls resolve to the corresponding owner-specific implementation.
+//RS #[test]
+//RS fn generated_same_name_methods_keep_owner_identity() {
+//RS     let src = r#"
+//RS struct D {
+//RS     value: Int
+//RS }
+//RS struct Pair {
+//RS     a: Int
+//RS     b: Int
+//RS }
+//RS fn align(left: D, right: D) -> Pair -> Pair{a: left.value, b: right.value}
+//RS impl D.Add {
+//RS     fn add(self, rhs: D) -> D {
+//RS         pair :: align(self, rhs)
+//RS         return D{value: pair.a + pair.b}
+//RS     }
+//RS }
+//RS fn run() {
+//RS     sum :: (D{value: 1} + D{value: 2})
+//RS     print(sum.value)
+//RS     print(Pair{a: 1, b: 2} == Pair{a: 1, b: 2})
+//RS }
+//RS "#;
+//RS     assert_release_tiers_agree("tir_generated_method_owner_identity", src, "3\ntrue\n");
+//RS }
+//RS 
+//RS /// A trait-impl method call. `(d).label()` is emitted with the BARE method name
+//RS /// (the trait impl owns it — no generated mangle), decided at lowering from
+//RS /// `cx.trait_methods`. The caller `describe` routes through the TIR.
+//RS #[test]
+//RS fn trait_impl_method_call_no_mangle() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS trait Named {
+//RS     fn label(self) -> String
+//RS }
+//RS struct Dog {
+//RS     sound: String
+//RS }
+//RS impl Dog.Named {
+//RS     fn label(self) -> String {
+//RS         return \"dog\"
+//RS     }
+//RS }
+//RS fn describe(d: Dog) -> String {
+//RS     return d.label()
+//RS }
+//RS fn run() {
+//RS     d :: Dog{ sound: \"woof\" }
+//RS     print(describe(d))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_trait_method", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "dog\n");
+//RS }
+//RS 
+//RS /// An instance method on a covered ENUM, called from a covered function. The
+//RS /// enum-method dispatch and the enum-literal argument both route through the TIR.
+//RS #[test]
+//RS fn user_method_on_covered_enum() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS enum Light {
+//RS     Red
+//RS     Green
+//RS 
+//RS     fn code(self) -[]> Int {
+//RS         if self == {
+//RS             .Red -> { return 1 }
+//RS             .Green -> { return 2 }
+//RS         }
+//RS     }
+//RS }
+//RS fn calc(l: Light) -[]> Int {
+//RS     return l.code()
+//RS }
+//RS fn run() {
+//RS     print(calc(Light.Green))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_enum_method", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "2\n");
+//RS }
+//RS 
+//RS /// A non-empty map literal `[k: v, …]` returned from a covered function, then
+//RS /// indexed in `main` — the map-builder lowering plus map indexing.
+//RS #[test]
+//RS fn map_literal_with_entries() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn scores() -[]> [String:Int] {
+//RS     return [\"a\": 1, \"b\": 2]
+//RS }
+//RS fn run() {
+//RS     s := scores()
+//RS     print(s[\"a\"])
+//RS     print(s[\"b\"])
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_map_entries", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "1\n2\n");
+//RS }
+//RS 
+//RS // ---------------------------------------------------------------------------
+//RS // c109 Phase 7: method bodies + static methods. The method body (with a `self`
+//RS // param) and static (associated) methods + their call sites now route through
+//RS // the TIR. These prove the lowered method definitions compile (I2) and run, and
+//RS // that static dispatch (`Type.make(x)` → `__jet_T::__jet_make(x)`) is correct.
+//RS // ---------------------------------------------------------------------------
+//RS 
+//RS /// A static constructor returning the owning type, plus a `self` getter that is
+//RS /// now covered end-to-end (definition + call). Static dispatch + instance call.
+//RS #[test]
+//RS fn static_constructor_and_self_getter() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Counter {
+//RS     n: Int
+//RS 
+//RS     fn make(v: Int) -[]> Counter {
+//RS         return Counter{ n: v }
+//RS     }
+//RS     fn value(self) -[]> Int {
+//RS         return self.n
+//RS     }
+//RS }
+//RS fn run() {
+//RS     c :: Counter.make(5)
+//RS     print(c.value())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_static_ctor", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "5\n");
+//RS }
+//RS 
+//RS /// A `mut self` method (receiver `&mut self`) whose body reads `self.field`. The
+//RS /// receiver form differs from a `self` getter, exercising the `&mut self` path.
+//RS #[test]
+//RS fn mut_self_method_body() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Acc {
+//RS     total: Int
+//RS 
+//RS     fn doubled(&self) -[]> Int {
+//RS         return (self.total + self.total)
+//RS     }
+//RS }
+//RS fn run() {
+//RS     a := Acc{ total: 7 }
+//RS     print(a.doubled())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_mut_self", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "14\n");
+//RS }
+//RS 
+//RS /// An enum method (a `when self` match in the body), plus a static call site,
+//RS /// covered end-to-end.
+//RS #[test]
+//RS fn enum_method_body_and_static_call() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS enum Sign {
+//RS     Pos
+//RS     Neg
+//RS     Zero
+//RS 
+//RS     fn make_pos() -[]> Sign {
+//RS         return Sign.Pos
+//RS     }
+//RS     fn to_num(self) -[]> Int {
+//RS         if self == {
+//RS             .Pos -> { return 1 }
+//RS             .Neg -> { return 0 }
+//RS             .Zero -> { return 0 }
+//RS         }
+//RS     }
+//RS }
+//RS fn run() {
+//RS     s :: Sign.make_pos()
+//RS     print(s.to_num())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_enum_method_static", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "1\n");
+//RS }
+//RS 
+//RS /// An instance method that calls another method on `self` and returns a new value
+//RS /// of the owning struct type — the method-to-method dispatch through the TIR, plus
+//RS /// a static constructor and a method returning a fresh struct literal.
+//RS #[test]
+//RS fn method_calls_method_and_returns_struct() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Vec2 {
+//RS     x: Int
+//RS     y: Int
+//RS 
+//RS     fn make(x: Int, y: Int) -[]> Vec2 {
+//RS         return Vec2{ x: x, y: y }
+//RS     }
+//RS     fn sum(self) -[]> Int {
+//RS         return (self.x + self.y)
+//RS     }
+//RS     fn shifted(self, dx: Int) -[]> Vec2 {
+//RS         return Vec2{ x: (self.x + dx), y: self.y }
+//RS     }
+//RS }
+//RS fn run() {
+//RS     p :: Vec2.make(3, 4)
+//RS     q :: p.shifted(10)
+//RS     print(q.sum())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_method_chain", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "17\n");
+//RS }
+//RS 
+//RS // c109 Phase 8: fallible + optional.
+//RS 
+//RS /// A fallible `T !E` function with `ok`/`err` constructors and automatic propagation
+//RS /// across a covered scalar-payload error enum, consumed with `??` value fallback.
+//RS /// `parse_age`, `load`, and `main` all route through the TIR.
+//RS #[test]
+//RS fn fallible_try_and_or_fallback() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS #Error
+//RS enum ParseError {
+//RS     Empty
+//RS     BadDigit(Int)
+//RS }
+//RS fn parse_age(raw: Int) -> Int ParseError! {
+//RS     if raw == 0 {
+//RS         return Err(ParseError.Empty)
+//RS     }
+//RS     if raw == 1 {
+//RS         return Err(ParseError.BadDigit(raw))
+//RS     }
+//RS     return Ok((raw * 2))
+//RS }
+//RS fn load(raw: Int) -> Int ParseError! {
+//RS     n :: parse_age(raw)
+//RS     return Ok((n + 1))
+//RS }
+//RS fn run() {
+//RS     a :: load(21) ?? 0
+//RS     print(a)
+//RS     b :: load(0) ?? 99
+//RS     print(b)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_fallible", src);
+//RS     assert_eq!(code, 0);
+//RS     // load(21): parse_age→Ok(42), n=42, Ok(43); ?? → 43.
+//RS     // load(0):  parse_age→Err(Empty), automatic propagation passes Err; ?? → 99.
+//RS     assert_eq!(stdout, "43\n99\n");
+//RS }
+//RS 
+//RS /// The `??` fallback in its early-`return` form (a `T !E` value), plus `ok`/`err`.
+//RS #[test]
+//RS fn or_fallback_return_form() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn checked(x: Int) -> Int Err! {
+//RS     if x == 0 {
+//RS         return Err(\"zero\")
+//RS     }
+//RS     return Ok((100 /% x))
+//RS }
+//RS fn safe(x: Int) -> Int {
+//RS     return checked(x) ?? return -1
+//RS }
+//RS fn run() {
+//RS     print(safe(4))
+//RS     print(safe(0))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_or_return", src);
+//RS     assert_eq!(code, 0);
+//RS     // safe(4): checked→Ok(25), ?? → 25. safe(0): checked→err, ?? return -1.
+//RS     assert_eq!(stdout, "25\n-1\n");
+//RS }
+//RS 
+//RS /// An optional `T?` with `Val`/`None` constructors and a `??` fallback.
+//RS #[test]
+//RS fn optional_val_none_and_fallback() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn first_even(limit: Int) -[]> Float? {
+//RS     loop i in 1..limit {
+//RS         if (i % 2) == 0 {
+//RS             return Val(Float.from_int(i))
+//RS         }
+//RS     }
+//RS     return None
+//RS }
+//RS fn run() {
+//RS     print((first_even(9) ?? 0.0) == 2.0)
+//RS     print((first_even(1) ?? 7.5) == 7.5)
+//RS }
+//RS ";
+//RS     assert_tiers_agree("tir_optional", src, "true\ntrue\n");
+//RS }
+//RS 
+//RS /// Optional field chaining `?.` (both `.map` and flattening `.and_then`), with a
+//RS /// nested optional field. `nick` routes through the TIR.
+//RS #[test]
+//RS fn optional_chaining() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Profile {
+//RS     handle: (String?)
+//RS }
+//RS struct Account {
+//RS     details: Profile
+//RS }
+//RS fn handle_of(a: (Account?)) -[]> (String?) {
+//RS     return a?.details?.handle
+//RS }
+//RS fn run() {
+//RS     p :: Profile{ handle: Val(\"jay\") }
+//RS     acct :: Account{ details: p }
+//RS     print(handle_of(Val(acct)) ?? \"none\")
+//RS     print(handle_of(None) ?? \"none\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_optchain", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "jay\nnone\n");
+//RS }
+//RS 
+//RS // c109 Phase 9: built-in collection/string methods. These route through the TIR
+//RS // (`recv_type == None` + a covered builtin name), with the Map-vs-List-vs-String
+//RS // emit branch resolved at lowering. Each proves rustc accepts the output (I2) and
+//RS // runs correctly. Closure-taking methods (`map`/`filter`/…) are deferred (Phase 11).
+//RS 
+//RS /// List methods: push, insert, get, first, last, len, contains, index_of, sort,
+//RS /// reverse, pop — a covered function exercising the non-closure list surface.
+//RS #[test]
+//RS fn list_builtin_methods() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn build() -[]> [Int] {
+//RS     xs := [3, 1, 2]
+//RS     xs.push(5)
+//RS     xs.insert(0, 0)
+//RS     xs.sort()
+//RS     xs.reverse()
+//RS     return xs
+//RS }
+//RS fn run() {
+//RS     xs := build()
+//RS     print(xs.len())
+//RS     print(xs.contains(5))
+//RS     print(xs.index_of(2))
+//RS     g := xs.get(0)
+//RS     print(g ?? 0)
+//RS     f := xs.first()
+//RS     print(f ?? 0)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_list_builtins", src);
+//RS     assert_eq!(code, 0);
+//RS     // sorted [0,1,2,3,5] reversed → [5,3,2,1,0]. len 5, contains 5 true,
+//RS     // index_of 2 → 2, get(0) → 5, first → 5.
+//RS     assert_eq!(stdout, "5\ntrue\n2\n5\n5\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn list_insert_bounds_have_release_tier_parity() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let valid = r#"
+//RS fn insert_at(index: Int) -[]> [Int] {
+//RS     values := [1, 3]
+//RS     &values.insert(index, 2)
+//RS     return values
+//RS }
+//RS fn run() {
+//RS     print(insert_at(0))
+//RS     print(insert_at(1))
+//RS     print(insert_at(2))
+//RS }
+//RS "#;
+//RS     assert_release_tiers_agree(
+//RS         "tir_list_insert_valid",
+//RS         valid,
+//RS         "[2, 1, 3]\n[1, 2, 3]\n[1, 3, 2]\n",
+//RS     );
+//RS 
+//RS     let negative = r#"
+//RS fn insert_at(index: Int) -[]> [Int] {
+//RS     values := [1, 3]
+//RS     &values.insert(index, 2)
+//RS     return values
+//RS }
+//RS fn run() {
+//RS     print(insert_at(-1))
+//RS }
+//RS "#;
+//RS     assert_release_error_tiers_agree(
+//RS         "tir_list_insert_negative",
+//RS         negative,
+//RS         "the list has 2 items, so position -1 doesn't exist",
+//RS     );
+//RS 
+//RS     let too_large = r#"
+//RS fn insert_at(index: Int) -[]> [Int] {
+//RS     values := [1, 3]
+//RS     &values.insert(index, 2)
+//RS     return values
+//RS }
+//RS fn run() {
+//RS     print(insert_at(3))
+//RS }
+//RS "#;
+//RS     assert_release_error_tiers_agree(
+//RS         "tir_list_insert_too_large",
+//RS         too_large,
+//RS         "the list has 2 items, so position 3 doesn't exist",
+//RS     );
+//RS }
+//RS 
+//RS /// String methods: len (char count), to_upper, to_lower, trim, split, starts_with,
+//RS /// ends_with, replace, repeat, slice, chars, contains, to_string.
+//RS #[test]
+//RS fn string_builtin_methods() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     s := \"  Hello, World  \"
+//RS     t := s.trim()
+//RS     print(t.to_upper())
+//RS     print(t.to_lower())
+//RS     print(t.len())
+//RS     print(t.starts_with(\"Hello\"))
+//RS     print(t.ends_with(\"World\"))
+//RS     print(t.replace(\"World\", \"Jet\"))
+//RS     print(\"ab\".repeat(3))
+//RS     print(t.contains(\"World\"))
+//RS     parts := \"a,b,c\".split(\",\")
+//RS     print(parts.len())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_string_builtins", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "HELLO, WORLD\nhello, world\n12\ntrue\ntrue\nHello, Jet\nababab\ntrue\n3\n"
+//RS     );
+//RS }
+//RS 
+//RS /// A copied String receiver must keep String builtin dispatch. The same shape
+//RS /// appears in `dogfood/tower/run.jet:683`; losing the type at `Expr::Copy`
+//RS /// selected the list slice helper and handed rustc `&String` where `&[T]` was
+//RS /// required. Unicode output also proves the canonical scalar-position slice.
+//RS #[test]
+//RS fn copied_string_slice_uses_string_builtin() {
+//RS     let src = "\
+//RS fn strip_hash(reference: String) -> String {
+//RS     text := ~reference
+//RS     if (~text).starts_with(\"#\") -> text = (~text).slice(1, (~text).len() - 1)
+//RS     return text
+//RS }
+//RS fn run() {
+//RS     print(strip_hash(\"#é🙂\"))
+//RS }
+//RS ";
+//RS     assert_tiers_agree("tir_copied_string_slice", src, "é🙂\n");
+//RS }
+//RS 
+//RS /// E3 breadth: String owns the common search, trim, padding, classification,
+//RS /// title, and single-split operations. The test runs through the TIR lowering
+//RS /// path and proves the tuple-shaped `split_once` result is usable by name.
+//RS #[test]
+//RS fn string_surface_breadth() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     s := \"  hello jet world  \"
+//RS     print(s.trim_start())
+//RS     print(s.trim_end())
+//RS     print(s.pad_start(22, \".\"))
+//RS     print(s.pad_end(22, \".\"))
+//RS     print(s.index_of(\"jet\"))
+//RS     print(s.count(\"l\"))
+//RS     print(\"Hello\".is_alphabetic())
+//RS     print(\"123\".is_numeric())
+//RS     print(\" \\t\".is_whitespace())
+//RS     print(\"Jet lang\".is_ascii())
+//RS     print(\"hELLO jet\".to_title())
+//RS     pair :: \"left:right\".split_once(\":\") ?? panic(\"split\")
+//RS     print(pair.before)
+//RS     print(pair.after)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_string_surface_breadth", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "hello jet world  \n  hello jet world\n...  hello jet world  \n  hello jet world  ...\n8\n3\ntrue\ntrue\ntrue\ntrue\nHello Jet\nleft\nright\n"
+//RS     );
+//RS }
+//RS 
+//RS /// E3 breadth: Set and Rank expose the complete algebra surface with one
+//RS /// semantic operation family on every execution tier.
+//RS #[test]
+//RS fn set_algebra_methods() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn sorted(xs: [Int]) -[]> [Int] {
+//RS     ys := ~xs
+//RS     ys.sort()
+//RS     return ys
+//RS }
+//RS fn run() {
+//RS     a := Set.from([1, 2, 3])
+//RS     b := Set.from([3, 4])
+//RS     i := a.intersection(b).to_list()
+//RS     d := a.difference(b).to_list()
+//RS     x := a.symmetric_difference(b).to_list()
+//RS     print(sorted(i))
+//RS     print(sorted(d))
+//RS     print(sorted(x))
+//RS     print(a.is_subset(Set.from([1, 2, 3, 4])))
+//RS     print(a.is_superset(Set.from([1, 2])))
+//RS     print(a.is_disjoint(Set.from([8])))
+//RS     s := Rank.from([1, 2, 3])
+//RS     t := Rank.from([3, 4])
+//RS     print(s.intersection(t).to_list())
+//RS     print(s.difference(t).to_list())
+//RS     print(s.symmetric_difference(t).to_list())
+//RS     print(s.is_subset(Rank.from([1, 2, 3, 4])))
+//RS     print(s.is_superset(Rank.from([1, 2])))
+//RS     print(s.is_disjoint(Rank.from([8])))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_set_algebra", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "[3]\n[1, 2]\n[1, 2, 4]\ntrue\ntrue\ntrue\n[3]\n[1, 2]\n[1, 2, 4]\ntrue\ntrue\ntrue\n"
+//RS     );
+//RS }
+//RS 
+//RS /// D-STR-AFTER1: `.after(sep)`/`.before(sep)` — first-occurrence substring
+//RS /// split. `sep` absent -> the whole original string on both sides (mirrors
+//RS /// `.replace`'s no-match-is-identity convention; no `Option` to unwrap).
+//RS #[test]
+//RS fn string_after_before() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     email := \"nate@jet-lang.dev\"
+//RS     print(email.after(\"@\"))
+//RS     print(email.before(\"@\"))
+//RS     plain := \"no-separator\"
+//RS     print(plain.after(\"@\"))
+//RS     print(plain.before(\"@\"))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_string_after_before", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "jet-lang.dev\nnate\nno-separator\nno-separator\n");
+//RS }
+//RS 
+//RS /// Map methods: add, add_new, get, has_key, lazy keys/values, len, clear.
+//RS /// JetMap iterates in sorted key order, so output is deterministic.
+//RS #[test]
+//RS fn map_builtin_methods() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     probe := [String:Int]{ "k": 41 }
+//RS     print(probe.add("k", 5) ?? 0)
+//RS     print(probe.add("new", 9) ?? -99)
+//RS     m := [String:Int]{}
+//RS     print(m.add("banana", 3) ?? 0)
+//RS     print(m.add("apple", 5) ?? 0)
+//RS     print(m.add("apple", 7) ?? 0)
+//RS     print(&m.add_new("apple", 9))
+//RS     print(&m.add_new("cherry", 11))
+//RS     print(m.len())
+//RS     print(m.has_key("apple"))
+//RS     v := m.get("apple")
+//RS     print(v ?? 0)
+//RS     ks := m.keys()
+//RS     print(ks.len())
+//RS     vs := m.values()
+//RS     print(vs.len())
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_map_builtins",
+//RS         src,
+//RS         "41\n-99\n0\n0\n5\nfalse\ntrue\n3\ntrue\n7\n3\n3\n",
+//RS     );
+//RS }
+//RS 
+//RS /// D-ONCE-VERB1=A: every collection's removal operation returns the removed
+//RS /// value, and List.replace names only an indexed swap.
+//RS #[test]
+//RS fn collection_pop_table() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     xs := [10, 20, 30]
+//RS     print(xs.pop() ?? -1)
+//RS     print(xs.replace(0, 99))
+//RS     counts := [String:Int]{ \"words\": 4 }
+//RS     print(counts.pop(\"words\") ?? -1)
+//RS     seen := Set.from([7, 8])
+//RS     print(seen.pop(8) ?? -1)
+//RS     queue := Queue.init([1, 2, 3])
+//RS     print(queue.pop_front() ?? -1)
+//RS     priorities := PriorityQueue.from([2, 9, 4])
+//RS     print(priorities.pop() ?? -1)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_collection_pop_table", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "30\n[99, 20]\n4\n8\n1\n9\n");
+//RS }
+//RS 
+//RS /// D-CORE-EAGER1=A / D-LOOPMAP1=B: concrete containers evaluate map/filter
+//RS /// once and return plain lists; `.lazy()` selects the deferred Iter plane.
+//RS #[test]
+//RS fn eager_container_adapters_and_lazy_opt_in() {
+//RS     let src = "\
+//RS fn count_and_keep(n: Int, visits: Cell<Int>) -> Bool {
+//RS     visits.edit(count -> count += 1)
+//RS     return n % 2 == 0
+//RS }
+//RS fn run() {
+//RS     nums := [1, 2, 3, 4]
+//RS     mapped := nums.map((n: Int) -> n + 1)
+//RS     print(mapped)
+//RS     print(mapped.len())
+//RS     visits := Cell.new(0)
+//RS     visits_copy :: ~visits
+//RS     even := nums.map((n: Int) -> n + 1).filter((n: Int) -> count_and_keep(n, visits_copy) ?? false)
+//RS     print(even)
+//RS     print(visits.get())
+//RS     lazy_values := nums.lazy().filter((n: Int) -> n > 2).map((n: Int) -> n * 10).to_list()
+//RS     print(lazy_values)
+//RS     parts := \"a,b,c\".split(\",\")
+//RS     print(parts.to_list())
+//RS }
+//RS ";
+//RS     let rust = compile("tir_eager_container_adapters", src);
+//RS     assert!(
+//RS         rust.contains("jet_list_map_filter(("),
+//RS         "adjacent eager adapters did not use the fused Prelude kernel"
+//RS     );
+//RS     assert!(rust.contains("jet_iter_filter("));
+//RS     assert!(rust.contains("jet_iter_map("));
+//RS     assert!(rust.contains("jet_iter_string_split("));
+//RS     assert_tiers_agree(
+//RS         "tir_eager_container_adapters",
+//RS         src,
+//RS         "[2, 3, 4, 5]\n4\n[2, 4]\n4\n[30, 40]\n[a, b, c]\n",
+//RS     );
+//RS }
+//RS 
+//RS /// D-ITERTOOLS1=A: positional picks have one spelling and one terminal path.
+//RS #[test]
+//RS fn iter_positional_pick_uses_skip_then_first() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     nums := [10, 20, 30]
+//RS     print(nums.skip(1).first() ?? -1)
+//RS     print(nums.skip(9).first() ?? -1)
+//RS     words := ["zero", "one"]
+//RS     print(words.skip(1).first() ?? "missing")
+//RS     decimals := [1.5, 2.5]
+//RS     print(decimals.skip(1).first() ?? 0.0)
+//RS }
+//RS "#;
+//RS     let rust = compile("tir_iter_positional_pick", src);
+//RS     assert!(rust.contains("jet_iter_first("));
+//RS     assert!(!rust.contains("jet_iter_nth("));
+//RS     assert_tiers_agree("tir_iter_positional_pick", src, "20\n-1\none\n2.5\n");
+//RS }
+//RS 
+//RS /// `remove` on both a list (value default and explicit slot mode) and a map
+//RS /// (the `.remove(&(k).clone())` form) — the Map-vs-List branch resolved at lowering.
+//RS #[test]
+//RS fn list_and_map_remove() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn drop_first(xs: [Int]) -[]> Int {
+//RS     ys := ~xs
+//RS     r := ys.remove(0, .Slot)
+//RS     return ys.len()
+//RS }
+//RS fn drop_key(m: [String:Int]) -[]> Int {
+//RS     m2 := ~m
+//RS     r := m2.remove(\"a\")
+//RS     return m2.len()
+//RS }
+//RS fn run() {
+//RS     print(drop_first([10, 20, 30]))
+//RS     counts := [String:Int]{}
+//RS     counts[\"a\"] = 1
+//RS     counts[\"b\"] = 2
+//RS     print(drop_key(counts))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_remove", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "2\n1\n");
+//RS }
+//RS 
+//RS /// D-LISTREMOVE1/F plus the missing list verbs: value removal is the default,
+//RS /// `.Slot` preserves positional removal, `count` counts equal items, `extend`
+//RS /// mutates in order, and `concat` returns a new list.
+//RS #[test]
+//RS fn list_remove_modes_and_surface_gaps() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     xs := [1, 2, 1]
+//RS     print(xs.remove(1) ?? 0)
+//RS     print(xs.count(1))
+//RS     print(xs.remove(0, .Slot) ?? 0)
+//RS     xs.extend([3, 4])
+//RS     print(xs.concat([5]).len())
+//RS     print(xs.len())
+//RS     by :: RemoveBy.Val
+//RS     print(xs.remove(1, by) ?? 0)
+//RS     print(xs.len())
+//RS     ss := [\"a\", \"b\", \"a\"]
+//RS     print(ss.remove(\"a\", .Val) ?? \"\")
+//RS     print(ss.len())
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_list_remove_modes", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "1\n1\n2\n4\n3\n1\n2\na\n2\n");
+//RS }
+//RS 
+//RS /// D-LISTREMOVE1/F: the same surface must run through the forced interpreter
+//RS /// path, including the map-view calls that use its list-shaped iterator value.
+//RS #[test]
+//RS fn list_surface_forced_interpreter() {
+//RS     let path = format!(
+//RS         "{}/Examples/features/collections/list_surface.jet",
+//RS         env!("CARGO_MANIFEST_DIR")
+//RS     );
+//RS     match dev_iteration(&path, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(exit_code, 0);
+//RS             assert_eq!(stderr, "");
+//RS             // Matches Examples/features/expected/collections/list_surface.out
+//RS             // (the full #1477 List surface — this assertion was stale, left
+//RS             // over from a smaller version of the fixture).
+//RS             assert_eq!(
+//RS                 stdout,
+//RS                 "true\ntrue\n[2, 3, 4]\ntrue\n2\n[1, 2, 3, 4, 5, 6]\n[2, 4]\n[1, 3, 5]\n5\n1\n5\n1\n1\n[1, 9, 1]\n"
+//RS             );
+//RS         }
+//RS         RunOutcome::Problems(diagnostics) => {
+//RS             panic!("forced interpreter rejected list surface: {diagnostics:?}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-SUBJECT-CALL1=A: bare member chains desugar to ordinary one-parameter
+//RS /// lambdas before the forced interpreter sees the collection methods.
+//RS #[test]
+//RS fn bare_member_shorthand_forced_interpreter() {
+//RS     let path = format!(
+//RS         "{}/Examples/features/basics/method_chain.jet",
+//RS         env!("CARGO_MANIFEST_DIR")
+//RS     );
+//RS     match dev_iteration(&path, false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(exit_code, 0);
+//RS             assert_eq!(stderr, "");
+//RS             assert_eq!(stdout, "HELL0 W0RLD\n3\n[1, 2]\n[Ada]\n[ADA, GRACE]\n");
+//RS         }
+//RS         RunOutcome::Problems(diagnostics) => {
+//RS             panic!("forced interpreter rejected bare member shorthand: {diagnostics:?}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-SUBJECT-COHERE1=A: method-head subject shorthand is the same unary
+//RS /// callable shape as a member head, including in a call slot.
+//RS #[test]
+//RS fn bare_method_head_shorthand_in_callable_slot() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     words := ["a", "bb"]
+//RS     lengths :: words.map(.len())
+//RS     print(lengths)
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_subject_method_head", source, "[1, 2]\n");
+//RS }
+//RS 
+//RS /// D-SUBJECT-COHERE1=A: nested shorthand gets a named lint, while a statement
+//RS /// marker suppresses only the lints raised by that statement.
+//RS #[test]
+//RS fn subject_shorthand_nesting_lint_and_allow() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     words := [["a", "bb"]]
+//RS     print(words.map(.map(.len())))
+//RS     #allow(subject_shorthand_nesting) print(words.map(.map(.len())))
+//RS }
+//RS "#;
+//RS     let compiled = jet::compile(source).expect("nested subject shorthand should remain legal");
+//RS     let lints: Vec<_> = compiled
+//RS         .lints
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "L0512")
+//RS         .collect();
+//RS     let lint_count = lints.len();
+//RS     assert_eq!(
+//RS         lint_count, 1,
+//RS         "local #allow should suppress one nested lint; got {lint_count}"
+//RS     );
+//RS }
+//RS 
+//RS /// D-FMT-PLAIN1=A: the old `Fixed(n)` comma cleanup gets one exact fix. The
+//RS /// explicit `Grouped(n)` form, arbitrary replacement text, and a local allow
+//RS /// stay quiet.
+//RS #[test]
+//RS fn redundant_fixed_cleanup_lint_has_exact_fix_and_allow() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     value :: Float{1234.5}
+//RS     print("{value:Fixed(2)}".replace(",", ""))
+//RS     #allow(redundant_fixed_cleanup) print("{value:Fixed(2)}".replace(",", ""))
+//RS     print("{value:Grouped(2)}".replace(",", ""))
+//RS     print("1,234".replace(",", ""))
+//RS     print("{value:Fixed(2)}".replace(",", ","))
+//RS }
+//RS "#;
+//RS     let compiled = jet::compile(source).expect("the formatting lint fixture should compile");
+//RS     let lints: Vec<_> = compiled
+//RS         .lints
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "L0518")
+//RS         .collect();
+//RS     assert_eq!(lints.len(), 1, "only the exact unallowed workaround should warn");
+//RS     let edit = lints[0]
+//RS         .edit
+//RS         .as_ref()
+//RS         .expect("L0518 must carry a mechanical deletion fix");
+//RS     assert_eq!(&source[edit.span.start..edit.span.end], ".replace(\",\", \"\")");
+//RS     assert_eq!(edit.new_text, "");
+//RS     let fixed = jet::FixEngine::apply_edits(source, std::slice::from_ref(edit))
+//RS         .expect("the L0518 edit must apply");
+//RS     assert!(fixed.contains("print(\"{value:Fixed(2)}\")"), "fixed source:\n{fixed}");
+//RS }
+//RS 
+//RS /// `join(sep)` on a list of strings — the `.iter().map(jet_show)…join` form.
+//RS #[test]
+//RS fn list_join_with_separator() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     words := [\"a\", \"b\", \"c\"]
+//RS     print(words.join(\"-\"))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_join", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "a-b-c\n");
+//RS }
+//RS 
+//RS /// `join(sep)` also works on a borrowed list window.
+//RS #[test]
+//RS fn view_join_with_separator() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     words := [\"a\", \"b\", \"c\"]
+//RS     middle :: words[0..1]
+//RS     print(middle.join(\"-\"))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_view_join", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "a-b\n");
+//RS }
+//RS 
+//RS /// `join(sep)` on an exclusive write window (`ViewMut`) — must not clone `&mut [T]`.
+//RS #[test]
+//RS fn view_mut_join_with_separator() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     words := [\"a\", \"b\", \"c\"]
+//RS     middle := &words[0..1]
+//RS     print(middle.join(\"-\"))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_view_mut_join", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "a-b\n");
+//RS }
+//RS 
+//RS /// A compact Result handler over a fallible value. The subject is a user
+//RS /// fallible fn call; the bound payload prints.
+//RS #[test]
+//RS fn fallible_when_match() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS #Error
+//RS enum ClassifyError {
+//RS     Bad(String)
+//RS }
+//RS fn classify(x: Int) -> Int ClassifyError! {
+//RS     if x == 0 {
+//RS         return Err(ClassifyError.Bad(\"bad\"))
+//RS     }
+//RS     return Ok((x + 10))
+//RS }
+//RS fn run() {
+//RS     classify(5) ? n -> { print(n) } ! e -> { print(e) }
+//RS     classify(0) ? n -> { print(n) } ! e -> { print(e) }
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_fallible_when", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "15\nBad(bad)\n");
+//RS }
+//RS 
+//RS /// List predicates count every match and replace only the first matching item.
+//RS #[test]
+//RS fn list_predicate_operations() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     values := [1, 2, 2, 3]
+//RS     print(values.count_where(item -> item % 2 == 0))
+//RS     print(&values.update_first(item -> item == 2, 9))
+//RS     print(values)
+//RS     print(&values.update_first(item -> item == 8, 7))
+//RS     print(values)
+//RS }
+//RS "#;
+//RS     let rust = compile("tir_list_predicate_operations", src);
+//RS     assert!(rust.contains("jet_list_count_where"));
+//RS     assert!(rust.contains("jet_list_update_first"));
+//RS     assert_tiers_agree(
+//RS         "tir_list_predicate_operations",
+//RS         src,
+//RS         "2\ntrue\n[1, 9, 2, 3]\nfalse\n[1, 9, 2, 3]\n",
+//RS     );
+//RS }
+//RS 
+//RS /// Hardening finding lane-3/float-sum-interpreter-gap (card #2830): tier-parity regression fixture.
+//RS #[test]
+//RS fn card_2830_float_sum_tier_parity() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     values :: [Float]{1.0, 2.0}
+//RS     result :: values.sum()
+//RS     print(result)
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_card_2830_float_sum", src, "3.0\n");
+//RS }
+//RS 
+//RS /// Hardening finding lane-8/map-key-set-aot-ice (card #2844): tier-parity regression fixture.
+//RS #[test]
+//RS fn card_2844_struct_key_set_from_tier_parity() {
+//RS     let src = r#"
+//RS struct CacheKey {
+//RS     user: String
+//RS     resource: String
+//RS }
+//RS 
+//RS fn run() {
+//RS     scores := [CacheKey:Int]{}
+//RS     print(scores.add(CacheKey{user: "ada", resource: "profile"}, 7) ?? -1)
+//RS     keys :: scores.keys().to_list()
+//RS     key_set :: Set.from(keys)
+//RS     print(keys.len())
+//RS     print(key_set.len())
+//RS     print(key_set.has(CacheKey{user: "ada", resource: "profile"}))
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_card_2844_struct_key_set_from",
+//RS         src,
+//RS         "-1\n1\n1\ntrue\n",
+//RS     );
+//RS }
+//RS /// The E0507 advice names three contracts instead of pretending that an index
+//RS /// rewrite preserves an unknown traversal.  Keep one executable witness for
+//RS /// each supported repair: a separate result, a fixed original set, and an
+//RS /// explicit queue that removes and appends work until empty.
+//RS #[test]
+//RS fn collection_mutation_intents_preserve_declared_contracts() {
+//RS     let src = r#"
+//RS fn count_work(work: &[Int]) -> Int {
+//RS     visits := 0
+//RS     loop work.len() > 0 {
+//RS         _value :: &work.pop() ?? -1
+//RS         visits += 1
+//RS     }
+//RS     return visits
+//RS }
+//RS 
+//RS fn run() {
+//RS     input :: [Int]{3, -1, 0, 2}
+//RS     selected := [Int]{}
+//RS     loop value in input {
+//RS         if value > 0 -> &selected.push(value)
+//RS     }
+//RS     print("separate input={input}")
+//RS     print("separate result={selected}")
+//RS 
+//RS     values := [Int]{3, -1, 0, 2}
+//RS     fixed_len :: values.len()
+//RS     loop index in 0..<fixed_len {
+//RS         values[index] = values[index] + 1
+//RS     }
+//RS     print("fixed values={values}")
+//RS 
+//RS     work := [Int]{1, 2}
+//RS     seen := [Int]{}
+//RS     loop work.len() > 0 {
+//RS         value :: &work.pop() ?? -1
+//RS         &seen.push(value)
+//RS         if value < 3 -> &work.push(value + 2)
+//RS     }
+//RS     print("work seen={seen} empty={work.len() == 0}")
+//RS 
+//RS     empty := [Int]{}
+//RS     print("empty visits={count_work(&empty)}")
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_collection_mutation_intents",
+//RS         src,
+//RS         "separate input=[3, -1, 0, 2]\n\
+//RS separate result=[3, 2]\n\
+//RS fixed values=[4, 0, 1, 3]\n\
+//RS work seen=[2, 4, 1, 3] empty=true\n\
+//RS empty visits=0\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 1170 tests/tir_collections_and_methods.rs:1-1904
+

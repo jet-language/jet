@@ -1,0 +1,279 @@
+// Rust: jet-parser/src/Formatter/mod.rs::format_program/format_source/unified_diff.
+use jet_foundation.[Diagnostic, Item, Marker, PolicyDeclaration, PolicyScope, Program, WebBucket]
+use jet_foundation.[diagnostic_bidi_control_at, diagnostic_escape_bidi_text]
+use jet_lexer.[Token, TOKEN_BLOCK_COMMENT, TOKEN_LINE_COMMENT, lex]
+
+pub struct JetFormatResult {
+    pub source: String?
+    pub diagnostics: [Diagnostic]
+}
+pub fn jet_format_program(program: Program, source: String, comment_tokens: [Token]) -> String Never! {
+    lexed :: lex(source.bytes())
+    jet_format_program_with_tokens(program, source, comment_tokens, lexed.tokens, JetFormatOptions{simplify: false}, false)
+}
+// Rust: format_synthetic_program: addressable blank source, no invented parser.
+pub fn jet_format_synthetic_program(program: Program) -> String Never! {
+    length := 0
+    loop item in program.items {
+        end :: jet_format_synthetic_item_end(item)
+        if end > length -> length = end
+    }
+    bytes := [U8]{}
+    loop index in 0..<length + 1 -> &bytes.push(U8{32})
+    source :: String.from_bytes(bytes) ?? panic("ASCII blank source")
+    lexed :: lex(bytes)
+    jet_format_program_with_tokens(program, source, [Token]{}, lexed.tokens, JetFormatOptions{simplify: false}, false)
+}
+fn jet_format_new_context(program: Program, source: String, comment_tokens: [Token], source_tokens: [Token], options: JetFormatOptions, strip_optional: Bool) -> JetFormatterContext Never! {
+    comments := [JetFormatterComment]{}
+    loop token in comment_tokens {
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> panic("formatter comment token is not a comment")
+        &comments.push(JetFormatterComment{text: token.payload.text, span: token.span})
+    }
+    JetFormatterContext{src: source, source_bytes: source.bytes(), source_toks: source_tokens, comments: comments, comment_i: 0, out: [U8]{}, col: 0, at_line_start: true, indent: 0, pending_blank: false, trailing_comment_limit: -1, pub_file: program.pub_file, items: program.items, policy_declarations: program.policy_declarations, fenced_statements: program.fenced_statements, simplify: options.simplify, expected_return_type: None, force_control_braces: false, layout_name: None, layout_resugar: false, strip_optional_returns: strip_optional, optional_body_visit: false, optional_tail: false, body_depth: 0}
+}
+// Rust: format_program_with_tokens. Ordered rules retain their source order;
+// single file markers have the canonical ordering of the native formatter.
+fn jet_format_program_with_tokens(program: Program, source: String, comment_tokens: [Token], source_tokens: [Token], options: JetFormatOptions, strip_optional: Bool) -> String Never! {
+    context := jet_format_new_context(program, source, comment_tokens, source_tokens, options, strip_optional)
+    first := true
+    ordered_rules := [Marker]{}
+    rules_precede_imports := false
+    loop application in program.applied_rules {
+        if application.target != None -> next
+        &ordered_rules.push(application.marker)
+        if application.marker.name == "PubFile" || application.marker.name == "NoPrelude" -> rules_precede_imports = true
+    }
+    has_ordered :: ordered_rules.len() > 0
+    file_rules := [String]{}
+    if program.pub_file -> &file_rules.push("PubFile")
+    if program.no_prelude -> &file_rules.push("NoPrelude")
+    if program.default_target == (Val("web")) -> &file_rules.push("Target(Web)")
+    if program.web_target_ceiling == .Val(bucket) -> &file_rules.push("Target({jet_format_web_bucket(bucket)})")
+    if program.html_path == .Val(path) -> &file_rules.push("HTML(Path{{\"{jet_format_escape_str_lit(path)}\"}})")
+    grouped :: file_rules.len() > 1
+    if {
+        has_ordered && rules_precede_imports -> {
+            jet_format_marker_group(&context, ordered_rules, "#", true)
+            first = false
+        }
+        !has_ordered && grouped -> {
+            jet_format_write(&context, "#[{file_rules.join(", ")}]")
+            jet_format_newline(&context)
+            first = false
+        }
+    }
+    if !has_ordered && !grouped {
+        if program.pub_file {
+            jet_format_write(&context, "#PubFile")
+            jet_format_newline(&context)
+            first = false
+        }
+        if program.no_prelude {
+            if !first -> jet_format_newline(&context)
+            jet_format_write(&context, "#NoPrelude")
+            jet_format_newline(&context)
+            first = false
+        }
+    }
+    loop declaration in program.imports {
+        if !first -> jet_format_blank_line_between_items(&context)
+        first = false
+        jet_format_emit_leading(&context, declaration.span.start)
+        jet_format_import(&context, declaration)
+        jet_format_emit_trailing(&context, declaration.span.end)
+    }
+    if has_ordered && !rules_precede_imports {
+        if !first -> jet_format_blank_line_between_items(&context)
+        first = false
+        jet_format_marker_group(&context, ordered_rules, "#", true)
+    }
+    if !grouped && !has_ordered {
+        loop index in 0..<file_rules.len() {
+            rule :: file_rules[index]
+            if rule == "PubFile" || rule == "NoPrelude" -> next
+            if !first -> jet_format_blank_line_between_items(&context)
+            first = false
+            jet_format_write(&context, "#{rule}")
+            jet_format_newline(&context)
+        }
+    }
+    module_policies := [PolicyDeclaration]{}
+    loop declaration in program.policy_declarations {
+        if declaration.scope == PolicyScope.Module -> &module_policies.push(declaration)
+    }
+    if module_policies.len() > 0 {
+        if !first -> jet_format_blank_line_between_items(&context)
+        first = false
+        span :: module_policies[0].span
+        jet_format_emit_leading(&context, span.start)
+        jet_format_policy_declarations(&context, module_policies)
+        jet_format_newline(&context)
+        jet_format_emit_trailing(&context, span.end)
+    }
+    loop declaration in program.user_policy_declarations {
+        if !first -> jet_format_blank_line_between_items(&context)
+        first = false
+        jet_format_emit_leading(&context, declaration.span.start)
+        jet_format_user_policy_decl(&context, declaration)
+        jet_format_emit_trailing(&context, declaration.span.end)
+    }
+    item_index := 0
+    stmt_index := 0
+    previous_script := false
+    loop item_index < program.items.len() || stmt_index < program.script_body.len() {
+        emit_stmt :: if {
+            stmt_index == program.script_body.len() -> false
+            item_index == program.items.len() -> true
+            else -> jet_format_stmt_start(program.script_body[stmt_index]) < jet_format_item_span_start(program.items[item_index], source)
+        }
+        if !first {
+            if emit_stmt && previous_script {
+                if !context.at_line_start -> jet_format_newline(&context)
+            } else { jet_format_blank_separator_before_item(&context) }
+        }
+        first = false
+        if emit_stmt {
+            stmt :: program.script_body[stmt_index]
+            jet_format_emit_leading(&context, jet_format_stmt_start(stmt))
+            jet_format_stmt(&context, stmt)
+            end :: jet_format_statement_source_end(&context, stmt)
+            jet_format_emit_trailing(&context, end)
+            if !context.at_line_start -> jet_format_newline(&context)
+            stmt_index += 1
+            previous_script = true
+        } else {
+            item :: program.items[item_index]
+            jet_format_emit_leading(&context, jet_format_item_span_start(item, source))
+            jet_format_item(&context, item)
+            jet_format_emit_trailing(&context, jet_format_item_span_end(item))
+            item_index += 1
+            previous_script = false
+        }
+    }
+    jet_format_emit_remaining_comments(&context)
+    if context.out.len() == 0 || context.out[context.out.len() - 1] != (U8{10}) -> &context.out.push(U8{10})
+    jet_format_output(&context)
+}
+fn jet_format_web_bucket(bucket: WebBucket) -> String Never! {
+    if bucket == {
+        .JS -> "JS"
+        .Wasm -> "Wasm"
+    }
+}
+pub fn jet_format_source(source: String) -> JetFormatResult {
+    jet_format_source_with_options(source, JetFormatOptions{simplify: false})
+}
+// Rust: format_source_with_options. Only ratified mechanical migrations happen
+// before admission, and only an admitted AST is rendered. Never return the
+// user's original source as a successful fallback when parsing failed.
+pub fn jet_format_source_with_options(source: String, options: JetFormatOptions) -> JetFormatResult {
+    // Refuse original literal controls before mechanical migrations can change
+    // their context or byte positions. Do not lex ordinary input twice.
+    source_bytes :: source.bytes()
+    loop index in 0..<source_bytes.len() {
+        if diagnostic_bidi_control_at(source_bytes, index) {
+            refused :: lex(source_bytes)
+            return JetFormatResult{source: None, diagnostics: refused.diagnostics}
+        }
+    }
+    print_migrated :: jet_format_apply_source_edits(source, jet_format_retired_print_family_edits(source)) ?? source
+    html_migrated :: jet_format_apply_source_edits(print_migrated, jet_format_retired_html_marker_edits(print_migrated)) ?? print_migrated
+    semi_migrated :: jet_format_apply_source_edits(html_migrated, jet_format_retired_semicolon_edits(html_migrated)) ?? html_migrated
+    migrated :: jet_format_apply_retired_type_edits(semi_migrated)
+    lexed :: lex(migrated.bytes())
+    if lexed.diagnostics.len() > 0 -> return JetFormatResult{source: None, diagnostics: lexed.diagnostics}
+    checked :: parse_for_check_with_source(lexed.tokens, migrated.bytes())
+    effective := options
+    program := checked.program
+    if program != None {
+        if effective.simplify {
+            loop diagnostic in checked.diagnostics {
+                if diagnostic.severity != 2 && diagnostic.code != "E0068" && diagnostic.code != "E0070" && diagnostic.code != "E0080" -> effective.simplify = false
+            }
+        }
+    } else {
+        effective.simplify = false
+        recovered :: parse_for_fmt(lexed.tokens)
+        if recovered.program == None -> return JetFormatResult{source: None, diagnostics: recovered.diagnostics}
+        program = recovered.program
+    }
+    admitted := program ?? panic("admission above established a program")
+    comments := [Token]{}
+    loop token in lexed.tokens {
+        if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> &comments.push(token)
+    }
+    formatted :: jet_format_program_with_tokens(admitted, migrated, comments, lexed.tokens, effective, effective.simplify)
+    if effective.simplify {
+        plain :: jet_format_program_with_tokens(admitted, migrated, comments, lexed.tokens, JetFormatOptions{simplify: false}, true)
+        if plain != formatted {
+            baseline := jet_format_canonical_formatted(plain)
+            if baseline.program == None -> return JetFormatResult{source: None, diagnostics: baseline.diagnostics}
+            simplified := jet_format_canonical_formatted(formatted)
+            if simplified.program == None -> return JetFormatResult{source: None, diagnostics: simplified.diagnostics}
+            baseline_program := (^baseline.program) ?? panic("checked above")
+            simplified_program := (^simplified.program) ?? panic("checked above")
+            before :: jet_format_canonical_simplify_program(^baseline_program)
+            after :: jet_format_canonical_simplify_program(^simplified_program)
+            if before != after -> panic("fmt --simplify changed the parsed AST")
+        }
+    }
+    JetFormatResult{source: Val(formatted), diagnostics: [Diagnostic]{}}
+}
+fn jet_format_canonical_formatted(formatted: String) -> JetParseAdmission {
+    lexed :: lex(formatted.bytes())
+    if lexed.diagnostics.len() > 0 -> return JetParseAdmission{program: None, diagnostics: lexed.diagnostics}
+    parse_for_fmt(lexed.tokens)
+}
+// Rust: unified_diff. This is intentionally the same simple (not LCS) diff,
+// with exact header/hunk/count bytes and no invented context lines.
+pub fn jet_format_unified_diff(path: String, old: String, new: String) -> String Never! {
+    old_lines :: jet_format_diff_lines(old)
+    new_lines :: jet_format_diff_lines(new)
+    out := [U8]{}
+    visible_path :: diagnostic_escape_bidi_text(~path)
+    loop byte in "--- {visible_path}\n+++ {visible_path}\n".bytes() -> &out.push(byte)
+    i := 0
+    j := 0
+    loop i < old_lines.len() || j < new_lines.len() {
+        if i < old_lines.len() && j < new_lines.len() && old_lines[i] == new_lines[j] {
+            i += 1
+            j += 1
+            next
+        }
+        start_i :: i
+        start_j :: j
+        loop i < old_lines.len() {
+            if j < new_lines.len() && old_lines[i] == new_lines[j] -> break
+            i += 1
+        }
+        loop j < new_lines.len() {
+            if i < old_lines.len() && new_lines[j] == old_lines[i] -> break
+            j += 1
+        }
+        header :: "@@ -{start_i + 1},{i - start_i} +{start_j + 1},{j - start_j} @@\n"
+        loop byte in header.bytes() -> &out.push(byte)
+        loop index in start_i..<i {
+            visible :: diagnostic_escape_bidi_text(~old_lines[index])
+            loop byte in "-{visible}\n".bytes() -> &out.push(byte)
+        }
+        loop index in start_j..<j {
+            visible :: diagnostic_escape_bidi_text(~new_lines[index])
+            loop byte in "+{visible}\n".bytes() -> &out.push(byte)
+        }
+    }
+    String.from_bytes(out) ?? panic("diff contains only UTF-8 source lines")
+}
+fn jet_format_diff_lines(source: String) -> [String] Never! {
+    bytes :: source.bytes()
+    lines := [String]{}
+    start := 0
+    loop index in 0..<bytes.len() {
+        if bytes[index] != (U8{10}) -> next
+        end :: if index > start && bytes[index - 1] == (U8{13}) -> index - 1 else -> index
+        &lines.push(String.from_bytes(bytes[start..<end]) ?? panic("line boundaries are UTF-8 boundaries"))
+        start = index + 1
+    }
+    if start < bytes.len() -> &lines.push(String.from_bytes(bytes[start..<bytes.len()]) ?? panic("UTF-8 remainder"))
+    lines
+}

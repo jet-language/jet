@@ -1,0 +1,58 @@
+// Rust Comptime/MirBridge: closed AST -> canonical Sema -> MIR -> JetEval.
+// All source and fact reads come from the retained authorized loader snapshot.
+use jet_foundation.[CtValue, Diagnostic, Span, TComptimeValue, ast_comptime_value_from_tir, jet_ring_prelude_closure_layer]
+use jet_sema.[SemaClosedValueRequest, SemaRegistrationHostHooks, SemaRegistrationPackagePolicy, SemaComptimeItemSource, SemaComptimeItemKind, SemaComptimeItemValue, SemaComptimeFunctionResult, sema_closed_input, sema_closed_expression, sema_closed_registration, sema_collect_comptime_declarations, sema_comptime_environment, sema_check_comptime_item, sema_function_memory_plan_from_graph, sema_hardware_use_snapshot, sema_hardware_use_merge]
+use jet_codegen.[lower_functions, lower_comptime_item, lower_foreign_artifacts]
+use jet_eval.[jet_eval_function, jet_eval_comptime_value, jet_eval_retire_result]
+
+fn jet_driver_closed_hooks(load: JetDriverLoadResult, compile: JetDriverCompileRequest) -> Shared<SemaRegistrationHostHooks> {
+    shared SemaRegistrationHostHooks{
+        numeric_unit_conversion_exact: compile.eval_config.host_hooks.numeric_unit_conversion_exact,
+        typed_boundary_literal_validate: compile.eval_config.host_hooks.typed_boundary_literal_validate,
+        closed_value: Val((request) -> jet_driver_closed_value(request, load, compile)),
+    }
+}
+fn jet_driver_closed_error(diagnostics: [Diagnostic], span: Span, problem: String) -> Diagnostic Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == jet_foundation.DIAGNOSTIC_ERROR -> return diagnostic
+    }
+    jet_driver_diagnostic("E0622", span, "cannot evaluate closed compile-time value", problem, "use a pure expression whose complete function closure is available")
+}
+fn jet_driver_closed_value(request: SemaClosedValueRequest, load: JetDriverLoadResult, compile: JetDriverCompileRequest) -> CtValue Diagnostic! {
+    input := sema_closed_input(request)
+    graph := sema_closed_registration(request)
+    span :: jet_foundation.expr_span(request.expression)
+    if graph.internal_problem == .Val(problem) -> panic("internal compiler error: {problem}")
+    if !graph.complete -> return Err(jet_driver_closed_error(graph.diagnostics, span, "closed fragment registration failed"))
+    stage :: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, None)
+    environment := sema_comptime_environment(graph, [SemaComptimeItemValue]{})
+    source :: SemaComptimeItemSource{module_identity: input.module_identity, key: "closed:{span.start}:{span.end}", destination_key: "closed:{span.start}:{span.end}", name: "closed value", source_file: input.source_file, kind: SemaComptimeItemKind.BodyExpression, expression: sema_closed_expression(request), expected_type: None, span: span, dependencies: [String]{}, checked_text: None}
+    checked :: sema_check_comptime_item(&environment, source, [SemaComptimeItemValue]{})
+    if !checked.complete -> return Err(jet_driver_closed_error(checked.diagnostics, span, "closed expression checking failed"))
+    item :: checked.request ?? return Err(jet_driver_closed_error(checked.diagnostics, span, "closed expression has unresolved runtime dependencies"))
+    diagnostics := checked.diagnostics
+    functions := [SemaComptimeFunctionResult]{}
+    closure :: jet_driver_comptime_function_closure(graph, &environment, sema_function_memory_plan_from_graph(graph), [SemaComptimeItemValue]{}, &functions, item, &diagnostics)
+    if !closure.complete || closure.waiting_dependencies.len() != 0 -> return Err(jet_driver_closed_error(diagnostics, span, "closed function closure has unresolved runtime dependencies"))
+    modules :: jet_driver_comptime_fragment_modules(stage.modules, closure.functions)
+    lowered := lower_functions(closure.functions, modules, load.source_files, None)
+    lowered_item :: lower_comptime_item(item, closure.functions, modules, load.source_files)
+    function_id :: lowered_item.function.id
+    if !jet_driver_merge_comptime_function(&lowered, lowered_item, load, &diagnostics) -> return Err(jet_driver_closed_error(diagnostics, span, "closed fragment lowering failed"))
+    hardware := sema_hardware_use_snapshot(item.hardware_use)
+    loop function in functions -> sema_hardware_use_merge(&hardware, sema_hardware_use_snapshot(function.hardware_use))
+    facts :: jet_driver_package_facts(load, compile, graph.target_machine, lowered.used_core, jet_ring_prelude_closure_layer(lowered.used_core), hardware, None, &diagnostics) ?? return Err(jet_driver_closed_error(diagnostics, span, "closed fragment package facts failed"))
+    foreign :: lower_foreign_artifacts(modules, facts)
+    program :: jet_driver_assemble_mir(load, modules, closure.functions, [], stage.names, lowered, foreign, facts, false, &diagnostics) ?? return Err(jet_driver_closed_error(diagnostics, span, "closed fragment MIR assembly failed"))
+    config := compile.eval_config
+    config.runtime_execution = false
+    config.host_hooks = request.context.host_hooks
+    result := jet_eval_function(^program, function_id, [TComptimeValue]{}, ^config)
+    value :: jet_eval_comptime_value(&result, span)
+    if result.session != None -> jet_eval_retire_result(&result, span)
+    if result.internal_problem == .Val(problem) -> panic("internal compiler error: {problem}")
+    if result.error == .Val(failure) -> return Err(failure.diagnostic)
+    folded :: value ?? return Err(jet_driver_closed_error(diagnostics, span, "closed evaluation did not return program data"))
+    converted :: ast_comptime_value_from_tir(folded) ?? return Err(jet_driver_closed_error(diagnostics, span, "runtime-owned value cannot cross the compile-time boundary"))
+    Ok(converted)
+}

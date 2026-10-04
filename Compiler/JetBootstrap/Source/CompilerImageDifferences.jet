@@ -1,0 +1,147 @@
+// CompilerImage.rs:802-1005. The schema renderer supplies native Rust pretty
+// Debug only for unequal canonical values. Parsing/comparison use explicit
+// stacks rather than recursive compiler-stack growth; class keys/order and
+// first-sample/count formatting are exactly the native diagnostic law.
+use jet_foundation.[MIRProgram, mir_image_program_debug_differences]
+struct CompilerImageDebugChild { key: String, node: Int }
+struct CompilerImageDebugNode { label: String, compound: Bool, children: [CompilerImageDebugChild] }
+struct CompilerImageDebugTree { nodes: [CompilerImageDebugNode], root: Int }
+struct CompilerImageDebugClass { count: Int, sample: String }
+struct CompilerImageDebugFieldDiff { classes: [String:CompilerImageDebugClass], records: Int }
+fn compiler_image_split_debug_key(line: String) -> (String?, String) Never! {
+    bytes :: line.bytes()
+    end := Int?{None}
+    if bytes.len() > 0 && bytes[0] == U8{34} {
+        index := 1
+        loop index < bytes.len() && bytes[index] != U8{34} -> index += if bytes[index] == U8{92} -> 2 else -> 1
+        if index < bytes.len() -> end = Val(index + 1)
+    } else {
+        length := 0
+        loop length < bytes.len() {
+            byte :: bytes[length]
+            if !((byte >= U8{48} && byte <= U8{57}) || (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || byte == U8{95}) -> break
+            length += 1
+        }
+        if length > 0 && !(bytes[0] >= U8{65} && bytes[0] <= U8{90}) -> end = Val(length)
+    }
+    if end == .Val(index) {
+        // #4303: slice views flow into String calls/carriers.
+        rest := line.slice(index, line.len())
+        if rest.starts_with(": ") {
+            key := line.slice(0, index)
+            value := line.slice(index + 2, line.len())
+            return (Val(~key), ~value)
+        }
+    }
+    (None, ~line)
+}
+fn compiler_image_parse_debug_tree(text: String) -> CompilerImageDebugTree Never! {
+    nodes := [CompilerImageDebugNode]{CompilerImageDebugNode{label: "", compound: true, children: [CompilerImageDebugChild]{}}}
+    stack := [Int]{0}
+    loop raw in text.lines() {
+        // #4303: trimmed/sliced views flow into String calls/carriers.
+        line := raw.trim()
+        if line.starts_with("}") || line.starts_with("]") || line.starts_with(")") {
+            if stack.len() == 1 -> break
+            &stack.pop()
+            next
+        }
+        pair :: compiler_image_split_debug_key(line)
+        parent :: stack[stack.len() - 1]
+        key :: if pair.0 == .Val(field) -> ".{field}" else -> "[{nodes[parent].children.len()}]"
+        rest := pair.1
+        compound :: rest.ends_with("{") || rest.ends_with("(") || rest.ends_with("[")
+        label := if compound -> rest.slice(0, rest.len() - 1).trim_end() else -> if rest.ends_with(",") -> rest.slice(0, rest.len() - 1) else -> rest
+        index :: nodes.len()
+        &nodes.push(CompilerImageDebugNode{label: ~label, compound: compound, children: [CompilerImageDebugChild]{}})
+        &nodes[parent].children.push(CompilerImageDebugChild{key: key, node: index})
+        if compound -> &stack.push(index)
+    }
+    root :: if nodes[0].children.len() == 1 -> nodes[0].children[0].node else -> 0
+    CompilerImageDebugTree{nodes: nodes, root: root}
+}
+fn compiler_image_debug_summary(node: CompilerImageDebugNode) -> String Never! {
+    text := if node.compound -> "{node.label} {{{node.children.len()} children}}" else -> ~node.label
+    bytes :: text.bytes()
+    if bytes.len() > 200 {
+        end := 200
+        // Rust str::is_char_boundary: UTF-8 continuation bytes are 10xxxxxx.
+        loop end > 0 && (bytes[end] & U8{192}) == U8{128} -> end -= 1
+        // #4303: sliced view flows into a String-typed return.
+        text = "{text.slice(0, end)}…"
+    }
+    text
+}
+fn compiler_image_debug_record(diff: &CompilerImageDebugFieldDiff, path: String, native: String, restored: String) Never! {
+    class := [U8]{}
+    in_index := false
+    loop byte in path.bytes() {
+        if byte == {
+            U8{91} -> { in_index = true; &class.push(U8{91}); &class.push(U8{42}); &class.push(U8{93}) }
+            U8{93} -> in_index = false
+            else -> if !in_index -> &class.push(byte)
+        }
+    }
+    key :: String.from_bytes(class) ?? panic("index-free path preserves UTF-8")
+    if diff.classes.get(key) == .Val(previous) {
+        diff.classes[key] = CompilerImageDebugClass{count: previous.count + 1, sample: previous.sample}
+    } else {
+        diff.classes[key] = CompilerImageDebugClass{count: 1, sample: "{path}: {native} | {restored}"}
+    }
+    diff.records += 1
+}
+struct CompilerImageDebugVisit { path: String, native: Int, restored: Int, cursor: Int, opened: Bool }
+fn compiler_image_debug_node(diff: &CompilerImageDebugFieldDiff, path: String, native: CompilerImageDebugTree, restored: CompilerImageDebugTree) Never! {
+    stack := [CompilerImageDebugVisit]{CompilerImageDebugVisit{path: ~path, native: native.root, restored: restored.root, cursor: 0, opened: false}}
+    loop stack.len() > 0 {
+        top :: stack.len() - 1
+        visit :: stack[top]
+        left :: native.nodes[visit.native]
+        right :: restored.nodes[visit.restored]
+        if !visit.opened {
+            if left.compound != right.compound || left.label != right.label {
+                compiler_image_debug_record(&diff, visit.path, compiler_image_debug_summary(left), compiler_image_debug_summary(right))
+                &stack.pop()
+                next
+            }
+            if !left.compound { &stack.pop(); next }
+            if left.children.len() != right.children.len() -> compiler_image_debug_record(&diff, "{visit.path}.len", "{left.children.len()}", "{right.children.len()}")
+            stack[top].opened = true
+        }
+        if visit.cursor >= left.children.len() || visit.cursor >= right.children.len() { &stack.pop(); next }
+        child_left :: left.children[visit.cursor]
+        child_right :: right.children[visit.cursor]
+        stack[top].cursor += 1
+        child_path :: "{visit.path}{child_left.key}"
+        if child_left.key != child_right.key {
+            compiler_image_debug_record(&diff, child_path, child_left.key, child_right.key)
+        } else {
+            &stack.push(CompilerImageDebugVisit{path: child_path, native: child_left.node, restored: child_right.node, cursor: 0, opened: false})
+        }
+    }
+}
+fn compiler_image_debug_value(diff: &CompilerImageDebugFieldDiff, path: String, native_text: String, restored_text: String) Never! {
+    before :: diff.records
+    native :: compiler_image_parse_debug_tree(native_text)
+    restored :: compiler_image_parse_debug_tree(restored_text)
+    compiler_image_debug_node(&diff, path, native, restored)
+    if diff.records == before && native_text != restored_text -> compiler_image_debug_record(&diff, path, "<Debug text differs>", "<unparsed>")
+}
+fn compiler_image_debug_finish(diff: CompilerImageDebugFieldDiff) -> [String] Never! {
+    // A map's native BTree iteration sorts class paths; make that order explicit.
+    keys := diff.classes.keys()
+    &keys.sort_by((left: String, right: String) -> left <=> right)
+    lines := [String]{}
+    loop key in keys {
+        entry :: diff.classes.get(key) ?? panic("class key came from map")
+        &lines.push("  {key} x{entry.count}: {entry.sample}")
+    }
+    if lines.len() == 0 -> &lines.push("  <none>: every field renders equal; the canonical image bytes differ only in encoding")
+    lines
+}
+fn compiler_image_field_differences(native: MIRProgram, restored: MIRProgram) -> [String] CompilerImageError! {
+    fields :: mir_image_program_debug_differences(native, restored) ?? return Err(CompilerImageError{message: err.message})
+    diff := CompilerImageDebugFieldDiff{classes: [String:CompilerImageDebugClass]{}, records: 0}
+    loop field in fields -> compiler_image_debug_value(&diff, field.path, field.native_text, field.restored_text)
+    compiler_image_debug_finish(diff)
+}

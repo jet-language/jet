@@ -95,16 +95,6 @@ fn mir_pass_dead_pure_function(function: &MIRFunction, purity: [U64:Bool]) -> In
     removed
 }
 
-// Rust: crates/jet-foundation/src/MIROptimization.rs::prelude_call_is_pure
-fn mir_pass_prelude_purity(rows: [MIRPreludeCall]) -> [U64:Bool] Never! {
-    purity := [U64:Bool]{}
-    loop row in rows {
-        if purity.get(row.id.value) == None {
-            &purity.add(row.id.value, row.effect_kind == None && row.abi != .Effect && row.fallibility == .Infallible).drop("checked absent above")
-        }
-    }
-    purity
-}
 
 fn mir_pass_defined_values(function: MIRFunction) -> [MIRValueFact] Never! {
     defined := [U64:Bool]{}

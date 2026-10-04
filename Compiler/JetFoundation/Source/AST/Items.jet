@@ -1,3 +1,5 @@
+use core.text as unit_family_text
+
 // Rust-shaped top-level AST, declaration payloads, and parser metadata.
 
 pub enum Item {
@@ -149,6 +151,59 @@ pub enum ImportKind {
 pub struct ImportedItem {
     pub original: String
     pub alias: String?
+}
+
+// Rust AST/program_imports.rs::ImportBinding; owned leaf projections only,
+// never a retained/duplicated ImportDecl or Program graph.
+pub struct ImportBinding {
+    pub module_alias: String
+    pub original: String?
+    pub local: String
+    pub alias: String?
+    pub module_alias_span: Span
+    pub item_span: Span?
+    pub local_span: Span
+    pub items_span: Span?
+    pub import_span: Span
+    pub is_pub: Bool
+    pub is_package_pub: Bool
+}
+pub fn import_binding_path(binding: ImportBinding) -> String Never! {
+    if binding.original == { .Val(original) -> "{binding.module_alias}.{original}", .None -> binding.module_alias }
+}
+pub fn member_import_local(original: String, alias: String?) -> String Never! {
+    if alias == .Val(name) -> return name
+    parts :: original.split(".")
+    parts[parts.len() - 1]
+}
+pub fn import_alias(declaration: ImportDecl) -> String Never! {
+    if declaration.alias != "" -> return declaration.alias
+    if declaration.kind == {
+        .File(path, _) -> {
+            parts :: path.split("/")
+            parts[parts.len() - 1]
+        }
+        .Module(name, _) -> name
+        .Unqualified(module_alias, _, _, _, _) -> module_alias
+    }
+}
+pub fn import_walk_bindings(declaration: ImportDecl) -> [ImportBinding] Never! {
+    bindings := [ImportBinding]{}
+    if declaration.kind == {
+        .Module(name, path_span) -> {
+            alias :: if declaration.alias == "" -> None else -> Val(declaration.alias)
+            &bindings.push(ImportBinding{module_alias: name, original: None, local: import_alias(declaration), alias: alias, module_alias_span: path_span, item_span: None, local_span: declaration.alias_span, items_span: None, import_span: declaration.span, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub})
+        }
+        .Unqualified(module_alias, module_alias_span, items, items_span, _) -> {
+            loop (index, item) in items {
+                item_span :: if index < declaration.item_spans.len() -> Val(declaration.item_spans[index]) else -> None
+                local_span :: if index < declaration.local_spans.len() -> declaration.local_spans[index] else -> item_span ?? module_alias_span
+                &bindings.push(ImportBinding{module_alias: module_alias, original: Val(item.original), local: member_import_local(item.original, item.alias), alias: item.alias, module_alias_span: module_alias_span, item_span: item_span, local_span: local_span, items_span: Val(items_span), import_span: declaration.span, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub})
+            }
+        }
+        .File(_, _) -> {}
+    }
+    bindings
 }
 
 pub struct InlineVersion {
@@ -497,6 +552,8 @@ pub struct TraitDef {
     pub is_package_pub: Bool
     pub name: String
     pub name_span: Span
+    // Rust AST/items.rs TraitDef: authored trait inheritance requirements.
+    pub supertraits: [String]
     pub assoc_types: [NamedSpan]
     pub methods: [TraitMethodSig]
 }
@@ -575,6 +632,14 @@ pub struct TraitMethodSig {
     pub declared_effects: [EffectRowEntry]?
     pub return_view_provenance: ViewProvenanceMap?
     pub declared_return_view_provenance: ViewProvenanceMap?
+}
+
+// Rust AST/items.rs::TraitMethodSig::{failure_contract,effective_return_type}.
+pub fn trait_method_failure_contract(method: TraitMethodSig) -> FailureContract Never! {
+    failure_contract_from_return_type(method.return_type)
+}
+pub fn trait_method_effective_return_type(method: TraitMethodSig) -> Type Never! {
+    failure_contract_effective_type(trait_method_failure_contract(method))
 }
 
 pub struct TraitImplBlock {
@@ -700,6 +765,8 @@ pub struct InlineForeign {
     pub marker_span: Span
     pub source: String
     pub source_span: Span
+    // Rust AST/items.rs: None for ordinary foreign source; Some for checked ASM.
+    pub asm_contract: InlineAsmContract?{None}
 }
 
 pub struct InlineAsmContract {
@@ -768,6 +835,11 @@ pub struct Param {
     pub declared_view_from_names: [String]?
 }
 
+// Rust AST/items.rs::Param::call_label: public label, otherwise local name.
+pub fn param_call_label(parameter: Param) -> String Never! {
+    if parameter.public_label == { .Val(label) -> label.name, .None -> parameter.name }
+}
+
 pub struct Func {
     pub span: Span
     pub is_pub: Bool
@@ -821,6 +893,54 @@ pub struct Func {
     pub markers: [Marker]
     pub compiler_generated: Bool
     pub body: [Stmt]
+}
+
+// Rust AST/items.rs::Func::failure_contract. #3708 keeps inferred and written
+// contracts distinct even when their effective carriers have identical types.
+pub fn func_failure_contract(function: Func) -> FailureContract Never! {
+    contract :: failure_contract_from_return_type(function.return_type)
+    if function.return_type_span == None {
+        if contract == {
+            .ProvenUnreachable(success) -> return FailureContract.InferredNever{success: success}
+            .Explicit(success, error) -> {
+                if error == .Named(name) && name == "Err" -> return contract
+                return FailureContract.Inferred{success: success, error: error}
+            }
+            else -> {}
+        }
+    }
+    contract
+}
+pub fn func_effective_return_type(function: Func) -> Type Never! {
+    failure_contract_effective_type(func_failure_contract(function))
+}
+
+// Rust AST/items.rs::{type_is_app,app_entry_run_fn}; only concrete App and
+// Result<App,E> qualify, and only authored CodeModule bodies recurse.
+pub fn type_is_app(ty: Type) -> Bool Never! {
+    if ty == {
+        .Named(name) -> name == "App"
+        .Result(ok, _) -> if ok == .Named(name) -> name == "App" else -> false
+        else -> false
+    }
+}
+pub fn app_entry_run_fn(items: [Item]) -> Func? Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> {
+                if function.name == "run" {
+                    if function.return_type == .Val(ty) && type_is_app(ty) -> return Val(function)
+                }
+            }
+            .CodeModule(module) -> {
+                if module.body == .Val(body) {
+                    if app_entry_run_fn(body) == .Val(function) -> return Val(function)
+                }
+            }
+            else -> {}
+        }
+    }
+    None
 }
 
 pub struct StructDef {
@@ -929,6 +1049,42 @@ pub struct UnitFamilyDef {
     pub base: NamedSpan?
     pub members: [UnitFamilyMember]
     pub span: Span
+}
+
+// Rust AST/items.rs::UnitFamilyDef::type_name (Unicode uppercase per segment).
+pub fn unit_family_type_name(member: String) -> String Never! {
+    out := ""
+    loop segment in member.split("_") {
+        if segment.len() > 0 -> out += "{unit_family_text.upper(segment.slice(0, 1))}{segment.slice(1, segment.len())}"
+    }
+    if out == "" -> member else -> out
+}
+
+// Rust AST/items.rs::UnitFamilyDef::distinct_defs. Member and Point/Delta order
+// is observable; every generated name/derive retains the original member span.
+pub fn unit_family_distinct_defs(family: UnitFamilyDef) -> [DistinctDef] Never! {
+    definitions := [DistinctDef]{}
+    if family.family == "Time" && family.resolved_owner == (Val("core.units")) -> return definitions
+    affine := false
+    if family.base != None {
+        loop member in family.members { if member.offset.numerator != 0 -> affine = true }
+    }
+    loop member in family.members {
+        base_name :: unit_family_type_name(member.name)
+        names :: if affine -> [String]{"{base_name}Point", "{base_name}Delta"} else -> [String]{base_name}
+        loop (index, name) in names {
+            point :: affine && index == 0
+            derives := [NamedSpan]{NamedSpan{name: if point -> "Comparable" else -> "Numeric", span: member.name_span}}
+            quantity := QuantityInfo?{None}
+            if family.resolved_dimension == .Val(dimension) {
+                &derives.push(NamedSpan{name: "Encode", span: member.name_span})
+                &derives.push(NamedSpan{name: "Decode", span: member.name_span})
+                quantity = Val(QuantityInfo{dimension: dimension, kind: if affine -> if point -> QuantityKind.Point else -> QuantityKind.Delta else -> QuantityKind.Linear})
+            }
+            &definitions.push(DistinctDef{is_pub: family.is_pub, is_package_pub: family.is_package_pub, type_markers: [Marker]{}, derives: derives, quantity: quantity, name: name, name_span: member.name_span, base: Type.Float, base_span: member.name_span, range: None, span: member.name_span})
+        }
+    }
+    definitions
 }
 
 pub enum UnitDimensionDecl {
@@ -1105,8 +1261,47 @@ pub enum OutputKind {
     Fleet
 }
 
+// Rust AST/patterns.rs::OutputKind::{as_str,from_name,is_runnable}.
+impl OutputKind {
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Library -> "Library"
+            .Executable -> "Executable"
+            .Service -> "Service"
+            .Check -> "Check"
+            .Environment -> "Environment"
+            .Image -> "Image"
+            .Bundle -> "Bundle"
+            .System -> "System"
+            .Fleet -> "Fleet"
+        }
+    }
+    pub fn from_name(name: String) -> OutputKind? Never! {
+        if name == {
+            "Library" -> Val(OutputKind.Library)
+            "Executable" -> Val(OutputKind.Executable)
+            "Service" -> Val(OutputKind.Service)
+            "Check" -> Val(OutputKind.Check)
+            "Environment" -> Val(OutputKind.Environment)
+            "Image" -> Val(OutputKind.Image)
+            "Bundle" -> Val(OutputKind.Bundle)
+            "System" -> Val(OutputKind.System)
+            "Fleet" -> Val(OutputKind.Fleet)
+            else -> None
+        }
+    }
+    pub fn is_runnable(self) -> Bool Never! {
+        self == OutputKind.Executable || self == OutputKind.Service || self == OutputKind.Check
+    }
+}
+
 pub enum OutputCallableAuthority {
     SafeJet
+}
+
+// Rust AST/patterns.rs::OutputCallableAuthority::as_str.
+impl OutputCallableAuthority {
+    pub fn as_str(self) -> String Never! { "safe-jet" }
 }
 
 pub struct ResolvedOutput {

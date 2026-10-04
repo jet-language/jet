@@ -1,6 +1,7 @@
 // MIR operation printer. Every branch consumes an already checked operation and
 // either preserves its ownership/failure facts or marks the artifact incomplete.
 use jet_foundation.[
+    foundation_generated_path,
     MIRAccess,
     MIRBinaryDispatch,
     MIRBinaryOp,
@@ -53,7 +54,6 @@ use jet_foundation.[
     MIRScope,
     MIRScopeID,
     MIRScopeKind,
-    MIRStringFormat,
     MIRStringPart,
     MIRSymbol,
     MIRTagMarker,
@@ -795,80 +795,13 @@ fn jet_rust_emit_unary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIRU
     jet_rust_emit_unary_text(&ctx, op, "*({jet_rust_emit_value_reference(value, false)})", ty)
 }
 
-// 0: not an integer; 1: exact `Int` (through refinements, tags and units);
-// 2: a fixed-width integer word.
-fn jet_rust_emit_format_integer_kind(ty: MIRType) -> Int Never! {
-    if ty.kind == {
-        .Int -> 1
-        .IntN(_, _) -> 2
-        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_rust_emit_format_integer_kind(base)
-        else -> 0
-    }
-}
-
-// MIRRust string_format_route / lower_direct_string_format: every hole renders
-// through the canonical `core.text.fmt` kernel the reference lowers it to
-// (`jet_fmt_display`, `jet_fmt_decimal`, ...). Exact Int selectors take the
-// owned adapters (`jet_std::jet_fmt_*_owned`), fixed-width integers render
-// their decimal text through the same decimal and radix kernels, and Float
-// selectors take the host `i64` precision.
-fn jet_rust_emit_string_format(ctx: &JetRustEmitContext, function: MIRFunction, format: MIRStringFormat, value: MIRValueID) -> String Never! {
-    root :: ~ctx.config.root_prefix
-    borrowed :: jet_rust_emit_value_reference(value, false)
-    shown :: "{root}jet_fmt_display({borrowed})"
-    if format == {
-        .Display -> return shown
-        .Debug -> return "{root}jet_fmt_debug({borrowed})"
-        .Pretty -> return "{root}jet_fmt_pretty(&{root}jet_fmt_debug({borrowed}))"
-        // The unit selector renders the quantity magnitude (MIRRust
-        // quantity_format_route).
-        .Unit(_) -> return "{root}jet_fmt_quantity({jet_rust_emit_value_owned(ctx, function, value)})"
-        else -> {}
-    }
-    ty :: jet_rust_emit_value_type(ctx, function, value)
-    integer :: jet_rust_emit_format_integer_kind(ty)
-    text :: if integer == 0 -> "&{shown}" else -> if integer == 1 -> "&({borrowed}).to_string_rep()" else -> "&({borrowed}).to_string()"
-    float :: if integer == 1 -> "({root}jet_std::jet_int_owned_to_f64({borrowed}) as f64)" else -> "(({jet_rust_emit_value_owned(ctx, function, value)}) as f64)"
-    if format == {
-        .Fixed(digits) -> {
-            if integer == 1 -> return "{root}jet_std::jet_fmt_decimal_int_owned({borrowed}, &jet_foundation::Numeric::JetInt::from_i64({digits}))"
-            if integer == 2 -> return "{root}jet_fmt_decimal_int({text}, {digits}i64)"
-            return "{root}jet_fmt_decimal({float}, {digits}i64)"
-        }
-        .Grouped(digits) -> {
-            if integer == 1 -> return "{root}jet_std::jet_fmt_grouped_int_owned({borrowed}, &jet_foundation::Numeric::JetInt::from_i64({digits}))"
-            if integer == 2 -> return "{root}jet_fmt_grouped_int({text}, {digits}i64)"
-            return "{root}jet_fmt_grouped({float}, {digits}i64)"
-        }
-        .Hex(digits) -> {
-            if integer == 1 -> return "{root}jet_std::jet_fmt_hex_owned({borrowed}, &jet_foundation::Numeric::JetInt::from_i64({digits}))"
-            return "{root}jet_fmt_hex_decimal({text}, {digits}i64)"
-        }
-        .Bin -> {
-            if integer == 1 -> return "{root}jet_std::jet_fmt_bin_owned({borrowed})"
-            return "{root}jet_fmt_bin_decimal({text})"
-        }
-        .Oct -> {
-            if integer == 1 -> return "{root}jet_std::jet_fmt_oct_owned({borrowed})"
-            return "{root}jet_fmt_oct_decimal({text})"
-        }
-        .Sci(digits) -> return "{root}jet_fmt_sci({float}, {digits}i64)"
-        .Percent(digits) -> return "{root}jet_fmt_percent({float}, {digits}i64)"
-        .Pad(width, fill) | .PadLeft(width, fill) -> {
-            member :: if format == .PadLeft(_, _) -> "jet_fmt_pad_left" else -> "jet_fmt_pad"
-            padded :: if ty.kind == MIRTypeKind.String -> borrowed else -> "&{shown}"
-            return "{root}{member}({padded}, {width}i64, &String::from({jet_rust_emit_quote(fill)}))"
-        }
-        .Display | .Debug | .Pretty | .Unit(_) -> return shown
-    }
-}
 
 fn jet_rust_emit_build_string(ctx: &JetRustEmitContext, function: MIRFunction, parts: [MIRStringPart]) -> String Never! {
     lines := [String]{"{{ let mut __jet_string = String::new();"}
     loop part in parts {
-        if part.kind == {
+        if part == {
             .Literal(text) -> &lines.push("__jet_string.push_str({jet_rust_emit_quote(text)});")
-            .Interpolation(value, format) -> &lines.push("__jet_string.push_str(&{jet_rust_emit_string_format(&ctx, function, format, value)});")
+            .Value(value) -> &lines.push("__jet_string.push_str(&{jet_rust_emit_value_move(value)});")
         }
     }
     &lines.push("__jet_string }}")
@@ -3562,11 +3495,11 @@ fn jet_rust_emit_global_symbol(ctx: &JetRustEmitContext, name: String) -> String
     if name == "stm" -> return "{ctx.config.root_prefix}jet_stm::begin()"
     loop constant in ctx.program.constants {
         if constant.name == name || constant.key == name {
-            path :: "{ctx.config.root_prefix}{jet_rust_emit_generated_path(constant.key)}"
+            path :: "{ctx.config.root_prefix}{foundation_generated_path(constant.key)}"
             return if constant.is_storage -> "({path}).get()" else -> "{path}()"
         }
     }
-    "{ctx.config.root_prefix}{jet_rust_emit_generated_path(name)}"
+    "{ctx.config.root_prefix}{foundation_generated_path(name)}"
 }
 
 // MIRRust shared_constant_accessor: the shared-value accessor a `Global` read
@@ -3576,7 +3509,7 @@ fn jet_rust_emit_shared_constant_accessor(ctx: &JetRustEmitContext, name: String
     loop constant in ctx.program.constants {
         if constant.name == name || constant.key == name {
             if !jet_rust_emit_shared_constant(no_os, constant) -> return None
-            return Val("{ctx.config.root_prefix}{jet_rust_emit_generated_path(constant.key)}_shared()")
+            return Val("{ctx.config.root_prefix}{foundation_generated_path(constant.key)}_shared()")
         }
     }
     None
@@ -3594,10 +3527,10 @@ fn jet_rust_emit_shared_constant_value(ctx: &JetRustEmitContext, function: MIRFu
 // checked persistent local carries.
 fn jet_rust_emit_static_path(ctx: &JetRustEmitContext, name: String) -> String Never! {
     loop constant in ctx.program.constants {
-        if constant.key == name && constant.is_storage -> return "{ctx.config.root_prefix}{jet_rust_emit_generated_path(constant.key)}"
+        if constant.key == name && constant.is_storage -> return "{ctx.config.root_prefix}{foundation_generated_path(constant.key)}"
     }
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR static place has no storage constant", "persistent places name exactly one checked storage constant", None)
-    "{ctx.config.root_prefix}{jet_rust_emit_generated_path(name)}"
+    "{ctx.config.root_prefix}{foundation_generated_path(name)}"
 }
 
 fn jet_rust_emit_scope_fact(scope: MIRScope, key: String) -> String? {

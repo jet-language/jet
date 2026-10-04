@@ -1,0 +1,1238 @@
+// PORT-PENDING 0515 crates-jet-codegen-src-codegen-tir-routes-slice-3154: crates/jet-codegen/src/Codegen/TIR/routes.rs:3154-4387
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS             HTTPClientMethod { kind, method } => http_client_request_route(kind, method, carrier)?,
+//RS             HTTPServerMethod { .. } | EmailMethod { .. } => primitive(),
+//RS             RegexMethod { kind, method } => regex_route(kind, method, carrier)?,
+//RS             UrlMimeMethod { kind, method } => url_mime_route(kind, method, carrier)?,
+//RS             SketchMethod { sketch, method } => {
+//RS                 let (arity, borrow_mask): (usize, &[bool]) =
+//RS                     match (sketch.as_str(), method.as_str()) {
+//RS                         ("HyperLogLog", "add") | ("CountMinSketch", "add" | "count") => {
+//RS                             (2, &[true, true])
+//RS                         }
+//RS                         ("HyperLogLog", "count") | ("ReservoirSampler", "sample") => (1, &[true]),
+//RS                         ("TDigest", "add" | "quantile") | ("ReservoirSampler", "add") => {
+//RS                             (2, &[true, false])
+//RS                         }
+//RS                         _ => {
+//RS                             return Err(route_error(format!(
+//RS                                 "unknown checked sketch method `{sketch}.{method}`"
+//RS                             )));
+//RS                         }
+//RS                     };
+//RS                 h(
+//RS                     &format!("{sketch}.{method}"),
+//RS                     &format!("Jet{sketch}::{method}"),
+//RS                     arity,
+//RS                     arity,
+//RS                     borrow_mask,
+//RS                     None,
+//RS                     carrier,
+//RS                 )
+//RS             }
+//RS             CivilTimeMethod { kind, method } => civil_time_route(kind, method, carrier)?,
+//RS             ProcessSpecMethod { method, args_len } => match (method.as_str(), *args_len) {
+//RS                 ("cwd", 1) => h(
+//RS                     "process.spec.cwd",
+//RS                     "jet_process_spec_cwd",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("arg", 1) => h(
+//RS                     "process.spec.arg",
+//RS                     "jet_process_spec_arg",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("args_extend", 1) => h(
+//RS                     "process.spec.args_extend",
+//RS                     "jet_process_spec_args_extend",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("env", 2) => h(
+//RS                     "process.spec.env",
+//RS                     "jet_process_spec_env",
+//RS                     3,
+//RS                     3,
+//RS                     &[false, true, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("env_remove", 1) => h(
+//RS                     "process.spec.env_remove",
+//RS                     "jet_process_spec_env_remove",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("env_clear", 0) => h(
+//RS                     "process.spec.env_clear",
+//RS                     "jet_process_spec_env_clear",
+//RS                     1,
+//RS                     1,
+//RS                     &[false],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("stdin", 1) => h(
+//RS                     "process.spec.stdin",
+//RS                     "jet_process_spec_stdin",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("stdout", 1) => h(
+//RS                     "process.spec.stdout",
+//RS                     "jet_process_spec_stdout",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("stderr", 1) => h(
+//RS                     "process.spec.stderr",
+//RS                     "jet_process_spec_stderr",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("timeout", 1) => h(
+//RS                     "process.spec.timeout",
+//RS                     "jet_process_spec_timeout",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("output_limit", 1) => h(
+//RS                     "process.spec.output_limit",
+//RS                     "jet_process_spec_output_limit",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, false],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("cpu_time_limit", 1) => h(
+//RS                     "process.spec.cpu_time_limit",
+//RS                     "jet_process_spec_cpu_time_limit",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("memory_limit", 1) => h(
+//RS                     "process.spec.memory_limit",
+//RS                     "jet_process_spec_memory_limit",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, false],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("open_file_limit", 1) => h(
+//RS                     "process.spec.open_file_limit",
+//RS                     "jet_process_spec_open_file_limit",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, false],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("detached", 0) => h(
+//RS                     "process.spec.detached",
+//RS                     "jet_process_spec_detached",
+//RS                     1,
+//RS                     1,
+//RS                     &[false],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("terminal", 0) => h(
+//RS                     "process.spec.terminal",
+//RS                     "jet_process_spec_terminal",
+//RS                     1,
+//RS                     1,
+//RS                     &[false],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("terminal", 1) => h(
+//RS                     "process.spec.terminal_with_policy",
+//RS                     "jet_process_spec_terminal_with_policy",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("abilities", 0) => h(
+//RS                     "process.spec.abilities",
+//RS                     "jet_process_spec_abilities",
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("under", 1) => h(
+//RS                     "process.spec.under",
+//RS                     "jet_std_process_spec_under",
+//RS                     2,
+//RS                     2,
+//RS                     &[false, true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("plan", 0) => h(
+//RS                     "process.spec.plan",
+//RS                     "jet_process_spec_plan",
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 ("run", 0) => h(
+//RS                     "process.spec.run",
+//RS                     "jet_process_spec_run",
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     Some(Effect::Exec),
+//RS                     carrier,
+//RS                 ),
+//RS                 ("run_checked", 0) => h(
+//RS                     "process.spec.run_checked",
+//RS                     "jet_process_spec_run_checked",
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     Some(Effect::Exec),
+//RS                     carrier,
+//RS                 ),
+//RS                 ("spawn", 0) => h(
+//RS                     "process.spec.spawn",
+//RS                     "jet_process_spec_spawn",
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     Some(Effect::Exec),
+//RS                     carrier,
+//RS                 ),
+//RS                 _ => {
+//RS                     return Err(route_error(format!(
+//RS                         "unknown checked ProcessSpec method `{method}` with {args_len} argument(s)"
+//RS                     )));
+//RS                 }
+//RS             },
+//RS             ProcessChildMethod { method } => match method.as_str() {
+//RS                 "id" => h(
+//RS                     "process.child.id",
+//RS                     "jet_process_child_id",
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     None,
+//RS                     carrier,
+//RS                 ),
+//RS                 "wait" => h(
+//RS                     "process.child.wait",
+//RS                     "jet_process_child_wait",
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     Some(Effect::Exec),
+//RS                     carrier,
+//RS                 ),
+//RS                 "exited" => h(
+//RS                     "process.child.exited",
+//RS                     "jet_process_child_exited",
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     Some(Effect::Exec),
+//RS                     carrier,
+//RS                 ),
+//RS                 "kill" => h(
+//RS                     "process.child.kill",
+//RS                     "jet_process_child_kill",
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     Some(Effect::Exec),
+//RS                     carrier,
+//RS                 ),
+//RS                 "terminate" => h(
+//RS                     "process.child.terminate",
+//RS                     "jet_process_child_terminate",
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     Some(Effect::Exec),
+//RS                     carrier,
+//RS                 ),
+//RS                 "interrupt" => h(
+//RS                     "process.child.interrupt",
+//RS                     "jet_process_child_interrupt",
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     Some(Effect::Exec),
+//RS                     carrier,
+//RS                 ),
+//RS                 _ => {
+//RS                     return Err(route_error(format!(
+//RS                         "unknown checked ProcessChild method `{method}`"
+//RS                     )));
+//RS                 }
+//RS             },
+//RS             PathFrom => h("path.from", "jet_path_from", 1, 1, &[true], None, carrier),
+//RS             PathToString => h(
+//RS                 "path.to_string",
+//RS                 "jet_path_to_string",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             PathHome => h(
+//RS                 "path.home",
+//RS                 "jet_path_home",
+//RS                 0,
+//RS                 0,
+//RS                 &[],
+//RS                 Some(Effect::FS),
+//RS                 carrier,
+//RS             ),
+//RS             PathJoin => h(
+//RS                 "path.join",
+//RS                 "jet_path_join",
+//RS                 2,
+//RS                 2,
+//RS                 &[true, true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             PathParent => h(
+//RS                 "path.parent",
+//RS                 "jet_path_parent",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             PathExtension => h(
+//RS                 "path.extension",
+//RS                 "jet_path_extension",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             PathStem => h("path.stem", "jet_path_stem", 1, 1, &[true], None, carrier),
+//RS             PathNormalize => h(
+//RS                 "path.normalize",
+//RS                 "jet_path_normalize",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             PathIsWithin => h(
+//RS                 "path.is_within",
+//RS                 "jet_path_is_within",
+//RS                 2,
+//RS                 2,
+//RS                 &[true, true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             PathWriteAtomic => h(
+//RS                 "path.write_atomic",
+//RS                 "jet_path_write_atomic",
+//RS                 2,
+//RS                 2,
+//RS                 &[true, true],
+//RS                 Some(Effect::FS),
+//RS                 carrier,
+//RS             ),
+//RS             PathWalk => h(
+//RS                 "path.walk",
+//RS                 "jet_path_walk",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 Some(Effect::FS),
+//RS                 carrier,
+//RS             ),
+//RS             PluginInvoke { .. } => plugin_call_route("plugin.invoke", "jet_plugin_call", carrier),
+//RS             ReaderOver { owned } => {
+//RS                 if *owned {
+//RS                     h(
+//RS                         "reader.over",
+//RS                         "jet_reader_over_owned",
+//RS                         1,
+//RS                         1,
+//RS                         &[false],
+//RS                         None,
+//RS                         carrier,
+//RS                     )
+//RS                 } else {
+//RS                     h(
+//RS                         "reader.over",
+//RS                         "jet_reader_over",
+//RS                         1,
+//RS                         1,
+//RS                         &[true],
+//RS                         None,
+//RS                         carrier,
+//RS                     )
+//RS                 }
+//RS             }
+//RS             ReaderReadU8 => h(
+//RS                 "reader.read_u8",
+//RS                 "jet_reader_read_u8",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadI8 => h(
+//RS                 "reader.read_i8",
+//RS                 "jet_reader_read_i8",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadU16Le => h(
+//RS                 "reader.read_u16_le",
+//RS                 "jet_reader_read_u16_le",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadU16Be => h(
+//RS                 "reader.read_u16_be",
+//RS                 "jet_reader_read_u16_be",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadI16Le => h(
+//RS                 "reader.read_i16_le",
+//RS                 "jet_reader_read_i16_le",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadI16Be => h(
+//RS                 "reader.read_i16_be",
+//RS                 "jet_reader_read_i16_be",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadU32Le => h(
+//RS                 "reader.read_u32_le",
+//RS                 "jet_reader_read_u32_le",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadU32Be => h(
+//RS                 "reader.read_u32_be",
+//RS                 "jet_reader_read_u32_be",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadI32Le => h(
+//RS                 "reader.read_i32_le",
+//RS                 "jet_reader_read_i32_le",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             TaskJoin => task_route(receiver, carrier)?,
+//RS             TaskDetach => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.tasks",
+//RS                 "detach",
+//RS                 "jet_std::JetTask::detach",
+//RS                 1,
+//RS                 1,
+//RS                 &[false],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ReaderReadI32Be => h(
+//RS                 "reader.read_i32_be",
+//RS                 "jet_reader_read_i32_be",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadU64Le => h(
+//RS                 "reader.read_u64_le",
+//RS                 "jet_reader_read_u64_le",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadU64Be => h(
+//RS                 "reader.read_u64_be",
+//RS                 "jet_reader_read_u64_be",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadI64Le => h(
+//RS                 "reader.read_i64_le",
+//RS                 "jet_reader_read_i64_le",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadI64Be => h(
+//RS                 "reader.read_i64_be",
+//RS                 "jet_reader_read_i64_be",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadF32Le => h(
+//RS                 "reader.read_f32_le",
+//RS                 "jet_reader_read_f32_le",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadF32Be => h(
+//RS                 "reader.read_f32_be",
+//RS                 "jet_reader_read_f32_be",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadF64Le => h(
+//RS                 "reader.read_f64_le",
+//RS                 "jet_reader_read_f64_le",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderReadF64Be => h(
+//RS                 "reader.read_f64_be",
+//RS                 "jet_reader_read_f64_be",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderPeek => h(
+//RS                 "reader.peek",
+//RS                 "jet_reader_peek",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderSeek => h(
+//RS                 "reader.seek",
+//RS                 "jet_reader_seek",
+//RS                 2,
+//RS                 2,
+//RS                 &[true, false],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderSkip => h(
+//RS                 "reader.skip",
+//RS                 "jet_reader_skip",
+//RS                 2,
+//RS                 2,
+//RS                 &[true, false],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderTake => h(
+//RS                 "reader.take",
+//RS                 "jet_reader_take",
+//RS                 2,
+//RS                 2,
+//RS                 &[true, false],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderRemaining => h(
+//RS                 "reader.remaining",
+//RS                 "jet_reader_remaining",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReaderAtEnd => h(
+//RS                 "reader.at_end",
+//RS                 "jet_reader_at_end",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             CursorOver => h(
+//RS                 "cursor.over",
+//RS                 "jet_cursor_over",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             CursorTakeUntil => h(
+//RS                 "cursor.take_until",
+//RS                 "jet_cursor_take_until",
+//RS                 2,
+//RS                 2,
+//RS                 &[true, true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             CursorSkipWs => h(
+//RS                 "cursor.skip_ws",
+//RS                 "jet_cursor_skip_ws",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             CursorTakePattern { .. } | ReaderTakePattern { .. } => primitive(),
+//RS             HTTPRespTrailers => h(
+//RS                 "http.response_trailers",
+//RS                 "jet_http_srv_response_trailers",
+//RS                 2,
+//RS                 2,
+//RS                 &[true, false],
+//RS                 Some(Effect::Net),
+//RS                 carrier,
+//RS             ),
+//RS             FfiCallbackEventStop => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.ffi",
+//RS                 "callback_event_stop",
+//RS                 "jet_ffi_callback_event_stop_unit",
+//RS                 0,
+//RS                 0,
+//RS                 &[],
+//RS                 Some(Effect::FFI),
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             // These methods are inherent Rust methods or require a type-specific
+//RS             // receiver/FFI policy not represented by this operation alone. Their
+//RS             // checked TIR projection must expand them before MIR.
+//RS             EventMethod { method } => event_route(receiver, method, carrier)?,
+//RS             WatchMethod { method, .. } => watch_route(receiver, method, carrier)?,
+//RS             PreciseMethod { type_name, method } => {
+//RS                 let arity = match method.as_str() {
+//RS                     "add" | "sub" | "mul" | "div" | "equal" | "compare" => 2,
+//RS                     "to_string" | "numerator" | "denominator" | "to_float" | "is_zero" => 1,
+//RS                     _ => {
+//RS                         return Err(route_error(format!(
+//RS                             "unregistered precise method `{type_name}.{method}`"
+//RS                         )));
+//RS                     }
+//RS                 };
+//RS                 TRoutePlan::Prelude(precise_builtin_route(
+//RS                     type_name, method, arity, receiver, carrier,
+//RS                 )?)
+//RS             }
+//RS             ReactiveGet => reactive_method_route(receiver, "get", carrier)?,
+//RS             ReactiveSet => reactive_method_route(receiver, "set", carrier)?,
+//RS             ChannelReceive => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.channels",
+//RS                 "receiver.receive",
+//RS                 "jet_std::JetReceiver::receive",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ChannelTryReceive => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.channels",
+//RS                 "receiver.try_receive",
+//RS                 "jet_std::JetReceiver::try_receive",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ChannelIsTimer => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.channels",
+//RS                 "receiver.is_timer",
+//RS                 "jet_std::JetReceiver::is_timer",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ChannelIsInterval => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.channels",
+//RS                 "receiver.is_interval",
+//RS                 "jet_std::JetReceiver::is_interval",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ChannelIsCancelled => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.channels",
+//RS                 "receiver.is_cancelled",
+//RS                 "jet_std::JetReceiver::is_cancelled",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ChannelIsReady => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.channels",
+//RS                 "receiver.is_ready",
+//RS                 "jet_std::JetReceiver::is_ready",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ChannelDelayMs => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.channels",
+//RS                 "receiver.delay_ms",
+//RS                 "jet_std::JetReceiver::delay_ms",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ChannelClose => {
+//RS                 let (member, symbol) = if receiver.without_user_tags().base_name() == Some("Sender")
+//RS                 {
+//RS                     ("sender.close", "jet_std::JetSender::close")
+//RS                 } else {
+//RS                     ("receiver.close", "jet_std::JetReceiver::close")
+//RS                 };
+//RS                 prelude(
+//RS                     MirPreludeFamily::HandleMethod,
+//RS                     "core.channels",
+//RS                     member,
+//RS                     symbol,
+//RS                     1,
+//RS                     1,
+//RS                     &[true],
+//RS                     None,
+//RS                     carrier,
+//RS                     MirPreludeAbi::Value,
+//RS                 )
+//RS             }
+//RS             SenderSend => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.channels",
+//RS                 "sender.send",
+//RS                 "jet_std::JetSender::send",
+//RS                 2,
+//RS                 2,
+//RS                 &[true, false],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             AllocAlloc | AllocTryAlloc | AllocReset => {
+//RS                 let allocator = match receiver.without_user_tags() {
+//RS                     Type::Named(name)
+//RS                         if matches!(name.as_str(), "Arena" | "Bump" | "Pool" | "Fixed") =>
+//RS                     {
+//RS                         name
+//RS                     }
+//RS                     _ => {
+//RS                         return Err(route_error(
+//RS                             "checked allocator method has no allocator receiver",
+//RS                         ));
+//RS                     }
+//RS                 };
+//RS                 let (method, arity, borrow_mask): (&str, usize, &[bool]) = match self {
+//RS                     AllocAlloc => ("alloc", 2, &[true, false]),
+//RS                     AllocTryAlloc => ("try_alloc", 2, &[true, false]),
+//RS                     AllocReset => ("reset", 1, &[true]),
+//RS                     _ => unreachable!(),
+//RS                 };
+//RS                 h(
+//RS                     &format!("{allocator}.{method}"),
+//RS                     &format!("jet_mem::Jet{allocator}::{method}"),
+//RS                     arity,
+//RS                     arity,
+//RS                     borrow_mask,
+//RS                     Some(Effect::Mem),
+//RS                     carrier,
+//RS                 )
+//RS             }
+//RS             TaskPause => h(
+//RS                 "task.pause",
+//RS                 "jet_std::JetTask::pause",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             TaskResume => h(
+//RS                 "task.resume",
+//RS                 "jet_std::JetTask::resume",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             TaskCancel => h(
+//RS                 "task.cancel",
+//RS                 "jet_std::JetTask::cancel",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS             ),
+//RS             ReflectValueTypeName => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.reflect",
+//RS                 "value.type_name",
+//RS                 "jet_jit_reflect_type_name",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ReflectValuePath => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.reflect",
+//RS                 "value.path",
+//RS                 "jet_jit_reflect_path",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ReflectValueDisplay => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.reflect",
+//RS                 "value.display",
+//RS                 "jet_jit_reflect_display",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ReflectValueFields => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.reflect",
+//RS                 "value.fields",
+//RS                 "jet_jit_reflect_fields",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ReflectFieldName => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.reflect",
+//RS                 "field.name",
+//RS                 "jet_jit_reflect_field_name",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             ReflectFieldValue => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.reflect",
+//RS                 "field.value",
+//RS                 "jet_jit_reflect_field_value",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             HTTPReqField(_)
+//RS             | HTTPRespField(_)
+//RS             | HTTPRespHeader
+//RS             | ArgsSpecHelp
+//RS             | DataTreeField
+//RS             | DataTreeAt
+//RS             | DataTreeInt
+//RS             | DataTreeText
+//RS             | DataTreeBool
+//RS             | DataTreeFloat
+//RS             | DataTreeToText
+//RS             | DataTreeEqualUnordered
+//RS             | DataTreeDecode(_)
+//RS             | SerdeEncode
+//RS             | JSONField
+//RS             | JSONAt
+//RS             | JSONInt
+//RS             | JSONText
+//RS             | JSONBool
+//RS             | JSONFloat
+//RS             | JSONToText
+//RS             | JSONEqualUnordered
+//RS             | DBValueInt
+//RS             | DBValueFloat
+//RS             | DBValueText
+//RS             | DBValueBool
+//RS             | DBValueBlob
+//RS             | DBValueIsNull
+//RS             | ModOnTick => primitive(),
+//RS             DBWithPolicy => h(
+//RS                 "db.with_policy",
+//RS                 "jet_db_with_policy",
+//RS                 3,
+//RS                 3,
+//RS                 &[true, false, false],
+//RS                 Some(Effect::DB),
+//RS                 carrier,
+//RS             ),
+//RS             DBBegin => h(
+//RS                 "db.begin",
+//RS                 "jet_db_begin",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 Some(Effect::DB),
+//RS                 carrier,
+//RS             ),
+//RS             DBCommit => h(
+//RS                 "db.commit",
+//RS                 "jet_db_commit",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 Some(Effect::DB),
+//RS                 carrier,
+//RS             ),
+//RS             DBRollback => h(
+//RS                 "db.rollback",
+//RS                 "jet_db_rollback",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 Some(Effect::DB),
+//RS                 carrier,
+//RS             ),
+//RS             DBClose => h(
+//RS                 "db.close",
+//RS                 "jet_db_close",
+//RS                 1,
+//RS                 1,
+//RS                 &[false],
+//RS                 Some(Effect::DB),
+//RS                 carrier,
+//RS             ),
+//RS             MeasurementMethod { method } => measurement_route(method, carrier)?,
+//RS             WebVirtualWindowFacts => prelude(
+//RS                 MirPreludeFamily::HandleMethod,
+//RS                 "core.web.virtual",
+//RS                 "facts_json",
+//RS                 "jet_web_virtual_window_facts",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 None,
+//RS                 carrier,
+//RS                 MirPreludeAbi::Value,
+//RS             ),
+//RS             AppMethod { method, args_len } => app_route(method, *args_len, carrier),
+//RS             DevServerMethod { method } => devserver_route(method, carrier),
+//RS             LayoutMethod { method } => layout_method_route(method, carrier)?,
+//RS             LoadableMethod { method } => loadable_method_route(method, carrier)?,
+//RS             UiBackendMethod { method } => ui_backend_method_route(method, receiver, carrier)?,
+//RS             HTTPRouterRegister {
+//RS                 handler_param_names,
+//RS                 ..
+//RS             } => {
+//RS                 let (member, symbol, arity, borrow_mask) = if matches!(receiver, Type::Named(name) if name == "HTTPMux")
+//RS                 {
+//RS                     if handler_param_names.is_empty() {
+//RS                         (
+//RS                             "mux_add_zero",
+//RS                             "jet_http_mux_add_zero_handler",
+//RS                             4,
+//RS                             vec![true, false, false, false],
+//RS                         )
+//RS                     } else {
+//RS                         (
+//RS                             "mux_add",
+//RS                             "jet_http_mux_add_handler",
+//RS                             4,
+//RS                             vec![true, false, false, false],
+//RS                         )
+//RS                     }
+//RS                 } else {
+//RS                     (
+//RS                         "router_register",
+//RS                         "jet_http_router_register",
+//RS                         7,
+//RS                         vec![true, false, false, false, true, false, false],
+//RS                     )
+//RS                 };
+//RS                 prelude(
+//RS                     MirPreludeFamily::StaticPrelude,
+//RS                     "core.http",
+//RS                     member,
+//RS                     symbol,
+//RS                     arity,
+//RS                     arity,
+//RS                     &borrow_mask,
+//RS                     None,
+//RS                     carrier,
+//RS                     MirPreludeAbi::Control,
+//RS                 )
+//RS             }
+//RS             MathMethod {
+//RS                 type_name, method, ..
+//RS             } if crate::Sema::is_geometry_type(type_name) => {
+//RS                 geometry_method_route(type_name, method, receiver, carrier)?
+//RS             }
+//RS             MathMethod {
+//RS                 type_name,
+//RS                 method,
+//RS                 reduce_op,
+//RS             } => {
+//RS                 let (suffix, arity) = match (method.as_str(), reduce_op.as_deref()) {
+//RS                     ("reduce", Some("Add")) => ("reduce_add", 1),
+//RS                     ("reduce", Some("Mul")) => ("reduce_mul", 1),
+//RS                     ("reduce", Some("Min")) => ("reduce_min", 1),
+//RS                     ("reduce", Some("Max")) => ("reduce_max", 1),
+//RS                     ("reduce", Some("Avg")) => ("reduce_avg", 1),
+//RS                     ("to_array" | "sum" | "product" | "min" | "max", None)
+//RS                         if crate::Sema::is_simd_lane_type(type_name) =>
+//RS                     {
+//RS                         (method.as_str(), 1)
+//RS                     }
+//RS                     ("to_array" | "length" | "normalize", None)
+//RS                         if matches!(type_name.as_str(), "Vec2" | "Vec3" | "Vec4") =>
+//RS                     {
+//RS                         (method.as_str(), 1)
+//RS                     }
+//RS                     ("dot", None) if matches!(type_name.as_str(), "Vec2" | "Vec3" | "Vec4") => {
+//RS                         ("dot", 2)
+//RS                     }
+//RS                     ("cross", None) if type_name == "Vec3" => ("cross", 2),
+//RS                     ("to_array" | "transpose", None)
+//RS                         if matches!(type_name.as_str(), "Mat3" | "Mat4") =>
+//RS                     {
+//RS                         (method.as_str(), 1)
+//RS                     }
+//RS                     ("matmul" | "transform", None)
+//RS                         if matches!(type_name.as_str(), "Mat3" | "Mat4") =>
+//RS                     {
+//RS                         (method.as_str(), 2)
+//RS                     }
+//RS                     _ => {
+//RS                         return Err(route_error(format!(
+//RS                             "checked math method `{type_name}.{method}` requires structural MIR lowering"
+//RS                         )));
+//RS                     }
+//RS                 };
+//RS                 let borrow_mask = if arity == 1 {
+//RS                     vec![true]
+//RS                 } else {
+//RS                     vec![true, false]
+//RS                 };
+//RS                 h(
+//RS                     &format!("{type_name}.{suffix}"),
+//RS                     &format!("jet_math_{type_name}_{suffix}"),
+//RS                     arity,
+//RS                     arity,
+//RS                     &borrow_mask,
+//RS                     None,
+//RS                     carrier,
+//RS                 )
+//RS             }
+//RS             ReactiveEffectMethod { .. }
+//RS             | ServiceRuntimeSend
+//RS             | ServiceRuntimeRetry
+//RS             | ServiceRuntimeDeadLetter
+//RS             | ServiceRuntimeRetain
+//RS             | ServiceRuntimeCommit => primitive(),
+//RS             DBLeaseClose => h(
+//RS                 "db_lease.close",
+//RS                 "jet_db_lease_close",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 Some(Effect::DB),
+//RS                 carrier,
+//RS             ),
+//RS             DBPoolAcquire => h(
+//RS                 "db_pool.acquire",
+//RS                 "jet_db_pool_acquire",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 Some(Effect::DB),
+//RS                 carrier,
+//RS             ),
+//RS             DBPoolAcquireDeadline => h(
+//RS                 "db_pool.acquire_deadline",
+//RS                 "jet_db_pool_acquire_deadline",
+//RS                 2,
+//RS                 2,
+//RS                 &[true, true],
+//RS                 Some(Effect::DB),
+//RS                 carrier,
+//RS             ),
+//RS             DBPoolReady => h(
+//RS                 "db_pool.ready",
+//RS                 "jet_db_pool_ready",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 Some(Effect::DB),
+//RS                 carrier,
+//RS             ),
+//RS             DBPoolDrain => h(
+//RS                 "db_pool.drain",
+//RS                 "jet_db_pool_drain",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 Some(Effect::DB),
+//RS                 carrier,
+//RS             ),
+//RS             DBPoolReceipt => h(
+//RS                 "db_pool.receipt",
+//RS                 "jet_db_pool_receipt",
+//RS                 1,
+//RS                 1,
+//RS                 &[true],
+//RS                 Some(Effect::DB),
+//RS                 carrier,
+//RS             ),
+//RS             DBQuery { metadata } => db_h(
+//RS                 "query",
+//RS                 "jet_db_scope_query_with_metadata",
+//RS                 metadata,
+//RS                 carrier,
+//RS             ),
+//RS             DBQueryOne { metadata } => db_h(
+//RS                 "query_one",
+//RS                 "jet_db_scope_query_one_with_metadata",
+//RS                 metadata,
+//RS                 carrier,
+//RS             ),
+//RS             DBExecute { metadata } => db_h(
+//RS                 "execute",
+//RS                 "jet_db_scope_execute_with_metadata",
+//RS                 metadata,
+//RS                 carrier,
+//RS             ),
+//RS             DBLive => primitive(),
+//RS         };
+//RS         Ok(plan)
+//RS     }
+//RS 
+// END-PORT-PENDING 0515 crates/jet-codegen/src/Codegen/TIR/routes.rs:3154-4387
+

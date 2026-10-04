@@ -1,0 +1,1188 @@
+// PORT-PENDING 0997 tests-cli-parts-inspect-module-group: tests/cli_parts/inspect.rs:1-336
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS 
+//RS #[test]
+//RS fn inspect_env_lists_typed_environment_reads() {
+//RS     let dir = isolated_cwd("inspect_env_reads");
+//RS     for (file, snapshot) in [
+//RS         ("env.jet", "inspect_env_reads.json"),
+//RS         ("config.jet", "inspect_config_reads.json"),
+//RS     ] {
+//RS         fs::write(dir.join(file), "module env.dev {\n    prompt: $HOME\n}\n").unwrap();
+//RS         let output = Command::new(jet())
+//RS             .args(["inspect", "env", file, "--json"])
+//RS             .current_dir(&dir)
+//RS             .env("HOME", "/test/home")
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         assert_eq!(
+//RS             output.status.code(),
+//RS             Some(0),
+//RS             "{}",
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         let json = String::from_utf8(output.stdout).unwrap();
+//RS         assert!(
+//RS             parse_json(&json).is_ok(),
+//RS             "inspect env JSON must parse: {json}"
+//RS         );
+//RS         assert!(json.contains("\"name\":\"$HOME\""), "{json}");
+//RS         assert!(json.contains("\"type\":\"String\""), "{json}");
+//RS         check_snapshot(snapshot, &json);
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS #[test]
+//RS fn package_team_policy_rejects_effect_unsafe_expert_and_dependency_violations() {
+//RS     for (tag, policy, source, expected_rule) in [
+//RS         (
+//RS             "team_policy_effect",
+//RS             "effects: { \"main.jet\": -[]> }",
+//RS             "fn run() { print(\"outside the ceiling\") }\n",
+//RS             "policy.effects",
+//RS         ),
+//RS         (
+//RS             "team_policy_unsafe",
+//RS             "unsafe: .Paths([\"src\"])",
+//RS             "fn run() {\n    #Unsafe(\"audit\") {}\n}\n",
+//RS             "policy.unsafe",
+//RS         ),
+//RS         (
+//RS             "team_policy_expert",
+//RS             "expert: .Deny",
+//RS             "fn run() {\n    #Shield {}\n}\n",
+//RS             "policy.expert",
+//RS         ),
+//RS         (
+//RS             "team_policy_dependency",
+//RS             "deps: .List([\"allowed\"])",
+//RS             "fn run() {}\n",
+//RS             "policy.deps",
+//RS         ),
+//RS     ] {
+//RS         let dir = isolated_cwd(tag);
+//RS         fs::write(
+//RS             dir.join("package.jet"),
+//RS             format!(
+//RS                 "name: \"guarantees\"\nversion: \"0.1.0\"\ndeps: {{ zlib: c@system }}\npolicy: {{ {policy} }}\n"
+//RS             ),
+//RS         )
+//RS         .unwrap();
+//RS         fs::write(dir.join("main.jet"), source).unwrap();
+//RS         let output = Command::new(jet())
+//RS             .args(["check", "main.jet"])
+//RS             .current_dir(&dir)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         assert_eq!(
+//RS             output.status.code(),
+//RS             Some(1),
+//RS             "{tag} unexpectedly passed:\n{}",
+//RS             String::from_utf8_lossy(&output.stdout)
+//RS         );
+//RS         let stderr = String::from_utf8_lossy(&output.stderr);
+//RS         assert!(
+//RS             stderr.contains("Error [E2960]") && stderr.contains(expected_rule),
+//RS             "{tag} did not report {expected_rule}:\n{stderr}"
+//RS         );
+//RS         assert!(
+//RS             stderr.contains("Package policy") && stderr.contains("package.jet"),
+//RS             "{tag} lacks actionable policy text:\n{stderr}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn hardened_release_sentry_reaches_a_foreign_dependency() {
+//RS     let dir = isolated_cwd("inspect_guarantees_runtime_harden");
+//RS     let app = dir.join("app");
+//RS     let dependency = dir.join("dep");
+//RS     fs::create_dir_all(&app).unwrap();
+//RS     fs::create_dir_all(&dependency).unwrap();
+//RS     fs::write(
+//RS         app.join("package.jet"),
+//RS         "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep: ../dep }\npolicy: { harden: true }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         app.join("main.jet"),
+//RS         "use dep\nfn run() {\n    #Unsafe(\"calls the audited dependency\") {\n        print(dep.read())\n    }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         dependency.join("package.jet"),
+//RS         "name: \"dep\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         dependency.join("dep.jet"),
+//RS         "use core.mem\n#Unsafe(\"intentionally invalid address\")\npub fn read() -[]> Int {\n    p :: mem.Ptr<Int>.from_addr(1)\n    return mem.volatile_read(p)\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = Command::new(jet())
+//RS         .args(["run", "--release", "main.jet"])
+//RS         .current_dir(&app)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "invalid dependency access must stop: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("R0801"),
+//RS         "hardened dependency sentry was not active: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("intentionally invalid address"),
+//RS         "dependency gate was not named: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn release_hardened_profile_catches_a_local_wrong_unsafe_region() {
+//RS     let source = include_str!("../../Examples/features/memory/unsafe_sentries.jet");
+//RS     for (tag, profile, hardened) in [
+//RS         ("release_sentry_normal", "release", false),
+//RS         ("release_sentry_hardened", "hardened", true),
+//RS     ] {
+//RS         let dir = isolated_cwd(tag);
+//RS         fs::write(
+//RS             dir.join("package.jet"),
+//RS             "name: \"sentry-profile\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+//RS         )
+//RS         .unwrap();
+//RS         fs::write(dir.join("main.jet"), source).unwrap();
+//RS 
+//RS         let profile_arg = format!("--profile={profile}");
+//RS         let output = Command::new(jet())
+//RS             .args(["run", profile_arg.as_str(), "main.jet"])
+//RS             .current_dir(&dir)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         let stdout = String::from_utf8_lossy(&output.stdout);
+//RS         let stderr = String::from_utf8_lossy(&output.stderr);
+//RS         if hardened {
+//RS             assert!(!output.status.success(), "hardened profile missed the stale pointer: {stderr}");
+//RS             for marker in [
+//RS                 "Runtime fault [R0802]",
+//RS                 "in #Unsafe gate",
+//RS                 "Why:",
+//RS                 "Fix:",
+//RS                 "obligation `valid_ptr` was not met on this run",
+//RS             ] {
+//RS                 assert!(stderr.contains(marker), "hardened report missing `{marker}`: {stderr}");
+//RS             }
+//RS         } else {
+//RS             assert!(
+//RS                 output.status.success(),
+//RS                 "normal release must run the deliberately wrong region: {stderr}"
+//RS             );
+//RS             assert_eq!(stdout, "7\n", "normal release did not execute the fixture: {stderr}");
+//RS             assert!(!stderr.contains("Runtime fault [R0802]"), "normal release was hardened: {stderr}");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn test_hardened_profile_catches_a_local_wrong_unsafe_region() {
+//RS     let source = "\
+//RS use core.mem
+//RS #Test(\"wrong unsafe region\") {
+//RS     arena :: mem.Arena.new()
+//RS     #Unsafe(\"test deliberately reads after arena reset\") {
+//RS         stale :: *Int{*arena.alloc(7)}
+//RS         arena.reset()
+//RS         print(stale.*)
+//RS     }
+//RS }
+//RS fn run() {}
+//RS ";
+//RS     for (tag, profile, hardened) in [
+//RS         ("test_release_sentry_normal", "release", false),
+//RS         ("test_hardened_sentry", "hardened", true),
+//RS     ] {
+//RS         let dir = isolated_cwd(tag);
+//RS         fs::write(
+//RS             dir.join("package.jet"),
+//RS             "name: \"test-sentry-profile\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+//RS         )
+//RS         .unwrap();
+//RS         fs::write(dir.join("main.jet"), source).unwrap();
+//RS         let profile_arg = format!("--profile={profile}");
+//RS         let output = Command::new(jet())
+//RS             .args(["test", "main.jet", profile_arg.as_str()])
+//RS             .current_dir(&dir)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         let stdout = String::from_utf8_lossy(&output.stdout);
+//RS         let stderr = String::from_utf8_lossy(&output.stderr);
+//RS         if hardened {
+//RS             assert_eq!(
+//RS                 output.status.code(),
+//RS                 Some(1),
+//RS                 "hardened test must report a failed suite: {stderr}"
+//RS             );
+//RS             let report = format!("{stdout}{stderr}");
+//RS             for marker in [
+//RS                 "Runtime fault [R0802]",
+//RS                 "test deliberately reads after arena reset",
+//RS                 "Why:",
+//RS                 "Fix:",
+//RS                 "obligation `valid_ptr` was not met on this run",
+//RS             ] {
+//RS                 assert!(report.contains(marker), "hardened test report missing `{marker}`: {report}");
+//RS             }
+//RS             assert!(
+//RS                 !report.contains("panicked at") && !report.contains("RUST_BACKTRACE"),
+//RS                 "hardened test leaked Rust panic voice: {report}"
+//RS             );
+//RS         } else {
+//RS             assert!(
+//RS                 output.status.success(),
+//RS                 "normal test profile must run the deliberately wrong region: {stderr}"
+//RS             );
+//RS             assert!(stdout.contains("1 passed"), "normal test did not run: {stdout}");
+//RS             assert!(!stdout.contains("Runtime fault [R0802]") && !stderr.contains("Runtime fault [R0802]"), "normal test was hardened: {stdout}{stderr}");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn safe_release_profiles_emit_no_sentry_runtime_overhead() {
+//RS     for (tag, policy, profile) in [
+//RS         ("safe_release_normal", "", "release"),
+//RS         ("safe_release_hardened", "policy: { harden: true }\n", "hardened"),
+//RS     ] {
+//RS         let dir = isolated_cwd(tag);
+//RS         fs::write(
+//RS             dir.join("package.jet"),
+//RS             format!("name: \"safe-profile\"\nversion: \"0.1.0\"\n{policy}"),
+//RS         )
+//RS         .unwrap();
+//RS         fs::write(dir.join("main.jet"), "fn run() { print(7) }\n").unwrap();
+//RS         let path = dir.join("main.jet");
+//RS         let src = fs::read_to_string(&path).unwrap();
+//RS         let shown = path.to_string_lossy();
+//RS         let output = jet::compile_with_target_and_gates_and_profile(
+//RS             &src,
+//RS             &shown,
+//RS             jet::Policy::GateSet::default(),
+//RS             None,
+//RS             profile,
+//RS         )
+//RS         .unwrap_or_else(|diags| panic!("safe profile rejected: {diags:?}"));
+//RS         assert!(
+//RS             !output.rust.contains("jet_mem::jet_sentry_"),
+//RS             "safe {tag} output carries sentry runtime machinery:\n{}",
+//RS             output.rust
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn package_guarantees_are_tighten_only() {
+//RS     let mut weak = jet::Package::PackagePolicy::default();
+//RS     weak.contain.insert("libxml".to_string());
+//RS     let mut strong = weak.clone();
+//RS     strong.contain.insert("libz".to_string());
+//RS     strong.harden = true;
+//RS     assert!(weak.guarantees_tighten(&strong).is_ok());
+//RS     assert!(strong.guarantees_tighten(&weak).is_err());
+//RS }
+//RS 
+//RS #[test]
+//RS fn source_policy_spelling_is_rejected_with_teaching_diagnostic() {
+//RS     let dir = isolated_cwd("inspect_guarantees_source_policy");
+//RS     let file = dir.join("main.jet");
+//RS     fs::write(&file, "#Policy(contain)\nfn run() {}\n").unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["check", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     let stderr = String::from_utf8(output.stderr).unwrap();
+//RS     assert!(
+//RS         stderr.contains("Error [E0355]")
+//RS             && stderr.contains("contain")
+//RS             && stderr.contains("not a scoped policy"),
+//RS         "{stderr}"
+//RS     );
+//RS     let teaching = stderr
+//RS         .lines()
+//RS         .filter(|line| {
+//RS             line.starts_with("Error [") || line.starts_with(" Why:") || line.starts_with(" Fix:")
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     check_snapshot(
+//RS         "inspect_guarantees_source_policy.txt",
+//RS         &format!("{teaching}\n"),
+//RS     );
+//RS }
+//RS 
+// END-PORT-PENDING 0997 tests/cli_parts/inspect.rs:1-336
+
+// PORT-PENDING 0997 tests-cli-parts-inspect-module-group: tests/cli_parts/scene_assets.rs:1-17
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS 
+//RS const ASSETS_BUDGET: &str = r#"Budget.{
+//RS     name: "assets",
+//RS     scope: .Scene("main"),
+//RS     metric: .SceneAssetBytes,
+//RS     provider: .SceneProbe("main"),
+//RS     comparison: .AbsoluteFrom("local/main"),
+//RS     limit: .AtMost(1MiB),
+//RS     enforcement: .Warn,
+//RS }"#;
+//RS 
+//RS #[test]
+//RS fn scene_probe_assets_produces_600_samples() {
+//RS     let (_dir, report) = scene_probe_once("scene_probe_assets", ASSETS_BUDGET);
+//RS     assert_scene_probe_measurement(&report, "SceneAssetBytes");
+//RS }
+// END-PORT-PENDING 0997 tests/cli_parts/scene_assets.rs:1-17
+
+// PORT-PENDING 0997 tests-cli-parts-inspect-module-group: tests/cli_parts/scene_draws.rs:1-17
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS 
+//RS const DRAWS_BUDGET: &str = r#"Budget.{
+//RS     name: "draws",
+//RS     scope: .Scene("main"),
+//RS     metric: .DrawCalls(.P99),
+//RS     provider: .SceneProbe("main"),
+//RS     comparison: .AbsoluteFrom("local/main"),
+//RS     limit: .AtMost(10),
+//RS     enforcement: .Warn,
+//RS }"#;
+//RS 
+//RS #[test]
+//RS fn scene_probe_draws_produces_600_samples() {
+//RS     let (_dir, report) = scene_probe_once("scene_probe_draws", DRAWS_BUDGET);
+//RS     assert_scene_probe_measurement(&report, "DrawCalls");
+//RS }
+// END-PORT-PENDING 0997 tests/cli_parts/scene_draws.rs:1-17
+
+// PORT-PENDING 0997 tests-cli-parts-inspect-module-group: tests/cli_parts/scene_forged.rs:1-50
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS 
+//RS const FRAME_BUDGET: &str = r#"Budget.{
+//RS     name: "assets_forged",
+//RS     scope: .Scene("main"),
+//RS     metric: .SceneAssetBytes,
+//RS     provider: .SceneProbe("main"),
+//RS     comparison: .AbsoluteFrom("local/main"),
+//RS     limit: .AtMost(1MiB),
+//RS     enforcement: .Warn,
+//RS }"#;
+//RS 
+//RS #[test]
+//RS fn scene_probe_rejects_forged_cache() {
+//RS     let (dir, report) = scene_probe_once("scene_probe_forged", FRAME_BUDGET);
+//RS     assert_scene_probe_measurement(&report, "SceneAssetBytes");
+//RS     let reports = dir.join(".jet/perf/reports");
+//RS     let paths = || {
+//RS         fs::read_dir(&reports)
+//RS             .unwrap()
+//RS             .map(|entry| entry.unwrap().path())
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS     let initial = paths();
+//RS     assert_eq!(
+//RS         initial.len(),
+//RS         1,
+//RS         "expected exactly one report; got {:?}",
+//RS         initial
+//RS     );
+//RS 
+//RS     fs::OpenOptions::new()
+//RS         .append(true)
+//RS         .open(&initial[0])
+//RS         .unwrap()
+//RS         .write_all(b"forged")
+//RS         .unwrap();
+//RS     let replacement = scene_probe_run(&dir);
+//RS     assert_eq!(
+//RS         replacement.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&replacement.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         paths().len(),
+//RS         2,
+//RS         "forged report must not satisfy compatible cache identity"
+//RS     );
+//RS }
+// END-PORT-PENDING 0997 tests/cli_parts/scene_forged.rs:1-50
+
+// PORT-PENDING 0997 tests-cli-parts-inspect-module-group: tests/cli_parts/scene_probe.rs:1-36
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS 
+//RS const FRAME_BUDGET: &str = r#"Budget.{
+//RS     name: "frame",
+//RS     scope: .Scene("main"),
+//RS     metric: .FrameTime(.P99),
+//RS     provider: .SceneProbe("main"),
+//RS     comparison: .AbsoluteFrom("local/main"),
+//RS     limit: .AtMost(16ms),
+//RS     enforcement: .Warn,
+//RS }"#;
+//RS 
+//RS #[test]
+//RS fn scene_probe_reuses_compatible_report() {
+//RS     let (dir, report) = scene_probe_once("scene_probe_runtime", FRAME_BUDGET);
+//RS     assert_scene_probe_measurement(&report, "FrameTime");
+//RS     let reports = dir.join(".jet/perf/reports");
+//RS     let paths = || {
+//RS         fs::read_dir(&reports)
+//RS             .unwrap()
+//RS             .map(|entry| entry.unwrap().path())
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS     let initial = paths();
+//RS     assert_eq!(
+//RS         initial.len(),
+//RS         1,
+//RS         "expected exactly one report; got {:?}",
+//RS         initial
+//RS     );
+//RS 
+//RS     // Second run should reuse cached report (compatible identity → no new report).
+//RS     let second = scene_probe_run(&dir);
+//RS     assert_eq!(second.status.code(), Some(0));
+//RS     assert_eq!(paths(), initial, "compatible report should be reused");
+//RS }
+// END-PORT-PENDING 0997 tests/cli_parts/scene_probe.rs:1-36
+
+// PORT-PENDING 0997 tests-cli-parts-inspect-module-group: tests/cli_parts/support.rs:1-708
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::fs;
+//RS use std::io;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Child, Command, Output};
+//RS use std::time::Duration;
+//RS 
+//RS pub use std::io::{Read, Write};
+//RS pub use std::process::Stdio;
+//RS pub use jet_foundation::JSON::parse_json;
+//RS use jet_foundation::PerformanceBudget::CanonicalJson;
+//RS 
+//RS pub fn jet() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS /// Explicit profile keeps `jet run` on the native AOT path; debug avoids the
+//RS /// optimized release codegen cost for behavior-only assertions.
+//RS pub fn run_debug_aot(file: &str) -> Command {
+//RS     let mut command = Command::new(jet());
+//RS     command.args(["run", "--profile=debug", file]);
+//RS     command
+//RS }
+//RS 
+//RS // ── #2075: which profile a CLI behavior test pays for ────────────────────────
+//RS //
+//RS // D-LENS-RUN1 keeps the AOT escape hatch for ANY explicit profile, so
+//RS // `jet run --profile=debug` still proves a real native build (I2/I5) — it just
+//RS // stops paying `-O`/opt-level=3 + ThinLTO + symbol stripping (Source/main.rs
+//RS // `ProfileConfig::rustc_args`, `OptimizeLevel::None`) for an assertion about
+//RS // argument binding, diagnostics, process behavior, or a foreign binding's
+//RS // output. Those tests use `--profile=debug`.
+//RS //
+//RS // `--release` stays ONLY where the release lens is what is under test. The
+//RS // named keep set, in full:
+//RS //
+//RS //   cli_parts/expand.rs        `profile_release_flag_is_accepted`
+//RS //                              (`--release` is a blessed profile, no E1219)
+//RS //   cli_parts/budget.rs        `typed_cli_field_markers_add_short_and_env_
+//RS //                              inputs_with_pinned_precedence` — runs its whole
+//RS //                              precedence matrix for `release in [false, true]`,
+//RS //                              which IS the default+release end-to-end proof
+//RS //   cli_parts/core.rs          `jobs_lists_documented_scheduled_project_jobs_
+//RS //                              and_matches_run_outside_projects` (`build
+//RS //                              --release` strips `#Job` dev entries; a debug
+//RS //                              build keeps them, so this needs release)
+//RS //   cli_parts/inspect.rs       `hardened_release_sentry_reaches_a_foreign_
+//RS //                              dependency` (hardened release sentry semantics)
+//RS //
+//RS // Everything else in the cli targets is behavior, and pays debug.
+//RS 
+//RS pub fn output_with_retry(cmd: &mut Command) -> Output {
+//RS     let mut last = None;
+//RS     for attempt in 0..8 {
+//RS         if attempt > 0 {
+//RS             std::thread::sleep(Duration::from_millis(20 * attempt));
+//RS         }
+//RS         match cmd.output() {
+//RS             Ok(out) => return out,
+//RS             Err(e) if e.kind() == io::ErrorKind::ExecutableFileBusy => last = Some(e),
+//RS             Err(e) => panic!("CLI command failed: {e}"),
+//RS         }
+//RS     }
+//RS     panic!("CLI command stayed busy: {}", last.unwrap());
+//RS }
+//RS 
+//RS pub fn spawn_with_retry(cmd: &mut Command) -> Child {
+//RS     let mut last = None;
+//RS     for attempt in 0..8 {
+//RS         if attempt > 0 {
+//RS             std::thread::sleep(Duration::from_millis(20 * attempt));
+//RS         }
+//RS         match cmd.spawn() {
+//RS             Ok(child) => return child,
+//RS             Err(e) if e.kind() == io::ErrorKind::ExecutableFileBusy => last = Some(e),
+//RS             Err(e) => panic!("CLI command failed: {e}"),
+//RS         }
+//RS     }
+//RS     panic!("CLI command stayed busy: {}", last.unwrap());
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS pub fn cli_dir() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cli")
+//RS }
+//RS 
+//RS /// Compare `actual` against `tests/cli/<name>`; bless on `UPDATE_EXPECT=1`.
+//RS pub fn check_snapshot(name: &str, actual: &str) {
+//RS     let path = cli_dir().join(name);
+//RS     if std::env::var("UPDATE_EXPECT").is_ok() {
+//RS         fs::create_dir_all(cli_dir()).unwrap();
+//RS         fs::write(&path, actual).unwrap();
+//RS         return;
+//RS     }
+//RS     let expected = fs::read_to_string(&path).unwrap_or_else(|_| {
+//RS         panic!(
+//RS             "missing snapshot {}; run UPDATE_EXPECT=1 cargo test",
+//RS             path.display()
+//RS         )
+//RS     });
+//RS     assert_eq!(actual, expected, "snapshot mismatch for {}", name);
+//RS }
+//RS 
+//RS /// Write a tiny source file with a known error and return its path. Keep each
+//RS /// file in its own authority root: concurrent tests creating sibling files
+//RS /// directly under the shared temp directory would change that root while
+//RS /// `jet` is checking its authority snapshot.
+//RS pub fn bad_file(tag: &str) -> PathBuf {
+//RS     let dir = isolated_cwd(&format!("bad_{tag}"));
+//RS     let p = dir.join("bad.jet");
+//RS     fs::write(&p, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap();
+//RS     p
+//RS }
+//RS 
+//RS /// Replace machine-specific temp paths so snapshots are portable.
+//RS ///
+//RS /// A diagnostic may render the entry as an absolute path, as a path relative to
+//RS /// the temp root, or as the bare file name, and which one it picks is not this
+//RS /// helper's business — its only job is to make the snapshot host-independent.
+//RS /// Only the first two were normalized, so a diagnostic that rendered the bare
+//RS /// name left a real machine-independent string that simply did not match the
+//RS /// `BAD.jet` convention every other fixture in this suite uses, and the test
+//RS /// read as a failure in the compiler rather than in the scrubber. This target
+//RS /// sits outside every routine set (#2025), so nobody saw it.
+//RS pub fn scrub(s: &str, file: &Path) -> String {
+//RS     let mut scrubbed = s.replace(&file.display().to_string(), "BAD.jet");
+//RS     let temp_dir = std::env::temp_dir();
+//RS     if let Some(temp_root) = temp_dir.parent() {
+//RS         if let Ok(relative) = file.strip_prefix(temp_root) {
+//RS             scrubbed = scrubbed.replace(&relative.display().to_string(), "BAD.jet");
+//RS         }
+//RS     }
+//RS     if let Some(name) = file.file_name().and_then(|n| n.to_str()) {
+//RS         scrubbed = scrubbed.replace(name, "BAD.jet");
+//RS     }
+//RS     scrubbed
+//RS }
+//RS 
+//RS /// A private cwd for a `jet run`/`build`/`test` subprocess.
+//RS ///
+//RS /// `jet` writes compiled output to `.jet/build/<stem>.rs` + `.jet/build/<stem>` *relative
+//RS /// to its own cwd* (Source/CmdCompile.rs `bin_path`/`stem`/`.jet/build`), keyed only
+//RS /// by the source file's stem — not its full path. Two concurrent `jet`
+//RS /// processes compiling different files that happen to share a stem (e.g. two
+//RS /// `main.jet` fixtures) race on that shared `.jet/build/` path if both inherit
+//RS /// the test harness's cwd (the repo root). Giving each such test its own cwd
+//RS /// removes the shared namespace entirely, regardless of stem.
+//RS pub fn isolated_cwd(tag: &str) -> PathBuf {
+//RS     static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+//RS 
+//RS     loop {
+//RS         let sequence = NEXT_FIXTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS         let dir = std::env::temp_dir().join(format!(
+//RS             "jet_cli_cwd_{tag}_{}_{sequence}",
+//RS             std::process::id()
+//RS         ));
+//RS         match fs::create_dir(&dir) {
+//RS             Ok(()) => return dir,
+//RS             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+//RS             Err(error) => panic!("cannot create isolated CLI fixture {}: {error}", dir.display()),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS // D-VERDICT-678-1 (2026-07-17) renamed the project entry to `run.jet`; retired
+//RS // `main.jet` is never a discovery fallback (jet-pkg-model
+//RS // `resolve_run_entry_checked`). A bare `jet budget` in these
+//RS // fixtures resolves its entry, so the entry must carry the canonical name.
+//RS pub fn budget_project(tag: &str, limit: u64) -> PathBuf {
+//RS     let dir = isolated_cwd(tag);
+//RS     fs::create_dir_all(dir.join("src")).unwrap();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"app\"\nversion: \"0.1.0\"\n",
+//RS     ).unwrap();
+//RS     fs::write(
+//RS         dir.join("src/run.jet"),
+//RS         format!(r#"module perf.package {{
+//RS     budgets: [Budget{{
+//RS         name: "public-api",
+//RS         scope: .Package,
+//RS         metric: .PublicApiItems,
+//RS         comparison: .Absolute,
+//RS         limit: .AtMost({limit}),
+//RS     }}],
+//RS }}
+//RS pub fn api() {{}}
+//RS fn run() {{}}
+//RS "#),
+//RS     ).unwrap();
+//RS     dir
+//RS }
+//RS 
+//RS pub fn compile_latency_budget_project(tag: &str) -> PathBuf {
+//RS     let dir = isolated_cwd(tag);
+//RS     copy_dir_all(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/compile_latency"), &dir);
+//RS     dir
+//RS }
+//RS 
+//RS pub fn artifact_budget_project(tag: &str, limit: u64) -> PathBuf {
+//RS     let dir = isolated_cwd(tag);
+//RS     fs::create_dir_all(dir.join("src")).unwrap();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"app\"\nversion: \"0.1.0\"\n",
+//RS     ).unwrap();
+//RS     fs::write(
+//RS         dir.join("src/run.jet"),
+//RS         format!(r#"module perf.package {{
+//RS     budgets: [Budget{{
+//RS         name: "binary",
+//RS         scope: .Package,
+//RS         metric: .BinarySize,
+//RS         comparison: .Absolute,
+//RS         limit: .AtMost({limit}B),
+//RS     }}],
+//RS }}
+//RS fn run() {{
+//RS     print("tiny")
+//RS }}
+//RS "#),
+//RS     ).unwrap();
+//RS     dir
+//RS }
+//RS 
+//RS pub fn mixed_budget_project(tag: &str) -> PathBuf {
+//RS     let dir = isolated_cwd(tag);
+//RS     fs::create_dir_all(dir.join("src")).unwrap();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"app\"\nversion: \"0.1.0\"\n",
+//RS     ).unwrap();
+//RS     fs::write(
+//RS         dir.join("src/run.jet"),
+//RS         r#"module perf.package {
+//RS     budgets: [
+//RS         Budget{
+//RS             name: "binary",
+//RS             scope: .Package,
+//RS             metric: .BinarySize,
+//RS             comparison: .Absolute,
+//RS             limit: .AtMost(100000000B),
+//RS         },
+//RS         Budget{
+//RS             name: "public-api",
+//RS             scope: .Package,
+//RS             metric: .PublicApiItems,
+//RS             comparison: .Absolute,
+//RS             limit: .AtMost(10),
+//RS         },
+//RS     ],
+//RS }
+//RS 
+//RS pub fn api() {}
+//RS fn run() {}
+//RS "#,
+//RS     ).unwrap();
+//RS     dir
+//RS }
+//RS 
+//RS pub fn benchmark_budget_project(tag: &str) -> PathBuf {
+//RS     let dir = isolated_cwd(tag);
+//RS     fs::create_dir_all(dir.join("src")).unwrap();
+//RS     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
+//RS     fs::write(dir.join("src/run.jet"), r#"module perf.package {
+//RS     budgets: [Budget{
+//RS         name: "parse",
+//RS         scope: .Test("parse"),
+//RS         metric: .BenchTime(.P50),
+//RS         provider: .BenchMeasurement("parse"),
+//RS         comparison: .RelativeTo("ci/linux"),
+//RS         limit: .RegressionAtMost(100pct),
+//RS         enforcement: .Warn,
+//RS     }],
+//RS }
+//RS #Test("parse") { .measure {
+//RS     total := 0
+//RS     loop value in 0..100 { total = total + value }
+//RS     assert_eq(total, 5050)
+//RS } }
+//RS fn run() {}
+//RS "#).unwrap();
+//RS     dir
+//RS }
+//RS 
+//RS pub fn allocation_budget_project(tag: &str) -> PathBuf {
+//RS     let dir = isolated_cwd(tag);
+//RS     fs::create_dir_all(dir.join("src")).unwrap();
+//RS     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
+//RS     fs::write(dir.join("src/run.jet"), r#"use core.mem
+//RS module perf.package {
+//RS     budgets: [
+//RS         Budget{
+//RS             name: "arena-count",
+//RS             scope: .Test("arena"),
+//RS             metric: .AllocationCount,
+//RS             provider: .AllocationProbe("arena"),
+//RS             comparison: .AbsoluteFrom("local/arena"),
+//RS             limit: .AtMost(2),
+//RS             enforcement: .Warn,
+//RS         },
+//RS         Budget{
+//RS             name: "arena-bytes",
+//RS             scope: .Test("arena"),
+//RS             metric: .AllocationBytes,
+//RS             provider: .AllocationProbe("arena"),
+//RS             comparison: .AbsoluteFrom("local/arena"),
+//RS             limit: .AtMost(16B),
+//RS             enforcement: .Warn,
+//RS         },
+//RS     ],
+//RS }
+//RS #Test("arena") { .measure {
+//RS     arena :: mem.Arena.new()
+//RS     value :: arena.alloc(42)
+//RS     assert_eq(value, 42)
+//RS } }
+//RS fn run() {}
+//RS "#).unwrap();
+//RS     dir
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS pub fn age_budget_baseline(dir: &Path, baseline: &str) -> (String, String) {
+//RS     use jet_foundation::PerformanceBudget::{stable_id, CanonicalJson};
+//RS     let path = dir.join(format!(".jet/perf/baselines/names/{baseline}.json"));
+//RS     let mut manifest = CanonicalJson::parse_canonical(&fs::read(&path).unwrap()).unwrap();
+//RS     let CanonicalJson::Object(wrapper) = &mut manifest else { panic!("manifest") };
+//RS     let report_id = {
+//RS         let CanonicalJson::Object(content) = &wrapper["content"] else { panic!("content") };
+//RS         let CanonicalJson::String(id) = &content["head_report_id"] else { panic!("head") };
+//RS         id.clone()
+//RS     };
+//RS     {
+//RS         let CanonicalJson::Object(content) = wrapper.get_mut("content").unwrap() else { panic!("content") };
+//RS         let CanonicalJson::Array(generations) = content.get_mut("generations").unwrap() else { panic!("generations") };
+//RS         let CanonicalJson::Object(generation) = &mut generations[0] else { panic!("generation") };
+//RS         let CanonicalJson::Object(audit) = generation.get_mut("audit").unwrap() else { panic!("audit") };
+//RS         audit.insert("accepted_at".into(), CanonicalJson::String("2000-01-01T00:00:00.000000000Z".into()));
+//RS         let mut body = audit.clone();
+//RS         body.remove("audit_id").unwrap();
+//RS         audit.insert("audit_id".into(), CanonicalJson::String(stable_id(&CanonicalJson::Object(body))));
+//RS     }
+//RS     let state_id = stable_id(&wrapper["content"]);
+//RS     wrapper.insert("manifest_id".into(), CanonicalJson::String(state_id.clone()));
+//RS     fs::write(path, manifest.bytes()).unwrap();
+//RS     (report_id, state_id)
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn run_budget_update_pty(dir: &Path, answer: &[u8]) -> (i32, String) {
+//RS     use std::fs::File;
+//RS     use std::io::{Read, Write};
+//RS     use std::os::fd::FromRawFd;
+//RS     use std::process::Stdio;
+//RS     unsafe extern "C" { fn openpty(master: *mut i32, slave: *mut i32, name: *mut i8, termp: *const u8, winp: *const u8) -> i32; }
+//RS     let (mut master_fd, mut slave_fd) = (-1, -1);
+//RS     assert_eq!(unsafe { openpty(&mut master_fd, &mut slave_fd, std::ptr::null_mut(), std::ptr::null(), std::ptr::null()) }, 0);
+//RS     let mut master = unsafe { File::from_raw_fd(master_fd) };
+//RS     let slave = unsafe { File::from_raw_fd(slave_fd) };
+//RS     let mut child = Command::new(jet())
+//RS         .args(["budget", "update", "--baseline", "ci/linux", "--bootstrap", "--reason", "initial evidence"])
+//RS         .current_dir(dir)
+//RS         .stdin(Stdio::from(slave.try_clone().unwrap()))
+//RS         .stdout(Stdio::from(slave.try_clone().unwrap()))
+//RS         .stderr(Stdio::from(slave))
+//RS         .spawn().unwrap();
+//RS     master.write_all(answer).unwrap();
+//RS     let status = child.wait().unwrap();
+//RS     let mut bytes = Vec::new();
+//RS     let mut buffer = [0u8; 4096];
+//RS     loop { match master.read(&mut buffer) { Ok(0) => break, Ok(n) => bytes.extend_from_slice(&buffer[..n]), Err(error) if error.raw_os_error() == Some(5) => break, Err(error) => panic!("PTY read: {error}") } }
+//RS     (status.code().unwrap(), String::from_utf8_lossy(&bytes).replace("\r\n", "\n"))
+//RS }
+//RS 
+//RS 
+//RS 
+//RS // ── Exit-code table ────────────────────────────────────────────────
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS // ── Human + JSON golden for one diagnostic ────────────────────────
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS // ── CI determinism: ANSI-free + identical when piped/NO_COLOR ──────
+//RS 
+//RS 
+//RS 
+//RS // ── explain coverage: every registered code resolves ──────────────
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS pub fn is_code(s: &str) -> bool {
+//RS     let b = s.as_bytes();
+//RS     b.len() == 5 && (b[0] == b'E' || b[0] == b'L') && b[1..].iter().all(|c| c.is_ascii_digit())
+//RS }
+//RS 
+//RS // ── Wave B: greeting, did-you-mean, doctor, completions, fix, externals ──
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS // ── Ext-optional CLI (no syntax decision; pure CLI behavior) ──────────
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS // ── D-ILE1: implicit executable inference (no package.jet) ───────────────
+//RS 
+//RS 
+//RS // ── D-CLI1: `--` separator passthrough (c11) ──────────────────────────────
+//RS 
+//RS /// Write a Jet fixture that prints its argument count via `process.argv()`.
+//RS pub fn args_fixture(tag: &str) -> std::path::PathBuf {
+//RS     let p = std::env::temp_dir().join(format!("jet_cli_args_{tag}.jet"));
+//RS     fs::write(
+//RS         &p,
+//RS         "use core.process as process\nfn run() {\n    args :: process.argv()\n    print(args.len())\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     p
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS // ── D-BUILDPROFILE1: --release / --profile=<name> ─────────────────────────────
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS // ── D-EXPANDCLI1 (card #183): `jet inspect expand` transparency command ────
+//RS 
+//RS /// Fixture exercising the `inline` lens: an `#Inline` fn and an
+//RS /// `#Inline(Always)` method.
+//RS pub fn expand_fixture() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_facts.jet")
+//RS }
+//RS 
+//RS /// Replace the fixture's machine-specific absolute path with a stable token.
+//RS pub fn scrub_fixture(s: &str, fixture: &Path) -> String {
+//RS     s.replace(&fixture.display().to_string(), "FIXTURE.jet")
+//RS }
+//RS 
+//RS 
+//RS 
+//RS pub fn expand_layout_fixture() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_layout_facts.jet")
+//RS }
+//RS 
+//RS 
+//RS pub fn expand_effects_layout_fixture() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("tests/fixtures/expand_effects_layout.jet")
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS // ── D-JPK-FILENAME2=B (A2): retired manifest filenames → E1226 ──────
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS // ── D-ILE1 / D-CLI-BARE1: bare entry resolution (card #497 verifier bounce) ──
+//RS //
+//RS // `resolve_bare_entry` (Source/main.rs) delegated to a `find_project_entry`
+//RS // that only ever checked `main.jet`/`.jet/main.jet`, never the package-named
+//RS // D-ILE1 fallback (`<package>.jet`, using `package.jet`'s `payload.name`). The shipped
+//RS // `Examples/features/packages/monorepo` fixture (members `hello.jet` /
+//RS // `ranker.jet`, neither named `main.jet`) exposed it end to end: bare `jet
+//RS // run` at the workspace root couldn't see either member as runnable, `-p
+//RS // hello` said "no workspace member named `hello`", and `cd`-ing into a
+//RS // member and running bare failed too.
+//RS 
+//RS /// Recursively copy a directory tree — sandboxes the shipped monorepo
+//RS /// fixture into an isolated cwd so `jet run`'s `.jet/build/` output never lands in
+//RS /// the checked-in example and concurrent test runs never collide.
+//RS pub fn copy_dir_all(src: &Path, dst: &Path) {
+//RS     fs::create_dir_all(dst).unwrap();
+//RS     for entry in fs::read_dir(src).unwrap() {
+//RS         let entry = entry.unwrap();
+//RS         let dest_path = dst.join(entry.file_name());
+//RS         if entry.file_type().unwrap().is_dir() {
+//RS             copy_dir_all(&entry.path(), &dest_path);
+//RS         } else {
+//RS             fs::copy(entry.path(), &dest_path).unwrap();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS pub fn scene_probe_project(tag: &str, budget: &str) -> PathBuf {
+//RS     let dir = isolated_cwd(tag);
+//RS     fs::create_dir_all(dir.join("src")).unwrap();
+//RS     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
+//RS     let source = r#"use core.game as game
+//RS 
+//RS module perf.game {
+//RS     budgets: [
+//RS         __SCENE_BUDGET__,
+//RS     ]
+//RS }
+//RS 
+//RS fn run() {
+//RS     scene := game.Scene.new("main")
+//RS     counter := 0
+//RS     scene.on_frame((frame) -> {
+//RS         counter = counter + 1
+//RS     })
+//RS     transcript :: game.run(scene)
+//RS     print(transcript)
+//RS }
+//RS "#
+//RS     .replace("__SCENE_BUDGET__", budget);
+//RS     fs::write(dir.join("src/main.jet"), source).unwrap();
+//RS     dir
+//RS }
+//RS 
+//RS pub fn scene_probe_run(dir: &Path) -> Output {
+//RS     Command::new(jet())
+//RS         .args(["self", "devtools", "probe", "src/main.jet"])
+//RS         .current_dir(dir)
+//RS         .output()
+//RS         .unwrap()
+//RS }
+//RS 
+//RS pub fn scene_probe_once(tag: &str, budget: &str) -> (PathBuf, CanonicalJson) {
+//RS     let dir = scene_probe_project(tag, budget);
+//RS     let output = scene_probe_run(&dir);
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(0),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let reports = dir.join(".jet/perf/reports");
+//RS     let paths = fs::read_dir(&reports)
+//RS         .unwrap()
+//RS         .map(|entry| entry.unwrap().path())
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(paths.len(), 1, "expected exactly one report; got {paths:?}");
+//RS     let bytes = fs::read(&paths[0]).unwrap();
+//RS     jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
+//RS     (dir, CanonicalJson::parse_canonical(&bytes).unwrap())
+//RS }
+//RS 
+//RS pub fn assert_scene_probe_measurement(report: &CanonicalJson, expected_metric: &str) {
+//RS     let CanonicalJson::Object(report) = report else { panic!("report") };
+//RS     let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
+//RS     let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
+//RS     assert_eq!(measurements.len(), 1, "expected one SceneProbe measurement");
+//RS     let CanonicalJson::Object(measurement) = &measurements[0] else { panic!("measurement") };
+//RS     let CanonicalJson::Object(provider) = &measurement["provider"] else { panic!("provider") };
+//RS     assert_eq!(provider["kind"], CanonicalJson::String("SceneProbe".into()));
+//RS     assert_eq!(provider["identity"], CanonicalJson::String("main".into()));
+//RS     let CanonicalJson::Object(metric) = &measurement["metric"] else { panic!("metric") };
+//RS     assert_eq!(metric["name"], CanonicalJson::String(expected_metric.into()));
+//RS     let CanonicalJson::Array(samples) = &measurement["samples"] else { panic!("samples") };
+//RS     assert_eq!(samples.len(), 600, "SceneProbe must produce exactly 600 measured samples");
+//RS }
+//RS 
+//RS /// One index on a `CanonicalJson::Object` yields a `CanonicalJson`, which is
+//RS /// not itself indexable, so a nested lookup has to step through the enum.
+//RS pub fn canonical_field<'a>(
+//RS     value: &'a jet_foundation::PerformanceBudget::CanonicalJson,
+//RS     key: &str,
+//RS ) -> &'a jet_foundation::PerformanceBudget::CanonicalJson {
+//RS     match value {
+//RS         jet_foundation::PerformanceBudget::CanonicalJson::Object(fields) => fields
+//RS             .get(key)
+//RS             .unwrap_or_else(|| panic!("canonical JSON has no field `{key}`")),
+//RS         _ => panic!("canonical JSON parent of `{key}` is not an object"),
+//RS     }
+//RS }
+// END-PORT-PENDING 0997 tests/cli_parts/support.rs:1-708
+

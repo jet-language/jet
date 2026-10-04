@@ -1,0 +1,1314 @@
+// PORT-PENDING 0588 crates-jet-comptime-src-comptime-mathlayout: crates/jet-comptime/src/Comptime/MathLayout.rs:1-1310
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-SIMD2 / D-LINALG1: comptime/REPL mirror of AOT `jet_math_*` + lane ops.
+//RS //! Scalar-array fallback — same algorithms as `LinalgFns.rs` / `MathTaskMem.rs`.
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Syntax;
+//RS use crate::AST::{BinOp, CtFloat, Type};
+//RS 
+//RS use super::Diagnostics::{comptime_panic, overflow, unsupported};
+//RS use crate::AST::CtValue;
+//RS 
+//RS mod fixed_arithmetic {
+//RS     include!("../../../jet-codegen/src/Prelude/Core/FixedArithmetic.rs");
+//RS }
+//RS 
+//RS mod simd_lanes {
+//RS     include!("../../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
+//RS }
+//RS 
+//RS fn fixed_op(op: BinOp) -> Option<i64> {
+//RS     Some(match op {
+//RS         BinOp::Add => fixed_arithmetic::JET_FIXED_OP_ADD,
+//RS         BinOp::Sub => fixed_arithmetic::JET_FIXED_OP_SUB,
+//RS         BinOp::Mul => fixed_arithmetic::JET_FIXED_OP_MUL,
+//RS         BinOp::Div => fixed_arithmetic::JET_FIXED_OP_DIV,
+//RS         BinOp::Rem => fixed_arithmetic::JET_FIXED_OP_REM,
+//RS         BinOp::BitAnd => fixed_arithmetic::JET_FIXED_OP_BIT_AND,
+//RS         BinOp::BitOr => fixed_arithmetic::JET_FIXED_OP_BIT_OR,
+//RS         BinOp::BitXor => fixed_arithmetic::JET_FIXED_OP_BIT_XOR,
+//RS         BinOp::Shl => fixed_arithmetic::JET_FIXED_OP_SHL,
+//RS         BinOp::Shr => fixed_arithmetic::JET_FIXED_OP_SHR,
+//RS         BinOp::Pow => fixed_arithmetic::JET_FIXED_OP_POW,
+//RS         BinOp::FloorDiv => fixed_arithmetic::JET_FIXED_OP_FLOOR_DIV,
+//RS         BinOp::Mod => fixed_arithmetic::JET_FIXED_OP_MOD,
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn fixed_result(
+//RS     result: fixed_arithmetic::JetFixedArithmeticResult,
+//RS     signed: bool,
+//RS     bits: u8,
+//RS     checked: bool,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     match result {
+//RS         fixed_arithmetic::JetFixedArithmeticResult::Value(value) => {
+//RS             let value = integer_value(value, signed, bits);
+//RS             if checked {
+//RS                 Ok(CtValue::Present(Box::new(value)))
+//RS             } else {
+//RS                 Ok(value)
+//RS             }
+//RS         }
+//RS         fixed_arithmetic::JetFixedArithmeticResult::Absent => {
+//RS             Ok(CtValue::absent(Type::IntN { signed, bits }))
+//RS         }
+//RS         fixed_arithmetic::JetFixedArithmeticResult::Trap(error) => {
+//RS             let message = error.to_string();
+//RS             Err(comptime_panic(&message, span))
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub fn integer_type_layout(ty: &Type) -> Option<(bool, u8)> {
+//RS     match ty {
+//RS         Type::Int => Some((true, 64)),
+//RS         Type::IntN { signed, bits } => Some((*signed, *bits)),
+//RS         Type::InlineRange { base, .. } => integer_type_layout(base),
+//RS         Type::Named(name) => match name.as_str() {
+//RS             "I8" => Some((true, 8)),
+//RS             "I16" => Some((true, 16)),
+//RS             "I32" => Some((true, 32)),
+//RS             "I64" | "Int" => Some((true, 64)),
+//RS             "U8" => Some((false, 8)),
+//RS             "U16" => Some((false, 16)),
+//RS             "U32" => Some((false, 32)),
+//RS             "U64" => Some((false, 64)),
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub fn integer_widen(value: i64, signed: bool) -> i128 {
+//RS     if signed {
+//RS         value as i128
+//RS     } else {
+//RS         value as u64 as i128
+//RS     }
+//RS }
+//RS 
+//RS pub fn integer_narrow(value: i128, signed: bool, bits: u8) -> i64 {
+//RS     if bits == 64 {
+//RS         return value as u64 as i64;
+//RS     }
+//RS     let mask = (1i128 << bits) - 1;
+//RS     let mut value = value & mask;
+//RS     if signed && value & (1i128 << (bits - 1)) != 0 {
+//RS         value |= !mask;
+//RS     }
+//RS     value as i64
+//RS }
+//RS /// Preserve a full-width unsigned result when the evaluator's fast carrier
+//RS /// would otherwise look like a negative `i64`.
+//RS pub fn integer_value(value: i64, signed: bool, bits: u8) -> CtValue {
+//RS     if !signed && bits == 64 && value < 0 {
+//RS         CtValue::BigInt(jet_foundation::Numeric::CtBigInt::from_u64(value as u64))
+//RS     } else {
+//RS         CtValue::Int(value)
+//RS     }
+//RS }
+//RS 
+//RS pub fn integer_show(value: i64, signed: bool) -> String {
+//RS     if signed {
+//RS         value.to_string()
+//RS     } else {
+//RS         (value as u64).to_string()
+//RS     }
+//RS }
+//RS 
+//RS /// The one wording for a zero divisor, shared by `%` and by `/%`
+//RS /// (D-FLOORDIV1=A). `Prelude/Core/Division.rs` carries the same text.
+//RS pub const INTEGER_DIVIDE_ZERO: &str = "divided by zero";
+//RS /// D-EXPSEM1=A: the two power traps. `Prelude/Core/Power.rs` is the one place
+//RS /// the rule lives; these constants carry its exact wording to the tiers that
+//RS /// cannot include that file — the comptime interpreter and the Cranelift host.
+//RS /// `tests/power_and_exclusive_or.rs` proves the Prelude text still matches, so
+//RS /// the wordings cannot drift apart.
+//RS pub const INTEGER_POWER_NEGATIVE: &str =
+//RS     "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)";
+//RS pub const INTEGER_POWER_OVERFLOW: &str =
+//RS     "this power overflows the value's type (the result is outside its range)";
+//RS pub const INTEGER_ROTATE_NEGATIVE: &str = "a rotation count cannot be negative";
+//RS /// D-FLOORDIV1=A / D-MODSEM1=A: the division-family traps. Same contract as the
+//RS /// power ones above — `Prelude/Core/Division.rs` owns the rule, these carry its
+//RS /// exact wording to the tiers that cannot include that file, and
+//RS /// `tests/floor_division.rs` proves every tier still reports them.
+//RS pub const INTEGER_DIVIDE_OVERFLOW: &str =
+//RS     "this division overflows the value's type (the result is outside its range)";
+//RS 
+//RS /// D-FLOORDIV1=A: the `/%` rule, mirroring `Prelude/Core/Division.rs` for the
+//RS /// tiers that cannot include that file. Rust's `/` rounds toward zero, so an
+//RS /// answer whose remainder falls on the other side of zero from the divisor sat
+//RS /// one step too high. `None` means the division itself overflowed.
+//RS pub fn floor_div(left: i128, right: i128) -> Option<i128> {
+//RS     let quotient = left.checked_div(right)?;
+//RS     let remainder = left % right;
+//RS     if remainder != 0 && (remainder < 0) != (right < 0) {
+//RS         quotient.checked_sub(1)
+//RS     } else {
+//RS         Some(quotient)
+//RS     }
+//RS }
+//RS 
+//RS /// D-MODSEM1=A: the `%` rule, mirroring `Prelude/Core/Division.rs`. Rust's `%`
+//RS /// gives the remainder the dividend's sign; the floored modulo takes the
+//RS /// divisor's, so the answer is moved across when the two disagree. `None`
+//RS /// means the remainder itself overflowed.
+//RS pub fn floored_mod(left: i128, right: i128) -> Option<i128> {
+//RS     if right == 0 {
+//RS         return None;
+//RS     }
+//RS     // `MIN % -1` is 0 and fits every width, so it answers rather than trapping.
+//RS     let remainder = left.wrapping_rem(right);
+//RS     if remainder != 0 && (remainder < 0) != (right < 0) {
+//RS         remainder.checked_add(right)
+//RS     } else {
+//RS         Some(remainder)
+//RS     }
+//RS }
+//RS 
+//RS const MATH_TYPES: &[&str] = &[
+//RS     Syntax::SIMD_F32X4_TYPE,
+//RS     Syntax::SIMD_F64X2_TYPE,
+//RS     Syntax::LINALG_VEC2_TYPE,
+//RS     Syntax::LINALG_VEC3_TYPE,
+//RS     Syntax::LINALG_VEC4_TYPE,
+//RS     Syntax::LINALG_MAT3_TYPE,
+//RS     Syntax::LINALG_MAT4_TYPE,
+//RS ];
+//RS 
+//RS pub(super) fn is_math_type(name: &str) -> bool {
+//RS     Syntax::is_simd_lane_type(name) || MATH_TYPES.contains(&name)
+//RS }
+//RS const GEOMETRY_TYPES: &[&str] = &[
+//RS     "Point2",
+//RS     "Delta2",
+//RS     "Transform",
+//RS     "Transform2",
+//RS     "Ray2",
+//RS     "ScreenPoint",
+//RS     "WorldPoint",
+//RS     "ViewPoint",
+//RS     "CameraPoint",
+//RS     "DevicePoint",
+//RS     "ScreenDelta",
+//RS     "WorldDelta",
+//RS     "ViewDelta",
+//RS     "CameraDelta",
+//RS     "DeviceDelta",
+//RS ];
+//RS 
+//RS const GEOMETRY_FRAME: &str = "__jet_frame_id";
+//RS const GEOMETRY_FROM_FRAME: &str = "__jet_from_frame";
+//RS const GEOMETRY_TO_FRAME: &str = "__jet_to_frame";
+//RS 
+//RS pub(super) fn is_geometry_type(name: &str) -> bool {
+//RS     GEOMETRY_TYPES.contains(&name)
+//RS }
+//RS 
+//RS pub(super) fn is_geometry_value(value: &CtValue) -> bool {
+//RS     matches!(
+//RS         value,
+//RS         CtValue::Struct { type_name, .. } if is_geometry_type(type_name)
+//RS     )
+//RS }
+//RS 
+//RS fn geometry_field<'a>(
+//RS     fields: &'a [(String, CtValue)],
+//RS     name: &str,
+//RS ) -> Option<&'a CtValue> {
+//RS     fields
+//RS         .iter()
+//RS         .find(|(field, _)| field == name)
+//RS         .map(|(_, value)| value)
+//RS }
+//RS 
+//RS fn geometry_float(value: &CtValue, what: &str, span: Span) -> Result<f64, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Float(value) => Ok(value.as_f64()),
+//RS         CtValue::Int(value) => Ok(*value as f64),
+//RS         _ => Err(unsupported(
+//RS             &format!("geometry {what} must be a Float"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn geometry_int(value: &CtValue, what: &str, span: Span) -> Result<i64, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Int(value) => Ok(*value),
+//RS         _ => Err(unsupported(
+//RS             &format!("geometry {what} must be a FrameId"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn geometry_coord(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<(String, f64, f64, i64), Diagnostic> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return Err(unsupported("malformed coordinate carrier", span));
+//RS     };
+//RS     if !is_geometry_type(type_name)
+//RS         || !(type_name == "Point2"
+//RS             || type_name == "Delta2"
+//RS             || type_name.ends_with("Point")
+//RS             || type_name.ends_with("Delta"))
+//RS     {
+//RS         return Err(unsupported("expected a coordinate carrier", span));
+//RS     }
+//RS     let x = geometry_field(fields, "x")
+//RS         .ok_or_else(|| unsupported("coordinate carrier is missing x", span))
+//RS         .and_then(|value| geometry_float(value, "x", span))?;
+//RS     let y = geometry_field(fields, "y")
+//RS         .ok_or_else(|| unsupported("coordinate carrier is missing y", span))
+//RS         .and_then(|value| geometry_float(value, "y", span))?;
+//RS     let frame = geometry_field(fields, GEOMETRY_FRAME)
+//RS         .map_or(Ok(0), |value| geometry_int(value, "frame identity", span))?;
+//RS     Ok((type_name.clone(), x, y, frame))
+//RS }
+//RS 
+//RS fn geometry_coord_value(type_name: &str, x: f64, y: f64, frame: i64) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: vec![
+//RS             ("x".to_string(), CtValue::Float(CtFloat::f64(x))),
+//RS             ("y".to_string(), CtValue::Float(CtFloat::f64(y))),
+//RS             (GEOMETRY_FRAME.to_string(), CtValue::Int(frame)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn geometry_transform(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<(String, [f64; 6], i64, i64), Diagnostic> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return Err(unsupported("malformed transform carrier", span));
+//RS     };
+//RS     if !matches!(type_name.as_str(), "Transform" | "Transform2") {
+//RS         return Err(unsupported("expected a transform carrier", span));
+//RS     }
+//RS     let mut matrix = [0.0; 6];
+//RS     for (index, name) in ["m00", "m01", "m10", "m11", "tx", "ty"].iter().enumerate() {
+//RS         matrix[index] = geometry_field(fields, name)
+//RS             .ok_or_else(|| unsupported("transform carrier is missing a matrix field", span))
+//RS             .and_then(|value| geometry_float(value, name, span))?;
+//RS     }
+//RS     let from = geometry_field(fields, GEOMETRY_FROM_FRAME)
+//RS         .map_or(Ok(0), |value| geometry_int(value, "source frame", span))?;
+//RS     let to = geometry_field(fields, GEOMETRY_TO_FRAME)
+//RS         .map_or(Ok(0), |value| geometry_int(value, "destination frame", span))?;
+//RS     Ok((type_name.clone(), matrix, from, to))
+//RS }
+//RS 
+//RS fn geometry_transform_value(
+//RS     type_name: &str,
+//RS     matrix: [f64; 6],
+//RS     from: i64,
+//RS     to: i64,
+//RS ) -> CtValue {
+//RS     let fields = ["m00", "m01", "m10", "m11", "tx", "ty"]
+//RS         .into_iter()
+//RS         .zip(matrix)
+//RS         .map(|(name, value)| (name.to_string(), CtValue::Float(CtFloat::f64(value))))
+//RS         .chain([
+//RS             (GEOMETRY_FROM_FRAME.to_string(), CtValue::Int(from)),
+//RS             (GEOMETRY_TO_FRAME.to_string(), CtValue::Int(to)),
+//RS         ])
+//RS         .collect();
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields,
+//RS     }
+//RS }
+//RS 
+//RS fn geometry_failed(message: &str) -> CtValue {
+//RS     CtValue::failed(Box::new(CtValue::Str(message.to_string())))
+//RS }
+//RS 
+//RS fn geometry_is_point(name: &str) -> bool {
+//RS     name == "Point2" || name.ends_with("Point")
+//RS }
+//RS 
+//RS fn geometry_is_delta(name: &str) -> bool {
+//RS     name == "Delta2" || name.ends_with("Delta")
+//RS }
+//RS fn geometry_point_result_name(name: &str, dynamic: bool) -> &str {
+//RS     if dynamic {
+//RS         return "Point2";
+//RS     }
+//RS     name
+//RS }
+//RS 
+//RS fn geometry_delta_result_name(name: &str, dynamic: bool) -> &str {
+//RS     if dynamic {
+//RS         return "Delta2";
+//RS     }
+//RS     match name {
+//RS         "ScreenPoint" => "ScreenDelta",
+//RS         "WorldPoint" => "WorldDelta",
+//RS         "ViewPoint" => "ViewDelta",
+//RS         "CameraPoint" => "CameraDelta",
+//RS         "DevicePoint" => "DeviceDelta",
+//RS         _ => name,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn apply_geometry_static(
+//RS     type_name: &str,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if !is_geometry_type(type_name) || !matches!(method, "new" | "affine") {
+//RS         return None;
+//RS     }
+//RS     Some((|| -> Result<CtValue, Diagnostic> {
+//RS         Ok(match (type_name, args) {
+//RS             (name, [x, y]) if geometry_is_point(name) || geometry_is_delta(name) => {
+//RS                 let x = geometry_float(x, "x", span)?;
+//RS                 let y = geometry_float(y, "y", span)?;
+//RS                 geometry_coord_value(name, x, y, 0)
+//RS             }
+//RS             (name, [x, y, frame]) if matches!(name, "Point2" | "Delta2") => {
+//RS                 let x = geometry_float(x, "x", span)?;
+//RS                 let y = geometry_float(y, "y", span)?;
+//RS                 let frame = geometry_int(frame, "frame identity", span)?;
+//RS                 geometry_coord_value(name, x, y, frame)
+//RS             }
+//RS             (name, [m00, m01, m10, m11, tx, ty, from, to])
+//RS                 if matches!(name, "Transform" | "Transform2") =>
+//RS             {
+//RS                 let mut matrix = [0.0; 6];
+//RS                 for (index, value) in [m00, m01, m10, m11, tx, ty].into_iter().enumerate() {
+//RS                     matrix[index] = geometry_float(value, "matrix component", span)?;
+//RS                 }
+//RS                 let from = geometry_int(from, "source frame", span)?;
+//RS                 let to = geometry_int(to, "destination frame", span)?;
+//RS                 geometry_transform_value(name, matrix, from, to)
+//RS             }
+//RS             _ => {
+//RS                 return Err(unsupported(
+//RS                     &format!("`{type_name}.{method}` has no geometry constructor shape"),
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS         })
+//RS     })())
+//RS }
+//RS 
+//RS pub(super) fn arity(name: &str) -> Option<usize> {
+//RS     if let Some((_, lanes)) = Syntax::simd_lane_layout(name) {
+//RS         return Some(lanes);
+//RS     }
+//RS     match name {
+//RS         Syntax::LINALG_VEC2_TYPE => Some(2),
+//RS         Syntax::LINALG_VEC3_TYPE => Some(3),
+//RS         Syntax::LINALG_VEC4_TYPE => Some(4),
+//RS         Syntax::LINALG_MAT3_TYPE => Some(9),
+//RS         Syntax::LINALG_MAT4_TYPE => Some(16),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn is_f32_lanes(name: &str) -> bool {
+//RS     matches!(
+//RS         Syntax::simd_lane_layout(name),
+//RS         Some((Syntax::SimdLaneKind::F32, _))
+//RS     )
+//RS }
+//RS 
+//RS fn integer_lane_layout(name: &str) -> Option<(bool, u8)> {
+//RS     Some(match Syntax::simd_lane_layout(name)?.0 {
+//RS         Syntax::SimdLaneKind::I8 => (true, 8),
+//RS         Syntax::SimdLaneKind::I16 => (true, 16),
+//RS         Syntax::SimdLaneKind::I32 => (true, 32),
+//RS         Syntax::SimdLaneKind::I64 => (true, 64),
+//RS         Syntax::SimdLaneKind::U8 => (false, 8),
+//RS         Syntax::SimdLaneKind::U16 => (false, 16),
+//RS         Syntax::SimdLaneKind::U32 => (false, 32),
+//RS         Syntax::SimdLaneKind::U64 => (false, 64),
+//RS         Syntax::SimdLaneKind::F32 | Syntax::SimdLaneKind::F64 => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn lane_value(name: &str, n: f64) -> CtValue {
+//RS     if let Some((signed, bits)) = integer_lane_layout(name) {
+//RS         return CtValue::Int(integer_narrow(n as i128, signed, bits));
+//RS     }
+//RS     if is_f32_lanes(name) {
+//RS         CtValue::Float(CtFloat::f32(n as f32))
+//RS     } else {
+//RS         CtValue::Float(CtFloat::f64(n))
+//RS     }
+//RS }
+//RS 
+//RS fn as_lane(v: &CtValue, span: Span) -> Result<f64, Diagnostic> {
+//RS     match v {
+//RS         CtValue::Float(f) => Ok(f.as_f64()),
+//RS         CtValue::Int(n) => Ok(*n as f64),
+//RS         CtValue::Struct { type_name, .. } if type_name == Syntax::TYPE_DECIMAL => {
+//RS             crate::Numeric::CtDecimal::from_value(v)
+//RS                 .map(|decimal| decimal.to_f64())
+//RS                 .map_err(|error| unsupported(&error, span))
+//RS         }
+//RS         _ => Err(unsupported("math component must be a Float", span)),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn from_lanes(type_name: &str, lanes: &[f64]) -> CtValue {
+//RS     let fields = lanes
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(i, n)| (field_name(type_name, i), lane_value(type_name, *n)))
+//RS         .collect();
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields,
+//RS     }
+//RS }
+//RS 
+//RS fn from_int_lanes(type_name: &str, lanes: &[i64]) -> CtValue {
+//RS     let (signed, bits) = integer_lane_layout(type_name).expect("integer SIMD lane");
+//RS     let fields = lanes
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(i, n)| {
+//RS             (
+//RS                 field_name(type_name, i),
+//RS                 CtValue::Int(integer_narrow(integer_widen(*n, signed), signed, bits)),
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields,
+//RS     }
+//RS }
+//RS 
+//RS fn geometry_binop(
+//RS     op: BinOp,
+//RS     left: &CtValue,
+//RS     right: &CtValue,
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if !is_geometry_value(left) && !is_geometry_value(right) {
+//RS         return None;
+//RS     }
+//RS     let (left_name, lx, ly, left_frame) = match geometry_coord(left, span) {
+//RS         Ok(value) => value,
+//RS         Err(error) => return Some(Err(error)),
+//RS     };
+//RS     let (right_name, rx, ry, right_frame) = match geometry_coord(right, span) {
+//RS         Ok(value) => value,
+//RS         Err(error) => return Some(Err(error)),
+//RS     };
+//RS     let dynamic = matches!(left_name.as_str(), "Point2" | "Delta2")
+//RS         || matches!(right_name.as_str(), "Point2" | "Delta2");
+//RS     let wrap = |value| {
+//RS         if dynamic {
+//RS             CtValue::Present(Box::new(value))
+//RS         } else {
+//RS             value
+//RS         }
+//RS     };
+//RS     if dynamic
+//RS         && left_frame != 0
+//RS         && right_frame != 0
+//RS         && left_frame != right_frame
+//RS         && matches!(op, BinOp::Add | BinOp::Sub)
+//RS     {
+//RS         return Some(Ok(geometry_failed(
+//RS             "coordinate values belong to different frames",
+//RS         )));
+//RS     }
+//RS     let result = match op {
+//RS         BinOp::Add if geometry_is_point(&left_name) && geometry_is_delta(&right_name) => {
+//RS             Ok(wrap(geometry_coord_value(
+//RS                 geometry_point_result_name(&left_name, dynamic),
+//RS                 lx + rx,
+//RS                 ly + ry,
+//RS                 if left_frame != 0 { left_frame } else { right_frame },
+//RS             )))
+//RS         }
+//RS         BinOp::Add if geometry_is_delta(&left_name) && geometry_is_point(&right_name) => {
+//RS             Ok(wrap(geometry_coord_value(
+//RS                 geometry_point_result_name(&right_name, dynamic),
+//RS                 lx + rx,
+//RS                 ly + ry,
+//RS                 if left_frame != 0 { left_frame } else { right_frame },
+//RS             )))
+//RS         }
+//RS         BinOp::Add if geometry_is_delta(&left_name) && geometry_is_delta(&right_name) => {
+//RS             Ok(wrap(geometry_coord_value(
+//RS                 geometry_delta_result_name(&left_name, dynamic),
+//RS                 lx + rx,
+//RS                 ly + ry,
+//RS                 if left_frame != 0 { left_frame } else { right_frame },
+//RS             )))
+//RS         }
+//RS         BinOp::Sub if geometry_is_point(&left_name) && geometry_is_delta(&right_name) => {
+//RS             Ok(wrap(geometry_coord_value(
+//RS                 geometry_point_result_name(&left_name, dynamic),
+//RS                 lx - rx,
+//RS                 ly - ry,
+//RS                 left_frame,
+//RS             )))
+//RS         }
+//RS         BinOp::Sub if geometry_is_point(&left_name) && geometry_is_point(&right_name) => {
+//RS             Ok(wrap(geometry_coord_value(
+//RS                 geometry_delta_result_name(&left_name, dynamic),
+//RS                 lx - rx,
+//RS                 ly - ry,
+//RS                 left_frame,
+//RS             )))
+//RS         }
+//RS         BinOp::Sub if geometry_is_delta(&left_name) && geometry_is_delta(&right_name) => {
+//RS             Ok(wrap(geometry_coord_value(
+//RS                 geometry_delta_result_name(&left_name, dynamic),
+//RS                 lx - rx,
+//RS                 ly - ry,
+//RS                 left_frame,
+//RS             )))
+//RS         }
+//RS         BinOp::Eq => Ok(CtValue::Bool(
+//RS             lx == rx && ly == ry && left_frame == right_frame,
+//RS         )),
+//RS         BinOp::Ne => Ok(CtValue::Bool(
+//RS             !(lx == rx && ly == ry && left_frame == right_frame),
+//RS         )),
+//RS         _ => Err(unsupported("this coordinate-space operator", span)),
+//RS     };
+//RS     Some(result)
+//RS }
+//RS 
+//RS pub(super) fn eval_binop(
+//RS     op: BinOp,
+//RS     left: &CtValue,
+//RS     right: &CtValue,
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if let Some(result) = geometry_binop(op, left, right, span) {
+//RS         return Some(result);
+//RS     }
+//RS     let (Some((ln, ll)), Some((rn, rl))) = (lanes(left), lanes(right)) else {
+//RS         return None;
+//RS     };
+//RS     if ln == rn && integer_lane_layout(ln).is_some() {
+//RS         let Some((_, left)) = integer_lanes(left) else {
+//RS             return Some(Err(unsupported("integer math lanes", span)));
+//RS         };
+//RS         let Some((_, right)) = integer_lanes(right) else {
+//RS             return Some(Err(unsupported("integer math lanes", span)));
+//RS         };
+//RS         return Some(zip_int_op(op, &left, &right, ln, span).map(|out| from_int_lanes(ln, &out)));
+//RS     }
+//RS     if ln != rn {
+//RS         // MatN * VecN transform.
+//RS         if matches!(op, BinOp::Mul) {
+//RS             if ln == Syntax::LINALG_MAT3_TYPE && rn == Syntax::LINALG_VEC3_TYPE {
+//RS                 return Some(Ok(from_lanes(rn, &mat_transform(3, &ll, &rl))));
+//RS             }
+//RS             if ln == Syntax::LINALG_MAT4_TYPE && rn == Syntax::LINALG_VEC4_TYPE {
+//RS                 return Some(Ok(from_lanes(rn, &mat_transform(4, &ll, &rl))));
+//RS             }
+//RS         }
+//RS         return Some(Err(unsupported("mixing math types", span)));
+//RS     }
+//RS     let out = if matches!(ln, Syntax::LINALG_MAT3_TYPE | Syntax::LINALG_MAT4_TYPE)
+//RS         && matches!(op, BinOp::Mul)
+//RS     {
+//RS         let n = if ln == Syntax::LINALG_MAT3_TYPE { 3 } else { 4 };
+//RS         mat_mul(n, &ll, &rl)
+//RS     } else {
+//RS         match zip_op(op, &ll, &rl, ln) {
+//RS             Some(v) => v,
+//RS             None => return Some(Err(unsupported("this math operator", span))),
+//RS         }
+//RS     };
+//RS     Some(Ok(from_lanes(ln, &out)))
+//RS }
+//RS 
+//RS fn field_name(type_name: &str, index: usize) -> String {
+//RS     match type_name {
+//RS         Syntax::LINALG_VEC2_TYPE | Syntax::LINALG_VEC3_TYPE | Syntax::LINALG_VEC4_TYPE => {
+//RS             ["x", "y", "z", "w"][index].to_string()
+//RS         }
+//RS         Syntax::LINALG_MAT3_TYPE => format!("m{}{}", index % 3, index / 3),
+//RS         Syntax::LINALG_MAT4_TYPE => format!("m{}{}", index % 4, index / 4),
+//RS         _ => index.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn lanes(value: &CtValue) -> Option<(&str, Vec<f64>)> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return None;
+//RS     };
+//RS     if !is_math_type(type_name) {
+//RS         return None;
+//RS     }
+//RS     let n = arity(type_name)?;
+//RS     if fields.len() != n {
+//RS         return None;
+//RS     }
+//RS     let mut out = Vec::with_capacity(n);
+//RS     for i in 0..n {
+//RS         let key = field_name(type_name, i);
+//RS         let (_, v) = fields.iter().find(|(name, _)| name == &key)?;
+//RS         out.push(match v {
+//RS             CtValue::Float(f) => f.as_f64(),
+//RS             CtValue::Int(n) => *n as f64,
+//RS             _ => return None,
+//RS         });
+//RS     }
+//RS     Some((type_name.as_str(), out))
+//RS }
+//RS 
+//RS fn integer_lanes(value: &CtValue) -> Option<(&str, Vec<i64>)> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return None;
+//RS     };
+//RS     let (signed, bits) = integer_lane_layout(type_name)?;
+//RS     let n = arity(type_name)?;
+//RS     if fields.len() != n {
+//RS         return None;
+//RS     }
+//RS     let mut out = Vec::with_capacity(n);
+//RS     for i in 0..n {
+//RS         let key = field_name(type_name, i);
+//RS         let (_, value) = fields.iter().find(|(name, _)| name == &key)?;
+//RS         let CtValue::Int(value) = value else {
+//RS             return None;
+//RS         };
+//RS         out.push(integer_narrow(integer_widen(*value, signed), signed, bits));
+//RS     }
+//RS     Some((type_name.as_str(), out))
+//RS }
+//RS 
+//RS fn as_int_lane(value: &CtValue, name: &str, span: Span) -> Result<i64, Diagnostic> {
+//RS     let (signed, bits) = integer_lane_layout(name).expect("integer SIMD lane");
+//RS     match value {
+//RS         CtValue::Int(value) => Ok(integer_narrow(integer_widen(*value, signed), signed, bits)),
+//RS         _ => Err(unsupported("math component must be an integer", span)),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn construct(name: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+//RS     let n = arity(name).ok_or_else(|| unsupported(&format!("`{name}`"), span))?;
+//RS     if args.len() != n {
+//RS         return Err(unsupported(
+//RS             &format!("`{name}` expects {n} components"),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if integer_lane_layout(name).is_some() {
+//RS         let lanes = args
+//RS             .iter()
+//RS             .map(|arg| as_int_lane(arg, name, span))
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         return Ok(from_int_lanes(name, &lanes));
+//RS     }
+//RS     let mut lanes = Vec::with_capacity(n);
+//RS     for arg in args {
+//RS         let mut v = as_lane(arg, span)?;
+//RS         v = narrow_lane(name, v);
+//RS         lanes.push(v);
+//RS     }
+//RS     Ok(from_lanes(name, &lanes))
+//RS }
+//RS 
+//RS fn narrow_lane(name: &str, n: f64) -> f64 {
+//RS     if let Some((signed, bits)) = integer_lane_layout(name) {
+//RS         return integer_narrow(n as i128, signed, bits) as f64;
+//RS     }
+//RS     if is_f32_lanes(name) {
+//RS         (n as f32) as f64
+//RS     } else {
+//RS         n
+//RS     }
+//RS }
+//RS 
+//RS fn simd_binary_op(op: BinOp) -> Option<simd_lanes::JetSimdBinaryOp> {
+//RS     Some(match op {
+//RS         BinOp::Add => simd_lanes::JetSimdBinaryOp::Add,
+//RS         BinOp::Sub => simd_lanes::JetSimdBinaryOp::Sub,
+//RS         BinOp::Mul => simd_lanes::JetSimdBinaryOp::Mul,
+//RS         BinOp::Div => simd_lanes::JetSimdBinaryOp::Div,
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn simd_reduce_op(op: &str) -> Option<simd_lanes::JetSimdReduceOp> {
+//RS     Some(match op {
+//RS         "Add" | "sum" => simd_lanes::JetSimdReduceOp::Add,
+//RS         "Mul" | "product" => simd_lanes::JetSimdReduceOp::Mul,
+//RS         "Min" => simd_lanes::JetSimdReduceOp::Min,
+//RS         "Max" => simd_lanes::JetSimdReduceOp::Max,
+//RS         "Avg" => simd_lanes::JetSimdReduceOp::Avg,
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn zip_op(op: BinOp, a: &[f64], b: &[f64], name: &str) -> Option<Vec<f64>> {
+//RS     let op = simd_binary_op(op)?;
+//RS     if is_f32_lanes(name) {
+//RS         let left = a.iter().map(|value| *value as f32).collect::<Vec<_>>();
+//RS         let right = b.iter().map(|value| *value as f32).collect::<Vec<_>>();
+//RS         return simd_lanes::jet_simd_binary_slice(&left, &right, op)
+//RS             .map(|values| values.into_iter().map(f64::from).collect());
+//RS     }
+//RS     simd_lanes::jet_simd_binary_slice(a, b, op)
+//RS }
+//RS 
+//RS fn zip_int_op(
+//RS     op: BinOp,
+//RS     a: &[i64],
+//RS     b: &[i64],
+//RS     name: &str,
+//RS     span: Span,
+//RS ) -> Result<Vec<i64>, Diagnostic> {
+//RS     let (signed, bits) = integer_lane_layout(name).expect("integer SIMD lane");
+//RS     let op = simd_binary_op(op).ok_or_else(|| unsupported("this math operator", span))?;
+//RS     simd_lanes::jet_simd_integer_binary(a, b, op, signed, bits)
+//RS         .ok_or_else(|| unsupported("this math operator", span))
+//RS }
+//RS 
+//RS fn mat_mul(n: usize, a: &[f64], b: &[f64]) -> Vec<f64> {
+//RS     let mut r = vec![0.0f64; n * n];
+//RS     for c in 0..n {
+//RS         for row in 0..n {
+//RS             let mut acc = 0.0f64;
+//RS             for k in 0..n {
+//RS                 acc += a[k * n + row] * b[c * n + k];
+//RS             }
+//RS             r[c * n + row] = acc;
+//RS         }
+//RS     }
+//RS     r
+//RS }
+//RS 
+//RS fn mat_transform(n: usize, m: &[f64], v: &[f64]) -> Vec<f64> {
+//RS     let mut r = vec![0.0f64; n];
+//RS     for row in 0..n {
+//RS         let mut a = 0.0f64;
+//RS         for k in 0..n {
+//RS             a += m[k * n + row] * v[k];
+//RS         }
+//RS         r[row] = a;
+//RS     }
+//RS     r
+//RS }
+//RS 
+//RS 
+//RS fn list_to_lanes(args: &[CtValue], n: usize, span: Span) -> Result<Vec<f64>, Diagnostic> {
+//RS     let list = match args.first() {
+//RS         Some(CtValue::List(items)) => items,
+//RS         _ => return Err(unsupported("from_array expects a fixed list", span)),
+//RS     };
+//RS     if list.len() != n {
+//RS         return Err(unsupported(
+//RS             &format!("from_array expects {n} elements"),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     list.iter().map(|v| as_lane(v, span)).collect()
+//RS }
+//RS 
+//RS fn list_to_int_lanes(
+//RS     args: &[CtValue],
+//RS     n: usize,
+//RS     name: &str,
+//RS     span: Span,
+//RS ) -> Result<Vec<i64>, Diagnostic> {
+//RS     let list = match args.first() {
+//RS         Some(CtValue::List(items)) => items,
+//RS         _ => return Err(unsupported("from_array expects a fixed list", span)),
+//RS     };
+//RS     if list.len() != n {
+//RS         return Err(unsupported(
+//RS             &format!("from_array expects {n} elements"),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     list.iter()
+//RS         .map(|value| as_int_lane(value, name, span))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn apply_geometry_method(
+//RS     recv: &CtValue,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let CtValue::Struct { type_name, .. } = recv else {
+//RS         return Err(unsupported("malformed geometry carrier", span));
+//RS     };
+//RS     if matches!(type_name.as_str(), "Transform" | "Transform2") {
+//RS         let (name, matrix, from, to) = geometry_transform(recv, span)?;
+//RS         match (method, args) {
+//RS             ("then", [next]) => {
+//RS                 let (_, next_matrix, next_from, next_to) = geometry_transform(next, span)?;
+//RS                 if to != 0 && next_from != 0 && to != next_from {
+//RS                     return Ok(geometry_failed(
+//RS                         "transform composition has mismatched frame identity",
+//RS                     ));
+//RS                 }
+//RS                 let composed = [
+//RS                     next_matrix[0] * matrix[0] + next_matrix[1] * matrix[2],
+//RS                     next_matrix[0] * matrix[1] + next_matrix[1] * matrix[3],
+//RS                     next_matrix[2] * matrix[0] + next_matrix[3] * matrix[2],
+//RS                     next_matrix[2] * matrix[1] + next_matrix[3] * matrix[3],
+//RS                     next_matrix[0] * matrix[4] + next_matrix[1] * matrix[5] + next_matrix[4],
+//RS                     next_matrix[2] * matrix[4] + next_matrix[3] * matrix[5] + next_matrix[5],
+//RS                 ];
+//RS                 Ok(CtValue::Present(Box::new(geometry_transform_value(
+//RS                     &name, composed, from, next_to,
+//RS                 ))))
+//RS             }
+//RS             ("inverse", []) => {
+//RS                 let det = matrix[0] * matrix[3] - matrix[1] * matrix[2];
+//RS                 if !det.is_finite() || det.abs() <= f64::EPSILON {
+//RS                     return Ok(geometry_failed("transform is singular and has no inverse"));
+//RS                 }
+//RS                 let inv_det = 1.0 / det;
+//RS                 let inverse = [
+//RS                     matrix[3] * inv_det,
+//RS                     -matrix[1] * inv_det,
+//RS                     -matrix[2] * inv_det,
+//RS                     matrix[0] * inv_det,
+//RS                     (matrix[1] * matrix[5] - matrix[3] * matrix[4]) * inv_det,
+//RS                     (matrix[2] * matrix[4] - matrix[0] * matrix[5]) * inv_det,
+//RS                 ];
+//RS                 Ok(CtValue::Present(Box::new(geometry_transform_value(
+//RS                     &name, inverse, to, from,
+//RS                 ))))
+//RS             }
+//RS             ("point", [point]) => {
+//RS                 let (_, x, y, frame) = geometry_coord(point, span)?;
+//RS                 if frame != 0 && frame != from {
+//RS                     return Ok(geometry_failed(
+//RS                         "coordinate point belongs to a stale frame",
+//RS                     ));
+//RS                 }
+//RS                 Ok(CtValue::Present(Box::new(geometry_coord_value(
+//RS                     "Point2",
+//RS                     matrix[0] * x + matrix[1] * y + matrix[4],
+//RS                     matrix[2] * x + matrix[3] * y + matrix[5],
+//RS                     to,
+//RS                 ))))
+//RS             }
+//RS             ("point_at_depth", [point, depth]) => {
+//RS                 let depth = geometry_float(depth, "perspective depth", span)?;
+//RS                 if !depth.is_finite() {
+//RS                     return Ok(geometry_failed("perspective depth must be finite"));
+//RS                 }
+//RS                 let (_, x, y, frame) = geometry_coord(point, span)?;
+//RS                 if frame != 0 && frame != from {
+//RS                     return Ok(geometry_failed(
+//RS                         "coordinate point belongs to a stale frame",
+//RS                     ));
+//RS                 }
+//RS                 Ok(CtValue::Present(Box::new(geometry_coord_value(
+//RS                     "Point2",
+//RS                     matrix[0] * x + matrix[1] * y + matrix[4] + matrix[0] * depth,
+//RS                     matrix[2] * x + matrix[3] * y + matrix[5] + matrix[2] * depth,
+//RS                     to,
+//RS                 ))))
+//RS             }
+//RS             ("ray", [point]) => {
+//RS                 let (_, x, y, frame) = geometry_coord(point, span)?;
+//RS                 if frame != 0 && frame != from {
+//RS                     return Ok(geometry_failed(
+//RS                         "coordinate point belongs to a stale frame",
+//RS                     ));
+//RS                 }
+//RS                 let origin = geometry_coord_value(
+//RS                     "Point2",
+//RS                     matrix[0] * x + matrix[1] * y + matrix[4],
+//RS                     matrix[2] * x + matrix[3] * y + matrix[5],
+//RS                     to,
+//RS                 );
+//RS                 let direction = geometry_coord_value("Delta2", matrix[0], matrix[2], to);
+//RS                 Ok(CtValue::Present(Box::new(CtValue::Struct {
+//RS                     type_name: "Ray2".to_string(),
+//RS                     fields: vec![
+//RS                         ("origin".to_string(), origin),
+//RS                         ("direction".to_string(), direction),
+//RS                     ],
+//RS                 })))
+//RS             }
+//RS             _ => Err(unsupported(
+//RS                 &format!("`{name}.{method}` has no geometry method"),
+//RS                 span,
+//RS             )),
+//RS         }
+//RS     } else if geometry_is_point(type_name) || geometry_is_delta(type_name) {
+//RS         let (_, x, y, frame) = geometry_coord(recv, span)?;
+//RS         let [other] = args else {
+//RS             return Err(unsupported(
+//RS                 &format!("`{type_name}.{method}` expects one coordinate"),
+//RS                 span,
+//RS             ));
+//RS         };
+//RS         let (other_name, ox, oy, other_frame) = geometry_coord(other, span)?;
+//RS         let dynamic = matches!(type_name.as_str(), "Point2" | "Delta2")
+//RS             || matches!(other_name.as_str(), "Point2" | "Delta2");
+//RS         if dynamic
+//RS             && frame != 0
+//RS             && other_frame != 0
+//RS             && frame != other_frame
+//RS         {
+//RS             return Ok(geometry_failed(
+//RS                 "coordinate values belong to different frames",
+//RS             ));
+//RS         }
+//RS         let frame = if frame != 0 { frame } else { other_frame };
+//RS         let output_name = if method == "add" && geometry_is_point(type_name) {
+//RS             geometry_point_result_name(type_name, dynamic)
+//RS         } else if method == "sub"
+//RS             && geometry_is_point(type_name)
+//RS             && geometry_is_point(&other_name)
+//RS         {
+//RS             geometry_delta_result_name(type_name, dynamic)
+//RS         } else if geometry_is_delta(type_name) {
+//RS             geometry_delta_result_name(type_name, dynamic)
+//RS         } else {
+//RS             type_name
+//RS         };
+//RS         let value = match method {
+//RS             "add" if (geometry_is_point(type_name) && geometry_is_delta(&other_name))
+//RS                 || (geometry_is_delta(type_name) && geometry_is_delta(&other_name)) =>
+//RS             {
+//RS                 geometry_coord_value(output_name, x + ox, y + oy, frame)
+//RS             }
+//RS             "sub" if (geometry_is_point(type_name)
+//RS                 && (geometry_is_delta(&other_name) || geometry_is_point(&other_name)))
+//RS                 || (geometry_is_delta(type_name) && geometry_is_delta(&other_name)) =>
+//RS             {
+//RS                 geometry_coord_value(output_name, x - ox, y - oy, frame)
+//RS             }
+//RS             _ => {
+//RS                 return Err(unsupported(
+//RS                     &format!("`{type_name}.{method}` has no geometry method"),
+//RS                     span,
+//RS                 ))
+//RS             }
+//RS         };
+//RS         Ok(if dynamic {
+//RS             CtValue::Present(Box::new(value))
+//RS         } else {
+//RS             value
+//RS         })
+//RS     } else {
+//RS         Err(unsupported(
+//RS             &format!("`{type_name}.{method}` has no geometry method"),
+//RS             span,
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn apply_static(
+//RS     type_name: &str,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if let Some(result) = apply_geometry_static(type_name, method, &args, span) {
+//RS         return Some(result);
+//RS     }
+//RS     if !is_math_type(type_name) {
+//RS         return None;
+//RS     }
+//RS     let n = arity(type_name)?;
+//RS     Some(match method {
+//RS         "new" => {
+//RS             if args.len() != n {
+//RS                 return Some(Err(unsupported(
+//RS                     &format!("`{type_name}.new` needs {n} lane arguments"),
+//RS                     span,
+//RS                 )));
+//RS             }
+//RS             if integer_lane_layout(type_name).is_some() {
+//RS                 list_to_int_lanes(&args, n, type_name, span)
+//RS                     .map(|lanes| from_int_lanes(type_name, &lanes))
+//RS             } else {
+//RS                 list_to_lanes(&args, n, span).map(|lanes| {
+//RS                     let lanes = lanes
+//RS                         .into_iter()
+//RS                         .map(|v| narrow_lane(type_name, v))
+//RS                         .collect::<Vec<_>>();
+//RS                     from_lanes(type_name, &lanes)
+//RS                 })
+//RS             }
+//RS         }
+//RS         "splat" => {
+//RS             let Some(arg) = args.first() else {
+//RS                 return Some(Err(unsupported(
+//RS                     &format!("`{type_name}.splat` needs one argument"),
+//RS                     span,
+//RS                 )));
+//RS             };
+//RS             if integer_lane_layout(type_name).is_some() {
+//RS                 match as_int_lane(arg, type_name, span) {
+//RS                     Ok(v) => Ok(from_int_lanes(
+//RS                         type_name,
+//RS                         &simd_lanes::jet_simd_splat_slice(v, n),
+//RS                     )),
+//RS                     Err(e) => Err(e),
+//RS                 }
+//RS             } else {
+//RS                 match as_lane(arg, span) {
+//RS                     Ok(v) => {
+//RS                         let v = narrow_lane(type_name, v);
+//RS                         Ok(from_lanes(
+//RS                             type_name,
+//RS                             &simd_lanes::jet_simd_splat_slice(v, n),
+//RS                         ))
+//RS                     }
+//RS                     Err(e) => Err(e),
+//RS                 }
+//RS             }
+//RS         }
+//RS         "from_array" => {
+//RS             if integer_lane_layout(type_name).is_some() {
+//RS                 list_to_int_lanes(&args, n, type_name, span)
+//RS                     .map(|lanes| from_int_lanes(type_name, &lanes))
+//RS             } else {
+//RS                 list_to_lanes(&args, n, span).map(|lanes| {
+//RS                     let lanes = lanes
+//RS                         .into_iter()
+//RS                         .map(|v| narrow_lane(type_name, v))
+//RS                         .collect::<Vec<_>>();
+//RS                     from_lanes(type_name, &lanes)
+//RS                 })
+//RS             }
+//RS         }
+//RS         _ => Err(unsupported(&format!("`{type_name}.{method}`"), span)),
+//RS     })
+//RS }
+//RS 
+//RS fn to_array_list(type_name: &str, lanes: &[f64]) -> CtValue {
+//RS     CtValue::List(lanes.iter().map(|n| lane_value(type_name, *n)).collect())
+//RS }
+//RS 
+//RS fn to_int_array_list(type_name: &str, lanes: &[i64]) -> CtValue {
+//RS     let (signed, bits) = integer_lane_layout(type_name).expect("integer SIMD lane");
+//RS     CtValue::List(
+//RS         lanes
+//RS             .iter()
+//RS             .map(|n| CtValue::Int(integer_narrow(integer_widen(*n, signed), signed, bits)))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS fn reduce_op(name: &str, lanes: &[f64], op: &str) -> Option<f64> {
+//RS     let op = simd_reduce_op(op)?;
+//RS     if is_f32_lanes(name) {
+//RS         let lanes = lanes.iter().map(|value| *value as f32).collect::<Vec<_>>();
+//RS         return simd_lanes::jet_simd_reduce_slice(&lanes, op).map(f64::from);
+//RS     }
+//RS     simd_lanes::jet_simd_reduce_slice(lanes, op)
+//RS }
+//RS 
+//RS fn reduce_int_op(name: &str, lanes: &[i64], op: &str) -> Option<i64> {
+//RS     let (signed, bits) = integer_lane_layout(name)?;
+//RS     simd_lanes::jet_simd_integer_reduce(lanes, simd_reduce_op(op)?, signed, bits)
+//RS }
+//RS 
+//RS fn reduce_value(name: &str, lanes: &[f64], int_lanes: Option<&[i64]>, op: &str) -> Option<CtValue> {
+//RS     if let Some(int_lanes) = int_lanes {
+//RS         return reduce_int_op(name, int_lanes, op).map(CtValue::Int);
+//RS     }
+//RS     reduce_op(name, lanes, op).map(|value| lane_value(name, value))
+//RS }
+//RS 
+//RS pub(super) fn apply_method(
+//RS     recv: &CtValue,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if is_geometry_value(recv) {
+//RS         return Some(apply_geometry_method(recv, method, args, span));
+//RS     }
+//RS     let (name, vals) = lanes(recv)?;
+//RS     let int_vals = integer_lanes(recv).map(|(_, values)| values);
+//RS     Some(match (method, args.len()) {
+//RS         ("to_array", 0) => Ok(int_vals.as_deref().map_or_else(
+//RS             || to_array_list(name, &vals),
+//RS             |values| to_int_array_list(name, values),
+//RS         )),
+//RS         ("sum", 0) => Ok(reduce_value(name, &vals, int_vals.as_deref(), "sum")
+//RS             .unwrap_or_else(|| lane_value(name, 0.0))),
+//RS         // AOT exposes product/min/max as named methods; same reduce_op as
+//RS         // `reduce(.Mul/.Min/.Max/.Avg)` so comptime/REPL stay byte-identical.
+//RS         ("product", 0) => Ok(reduce_value(name, &vals, int_vals.as_deref(), "product")
+//RS             .unwrap_or_else(|| lane_value(name, 0.0))),
+//RS         ("min", 0) => Ok(reduce_value(name, &vals, int_vals.as_deref(), "Min")
+//RS             .unwrap_or_else(|| lane_value(name, 0.0))),
+//RS         ("max", 0) => Ok(reduce_value(name, &vals, int_vals.as_deref(), "Max")
+//RS             .unwrap_or_else(|| lane_value(name, 0.0))),
+//RS         ("reduce", 1) => {
+//RS             let op = match &args[0] {
+//RS                 CtValue::Enum { variant, .. } => variant.as_str(),
+//RS                 CtValue::Str(s) => s.as_str(),
+//RS                 _ => {
+//RS                     return Some(Err(unsupported(
+//RS                         "reduce expects .Add/.Mul/.Min/.Max/.Avg",
+//RS                         span,
+//RS                     )))
+//RS                 }
+//RS             };
+//RS             match reduce_value(name, &vals, int_vals.as_deref(), op) {
+//RS                 Some(value) => Ok(value),
+//RS                 None => Err(unsupported(&format!("reduce({op})"), span)),
+//RS             }
+//RS         }
+//RS         ("dot", 1) => {
+//RS             let Some((_, other)) = lanes(&args[0]) else {
+//RS                 return Some(Err(unsupported("dot argument", span)));
+//RS             };
+//RS             if other.len() != vals.len() {
+//RS                 return Some(Err(unsupported("dot size mismatch", span)));
+//RS             }
+//RS             let mut acc = 0.0f64;
+//RS             for (a, b) in vals.iter().zip(other.iter()) {
+//RS                 acc += a * b;
+//RS             }
+//RS             Ok(CtValue::Float(CtFloat::f64(acc)))
+//RS         }
+//RS         ("cross", 1) if name == Syntax::LINALG_VEC3_TYPE => {
+//RS             let Some((_, o)) = lanes(&args[0]) else {
+//RS                 return Some(Err(unsupported("cross argument", span)));
+//RS             };
+//RS             if o.len() != 3 {
+//RS                 return Some(Err(unsupported("cross needs Vec3", span)));
+//RS             }
+//RS             Ok(from_lanes(
+//RS                 name,
+//RS                 &[
+//RS                     vals[1] * o[2] - vals[2] * o[1],
+//RS                     vals[2] * o[0] - vals[0] * o[2],
+//RS                     vals[0] * o[1] - vals[1] * o[0],
+//RS                 ],
+//RS             ))
+//RS         }
+//RS         ("length", 0) => {
+//RS             let acc: f64 = vals.iter().map(|n| n * n).sum();
+//RS             Ok(CtValue::Float(CtFloat::f64(acc.sqrt())))
+//RS         }
+//RS         ("normalize", 0) => {
+//RS             let len: f64 = vals.iter().map(|n| n * n).sum::<f64>().sqrt();
+//RS             if len == 0.0 {
+//RS                 Ok(from_lanes(name, &vals))
+//RS             } else {
+//RS                 Ok(from_lanes(
+//RS                     name,
+//RS                     &vals.iter().map(|n| n / len).collect::<Vec<_>>(),
+//RS                 ))
+//RS             }
+//RS         }
+//RS         ("matmul", 1) => {
+//RS             let Some((on, other)) = lanes(&args[0]) else {
+//RS                 return Some(Err(unsupported("matmul argument", span)));
+//RS             };
+//RS             if on != name {
+//RS                 return Some(Err(unsupported("matmul type mismatch", span)));
+//RS             }
+//RS             if !(name == Syntax::LINALG_MAT3_TYPE || name == Syntax::LINALG_MAT4_TYPE) {
+//RS                 return Some(Err(unsupported("matmul on a matrix", span)));
+//RS             }
+//RS             let n = if name == Syntax::LINALG_MAT3_TYPE {
+//RS                 3
+//RS             } else {
+//RS                 4
+//RS             };
+//RS             Ok(from_lanes(name, &mat_mul(n, &vals, &other)))
+//RS         }
+//RS         ("transform", 1) => {
+//RS             let (n, expect_v) = if name == Syntax::LINALG_MAT3_TYPE {
+//RS                 (3, Syntax::LINALG_VEC3_TYPE)
+//RS             } else if name == Syntax::LINALG_MAT4_TYPE {
+//RS                 (4, Syntax::LINALG_VEC4_TYPE)
+//RS             } else {
+//RS                 return Some(Err(unsupported("transform on a matrix", span)));
+//RS             };
+//RS             let Some((vn, v)) = lanes(&args[0]) else {
+//RS                 return Some(Err(unsupported("transform argument", span)));
+//RS             };
+//RS             if vn != expect_v {
+//RS                 return Some(Err(unsupported("transform vector type", span)));
+//RS             }
+//RS             Ok(from_lanes(expect_v, &mat_transform(n, &vals, &v)))
+//RS         }
+//RS         ("transpose", 0) => {
+//RS             let n = if name == Syntax::LINALG_MAT3_TYPE {
+//RS                 3
+//RS             } else if name == Syntax::LINALG_MAT4_TYPE {
+//RS                 4
+//RS             } else {
+//RS                 return Some(Err(unsupported("transpose on a matrix", span)));
+//RS             };
+//RS             let mut r = vec![0.0f64; n * n];
+//RS             for c in 0..n {
+//RS                 for row in 0..n {
+//RS                     r[c * n + row] = vals[row * n + c];
+//RS                 }
+//RS             }
+//RS             Ok(from_lanes(name, &r))
+//RS         }
+//RS         _ => Err(unsupported(&format!("`{name}.{method}`"), span)),
+//RS     })
+//RS }
+//RS 
+//RS /// D-NUMOPS1: `wrapping`/`saturating`/`checked` over a single integer binary op.
+//RS pub fn overflow_opt(
+//RS     mode: &str,
+//RS     op: BinOp,
+//RS     left: i64,
+//RS     right: i64,
+//RS     signed: bool,
+//RS     bits: u8,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let fixed_op = if mode == "rotate_left" {
+//RS         fixed_arithmetic::JET_FIXED_OP_ROTATE_LEFT
+//RS     } else if mode == "rotate_right" {
+//RS         fixed_arithmetic::JET_FIXED_OP_ROTATE_RIGHT
+//RS     } else {
+//RS         fixed_op(op).ok_or_else(|| overflow(mode, span))?
+//RS     };
+//RS     let fixed_mode = match mode {
+//RS         Syntax::BUILTIN_WRAPPING => fixed_arithmetic::JET_FIXED_MODE_WRAPPING,
+//RS         Syntax::BUILTIN_SATURATING => fixed_arithmetic::JET_FIXED_MODE_SATURATING,
+//RS         Syntax::BUILTIN_CHECKED => fixed_arithmetic::JET_FIXED_MODE_CHECKED,
+//RS         "checked_policy" => fixed_arithmetic::JET_FIXED_MODE_TRAP,
+//RS         "rotate_left" | "rotate_right" => fixed_arithmetic::JET_FIXED_MODE_WRAPPING,
+//RS         _ => return Err(overflow(mode, span)),
+//RS     };
+//RS     fixed_result(
+//RS         fixed_arithmetic::jet_fixed_arithmetic(
+//RS             left,
+//RS             right as i128,
+//RS             fixed_op,
+//RS             fixed_mode,
+//RS             signed,
+//RS             bits,
+//RS             true,
+//RS         ),
+//RS         signed,
+//RS         bits,
+//RS         mode == Syntax::BUILTIN_CHECKED,
+//RS         span,
+//RS     )
+//RS }
+// END-PORT-PENDING 0588 crates/jet-comptime/src/Comptime/MathLayout.rs:1-1310
+

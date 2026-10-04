@@ -1,0 +1,1647 @@
+// PORT-PENDING 0996 tests-cli-parts-expand: tests/cli_parts/expand.rs:1-1643
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use jet_foundation::DataTree::DataTree;
+//RS 
+//RS fn normalize_expand_json(text: &str) -> DataTree {
+//RS     fn scrub(node: &mut DataTree) {
+//RS         match node {
+//RS             DataTree::Object(fields) => {
+//RS                 for (key, value) in fields {
+//RS                     if key == "elapsed_ms" {
+//RS                         *value = DataTree::Int(0);
+//RS                     } else {
+//RS                         scrub(value);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             DataTree::Array(values) => {
+//RS                 for value in values {
+//RS                     scrub(value);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     let mut value = parse_json(text).expect("expand JSON must parse");
+//RS     scrub(&mut value);
+//RS     value
+//RS }
+//RS 
+//RS fn stable_expand_text(text: &str) -> String {
+//RS     text.lines()
+//RS         .filter(|line| !line.starts_with("check: ") && !line.starts_with("proof: "))
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n")
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn no_separator_positional_regression() {
+//RS     // Plain positional words with no `--` still reach the program (regression
+//RS     // guard). `jet run file.jet hello` → len == 2.
+//RS     let p = args_fixture(&line!().to_string());
+//RS     let out = Command::new(jet())
+//RS         .args(["run", "--profile=debug", p.to_str().unwrap(), "hello"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         stdout.trim() == "2",
+//RS         "expected 2 args (argv[0] + hello), got: {stdout}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn unknown_flag_before_separator_is_e2102_with_passthrough_hint() {
+//RS     // `jet run file.jet --port` (no `--`) — unknown flag before `--` is E2102
+//RS     // and the Fix line teaches the `--` form (D-CLI1=A).
+//RS     let p = args_fixture(&line!().to_string());
+//RS     let out = Command::new(jet())
+//RS         .args(["run", p.to_str().unwrap(), "--port"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(2),
+//RS         "unknown flag before -- should exit 2"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("E2102"), "should cite E2102:\n{stderr}");
+//RS     assert!(
+//RS         stderr.contains("--"),
+//RS         "Fix should mention `--` separator:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn profile_unknown_name_emits_e1219() {
+//RS     // D-BUILDPROFILE1: `--profile=<unknown>` with no package.jet defining that name
+//RS     // must emit E1219 and exit 1 (user error).
+//RS     let p = std::env::temp_dir().join("jet_cli_profile_test.jet");
+//RS     fs::write(&p, "fn run() { print(\"ok\") }\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .args(["build", p.to_str().unwrap(), "--profile=staging"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(1),
+//RS         "unknown --profile should exit 1 (user error)"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1219"),
+//RS         "unknown profile should cite E1219:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("staging"),
+//RS         "E1219 should name the unknown profile:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn default_run_and_dev_route_to_fast_production_lens() {
+//RS     let scratch = common::Scratch::new("default_profile_routing");
+//RS     fs::write(
+//RS         scratch.join("package.jet"),
+//RS         r#"name: "default-profile"
+//RS version: "0.1.0"
+//RS authority: {
+//RS     holds: { allow: [IO] }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     fs::write(
+//RS         scratch.join("main.jet"),
+//RS         "fn run() { print(\"default-profile\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     for args in [
+//RS         vec!["run", "--trace-tiers", "main.jet"],
+//RS         vec!["dev", "--watch=off", "--trace-tiers", "main.jet"],
+//RS     ] {
+//RS         let output = Command::new(jet())
+//RS             .args(&args)
+//RS             .current_dir(&scratch.path)
+//RS             .env("JET_STORE_DIR", scratch.join("store"))
+//RS             .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         let trace = String::from_utf8_lossy(&output.stderr);
+//RS         assert_eq!(
+//RS             output.status.code(),
+//RS             Some(0),
+//RS             "{} failed:\nstdout: {}\nstderr: {trace}",
+//RS             args[0],
+//RS             String::from_utf8_lossy(&output.stdout)
+//RS         );
+//RS         assert_eq!(output.stdout, b"default-profile\n", "{} output", args[0]);
+//RS         assert!(
+//RS             trace.lines().any(|line| line.contains("tier1 native")),
+//RS             "{} did not use the default fast production lens:\n{trace}",
+//RS             args[0]
+//RS         );
+//RS         assert!(
+//RS             !trace.contains("tier0 interp"),
+//RS             "{} default route deoptimized:\n{trace}",
+//RS             args[0]
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn profile_release_flag_is_accepted() {
+//RS     // `--release` is valid (blessed profile) and must not emit E1219.
+//RS     let p = std::env::temp_dir().join("jet_cli_release_test.jet");
+//RS     fs::write(&p, "fn run() { print(\"ok\") }\n").unwrap();
+//RS     // We can't guarantee rustc is in PATH for the binary build, but `jet check`
+//RS     // doesn't accept --release yet, so test that `jet build --release` at least
+//RS     // doesn't emit E1219. We check that the exit code is NOT 1-with-E1219.
+//RS     let out = Command::new(jet())
+//RS         .args(["build", p.to_str().unwrap(), "--release"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         !stderr.contains("E1219"),
+//RS         "--release must not emit E1219 (it's a blessed profile):\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn profile_ci_flag_is_accepted() {
+//RS     let p = std::env::temp_dir().join("jet_cli_ci_test.jet");
+//RS     fs::write(&p, "fn run() { print(\"ok\") }\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .args(["build", p.to_str().unwrap(), "--profile=ci"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         !stderr.contains("E1219"),
+//RS         "--profile=ci must not emit E1219 (it's a blessed profile):\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn profile_custom_name_from_package_jet() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_cli_custom_profile_{}",
+//RS         std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .unwrap()
+//RS             .as_nanos()
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         r#"name: "p"
+//RS version: "0.1.0"
+//RS build: { staging: Build{ optimize: basic } }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let main = dir.join("main.jet");
+//RS     fs::write(&main, "fn run() { print(\"ok\") }\n").unwrap();
+//RS     // Isolated cwd: this fixture's stem is `main` — see `isolated_cwd`. Also
+//RS     // the semantically correct place for `build/` to land, since it's this
+//RS     // fixture's own project directory.
+//RS     let out = Command::new(jet())
+//RS         .args(["build", main.to_str().unwrap(), "--profile=staging"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         !stderr.contains("E1219"),
+//RS         "package.jet-defined profile must resolve:\n{stderr}"
+//RS     );
+//RS }
+//RS #[test]
+//RS fn selected_profile_and_settings_reach_dev_test_and_replay_identity() {
+//RS     let scratch = common::Scratch::new("selected_profile_settings");
+//RS     fs::write(
+//RS         scratch.join("package.jet"),
+//RS         r#"name: "selected-profile-settings"
+//RS version: "0.1.0"
+//RS authority: {
+//RS     holds: { allow: [IO] }
+//RS }
+//RS settings: { marker: String = "package" }
+//RS 
+//RS build: {
+//RS     staging: Build{ optimize: basic, settings: { marker: "profile" } },
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         scratch.join("main.jet"),
+//RS         r#"
+//RS fn dev() {
+//RS     print($build.profile)
+//RS     print($build.settings.marker)
+//RS }
+//RS 
+//RS #Test("selected profile") {
+//RS     assert_eq($build.profile, "staging")
+//RS }
+//RS 
+//RS #Test("selected setting") {
+//RS     assert_eq($build.settings.marker, "cli")
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let dev = Command::new(jet())
+//RS         .args([
+//RS             "dev",
+//RS             "main.jet",
+//RS             "--profile=staging",
+//RS             "--small",
+//RS             "--set",
+//RS             "marker=cli",
+//RS             "--watch=off",
+//RS         ])
+//RS         .current_dir(&scratch.path)
+//RS         .env("JET_STORE_DIR", scratch.join("store"))
+//RS         .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         dev.status.code(),
+//RS         Some(0),
+//RS         "selected dev profile/settings failed:\n{}",
+//RS         String::from_utf8_lossy(&dev.stderr)
+//RS     );
+//RS     assert_eq!(dev.stdout, b"staging\ncli\n");
+//RS 
+//RS     let run_test = |record: &str, setting: &str, filter: Option<&str>| {
+//RS         let setting_arg = format!("marker={setting}");
+//RS         let record_arg = format!("--record={record}");
+//RS         let mut command = Command::new(jet());
+//RS         command
+//RS             .args([
+//RS                 "test",
+//RS                 "main.jet",
+//RS                 "--profile=staging",
+//RS                 "--set",
+//RS             ])
+//RS             .arg(&setting_arg)
+//RS             .args(["--serial", "--fresh", "--capture=all"])
+//RS             .arg(&record_arg)
+//RS             .current_dir(&scratch.path)
+//RS             .env("JET_STORE_DIR", scratch.join("store"))
+//RS             .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+//RS             .env("NO_COLOR", "1");
+//RS         if let Some(filter) = filter {
+//RS             command.arg("--filter").arg(filter);
+//RS         }
+//RS         command.output().unwrap()
+//RS     };
+//RS 
+//RS     let selected = run_test("selected-profile-settings", "cli", None);
+//RS     assert_eq!(
+//RS         selected.status.code(),
+//RS         Some(0),
+//RS         "selected test profile/settings failed:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&selected.stdout),
+//RS         String::from_utf8_lossy(&selected.stderr)
+//RS     );
+//RS     let selected_artifact =
+//RS         fs::read(scratch.join(".jet/replays/selected-profile-settings.jetproof-replay"))
+//RS             .expect("selected test replay artifact");
+//RS     let selected_text = String::from_utf8_lossy(&selected_artifact);
+//RS     assert!(
+//RS         selected_text.contains(r#""profile":"staging""#),
+//RS         "test replay lost selected profile: {selected_text}"
+//RS     );
+//RS     let selected_mir = selected_text
+//RS         .split(r#""semantic_mir_hash":""#)
+//RS         .nth(1)
+//RS         .and_then(|tail| tail.split('"').next())
+//RS         .expect("selected test replay MIR identity");
+//RS 
+//RS     let alternate = run_test(
+//RS         "selected-profile-settings-alternate",
+//RS         "alternate",
+//RS         Some("selected profile"),
+//RS     );
+//RS     assert_eq!(
+//RS         alternate.status.code(),
+//RS         Some(0),
+//RS         "alternate test profile/settings failed:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&alternate.stdout),
+//RS         String::from_utf8_lossy(&alternate.stderr)
+//RS     );
+//RS     let alternate_artifact =
+//RS         fs::read(scratch.join(".jet/replays/selected-profile-settings-alternate.jetproof-replay"))
+//RS             .expect("alternate test replay artifact");
+//RS     let alternate_text = String::from_utf8_lossy(&alternate_artifact);
+//RS     let alternate_mir = alternate_text
+//RS         .split(r#""semantic_mir_hash":""#)
+//RS         .nth(1)
+//RS         .and_then(|tail| tail.split('"').next())
+//RS         .expect("alternate test replay MIR identity");
+//RS     assert_ne!(
+//RS         selected_mir, alternate_mir,
+//RS         "test replay identity must include --set's checked value"
+//RS     );
+//RS 
+//RS     let coverage = Command::new(jet())
+//RS         .args([
+//RS             "test",
+//RS             "main.jet",
+//RS             "--profile=staging",
+//RS             "--set",
+//RS             "marker=cli",
+//RS             "--coverage",
+//RS             "--serial",
+//RS             "--fresh",
+//RS         ])
+//RS         .current_dir(&scratch.path)
+//RS         .env("JET_STORE_DIR", scratch.join("store"))
+//RS         .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         coverage.status.code(),
+//RS         Some(0),
+//RS         "coverage test profile/settings failed:\nstdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&coverage.stdout),
+//RS         String::from_utf8_lossy(&coverage.stderr)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_inline_golden() {
+//RS     let p = expand_fixture();
+//RS     let out = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "inline"])
+//RS         .arg(&p)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "expand --facts inline should exit 0:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let text = scrub_fixture(&String::from_utf8_lossy(&out.stdout), &p);
+//RS     assert!(text.contains("inline —"), "{text}");
+//RS     assert!(text.contains("Meters.plus"), "{text}");
+//RS     assert!(text.contains("square"), "{text}");
+//RS 
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_callable_signature_uses_one_checked_fact_document() {
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/callable/callable_policies.jet");
+//RS     let human = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "callable-signature"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         human.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&human.stderr)
+//RS     );
+//RS     let human_text = scrub_fixture(&String::from_utf8_lossy(&human.stdout), &fixture);
+//RS     assert!(human_text.contains("load_user [fn:"), "{human_text}");
+//RS     assert!(
+//RS         human_text.contains("label{\"user\"}: String"),
+//RS         "{human_text}"
+//RS     );
+//RS     assert!(
+//RS         !human_text.contains("label: label{\"user\"}: String"),
+//RS         "{human_text}"
+//RS     );
+//RS     assert!(
+//RS         human_text.contains("policies=[trace(\"users.load\")]"),
+//RS         "{human_text}"
+//RS     );
+//RS 
+//RS     assert!(
+//RS         human_text.contains("failure=String")
+//RS             && human_text.contains("implicit default !Err"),
+//RS         "{human_text}"
+//RS     );
+//RS 
+//RS     let json = Command::new(jet())
+//RS         .args([
+//RS             "inspect",
+//RS             "expand",
+//RS             "--facts",
+//RS             "callable-signature",
+//RS             "--json",
+//RS         ])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         json.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&json.stderr)
+//RS     );
+//RS     let json_text = scrub_fixture(&String::from_utf8_lossy(&json.stdout), &fixture);
+//RS     assert!(parse_json(&json_text).is_ok(), "{json_text}");
+//RS     assert!(json_text.contains("\"selection\":\"callable-signature\""));
+//RS     assert!(json_text.contains("\"policies\":[\"trace(\\\"users.load\\\")\"]"));
+//RS     assert!(json_text.contains("\"default\":\"\\\"user\\\"\""));
+//RS     assert!(json_text.contains("\"failure_contract\""));
+//RS     assert!(json_text.contains("\"failure_source\":\"implicit default !Err\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_callable_signature_shows_default_and_explicit_failure_routes() {
+//RS     let scratch = common::Scratch::new("expand_failure_contracts");
+//RS     let path = scratch.join("main.jet");
+//RS     fs::write(
+//RS         &path,
+//RS         r#"#Error
+//RS enum Problem { Bad }
+//RS fn default_helper() -> Int { return 1 }
+//RS fn explicit_helper() -> Int Problem! { return Ok(1) }
+//RS fn run() {}
+//RS "#,
+//RS 
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "callable-signature"])
+//RS         .arg(&path)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let text = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(text.contains("default_helper"), "{text}");
+//RS     assert!(text.contains("implicit default !Err"), "{text}");
+//RS     assert!(text.contains("explicit_helper"), "{text}");
+//RS     assert!(text.contains("explicit !Problem"), "{text}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_origin_projects_the_folded_origin_info_fact() {
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/tooling/provenance_track.jet");
+//RS     let out = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "origin"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let text = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(text.contains("speed.$origin"), "{text}");
+//RS     assert!(text.contains("OriginInfo?"), "{text}");
+//RS     assert!(text.contains("tracked: true"), "{text}");
+//RS 
+//RS     let json = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "origin", "--json"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         json.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&json.stderr)
+//RS     );
+//RS     let json_text = String::from_utf8_lossy(&json.stdout);
+//RS     assert!(parse_json(&json_text).is_ok(), "{json_text}");
+//RS     assert!(json_text.contains("\"fact\":\"@origin\""), "{json_text}");
+//RS     assert!(
+//RS         json_text.contains("\"type\":\"OriginInfo?\""),
+//RS         "{json_text}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_derive_lens_projects_derived_capabilities() {
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/types/auto_derive_policy/run.jet");
+//RS     let human = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "derive"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         human.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&human.stderr)
+//RS     );
+//RS     let human_text = scrub_fixture(&String::from_utf8_lossy(&human.stdout), &fixture);
+//RS     assert!(human_text.contains("derive —"), "{human_text}");
+//RS     assert!(human_text.contains("Visible: Printable"), "{human_text}");
+//RS 
+//RS     let json = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "derive", "--json"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         json.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&json.stderr)
+//RS     );
+//RS     let json_text = scrub_fixture(&String::from_utf8_lossy(&json.stdout), &fixture);
+//RS     assert!(parse_json(&json_text).is_ok(), "{json_text}");
+//RS     assert!(json_text.contains("\"selection\":\"derive\""));
+//RS     assert!(json_text.contains("\"derives\":[\"Printable\"]"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_templates_projects_checked_marker_impl_and_test_items() {
+//RS     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/reflection/derive_loop.jet");
+//RS     let human = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "templates"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         human.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&human.stderr)
+//RS     );
+//RS     let human_text = scrub_fixture(&String::from_utf8_lossy(&human.stdout), &fixture);
+//RS     for fact in [
+//RS         "marker #AddMarkerFields on Point",
+//RS         "impl Point",
+//RS         "field_x",
+//RS         "field_y",
+//RS         "generated",
+//RS         "measurement #Test(case 1)",
+//RS         "measurement #Test(case 2)",
+//RS     ] {
+//RS         assert!(human_text.contains(fact), "missing {fact}: {human_text}");
+//RS     }
+//RS 
+//RS     let json = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "templates", "--json"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         json.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&json.stderr)
+//RS     );
+//RS     let json_text = scrub_fixture(&String::from_utf8_lossy(&json.stdout), &fixture);
+//RS     assert!(parse_json(&json_text).is_ok(), "{json_text}");
+//RS     assert!(json_text.contains("\"selection\":\"templates\""));
+//RS     assert!(json_text.contains("\"origin\":\"prep loop (closed comptime source)\""));
+//RS     assert!(json_text.contains("\"name\":\"case 1\""));
+//RS     assert!(json_text.contains("\"name\":\"case 2\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_json_is_canonical_and_lens_scoped() {
+//RS     let p = expand_fixture();
+//RS     let run = || {
+//RS         Command::new(jet())
+//RS             .args(["inspect", "expand", "--facts", "inline", "--json"])
+//RS             .arg(&p)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS     let first = run();
+//RS     let second = run();
+//RS     assert_eq!(first.status.code(), Some(0));
+//RS     assert_eq!(
+//RS         normalize_expand_json(String::from_utf8_lossy(&first.stdout).as_ref()),
+//RS         normalize_expand_json(String::from_utf8_lossy(&second.stdout).as_ref()),
+//RS         "expand JSON must be byte-stable apart from elapsed_ms"
+//RS     );
+//RS 
+//RS     let stdout = String::from_utf8_lossy(&first.stdout);
+//RS     assert!(
+//RS         stdout.starts_with('{'),
+//RS         "JSON mode must not print human headers: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains(&format!("\"schema_version\":{}", jet_semindex::SCHEMA_VERSION)),
+//RS         "must reuse semindex schema: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"expand\":{\"selection\":\"inline\""),
+//RS         "missing expand projection: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"contract\":\"#Inline"),
+//RS         "inline facts missing: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"check\":{\"status\":\"passed\""),
+//RS         "check provenance missing: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         !stdout.contains("inline —"),
+//RS         "human lens header leaked into JSON: {stdout}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_layout_human_and_json_are_deterministic() {
+//RS     let fixture = expand_layout_fixture();
+//RS     let run = || {
+//RS         Command::new(jet())
+//RS             .args(["inspect", "expand", "--facts", "layout"])
+//RS             .arg(&fixture)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS     let first = run();
+//RS     let second = run();
+//RS     assert_eq!(first.status.code(), Some(0));
+//RS     assert_eq!(
+//RS         stable_expand_text(&scrub_fixture(
+//RS             &String::from_utf8_lossy(&first.stdout),
+//RS             &fixture,
+//RS         )),
+//RS         stable_expand_text(&scrub_fixture(
+//RS             &String::from_utf8_lossy(&second.stdout),
+//RS             &fixture,
+//RS         )),
+//RS         "layout text must be stable apart from check/proof timing"
+//RS     );
+//RS 
+//RS     let human = scrub_fixture(&String::from_utf8_lossy(&first.stdout), &fixture);
+//RS     assert!(!human.contains('\u{1b}'), "NO_COLOR leaked ANSI: {human:?}");
+//RS     for type_name in ["PlainPacket", "CPacket", "ColumnPacket", "PacketState"] {
+//RS         assert!(
+//RS             human.contains(&format!("{type_name}.$layout")),
+//RS             "{type_name}: {human}"
+//RS         );
+//RS     }
+//RS     assert!(human.contains("PlainPacket.$layout   kind=default size=unknown"));
+//RS     assert!(human.contains("CPacket.$layout   kind=c size=8 alignment=4 stride=8"));
+//RS     assert!(human.contains("fields=[count:U32(offset=0,size=4),flag:U8(offset=4,size=1)]"));
+//RS     assert!(human.contains("ColumnPacket.$layout   kind=columnar size=32 alignment=8 stride=32"));
+//RS     assert!(human.contains("fields=[count:Int(offset=0,size=8),label:String(offset=8,size=24)]"));
+//RS     assert!(human.contains("byte_facts=unavailable") && human.contains("E0959"));
+//RS 
+//RS     let json_run = || {
+//RS         Command::new(jet())
+//RS             .args(["inspect", "expand", "--facts", "layout", "--json"])
+//RS             .arg(&fixture)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS     let json_first = json_run();
+//RS     let json_second = json_run();
+//RS     assert_eq!(json_first.status.code(), Some(0));
+//RS     assert_eq!(
+//RS         normalize_expand_json(String::from_utf8_lossy(&json_first.stdout).as_ref()),
+//RS         normalize_expand_json(String::from_utf8_lossy(&json_second.stdout).as_ref()),
+//RS         "layout JSON must be byte-stable apart from elapsed_ms"
+//RS     );
+//RS 
+//RS     let json = scrub_fixture(&String::from_utf8_lossy(&json_first.stdout), &fixture);
+//RS     assert!(parse_json(&json).is_ok(), "layout JSON must parse: {json}");
+//RS     assert!(json.contains("\"selection\":\"layout\""));
+//RS     assert!(json.contains("\"kind\":\"c\"") && json.contains("\"kind\":\"columnar\""));
+//RS     assert!(json.contains("\"type\":\"PacketState\"") && json.contains("\"size\":null"));
+//RS     assert!(json.contains("\"offset\":null"));
+//RS     assert!(json.contains("\"size\":8") && json.contains("\"offset\":4"));
+//RS     assert!(json.contains("\"byte_facts\":{\"diagnostic\""));
+//RS     assert!(json.contains("\"status\":\"unavailable\""));
+//RS     assert!(json.contains("\"code\":\"E0959\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_effects_and_layout_report_checked_facts() {
+//RS     let fixture = expand_effects_layout_fixture();
+//RS     let effects = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "effects"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(effects.status.code(), Some(0));
+//RS     let effects_human = scrub_fixture(&String::from_utf8_lossy(&effects.stdout), &fixture);
+//RS     assert!(effects_human.contains("audit"), "{effects_human}");
+//RS     // `-[Log.Audit]>` is an upper bound. The pure fixture body resolves to
+//RS     // an empty inferred row; a declaration is not an executed effect.
+//RS     assert!(effects_human.contains("resolved=[]"), "{effects_human}");
+//RS 
+//RS     let layout = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "layout"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(layout.status.code(), Some(0));
+//RS     let layout_human = scrub_fixture(&String::from_utf8_lossy(&layout.stdout), &fixture);
+//RS     assert!(
+//RS         layout_human.contains("AuditPacket.$layout"),
+//RS         "{layout_human}"
+//RS     );
+//RS     assert!(
+//RS         layout_human.contains("byte_facts=unavailable"),
+//RS         "{layout_human}"
+//RS     );
+//RS     assert!(layout_human.contains("[E0959]"), "{layout_human}");
+//RS 
+//RS     let effects_json = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "effects", "--json"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(effects_json.status.code(), Some(0));
+//RS     let effects_json = String::from_utf8_lossy(&effects_json.stdout);
+//RS     assert!(parse_json(&effects_json).is_ok(), "{effects_json}");
+//RS     assert!(effects_json.contains("\"selection\":\"effects\""));
+//RS     assert!(effects_json.contains("\"inferred\":[]"));
+//RS 
+//RS     let layout_json = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "layout", "--json"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(layout_json.status.code(), Some(0));
+//RS     let layout_json = String::from_utf8_lossy(&layout_json.stdout);
+//RS     assert!(parse_json(&layout_json).is_ok(), "{layout_json}");
+//RS     assert!(layout_json.contains("\"selection\":\"layout\""));
+//RS     assert!(layout_json.contains("\"byte_facts\":{\"diagnostic\""));
+//RS     assert!(layout_json.contains("\"status\":\"unavailable\""));
+//RS     assert!(layout_json.contains("\"code\":\"E0959\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_json_bare_projects_every_lens() {
+//RS     let p = expand_fixture();
+//RS     let out = Command::new(jet())
+//RS         .args(["inspect", "expand", "--json"])
+//RS         .arg(&p)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(0));
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         parse_json(&stdout).is_ok(),
+//RS         "bare expand JSON must parse: {stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"selection\":\"all\""), "{stdout}");
+//RS     assert!(stdout.contains("\"name\":\"inline\""), "{stdout}");
+//RS     assert!(stdout.contains("\"name\":\"memory\""), "{stdout}");
+//RS     assert!(stdout.contains("\"name\":\"web\""), "{stdout}");
+//RS     assert!(stdout.contains("\"name\":\"effects\""), "{stdout}");
+//RS     assert!(stdout.contains("\"name\":\"layout\""), "{stdout}");
+//RS     assert!(stdout.contains("\"name\":\"derive\""), "{stdout}");
+//RS     assert!(stdout.contains("\"name\":\"templates\""), "{stdout}");
+//RS     assert!(
+//RS         stdout.contains("\"name\":\"callable-signature\""),
+//RS         "{stdout}"
+//RS     );
+//RS     assert!(
+//RS         !stdout.contains("inline —"),
+//RS         "human output leaked into JSON: {stdout}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_json_selected_empty_and_positions_are_proved() {
+//RS     let fixture = expand_fixture();
+//RS     let empty = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "memory", "--json"])
+//RS         .arg(&fixture)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(empty.status.code(), Some(0));
+//RS     let empty_json = String::from_utf8_lossy(&empty.stdout);
+//RS     assert!(
+//RS         parse_json(&empty_json).is_ok(),
+//RS         "selected empty JSON must parse: {empty_json}"
+//RS     );
+//RS     assert!(empty_json.contains("\"selection\":\"memory\""));
+//RS     assert!(
+//RS         empty_json.contains("\"facts\":[]"),
+//RS         "selected empty lens must be explicit: {empty_json}"
+//RS     );
+//RS 
+//RS     let memory = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "memory", "--json"])
+//RS         .arg(
+//RS             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS                 .join("Examples/features/memory/effect_denials.jet"),
+//RS         )
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(memory.status.code(), Some(0));
+//RS     let memory_json = String::from_utf8_lossy(&memory.stdout);
+//RS     assert!(parse_json(&memory_json).is_ok());
+//RS     assert!(memory_json.contains("\"fact\":\"!Mem.Alloc\""));
+//RS     assert!(
+//RS         memory_json.contains("\"line\":4"),
+//RS         "memory fact location missing: {memory_json}"
+//RS     );
+//RS 
+//RS     let web = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "web", "--json"])
+//RS         .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/web/web_app.jet"))
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(web.status.code(), Some(0));
+//RS     let web_json = String::from_utf8_lossy(&web.stdout);
+//RS     assert!(parse_json(&web_json).is_ok());
+//RS     assert!(web_json.contains("\"kind\":\"web_graph\""));
+//RS     assert!(
+//RS         web_json.contains("\"span\":{"),
+//RS         "web fact positions missing: {web_json}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_json_compile_error_uses_machine_diagnostics() {
+//RS     let p = bad_file(&line!().to_string());
+//RS     let out = Command::new(jet())
+//RS         .args(["inspect", "expand", "--json"])
+//RS         .arg(&p)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stdout.starts_with("{\"schema\":\"jet.status/v1\""),
+//RS         "JSON diagnostic must use jet.status/v1: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"code\":\"E0102\""),
+//RS         "missing registered diagnostic: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         parse_json(&stdout).is_ok(),
+//RS         "diagnostic JSON line must parse: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         !stdout.contains("Error ["),
+//RS         "human diagnostic leaked into JSON: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stderr.is_empty(),
+//RS         "JSON mode should keep stderr quiet: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_json_unknown_lens_uses_machine_diagnostic() {
+//RS     let p = expand_fixture();
+//RS     let out = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "bogus", "--json"])
+//RS         .arg(&p)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         stdout.starts_with("{\"schema\":\"jet.status/v1\""),
+//RS         "{stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"code\":\"E2941\""), "{stdout}");
+//RS     assert!(
+//RS         parse_json(&stdout).is_ok(),
+//RS         "diagnostic JSON line must parse: {stdout}"
+//RS     );
+//RS     assert!(out.stderr.is_empty());
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_all_golden() {
+//RS     let p = expand_fixture();
+//RS     // Bare `jet inspect expand <file>`: every lens, grouped, magic default.
+//RS     let out = Command::new(jet())
+//RS         .args(["inspect", "expand"])
+//RS         .arg(&p)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "bare expand should exit 0:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let text = scrub_fixture(&String::from_utf8_lossy(&out.stdout), &p);
+//RS     for lens in ["inline —", "effects —", "layout —", "callable-signature —"] {
+//RS         assert!(text.contains(lens), "missing {lens}: {text}");
+//RS     }
+//RS     assert!(text.contains("Meters.plus"), "{text}");
+//RS 
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_unknown_lens_golden() {
+//RS     let p = expand_fixture();
+//RS     let out = Command::new(jet())
+//RS         .args(["inspect", "expand", "--facts", "bogus"])
+//RS         .arg(&p)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(1),
+//RS         "unknown lens should exit 1 (USER_ERROR), listing available lenses"
+//RS     );
+//RS     let s = scrub_fixture(&String::from_utf8_lossy(&out.stderr), &p);
+//RS     assert!(s.contains("E2941"), "{s}");
+//RS     assert!(s.contains("Unknown expand lens `bogus`"), "{s}");
+//RS     assert!(s.contains("available lenses:"), "{s}");
+//RS     for lens in ["inline", "layout", "origin", "callable-signature"] {
+//RS         assert!(s.contains(lens), "missing {lens}: {s}");
+//RS     }
+//RS 
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_missing_file_is_user_error() {
+//RS     let out = Command::new(jet())
+//RS         .args(["inspect", "expand"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(1),
+//RS         "missing entry file is USER_ERROR"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("needs an entry file"),
+//RS         "should explain the missing file:\n{}",
+//RS         stderr
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn expand_compile_error_reports_ordinary_diagnostics() {
+//RS     let p = bad_file(&line!().to_string());
+//RS     let out = Command::new(jet())
+//RS         .args(["inspect", "expand"])
+//RS         .arg(&p)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(1),
+//RS         "a program that fails to compile can't print facts (USER_ERROR)"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E0102"),
+//RS         "should render the ordinary front-end diagnostic:\n{}",
+//RS         stderr
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn stale_manifest_name_pack_jet_is_e1226() {
+//RS     let dir = isolated_cwd("stale_pack_jet");
+//RS     fs::write(dir.join("pack.jet"), "name: \"x\"\nversion: \"0.1.0\"\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .arg("add")
+//RS         .arg("dep")
+//RS         .arg("--path")
+//RS         .arg("../dep")
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1226"),
+//RS         "expected E1226 in stderr:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("pack.jet"),
+//RS         "names the found file:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("package.jet"),
+//RS         "names the fix target:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn stale_manifest_name_jet_toml_is_e1226() {
+//RS     let dir = isolated_cwd("stale_jet_toml");
+//RS     fs::write(dir.join("jet.toml"), "").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .arg("build")
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1226"),
+//RS         "expected E1226 in stderr:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("jet.toml"),
+//RS         "names the found file:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn stale_manifest_name_payload_jet_is_e1226() {
+//RS     let dir = isolated_cwd("stale_payload_jet");
+//RS     fs::write(dir.join("payload.jet"), "").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .args(["inspect", "schema"])
+//RS         .arg("status")
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1226"),
+//RS         "expected E1226 in stderr:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("payload.jet"),
+//RS         "names the found file:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS /// `jetpack.toml` is a retired Jetpack config file, not a package manifest;
+//RS /// `jet build` must not mistake it for the E1226 manifest filename family.
+//RS #[test]
+//RS fn jetpack_toml_alone_is_not_e1226() {
+//RS     let dir = isolated_cwd("jetpacktoml_not_stale");
+//RS     fs::write(dir.join("jetpack.toml"), "[repo]\nname = \"x\"\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .arg("build")
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         !stderr.contains("E1226"),
+//RS         "jetpack.toml must not be reported as an E1226 manifest name:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("No file given and no `package.jet` found"),
+//RS         "should fall back to the generic no-manifest message:\n{stderr}"
+//RS 
+//RS     );
+//RS }
+//RS 
+//RS /// D-PLUGIN1=B (c81): a `target: sandbox` package is deny-by-default — its own
+//RS /// code using any effect (here `core.sys`) must fail cleanly at build time
+//RS /// (E1258), not defer to a runtime instantiation failure. This check lives in
+//RS /// the CLI's post-compile effect-budget pass (`Source/CmdCompile.rs`), so it
+//RS /// needs the real subprocess (not the `jet::compile_plugin` library call the
+//RS /// `tests/ui` `@plugin_target` harness drives).
+//RS #[test]
+//RS fn plugin_using_an_effect_is_e1258() {
+//RS     let dir = isolated_cwd("plugin_effect_denied");
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         "use core.sys as env\n\npub fn get_secret() -> Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n\nfn run() { print(get_secret()) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .arg("build")
+//RS         .arg("main.jet")
+//RS         .arg("--target=sandbox")
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1258"),
+//RS         "expected E1258 (plugin capability-denied) in stderr:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("Env"),
+//RS         "should name the offending effect:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS /// Component Model Text lowering allocates guest memory. That internal memory
+//RS /// effect must not be mistaken for a host capability and rejected as E1258.
+//RS #[test]
+//RS fn plugin_text_export_allows_guest_memory_allocation() {
+//RS     let dir = isolated_cwd("plugin_text_memory_allowed");
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         "pub fn echo(value: String) -> String -> ~value\n\nfn run() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .arg("build")
+//RS         .arg("main.jet")
+//RS         .arg("--target=sandbox")
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         !stderr.contains("E1258"),
+//RS         "guest-local Text allocation must not be E1258:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         out.status.success() || stderr.contains("E1259"),
+//RS         "Text sandbox build should succeed or report a missing toolchain, not another error:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS /// D-DEP-WASM1=A (c81): `jet build --target=sandbox` shells out to
+//RS /// `wasm-tools` to lift the rustc-built core wasm module into a Component. A
+//RS /// PATH without `wasm-tools` on it (but with `rustc` still reachable, so the
+//RS /// core-module half of the build succeeds) must fail as a clean E1259, never
+//RS /// a raw "No such file or directory" panic (I2).
+//RS #[test]
+//RS fn plugin_missing_wasm_tools_is_e1259() {
+//RS     let which = |tool: &str| -> Option<String> {
+//RS         Command::new("which")
+//RS             .arg(tool)
+//RS             .output()
+//RS             .ok()
+//RS             .filter(|o| o.status.success())
+//RS             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+//RS     };
+//RS     let (Some(rustc_path), Some(lld_path)) = (which("rustc"), which("lld")) else {
+//RS         eprintln!("note: skipping plugin_missing_wasm_tools_is_e1259 (no `rustc`/`lld` on PATH to re-expose)");
+//RS         return;
+//RS     };
+//RS 
+//RS     let dir = isolated_cwd("plugin_no_wasmtools");
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         "pub fn scale(a: Float, b: Float) -> Float {\n    return a * b\n}\n\nfn run() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     // A minimal PATH exposing only `rustc` + `lld` (via symlinks), so the
+//RS     // core-wasm-module half of the build still works but `wasm-tools`
+//RS     // resolves to nothing.
+//RS     let bin_dir = dir.join("bin");
+//RS     fs::create_dir_all(&bin_dir).unwrap();
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::symlink;
+//RS         let _ = symlink(&rustc_path, bin_dir.join("rustc"));
+//RS         let _ = symlink(&lld_path, bin_dir.join("lld"));
+//RS     }
+//RS 
+//RS     let out = Command::new(jet())
+//RS         .arg("build")
+//RS         .arg("main.jet")
+//RS         .arg("--target=sandbox")
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .env("PATH", &bin_dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1259"),
+//RS         "expected E1259 (missing wasm-tools) in stderr:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("panicked"),
+//RS         "must never panic, only report a clean diagnostic (I2):\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn monorepo_bare_entry_honors_d_ile1_search_order() {
+//RS     let fixture =
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/packages/monorepo");
+//RS     let root = isolated_cwd("monorepo_d_ile1");
+//RS     fs::remove_dir_all(&root).ok();
+//RS     copy_dir_all(&fixture, &root);
+//RS 
+//RS     let run = |dir: &Path, extra_args: &[&str]| -> std::process::Output {
+//RS         Command::new(jet())
+//RS             .arg("run")
+//RS             .args(extra_args)
+//RS             .current_dir(dir)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS     let mut golden = String::new();
+//RS 
+//RS     // 1. Bare `jet run` at the workspace root: both members resolve via
+//RS     //    D-ILE1 (`<package>.jet`, since neither has `run.jet`/`src/run.jet`), so the
+//RS     //    result is the D-CLI-BARE1 ambiguity error naming both.
+//RS     let out = run(&root, &[]);
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(2),
+//RS         "ambiguous bare run is USAGE:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("ambiguous"),
+//RS         "expected the D-CLI-BARE1 ambiguity error:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("hello") && stderr.contains("ranker"),
+//RS         "ambiguity error should list both runnable members by their real package.jet name:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("hello\"") && !stderr.contains("ranker\""),
+//RS         "member names must not carry a stray trailing quote:\n{stderr}"
+//RS     );
+//RS 
+//RS     // 2. `-p hello` picks the member unambiguously and actually runs it.
+//RS     let out = run(&root, &["-p", "hello"]);
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "-p hello should run: stderr={}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     golden.push_str(&String::from_utf8(out.stdout).unwrap());
+//RS 
+//RS     // 3. `-p ranker` likewise.
+//RS     let out = run(&root, &["-p", "ranker"]);
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "-p ranker should run: stderr={}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     golden.push_str(&String::from_utf8(out.stdout).unwrap());
+//RS     // Package workspaces use this dedicated golden path because they are not
+//RS     // single-entry files in `tests/golden.rs`'s example scan.
+//RS     assert_eq!(
+//RS         golden,
+//RS         include_str!("../../Examples/features/expected/packages/monorepo.out"),
+//RS         "monorepo output differs from its golden artifact"
+//RS     );
+//RS 
+//RS     // 4. `cd packages/hello && jet run` (bare, single-package convention):
+//RS     //    the member directory's own `package.jet` names it `hello`, so D-ILE1
+//RS     //    resolves `hello.jet` directly — no workspace ambiguity from inside.
+//RS     let member_dir = root.join("packages/hello");
+//RS     let out = run(&member_dir, &[]);
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "bare run inside a member should run its own entry: stderr={}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&out.stdout).contains("hello from the monorepo"),
+//RS         "stdout: {}",
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS 
+//RS     // 5. Outside any package or workspace, the bare-form usage error is
+//RS     //    unchanged (D-CLI-BARE1: "outside a package the bare form stays the
+//RS     //    current usage error").
+//RS     let outside = isolated_cwd("monorepo_d_ile1_outside");
+//RS     let out = run(&outside, &[]);
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     assert!(
+//RS         stderr.contains("No file given and no `package.jet` found"),
+//RS         "outside-package bare error text must stay the current usage error:\n{stderr}"
+//RS 
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn explicit_workspace_directory_uses_shared_entry_resolver() {
+//RS     let fixture =
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/packages/monorepo");
+//RS     let root = isolated_cwd("monorepo_explicit_directory");
+//RS     fs::remove_dir_all(&root).ok();
+//RS     copy_dir_all(&fixture, &root);
+//RS 
+//RS     let ambiguous = Command::new(jet())
+//RS         .args(["run", "."])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(ambiguous.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&ambiguous.stderr);
+//RS     assert!(
+//RS         stderr.contains("ambiguous") && stderr.contains("hello") && stderr.contains("ranker"),
+//RS         "{stderr}"
+//RS     );
+//RS 
+//RS     let selected = Command::new(jet())
+//RS         .args(["run", ".", "-p", "hello"])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         selected.status.success(),
+//RS         "explicit directory member selection failed:\n{}",
+//RS         String::from_utf8_lossy(&selected.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&selected.stdout).contains("hello from the monorepo"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn explicit_project_directory_missing_entry_reports_run_jet() {
+//RS     let root = isolated_cwd("missing_explicit_project_entry");
+//RS     fs::remove_dir_all(&root).ok();
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"missing-entry\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = Command::new(jet())
+//RS         .args(["run", "."])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(
+//RS         stderr.contains("E2105") && stderr.contains("run.jet"),
+//RS         "{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn malformed_workspace_never_falls_back_to_an_ordinary_entry() {
+//RS     let dir = isolated_cwd("workspace_no_fallback");
+//RS     fs::write(dir.join("workspace.jet"), "module workspace { members: [\n").unwrap();
+//RS     fs::write(
+//RS         dir.join("run.jet"),
+//RS         "fn run() { print(\"SHOULD-NOT-RUN\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["run"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(1),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(!String::from_utf8_lossy(&output.stdout).contains("SHOULD-NOT-RUN"));
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(
+//RS         stderr.contains("E0995") || stderr.contains("E0003"),
+//RS         "{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn stale_workspace_lock_never_becomes_an_empty_member_index() {
+//RS     let dir = isolated_cwd("workspace_lock_no_fallback");
+//RS     fs::create_dir_all(dir.join(".jet")).unwrap();
+//RS     fs::write(
+//RS         dir.join(".jet/lock"),
+//RS         "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         dir.join("run.jet"),
+//RS         "fn run() { print(\"SHOULD-NOT-RUN\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["run"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(1),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(!String::from_utf8_lossy(&output.stdout).contains("SHOULD-NOT-RUN"));
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stderr).contains("malformed or stale"),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn service_probe_unavailable_without_dev_reports_diagnostic() {
+//RS     let dir = isolated_cwd("service_probe_no_env");
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"app\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         dir.join("run.jet"),
+//RS         r#"module env.dev {
+//RS     services: { mydb: { run: ["echo", "mydb"], ready: "true" } }
+//RS }
+//RS 
+//RS module perf.package {
+//RS     budgets: [Budget{
+//RS         name: "readiness",
+//RS         scope: .Service("mydb"),
+//RS         metric: .ServiceReadiness,
+//RS         provider: .ServiceProbe("mydb"),
+//RS         comparison: .AbsoluteFrom("local/mydb"),
+//RS         limit: .AtMost(500ms),
+//RS         enforcement: .Warn,
+//RS     }],
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     // jet budget check: ServiceProbe stub should report "unavailable", not 101.
+//RS     let out = Command::new(jet())
+//RS         .args(["budget", "check"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     // Exit code must not be 101 (I2 — rustc never speaks to user).
+//RS     assert_ne!(
+//RS         out.status.code(),
+//RS         Some(101),
+//RS         "rustc must never speak to user (I2)"
+//RS     );
+//RS     assert_ne!(out.status.code(), Some(2), "usage error unexpected");
+//RS     let combined = format!(
+//RS         "{}{}",
+//RS         String::from_utf8_lossy(&out.stdout),
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(
+//RS         combined.contains("ServiceProbe")
+//RS             || combined.contains("unavailable")
+//RS             || combined.contains("jet dev"),
+//RS         "expected unavailability message; got:\n{combined}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn service_probe_uses_jetpack_lifecycle_and_produces_twenty_samples() {
+//RS     use jet_foundation::PerformanceBudget::CanonicalJson;
+//RS 
+//RS     let dir = isolated_cwd("service_probe_runtime");
+//RS     fs::create_dir_all(dir.join("src")).unwrap();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"app\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         dir.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     services: { mydb: { enable: true, run: ["sleep", "30"], ready: "true" } }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         dir.join("src/main.jet"),
+//RS         r#"use project.env.dev
+//RS 
+//RS module perf.package {
+//RS     budgets: [Budget{
+//RS         name: "readiness",
+//RS         scope: .Service("mydb"),
+//RS         metric: .ServiceReadiness,
+//RS         provider: .ServiceProbe("mydb"),
+//RS         comparison: .AbsoluteFrom("local/mydb"),
+//RS         limit: .AtMost(500ms),
+//RS         enforcement: .Warn,
+//RS     }],
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let out = Command::new(jet())
+//RS         .args(["self", "devtools", "probe", "src/main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("JETPACK_ROOT", dir.join("jetpack-root"))
+//RS         .env("HOME", dir.join("home"))
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&out.stdout),
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS 
+//RS     let reports = fs::read_dir(dir.join(".jet/perf/reports"))
+//RS         .unwrap()
+//RS         .map(|entry| entry.unwrap().path())
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(reports.len(), 1, "expected one report; got {reports:?}");
+//RS     let bytes = fs::read(&reports[0]).unwrap();
+//RS     jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
+//RS     let CanonicalJson::Object(report) = CanonicalJson::parse_canonical(&bytes).unwrap() else {
+//RS         panic!("report")
+//RS     };
+//RS     let CanonicalJson::Object(content) = &report["content"] else {
+//RS         panic!("content")
+//RS     };
+//RS     let CanonicalJson::Array(measurements) = &content["measurements"] else {
+//RS         panic!("measurements")
+//RS     };
+//RS     assert_eq!(measurements.len(), 1);
+//RS     let CanonicalJson::Object(measurement) = &measurements[0] else {
+//RS         panic!("measurement")
+//RS     };
+//RS     let CanonicalJson::Object(provider) = &measurement["provider"] else {
+//RS         panic!("provider")
+//RS     };
+//RS     assert_eq!(
+//RS         provider["kind"],
+//RS         CanonicalJson::String("ServiceProbe".into())
+//RS     );
+//RS     assert_eq!(provider["identity"], CanonicalJson::String("mydb".into()));
+//RS     let CanonicalJson::Array(samples) = &measurement["samples"] else {
+//RS         panic!("samples")
+//RS     };
+//RS     assert_eq!(
+//RS         samples.len(),
+//RS         20,
+//RS         "ServiceProbe must produce exactly 20 samples"
+//RS     );
+//RS }
+// END-PORT-PENDING 0996 tests/cli_parts/expand.rs:1-1643
+

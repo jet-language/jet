@@ -1,0 +1,1763 @@
+// PORT-PENDING 0426 crates-jet-sema-src-sema-diagnostics-slice-1: crates/jet-sema/src/Sema/Diagnostics.rs:1-1759
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use super::NominalWalk::{NominalQuery, NominalWalk};
+//RS use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+//RS use crate::Generics::{self, is_type_var_name};
+//RS use crate::Syntax;
+//RS pub(crate) use crate::Syntax::edit_distance;
+//RS use crate::AST::{BinOp, Expr, Pattern, Stmt, StrPart, Type, TypedLitBody, VariantPayload};
+//RS use std::collections::{HashMap, HashSet};
+//RS 
+//RS pub(crate) const WRITE_ACCESS_MARKER: &str = Syntax::WRITE_ACCESS_LABEL;
+//RS 
+//RS /// Shared registered-diagnostic renderer for execution adapters. Codegen and
+//RS /// the interpreter may supply source-derived values, but row lookup and
+//RS /// report construction stay in sema's diagnostic seam.
+//RS pub fn render_registered(
+//RS     code: impl Into<String>,
+//RS     what: String,
+//RS     why: String,
+//RS     fix: String,
+//RS     span: Option<Span>,
+//RS ) -> Diagnostic {
+//RS     Diagnostic::error(code, what, why, fix, span)
+//RS }
+//RS 
+//RS /// D-RANGETYPE1: one diagnostic root for an inline range literal that cannot
+//RS /// satisfy its destination interval.
+//RS pub(crate) fn inline_range_literal_out_of_bounds(
+//RS     value: &crate::Numeric::CtBigInt,
+//RS     lo: i64,
+//RS     hi: i64,
+//RS     span: Span,
+//RS ) -> Diagnostic {
+//RS     let shown = value.to_string_rep();
+//RS     Diagnostic::error(
+//RS         "E0135",
+//RS         format!("`{shown}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"),
+//RS         format!(
+//RS             "a range type only holds values inside its bounds; `{shown}` can never be an `Int({lo}..{hi})`"
+//RS         ),
+//RS         format!("use a value in `{lo}..{hi}`, or widen the type's range"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-RANGETYPE1: the explicit fallible conversion required for an unproven
+//RS /// value entering an inline range.
+//RS pub(crate) fn inline_range_runtime_conversion(
+//RS     lo: i64,
+//RS     hi: i64,
+//RS     method: &str,
+//RS     span: Span,
+//RS ) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0136",
+//RS         format!("making a `Int({lo}..{hi})` from a runtime value can fail"),
+//RS         "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled".to_string(),
+//RS         format!("write `Int({lo}..{hi}).{method}(raw)?` and handle the failure"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E1112 for an empty task combinator. The row owns the report wording.
+//RS pub fn e1112(method: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::from_row("E1112", &[("method", method)], Some(span))
+//RS }
+//RS 
+//RS /// Internal evaluator control-flow sentinel. It is not a user diagnostic row.
+//RS pub fn soft_exit(what: String, why: String, span: Option<Span>) -> Diagnostic {
+//RS     Diagnostic::soft_exit(what, why, span)
+//RS }
+//RS 
+//RS /// Internal evaluator cancellation sentinel. It is not a user diagnostic row.
+//RS pub fn task_cancelled(span: Option<Span>) -> Diagnostic {
+//RS     Diagnostic::task_cancelled(span)
+//RS }
+//RS 
+//RS /// E1403 when an evaluator crosses the shared source-nesting limit.
+//RS pub fn source_nesting_exceeded(depth: usize, span: Span) -> Diagnostic {
+//RS     Diagnostic::source_nesting_exceeded(depth, span)
+//RS }
+//RS 
+//RS /// E0956 for the tier-0 Browser adapter. The host supplies only the dynamic
+//RS /// value fact; the registered row owns the user-facing wording and fix.
+//RS pub fn browser_tier0_unsupported(what: &str, span: Span) -> Diagnostic {
+//RS     jet_foundation::Prelude::jet_e0956_unsupported(&format!("Browser {what}"), span)
+//RS }
+//RS 
+//RS /// D-BOUND-HEAD1: validate a raw boundary literal before the TIR evaluator
+//RS /// lowers it. Normal source checking performs the same validation while
+//RS /// rewriting the typed head; this seam covers comptime fragments that reach
+//RS /// TIR before that rewrite.
+//RS pub fn validate_typed_boundary_before_lowering(e: &Expr) -> Option<Diagnostic> {
+//RS     let Expr::TypedLit {
+//RS         head: Some(Type::Named(type_name)),
+//RS         body: TypedLitBody::Value(inner),
+//RS         ..
+//RS     } = e
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     let Expr::Str(parts, literal_span) = inner.as_ref() else {
+//RS         return None;
+//RS     };
+//RS     let mut has_holes = false;
+//RS     let mut literals = vec![String::new()];
+//RS     for part in parts {
+//RS         match part {
+//RS             StrPart::Lit(text) => literals.last_mut().unwrap().push_str(text),
+//RS             StrPart::Interp(..) => {
+//RS                 has_holes = true;
+//RS                 literals.push(String::new());
+//RS             }
+//RS         }
+//RS     }
+//RS     let Some(kind) = Syntax::typed_head_kind(type_name).filter(|kind| kind.is_boundary()) else {
+//RS         return None;
+//RS     };
+//RS     if kind.forbids_holes() && has_holes {
+//RS         return Some(Diagnostic::error(
+//RS             "E0155",
+//RS             "a `DateTime` literal cannot contain interpolation".to_string(),
+//RS             "DateTime values are checked as complete RFC3339 literals before the program runs"
+//RS                 .to_string(),
+//RS             "write a complete `DateTime{\"…\"}` literal, or parse a runtime String explicitly"
+//RS                 .to_string(),
+//RS             Some(*literal_span),
+//RS         ));
+//RS     }
+//RS     let reason = crate::Comptime::validate_typed_boundary_literal(kind, &literals).err()?;
+//RS     Some(Diagnostic::error(
+//RS         "E0155",
+//RS         format!("this `{}` literal is invalid", kind.source_name()),
+//RS         reason,
+//RS         format!(
+//RS             "fix the literal, or parse a runtime String with the ordinary `{}` constructor",
+//RS             kind.source_name()
+//RS         ),
+//RS         Some(*literal_span),
+//RS     ))
+//RS }
+//RS 
+//RS pub(crate) fn operator_label(op: BinOp) -> String {
+//RS     match op {
+//RS         BinOp::BitAnd => "the bitwise and operator `&`".to_string(),
+//RS         BinOp::Pow => "the power operator `^`".to_string(),
+//RS         BinOp::BitXor => "the bitwise xor operator `~|`".to_string(),
+//RS         _ => format!("`{}`", op.spell()),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn undeclared_value_tag(
+//RS     marker: &str,
+//RS     suggestion: Option<&str>,
+//RS     span: Span,
+//RS ) -> Diagnostic {
+//RS     let fix = suggestion.map_or_else(
+//RS         || {
+//RS             format!(
+//RS                 "declare it first with `tag {marker} {{ deny: [Effect] }}`, or check the spelling"
+//RS             )
+//RS         },
+//RS         |candidate| format!("did you mean `{candidate}`?"),
+//RS     );
+//RS     let mut diagnostic = Diagnostic::error(
+//RS         "E0733",
+//RS         format!("there's no tag called `{marker}`"),
+//RS         "a value tag must name a declared `tag`".to_string(),
+//RS         fix,
+//RS         Some(span),
+//RS     );
+//RS     if let Some(candidate) = suggestion {
+//RS         diagnostic = diagnostic.with_edit(TextEdit {
+//RS             span,
+//RS             new_text: candidate.to_string(),
+//RS         });
+//RS     }
+//RS     diagnostic
+//RS }
+//RS 
+//RS pub(crate) fn compound_why(op: BinOp) -> String {
+//RS     match op {
+//RS         // D-FLOORDIV1=A: `/%` rounds down on whole numbers and on floats alike.
+//RS         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::FloorDiv => {
+//RS             "`+ - * / /%` work on Int and Float".to_string()
+//RS         }
+//RS         _ => format!(
+//RS             "{} is a whole-number operation (Int only)",
+//RS             operator_label(op)
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS /// `T?` passed where plain `T` is expected (E0310).
+//RS pub(crate) fn option_used_where_plain_expected(want: &Type, got: &Type) -> bool {
+//RS     matches!(got, Type::Option(inner) if want.unwrap_option().is_none() && **inner == *want)
+//RS }
+//RS 
+//RS pub(crate) fn is_default_error(ty: &Type) -> bool {
+//RS     matches!(ty, Type::Named(n) if n == Syntax::TYPE_ERR)
+//RS }
+//RS 
+//RS pub(crate) fn type_fix_hint(want: &Type, got: &Type) -> String {
+//RS     // I4: a fix must never prescribe exactly what the writer already wrote.
+//RS     // When both sides render the same text, "use X here" is a contradiction
+//RS     // (card #2054: `promises to return bank.Account, but this returns
+//RS     // vis2.bank.Account … Fix: use bank.Account here`). Two same-printing
+//RS     // types that reach here are two DIFFERENT declarations — one declaration
+//RS     // reached by two paths is already accepted by `nominal_type_identity` —
+//RS     // so the repair is to make both sides name one declaration.
+//RS     if want.show() == got.show() {
+//RS         return format!(
+//RS             "these are two different declarations that both print as {}; make both sides name the same one (import it once and use that name)",
+//RS             want.show()
+//RS         );
+//RS     }
+//RS     // A qualified projection can differ only by the enclosing file alias
+//RS     // (`bank.Account` vs `vis2.bank.Account`). Naming the shorter side would
+//RS     // repeat the declaration spelling already present in the source. Keep the
+//RS     // repair deterministic without pretending the two declarations are known
+//RS     // equal at this display-only layer.
+//RS     fn nominal_leaf(ty: &Type) -> &str {
+//RS         match ty {
+//RS             Type::Named(name) => name
+//RS                 .rsplit_once("::")
+//RS                 .or_else(|| name.rsplit_once('.'))
+//RS                 .map_or(name.as_str(), |(_, leaf)| leaf),
+//RS             _ => "",
+//RS         }
+//RS     }
+//RS     if !nominal_leaf(want).is_empty() && nominal_leaf(want) == nominal_leaf(got) {
+//RS         return format!(
+//RS             "these names may refer to one declaration; make both sides use one spelling for `{}`",
+//RS             nominal_leaf(want)
+//RS         );
+//RS     }
+//RS     match (want, got) {
+//RS         (Type::Float, Type::Int) => "write the number with a decimal part, like `2.0`".to_string(),
+//RS         (Type::Float, got) if nominal_leaf(got) == Syntax::TYPE_DECIMAL => {
+//RS             "write the literal as Float{3.4}, or keep Decimal on both sides".to_string()
+//RS         }
+//RS         (Type::Int, Type::Float) => "drop the decimal part, like `2`".to_string(),
+//RS         // D-SHAPE-CONVERT1: the destination type owns explicit conversion.
+//RS         (Type::Int, Type::IntN { signed, bits }) => format!(
+//RS             "widen it explicitly with `Int.from_{}{}(value)`",
+//RS             if *signed { "i" } else { "u" },
+//RS             bits
+//RS         ),
+//RS         (Type::String, _) => "put the value in text with interpolation: \"{x}\"".to_string(),
+//RS         (Type::Named(name), _) if name.ends_with(".RNG") => {
+//RS             format!("use {} here", Syntax::RNG_TYPE)
+//RS         }
+//RS         _ => format!("use {} here", want.show()),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod polish_tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn rng_type_fix_uses_the_bare_type_name() {
+//RS         assert_eq!(
+//RS             type_fix_hint(&Type::Named("random.RNG".to_string()), &Type::Int),
+//RS             "use RNG here"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn decimal_to_float_fix_names_explicit_float_spelling() {
+//RS         assert_eq!(
+//RS             type_fix_hint(
+//RS                 &Type::Float,
+//RS                 &Type::Named(crate::Syntax::TYPE_DECIMAL.to_string())
+//RS             ),
+//RS             "write the literal as Float{3.4}, or keep Decimal on both sides"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// D-TYPEDTEXT1/D-FFI-SH1: plain `String` reaching checked typed text. `None`
+//RS /// when `want`/`got` isn't that shape — caller falls back to the generic
+//RS /// mismatch diagnostic.
+//RS pub(crate) fn typed_text_mismatch(want: &Type, got: &Type, span: Span) -> Option<Diagnostic> {
+//RS     let (tn, typed_text_name) = match want {
+//RS         Type::Named(tn) => (
+//RS             tn.clone(),
+//RS             Syntax::typed_head_kind(tn)
+//RS                 .filter(|kind| kind.is_typed_text())
+//RS                 .map(|_| tn.clone()),
+//RS         ),
+//RS         _ => return None,
+//RS     };
+//RS     if tn == Syntax::TYPE_REGEX && *got == Type::String {
+//RS         return Some(Diagnostic::error(
+//RS             "E0152",
+//RS             "a `String` is not a `Regex` pattern".to_string(),
+//RS             "regex patterns are typed literals, so Jet can validate them before the program runs"
+//RS                 .to_string(),
+//RS             "write `.{\"...\"}` here, or call `re.compile(text)` for a pattern built at run time"
+//RS                 .to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS     let Some(typed_text_name) = typed_text_name else {
+//RS         return None;
+//RS     };
+//RS     if *got != Type::String {
+//RS         return None;
+//RS     }
+//RS     Some(Diagnostic::error(
+//RS         "E0149",
+//RS         format!("a runtime `String` can't be used as `{}`", tn),
+//RS         if typed_text_name == Syntax::TYPE_SH {
+//RS             "a runtime string could change the executable or argument boundaries; only a checked literal may build `Sh`, where every `{value}` hole is exactly one argv item".to_string()
+//RS         } else {
+//RS             "interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one".to_string()
+//RS         },
+//RS         format!(
+//RS             "write `{tn}{{\"...\"}}` with `{{value}}` holes, or use `{tn}.raw(\"…\")` if you have audited the text"
+//RS         ),
+//RS         Some(span),
+//RS     ))
+//RS }
+//RS 
+//RS // D-APILABEL1=A: canonical call-binder diagnostics. The binder supplies only
+//RS // callable facts; wording and fixes live in this registered diagnostic seam.
+//RS pub(crate) fn binder_unknown_label(
+//RS     callee: &str,
+//RS     label: &str,
+//RS     callable: &[&str],
+//RS     span: Span,
+//RS ) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0764",
+//RS         format!("`{callee}` has no parameter labelled `{label}`"),
+//RS         "a label binds an argument to the parameter of that name".to_string(),
+//RS         if callable.is_empty() {
+//RS             format!("`{callee}` takes no labelled arguments")
+//RS         } else {
+//RS             format!("`{callee}` accepts `{}`", callable.join("`, `"))
+//RS         },
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn binder_repeated_label(callee: &str, label: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0765",
+//RS         format!("`{label}:` is written twice in this call to `{callee}`"),
+//RS         "each parameter takes exactly one argument".to_string(),
+//RS         format!("remove one of the `{label}:` arguments"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn binder_missing_argument(callee: &str, label: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0766",
+//RS         format!("this call to `{callee}` is missing `{label}`"),
+//RS         format!("`{label}` has no default, so every call has to supply it"),
+//RS         format!("add `{label}: …` to the call"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn binder_label_forbidden(callee: &str, label: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0767",
+//RS         format!("`{label}` is a positional-only parameter of `{callee}`"),
+//RS         "the `/` in the declaration keeps these parameters positional, so their names stay free to change"
+//RS             .to_string(),
+//RS         format!("drop the `{label}:` label and pass the value by position"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn binder_ambiguous_positional(callee: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0768",
+//RS         format!("this argument to `{callee}` follows a labelled one without a label"),
+//RS         "labels bind by name, so a bare argument after one has no parameter to fill".to_string(),
+//RS         "label this argument, or move it before the labelled ones".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn binder_label_required(callee: &str, label: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0769",
+//RS         format!("`{label}` is a label-only parameter of `{callee}`"),
+//RS         "the `*` in the declaration requires the label, so the call says what the value means"
+//RS             .to_string(),
+//RS         format!("write `{label}: …` for this argument"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS // Reached only from the CallBinder overload seam, which waits on card #2042.
+//RS #[cfg_attr(not(test), allow(dead_code))]
+//RS pub(crate) fn binder_ambiguous_call(
+//RS     callee: &str,
+//RS     candidates: &[&str],
+//RS     rewrite: &str,
+//RS     span: Span,
+//RS ) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0772",
+//RS         format!("this call to `{callee}` matches more than one callable body"),
+//RS         format!(
+//RS             "the call binds to multiple candidate signatures:\n{}",
+//RS             candidates
+//RS                 .iter()
+//RS                 .map(|candidate| format!("  {candidate}"))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("\n")
+//RS         ),
+//RS         format!("name the arguments to choose one candidate: `{callee}({rewrite})`"),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E0202: `&` grants write access only to a place — a name followed by field,
+//RS /// index, or range projections (D-SHAPE-PLACE1=A). A temporary has no storage
+//RS /// the callee's edits could reach.
+//RS pub(crate) fn write_place_required(span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0202",
+//RS         format!("{WRITE_ACCESS_MARKER} needs a place after it"),
+//RS         "write access reaches only a place: a name, optionally followed by field, index, or range projections such as `buf.items[0]`; a temporary expression has no storage for the edit to land in".to_string(),
+//RS         format!(
+//RS             "bind the value first: `x {} ...` then pass `{}x` with the write-access marker `&`",
+//RS             Syntax::SIGIL_BIND_MUT,
+//RS             Syntax::SIGIL_WRITE,
+//RS         ),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E0202: a range write window is fixed-length (D-SHAPE-PLACE1=A), while this
+//RS /// callee may resize its list write parameter; the window cannot fill it.
+//RS pub(crate) fn write_range_window_argument(span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0202",
+//RS         "a range write window can't fill a list parameter that may resize".to_string(),
+//RS         "a range window has a fixed length, but this function may grow or shrink the list it receives through the write-access marker `&`".to_string(),
+//RS         format!(
+//RS             "pass the whole list with the write-access marker `&`: `fill({}values)`",
+//RS             Syntax::SIGIL_WRITE,
+//RS         ),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn aliasing_while_mut(name: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0204",
+//RS         format!(
+//RS             "`{}` is being changed in this call, so it can't be used again here",
+//RS             name
+//RS         ),
+//RS         "while something is being changed through the write-access marker `&`, nobody else may be looking at it".to_string(),
+//RS         format!(
+//RS             "pass the write-access marker `&` (`{}{}`) only once, or copy first with `{}{}`",
+//RS             Syntax::SIGIL_WRITE,
+//RS             name,
+//RS             Syntax::SIGIL_COPY,
+//RS             name
+//RS         ),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn aliasing_mut_after_read(name: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0204",
+//RS         format!(
+//RS             "`{}` is already shared in this call, so it can't be changed here too",
+//RS             name
+//RS         ),
+//RS         "while something is being looked at, nobody else may be changing it".to_string(),
+//RS         format!(
+//RS             "drop the extra use of `{}`, or copy first with `{}{}`",
+//RS             name,
+//RS             Syntax::SIGIL_COPY,
+//RS             name
+//RS         ),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn loop_control_outside(kw: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0115",
+//RS         format!("`{}` only works inside a loop", kw),
+//RS         format!(
+//RS             "`{}` and `{}` steer the nearest `{}` loop",
+//RS             Syntax::KW_BREAK,
+//RS             Syntax::KW_NEXT,
+//RS             Syntax::KW_LOOP,
+//RS         ),
+//RS         "move this inside a loop, or remove it".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// D-ARROW-CONTROL1 (E0987): `break(name)` / `next(name)` targets a loop name that
+//RS /// is not in scope. The fix lists the names that *are* reachable here.
+//RS pub(crate) fn undefined_loop_label(name: &str, in_scope: &[String], span: Span) -> Diagnostic {
+//RS     let fix = if in_scope.is_empty() {
+//RS         "label an enclosing loop with `name :: loop { … }` first".to_string()
+//RS     } else {
+//RS         let labels = in_scope
+//RS             .iter()
+//RS             .map(|l| format!("`break({l})` or `next({l})`"))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         format!("use a label in scope: {labels}")
+//RS     };
+//RS     Diagnostic::error(
+//RS         "E0987",
+//RS         format!("no loop labeled `{name}` is in scope"),
+//RS         "a named `break`/`next` must name an enclosing `name :: loop` (D-LOOPLABEL3)".to_string(),
+//RS         fix,
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// Does this block definitely hit a `return` on every path?
+//RS pub(crate) fn block_definitely_returns(stmts: &[Stmt]) -> bool {
+//RS     stmts.iter().any(stmt_definitely_returns)
+//RS }
+//RS 
+//RS /// Does this block definitely leave its enclosing statement sequence?
+//RS ///
+//RS /// Value branches and refutable fallbacks share this structural rule. Unlike
+//RS /// `block_definitely_returns`, it includes loop control because `break` and
+//RS /// `continue` are valid exits from those constructs.
+//RS pub(crate) fn block_definitely_exits(stmts: &[Stmt]) -> bool {
+//RS     stmts.iter().any(stmt_definitely_exits)
+//RS }
+//RS 
+//RS fn stmt_definitely_exits(stmt: &Stmt) -> bool {
+//RS     match stmt {
+//RS         Stmt::Return(..)
+//RS         | Stmt::Break(..)
+//RS         | Stmt::BreakValue(..)
+//RS         | Stmt::Continue(..)
+//RS         | Stmt::BreakLabel(..)
+//RS         | Stmt::BreakLabelValue(..)
+//RS         | Stmt::ContinueLabel(..) => true,
+//RS         Stmt::Expr(expr) => {
+//RS             // `Expr::NoElse` as a statement is the checked dead end of a
+//RS             // synthesized presence binding (D-FLOWTYPE1=A).
+//RS             matches!(expr.without_parens(), Expr::Todo { .. } | Expr::NoElse(_))
+//RS                 || matches!(
+//RS                     expr.without_parens(),
+//RS                     Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
+//RS                 )
+//RS         }
+//RS         Stmt::Switch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             span,
+//RS         } => {
+//RS             let fallback_exits = match else_body.as_deref() {
+//RS                 Some(body) => block_definitely_exits(body),
+//RS                 None => !crate::AST::is_subjectless_guard(subject, *span),
+//RS             };
+//RS             !arms.is_empty()
+//RS                 && arms.iter().all(|arm| block_definitely_exits(&arm.body))
+//RS                 && fallback_exits
+//RS         }
+//RS         Stmt::Loop { body, .. } => !loop_body_can_break(body),
+//RS         Stmt::While { cond, body, .. } | Stmt::CountedLoop { cond, body, .. }
+//RS             if matches!(cond.without_parens(), Expr::Bool(true, _)) =>
+//RS         {
+//RS             !loop_body_can_break(body)
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn loop_body_can_break(stmts: &[Stmt]) -> bool {
+//RS     loop_body_can_break_inner(stmts, &[], true)
+//RS }
+//RS 
+//RS fn loop_body_can_break_inner(
+//RS     stmts: &[Stmt],
+//RS     nested_labels: &[&str],
+//RS     allow_unlabelled: bool,
+//RS ) -> bool {
+//RS     for stmt in stmts {
+//RS         let can_break = match stmt {
+//RS             Stmt::Break(..) | Stmt::BreakValue(..) => allow_unlabelled,
+//RS             Stmt::BreakLabel(name, ..) | Stmt::BreakLabelValue(name, ..) => {
+//RS                 !nested_labels.iter().any(|label| *label == name.as_str())
+//RS             }
+//RS             Stmt::Switch {
+//RS                 arms, else_body, ..
+//RS             } => {
+//RS                 arms.iter().any(|arm| {
+//RS                     loop_body_can_break_inner(&arm.body, nested_labels, allow_unlabelled)
+//RS                 }) || else_body.as_deref().is_some_and(|body| {
+//RS                     loop_body_can_break_inner(body, nested_labels, allow_unlabelled)
+//RS                 })
+//RS             }
+//RS             Stmt::Loop { body, label, .. }
+//RS             | Stmt::While { body, label, .. }
+//RS             | Stmt::For { body, label, .. }
+//RS             | Stmt::CountedLoop { body, label, .. } => {
+//RS                 let mut nested = nested_labels.to_vec();
+//RS                 if let Some((label, _)) = label {
+//RS                     nested.push(label.as_str());
+//RS                 }
+//RS                 loop_body_can_break_inner(body, &nested, false)
+//RS             }
+//RS             _ => false,
+//RS         };
+//RS         if can_break {
+//RS             return true;
+//RS         }
+//RS         if stmt_definitely_exits(stmt) {
+//RS             return false;
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS pub(crate) fn stmt_definitely_returns(stmt: &Stmt) -> bool {
+//RS     match stmt {
+//RS         Stmt::Return(_, _) => true,
+//RS         // D-TOOL2 (E2-M11): `todo` is diverging — a bare `todo;` satisfies
+//RS         // the "every path must return" check just like `return`.
+//RS         Stmt::Expr(expr)
+//RS             if matches!(expr.without_parens(), Expr::Todo { .. })
+//RS                 || matches!(
+//RS                     expr.without_parens(),
+//RS                     Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
+//RS                 ) =>
+//RS         {
+//RS             true
+//RS         }
+//RS         Stmt::Loop { body, .. } => !loop_body_can_break(body),
+//RS         Stmt::While { cond, body, .. } | Stmt::CountedLoop { cond, body, .. }
+//RS             if matches!(cond.without_parens(), Expr::Bool(true, _)) =>
+//RS         {
+//RS             !loop_body_can_break(body)
+//RS         }
+//RS         Stmt::Switch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             span,
+//RS         } => {
+//RS             !arms.is_empty()
+//RS                 && arms.iter().all(|a| block_definitely_returns(&a.body))
+//RS                 && else_body
+//RS                     .as_ref()
+//RS                     .map(|b| block_definitely_returns(b))
+//RS                     .unwrap_or_else(|| !crate::AST::is_subjectless_guard(subject, *span))
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn is_cloneable(ty: &Type, registry: &TypeRegistry) -> bool {
+//RS     let mut walk = NominalWalk::new(NominalQuery::Cloneable, registry);
+//RS     let cloneable = is_cloneable_rec(ty, registry, &mut walk);
+//RS     walk.finish(cloneable);
+//RS     cloneable
+//RS }
+//RS 
+//RS /// D-MEM-COPYSEM1=A: a read-only window has one owning materialization shape.
+//RS /// Keep this mapping in sema so every consumer (inference, ownership, and
+//RS /// diagnostics) agrees before TIR lowers the one shared copy node.
+//RS pub(crate) fn owned_type_for_read_view(ty: &Type) -> Option<Type> {
+//RS     let Type::Apply { name, args } = ty else {
+//RS         return None;
+//RS     };
+//RS     if name != "View" || args.len() != 1 {
+//RS         return None;
+//RS     }
+//RS     if matches!(&args[0], Type::Named(element) if element == "str") {
+//RS         Some(Type::String)
+//RS     } else {
+//RS         Some(Type::List(Box::new(args[0].clone())))
+//RS     }
+//RS }
+//RS 
+//RS /// `is_cloneable`'s recursion. A self-referential type
+//RS /// (`enum Nat { Succ(n: Nat) }`) compiles to a `Box` indirection (I3: sema
+//RS /// already proves this elsewhere), so a cycle back to a type still being
+//RS /// visited is vacuously cloneable, and a type this query already finished
+//RS /// was cloneable (the first field that is not ends the query). The walk
+//RS /// (`NominalWalk`) enters each named type once; without the cycle guard it
+//RS /// never terminates.
+//RS fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk<'_>) -> bool {
+//RS     match ty {
+//RS         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
+//RS         Type::IntN { .. } | Type::Float32 => true,
+//RS         Type::Shared(_) => true,
+//RS         Type::List(inner) | Type::Option(inner) => is_cloneable_rec(inner, registry, walk),
+//RS         Type::Map { key, value, .. } => {
+//RS             is_cloneable_rec(key, registry, walk) && is_cloneable_rec(value, registry, walk)
+//RS         }
+//RS         Type::Result { ok, err } => {
+//RS             is_cloneable_rec(ok, registry, walk) && is_cloneable_rec(err, registry, walk)
+//RS         }
+//RS         Type::Fn { .. } => false,
+//RS         Type::Named(name) if builtin_resource_type(name) => false,
+//RS         Type::Named(name) if is_type_var_name(name) || core_type_known(name) => true,
+//RS         Type::Named(name) => {
+//RS             let Some(key) = walk.enter(name, &[]) else {
+//RS                 return true;
+//RS             };
+//RS             let result = registry.contains(name)
+//RS                 && match registry.types.get(name) {
+//RS                     Some(TypeDef::Struct { fields, .. }) => fields
+//RS                         .iter()
+//RS                         .all(|(_, _, fty)| is_cloneable_rec(fty, registry, walk)),
+//RS                     Some(TypeDef::Enum { variants, .. }) => {
+//RS                         variants.values().all(|(_, p)| match p {
+//RS                             VariantPayload::Unit => true,
+//RS                             VariantPayload::Single(t, _) => is_cloneable_rec(t, registry, walk),
+//RS                             VariantPayload::Named(fs) => fs
+//RS                                 .iter()
+//RS                                 .all(|f| is_cloneable_rec(&f.ty, registry, walk)),
+//RS                         })
+//RS                     }
+//RS                     // D-DIST1: distinct types wrap a scalar; they are always cloneable.
+//RS                     Some(TypeDef::Distinct { .. }) => true,
+//RS                     Some(TypeDef::Alias { target, .. }) => is_cloneable_rec(target, registry, walk),
+//RS                     None => false,
+//RS                 };
+//RS             walk.leave(name, key);
+//RS             result
+//RS         }
+//RS         // A task or imported Arrow batch owns one release duty.  Copying either
+//RS         // carrier would hand two bindings the same cleanup authority, so both
+//RS         // runtime carriers implement no `Clone` and neither does the language
+//RS         // type.
+//RS         Type::Apply { name, .. }
+//RS             if matches!(
+//RS                 name.as_str(),
+//RS                 "DataArrowBatch"
+//RS                     | "MutationPlan"
+//RS                     | "VaultWrite"
+//RS                     | "ExpiringSecret"
+//RS                     | "ViewMut"
+//RS                     | Syntax::TYPE_VIEW_ITER
+//RS                     | "CellReadGuard"
+//RS                     | "CellEditGuard"
+//RS                     | "Task"
+//RS                     | Syntax::TYPE_SHARED_GUARD
+//RS             ) =>
+//RS         {
+//RS             false
+//RS         }
+//RS         Type::Apply { name, .. } if name == "View" => true,
+//RS         Type::Apply { name, .. } if matches!(name.as_str(), "KeyRef" | "Rotation") => true,
+//RS         Type::Apply { args, .. } => args.iter().all(|a| is_cloneable_rec(a, registry, walk)),
+//RS         Type::Tuple(fields) => fields
+//RS             .iter()
+//RS             .all(|(_, t)| is_cloneable_rec(t, registry, walk)),
+//RS         Type::TraitObject(_) => false,
+//RS         Type::FixedList { elem, .. } => is_cloneable_rec(elem, registry, walk),
+//RS         Type::Tagged { inner, .. } => is_cloneable_rec(inner, registry, walk),
+//RS         Type::InlineRange { base, .. } => is_cloneable_rec(base, registry, walk),
+//RS         Type::Union(members) => members
+//RS             .iter()
+//RS             .all(|m| is_cloneable_rec(m, registry, walk)),
+//RS         Type::Quantity { base, .. } => is_cloneable_rec(base, registry, walk),
+//RS         Type::Measure(_) => true,
+//RS     }
+//RS }
+//RS 
+//RS fn builtin_resource_type(name: &str) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         "FileReader"
+//RS             | "FileWriter"
+//RS             | "FileScope"
+//RS             | "FileLock"
+//RS             | "TcpStream"
+//RS             | "UnixStream"
+//RS             | "TLSStream"
+//RS             | "DBConnection"
+//RS             | "Arena"
+//RS             | "Bump"
+//RS             | "Pool"
+//RS             | "Fixed"
+//RS     )
+//RS }
+//RS 
+//RS /// D-MEM1: true when `ty` owns heap data — directly
+//RS /// (`String`/`[T]`/`[K,V]`/`Shared<T>`/a boxed trait object/a `[T#N]`, which
+//RS /// erases to `Vec<T>` at codegen) or transitively (a struct/enum/tuple/distinct/
+//RS /// alias with a heap-owning part). Backs heap-ownership and `copy` checks —
+//RS /// deliberately narrower than
+//RS /// `is_cloneable`, which asks a different question ("can Rust `.clone()` this",
+//RS /// true for nearly everything including heap types).
+//RS pub(crate) fn type_owns_heap(ty: &Type, registry: &TypeRegistry) -> bool {
+//RS     let mut walk = NominalWalk::new(NominalQuery::OwnsHeap, registry);
+//RS     let owns = type_owns_heap_rec(ty, registry, &mut walk);
+//RS     walk.finish(!owns);
+//RS     owns
+//RS }
+//RS 
+//RS /// `type_owns_heap`'s recursion, with the same self-referential-type cycle
+//RS /// guard as `is_cloneable_rec` (a cycle is already behind a `Box` indirection
+//RS /// by construction, so it's vacuously non-heap-owning here — the walk doesn't
+//RS /// need to unwind further to answer "does this type ITSELF own heap data").
+//RS /// A type this query already finished owned none (the first owner ends it).
+//RS fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk<'_>) -> bool {
+//RS     match ty {
+//RS         Type::Int | Type::Bool | Type::Float | Type::Char => false,
+//RS         Type::IntN { .. } | Type::Float32 => false,
+//RS         Type::String | Type::List(_) | Type::Shared(_) => true,
+//RS         Type::Map { .. } => true,
+//RS         Type::Option(inner) => type_owns_heap_rec(inner, registry, walk),
+//RS         Type::Result { ok, err } => {
+//RS             type_owns_heap_rec(ok, registry, walk) || type_owns_heap_rec(err, registry, walk)
+//RS         }
+//RS         // A plain function value/pointer carries no heap-owned data at the
+//RS         // type level (a closure's captured environment isn't tracked here).
+//RS         Type::Fn { .. } => false,
+//RS         // A boxed dyn trait object is a heap allocation (Rust `Box<dyn …>`).
+//RS         Type::TraitObject(_) => true,
+//RS         Type::Named(name) if is_type_var_name(name) => false,
+//RS         Type::Named(name) if core_type_known(name) => false,
+//RS         Type::Named(name) => {
+//RS             let Some(key) = walk.enter(name, &[]) else {
+//RS                 return false;
+//RS             };
+//RS             let result = match registry.types.get(name) {
+//RS                 Some(TypeDef::Struct { fields, .. }) => fields
+//RS                     .iter()
+//RS                     .any(|(_, _, fty)| type_owns_heap_rec(fty, registry, walk)),
+//RS                 Some(TypeDef::Enum { variants, .. }) => variants.values().any(|(_, p)| match p {
+//RS                     VariantPayload::Unit => false,
+//RS                     VariantPayload::Single(t, _) => type_owns_heap_rec(t, registry, walk),
+//RS                     VariantPayload::Named(fs) => fs
+//RS                         .iter()
+//RS                         .any(|f| type_owns_heap_rec(&f.ty, registry, walk)),
+//RS                 }),
+//RS                 // D-DIST1: a distinct type wraps a base type — heap-owning iff
+//RS                 // the base is (e.g. `UserId :: distinct String`).
+//RS                 Some(TypeDef::Distinct { base, .. }) => type_owns_heap_rec(base, registry, walk),
+//RS                 Some(TypeDef::Alias { target, .. }) => type_owns_heap_rec(target, registry, walk),
+//RS                 None => false,
+//RS             };
+//RS             walk.leave(name, key);
+//RS             result
+//RS         }
+//RS         // D-POOLID-API1=A: `Pool<T>` is a generational arena (heap-owning
+//RS         // regardless of `T`); `Id<T>` is plain index+generation data (`Copy`,
+//RS         // never heap-owning). Any other generic application: best-effort —
+//RS         // recurse into its type args (approximates a generic field storing
+//RS         // one), OR'd with a direct field-registry lookup by name (no generic
+//RS         // substitution — a known gap for a user generic struct whose fields
+//RS         // are typed by a type PARAMETER rather than a concrete arg; see the
+//RS         // generic-type report). Errs toward flagging (a false positive is
+//RS         // cheaper than a silent miss of an actual allocation).
+//RS         Type::Apply { name, args } if name == "Pool" => {
+//RS             let _ = args;
+//RS             true
+//RS         }
+//RS         Type::Apply { name, .. } if name == "ID" => false,
+//RS         Type::Apply { name, .. } if name == "KeyRef" => true,
+//RS         Type::Apply { name, args } => {
+//RS             args.iter().any(|a| type_owns_heap_rec(a, registry, walk))
+//RS                 || matches!(
+//RS                     registry.types.get(name),
+//RS                     Some(TypeDef::Struct { fields, .. }) if fields.iter().any(|(_, _, fty)| type_owns_heap_rec(fty, registry, walk))
+//RS                 )
+//RS         }
+//RS         Type::Tuple(fields) => fields
+//RS             .iter()
+//RS             .any(|(_, t)| type_owns_heap_rec(t, registry, walk)),
+//RS         // D-SG9/S76: `[T#N]` erases to `Vec<T>` at codegen (I3) — always a
+//RS         // heap allocation regardless of the element type.
+//RS         Type::FixedList { .. } => true,
+//RS         Type::Tagged { inner, .. } => type_owns_heap_rec(inner, registry, walk),
+//RS         Type::InlineRange { base, .. } => type_owns_heap_rec(base, registry, walk),
+//RS         Type::Union(members) => members
+//RS             .iter()
+//RS             .any(|m| type_owns_heap_rec(m, registry, walk)),
+//RS         Type::Quantity { base, .. } => type_owns_heap_rec(base, registry, walk),
+//RS         Type::Measure(_) => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn expr_is_same_ident(a: &Expr, name: &str) -> bool {
+//RS     matches!(a, Expr::Ident(n, _) if n == name)
+//RS }
+//RS 
+//RS pub(crate) fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
+//RS     // S31: a nested payload pattern covers only part of its head variant;
+//RS     // nested coverage is proven separately over the whole arm set.
+//RS     if pattern.has_nested_pattern() && !matches!(pattern, Pattern::Or(..)) {
+//RS         return None;
+//RS     }
+//RS     match pattern {
+//RS         Pattern::Variant {
+//RS             variant, bindings, ..
+//RS         } => {
+//RS             // D-PATR: a Variant with Range slots only partially covers the variant
+//RS             // (it matches a subset of payloads), so we don't mark it as fully covered.
+//RS             let has_range = bindings
+//RS                 .iter()
+//RS                 .any(|s| matches!(s, crate::AST::PatSlot::Range { .. }));
+//RS             if has_range {
+//RS                 None
+//RS             } else {
+//RS                 Some(variant.clone())
+//RS             }
+//RS         }
+//RS         Pattern::Present { .. } => Some(Syntax::LIT_VALUE.to_string()),
+//RS         Pattern::Absent(_) => Some(Syntax::LIT_NULL.to_string()),
+//RS         Pattern::Ok { .. } => Some(Syntax::LIT_OK.to_string()),
+//RS         Pattern::Err { .. } => Some(Syntax::LIT_ERR.to_string()),
+//RS         // D-PATO: use the first alternative's name as the canonical key.
+//RS         // Coverage walks every alternative through `collect_covered_variant_names`.
+//RS         Pattern::Or(alts, _) => alts.first().and_then(pattern_variant_name),
+//RS         // D-PATR/D-DESTRUCT1/D-PARSESTR1: range, struct, and str-match patterns
+//RS         // don't cover a single variant name.
+//RS         Pattern::Range { .. }
+//RS         | Pattern::Struct { .. }
+//RS         | Pattern::StrMatch { .. }
+//RS         | Pattern::BinMatch { .. } => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Generate compilable switch arm source text for missing variants.
+//RS /// `subj_name` is the variable being switched on (e.g. `"c"` or `"it"` for fallible types).
+//RS pub(crate) fn missing_arms_text(
+//RS     subj_ty: &Type,
+//RS     missing: &[String],
+//RS     _subj_name: Option<&str>,
+//RS ) -> String {
+//RS     let arms: Vec<String> = missing
+//RS         .iter()
+//RS         .map(|v| match subj_ty {
+//RS             // S31: a nested witness (`Err(.High)`) is already a full pattern.
+//RS             _ if v.contains('(') && !v.ends_with("(...)") => {
+//RS                 format!("    .{} {} {{}}", v, crate::Syntax::OP_UNIFIED_ARROW)
+//RS             }
+//RS             // D-ENUMDOT1: leading-dot arm heads in `if subject == { … }`.
+//RS             Type::Named(_) | Type::Apply { .. } | Type::Union(_) => {
+//RS                 format!("    .{} {} {{}}", v, crate::Syntax::OP_UNIFIED_ARROW)
+//RS             }
+//RS             Type::Option(_) => {
+//RS                 if v == crate::Syntax::LIT_VALUE {
+//RS                     format!(
+//RS                         "    .{}(inner) {} {{}}",
+//RS                         crate::Syntax::LIT_VALUE,
+//RS                         crate::Syntax::OP_UNIFIED_ARROW
+//RS                     )
+//RS                 } else {
+//RS                     format!(
+//RS                         "    .{} {} {{}}",
+//RS                         crate::Syntax::LIT_NULL,
+//RS                         crate::Syntax::OP_UNIFIED_ARROW
+//RS                     )
+//RS                 }
+//RS             }
+//RS             Type::Result { .. } => {
+//RS                 if v.starts_with(crate::Syntax::LIT_OK) {
+//RS                     format!(
+//RS                         "    .{}(v) {} {{}}",
+//RS                         crate::Syntax::LIT_OK,
+//RS                         crate::Syntax::OP_UNIFIED_ARROW
+//RS                     )
+//RS                 } else if v.starts_with(crate::Syntax::LIT_VALUE) {
+//RS                     // D-OUTCOME-SHAPE1=A: `T? E!` names its optional
+//RS                     // success states directly.
+//RS                     format!(
+//RS                         "    .{}(inner) {} {{}}",
+//RS                         crate::Syntax::LIT_VALUE,
+//RS                         crate::Syntax::OP_UNIFIED_ARROW
+//RS                     )
+//RS                 } else if v == crate::Syntax::LIT_NULL {
+//RS                     format!(
+//RS                         "    .{} {} {{}}",
+//RS                         crate::Syntax::LIT_NULL,
+//RS                         crate::Syntax::OP_UNIFIED_ARROW
+//RS                     )
+//RS                 } else {
+//RS                     format!(
+//RS                         "    .{}(e) {} {{}}",
+//RS                         crate::Syntax::LIT_ERR,
+//RS                         crate::Syntax::OP_UNIFIED_ARROW
+//RS                     )
+//RS                 }
+//RS             }
+//RS             _ => format!("    .{} {} {{}}", v, crate::Syntax::OP_UNIFIED_ARROW),
+//RS         })
+//RS         .collect();
+//RS     format!("\n{}", arms.join("\n"))
+//RS }
+//RS 
+//RS pub(crate) fn missing_pattern_coverage(
+//RS     subject_ty: &Type,
+//RS     covered: &HashSet<String>,
+//RS     registry: &TypeRegistry,
+//RS ) -> Option<Vec<String>> {
+//RS     match subject_ty {
+//RS         Type::Named(name) => {
+//RS             let order = registry.enum_variant_order(name)?;
+//RS             // D-TAG1: exhaustiveness is checked at the group level — a leaf is
+//RS             // covered when the leaf itself OR any ancestor group is covered.
+//RS             let leaf_covered = |leaf: &str| {
+//RS                 if covered.contains(leaf) {
+//RS                     return true;
+//RS                 }
+//RS                 let mut prefix = String::new();
+//RS                 for (i, seg) in leaf.split('.').enumerate() {
+//RS                     if i > 0 {
+//RS                         if covered.contains(&prefix) {
+//RS                             return true;
+//RS                         }
+//RS                         prefix.push('.');
+//RS                     }
+//RS                     prefix.push_str(seg);
+//RS                 }
+//RS                 false
+//RS             };
+//RS             let missing: Vec<_> = order.iter().filter(|v| !leaf_covered(v)).cloned().collect();
+//RS             if missing.is_empty() {
+//RS                 None
+//RS             } else {
+//RS                 Some(missing)
+//RS             }
+//RS         }
+//RS         Type::Option(_) => {
+//RS             let mut missing = Vec::new();
+//RS             if !covered.contains(Syntax::LIT_VALUE) {
+//RS                 missing.push(Syntax::LIT_VALUE.to_string());
+//RS             }
+//RS             if !covered.contains(Syntax::LIT_NULL) {
+//RS                 missing.push(Syntax::LIT_NULL.to_string());
+//RS             }
+//RS             if missing.is_empty() {
+//RS                 None
+//RS             } else {
+//RS                 Some(missing)
+//RS             }
+//RS         }
+//RS         Type::Result { .. } => {
+//RS             let mut missing = Vec::new();
+//RS             if !covered.contains(Syntax::LIT_OK) {
+//RS                 missing.push(format!("{}(...)", Syntax::LIT_OK));
+//RS             }
+//RS             if !covered.contains(Syntax::LIT_ERR) {
+//RS                 missing.push(format!("{}(...)", Syntax::LIT_ERR));
+//RS             }
+//RS             if missing.is_empty() {
+//RS                 None
+//RS             } else {
+//RS                 Some(missing)
+//RS             }
+//RS         }
+//RS         // D-UNIONTYPE1=A: each member type name is an arm head.
+//RS         Type::Union(members) => {
+//RS             let missing: Vec<String> = members
+//RS                 .iter()
+//RS                 .map(crate::AST::union_member_tag)
+//RS                 .filter(|tag| !covered.contains(tag))
+//RS                 .collect();
+//RS             if missing.is_empty() {
+//RS                 None
+//RS             } else {
+//RS                 Some(missing)
+//RS             }
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// `T !E` passed where plain `T` is expected (E0401).
+//RS pub(crate) fn result_used_where_plain_expected(want: &Type, got: &Type) -> bool {
+//RS     matches!(got, Type::Result { ok, .. } if want.unwrap_result().is_none() && **ok == *want)
+//RS }
+//RS 
+//RS /// Plain success `T` passed where `T !E` is expected. A fallible slot can
+//RS /// store an infallible value of the same success type (implicit `Ok`).
+//RS pub(crate) fn plain_used_where_result_expected(want: &Type, got: &Type) -> bool {
+//RS     matches!(want, Type::Result { ok, .. } if got.unwrap_result().is_none() && **ok == *got)
+//RS }
+//RS 
+//RS pub(crate) fn pattern_binding_types(payload: &VariantPayload) -> Vec<Type> {
+//RS     match payload {
+//RS         VariantPayload::Unit => Vec::new(),
+//RS         VariantPayload::Single(t, _) => vec![t.clone()],
+//RS         VariantPayload::Named(fs) => fs.iter().map(|f| f.ty.clone()).collect(),
+//RS     }
+//RS }
+//RS 
+//RS /// The one "did you mean …?" candidate picker. Every caller has already
+//RS /// reported that `name` does not exist, so a candidate EQUAL to `name` is
+//RS /// never a fix — it tells the reader to write what was just refused, and it
+//RS /// contradicts the message that named it missing. Distance 0 is therefore not
+//RS /// a suggestion but evidence that the candidate set and the failed lookup
+//RS /// disagree; a tied nearest pair is ambiguous for a machine edit. The caller
+//RS /// keeps its ordinary fix text in either case (card #2002).
+//RS pub(crate) fn suggest_field(name: &str, candidates: &[String]) -> Option<String> {
+//RS     let mut best: Option<(String, usize)> = None;
+//RS     let mut ambiguous = false;
+//RS     for cand in candidates {
+//RS         let d = edit_distance(name, cand);
+//RS         if d == 0 || d > 2 {
+//RS             continue;
+//RS         }
+//RS         match best.as_ref() {
+//RS             None => best = Some((cand.clone(), d)),
+//RS             Some((_best_name, best_distance)) if d < *best_distance => {
+//RS                 best = Some((cand.clone(), d));
+//RS                 ambiguous = false;
+//RS             }
+//RS             Some((best_name, best_distance)) if d == *best_distance => {
+//RS                 ambiguous |= best_name != cand;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     best.filter(|_| !ambiguous).map(|(s, _)| s)
+//RS }
+//RS 
+//RS /// The one home for cross-language method names (card #1965).
+//RS ///
+//RS /// A row earns its place only when all three of these hold. A reader deciding
+//RS /// whether to add one answers them in order:
+//RS ///
+//RS /// 1. the left spelling is the *primary* name of this operation in at least two
+//RS ///    mainstream languages (Python, JavaScript, Java/C#, C++, Rust, Go), so it
+//RS ///    is what a newcomer or a coding agent types from habit — not a name one
+//RS ///    library happens to use;
+//RS /// 2. one of the right spellings is the real Jet name for the *same* operation
+//RS ///    on some Core receiver — the same operation, not a near neighbour;
+//RS /// 3. the left spelling is not itself a Jet method on that receiver, so the row
+//RS ///    can only ever fire after real method lookup has already failed.
+//RS ///
+//RS /// A name failing (1) is one project's private dictionary. A name failing (2)
+//RS /// teaches a method that does something else. A name failing (3) is dead
+//RS /// weight: the call resolves and this table is never consulted.
+//RS ///
+//RS /// The receiver family is the same label used by E0311's `Why:` text. Keep
+//RS /// target membership as a second check: a family row must name a method the
+//RS /// receiver actually carries.
+//RS const FOREIGN_METHOD_ALIASES: &[(&str, &str, &str)] = &[
+//RS     // Sequence append: Python `list.append`, Java/C# `add`/`Add`, C++ `push_back`.
+//RS     ("append", "List", "push"),
+//RS     ("add", "List", "push"),
+//RS     ("push_back", "List", "push"),
+//RS     ("extend", "List", "push"),
+//RS     // Size: C++/Java `size`, JavaScript/Java-String `length`, C#/Swift `Count`/`count`.
+//RS     ("size", "List", "len"),
+//RS     ("size", "Map", "len"),
+//RS     ("size", "String", "len"),
+//RS     ("length", "List", "len"),
+//RS     ("length", "Map", "len"),
+//RS     ("length", "String", "len"),
+//RS     ("count", "List", "len"),
+//RS     ("count", "Map", "len"),
+//RS     ("count", "String", "len"),
+//RS     // Membership: Rust `contains_key`, JavaScript `Map.has`, Rust/Java/C++ set
+//RS     // `contains`, JavaScript `Array.includes`.
+//RS     ("contains_key", "Map", "has_key"),
+//RS     ("contains_key", "Set", "has"),
+//RS     ("has", "Map", "has_key"),
+//RS     ("contains", "List", "contains"),
+//RS     ("contains", "Set", "has"),
+//RS     ("includes", "List", "contains"),
+//RS     // Keyed store: JavaScript `Map.set`, Java `Map.put`, Rust `HashMap::insert`.
+//RS     ("set", "Map", "add"),
+//RS     ("put", "Map", "add"),
+//RS     ("insert", "Map", "add"),
+//RS     // Text: Python `str.upper`/`lower`/`strip`, Java/JavaScript
+//RS     // `substring`/`substr`, Rust `to_str`.
+//RS     ("upper", "String", "to_upper"),
+//RS     ("lower", "String", "to_lower"),
+//RS     ("strip", "String", "trim"),
+//RS     ("substring", "String", "slice"),
+//RS     ("substr", "String", "slice"),
+//RS     ("to_str", "String", "to_string"),
+//RS ];
+//RS 
+//RS /// A method name the receiver really carries, plus the `Fix:` line that names
+//RS /// it. One picker returns both so E0311 and E0102 cannot drift apart.
+//RS pub(crate) struct MethodSuggestion {
+//RS     /// The Jet spelling to write instead — also the rename `TextEdit`.
+//RS     pub(crate) name: String,
+//RS     /// The rendered `Fix:` sentence.
+//RS     pub(crate) fix: String,
+//RS }
+//RS 
+//RS /// First target of `name`'s alias row that this receiver actually carries.
+//RS /// A target equal to `name` is refused for the same reason `suggest_field`
+//RS /// refuses distance 0 (#2002): it would hand back the spelling just refused.
+//RS fn alias_target(
+//RS     name: &str,
+//RS     receiver_family: Option<&str>,
+//RS     candidates: &[String],
+//RS ) -> Option<String> {
+//RS     FOREIGN_METHOD_ALIASES
+//RS         .iter()
+//RS         .find(|(foreign, family, target)| {
+//RS             *foreign == name
+//RS                 && receiver_family.map_or(true, |receiver| receiver == *family)
+//RS                 && *target != name
+//RS                 && candidates.iter().any(|known| known.as_str() == *target)
+//RS         })
+//RS         .map(|(_, _, target)| (*target).to_string())
+//RS }
+//RS 
+//RS /// `indexOf` → `index_of`. `None` when the name carries no capital, so a name
+//RS /// already written in Jet's convention never routes through here.
+//RS fn snake_case_of_camel(name: &str) -> Option<String> {
+//RS     if !name.chars().any(|c| c.is_ascii_uppercase()) {
+//RS         return None;
+//RS     }
+//RS     let mut snake = String::with_capacity(name.len() + 4);
+//RS     for (index, c) in name.char_indices() {
+//RS         if c.is_ascii_uppercase() {
+//RS             if index > 0 {
+//RS                 snake.push('_');
+//RS             }
+//RS             snake.push(c.to_ascii_lowercase());
+//RS         } else {
+//RS             snake.push(c);
+//RS         }
+//RS     }
+//RS     Some(snake)
+//RS }
+//RS 
+//RS fn foreign_method_fix(name: &str, jet: &str) -> String {
+//RS     format!("did you mean `{jet}`? `{name}` is another language's name for the same operation")
+//RS }
+//RS 
+//RS /// The one method-name suggestion picker, for a receiver that has already
+//RS /// refused `name`.
+//RS ///
+//RS /// Known facts beat guesses. An exact camelCase-to-snake_case hit comes first
+//RS /// and teaches the naming rule; a cross-language alias comes next; edit
+//RS /// distance is last, because it is the only one that can be wrong.
+//RS pub(crate) fn suggest_method_for_receiver(
+//RS     name: &str,
+//RS     receiver_family: Option<&str>,
+//RS     candidates: &[String],
+//RS ) -> Option<MethodSuggestion> {
+//RS     if let Some(snake) = snake_case_of_camel(name) {
+//RS         if candidates.iter().any(|known| *known == snake) {
+//RS             return Some(MethodSuggestion {
+//RS                 fix: format!("did you mean `{snake}`? Jet method names are snake_case"),
+//RS                 name: snake,
+//RS             });
+//RS         }
+//RS     }
+//RS     if let Some(snake) = snake_case_of_camel(name) {
+//RS         if let Some(jet) = alias_target(&snake, receiver_family, candidates) {
+//RS             return Some(MethodSuggestion {
+//RS                 fix: foreign_method_fix(name, &jet),
+//RS                 name: jet,
+//RS             });
+//RS         }
+//RS     }
+//RS     if let Some(jet) = alias_target(name, receiver_family, candidates) {
+//RS         return Some(MethodSuggestion {
+//RS             fix: foreign_method_fix(name, &jet),
+//RS             name: jet,
+//RS         });
+//RS     }
+//RS     suggest_field(name, candidates).map(|candidate| MethodSuggestion {
+//RS         fix: format!("did you mean `{candidate}`?"),
+//RS         name: candidate,
+//RS     })
+//RS }
+//RS 
+//RS /// Receiver-free convenience for the suggestion tests. Production callers pass
+//RS /// the receiver family so an alias cannot jump between value shapes.
+//RS #[cfg(test)]
+//RS fn suggest_method(name: &str, candidates: &[String]) -> Option<MethodSuggestion> {
+//RS     suggest_method_for_receiver(name, None, candidates)
+//RS }
+//RS 
+//RS fn crypto_leaf(name: &str) -> Option<&str> {
+//RS     let leaf = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
+//RS     secret_bearing_crypto_leaf(leaf).then_some(leaf)
+//RS }
+//RS 
+//RS fn secret_bearing_crypto_leaf(name: &str) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         "Secret" | "SigningKey" | "X25519SecretKey" | "SharedSecret"
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
+//RS     match ty {
+//RS         Type::Named(name) if crypto_leaf(&name).is_some() => Type::Tagged {
+//RS             marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
+//RS             inner: Box::new(Type::Named(
+//RS                 crypto_leaf(&name).expect("crypto leaf was checked").to_string(),
+//RS             )),
+//RS         },
+//RS         Type::List(inner) => Type::List(Box::new(core_crypto_nominal(*inner))),
+//RS         Type::Shared(inner) => Type::Shared(Box::new(core_crypto_nominal(*inner))),
+//RS         Type::Map {
+//RS             key,
+//RS             key_span,
+//RS             value,
+//RS         } => Type::Map {
+//RS             key: Box::new(core_crypto_nominal(*key)),
+//RS             key_span,
+//RS             value: Box::new(core_crypto_nominal(*value)),
+//RS         },
+//RS         Type::Option(inner) => Type::Option(Box::new(core_crypto_nominal(*inner))),
+//RS         Type::Result { ok, err } => Type::Result {
+//RS             ok: Box::new(core_crypto_nominal(*ok)),
+//RS             err: Box::new(core_crypto_nominal(*err)),
+//RS         },
+//RS         Type::Tuple(fields) => Type::Tuple(
+//RS             fields
+//RS                 .into_iter()
+//RS                 .map(|(name, ty)| (name, Box::new(core_crypto_nominal(*ty))))
+//RS                 .collect(),
+//RS         ),
+//RS         Type::FixedList { elem, len } => Type::FixedList {
+//RS             elem: Box::new(core_crypto_nominal(*elem)),
+//RS             len,
+//RS         },
+//RS         Type::Fn {
+//RS             params,
+//RS             ret,
+//RS             effect_bound,
+//RS             param_contract,
+//RS             call_metadata,
+//RS             return_view_provenance,
+//RS         } => Type::Fn {
+//RS             params: params.into_iter().map(core_crypto_nominal).collect(),
+//RS             ret: ret.map(|ty| Box::new(core_crypto_nominal(*ty))),
+//RS             effect_bound,
+//RS             param_contract,
+//RS             call_metadata,
+//RS             return_view_provenance,
+//RS         },
+//RS         Type::Apply { name, args } => Type::Apply {
+//RS             name,
+//RS             args: args.into_iter().map(core_crypto_nominal).collect(),
+//RS         },
+//RS         // Already-provenanced leaves are idempotent. User flow tags remain
+//RS         // transparent wrappers while provenance is installed below them.
+//RS         Type::Tagged { marker, inner }
+//RS             if matches!(
+//RS                 marker,
+//RS                 crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
+//RS             ) =>
+//RS         {
+//RS             Type::Tagged { marker, inner }
+//RS         }
+//RS         Type::Tagged { marker, inner } => Type::Tagged {
+//RS             marker,
+//RS             inner: Box::new(core_crypto_nominal(*inner)),
+//RS         },
+//RS         Type::Union(members) => {
+//RS             crate::AST::canonicalize_union(members.into_iter().map(core_crypto_nominal).collect())
+//RS         }
+//RS         Type::Int => Type::Int,
+//RS         Type::Float => Type::Float,
+//RS         Type::Bool => Type::Bool,
+//RS         Type::String => Type::String,
+//RS         Type::Char => Type::Char,
+//RS         Type::Named(name) => Type::Named(name),
+//RS         Type::TraitObject(names) => Type::TraitObject(names),
+//RS         Type::IntN { signed, bits } => Type::IntN { signed, bits },
+//RS         Type::InlineRange { base, lo, hi } => Type::InlineRange {
+//RS             base: Box::new(core_crypto_nominal(*base)),
+//RS             lo,
+//RS             hi,
+//RS         },
+//RS         Type::Float32 => Type::Float32,
+//RS         Type::Quantity { base, dimension } => Type::Quantity {
+//RS             base: Box::new(core_crypto_nominal(*base)),
+//RS             dimension,
+//RS         },
+//RS         Type::Measure(measure) => Type::Measure(measure),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn deterministic_clock_type(ty: Type) -> Type {
+//RS     Type::Tagged {
+//RS         marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock),
+//RS         inner: Box::new(ty),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn system_clock_type(ty: Type) -> Type {
+//RS     Type::Tagged {
+//RS         marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::SystemClock),
+//RS         inner: Box::new(ty),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn expiring_secret_loan_type(ty: Type) -> Type {
+//RS     Type::Tagged {
+//RS         marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::ExpiringSecretLoan),
+//RS         inner: Box::new(ty),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn is_expiring_secret_member_type(ty: &Type) -> bool {
+//RS     let expiring_leaf = |name: &str| matches!(name, "Secret" | "SigningKey" | "X25519SecretKey");
+//RS     match ty {
+//RS         Type::Tagged { marker, inner }
+//RS             if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)) =>
+//RS         {
+//RS             matches!(inner.as_ref(), Type::Named(name) if expiring_leaf(name))
+//RS         }
+//RS         // The secret family is source-owned Core since the crypto carrier
+//RS         // cutover; only the canonical `core.crypto` declarations qualify.
+//RS         Type::Named(name) => canonical_core_crypto_leaf(name).is_some_and(expiring_leaf),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn expiring_secret_loan_matches(want: &Type, got: &Type) -> bool {
+//RS     matches!(
+//RS         got,
+//RS         Type::Tagged { marker, inner }
+//RS             if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::ExpiringSecretLoan))
+//RS                 && inner.as_ref() == want
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn contains_expiring_secret_loan(ty: &Type) -> bool {
+//RS     match ty {
+//RS         Type::Tagged { marker, .. }
+//RS             if matches!(
+//RS                 marker,
+//RS                 crate::AST::TagMarker::Internal(crate::AST::InternalTag::ExpiringSecretLoan)
+//RS             ) =>
+//RS         {
+//RS             true
+//RS         }
+//RS         Type::Tagged { inner, .. }
+//RS         | Type::Option(inner)
+//RS         | Type::List(inner)
+//RS         | Type::Shared(inner)
+//RS         | Type::FixedList { elem: inner, .. } => contains_expiring_secret_loan(inner),
+//RS         Type::Result { ok, err }
+//RS         | Type::Map {
+//RS             key: ok,
+//RS             value: err,
+//RS             ..
+//RS         } => contains_expiring_secret_loan(ok) || contains_expiring_secret_loan(err),
+//RS         Type::Fn { params, ret, .. } => {
+//RS             params.iter().any(contains_expiring_secret_loan)
+//RS                 || ret.as_deref().is_some_and(contains_expiring_secret_loan)
+//RS         }
+//RS         Type::Tuple(fields) => fields
+//RS             .iter()
+//RS             .any(|(_, field)| contains_expiring_secret_loan(field)),
+//RS         Type::Apply { args, .. } => args.iter().any(contains_expiring_secret_loan),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn is_deterministic_clock_type(ty: &Type) -> bool {
+//RS     matches!(
+//RS         ty,
+//RS         Type::Tagged { marker, inner }
+//RS             if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock))
+//RS                 && matches!(inner.as_ref(), Type::Named(name) if name == crate::Syntax::CLOCK_TYPE)
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn is_system_clock_type(ty: &Type) -> bool {
+//RS     matches!(
+//RS         ty,
+//RS         Type::Tagged { marker, inner }
+//RS             if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SystemClock))
+//RS                 && matches!(inner.as_ref(), Type::Named(name) if name == crate::Syntax::CLOCK_TYPE)
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn is_clock_type(ty: &Type) -> bool {
+//RS     match ty {
+//RS         Type::Named(name) => name == crate::Syntax::CLOCK_TYPE,
+//RS         Type::Tagged { inner, .. } => is_clock_type(inner),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// The canonical owner prefix of the source-owned `core.crypto` declarations.
+//RS const CORE_CRYPTO_CANONICAL_PREFIX: &str = "<corelib>/Core/crypto::Core/crypto/crypto.jet::";
+//RS 
+//RS /// The leaf of a canonical `core.crypto` nominal, e.g. `Secret`.
+//RS fn canonical_core_crypto_leaf(name: &str) -> Option<&str> {
+//RS     name.strip_prefix(CORE_CRYPTO_CANONICAL_PREFIX)
+//RS }
+//RS 
+//RS /// The canonical `core.crypto` nominal for `leaf`, the identity every
+//RS /// source-owned crypto signature and value carries.
+//RS pub(crate) fn core_crypto_canonical_type(leaf: &str) -> Type {
+//RS     Type::Named(format!("{CORE_CRYPTO_CANONICAL_PREFIX}{leaf}"))
+//RS }
+//RS 
+//RS pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
+//RS     match ty {
+//RS         Type::Tagged { marker, inner }
+//RS             if matches!(
+//RS                 marker,
+//RS                 crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
+//RS             ) =>
+//RS         {
+//RS             matches!(inner.as_ref(), Type::Named(name) if secret_bearing_crypto_leaf(name))
+//RS         }
+//RS         Type::Tagged { inner, .. } => is_secret_bearing_crypto_type(inner),
+//RS         Type::Named(name) => canonical_core_crypto_leaf(name).is_some_and(secret_bearing_crypto_leaf),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-CRYPTO-API1: the one audited `core.crypto.expert` exposure function for
+//RS /// a secret-bearing value's raw bytes.
+//RS pub(crate) fn secret_exposure_function(ty: &Type) -> Option<&'static str> {
+//RS     match ty {
+//RS         Type::Tagged { inner, .. } => secret_exposure_function(inner),
+//RS         Type::Named(name) => match crypto_leaf(name).or_else(|| canonical_core_crypto_leaf(name))? {
+//RS             "Secret" => Some("secret_bytes"),
+//RS             "SigningKey" => Some("signing_key_bytes"),
+//RS             "X25519SecretKey" => Some("x25519_secret_bytes"),
+//RS             "SharedSecret" => Some("shared_secret_bytes"),
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Some Core values are one-pass sources. Reading one consumes it, so it
+//RS /// cannot be shown from a read, and codegen has no `jet_show` to call. Sema
+//RS /// refuses showing it (I3).
+//RS pub(crate) fn is_one_pass_source(ty: &Type) -> bool {
+//RS     match ty {
+//RS         Type::Apply { name, .. } => {
+//RS             name == Syntax::TYPE_ITER
+//RS                 || name == Syntax::TYPE_VIEW_ITER
+//RS                 || name == Syntax::TYPE_STREAM
+//RS         }
+//RS         Type::Named(name) => name == "Body" || name == "HTTPBodyChunks",
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS /// Name a real materializer when the one-pass type has one. `Stream<T>` and
+//RS /// `HTTPBodyChunks` are consumed with a loop instead.
+//RS pub(crate) fn one_pass_materializer(ty: &Type) -> Option<&'static str> {
+//RS     match ty {
+//RS         Type::Apply { name, .. }
+//RS             if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER =>
+//RS         {
+//RS             Some(".to_list()")
+//RS         }
+//RS         Type::Named(n) if n == "Body" => Some(".text(limit)"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Core types that carry a Prelude display but are not user items, so they
+//RS /// never reach the auto-derive sets. Every "can this be shown" predicate must
+//RS /// agree on this list. Splitting it is what let interpolation accept a value
+//RS /// that print rejected.
+//RS pub(crate) fn is_core_shown_type(name: &str) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         "Decimal"
+//RS             | "Fraction"
+//RS             | "MIME"
+//RS             | "ServiceUpgradeReceipt"
+//RS             | "ServiceWorkflow"
+//RS             | "TaskOutcome"
+//RS             | "TaskStatus"
+//RS             | "Complex"
+//RS             | "URL"
+//RS             | "Path"
+//RS             | "Date"
+//RS             | "Duration"
+//RS             | "LocalDate"
+//RS             | "LocalTime"
+//RS             | "DateTime"
+//RS             | "Instant"
+//RS             | "Period"
+//RS             | "Zone"
+//RS             | "ZonedDateTime"
+//RS             | "DataTracked"
+//RS             | "DataWatch"
+//RS             | "DataWatchStatus"
+//RS             | "DBValue"
+//RS             | "DBLease"
+//RS             | "DBPoolReceipt"
+//RS     ) || is_core_error_family_type(name)
+//RS         // S80 / D-FAIL-ERROR1=A: the Prelude-owned default error shows its
+//RS         // `message` through the Prelude display every tier already carries.
+//RS         || name == Syntax::TYPE_ERR
+//RS }
+//RS 
+//RS /// D-FAIL-CONV2=A: the standard library's own error family. Membership is
+//RS /// derived, not chosen: a Core error type is a member when the Prelude registers
+//RS /// it printable (`TraitRegistry::register_synthetic_display_debug`), a Core
+//RS /// signature returns it in the error position of a `T !E` result, and showing it
+//RS /// is not prohibited. `Prelude/Errors.jet` declares one `impl <member> => Err`
+//RS /// for exactly this list, and the Prelude owns each member's failure text, so the
+//RS /// family renders through the same display hook every other shown Core type uses.
+//RS ///
+//RS /// D-CRYPTO-ERRFAM1=A: `CryptoError` and `FileCryptoError` are members; both are
+//RS /// payload-free enums, and the secret-bearing crypto types keep E0915.
+//RS ///
+//RS /// Outside the family on purpose: `TaskFailure` (D-FAIL-CARRIER1 owns
+//RS /// cancellation and deadline reporting), `[FieldError]` (a list, not one named
+//RS /// type), and component types no Core call fails with (`DataErrorKind`,
+//RS /// `EncodingCause`, `IOContext`, `NetErrorDetail`, `NetDnsError`).
+//RS ///
+//RS /// A source-owned Core error arrives under its canonical owner identity
+//RS /// (`<corelib>/Core/crypto::Core/crypto/uuid.jet::UUIDError`); membership is
+//RS /// decided by its leaf.
+//RS pub fn is_core_error_family_type(name: &str) -> bool {
+//RS     matches!(
+//RS         core_error_family_leaf(name),
+//RS         "AppError"
+//RS             | "ArchiveError"
+//RS             | "BuildError"
+//RS             | "BrowserError"
+//RS             | "CBORError"
+//RS             | "ComputeError"
+//RS             | "CryptoError"
+//RS             | "DBError"
+//RS             | "DataError"
+//RS             | "EncodingError"
+//RS             | "EmailError"
+//RS             | "EnvError"
+//RS             | "FileCryptoError"
+//RS             | "HTTPError"
+//RS             | "IOError"
+//RS             | "MIMEError"
+//RS             | "ModError"
+//RS             | "NetError"
+//RS             | "PerfError"
+//RS             | "RangeError"
+//RS             | "TextError"
+//RS             | "TimeError"
+//RS             | "URLError"
+//RS             | "UTF8Error"
+//RS             | "UUIDError"
+//RS             | "WsError"
+//RS             | "XMLError"
+//RS     )
+//RS }
+//RS 
+//RS /// The family leaf of a Core error name: canonical `<corelib>/…::Leaf`
+//RS /// identities reduce to `Leaf`; every other name is its own leaf.
+//RS pub(crate) fn core_error_family_leaf(name: &str) -> &str {
+//RS     name.strip_prefix("<corelib>/")
+//RS         .and_then(|identity| identity.rsplit("::").next())
+//RS         .unwrap_or(name)
+//RS }
+//RS 
+//RS /// D-FAILURE-FOUNDATION1=A: every Core type that may be named as the error
+//RS /// side of an explicit `!` contract. This is intentionally broader than the
+//RS /// default-error conversion family above: types such as `TaskFailure` and
+//RS /// `AllocError` keep their own typed failure meaning even when they do not
+//RS /// convert implicitly to `Err`.
+//RS pub(crate) fn is_core_error_type(name: &str) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         "AllocError"
+//RS             | "AuthError"
+//RS             | "BuildError"
+//RS             | "BrowserError"
+//RS             | "CBORError"
+//RS             | "Closed"
+//RS             | "CompilerError"
+//RS             | "CompilerPackageError"
+//RS             | "ComputeError"
+//RS             | "CryptoError"
+//RS             | "DBError"
+//RS             | "DataError"
+//RS             | "EmailError"
+//RS             | "EncodingError"
+//RS             | "EnvError"
+//RS             | "EventConfigError"
+//RS             | "Expired"
+//RS             | "FileCryptoError"
+//RS             | "HTTPError"
+//RS             | "IOError"
+//RS             | "UIHostError"
+//RS             | "KeyWrapError"
+//RS             | "NetError"
+//RS             | "RangeError"
+//RS             | "ServiceError"
+//RS             | "TaskFailure"
+//RS             | "TextError"
+//RS             | "UTF8Error"
+//RS             | "VaultError"
+//RS             | "WsError"
+//RS             | "XMLError"
+//RS             | "FieldError"
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn is_printable(
+//RS     ty: &Type,
+//RS     registry: &TypeRegistry,
+//RS     trait_reg: &crate::Traits::TraitRegistry,
+//RS ) -> bool {
+//RS     if is_secret_bearing_crypto_type(ty) || is_one_pass_source(ty) {
+//RS         return false;
+//RS     }
+//RS     match ty {
+//RS         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
+//RS         Type::IntN { .. } | Type::Float32 => true,
+//RS         Type::Option(inner) => is_printable(inner, registry, trait_reg),
+//RS         Type::Result { ok, err } => {
+//RS             is_printable(ok, registry, trait_reg) && is_printable(err, registry, trait_reg)
+//RS         }
+//RS         Type::List(inner) => is_printable(inner, registry, trait_reg),
+//RS         Type::Map { key, value, .. } => {
+//RS             is_printable(key, registry, trait_reg) && is_printable(value, registry, trait_reg)
+//RS         }
+//RS         Type::Named(n) => {
+//RS             registry.is_unit_type(n)
+//RS                 || registry.distinct_is_printable(n)
+//RS                 || trait_reg.implements_trait(n, Generics::PRINTABLE)
+//RS                 || is_core_shown_type(n)
+//RS         }
+//RS         Type::Quantity { .. } => true,
+//RS         Type::Apply { name, .. } if name == "KeyRef" => true,
+//RS         Type::Apply { name, args } => {
+//RS             (name == "View" && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
+//RS                 || (trait_reg.implements_trait(name, Generics::PRINTABLE)
+//RS                     && args.iter().all(|a| is_printable(a, registry, trait_reg)))
+//RS         }
+//RS         Type::Tuple(fields) => fields
+//RS             .iter()
+//RS             .all(|(_, t)| is_printable(t, registry, trait_reg)),
+//RS         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
+//RS         Type::FixedList { elem, .. } => is_printable(elem, registry, trait_reg),
+//RS         Type::Tagged { inner, .. } => is_printable(inner, registry, trait_reg),
+//RS         Type::InlineRange { base, .. } => is_printable(base, registry, trait_reg),
+//RS         Type::Union(members) => members.iter().all(|m| is_printable(m, registry, trait_reg)),
+//RS         // Same as the retired `\0compute.dimension.N` string encoding: it
+//RS         // never matched any of the `Type::Named` arms above, so this stayed
+//RS         // non-printable on its own (only ever seen as a `Type::Apply` arg).
+//RS         Type::Measure(_) => false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-DISPLAYDBG1: bare `{value}` requires a Display-capable value. Auto-
+//RS /// Printable values remain admitted during the Display migration.
+// END-PORT-PENDING 0426 crates/jet-sema/src/Sema/Diagnostics.rs:1-1759
+

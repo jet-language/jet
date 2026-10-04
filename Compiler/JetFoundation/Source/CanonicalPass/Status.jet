@@ -1,0 +1,39 @@
+// CmdInspect.rs:3655-3707: typed projection of actual journal records. Uses
+// the ONE original StatusValue parser (including its Core parse gate), never
+// protocol JSON's narrower limits or a decision-ledger reconstruction.
+use core.sys.host.os_path_ingress as canonical_pass_status_env
+use core.files.runtime.kernel_path_components as canonical_pass_status_path
+fn canonical_pass_status_snapshot(raw: String) -> StatusValue Never! {
+    StatusValue.parse(raw) ?? StatusValue.String{value: ~raw}
+}
+fn canonical_pass_status_process() -> String Never! {
+    native :: canonical_pass_status_env.var_os("JET_ADAPTER_CANONICAL_PASS_PROCESS") ?? return "inspect"
+    canonical_pass_status_path.to_str(native) ?? "inspect"
+}
+pub fn canonical_pass_status_value(record: CanonicalPassRecord) -> StatusValue Never! {
+    source :: StatusFields.new()
+        .with("path", StatusValue.String{value: ~record.source})
+        .with("process", StatusValue.String{value: canonical_pass_status_process()})
+    input :: StatusFields.new()
+        .with("representation", StatusValue.String{value: ~record.input_representation})
+        .with("canonical_payload", canonical_pass_status_snapshot(record.input_payload))
+        .with("identity", canonical_pass_status_snapshot(record.input_identity))
+    output :: StatusFields.new()
+        .with("representation", StatusValue.String{value: ~record.output_representation})
+        .with("canonical_payload", canonical_pass_status_snapshot(record.output_payload))
+        .with("identity", canonical_pass_status_snapshot(record.output_identity))
+    premises :: loop premise in record.premises -> StatusValue.String{value: ~premise}
+    fields :: StatusFields.new()
+        .with("schema", StatusValue.String{value: CANONICAL_PASS_SCHEMA})
+        .with("protocol", StatusValue.String{value: CANONICAL_PASS_PROTOCOL})
+        .with("stage", StatusValue.String{value: ~record.stage})
+        .with("operation_id", StatusValue.String{value: ~record.operation_id})
+        .with("occurrence", StatusValue.Integer{value: record.occurrence})
+        .with("order", StatusValue.Integer{value: record.order})
+        .with("source", StatusValue.object(^source))
+        .with("input", StatusValue.object(^input))
+        .with("output", StatusValue.object(^output))
+        .with("premises", StatusValue.array(^premises))
+        .with("disposition", StatusValue.String{value: ~record.disposition})
+    StatusValue.object(^fields)
+}

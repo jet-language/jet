@@ -1,0 +1,15 @@
+// Lock-pinned build provenance; capture and mutation remain with the lock writer.
+// The toolchain identity a fresh stamp records: the Rust `BuildStamp`
+// default (`CARGO_PKG_VERSION` of jet-foundation).
+pub PKG_BUILD_STAMP_TOOLCHAIN :: prep { "0.1.0" }
+
+pub struct BuildStamp {
+    pub git: String?
+    pub dirty: Bool
+    pub toolchain: String
+    pub at: String
+
+    pub fn default() -> BuildStamp Never! {
+        BuildStamp{git: None, dirty: false, toolchain: PKG_BUILD_STAMP_TOOLCHAIN, at: ""}
+    }
+}

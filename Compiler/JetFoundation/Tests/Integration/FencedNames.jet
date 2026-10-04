@@ -1,0 +1,1055 @@
+// PORT-PENDING 1054 tests-fenced-names-module-group: tests/fenced_names.rs:1-94
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS 
+//RS use tir_support::{build_and_run, have_rustc};
+//RS 
+//RS const SOURCE: &str = r#"
+//RS fn run() {
+//RS     <: score1..score3 :> :: 7
+//RS     print(<: score1..score3 :>)
+//RS }
+//RS "#;
+//RS 
+//RS const INTEGER_RANGE_SOURCE: &str = r#"
+//RS fn run() {
+//RS     print(<:0..3:>)
+//RS }
+//RS "#;
+//RS 
+//RS fn run_fenced_source(name: &str, source: &str, expected: &str) {
+//RS     if have_rustc() {
+//RS         let (code, stdout) = build_and_run(name, source);
+//RS         assert_eq!(code, 0);
+//RS         assert_eq!(stdout, expected);
+//RS     }
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_{name}_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     let shown = path.to_string_lossy().into_owned();
+//RS 
+//RS     let mut bundle = jet::Loader::load_entry(&shown).expect("fenced-name bundle should load");
+//RS     let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+//RS         .into_iter()
+//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect::<Vec<_>>();
+//RS     assert!(
+//RS         errors.is_empty(),
+//RS         "fenced names must type-check: {errors:?}"
+//RS     );
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "expanded statements must stay resident-JIT safe: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS         .expect("expanded statements must compile in resident JIT");
+//RS 
+//RS     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
+//RS         jet_jit::reset_jit_trace_for_test();
+//RS         match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+//RS             jet::Interpreter::RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(exit_code, 0, "{tier} exit drift");
+//RS                 assert_eq!(stderr, "", "{tier} stderr drift");
+//RS                 assert_eq!(stdout, expected, "{tier} expansion order drift");
+//RS                 if !force_interpreter {
+//RS                     assert!(
+//RS                         jet_jit::jit_executed_for_test(),
+//RS                         "fenced names must execute native resident JIT code"
+//RS                     );
+//RS                     assert!(
+//RS                         !jet_jit::fallback_invoked_for_test(),
+//RS                         "fenced names resident JIT must not invoke fallback"
+//RS                     );
+//RS                     assert!(
+//RS                         !jet_jit::deopt_invoked_for_test(),
+//RS                         "fenced names resident JIT must not deopt"
+//RS                     );
+//RS                 }
+//RS             }
+//RS             jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+//RS                 panic!("{tier} rejected fenced names: {diagnostics:?}")
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn fenced_names_match_on_aot_jit_and_interpreter() {
+//RS     run_fenced_source("fenced_names", SOURCE, "7\n7\n7\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fenced_integer_range_matches_on_aot_jit_and_interpreter() {
+//RS     run_fenced_source("fenced_integer_range", INTEGER_RANGE_SOURCE, "0\n1\n2\n3\n");
+//RS }
+// END-PORT-PENDING 1054 tests/fenced_names.rs:1-94
+
+// PORT-PENDING 1054 tests-fenced-names-module-group: tests/ffi_com.rs:1-24
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Focused COM/VBA fixture coverage for card #507.
+//RS //!
+//RS //! The checked-in example and IDL are portable source artifacts. The production
+//RS //! type-library bind and COM/Office execution remain Windows-host proof, so the
+//RS //! portable test only checks the honest non-Windows refusal.
+//RS 
+//RS use std::fs;
+//RS 
+//RS mod common;
+//RS 
+//RS #[cfg(not(target_os = "windows"))]
+//RS #[test]
+//RS fn com_example_is_rejected_before_binding_on_non_windows() {
+//RS     let root = common::unique_tmp("jet_com_example_gate");
+//RS     let entry = root.join("run.jet");
+//RS     let source = include_str!("../Examples/features/lowlevel/polyglot_com/run.jet");
+//RS     fs::write(&entry, source).unwrap();
+//RS 
+//RS     let diagnostics = jet::compile_with_path(source, entry.to_str().unwrap())
+//RS         .expect_err("the COM example must be gated on a non-Windows host");
+//RS     assert_eq!(diagnostics.first().map(|diagnostic| diagnostic.code.as_str()), Some("E3260"));
+//RS     let rendered = jet::render_diagnostics(entry.to_str().unwrap(), source, &diagnostics);
+//RS     assert!(rendered.contains("`com.*` needs a Windows host"), "{rendered}");
+//RS }
+// END-PORT-PENDING 1054 tests/ffi_com.rs:1-24
+
+// PORT-PENDING 1054 tests-fenced-names-module-group: tests/ffi_javascript.rs:1-109
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Focused production-path conformance for the typed JavaScript sidecar.
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS fn test_root(name: &str) -> PathBuf {
+//RS     std::env::temp_dir().join(format!("jet_{name}_{}", std::process::id()))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn javascript_sidecar_binds_runs_and_rejects_dynamic_types() {
+//RS     if Command::new("node").arg("--version").output().is_err()
+//RS         || Command::new("cc").arg("--version").output().is_err()
+//RS         || Command::new("ar").arg("--version").output().is_err()
+//RS     {
+//RS         eprintln!("note: JavaScript sidecar toolchain unavailable; skipping production-path check");
+//RS         return;
+//RS     }
+//RS     let root = test_root("javascript_sidecar");
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(
+//RS         root.join("ops.d.ts"),
+//RS         "export function add(left: bigint, right: bigint): bigint;\nexport function fail(value: bigint): bigint;\nexport function wrong_type(value: bigint): bigint;\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         root.join("ops.mjs"),
+//RS         "export function add(left, right) { return left + right; }\nexport function fail(value) { throw new Error('secret foreign detail'); }\nexport function wrong_type(value) { return Number(value); }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args([
+//RS             "inspect",
+//RS             "bind",
+//RS             "js",
+//RS             "ops.d.ts",
+//RS             "--runtime",
+//RS             "ops.mjs",
+//RS             "--pkg",
+//RS             "ops",
+//RS         ])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "JavaScript binding failed: {}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     let generated = fs::read_to_string(root.join(".jet/bindings/js/ops.jet")).unwrap();
+//RS     assert!(generated.contains("jet-ffi-descriptor="));
+//RS     assert!(generated.contains("Int !String -[FFI]>"));
+//RS     assert!(!generated.contains("=>"));
+//RS     assert!(root.join(".jet/bindings/js/libjet_js_ops.a").is_file());
+//RS     assert!(root.join(".jet/bindings/js/ops.d.ts").is_file());
+//RS     let provenance = fs::read_to_string(root.join(".jet/bindings/js/ops.provenance")).unwrap();
+//RS     assert!(provenance.contains("descriptor="));
+//RS     assert!(provenance.contains("artifact.libjet_js_ops.a="));
+//RS 
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "use js.ops as ops\nfn run() -[FFI, IO]> {\n    print(ops.add(2, 3) ?? panic(\"add failed\"))\n    print(ops.fail(7) ?? 99)\n    print(ops.wrong_type(7) ?? 123)\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", "main.jet"])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "JavaScript sidecar run failed: {}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "5\n99\n123\n");
+//RS 
+//RS     fs::write(
+//RS         root.join("bad.d.ts"),
+//RS         "export function dynamic(value?: number): number;\n",
+//RS     )
+//RS     .unwrap();
+//RS     let bad = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args([
+//RS             "inspect",
+//RS             "bind",
+//RS             "js",
+//RS             "bad.d.ts",
+//RS             "--runtime",
+//RS             "ops.mjs",
+//RS             "--pkg",
+//RS             "bad",
+//RS         ])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!bad.status.success());
+//RS     let stderr = String::from_utf8_lossy(&bad.stderr);
+//RS     assert!(stderr.contains("Error [E3208]:"), "{stderr}");
+//RS     assert!(stderr.contains(" Why:"), "{stderr}");
+//RS     assert!(stderr.contains(" Fix:"), "{stderr}");
+//RS     assert!(!root.join(".jet/bindings/js/bad.jet").exists());
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+// END-PORT-PENDING 1054 tests/ffi_javascript.rs:1-109
+
+// PORT-PENDING 1054 tests-fenced-names-module-group: tests/ffi_python.rs:1-166
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Focused closeout checks for the unified Python sidecar and capability report.
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS fn test_root(name: &str) -> PathBuf {
+//RS     std::env::temp_dir().join(format!("jet_{name}_{}", std::process::id()))
+//RS }
+//RS 
+//RS #[test]
+//RS fn ffi_capability_report_is_golden_and_cli_backed() {
+//RS     let expected = include_str!("fixtures/ffi_capability_report.txt");
+//RS     assert_eq!(jet::Foreign::capability_report_text(), expected);
+//RS 
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["inspect", "dossier", "ffi"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("jet inspect dossier ffi");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "capability report failed: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn python_sidecar_binds_runs_and_launders_failure() {
+//RS     if Command::new("python3").arg("--version").output().is_err()
+//RS         || Command::new("cc").arg("--version").output().is_err()
+//RS         || Command::new("ar").arg("--version").output().is_err()
+//RS     {
+//RS         eprintln!("note: Python sidecar toolchain unavailable; skipping production-path check");
+//RS         return;
+//RS     }
+//RS     let root = test_root("python_sidecar");
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(
+//RS         root.join("ops.py"),
+//RS         "def add(left: int, right: int) -> int:\n    return left + right\n\ndef negate(value: bool) -> bool:\n    return not value\n\ndef fail(value: int) -> int:\n    raise RuntimeError('secret foreign detail')\n\ndef wrong_type(value: int) -> int:\n    return 1.5\n",
+//RS     )
+//RS     .unwrap();
+//RS     let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["inspect", "bind", "py", "ops.py", "--pkg", "ops"])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Python binding failed: {}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     let generated = fs::read_to_string(root.join(".jet/bindings/py/ops.jet")).unwrap();
+//RS     assert!(generated.contains("jet-ffi-descriptor="));
+//RS     assert!(generated.contains("-[FFI.Py]>"));
+//RS     assert!(!generated.contains("=>"));
+//RS     assert!(root.join(".jet/bindings/py/libjet_py_ops.a").is_file());
+//RS     let provenance = fs::read_to_string(root.join(".jet/bindings/py/ops.provenance")).unwrap();
+//RS     assert!(provenance.contains("descriptor="));
+//RS     assert!(provenance.contains("layout=AdapterTyped"));
+//RS     assert!(provenance.contains("ownership=AdapterOwned"));
+//RS     assert!(provenance.contains("errors=AdapterResult"));
+//RS     assert!(provenance.contains("callbacks=AdapterMarshalled"));
+//RS     assert!(provenance.contains("async=AdapterMarshalled"));
+//RS     assert!(provenance.contains("tasks=AdapterMarshalled"));
+//RS     assert!(provenance.contains("safety=GeneratedWrapper"));
+//RS     assert!(provenance.contains("provider=PyPi"));
+//RS     assert!(provenance.contains("artifact.libjet_py_ops.a="));
+//RS     assert!(provenance.contains("runtime-toolchain="));
+//RS     assert!(provenance.contains("source-sha256="));
+//RS     let first_identity = provenance
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("identity="))
+//RS         .unwrap()
+//RS         .to_string();
+//RS     let first_store = root.join(".jet/bindings/py/.bridges").join(&first_identity);
+//RS     assert!(first_store.join("libjet_py_ops.a").is_file());
+//RS     fs::remove_file(root.join(".jet/bindings/py/libjet_py_ops.a")).unwrap();
+//RS     let cached = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["inspect", "bind", "py", "ops.py", "--pkg", "ops"])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         cached.status.success(),
+//RS         "identical Python binding did not reuse its bridge: {}",
+//RS         String::from_utf8_lossy(&cached.stderr)
+//RS     );
+//RS     let cached_provenance =
+//RS         fs::read_to_string(root.join(".jet/bindings/py/ops.provenance")).unwrap();
+//RS     assert_eq!(
+//RS         cached_provenance
+//RS             .lines()
+//RS             .find_map(|line| line.strip_prefix("identity=")),
+//RS         Some(first_identity.as_str())
+//RS     );
+//RS     assert!(root.join(".jet/bindings/py/libjet_py_ops.a").is_file());
+//RS 
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "use py.ops as ops\nfn run() -[FFI.Py, IO]> {\n    print(ops.add(2, 3) ?? panic(\"add failed\"))\n    print(ops.negate(true) ?? true)\n    print(ops.fail(7) ?? 99)\n    print(ops.wrong_type(7) ?? 123)\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", "main.jet"])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "Python sidecar run failed: {}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "5\nfalse\n99\n123\n");
+//RS 
+//RS     fs::write(
+//RS         root.join("ops.py"),
+//RS         "def add(left: int, right: int) -> int:\n    return left + right + 1\n\ndef fail(value: int) -> int:\n    raise RuntimeError('secret foreign detail')\n",
+//RS     )
+//RS     .unwrap();
+//RS     let changed = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["inspect", "bind", "py", "ops.py", "--pkg", "ops"])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         changed.status.success(),
+//RS         "changed Python source did not rebuild its bridge: {}",
+//RS         String::from_utf8_lossy(&changed.stderr)
+//RS     );
+//RS     let changed_provenance =
+//RS         fs::read_to_string(root.join(".jet/bindings/py/ops.provenance")).unwrap();
+//RS     let changed_identity = changed_provenance
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("identity="))
+//RS         .unwrap();
+//RS     assert_ne!(changed_identity, first_identity);
+//RS     assert!(root
+//RS         .join(".jet/bindings/py/.bridges")
+//RS         .join(changed_identity)
+//RS         .join("libjet_py_ops.a")
+//RS         .is_file());
+//RS 
+//RS     fs::write(root.join("bad.py"), "def bad(value):\n    return value\n").unwrap();
+//RS     let bad = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["inspect", "bind", "py", "bad.py", "--pkg", "bad"])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!bad.status.success());
+//RS     let stderr = String::from_utf8_lossy(&bad.stderr);
+//RS     assert!(stderr.contains("Error [E3208]:"), "{stderr}");
+//RS     assert!(stderr.contains(" Why:"), "{stderr}");
+//RS     assert!(stderr.contains(" Fix:"), "{stderr}");
+//RS     assert!(!root.join(".jet/bindings/py/bad.jet").exists());
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+// END-PORT-PENDING 1054 tests/ffi_python.rs:1-166
+
+// PORT-PENDING 1054 tests-fenced-names-module-group: tests/ffi_rust.rs:1-145
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Rust FFI conformance against the unified descriptor and bridge contract.
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS use common::have_rustc;
+//RS 
+//RS fn add_ffi_bridge_args(rustc: &mut Command, link: &jet::FFI::FfiLink) {
+//RS     rustc
+//RS         .arg("--extern")
+//RS         .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS     for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS         rustc
+//RS             .arg("-L")
+//RS             .arg(format!("dependency={}", deps_dir.display()));
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn rust_extern_std_round_trip_uses_the_canonical_descriptor() {
+//RS     if !have_rustc() || Command::new("cargo").arg("--version").output().is_err() {
+//RS         eprintln!("note: skipping Rust FFI conformance (need rustc and cargo)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let root = common::unique_tmp("jet_ffi_rust_conformance");
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     let path = root.join("main.jet");
+//RS     let source = r#"
+//RS extern rust "std" {
+//RS     fn rust_max(a: Int, b: Int) -> Int = "std::cmp::max"
+//RS }
+//RS fn run() {
+//RS     print(rust_max(2, 40))
+//RS }
+//RS "#;
+//RS     fs::write(&path, source).unwrap();
+//RS 
+//RS     let output = jet::compile_with_path(source, path.to_str().unwrap()).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "Rust FFI source failed the production path:\n{}",
+//RS             jet::render_diagnostics(path.to_str().unwrap(), source, &diags)
+//RS         )
+//RS     });
+//RS     let link = output
+//RS         .ffi
+//RS         .as_ref()
+//RS         .expect("extern rust must publish a bridge link");
+//RS     let descriptor = jet::AST::binder_descriptor(jet::AST::ForeignLanguage::Rust)
+//RS         .expect("Rust must have a canonical binder descriptor")
+//RS         .stamp();
+//RS     let provenance = fs::read_to_string(&link.provenance_path).unwrap();
+//RS     assert!(
+//RS         provenance.contains(&format!("descriptor={descriptor}")),
+//RS         "Rust bridge provenance must carry the canonical descriptor: {provenance}"
+//RS     );
+//RS     assert!(
+//RS         output.rust.contains("jet_ffi_rust_max"),
+//RS         "the production bridge wrapper must reach generated Rust"
+//RS     );
+//RS 
+//RS     let rust_source = root.join("main.rs");
+//RS     let binary = root.join("main_bin");
+//RS     fs::write(&rust_source, &output.rust).unwrap();
+//RS     let mut rustc = Command::new("rustc");
+//RS     rustc
+//RS         .args(["--edition", "2021"])
+//RS         .arg(&rust_source)
+//RS         .arg("-o")
+//RS         .arg(&binary);
+//RS     add_ffi_bridge_args(&mut rustc, link);
+//RS     let built = rustc.output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "rustc rejected Rust FFI output:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS 
+//RS     let run = Command::new(&binary).output().unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "Rust FFI program failed:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "40\n");
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rust_extern_signature_mismatch_is_typed_before_a_foreign_call() {
+//RS     if !have_rustc() || Command::new("cargo").arg("--version").output().is_err() {
+//RS         eprintln!("note: skipping Rust FFI mismatch conformance (need rustc and cargo)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let root = common::unique_tmp("jet_ffi_rust_mismatch");
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     let path = root.join("main.jet");
+//RS     let source = r#"
+//RS extern rust "std" {
+//RS     fn wrong_result(value: Int) -> String = "std::convert::identity"
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     fs::write(&path, source).unwrap();
+//RS 
+//RS     let diagnostics = jet::compile_with_path(source, path.to_str().unwrap())
+//RS         .expect_err("a Rust ABI mismatch must fail before a foreign call");
+//RS     let diagnostic = diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0705")
+//RS         .expect("Rust ABI mismatch must use E0705");
+//RS     assert!(!diagnostic.what.is_empty());
+//RS     assert!(!diagnostic.why.is_empty());
+//RS     assert!(!diagnostic.fix.is_empty());
+//RS     let rendered = jet::render_diagnostics(path.to_str().unwrap(), source, &diagnostics);
+//RS     assert!(rendered.contains("Error [E0705]"), "{rendered}");
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn c_rust_python_and_javascript_share_the_typed_scalar_contract() {
+//RS     use jet::AST::{binder_descriptor, ForeignLanguage, ForeignSafety, ForeignScalar};
+//RS 
+//RS     for language in [
+//RS         ForeignLanguage::C,
+//RS         ForeignLanguage::Rust,
+//RS         ForeignLanguage::Py,
+//RS         ForeignLanguage::JS,
+//RS     ] {
+//RS         let descriptor = binder_descriptor(language).expect("conformance language descriptor");
+//RS         let contract = descriptor.contract;
+//RS         assert_eq!(contract.version, jet::AST::FOREIGN_ABI_CONTRACT_VERSION);
+//RS         assert_eq!(contract.integer, ForeignScalar::Int);
+//RS         assert_eq!(contract.floating, ForeignScalar::Float);
+//RS         assert_eq!(contract.boolean, ForeignScalar::Bool);
+//RS         assert_eq!(contract.character, ForeignScalar::Char);
+//RS         assert_eq!(contract.string, ForeignScalar::String);
+//RS         assert_eq!(contract.safety, ForeignSafety::GeneratedWrapper);
+//RS         assert!(descriptor
+//RS             .stamp()
+//RS             .starts_with(jet::AST::FOREIGN_DESCRIPTOR_SCHEMA));
+//RS     }
+//RS }
+// END-PORT-PENDING 1054 tests/ffi_rust.rs:1-145
+
+// PORT-PENDING 1054 tests-fenced-names-module-group: tests/find.rs:1-85
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::process::Command;
+//RS 
+//RS fn jet() -> Command {
+//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn effects_example() -> String {
+//RS     format!(
+//RS         "{}/Examples/features/effects/effects.jet",
+//RS         env!("CARGO_MANIFEST_DIR")
+//RS     )
+//RS }
+//RS 
+//RS #[test]
+//RS fn find_searches_by_signature_effect_and_example() {
+//RS     let target = effects_example();
+//RS 
+//RS     let signature = jet()
+//RS         .args(["find", "Int -> Int", target.as_str()])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         signature.status.success(),
+//RS         "signature stderr: {}",
+//RS         String::from_utf8_lossy(&signature.stderr)
+//RS     );
+//RS     let signature_stdout = String::from_utf8_lossy(&signature.stdout);
+//RS     assert!(
+//RS         signature_stdout.contains("square"),
+//RS         "signature: {signature_stdout}"
+//RS     );
+//RS 
+//RS     let effect = jet()
+//RS         .args(["find", "--effect", "IO", "report", target.as_str()])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         effect.status.success(),
+//RS         "effect stderr: {}",
+//RS         String::from_utf8_lossy(&effect.stderr)
+//RS     );
+//RS     let effect_stdout = String::from_utf8_lossy(&effect.stdout);
+//RS     assert!(effect_stdout.contains("report"), "effect: {effect_stdout}");
+//RS     assert!(
+//RS         effect_stdout.contains("holds IO"),
+//RS         "effect reason: {effect_stdout}"
+//RS     );
+//RS     assert!(
+//RS         effect_stdout.contains("why:"),
+//RS         "effect explanation: {effect_stdout}"
+//RS     );
+//RS 
+//RS     let example = jet()
+//RS         .args(["find", "--example", "4 -> 16", target.as_str()])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         example.status.success(),
+//RS         "example stderr: {}",
+//RS         String::from_utf8_lossy(&example.stderr)
+//RS     );
+//RS     let example_stdout = String::from_utf8_lossy(&example.stdout);
+//RS     assert!(
+//RS         example_stdout.contains("square"),
+//RS         "example: {example_stdout}"
+//RS     );
+//RS     assert!(
+//RS         example_stdout.contains("why:"),
+//RS         "example explanation: {example_stdout}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn find_is_a_flat_top_level_verb() {
+//RS     assert!(jet::CLI::is_canonical_top_level("find"));
+//RS     let out = jet().args(["find", "--help"]).output().unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(stdout.contains("jet find"), "stdout: {stdout}");
+//RS     assert!(!stdout.contains("jet inspect find"), "stdout: {stdout}");
+//RS }
+// END-PORT-PENDING 1054 tests/find.rs:1-85
+
+// PORT-PENDING 1054 tests-fenced-names-module-group: tests/first_hour.rs:1-404
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #2900: prove the first-hour path on one real, isolated project.
+//RS //!
+//RS //! This is intentionally an end-to-end CLI scenario rather than a unit test.
+//RS //! It keeps every generated project and every Jet execution/package cache
+//RS //! below the disk-backed Scratch root, and it never turns a missing tier into a
+//RS //! skip.
+//RS 
+//RS mod common;
+//RS 
+//RS use common::Scratch;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Output};
+//RS 
+//RS const CARD: &str = "#2900";
+//RS const OWNER_NEW: &str = "#2433";
+//RS const OWNER_DEPS: &str = "#2883";
+//RS const OWNER_WEB: &str = "#2882";
+//RS const OWNER_ADVANCED: &str = "#2878/#2879";
+//RS 
+//RS fn jet_bin() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn prepare_environment(root: &Path) {
+//RS     for name in [
+//RS         "store",
+//RS         "package-store",
+//RS         "run-cache",
+//RS         "test-scratch",
+//RS         "oracle-cache",
+//RS         "tmp",
+//RS     ] {
+//RS         fs::create_dir_all(root.join(name)).unwrap_or_else(|error| {
+//RS             panic!(
+//RS                 "{CARD} environment setup (owner {CARD}) could not create {}: {error}",
+//RS                 root.join(name).display()
+//RS             )
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn command_with_environment(
+//RS     label: &str,
+//RS     owner: &str,
+//RS     cwd: &Path,
+//RS     environment: &Path,
+//RS     args: &[&str],
+//RS ) -> Output {
+//RS     let mut command = Command::new(jet_bin());
+//RS     command.args(args).current_dir(cwd);
+//RS     command
+//RS         .env("JET_STORE_DIR", environment.join("store"))
+//RS         .env("JET_PACKAGE_STORE_DIR", environment.join("package-store"))
+//RS         .env("JET_RUN_CACHE_DIR", environment.join("run-cache"))
+//RS         .env("JET_TEST_SCRATCH_DIR", environment.join("test-scratch"))
+//RS         .env("JET_DEV_ORACLE_CACHE_DIR", environment.join("oracle-cache"))
+//RS         .env("TMPDIR", environment.join("tmp"))
+//RS         .env("TMP", environment.join("tmp"))
+//RS         .env("TEMP", environment.join("tmp"))
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap_or_else(|error| {
+//RS             panic!(
+//RS                 "{CARD} step `{label}` (owner {owner}) could not start in {}: {error}",
+//RS                 cwd.display()
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS fn assert_success(label: &str, owner: &str, cwd: &Path, output: &Output) {
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{CARD} step `{label}` (owner {owner}) failed in {}\nstdout:\n{}\nstderr:\n{}",
+//RS         cwd.display(),
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS }
+//RS 
+//RS fn run_exact(
+//RS     label: &str,
+//RS     owner: &str,
+//RS     cwd: &Path,
+//RS     environment: &Path,
+//RS     args: &[&str],
+//RS     expected_stdout: &str,
+//RS ) {
+//RS     let output = command_with_environment(label, owner, cwd, environment, args);
+//RS     assert_success(label, owner, cwd, &output);
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         expected_stdout,
+//RS         "{CARD} step `{label}` (owner {owner}) produced unexpected stdout"
+//RS     );
+//RS }
+//RS 
+//RS fn run_contains(
+//RS     label: &str,
+//RS     owner: &str,
+//RS     cwd: &Path,
+//RS     environment: &Path,
+//RS     args: &[&str],
+//RS     expected_stdout: &str,
+//RS ) {
+//RS     let output = command_with_environment(label, owner, cwd, environment, args);
+//RS     assert_success(label, owner, cwd, &output);
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         stdout.contains(expected_stdout),
+//RS         "{CARD} step `{label}` (owner {owner}) stdout did not contain `{expected_stdout}`:\n{stdout}"
+//RS     );
+//RS }
+//RS 
+//RS fn write_source(project: &Path, relative: &str, source: &str, owner: &str) {
+//RS     let path = project.join(relative);
+//RS     if let Some(parent) = path.parent() {
+//RS         fs::create_dir_all(parent).unwrap_or_else(|error| {
+//RS             panic!(
+//RS                 "{CARD} source step `{relative}` (owner {owner}) could not create {}: {error}",
+//RS                 parent.display()
+//RS             )
+//RS         });
+//RS     }
+//RS     fs::write(&path, source).unwrap_or_else(|error| {
+//RS         panic!(
+//RS             "{CARD} source step `{relative}` (owner {owner}) could not write {}: {error}",
+//RS             path.display()
+//RS         )
+//RS     });
+//RS }
+//RS 
+//RS fn assert_file(project: &Path, relative: &str, owner: &str) {
+//RS     let path = project.join(relative);
+//RS     assert!(
+//RS         path.is_file(),
+//RS         "{CARD} expected `{}` (owner {owner}) after the preceding step",
+//RS         path.display()
+//RS     );
+//RS }
+//RS 
+//RS const SECOND_MODULE: &str = r#"pub fn message() -> String -> "second"
+//RS "#;
+//RS 
+//RS const SECOND_MODULE_RUN: &str = r#"use second
+//RS 
+//RS #CLI
+//RS struct GreetingArgs {
+//RS     #Doc("name to greet") name: String{"world"}
+//RS }
+//RS 
+//RS fn greeting(name: String) -> String -> "hello, {name}"
+//RS 
+//RS fn run(args: GreetingArgs) {
+//RS     print(greeting(args.name))
+//RS     print(second.message())
+//RS }
+//RS 
+//RS #Test("the greeting stays stable") {
+//RS     assert_eq(greeting("world"), "hello, world")
+//RS }
+//RS "#;
+//RS 
+//RS const PATH_DEPENDENCY_RUN: &str = r#"use second
+//RS use lib1
+//RS 
+//RS #CLI
+//RS struct GreetingArgs {
+//RS     #Doc("name to greet") name: String{"world"}
+//RS }
+//RS 
+//RS fn greeting(name: String) -> String -> "hello, {name}"
+//RS 
+//RS fn run(args: GreetingArgs) {
+//RS     print(greeting(args.name))
+//RS     print(second.message())
+//RS     print(lib1.answer())
+//RS }
+//RS 
+//RS #Test("the greeting stays stable") {
+//RS     assert_eq(greeting("world"), "hello, world")
+//RS }
+//RS "#;
+//RS 
+//RS const WEB_RUN: &str = r#"#Target(Web)
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS 
+//RS const FINAL_RUN: &str = r#"#CLI
+//RS struct GreetingArgs {
+//RS     #Doc("name to greet") name: String{"world"}
+//RS }
+//RS 
+//RS #Comparable
+//RS struct Score {
+//RS     value: Int
+//RS }
+//RS 
+//RS struct Node {
+//RS     value: Int
+//RS     next: Node?
+//RS }
+//RS 
+//RS fn comparable_max<T: Comparable>(left: T, right: T) -> T {
+//RS     if right > left -> return right
+//RS     left
+//RS }
+//RS 
+//RS fn greeting(name: String) -> String -> "hello, {name}"
+//RS 
+//RS fn run(args: GreetingArgs) {
+//RS     print(greeting(args.name))
+//RS     best :: comparable_max(Score{value: 3}, Score{value: 5})
+//RS     print(best.value)
+//RS     node :: Node{value: 7, next: None}
+//RS     print(node.value)
+//RS }
+//RS 
+//RS #Test("the greeting stays stable") {
+//RS     assert_eq(greeting("world"), "hello, world")
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn first_hour_cli_journey() {
+//RS     let scratch = Scratch::new("first-hour");
+//RS     let root = scratch.path.clone();
+//RS     let environment = root.join("environment");
+//RS     prepare_environment(&environment);
+//RS 
+//RS     run_exact(
+//RS         "jet new demo",
+//RS         OWNER_NEW,
+//RS         &root,
+//RS         &environment,
+//RS         &["new", "demo"],
+//RS         "",
+//RS     );
+//RS     let demo = root.join("demo");
+//RS     for file in ["package.jet", "run.jet", ".gitignore"] {
+//RS         assert_file(&demo, file, OWNER_NEW);
+//RS     }
+//RS     // #3722 criterion 4: lesson 1 shows the generated `run.jet` byte for byte.
+//RS     let guide = fs::read_to_string(
+//RS         Path::new(env!("CARGO_MANIFEST_DIR")).join("Docs/spec/guides/first-hour.md"),
+//RS     )
+//RS     .expect("read the first-hour guide");
+//RS     let lesson = guide
+//RS         .split_once("The generated `run.jet` prints a greeting")
+//RS         .and_then(|(_, rest)| rest.split_once("```jet\n"))
+//RS         .and_then(|(_, rest)| rest.split_once("```"))
+//RS         .map(|(block, _)| block)
+//RS         .expect("lesson 1 shows the generated run.jet");
+//RS     assert_eq!(
+//RS         fs::read_to_string(demo.join("run.jet")).expect("read generated run.jet"),
+//RS         lesson,
+//RS         "the first-hour guide's lesson 1 must match the generated run.jet"
+//RS     );
+//RS 
+//RS     run_exact(
+//RS         "jet run",
+//RS         OWNER_NEW,
+//RS         &demo,
+//RS         &environment,
+//RS         &["run"],
+//RS         "hello, world\n",
+//RS     );
+//RS     run_contains(
+//RS         "jet test",
+//RS         CARD,
+//RS         &demo,
+//RS         &environment,
+//RS         &["test", "--capture=all"],
+//RS         "greeting stays stable: pass",
+//RS     );
+//RS 
+//RS     write_source(&demo, "second.jet", SECOND_MODULE, CARD);
+//RS     write_source(&demo, "run.jet", SECOND_MODULE_RUN, CARD);
+//RS     run_exact(
+//RS         "second module call",
+//RS         CARD,
+//RS         &demo,
+//RS         &environment,
+//RS         &["run"],
+//RS         "hello, world\nsecond\n",
+//RS     );
+//RS 
+//RS     run_exact(
+//RS         "jet new lib1",
+//RS         OWNER_NEW,
+//RS         &root,
+//RS         &environment,
+//RS         &["new", "lib1"],
+//RS         "",
+//RS     );
+//RS     let lib1 = root.join("lib1");
+//RS     write_source(
+//RS         &lib1,
+//RS         "lib1.jet",
+//RS         "pub fn answer() -> Int {\n    return 42\n}\n",
+//RS         OWNER_DEPS,
+//RS     );
+//RS     run_contains(
+//RS         "jet add lib1 --path ../lib1",
+//RS         OWNER_DEPS,
+//RS         &demo,
+//RS         &environment,
+//RS         &["add", "lib1", "--path", "../lib1"],
+//RS         "added `lib1`",
+//RS     );
+//RS     write_source(&demo, "run.jet", PATH_DEPENDENCY_RUN, OWNER_DEPS);
+//RS     run_exact(
+//RS         "path dependency call",
+//RS         OWNER_DEPS,
+//RS         &demo,
+//RS         &environment,
+//RS         &["run"],
+//RS         "hello, world\nsecond\n42\n",
+//RS     );
+//RS     run_exact(
+//RS         "jet fetch",
+//RS         OWNER_DEPS,
+//RS         &demo,
+//RS         &environment,
+//RS         &["fetch"],
+//RS         "fetched all dependencies\n",
+//RS     );
+//RS     run_exact(
+//RS         "jet build --locked",
+//RS         OWNER_DEPS,
+//RS         &demo,
+//RS         &environment,
+//RS         &["build", "--locked"],
+//RS         "built: build/run\n",
+//RS     );
+//RS     assert_file(&demo, "build/run", OWNER_DEPS);
+//RS     run_exact(
+//RS         "jet build --release",
+//RS         OWNER_DEPS,
+//RS         &demo,
+//RS         &environment,
+//RS         &["build", "--release"],
+//RS         "built: build/run\n",
+//RS     );
+//RS 
+//RS     write_source(&demo, "run.jet", WEB_RUN, OWNER_WEB);
+//RS     run_contains(
+//RS         "jet build --target web",
+//RS         OWNER_WEB,
+//RS         &demo,
+//RS         &environment,
+//RS         &["build", "--target", "web"],
+//RS         "built: build/app.wasm + build/app.js",
+//RS     );
+//RS     assert_file(&demo, "build/app.wasm", OWNER_WEB);
+//RS     assert_file(&demo, "build/app.js", OWNER_WEB);
+//RS 
+//RS     write_source(&demo, "run.jet", FINAL_RUN, OWNER_ADVANCED);
+//RS     run_exact(
+//RS         "AOT final program",
+//RS         OWNER_ADVANCED,
+//RS         &demo,
+//RS         &environment,
+//RS         &["run", "--release"],
+//RS         "hello, world\n5\n7\n",
+//RS     );
+//RS     run_exact(
+//RS         "JIT final program",
+//RS         OWNER_ADVANCED,
+//RS         &demo,
+//RS         &environment,
+//RS         &["run"],
+//RS         "hello, world\n5\n7\n",
+//RS     );
+//RS     run_exact(
+//RS         "interpreter final program",
+//RS         OWNER_ADVANCED,
+//RS         &demo,
+//RS         &environment,
+//RS         &["run", "--interpret"],
+//RS         "hello, world\n5\n7\n",
+//RS     );
+//RS     run_exact(
+//RS         "jet fmt result",
+//RS         CARD,
+//RS         &demo,
+//RS         &environment,
+//RS         &["fmt", "run.jet"],
+//RS         "",
+//RS     );
+//RS     // #3721: a clean project check prints exactly its one `ok:` line.
+//RS     let check = command_with_environment("jet check result", CARD, &demo, &environment, &["check"]);
+//RS     assert_success("jet check result", CARD, &demo, &check);
+//RS     let combined = format!(
+//RS         "{}{}",
+//RS         String::from_utf8_lossy(&check.stdout),
+//RS         String::from_utf8_lossy(&check.stderr)
+//RS     );
+//RS     assert!(
+//RS         combined.lines().count() == 1 && combined.ends_with("has no problems\n"),
+//RS         "{CARD} step `jet check result` must print one `ok:` line:\n{combined}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1054 tests/first_hour.rs:1-404
+

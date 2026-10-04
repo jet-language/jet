@@ -1,0 +1,192 @@
+// MIR.rs:6414-6455, 7513-7673. Identity is owned once; frame/closure users share
+// the program-sized portion rather than copying it per row.
+pub MIR_IDENTITY_SCHEMA_VERSION :: prep { 1 }
+pub MIR_IDENTITY_SCHEMA :: prep { "mir-v1" }
+pub struct MIRSourceMapIdentity { pub id: U64, pub path: String, pub digest: String }
+pub struct MIRProgramIdentity {
+    pub semantic_hash: String
+    pub optimized_hash: String
+    pub function_ids: [U64]
+    pub core_ids: [U64]
+    pub target_facts: [(String, String)]
+    pub source_map: [MIRSourceMapIdentity]
+}
+pub struct MIRArtifactIdentity {
+    pub schema_version: Int
+    pub mir_schema_version: Int
+    pub program_digest: [U8]
+    pub package_identity: String
+    pub artifact: MIRArtifactID
+    pub name: String
+    pub kind: MIRArtifactKind
+    pub target: MIRArtifactTarget
+    pub mode: MIRArtifactBuildMode
+    pub provider_identity: String
+    pub closure_identity: String
+    pub artifact_identity: String
+    pub program_identity: Shared<MIRProgramIdentity>
+}
+pub struct MIRExecutionIdentity { pub schema_version: Int, pub artifact: MIRArtifactIdentity }
+#Error
+pub enum MIRIdentityError {
+    MissingArtifact(id: MIRArtifactID)
+    AmbiguousArtifact
+    Unoptimized(reason: String)
+}
+pub fn mir_identity_error_text(error: MIRIdentityError) -> String Never! {
+    if error == {
+        .MissingArtifact(id) -> "MIR artifact MirArtifactId({id.value}) is missing"
+        .AmbiguousArtifact -> "MIR execution identity needs an explicit artifact"
+        .Unoptimized(reason) -> reason
+    }
+}
+pub fn mir_artifact_kind_name(kind: MIRArtifactKind) -> String Never! {
+    if kind == {
+        .NativeExecutable -> "native-executable"
+        .NativeLibrary -> "native-library"
+        .SandboxPlugin -> "sandbox-plugin"
+        .WebApplication -> "web-application"
+        .TestExecutable -> "test-executable"
+        .FuzzExecutable -> "fuzz-executable"
+        .TestOverride -> "test-override"
+    }
+}
+pub fn mir_artifact_target_name(target: MIRArtifactTarget) -> String Never! {
+    if target == { .RustAOT -> "rust-aot" .Cranelift -> "cranelift" .Interpreter -> "interpreter" .Web -> "web" }
+}
+pub fn mir_artifact_mode_name(mode: MIRArtifactBuildMode) -> String Never! {
+    if mode == { .Dev -> "dev" .Release -> "release" .Test -> "test" .Fuzz -> "fuzz" .Coverage -> "coverage" }
+}
+pub fn mir_runtime_part_name(part: MIRRuntimePartID) -> String Never! {
+    if part == {
+        .GC -> "gc" .Event -> "event" .Realtime -> "realtime" .EmbeddedHardware -> "embedded-hardware"
+        .UI -> "ui" .Devtools -> "devtools" .Gtk -> "gtk" .Apps -> "apps" .Email -> "email" .Game -> "game"
+        .Files -> "files" .Interrupt -> "interrupt" .FSRuntime -> "fs-runtime" .Process -> "process"
+        .Crypto -> "crypto" .Math -> "math" .Encoding -> "encoding" .Data -> "data" .Fmt -> "fmt"
+        .DataFmt -> "data-fmt" .Compute -> "compute" .HTTP -> "http" .WebSocket -> "websocket"
+        .Browser -> "browser" .Args -> "args" .Reflect -> "reflect" .AuthTokens -> "auth-tokens"
+        .AuthSession -> "auth-session" .Sync -> "sync" .Services -> "services" .Mod -> "mod"
+    }
+}
+
+// MIROptimization.rs::sealed_mir_digest. Only seven pass ids and the stored
+// 32-byte seal are read for each function; no program walk/hash/validation.
+pub fn mir_sealed_program_digest(program: MIRProgram) -> String? Never! {
+    seal := String?{None}
+    expected :: [MIROptimizationPassID]{.LegalityVerification, .UnreachableBlockElimination, .CFGSimplification, .ExactConstantFolding, .BoundsCheckElimination, .DeadPureValueElimination, .CanonicalLoopFacts}
+    loop function in program.functions {
+        if function.optimization.pass_ids != expected -> return None
+        digest :: function.optimization.derived_from_digest ?? return None
+        if seal == .Val(previous) { if previous != digest -> return None }
+        seal = Val(digest)
+    }
+    seal
+}
+// Source optimization seals use the native accessor's hex spelling. Decode it
+// rather than hashing its text or recomputing the MIR that was sealed.
+pub fn mir_pipeline_seal_bytes(hex: String) -> [U8] Err! {
+    bytes :: hex.bytes()
+    if bytes.len() != 64 -> return Err("MIR pipeline seal `{hex}` is not 64 hex digits")
+    output := [U8]{}
+    loop index in 0..<32 {
+        first :: mir_pipeline_hex_digit(bytes[index * 2]) ?? return Err("MIR pipeline seal `{hex}` is not hex")
+        second :: mir_pipeline_hex_digit(bytes[index * 2 + 1]) ?? return Err("MIR pipeline seal `{hex}` is not hex")
+        &output.push(U8{first * 16 + second})
+    }
+    Ok(output)
+}
+fn mir_pipeline_hex_digit(byte: U8) -> Int? Never! {
+    value :: Int.from_u8(byte)
+    if { value >= 48 && value <= 57 -> Val(value - 48) value >= 65 && value <= 70 -> Val(value - 55) value >= 97 && value <= 102 -> Val(value - 87) else -> None }
+}
+fn mir_identity_unique_ids(ids: [U64]) -> [U64] Never! {
+    output := [U64]{}
+    previous := U64?{None}
+    loop position in mir_digest_sort_ids(ids) {
+        id :: ids[position]
+        if previous != Val(id) -> &output.push(id)
+        previous = Val(id)
+    }
+    output
+}
+
+pub fn mir_artifact_identity_with_digest(program: MIRProgram, id: MIRArtifactID, digest: ^[U8]) -> MIRArtifactIdentity MIRIdentityError! {
+    artifact := MIRArtifactPlan?{None}
+    loop row in program.artifacts { if row.id == id { artifact = Val(row); break } }
+    selected :: artifact ?? return Err(MIRIdentityError.MissingArtifact{id: id})
+    digest_hex :: mir_sha256_hex_bytes(digest[0..<digest.len()])
+    function_ids :: mir_identity_unique_ids(program.functions.map(row -> row.id.value))
+    core_ids :: mir_identity_unique_ids(program.core_calls.map(row -> row.id.value))
+    source_map := [MIRSourceMapIdentity]{}
+    loop position in mir_digest_sort_source_files(program.source_files) {
+        source :: program.source_files[position]
+        &source_map.push(MIRSourceMapIdentity{id: source.id.value, path: ~source.path, digest: mir_sha256_hex(source.source)})
+    }
+    triple :: program.facts.target_dossier.machine.map(machine -> machine.triple) ?? ""
+    dossier :: mir_digest_target_dossier_bytes(program.facts.target_dossier, triple)
+    dossier_hash :: mir_sha256_bytes(dossier[0..<dossier.len()])
+    facts := [(String, String)]{
+        ("artifact.id", "{selected.id.value}"), ("package.identity", ~program.package_identity),
+        ("package.project_root", ~program.facts.project_root), ("package.edition", ~program.facts.edition),
+        ("package.active_os", ~program.facts.active_os), ("package.inferred_layer", ~program.facts.inferred_layer),
+        ("package.allocator", ~program.facts.allocator), ("package.target_dossier", mir_sha256_hex_bytes(dossier_hash[0..<dossier_hash.len()]))
+    }
+    loop part in program.facts.runtime_parts -> &facts.push(("package.runtime_part.{mir_runtime_part_name(part)}", "enabled"))
+    &facts.push(("artifact.kind", mir_artifact_kind_name(selected.kind)))
+    &facts.push(("artifact.target", mir_artifact_target_name(selected.target)))
+    &facts.push(("artifact.mode", mir_artifact_mode_name(selected.mode)))
+    &facts.push(("artifact.name", ~selected.name))
+    &facts.push(("artifact.provider", ~selected.provider_identity))
+    &facts.push(("artifact.closure", ~selected.closure_identity))
+    &facts.push(("artifact.identity", ~selected.artifact_identity))
+    loop function in program.functions {
+        target :: function.target_applicability
+        &facts.push(("function.{function.id.value}.targets", "rust_aot={target.rust_aot},cranelift={target.cranelift},interpreter={target.interpreter},web={target.web}"))
+    }
+    keys :: facts.map(row -> row.0)
+    values :: facts.map(row -> row.1)
+    sorted := [(String, String)]{}
+    loop position in mir_digest_order([U64]{}, [U64]{}, [U64]{}, keys, values, false) -> &sorted.push(^facts[position])
+    identity :: MIRProgramIdentity{semantic_hash: ~digest_hex, optimized_hash: digest_hex, function_ids: function_ids, core_ids: core_ids, target_facts: sorted, source_map: source_map}
+    Ok(MIRArtifactIdentity{schema_version: MIR_IDENTITY_SCHEMA_VERSION, mir_schema_version: program.schema_version, program_digest: digest, package_identity: ~program.package_identity, artifact: selected.id, name: ~selected.name, kind: selected.kind, target: selected.target, mode: selected.mode, provider_identity: ~selected.provider_identity, closure_identity: ~selected.closure_identity, artifact_identity: ~selected.artifact_identity, program_identity: shared identity})
+}
+fn mir_identity_single_artifact(program: MIRProgram, artifact: MIRArtifactID?) -> MIRArtifactID MIRIdentityError! {
+    if artifact == .Val(id) -> return Ok(id)
+    if program.artifacts.len() == 1 -> return Ok(program.artifacts[0].id)
+    Err(MIRIdentityError.AmbiguousArtifact)
+}
+pub fn mir_sealed_execution_identity(program: MIRProgram, artifact: MIRArtifactID?) -> MIRExecutionIdentity MIRIdentityError! {
+    id :: mir_identity_single_artifact(program, artifact)
+    seal :: mir_sealed_program_digest(program) ?? return Err(MIRIdentityError.Unoptimized{reason: "MIR does not carry one complete optimizer pipeline seal"})
+    digest :: mir_pipeline_seal_bytes(seal) ?? return Err(MIRIdentityError.Unoptimized{reason: err})
+    Ok(MIRExecutionIdentity{schema_version: MIR_IDENTITY_SCHEMA_VERSION, artifact: mir_artifact_identity_with_digest(program, id, ^digest)})
+}
+
+// MIROptimization.rs:4589-4622. The process-static Relaxed flag provider and
+// canonical pass journal are #4494 provider gates; do not replace either with
+// a constant, parameter, mutex, omitted check or synthesized evidence.
+pub fn mir_canonical_program_digest(program: MIRProgram) -> [U8] MIRIdentityError! {
+    if !mir_verification_enabled() && !canonical_pass_enabled() {
+        if mir_sealed_program_digest(program) == .Val(seal) {
+            return mir_pipeline_seal_bytes(seal) ?? return Err(MIRIdentityError.Unoptimized{reason: err})
+        }
+    }
+    mir_verify_legality(program) ?? return Err(MIRIdentityError.Unoptimized{reason: "MIR pass legality-verification rejected the program: {mir_legality_error_text(err)}"})
+    digest_hex :: mir_program_digest(program)
+    expected :: [MIROptimizationPassID]{.LegalityVerification, .UnreachableBlockElimination, .CFGSimplification, .ExactConstantFolding, .BoundsCheckElimination, .DeadPureValueElimination, .CanonicalLoopFacts}
+    loop function in program.functions {
+        if function.optimization.pass_ids != expected || function.optimization.derived_from_digest != Val(digest_hex) {
+            return Err(MIRIdentityError.Unoptimized{reason: "MIR pass canonical-loop-facts precondition failed for Some(MirFunctionId({function.id.value})): canonical MIR optimization pipeline has not completed for this MIR"})
+        }
+    }
+    mir_record_canonical_check("mir.require-canonical-optimization", "crates/jet-foundation/src/MIROptimization.rs", program)
+    mir_pipeline_seal_bytes(digest_hex) ?? return Err(MIRIdentityError.Unoptimized{reason: err})
+}
+pub fn mir_artifact_identity(program: MIRProgram, id: MIRArtifactID) -> MIRArtifactIdentity MIRIdentityError! {
+    digest :: mir_canonical_program_digest(program)
+    mir_artifact_identity_with_digest(program, id, ^digest)
+}
+pub fn mir_execution_identity(program: MIRProgram, artifact: MIRArtifactID?) -> MIRExecutionIdentity MIRIdentityError! {
+    id :: mir_identity_single_artifact(program, artifact)
+    MIRExecutionIdentity{schema_version: MIR_IDENTITY_SCHEMA_VERSION, artifact: mir_artifact_identity(program, id)}
+}

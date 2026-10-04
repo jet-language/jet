@@ -1,0 +1,1063 @@
+// PORT-PENDING 1045 tests-engine-dispatch-module-group: tests/engine_dispatch.rs:1-247
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! End-to-end tests for engine-verb process dispatch (D-JPK-DISPATCH1=B,
+//RS //! card c9jetpackgates, Epoch 4 Phase A1).
+//RS //!
+//RS //! `jet env` execs the `jetpack` binary by name instead of linking it
+//RS //! in-process. To exercise the "engine missing" / "version skew" / exit-code
+//RS //! / `--json` paths without disturbing the real co-built `jetpack` binary,
+//RS //! each test copies the compiled `jet` binary into an isolated scratch
+//RS //! directory (so `EngineDispatch::find_engine_binary`'s "next to the running
+//RS //! exe" check finds nothing) and points `PATH` at a scratch dir the test
+//RS //! controls.
+//RS 
+//RS use std::fs;
+//RS use std::io;
+//RS use std::path::PathBuf;
+//RS use std::process::{Command, Output};
+//RS use std::time::Duration;
+//RS 
+//RS mod common;
+//RS use common::Scratch;
+//RS 
+//RS fn real_jet() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS /// Copy the real `jet` binary into an isolated directory with no `jetpack`
+//RS /// alongside it, so engine dispatch must fall through to `PATH`.
+//RS fn isolated_jet(dir: &Scratch) -> PathBuf {
+//RS     let dest = dir.join("jet");
+//RS     fs::copy(real_jet(), &dest).unwrap();
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         let mut perm = fs::metadata(&dest).unwrap().permissions();
+//RS         perm.set_mode(0o755);
+//RS         fs::set_permissions(&dest, perm).unwrap();
+//RS     }
+//RS     dest
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn write_script(path: &PathBuf, body: &str) {
+//RS     fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+//RS     use std::os::unix::fs::PermissionsExt;
+//RS     let mut perm = fs::metadata(path).unwrap().permissions();
+//RS     perm.set_mode(0o755);
+//RS     fs::set_permissions(path, perm).unwrap();
+//RS }
+//RS 
+//RS fn output_with_retry(cmd: &mut Command) -> Output {
+//RS     let mut last = None;
+//RS     for attempt in 0..8 {
+//RS         if attempt > 0 {
+//RS             std::thread::sleep(Duration::from_millis(20 * attempt));
+//RS         }
+//RS         match cmd.output() {
+//RS             Ok(out) => return out,
+//RS             Err(e) if e.kind() == io::ErrorKind::ExecutableFileBusy => last = Some(e),
+//RS             Err(e) => panic!("engine dispatch command failed: {e}"),
+//RS         }
+//RS     }
+//RS     panic!("engine dispatch command stayed busy: {}", last.unwrap());
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn missing_engine_binary_is_e1228() {
+//RS     let jet_dir = Scratch::new("missing-jet");
+//RS     let jet_bin = isolated_jet(&jet_dir);
+//RS     let empty_path_dir = Scratch::new("missing-path");
+//RS 
+//RS     let out = output_with_retry(
+//RS         Command::new(&jet_bin)
+//RS             .arg("env")
+//RS             .env("PATH", &empty_path_dir.path),
+//RS     );
+//RS 
+//RS     assert_eq!(out.status.code(), Some(1), "engine-missing is USER_ERROR");
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1228"),
+//RS         "expected E1228 in stderr: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("jetpack"),
+//RS         "names the missing engine: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn version_skew_is_e1227() {
+//RS     let jet_dir = Scratch::new("skew-jet");
+//RS     let jet_bin = isolated_jet(&jet_dir);
+//RS     let path_dir = Scratch::new("skew-path");
+//RS     let fake_jetpack = path_dir.join("jetpack");
+//RS     // Answers the handshake with a version that can never equal jet's real
+//RS     // `CARGO_PKG_VERSION`.
+//RS     write_script(
+//RS         &fake_jetpack,
+//RS         r#"if [ "$1" = "--engine-protocol" ]; then echo "0.0.0-skew-test"; exit 0; fi
+//RS exit 0"#,
+//RS     );
+//RS 
+//RS     let out = output_with_retry(
+//RS         Command::new(&jet_bin)
+//RS             .arg("env")
+//RS             .env("PATH", &path_dir.path),
+//RS     );
+//RS 
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1227"),
+//RS         "expected E1227 in stderr: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("0.0.0-skew-test"),
+//RS         "names the mismatched version: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn engine_too_old_for_handshake_is_e1227() {
+//RS     // An engine binary that doesn't understand `--engine-protocol` at all
+//RS     // (predates this gate) must not be treated as compatible.
+//RS     let jet_dir = Scratch::new("oldengine-jet");
+//RS     let jet_bin = isolated_jet(&jet_dir);
+//RS     let path_dir = Scratch::new("oldengine-path");
+//RS     let fake_jetpack = path_dir.join("jetpack");
+//RS     write_script(
+//RS         &fake_jetpack,
+//RS         "echo \"jetpack: unknown flag $1\" >&2\nexit 2",
+//RS     );
+//RS 
+//RS     let out = output_with_retry(
+//RS         Command::new(&jet_bin)
+//RS             .arg("env")
+//RS             .env("PATH", &path_dir.path),
+//RS     );
+//RS 
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1227"),
+//RS         "expected E1227 in stderr: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn exit_code_propagates_from_engine() {
+//RS     let jet_bin_version = env!("CARGO_PKG_VERSION");
+//RS     let jet_dir = Scratch::new("exitcode-jet");
+//RS     let jet_bin = isolated_jet(&jet_dir);
+//RS     let path_dir = Scratch::new("exitcode-path");
+//RS     let fake_jetpack = path_dir.join("jetpack");
+//RS     write_script(
+//RS         &fake_jetpack,
+//RS         &format!(
+//RS             r#"if [ "$1" = "--engine-protocol" ]; then echo "{jet_bin_version}"; exit 0; fi
+//RS exit 37"#
+//RS         ),
+//RS     );
+//RS 
+//RS     let out = output_with_retry(
+//RS         Command::new(&jet_bin)
+//RS             .arg("env")
+//RS             .env("PATH", &path_dir.path),
+//RS     );
+//RS 
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(37),
+//RS         "jet must return the engine's exit code verbatim"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn json_flag_forwarded_verbatim_to_engine() {
+//RS     let jet_bin_version = env!("CARGO_PKG_VERSION");
+//RS     let jet_dir = Scratch::new("json-jet");
+//RS     let jet_bin = isolated_jet(&jet_dir);
+//RS     let path_dir = Scratch::new("json-path");
+//RS     let fake_jetpack = path_dir.join("jetpack");
+//RS     let log = path_dir.join("argv.log");
+//RS     write_script(
+//RS         &fake_jetpack,
+//RS         &format!(
+//RS             r#"if [ "$1" = "--engine-protocol" ]; then echo "{jet_bin_version}"; exit 0; fi
+//RS echo "$@" > "{log}"
+//RS exit 0"#,
+//RS             log = log.display()
+//RS         ),
+//RS     );
+//RS 
+//RS     let out = output_with_retry(
+//RS         Command::new(&jet_bin)
+//RS             .arg("env")
+//RS             .arg("--json")
+//RS             .env("PATH", &path_dir.path),
+//RS     );
+//RS 
+//RS     assert_eq!(out.status.code(), Some(0));
+//RS     let logged = fs::read_to_string(&log).unwrap_or_default();
+//RS     assert!(
+//RS         logged.contains("--json"),
+//RS         "--json must reach the engine verbatim, got argv: {logged}"
+//RS     );
+//RS }
+//RS 
+//RS /// Regression: engine-verb dispatch must not disturb the existing typo
+//RS /// suggestion path (E2101) for a near-miss of a known command like `env`.
+//RS #[test]
+//RS fn typo_of_engine_verb_still_suggests_it() {
+//RS     let out = output_with_retry(Command::new(real_jet()).arg("envx"));
+//RS     assert_eq!(out.status.code(), Some(2), "unknown command is USAGE");
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E2101"),
+//RS         "expected E2101 in stderr: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("env"),
+//RS         "did-you-mean should suggest `env`: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS /// The real, co-built `jetpack` binary must satisfy its own handshake (a
+//RS /// same-toolchain `jet env` never hits E1227/E1228). This doesn't drive an
+//RS /// actual shell (no TTY, no manifest) so `jetpack env` fails for its own
+//RS /// reasons — the point is that dispatch gets past the handshake cleanly.
+//RS #[test]
+//RS fn real_engine_pair_passes_handshake() {
+//RS     let out = output_with_retry(
+//RS         Command::new(real_jet())
+//RS             .arg("env")
+//RS             .env("NO_COLOR", "1")
+//RS             .stdin(std::process::Stdio::null()),
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         !stderr.contains("E1227") && !stderr.contains("E1228"),
+//RS         "the co-built jet/jetpack pair must pass their own handshake: {stderr}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1045 tests/engine_dispatch.rs:1-247
+
+// PORT-PENDING 1045 tests-engine-dispatch-module-group: tests/error_conversions.rs:1-512
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-FAIL-CONV1: one declared conversion rail, including the default Err target.
+//RS 
+//RS mod common;
+//RS 
+//RS #[test]
+//RS fn declared_conversion_reaches_default_error() {
+//RS     let source = r#"
+//RS #Error
+//RS enum StoreErr { Missing }
+//RS 
+//RS impl StoreErr -> Err {
+//RS     return Err("missing")
+//RS }
+//RS 
+//RS fn read_store() -> Int StoreErr! {
+//RS     return Err(StoreErr.Missing)
+//RS }
+//RS 
+//RS fn get_user() -> Int {
+//RS     return Ok(read_store())
+//RS }
+//RS 
+//RS fn run() {
+//RS     get_user()
+//RS }
+//RS "#;
+//RS     let compiled = jet::compile(source).expect("declared StoreErr -> Err must compile");
+//RS     assert!(compiled.rust.contains("errconv_StoreErr_to_Err"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn conversion_names_with_to_preserve_type_identity_and_symbol_uniqueness() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("rustc unavailable; skipping AOT conversion regression");
+//RS         return;
+//RS     }
+//RS 
+//RS     // Qualified/generated type identities can contain `_to_`; the two pairs
+//RS     // below used to produce the same helper symbol after flattening.
+//RS     let left = jet::Sema::error_conv_fn_name("Source_to_Left", "Target");
+//RS     let right = jet::Sema::error_conv_fn_name("Source", "Left_to_Target");
+//RS     assert_ne!(
+//RS         left, right,
+//RS         "error conversion helper names must be injective"
+//RS     );
+//RS 
+//RS     let source = r#"
+//RS #Error
+//RS struct SourceErr {
+//RS     message: String
+//RS }
+//RS 
+//RS #Error
+//RS struct TargetErr {
+//RS     message: String
+//RS }
+//RS 
+//RS impl SourceErr -> TargetErr {
+//RS     return TargetErr{message: "converted from source"}
+//RS }
+//RS 
+//RS impl TargetErr -> Err {
+//RS     return Err("converted from target")
+//RS }
+//RS 
+//RS fn read() -> Int SourceErr! {
+//RS     return Err(SourceErr{message: "source failure"})
+//RS }
+//RS 
+//RS fn middle() -> Int TargetErr! {
+//RS     value :: read()
+//RS     return Ok(value)
+//RS }
+//RS 
+//RS fn outer() -> Int {
+//RS     value :: middle()
+//RS     return Ok(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     outer()
+//RS }
+//RS "#;
+//RS 
+//RS     let (status, stdout, stderr) =
+//RS         common::build_and_run("jet_error_conversion", "names_with_to", source);
+//RS     assert_eq!(status, 1, "expected converted error, got: {stderr}");
+//RS     assert!(stdout.is_empty(), "unexpected stdout: {stdout}");
+//RS     assert!(
+//RS         stderr.contains("type: TargetErr"),
+//RS         "converted error lost its source family: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("conversion: TargetErr -> Err"),
+//RS         "converted error lost its conversion trail: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn foreign_source_may_target_default_error() {
+//RS     let source = r#"
+//RS impl String -> Err {
+//RS     return Err(self)
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     jet::compile(source).expect("foreign String source may convert into default Err");
+//RS }
+//RS 
+//RS #[test]
+//RS fn declared_conversion_reaches_typed_error() {
+//RS     let source = r#"
+//RS #Error
+//RS enum SourceErr { One }
+//RS #Error
+//RS enum TargetErr { One }
+//RS 
+//RS impl SourceErr -> TargetErr {
+//RS     return TargetErr.One
+//RS }
+//RS 
+//RS fn read() -> Int SourceErr! {
+//RS     return Err(SourceErr.One)
+//RS }
+//RS 
+//RS fn outer() -> Int TargetErr! {
+//RS     value :: read()
+//RS     return Ok(value)
+//RS }
+//RS 
+//RS fn run() TargetErr! {
+//RS     outer()
+//RS }
+//RS "#;
+//RS     let compiled = jet::compile(source).expect("declared typed conversion must compile");
+//RS     assert!(compiled.rust.contains("errconv_SourceErr_to_TargetErr"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn missing_typed_conversion_reports_e2404() {
+//RS     let source = r#"
+//RS #Error
+//RS enum SourceErr { One }
+//RS #Error
+//RS enum TargetErr { One }
+//RS 
+//RS fn read() -> Int SourceErr! {
+//RS     return Err(SourceErr.One)
+//RS }
+//RS 
+//RS fn run() -> Int TargetErr! {
+//RS     value :: read()
+//RS     return Ok(value)
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::compile(source).expect_err("missing typed conversion must be rejected");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E2404"),
+//RS         "expected E2404, got {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn missing_typed_conversion_preserves_helper_provenance() {
+//RS     let source = include_str!("ui/e2392_linked_cascade.jet");
+//RS     let diagnostics =
+//RS         jet::compile(source).expect_err("the linked conversion fixture must be rejected");
+//RS     let e2404 = diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E2404")
+//RS         .expect("linked conversion fixture must contain E2404");
+//RS     let detail = e2404
+//RS         .detail
+//RS         .as_deref()
+//RS         .expect("E2404 must expose provenance detail");
+//RS     for expected in [
+//RS         "failure-domain:load_row|SourceErr|TargetErr",
+//RS         "callee: load_row",
+//RS         "effective contract: explicit !SourceErr",
+//RS         "caller contract: explicit !TargetErr",
+//RS     ] {
+//RS         assert!(
+//RS             detail.contains(expected),
+//RS             "E2404 provenance missing {expected:?}: {detail}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn conversion_cascade_links_same_span_root_and_orders_it_first() {
+//RS     let source = include_str!("ui/e2392_linked_cascade.jet");
+//RS     let diagnostics =
+//RS         jet::compile(source).expect_err("the linked conversion fixture must be rejected");
+//RS     let root = diagnostics
+//RS         .iter()
+//RS         .position(|diagnostic| diagnostic.code == "E0104")
+//RS         .expect("wrong-arity root must be retained");
+//RS     let dependent = diagnostics
+//RS         .iter()
+//RS         .position(|diagnostic| diagnostic.code == "E2404")
+//RS         .expect("conversion dependent must be retained");
+//RS     assert!(
+//RS         root < dependent,
+//RS         "root diagnostics must precede dependents: {diagnostics:?}"
+//RS     );
+//RS     let root_span = diagnostics[root].span;
+//RS     let causes = &diagnostics[dependent].cause;
+//RS     assert!(
+//RS         causes
+//RS             .iter()
+//RS             .any(|cause| cause.code == "E0104" && cause.span == root_span),
+//RS         "E2404 must link the same-span E0104 root: {diagnostics:?}"
+//RS     );
+//RS 
+//RS     let json = jet::render_all_json(
+//RS         &jet::Diagnostics::ReportPath::from_process("e2392_linked_cascade.jet"),
+//RS         source,
+//RS         &diagnostics,
+//RS     );
+//RS     let lines = json.lines().collect::<Vec<_>>();
+//RS     assert!(
+//RS         lines
+//RS             .iter()
+//RS             .any(|line| line.contains("\"code\":\"E0104\"")
+//RS                 && line.contains("\"cause\":[],\"clears\":1")),
+//RS         "JSON must expose the root and its dependent count: {json}"
+//RS     );
+//RS     assert!(
+//RS         lines
+//RS             .iter()
+//RS             .any(|line| line.contains("\"code\":\"E2404\"")
+//RS                 && line.contains("\"cause\":[\"E0104\"]")),
+//RS         "JSON must expose the linked cause chain: {json}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repeated_conversion_sites_dedupe_but_independent_roots_remain() {
+//RS     let source = include_str!("ui/e2392_root_cascade.jet");
+//RS     let diagnostics =
+//RS         jet::compile(source).expect_err("the root cascade fixture must be rejected");
+//RS     let mismatches = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "E2404")
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         mismatches.len(),
+//RS         2,
+//RS         "five repeated sites must collapse while the independent domain remains: {diagnostics:?}"
+//RS     );
+//RS     assert!(
+//RS         mismatches[0]
+//RS             .detail
+//RS             .as_deref()
+//RS             .is_some_and(|detail| detail.starts_with("failure-domain:load_row|SourceErr|TargetErr")),
+//RS         "first retained root must be load_row's domain: {diagnostics:?}"
+//RS     );
+//RS     assert!(
+//RS         mismatches[1]
+//RS             .detail
+//RS             .as_deref()
+//RS             .is_some_and(|detail| {
+//RS                 detail.starts_with(
+//RS                     "failure-domain:load_other|OtherSourceErr|OtherTargetErr"
+//RS                 )
+//RS             }),
+//RS         "independent load_other root must remain: {diagnostics:?}"
+//RS     );
+//RS     assert!(
+//RS         mismatches.iter().all(|diagnostic| diagnostic.cause.is_empty()),
+//RS         "independent failure domains must not be linked to one another: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn seeded_error_cascade_metric_keeps_one_first_root_per_domain() {
+//RS     let source = include_str!("ui/e2392_root_cascade.jet");
+//RS     let diagnostics =
+//RS         jet::compile(source).expect_err("the seeded cascade fixture must be rejected");
+//RS     assert_eq!(
+//RS         diagnostics.len(),
+//RS         2,
+//RS         "the seeded witness must emit only its two independent roots: {diagnostics:?}"
+//RS     );
+//RS     let emitted = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "E2404")
+//RS         .count();
+//RS     assert_eq!(
+//RS         emitted, 2,
+//RS         "five load_row sites plus two independent load_other sites must emit one root per domain: {diagnostics:?}"
+//RS     );
+//RS     let seeded = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| {
+//RS             diagnostic
+//RS                 .detail
+//RS                 .as_deref()
+//RS                 .is_some_and(|detail| detail.starts_with("failure-domain:load_row|"))
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         seeded.len(),
+//RS         1,
+//RS         "the seeded helper must emit one report for five repeated sites: {diagnostics:?}"
+//RS     );
+//RS     let first = diagnostics
+//RS         .first()
+//RS         .expect("the seeded cascade must emit a diagnostic");
+//RS     assert_eq!(first.code, "E2404");
+//RS     assert!(
+//RS         first.what.contains("from `load_row`"),
+//RS         "the first emitted report must name the seeded helper: {diagnostics:?}"
+//RS     );
+//RS     assert!(
+//RS         first.cause.is_empty(),
+//RS         "the first report must be a root: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fixing_the_named_helper_domain_clears_all_repeated_sites() {
+//RS     let source = r#"
+//RS #Error
+//RS enum SourceErr { One }
+//RS #Error
+//RS enum TargetErr { One }
+//RS 
+//RS fn fetch() -> Int SourceErr! {
+//RS     return Err(SourceErr.One)
+//RS }
+//RS 
+//RS fn run() -> Int TargetErr! {
+//RS     fetch()
+//RS     fetch()
+//RS     fetch()
+//RS     fetch()
+//RS     fetch()
+//RS     return Ok(0)
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::compile(source).expect_err("the repeated domain must be rejected");
+//RS     assert_eq!(
+//RS         diagnostics.len(),
+//RS         1,
+//RS         "one seeded bad helper feeding five sites must emit one report: {diagnostics:?}"
+//RS     );
+//RS     let first = diagnostics.first().expect("the seeded report must exist");
+//RS     assert_eq!(first.code, "E2404");
+//RS     assert!(first.what.contains("from `fetch`"), "{first:?}");
+//RS     assert!(
+//RS         first.cause.is_empty(),
+//RS         "the seeded report must be root-first: {first:?}"
+//RS     );
+//RS     let mismatches = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.code == "E2404")
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(mismatches.len(), 1, "one helper root must represent five sites");
+//RS     assert!(mismatches[0]
+//RS         .detail
+//RS         .as_deref()
+//RS         .is_some_and(|detail| detail.contains("callee: fetch")));
+//RS 
+//RS     let fixed = source
+//RS         .replacen("fn fetch() -> Int SourceErr!", "fn fetch() -> Int TargetErr!", 1)
+//RS         .replacen("Err(SourceErr.One)", "Err(TargetErr.One)", 1);
+//RS     jet::compile(&fixed).expect("changing the named helper domain must clear every site");
+//RS }
+//RS 
+//RS #[test]
+//RS fn failed_propagation_poisons_derived_bindings_without_unknown_cascade() {
+//RS     // `raw` has no value after its rejected propagation. Every binding
+//RS     // derived from it inherits that poison; none of them may surface as an
+//RS     // `Unknown` receiver, argument, operand, or assignment target.
+//RS     let source = r#"
+//RS #Error
+//RS enum SourceErr { One }
+//RS #Error
+//RS enum TargetErr { One }
+//RS 
+//RS fn fetch() -> [U8] SourceErr! {
+//RS     return Err(SourceErr.One)
+//RS }
+//RS 
+//RS fn width(bytes: [U8]) -> Int Never! { bytes.len() }
+//RS 
+//RS fn load() -> Int TargetErr! {
+//RS     raw :: fetch()
+//RS     owned :: ~raw
+//RS     size :: owned.len() + 1
+//RS     doubled :: size * 2
+//RS     if width(owned) != doubled -> return Ok(1)
+//RS     count := size
+//RS     count = count + 1
+//RS     return Ok(0)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(load() ?? 0)
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::compile(source).expect_err("the failure-domain mismatch must be rejected");
+//RS     assert_eq!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .map(|diagnostic| diagnostic.code.as_str())
+//RS             .collect::<Vec<_>>(),
+//RS         ["E2404"],
+//RS         "only the root mismatch may be reported: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn typed_foreign_target_keeps_the_orphan_rule() {
+//RS     let source = r#"
+//RS impl Int -> String {
+//RS     return "number"
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics = jet::compile(source).expect_err("foreign typed target must be rejected");
+//RS     assert!(diagnostics
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.code == "E2406"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn declared_default_conversion_reaches_web_artifact() {
+//RS     let source = r#"
+//RS #Error
+//RS enum StoreErr { Missing }
+//RS 
+//RS impl StoreErr -> Err {
+//RS     return Err("store unavailable")
+//RS }
+//RS 
+//RS fn read_store() -> Int StoreErr! {
+//RS     return Err(StoreErr.Missing)
+//RS }
+//RS 
+//RS fn get_user() -> Int {
+//RS     value :: read_store()
+//RS     return Ok(value)
+//RS }
+//RS 
+//RS #Target(Wasm)
+//RS fn run() {
+//RS     value :: get_user()
+//RS }
+//RS "#;
+//RS     let output = jet::compile_web_with_path(source, "default_error_conversion_web.jet")
+//RS         .expect("declared default conversion must compile for web");
+//RS     let web = output.web.expect("web target must produce artifacts");
+//RS     assert!(web.wasm_rust.contains("store unavailable"));
+//RS     assert!(web.wasm_rust.contains("errconv_StoreErr_to_Err"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn conversion_registration_does_not_depend_on_type_order() {
+//RS     let source = r#"
+//RS impl SourceErr -> TargetErr { return TargetErr.One }
+//RS 
+//RS enum SourceErr { One }
+//RS enum TargetErr { One }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     jet::compile(source).expect("a local conversion may precede its type declarations");
+//RS }
+//RS 
+//RS #[test]
+//RS fn cyclic_error_conversions_report_e2418() {
+//RS     let source = r#"
+//RS enum SourceErr { One }
+//RS enum TargetErr { One }
+//RS 
+//RS impl SourceErr -> TargetErr { return TargetErr.One }
+//RS impl TargetErr -> SourceErr { return SourceErr.One }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics = jet::compile(source).expect_err("cyclic conversions must be rejected");
+//RS     assert!(diagnostics
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.code == "E2418"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn branched_error_conversions_report_e2419() {
+//RS     let source = r#"
+//RS enum RootErr { One }
+//RS enum LeftErr { One }
+//RS enum RightErr { One }
+//RS enum TargetErr { One }
+//RS 
+//RS impl RootErr -> LeftErr { return LeftErr.One }
+//RS impl RootErr -> RightErr { return RightErr.One }
+//RS impl LeftErr -> TargetErr { return TargetErr.One }
+//RS impl RightErr -> TargetErr { return TargetErr.One }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics = jet::compile(source).expect_err("ambiguous conversions must be rejected");
+//RS     assert!(diagnostics
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.code == "E2419"));
+//RS }
+// END-PORT-PENDING 1045 tests/error_conversions.rs:1-512
+
+// PORT-PENDING 1045 tests-engine-dispatch-module-group: tests/event_hooks.rs:1-292
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use tir_support::{build_and_run, have_rustc};
+//RS 
+//RS #[cfg(unix)]
+//RS use common::Scratch;
+//RS #[cfg(unix)]
+//RS use std::fs;
+//RS #[cfg(unix)]
+//RS use std::process::{Command, Stdio};
+//RS 
+//RS #[cfg(unix)]
+//RS fn json_string_at(text: &str, start: usize) -> (String, usize) {
+//RS     let bytes = text.as_bytes();
+//RS     assert_eq!(bytes.get(start), Some(&b'"'), "JSON string must start with quote");
+//RS     let mut index = start + 1;
+//RS     let mut decoded = String::new();
+//RS     while index < bytes.len() {
+//RS         match bytes[index] {
+//RS             b'"' => return (decoded, index + 1),
+//RS             b'\\' => {
+//RS                 index += 1;
+//RS                 let escaped = *bytes
+//RS                     .get(index)
+//RS                     .expect("JSON string cannot end after an escape");
+//RS                 let character = match escaped {
+//RS                     b'"' => '"',
+//RS                     b'\\' => '\\',
+//RS                     b'/' => '/',
+//RS                     b'b' => '\u{8}',
+//RS                     b'f' => '\u{c}',
+//RS                     b'n' => '\n',
+//RS                     b'r' => '\r',
+//RS                     b't' => '\t',
+//RS                     b'u' => {
+//RS                         let end = index + 5;
+//RS                         let digits = text
+//RS                             .get(index + 1..end)
+//RS                             .expect("JSON unicode escape must have four digits");
+//RS                         let code = u16::from_str_radix(digits, 16)
+//RS                             .expect("JSON unicode escape must be hexadecimal");
+//RS                         index = end - 1;
+//RS                         char::from_u32(code as u32).expect("JSON unicode escape must be valid")
+//RS                     }
+//RS                     other => panic!("unsupported JSON escape {other:?}"),
+//RS                 };
+//RS                 decoded.push(character);
+//RS                 index += 1;
+//RS             }
+//RS             _ => {
+//RS                 let character = text[index..]
+//RS                     .chars()
+//RS                     .next()
+//RS                     .expect("JSON string byte must be valid UTF-8");
+//RS                 decoded.push(character);
+//RS                 index += character.len_utf8();
+//RS             }
+//RS         }
+//RS     }
+//RS     panic!("unterminated JSON string");
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn hook_commands(settings: &str) -> Vec<String> {
+//RS     let bytes = settings.as_bytes();
+//RS     let mut commands = Vec::new();
+//RS     let mut index = 0;
+//RS     while index < bytes.len() {
+//RS         if bytes[index] != b'"' {
+//RS             index += 1;
+//RS             continue;
+//RS         }
+//RS         let (key, after_key) = json_string_at(settings, index);
+//RS         index = after_key;
+//RS         if key != "command" {
+//RS             continue;
+//RS         }
+//RS         while bytes
+//RS             .get(index)
+//RS             .is_some_and(|byte| byte.is_ascii_whitespace())
+//RS         {
+//RS             index += 1;
+//RS         }
+//RS         if bytes.get(index) != Some(&b':') {
+//RS             continue;
+//RS         }
+//RS         index += 1;
+//RS         while bytes
+//RS             .get(index)
+//RS             .is_some_and(|byte| byte.is_ascii_whitespace())
+//RS         {
+//RS             index += 1;
+//RS         }
+//RS         let (command, after_command) = json_string_at(settings, index);
+//RS         commands.push(command);
+//RS         index = after_command;
+//RS     }
+//RS     commands
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn decision_hook_outcomes_transform_and_short_circuit() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let (code, stdout) = build_and_run(
+//RS         "decision_hook_outcomes",
+//RS         r#"
+//RS use core.event as event
+//RS 
+//RS fn show(outcome: HookOutcome<String, String>) {
+//RS     if outcome == {
+//RS         .Continue(value) -> print("continue {value}")
+//RS         .Cancel -> print("cancel")
+//RS         .Fail(error) -> print("fail {error}")
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     zero :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+//RS     show(zero.run("original"))
+//RS 
+//RS     scope :: event.scope()
+//RS     transformed :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+//RS     transformed.on_priority(scope, 10, (value: String) -> {
+//RS         print("first {value}")
+//RS         HookDecision.Transform("{value}-one")
+//RS     })
+//RS     transformed.on(scope, (value: String) -> {
+//RS         print("second {value}")
+//RS         HookDecision.Continue
+//RS     })
+//RS     show(transformed.run("start"))
+//RS 
+//RS     cancelled :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+//RS     cancelled.on_priority(scope, 10, (value: String) -> HookDecision.Cancel)
+//RS     cancelled.on(scope, (value: String) -> {
+//RS         print("must not run {value}")
+//RS         HookDecision.Continue
+//RS     })
+//RS     show(cancelled.run("stop"))
+//RS 
+//RS     failed :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+//RS     failed.on_priority(scope, 10, (value: String) -> HookDecision.Fail("denied {value}"))
+//RS     failed.on(scope, (value: String) -> {
+//RS         print("must not run {value}")
+//RS         HookDecision.Continue
+//RS     })
+//RS     show(failed.run("save"))
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "continue original\nfirst start\nsecond start-one\ncontinue start-one\ncancel\nfail denied save\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn decision_hook_lifetime_order_once_mutation_and_reentrancy() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let (code, stdout) = build_and_run(
+//RS         "decision_hook_lifetime",
+//RS         r#"
+//RS use core.event as event
+//RS 
+//RS fn run() {
+//RS     scope :: event.scope()
+//RS     hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+//RS     late :: hook.on(scope, (value: Int) -> {
+//RS         print("late {value}")
+//RS         HookDecision.Continue
+//RS     })
+//RS     hook.on_priority(scope, 10, (value: Int) -> {
+//RS         print("first {value}")
+//RS         late.unsubscribe()
+//RS         HookDecision.Transform(value + 1)
+//RS     })
+//RS     hook.once(scope, (value: Int) -> {
+//RS         print("once {value}")
+//RS         if value == 2 { hook.run(10) }
+//RS         HookDecision.Continue
+//RS     })
+//RS     hook.on(scope, (value: Int) -> {
+//RS         print("last {value}")
+//RS         HookDecision.Continue
+//RS     })
+//RS     hook.run(1)
+//RS     hook.run(2)
+//RS     print("active {scope.active_count()}")
+//RS     scope.cancel()
+//RS     hook.run(3)
+//RS 
+//RS     owned :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+//RS     if true {
+//RS         owner :: event.scope()
+//RS         owned.on(owner, (value: Int) -> {
+//RS             print("leaked {value}")
+//RS             HookDecision.Continue
+//RS         })
+//RS     }
+//RS     owned.run(9)
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "first 1\nonce 2\nfirst 10\nlast 11\nlast 2\nfirst 2\nlast 3\nactive 2\n"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn claude_hooks_follow_project_dir_for_hostile_paths() {
+//RS     let settings_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join(".claude/settings.json");
+//RS     let settings =
+//RS         fs::read_to_string(&settings_path).expect("Claude hook settings must be readable");
+//RS     let commands = hook_commands(&settings);
+//RS     let script_names = [
+//RS         "clean-nix-tmp.sh",
+//RS         "check-worktree-layout.sh",
+//RS         "require-clean-tree.sh",
+//RS     ];
+//RS     assert_eq!(
+//RS         commands.len(),
+//RS         script_names.len(),
+//RS         "Claude settings must keep one command for each guarded hook"
+//RS     );
+//RS 
+//RS     let scratch = Scratch::new("claude-hostile-project-path");
+//RS     let project = scratch.join(r#"project with spaces;$(touch "$HOOK_INJECTION_MARKER")"#);
+//RS     let attacker = scratch.join("attacker cwd");
+//RS     let project_scripts = project.join("Tools/agent");
+//RS     let attacker_scripts = attacker.join("Tools/agent");
+//RS     fs::create_dir_all(&project_scripts).expect("create project hook directory");
+//RS     fs::create_dir_all(&attacker_scripts).expect("create attacker hook directory");
+//RS     let marker = scratch.join("claude-hook-origin");
+//RS     let injection_marker = scratch.join("claude-hook-injected");
+//RS 
+//RS     for script_name in script_names {
+//RS         fs::write(
+//RS             project_scripts.join(script_name),
+//RS             "printf 'project\\n' >> \"$HOOK_MARKER\"\n",
+//RS         )
+//RS         .expect("write project hook fixture");
+//RS         fs::write(
+//RS             attacker_scripts.join(script_name),
+//RS             "printf 'attacker\\n' >> \"$HOOK_MARKER\"\n",
+//RS         )
+//RS         .expect("write attacker hook fixture");
+//RS     }
+//RS 
+//RS     for script_name in script_names {
+//RS         let command = commands
+//RS             .iter()
+//RS             .find(|command| command.contains(script_name))
+//RS             .unwrap_or_else(|| panic!("missing configured hook {script_name}"));
+//RS         let output = Command::new("bash")
+//RS             .current_dir(&attacker)
+//RS             .args(["-c", command])
+//RS             .env("CLAUDE_PROJECT_DIR", &project)
+//RS             .env("HOOK_MARKER", &marker)
+//RS             .env("HOOK_INJECTION_MARKER", &injection_marker)
+//RS             .stdin(Stdio::null())
+//RS             .output()
+//RS             .expect("run Claude hook command");
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "Claude hook {script_name} failed:\n{}",
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS     }
+//RS 
+//RS     assert_eq!(
+//RS         fs::read_to_string(&marker).expect("project hook marker"),
+//RS         "project\nproject\nproject\n",
+//RS         "hooks must execute the project scripts, not cwd-relative attacker scripts"
+//RS     );
+//RS     assert!(
+//RS         !injection_marker.exists(),
+//RS         "CLAUDE_PROJECT_DIR was reparsed as shell syntax"
+//RS     );
+//RS }
+// END-PORT-PENDING 1045 tests/event_hooks.rs:1-292
+

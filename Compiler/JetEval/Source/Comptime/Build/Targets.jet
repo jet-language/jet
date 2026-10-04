@@ -1,0 +1,147 @@
+// PORT-PENDING 0570 crates-jet-comptime-src-comptime-build-targets-module-group: crates/jet-comptime/src/Comptime/Build/targets.rs:1-143
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::errors_keys::BuildError;
+//RS use super::handles::{
+//RS     ActionHandle, PluginHandle, ProbeHandle, SigningIdentityHandle, TargetId, TargetRef,
+//RS     ToolchainHandle,
+//RS };
+//RS use std::collections::BTreeMap;
+//RS use std::path::{Component, Path};
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum TargetKind {
+//RS     Executable,
+//RS     Library,
+//RS     Test,
+//RS     AssetBundle,
+//RS     Doc,
+//RS     Install,
+//RS     Package,
+//RS     Publish,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub struct BuildPath(pub(super) String);
+//RS 
+//RS impl BuildPath {
+//RS     pub fn new(path: impl Into<String>) -> Result<Self, BuildError> {
+//RS         let path = path.into();
+//RS         if path.trim().is_empty() {
+//RS             return Err(BuildError::EmptyPath);
+//RS         }
+//RS         if Path::new(&path).is_absolute()
+//RS             || Path::new(&path).components().any(|component| {
+//RS                 matches!(
+//RS                     component,
+//RS                     Component::ParentDir | Component::RootDir | Component::Prefix(_)
+//RS                 )
+//RS             })
+//RS         {
+//RS             return Err(BuildError::InvalidPath(path));
+//RS         }
+//RS         Ok(BuildPath(path))
+//RS     }
+//RS 
+//RS     pub fn as_str(&self) -> &str {
+//RS         &self.0
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct TargetSpec {
+//RS     pub sources: Vec<BuildPath>,
+//RS     pub inputs: Vec<BuildPath>,
+//RS     pub outputs: Vec<BuildPath>,
+//RS     pub deps: Vec<TargetRef>,
+//RS     pub actions: Vec<ActionHandle>,
+//RS     pub probes: Vec<ProbeHandle>,
+//RS     pub toolchain: Option<ToolchainHandle>,
+//RS     pub signing_identity: Option<SigningIdentityHandle>,
+//RS     pub metadata: BTreeMap<String, String>,
+//RS }
+//RS 
+//RS impl TargetSpec {
+//RS     pub fn new() -> Self {
+//RS         Self::default()
+//RS     }
+//RS 
+//RS     pub fn with_source(mut self, path: impl Into<String>) -> Self {
+//RS         self.sources.push(BuildPath(path.into()));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_input(mut self, path: impl Into<String>) -> Self {
+//RS         self.inputs.push(BuildPath(path.into()));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_output(mut self, path: impl Into<String>) -> Self {
+//RS         self.outputs.push(BuildPath(path.into()));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_dep(mut self, target: impl Into<TargetRef>) -> Self {
+//RS         self.deps.push(target.into());
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_action(mut self, action: ActionHandle) -> Self {
+//RS         self.actions.push(action);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_probe(mut self, probe: ProbeHandle) -> Self {
+//RS         self.probes.push(probe);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_toolchain(mut self, toolchain: ToolchainHandle) -> Self {
+//RS         self.toolchain = Some(toolchain);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_signing_identity(mut self, identity: SigningIdentityHandle) -> Self {
+//RS         self.signing_identity = Some(identity);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+//RS         self.metadata.insert(key.into(), value.into());
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS impl Default for TargetSpec {
+//RS     fn default() -> Self {
+//RS         TargetSpec {
+//RS             sources: Vec::new(),
+//RS             inputs: Vec::new(),
+//RS             outputs: Vec::new(),
+//RS             deps: Vec::new(),
+//RS             actions: Vec::new(),
+//RS             probes: Vec::new(),
+//RS             toolchain: None,
+//RS             signing_identity: None,
+//RS             metadata: BTreeMap::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct BuildTarget {
+//RS     pub id: TargetId,
+//RS     pub name: String,
+//RS     pub kind: TargetKind,
+//RS     pub sources: Vec<BuildPath>,
+//RS     pub inputs: Vec<BuildPath>,
+//RS     pub outputs: Vec<BuildPath>,
+//RS     pub deps: Vec<TargetRef>,
+//RS     pub actions: Vec<ActionHandle>,
+//RS     pub probes: Vec<ProbeHandle>,
+//RS     pub toolchain: ToolchainHandle,
+//RS     pub signing_identity: Option<SigningIdentityHandle>,
+//RS     pub metadata: BTreeMap<String, String>,
+//RS     pub plugin: Option<PluginHandle>,
+//RS }
+// END-PORT-PENDING 0570 crates/jet-comptime/src/Comptime/Build/targets.rs:1-143
+

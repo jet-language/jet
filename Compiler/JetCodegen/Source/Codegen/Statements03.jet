@@ -1,0 +1,1300 @@
+// PORT-PENDING 0538 crates-jet-codegen-src-codegen-tir-tir-to-mir-stmt-slice-1752: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1752-3047
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn lower_range_loop(
+//RS     ctx: &mut LowerCtx,
+//RS     label: Option<&str>,
+//RS     var: &str,
+//RS     source: Option<&TExpr>,
+//RS     start: &TExpr,
+//RS     end: &TExpr,
+//RS     step: Option<&TExpr>,
+//RS     exclusive: bool,
+//RS     auto_vectorization: Option<&crate::AST::AutoVectorizationFacts>,
+//RS     body: &[TStmt],
+//RS ) -> Result<(), LowerError> {
+//RS     let loop_span = ctx.span();
+//RS     let routes = super::loop_route_bundle();
+//RS     let range_init_call = ctx.intern_prelude_route(routes.range_init)?;
+//RS     let range_has_next_call = ctx.intern_prelude_route(routes.range_has_next)?;
+//RS     let range_value_call = ctx.intern_prelude_route(routes.range_value)?;
+//RS     let range_advance_call = ctx.intern_prelude_route(routes.range_advance)?;
+//RS     let iter_init_call = ctx.intern_prelude_route(routes.iter_init)?;
+//RS     let iter_has_next_call = ctx.intern_prelude_route(routes.iter_has_next)?;
+//RS     let iter_value_call = ctx.intern_prelude_route(routes.iter_value)?;
+//RS     let iter_advance_call = ctx.intern_prelude_route(routes.iter_advance)?;
+//RS     let (cursor, item_ty, iterator) = if let Some(source) = source {
+//RS         let collection = lower_expr(ctx, source)?;
+//RS         let step_value = step.map(|step| lower_expr(ctx, step)).transpose()?;
+//RS         // A `Range` value walks the generic iterator cursor, so its carrier
+//RS         // type is the one `LoopIterInit` returns, never the literal-range cursor.
+//RS         let cursor_ty = Type::Named("IterCursor".to_string());
+//RS         let cursor = ctx.emit(
+//RS             "range.iter-init",
+//RS             Some(cursor_ty),
+//RS             MirOperation::LoopIterInit {
+//RS                 call: iter_init_call,
+//RS                 collection,
+//RS                 step: step_value,
+//RS                 by_value: false,
+//RS                 source_kind: MirLoopSourceKind::Plain,
+//RS             },
+//RS         )?;
+//RS         (cursor, start.ty.clone(), true)
+//RS     } else {
+//RS         let start_value = lower_expr(ctx, start)?;
+//RS         let end_value = lower_expr(ctx, end)?;
+//RS         let step_value = step.map(|step| lower_expr(ctx, step)).transpose()?;
+//RS         let cursor_ty = Type::Named("RangeCursor".to_string());
+//RS         let cursor = ctx.emit(
+//RS             "range.init",
+//RS             Some(cursor_ty),
+//RS             MirOperation::LoopRangeInit {
+//RS                 call: range_init_call,
+//RS                 start: start_value,
+//RS                 end: end_value,
+//RS                 step: step_value,
+//RS                 exclusive,
+//RS             },
+//RS         )?;
+//RS         (cursor, start.ty.clone(), false)
+//RS     };
+//RS     let header = ctx.new_block(ctx.span(), "range.header")?;
+//RS     let body_block = ctx.new_block(ctx.span(), "range.body")?;
+//RS     let advance = ctx.new_block(ctx.span(), "range.advance")?;
+//RS     let exit = ctx.new_block(ctx.span(), "range.exit")?;
+//RS     ctx.terminate(MirTerminator::Jump { target: header });
+//RS     ctx.switch_to(header);
+//RS     let has_next = if iterator {
+//RS         ctx.emit(
+//RS             "range.iter-has-next",
+//RS             Some(Type::Bool),
+//RS             MirOperation::LoopIterHasNext {
+//RS                 call: iter_has_next_call,
+//RS                 cursor,
+//RS             },
+//RS         )?
+//RS     } else {
+//RS         ctx.emit(
+//RS             "range.has-next",
+//RS             Some(Type::Bool),
+//RS             MirOperation::LoopRangeHasNext {
+//RS                 call: range_has_next_call,
+//RS                 cursor,
+//RS             },
+//RS         )?
+//RS     };
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition: has_next,
+//RS         then_target: body_block,
+//RS         else_target: exit,
+//RS     });
+//RS     ctx.switch_to(body_block);
+//RS     let item = if iterator {
+//RS         ctx.emit(
+//RS             "range.iter-value",
+//RS             Some(item_ty.clone()),
+//RS             MirOperation::LoopIterValue {
+//RS                 call: iter_value_call,
+//RS                 cursor,
+//RS             },
+//RS         )?
+//RS     } else {
+//RS         ctx.emit(
+//RS             "range.value",
+//RS             Some(item_ty.clone()),
+//RS             MirOperation::LoopRangeValue {
+//RS                 call: range_value_call,
+//RS                 cursor,
+//RS             },
+//RS         )?
+//RS     };
+//RS     bind_value(ctx, var, item, item_ty, false)?;
+//RS     ctx.push_loop(label.map(str::to_string), exit, advance);
+//RS     ctx.push_lexical_frame();
+//RS     lower_stmts(ctx, body)?;
+//RS     ctx.pop_lexical_frame()?;
+//RS     ctx.pop_loop();
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: advance });
+//RS     }
+//RS     ctx.switch_to(advance);
+//RS     if iterator {
+//RS         ctx.emit(
+//RS             "range.iter-advance",
+//RS             None,
+//RS             MirOperation::LoopIterAdvance {
+//RS                 call: iter_advance_call,
+//RS                 cursor,
+//RS             },
+//RS         )?;
+//RS     } else {
+//RS         ctx.emit(
+//RS             "range.advance",
+//RS             None,
+//RS             MirOperation::LoopRangeAdvance {
+//RS                 call: range_advance_call,
+//RS                 cursor,
+//RS             },
+//RS         )?;
+//RS     }
+//RS     ctx.terminate(MirTerminator::Jump { target: header });
+//RS     ctx.switch_to(exit);
+//RS     if iterator {
+//RS         ctx.emit(
+//RS             "range.iter-drop",
+//RS             None,
+//RS             MirOperation::Drop {
+//RS                 value: cursor,
+//RS                 kind: MirDropKind::Value,
+//RS             },
+//RS         )?;
+//RS     }
+//RS     if let Some(facts) = auto_vectorization {
+//RS         let body_blocks = ctx.loop_body_blocks(header, body_block, Some(exit), Some(advance));
+//RS         ctx.record_checked_vector_fact(
+//RS             header,
+//RS             Some(cursor),
+//RS             body_blocks,
+//RS             Some(advance),
+//RS             None,
+//RS             facts,
+//RS             loop_span,
+//RS         )?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS /// D-MEM-COPYSEM1: a plain `loop item in list` (or `loop (index, item) in
+//RS /// list`) over a read parameter's list walks the list in place. The loop
+//RS /// becomes an index range over the list's length whose item is a read-only
+//RS /// alias of its slot, so neither the list nor any item is copied; the
+//RS /// two-name form binds the range index itself as `index`. The parameter
+//RS /// cannot change while the loop runs, so every alias reads exactly what the
+//RS /// copied item would hold. #4318 §4: a stable source (sema proved the body
+//RS /// never mentions its root) walks the same way when it is rooted at a local
+//RS /// or any parameter. A columnar list (D-SOA1) stores one column per field,
+//RS /// so its slots are not places an alias can name; it keeps the
+//RS /// gathered-record iteration.
+//RS fn read_list_walk(
+//RS     ctx: &mut LowerCtx,
+//RS     label: Option<&str>,
+//RS     var: &str,
+//RS     var2: Option<&str>,
+//RS     collection: &TExpr,
+//RS     step: Option<&TExpr>,
+//RS     method_kind: Option<&crate::Codegen::TIR::TForInMethod>,
+//RS     by_value: bool,
+//RS     columnar: bool,
+//RS     source_stable: bool,
+//RS     body: &[TStmt],
+//RS ) -> Result<Option<TStmt>, LowerError> {
+//RS     if method_kind.is_some() || step.is_some() || by_value || columnar {
+//RS         return Ok(None);
+//RS     }
+//RS     let Type::List(element) = collection.ty.without_user_tags() else {
+//RS         return Ok(None);
+//RS     };
+//RS     let element = (**element).clone();
+//RS     if ctx.read_window_place(collection)?.is_none()
+//RS         && !(source_stable && ctx.stable_source_place(collection)?.is_some())
+//RS     {
+//RS         return Ok(None);
+//RS     }
+//RS     let list = match &collection.kind {
+//RS         TExprKind::Clone(inner, _) => (**inner).clone(),
+//RS         _ => collection.clone(),
+//RS     };
+//RS     let (index_name, item_name) = match var2 {
+//RS         Some(item_name) => (var.to_string(), item_name),
+//RS         None => (format!("__jet_read_walk_{}", ctx.span().start), var),
+//RS     };
+//RS     let index = TExpr {
+//RS         ty: Type::Int,
+//RS         kind: TExprKind::Local(TLocal::user(index_name.clone())),
+//RS     };
+//RS     let item = TExpr {
+//RS         ty: element.clone(),
+//RS         kind: TExprKind::Borrow {
+//RS             place: Box::new(TExpr {
+//RS                 ty: element,
+//RS                 kind: TExprKind::Index {
+//RS                     base: Box::new(list.clone()),
+//RS                     index: Box::new(index),
+//RS                     is_map: false,
+//RS                     uninit_fixed: false,
+//RS                     line: ctx.source_line() as usize,
+//RS                 },
+//RS             }),
+//RS             mutable: false,
+//RS         },
+//RS     };
+//RS     let mut walk_body = Vec::with_capacity(body.len() + 1);
+//RS     walk_body.push(TStmt::Let {
+//RS         name: item_name.to_string(),
+//RS         kw: "let",
+//RS         let_ty: TLetTy::Inferred,
+//RS         init: item,
+//RS         gc_promotion: None,
+//RS         gc_transferred: false,
+//RS     });
+//RS     walk_body.extend(body.iter().cloned());
+//RS     Ok(Some(TStmt::Range {
+//RS         label: label.map(str::to_string),
+//RS         var: index_name,
+//RS         source: None,
+//RS         start: TExpr {
+//RS             ty: Type::Int,
+//RS             kind: TExprKind::IntLit(0, None),
+//RS         },
+//RS         end: TExpr {
+//RS             ty: Type::Int,
+//RS             kind: TExprKind::BuiltinMethod {
+//RS                 recv: Box::new(list),
+//RS                 op: TBuiltinOp::LenList,
+//RS                 args: Vec::new(),
+//RS             },
+//RS         },
+//RS         step: None,
+//RS         exclusive: true,
+//RS         auto_vectorization: None,
+//RS         body: walk_body,
+//RS     }))
+//RS }
+//RS 
+//RS fn lower_for_in(
+//RS     ctx: &mut LowerCtx,
+//RS     label: Option<&str>,
+//RS     var: &str,
+//RS     var2: Option<&str>,
+//RS     source: &TExpr,
+//RS     collection: &TExpr,
+//RS     step: Option<&TExpr>,
+//RS     method_kind: Option<&crate::Codegen::TIR::TForInMethod>,
+//RS     by_value: bool,
+//RS     columnar: bool,
+//RS     source_stable: bool,
+//RS     body: &[TStmt],
+//RS ) -> Result<(), LowerError> {
+//RS     if let Some(walk) = read_list_walk(
+//RS         ctx,
+//RS         label,
+//RS         var,
+//RS         var2,
+//RS         collection,
+//RS         step,
+//RS         method_kind,
+//RS         by_value,
+//RS         columnar,
+//RS         source_stable,
+//RS         body,
+//RS     )? {
+//RS         return lower_stmt(ctx, &walk);
+//RS     }
+//RS     let routes = super::loop_route_bundle();
+//RS     let iter_init_call = ctx.intern_prelude_route(routes.iter_init)?;
+//RS     let iter_has_next_call = ctx.intern_prelude_route(routes.iter_has_next)?;
+//RS     let iter_value_call = ctx.intern_prelude_route(routes.iter_value)?;
+//RS     let iter_advance_call = ctx.intern_prelude_route(routes.iter_advance)?;
+//RS     let source_kind = loop_source_kind(method_kind);
+//RS     // A sequence's two-binding form is `(index, item)`, not a projection from
+//RS     // the element itself. Reuse the canonical indexed adapter so the cursor
+//RS     // receives the same named tuple shape as an explicit `.indexed()` call.
+//RS     let (loop_collection, indexed_pair_types) = match (method_kind, &collection.ty, var2) {
+//RS         (None, Type::List(elem) | Type::FixedList { elem, .. }, Some(_)) => {
+//RS             let elem_ty = (**elem).clone();
+//RS             let fields = vec![
+//RS                 ("idx".to_string(), Type::Int),
+//RS                 ("item".to_string(), elem_ty.clone()),
+//RS             ];
+//RS             let row_ty = Type::Tuple(
+//RS                 fields
+//RS                     .iter()
+//RS                     .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
+//RS                     .collect(),
+//RS             );
+//RS             let indexed = TExpr {
+//RS                 ty: crate::Collections::iter_ty(row_ty.clone()),
+//RS                 kind: TExprKind::BuiltinMethod {
+//RS                     recv: Box::new(collection.clone()),
+//RS                     op: TBuiltinOp::Indexed {
+//RS                         tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+//RS                     },
+//RS                     args: Vec::new(),
+//RS                 },
+//RS             };
+//RS             (indexed, Some((row_ty, elem_ty)))
+//RS         }
+//RS         _ => (collection.clone(), None),
+//RS     };
+//RS     let owns_source = match &source_kind {
+//RS         MirLoopSourceKind::LinesFile
+//RS         | MirLoopSourceKind::LinesStdin
+//RS         | MirLoopSourceKind::LinesProcessStream
+//RS         | MirLoopSourceKind::ChannelReceiver
+//RS         | MirLoopSourceKind::EncodingReader { .. }
+//RS         | MirLoopSourceKind::Iterable { .. } => true,
+//RS         MirLoopSourceKind::Plain => crate::Collections::iter_elem(&loop_collection.ty).is_some(),
+//RS         MirLoopSourceKind::Chars => false,
+//RS     };
+//RS 
+//RS     let effective_by_value = owns_source || by_value;
+//RS     let source = if method_kind.is_some() {
+//RS         source
+//RS     } else {
+//RS         &loop_collection
+//RS     };
+//RS     let source_value = match (&source.kind, owns_source) {
+//RS         // Receivers have a checked shared-handle read convention. The native
+//RS         // channel adapter clones a read source before consuming it, so retain
+//RS         // `by_value` for the iterator ABI without moving a borrowed parameter.
+//RS         (TExprKind::Local(_), true)
+//RS             if matches!(source_kind, MirLoopSourceKind::ChannelReceiver) =>
+//RS         {
+//RS             lower_expr(ctx, source)?
+//RS         }
+//RS         // A read-only alias names another value's slot: the cursor reads (and
+//RS         // so copies) it instead of moving the slot out of its owner.
+//RS         (TExprKind::Local(local), true) if !ctx.local_is_read_alias(local) => {
+//RS             let place = ctx.place_for_local(local, MirAccess::Move)?;
+//RS             ctx.emit(
+//RS                 "for-in.source-move",
+//RS                 Some(source.ty.clone()),
+//RS                 MirOperation::MovePlace { place },
+//RS             )?
+//RS         }
+//RS         _ => lower_expr(ctx, source)?,
+//RS     };
+//RS     let step_value = step.map(|step| lower_expr(ctx, step)).transpose()?;
+//RS     let byte_slice_cursor = matches!(source_kind, MirLoopSourceKind::Plain)
+//RS         && !effective_by_value
+//RS         && matches!(
+//RS             loop_collection.ty.without_user_tags(),
+//RS             Type::List(elem) | Type::FixedList { elem, .. }
+//RS                 if matches!(
+//RS                     elem.without_user_tags(),
+//RS                     Type::IntN {
+//RS                         signed: false,
+//RS                         bits: 8,
+//RS                     }
+//RS                 )
+//RS         );
+//RS     let cursor_ty = Type::Named(if byte_slice_cursor {
+//RS         "ByteIterCursor".to_string()
+//RS     } else {
+//RS         "IterCursor".to_string()
+//RS     });
+//RS     let cursor = ctx.emit(
+//RS         "for-in.iter-init",
+//RS         Some(cursor_ty),
+//RS         MirOperation::LoopIterInit {
+//RS             call: iter_init_call,
+//RS             collection: source_value,
+//RS             step: step_value,
+//RS             by_value: effective_by_value,
+//RS             source_kind,
+//RS         },
+//RS     )?;
+//RS     let item_ty = indexed_pair_types
+//RS         .as_ref()
+//RS         .map(|(row_ty, _)| row_ty.clone())
+//RS         .unwrap_or_else(|| for_item_type(collection, method_kind));
+//RS     let header = ctx.new_block(ctx.span(), "for-in.header")?;
+//RS     let body_block = ctx.new_block(ctx.span(), "for-in.body")?;
+//RS     let advance = ctx.new_block(ctx.span(), "for-in.advance")?;
+//RS     let exit = ctx.new_block(ctx.span(), "for-in.exit")?;
+//RS     ctx.terminate(MirTerminator::Jump { target: header });
+//RS     ctx.switch_to(header);
+//RS     let has_next = ctx.emit(
+//RS         "for-in.has-next",
+//RS         Some(Type::Bool),
+//RS         MirOperation::LoopIterHasNext {
+//RS             call: iter_has_next_call,
+//RS             cursor,
+//RS         },
+//RS     )?;
+//RS     ctx.terminate(MirTerminator::Branch {
+//RS         condition: has_next,
+//RS         then_target: body_block,
+//RS         else_target: exit,
+//RS     });
+//RS     ctx.switch_to(body_block);
+//RS     let item = ctx.emit(
+//RS         "for-in.value",
+//RS         Some(item_ty.clone()),
+//RS         MirOperation::LoopIterValue {
+//RS             call: iter_value_call,
+//RS             cursor,
+//RS         },
+//RS     )?;
+//RS     if let Some(var2) = var2 {
+//RS         let (key_ty, value_ty, key_name, value_name) =
+//RS             match (&collection.ty, indexed_pair_types.as_ref()) {
+//RS                 (Type::Map { key, value, .. }, _) => {
+//RS                     ((**key).clone(), (**value).clone(), "key", "value")
+//RS                 }
+//RS                 (_, Some((_, elem_ty))) => (Type::Int, elem_ty.clone(), "idx", "item"),
+//RS                 _ => (Type::Int, item_ty.clone(), "key", "value"),
+//RS             };
+//RS         let key_field = ctx.field_id_for_type(&item_ty, key_name)?;
+//RS         let value_field = ctx.field_id_for_type(&item_ty, value_name)?;
+//RS         let key = ctx.emit(
+//RS             "for-in.key",
+//RS             Some(key_ty.clone()),
+//RS             MirOperation::Field {
+//RS                 base: item,
+//RS                 field: key_field,
+//RS             },
+//RS         )?;
+//RS         let val = ctx.emit(
+//RS             "for-in.value-field",
+//RS             Some(value_ty.clone()),
+//RS             MirOperation::Field {
+//RS                 base: item,
+//RS                 field: value_field,
+//RS             },
+//RS         )?;
+//RS         bind_value(ctx, var, key, key_ty, false)?;
+//RS         bind_value(ctx, var2, val, value_ty, false)?;
+//RS     } else {
+//RS         bind_value(ctx, var, item, item_ty, false)?;
+//RS     }
+//RS     ctx.push_loop(label.map(str::to_string), exit, advance);
+//RS     ctx.push_lexical_frame();
+//RS     lower_stmts(ctx, body)?;
+//RS     ctx.pop_lexical_frame()?;
+//RS     ctx.pop_loop();
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: advance });
+//RS     }
+//RS     ctx.switch_to(advance);
+//RS     ctx.emit(
+//RS         "for-in.advance",
+//RS         None,
+//RS         MirOperation::LoopIterAdvance {
+//RS             call: iter_advance_call,
+//RS             cursor,
+//RS         },
+//RS     )?;
+//RS     ctx.terminate(MirTerminator::Jump { target: header });
+//RS     ctx.switch_to(exit);
+//RS     ctx.emit(
+//RS         "for-in.iter-drop",
+//RS         None,
+//RS         MirOperation::Drop {
+//RS             value: cursor,
+//RS             kind: MirDropKind::Value,
+//RS         },
+//RS     )?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn loop_source_kind(method_kind: Option<&TForInMethod>) -> MirLoopSourceKind {
+//RS     match method_kind {
+//RS         None => MirLoopSourceKind::Plain,
+//RS         Some(TForInMethod::Chars) => MirLoopSourceKind::Chars,
+//RS         Some(TForInMethod::LinesFile) => MirLoopSourceKind::LinesFile,
+//RS         Some(TForInMethod::LinesStdin) => MirLoopSourceKind::LinesStdin,
+//RS         Some(TForInMethod::LinesProcessStream) => MirLoopSourceKind::LinesProcessStream,
+//RS         Some(TForInMethod::ChannelReceiver) => MirLoopSourceKind::ChannelReceiver,
+//RS         Some(TForInMethod::EncodingReader { reader_type }) => MirLoopSourceKind::EncodingReader {
+//RS             reader_type: reader_type.clone(),
+//RS         },
+//RS         Some(TForInMethod::Iterable {
+//RS             coll_type,
+//RS             iter_type,
+//RS             iter_symbol,
+//RS             next_symbol,
+//RS             item_type: _,
+//RS         }) => MirLoopSourceKind::Iterable {
+//RS             coll_type: coll_type.clone(),
+//RS             iter_type: iter_type.clone(),
+//RS             iter_symbol: iter_symbol.clone(),
+//RS             next_symbol: next_symbol.clone(),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn for_item_type(
+//RS     collection: &TExpr,
+//RS     method_kind: Option<&crate::Codegen::TIR::TForInMethod>,
+//RS ) -> Type {
+//RS     if matches!(
+//RS         method_kind,
+//RS         Some(crate::Codegen::TIR::TForInMethod::ChannelReceiver)
+//RS     ) {
+//RS         if let Type::Apply { name, args } = &collection.ty {
+//RS             if name == crate::Syntax::TYPE_RECEIVER && args.len() == 1 {
+//RS                 return args[0].clone();
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     if let Some(elem) = crate::Collections::iter_elem(&collection.ty) {
+//RS         return elem.clone();
+//RS     }
+//RS     if let Some(method) = method_kind {
+//RS         return match method {
+//RS             crate::Codegen::TIR::TForInMethod::Chars => Type::Char,
+//RS             crate::Codegen::TIR::TForInMethod::LinesFile
+//RS             | crate::Codegen::TIR::TForInMethod::LinesStdin
+//RS             | crate::Codegen::TIR::TForInMethod::LinesProcessStream => Type::String,
+//RS             crate::Codegen::TIR::TForInMethod::Iterable { item_type, .. } => item_type.clone(),
+//RS             crate::Codegen::TIR::TForInMethod::ChannelReceiver => match &collection.ty {
+//RS                 Type::Apply { name, args }
+//RS                     if name == crate::Syntax::TYPE_RECEIVER && args.len() == 1 =>
+//RS                 {
+//RS                     args[0].clone()
+//RS                 }
+//RS                 _ => collection.ty.clone(),
+//RS             },
+//RS             crate::Codegen::TIR::TForInMethod::EncodingReader { reader_type } => {
+//RS                 crate::Codegen::TIR::lower::encoding_reader_item_type(reader_type)
+//RS                     .expect("checked encoding-reader loop names a reader with no item type")
+//RS             }
+//RS         };
+//RS     }
+//RS     match &collection.ty {
+//RS         Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
+//RS         Type::Map { key, value, .. } => Type::Tuple(vec![
+//RS             ("key".to_string(), key.clone()),
+//RS             ("value".to_string(), value.clone()),
+//RS         ]),
+//RS         // A generator loop binds each yielded item, not the Stream carrier.
+//RS         Type::Apply { name, args }
+//RS             if args.len() == 1
+//RS                 && matches!(
+//RS                     name.as_str(),
+//RS                     "View" | "ViewMut" | "ComputeViewMut" | crate::Syntax::TYPE_STREAM
+//RS                 ) =>
+//RS         {
+//RS             args[0].clone()
+//RS         }
+//RS         _ => collection.ty.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn bind_value(
+//RS     ctx: &mut LowerCtx,
+//RS     name: &str,
+//RS     value: jet_foundation::MIR::MirValueId,
+//RS     ty: Type,
+//RS     mutable: bool,
+//RS ) -> Result<(), LowerError> {
+//RS     let local = if mutable {
+//RS         TLocal::user(name).as_mutable()
+//RS     } else {
+//RS         TLocal::user(name)
+//RS     };
+//RS     let place = ctx.bind_local(&local, ty, mutable, false, false)?;
+//RS     ctx.emit(
+//RS         "stmt.bind.write",
+//RS         None,
+//RS         MirOperation::WritePlace { place, value },
+//RS     )?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn lower_enum_match(
+//RS     ctx: &mut LowerCtx,
+//RS     scrutinee: &TExpr,
+//RS     clone_subject: bool,
+//RS     arms: &[TMatchArm],
+//RS     else_body: Option<&[TStmt]>,
+//RS     fallthrough: bool,
+//RS ) -> Result<(), LowerError> {
+//RS     let mut subject = ctx.lower_pattern_subject(scrutinee)?;
+//RS     // A read window tests the parameter's own place, which nothing can
+//RS     // change during the match: no copy is needed to keep the subject stable.
+//RS     if clone_subject && ctx.read_window_of(subject).is_none() {
+//RS         subject = ctx.emit(
+//RS             "match.subject.copy",
+//RS             Some(scrutinee.ty.clone()),
+//RS             MirOperation::Copy {
+//RS                 value: subject,
+//RS                 fact: jet_foundation::MIR::MirCopyFact::Materialize,
+//RS             },
+//RS         )?;
+//RS     }
+//RS     let join = ctx.new_block(ctx.span(), "match.join")?;
+//RS     let otherwise = ctx.new_block(ctx.span(), "match.otherwise")?;
+//RS     let mut tests = Vec::with_capacity(arms.len());
+//RS     let mut bodies = Vec::with_capacity(arms.len());
+//RS     for index in 0..arms.len() {
+//RS         tests.push(ctx.new_block(ctx.span(), &format!("match.test.{index}"))?);
+//RS         bodies.push(ctx.new_block(ctx.span(), &format!("match.body.{index}"))?);
+//RS     }
+//RS     if let Some(first) = tests.first().copied() {
+//RS         ctx.terminate(MirTerminator::Jump { target: first });
+//RS     } else {
+//RS         ctx.terminate(MirTerminator::Jump { target: otherwise });
+//RS     }
+//RS     for (index, arm) in arms.iter().enumerate() {
+//RS         ctx.switch_to(tests[index]);
+//RS         // Pattern bindings are scoped to their arm. Registered in the
+//RS         // enclosing frame instead, every later exit of that frame re-emitted
+//RS         // the cleanup of every earlier arm's bindings, so a derived enum
+//RS         // `compare`/`equal` grew quadratically in its variants (#3871).
+//RS         ctx.push_lexical_frame();
+//RS         let pattern = ctx.lower_pattern(&arm.pattern)?;
+//RS         let condition = ctx.lower_pattern_condition(subject, &pattern)?;
+//RS         let next = tests.get(index + 1).copied().unwrap_or(otherwise);
+//RS         let unmatched = if ctx.lexical_frame_has_cleanups() {
+//RS             ctx.new_block(ctx.span(), &format!("match.unmatched.{index}"))?
+//RS         } else {
+//RS             next
+//RS         };
+//RS         ctx.terminate(MirTerminator::Branch {
+//RS             condition,
+//RS             then_target: bodies[index],
+//RS             else_target: unmatched,
+//RS         });
+//RS         if unmatched != next {
+//RS             ctx.switch_to(unmatched);
+//RS             ctx.jump_leaving_lexical_frame(next)?;
+//RS         }
+//RS         ctx.switch_to(bodies[index]);
+//RS         ctx.push_lexical_frame();
+//RS         lower_stmts(ctx, &arm.body)?;
+//RS         ctx.pop_lexical_frame()?;
+//RS         ctx.pop_lexical_frame()?;
+//RS         if !ctx.is_terminated() {
+//RS             ctx.terminate(MirTerminator::Jump { target: join });
+//RS         }
+//RS     }
+//RS     ctx.switch_to(otherwise);
+//RS     ctx.push_lexical_frame();
+//RS     if let Some(body) = else_body {
+//RS         lower_stmts(ctx, body)?;
+//RS     } else if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Unreachable {
+//RS             reason: if fallthrough {
+//RS                 "checked exhaustive match fallthrough".to_string()
+//RS             } else {
+//RS                 "checked exhaustive match otherwise".to_string()
+//RS             },
+//RS         });
+//RS     }
+//RS     ctx.pop_lexical_frame()?;
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: join });
+//RS     }
+//RS     ctx.switch_to(join);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn lower_range_switch(
+//RS     ctx: &mut LowerCtx,
+//RS     subject: &TExpr,
+//RS     arms: &[(i64, i64, Vec<TStmt>)],
+//RS     else_body: &[TStmt],
+//RS ) -> Result<(), LowerError> {
+//RS     let subject_value = lower_expr(ctx, subject)?;
+//RS     let join = ctx.new_block(ctx.span(), "range-switch.join")?;
+//RS     let otherwise = ctx.new_block(ctx.span(), "range-switch.otherwise")?;
+//RS     let mut tests = Vec::with_capacity(arms.len());
+//RS     let mut bodies = Vec::with_capacity(arms.len());
+//RS     for index in 0..arms.len() {
+//RS         tests.push(ctx.new_block(ctx.span(), &format!("range-switch.test.{index}"))?);
+//RS         bodies.push(ctx.new_block(ctx.span(), &format!("range-switch.body.{index}"))?);
+//RS     }
+//RS     if let Some(first) = tests.first().copied() {
+//RS         ctx.terminate(MirTerminator::Jump { target: first });
+//RS     } else {
+//RS         ctx.terminate(MirTerminator::Jump { target: otherwise });
+//RS     }
+//RS     for (index, (lo, hi, _)) in arms.iter().enumerate() {
+//RS         ctx.switch_to(tests[index]);
+//RS         let lo = const_int(ctx, *lo)?;
+//RS         let hi = const_int(ctx, *hi)?;
+//RS         let lower = ctx.emit(
+//RS             &format!("range-switch.{index}.lower"),
+//RS             Some(Type::Bool),
+//RS             MirOperation::Binary {
+//RS                 op: super::mir_binary_op(BinOp::Ge),
+//RS                 dispatch: MirBinaryDispatch::Primitive,
+//RS                 left: subject_value,
+//RS                 right: lo,
+//RS             },
+//RS         )?;
+//RS         let upper = ctx.emit(
+//RS             &format!("range-switch.{index}.upper"),
+//RS             Some(Type::Bool),
+//RS             MirOperation::Binary {
+//RS                 op: super::mir_binary_op(BinOp::Le),
+//RS                 dispatch: MirBinaryDispatch::Primitive,
+//RS                 left: subject_value,
+//RS                 right: hi,
+//RS             },
+//RS         )?;
+//RS         let condition = ctx.emit(
+//RS             &format!("range-switch.{index}.condition"),
+//RS             Some(Type::Bool),
+//RS             MirOperation::Binary {
+//RS                 op: super::mir_binary_op(BinOp::And),
+//RS                 dispatch: MirBinaryDispatch::Primitive,
+//RS                 left: lower,
+//RS                 right: upper,
+//RS             },
+//RS         )?;
+//RS         let next = tests.get(index + 1).copied().unwrap_or(otherwise);
+//RS         ctx.terminate(MirTerminator::Branch {
+//RS             condition,
+//RS             then_target: bodies[index],
+//RS             else_target: next,
+//RS         });
+//RS         ctx.switch_to(bodies[index]);
+//RS         ctx.push_lexical_frame();
+//RS         lower_stmts(ctx, &arms[index].2)?;
+//RS         ctx.pop_lexical_frame()?;
+//RS         if !ctx.is_terminated() {
+//RS             ctx.terminate(MirTerminator::Jump { target: join });
+//RS         }
+//RS     }
+//RS     ctx.switch_to(otherwise);
+//RS     ctx.push_lexical_frame();
+//RS     lower_stmts(ctx, else_body)?;
+//RS     ctx.pop_lexical_frame()?;
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: join });
+//RS     }
+//RS     ctx.switch_to(join);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn lower_mixed_switch(
+//RS     ctx: &mut LowerCtx,
+//RS     subject: &TExpr,
+//RS     arms: &[(TExpr, Vec<TStmt>)],
+//RS     else_body: Option<&[TStmt]>,
+//RS ) -> Result<(), LowerError> {
+//RS     let subject_value = lower_expr(ctx, subject)?;
+//RS     let join = ctx.new_block(ctx.span(), "mixed-switch.join")?;
+//RS     let otherwise = ctx.new_block(ctx.span(), "mixed-switch.otherwise")?;
+//RS     let mut tests = Vec::with_capacity(arms.len());
+//RS     let mut bodies = Vec::with_capacity(arms.len());
+//RS     for index in 0..arms.len() {
+//RS         tests.push(ctx.new_block(ctx.span(), &format!("mixed-switch.test.{index}"))?);
+//RS         bodies.push(ctx.new_block(ctx.span(), &format!("mixed-switch.body.{index}"))?);
+//RS     }
+//RS     if let Some(first) = tests.first().copied() {
+//RS         ctx.terminate(MirTerminator::Jump { target: first });
+//RS     } else {
+//RS         ctx.terminate(MirTerminator::Jump { target: otherwise });
+//RS     }
+//RS     for (index, (condition, body)) in arms.iter().enumerate() {
+//RS         ctx.switch_to(tests[index]);
+//RS         let condition = ctx.with_switch_subject(subject_value, |ctx| lower_expr(ctx, condition))?;
+//RS         let next = tests.get(index + 1).copied().unwrap_or(otherwise);
+//RS         ctx.terminate(MirTerminator::Branch {
+//RS             condition,
+//RS             then_target: bodies[index],
+//RS             else_target: next,
+//RS         });
+//RS         ctx.switch_to(bodies[index]);
+//RS         ctx.with_switch_subject(subject_value, |ctx| {
+//RS             ctx.push_lexical_frame();
+//RS             lower_stmts(ctx, body)?;
+//RS             ctx.pop_lexical_frame()
+//RS         })?;
+//RS         if !ctx.is_terminated() {
+//RS             ctx.terminate(MirTerminator::Jump { target: join });
+//RS         }
+//RS     }
+//RS     ctx.switch_to(otherwise);
+//RS     ctx.push_lexical_frame();
+//RS     if let Some(body) = else_body {
+//RS         lower_stmts(ctx, body)?;
+//RS     }
+//RS     ctx.pop_lexical_frame()?;
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: join });
+//RS     }
+//RS     ctx.switch_to(join);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn lower_debug_only(ctx: &mut LowerCtx, body: &[TStmt]) -> Result<(), LowerError> {
+//RS     let scope = ctx.enter_scope(
+//RS         MirScopeKind::DebugOnly,
+//RS         ctx.span(),
+//RS         Some("debug-only".to_string()),
+//RS     )?;
+//RS     lower_stmts(ctx, body)?;
+//RS     ctx.exit_scope(scope)?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn lower_scoped(
+//RS     ctx: &mut LowerCtx,
+//RS     kind: MirScopeKind,
+//RS     name: Option<String>,
+//RS     body: &[TStmt],
+//RS ) -> Result<(), LowerError> {
+//RS     let scope = ctx.enter_scope(kind, ctx.span(), name)?;
+//RS     lower_stmts(ctx, body)?;
+//RS     ctx.exit_scope(scope)?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn lower_scope_member(
+//RS     ctx: &mut LowerCtx,
+//RS     kind: &ScopeMemberKind,
+//RS     body: &[TStmt],
+//RS ) -> Result<(), LowerError> {
+//RS     match kind {
+//RS         ScopeMemberKind::Setup => lower_stmts(ctx, body),
+//RS         ScopeMemberKind::ExpectFail(code) => {
+//RS             let scope = ctx.enter_scope(MirScopeKind::ScopeMember, ctx.span(), code.clone())?;
+//RS             attach_scope_member(
+//RS                 ctx,
+//RS                 scope,
+//RS                 MirTestScopeMember::ExpectFail {
+//RS                     expected_code: code.clone(),
+//RS                 },
+//RS             )?;
+//RS             lower_scope_member_body(ctx, scope, body)
+//RS         }
+//RS         ScopeMemberKind::Timeout(duration) => {
+//RS             let value = lower_expr(ctx, duration)?;
+//RS             let scope = ctx.enter_scope(
+//RS                 MirScopeKind::ScopeMember,
+//RS                 ctx.span(),
+//RS                 Some("timeout".to_string()),
+//RS             )?;
+//RS             attach_scope_member(ctx, scope, MirTestScopeMember::Timeout { duration: value })?;
+//RS             lower_scope_member_body(ctx, scope, body)
+//RS         }
+//RS         ScopeMemberKind::Measure => {
+//RS             let scope = ctx.enter_scope(
+//RS                 MirScopeKind::ScopeMember,
+//RS                 ctx.span(),
+//RS                 Some("measure".to_string()),
+//RS             )?;
+//RS             attach_scope_member(ctx, scope, MirTestScopeMember::Measure)?;
+//RS             lower_scope_member_body(ctx, scope, body)
+//RS         }
+//RS         ScopeMemberKind::Skip => {
+//RS             let whole_test = ctx.scopes.is_empty()
+//RS                 && ctx.current == ctx.entry
+//RS                 && ctx
+//RS                     .block_by_id(ctx.current)
+//RS                     .is_some_and(|block| block.instructions.is_empty());
+//RS             let scope = ctx.enter_scope(
+//RS                 MirScopeKind::ScopeMember,
+//RS                 ctx.span(),
+//RS                 Some("skip".to_string()),
+//RS             )?;
+//RS             attach_scope_member(ctx, scope, MirTestScopeMember::Skip { whole_test })?;
+//RS 
+//RS             // Keep the checked body in MIR for diagnostics, but make its path
+//RS             // unreachable exactly as the test harness's `if false` shape does.
+//RS             let body_block = ctx.new_block(ctx.span(), "scope-member.skip.body")?;
+//RS             let skipped_block = ctx.new_block(ctx.span(), "scope-member.skip.skipped")?;
+//RS             let exit = ctx.new_block(ctx.span(), "scope-member.skip.exit")?;
+//RS             let join = ctx.new_block(ctx.span(), "scope-member.skip.join")?;
+//RS             let false_value = ctx.emit(
+//RS                 "scope-member.skip.condition",
+//RS                 Some(Type::Bool),
+//RS                 MirOperation::Constant(MirConstant::Bool(false)),
+//RS             )?;
+//RS             ctx.terminate(MirTerminator::Branch {
+//RS                 condition: false_value,
+//RS                 then_target: body_block,
+//RS                 else_target: skipped_block,
+//RS             });
+//RS             ctx.switch_to(body_block);
+//RS             let body_block_start = ctx.blocks.len();
+//RS             ctx.push_lexical_frame();
+//RS             lower_stmts(ctx, body)?;
+//RS             ctx.pop_lexical_frame()?;
+//RS             emit_scope_exits_on_early_paths(ctx, scope, body_block, body_block_start)?;
+//RS             if !ctx.is_terminated() {
+//RS                 ctx.terminate(MirTerminator::Jump { target: exit });
+//RS             }
+//RS             ctx.switch_to(skipped_block);
+//RS             ctx.terminate(MirTerminator::Jump { target: exit });
+//RS             ctx.switch_to(exit);
+//RS             ctx.exit_scope(scope)?;
+//RS             if !ctx.is_terminated() {
+//RS                 ctx.terminate(MirTerminator::Jump { target: join });
+//RS             }
+//RS             ctx.switch_to(join);
+//RS             Ok(())
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn attach_scope_member(
+//RS     ctx: &mut LowerCtx,
+//RS     scope: MirScopeId,
+//RS     member: MirTestScopeMember,
+//RS ) -> Result<(), LowerError> {
+//RS     let current = ctx.current_block();
+//RS     let span = ctx.span();
+//RS     let Some(instruction) = ctx
+//RS         .blocks
+//RS         .iter_mut()
+//RS         .find(|block| block.id == current)
+//RS         .and_then(|block| block.instructions.last_mut())
+//RS     else {
+//RS         return Err(ctx.error(span, "MIR scope member has no scope-enter operation"));
+//RS     };
+//RS     match &mut instruction.operation {
+//RS         MirOperation::ScopeEnter {
+//RS             scope: candidate,
+//RS             test_member,
+//RS         } if *candidate == scope => {
+//RS             *test_member = Some(member);
+//RS             Ok(())
+//RS         }
+//RS         _ => Err(ctx.error(span, "MIR scope member has no scope-enter operation")),
+//RS     }
+//RS }
+//RS 
+//RS fn rollback_method_lookup(owner: &Type, method: &str) -> String {
+//RS     let owner = match owner.without_user_tags() {
+//RS         Type::Named(name) => name.clone(),
+//RS         Type::Apply { name, .. } => name.clone(),
+//RS         _ => return format!("{}::{method}", crate::Syntax::TRAIT_ROLLBACK),
+//RS     };
+//RS     let key = format!("{}::{method}", crate::Syntax::TRAIT_ROLLBACK);
+//RS     if key == owner || key.starts_with(&format!("{owner}::")) {
+//RS         key
+//RS     } else {
+//RS         format!("{owner}::{key}")
+//RS     }
+//RS }
+//RS 
+//RS fn rollback_method_call(
+//RS     receiver: TLocal,
+//RS     receiver_ty: Type,
+//RS     method: &str,
+//RS     return_ty: Type,
+//RS     args: Vec<TCallArg>,
+//RS ) -> TExpr {
+//RS     TExpr {
+//RS         ty: return_ty,
+//RS         kind: TExprKind::MethodCall {
+//RS             recv: Box::new(TExpr {
+//RS                 ty: receiver_ty,
+//RS                 kind: TExprKind::Local(receiver),
+//RS             }),
+//RS             method: TMethodRef::trait_method(crate::Syntax::TRAIT_ROLLBACK, method),
+//RS             type_args: Vec::new(),
+//RS             args,
+//RS             source_first_string_literal: None,
+//RS             operator_line: None,
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn transaction_restore_call_arg(value: TExpr) -> TCallArg {
+//RS     TCallArg {
+//RS         value,
+//RS         template_items: None,
+//RS         borrow: false,
+//RS         mut_borrow: false,
+//RS         clone: false,
+//RS         arc_clone: false,
+//RS         fn_coerce: None,
+//RS         widen_to_vec: false,
+//RS         widen_to_union: None,
+//RS         box_as_trait: None,
+//RS     }
+//RS }
+//RS 
+//RS fn emit_scope_exits_on_early_paths(
+//RS     ctx: &mut LowerCtx,
+//RS     scope: MirScopeId,
+//RS     body_entry: MirBlockId,
+//RS     body_block_start: usize,
+//RS ) -> Result<(), LowerError> {
+//RS     let body_blocks = ctx.blocks[body_block_start..]
+//RS         .iter()
+//RS         .map(|block| block.id)
+//RS         .chain(std::iter::once(body_entry))
+//RS         .collect::<Vec<_>>();
+//RS     let early_exits = body_blocks
+//RS         .iter()
+//RS         .copied()
+//RS         .filter(|block_id| {
+//RS             let Some(block) = ctx.block_by_id(*block_id) else {
+//RS                 return false;
+//RS             };
+//RS             let leaves_scope = match &block.terminator {
+//RS                 MirTerminator::Return { .. } => true,
+//RS                 MirTerminator::Break { target, .. } | MirTerminator::Continue { target } => {
+//RS                     !body_blocks.contains(target)
+//RS                 }
+//RS                 _ => false,
+//RS             };
+//RS             leaves_scope
+//RS                 && !block.instructions.iter().any(|instruction| {
+//RS                     matches!(
+//RS                         &instruction.operation,
+//RS                         MirOperation::ScopeExit { scope: candidate } if *candidate == scope
+//RS                     )
+//RS                 })
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let current = ctx.current_block();
+//RS     for block in early_exits {
+//RS         // A live-flag guarded release branches, which ends `block` early; the
+//RS         // exit itself then moves to the block the cleanups end in.
+//RS         let exit = ctx
+//RS             .block_by_id(block)
+//RS             .map(|row| row.terminator.clone())
+//RS             .ok_or_else(|| ctx.error(ctx.span(), "scope early exit has no block"))?;
+//RS         ctx.switch_to(block);
+//RS         ctx.emit_scope_cleanups(scope)?;
+//RS         ctx.emit(
+//RS             &format!("scope-member.exit.early.{}", block.0),
+//RS             None,
+//RS             MirOperation::ScopeExit { scope },
+//RS         )?;
+//RS         ctx.terminate(exit);
+//RS     }
+//RS     ctx.switch_to(current);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn lower_scope_member_body(
+//RS     ctx: &mut LowerCtx,
+//RS     scope: MirScopeId,
+//RS     body: &[TStmt],
+//RS ) -> Result<(), LowerError> {
+//RS     let body_entry = ctx.current_block();
+//RS     let body_block_start = ctx.blocks.len();
+//RS     lower_stmts(ctx, body)?;
+//RS     emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start)?;
+//RS     if ctx.is_terminated() {
+//RS         ctx.exit_scope(scope)?;
+//RS         return Ok(());
+//RS     }
+//RS     let exit = ctx.new_block(ctx.span(), "scope-member.exit")?;
+//RS     let join = ctx.new_block(ctx.span(), "scope-member.join")?;
+//RS     ctx.terminate(MirTerminator::Jump { target: exit });
+//RS     ctx.switch_to(exit);
+//RS     ctx.exit_scope(scope)?;
+//RS     if !ctx.is_terminated() {
+//RS         ctx.terminate(MirTerminator::Jump { target: join });
+//RS     }
+//RS     ctx.switch_to(join);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn lower_transaction(
+//RS     ctx: &mut LowerCtx,
+//RS     handle: Option<&TLocal>,
+//RS     snapshots: &[(TLocal, Option<Type>)],
+//RS     stm: Option<&TLocal>,
+//RS     body: &[TStmt],
+//RS ) -> Result<(), LowerError> {
+//RS     let scope = ctx.enter_scope(MirScopeKind::Transaction, ctx.span(), None)?;
+//RS     if let Some(handle) = handle {
+//RS         let ty = Type::Named("Transaction".to_string());
+//RS         let place = ctx.bind_local(handle, ty.clone(), handle.mutable, false, false)?;
+//RS         let value = ctx.emit(
+//RS             "transaction.handle.global",
+//RS             Some(ty),
+//RS             MirOperation::Global {
+//RS                 name: "transaction".to_string(),
+//RS             },
+//RS         )?;
+//RS         ctx.emit(
+//RS             "transaction.handle.write",
+//RS             None,
+//RS             MirOperation::WritePlace { place, value },
+//RS         )?;
+//RS     }
+//RS     if let Some(stm) = stm {
+//RS         let ty = Type::Named("Stm".to_string());
+//RS         let place = ctx.bind_local(stm, ty.clone(), stm.mutable, false, false)?;
+//RS         let value = ctx.emit(
+//RS             "transaction.stm.global",
+//RS             Some(ty),
+//RS             MirOperation::Global {
+//RS                 name: "stm".to_string(),
+//RS             },
+//RS         )?;
+//RS         ctx.emit(
+//RS             "transaction.stm.write",
+//RS             None,
+//RS             MirOperation::WritePlace { place, value },
+//RS         )?;
+//RS     }
+//RS     let mut restores = Vec::new();
+//RS     for (index, (local, rollback_ty)) in snapshots.iter().enumerate() {
+//RS         let place = ctx.lower_place(
+//RS             &crate::Codegen::TIR::TPlace::Local(local.clone()),
+//RS             MirAccess::Write,
+//RS         )?;
+//RS         let (value, snapshot_ty) = if let Some(owner_ty) = rollback_ty {
+//RS             let snapshot_method = rollback_method_lookup(owner_ty, "snapshot");
+//RS             let snapshot_function = ctx.function_id_for(&snapshot_method)?;
+//RS             let callable_ty = match ctx.function_registry.return_type_for(snapshot_function) {
+//RS                 Some(snapshot_ty) => snapshot_ty,
+//RS                 None => {
+//RS                     return Err(ctx.error(
+//RS                         ctx.span(),
+//RS                         format!(
+//RS                             "Rollback::snapshot for `{}` has no checked return type",
+//RS                             owner_ty.name()
+//RS                         ),
+//RS                     ));
+//RS                 }
+//RS             };
+//RS             let call = rollback_method_call(
+//RS                 local.clone(),
+//RS                 owner_ty.clone(),
+//RS                 "snapshot",
+//RS                 callable_ty.clone(),
+//RS                 Vec::new(),
+//RS             );
+//RS             let (snapshot, snapshot_ty) = match &callable_ty {
+//RS                 Type::Result { ok, .. } => {
+//RS                     let snapshot_ty = (**ok).clone();
+//RS                     (
+//RS                         TExpr {
+//RS                             ty: snapshot_ty.clone(),
+//RS                             kind: TExprKind::Try {
+//RS                                 inner: Box::new(call),
+//RS                                 note: None,
+//RS                                 convert: TTryConvert::None,
+//RS                                 file: ctx.function.source_file.clone(),
+//RS                                 line: ctx.source_line() as usize,
+//RS                                 column: ctx.source_column() as usize,
+//RS                                 fn_name: ctx.function.name.clone(),
+//RS                             },
+//RS                         },
+//RS                         snapshot_ty,
+//RS                     )
+//RS                 }
+//RS                 _ => (call, callable_ty),
+//RS             };
+//RS             (lower_expr(ctx, &snapshot)?, snapshot_ty)
+//RS         } else {
+//RS             let snapshot_ty = ctx
+//RS                 .local_types
+//RS                 .get(&local.name)
+//RS                 .cloned()
+//RS                 .or_else(|| rollback_ty.clone())
+//RS                 .unwrap_or_else(|| Type::Named("Snapshot".to_string()));
+//RS             let value = ctx.emit(
+//RS                 &format!("transaction.snapshot.{index}.read"),
+//RS                 Some(snapshot_ty.clone()),
+//RS                 MirOperation::ReadPlace(place),
+//RS             )?;
+//RS             let copied = ctx.emit(
+//RS                 &format!("transaction.snapshot.{index}.copy"),
+//RS                 Some(snapshot_ty.clone()),
+//RS                 MirOperation::Copy {
+//RS                     value,
+//RS                     // The rollback snapshot owns the state the scope goes on
+//RS                     // to change.
+//RS                     fact: jet_foundation::MIR::MirCopyFact::Materialize,
+//RS                 },
+//RS             )?;
+//RS             (copied, snapshot_ty)
+//RS         };
+//RS         let saved_local = TLocal::generated(format!(
+//RS             "txn_snap_{}_{}",
+//RS             ctx.transaction_restores.len(),
+//RS             index
+//RS         ))
+//RS         .as_mutable();
+//RS         let saved_place = ctx.bind_local(&saved_local, snapshot_ty.clone(), true, false, false)?;
+//RS         ctx.emit(
+//RS             &format!("transaction.snapshot.{index}.save"),
+//RS             None,
+//RS             MirOperation::WritePlace {
+//RS                 place: saved_place,
+//RS                 value,
+//RS             },
+//RS         )?;
+//RS         let custom = rollback_ty.as_ref().map(|owner_ty| {
+//RS             rollback_method_call(
+//RS                 local.clone(),
+//RS                 owner_ty.clone(),
+//RS                 "restore",
+//RS                 Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+//RS                 vec![transaction_restore_call_arg(TExpr {
+//RS                     ty: snapshot_ty.clone(),
+//RS                     kind: TExprKind::Local(saved_local.clone()),
+//RS                 })],
+//RS             )
+//RS         });
+//RS         restores.push(TransactionRestore {
+//RS             place,
+//RS             saved: saved_place,
+//RS             ty: snapshot_ty,
+//RS             custom,
+//RS         });
+//RS     }
+//RS     ctx.transaction_restores.push((scope, restores));
+//RS     let body_entry = ctx.current_block();
+//RS     let body_block_start = ctx.blocks.len();
+//RS     lower_stmts(ctx, body)?;
+//RS     emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start)?;
+//RS     if let Some(handle) = handle {
+//RS         if ctx.is_terminated() {
+//RS             ctx.exit_scope(scope)?;
+//RS             ctx.transaction_restores.pop();
+//RS             return Ok(());
+//RS         }
+//RS         let handle_ty = Type::Named("Transaction".to_string());
+//RS         let receiver = lower_expr(
+//RS             ctx,
+//RS             &TExpr {
+//RS                 ty: handle_ty,
+//RS                 kind: TExprKind::Local(handle.clone()),
+//RS             },
+//RS         )?;
+//RS         let call = ctx.intern_prelude_route(TPreludeRoute {
+//RS             family: MirPreludeFamily::HandleMethod,
+//RS             module: "core.transaction".to_string(),
+//RS             member: "commit".to_string(),
+//RS             symbol: MirSymbol::Prelude("jet_transaction_commit".to_string()),
+//RS             signature: MirCallSignature {
+//RS                 arity: 1,
+//RS                 max_arity: 1,
+//RS                 borrow_mask: vec![true],
+//RS             },
+//RS             effect: None,
+//RS             fallibility: TFailureCarrier::Infallible,
+//RS             abi: MirPreludeAbi::Value,
+//RS             authority: None,
+//RS             db_metadata: None,
+//RS         })?;
+//RS         ctx.emit(
+//RS             "transaction.commit",
+//RS             Some(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
+//RS             MirOperation::Semantic(MirSemanticOp::HandleMethod {
+//RS                 call,
+//RS                 receiver,
+//RS                 args: Vec::new(),
+//RS                 frame_schedule: None,
+//RS                 frame_schedule_derivation: None,
+//RS             }),
+//RS         )?;
+//RS     }
+//RS     ctx.exit_scope(scope)?;
+//RS     ctx.transaction_restores.pop();
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn const_int(
+//RS     ctx: &mut LowerCtx,
+//RS     value: i64,
+//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+//RS     ctx.emit(
+//RS         "stmt.constant-int",
+//RS         Some(Type::Int),
+//RS         MirOperation::Constant(MirConstant::Int {
+//RS             value,
+//RS             width: None,
+//RS             spelling: None,
+//RS         }),
+//RS     )
+//RS }
+// END-PORT-PENDING 0538 crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1752-3047
+

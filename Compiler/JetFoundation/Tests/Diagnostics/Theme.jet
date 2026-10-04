@@ -1,0 +1,11 @@
+// Terminal.rs:53: selected completion entries use the canonical inverted role.
+#Test("inverted terminal role preserves plain text when color is disabled") {
+    assert(diagnostic_theme_invert(false, "λ selected") == "λ selected")
+    assert(diagnostic_theme_invert(false, "") == "")
+}
+
+#Test("inverted terminal role uses exact shared SGR and reset bytes") {
+    escape :: String.from_bytes([U8]{27}).unwrap("escape is UTF-8")
+    assert(diagnostic_theme_invert(true, "λ selected") == "{escape}[48;5;24;97;1mλ selected{escape}[0m")
+    assert(diagnostic_theme_invert(true, "") == "{escape}[48;5;24;97;1m{escape}[0m")
+}

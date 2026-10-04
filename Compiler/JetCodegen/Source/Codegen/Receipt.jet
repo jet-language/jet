@@ -1,0 +1,414 @@
+// PORT-PENDING 0469 crates-jet-codegen-src-codegen-receipt-module-group: crates/jet-codegen/src/Codegen/Receipt.rs:1-410
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Checked Codable projection for interpreter receipt attachments.
+//RS //!
+//RS //! The interpreter carries structured MIR values rather than resident handles.
+//RS //! This adapter consumes only the MIR type rows and their checked wire metadata;
+//RS //! it never derives a wire key from a display spelling.
+//RS 
+//RS use jet_foundation::MIR::{
+//RS     MirRuntimeValue, MirSerdeAttributeKind, MirType, MirTypeDef, MirTypeDefKind, MirTypeKind,
+//RS     MirVariantPayload, MirProgram, MirField,
+//RS };
+//RS use std::collections::HashSet;
+//RS use jet_foundation::Shape::ShapeProjectionKind;
+//RS 
+//RS const JSON_OBJECT: &str = "JSONObject";
+//RS fn field_json_name(field: &MirField) -> &str {
+//RS     field
+//RS         .shape_names
+//RS         .name_for(ShapeProjectionKind::Json)
+//RS         .expect("checked receipt fields always have a JSON projection name")
+//RS }
+//RS 
+//RS fn object(fields: Vec<(String, MirRuntimeValue)>) -> MirRuntimeValue {
+//RS     MirRuntimeValue::Struct {
+//RS         type_name: JSON_OBJECT.to_string(),
+//RS         fields,
+//RS     }
+//RS }
+//RS 
+//RS fn type_definition<'a>(
+//RS     program: &'a MirProgram,
+//RS     ty: &MirType,
+//RS ) -> Option<&'a MirTypeDef> {
+//RS     let id = ty.identity?;
+//RS     program.types.iter().find(|definition| definition.id == id)
+//RS }
+//RS 
+//RS fn is_u8(ty: &MirType) -> bool {
+//RS     matches!(
+//RS         ty.kind(),
+//RS         MirTypeKind::IntN {
+//RS             signed: false,
+//RS             bits: 8
+//RS         }
+//RS     )
+//RS }
+//RS 
+//RS fn encode_byte_values(values: &[MirRuntimeValue]) -> Result<MirRuntimeValue, String> {
+//RS     values
+//RS         .iter()
+//RS         .map(|value| match value {
+//RS             MirRuntimeValue::Int(value) => u8::try_from(*value)
+//RS                 .map_err(|_| "receipt byte list contains an out-of-range value".to_string()),
+//RS             MirRuntimeValue::BigInt(value) => value
+//RS                 .parse::<u8>()
+//RS                 .map_err(|_| "receipt byte list contains an out-of-range value".to_string()),
+//RS             _ => Err("receipt byte list contains a non-integer value".to_string()),
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()
+//RS         .map(MirRuntimeValue::Bytes)
+//RS }
+//RS 
+//RS fn encode_fields(
+//RS     program: &MirProgram,
+//RS     source: &[(String, MirRuntimeValue)],
+//RS     fields: &[MirField],
+//RS ) -> Result<Vec<(String, MirRuntimeValue)>, String> {
+//RS     let mut seen = HashSet::with_capacity(source.len());
+//RS     for (name, _) in source {
+//RS         if !seen.insert(name) {
+//RS             return Err(format!("receipt record repeats checked field `{name}`"));
+//RS         }
+//RS         if !fields.iter().any(|field| &field.name == name) {
+//RS             return Err(format!("receipt record has unknown checked field `{name}`"));
+//RS         }
+//RS     }
+//RS     let mut encoded = Vec::with_capacity(fields.len());
+//RS     for field in fields {
+//RS         if field.skip {
+//RS             continue;
+//RS         }
+//RS         let Some((_, value)) = source.iter().find(|(name, _)| name == &field.name) else {
+//RS             return Err(format!(
+//RS                 "receipt value is missing checked field `{}`",
+//RS                 field.name
+//RS             ));
+//RS         };
+//RS         if matches!(field.ty.kind(), MirTypeKind::Option(_))
+//RS             && matches!(value, MirRuntimeValue::Absent { .. })
+//RS         {
+//RS             continue;
+//RS         }
+//RS         encoded.push((
+//RS             field_json_name(field).to_string(),
+//RS             encode_value(program, value, &field.ty)?,
+//RS         ));
+//RS     }
+//RS     Ok(encoded)
+//RS }
+//RS 
+//RS fn serde_tag(definition: &MirTypeDef) -> Option<String> {
+//RS     definition.serde.iter().find_map(|attribute| {
+//RS         (attribute.kind == MirSerdeAttributeKind::Tag)
+//RS             .then(|| attribute.value.clone())
+//RS             .flatten()
+//RS     })
+//RS }
+//RS 
+//RS fn serde_untagged(definition: &MirTypeDef) -> bool {
+//RS     definition
+//RS         .serde
+//RS         .iter()
+//RS         .any(|attribute| attribute.kind == MirSerdeAttributeKind::Untagged)
+//RS }
+//RS 
+//RS fn encode_enum(
+//RS     program: &MirProgram,
+//RS     value: &MirRuntimeValue,
+//RS     variants: &[jet_foundation::MIR::MirVariant],
+//RS     definition: &MirTypeDef,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     let MirRuntimeValue::Enum {
+//RS         variant: source_variant,
+//RS         args,
+//RS         ..
+//RS     } = value
+//RS     else {
+//RS         return Err(format!(
+//RS             "receipt value `{}` is not an enum carrier",
+//RS             definition.name
+//RS         ));
+//RS     };
+//RS     let variant = variants
+//RS         .iter()
+//RS         .find(|candidate| candidate.name == *source_variant)
+//RS         .ok_or_else(|| {
+//RS             format!(
+//RS                 "receipt value `{}` has unknown enum variant `{}`",
+//RS                 definition.name, source_variant
+//RS             )
+//RS         })?;
+//RS     let payload = match &variant.payload {
+//RS         MirVariantPayload::Unit => {
+//RS             if !args.is_empty() {
+//RS                 return Err(format!(
+//RS                     "receipt enum variant `{}` has an unexpected payload",
+//RS                     variant.name
+//RS                 ));
+//RS             }
+//RS             None
+//RS         }
+//RS         MirVariantPayload::Single(ty) => {
+//RS             let Some((_, payload)) = args.first() else {
+//RS                 return Err(format!(
+//RS                     "receipt enum variant `{}` is missing its payload",
+//RS                     variant.name
+//RS                 ));
+//RS             };
+//RS             if args.len() != 1 {
+//RS                 return Err(format!(
+//RS                     "receipt enum variant `{}` has too many payload values",
+//RS                     variant.name
+//RS                 ));
+//RS             }
+//RS             Some(encode_value(program, payload, ty)?)
+//RS         }
+//RS         MirVariantPayload::Named(fields) => {
+//RS             if args.len() != fields.len() {
+//RS                 return Err(format!(
+//RS                     "receipt enum variant `{}` has {} payload values; checked shape needs {}",
+//RS                     variant.name,
+//RS                     args.len(),
+//RS                     fields.len()
+//RS                 ));
+//RS             }
+//RS             let mut encoded = Vec::with_capacity(fields.len());
+//RS             for (index, field) in fields.iter().enumerate() {
+//RS                 if field.skip {
+//RS                     continue;
+//RS                 }
+//RS                 let labeled = args.iter().find_map(|(label, value)| {
+//RS                     (label.as_deref() == Some(field.name.as_str())).then_some(value)
+//RS                 });
+//RS                 let positional = args
+//RS                     .iter()
+//RS                     .all(|(label, _)| label.is_none())
+//RS                     .then(|| args.get(index).map(|(_, value)| value))
+//RS                     .flatten();
+//RS                 let Some(payload) = labeled.or(positional) else {
+//RS                     return Err(format!(
+//RS                         "receipt enum variant `{}` is missing checked field `{}`",
+//RS                         variant.name, field.name
+//RS                     ));
+//RS                 };
+//RS                 encoded.push((
+//RS                     field_json_name(field).to_string(),
+//RS                     encode_value(program, payload, &field.ty)?,
+//RS                 ));
+//RS             }
+//RS             Some(object(encoded))
+//RS         }
+//RS     };
+//RS     if serde_untagged(definition) {
+//RS         return Ok(payload.unwrap_or(MirRuntimeValue::Unit));
+//RS     }
+//RS     let wire = variant.wire_name.clone();
+//RS     if let Some(tag) = serde_tag(definition) {
+//RS         let mut fields = vec![(tag, MirRuntimeValue::String(wire))];
+//RS         match payload {
+//RS             None => {}
+//RS             Some(value) if matches!(&variant.payload, MirVariantPayload::Single(_)) => {
+//RS                 fields.push(("value".to_string(), value));
+//RS             }
+//RS             Some(MirRuntimeValue::Struct { fields: payload, .. }) => fields.extend(payload),
+//RS             Some(_) => {
+//RS                 return Err(format!(
+//RS                     "receipt enum variant `{}` has an invalid named payload",
+//RS                     variant.name
+//RS                 ));
+//RS             }
+//RS         }
+//RS         return Ok(object(fields));
+//RS     }
+//RS     match payload {
+//RS         None => Ok(MirRuntimeValue::String(wire)),
+//RS         Some(payload) => Ok(object(vec![(wire, payload)])),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_definition(
+//RS     program: &MirProgram,
+//RS     value: &MirRuntimeValue,
+//RS     definition: &MirTypeDef,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     match &definition.kind {
+//RS         MirTypeDefKind::Struct { fields, .. } => {
+//RS             let MirRuntimeValue::Struct { fields: source, .. } = value else {
+//RS                 return Err(format!(
+//RS                     "receipt value `{}` is not a record carrier",
+//RS                     definition.name
+//RS                 ));
+//RS             };
+//RS             Ok(object(encode_fields(program, source, fields)?))
+//RS         }
+//RS         MirTypeDefKind::Enum { variants, .. } => {
+//RS             encode_enum(program, value, variants, definition)
+//RS         }
+//RS         MirTypeDefKind::Distinct { base, .. } => encode_value(program, value, base),
+//RS         MirTypeDefKind::Alias { target } => encode_value(program, value, target),
+//RS         MirTypeDefKind::UnitFamily { .. } => Err(format!(
+//RS             "receipt type `{}` has no checked Codable variant metadata",
+//RS             definition.name
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_option(
+//RS     program: &MirProgram,
+//RS     value: &MirRuntimeValue,
+//RS     inner: &MirType,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     match value {
+//RS         MirRuntimeValue::Present(value) => encode_value(program, value, inner),
+//RS         MirRuntimeValue::Absent { .. } => Ok(MirRuntimeValue::Unit),
+//RS         MirRuntimeValue::FailedTold(_) => Err("receipt Option carries a told failure".to_string()),
+//RS         _ => Err("receipt Option has an invalid result carrier".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_result(
+//RS     program: &MirProgram,
+//RS     value: &MirRuntimeValue,
+//RS     ok: &MirType,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     match value {
+//RS         MirRuntimeValue::Present(value) => encode_value(program, value, ok),
+//RS         MirRuntimeValue::Absent { .. } => Ok(MirRuntimeValue::Unit),
+//RS         MirRuntimeValue::FailedTold(_) => Err("receipt Result has a non-Codable error carrier".to_string()),
+//RS         _ => Err("receipt Result has an invalid result carrier".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_value(
+//RS     program: &MirProgram,
+//RS     value: &MirRuntimeValue,
+//RS     ty: &MirType,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     if let MirTypeKind::Apply { name, args } = ty.kind() {
+//RS         match (name.name.as_str(), args.as_slice()) {
+//RS             ("List", [inner]) => {
+//RS                 return encode_value(program, value, &MirType::from_kind(
+//RS                     MirTypeKind::List(Box::new(inner.clone())),
+//RS                 ));
+//RS             }
+//RS             ("Shared", [inner]) => {
+//RS                 return encode_value(program, value, &MirType::from_kind(
+//RS                     MirTypeKind::Shared(Box::new(inner.clone())),
+//RS                 ));
+//RS             }
+//RS             ("Option", [inner]) => return encode_option(program, value, inner),
+//RS             ("Result", [ok, _err]) => return encode_result(program, value, ok),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     if let Some(definition) = type_definition(program, ty) {
+//RS         return encode_definition(program, value, definition);
+//RS     }
+//RS     match ty.kind() {
+//RS         MirTypeKind::Int | MirTypeKind::IntN { .. } | MirTypeKind::Measure(_) => match value {
+//RS             MirRuntimeValue::Int(_) | MirRuntimeValue::BigInt(_) => Ok(value.clone()),
+//RS             _ => Err("receipt integer has an invalid scalar carrier".to_string()),
+//RS         },
+//RS         MirTypeKind::Float | MirTypeKind::Float32 => match value {
+//RS             MirRuntimeValue::Float { value: number, .. } if number.is_finite() => Ok(value.clone()),
+//RS             MirRuntimeValue::Float { .. } => {
+//RS                 Err("receipt Float contains a non-finite value".to_string())
+//RS             }
+//RS             _ => Err("receipt Float has an invalid scalar carrier".to_string()),
+//RS         },
+//RS         MirTypeKind::Bool => match value {
+//RS             MirRuntimeValue::Bool(_) => Ok(value.clone()),
+//RS             _ => Err("receipt Bool has an invalid scalar carrier".to_string()),
+//RS         },
+//RS         MirTypeKind::Char => match value {
+//RS             MirRuntimeValue::Char(_) => Ok(value.clone()),
+//RS             _ => Err("receipt Char has an invalid scalar carrier".to_string()),
+//RS         },
+//RS         MirTypeKind::String => match value {
+//RS             MirRuntimeValue::String(_) => Ok(value.clone()),
+//RS             _ => Err("receipt String has an invalid scalar carrier".to_string()),
+//RS         },
+//RS         MirTypeKind::List(inner) => match value {
+//RS             MirRuntimeValue::Bytes(_) if is_u8(inner) => Ok(value.clone()),
+//RS             MirRuntimeValue::List(values) if is_u8(inner) => encode_byte_values(values),
+//RS             MirRuntimeValue::List(values) => Ok(MirRuntimeValue::List(
+//RS                 values
+//RS                     .iter()
+//RS                     .map(|value| encode_value(program, value, inner))
+//RS                     .collect::<Result<Vec<_>, _>>()?,
+//RS             )),
+//RS             _ => Err("receipt List has an invalid list carrier".to_string()),
+//RS         },
+//RS         MirTypeKind::FixedList { elem, .. } => match value {
+//RS             MirRuntimeValue::Bytes(_) if is_u8(elem) => Ok(value.clone()),
+//RS             MirRuntimeValue::List(values) if is_u8(elem) => encode_byte_values(values),
+//RS             MirRuntimeValue::List(values) => Ok(MirRuntimeValue::List(
+//RS                 values
+//RS                     .iter()
+//RS                     .map(|value| encode_value(program, value, elem))
+//RS                     .collect::<Result<Vec<_>, _>>()?,
+//RS             )),
+//RS             _ => Err("receipt fixed list has an invalid list carrier".to_string()),
+//RS         },
+//RS         MirTypeKind::Map { value: value_ty, .. } => match value {
+//RS             MirRuntimeValue::Map(entries) => Ok(MirRuntimeValue::Map(
+//RS                 entries
+//RS                     .iter()
+//RS                     .map(|(key, value)| {
+//RS                         Ok((key.clone(), encode_value(program, value, value_ty)?))
+//RS                     })
+//RS                     .collect::<Result<Vec<_>, String>>()?,
+//RS             )),
+//RS             _ => Err("receipt Map has an invalid map carrier".to_string()),
+//RS         },
+//RS         MirTypeKind::Shared(inner) => encode_value(program, value, inner),
+//RS         MirTypeKind::Option(inner) => encode_option(program, value, inner),
+//RS         MirTypeKind::Result { ok, .. } => encode_result(program, value, ok),
+//RS         MirTypeKind::Tuple(_) => Err(format!(
+//RS             "receipt type `{}` has no checked Codable field metadata",
+//RS             ty.display_name()
+//RS         )),
+//RS         MirTypeKind::Tagged { inner, .. }
+//RS         | MirTypeKind::InlineRange { base: inner, .. }
+//RS         | MirTypeKind::Quantity { base: inner, .. } => encode_value(program, value, inner),
+//RS         MirTypeKind::Apply { name, args } => match name.name.as_str() {
+//RS             "List" if args.len() == 1 => encode_value(
+//RS                 program,
+//RS                 value,
+//RS                 &MirType::from_kind(MirTypeKind::List(Box::new(args[0].clone()))),
+//RS             ),
+//RS             "Shared" if args.len() == 1 => encode_value(
+//RS                 program,
+//RS                 value,
+//RS                 &MirType::from_kind(MirTypeKind::Shared(Box::new(args[0].clone()))),
+//RS             ),
+//RS             "Option" if args.len() == 1 => encode_option(program, value, &args[0]),
+//RS             "Result" if args.len() == 2 => encode_result(program, value, &args[0]),
+//RS             _ => Err(format!(
+//RS                 "receipt type `{}` has no checked Codable definition",
+//RS                 ty.display_name()
+//RS             )),
+//RS         },
+//RS         MirTypeKind::Union(_) => Err(format!(
+//RS             "receipt type `{}` has no checked Codable definition",
+//RS             ty.display_name()
+//RS         )),
+//RS         MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } | MirTypeKind::TraitObject(_) => Err(format!(
+//RS             "receipt type `{}` is not Codable",
+//RS             ty.display_name()
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS /// Canonicalize one interpreter value using the checked MIR type and wire rows.
+//RS pub(crate) fn encode_interpreter_value(
+//RS     program: &MirProgram,
+//RS     value: &MirRuntimeValue,
+//RS     ty: &MirType,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     encode_value(program, value, ty)
+//RS }
+// END-PORT-PENDING 0469 crates/jet-codegen/src/Codegen/Receipt.rs:1-410
+

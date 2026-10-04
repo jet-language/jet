@@ -1,0 +1,571 @@
+// One backend-neutral shape vocabulary. Rust: jet-foundation/src/Shape.rs.
+// No adapters, serializers, or second shape enum belong in this owner.
+// usize facts use U64 to retain their complete magnitude, as ArrowData does.
+// #4483: selected-target usize bounds remain a type/ABI integration gate;
+// this module never substitutes the executing host's pointer width.
+// #4499: derived composite Ord/Hash remains a canonical user-type-key gate.
+// Validation only needs canonical Set<String>/Set<U64>, never composite keys.
+// Borrow-return APIs use canonical @String/@ShapeProjectedField references;
+// their native lowering is the existing #4500 gate, not an owning-copy fallback.
+
+pub struct ShapeIdentity {
+    pub source: String
+    pub type_name: String
+
+    pub fn new(^source: String, ^type_name: String) -> ShapeIdentity Never! {
+        ShapeIdentity{source: ^source, type_name: ^type_name}
+    }
+    pub fn validate(self) ShapeError! {
+        if self.source.trim().is_empty() -> return Err(ShapeError.EmptyIdentity{part: "source"})
+        if self.type_name.trim().is_empty() -> return Err(ShapeError.EmptyIdentity{part: "type_name"})
+        if self.source.contains(TEXT_NUL) || self.type_name.contains(TEXT_NUL) -> return Err(ShapeError.InvalidIdentity{source: ~self.source, type_name: ~self.type_name})
+    }
+    pub fn key(self) -> String Never! { "{self.source}::{self.type_name}" }
+}
+
+pub struct ShapeSpan {
+    pub start: U64
+    pub end: U64
+
+    pub fn new(start: U64, end: U64) -> ShapeSpan Never! { ShapeSpan{start: start, end: end} }
+    fn validate(self) ShapeError! {
+        if self.start > self.end -> return Err(ShapeError.InvalidProvenance)
+    }
+}
+
+// Recursive aggregates are the same mechanism as Foundation AST/Arrow fields;
+// there is no public Box wrapper or string-encoded private type universe.
+pub enum ShapeType {
+    Null
+    Bool
+    Int
+    Float
+    Number
+    Text
+    Bytes
+    Array(inner: ShapeType)
+    Optional(inner: ShapeType)
+    Object(identity: ShapeIdentity)
+    Unknown(name: String)
+
+    fn validate(self) ShapeError! {
+        if self == {
+            .Array(inner) | .Optional(inner) -> inner.validate()
+            .Object(identity) -> identity.validate()
+            .Unknown(name) -> {
+                if name.trim().is_empty() || name.contains(TEXT_NUL) -> return Err(ShapeError.UnknownType{value: ~name})
+            }
+            else -> {}
+        }
+    }
+}
+
+pub enum ShapeDefault {
+    Null
+    Bool(value: Bool)
+    Int(value: I128)
+    Float(value: String)
+    Text(value: String)
+    Bytes(value: [U8])
+    Unknown(value: String)
+
+    fn validate(self) ShapeError! {
+        if self == {
+            .Float(value) | .Unknown(value) -> {
+                if value.trim().is_empty() || value.contains(TEXT_NUL) -> return Err(ShapeError.InvalidDefault)
+            }
+            else -> {}
+        }
+    }
+}
+
+pub enum ShapeOrigin {
+    Declared
+    Derived(from: ShapeIdentity)
+    Imported(package: String)
+}
+
+pub struct ShapeProvenance {
+    pub origin: ShapeOrigin
+    pub span: ShapeSpan?
+    pub declaration: String?
+
+    pub fn declared() -> ShapeProvenance Never! {
+        ShapeProvenance{origin: ShapeOrigin.Declared, span: None, declaration: None}
+    }
+    pub fn with_span(^self, span: ShapeSpan) -> ShapeProvenance Never! {
+        result := ^self
+        result.span = Val(span)
+        ^result
+    }
+    pub fn with_declaration(^self, ^declaration: String) -> ShapeProvenance Never! {
+        result := ^self
+        result.declaration = Val(^declaration)
+        ^result
+    }
+    fn validate(self) ShapeError! {
+        if self.declaration == .Val(declaration) {
+            if declaration.contains(TEXT_NUL) -> return Err(ShapeError.InvalidProvenance)
+        }
+        if self.span == .Val(span) -> span.validate() ?? return Err(err)
+        if self.origin == {
+            .Declared -> {}
+            .Derived(from) -> from.validate()
+            .Imported(package) -> {
+                if package.trim().is_empty() || package.contains(TEXT_NUL) -> return Err(ShapeError.InvalidProvenance)
+            }
+        }
+    }
+}
+
+pub enum ShapeEncoding {
+    Null
+    Bool
+    Int
+    Float
+    Number
+    Text
+    Array
+    Object
+    Unknown(name: String)
+
+    pub fn as_str(self) -> @String Never! {
+        if self == {
+            .Null -> @SHAPE_ENCODING_LABELS[0]
+            .Bool -> @SHAPE_ENCODING_LABELS[1]
+            .Int -> @SHAPE_ENCODING_LABELS[2]
+            .Float -> @SHAPE_ENCODING_LABELS[3]
+            .Number -> @SHAPE_ENCODING_LABELS[4]
+            .Text -> @SHAPE_ENCODING_LABELS[5]
+            .Array -> @SHAPE_ENCODING_LABELS[6]
+            .Object -> @SHAPE_ENCODING_LABELS[7]
+            .Unknown(name) -> @name
+        }
+    }
+    fn validate(self) ShapeError! {
+        if self == .Unknown(name) {
+            if name.trim().is_empty() || name.contains(TEXT_NUL) -> return Err(ShapeError.UnknownEncoding{value: ~name})
+        }
+    }
+}
+SHAPE_ENCODING_LABELS :: prep { [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Array", "Object"} }
+
+pub enum ShapeLayoutKind { Default C Columnar }
+pub struct ShapeLayoutFact {
+    pub kind: ShapeLayoutKind
+    pub alignment: U64?
+    pub target_alignment: Bool
+
+    pub fn default() -> ShapeLayoutFact Never! {
+        ShapeLayoutFact{kind: ShapeLayoutKind.Default, alignment: None, target_alignment: false}
+    }
+    pub fn c() -> ShapeLayoutFact Never! {
+        ShapeLayoutFact{kind: ShapeLayoutKind.C, alignment: None, target_alignment: false}
+    }
+    pub fn c_aligned(alignment: U64) -> ShapeLayoutFact Never! {
+        ShapeLayoutFact.c_aligned_with_mode(alignment, false)
+    }
+    pub fn c_aligned_target(alignment: U64) -> ShapeLayoutFact Never! {
+        ShapeLayoutFact.c_aligned_with_mode(alignment, true)
+    }
+    pub fn c_aligned_with_mode(alignment: U64, target_alignment: Bool) -> ShapeLayoutFact Never! {
+        ShapeLayoutFact{kind: ShapeLayoutKind.C, alignment: Val(alignment), target_alignment: target_alignment}
+    }
+    pub fn columnar() -> ShapeLayoutFact Never! {
+        ShapeLayoutFact{kind: ShapeLayoutKind.Columnar, alignment: None, target_alignment: false}
+    }
+    pub fn validate(self) ShapeError! {
+        if self.target_alignment && self.alignment == None -> return Err(ShapeError.InvalidLayoutAlignment{alignment: 0})
+        if self.alignment == .Val(alignment) {
+            // Short-circuit before subtraction: zero is invalid, not underflow.
+            if alignment == U64{0} || (alignment & (alignment - U64{1})) != U64{0} || self.kind != ShapeLayoutKind.C -> return Err(ShapeError.InvalidLayoutAlignment{alignment: alignment})
+        }
+    }
+}
+
+pub struct ShapeFieldNames {
+    pub text: String
+    pub json: String?
+    pub cbor: String?
+    pub csv: String?
+    pub toml: String?
+    pub yaml: String?
+    pub xml: String?
+    pub args: String
+    pub env: String
+    pub db: String?
+    pub layout: String?
+
+    pub fn from_source(source: String) -> ShapeFieldNames Never! {
+        ShapeFieldNames{text: ~source, json: None, cbor: None, csv: None,
+            toml: None, yaml: None, xml: None, args: shape_args_name(source),
+            env: shape_env_name(source), db: None, layout: None}
+    }
+    pub fn shared(^self, ^name: String) -> ShapeFieldNames Never! {
+        result := ^self
+        result.text = ^name
+        ^result
+    }
+    pub fn json(^self, ^name: String) -> ShapeFieldNames Never! {
+        result := ^self
+        result.json = Val(^name)
+        ^result
+    }
+    pub fn cbor(^self, ^name: String) -> ShapeFieldNames Never! {
+        result := ^self
+        result.cbor = Val(^name)
+        ^result
+    }
+    pub fn csv(^self, ^name: String) -> ShapeFieldNames Never! {
+        result := ^self
+        result.csv = Val(^name)
+        ^result
+    }
+    pub fn toml(^self, ^name: String) -> ShapeFieldNames Never! {
+        result := ^self
+        result.toml = Val(^name)
+        ^result
+    }
+    pub fn yaml(^self, ^name: String) -> ShapeFieldNames Never! {
+        result := ^self
+        result.yaml = Val(^name)
+        ^result
+    }
+    pub fn xml(^self, ^name: String) -> ShapeFieldNames Never! {
+        result := ^self
+        result.xml = Val(^name)
+        ^result
+    }
+    pub fn args(^self, ^name: String) -> ShapeFieldNames Never! {
+        result := ^self
+        result.args = ^name
+        ^result
+    }
+    pub fn env(^self, ^name: String) -> ShapeFieldNames Never! {
+        result := ^self
+        result.env = ^name
+        ^result
+    }
+    pub fn db(^self, ^name: String) -> ShapeFieldNames Never! {
+        result := ^self
+        result.db = Val(^name)
+        ^result
+    }
+    pub fn layout(^self, ^name: String) -> ShapeFieldNames Never! {
+        result := ^self
+        result.layout = Val(^name)
+        ^result
+    }
+    pub fn name_for(self, projection: ShapeProjectionKind) -> @String? Never! from self {
+        Val(if projection == {
+            .Json -> if self.json == { .Val(name) -> @name .None -> @self.text }
+            .Cbor -> if self.cbor == { .Val(name) -> @name .None -> @self.text }
+            .Csv -> if self.csv == { .Val(name) -> @name .None -> @self.text }
+            .Toml -> if self.toml == { .Val(name) -> @name .None -> @self.text }
+            .Yaml -> if self.yaml == { .Val(name) -> @name .None -> @self.text }
+            .Xml -> if self.xml == { .Val(name) -> @name .None -> @self.text }
+            .Args -> @self.args
+            .Env -> @self.env
+            .Db -> if self.db == { .Val(name) -> @name .None -> @self.text }
+            .Layout -> if self.layout == { .Val(name) -> @name .None -> @self.text }
+        })
+    }
+    fn validate(self, source: String) ShapeError! {
+        // Preserve Rust's text/json/cbor/.../layout error precedence without
+        // allocating or cloning an eleven-element table of optional strings.
+        shape_validate_field_name(source, "text", self.text) ?? return Err(err)
+        if self.json == .Val(name) -> shape_validate_field_name(source, "json", name) ?? return Err(err)
+        if self.cbor == .Val(name) -> shape_validate_field_name(source, "cbor", name) ?? return Err(err)
+        if self.csv == .Val(name) -> shape_validate_field_name(source, "csv", name) ?? return Err(err)
+        if self.toml == .Val(name) -> shape_validate_field_name(source, "toml", name) ?? return Err(err)
+        if self.yaml == .Val(name) -> shape_validate_field_name(source, "yaml", name) ?? return Err(err)
+        if self.xml == .Val(name) -> shape_validate_field_name(source, "xml", name) ?? return Err(err)
+        shape_validate_field_name(source, "args", self.args) ?? return Err(err)
+        shape_validate_field_name(source, "env", self.env) ?? return Err(err)
+        if self.db == .Val(name) -> shape_validate_field_name(source, "db", name) ?? return Err(err)
+        if self.layout == .Val(name) -> shape_validate_field_name(source, "layout", name) ?? return Err(err)
+    }
+}
+fn shape_validate_field_name(source: String, projection: String, name: String) ShapeError! {
+    if name.trim().is_empty() || name.contains(TEXT_NUL) -> return Err(ShapeError.InvalidFieldName{field: ~source, projection: Val(~projection)})
+}
+
+pub struct ShapeFieldFact {
+    pub name: String
+    pub ty: ShapeType
+    pub order: U64
+    pub names: ShapeFieldNames
+    pub encoding: ShapeEncoding
+    pub default: ShapeDefault?
+    pub skip: Bool
+    pub short: String?
+    pub doc: String?
+
+    pub fn new(^name: String, ^ty: ShapeType, order: U64) -> ShapeFieldFact Never! {
+        names :: ShapeFieldNames.from_source(name)
+        ShapeFieldFact{name: ^name, ty: ^ty, order: order, names: names,
+            encoding: ShapeEncoding.Unknown{name: "unresolved"}, default: None,
+            skip: false, short: None, doc: None}
+    }
+    pub fn with_names(^self, ^names: ShapeFieldNames) -> ShapeFieldFact Never! {
+        result := ^self
+        result.names = ^names
+        ^result
+    }
+    pub fn with_encoding(^self, ^encoding: ShapeEncoding) -> ShapeFieldFact Never! {
+        result := ^self
+        result.encoding = ^encoding
+        ^result
+    }
+    pub fn with_default(^self, ^default: ShapeDefault) -> ShapeFieldFact Never! {
+        result := ^self
+        result.default = Val(^default)
+        ^result
+    }
+    pub fn skipped(^self) -> ShapeFieldFact Never! {
+        result := ^self
+        result.skip = true
+        ^result
+    }
+    pub fn with_short(^self, ^short: String) -> ShapeFieldFact Never! {
+        result := ^self
+        result.short = Val(^short)
+        ^result
+    }
+    pub fn with_doc(^self, ^doc: String) -> ShapeFieldFact Never! {
+        result := ^self
+        result.doc = Val(^doc)
+        ^result
+    }
+    fn validate(self) ShapeError! {
+        if self.name.trim().is_empty() || self.name.contains(TEXT_NUL) -> return Err(ShapeError.InvalidFieldName{field: ~self.name, projection: None})
+        self.ty.validate() ?? return Err(err)
+        self.names.validate(self.name) ?? return Err(err)
+        self.encoding.validate() ?? return Err(err)
+        if self.default == .Val(default) -> default.validate() ?? return Err(err)
+        if self.short == .Val(short) {
+            if short.trim().is_empty() || short.contains(TEXT_NUL) -> return Err(ShapeError.InvalidFieldMetadata{field: ~self.name})
+        }
+        if self.doc == .Val(doc) {
+            if doc.contains(TEXT_NUL) -> return Err(ShapeError.InvalidFieldMetadata{field: ~self.name})
+        }
+    }
+}
+
+pub struct ShapeProjectedField {
+    pub source_name: String
+    pub name: String
+    pub decode_name: String
+    pub ty: ShapeType
+    pub order: U64
+    pub encoding: ShapeEncoding
+    pub default: ShapeDefault?
+    pub short: String?
+    pub doc: String?
+}
+
+pub enum ShapeProjectionKind {
+    Json Cbor Csv Toml Yaml Xml Args Env Db Layout
+
+    pub fn as_str(self) -> @String Never! {
+        if self == {
+            .Json -> @SHAPE_PROJECTION_LABELS[0]
+            .Cbor -> @SHAPE_PROJECTION_LABELS[1]
+            .Csv -> @SHAPE_PROJECTION_LABELS[2]
+            .Toml -> @SHAPE_PROJECTION_LABELS[3]
+            .Yaml -> @SHAPE_PROJECTION_LABELS[4]
+            .Xml -> @SHAPE_PROJECTION_LABELS[5]
+            .Args -> @SHAPE_PROJECTION_LABELS[6]
+            .Env -> @SHAPE_PROJECTION_LABELS[7]
+            .Db -> @SHAPE_PROJECTION_LABELS[8]
+            .Layout -> @SHAPE_PROJECTION_LABELS[9]
+        }
+    }
+    pub fn is_text(self) -> Bool Never! {
+        if self == {
+            .Json | .Cbor | .Csv | .Toml | .Yaml | .Xml -> true
+            else -> false
+        }
+    }
+}
+SHAPE_PROJECTION_LABELS :: prep { [String]{"json", "cbor", "csv", "toml", "yaml", "xml", "args", "env", "db", "layout"} }
+pub SHAPE_PROJECTION_KINDS :: prep { [ShapeProjectionKind]{
+    ShapeProjectionKind.Json, ShapeProjectionKind.Cbor, ShapeProjectionKind.Csv,
+    ShapeProjectionKind.Toml, ShapeProjectionKind.Yaml, ShapeProjectionKind.Xml,
+    ShapeProjectionKind.Args, ShapeProjectionKind.Env, ShapeProjectionKind.Db,
+    ShapeProjectionKind.Layout
+} }
+
+pub struct ShapeProjection {
+    pub kind: ShapeProjectionKind
+    pub identity: ShapeIdentity
+    pub dimensions: ShapeDimensions
+    pub encoding: ShapeEncoding
+    pub layout: ShapeLayoutFact
+    pub fields: [ShapeProjectedField]
+    pub provenance: ShapeProvenance
+
+    pub fn field(self, name: String) -> @ShapeProjectedField? Never! from self {
+        loop index in 0..<self.fields.len() {
+            if self.fields[index].name == name -> return Val(@self.fields[index])
+        }
+        None
+    }
+}
+
+pub enum ShapeProjectionResult { Text(value: String) Bytes(value: [U8]) }
+pub enum ShapeDimensions {
+    Known(rank: U64, width: U64)
+    Unknown(reason: String)
+
+    pub fn record(width: U64) -> ShapeDimensions Never! { ShapeDimensions.Known{rank: 1, width: width} }
+    pub fn known(rank: U64, width: U64) -> ShapeDimensions ShapeError! {
+        if rank == U64{0} -> return Err(ShapeError.InvalidDimensions{reason: "rank must be greater than zero"})
+        Ok(ShapeDimensions.Known{rank: rank, width: width})
+    }
+    pub fn unknown(^reason: String) -> ShapeDimensions Never! { ShapeDimensions.Unknown{reason: ^reason} }
+    pub fn is_known(self) -> Bool Never! {
+        if self == { .Known(_, _) -> true else -> false }
+    }
+}
+
+pub struct ShapeFact {
+    pub identity: ShapeIdentity
+    pub dimensions: ShapeDimensions
+    pub fields: [ShapeFieldFact]
+    pub encoding: ShapeEncoding
+    pub layout: ShapeLayoutFact
+    pub provenance: ShapeProvenance
+
+    pub fn new(^identity: ShapeIdentity, ^dimensions: ShapeDimensions, ^fields: [ShapeFieldFact], ^encoding: ShapeEncoding, ^provenance: ShapeProvenance) -> ShapeFact ShapeError! {
+        ordered := ^fields
+        &ordered.sort_by((left: ShapeFieldFact, right: ShapeFieldFact) -> {
+            if left.order != right.order -> return left.order <=> right.order
+            left.name <=> right.name
+        })
+        fact :: ShapeFact{identity: ^identity, dimensions: ^dimensions, fields: ^ordered,
+            encoding: ^encoding, layout: ShapeLayoutFact.default(), provenance: ^provenance}
+        fact.validate() ?? return Err(err)
+        Ok(fact)
+    }
+    pub fn with_layout(^self, ^layout: ShapeLayoutFact) -> ShapeFact ShapeError! {
+        layout.validate() ?? return Err(err)
+        result := ^self
+        result.layout = ^layout
+        Ok(^result)
+    }
+    pub fn record(^identity: ShapeIdentity, ^fields: [ShapeFieldFact], ^provenance: ShapeProvenance) -> ShapeFact ShapeError! {
+        dimensions :: ShapeDimensions.record(U64{fields.len()})
+        ShapeFact.new(^identity, dimensions, ^fields, ShapeEncoding.Object, ^provenance)
+    }
+    pub fn unknown(^identity: ShapeIdentity, ^reason: String, ^provenance: ShapeProvenance) -> ShapeFact ShapeError! {
+        ShapeFact.new(^identity, ShapeDimensions.unknown(^reason), [ShapeFieldFact]{},
+            ShapeEncoding.Unknown{name: "unresolved"}, ^provenance)
+    }
+    pub fn validate(self) ShapeError! {
+        self.identity.validate() ?? return Err(err)
+        self.provenance.validate() ?? return Err(err)
+        self.encoding.validate() ?? return Err(err)
+        self.layout.validate() ?? return Err(err)
+        if self.dimensions == {
+            .Known(rank, width) -> {
+                if rank == U64{0} || width != U64{self.fields.len()} -> return Err(ShapeError.InvalidDimensions{reason: "rank {rank} and width {width} do not match fields"})
+            }
+            .Unknown(reason) -> {
+                // Unlike other unknown spellings Rust deliberately accepts NUL here.
+                if reason.trim().is_empty() -> return Err(ShapeError.InvalidDimensions{reason: "unknown dimensions need a reason"})
+            }
+        }
+        if !self.fields.is_empty() {
+            if self.encoding == {
+                .Object | .Unknown(_) -> {}
+                else -> return Err(ShapeError.EncodingMismatch{identity: self.identity.key(), encoding: ~self.encoding.as_str()})
+            }
+        }
+        source_names := Set<String>{}
+        orders := Set<U64>{}
+        loop field in self.fields {
+            field.validate() ?? return Err(err)
+            if field.encoding == .Unknown(value) -> return Err(ShapeError.UnknownFieldEncoding{field: ~field.name, value: ~value})
+            if !(&source_names.add(field.name)) -> return Err(ShapeError.DuplicateField{name: ~field.name})
+            if !(&orders.add(field.order)) -> return Err(ShapeError.AmbiguousFieldOrder{order: field.order})
+        }
+        loop projection in SHAPE_PROJECTION_KINDS {
+            names := Set<String>{}
+            loop field in self.fields {
+                if field.skip -> next
+                name :: field.names.name_for(projection) ?? return Err(ShapeError.MissingProjectionName{field: ~field.name, projection: ~projection.as_str()})
+                if !(&names.add(~name)) -> return Err(ShapeError.DuplicateProjectionName{projection: ~projection.as_str(), name: ~name})
+            }
+        }
+    }
+    pub fn project(self, kind: ShapeProjectionKind) -> ShapeProjection ShapeError! {
+        self.validate() ?? return Err(err)
+        if !self.dimensions.is_known() -> return Err(ShapeError.UnknownShape{identity: self.identity.key()})
+        if self.encoding == .Unknown(_) -> return Err(ShapeError.UnknownShape{identity: self.identity.key()})
+        fields := [ShapeProjectedField]{}
+        loop field in self.fields {
+            if field.skip -> next
+            name :: field.names.name_for(kind) ?? return Err(ShapeError.MissingProjectionName{field: ~field.name, projection: ~kind.as_str()})
+            decode_name :: field.names.name_for(ShapeProjectionKind.Json) ?? return Err(ShapeError.MissingProjectionName{field: ~field.name, projection: "json"})
+            &fields.push(ShapeProjectedField{source_name: ~field.name, name: ~name,
+                decode_name: ~decode_name, ty: ~field.ty, order: field.order,
+                encoding: ~field.encoding, default: ~field.default,
+                short: if kind == ShapeProjectionKind.Args -> ~field.short else -> None,
+                doc: if kind == ShapeProjectionKind.Args -> ~field.doc else -> None})
+        }
+        Ok(ShapeProjection{kind: kind, identity: ~self.identity, dimensions: ~self.dimensions,
+            encoding: ~self.encoding, layout: ~self.layout, fields: ^fields, provenance: ~self.provenance})
+    }
+}
+
+#Error
+pub enum ShapeError {
+    EmptyIdentity(part: String)
+    InvalidIdentity(source: String, type_name: String)
+    InvalidProvenance
+    InvalidDimensions(reason: String)
+    InvalidLayoutAlignment(alignment: U64)
+    EncodingMismatch(identity: String, encoding: String)
+    InvalidFieldName(field: String, projection: String?)
+    InvalidFieldMetadata(field: String)
+    InvalidDefault
+    UnknownType(value: String)
+    UnknownEncoding(value: String)
+    UnknownFieldEncoding(field: String, value: String)
+    DuplicateField(name: String)
+    AmbiguousFieldOrder(order: U64)
+    MissingProjectionName(field: String, projection: String)
+    DuplicateProjectionName(projection: String, name: String)
+    UnknownShape(identity: String)
+
+    // Exact Rust Display text. #Error owns the canonical error channel.
+    pub fn display(self) -> String Never! {
+        if self == {
+            .EmptyIdentity(part) -> "shape {part} is empty"
+            .InvalidIdentity(source, type_name) -> "invalid shape identity {source}::{type_name}"
+            .InvalidProvenance -> "invalid shape provenance"
+            .InvalidDimensions(reason) -> "invalid shape dimensions: {reason}"
+            .InvalidLayoutAlignment(alignment) -> "invalid shape layout alignment {alignment}"
+            .EncodingMismatch(identity, encoding) -> "shape {identity} cannot carry fields as {encoding}"
+            .InvalidFieldName(field, projection) -> if projection == {
+                .Val(name) -> "invalid {name} name for field {field}"
+                .None -> "invalid shape field name {field}"
+            }
+            .InvalidFieldMetadata(field) -> "invalid metadata for field {field}"
+            .InvalidDefault -> "invalid shape default"
+            .UnknownType(value) -> "unknown shape type {value}"
+            .UnknownEncoding(value) -> "unknown shape encoding {value}"
+            .UnknownFieldEncoding(field, value) -> "field {field} has unknown shape encoding {value}"
+            .DuplicateField(name) -> "duplicate shape field {name}"
+            .AmbiguousFieldOrder(order) -> "ambiguous shape field order {order}"
+            .MissingProjectionName(field, projection) -> "field {field} has no {projection} projection name"
+            .DuplicateProjectionName(projection, name) -> "duplicate {projection} projection name {name}"
+            .UnknownShape(identity) -> "shape {identity} is unknown"
+        }
+    }
+}
+
+// ASCII-only rewriting; non-ASCII source bytes are preserved by the builtins.
+fn shape_args_name(source: String) -> String Never! { source.replace("_", "-") }
+fn shape_env_name(source: String) -> String Never! { source.replace("-", "_").to_ascii_upper() }

@@ -70,6 +70,22 @@ and never inherit the root diagnostic's location. If a source snapshot is
 unavailable, the projection must not invent a path, line, column, or `0:0`
 position. An explicitly supplied byte span remains unchanged.
 
+Wrapping a diagnostic appends the nearest report's code, primary span, and
+source snapshot, then that report's complete existing cause chain. Existing
+causes stay before the appended chain. Batch root-first ordering compares all
+three identity fields, keeps independent reports stable, and preserves the
+remaining source order when a cycle prevents further progress. The JSON Lines
+projection keeps its input order; `clears` counts each other report whose
+explicit chain names that diagnostic once, even if the chain repeats it.
+
+Fix safety, applicability, and no-fix reasons share the canonical Foundation
+report carriers. A reviewed no-fix next action must contain non-whitespace text
+and no Unicode control characters. Diagnostic attachment rejects any primary
+or alternative edit before validating the reason. Report-envelope attachment
+validates the reason first, then rejects edit/reason coexistence; adding an edit
+to a reasoned envelope also fails. These rejected operations leave the prior
+report unchanged. JSON emits either `fix_edits` or `no_fix_reason`, never both.
+
 ## No-OS E3301 contract
 
 E3301 is the registered rule for an OS-dependent API selected for a no-OS

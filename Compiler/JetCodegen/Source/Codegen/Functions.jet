@@ -72,6 +72,7 @@ use jet_foundation.[
     MIRImplID,
     MIRIntegerRange,
     MIRKernelFacts,
+    MIRKernelMode,
     MIRLayoutAlignmentFact,
     MIRLinkArtifact,
     MIRLinkUnit,
@@ -1385,7 +1386,7 @@ fn jet_codegen_lower_parameter(builder: &JetCodegenBuilder, parameter: TParamete
     access := jet_codegen_lower_access(parameter.convention)
     lowered_ty :: jet_codegen_lower_type_for_function(parameter.ty, builder)
     value := jet_codegen_emit_mir_type(&builder, parameter.span, lowered_ty, mir_ownership_from_access(access), MIROperation.Parameter{index: index, name: parameter.name})
-    _ := jet_codegen_bind_local(&builder, parameter.local, parameter.ty, parameter.local.mutable, Val(value), Val(access), false)
+    place := jet_codegen_bind_local(&builder, parameter.local, parameter.ty, parameter.local.mutable, Val(value), Val(access), false)
     &builder.params.push(MIRParam{
         index: index,
         name: parameter.name,
@@ -1397,6 +1398,8 @@ fn jet_codegen_lower_parameter(builder: &JetCodegenBuilder, parameter: TParamete
         variadic: parameter.variadic,
         default_present: parameter.default != None,
     })
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::bind_parameter
+    if access == MIRAccess.Move -> jet_codegen_register_file_owner(&builder, place, parameter.ty)
 }
 
 fn jet_codegen_lower_generic_params(params: [TGenericParam], modules: [SemaGraphModuleResult]) -> [MIRGenericParam] Never! {
@@ -1415,6 +1418,7 @@ fn jet_codegen_lower_kernel_proof(proof: KernelProof?) -> MIRKernelFacts? {
         Val(value) -> {
             if value.mode != KernelMode.Parallel -> panic("checked kernel proof uses an unsupported MIR kernel mode")
             Val(MIRKernelFacts{
+                mode: MIRKernelMode.Parallel,
                 bounds: value.bounds,
                 alias_free: value.alias_free,
                 captures: value.captures,
@@ -1467,7 +1471,7 @@ fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, owner_type: Type, con
         uninit_fixed: false,
         direct_closure: false,
     }
-    _ := jet_codegen_bind_local(&builder, local, owner_type, local.mutable, Val(value), Val(access), false)
+    place := jet_codegen_bind_local(&builder, local, owner_type, local.mutable, Val(value), Val(access), false)
     &builder.params.push(MIRParam{
         index: index,
         name: "self",
@@ -1479,6 +1483,8 @@ fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, owner_type: Type, con
         variadic: false,
         default_present: false,
     })
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::bind_parameter
+    if access == MIRAccess.Move -> jet_codegen_register_file_owner(&builder, place, owner_type)
 }
 
 fn jet_codegen_lower_function_form(function: TFunc, builder: JetCodegenBuilder) -> MIRFunctionForm Never! {
@@ -1518,6 +1524,8 @@ fn jet_codegen_lambda_capture_facts(lambda: TLambda) -> MIRCaptureFacts Never! {
         frozen: lambda.capture_facts.frozen,
         materialized: lambda.capture_facts.materialized,
         moved: lambda.capture_facts.moved,
+        frame_schedule: None,
+        frame_schedule_derivation: None,
     }
 }
 
@@ -1733,7 +1741,7 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, stat
         values: builder.values,
         places: builder.places,
         scopes: builder.scopes,
-        drops: [MIRDropAction]{},
+        drops: builder.drops,
         foreign_language: foreign_language,
     }
     function_rows := [MIRFunction]{mir_function}

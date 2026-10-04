@@ -1,0 +1,1815 @@
+// PORT-PENDING 1121 tests-ownership-slice-1: tests/ownership.rs:1-1811
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Tests for M2 ownership / borrow transpiler rules (SAFETY DEFAULTS).
+//RS 
+//RS mod common;
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS #[test]
+//RS fn discard_binding_is_not_a_referenceable_local() {
+//RS     let src = r#"
+//RS fn consume(value: ^String) {
+//RS     print(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     _ :: "discarded"
+//RS     consume(^_)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src).expect_err("the discard name must not be referenceable");
+//RS     assert!(
+//RS         diags.iter().any(|diagnostic| diagnostic.code == "E0107"),
+//RS         "expected the ordinary unknown-name error: {diags:?}"
+//RS     );
+//RS     assert!(
+//RS         diags
+//RS             .iter()
+//RS             .all(|diagnostic| !diagnostic.fix.contains("~_")),
+//RS         "a discard must never receive a copy suggestion: {diags:?}"
+//RS     );
+//RS }
+//RS 
+//RS /// D-MEM1/S2: no clone is ever silent (I8) — the former lint (`L0201`) is now
+//RS /// a hard error (`E0209`), regardless of liveness.
+//RS #[test]
+//RS fn implicit_clone_is_error_not_lint() {
+//RS     let src = r#"
+//RS fn consume(s: ^String) {
+//RS     print(s)
+//RS }
+//RS 
+//RS fn run() {
+//RS msg :: "hello"
+//RS     consume(msg)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src).expect_err("should error");
+//RS     assert!(
+//RS         diags.iter().any(|d| d.code == "E0209"),
+//RS         "expected E0209 implicit-clone hard error"
+//RS     );
+//RS }
+//RS 
+//RS /// D-MEM1/S2 ("signatures can't lie"): an unmarked param is always `Read` —
+//RS /// no body-usage elevation. A body write through it is a hard error (E0205)
+//RS /// with a fix-it naming the `&` sigil, same as a non-`&self` receiver.
+//RS #[test]
+//RS fn body_write_to_unmarked_param_is_error() {
+//RS     let src = r#"
+//RS struct Counter {
+//RS     n: Int
+//RS }
+//RS fn bump(c: Counter) {
+//RS     c.n = c.n + 1
+//RS }
+//RS fn run() {
+//RS     c :: Counter{ n: 0 }
+//RS     bump(c)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src).expect_err("should error");
+//RS     let d = diags
+//RS         .iter()
+//RS         .find(|d| d.code == "E0205")
+//RS         .expect("expected E0205: body write to an unmarked (Read) param");
+//RS     assert!(
+//RS         d.fix.contains("&Counter"),
+//RS         "fix should point at adding `&` to the param, got: {}",
+//RS         d.fix
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_clone_bound_is_usage_sensitive() {
+//RS     let src = r#"
+//RS fn inspect<T>(value: T) -> Int -> 1
+//RS fn duplicate<T>(value: T) -[..E]> T { return ~value }
+//RS fn increment(value: Int) -[]> Int { return value + 1 }
+//RS 
+//RS fn run() {
+//RS     callback :: increment
+//RS     print(inspect(callback))
+//RS     print(duplicate(4))
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("usage-sensitive generic bounds should compile");
+//RS     assert!(
+//RS         out.rust.contains("pub fn __jet_inspect<T>(__jet_value: &T) -> JetOutcome<i64, JetErr>"),
+//RS         "read-only generic must not require Clone: {}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("pub fn __jet_duplicate<T: Clone>(__jet_value: &T) -> JetOutcome<T, JetErr>"),
+//RS         "explicit copy must require Clone: {}",
+//RS         out.rust
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn nested_plain_parameter_read_does_not_clone() {
+//RS     let src = r#"
+//RS struct Leaf { text: String }
+//RS struct Branch { leaf: Leaf }
+//RS fn show(branch: Branch) { print(branch.leaf.text) }
+//RS fn run() {
+//RS     branch :: Branch{leaf: Leaf{text: "read"}}
+//RS     show(branch)
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("nested read should compile");
+//RS     assert!(
+//RS         !out.rust
+//RS             .contains("__jet_branch.__jet_leaf.__jet_text).clone()"),
+//RS         "nested read must stay borrowed: {}",
+//RS         out.rust
+//RS     );
+//RS }
+//RS 
+//RS /// #3735: reading one stored field through `self`, a parameter, or a local
+//RS /// projects that field's place; it never copies the whole receiver first, so a
+//RS /// scalar read beside a large buffer stays a scalar read on every tier.
+//RS #[test]
+//RS fn stored_field_read_clones_only_the_field() {
+//RS     let src = r#"
+//RS struct Sprite {
+//RS     text: [U8]
+//RS     width: Int
+//RS 
+//RS     fn row_width(self, row: Int) -> Int { self.width * row }
+//RS }
+//RS 
+//RS struct Frame {
+//RS     sprite: Sprite
+//RS }
+//RS 
+//RS fn frame_width(frame: Frame) -> Int { frame.sprite.width }
+//RS 
+//RS fn run() {
+//RS     sprite :: Sprite{text: [U8{1}, U8{2}, U8{3}], width: 4}
+//RS     total := 0
+//RS     loop row in 0..3 -> total += sprite.row_width(row)
+//RS     print(total)
+//RS     local_width :: sprite.width
+//RS     frame :: Frame{sprite: sprite}
+//RS     print(frame_width(frame) + local_width)
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("stored field reads should compile");
+//RS     let body = |marker: &str| -> &str {
+//RS         let start = out
+//RS             .rust
+//RS             .find(marker)
+//RS             .unwrap_or_else(|| panic!("generated Rust has no `{marker}` frame:\n{}", out.rust));
+//RS         let rest = &out.rust[start..];
+//RS         &rest[..rest.find("\n}\n").unwrap_or(rest.len())]
+//RS     };
+//RS     let row_width = body("\"Sprite::row_width\"");
+//RS     assert!(
+//RS         row_width.contains("((*self).__jet_width).clone()"),
+//RS         "the method must read only the width field: {row_width}"
+//RS     );
+//RS     assert!(
+//RS         !row_width.contains("(*self).clone()"),
+//RS         "the method must not copy the whole receiver: {row_width}"
+//RS     );
+//RS     let frame_width = body("\"frame_width\"");
+//RS     assert!(
+//RS         frame_width.contains("(((*__jet_frame).__jet_sprite).__jet_width).clone()"),
+//RS         "a nested stored-field read must project the field chain: {frame_width}"
+//RS     );
+//RS     tir_support::assert_tiers_agree("stored_field_read", src, "24\n8\n");
+//RS }
+//RS 
+//RS /// D-CONC-SHARE1=A (card #1561): plain field access on a `Shared<T>` is the
+//RS /// only source spelling. Sema desugars a field read into ONE locked read and a
+//RS /// field write into ONE locked edit, both through the same Prelude seam the
+//RS /// retired closure forms used, so no execution tier grows a second mechanism.
+//RS /// The synthesized payload parameter is `__jet_shared_value`, a name no user
+//RS /// program can spell, so counting its closures counts the locks taken.
+//RS #[test]
+//RS fn shared_callbacks_receive_exactly_one_host_borrow() {
+//RS     let src = r#"
+//RS struct Config { hits: Int }
+//RS fn run() {
+//RS     config := shared Config{ hits: 0 }
+//RS     print(config.hits)
+//RS     config.hits += 1
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("plain shared access must lower without double borrowing");
+//RS     assert!(
+//RS         out.rust.contains("|__jet_shared_value: &__jet_Config|"),
+//RS         "{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("|__jet_shared_value: &mut __jet_Config|"),
+//RS         "{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(!out.rust.contains("&&__jet_Config"), "{}", out.rust);
+//RS     assert!(!out.rust.contains("&mut &__jet_Config"), "{}", out.rust);
+//RS     // The single-write property. `config.hits += 1` is a read-modify-write, and
+//RS     // the desugar must keep both halves inside ONE edit so no update is lost. A
+//RS     // two-step lowering would either add a second read closure (the `+=` load)
+//RS     // or nest a read inside the edit; either way the counts below move. One
+//RS     // read closure (`print(config.hits)`) and one edit closure (`+= 1`) is the
+//RS     // only shape in which the write's load and store share a single lock.
+//RS     assert_eq!(
+//RS         out.rust
+//RS             .matches("|__jet_shared_value: &__jet_Config|")
+//RS             .count(),
+//RS         1,
+//RS         "the field read is one locked read: {}",
+//RS         out.rust
+//RS     );
+//RS     assert_eq!(
+//RS         out.rust
+//RS             .matches("|__jet_shared_value: &mut __jet_Config|")
+//RS             .count(),
+//RS         1,
+//RS         "the read-modify-write is one locked edit: {}",
+//RS         out.rust
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_edit_guard_spans_helper_calls() {
+//RS     let src = r#"
+//RS struct Jobs { items: [Int] }
+//RS 
+//RS impl Jobs {
+//RS     fn add(&self, value: Int) {
+//RS         &self.items.push(value)
+//RS     }
+//RS 
+//RS     fn count(self) -[]> Int {
+//RS         return self.items.len()
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     queue := shared Jobs{ items: [Int]{} }
+//RS     other := shared Jobs{ items: [Int]{} }
+//RS     guard :: queue.guard_edit()
+//RS     other_guard :: other.guard_read()
+//RS     guard.value.add(1)
+//RS     guard.value.add(2)
+//RS     print(other_guard.value.count())
+//RS     print(guard.value.count())
+//RS }
+//RS "#;
+//RS     let output =
+//RS         jet::compile(src).expect("an edit guard must preserve one write loan across helper calls");
+//RS     // The receipt names the lock by the Rust binding it acquires through, so
+//RS     // the identity carries the one machine prefix every generated local wears
+//RS     // (`Syntax::GENERATED_NAME_PREFIX`, `__jet_`); it was spelled `user_`
+//RS     // before that prefix was unified.
+//RS     let first = output
+//RS         .rust
+//RS         .find("jet-shared-lock-order-receipt: lock=__jet_queue; acquire=guard_edit; order=source")
+//RS         .expect("first lock receipt needs identity and acquisition mode");
+//RS     let second = output
+//RS         .rust
+//RS         .find("jet-shared-lock-order-receipt: lock=__jet_other; acquire=guard_read; order=source")
+//RS         .expect("second lock receipt needs identity and acquisition mode");
+//RS     assert!(
+//RS         first < second,
+//RS         "nested-lock audit receipts must preserve source acquisition order"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_read_guard_value_is_not_writable() {
+//RS     let src = r#"
+//RS struct Counter { value: Int }
+//RS 
+//RS fn run() {
+//RS     counter := shared Counter{ value: 0 }
+//RS     guard :: counter.guard_read()
+//RS     guard.value.value += 1
+//RS }
+//RS "#;
+//RS     let diagnostics =
+//RS         jet::compile(src).expect_err("a read guard must not grant write access to its value");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0205"),
+//RS         "expected the ordinary read-only write diagnostic: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_guard_public_type_annotation_resolves() {
+//RS     let src = r#"
+//RS fn inspect(guard: SharedGuard<Int>) {
+//RS     print(guard.value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     cell := shared 1
+//RS     guard :: cell.guard_edit()
+//RS     inspect(guard)
+//RS     guard.value += 1
+//RS }
+//RS "#;
+//RS     jet::compile(src).expect("SharedGuard<T> must be a public, annotatable expert type");
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_read_guard_cannot_enter_write_helper() {
+//RS     let src = r#"
+//RS fn bump(&guard: SharedGuard<Int>) {
+//RS     guard.value += 1
+//RS }
+//RS 
+//RS fn run() {
+//RS     cell := shared 1
+//RS     guard := cell.guard_read()
+//RS     bump(&guard)
+//RS }
+//RS "#;
+//RS     let diagnostics =
+//RS         jet::compile(src).expect_err("a write helper must require an edit SharedGuard");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0205"),
+//RS         "expected read-vs-edit guard diagnostic: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn returned_public_guard_is_read_only_without_write_helper_access() {
+//RS     let src = r#"
+//RS fn acquire(handle: Shared<Int>) -[]> SharedGuard<Int> {
+//RS     return handle.guard_edit()
+//RS }
+//RS 
+//RS fn run() {
+//RS     cell := shared 1
+//RS     guard := acquire(cell)
+//RS     guard.value += 1
+//RS }
+//RS "#;
+//RS     let diagnostics =
+//RS         jet::compile(src).expect_err("an untagged returned guard must not regain edit access");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0205"),
+//RS         "expected returned guard access diagnostic: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_guard_map_and_split_preserve_disjoint_places() {
+//RS     let src = r#"
+//RS struct Pair { left: Int, right: Int }
+//RS 
+//RS fn run() {
+//RS     first := shared Pair{ left: 1, right: 2 }
+//RS     mapped :: first.guard_edit().map(value -> value.left)
+//RS     mapped.value += 1
+//RS 
+//RS     second := shared Pair{ left: 3, right: 4 }
+//RS     (left, right) :: second.guard_edit().split(
+//RS         value -> value.left,
+//RS         value -> value.right
+//RS     )
+//RS     left.value += 1
+//RS     right.value += 1
+//RS }
+//RS "#;
+//RS     jet::compile(src).expect("mapped and split guards must preserve safe field provenance");
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_guard_split_rejects_overlapping_places() {
+//RS     let src = r#"
+//RS struct Pair { left: Int, right: Int }
+//RS 
+//RS fn run() {
+//RS     cell := shared Pair{ left: 1, right: 2 }
+//RS     guard :: cell.guard_edit()
+//RS     _ :: guard.split(value -> value.left, value -> value.left)
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::compile(src).expect_err("split guard projections must be disjoint");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0216"),
+//RS         "expected a projection error: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_guard_is_owned_and_noncloneable() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     cell := shared 1
+//RS     guard :: cell.guard_read()
+//RS     _ :: ~guard
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::compile(src).expect_err("a lock token must have one owner");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0211"),
+//RS         "expected the noncloneable-value diagnostic: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_guard_wait_requires_edit_access_and_bool_predicate() {
+//RS     let read_src = r#"
+//RS fn run() {
+//RS     cell := shared 1
+//RS     changed := Condition.new()
+//RS     guard :: cell.guard_read()
+//RS     _ :: guard.wait(changed, value -> value == 1)
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::compile(read_src).expect_err("waiting must require an exclusive guard");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0205"),
+//RS         "expected the read-guard wait diagnostic: {diagnostics:?}"
+//RS     );
+//RS 
+//RS     let predicate_src = r#"
+//RS fn run() {
+//RS     cell := shared 1
+//RS     changed := Condition.new()
+//RS     guard :: cell.guard_edit()
+//RS     _ :: guard.wait(changed, value -> value)
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::compile(predicate_src).expect_err("a wait predicate must return Bool");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| matches!(diagnostic.code.as_str(), "E0112" | "E0113")),
+//RS         "expected the predicate diagnostic: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_guard_long_scope_has_lock_order_lint() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     cell := shared 1
+//RS     guard :: cell.guard_edit()
+//RS     print(guard.value)
+//RS     print(guard.value)
+//RS     print(guard.value)
+//RS     print(guard.value)
+//RS     print(guard.value)
+//RS     print(guard.value)
+//RS     print(guard.value)
+//RS     print(guard.value)
+//RS }
+//RS "#;
+//RS     let output = jet::compile(src).expect("a long guard scope is legal expert code");
+//RS     let lint = output
+//RS         .lints
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "L0206")
+//RS         .expect("long guard scopes must produce an audit lint");
+//RS     assert!(
+//RS         lint.fix.contains("stable order"),
+//RS         "the lint must teach nested lock order: {lint:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn local_cell_surface_uses_read_receivers_and_host_borrows() {
+//RS     let source = r#"
+//RS struct Pair { left: Int, right: Int }
+//RS fn update(cell: Cell<Pair>) -[]> Int {
+//RS     &cell.set(Pair{ left: 2, right: 3 })
+//RS     old :: &cell.replace(Pair{ left: 4, right: 5 })
+//RS     &cell.edit(pair -> pair.left += old.left)
+//RS     return cell.read(pair -> pair.left + pair.right)
+//RS }
+//RS fn run() {
+//RS     cell :: Cell.new(Pair{ left: 0, right: 1 })
+//RS     print(update(cell))
+//RS }
+//RS "#;
+//RS     let output = jet::compile(source).expect("local Cell surface must compile");
+//RS     assert!(
+//RS         output.rust.contains("jet_std::JetCell<__jet_Pair>"),
+//RS         "{}",
+//RS         output.rust
+//RS     );
+//RS     assert!(
+//RS         output.rust.contains("|__jet_pair: &__jet_Pair|"),
+//RS         "{}",
+//RS         output.rust
+//RS     );
+//RS     assert!(
+//RS         output.rust.contains("|__jet_pair: &mut __jet_Pair|"),
+//RS         "{}",
+//RS         output.rust
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn local_cell_runtime_has_no_atomic_or_os_lock_storage() {
+//RS     let cell = include_str!("../crates/jet-codegen/src/Prelude/LocalCell.rs");
+//RS     assert!(cell.contains("std::rc::Rc"), "{cell}");
+//RS     assert!(cell.contains("std::cell::UnsafeCell"), "{cell}");
+//RS     assert!(!cell.contains("std::sync::Arc"), "{cell}");
+//RS     assert!(!cell.contains("Mutex"), "{cell}");
+//RS     assert!(!cell.contains("RwLock"), "{cell}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn local_cell_runtime_releases_original_loans_on_drop_and_unwind() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let cell = include_str!("../crates/jet-codegen/src/Prelude/LocalCell.rs");
+//RS     // f855ee91f (2026-08-06) stated LocalCell's optional-slot policy over the
+//RS     // one outcome carrier: `T?` is `JetOutcome<T, JetAbsent>`
+//RS     // (D-FAIL-CARRIER1=A, crates/jet-foundation/src/Outcome.rs:15-22). This
+//RS     // harness compiles LocalCell.rs on its own, so it has to supply that
+//RS     // carrier — and supplying a DIFFERENT optional shape is precisely the
+//RS     // second representation D-FAIL-CARRIER1 exists to remove. Take the
+//RS     // declarations from the canonical file verbatim and prove they are still
+//RS     // the canonical declarations, the same way the FFI bridge projects them
+//RS     // into its standalone crate (crates/jet-pkg-model/src/FFI.rs:1448-1463).
+//RS     let outcome = include_str!("../crates/jet-foundation/src/Outcome.rs");
+//RS     let carrier = "pub type JetOutcome<T, E> = Result<T, E>;";
+//RS     let absent_derive =
+//RS         "#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]";
+//RS     let absent = "pub struct JetAbsent;";
+//RS     for line in [carrier, absent_derive, absent] {
+//RS         assert!(
+//RS             outcome.contains(line),
+//RS             "the outcome carrier moved; this harness now declares a second shape: {line}"
+//RS         );
+//RS     }
+//RS     let harness = [
+//RS         "mod jet_cell {",
+//RS         carrier,
+//RS         absent_derive,
+//RS         absent,
+//RS         cell,
+//RS         "}",
+//RS         r#"
+//RS use jet_cell::JetCell;
+//RS use std::panic::{catch_unwind, AssertUnwindSafe};
+//RS 
+//RS #[derive(Clone)]
+//RS struct Pair {
+//RS     left: i64,
+//RS     right: i64,
+//RS }
+//RS 
+//RS #[test]
+//RS fn loans_release_after_every_exit() {
+//RS     let cell = JetCell::new(Pair { left: 1, right: 2 });
+//RS     let first = cell.guard_read();
+//RS     let second = cell.guard_read();
+//RS     assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+//RS     drop(first);
+//RS     assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+//RS     drop(second);
+//RS 
+//RS     let edit = cell.guard_edit();
+//RS     assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_read())).is_err());
+//RS     drop(edit);
+//RS 
+//RS     assert!(catch_unwind(AssertUnwindSafe(|| {
+//RS         cell.read::<_, ()>(|_| panic!("read unwind"))
+//RS     }))
+//RS     .is_err());
+//RS     assert!(catch_unwind(AssertUnwindSafe(|| {
+//RS         cell.edit::<_, ()>(|_| panic!("edit unwind"))
+//RS     }))
+//RS     .is_err());
+//RS     cell.edit(|pair| pair.left = 3);
+//RS     assert_eq!(cell.read(|pair| pair.left), 3);
+//RS 
+//RS     let guard = cell.guard_edit();
+//RS     assert!(catch_unwind(AssertUnwindSafe(|| {
+//RS         &guard.edit(|_| &guard.edit(|_| ()))
+//RS     }))
+//RS     .is_err());
+//RS     guard.set(Pair { left: 4, right: 5 });
+//RS     drop(guard);
+//RS     assert_eq!(cell.read(|pair| pair.left), 4);
+//RS }
+//RS 
+//RS #[test]
+//RS fn mapped_and_split_guards_keep_the_original_loan() {
+//RS     let cell = JetCell::new(Pair { left: 4, right: 5 });
+//RS     let mapped = cell.guard_read().map(|pair| &pair.left);
+//RS     assert_eq!(mapped.get(), 4);
+//RS     assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+//RS     drop(mapped);
+//RS 
+//RS     let (left, right) = cell
+//RS         .guard_read()
+//RS         .split(|pair| (&pair.left, &pair.right));
+//RS     assert_eq!((left.get(), right.get()), (4, 5));
+//RS     drop(left);
+//RS     assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+//RS     drop(right);
+//RS 
+//RS     let (left, right) = cell
+//RS         .guard_edit()
+//RS         .split(|pair| (&mut pair.left, &mut pair.right));
+//RS     left.set(7);
+//RS     right.set(8);
+//RS     drop(left);
+//RS     assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_read())).is_err());
+//RS     drop(right);
+//RS     assert_eq!(cell.read(|pair| (pair.left, pair.right)), (7, 8));
+//RS }
+//RS "#,
+//RS     ]
+//RS     .join("\n");
+//RS 
+//RS     let root = common::unique_tmp("jet_local_cell_runtime");
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     let source = root.join("cell_runtime.rs");
+//RS     let binary = root.join("cell_runtime_test");
+//RS     fs::write(&source, harness).unwrap();
+//RS     let compiled = Command::new("rustc")
+//RS         .args(["--edition=2021", "--test"])
+//RS         .arg(&source)
+//RS         .arg("-o")
+//RS         .arg(&binary)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         compiled.status.success(),
+//RS         "Cell runtime harness failed to compile:\n{}",
+//RS         String::from_utf8_lossy(&compiled.stderr)
+//RS     );
+//RS     let ran = Command::new(&binary).output().unwrap();
+//RS     assert!(
+//RS         ran.status.success(),
+//RS         "Cell runtime harness failed:\nstdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&ran.stdout),
+//RS         String::from_utf8_lossy(&ran.stderr)
+//RS     );
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn local_cell_guard_mapping_and_splitting_keep_projected_types() {
+//RS     let source = r#"
+//RS struct Pair { left: Int, right: Int }
+//RS fn inspect(cell: Cell<Pair>) {
+//RS     mapped :: cell.guard_read().map(pair -> pair.left)
+//RS     print(mapped.get())
+//RS }
+//RS fn edit_pair(cell: Cell<Pair>) {
+//RS     (left, right) :: cell.guard_edit().split(
+//RS         pair -> pair.left,
+//RS         pair -> pair.right
+//RS     )
+//RS     &left.set(7)
+//RS     &right.set(8)
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     let output = jet::compile(source).expect("guard projections must compile");
+//RS     assert!(
+//RS         output.rust.contains("JetCellReadGuard<i64>")
+//RS             && output.rust.contains("JetCellEditGuard<i64>"),
+//RS         "{}",
+//RS         output.rust
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn local_cell_guard_map_rejects_detached_values() {
+//RS     let source = r#"
+//RS struct Pair { left: Int, right: Int }
+//RS fn inspect(cell: Cell<Pair>) {
+//RS     _ :: cell.guard_read().map(pair -> pair.left + pair.right)
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics =
+//RS         jet::compile(source).expect_err("map must preserve the original dynamic loan");
+//RS     assert!(
+//RS         diagnostics.iter().any(|diagnostic| {
+//RS             diagnostic.code == "E0112" && diagnostic.what.contains("needs a field projection")
+//RS         }),
+//RS         "{diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn local_cell_get_rejects_values_without_copy_semantics() {
+//RS     let source = r#"
+//RS fn inspect(cell: Cell<fn() -> Int>) {
+//RS     _ :: cell.get()
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics =
+//RS         jet::compile(source).expect_err("Cell.get must not defer a missing Clone bound to rustc");
+//RS     assert!(
+//RS         diagnostics.iter().any(|diagnostic| {
+//RS             diagnostic.code == "E0112" && diagnostic.what.contains("cannot copy its value")
+//RS         }),
+//RS         "{diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn local_cell_edit_guard_split_rejects_overlapping_paths() {
+//RS     let source = r#"
+//RS struct Pair { left: Int, right: Int }
+//RS fn edit_pair(cell: Cell<Pair>) {
+//RS     _ :: cell.guard_edit().split(
+//RS         pair -> pair.left,
+//RS         pair -> pair.left
+//RS     )
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics =
+//RS         jet::compile(source).expect_err("split must prove projections disjoint in sema");
+//RS     assert!(
+//RS         diagnostics.iter().any(|diagnostic| {
+//RS             diagnostic.code == "E0112" && diagnostic.what.contains("projections overlap")
+//RS         }),
+//RS         "{diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn mutate_required_at_call_site() {
+//RS     let src = r#"
+//RS fn touch(n: &Int) {
+//RS     print(n)
+//RS }
+//RS 
+//RS fn run() {
+//RS     x := 1
+//RS     touch(x)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src).expect_err("should error");
+//RS     assert!(diags.iter().any(|d| d.code == "E0202"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn move_non_clonable_is_hard_error() {
+//RS     let src = r#"
+//RS fn consume(item: ^NoClone) {
+//RS     print(0)
+//RS }
+//RS 
+//RS fn run() {
+//RS msg :: "hi"
+//RS     consume(msg)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src).expect_err("should error");
+//RS     assert!(diags.iter().any(|d| d.code == "E0201"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_auto_clone_in_loop_is_lint() {
+//RS     let src = r#"
+//RS fn noop(h: Shared<Int>) {
+//RS     print(0)
+//RS }
+//RS 
+//RS fn loop_user(h: Shared<Int>) {
+//RS     loop {
+//RS         noop(h)
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(0)
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("should compile with lint");
+//RS     assert!(
+//RS         out.lints.iter().any(|d| d.code == "L0202"),
+//RS         "expected L0202 loop auto-clone lint"
+//RS     );
+//RS     // D-MEM1 S6: `Shared<T>` lowers to `jet_std::JetShared<T>` now, not a bare
+//RS     // `Arc<T>` — the auto-clone is a plain `.clone()` call (its own cheap-handle
+//RS     // `Clone` impl), not `Arc::clone(&…)`.
+//RS     assert!(out.rust.contains(").clone()"));
+//RS }
+//RS 
+//RS /// D-CONSTMARK1=A (syntax-decisions.md:1756): `NAME :: value` is the marked
+//RS /// compile-time binding, and `#Static @` emits a Rust `static` so the value
+//RS /// gets one stable address. Ordinary `name :: value` and `name := value`
+//RS /// are module globals; only the mutable form is writable.
+//RS ///
+//RS /// The symbol name is fixed by the naming law, not by choice: `mangle` rewrites
+//RS /// the `@` mark to `ct_` and prefixes the one machine prefix `__jet_`
+//RS /// (crates/jet-foundation/src/Names.rs:565-571, D-NAME-SIGIL1 at
+//RS /// crates/jet-foundation/src/Syntax/predicates.rs:367), then `emit_const`
+//RS /// uppercases it (crates/jet-codegen/src/Codegen/Items.rs:2864). So `@limit`
+//RS /// can only ever become `__JET_CT_LIMIT`.
+//RS #[test]
+//RS fn const_address_taken_emits_static() {
+//RS     let src = r#"
+//RS #Static LIMIT :: prep { 10 }
+//RS 
+//RS fn show(n: Int) {
+//RS     print(n)
+//RS }
+//RS 
+//RS fn run() {
+//RS     show(LIMIT)
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("should compile");
+//RS     assert!(
+//RS         out.rust.contains("static __JET_CT_LIMIT"),
+//RS         "`#Static` should give the constant its own address: {}",
+//RS         out.rust
+//RS     );
+//RS     // The other half of the same law: without `#Static` the constant is
+//RS     // address-free — it folds into its use sites and emits no top-level item
+//RS     // (crates/jet-codegen/src/Codegen/Items.rs:2829). Without this the
+//RS     // assertion above would also pass on a build that emitted a symbol for
+//RS     // every constant, which is the opposite of what the marker is for.
+//RS     let inlined = jet::compile(&src.replace("#Static ", "")).expect("should compile");
+//RS     assert!(
+//RS         !inlined.rust.contains("__JET_CT_LIMIT"),
+//RS         "an unmarked constant should inline, not take an address: {}",
+//RS         inlined.rust
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn same_call_mut_and_read_is_error() {
+//RS     let src = r#"
+//RS fn both(a: &Int, b: Int) {
+//RS     print(b)
+//RS }
+//RS 
+//RS fn run() {
+//RS     x := 1
+//RS     both(&x, x)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src).expect_err("should error");
+//RS     assert!(diags.iter().any(|d| d.code == "E0204"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn nested_call_argument_cannot_read_an_active_write_place() {
+//RS     let src = r#"
+//RS fn see(x: Int) -[]> Int { return x }
+//RS fn both(a: &Int, b: Int) { a += b }
+//RS 
+//RS fn run() {
+//RS     x := 1
+//RS     both(&x, see(x))
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src).expect_err("nested read must fail in sema before rustc");
+//RS     assert!(
+//RS         diags.iter().any(|diag| diag.code == "E0204"),
+//RS         "expected the call-alias diagnostic: {diags:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn composite_argument_cannot_read_an_active_write_place() {
+//RS     let src = r#"
+//RS fn both(a: &Int, b: Int) { a += b }
+//RS 
+//RS fn run() {
+//RS     x := 1
+//RS     both(&x, x + 1)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src).expect_err("composite read must fail in sema before rustc");
+//RS     assert!(
+//RS         diags.iter().any(|diag| diag.code == "E0204"),
+//RS         "expected the call-alias diagnostic: {diags:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn lambda_capture_cannot_read_an_active_write_place() {
+//RS     let src = r#"
+//RS fn both(a: &String, callback: fn() -> String) {
+//RS     print(a)
+//RS     print(callback())
+//RS }
+//RS 
+//RS fn run() {
+//RS     x := "jet"
+//RS     both(&x, () -> x)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(src).expect_err("lambda capture must fail in sema before rustc");
+//RS     assert!(
+//RS         diags.iter().any(|diag| diag.code == "E0204"),
+//RS         "expected the call-alias diagnostic: {diags:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn inferred_mutable_lambda_capture_stays_active_through_call() {
+//RS     let src = r#"
+//RS fn both(callback: fn(), values: [Int]) {
+//RS     callback()
+//RS     print(values.len())
+//RS }
+//RS 
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     both(() -> &values.push(3), values)
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(src).expect_err("mutable lambda capture must remain active through the call");
+//RS     assert!(
+//RS         diags.iter().any(|diag| diag.code == "E0204"),
+//RS         "expected the call-alias diagnostic: {diags:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn nested_lambda_forms_use_the_enclosing_call_access_frame() {
+//RS     let composite = r#"
+//RS struct Work { callback: fn() -> Int }
+//RS fn both(values: &[Int], work: Work) { &values.push(work.callback()) }
+//RS 
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     both(&values, Work{ callback: () -> values.len() })
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(composite)
+//RS         .expect_err("a lambda inside an aggregate must see the active write");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let immediate_callee = r#"
+//RS fn both(values: &[Int], count: Int) { &values.push(count) }
+//RS 
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     both(&values, (() -> values.len()).call())
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(immediate_callee)
+//RS         .expect_err("an immediate lambda callee must see the outer active write");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn move_and_fnmut_lambda_captures_have_exact_lifetimes_and_places() {
+//RS     let copy_move = r#"
+//RS fn both(callback: fn() -> Int, value: &Int) { value += callback() }
+//RS fn run() {
+//RS     value := 1
+//RS     both(() -> value, &value)
+//RS }
+//RS "#;
+//RS     jet::compile(copy_move).expect("a read-only move closure copies a scalar before the write");
+//RS 
+//RS     let disjoint = r#"
+//RS struct Pair { left: [Int], right: [Int] }
+//RS fn both(callback: fn(), values: [Int]) {
+//RS     callback()
+//RS     print(values.len())
+//RS }
+//RS fn run() {
+//RS     pair := Pair{ left: [1], right: [2] }
+//RS     both(() -> &pair.right.push(3), pair.left)
+//RS }
+//RS "#;
+//RS     jet::compile(disjoint).expect("Rust 2021 captures disjoint struct fields separately");
+//RS 
+//RS     let conflicting = r#"
+//RS struct Pair { left: [Int], right: [Int] }
+//RS fn both(callback: fn(), values: [Int]) {
+//RS     callback()
+//RS     print(values.len())
+//RS }
+//RS fn run() {
+//RS     pair := Pair{ left: [1], right: [2] }
+//RS     both(() -> &pair.right.push(3), pair.right)
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(conflicting).expect_err("the same captured field must remain write-borrowed");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn move_lambda_capture_identity_matches_rust_2021_places() {
+//RS     let disjoint_owned_field = r#"
+//RS struct Pair { left: String, right: [Int] }
+//RS fn both(callback: fn(), values: [Int]) {
+//RS     callback()
+//RS     print(values.len())
+//RS }
+//RS fn run() {
+//RS     pair := Pair{ left: "jet", right: [1, 2] }
+//RS     both(() -> { print(pair.left) }, pair.right)
+//RS }
+//RS "#;
+//RS     jet::compile(disjoint_owned_field)
+//RS         .expect("moving one captured field must leave a disjoint field usable");
+//RS 
+//RS     let copy_field = r#"
+//RS struct Pair { count: Int, values: [Int] }
+//RS fn both(callback: fn(), pair: Pair) {
+//RS     callback()
+//RS     print(pair.count)
+//RS }
+//RS fn run() {
+//RS     pair := Pair{ count: 2, values: [1, 2] }
+//RS     both(() -> { print(pair.count) }, pair)
+//RS }
+//RS "#;
+//RS     jet::compile(copy_field).expect("capturing a Copy field must not move its owner");
+//RS 
+//RS     let view_alias = r#"
+//RS fn call(callback: fn()) { callback() }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     first :: values[0..1]
+//RS     call(() -> { print(first.len()) })
+//RS     print(values.len())
+//RS }
+//RS "#;
+//RS     jet::compile(view_alias).expect("a closure captures a View alias, not its source owner");
+//RS 
+//RS     let same_owned_field = r#"
+//RS struct Pair { left: String, right: [Int] }
+//RS fn both(callback: fn(), text: String) {
+//RS     callback()
+//RS     print(text)
+//RS }
+//RS fn run() {
+//RS     pair := Pair{ left: "jet", right: [1, 2] }
+//RS     both(() -> { print(pair.left) }, pair.left)
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(same_owned_field).expect_err("the moved captured field cannot be reused");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+//RS 
+//RS     let conflicting_view_alias = r#"
+//RS fn both(values: &[Int], callback: fn()) {
+//RS     &values.push(3)
+//RS     callback()
+//RS }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     first :: values[0..1]
+//RS     both(&values, () -> { print(first.len()) })
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(conflicting_view_alias)
+//RS         .expect_err("a copied View alias still borrows its source place");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let reverse_view_alias = r#"
+//RS fn both(callback: fn() -> Int, values: &[Int]) { &values.push(callback()) }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     first :: values[0..1]
+//RS     both(() -> first.len(), &values)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(reverse_view_alias)
+//RS         .expect_err("a closure keeps its copied View alias live across the whole call");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn erased_capture_and_view_do_not_consume_outer_values() {
+//RS     let src = r#"
+//RS struct NoClone { label: Int }
+//RS 
+//RS fn run() {
+//RS     item :: NoClone{ label: 7 }
+//RS     values := [1, 2]
+//RS     #Off {
+//RS         callback :: () -> item.label
+//RS         window :: values[0..1]
+//RS         retained :: () -> window[0]
+//RS     }
+//RS     &values.push(3)
+//RS     print(item.label)
+//RS     print(values.len())
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("erased_capture_view", src, "7\n3\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn move_lambda_index_and_slice_captures_stop_at_the_rust_prefix() {
+//RS     for source in [
+//RS         r#"
+//RS fn call(callback: fn()) { callback() }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     call(() -> { print(values[0]) })
+//RS     print(values.len())
+//RS }
+//RS "#,
+//RS         r#"
+//RS fn call(callback: fn()) { callback() }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     call(() -> { print(values[0..1].len()) })
+//RS     print(values.len())
+//RS }
+//RS "#,
+//RS     ] {
+//RS         let diags =
+//RS             jet::compile(source).expect_err("indexing cannot make a move capture element-precise");
+//RS         assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+//RS     }
+//RS 
+//RS     let field_before_index = r#"
+//RS struct Pair { left: [Int], right: [Int] }
+//RS fn call(callback: fn()) { callback() }
+//RS fn run() {
+//RS     pair := Pair{ left: [1], right: [2] }
+//RS     call(() -> { print(pair.left[0]) })
+//RS     print(pair.right.len())
+//RS }
+//RS "#;
+//RS     jet::compile(field_before_index).expect("Rust may capture the field prefix before an index");
+//RS }
+//RS 
+//RS #[test]
+//RS fn moved_places_can_be_reinitialized_without_clearing_relatives() {
+//RS     let whole = r#"
+//RS fn consume(value: String) { print(value) }
+//RS fn run() {
+//RS     value := "jet"
+//RS     consume(value)
+//RS     value = "again"
+//RS     print(value)
+//RS }
+//RS "#;
+//RS     jet::compile(whole).expect("whole assignment reinitializes the moved binding");
+//RS 
+//RS     let field = r#"
+//RS struct Pair { left: String, right: [Int] }
+//RS fn call(callback: fn()) { callback() }
+//RS fn run() {
+//RS     pair := Pair{ left: "jet", right: [1] }
+//RS     call(() -> { print(pair.left) })
+//RS     pair.left = "again"
+//RS     print(pair.left)
+//RS     print(pair.right.len())
+//RS }
+//RS "#;
+//RS     jet::compile(field).expect("field assignment reinitializes the exact moved field");
+//RS 
+//RS     let sibling = r#"
+//RS struct Pair { left: String, right: [Int] }
+//RS fn call(callback: fn()) { callback() }
+//RS fn run() {
+//RS     pair := Pair{ left: "jet", right: [1] }
+//RS     call(() -> { print(pair.left) })
+//RS     pair.right = [2]
+//RS     print(pair.left)
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(sibling).expect_err("assigning a sibling must not restore the moved field");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+//RS 
+//RS     let ancestor = r#"
+//RS struct Pair { left: String, right: [Int] }
+//RS fn call(callback: fn()) { callback() }
+//RS fn run() {
+//RS     pair := Pair{ left: "jet", right: [1] }
+//RS     call(() -> { print(pair) })
+//RS     pair.left = "again"
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(ancestor).expect_err("assigning a field cannot restore a moved ancestor");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn builtin_and_composite_receivers_use_the_call_access_frame() {
+//RS     let builtin = r#"
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     &values.insert(0, values.remove(0, .Slot))
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(builtin)
+//RS         .expect_err("a nested builtin receiver must see the outer receiver write");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let composite = r#"
+//RS fn both(value: &Int, count: Int) { value += count }
+//RS fn run() {
+//RS     value := 1
+//RS     both(&value, [value].len())
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(composite).expect_err("a composite receiver must evaluate inside the call");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn if_expression_prefix_reads_use_the_call_access_frame() {
+//RS     let src = r#"
+//RS fn both(value: &Int, count: Int) { value += count }
+//RS fn run() {
+//RS     value := 1
+//RS     both(&value, if true -> {
+//RS         seen :: value
+//RS         seen
+//RS     } else -> { 0 })
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(src).expect_err("an if-expression prefix read must see the active write");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn deferred_lambda_capture_reports_once() {
+//RS     let src = r#"
+//RS fn see(value: String) -[]> String { return value }
+//RS fn both(value: &String, callback: fn() -> String) {
+//RS     print(value)
+//RS     print(callback())
+//RS }
+//RS fn run() {
+//RS     value := "jet"
+//RS     both(&value, () -> see(value))
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(src).expect_err("the deferred capture conflicts with the active write");
+//RS     assert_eq!(
+//RS         diags.iter().filter(|diag| diag.code == "E0204").count(),
+//RS         1,
+//RS         "the post-inference capture summary must be the only report: {diags:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn evaluated_statement_accesses_are_scoped_and_mode_aware() {
+//RS     let write = r#"
+//RS fn both(values: [Int], count: Int) { print(values.len() + count) }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     both(values, if true -> {
+//RS         values = [3]
+//RS         1
+//RS     } else -> { 0 })
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(write).expect_err("an if-prefix assignment must conflict with the read loan");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let shadow = r#"
+//RS fn both(value: &Int, callback: fn(Int) -> Int) { value += callback(2) }
+//RS fn run() {
+//RS     value := 1
+//RS     both(&value, (value: Int) -> value)
+//RS }
+//RS "#;
+//RS     jet::compile(shadow)
+//RS         .expect("a lambda-local shadow must not capture the outer write-borrowed place");
+//RS }
+//RS 
+//RS #[test]
+//RS fn lambda_capture_access_is_projection_specific_and_transitive() {
+//RS     let mixed = r#"
+//RS struct Pair { left: [Int], right: [Int] }
+//RS fn both(callback: fn(), values: [Int]) {
+//RS     callback()
+//RS     print(values.len())
+//RS }
+//RS fn run() {
+//RS     pair := Pair{ left: [1], right: [2] }
+//RS     both(() -> {
+//RS         print(pair.left.len())
+//RS         &pair.right.push(3)
+//RS     }, pair.left)
+//RS }
+//RS "#;
+//RS     jet::compile(mixed).expect("reading left and mutating right keeps projection modes separate");
+//RS 
+//RS     let conflict = r#"
+//RS struct Pair { left: [Int], right: [Int] }
+//RS fn both(callback: fn(), values: [Int]) {
+//RS     callback()
+//RS     print(values.len())
+//RS }
+//RS fn run() {
+//RS     pair := Pair{ left: [1], right: [2] }
+//RS     both(() -> {
+//RS         print(pair.left.len())
+//RS         &pair.right.push(3)
+//RS     }, pair.right)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(conflict).expect_err("the mutated projection remains write-borrowed");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let transitive = r#"
+//RS fn both(value: &String, callback: fn() -> fn() -> String) {
+//RS     print(value)
+//RS     print(callback().call())
+//RS }
+//RS fn run() {
+//RS     value := "jet"
+//RS     both(&value, () -> () -> value)
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(transitive).expect_err("a nested closure capture is also an outer capture");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn composite_lambda_capture_walks_if_prefix_and_fallback_values() {
+//RS     let if_prefix = r#"
+//RS struct Work { callback: fn() -> Int }
+//RS fn both(values: &[Int], work: Work) { &values.push(work.callback()) }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     both(&values, if true -> {
+//RS         work :: Work{ callback: () -> values.len() }
+//RS         work
+//RS     } else -> {
+//RS         Work{ callback: () -> 0 }
+//RS     })
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(if_prefix).expect_err("a lambda created in an if prefix must be summarized");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let fallback = r#"
+//RS fn both(values: &[Int], callback: fn() -> Int) { &values.push(callback()) }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     both(&values, Val(() -> values.len()) ?? () -> 0)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(fallback)
+//RS         .expect_err("a lambda created through fallback evaluation must retain its capture");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn builtin_mut_receiver_uses_two_phase_reservation() {
+//RS     let accepted = r#"
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     &values.push(values.len())
+//RS }
+//RS "#;
+//RS     jet::compile(accepted).expect("a shared argument read is allowed during receiver reservation");
+//RS 
+//RS     let rejected = r#"
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     &values.push(values.remove(0, .Slot))
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(rejected).expect_err("a nested write conflicts with receiver reservation");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     for eager in [
+//RS         r#"
+//RS fn run() {
+//RS     values := [2, 1]
+//RS     &values.sort_by((value: Int) -> value + values.len())
+//RS }
+//RS "#,
+//RS         r#"
+//RS fn run() {
+//RS     clock := Clock.new(0)
+//RS     &clock.advance(clock.now())
+//RS }
+//RS "#,
+//RS         r#"
+//RS use core.compute.solve as solve
+//RS fn run() {
+//RS     solver := solve.Solver.new(1)
+//RS     solver.require(solver.failure_count() == 0)
+//RS }
+//RS "#,
+//RS     ] {
+//RS         let diags = jet::compile(eager).expect_err("explicit-helper receiver borrows are eager");
+//RS         assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_capture_events_drive_retention_and_deferred_clone_modes() {
+//RS     let field_write = r#"
+//RS struct Bucket { values: [Int] }
+//RS fn both(callback: fn(), values: [Int]) {
+//RS     callback()
+//RS     print(values.len())
+//RS }
+//RS fn run() {
+//RS     bucket := Bucket{ values: [1, 2] }
+//RS     both(() -> { bucket.values = [3] }, bucket.values)
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(field_write).expect_err("a captured field assignment stays write-borrowed");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let user_method = r#"
+//RS struct Bucket { values: [Int] }
+//RS impl Bucket {
+//RS     fn clear(&self) { self.values = [0] }
+//RS }
+//RS fn both(callback: fn(), values: [Int]) {
+//RS     callback()
+//RS     print(values.len())
+//RS }
+//RS fn run() {
+//RS     bucket := Bucket{ values: [1, 2] }
+//RS     both(() -> &bucket.clear(), bucket.values)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(user_method)
+//RS         .expect_err("a captured user mutable receiver stays write-borrowed");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let reactive_clone = r#"
+//RS fn both(callback: fn(), values: &[Int]) {
+//RS     &values.push(4)
+//RS     callback()
+//RS }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     both(() -> {
+//RS         #Reactive { &values.push(3) }
+//RS     }, &values)
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(reactive_clone)
+//RS         .expect_err("the outer move closure consumes the reactive source before the later loan");
+//RS     assert!(!diags.is_empty(), "expected a move or alias diagnostic");
+//RS }
+//RS 
+//RS #[test]
+//RS fn pattern_value_tests_and_reactive_clones_use_runtime_capture_places() {
+//RS     let pattern_value = r#"
+//RS struct Incident { count: Int, label: String }
+//RS fn both(values: &[Int], callback: fn()) {
+//RS     &values.push(3)
+//RS     callback()
+//RS }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     changed := [0]
+//RS     incident := Incident{ count: 2, label: "jet" }
+//RS     both(&values, () -> {
+//RS         &changed.push(1)
+//RS         if incident == {
+//RS             { count: values.len(), label, .. } -> print(label)
+//RS             else -> {}
+//RS         }
+//RS     })
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(pattern_value)
+//RS         .expect_err("a struct-pattern value expression is evaluated before its arm");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let reactive_root = r#"
+//RS struct Pair { left: [Int], right: [Int] }
+//RS fn both(values: &[Int], callback: fn()) {
+//RS     &values.push(3)
+//RS     callback()
+//RS }
+//RS fn run() {
+//RS     pair := Pair{ left: [1], right: [2] }
+//RS     changed := [0]
+//RS     both(&pair.right, () -> {
+//RS         &changed.push(1)
+//RS         #Reactive { &pair.left.push(3) }
+//RS     })
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(reactive_root).expect_err("reactive lowering clones the whole captured root");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn reactive_root_capture_replaces_existing_owner_projections() {
+//RS     let src = r#"
+//RS struct Pair { left: [Int], right: [Int] }
+//RS fn both(values: &[Int], callback: fn()) {
+//RS     &values.push(3)
+//RS     callback()
+//RS }
+//RS fn run() {
+//RS     pair := Pair{ left: [1], right: [2] }
+//RS     both(&pair.right, () -> {
+//RS         print(pair.left.len())
+//RS         #Reactive { &pair.right.push(4) }
+//RS     })
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(src).expect_err("Reactive clones the root after an earlier field capture");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let write_then_reactive = r#"
+//RS struct Pair { left: [Int], right: [Int] }
+//RS fn both(values: &[Int], callback: fn()) {
+//RS     &values.push(3)
+//RS     callback()
+//RS }
+//RS fn run() {
+//RS     pair := Pair{ left: [1], right: [2] }
+//RS     both(&pair.right, () -> {
+//RS         &pair.left.push(4)
+//RS         #Reactive { print(pair.right.len()) }
+//RS     })
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(write_then_reactive)
+//RS         .expect_err("Reactive coarsening must preserve an earlier mutable capture");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn reactive_codegen_clones_the_whole_root_before_running() {
+//RS     let source = r#"
+//RS struct Pair { left: [Int], right: [Int] }
+//RS fn run() {
+//RS     pair := Pair{ left: [1], right: [2] }
+//RS     #Reactive {
+//RS         &pair.left.push(3)
+//RS         print(pair.left.len())
+//RS     }
+//RS     print(pair.right.len())
+//RS }
+//RS "#;
+//RS     let compiled = jet::compile(source).expect("direct Reactive cloning must remain valid");
+//RS     assert!(
+//RS         compiled
+//RS             .rust
+//RS             .contains("let mut __jet___cap_pair = (__jet_pair).clone();"),
+//RS         "{}",
+//RS         compiled.rust
+//RS     );
+//RS     if common::have_rustc() {
+//RS         let (code, stdout, stderr) =
+//RS             common::build_and_run("jet_reactive_capture", "whole_root", source);
+//RS         assert_eq!(code, 0, "{stderr}");
+//RS         assert_eq!(stdout, "2\n1\n");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn reactive_capture_materializes_local_views_before_rustc() {
+//RS     // `a..b` is inclusive (spec.md:127), so the window has to be narrower than
+//RS     // the owner for the length to prove anything: `jet_view_copy` must copy the
+//RS     // WINDOW, not the root. `values[0..1]` is the whole list and would pass on
+//RS     // either behaviour.
+//RS     let source = r#"
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     first :: values[0..0]
+//RS     #Reactive { print(first.len()) }
+//RS }
+//RS "#;
+//RS     let compiled = jet::compile(source).expect("a stored read View gets an owning copy");
+//RS     assert!(compiled.rust.contains("jet_view_copy"), "{}", compiled.rust);
+//RS     if common::have_rustc() {
+//RS         let (code, stdout, stderr) =
+//RS             common::build_and_run("jet_reactive_view_capture", "whole_root", source);
+//RS         assert_eq!(code, 0, "{stderr}");
+//RS         assert_eq!(stdout, "1\n");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn move_lambda_construction_consumes_owned_nonscalar_captures() {
+//RS     for (source, expected) in [
+//RS         (
+//RS             r#"
+//RS fn both(callback: fn(), values: [Int]) {
+//RS     callback()
+//RS     print(values.len())
+//RS }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     both(() -> values.len(), values)
+//RS }
+//RS "#,
+//RS             "E0121",
+//RS         ),
+//RS         (
+//RS             r#"
+//RS fn both(values: [Int], callback: fn()) {
+//RS     print(values.len())
+//RS     callback()
+//RS }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     both(values, () -> values.len())
+//RS }
+//RS "#,
+//RS             "E0204",
+//RS         ),
+//RS     ] {
+//RS         let diags =
+//RS             jet::compile(source).expect_err("a move closure consumes its owned non-scalar capture");
+//RS         assert!(
+//RS             diags.iter().any(|diag| diag.code == expected),
+//RS             "{expected}: {diags:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     let scalar_copy = r#"
+//RS fn both(callback: fn(), value: Int) {
+//RS     callback()
+//RS     print(value)
+//RS }
+//RS fn run() {
+//RS     value := 2
+//RS     both(() -> { print(value) }, value)
+//RS }
+//RS "#;
+//RS     jet::compile(scalar_copy).expect("Copy scalar captures remain usable");
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_capture_walker_covers_fallback_and_scope_member_arguments() {
+//RS     let fallback = r#"
+//RS fn missing() -[]> Int? { return null }
+//RS fn both(values: &[Int], callback: fn()) {
+//RS     &values.push(3)
+//RS     callback()
+//RS }
+//RS fn run() {
+//RS     values := [1, 2]
+//RS     both(&values, () -> {
+//RS         found :: missing() ?? panic("length {values.len()}")
+//RS         print(found)
+//RS     })
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(fallback).expect_err("panic fallback arguments are closure captures");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let scope_member = r#"
+//RS fn run() { print(0) }
+//RS #Test("member argument capture walk") {
+//RS     values := [1, 2]
+//RS     .skip("length {values.len()}") { assert(false) }
+//RS }
+//RS "#;
+//RS     jet::compile(scope_member).expect("valid scope-member arguments remain walkable");
+//RS }
+//RS 
+//RS #[test]
+//RS fn wrapped_and_branch_returned_views_stay_live_through_outer_calls() {
+//RS     for view in [
+//RS         "(first(values))",
+//RS         "if true -> { first(values) } else -> { first(values) }",
+//RS         "Val(first(values)) ?? first(values)",
+//RS     ] {
+//RS         let src = format!(
+//RS             r#"
+//RS fn first(values: [Int]) -[]> View<Int> {{
+//RS     return values[0..1]
+//RS }}
+//RS fn both(view: View<Int>, values: &[Int]) {{
+//RS     &values.push(view[0])
+//RS }}
+//RS fn run() {{
+//RS     values := [1, 2]
+//RS     both({view}, &values)
+//RS }}
+//RS "#
+//RS         );
+//RS         let diags =
+//RS             jet::compile(&src).expect_err("wrapped returned views retain their source loan");
+//RS         assert!(
+//RS             diags.iter().any(|diag| diag.code == "E0204"),
+//RS             "{view}: {diags:?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn return_fallback_view_does_not_reach_the_enclosing_call() {
+//RS     let source = r#"
+//RS struct View<T> { value: T }
+//RS fn first(values: [Int]) -[]> View<Int> { return values[0..1] }
+//RS fn both(view: View<Int>, values: &[Int]) { &values.push(view[0]) }
+//RS fn choose(other: [Int], values: &[Int]) -[..E]> View<Int> {
+//RS     both(Val(first(other)) ?? return first(values), &values)
+//RS     return first(other)
+//RS }
+//RS fn run() {
+//RS     other := [1]
+//RS     values := [2]
+//RS     chosen :: choose(other, &values)
+//RS     print(chosen[0])
+//RS }
+//RS "#;
+//RS     jet::compile(source).expect("a return fallback exits before the enclosing call can run");
+//RS }
+//RS 
+//RS #[test]
+//RS fn generic_constructor_nested_argument_sees_active_write_place() {
+//RS     let src = r#"
+//RS struct Pair<T> { value: T }
+//RS impl Pair {
+//RS     fn new(first: &T, second: T) -[]> Pair<T> {
+//RS         return Pair<T>{ value: second }
+//RS     }
+//RS }
+//RS fn see(value: Int) -[]> Int { return value }
+//RS 
+//RS fn run() {
+//RS     x := 1
+//RS     pair :: Pair.new(&x, see(x))
+//RS     print(pair.value)
+//RS }
+//RS "#;
+//RS     let diags =
+//RS         jet::compile(src).expect_err("constructor pre-inference must fail in sema before rustc");
+//RS     assert!(
+//RS         diags.iter().any(|diag| diag.code == "E0204"),
+//RS         "expected the call-alias diagnostic: {diags:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn dynamic_projection_operands_are_checked_but_not_retained() {
+//RS     let hostile_index = r#"
+//RS fn both(index: &Int, value: Int) { index += value }
+//RS fn run() {
+//RS     values := [10, 20]
+//RS     index := 0
+//RS     both(&index, values[index])
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(hostile_index)
+//RS         .expect_err("dynamic index evaluation must fail in sema before rustc");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let hostile_slice = r#"
+//RS fn both(end: &Int, values: [Int]) { end += values.len() }
+//RS fn run() {
+//RS     values := [10, 20]
+//RS     end := 1
+//RS     both(&end, values[0..end])
+//RS }
+//RS "#;
+//RS     let diags = jet::compile(hostile_slice)
+//RS         .expect_err("dynamic slice-bound evaluation must fail in sema before rustc");
+//RS     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+//RS 
+//RS     let ordered = r#"
+//RS fn both(value: Int, index: &Int) { index += value }
+//RS fn run() {
+//RS     values := [10, 20]
+//RS     index := 0
+//RS     both(values[index], &index)
+//RS }
+//RS "#;
+//RS     jet::compile(ordered)
+//RS         .expect("the index read finishes before the later write borrow is retained");
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1121 tests/ownership.rs:1-1811
+

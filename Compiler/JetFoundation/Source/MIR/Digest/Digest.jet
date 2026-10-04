@@ -1186,7 +1186,7 @@ fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemantic
             if frame_schedule == {
                 .Val(frame_schedule_value) -> {
                 mir_digest_bool(&writer, true)
-                mir_digest_string(&writer, mir_digest_frame_schedule_text(frame_schedule_value))
+                mir_digest_string(&writer, mir_frame_schedule_json(frame_schedule_value))
             }
             else -> {
                 mir_digest_bool(&writer, false)
@@ -1296,12 +1296,6 @@ fn mir_digest_http_method(value: MIRHTTPMethod) -> String Never! {
     }
 }
 
-fn mir_digest_frame_schedule_text(value: MIRFrameSchedule) -> String Never! {
-    operations :: loop operation in value.operations -> "{mir_digest_debug_quote(operation.name)}:{operation.source_index}:{mir_digest_debug_bool(operation.external_effect)}"
-    dependencies :: loop dependency in value.dependencies -> "{dependency.before}->{dependency.after}:{mir_digest_debug_quote(dependency.resource)}"
-    transfers :: loop transfer in value.transfers -> "{transfer.before}->{transfer.after}:{mir_digest_debug_quote(transfer.resource)}"
-    "{operations.join("|")};{dependencies.join("|")};{transfers.join("|")};{value.conservative.join("|")}"
-}
 
 fn mir_digest_operation(writer: &MIRCanonicalWriter, operation: MIROperation) {
     if operation == {
@@ -1715,48 +1709,107 @@ fn mir_digest_binary_dispatch_debug(value: MIRBinaryDispatch) -> String Never! {
     }
 }
 
-fn mir_digest_string_format_debug(value: MIRStringFormat) -> String Never! {
-    if value == {
-        .Display -> "Display"
-        .Debug -> "Debug"
-        .Pretty -> "Pretty"
-        .Fixed(digits) -> "Fixed({digits})"
-        .Grouped(digits) -> "Grouped({digits})"
-        .Hex(digits) -> "Hex({digits})"
-        .Pad(width, fill) -> "Pad {{ width: {width}, fill: {mir_digest_debug_quote(fill)} }}"
-        .PadLeft(width, fill) -> "PadLeft {{ width: {width}, fill: {mir_digest_debug_quote(fill)} }}"
-        .Sci(digits) -> "Sci({digits})"
-        .Percent(digits) -> "Percent({digits})"
-        .Bin -> "Bin"
-        .Oct -> "Oct"
-        .Unit(format) -> "Unit({mir_digest_unit_format_debug(format)})"
-    }
-}
-
-fn mir_digest_unit_format_debug(value: MIRUnitFormat) -> String Never! {
-    if value == {
-        .Symbol -> "Symbol"
-        .Name -> "Name"
-        .Bare -> "Bare"
-    }
-}
-
 fn mir_digest_string_part_debug(value: MIRStringPart) -> String Never! {
-    if value.kind == {
-        .Literal(text) -> "MirStringPart {{ kind: Literal({mir_digest_debug_quote(text)}) }}"
-        .Interpolation(id, format) -> "MirStringPart {{ kind: Interpolation(MirValueId {{ value: {id.value} }}, {mir_digest_string_format_debug(format)}) }}"
+    if value == {
+        .Literal(text) -> "Literal({mir_digest_debug_quote(text)})"
+        .Value(id) -> "Value(MirValueId({id.value}))"
     }
 }
 
 fn mir_digest_capture_operand_debug(value: MIRCaptureOperand) -> String Never! {
     if value == {
-        .Value(id) -> "Value(MirValueId {{ value: {id.value} }})"
-        .Place(id) -> "Place(MirPlaceId {{ value: {id.value} }})"
+        .Value(id) -> "Value(MirValueId({id.value}))"
+        .Place(id) -> "Place(MirPlaceId({id.value}))"
     }
 }
 
+// Native derived Debug uses ordered sets, not the Source list spelling.
+fn mir_digest_capture_set_debug(values: [String]) -> String Never! {
+    rendered := [String]{}
+    previous := String?{None}
+    loop position in mir_digest_sort_strings(values) {
+        value :: values[position]
+        if previous == .Val(last) { if last == value -> next }
+        &rendered.push(mir_digest_debug_quote(value))
+        previous = Val(value)
+    }
+    "{{{rendered.join(", ")}}}"
+}
+
+fn mir_digest_frame_resource_debug(value: MIRResourceIdentity) -> String Never! {
+    if value == {
+        .Named(name) -> "Named({mir_digest_debug_quote(name)})"
+        .Unknown -> "Unknown"
+    }
+}
+
+fn mir_digest_frame_access_mode_debug(value: MIRResourceAccessMode) -> String Never! {
+    if value == { .Read -> "Read", .Write -> "Write", .Move -> "Move" }
+}
+
+fn mir_digest_frame_region_debug(value: MIRResourceRegion) -> String Never! {
+    if value == {
+        .Whole -> "Whole"
+        .Bytes(start, length) -> "Bytes {{ start: {start}, length: {length} }}"
+        .Unknown -> "Unknown"
+    }
+}
+
+fn mir_digest_frame_layout_debug(value: MIRResourceLayout?) -> String Never! {
+    row :: value ?? return "None"
+    "Some(JetResourceLayout {{ size: {row.size}, align: {row.align}, layout: {mir_digest_debug_quote(row.layout)}, device: {mir_digest_debug_quote(row.device)} }})"
+}
+
+fn mir_digest_frame_access_debug(value: MIRResourceAccess) -> String Never! {
+    "JetResourceAccess {{ resource: {mir_digest_frame_resource_debug(value.resource)}, mode: {mir_digest_frame_access_mode_debug(value.mode)}, region: {mir_digest_frame_region_debug(value.region)}, layout: {mir_digest_frame_layout_debug(value.layout)}, temporary: {mir_digest_debug_bool(value.temporary)} }}"
+}
+
+fn mir_digest_frame_completion_debug(value: MIRFrameCompletion) -> String Never! {
+    if value == {
+        .Synchronous -> "Synchronous"
+        .Pending(token) -> "Pending {{ token: {mir_digest_debug_quote(token)} }}"
+        .Event(token) -> "Event {{ token: {mir_digest_debug_quote(token)} }}"
+    }
+}
+
+fn mir_digest_frame_operation_debug(value: MIRFrameOperation) -> String Never! {
+    accesses :: loop access in value.accesses -> mir_digest_frame_access_debug(access)
+    "JetFrameOperation {{ name: {mir_digest_debug_quote(value.name)}, source_index: {value.source_index}, accesses: [{accesses.join(", ")}], completion: {mir_digest_frame_completion_debug(value.completion)}, completion_provider: {mir_digest_debug_option_string(value.completion_provider)}, external_effect: {mir_digest_debug_bool(value.external_effect)} }}"
+}
+
+fn mir_digest_frame_dependency_debug(value: MIRFrameDependency) -> String Never! {
+    "JetFrameDependency {{ before: {value.before}, after: {value.after}, resource: {mir_digest_debug_quote(value.resource)}, reason: {mir_digest_debug_quote(value.reason)} }}"
+}
+
+fn mir_digest_frame_transfer_debug(value: MIRFrameTransfer) -> String Never! {
+    "JetFrameTransfer {{ before: {value.before}, after: {value.after}, resource: {mir_digest_debug_quote(value.resource)}, from_device: {mir_digest_debug_quote(value.from_device)}, to_device: {mir_digest_debug_quote(value.to_device)} }}"
+}
+
+fn mir_digest_frame_reuse_debug(value: MIRFrameReuse) -> String Never! {
+    "JetFrameReuse {{ previous_resource: {mir_digest_debug_quote(value.previous_resource)}, next_resource: {mir_digest_debug_quote(value.next_resource)}, previous_last_use: {value.previous_last_use}, next_first_use: {value.next_first_use}, legal: {mir_digest_debug_bool(value.legal)}, reason: {mir_digest_debug_quote(value.reason)} }}"
+}
+
+fn mir_digest_frame_retention_debug(value: MIRFrameRetention) -> String Never! {
+    "JetFrameRetention {{ resource: {mir_digest_debug_quote(value.resource)}, operation: {value.operation}, owner: {mir_digest_debug_quote(value.owner)}, completion_token: {mir_digest_debug_option_string(value.completion_token)}, completed: {mir_digest_debug_bool(value.completed)} }}"
+}
+
+fn mir_digest_frame_schedule_debug(value: MIRFrameSchedule?) -> String Never! {
+    row :: value ?? return "None"
+    operations :: loop operation in row.operations -> mir_digest_frame_operation_debug(operation)
+    dependencies :: loop dependency in row.dependencies -> mir_digest_frame_dependency_debug(dependency)
+    transfers :: loop transfer in row.transfers -> mir_digest_frame_transfer_debug(transfer)
+    reuse :: loop reuse in row.reuse -> mir_digest_frame_reuse_debug(reuse)
+    retentions :: loop retention in row.retentions -> mir_digest_frame_retention_debug(retention)
+    "Some(JetFrameSchedule {{ operations: [{operations.join(", ")}], dependencies: [{dependencies.join(", ")}], transfers: [{transfers.join(", ")}], reuse: [{reuse.join(", ")}], retentions: [{retentions.join(", ")}], conservative: {mir_digest_debug_string_list(row.conservative)} }})"
+}
+
+fn mir_digest_frame_derivation_debug(value: MIRDerivationRef?) -> String Never! {
+    row :: value ?? return "None"
+    "Some(DerivationRef {{ id: {mir_digest_debug_quote(row.id)} }})"
+}
+
 fn mir_digest_capture_facts_debug(value: MIRCaptureFacts) -> String Never! {
-    "MirCaptureFacts {{ escapes: {mir_digest_debug_bool(value.escapes)}, needs_fn_mut: {mir_digest_debug_bool(value.needs_fn_mut)}, mutable: {mir_digest_debug_string_list(value.mutable)}, cloned: {mir_digest_debug_string_list(value.cloned)}, frozen: {mir_digest_debug_string_list(value.frozen)}, materialized: {mir_digest_debug_string_list(value.materialized)}, moved: {mir_digest_debug_string_list(value.moved)} }}"
+    "MirCaptureFacts {{ escapes: {mir_digest_debug_bool(value.escapes)}, needs_fn_mut: {mir_digest_debug_bool(value.needs_fn_mut)}, mutable: {mir_digest_capture_set_debug(value.mutable)}, cloned: {mir_digest_capture_set_debug(value.cloned)}, frozen: {mir_digest_capture_set_debug(value.frozen)}, materialized: {mir_digest_capture_set_debug(value.materialized)}, moved: {mir_digest_capture_set_debug(value.moved)}, frame_schedule: {mir_digest_frame_schedule_debug(value.frame_schedule)}, frame_schedule_derivation: {mir_digest_frame_derivation_debug(value.frame_schedule_derivation)} }}"
 }
 
 fn mir_digest_test_scope_member_debug(value: MIRTestScopeMember) -> String Never! {
@@ -3376,7 +3429,8 @@ fn mir_digest_web_param_reconstruction(writer: &MIRCanonicalWriter, value: MIRWe
 
 fn mir_digest_kernel_facts_debug(value: MIRKernelFacts?) -> String Never! {
     row :: value ?? return "None"
-    "Some(MirKernelFacts {{ bounds: {mir_digest_debug_bool(row.bounds)}, alias_free: {mir_digest_debug_bool(row.alias_free)}, captures: {mir_digest_debug_bool(row.captures)}, race_free: {mir_digest_debug_bool(row.race_free)}, barriers_uniform: {mir_digest_debug_bool(row.barriers_uniform)}, control_flow: {mir_digest_debug_bool(row.control_flow)} }})"
+    mode :: if row.mode == { .Parallel -> "Parallel" }
+    "Some(MirKernelFacts {{ mode: {mode}, bounds: {mir_digest_debug_bool(row.bounds)}, alias_free: {mir_digest_debug_bool(row.alias_free)}, captures: {mir_digest_debug_bool(row.captures)}, race_free: {mir_digest_debug_bool(row.race_free)}, barriers_uniform: {mir_digest_debug_bool(row.barriers_uniform)}, control_flow: {mir_digest_debug_bool(row.control_flow)} }})"
 }
 
 fn mir_digest_unsafe_gate_debug(value: MIRUnsafeGate?) -> String Never! {
@@ -3533,7 +3587,7 @@ fn mir_digest_terminator_debug(terminator: MIRTerminator) -> String Never! {
             "Switch(MirValueId({subject.value}), [{rendered.join(", ")}], MirBlockId({otherwise.value}))"
         }
         .Return(value) -> "Return({mir_digest_debug_u64_option(value.map(row -> row.value))})"
-        .Yield(value, resume) -> "Yield(MirValueId({value.value}), MirBlockId({resume.value}))"
+        .Yield(value, resume, cancel) -> "Yield(MirValueId({value.value}), MirBlockId({resume.value}), MirBlockId({cancel.value}))"
         .Break(target, value) -> "Break(MirBlockId({target.value}), {mir_digest_debug_u64_option(value.map(row -> row.value))})"
         .Continue(target) -> "Continue(MirBlockId({target.value}))"
         .Unreachable(reason) -> "Unreachable({mir_digest_debug_quote(reason)})"
@@ -4026,7 +4080,7 @@ fn mir_digest_runtime_layer(value: MIRRuntimeLayer) -> String Never! {
     if value == {
         .Core -> "core"
         .Alloc -> "alloc"
-        .Std -> "std"
+        .Std -> "hosted"
     }
 }
 
@@ -4041,8 +4095,9 @@ fn mir_digest_u64_bytes(bytes: &[U8], value: Int) Never! {
     }
 }
 
-fn mir_digest_target_dossier_bytes(value: MIRTargetDossier, target_triple: String) -> [U8] Never! {
-    bytes := [U8]{}
+// Rust Facts.rs::TargetDossier::append_cache_bytes. One framing owner, shared
+// by MIR identities and the actual BuildFactSnapshot artifact identity.
+fn mir_digest_append_target_dossier_bytes(value: MIRTargetDossier, target_triple: String, bytes: &[U8]) Never! {
     loop byte in "jet-target-dossier-v3".bytes() -> &bytes.push(byte)
     &bytes.push(U8{0})
     if value.machine == {
@@ -4051,8 +4106,8 @@ fn mir_digest_target_dossier_bytes(value: MIRTargetDossier, target_triple: Strin
             mir_digest_cache_frame(&bytes, "selected-machine")
             mir_digest_cache_frame(&bytes, machine.name)
             mir_digest_cache_frame(&bytes, machine.triple)
-            mir_digest_cache_frame(&bytes, value.provider_identity)
-            mir_digest_cache_frame(&bytes, value.linker_identity)
+            mir_digest_cache_frame(&bytes, jet_target_provider_identity(machine))
+            mir_digest_cache_frame(&bytes, jet_target_linker_identity(machine))
         }
     }
     mir_digest_cache_frame(&bytes, target_triple)
@@ -4064,6 +4119,10 @@ fn mir_digest_target_dossier_bytes(value: MIRTargetDossier, target_triple: Strin
     mir_digest_cache_frame(&bytes, value.compiler_identity)
     mir_digest_cache_frame(&bytes, value.environment_identity)
     mir_digest_cache_frame(&bytes, value.dependency_identity)
+}
+fn mir_digest_target_dossier_bytes(value: MIRTargetDossier, target_triple: String) -> [U8] Never! {
+    bytes := [U8]{}
+    mir_digest_append_target_dossier_bytes(value, target_triple, &bytes)
     bytes
 }
 

@@ -1,0 +1,183 @@
+// Original Rust Generics.rs unit tests; helpers use the canonical Type owner.
+fn generics_test_callable(zone: ParamZone) -> Type Never! {
+    Type.Fn{params: [Type]{Type.Bool}, ret: Val(Type.Int), effect_bound: None, param_contract: Val([CallContractRow]{CallContractRow{label: "force", zone: zone}}), call_metadata: None, return_view_provenance: None}
+}
+struct GenericsPairCounter { visited: Int }
+impl GenericsPairCounter.CompositeTypePairVisitor {
+    fn visit(&self, left: Type, right: Type) Never! { self.visited += 1 }
+}
+
+// Rust Generics.rs:959-1028. Every original fixture and assertion is retained.
+#Test("composite_walker_drives_assignability_and_unification") {
+    required :: Type.Apply{name: "SyntheticCarrier", args: [Type]{
+        Type.List{element: generics_test_callable(ParamZone.PositionalOnly)},
+        Type.Option{inner: Type.Result{ok: Type.Int, err: Type.String}},
+    }}
+    offered :: Type.Apply{name: "SyntheticCarrier", args: [Type]{
+        Type.List{element: generics_test_callable(ParamZone.Either)},
+        Type.Option{inner: Type.Result{ok: Type.Int, err: Type.String}},
+    }}
+    assert(type_obligations_satisfy(required, offered))
+    expected :: Type.Apply{name: "SyntheticCarrier", args: [Type]{
+        Type.List{element: Type.Named{name: "T"}},
+        Type.Option{inner: Type.Result{ok: Type.Named{name: "U"}, err: Type.Int}},
+    }}
+    found :: Type.Apply{name: "SyntheticCarrier", args: [Type]{
+        Type.List{element: Type.String},
+        Type.Option{inner: Type.Result{ok: Type.Bool, err: Type.Int}},
+    }}
+    subst := [String:Type]{}
+    type_params :: Set.from([String]{"T", "U"})
+    assert(unify_types(expected, found, &subst, type_params))
+    assert(type_identity_equal(subst.get("T") ?? panic("T must be inferred"), Type.String))
+    assert(type_identity_equal(subst.get("U") ?? panic("U must be inferred"), Type.Bool))
+    wrong_arity :: Type.Apply{name: "SyntheticCarrier", args: [Type]{Type.Int}}
+    counter := GenericsPairCounter{visited: 0}
+    assert(if type_for_each_composite_pair<GenericsPairCounter>(expected, wrong_arity, &counter) == {
+        .Err(error) -> error == CompositeTypePairError.ShapeMismatch
+        .Ok(_) -> false
+    })
+    assert_eq(counter.visited, 0)
+}
+
+// Rust Generics.rs:1031-1037.
+#Test("generic_depth_limit_detects_long_chains") {
+    ty := Type.Int
+    loop _ in 0..<65 -> ty = Type.List{element: ^ty}
+    assert(generic_depth_exceeded(ty) != None)
+}
+
+// Rust AST/types.rs:2660-2672, canonical helper brought into this packet by Main.
+#Test("canonicalize_union_flattens_dedupes_and_sorts") {
+    union :: canonicalize_union([Type]{Type.String, Type.Union{members: [Type]{Type.Int, Type.String}}, Type.Int})
+    assert(type_identity_equal(union, Type.Union{members: [Type]{Type.Int, Type.String}}))
+    assert(type_identity_equal(canonicalize_union([Type]{Type.Int, Type.Int}), Type.Int))
+    assert(type_identity_equal(canonicalize_union([Type]{Type.String, Type.Int}), Type.Union{members: [Type]{Type.Int, Type.String}}))
+}
+
+#Test("generic depth retains the exact boundary and original opaque variants") {
+    ty := Type.Int
+    loop _ in 0..<64 -> ty = Type.Option{inner: ^ty}
+    assert_eq(generic_depth_exceeded(ty), None)
+    long :: Type.Shared{inner: ^ty}
+    chain :: generic_depth_exceeded(long) ?? panic("65 counted nodes must exceed")
+    assert_eq(chain.split(" → ").to_list().len(), 65)
+    assert(chain.starts_with("Shared → T?"))
+    assert_eq(generic_depth_exceeded(Type.FixedList{elem: long, len: Measure.Literal{kind: "length", value: 1}}), None)
+}
+
+#Test("generic depth visits last siblings first and counts only Rust carriers") {
+    first := Type.Int
+    last := Type.Int
+    loop _ in 0..<65 {
+        first = Type.List{element: ^first}
+        last = Type.Shared{inner: ^last}
+    }
+    app :: Type.Apply{name: "Outer", args: [Type]{first, last}}
+    chain :: generic_depth_exceeded(app) ?? panic("deep application")
+    assert(chain.starts_with("Outer → Shared → Shared"))
+    transparent :: Type.Map{key: first, key_span: None, value: last}
+    map_chain :: generic_depth_exceeded(transparent) ?? panic("deep map value")
+    assert(map_chain.starts_with("Shared → Shared"))
+    assert(!map_chain.contains("Map"))
+}
+
+#Test("generic inference distinguishes nominal names arity and binding conflicts") {
+    params :: Set.from([String]{"Kind", "Val"})
+    subst := [String:Type]{}
+    assert(unify_types(Type.Named{name: "Kind"}, Type.String, &subst, params))
+    assert(!unify_types(Type.Named{name: "Kind"}, Type.Bool, &subst, params))
+    assert(type_identity_equal(subst.get("Kind") ?? panic("binding retained"), Type.String))
+    assert(!unify_types(Type.Apply{name: "Left", args: [Type]{Type.Int}}, Type.Apply{name: "Right", args: [Type]{Type.Int}}, &subst, params))
+    assert(!unify_types(Type.FixedList{elem: Type.Named{name: "Val"}, len: Measure.Literal{kind: "length", value: 2}}, Type.FixedList{elem: Type.Int, len: Measure.Literal{kind: "length", value: 2}}, &subst, params))
+    assert(is_type_var_name("T"))
+    assert(!is_type_var_name("Kind"))
+    assert(!is_type_var_name("É"))
+    assert(!is_type_var_name("t"))
+    assert(!is_type_var_name(""))
+}
+
+#Test("substitution preserves annotations and only substitutes user tags") {
+    substitutions :: [String:Type]{"T": Type.Named{name: "Concrete"}}
+    span :: Span{start: 7, end: 13}
+    contract :: Val([CallContractRow]{CallContractRow{label: "force", zone: ParamZone.LabelOnly}})
+    effects :: Val([EffectRowEntry]{EffectRowEntry{name: "FS.Read", span: span}})
+    original :: Type.Fn{params: [Type]{Type.Named{name: "T"}}, ret: Val(Type.Named{name: "T"}), effect_bound: effects, param_contract: contract, call_metadata: None, return_view_provenance: None}
+    rewritten :: substitute_type(original, substitutions)
+    assert(rewritten == (Type.Fn{params: [Type]{Type.Named{name: "Concrete"}}, ret: Val(Type.Named{name: "Concrete"}), effect_bound: effects, param_contract: contract, call_metadata: None, return_view_provenance: None}))
+    user :: substitute_type(Type.Tagged{marker: TagMarker.User{name: "T"}, inner: Type.Named{name: "T"}}, substitutions)
+    assert(user == (Type.Tagged{marker: TagMarker.User{name: "Concrete"}, inner: Type.Named{name: "Concrete"}}))
+    internal :: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}
+    assert(substitute_type(Type.Tagged{marker: internal, inner: Type.Named{name: "T"}}, substitutions) == (Type.Tagged{marker: internal, inner: Type.Named{name: "Concrete"}}))
+    map :: substitute_type(Type.Map{key: Type.Named{name: "T"}, key_span: Val(span), value: Type.Bool}, substitutions)
+    assert(map == (Type.Map{key: Type.Named{name: "Concrete"}, key_span: Val(span), value: Type.Bool}))
+}
+
+#Test("parameter mentions and clone requirements retain their different boundaries") {
+    names :: Set.from([String]{"T", "Item", "NeverUsed"})
+    ty :: Type.Tuple{fields: [TypeTupleField]{
+        TypeTupleField{name: "shared", ty: Type.Shared{inner: Type.Named{name: "T"}}},
+        TypeTupleField{name: "callback", ty: Type.Fn{params: [Type]{Type.Named{name: "Item"}}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}},
+        TypeTupleField{name: "list", ty: Type.List{element: Type.Named{name: "Item"}}},
+    }}
+    mentions := Set.from([String]{})
+    clones := Set.from([String]{})
+    collect_type_param_mentions(ty, names, &mentions)
+    collect_clone_type_param_mentions(ty, names, &clones)
+    assert(mentions.has("T") && mentions.has("Item") && !mentions.has("NeverUsed"))
+    assert(!clones.has("T") && clones.has("Item") && !clones.has("NeverUsed"))
+    free :: free_type_params(ty)
+    assert(free.has("T") && !free.has("Item"))
+}
+
+#Test("quantity bound parsing preserves first separator and exact validation") {
+    encoded :: quantity_bound("Mass", "Linear")
+    parsed :: parse_quantity_bound(encoded) ?? panic("valid quantity bound")
+    assert_eq(parsed.dimension, "Mass")
+    assert_eq(parsed.kind, "Linear")
+    repeated :: parse_quantity_bound("Quantity<Mass, .Linear, .tail>") ?? panic("first separator only")
+    assert_eq(repeated.kind, "Linear, .tail")
+    unicode :: parse_quantity_bound("Quantity<Mäss>, .Linéar>") ?? panic("Unicode names and embedded >")
+    assert_eq(unicode.dimension, "Mäss>")
+    assert_eq(unicode.kind, "Linéar")
+    assert_eq(parse_quantity_bound("Quantity<, .Linear>"), None)
+    assert_eq(parse_quantity_bound("Quantity<Mass, .>"), None)
+    assert_eq(parse_quantity_bound(" Quantity<Mass, .Linear>"), None)
+    assert_eq(parse_quantity_bound("Quantity<Mass,.Linear>"), None)
+    assert_eq(parse_quantity_bound("Quantity<Mass, .Linear"), None)
+    assert(is_literal_capability(TRAIT_LITERAL_INT) && is_literal_capability(TRAIT_LITERAL_FLOAT))
+    assert(!is_builtin_trait(TRAIT_LITERAL_INT))
+    assert(is_builtin_trait(TRAIT_NUMERIC))
+    assert_eq(rust_trait_bound(TRAIT_NUMERIC), None)
+    assert_eq(rust_trait_bound(RENDERABLE), Val("JetDisplay"))
+}
+
+fn generics_test_param(name: String, convention: AccessConvention, ty: Type) -> Param Never! {
+    span :: Span{start: 0, end: 0}
+    Param{convention: convention, root: false, name: name, name_span: span, public_label: None, zone: ParamZone.Either, ty: ty, ty_span: span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None}
+}
+fn generics_test_sig(ret: Type?, effects: [EffectRowEntry]?, pure: Bool) -> TraitMethodSig Never! {
+    span :: Span{start: 0, end: 0}
+    TraitMethodSig{name: "next", name_span: span, params: [Param]{generics_test_param("self", AccessConvention.Read, Type.Named{name: ""}), generics_test_param("item", AccessConvention.Write, Type.Named{name: "Item"})}, return_type: ret, span: span, default_body: None, is_pure: pure, declared_effects: effects, return_view_provenance: None, declared_return_view_provenance: None}
+}
+#Test("trait signatures resolve associated types Self and exact effect arrows") {
+    span :: Span{start: 0, end: 0}
+    assoc :: [String:Type]{"Item": Type.Named{name: "Message"}}
+    sig :: generics_test_sig(Val(Type.Named{name: ""}), Val([EffectRowEntry]{EffectRowEntry{name: "FS.Read", span: span}, EffectRowEntry{name: "FS.Write", span: span}}), true)
+    assert_eq(trait_method_expected_signature("Socket", sig, assoc), "`fn next(self, item: &Message) -[FS.Read, FS.Write]> Socket`")
+    params :: [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.Named{name: "Socket"}), (convention: AccessConvention.Read, ty: Type.Named{name: "Message"})}
+    assert(sig_matches_trait(params, Val(Type.Named{name: "Socket"}), sig, assoc))
+    assert(!sig_matches_trait(params, None, sig, assoc))
+    unit :: generics_test_sig(Val(Type.Result{ok: Type.Named{name: INTERNAL_UNIT_TYPE}, err: Type.Named{name: "Err"}}), None, false)
+    assert_eq(trait_method_expected_signature("Socket", unit, assoc), "`fn next(self, item: &Message) Err!`")
+    assert_eq(trait_method_expected_signature("Socket", generics_test_sig(None, None, true), assoc), "`fn next(self, item: &Message) -[]>`")
+}
+
+#Test("callable obligations preserve direction and shape errors under Apply") {
+    required :: Type.Apply{name: "Left", args: [Type]{Type.List{element: generics_test_callable(ParamZone.PositionalOnly)}}}
+    offered :: Type.Apply{name: "Right", args: [Type]{Type.List{element: generics_test_callable(ParamZone.Either)}}}
+    assert(type_obligations_satisfy(required, offered))
+    assert(!type_obligations_satisfy(offered, required))
+    assert(!type_obligations_satisfy(required, Type.Apply{name: "Left", args: [Type]{Type.Int}}))
+    assert(!type_obligations_satisfy(required, Type.Apply{name: "Left", args: [Type]{}}))
+}

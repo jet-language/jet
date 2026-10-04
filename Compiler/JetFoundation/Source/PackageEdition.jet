@@ -1,0 +1,34 @@
+// Thread-local package edition for sema, comptime, and codegen parity (D-REL3).
+use std.cell.[RefCell]
+use std.thread.[ThreadLocal]
+
+// Rust: crates/jet-foundation/src/PackageEdition.rs:5
+pub fn edition_year(edition: String) -> U32 Never! {
+    trimmed := edition.trim() // #4303
+    U32.parse(trimmed).unwrap_or(U32{2026})
+}
+// Rust: crates/jet-foundation/src/PackageEdition.rs:9
+pub fn edition_at_least(edition: String, baseline: String) -> Bool Never! {
+    edition_year(edition) >= edition_year(baseline)
+}
+// Rust: crates/jet-foundation/src/PackageEdition.rs:13
+// GATE #4494: native thread-local storage and RefCell borrowing.
+const PACKAGE_EDITION: ThreadLocal<RefCell<String>> = ThreadLocal.new(fn() { RefCell.new("2026") })
+// Rust: crates/jet-foundation/src/PackageEdition.rs:17
+pub fn with_package_edition<R>(edition: String, f: fn() -> R) -> R Never! {
+    PACKAGE_EDITION.with(fn(cell) {
+        prev :: cell.replace(~edition)
+        out :: f()
+        &cell.replace(^prev)
+        out
+    })
+}
+// Rust: crates/jet-foundation/src/PackageEdition.rs:26
+pub fn package_edition() -> String Never! {
+    PACKAGE_EDITION.with(fn(cell) { ~cell.borrow() })
+}
+// Rust: crates/jet-foundation/src/PackageEdition.rs:30
+pub fn package_edition_at_least(baseline: String) -> Bool Never! {
+    edition_at_least(package_edition(), baseline)
+}
+

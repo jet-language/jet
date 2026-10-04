@@ -1,0 +1,269 @@
+use jet_foundation.[BinOp, Diagnostic, Dimension, Expr, Item, Span, UnitDimensionDecl, UnitFamilyDef, dimension_base, dimension_divide, dimension_multiply, import_alias]
+
+// Rust Bundle/Units.rs::DimensionLookup and resolve_dimension_expression.
+pub enum SemaUnitDimensionLookup {
+    Found(value: Dimension)
+    Missing
+    Ambiguous(name: String)
+}
+struct SemaUnitDimensionDeclaration {
+    module: Int
+    item: Int
+    family: String
+    span: Span
+    claim: UnitDimensionDecl
+    preset: Dimension?
+}
+struct SemaUnitDimensionVisibility {
+    local: [String:Int]
+    imported: [String:[Int]]
+    qualified: [String:Int]
+    aliases: [String:Int]
+}
+fn sema_units_dimension_target(visible: SemaUnitDimensionVisibility, qualifier: String?, name: String) -> (target: Int?, ambiguous: Bool) Never! {
+    if qualifier == .Val(alias) -> return (target: visible.qualified.get("{alias}|{name}"), ambiguous: false)
+    if visible.local.get(name) == .Val(index) -> return (target: Val(index), ambiguous: false)
+    candidates :: visible.imported.get(name) ?? [Int]{}
+    if candidates.len() > 1 -> return (target: None, ambiguous: true)
+    (target: if candidates.len() == 1 -> Val(candidates[0]) else -> None, ambiguous: false)
+}
+fn sema_units_dimension_lookup(visible: SemaUnitDimensionVisibility, known: [Int:Dimension], qualifier: String?, name: String, ambiguity_only: Bool) -> SemaUnitDimensionLookup Never! {
+    target :: sema_units_dimension_target(visible, qualifier, name)
+    if target.ambiguous -> return SemaUnitDimensionLookup.Ambiguous{name: name}
+    if ambiguity_only -> return SemaUnitDimensionLookup.Missing
+    index :: target.target ?? return SemaUnitDimensionLookup.Missing
+    if known.get(index) == .Val(value) -> SemaUnitDimensionLookup.Found{value: value}
+    else -> SemaUnitDimensionLookup.Missing
+}
+fn sema_units_dimension_expression(expression: Expr, visible: SemaUnitDimensionVisibility, known: [Int:Dimension], ambiguity_only: Bool) -> SemaUnitDimensionLookup Never! {
+    if expression == {
+        .Ident(name, _) -> sema_units_dimension_lookup(visible, known, None, name, ambiguity_only)
+        .Field(base, name, _) -> if base == {
+            .Ident(alias, _) -> sema_units_dimension_lookup(visible, known, Val(alias), name, ambiguity_only)
+            else -> SemaUnitDimensionLookup.Missing
+        }
+        .Binary(op, left, right, _) -> {
+            if op != BinOp.Mul && op != BinOp.Div -> return SemaUnitDimensionLookup.Missing
+            left_value :: sema_units_dimension_expression(left, visible, known, ambiguity_only)
+            right_value :: sema_units_dimension_expression(right, visible, known, ambiguity_only)
+            if left_value == .Ambiguous(name) -> return SemaUnitDimensionLookup.Ambiguous{name: name}
+            if right_value == .Ambiguous(name) -> return SemaUnitDimensionLookup.Ambiguous{name: name}
+            if left_value == .Found(l) {
+                if right_value == .Found(r) {
+                    value :: if op == BinOp.Mul -> dimension_multiply(l, r) else -> dimension_divide(l, r)
+                    if value == .Val(dimension) -> return SemaUnitDimensionLookup.Found{value: dimension}
+                }
+            }
+            SemaUnitDimensionLookup.Missing
+        }
+        else -> SemaUnitDimensionLookup.Missing
+    }
+}
+// Rust dimension_dependencies includes identifiers on either side of any
+// binary operator; the resolver itself admits only multiplication/division.
+pub fn sema_units_dimension_dependencies(expression: Expr, names: &[String]) Never! {
+    if expression == {
+        .Ident(name, _) -> &names.push(name)
+        .Binary(_, left, right, _) -> { sema_units_dimension_dependencies(left, &names); sema_units_dimension_dependencies(right, &names) }
+        else -> {}
+    }
+}
+// Rust dimension_aliases/dimension_unqualified_names, plus indexed reverse
+// dependencies. Repeated references to one declaration count only once.
+// Rust dimension_aliases visits field bases even when the outer expression
+// is not a valid dimension expression. Unqualified names never visit a field.
+fn sema_units_dimension_aliases(expression: Expr, aliases: &[String:Bool]) Never! {
+    if expression == {
+        .Field(base, _, _) -> {
+            if base == .Ident(alias, _) -> aliases[alias] = true
+            sema_units_dimension_aliases(base, &aliases)
+        }
+        .Binary(_, left, right, _) -> {
+            sema_units_dimension_aliases(left, &aliases)
+            sema_units_dimension_aliases(right, &aliases)
+        }
+        else -> {}
+    }
+}
+
+fn sema_units_dimension_reads(expression: Expr, visible: SemaUnitDimensionVisibility, dependencies: &[Int:Bool], aliases: &[String:Bool]) Never! {
+    if expression == {
+        .Ident(name, _) -> {
+            target :: sema_units_dimension_target(visible, None, name)
+            if target.target == .Val(index) -> dependencies[index] = true
+            if visible.local.get(name) == None {
+                candidates :: visible.imported.get(name) ?? [Int]{}
+                loop (alias, _) in visible.aliases {
+                    loop candidate in candidates {
+                        // Declaration indices belong to their import module;
+                        // qualified entries encode the exact family visibility.
+                        if visible.qualified.get("{alias}|{name}") == (Val(candidate)) -> aliases[alias] = true
+                    }
+                }
+            }
+        }
+        .Field(base, name, _) -> {
+            if base == .Ident(alias, _) {
+                aliases[alias] = true
+                if visible.qualified.get("{alias}|{name}") == .Val(index) -> dependencies[index] = true
+            }
+            // A field base is not an unqualified dimension read.
+        }
+        .Binary(_, left, right, _) -> { sema_units_dimension_reads(left, visible, &dependencies, &aliases); sema_units_dimension_reads(right, visible, &dependencies, &aliases) }
+        else -> {}
+    }
+}
+// Rust stable_unit_owner. Driver already retained owning_package and the
+// GenericModules package fingerprint and root-relative physical definition
+// path. Never derive package identity from cwd, display labels or root text.
+fn sema_units_owner(input: SemaRegistrationModuleInput) -> (package: String, module: String) Never! {
+    package :: input.generic_package_identity ?? input.package_identity
+    path :: if input.generic_definition_path != "" -> input.generic_definition_path else -> input.module_path
+    (package: package, module: "{package}::{path}")
+}
+pub fn sema_units_resolve_standard(prelude: &[UnitFamilyDef]) Never! {
+    local := [String:Int]{}
+    known := [Int:Dimension]{}
+    loop (index, family) in prelude {
+        local[family.family] = index
+        if family.dimension == .Val(claim) {
+            if claim == .Base(_) -> known[index] = dimension_base("core.units::{family.family}")
+        }
+    }
+    visible :: SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}}
+    loop {
+        progress := false
+        loop index in 0..<prelude.len() {
+            if known.get(index) != None -> next
+            if prelude[index].dimension == .Val(claim) {
+                if claim == .Derived(expression) {
+                    if sema_units_dimension_expression(expression, visible, known, false) == .Found(value) { known[index] = value; progress = true }
+                }
+            }
+        }
+        if !progress -> break
+    }
+    loop index in 0..<prelude.len() { prelude[index].resolved_dimension = known.get(index); prelude[index].resolved_owner = Val("core.units") }
+}
+// Rust resolve_unit_dimensions. Visibility is built from exact resolved
+// import edges (the name-ledger import target), not guessed source paths.
+// Reverse edges wake only affected claims; forward references and cycles do
+// not incur a declarations × pending-claims scan each iteration.
+pub fn sema_units_resolve(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], diagnostics: &[Diagnostic]) Never! {
+    declarations := [SemaUnitDimensionDeclaration]{}
+    module_rows := [String:Int]{}
+    locals := [[String:Int]]{}
+    exports := [[String:Int]]{}
+    loop (module, input) in inputs {
+        module_rows[input.module_identity] = module
+        local := [String:Int]{}
+        public := [String:Int]{}
+        loop (item, value) in input.program.items {
+            if value == .UnitFamily(family) {
+                if family.dimension == .Val(claim) {
+                    index :: declarations.len()
+                    local[family.family] = index
+                    if family.is_pub -> public[family.family] = index
+                    &declarations.push(SemaUnitDimensionDeclaration{module: module, item: item, family: family.family, span: family.family_span, claim: claim, preset: family.resolved_dimension})
+                }
+            }
+        }
+        &locals.push(local)
+        &exports.push(public)
+    }
+    visibility := [SemaUnitDimensionVisibility]{}
+    loop local in locals -> &visibility.push(SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}})
+    loop edge in edges {
+        source :: module_rows.get(edge.source_module_identity) ?? next
+        target :: module_rows.get(edge.target_module_identity) ?? next
+        alias :: import_alias(edge.declaration)
+        visibility[source].aliases[alias] = target
+        loop (name, index) in exports[target] {
+            visibility[source].qualified["{alias}|{name}"] = index
+            candidates := visibility[source].imported.get(name) ?? [Int]{}
+            seen := false
+            loop candidate in candidates { if candidate == index -> seen = true }
+            if !seen -> &candidates.push(index)
+            visibility[source].imported[name] = candidates
+        }
+    }
+    known := [Int:Dimension]{}
+    dependents := [[Int]]{}
+    waits := [Int]{}
+    queue := [Int]{}
+    loop _ in declarations { &dependents.push([Int]{}); &waits.push(0) }
+    loop (index, declaration) in declarations {
+        if declaration.preset == .Val(value) -> known[index] = value
+        else { if declaration.claim == .Base(_) -> known[index] = dimension_base("{sema_units_owner(inputs[declaration.module]).module}::{declaration.family}") }
+    }
+    loop (index, declaration) in declarations {
+        if declaration.claim == .Derived(expression) {
+            dependencies := [Int:Bool]{}
+            aliases := [String:Bool]{}
+            sema_units_dimension_reads(expression, visibility[declaration.module], &dependencies, &aliases)
+            sema_units_dimension_aliases(expression, &aliases)
+            loop (alias, _) in aliases {
+                if visibility[declaration.module].aliases.get(alias) != None {
+                    // The same source ledger used by L0103 and MIRNameFacts.
+                    used := false
+                    loop name in inputs[declaration.module].program.used_import_names { if name == alias -> used = true }
+                    if !used -> &inputs[declaration.module].program.used_import_names.push(alias)
+                    dimension_use := false
+                    loop name in inputs[declaration.module].unit_dimension_aliases { if name == alias -> dimension_use = true }
+                    if !dimension_use -> &inputs[declaration.module].unit_dimension_aliases.push(alias)
+                }
+            }
+            loop (dependency, _) in dependencies {
+                if known.get(dependency) == None { waits[index] += 1; &dependents[dependency].push(index) }
+            }
+            if known.get(index) == None && waits[index] == 0 -> &queue.push(index)
+        }
+    }
+    at := 0
+    loop at < queue.len() {
+        index :: queue[at]
+        at += 1
+        declaration :: declarations[index]
+        if declaration.claim == .Derived(expression) {
+            if sema_units_dimension_expression(expression, visibility[declaration.module], known, false) == .Found(value) {
+                known[index] = value
+                loop dependent in dependents[index] {
+                    waits[dependent] -= 1
+                    if waits[dependent] == 0 -> &queue.push(dependent)
+                }
+            }
+        }
+    }
+    loop (index, declaration) in declarations {
+        resolved :: known.get(index)
+        if resolved == None {
+            diagnostic := sema_error("E0905", declaration.span, "dimension `{declaration.family}` cannot be resolved", "derived dimensions can use visible declared dimensions and cannot form a cycle", "import or declare every base dimension and remove any dimension cycle")
+            if declaration.claim == .Derived(expression) {
+                if sema_units_dimension_expression(expression, visibility[declaration.module], known, true) == .Ambiguous(name) -> diagnostic = sema_error("E0905", declaration.span, "dimension name `{name}` is ambiguous", "more than one imported module exports that dimension", "qualify it with the intended module alias, such as `dep.{name}`")
+            }
+            start :: diagnostics.len()
+            &diagnostics.push(diagnostic)
+            sema_attach_diagnostic_source_locations(&diagnostics, start, inputs[declaration.module].source_segments)
+        }
+        if inputs[declaration.module].program.items[declaration.item] == .UnitFamily(definition) {
+            updated := definition
+            updated.resolved_dimension = resolved
+            if updated.resolved_owner == None -> updated.resolved_owner = Val(sema_units_owner(inputs[declaration.module]).package)
+            inputs[declaration.module].program.items[declaration.item] = Item.UnitFamily{value: updated}
+        }
+    }
+    // Open families still carry owner/scale/offset/kind provenance, even
+    // without a dimension claim; conversion requires an explicit base.
+    loop module in 0..<inputs.len() {
+        owner :: sema_units_owner(inputs[module]).package
+        loop item in 0..<inputs[module].program.items.len() {
+            if inputs[module].program.items[item] == .UnitFamily(definition) {
+                if definition.resolved_owner == None {
+                    updated := definition
+                    updated.resolved_owner = Val(owner)
+                    inputs[module].program.items[item] = Item.UnitFamily{value: updated}
+                }
+            }
+        }
+    }
+}

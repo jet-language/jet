@@ -1,0 +1,357 @@
+// Shape.rs:1-952 has no inline, included, or macro-generated tests.
+// Behavioral controls below cover its constructors, every validation branch,
+// all ten projections and all seventeen Display arms. No mocks/providers.
+// Main must publish this suite with Source/Shape.jet and run positive/control/
+// restored proof after reopening its window; no writer verification is claimed.
+
+fn shape_test_identity() -> ShapeIdentity Never! { ShapeIdentity.new("pkg/model.jet", "Row") }
+fn shape_test_field(name: String, order: U64) -> ShapeFieldFact Never! {
+    field := ShapeFieldFact.new(~name, ShapeType.Text, order)
+    ^field.with_encoding(ShapeEncoding.Text)
+}
+fn shape_test_fact(fields: [ShapeFieldFact]) -> ShapeFact Never! {
+    ShapeFact.record(shape_test_identity(), ~fields, ShapeProvenance.declared()) ?? panic("valid shape fixture")
+}
+fn shape_test_error(result: Unit ShapeError!) -> ShapeError Never! {
+    if result == { .Err(error) -> error .Ok(_) -> panic("expected shape validation error") }
+}
+fn shape_test_fact_error(result: ShapeFact ShapeError!) -> ShapeError Never! {
+    if result == { .Err(error) -> error .Ok(_) -> panic("expected shape construction error") }
+}
+fn shape_test_project_error(result: ShapeProjection ShapeError!) -> ShapeError Never! {
+    if result == { .Err(error) -> error .Ok(_) -> panic("expected shape projection error") }
+}
+
+#Test("Shape identity validation precedence and stable key") {
+    identity :: shape_test_identity()
+    identity.validate() ?? panic("valid identity")
+    assert(identity.key() == "pkg/model.jet::Row")
+    assert(shape_test_error(ShapeIdentity.new(" \t\n", TEXT_NUL).validate()) == ShapeError.EmptyIdentity{part: "source"})
+    assert(shape_test_error(ShapeIdentity.new(TEXT_NUL, "\u{2003}").validate()) == ShapeError.EmptyIdentity{part: "type_name"})
+    assert(shape_test_error(ShapeIdentity.new("src{TEXT_NUL}", "Row").validate()) == ShapeError.InvalidIdentity{source: "src{TEXT_NUL}", type_name: "Row"})
+    assert(shape_test_error(ShapeIdentity.new("src", "Row{TEXT_NUL}").validate()) == ShapeError.InvalidIdentity{source: "src", type_name: "Row{TEXT_NUL}"})
+    // Validation does not trim the stored identity.
+    assert(ShapeIdentity.new(" src ", " Row ").key() == " src :: Row ")
+}
+
+#Test("Shape spans origins and declaration provenance") {
+    ShapeSpan.new(8, 8).validate() ?? panic("empty span is valid")
+    ShapeSpan.new(0, 9).validate() ?? panic("ordered span is valid")
+    assert(shape_test_error(ShapeSpan.new(9, 8).validate()) == ShapeError.InvalidProvenance)
+    provenance := ShapeProvenance.declared()
+    provenance = ^provenance.with_span(ShapeSpan.new(2, 12))
+    provenance = ^provenance.with_declaration("struct Row")
+    provenance.validate() ?? panic("declared provenance")
+    assert(provenance.span == Val(ShapeSpan.new(2, 12)))
+    assert(provenance.declaration == Val("struct Row"))
+    provenance.origin = ShapeOrigin.Derived{from: ShapeIdentity.new("", "Row")}
+    assert(shape_test_error(provenance.validate()) == ShapeError.EmptyIdentity{part: "source"})
+    provenance.declaration = Val("bad{TEXT_NUL}")
+    assert(shape_test_error(provenance.validate()) == ShapeError.InvalidProvenance)
+    provenance.declaration = None
+    provenance.span = Val(ShapeSpan.new(4, 3))
+    assert(shape_test_error(provenance.validate()) == ShapeError.InvalidProvenance)
+    provenance.span = None
+    provenance.origin = ShapeOrigin.Imported{package: "pkg"}
+    provenance.validate() ?? panic("imported package")
+    loop package in [String]{"", " \n", "pkg{TEXT_NUL}"} {
+        provenance.origin = ShapeOrigin.Imported{package: package}
+        assert(shape_test_error(provenance.validate()) == ShapeError.InvalidProvenance)
+    }
+    provenance.origin = ShapeOrigin.Derived{from: shape_test_identity()}
+    provenance.validate() ?? panic("derived identity")
+}
+
+#Test("Shape recursive types and exact declaration defaults") {
+    loop ty in [ShapeType]{ShapeType.Null, ShapeType.Bool, ShapeType.Int,
+        ShapeType.Float, ShapeType.Number, ShapeType.Text, ShapeType.Bytes,
+        ShapeType.Object{identity: shape_test_identity()}, ShapeType.Unknown{name: "unresolved"}} {
+        ty.validate() ?? panic("valid source type")
+    }
+    nested :: ShapeType.Optional{inner: ShapeType.Array{inner: ShapeType.Unknown{name: " \n"}}}
+    assert(shape_test_error(nested.validate()) == ShapeError.UnknownType{value: " \n"})
+    assert(shape_test_error(ShapeType.Unknown{name: "bad{TEXT_NUL}"}.validate()) == ShapeError.UnknownType{value: "bad{TEXT_NUL}"})
+    assert(shape_test_error(ShapeType.Array{inner: ShapeType.Object{identity: ShapeIdentity.new("src", "")}}.validate()) == ShapeError.EmptyIdentity{part: "type_name"})
+    loop value in [ShapeDefault]{ShapeDefault.Null, ShapeDefault.Bool{value: true},
+        ShapeDefault.Int{value: I128{170141183460469231731687303715884105727}},
+        ShapeDefault.Int{value: I128{-170141183460469231731687303715884105728}},
+        ShapeDefault.Float{value: "1.00000000000000000000000000000000000001"},
+        ShapeDefault.Text{value: TEXT_NUL}, ShapeDefault.Bytes{value: [U8]{0, 255}},
+        ShapeDefault.Unknown{value: "exact source"}} {
+        value.validate() ?? panic("valid typed default")
+    }
+    loop value in [String]{"", " \t", "1{TEXT_NUL}"} {
+        assert(shape_test_error(ShapeDefault.Float{value: value}.validate()) == ShapeError.InvalidDefault)
+        assert(shape_test_error(ShapeDefault.Unknown{value: value}.validate()) == ShapeError.InvalidDefault)
+    }
+}
+
+#Test("Shape encoding vocabulary and unknown validation") {
+    encodings :: [ShapeEncoding]{ShapeEncoding.Null, ShapeEncoding.Bool, ShapeEncoding.Int,
+        ShapeEncoding.Float, ShapeEncoding.Number, ShapeEncoding.Text, ShapeEncoding.Array,
+        ShapeEncoding.Object, ShapeEncoding.Unknown{name: "unresolved"}}
+    spellings :: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Array", "Object", "unresolved"}
+    loop index in 0..<encodings.len() {
+        assert(~encodings[index].as_str() == spellings[index])
+        encodings[index].validate() ?? panic("valid encoding")
+    }
+    loop name in [String]{"", " \t", "bad{TEXT_NUL}"} {
+        assert(shape_test_error(ShapeEncoding.Unknown{name: name}.validate()) == ShapeError.UnknownEncoding{value: name})
+    }
+}
+
+#Test("Shape layout alignment is metadata not host ABI selection") {
+    assert(ShapeLayoutFact.default() == ShapeLayoutFact{kind: ShapeLayoutKind.Default, alignment: None, target_alignment: false})
+    assert(ShapeLayoutFact.c() == ShapeLayoutFact{kind: ShapeLayoutKind.C, alignment: None, target_alignment: false})
+    assert(ShapeLayoutFact.columnar() == ShapeLayoutFact{kind: ShapeLayoutKind.Columnar, alignment: None, target_alignment: false})
+    loop alignment in [U64]{1, 2, 16, 9223372036854775808} {
+        portable :: ShapeLayoutFact.c_aligned(alignment)
+        target :: ShapeLayoutFact.c_aligned_target(alignment)
+        portable.validate() ?? panic("portable power of two")
+        target.validate() ?? panic("target power of two")
+        assert(!portable.target_alignment && target.target_alignment)
+        assert(target == ShapeLayoutFact.c_aligned_with_mode(alignment, true))
+    }
+    loop alignment in [U64]{0, 3, 6, 18446744073709551615} {
+        assert(shape_test_error(ShapeLayoutFact.c_aligned(alignment).validate()) == ShapeError.InvalidLayoutAlignment{alignment: alignment})
+    }
+    loop kind in [ShapeLayoutKind]{ShapeLayoutKind.Default, ShapeLayoutKind.Columnar} {
+        invalid :: ShapeLayoutFact{kind: kind, alignment: Val(U64{8}), target_alignment: false}
+        assert(shape_test_error(invalid.validate()) == ShapeError.InvalidLayoutAlignment{alignment: 8})
+    }
+    invalid :: ShapeLayoutFact{kind: ShapeLayoutKind.C, alignment: None, target_alignment: true}
+    assert(shape_test_error(invalid.validate()) == ShapeError.InvalidLayoutAlignment{alignment: 0})
+}
+
+#Test("Shape all projection names overrides and ASCII defaults") {
+    names := ShapeFieldNames.from_source("über_Field-name")
+    assert(names.text == "über_Field-name")
+    assert(names.args == "über-Field-name")
+    assert(names.env == "üBER_FIELD_NAME")
+    names = ^names.shared("shared")
+    loop kind in SHAPE_PROJECTION_KINDS {
+        fallback :: if kind == { .Args -> "über-Field-name" .Env -> "üBER_FIELD_NAME" else -> "shared" }
+        selected :: names.name_for(kind) ?? panic("shared fallback")
+        assert(~selected == fallback)
+    }
+    names = ^names.json("j")
+    names = ^names.cbor("c")
+    names = ^names.csv("s")
+    names = ^names.toml("t")
+    names = ^names.yaml("y")
+    names = ^names.xml("x")
+    names = ^names.args("a")
+    names = ^names.env("e")
+    names = ^names.db("d")
+    names = ^names.layout("l")
+    expected :: [String]{"j", "c", "s", "t", "y", "x", "a", "e", "d", "l"}
+    labels :: [String]{"json", "cbor", "csv", "toml", "yaml", "xml", "args", "env", "db", "layout"}
+    loop index in 0..<SHAPE_PROJECTION_KINDS.len() {
+        kind :: SHAPE_PROJECTION_KINDS[index]
+        selected :: names.name_for(kind) ?? panic("overridden name")
+        assert(~selected == expected[index])
+        assert(~kind.as_str() == labels[index])
+        assert(kind.is_text() == (index < 6))
+    }
+    names.validate("field") ?? panic("all names valid")
+    // Every optional slot is independently validated; unused marker data matters.
+    loop projection in [String]{"text", "json", "cbor", "csv", "toml", "yaml", "xml", "args", "env", "db", "layout"} {
+        broken := ShapeFieldNames.from_source("field")
+        if projection == {
+            "text" -> broken.text = "\t"
+            "json" -> broken.json = Val(TEXT_NUL)
+            "cbor" -> broken.cbor = Val("")
+            "csv" -> broken.csv = Val("")
+            "toml" -> broken.toml = Val("")
+            "yaml" -> broken.yaml = Val("")
+            "xml" -> broken.xml = Val("")
+            "args" -> broken.args = ""
+            "env" -> broken.env = ""
+            "db" -> broken.db = Val("")
+            "layout" -> broken.layout = Val("")
+            else -> panic("known name slot")
+        }
+        assert(shape_test_error(broken.validate("field")) == ShapeError.InvalidFieldName{field: "field", projection: Val(projection)})
+    }
+    broken := ShapeFieldNames.from_source("field")
+    broken.text = ""
+    broken.json = Val("")
+    assert(shape_test_error(broken.validate("field")) == ShapeError.InvalidFieldName{field: "field", projection: Val("text")})
+}
+
+#Test("Shape field builders validation precedence and retained metadata") {
+    unresolved :: ShapeFieldFact.new("field", ShapeType.Text, 7)
+    assert(unresolved.encoding == ShapeEncoding.Unknown{name: "unresolved"})
+    assert(unresolved.default == None && unresolved.short == None && unresolved.doc == None && !unresolved.skip)
+    unresolved.validate() ?? panic("valid unresolved field in isolation")
+    field := shape_test_field("field", 7)
+    field = ^field.with_names(ShapeFieldNames.from_source("field"))
+    field = ^field.with_default(ShapeDefault.Text{value: TEXT_NUL})
+    field = ^field.with_short("f")
+    field = ^field.with_doc("\n")
+    field = ^field.skipped()
+    field.validate() ?? panic("empty/whitespace doc and NUL text default are permitted")
+    assert(field.skip && field.short == Val("f") && field.doc == Val("\n"))
+    field.short = Val(" ")
+    assert(shape_test_error(field.validate()) == ShapeError.InvalidFieldMetadata{field: "field"})
+    field.short = Val("f{TEXT_NUL}")
+    assert(shape_test_error(field.validate()) == ShapeError.InvalidFieldMetadata{field: "field"})
+    field.short = None
+    field.doc = Val("bad{TEXT_NUL}")
+    assert(shape_test_error(field.validate()) == ShapeError.InvalidFieldMetadata{field: "field"})
+    field.default = Val(ShapeDefault.Float{value: ""})
+    assert(shape_test_error(field.validate()) == ShapeError.InvalidDefault)
+    field.encoding = ShapeEncoding.Unknown{name: ""}
+    assert(shape_test_error(field.validate()) == ShapeError.UnknownEncoding{value: ""})
+    field.names.text = ""
+    assert(shape_test_error(field.validate()) == ShapeError.InvalidFieldName{field: "field", projection: Val("text")})
+    field.ty = ShapeType.Unknown{name: ""}
+    assert(shape_test_error(field.validate()) == ShapeError.UnknownType{value: ""})
+    field.name = TEXT_NUL
+    assert(shape_test_error(field.validate()) == ShapeError.InvalidFieldName{field: TEXT_NUL, projection: None})
+}
+
+#Test("Shape dimensions constructors exact widths and unknown states") {
+    assert(ShapeDimensions.record(0) == ShapeDimensions.Known{rank: 1, width: 0})
+    known :: ShapeDimensions.known(2, 18446744073709551615) ?? panic("dimensions do not enforce field width until fact validation")
+    assert(known.is_known())
+    if ShapeDimensions.known(0, 4) == {
+        .Err(error) -> assert(error == ShapeError.InvalidDimensions{reason: "rank must be greater than zero"})
+        .Ok(_) -> panic("rank zero accepted")
+    }
+    assert(!ShapeDimensions.unknown("unresolved").is_known())
+    unknown :: ShapeFact.unknown(shape_test_identity(), "unresolved", ShapeProvenance.declared()) ?? panic("unknown source fact retained")
+    assert(unknown.fields.is_empty())
+    loop kind in SHAPE_PROJECTION_KINDS {
+        assert(shape_test_project_error(unknown.project(kind)) == ShapeError.UnknownShape{identity: "pkg/model.jet::Row"})
+    }
+    assert(shape_test_fact_error(ShapeFact.unknown(shape_test_identity(), " \n", ShapeProvenance.declared())) == ShapeError.InvalidDimensions{reason: "unknown dimensions need a reason"})
+    ShapeFact.unknown(shape_test_identity(), TEXT_NUL, ShapeProvenance.declared()) ?? panic("Rust permits NUL unknown-dimension reason")
+    wrong := shape_test_fact([ShapeFieldFact]{shape_test_field("one", 0)})
+    wrong.dimensions = ShapeDimensions.Known{rank: 0, width: 1}
+    assert(shape_test_error(wrong.validate()) == ShapeError.InvalidDimensions{reason: "rank 0 and width 1 do not match fields"})
+    wrong.dimensions = ShapeDimensions.Known{rank: 1, width: 2}
+    assert(shape_test_error(wrong.validate()) == ShapeError.InvalidDimensions{reason: "rank 1 and width 2 do not match fields"})
+}
+
+#Test("Shape sorted source order duplicate precedence and skipped fields") {
+    fact :: shape_test_fact([ShapeFieldFact]{shape_test_field("z", 9), shape_test_field("a", 1)})
+    assert(fact.fields[0].name == "a" && fact.fields[1].name == "z")
+    assert(shape_test_fact_error(ShapeFact.record(shape_test_identity(), [ShapeFieldFact]{shape_test_field("a", 1), shape_test_field("a", 1)}, ShapeProvenance.declared())) == ShapeError.DuplicateField{name: "a"})
+    assert(shape_test_fact_error(ShapeFact.record(shape_test_identity(), [ShapeFieldFact]{shape_test_field("z", 1), shape_test_field("a", 1)}, ShapeProvenance.declared())) == ShapeError.AmbiguousFieldOrder{order: 1})
+    assert(shape_test_fact_error(ShapeFact.record(shape_test_identity(), [ShapeFieldFact]{ShapeFieldFact.new("a", ShapeType.Text, 0)}, ShapeProvenance.declared())) == ShapeError.UnknownFieldEncoding{field: "a", value: "unresolved"})
+    broken := ~fact
+    broken.encoding = ShapeEncoding.Text
+    assert(shape_test_error(broken.validate()) == ShapeError.EncodingMismatch{identity: "pkg/model.jet::Row", encoding: "Text"})
+    broken.encoding = ShapeEncoding.Unknown{name: "unresolved"}
+    broken.validate() ?? panic("unknown outer encoding allowed at construction")
+    assert(shape_test_project_error(broken.project(ShapeProjectionKind.Json)) == ShapeError.UnknownShape{identity: "pkg/model.jet::Row"})
+    skipped := shape_test_field("b", 2)
+    skipped = ^skipped.skipped()
+    skipped.names.text = "a"
+    allowed :: shape_test_fact([ShapeFieldFact]{shape_test_field("a", 1), skipped})
+    projected :: allowed.project(ShapeProjectionKind.Json) ?? panic("skipped duplicate marker allowed")
+    assert(projected == ShapeProjection{kind: ShapeProjectionKind.Json, identity: shape_test_identity(), dimensions: ShapeDimensions.record(2), encoding: ShapeEncoding.Object, layout: ShapeLayoutFact.default(), fields: [ShapeProjectedField]{ShapeProjectedField{source_name: "a", name: "a", decode_name: "a", ty: ShapeType.Text, order: 1, encoding: ShapeEncoding.Text, default: None, short: None, doc: None}}, provenance: ShapeProvenance.declared()})
+    // Skipping does not bypass source validation or duplicate source/order checks.
+    skipped.names.text = ""
+    assert(shape_test_fact_error(ShapeFact.record(shape_test_identity(), [ShapeFieldFact]{skipped}, ShapeProvenance.declared())) == ShapeError.InvalidFieldName{field: "b", projection: Val("text")})
+}
+
+#Test("Shape per-projection collisions retain canonical precedence") {
+    loop collision in SHAPE_PROJECTION_KINDS {
+        left := shape_test_field("a", 0)
+        right := shape_test_field("b", 1)
+        if collision == {
+            .Json -> { left.names.json = Val("same"); right.names.json = Val("same") }
+            .Cbor -> { left.names.cbor = Val("same"); right.names.cbor = Val("same") }
+            .Csv -> { left.names.csv = Val("same"); right.names.csv = Val("same") }
+            .Toml -> { left.names.toml = Val("same"); right.names.toml = Val("same") }
+            .Yaml -> { left.names.yaml = Val("same"); right.names.yaml = Val("same") }
+            .Xml -> { left.names.xml = Val("same"); right.names.xml = Val("same") }
+            .Args -> { left.names.args = "same"; right.names.args = "same" }
+            .Env -> { left.names.env = "same"; right.names.env = "same" }
+            .Db -> { left.names.db = Val("same"); right.names.db = Val("same") }
+            .Layout -> { left.names.layout = Val("same"); right.names.layout = Val("same") }
+        }
+        error :: shape_test_fact_error(ShapeFact.record(shape_test_identity(), [ShapeFieldFact]{left, right}, ShapeProvenance.declared()))
+        assert(error == ShapeError.DuplicateProjectionName{projection: ~collision.as_str(), name: "same"})
+    }
+    // Args and Env defaults collide independently of the shared source spelling.
+    error :: shape_test_fact_error(ShapeFact.record(shape_test_identity(), [ShapeFieldFact]{shape_test_field("a_b", 0), shape_test_field("a-b", 1)}, ShapeProvenance.declared()))
+    assert(error == ShapeError.DuplicateProjectionName{projection: "args", name: "a-b"})
+    error_env :: shape_test_fact_error(ShapeFact.record(shape_test_identity(), [ShapeFieldFact]{shape_test_field("a", 0), shape_test_field("A", 1)}, ShapeProvenance.declared()))
+    assert(error_env == ShapeError.DuplicateProjectionName{projection: "env", name: "A"})
+}
+
+#Test("Shape projections preserve decode key defaults provenance layout and args-only metadata") {
+    field := shape_test_field("source_name", 4)
+    field = ^field.with_default(ShapeDefault.Float{value: "1.0000000000000000001"})
+    field = ^field.with_short("s")
+    field = ^field.with_doc("field help")
+    field.names.json = Val("decode-key")
+    field.names.cbor = Val("binary-key")
+    provenance := ShapeProvenance.declared()
+    provenance = ^provenance.with_span(ShapeSpan.new(10, 20))
+    provenance = ^provenance.with_declaration("original source")
+    fact := ShapeFact.record(shape_test_identity(), [ShapeFieldFact]{field}, provenance) ?? panic("valid fact")
+    fact = ^fact.with_layout(ShapeLayoutFact.c_aligned_target(32)) ?? panic("valid layout")
+    original :: ~fact
+    loop kind in SHAPE_PROJECTION_KINDS {
+        projected :: fact.project(kind) ?? panic("known projection")
+        assert(projected.kind == kind && projected.identity == fact.identity)
+        assert(projected.dimensions == fact.dimensions && projected.encoding == fact.encoding)
+        assert(projected.layout == fact.layout && projected.provenance == fact.provenance)
+        assert(projected.fields.len() == 1)
+        name :: field.names.name_for(kind) ?? panic("resolved name")
+        selected :: projected.field(~name) ?? panic("projected lookup")
+        assert(selected.source_name == "source_name" && selected.name == ~name)
+        assert(selected.decode_name == "decode-key" && selected.ty == field.ty)
+        assert(selected.order == U64{4} && selected.encoding == field.encoding && selected.default == field.default)
+        assert(selected.short == (if kind == ShapeProjectionKind.Args -> Val("s") else -> None))
+        assert(selected.doc == (if kind == ShapeProjectionKind.Args -> Val("field help") else -> None))
+        assert(projected.field("absent") == None)
+    }
+    assert(fact == original)
+    assert(shape_test_fact_error(^fact.with_layout(ShapeLayoutFact.c_aligned(3))) == ShapeError.InvalidLayoutAlignment{alignment: 3})
+    assert(ShapeProjectionResult.Text{value: "rendered"} != ShapeProjectionResult.Bytes{value: [U8]{114, 101, 110, 100, 101, 114, 101, 100}})
+    empty :: shape_test_fact([ShapeFieldFact]{})
+    assert((empty.project(ShapeProjectionKind.Json) ?? panic("empty record is known")).fields.is_empty())
+}
+
+#Test("Shape aggregate validation and projection never mask earlier errors") {
+    fact := shape_test_fact([ShapeFieldFact]{shape_test_field("a", 0)})
+    fact.identity.source = ""
+    fact.provenance.declaration = Val("bad{TEXT_NUL}")
+    fact.encoding = ShapeEncoding.Unknown{name: ""}
+    fact.layout = ShapeLayoutFact.c_aligned(3)
+    fact.dimensions = ShapeDimensions.Known{rank: 0, width: 8}
+    assert(shape_test_error(fact.validate()) == ShapeError.EmptyIdentity{part: "source"})
+    fact.identity = shape_test_identity()
+    assert(shape_test_error(fact.validate()) == ShapeError.InvalidProvenance)
+    fact.provenance = ShapeProvenance.declared()
+    assert(shape_test_error(fact.validate()) == ShapeError.UnknownEncoding{value: ""})
+    fact.encoding = ShapeEncoding.Object
+    assert(shape_test_error(fact.validate()) == ShapeError.InvalidLayoutAlignment{alignment: 3})
+    fact.layout = ShapeLayoutFact.default()
+    assert(shape_test_project_error(fact.project(ShapeProjectionKind.Json)) == ShapeError.InvalidDimensions{reason: "rank 0 and width 8 do not match fields"})
+}
+
+#Test("Shape exact error display including unreachable missing-name diagnostic") {
+    errors :: [ShapeError]{ShapeError.EmptyIdentity{part: "source"},
+        ShapeError.InvalidIdentity{source: "src", type_name: "T"}, ShapeError.InvalidProvenance,
+        ShapeError.InvalidDimensions{reason: "why"}, ShapeError.InvalidLayoutAlignment{alignment: 3},
+        ShapeError.EncodingMismatch{identity: "src::T", encoding: "Text"},
+        ShapeError.InvalidFieldName{field: "f", projection: Val("json")},
+        ShapeError.InvalidFieldName{field: "f", projection: None}, ShapeError.InvalidFieldMetadata{field: "f"},
+        ShapeError.InvalidDefault, ShapeError.UnknownType{value: "bad"}, ShapeError.UnknownEncoding{value: "bad"},
+        ShapeError.UnknownFieldEncoding{field: "f", value: "bad"}, ShapeError.DuplicateField{name: "f"},
+        ShapeError.AmbiguousFieldOrder{order: 7}, ShapeError.MissingProjectionName{field: "f", projection: "json"},
+        ShapeError.DuplicateProjectionName{projection: "json", name: "f"}, ShapeError.UnknownShape{identity: "src::T"}}
+    expected :: [String]{"shape source is empty", "invalid shape identity src::T", "invalid shape provenance",
+        "invalid shape dimensions: why", "invalid shape layout alignment 3", "shape src::T cannot carry fields as Text",
+        "invalid json name for field f", "invalid shape field name f", "invalid metadata for field f",
+        "invalid shape default", "unknown shape type bad", "unknown shape encoding bad",
+        "field f has unknown shape encoding bad", "duplicate shape field f", "ambiguous shape field order 7",
+        "field f has no json projection name", "duplicate json projection name f", "shape src::T is unknown"}
+    loop index in 0..<errors.len() -> assert(errors[index].display() == expected[index])
+}

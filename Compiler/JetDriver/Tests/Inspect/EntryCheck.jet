@@ -1,0 +1,136 @@
+// Rust semindex/lib.rs:217-294 and Loader.rs:2363-2459: actual captured
+// authority -> overlay -> structural import directory -> checked facts.
+use jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileRequest, JetDriverCompileTarget, JetDriverHostFacts, JetDriverCompilerCheckInput, JetDriverCompilerCheckResult, jet_driver_embedded_core_sources, jet_driver_compiler_check_with_overlays, jet_driver_compiler_check_loaded_module_rows]
+use jet_eval.[JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse, jet_eval_default_config]
+use jet_foundation.[foundation_embedded_core]
+use jet_foundation.[BuildStamp]
+use core.files.runtime.kernel_path_components as entry_check_os_path
+
+fn entry_check_path(text: String) -> entry_check_os_path.OsPath Never! {
+    entry_check_os_path.from_text(text, entry_check_os_path.PathPlatform.Unix)
+}
+
+fn entry_check_file(relative: String, source: String) -> JetDriverAuthorizedSourceFile Never! {
+    JetDriverAuthorizedSourceFile{path: entry_check_path("/entrycheck/{relative}"), relative_path: entry_check_path(relative), identity: "entrycheck:{relative}", source: source}
+}
+fn entry_check_request(source: String) -> JetDriverCompileRequest Never! {
+    core :: foundation_embedded_core()
+    JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{
+            roots: [JetDriverAuthorizedSourceRoot]{
+                JetDriverAuthorizedSourceRoot{canonical_path: entry_check_path("/entrycheck"), identity: "entrycheck-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{
+                    entry_check_file("staged/candidate.jet", source),
+                    entry_check_file("actual/api.jet", "pub fn report() { print(7) }\n"),
+                    entry_check_file("actual/empty.jet", "// symbol-free import\n"),
+                    entry_check_file("staged/api.jet", "pub fn wrong() {}\n"),
+                }, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}},
+                JetDriverAuthorizedSourceRoot{canonical_path: entry_check_path("/entrycheck-other"), identity: "unrelated-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{
+                    JetDriverAuthorizedSourceFile{path: entry_check_path("/entrycheck-other/api.jet"), relative_path: entry_check_path("api.jet"), identity: "unrelated-api", source: "pub fn report() {}\n"},
+                }, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}},
+            }, entry_root_identity: "entrycheck-root", entry_path: entry_check_path("/entrycheck/staged/candidate.jet"),
+        },
+        canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core),
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("entrycheck-fixture"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
+        eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
+        record_store: None, trace_sink: None, mir_lint_every_pass: false,
+    }
+}
+fn entry_check_open(request: JetDriverCompileRequest, source: String, entry: String?, root: String?) -> JetDriverCompilerCheckResult {
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: source})}) ?? panic("canonical entry parse is absent")
+    selected :: if entry == .Val(path) -> Val(entry_check_path(path)) else -> None
+    import_root :: if root == .Val(path) -> Val(entry_check_path(path)) else -> None
+    path :: entry_check_path("/entrycheck/staged/candidate.jet")
+    jet_driver_compiler_check_with_overlays(JetDriverCompilerCheckInput{parsed: parsed, request: request}, [entry_check_os_path.OsPath:String]{path: source}, selected, import_root)
+}
+fn entry_check_has_diagnostic(result: JetDriverCompilerCheckResult, code: String) -> Bool Never! {
+    loop diagnostic in result.diagnostics { if diagnostic.code == code -> return true }
+    false
+}
+
+#Test("captured overlay import root retains symbol-free loader order and original authority") {
+    original :: "fn run() {}\n"
+    source :: "use \"./empty\" as empty\nuse api.[report]\nfn run() { report() }\n"
+    request :: entry_check_request(original)
+    result :: entry_check_open(request, source, None, Val("/entrycheck/actual"))
+    assert(result.complete)
+    assert(result.registration != None && result.graph != None)
+    assert_eq(result.project_root, Val(entry_check_path("/entrycheck")))
+    loaded :: jet_driver_compiler_check_loaded_module_rows(result)
+    assert_eq(loaded.len(), 3)
+    assert_eq(result.module_sources[loaded[0]].path, "/entrycheck/staged/candidate.jet")
+    assert_eq(result.module_sources[loaded[0]].loaded_source, source)
+    assert_eq(result.module_sources[loaded[1]].path, "/entrycheck/actual/empty.jet")
+    assert_eq(result.module_sources[loaded[1]].loaded_source, "// symbol-free import\n")
+    assert_eq(result.module_sources[loaded[2]].path, "/entrycheck/actual/api.jet")
+    loop (index, row) in loaded { assert_eq(result.module_sources[row].loaded_module_index, Val(index)) }
+    assert_eq(request.authorized_sources.roots[0].files[0].source, original)
+    assert_eq(request.authorized_sources.entry_root_identity, "entrycheck-root")
+    assert_eq(request.authorized_sources.roots[1].identity, "unrelated-root")
+    graph :: result.graph ?? panic("actual sema graph absent")
+    assert(graph.effect_facts.summaries.len() > 0)
+}
+#Test("normal overlay does not silently enable structural adjacent imports") {
+    source :: "use api.[report]\nfn run() { report() }\n"
+    result :: entry_check_open(entry_check_request(source), source, None, None)
+    assert(!result.complete)
+    assert(entry_check_has_diagnostic(result, "E0610"))
+}
+#Test("import root cannot widen captured entry authority to unrelated pinned root") {
+    source :: "fn run() {}\n"
+    result :: entry_check_open(entry_check_request(source), source, None, Val("/entrycheck-other"))
+    assert(!result.complete)
+    assert(entry_check_has_diagnostic(result, "E0602"))
+    assert_eq(result.loaded_module_count, 0)
+    assert_eq(result.project_root, Val(entry_check_path("/entrycheck")))
+}
+#Test("relative import root still refuses escaping file imports") {
+    source :: "use \"../../entrycheck-other/api\" as api\nfn run() {}\n"
+    result :: entry_check_open(entry_check_request(source), source, None, Val("/entrycheck/actual"))
+    assert(!result.complete)
+    assert(entry_check_has_diagnostic(result, "E0602"))
+}
+#Test("unauthorized overlay entry fails rather than silently checking the captured entry") {
+    source :: "fn run() {}\n"
+    result :: entry_check_open(entry_check_request(source), source, Val("/outside/candidate.jet"), None)
+    assert(!result.complete)
+    assert(entry_check_has_diagnostic(result, "E0003"))
+    assert_eq(result.loaded_module_count, 0)
+}
+#Test("diagnostics-side overlay preserves real checked graph and complete loaded membership") {
+    source :: "use \"./empty\" as empty\nuse api.[report]\nfn run() { report(); missing_name() }\n"
+    result :: entry_check_open(entry_check_request("fn run() {}\n"), source, None, Val("/entrycheck/actual"))
+    assert(!result.complete)
+    assert(result.diagnostics.len() > 0)
+    graph :: result.graph ?? panic("diagnostics-side real sema graph absent")
+    assert(result.registration != None)
+    assert(graph.effect_facts.summaries.len() > 0)
+    loaded :: jet_driver_compiler_check_loaded_module_rows(result)
+    assert_eq(loaded.len(), 3)
+    assert_eq(result.module_sources[loaded[0]].loaded_source, source)
+    assert_eq(result.module_sources[loaded[1]].path, "/entrycheck/actual/empty.jet")
+    assert_eq(result.module_sources[loaded[2]].path, "/entrycheck/actual/api.jet")
+}
+
+// These are metadata assertions over native OsPath Eq/Hash keys, not handles or
+// filesystem authority proofs. RtW35's actual retained producer stays a gate.
+#Test("overlay keys distinguish nonunicode native names and Windows surrogate encoding") {
+    left :: entry_check_os_path.from_encoded([U8]{U8{47}, U8{255}}, entry_check_os_path.PathPlatform.Unix)
+    right :: entry_check_os_path.from_encoded([U8]{U8{47}, U8{254}}, entry_check_os_path.PathPlatform.Unix)
+    assert(left != right)
+    overlays :: [entry_check_os_path.OsPath:String]{left: "left", right: "right"}
+    assert_eq(overlays.get(left), Val("left"))
+    assert_eq(overlays.get(right), Val("right"))
+    // WTF-8 encoding of an unpaired high surrogate, legal Windows OsStr data.
+    windows :: entry_check_os_path.from_encoded([U8]{U8{237}, U8{160}, U8{128}}, entry_check_os_path.PathPlatform.Windows)
+    unix :: entry_check_os_path.from_encoded([U8]{U8{237}, U8{160}, U8{128}}, entry_check_os_path.PathPlatform.Unix)
+    assert(windows != unix)
+}
+#Test("mutating captured root platform is rejected before Loader parses entry") {
+    source :: "fn run() {}\n"
+    request := entry_check_request(source)
+    request.authorized_sources.roots[0].canonical_path.platform = entry_check_os_path.PathPlatform.Windows
+    result :: entry_check_open(request, source, None, None)
+    assert(!result.complete)
+    assert(entry_check_has_diagnostic(result, "E0003"))
+    assert_eq(result.loaded_module_count, 0)
+}

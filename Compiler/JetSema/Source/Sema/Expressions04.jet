@@ -1,0 +1,1761 @@
+// PORT-PENDING 0396 crates-jet-sema-src-sema-checkerinfer-binary-slice-1152: crates/jet-sema/src/Sema/CheckerInfer/binary.rs:1152-2908
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     pub(crate) fn infer_binary(
+//RS         &mut self,
+//RS         op: BinOp,
+//RS         lhs: &mut Box<Expr>,
+//RS         rhs: &mut Box<Expr>,
+//RS         span: Span,
+//RS         replacement: &mut Option<Expr>,
+//RS     ) -> Option<Type> {
+//RS         if matches!(op, BinOp::And | BinOp::Or) {
+//RS             let lt = self.infer(lhs);
+//RS             if let Some(lt) = &lt {
+//RS                 if *lt != Type::Bool {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0110",
+//RS                         format!(
+//RS                             "the left side of `{}` must be {}, but this is {}",
+//RS                             op.spell(),
+//RS                             Type::Bool.show(),
+//RS                             lt.show()
+//RS                         ),
+//RS                         "logic joins yes/no values".to_string(),
+//RS                         "compare the value to something first".to_string(),
+//RS                         Some(lhs.span()),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             let rt = self.infer(rhs);
+//RS             if let Some(rt) = &rt {
+//RS                 if *rt != Type::Bool {
+//RS                     // D-S25-RETIRE1=A: comparison distribution via `||`/`&&` is gone.
+//RS                     // Each side of `||`/`&&` must be a Bool expression.
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0110",
+//RS                         format!(
+//RS                             "the right side of `{}` must be {}, but this is {}",
+//RS                             op.spell(),
+//RS                             Type::Bool.show(),
+//RS                             rt.show()
+//RS                         ),
+//RS                         "each side of a logic operator must be a yes/no comparison".to_string(),
+//RS                         "write the full comparison, e.g. `x == 2`".to_string(),
+//RS                         Some(rhs.span()),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             if op == BinOp::And
+//RS                 && lt.as_ref() == Some(&Type::Bool)
+//RS                 && rt.as_ref() == Some(&Type::Bool)
+//RS             {
+//RS                 if let Some(edit) = self.path_containment_string_prefix_edit(lhs, rhs, span) {
+//RS                     let diagnostic = Diagnostic::from_row("L0517", &[], Some(span)).with_edit(edit);
+//RS                     self.diags.push(diagnostic);
+//RS                 }
+//RS             }
+//RS             return Some(Type::Bool);
+//RS         }
+//RS 
+//RS         // Comparisons and synthetic read/read hooks borrow a non-Copy field
+//RS         // operand; other operators retain the canonical owning-read clone rule.
+//RS         self.borrow_ctx = self.operator_operand_needs_borrow(lhs, op);
+//RS         let saved_expected = self.expected_type.clone();
+//RS         if Self::is_exact_numeric_literal(lhs)
+//RS             && (self.known_measurement_expr(rhs)
+//RS                 || (matches!(op, BinOp::Mul | BinOp::Div) && self.known_unit_expr(rhs)))
+//RS         {
+//RS             self.expected_type = Some(Type::Float);
+//RS         }
+//RS         let lt = self.infer(lhs);
+//RS         self.expected_type = saved_expected;
+//RS 
+//RS         // S31: pattern-shaped `==` before RHS name lookup.
+//RS         if op == BinOp::Eq {
+//RS             let subj_name = match lhs.as_ref() {
+//RS                 Expr::Ident(n, _) => Some(n.as_str()),
+//RS                 _ => None,
+//RS             };
+//RS             if let Some(lt) = &lt {
+//RS                 if let Some(pattern) = self.eq_unit_variant_pattern(lhs, rhs, subj_name, lt) {
+//RS                     self.validate_pattern(lt, &pattern, span);
+//RS                     return Some(Type::Bool);
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         self.borrow_ctx = self.operator_operand_needs_borrow(rhs, op);
+//RS         // Same-type ops: LHS feeds RHS `.{…}`. Clear inherited assign expected
+//RS         // otherwise so heterogeneous RHS (unit Point += Delta) can still infer.
+//RS         let saved_expected = self.expected_type.clone();
+//RS         if matches!(
+//RS             op,
+//RS             BinOp::Add
+//RS                 | BinOp::Sub
+//RS                 | BinOp::Mul
+//RS                 | BinOp::Div
+//RS                 | BinOp::Eq
+//RS                 | BinOp::Ne
+//RS                 | BinOp::Compare
+//RS                 | BinOp::Lt
+//RS                 | BinOp::Le
+//RS                 | BinOp::Gt
+//RS                 | BinOp::Ge
+//RS         ) {
+//RS             self.expected_type = if lt.as_ref().is_some_and(Self::is_measurement_type)
+//RS                 && Self::is_exact_numeric_literal(rhs)
+//RS             {
+//RS                 Some(Type::Float)
+//RS             } else if matches!(op, BinOp::Mul | BinOp::Div)
+//RS                 && Self::is_exact_numeric_literal(rhs)
+//RS                 && lt.as_ref().is_some_and(|ty| self.is_scalable_unit_type(ty))
+//RS             {
+//RS                 Some(Type::Float)
+//RS             } else {
+//RS                 lt.as_ref()
+//RS                     .filter(|_| expr_wants_expected_type(rhs))
+//RS                     .cloned()
+//RS             };
+//RS         }
+//RS         let rt = self.infer(rhs);
+//RS         self.expected_type = saved_expected;
+//RS         let (mut lt, mut rt) = (lt?, rt?);
+//RS         // D-OPT-LIFT1=A: `x == 5` holds only when the optional `x` holds 5,
+//RS         // and `x != 5` is its opposite. The plain side lifts once, so the
+//RS         // comparison is the existing optional equality on every tier.
+//RS         if matches!(op, BinOp::Eq | BinOp::Ne) {
+//RS             if let Some(lifted) = self.lift_optional_slot(&lt, &rt, rhs) {
+//RS                 rt = lifted;
+//RS             } else if let Some(lifted) = self.lift_optional_slot(&rt, &lt, lhs) {
+//RS                 lt = lifted;
+//RS             }
+//RS         }
+//RS 
+//RS         // A folded fact compared with a closed enum literal is already a Bool.
+//RS         // Keep the comparison out of TIR: core enum literals intentionally stay
+//RS         // outside the resident subset, and no engine may rediscover a fact at
+//RS         // runtime.
+//RS         if matches!(op, BinOp::Eq | BinOp::Ne)
+//RS             && (is_folded_fact_expr(lhs) || is_folded_fact_expr(rhs))
+//RS             && matches!((&lt, &rt), (Type::Named(left), Type::Named(right)) if left == right
+//RS                 && crate::Sema::CheckerCoreLib::core_type_known(left))
+//RS         {
+//RS             if let (Some(left), Some(right)) =
+//RS                 (known_comptime_value(lhs), known_comptime_value(rhs))
+//RS             {
+//RS                 if let Ok(CtValue::Bool(value)) =
+//RS                     crate::Comptime::Builtins::eval_binop(op, left, right, span)
+//RS                 {
+//RS                     *replacement = Some(Expr::Bool(value, span));
+//RS                     return Some(Type::Bool);
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         // D-INTLIT-WIDTH1=F / D-NUMLIT-PEER1=A: an unowned whole literal takes
+//RS         // its own minimal width in a sized peer's signedness family; without a
+//RS         // sized peer it stays `Int`. The ordinary value-set law then decides
+//RS         // whether one operand widens to the other — the peer's width is never
+//RS         // pushed onto the numeral, so a numeral the peer cannot hold widens the
+//RS         // join instead of being rejected against the peer.
+//RS         let lhs_is_literal = Self::is_bare_integer_literal(lhs);
+//RS         let rhs_is_literal = Self::is_bare_integer_literal(rhs);
+//RS         if let Some(minimal) =
+//RS             Self::minimal_integer_literal_type(lhs, (!rhs_is_literal).then_some(&rt))
+//RS         {
+//RS             lt = minimal;
+//RS         }
+//RS         if let Some(minimal) =
+//RS             Self::minimal_integer_literal_type(rhs, (!lhs_is_literal).then_some(&lt))
+//RS         {
+//RS             rt = minimal;
+//RS         }
+//RS 
+//RS         // Decimal context still owns an untyped numeral's representation.
+//RS         if lt != rt && matches!(rt, Type::Float | Type::Float32) {
+//RS             if let Some(contextual) = self.contextualize_numeric_literal(lhs, &rt) {
+//RS                 lt = contextual;
+//RS             }
+//RS         }
+//RS         if lt != rt && matches!(lt, Type::Float | Type::Float32) {
+//RS             if let Some(contextual) = self.contextualize_numeric_literal(rhs, &lt) {
+//RS                 rt = contextual;
+//RS             }
+//RS         }
+//RS 
+//RS         // D-TYPE2-MEASURE1=A: Matrix shape composition is the measure
+//RS         // substrate's match/compose rule, not a compute-runtime heuristic.
+//RS         if op == BinOp::Mul {
+//RS             if let (Some([left_rows, left_inner]), Some([right_inner, right_cols])) = (
+//RS                 lt.compute_shape_dimensions()
+//RS                     .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
+//RS                 rt.compute_shape_dimensions()
+//RS                     .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
+//RS             ) {
+//RS                 if matches!((&lt, &rt), (
+//RS                     Type::Apply { name: left, .. },
+//RS                     Type::Apply { name: right, .. }
+//RS                 ) if left == "Matrix" && right == "Matrix")
+//RS                 {
+//RS                     let left = crate::AST::Measure::literal("shape", left_inner);
+//RS                     let right = crate::AST::Measure::literal("shape", right_inner);
+//RS                     if left
+//RS                         .combine(&right, crate::AST::MeasureRule::Match)
+//RS                         .is_none()
+//RS                     {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E2512",
+//RS                             format!(
+//RS                                 "matrix multiplication needs equal inner sides, but these are {left_inner} and {right_inner}"
+//RS                             ),
+//RS                             "the left column measure must match the right row measure".to_string(),
+//RS                             format!(
+//RS                                 "use `Matrix<{left_rows}, {left_inner}> * Matrix<{left_inner}, {right_cols}>`"
+//RS                             ),
+//RS                             Some(span),
+//RS                         ));
+//RS                         return None;
+//RS                     }
+//RS                     return Some(Type::Result {
+//RS                         ok: Box::new(Type::compute_shape_type("Matrix", &[left_rows, right_cols])),
+//RS                         err: Box::new(Type::Named("ComputeError".to_string())),
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         // D-TYPE2-UNCERT1=A: entering the measured grade is contagious.
+//RS         // Exact numeric operands enter it through the canonical zero-uncertainty
+//RS         // constructor; widening to the Measurement<Float> carrier is implicit.
+//RS         if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+//RS             && (Self::is_measurement_type(&lt) || Self::is_measurement_type(&rt))
+//RS         {
+//RS             if lt != Type::Float && lt.numeric_widening_to(&Type::Float).is_some() {
+//RS                 self.widen_numeric_expr(lhs, &lt, &Type::Float);
+//RS                 lt = Type::Float;
+//RS             }
+//RS             if rt != Type::Float && rt.numeric_widening_to(&Type::Float).is_some() {
+//RS                 self.widen_numeric_expr(rhs, &rt, &Type::Float);
+//RS                 rt = Type::Float;
+//RS             }
+//RS             if lt == Type::Float {
+//RS                 Self::zero_uncertainty(lhs, span);
+//RS                 lt = Type::Apply {
+//RS                     name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+//RS                     args: vec![Type::Float],
+//RS                 };
+//RS             }
+//RS             if rt == Type::Float {
+//RS                 Self::zero_uncertainty(rhs, span);
+//RS                 rt = Type::Apply {
+//RS                     name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+//RS                     args: vec![Type::Float],
+//RS                 };
+//RS             }
+//RS             if Self::is_measurement_type(&lt) && Self::is_measurement_type(&rt) {
+//RS                 return Some(lt);
+//RS             }
+//RS             self.op_mismatch(op, &lt, &rt, span);
+//RS             return None;
+//RS         }
+//RS 
+//RS         if matches!(op, BinOp::Eq | BinOp::Ne)
+//RS             && (self.type_contains_observable_clock(&lt)
+//RS                 || self.type_contains_observable_clock(&rt))
+//RS         {
+//RS             self.record_effect(crate::Sema::Effects::Effect::Time.name(), span);
+//RS             if self.in_pure && self.det_suppress == 0 {
+//RS                 self.diags
+//RS                     .push(crate::Sema::e3403("Clock comparison", Some(span)));
+//RS             }
+//RS         }
+//RS 
+//RS         let joins_numeric = matches!(
+//RS             op,
+//RS             BinOp::Add
+//RS                 | BinOp::Sub
+//RS                 | BinOp::Mul
+//RS                 | BinOp::Div
+//RS                 // D-FLOORDIV1=A: `/%` takes the same operands as `/`.
+//RS                 | BinOp::FloorDiv
+//RS                 // D-EXPSEM1=A: any Float operand makes the power a Float.
+//RS                 | BinOp::Pow
+//RS                 | BinOp::Eq
+//RS                 | BinOp::Ne
+//RS                 | BinOp::Compare
+//RS                 | BinOp::Lt
+//RS                 | BinOp::Le
+//RS                 | BinOp::Gt
+//RS                 | BinOp::Ge
+//RS         ) || (matches!(
+//RS             op,
+//RS             BinOp::Mod | BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor
+//RS         ) && lt.is_integer()
+//RS             && rt.is_integer());
+//RS         if joins_numeric && lt != rt {
+//RS             if let Some(join) = lt.numeric_join(&rt) {
+//RS                 self.widen_numeric_expr(lhs, &lt, &join);
+//RS                 self.widen_numeric_expr(rhs, &rt, &join);
+//RS                 lt = join.clone();
+//RS                 rt = join;
+//RS             }
+//RS         }
+//RS 
+//RS         // D-RANGETYPE1: arithmetic on a range refinement widens to the base
+//RS         // carrier. The result is not silently claimed to remain inside the
+//RS         // input interval (`10 + 10` is not in `0..10`).
+//RS         let arithmetic = matches!(
+//RS             op,
+//RS             BinOp::Add
+//RS                 | BinOp::Sub
+//RS                 | BinOp::Mul
+//RS                 | BinOp::Div
+//RS                 | BinOp::FloorDiv
+//RS                 | BinOp::Mod
+//RS                 | BinOp::Rem
+//RS                 | BinOp::BitAnd
+//RS                 | BinOp::BitOr
+//RS                 | BinOp::BitXor
+//RS                 | BinOp::Shl
+//RS                 | BinOp::Shr
+//RS                 | BinOp::Pow
+//RS         );
+//RS         if arithmetic {
+//RS             let left_erased = lt.erased_inline_ranges();
+//RS             if left_erased != lt {
+//RS                 self.widen_numeric_expr(lhs, &lt, &left_erased);
+//RS                 lt = left_erased;
+//RS             }
+//RS             let right_erased = rt.erased_inline_ranges();
+//RS             if right_erased != rt {
+//RS                 self.widen_numeric_expr(rhs, &rt, &right_erased);
+//RS                 rt = right_erased;
+//RS             }
+//RS         }
+//RS 
+//RS         if let Some(mixed) = self.infer_mixed_operator(op, lhs, rhs, &lt, &rt, span, replacement) {
+//RS             return Some(mixed);
+//RS         }
+//RS 
+//RS         // D-OPDEF1=A: user operators are ordinary trait-method calls after sema
+//RS         // proves one exact impl and the fixed same-type law.
+//RS         // A dimensional unit is still represented by a nominal `#Numeric`
+//RS         // type, but `*` and `/` must derive the physical dimension before the
+//RS         // ordinary same-type trait hook can erase it back to that nominal type.
+//RS         // Otherwise `Meter * Meter` stays `Meter` forever and exponent
+//RS         // overflow never reaches the sema dimension check.
+//RS         let dimensional_multiplicative = matches!(op, BinOp::Mul | BinOp::Div)
+//RS             && (self.quantity_dimension(&lt).is_some() || self.quantity_dimension(&rt).is_some());
+//RS         let unit_operator =
+//RS             self.unit_fact_for_type(&lt).is_some() || self.unit_fact_for_type(&rt).is_some();
+//RS         if lt == rt && !dimensional_multiplicative && !unit_operator {
+//RS             if let Type::Named(type_name) = &lt {
+//RS                 let comparable_hook = Self::comparable_equality_hook(type_name)
+//RS                     && (self.type_implements_trait_for_name(
+//RS                         type_name,
+//RS                         crate::Syntax::TRAIT_COMPARABLE,
+//RS                     ) || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_COMPARABLE))
+//RS                     && (self
+//RS                         .type_implements_trait_for_name(type_name, crate::Syntax::TRAIT_EQUATABLE)
+//RS                         || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_EQUATABLE));
+//RS                 let hook = match op {
+//RS                     BinOp::Add => Some((crate::Syntax::TRAIT_ADD, "add", lt.clone())),
+//RS                     BinOp::Sub => Some((crate::Syntax::TRAIT_SUB, "sub", lt.clone())),
+//RS                     BinOp::Mul => Some((crate::Syntax::TRAIT_MUL, "mul", lt.clone())),
+//RS                     BinOp::Div => Some((crate::Syntax::TRAIT_DIV, "div", lt.clone())),
+//RS                     BinOp::Eq | BinOp::Ne if comparable_hook => Some((
+//RS                         crate::Syntax::TRAIT_COMPARABLE,
+//RS                         "compare",
+//RS                         Type::Named(crate::Syntax::TYPE_ORDERING.to_string()),
+//RS                     )),
+//RS                     BinOp::Eq | BinOp::Ne => {
+//RS                         Some((crate::Syntax::TRAIT_EQUATABLE, "equal", Type::Bool))
+//RS                     }
+//RS                     BinOp::Compare | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => Some((
+//RS                         crate::Syntax::TRAIT_COMPARABLE,
+//RS                         "compare",
+//RS                         Type::Named(crate::Syntax::TYPE_ORDERING.to_string()),
+//RS                     )),
+//RS                     _ => None,
+//RS                 };
+//RS                 if let Some((trait_name, method, mut ret)) = hook {
+//RS                     let (owner_type, _, owner_traits) = self.capability_type_context(&lt);
+//RS                     let operator_rhs = owner_traits
+//RS                         .operator_impl_for(&owner_type, trait_name, &owner_type)
+//RS                         .map(|implementation| {
+//RS                             ret = if implementation.result == owner_type {
+//RS                                 lt.clone()
+//RS                             } else {
+//RS                                 implementation.result.clone()
+//RS                             };
+//RS                             implementation.rhs.clone()
+//RS                         })
+//RS                         .or_else(|| {
+//RS                             self.type_param_has_bound(&lt, trait_name)
+//RS                                 .then(|| rt.clone())
+//RS                         });
+//RS                     if self.type_implements_trait_for_name(type_name, trait_name)
+//RS                         || self.type_param_has_bound(&lt, trait_name)
+//RS                     {
+//RS                         // `lt` and `rt` are the typed operands that selected this
+//RS                         // exact hook. Do not inspect source shape here: a field,
+//RS                         // call, literal, or other expression of the same type
+//RS                         // dispatches back to this hook just like an identifier.
+//RS                         if self.fn_name == method
+//RS                             && self
+//RS                                 .lookup(crate::Syntax::KW_SELF)
+//RS                                 .is_some_and(|info| info.ty == lt)
+//RS                         {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0361",
+//RS                                 format!("`{}` calls itself through {}", method, operator_label(op)),
+//RS                                 concat!(
+//RS                                     "the operator symbol dispatches back to this same hook, ",
+//RS                                     "so evaluation would recurse forever"
+//RS                                 )
+//RS                                 .to_string(),
+//RS                                 concat!(
+//RS                                     "combine the value's fields or call a different named helper ",
+//RS                                     "inside the hook"
+//RS                                 )
+//RS                                 .to_string(),
+//RS                                 Some(span),
+//RS                             ));
+//RS                             return None;
+//RS                         }
+//RS                         // The synthesized call is not re-inferred, so record the
+//RS                         // same checked dependency and effect as an explicit method call.
+//RS                         self.record_method_reference(type_name, method, span);
+//RS                         self.record_edge(
+//RS                             crate::Sema::effect_key(Some(Self::split_type_name(type_name).1), method),
+//RS                             span,
+//RS                         );
+//RS                         let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+//RS                         let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+//RS                         let call = Expr::MethodCall {
+//RS                             receiver: left,
+//RS                             method: method.to_string(),
+//RS                             method_span: span,
+//RS                             owner_type_args: Vec::new(),
+//RS                             type_args: Vec::new(),
+//RS                             args: vec![crate::AST::CallArg {
+//RS                                 convention: crate::AST::AccessConvention::Read,
+//RS                                 expr: *right,
+//RS                                 span,
+//RS                                 flags: crate::AST::CallArgFlags::default(),
+//RS                                 label: None,
+//RS                                 spread: false,
+//RS                             }],
+//RS                             recv_type: Some(
+//RS                                 if self
+//RS                                     .type_param_scope
+//RS                                     .iter()
+//RS                                     .any(|param| param.name == type_name.as_str())
+//RS                                 {
+//RS                                     trait_name.to_string()
+//RS                                 } else {
+//RS                                     Self::split_type_name(type_name).1.to_string()
+//RS                                 },
+//RS                             ),
+//RS                             resolved_ret: Some(ret.clone()),
+//RS                             operator_rhs,
+//RS                             checked_widen: false,
+//RS                         };
+//RS                         *replacement = Some(match op {
+//RS                             BinOp::Eq | BinOp::Ne if comparable_hook => Expr::Binary(
+//RS                                 if op == BinOp::Eq {
+//RS                                     BinOp::Eq
+//RS                                 } else {
+//RS                                     BinOp::Ne
+//RS                                 },
+//RS                                 Box::new(call),
+//RS                                 Box::new(Expr::EnumLit {
+//RS                                     type_name: crate::Syntax::TYPE_ORDERING.to_string(),
+//RS                                     variant: "Equal".to_string(),
+//RS                                     variant_span: None,
+//RS                                     args: Vec::new(),
+//RS                                     leading_dot: false,
+//RS                                     span,
+//RS                                 }),
+//RS                                 span,
+//RS                             ),
+//RS                             BinOp::Ne => Expr::Unary(crate::AST::UnOp::Not, Box::new(call), span),
+//RS                             BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+//RS                                 let (cmp, variant) = match op {
+//RS                                     BinOp::Lt => (BinOp::Eq, "Less"),
+//RS                                     BinOp::Le => (BinOp::Ne, "Greater"),
+//RS                                     BinOp::Gt => (BinOp::Eq, "Greater"),
+//RS                                     BinOp::Ge => (BinOp::Ne, "Less"),
+//RS                                     _ => unreachable!(),
+//RS                                 };
+//RS                                 Expr::Binary(
+//RS                                     cmp,
+//RS                                     Box::new(call),
+//RS                                     Box::new(Expr::EnumLit {
+//RS                                         type_name: crate::Syntax::TYPE_ORDERING.to_string(),
+//RS                                         variant: variant.to_string(),
+//RS                                         variant_span: None,
+//RS                                         args: Vec::new(),
+//RS                                         leading_dot: false,
+//RS                                         span,
+//RS                                     }),
+//RS                                     span,
+//RS                                 )
+//RS                             }
+//RS                             BinOp::Compare => call,
+//RS                             _ => call,
+//RS                         });
+//RS                         return Some(if op == BinOp::Compare {
+//RS                             Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
+//RS                         } else if op.is_comparison() {
+//RS                             Type::Bool
+//RS                         } else {
+//RS                             ret
+//RS                         });
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         // D-TIMERES1=A: Duration scaling stays on the canonical nanosecond
+//RS         // carrier. Handle it before the general quantity algebra, whose
+//RS         // scalar path intentionally produces Float quantities.
+//RS         {
+//RS             let left_duration = matches!(
+//RS                 &lt,
+//RS                 Type::Named(name) if name == crate::Syntax::DURATION_TYPE
+//RS             );
+//RS             let right_duration = matches!(
+//RS                 &rt,
+//RS                 Type::Named(name) if name == crate::Syntax::DURATION_TYPE
+//RS             );
+//RS             let valid = (left_duration && rt == Type::Int)
+//RS                 || (right_duration && lt == Type::Int && op == BinOp::Mul);
+//RS             if valid && matches!(op, BinOp::Mul | BinOp::Div) {
+//RS                 return Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()));
+//RS             }
+//RS         }
+//RS 
+//RS         // D-SHAPE-QUANTITY1=A: physical dimensions are compiler-known and
+//RS         // normalized before the ordinary nominal/numeric operator rules.
+//RS         // Unit-family declarations remain nominal for +/-, while */ derives a
+//RS         // package-independent erased quantity type.
+//RS         let lunit = self.unit_fact_for_type(&lt);
+//RS         let runit = self.unit_fact_for_type(&rt);
+//RS         let ldim = self.quantity_dimension(&lt);
+//RS         let rdim = self.quantity_dimension(&rt);
+//RS         // D-DIMENSION-OPEN1=D: a nominal family has no dimension, and still
+//RS         // owns unit conversion, affine points, and rounding policy.
+//RS         let any_dimensional = ldim.is_some() || rdim.is_some();
+//RS 
+//RS         // D-UNIT-SCALAR1=A: scalar arithmetic is a same-family operation.
+//RS         // Strip only the unit wrapper, perform the operation on its Float
+//RS         // carrier, then rewrap the result in that exact unit. This keeps the
+//RS         // rule in sema; every execution tier sees the existing raw/constructor
+//RS         // seams. Time is excluded because its fixed Int nanosecond carrier has
+//RS         // the dedicated checked path above.
+//RS         if matches!(op, BinOp::Mul | BinOp::Div) {
+//RS             if let (Some((lname, lfact)), None) = (&lunit, &runit) {
+//RS                 if Self::is_unit_scalar_type(&rt) {
+//RS                     if !Self::is_scalable_unit_fact(lfact) {
+//RS                         self.op_mismatch(op, &lt, &rt, span);
+//RS                         return None;
+//RS                     }
+//RS                     let unit = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+//RS                     let mut scalar = *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+//RS                     self.widen_numeric_expr(&mut scalar, &rt, &Type::Float);
+//RS                     *replacement =
+//RS                         Some(self.unit_scalar_wrapped_binary(op, unit, lname, scalar, true, span));
+//RS                     return Some(Type::Named(lname.clone()));
+//RS                 }
+//RS             }
+//RS             if let (None, Some((rname, rfact))) = (&lunit, &runit) {
+//RS                 if Self::is_unit_scalar_type(&lt) {
+//RS                     if op != BinOp::Mul || !Self::is_scalable_unit_fact(rfact) {
+//RS                         self.op_mismatch(op, &lt, &rt, span);
+//RS                         return None;
+//RS                     }
+//RS                     let mut scalar = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+//RS                     let unit = *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+//RS                     self.widen_numeric_expr(&mut scalar, &lt, &Type::Float);
+//RS                     *replacement =
+//RS                         Some(self.unit_scalar_wrapped_binary(op, unit, rname, scalar, false, span));
+//RS                     return Some(Type::Named(rname.clone()));
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         // D-UNIT-SCALAR1=A keeps unit×unit outside scalar scaling. Physical
+//RS         // dimension algebra is the one existing exception: both operands must
+//RS         // be dimensioned linear/delta values. Affine points and nominal/base
+//RS         // units have no multiplicative algebra, even though their erased
+//RS         // carriers are numeric and would otherwise reach #Numeric.
+//RS         if matches!(op, BinOp::Mul | BinOp::Div) {
+//RS             let has_point = lunit
+//RS                 .as_ref()
+//RS                 .is_some_and(|(_, fact)| fact.kind == crate::AST::QuantityKind::Point)
+//RS                 || runit
+//RS                     .as_ref()
+//RS                     .is_some_and(|(_, fact)| fact.kind == crate::AST::QuantityKind::Point);
+//RS             let unit_pair_is_physical = match (&lunit, &runit) {
+//RS                 (Some((_, left)), Some((_, right))) => {
+//RS                     any_dimensional
+//RS                         && left.dimension.is_some()
+//RS                         && right.dimension.is_some()
+//RS                         && !has_point
+//RS                 }
+//RS                 _ => true,
+//RS             };
+//RS             if has_point || !unit_pair_is_physical {
+//RS                 self.unit_arithmetic_mismatch(op, &lt, &rt, span);
+//RS                 return None;
+//RS             }
+//RS         }
+//RS 
+//RS         if any_dimensional || lunit.is_some() || runit.is_some() {
+//RS             if let (Some((lname, lfact)), Some((rname, rfact))) = (&lunit, &runit) {
+//RS                 if lfact.package == rfact.package
+//RS                     && lfact.dimension == rfact.dimension
+//RS                     && lfact.family == rfact.family
+//RS                 {
+//RS                     use QuantityKind::{Delta, Linear, Point};
+//RS                     if lfact.family == "Time"
+//RS                         && lfact.package == std::path::PathBuf::from("core.units")
+//RS                     {
+//RS                         let result = match (op, lfact.kind, rfact.kind) {
+//RS                             (BinOp::Add | BinOp::Sub, Delta, Delta) => {
+//RS                                 Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))
+//RS                             }
+//RS                             (BinOp::Add, Point, Delta)
+//RS                             | (BinOp::Sub, Point, Delta)
+//RS                             | (BinOp::Add, Delta, Point) => {
+//RS                                 Some(Type::Named(crate::Syntax::TYPE_INSTANT.to_string()))
+//RS                             }
+//RS                             (BinOp::Sub, Point, Point) => {
+//RS                                 Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))
+//RS                             }
+//RS                             (
+//RS                                 BinOp::Eq
+//RS                                 | BinOp::Ne
+//RS                                 | BinOp::Lt
+//RS                                 | BinOp::Gt
+//RS                                 | BinOp::Le
+//RS                                 | BinOp::Ge
+//RS                                 | BinOp::Compare,
+//RS                                 left_kind,
+//RS                                 right_kind,
+//RS                             ) if left_kind == right_kind => Some(if op == BinOp::Compare {
+//RS                                 Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
+//RS                             } else {
+//RS                                 Type::Bool
+//RS                             }),
+//RS                             (BinOp::Add, Point, Point) | (BinOp::Sub, Delta, Point) => {
+//RS                                 self.diags.push(Diagnostic::error(
+//RS                                     "E0127",
+//RS                                     format!(
+//RS                                         "{} is not available between `{}` and `{}`",
+//RS                                         operator_label(op), lname, rname
+//RS                                     ),
+//RS                                     "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined".to_string(),
+//RS                                     "subtract two Instants for a Duration, or add a Duration to an Instant".to_string(),
+//RS                                     Some(span),
+//RS                                 ));
+//RS                                 return None;
+//RS                             }
+//RS                             _ => None,
+//RS                         };
+//RS                         if result.is_some() {
+//RS                             return result;
+//RS                         }
+//RS                     }
+//RS                     match (op, lfact.kind, rfact.kind) {
+//RS                         (BinOp::Add | BinOp::Sub, Linear, Linear)
+//RS                         | (BinOp::Add | BinOp::Sub, Delta, Delta) => {
+//RS                             let left_wins = lfact.scale.abs() <= rfact.scale.abs();
+//RS                             let (dest_name, dest_fact) = if left_wins {
+//RS                                 (lname, lfact)
+//RS                             } else {
+//RS                                 (rname, rfact)
+//RS                             };
+//RS                             let source_name = if left_wins { rname } else { lname };
+//RS                             let source_expr = if left_wins { &**rhs } else { &**lhs };
+//RS                             if self.reject_implicit_unit_conversion(
+//RS                                 dest_name,
+//RS                                 source_name,
+//RS                                 source_expr,
+//RS                                 span,
+//RS                             ) {
+//RS                                 return Some(Type::Named(dest_name.clone()));
+//RS                             }
+//RS                             self.convert_unit_operand(
+//RS                                 lhs, lname, lfact, dest_name, dest_fact, span,
+//RS                             );
+//RS                             self.convert_unit_operand(
+//RS                                 rhs, rname, rfact, dest_name, dest_fact, span,
+//RS                             );
+//RS                             return Some(Type::Named(dest_name.clone()));
+//RS                         }
+//RS                         (BinOp::Add, Point, Delta) | (BinOp::Sub, Point, Delta) => {
+//RS                             let Some(delta_name) = self.counterpart_unit_type(lname, lfact, Delta)
+//RS                             else {
+//RS                                 return None;
+//RS                             };
+//RS                             let (_, delta_fact) = self
+//RS                                 .unit_fact_for_type(&Type::Named(delta_name.clone()))
+//RS                                 .expect("counterpart unit fact");
+//RS                             if self.reject_implicit_unit_conversion(&delta_name, rname, rhs, span) {
+//RS                                 return Some(Type::Named(lname.clone()));
+//RS                             }
+//RS                             let left = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+//RS                             let right = *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+//RS                             let right = self.unit_conversion_expr(
+//RS                                 right,
+//RS                                 rname,
+//RS                                 rfact,
+//RS                                 &delta_name,
+//RS                                 &delta_fact,
+//RS                                 span,
+//RS                             );
+//RS                             *replacement = Some(self.unit_wrapped_binary(
+//RS                                 op,
+//RS                                 left,
+//RS                                 lname,
+//RS                                 right,
+//RS                                 &delta_name,
+//RS                                 lname,
+//RS                                 span,
+//RS                             ));
+//RS                             return Some(Type::Named(lname.clone()));
+//RS                         }
+//RS                         (BinOp::Add, Delta, Point) => {
+//RS                             let Some(delta_name) = self.counterpart_unit_type(rname, rfact, Delta)
+//RS                             else {
+//RS                                 return None;
+//RS                             };
+//RS                             let (_, delta_fact) = self
+//RS                                 .unit_fact_for_type(&Type::Named(delta_name.clone()))
+//RS                                 .expect("counterpart unit fact");
+//RS                             if self.reject_implicit_unit_conversion(&delta_name, lname, lhs, span) {
+//RS                                 return Some(Type::Named(rname.clone()));
+//RS                             }
+//RS                             let left = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+//RS                             let right = *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+//RS                             let left = self.unit_conversion_expr(
+//RS                                 left,
+//RS                                 lname,
+//RS                                 lfact,
+//RS                                 &delta_name,
+//RS                                 &delta_fact,
+//RS                                 span,
+//RS                             );
+//RS                             *replacement = Some(self.unit_wrapped_binary(
+//RS                                 BinOp::Add,
+//RS                                 right,
+//RS                                 rname,
+//RS                                 left,
+//RS                                 &delta_name,
+//RS                                 rname,
+//RS                                 span,
+//RS                             ));
+//RS                             return Some(Type::Named(rname.clone()));
+//RS                         }
+//RS                         (BinOp::Sub, Point, Point) => {
+//RS                             let left_wins = lfact.scale.abs() <= rfact.scale.abs();
+//RS                             let (point_name, point_fact) = if left_wins {
+//RS                                 (lname, lfact)
+//RS                             } else {
+//RS                                 (rname, rfact)
+//RS                             };
+//RS                             let Some(delta_name) =
+//RS                                 self.counterpart_unit_type(point_name, point_fact, Delta)
+//RS                             else {
+//RS                                 return None;
+//RS                             };
+//RS                             let source_name = if left_wins { rname } else { lname };
+//RS                             let source_expr = if left_wins { &**rhs } else { &**lhs };
+//RS                             if self.reject_implicit_unit_conversion(
+//RS                                 point_name,
+//RS                                 source_name,
+//RS                                 source_expr,
+//RS                                 span,
+//RS                             ) {
+//RS                                 return Some(Type::Named(delta_name));
+//RS                             }
+//RS                             let left = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+//RS                             let right = *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+//RS                             let left = self.unit_conversion_expr(
+//RS                                 left, lname, lfact, point_name, point_fact, span,
+//RS                             );
+//RS                             let right = self.unit_conversion_expr(
+//RS                                 right, rname, rfact, point_name, point_fact, span,
+//RS                             );
+//RS                             *replacement = Some(self.unit_wrapped_binary(
+//RS                                 BinOp::Sub,
+//RS                                 left,
+//RS                                 point_name,
+//RS                                 right,
+//RS                                 point_name,
+//RS                                 &delta_name,
+//RS                                 span,
+//RS                             ));
+//RS                             return Some(Type::Named(delta_name));
+//RS                         }
+//RS                         (BinOp::Add, Point, Point) | (BinOp::Sub, Delta, Point) => {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0127",
+//RS                                 format!("{} is not available between `{}` and `{}`", operator_label(op), lname, rname),
+//RS                                 "affine points are positions; only point + delta, point - delta, point - point, and delta + delta are defined".to_string(),
+//RS                                 "subtract two points for a delta, or add a matching Delta to a point".to_string(),
+//RS                                 Some(span),
+//RS                             ));
+//RS                             return None;
+//RS                         }
+//RS                         (
+//RS                             BinOp::Eq
+//RS                             | BinOp::Ne
+//RS                             | BinOp::Compare
+//RS                             | BinOp::Lt
+//RS                             | BinOp::Gt
+//RS                             | BinOp::Le
+//RS                             | BinOp::Ge,
+//RS                             left_kind,
+//RS                             right_kind,
+//RS                         ) if left_kind == right_kind => {
+//RS                             let left_wins = lfact.scale.abs() <= rfact.scale.abs();
+//RS                             let (dest_name, dest_fact) = if left_wins {
+//RS                                 (lname, lfact)
+//RS                             } else {
+//RS                                 (rname, rfact)
+//RS                             };
+//RS                             let source_name = if left_wins { rname } else { lname };
+//RS                             let source_expr = if left_wins { &**rhs } else { &**lhs };
+//RS                             if self.reject_implicit_unit_conversion(
+//RS                                 dest_name,
+//RS                                 source_name,
+//RS                                 source_expr,
+//RS                                 span,
+//RS                             ) {
+//RS                                 return Some(if op == BinOp::Compare {
+//RS                                     Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
+//RS                                 } else {
+//RS                                     Type::Bool
+//RS                                 });
+//RS                             }
+//RS                             self.convert_unit_operand(
+//RS                                 lhs, lname, lfact, dest_name, dest_fact, span,
+//RS                             );
+//RS                             self.convert_unit_operand(
+//RS                                 rhs, rname, rfact, dest_name, dest_fact, span,
+//RS                             );
+//RS                             return Some(Type::Bool);
+//RS                         }
+//RS                         _ => {}
+//RS                     }
+//RS                 }
+//RS             }
+//RS             match op {
+//RS                 BinOp::Add | BinOp::Sub => {
+//RS                     if let (Some(ldim), Some(rdim)) = (ldim.clone(), rdim.clone()) {
+//RS                         if ldim != rdim {
+//RS                             self.dimension_mismatch(op, ldim, rdim, span);
+//RS                             return None;
+//RS                         }
+//RS                         // Same concrete unit/derived quantity is safe. Different
+//RS                         // units of one dimension still need #603's conversions.
+//RS                         if lt == rt {
+//RS                             return Some(lt);
+//RS                         }
+//RS                     } else if any_dimensional {
+//RS                         self.dimension_mismatch(
+//RS                             op,
+//RS                             ldim.unwrap_or_else(Dimension::scalar),
+//RS                             rdim.unwrap_or_else(Dimension::scalar),
+//RS                             span,
+//RS                         );
+//RS                         return None;
+//RS                     } else if lt == rt {
+//RS                         return Some(lt);
+//RS                     }
+//RS                     // Two nominal families: the ordinary distinct-type rule
+//RS                     // below reports the mismatch.
+//RS                 }
+//RS                 BinOp::Mul | BinOp::Div if any_dimensional => {
+//RS                     if !self.quantity_base_is_compatible(&lt, &rt) {
+//RS                         self.op_mismatch(op, &lt, &rt, span);
+//RS                         return None;
+//RS                     }
+//RS                     let ldim = ldim.unwrap_or_else(Dimension::scalar);
+//RS                     let rdim = rdim.unwrap_or_else(Dimension::scalar);
+//RS                     let result = if op == BinOp::Mul {
+//RS                         ldim.multiply(&rdim)
+//RS                     } else {
+//RS                         ldim.divide(&rdim)
+//RS                     };
+//RS                     let Some(result) = result else {
+//RS                         self.dimension_overflow(op, span);
+//RS                         return None;
+//RS                     };
+//RS                     return if result == Dimension::scalar() {
+//RS                         Some(Type::Float)
+//RS                     } else {
+//RS                         Some(Type::quantity(Type::Float, result))
+//RS                     };
+//RS                 }
+//RS                 BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+//RS                     if lt == rt {
+//RS                         return Some(Type::Bool);
+//RS                     }
+//RS                     if any_dimensional && ldim != rdim {
+//RS                         self.dimension_mismatch(
+//RS                             op,
+//RS                             ldim.unwrap_or_else(Dimension::scalar),
+//RS                             rdim.unwrap_or_else(Dimension::scalar),
+//RS                             span,
+//RS                         );
+//RS                         return None;
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS 
+//RS         // D-DIST3 (ratified 2026-06-20): distinct type arithmetic rules (E0127/E0128).
+//RS         {
+//RS             let lt_is_distinct = if let Type::Named(n) = &lt {
+//RS                 self.registry.is_distinct(n)
+//RS             } else {
+//RS                 false
+//RS             };
+//RS             let rt_is_distinct = if let Type::Named(n) = &rt {
+//RS                 self.registry.is_distinct(n)
+//RS             } else {
+//RS                 false
+//RS             };
+//RS             let is_arith = matches!(
+//RS                 op,
+//RS                 BinOp::Add
+//RS                     | BinOp::Sub
+//RS                     | BinOp::Mul
+//RS                     | BinOp::Div
+//RS                     | BinOp::FloorDiv
+//RS                     | BinOp::Mod
+//RS                     | BinOp::Rem
+//RS                     | BinOp::BitAnd
+//RS                     | BinOp::BitOr
+//RS                     | BinOp::BitXor
+//RS                     | BinOp::Shl
+//RS                     | BinOp::Shr
+//RS             );
+//RS             let is_eq = matches!(op, BinOp::Eq | BinOp::Ne);
+//RS             if (lt_is_distinct || rt_is_distinct) && is_arith {
+//RS                 let distinct_name = if lt_is_distinct {
+//RS                     if let Type::Named(n) = &lt {
+//RS                         n.as_str()
+//RS                     } else {
+//RS                         ""
+//RS                     }
+//RS                 } else {
+//RS                     if let Type::Named(n) = &rt {
+//RS                         n.as_str()
+//RS                     } else {
+//RS                         ""
+//RS                     }
+//RS                 };
+//RS                 if lt != rt {
+//RS                     // Arithmetic between different types (or distinct + base) — E0127/E0128.
+//RS                     // Primary error is E0127 when the distinct type isn't numeric.
+//RS                     if !self.registry.distinct_is_numeric(distinct_name) {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0127",
+//RS                             format!("{} is not available on `{}`", operator_label(op), distinct_name),
+//RS                             format!("`{}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
+//RS                             format!("add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value"),
+//RS                             Some(span),
+//RS                         ));
+//RS                     } else {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0127",
+//RS                             format!("{} is not available between `{}` and `{}`", operator_label(op), lt.name(), rt.name()),
+//RS                             format!("`#Numeric` distinct types only support arithmetic between the same type"),
+//RS                             format!("both sides must be `{}`", distinct_name),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                     return None;
+//RS                 }
+//RS                 // Same distinct type — check numeric marker.
+//RS                 if !self.registry.distinct_is_numeric(distinct_name) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0127",
+//RS                         format!("{} is not available on `{}`", operator_label(op), distinct_name),
+//RS                         format!("`{}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
+//RS                         "add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return None;
+//RS                 }
+//RS                 if self.registry.distinct_range(distinct_name).is_some() {
+//RS                     self.require_knowledge_gate(
+//RS                         KnowledgePlane::Range,
+//RS                         KnowledgeGate::BoundedArithmetic,
+//RS                         span,
+//RS                     );
+//RS                     let base = self
+//RS                         .registry
+//RS                         .distinct_base(distinct_name)
+//RS                         .cloned()
+//RS                         .expect("range-constrained distinct type has a base");
+//RS                     // Range loss changes the carrier, not just the result fact. Keep
+//RS                     // the nominal wrapper at the boundary, then expose its base to
+//RS                     // every backend through the existing raw projection seam.
+//RS                     let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+//RS                     let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+//RS                     *lhs = Box::new(Self::distinct_raw(*left, distinct_name, base.clone(), span));
+//RS                     *rhs = Box::new(Self::distinct_raw(
+//RS                         *right,
+//RS                         distinct_name,
+//RS                         base.clone(),
+//RS                         span,
+//RS                     ));
+//RS                     return Some(base);
+//RS                 }
+//RS                 // Same #Numeric distinct type — arithmetic is allowed, returns the same type.
+//RS                 return Some(lt);
+//RS             }
+//RS             if (lt_is_distinct || rt_is_distinct) && is_eq {
+//RS                 // Equality between two values of the same distinct type: allowed.
+//RS                 // Equality between distinct and different type: E0128.
+//RS                 if lt != rt {
+//RS                     let dt_name = if lt_is_distinct {
+//RS                         if let Type::Named(n) = &lt {
+//RS                             n.clone()
+//RS                         } else {
+//RS                             lt.name()
+//RS                         }
+//RS                     } else {
+//RS                         if let Type::Named(n) = &rt {
+//RS                             n.clone()
+//RS                         } else {
+//RS                             rt.name()
+//RS                         }
+//RS                     };
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0128",
+//RS                         format!("a `{}` can't be compared with a `{}`", lt.name(), rt.name()),
+//RS                         format!(
+//RS                             "`{}` is a distinct type; it only compares equal to another `{}`",
+//RS                             dt_name, dt_name
+//RS                         ),
+//RS                         format!(
+//RS                             "use `.raw()` to compare the underlying values, or construct a `{}`",
+//RS                             dt_name
+//RS                         ),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return None;
+//RS                 }
+//RS                 return Some(Type::Bool);
+//RS             }
+//RS             // Implicit coercion check (non-arithmetic, non-eq): handled at assignment.
+//RS         }
+//RS 
+//RS         // D-SPACE-GEOMETRY1=A: points/deltas are only combinable inside one
+//RS         // nominal coordinate space.  Do this before the generic operator
+//RS         // machinery so a cross-space expression is source-linked as geometry,
+//RS         // not reported as an opaque missing operator.
+//RS         match crate::Sema::CheckerCoreLib::geometry_binop_result(op, &lt, &rt) {
+//RS             Some(Ok(result)) => return Some(result),
+//RS             Some(Err(())) => {
+//RS                 if let Some((operation, expected, actual)) =
+//RS                     crate::Sema::CheckerCoreLib::geometry_binop_diagnostic(op, &lt, &rt)
+//RS                 {
+//RS                     self.diags.push(Diagnostic::from_row(
+//RS                         "E2520",
+//RS                         &[
+//RS                             ("operation", operation.as_str()),
+//RS                             ("expected", expected.as_str()),
+//RS                             ("actual", actual.as_str()),
+//RS                         ],
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS             None => {}
+//RS         }
+//RS 
+//RS         // D-LAYOUT1 / D-LAYOUT-GATES1: operator overloading on the closed
+//RS         // built-in layout family (`HVar`/`VVar`/`LengthVar`/`Constraint`).
+//RS         // GATE 1 is exactly this: `>=`/`<=`/`==` return `Constraint` instead
+//RS         // of `Bool` for this family — the ONLY place that blessing is wired.
+//RS         // A cross-axis combination (`HVar` with `VVar`, on `+`/`-` OR a
+//RS         // comparison) is E2932, `E-LAYOUT-AXIS-MISMATCH`.
+//RS         match layout_binop_result(op, &lt, &rt) {
+//RS             Some(Ok(result)) => return Some(result),
+//RS             Some(Err(())) => {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E2932",
+//RS                     format!(
+//RS                         "layout constraint mixes a horizontal and vertical value (`{}` and `{}`)",
+//RS                         lt.name(),
+//RS                         rt.name()
+//RS                     ),
+//RS                     "`left`/`right`/`width` are horizontal (`HVar`); `top`/`bottom`/`height` are vertical (`VVar`) — combining or comparing across axes is caught at compile time instead of producing a nonsensical layout".to_string(),
+//RS                     "compare or combine values from the same axis (a `LengthVar`, or a plain number, fits either axis)".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 return None;
+//RS             }
+//RS             None => {}
+//RS         }
+//RS 
+//RS         // D-TYPE2-IMAG1=A: Complex shares the precise-builtin path, while a
+//RS         // scalar operand is promoted through the same explicit constructor.
+//RS         let lhs_complex = Self::is_complex_type(&lt);
+//RS         let rhs_complex = Self::is_complex_type(&rt);
+//RS         if lhs_complex || rhs_complex {
+//RS             if lhs_complex && !rhs_complex && Self::is_complex_scalar(&rt) {
+//RS                 rt = self.complexize_operand(rhs, span)?;
+//RS             } else if rhs_complex && !lhs_complex && Self::is_complex_scalar(&lt) {
+//RS                 lt = self.complexize_operand(lhs, span)?;
+//RS             }
+//RS             if Self::is_complex_type(&lt) && Self::is_complex_type(&rt) {
+//RS                 if let Some(result) = precise_binop_result(
+//RS                     op,
+//RS                     crate::Syntax::TYPE_COMPLEX,
+//RS                     crate::Syntax::TYPE_COMPLEX,
+//RS                 ) {
+//RS                     return Some(result);
+//RS                 }
+//RS             }
+//RS             self.op_mismatch(op, &lt, &rt, span);
+//RS             return None;
+//RS         }
+//RS 
+//RS         // D-SIMD2 / D-LINALG1: operator overloading on the closed built-in math
+//RS         // family (lane + linalg types). Element-wise `+`/`-`/`*`/`/`, scalar-free
+//RS         // matrix×vector, and `==`/`!=`. Runs before the builtin numeric match (a
+//RS         // math type isn't `is_numeric`, so the builtin path would reject it).
+//RS         {
+//RS             // A user struct sharing a math name isn't part of the closed family;
+//RS             // skip the math-operator path so it gets the normal operator handling.
+//RS             let lname = match &lt {
+//RS                 Type::Named(n) if !self.registry.contains(n) => n.clone(),
+//RS                 _ => String::new(),
+//RS             };
+//RS             let rname = match &rt {
+//RS                 Type::Named(n) if !self.registry.contains(n) => n.clone(),
+//RS                 _ => String::new(),
+//RS             };
+//RS             if is_math_type(&lname) || is_math_type(&rname) {
+//RS                 if let Some(result) = math_binop_result(op, &lname, &rname) {
+//RS                     return Some(result);
+//RS                 }
+//RS                 if let Some(result) = math_scalar_binop_result(op, &lname, &rt) {
+//RS                     return Some(result);
+//RS                 }
+//RS                 if let Some(result) = math_scalar_binop_result(op, &rname, &lt) {
+//RS                     return Some(result);
+//RS                 }
+//RS                 // A math operand with an unsupported operator/operand pairing.
+//RS                 // The built-in family keeps fixed shapes (D-SIMD2/D-LINALG1);
+//RS                 // other pairs go through the D-OPDEF1/D-OPMIX1 hook traits.
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E2511",
+//RS                     format!("{} isn't defined between `{}` and `{}`", operator_label(op), lt.name(), rt.name()),
+//RS                     "built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook".to_string(),
+//RS                     "match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 return None;
+//RS             }
+//RS         }
+//RS 
+//RS         // D-TYPE2-DEFAULT1 / D-NUMTYPE1: exact decimal and rational operators.
+//RS         {
+//RS             let lname = match &lt {
+//RS                 Type::Named(n) if !self.registry.contains(n) => n.clone(),
+//RS                 _ => String::new(),
+//RS             };
+//RS             let rname = match &rt {
+//RS                 Type::Named(n) if !self.registry.contains(n) => n.clone(),
+//RS                 _ => String::new(),
+//RS             };
+//RS             if crate::Numeric::is_decimal_type_name(&lname)
+//RS                 || crate::Numeric::is_decimal_type_name(&rname)
+//RS                 || lname == crate::Syntax::TYPE_FRACTION
+//RS                 || rname == crate::Syntax::TYPE_FRACTION
+//RS             {
+//RS                 // D-TYPE2-DEFAULT1: an exact decimal may absorb an untyped
+//RS                 // integer literal. Keep the promotion at sema so TIR and all
+//RS                 // engines consume the same Decimal Prelude operation.
+//RS                 if crate::Numeric::type_is_decimal(&lt)
+//RS                     && rt == Type::Int
+//RS                     && Self::is_bare_integer_literal(rhs)
+//RS                 {
+//RS                     if let Some(promoted) = self.decimalize_integer_literal(rhs, span) {
+//RS                         rt = promoted;
+//RS                     }
+//RS                 } else if crate::Numeric::type_is_decimal(&rt)
+//RS                     && lt == Type::Int
+//RS                     && Self::is_bare_integer_literal(lhs)
+//RS                 {
+//RS                     if let Some(promoted) = self.decimalize_integer_literal(lhs, span) {
+//RS                         lt = promoted;
+//RS                     }
+//RS                 }
+//RS                 let lname = match &lt {
+//RS                     Type::Named(n) if !self.registry.contains(n) => n.clone(),
+//RS                     _ => String::new(),
+//RS                 };
+//RS                 let rname = match &rt {
+//RS                     Type::Named(n) if !self.registry.contains(n) => n.clone(),
+//RS                     _ => String::new(),
+//RS                 };
+//RS                 if let Some((code, what, fix)) = precise_mix_error(&lt, &rt) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         code,
+//RS                         what,
+//RS                         "precise numeric types never mix with fixed-width integers or floats without an explicit constructor".to_string(),
+//RS                         fix,
+//RS                         Some(span),
+//RS                     ));
+//RS                     return None;
+//RS                 }
+//RS                 let fraction_and_integer_literal = (lname == crate::Syntax::TYPE_FRACTION
+//RS                     && rt == Type::Int
+//RS                     && Self::is_bare_integer_literal(rhs))
+//RS                     || (rname == crate::Syntax::TYPE_FRACTION
+//RS                         && lt == Type::Int
+//RS                         && Self::is_bare_integer_literal(lhs));
+//RS                 if fraction_and_integer_literal {
+//RS                     return match op {
+//RS                         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+//RS                             Some(Type::Named(crate::Syntax::TYPE_FRACTION.to_string()))
+//RS                         }
+//RS                         BinOp::Eq | BinOp::Ne => Some(Type::Bool),
+//RS                         _ => None,
+//RS                     };
+//RS                 }
+//RS                 if let Some(result) = precise_binop_result(op, &lname, &rname) {
+//RS                     return Some(result);
+//RS                 }
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0133",
+//RS                     format!(
+//RS                         "{} isn't defined between `{}` and `{}`",
+//RS                         operator_label(op),
+//RS                         lt.name(),
+//RS                         rt.name()
+//RS                     ),
+//RS                     "`Decimal` supports `+`, `-`, `*`, and `==`/`!=` on matching values only"
+//RS                         .to_string(),
+//RS                     "use a method like `.add(other)` or make both operands the same precise type"
+//RS                         .to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 return None;
+//RS             }
+//RS         }
+//RS 
+//RS         match op {
+//RS             // D-FLOORDIV1=A: `/%` divides and rounds down. It keeps the operand
+//RS             // type — whole numbers stay whole, floats stay floats — so it is the
+//RS             // operator that gives a whole-number quotient.
+//RS             BinOp::FloorDiv => {
+//RS                 if lt == rt && lt.is_numeric() {
+//RS                     Some(lt)
+//RS                 } else {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0109",
+//RS                         format!(
+//RS                             "{} needs both sides to be the same number type, but this has {} and {}",
+//RS                             operator_label(op),
+//RS                             lt.show(),
+//RS                             rt.show()
+//RS                         ),
+//RS                         compound_why(op),
+//RS                         "make both sides the same number type".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     None
+//RS                 }
+//RS             }
+//RS             // D-EXPSEM1=A / D-EXPNEG1=A: a whole-number base with a
+//RS             // written negative exponent leaves the exact whole-number world
+//RS             // for the exact Fraction carrier. A dynamic exponent remains an
+//RS             // Int and the shared Prelude reports a negative-power stop.
+//RS             BinOp::Pow => {
+//RS                 if lt == Type::Int && rt == Type::Int && is_written_negative_int(rhs) {
+//RS                     return Some(Type::Named(crate::Syntax::TYPE_FRACTION.to_string()));
+//RS                 }
+//RS                 if lt == rt && lt.is_numeric() {
+//RS                     Some(lt)
+//RS                 } else {
+//RS                     self.op_mismatch(op, &lt, &rt, span);
+//RS                     None
+//RS                 }
+//RS             }
+//RS             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+//RS                 // D-TYPE2-DEFAULT1 amends D-INTDIV1: `/` on exact whole numbers
+//RS                 // answers an exact Fraction. `/%` remains the whole-number
+//RS                 // floor path. Sized widths keep the D-SG9 same-width rule and
+//RS                 // are not touched here.
+//RS                 if op == BinOp::Div && lt == Type::Int && rt == Type::Int {
+//RS                     return Some(Type::Named(crate::Syntax::TYPE_FRACTION.to_string()));
+//RS                 }
+//RS                 // D-VERDICT-1304-1: the widening join above rewrites both
+//RS                 // operands to one numeric type. Arithmetic keeps that type.
+//RS                 if lt == rt && lt.is_numeric() {
+//RS                     Some(lt)
+//RS                 } else if let Type::Named(type_name) = &lt {
+//RS                     let (import_ns, leaf) = Self::split_type_name(type_name);
+//RS                     if self.struct_owner_module(leaf, import_ns).is_some() {
+//RS                         let trait_name = match op {
+//RS                             BinOp::Add => crate::Syntax::TRAIT_ADD,
+//RS                             BinOp::Sub => crate::Syntax::TRAIT_SUB,
+//RS                             BinOp::Mul => crate::Syntax::TRAIT_MUL,
+//RS                             BinOp::Div => crate::Syntax::TRAIT_DIV,
+//RS                             _ => unreachable!(),
+//RS                         };
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0360",
+//RS                             format!(
+//RS                                 "no {} operator is defined for `{}`",
+//RS                                 operator_label(op),
+//RS                                 type_name
+//RS                             ),
+//RS                             format!(
+//RS                                 concat!(
+//RS                                     "user arithmetic dispatches only through one ",
+//RS                                     "`impl {}.{}` hook"
+//RS                                 ),
+//RS                                 type_name, trait_name
+//RS                             ),
+//RS                             format!("implement `{type_name}.{trait_name}`, or call a named method"),
+//RS                             Some(span),
+//RS                         ));
+//RS                         None
+//RS                     } else {
+//RS                         self.op_mismatch(op, &lt, &rt, span);
+//RS                         None
+//RS                     }
+//RS                 } else if lt == Type::String && op == BinOp::Add {
+//RS                     let operands = (simple_text_operand(lhs), simple_text_operand(rhs));
+//RS                     let what = match operands {
+//RS                         (Some(left), Some(right)) => {
+//RS                             format!("text values `{left}` and `{right}` aren't joined with `+`")
+//RS                         }
+//RS                         _ => "text isn't joined with `+`".to_string(),
+//RS                     };
+//RS                     let fix = match operands {
+//RS                         (Some(left), Some(right)) => {
+//RS                             format!(
+//RS                                 "write the pieces inside one string: \"{{{left}}}{{{right}}}\""
+//RS                             )
+//RS                         }
+//RS                         _ => "write the pieces inside one interpolated string (schematic: the checked operands are not simple names)".to_string(),
+//RS                     };
+//RS                     let mut diagnostic = Diagnostic::error(
+//RS                         "E0109",
+//RS                         what,
+//RS                         "there's one way to build text: interpolation (S8)".to_string(),
+//RS                         fix,
+//RS                         Some(span),
+//RS                     );
+//RS                     if let (Some(left), Some(right)) = operands {
+//RS                         diagnostic = diagnostic.with_source_derived_suggestion(
+//RS                             span,
+//RS                             format!("\"{{{left}}}{{{right}}}\""),
+//RS                         );
+//RS                     }
+//RS                     self.diags.push(diagnostic);
+//RS                     None
+//RS                 } else {
+//RS                     self.op_mismatch(op, &lt, &rt, span);
+//RS                     None
+//RS                 }
+//RS             }
+//RS             BinOp::Shl | BinOp::Shr => {
+//RS                 // D-NUMOPS1: a shift's left side carries the value/width; the right
+//RS                 // side is a bit-count, so it may be any integer width and does NOT
+//RS                 // have to match. The result keeps the left side's type. (Same rule
+//RS                 // as Rust/C/Swift — `U8 << 1` shifts a `U8` by an `Int` count.)
+//RS                 if lt.is_integer() && rt.is_integer() {
+//RS                     Some(lt)
+//RS                 } else {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0109",
+//RS                         format!(
+//RS                             "{} works on {} only, but this has {} and {}",
+//RS                             operator_label(op),
+//RS                             Type::Int.show(),
+//RS                             lt.show(),
+//RS                             rt.show()
+//RS                         ),
+//RS                         compound_why(op),
+//RS                         "use whole numbers here".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     None
+//RS                 }
+//RS             }
+//RS             BinOp::Mod | BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+//RS                 // D-SG9/D-MODSEM1: both remainders and the bitwise ops work on any
+//RS                 // integer width,
+//RS                 // both sides the same width, and keep it.
+//RS                 if lt == rt && lt.is_integer() {
+//RS                     Some(lt)
+//RS                 } else {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0109",
+//RS                         format!(
+//RS                             "{} works on {} only, but this has {} and {}",
+//RS                             operator_label(op),
+//RS                             Type::Int.show(),
+//RS                             lt.show(),
+//RS                             rt.show()
+//RS                         ),
+//RS                         compound_why(op),
+//RS                         "use whole numbers here".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                     None
+//RS                 }
+//RS             }
+//RS             BinOp::Eq | BinOp::Ne => {
+//RS                 // A Core record read through its owner carries the canonical
+//RS                 // identity while a grouped-import literal keeps the leaf; both
+//RS                 // name one declaration.
+//RS                 if lt == rt || self.nominal_type_identity(&lt, &rt) {
+//RS                     if !self.is_equatable_type(&lt) {
+//RS                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&lt) {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0312",
+//RS                                 format!("secret-bearing `{}` values cannot use {}", lt.name(), operator_label(op)),
+//RS                                 "ordinary equality may leak secret information through timing and secret-bearing crypto types never implement comparison".to_string(),
+//RS                                 "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values".to_string(),
+//RS                                 Some(span),
+//RS                             ));
+//RS                         } else if let Some(field) = self.incomparable_field_type(&lt) {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0312",
+//RS                                 format!("`{}` can't be compared with `{}` because field `{}` doesn't support {}", lt.name(), rt.name(), field, operator_label(op)),
+//RS                                 "value equality needs every field to support the comparison".to_string(),
+//RS                                 "compare individual fields instead".to_string(),
+//RS                                 Some(span),
+//RS                             ));
+//RS                         } else {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0312",
+//RS                                 format!("`{}` doesn't support {}", lt.name(), operator_label(op)),
+//RS                                 "value equality requires the Equatable trait".to_string(),
+//RS                                 "add `#Equatable` before the type, implement `Equatable` by hand, or compare individual fields".to_string(),
+//RS                                 Some(span),
+//RS                             ));
+//RS                         }
+//RS                         return None;
+//RS                     }
+//RS                     // D-SMELLLINT1 / L0502: float `==` is almost always a bug.
+//RS                     if matches!(lt, Type::Float | Type::Float32) {
+//RS                         self.diags.push(Diagnostic::lint(
+//RS                             "L0502",
+//RS                             format!("comparing floats with {} is unreliable", operator_label(op)),
+//RS                             "floating-point arithmetic is inexact; two values computed differently may not be bit-identical even when mathematically equal".to_string(),
+//RS                             "compare within a tolerance: `(a - b).abs() < 1e-9`".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                     Some(Type::Bool)
+//RS                 } else {
+//RS                     self.op_mismatch(op, &lt, &rt, span);
+//RS                     None
+//RS                 }
+//RS             }
+//RS             BinOp::Compare => {
+//RS                 if lt == rt
+//RS                     && (self.types_comparable_type(&lt)
+//RS                         || self.type_param_has_bound(&lt, COMPARABLE))
+//RS                 {
+//RS                     Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string()))
+//RS                 } else {
+//RS                     self.op_mismatch(op, &lt, &rt, span);
+//RS                     None
+//RS                 }
+//RS             }
+//RS             BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+//RS                 self.check_relational(op, &lt, &rt, span)
+//RS             }
+//RS             BinOp::And | BinOp::Or => unreachable!(),
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-CHAINCMP1: the `</<=/>/>=` type-check, shared by a plain `Binary`
+//RS     /// pair and each adjacent pair of a `CompareChain`. No new *type* rule —
+//RS     /// every pair type-checks exactly as a standalone relational comparison.
+//RS     pub(crate) fn check_relational(
+//RS         &mut self,
+//RS         op: BinOp,
+//RS         lt: &Type,
+//RS         rt: &Type,
+//RS         span: Span,
+//RS     ) -> Option<Type> {
+//RS         if lt == rt && matches!(lt, Type::Int | Type::Float) {
+//RS             Some(Type::Bool)
+//RS         } else if lt == rt {
+//RS             let (normalized, registry, trait_reg) = self.capability_type_context(lt);
+//RS             if let Type::Named(name) = &normalized {
+//RS                 if registry.is_distinct(name) {
+//RS                     if trait_reg.implements_trait(name, COMPARABLE) {
+//RS                         return Some(Type::Bool);
+//RS                     }
+//RS                     self.diags.push(e0905(name, COMPARABLE, span, false));
+//RS                     return None;
+//RS                 }
+//RS             }
+//RS             if self.types_comparable_type(lt) || self.type_param_has_bound(lt, COMPARABLE) {
+//RS                 Some(Type::Bool)
+//RS             } else if *lt == Type::String {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0109",
+//RS                     format!("text isn't ordered with {}", operator_label(op)),
+//RS                     "comparing text for order isn't supported yet".to_string(),
+//RS                     "compare with `==` or `!=`, or compare lengths/numbers instead".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 None
+//RS             } else {
+//RS                 self.op_mismatch(op, lt, rt, span);
+//RS                 None
+//RS             }
+//RS         } else {
+//RS             self.op_mismatch(op, lt, rt, span);
+//RS             None
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-CHAINCMP1: `0 <= sev < 10` — infer each operand once, type-check
+//RS     /// every adjacent pair via `check_relational`. The chain's own type is
+//RS     /// `Bool`; a bad pair pushes its own diagnostic and the overall result
+//RS     /// is `None` (mirrors a plain mismatched `Binary` comparison).
+//RS     pub(crate) fn infer_compare_chain(
+//RS         &mut self,
+//RS         operands: &mut [Expr],
+//RS         ops: &[BinOp],
+//RS         hooks: &mut Vec<bool>,
+//RS         span: Span,
+//RS     ) -> Option<Type> {
+//RS         let types: Vec<Option<Type>> = operands
+//RS             .iter_mut()
+//RS             .map(|e| {
+//RS                 self.borrow_ctx = self.operator_operand_needs_borrow(e, BinOp::Lt);
+//RS                 self.infer(e)
+//RS             })
+//RS             .collect();
+//RS         hooks.clear();
+//RS         let mut ok = true;
+//RS         for (i, op) in ops.iter().enumerate() {
+//RS             match (&types[i], &types[i + 1]) {
+//RS                 (Some(lt), Some(rt)) => {
+//RS                     let uses_hook = lt == rt
+//RS                         && match lt {
+//RS                             Type::Named(type_name) => {
+//RS                                 self.type_implements_trait_for_name(
+//RS                                     type_name,
+//RS                                     crate::Syntax::TRAIT_COMPARABLE,
+//RS                                 ) || self.type_param_has_bound(lt, crate::Syntax::TRAIT_COMPARABLE)
+//RS                             }
+//RS                             _ => false,
+//RS                         };
+//RS                     hooks.push(uses_hook);
+//RS                     if uses_hook
+//RS                         && self.fn_name == "compare"
+//RS                         && self
+//RS                             .lookup(crate::Syntax::KW_SELF)
+//RS                             .is_some_and(|info| info.ty == *lt)
+//RS                     {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0361",
+//RS                             format!("`compare` calls itself through {}", operator_label(*op)),
+//RS                             "the operator symbol dispatches back to this same hook, so evaluation would recurse forever".to_string(),
+//RS                             "compare the value's fields or call a different named helper inside the hook".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                         ok = false;
+//RS                         continue;
+//RS                     }
+//RS                     if self.check_relational(*op, lt, rt, span).is_none() {
+//RS                         ok = false;
+//RS                     }
+//RS                 }
+//RS                 _ => {
+//RS                     hooks.push(false);
+//RS                     ok = false;
+//RS                 }
+//RS             }
+//RS         }
+//RS         if ok {
+//RS             Some(Type::Bool)
+//RS         } else {
+//RS             None
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn op_mismatch(&mut self, op: BinOp, lt: &Type, rt: &Type, span: Span) {
+//RS         let (why, fix) = if lt.is_numeric() && rt.is_numeric() {
+//RS             (
+//RS                 format!(
+//RS                     "neither {} contains every value of {}, nor {} every value of {}",
+//RS                     lt.name(),
+//RS                     rt.name(),
+//RS                     rt.name(),
+//RS                     lt.name()
+//RS                 ),
+//RS                 "choose the result type and convert the other side into it".to_string(),
+//RS             )
+//RS         } else if lt == rt {
+//RS             (
+//RS                 format!("{} is not defined for {}", operator_label(op), lt.show()),
+//RS                 format!(
+//RS                     "use an operation supported by {}, or call a named method",
+//RS                     lt.show()
+//RS                 ),
+//RS             )
+//RS         } else {
+//RS             // D-OPDEF1 / D-OPMIX1: a mixed pair is served by the owning
+//RS             // type's hook trait; the built-in pairs have no user route.
+//RS             (
+//RS                 "the operator has no built-in rule and no user-defined `impl Type.Trait` hook for this operand pair"
+//RS                     .to_string(),
+//RS                 "use a supported operand pair, call a named method, or implement the operator's hook trait on your own type for this pair"
+//RS                     .to_string(),
+//RS             )
+//RS         };
+//RS         self.diags.push(Diagnostic::error(
+//RS             "E0109",
+//RS             format!(
+//RS                 "{} can't compare or combine {} and {}",
+//RS                 operator_label(op),
+//RS                 lt.show(),
+//RS                 rt.show()
+//RS             ),
+//RS             why,
+//RS             fix,
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS 
+//RS     fn unit_arithmetic_mismatch(&mut self, op: BinOp, lt: &Type, rt: &Type, span: Span) {
+//RS         self.diags.push(Diagnostic::error(
+//RS             "E0127",
+//RS             format!(
+//RS                 "{} is not available between `{}` and `{}`",
+//RS                 operator_label(op),
+//RS                 lt.name(),
+//RS                 rt.name()
+//RS             ),
+//RS             "unit-family arithmetic only defines scalar scaling and physical dimension algebra; nominal units and affine points do not multiply or divide"
+//RS                 .to_string(),
+//RS             "scale a linear unit or delta by a plain numeric scalar, or use a dimensioned linear/delta family for physical products"
+//RS                 .to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS 
+//RS     fn quantity_dimension(&self, ty: &Type) -> Option<Dimension> {
+//RS         if let Some((_, dimension)) = ty.quantity_parts() {
+//RS             return Some(dimension);
+//RS         }
+//RS         let Type::Named(name) = ty else {
+//RS             return None;
+//RS         };
+//RS         if let Some(dimension) = self.registry.unit_dimension(name) {
+//RS             return Some(dimension);
+//RS         }
+//RS         if let Some((module, leaf)) = name.split_once('.') {
+//RS             return self.modules.and_then(|modules| {
+//RS                 modules
+//RS                     .iter()
+//RS                     .find(|candidate| candidate.module_alias == module)
+//RS                     .and_then(|candidate| candidate.registry.unit_dimension(leaf))
+//RS             });
+//RS         }
+//RS         // A local nominal shadows imported names; do not borrow an unrelated
+//RS         // module's dimension merely because its member has the same spelling.
+//RS         if self.registry.contains(name) {
+//RS             return None;
+//RS         }
+//RS         None
+//RS     }
+//RS 
+//RS     fn quantity_base_is_compatible(&self, left: &Type, right: &Type) -> bool {
+//RS         let base = |ty: &Type| {
+//RS             if let Some((base, _)) = ty.quantity_parts() {
+//RS                 base.clone()
+//RS             } else if self.quantity_dimension(ty).is_some() {
+//RS                 Type::Float
+//RS             } else {
+//RS                 ty.clone()
+//RS             }
+//RS         };
+//RS         base(left) == Type::Float
+//RS             && base(right) == Type::Float
+//RS             && !matches!(
+//RS                 (left, right),
+//RS                 (Type::Named(name), _) if name == crate::Syntax::TYPE_INSTANT
+//RS             )
+//RS             && !matches!(
+//RS                 (left, right),
+//RS                 (_, Type::Named(name)) if name == crate::Syntax::TYPE_INSTANT
+//RS             )
+//RS     }
+//RS 
+//RS     fn dimension_mismatch(&mut self, op: BinOp, left: Dimension, right: Dimension, span: Span) {
+//RS         self.diags.push(Diagnostic::error(
+//RS             "E0359",
+//RS             format!(
+//RS                 "{} can't combine {} with {}",
+//RS                 operator_label(op),
+//RS                 left.display_name(),
+//RS                 right.display_name()
+//RS             ),
+//RS             "physical quantities must have compatible dimensions before they can be added, subtracted, or compared".to_string(),
+//RS             "use matching dimensions, or use `*` or `/` to derive a new dimension".to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS 
+//RS     fn dimension_overflow(&mut self, op: BinOp, span: Span) {
+//RS         self.diags.push(Diagnostic::error(
+//RS             "E0359",
+//RS             format!(
+//RS                 "{} makes the physical dimension too large",
+//RS                 operator_label(op)
+//RS             ),
+//RS             "physical dimension exponents are checked compiler facts and cannot overflow"
+//RS                 .to_string(),
+//RS             "simplify the repeated physical multiplication or division".to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS 
+//RS     // --- calls -----------------------------------------------------------
+//RS }
+//RS 
+//RS /// RHS forms that need a surrounding expected type (`.{…}`, `.Variant`, a bare
+//RS /// `None`).
+//RS pub(crate) fn expr_wants_expected_type(expr: &Expr) -> bool {
+//RS     match expr {
+//RS         Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+//RS             expr_wants_expected_type(inner)
+//RS         }
+//RS         Expr::Float(..) => true,
+//RS         Expr::StructLit { inferred: true, .. } => true,
+//RS         Expr::TypedLit { head: None, .. } => true,
+//RS         Expr::EnumLit { type_name, .. } if type_name.is_empty() => true,
+//RS         Expr::Absent(_) => true,
+//RS         _ => false,
+//RS     }
+//RS }
+// END-PORT-PENDING 0396 crates/jet-sema/src/Sema/CheckerInfer/binary.rs:1152-2908
+

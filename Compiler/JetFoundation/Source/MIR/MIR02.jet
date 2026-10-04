@@ -1,0 +1,599 @@
+// Extension of the canonical MIR owner (MIR.jet); declarations stay there.
+use core.encoding.DataTree
+use core.sys.target as decision_target
+use MIROptimization.Acceleration.[AccelerationGate, AccelerationGateInput, AccelerationDecision]
+
+// Rust: crates/jet-foundation/src/MIR.rs:1804 — MIRAssociatedTypeDecl in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1810 — MIRTraitMethod in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1827 — MIRTraitDef in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1839 — MIRAssociatedTypeValue in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1846 — MIRImplDef in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1865 — MIRConstantDef in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1878 — MIRFailureCarrier in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1887 — MIREffectFacts in MIR.jet.
+impl MIREffectFacts {
+    pub fn default() -> MIREffectFacts Never! {
+        MIREffectFacts{direct: [], solved: [], call_edges: [], maximal: false, direct_spans: []}
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:1896 — MIRTargetApplicability in MIR.jet.
+impl MIRTargetApplicability {
+    pub fn default() -> MIRTargetApplicability Never! {
+        MIRTargetApplicability{rust_aot: false, cranelift: false, interpreter: false, web: false}
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:1904 — MIRCaptureFacts in MIR.jet.
+impl MIRCaptureFacts {
+    pub fn default() -> MIRCaptureFacts Never! {
+        MIRCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [], cloned: [], frozen: [], materialized: [], moved: [], frame_schedule: None, frame_schedule_derivation: None}
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:1916 — MIRGenericParam in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1923 — MIRGeneratorFacts in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1929 — MIRUnsafeGate in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1938 — MIRKernelMode in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1943 — MIRKernelFacts in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1954 — MIRViewSource in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1961 — MIRViewProjection in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1968 — MIRViewSourcePath in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1974 — MIRViewProvenance in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1980 — MIRWebParamField in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1987 — MIRWebParamReconstruction in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1993 — MIRPreludeCallID in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:1996 — MIRPreludeTypeArg in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2002 — MIRFieldID in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2005 — MIRSourceFileID in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2008 — MIRSiteID in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2011 — MIRSourceFile in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2018 — MIRPreludeFamily in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2032 — MIRPreludeABI in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2040 — MIRSymbol in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2046 — name is mir_symbol_name in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2054 — MIRCallFallibility in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2059 — MIRConversion in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2077 — MIRCallSignature in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2088 — MIRAuthorityDecision in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2095 — plugin_load is mir_authority_plugin_load in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2109 — plugin_call is mir_authority_plugin_call in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2119
+impl MIRAuthorityDecision {
+    pub fn default() -> MIRAuthorityDecision Never! { mir_authority_plugin_load() }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2127
+pub fn plugin_authority_import_fact() -> MIRHostImportFact Never! { mir_authority_plugin_load().import }
+// Rust: crates/jet-foundation/src/MIR.rs:2133 — MIRDBTableFact in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2143 — MIRDBQueryMetadata in MIR.jet.
+impl MIRDBQueryMetadata {
+    // Rust: crates/jet-foundation/src/MIR.rs:2153
+    pub fn to_wire(self) -> String Never! {
+        output := [U8]{}
+        mir_wire_text(&output, "JDB1:")
+        mir_db_wire_field(&output, self.source_path)
+        mir_db_wire_field(&output, "{self.source_file.value}")
+        mir_db_wire_field(&output, "{self.source_span.start}")
+        mir_db_wire_field(&output, "{self.source_span.end}")
+        mir_db_wire_field(&output, self.statement_identity)
+        mir_db_wire_field(&output, "{self.table_facts.len()}")
+        loop fact in self.table_facts {
+            mir_db_wire_field(&output, fact.table_id)
+            mir_db_wire_field(&output, if fact.read -> "1" else -> "0")
+            mir_db_wire_field(&output, if fact.write -> "1" else -> "0")
+        }
+        String.from_bytes(^output) ?? panic("wire text is UTF-8")
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2154
+fn mir_db_wire_field(output: &[U8], value: String) Never! {
+    mir_wire_text(&output, "{value.bytes().len()}:")
+    mir_wire_text(&output, value)
+}
+fn mir_wire_text(output: &[U8], value: String) Never! { loop byte in value.bytes() -> &output.push(byte) }
+
+// Rust: crates/jet-foundation/src/MIR.rs:2181 — MIRComponentTypeDescriptor in MIR.jet.
+impl MIRComponentTypeDescriptor {
+    // Rust: crates/jet-foundation/src/MIR.rs:2199
+    pub fn wire(self) -> String Never! {
+        out := [U8]{}
+        self.write_wire(&out)
+        String.from_bytes(^out) ?? panic("component wire is UTF-8")
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:2205
+    fn write_wire(self, out: &[U8]) Never! {
+        if self == {
+            .Int -> mir_wire_text(&out, "i")
+            .Float -> mir_wire_text(&out, "f")
+            .Bool -> mir_wire_text(&out, "b")
+            .String -> mir_wire_text(&out, "s")
+            .List(inner) -> { mir_wire_text(&out, "l"); inner.write_wire(&out) }
+            .Option(inner) -> { mir_wire_text(&out, "o"); inner.write_wire(&out) }
+            .Result(ok, err) -> { mir_wire_text(&out, "q"); ok.write_wire(&out); err.write_wire(&out) }
+            .Record(name, fields) -> {
+                mir_wire_text(&out, "r")
+                write_component_text(&out, name)
+                mir_wire_text(&out, "{fields.len()}:")
+                loop field in fields {
+                    mir_wire_text(&out, "{field.index}:")
+                    write_component_text(&out, field.name)
+                    field.ty.write_wire(&out)
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:2239
+    pub fn wit_type(self) -> String Never! {
+        if self == {
+            .Int -> "s64"
+            .Float -> "f64"
+            .Bool -> "bool"
+            .String -> "string"
+            .List(inner) -> "list<{inner.wit_type()}>"
+            .Option(inner) -> "option<{inner.wit_type()}>"
+            .Result(ok, err) -> "result<{ok.wit_type()}, {err.wit_type()}>"
+            .Record(name, _) -> name.replace("_", "-")
+        }
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:2254
+    fn append_wit_definitions(self, seen: &[String:Bool], definitions: &[String]) Never! {
+        if self == {
+            .List(inner) | .Option(inner) -> inner.append_wit_definitions(&seen, &definitions)
+            .Result(ok, err) -> { ok.append_wit_definitions(&seen, &definitions); err.append_wit_definitions(&seen, &definitions) }
+            .Record(original, fields) -> {
+                name :: original.replace("_", "-")
+                if seen.contains_key(name) -> return
+                seen[name] = true
+                loop field in fields -> field.ty.append_wit_definitions(&seen, &definitions)
+                rows := [String]{}
+                loop field in fields -> &rows.push("  {field.name.replace("_", "-")}: {field.ty.wit_type()},")
+                &definitions.push("record {name} {{\n{rows.join("\n")}\n}}\n")
+            }
+            .Int | .Float | .Bool | .String -> {}
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2289
+fn write_component_text(out: &[U8], text: String) Never! { mir_db_wire_field(&out, text) }
+// Rust: crates/jet-foundation/src/MIR.rs:2297 — MIRComponentSignatureDescriptor in MIR.jet.
+impl MIRComponentSignatureDescriptor {
+    // Rust: crates/jet-foundation/src/MIR.rs:2303
+    pub fn wire(self) -> String Never! {
+        out := [U8]{}
+        mir_wire_text(&out, "C{self.params.len()}:")
+        loop param in self.params -> param.write_wire(&out)
+        mir_wire_text(&out, "r")
+        self.result.write_wire(&out)
+        String.from_bytes(^out) ?? panic("component signature wire is UTF-8")
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:2313
+    pub fn wit_definitions(self) -> [String] Never! {
+        seen := [String:Bool]{}
+        definitions := [String]{}
+        loop param in self.params -> param.append_wit_definitions(&seen, &definitions)
+        self.result.append_wit_definitions(&seen, &definitions)
+        ^definitions
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2326 — MIRPreludeCall in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2344
+pub enum MIRFieldOwner { Type(id: MIRTypeID) Function(id: MIRFunctionID) }
+// Rust: crates/jet-foundation/src/MIR.rs:2355 — MIROptimizationPassID in MIR.jet.
+impl MIROptimizationPassID {
+    // Rust: crates/jet-foundation/src/MIR.rs:2366
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .LegalityVerification -> "legality-verification"
+            .UnreachableBlockElimination -> "unreachable-block-elimination"
+            .CFGSimplification -> "cfg-simplification"
+            .ExactConstantFolding -> "exact-constant-folding"
+            .BoundsCheckElimination -> "bounds-check-elimination"
+            .DeadPureValueElimination -> "dead-pure-value-elimination"
+            .CanonicalLoopFacts -> "canonical-loop-facts"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2382 — MIRDecisionKind in MIR.jet.
+impl MIRDecisionKind {
+    // Rust: crates/jet-foundation/src/MIR.rs:2395
+    pub fn as_str(self) -> String Never! {
+        if self == { .Tier -> "tier"; .Inline -> "inline"; .Vectorize -> "vectorize"; .Parallel -> "parallel"; .Copy -> "copy"; .Bounds -> "bounds"; .Deopt -> "deopt"; .Unreachable -> "unreachable"; .LoopInvariant -> "loop-invariant" }
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2411 — MIRDecisionDisposition in MIR.jet.
+impl MIRDecisionDisposition {
+    // Rust: crates/jet-foundation/src/MIR.rs:2420
+    pub fn as_str(self) -> String Never! {
+        if self == { .Accepted -> "accepted"; .Rejected -> "rejected"; .Selected -> "selected"; .NotAttempted -> "not-attempted"; .Unavailable -> "unavailable" }
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2439 — MIRDecisionIdentity in MIR.jet.
+impl MIRDecisionIdentity {
+    // Rust: crates/jet-foundation/src/MIR.rs:2453
+    pub fn derivation_identity(self) -> DerivationIdentity Never! {
+        build := [U8]{}
+        loop value in [String]{self.configuration, self.profile, self.implementation, self.artifact} -> append_decision_identity_frame(&build, value)
+        digest :: mir_sha256_bytes(build.view(0..<build.len()))
+        derivation_identity(self.source, mir_sha256_hex_bytes(digest.view(0..<digest.len())), self.run, self.target)
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:2475
+    pub fn from_program(program: MIRProgram, artifact: MIRArtifactID?, profile: String, run: String) -> MIRDecisionIdentity Never! {
+        artifact_plan := None
+        if artifact == .Val(id) {
+            loop candidate in program.artifacts { if candidate.id == id { artifact_plan = Val(@candidate); break } }
+        }
+        if artifact_plan == None && program.artifacts.len() > 0 -> artifact_plan = Val(@program.artifacts[0])
+        source_material := [U8]{}
+        source_files := [@MIRSourceFile]{}
+        loop source in program.source_files -> &source_files.push(@source)
+        &source_files.sort_by((left, right) -> if left.path == right.path -> left.id.value.compare(right.id.value) else -> left.path.compare(right.path))
+        loop source in source_files {
+            append_decision_identity_frame(&source_material, source.path)
+            append_decision_identity_frame(&source_material, mir_sha256_hex(source.source))
+        }
+        if source_material.len() == 0 -> append_decision_identity_frame(&source_material, program.package_identity)
+        digest :: mir_sha256_bytes(source_material.view(0..<source_material.len()))
+        source :: mir_sha256_hex_bytes(digest.view(0..<digest.len()))
+        runtime_parts := [String]{}
+        loop part in program.facts.runtime_parts -> &runtime_parts.push(part.as_str())
+        &runtime_parts.sort()
+        configuration :: "package={program.package_identity};edition={program.facts.edition};os={program.facts.active_os};layer={program.facts.inferred_layer};allocator={program.facts.allocator};runtime={runtime_parts.join(",")};arrow={program.facts.uses_arrow};hardware={program.facts.hardware_profile_id}"
+        selected_profile := profile
+        if selected_profile.is_empty() { selected_profile = if artifact_plan == .Val(plan) -> plan.mode.as_str() else -> "unknown" }
+        dossier :: program.facts.target_dossier
+        triple :: if dossier.machine == .Val(machine) -> machine.triple else -> "hosted-default"
+        machine_name :: if dossier.machine == .Val(machine) -> machine.name else -> "hosted-default"
+        target_artifact :: if artifact_plan == .Val(plan) -> plan.target.as_str() else -> "unknown"
+        target :: "triple={triple};artifact={target_artifact};machine={machine_name}"
+        provider :: if artifact_plan == .Val(plan) -> plan.provider_identity else -> dossier.provider_identity
+        closure :: if artifact_plan == .Val(plan) -> plan.closure_identity else -> dossier.closure_identity
+        implementation :: "compiler={dossier.compiler_identity};provider={provider};closure={closure};linker={dossier.linker_identity};tier={dossier.tier_identity};environment={dossier.environment_identity};dependencies={dossier.dependency_identity}"
+        artifact_name := if artifact == .Val(id) -> "artifact:{id.value}" else -> "unavailable"
+        if artifact_plan == .Val(plan) { artifact_name = if plan.artifact_identity.is_empty() -> "artifact:{plan.id.value}" else -> plan.artifact_identity }
+        MIRDecisionIdentity{source: source, configuration: configuration, profile: selected_profile, target: target, implementation: implementation, artifact: artifact_name, run: if run.is_empty() -> "not-observed" else -> run}
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2589
+fn append_decision_identity_frame(out: &[U8], value: String) Never! {
+    bytes :: value.bytes()
+    length :: U64{bytes.len()}
+    loop index in 0..<8 -> &out.push(U8{(length >> (index * 8)) & U64{255}})
+    loop byte in bytes -> &out.push(byte)
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2599 — MIRDecisionEdit in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:2605 — MIRDecisionRow in MIR.jet.
+impl MIRDecisionRow {
+    // Rust: crates/jet-foundation/src/MIR.rs:2634
+    pub fn new(kind: MIRDecisionKind, disposition: MIRDecisionDisposition, function: MIRFunctionID?, function_name: String, span: Span, rule: String, reason: String, producer: String, evidence: String) -> MIRDecisionRow Never! {
+        function_id :: if function == .Val(id) -> id.value else -> U64{0}
+        identity :: "{kind.as_str()}|{disposition.as_str()}|{function_id}|{span.start}|{span.end}|{rule}|{reason}"
+        MIRDecisionRow{id: stable_id("mir-decision", identity), kind: kind, disposition: disposition, function: function, function_name: function_name, span: span, rule: rule, reason: reason, producer: producer, evidence: evidence, edit: None, derivation: None, identity: None, evidence_method: None, derivation_disposition: None}
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:2678
+    pub fn with_edit(^self, span: Span, replacement: String) -> MIRDecisionRow Never! { self.edit = Val(MIRDecisionEdit{span: span, replacement: replacement}); ^self }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2697
+pub struct MIRDecisionLedger {
+    pub identity: MIRDecisionIdentity
+    pub rows: [MIRDecisionRow]
+    pub derivations: [DerivationRecord]
+}
+impl MIRDecisionLedger {
+    // Rust: crates/jet-foundation/src/MIR.rs:2704
+    pub fn from_rows(identity: MIRDecisionIdentity, rows: ^[MIRDecisionRow]) -> MIRDecisionLedger Never! {
+        canonical_rows := [MIRDecisionRow]{}
+        indexes := [U64:Int]{}
+        loop row in ^rows {
+            if indexes.get(row.id) == .Val(index) {
+                if canonical_rows[index].edit == None -> canonical_rows[index].edit = ^row.edit
+                if canonical_rows[index].evidence.is_empty() -> canonical_rows[index].evidence = ^row.evidence
+                continue
+            }
+            indexes[row.id] = canonical_rows.len()
+            &canonical_rows.push(^row)
+        }
+        derivations := [DerivationRecord]{}
+        compact_identity :: identity.derivation_identity()
+        loop &row in canonical_rows {
+            method :: row.evidence_method ?? (if row.evidence.contains("proof") || row.evidence.contains("static-flow") -> MIRDerivationMethod.FormalProof else -> MIRDerivationMethod.StaticDerivation)
+            disposition :: if row.disposition == { .Unavailable -> MIRDerivationDisposition.Unavailable; .NotAttempted -> MIRDerivationDisposition.Unknown; else -> MIRDerivationDisposition.Current }
+            subject :: "{row.kind.as_str()}:{row.function_name}:{row.span.start}-{row.span.end}"
+            claim :: "{row.kind.as_str()}:{row.disposition.as_str()}:{row.rule}"
+            derivation := derivation_record(subject, claim, row.producer, method, row.rule, [String]{row.reason, row.evidence, "row-id={row.id}"}, compact_identity)
+            derivation.disposition = disposition
+            row.derivation = Val(derivation_record_reference(derivation))
+            row.identity = Val(identity)
+            row.evidence_method = Val(method)
+            row.derivation_disposition = Val(disposition)
+            &derivations.push(^derivation)
+        }
+        MIRDecisionLedger{identity: identity, rows: ^canonical_rows, derivations: ^derivations}
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:2785
+    pub fn canonical_json(self) -> String Never! {
+        rows := [String]{}
+        loop row in self.rows -> &rows.push(decision_row_json(row))
+        "{{\"identity\":{decision_identity_json(self.identity)},\"rows\":[{rows.join(",")}],\"schema\":\"jet.mir.decisions.v1\"}}"
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:2803
+    pub fn from_json(payload: String) -> MIRDecisionLedger Err! {
+        root :: foundation_parse_protocol_json(payload) ?? return Err("decision ledger payload is not valid JSON")
+        root_fields :: if root == .Object(_) -> decision_object(root, "decision ledger payload") else -> return Err("decision ledger payload must be an object")
+        schema_ok :: if root_fields.get("schema") == .Val(.Text(schema)) -> schema == "jet.mir.decisions.v1" else -> false
+        if root_fields.len() != 3 || !schema_ok -> return Err("decision ledger payload has an unsupported schema")
+        identity :: parse_decision_identity(root_fields.get("identity") ?? return Err("decision ledger payload has no identity"))
+        rows_value :: root_fields.get("rows") ?? return Err("decision ledger payload has no rows")
+        values :: if rows_value == .Array(items) -> items else -> return Err("decision ledger payload rows must be an array")
+        if values.len() > 4096 -> return Err("decision ledger payload has too many rows")
+        rows := [MIRDecisionRow]{}
+        transported := [U64:MIRDecisionRow]{}
+        loop value in values {
+            row :: parse_decision_row(value)
+            if !transported.contains_key(row.id) -> transported[row.id] = row
+            &rows.push(row)
+        }
+        ledger :: MIRDecisionLedger.from_rows(identity, ^rows)
+        loop row in ledger.rows {
+            source :: transported.get(row.id) ?? return Err("decision ledger payload lost a row during materialization")
+            if source.identity != Val(ledger.identity) || source.derivation != row.derivation || source.evidence_method != row.evidence_method || source.derivation_disposition != row.derivation_disposition -> return Err("decision ledger row {row.id} has an untrusted derivation relation")
+        }
+        if ledger.canonical_json() != payload -> return Err("decision ledger payload is not canonical JSON")
+        ledger
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:2862
+    pub fn row(self, id: U64) -> (@MIRDecisionRow)? Never! from self {
+        loop row in self.rows { if row.id == id -> return Val(@row) }
+        None
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:2867
+    pub fn derivation(self, reference: MIRDerivationRef) -> (@DerivationRecord)? Never! from self {
+        loop record in self.derivations { if record.id == reference.id -> return Val(@record) }
+        None
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2873
+fn decision_json_string(value: String) -> String Never! { foundation_json_quote(value) }
+// Rust: crates/jet-foundation/src/MIR.rs:2877
+fn decision_identity_json(identity: MIRDecisionIdentity) -> String Never! {
+    "{{\"artifact\":{decision_json_string(identity.artifact)},\"configuration\":{decision_json_string(identity.configuration)},\"implementation\":{decision_json_string(identity.implementation)},\"profile\":{decision_json_string(identity.profile)},\"run\":{decision_json_string(identity.run)},\"source\":{decision_json_string(identity.source)},\"target\":{decision_json_string(identity.target)}}}"
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2890
+fn decision_span_json(span: Span) -> String Never! { "{{\"end\":{span.end},\"start\":{span.start}}}" }
+// Rust: crates/jet-foundation/src/MIR.rs:2894
+fn decision_optional_identity_json(identity: MIRDecisionIdentity?) -> String Never! { if identity == .Val(value) -> decision_identity_json(value) else -> "null" }
+// Rust: crates/jet-foundation/src/MIR.rs:2898
+fn decision_edit_json(edit: MIRDecisionEdit?) -> String Never! {
+    if edit == .Val(value) -> "{{\"replacement\":{decision_json_string(value.replacement)},\"span\":{decision_span_json(value.span)}}}" else -> "null"
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2911
+fn decision_derivation_ref_json(reference: MIRDerivationRef?) -> String Never! {
+    if reference == .Val(value) -> "{{\"id\":{decision_json_string(value.id)}}}" else -> "null"
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2918
+fn decision_row_json(row: MIRDecisionRow) -> String Never! {
+    function :: if row.function == None -> "null" else -> decision_json_string(row.function_name)
+    function_id :: if row.function == .Val(id) -> decision_json_string("{id.value}") else -> "null"
+    method :: if row.evidence_method == .Val(value) -> decision_json_string(derivation_method_raw(value)) else -> "null"
+    disposition :: if row.derivation_disposition == .Val(value) -> decision_json_string(derivation_disposition_text(value)) else -> "null"
+    "{{\"derivation_disposition\":{disposition},\"derivation_ref\":{decision_derivation_ref_json(row.derivation)},\"disposition\":{decision_json_string(row.disposition.as_str())},\"edit\":{decision_edit_json(row.edit)},\"evidence\":{decision_json_string(row.evidence)},\"evidence_method\":{method},\"function\":{function},\"function_id\":{function_id},\"function_name\":{decision_json_string(row.function_name)},\"id\":{decision_json_string("{row.id}")},\"identity\":{decision_optional_identity_json(row.identity)},\"kind\":{decision_json_string(row.kind.as_str())},\"producer\":{decision_json_string(row.producer)},\"reason\":{decision_json_string(row.reason)},\"rule\":{decision_json_string(row.rule)},\"span\":{decision_span_json(row.span)}}}"
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2955
+fn decision_object(value: DataTree, label: String) -> [String:DataTree] Err! {
+    if value == .Object(entries) {
+        fields := [String:DataTree]{}
+        loop entry in entries -> fields[entry.key] = entry.value
+        return ^fields
+    }
+    Err("{label} must be an object")
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2966
+fn decision_text(fields: [String:DataTree], key: String, label: String) -> String Err! {
+    if fields.get(key) == .Val(.Text(value)) -> return value
+    Err("{label} has invalid `{key}`")
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2982
+fn decision_u64(fields: [String:DataTree], key: String, label: String) -> U64 Err! {
+    value :: decision_text(fields, key, label)
+    bytes :: value.bytes()
+    start :: if bytes.len() > 0 && bytes[0] == U8{43} -> 1 else -> 0
+    if start == bytes.len() -> return Err("{label} has invalid `{key}`")
+    result := U64{0}
+    loop index in start..<bytes.len() {
+        byte :: bytes[index]
+        if byte < U8{48} || byte > U8{57} -> return Err("{label} has invalid `{key}`")
+        digit :: U64.from_u8(byte - U8{48})
+        if result > (U64{18446744073709551615} - digit) / U64{10} -> return Err("{label} has invalid `{key}`")
+        result = result * U64{10} + digit
+    }
+    result
+}
+// Rust: crates/jet-foundation/src/MIR.rs:2998
+fn decision_optional_u64(fields: [String:DataTree], key: String, label: String) -> U64? Err! {
+    if fields.get(key) == { .Val(.Null) -> None; .Val(_) -> Val(decision_u64(fields, key, label)); .None -> Err("{label} has no `{key}`") }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3010
+fn parse_decision_identity(value: DataTree) -> MIRDecisionIdentity Err! {
+    fields :: decision_object(value, "decision identity")
+    keys :: [String]{"artifact", "configuration", "implementation", "profile", "run", "source", "target"}
+    if fields.len() != keys.len() -> return Err("decision identity has missing or unsafe fields")
+    loop key in keys { if !fields.contains_key(key) -> return Err("decision identity has missing or unsafe fields") }
+    MIRDecisionIdentity{artifact: decision_text(fields, "artifact", "decision identity"), configuration: decision_text(fields, "configuration", "decision identity"), implementation: decision_text(fields, "implementation", "decision identity"), profile: decision_text(fields, "profile", "decision identity"), run: decision_text(fields, "run", "decision identity"), source: decision_text(fields, "source", "decision identity"), target: decision_text(fields, "target", "decision identity")}
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3037
+fn parse_decision_span(value: DataTree) -> Span Err! {
+    fields :: decision_object(value, "decision span")
+    if fields.len() != 2 || !fields.contains_key("start") || !fields.contains_key("end") -> return Err("decision span has missing or unsafe fields")
+    start_word :: decision_u64(fields, "start", "decision span")
+    // GATE #4483: usize conversion uses selected-target width, never host width.
+    bits :: decision_target.selected_pointer_bits()
+    if bits < 64 && start_word > ((U64{1} << bits) - U64{1}) -> return Err("decision span start is out of range")
+    end_word :: decision_u64(fields, "end", "decision span")
+    if bits < 64 && end_word > ((U64{1} << bits) - U64{1}) -> return Err("decision span end is out of range")
+    Span{start: Int.from_u64(start_word), end: Int.from_u64(end_word)}
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3049
+fn parse_decision_kind(value: String) -> MIRDecisionKind? Never! {
+    if value == { "tier" -> Val(.Tier); "inline" -> Val(.Inline); "vectorize" -> Val(.Vectorize); "parallel" -> Val(.Parallel); "copy" -> Val(.Copy); "bounds" -> Val(.Bounds); "deopt" -> Val(.Deopt); "unreachable" -> Val(.Unreachable); "loop-invariant" -> Val(.LoopInvariant); else -> None }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3064
+fn parse_decision_disposition(value: String) -> MIRDecisionDisposition? Never! {
+    if value == { "accepted" -> Val(.Accepted); "rejected" -> Val(.Rejected); "selected" -> Val(.Selected); "not-attempted" -> Val(.NotAttempted); "unavailable" -> Val(.Unavailable); else -> None }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3075
+fn parse_decision_optional_identity(value: DataTree?) -> MIRDecisionIdentity? Err! {
+    if value == { .None | .Val(.Null) -> None; .Val(item) -> Val(parse_decision_identity(item)) }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3084
+fn parse_decision_optional_edit(value: DataTree?) -> MIRDecisionEdit? Err! {
+    item :: value ?? return Err("decision row has no `edit`")
+    if item == .Null -> return None
+    fields :: decision_object(item, "decision edit")
+    if fields.len() != 2 || !fields.contains_key("replacement") || !fields.contains_key("span") -> return Err("decision edit has missing or unsafe fields")
+    Val(MIRDecisionEdit{replacement: decision_text(fields, "replacement", "decision edit"), span: parse_decision_span(fields.get("span") ?? return Err("decision edit has no span"))})
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3107
+fn parse_decision_optional_ref(value: DataTree?) -> MIRDerivationRef? Err! {
+    item :: value ?? return Err("decision row has no `derivation_ref`")
+    if item == .Null -> return None
+    fields :: decision_object(item, "decision derivation reference")
+    if fields.len() != 1 || !fields.contains_key("id") -> return Err("decision derivation reference has missing or unsafe fields")
+    Val(MIRDerivationRef{id: decision_text(fields, "id", "decision derivation reference")})
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3127
+fn parse_decision_row(value: DataTree) -> MIRDecisionRow Err! {
+    fields :: decision_object(value, "decision row")
+    keys :: [String]{"derivation_disposition", "derivation_ref", "disposition", "edit", "evidence", "evidence_method", "function", "function_id", "function_name", "id", "identity", "kind", "producer", "reason", "rule", "span"}
+    if fields.len() != keys.len() -> return Err("decision row has missing or unsafe fields")
+    loop key in keys { if !fields.contains_key(key) -> return Err("decision row has missing or unsafe fields") }
+    kind_text :: decision_text(fields, "kind", "decision row")
+    kind :: parse_decision_kind(kind_text) ?? return Err("decision row has unsupported kind `{kind_text}`")
+    disposition_text :: decision_text(fields, "disposition", "decision row")
+    disposition :: parse_decision_disposition(disposition_text) ?? return Err("decision row has unsupported disposition `{disposition_text}`")
+    function_name :: decision_text(fields, "function_name", "decision row")
+    function_word :: decision_optional_u64(fields, "function_id", "decision row")
+    function :: if function_word == .Val(word) -> Val(MIRFunctionID{value: word}) else -> None
+    span :: parse_decision_span(fields.get("span") ?? return Err("decision row has no span"))
+    row := MIRDecisionRow.new(kind, disposition, function, function_name, span, decision_text(fields, "rule", "decision row"), decision_text(fields, "reason", "decision row"), decision_text(fields, "producer", "decision row"), decision_text(fields, "evidence", "decision row"))
+    id :: decision_u64(fields, "id", "decision row")
+    if row.id != id -> return Err("decision row id {id} does not match its canonical fields")
+    row.edit = parse_decision_optional_edit(fields.get("edit"))
+    row.derivation = parse_decision_optional_ref(fields.get("derivation_ref"))
+    row.identity = parse_decision_optional_identity(fields.get("identity"))
+    row.evidence_method = if fields.get("evidence_method") == {
+        .Val(.Null) -> None
+        .Val(.Text(method)) -> {
+            parsed :: if method == { "static_derivation" -> Val(MIRDerivationMethod.StaticDerivation); "formal_proof" -> Val(MIRDerivationMethod.FormalProof); "recorded_execution" -> Val(MIRDerivationMethod.RecordedExecution); "sampled_agreement" -> Val(MIRDerivationMethod.SampledAgreement); "external_assumption" -> Val(MIRDerivationMethod.ExternalAssumption); else -> None }
+            Val(parsed ?? return Err("decision row has unsupported `evidence_method`"))
+        }
+        .Val(_) -> return Err("decision row has invalid `evidence_method`")
+        .None -> return Err("decision row has no `evidence_method`")
+    }
+    row.derivation_disposition = if fields.get("derivation_disposition") == {
+        .Val(.Null) -> None
+        .Val(.Text(disposition)) -> {
+            parsed :: if disposition == { "current" -> Val(MIRDerivationDisposition.Current); "stale" -> Val(MIRDerivationDisposition.Stale); "expired" -> Val(MIRDerivationDisposition.Expired); "redacted" -> Val(MIRDerivationDisposition.Redacted); "unavailable" -> Val(MIRDerivationDisposition.Unavailable); "unsupported" -> Val(MIRDerivationDisposition.Unsupported); "budget_exhausted" -> Val(MIRDerivationDisposition.BudgetExhausted); "unknown" -> Val(MIRDerivationDisposition.Unknown); else -> None }
+            Val(parsed ?? return Err("decision row has unsupported `derivation_disposition`"))
+        }
+        .Val(_) -> return Err("decision row has invalid `derivation_disposition`")
+        .None -> return Err("decision row has no `derivation_disposition`")
+    }
+    ^row
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3211 — MIROptimizationRejection in MIR.jet.
+impl MIROptimizationRejection {
+    // Rust: crates/jet-foundation/src/MIR.rs:3228
+    pub fn as_str(self) -> String Never! {
+        if self == { .MissingProof -> "missing-proof"; .MayTrap -> "may-trap"; .HasEffects -> "has-effects"; .HasEarlyExit -> "has-early-exit"; .MayAlias -> "may-alias"; .CrossIterationDependency -> "cross-iteration-dependency"; .DynamicTripCount -> "dynamic-trip-count"; .UnknownCopyCost -> "unknown-copy-cost"; .ScalarBoundary -> "scalar-boundary"; .ObservableLayout -> "observable-layout"; .OwnershipObligation -> "ownership-obligation"; .UnsupportedOperation -> "unsupported-operation" }
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3249 — MIRVectorRule in MIR.jet.
+impl MIRVectorRule {
+    // Rust: crates/jet-foundation/src/MIR.rs:3258
+    pub fn as_str(self) -> String Never! {
+        if self == { .Elementwise -> "elementwise"; .FieldAccess -> "field-access"; .ConditionalAccumulate -> "conditional-accumulate"; .EarlyExitSearch -> "early-exit-search"; .Reduction -> "reduction" }
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3273 — MIRVectorLayout in MIR.jet.
+impl MIRVectorLayout {
+    // Rust: crates/jet-foundation/src/MIR.rs:3280
+    pub fn as_str(self) -> String Never! { if self == { .Flat -> "flat"; .AosStrided -> "aos-strided"; .ColumnarDirect -> "columnar-direct" } }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3290 — MIRVectorAccessRoot in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:3297 — MIRVectorAccess in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:3308 — MIROptimizationDecision in MIR.jet.
+impl MIROptimizationDecision {
+    // Rust: crates/jet-foundation/src/MIR.rs:3314
+    pub fn is_eligible(self) -> Bool Never! { self == .Eligible }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3322 — MIRLoopForm in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:3329 — MIRCopyCost in MIR.jet (None -> NoCopy).
+// Rust: crates/jet-foundation/src/MIR.rs:3338 — MIRLoopFact in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:3353 — MIRBoundsFact in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:3366 — MIRFixedReductionFact in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:3384 — MIRVectorFact in MIR.jet.
+impl MIRVectorFact {
+    // Rust: crates/jet-foundation/src/MIR.rs:3419
+    pub fn same_checked_scope(self, other: MIRVectorFact) -> Bool Never! {
+        self.loop_header == other.loop_header && self.cursor == other.cursor && self.body_blocks == other.body_blocks && self.advance_block == other.advance_block && self.accesses == other.accesses && self.span == other.span
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3433 — MIRFusionFact in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:3449 — MIRAccelerationFact in MIR.jet.
+impl MIRAccelerationFact {
+    // Rust: crates/jet-foundation/src/MIR.rs:3458
+    pub fn source(loop_header: MIRBlockID, transform: MIRAccelerationTransform, workload: MIRAccelerationWorkloadFacts, proof: MIRAccelerationProof, span: Span) -> MIRAccelerationFact Never! {
+        MIRAccelerationFact{loop_header: loop_header, transform: transform, workload: workload, proof: proof, span: span}
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:3474
+    pub fn evaluate(self, gate: AccelerationGate, input: ^AccelerationGateInput) -> AccelerationDecision Never! {
+        input.workload = self.workload
+        input.proof = self.proof
+        gate.evaluate(self.transform, ^input)
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3486 — MIROptimizationFacts in MIR.jet.
+impl MIROptimizationFacts {
+    pub fn default() -> MIROptimizationFacts Never! { mir_empty_optimization_facts() }
+    // Rust: crates/jet-foundation/src/MIR.rs:3518
+    pub fn clear_derived(&self) Never! {
+        self.auto_vectorizable = false
+        self.no_aliasing = false
+        self.no_early_exit = false
+        self.no_cross_iteration_dependencies = false
+        self.derived_from_digest = None
+        &self.pass_ids.clear()
+        &self.loop_facts.clear()
+        &self.bounds_facts.clear()
+        &self.vector_facts.clear()
+        &self.fusion_facts.clear()
+        &self.acceleration_facts.clear()
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:3536
+    pub fn pipeline_seal_hex(self) -> String? Never! { self.derived_from_digest }
+    // Rust: crates/jet-foundation/src/MIR.rs:3541
+    pub fn set_pipeline_seal_hex(&self, seal: String?) Err! {
+        if seal == .None { self.derived_from_digest = None; return }
+        hex :: seal ?? panic("present seal")
+        bytes :: hex.bytes()
+        if bytes.len() != 64 -> return Err("MIR pipeline seal `{hex}` is not 64 hex digits")
+        digest := [U8]{}
+        loop index in 0..<32 {
+            first :: Int.from_u8(bytes[index * 2])
+            second :: Int.from_u8(bytes[index * 2 + 1])
+            // Rust validates UTF-8 on each two-byte pair before numeric parsing.
+            if first >= 128 || second >= 128 {
+                pair :: [U8]{bytes[index * 2], bytes[index * 2 + 1]}
+                if String.from_bytes(pair) == None -> return Err("MIR pipeline seal is not ASCII hex")
+                return Err("MIR pipeline seal `{hex}` is not hex")
+            }
+            // u8::from_str_radix accepts a leading '+' for a one-digit pair.
+            high :: if first == 43 -> 0 else -> mir_seal_nibble(first) ?? return Err("MIR pipeline seal `{hex}` is not hex")
+            low :: mir_seal_nibble(second) ?? return Err("MIR pipeline seal `{hex}` is not hex")
+            &digest.push(U8{high * 16 + low})
+        }
+        self.derived_from_digest = Val(mir_sha256_hex_bytes(digest.view(0..<digest.len())))
+    }
+}
+fn mir_seal_nibble(byte: Int) -> Int? Never! {
+    if { byte >= 48 && byte <= 57 -> Val(byte - 48); byte >= 65 && byte <= 70 -> Val(byte - 65 + 10); byte >= 97 && byte <= 102 -> Val(byte - 97 + 10); else -> None }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:3563 — MIRScopeKind in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:3583 — MIRTestScopeMember in MIR.jet.
+// Rust: crates/jet-foundation/src/MIR.rs:3591 — MIRScope in MIR.jet.

@@ -13,24 +13,38 @@ use jet_foundation.[
     MIRVectorFact,
     Span,
     mir_program_digest,
+    MIROptimizationErrorKind,
+    MIROptimizationError,
+    MIRPassDominance,
+    mir_pass_error,
+    mir_pass_validate_program,
+    mir_pass_reachable,
+    mir_pass_predecessor_map,
+    mir_pass_dominators,
+    mir_pass_dominator_row,
+    mir_pass_dominates,
+    mir_pass_place_value_uses,
+    mir_pass_value_use_counts,
+    mir_pass_block_id_seen,
+    mir_pass_block_exists,
+    mir_pass_find_block,
+    mir_pass_block_ids_equal,
+    mir_pass_place_rows,
+    mir_pass_value_id_seen,
+    mir_pass_operation_id_seen,
+    mir_pass_find_place,
+    mir_pass_place_id_seen,
+    mir_pass_operation_place_refs,
+    mir_pass_prelude_purity,
+    mir_sealed_program_digest,
+    canonical_pass_enabled,
+    mir_canonical_payload,
+    mir_canonical_identity,
+    mir_canonical_mark_pass,
+    mir_record_canonical_check,
+    mir_record_canonical_transition,
 ]
 
-pub enum MIROptimizationErrorKind {
-    InvalidSchema
-    InvalidCFG
-    InvalidDefUse
-    InvalidFact
-    // A MIR Lint rule (Docs/spec/mir-lint.md) failed: an internal compiler error.
-    Lint
-}
-
-pub struct MIROptimizationError {
-    pub pass: MIROptimizationPassID
-    pub kind: MIROptimizationErrorKind
-    pub function: MIRFunctionID?
-    pub span: Span
-    pub message: String
-}
 
 pub struct MIROptimizationReport {
     pub production_order: [MIROptimizationPassID]
@@ -83,15 +97,6 @@ fn mir_optimizer_empty_report() -> MIROptimizationReport Never! {
     }
 }
 
-fn mir_pass_error(
-    pass: MIROptimizationPassID,
-    kind: MIROptimizationErrorKind,
-    function: MIRFunctionID?,
-    span: Span,
-    message: String,
-) -> MIROptimizationError Never! {
-    MIROptimizationError{pass: pass, kind: kind, function: function, span: span, message: message}
-}
 
 fn mir_optimizer_failed(error: MIROptimizationError, report: MIROptimizationReport) -> MIROptimizationResult Never! {
     MIROptimizationResult{program: None, report: report, error: Val(error), complete: false}
@@ -112,8 +117,11 @@ fn mir_optimizer_succeeded(program: MIRProgram, report: MIROptimizationReport) -
 // MIROptimization `validate_after`).
 pub fn optimize_mir_program(program: ^MIRProgram, full_verification: Bool) -> MIROptimizationResult {
     report := mir_optimizer_empty_report()
+    pipeline_before :: if canonical_pass_enabled() -> Val(mir_canonical_payload(program)) else -> None
+    pipeline_identity_before :: if canonical_pass_enabled() -> Val(mir_canonical_identity(program)) else -> None
     validation := mir_pass_check(program, .LegalityVerification, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
+    mir_record_canonical_check("mir.legality-verification", "crates/jet-foundation/src/MIROptimization.rs", program)
     if mir_optimizer_has_complete_seal(program) {
         report.completed = mir_optimizer_production_order()
         loop function in program.functions {
@@ -125,59 +133,76 @@ pub fn optimize_mir_program(program: ^MIRProgram, full_verification: Bool) -> MI
         }
         validation = mir_pass_lint(program, .CanonicalLoopFacts)
         if validation == .Val(error) -> return mir_optimizer_failed(error, report)
+        mir_record_canonical_transition("mir.optimize-pipeline", "crates/jet-foundation/src/MIROptimization.rs", ^pipeline_before, ^pipeline_identity_before, program)
         return mir_optimizer_succeeded(program, report)
     }
 
     optimized := ^program
     mir_pass_clear_batch_facts(&optimized)
 
+    before := mir_optimizer_canonical_before(optimized)
     inline_result :: mir_pass_expand_inline_always(&optimized)
     report.inline_calls_expanded = inline_result.expanded
     report.reachable_blocks_removed += inline_result.blocks_removed
     if inline_result.error == .Val(error) -> return mir_optimizer_failed(error, report)
-    mir_pass_mark(&optimized, .LegalityVerification)
+    mir_record_canonical_transition("mir.inline-always", "crates/jet-foundation/src/MIROptimization.rs", ^before.0, ^before.1, optimized)
+    mir_canonical_mark_pass(&optimized, .LegalityVerification)
     &report.completed.push(.LegalityVerification)
     validation = mir_pass_validate_after(optimized, .LegalityVerification, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     before_blocks := mir_pass_block_count(&optimized)
+    before = mir_optimizer_canonical_before(optimized)
     mir_pass_eliminate_unreachable(&optimized)
+    mir_record_canonical_transition("mir.unreachable-block-elimination", "crates/jet-foundation/src/MIROptimization.rs", ^before.0, ^before.1, optimized)
     report.reachable_blocks_removed += before_blocks - mir_pass_block_count(&optimized)
-    mir_pass_mark(&optimized, .UnreachableBlockElimination)
+    mir_canonical_mark_pass(&optimized, .UnreachableBlockElimination)
     &report.completed.push(.UnreachableBlockElimination)
     validation = mir_pass_validate_after(optimized, .UnreachableBlockElimination, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     before_blocks = mir_pass_block_count(&optimized)
+    before = mir_optimizer_canonical_before(optimized)
     mir_pass_simplify_cfg(&optimized)
+    mir_record_canonical_transition("mir.cfg-simplification", "crates/jet-foundation/src/MIROptimization.rs", ^before.0, ^before.1, optimized)
     report.reachable_blocks_removed += before_blocks - mir_pass_block_count(&optimized)
-    mir_pass_mark(&optimized, .CFGSimplification)
+    mir_canonical_mark_pass(&optimized, .CFGSimplification)
     &report.completed.push(.CFGSimplification)
     validation = mir_pass_validate_after(optimized, .CFGSimplification, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
+    before = mir_optimizer_canonical_before(optimized)
     report.folded_values = mir_pass_fold_exact_constants(&optimized)
-    mir_pass_mark(&optimized, .ExactConstantFolding)
+    mir_record_canonical_transition("mir.exact-constant-folding", "crates/jet-foundation/src/MIROptimization.rs", ^before.0, ^before.1, optimized)
+    mir_canonical_mark_pass(&optimized, .ExactConstantFolding)
     &report.completed.push(.ExactConstantFolding)
     validation = mir_pass_validate_after(optimized, .ExactConstantFolding, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
+    before = mir_optimizer_canonical_before(optimized)
     report.bounds_facts = mir_pass_derive_bounds(&optimized)
-    mir_pass_mark(&optimized, .BoundsCheckElimination)
+    mir_record_canonical_transition("mir.bounds-check-elimination", "crates/jet-foundation/src/MIROptimization.rs", ^before.0, ^before.1, optimized)
+    mir_canonical_mark_pass(&optimized, .BoundsCheckElimination)
     &report.completed.push(.BoundsCheckElimination)
     validation = mir_pass_validate_after(optimized, .BoundsCheckElimination, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
+    before = mir_optimizer_canonical_before(optimized)
     report.dead_values_removed = mir_pass_eliminate_dead_pure(&optimized)
-    mir_pass_mark(&optimized, .DeadPureValueElimination)
+    mir_record_canonical_transition("mir.dead-pure-value-elimination", "crates/jet-foundation/src/MIROptimization.rs", ^before.0, ^before.1, optimized)
+    mir_canonical_mark_pass(&optimized, .DeadPureValueElimination)
     &report.completed.push(.DeadPureValueElimination)
     validation = mir_pass_validate_after(optimized, .DeadPureValueElimination, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
+    before = mir_optimizer_canonical_before(optimized)
     loop_counts :: mir_pass_derive_loop_and_vector_facts(&optimized)
+    mir_record_canonical_transition("mir.canonical-loop-facts", "crates/jet-foundation/src/MIROptimization.rs", ^before.0, ^before.1, optimized)
     report.loop_facts = loop_counts.loops
     report.vector_facts = loop_counts.vectors
+    before = mir_optimizer_canonical_before(optimized)
     reduction_counts := mir_pass_fixed_reduction_normalize(&optimized)
+    mir_record_canonical_transition("mir.fixed-reduction-normalization", "crates/jet-foundation/src/MIROptimization.rs", ^before.0, ^before.1, optimized)
     report.fixed_reductions_normalized += reduction_counts.normalized
     report.reachable_blocks_removed += reduction_counts.blocks_removed
     report.dead_values_removed += reduction_counts.dead_values_removed
@@ -189,13 +214,17 @@ pub fn optimize_mir_program(program: ^MIRProgram, full_verification: Bool) -> MI
     report.reachable_blocks_removed += reduction_counts.blocks_removed
     report.dead_values_removed += reduction_counts.dead_values_removed
     report.bounds_facts = mir_pass_derive_bounds(&optimized)
-    mir_pass_mark(&optimized, .CanonicalLoopFacts)
+    mir_canonical_mark_pass(&optimized, .CanonicalLoopFacts)
     &report.completed.push(.CanonicalLoopFacts)
     validation = mir_pass_validate_after(optimized, .CanonicalLoopFacts, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
+    before = mir_optimizer_canonical_before(optimized)
     report.acceleration_facts = mir_pass_refresh_acceleration_facts(&optimized)
+    mir_record_canonical_transition("mir.acceleration-facts", "crates/jet-foundation/src/MIROptimization.rs", ^before.0, ^before.1, optimized)
+    before = mir_optimizer_canonical_before(optimized)
     mir_pass_canonicalize_program_order(&optimized)
+    mir_record_canonical_transition("mir.canonical-program-order", "crates/jet-foundation/src/MIROptimization.rs", ^before.0, ^before.1, optimized)
     if full_verification {
         validation = mir_pass_validate_program(optimized, .CanonicalLoopFacts)
         if validation == .Val(error) -> return mir_optimizer_failed(error, report)
@@ -206,6 +235,7 @@ pub fn optimize_mir_program(program: ^MIRProgram, full_verification: Bool) -> MI
     mir_pass_sort_decision_rows_for_program(&optimized)
     digest :: mir_program_digest(optimized)
     loop index in 0..<optimized.functions.len() -> optimized.functions[index].optimization.derived_from_digest = Val(digest)
+    mir_record_canonical_transition("mir.optimize-pipeline", "crates/jet-foundation/src/MIROptimization.rs", ^pipeline_before, ^pipeline_identity_before, optimized)
     mir_optimizer_succeeded(optimized, report)
 }
 
@@ -241,23 +271,9 @@ fn mir_pass_name(pass: MIROptimizationPassID) -> String Never! {
     }
 }
 
-// Only a program whose every function carries the complete pass order and a
-// seal can skip the pipeline, so the program is digested only then.
+// A checksummed producer's seal is read, not recomputed across the graph.
 fn mir_optimizer_has_complete_seal(program: MIRProgram) -> Bool {
-    if program.functions.len() == 0 -> return false
-    expected :: mir_optimizer_production_order()
-    loop function in program.functions {
-        if function.optimization.derived_from_digest == None -> return false
-        if function.optimization.pass_ids.len() != expected.len() -> return false
-        loop (index, pass_id) in expected {
-            if function.optimization.pass_ids[index] != pass_id -> return false
-        }
-    }
-    digest :: mir_program_digest(program)
-    loop function in program.functions {
-        if function.optimization.derived_from_digest != Val(digest) -> return false
-    }
-    true
+    mir_sealed_program_digest(program) != None
 }
 
 fn mir_pass_clear_batch_facts(program: &MIRProgram) Never! {
@@ -278,8 +294,9 @@ fn mir_pass_clear_batch_facts(program: &MIRProgram) Never! {
     }
 }
 
-fn mir_pass_mark(program: &MIRProgram, pass: MIROptimizationPassID) Never! {
-    loop index in 0..<program.functions.len() -> &program.functions[index].optimization.pass_ids.push(pass)
+fn mir_optimizer_canonical_before(program: MIRProgram) -> (String?, String?) Never! {
+    if !canonical_pass_enabled() -> return (None, None)
+    (Val(mir_canonical_payload(program)), Val(mir_canonical_identity(program)))
 }
 
 fn mir_pass_block_count(program: &MIRProgram) -> Int Never! {

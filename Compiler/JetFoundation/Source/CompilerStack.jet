@@ -1,0 +1,249 @@
+// PORT-PENDING 0059 crates-jet-foundation-src-compilerstack-module-group: crates/jet-foundation/src/CompilerStack.rs:1-245
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! The explicit stack every compiler entry point runs on.
+//RS //!
+//RS //! Lowering is a recursive descent over user syntax, so the frame budget is
+//RS //! per nesting level, never per program size — and the front end already caps
+//RS //! that depth: [`crate::Diagnostics::MAX_SOURCE_NESTING`] (256) is the deepest
+//RS //! nesting sema and the TIR evaluator accept, deeper source is reported as
+//RS //! `E1403`. So the worst case a valid program can demand is bounded
+//RS //! arithmetic, not a guess. Measured per level: ~144 KiB for TIR lowering
+//RS //! (per method-call level) and ~51 KiB for Cranelift lowering (per expression
+//RS //! level).
+//RS //!
+//RS //! * 256 x 144 KiB = 36 MiB — deepest TIR lowering alone
+//RS //! * 256 x 51 KiB = 12.75 MiB — deepest Cranelift lowering alone
+//RS //! * 256 x 195 KiB = 48.75 MiB — a program paying both at every level
+//RS //!
+//RS //! # Why this crate owns it
+//RS //!
+//RS //! * `jet-sema` — the checked-bundle/effect-facts funnel
+//RS //! * `jet-driver` — the compile/check/run funnels, and the loader funnel every
+//RS //!   public `Loader::load_entry*` shares
+//RS //! * `jet-codegen` — checked TIR lowering, MIR lowering, and MIR optimization
+//RS //! * `jet-jit` — its public MIR execution entries
+//RS //! Installing at those funnels rather than at their callers is the whole
+//RS //! point. Each one is public API, so an embedder holding its own bundle, a
+//RS //! test harness, or the LSP reaches the recursive descent on whatever stack it
+//RS //! happens to have — and wrapping callers one at a time never converges,
+//RS //! because the overflow just moves to the next unwrapped caller.
+//RS //!
+//RS //! I6 keeps the seam one-directional — `jet-jit` must not depend on
+//RS //! `jet-driver`, and `jet-sema` depends on neither — so the flag lives in the
+//RS //! deepest crate all four take a path dependency on. That is the same reason
+//RS //! the `JitBackend` / `RunOutcome` execution seam lives here rather than in
+//RS //! any one side.
+//RS 
+//RS use std::cell::Cell;
+//RS 
+//RS thread_local! {
+//RS     /// Set on the worker itself, never on the thread that spawned it:
+//RS     /// thread-locals do not cross a spawn, so the flag has to be established
+//RS     /// by the code that runs with the big stack.
+//RS     static ON_COMPILER_WORKER: Cell<bool> = const { Cell::new(false) };
+//RS }
+//RS 
+//RS /// 192 MiB covers the deepest accepted source nesting through sema. Nested
+//RS /// ordinary calls recurse through `check_call_inner`; that function's frame
+//RS /// is ~680 KiB per level (measured: 96 nested `id(id(...))` overflowed 64 MiB).
+//RS /// 256 × 680 KiB = 170 MiB, with room for parser/TIR/Cranelift frames riding
+//RS /// along. A thread stack is reserved address space committed page by page, so
+//RS /// an ordinary compile still touches only the pages it uses.
+//RS ///
+//RS /// The budget is recursion depth only; unwind space is not a second term.
+//RS /// Both unwind phases run on the panicking thread's own stack, so a raise
+//RS /// that runs out of it faults on the guard page and std's per-thread handler
+//RS /// says so: `thread '<name>' has overflowed its stack`, then
+//RS /// `fatal runtime error: stack overflow` (`std::sys::pal::unix::stack_overflow`).
+//RS /// That text is the only abort this number can answer for.
+//RS ///
+//RS /// `fatal runtime error: failed to initiate panic, error 5` is a different
+//RS /// defect and a bigger stack cannot move it. Error 5 is `_URC_END_OF_STACK`
+//RS /// (`library/unwind/src/types.rs`), which libgcc's phase-1 loop returns when
+//RS /// it walked off the top of the stack without finding a *handler*
+//RS /// (`unwind.inc` -> `uw_frame_state_for`): a panic raised where no
+//RS /// `catch_unwind` is above it at all. Two sources produce it.
+//RS ///
+//RS /// The first is a thread-local destructor — glibc runs those from
+//RS /// `__call_tls_dtors` after the thread's Rust entry frame and its
+//RS /// `catch_unwind` have already returned, which is also why the
+//RS /// `extern "C" destroy` shim does not convert it into the "non-unwinding
+//RS /// panic" abort: that shim is a phase-2 cleanup pad, and phase 2 never starts.
+//RS ///
+//RS /// The second is a Cranelift JIT frame. `cranelift-jit` registers no unwind
+//RS /// information for the code it emits, so phase 1 cannot walk past one and any
+//RS /// outer `catch_unwind` is unreachable even though it exists. That class is
+//RS /// fixed at the boundary, not here: `jet-jit`'s `host_seam` generates an
+//RS /// `extern "C"` shim per host symbol that catches and converts inside its own
+//RS /// C frame (#1997). If you are reading this because you saw error 5, check
+//RS /// which of the two you have before touching this number — neither is a
+//RS /// stack-space condition, and this constant answers for exactly one abort,
+//RS /// the `has overflowed its stack` pair above.
+//RS pub const COMPILER_STACK_SIZE: usize = 192 * 1024 * 1024;
+//RS 
+//RS /// Raising the accepted nesting depth must raise the stack that lowers it.
+//RS const _: () = assert!(
+//RS     COMPILER_STACK_SIZE >= crate::Diagnostics::MAX_SOURCE_NESTING * 680 * 1024,
+//RS     "the compiler worker stack must cover the deepest nesting the front end accepts",
+//RS );
+//RS 
+//RS /// Whether this thread already *is* a compiler worker.
+//RS ///
+//RS /// Callers that carry thread-local state across the boundary check this first
+//RS /// so they skip the capture/restore dance entirely on the inline path.
+//RS pub fn on_compiler_worker() -> bool {
+//RS     ON_COMPILER_WORKER.with(Cell::get)
+//RS }
+//RS 
+//RS /// Run `work` with the compiler's stack budget.
+//RS ///
+//RS /// Re-entrant by construction: on a thread that already has the budget the
+//RS /// closure runs inline, so the boundary can be installed at *every* public
+//RS /// entry without any path ever nesting two workers. That is what removes the
+//RS /// whack-a-mole — an entry does not have to know whether some outer entry
+//RS /// already crossed.
+//RS ///
+//RS /// This primitive carries no thread-local state of its own. Each installing
+//RS /// crate knows which of its own thread-locals the work reads or publishes and
+//RS /// wraps this with exactly that capture/restore: `jet_driver::run_compiler_work`
+//RS /// and `Sema::check_bundle_opts_for_output_with_context` carry the comptime
+//RS /// ambient hooks; checked TIR is lowered once to MIR, optimized, and handed
+//RS /// to the `JitBackend`; and `jet_jit::on_compiler_stack` carries the trace
+//RS /// flags, the tier rows and the `core.perf` fidelity signal. Each checks
+//RS /// [`on_compiler_worker`] before capturing, so the inline path stays
+//RS /// allocation-free.
+//RS ///
+//RS /// A worker's storage lasts one outermost call, so an installing crate owes the
+//RS /// capture/restore not only to state a caller sets up or inspects around the
+//RS /// call, but to any thread-local whose contract is *per session* — state a
+//RS /// later call on the same caller thread is entitled to read. Such state is
+//RS /// lent to the worker and taken back (`jet_jit`'s fidelity signal), or the
+//RS /// session owner installs this boundary once around the whole session so every
+//RS /// call runs inline on one worker (`jet_jit`'s resident module, live heap and
+//RS /// `crate::Persist` store). Making it process-wide instead is not a third
+//RS /// option: that leaks one session into a concurrent unrelated one.
+//RS ///
+//RS /// Values and panics both cross unchanged. The value rides out through
+//RS /// `join`; a panic is captured on the worker with `catch_unwind` and re-raised
+//RS /// on the caller with `resume_unwind`, so the caller observes the original
+//RS /// payload at the original panic location — the ICE path and the diagnostics a
+//RS /// caller catches keep their shape instead of being reshaped into an error.
+//RS ///
+//RS /// The capture sits directly around `work`, not on the join result, so the
+//RS /// transport owes nothing to `std::thread::scope`'s internals. The worker never
+//RS /// dies panicking, `ScopeData::a_thread_panicked` is never set, and `scope` can
+//RS /// never substitute its own `"a scoped thread panicked"` payload for the
+//RS /// compiler's. `resume_unwind` then runs on the caller's own frame, outside the
+//RS /// scope, so the caller's unwind is raised exactly once, by us.
+//RS ///
+//RS /// What the boundary cannot move is the panic *hook*: it runs at panic time, on
+//RS /// the worker, before any payload crosses back. A hook that reads thread-local
+//RS /// state therefore reads the worker's — that is why a compiler panic's message
+//RS /// lands outside libtest's per-test output capture, and why
+//RS /// `JET_SCHEDULER_CATCHING_PANIC` (`jet-codegen/src/Prelude/Scheduler.rs`) is
+//RS /// read on the worker rather than on the caller. `resume_unwind` deliberately
+//RS /// does not run the hook a second time.
+//RS pub fn run_on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+//RS     if on_compiler_worker() {
+//RS         return work();
+//RS     }
+//RS     let outcome = std::thread::scope(|scope| {
+//RS         let worker = std::thread::Builder::new()
+//RS             .name("jet-compiler".to_string())
+//RS             .stack_size(COMPILER_STACK_SIZE)
+//RS             .spawn_scoped(scope, move || {
+//RS                 ON_COMPILER_WORKER.with(|active| active.set(true));
+//RS                 // Asserted, not proven: the payload is re-raised immediately
+//RS                 // and unchanged, so no caller ever observes state this panic
+//RS                 // left behind without unwinding through it itself.
+//RS                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+//RS             })
+//RS             .unwrap_or_else(|error| crate::ice!(None, "could not start compiler worker: {error}"));
+//RS         // An outer `Err` is a panic raised after `work` returned, by the thread
+//RS         // epilogue itself; fold it into the one channel.
+//RS         worker.join().unwrap_or_else(Err)
+//RS     });
+//RS     outcome.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+//RS }
+//RS 
+//RS /// Run `work` on every job on up to `workers` compiler-stack threads and
+//RS /// return the results in job order.
+//RS ///
+//RS /// Each worker is a compiler worker (the `COMPILER_STACK_SIZE` stack and the
+//RS /// re-entrancy flag), so compiler entries reached from `work` run inline on
+//RS /// it. Workers take the next unclaimed job, so uneven job sizes still spread
+//RS /// across them; the results come back in job order whatever order the
+//RS /// workers finished in, which keeps the caller's output deterministic.
+//RS ///
+//RS /// As in [`run_on_compiler_stack`], this primitive carries no thread-local
+//RS /// state: `work` installs whatever caller context it reads. A panic in any
+//RS /// job is re-raised on the caller with `resume_unwind` after every worker has
+//RS /// stopped; when several jobs panic, the one with the lowest job index wins,
+//RS /// so the reported failure does not depend on scheduling either.
+//RS ///
+//RS /// With one worker or at most one job, the jobs run inline on the calling
+//RS /// thread, in order.
+//RS pub fn map_on_compiler_workers<T: Send, R: Send>(
+//RS     jobs: Vec<T>,
+//RS     workers: usize,
+//RS     work: impl Fn(T) -> R + Sync,
+//RS ) -> Vec<R> {
+//RS     let count = jobs.len();
+//RS     let workers = workers.min(count);
+//RS     if workers <= 1 {
+//RS         return jobs.into_iter().map(work).collect();
+//RS     }
+//RS     let slots = jobs
+//RS         .into_iter()
+//RS         .map(|job| std::sync::Mutex::new(Some(job)))
+//RS         .collect::<Vec<_>>();
+//RS     let results = (0..count)
+//RS         .map(|_| std::sync::Mutex::new(None))
+//RS         .collect::<Vec<std::sync::Mutex<Option<std::thread::Result<R>>>>>();
+//RS     let next = std::sync::atomic::AtomicUsize::new(0);
+//RS     std::thread::scope(|scope| {
+//RS         for index in 0..workers {
+//RS             let (slots, results, next, work) = (&slots, &results, &next, &work);
+//RS             std::thread::Builder::new()
+//RS                 .name(format!("jet-compiler-{index}"))
+//RS                 .stack_size(COMPILER_STACK_SIZE)
+//RS                 .spawn_scoped(scope, move || {
+//RS                     ON_COMPILER_WORKER.with(|active| active.set(true));
+//RS                     loop {
+//RS                         let job_index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS                         let Some(slot) = slots.get(job_index) else {
+//RS                             break;
+//RS                         };
+//RS                         let job = slot
+//RS                             .lock()
+//RS                             .unwrap_or_else(std::sync::PoisonError::into_inner)
+//RS                             .take()
+//RS                             .expect("each job index is claimed once");
+//RS                         // Caught per job, so one panicking job leaves this
+//RS                         // worker free to finish the rest of the batch.
+//RS                         let outcome =
+//RS                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(job)));
+//RS                         *results[job_index]
+//RS                             .lock()
+//RS                             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(outcome);
+//RS                     }
+//RS                 })
+//RS                 .unwrap_or_else(|error| crate::ice!(None, "could not start compiler worker: {error}"));
+//RS         }
+//RS     });
+//RS     results
+//RS         .into_iter()
+//RS         .map(|slot| {
+//RS             match slot
+//RS                 .into_inner()
+//RS                 .unwrap_or_else(std::sync::PoisonError::into_inner)
+//RS                 .expect("every job ran before the workers joined")
+//RS             {
+//RS                 Ok(result) => result,
+//RS                 Err(payload) => std::panic::resume_unwind(payload),
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+// END-PORT-PENDING 0059 crates/jet-foundation/src/CompilerStack.rs:1-245
+

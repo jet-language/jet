@@ -2,6 +2,7 @@
 // control-flow constructs whose TIR carries no registry-owned facts.
 use jet_foundation.[
     AccessConvention,
+    ArithmeticPolicyFact,
     BinOp,
     BindName,
     BindPattern,
@@ -19,6 +20,7 @@ use jet_foundation.[
     OrFallback,
     Pattern,
     PlaceAccess,
+    PolicyKey,
     Span,
     Stmt,
     SwitchArm,
@@ -69,6 +71,7 @@ use jet_foundation.[
     ast_empty_lambda_meta,
     expr_span,
     measure_literal_value,
+    stmt_span,
     symbol_id,
     tir_expr_children,
     tir_generated_local,
@@ -182,7 +185,7 @@ fn sema_stmt_tir_block_can_fall_through(statements: [TStmt]) -> Bool Never! {
 
 // Rust `stream_element_type` reads the declared return type. The scope holds
 // the effective return, where a plain `Stream<T>` became
-// `Stream<T> Err!` (`sema_effective_return_type`), so that carrier is unwrapped.
+// `Stream<T> Err!` (Foundation failure projection), so that carrier is unwrapped.
 fn sema_stmt_stream_element_type(return_type: Type?) -> Type? {
     resolved :: return_type ?? return None
     if resolved == {
@@ -1558,7 +1561,7 @@ fn sema_stmt_call_return_views_at(span: Span, context: SemaCheckContext) -> [Sem
 fn sema_stmt_call_return_views_for_expr(expr: Expr, context: SemaCheckContext) -> [SemaCallReturnViewFact] {
     if expr == {
         .Call(call) -> return sema_stmt_call_return_views_at(call.name_span, context)
-        .MethodCall(_, _, method_span, _, _, _, _, _, _, _) | .OptMethodCall(_, _, method_span, _, _, _) -> return sema_stmt_call_return_views_at(method_span, context)
+        .MethodCall(_, _, method_span, _, _, _, _, _, _, _) | .OptMethodCall(_, _, method_span, _, _, _, _, _) -> return sema_stmt_call_return_views_at(method_span, context)
         .CallValue(_, _, span) -> return sema_stmt_call_return_views_at(span, context)
         .Paren(value, _) | .Place(value, _, _) | .Tainted(value, _, _) | .Try(value, _, _, _) | .Present(value, _) | .Ok(value, _) -> return sema_stmt_call_return_views_for_expr(value, context)
         .Field(base, member, _) | .OptField(base, member, _, _, _) -> {
@@ -1834,7 +1837,7 @@ fn sema_stmt_destructure_names(pattern: BindPattern) -> [BindName] Never! {
     if pattern == {
         .Struct(_, _, fields, _, _) -> fields
         .List(elements, _) | .Tuple(elements, _) -> elements
-        .Refutable(_, _, names, _) -> names
+        .Refutable(_, _, names, _, _) -> names
     }
 }
 
@@ -2056,7 +2059,7 @@ fn sema_stmt_refutable_expr_can_break(expr: Expr, nested_labels: [String], allow
 fn sema_stmt_refutable_binding_can_break(binding: Binding, nested_labels: [String], allow_unlabelled: Bool) -> Bool Never! {
     if binding.pattern == .Val(pattern) {
         if pattern == {
-            .Refutable(_, fallback, _, _) -> {
+            .Refutable(_, fallback, _, _, _) -> {
                 if sema_stmt_refutable_fallback_can_break(fallback, nested_labels, allow_unlabelled) -> return true
             }
             else -> {}
@@ -2335,12 +2338,12 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
     result
 }
 
-fn sema_stmt_check_refutable_binding(binding: Binding, pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+fn sema_stmt_check_refutable_binding(binding: Binding, pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span, synthesized: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     before := diagnostics.len()
     // D-FAILURE-FOUNDATION1=A: an `.Ok`/`.Err` pattern consumes the carrier.
     subject_value :: if sema_pattern_consumes_result_carrier(pattern) -> sema_check_expression_carrier(binding.init, binding.ty, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(binding.init, binding.ty, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     subject :: subject_value ?? {
-        sema_stmt_destructure_recover(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names, span: span}, binding.mutable, environment, &scopes, &state, &diagnostics)
+        sema_stmt_destructure_recover(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names, span: span, synthesized: synthesized}, binding.mutable, environment, &scopes, &state, &diagnostics)
         return None
     }
     checked_pattern := sema_check_pattern(subject, sema_stmt_refutable_contextual_pattern(pattern, subject.ty, environment), TPatternPosition.Binding, binding.mutable, false, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2446,7 +2449,7 @@ fn sema_stmt_check_else_complement(names: [BindName], body: [Stmt], span: Span, 
 
 fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if pattern == {
-        .Refutable(inner, fallback, names, span) -> return sema_stmt_check_refutable_binding(binding, inner, fallback, names, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Refutable(inner, fallback, names, span, synthesized) -> return sema_stmt_check_refutable_binding(binding, inner, fallback, names, span, synthesized, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> {}
     }
     before := diagnostics.len()
@@ -2570,7 +2573,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
                 }
             }
         }
-        .Refutable(_, _, _, _) -> return None
+        .Refutable(_, _, _, _, _) -> return None
     }
     locals := [TLocal]{}
     binds := [TDestructureBinding]{}
@@ -2604,7 +2607,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
         .Struct(_, _, _, _, _) -> Val(TStmt.StructDestructure{temp: temp, init: init, move_fields: move_fields, binds: binds, span: span})
         .Tuple(_, _) -> Val(TStmt.TupleDestructure{temp: temp, init: init, move_fields: move_fields, binds: binds, span: span})
         .List(_, _) -> Val(TStmt.ListDestructure{temp: temp, init: init, count: names.len(), file: environment.source_file, line: sema_source_line_at(environment.source_segments, span) ?? 0, elements: locals, span: span})
-        .Refutable(_, _, _, _) -> None
+        .Refutable(_, _, _, _, _) -> None
     }
 }
 
@@ -3464,6 +3467,19 @@ fn sema_stmt_check_reactive(body: [Stmt], span: Span, environment: SemaScopeEnvi
 }
 
 fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, body: [Stmt], dsl: Bool, span: Span, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> TStmt? {
+    // Rust CheckerCore/statements.rs: Arithmetic is a lexical policy, not
+    // a test scope member; checked operations keep the marker/operation spans.
+    if name == "Arithmetic" {
+        previous :: context.arithmetic_policy
+        mode := if args.len() > 0 -> sema_function_header_arithmetic_mode(args[0]) else -> None
+        if mode == .Val(value) {
+            context.arithmetic_policy = Val(ArithmeticPolicyFact{mode: value, scope_span: span, operation_span: span, operation: None})
+        }
+        nested :: sema_stmt_check_block(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, "arithmetic@{span.start}", loop_depth)
+        context.arithmetic_policy = previous
+        if !nested.complete || mode == None -> return None
+        return Val(TStmt.Inline{body: nested.value, span: span})
+    }
     if dsl {
         dsl_args_valid := args.len() == 0
         if name != "HTML" && args.len() == 1 {
@@ -4112,6 +4128,13 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
             index += 1
             next
         }
+        // Rust CheckerCore/statements.rs::check_stmt_inner. Current locals
+        // are still live; probing never replaces this with module-only scopes.
+        target :: stmt_span(statement)
+        if !sema_marker_rules_check_target(target, environment, &scopes, &state, &tail_store, &context, &diagnostics) -> complete = false
+        if statement == .Val(binding) && binding.meta == .Val(meta) && meta.span != target {
+            if !sema_marker_rules_check_target(meta.span, environment, &scopes, &state, &tail_store, &context, &diagnostics) -> complete = false
+        }
         sema_pin_release_dead(&state, statement, scopes, &tail_store, &context)
         output_start := output.len()
         // #3708: these statements own a failure route of their own (task
@@ -4694,7 +4717,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
             }
             .Unsafe(audit, _, body, span) -> {
                 if {
-                    !sema_effect_check_unsafe_region(audit, span, &diagnostics) -> {
+                    !sema_effect_check_unsafe_region(audit, span, &diagnostics) || !sema_scope_audited_gate_allowed(scopes, PolicyKey.Unsafe, span, &diagnostics) -> {
                         complete = false
                     }
                     else -> {
@@ -4718,18 +4741,26 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 }
             }
             .Impure(reason, _, body, span) -> {
+                policy_allowed :: sema_scope_audited_gate_allowed(scopes, PolicyKey.Impure, span, &diagnostics)
                 if reason == None {
                     &diagnostics.push(sema_lint("L3102", span, "this `#Impure` block has no reason", "every comptime effect gate records why ambient I/O is needed", "add the reason: `#Impure(\"reading build config\") {{ … }}`"))
                 }
                 nested :: sema_stmt_check_block(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, "impure@{span.start}", loop_depth)
                 if {
-                    !nested.complete -> {
+                    !nested.complete || !policy_allowed -> {
                         complete = false
                     }
                     else -> {
                         &output.push(TStmt.Impure{body: nested.value, span: span})
                     }
                 }
+            }
+            // Rust Stmt::AssumeDet: same lexical body and erased region; the
+            // existing effects solver reads its authored suppression spans.
+            .AssumeDet(_, _, body, span) -> {
+                allowed :: sema_scope_audited_gate_allowed(scopes, PolicyKey.Nondeterministic, span, &diagnostics)
+                nested :: sema_stmt_check_block(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, "assume_det@{span.start}", loop_depth)
+                if !allowed || !nested.complete -> complete = false else -> &output.push(TStmt.Region{body: nested.value, span: span})
             }
             .Reactive(body, span) -> {
                 checked := sema_stmt_check_reactive(body, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4814,11 +4845,14 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 }
             }
             .Policy(declarations, body, span) -> {
+                audited_count :: scopes.audited_blocks.len()
+                loop declaration in declarations -> &scopes.audited_blocks.push(declaration)
                 previous_unit_policy := sema_scope_push_unit_policy(&scopes, declarations)
                 previous_copies_policy := sema_string_view_push_copies_policy(&scopes, declarations)
                 nested :: sema_stmt_check_block(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, "policy@{span.start}", loop_depth)
                 sema_scope_pop_unit_policy(&scopes, previous_unit_policy)
                 scopes.copies_explicit = previous_copies_policy
+                loop scopes.audited_blocks.len() > audited_count -> &scopes.audited_blocks.pop()
                 if {
                     !nested.complete -> {
                         complete = false

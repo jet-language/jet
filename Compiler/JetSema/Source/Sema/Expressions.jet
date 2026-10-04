@@ -4,6 +4,9 @@
 use core.math as math
 use jet_foundation.[
     AccessConvention,
+    ArithmeticMode,
+    ArithmeticOperation,
+    ArithmeticPolicyFact,
     BinOp,
     Call,
     CallArg,
@@ -16,7 +19,6 @@ use jet_foundation.[
     Expr,
     Func,
     IntegerWidth,
-    Measure,
     MIRCopyFact,
     OperatorMarker,
     ParamZone,
@@ -57,10 +59,11 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     core_call_typed_signature,
     dimension_display_name,
+    dimension_divide,
     dimension_identity,
+    dimension_multiply,
     expr_span,
     integer_bounds_exact,
-    measure_signed_value,
     symbol_id,
     tir_symbol_local,
     type_identity_equal,
@@ -1368,7 +1371,7 @@ fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
 fn sema_expr_unit_fact(ty: Type, environment: SemaScopeEnvironment) -> SemaRegistrationUnitFact? {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
-    sema_registration_unit_fact_for_type(graph, ty)
+    sema_registration_unit_fact_for_type(graph, ty, environment.module_identity)
 }
 
 
@@ -1541,29 +1544,6 @@ fn sema_expr_unit_conversion_is_finite(source: SemaRegistrationUnitFact, destina
     sema_expr_unit_ratio_is_finite(scale) && sema_expr_unit_ratio_is_finite(offset)
 }
 
-
-fn sema_expr_dimension_add_axis(axes: &[DimensionAxis], name: String, exponent: Int) -> Bool Never! {
-    index := 0
-    loop index < axes.len() {
-        if axes[index].name == name {
-
-            current :: measure_signed_value(axes[index].exponent) ?? return false
-            next := current + exponent
-            if {
-                next == 0 -> {
-                    _ := &axes.remove(index, .Slot)
-                }
-                else -> {
-                    axes[index].exponent = Measure.SignedLiteral{kind: "dimension", value: next}
-                }
-            }
-            return true
-        }
-        index += 1
-    }
-    if exponent != 0 -> &axes.push(DimensionAxis{name: name, exponent: Measure.SignedLiteral{kind: "dimension", value: exponent}})
-    true
-}
 fn sema_expr_unit_quantity_base_is_float(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     if ty == {
         .Quantity(base, _) -> return base == Type.Float
@@ -1571,20 +1551,6 @@ fn sema_expr_unit_quantity_base_is_float(ty: Type, environment: SemaScopeEnviron
     }
     if sema_expr_unit_fact(ty, environment) != None -> return true
     ty == Type.Float
-}
-
-fn sema_expr_dimension_combine(left: Dimension, right: Dimension, multiply: Bool) -> Dimension? {
-    axes := [DimensionAxis]{}
-    loop axis in left.axes {
-        exponent :: measure_signed_value(axis.exponent) ?? return None
-        if !sema_expr_dimension_add_axis(&axes, axis.name, exponent) -> return None
-    }
-    loop axis in right.axes {
-        exponent := measure_signed_value(axis.exponent) ?? return None
-        if !multiply -> exponent = -exponent
-        if !sema_expr_dimension_add_axis(&axes, axis.name, exponent) -> return None
-    }
-    Val(Dimension{axes: axes})
 }
 
 fn sema_expr_unit_dimension(ty: Type, environment: SemaScopeEnvironment) -> Dimension? {
@@ -1726,7 +1692,10 @@ fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
                 sema_expr_unit_arithmetic_mismatch(op, lhs.ty, rhs.ty, span, &diagnostics)
                 return None
             }
-            dimensions :: sema_expr_dimension_combine(left.dimension ?? Dimension{axes: [DimensionAxis]{}}, right.dimension ?? Dimension{axes: [DimensionAxis]{}}, op == BinOp.Mul) ?? {
+            left_dimension_value :: left.dimension ?? Dimension{axes: [DimensionAxis]{}}
+            right_dimension_value :: right.dimension ?? Dimension{axes: [DimensionAxis]{}}
+            combined :: if op == BinOp.Mul -> dimension_multiply(left_dimension_value, right_dimension_value) else -> dimension_divide(left_dimension_value, right_dimension_value)
+            dimensions :: combined ?? {
                 sema_expr_unit_dimension_overflow(op, span, &diagnostics)
                 return None
             }
@@ -1757,7 +1726,8 @@ fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
             }
             left_dim :: left_dimension ?? Dimension{axes: [DimensionAxis]{}}
             right_dim :: right_dimension ?? Dimension{axes: [DimensionAxis]{}}
-            dimensions :: sema_expr_dimension_combine(left_dim, right_dim, op == BinOp.Mul) ?? {
+            combined :: if op == BinOp.Mul -> dimension_multiply(left_dim, right_dim) else -> dimension_divide(left_dim, right_dim)
+            dimensions :: combined ?? {
                 sema_expr_unit_dimension_overflow(op, span, &diagnostics)
                 return None
             }
@@ -2908,6 +2878,28 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
     result
 }
 
+// Rust CheckerInfer/expr.rs::active_arithmetic_policy and policy_call,
+// projected directly to the same TIR OverflowOpt consumed by native lowering.
+fn sema_expr_arithmetic_policy(op: BinOp, lhs: TExpr, rhs: TExpr, ty: Type, span: Span, line: Int, context: SemaCheckContext) -> TExpr? Never! {
+    if ty != .IntN(_, _) -> return None
+    operation :: if op == {
+        .Add -> ArithmeticOperation.Add
+        .Sub -> ArithmeticOperation.Sub
+        .Mul -> ArithmeticOperation.Mul
+        .Pow -> ArithmeticOperation.Pow
+        else -> return None
+    }
+    fact := context.arithmetic_policy ?? return None
+    fact.operation_span = span
+    fact.operation = Val(operation)
+    prefix :: if fact.mode == {
+        .Checked -> "checked_policy"
+        .Wrapping -> "wrapping"
+        .Saturating -> "saturating"
+    }
+    Val(sema_tir_expr(ty, TExprKind.OverflowOpt{prefix: prefix, operation: sema_call_overflow_operation_name(op), line: line, policy: Val(fact), lhs: lhs, rhs: rhs}, span))
+}
+
 fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if op == UnOp.Neg {
         if operand == {
@@ -2933,6 +2925,20 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
                 if !signed {
                     &diagnostics.push(sema_error("E0109", span, "`-` can't negate {type_name(value.ty)}, which is unsigned", "unsigned numbers have no negative values", "use a signed integer type if this value needs a negative result"))
                     return None
+                }
+                if context.arithmetic_policy == .Val(policy) {
+                    zero :: sema_tir_expr(value.ty, TExprKind.IntLit{value: 0, width: None}, span)
+                    fact := policy
+                    fact.operation_span = span
+                    fact.operation = Val(ArithmeticOperation.Neg)
+                    prefix :: if fact.mode == {
+                        .Checked -> "checked_policy"
+                        .Wrapping -> "wrapping"
+                        .Saturating -> "saturating"
+                    }
+                    line :: sema_source_line_at(environment.source_segments, span) ?? 0
+                    result :: sema_tir_expr(value.ty, TExprKind.OverflowOpt{prefix: prefix, operation: "sub", line: line, policy: Val(fact), lhs: zero, rhs: value}, span)
+                    return sema_expr_expected(result, expected, environment, &diagnostics)
                 }
             }
             else -> {}
@@ -3145,6 +3151,8 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         return None
     }
     ty :: sema_expr_binary_type(op, effective_lhs.ty, effective_rhs.ty, span, &diagnostics) ?? return None
+    policy_value :: sema_expr_arithmetic_policy(op, effective_lhs, effective_rhs, ty, span, line, context)
+    if policy_value == .Val(value) -> return sema_expr_expected(value, expected, environment, &diagnostics)
     overflow := false
     if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && (sema_expr_is_integer(effective_lhs.ty) || sema_expr_is_integer(effective_rhs.ty)) -> overflow = true
     if op == BinOp.Pow && sema_expr_is_integer(effective_lhs.ty) -> overflow = true
@@ -3352,7 +3360,7 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
         .Slice(base, start, end, range, span) -> sema_expression_slice(base, start, end, range, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Field(base, member, span) -> sema_expression_field(base, member, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .OptField(base, member, member_span, _, span) -> sema_expression_optional_field(base, member, member_span, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .OptMethodCall(receiver, method, method_span, type_args, args, span) -> sema_expression_optional_method_call(receiver, method, method_span, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .OptMethodCall(receiver, method, method_span, type_args, args, span, receiver_span, _) -> sema_expression_optional_method_call(receiver, method, method_span, type_args, args, span, receiver_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Deref(value, span) -> sema_expression_deref(value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Place(value, access, span) -> {
             if scopes.ownership_call_depth == 0 && !sema_ownership_check_expression(&state, expr, scopes, &diagnostics) -> return None

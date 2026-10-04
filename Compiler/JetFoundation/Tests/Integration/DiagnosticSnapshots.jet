@@ -1,0 +1,1758 @@
+// PORT-PENDING 1039 tests-diagnostic-snapshots: tests/diagnostic_snapshots.rs:1-1754
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Snapshot tests for every user-facing diagnostic (invariant I4): errors
+//RS //! (tests/ui/*.jet + .stderr) and ownership lints (tests/ui_lint/*.jet +
+//RS //! .warn), both driven by the same `UPDATE_EXPECT` snapshot harness.
+//RS //!
+//RS //! Each flat tests/ui/NAME.jet has a sibling NAME.stderr holding the exact
+//RS //! rendered output. A directory fixture uses `run.jet` or legacy `main.jet`
+//RS //! plus `stderr`, or
+//RS //! `workspace.jet` + tests/ui/NAME.stderr. Each tests/ui_lint/NAME.jet has a
+//RS //! sibling NAME.warn.
+//RS //! To update after an INTENTIONAL wording change:
+//RS //!
+//RS //!     JET_UI_FILTER=tests/ui/NAME.jet UPDATE_EXPECT=tests/ui/NAME.jet \
+//RS //!       cargo test --test diagnostic_snapshots ui_snapshots
+//RS //!
+//RS //! A reviewed sweep still exists, but `UPDATE_EXPECT=1` now demands
+//RS //! `UPDATE_EXPECT_REASON="<the compiler change that justifies it>"`. Card #2026
+//RS //! measured a blanket sweep (6fd88282b) that rewrote 122 fixtures while
+//RS //! touching zero crate source: a contract rewrite with no author. The reason
+//RS //! names the author.
+//RS //!
+//RS //! Blessing may add or reword a diagnostic; it may never silently drop one.
+//RS //! `write_blessed_snapshot` refuses a write that lowers a fixture's rendered
+//RS //! diagnostic count unless `UPDATE_EXPECT_SHRINK=<fixture>` names that exact
+//RS //! fixture. 6fd88282b dropped five live `E0209` rows from
+//RS //! tests/ui/core_consuming_borrowed_field.stderr that way, and the snapshot
+//RS //! then asserted five clones codegen still inserts.
+//RS //!
+//RS //! Never bless a snapshot you haven't read against the typed diagnostic row.
+//RS //! These files are the product: the error messages ARE the language's UX.
+//RS 
+//RS use std::collections::HashSet;
+//RS use std::fs;
+//RS use std::io::Write;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Stdio};
+//RS use std::sync::{Mutex, OnceLock};
+//RS 
+//RS #[path = "support/case_law.rs"]
+//RS mod case_law;
+//RS mod common;
+//RS use common::{
+//RS     fixture_filter, fixture_matches, jetpack_bin, normalize_fixture_selector, unified_diff,
+//RS     unique_tmp,
+//RS };
+//RS 
+//RS /// Serialize `JET_COMPILER_EXTENSION` mutations across UI/lint snapshot
+//RS /// threads (same race the driver unit tests already lock).
+//RS fn compiler_extension_env_lock() -> &'static Mutex<()> {
+//RS     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+//RS     LOCK.get_or_init(|| Mutex::new(()))
+//RS }
+//RS 
+//RS struct CompilerExtensionEnvRestore(Option<std::ffi::OsString>);
+//RS 
+//RS impl Drop for CompilerExtensionEnvRestore {
+//RS     fn drop(&mut self) {
+//RS         match self.0.take() {
+//RS             Some(value) => std::env::set_var("JET_COMPILER_EXTENSION", value),
+//RS             None => std::env::remove_var("JET_COMPILER_EXTENSION"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn compiler_extension_env(
+//RS     compiler_extension: Option<&str>,
+//RS ) -> (
+//RS     std::sync::MutexGuard<'static, ()>,
+//RS     CompilerExtensionEnvRestore,
+//RS ) {
+//RS     if compiler_extension.is_some() {
+//RS         let _ = jetpack_bin();
+//RS     }
+//RS     let guard = compiler_extension_env_lock()
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     let restore = CompilerExtensionEnvRestore(std::env::var_os("JET_COMPILER_EXTENSION"));
+//RS     match compiler_extension {
+//RS         Some(rel) => {
+//RS             let wasm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
+//RS             std::env::set_var(
+//RS                 "JET_COMPILER_EXTENSION",
+//RS                 wasm.to_str().expect("utf-8 wasm path"),
+//RS             );
+//RS         }
+//RS         None => std::env::remove_var("JET_COMPILER_EXTENSION"),
+//RS     }
+//RS     (guard, restore)
+//RS }
+//RS 
+//RS struct UiFixtureScratch {
+//RS     root: PathBuf,
+//RS     entry: PathBuf,
+//RS }
+//RS 
+//RS impl UiFixtureScratch {
+//RS     fn for_entry(entry: &Path) -> Option<Self> {
+//RS         let fixture_root = entry.parent()?;
+//RS         let state = fixture_root.join("state");
+//RS         if !state.is_dir() {
+//RS             return None;
+//RS         }
+//RS 
+//RS         let base = std::env::var_os("JET_TEST_SCRATCH_DIR")
+//RS             .or_else(|| std::env::var_os("JET_TEST_SCRATCH"))
+//RS             .map(PathBuf::from)
+//RS             .unwrap_or_else(|| {
+//RS                 PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
+//RS                     .join(".cache/jet-test-scratch")
+//RS             });
+//RS         fs::create_dir_all(&base).expect("create UI fixture scratch root");
+//RS         let base = fs::canonicalize(base).expect("canonicalize UI fixture scratch root");
+//RS         let repo = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).expect("canonicalize repo root");
+//RS         assert!(
+//RS             !base.starts_with(&repo) && !base.starts_with("/tmp"),
+//RS             "UI fixture scratch must be outside the repository and disk-backed: {}",
+//RS             base.display()
+//RS         );
+//RS 
+//RS         let stamp = std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .expect("system clock before Unix epoch")
+//RS             .as_nanos();
+//RS         let root = base.join(format!(
+//RS             "ui-fixture-{}-{stamp}",
+//RS             std::process::id()
+//RS         ));
+//RS         fs::create_dir_all(&root).expect("create UI fixture scratch project");
+//RS         copy_ui_fixture_tree(fixture_root, &root, true);
+//RS         let manifest = root.join("package.jet");
+//RS         if !manifest.is_file() {
+//RS             let source = fs::read_to_string(entry).unwrap_or_else(|error| {
+//RS                 panic!(
+//RS                     "read UI fixture entry {}: {error}",
+//RS                     entry.display()
+//RS                 )
+//RS             });
+//RS             let has_inline_package = source
+//RS                 .lines()
+//RS                 .any(|line| line.trim_start().starts_with("package {"));
+//RS             let is_workspace_entry = entry
+//RS                 .file_name()
+//RS                 .and_then(|name| name.to_str())
+//RS                 == Some(jet::Syntax::WORKSPACE_FILE);
+//RS             if !has_inline_package && !is_workspace_entry {
+//RS                 // Without a manifest the plugin export name falls back to the
+//RS                 // entry stem; preserve matching `plugin__<stem>.api` snapshots.
+//RS                 let package_name = entry
+//RS                     .file_stem()
+//RS                     .and_then(|name| name.to_str())
+//RS                     .unwrap_or("ui-fixture-scratch");
+//RS                 let contents = format!("name: \"{package_name}\"\nversion: \"0.1.0\"\n");
+//RS                 fs::write(&manifest, contents).unwrap_or_else(|error| {
+//RS                     panic!(
+//RS                         "write staged UI package manifest {}: {error}",
+//RS                         manifest.display()
+//RS                     )
+//RS                 });
+//RS             }
+//RS         }
+//RS         let jet_state = root.join(".jet");
+//RS         fs::create_dir_all(&jet_state).expect("create staged UI .jet state");
+//RS         copy_ui_fixture_tree(&state, &jet_state, false);
+//RS         Some(Self {
+//RS             entry: root.join(entry.file_name()?),
+//RS             root,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for UiFixtureScratch {
+//RS     fn drop(&mut self) {
+//RS         let _ = fs::remove_dir_all(&self.root);
+//RS     }
+//RS }
+//RS 
+//RS fn copy_ui_fixture_tree(source: &Path, destination: &Path, skip_state: bool) {
+//RS     for item in fs::read_dir(source)
+//RS         .unwrap_or_else(|error| panic!("read UI fixture directory {}: {error}", source.display()))
+//RS         .flatten()
+//RS     {
+//RS         let name = item.file_name();
+//RS         if skip_state && (name == "state" || name == "stderr") {
+//RS             continue;
+//RS         }
+//RS         let from = item.path();
+//RS         let to = destination.join(&name);
+//RS         let file_type = item.file_type().expect("read UI fixture entry type");
+//RS         if file_type.is_dir() {
+//RS             fs::create_dir_all(&to).expect("create copied UI fixture directory");
+//RS             copy_ui_fixture_tree(&from, &to, false);
+//RS         } else if file_type.is_file() {
+//RS             fs::copy(&from, &to).unwrap_or_else(|error| {
+//RS                 panic!(
+//RS                     "copy UI fixture {} -> {}: {error}",
+//RS                     from.display(),
+//RS                     to.display()
+//RS                 )
+//RS             });
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn compiler_extension_env_lock_covers_plain_compile_regions() {
+//RS     let held = compiler_extension_env_lock()
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     let (attempting_tx, attempting_rx) = std::sync::mpsc::channel();
+//RS     let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+//RS     let worker = std::thread::spawn(move || {
+//RS         attempting_tx.send(()).unwrap();
+//RS         let _scope = compiler_extension_env(None);
+//RS         entered_tx.send(()).unwrap();
+//RS     });
+//RS     attempting_rx.recv().unwrap();
+//RS     assert!(
+//RS         entered_rx
+//RS             .recv_timeout(std::time::Duration::from_millis(50))
+//RS             .is_err(),
+//RS         "plain compile region entered while compiler-extension env lock was held"
+//RS     );
+//RS     drop(held);
+//RS     entered_rx
+//RS         .recv_timeout(std::time::Duration::from_secs(1))
+//RS         .expect("plain compile region should enter after env lock release");
+//RS     worker.join().unwrap();
+//RS }
+//RS 
+//RS // ============================================================================
+//RS // Section: error snapshots, tests/ui/*.stderr (was tests/ui.rs)
+//RS // ============================================================================
+//RS 
+//RS #[test]
+//RS fn ui_snapshots() {
+//RS     let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
+//RS     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui");
+//RS     let ext = jet::Syntax::FILE_EXT;
+//RS     let mut entries: Vec<(PathBuf, String)> = Vec::new();
+//RS     for e in fs::read_dir(&dir).unwrap().flatten() {
+//RS         let path = e.path();
+//RS         if path.is_file() && path.extension().and_then(|x| x.to_str()) == Some(ext) {
+//RS             let name = path.file_name().unwrap().to_string_lossy().into_owned();
+//RS             if !name.contains(".fixed.") {
+//RS                 entries.push((path, format!("tests/ui/{}", name)));
+//RS             }
+//RS         } else if path.is_dir() {
+//RS             let entry = ["run", "main"]
+//RS                 .into_iter()
+//RS                 .map(|name| path.join(format!("{name}.{ext}")))
+//RS                 .find(|candidate| candidate.is_file());
+//RS             if let Some(entry) = entry {
+//RS                 let entry_name = entry.file_name().unwrap().to_string_lossy().into_owned();
+//RS                 let rel = format!(
+//RS                     "tests/ui/{}/{}",
+//RS                     path.file_name().unwrap().to_string_lossy(),
+//RS                     entry_name
+//RS                 );
+//RS                 entries.push((entry, rel));
+//RS             } else {
+//RS                 let workspace = path.join(jet::Syntax::WORKSPACE_FILE);
+//RS                 if workspace.is_file() {
+//RS                     let rel = format!(
+//RS                         "tests/ui/{}/{}",
+//RS                         path.file_name().unwrap().to_string_lossy(),
+//RS                         jet::Syntax::WORKSPACE_FILE
+//RS                     );
+//RS                     entries.push((workspace, rel));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     entries.sort_by(|a, b| a.1.cmp(&b.1));
+//RS 
+//RS     let filter = fixture_filter("JET_UI_FILTER");
+//RS     entries.retain(|(_, shown)| fixture_matches(filter.as_deref(), shown));
+//RS     assert!(
+//RS         !entries.is_empty(),
+//RS         "JET_UI_FILTER matched no error fixtures: {}",
+//RS         filter.as_deref().unwrap_or("<unfiltered>")
+//RS     );
+//RS     let update = update_selector();
+//RS     validate_scoped_update(&update, entries.iter().map(|(_, shown)| shown.as_str()));
+//RS 
+//RS     let mut checked = 0;
+//RS     let mut failures = Vec::new();
+//RS     for (path, shown_path) in entries {
+//RS         if shown_path.contains("ffi_bad_path") && !have_cargo {
+//RS             eprintln!(
+//RS                 "note: skipping {} ui snapshot (need cargo for E0705)",
+//RS                 shown_path
+//RS             );
+//RS             checked += 1;
+//RS             continue;
+//RS         }
+//RS         if shown_path.contains("ffi_fetch_failed") && !have_cargo {
+//RS             eprintln!(
+//RS                 "note: skipping {} ui snapshot (need cargo for E0704)",
+//RS                 shown_path
+//RS             );
+//RS             checked += 1;
+//RS             continue;
+//RS         }
+//RS         if shown_path.contains("ffi_no_cargo") && have_cargo {
+//RS             eprintln!(
+//RS                 "note: skipping {} ui snapshot (need no cargo for E0703)",
+//RS                 shown_path
+//RS             );
+//RS             checked += 1;
+//RS             continue;
+//RS         }
+//RS         let src = fs::read_to_string(&path).unwrap();
+//RS 
+//RS         // D-MIGRATE1: if a sibling NAME.published.snapshot exists, install it in a temp
+//RS         // dir and set JET_SCHEMA_CACHE_DIR so the schema diff pass can find the prior snapshot.
+//RS         let snap_path = path.with_extension("published.snapshot");
+//RS         if snap_path.is_file() {
+//RS             let snap_text = fs::read_to_string(&snap_path).unwrap();
+//RS             // Extract type name from the snapshot.
+//RS             let type_name = snap_text
+//RS                 .lines()
+//RS                 .find(|l| l.starts_with("type = "))
+//RS                 .and_then(|l| l.strip_prefix("type = "))
+//RS                 .unwrap_or("Unknown")
+//RS                 .trim()
+//RS                 .to_string();
+//RS             let stamp = std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .expect("system clock before Unix epoch")
+//RS                 .as_nanos();
+//RS             let tmp = PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
+//RS                 .join(".cache/jet-test-scratch")
+//RS                 .join(format!("jet_schema_ui_{}_{}", std::process::id(), stamp));
+//RS             fs::create_dir_all(&tmp).expect("create UI schema fixture cache");
+//RS             fs::write(tmp.join(format!("{}.snapshot", type_name)), &snap_text)
+//RS                 .expect("write UI schema fixture cache");
+//RS             std::env::set_var("JET_SCHEMA_CACHE_DIR", &tmp);
+//RS         } else {
+//RS             std::env::remove_var("JET_SCHEMA_CACHE_DIR");
+//RS         }
+//RS 
+//RS         let staged_fixture = UiFixtureScratch::for_entry(&path);
+//RS         let compile_entry = staged_fixture
+//RS             .as_ref()
+//RS             .map_or(path.as_path(), |fixture| fixture.entry.as_path());
+//RS         let file_arg = compile_entry.to_string_lossy();
+//RS         let render_path = if path.file_name().and_then(|name| name.to_str())
+//RS             == Some(jet::Syntax::WORKSPACE_FILE)
+//RS         {
+//RS             jet::Syntax::WORKSPACE_FILE.to_string()
+//RS         } else {
+//RS             shown_path.clone()
+//RS         };
+//RS         // E2-M15: files marked with `// @no-os` are compiled with the
+//RS         // no-OS profile (E3301 checks enabled).
+//RS         let no_os = src.lines().any(|l| l.trim() == "// @no-os");
+//RS         // I4: `// @all_diags` and workspace fixtures run `check_with_path`.
+//RS         let all_diags = src.lines().any(|l| l.trim() == "// @all_diags")
+//RS             || path.file_name().and_then(|name| name.to_str()) == Some(jet::Syntax::WORKSPACE_FILE);
+//RS         // Card #2389: a marked fixture drives the real `jet check <file>`
+//RS         // command so ownership diagnostics and successful in-package checks
+//RS         // use the user-facing CLI renderer, not a lookalike direct API.
+//RS         let check_cli = src.lines().any(|l| l.trim() == "// @check_cli");
+//RS         // D-ONCE-GATE1=A: files marked with the invocation gate exercise the
+//RS         // same audited policy path as the CLI.
+//RS         let gates = src.lines().any(|l| l.trim() == "// @gate impure=allow");
+//RS         let repl_deny = src.lines().any(|l| l.trim() == "// @repl_deny");
+//RS         // Runtime/interpreter diagnostics still use the same exact snapshot
+//RS         // product contract as front-end diagnostics.
+//RS         let dev_interpreter = src.lines().any(|l| l.trim() == "// @dev_interpreter");
+//RS         // #2906 / E2104: drive the generic cost-projection failure through
+//RS         // the real `jet explain --cost` CLI surface.
+//RS         let cost_cli = src.lines().any(|l| l.trim() == "// @cost_cli");
+//RS         // #2906 / E1250: run an offline build against a pinned, unlocked
+//RS         // scratch package so the fix names the real `jet update jet` command.
+//RS         let jetpack_e1250 = src.lines().any(|l| l.trim() == "// @jetpack_e1250");
+//RS         // D-RTFAIL1: this one fixture deliberately crosses the prepared FFI
+//RS         // bridge in the interpreter. Native FFI remains an explicit boundary
+//RS         // for every other interpreter snapshot.
+//RS         let runtime_ffi = src.lines().any(|l| l.trim() == "// @runtime_ffi");
+//RS         // D-CANCELMODEL1: parent-control cancellation is produced by a live
+//RS         // task wait, so this fixture renders the shared Prelude diagnostic at
+//RS         // the representative wait expression without inventing user syntax.
+//RS         let parent_control_cancel = src.lines().any(|l| l.trim() == "// @parent_control_cancel");
+//RS         // Compiler/tool-generated Jet may use the reserved `__name` lane.
+//RS         // Ordinary fixtures never take this path.
+//RS         let generated_source = src.lines().any(|l| l.trim() == "// @generated_source")
+//RS             && path.parent() == Some(dir.as_path())
+//RS             && path
+//RS                 .file_name()
+//RS                 .and_then(|name| name.to_str())
+//RS                 .is_some_and(|name| name.starts_with("generated_cffi_"));
+//RS         // D-PLUGIN1=B (c81): files marked `// @plugin_target` compile via
+//RS         // `jet build --target=sandbox`'s front end so sandbox-only diagnostics
+//RS         // (E1257-E1260) can exercise the gate.
+//RS         let plugin_target = src.lines().any(|l| l.trim() == "// @plugin_target");
+//RS         // D-PLUGIN1=B / D-DEP-WASM1=A: these fixtures run the real CLI build
+//RS         // so post-compile sandbox diagnostics cover the complete command path.
+//RS         let sandbox_effect = src.lines().any(|l| l.trim() == "// @sandbox_effect");
+//RS         let sandbox_missing_wasm_tools = src
+//RS             .lines()
+//RS             .any(|l| l.trim() == "// @sandbox_missing_wasm_tools");
+//RS         // D-WEBTIR1=A: files marked `// @web_target` compile through the web
+//RS         // preflight so web-only executable-body diagnostics get UI snapshots.
+//RS         let web_target = src.lines().any(|l| l.trim() == "// @web_target");
+//RS         // D-WEBRUN1=A: this fixture must cross the real native-run boundary;
+//RS         // compiling it as a web fixture would miss the empty-success guard.
+//RS         let web_run = src.lines().any(|l| l.trim() == "// @web_run");
+//RS         // D-AUTH-AMBIENT1 / E1803: application authority is decided at the
+//RS         // real `jet run` host boundary, so this fixture crosses that command.
+//RS         let run_cli = src.lines().any(|l| l.trim() == "// @run_cli");
+//RS         // D-WASISRV1=A: a target directive drives the real cross-target sema
+//RS         // path without requiring the UI snapshot process to invoke rustc.
+//RS         let cross_target = src
+//RS             .lines()
+//RS             .find_map(|line| line.trim().strip_prefix("// @target ").map(str::to_owned));
+//RS         // D-BUILDENTRY1: selected-root build diagnostics need programmable
+//RS         // staging, not ordinary runtime compilation.
+//RS         let programmable_build = src.lines().any(|l| l.trim() == "// @programmable_build");
+//RS         // D-CMDOVERRIDE1=A / E3540: package-scope command collisions are
+//RS         // authority diagnostics, so this fixture asks the same checked
+//RS         // Package resolver for its duplicate locations.
+//RS         let command_override_conflict = src
+//RS             .lines()
+//RS             .any(|l| l.trim() == "// @command_override_conflict");
+//RS         let build_grants = src
+//RS             .lines()
+//RS             .find_map(|line| line.trim().strip_prefix("// @build_grants "))
+//RS             .map(|list| {
+//RS                 list.split(',')
+//RS                     .map(|item| item.trim().to_string())
+//RS                     .collect::<Vec<_>>()
+//RS             })
+//RS             .unwrap_or_default();
+//RS         let build_locked = src.lines().any(|line| line.trim() == "// @build_locked");
+//RS         // Hangar diagnostics originate in the real Jetpack command surface,
+//RS         // not Jet source compilation. This directive runs that command against
+//RS         // an isolated root so its exact user-facing output remains I4-pinned.
+//RS         let jetpack_hangar_digest_mismatch = src
+//RS             .lines()
+//RS             .any(|line| line.trim() == "// @jetpack_hangar_digest_mismatch");
+//RS         // D-ENV-FACET1 / E1337: environment module selection is an
+//RS         // environment-model diagnostic, so this fixture drives that same
+//RS         // evaluator while retaining the ordinary UI snapshot contract.
+//RS         let env_facet_missing = src
+//RS             .lines()
+//RS             .any(|line| line.trim() == "// @env_facet_missing");
+//RS         // D-ENVFLAG1 / E1342: the retired compound selector is a teaching
+//RS         // diagnostic from the real Jetpack command surface.
+//RS         let jetpack_retired_environment_flag = src
+//RS             .lines()
+//RS             .any(|line| line.trim() == "// @jetpack_retired_environment_flag");
+//RS         // Card #2195 / E1354: retired store roots teach their `hangar` route.
+//RS         let jetpack_retired_store_verbs = src
+//RS             .lines()
+//RS             .any(|line| line.trim() == "// @jetpack_retired_store_verbs");
+//RS         let retired_gate_flag = src
+//RS             .lines()
+//RS             .any(|line| line.trim() == "// @retired_gate_flag");
+//RS         // Card #2033: run the real opt-in cognitive-complexity lint so the
+//RS         // budget failure and refactored pass stay pinned to CLI behavior.
+//RS         let complexity_cli = src.lines().find_map(|line| {
+//RS             line.trim()
+//RS                 .strip_prefix("// @complexity_cli ")
+//RS                 .map(str::to_owned)
+//RS         });
+//RS         let cli_e0043 = src.lines().any(|line| line.trim() == "// @cli_e0043");
+//RS         let cli_e1219 = src.lines().any(|line| line.trim() == "// @cli_e1219");
+//RS         // D-DBG1=A: a marked fixture drives the real `jet build <file>`, whose
+//RS         // shipped-artifact fact rejects a leftover `debug(...)` trace.
+//RS         let cli_build = src.lines().any(|line| line.trim() == "// @cli_build");
+//RS         let cli_e2101 = src.lines().any(|line| line.trim() == "// @cli_e2101");
+//RS         let typed_settings_cli = src
+//RS             .lines()
+//RS             .any(|line| line.trim() == "// @typed_settings_cli");
+//RS         // Card #1748: this flat fixture carries a manifest sample in a test
+//RS         // directive so the intentional retired spelling is not a live
+//RS         // `package.jet` counted by the migration ratchet.
+//RS         let lint_policy_config = src.lines().find_map(|line| {
+//RS             line.trim()
+//RS                 .strip_prefix("// @lint_policy_config ")
+//RS                 .map(str::to_owned)
+//RS         });
+//RS         // D-WORKSPACELOCK1 / E1202: persisted workspace identity failures
+//RS         // use the same registered diagnostic in tooling and CLI paths.
+//RS         let workspace_lock_e1202 = src
+//RS             .lines()
+//RS             .any(|line| line.trim() == "// @workspace_lock_e1202");
+//RS         // Card #1421 c2 / D-LIB-REUSE1=B / E1338: a `.jetlib` artifact's
+//RS         // compiler-identity stamp is checked before mapping. This fixture
+//RS         // drives the shared stamp check directly against a fixture stamp.
+//RS         let jetlib_version_mismatch = src
+//RS             .lines()
+//RS             .any(|line| line.trim() == "// @jetlib_version_mismatch");
+//RS         // Card #1421 c3 / D-LIB-DYNTRUST1=A / E1339: a `.jetlib` artifact's
+//RS         // declared effects are checked against the load site's grant before
+//RS         // mapping. This fixture drives the shared grant check directly.
+//RS         let jetlib_effect_refused = src
+//RS             .lines()
+//RS             .any(|line| line.trim() == "// @jetlib_effect_refused");
+//RS         // Card #1421 / E1341: the Library resolver must reject an unknown
+//RS         // binding instead of silently dropping it during code generation.
+//RS         let library_invalid_binding = src
+//RS             .lines()
+//RS             .any(|line| line.trim() == "// @library_invalid_binding");
+//RS         // D-DX5-HOOK1 / Tower #549: `// @compiler_extension <repo-relative.wasm>`
+//RS         // sets JET_COMPILER_EXTENSION for this fixture only (no user syntax).
+//RS         let compiler_extension = src.lines().find_map(|line| {
+//RS             line.trim()
+//RS                 .strip_prefix("// @compiler_extension ")
+//RS                 .map(|p| p.trim().to_string())
+//RS         });
+//RS         let (cex_lock, cex_restore) = compiler_extension_env(compiler_extension.as_deref());
+//RS         let actual = if let Some(manifest_source) = lint_policy_config.as_deref() {
+//RS             let diagnostic = jet::Manifest::parse(Path::new("package.jet"), manifest_source)
+//RS                 .expect_err("the lint-policy code fixture must be refused");
+//RS             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
+//RS         } else if typed_settings_cli {
+//RS             run_typed_settings_cli_snapshot(&file_arg)
+//RS         } else if cli_e0043 {
+//RS             run_cli_e0043_snapshot()
+//RS         } else if cli_e1219 {
+//RS             run_cli_e1219_snapshot(&file_arg)
+//RS         } else if cli_build {
+//RS             run_cli_build_snapshot(&file_arg)
+//RS         } else if cli_e2101 {
+//RS             run_cli_e2101_snapshot()
+//RS         } else if jetpack_hangar_digest_mismatch {
+//RS             run_jetpack_hangar_digest_mismatch_snapshot()
+//RS         } else if jetpack_retired_environment_flag {
+//RS             run_jetpack_retired_environment_flag_snapshot()
+//RS         } else if jetpack_retired_store_verbs {
+//RS             run_jetpack_retired_store_verbs_snapshot()
+//RS         } else if retired_gate_flag {
+//RS             run_retired_gate_flag_snapshot(&file_arg)
+//RS         } else if let Some(spec) = complexity_cli.as_deref() {
+//RS             run_complexity_cli_snapshot(&file_arg, spec)
+//RS         } else if env_facet_missing {
+//RS             let diagnostic = jet_env_model::ModuleEval::evaluate_env_with_environment(
+//RS                 &src,
+//RS                 path.parent().expect("environment fixture parent"),
+//RS                 Some("missing"),
+//RS             )
+//RS             .expect_err("missing environment module fixture must fail");
+//RS             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
+//RS         } else if workspace_lock_e1202 {
+//RS             let lock_path = ".jet/lock";
+//RS             let diagnostics = [
+//RS                 jetpack::Lock::e1202_workspace(lock_path),
+//RS                 jetpack::Lock::e1202_workspace_write(lock_path, "permission denied"),
+//RS             ];
+//RS             jet::render_diagnostics(&shown_path, &src, &diagnostics)
+//RS         } else if jetlib_version_mismatch {
+//RS             let stamp = jetpack::JetLib::JetLibStamp {
+//RS                 compiler_version: "0.0.1-old".to_string(),
+//RS                 declared_effects: Default::default(),
+//RS                 ..Default::default()
+//RS             };
+//RS             let diagnostic = jetpack::JetLib::check_compiler_identity(&stamp)
+//RS                 .expect_err("mismatched compiler identity must be refused before mapping");
+//RS             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
+//RS         } else if jetlib_effect_refused {
+//RS             let declared: jetpack::Sema::EffectSet = ["Net".to_string()].into_iter().collect();
+//RS             let stamp = jetpack::JetLib::JetLibStamp::for_this_compiler(declared);
+//RS             let grant: jetpack::Sema::EffectSet = ["FS".to_string()].into_iter().collect();
+//RS             let diagnostics = jetpack::JetLib::check_effect_grant("skyhawk", &stamp, &grant)
+//RS                 .expect_err("an effect outside the grant must be refused before mapping");
+//RS             jet::render_diagnostics(&shown_path, &src, &diagnostics)
+//RS         } else if library_invalid_binding {
+//RS             match jet::compile_library(&file_arg, None) {
+//RS                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+//RS                 Ok(_) => "(no errors)\n".to_string(),
+//RS             }
+//RS         } else if programmable_build {
+//RS             let result = if build_locked {
+//RS                 jet::compile_programmable_build_opts(
+//RS                     &file_arg,
+//RS                     &build_grants,
+//RS                     false,
+//RS                     jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+//RS                     true,
+//RS                     false,
+//RS                     false,
+//RS                     None,
+//RS                 )
+//RS             } else {
+//RS                 jet::compile_programmable_build(&file_arg, &build_grants)
+//RS             };
+//RS             match result {
+//RS                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+//RS                 Ok(_) => "(no errors)\n".to_string(),
+//RS             }
+//RS         } else if command_override_conflict {
+//RS             let root = path.parent().expect("command conflict fixture parent");
+//RS             let resolver = jet::Authority::AuthorityResolver::open(root)
+//RS                 .expect("command conflict fixture authority");
+//RS             let package = resolver
+//RS                 .checked_package(Path::new("."))
+//RS                 .expect("command conflict fixture package")
+//RS                 .facts;
+//RS             let error = package
+//RS                 .resolve_command_entry_checked(&resolver, "run")
+//RS                 .expect_err("command conflict fixture must have duplicate run overrides");
+//RS             let marker = "// @command_override_conflict";
+//RS             let marker_start = src.find(marker).expect("command conflict marker");
+//RS             let diagnostic = jet::Diagnostics::Diagnostic::from_row(
+//RS                 "E3540",
+//RS                 &[("command", "run"), ("locations", error.as_str())],
+//RS                 Some(jet::Diagnostics::Span::new(
+//RS                     marker_start,
+//RS                     marker_start + marker.len(),
+//RS                 )),
+//RS             );
+//RS             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
+//RS         } else if jetpack_e1250 {
+//RS             run_jetpack_e1250_snapshot(&path)
+//RS         } else if cost_cli {
+//RS             run_cost_cli_snapshot(&path)
+//RS         } else if dev_interpreter {
+//RS             match jet::Interpreter::dev_iteration(&file_arg, runtime_ffi, true) {
+//RS                 jet::Interpreter::RunOutcome::Problems(diags) => {
+//RS                     jet::render_diagnostics(&shown_path, &src, &diags)
+//RS                 }
+//RS                 jet::Interpreter::RunOutcome::Ran {
+//RS                     stderr, exit_code, ..
+//RS                 } if exit_code != 0 => stderr,
+//RS                 jet::Interpreter::RunOutcome::Ran { .. } => "(no errors)\n".to_string(),
+//RS             }
+//RS         } else if parent_control_cancel {
+//RS             let cancellation = jet::Codegen::task_group::jet_task_cancellation();
+//RS             let wait_start = src
+//RS                 .find("time.sleep")
+//RS                 .expect("parent-control fixture must name its wait expression");
+//RS             let diagnostic = jet::Diagnostics::Diagnostic::error(
+//RS                 cancellation.code,
+//RS                 cancellation.what.to_string(),
+//RS                 cancellation.why.to_string(),
+//RS                 cancellation.fix.to_string(),
+//RS                 Some(jet::Diagnostics::Span::new(
+//RS                     wait_start,
+//RS                     wait_start + "time.sleep".len(),
+//RS                 )),
+//RS             );
+//RS             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
+//RS         } else if src.lines().any(|line| line.trim() == "// @ambiguous_call") {
+//RS             let call = "put(\"name\", \"text\")";
+//RS             let call_start = src
+//RS                 .find(call)
+//RS                 .expect("ambiguous-call fixture must name its call expression");
+//RS             let diagnostic = jet::Diagnostics::Diagnostic::error(
+//RS                 "E0772",
+//RS                 "this call to `put` matches more than one callable body".to_string(),
+//RS                 "the call binds to multiple candidate signatures:\n  put(name: String, text: String)\n  put(key: String, id: String)".to_string(),
+//RS                 "name the arguments to choose one candidate: `put(name: …, text: …)`".to_string(),
+//RS                 Some(jet::Diagnostics::Span::new(call_start, call_start + call.len())),
+//RS             );
+//RS             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
+//RS         } else if repl_deny {
+//RS             let input = src
+//RS                 .lines()
+//RS                 .filter(|line| !line.trim_start().starts_with("//"))
+//RS                 .filter(|line| !line.trim().is_empty())
+//RS                 .chain(std::iter::once(":quit"))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("\n");
+//RS             let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS                 .args(["repl", "--deny=FS"])
+//RS                 .env("NO_COLOR", "1")
+//RS                 .env("JET_REPL_HISTORY", "off")
+//RS                 .stdin(Stdio::piped())
+//RS                 .stdout(Stdio::null())
+//RS                 .stderr(Stdio::piped())
+//RS                 .spawn()
+//RS                 .expect("start real REPL diagnostic fixture");
+//RS             child
+//RS                 .stdin
+//RS                 .as_mut()
+//RS                 .expect("REPL stdin")
+//RS                 .write_all(input.as_bytes())
+//RS                 .expect("write REPL diagnostic fixture");
+//RS             let output = child
+//RS                 .wait_with_output()
+//RS                 .expect("finish REPL diagnostic fixture");
+//RS             assert!(
+//RS                 output.status.success(),
+//RS                 "REPL diagnostic fixture failed to exit"
+//RS             );
+//RS             String::from_utf8(output.stderr).expect("REPL diagnostic stderr is UTF-8")
+//RS         } else if generated_source {
+//RS             match jet::Driver::compile_generated_src(&src, &file_arg, jet::Sema::CompileMode::Check)
+//RS             {
+//RS                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+//RS                 Ok(_) => "(no errors)\n".to_string(),
+//RS             }
+//RS         } else if check_cli {
+//RS             run_check_cli_snapshot(&path)
+//RS         } else if all_diags {
+//RS             let diags = jet::check_with_path(&file_arg);
+//RS             if diags.is_empty() {
+//RS                 "(no errors)\n".to_string()
+//RS             } else {
+//RS                 jet::render_diagnostics(&render_path, &src, &diags)
+//RS             }
+//RS         } else if no_os {
+//RS             match jet::compile_no_os(&file_arg) {
+//RS                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+//RS                 Ok(_) => "(no errors)\n".to_string(),
+//RS             }
+//RS         } else if gates {
+//RS             match jet::compile_with_gates(
+//RS                 &file_arg,
+//RS                 jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+//RS             ) {
+//RS                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+//RS                 Ok(_) => "(no errors)\n".to_string(),
+//RS             }
+//RS         } else if sandbox_effect {
+//RS             run_sandbox_cli_snapshot(&file_arg, false)
+//RS         } else if sandbox_missing_wasm_tools {
+//RS             run_sandbox_cli_snapshot(&file_arg, true)
+//RS         } else if plugin_target {
+//RS             match jet::compile_plugin(&file_arg) {
+//RS                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+//RS                 Ok(_) => "(no errors)\n".to_string(),
+//RS             }
+//RS         } else if web_run {
+//RS             run_web_run_cli_snapshot(&file_arg)
+//RS         } else if run_cli {
+//RS             run_cli_snapshot(&file_arg)
+//RS         } else if web_target {
+//RS             match jet::compile_web(&file_arg) {
+//RS                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+//RS                 Ok(_) => "(no errors)\n".to_string(),
+//RS             }
+//RS         } else if let Some(target) = cross_target.as_deref() {
+//RS             match jet::compile_with_target_and_gates_and_profile(
+//RS                 &src,
+//RS                 &file_arg,
+//RS                 jet::Policy::GateSet::default(),
+//RS                 Some(target),
+//RS                 "dev",
+//RS             ) {
+//RS                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+//RS                 Ok(_) => "(no errors)\n".to_string(),
+//RS             }
+//RS         } else {
+//RS             match jet::compile_with_path(&src, &file_arg) {
+//RS                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+//RS                 Ok(_) => "(no errors)\n".to_string(),
+//RS             }
+//RS         };
+//RS         drop(cex_restore);
+//RS         drop(cex_lock);
+//RS         let actual = normalize_volatile_ui_snapshot(&shown_path, actual);
+//RS 
+//RS         let is_directory_entry = path
+//RS             .file_name()
+//RS             .and_then(|name| name.to_str())
+//RS             .is_some_and(|name| name == "main.jet" || name == "run.jet");
+//RS         let expect_path = if is_directory_entry {
+//RS             path.parent().unwrap().join("stderr")
+//RS         } else if path.file_name().and_then(|name| name.to_str())
+//RS             == Some(jet::Syntax::WORKSPACE_FILE)
+//RS         {
+//RS             path.parent().unwrap().parent().unwrap().join(format!(
+//RS                 "{}.stderr",
+//RS                 path.parent()
+//RS                     .unwrap()
+//RS                     .file_name()
+//RS                     .unwrap()
+//RS                     .to_string_lossy()
+//RS             ))
+//RS         } else {
+//RS             path.with_extension("stderr")
+//RS         };
+//RS         if should_update(&update, &shown_path) {
+//RS             write_blessed_snapshot(&expect_path, &shown_path, &actual);
+//RS         } else {
+//RS             let expected = fs::read_to_string(&expect_path).unwrap_or_default();
+//RS             if actual != expected {
+//RS                 failures.push(format!(
+//RS                     "ui snapshot mismatch for {shown_path}\n{}",
+//RS                     unified_diff(
+//RS                         &expect_path.to_string_lossy(),
+//RS                         &format!("{shown_path} (actual)"),
+//RS                         &expected,
+//RS                         &actual,
+//RS                     )
+//RS                 ));
+//RS             }
+//RS         }
+//RS         checked += 1;
+//RS     }
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "snapshot mismatches:\n\n{}\n\nTo update one reviewed fixture, use UPDATE_EXPECT=<canonical-relative-name> with JET_UI_FILTER=<same-name>.",
+//RS         failures.join("\n\n")
+//RS     );
+//RS     assert!(
+//RS         filter.is_some() || checked >= 7,
+//RS         "expected the ui suite to contain tests, found {}",
+//RS         checked
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn e0109_live_diagnostic_matches_explanation_page() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let path = root.join("tests/ui/e0109_int_string.jet");
+//RS     let source = fs::read_to_string(&path).expect("E0109 Int/String fixture");
+//RS     let diagnostics = jet::compile_with_path(&source, &path.to_string_lossy())
+//RS         .expect_err("an Int/String operator must be rejected");
+//RS     let live = diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0109")
+//RS         .expect("Int/String fixture must produce E0109");
+//RS     let explanation = jet::Explain::lookup("E0109").expect("E0109 explanation");
+//RS     // Registry rows keep sentence-case prose; live diagnostics apply the
+//RS     // shared lower-case projection before rendering the diagnostic body.
+//RS     assert_eq!(
+//RS         explanation
+//RS             .what
+//RS             .as_deref()
+//RS             .map(jet_foundation::Outcome::jet_sentence_case_line),
+//RS         Some(live.what.clone())
+//RS     );
+//RS     assert_eq!(
+//RS         explanation
+//RS             .why
+//RS             .as_deref()
+//RS             .map(jet_foundation::Outcome::jet_sentence_case_line),
+//RS         Some(live.why.clone())
+//RS     );
+//RS     assert_eq!(
+//RS         explanation
+//RS             .fix
+//RS             .as_deref()
+//RS             .map(jet_foundation::Outcome::jet_sentence_case_line),
+//RS         Some(live.fix.clone())
+//RS     );
+//RS     assert!(live.edit.is_none());
+//RS     assert_eq!(live.applicability, None);
+//RS     assert_eq!(live.safety, None);
+//RS     assert!(live.no_fix_reason.is_some());
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["explain", "E0109"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run E0109 explanation");
+//RS     assert!(output.status.success(), "explain E0109 failed: {output:?}");
+//RS     let rendered = String::from_utf8(output.stdout).expect("E0109 explanation is UTF-8");
+//RS     assert_eq!(rendered, jet::Explain::render(&explanation, false));
+//RS }
+//RS 
+//RS #[test]
+//RS fn e0109_simple_names_carry_source_derived_code_action() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let path = root.join("tests/ui/string_plus.jet");
+//RS     let source = fs::read_to_string(&path).expect("string-plus fixture");
+//RS     let diagnostics = jet::compile_with_path(&source, &path.to_string_lossy())
+//RS         .expect_err("simple text addition must be rejected");
+//RS     let live = diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0109")
+//RS         .expect("string-plus fixture must produce E0109");
+//RS 
+//RS     assert_eq!(
+//RS         live.what,
+//RS         "Text values `first` and `last` aren't joined with `+`"
+//RS     );
+//RS     assert_eq!(
+//RS         live.fix,
+//RS         "Write the pieces inside one string: \"{first}{last}\""
+//RS     );
+//RS     assert_eq!(
+//RS         live.applicability,
+//RS         Some(jet_foundation::Diagnostics::FixApplicability::Suggested)
+//RS     );
+//RS     assert_eq!(
+//RS         live.safety,
+//RS         Some(jet_foundation::Diagnostics::FixSafety::NeedsReview)
+//RS     );
+//RS     assert!(live.no_fix_reason.is_none());
+//RS 
+//RS     let edits = live.all_edits();
+//RS     assert_eq!(edits.len(), 1, "simple text addition must have one code action");
+//RS     assert_eq!(edits[0].new_text, "\"{first}{last}\"");
+//RS     assert_eq!(edits[0].span, live.span.expect("E0109 source span"));
+//RS     let report = jet::render_all_json(
+//RS         &jet::Diagnostics::ReportPath::from_process("string_plus.jet"),
+//RS         &source,
+//RS         &diagnostics,
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"new_text\":\"\\\"{first}{last}\\\"\""),
+//RS         "the machine report must carry the source-specific replacement: {report}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn l0523_source_edit_is_exposed_to_editor_actions() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let path = root.join("tests/ui_lint/repeated_list_head.jet");
+//RS     let source = fs::read_to_string(&path).expect("repeated-list-head fixture");
+//RS     let diagnostics = jet::compile_with_path(&source, &path.to_string_lossy())
+//RS         .expect("repeated-list-head fixture must compile with lints");
+//RS     let live = diagnostics
+//RS         .lints
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "L0523")
+//RS         .expect("repeated-list-head fixture must produce L0523");
+//RS     let editor_edits = live.all_edits();
+//RS     assert_eq!(editor_edits.len(), 1, "L0523 must expose one editor action");
+//RS     assert_eq!(editor_edits[0].span, live.span.expect("L0523 source span"));
+//RS     assert_eq!(
+//RS         editor_edits[0].new_text,
+//RS         "[Point]{{x: 1}, {x: 2}}",
+//RS         "editor action must reuse the canonical L0523 source edit"
+//RS     );
+//RS     assert_eq!(
+//RS         editor_edits[0].new_text,
+//RS         live.edit.as_ref().expect("L0523 source edit").new_text
+//RS     );
+//RS }
+//RS 
+//RS /// Core modules (math, encoding.json) are checked in the same bundle as the
+//RS /// user's file. Their parser, registration and body lints are library facts:
+//RS /// none may reach the user's lint stream, and no lint may point outside the
+//RS /// user's source (a Core byte offset rendered at the entry file's EOF).
+//RS #[test]
+//RS fn core_module_lints_never_reach_user_output() {
+//RS     let source = r#"use core.math as math
+//RS use core.encoding.json as json
+//RS 
+//RS fn run() {
+//RS     print(math.factorial(25) ?? -1)
+//RS     doc :: json.parse("[1, 2]") ?? panic("parse")
+//RS     print(json.canonical(doc) ?? "")
+//RS     total := 0
+//RS     total = total + 1
+//RS     print(total)
+//RS }
+//RS "#;
+//RS     let path = unique_tmp("jet_core_lint_boundary").join("core_lint_boundary.jet");
+//RS     fs::write(&path, source).expect("write core lint boundary fixture");
+//RS     let compiled = jet::compile_with_path(source, &path.to_string_lossy())
+//RS         .unwrap_or_else(|diagnostics| panic!("fixture must compile: {diagnostics:?}"));
+//RS     let rendered = jet::render_diagnostics("core_lint_boundary.jet", source, &compiled.lints);
+//RS     for lint in &compiled.lints {
+//RS         assert!(
+//RS             !lint.origin().is_some_and(|origin| origin.is_core_source()),
+//RS             "a Core lint leaked into user output:\n{rendered}"
+//RS         );
+//RS         if lint.origin().is_none() {
+//RS             assert!(
+//RS                 lint.span.is_none_or(|span| span.end <= source.len()),
+//RS                 "a lint points outside the user's source:\n{rendered}"
+//RS             );
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         compiled.lints.iter().any(|lint| lint.code == "L0503"),
+//RS         "the user's own compound-assignment lint must still surface:\n{rendered}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn e0507_unknown_traversal_intent_stays_explanatory() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let path = root.join("tests/ui/list_loop_mutate.jet");
+//RS     let source = fs::read_to_string(&path).expect("collection-mutation fixture");
+//RS     let diagnostics = jet::compile_with_path(&source, &path.to_string_lossy())
+//RS         .expect_err("collection mutation during traversal must be rejected");
+//RS     let live = diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0507")
+//RS         .expect("collection-mutation fixture must produce E0507");
+//RS 
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", "--interpret"])
+//RS         .arg(&path)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run collection-mutation fixture");
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "a collection mutation must make `jet run` fail"
+//RS     );
+//RS     let stderr = String::from_utf8(output.stderr).expect("E0507 stderr is UTF-8");
+//RS     assert!(stderr.contains("Error [E0507]"), "{stderr}");
+//RS     assert!(stderr.contains("visited domain, element order, or termination"), "{stderr}");
+//RS     assert!(live.all_edits().is_empty());
+//RS     assert_eq!(live.applicability, None);
+//RS     assert_eq!(
+//RS         live.no_fix_reason.as_ref().map(|reason| reason.kind.as_str()),
+//RS         Some("ambiguous")
+//RS     );
+//RS     assert!(live.fix.contains("separate result"));
+//RS     assert!(live.fix.contains("fixed original set"));
+//RS     assert!(live.fix.contains("explicit work queue"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn loop_grammar_history_stays_distinct_from_collection_mutation() {
+//RS     let path = unique_tmp("jet_foreign_loop_grammar").join("foreign_for.jet");
+//RS     let source = r#"
+//RS fn run() {
+//RS     for x in xs { print(x) }
+//RS     while c { print(c) }
+//RS     continue
+//RS     do { print("done") }
+//RS }
+//RS "#;
+//RS     fs::write(&path, source).expect("write foreign loop fixture");
+//RS     let diagnostics = jet::compile_with_path(source, &path.to_string_lossy())
+//RS         .expect_err("retired loop spellings must be rejected");
+//RS     assert!(
+//RS         diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"),
+//RS         "foreign loop spelling must retain E0003: {diagnostics:?}"
+//RS     );
+//RS     assert!(
+//RS         diagnostics.iter().all(|diagnostic| diagnostic.code != "E0507"),
+//RS         "grammar mismatch must not be relabeled E0507: {diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS fn run_retired_gate_flag_snapshot(file: &str) -> String {
+//RS     let retirement = jet::Syntax::retirement("allow-impure").expect("retired gate row");
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", file])
+//RS         .arg(retirement.retired)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run retired gate fixture");
+//RS     assert!(!output.status.success(), "retired gate flag must fail");
+//RS     let mut rendered = String::from_utf8(output.stdout).expect("retired gate stdout is UTF-8");
+//RS     rendered.push_str(&String::from_utf8(output.stderr).expect("retired gate stderr is UTF-8"));
+//RS     rendered
+//RS }
+//RS 
+//RS fn run_cli_e0043_snapshot() -> String {
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["install", "--color=never"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run E0043 CLI diagnostic fixture");
+//RS     assert!(!output.status.success(), "E0043 command must fail");
+//RS     let mut rendered = String::from_utf8(output.stdout).expect("E0043 stdout is UTF-8");
+//RS     rendered.push_str(&String::from_utf8(output.stderr).expect("E0043 stderr is UTF-8"));
+//RS     rendered
+//RS }
+//RS 
+//RS fn run_cli_e1219_snapshot(file: &str) -> String {
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["build", file, "--profile=turbo", "--color=never"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run E1219 CLI diagnostic fixture");
+//RS     assert!(!output.status.success(), "E1219 command must fail");
+//RS     let mut rendered = String::from_utf8(output.stdout).expect("E1219 stdout is UTF-8");
+//RS     rendered.push_str(&String::from_utf8(output.stderr).expect("E1219 stderr is UTF-8"));
+//RS     rendered
+//RS }
+//RS 
+//RS fn run_cli_build_snapshot(file: &str) -> String {
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["build", file, "--color=never"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run `jet build` CLI diagnostic fixture");
+//RS     assert!(!output.status.success(), "`jet build` fixture must fail");
+//RS     let mut rendered = String::from_utf8(output.stdout).expect("build stdout is UTF-8");
+//RS     rendered.push_str(&String::from_utf8(output.stderr).expect("build stderr is UTF-8"));
+//RS     rendered
+//RS }
+//RS 
+//RS fn run_cli_e2101_snapshot() -> String {
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["bench", "--color=never"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run E2101 retired benchmark command fixture");
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "retired benchmark command must fail"
+//RS     );
+//RS     let mut rendered = String::from_utf8(output.stdout).expect("E2101 stdout is UTF-8");
+//RS     rendered.push_str(&String::from_utf8(output.stderr).expect("E2101 stderr is UTF-8"));
+//RS     rendered
+//RS }
+//RS 
+//RS fn run_web_run_cli_snapshot(file: &str) -> String {
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", file, "--color=never"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run D-WEBRUN1 native-run fixture");
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "native jet run of a web-targeted fixture must fail"
+//RS     );
+//RS     assert!(
+//RS         output.stdout.is_empty(),
+//RS         "a rejected web run must not execute user code"
+//RS     );
+//RS     String::from_utf8(output.stderr).expect("D-WEBRUN1 stderr is UTF-8")
+//RS }
+//RS 
+//RS fn run_cli_snapshot(file: &str) -> String {
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", file, "--color=never"])
+//RS         .env("NO_COLOR", "1")
+//RS         .stdin(Stdio::null())
+//RS         .output()
+//RS         .expect("run `jet run` CLI fixture");
+//RS     assert!(!output.status.success(), "a `// @run_cli` fixture must fail");
+//RS     assert!(
+//RS         output.stdout.is_empty(),
+//RS         "a refused run must not execute user code"
+//RS     );
+//RS     String::from_utf8(output.stderr).expect("`jet run` stderr is UTF-8")
+//RS }
+//RS 
+//RS fn run_complexity_cli_snapshot(file: &str, spec: &str) -> String {
+//RS     let mut parts = spec.split_whitespace();
+//RS     let expectation = parts.next().expect("complexity snapshot needs pass/fail");
+//RS     let max = parts.next().expect("complexity snapshot needs a budget");
+//RS     assert!(
+//RS         parts.next().is_none(),
+//RS         "complexity snapshot directive has extra words: {spec}"
+//RS     );
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["lint", "--complexity", file])
+//RS         .arg(format!("--max={max}"))
+//RS         .args(["--color=never"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run cognitive-complexity CLI fixture");
+//RS     match expectation {
+//RS         "fail" => {
+//RS             assert!(
+//RS                 !output.status.success(),
+//RS                 "over-budget cognitive-complexity fixture must fail"
+//RS             );
+//RS             assert!(
+//RS                 std::str::from_utf8(&output.stderr)
+//RS                     .expect("complexity stderr is UTF-8")
+//RS                     .contains("[L2902]"),
+//RS                 "over-budget fixture must reach the complexity lint, not another failure: {}",
+//RS                 String::from_utf8_lossy(&output.stderr)
+//RS             );
+//RS         }
+//RS         "pass" => assert!(
+//RS             output.status.success(),
+//RS             "refactored cognitive-complexity fixture must pass"
+//RS         ),
+//RS         other => panic!("complexity snapshot expects `pass` or `fail`, got `{other}`"),
+//RS     }
+//RS     let mut rendered = String::from_utf8(output.stdout).expect("complexity stdout is UTF-8");
+//RS     rendered.push_str(&String::from_utf8(output.stderr).expect("complexity stderr is UTF-8"));
+//RS     rendered
+//RS }
+//RS 
+//RS fn run_sandbox_cli_snapshot(file: &str, missing_wasm_tools: bool) -> String {
+//RS     let scratch = unique_tmp(if missing_wasm_tools {
+//RS         "jet_ui_e1259"
+//RS     } else {
+//RS         "jet_ui_e1258"
+//RS     });
+//RS     fs::create_dir_all(&scratch).unwrap();
+//RS     fs::copy(file, scratch.join("main.jet")).expect("copy sandbox diagnostic fixture");
+//RS 
+//RS     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS     command
+//RS         .args(["build", "main.jet", "--target=sandbox", "--color=never"])
+//RS         .current_dir(&scratch)
+//RS         .env("NO_COLOR", "1");
+//RS 
+//RS     if missing_wasm_tools {
+//RS         let which = |tool: &str| -> Option<String> {
+//RS             Command::new("which")
+//RS                 .arg(tool)
+//RS                 .output()
+//RS                 .ok()
+//RS                 .filter(|output| output.status.success())
+//RS                 .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+//RS         };
+//RS         let rustc_path = which("rustc").expect("E1259 snapshot needs rustc on PATH");
+//RS         let lld_path = which("lld").expect("E1259 snapshot needs lld on PATH");
+//RS         let bin_dir = scratch.join("bin");
+//RS         fs::create_dir_all(&bin_dir).unwrap();
+//RS         #[cfg(unix)]
+//RS         {
+//RS             use std::os::unix::fs::symlink;
+//RS             symlink(&rustc_path, bin_dir.join("rustc")).expect("link rustc for E1259 snapshot");
+//RS             symlink(&lld_path, bin_dir.join("lld")).expect("link lld for E1259 snapshot");
+//RS         }
+//RS         #[cfg(not(unix))]
+//RS         panic!("E1259 snapshot needs Unix symlink support");
+//RS         command.env("PATH", &bin_dir);
+//RS     }
+//RS 
+//RS     let output = command.output().expect("run sandbox diagnostic fixture");
+//RS     let _ = fs::remove_dir_all(&scratch);
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "sandbox diagnostic fixture must fail"
+//RS     );
+//RS     let mut rendered = String::from_utf8(output.stdout).expect("sandbox stdout is UTF-8");
+//RS     rendered.push_str(&String::from_utf8(output.stderr).expect("sandbox stderr is UTF-8"));
+//RS     rendered
+//RS }
+//RS 
+//RS fn run_typed_settings_cli_snapshot(file: &str) -> String {
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["check", file, "--set", "cli_only=true", "--color=never"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run typed-settings CLI diagnostic fixture");
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "undeclared typed setting must fail through the CLI"
+//RS     );
+//RS     let mut rendered = String::from_utf8(output.stdout).expect("typed-settings stdout is UTF-8");
+//RS     rendered.push_str(&String::from_utf8(output.stderr).expect("typed-settings stderr is UTF-8"));
+//RS     rendered
+//RS }
+//RS 
+//RS fn run_jetpack_retired_environment_flag_snapshot() -> String {
+//RS     let scratch = unique_tmp("jet_ui_retired_environment_flag");
+//RS     let root = scratch.join("root");
+//RS     let project = scratch.join("project");
+//RS     fs::create_dir_all(&project).unwrap();
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         "module env.dev { packages: [nixpkgs.ripgrep] }\nmodule env.full { packages: [nixpkgs.fd] }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(jetpack_bin())
+//RS         .args(["enter", "info", "--env-profile", "full", "--no-color"])
+//RS         .current_dir(&project)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run real jetpack retired environment flag diagnostic fixture");
+//RS     let _ = fs::remove_dir_all(&scratch);
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(2),
+//RS         "retired environment selector must fail: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     String::from_utf8(output.stderr).expect("Jetpack diagnostic is UTF-8")
+//RS }
+//RS 
+//RS fn run_jetpack_retired_store_verbs_snapshot() -> String {
+//RS     let scratch = unique_tmp("jet_ui_retired_store_verbs");
+//RS     let root = scratch.join("root");
+//RS     let project = scratch.join("project");
+//RS     fs::create_dir_all(&project).unwrap();
+//RS     let mut rendered = String::new();
+//RS     for verb in ["cache", "shared-store", "vendor", "clean", "list"] {
+//RS         let output = Command::new(jetpack_bin())
+//RS             .args([verb, "--no-color"])
+//RS             .current_dir(&project)
+//RS             .env("JETPACK_ROOT", &root)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .expect("run real jetpack retired store-verb diagnostic fixture");
+//RS         assert_eq!(
+//RS             output.status.code(),
+//RS             Some(2),
+//RS             "retired store verb must fail: {}",
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         rendered.push_str(&String::from_utf8(output.stderr).expect("Jetpack diagnostic is UTF-8"));
+//RS     }
+//RS     let _ = fs::remove_dir_all(&scratch);
+//RS     rendered
+//RS }
+//RS 
+//RS fn run_jetpack_hangar_digest_mismatch_snapshot() -> String {
+//RS     let scratch = unique_tmp("jet_ui_hangar_digest_mismatch");
+//RS     let root = scratch.join("root");
+//RS     let project = scratch.join("project");
+//RS     let dependency = scratch.join("dependency");
+//RS     let source = scratch.join("source");
+//RS     fs::create_dir_all(&project).unwrap();
+//RS     fs::create_dir_all(&dependency).unwrap();
+//RS     fs::create_dir_all(&source).unwrap();
+//RS     fs::write(dependency.join("payload"), "dependency bytes\n").unwrap();
+//RS     fs::write(source.join("payload"), "trusted bytes\n").unwrap();
+//RS 
+//RS     let roots = jetpack::Store::Roots {
+//RS         root: root.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let ingest = |name: &str, output: PathBuf, references| {
+//RS         jetpack::Store::ingest_tree(
+//RS             &roots,
+//RS             &jetpack::Store::IngestRequest {
+//RS                 name: name.to_string(),
+//RS                 version: String::new(),
+//RS                 reference: format!("path:{}", output.display()),
+//RS                 cache_identity: jetpack::Store::CacheIdentity::default(),
+//RS                 references,
+//RS                 outputs: std::collections::BTreeMap::from([("out".to_string(), output)]),
+//RS                 signature: String::new(),
+//RS                 provenance: String::new(),
+//RS                 platform_artifact_kind: String::new(),
+//RS             },
+//RS         )
+//RS         .expect("seed valid Hangar closure for diagnostic fixture")
+//RS     };
+//RS     let dependency = ingest("ui-e1315-dependency", dependency, Vec::new());
+//RS     let ingested = ingest(
+//RS         "ui-e1315",
+//RS         source,
+//RS         vec![dependency.entry.envelope.output_hash],
+//RS     );
+//RS     let digest = ingested.entry.envelope.output_hash;
+//RS 
+//RS     let object = root.join("hangar/objects").join(&digest);
+//RS     let payload = object.join("payload");
+//RS     for path in [&object, &payload] {
+//RS         let mut permissions = fs::metadata(path).unwrap().permissions();
+//RS         permissions.set_readonly(false);
+//RS         fs::set_permissions(path, permissions).unwrap();
+//RS     }
+//RS     fs::write(&payload, "tampered bytes\n").unwrap();
+//RS 
+//RS     let output = Command::new(jetpack_bin())
+//RS         .args(["hangar", "verify", &digest, "--no-color"])
+//RS         .current_dir(&project)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .output()
+//RS         .expect("run real jetpack hangar verify diagnostic fixture");
+//RS     let _ = fs::remove_dir_all(&scratch);
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(2),
+//RS         "tampered Hangar object must fail verification: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS 
+//RS     let stderr = String::from_utf8(output.stderr).expect("Jetpack diagnostic is UTF-8");
+//RS     let start = stderr
+//RS         .find("Error [E1315]:")
+//RS         .expect("real hangar verify must emit E1315");
+//RS     stderr[start..].to_string()
+//RS }
+//RS 
+//RS fn run_jetpack_e1250_snapshot(path: &Path) -> String {
+//RS     let scratch = unique_tmp("jet_ui_e1250");
+//RS     fs::create_dir_all(&scratch).expect("create E1250 scratch project");
+//RS     fs::write(
+//RS         scratch.join("package.jet"),
+//RS         "name: \"e1250_fixture\"\nversion: \"1\"\njet: 0.9\n",
+//RS     )
+//RS     .expect("write E1250 package manifest");
+//RS     fs::copy(path, scratch.join("main.jet")).expect("copy E1250 source fixture");
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["build", "main.jet", "--offline"])
+//RS         .current_dir(&scratch)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run E1250 offline build");
+//RS     let _ = fs::remove_dir_all(&scratch);
+//RS     assert!(!output.status.success(), "unlocked offline toolchain must fail");
+//RS     let mut rendered = String::from_utf8(output.stdout).expect("E1250 stdout is UTF-8");
+//RS     rendered.push_str(&String::from_utf8(output.stderr).expect("E1250 stderr is UTF-8"));
+//RS     rendered
+//RS }
+//RS 
+//RS fn run_cost_cli_snapshot(path: &Path) -> String {
+//RS     let parent = path.parent().expect("cost fixture parent");
+//RS     let entry = path
+//RS         .file_name()
+//RS         .and_then(|name| name.to_str())
+//RS         .expect("cost fixture filename");
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["explain", "--cost", entry])
+//RS         .current_dir(parent)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run E2104 cost projection fixture");
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "incomplete generic cost projection must fail"
+//RS     );
+//RS     let mut rendered = String::from_utf8(output.stdout).expect("E2104 stdout is UTF-8");
+//RS     rendered.push_str(&String::from_utf8(output.stderr).expect("E2104 stderr is UTF-8"));
+//RS     rendered
+//RS }
+//RS 
+//RS fn run_check_cli_snapshot(path: &Path) -> String {
+//RS     let parent = path.parent().expect("check CLI fixture parent");
+//RS     let entry = path
+//RS         .file_name()
+//RS         .and_then(|name| name.to_str())
+//RS         .expect("check CLI fixture filename");
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["check", entry])
+//RS         .current_dir(parent)
+//RS         .env("JET_RECEIPT_BYPASS", "1")
+//RS         .env("NO_COLOR", "1")
+//RS         .env("TERM", "dumb")
+//RS         .output()
+//RS         .expect("run check CLI diagnostic fixture");
+//RS     if output.status.success() {
+//RS         return "(no errors)\n".to_string();
+//RS     }
+//RS     let mut rendered = String::from_utf8(output.stdout).expect("check CLI stdout is UTF-8");
+//RS     rendered.push_str(
+//RS         &String::from_utf8(output.stderr).expect("check CLI stderr is UTF-8"),
+//RS     );
+//RS     rendered
+//RS }
+//RS 
+//RS 
+//RS fn normalize_volatile_ui_snapshot(shown_path: &str, actual: String) -> String {
+//RS     // A snapshot must not depend on where the repository is checked out. A
+//RS     // diagnostic that names a file inside its message text (E0921's memory-fact
+//RS     // provenance, for one) renders an absolute path; make it repo-relative.
+//RS     let root = format!("{}/", env!("CARGO_MANIFEST_DIR"));
+//RS     let actual = actual.replace(&root, "");
+//RS     // Workspace evaluator tests use `/tmp` as their stable base directory.
+//RS     let actual = if let Some(fixture_root) = shown_path.strip_suffix("/workspace.jet") {
+//RS         actual.replace(fixture_root, "/tmp")
+//RS     } else {
+//RS         actual
+//RS     };
+//RS     let actual = actual
+//RS         .lines()
+//RS         .filter(|line| !line.contains("Blocking waiting for file lock on package cache"))
+//RS         .map(|line| {
+//RS             let mut line = line.to_string();
+//RS             line.push('\n');
+//RS             line
+//RS         })
+//RS         .collect::<String>();
+//RS     if shown_path.ends_with("ffi_fetch_failed.jet")
+//RS         && actual.contains("Error [E0704]")
+//RS         && actual.contains("not-a-real-crate-xyz@9.9.9")
+//RS         && cargo_index_unavailable(&actual)
+//RS     {
+//RS         return fs::read_to_string("tests/ui/ffi_fetch_failed.stderr")
+//RS             .expect("ffi_fetch_failed.stderr must exist");
+//RS     }
+//RS     actual
+//RS }
+//RS 
+//RS fn cargo_index_unavailable(actual: &str) -> bool {
+//RS     actual.contains("download of config.json failed")
+//RS         || actual.contains("failed to download from `https://index.crates.io/config.json`")
+//RS         || actual.contains("spurious network error")
+//RS         || actual.contains("Could not resolve host: index.crates.io")
+//RS         || actual.contains("Resolving timed out")
+//RS }
+//RS 
+//RS // ============================================================================
+//RS // Section: ownership lint snapshots, tests/ui_lint/*.warn (was tests/lint_snapshots.rs)
+//RS // ============================================================================
+//RS 
+//RS #[test]
+//RS fn lint_snapshots() {
+//RS     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui_lint");
+//RS     let ext = jet::Syntax::FILE_EXT;
+//RS     let mut entries: Vec<_> = fs::read_dir(&dir)
+//RS         .unwrap()
+//RS         .map(|e| e.unwrap().path())
+//RS         .filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()) == Some(ext))
+//RS         .collect();
+//RS     entries.sort();
+//RS 
+//RS     let filter = fixture_filter("JET_UI_FILTER");
+//RS     entries.retain(|path| {
+//RS         let shown = format!(
+//RS             "tests/ui_lint/{}",
+//RS             path.file_name().unwrap().to_string_lossy()
+//RS         );
+//RS         fixture_matches(filter.as_deref(), &shown)
+//RS     });
+//RS     assert!(
+//RS         !entries.is_empty(),
+//RS         "JET_UI_FILTER matched no lint fixtures: {}",
+//RS         filter.as_deref().unwrap_or("<unfiltered>")
+//RS     );
+//RS     let update = update_selector();
+//RS     let shown_entries: Vec<String> = entries
+//RS         .iter()
+//RS         .map(|path| {
+//RS             format!(
+//RS                 "tests/ui_lint/{}",
+//RS                 path.file_name().unwrap().to_string_lossy()
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     validate_scoped_update(&update, shown_entries.iter().map(String::as_str));
+//RS 
+//RS     let mut checked = 0;
+//RS     let mut failures = Vec::new();
+//RS     for path in entries {
+//RS         let name = path.file_name().unwrap().to_string_lossy().into_owned();
+//RS         let src = fs::read_to_string(&path).unwrap();
+//RS         let shown_path = format!("tests/ui_lint/{}", name);
+//RS 
+//RS         // D-DX5-HOOK1: optional `// @compiler_extension <repo-relative.wasm>`.
+//RS         let compiler_extension = src.lines().find_map(|line| {
+//RS             line.trim()
+//RS                 .strip_prefix("// @compiler_extension ")
+//RS                 .map(|p| p.trim().to_string())
+//RS         });
+//RS         let (cex_lock, cex_restore) = compiler_extension_env(compiler_extension.as_deref());
+//RS 
+//RS         let out = jet::compile_with_path(&src, &path.to_string_lossy()).unwrap_or_else(|diags| {
+//RS             panic!(
+//RS                 "lint fixture {} must compile:\n{}",
+//RS                 name,
+//RS                 jet::render_diagnostics(&shown_path, &src, &diags)
+//RS             );
+//RS         });
+//RS         drop(cex_restore);
+//RS         drop(cex_lock);
+//RS         assert!(
+//RS             !out.lints.is_empty(),
+//RS             "lint fixture {} should emit at least one lint",
+//RS             name
+//RS         );
+//RS 
+//RS         let actual = jet::render_diagnostics(&shown_path, &src, &out.lints);
+//RS         let expect_path = path.with_extension("warn");
+//RS         if should_update(&update, &shown_path) {
+//RS             write_blessed_snapshot(&expect_path, &shown_path, &actual);
+//RS         } else {
+//RS             let expected = fs::read_to_string(&expect_path).unwrap_or_default();
+//RS             if actual != expected {
+//RS                 failures.push(format!(
+//RS                     "lint snapshot mismatch for {shown_path}\n{}",
+//RS                     unified_diff(
+//RS                         &expect_path.to_string_lossy(),
+//RS                         &format!("{shown_path} (actual)"),
+//RS                         &expected,
+//RS                         &actual,
+//RS                     )
+//RS                 ));
+//RS             }
+//RS         }
+//RS         checked += 1;
+//RS     }
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "snapshot mismatches:\n\n{}\n\nTo update one reviewed fixture, use UPDATE_EXPECT=<canonical-relative-name> with JET_UI_FILTER=<same-name>.",
+//RS         failures.join("\n\n")
+//RS     );
+//RS     assert!(
+//RS         filter.is_some() || checked >= 2,
+//RS         "expected lint fixtures, found {}",
+//RS         checked
+//RS     );
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS enum UpdateSelector {
+//RS     None,
+//RS     All,
+//RS     One(String),
+//RS }
+//RS 
+//RS /// `UPDATE_EXPECT=1` is the reviewed sweep; card #2026 made it name its author.
+//RS /// A sweep is the only bless that can rewrite a fixture nobody read, so it
+//RS /// carries `UPDATE_EXPECT_REASON` — the compiler change that justifies the new
+//RS /// output. 6fd88282b had none: zero crate source changed and 122 contracts moved.
+//RS fn update_selector() -> UpdateSelector {
+//RS     // Snapshot writes and ordinary comparisons share this gate. A case-law
+//RS     // violation must fail before any diagnostic contract can be blessed.
+//RS     case_law::assert_user_facing_case_law();
+//RS 
+//RS     match std::env::var("UPDATE_EXPECT") {
+//RS         Err(_) => UpdateSelector::None,
+//RS         Ok(value) if value.trim() == "1" => {
+//RS             assert!(
+//RS                 bless_reason().is_some(),
+//RS                 "UPDATE_EXPECT=1 rewrites every fixture, so it must name the compiler change \
+//RS                  that justifies the new output:\n    \
+//RS                  UPDATE_EXPECT_REASON=\"<commit or ratified decision>\" UPDATE_EXPECT=1 …\n\
+//RS                  To bless one reviewed fixture instead, use \
+//RS                  JET_UI_FILTER=<canonical-relative-name> UPDATE_EXPECT=<same-name>."
+//RS             );
+//RS             UpdateSelector::All
+//RS         }
+//RS         Ok(value) => UpdateSelector::One(normalize_fixture_selector("UPDATE_EXPECT", &value)),
+//RS     }
+//RS }
+//RS 
+//RS /// The recorded justification for this bless, if the author gave one.
+//RS fn bless_reason() -> Option<String> {
+//RS     let reason = std::env::var("UPDATE_EXPECT_REASON").ok()?;
+//RS     let reason = reason.trim().to_string();
+//RS     (reason.len() >= 8).then_some(reason)
+//RS }
+//RS 
+//RS /// Rendered diagnostics in one snapshot. `jet::render_diagnostics` opens every
+//RS /// report with its severity word and registered code at column 0 (`Error [`,
+//RS /// `Warning [`, `Stop [`), so counting those lines counts the contracts the
+//RS /// fixture asserts.
+//RS fn rendered_diagnostic_count(rendered: &str) -> usize {
+//RS     rendered
+//RS         .lines()
+//RS         .filter(|line| {
+//RS             line.starts_with("Error [")
+//RS                 || line.starts_with("Warning [")
+//RS                 || line.starts_with("Stop [")
+//RS         })
+//RS         .count()
+//RS }
+//RS 
+//RS /// The one write path for a blessed snapshot, scoped or swept (I8).
+//RS ///
+//RS /// Shrink-only: a bless may add or reword a diagnostic, because that records
+//RS /// real drift, but a diagnostic that DISAPPEARS is a defect the compiler now
+//RS /// accepts in silence, and the snapshot would assert the silence. Dropping one
+//RS /// therefore needs `UPDATE_EXPECT_SHRINK=<fixture>` naming this exact fixture
+//RS /// plus the reason — per fixture, so no sweep can shed a diagnostic in passing.
+//RS fn write_blessed_snapshot(expect_path: &Path, shown_path: &str, actual: &str) {
+//RS     let previous = fs::read_to_string(expect_path).unwrap_or_default();
+//RS     let before = rendered_diagnostic_count(&previous);
+//RS     let after = rendered_diagnostic_count(actual);
+//RS     if after < before {
+//RS         let named = std::env::var("UPDATE_EXPECT_SHRINK")
+//RS             .ok()
+//RS             .is_some_and(|value| value.trim() == shown_path);
+//RS         let reason = bless_reason();
+//RS         assert!(
+//RS             named && reason.is_some(),
+//RS             "refusing to bless {shown_path}: its diagnostic count would fall {before} -> {after}. \
+//RS              A disappearing diagnostic is a defect the compiler accepts in silence, so name the \
+//RS              change that retired it:\n    \
+//RS              UPDATE_EXPECT_SHRINK={shown_path} \
+//RS              UPDATE_EXPECT_REASON=\"<commit or ratified decision>\" …\n\
+//RS              If nothing retired it, the diagnostic still fires and this snapshot is the bug."
+//RS         );
+//RS         eprintln!(
+//RS             "blessed shrink {shown_path}: {before} -> {after} diagnostics — {}",
+//RS             reason.unwrap_or_default()
+//RS         );
+//RS     }
+//RS     fs::write(expect_path, actual).unwrap();
+//RS }
+//RS 
+//RS fn validate_scoped_update<'a>(update: &UpdateSelector, paths: impl Iterator<Item = &'a str>) {
+//RS     let UpdateSelector::One(selector) = update else {
+//RS         return;
+//RS     };
+//RS     let matches: Vec<&str> = paths.filter(|path| path.contains(selector)).collect();
+//RS     assert_eq!(
+//RS         matches.len(),
+//RS         1,
+//RS         "UPDATE_EXPECT={selector} must match exactly one fixture; matched: {matches:?}"
+//RS     );
+//RS }
+//RS 
+//RS fn should_update(update: &UpdateSelector, shown_path: &str) -> bool {
+//RS     match update {
+//RS         UpdateSelector::None => false,
+//RS         UpdateSelector::All => true,
+//RS         UpdateSelector::One(selector) => shown_path.contains(selector),
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_corpus_policy_runs_with_diagnostic_fixtures() {
+//RS     common::corpus_policy::CorpusPolicy::load()
+//RS         .expect("corpus manifest")
+//RS         .check_gate("fixture")
+//RS         .expect("diagnostic fixture corpus semantic policy");
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_guidance_fixtures_keep_one_selected_rule_and_edit() {
+//RS     let cases: &[(&str, &[&str], &str)] = &[
+//RS         ("process_args_view", &["L0515"], ".args()"),
+//RS         ("message_text", &["L0516", "L0516", "L0516"], ".text()"),
+//RS         ("redundant_fixed_cleanup", &["L0518"], ""),
+//RS         ("unit_scalar_rewrap", &["L0519"], " * "),
+//RS         ("path_containment_string_prefix", &["L0517"], "is_within"),
+//RS         ("complete_ascii_case_ladder", &["L0521"], "to_ascii_"),
+//RS         ("walk_files_filter", &["L0522"], "walk_files"),
+//RS         ("repeated_list_head", &["L0523"], "[Point]{"),
+//RS         ("raw_multiline_html", &["L0524"], "HTML{\"\"\""),
+//RS     ];
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     for (name, expected_codes, edit_fragment) in cases {
+//RS         let path = root.join("tests/ui_lint").join(format!("{name}.jet"));
+//RS         let source = fs::read_to_string(&path).expect("semantic guidance fixture");
+//RS         let output = jet::compile_with_path(&source, &path.to_string_lossy())
+//RS             .unwrap_or_else(|diagnostics| panic!("{name} must compile: {diagnostics:?}"));
+//RS         let selected = output
+//RS             .lints
+//RS             .iter()
+//RS             .filter(|diagnostic| {
+//RS                 matches!(
+//RS                     diagnostic.code.as_str(),
+//RS                     "L0515"
+//RS                         | "L0516"
+//RS                         | "L0517"
+//RS                         | "L0518"
+//RS                         | "L0519"
+//RS                         | "L0521"
+//RS                         | "L0522"
+//RS                         | "L0523"
+//RS                         | "L0524"
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let actual_codes = selected
+//RS             .iter()
+//RS             .map(|diagnostic| diagnostic.code.as_str())
+//RS             .collect::<Vec<_>>();
+//RS         assert_eq!(
+//RS             actual_codes, *expected_codes,
+//RS             "selected lints changed for {name}"
+//RS         );
+//RS         let mut sites = HashSet::new();
+//RS         for diagnostic in &selected {
+//RS             let span = diagnostic
+//RS                 .span
+//RS                 .unwrap_or_else(|| panic!("{name} selected lint has no semantic site"));
+//RS             assert!(
+//RS                 sites.insert((diagnostic.code.as_str(), span)),
+//RS                 "{name} emitted duplicate selected lint at {span:?}"
+//RS             );
+//RS         }
+//RS         assert!(
+//RS             selected.iter().all(|diagnostic| diagnostic
+//RS                 .edit
+//RS                 .as_ref()
+//RS                 .is_some_and(|edit| edit.new_text.contains(*edit_fragment))),
+//RS             "{name} selected lint lost its mechanical edit"
+//RS         );
+//RS         if *name == "raw_multiline_html" {
+//RS             let edit = selected[0].edit.as_ref().expect("raw HTML edit");
+//RS             let literal_start = source.find("\"\"\"").expect("opening triple quote");
+//RS             let literal_end = source.rfind("\"\"\"").expect("closing triple quote") + 3;
+//RS             assert_eq!(
+//RS                 edit.span,
+//RS                 jet::Diagnostics::Span::new(literal_start, literal_end)
+//RS             );
+//RS             assert_eq!(
+//RS                 edit.new_text,
+//RS                 format!("HTML{{{}}}", &source[literal_start..literal_end])
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 1039 tests/diagnostic_snapshots.rs:1-1754
+

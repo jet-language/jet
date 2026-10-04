@@ -3,15 +3,10 @@
 // reference is crates/jet-sema/src/Sema/Bundle/Pipeline/FailureUnion.rs and
 // `solve_inferred_failure` (Sema/mod.rs).
 //
-// Every body check records what reaches the function's default `Err` route
-// (`SemaCheckContext.failure_union_*`). After the first check of the bundle,
-// the rows of the unannotated top-level functions are joined over their call
-// edges (least fixed point). Function-owned cases (`Err(.NotFound(n))`) are
-// minted into a closed `#Error enum` named after the function (`find` gives
-// `FindError`), and every function whose set holds a typed member is projected
-// onto `T (A | B)!` with no written span. Functions the #3708 solve proved
-// infallible are projected onto `T Never!`. The bundle is then checked again,
-// so the real check, every caller and lowering read the one projected contract.
+// Only selected typed-failure candidates are probed before the real body
+// pass (Rust Pipeline/FailureUnion.rs); probe diagnostics/products are discarded.
+// The real pass runs once, or replays its cached products. The later empty-set
+// solve projects checked executable signatures without checking bodies again.
 use jet_foundation.[
     Call,
     CallLabel,
@@ -27,6 +22,8 @@ use jet_foundation.[
     Span,
     Symbol,
     TraitImplBlock,
+    TFailureCarrier,
+    TFuncKind,
     Type,
     TypeParam,
     Variant,
@@ -405,19 +402,125 @@ fn sema_failure_project_returns(graph: &SemaRegistrationGraph, projections: [Sem
     true
 }
 
-// D-FAIL-INFER-UNION1=A: join the default-route rows of the unannotated
-// top-level functions, mint their own cases and project every set that holds
-// a typed member. Returns whether any contract was projected.
-pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool {
-    rows := [SemaFailureUnionRow]{}
-    loop module_result in modules {
-        module_index :: sema_registration_module_index(graph, module_result.module_identity) ?? next
-        loop facts in module_result.failure_facts {
-            declaration :: sema_failure_registered_declaration(graph, module_index, facts.function_key) ?? next
-            if !sema_failure_inference_candidate(declaration) -> next
-            &rows.push(SemaFailureUnionRow{key: ~facts.function_key, name: ~declaration.name, module_index: module_index, members: ~facts.union_members, general: facts.union_general, edges: ~facts.union_edges, cases: ~facts.union_cases, declaration: declaration})
+// Rust Pipeline/FailureUnion.rs::infer_failure_unions/select_probed_functions.
+// Called before real body checking; no untyped/pure corpus pays a probe pass.
+fn sema_failure_union_prepare(graph: &SemaRegistrationGraph, checked_types: [TTypeDef], values: [SemaComptimeItemValue], diagnostics: &[Diagnostic]) -> Bool {
+    typed_names := [String:Bool]{}
+    loop registered_module in graph.modules {
+        loop function in registered_module.functions -> sema_failure_union_written_typed(function.declaration, &typed_names)
+        loop nominal in registered_module.nominals {
+            loop method in nominal.methods -> sema_failure_union_written_typed(method.declaration, &typed_names)
+        }
+        loop implementation in registered_module.impls {
+            loop method in implementation.methods -> sema_failure_union_written_typed(method.declaration, &typed_names)
         }
     }
+    candidates := [SemaFailureProbeCandidate]{}
+    names := [String:[Int]]{}
+    selected := [Int:Bool]{}
+    loop (module_index, registered_module) in graph.modules {
+        loop (function_index, function) in registered_module.functions {
+            declaration :: function.declaration
+            if declaration.name.contains(".") || !sema_failure_inference_candidate(declaration) -> next
+            syntax :: sema_incremental_syntax_facts(declaration.body)
+            seeded := syntax.typed_error
+            calls := [String]{}
+            loop (name, _) in syntax.calls {
+                &calls.push(name)
+                if typed_names.has_key(name) -> seeded = true
+            }
+            index :: candidates.len()
+            &candidates.push(SemaFailureProbeCandidate{module_index: module_index, function_index: function_index, calls: calls})
+            bucket := names.get(declaration.name) ?? [Int]{}
+            &bucket.push(index)
+            names[declaration.name] = bucket
+            if seeded -> selected[index] = true
+        }
+    }
+    // The conservative leaf-name graph is the Rust candidate graph. Build
+    // both directions once, then queue the reverse seed closure and forward
+    // callee closure; never repeatedly scan all bodies for an edge.
+    outgoing := [[Int]]{}
+    incoming := [[Int]]{}
+    loop _ in candidates {
+        &outgoing.push([Int]{})
+        &incoming.push([Int]{})
+    }
+    loop (index, candidate) in candidates {
+        loop name in candidate.calls {
+            targets :: names.get(name) ?? [Int]{}
+            loop target in targets {
+                &outgoing[index].push(target)
+                &incoming[target].push(index)
+            }
+        }
+    }
+    queue := [Int]{}
+    loop (index, _) in selected -> &queue.push(index)
+    position := 0
+    loop position < queue.len() {
+        index :: ~queue[position]
+        position += 1
+        loop caller in incoming[index] {
+            if selected.has_key(caller) -> next
+            selected[caller] = true
+            &queue.push(caller)
+        }
+    }
+    position = 0
+    loop position < queue.len() {
+        index :: ~queue[position]
+        position += 1
+        loop callee in outgoing[index] {
+            if selected.has_key(callee) -> next
+            selected[callee] = true
+            &queue.push(callee)
+        }
+    }
+    if selected.len() == 0 -> return false
+    environment := sema_check_pass_environment(graph, checked_types)
+    environment.incremental_probe = true
+    memory_plan :: sema_function_memory_plan_from_graph(graph)
+    rows := [SemaFailureUnionRow]{}
+    loop (module_index, registered_module) in graph.modules {
+        scopes := sema_scope_init(registered_module.module_identity)
+        discarded := [Diagnostic]{}
+        _ := sema_registration_apply_graph_module(graph, registered_module.module_identity, &scopes, &discarded)
+        sema_scope_environment_enter_module(&environment, registered_module, sema_comptime_body_values_from_items(values))
+        loop (index, candidate) in candidates {
+            if candidate.module_index != module_index || !selected.has_key(index) -> next
+            registered :: registered_module.functions[candidate.function_index]
+            declaration :: registered.declaration
+            probe_func := declaration
+            memory_row :: sema_function_memory_find(memory_plan, registered_module.module_identity, declaration.span)
+            if memory_row == .Val(row) -> probe_func = row.function
+            calls := [SemaCallSiteFact]{}
+            requests := [SemaComptimeRequest]{}
+            references := [SemaNameReferenceFact]{}
+            unused := [Diagnostic]{}
+            result :: sema_function_check(probe_func, registered.symbol.id, TFuncKind.TopLevel, registered.raw_protocol_return, &environment, &scopes, &unused, &calls, &requests, &references)
+            facts :: result.failure ?? next
+            &rows.push(SemaFailureUnionRow{key: facts.function_key, name: declaration.name, module_index: module_index, members: facts.union_members, general: facts.union_general, edges: facts.union_edges, cases: facts.union_cases, declaration: declaration})
+        }
+    }
+    sema_failure_union_project_rows(&graph, rows, &diagnostics)
+}
+
+struct SemaFailureProbeCandidate {
+    module_index: Int
+    function_index: Int
+    calls: [String]
+}
+
+fn sema_failure_union_written_typed(function: Func, names: &[String:Bool]) Never! {
+    declared :: function.return_type ?? return
+    if declared == .Result(_, error) {
+        if sema_failure_union_typed(error) -> names[function.name] = true
+    }
+}
+
+fn sema_failure_union_project_rows(graph: &SemaRegistrationGraph, probe_rows: [SemaFailureUnionRow], diagnostics: &[Diagnostic]) -> Bool {
+    rows := ~probe_rows
     if rows.len() == 0 -> return false
     loop row_index in 0..<rows.len() {
         minted :: sema_failure_union_mint(&graph, rows[row_index], &diagnostics) ?? next
@@ -501,4 +604,26 @@ pub fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [S
         }
     }
     sema_failure_project_returns(&graph, projections)
+}
+
+// Rust solve_inferred_failure projects the solved signature after body
+// checking. Existing Codegen plain-call/return reconciliation accepts the
+// original checked Result carrier, so no second body pass is necessary.
+fn sema_failure_project_checked_infallible(graph: SemaRegistrationGraph, modules: &[SemaGraphModuleResult], solved: [String]) Never! {
+    empty := [String:Bool]{}
+    loop key in solved -> empty[key] = true
+    loop module_index in 0..<modules.len() {
+        loop function_index in 0..<modules[module_index].functions.len() {
+            key :: modules[module_index].functions[function_index].key
+            if !empty.has_key(key) -> next
+            row :: graph.callable_rows.get(key) ?? next
+            if row == .Function(declaring, registered) {
+                return_type :: graph.modules[declaring].functions[registered].declaration.return_type
+                if return_type == .Val(.Result(_, .Named(error))) && error == "Never" {
+                    modules[module_index].functions[function_index].ret = return_type
+                    modules[module_index].functions[function_index].failure_carrier = TFailureCarrier.Infallible
+                }
+            }
+        }
+    }
 }

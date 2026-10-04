@@ -1,0 +1,20 @@
+use OSTarget.[OSTarget]
+// Rust: crates/jet-foundation/src/OSTarget.rs:216
+#Test("parse_and_name_roundtrip") {
+    loop os in [OSTarget]{.Linux, .MacOS, .Windows} {
+        assert(OSTarget.parse(os.name()) == Val(os))
+    }
+    assert(OSTarget.parse("Bsd") == None)
+}
+// Rust: crates/jet-foundation/src/OSTarget.rs:224
+#Test("from_triple_maps_known_platforms") {
+    assert(OSTarget.from_triple("x86_64-unknown-linux-gnu") == Val(.Linux))
+    assert(OSTarget.from_triple("aarch64-apple-darwin") == Val(.MacOS))
+    assert(OSTarget.from_triple("x86_64-pc-windows-msvc") == Val(.Windows))
+    assert(OSTarget.from_triple("wasm32-unknown-unknown") == None)
+}
+// Rust: crates/jet-foundation/src/OSTarget.rs:241
+#Test("active_falls_back_to_host_for_unrecognized_triple") {
+    assert(OSTarget.active(Val("wasm32-unknown-unknown")) == OSTarget.host())
+    assert(OSTarget.active(None) == OSTarget.host())
+}

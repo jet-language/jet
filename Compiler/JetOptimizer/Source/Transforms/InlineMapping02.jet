@@ -1,0 +1,540 @@
+// Canonical InlineMapping extension: Rust identity maps and CFG expansion.
+use jet_foundation.*
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:4715
+pub fn optimize_mir_program(program: ^MIRProgram, policy: MirOptimizationPolicy) -> MIRProgram MIROptimizationError! {
+    _ :: policy
+    before_payload :: if canonical_pass_enabled() -> Val(mir_canonical_payload(program)) else -> None
+    before_identity :: if canonical_pass_enabled() -> Val(mir_canonical_identity(program)) else -> None
+    if verify_mir_legality(program) == .Err(error) -> return Err(MIROptimizationError.Legality{pass: .LegalityVerification, error: error})
+    record_canonical_check("mir.legality-verification", "crates/jet-foundation/src/MIROptimization.rs", program)
+    complete := true
+    loop function in program.functions {
+        if function.optimization.pass_ids != MIR_OPTIMIZATION_PASS_ORDER || function.optimization.derived_from_digest == None { complete = false; break }
+    }
+    if complete -> complete = optimized_pass_order_complete(program, mir_program_digest(program))
+    optimized := ^program
+    if complete {
+        run_canonical_pass("mir.fixed-reduction-normalization", "crates/jet-foundation/src/MIROptimization.rs", &optimized, normalize_fixed_reduction_loops)
+        run_canonical_pass("mir.acceleration-facts", "crates/jet-foundation/src/MIROptimization.rs", &optimized, refresh_acceleration_facts)
+        validate_after(optimized, .CanonicalLoopFacts)
+        seal_derived_facts(&optimized)
+        record_canonical_transition("mir.optimize-pipeline", "crates/jet-foundation/src/MIROptimization.rs", before_payload, before_identity, optimized)
+        return ^optimized
+    }
+    previous_loop_facts :: loop function in optimized.functions -> function.optimization.loop_facts
+    clear_derived_facts(&optimized)
+    run_canonical_pass("mir.inline-always", "crates/jet-foundation/src/MIROptimization.rs", &optimized, expand_inline_always)
+    mark_pass(&optimized, .LegalityVerification)
+    validate_after(optimized, .LegalityVerification)
+    run_canonical_pass("mir.unreachable-block-elimination", "crates/jet-foundation/src/MIROptimization.rs", &optimized, eliminate_unreachable_blocks)
+    mark_pass(&optimized, .UnreachableBlockElimination)
+    validate_after(optimized, .UnreachableBlockElimination)
+    run_canonical_pass("mir.cfg-simplification", "crates/jet-foundation/src/MIROptimization.rs", &optimized, simplify_cfg)
+    mark_pass(&optimized, .CFGSimplification)
+    validate_after(optimized, .CFGSimplification)
+    run_canonical_pass("mir.exact-constant-folding", "crates/jet-foundation/src/MIROptimization.rs", &optimized, fold_exact_constants)
+    mark_pass(&optimized, .ExactConstantFolding)
+    validate_after(optimized, .ExactConstantFolding)
+    run_canonical_pass("mir.bounds-check-elimination", "crates/jet-foundation/src/MIROptimization.rs", &optimized, derive_bounds_facts)
+    mark_pass(&optimized, .BoundsCheckElimination)
+    validate_after(optimized, .BoundsCheckElimination)
+    run_canonical_pass("mir.dead-pure-value-elimination", "crates/jet-foundation/src/MIROptimization.rs", &optimized, eliminate_dead_pure_values)
+    mark_pass(&optimized, .DeadPureValueElimination)
+    validate_after(optimized, .DeadPureValueElimination)
+    run_canonical_pass("mir.canonical-loop-facts", "crates/jet-foundation/src/MIROptimization.rs", &optimized, program -> derive_loop_and_vector_facts(&program, previous_loop_facts))
+    run_canonical_pass("mir.fixed-reduction-normalization", "crates/jet-foundation/src/MIROptimization.rs", &optimized, normalize_fixed_reduction_loops)
+    normalize_fixed_reduction_loops(&optimized)
+    post_reduction_loop_facts :: loop function in optimized.functions -> function.optimization.loop_facts
+    derive_loop_and_vector_facts(&optimized, post_reduction_loop_facts)
+    normalize_fixed_reduction_loops(&optimized)
+    mark_pass(&optimized, .CanonicalLoopFacts)
+    validate_after(optimized, .CanonicalLoopFacts)
+    run_canonical_pass("mir.acceleration-facts", "crates/jet-foundation/src/MIROptimization.rs", &optimized, refresh_acceleration_facts)
+    validate_after(optimized, .CanonicalLoopFacts)
+    run_canonical_pass("mir.canonical-program-order", "crates/jet-foundation/src/MIROptimization.rs", &optimized, canonicalize_program_order)
+    validate_after(optimized, .CanonicalLoopFacts)
+    seal_derived_facts(&optimized)
+    record_canonical_transition("mir.optimize-pipeline", "crates/jet-foundation/src/MIROptimization.rs", before_payload, before_identity, optimized)
+    ^optimized
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:4884
+pub fn decision_ledger_rows(program: MIRProgram) -> [MIRDecisionRow] Never! {
+    rows := [MIRDecisionRow]{}
+    loop function in program.functions {
+        loop row in function.optimization.decision_rows -> &rows.push(row)
+        if function.is_inline || function.is_inline_always {
+            rule :: if function.is_inline_always -> "#Inline(Always)" else -> "#Inline"
+            &rows.push(MIRDecisionRow.new(.Inline, .Selected, Val(function.id), function.key, function.span, rule, "the checked function carries this inline contract", "mir.inline", "checked-function-metadata"))
+        }
+        if function.kernel_proof == .Val(kernel) {
+            proven :: kernel.bounds && kernel.alias_free && kernel.captures && kernel.race_free && kernel.barriers_uniform && kernel.control_flow
+            disposition :: if proven -> MIRDecisionDisposition.Accepted else -> MIRDecisionDisposition.Rejected
+            reason :: if proven -> "the checked kernel satisfies the parallel safety proof" else -> "the checked kernel does not satisfy every parallel safety obligation"
+            &rows.push(MIRDecisionRow.new(.Parallel, disposition, Val(function.id), function.key, function.span, "kernel-parallel", reason, "sema.kernel-proof", "static-legality-proof"))
+        }
+        loop fact in function.optimization.loop_facts {
+            disposition :: if fact.copy_cost == { .NoCopy -> MIRDecisionDisposition.NotAttempted; .PerIteration(_) -> MIRDecisionDisposition.Selected; .Unknown -> MIRDecisionDisposition.Unavailable }
+            reason :: if fact.copy_cost == { .NoCopy -> "no loop copy was required by the checked ownership fact"; .PerIteration(count) -> if count == 1 -> "the compiler inserted one copy per iteration" else -> "the compiler inserted copies per iteration"; .Unknown -> "the compiler has no bounded copy-cost fact" }
+            &rows.push(MIRDecisionRow.new(.Copy, disposition, Val(function.id), function.key, fact.span, "loop-copy-cost", reason, "mir.loop-facts", "static-cost-fact"))
+        }
+        loop bounds in function.optimization.bounds_facts {
+            disposition :: if bounds.proven && bounds.elided -> MIRDecisionDisposition.Accepted else if bounds.proven -> MIRDecisionDisposition.Rejected else -> MIRDecisionDisposition.NotAttempted
+            reason :: if bounds.proven && bounds.elided -> "the checked bounds proof permits elision" else if bounds.proven -> "the bounds proof is present but the failure check is retained" else -> "no checked bounds proof is available for this access"
+            &rows.push(MIRDecisionRow.new(.Bounds, disposition, Val(function.id), function.key, bounds.span, "bounds-check-elimination", reason, "mir.bounds", "static-legality-proof"))
+        }
+        loop vector in function.optimization.vector_facts {
+            disposition :: if vector.decision == .Eligible -> MIRDecisionDisposition.Accepted else -> MIRDecisionDisposition.Rejected
+            reason :: if vector.decision == { .Eligible -> "the {vector.rule.as_str()} vector proof was accepted"; .Rejected(rejection) -> if vector.rule == .Reduction && vector.fixed_reduction == None -> "strict-order reduction proof was not accepted" else -> "vector proof rejected: {rejection.as_str()}" }
+            &rows.push(MIRDecisionRow.new(.Vectorize, disposition, Val(function.id), function.key, vector.span, vector.rule.as_str(), reason, "mir.vector-proof", "static-legality-proof"))
+        }
+    }
+    loop unreachable in program.unreachable {
+        reason :: if unreachable.reason == { .CompileTimeOnly -> "compiletimeonly"; .Disabled -> "disabled"; .ExpandedBeforeLowering -> "expandedbeforelowering"; .SemanticIndexOnly -> "semanticindexonly" }
+        &rows.push(MIRDecisionRow.new(.Unreachable, .Selected, None, "", unreachable.span, unreachable.construct, reason, "tir.erasure", "static-control-flow-fact"))
+    }
+    &rows.sort_by((left, right) -> {
+        if left.span.start != right.span.start -> return left.span.start.compare(right.span.start)
+        if left.span.end != right.span.end -> return left.span.end.compare(right.span.end)
+        if left.kind != right.kind -> return left.kind.compare(right.kind)
+        if left.function_name != right.function_name -> return left.function_name.compare(right.function_name)
+        left.id.compare(right.id)
+    })
+    ^rows
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5059
+pub fn decision_ledger(program: MIRProgram, artifact: MIRArtifactID?, profile: String, run: String, additional_rows: ^[MIRDecisionRow]) -> MIRDecisionLedger Never! {
+    identity :: MIRDecisionIdentity.from_program(program, artifact, profile, run)
+    rows := decision_ledger_rows(program)
+    loop row in ^additional_rows -> &rows.push(^row)
+    MIRDecisionLedger.from_rows(identity, ^rows)
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5077
+fn expand_inline_always(program: &MIRProgram) Never! {
+    function_indices := [MIRFunctionID:Int]{}
+    eligible := [MIRFunctionID:Bool]{}
+    loop (index, function) in program.functions {
+        if !function_indices.contains_key(function.id) {
+            function_indices[function.id] = index
+            if function.is_inline_always -> eligible[function.id] = true
+        }
+    }
+    if eligible.len() == 0 -> return
+    pending := loop function in program.functions -> inline_candidates(function, eligible)
+    callers := [Int]{}
+    loop (index, candidates) in pending { if candidates.len() > 0 -> &callers.push(index) }
+    loop {
+        changed := false
+        loop caller_index in callers {
+            caller_id :: program.functions[caller_index].id
+            site := None
+            loop position in pending[caller_index] {
+                instruction :: program.functions[caller_index].blocks[position.block].instructions[position.instruction]
+                target_id :: inline_target_id(instruction.operation) ?? continue
+                callee_index :: function_indices.get(target_id) ?? continue
+                callee :: program.functions[callee_index]
+                if callee.id == caller_id -> continue
+                seen := [MIRFunctionID:Bool]{}
+                if inline_path(program, function_indices, eligible, callee.id, caller_id, &seen) -> continue
+                &seen.clear()
+                if inline_path(program, function_indices, eligible, callee.id, callee.id, &seen) -> continue
+                if inline_has_return_drop(callee) -> continue
+                site = Val((block: position.block, instruction: position.instruction, call: instruction, callee: callee_index))
+                break
+            }
+            position :: site ?? continue
+            callee :: program.functions[position.callee]
+            if inline_call(&program.functions[caller_index], callee, position.block, position.instruction, position.call) {
+                caller := &program.functions[caller_index]
+                &caller.optimization.decision_rows.push(MIRDecisionRow.new(.Inline, .Accepted, Val(caller.id), caller.key, position.call.span, "#Inline(Always)", "expanded checked callee `{callee.key}` into this call site", "mir.inline", "canonical-cfg-transform"))
+                pending[caller_index] = inline_candidates(caller, eligible)
+                changed = true
+                break
+            }
+        }
+        if !changed -> break
+    }
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5166
+fn inline_candidates(caller: MIRFunction, eligible: [MIRFunctionID:Bool]) -> [(block: Int, instruction: Int)] Never! {
+    pending := [(block: Int, instruction: Int)]{}
+    loop (block_index, block) in caller.blocks {
+        loop (instruction_index, instruction) in block.instructions {
+            if inline_target_id(instruction.operation) == .Val(id) {
+                if eligible.contains_key(id) -> &pending.push((block: block_index, instruction: instruction_index))
+            }
+        }
+    }
+    ^pending
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5181
+fn inline_has_return_drop(callee: MIRFunction) -> Bool Never! {
+    loop drop in callee.drops { if drop.edge == .Return -> return true }
+    false
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5188
+fn inline_target_id(operation: MIROperation) -> MIRFunctionID? Never! {
+    if operation == .Call(callee, _, _) {
+        if callee == { .User(id) | .Associated(id, _) | .Method(id, _) -> return Val(id); else -> {} }
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5200
+fn inline_path(program: MIRProgram, function_indices: [MIRFunctionID:Int], eligible: [MIRFunctionID:Bool], current: MIRFunctionID, wanted: MIRFunctionID, seen: &[MIRFunctionID:Bool]) -> Bool Never! {
+    if seen.contains_key(current) -> return false
+    seen[current] = true
+    index :: function_indices.get(current) ?? return false
+    loop block in program.functions[index].blocks {
+        loop instruction in block.instructions {
+            target :: inline_target_id(instruction.operation) ?? continue
+            if !eligible.contains_key(target) -> continue
+            if target == wanted || inline_path(program, function_indices, eligible, target, wanted, &seen) -> return true
+        }
+    }
+    false
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5232
+// GATE #4499: MIR identity newtypes retain exact composite-key equality/hash.
+struct InlineIdMaps {
+    values: [MIRValueID:MIRValueID]
+    blocks: [MIRBlockID:MIRBlockID]
+    locals: [MIRLocalID:MIRLocalID]
+    places: [MIRPlaceID:MIRPlaceID]
+    scopes: [MIRScopeID:MIRScopeID]
+}
+impl InlineIdMaps {
+    fn default() -> InlineIdMaps Never! { InlineIdMaps{values: [:], blocks: [:], locals: [:], places: [:], scopes: [:]} }
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5240
+fn inline_call(caller: &MIRFunction, callee: MIRFunction, block_index: Int, instruction_index: Int, call_instruction: MIRInstruction) -> Bool Never! {
+    call :: if call_instruction.operation == .Call(call_callee, args, type_args) -> (callee: call_callee, args: args, types: type_args) else -> return false
+    args :: call.args
+    if inline_target_id(call_instruction.operation) != Val(callee.id) || inline_has_return_drop(callee) || callee.capture_params.len() != 0 || (caller.generator == None && callee.generator != None) || block_index >= caller.blocks.len() || instruction_index >= caller.blocks[block_index].instructions.len() -> return false
+    substitutions := [String:MIRType]{}
+    if callee.generic_params.len() > 0 {
+        if callee.generic_params.len() != call.types.len() -> return false
+        loop (index, parameter) in callee.generic_params -> substitutions[parameter.name] = call.types[index]
+    }
+    if args.len() != callee.params.len() -> return false
+    return_type :: inline_type(callee.return_type, substitutions)
+    if call_instruction.ty == .Val(ty) { if !mir_type_same_checked_type(ty, return_type) -> return false }
+    caller_values := [MIRValueID:@MIRValueFact]{}
+    loop fact in caller.values -> caller_values[fact.id] = @fact
+    loop (index, argument) in args {
+        fact :: caller_values.get(argument.value) ?? return false
+        if !mir_type_same_checked_type(fact.ty, inline_type(callee.params[index].ty, substitutions)) -> return false
+        if argument.fn_coercion != None || argument.widen_fixed_to_list || argument.widen_to_union != None || argument.box_as_trait != None || argument.authority_boundary -> return false
+    }
+    reachable :: reachable_blocks(callee)
+    reachable_returns := 0
+    loop block in callee.blocks {
+        if reachable.contains_key(block.id) && block.terminator == .Return(_) -> reachable_returns += 1
+    }
+    if reachable_returns == 0 && call_instruction.result != None -> return false
+    used_values := [U64:Bool]{}
+    used_operations := [U64:Bool]{}
+    used_blocks := [U64:Bool]{}
+    used_locals := [U64:Bool]{}
+    used_places := [U64:Bool]{}
+    used_scopes := [U64:Bool]{}
+    loop value in caller.values -> used_values[value.id.value] = true
+    loop block in caller.blocks {
+        used_blocks[block.id.value] = true
+        loop instruction in block.instructions -> used_operations[instruction.id.value] = true
+    }
+    loop local in caller.locals -> used_locals[local.id.value] = true
+    loop place in caller.places -> used_places[place.id.value] = true
+    loop scope in caller.scopes -> used_scopes[scope.id.value] = true
+    identity :: (kind: String, source: U64, ordinal: Int) -> "caller={caller.id.value}:call={call_instruction.id.value}:callee={callee.id.value}:kind={kind}:source={source}:ordinal={ordinal}"
+    original_block :: caller.blocks[block_index]
+    adapted_values := [MIRValueFact]{}
+    adapted_arguments := [MIRValueID]{}
+    adapters := [MIRInstruction]{}
+    loop (ordinal, argument) in args {
+        fact :: caller_values.get(argument.value) ?? return false
+        adapted := argument.value
+        if argument.implicit_clone || argument.shared_auto_clone || call_arg_consumes(argument) {
+            clone :: argument.implicit_clone || argument.shared_auto_clone
+            value :: MIRValueID{value: inline_fresh_id(&used_values, "mir-inline-value", identity(if clone -> "clone" else -> "move", argument.value.value, ordinal))}
+            op :: MIROpID{value: inline_fresh_id(&used_operations, "mir-inline-op", identity(if clone -> "clone-op" else -> "move-op", argument.value.value, ordinal))}
+            ownership := fact.ownership
+            ownership.moved = false
+            ownership.last_use = false
+            &adapted_values.push(MIRValueFact{id: value, ty: fact.ty, span: fact.span, ownership: ownership})
+            operation :: if clone -> MIROperation.Copy{value: argument.value, fact: mir_copy_fact_for_ownership(if argument.shared_auto_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize, fact.ownership.mode)} else -> MIROperation.Move{value: argument.value}
+            &adapters.push(MIRInstruction{id: op, span: fact.span, source_line: None, result: Val(value), ty: Val(fact.ty), operation: operation})
+            adapted = value
+        }
+        &adapted_arguments.push(adapted)
+    }
+    prefix := original_block.instructions[0..<instruction_index]
+    loop adapter in ^adapters -> &prefix.push(^adapter)
+    suffix :: original_block.instructions[instruction_index + 1..<original_block.instructions.len()]
+    ids := InlineIdMaps.default()
+    parameter_values := [Int:MIRValueID]{}
+    loop block in callee.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .Parameter(index, _) {
+                value :: instruction.result ?? return false
+                if parameter_values.contains_key(index) -> return false
+                parameter_values[index] = value
+            }
+        }
+    }
+    if parameter_values.len() != callee.params.len() -> return false
+    loop (index, adapted) in adapted_arguments {
+        value :: parameter_values.get(index) ?? return false
+        ids.values[value] = adapted
+    }
+    loop value in callee.values {
+        if ids.values.contains_key(value.id) -> continue
+        ids.values[value.id] = MIRValueID{value: inline_fresh_id(&used_values, "mir-inline-value", identity("value", value.id.value, 0))}
+    }
+    loop block in callee.blocks -> ids.blocks[block.id] = MIRBlockID{value: inline_fresh_id(&used_blocks, "mir-inline-block", identity("block", block.id.value, 0))}
+    loop local in callee.locals -> ids.locals[local.id] = MIRLocalID{value: inline_fresh_id(&used_locals, "mir-inline-local", identity("local", local.id.value, 0))}
+    loop scope in callee.scopes -> ids.scopes[scope.id] = MIRScopeID{value: inline_fresh_id(&used_scopes, "mir-inline-scope", identity("scope", scope.id.value, 0))}
+    parameter_indexes := [MIRValueID:Int]{}
+    loop (index, value) in parameter_values -> parameter_indexes[value] = index
+    caller_places := [MIRPlaceID:@MIRPlace]{}
+    loop place in caller.places -> caller_places[place.id] = @place
+    cloned_places := [MIRPlace]{}
+    loop place in callee.places {
+        mapped_base := place.base
+        if place.base == {
+            .Parameter(value) -> {
+                index :: parameter_indexes.get(value) ?? return false
+                if args[index].place == .Val(source_place_id) {
+                    source :: caller_places.get(source_place_id) ?? return false
+                    if place.projections.len() == 0 { ids.places[place.id] = source.id; continue }
+                    mapped_id :: MIRPlaceID{value: inline_fresh_id(&used_places, "mir-inline-place", identity("parameter-place", place.id.value, index))}
+                    projections := source.projections
+                    loop projection in place.projections -> &projections.push(inline_projection(projection, ids))
+                    persist :: if place.persist_key != None -> place.persist_key else -> source.persist_key
+                    &cloned_places.push(MIRPlace{id: mapped_id, span: place.span, ty: inline_type(place.ty, substitutions), base: source.base, projections: ^projections, access: place.access, persist_key: persist})
+                    ids.places[place.id] = mapped_id
+                    continue
+                }
+                mapped_base = MIRPlaceBase.Parameter{value: inline_value(ids, value)}
+            }
+            .Local(local) -> mapped_base = MIRPlaceBase.Local{local: inline_local(ids, local)}
+            .Capture(value) -> mapped_base = MIRPlaceBase.Capture{value: inline_value(ids, value)}
+            .Temporary(value) -> mapped_base = MIRPlaceBase.Temporary{value: inline_value(ids, value)}
+            .Static(_) -> {}
+        }
+        mapped_id :: MIRPlaceID{value: inline_fresh_id(&used_places, "mir-inline-place", identity("place", place.id.value, 0))}
+        ids.places[place.id] = mapped_id
+        projections :: loop projection in place.projections -> inline_projection(projection, ids)
+        &cloned_places.push(MIRPlace{id: mapped_id, span: place.span, ty: inline_type(place.ty, substitutions), base: mapped_base, projections: projections, access: place.access, persist_key: place.persist_key})
+    }
+    cloned_locals :: loop local in callee.locals -> MIRLocal{id: ids.locals[local.id], name: local.name, span: local.span, ty: inline_type(local.ty, substitutions), place: ids.places[local.place], mutable: local.mutable, ownership: local.ownership, is_comptime: local.is_comptime, uninit: local.uninit, arena_view: local.arena_view, string_view: local.string_view, gc_root: local.gc_root}
+    cloned_scopes :: loop scope in callee.scopes -> MIRScope{id: ids.scopes[scope.id], kind: scope.kind, span: scope.span, name: scope.name, deadline: scope.deadline.map(value -> inline_value(ids, value)), facts: scope.facts}
+    cloned_values := [MIRValueFact]{}
+    callee_values := [MIRValueID:@MIRValueFact]{}
+    loop fact in callee.values {
+        callee_values[fact.id] = @fact
+        if parameter_indexes.contains_key(fact.id) -> continue
+        &cloned_values.push(MIRValueFact{id: ids.values[fact.id], ty: inline_type(fact.ty, substitutions), span: fact.span, ownership: fact.ownership})
+    }
+    continuation :: if reachable_returns > 0 -> Val(MIRBlockID{value: inline_fresh_id(&used_blocks, "mir-inline-block", identity("continuation", call_instruction.id.value, 0))}) else -> None
+    cloned_blocks := [MIRBasicBlock]{}
+    return_sites := [(block: MIRBlockID, value: MIRValueID?)]{}
+    loop block in callee.blocks {
+        mapped_id :: ids.blocks[block.id]
+        instructions := [MIRInstruction]{}
+        loop instruction in block.instructions {
+            if instruction.operation == .Parameter(_, _) -> continue
+            operation :: inline_operation(instruction.operation, ids, substitutions)
+            &instructions.push(MIRInstruction{id: MIROpID{value: inline_fresh_id(&used_operations, "mir-inline-op", identity("instruction", instruction.id.value, 0))}, span: instruction.span, source_line: instruction.source_line, result: instruction.result.map(value -> inline_value(ids, value)), ty: instruction.ty.map(ty -> inline_type(ty, substitutions)), operation: operation})
+        }
+        terminator := inline_terminator(block.terminator, ids)
+        if block.terminator == .Return(source_return_value) {
+            if reachable.contains_key(block.id) {
+                target :: continuation ?? return false
+                mapped_value := source_return_value.map(value -> inline_value(ids, value))
+                if mapped_value == None && call_instruction.result != None {
+                    if !mir_type_is_unit(return_type) -> return false
+                    unit_value :: MIRValueID{value: inline_fresh_id(&used_values, "mir-inline-value", identity("unit-return", block.id.value, 0))}
+                    unit_operation :: MIROpID{value: inline_fresh_id(&used_operations, "mir-inline-op", identity("unit-return-op", block.id.value, 0))}
+                    &instructions.push(MIRInstruction{id: unit_operation, span: block.span, source_line: None, result: Val(unit_value), ty: Val(return_type), operation: MIROperation.Constant{value: MIRConstant.Unit}})
+                    &cloned_values.push(MIRValueFact{id: unit_value, ty: return_type, span: block.span, ownership: mir_copy_ownership()})
+                    mapped_value = Val(unit_value)
+                }
+                if call_instruction.result == None && mapped_value == .Val(value) {
+                    if source_return_value == .Val(source_id) {
+                        if callee_values.get(source_id) == .Val(fact) {
+                            if fact.ownership.drop != .None -> &instructions.push(MIRInstruction{id: MIROpID{value: inline_fresh_id(&used_operations, "mir-inline-op", identity("discard-return", block.id.value, 0))}, span: block.span, source_line: None, result: None, ty: None, operation: MIROperation.Drop{value: value, kind: fact.ownership.drop}})
+                        }
+                    }
+                }
+                &return_sites.push((block: mapped_id, value: mapped_value))
+                terminator = MIRTerminator.Jump{target: target}
+            }
+        }
+        &cloned_blocks.push(MIRBasicBlock{id: mapped_id, span: block.span, instructions: ^instructions, terminator: terminator})
+    }
+    if continuation == .Val(target) {
+        instructions := [MIRInstruction]{}
+        if call_instruction.result == .Val(result) {
+            call_type :: call_instruction.ty ?? return false
+            incoming := [MIRPhiIncoming]{}
+            loop site in return_sites {
+                value :: site.value ?? return false
+                &incoming.push(MIRPhiIncoming{block: site.block, value: value})
+            }
+            &instructions.push(MIRInstruction{id: MIROpID{value: inline_fresh_id(&used_operations, "mir-inline-op", identity("return-phi", call_instruction.id.value, 0))}, span: call_instruction.span, source_line: call_instruction.source_line, result: Val(result), ty: Val(call_type), operation: MIROperation.Phi{incoming: ^incoming}})
+        }
+        loop instruction in suffix -> &instructions.push(instruction)
+        &cloned_blocks.push(MIRBasicBlock{id: target, span: call_instruction.span, instructions: ^instructions, terminator: original_block.terminator})
+    } else {
+        &caller.values.retain(value -> Val(value.id) != call_instruction.result)
+    }
+    callee_places := [MIRPlaceID:@MIRPlace]{}
+    loop place in callee.places -> callee_places[place.id] = @place
+    drops := [MIRDropAction]{}
+    loop drop in callee.drops {
+        source :: callee_places.get(drop.place) ?? continue
+        if source.base == .Parameter(_) -> continue
+        edge :: if drop.edge == { .Normal -> MIRDropEdge.Normal; .Return -> MIRDropEdge.Return; .Failure(block) -> MIRDropEdge.Failure{target: ids.blocks[block]}; .Unwind(block) -> MIRDropEdge.Unwind{target: ids.blocks[block]} }
+        &drops.push(MIRDropAction{place: ids.places[drop.place], edge: edge, span: drop.span})
+    }
+    caller.blocks[block_index].instructions = ^prefix
+    caller.blocks[block_index].terminator = MIRTerminator.Jump{target: ids.blocks[callee.entry]}
+    loop block in ^cloned_blocks -> &caller.blocks.push(^block)
+    loop value in ^adapted_values -> &caller.values.push(^value)
+    loop value in ^cloned_values -> &caller.values.push(^value)
+    loop local in ^cloned_locals -> &caller.locals.push(^local)
+    loop place in ^cloned_places -> &caller.places.push(^place)
+    loop scope in ^cloned_scopes -> &caller.scopes.push(^scope)
+    loop drop in ^drops -> &caller.drops.push(^drop)
+    true
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5796
+fn inline_fresh_id(used: &[U64:Bool], namespace: String, identity: String) -> U64 Never! {
+    salt := U64{0}
+    loop {
+        id :: stable_id(namespace, "{identity}:salt={salt}")
+        if !used.contains_key(id) { used[id] = true; return id }
+        salt = salt.saturating_add(U64{1})
+    }
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5808
+fn inline_value(ids: InlineIdMaps, value: MIRValueID) -> MIRValueID Never! { ids.values.get(value) ?? value }
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5812
+fn inline_block(ids: InlineIdMaps, block: MIRBlockID) -> MIRBlockID Never! { ids.blocks.get(block) ?? block }
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5816
+fn inline_local(ids: InlineIdMaps, local: MIRLocalID) -> MIRLocalID Never! { ids.locals.get(local) ?? local }
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5820
+fn inline_place(ids: InlineIdMaps, place: MIRPlaceID) -> MIRPlaceID Never! { ids.places.get(place) ?? place }
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5824
+fn inline_scope(ids: InlineIdMaps, scope: MIRScopeID) -> MIRScopeID Never! { ids.scopes.get(scope) ?? scope }
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5828
+fn inline_context(ids: InlineIdMaps, context: MIRPanicContext) -> MIRPanicContext Never! {
+    locals :: loop local in context.locals -> MIRPanicLocal{name: local.name, local: inline_local(ids, local.local)}
+    MIRPanicContext{function: context.function, source_line: context.source_line, caret: context.caret, locals: locals}
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5841
+fn inline_projection(projection: MIRProjection, ids: InlineIdMaps) -> MIRProjection Never! {
+    if projection == {
+        .Field(field, span) -> MIRProjection.Field{field: field, span: span}
+        .Index(kind, index, call, write_call, location, context, span) -> MIRProjection.Index{kind: kind, index: inline_value(ids, index), call: call, write_call: write_call, location: location, context: context.map(value -> inline_context(ids, value)), span: span}
+        .Deref(span) -> MIRProjection.Deref{span: span}
+        .Payload(kind, span) -> MIRProjection.Payload{kind: kind, span: span}
+        .Range(range, location, span) -> MIRProjection.Range{range: inline_value(ids, range), location: location, span: span}
+    }
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5881
+fn inline_call_arg(argument: MIRCallArg, ids: InlineIdMaps, substitutions: [String:MIRType]) -> MIRCallArg Never! {
+    MIRCallArg{value: inline_value(ids, argument.value), place: argument.place.map(place -> inline_place(ids, place)), access: argument.access, span: argument.span, label: argument.label, source_index: argument.source_index, binder_slot: argument.binder_slot, spread: argument.spread, implicit_clone: argument.implicit_clone, shared_auto_clone: argument.shared_auto_clone, owned_last_use: argument.owned_last_use, authority_boundary: argument.authority_boundary, fn_coercion: argument.fn_coercion.map(coercion -> MIRFnCoercion{ty: inline_type(coercion.ty, substitutions), already_boxed: coercion.already_boxed}), widen_fixed_to_list: argument.widen_fixed_to_list, widen_to_union: argument.widen_to_union, box_as_trait: argument.box_as_trait}
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5909
+fn inline_callee(callee: MIRCallee, ids: InlineIdMaps, substitutions: [String:MIRType]) -> MIRCallee Never! {
+    if callee == {
+        .User(function) -> MIRCallee.User{function: function}
+        .Associated(function, owner) -> MIRCallee.Associated{function: function, owner: inline_type(owner, substitutions)}
+        .Method(function, owner) -> MIRCallee.Method{function: function, owner: inline_type(owner, substitutions)}
+        .TraitMethod(method, trait_ref, receiver) -> MIRCallee.TraitMethod{method: method, trait_ref: trait_ref, receiver: inline_type(receiver, substitutions)}
+        .Core(call) -> MIRCallee.Core{call: call}
+        .Prelude(call) -> MIRCallee.Prelude{call: call}
+        .Foreign(id) -> MIRCallee.Foreign{id: id}
+        .Indirect(value) -> MIRCallee.Indirect{value: inline_value(ids, value)}
+    }
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5940
+fn inline_failure_carrier(carrier: MIRFailureCarrier, substitutions: [String:MIRType]) -> MIRFailureCarrier Never! {
+    if carrier == { .Infallible -> MIRFailureCarrier.Infallible; .Result(success, error) -> MIRFailureCarrier.Result{success: inline_type(success, substitutions), error: inline_type(error, substitutions)}; .Optional(value) -> MIRFailureCarrier.Optional{value: inline_type(value, substitutions)}; .Diverges(value) -> MIRFailureCarrier.Diverges{value: inline_type(value, substitutions)} }
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5959
+fn inline_fallibility(fallibility: MIRCallFallibility, substitutions: [String:MIRType]) -> MIRCallFallibility Never! {
+    if fallibility == { .Infallible -> MIRCallFallibility.Infallible; .Failure(carrier) -> MIRCallFallibility.Failure{failure: inline_failure_carrier(carrier, substitutions)} }
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5971
+fn inline_conversion(conversion: MIRConversion, substitutions: [String:MIRType]) -> MIRConversion Never! {
+    if conversion == { .Transparent -> MIRConversion.Transparent; .NumericCast -> MIRConversion.NumericCast; .SendFn -> MIRConversion.SendFn; .Prelude(call, location, fallibility) -> MIRConversion.Prelude{call: call, location: location, fallibility: inline_fallibility(fallibility, substitutions)} }
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:5991
+fn inline_operation(operation: MIROperation, ids: InlineIdMaps, substitutions: [String:MIRType]) -> MIROperation Never! {
+    if operation == {
+        .Parameter(index, name) -> MIROperation.Parameter{index: index, name: name}
+        .Capture(slot) -> MIROperation.Capture{slot: slot}
+        .Global(name) -> MIROperation.Global{name: name}
+        .Phi(incoming) -> MIROperation.Phi{incoming: loop row in incoming -> MIRPhiIncoming{block: inline_block(ids, row.block), value: inline_value(ids, row.value)}}
+        .ReadPlace(place) -> MIROperation.ReadPlace{place: inline_place(ids, place)}
+        .MovePlace(place) -> MIROperation.MovePlace{place: inline_place(ids, place)}
+        .WritePlace(place, value) -> MIROperation.WritePlace{place: inline_place(ids, place), value: inline_value(ids, value)}
+        .ReplacePlace(place, value) -> MIROperation.ReplacePlace{place: inline_place(ids, place), value: inline_value(ids, value)}
+        .InitializeUninit(place) -> MIROperation.InitializeUninit{place: inline_place(ids, place)}
+        .Copy(value, fact) -> MIROperation.Copy{value: inline_value(ids, value), fact: fact}
+        .Move(value) -> MIROperation.Move{value: inline_value(ids, value)}
+        .TraitBox(value, target) -> MIROperation.TraitBox{value: inline_value(ids, value), target: target}
+        .Constant(value) -> MIROperation.Constant{value: value}
+        .Unary(op, value) -> MIROperation.Unary{op: op, value: inline_value(ids, value)}
+        .Binary(op, dispatch, overflow, left, right) -> MIROperation.Binary{op: op, dispatch: dispatch, overflow: overflow, left: inline_value(ids, left), right: inline_value(ids, right)}
+        .BuildString(parts) -> MIROperation.BuildString{parts: loop part in parts -> if part == { .Literal(text) -> MIRStringPart.Literal{text: text}; .Value(value) -> MIRStringPart.Value{value: inline_value(ids, value)} }}
+        .BuildList(values, trait_coercion) -> MIROperation.BuildList{values: loop value in values -> inline_value(ids, value), trait_coercion: trait_coercion}
+        .BuildMap(entries) -> MIROperation.BuildMap{entries: loop entry in entries -> MIRMapEntry{key: inline_value(ids, entry.key), value: inline_value(ids, entry.value)}}
+        .EnumIs(subject, owner, variant) -> MIROperation.EnumIs{subject: inline_value(ids, subject), owner: owner, variant: variant}
+        .EnumPayload(subject, owner, variant, index) -> MIROperation.EnumPayload{subject: inline_value(ids, subject), owner: owner, variant: variant, index: index}
+        .OptionIsSome(subject) -> MIROperation.OptionIsSome{subject: inline_value(ids, subject)}
+        .OptionValue(subject) -> MIROperation.OptionValue{subject: inline_value(ids, subject)}
+        .ResultIsOk(subject) -> MIROperation.ResultIsOk{subject: inline_value(ids, subject)}
+        .ResultValue(subject, ok) -> MIROperation.ResultValue{subject: inline_value(ids, subject), ok: ok}
+        .PatternCapture(matched, index) -> MIROperation.PatternCapture{matched: inline_value(ids, matched), index: index}
+        .PatternMatched(matched) -> MIROperation.PatternMatched{matched: inline_value(ids, matched)}
+        .ProjectMembers(base, members) -> MIROperation.ProjectMembers{base: inline_value(ids, base), members: members}
+        .Index(call, base, index, kind, access, location, context) -> MIROperation.Index{call: call, base: inline_value(ids, base), index: inline_value(ids, index), kind: kind, access: access, location: location, context: inline_context(ids, context)}
+        .Slice(call, base, start, end, range, location) -> MIROperation.Slice{call: call, base: inline_value(ids, base), start: inline_value(ids, start), end: inline_value(ids, end), range: range.map(value -> inline_value(ids, value)), location: location}
+        .Range(start, end, exclusive) -> MIROperation.Range{start: inline_value(ids, start), end: inline_value(ids, end), exclusive: exclusive}
+        .Field(base, field) -> MIROperation.Field{base: inline_value(ids, base), field: field}
+        .Struct(type_id, fields) -> MIROperation.Struct{type_id: type_id, fields: loop field in fields -> MIRFieldValue{field: field.field, value: inline_value(ids, field.value)}}
+        .Enum(type_id, variant, args) -> MIROperation.Enum{type_id: type_id, variant: variant, args: loop arg in args -> MIREnumArg{field: arg.field, value: inline_value(ids, arg.value), boxed: arg.boxed}}
+        .Tuple(type_id, fields) -> MIROperation.Tuple{type_id: type_id, fields: loop field in fields -> MIRFieldValue{field: field.field, value: inline_value(ids, field.value)}}
+        .Present(value) -> MIROperation.Present{value: inline_value(ids, value)}
+        .Convert(value, parameters, target, conversion) -> MIROperation.Convert{value: inline_value(ids, value), parameters: loop parameter in parameters -> inline_value(ids, parameter), target: inline_type(target, substitutions), conversion: inline_conversion(conversion, substitutions)}
+        .Absent -> MIROperation.Absent
+        .ResultOk(value) -> MIROperation.ResultOk{value: inline_value(ids, value)}
+        .ResultErr(value) -> MIROperation.ResultErr{value: inline_value(ids, value)}
+        .Call(callee, args, type_args) -> MIROperation.Call{callee: inline_callee(callee, ids, substitutions), args: loop arg in args -> inline_call_arg(arg, ids, substitutions), type_args: loop ty in type_args -> inline_type(ty, substitutions)}
+        .IndirectCall(callee, args, type_args) -> MIROperation.IndirectCall{callee: inline_value(ids, callee), args: loop arg in args -> inline_call_arg(arg, ids, substitutions), type_args: loop ty in type_args -> inline_type(ty, substitutions)}
+        .Closure(function, captures, facts) -> MIROperation.Closure{function: function, captures: loop capture in captures -> if capture == { .Value(value) -> MIRCaptureOperand.Value{value: inline_value(ids, value)}; .Place(place) -> MIRCaptureOperand.Place{place: inline_place(ids, place)} }, facts: facts}
+        .PtrFromAddr(address, element) -> MIROperation.PtrFromAddr{address: inline_value(ids, address), element: inline_type(element, substitutions)}
+        .Deref(value) -> MIROperation.Deref{value: inline_value(ids, value)}
+        .AddressOf(place, access) -> MIROperation.AddressOf{place: inline_place(ids, place), access: access}
+        .RawAddressOf(place) -> MIROperation.RawAddressOf{place: inline_place(ids, place)}
+        .CoreCall(call, route, args, type_args, fallibility, data_plan) -> MIROperation.CoreCall{call: call, route: route, args: loop arg in args -> inline_call_arg(arg, ids, substitutions), type_args: loop ty in type_args -> inline_type(ty, substitutions), fallibility: inline_fallibility(fallibility, substitutions), data_plan: data_plan}
+        .AttachTag(value, tag) -> MIROperation.AttachTag{value: inline_value(ids, value), tag: tag}
+        .Todo(call, location, expected_type) -> MIROperation.Todo{call: call, location: location, expected_type: expected_type.map(ty -> inline_type(ty, substitutions))}
+        .Never(reason) -> MIROperation.Never{reason: reason}
+        .Semantic(semantic) -> MIROperation.Semantic{operation: inline_semantic(semantic, ids, substitutions)}
+        .LoopRangeInit(call, start, end, step, exclusive) -> MIROperation.LoopRangeInit{call: call, start: inline_value(ids, start), end: inline_value(ids, end), step: step.map(value -> inline_value(ids, value)), exclusive: exclusive}
+        .LoopRangeHasNext(call, cursor) -> MIROperation.LoopRangeHasNext{call: call, cursor: inline_value(ids, cursor)}
+        .LoopRangeValue(call, cursor) -> MIROperation.LoopRangeValue{call: call, cursor: inline_value(ids, cursor)}
+        .LoopRangeAdvance(call, cursor) -> MIROperation.LoopRangeAdvance{call: call, cursor: inline_value(ids, cursor)}
+        .LoopIterInit(call, collection, step, by_value, source_kind) -> MIROperation.LoopIterInit{call: call, collection: inline_value(ids, collection), step: step.map(value -> inline_value(ids, value)), by_value: by_value, source_kind: source_kind}
+        .LoopIterHasNext(call, cursor) -> MIROperation.LoopIterHasNext{call: call, cursor: inline_value(ids, cursor)}
+        .LoopIterValue(call, cursor) -> MIROperation.LoopIterValue{call: call, cursor: inline_value(ids, cursor)}
+        .LoopIterAdvance(call, cursor) -> MIROperation.LoopIterAdvance{call: call, cursor: inline_value(ids, cursor)}
+        .ScopeEnter(scope, member) -> MIROperation.ScopeEnter{scope: inline_scope(ids, scope), test_member: member.map(value -> if value == { .ExpectFail(expected_code) -> MIRTestScopeMember.ExpectFail{expected_code: expected_code}; .Timeout(duration) -> MIRTestScopeMember.Timeout{duration: inline_value(ids, duration)}; .Skip(whole_test) -> MIRTestScopeMember.Skip{whole_test: whole_test}; .Measure -> MIRTestScopeMember.Measure })}
+        .ScopeExit(scope) -> MIROperation.ScopeExit{scope: inline_scope(ids, scope)}
+        .Drop(value, kind) -> MIROperation.Drop{value: inline_value(ids, value), kind: kind}
+    }
+}

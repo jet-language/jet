@@ -1,0 +1,36 @@
+// SourceSharedInterop.rs:56-92 and jit/functions_compile.rs:197-219.
+// Descriptor IDs are checked metadata, never physical-pointer authority.
+// Native Shared backend/guard/owner aliases consume the sole Core Shared
+// provider once #4494 supplies retained typed carrier/lifecycle transport.
+use jet_foundation.[MIRProgram, MIRType, MIRNominalRef, stable_id, mir_type_canonical_key]
+
+pub fn source_shared_interop_checked_type_id(ty: MIRType) -> U64 Never! {
+    if ty.identity == .Val(identity) -> return identity.value
+    stable_id("jit-runtime-type", mir_type_canonical_key(ty)) | U64{9223372036854775808}
+}
+// Retain only a row index, not an owned MIRTypeDef/graph clone.
+fn source_shared_interop_nominal_definition_position(program: MIRProgram, name: MIRNominalRef) -> Int? Never! {
+    loop (position, row) in program.types { if row.id == name.id -> return Val(position) }
+    loop (position, row) in program.types { if row.key == name.name -> return Val(position) }
+    selected := Int?{None}
+    loop (position, row) in program.types {
+        if row.name == name.name {
+            if selected != None -> return None
+            selected = Val(position)
+        }
+    }
+    selected
+}
+pub fn source_shared_interop_checked_type_id_for_program(program: MIRProgram, ty: MIRType) -> U64 Never! {
+    if ty.identity == .Val(identity) -> return identity.value
+    key :: mir_type_canonical_key(ty)
+    loop instance in program.type_instances {
+        if mir_type_canonical_key(instance) == key -> return source_shared_interop_checked_type_id(instance)
+    }
+    if ty.kind == .Apply(name, args) {
+        if args.len() == 0 {
+            if source_shared_interop_nominal_definition_position(program, name) == .Val(position) -> return program.types[position].id.value
+        }
+    }
+    source_shared_interop_checked_type_id(ty)
+}

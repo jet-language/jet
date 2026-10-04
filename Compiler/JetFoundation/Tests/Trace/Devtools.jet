@@ -1,0 +1,42 @@
+// Genuine typed Foundation Devtools carrier dependency behavior, not a wire-tag fixture.
+#Test("Devtools source span and function identity retain U32 boundaries") {
+    span :: jet_devtools_source_span_new("source", "file.jet", U32{1}, U32{2}, U32{3}, U32{4})
+    _ :: jet_devtools_source_span_validate(span) ?? panic(err)
+    function :: jet_devtools_function_identity_new("function", "name", ~span)
+    _ :: jet_devtools_function_identity_validate(function) ?? panic(err)
+    invalid := span
+    invalid.start_line = U32{0}
+    if jet_devtools_source_span_validate(invalid) == {
+        .Err(error) -> assert_eq(error, "jet.devtools.v1 source span starts or ends at zero")
+        else -> panic("zero position accepted")
+    }
+    invalid = span
+    invalid.end_line = U32{1}
+    invalid.end_column = U32{1}
+    if jet_devtools_source_span_validate(invalid) == {
+        .Err(error) -> assert_eq(error, "jet.devtools.v1 source span ends before it starts")
+        else -> panic("reversed span accepted")
+    }
+}
+#Test("Devtools typed family entity and state wires remain closed") {
+    body :: JetDevtoolsEventBody.Query{name: "orders", state: .Fresh, footprint: U64{3}}
+    assert_eq(jet_devtools_event_body_family(body), "Query")
+    assert_eq(jet_devtools_event_body_entity(body), "orders")
+    assert_eq(jet_devtools_query_state_wire(.Invalidated), "invalidated")
+    assert_eq(jet_devtools_mutation_lifecycle_wire(.RolledBack), "rolled_back")
+    assert_eq(jet_devtools_form_state_wire(.Invalid), "invalid")
+    assert_eq(jet_devtools_trace_kind_wire(.Frame), "frame")
+    game :: JetDevtoolsEventBody.GameFrameSample{sequence: U64{1}, frame_id: U64{2}, scene: "scene", frame_index: U64{3}, build: "build", revision: "revision", trace_id: "trace", start_ns: U64{4}, cpu_ns: U64{5}, gpu_ns: None, responsible_function: None}
+    assert_eq(jet_devtools_event_body_family(game), "GameFrameSample")
+    assert_eq(jet_devtools_event_body_entity(game), "scene")
+}
+#Test("Devtools carrier validation enforces UTF8 byte text bounds") {
+    allowed :: jet_devtools_source_span_new("é".repeat(8192), "file.jet", U32{1}, U32{1}, U32{1}, U32{1})
+    _ :: jet_devtools_source_span_validate(allowed) ?? panic(err)
+    oversized := allowed
+    oversized.source_id = "é".repeat(8193)
+    if jet_devtools_source_span_validate(oversized) == {
+        .Err(error) -> assert_eq(error, "jet.devtools.v1 source id exceeds the Prelude text limit")
+        else -> panic("oversized source id accepted")
+    }
+}

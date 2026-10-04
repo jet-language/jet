@@ -1,0 +1,939 @@
+// PORT-PENDING 1025 tests-cross-module-group: tests/cross.rs:1-528
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! E2-M15 cross-compilation and freestanding profile tests.
+//RS //! Tests E3301 (std API in freestanding build).
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS 
+//RS /// Write `src` to a temp file and compile in freestanding mode.
+//RS /// Returns the rendered diagnostic output (or "(no errors)\n").
+//RS fn check_freestanding_src(src: &str, label: &str) -> String {
+//RS     let dir = std::env::temp_dir().join(format!("jet_cross_test_{}_{}", std::process::id(), label));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("test.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     let file_arg = path.to_string_lossy().into_owned();
+//RS     match jet::compile_no_os(&file_arg) {
+//RS         Ok(_) => "(no errors)\n".to_string(),
+//RS         Err(diags) => jet::render_diagnostics(&file_arg, src, &diags),
+//RS     }
+//RS }
+//RS 
+//RS // ── E3301: OS-dependent API used in freestanding build ──────────────────────
+//RS 
+//RS #[test]
+//RS fn e3301_fs_read_in_freestanding() {
+//RS     let src = r#"use core.files as fs
+//RS 
+//RS fn run() {
+//RS     _ :: fs.read("config.txt")
+//RS }
+//RS "#;
+//RS     let out = check_freestanding_src(src, "fs_read");
+//RS     assert!(
+//RS         out.contains("E3301"),
+//RS         "expected E3301 for fs.read in freestanding mode; got:\n{}",
+//RS         out
+//RS     );
+//RS     assert!(
+//RS         out.contains("no-OS"),
+//RS         "expected 'no-OS' in error; got:\n{}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn e3301_http_in_freestanding() {
+//RS     let src = r#"use core.http as http
+//RS 
+//RS fn run() {
+//RS     _ :: http.get("http://example.com")
+//RS }
+//RS "#;
+//RS     let out = check_freestanding_src(src, "http");
+//RS     assert!(
+//RS         out.contains("E3301"),
+//RS         "expected E3301 for http.get in freestanding mode; got:\n{}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn e3301_tasks_in_freestanding() {
+//RS     let src = r#"use core.tasks as tasks
+//RS 
+//RS fn run() {
+//RS     t :: task 42
+//RS     t.join() ?? panic("task failed")
+//RS }
+//RS "#;
+//RS     let out = check_freestanding_src(src, "tasks");
+//RS     assert!(
+//RS         out.contains("E3301"),
+//RS         "expected E3301 for task in freestanding mode; got:\n{}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn freestanding_allows_core_math() {
+//RS     // core.math is not OS-dependent; must not trigger E3301.
+//RS     let src = r#"use core.math as math
+//RS 
+//RS fn run() {
+//RS     x :: math.sqrt(4.0)
+//RS     print(x)
+//RS }
+//RS "#;
+//RS     let out = check_freestanding_src(src, "core_math");
+//RS     assert!(
+//RS         !out.contains("E3301"),
+//RS         "core.math should be allowed in freestanding mode; got:\n{}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn freestanding_allows_core_json() {
+//RS     // core.encoding.json does not need an OS.
+//RS     let src = r#"use core.encoding.json as json
+//RS 
+//RS fn run() {
+//RS     s :: json.to_string("hello")
+//RS     print(s)
+//RS }
+//RS "#;
+//RS     let out = check_freestanding_src(src, "core_json");
+//RS     assert!(
+//RS         !out.contains("E3301"),
+//RS         "core.encoding.json should be allowed in freestanding mode; got:\n{}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS // ── E3301 UI snapshot ────────────────────────────────────────────────────────
+//RS 
+//RS /// Pin the exact rendered output for E3301 so it matches Docs/spec/diagnostics.md.
+//RS #[test]
+//RS fn e3301_snapshot() {
+//RS     let src_path =
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/freestanding_e3301.jet");
+//RS     let snap_path =
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/freestanding_e3301.stderr");
+//RS 
+//RS     if !src_path.exists() {
+//RS         panic!("missing tests/ui/freestanding_e3301.jet (I4 requires a snapshot)");
+//RS     }
+//RS     let src = fs::read_to_string(&src_path).unwrap();
+//RS     let shown = "tests/ui/freestanding_e3301.jet";
+//RS     let actual = match jet::compile_no_os(&src_path.to_string_lossy()) {
+//RS         Ok(_) => "(no errors)\n".to_string(),
+//RS         Err(diags) => jet::render_diagnostics(shown, &src, &diags),
+//RS     };
+//RS 
+//RS     if std::env::var("UPDATE_EXPECT").is_ok() {
+//RS         fs::write(&snap_path, &actual).unwrap();
+//RS     } else {
+//RS         let expected = fs::read_to_string(&snap_path).unwrap_or_default();
+//RS         assert_eq!(
+//RS             actual, expected,
+//RS             "\nE3301 snapshot mismatch (run UPDATE_EXPECT=1 cargo test to bless)\n"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS // ── D-OSTARGET1=A: native OS platform gating (c134 Phase 9.3) ───────────────
+//RS 
+//RS /// `#Target(OS.Linux)` / `#Target(OS.MacOS)` impls, both present in source —
+//RS /// only the `impl` matching `--target=<triple>`'s OS reaches the generated
+//RS /// Rust (mirrors how `Codegen/Web.rs` filters function membership by
+//RS /// `WebBucket`, E2-M15's cross-compile flag reused, no new flag). The
+//RS /// compiler-synthesized `JetShow`/`JetDebug`/`JetDisplay` impls for both
+//RS /// structs are NOT filtered (only the user's own OS-gated `impl` is) — this
+//RS /// asserts on the specific `impl __jet_Backend for __jet_<Type>` line, not a
+//RS /// bare substring count of the type name.
+//RS fn os_target_gating_path() -> String {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/lowlevel/os_target_gating.jet")
+//RS         .to_string_lossy()
+//RS         .into_owned()
+//RS }
+//RS 
+//RS fn os_target_gating_src() -> String {
+//RS     fs::read_to_string(os_target_gating_path()).unwrap()
+//RS }
+//RS 
+//RS #[test]
+//RS fn os_target_gating_emits_only_linux_impl_for_linux_triple() {
+//RS     let src = os_target_gating_src();
+//RS     let file = os_target_gating_path();
+//RS     let out = jet::compile_with_target(&src, &file, Some("x86_64-unknown-linux-gnu"))
+//RS         .unwrap_or_else(|diags| {
+//RS             panic!(
+//RS                 "front end rejected os_target_gating.jet:\n{}",
+//RS                 jet::render_diagnostics(&file, &src, &diags)
+//RS             )
+//RS         });
+//RS     assert!(
+//RS         out.rust
+//RS             .contains("impl __jet_Backend for __jet_LinuxBackend"),
+//RS         "Linux triple should keep the OS.Linux impl:\n{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         !out.rust
+//RS             .contains("impl __jet_Backend for __jet_MacosBackend"),
+//RS         "Linux triple should strip the OS.MacOS impl:\n{}",
+//RS         out.rust
+//RS     );
+//RS     // D-OSTARGET2=B: `@if build.os == { … }` in `main` must fold to the
+//RS     // Linux arm for a Linux triple — the arm constructs `LinuxBackend.{ name:
+//RS     // "gtk" }`, so "gtk" appears and the discarded arms' payloads do not.
+//RS     assert!(
+//RS         out.rust.contains("\"gtk\""),
+//RS         "Linux triple should keep only the .Linux dispatch arm (\"gtk\"):\n{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         !out.rust.contains("\"appkit\"") && !out.rust.contains("\"win32\""),
+//RS         "Linux triple should discard the .MacOS/.Windows dispatch arms:\n{}",
+//RS         out.rust
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn os_target_gating_emits_only_macos_impl_for_macos_triple() {
+//RS     let src = os_target_gating_src();
+//RS     let file = os_target_gating_path();
+//RS     let out = jet::compile_with_target(&src, &file, Some("aarch64-apple-darwin")).unwrap_or_else(
+//RS         |diags| {
+//RS             panic!(
+//RS                 "front end rejected os_target_gating.jet:\n{}",
+//RS                 jet::render_diagnostics(&file, &src, &diags)
+//RS             )
+//RS         },
+//RS     );
+//RS     assert!(
+//RS         out.rust
+//RS             .contains("impl __jet_Backend for __jet_MacosBackend"),
+//RS         "macOS triple should keep the OS.MacOS impl:\n{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         !out.rust
+//RS             .contains("impl __jet_Backend for __jet_LinuxBackend"),
+//RS         "macOS triple should strip the OS.Linux impl:\n{}",
+//RS         out.rust
+//RS     );
+//RS     // D-OSTARGET2=B: the same `main` switch folds to the .MacOS arm for a macOS
+//RS     // triple — constructing `MacOSBackend.{ name: "appkit" }`.
+//RS     assert!(
+//RS         out.rust.contains("\"appkit\""),
+//RS         "macOS triple should keep only the .MacOS dispatch arm (\"appkit\"):\n{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         !out.rust.contains("\"gtk\"") && !out.rust.contains("\"win32\""),
+//RS         "macOS triple should discard the .Linux/.Windows dispatch arms:\n{}",
+//RS         out.rust
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn os_target_gating_defaults_to_host_os_with_no_target_flag() {
+//RS     let src = os_target_gating_src();
+//RS     let file = os_target_gating_path();
+//RS     let out = jet::compile_with_target(&src, &file, None).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected os_target_gating.jet:\n{}",
+//RS             jet::render_diagnostics(&file, &src, &diags)
+//RS         )
+//RS     });
+//RS     // This repo's dev shell / CI host is Linux (see env: `jet::OSTarget::host()`).
+//RS     let host_is_linux = jet::Syntax::OSTarget::host() == jet::Syntax::OSTarget::Linux;
+//RS     assert_eq!(
+//RS         out.rust
+//RS             .contains("impl __jet_Backend for __jet_LinuxBackend"),
+//RS         host_is_linux,
+//RS         "no --target= should default to the host OS:\n{}",
+//RS         out.rust
+//RS     );
+//RS }
+//RS 
+//RS // ── D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend ────────────────
+//RS //
+//RS // Phase 8 is the real native backend behind the `#Target(OS.Linux)` / `comptime
+//RS // if build.os` frame. These structural tests are the headless proof (this
+//RS // environment has no reliable display): they inspect the generated Rust to show
+//RS // (a) a Linux build emits the vetted `jet_gtk` FFI module and wires real
+//RS // libgtk-4 / GLib C-ABI calls, and (b) a non-Linux build folds the gtk arm away
+//RS // so nothing links gtk. A real `jet build` of the example (golden, gated on
+//RS // `pkg-config gtk4`) is the compile-and-link proof.
+//RS 
+//RS fn ui_native_linux_path() -> String {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features/ui/ui_native_linux.jet")
+//RS         .to_string_lossy()
+//RS         .into_owned()
+//RS }
+//RS 
+//RS #[test]
+//RS fn gtk_backend_emits_gtk_ffi_for_linux_triple() {
+//RS     let path = ui_native_linux_path();
+//RS     let src = fs::read_to_string(&path).unwrap();
+//RS     let out = jet::compile_with_target(&src, &path, Some("x86_64-unknown-linux-gnu"))
+//RS         .unwrap_or_else(|diags| {
+//RS             panic!(
+//RS                 "front end rejected ui_native_linux.jet:\n{}",
+//RS                 jet::render_diagnostics(&path, &src, &diags)
+//RS             )
+//RS         });
+//RS     // The native backend is selected, so its vetted FFI module is emitted.
+//RS     assert!(
+//RS         out.rust.contains("mod jet_gtk"),
+//RS         "Linux build should emit the native GTK4 backend prelude:\n{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("jet_ui_gtk()"),
+//RS         "Linux build should construct the GTK backend via core.ui:\n{}",
+//RS         out.rust
+//RS     );
+//RS     // Real libgtk-4 / GLib symbols are declared and called — rustc verifies the
+//RS     // `extern "C"` shims (I2), and the window/mount/click/style floor is present.
+//RS     for sym in [
+//RS         "gtk_init_check",
+//RS         "gtk_window_new",
+//RS         "gtk_box_append",
+//RS         "gtk_label_new",
+//RS         "gtk_label_set_text",
+//RS         "gtk_button_new_with_label",
+//RS         "gtk_entry_new",
+//RS         "gtk_editable_set_text",
+//RS         "gtk_box_remove",
+//RS         "gtk_widget_grab_focus",
+//RS         "gtk_widget_set_size_request",
+//RS         "gtk_css_provider_load_from_string",
+//RS         "g_signal_connect_data",
+//RS         "g_main_loop_run",
+//RS     ] {
+//RS         assert!(
+//RS             out.rust.contains(sym),
+//RS             "Linux GTK4 backend should call `{sym}`:\n{}",
+//RS             out.rust
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn gtk_backend_folds_away_for_macos_triple() {
+//RS     let path = ui_native_linux_path();
+//RS     let src = fs::read_to_string(&path).unwrap();
+//RS     let out = jet::compile_with_target(&src, &path, Some("aarch64-apple-darwin")).unwrap_or_else(
+//RS         |diags| {
+//RS             panic!(
+//RS                 "front end rejected ui_native_linux.jet:\n{}",
+//RS                 jet::render_diagnostics(&path, &src, &diags)
+//RS             )
+//RS         },
+//RS     );
+//RS     // A macOS build folds the `.Linux` dispatch arm out (D-OSTARGET2=B), so the
+//RS     // gtk backend is never constructed, the FFI module is never emitted, and the
+//RS     // build never links libgtk-4 — an honest non-Linux degrade.
+//RS     assert!(
+//RS         !out.rust.contains("mod jet_gtk"),
+//RS         "macOS build must not emit the GTK4 backend prelude:\n{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         !out.rust.contains("gtk_window_new"),
+//RS         "macOS build must not wire any gtk calls:\n{}",
+//RS         out.rust
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains("not yet on macOS"),
+//RS         "macOS build should keep only the .MacOS dispatch arm:\n{}",
+//RS         out.rust
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn gtk_backend_resolves_gtk4_link_flags() {
+//RS     // `use c.gtk4` names the native link via the S59 pkg-config path. Gated on a
+//RS     // present gtk4 (the nix dev shell); elsewhere link resolution is untested
+//RS     // here and the missing-lib path (E3201) covers absence.
+//RS     let have_gtk = std::process::Command::new("pkg-config")
+//RS         .args(["--exists", "gtk4"])
+//RS         .status()
+//RS         .map(|s| s.success())
+//RS         .unwrap_or(false);
+//RS     if !have_gtk {
+//RS         eprintln!("note: skipping gtk4 link-flag check (no pkg-config gtk4)");
+//RS         return;
+//RS     }
+//RS     let path = ui_native_linux_path();
+//RS     let clinks = jet::resolve_c_links(&path).expect("gtk4 link flags should resolve");
+//RS     assert!(
+//RS         clinks.iter().any(|a| a == "gtk-4"),
+//RS         "expected `-l gtk-4` in the link line; got {:?}",
+//RS         clinks
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn gtk_canonical_tree_reconciles_real_widgets_under_xvfb() {
+//RS     let have_gtk = std::process::Command::new("pkg-config")
+//RS         .args(["--exists", "gtk4"])
+//RS         .status()
+//RS         .map(|status| status.success())
+//RS         .unwrap_or(false);
+//RS     let have_xvfb = std::process::Command::new("xvfb-run")
+//RS         .arg("--help")
+//RS         .output()
+//RS         .map(|output| output.status.success())
+//RS         .unwrap_or(false);
+//RS     let have_display = std::env::var_os("DISPLAY").is_some();
+//RS     if !have_gtk || (!have_xvfb && !have_display) {
+//RS         eprintln!("note: skipping live GTK reconcile proof (need gtk4 + display)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_gtk_tree_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("gtk_tree.jet");
+//RS     let src = r#"use core.ui as ui
+//RS use core.reactive as reactive
+//RS use c.gtk4 as gtk4
+//RS fn run() {
+//RS     app := ui.gtk_backend()
+//RS     clicks := reactive.signal(0)
+//RS     first := ui.box([
+//RS         ui.text("Title"),
+//RS         ui.button("Save"),
+//RS         ui.node_role("Name", 120.0, 24.0, ui.aria_role_text_input())
+//RS     ])
+//RS     size := app.measure(first, ui.constraint(0.0, 0.0, 320.0, 240.0))
+//RS     app.layout(first, ui.rect(0.0, 0.0, size.width, size.height))
+//RS     app.paint(first)
+//RS     save := app.button("Save")
+//RS     app.on_click(save, () -> {
+//RS         &clicks.set(clicks.get() + 1)
+//RS     })
+//RS     app.set_text(save, "__JET_TEST_CLICK__")
+//RS     app.on_event(ui.key_event("Tab"))
+//RS     second := ui.box([ui.text("Updated")])
+//RS     app.paint(second)
+//RS     app.set_text(save, "stale")
+//RS     third := ui.box([ui.text("Updated"), ui.button("Save")])
+//RS     app.paint(third)
+//RS     app.set_text(save, "Rebound")
+//RS     app.set_text(save, "__JET_TEST_CLICK__")
+//RS     print("{app.focused_label()}:{clicks.get()}")
+//RS }
+//RS "#;
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_target(src, &shown, Some("x86_64-unknown-linux-gnu"))
+//RS         .unwrap_or_else(|diags| panic!("{}", jet::render_diagnostics(&shown, src, &diags)));
+//RS     // Test-only generated-Rust hook: emit `clicked` on the resolved GTK button
+//RS     // when the fixture writes the sentinel text. This uses GTK's real signal
+//RS     // without adding a Jet-visible testing API to core.ui.
+//RS     let extern_marker = "    extern \"C\" {\n        fn gtk_init_check() -> gboolean;";
+//RS     let extern_replacement = "    extern \"C\" {\n        fn g_signal_emit_by_name(instance: gpointer, detailed_signal: *const c_char, ...);\n        fn gtk_init_check() -> gboolean;";
+//RS     let set_text_marker = "        pub fn set_text(&self, id: i64, text: &str) {\n            let state = self.state.borrow();";
+//RS     let set_text_replacement = r#"        pub fn set_text(&self, id: i64, text: &str) {
+//RS             if text == "__JET_TEST_CLICK__" {
+//RS                 let state = self.state.borrow();
+//RS                 if let Some((widget, GtkWidgetKind::Button)) = state.resolve_widget_handle(id) {
+//RS                     let signal = CString::new("clicked").unwrap();
+//RS                     unsafe { g_signal_emit_by_name(widget as gpointer, signal.as_ptr()); }
+//RS                 }
+//RS                 return;
+//RS             }
+//RS             let state = self.state.borrow();"#;
+//RS     assert!(
+//RS         out.rust.contains(extern_marker),
+//RS         "missing GTK extern injection marker"
+//RS     );
+//RS     assert!(
+//RS         out.rust.contains(set_text_marker),
+//RS         "missing GTK signal injection marker"
+//RS     );
+//RS     let rust = out
+//RS         .rust
+//RS         .replacen(extern_marker, extern_replacement, 1)
+//RS         .replacen(set_text_marker, set_text_replacement, 1);
+//RS     let rs = dir.join("gtk_tree.rs");
+//RS     let bin = dir.join("gtk_tree");
+//RS     fs::write(&rs, rust).unwrap();
+//RS     let mut rustc = std::process::Command::new("rustc");
+//RS     rustc
+//RS         .args(["--edition", "2021"])
+//RS         .arg(&rs)
+//RS         .arg("-o")
+//RS         .arg(&bin);
+//RS     for arg in jet::resolve_c_links(&shown).expect("gtk4 link flags") {
+//RS         rustc.arg(arg);
+//RS     }
+//RS     let compiled = rustc.output().unwrap();
+//RS     assert!(
+//RS         compiled.status.success(),
+//RS         "generated GTK Rust failed:\n{}",
+//RS         String::from_utf8_lossy(&compiled.stderr)
+//RS     );
+//RS 
+//RS     let mut run_command = if have_xvfb {
+//RS         let mut command = std::process::Command::new("xvfb-run");
+//RS         command.arg("-a").arg(&bin);
+//RS         command
+//RS     } else {
+//RS         std::process::Command::new(&bin)
+//RS     };
+//RS     let run = run_command.env("JET_UI_GTK_TRACE", "1").output().unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "live GTK fixture failed:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "Save:2\n");
+//RS     let trace = String::from_utf8_lossy(&run.stderr);
+//RS     for event in [
+//RS         "GTK_UI create root Box",
+//RS         "GTK_UI create root/1 Button",
+//RS         "GTK_UI create root/2 Entry",
+//RS         "GTK_UI click-connect root/1 1",
+//RS         "GTK_UI focus root/2",
+//RS         "GTK_UI update root/0 Updated",
+//RS         "GTK_UI remove root/2",
+//RS         "GTK_UI remove root/1",
+//RS         "GTK_UI handle-miss 0",
+//RS         "GTK_UI create root/1 Button",
+//RS         "GTK_UI click-connect root/1 1",
+//RS         "GTK_UI handle-set-text 0 Rebound",
+//RS         "GTK_UI cleanup",
+//RS     ] {
+//RS         assert!(
+//RS             trace.contains(event),
+//RS             "missing `{event}` in GTK trace:\n{trace}"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         trace.matches("GTK_UI click-connect root/1 1").count(),
+//RS         2,
+//RS         "click handler must connect exactly once per widget lifetime:\n{trace}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+// END-PORT-PENDING 1025 tests/cross.rs:1-528
+
+// PORT-PENDING 1025 tests-cross-module-group: tests/data_bridges.rs:1-247
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #708 / D-DATA-BRIDGE1 / D-DATA-STATUS1: honest Python/R/GPU bridge facts.
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS 
+//RS fn build_and_run_env(
+//RS     dir: &PathBuf,
+//RS     name: &str,
+//RS     src: &str,
+//RS     env: &[(&str, &str)],
+//RS ) -> (i32, String, String) {
+//RS     let path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     let rs = dir.join(format!("{name}.rs"));
+//RS     let bin = dir.join(name);
+//RS     fs::write(&rs, &out.rust).unwrap();
+//RS     let mut rustc_cmd = Command::new("rustc");
+//RS     rustc_cmd.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         rs.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     if let Some(link) = &out.ffi {
+//RS         rustc_cmd
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc_cmd
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     let rustc = rustc_cmd.output().unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc rejected generated code:\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let mut cmd = Command::new(&bin);
+//RS     cmd.current_dir(dir);
+//RS     for (k, v) in env {
+//RS         cmd.env(k, v);
+//RS     }
+//RS     let out = cmd.output().unwrap();
+//RS     (
+//RS         out.status.code().unwrap_or(0),
+//RS         String::from_utf8_lossy(&out.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&out.stderr).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS fn rscript_on_path() -> bool {
+//RS     let Some(path) = std::env::var_os("PATH") else {
+//RS         return false;
+//RS     };
+//RS     std::env::split_paths(&path).any(|dir| dir.join("Rscript").is_file())
+//RS }
+//RS 
+//RS const BRIDGE_SRC: &str = r#"
+//RS use core.data as data
+//RS 
+//RS fn show_bridge(step: String) {
+//RS     status :: data.status()
+//RS     loop row in status {
+//RS         if row.step == step {
+//RS             print("{row.step} path={row.path} copy={row.copy} ownership={row.ownership} trust={row.trust} fallback={row.fallback} replacement={row.replacement}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn probe_bridge(name: String) {
+//RS     asked := data.require_bridge(name)
+//RS     if asked == {
+//RS         Ok(_) -> print("{name}: available")
+//RS         Err(error) -> print("{name}: {error}")
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     show_bridge("py.*")
+//RS     show_bridge("r.*")
+//RS     show_bridge("gpu.*")
+//RS     probe_bridge("py")
+//RS     probe_bridge("r")
+//RS     probe_bridge("gpu")
+//RS     bad := data.require_bridge("nope")
+//RS     if bad == {
+//RS         Ok(_) -> print("nope: unexpectedly ok")
+//RS         Err(error) -> print("nope: {error}")
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn data_bridges_declare_costs_and_fail_closed() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping data bridges test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_data_bridges_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run_env(&dir, "data_bridges", BRIDGE_SRC, &[]);
+//RS     assert_eq!(code, 0, "data bridges program failed: {stderr}\n{stdout}");
+//RS     assert!(
+//RS         !stdout.contains("bridge-ready"),
+//RS         "must not claim bridge-ready facade:\n{stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("py.* path=unavailable copy=owned-copy ownership=python-sidecar trust=untrusted-foreign fallback=none"),
+//RS         "py status:\n{stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("r.* path=unavailable copy=owned-copy ownership=r-sidecar trust=untrusted-foreign fallback=none"),
+//RS         "r default status:\n{stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("gpu.* path=unavailable copy=device-transfer ownership=device-buffer trust=untrusted-accelerator fallback=none"),
+//RS         "gpu status:\n{stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("py: Bridge require_bridge: py.* unavailable"),
+//RS         "py fail:\n{stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("r: Bridge require_bridge: r.* unavailable"),
+//RS         "r fail by default:\n{stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("gpu: Bridge require_bridge: gpu.* unavailable"),
+//RS         "gpu fail:\n{stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("nope: InvalidArgument require_bridge"),
+//RS         "unknown provider:\n{stdout}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn data_bridges_r_available_with_opt_in_and_rscript() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping R available test (need rustc)");
+//RS         return;
+//RS     }
+//RS     if !rscript_on_path() {
+//RS         eprintln!("note: skipping R available test (no Rscript on PATH)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_data_bridges_r_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run_env(
+//RS         &dir,
+//RS         "data_bridges_r",
+//RS         BRIDGE_SRC,
+//RS         &[("JET_DATA_R_BRIDGE", "1")],
+//RS     );
+//RS     assert_eq!(code, 0, "r available program failed: {stderr}\n{stdout}");
+//RS     assert!(
+//RS         stdout.contains("r.* path=available copy=owned-copy ownership=r-sidecar"),
+//RS         "r available status:\n{stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("r: available"),
+//RS         "r require_bridge should succeed:\n{stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("py: Bridge require_bridge:"),
+//RS         "py still fails:\n{stdout}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn data_bridges_r_fails_closed_without_rscript_on_path() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping data bridges PATH test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_data_bridges_nors_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let src = r#"
+//RS use core.data as data
+//RS fn run() {
+//RS     status :: data.status()
+//RS     loop row in status {
+//RS         if row.step == "r.*" {
+//RS             print("{row.step}:{row.path}")
+//RS         }
+//RS     }
+//RS     asked := data.require_bridge("r")
+//RS     if asked == {
+//RS         Ok(_) -> print("r:ok")
+//RS         Err(error) -> print("r:{error}")
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run_env(
+//RS         &dir,
+//RS         "data_bridges_nors",
+//RS         src,
+//RS         &[("PATH", ""), ("JET_DATA_R_BRIDGE", "1")],
+//RS     );
+//RS     assert_eq!(code, 0, "{stdout}\n{stderr}");
+//RS     assert!(stdout.contains("r.*:unavailable"), "{stdout}");
+//RS     assert!(stdout.contains("r:Bridge"), "{stdout}");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn dossier_data_lens_matches_status_rows() {
+//RS     let jet = env!("CARGO_BIN_EXE_jet");
+//RS     let out = Command::new(jet)
+//RS         .args(["inspect", "dossier", "data", "--json"])
+//RS         .output()
+//RS         .expect("jet inspect dossier data");
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "dossier data failed: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(stdout.contains("\"lens\":\"data\""), "{stdout}");
+//RS     assert!(stdout.contains("\"step\":\"py.*\""), "{stdout}");
+//RS     assert!(stdout.contains("\"step\":\"r.*\""), "{stdout}");
+//RS     assert!(stdout.contains("\"step\":\"gpu.*\""), "{stdout}");
+//RS     assert!(stdout.contains("\"copy\":\"owned-copy\""), "{stdout}");
+//RS     assert!(stdout.contains("\"fallback\":\"none\""), "{stdout}");
+//RS     assert!(stdout.contains("\"path\":\"unavailable\""), "{stdout}");
+//RS     assert!(!stdout.contains("bridge-ready"), "{stdout}");
+//RS }
+// END-PORT-PENDING 1025 tests/data_bridges.rs:1-247
+
+// PORT-PENDING 1025 tests-cross-module-group: tests/data_hostile.rs:1-152
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #709 / #237 C4: flagship analysis + hostile typed-data corpus (AOT).
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS 
+//RS fn repo_root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS fn build_and_run(dir: &Path, name: &str, src: &str) -> (i32, String, String) {
+//RS     let path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     let rs = dir.join(format!("{name}.rs"));
+//RS     let bin = dir.join(name);
+//RS     fs::write(&rs, &out.rust).unwrap();
+//RS     let mut rustc_cmd = Command::new("rustc");
+//RS     rustc_cmd.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         rs.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     if let Some(link) = &out.ffi {
+//RS         rustc_cmd
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc_cmd
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     let rustc = rustc_cmd.output().unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc rejected generated code:\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let out = Command::new(&bin).current_dir(dir).output().unwrap();
+//RS     (
+//RS         out.status.code().unwrap_or(0),
+//RS         String::from_utf8_lossy(&out.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&out.stderr).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS fn assert_example_matches_golden(stem: &str) {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping {stem} AOT corpus (need rustc)");
+//RS         return;
+//RS     }
+//RS     let root = repo_root();
+//RS     let src = fs::read_to_string(root.join(format!("Examples/features/tooling/{stem}.jet")))
+//RS         .unwrap_or_else(|e| panic!("read {stem}.jet: {e}"));
+//RS     let expected =
+//RS         fs::read_to_string(root.join(format!("Examples/features/expected/tooling/{stem}.out")))
+//RS             .unwrap_or_else(|e| panic!("read {stem}.out: {e}"));
+//RS     let dir = std::env::temp_dir().join(format!("jet_data_hostile_{stem}_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run(&dir, stem, &src);
+//RS     assert_eq!(code, 0, "{stem} failed: {stderr}");
+//RS     assert_eq!(stdout, expected, "{stem} stdout drifted from golden");
+//RS     assert_eq!(stderr, "", "{stem} unexpected stderr: {stderr}");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn flagship_analysis_example_matches_golden_aot() {
+//RS     assert_example_matches_golden("data_analysis");
+//RS }
+//RS 
+//RS #[test]
+//RS fn plot_example_matches_golden_aot() {
+//RS     // Was `data_line`, an example that has NEVER existed in git history: the stem
+//RS     // was introduced by f4d17b661, a checkpoint of an unconsolidated epoch-5
+//RS     // worktree, so this test could not have passed since it was written. The real
+//RS     // example is data_plot.jet (118579b09).
+//RS     assert_example_matches_golden("data_plot");
+//RS }
+//RS 
+//RS #[test]
+//RS fn hostile_data_corpus_matches_golden_aot() {
+//RS     assert_example_matches_golden("data_hostile");
+//RS }
+//RS 
+//RS #[test]
+//RS fn hostile_corpus_covers_required_failure_classes() {
+//RS     let root = repo_root();
+//RS     let out = fs::read_to_string(root.join("Examples/features/expected/tooling/data_hostile.out"))
+//RS         .expect("data_hostile.out");
+//RS     for needle in [
+//RS         "empty_mean: Empty mean:",
+//RS         "empty_quantile: Empty quantile:",
+//RS         "empty_variance: Empty variance:",
+//RS         "missing_count: 3",
+//RS         "dup_join_count: 5",
+//RS         "pivot: row=a|b col=c sum=12.0",
+//RS         "tie_order: 3.0,1.0,2.0",
+//RS         "nan_mean: NonFinite",
+//RS         "inf_sum: NonFinite",
+//RS         "signed_zero_sum: 0.0",
+//RS         "signed_zero_mean: 0.0",
+//RS         "pop_variance: 0.6666666666666666",
+//RS         "one_variance: 0.0",
+//RS         "bad_quantile: InvalidArgument quantile:",
+//RS         "bad_window: InvalidArgument rolling_mean:",
+//RS         "hostile_svg_escaped: true",
+//RS         "large_limit: Limit group_mean:",
+//RS         // #1657: the compensated kernel. A naive sum answers 0.0 for both.
+//RS         "cancellation_sum: 1.0",
+//RS         "cancellation_mean: 0.3333333333333333",
+//RS     ] {
+//RS         assert!(
+//RS             out.contains(needle),
+//RS             "hostile golden missing required class `{needle}`:\n{out}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn flagship_example_covers_analysis_pipeline() {
+//RS     let root = repo_root();
+//RS     let out = fs::read_to_string(root.join("Examples/features/expected/tooling/data_analysis.out"))
+//RS         .expect("data_analysis.out");
+//RS     for needle in [
+//RS         "tickets: 5",
+//RS         "focused: 4",
+//RS         "owned: Core",
+//RS         "mean: Core",
+//RS         "describe: count=5",
+//RS         "Core | ## 2",
+//RS         "svg bytes:",
+//RS         "status: core.data.csv native",
+//RS     ] {
+//RS         assert!(
+//RS             out.contains(needle),
+//RS             "flagship golden missing `{needle}`:\n{out}"
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 1025 tests/data_hostile.rs:1-152
+

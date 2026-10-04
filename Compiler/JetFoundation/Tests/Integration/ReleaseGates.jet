@@ -1,0 +1,1132 @@
+// PORT-PENDING 1140 tests-release-gates: tests/release_gates.rs:1-1128
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Milestone gate checks, one lane: `--small` binary
+//RS //! size gates, the compiled-workload contract, the Epoch 2 GA checklist, and
+//RS //! release/edition/deprecation policy. Distinct from `tests/golden.rs`
+//RS //! (per-example front-end + rustc matrix) — these are one-off milestone
+//RS //! exit-criteria checks, not part of the example discovery loop.
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS use common::have_rustc;
+//RS 
+//RS fn jet_bin() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS // ============================================================================
+//RS // Section: `--small` binary size (was tests/small.rs) — M6 phase 4 / S15
+//RS // ============================================================================
+//RS 
+//RS #[test]
+//RS fn small_profile_binary_is_smaller_than_default() {
+//RS     let jet = jet_bin();
+//RS     let have_rustc = have_rustc();
+//RS     if !have_rustc || !jet.exists() {
+//RS         eprintln!("note: skipping --small size test (need jet + rustc)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let example = root.join("Examples/features/collections/wordcount.jet");
+//RS     assert!(
+//RS         example.is_file(),
+//RS         "Examples/features/collections/wordcount.jet must exist"
+//RS     );
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_small_test_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     fs::create_dir_all(dir.join(".jet/build")).unwrap();
+//RS 
+//RS     let build_default = Command::new(&jet)
+//RS         .args(["build", example.to_str().unwrap()])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         build_default.status.success(),
+//RS         "default build failed:\n{}",
+//RS         String::from_utf8_lossy(&build_default.stderr)
+//RS     );
+//RS     fs::rename(
+//RS         dir.join(".jet/build/wordcount"),
+//RS         dir.join(".jet/build/wordcount_default"),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let build_small = Command::new(&jet)
+//RS         .args(["build", "--small", example.to_str().unwrap()])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         build_small.status.success(),
+//RS         "--small build failed:\n{}",
+//RS         String::from_utf8_lossy(&build_small.stderr)
+//RS     );
+//RS     fs::rename(
+//RS         dir.join(".jet/build/wordcount"),
+//RS         dir.join(".jet/build/wordcount_small"),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let default_size = fs::metadata(dir.join(".jet/build/wordcount_default"))
+//RS         .unwrap()
+//RS         .len();
+//RS     let small_size = fs::metadata(dir.join(".jet/build/wordcount_small"))
+//RS         .unwrap()
+//RS         .len();
+//RS 
+//RS     assert!(
+//RS         small_size < default_size,
+//RS         "--small binary ({small_size} bytes) should be smaller than default ({default_size} bytes)"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS // ============================================================================
+//RS // Section: Epoch 2 GA checklist (was tests/ga.rs) — E2-M17
+//RS //
+//RS // Asserts that Epoch 2 exit criteria still hold at the compiler level.
+//RS // Showcase programs were retired from `Examples/`; milestone coverage now
+//RS // lives in `Examples/features/` (I5 golden tests).
+//RS // ============================================================================
+//RS 
+//RS fn root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS // ── 1. Every diagnostic code has a jet explain entry ──────────────────────
+//RS 
+//RS /// Mirrors the check in cli.rs `every_registered_code_has_an_explain_entry`.
+//RS #[test]
+//RS fn ga_every_diagnostic_has_explain() {
+//RS     let index = jet::Explain::index();
+//RS     let missing: Vec<String> = jet_foundation::Registry::diagnostic_rows()
+//RS         .iter()
+//RS         .filter(|row| !index.contains_key(row.code))
+//RS         .map(|row| row.code.to_string())
+//RS         .collect();
+//RS     assert!(
+//RS         missing.is_empty(),
+//RS         "M17 GA gate: these diagnostic codes lack a `jet explain` entry:\n  {}",
+//RS         missing.join(", ")
+//RS     );
+//RS }
+//RS 
+//RS // ── 2. Milestone feature examples are front-end clean ─────────────────────
+//RS 
+//RS /// D-GA1=B milestone coverage now lives under `Examples/features/`.
+//RS #[test]
+//RS fn ga_milestone_features_front_end_clean() {
+//RS     let features: &[(&str, &str)] = &[
+//RS         ("modules/library.jet", "library authoring"),
+//RS         ("lowlevel/lowlevel.jet", "expert low-level tier"),
+//RS         ("net/http_server_tasks.jet", "HTTP service"),
+//RS         ("lowlevel/freestanding.jet", "freestanding smoke"),
+//RS     ];
+//RS 
+//RS     let features_dir = root().join("Examples/features");
+//RS     for (file, desc) in features {
+//RS         let path = features_dir.join(file);
+//RS         assert!(
+//RS             path.is_file(),
+//RS             "M17 GA gate: feature example missing: {}",
+//RS             path.display()
+//RS         );
+//RS         let src =
+//RS             fs::read_to_string(&path).unwrap_or_else(|_| panic!("cannot read {}", path.display()));
+//RS         let result = jet::compile_with_path(&src, path.to_str().unwrap());
+//RS         assert!(
+//RS             result.is_ok(),
+//RS             "M17 GA gate: '{}' failed front end:\n{:?}",
+//RS             desc,
+//RS             result.err()
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS // ── 3. Hard size budgets (D-GA2=B) ────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn ga_feature_size_budgets() {
+//RS     let jet = jet_bin();
+//RS     let have_rustc = have_rustc();
+//RS     if !have_rustc || !jet.exists() {
+//RS         eprintln!("note: skipping GA size budgets (need jet + rustc)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let budgets: &[(&str, u64)] = &[
+//RS         ("basics/hello.jet", 512_000),
+//RS         ("io/cli.jet", 512 * 1024),
+//RS         ("net/http_server_tasks.jet", 3 * 1024 * 1024),
+//RS         ("modules/library.jet", 4_194_304),
+//RS         ("lowlevel/lowlevel.jet", 4_194_304),
+//RS         ("lowlevel/freestanding.jet", 4_194_304),
+//RS     ];
+//RS 
+//RS     let features_dir = root().join("Examples/features");
+//RS     let build_dir = std::env::temp_dir().join(format!("jet_ga_budgets_{}", std::process::id()));
+//RS     fs::create_dir_all(build_dir.join(".jet/build")).unwrap();
+//RS 
+//RS     for (file, max_bytes) in budgets {
+//RS         let src = features_dir.join(file);
+//RS         let stem = std::path::Path::new(file)
+//RS             .file_stem()
+//RS             .unwrap()
+//RS             .to_string_lossy();
+//RS         let bin = build_dir.join(".jet/build").join(stem.as_ref());
+//RS 
+//RS         let out = Command::new(&jet)
+//RS             .args(["build", "--small", src.to_str().unwrap()])
+//RS             .current_dir(&build_dir)
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             out.status.success(),
+//RS             "GA size gate: `--small` build of {} failed:\n{}",
+//RS             file,
+//RS             String::from_utf8_lossy(&out.stderr)
+//RS         );
+//RS 
+//RS         let size = fs::metadata(&bin).map(|m| m.len()).unwrap_or(0);
+//RS         assert!(
+//RS             size <= *max_bytes && size > 0,
+//RS             "GA size gate: {} --small binary is {} bytes (limit {})",
+//RS             file,
+//RS             size,
+//RS             max_bytes
+//RS         );
+//RS     }
+//RS 
+//RS     let _ = fs::remove_dir_all(&build_dir);
+//RS }
+//RS 
+//RS // ============================================================================
+//RS // Section: release policy, editions, epoch contract (was tests/release.rs) — E2-M2
+//RS //
+//RS // Golden tests for the version banner (E2-D1), the E2001 edition-too-new
+//RS // diagnostic (D-REL3), and the E2002/L2001 deprecation diagnostics (D-REL5),
+//RS // plus a docs-consistency check that every later breaking epoch-2 milestone
+//RS // names the edition/epoch gate it needs (the m2 exit criteria).
+//RS //
+//RS // Fixtures live in tests/release/*.txt. To re-bless after an INTENTIONAL change
+//RS // (read it against Docs/spec/diagnostics.md and Docs/spec/release-policy.md
+//RS // first):
+//RS //
+//RS //     UPDATE_EXPECT=1 cargo test --test release_gates
+//RS //
+//RS // E2002 and L2001 are exercised by the encoding edition/UI tests. This gate
+//RS // also pins both Core aliases through the one marker payload.
+//RS // ============================================================================
+//RS 
+//RS use jet::Manifest::{self};
+//RS 
+//RS fn release_dir() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/release")
+//RS }
+//RS 
+//RS /// Compare `actual` against the fixture, or re-bless it under UPDATE_EXPECT.
+//RS fn check_fixture(name: &str, actual: &str) {
+//RS     let path = release_dir().join(name);
+//RS     if std::env::var("UPDATE_EXPECT").is_ok() {
+//RS         fs::create_dir_all(release_dir()).unwrap();
+//RS         fs::write(&path, actual).unwrap();
+//RS         return;
+//RS     }
+//RS     let expected = fs::read_to_string(&path).unwrap_or_default();
+//RS     assert_eq!(
+//RS         actual, expected,
+//RS         "\nrelease fixture mismatch for tests/release/{name}\n(if the new output is intentional and matches the spec, run: UPDATE_EXPECT=1 cargo test)\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn version_banner() {
+//RS     let jet = jet_bin();
+//RS     assert!(jet.exists(), "build the jet binary first (cargo build)");
+//RS     for argument in ["version", "--version"] {
+//RS         let out = Command::new(&jet).arg(argument).output().unwrap();
+//RS         assert!(out.status.success(), "jet {argument} exited non-zero");
+//RS         let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+//RS         // Both entry points and the library must agree.
+//RS         assert_eq!(stdout, Manifest::version_banner());
+//RS         check_fixture("version_banner.txt", &stdout);
+//RS     }
+//RS }
+//RS #[test]
+//RS fn prerelease_status_is_not_a_shipped_1_0_policy() {
+//RS     let status = Manifest::current_release_status();
+//RS     assert_eq!(status.channel(), "prerelease");
+//RS     assert_eq!(status.disposition(), "current");
+//RS     assert_eq!(status.readiness(), "not-ready");
+//RS     assert_eq!(status.policy(), "future-1.0");
+//RS     assert_eq!(status.policy_disposition(), "planned");
+//RS     assert!(!status.policy_active());
+//RS 
+//RS     let banner = Manifest::version_banner();
+//RS     assert!(banner.contains("release status: prerelease"));
+//RS     assert!(banner.contains("release disposition: current"));
+//RS     assert!(banner.contains("release readiness: not-ready"));
+//RS     assert!(banner.contains(
+//RS         "1.0 compatibility policy: future-1.0 (planned; not active)"
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn claims_projection_uses_canonical_release_source_and_fails_closed() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_release_claims_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"release_claims\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     let entry = root.join("run.jet");
+//RS     fs::write(&entry, "fn run() {}\n").unwrap();
+//RS 
+//RS     let output = Command::new(jet_bin())
+//RS         .args([
+//RS             "inspect",
+//RS             "claims",
+//RS             entry.to_str().unwrap(),
+//RS             "--json",
+//RS         ])
+//RS         .output()
+//RS         .unwrap();
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "inspect claims failed: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let json = String::from_utf8_lossy(&output.stdout);
+//RS     for expected in [
+//RS         "\"action\":\"inspect.claims\"",
+//RS         "\"source\":\"manifest.capability_relation.rows\"",
+//RS         "\"status\":\"prerelease\"",
+//RS         "\"disposition\":\"current\"",
+//RS         "\"readiness\":\"not-ready\"",
+//RS         "\"compatibility_policy\":\"future-1.0\"",
+//RS         "\"compatibility_policy_disposition\":\"planned\"",
+//RS         "\"compatibility_policy_active\":false",
+//RS         "\"release_ready\":false",
+//RS         "\"claims\":[]",
+//RS     ] {
+//RS         assert!(json.contains(expected), "claims output missing {expected}: {json}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn edition_too_new() {
+//RS     // A real package.jet asking for a future edition triggers E2001 through the
+//RS     // manifest loader path. We render the diagnostic the way the CLI would.
+//RS     let raw = "name: \"wordstats\"\nversion: \"0.1.0\"\nedition: \"2099\"\n";
+//RS     let path = std::path::Path::new("package.jet");
+//RS     let mf = Manifest::parse(path, raw).expect("manifest should parse");
+//RS     let err = Manifest::check_edition_support(&mf, "package.jet")
+//RS         .expect_err("a future edition must be rejected");
+//RS     assert_eq!(err.code, "E2001");
+//RS     let rendered = jet::render_diagnostics("package.jet", raw, std::slice::from_ref(&err));
+//RS     check_fixture("edition_too_new.txt", &rendered);
+//RS }
+//RS 
+//RS #[test]
+//RS fn supported_edition_is_accepted() {
+//RS     let raw = format!(
+//RS         "name: \"x\"\nversion: \"0.1.0\"\nedition: \"{}\"\n",
+//RS         Manifest::latest_edition()
+//RS     );
+//RS     let mf = Manifest::parse(std::path::Path::new("package.jet"), &raw).unwrap();
+//RS     assert!(Manifest::check_edition_support(&mf, "package.jet").is_ok());
+//RS }
+//RS 
+//RS #[test]
+//RS fn no_edition_field_is_accepted() {
+//RS     // A manifest with no edition tracks the toolchain's newest stable edition.
+//RS     let raw = "name: \"x\"\nversion: \"0.1.0\"\n";
+//RS     let mf = Manifest::parse(std::path::Path::new("package.jet"), raw).unwrap();
+//RS     assert_eq!(mf.package.edition, None);
+//RS     assert!(Manifest::check_edition_support(&mf, "package.jet").is_ok());
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_encoding_migrations_use_one_marker_payload() {
+//RS     let encode = jet::Syntax::core_marker_application("core.encoding.cbor", "encode")
+//RS         .expect("cbor.encode deprecation");
+//RS     assert_eq!(encode.since, "2027");
+//RS     assert_eq!(encode.replacement, "cbor.to_bytes");
+//RS     assert_eq!(encode.removed_in, Some("2028"));
+//RS     let decode = jet::Syntax::core_marker_application("core.encoding.cbor", "decode")
+//RS         .expect("cbor.decode deprecation");
+//RS     assert_eq!(decode.since, "2027");
+//RS     assert_eq!(decode.replacement, "cbor.parse");
+//RS     assert_eq!(decode.removed_in, Some("2028"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_deprecation_release_fixture() {
+//RS     let root = std::env::temp_dir().join(format!("jet_release_deprecation_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     let source = "use core.encoding.cbor as cbor\nuse core.encoding.json as json\n\nfn run() {\n    tree :: json.parse(\"{{}}\") ?? panic(\"json\")\n    payload :: cbor.encode(tree)\n    print(\"ok\")\n}\n";
+//RS     let mut rendered = String::new();
+//RS     for edition in ["2027", "2028"] {
+//RS         fs::write(
+//RS             root.join("package.jet"),
+//RS             format!("name: \"cbor_release\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\n"),
+//RS         )
+//RS         .unwrap();
+//RS         let path = root.join("run.jet");
+//RS         fs::write(&path, source).unwrap();
+//RS         let diagnostics = jet::check_with_path(path.to_str().unwrap());
+//RS         rendered.push_str(&format!("edition {edition}\n"));
+//RS         rendered.push_str(&jet::render_diagnostics(
+//RS             &format!("tests/release/cbor_{edition}.jet"),
+//RS             source,
+//RS             &diagnostics,
+//RS         ));
+//RS     }
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     check_fixture("deprecation.txt", &rendered);
+//RS }
+//RS 
+//RS // ============================================================================
+//RS // Section: #1414 compiled workload contract and report gate
+//RS // ============================================================================
+//RS 
+//RS #[test]
+//RS fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
+//RS     let root = root();
+//RS     let gate = fs::read_to_string(root.join("Tools/ci/compiled-workload-gate.sh"))
+//RS         .expect("read compiled workload gate");
+//RS     for field in [
+//RS         "--contract",
+//RS         "--check",
+//RS         "outcomes.tsv",
+//RS         "measurements.tsv",
+//RS         "tiers.tsv",
+//RS         "jet_tool_version",
+//RS         "peer_tool_version",
+//RS         "review_status",
+//RS         "review_evidence",
+//RS         "review.tsv",
+//RS         "reviewer_is_independent",
+//RS         "review_workflow",
+//RS         "review_run",
+//RS         "review_actor",
+//RS         "rust_tolerance_ratio",
+//RS         "metric_is_loss",
+//RS     ] {
+//RS         assert!(gate.contains(field), "compiled workload gate lost {field}");
+//RS     }
+//RS 
+//RS     let runner_path = root.join("Tools/ci/compiled-workload-runner.mjs");
+//RS     let runner = fs::read_to_string(&runner_path).expect("read compiled workload runner");
+//RS     for field in [
+//RS         "runMeasured",
+//RS         "process.hrtime.bigint",
+//RS         "JET_WEB_CHROMIUM",
+//RS         "CdpDriver",
+//RS         "network=loopback-only",
+//RS         "network=disabled",
+//RS         "peerMeasured",
+//RS         "samples",
+//RS         "targetArtifactProof",
+//RS         "JET_STORE_DIR",
+//RS         ".jet",
+//RS     ] {
+//RS         assert!(runner.contains(field), "compiled workload runner lost {field}");
+//RS     }
+//RS     let metric_registry = Command::new("node")
+//RS         .arg(&runner_path)
+//RS         .arg("--measurement-registry")
+//RS         .current_dir(&root)
+//RS         .output()
+//RS         .expect("probe compiled workload measurement registry");
+//RS     assert!(
+//RS         metric_registry.status.success(),
+//RS         "compiled workload measurement registry probe failed:\n{}",
+//RS         String::from_utf8_lossy(&metric_registry.stderr)
+//RS     );
+//RS     let metric_registry = String::from_utf8_lossy(&metric_registry.stdout);
+//RS     for field in [
+//RS         "\"linux\"",
+//RS         "\"macos\"",
+//RS         "\"windows\"",
+//RS         "\"VmHWM\"",
+//RS         "\"VmRSS\"",
+//RS         "\"PeakWorkingSet64\"",
+//RS     ] {
+//RS         assert!(
+//RS             metric_registry.contains(field),
+//RS             "compiled workload measurement registry lost {field}: {metric_registry}"
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         metric_registry.contains("\"processProperty\":\"PeakWorkingSet64\""),
+//RS         "Windows memory measurement must use peak working set: {metric_registry}"
+//RS     );
+//RS 
+//RS     let self_check = fs::read_to_string(root.join("Tools/ci/test-compiled-workload-gate.sh"))
+//RS         .expect("read compiled workload gate self-check");
+//RS     let canaries = fs::read_to_string(root.join("tests/compiled_workloads/canaries.tsv"))
+//RS         .expect("read compiled workload canaries");
+//RS     for line in canaries.lines().skip(1).filter(|line| !line.is_empty()) {
+//RS         let name = line.split('\t').nth(1).unwrap();
+//RS         assert!(
+//RS             self_check.contains(&format!("expect_reject {name}")),
+//RS             "removal canary is not exercised: {name}"
+//RS         );
+//RS     }
+//RS 
+//RS     let suites = fs::read_to_string(root.join("tests/suites.txt")).expect("read test suites");
+//RS     assert!(
+//RS         suites.lines().any(|line| line.trim() == "tests/compiled_workloads"),
+//RS         "compiled workload self-check must stay in the named test suites"
+//RS     );
+//RS 
+//RS     let output = Command::new("bash")
+//RS         .arg(root.join("Tools/ci/compiled-workload-gate.sh"))
+//RS         .arg("--contract")
+//RS         .current_dir(&root)
+//RS         .output()
+//RS         .expect("run compiled workload contract gate");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "compiled workload contract gate failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS }
+//RS 
+//RS // ============================================================================
+//RS // Section: #211 CI test-target inventory + sharding (D-CI1=A)
+//RS // ============================================================================
+//RS 
+//RS /// The exact `cargo metadata` inventory of test-bearing targets, as
+//RS /// `-p PKG --lib` / `-p PKG --bin NAME` / `-p PKG --test NAME` lines — the
+//RS /// same shape `Tools/ci/test-shards.sh` emits. Computed independently here
+//RS /// (a separate `jq` invocation, not a call into the script) so a bug in the
+//RS /// script's own partition math still shows up as a mismatch below.
+//RS fn full_workspace_test_target_inventory(root: &std::path::Path) -> Vec<String> {
+//RS     let metadata = Command::new("cargo")
+//RS         .args(["metadata", "--no-deps", "--format-version", "1"])
+//RS         .current_dir(root)
+//RS         .output()
+//RS         .expect("run cargo metadata");
+//RS     assert!(
+//RS         metadata.status.success(),
+//RS         "cargo metadata failed:\n{}",
+//RS         String::from_utf8_lossy(&metadata.stderr)
+//RS     );
+//RS 
+//RS     let jq_filter = r#".packages[] | .name as $pkg | .targets[]
+//RS       | select(.kind[0] == "lib" or .kind[0] == "bin" or .kind[0] == "test")
+//RS       | if .kind[0] == "lib" then "-p \($pkg) --lib"
+//RS         elif .kind[0] == "bin" then "-p \($pkg) --bin \(.name)"
+//RS         else "-p \($pkg) --test \(.name)" end"#;
+//RS     let mut child = Command::new("jq")
+//RS         .args(["-r", jq_filter])
+//RS         .stdin(std::process::Stdio::piped())
+//RS         .stdout(std::process::Stdio::piped())
+//RS         .spawn()
+//RS         .expect("spawn jq");
+//RS     {
+//RS         use std::io::Write;
+//RS         child
+//RS             .stdin
+//RS             .as_mut()
+//RS             .unwrap()
+//RS             .write_all(&metadata.stdout)
+//RS             .expect("pipe cargo metadata into jq");
+//RS     }
+//RS     let jq_result = child.wait_with_output().expect("jq output");
+//RS     assert!(
+//RS         jq_result.status.success(),
+//RS         "jq filter failed:\n{}",
+//RS         String::from_utf8_lossy(&jq_result.stderr)
+//RS     );
+//RS     String::from_utf8(jq_result.stdout)
+//RS         .unwrap()
+//RS         .lines()
+//RS         .map(str::to_string)
+//RS         .collect()
+//RS }
+//RS 
+//RS #[test]
+//RS fn ci_test_shards_cover_every_workspace_target_exactly_once() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let shard_count = 6;
+//RS 
+//RS     let want = full_workspace_test_target_inventory(&root);
+//RS     assert!(
+//RS         want.len() > 200,
+//RS         "sanity: expected well over 200 lib/bin/test targets across the workspace, got {}",
+//RS         want.len()
+//RS     );
+//RS 
+//RS     let mut got: Vec<String> = Vec::new();
+//RS     for shard in 0..shard_count {
+//RS         let out = Command::new("bash")
+//RS             .arg(root.join("Tools/ci/test-shards.sh"))
+//RS             .arg(shard.to_string())
+//RS             .arg(shard_count.to_string())
+//RS             .current_dir(&root)
+//RS             .output()
+//RS             .expect("run Tools/ci/test-shards.sh");
+//RS         assert!(
+//RS             out.status.success(),
+//RS             "shard {shard} enumeration failed:\n{}",
+//RS             String::from_utf8_lossy(&out.stderr)
+//RS         );
+//RS         got.extend(
+//RS             String::from_utf8(out.stdout)
+//RS                 .unwrap()
+//RS                 .lines()
+//RS                 .map(str::to_string),
+//RS         );
+//RS     }
+//RS 
+//RS     assert_eq!(
+//RS         got.len(),
+//RS         got.iter().collect::<std::collections::BTreeSet<_>>().len(),
+//RS         "a test target appeared in more than one shard"
+//RS     );
+//RS 
+//RS     let mut want_sorted = want.clone();
+//RS     want_sorted.sort();
+//RS     let mut got_sorted = got.clone();
+//RS     got_sorted.sort();
+//RS     assert_eq!(
+//RS         want_sorted, got_sorted,
+//RS         "the union of all CI test shards must equal the exact workspace test-target inventory \
+//RS          (nothing silently skipped, nothing duplicated)"
+//RS     );
+//RS     assert_eq!(
+//RS         got.iter()
+//RS             .filter(|target| target.as_str() == "-p jet --test grammar")
+//RS             .count(),
+//RS         1,
+//RS         "CI grammar drift tests must remain on exactly one production shard"
+//RS     );
+//RS }
+//RS 
+//RS /// #2075: the shard split is weighted by measured cost, and the weight table is
+//RS /// machine-checked.
+//RS ///
+//RS /// A table nobody reads is a second place to remember cost (AGENTS.md I8), and a
+//RS /// row naming a target that no longer exists is a weight that silently stopped
+//RS /// applying — which is exactly how a 45-minute target stayed the critical path
+//RS /// while six jobs looked balanced. So every row must parse, name a real target,
+//RS /// and appear once; and the script must report the load it computed.
+//RS #[test]
+//RS fn ci_test_shards_use_the_committed_weight_table() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let table = fs::read_to_string(root.join("Tools/ci/test-weights.tsv"))
+//RS         .expect("read Tools/ci/test-weights.tsv");
+//RS     let inventory: std::collections::BTreeSet<String> = full_workspace_test_target_inventory(&root)
+//RS         .into_iter()
+//RS         .collect();
+//RS 
+//RS     let mut weighed = std::collections::BTreeSet::new();
+//RS     for (index, line) in table.lines().enumerate() {
+//RS         let row = index + 1;
+//RS         if line.is_empty() || line.starts_with('#') {
+//RS             continue;
+//RS         }
+//RS         let fields: Vec<&str> = line.split('\t').collect();
+//RS         assert_eq!(
+//RS             fields.len(),
+//RS             4,
+//RS             "Tools/ci/test-weights.tsv:{row} must be \
+//RS              '<package>\\t<kind>\\t<target>\\t<seconds>': {line:?}"
+//RS         );
+//RS         let (package, kind, name, seconds) = (fields[0], fields[1], fields[2], fields[3]);
+//RS         assert!(
+//RS             seconds.parse::<u64>().is_ok(),
+//RS             "Tools/ci/test-weights.tsv:{row} seconds must be a whole number: {seconds:?}"
+//RS         );
+//RS         let target = match kind {
+//RS             "lib" => format!("-p {package} --lib"),
+//RS             "bin" => format!("-p {package} --bin {name}"),
+//RS             "test" => format!("-p {package} --test {name}"),
+//RS             other => panic!("Tools/ci/test-weights.tsv:{row} has unknown target kind `{other}`"),
+//RS         };
+//RS         assert!(
+//RS             inventory.contains(&target),
+//RS             "Tools/ci/test-weights.tsv:{row} weighs `{target}`, which is not a workspace test \
+//RS              target — renamed or deleted, so its weight silently stopped applying"
+//RS         );
+//RS         assert!(
+//RS             weighed.insert(target.clone()),
+//RS             "Tools/ci/test-weights.tsv:{row} repeats `{target}`"
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         !weighed.is_empty(),
+//RS         "the weight table must carry at least one measured row, or the weighted split is \
+//RS          round-robin wearing a hat"
+//RS     );
+//RS 
+//RS     // The script must actually consult it, and say what it computed: the shard
+//RS     // load and the spread are the numbers that show whether the split is honest.
+//RS     let out = Command::new("bash")
+//RS         .arg(root.join("Tools/ci/test-shards.sh"))
+//RS         .args(["0", "6"])
+//RS         .current_dir(&root)
+//RS         .output()
+//RS         .expect("run Tools/ci/test-shards.sh");
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "weighted shard enumeration failed:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let summary = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         summary.contains("predicted ") && summary.contains("spread "),
+//RS         "Tools/ci/test-shards.sh must report the load and spread it computed: {summary}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn verify_full_default_run_covers_whole_workspace() {
+//RS     // The unsharded default path (no JET_TEST_SHARD set) is what local/manual
+//RS     // `Tools/agent/verify-full.sh` runs use; it must cover the complete
+//RS     // inventory via plain `cargo test --workspace` rather than the old
+//RS     // default-members-only `cargo test`.
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let verify = fs::read_to_string(root.join("Tools/agent/verify-full.sh"))
+//RS         .expect("read Tools/agent/verify-full.sh");
+//RS     assert!(
+//RS         verify.contains("cargo test --workspace \"$@\""),
+//RS         "the unsharded default path must run `cargo test --workspace`, not the \
+//RS          default-members-only `cargo test`"
+//RS     );
+//RS     assert!(
+//RS         verify.contains("Tools/ci/test-shards.sh"),
+//RS         "the sharded path must delegate enumeration to Tools/ci/test-shards.sh"
+//RS     );
+//RS     assert!(verify.contains("cargo test $test_target --no-run"));
+//RS     assert!(verify.contains("test_targets_repeat"));
+//RS     assert!(verify.contains("test-target inventory is nondeterministic"));
+//RS     assert!(verify.contains("CARGO_BUILD_JOBS"));
+//RS     assert!(!verify.contains("tmp_parent=\"${JET_VERIFY_TMPDIR:-/tmp}\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn warning_free_policy_is_strict_and_curated() {
+//RS     let verify = fs::read_to_string(root().join("Tools/agent/verify-full.sh"))
+//RS         .expect("read Tools/agent/verify-full.sh");
+//RS     assert!(
+//RS         verify.contains("D-CI2=A") && verify.contains("-D warnings"),
+//RS         "the production test path must inherit the warning wall"
+//RS     );
+//RS 
+//RS     let jit = fs::read_to_string(root().join("crates/jet-jit/src/lib.rs"))
+//RS         .expect("read jet-jit lint policy");
+//RS     assert!(
+//RS         jit.contains("#![expect(") && jit.contains("reason = \"#804:"),
+//RS         "intentional Rust lint exceptions must use card-referenced #[expect]"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn ci_gate_evidence_preserves_success_and_failure_receipts() {
+//RS     let root = root();
+//RS     let scratch = common::test_scratch_root(&format!("ci-evidence-{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&scratch);
+//RS     fs::create_dir_all(&scratch).unwrap();
+//RS     let script = root.join("Tools/ci/ci-evidence.sh");
+//RS 
+//RS     let success_dir = scratch.join("success");
+//RS     let success = Command::new("bash")
+//RS         .arg(&script)
+//RS         .args(["--report-dir", success_dir.to_str().unwrap(), "--", "bash", "-c"])
+//RS         .arg("printf 'gate-ok\\n'")
+//RS         .env_remove("GITHUB_ACTIONS")
+//RS         .env("RUNNER_OS", "Linux")
+//RS         .env("RUNNER_ARCH", "X64")
+//RS         .current_dir(&root)
+//RS         .output()
+//RS         .expect("run CI evidence success path");
+//RS     assert!(
+//RS         success.status.success(),
+//RS         "successful gate must stay successful:\n{}",
+//RS         String::from_utf8_lossy(&success.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&success.stdout),
+//RS         "gate-ok\n",
+//RS         "evidence wrapper must preserve gate stdout"
+//RS     );
+//RS     let success_receipt = fs::read_to_string(success_dir.join("receipt.txt")).unwrap();
+//RS     let candidate = success_receipt
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("candidate_commit="))
+//RS         .expect("receipt must record the candidate")
+//RS         .to_owned();
+//RS     assert_eq!(candidate.len(), 40, "candidate revision must be a full SHA-1");
+//RS     assert!(success_receipt.contains("schema=jet.ci-evidence.v1"));
+//RS     assert!(success_receipt.contains("status=pass"));
+//RS     assert!(success_receipt.contains(&format!("candidate_commit={candidate}")));
+//RS     for field in [
+//RS         "source_candidate_commit",
+//RS         "toolchain_candidate_commit",
+//RS         "artifact_candidate_commit",
+//RS         "signature_candidate_commit",
+//RS         "test_candidate_commit",
+//RS         "support_matrix_candidate_commit",
+//RS         "provenance_candidate_commit",
+//RS         "release_metadata_candidate_commit",
+//RS     ] {
+//RS         assert!(
+//RS             success_receipt.contains(&format!("{field}={candidate}")),
+//RS             "receipt must bind {field} to the candidate"
+//RS         );
+//RS     }
+//RS     let candidate_manifest = fs::read_to_string(success_dir.join("candidate.txt")).unwrap();
+//RS     assert!(candidate_manifest.contains("schema=jet.ci-candidate.v1"));
+//RS     for field in [
+//RS         "candidate_commit",
+//RS         "source_candidate_commit",
+//RS         "toolchain_candidate_commit",
+//RS         "artifact_candidate_commit",
+//RS         "signature_candidate_commit",
+//RS         "test_candidate_commit",
+//RS         "support_matrix_candidate_commit",
+//RS         "provenance_candidate_commit",
+//RS         "release_metadata_candidate_commit",
+//RS     ] {
+//RS         assert!(
+//RS             candidate_manifest.contains(&format!("{field}={candidate}")),
+//RS             "candidate manifest must bind {field} to the candidate"
+//RS         );
+//RS     }
+//RS     assert!(candidate_manifest.contains("signature=not-required-for-ci-test-gate"));
+//RS     assert!(success_receipt.contains("command_exit=0"));
+//RS     assert!(success_receipt.contains("support_matrix=Linux/X64"));
+//RS     assert!(success_receipt.contains("artifact_name=not-published"));
+//RS     assert!(success_receipt.contains("provenance=github-actions:local/1"));
+//RS     assert!(success_receipt.contains("source_manifest_sha256="));
+//RS     assert!(success_receipt.contains("toolchain_sha256="));
+//RS     assert_eq!(
+//RS         fs::read_to_string(success_dir.join("command.stdout")).unwrap(),
+//RS         "gate-ok\n"
+//RS     );
+//RS 
+//RS     let failure_dir = scratch.join("failure");
+//RS     let failure = Command::new("bash")
+//RS         .arg(&script)
+//RS         .args(["--report-dir", failure_dir.to_str().unwrap(), "--", "bash", "-c"])
+//RS         .arg("printf 'gate-failed\\n' >&2; exit 23")
+//RS         .env("GITHUB_SHA", &candidate)
+//RS         .env("RUNNER_OS", "Linux")
+//RS         .env("RUNNER_ARCH", "X64")
+//RS         .current_dir(&root)
+//RS         .output()
+//RS         .expect("run CI evidence failure path");
+//RS     assert_eq!(failure.status.code(), Some(23));
+//RS     let failure_receipt = fs::read_to_string(failure_dir.join("receipt.txt")).unwrap();
+//RS     assert!(failure_receipt.contains("status=fail"));
+//RS     assert!(failure_receipt.contains("command_exit=23"));
+//RS     assert_eq!(
+//RS         fs::read_to_string(failure_dir.join("command.stderr")).unwrap(),
+//RS         "gate-failed\n"
+//RS     );
+//RS     assert!(
+//RS         failure_dir.join("toolchain.txt").is_file(),
+//RS         "failed gates must retain toolchain evidence"
+//RS     );
+//RS 
+//RS     let missing_runner_dir = scratch.join("missing-runner");
+//RS     let missing_runner = Command::new("bash")
+//RS         .arg(&script)
+//RS         .args([
+//RS             "--report-dir",
+//RS             missing_runner_dir.to_str().unwrap(),
+//RS             "--",
+//RS             "bash",
+//RS             "-c",
+//RS         ])
+//RS         .arg("printf 'must-not-run\\n'")
+//RS         .env("GITHUB_ACTIONS", "true")
+//RS         .env("GITHUB_SHA", &candidate)
+//RS         .env_remove("RUNNER_OS")
+//RS         .env_remove("RUNNER_ARCH")
+//RS         .env_remove("GITHUB_RUNNER_OS")
+//RS         .env_remove("GITHUB_RUNNER_ARCH")
+//RS         .current_dir(&root)
+//RS         .output()
+//RS         .expect("run CI evidence missing-runner path");
+//RS     assert_eq!(missing_runner.status.code(), Some(78));
+//RS     assert_eq!(
+//RS         fs::read_to_string(missing_runner_dir.join("command.stdout")).unwrap(),
+//RS         ""
+//RS     );
+//RS     let missing_runner_receipt =
+//RS         fs::read_to_string(missing_runner_dir.join("receipt.txt")).unwrap();
+//RS     assert!(missing_runner_receipt.contains("status=fail"));
+//RS     assert!(
+//RS         fs::read_to_string(missing_runner_dir.join("command.stderr"))
+//RS             .unwrap()
+//RS             .contains("runner OS identity is missing")
+//RS     );
+//RS 
+//RS     let stale_dir = scratch.join("stale");
+//RS     fs::create_dir_all(&stale_dir).unwrap();
+//RS     fs::write(stale_dir.join("receipt.txt"), "status=pass\\n").unwrap();
+//RS     let stale = Command::new("bash")
+//RS         .arg(&script)
+//RS         .args(["--report-dir", stale_dir.to_str().unwrap(), "--", "bash", "-c"])
+//RS         .arg("printf 'must-not-run\\n'")
+//RS         .env_remove("GITHUB_ACTIONS")
+//RS         .env("GITHUB_SHA", &candidate)
+//RS         .env("RUNNER_OS", "Linux")
+//RS         .env("RUNNER_ARCH", "X64")
+//RS         .current_dir(&root)
+//RS         .output()
+//RS         .expect("run CI evidence stale-report path");
+//RS     assert_eq!(stale.status.code(), Some(78));
+//RS     assert_eq!(
+//RS         fs::read_to_string(stale_dir.join("command.stdout")).unwrap(),
+//RS         ""
+//RS     );
+//RS     let stale_receipt = fs::read_to_string(stale_dir.join("receipt.txt")).unwrap();
+//RS     assert!(stale_receipt.contains("status=fail"));
+//RS     assert!(
+//RS         fs::read_to_string(stale_dir.join("command.stderr"))
+//RS             .unwrap()
+//RS             .contains("stale file")
+//RS     );
+//RS 
+//RS     let artifact_mismatch_dir = scratch.join("artifact-mismatch");
+//RS     let artifact_mismatch = Command::new("bash")
+//RS         .arg(&script)
+//RS         .args([
+//RS             "--report-dir",
+//RS             artifact_mismatch_dir.to_str().unwrap(),
+//RS             "--",
+//RS             "bash",
+//RS             "-c",
+//RS         ])
+//RS         .arg("printf 'must-not-run\\n'")
+//RS         .env_remove("GITHUB_ACTIONS")
+//RS         .env("GITHUB_SHA", &candidate)
+//RS         .env("JET_CI_ARTIFACT_NAME", "ci-gate-evidence-shard-0-stale")
+//RS         .current_dir(&root)
+//RS         .output()
+//RS         .expect("run CI evidence artifact identity failure path");
+//RS     assert_eq!(artifact_mismatch.status.code(), Some(78));
+//RS     let artifact_mismatch_receipt =
+//RS         fs::read_to_string(artifact_mismatch_dir.join("receipt.txt")).unwrap();
+//RS     assert!(artifact_mismatch_receipt.contains("status=fail"));
+//RS     assert!(
+//RS         fs::read_to_string(artifact_mismatch_dir.join("command.stderr"))
+//RS             .unwrap()
+//RS             .contains("artifact name does not identify candidate")
+//RS     );
+//RS     assert!(artifact_mismatch_dir.join("candidate.txt").is_file());
+//RS     let _ = fs::remove_dir_all(&scratch);
+//RS }
+//RS 
+//RS // ============================================================================
+//RS // Section: #805 read-only Tower hygiene (D-ONCE-LEDGER1=A)
+//RS 
+//RS fn run_tower_hygiene_gate(
+//RS     repo: &Path,
+//RS     tower_dir: &Path,
+//RS     docs_root: &Path,
+//RS     report: &Path,
+//RS ) -> std::process::Output {
+//RS     Command::new("bash")
+//RS         .arg(repo.join("Tools/ci/tower-hygiene-gate.sh"))
+//RS         .current_dir(repo)
+//RS         .env("TOWER_DATA", tower_dir)
+//RS         .env("JET_TOWER_LINT_SCOPE", docs_root)
+//RS         .env("JET_TOWER_HYGIENE_REPORT", report)
+//RS         .env_remove("JET_TEST_SHARD")
+//RS         .output()
+//RS         .expect("run Tower hygiene gate")
+//RS }
+//RS 
+//RS #[test]
+//RS fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
+//RS     let repo = root();
+//RS     let fixture = common::test_scratch_root(&format!("tower-hygiene-gate-{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&fixture);
+//RS     fs::create_dir_all(fixture.join("Docs/spec")).unwrap();
+//RS     fs::create_dir_all(fixture.join("tower")).unwrap();
+//RS 
+//RS     fs::write(
+//RS         fixture.join("tower/tower.json"),
+//RS         r#"{
+//RS   "meta": {"version": 4, "project": "fixture", "currentEpoch": null, "nextNum": 1, "rev": 0, "ui": {"toggled": []}},
+//RS   "epochs": [{"id": "e1", "name": "Epoch 1", "goal": "", "status": "active"}],
+//RS   "milestones": [],
+//RS   "cards": [],
+//RS   "decisions": [{"id": "D-OK1", "status": "ratified", "outcome": "A"}],
+//RS   "questions": [],
+//RS   "ideas": [],
+//RS   "papercuts": [],
+//RS   "events": []
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         fixture.join("tower/history.json"),
+//RS         r#"{"version": 1, "decisions": [], "cards": [], "events": []}
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         fixture.join("tower/read-only-marker.txt"),
+//RS         "must not change\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(fixture.join("Docs/spec/ok.md"), "D-OK1\n").unwrap();
+//RS 
+//RS     let tower_before = fs::read(fixture.join("tower/tower.json")).unwrap();
+//RS     let history_before = fs::read(fixture.join("tower/history.json")).unwrap();
+//RS     let marker_before = fs::read(fixture.join("tower/read-only-marker.txt")).unwrap();
+//RS     let success_report = fixture.join("success.txt");
+//RS     let success = run_tower_hygiene_gate(
+//RS         &repo,
+//RS         &fixture.join("tower"),
+//RS         &fixture.join("Docs"),
+//RS         &success_report,
+//RS     );
+//RS     assert!(
+//RS         success.status.success(),
+//RS         "valid Tower hygiene must pass:\n{}",
+//RS         String::from_utf8_lossy(&success.stdout)
+//RS     );
+//RS     let success_text = fs::read_to_string(&success_report).unwrap();
+//RS     assert!(success_text.contains("status=pass"), "{success_text}");
+//RS     assert!(success_text.contains("read_only=pass"), "{success_text}");
+//RS     assert!(success_text.contains("lint_exit=0"), "{success_text}");
+//RS     assert!(
+//RS         success_text.contains("lint_repeat_exit=0"),
+//RS         "{success_text}"
+//RS     );
+//RS     assert!(success_text.contains("lint_json=pass"), "{success_text}");
+//RS     assert!(
+//RS         success_text.contains("lint_repeat_json=pass"),
+//RS         "{success_text}"
+//RS     );
+//RS     assert!(success_text.contains("candidate_commit="), "{success_text}");
+//RS     assert!(success_text.contains("runner_os="), "{success_text}");
+//RS     assert!(success_text.contains("node=v"), "{success_text}");
+//RS     assert!(success_text.contains("scope_input="), "{success_text}");
+//RS     assert_eq!(
+//RS         tower_before,
+//RS         fs::read(fixture.join("tower/tower.json")).unwrap()
+//RS     );
+//RS     assert_eq!(
+//RS         history_before,
+//RS         fs::read(fixture.join("tower/history.json")).unwrap()
+//RS     );
+//RS     assert_eq!(
+//RS         marker_before,
+//RS         fs::read(fixture.join("tower/read-only-marker.txt")).unwrap()
+//RS     );
+//RS 
+//RS     fs::write(fixture.join("Docs/spec/bad.md"), "D-MISSING1\n").unwrap();
+//RS     let failure_report = fixture.join("failure.txt");
+//RS     let failure = run_tower_hygiene_gate(
+//RS         &repo,
+//RS         &fixture.join("tower"),
+//RS         &fixture.join("Docs"),
+//RS         &failure_report,
+//RS     );
+//RS     assert!(
+//RS         !failure.status.success(),
+//RS         "missing Tower decision record must block:\n{}",
+//RS         String::from_utf8_lossy(&failure.stdout)
+//RS     );
+//RS     let failure_text = fs::read_to_string(&failure_report).unwrap();
+//RS     assert!(failure_text.contains("status=fail"), "{failure_text}");
+//RS     assert!(failure_text.contains("lint_exit=1"), "{failure_text}");
+//RS     assert!(
+//RS         failure_text.contains("lint_repeat_exit=1"),
+//RS         "{failure_text}"
+//RS     );
+//RS     assert!(
+//RS         failure_text.contains("spec-decision-ref-missing"),
+//RS         "{failure_text}"
+//RS     );
+//RS     assert!(failure_text.contains("D-MISSING1"), "{failure_text}");
+//RS     assert_eq!(
+//RS         tower_before,
+//RS         fs::read(fixture.join("tower/tower.json")).unwrap()
+//RS     );
+//RS     assert_eq!(
+//RS         history_before,
+//RS         fs::read(fixture.join("tower/history.json")).unwrap()
+//RS     );
+//RS     assert_eq!(
+//RS         marker_before,
+//RS         fs::read(fixture.join("tower/read-only-marker.txt")).unwrap()
+//RS     );
+//RS 
+//RS     fs::create_dir_all(fixture.join("outside")).unwrap();
+//RS     let traversal_report = fixture.join("outside/../tower/traversal.txt");
+//RS     let traversal = run_tower_hygiene_gate(
+//RS         &repo,
+//RS         &fixture.join("tower"),
+//RS         &fixture.join("Docs"),
+//RS         &traversal_report,
+//RS     );
+//RS     assert!(
+//RS         !traversal.status.success(),
+//RS         "a report path resolving into Tower must block the gate:\n{}",
+//RS         String::from_utf8_lossy(&traversal.stdout)
+//RS     );
+//RS     assert!(
+//RS         !fixture.join("tower/traversal.txt").exists(),
+//RS         "read-only gate wrote an audit report into Tower"
+//RS     );
+//RS 
+//RS     fs::create_dir_all(fixture.join("tower/tower.json.lock")).unwrap();
+//RS     fs::write(
+//RS         fixture.join("tower/tower.json.lock/info.json"),
+//RS         "{\"pid\": 1, \"at\": 0}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let locked_report = fixture.join("locked.txt");
+//RS     let locked = run_tower_hygiene_gate(
+//RS         &repo,
+//RS         &fixture.join("tower"),
+//RS         &fixture.join("Docs"),
+//RS         &locked_report,
+//RS     );
+//RS     assert!(
+//RS         !locked.status.success(),
+//RS         "a Tower write lock must block the read-only gate:\n{}",
+//RS         String::from_utf8_lossy(&locked.stdout)
+//RS     );
+//RS     let locked_text = fs::read_to_string(&locked_report).unwrap();
+//RS     assert!(locked_text.contains("read_only=blocked"), "{locked_text}");
+//RS     assert!(locked_text.contains("lint_exit=not-run"), "{locked_text}");
+//RS     assert!(locked_text.contains("write lock"), "{locked_text}");
+//RS     let _ = fs::remove_dir_all(fixture.join("tower/tower.json.lock"));
+//RS 
+//RS     let verify = fs::read_to_string(repo.join("Tools/agent/verify-full.sh")).unwrap();
+//RS     assert!(
+//RS         verify.contains("Tools/ci/tower-hygiene-gate.sh"),
+//RS         "verify-full must run the production Tower hygiene gate"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&fixture);
+//RS }
+// END-PORT-PENDING 1140 tests/release_gates.rs:1-1128
+

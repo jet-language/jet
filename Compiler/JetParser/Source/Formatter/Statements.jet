@@ -1,0 +1,1154 @@
+// Canonical statement formatter. Rust: jet-parser/src/Formatter/Statements.rs.
+use jet_foundation.[BinOp, BindName, BindPattern, Binding, CallArg, Expr, FencedNames, FencedStatement, ForKind, LValue, Marker, MarkerArgument, MarkerRowAndArgs, NameRange, NamedSpan, Span, Stmt, block_marker, expr_span]
+use jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_CHAR, TOKEN_KW_ELSE, TOKEN_LBRACE, TOKEN_LINE_COMMENT, TOKEN_RAW_STRING, TOKEN_STRING]
+use core.text as stmt_unicode
+
+// Rust Statements.rs:4-21: exits remain scoped where collapsing changes meaning.
+fn jet_format_is_loop_exit_stmt(stmt: Stmt) -> Bool Never! {
+    if stmt == {
+        .Break(_) -> true
+        .BreakValue(_, _) -> true
+        .BreakLabel(_, _) -> true
+        .BreakLabelValue(_, _, _, _) -> true
+        .Continue(_) -> true
+        .ContinueLabel(_, _) -> true
+        else -> false
+    }
+}
+fn jet_format_is_loop_break_stmt(stmt: Stmt) -> Bool Never! {
+    if stmt == {
+        .Break(_) -> true
+        .BreakValue(_, _) -> true
+        .BreakLabel(_, _) -> true
+        .BreakLabelValue(_, _, _, _) -> true
+        else -> false
+    }
+}
+
+// Rust Statements.rs:257-313: preserve blank gaps on EACH side of comments.
+fn jet_format_source_has_blank_line(gap: String) -> Bool Never! {
+    saw_newline := false
+    only_space := true
+    loop scalar in gap.chars() {
+        text :: "{scalar}"
+        if text == "\n" {
+            if saw_newline && only_space -> return true
+            saw_newline = true
+            only_space = true
+        } else {
+            if !stmt_unicode.is_whitespace(text) -> only_space = false
+        }
+    }
+    false
+}
+fn jet_format_emit_leading_statement_gap(context: &JetFormatterContext, start: Int, end: Int) Never! {
+    cursor := start
+    loop context.comment_i < context.comments.len() {
+        span :: ~context.comments[context.comment_i].span
+        if span.start >= end -> break
+        if span.start < start {
+            comment_index :: ~context.comment_i
+            jet_format_emit_comment_line_at(&context, comment_index)
+            context.comment_i += 1
+            context.pending_blank = false
+            cursor = if cursor > span.end -> cursor else -> span.end
+        } else {
+            if jet_format_source_has_blank_line(jet_format_source_slice(&context, cursor, span.start) ?? "") -> jet_format_newline(&context)
+            comment_index :: ~context.comment_i
+            jet_format_emit_comment_line_at(&context, comment_index)
+            context.comment_i += 1
+            context.pending_blank = false
+            cursor = span.end
+        }
+    }
+    if jet_format_source_has_blank_line(jet_format_source_slice(&context, cursor, end) ?? "") -> jet_format_newline(&context)
+}
+
+// Rust Statements.rs:58-101: index facts instead of copying authored fences.
+fn jet_format_fenced_statement_for(context: &JetFormatterContext, stmt: Stmt) -> Int? Never! {
+    start :: jet_format_stmt_start(stmt)
+    loop index in 0..<context.fenced_statements.len() {
+        fact :: context.fenced_statements[index]
+        loop fence in fact.fences {
+            if fact.span.start <= start && start <= fence.span.end -> return Val(index)
+        }
+    }
+    None
+}
+fn jet_format_block_stmts(context: &JetFormatterContext, body: [Stmt]) Never! {
+    saved_tail :: ~context.optional_tail
+    context.body_depth += 1
+    index := 0
+    previous_end := Int?{None}
+    loop index < body.len() {
+        stmt :: body[index]
+        context.optional_tail = context.optional_body_visit && context.body_depth == 1 && index + 1 == body.len()
+        fence_index :: jet_format_fenced_statement_for(&context, stmt)
+        source_start :: if fence_index == {
+            .Val(i) -> context.fenced_statements[i].span.start
+            .None -> jet_format_stmt_start(stmt)
+        }
+        if previous_end == {
+            .Val(end) -> {
+                jet_format_newline(&context)
+                jet_format_emit_leading_statement_gap(&context, end, source_start)
+            }
+            .None -> jet_format_emit_leading(&context, source_start)
+        }
+        if fence_index == {
+            .Val(i) -> {
+                end :: ~context.fenced_statements[i].span.end
+                copies :: ~context.fenced_statements[i].copies
+                jet_format_fenced_statement(&context, i)
+                jet_format_emit_trailing(&context, end)
+                previous_end = Val(end)
+                index += copies
+            }
+            .None -> {
+                jet_format_stmt(&context, stmt)
+                end :: jet_format_statement_source_end(&context, stmt)
+                jet_format_emit_trailing(&context, end)
+                previous_end = Val(end)
+                index += 1
+            }
+        }
+    }
+    context.body_depth -= 1
+    context.optional_tail = saved_tail
+}
+
+// Rust Statements.rs:103-117: verbatim fragments are only the authored fence fact.
+fn jet_format_fenced_statement(context: &JetFormatterContext, fact_index: Int) Never! {
+    span :: ~context.fenced_statements[fact_index].span
+    preserve :: jet_format_span_has_comment(&context, span.start, span.end)
+    cursor := span.start
+    loop fence_index in 0..<context.fenced_statements[fact_index].fences.len() {
+        fence_span :: ~context.fenced_statements[fact_index].fences[fence_index].span
+        jet_format_write_fence_fragment(&context, cursor, fence_span.start, preserve)
+        jet_format_fenced_names(&context, fact_index, fence_index)
+        cursor = fence_span.end
+    }
+    jet_format_write_fence_fragment(&context, cursor, span.end, preserve)
+    if preserve -> jet_format_skip_verbatim_comments(&context, span.end)
+}
+
+// Rust Statements.rs:234-255: Unicode whitespace, literal content excluded.
+fn jet_format_write_normalized_source_fragment(context: &JetFormatterContext, fragment: String) Never! {
+    pending_space := false
+    loop char in fragment.chars() {
+        scalar :: "{char}"
+        if stmt_unicode.is_whitespace(scalar) {
+            pending_space = true
+        } else {
+            if pending_space -> jet_format_write(&context, " ")
+            jet_format_write(&context, scalar)
+            pending_space = false
+        }
+    }
+    if pending_space -> jet_format_write(&context, " ")
+}
+fn jet_format_write_fence_fragment(context: &JetFormatterContext, start: Int, end: Int, preserve: Bool) Never! {
+    if preserve {
+        text :: jet_format_source_slice(&context, start, end) ?? ""
+        jet_format_write(&context, text)
+        return
+    }
+    cursor := start
+    loop index in 0..<context.source_toks.len() {
+        span :: ~context.source_toks[index].span
+        kind :: ~context.source_toks[index].kind
+        if span.start >= start && span.end <= end && (kind == TOKEN_STRING || kind == TOKEN_RAW_STRING || kind == TOKEN_CHAR) {
+            before :: jet_format_source_slice(&context, cursor, span.start) ?? ""
+            jet_format_write_normalized_source_fragment(&context, before)
+            literal :: jet_format_source_slice(&context, span.start, span.end) ?? ""
+            jet_format_write(&context, literal)
+            cursor = span.end
+        }
+    }
+    tail :: jet_format_source_slice(&context, cursor, end) ?? ""
+    jet_format_write_normalized_source_fragment(&context, tail)
+}
+
+// Rust Statements.rs:1065-1093: listed expression integers simplify only in order.
+fn jet_format_consecutive_expr_int_range(context: &JetFormatterContext, fact_index: Int, fence_index: Int) -> NameRange? Never! {
+    span :: ~context.fenced_statements[fact_index].fences[fence_index].span
+    count :: context.fenced_statements[fact_index].fences[fence_index].names.len()
+    if count < 2 || jet_format_span_has_comment(&context, span.start, span.end) -> return None
+    previous := Int?{None}
+    first := ""
+    last := ""
+    loop index in 0..<count {
+        if context.fenced_statements[fact_index].fences[fence_index].names[index].name != "" -> return None
+        name_span :: ~context.fenced_statements[fact_index].fences[fence_index].names[index].span
+        text :: jet_format_source_slice(&context, name_span.start, name_span.end) ?? return None
+        if text.contains(".") -> return None
+        value :: Int.parse(text.replace("_", "")) ?? return None
+        if value < -9223372036854775808 || value > 9223372036854775807 -> return None
+        if previous == .Val(prior) {
+            if prior == 9223372036854775807 || value != prior + 1 -> return None
+        } else { first = text }
+        previous = Val(value)
+        last = text
+    }
+    Val(NameRange{start: first, end: last})
+}
+fn jet_format_fenced_names(context: &JetFormatterContext, fact_index: Int, fence_index: Int) Never! {
+    if context.fenced_statements[fact_index].fences[fence_index].range != None {
+        text :: if context.fenced_statements[fact_index].fences[fence_index].range == {
+            .Val(range) -> "<: {range.start}..{range.end} :>"
+            .None -> panic("fenced range was present")
+        }
+        jet_format_write(&context, text)
+        return
+    }
+    count :: context.fenced_statements[fact_index].fences[fence_index].names.len()
+    if count > 1 {
+        first :: ~context.fenced_statements[fact_index].fences[fence_index].names[0].span
+        all_same := true
+        loop index in 0..<count { if context.fenced_statements[fact_index].fences[fence_index].names[index].span != first -> all_same = false }
+        if all_same {
+            text :: jet_format_source_slice(&context, first.start, first.end) ?? ""
+            jet_format_write(&context, "<: {text} :>")
+            return
+        }
+    }
+    if context.simplify {
+        if jet_format_consecutive_expr_int_range(&context, fact_index, fence_index) == .Val(range) {
+            jet_format_write(&context, "<: {range.start}..{range.end} :>")
+            return
+        }
+    }
+    width := 6
+    loop index in 0..<count {
+        span :: ~context.fenced_statements[fact_index].fences[fence_index].names[index].span
+        length := context.fenced_statements[fact_index].fences[fence_index].names[index].name.len()
+        if length == 0 -> length = (jet_format_source_slice(&context, span.start, span.end) ?? "").len()
+        width += length + if index > 0 -> 2 else -> 0
+    }
+    if context.col + width <= 100 {
+        jet_format_write(&context, "<: ")
+        loop index in 0..<count {
+            if index > 0 -> jet_format_write(&context, ", ")
+            jet_format_write_fenced_name_at(&context, fact_index, fence_index, index)
+        }
+        jet_format_write(&context, " :>")
+    } else {
+        jet_format_write(&context, "<:")
+        jet_format_newline(&context)
+        context.indent += 1
+        loop index in 0..<count {
+            jet_format_write_fenced_name_at(&context, fact_index, fence_index, index)
+            jet_format_write(&context, ",")
+            jet_format_newline(&context)
+        }
+        context.indent -= 1
+        jet_format_write(&context, ":>")
+    }
+}
+fn jet_format_write_fenced_name_at(context: &JetFormatterContext, fact_index: Int, fence_index: Int, index: Int) Never! {
+    length :: context.fenced_statements[fact_index].fences[fence_index].names[index].name.len()
+    if length == 0 {
+        span :: ~context.fenced_statements[fact_index].fences[fence_index].names[index].span
+        text :: jet_format_source_slice(&context, span.start, span.end) ?? ""
+        jet_format_write(&context, text)
+        return
+    }
+    if context.at_line_start -> jet_format_write_indent(&context)
+    context.col += length
+    context.at_line_start = false
+    loop byte in context.fenced_statements[fact_index].fences[fence_index].names[index].name.bytes() -> &context.out.push(byte)
+    context.pending_blank = false
+}
+
+// Rust Statements.rs:859-900: conditions impose no precedence requirement.
+fn jet_format_cond(context: &JetFormatterContext, cond: Expr) Never! {
+    jet_format_expr_with_optional_visit(&context, cond, false)
+}
+fn jet_format_stmt_inline(context: &JetFormatterContext, stmt: Stmt) Never! {
+    jet_format_stmt(&context, stmt)
+}
+fn jet_format_value_block(context: &JetFormatterContext, stmts: [Stmt], value: Expr, inline: Bool, visit_value: Bool) Never! {
+    jet_format_write(&context, "{{")
+    if inline {
+        saved :: ~context.optional_body_visit
+        context.optional_body_visit = saved && visit_value
+        rendered :: jet_format_try_inline_value_block(&context, stmts, value)
+        context.optional_body_visit = saved
+        if rendered -> return
+    }
+    jet_format_newline(&context)
+    context.indent += 1
+    jet_format_block_stmts(&context, stmts)
+    if stmts.len() > 0 -> jet_format_newline(&context)
+    jet_format_expr_with_optional_visit(&context, value, visit_value)
+    context.indent -= 1
+    jet_format_end_block(&context)
+}
+fn jet_format_value_block_inlineable(context: &JetFormatterContext, stmts: [Stmt], value: Expr) -> Bool Never! {
+    if stmts.len() > 0 -> return false
+    if jet_format_value_block_braces(&context, value) == .Val(braces) {
+        source :: jet_format_source_slice(&context, braces.start, braces.end) ?? return false
+        return !jet_format_span_has_comment(&context, braces.start, braces.end) && !source.contains("\n")
+    }
+    false
+}
+
+// Rust Statements.rs:1494-1567: explicit preparation, pattern binds and uninit.
+fn jet_format_binding(context: &JetFormatterContext, binding: Binding) Never! {
+    if binding.meta == .Val(meta) {
+        jet_format_meta_attr(&context, meta)
+        jet_format_write(&context, " ")
+    }
+    loop marker in binding.markers -> jet_format_write(&context, "#{marker.name} ")
+    if binding.is_comptime {
+        jet_format_write(&context, "{binding.name} :: ")
+        jet_format_prepared_value(&context, binding.init)
+        return
+    }
+    if binding.pattern == .Val(bind_pattern) && bind_pattern == .Refutable(pattern, fallback, _, _, _) {
+        jet_format_refutable_subject(&context, binding.init)
+        jet_format_write(&context, " == ")
+        jet_format_pattern(&context, pattern)
+        jet_format_write(&context, " ?? ")
+        jet_format_or_fallback(&context, fallback)
+        return
+    }
+    if binding.pattern == {
+        .Val(pattern) -> jet_format_bind_pattern(&context, pattern)
+        .None -> jet_format_write(&context, binding.name)
+    }
+    jet_format_write(&context, if binding.mutable -> " := " else -> " :: ")
+    if binding.uninit {
+        if binding.ty == {
+            .Val(ty) -> {
+                jet_format_type(&context, ty)
+                jet_format_write(&context, "{{ uninit }}")
+            }
+            .None -> jet_format_write(&context, "uninit")
+        }
+    } else { jet_format_expr(&context, binding.init, JetFormatterPrec.OrFallback) }
+}
+fn jet_format_prepared_value(context: &JetFormatterContext, value: Expr) Never! {
+    jet_format_write(&context, "prep {{ ")
+    jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+    jet_format_write(&context, " }}")
+}
+fn jet_format_refutable_subject(context: &JetFormatterContext, expr: Expr) Never! {
+    unwrapped := expr
+    loop {
+        if unwrapped == .Paren(value, _) -> unwrapped = value else -> break
+    }
+    postfix :: if unwrapped == {
+        .Call(_) -> true
+        .CallValue(_, _, _) -> true
+        .MethodCall(_, _, _, _, _, _, _, _, _, _) -> true
+        .Field(_, _, _) -> true
+        .OptField(_, _, _, _, _) -> true
+        .Index(_, _, _, _) -> true
+        .Slice(_, _, _, _, _) -> true
+        else -> false
+    }
+    jet_format_expr(&context, if postfix -> unwrapped else -> expr, JetFormatterPrec.Cmp)
+}
+fn jet_format_bind_names(context: &JetFormatterContext, names: [BindName], rename: Bool) Never! {
+    loop index in 0..<names.len() {
+        if index > 0 -> jet_format_write(&context, ", ")
+        name :: names[index]
+        jet_format_write(&context, name.name)
+        if rename {
+            if name.rename == .Val(target) -> jet_format_write(&context, ": {target.name}")
+        }
+    }
+}
+fn jet_format_bind_pattern(context: &JetFormatterContext, pattern: BindPattern) Never! {
+    if pattern == {
+        .Struct(name, _, fields, rest, _) -> {
+            jet_format_write(&context, "{name}{{")
+            jet_format_bind_names(&context, fields, true)
+            if rest != None {
+                if fields.len() > 0 -> jet_format_write(&context, ", ")
+                jet_format_write(&context, "..")
+            }
+            jet_format_write(&context, "}}")
+        }
+        .List(elems, _) -> {
+            jet_format_write(&context, "[")
+            jet_format_bind_names(&context, elems, false)
+            jet_format_write(&context, "]")
+        }
+        .Tuple(elems, _) -> {
+            jet_format_write(&context, "(")
+            jet_format_bind_names(&context, elems, false)
+            jet_format_write(&context, ")")
+        }
+        .Refutable(_, _, _, _, _) -> panic("refutable bindings use statement syntax")
+    }
+}
+fn jet_format_lvalue(context: &JetFormatterContext, target: LValue) Never! {
+    if target == {
+        .Local(name, _) -> jet_format_write(&context, name)
+        .Index(base, index, _, _) -> {
+            jet_format_expr(&context, base, JetFormatterPrec.Postfix)
+            jet_format_write(&context, "[")
+            jet_format_expr(&context, index, JetFormatterPrec.OrFallback)
+            jet_format_write(&context, "]")
+        }
+        .Field(base, field, _) -> {
+            jet_format_expr(&context, base, JetFormatterPrec.Postfix)
+            jet_format_write(&context, ".{field}")
+        }
+    }
+}
+
+// Rust Statements.rs:902-935,1172-1265: bounded speculative output, no AST copy.
+struct JetStmtFormatCheckpoint {
+    length: Int
+    col: Int
+    at_line_start: Bool
+    pending_blank: Bool
+    comment_i: Int
+}
+fn jet_format_stmt_checkpoint(context: &JetFormatterContext) -> JetStmtFormatCheckpoint Never! {
+    JetStmtFormatCheckpoint{length: context.out.len(), col: context.col, at_line_start: context.at_line_start, pending_blank: context.pending_blank, comment_i: context.comment_i}
+}
+fn jet_format_stmt_restore(context: &JetFormatterContext, saved: JetStmtFormatCheckpoint) Never! {
+    jet_format_truncate(&context, saved.length)
+    context.col = saved.col
+    context.at_line_start = saved.at_line_start
+    context.pending_blank = saved.pending_blank
+    context.comment_i = saved.comment_i
+}
+fn jet_format_effect_loop_body(context: &JetFormatterContext, body: [Stmt], header_end: Int, arrow_body: Bool) Never! {
+    if arrow_body && body.len() == 1 {
+        saved :: jet_format_stmt_checkpoint(&context)
+        jet_format_write(&context, " -> ")
+        jet_format_stmt_inline(&context, body[0])
+        if context.col <= 100 && !jet_format_output_has_newline(&context, saved.length) -> return
+        jet_format_stmt_restore(&context, saved)
+    }
+    preserve_expr := false
+    if !arrow_body && body.len() == 1 {
+        if body[0] == .Expr(_) -> preserve_expr = jet_format_single_stmt_braces(&context, body[0]) != None
+    }
+    force :: preserve_expr || (!arrow_body && body.len() == 1 && jet_format_is_loop_exit_stmt(body[0]))
+    jet_format_control_body_after_header(&context, body, force)
+}
+fn jet_format_control_body_after_header(context: &JetFormatterContext, body: [Stmt], force: Bool) Never! {
+    if force || context.force_control_braces {
+        jet_format_write(&context, " {{")
+        jet_format_control_body(&context, body)
+        return
+    }
+    if body.len() == 1 && jet_format_is_simple_stmt(body[0]) {
+        comment_free :: if jet_format_single_stmt_braces(&context, body[0]) == {
+            .Val(span) -> !jet_format_span_has_comment(&context, span.start, span.end)
+            .None -> true
+        }
+        if comment_free {
+            saved :: jet_format_stmt_checkpoint(&context)
+            jet_format_write(&context, " -> ")
+            jet_format_stmt_inline(&context, body[0])
+            if context.col <= 100 && !jet_format_output_has_newline(&context, saved.length) -> return
+            jet_format_stmt_restore(&context, saved)
+        }
+    }
+    jet_format_write(&context, " {{")
+    jet_format_control_body(&context, body)
+}
+fn jet_format_arm_body_was_braceless(context: &JetFormatterContext, body: [Stmt]) -> Bool Never! {
+    if body.len() != 1 || !jet_format_is_simple_stmt(body[0]) -> return false
+    start :: jet_format_stmt_start(body[0])
+    prefix :: jet_format_source_slice(&context, 0, start) ?? return false
+    // rfind reports scalar positions; convert the authored prefix back to bytes.
+    arrow_scalar :: prefix.rfind("->")
+    if arrow_scalar < 0 -> return false
+    arrow :: prefix.slice(0, arrow_scalar).bytes().len()
+    between :: jet_format_source_slice(&context, arrow + 2, start) ?? return false
+    source_end :: jet_format_statement_source_end(&context, body[0])
+    source :: jet_format_source_slice(&context, start, source_end) ?? return false
+    !between.contains("{{") && !between.contains("\n") && !source.contains("\n") && !jet_format_span_has_comment(&context, arrow + 2, source_end)
+}
+fn jet_format_arm_body(context: &JetFormatterContext, body: [Stmt], force: Bool) Never! {
+    if body.len() == 0 {
+        jet_format_write(&context, " {{}}")
+        return
+    }
+    if jet_format_arm_body_was_braceless(&context, body) {
+        is_return :: if body[0] == {
+            .Return(_, _) -> true
+            else -> false
+        }
+        braces :: force && !is_return
+        saved :: jet_format_stmt_checkpoint(&context)
+        jet_format_write(&context, if braces -> " {{ " else -> " ")
+        jet_format_stmt_inline(&context, body[0])
+        if braces -> jet_format_write(&context, " }}")
+        if context.col <= 100 -> return
+        jet_format_stmt_restore(&context, saved)
+        jet_format_write(&context, " {{")
+        jet_format_body_expanded(&context, body)
+        return
+    }
+    jet_format_write(&context, " {{")
+    jet_format_body(&context, body)
+}
+
+// Rust Statements.rs:24-56: a single statement marker scopes the whole control.
+fn jet_format_statement_switch_attr(context: &JetFormatterContext, marker: Marker, body: [Stmt]) Never! {
+    body_start :: if body.len() > 0 -> jet_format_stmt_start(body[0]) else -> marker.span.end
+    block := false
+    loop token in context.source_toks {
+        if token.span.start >= marker.span.end && token.span.start < body_start && token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT {
+            block = token.kind == TOKEN_LBRACE
+            break
+        }
+    }
+    jet_format_write(&context, "#")
+    jet_format_marker(&context, marker)
+    if block || body.len() != 1 {
+        jet_format_write(&context, " {{")
+        jet_format_newline(&context)
+        context.indent += 1
+        jet_format_block_stmts(&context, body)
+        context.indent -= 1
+        jet_format_end_block(&context)
+    } else {
+        jet_format_write(&context, " ")
+        saved :: context.force_control_braces
+        context.force_control_braces = true
+        jet_format_stmt(&context, body[0])
+        context.force_control_braces = saved
+    }
+}
+
+// Rust Statements.rs:321-405: policy declarations share marker argument layout.
+fn jet_format_marker_arg_separator(context: &JetFormatterContext, first: &Bool, multiline: Bool) Never! {
+    if first -> first = false else {
+        jet_format_write(&context, if multiline -> "," else -> ", ")
+        if multiline -> jet_format_newline(&context)
+    }
+}
+fn jet_format_block_marker(context: &JetFormatterContext, marker: MarkerRowAndArgs, start: Int) Never! {
+    jet_format_write(&context, "#")
+    if marker.negated -> jet_format_write(&context, "!")
+    jet_format_write(&context, marker.name)
+    if marker.args.len() > 0 {
+        jet_format_write(&context, "(")
+        source :: jet_format_source_list_span_after(&context, start, JetFormatterSourceDelimiter.Paren)
+        multiline :: if source == {
+            .Val(list) -> jet_format_source_span_multiline(&context, list.span)
+            .None -> false
+        }
+        if multiline -> jet_format_newline(&context)
+        first := true
+        loop argument in marker.args {
+            if argument == {
+                .Expr(label, value) -> {
+                    jet_format_marker_arg_separator(&context, &first, multiline)
+                    if label == .Val(name) -> jet_format_write(&context, "{name}: ")
+                    jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+                }
+                .Ident(value) -> {
+                    jet_format_marker_arg_separator(&context, &first, multiline)
+                    jet_format_write(&context, value)
+                }
+                .Idents(label, values) -> {
+                    jet_format_marker_arg_separator(&context, &first, multiline)
+                    if label == .Val(name) -> jet_format_write(&context, "{name}: ")
+                    loop index in 0..<values.len() {
+                        if index > 0 -> jet_format_write(&context, ", ")
+                        jet_format_write(&context, values[index].name)
+                    }
+                }
+                .Text(value) -> {
+                    jet_format_marker_arg_separator(&context, &first, multiline)
+                    escaped :: jet_format_escape_str_lit(value)
+                    jet_format_write(&context, "\"{escaped}\"")
+                }
+                .Policy(declarations) -> {
+                    loop declaration in declarations {
+                        jet_format_marker_arg_separator(&context, &first, multiline)
+                        jet_format_policy_declaration(&context, declaration)
+                    }
+                }
+            }
+        }
+        if multiline && !context.at_line_start -> jet_format_newline(&context)
+        jet_format_write(&context, ")")
+    }
+    jet_format_write(&context, " {{")
+}
+
+// Rust Statements.rs:407-857: exhaustive statement surface dispatch.
+fn jet_format_stmt(context: &JetFormatterContext, stmt: Stmt) Never! {
+    saved_visit :: ~context.optional_body_visit
+    saved_tail :: ~context.optional_tail
+    if stmt != .Expr{expr: _} -> context.optional_tail = false
+    if saved_visit {
+        context.optional_body_visit = if stmt == {
+            .Return(_, _) | .Expr(_) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Switch(_, _, _, _) -> true
+            else -> false
+        }
+    }
+    jet_format_stmt_inner(&context, stmt)
+    context.optional_body_visit = saved_visit
+    context.optional_tail = saved_tail
+}
+fn jet_format_stmt_inner(context: &JetFormatterContext, stmt: Stmt) Never! {
+    switched :: if stmt == {
+        .Switched(_, _, _) -> true
+        else -> false
+    }
+    if !switched {
+        if block_marker(stmt, context.policy_declarations) == .Val(marker) -> jet_format_block_marker(&context, marker, jet_format_stmt_start(stmt))
+    }
+    if stmt == {
+        .DeferClose(close, _) -> {
+            jet_format_write(&context, "defer ")
+            jet_format_expr(&context, close, JetFormatterPrec.OrFallback)
+        }
+        .Expr(expr) -> {
+            if expr == .Call(call) {
+                if call.name == "__jet_unsafe_assert" {
+                    jet_format_write(&context, "assert")
+                    loop index in 0..<call.args.len() {
+                        jet_format_write(&context, if index == 0 -> " " else -> ", ")
+                        if call.args[index].expr == .Ident(name, _) -> jet_format_write(&context, name)
+                    }
+                    return
+                }
+            }
+            if context.optional_tail -> jet_format_optional_value(&context, expr, JetFormatterPrec.OrFallback) else -> jet_format_expr(&context, expr, JetFormatterPrec.OrFallback)
+        }
+        .Val(binding) -> jet_format_binding(&context, binding)
+        .Assign(target, op, _, value) -> {
+            jet_format_lvalue(&context, target)
+            if op == {
+                .Val(operator) -> {
+                    spell :: jet_format_compound_spell(operator)
+                    jet_format_write(&context, " {spell}")
+                }
+                .None -> jet_format_write(&context, " =")
+            }
+            jet_format_write(&context, " ")
+            jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+        }
+        .Return(value, _) -> {
+            jet_format_write(&context, "return")
+            if value == .Val(expr) {
+                jet_format_write(&context, " ")
+                jet_format_optional_value(&context, expr, JetFormatterPrec.OrFallback)
+            }
+        }
+        .Yield(value, _) -> {
+            jet_format_write(&context, "yield ")
+            jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+        }
+        .While(cond, body, _, arrow, label) -> {
+            jet_format_loop_label(&context, label)
+            jet_format_write(&context, "loop ")
+            jet_format_cond(&context, cond)
+            jet_format_effect_loop_body(&context, body, expr_span(cond).end, arrow)
+        }
+        .For(var, var_span, var2, kind, body, span, arrow, label, _) -> {
+            jet_format_loop_label(&context, label)
+            jet_format_write(&context, "loop ")
+            bindingless :: var2 == None && var == "it"
+            if !bindingless {
+                if var2 == {
+                    .Val(second) -> {
+                        jet_format_write(&context, "(")
+                        names :: [NamedSpan]{NamedSpan{name: var, span: var_span}, second}
+                        source :: jet_format_source_list_span_after(&context, span.start, JetFormatterSourceDelimiter.Paren)
+                        multiline :: jet_format_comma_begin(&context, names.len(), source)
+                        loop (name_index, entry) in names {
+                            item_span :: entry.span
+                            jet_format_comma_before(&context, name_index, item_span, multiline)
+                            jet_format_write(&context, entry.name)
+                            jet_format_comma_after(&context, item_span, multiline)
+                        }
+                        jet_format_comma_end(&context, source, multiline)
+                        jet_format_write(&context, ")")
+                    }
+                    .None -> jet_format_write(&context, var)
+                }
+            }
+            jet_format_for_clause(&context, kind, body, arrow, bindingless)
+        }
+        .CountedLoop(init, cond, step, body, _, arrow, label) -> {
+            jet_format_loop_label(&context, label)
+            jet_format_write(&context, "loop ")
+            step_width :: if step == {
+                .Val(value) -> jet_format_stmt_width(jet_format_stmt_end(value), jet_format_stmt_start(value)) + 2
+                .None -> 0
+            }
+            width :: jet_format_stmt_width(expr_span(init.init).end, init.name_span.start) + jet_format_stmt_width(expr_span(cond).end, expr_span(cond).start) + step_width + 5
+            wrap :: context.col + width > 100
+            jet_format_binding(&context, init)
+            jet_format_loop_clause_separator(&context, expr_span(cond).start, wrap)
+            jet_format_cond(&context, cond)
+            end := expr_span(cond).end
+            if step == {
+                .Val(value) -> {
+                    jet_format_loop_clause_separator(&context, jet_format_stmt_start(value), wrap)
+                    jet_format_stmt(&context, value)
+                    end = jet_format_stmt_end(value)
+                }
+                .None -> if wrap -> jet_format_write(&context, ",")
+            }
+            jet_format_effect_loop_body(&context, body, end, arrow)
+        }
+        .Loop(body, _, arrow, label) -> {
+            jet_format_loop_label(&context, label)
+            jet_format_write(&context, "loop")
+            jet_format_effect_loop_body(&context, body, 0, arrow)
+        }
+        .Switch(subject, arms, fallback, span) -> {
+            jet_format_write(&context, "if ")
+            if parser_is_subjectless_guard(subject, span) {
+                if jet_format_switch_was_classic_if(&context, arms, span) && !(context.simplify && arms.len() > 1) -> jet_format_classic_switch(&context, arms, fallback)
+                else -> jet_format_guard_dispatch(&context, arms, fallback)
+            } else { jet_format_dispatch(&context, subject, arms, fallback, false) }
+        }
+        .Break(_) -> jet_format_write(&context, "break")
+        .BreakValue(value, _) -> {
+            jet_format_write(&context, "break ")
+            jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+        }
+        .Continue(_) -> jet_format_write(&context, "next")
+        .BreakLabel(name, _) -> jet_format_write(&context, if jet_format_is_generated_label(name) -> "break" else -> "break({name})")
+        .ContinueLabel(name, _) -> jet_format_write(&context, if jet_format_is_generated_label(name) -> "next" else -> "next({name})")
+        .BreakLabelValue(name, _, value, _) -> {
+            generated :: jet_format_is_generated_label(name)
+            jet_format_write(&context, if generated -> "break " else -> "break({name}, ")
+            jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+            if !generated -> jet_format_write(&context, ")")
+        }
+        .Switched(marker, body, _) -> jet_format_statement_switch_attr(&context, marker, body)
+        .Unsafe(_, _, body, _) -> jet_format_body(&context, body)
+        .Impure(_, _, body, _) -> jet_format_body(&context, body)
+        .Reactive(body, _) -> jet_format_body(&context, body)
+        .Shield(body, _) -> jet_format_body(&context, body)
+        .Region(_, _, body, _) -> jet_format_body(&context, body)
+        .Policy(_, body, _) -> jet_format_body(&context, body)
+        .AuthorityScope(_, _, _, body, _) -> jet_format_body(&context, body)
+        .ContextBlock(_, body, _) -> jet_format_body(&context, body)
+        .Live(body, _) -> jet_format_body(&context, body)
+        .AssumeDet(_, _, body, _) -> jet_format_body(&context, body)
+        .Transact(_, _, body, _, _) -> jet_format_body(&context, body)
+        .TaskGroup(name, _, limit, body, _) -> {
+            jet_format_write(&context, "task.group {name}")
+            if limit == .Val(value) {
+                jet_format_write(&context, "(limit: ")
+                jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+                jet_format_write(&context, ")")
+            }
+            jet_format_write(&context, " {{")
+            jet_format_body_expanded(&context, body)
+        }
+        .Layout(name, _, body, span) -> jet_format_layout(&context, name, body, span)
+        .ComptimeBlock(body, template, _) -> {
+            if template && body.len() == 1 {
+                jet_format_write(&context, "prep ")
+                jet_format_stmt(&context, body[0])
+            } else {
+                jet_format_write(&context, "prep {{")
+                jet_format_body_expanded(&context, body)
+            }
+        }
+        .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
+            jet_format_write(&context, "prep if ")
+            jet_format_cond(&context, cond)
+            jet_format_write(&context, " {{")
+            jet_format_body_expanded(&context, then_body)
+            if else_body == .Val(body) {
+                jet_format_write(&context, " else {{")
+                jet_format_body_expanded(&context, body)
+            }
+        }
+        .ComptimeSwitch(subject, arms, fallback, _) -> {
+            jet_format_write(&context, "prep if ")
+            jet_format_dispatch(&context, subject, arms, fallback, true)
+        }
+        .ScopeMember(name, _, args, args_span, body, dsl, _, _) -> {
+            jet_format_write(&context, if dsl || name == "Arithmetic" -> "#{name}" else -> ".{name}")
+            if args.len() > 0 {
+                jet_format_write(&context, "(")
+                source :: if args_span == {
+                    .Val(span) -> jet_format_source_list_span_after(&context, span.start, JetFormatterSourceDelimiter.Paren)
+                    .None -> None
+                }
+                multiline :: jet_format_comma_begin(&context, args.len(), source)
+                loop (index, expr) in args {
+                    span :: expr_span(expr)
+                    jet_format_comma_before(&context, index, span, multiline)
+                    jet_format_expr(&context, expr, JetFormatterPrec.OrFallback)
+                    jet_format_comma_after(&context, span, multiline)
+                }
+                jet_format_comma_end(&context, source, multiline)
+                jet_format_write(&context, ")")
+            }
+            jet_format_write(&context, " {{")
+            jet_format_body_expanded(&context, body)
+        }
+    }
+}
+fn jet_format_loop_label(context: &JetFormatterContext, label: NamedSpan?) Never! {
+    if label == .Val(value) -> jet_format_write(&context, "{value.name} :: ")
+}
+fn jet_format_for_clause(context: &JetFormatterContext, kind: ForKind, body: [Stmt], arrow: Bool, bindingless: Bool) Never! {
+    first_start := 0
+    width := 0
+    if kind == {
+        .Range(start, end, step, exclusive) -> {
+            first_start = expr_span(start).start
+            width = expr_span(start).end - first_start + expr_span(end).end - expr_span(end).start + if exclusive -> 6 else -> 5
+            if step == .Val(value) -> width += expr_span(value).end - expr_span(value).start + 2
+        }
+        .In(collection, step) -> {
+            first_start = expr_span(collection).start
+            width = expr_span(collection).end - first_start + 3
+            if step == .Val(value) -> width += expr_span(value).end - expr_span(value).start + 2
+        }
+    }
+    wrap :: context.col + width > 100
+    if bindingless -> jet_format_maybe_wrap_loop_clause(&context, wrap)
+    else -> jet_format_loop_source_separator(&context, first_start, wrap)
+    header_end := 0
+    if kind == {
+        .Range(start, end, step, exclusive) -> {
+            jet_format_expr(&context, start, JetFormatterPrec.OrFallback)
+            jet_format_write(&context, if exclusive -> "..<" else -> "..")
+            jet_format_expr(&context, end, JetFormatterPrec.OrFallback)
+            header_end = expr_span(end).end
+            if step == {
+                .Val(value) -> {
+                    jet_format_loop_clause_separator(&context, expr_span(value).start, wrap)
+                    jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+                    header_end = expr_span(value).end
+                }
+                .None -> if wrap -> jet_format_write(&context, ",")
+            }
+        }
+        .In(collection, step) -> {
+            jet_format_expr(&context, collection, JetFormatterPrec.OrFallback)
+            header_end = expr_span(collection).end
+            if step == {
+                .Val(value) -> {
+                    jet_format_loop_clause_separator(&context, expr_span(value).start, wrap)
+                    jet_format_expr(&context, value, JetFormatterPrec.OrFallback)
+                    header_end = expr_span(value).end
+                }
+                .None -> if wrap -> jet_format_write(&context, ",")
+            }
+        }
+    }
+    jet_format_effect_loop_body(&context, body, header_end, arrow)
+}
+
+// Rust Statements.rs:943-1034: one source-ordered renderer for both tables.
+fn jet_format_dispatch(context: &JetFormatterContext, subject: Expr, arms: [SwitchArm], fallback: [Stmt]?, force: Bool) Never! {
+    op :: jet_format_dispatch_op_from_source(&context, subject) ?? jet_format_dispatch_op(&context, subject, arms)
+    jet_format_expr(&context, subject, JetFormatterPrec.OrFallback)
+    spell :: jet_format_bin_spell(op)
+    jet_format_write(&context, " {spell} {{")
+    jet_format_newline(&context)
+    context.indent += 1
+    loop index in 0..<arms.len() {
+        arm :: arms[index]
+        if index > 0 {
+            jet_format_newline(&context)
+            jet_format_emit_leading_statement_gap(&context, arms[index - 1].span.end, arm.span.start)
+        } else { jet_format_emit_leading(&context, arm.span.start) }
+        next_dot :: index + 1 < arms.len() && jet_format_arm_head_starts_with_dot(arms[index + 1].cond)
+        jet_format_switch_arm(&context, subject, op, arm, force || next_dot)
+        jet_format_emit_trailing(&context, arm.span.end)
+    }
+    jet_format_dispatch_fallback(&context, arms, fallback, force)
+    context.indent -= 1
+    jet_format_end_block(&context)
+}
+fn jet_format_guard_dispatch(context: &JetFormatterContext, arms: [SwitchArm], fallback: [Stmt]?) Never! {
+    jet_format_write(&context, "{{")
+    jet_format_newline(&context)
+    context.indent += 1
+    loop index in 0..<arms.len() {
+        arm :: arms[index]
+        if index > 0 {
+            jet_format_newline(&context)
+            jet_format_emit_leading_statement_gap(&context, arms[index - 1].span.end, arm.span.start)
+        } else { jet_format_emit_leading(&context, arm.span.start) }
+        if !jet_format_readiness_head(&context, arm.cond) -> jet_format_expr(&context, arm.cond, JetFormatterPrec.OrFallback)
+        jet_format_write(&context, " ->")
+        jet_format_arm_body(&context, arm.body, false)
+        jet_format_emit_trailing(&context, arm.span.end)
+    }
+    jet_format_dispatch_fallback(&context, arms, fallback, false)
+    context.indent -= 1
+    jet_format_end_block(&context)
+}
+fn jet_format_dispatch_else_start(context: &JetFormatterContext, after: Int) -> Int? Never! {
+    loop token in context.source_toks {
+        if token.span.start >= after && token.kind == TOKEN_KW_ELSE -> return Val(token.span.start)
+    }
+    None
+}
+fn jet_format_dispatch_fallback(context: &JetFormatterContext, arms: [SwitchArm], fallback: [Stmt]?, force: Bool) Never! {
+    if fallback == .Val(body) {
+        if arms.len() > 0 {
+            jet_format_newline(&context)
+            last :: arms[arms.len() - 1]
+            if jet_format_dispatch_else_start(&context, last.span.end) == .Val(start) -> jet_format_emit_leading_statement_gap(&context, last.span.end, start)
+        } else {
+            if jet_format_dispatch_else_start(&context, 0) == .Val(start) -> jet_format_emit_leading(&context, start)
+        }
+        jet_format_write(&context, "else ->")
+        jet_format_arm_body(&context, body, force)
+    }
+}
+fn jet_format_switch_arm(context: &JetFormatterContext, subject: Expr, op: BinOp, arm: SwitchArm, force: Bool) Never! {
+    jet_format_switch_cond(&context, subject, op, arm.cond, JetFormatterPrec.OrFallback)
+    jet_format_write(&context, " ->")
+    jet_format_arm_body(&context, arm.body, force)
+}
+
+// Rust Statements.rs:1036-1056 + AST/statements.rs::readiness_head.
+fn jet_format_readiness_head(context: &JetFormatterContext, cond: Expr) -> Bool Never! {
+    if cond == .TupleLit(fields, _, _) {
+        if fields.len() == 1 {
+            field :: fields[0]
+            if field.name == parser_select_after_field() -> jet_format_write(&context, "after ")
+            else -> jet_format_write(&context, "{field.name}, ")
+            jet_format_expr(&context, field.value, JetFormatterPrec.OrFallback)
+            return true
+        }
+    }
+    false
+}
+fn jet_format_switch_was_classic_if(context: &JetFormatterContext, arms: [SwitchArm], span: Span) -> Bool Never! {
+    if arms.len() == 0 -> return false
+    end :: expr_span(arms[0].cond).start
+    // AST::uses_classic_if_spelling skips line/nested block comments. Lexer
+    // already owns that trivia classification, so inspect significant tokens.
+    if span.end > end -> return false
+    loop token in context.source_toks {
+        if token.span.start >= span.end && token.span.start < end && token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> return token.kind != TOKEN_LBRACE
+    }
+    true
+}
+fn jet_format_authored_braced_loop_exit(context: &JetFormatterContext, body: [Stmt]) -> Bool Never! {
+    body.len() == 1 && jet_format_is_loop_break_stmt(body[0]) && jet_format_single_stmt_braces(&context, body[0]) != None
+}
+fn jet_format_emit_classic_if_condition_trivia(context: &JetFormatterContext, start: Int) Never! {
+    loop context.comment_i < context.comments.len() && context.comments[context.comment_i].span.start < start {
+        line_comment :: context.comments[context.comment_i].text.starts_with("//")
+        index :: ~context.comment_i
+        jet_format_write_comment_at(&context, index)
+        context.comment_i += 1
+        if line_comment -> jet_format_newline(&context) else -> jet_format_write(&context, " ")
+    }
+}
+fn jet_format_classic_switch(context: &JetFormatterContext, arms: [SwitchArm], fallback: [Stmt]?) Never! {
+    if arms.len() == 0 -> return
+    loop index in 0..<arms.len() {
+        arm :: arms[index]
+        if index > 0 -> jet_format_write(&context, " else if ")
+        jet_format_emit_classic_if_condition_trivia(&context, expr_span(arm.cond).start)
+        jet_format_cond(&context, arm.cond)
+        paren :: if arm.cond == {
+            .Paren(_, _) -> true
+            else -> false
+        }
+        braces :: paren || jet_format_authored_braced_loop_exit(&context, arm.body)
+        jet_format_control_body_after_header(&context, arm.body, braces)
+    }
+    if fallback == .Val(body) {
+        then_braces :: jet_format_output(&context).trim().ends_with("}}")
+        jet_format_write(&context, " else")
+        braces :: then_braces || jet_format_authored_braced_loop_exit(&context, body)
+        jet_format_control_body_after_header(&context, body, braces)
+    }
+}
+
+// Rust Statements.rs:1267-1471: distributed heads preserve predicate/grouping.
+fn jet_format_arm_head_starts_with_dot(cond: Expr) -> Bool Never! {
+    if cond == {
+        .PatternTest(_, pattern, _) -> if pattern == {
+            .Variant(_, _, _, _) -> true
+            else -> false
+        }
+        .Binary(_, left, _, _) -> jet_format_arm_head_starts_with_dot(left)
+        else -> false
+    }
+}
+fn jet_format_same_subject(context: &JetFormatterContext, value: Expr, subject: Expr) -> Bool Never! {
+    if value == .Ident(name, _) {
+        if name == "it" -> return true
+    }
+    // Correct the frozen reference's anchor-end truncation: differing call
+    // arguments must never become equal. EXPR owns the full source extent.
+    value_end :: jet_format_expr_source_end(&context, value)
+    left :: jet_format_source_slice(&context, jet_format_expr_start(value), value_end) ?? return false
+    subject_end :: jet_format_expr_source_end(&context, subject)
+    right :: jet_format_source_slice(&context, jet_format_expr_start(subject), subject_end) ?? return false
+    left.len() > 0 && left == right
+}
+fn jet_format_dispatch_op_from_source(context: &JetFormatterContext, subject: Expr) -> BinOp? Never! {
+    start :: jet_format_expr_source_end(&context, subject)
+    end :: context.source_bytes.len()
+    rest :: jet_format_source_slice(&context, start, end) ?? return None
+    text :: rest.trim()
+    if text.starts_with("==") -> return Val(BinOp.Eq)
+    if text.starts_with("!=") -> return Val(BinOp.Ne)
+    if text.starts_with("<=") -> return Val(BinOp.Le)
+    if text.starts_with(">=") -> return Val(BinOp.Ge)
+    if text.starts_with("<") -> return Val(BinOp.Lt)
+    if text.starts_with(">") -> return Val(BinOp.Gt)
+    None
+}
+fn jet_format_dispatch_op(context: &JetFormatterContext, subject: Expr, arms: [SwitchArm]) -> BinOp Never! {
+    found := BinOp?{None}
+    loop arm in arms -> jet_format_collect_dispatch_ops(&context, subject, arm.cond, &found)
+    found ?? BinOp.Eq
+}
+fn jet_format_is_comparison(op: BinOp) -> Bool Never! {
+    op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge || op == BinOp.Compare
+}
+fn jet_format_collect_dispatch_ops(context: &JetFormatterContext, subject: Expr, expr: Expr, found: &BinOp?) Never! {
+    if expr == .Binary(op, left, right, _) {
+        if jet_format_is_comparison(op) && jet_format_same_subject(&context, left, subject) {
+            if found == None -> found = Val(op)
+        } else {
+            if op == BinOp.And || op == BinOp.Or {
+                jet_format_collect_dispatch_ops(&context, subject, left, &found)
+                jet_format_collect_dispatch_ops(&context, subject, right, &found)
+            }
+        }
+    }
+}
+fn jet_format_is_subject_alt_leaf(context: &JetFormatterContext, subject: Expr, op: BinOp, expr: Expr) -> Bool Never! {
+    if expr == .Binary(operator, left, right, _) {
+        if operator == op -> return jet_format_same_subject(&context, left, subject)
+        if operator == BinOp.Or -> return jet_format_is_subject_alt_leaf(&context, subject, op, left) && jet_format_is_subject_alt_leaf(&context, subject, op, right)
+    }
+    false
+}
+fn jet_format_is_all_subject_alts(context: &JetFormatterContext, subject: Expr, op: BinOp, expr: Expr) -> Bool Never! {
+    if expr == .Binary(operator, left, right, _) && operator == BinOp.Or -> return jet_format_is_subject_alt_leaf(&context, subject, op, left) && jet_format_is_subject_alt_leaf(&context, subject, op, right)
+    false
+}
+fn jet_format_arm_alternates(context: &JetFormatterContext, subject: Expr, op: BinOp, expr: Expr) Never! {
+    if expr == .Binary(operator, left, right, _) {
+        if operator == BinOp.Or {
+            jet_format_arm_alternates(&context, subject, op, left)
+            jet_format_write(&context, " | ")
+            jet_format_arm_alternates(&context, subject, op, right)
+        } else {
+            if operator != op -> panic("is_all_subject_alts should guard this path")
+            jet_format_expr(&context, right, JetFormatterPrec.Cmp)
+        }
+    } else {
+        panic("is_all_subject_alts should guard this path")
+    }
+}
+fn jet_format_switch_cond_slot(op: BinOp, child: Expr, base: JetFormatterPrec) -> JetFormatterPrec Never! {
+    if op == BinOp.Or {
+        if child == .Binary(operator, _, _, _) && operator == BinOp.And -> return jet_format_prec_add_rhs(JetFormatterPrec.And)
+    }
+    ~base
+}
+fn jet_format_switch_cond(context: &JetFormatterContext, subject: Expr, op: BinOp, cond: Expr, prec: JetFormatterPrec) Never! {
+    if jet_format_is_all_subject_alts(&context, subject, op, cond) {
+        parens :: jet_format_prec_rank(prec) > jet_format_prec_rank(JetFormatterPrec.OrFallback)
+        if parens -> jet_format_write(&context, "(")
+        jet_format_arm_alternates(&context, subject, op, cond)
+        if parens -> jet_format_write(&context, ")")
+        return
+    }
+    if cond == {
+        .Binary(operator, left, right, _) -> {
+            if operator == BinOp.And || operator == BinOp.Or {
+                own :: jet_format_prec_of_bin(operator)
+                parens :: jet_format_prec_rank(prec) > jet_format_prec_rank(own)
+                if parens -> jet_format_write(&context, "(")
+                jet_format_switch_cond(&context, subject, op, left, jet_format_switch_cond_slot(operator, left, own))
+                spell :: jet_format_bin_spell(operator)
+                jet_format_write(&context, " {spell} ")
+                jet_format_switch_cond(&context, subject, op, right, jet_format_switch_cond_slot(operator, right, jet_format_prec_add_rhs(own)))
+                if parens -> jet_format_write(&context, ")")
+            } else {
+                if operator == op && jet_format_same_subject(&context, left, subject) -> jet_format_expr(&context, right, JetFormatterPrec.Cmp)
+                else -> jet_format_expr(&context, cond, prec)
+            }
+        }
+        .PatternTest(_, pattern, _) -> jet_format_pattern(&context, pattern)
+        else -> jet_format_expr(&context, cond, prec)
+    }
+}
+
+// Rust Statements.rs:716-749,1644-1759: inverse parser layout-anchor lowering.
+// Project only the reference's selected expression paths while rendering;
+// authored statement and expression graphs remain borrowed and unchanged.
+fn jet_format_layout(context: &JetFormatterContext, name: String, body: [Stmt], span: Span) Never! {
+    jet_format_write(&context, "{name} :: Layout{{")
+    source :: jet_format_source_list_span_after(&context, span.start, JetFormatterSourceDelimiter.Brace)
+    multiline :: if source == {
+        .Val(list) -> jet_format_source_span_multiline(&context, list.span)
+        .None -> false
+    }
+    if !multiline && body.len() > 0 -> jet_format_write(&context, " ")
+    saved_name :: ^context.layout_name
+    saved_resugar :: ~context.layout_resugar
+    context.layout_name = Val(name)
+    list_multiline :: jet_format_comma_begin(&context, body.len(), source)
+    loop (index, stmt) in body {
+        item_span :: Span{start: jet_format_stmt_start(stmt), end: jet_format_stmt_end(stmt)}
+        jet_format_comma_before(&context, index, item_span, list_multiline)
+        context.layout_resugar = if stmt == {
+            .Expr(_) | .DeferClose(_, _) | .Val(_) -> true
+            else -> false
+        }
+        jet_format_stmt(&context, stmt)
+        jet_format_comma_after(&context, item_span, list_multiline)
+    }
+    jet_format_comma_end(&context, source, list_multiline)
+    context.layout_name = saved_name
+    context.layout_resugar = saved_resugar
+    if multiline && body.len() > 0 -> jet_format_write(&context, "}}") else -> jet_format_end_block(&context)
+}
+fn jet_format_single_str_lit(expr: Expr) -> String? Never! {
+    if expr == .Str(parts, _) {
+        if parts.len() == 1 {
+            if parts[0] == .Lit(text) -> return Val(text)
+        }
+    }
+    None
+}
+fn jet_format_layout_anchor(context: &JetFormatterContext, expr: Expr) -> Bool Never! {
+    if !context.layout_resugar -> return false
+    if expr == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+        if (method == "h" || method == "v") && args.len() == 2 {
+            if receiver == .Ident(owner, _) {
+                matches :: context.layout_name.map(name -> name == owner) ?? false
+                if matches {
+                    if jet_format_single_str_lit(args[0].expr) == .Val(box_name) {
+                        if jet_format_single_str_lit(args[1].expr) == .Val(anchor) {
+                            own_box :: context.layout_name.map(name -> box_name == name) ?? false
+                            shown :: if own_box -> "self" else -> box_name
+                            jet_format_write(&context, shown)
+                            jet_format_write(&context, ".")
+                            jet_format_write(&context, anchor)
+                            return true
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+// Rust Statements.rs:644-649 uses usize::saturating_sub for counted headers.
+fn jet_format_stmt_width(end: Int, start: Int) -> Int Never! {
+    if end >= start -> end - start else -> 0
+}

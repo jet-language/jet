@@ -1,0 +1,409 @@
+// Rust Facts.rs::TargetDossier and TargetMachine.rs/Layout.rs derived Debug.
+// Sole compact typed target renderer for checking and native image comparison.
+// The same borrowed traversal streams to a byte sink or a hash-only sink.
+pub fn build_snapshot_write_target_dossier<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRTargetDossier) Never! {
+    sink.write(&out, "TargetDossier {{ machine: ")
+    if value.machine == {
+        .None -> sink.write(&out, "None")
+        .Val(machine) -> {
+            sink.write(&out, "Some(")
+            build_snapshot_write_target_machine<S, W>(sink, &out, machine)
+            sink.write(&out, ")")
+        }
+    }
+    sink.write(&out, ", layer: ")
+    canonical_debug_write_layer<S, W>(sink, &out, value.layer)
+    sink.write(&out, ", provider_identity: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.provider_identity)
+    sink.write(&out, ", closure_identity: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.closure_identity)
+    sink.write(&out, ", linker_identity: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.linker_identity)
+    sink.write(&out, ", tier_identity: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.tier_identity)
+    sink.write(&out, ", compiler_identity: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.compiler_identity)
+    sink.write(&out, ", environment_identity: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.environment_identity)
+    sink.write(&out, ", dependency_identity: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.dependency_identity)
+    sink.write(&out, " }}")
+}
+fn target_debug_optional_int<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: Int?) Never! {
+    if value == {
+        .None -> sink.write(&out, "None")
+        .Val(number) -> sink.write(&out, "Some({number})")
+    }
+}
+fn target_debug_strings<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, values: [String]) Never! {
+    sink.write(&out, "[")
+    loop (index, value) in values {
+        if index != 0 -> sink.write(&out, ", ")
+        canonical_debug_write_string<S, W>(sink, &out, value)
+    }
+    sink.write(&out, "]")
+}
+fn target_debug_size<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRByteSize) Never! {
+    sink.write(&out, "ByteSize {{ bytes: {value.bytes} }}")
+}
+fn target_debug_provider_abi<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRProviderABI) Never! {
+    sink.write(&out, "ProviderAbi {{ calling_convention: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.calling_convention)
+    sink.write(&out, ", version: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.version)
+    sink.write(&out, " }}")
+}
+fn target_debug_provider<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRProviderContract) Never! {
+    sink.write(&out, "ProviderContract {{ provider: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.provider)
+    sink.write(&out, ", sha256: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.sha256)
+    sink.write(&out, ", provenance: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.provenance)
+    sink.write(&out, ", abi: ")
+    target_debug_provider_abi<S, W>(sink, &out, value.abi)
+    sink.write(&out, ", limits: ProviderLimits {{ max_request_bytes: ")
+    target_debug_optional_int<S, W>(sink, &out, value.limits.max_request_bytes)
+    sink.write(&out, ", max_response_bytes: ")
+    target_debug_optional_int<S, W>(sink, &out, value.limits.max_response_bytes)
+    sink.write(&out, ", max_calls: ")
+    target_debug_optional_int<S, W>(sink, &out, value.limits.max_calls)
+    sink.write(&out, " }} }}")
+}
+fn target_debug_optional_provider<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRProviderContract?) Never! {
+    if value == {
+        .None -> sink.write(&out, "None")
+        .Val(provider) -> {
+            sink.write(&out, "Some(")
+            target_debug_provider<S, W>(sink, &out, provider)
+            sink.write(&out, ")")
+        }
+    }
+}
+fn target_debug_provider_variant<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, name: String, provider: MIRProviderContract) Never! {
+    sink.write(&out, "{name} {{ provider: ")
+    target_debug_provider<S, W>(sink, &out, provider)
+    sink.write(&out, " }}")
+}
+fn target_debug_layout_support<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRLayoutSupportFacts) Never! {
+    sink.write(&out, "LayoutSupportFacts {{ proven: {value.proven:Debug}, alignments: [")
+    loop (index, alignment) in value.alignments {
+        if index != 0 -> sink.write(&out, ", ")
+        sink.write(&out, "{alignment}")
+    }
+    sink.write(&out, "], max_size: ")
+    target_debug_optional_int<S, W>(sink, &out, value.max_size)
+    sink.write(&out, ", max_address: ")
+    target_debug_optional_int<S, W>(sink, &out, value.max_address)
+    sink.write(&out, ", abi: ")
+    canonical_debug_write_optional_text<S, W>(sink, &out, value.abi)
+    sink.write(&out, ", provenance: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.provenance)
+    sink.write(&out, " }}")
+}
+fn target_debug_layout<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRLayoutCapabilityFacts) Never! {
+    sink.write(&out, "LayoutCapabilityFacts {{ fact_version: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.fact_version)
+    sink.write(&out, ", target_profile: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.target_profile)
+    sink.write(&out, ", execution_modes: ")
+    target_debug_strings<S, W>(sink, &out, value.execution_modes)
+    sink.write(&out, ", backend: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.backend)
+    sink.write(&out, ", toolchain: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.toolchain)
+    sink.write(&out, ", linker: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.linker)
+    sink.write(&out, ", allocator_provider: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.allocator_provider)
+    sink.write(&out, ", type_representation: ")
+    target_debug_layout_support<S, W>(sink, &out, value.type_representation)
+    sink.write(&out, ", stack_placement: ")
+    target_debug_layout_support<S, W>(sink, &out, value.stack_placement)
+    sink.write(&out, ", global_placement: ")
+    target_debug_layout_support<S, W>(sink, &out, value.global_placement)
+    sink.write(&out, ", heap_allocator: ")
+    target_debug_layout_support<S, W>(sink, &out, value.heap_allocator)
+    sink.write(&out, ", foreign_by_value_abi: ")
+    target_debug_layout_support<S, W>(sink, &out, value.foreign_by_value_abi)
+    sink.write(&out, " }}")
+}
+fn target_debug_linker<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRLinkerInput) Never! {
+    if value == {
+        .HostedDefault -> sink.write(&out, "HostedDefault")
+        .Unspecified -> sink.write(&out, "Unspecified")
+        .Generated -> sink.write(&out, "Generated")
+        .File(path, sha256) -> {
+            sink.write(&out, "File {{ path: ")
+            canonical_debug_write_string<S, W>(sink, &out, path)
+            sink.write(&out, ", sha256: ")
+            canonical_debug_write_string<S, W>(sink, &out, sha256)
+            sink.write(&out, " }}")
+        }
+    }
+}
+fn target_debug_allocator<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRAllocatorPolicy) Never! {
+    if value == {
+        .HostedDefault -> sink.write(&out, "HostedDefault")
+        .Unspecified -> sink.write(&out, "Unspecified")
+        .NoAllocator -> sink.write(&out, "None")
+        .Provider(provider) -> target_debug_provider_variant<S, W>(sink, &out, "Provider", provider)
+        .Fixed(region, size) -> {
+            sink.write(&out, "Fixed {{ region: ")
+            canonical_debug_write_string<S, W>(sink, &out, region)
+            sink.write(&out, ", size: ")
+            target_debug_size<S, W>(sink, &out, size)
+            sink.write(&out, " }}")
+        }
+        .Counting(cap) -> {
+            sink.write(&out, "Counting {{ cap: ")
+            if cap == {
+                .None -> sink.write(&out, "None")
+                .Val(size) -> {
+                    sink.write(&out, "Some(")
+                    target_debug_size<S, W>(sink, &out, size)
+                    sink.write(&out, ")")
+                }
+            }
+            sink.write(&out, " }}")
+        }
+    }
+}
+fn target_debug_panic<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRPanicPolicy) Never! {
+    if value == {
+        .HostedDefault -> sink.write(&out, "HostedDefault")
+        .Unspecified -> sink.write(&out, "Unspecified")
+        .Abort -> sink.write(&out, "Abort")
+        .Report(provider) -> target_debug_provider_variant<S, W>(sink, &out, "Report", provider)
+    }
+}
+fn target_debug_mmio<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRMMIOPolicy) Never! {
+    if value == {
+        .HostedDefault -> sink.write(&out, "HostedDefault")
+        .Unspecified -> sink.write(&out, "Unspecified")
+        .NoMMIO -> sink.write(&out, "None")
+        .Provider(provider) -> target_debug_provider_variant<S, W>(sink, &out, "Provider", provider)
+    }
+}
+fn target_debug_clock<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRClockPolicy) Never! {
+    if value == {
+        .HostedDefault -> sink.write(&out, "HostedDefault")
+        .Unspecified -> sink.write(&out, "Unspecified")
+        .NoClock -> sink.write(&out, "None")
+        .Provider(provider) -> target_debug_provider_variant<S, W>(sink, &out, "Provider", provider)
+    }
+}
+fn target_debug_entropy<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIREntropyPolicy) Never! {
+    if value == {
+        .HostedDefault -> sink.write(&out, "HostedDefault")
+        .Unspecified -> sink.write(&out, "Unspecified")
+        .NoEntropy -> sink.write(&out, "None")
+        .Provider(provider) -> target_debug_provider_variant<S, W>(sink, &out, "Provider", provider)
+    }
+}
+fn target_debug_scheduler<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRSchedulerPolicy) Never! {
+    if value == {
+        .HostedDefault -> sink.write(&out, "HostedDefault")
+        .Unspecified -> sink.write(&out, "Unspecified")
+        .NoScheduler -> sink.write(&out, "None")
+        .Cooperative(provider) -> target_debug_provider_variant<S, W>(sink, &out, "Cooperative", provider)
+        .InterruptDriven(provider) -> target_debug_provider_variant<S, W>(sink, &out, "InterruptDriven", provider)
+        .BoardRuntime(provider) -> target_debug_provider_variant<S, W>(sink, &out, "BoardRuntime", provider)
+    }
+}
+fn target_debug_byte_sink<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRByteSinkPolicy) Never! {
+    if value == {
+        .HostedDefault -> sink.write(&out, "HostedDefault")
+        .Unspecified -> sink.write(&out, "Unspecified")
+        .NoByteSink -> sink.write(&out, "None")
+        .Provider(read, write, report) -> {
+            sink.write(&out, "Provider {{ read: ")
+            target_debug_optional_provider<S, W>(sink, &out, read)
+            sink.write(&out, ", write: ")
+            target_debug_optional_provider<S, W>(sink, &out, write)
+            sink.write(&out, ", report: ")
+            target_debug_optional_provider<S, W>(sink, &out, report)
+            sink.write(&out, " }}")
+        }
+    }
+}
+fn target_debug_startup<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRStartupPolicy) Never! {
+    if value == {
+        .HostedDefault -> sink.write(&out, "HostedDefault")
+        .Unspecified -> sink.write(&out, "Unspecified")
+        .Generated(provider) -> target_debug_provider_variant<S, W>(sink, &out, "Generated", provider)
+    }
+}
+fn target_debug_width<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRRegisterWidth) Never! {
+    if value == {
+        .U8 -> sink.write(&out, "U8")
+        .U16 -> sink.write(&out, "U16")
+        .U32 -> sink.write(&out, "U32")
+        .U64 -> sink.write(&out, "U64")
+    }
+}
+fn target_debug_hardware<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRTargetHardwareFacts) Never! {
+    sink.write(&out, "TargetHardwareFacts {{ svd: ")
+    if value.svd == {
+        .None -> sink.write(&out, "None")
+        .Val(svd) -> {
+            sink.write(&out, "Some(SvdProvenance {{ source: ")
+            canonical_debug_write_string<S, W>(sink, &out, svd.source)
+            sink.write(&out, ", sha256: ")
+            canonical_debug_write_string<S, W>(sink, &out, svd.sha256)
+            sink.write(&out, " }})")
+        }
+    }
+    sink.write(&out, ", register_blocks: [")
+    loop (index, block) in value.register_blocks {
+        if index != 0 -> sink.write(&out, ", ")
+        sink.write(&out, "TargetRegisterBlockFact {{ name: ")
+        canonical_debug_write_string<S, W>(sink, &out, block.name)
+        sink.write(&out, ", base: {block.base}, size: ")
+        target_debug_size<S, W>(sink, &out, block.size)
+        sink.write(&out, ", registers: [")
+        loop (register_index, register) in block.registers {
+            if register_index != 0 -> sink.write(&out, ", ")
+            sink.write(&out, "TargetRegisterFact {{ name: ")
+            canonical_debug_write_string<S, W>(sink, &out, register.name)
+            sink.write(&out, ", offset: {register.offset}, width: ")
+            target_debug_width<S, W>(sink, &out, register.width)
+            sink.write(&out, ", access: ")
+            if register.access == {
+                .ReadOnly -> sink.write(&out, "ReadOnly")
+                .WriteOnly -> sink.write(&out, "WriteOnly")
+                .ReadWrite -> sink.write(&out, "ReadWrite")
+            }
+            sink.write(&out, ", volatile: {register.volatile:Debug} }}")
+        }
+        sink.write(&out, "] }}")
+    }
+    sink.write(&out, "], interrupts: [")
+    loop (index, interrupt) in value.interrupts {
+        if index != 0 -> sink.write(&out, ", ")
+        sink.write(&out, "TargetInterruptFact {{ name: ")
+        canonical_debug_write_string<S, W>(sink, &out, interrupt.name)
+        sink.write(&out, ", vector: {interrupt.vector}, forbidden_effects: {{")
+        // Native EffectSet is a BTreeSet; sort/deduplicate borrowed indexes.
+        order :: package_key_byte_order(interrupt.forbidden_effects)
+        previous := -1
+        loop effect_index in order {
+            if previous >= 0 && interrupt.forbidden_effects[effect_index] == interrupt.forbidden_effects[previous] -> next
+            if previous >= 0 -> sink.write(&out, ", ")
+            canonical_debug_write_string<S, W>(sink, &out, interrupt.forbidden_effects[effect_index])
+            previous = effect_index
+        }
+        sink.write(&out, "}}, bounded: {interrupt.bounded:Debug} }}")
+    }
+    sink.write(&out, "], dma_channels: [")
+    loop (index, channel) in value.dma_channels {
+        if index != 0 -> sink.write(&out, ", ")
+        sink.write(&out, "TargetDmaChannelFact {{ name: ")
+        canonical_debug_write_string<S, W>(sink, &out, channel.name)
+        sink.write(&out, ", channel: {channel.channel}, transfer_width: ")
+        target_debug_width<S, W>(sink, &out, channel.transfer_width)
+        sink.write(&out, ", ownership: ")
+        if channel.ownership == {
+            .Borrowed -> sink.write(&out, "Borrowed")
+            .Transfer -> sink.write(&out, "Transfer")
+        }
+        sink.write(&out, ", max_transfer_bytes: ")
+        target_debug_optional_int<S, W>(sink, &out, channel.max_transfer_bytes)
+        sink.write(&out, " }}")
+    }
+    sink.write(&out, "] }}")
+}
+fn target_debug_programmer<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRTargetProgrammerFacts) Never! {
+    sink.write(&out, "TargetProgrammerFacts {{ adapter: ")
+    if value.adapter == {
+        .Emulator -> sink.write(&out, "Emulator")
+        .ProbeRs -> sink.write(&out, "ProbeRs")
+        .OpenOcd -> sink.write(&out, "OpenOcd")
+    }
+    sink.write(&out, ", executable: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.executable)
+    sink.write(&out, ", chip: ")
+    canonical_debug_write_optional_text<S, W>(sink, &out, value.chip)
+    sink.write(&out, ", interface: ")
+    canonical_debug_write_optional_text<S, W>(sink, &out, value.interface)
+    sink.write(&out, ", config: ")
+    target_debug_strings<S, W>(sink, &out, value.config)
+    sink.write(&out, ", speed_khz: ")
+    target_debug_optional_int<S, W>(sink, &out, value.speed_khz)
+    sink.write(&out, ", reset: {value.reset:Debug}, machine: ")
+    canonical_debug_write_optional_text<S, W>(sink, &out, value.machine)
+    sink.write(&out, ", cpu: ")
+    canonical_debug_write_optional_text<S, W>(sink, &out, value.cpu)
+    sink.write(&out, " }}")
+}
+pub fn build_snapshot_write_target_machine<S, W: CanonicalDebugSink<S>>(sink: W, out: &S, value: MIRTargetMachine) Never! {
+    sink.write(&out, "TargetMachine {{ name: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.name)
+    sink.write(&out, ", triple: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.triple)
+    sink.write(&out, ", layout: ")
+    target_debug_layout<S, W>(sink, &out, value.layout)
+    sink.write(&out, ", no_os: {value.no_os:Debug}, memory: [")
+    loop (index, region) in value.memory {
+        if index != 0 -> sink.write(&out, ", ")
+        sink.write(&out, "MemoryRegion {{ name: ")
+        canonical_debug_write_string<S, W>(sink, &out, region.name)
+        sink.write(&out, ", origin: {region.origin}, size: ")
+        target_debug_size<S, W>(sink, &out, region.size)
+        sink.write(&out, ", kind: ")
+        if region.kind == {
+            .Flash -> sink.write(&out, "Flash")
+            .Ram -> sink.write(&out, "Ram")
+            .MMIO -> sink.write(&out, "Mmio")
+            .Reserved -> sink.write(&out, "Reserved")
+        }
+        sink.write(&out, ", access: ")
+        if region.access == {
+            .R -> sink.write(&out, "R")
+            .Rw -> sink.write(&out, "Rw")
+            .Rx -> sink.write(&out, "Rx")
+            .Rwx -> sink.write(&out, "Rwx")
+        }
+        sink.write(&out, " }}")
+    }
+    sink.write(&out, "], linker: ")
+    target_debug_linker<S, W>(sink, &out, value.linker)
+    sink.write(&out, ", allocator: ")
+    target_debug_allocator<S, W>(sink, &out, value.allocator)
+    sink.write(&out, ", panic: ")
+    target_debug_panic<S, W>(sink, &out, value.panic)
+    sink.write(&out, ", mmio: ")
+    target_debug_mmio<S, W>(sink, &out, value.mmio)
+    sink.write(&out, ", wall_clock: ")
+    target_debug_clock<S, W>(sink, &out, value.wall_clock)
+    sink.write(&out, ", monotonic_clock: ")
+    target_debug_clock<S, W>(sink, &out, value.monotonic_clock)
+    sink.write(&out, ", zone_data: ")
+    target_debug_clock<S, W>(sink, &out, value.zone_data)
+    sink.write(&out, ", sleep: ")
+    target_debug_clock<S, W>(sink, &out, value.sleep)
+    sink.write(&out, ", entropy: ")
+    target_debug_entropy<S, W>(sink, &out, value.entropy)
+    sink.write(&out, ", scheduler: ")
+    target_debug_scheduler<S, W>(sink, &out, value.scheduler)
+    sink.write(&out, ", byte_sink: ")
+    target_debug_byte_sink<S, W>(sink, &out, value.byte_sink)
+    sink.write(&out, ", startup: ")
+    target_debug_startup<S, W>(sink, &out, value.startup)
+    sink.write(&out, ", startup_entry: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.startup_entry)
+    sink.write(&out, ", startup_vectors: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.startup_vectors)
+    sink.write(&out, ", startup_abi: ")
+    target_debug_provider_abi<S, W>(sink, &out, value.startup_abi)
+    sink.write(&out, ", startup_placement: ")
+    canonical_debug_write_string<S, W>(sink, &out, value.startup_placement)
+    sink.write(&out, ", hardware: ")
+    target_debug_hardware<S, W>(sink, &out, value.hardware)
+    sink.write(&out, ", programmers: [")
+    loop (index, programmer) in value.programmers {
+        if index != 0 -> sink.write(&out, ", ")
+        target_debug_programmer<S, W>(sink, &out, programmer)
+    }
+    sink.write(&out, "], audit: AuditPolicy {{ build_artifact: {value.audit.build_artifact:Debug}, dossier_lens: {value.audit.dossier_lens:Debug} }} }}")
+}

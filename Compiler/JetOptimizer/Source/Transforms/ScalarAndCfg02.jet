@@ -1,0 +1,523 @@
+// ScalarAndCfg owner extension: fixed-order eight-lane reduction CFG normalization.
+use jet_foundation.[MIRProgram, MIRFunction, MIRVectorFact, MIRFixedReductionFact,
+    MIRFixedReductionOrder, MIRBasicBlock, MIRInstruction, MIRTerminator, MIROperation,
+    MIRConstant, MIRType, MIRTypeKind, MIRValueID, MIRValueFact, MIRBlockID,
+    MIRPlaceID, MIRLocalID, MIRLocal, MIRPlace, MIRPlaceBase, MIROpID,
+    MIROptimizationPassID, MIROptimizationError, Span, stable_id,
+    mir_copy_ownership, mir_program_digest, mir_verification_enabled,
+    mir_pass_validate_program, mir_canonical_mark_pass, D_FRED1_FIXED_ORDER,
+    MIRSemanticOp, MIRHardwareOp, MIRSwitchArm, MIRReflectField, MIRFieldValue, MIRCallArg,
+    MIRPreludeTypeArg, MIRTupleField, mir_type_from_kind, mir_type_with_identity,
+    mir_type_kind_same_identity, mir_type_canonical_key, mir_type_id]
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:6400
+fn inline_semantic(semantic: MIRSemanticOp, ids: InlineIdMaps, substitutions: [String:MIRType]) -> MIRSemanticOp Never! {
+    values :: (args: [MIRValueID]) -> loop value in args -> inline_value(ids, value)
+    arguments :: (args: [MIRCallArg]) -> loop argument in args -> inline_call_arg(argument, ids, substitutions)
+    if semantic == {
+        .DataEntriesToMap(call, local) -> MIRSemanticOp.DataEntriesToMap{call: call, local: inline_local(ids, local)}
+        .MathBuiltin(type_id, call, args) -> MIRSemanticOp.MathBuiltin{type_id: type_id, call: call, args: values(args)}
+        .PreciseBuiltin(type_id, call, args) -> MIRSemanticOp.PreciseBuiltin{type_id: type_id, call: call, args: values(args)}
+        .Print(call, value) -> MIRSemanticOp.Print{call: call, value: inline_value(ids, value)}
+        .AmbientInput(call, prompt) -> MIRSemanticOp.AmbientInput{call: call, prompt: prompt.map(value -> inline_value(ids, value))}
+        .RequireStop(call, kind, condition, location, context, args, always_stops) -> MIRSemanticOp.RequireStop{call: call, kind: kind, condition: condition.map(value -> inline_value(ids, value)), location: location, context: inline_context(ids, context), values: values(args), always_stops: always_stops}
+        .LayoutCompare(call, op, left, right) -> MIRSemanticOp.LayoutCompare{call: call, op: op, left: inline_value(ids, left), right: inline_value(ids, right)}
+        .LayoutLiteral(inner) -> MIRSemanticOp.LayoutLiteral{inner: inline_value(ids, inner)}
+        .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> {
+            mapped :: loop field in fields -> MIRFieldValue{field: field.field, value: inline_value(ids, field.value)}
+            MIRSemanticOp.StructLiteral{type_id: type_id, fields: mapped, extra: extra, trait_coercion: trait_coercion, boxed_fields: boxed_fields}
+        }
+        .ReflectOf(type_name, path, display, fields) -> {
+            mapped :: loop field in fields -> MIRReflectField{name: field.name, type_name: field.type_name, path: field.path, value: inline_value(ids, field.value)}
+            MIRSemanticOp.ReflectOf{type_name: type_name, path: path, display: inline_value(ids, display), fields: mapped}
+        }
+        .CellGuardProject(map_call, split_call, guard, paths, editable, edit_paths_disjoint) -> MIRSemanticOp.CellGuardProject{map_call: map_call, split_call: split_call, guard: inline_value(ids, guard), paths: paths, editable: editable, edit_paths_disjoint: edit_paths_disjoint}
+        .SharedGuardMap(call, guard, path, editable) -> MIRSemanticOp.SharedGuardMap{call: call, guard: inline_value(ids, guard), path: path, editable: editable}
+        .SharedGuardSplit(call, map_call, guard, first, second, editable) -> MIRSemanticOp.SharedGuardSplit{call: call, map_call: map_call, guard: inline_value(ids, guard), first: first, second: second, editable: editable}
+        .SharedGuardWait(call, guard, condition, predicate) -> MIRSemanticOp.SharedGuardWait{call: call, guard: inline_value(ids, guard), condition: inline_value(ids, condition), predicate: inline_value(ids, predicate)}
+        .ConditionNotify(call, condition, all) -> MIRSemanticOp.ConditionNotify{call: call, condition: inline_value(ids, condition), all: all}
+        .AllocNew(call, kind, inline_size, args) -> MIRSemanticOp.AllocNew{call: call, kind: kind, inline_size: inline_size, args: arguments(args)}
+        .ColumnarRead(base, index, column, column_index, accessor) -> MIRSemanticOp.ColumnarRead{base: inline_value(ids, base), index: inline_value(ids, index), column: column, column_index: column_index, accessor: accessor}
+        .StaticPreludeCall(call, args, owner_type_args, type_args) -> {
+            owners :: loop type_arg in owner_type_args -> if type_arg == {
+                .Type(ty) -> MIRPreludeTypeArg.Type{ty: inline_type(ty, substitutions)}
+                .HostUsize -> MIRPreludeTypeArg.HostUsize
+            }
+            types :: loop ty in type_args -> inline_type(ty, substitutions)
+            MIRSemanticOp.StaticPreludeCall{call: call, args: arguments(args), owner_type_args: owners, type_args: types}
+        }
+        .DecodeUnder(call, segment, inner) -> MIRSemanticOp.DecodeUnder{call: call, segment: inline_value(ids, segment), inner: inline_value(ids, inner)}
+        .HardwareCall(call, op, receiver, args) -> MIRSemanticOp.HardwareCall{call: call, op: inline_hardware_op(op, substitutions), receiver: receiver.map(value -> inline_value(ids, value)), args: arguments(args)}
+        .BuiltinMethod(call, receiver, receiver_place, args, aggregate_fields) -> MIRSemanticOp.BuiltinMethod{call: call, receiver: inline_value(ids, receiver), receiver_place: receiver_place.map(place -> inline_place(ids, place)), args: values(args), aggregate_fields: aggregate_fields}
+        .OptionLift2(call, function, left, right) -> MIRSemanticOp.OptionLift2{call: call, function: inline_value(ids, function), left: inline_value(ids, left), right: inline_value(ids, right)}
+        .ClosureMethod(receiver, args, call) -> MIRSemanticOp.ClosureMethod{receiver: inline_value(ids, receiver), args: arguments(args), call: call}
+        .HostBorrowCallback(callable, params) -> {
+            types :: loop ty in params -> inline_type(ty, substitutions)
+            MIRSemanticOp.HostBorrowCallback{callable: inline_value(ids, callable), params: types}
+        }
+        .TextPatternMatch(call, subject, parts) -> MIRSemanticOp.TextPatternMatch{call: call, subject: inline_value(ids, subject), parts: parts}
+        .BinaryPatternMatch(call, subject, parts) -> MIRSemanticOp.BinaryPatternMatch{call: call, subject: inline_value(ids, subject), parts: parts}
+        .CursorTakePattern(receiver, receiver_place, parts) -> MIRSemanticOp.CursorTakePattern{receiver: inline_value(ids, receiver), receiver_place: inline_place(ids, receiver_place), parts: parts}
+        .ReaderTakePattern(receiver, receiver_place, parts) -> MIRSemanticOp.ReaderTakePattern{receiver: inline_value(ids, receiver), receiver_place: inline_place(ids, receiver_place), parts: parts}
+        .NumericMethod(call, receiver) -> MIRSemanticOp.NumericMethod{call: call, receiver: inline_value(ids, receiver)}
+        .NumericBinaryMethod(call, receiver, argument) -> MIRSemanticOp.NumericBinaryMethod{call: call, receiver: inline_value(ids, receiver), argument: inline_value(ids, argument)}
+        .OverflowOption(call, left, right, location) -> MIRSemanticOp.OverflowOption{call: call, left: inline_value(ids, left), right: inline_value(ids, right), location: location}
+        .HandleMethod(call, receiver, args, frame_schedule, frame_schedule_derivation) -> MIRSemanticOp.HandleMethod{call: call, receiver: inline_value(ids, receiver), args: values(args), frame_schedule: frame_schedule, frame_schedule_derivation: frame_schedule_derivation}
+        .PluginInvoke(call, handle, export_name, signature, args) -> MIRSemanticOp.PluginInvoke{call: call, handle: inline_value(ids, handle), export_name: export_name, signature: signature, args: values(args)}
+        .HTTPRouterRegister(call, receiver, path, handler, method, handler_param_names, contract_json, location) -> MIRSemanticOp.HTTPRouterRegister{call: call, receiver: inline_value(ids, receiver), path: inline_value(ids, path), handler: inline_value(ids, handler), method: method, handler_param_names: handler_param_names, contract_json: contract_json, location: location}
+        .CoreClosureCall(call, kind, args, closure, site, label) -> MIRSemanticOp.CoreClosureCall{call: call, kind: kind, values: values(args), closure: closure.map(value -> inline_value(ids, value)), site: site, label: label}
+        .TaskGroup(call, kind, tasks) -> MIRSemanticOp.TaskGroup{call: call, kind: kind, tasks: values(tasks)}
+        .Select(call, kind, args) -> MIRSemanticOp.Select{call: call, kind: kind, values: values(args)}
+        .PolicyFunction(policy, args) -> MIRSemanticOp.PolicyFunction{policy: policy, values: values(args)}
+        .InterruptFunction(interrupt, args) -> MIRSemanticOp.InterruptFunction{interrupt: interrupt, values: values(args)}
+        .CarrierFact(call, receiver, field, notes) -> MIRSemanticOp.CarrierFact{call: call, receiver: inline_value(ids, receiver), field: field, notes: notes}
+        .GCEdit(call, root, edges, edit, index, kind, site) -> MIRSemanticOp.GCEdit{call: call, root: inline_value(ids, root), edges: values(edges), edit: inline_value(ids, edit), index: index.map(value -> inline_value(ids, value)), kind: kind, site: site}
+        .TypedTextInterp(call, kind, literals, holes, trusted_html) -> MIRSemanticOp.TypedTextInterp{call: call, kind: kind, literals: literals, holes: values(holes), trusted_html: trusted_html}
+        .CCallback(call, callback, lambda) -> MIRSemanticOp.CCallback{call: call, callback: callback, lambda: inline_value(ids, lambda)}
+        .HostCall(call, args) -> MIRSemanticOp.HostCall{call: call, args: arguments(args)}
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:6877
+fn inline_hardware_op(operation: MIRHardwareOp, substitutions: [String:MIRType]) -> MIRHardwareOp Never! {
+    if operation == {
+        .RegisterRead(profile, block, register, width) -> MIRHardwareOp.RegisterRead{profile_id: profile, block: block, register: register, width: width}
+        .RegisterWrite(profile, block, register, width) -> MIRHardwareOp.RegisterWrite{profile_id: profile, block: block, register: register, width: width}
+        .DMAStart(profile, channel, buffer_ty) -> MIRHardwareOp.DMAStart{profile_id: profile, channel: channel, buffer_ty: inline_type(buffer_ty, substitutions)}
+        .DMAWait(profile, channel, buffer_ty) -> MIRHardwareOp.DMAWait{profile_id: profile, channel: channel, buffer_ty: inline_type(buffer_ty, substitutions)}
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:6925
+fn inline_terminator(terminator: MIRTerminator, ids: InlineIdMaps) -> MIRTerminator Never! {
+    if terminator == {
+        .Jump(target) -> MIRTerminator.Jump{target: inline_block(ids, target)}
+        .Branch(condition, then_target, else_target) -> MIRTerminator.Branch{condition: inline_value(ids, condition), then_target: inline_block(ids, then_target), else_target: inline_block(ids, else_target)}
+        .Switch(subject, arms, otherwise) -> {
+            mapped :: loop arm in arms -> MIRSwitchArm{condition: inline_value(ids, arm.condition), target: inline_block(ids, arm.target), span: arm.span}
+            MIRTerminator.Switch{subject: inline_value(ids, subject), arms: mapped, otherwise: inline_block(ids, otherwise)}
+        }
+        .Return(value) -> MIRTerminator.Return{value: value.map(value -> inline_value(ids, value))}
+        .Yield(value, resume, cancel) -> MIRTerminator.Yield{value: inline_value(ids, value), resume: inline_block(ids, resume), cancel: inline_block(ids, cancel)}
+        .Break(target, value) -> MIRTerminator.Break{target: inline_block(ids, target), value: value.map(value -> inline_value(ids, value))}
+        .Continue(target) -> MIRTerminator.Continue{target: inline_block(ids, target)}
+        .Unreachable(reason) -> MIRTerminator.Unreachable{reason: reason}
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:6976
+fn inline_type(ty: MIRType, substitutions: [String:MIRType]) -> MIRType Never! {
+    if ty.kind == .Apply(name, args) {
+        if args.len() == 0 { if substitutions.get(name.name) == .Val(replacement) -> return replacement }
+    }
+    kind :: if ty.kind == {
+        .List(inner) -> MIRTypeKind.List{inner: inline_type(inner, substitutions)}
+        .Map(key, value) -> MIRTypeKind.Map{key: inline_type(key, substitutions), value: inline_type(value, substitutions)}
+        .Shared(inner) -> MIRTypeKind.Shared{inner: inline_type(inner, substitutions)}
+        .Option(inner) -> MIRTypeKind.Option{inner: inline_type(inner, substitutions)}
+        .Result(ok, error) -> MIRTypeKind.Result{ok: inline_type(ok, substitutions), err: inline_type(error, substitutions)}
+        .Fn(signature) -> {
+            mapped := signature
+            mapped.params = loop parameter in signature.params -> inline_type(parameter, substitutions)
+            mapped.ret = signature.ret.map(result -> inline_type(result, substitutions))
+            MIRTypeKind.Fn{signature: mapped}
+        }
+        .SendFn(params, result, conventions) -> {
+            mapped :: loop parameter in params -> inline_type(parameter, substitutions)
+            MIRTypeKind.SendFn{params: mapped, ret: result.map(result -> inline_type(result, substitutions)), conventions: conventions}
+        }
+        .Apply(name, args) -> {
+            mapped :: loop argument in args -> inline_type(argument, substitutions)
+            MIRTypeKind.Apply{name: name, args: mapped}
+        }
+        .Tuple(fields) -> {
+            mapped :: loop field in fields -> MIRTupleField{name: field.name, ty: inline_type(field.ty, substitutions)}
+            MIRTypeKind.Tuple{fields: mapped}
+        }
+        .FixedList(elem, len) -> MIRTypeKind.FixedList{elem: inline_type(elem, substitutions), len: len}
+        .InlineRange(base, lo, hi) -> MIRTypeKind.InlineRange{base: inline_type(base, substitutions), lo: lo, hi: hi}
+        .Tagged(marker, inner) -> MIRTypeKind.Tagged{marker: marker, inner: inline_type(inner, substitutions)}
+        .Union(members) -> {
+            mapped :: loop member in members -> inline_type(member, substitutions)
+            MIRTypeKind.Union{members: mapped}
+        }
+        .Quantity(base, dimension) -> MIRTypeKind.Quantity{base: inline_type(base, substitutions), dimension: dimension}
+        else -> ty.kind
+    }
+    mapped :: mir_type_from_kind(kind)
+    if mir_type_kind_same_identity(mapped, ty) -> return ty
+    mir_type_with_identity(mapped, mir_type_id(mir_type_canonical_key(mapped)))
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7079
+fn normalize_fixed_reduction_loops(program: &MIRProgram) Never! {
+    loop function_index in 0..<program.functions.len() {
+        function := &program.functions[function_index]
+        changed := false
+        // Store indices instead of repeatedly scanning rows for each header.
+        row_indices := [U64:Int]{}
+        candidates := [MIRVectorFact]{}
+        loop (index, fact) in function.optimization.vector_facts {
+            if row_indices.get(fact.loop_header.value) == None -> &row_indices.add(fact.loop_header.value, index).drop("checked absent above")
+            if fact.decision == .Eligible && fact.rule == .Reduction && fact.fixed_reduction == None -> &candidates.push(fact)
+        }
+        loop fact in candidates {
+            fixed :: normalize_fixed_reduction_loop(&function, fact)
+            index :: row_indices.get(fact.loop_header.value) ?? next
+            if fixed == {
+                .None -> {
+                    function.optimization.vector_facts[index].packed = false
+                    function.optimization.vector_facts[index].decision = .Rejected{reason: .UnsupportedOperation}
+                }
+                .Val(value) -> function.optimization.vector_facts[index].fixed_reduction = Val(value)
+            }
+            changed = true
+        }
+        refresh_loop_summaries(&function)
+        if changed -> function.optimization.derived_from_digest = None
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7126
+fn normalize_fixed_reduction_loop(function: &MIRFunction, fact: MIRVectorFact) -> MIRFixedReductionFact? Never! {
+    if fact.rule != .Reduction -> return None
+    order :: D_FRED1_FIXED_ORDER
+    if !order.is_canonical() -> return None
+    if normalized_fixed_reduction_fact(function, fact) == .Val(fixed) -> return Val(fixed)
+    lanes :: order.lanes
+    cursor :: fact.cursor ?? return None
+    advance :: fact.advance_block ?? return None
+    row_index := Int?{None}
+    loop (index, row) in function.optimization.loop_facts {
+        if row.header == fact.loop_header { row_index = Val(index); break }
+    }
+    row :: function.optimization.loop_facts[row_index ?? return None]
+    exit :: row.exit ?? return None
+    body_entry :: row.body ?? return None
+    positions := [U64:Int]{}
+    value_types := [U64:MIRType]{}
+    place_positions := [U64:Int]{}
+    loop (index, block) in function.blocks -> &positions.add(block.id.value, index).drop("block IDs are unique")
+    loop value in function.values -> &value_types.add(value.id.value, value.ty).drop("value IDs are unique")
+    loop (index, place) in function.places -> &place_positions.add(place.id.value, index).drop("place IDs are unique")
+    header_index :: positions.get(fact.loop_header.value) ?? return None
+    header :: function.blocks[header_index]
+    if header.terminator == {
+        .Branch(_, then_target, else_target) -> if then_target != body_entry || else_target != exit -> return None
+        else -> return None
+    }
+    init := MIRInstruction?{None}
+    preheader_id := MIRBlockID?{None}
+    range_value_instruction := MIRInstruction?{None}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .LoopRangeInit(_, _, _, _, _) -> {
+                    if init == None && instruction.result == Val(cursor) {
+                        init = Val(instruction)
+                        preheader_id = Val(block.id)
+                    }
+                }
+                .LoopRangeValue(_, value_cursor) -> if value_cursor == cursor && range_value_instruction == None -> range_value_instruction = Val(instruction)
+                else -> {}
+            }
+        }
+    }
+    start := MIRValueID{value: 0}
+    step := MIRValueID?{None}
+    if (init ?? return None).operation == {
+        .LoopRangeInit(_, value_start, _, value_step, exclusive) -> {
+            if !exclusive -> return None
+            start = value_start
+            step = value_step
+        }
+        else -> return None
+    }
+    range_operation :: (range_value_instruction ?? return None).operation
+    if step == .Val(step_value) {
+        constants :: mir_pass_collect_scalar_constants(function)
+        constant :: constants.get(step_value.value) ?? return None
+        if constant == {
+            .Int(value, _, _) -> if value != 1 -> return None
+            else -> return None
+        }
+    }
+    body_ids :: fact.body_blocks
+    body_set := [U64:Bool]{}
+    loop id in body_ids -> &body_set.add(id.value, true).drop("a body block may repeat")
+    if body_ids.len() == 0 || body_set.get(advance.value) != None || body_set.get(exit.value) != None -> return None
+    body_instructions := [MIRInstruction]{}
+    loop id in body_ids {
+        position :: positions.get(id.value) ?? next
+        loop instruction in function.blocks[position].instructions -> &body_instructions.push(instruction)
+    }
+    cursor_place :: loop_cursor_place(function, body_ids, cursor)
+    if !vector_has_indexed_input(function, body_instructions, cursor, cursor_place) -> return None
+    (accumulator, addend, _) :: fixed_reduction_plan(function, body_instructions) ?? return None
+    accumulator_place :: function.places[place_positions.get(accumulator.value) ?? return None]
+    accumulator_ty :: accumulator_place.ty
+    if accumulator_place.projections.len() != 0 || (accumulator_ty.kind != .Float && accumulator_ty.kind != .Float32) -> return None
+    condition :: MIRValueID?{None}
+    loop id in body_ids {
+        block :: function.blocks[positions.get(id.value) ?? return None]
+        if block.terminator == {
+            .Jump(target) -> if target != advance && body_set.get(target.value) == None -> return None
+            .Branch(_, then_target, else_target) -> {
+                if then_target != advance && body_set.get(then_target.value) == None -> return None
+                if else_target != advance && body_set.get(else_target.value) == None -> return None
+            }
+            else -> return None
+        }
+    }
+    source_operations :: loop instruction in body_instructions -> instruction.id
+    span :: header.span
+    source_line := Int?{None}
+    loop instruction in body_instructions {
+        if instruction.source_line != None { source_line = instruction.source_line; break }
+    }
+    addend_ty :: value_types.get(addend.value) ?? return None
+    if !((accumulator_ty.kind == .Float && addend_ty.kind == .Float) || (accumulator_ty.kind == .Float32 && addend_ty.kind == .Float32)) -> return None
+    int_ty :: value_types.get(start.value) ?? return None
+    bool_value := MIRValueID?{None}
+    loop instruction in header.instructions {
+        if instruction.operation == { .LoopRangeHasNext(_, _) -> { if instruction.result != None { bool_value = instruction.result; break } } else -> {} }
+    }
+    bool_ty :: value_types.get((bool_value ?? return None).value) ?? return None
+    base :: "{function.id.value}:{fact.loop_header.value}:"
+    // Rust ni!/bid! macros become closures over the same retained function loan.
+    ni :: (role: String, ty: MIRType?, operation: MIROperation) -> normalized_instruction(&function, "{base}{role}", span, source_line, ty, operation)
+    bid :: (role: String) -> MIRBlockID{value: stable_id("mir-fixed-reduction-block", "{base}{role}")}
+    lane_places := [MIRPlaceID]{}
+    loop lane in 0..<lanes {
+        (_, place) :: normalized_local_place(&function, "{base}lane-place-{lane}", span, accumulator_ty)
+        &lane_places.push(place)
+    }
+    (_, seen_place) :: normalized_local_place(&function, "{base}seen-place", span, bool_ty)
+    zero :: ni("constant-zero", Val(accumulator_ty), normalized_float_zero(accumulator_ty))
+    zero_value :: zero.value ?? return None
+    false_constant :: ni("constant-seen-false", Val(bool_ty), .Constant{constant: .Bool{value: false}})
+    false_value :: false_constant.value ?? return None
+    true_constant :: ni("constant-seen-true", Val(bool_ty), .Constant{constant: .Bool{value: true}})
+    true_value :: true_constant.value ?? return None
+    seed_read :: ni("seed-read", Val(accumulator_ty), .ReadPlace{place: accumulator})
+    seed_value :: seed_read.value ?? return None
+    lane_index :: ni("dispatch-index", Val(int_ty), range_operation)
+    lane_index_value :: lane_index.value ?? return None
+    mask :: ni("dispatch-mask", Val(int_ty), .Constant{constant: .Int{value: lanes - 1, width: None, spelling: None}})
+    mask_value :: mask.value ?? return None
+    eight :: ni("dispatch-eight", Val(int_ty), .Constant{constant: .Int{value: lanes, width: None, spelling: None}})
+    eight_value :: eight.value ?? return None
+    index_low :: ni("dispatch-index-low", Val(int_ty), .Binary{op: .BitAnd, dispatch: .Primitive, overflow: .Unchecked, left: lane_index_value, right: mask_value})
+    index_low_value :: index_low.value ?? return None
+    start_low :: ni("dispatch-start-low", Val(int_ty), .Binary{op: .BitAnd, dispatch: .Primitive, overflow: .Unchecked, left: start, right: mask_value})
+    start_low_value :: start_low.value ?? return None
+    delta :: ni("dispatch-delta", Val(int_ty), .Binary{op: .Sub, dispatch: .Primitive, overflow: .Trap, left: index_low_value, right: start_low_value})
+    delta_value :: delta.value ?? return None
+    wrapped :: ni("dispatch-wrapped", Val(int_ty), .Binary{op: .Add, dispatch: .Primitive, overflow: .Trap, left: delta_value, right: eight_value})
+    wrapped_value :: wrapped.value ?? return None
+    ordinal :: ni("dispatch-ordinal", Val(int_ty), .Binary{op: .BitAnd, dispatch: .Primitive, overflow: .Unchecked, left: wrapped_value, right: mask_value})
+    ordinal_value :: ordinal.value ?? return None
+    lane_constant_values := [MIRValueID]{}
+    lane_constant_instructions := [MIRInstruction]{}
+    loop lane in 0..<lanes {
+        constant :: ni("lane-constant-{lane}", Val(int_ty), .Constant{constant: .Int{value: lane, width: None, spelling: None}})
+        &lane_constant_values.push(constant.value ?? return None)
+        &lane_constant_instructions.push(constant.instruction)
+    }
+    dispatch_entry :: bid("dispatch-entry")
+    post_entry :: bid("post-entry")
+    post_seen_entry :: bid("post-seen-entry")
+    post_unseen_entry :: bid("post-unseen-entry")
+    tree_block :: bid("tree")
+    continuation :: bid("continuation")
+    lane_pre :: loop lane in 0..<lanes -> bid("lane-pre-{lane}")
+    lane_seen_post :: loop lane in 0..<lanes -> bid("lane-seen-post-{lane}")
+    lane_unseen_post :: loop lane in 0..<lanes -> bid("lane-unseen-post-{lane}")
+    lane_dispatch :: loop lane in 0..<(lanes - 1) -> bid("lane-dispatch-{lane}")
+    lane_seen_dispatch :: loop lane in 0..<(lanes - 1) -> bid("lane-seen-dispatch-{lane}")
+    lane_unseen_dispatch :: loop lane in 0..<(lanes - 1) -> bid("lane-unseen-dispatch-{lane}")
+    preheader_index :: positions.get((preheader_id ?? return None).value) ?? return None
+    generated := [MIRBasicBlock]{}
+    preheader_instructions := [MIRInstruction]{zero.instruction, false_constant.instruction, true_constant.instruction, seed_read.instruction}
+    loop lane in 0..<lanes {
+        &preheader_instructions.push(ni("seed-lane-{lane}", None, .WritePlace{place: lane_places[lane], value: if lane == 0 -> seed_value else -> zero_value}).instruction)
+    }
+    &preheader_instructions.push(ni("seed-seen", None, .WritePlace{place: seen_place, value: false_value}).instruction)
+    loop instruction in preheader_instructions -> &function.blocks[preheader_index].instructions.push(instruction)
+    dispatch_instructions := [MIRInstruction]{lane_index.instruction, mask.instruction, eight.instruction, index_low.instruction, start_low.instruction, delta.instruction, wrapped.instruction, ordinal.instruction}
+    loop instruction in lane_constant_instructions -> &dispatch_instructions.push(instruction)
+    &generated.push(MIRBasicBlock{id: dispatch_entry, span: span, instructions: dispatch_instructions, terminator: .Jump{target: lane_dispatch[0]}})
+    make_dispatch :: (dispatch_id: MIRBlockID, lane: Int, next_block: MIRBlockID, target: MIRBlockID) -> {
+        compare :: ni("dispatch-compare-{dispatch_id.value}-{lane}", Val(bool_ty), .Binary{op: .Eq, dispatch: .Primitive, overflow: .Unchecked, left: ordinal_value, right: lane_constant_values[lane]})
+        MIRBasicBlock{id: dispatch_id, span: span, instructions: [MIRInstruction]{compare.instruction}, terminator: .Branch{condition: compare.value ?? panic("dispatch comparison has a result"), then_target: target, else_target: next_block}}
+    }
+    loop lane in 0..<(lanes - 1) {
+        &generated.push(make_dispatch(lane_dispatch[lane], lane, if lane + 1 == lanes - 1 -> lane_pre[lanes - 1] else -> lane_dispatch[lane + 1], lane_pre[lane]))
+        &generated.push(make_dispatch(lane_seen_dispatch[lane], lane, if lane + 1 == lanes - 1 -> lane_seen_post[lanes - 1] else -> lane_seen_dispatch[lane + 1], lane_seen_post[lane]))
+        &generated.push(make_dispatch(lane_unseen_dispatch[lane], lane, if lane + 1 == lanes - 1 -> lane_unseen_post[lanes - 1] else -> lane_unseen_dispatch[lane + 1], lane_unseen_post[lane]))
+    }
+    loop lane in 0..<lanes {
+        read :: ni("pre-read-{lane}", Val(accumulator_ty), .ReadPlace{place: lane_places[lane]})
+        read_value :: read.value ?? panic("lane pre-read has a result")
+        &generated.push(MIRBasicBlock{id: lane_pre[lane], span: span, instructions: [MIRInstruction]{read.instruction, ni("pre-write-{lane}", None, .WritePlace{place: accumulator, value: read_value}).instruction}, terminator: .Jump{target: body_entry}})
+    }
+    post_terminator :: if condition == { .None -> MIRTerminator.Jump{target: post_seen_entry} .Val(value) -> MIRTerminator.Branch{condition: value, then_target: post_seen_entry, else_target: post_unseen_entry} }
+    &generated.push(MIRBasicBlock{id: post_entry, span: span, instructions: [MIRInstruction]{}, terminator: post_terminator})
+    &generated.push(MIRBasicBlock{id: post_seen_entry, span: span, instructions: [MIRInstruction]{}, terminator: .Jump{target: lane_seen_dispatch[0]}})
+    &generated.push(MIRBasicBlock{id: post_unseen_entry, span: span, instructions: [MIRInstruction]{}, terminator: .Jump{target: lane_unseen_dispatch[0]}})
+    loop lane in 0..<lanes {
+        read :: ni("seen-post-read-{lane}", Val(accumulator_ty), .ReadPlace{place: accumulator})
+        read_value :: read.value ?? panic("seen post-read has a result")
+        &generated.push(MIRBasicBlock{id: lane_seen_post[lane], span: span, instructions: [MIRInstruction]{read.instruction, ni("seen-post-write-{lane}", None, .WritePlace{place: lane_places[lane], value: read_value}).instruction, ni("seen-post-mark-{lane}", None, .WritePlace{place: seen_place, value: true_value}).instruction}, terminator: .Jump{target: advance}})
+        unseen_read :: ni("unseen-post-read-{lane}", Val(accumulator_ty), .ReadPlace{place: accumulator})
+        unseen_value :: unseen_read.value ?? panic("unseen post-read has a result")
+        &generated.push(MIRBasicBlock{id: lane_unseen_post[lane], span: span, instructions: [MIRInstruction]{unseen_read.instruction, ni("unseen-post-write-{lane}", None, .WritePlace{place: lane_places[lane], value: unseen_value}).instruction}, terminator: .Jump{target: advance}})
+    }
+    tree_instructions := [MIRInstruction]{}
+    lane_values := [MIRValueID]{}
+    loop lane in 0..<lanes {
+        read :: ni("tree-read-{lane}", Val(accumulator_ty), .ReadPlace{place: lane_places[lane]})
+        &lane_values.push(read.value ?? panic("tree read has a result"))
+        &tree_instructions.push(read.instruction)
+    }
+    tree_add :: (role: String, left: MIRValueID, right: MIRValueID) -> {
+        add :: ni(role, Val(accumulator_ty), .Binary{op: .Add, dispatch: .Primitive, overflow: .Unchecked, left: left, right: right})
+        value :: add.value ?? panic("tree add has a result")
+        &tree_instructions.push(add.instruction)
+        value
+    }
+    left01 :: tree_add("tree-left-01", lane_values[0], lane_values[1])
+    left23 :: tree_add("tree-left-23", lane_values[2], lane_values[3])
+    left :: tree_add("tree-left", left01, left23)
+    right45 :: tree_add("tree-right-45", lane_values[4], lane_values[5])
+    right67 :: tree_add("tree-right-67", lane_values[6], lane_values[7])
+    right :: tree_add("tree-right", right45, right67)
+    result :: tree_add("tree-final", left, right)
+    &tree_instructions.push(ni("tree-write", None, .WritePlace{place: accumulator, value: result}).instruction)
+    &generated.push(MIRBasicBlock{id: tree_block, span: span, instructions: tree_instructions, terminator: .Jump{target: continuation}})
+    exit_index :: positions.get(exit.value) ?? return None
+    original_exit_instructions :: ^function.blocks[exit_index].instructions
+    function.blocks[exit_index].instructions = [MIRInstruction]{}
+    original_exit_terminator :: ^function.blocks[exit_index].terminator
+    function.blocks[exit_index].terminator = .Unreachable{reason: "fixed reduction exit gate"}
+    &generated.push(MIRBasicBlock{id: continuation, span: span, instructions: original_exit_instructions, terminator: original_exit_terminator})
+    seen_read :: ni("exit-seen-read", Val(bool_ty), .ReadPlace{place: seen_place})
+    seen_value :: seen_read.value ?? return None
+    function.blocks[exit_index].instructions = [MIRInstruction]{seen_read.instruction}
+    function.blocks[exit_index].terminator = .Branch{condition: seen_value, then_target: tree_block, else_target: continuation}
+    loop id in body_ids {
+        index :: positions.get(id.value) ?? return None
+        if function.blocks[index].terminator == {
+            .Jump(target) -> if target == advance -> function.blocks[index].terminator = .Jump{target: post_entry}
+            .Branch(value, then_target, else_target) -> function.blocks[index].terminator = .Branch{condition: value, then_target: if then_target == advance -> post_entry else -> then_target, else_target: if else_target == advance -> post_entry else -> else_target}
+            else -> {}
+        }
+    }
+    if function.blocks[header_index].terminator == {
+        .Branch(value, _, else_target) -> function.blocks[header_index].terminator = .Branch{condition: value, then_target: dispatch_entry, else_target: else_target}
+        else -> return None
+    }
+    loop block in generated -> &function.blocks.push(block)
+    Val(MIRFixedReductionFact{accumulator: accumulator, addend: addend, seed: seed_value, condition: condition, source_operations: source_operations, exit: continuation, order: order})
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7799
+fn fixed_reduction_plan(function: MIRFunction, instructions: [MIRInstruction]) -> (MIRPlaceID, MIRValueID, MIRValueID)? Never! {
+    definitions := [U64:MIRInstruction]{}
+    loop instruction in instructions {
+        if instruction.result == .Val(value) {
+            if definitions.get(value.value) == None -> &definitions.add(value.value, instruction).drop("retain the first definition")
+        }
+    }
+    plans := [(MIRPlaceID, MIRValueID, MIRValueID)]{}
+    loop instruction in instructions {
+        if instruction.operation == {
+            .WritePlace(place, value) -> {
+                defining :: definitions.get(value.value) ?? next
+                if defining.operation == {
+                    .Binary(op, _, _, left, right) -> {
+                        if op != .Add -> next
+                        visited_left := [MIRValueID:Bool]{} // GATE #4499: exact identity keys.
+                        visited_right := [MIRValueID:Bool]{}
+                        if {
+                            value_reads_place(instructions, left, place, &visited_left) -> &plans.push((place, right, left))
+                            value_reads_place(instructions, right, place, &visited_right) -> &plans.push((place, left, right))
+                            else -> {}
+                        }
+                    }
+                    else -> {}
+                }
+            }
+            else -> {}
+        }
+    }
+    _ :: function
+    if plans.len() == 1 -> Val(plans[0]) else -> None
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7840
+fn normalized_value(function: &MIRFunction, identity: String, span: Span, ty: MIRType) -> MIRValueID Never! {
+    value :: MIRValueID{value: stable_id("mir-fixed-reduction-value", identity)}
+    loop candidate in function.values { if candidate.id == value -> return value }
+    &function.values.push(MIRValueFact{id: value, ty: ty, span: span, ownership: mir_copy_ownership()})
+    value
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7855
+struct NormalizedInstruction { instruction: MIRInstruction, value: MIRValueID? }
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7861
+fn normalized_instruction(function: &MIRFunction, identity: String, span: Span, source_line: Int?, ty: MIRType?, operation: MIROperation) -> NormalizedInstruction Never! {
+    value :: ty.map(value_ty -> normalized_value(&function, identity, span, value_ty))
+    op_id :: MIROpID{value: stable_id("mir-fixed-reduction-op", identity)}
+    NormalizedInstruction{instruction: MIRInstruction{id: op_id, span: span, source_line: source_line, result: value, ty: ty, operation: operation}, value: value}
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7884
+fn normalized_local_place(function: &MIRFunction, identity: String, span: Span, ty: MIRType) -> (MIRLocalID, MIRPlaceID) Never! {
+    local :: MIRLocalID{value: stable_id("mir-fixed-reduction-local", identity)}
+    place :: MIRPlaceID{value: stable_id("mir-fixed-reduction-place", identity)}
+    &function.locals.push(MIRLocal{id: local, name: "__jet_dfred_{identity}", span: span, ty: ty, place: place, mutable: true, ownership: mir_copy_ownership(), is_comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false})
+    &function.places.push(MIRPlace{id: place, span: span, ty: ty, base: MIRPlaceBase.Local{local: local}, projections: [], access: .Write, persist_key: None})
+    (local, place)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7918
+fn normalized_float_zero(ty: MIRType) -> MIROperation Never! {
+    MIROperation.Constant{constant: MIRConstant.Float{value: 0.0, f32: ty.kind == .Float32, spelling: Val("0.0")}}
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7927
+fn optimized_pass_order_complete(program: MIRProgram, input_digest: String) -> Bool Never! {
+    order :: mir_optimizer_production_order()
+    loop function in program.functions {
+        if function.optimization.pass_ids != order || function.optimization.derived_from_digest != Val(input_digest) -> return false
+    }
+    true
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7939
+fn validate_after(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? Never! {
+    if !mir_verification_enabled() -> return None
+    mir_pass_validate_program(program, pass)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7947
+fn seal_derived_facts(program: &MIRProgram) Never! {
+    input_digest :: mir_program_digest(program)
+    loop index in 0..<program.functions.len() -> program.functions[index].optimization.derived_from_digest = Val(input_digest)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7954
+// clear_derived_facts -> Pipeline.jet::mir_pass_clear_batch_facts (all derived rows).
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7960
+// mark_pass -> jet_foundation/MIR/CanonicalPassJournal.jet::mir_canonical_mark_pass.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:7984
+// eliminate_unreachable_blocks -> ScalarAndCfg.jet::mir_pass_eliminate_unreachable,
+// with its per-function retained-block/live-value/predecessor-phi implementation.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8007
+// simplify_cfg -> ScalarAndCfg.jet::mir_pass_simplify_cfg and simplify_cfg_function.
+// Rust: crates/jet-foundation/src/MIROptimization.rs:8038
+// forward_phi_joins -> ScalarAndCfg.jet::mir_pass_forward_phi_joins: candidate
+// checks, path-compressed finals, cycle early return and iterative phi expansion.
+// No native substrate, OS dispatch or IO error-kind primitive occurs in this range.

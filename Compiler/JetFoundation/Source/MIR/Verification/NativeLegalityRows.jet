@@ -1,0 +1,333 @@
+// MIROptimization.rs:254-309,352-446. Stable native IDs are keyed by their
+// canonical U64 word, never by a digest or a textual rendering of the row.
+fn mir_native_verify_row_id(id: U64, kind: String, seen: &[U64:Bool], span: Span) MIRLegalityError! {
+    if id == U64{0} -> return Err(mir_native_invalid_row("{kind} zero ID", span))
+    if seen.get(id) != None -> return Err(MIRLegalityError.Validation{error: MIRValidationError.DuplicateId{kind: kind, id: id}})
+    seen[id] = true
+    return
+}
+fn mir_native_verify_row_ref(ids: [U64:Bool], id: U64, subject: String, span: Span) MIRLegalityError! {
+    if ids.get(id) == None -> return Err(mir_native_invalid_row(subject, span))
+    return
+}
+fn mir_native_verify_generic_params(params: [MIRGenericParam], traits: [U64:Bool], span: Span) MIRLegalityError! {
+    loop param in params {
+        if param.name.len() == 0 -> return Err(mir_native_invalid_row("generic parameter without a name", span))
+        loop bound in param.bounds {
+            if bound.id.value == U64{0} || bound.name.len() == 0 || traits.get(bound.id.value) == None -> return Err(mir_native_invalid_row("generic bound MirTraitId({bound.id.value})", span))
+        }
+    }
+    return
+}
+fn mir_native_verify_param(param: MIRParam, function: MIRFunctionID) MIRLegalityError! {
+    if param.name.len() == 0 || param.public_label.len() == 0 || param.span.start > param.span.end -> return Err(mir_native_invalid_row("parameter {param.index}", param.span))
+    mir_native_verify_type(param.ty, param.span, function)
+    return
+}
+fn mir_native_verify_cli_input(input: MIRCLIInput, span: Span) MIRLegalityError! {
+    if input.name.len() == 0 || input.label.len() == 0 || input.help.len() == 0 -> return Err(mir_native_invalid_row("CLI input without a name, label, or help", span))
+    if input.short == Val("") || input.env == Val("") || input.metavar == Val("") -> return Err(mir_native_invalid_row("CLI input contains an empty optional name", span))
+    mir_native_verify_type(input.ty, span, MIRFunctionID{value: U64{0}})
+    if input.shape == {
+        .Flag -> {
+            if !mir_type_is_bool(input.ty) || input.variadic || input.metavar != None -> return Err(mir_native_invalid_row("CLI flag has invalid type or shape", span))
+        }
+        .Value(kind, optional, default) -> {
+            value_type :: if {
+                input.variadic -> {
+                    if input.ty.kind == .List(element) -> element
+                    else -> return Err(mir_native_invalid_row("CLI variadic input is not a list", span))
+                }
+                optional -> {
+                    if input.ty.kind == .Option(value) -> value
+                    else -> return Err(mir_native_invalid_row("CLI optional input is not optional", span))
+                }
+                else -> input.ty
+            }
+            kind_matches :: if kind == {
+                .Bool -> mir_type_is_bool(value_type)
+                .Int -> mir_type_is_integer(value_type)
+                .Float -> mir_type_is_float(value_type)
+                .String -> mir_type_is_string(value_type)
+                .Path -> mir_type_is_string(value_type) || mir_type_nominal_name(value_type) == Val(TYPE_PATH)
+            }
+            if !kind_matches -> return Err(mir_native_invalid_row("CLI value kind disagrees with its type", span))
+            if optional && default != None -> return Err(mir_native_invalid_row("CLI optional input cannot carry a default", span))
+            if default == .Val(.Value(value)) -> mir_native_verify_constant(value, span)
+        }
+    }
+    if input.variadic && input.positional == None -> return Err(mir_native_invalid_row("CLI variadic input must be positional", span))
+    return
+}
+fn mir_native_verify_entry_spec(entry: MIREntrySpec, functions: [U64:Bool], types: [U64:Bool], span: Span) MIRLegalityError! {
+    if entry.function == .Val(function) -> mir_native_verify_row_ref(functions, function.value, "entry function", span)
+    if entry.package_version.len() == 0 -> return Err(mir_native_invalid_row("entry package version", span))
+    if entry.cli == .Val(cli) {
+        loop input in cli.inputs -> mir_native_verify_cli_input(input, span)
+        names := [String:Bool]{}
+        loop command in cli.commands {
+            if command.name.len() == 0 || names.get(command.name) != None -> return Err(mir_native_invalid_row("CLI command {command.name}", span))
+            names[command.name] = true
+            mir_native_verify_row_ref(functions, command.function.value, "CLI command {command.name}", span)
+            if command.receiver == .Val(receiver) -> mir_native_verify_row_ref(types, receiver.value, "CLI receiver {command.name}", span)
+            loop input in command.inputs -> mir_native_verify_cli_input(input, span)
+        }
+    }
+    return
+}
+
+// MIROptimization.rs:447-873. All rows, including imports and native rows,
+// participate; collection order is also first-error order.
+fn mir_native_verify_program_rows(program: MIRProgram, functions: [U64:Bool], types: [U64:Bool], fields: [U64:Bool], sources: [U64:Bool]) MIRLegalityError! {
+    zero :: Span{start: 0, end: 0}
+    function_zero :: MIRFunctionID{value: U64{0}}
+    modules := [U64:Bool]{}
+    imports := [U64:Bool]{}
+    traits := [U64:Bool]{}
+    implementations := [U64:Bool]{}
+    constants := [U64:Bool]{}
+    foreign := [U64:Bool]{}
+    callbacks := [U64:Bool]{}
+    links := [U64:Bool]{}
+    handles := [U64:Bool]{}
+    jobs := [U64:Bool]{}
+    tests := [U64:Bool]{}
+    harnesses := [U64:Bool]{}
+    loop row in program.modules -> modules[row.id.value] = true
+    loop row in program.imports -> imports[row.id.value] = true
+    loop row in program.traits -> traits[row.id.value] = true
+    loop row in program.impls -> implementations[row.id.value] = true
+    loop row in program.constants -> constants[row.id.value] = true
+    loop row in program.foreign -> foreign[row.id.value] = true
+    loop row in program.callbacks -> callbacks[row.id.value] = true
+    loop row in program.links -> links[row.id.value] = true
+    loop row in program.handles -> handles[row.id.value] = true
+    loop row in program.jobs -> jobs[row.id.value] = true
+    loop row in program.tests -> tests[row.id.value] = true
+    loop row in program.harnesses -> harnesses[row.id.value] = true
+    seen_modules := [U64:Bool]{}
+    loop module in program.modules {
+        mir_native_verify_row_id(module.id.value, "module", &seen_modules, zero)
+        if module.key.len() == 0 || module.name.len() == 0 || module.path.len() == 0 -> return Err(mir_native_invalid_row("module MirModuleId({module.id.value})", zero))
+        mir_native_verify_row_ref(sources, module.source_file.value, "module {module.key} source", zero)
+        loop import in module.imports -> mir_native_verify_row_ref(imports, import.value, "module {module.key} import", zero)
+        loop item in module.item_order {
+            if item == {
+                .Type(id) -> mir_native_verify_row_ref(types, id.value, "module type item", zero)
+                .Trait(id) -> mir_native_verify_row_ref(traits, id.value, "module trait item", zero)
+                .Function(id) -> mir_native_verify_row_ref(functions, id.value, "module function item", zero)
+                .Constant(id) -> mir_native_verify_row_ref(constants, id.value, "module constant item", zero)
+                .Impl(id) -> mir_native_verify_row_ref(implementations, id.value, "module impl item", zero)
+                .Foreign(id) -> mir_native_verify_row_ref(foreign, id.value, "module foreign item", zero)
+                .Import(id) -> mir_native_verify_row_ref(imports, id.value, "module import item", zero)
+            }
+        }
+    }
+    seen_imports := [U64:Bool]{}
+    loop import in program.imports {
+        mir_native_verify_row_id(import.id.value, "import", &seen_imports, import.span)
+        mir_native_verify_row_ref(modules, import.module_id.value, "import owner module", import.span)
+        if import.kind == {
+            .File(path) | .Module(path) -> {
+                if path.len() == 0 -> return Err(mir_native_invalid_row("import MirImportId({import.id.value})", import.span))
+            }
+            .Unqualified(module, items) -> {
+                mir_native_verify_row_ref(modules, module.value, "unqualified import module", import.span)
+                loop item in items {
+                    if item.original.len() == 0 || item.local.len() == 0 -> return Err(mir_native_invalid_row("import MirImportId({import.id.value})", import.span))
+                    if item.item == {
+                        .Type(id) -> mir_native_verify_row_ref(types, id.value, "import type", import.span)
+                        .Trait(id) -> mir_native_verify_row_ref(traits, id.value, "import trait", import.span)
+                        .Function(id) -> mir_native_verify_row_ref(functions, id.value, "import function", import.span)
+                        .Constant(id) -> mir_native_verify_row_ref(constants, id.value, "import constant", import.span)
+                        .Impl(id) -> mir_native_verify_row_ref(implementations, id.value, "import impl", import.span)
+                        .Foreign(id) -> mir_native_verify_row_ref(foreign, id.value, "import foreign", import.span)
+                        .Import(id) -> mir_native_verify_row_ref(imports, id.value, "import import", import.span)
+                    }
+                }
+            }
+        }
+    }
+    loop ty in program.types {
+        mir_native_verify_row_ref(modules, ty.module_id.value, "type {ty.key} module", ty.span)
+        if ty.key.len() == 0 || ty.name.len() == 0 -> return Err(mir_native_invalid_row("type MirTypeId({ty.id.value})", ty.span))
+        mir_native_verify_generic_params(ty.generic_params, traits, ty.span)
+        loop derive in ty.derives -> mir_native_verify_row_ref(traits, derive.value, "type {ty.key} derive", ty.span)
+        loop binding in ty.cli_bindings {
+            if binding.name.len() == 0 -> return Err(mir_native_invalid_row("type MirTypeId({ty.id.value}) CLI binding", ty.span))
+            mir_native_verify_row_ref(functions, binding.function.value, "type CLI binding function", ty.span)
+        }
+        if ty.cli == .Val(cli) {
+            loop input in cli.inputs -> mir_native_verify_cli_input(input, ty.span)
+            if cli.commands.len() != 0 -> return Err(mir_native_invalid_row("type MirTypeId({ty.id.value}) CLI shape carries commands", ty.span))
+        }
+    }
+    loop function in program.functions -> mir_native_verify_row_ref(modules, function.module_id.value, "function {function.key} module", function.span)
+    seen_traits := [U64:Bool]{}
+    seen_methods := [U64:Bool]{}
+    loop trait_def in program.traits {
+        mir_native_verify_row_id(trait_def.id.value, "trait", &seen_traits, trait_def.span)
+        mir_native_verify_row_ref(modules, trait_def.module_id.value, "trait module", trait_def.span)
+        if trait_def.key.len() == 0 || trait_def.name.len() == 0 -> return Err(mir_native_invalid_row("trait MirTraitId({trait_def.id.value})", trait_def.span))
+        loop method in trait_def.methods {
+            mir_native_verify_row_id(method.id.value, "trait method", &seen_methods, method.span)
+            if method.name.len() == 0 -> return Err(mir_native_invalid_row("trait {trait_def.key} method", method.span))
+            loop param in method.params -> mir_native_verify_param(param, function_zero)
+            if method.declared_return == .Val(ty) -> mir_native_verify_type(ty, method.span, function_zero)
+            mir_native_verify_type(method.return_type, method.span, function_zero)
+            mir_native_verify_failure_carrier_at(method.failure, function_zero, method.span)
+            if method.default == .Val(default) -> mir_native_verify_row_ref(functions, default.value, "trait {trait_def.key} default", method.span)
+        }
+    }
+    seen_impls := [U64:Bool]{}
+    loop implementation in program.impls {
+        mir_native_verify_row_id(implementation.id.value, "impl", &seen_impls, implementation.span)
+        mir_native_verify_row_ref(modules, implementation.module_id.value, "impl module", implementation.span)
+        if implementation.key.len() == 0 -> return Err(mir_native_invalid_row("impl MirImplId({implementation.id.value})", implementation.span))
+        mir_native_verify_type(implementation.self_type, implementation.span, function_zero)
+        if implementation.trait_ref == .Val(trait_ref) {
+            mir_native_verify_row_ref(traits, trait_ref.id.value, "impl trait", implementation.span)
+            if trait_ref.name.len() == 0 -> return Err(mir_native_invalid_row("impl trait name", implementation.span))
+        }
+        loop associated in implementation.associated_types {
+            if associated.name.len() == 0 || associated.span.start > associated.span.end -> return Err(mir_native_invalid_row("impl associated type", associated.span))
+            mir_native_verify_type(associated.ty, associated.span, function_zero)
+        }
+        loop method in implementation.methods -> mir_native_verify_row_ref(functions, method.value, "impl method", implementation.span)
+        if implementation.delegation == .Val(field) -> mir_native_verify_row_ref(fields, field.value, "impl delegation field", implementation.span)
+        if implementation.operator_rhs == .Val(rhs) -> mir_native_verify_type(rhs, implementation.span, function_zero)
+    }
+    seen_constants := [U64:Bool]{}
+    loop constant in program.constants {
+        mir_native_verify_row_id(constant.id.value, "constant", &seen_constants, constant.span)
+        mir_native_verify_row_ref(modules, constant.module_id.value, "constant module", constant.span)
+        if constant.key.len() == 0 || constant.name.len() == 0 -> return Err(mir_native_invalid_row("constant MirConstantId({constant.id.value})", constant.span))
+        mir_native_verify_type(constant.ty, constant.span, function_zero)
+        mir_native_verify_constant(constant.value, constant.span)
+    }
+    seen_links := [U64:Bool]{}
+    loop link in program.links {
+        mir_native_verify_row_id(link.id.value, "link unit", &seen_links, zero)
+        if link.crate_spec.len() == 0 || link.cache_identity.len() == 0 -> return Err(mir_native_invalid_row("link MirLinkUnitId({link.id.value})", zero))
+        loop artifact in link.artifacts {
+            if artifact.path.len() == 0 -> return Err(mir_native_invalid_row("link MirLinkUnitId({link.id.value}) artifact", zero))
+        }
+        loop dependency in link.dependency_dirs {
+            if dependency.len() == 0 -> return Err(mir_native_invalid_row("link MirLinkUnitId({link.id.value}) dependency", zero))
+        }
+        loop closure in link.link_closure -> mir_native_verify_row_ref(links, closure.value, "link closure", zero)
+    }
+    seen_foreign := [U64:Bool]{}
+    loop row in program.foreign {
+        mir_native_verify_row_id(row.id.value, "foreign", &seen_foreign, row.span)
+        mir_native_verify_row_ref(modules, row.module_id.value, "foreign module", row.span)
+        if row.key.len() == 0 || row.module_name.len() == 0 || row.name.len() == 0 || row.symbol.len() == 0 || row.path.len() == 0 -> return Err(mir_native_invalid_row("foreign MirForeignId({row.id.value})", row.span))
+        loop param in row.params -> mir_native_verify_param(param, function_zero)
+        if row.return_type == .Val(ty) -> mir_native_verify_type(ty, row.span, function_zero)
+        if row.link == .Val(link) -> mir_native_verify_row_ref(links, link.value, "foreign link", row.span)
+        if row.callback == .Val(callback) -> mir_native_verify_row_ref(callbacks, callback.value, "foreign callback", row.span)
+        if row.handle == .Val(handle) -> mir_native_verify_row_ref(handles, handle.value, "foreign handle", row.span)
+        if row.close_function == .Val(function) -> mir_native_verify_row_ref(functions, function.value, "foreign lifecycle function", row.span)
+        if row.undo_function == .Val(function) -> mir_native_verify_row_ref(functions, function.value, "foreign lifecycle function", row.span)
+        if row.close_foreign == .Val(close) -> mir_native_verify_row_ref(foreign, close.value, "foreign close", row.span)
+    }
+    seen_callbacks := [U64:Bool]{}
+    loop callback in program.callbacks {
+        mir_native_verify_row_id(callback.id.value, "callback", &seen_callbacks, zero)
+        if callback.symbol.len() == 0 -> return Err(mir_native_invalid_row("callback MirCallbackId({callback.id.value})", zero))
+        mir_native_verify_row_ref(functions, callback.function.value, "callback function", zero)
+        loop param in callback.params -> mir_native_verify_param(param, callback.function)
+        if callback.return_type == .Val(ty) -> mir_native_verify_type(ty, zero, callback.function)
+    }
+    seen_handles := [U64:Bool]{}
+    loop handle in program.handles {
+        mir_native_verify_row_id(handle.id.value, "handle", &seen_handles, zero)
+        mir_native_verify_type(handle.ty, zero, function_zero)
+        if handle.close == .Val(function) -> mir_native_verify_row_ref(functions, function.value, "handle lifecycle function", zero)
+        if handle.undo == .Val(function) -> mir_native_verify_row_ref(functions, function.value, "handle lifecycle function", zero)
+        if handle.close_foreign == .Val(row) -> mir_native_verify_row_ref(foreign, row.value, "handle close foreign", zero)
+    }
+    seen_jobs := [U64:Bool]{}
+    loop job in program.jobs {
+        mir_native_verify_row_id(job.id.value, "job", &seen_jobs, zero)
+        mir_native_verify_row_ref(functions, job.function.value, "job {job.name}", zero)
+        if job.name.len() == 0 -> return Err(mir_native_invalid_row("job without a name", zero))
+        if job.parallel == 0 || mir_native_has_empty_string(job.after) -> return Err(mir_native_invalid_row("job MirJobId({job.id.value})", zero))
+        if job.schedule == .Val(schedule) {
+            if schedule == {
+                .Duration(nanos) -> { if nanos < 0 -> return Err(mir_native_invalid_row("negative job duration", zero)) }
+                .WallClockTime(hour, minute) -> { if hour >= 24 || minute >= 60 -> return Err(mir_native_invalid_row("invalid job wall-clock time", zero)) }
+            }
+        }
+        loop input in job.inputs -> mir_native_verify_cli_input(input, zero)
+        if mir_native_has_empty_string(job.packages) || mir_native_has_empty_string(job.input_paths) || mir_native_has_empty_string(job.output_paths) -> return Err(mir_native_invalid_row("job MirJobId({job.id.value})", zero))
+        loop limit in job.limits {
+            if limit.name.len() == 0 || limit.value.len() == 0 -> return Err(mir_native_invalid_row("job MirJobId({job.id.value})", zero))
+        }
+        if job.working_directory == Val("") -> return Err(mir_native_invalid_row("job MirJobId({job.id.value})", zero))
+        if job.skip == .Val(skip) {
+            if skip == .Always(value) | .UnlessPlatform(value) {
+                if value.len() == 0 -> return Err(mir_native_invalid_row("job MirJobId({job.id.value})", zero))
+            }
+        }
+    }
+    seen_tests := [U64:Bool]{}
+    loop test in program.tests {
+        mir_native_verify_row_id(test.id.value, "test", &seen_tests, test.span)
+        mir_native_verify_row_ref(functions, test.function.value, "test {test.name}", test.span)
+        if test.eligibility == .Val(eligibility) -> mir_native_verify_row_ref(functions, eligibility.value, "test {test.name} eligibility predicate", test.span)
+        sampled :: test.contract_generated && test.generation_unavailable_reason == None
+        if test.name.len() == 0 || test.span.start > test.span.end || test.generation_unavailable_reason == Val("") || (test.eligibility != None) != sampled -> return Err(mir_native_invalid_row("test MirTestId({test.id.value})", test.span))
+        loop param in test.parameters -> mir_native_verify_param(param, test.function)
+        if mir_native_has_empty_string(test.faults) -> return Err(mir_native_invalid_row("test MirTestId({test.id.value})", test.span))
+    }
+    // Separate function->bucket and bucket->block indexes avoid copying a
+    // whole nested map for each coverage membership check.
+    function_slots := [U64:Int]{}
+    function_blocks := [[U64:Bool]]{}
+    loop function in program.functions {
+        block_ids := [U64:Bool]{}
+        loop block in function.blocks -> block_ids[block.id.value] = true
+        function_slots[function.id.value] = function_blocks.len()
+        &function_blocks.push(^block_ids)
+    }
+    seen_harnesses := [U64:Bool]{}
+    seen_output := [U64:Bool]{}
+    seen_coverage := [U64:Bool]{}
+    loop harness in program.harnesses {
+        mir_native_verify_row_id(harness.id.value, "harness", &seen_harnesses, zero)
+        loop test in harness.tests -> mir_native_verify_row_ref(tests, test.value, "harness test", zero)
+        if harness.selected_test == .Val(test) -> mir_native_verify_row_ref(tests, test.value, "harness selected test", zero)
+        loop check in harness.output_checks {
+            mir_native_verify_row_id(check.id.value, "output check", &seen_output, zero)
+            if check.name.len() == 0 -> return Err(mir_native_invalid_row("output check without a name", zero))
+            mir_native_verify_row_ref(functions, check.function.value, "output check function", zero)
+        }
+        loop point in harness.coverage_points {
+            mir_native_verify_row_id(point.id.value, "coverage point", &seen_coverage, point.span)
+            mir_native_verify_row_ref(functions, point.function.value, "coverage point function", point.span)
+            slot :: function_slots.get(point.function.value) ?? return Err(mir_native_invalid_row("coverage point block", point.span))
+            if function_blocks[slot].get(point.block.value) == None -> return Err(mir_native_invalid_row("coverage point block", point.span))
+            if point.span.start > point.span.end -> return Err(MIRLegalityError.InvalidSpan{function: Val(point.function), span: point.span})
+        }
+    }
+    seen_artifacts := [U64:Bool]{}
+    loop artifact in program.artifacts {
+        mir_native_verify_row_id(artifact.id.value, "artifact", &seen_artifacts, zero)
+        if artifact.name.len() == 0 || artifact.provider_identity.len() == 0 || artifact.closure_identity.len() == 0 || artifact.artifact_identity.len() == 0 -> return Err(mir_native_invalid_row("artifact MirArtifactId({artifact.id.value})", zero))
+        loop module in artifact.modules -> mir_native_verify_row_ref(modules, module.value, "artifact module", zero)
+        loop link in artifact.links -> mir_native_verify_row_ref(links, link.value, "artifact link", zero)
+        loop job in artifact.jobs -> mir_native_verify_row_ref(jobs, job.value, "artifact job", zero)
+        if artifact.harness == .Val(harness) -> mir_native_verify_row_ref(harnesses, harness.value, "artifact harness", zero)
+        if artifact.entry == .Val(entry) -> mir_native_verify_entry_spec(entry, functions, types, zero)
+        loop export in artifact.exports {
+            if export.symbol.len() == 0 -> return Err(mir_native_invalid_row("artifact MirArtifactId({artifact.id.value}) export", zero))
+            mir_native_verify_row_ref(functions, export.function.value, "artifact export function", zero)
+        }
+    }
+    return
+}
+fn mir_native_has_empty_string(values: [String]) -> Bool Never! {
+    loop value in values { if value.len() == 0 -> return true }
+    false
+}

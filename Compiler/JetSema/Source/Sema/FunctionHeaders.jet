@@ -3,6 +3,8 @@
 // registering or type-checking ordinary function bodies.
 use jet_foundation.[
     AccessConvention,
+    ArithmeticMode,
+    ArithmeticPolicyFact,
     CallArg,
     Diagnostic,
     Expr,
@@ -160,11 +162,44 @@ pub fn sema_function_header_check_marker_gates(function: Func, function_allowed_
     valid
 }
 
-// The function rules whose meaning the parser projects onto `Func` fields
-// that the checker, foreign stage and lowering read; the marker row itself
-// adds nothing.
+// These rules have real checker/foreign/lowering consumers, after canonical
+// applicability and typed argument observation: Func fields, checked job
+// facts, checked contracts, or lexical arithmetic operations. This is not
+// the applicability whitelist; unimplemented headers still fail below.
 fn sema_function_header_marker_projected(name: String) -> Bool Never! {
-    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI"
+    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Job" || name == "Every" || name == "Doc" || name == "Pre" || name == "Post" || name == "Arithmetic"
+}
+
+// Rust ArithmeticMode::from_expr: the canonical marker registry validates
+// the typed closed menu first; the body consumer reads only its variant.
+pub fn sema_function_header_arithmetic_mode(value: Expr) -> ArithmeticMode? Never! {
+    name := if value == {
+        .EnumLit(_, variant, _, _, _, _) -> variant
+        .Field(_, variant, _) -> variant
+        .Ident(variant, _) -> variant
+        else -> return None
+    }
+    if name == {
+        "Checked" -> Val(ArithmeticMode.Checked)
+        "Wrapping" -> Val(ArithmeticMode.Wrapping)
+        "Saturating" -> Val(ArithmeticMode.Saturating)
+        else -> None
+    }
+}
+
+// Rust Registration::check_params_and_body applies the first function/method
+// arithmetic marker to the body, after checking contracts and parameters.
+pub fn sema_function_header_arithmetic_policy(function: Func) -> ArithmeticPolicyFact? Never! {
+    loop marker in function.markers {
+        if marker.name != "Arithmetic" -> next
+        if marker.args.len() == 0 -> return None
+        if marker.args[0] == .Expr(expression) {
+            mode :: sema_function_header_arithmetic_mode(expression) ?? return None
+            return Val(ArithmeticPolicyFact{mode: mode, scope_span: marker.span, operation_span: marker.span, operation: None})
+        }
+        return None
+    }
+    None
 }
 
 // The header forms the body checker does not handle yet. Each one records

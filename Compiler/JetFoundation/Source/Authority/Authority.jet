@@ -1,0 +1,392 @@
+// D-AUTHORITY-MODEL1=A, ported from jet_foundation::Authority: one rights
+// tree, one holds relation, one application policy carrier.
+//
+// A rights set (Rust `Holds`, a `BTreeSet<String>`) is a sorted,
+// duplicate-free `[String]`; `authority_holds` builds one. Host-import facts
+// and the E1803 policy diagnostic need compiler types (MIR, Diagnostic), so
+// their owners live in the PackageModel area (Authority/SandboxAuthority.jet,
+// Policy/EffectProjection.jet); this file stays compiler-free.
+
+// jet_foundation::Effects::EFFECT_ROOTS: the thirteen grantable roots.
+pub AUTHORITY_EFFECT_ROOTS :: prep { [String]{
+    "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI", "Browser", "Secret"
+} }
+
+// jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS: reading the program's own
+// arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
+pub AUTHORITY_EXEC_ARGS_LEAF :: prep { "Exec.Args" }
+// ApplicationAuthority::AMBIENT_BASIC_EFFECTS (D-AUTH-AMBIENT1=A): print,
+// allocate, and read arguments. Never the `Exec` root.
+pub AUTHORITY_AMBIENT_BASIC_EFFECTS :: prep { [String]{"IO", "Mem.Alloc", AUTHORITY_EXEC_ARGS_LEAF} }
+// ApplicationAuthority::APPLICATION_DEFAULT: the manifest-less policy source.
+pub AUTHORITY_APPLICATION_DEFAULT :: prep { "application default" }
+// ApplicationAuthority::PACKAGE_DEFAULT: a package.jet with no authority.holds.
+pub AUTHORITY_PACKAGE_DEFAULT :: prep { "package.jet default" }
+// The deny-only stop root (D-PANICROOT1).
+pub AUTHORITY_PANIC_ROOT :: prep { "Panic" }
+
+// The one verdict every checkpoint answers.
+pub enum AuthorityVerdict {
+    Allowed
+    Denied
+    Missing
+}
+
+// A rights set: sorted with duplicates removed (Rust `Holds`).
+pub fn authority_holds(rights: [String]) -> [String] Never! {
+    sorted := rights
+    &sorted.sort()
+    out := [String]{}
+    loop right in sorted {
+        if out.contains(right) -> next
+        &out.push(right)
+    }
+    out
+}
+
+// Insert one right, keeping the set sorted and duplicate-free.
+pub fn authority_holds_insert(holds: &[String], right: String) {
+    if holds.contains(right) -> return
+    &holds.push(right)
+    &holds.sort()
+}
+
+// Root segment of a dotted right (`FS.Read` -> `FS`).
+pub fn authority_root(right: String) -> String Never! {
+    parts :: right.split(".").to_list()
+    if parts.len() == 0 -> return ~right
+    parts[0]
+}
+
+// ASCII-only lowercase, for the case-insensitive root table.
+pub fn authority_ascii_lower(value: String) -> String Never! {
+    out := [U8]{}
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        &out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
+    }
+    String.from_bytes(out) ?? value
+}
+
+// Resolve one root using the canonical table. Dotted input is accepted only
+// for its root; leaf declaration remains sema's job.
+pub fn authority_parse_root(right: String) -> String? Never! {
+    folded :: authority_ascii_lower(authority_root(right))
+    if folded == {
+        "panic" -> return Val(AUTHORITY_PANIC_ROOT)
+        "mem" -> return Val("Mem")
+        else -> {}
+    }
+    loop known in AUTHORITY_EFFECT_ROOTS {
+        if authority_ascii_lower(known) == folded -> return Val(known)
+    }
+    None
+}
+
+// Preserve a right's leaf spelling while normalizing its canonical root.
+pub fn authority_parse_right(right: String) -> String? Never! {
+    // #4303: Main-approved host-emitter binding workaround; restore :: with the emitter fix.
+    trimmed := right.trim()
+    root :: authority_parse_root(trimmed) ?? return None
+    if root == AUTHORITY_PANIC_ROOT && trimmed != AUTHORITY_PANIC_ROOT -> return None
+    raw :: trimmed.bytes()
+    loop index in 0..<raw.len() {
+        if Int.from_u8(raw[index]) == 46 {
+            leaf :: String.from_bytes(raw[index + 1..<raw.len()]) ?? ""
+            return Val("{root}.{leaf}")
+        }
+    }
+    Val(root)
+}
+
+// D-EFFTREE1: a bound covers itself and every descendant in the rights tree.
+// Resource-qualified rights use `:` for hosts and paths (`FS.Read:/data`); a
+// qualified descendant must cross a `/` boundary, so `/data` does not cover
+// `/database`.
+pub fn authority_covers(bound: String, right: String) -> Bool Never! {
+    canonical_bound :: authority_parse_right(bound) ?? bound.trim()
+    canonical_right :: authority_parse_right(right) ?? right.trim()
+    if canonical_right == canonical_bound -> return true
+    if !canonical_right.starts_with(canonical_bound) -> return false
+    qualified :: canonical_bound.contains(":")
+    next_byte :: Int.from_u8(canonical_right.bytes()[canonical_bound.bytes().len()])
+    if qualified -> return next_byte == 47
+    next_byte == 46 || next_byte == 58 || next_byte == 47
+}
+
+pub fn authority_covers_any(bounds: [String], right: String) -> Bool Never! {
+    loop bound in bounds {
+        if authority_covers(bound, right) -> return true
+    }
+    false
+}
+
+pub fn authority_answer(held: [String], denied: [String], right: String) -> AuthorityVerdict Never! {
+    if authority_covers_any(denied, right) -> return AuthorityVerdict.Denied
+    if authority_covers_any(held, right) -> return AuthorityVerdict.Allowed
+    AuthorityVerdict.Missing
+}
+
+// D-AUTHORITY-MODEL1: an inner scope may only tighten its parent's holds.
+pub fn authority_tighten(outer: [String], inner: [String]) -> Bool Never! {
+    loop right in inner {
+        if !authority_covers_any(outer, right) -> return false
+    }
+    true
+}
+
+// Rights in `used` not covered by any held right.
+pub fn authority_uncovered(used: [String], held: [String]) -> [String] Never! {
+    out := [String]{}
+    loop right in used {
+        if !authority_covers_any(held, right) -> &out.push(right)
+    }
+    authority_holds(out)
+}
+
+// Rights in `used` covered by a prohibition or other matching set.
+pub fn authority_covered(used: [String], matching: [String]) -> [String] Never! {
+    out := [String]{}
+    loop right in used {
+        if authority_covers_any(matching, right) -> &out.push(right)
+    }
+    authority_holds(out)
+}
+
+// A requested scope that would widen its parent authority.
+#Error
+pub struct AuthorityTightenError {
+    pub uncovered: [String]
+
+    pub fn message(self) -> String Never! {
+        "authority scope widens its parent for `{self.uncovered.join(", ")}`"
+    }
+}
+
+// The canonical authority value (Rust `Authority`) projected to runtime
+// adapters. Sandbox wrappers must not keep a second grant set.
+// Shared consumers use this same public constructor and read-only holds field.
+pub struct CanonicalAuthority {
+    pub holds: [String]
+
+    // Unknown spellings are retained for the caller's diagnostic; policy
+    // checks still fail closed because no known hold covers them.
+    pub fn from_rights(rights: [String]) -> CanonicalAuthority Never! {
+        holds := [String]{}
+        loop right in rights -> &holds.push(authority_parse_right(right) ?? right)
+        CanonicalAuthority{holds: authority_holds(holds)}
+    }
+
+    pub fn from_holds(holds: [String]) -> CanonicalAuthority Never! {
+        CanonicalAuthority{holds: authority_holds(holds)}
+    }
+
+    pub fn allows(self, right: String) -> Bool Never! {
+        authority_covers_any(self.holds, right)
+    }
+
+    // True when this authority can satisfy a host operation declaring
+    // `right`; a resource-qualified hold (`FS.Read:/data`) also satisfies the
+    // unqualified operation (`FS.Read`), bounded by the held descendant.
+    pub fn allows_operation(self, right: String) -> Bool Never! {
+        if self.allows(right) -> return true
+        loop held in self.holds {
+            if authority_covers(right, held) -> return true
+        }
+        false
+    }
+
+    // A child authority, only when every requested right is covered here.
+    pub fn tighten(self, requested: [String]) -> CanonicalAuthority AuthorityTightenError! {
+        uncovered :: authority_uncovered(requested, self.holds)
+        if uncovered.len() > 0 -> return Err(AuthorityTightenError{uncovered: uncovered})
+        Ok(CanonicalAuthority.from_holds(requested))
+    }
+}
+
+// D-EFFECT-AUTHORITY1: the application boundary's one checked policy fact.
+// Sema owns `required_effects`; the package loader owns the policy rows.
+pub struct ApplicationAuthority {
+    pub required_effects: [String]
+    pub granted_effects: [String]
+    pub denied_effects: [String]
+    pub authority: String
+
+    // D-AUTH-AMBIENT1=A: the manifest-less beginner basics.
+    pub fn ambient_basics() -> ApplicationAuthority Never! {
+        ApplicationAuthority.beginner_floor(AUTHORITY_APPLICATION_DEFAULT)
+    }
+
+    // #3718: the same floor for a package.jet that writes no `authority.holds`.
+    pub fn package_default() -> ApplicationAuthority Never! {
+        ApplicationAuthority.beginner_floor(AUTHORITY_PACKAGE_DEFAULT)
+    }
+
+    pub fn beginner_floor(authority: String) -> ApplicationAuthority Never! {
+        ApplicationAuthority{
+            required_effects: [String]{},
+            granted_effects: authority_holds(AUTHORITY_AMBIENT_BASIC_EFFECTS),
+            denied_effects: [String]{},
+            authority: authority
+        }
+    }
+
+    // Project parsed `authority.holds` rows; unknown spellings are dropped.
+    pub fn from_policy(allow: [String]?, deny: [String]?, authority: String) -> ApplicationAuthority Never! {
+        ApplicationAuthority{
+            required_effects: [String]{},
+            granted_effects: authority_parse_rights(allow ?? [String]{}),
+            denied_effects: authority_parse_rights(deny ?? [String]{}),
+            authority: authority
+        }
+    }
+
+    // The policy source is the manifest-less default, alone or widened by
+    // invocation flags (D-ECO-INLINEPACKAGE1).
+    pub fn is_application_default(self) -> Bool Never! {
+        self.authority.starts_with(AUTHORITY_APPLICATION_DEFAULT)
+    }
+
+    // A beginner floor (manifest-less or a manifest with no holds). A written
+    // grant replaces the floor, so it must name every required effect.
+    pub fn is_beginner_floor(self) -> Bool Never! {
+        self.is_application_default() || self.authority.starts_with(AUTHORITY_PACKAGE_DEFAULT)
+    }
+
+    // The complete `allow:` row a manifest-less program must declare; `Panic`
+    // is deny-only and never a positive grant.
+    pub fn inline_allow_row(self) -> [String] Never! {
+        out := [String]{}
+        loop effect_name in self.required_effects {
+            if authority_root(effect_name) != AUTHORITY_PANIC_ROOT -> &out.push(effect_name)
+        }
+        authority_holds(out)
+    }
+
+    // Required effects with no policy verdict. `Panic` is not a positive
+    // request; an explicit `Panic` denial is still reported as denied.
+    pub fn undecided_effects(self) -> [String] Never! {
+        out := [String]{}
+        loop effect_name in self.required_effects {
+            if authority_root(effect_name) == AUTHORITY_PANIC_ROOT -> next
+            if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Missing -> &out.push(effect_name)
+        }
+        authority_holds(out)
+    }
+
+    // Required effects the policy explicitly denies.
+    pub fn denied_required_effects(self) -> [String] Never! {
+        out := [String]{}
+        loop effect_name in self.required_effects {
+            if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Denied -> &out.push(effect_name)
+        }
+        authority_holds(out)
+    }
+
+    pub fn is_allowed(self) -> Bool Never! {
+        self.undecided_effects().len() == 0 && self.denied_required_effects().len() == 0
+    }
+
+    // The one-line policy fix from the complete undecided set. Denied effects
+    // are never turned into an allow suggestion; a beginner floor is replaced
+    // by the grant it teaches, so that grant names the complete row.
+    pub fn policy_fix(self) -> String Never! {
+        undecided :: self.undecided_effects()
+        if undecided.len() > 0 && self.is_application_default() {
+            return "declare the complete row `allow: [{self.inline_allow_row().join(", ")}]` under `authority.holds` in a leading `package {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
+        }
+        policy_step :: if {
+            undecided.len() == 0 -> "adjust the denial in `authority.holds.deny`"
+            self.is_beginner_floor() -> "add the complete row `allow: [{self.inline_allow_row().join(", ")}]` under `authority.holds` in `package.jet`"
+            else -> "add `allow: [{undecided.join(", ")}]` under `authority.holds` in `package.jet`"
+        }
+        "{policy_step}; otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal"
+    }
+
+    // #3718: the human Why of E1803, one plain sentence naming what the
+    // program does and which policy has not allowed it.
+    pub fn policy_why(self) -> String Never! {
+        denied :: self.denied_required_effects()
+        rights :: if denied.len() == 0 -> self.undecided_effects() else -> denied
+        verdict :: if denied.len() == 0 -> "has not allowed that yet" else -> "denies that"
+        actions := [String]{}
+        loop right in rights {
+            action :: authority_effect_action(right)
+            if !actions.contains(action) -> &actions.push(action)
+        }
+        said :: if {
+            actions.len() == 0 -> "uses no authority"
+            actions.len() == 1 -> actions[0]
+            else -> "{actions[0..<actions.len() - 1].join(", ")} and {actions[actions.len() - 1]}"
+        }
+        "This program {said}, and {self.policy_owner()} {verdict}."
+    }
+
+    pub fn policy_owner(self) -> String Never! {
+        if {
+            self.is_application_default() -> "the default for a file with no package block"
+            self.authority.starts_with(AUTHORITY_PACKAGE_DEFAULT) -> "package.jet (which has no authority block)"
+            self.authority.starts_with("package.jet") -> "package.jet"
+            self.authority.starts_with("inline Package") -> "this file's package block"
+            else -> "`{self.authority}`"
+        }
+    }
+
+    // The machine facts behind E1803: structured detail that `--json`
+    // reports and the human renderer keeps out of the sentence.
+    pub fn policy_facts(self) -> String Never! {
+        "authority_facts:required_effects={authority_names_or_none(self.required_effects)}; granted_effects={authority_names_or_none(self.granted_effects)}; denied_effects={authority_names_or_none(self.denied_effects)}; denied_required_effects={authority_names_or_none(self.denied_required_effects())}; undecided_effects={authority_names_or_none(self.undecided_effects())}; authority={self.authority}"
+    }
+}
+
+pub fn authority_names_or_none(rights: [String]) -> String Never! {
+    if rights.len() == 0 -> return "none"
+    rights.join(", ")
+}
+
+// Plain words for what a program does when it uses `right`
+// (jet_foundation::Authority::effect_action). Unlisted leaves fall back to
+// their root's words.
+pub fn authority_effect_action(right: String) -> String Never! {
+    canonical :: authority_parse_right(right) ?? right
+    if canonical == {
+        "FS.Read" -> return "reads files"
+        "FS.Write" -> return "writes files"
+        "Exec.Exit" -> return "ends its own process"
+        "Time.Wait" -> return "waits"
+        "Mem.Alloc" -> return "allocates memory"
+        "DB.Read" -> return "reads a database"
+        "DB.Write" -> return "writes a database"
+        "Rand.Draw" -> return "draws random numbers"
+        else -> {}
+    }
+    if canonical == AUTHORITY_EXEC_ARGS_LEAF -> return "reads its arguments"
+    if authority_root(canonical) == {
+        "IO" -> "prints text or reads input"
+        "FS" -> "reads and writes files"
+        "Net" -> "uses the network"
+        "Exec" -> "starts other programs"
+        "Env" -> "reads environment variables"
+        "Time" -> "reads the clock"
+        "Rand" -> "draws random numbers"
+        "DB" -> "uses a database"
+        "Log" -> "writes logs"
+        "GPU" -> "uses the GPU"
+        "FFI" -> "calls foreign code"
+        "Browser" -> "uses browser APIs"
+        "Secret" -> "reads secrets"
+        "Mem" -> "allocates memory"
+        "Panic" -> "can stop with a panic"
+        else -> "uses an undeclared authority"
+    }
+}
+
+// The canonical spellings of `names`, dropping unknown ones.
+pub fn authority_parse_rights(names: [String]) -> [String] Never! {
+    out := [String]{}
+    loop name in names {
+        parsed :: authority_parse_right(name) ?? next
+        &out.push(parsed)
+    }
+    authority_holds(out)
+}

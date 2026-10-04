@@ -1,0 +1,355 @@
+// Source parity for crates/jet-foundation/src/Diagnostics.rs:1851-2465.
+// Main composes the canonical Core assets and generated template_holes before
+// exercising these tests. Every assertion targets the real production owner.
+fn registry_diagnostic_error() -> Diagnostic Never! {
+    diagnostic_from_registry("E0001", Val(Span{start: 1, end: 3}), "error what", "error why", "error fix")
+}
+
+fn registry_diagnostic_warning() -> Diagnostic Never! {
+    diagnostic_from_registry("L2001", Val(Span{start: 1, end: 3}), "warning what", "warning why", "warning fix")
+}
+
+fn registry_diagnostic_json_lines(json: String) -> [String] Never! {
+    assert(json.ends_with("\n"))
+    lines := json.split("\n")
+    removed :: &lines.remove(lines.len() - 1, .Slot)
+    assert(removed == Val(""))
+    lines
+}
+
+fn registry_diagnostic_occurrences(text: String, needle: String) -> Int Never! {
+    bytes :: text.bytes()
+    sought :: needle.bytes()
+    assert(sought.len() > 0)
+    count := 0
+    at := 0
+    loop at + sought.len() <= bytes.len() {
+        matches := true
+        loop index in 0..<sought.len() {
+            if bytes[at + index] != sought[index] { matches = false; break }
+        }
+        if matches { count += 1; at += sought.len() } else -> at += 1
+    }
+    count
+}
+
+fn registry_diagnostic_valid_json(text: String) -> Bool Never! {
+    if foundation_json_parse(text) == { .Ok(_) -> true .Err(_) -> false }
+}
+
+// Rust:1851. All original grapheme fixtures, not scalar-width substitutes.
+#Test("diagnostics_use_pinned_grapheme_display_width") {
+    assert(diagnostic_display_width("é") == 1)
+    assert(diagnostic_display_width("🇺🇸") == 2)
+    assert(diagnostic_display_width("👨‍👩‍👧‍👦") == 2)
+    assert(diagnostic_display_width("1️⃣") == 2)
+    assert(diagnostic_display_width("©️") == 2)
+    assert(diagnostic_display_width("́‍") == 0)
+    assert(diagnostic_display_width("界") == 2)
+}
+
+// Rust:1887, including both severity-colored caret byte goldens.
+#Test("colored_carets_follow_error_and_warning_severity") {
+    esc :: String.from_bytes([U8]{27}) ?? panic("ESC is valid UTF-8")
+    assert(diagnostic_render(registry_diagnostic_error(), "main.jet", "abc\n", true) == "{esc}[31mError{esc}[0m [E0001]: Error what\n  {esc}[2;37m--> main.jet:1:2{esc}[0m\n    |\n  1 | abc\n    |  {esc}[31m^^{esc}[0m\n {esc}[1mWhy:{esc}[0m Error why\n {esc}[1mFix:{esc}[0m Error fix\nMore: jet-lang.dev/e/E0001\n")
+    assert(diagnostic_render(registry_diagnostic_warning(), "main.jet", "abc\n", true) == "{esc}[33mWarning{esc}[0m [L2001] (deprecated_item): Warning what\n  {esc}[2;37m--> main.jet:1:2{esc}[0m\n    |\n  1 | abc\n    |  {esc}[33m^^{esc}[0m\n {esc}[1mWhy:{esc}[0m Warning why\n {esc}[1mFix:{esc}[0m Warning fix\nMore: jet-lang.dev/e/L2001\n")
+}
+
+// Rust:1918.
+#Test("secondary_labels_render_a_located_caret_and_reach_json") {
+    source :: "ab\ncd xs\n"
+    diagnostic :: diagnostic_with_label(^registry_diagnostic_error(), Span{start: 6, end: 8}, "`xs` moved here")
+    assert(diagnostic_render(diagnostic, "main.jet", source, false) == "Error [E0001]: Error what\n  --> main.jet:1:2\n    |\n  1 | ab\n    |  ^\n  --> main.jet:2:4\n    |\n  2 | cd xs\n    |    ^^ `xs` moved here\n Why: Error why\n Fix: Error fix\nMore: jet-lang.dev/e/E0001\n")
+    json :: diagnostic_to_json(diagnostic, ReportPath.from_process("main.jet"), source)
+    assert(json.contains("\"labels\":[{{\"line\":2,\"col\":4,\"span\":{{\"start\":6,\"end\":8}},\"message\":\"`xs` moved here\"}}]"))
+    assert(json.contains("\"line\":1,\"col\":2,\"span\":{{\"start\":1,\"end\":3}}"))
+}
+
+// Rust:1949.
+#Test("plain_error_and_warning_renderings_are_byte_exact") {
+    assert(diagnostic_render(registry_diagnostic_error(), "main.jet", "abc\n", false) == "Error [E0001]: Error what\n  --> main.jet:1:2\n    |\n  1 | abc\n    |  ^^\n Why: Error why\n Fix: Error fix\nMore: jet-lang.dev/e/E0001\n")
+    assert(diagnostic_render(registry_diagnostic_warning(), "main.jet", "abc\n", false) == "Warning [L2001] (deprecated_item): Warning what\n  --> main.jet:1:2\n    |\n  1 | abc\n    |  ^^\n Why: Warning why\n Fix: Warning fix\nMore: jet-lang.dev/e/L2001\n")
+}
+
+// Rust:1980. Hostile controls are terminal-only escaped, never normalized away.
+#Test("terminal_projection_escapes_hostile_text_without_mutating_structure") {
+    esc :: String.from_bytes([U8]{27}) ?? panic("ESC is valid UTF-8")
+    bel :: String.from_bytes([U8]{7}) ?? panic("BEL is valid UTF-8")
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
+    detail :: "provider: {esc}[31mBAD\nforged"
+    diagnostic :: diagnostic_with_detail(^diagnostic_from_registry("E0001", Val(Span{start: 0, end: 1}), "The {esc}]8;;evil{bel} headline", "The why\nforged", "The fix{cr}forged"), detail)
+    rendered :: diagnostic_render(diagnostic, "bad{esc}]8;;evil", "x{esc}[31m\n", false)
+    assert(!rendered.contains(esc))
+    assert(rendered.contains("\\u{{001b}}"))
+    assert(rendered.contains("\\nforged"))
+    assert(rendered.contains("\\rforged"))
+    assert(!rendered.contains("BAD\nforged"))
+    assert(diagnostic.detail == Val(detail))
+    assert(diagnostic.why.contains("\n"))
+}
+
+// Rust:2002.
+#Test("runtime_text_obeys_case_law_and_more_line") {
+    assert(diagnostic_sentence_case_line("the compiler saw `TypeName`") == "The compiler saw `TypeName`")
+    assert(diagnostic_sentence_case_line("`--offline` forbids network access") == "`--offline` forbids network access")
+    assert(diagnostic_sentence_case_line("Int cannot cross the C boundary") == "Int cannot cross the C boundary")
+    assert(diagnostic_sentence_case_line("Syntax.rs owns user-typeable syntax") == "Syntax.rs owns user-typeable syntax")
+    assert(diagnostic_sentence_case_line("pkg@source#version is a package ref") == "pkg@source#version is a package ref")
+    diagnostic :: diagnostic_from_registry("E0001", None, "The dynamic what", "The dynamic why", "The dynamic fix")
+    rendered :: diagnostic_render(diagnostic, "", "", false)
+    assert(rendered.contains("Error [E0001]: The dynamic what"))
+    assert(rendered.ends_with("More: jet-lang.dev/e/E0001\n"))
+    lint :: diagnostic_from_registry("L2001", None, "The dynamic warning", "The dynamic why", "The dynamic fix")
+    assert(lint.what == "The dynamic warning")
+    assert(lint.why == "The dynamic why")
+    assert(lint.fix == "The dynamic fix")
+}
+
+// Rust:2047.
+#Test("wide_character_span_keeps_columns_and_caret_width") {
+    diagnostic :: diagnostic_from_registry("E0001", Val(Span{start: 1, end: 4}), "error what", "error why", "error fix")
+    assert(diagnostic_render(diagnostic, "wide.jet", "a界b\n", false) == "Error [E0001]: Error what\n  --> wide.jet:1:2\n    |\n  1 | a界b\n    |  ^^\n Why: Error why\n Fix: Error fix\nMore: jet-lang.dev/e/E0001\n")
+}
+
+// Rust:2076.
+#Test("e2702_json_is_one_closed_redacted_object") {
+    diagnostic :: diagnostic_crypto_misuse("HKDF-SHA256 output length is 8161 bytes; this operation requires 0..8160", "pass an output length from 0 through 8160 bytes", Span{start: 4, end: 8}, DiagnosticCryptoMisuseReason.OutputLength, "hkdf_sha256", "0..8160", 8161)
+    json :: diagnostic_render_all_json(ReportPath.from_process("secret-name.jet"), "xxxx8161", [Diagnostic]{diagnostic})
+    lines :: registry_diagnostic_json_lines(json)
+    assert(lines.len() == 1)
+    object :: lines[0]
+    assert(object.starts_with("{{") && object.ends_with("}}"))
+    assert(registry_diagnostic_valid_json(object))
+    loop required in [String]{
+        "\"schema\":\"jet.report/v3\"", "\"severity\":\"error\"", "\"code\":\"E2702\"",
+        "\"what\":\"Crypto API misuse\"",
+        "\"why\":\"HKDF-SHA256 output length is 8161 bytes; this operation requires 0..8160\"",
+        "\"fix\":\"Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass an output length from 0 through 8160 bytes\"",
+        "\"no_fix_reason\":{{\"kind\":\"behavior\"", "\"reason\":\"output_length\"", "\"operation\":\"hkdf_sha256\"", "\"expected\":\"0..8160\"", "\"actual\":8161"
+    } -> assert(object.contains(required))
+    loop forbidden in [String]{"password", "plaintext", "ciphertext", "backend", "rustc", "dependency"} -> assert(!json.contains(forbidden))
+}
+
+// Rust:2124.
+#Test("ordinary_diagnostics_use_report_json_lines") {
+    diagnostic :: diagnostic_from_registry("E0001", None, "bad token", "grammar", "remove it")
+    file :: ReportPath.from_process("x.jet")
+    json :: diagnostic_render_all_json(file, "", [Diagnostic]{diagnostic})
+    assert(json.starts_with("{{\"schema\":\"jet.report/v3\",\"moment\":\"compile\""))
+    lines :: registry_diagnostic_json_lines(json)
+    assert(lines.len() == 1)
+    assert(registry_diagnostic_valid_json(lines[0]))
+    assert(diagnostic_render_all_json(file, "", [Diagnostic]{}) == "")
+}
+
+fn registry_diagnostic_position(diagnostics: [Diagnostic], code: String) -> Int Never! {
+    loop (index, diagnostic) in diagnostics {
+        if diagnostic.code == code -> return index
+    }
+    panic("ordered report must retain every diagnostic")
+}
+
+// Rust:2143.
+#Test("report_order_puts_roots_before_their_dependents") {
+    root :: diagnostic_from_registry("E0109", Val(Span{start: 0, end: 1}), "root", "test", "fix root")
+    middle :: diagnostic_caused_by(^diagnostic_from_registry("E0108", Val(Span{start: 2, end: 3}), "middle", "test", "fix middle"), root)
+    leaf :: diagnostic_caused_by(^diagnostic_from_registry("E0107", Val(Span{start: 4, end: 5}), "leaf", "test", "fix leaf"), middle)
+    sibling :: diagnostic_from_registry("E0001", Val(Span{start: 6, end: 7}), "sibling", "test", "fix sibling")
+    diagnostics :: diagnostic_order_root_first(^[Diagnostic]{leaf, sibling, middle, root})
+    assert(registry_diagnostic_position(diagnostics, "E0001") < registry_diagnostic_position(diagnostics, "E0108"))
+    assert(registry_diagnostic_position(diagnostics, "E0109") < registry_diagnostic_position(diagnostics, "E0108"))
+    assert(registry_diagnostic_position(diagnostics, "E0108") < registry_diagnostic_position(diagnostics, "E0107"))
+}
+
+// Rust:2190.
+#Test("report_json_preserves_a_multi_link_cause_chain") {
+    root :: diagnostic_from_registry("E0109", None, "root", "test", "fix root")
+    middle :: diagnostic_caused_by(^diagnostic_from_registry("E0108", None, "middle", "test", "fix middle"), root)
+    leaf :: diagnostic_caused_by(^diagnostic_from_registry("E0107", None, "leaf", "test", "fix leaf"), middle)
+    sibling :: diagnostic_caused_by(^diagnostic_from_registry("E0001", None, "sibling", "test", "fix sibling"), root)
+    json :: diagnostic_render_all_json(ReportPath.from_process("x.jet"), "", [Diagnostic]{root, middle, leaf, sibling})
+    lines :: registry_diagnostic_json_lines(json)
+    assert(lines.len() == 4)
+    assert(lines[0].contains("\"cause\":[],\"clears\":3"))
+    assert(lines[1].contains("\"cause\":[{{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}}],\"clears\":1"))
+    assert(lines[2].contains("\"cause\":[{{\"code\":\"E0108\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}},{{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}}],\"clears\":0"))
+    assert(lines[3].contains("\"cause\":[{{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}}],\"clears\":0"))
+}
+
+// Rust:2250.
+#Test("constructors_take_metadata_from_the_typed_row") {
+    error :: diagnostic_from_row("E0102", [DiagnosticTemplateHole]{}, None)
+    assert(error.severity == DIAGNOSTIC_ERROR)
+    assert(error.moment == DiagnosticMoment.Compile)
+    lint :: diagnostic_from_row("L2001", [DiagnosticTemplateHole]{}, None)
+    assert(lint.severity == DIAGNOSTIC_LINT)
+    assert(lint.moment == DiagnosticMoment.Compile)
+}
+
+// Rust:2261.
+#Test("structured_edit_comes_from_the_row_not_fix_prose") {
+    diagnostic := diagnostic_from_row("E0373", [DiagnosticTemplateHole]{}, Val(Span{start: 3, end: 4}))
+    assert(diagnostic.edit == None)
+    assert(diagnostic.applicability == None)
+    diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: 3, end: 4}, new_text: "\n"})
+    edit :: diagnostic.edit ?? panic("source edit must remain attached")
+    assert(edit.new_text == "\n")
+    assert(diagnostic.applicability == Val(FixApplicability.Safe))
+}
+
+// Rust:2276.
+#Test("source_derived_suggestion_uses_one_typed_reviewable_edit") {
+    span :: Span{start: 4, end: 16}
+    diagnostic :: diagnostic_with_source_derived_suggestion(diagnostic_from_registry("E0109", Val(span), "text values `first` and `last` aren't joined with `+`", "there's one way to build text: interpolation (S8)", "write the pieces inside one string: \"{{first}}{{last}}\""), span, "\"{{first}}{{last}}\"")
+    assert(diagnostic_all_edits(diagnostic).len() == 1)
+    edit :: diagnostic.edit ?? panic("source-derived suggestion must carry an edit")
+    assert(edit.new_text == "\"{{first}}{{last}}\"")
+    assert(diagnostic.applicability == Val(FixApplicability.Suggested))
+    assert(diagnostic.safety == Val(FixSafety.NeedsReview))
+    assert(diagnostic.no_fix_reason == None)
+}
+
+// Rust:2298.
+#Test("construction_edit_survives_fix_rewording") {
+    span :: Span{start: 4, end: 9}
+    edit :: TextEdit{span: span, new_text: "print"}
+    original :: diagnostic_with_edit(diagnostic_from_registry("E0102", Val(span), "nothing named `pirnt` exists here", "only known functions can be called", "did you mean `print`?"), edit)
+    reworded :: diagnostic_with_edit(diagnostic_from_registry("E0102", Val(span), "nothing named `pirnt` exists here", "only known functions can be called", "try `print` instead"), edit)
+    assert(original.edit == reworded.edit)
+    assert(original.applicability == Val(FixApplicability.Safe))
+    suggested :: diagnostic_with_edit(diagnostic_from_registry("E0311", Val(span), "this value has no method", "method lookup", "did you mean `copy`?"), TextEdit{span: span, new_text: "copy"})
+    assert(suggested.applicability == Val(FixApplicability.Suggested))
+}
+
+// Rust:2338.
+#Test("alternative_edits_share_the_report_grade") {
+    holes :: [DiagnosticTemplateHole]{
+        DiagnosticTemplateHole{name: "Source", value: "SourceErr"}, DiagnosticTemplateHole{name: "Target", value: "TargetErr"},
+        DiagnosticTemplateHole{name: "callee", value: "helper"}, DiagnosticTemplateHole{name: "definition", value: "source bytes 0..6"},
+        DiagnosticTemplateHole{name: "contract", value: "explicit !SourceErr"}, DiagnosticTemplateHole{name: "caller", value: "explicit !TargetErr"}
+    }
+    graded :: diagnostic_with_edit_grade(diagnostic_from_row("E2404", holes, Val(Span{start: 10, end: 16})), TextEdit{span: Span{start: 20, end: 39}, new_text: "Int !SourceErr"}, FixApplicability.Suggested, FixSafety.NeedsReview)
+    diagnostic :: diagnostic_with_alternative_edit(graded, TextEdit{span: Span{start: 100, end: 100}, new_text: "impl SourceErr -> TargetErr {{ … }}"})
+    assert(diagnostic_all_edits(diagnostic).len() == 2)
+    json :: diagnostic_to_json(diagnostic, ReportPath.from_process("main.jet"), "x")
+    assert(registry_diagnostic_occurrences(json, "\"safety\":\"needs-review\"") == 2)
+    assert(json.contains("impl SourceErr -> TargetErr"))
+}
+
+// Rust:2370. E0956's Prelude raise is the same typed-row constructor, not a
+// second hand-written unsupported message.
+#Test("migrated_rows_render_named_holes_without_a_second_message") {
+    lint :: diagnostic_from_row("L0503", [DiagnosticTemplateHole]{DiagnosticTemplateHole{name: "place", value: "total"}, DiagnosticTemplateHole{name: "op", value: "+="}}, Val(Span{start: 0, end: 5}))
+    assert(lint.what == "Prefer `total += …` instead of repeating the left side")
+    assert(lint.fix == "Write `total += …`")
+    unsupported :: diagnostic_from_row("E0956", [DiagnosticTemplateHole]{DiagnosticTemplateHole{name: "what", value: "a compiler fact"}}, Val(Span{start: 0, end: 1}))
+    assert(unsupported.what == "`a compiler fact` isn't supported by the current evaluator yet")
+}
+
+fn registry_diagnostic_crypto() -> Diagnostic Never! {
+    diagnostic_crypto_misuse("invalid length", "pass the required length", Span{start: 0, end: 1}, DiagnosticCryptoMisuseReason.InvalidLength, "x25519", "exactly 32", 31)
+}
+
+// Rust:2390. Every closed reason, and both batch rows' structured extensions.
+#Test("every_crypto_reason_is_closed_and_batches_keep_structured_fields") {
+    reasons :: [DiagnosticCryptoMisuseReason]{DiagnosticCryptoMisuseReason.InvalidLength, DiagnosticCryptoMisuseReason.NonceLength, DiagnosticCryptoMisuseReason.OutputLength, DiagnosticCryptoMisuseReason.SaltLength, DiagnosticCryptoMisuseReason.MemoryCost, DiagnosticCryptoMisuseReason.IterationCount, DiagnosticCryptoMisuseReason.LaneCount, DiagnosticCryptoMisuseReason.MemoryTimeCost, DiagnosticCryptoMisuseReason.RawNonce, DiagnosticCryptoMisuseReason.RawAlgorithm, DiagnosticCryptoMisuseReason.DeterministicEntropy}
+    spellings :: [String]{"invalid_length", "nonce_length", "output_length", "salt_length", "memory_cost", "iteration_count", "lane_count", "memory_time_cost", "raw_nonce", "raw_algorithm", "deterministic_entropy"}
+    loop index in 0..<reasons.len() -> assert(reasons[index].as_str() == spellings[index])
+    json :: diagnostic_render_all_json(ReportPath.from_process("x.jet"), "x", [Diagnostic]{registry_diagnostic_crypto(), registry_diagnostic_crypto()})
+    assert(registry_diagnostic_json_lines(json).len() == 2)
+    assert(registry_diagnostic_occurrences(json, "\"schema\":\"jet.report/v3\"") == 2)
+    assert(registry_diagnostic_occurrences(json, "\"reason\":\"invalid_length\"") == 2)
+}
+
+// Rust:2433.
+#Test("mixed_batches_preserve_order_and_one_schema") {
+    generic :: diagnostic_from_registry("E0001", None, "bad token", "grammar", "remove it")
+    json :: diagnostic_render_all_json(ReportPath.from_process("x.jet"), "x", [Diagnostic]{registry_diagnostic_crypto(), generic})
+    lines :: registry_diagnostic_json_lines(json)
+    assert(lines.len() == 2)
+    loop line in lines -> assert(registry_diagnostic_valid_json(line))
+    assert(lines[0].contains("\"schema\":\"jet.report/v3\"") && lines[0].contains("\"code\":\"E2702\""))
+    assert(lines[1].contains("\"schema\":\"jet.report/v3\"") && lines[1].contains("\"code\":\"E0001\""))
+}
+
+fn registry_diagnostic_assert_line(index: DiagnosticLineIndex, bytes: [U8], line: Int, expected: String) Never! {
+    actual :: index.line_text(bytes, line)
+    wanted :: expected.bytes()
+    assert(actual.len() == wanted.len())
+    loop at in 0..<wanted.len() -> assert(actual[at] == wanted[at])
+}
+
+#Test("diagnostic indexed positions preserve byte columns CRLF and final CR") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
+    source :: "é界\nabc{cr}\nlast{cr}"
+    bytes :: source.bytes()
+    index :: DiagnosticLineIndex.new(bytes)
+    loop offset in 0..<bytes.len() + 3 {
+        location :: index.line_col(bytes, offset)
+        assert(location.line == diagnostic_line_at(source, offset))
+        assert(location.col == diagnostic_column_at(source, offset))
+    }
+    registry_diagnostic_assert_line(index, bytes, 0, "é界")
+    registry_diagnostic_assert_line(index, bytes, 1, "é界")
+    registry_diagnostic_assert_line(index, bytes, 2, "abc")
+    registry_diagnostic_assert_line(index, bytes, 3, "last{cr}")
+    registry_diagnostic_assert_line(index, bytes, 4, "")
+}
+
+#Test("project diagnostics validate before optional row metadata") {
+    if diagnostic_project_error("", "x", "y", "z", None) == { .Err(error) -> assert(error.message == "custom diagnostic code must not be empty") .Ok(_) -> assert(false) }
+    control :: String.from_bytes([U8]{194, 133}) ?? panic("NEL is valid UTF-8")
+    if diagnostic_project_error("CUSTOM{control}", "x", "y", "z", None) == { .Err(error) -> assert(error.message == "custom diagnostic code must not contain control characters") .Ok(_) -> assert(false) }
+    custom :: diagnostic_project_error("BUILD_CUSTOM", "custom what", "custom why", "custom fix", None) ?? panic("project-owned code is allowed without a row")
+    assert(custom.code == "BUILD_CUSTOM" && custom.moment == DiagnosticMoment.Compile && custom.severity == DIAGNOSTIC_ERROR)
+    assert(custom.what == "Custom what" && custom.why == "Custom why" && custom.fix == "Custom fix")
+    assert(custom.edit == None && custom.no_fix_reason == None)
+    lint :: diagnostic_project_error("L2001", "custom what", "why", "fix", None) ?? panic("registered lint code is allowed")
+    assert(lint.severity == DIAGNOSTIC_LINT)
+}
+
+#Test("internal transport sentinels never use the product registry") {
+    soft :: diagnostic_soft_exit("lowercase remains transport data", "why", None)
+    assert(soft.code == "SOFT_EXIT" && soft.moment == DiagnosticMoment.Run && soft.what == "lowercase remains transport data")
+    assert(soft.fix == "" && soft.no_fix_reason == None && soft.edit == None)
+    cancelled :: diagnostic_task_cancelled(Val(Span{start: 1, end: 2}))
+    assert(cancelled.code == "TASK_CANCELLED" && cancelled.what == "task cancelled" && cancelled.why == "the owning task group stopped this task")
+    fault :: diagnostic_runtime_host_fault("engine stdout", "host payload")
+    parts :: diagnostic_runtime_host_fault_parts(fault) ?? panic("host fault transports its original parts")
+    assert(parts.stdout == "engine stdout" && parts.what == "host payload")
+    assert(diagnostic_runtime_host_fault_parts(soft) == None)
+}
+
+#Test("crypto fact report retains absent actual and expected") {
+    diagnostic :: diagnostic_crypto_misuse_fact("unsafe entropy", "use OS entropy", Span{start: 0, end: 1}, DiagnosticCryptoMisuseReason.DeterministicEntropy, "rng")
+    json :: diagnostic_to_json(diagnostic, ReportPath.from_process("x.jet"), "x")
+    assert(json.contains("\"reason\":\"deterministic_entropy\""))
+    assert(json.contains("\"expected\":null") && json.contains("\"actual\":null"))
+}
+
+#Test("template fill treats values as data and preserves literal braces") {
+    row := diagnostic_registry_row("E0956") ?? panic("E0956 has a typed row")
+    row.what = "{{{{literal}}}} {{what}} / {{not a hole}}"
+    row.why = "{{what}}"
+    row.fix = "tail {{"
+    rendered :: diagnostic_registry_render(row, [DiagnosticTemplateHole]{DiagnosticTemplateHole{name: "what", value: "{{other}}"}})
+    assert(rendered.what == "{{literal}} {{other}} / {{not a hole}}")
+    assert(rendered.why == "{{other}}")
+    assert(rendered.fix == "tail {{")
+}
+
+#Test("origin snapshot hashes exact bytes and Core classification uses components") {
+    origin :: diagnostic_origin_new("shown.jet", "<corelib>/Core/math/math.jet", "é\n")
+    assert(origin.revision == mir_sha256_hex("é\n"))
+    assert(diagnostic_origin_is_core_source(origin, diagnostic_paths.PathPlatform.Unix))
+    assert(diagnostic_origin_is_core_source(origin, diagnostic_paths.PathPlatform.Windows))
+    ordinary :: diagnostic_origin_new("shown.jet", "<corelib>-not/Core/math.jet", "é\n")
+    assert(!diagnostic_origin_is_core_source(ordinary, diagnostic_paths.PathPlatform.Unix))
+}
+
+#Test("ICE report never promises an absent generated file") {
+    plain :: diagnostic_render_ice_report("bad state", "", false)
+    assert(plain == "internal compiler error: bad state\nThis is a bug in jet, NOT in your program. Please report it,\nattaching your source file.")
+    attached :: diagnostic_render_ice_report("bad state", "  at input.jet:1:2", true)
+    assert(attached == "internal compiler error: bad state\nThis is a bug in jet, NOT in your program. Please report it,\nattaching your source file and the generated file below.\n  at input.jet:1:2")
+}

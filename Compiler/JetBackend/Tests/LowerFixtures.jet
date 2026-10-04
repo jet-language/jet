@@ -88,9 +88,7 @@ use jet_foundation.[
     MIRShapeFieldNames,
     MIRSourceFile,
     MIRSourceFileID,
-    MIRStringFormat,
     MIRStringPart,
-    MIRStringPartKind,
     MIRStructureFact,
     MIRSwitchArm,
     MIRSymbol,
@@ -327,7 +325,13 @@ fn fx_prelude_rows() -> [MIRPreludeCall] Never! {
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_has_next", "jet_loop_range_has_next", 1, MIRPreludeABI.Value),
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_value", "jet_loop_range_value", 1, MIRPreludeABI.Value),
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_advance", "jet_loop_range_advance", 1, MIRPreludeABI.Value),
+        fx_display_prelude(),
     }
+}
+fn fx_display_prelude() -> MIRPreludeCall Never! {
+    row := fx_prelude(MIRPreludeFamily.StaticPrelude, "core.text.fmt", "display", "jet_fmt_display", 1, MIRPreludeABI.Value)
+    row.signature.borrow_mask = [Bool]{true}
+    row
 }
 
 fn fx_field(owner: String, name: String, ty: MIRType) -> MIRField Never! {
@@ -543,7 +547,9 @@ fn fx_control_flow() -> MIRProgram Never! {
     fx_do(&r, MIROperation.Drop{value: cursor, kind: MIRDropKind.Value})
     five :: fx_int_const(&r, 5)
     total_value :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("sum_to")}, args: [MIRCallArg]{fx_arg(five, MIRAccess.Read)}, type_args: [MIRType]{}})
-    message :: fx_owned(&r, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Literal{text: "sum = "}}, MIRStringPart{kind: MIRStringPartKind.Interpolation{value: total_value, format: MIRStringFormat.Display}}}})
+    total_text :: fx_owned(&r, fx_string(), MIROperation.Call{callee: MIRCallee.Prelude{call: fx_prelude_id("core.text.fmt", "display")}, args: [MIRCallArg]{fx_arg(total_value, MIRAccess.Read)}, type_args: [MIRType]{}})
+    message :: fx_owned(&r, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart.Literal{text: "sum = "}, MIRStringPart.Value{value: total_text}}})
+    fx_do(&r, MIROperation.Drop{value: total_text, kind: MIRDropKind.Value})
     fx_print(&r, message)
     fx_do(&r, MIROperation.Drop{value: message, kind: MIRDropKind.Value})
     classified :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("classify")}, args: [MIRCallArg]{fx_arg(total_value, MIRAccess.Read)}, type_args: [MIRType]{}})
@@ -623,7 +629,9 @@ fn fx_aggregates() -> MIRProgram Never! {
     green :: fx_copy(&r, color, MIROperation.Enum{type_id: mir_type_id("Color"), variant: "Green", args: [MIREnumArg]{}})
     is_green :: fx_compare_value(&r, MIROperation.EnumIs{subject: green, owner: mir_type_id("Color"), variant: "Green"})
     fx_print(&r, is_green)
-    label :: fx_owned(&r, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Literal{text: "p.x = "}}, MIRStringPart{kind: MIRStringPartKind.Interpolation{value: x, format: MIRStringFormat.Display}}}})
+    x_text :: fx_owned(&r, fx_string(), MIROperation.Call{callee: MIRCallee.Prelude{call: fx_prelude_id("core.text.fmt", "display")}, args: [MIRCallArg]{fx_arg(x, MIRAccess.Read)}, type_args: [MIRType]{}})
+    label :: fx_owned(&r, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart.Literal{text: "p.x = "}, MIRStringPart.Value{value: x_text}}})
+    fx_do(&r, MIROperation.Drop{value: x_text, kind: MIRDropKind.Value})
     fx_print(&r, label)
     fx_do(&r, MIROperation.Drop{value: label, kind: MIRDropKind.Value})
     released :: fx_owned(&r, point, MIROperation.MovePlace{place: p})

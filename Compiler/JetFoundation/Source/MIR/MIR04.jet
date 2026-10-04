@@ -1,0 +1,350 @@
+// Extends the canonical MIR module; declarations mapped below stay in MIR.jet.
+use core.sys.target as mir_wire_target
+// GATE #4494: Rust std names for shared allocation, pointer identity and poisoned mutex guards.
+use std.sync.[Arc, Mutex]
+
+// Rust: crates/jet-foundation/src/MIR.rs:5461
+impl MIRLoopSourceKind {
+    pub fn from_wire(wire: String) -> MIRLoopSourceKind? Never! {
+        if wire == {
+            "plain" -> return Val(.Plain)
+            "chars" -> return Val(.Chars)
+            "lines:file" -> return Val(.LinesFile)
+            "lines:stdin" -> return Val(.LinesStdin)
+            "lines:process" -> return Val(.LinesProcessStream)
+            "channel" -> return Val(.ChannelReceiver)
+            else -> {}
+        }
+        bytes :: wire.bytes()
+        if wire.starts_with("encoding:") {
+            at := 9
+            reader_type :: mir_loop_wire_take(bytes, &at) ?? return None
+            if reader_type == "" || at != bytes.len() -> return None
+            return Val(.EncodingReader(reader_type))
+        }
+        if !wire.starts_with("iterable:") -> return None
+        at := 9
+        coll_type :: mir_loop_wire_take(bytes, &at) ?? return None
+        if at >= bytes.len() || bytes[at] != U8{58} -> return None
+        at += 1
+        iter_type :: mir_loop_wire_take(bytes, &at) ?? return None
+        if at >= bytes.len() || bytes[at] != U8{58} -> return None
+        at += 1
+        iter_symbol :: mir_loop_wire_take(bytes, &at) ?? return None
+        if at >= bytes.len() || bytes[at] != U8{58} -> return None
+        at += 1
+        next_symbol :: mir_loop_wire_take(bytes, &at) ?? return None
+        if coll_type == "" || iter_type == "" || iter_symbol == "" || next_symbol == "" || at != bytes.len() -> return None
+        Val(.Iterable(coll_type, iter_type, iter_symbol, next_symbol))
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:5462
+// Parse unsigned usize exactly (including Rust's optional leading '+'). Byte
+// bounds and UTF-8 validation reject split codepoints, overflow and trailing data.
+fn mir_loop_wire_take(bytes: [U8], at: &Int) -> String? Never! {
+    // GATE #4483: selected usize maximum, never the compiler host width.
+    maximum :: mir_wire_target.usize_max()
+    cursor := at
+    if cursor < bytes.len() && bytes[cursor] == U8{43} -> cursor += 1
+    digit_start :: cursor
+    length := U64{0}
+    loop cursor < bytes.len() && bytes[cursor] != U8{58} {
+        byte :: bytes[cursor]
+        if byte < U8{48} || byte > U8{57} -> return None
+        digit :: U64.from_u8(byte - U8{48})
+        if length > (maximum - digit) / U64{10} -> return None
+        length = length * U64{10} + digit
+        cursor += 1
+    }
+    if cursor == digit_start || cursor >= bytes.len() -> return None
+    if U64{cursor} == maximum -> return None
+    start :: cursor + 1
+    if length > maximum - U64{start} -> return None
+    end :: start + Int.from_u64(length)
+    if end > bytes.len() -> return None
+    payload :: String.from_bytes(bytes.view(start..<end)) ?? return None
+    at = end
+    Val(payload)
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:5520
+// MirCopyFact -> MIR.jet::MIRCopyFact (all five variants).
+// Rust: crates/jet-foundation/src/MIR.rs:5536
+// MirCopyFact::as_str -> MIR.jet::mir_copy_fact_name.
+// Rust: crates/jet-foundation/src/MIR.rs:5548
+// MirCopyFact::for_ownership -> MIR.jet::mir_copy_fact_for_ownership.
+// Rust: crates/jet-foundation/src/MIR.rs:5557
+// MirOperation -> MIR.jet::MIROperation (every variant, in canonical owner).
+
+// Rust: crates/jet-foundation/src/MIR.rs:5727
+impl MIROperation {
+    pub fn value_uses(self) -> [MIRValueID] Never! {
+        out := [MIRValueID]{}
+        if self == {
+            .Parameter(_, _) -> {}
+            .Capture(_) -> {}
+            .Global(_) -> {}
+            .Constant(_) -> {}
+            .Absent -> {}
+            .Todo(_, _, _) -> {}
+            .Never(_) -> {}
+            .ScopeExit(_) -> {}
+            .ScopeEnter(_, member) -> {
+                if member == Val(.Timeout(duration)) -> &out.push(duration)
+            }
+            .Phi(incoming) -> { loop row in incoming -> &out.push(row.value) }
+            .ReadPlace(_) -> {}
+            .MovePlace(_) -> {}
+            .InitializeUninit(_) -> {}
+            .WritePlace(_, value) -> &out.push(value)
+            .ReplacePlace(_, value) -> &out.push(value)
+            .Copy(value, _) -> &out.push(value)
+            .Move(value) -> &out.push(value)
+            .TraitBox(value, _) -> &out.push(value)
+            .Unary(_, value) -> &out.push(value)
+            .Deref(value) -> &out.push(value)
+            .AttachTag(value, _) -> &out.push(value)
+            .Drop(value, _) -> &out.push(value)
+            .Present(value) -> &out.push(value)
+            .ResultOk(value) -> &out.push(value)
+            .ResultErr(value) -> &out.push(value)
+            .Binary(_, _, _, left, right) -> { &out.push(left); &out.push(right) }
+            .BuildList(values, _) -> { loop value in values -> &out.push(value) }
+            .EnumIs(subject, _, _) -> &out.push(subject)
+            .EnumPayload(subject, _, _, _) -> &out.push(subject)
+            .OptionIsSome(subject) -> &out.push(subject)
+            .OptionValue(subject) -> &out.push(subject)
+            .ResultIsOk(subject) -> &out.push(subject)
+            .ResultValue(subject, _) -> &out.push(subject)
+            .PatternCapture(subject, _) -> &out.push(subject)
+            .PatternMatched(subject) -> &out.push(subject)
+            .BuildString(parts) -> {
+                loop part in parts { if part == .Value(value) -> &out.push(value) }
+            }
+            .BuildMap(entries) -> {
+                loop entry in entries { &out.push(entry.key); &out.push(entry.value) }
+            }
+            .ProjectMembers(base, _) -> &out.push(base)
+            .Field(base, _) -> &out.push(base)
+            .Index(_, base, index, _, _, _, _) -> { &out.push(base); &out.push(index) }
+            .Slice(_, base, start, end, range, _) -> {
+                &out.push(base); &out.push(start); &out.push(end)
+                if range == Val(value) -> &out.push(value)
+            }
+            .Range(start, end, _) -> { &out.push(start); &out.push(end) }
+            .Struct(_, fields) -> { loop field in fields -> &out.push(field.value) }
+            .Tuple(_, fields) -> { loop field in fields -> &out.push(field.value) }
+            .Enum(_, _, args) -> { loop arg in args -> &out.push(arg.value) }
+            .Call(callee, args, _) -> {
+                collect_callee_uses(callee, &out)
+                loop arg in args -> &out.push(arg.value)
+            }
+            .CoreCall(_, _, args, _, _, _) -> { loop arg in args -> &out.push(arg.value) }
+            .IndirectCall(callee, args, _) -> {
+                &out.push(callee)
+                loop arg in args -> &out.push(arg.value)
+            }
+            .Closure(_, captures, _) -> {
+                loop capture in captures { if capture == .Value(value) -> &out.push(value) }
+            }
+            .PtrFromAddr(addr, _) -> &out.push(addr)
+            .RawAddressOf(_) -> {}
+            .AddressOf(_, _) -> {}
+            .Convert(value, parameters, _, _) -> {
+                &out.push(value)
+                loop parameter in parameters -> &out.push(parameter)
+            }
+            .Semantic(operation) -> { loop value in mir_semantic_op_value_uses(operation) -> &out.push(value) }
+            .LoopRangeInit(_, start, end, step, _) -> {
+                &out.push(start); &out.push(end)
+                if step == Val(value) -> &out.push(value)
+            }
+            .LoopRangeHasNext(_, cursor) -> &out.push(cursor)
+            .LoopRangeValue(_, cursor) -> &out.push(cursor)
+            .LoopRangeAdvance(_, cursor) -> &out.push(cursor)
+            .LoopIterHasNext(_, cursor) -> &out.push(cursor)
+            .LoopIterValue(_, cursor) -> &out.push(cursor)
+            .LoopIterAdvance(_, cursor) -> &out.push(cursor)
+            .LoopIterInit(_, collection, step, _, _) -> {
+                &out.push(collection)
+                if step == Val(value) -> &out.push(value)
+            }
+        }
+        out
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:5849
+fn collect_callee_uses(callee: MIRCallee, out: &[MIRValueID]) Never! {
+    if callee == .Indirect(value) -> &out.push(value)
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:5858
+// MirForeignLanguage -> MIR.jet::MIRForeignLanguage.
+// Rust: crates/jet-foundation/src/MIR.rs:5866
+// MirForeignAbi -> MIR.jet::MIRForeignABI.
+// Rust: crates/jet-foundation/src/MIR.rs:5878
+// MirLinkArtifactKind -> MIR.jet::MIRLinkArtifactKind.
+// Rust: crates/jet-foundation/src/MIR.rs:5887
+// MirLinkArtifact -> MIR.jet::MIRLinkArtifact.
+// Rust: crates/jet-foundation/src/MIR.rs:5893
+// MirLinkUnit -> MIR.jet::MIRLinkUnit.
+// Rust: crates/jet-foundation/src/MIR.rs:5904
+// MirCallbackAdapter -> MIR.jet::MIRCallbackAdapter.
+// Rust: crates/jet-foundation/src/MIR.rs:5920
+// MirCImportLink -> MIR.jet::MIRCImportLink.
+// Rust: crates/jet-foundation/src/MIR.rs:5929
+// MirCLib -> MIR.jet::MIRCLib (Rust module field is module_name).
+// Rust: crates/jet-foundation/src/MIR.rs:5936
+// MirCOverlayOverride -> MIR.jet::MIRCOverlayOverride.
+// Rust: crates/jet-foundation/src/MIR.rs:5944
+// MirCloseAdapter -> MIR.jet::MIRCloseAdapter.
+// Rust: crates/jet-foundation/src/MIR.rs:5954
+// MirCffiFacts -> MIR.jet::MIRCffiFacts.
+impl MIRCffiFacts {
+    // Rust: crates/jet-foundation/src/MIR.rs:5964
+    pub fn boundary_for(self, library: String) -> ?@MIRFFIBoundaryFacts from self {
+        loop index in 0..<self.boundaries.len() {
+            if self.boundaries[index].library == library -> return Val(@self.boundaries[index])
+        }
+        None
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:5970
+    pub fn validate_boundaries(self) Err! {
+        libraries := [String:Bool]{}
+        loop boundary in self.boundaries {
+            boundary.validate()
+            if libraries.get(boundary.library) != None -> return Err("MIR carries duplicate foreign boundary `{boundary.library}`")
+            libraries[boundary.library] = true
+        }
+        return
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:5953 (derived Default)
+    pub fn default() -> MIRCffiFacts Never! {
+        MIRCffiFacts{import_links: [], libs: [], overlay_overrides: [], boundaries: [],
+            direct_links: [], transitive_links: [], close_adapters: []}
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs:5987
+// MirHandleOwnership -> MIR.jet::MIRHandleOwnership.
+// Rust: crates/jet-foundation/src/MIR.rs:5994
+// MirHandlePayload -> MIR.jet::MIRHandlePayload.
+// Rust: crates/jet-foundation/src/MIR.rs:6001
+// MirHandleLifecycle -> MIR.jet::MIRHandleLifecycle.
+
+// Rust: crates/jet-foundation/src/MIR.rs:6025
+// Every cloned token retains the SAME state; native address reuse cannot change
+// its identity or permit a second take. Shared pointer and mutex are #4494 gates.
+#Clone
+pub struct MIRHandleToken {
+    state: Arc<MIRHandleTokenState>
+    // Rust: crates/jet-foundation/src/MIR.rs:6036
+    pub fn new(handle: MIRHandleID, raw: I64) -> MIRHandleToken Never! {
+        MIRHandleToken{state: Arc.new(MIRHandleTokenState{handle: handle, raw: Mutex.new(Val(raw))})}
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:6045
+    pub fn handle_id(self) -> MIRHandleID Never! { self.state.handle }
+    // Rust: crates/jet-foundation/src/MIR.rs:6049
+    pub fn identity(self) -> U64 Never! {
+        // GATE #4494/#4483: Arc pointer identity converted losslessly to usize.
+        Arc.as_ptr(self.state).as_usize()
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:6053
+    pub fn raw(self) -> I64? Never! {
+        guard := self.state.raw.lock() ?? err.into_inner()
+        ~guard.value
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:6062
+    pub fn take_raw(self) -> (MIRHandleID, I64)? Never! {
+        guard := self.state.raw.lock() ?? err.into_inner()
+        raw :: guard.value ?? return None
+        guard.value = None
+        Val((self.state.handle, raw))
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:6072
+    pub fn is_taken(self) -> Bool Never! { self.raw() == None }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:6030
+struct MIRHandleTokenState { handle: MIRHandleID, raw: Mutex<I64?> }
+
+// Rust: crates/jet-foundation/src/MIR.rs:6078
+// MirEntryKind -> MIR.jet::MIREntryKind.
+// Rust: crates/jet-foundation/src/MIR.rs:6087
+// MirEntryOutput -> MIR.jet::MIREntryOutput (None -> NoOutput).
+// Rust: crates/jet-foundation/src/MIR.rs:6095
+// MirCliValueKind -> MIR.jet::MIRCLIValueKind.
+// Rust: crates/jet-foundation/src/MIR.rs:6104
+// MirCliDefault -> MIR.jet::MIRCLIDefault.
+// Rust: crates/jet-foundation/src/MIR.rs:6110
+// MirCliInputShape -> MIR.jet::MIRCLIInputShape.
+// Rust: crates/jet-foundation/src/MIR.rs:6120
+// MirCliInput -> MIR.jet::MIRCLIInput.
+// Rust: crates/jet-foundation/src/MIR.rs:6138
+// MirCliCommand -> MIR.jet::MIRCLICommand.
+// Rust: crates/jet-foundation/src/MIR.rs:6147
+// MirCliEntry -> MIR.jet::MIRCLIEntry.
+// Rust: crates/jet-foundation/src/MIR.rs:6159
+// MirEntrySpec -> MIR.jet::MIREntrySpec.
+// Rust: crates/jet-foundation/src/MIR.rs:6171
+// MirJobScope -> MIR.jet::MIRJobScope.
+// Rust: crates/jet-foundation/src/MIR.rs:6178
+// MirJobSchedule -> MIR.jet::MIRJobSchedule.
+// Rust: crates/jet-foundation/src/MIR.rs:6184
+// MirJobDispatch -> MIR.jet::MIRJobDispatch.
+// Rust: crates/jet-foundation/src/MIR.rs:6191
+// MirJobSkip -> MIR.jet::MIRJobSkip.
+// Rust: crates/jet-foundation/src/MIR.rs:6197
+// MirJobCachePolicy -> MIR.jet::MIRJobCachePolicy.
+// Rust: crates/jet-foundation/src/MIR.rs:6204
+// MirJob -> MIR.jet::MIRJob (limits retained as sorted MIRJobLimit rows).
+// Rust: crates/jet-foundation/src/MIR.rs:6226
+// MirTestKind -> MIR.jet::MIRTestKind.
+// Rust: crates/jet-foundation/src/MIR.rs:6232
+// MirTestCase -> MIR.jet::MIRTestCase.
+// Rust: crates/jet-foundation/src/MIR.rs:6257
+// MirOutputCheck -> MIR.jet::MIROutputCheck.
+// Rust: crates/jet-foundation/src/MIR.rs:6264
+// MirCoveragePoint -> MIR.jet::MIRCoveragePoint.
+// Rust: crates/jet-foundation/src/MIR.rs:6272
+// MirHarnessKind -> MIR.jet::MIRHarnessKind.
+// Rust: crates/jet-foundation/src/MIR.rs:6279
+// MirHarnessPlan -> MIR.jet::MIRHarnessPlan.
+// Rust: crates/jet-foundation/src/MIR.rs:6290
+// MirArtifactKind -> MIR.jet::MIRArtifactKind.
+// Rust: crates/jet-foundation/src/MIR.rs:6301
+// MirArtifactTarget -> MIR.jet::MIRArtifactTarget (RustAot -> RustAOT).
+// Rust: crates/jet-foundation/src/MIR.rs:6309
+// MirArtifactBuildMode -> MIR.jet::MIRArtifactBuildMode.
+
+// Rust: crates/jet-foundation/src/MIR.rs:6318
+pub struct MIRArtifactRequest {
+    pub target: MIRArtifactTarget
+    pub kind: MIRArtifactKind
+    pub mode: MIRArtifactBuildMode
+    pub name: String?
+    // Rust: crates/jet-foundation/src/MIR.rs:6326
+    pub fn new(target: MIRArtifactTarget, kind: MIRArtifactKind, mode: MIRArtifactBuildMode) -> MIRArtifactRequest Never! {
+        MIRArtifactRequest{target: target, kind: kind, mode: mode, name: None}
+    }
+    // Rust: crates/jet-foundation/src/MIR.rs:6339
+    pub fn with_name(^self, name: String) -> MIRArtifactRequest Never! {
+        self.name = Val(^name)
+        ^self
+    }
+}
+// Rust: crates/jet-foundation/src/MIR.rs:6346
+// MirExport -> MIR.jet::MIRExport.
+// Rust: crates/jet-foundation/src/MIR.rs:6353
+// MirArtifactKind::as_str -> MIR/Identity.jet::mir_artifact_kind_name.
+// Rust: crates/jet-foundation/src/MIR.rs:6367
+// MirArtifactTarget::as_str -> MIR/Identity.jet::mir_artifact_target_name.
+// Rust: crates/jet-foundation/src/MIR.rs:6378
+// MirArtifactBuildMode::as_str -> MIR/Identity.jet::mir_artifact_mode_name.
+// Rust: crates/jet-foundation/src/MIR.rs:6390
+// MirArtifactPlan -> MIR.jet::MIRArtifactPlan.
+// Rust: crates/jet-foundation/src/MIR.rs:6409
+// MIR_IDENTITY_SCHEMA_VERSION -> MIR/Identity.jet::MIR_IDENTITY_SCHEMA_VERSION.
+// Rust: crates/jet-foundation/src/MIR.rs:6412
+// MIR_IDENTITY_SCHEMA -> MIR/Identity.jet::MIR_IDENTITY_SCHEMA.

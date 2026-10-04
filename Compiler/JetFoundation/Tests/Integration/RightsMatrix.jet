@@ -1,0 +1,856 @@
+// PORT-PENDING 1143 tests-rights-matrix-module-group: tests/rights_matrix.rs:1-132
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Phase-A differential matrix for the canonical rights-row walker.
+//RS //!
+//RS //! Each legacy oracle is deliberately test-local: it records the old verdict
+//RS //! relation without creating another production checker. `RightsRow::observe`
+//RS //! compares that relation with the row used by sema, so a future row change
+//RS //! identifies the exact right and callable that drifted.
+//RS 
+//RS use jet_foundation::Authority::{self, Holds, Verdict};
+//RS use jet_foundation::sema::{RightsProvenance, RightsRow};
+//RS 
+//RS struct Case {
+//RS     name: &'static str,
+//RS     row: RightsRow,
+//RS     effects: Holds,
+//RS     legacy: fn(&str) -> Verdict,
+//RS }
+//RS 
+//RS fn legacy_pure(_right: &str) -> Verdict {
+//RS     Verdict::Missing
+//RS }
+//RS 
+//RS fn legacy_replayable(right: &str) -> Verdict {
+//RS     match Authority::root(right) {
+//RS         "Time" | "Rand" | "Net" | "IO" => Verdict::Denied,
+//RS         _ => Verdict::Allowed,
+//RS     }
+//RS }
+//RS 
+//RS fn legacy_comptime(right: &str) -> Verdict {
+//RS     if Authority::covers("Mem", right) {
+//RS         Verdict::Allowed
+//RS     } else {
+//RS         Verdict::Missing
+//RS     }
+//RS }
+//RS 
+//RS fn legacy_invocation(right: &str) -> Verdict {
+//RS     if Authority::covers("FS.Write", right) {
+//RS         Verdict::Denied
+//RS     } else if Authority::covers("FS", right) || Authority::covers("Time", right) {
+//RS         Verdict::Allowed
+//RS     } else {
+//RS         Verdict::Missing
+//RS     }
+//RS }
+//RS 
+//RS fn case_rows() -> Vec<Case> {
+//RS     vec![
+//RS         Case {
+//RS             name: "pure-empty-row",
+//RS             row: RightsRow::pure(RightsProvenance::new(
+//RS                 "rights_matrix::pure",
+//RS                 "legacy purity oracle",
+//RS             )),
+//RS             effects: Holds::from(["IO".to_string()]),
+//RS             legacy: legacy_pure,
+//RS         },
+//RS         Case {
+//RS             name: "replayable-ambient-denials",
+//RS             row: RightsRow::replayable(RightsProvenance::new(
+//RS                 "rights_matrix::replayable",
+//RS                 "legacy replayability oracle",
+//RS             )),
+//RS             effects: Holds::from([
+//RS                 "Time".to_string(),
+//RS                 "Rand.Draw".to_string(),
+//RS                 "Net.HTTP.Get".to_string(),
+//RS                 "IO".to_string(),
+//RS                 "FS.Read".to_string(),
+//RS             ]),
+//RS             legacy: legacy_replayable,
+//RS         },
+//RS         Case {
+//RS             name: "comptime-memory-only",
+//RS             row: RightsRow::comptime(RightsProvenance::new(
+//RS                 "rights_matrix::comptime",
+//RS                 "legacy comptime oracle",
+//RS             )),
+//RS             effects: Holds::from(["Mem.Alloc".to_string(), "FS.Read".to_string()]),
+//RS             legacy: legacy_comptime,
+//RS         },
+//RS         Case {
+//RS             name: "invocation-allow-deny",
+//RS             row: RightsRow::invocation(
+//RS                 ["FS", "Time"],
+//RS                 ["FS.Write"],
+//RS                 RightsProvenance::new("rights_matrix::invocation", "legacy invocation oracle"),
+//RS             ),
+//RS             effects: Holds::from([
+//RS                 "FS.Read".to_string(),
+//RS                 "FS.Write".to_string(),
+//RS                 "Time".to_string(),
+//RS                 "Net".to_string(),
+//RS             ]),
+//RS             legacy: legacy_invocation,
+//RS         },
+//RS     ]
+//RS }
+//RS 
+//RS #[test]
+//RS fn canonical_rows_match_legacy_rights_verdicts() {
+//RS     for case in case_rows() {
+//RS         let call_chain = vec![case.name.to_string()];
+//RS         let observed = case
+//RS             .row
+//RS             .observe(
+//RS                 case.name,
+//RS                 &case.effects,
+//RS                 &call_chain,
+//RS                 &[],
+//RS                 case.legacy,
+//RS             )
+//RS             .unwrap_or_else(|mismatch| panic!("rights row drift: {mismatch:#?}"));
+//RS         let walked = case.row.walk(&case.effects, &call_chain, &[]);
+//RS         assert_eq!(observed, walked, "observed row changed for {}", case.name);
+//RS         for right in &case.effects {
+//RS             assert_eq!(case.row.decide(right), (case.legacy)(right), "right {right}");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn invocation_deny_wins_after_leaf_expansion() {
+//RS     let row = RightsRow::invocation(
+//RS         ["FS"],
+//RS         ["FS.Write"],
+//RS         RightsProvenance::new("rights_matrix::precedence", "deny-wins oracle"),
+//RS     );
+//RS     assert_eq!(row.decide("FS.Read"), Verdict::Allowed);
+//RS     assert_eq!(row.decide("FS.Write"), Verdict::Denied);
+//RS     assert_eq!(row.decide("FS.Write:/tmp/out"), Verdict::Denied);
+//RS }
+// END-PORT-PENDING 1143 tests/rights_matrix.rs:1-132
+
+// PORT-PENDING 1143 tests-rights-matrix-module-group: tests/ring_layer.rs:1-290
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-RINGLAYER1=A M1: runtime profile inference and package ceilings.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS 
+//RS fn tmp_project(name: &str) -> PathBuf {
+//RS     let dir = std::env::temp_dir().join(format!("jet_ring_layer_{name}_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     dir
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parses_layer_ceiling() {
+//RS     let raw = r#"
+//RS name: "embed"
+//RS version: "0.1.0"
+//RS runtime: alloc
+//RS "#;
+//RS     let pm = jetpack::Package::PackageFacts::parse(raw, "test").unwrap();
+//RS     assert_eq!(pm.layer, Some(jet::Syntax::RuntimeLayer::Alloc));
+//RS     let mf = jetpack::Package::to_manifest(&pm, raw).unwrap();
+//RS     assert_eq!(mf.package.layer, Some(jet::Syntax::RuntimeLayer::Alloc));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_rejects_unknown_layer() {
+//RS     let raw = "name: \"x\"\nversion: \"1\"\nruntime: heap\n";
+//RS     let err = jetpack::Package::PackageFacts::parse(raw, "test").unwrap_err();
+//RS     assert!(matches!(
+//RS         err,
+//RS         jetpack::Package::PackageParseError::InvalidValue { .. }
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_rejects_retired_std_runtime_name() {
+//RS     let raw = "name: \"x\"\nversion: \"1\"\nruntime: std\n";
+//RS     let err = jetpack::Package::PackageFacts::parse(raw, "test").unwrap_err();
+//RS     assert!(matches!(
+//RS         err,
+//RS         jetpack::Package::PackageParseError::InvalidValue { .. }
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn math_import_infers_core_layer() {
+//RS     let dir = tmp_project("math");
+//RS     fs::write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap();
+//RS     let main = r#"
+//RS use core.math as math
+//RS 
+//RS fn run() {
+//RS     print(math.sqrt(9.0))
+//RS }
+//RS "#;
+//RS     fs::write(dir.join("main.jet"), main).unwrap();
+//RS     let main_path = dir.join("main.jet");
+//RS     let path = main_path.to_str().unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(path).unwrap();
+//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         !diags
+//RS             .iter()
+//RS             .any(|d| d.severity == jet::Diagnostics::Severity::Error),
+//RS         "{}",
+//RS         jet::render_diagnostics(path, main, &diags)
+//RS     );
+//RS     assert_eq!(bundle.inferred_layer, jet::Syntax::RuntimeLayer::Core);
+//RS }
+//RS 
+//RS #[test]
+//RS fn solve_import_infers_alloc_layer() {
+//RS     let dir = tmp_project("solve");
+//RS     fs::write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap();
+//RS     let main = r#"
+//RS use core.compute.solve as solve
+//RS 
+//RS fn run() {
+//RS     solver := solve.Solver.new(1)
+//RS     solver.require(true)
+//RS }
+//RS "#;
+//RS     fs::write(dir.join("main.jet"), main).unwrap();
+//RS     let main_path = dir.join("main.jet");
+//RS     let path = main_path.to_str().unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(path).unwrap();
+//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         !diags
+//RS             .iter()
+//RS             .any(|d| d.severity == jet::Diagnostics::Severity::Error),
+//RS         "{}",
+//RS         jet::render_diagnostics(path, main, &diags)
+//RS     );
+//RS     assert_eq!(bundle.inferred_layer, jet::Syntax::RuntimeLayer::Alloc);
+//RS }
+//RS 
+//RS #[test]
+//RS fn fs_import_infers_std_layer() {
+//RS     let dir = tmp_project("fs");
+//RS     fs::write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap();
+//RS     let main = r#"
+//RS use core.files as fs
+//RS 
+//RS fn run() {
+//RS     print("ok")
+//RS }
+//RS "#;
+//RS     fs::write(dir.join("main.jet"), main).unwrap();
+//RS     let main_path = dir.join("main.jet");
+//RS     let path = main_path.to_str().unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(path).unwrap();
+//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         !diags
+//RS             .iter()
+//RS             .any(|d| d.severity == jet::Diagnostics::Severity::Error),
+//RS         "{}",
+//RS         jet::render_diagnostics(path, main, &diags)
+//RS     );
+//RS     assert_eq!(bundle.inferred_layer, jet::Syntax::RuntimeLayer::Std);
+//RS }
+//RS 
+//RS #[test]
+//RS fn ceiling_blocks_std_import() {
+//RS     let dir = tmp_project("ceiling");
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"m\"\nversion: \"0.1.0\"\nruntime: core\n",
+//RS     )
+//RS     .unwrap();
+//RS     let main = r#"
+//RS use core.files as fs
+//RS 
+//RS fn run() {
+//RS     print("ok")
+//RS }
+//RS "#;
+//RS     fs::write(dir.join("main.jet"), main).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     let shown = path.to_string_lossy();
+//RS     let diags = jet::check_with_path(&shown);
+//RS     assert!(
+//RS         diags.iter().any(|d| d.code == "E1006"),
+//RS         "expected E1006, got: {}",
+//RS         jet::render_diagnostics(&shown, main, &diags)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn alloc_ceiling_allows_mem_not_fs() {
+//RS     let dir = tmp_project("alloc_ok");
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"m\"\nversion: \"0.1.0\"\nruntime: alloc\n",
+//RS     )
+//RS     .unwrap();
+//RS     let main = r#"
+//RS use core.mem as mem
+//RS 
+//RS fn run() {
+//RS     print("ok")
+//RS }
+//RS "#;
+//RS     fs::write(dir.join("main.jet"), main).unwrap();
+//RS     let main_path = dir.join("main.jet");
+//RS     let path = main_path.to_str().unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(path).unwrap();
+//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         !diags.iter().any(|d| d.code == "E1006"),
+//RS         "mem import should be allowed under alloc ceiling"
+//RS     );
+//RS     assert_eq!(bundle.inferred_layer, jet::Syntax::RuntimeLayer::Alloc);
+//RS }
+//RS 
+//RS #[test]
+//RS fn ambient_input_infers_std_layer() {
+//RS     let dir = tmp_project("input");
+//RS     fs::write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap();
+//RS     let main = r#"
+//RS fn run() {
+//RS     _ :: input("name? ")
+//RS     print("ok")
+//RS }
+//RS "#;
+//RS     fs::write(dir.join("main.jet"), main).unwrap();
+//RS     let main_path = dir.join("main.jet");
+//RS     let path = main_path.to_str().unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(path).unwrap();
+//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         !diags
+//RS             .iter()
+//RS             .any(|d| d.severity == jet::Diagnostics::Severity::Error),
+//RS         "{}",
+//RS         jet::render_diagnostics(path, main, &diags)
+//RS     );
+//RS     assert_eq!(bundle.inferred_layer, jet::Syntax::RuntimeLayer::Std);
+//RS }
+//RS 
+//RS #[test]
+//RS fn ceiling_blocks_ambient_input_helper() {
+//RS     let dir = tmp_project("input_ceiling");
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"m\"\nversion: \"0.1.0\"\nruntime: core\n",
+//RS     )
+//RS     .unwrap();
+//RS     let main = r#"
+//RS fn run() {
+//RS     _ :: input("name? ")
+//RS     print("ok")
+//RS }
+//RS "#;
+//RS     fs::write(dir.join("main.jet"), main).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     let shown = path.to_string_lossy();
+//RS     let diags = jet::check_with_path(&shown);
+//RS     assert!(
+//RS         diags.iter().any(|d| d.code == "E1006"),
+//RS         "expected E1006 for ambient input under core ceiling"
+//RS     );
+//RS     let e1006 = diags.iter().find(|d| d.code == "E1006").unwrap();
+//RS     assert!(
+//RS         e1006.why.contains("import chain:"),
+//RS         "E1006 should include import chain: {}",
+//RS         e1006.why
+//RS     );
+//RS     assert!(
+//RS         e1006.why.contains("input()"),
+//RS         "chain should name ambient input: {}",
+//RS         e1006.why
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_roundtrip_layer_metadata() {
+//RS     use jet::Lock::{LockFile, LockSource, LockedPackage};
+//RS     let pkg = LockedPackage {
+//RS         name: "embed".into(),
+//RS         version: "0.1.0".into(),
+//RS         source: LockSource::Root,
+//RS         nix_closure: None,
+//RS 
+//RS         locked: None,
+//RS         fingerprint: String::new(),
+//RS         content_hash: None,
+//RS         dependencies: vec![],
+//RS         layer: Some(jet::Syntax::RuntimeLayer::Alloc),
+//RS         inferred_layer: Some(jet::Syntax::RuntimeLayer::Std),
+//RS         effects: vec![],
+//RS         effect_grants: vec![],
+//RS         required_effects: vec![],
+//RS         granted_effects: vec![],
+//RS         denied_effects: vec![],
+//RS         effect_authority: None,
+//RS         envelope: None,
+//RS         receipt: None,
+//RS         provenance: None,
+//RS     };
+//RS     let lock = LockFile {
+//RS         version: 1,
+//RS         packages: vec![pkg],
+//RS         root_dependencies: vec![],
+//RS         authority: None,
+//RS         workspace_members: vec![],
+//RS         workspace_source_digest: None,
+//RS         workspace_overlay_policy: Default::default(),
+//RS         comptime_inputs: vec![],
+//RS         toolchains: Vec::new(),
+//RS         browsers: Vec::new(),
+//RS         source_channels: Vec::new(),
+//RS         build_stamp: None,
+//RS         build_contributions: Vec::new(),
+//RS     };
+//RS     let raw = jet::Lock::write(&lock);
+//RS     let parsed = jet::Lock::parse(&raw).unwrap();
+//RS     assert_eq!(
+//RS         parsed.packages[0].layer,
+//RS         Some(jet::Syntax::RuntimeLayer::Alloc)
+//RS     );
+//RS     assert_eq!(
+//RS         parsed.packages[0].inferred_layer,
+//RS         Some(jet::Syntax::RuntimeLayer::Std)
+//RS     );
+//RS }
+// END-PORT-PENDING 1143 tests/ring_layer.rs:1-290
+
+// PORT-PENDING 1143 tests-rights-matrix-module-group: tests/ring_shipping.rs:1-81
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! T3 (card #99, D-JPK-RINGSHIP1=C): ring package shipping.
+//RS //!
+//RS //! A ring library (`core.http`, `core.regex`, …) resolves from a realized
+//RS //! hangar object when the active toolchain object stages a prebuilt artifact for
+//RS //! it, and from the compiler-embedded template otherwise. One resolution path,
+//RS //! two sources, no user-visible difference. This is its own test binary so the
+//RS //! process-global `JET_TOOLCHAIN_OBJECT` env it sets never races the parallel
+//RS //! unit tests in other binaries.
+//RS 
+//RS mod common;
+//RS 
+//RS use jet::Loader::{self, RingResolution};
+//RS use jet::Syntax;
+//RS use std::path::PathBuf;
+//RS 
+//RS fn scratch(tag: &str) -> PathBuf {
+//RS     let p = std::env::temp_dir().join(format!(
+//RS         "ring-ship-{tag}-{}",
+//RS         std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .unwrap()
+//RS             .as_nanos()
+//RS     ));
+//RS     std::fs::create_dir_all(&p).unwrap();
+//RS     p
+//RS }
+//RS 
+//RS #[test]
+//RS fn ring_module_realizes_from_hangar() {
+//RS     // No active toolchain object → the ring resolves from the embedded template
+//RS     // (rung-0 magic preserved).
+//RS     std::env::remove_var(Syntax::TOOLCHAIN_OBJECT_ENV);
+//RS     assert!(
+//RS         !Syntax::is_ring_module_staged("http"),
+//RS         "with no toolchain object, no ring is staged"
+//RS     );
+//RS     assert_eq!(
+//RS         Loader::resolve_ring_module("http"),
+//RS         RingResolution::Embedded
+//RS     );
+//RS 
+//RS     // A fixture toolchain object that carries prebuilt `http` and `regex`
+//RS     // artifacts → those rings become staged and resolve from the hangar object;
+//RS     // a ring it does not carry still falls back to the embedded template.
+//RS     let obj = scratch("obj");
+//RS     let ring = obj.join("ring");
+//RS     std::fs::create_dir_all(&ring).unwrap();
+//RS     std::fs::write(ring.join("http"), "prebuilt-http").unwrap();
+//RS     std::fs::write(ring.join("regex"), "prebuilt-regex").unwrap();
+//RS     std::env::set_var(Syntax::TOOLCHAIN_OBJECT_ENV, &obj);
+//RS 
+//RS     assert!(
+//RS         Syntax::is_ring_module_staged("http"),
+//RS         "is_ring_module_staged(\"http\") must flip true when the object stages it"
+//RS     );
+//RS     assert!(Syntax::is_ring_module_staged("regex"));
+//RS     // The loader resolves the staged artifact from the hangar object.
+//RS     match Loader::resolve_ring_module("http") {
+//RS         RingResolution::Staged(path) => {
+//RS             assert_eq!(path, ring.join("http"), "must point at the staged artifact");
+//RS         }
+//RS         other => panic!("expected Staged, got {other:?}"),
+//RS     }
+//RS     // A ring the object does not carry falls back to embedded (no skew, no error).
+//RS     assert!(!Syntax::is_ring_module_staged("db"));
+//RS     assert_eq!(Loader::resolve_ring_module("db"), RingResolution::Embedded);
+//RS 
+//RS     // A non-ring name is never staged.
+//RS     assert!(!Syntax::is_ring_module_staged("not_a_ring"));
+//RS 
+//RS     std::env::remove_var(Syntax::TOOLCHAIN_OBJECT_ENV);
+//RS     std::fs::remove_dir_all(&obj).ok();
+//RS }
+//RS 
+//RS #[test]
+//RS fn ring_platform_miss_diagnostic_exists() {
+//RS     // E1241 — the RINGSHIP1=B hard-error / RINGSHIP1=C informational form.
+//RS     let d = Loader::e1241_ring_platform_miss("http");
+//RS     assert_eq!(d.code, "E1241");
+//RS     assert!(d.what.contains("core.http"));
+//RS }
+// END-PORT-PENDING 1143 tests/ring_shipping.rs:1-81
+
+// PORT-PENDING 1143 tests-rights-matrix-module-group: tests/rollback.rs:1-207
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-TXN-ROLLBACK layer 2: the `Rollback` trait — custom snapshot/restore path.
+//RS 
+//RS use std::fs;
+//RS 
+//RS mod common;
+//RS use common::have_rustc;
+//RS 
+//RS fn unique_tmp(tag: &str) -> std::path::PathBuf {
+//RS     common::unique_tmp(&format!("jet_rollback_{tag}"))
+//RS }
+//RS 
+//RS fn build_and_run(name: &str, src: &str) -> (i32, String) {
+//RS     let (code, stdout, _stderr) = common::build_and_run("jet_rollback", name, src);
+//RS     (code, stdout)
+//RS }
+//RS 
+//RS /// On `?`-failure both fields are restored to their pre-block values via the
+//RS /// custom `restore` method (not a full clone).
+//RS #[test]
+//RS fn rollback_restores_on_failure() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS struct Counter {
+//RS     value: Int
+//RS     ops: Int
+//RS }
+//RS struct CounterSnap {
+//RS     value: Int
+//RS     ops: Int
+//RS }
+//RS impl Counter.Rollback {
+//RS     type Snapshot = CounterSnap
+//RS     fn snapshot(self) -> CounterSnap {
+//RS         return CounterSnap{ value: self.value, ops: self.ops }
+//RS     }
+//RS     fn restore(&self, snap: ^CounterSnap) {
+//RS         self.value = snap.value
+//RS         self.ops = snap.ops
+//RS     }
+//RS }
+//RS enum Fail { Bad }
+//RS fn bump(c: &Counter) -> Int !Fail {
+//RS     #Transact {
+//RS         c.value += 1
+//RS         c.ops += 1
+//RS         return Err(Fail.Bad)
+//RS     }
+//RS     return Ok(c.value)
+//RS }
+//RS fn run() {
+//RS     c := Counter{ value: 10, ops: 0 }
+//RS     _ :: bump(&c) ?? 0
+//RS     print(c.value)
+//RS     print(c.ops)
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("rollback_failure", src);
+//RS     assert_eq!(code, 0);
+//RS     // Both fields restored to 10 and 0.
+//RS     assert_eq!(stdout, "10\n0\n");
+//RS }
+//RS 
+//RS /// On success the changes are committed: rollback must NOT run.
+//RS #[test]
+//RS fn rollback_not_triggered_on_success() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS struct Counter {
+//RS     value: Int
+//RS     ops: Int
+//RS }
+//RS struct CounterSnap {
+//RS     value: Int
+//RS     ops: Int
+//RS }
+//RS impl Counter.Rollback {
+//RS     type Snapshot = CounterSnap
+//RS     fn snapshot(self) -> CounterSnap {
+//RS         return CounterSnap{ value: self.value, ops: self.ops }
+//RS     }
+//RS     fn restore(&self, snap: ^CounterSnap) {
+//RS         self.value = snap.value
+//RS         self.ops = snap.ops
+//RS     }
+//RS }
+//RS enum Fail { Bad }
+//RS fn bump(c: &Counter) -> Int !Fail {
+//RS     #Transact {
+//RS         c.value += 1
+//RS         c.ops += 1
+//RS     }
+//RS     return Ok(c.value)
+//RS }
+//RS fn run() {
+//RS     c := Counter{ value: 10, ops: 0 }
+//RS     _ :: bump(&c) ?? 0
+//RS     print(c.value)
+//RS     print(c.ops)
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("rollback_success", src);
+//RS     assert_eq!(code, 0);
+//RS     // Changes committed: 11 and 1.
+//RS     assert_eq!(stdout, "11\n1\n");
+//RS }
+//RS 
+//RS /// The canonical interpreter must restore nominal fields through a materialized
+//RS /// callback receiver, not only through an address-backed place.
+//RS #[test]
+//RS fn rollback_trait_interpreter_restores_projected_fields() {
+//RS     let mut bundle = jet::Loader::load_entry("Examples/features/errors/rollback_trait.jet")
+//RS         .expect("rollback trait fixture should load");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     let errors = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+//RS         .collect::<Vec<_>>();
+//RS     assert!(
+//RS         errors.is_empty(),
+//RS         "rollback trait fixture should be semantically valid: {errors:#?}"
+//RS     );
+//RS 
+//RS     match common::run_interpreter_checked_bundle(
+//RS         &bundle,
+//RS         true,
+//RS         jet::Interpreter::InterpreterInvocation::RunInterpret,
+//RS         &common::development_policy(),
+//RS     ) {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout,
+//RS             exit_code,
+//RS             ..
+//RS         } => {
+//RS             assert_eq!(exit_code, 0);
+//RS             assert_eq!(
+//RS                 stdout,
+//RS                 include_str!("../Examples/features/expected/errors/rollback_trait.out")
+//RS             );
+//RS         }
+//RS         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+//RS             panic!("rollback trait interpreter failed: {diagnostics:?}");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Generated Rust contains `snapshot_custom` and `trait __jet_Rollback`.
+//RS /// `unsafe` must not leak outside `mod jet_txn`.
+//RS #[test]
+//RS fn snapshot_custom_in_codegen() {
+//RS     let src = r#"
+//RS struct Counter {
+//RS     value: Int
+//RS }
+//RS struct CounterSnap { value: Int }
+//RS impl Counter.Rollback {
+//RS     type Snapshot = CounterSnap
+//RS     fn snapshot(self) -> CounterSnap {
+//RS         return CounterSnap{ value: self.value }
+//RS     }
+//RS     fn restore(&self, snap: ^CounterSnap) {
+//RS         self.value = snap.value
+//RS     }
+//RS }
+//RS enum Fail { Bad }
+//RS fn bump(c: &Counter) -> Int !Fail {
+//RS     #Transact {
+//RS         c.value += 1
+//RS         return Err(Fail.Bad)
+//RS     }
+//RS     return Ok(c.value)
+//RS }
+//RS fn run() {
+//RS     c := Counter{ value: 0 }
+//RS     _ :: bump(&c) ?? 0
+//RS     print(c.value)
+//RS }
+//RS "#;
+//RS     let dir = unique_tmp("codegen");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let jet_path = dir.join("snap_codegen.jet");
+//RS     fs::write(&jet_path, src).unwrap();
+//RS     let shown = jet_path.to_string_lossy().into_owned();
+//RS     let out = jet::compile_with_path(src, &shown)
+//RS         .unwrap_or_else(|diags| panic!("front end rejected: {:?}", diags));
+//RS     let rust = &out.rust;
+//RS 
+//RS     assert!(
+//RS         rust.contains("snapshot_custom"),
+//RS         "expected snapshot_custom in generated Rust:\n{rust}"
+//RS     );
+//RS     assert!(
+//RS         rust.contains("trait __jet_Rollback"),
+//RS         "expected trait __jet_Rollback in generated Rust:\n{rust}"
+//RS     );
+//RS 
+//RS     // Strip every vetted prelude region (jet_txn, jet_mem, and the rest of the
+//RS     // canonical list) then verify no `unsafe` remains.
+//RS     let user_code = common::strip_vetted_prelude_modules(rust);
+//RS     assert!(
+//RS         !user_code.contains("unsafe"),
+//RS         "unsafe leaked outside jet_txn/jet_mem:\n{user_code}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1143 tests/rollback.rs:1-207
+
+// PORT-PENDING 1143 tests-rights-matrix-module-group: tests/s5_columnar_witness.rs:1-30
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use tir_support::{build_and_run_full, have_rustc, interpreter_run, jit_run};
+//RS 
+//RS const EXPECTED: &str = "599.9999999999977\n";
+//RS const AOS: &str = include_str!("s5_columnar_witness/aos.jet");
+//RS const COLUMNAR: &str = include_str!("s5_columnar_witness/columnar.jet");
+//RS 
+//RS fn assert_tiers(name: &str, source: &str) {
+//RS     let (jit_code, jit_stdout, jit_stderr) = jit_run(name, source);
+//RS     assert_eq!(jit_code, 0, "{name} default run failed: {jit_stderr}");
+//RS     assert_eq!(jit_stdout, EXPECTED, "{name} default output drifted");
+//RS     let (interpreter_code, interpreter_stdout, interpreter_stderr) = interpreter_run(name, source);
+//RS     assert_eq!(interpreter_code, jit_code, "{name} interpreter failed: {interpreter_stderr}");
+//RS     assert_eq!(interpreter_stdout, EXPECTED, "{name} interpreter output drifted");
+//RS     if have_rustc() {
+//RS         let (aot_code, aot_stdout, aot_stderr) = build_and_run_full("jet_s5_columnar", name, source);
+//RS         assert_eq!(aot_code, jit_code, "{name} AOT failed: {aot_stderr}");
+//RS         assert_eq!(aot_stdout, EXPECTED, "{name} AOT output drifted");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn s5_aos_and_columnar_variants_are_byte_identical_across_tiers() {
+//RS     assert_tiers("s5_aos", AOS);
+//RS     assert_tiers("s5_columnar", COLUMNAR);
+//RS }
+// END-PORT-PENDING 1143 tests/s5_columnar_witness.rs:1-30
+
+// PORT-PENDING 1143 tests-rights-matrix-module-group: tests/same_subject_dispatch.rs:1-92
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! L0514: the adjacent-guard rewrite keeps parser-style dispatch behavior.
+//RS 
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS const SOURCE: &str = include_str!("fixtures/adjacent_subject_dispatch_witness.jet");
+//RS const EXPECTED_STDOUT: &str = "revision\n";
+//RS const BRACED_SOURCE: &str = r#"fn run() {
+//RS     key :: "rev"
+//RS     if key == "revision" {
+//RS         print("revision")
+//RS     }
+//RS     if key == "rev" {
+//RS         print("revision")
+//RS     }
+//RS     if key == "path" {
+//RS         print("path")
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn rewrite_compiles_formats_and_preserves_parser_dispatch_behavior() {
+//RS     let output = tir_support::compile_source("adjacent_subject_dispatch_witness.jet", SOURCE)
+//RS         .expect("the non-Jetpack dispatch witness should compile");
+//RS     let lint = output
+//RS         .lints
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "L0514")
+//RS         .expect("three adjacent categorical guards should be linted");
+//RS     assert_eq!(
+//RS         lint.applicability,
+//RS         Some(jet::Diagnostics::FixApplicability::Suggested)
+//RS     );
+//RS     assert_eq!(lint.safety, Some(jet::Diagnostics::FixSafety::NeedsReview));
+//RS 
+//RS     let edit = lint.edit.clone().expect("L0514 should carry a source edit");
+//RS     let fixed = jet::FixEngine::apply_edits(SOURCE, std::slice::from_ref(&edit))
+//RS         .expect("the structured L0514 edit should apply");
+//RS     assert!(
+//RS         fixed.contains("if key == {\n        \"revision\" | \"rev\" -> print(\"revision\")"),
+//RS         "fixed source did not group aliases in an ordered table:\n{fixed}"
+//RS     );
+//RS     assert_eq!(
+//RS         jet::format_source(&fixed).expect("the rewrite should be formatter-readable"),
+//RS         fixed,
+//RS         "the L0514 action should produce formatted source"
+//RS     );
+//RS     let fixed_output =
+//RS         tir_support::compile_source("adjacent_subject_dispatch_witness_fixed.jet", &fixed)
+//RS             .expect("the suggested rewrite should compile");
+//RS     assert!(
+//RS         !fixed_output
+//RS             .lints
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "L0514"),
+//RS         "the rewrite should remove the adjacent guard run"
+//RS     );
+//RS 
+//RS     tir_support::assert_tiers_agree(
+//RS         "adjacent_subject_dispatch_original",
+//RS         SOURCE,
+//RS         EXPECTED_STDOUT,
+//RS     );
+//RS     tir_support::assert_tiers_agree("adjacent_subject_dispatch_rewrite", &fixed, EXPECTED_STDOUT);
+//RS }
+//RS 
+//RS #[test]
+//RS fn braced_rewrite_is_formatter_stable_and_compiles() {
+//RS     let output = tir_support::compile_source(
+//RS         "adjacent_subject_dispatch_braced.jet",
+//RS         BRACED_SOURCE,
+//RS     )
+//RS     .expect("the braced dispatch witness should compile");
+//RS     let lint = output
+//RS         .lints
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "L0514")
+//RS         .expect("three adjacent braced guards should be linted");
+//RS     let edit = lint.edit.clone().expect("L0514 should carry a source edit");
+//RS     let fixed = jet::FixEngine::apply_edits(BRACED_SOURCE, std::slice::from_ref(&edit))
+//RS         .expect("the braced L0514 edit should apply");
+//RS 
+//RS     assert_eq!(
+//RS         jet::format_source(&fixed).expect("the braced rewrite should format"),
+//RS         fixed,
+//RS         "the LSP refactor action should produce formatter-stable source"
+//RS     );
+//RS     tir_support::compile_source("adjacent_subject_dispatch_braced_fixed.jet", &fixed)
+//RS         .expect("the formatted braced rewrite should compile");
+//RS }
+// END-PORT-PENDING 1143 tests/same_subject_dispatch.rs:1-92
+

@@ -1,0 +1,128 @@
+// Rust EffectBudget.rs:1089/1104 original reachability assertions, exercised
+// through the captured request, actual Loader and the single checked producer.
+// Shared PackageModel/OsPath publication and actual complete compiler closure
+// are proof gates; these assertions are not replaced with carrier-only tests.
+use jet_driver.[JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverCompileRequest, JetDriverCompilerCheckResult, jet_driver_compiler_check, JetDriverCompilerCheckInput]
+use jet_eval.[JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse]
+use jet_pkg_model.[PackageEffects, pkg_compute_package_effects]
+use jet_foundation.[Span]
+
+fn effect_budget_source_file(root: String, relative: String, source: String) -> JetDriverAuthorizedSourceFile Never! {
+    JetDriverAuthorizedSourceFile{path: entry_check_path("{root}/{relative}"), relative_path: entry_check_path(relative), identity: "budget:{root}:{relative}", source: source}
+}
+fn effect_budget_request(source: String, allow: String) -> JetDriverCompileRequest Never! {
+    request := entry_check_request(source)
+    &request.authorized_sources.roots[0].files.push(entry_check_file("package.jet", "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ email: {{ path: \"dep\" }}, extra: {{ path: \"dep-more\" }} }}\nauthority: {{ holds: {{ allow: [{allow}] }} }}\n"))
+    &request.authorized_sources.roots.push(JetDriverAuthorizedSourceRoot{
+        canonical_path: entry_check_path("/entrycheck/dep"), identity: "email-root", allow_hardlinks: false,
+        files: [JetDriverAuthorizedSourceFile]{
+            effect_budget_source_file("/entrycheck/dep", "package.jet", "name: \"email\"\nversion: \"0.1.0\"\n"),
+            effect_budget_source_file("/entrycheck/dep", "crypto.jet", "use core.math.random as random\npub fn migrate_v1(n: Int) { seal() }\npub fn seal() { random.float() }\npub fn unused() { random.float() }\n"),
+        }, foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+    })
+    &request.authorized_sources.roots.push(JetDriverAuthorizedSourceRoot{
+        canonical_path: entry_check_path("/entrycheck/dep-more"), identity: "extra-root", allow_hardlinks: false,
+        files: [JetDriverAuthorizedSourceFile]{
+            effect_budget_source_file("/entrycheck/dep-more", "package.jet", "name: \"extra\"\nversion: \"0.1.0\"\n"),
+            effect_budget_source_file("/entrycheck/dep-more", "helper.jet", "pub fn helper() { print(9) }\n"),
+        }, foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+    })
+    request
+}
+fn effect_budget_check(request: JetDriverCompileRequest, source: String) -> JetDriverCompilerCheckResult {
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: source})}) ?? panic("budget original source parse failed")
+    jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request})
+}
+fn effect_budget_package(entries: [PackageEffects], name: String) -> PackageEffects Never! {
+    loop entry in entries { if entry.name == name -> return entry }
+    panic("checked budget did not retain package {name}")
+}
+#Test("package_budget_ignores_unreachable_loaded_rand_helper: real checked adapter") {
+    source :: "use email.[migrate_v1]\nfn run() {}\n"
+    result :: effect_budget_check(effect_budget_request(source, "IO"), source)
+    assert(result.complete)
+    entries :: result.package_effects ?? panic("checked budget aggregates absent")
+    email :: effect_budget_package(entries, "email")
+    assert_eq(email.effects.len(), 0)
+    assert_eq(email.effect_sites.len(), 0)
+    program :: result.effect_budget_program ?? panic("original loaded budget metadata absent")
+    loaded_crypto := false
+    loop module in program.modules {
+        if module.alias == "crypto" {
+            loaded_crypto = true
+            assert(module.function_keys.contains("unused"))
+            assert_eq(module.path, entry_check_path("/entrycheck/dep/crypto.jet"))
+        }
+    }
+    assert(loaded_crypto)
+}
+#Test("package_budget_keeps_reachable_rand_at_dependency_boundary: same checked solve") {
+    source :: "use email.[migrate_v1]\nfn run() { migrate_v1(2) }\n"
+    result :: effect_budget_check(effect_budget_request(source, "IO"), source)
+    assert(!result.complete)
+    assert(result.graph != None && result.registration != None)
+    assert(entry_check_has_diagnostic(result, "E1220"))
+    program :: result.effect_budget_program ?? panic("checked metadata absent")
+    summaries :: result.effect_budget_summaries ?? panic("same-solve summaries absent")
+    graph :: result.graph ?? panic("actual sema facts absent")
+    loop (key, summary) in summaries {
+        actual :: graph.effect_facts.summaries.get(key) ?? panic("adapter invented a summary")
+        assert_eq(summary.direct, actual.direct)
+        assert_eq(summary.edges, actual.edges)
+        assert_eq(summary.maximal, actual.maximal)
+    }
+    migrate :: summaries.get("crypto::migrate_v1") ?? panic("qualified summary absent")
+    assert(migrate.edges.contains("crypto::seal"))
+    entries :: pkg_compute_package_effects(program, graph.effect_facts.solved, summaries)
+    email :: effect_budget_package(entries, "email")
+    assert(email.effects.contains("Rand"))
+    assert_eq(email.effect_sites.get("Rand"), Val("crypto::seal"))
+    // Rust Loader4507-4509 puts the synthesized dependency Module binding
+    // first, with a zero-width span at the authored alias start.
+    boundary :: email.boundary_span ?? panic("dependency boundary span absent")
+    assert_eq(boundary, Span{start: 4, end: 4})
+}
+#Test("dependency root component prefix trap attributes sibling package separately") {
+    source :: "use email.[migrate_v1]\nuse extra.[helper]\nfn run() { helper() }\n"
+    result :: effect_budget_check(effect_budget_request(source, "IO"), source)
+    assert(result.complete)
+    entries :: result.package_effects ?? panic("budget aggregates absent")
+    email :: effect_budget_package(entries, "email")
+    extra :: effect_budget_package(entries, "extra")
+    assert_eq(email.effects.len(), 0)
+    assert(extra.effects.contains("IO"))
+    assert_eq(extra.effect_sites.get("IO"), Val("helper::helper"))
+}
+#Test("original loader budget keys retain methods and struct trait implementation methods") {
+    source :: "trait Worker { fn work(self) }\nstruct Tool { value: Int, fn step(self) { print(self.value) } impl Worker { fn work(self) { print(self.value) } } }\nimpl Tool { fn extra(self) { print(self.value) } }\nfn run() { tool :: Tool{value: 7}; tool.step(); tool.work(); tool.extra() }\n"
+    request :: entry_check_request(source)
+    result :: effect_budget_check(request, source)
+    assert(result.complete)
+    program :: result.effect_budget_program ?? panic("original callable projection absent")
+    keys :: program.modules[program.entry].function_keys
+    assert(keys.contains("Tool::step"))
+    assert(keys.contains("Tool::work"))
+    assert(keys.contains("Tool::extra"))
+    assert(keys.contains("run"))
+    summaries :: result.effect_budget_summaries ?? panic("checked methods summaries absent")
+    alias :: program.modules[program.entry].alias
+    assert(summaries.get("{alias}::Tool::work") != None)
+    assert(summaries.get("{alias}::Tool::extra") != None)
+}
+
+#Test("recursive imported call retains exact checked summary edge and cycle provenance") {
+    source :: "use email.[migrate_v1]\nfn run() { migrate_v1(2) }\n"
+    request := effect_budget_request(source, "IO, Rand")
+    request.authorized_sources.roots[2].files[1].source = "use core.math.random as random\npub fn migrate_v1(n: Int) { if n > 0 -> migrate_v1(n - 1) else -> seal() }\npub fn seal() { random.float() }\npub fn unused() { random.float() }\n"
+    result :: effect_budget_check(request, source)
+    assert(result.complete)
+    summaries :: result.effect_budget_summaries ?? panic("recursive summaries absent")
+    summary :: summaries.get("crypto::migrate_v1") ?? panic("recursive qualified summary absent")
+    assert(summary.edges.contains("crypto::migrate_v1"))
+    assert(summary.edges.contains("crypto::seal"))
+    entries :: result.package_effects ?? panic("recursive package aggregates absent")
+    email :: effect_budget_package(entries, "email")
+    assert(email.effects.contains("Rand"))
+    // Rust effect_site's seen set terminates the first sorted recursive edge.
+    assert_eq(email.effect_sites.get("Rand"), Val("crypto::migrate_v1"))
+}

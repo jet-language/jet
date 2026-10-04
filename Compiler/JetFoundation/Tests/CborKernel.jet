@@ -1,0 +1,179 @@
+use core.encoding as cbor_kernel_test_encoding
+
+// CborKernel.rs has no inline or included tests. These faithful behavioral
+// controls exercise the original source branches. Original integration suites
+// encoding_streams.rs remain exclusively packets 1015/1016. Main must publish
+// the Budget, escape_debug and target-fact capabilities before exercising them.
+fn cbor_kernel_test_bytes(hex: String) -> [U8] Never! {
+    cbor_kernel_test_encoding.hex_to_bytes(hex) ?? panic("invalid test hex")
+}
+fn cbor_kernel_test_decode(hex: String) -> CborKernelValue Never! {
+    cbor_kernel_decode(cbor_kernel_test_bytes(hex), cbor_kernel_options_safe(), true) ?? panic("CBOR positive control failed")
+}
+fn cbor_kernel_test_error(hex: String, options: CBOROptions, allow_bytes: Bool, kind: CBORErrorKind, offset: Int, path: String, reason: String) Never! {
+    if cbor_kernel_decode(cbor_kernel_test_bytes(hex), options, allow_bytes) == {
+        .Ok(_) -> panic("CBOR negative control unexpectedly decoded")
+        .Err(error) -> {
+            assert(error.kind == kind)
+            assert(error.byte_offset == offset)
+            assert(error.path == path)
+            assert(error.reason == reason)
+        }
+    }
+}
+fn cbor_kernel_test_encode(value: CborKernelValue, canonical: Bool, hex: String) Never! {
+    encoded :: cbor_kernel_encode(value, canonical) ?? panic("CBOR encode positive control failed")
+    assert(encoded == cbor_kernel_test_bytes(hex))
+}
+fn cbor_kernel_test_canonical() -> CBOROptions Never! {
+    options := cbor_kernel_options_safe()
+    options.require_canonical = true
+    options
+}
+
+#Test("CborKernel options defaults bounds and validation precedence") {
+    safe :: cbor_kernel_options_safe()
+    assert(safe.max_depth == 256 && safe.max_items == 1000000 && safe.max_bytes == 1073741824 && !safe.require_canonical)
+    defaults :: cbor_kernel_options_from_fields(None, None, None, None) ?? panic("defaults rejected")
+    assert(defaults.max_depth == safe.max_depth && defaults.max_items == safe.max_items && defaults.max_bytes == safe.max_bytes)
+    _ :: cbor_kernel_options_from_fields(Val(4096), Val(1000000000), Val(0), Val(true)) ?? panic("inclusive maxima/minimum rejected")
+    bad :: CBOROptions{max_depth: 0, max_items: 0, max_bytes: -1, require_canonical: false}
+    cbor_kernel_test_error("", bad, true, CBORErrorKind.Limit, 0, "$", "max_depth must be in 1..4096")
+    bad_items :: CBOROptions{max_depth: 1, max_items: 1000000001, max_bytes: -1, require_canonical: false}
+    cbor_kernel_test_error("", bad_items, true, CBORErrorKind.Limit, 0, "$", "max_items must be in 1..1000000000")
+    bad_bytes :: CBOROptions{max_depth: 1, max_items: 1, max_bytes: 1073741825, require_canonical: false}
+    cbor_kernel_test_error("", bad_bytes, true, CBORErrorKind.Limit, 0, "$", "max_bytes must be in 0..1073741824")
+}
+
+#Test("CborKernel scalar and integer-width encodings") {
+    cbor_kernel_test_encode(CborKernelValue.Null, false, "f6")
+    cbor_kernel_test_encode(CborKernelValue.Bool(false), false, "f4")
+    cbor_kernel_test_encode(CborKernelValue.Bool(true), true, "f5")
+    values :: [Int]{0, 23, 24, 255, 256, 65535, 65536, 4294967295, 4294967296, 9223372036854775807}
+    positive :: [String]{"00", "17", "1818", "18ff", "190100", "19ffff", "1a00010000", "1affffffff", "1b0000000100000000", "1b7fffffffffffffff"}
+    negative :: [String]{"20", "37", "3818", "38ff", "390100", "39ffff", "3a00010000", "3affffffff", "3b0000000100000000", "3b7fffffffffffffff"}
+    loop (index, value) in values {
+        cbor_kernel_test_encode(CborKernelValue.Int(I64{value}), true, positive[index])
+        cbor_kernel_test_encode(CborKernelValue.Int(I64{-value - 1}), false, negative[index])
+        assert(cbor_kernel_test_decode(positive[index]) == CborKernelValue.Int(I64{value}))
+        assert(cbor_kernel_test_decode(negative[index]) == CborKernelValue.Int(I64{-value - 1}))
+    }
+    safe :: cbor_kernel_options_safe()
+    cbor_kernel_test_error("1b8000000000000000", safe, true, CBORErrorKind.Unsupported, 0, "$", "CBOR integer is outside Jet Int")
+    cbor_kernel_test_error("3bffffffffffffffff", safe, true, CBORErrorKind.Unsupported, 0, "$", "CBOR integer is outside Jet Int")
+}
+
+#Test("CborKernel preferred float widths signed zero infinities NaN") {
+    cbor_kernel_test_encode(CborKernelValue.Float(1.5), false, "f93e00")
+    cbor_kernel_test_encode(CborKernelValue.Float(cbor_math.from_bits(0x8000000000000000)), false, "f98000")
+    cbor_kernel_test_encode(CborKernelValue.Float(cbor_math.from_bits(0x7ff0000000000000)), true, "f97c00")
+    cbor_kernel_test_encode(CborKernelValue.Float(cbor_math.from_bits(0xfff0000000000000)), true, "f9fc00")
+    cbor_kernel_test_encode(CborKernelValue.Float(cbor_math.from_bits(0x7ff8000000000042)), false, "f97e00")
+    cbor_kernel_test_encode(CborKernelValue.Float(100000.0), true, "fa47c35000")
+    cbor_kernel_test_encode(CborKernelValue.Float(1.1), true, "fb3ff199999999999a")
+    cbor_kernel_test_encode(CborKernelValue.Float(cbor_kernel_half_to_f64(1)), true, "f90001")
+    cbor_kernel_test_encode(CborKernelValue.Float(cbor_kernel_f32_to_f64(1)), true, "fa00000001")
+    cbor_kernel_test_encode(CborKernelValue.Float(cbor_math.from_bits(1)), true, "fb0000000000000001")
+    canonical :: cbor_kernel_test_canonical()
+    cbor_kernel_test_error("f97c01", canonical, true, CBORErrorKind.NonCanonical, 0, "$", "CBOR NaN is not the canonical 0xf97e00 encoding")
+    cbor_kernel_test_error("f9fe00", canonical, true, CBORErrorKind.NonCanonical, 0, "$", "CBOR NaN is not the canonical 0xf97e00 encoding")
+    cbor_kernel_test_error("fa3fc00000", canonical, true, CBORErrorKind.NonCanonical, 0, "$", "CBOR Float does not use its preferred shortest encoding")
+    cbor_kernel_test_error("fb3ff8000000000000", canonical, true, CBORErrorKind.NonCanonical, 0, "$", "CBOR Float does not use its preferred shortest encoding")
+    cbor_kernel_test_error("fa7fc00000", canonical, true, CBORErrorKind.NonCanonical, 0, "$", "CBOR Float does not use its preferred shortest encoding")
+    cbor_kernel_test_error("fb7ff8000000000000", canonical, true, CBORErrorKind.NonCanonical, 0, "$", "CBOR Float does not use its preferred shortest encoding")
+    loop pair in [String]{"f900", "fa000000", "fb00000000000000"} {
+        width :: if pair.bytes().len() == { 4 -> "16" 8 -> "32" else -> "64" }
+        cbor_kernel_test_error(pair, cbor_kernel_options_safe(), true, CBORErrorKind.Truncated, pair.bytes().len() /% 2, "$", "CBOR Float{width} is truncated")
+    }
+}
+
+#Test("CborKernel IEEE half and single bit algorithms preserve finite words") {
+    loop word in 0..<65536 {
+        value :: cbor_kernel_half_to_f64(word)
+        if (word & 0x7c00) == 0x7c00 && (word & 1023) != 0 -> assert(cbor_math.is_nan(value))
+        else -> assert(cbor_kernel_half_exact(value) == Val(word))
+    }
+    single_words :: [Int]{0, 0x80000000, 1, 0x7fffff, 0x800000, 0x3f800000, 0x3fc00000, 0x7f7fffff, 0xff7fffff, 0x7f800000, 0xff800000}
+    loop word in single_words -> assert(cbor_kernel_f64_to_f32_bits(cbor_kernel_f32_to_f64(word)) == word)
+    // Ties round to the even low mantissa at both binary64->32 and 32->16.
+    assert(cbor_kernel_f64_to_f32_bits(cbor_math.from_bits(0x3ff0000010000000)) == 0x3f800000)
+    assert(cbor_kernel_f64_to_f32_bits(cbor_math.from_bits(0x3ff0000030000000)) == 0x3f800002)
+    assert(cbor_kernel_f32_to_half_bits(0x3f801000) == 0x3c00)
+    assert(cbor_kernel_f32_to_half_bits(0x3f803000) == 0x3c02)
+    assert(cbor_kernel_f64_to_f32_bits(cbor_math.from_bits(0x47f0000000000000)) == 0x7f800000)
+}
+
+#Test("CborKernel definite and indefinite strings bytes and chunk UTF8") {
+    assert(cbor_kernel_test_decode("60") == CborKernelValue.Text(""))
+    assert(cbor_kernel_test_decode("62c3a9") == CborKernelValue.Text("é"))
+    assert(cbor_kernel_test_decode("5f4201024103ff") == CborKernelValue.Bytes(cbor_kernel_test_bytes("010203")))
+    assert(cbor_kernel_test_decode("7f6062c3a96161ff") == CborKernelValue.Text("éa"))
+    cbor_kernel_test_encode(CborKernelValue.Text("é"), true, "62c3a9")
+    cbor_kernel_test_encode(CborKernelValue.Bytes(cbor_kernel_test_bytes("00ff")), false, "4200ff")
+    safe :: cbor_kernel_options_safe()
+    cbor_kernel_test_error("42ff", safe, false, CBORErrorKind.Truncated, 2, "$", "CBOR byte/text string is truncated")
+    cbor_kernel_test_error("40", safe, false, CBORErrorKind.Unsupported, 0, "$", "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>")
+    cbor_kernel_test_error("5f", safe, false, CBORErrorKind.Unsupported, 0, "$", "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>")
+    cbor_kernel_test_error("62c080", safe, true, CBORErrorKind.Syntax, 0, "$", "CBOR text is not UTF-8")
+    cbor_kernel_test_error("7f61c361a9ff", safe, true, CBORErrorKind.Syntax, 1, "$", "CBOR text chunk is not UTF-8")
+    cbor_kernel_test_error("7f4100ff", safe, true, CBORErrorKind.Syntax, 1, "$", "indefinite CBOR string contains a wrong or indefinite chunk")
+    cbor_kernel_test_error("7f7fff", safe, true, CBORErrorKind.Syntax, 1, "$", "indefinite CBOR string contains a wrong or indefinite chunk")
+    cbor_kernel_test_error("7f62", safe, true, CBORErrorKind.Truncated, 2, "$", "CBOR byte/text string chunk is truncated")
+    cbor_kernel_test_error("7f6161", safe, true, CBORErrorKind.Truncated, 3, "$", "indefinite CBOR string ended before its break")
+    cbor_kernel_test_error("7fff", cbor_kernel_test_canonical(), true, CBORErrorKind.NonCanonical, 0, "$", "indefinite-length CBOR is not Core deterministic")
+    assert(!cbor_kernel_utf8_valid(cbor_kernel_test_bytes("eda080"), 0, 3))
+    assert(!cbor_kernel_utf8_valid(cbor_kernel_test_bytes("f4908080"), 0, 4))
+    assert(cbor_kernel_utf8_valid(cbor_kernel_test_bytes("f48fbfbf"), 0, 4))
+}
+
+#Test("CborKernel arrays maps preserve order and canonical error precedence") {
+    array :: CborKernelValue.Array([CborKernelValue]{CborKernelValue.Int(I64{1}), CborKernelValue.Null})
+    cbor_kernel_test_encode(array, false, "8201f6")
+    assert(cbor_kernel_test_decode("9f01f6ff") == array)
+    entries :: [CborKernelEntry]{CborKernelEntry{key: "aa", value: CborKernelValue.Int(I64{2})}, CborKernelEntry{key: "b", value: CborKernelValue.Int(I64{1})}}
+    object :: CborKernelValue.Object(entries)
+    cbor_kernel_test_encode(object, false, "a262616102616201")
+    cbor_kernel_test_encode(object, true, "a261620162616102")
+    assert(cbor_kernel_test_decode("bf62616102616201ff") == object)
+    safe :: cbor_kernel_options_safe()
+    cbor_kernel_test_error("9f00", safe, true, CBORErrorKind.Truncated, 2, "$", "indefinite CBOR array ended before its break")
+    cbor_kernel_test_error("bf", safe, true, CBORErrorKind.Truncated, 1, "$", "indefinite CBOR map ended before its break")
+    cbor_kernel_test_error("bf6161", safe, true, CBORErrorKind.Truncated, 3, "$", "indefinite CBOR map ended before its value")
+    cbor_kernel_test_error("bf6161ff", safe, true, CBORErrorKind.Syntax, 3, "$", "indefinite CBOR map break appears where a value is required")
+    cbor_kernel_test_error("a10000", safe, true, CBORErrorKind.Unsupported, 1, "$", "CBOR map key must be text")
+    cbor_kernel_test_error("a2616100616101", safe, true, CBORErrorKind.Unsupported, 4, "$", "duplicate CBOR text map key")
+    cbor_kernel_test_error("a2616100616101", cbor_kernel_test_canonical(), true, CBORErrorKind.NonCanonical, 4, "$", "CBOR map keys are not in Core deterministic bytewise order")
+    cbor_kernel_test_error("a262616102616201", cbor_kernel_test_canonical(), true, CBORErrorKind.NonCanonical, 5, "$", "CBOR map keys are not in Core deterministic bytewise order")
+    duplicate :: CborKernelValue.Object([CborKernelEntry]{CborKernelEntry{key: "a", value: CborKernelValue.Null}, CborKernelEntry{key: "a", value: CborKernelValue.Bool(true)}})
+    if cbor_kernel_encode(duplicate, true) == {
+        .Ok(_) -> panic("duplicate map was encoded")
+        .Err(error) -> assert(error.kind == CBORErrorKind.Unsupported && error.byte_offset == 0 && error.path == "$" && error.reason == "duplicate encoded CBOR map key")
+    }
+}
+
+#Test("CborKernel paths escape_debug semantics byte offsets and scalar errors") {
+    safe :: cbor_kernel_options_safe()
+    cbor_kernel_test_error("a161618100", CBOROptions{max_depth: 1, max_items: 100, max_bytes: 1024, require_canonical: false}, true, CBORErrorKind.Limit, 3, "$[\"a\"]", "max_depth 1 exceeded")
+    cbor_kernel_test_error("a1622722ff", safe, true, CBORErrorKind.Syntax, 4, "$[\"\\'\\\"\"]", "CBOR break outside an indefinite container")
+    cbor_kernel_test_error("a163650001ff", safe, true, CBORErrorKind.Syntax, 5, "$[\"e\\0\\u{{1}}\"]", "CBOR break outside an indefinite container")
+    cbor_kernel_test_error("", safe, true, CBORErrorKind.Truncated, 0, "$", "CBOR value is missing")
+    cbor_kernel_test_error("81", safe, true, CBORErrorKind.Truncated, 1, "$[0]", "CBOR value is missing")
+    cbor_kernel_test_error("c000", safe, true, CBORErrorKind.Unsupported, 0, "$", "CBOR tags are unsupported")
+    cbor_kernel_test_error("f7", safe, true, CBORErrorKind.Unsupported, 0, "$", "unsupported CBOR simple value 23")
+    cbor_kernel_test_error("ff", safe, true, CBORErrorKind.Syntax, 0, "$", "CBOR break outside an indefinite container")
+    cbor_kernel_test_error("0001", safe, true, CBORErrorKind.TrailingData, 1, "$", "trailing CBOR data after root value")
+    cbor_kernel_test_error("1c", safe, true, CBORErrorKind.Unsupported, 0, "$", "indefinite/reserved CBOR length is unsupported by whole-value decoding")
+    cbor_kernel_test_error("19ff", safe, true, CBORErrorKind.Truncated, 2, "$", "CBOR length argument is truncated")
+    loop hex in [String]{"1800", "190018", "1a00000100", "1b0000000000010000"} -> cbor_kernel_test_error(hex, cbor_kernel_test_canonical(), true, CBORErrorKind.NonCanonical, 0, "$", "CBOR argument does not use its shortest form")
+}
+
+#Test("CborKernel resource limits retain paths reasons and depth precedence") {
+    cbor_kernel_test_error("00", CBOROptions{max_depth: 1, max_items: 1, max_bytes: 0, require_canonical: false}, true, CBORErrorKind.Limit, 0, "$", "input exceeds max_bytes 0")
+    cbor_kernel_test_error("9f00ff", CBOROptions{max_depth: 1, max_items: 1, max_bytes: 1024, require_canonical: false}, true, CBORErrorKind.Limit, 1, "$[0]", "max_items 1 exceeded")
+    cbor_kernel_test_error("8100", CBOROptions{max_depth: 1, max_items: 1, max_bytes: 1024, require_canonical: false}, true, CBORErrorKind.Limit, 1, "$[0]", "max_items 1 exceeded")
+    cbor_kernel_test_error("8180", CBOROptions{max_depth: 1, max_items: 100, max_bytes: 1024, require_canonical: false}, true, CBORErrorKind.Limit, 1, "$[0]", "max_depth 1 exceeded")
+    cbor_kernel_test_error("817fff", CBOROptions{max_depth: 1, max_items: 100, max_bytes: 1024, require_canonical: false}, true, CBORErrorKind.Limit, 1, "$[0]", "max_depth 1 exceeded")
+    cbor_kernel_test_error("8100", CBOROptions{max_depth: 1, max_items: 100, max_bytes: 32, require_canonical: false}, true, CBORErrorKind.Limit, 0, "$", "CBOR path allocation exceeds max_bytes 32")
+    cbor_kernel_test_error("8100", CBOROptions{max_depth: 1, max_items: 100, max_bytes: 3, require_canonical: false}, true, CBORErrorKind.Limit, 0, "$", "CBOR array allocation exceeds max_bytes 3")
+    cbor_kernel_test_error("bfff", cbor_kernel_test_canonical(), true, CBORErrorKind.NonCanonical, 0, "$", "indefinite-length CBOR is not Core deterministic")
+}

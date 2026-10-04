@@ -364,7 +364,7 @@ pub fn record_encode(schema: String, sections: [RecordSection]) -> RecordEncodeR
         }
         loop byte in body -> &out.push(byte)
     }
-    checksum :: mir_sha256_bytes(out)
+    checksum :: mir_sha256_bytes(out[0..<out.len()])
     loop byte in checksum -> &out.push(byte)
     RecordEncodeResult{bytes: Val(out), problem: None}
 }
@@ -478,7 +478,7 @@ pub fn record_open(bytes: [U8]) -> RecordReaderResult Never! {
         return record_reader_failure("record magic is not `JETR`")
     }
     checksum :: bytes.slice(body_end, bytes.len())
-    if mir_sha256_bytes(bytes.slice(0, body_end)) != checksum -> return record_reader_failure("record checksum does not match its bytes")
+    if mir_sha256_bytes(bytes[0..<body_end]) != checksum -> return record_reader_failure("record checksum does not match its bytes")
     cursor := RecordCursor{at: 4, end: body_end, problem: None}
     format :: record_read_uvarint(bytes, &cursor)
     if cursor.problem == None && format != RECORD_FORMAT -> return record_reader_failure("record format {format} is not supported")
@@ -638,10 +638,12 @@ pub fn record_decode(bytes: [U8]) -> RecordDecodeResult Never! {
 pub fn record_key_digest(fields: [String]) -> String Never! {
     framed := [U8]{}
     loop field in fields -> record_put_str(&framed, field)
-    mir_sha256_hex_bytes(mir_sha256_bytes(framed))
+    digest :: mir_sha256_bytes(framed[0..<framed.len()])
+    mir_sha256_hex_bytes(digest[0..<digest.len()])
 }
 
 // The store key of a blob record: lowercase hex SHA-256 of its whole bytes.
-pub fn record_blob_key(bytes: [U8]) -> String Never! {
-    mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+pub fn record_blob_key(bytes: View<U8>) -> String Never! {
+    digest :: mir_sha256_bytes(bytes)
+    mir_sha256_hex_bytes(digest[0..<digest.len()])
 }

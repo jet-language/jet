@@ -1,0 +1,330 @@
+// PORT-PENDING 0352 crates-jet-sema-src-sema-bundle-comptime-module-group: crates/jet-sema/src/Sema/Bundle/InlineCalls.rs:1-326
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS /// such call names so registration, body-checking, and codegen all agree.
+//RS /// Only callee names are rewritten (the unambiguous case); a sibling referenced
+//RS /// as a value resolves through normal name lookup and yields a clean Jet error
+//RS /// rather than leaking to rustc.
+//RS pub(crate) fn mangle_inline_sibling_calls(bundle: &mut ProgramBundle) {
+//RS     for module in bundle.modules.iter_mut() {
+//RS         for item in module.items.iter_mut() {
+//RS             let Item::CodeModule(cm) = item else { continue };
+//RS             let Some(body) = &mut cm.body else { continue };
+//RS             let siblings: HashSet<String> = body
+//RS                 .iter()
+//RS                 .filter_map(|i| match i {
+//RS                     Item::Func(f) => Some(f.name.clone()),
+//RS                     _ => None,
+//RS                 })
+//RS                 .collect();
+//RS             if siblings.is_empty() {
+//RS                 continue;
+//RS             }
+//RS             for inner in body.iter_mut() {
+//RS                 if let Item::Func(f) = inner {
+//RS                     rewrite_inline_calls_stmts(&mut f.body, &siblings, &cm.name);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn rewrite_inline_calls_stmts(
+//RS     stmts: &mut [Stmt],
+//RS     siblings: &HashSet<String>,
+//RS     modname: &str,
+//RS ) {
+//RS     for stmt in stmts {
+//RS         match stmt {
+//RS             Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
+//RS                 rewrite_inline_calls_expr(e, siblings, modname)
+//RS             }
+//RS             Stmt::Val(b) => rewrite_inline_calls_expr(&mut b.init, siblings, modname),
+//RS             Stmt::Assign { value, .. } => rewrite_inline_calls_expr(value, siblings, modname),
+//RS             Stmt::Return(Some(e), _) => rewrite_inline_calls_expr(e, siblings, modname),
+//RS             Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
+//RS                 rewrite_inline_calls_expr(e, siblings, modname)
+//RS             }
+//RS             Stmt::Return(None, _)
+//RS             | Stmt::Break(_)
+//RS             | Stmt::Continue(_)
+//RS             | Stmt::BreakLabel(..)
+//RS             | Stmt::ContinueLabel(..) => {}
+//RS             Stmt::While { cond, body, .. } => {
+//RS                 rewrite_inline_calls_expr(cond, siblings, modname);
+//RS                 rewrite_inline_calls_stmts(body, siblings, modname);
+//RS             }
+//RS             Stmt::For { kind, body, .. } => {
+//RS                 match kind {
+//RS                     ForKind::Range {
+//RS                         start,
+//RS                         end,
+//RS                         step,
+//RS                         exclusive: _,
+//RS                     } => {
+//RS                         rewrite_inline_calls_expr(start, siblings, modname);
+//RS                         rewrite_inline_calls_expr(end, siblings, modname);
+//RS                         if let Some(step) = step {
+//RS                             rewrite_inline_calls_expr(step, siblings, modname);
+//RS                         }
+//RS                     }
+//RS                     ForKind::In { collection, step } => {
+//RS                         rewrite_inline_calls_expr(collection, siblings, modname);
+//RS                         if let Some(step) = step {
+//RS                             rewrite_inline_calls_expr(step, siblings, modname);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 rewrite_inline_calls_stmts(body, siblings, modname);
+//RS             }
+//RS             Stmt::Switch {
+//RS                 subject,
+//RS                 arms,
+//RS                 else_body,
+//RS                 ..
+//RS             }
+//RS             | Stmt::ComptimeSwitch {
+//RS                 subject,
+//RS                 arms,
+//RS                 else_body,
+//RS                 ..
+//RS             } => {
+//RS                 rewrite_inline_calls_expr(subject, siblings, modname);
+//RS                 for a in arms.iter_mut() {
+//RS                     rewrite_inline_calls_expr(&mut a.cond, siblings, modname);
+//RS                     rewrite_inline_calls_stmts(&mut a.body, siblings, modname);
+//RS                 }
+//RS                 if let Some(eb) = else_body {
+//RS                     rewrite_inline_calls_stmts(eb, siblings, modname);
+//RS                 }
+//RS             }
+//RS             Stmt::CountedLoop {
+//RS                 init,
+//RS                 cond,
+//RS                 body: inner,
+//RS                 ..
+//RS             } => {
+//RS                 rewrite_inline_calls_expr(&mut init.init, siblings, modname);
+//RS                 rewrite_inline_calls_expr(cond, siblings, modname);
+//RS                 rewrite_inline_calls_stmts(inner, siblings, modname);
+//RS             }
+//RS             Stmt::Loop { body: inner, .. }
+//RS             | Stmt::Unsafe { body: inner, .. }
+//RS             | Stmt::Impure { body: inner, .. }
+//RS             | Stmt::Reactive { body: inner, .. }
+//RS             | Stmt::Shield { body: inner, .. }
+//RS             | Stmt::Switched { body: inner, .. }
+//RS             | Stmt::Region { body: inner, .. }
+//RS             | Stmt::Policy { body: inner, .. }
+//RS             | Stmt::TaskGroup { body: inner, .. }
+//RS             | Stmt::Layout { body: inner, .. }
+//RS             | Stmt::AuthorityScope { body: inner, .. }
+//RS             | Stmt::Transact { body: inner, .. }
+//RS             | Stmt::AssumeDet { body: inner, .. } => {
+//RS                 rewrite_inline_calls_stmts(inner, siblings, modname);
+//RS             }
+//RS             // D-META-STAGE1=B (formerly D-CTMARKER1): rewrite inline calls in comptime block body.
+//RS             Stmt::ComptimeBlock { body, .. } => rewrite_inline_calls_stmts(body, siblings, modname),
+//RS             // D-WHEN1: rewrite calls in both arms so sibling resolution works
+//RS             // regardless of which arm is selected at comptime.
+//RS             Stmt::ComptimeIf {
+//RS                 cond,
+//RS                 then_body,
+//RS                 else_body,
+//RS                 ..
+//RS             } => {
+//RS                 rewrite_inline_calls_expr(cond, siblings, modname);
+//RS                 rewrite_inline_calls_stmts(then_body, siblings, modname);
+//RS                 if let Some(eb) = else_body {
+//RS                     rewrite_inline_calls_stmts(eb, siblings, modname);
+//RS                 }
+//RS             }
+//RS             // Rewrite inline calls in field values and body.
+//RS             Stmt::ContextBlock { fields, body, .. } => {
+//RS                 for (_, e, _) in fields.iter_mut() {
+//RS                     rewrite_inline_calls_expr(e, siblings, modname);
+//RS                 }
+//RS                 rewrite_inline_calls_stmts(body, siblings, modname);
+//RS             }
+//RS             // D-TERM1 (ratified 2026-06-22): rewrite inline calls in live block body.
+//RS             Stmt::Live { body, .. } => {
+//RS                 rewrite_inline_calls_stmts(body, siblings, modname);
+//RS             }
+//RS             // D-DOTSCOPE1: rewrite inline calls in a scope-member region body.
+//RS             Stmt::ScopeMember { body, .. } => {
+//RS                 rewrite_inline_calls_stmts(body, siblings, modname);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn rewrite_inline_calls_expr(
+//RS     expr: &mut Expr,
+//RS     siblings: &HashSet<String>,
+//RS     modname: &str,
+//RS ) {
+//RS     match expr {
+//RS         Expr::Call(c) => {
+//RS             if siblings.contains(&c.name) {
+//RS                 c.name = jet_foundation::Names::member_name(modname, &c.name);
+//RS             }
+//RS             for a in c.args.iter_mut() {
+//RS                 rewrite_inline_calls_expr(&mut a.expr, siblings, modname);
+//RS             }
+//RS         }
+//RS         Expr::PtrFromAddr { addr, .. } => rewrite_inline_calls_expr(addr, siblings, modname),
+//RS         Expr::Ident(name, _) => {
+//RS             if siblings.contains(name) {
+//RS                 *name = modname.to_string();
+//RS             }
+//RS         }
+//RS         Expr::Char(_, _)
+//RS         | Expr::Int(_, _, _, _)
+//RS         | Expr::Float(_, _, _, _)
+//RS         | Expr::Bool(_, _)
+//RS         | Expr::Unit(_)
+//RS         | Expr::Absent(_)
+//RS         | Expr::ReduceMarker(_, _)
+//RS         | Expr::Todo { .. }
+//RS         | Expr::NoElse(_)
+//RS         | Expr::UnitLit { .. }
+//RS         | Expr::ComptimeName { .. }
+//RS         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
+//RS         // literal, no nested `Expr` to recurse into.
+//RS         | Expr::StrMatchLit(_, _)
+//RS         | Expr::BinMatchLit(_, _) => {}
+//RS         Expr::Str(parts, _) => {
+//RS             for p in parts.iter_mut() {
+//RS                 if let StrPart::Interp(e, _) = p {
+//RS                     rewrite_inline_calls_expr(e, siblings, modname);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Expr::Unary(_, inner, _)
+//RS         | Expr::Deref(inner, _)
+//RS         | Expr::RawOf(inner, _)
+//RS         | Expr::Copy(inner, _)
+//RS         | Expr::Place(inner, _, _)
+//RS         | Expr::Field(inner, _, _)
+//RS         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
+//RS         | Expr::Present(inner, _)
+//RS         | Expr::Ok(inner, _)
+//RS         | Expr::Err(inner, _) => rewrite_inline_calls_expr(inner, siblings, modname),
+//RS         Expr::Try(inner, _, _, note) => {
+//RS             rewrite_inline_calls_expr(inner, siblings, modname);
+//RS             if let Some(note) = note {
+//RS                 rewrite_inline_calls_expr(note, siblings, modname);
+//RS             }
+//RS         }
+//RS         Expr::OptField { base, .. } => rewrite_inline_calls_expr(base, siblings, modname),
+//RS         Expr::Range { start, end, .. } => {
+//RS             rewrite_inline_calls_expr(start, siblings, modname);
+//RS             rewrite_inline_calls_expr(end, siblings, modname);
+//RS         }
+//RS         Expr::MethodCall { receiver, args, .. } => {
+//RS             rewrite_inline_calls_expr(receiver, siblings, modname);
+//RS             for a in args.iter_mut() {
+//RS                 rewrite_inline_calls_expr(&mut a.expr, siblings, modname);
+//RS             }
+//RS         }
+//RS         Expr::StructLit { fields, .. } => {
+//RS             for (_, _, e) in fields.iter_mut() {
+//RS                 rewrite_inline_calls_expr(e, siblings, modname);
+//RS             }
+//RS         }
+//RS         Expr::TypedLit { body, .. } => {
+//RS             body.for_each_expr_mut(|e| rewrite_inline_calls_expr(e, siblings, modname));
+//RS         }
+//RS         Expr::EnumLit { args, .. } => {
+//RS             for a in args.iter_mut() {
+//RS                 match a {
+//RS                     EnumLitArg::Positional(e) | EnumLitArg::Named { expr: e, .. } => {
+//RS                         rewrite_inline_calls_expr(e, siblings, modname);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         Expr::OrFallback { value, fallback, .. } => {
+//RS             rewrite_inline_calls_expr(value, siblings, modname);
+//RS             match fallback {
+//RS                 OrFallback::Value(e) => rewrite_inline_calls_expr(e, siblings, modname),
+//RS                 OrFallback::Block { body, value, .. } => {
+//RS                     rewrite_inline_calls_stmts(body, siblings, modname);
+//RS                     if let Some(value) = value {
+//RS                         rewrite_inline_calls_expr(value, siblings, modname);
+//RS                     }
+//RS                 }
+//RS                 OrFallback::Return(Some(e), _) => rewrite_inline_calls_expr(e, siblings, modname),
+//RS                 OrFallback::Return(None, _)
+//RS                 | OrFallback::Panic { .. }
+//RS                 | OrFallback::Break(_)
+//RS                 | OrFallback::Continue(_)
+//RS                 | OrFallback::BreakLabel(..)
+//RS                 | OrFallback::ContinueLabel(..) => {}
+//RS             }
+//RS         }
+//RS         Expr::PatternTest { subject, .. } => {
+//RS             rewrite_inline_calls_expr(subject, siblings, modname)
+//RS         }
+//RS         Expr::Binary(_, l, r, _) => {
+//RS             rewrite_inline_calls_expr(l, siblings, modname);
+//RS             rewrite_inline_calls_expr(r, siblings, modname);
+//RS         }
+//RS         Expr::CompareChain { operands, .. } => {
+//RS             for e in operands.iter_mut() {
+//RS                 rewrite_inline_calls_expr(e, siblings, modname);
+//RS             }
+//RS         }
+//RS         Expr::ListLit(elems, _) => {
+//RS             for e in elems.iter_mut() {
+//RS                 rewrite_inline_calls_expr(e, siblings, modname);
+//RS             }
+//RS         }
+//RS         Expr::TupleLit(fields, _, _) => {
+//RS             for (_, e) in fields.iter_mut() {
+//RS                 rewrite_inline_calls_expr(e, siblings, modname);
+//RS             }
+//RS         }
+//RS         Expr::MapLit(entries, _) => {
+//RS             for (k, v) in entries.iter_mut() {
+//RS                 rewrite_inline_calls_expr(k, siblings, modname);
+//RS                 rewrite_inline_calls_expr(v, siblings, modname);
+//RS             }
+//RS         }
+//RS         Expr::Index { base, index, .. } => {
+//RS             rewrite_inline_calls_expr(base, siblings, modname);
+//RS             rewrite_inline_calls_expr(index, siblings, modname);
+//RS         }
+//RS         Expr::Slice { base, start, end, range, .. } => {
+//RS             rewrite_inline_calls_expr(base, siblings, modname);
+//RS             if let Some(range) = range {
+//RS                 rewrite_inline_calls_expr(range, siblings, modname);
+//RS             } else {
+//RS                 rewrite_inline_calls_expr(start, siblings, modname);
+//RS                 rewrite_inline_calls_expr(end, siblings, modname);
+//RS             }
+//RS         }
+//RS         Expr::CallValue { callee, args, .. } => {
+//RS             rewrite_inline_calls_expr(callee, siblings, modname);
+//RS             for a in args.iter_mut() {
+//RS                 rewrite_inline_calls_expr(&mut a.expr, siblings, modname);
+//RS             }
+//RS         }
+//RS         Expr::Lambda(lam) => match &mut lam.body {
+//RS             LambdaBody::Expr(e) => rewrite_inline_calls_expr(e, siblings, modname),
+//RS             LambdaBody::Block(stmts) => rewrite_inline_calls_stmts(stmts, siblings, modname),
+//RS         },
+//RS         Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+//RS             rewrite_inline_calls_expr(cond, siblings, modname);
+//RS             rewrite_inline_calls_stmts(then_body, siblings, modname);
+//RS             rewrite_inline_calls_expr(then_value, siblings, modname);
+//RS             rewrite_inline_calls_stmts(else_body, siblings, modname);
+//RS             rewrite_inline_calls_expr(else_value, siblings, modname);
+//RS         }
+//RS         Expr::Paren(inner, _) => rewrite_inline_calls_expr(inner, siblings, modname),
+//RS         Expr::Spread(inner, _) => rewrite_inline_calls_expr(inner, siblings, modname),
+//RS         Expr::MemberSpread { base, .. } => rewrite_inline_calls_expr(base, siblings, modname),
+//RS     }
+//RS }
+// END-PORT-PENDING 0352 crates/jet-sema/src/Sema/Bundle/InlineCalls.rs:1-326
+

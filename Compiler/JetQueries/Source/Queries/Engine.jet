@@ -1,0 +1,246 @@
+// Demand-driven front-end cache: crates/jet-queries/src/lib.rs:1–288.
+// Values belong to the caller's typed carrier. Compiler carriers hold shared
+// handles or arena IDs, never copied checked bundles or token vectors. There is
+// one dependency graph regardless of the requested result kind.
+// Driver uses JetDriverQueryMemo.Checked(Shared<JetDriverCheckedQuery>) and
+// .Tokens(Shared<[Token]>), with result tags "checked"/"tokens"; "checked.lsp"
+// is a query identity with the same "checked" result tag.
+use core.text as query_text
+
+// Rust FileKey/Subject/InputKey/QueryKey: file and named subjects are distinct
+// even when their spelling is identical. Composite keys use built-in maps.
+// #4397: frozen MIR Rust emission omits required Ord/Eq derives for these
+// key-eligible structs. Keep canonical structural keys; fix the compiler seam.
+pub struct FileKey {
+    path: String
+    pub fn new(path: String) -> FileKey Never! { FileKey{path: path} }
+}
+struct QuerySubject { is_file: Bool, name: String }
+pub struct InputKey {
+    subject: QuerySubject
+    pub fn new(name: String) -> InputKey Never! {
+        InputKey{subject: QuerySubject{is_file: false, name: name}}
+    }
+    pub fn file(file: FileKey) -> InputKey Never! {
+        InputKey{subject: QuerySubject{is_file: true, name: file.path}}
+    }
+}
+pub struct QueryKey {
+    kind: String
+    subject: QuerySubject
+    pub fn new(kind: String, name: String) -> QueryKey Never! {
+        QueryKey{kind: kind, subject: QuerySubject{is_file: false, name: name}}
+    }
+    pub fn for_file(kind: String, file: FileKey) -> QueryKey Never! {
+        QueryKey{kind: kind, subject: QuerySubject{is_file: true, name: file.path}}
+    }
+}
+
+// Rust InputCell/DepKey/Dep/MemoEntry and the dependency stack helper family.
+struct QueryInputCell { revision: Int, text: String, byte_count: Int }
+struct QueryDepKey { is_input: Bool, kind: String, subject: QuerySubject }
+enum QueryDep {
+    Input(key: InputKey, revision: Int?)
+    Query(key: QueryKey, generation: Int)
+}
+struct QueryMemoEntry {
+    deps: [QueryDep]
+    result_kind: String
+    generation: Int
+}
+struct QueryComputeFrame {
+    key: QueryKey
+    result_kind: String
+    deps: [QueryDepKey]
+}
+
+// Rust QueryStats: cumulative work and currently retained memory/history.
+pub struct QueryStats {
+    pub hits: Int
+    pub recomputes: Int
+    pub live_inputs: Int
+    pub live_input_bytes: Int
+    pub live_memos: Int
+    pub live_query_counters: Int
+}
+
+pub struct QueryEngine<T> {
+    revision: Int
+    inputs: [InputKey:QueryInputCell]
+    // #4390: a nested generic map value QueryMemoEntry<T> overflows the
+    // compiler stack. Keep typed payloads beside the one metadata graph;
+    // every eviction uses remove_memo to release both synchronized rows.
+    memo: [QueryKey:QueryMemoEntry]
+    values: [QueryKey:T]
+    recompute_by_key: [QueryKey:Int]
+    dep_stack: [QueryComputeFrame]
+    hits: Int
+    recomputes: Int
+
+    // Rust QueryEngine::new/default.
+    pub fn new() -> QueryEngine<T> Never! {
+        QueryEngine<T>{revision: 0, inputs: [InputKey:QueryInputCell]{},
+            memo: [QueryKey:QueryMemoEntry]{}, values: [QueryKey:T]{}, recompute_by_key: [QueryKey:Int]{},
+            dep_stack: [QueryComputeFrame]{}, hits: 0, recomputes: 0}
+    }
+
+    // Rust set_input: identical text neither advances revision nor prunes.
+    pub fn set_input(&self, key: InputKey, text: String) -> Bool Never! {
+        if self.inputs.get(key) == .Val(cell) {
+            if cell.text == text -> return false
+        }
+        self.revision += 1
+        self.inputs[key] = QueryInputCell{revision: self.revision, text: text, byte_count: query_text.byte_count(text)}
+        &self.prune_invalid_memos(false)
+        true
+    }
+
+    // Rust remove_input: purge invalid counters and same-subject history even
+    // when invalidate_kind previously removed its memo.
+    pub fn remove_input(&self, key: InputKey) -> Bool Never! {
+        if !self.inputs.has_key(key) -> return false
+        _ :: &self.inputs.remove(key)
+        self.revision += 1
+        &self.prune_invalid_memos(true)
+        dead := [QueryKey]{}
+        loop (query, _) in self.recompute_by_key {
+            if query.subject == key.subject -> &dead.push(query)
+        }
+        loop query in dead -> _ :: &self.recompute_by_key.remove(query)
+        true
+    }
+
+    // Rust input_text/record_dep: missing inputs are dependencies too.
+    pub fn input_text(&self, key: InputKey) -> String? Never! {
+        &self.record_dep(QueryDepKey{is_input: true, kind: "", subject: key.subject})
+        if self.inputs.get(key) == {
+            .Val(cell) -> Val(~cell.text)
+            None -> None
+        }
+    }
+
+    // Rust query's demand/hit/compute-entry half. Jet function values have read
+    // arguments only, so the mutable computation is a direct caller operation:
+    // match Val(hit), or compute on None and balance it with finish_query.
+    // expected_result_kind is a carrier/type discriminator, NOT query identity.
+    // Always record the parent edge, including a child served from its memo.
+    pub fn query(&self, key: QueryKey, expected_result_kind: String) -> T? Never! {
+        &self.record_dep(QueryDepKey{is_input: false, kind: key.kind, subject: key.subject})
+        visiting := [QueryKey:Bool]{}
+        if self.memo.get(key) == .Val(entry) {
+            if entry.result_kind == expected_result_kind && self.memo_entry_valid(entry, &visiting) {
+                self.hits += 1
+                return Val(~self.values[key])
+            }
+        }
+        &self.remove_memo(key)
+        &self.dep_stack.push(QueryComputeFrame{key: key, result_kind: expected_result_kind, deps: [QueryDepKey]{}})
+        None
+    }
+
+    // Rust query's completion half / finish_deps. Only finish the innermost
+    // demand; caller-owned handle copying is the equivalent of Rust Arc clone.
+    pub fn finish_query(&self, key: QueryKey, result_kind: String, value: ^T) -> T Never! {
+        frame :: (&self.dep_stack.pop()) ?? panic("query computation has no frame")
+        assert(frame.key == key && frame.result_kind == result_kind)
+        seen := [QueryDepKey:Bool]{}
+        deps := [QueryDep]{}
+        loop dep in frame.deps {
+            if seen.has_key(dep) -> next
+            seen[dep] = true
+            if dep.is_input {
+                input :: InputKey{subject: dep.subject}
+                revision := Int?{None}
+                if self.inputs.get(input) == .Val(cell) -> revision = Val(cell.revision)
+                &deps.push(QueryDep.Input{key: input, revision: revision})
+            } else {
+                query :: QueryKey{kind: dep.kind, subject: dep.subject}
+                if self.memo.get(query) == .Val(entry) {
+                    &deps.push(QueryDep.Query{key: query, generation: entry.generation})
+                }
+            }
+        }
+        generation :: (self.recompute_by_key.get(key) ?? 0) + 1
+        self.recompute_by_key[key] = generation
+        self.recomputes += 1
+        self.values[key] = ~value
+        self.memo[key] = QueryMemoEntry{deps: deps, result_kind: result_kind, generation: generation}
+        value
+    }
+
+    // Rust recompute_count/stats.
+    pub fn recompute_count(self, key: QueryKey) -> Int Never! {
+        self.recompute_by_key.get(key) ?? 0
+    }
+    pub fn stats(self) -> QueryStats Never! {
+        bytes := 0
+        loop (_, cell) in self.inputs -> bytes += cell.byte_count
+        QueryStats{hits: self.hits, recomputes: self.recomputes,
+            live_inputs: self.inputs.len(), live_input_bytes: bytes,
+            live_memos: self.memo.len(), live_query_counters: self.recompute_by_key.len()}
+    }
+
+    // Rust invalidate_kind does NOT eagerly prune dependent memos/counters.
+    pub fn invalidate_kind(&self, kind: String) Never! {
+        dead := [QueryKey]{}
+        loop (key, _) in self.memo {
+            if key.kind == kind -> &dead.push(key)
+        }
+        loop key in dead -> &self.remove_memo(key)
+    }
+    // Rust invalidate: prune dependents only when the memo existed.
+    pub fn invalidate(&self, key: QueryKey) Never! {
+        if !self.memo.has_key(key) -> return
+        &self.remove_memo(key)
+        &self.prune_invalid_memos(false)
+    }
+
+    fn remove_memo(&self, key: QueryKey) Never! {
+        _ :: &self.memo.remove(key)
+        _ :: &self.values.remove(key)
+    }
+
+    fn record_dep(&self, key: QueryDepKey) Never! {
+        if self.dep_stack.len() == 0 -> return
+        &self.dep_stack[self.dep_stack.len() - 1].deps.push(key)
+    }
+    // Rust memo_entry_valid/memo_key_valid: generations are per-key recompute
+    // counts, and revisiting a key returns true (not a new cycle error).
+    fn memo_entry_valid(self, entry: QueryMemoEntry, visiting: &[QueryKey:Bool]) -> Bool Never! {
+        loop dep in entry.deps {
+            if dep == {
+                .Input(key, revision) -> {
+                    current := Int?{None}
+                    if self.inputs.get(key) == .Val(cell) -> current = Val(cell.revision)
+                    if current != revision -> return false
+                }
+                .Query(key, generation) -> {
+                    child :: self.memo.get(key) ?? return false
+                    if child.generation != generation || !self.memo_key_valid(key, &visiting) -> return false
+                }
+            }
+        }
+        true
+    }
+    fn memo_key_valid(self, key: QueryKey, visiting: &[QueryKey:Bool]) -> Bool Never! {
+        if visiting.has_key(key) -> return true
+        visiting[key] = true
+        valid := false
+        if self.memo.get(key) == .Val(entry) -> valid = self.memo_entry_valid(entry, &visiting)
+        _ :: &visiting.remove(key)
+        valid
+    }
+    // Rust prune_invalid_memos: discover all dead keys against the same graph
+    // before removing any entries; normal edits keep cumulative key counters.
+    fn prune_invalid_memos(&self, purge_counters: Bool) Never! {
+        dead := [QueryKey]{}
+        loop (key, _) in self.memo {
+            visiting := [QueryKey:Bool]{}
+            if !self.memo_key_valid(key, &visiting) -> &dead.push(key)
+        }
+        loop key in dead {
+            &self.remove_memo(key)
+            if purge_counters -> _ :: &self.recompute_by_key.remove(key)
+        }
+    }
+}

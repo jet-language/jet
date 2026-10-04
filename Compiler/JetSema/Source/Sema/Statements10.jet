@@ -1,0 +1,1096 @@
+// PORT-PENDING 0496 crates-jet-codegen-src-codegen-tir-lower-statements-slice-3830: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:3830-4815
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         Stmt::Return(Some(e), _) => {
+//RS             return LowerStmtPlan::ready(lower_return_value(e, cx, env));
+//RS         }
+//RS         Stmt::Return(None, _) => {
+//RS             if matches!(
+//RS                 &env.ret_ty,
+//RS                 Some(Type::Result { ok, .. })
+//RS                     if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::INTERNAL_UNIT_TYPE)
+//RS             ) {
+//RS                 return in_own_frame(|| {
+//RS                     LowerStmtPlan::ready({
+//RS                         let unit = TExpr {
+//RS                             ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+//RS                             kind: TExprKind::Unit,
+//RS                         };
+//RS                         TStmt::Return(Some(TExpr {
+//RS                             ty: env.ret_ty.clone().expect("fallible void return"),
+//RS                             kind: TExprKind::Ok(Box::new(unit)),
+//RS                         }))
+//RS                     })
+//RS                 });
+//RS             }
+//RS             TStmt::Return(None)
+//RS         }
+//RS         // D-CONC-STREAM1=A / D-CANCELMODEL1=C: the shared Stream Prelude owns
+//RS         // the producer task and makes this send a cancellation wait point.
+//RS         Stmt::Yield(e, _) => {
+//RS             return in_own_frame(|| {
+//RS                 LowerStmtPlan::ready({
+//RS                     let v = lower_expr(e, cx, env);
+//RS                     TStmt::ExprStmt(TExpr {
+//RS                         ty: unit_type(),
+//RS                         kind: TExprKind::HostCall(Box::new(
+//RS                             crate::Codegen::TIR::THostCall::YieldSend { value: Box::new(v) },
+//RS                         )),
+//RS                     })
+//RS                 })
+//RS             });
+//RS         }
+//RS         // D-SHAPE-RESOURCE2=A: lower the sema-checked consuming close into the
+//RS         // existing TIR cleanup node; the engines keep the same LIFO behavior.
+//RS         Stmt::DeferClose { close, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 LowerStmtPlan::ready({
+//RS                     let Expr::Call(close_call) = close else {
+//RS                         unreachable!("parser creates a close call for deferred cleanup")
+//RS                     };
+//RS                     let Expr::Ident(resource, _) = &close_call.args[0].expr else {
+//RS                         unreachable!("parser restricts deferred close to one resource binding")
+//RS                     };
+//RS                     TStmt::DeferClose {
+//RS                         close: lower_expr(close, cx, env),
+//RS                         resource: env.local_of(resource),
+//RS                     }
+//RS                 })
+//RS             });
+//RS         }
+//RS         Stmt::Expr(e) if matches!(e.without_parens(), Expr::If { .. }) => {
+//RS             return LowerStmtPlan::ready(lower_discarded_expr(e, cx, env));
+//RS         }
+//RS         Stmt::Expr(Expr::MethodCall {
+//RS             receiver, method, ..
+//RS         }) if method == Syntax::METHOD_DROP => TStmt::ExprStmt(lower_expr(receiver, cx, env)),
+//RS         // D-LOOP-STMT-ARROW1=C: statement-position loop arrows normalize to
+//RS         // the ordinary expression statement. Sema owns the discard lint;
+//RS         // every execution tier lowers the expression through this same path.
+//RS         Stmt::Expr(e) => TStmt::ExprStmt(lower_expr(e, cx, env)),
+//RS         // c109 Phase 2: control-flow loops. Loop bodies are their own scope —
+//RS         // lower on a cloned env so bindings inside don't leak out.
+//RS         Stmt::Loop { body, label, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 let branch = clone_env(env);
+//RS                 let label = label_name(label);
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, branch)], move |mut lowered| {
+//RS                     TStmt::Loop {
+//RS                         label,
+//RS                         body: lowered.pop().expect("loop body was deferred"),
+//RS                     }
+//RS                 });
+//RS             });
+//RS         }
+//RS         Stmt::While {
+//RS             cond, body, label, ..
+//RS         } => {
+//RS             return in_own_frame(|| {
+//RS                 let cond = lower_expr(cond, cx, env);
+//RS                 let mut branch = clone_env(env);
+//RS                 refine_loop_condition(&mut branch, &cond);
+//RS                 let label = label_name(label);
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, branch)], move |mut lowered| {
+//RS                     TStmt::While {
+//RS                         label,
+//RS                         cond,
+//RS                         body: lowered.pop().expect("while body was deferred"),
+//RS                     }
+//RS                 });
+//RS             });
+//RS         }
+//RS         // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` three-part counted loop.
+//RS         Stmt::CountedLoop {
+//RS             init,
+//RS             cond,
+//RS             step,
+//RS             body,
+//RS             label,
+//RS             ..
+//RS         } => {
+//RS             return in_own_frame(|| {
+//RS                 // The emitted outer Rust block owns the init binding and every loop-body
+//RS                 // binding. Lower all of them in one child env so none survives the loop.
+//RS                 let init_val = lower_expr(&init.init, cx, env);
+//RS                 let init_ty = init.ty.clone().unwrap_or_else(|| init_val.ty.clone());
+//RS                 let mut_fn = thread_callback_lambda(&init.init)
+//RS                     .is_some_and(|lam| lam.meta.escapes && lam.meta.needs_fn_mut);
+//RS                 let send_fn =
+//RS                     env.is_send_fn(&init.name) && matches!(&init_ty, Type::Fn { .. }) && !mut_fn;
+//RS                 let init_val = if send_fn {
+//RS                     force_thread_callback_value(init_val, cx)
+//RS                 } else {
+//RS                     init_val
+//RS                 };
+//RS                 let init_bounds = integer_bounds_for_expr(&init_val);
+//RS                 let mut scoped = clone_env(env);
+//RS                 scoped.bind(&init.name, TLocal::user(&init.name), Some(init_ty.clone()));
+//RS                 scoped.set_integer_bounds(&init.name, init_bounds);
+//RS                 let init_stmt = Box::new(TStmt::Let {
+//RS                     name: init.name.clone(),
+//RS                     kw: "let mut",
+//RS                     let_ty: if send_fn {
+//RS                         TLetTy::SendFn(init_ty)
+//RS                     } else {
+//RS                         TLetTy::Inferred
+//RS                     },
+//RS                     init: init_val,
+//RS                     gc_promotion: None,
+//RS                     gc_transferred: false,
+//RS                 });
+//RS                 let cond = lower_expr(cond, cx, &mut scoped);
+//RS                 refine_loop_condition(&mut scoped, &cond);
+//RS                 let has_step = step.is_some();
+//RS                 let mut bodies = Vec::with_capacity(if has_step { 2 } else { 1 });
+//RS                 if let Some(step) = step {
+//RS                     bodies.push(
+//RS                         LowerBody::direct(std::slice::from_ref(step.as_ref()), scoped.clone())
+//RS                             .carry_env(),
+//RS                     );
+//RS                 }
+//RS                 bodies.push(LowerBody::inherited(body, scoped));
+//RS                 let label = label_name(label);
+//RS                 return deferred_stmt(bodies, move |mut lowered| {
+//RS                     let body = lowered.pop().expect("counted-loop body was deferred");
+//RS                     let step = has_step.then(|| {
+//RS                         Box::new(
+//RS                             lowered
+//RS                                 .pop()
+//RS                                 .expect("counted-loop step was deferred")
+//RS                                 .into_iter()
+//RS                                 .next()
+//RS                                 .expect("counted-loop step was empty"),
+//RS                         )
+//RS                     });
+//RS                     TStmt::CountedLoop {
+//RS                         label,
+//RS                         init: init_stmt,
+//RS                         cond,
+//RS                         step,
+//RS                         auto_vectorization: None,
+//RS                         body,
+//RS                     }
+//RS                 });
+//RS             });
+//RS         }
+//RS         Stmt::For {
+//RS             var,
+//RS             var2,
+//RS             kind,
+//RS             body,
+//RS             label,
+//RS             auto_vectorization,
+//RS             ..
+//RS         } => match kind {
+//RS             ForKind::Range {
+//RS                 start,
+//RS                 end,
+//RS                 step,
+//RS                 exclusive,
+//RS             } => {
+//RS                 return in_own_frame(|| {
+//RS                     let start = lower_expr(start, cx, env);
+//RS                     let end = lower_expr(end, cx, env);
+//RS                     let step = step.as_ref().map(|s| lower_expr(s, cx, env));
+//RS                     // The loop var is an `Int` local for the body's scope only. Panic
+//RS                     // context inside the body sees it; a panic after the loop does not.
+//RS                     let mut branch = clone_env(env);
+//RS                     branch.bind(var, TLocal::user(var), Some(Type::Int));
+//RS                     if let Some(bounds) =
+//RS                         range_iteration_bounds(&start, &end, step.as_ref(), *exclusive)
+//RS                     {
+//RS                         branch.set_integer_bounds(var, Some(bounds));
+//RS                     }
+//RS                     let label = label_name(label);
+//RS                     let var = var.clone();
+//RS                     let exclusive = *exclusive;
+//RS                     return deferred_stmt(
+//RS                         vec![LowerBody::scoped(body, branch)],
+//RS                         move |mut lowered| TStmt::Range {
+//RS                             label,
+//RS                             var,
+//RS                             source: None,
+//RS                             start,
+//RS                             end,
+//RS                             step,
+//RS                             exclusive,
+//RS                             auto_vectorization: auto_vectorization.clone(),
+//RS                             body: lowered.pop().expect("range body was deferred"),
+//RS                         },
+//RS                     );
+//RS                 });
+//RS             }
+//RS             // c109 Phase 5: collection iteration `loop x in coll` / `loop (k, v) in map`.
+//RS             // The collection string is resolved once. The loop var(s) bind in the body
+//RS             // scope with an *unresolved* type (`None`) — matching the AST slot's
+//RS             // `jet_ty: None`, so they never enable the overflow trap (parity).
+//RS             ForKind::In { collection, step } => {
+//RS                 return in_own_frame(|| {
+//RS                     // c109 Phase 22: classify a method-call collection into the matching
+//RS                     // `emit_for_in` branch (`chars`/`lines`/the `.iter().cloned()` default),
+//RS                     // resolving the receiver/collection string off the SAME node shape the
+//RS                     // AST path reads. `method_kind == None` is the plain `.iter()` form.
+//RS                     let (iter_source, method_kind) = lower_forin_collection(collection, cx, env);
+//RS                     // Keep the concrete element type for checked field projection.
+//RS                     let lowered_coll = lower_expr(collection, cx, env);
+//RS                     if matches!(&lowered_coll.ty, Type::Named(name) if name == Syntax::TYPE_RANGE) {
+//RS                         return in_own_frame(|| {
+//RS                             let step = step.as_ref().map(|s| lower_expr(s, cx, env));
+//RS                             let zero = || TExpr {
+//RS                                 ty: Type::Int,
+//RS                                 kind: TExprKind::IntLit(0, None),
+//RS                             };
+//RS                             let mut branch = clone_env(env);
+//RS                             branch.bind(var, TLocal::user(var), Some(Type::Int));
+//RS                             let label = label_name(label);
+//RS                             let var = var.clone();
+//RS                             return deferred_stmt(
+//RS                                 vec![LowerBody::scoped(body, branch)],
+//RS                                 move |mut lowered| TStmt::Range {
+//RS                                     label,
+//RS                                     var,
+//RS                                     source: Some(lowered_coll),
+//RS                                     start: zero(),
+//RS                                     end: zero(),
+//RS                                     step,
+//RS                                     exclusive: false,
+//RS                                     auto_vectorization: None,
+//RS                                     body: lowered.pop().expect("range body was deferred"),
+//RS                                 },
+//RS                             );
+//RS                         });
+//RS                     }
+//RS                     let mut method_kind = method_kind;
+//RS                     let mut coll_elem_ty: Option<Type> = match &lowered_coll.ty {
+//RS                         Type::List(inner) => Some((**inner).clone()),
+//RS                         Type::FixedList { elem, .. } => Some((**elem).clone()),
+//RS                         Type::Map { key, value, .. } => Some(Type::Tuple(vec![
+//RS                             ("key".to_string(), Box::new((**key).clone())),
+//RS                             ("value".to_string(), Box::new((**value).clone())),
+//RS                         ])),
+//RS                         // D-ONCE-WORD1 / D-CONC-STREAM1: a generator's `Stream<T>`.
+//RS                         Type::Apply { name, args }
+//RS                             if name == Syntax::TYPE_STREAM && args.len() == 1 =>
+//RS                         {
+//RS                             Some(args[0].clone())
+//RS                         }
+//RS                         // D-ITERTOOLS1=A: lazy `Iter<T>` view — element is T.
+//RS                         Type::Apply { name, args }
+//RS                             if name == crate::Syntax::TYPE_ITER && args.len() == 1 =>
+//RS                         {
+//RS                             Some(args[0].clone())
+//RS                         }
+//RS                         Type::Named(name) if name == "HTTPBodyChunks" => Some(Type::Result {
+//RS                             ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
+//RS                             err: Box::new(Type::Named("HTTPError".to_string())),
+//RS                         }),
+//RS                         Type::Named(name) => encoding_reader_item_type(name),
+//RS                         // D-DYNARRAY1: `loop x in window` — a `View<T>`'s element type.
+//RS                         Type::Apply { name, args }
+//RS                             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+//RS                                 && args.len() == 1 =>
+//RS                         {
+//RS                             Some(args[0].clone())
+//RS                         }
+//RS                         _ => None,
+//RS                     };
+//RS                     // c109 Phase 22: for a `chars`/`lines` form the element type is
+//RS                     // a property of the ITERATION FORM, not of the collection
+//RS                     // expression. `emit_for_in` writes the binding itself — `let
+//RS                     // <var> = __jet_c;` off `(recv).chars()` is a `char`, and every
+//RS                     // line stream binds a `String` — so reading it off the form is
+//RS                     // reading the fact the emitter is about to commit to.
+//RS                     //
+//RS                     // Deriving it from `lowered_coll.ty` cannot work for the line
+//RS                     // forms: sema types `handle.lines()` / `io.stdin().lines()` /
+//RS                     // `child.stdout.lines()` as the loop-source-only markers
+//RS                     // `FileLines` / `StdinLines` / `ProcessLines` (jet-sema
+//RS                     // `CheckerCoreLib/core_types.rs`, `process_ui.rs`), which carry
+//RS                     // no element to read, so the match above answers `None`. The
+//RS                     // loop variable then binds untyped and `lower_expr`'s
+//RS                     // `Expr::Ident` arm substitutes its `Type::Int` fallback — a
+//RS                     // `String` local typed `Int`. Print's integer fast path then
+//RS                     // emits `jet_int_to_string(<String>)` and rustc rejects Jet's
+//RS                     // own output, which is an internal compiler error by I2, never a
+//RS                     // user diagnostic. Sema already declares all three of these loop
+//RS                     // variables `String` (`declare_loop_var`, CheckerCore/
+//RS                     // statements.rs); this is the same fact, said once more where
+//RS                     // codegen reads it.
+//RS                     //
+//RS                     // I9: the resident JIT already carries this exact table —
+//RS                     // `lower_ctx.rs`'s for-in arm derives `elem_ty` from
+//RS                     // `method_kind` (Chars → Char, all three line forms → String)
+//RS                     // and never consults the bound type. Both tiers now read the
+//RS                     // element off the same closed form enum, so neither can drift.
+//RS                     match &method_kind {
+//RS                         Some(TForInMethod::Chars) => coll_elem_ty = Some(Type::Char),
+//RS                         Some(
+//RS                             TForInMethod::LinesFile
+//RS                             | TForInMethod::LinesStdin
+//RS                             | TForInMethod::LinesProcessStream,
+//RS                         ) => coll_elem_ty = Some(Type::String),
+//RS                         // `EncodingReader` already took its item type from the
+//RS                         // reader above; `Iterable` is resolved below, from the hook.
+//RS                         Some(
+//RS                             TForInMethod::EncodingReader { .. } | TForInMethod::Iterable { .. },
+//RS                         )
+//RS                         | Some(TForInMethod::ChannelReceiver)
+//RS                         | None => {}
+//RS                     }
+//RS                     // A list whose elements cannot be cloned is iterated by value: the
+//RS                     // loop consumes the collection instead of asking rustc for a
+//RS                     // `.cloned()` that does not exist (I2 — that reaches the user as
+//RS                     // an internal compiler error, never a diagnostic).
+//RS                     // A `ViewMut` element is not cloneable either, but a list of them
+//RS                     // already has its own iteration form below; leave it alone.
+//RS                     let elem_is_view_mut = matches!(
+//RS                         coll_elem_ty.as_ref(),
+//RS                         Some(Type::Apply { name, .. })
+//RS                             if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+//RS                     );
+//RS                     // Only a type requiring owned iteration is consumed here. codegen's
+//RS                     // `field_type_cloneable` answers a narrower question than sema's
+//RS                     // `is_cloneable` (it treats every core `Named` type as
+//RS                     // non-cloneable because no derive is emitted for one), so using
+//RS                     // it directly would consume ordinary `[Int]` / `[Duration]`
+//RS                     // lists that sema still believes are copied — an ICE, not a fix.
+//RS                     // The shared predicate reaches inside containers, so a
+//RS                     // `[[Task<Int>]]` element is uncopyable too (it is a `Vec` of a
+//RS                     // type with no `Clone`), not just a bare `Task<T>`.
+//RS                     let elem_is_cloneable = !coll_elem_ty
+//RS                         .as_ref()
+//RS                         .is_some_and(crate::Sema::type_requires_owned_iteration);
+//RS                     let by_value = matches!(&lowered_coll.ty,
+//RS                         Type::Apply { name, .. }
+//RS                             if name == Syntax::TYPE_STREAM || name == crate::Syntax::TYPE_ITER
+//RS                     ) || matches!(&lowered_coll.ty, Type::Named(name) if name == "HTTPBodyChunks")
+//RS                         || (method_kind.is_none()
+//RS                             && !elem_is_cloneable
+//RS                             && !elem_is_view_mut
+//RS                             && matches!(&lowered_coll.ty, Type::List(_) | Type::FixedList { .. }));
+//RS                     if method_kind.is_none() {
+//RS                         if let Type::Named(n) = &lowered_coll.ty {
+//RS                             if let Some(hook) = cx.iterable_hooks.get(n) {
+//RS                                 method_kind = Some(TForInMethod::Iterable {
+//RS                                     coll_type: n.clone(),
+//RS                                     iter_type: hook.iter_type.clone(),
+//RS                                     iter_symbol: hook.iter_symbol.clone(),
+//RS                                     next_symbol: hook.next_symbol.clone(),
+//RS                                     item_type: hook.item_type.clone(),
+//RS                                 });
+//RS                                 coll_elem_ty = Some(hook.item_type.clone());
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     let mut branch = clone_env(env);
+//RS                     branch.bind(var, TLocal::user(var), coll_elem_ty.clone());
+//RS                     if let Some((v2, _)) = var2 {
+//RS                         // Two-binding: map → key/value; sequence → index/item (D-RANGE-EXCL1=C).
+//RS                         match &lowered_coll.ty {
+//RS                             Type::Map { key, value, .. } => {
+//RS                                 branch.bind(var, TLocal::user(var), Some((**key).clone()));
+//RS                                 branch.bind(v2, TLocal::user(v2), Some((**value).clone()));
+//RS                             }
+//RS                             Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+//RS                                 branch.bind(var, TLocal::user(var), Some(Type::Int));
+//RS                                 branch.bind(v2, TLocal::user(v2), Some((**inner).clone()));
+//RS                             }
+//RS                             Type::Apply { name, args }
+//RS                                 if matches!(
+//RS                                     name.as_str(),
+//RS                                     "View" | "ViewMut" | "ComputeViewMut"
+//RS                                 ) && args.len() == 1 =>
+//RS                             {
+//RS                                 branch.bind(var, TLocal::user(var), Some(Type::Int));
+//RS                                 branch.bind(v2, TLocal::user(v2), Some(args[0].clone()));
+//RS                             }
+//RS                             _ => {
+//RS                                 branch.bind(v2, TLocal::user(v2), None);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     // D-SOA1: a single-binding loop over a columnar list iterates the
+//RS                     // gathered record view (`iter_aos`), pulling each record out of the
+//RS                     // shared column store, not `Vec::iter` (the facade holds columns).
+//RS                     let columnar = var2.is_none()
+//RS                         && method_kind.is_none()
+//RS                         && coll_elem_ty
+//RS                             .as_ref()
+//RS                             .map(|t| cx.columnar_list_type(t).is_some())
+//RS                             .unwrap_or(false);
+//RS                     // #4318 §4 stable loop source: a plain list loop over a place
+//RS                     // (a local or parameter through fields) whose body never
+//RS                     // mentions the source's root walks the list in place.
+//RS                     let source_stable = method_kind.is_none()
+//RS                         && step.is_none()
+//RS                         && !by_value
+//RS                         && !columnar
+//RS                         && matches!(lowered_coll.ty.without_user_tags(), Type::List(_))
+//RS                         && stable_loop_source_root(collection).is_some_and(|root| {
+//RS                             !crate::Sema::block_free_var_reads(body).contains(root)
+//RS                         });
+//RS                     let step = step.as_ref().map(|step| lower_expr(step, cx, env));
+//RS                     let label = label_name(label);
+//RS                     let var = var.clone();
+//RS                     let var2 = var2.as_ref().map(|(n, _)| n.clone());
+//RS                     return deferred_stmt(
+//RS                         vec![LowerBody::scoped(body, branch)],
+//RS                         move |mut lowered| TStmt::ForIn {
+//RS                             label,
+//RS                             var,
+//RS                             var2,
+//RS                             source: iter_source,
+//RS                             collection: lowered_coll,
+//RS                             step,
+//RS                             method_kind,
+//RS                             columnar,
+//RS                             by_value,
+//RS                             source_stable,
+//RS                             body: lowered.pop().expect("for-in body was deferred"),
+//RS                         },
+//RS                     );
+//RS                 });
+//RS             }
+//RS         },
+//RS         Stmt::Break(_) => TStmt::Break(None),
+//RS         Stmt::BreakValue(value, _) => TStmt::BreakValue {
+//RS             label: None,
+//RS             value: lower_expr(value, cx, env),
+//RS         },
+//RS         Stmt::Continue(_) => TStmt::Continue(None),
+//RS         Stmt::BreakLabel(name, _) => TStmt::Break(Some(name.clone())),
+//RS         Stmt::BreakLabelValue(name, _, value, _) => TStmt::BreakValue {
+//RS             label: Some(name.clone()),
+//RS             value: lower_expr(value, cx, env),
+//RS         },
+//RS         Stmt::ContinueLabel(name, _) => TStmt::Continue(Some(name.clone())),
+//RS         // c109 Phase 4: a `when`/match. The gate already classified it as either an
+//RS         // exhaustive enum match (shape A) or an all-range scalar switch (shape B).
+//RS         Stmt::Switch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             span,
+//RS         } => return lower_switch(subject, arms, else_body, *span, cx, env),
+//RS         // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `@ { … }` runs at
+//RS         // build time and erases entirely — no runtime Rust is emitted (I3).
+//RS         Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),
+//RS         // D-CANVASSTATE1=D: `#Off` type-checks in sema but emits no runtime TIR.
+//RS         Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => TStmt::Inline(vec![]),
+//RS         // D-CANVASSTATE1=D: `#DebugOnly` is a lexical debug-only region. Lower
+//RS         // on a cloned env so declarations cannot be required by release code.
+//RS         Stmt::Switched { body, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 let scoped = clone_env(env);
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+//RS                     TStmt::DebugOnly(lowered.pop().expect("debug body was deferred"))
+//RS                 });
+//RS             });
+//RS         }
+//RS         // Lexical-scope rule: whenever `emit_tir_stmt` opens a Rust `{ ... }`, lower
+//RS         // declarations in a cloned env. Only three statement forms deliberately reuse
+//RS         // the parent env because emission is inline with no Rust block: selected
+//RS         // comptime-if, `layout`, and `.setup`.
+//RS         // c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema chose the
+//RS         // branch (`selected_then`); the AST `emit_stmts` emits ONLY that branch's
+//RS         // statements INLINE on the SAME `&mut env` at the SAME indent (no `if`, no
+//RS         // block — its `let`s leak into the outer scope). Reproduce both: lower the
+//RS         // selected branch's statements on the SAME `env` (so their bindings leak, like
+//RS         // the AST shared env) and wrap them in a flat `Inline` node.
+//RS         Stmt::ComptimeIf {
+//RS             then_body,
+//RS             else_body,
+//RS             selected_then,
+//RS             ..
+//RS         } => {
+//RS             return in_own_frame(|| {
+//RS                 let chosen: &[Stmt] = match selected_then {
+//RS                     Some(true) => then_body,
+//RS                     Some(false) => else_body.as_deref().unwrap_or(&[]),
+//RS                     // Sema didn't resolve (earlier error) — emit nothing (I3), like the AST.
+//RS                     None => &[],
+//RS                 };
+//RS                 let scoped = clone_env(env);
+//RS                 return deferred_stmt(vec![LowerBody::inline(chosen, scoped)], |mut lowered| {
+//RS                     TStmt::Inline(lowered.pop().expect("comptime-if body was deferred"))
+//RS                 });
+//RS             });
+//RS         }
+//RS         // c109 Phase 18: an audited `#Unsafe { … }` region (`Stmt::Unsafe`). Emission
+//RS         // adds a Rust lexical block, so lower its declarations in a child env. The `#Audit("…")`
+//RS         // annotation is dropped (codegen is dumb — it emits nothing, matching the AST).
+//RS         // I1: the source `#Unsafe` gate is 1:1 with this node, the only producer of a
+//RS         // Rust `unsafe` block.
+//RS         Stmt::Unsafe {
+//RS             audit, body, span, ..
+//RS         } => {
+//RS             return in_own_frame(|| {
+//RS                 let scoped = clone_env(env);
+//RS                 let gate = TUnsafeGate {
+//RS                     file: cx.file.clone(),
+//RS                     line: cx.src_line_col(span.start).0 as u32,
+//RS                     reason: audit.clone().unwrap_or_default(),
+//RS                     enabled: env.sentries_enabled,
+//RS                     fenced: env.sentries_fenced,
+//RS                 };
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+//RS                     TStmt::Unsafe {
+//RS                         gate,
+//RS                         body: lowered.pop().expect("unsafe body was deferred"),
+//RS                     }
+//RS                 });
+//RS             });
+//RS         }
+//RS         // D-CTEFFECT1: preserve the policy gate for canonical comptime evaluation.
+//RS         // AOT/JIT still execute its body as a plain lexical block.
+//RS         Stmt::Impure { body, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 let scoped = clone_env(env);
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+//RS                     TStmt::Impure(lowered.pop().expect("impure body was deferred"))
+//RS                 });
+//RS             });
+//RS         }
+//RS         // D-REACTCORE1: `#Reactive { … }` lowers to `jet_reactive_effect(closure)`.
+//RS         // Clone outer captures into the closure (same as a stored lambda).
+//RS         Stmt::Reactive { body, span, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 let outer_env = clone_env(env);
+//RS                 let body_env = reactive_block_env(body, cx, env);
+//RS                 // Synthetic zero-arg lambda so JIT can compile the body with captures.
+//RS                 let synthetic = crate::AST::Lambda {
+//RS                     take_names: Vec::new(),
+//RS                     params: Vec::new(),
+//RS                     result_type: None,
+//RS                     error_type: None,
+//RS                     effects: None,
+//RS                     body: crate::AST::LambdaBody::Block(body.clone()),
+//RS                     span: *span,
+//RS                     meta: {
+//RS                         let reads = crate::Sema::block_free_var_reads(body);
+//RS                         let mut meta = crate::AST::LambdaMeta::default();
+//RS                         meta.cloned_captures = reads
+//RS                             .into_iter()
+//RS                             .filter(|n| outer_env.locals.contains_key(n))
+//RS                             .collect();
+//RS                         meta.cloned_captures.sort();
+//RS                         meta.needs_fn_mut = true;
+//RS                         meta.escapes = true;
+//RS                         meta
+//RS                     },
+//RS                 };
+//RS                 return deferred_stmt(
+//RS                     vec![LowerBody::scoped(body, body_env)],
+//RS                     move |mut lowered| {
+//RS                         let lowered = lowered.pop().expect("reactive body was deferred");
+//RS                         let shared: Arc<[TStmt]> = Arc::from(lowered.into_boxed_slice());
+//RS                         let executable = Box::new(lower_lambda_with_shared_block(
+//RS                             &synthetic,
+//RS                             cx,
+//RS                             &outer_env,
+//RS                             shared.clone(),
+//RS                         ));
+//RS                         let jit_lambda = lower_spawn_lambda_for_jit_with_shared_block(
+//RS                             &synthetic, cx, &outer_env, shared,
+//RS                         );
+//RS                         cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+//RS                         TStmt::Reactive { executable }
+//RS                     },
+//RS                 );
+//RS             });
+//RS         }
+//RS         // D-SHIELDNAME1=A: `#Shield { … }` lowers to a shield-guarded lexical block.
+//RS         Stmt::Shield { body, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 let scoped = clone_env(env);
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+//RS                     TStmt::Shield {
+//RS                         body: lowered.pop().expect("shield body was deferred"),
+//RS                     }
+//RS                 });
+//RS             });
+//RS         }
+//RS         // c109 Phase 19: an explicit `region r { … }` (D-REGION1) emits a plain
+//RS         // Rust lexical block.
+//RS         Stmt::Region { body, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 let scoped = clone_env(env);
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+//RS                     TStmt::Region(lowered.pop().expect("region body was deferred"))
+//RS                 });
+//RS             });
+//RS         }
+//RS         Stmt::Policy {
+//RS             declarations, body, ..
+//RS         } => {
+//RS             return in_own_frame(|| {
+//RS                 let mut scoped = clone_env(env);
+//RS                 let sentry_mode = declarations
+//RS                     .iter()
+//RS                     .find(|declaration| declaration.key == crate::Policy::PolicyKey::Sentries)
+//RS                     .map(|declaration| declaration.value == crate::Policy::PolicyValue::On);
+//RS                 if sentry_mode == Some(false) {
+//RS                     scoped.sentries_enabled = false;
+//RS                 }
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+//RS                     let body = lowered.pop().expect("policy body was deferred");
+//RS                     match sentry_mode {
+//RS                         Some(enabled) => TStmt::SentryPolicy { enabled, body },
+//RS                         None => TStmt::Region(body),
+//RS                     }
+//RS                 });
+//RS             });
+//RS         }
+//RS         // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: the lexical block owns one
+//RS         // internal collector. Helpers borrow this same value.
+//RS         Stmt::TaskGroup {
+//RS             name, limit, body, ..
+//RS         } => {
+//RS             return in_own_frame(|| {
+//RS                 let mut scoped = clone_env(env);
+//RS                 let group_ty = Type::Named(Syntax::TYPE_TASKGROUP.to_string());
+//RS                 let group = TLocal::user(name);
+//RS                 scoped.bind(name, group.clone(), Some(group_ty));
+//RS                 let limit = limit.as_ref().map(|value| lower_expr(value, cx, env));
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+//RS                     TStmt::TaskGroup {
+//RS                         group,
+//RS                         limit,
+//RS                         body: lowered.pop().expect("task-group body was deferred"),
+//RS                     }
+//RS                 });
+//RS             });
+//RS         }
+//RS         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }` needs a public
+//RS         // runtime object (unlike the compiler-private TaskGroup handle) — bind `name`
+//RS         // to a fresh `jet_layout::Handle` BEFORE lowering the body, so the
+//RS         // desugared `name.h(box, anchor)` calls inside resolve to it, exactly
+//RS         // like an ordinary `name :: jet_layout::Handle::new(…)` binding would.
+//RS         Stmt::Layout { name, body, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 let handle = TLocal::user(name);
+//RS                 let mut scoped = clone_env(env);
+//RS                 scoped.bind(
+//RS                     name,
+//RS                     handle.clone(),
+//RS                     Some(Type::Named(Syntax::LAYOUT_TYPE.to_string())),
+//RS                 );
+//RS                 let label = name.clone();
+//RS                 return deferred_stmt(vec![LowerBody::inline(body, scoped)], move |mut lowered| {
+//RS                     TStmt::Layout {
+//RS                         handle,
+//RS                         label,
+//RS                         body: lowered.pop().expect("layout body was deferred"),
+//RS                     }
+//RS                 });
+//RS             });
+//RS         }
+//RS         // c109 Phase 26: a bare `#FX(IO) { … }` effect-restriction region
+//RS         // (D-EFF1). Effects erase at codegen (I3).
+//RS         Stmt::AuthorityScope {
+//RS             caps,
+//RS             binding: Some(binding),
+//RS             body,
+//RS             ..
+//RS         } => {
+//RS             return in_own_frame(|| {
+//RS                 // D-AUTHORITY-NAME1=A: the named form is an ordinary runtime
+//RS                 // Authority value. Its rights are the already-resolved marker
+//RS                 // list; construction remains a Prelude call so every engine
+//RS                 // receives the same carrier and relation.
+//RS                 let authority_ty = Type::Named(Syntax::TYPE_AUTHORITY.to_string());
+//RS                 let authority = TLocal::user(binding);
+//RS                 let mut scoped = clone_env(env);
+//RS                 scoped.bind(binding, authority, Some(authority_ty.clone()));
+//RS                 let rights = TExpr {
+//RS                     ty: Type::List(Box::new(Type::String)),
+//RS                     kind: TExprKind::CtLit(crate::AST::CtValue::List(
+//RS                         caps.iter()
+//RS                             .map(|(name, _)| crate::AST::CtValue::Str(name.clone()))
+//RS                             .collect(),
+//RS                     )),
+//RS                 };
+//RS                 let init = TExpr {
+//RS                     ty: authority_ty.clone(),
+//RS                     kind: TExprKind::StaticCall {
+//RS                         owner: TStaticOwner::Prelude {
+//RS                             rooted: true,
+//RS                             path: "JetAuthority".to_string(),
+//RS                             generics: Vec::new(),
+//RS                         },
+//RS                         owner_type: None,
+//RS                         method: crate::Codegen::TIR::TMethodRef::bare("from_rights"),
+//RS                         type_args: Vec::new(),
+//RS                         args: vec![TCallArg {
+//RS                             value: rights,
+//RS                             template_items: None,
+//RS                             borrow: false,
+//RS                             mut_borrow: false,
+//RS                             clone: false,
+//RS                             arc_clone: false,
+//RS                             fn_coerce: None,
+//RS                             widen_to_vec: false,
+//RS                             widen_to_union: None,
+//RS                             box_as_trait: None,
+//RS                         }],
+//RS                     },
+//RS                 };
+//RS                 let binding_used = body.iter().any(|stmt| {
+//RS                     if matches!(
+//RS                         stmt,
+//RS                         Stmt::Assign {
+//RS                             target: LValue::Local { name, .. },
+//RS                             ..
+//RS                         } if name == binding
+//RS                     ) {
+//RS                         return true;
+//RS                     }
+//RS                     let mut stmt = stmt.clone();
+//RS                     let mut used = false;
+//RS                     stmt.for_each_expr_mut(|expr| {
+//RS                         if matches!(expr, Expr::Ident(name, _) if name == binding) {
+//RS                             used = true;
+//RS                         }
+//RS                     });
+//RS                     used
+//RS                 });
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+//RS                     let mut lowered = lowered.pop().expect("FX body was deferred");
+//RS                     if binding_used {
+//RS                         lowered.insert(
+//RS                             0,
+//RS                             TStmt::Let {
+//RS                                 name: binding.clone(),
+//RS                                 kw: "let",
+//RS                                 let_ty: TLetTy::plain(authority_ty),
+//RS                                 init,
+//RS                                 gc_promotion: None,
+//RS                                 gc_transferred: false,
+//RS                             },
+//RS                         );
+//RS                     }
+//RS                     TStmt::Region(lowered)
+//RS                 });
+//RS             });
+//RS         }
+//RS         Stmt::AuthorityScope { body, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 let scoped = clone_env(env);
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+//RS                     TStmt::Region(lowered.pop().expect("FX body was deferred"))
+//RS                 });
+//RS             });
+//RS         }
+//RS         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
+//RS         // Resolve each field against the outer env, then lower the guarded Rust block
+//RS         // in a lexical child env.
+//RS         Stmt::ContextBlock { fields, body, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 let guards = fields
+//RS                     .iter()
+//RS                     .map(|(name, v, _)| (name.clone(), lower_expr(v, cx, env)))
+//RS                     .collect();
+//RS                 let scoped = clone_env(env);
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+//RS                     TStmt::ContextBlock {
+//RS                         guards,
+//RS                         body: lowered.pop().expect("context body was deferred"),
+//RS                     }
+//RS                 });
+//RS             });
+//RS         }
+//RS         // D-TERM1: `live { … }` emits an enter/guard/leave Rust lexical block.
+//RS         Stmt::Live { body, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 let scoped = clone_env(env);
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+//RS                     TStmt::Live {
+//RS                         body: lowered.pop().expect("live body was deferred"),
+//RS                     }
+//RS                 });
+//RS             });
+//RS         }
+//RS         // D-DOTSCOPE1 / D-META-DSL1: a `#Test` scope member
+//RS         // (`.setup`/`.expect_fail`/`.timeout`/`.skip`/`.measure`) or a declared checked
+//RS         // text block. Legality/args were checked in sema; here we pick the
+//RS         // lowering kind while retaining `.timeout`'s canonical Duration expression.
+//RS         // `.setup` emits inline, so its bindings are visible to the rest of the test;
+//RS         // the others open their own scope in
+//RS         // `emit_tir_stmt`.
+//RS         Stmt::ScopeMember {
+//RS             name,
+//RS             args,
+//RS             body,
+//RS             dsl,
+//RS             ..
+//RS         } => {
+//RS             return in_own_frame(|| {
+//RS                 if *dsl {
+//RS                     return in_own_frame(|| {
+//RS                         let scoped = clone_env(env);
+//RS                         return deferred_stmt(
+//RS                             vec![LowerBody::scoped(body, scoped)],
+//RS                             |mut lowered| {
+//RS                                 TStmt::Region(lowered.pop().expect("scope body was deferred"))
+//RS                             },
+//RS                         );
+//RS                     });
+//RS                 }
+//RS                 // D-WRAP-SCOPE1=A: arithmetic policy is a sema-only lexical
+//RS                 // fact. Preserve the region boundary while its expressions
+//RS                 // lower through the ordinary shared arithmetic nodes.
+//RS                 if name == Syntax::MARKER_ARITHMETIC {
+//RS                     let scoped = clone_env(env);
+//RS                     return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+//RS                         TStmt::Region(lowered.pop().expect("arithmetic body was deferred"))
+//RS                     });
+//RS                 }
+//RS                 let kind = if name == Syntax::SCOPE_TEST_SETUP {
+//RS                     ScopeMemberKind::Setup
+//RS                 } else if name == Syntax::SCOPE_TEST_EXPECT_FAIL {
+//RS                     let expected = args.first().and_then(|arg| match arg {
+//RS                         crate::AST::Expr::Ident(code, _) => Some(code.clone()),
+//RS                         _ => None,
+//RS                     });
+//RS                     ScopeMemberKind::ExpectFail(expected)
+//RS                 } else if name == Syntax::SCOPE_TEST_TIMEOUT {
+//RS                     ScopeMemberKind::Timeout(lower_expr(
+//RS                         args.first().expect("sema validated .timeout argument"),
+//RS                         cx,
+//RS                         env,
+//RS                     ))
+//RS                 } else if name == Syntax::SCOPE_TEST_MEASURE {
+//RS                     ScopeMemberKind::Measure
+//RS                 } else {
+//RS                     ScopeMemberKind::Skip
+//RS                 };
+//RS                 let scoped = clone_env(env);
+//RS                 let body_plan = if matches!(&kind, ScopeMemberKind::Setup) {
+//RS                     // `.setup` is emitted inline so its declarations intentionally remain
+//RS                     // available to later statements in the test.
+//RS                     LowerBody::inline(body, scoped)
+//RS                 } else {
+//RS                     LowerBody::scoped(body, scoped)
+//RS                 };
+//RS                 return deferred_stmt(vec![body_plan], move |mut lowered| TStmt::ScopeMember {
+//RS                     kind,
+//RS                     body: lowered.pop().expect("scope member body was deferred"),
+//RS                 });
+//RS             });
+//RS         }
+//RS         // D-DET1: `assume_deterministic { … }` erases to a plain `TStmt::Region`
+//RS         // (byte-for-byte the `Stmt::Region`/`Stmt::AuthorityScope` shape). The determinism
+//RS         // suspension is a sema-only fact; nothing runtime, no `unsafe` (I3).
+//RS         Stmt::AssumeDet { body, .. } => {
+//RS             return in_own_frame(|| {
+//RS                 let scoped = clone_env(env);
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+//RS                     TStmt::Region(lowered.pop().expect("determinism body was deferred"))
+//RS                 });
+//RS             });
+//RS         }
+//RS         // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact { … }` block. A named
+//RS         // form binds the handle (typed `Transaction`) in a child env so
+//RS         // `name.on_commit(…)` lowers against it without escaping the emitted Rust
+//RS         // block. The `let mut <handle> = jet_transaction(); … <handle>.commit();` framing is
+//RS         // emitted in `emit_tir_stmt`; codegen is dumb (I3).
+//RS         Stmt::Transact {
+//RS             name,
+//RS             body,
+//RS             implicit,
+//RS             ..
+//RS         } => {
+//RS             return in_own_frame(|| {
+//RS                 // D-CONC-SHARE1=A: a shared RHS is hoisted into an implicit
+//RS                 // transaction wrapper before the destination edit is queued.
+//RS                 // When that wrapper sits inside an authored #Transact, it must
+//RS                 // join the outer STM commit instead of opening a nested commit.
+//RS                 // The wrapper still needs a lexical block for its hoisted local.
+//RS                 if *implicit && cx.in_stm_transact.get() {
+//RS                     let scoped = clone_env(env);
+//RS                     return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+//RS                         TStmt::Region(
+//RS                             lowered
+//RS                                 .pop()
+//RS                                 .expect("joined shared access body was deferred"),
+//RS                         )
+//RS                     });
+//RS                 }
+//RS                 let mut scoped = clone_env(env);
+//RS                 let handle = name.as_ref().map(|name| {
+//RS                     let slot = TLocal::user(name).as_mutable();
+//RS                     scoped.bind(
+//RS                         name,
+//RS                         slot.clone(),
+//RS                         Some(Type::Named(Syntax::TXN_HANDLE_TYPE.to_string())),
+//RS                     );
+//RS                     slot
+//RS                 });
+//RS                 let synthesized_handle = TLocal::generated("txn").as_mutable();
+//RS                 let txn_undo_needed = Rc::new(Cell::new(false));
+//RS                 scoped.txn_handle =
+//RS                     Some(handle.clone().unwrap_or_else(|| synthesized_handle.clone()));
+//RS                 scoped.txn_undo_needed = Some(txn_undo_needed.clone());
+//RS                 // D-TXN-ROLLBACK layer 1 (auto-snapshot): collect the root local names
+//RS                 // assigned anywhere in the block (recursing into nested control flow, but
+//RS                 // NOT into nested `#Transact` blocks or lambda bodies — those own their
+//RS                 // own rollback scope / are deferred). Snapshot only roots ALREADY in scope
+//RS                 // at block entry (params / outer locals): a local declared inside the block
+//RS                 // needs no snapshot, since rollback discards it when the block scope ends.
+//RS                 let mut roots: Vec<String> = Vec::new();
+//RS                 collect_txn_mut_roots(body, &mut roots);
+//RS                 let snapshots: Vec<(TLocal, Option<Type>)> = roots
+//RS                     .iter()
+//RS                     .filter(|r| env.locals.contains_key(*r))
+//RS                     .map(|r| {
+//RS                         // D-TXN-ROLLBACK layer 2: if the root type implements Rollback,
+//RS                         // use snapshot_custom instead of the clone-based snapshot path.
+//RS                         let rollback_ty = env.ty_of(r).filter(
+//RS                             |ty| matches!(ty, Type::Named(n) if cx.rollback_types.contains(n)),
+//RS                         );
+//RS                         (env.local_of(r), rollback_ty)
+//RS                     })
+//RS                     .collect();
+//RS                 // D-STM1=A (card #506): lower the body with `in_stm_transact` raised so a
+//RS                 // `Shared<T>.edit` inside routes to the deferred `edit_txn`. `stm_touched`
+//RS                 // is reset first and read after, so the emitted STM handle reflects THIS
+//RS                 // block only
+//RS                 // (save/restore isolates nested blocks); a Shared edit in a nested
+//RS                 // `#Transact` attaches to that inner block's own transaction, not this one.
+//RS                 let prev_in = cx.in_stm_transact.replace(true);
+//RS                 let prev_touched = cx.stm_touched.replace(false);
+//RS                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+//RS                     let stm = cx.stm_touched.get().then(TLocal::stm);
+//RS                     cx.in_stm_transact.set(prev_in);
+//RS                     cx.stm_touched.set(prev_touched);
+//RS                     let handle = handle.or_else(|| {
+//RS                         (txn_undo_needed.get() || !snapshots.is_empty())
+//RS                             .then_some(synthesized_handle)
+//RS                     });
+//RS                     TStmt::Transact {
+//RS                         handle,
+//RS                         snapshots,
+//RS                         stm,
+//RS                         body: lowered.pop().expect("transaction body was deferred"),
+//RS                     }
+//RS                 });
+//RS             });
+//RS         }
+//RS         // D-TIER-FORM1=A: the OS/settings switch is sema-desugared into
+//RS         // `ComptimeIf` before checked executable lowering. Retain an explicit
+//RS         // typed erasure row if a parser-recovery fragment reaches this seam.
+//RS         Stmt::ComptimeSwitch { span, .. } => TStmt::Erased {
+//RS             construct: "ComptimeSwitch".to_string(),
+//RS             span: *span,
+//RS             reason: crate::Codegen::TIR::TirErasureReason::CompileTimeOnly,
+//RS         },
+//RS     })
+//RS }
+//RS 
+// END-PORT-PENDING 0496 crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:3830-4815
+
+// PORT-PENDING 0496 crates-jet-codegen-src-codegen-tir-lower-statements-slice-3830: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:4816-4917
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn hardware_dma_channel(expr: &crate::AST::Expr, cx: &Cx) -> Option<String> {
+//RS     let crate::AST::Expr::MethodCall {
+//RS         receiver,
+//RS         method,
+//RS         args,
+//RS         ..
+//RS     } = expr
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     if method != "start"
+//RS         || !matches!(receiver.as_ref(), crate::AST::Expr::Ident(name, _) if name == "dma")
+//RS         || args.len() < 2
+//RS     {
+//RS         return None;
+//RS     }
+//RS     let crate::AST::Expr::Field(base, channel, _) = &args[0].expr else {
+//RS         return None;
+//RS     };
+//RS     let crate::AST::Expr::Field(root, block, _) = base.as_ref() else {
+//RS         return None;
+//RS     };
+//RS     let crate::AST::Expr::Ident(alias, _) = root.as_ref() else {
+//RS         return None;
+//RS     };
+//RS     if !cx
+//RS         .core_imports
+//RS         .get(alias)
+//RS         .is_some_and(|profile| profile.starts_with("board."))
+//RS     {
+//RS         return None;
+//RS     }
+//RS     let fallback = format!(
+//RS         "{}_{}",
+//RS         block.to_ascii_uppercase(),
+//RS         channel.to_ascii_uppercase()
+//RS     );
+//RS     Some(
+//RS         cx.hardware_profile
+//RS             .as_ref()
+//RS             .and_then(|facts| {
+//RS                 facts
+//RS                     .dma_channels
+//RS                     .iter()
+//RS                     .find(|fact| fact.name.eq_ignore_ascii_case(&fallback))
+//RS                     .map(|fact| fact.name.clone())
+//RS             })
+//RS             .unwrap_or(fallback),
+//RS     )
+//RS }
+//RS 
+//RS /// W4 (durability): prove the sema-to-TIR handoff `debug_assert`s in
+//RS /// `lower_expr`'s `Expr::Index` arm and this file's `LValue::Index` arm
+//RS /// still trip when an unresolved `IndexKind::Unknown` has no type-derived
+//RS /// recovery. A pre-sema fragment may carry `Unknown` only when the lowered
+//RS /// operands identify a canonical index route. Release builds compile the
+//RS /// asserts out and return the invariant-violation node instead.
+//RS #[cfg(all(test, debug_assertions))]
+//RS mod handoff_assert_tests {
+//RS     use super::*;
+//RS 
+//RS     fn empty_cx() -> Cx {
+//RS         let src = "fn run() {}\n";
+//RS         let (toks, lex_diags) = crate::Lexer::lex(src);
+//RS         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+//RS         let prog = crate::Parser::parse(&toks).expect("parse failed");
+//RS         build_cx(&prog, src, "test.jet")
+//RS     }
+//RS 
+//RS     #[test]
+//RS     #[should_panic(expected = "sema-to-TIR handoff violated")]
+//RS     fn index_read_unknown_kind_trips_handoff_assert() {
+//RS         let cx = empty_cx();
+//RS         let mut env = LowerEnv::new("run".to_string());
+//RS         let idx_expr = Expr::Index {
+//RS             base: Box::new(Expr::Int(0, Span::new(0, 0), None, None)),
+//RS             index: Box::new(Expr::Int(0, Span::new(0, 0), None, None)),
+//RS             span: Span::new(0, 0),
+//RS             kind: IndexKind::Unknown, // seeded leak: sema never resolved this
+//RS         };
+//RS         let _ = lower_expr(&idx_expr, &cx, &mut env);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     #[should_panic(expected = "sema-to-TIR handoff violated")]
+//RS     fn index_assign_unknown_kind_trips_handoff_assert() {
+//RS         let cx = empty_cx();
+//RS         let mut env = LowerEnv::new("run".to_string());
+//RS         let stmt = Stmt::Assign {
+//RS             target: LValue::Index {
+//RS                 base: Box::new(Expr::Int(0, Span::new(0, 0), None, None)),
+//RS                 index: Box::new(Expr::Int(0, Span::new(0, 0), None, None)),
+//RS                 span: Span::new(0, 0),
+//RS                 kind: IndexKind::Unknown, // seeded leak: sema never resolved this
+//RS             },
+//RS             op: None,
+//RS             op_span: Span::new(0, 0),
+//RS             value: Expr::Int(1, Span::new(0, 0), None, None),
+//RS         };
+//RS         let _ = lower_stmts(std::slice::from_ref(&stmt), &cx, &mut env);
+//RS     }
+//RS }
+// END-PORT-PENDING 0496 crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:4816-4917
+

@@ -1,0 +1,1964 @@
+// PORT-PENDING 0590 crates-jet-comptime-src-comptime-methods-core-calls-history: crates/jet-comptime/src/Comptime/Methods/core_calls/history.rs:1-1960
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS 
+//RS /// Checked metadata passed by the MIR evaluator to the comptime history
+//RS /// adapter. Derived strategies use the scalar schema rows; explicit strategies
+//RS /// retain their lossless typed command values and use only provenance here.
+//RS #[derive(Clone, Debug)]
+//RS pub struct HistoryCommandSchema {
+//RS     pub command_type: String,
+//RS     pub variants: Vec<HistoryCommandVariant>,
+//RS     pub unsupported_reason: Option<String>,
+//RS     pub provenance: Option<HistoryProvenance>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct HistoryCommandVariant {
+//RS     pub operation: String,
+//RS     pub variant: String,
+//RS     pub fields: Vec<(Option<String>, jet_foundation::TestingHistory::HistorySchemaField)>,
+//RS }
+//RS /// Recover the checked ordinary-enum strategy from the MIR type table.  This
+//RS /// is the comptime counterpart of MIRRust's emitted `HistoryCommand` impl, so
+//RS /// both tiers use the same variant names and scalar bounds.
+//RS pub fn history_command_schema_from_mir(
+//RS     program: &jet_foundation::MIR::MirProgram,
+//RS     command_type: &jet_foundation::MIR::MirType,
+//RS     provenance: Option<HistoryProvenance>,
+//RS ) -> Option<HistoryCommandSchema> {
+//RS     let command_name = command_type
+//RS         .nominal_name()
+//RS         .map(str::to_string)
+//RS         .unwrap_or_else(|| command_type.identity_key());
+//RS     let Some(definition) = command_type
+//RS         .identity
+//RS         .and_then(|identity| program.types.iter().find(|definition| definition.id == identity))
+//RS         .or_else(|| {
+//RS             program
+//RS                 .types
+//RS                 .iter()
+//RS                 .find(|definition| definition.name == command_name || definition.key == command_name)
+//RS         }) else {
+//RS         return Some(HistoryCommandSchema {
+//RS             command_type: command_name.clone(),
+//RS             variants: Vec::new(),
+//RS             unsupported_reason: Some(
+//RS                 jet_foundation::TestingHistory::history_unsupported_type_reason(&command_name),
+//RS             ),
+//RS             provenance,
+//RS         });
+//RS     };
+//RS     let jet_foundation::MIR::MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
+//RS         return Some(HistoryCommandSchema {
+//RS             command_type: command_name.clone(),
+//RS             variants: Vec::new(),
+//RS             unsupported_reason: Some(
+//RS                 jet_foundation::TestingHistory::history_unsupported_type_reason(&command_name),
+//RS             ),
+//RS             provenance,
+//RS         });
+//RS     };
+//RS     if !definition.generic_params.is_empty() {
+//RS         return Some(HistoryCommandSchema {
+//RS             command_type: command_name.clone(),
+//RS             variants: Vec::new(),
+//RS             unsupported_reason: Some(
+//RS                 jet_foundation::TestingHistory::history_unsupported_type_reason(&command_name),
+//RS             ),
+//RS             provenance,
+//RS         });
+//RS     }
+//RS     let mut supported = Vec::new();
+//RS     let mut unsupported_variant = None;
+//RS     for variant in variants {
+//RS         let fields = match &variant.payload {
+//RS             jet_foundation::MIR::MirVariantPayload::Unit => Some(Vec::new()),
+//RS             jet_foundation::MIR::MirVariantPayload::Single(ty) => {
+//RS                 history_schema_field(ty).map(|field| vec![(None, field)])
+//RS             }
+//RS             jet_foundation::MIR::MirVariantPayload::Named(fields) => fields
+//RS                 .iter()
+//RS                 .map(|field| {
+//RS                     history_schema_field(&field.ty)
+//RS                         .map(|field_type| (Some(field.name.clone()), field_type))
+//RS                 })
+//RS                 .collect::<Option<Vec<_>>>(),
+//RS         };
+//RS         let Some(fields) = fields else {
+//RS             if unsupported_variant.is_none() {
+//RS                 unsupported_variant = Some(variant.name.clone());
+//RS             }
+//RS             continue;
+//RS         };
+//RS         supported.push(HistoryCommandVariant {
+//RS             operation: variant.wire_name.clone(),
+//RS             variant: variant.name.clone(),
+//RS             fields,
+//RS         });
+//RS     }
+//RS     Some(HistoryCommandSchema {
+//RS         command_type: command_name.clone(),
+//RS         variants: supported,
+//RS         unsupported_reason: unsupported_variant.map(|variant| {
+//RS             jet_foundation::TestingHistory::history_unsupported_variant_reason(
+//RS                 &command_name,
+//RS                 &variant,
+//RS             )
+//RS         }),
+//RS         provenance,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn history_schema_field(
+//RS     ty: &jet_foundation::MIR::MirType,
+//RS ) -> Option<jet_foundation::TestingHistory::HistorySchemaField> {
+//RS     use jet_foundation::MIR::MirTypeKind;
+//RS     use jet_foundation::TestingHistory::HistorySchemaField;
+//RS 
+//RS     match ty.kind() {
+//RS         MirTypeKind::Int => Some(HistorySchemaField::Integer { lo: -8, hi: 8 }),
+//RS         MirTypeKind::Bool => Some(HistorySchemaField::Boolean),
+//RS         MirTypeKind::String => Some(HistorySchemaField::Text),
+//RS         MirTypeKind::Char => Some(HistorySchemaField::Char),
+//RS         MirTypeKind::IntN { signed, .. } => Some(HistorySchemaField::Integer {
+//RS             lo: if *signed { -8 } else { 0 },
+//RS             hi: if *signed { 8 } else { 16 },
+//RS         }),
+//RS         MirTypeKind::InlineRange { base, lo, hi } if lo <= hi => {
+//RS             match history_schema_field(base)? {
+//RS                 HistorySchemaField::Integer { .. } => {
+//RS                     Some(HistorySchemaField::Integer { lo: *lo, hi: *hi })
+//RS                 }
+//RS                 _ => None,
+//RS             }
+//RS         }
+//RS         MirTypeKind::Tagged { inner, .. } | MirTypeKind::Quantity { base: inner, .. } => {
+//RS             history_schema_field(inner)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn comptime_history_data_tree_command(
+//RS     value: &jet_foundation::DataTree::DataTree,
+//RS ) -> Result<CtValue, String> {
+//RS     let json = jet_foundation::EncodingJson::render_json(value, false, 0);
+//RS     crate::Comptime::JSONInterp::parse_json(&json)
+//RS         .map_err(|error| format!("history command could not be encoded: {}", error.message))
+//RS }
+//RS 
+//RS pub(super) fn comptime_history_enum_command(
+//RS     operation: &jet_foundation::TestingHistory::HistoryOperation,
+//RS     schema: &HistoryCommandSchema,
+//RS ) -> Result<CtValue, String> {
+//RS     if !operation.creates.is_empty() || !operation.consumes.is_empty() {
+//RS         return Err(format!(
+//RS             "history operation `{}` carries resources without an executable strategy",
+//RS             operation.name
+//RS         ));
+//RS     }
+//RS     let variant = schema
+//RS         .variants
+//RS         .iter()
+//RS         .find(|variant| variant.operation == operation.name)
+//RS         .ok_or_else(|| format!("history operation `{}` is not in the checked command schema", operation.name))?;
+//RS     if operation.arguments.len() != variant.fields.len() {
+//RS         return Err(format!(
+//RS             "history operation `{}` has {} argument(s), expected {}",
+//RS             operation.name,
+//RS             operation.arguments.len(),
+//RS             variant.fields.len()
+//RS         ));
+//RS     }
+//RS     let args = variant
+//RS         .fields
+//RS         .iter()
+//RS         .zip(&operation.arguments)
+//RS         .map(|((label, field), value)| {
+//RS             let value = match (field, value) {
+//RS                 (
+//RS                     jet_foundation::TestingHistory::HistorySchemaField::Integer { lo, hi },
+//RS                     jet_foundation::TestingHistory::HistoryValue::Integer(value),
+//RS                 ) if lo <= value && value <= hi => CtValue::Int(*value),
+//RS                 (
+//RS                     jet_foundation::TestingHistory::HistorySchemaField::Boolean,
+//RS                     jet_foundation::TestingHistory::HistoryValue::Boolean(value),
+//RS                 ) => CtValue::Bool(*value),
+//RS                 (
+//RS                     jet_foundation::TestingHistory::HistorySchemaField::Text,
+//RS                     jet_foundation::TestingHistory::HistoryValue::Text(value),
+//RS                 ) => CtValue::Str(value.clone()),
+//RS                 (
+//RS                     jet_foundation::TestingHistory::HistorySchemaField::Char,
+//RS                     jet_foundation::TestingHistory::HistoryValue::Text(value),
+//RS                 ) => {
+//RS                     let mut chars = value.chars();
+//RS                     let character = chars
+//RS                         .next()
+//RS                         .filter(|_| chars.next().is_none())
+//RS                         .ok_or_else(|| format!("history operation `{}` has an invalid Char argument", operation.name))?;
+//RS                     CtValue::Char(character)
+//RS                 }
+//RS                 _ => {
+//RS                     return Err(format!(
+//RS                         "history operation `{}` has an argument with the wrong scalar kind",
+//RS                         operation.name
+//RS                     ))
+//RS                 }
+//RS             };
+//RS             Ok((label.clone(), value))
+//RS         })
+//RS         .collect::<Result<Vec<_>, String>>()?;
+//RS     Ok(CtValue::Enum {
+//RS         type_name: schema.command_type.clone(),
+//RS         variant: variant.variant.clone(),
+//RS         args,
+//RS     })
+//RS }
+//RS pub(super) fn comptime_history_terminal(
+//RS     seed: u64,
+//RS     status: jet_foundation::TestingComparison::ComparisonStatus,
+//RS     reason: impl Into<String>,
+//RS ) -> CtValue {
+//RS     CtValue::Present(Box::new(CtValue::Struct {
+//RS         type_name: "TestComparison".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "status".to_string(),
+//RS                 CtValue::Str(status.as_str().to_string()),
+//RS             ),
+//RS             (
+//RS                 "relation".to_string(),
+//RS                 CtValue::Str(
+//RS                     jet_foundation::TestingComparison::ObservationRelation::TypedEquality
+//RS                         .as_str()
+//RS                         .to_string(),
+//RS                 ),
+//RS             ),
+//RS             ("source".to_string(), CtValue::Str("core.testing".to_string())),
+//RS             ("tool".to_string(), CtValue::Str("interpreter".to_string())),
+//RS             ("target".to_string(), CtValue::Str("comptime".to_string())),
+//RS             ("seed".to_string(), history_count_to_ct(seed)),
+//RS             ("case_ids".to_string(), CtValue::List(Vec::new())),
+//RS             ("inputs".to_string(), CtValue::List(Vec::new())),
+//RS             ("reference".to_string(), CtValue::List(Vec::new())),
+//RS             ("candidate".to_string(), CtValue::List(Vec::new())),
+//RS             ("first_difference".to_string(), CtValue::Int(-1)),
+//RS             ("reason".to_string(), CtValue::Str(reason.into())),
+//RS             ("universal_proof".to_string(), CtValue::Bool(false)),
+//RS         ],
+//RS     }))
+//RS }
+//RS /// Ephemeral borrowed state passed to explicit history generator callbacks.
+//RS /// The carrier never enters a history record or replay artifact; it only
+//RS /// keeps the Foundation runner's RNG state alive while one callback executes.
+//RS #[derive(Clone, Copy)]
+//RS pub(super) struct HistoryRngBorrow(*mut jet_foundation::TestingHistory::HistoryRng);
+//RS 
+//RS // The pointer is valid only for the synchronous callback invocation that owns
+//RS // the Foundation runner borrow. CtValue requires its opaque payload to be
+//RS // Send + Sync so the same carrier can cross the MIR callback seam.
+//RS unsafe impl Send for HistoryRngBorrow {}
+//RS unsafe impl Sync for HistoryRngBorrow {}
+//RS 
+//RS pub(super) fn history_rng_carrier(
+//RS     rng: &mut jet_foundation::TestingHistory::HistoryRng,
+//RS ) -> CtValue {
+//RS     CtValue::Closure(std::sync::Arc::new(crate::AST::ClosureData {
+//RS         lambda: crate::AST::Lambda {
+//RS             take_names: Vec::new(),
+//RS             params: Vec::new(),
+//RS             result_type: None,
+//RS             error_type: None,
+//RS             effects: None,
+//RS             body: crate::AST::LambdaBody::Block(Vec::new()),
+//RS             span: Span::new(0, 0),
+//RS             meta: crate::AST::LambdaMeta::default(),
+//RS         },
+//RS         captured: std::collections::HashMap::new(),
+//RS         return_type: None,
+//RS         opaque: Some(crate::AST::CtOpaque::new(HistoryRngBorrow(rng as *mut _))),
+//RS     }))
+//RS }
+//RS 
+//RS pub(super) fn history_rng_pointer(value: &CtValue) -> Option<*mut jet_foundation::TestingHistory::HistoryRng> {
+//RS     let CtValue::Closure(data) = value else {
+//RS         return None;
+//RS     };
+//RS     data.opaque
+//RS         .as_ref()
+//RS         .and_then(|opaque| opaque.downcast_ref::<HistoryRngBorrow>())
+//RS         .map(|borrow| borrow.0)
+//RS }
+//RS 
+//RS /// Execute one explicit HistoryRng method against the runner-owned borrowed
+//RS /// state. MIR's callback bridge uses this same carrier operation.
+//RS pub fn apply_history_rng_method(
+//RS     receiver: &CtValue,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if !matches!(method, "next_u64" | "below" | "coin") {
+//RS         return None;
+//RS     }
+//RS     let Some(pointer) = history_rng_pointer(receiver) else {
+//RS         return None;
+//RS     };
+//RS     let Some(rng) = (unsafe { pointer.as_mut() }) else {
+//RS         return Some(Err(unsupported("invalid HistoryRNG callback carrier", span)));
+//RS     };
+//RS     match method {
+//RS         "next_u64" if args.is_empty() => Some(Ok(exact_int_value(
+//RS             jet_foundation::Numeric::CtBigInt::from_u64(rng.next_u64()),
+//RS         ))),
+//RS         "next_u64" => Some(Err(unsupported(
+//RS             "HistoryRNG.next_u64() expects no arguments",
+//RS             span,
+//RS         ))),
+//RS         "below" if args.len() == 1 => {
+//RS             let bound = match history_u64_from_ct(&args[0]) {
+//RS                 Ok(bound) => bound,
+//RS                 Err(reason) => return Some(Err(unsupported(&reason, span))),
+//RS             };
+//RS             Some(Ok(exact_int_value(
+//RS                 jet_foundation::Numeric::CtBigInt::from_u64(rng.below(bound)),
+//RS             )))
+//RS         }
+//RS         "below" => Some(Err(unsupported(
+//RS             "HistoryRNG.below() expects one argument",
+//RS             span,
+//RS         ))),
+//RS         "coin" if args.is_empty() => Some(Ok(CtValue::Bool(rng.coin()))),
+//RS         "coin" => Some(Err(unsupported(
+//RS             "HistoryRNG.coin() expects no arguments",
+//RS             span,
+//RS         ))),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_u64_from_ct(value: &CtValue) -> Result<u64, String> {
+//RS     let number = exact_big(value)
+//RS         .ok_or_else(|| "history count must be an exact non-negative Int".to_string())?;
+//RS     let signed = number
+//RS         .try_i128()
+//RS         .ok_or_else(|| "history count is outside the supported integer range".to_string())?;
+//RS     u64::try_from(signed)
+//RS         .map_err(|_| "history count must be a non-negative Int".to_string())
+//RS }
+//RS 
+//RS 
+//RS pub(super) fn history_u32_from_ct(value: &CtValue, label: &str) -> Result<u32, String> {
+//RS     let count = history_u64_from_ct(value)
+//RS         .map_err(|reason| format!("{label} must be a non-negative Count: {reason}"))?;
+//RS     u32::try_from(count).map_err(|_| format!("{label} exceeds the u32 identity range"))
+//RS }
+//RS 
+//RS pub(super) fn history_i64_from_ct(value: &CtValue, label: &str) -> Result<i64, String> {
+//RS     exact_big(value)
+//RS         .and_then(|number| number.try_i64())
+//RS         .ok_or_else(|| format!("{label} must fit in an Int"))
+//RS }
+//RS 
+//RS pub(super) fn history_string_from_ct(value: &CtValue, label: &str) -> Result<String, String> {
+//RS     match value {
+//RS         CtValue::Str(value) => Ok(value.clone()),
+//RS         _ => Err(format!("{label} must be a String")),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_option_value(value: &CtValue) -> Result<Option<CtValue>, String> {
+//RS     match value {
+//RS         CtValue::Present(value) => Ok(Some((**value).clone())),
+//RS         CtValue::Failed(CtReport::Clean(_)) => Ok(None),
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if type_name.is_empty() && variant == "Val" => args
+//RS             .first()
+//RS             .map(|(_, value)| Some(value.clone()))
+//RS             .ok_or_else(|| "malformed optional history value".to_string()),
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if type_name.is_empty() && variant == "None" && args.is_empty() => Ok(None),
+//RS         CtValue::Failed(CtReport::Told(reason)) => Err(format!(
+//RS             "optional history value carries failure: {}",
+//RS             reason.debug_rust()
+//RS         )),
+//RS         _ => Err("history strategy field must be an optional value".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_field<'a>(value: &'a CtValue, name: &str) -> Result<&'a CtValue, String> {
+//RS     let CtValue::Struct { fields, .. } = value else {
+//RS         return Err(format!("history value is not a record with `{name}`"));
+//RS     };
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(field, value)| (field == name).then_some(value))
+//RS         .ok_or_else(|| format!("history record is missing `{name}`"))
+//RS }
+//RS 
+//RS pub(super) fn history_list<'a>(value: &'a CtValue, label: &str) -> Result<&'a Vec<CtValue>, String> {
+//RS     match value {
+//RS         CtValue::List(values) => Ok(values),
+//RS         _ => Err(format!("{label} must be a List")),
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub(super) struct ComptimeHistoryCommand {
+//RS     value: CtValue,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub(super) struct ComptimeHistoryDerivedStrategy;
+//RS 
+//RS impl HistoryCommand for ComptimeHistoryCommand {
+//RS     type Strategy = ComptimeHistoryDerivedStrategy;
+//RS 
+//RS     fn history_strategy() -> Self::Strategy {
+//RS         ComptimeHistoryDerivedStrategy
+//RS     }
+//RS 
+//RS     fn history_command_type() -> &'static str {
+//RS         "comptime-history-command"
+//RS     }
+//RS }
+//RS 
+//RS impl HistoryStrategyBehavior<ComptimeHistoryCommand> for ComptimeHistoryDerivedStrategy {
+//RS     fn command_type(&self) -> &str {
+//RS         "comptime-history-command"
+//RS     }
+//RS 
+//RS     fn distributions(&self) -> Vec<HistoryDistribution> {
+//RS         Vec::new()
+//RS     }
+//RS 
+//RS     fn generate(
+//RS         &self,
+//RS         _rng: &mut HistoryRng,
+//RS         _case_index: usize,
+//RS         _max_steps: usize,
+//RS     ) -> Option<TypedHistoryCase<ComptimeHistoryCommand>> {
+//RS         None
+//RS     }
+//RS 
+//RS     fn rebuild(&self, _case: &HistoryCase) -> Option<TypedHistoryCase<ComptimeHistoryCommand>> {
+//RS         None
+//RS     }
+//RS 
+//RS     fn valid(&self, _case: &TypedHistoryCase<ComptimeHistoryCommand>) -> bool {
+//RS         false
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_enum_payload<'a>(
+//RS     args: &'a [(Option<String>, CtValue)],
+//RS     label: &str,
+//RS ) -> Result<&'a CtValue, String> {
+//RS     args.first()
+//RS         .map(|(_, value)| value)
+//RS         .ok_or_else(|| format!("{label} is missing its payload"))
+//RS }
+//RS 
+//RS pub(super) fn history_handle_from_ct(value: &CtValue) -> Result<HandleId, String> {
+//RS     Ok(HandleId {
+//RS         value: history_u32_from_ct(
+//RS             history_field(value, "value")?,
+//RS             "HandleID.value",
+//RS         )?,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn history_task_from_ct(value: &CtValue) -> Result<TaskId, String> {
+//RS     Ok(TaskId {
+//RS         value: history_u32_from_ct(history_field(value, "value")?, "TaskID.value")?,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn history_event_from_ct(value: &CtValue) -> Result<EventId, String> {
+//RS     Ok(EventId {
+//RS         value: history_u32_from_ct(history_field(value, "value")?, "EventID.value")?,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn history_value_from_ct(value: &CtValue) -> Result<HistoryValue, String> {
+//RS     let CtValue::Enum { variant, args, .. } = value else {
+//RS         return Err("HistoryValue must be an enum value".to_string());
+//RS     };
+//RS     let payload = history_enum_payload(args, "HistoryValue")?;
+//RS     match variant.as_str() {
+//RS         "Integer" => history_i64_from_ct(payload, "HistoryValue.Integer").map(HistoryValue::Integer),
+//RS         "Boolean" => match payload {
+//RS             CtValue::Bool(value) => Ok(HistoryValue::Boolean(*value)),
+//RS             _ => Err("HistoryValue.Boolean payload must be Bool".to_string()),
+//RS         },
+//RS         "Text" => history_string_from_ct(payload, "HistoryValue.Text").map(HistoryValue::Text),
+//RS         "Handle" => history_handle_from_ct(payload).map(HistoryValue::Handle),
+//RS         "Redacted" => history_string_from_ct(payload, "HistoryValue.Redacted")
+//RS             .map(HistoryValue::Redacted),
+//RS         _ => Err(format!("unknown HistoryValue variant `{variant}`")),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_precondition_from_ct(value: &CtValue) -> Result<HistoryPrecondition, String> {
+//RS     let CtValue::Enum { variant, args, .. } = value else {
+//RS         return Err("HistoryPrecondition must be an enum value".to_string());
+//RS     };
+//RS     match variant.as_str() {
+//RS         "HandleLive" => Ok(HistoryPrecondition::HandleLive(history_handle_from_ct(
+//RS             history_enum_payload(args, "HistoryPrecondition.HandleLive")?,
+//RS         )?)),
+//RS         "HandleState" => Ok(HistoryPrecondition::HandleState {
+//RS             handle: history_handle_from_ct(
+//RS                 args.iter()
+//RS                     .find_map(|(name, value)| (name.as_deref() == Some("handle")).then_some(value))
+//RS                     .ok_or_else(|| {
+//RS                         "HistoryPrecondition.HandleState is missing `handle`".to_string()
+//RS                     })?,
+//RS             )?,
+//RS             state: history_string_from_ct(
+//RS                 args.iter()
+//RS                     .find_map(|(name, value)| (name.as_deref() == Some("state")).then_some(value))
+//RS                     .ok_or_else(|| {
+//RS                         "HistoryPrecondition.HandleState is missing `state`".to_string()
+//RS                     })?,
+//RS                 "HistoryPrecondition.HandleState.state",
+//RS             )?,
+//RS         }),
+//RS         "TaskCompleted" => Ok(HistoryPrecondition::TaskCompleted(history_task_from_ct(
+//RS             history_enum_payload(args, "HistoryPrecondition.TaskCompleted")?,
+//RS         )?)),
+//RS         "EventAvailable" => Ok(HistoryPrecondition::EventAvailable(history_event_from_ct(
+//RS             history_enum_payload(args, "HistoryPrecondition.EventAvailable")?,
+//RS         )?)),
+//RS         _ => Err(format!("unknown HistoryPrecondition variant `{variant}`")),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_operation_from_ct(value: &CtValue) -> Result<HistoryOperation, String> {
+//RS     let arguments = history_list(history_field(value, "arguments")?, "HistoryOperation.arguments")?
+//RS         .iter()
+//RS         .map(history_value_from_ct)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let creates = history_list(history_field(value, "creates")?, "HistoryOperation.creates")?
+//RS         .iter()
+//RS         .map(history_handle_from_ct)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let consumes = history_list(history_field(value, "consumes")?, "HistoryOperation.consumes")?
+//RS         .iter()
+//RS         .map(history_handle_from_ct)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let preconditions = history_list(
+//RS         history_field(value, "preconditions")?,
+//RS         "HistoryOperation.preconditions",
+//RS     )?
+//RS     .iter()
+//RS     .map(history_precondition_from_ct)
+//RS     .collect::<Result<Vec<_>, _>>()?;
+//RS     let depends_on = history_list(
+//RS         history_field(value, "depends_on")?,
+//RS         "HistoryOperation.depends_on",
+//RS     )?
+//RS     .iter()
+//RS     .map(|value| history_u32_from_ct(value, "HistoryOperation.depends_on"))
+//RS     .collect::<Result<Vec<_>, _>>()?;
+//RS     let task = match history_option_value(history_field(value, "task")?)? {
+//RS         Some(value) => Some(history_task_from_ct(&value)?),
+//RS         None => None,
+//RS     };
+//RS     let event = match history_option_value(history_field(value, "event")?)? {
+//RS         Some(value) => Some(history_event_from_ct(&value)?),
+//RS         None => None,
+//RS     };
+//RS     Ok(HistoryOperation {
+//RS         index: history_u32_from_ct(
+//RS             history_field(value, "index")?,
+//RS             "HistoryOperation.index",
+//RS         )?,
+//RS         name: history_string_from_ct(
+//RS             history_field(value, "name")?,
+//RS             "HistoryOperation.name",
+//RS         )?,
+//RS         arguments,
+//RS         creates,
+//RS         consumes,
+//RS         preconditions,
+//RS         depends_on,
+//RS         task,
+//RS         event,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn history_schedule_from_ct(value: &CtValue) -> Result<HistoryScheduleChoice, String> {
+//RS     Ok(HistoryScheduleChoice {
+//RS         operation: history_u32_from_ct(
+//RS             history_field(value, "operation")?,
+//RS             "HistoryScheduleChoice.operation",
+//RS         )?,
+//RS         task: match history_option_value(history_field(value, "task")?)? {
+//RS             Some(value) => Some(history_task_from_ct(&value)?),
+//RS             None => None,
+//RS         },
+//RS         event: match history_option_value(history_field(value, "event")?)? {
+//RS             Some(value) => Some(history_event_from_ct(&value)?),
+//RS             None => None,
+//RS         },
+//RS         choice: history_string_from_ct(
+//RS             history_field(value, "choice")?,
+//RS             "HistoryScheduleChoice.choice",
+//RS         )?,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn history_case_from_ct(value: &CtValue) -> Result<HistoryCase, String> {
+//RS     let operations = history_list(
+//RS         history_field(value, "operations")?,
+//RS         "HistoryCase.operations",
+//RS     )?
+//RS     .iter()
+//RS     .map(history_operation_from_ct)
+//RS     .collect::<Result<Vec<_>, _>>()?;
+//RS     let schedule = history_list(history_field(value, "schedule")?, "HistoryCase.schedule")?
+//RS         .iter()
+//RS         .map(history_schedule_from_ct)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     Ok(HistoryCase {
+//RS         case_id: history_string_from_ct(history_field(value, "case_id")?, "HistoryCase.case_id")?,
+//RS         seed: history_u64_from_ct(history_field(value, "seed")?)?,
+//RS         operations,
+//RS         schedule,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn history_typed_case_from_ct(
+//RS     value: &CtValue,
+//RS ) -> Result<TypedHistoryCase<ComptimeHistoryCommand>, String> {
+//RS     let case = history_case_from_ct(history_field(value, "case")?)?;
+//RS     let commands = history_list(
+//RS         history_field(value, "commands")?,
+//RS         "TypedHistoryCase.commands",
+//RS     )?
+//RS     .iter()
+//RS     .cloned()
+//RS     .map(|value| ComptimeHistoryCommand { value })
+//RS     .collect::<Vec<_>>();
+//RS     TypedHistoryCase::new(case, commands)
+//RS         .ok_or_else(|| "TypedHistoryCase command count does not match operations".to_string())
+//RS }
+//RS 
+//RS pub(super) fn history_count_to_ct(value: u64) -> CtValue {
+//RS     exact_int_value(jet_foundation::Numeric::CtBigInt::from_u64(value))
+//RS }
+//RS 
+//RS pub(super) fn history_optional_to_ct(value: Option<CtValue>, type_name: &str) -> CtValue {
+//RS     value.map_or_else(
+//RS         || CtValue::absent(Type::Named(type_name.to_string())),
+//RS         |value| CtValue::Present(Box::new(value)),
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn history_id_to_ct(type_name: &str, value: u32) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: vec![("value".to_string(), history_count_to_ct(u64::from(value)))],
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_value_to_ct(value: &HistoryValue) -> CtValue {
+//RS     let (variant, payload) = match value {
+//RS         HistoryValue::Integer(value) => ("Integer", CtValue::Int(*value)),
+//RS         HistoryValue::Boolean(value) => ("Boolean", CtValue::Bool(*value)),
+//RS         HistoryValue::Text(value) => ("Text", CtValue::Str(value.clone())),
+//RS         HistoryValue::Handle(value) => ("Handle", history_id_to_ct("HandleID", value.value)),
+//RS         HistoryValue::Redacted(value) => ("Redacted", CtValue::Str(value.clone())),
+//RS     };
+//RS     CtValue::Enum {
+//RS         type_name: "HistoryValue".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: vec![(None, payload)],
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_usize_from_ct(value: &CtValue, label: &str) -> Result<usize, String> {
+//RS     usize::try_from(history_u64_from_ct(value)?)
+//RS         .map_err(|_| format!("{label} exceeds the supported host count range"))
+//RS }
+//RS 
+//RS pub(super) fn history_precondition_to_ct(value: &HistoryPrecondition) -> CtValue {
+//RS     match value {
+//RS         HistoryPrecondition::HandleLive(handle) => CtValue::Enum {
+//RS             type_name: "HistoryPrecondition".to_string(),
+//RS             variant: "HandleLive".to_string(),
+//RS             args: vec![(None, history_id_to_ct("HandleID", handle.value))],
+//RS         },
+//RS         HistoryPrecondition::HandleState { handle, state } => CtValue::Enum {
+//RS             type_name: "HistoryPrecondition".to_string(),
+//RS             variant: "HandleState".to_string(),
+//RS             args: vec![
+//RS                 (
+//RS                     Some("handle".to_string()),
+//RS                     history_id_to_ct("HandleID", handle.value),
+//RS                 ),
+//RS                 (Some("state".to_string()), CtValue::Str(state.clone())),
+//RS             ],
+//RS         },
+//RS         HistoryPrecondition::TaskCompleted(task) => CtValue::Enum {
+//RS             type_name: "HistoryPrecondition".to_string(),
+//RS             variant: "TaskCompleted".to_string(),
+//RS             args: vec![(None, history_id_to_ct("TaskID", task.value))],
+//RS         },
+//RS         HistoryPrecondition::EventAvailable(event) => CtValue::Enum {
+//RS             type_name: "HistoryPrecondition".to_string(),
+//RS             variant: "EventAvailable".to_string(),
+//RS             args: vec![(None, history_id_to_ct("EventID", event.value))],
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_operation_to_ct(value: &HistoryOperation) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "HistoryOperation".to_string(),
+//RS         fields: vec![
+//RS             ("index".to_string(), history_count_to_ct(u64::from(value.index))),
+//RS             ("name".to_string(), CtValue::Str(value.name.clone())),
+//RS             (
+//RS                 "arguments".to_string(),
+//RS                 CtValue::List(value.arguments.iter().map(history_value_to_ct).collect()),
+//RS             ),
+//RS             (
+//RS                 "creates".to_string(),
+//RS                 CtValue::List(
+//RS                     value
+//RS                         .creates
+//RS                         .iter()
+//RS                         .map(|handle| history_id_to_ct("HandleID", handle.value))
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "consumes".to_string(),
+//RS                 CtValue::List(
+//RS                     value
+//RS                         .consumes
+//RS                         .iter()
+//RS                         .map(|handle| history_id_to_ct("HandleID", handle.value))
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "preconditions".to_string(),
+//RS                 CtValue::List(
+//RS                     value
+//RS                         .preconditions
+//RS                         .iter()
+//RS                         .map(history_precondition_to_ct)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "depends_on".to_string(),
+//RS                 CtValue::List(
+//RS                     value
+//RS                         .depends_on
+//RS                         .iter()
+//RS                         .map(|index| history_count_to_ct(u64::from(*index)))
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "task".to_string(),
+//RS                 history_optional_to_ct(
+//RS                     value
+//RS                         .task
+//RS                         .map(|task| history_id_to_ct("TaskID", task.value)),
+//RS                     "TaskID",
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "event".to_string(),
+//RS                 history_optional_to_ct(
+//RS                     value
+//RS                         .event
+//RS                         .map(|event| history_id_to_ct("EventID", event.value)),
+//RS                     "EventID",
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_schedule_to_ct(value: &HistoryScheduleChoice) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "HistoryScheduleChoice".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "operation".to_string(),
+//RS                 history_count_to_ct(u64::from(value.operation)),
+//RS             ),
+//RS             (
+//RS                 "task".to_string(),
+//RS                 history_optional_to_ct(
+//RS                     value
+//RS                         .task
+//RS                         .map(|task| history_id_to_ct("TaskID", task.value)),
+//RS                     "TaskID",
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "event".to_string(),
+//RS                 history_optional_to_ct(
+//RS                     value
+//RS                         .event
+//RS                         .map(|event| history_id_to_ct("EventID", event.value)),
+//RS                     "EventID",
+//RS                 ),
+//RS             ),
+//RS             ("choice".to_string(), CtValue::Str(value.choice.clone())),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_case_to_ct(value: &HistoryCase) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "HistoryCase".to_string(),
+//RS         fields: vec![
+//RS             ("case_id".to_string(), CtValue::Str(value.case_id.clone())),
+//RS             ("seed".to_string(), history_count_to_ct(value.seed)),
+//RS             (
+//RS                 "operations".to_string(),
+//RS                 CtValue::List(value.operations.iter().map(history_operation_to_ct).collect()),
+//RS             ),
+//RS             (
+//RS                 "schedule".to_string(),
+//RS                 CtValue::List(value.schedule.iter().map(history_schedule_to_ct).collect()),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_typed_case_to_ct(
+//RS     value: &TypedHistoryCase<ComptimeHistoryCommand>,
+//RS ) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "TypedHistoryCase".to_string(),
+//RS         fields: vec![
+//RS             ("case".to_string(), history_case_to_ct(&value.case)),
+//RS             (
+//RS                 "commands".to_string(),
+//RS                 CtValue::List(
+//RS                     value
+//RS                         .commands
+//RS                         .iter()
+//RS                         .map(|command| command.value.clone())
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn history_bounds_from_ct(value: &CtValue) -> Result<HistoryBounds, String> {
+//RS     Ok(HistoryBounds {
+//RS         max_steps: history_usize_from_ct(
+//RS             history_field(value, "max_steps")?,
+//RS             "HistoryBounds.max_steps",
+//RS         )?,
+//RS         max_resources: history_usize_from_ct(
+//RS             history_field(value, "max_resources")?,
+//RS             "HistoryBounds.max_resources",
+//RS         )?,
+//RS         max_shrink_attempts: history_usize_from_ct(
+//RS             history_field(value, "max_shrink_attempts")?,
+//RS             "HistoryBounds.max_shrink_attempts",
+//RS         )?,
+//RS         max_discarded_cases: history_usize_from_ct(
+//RS             history_field(value, "max_discarded_cases")?,
+//RS             "HistoryBounds.max_discarded_cases",
+//RS         )?,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn history_distribution_from_ct(
+//RS     value: &CtValue,
+//RS ) -> Result<HistoryDistribution, String> {
+//RS     let operation = history_string_from_ct(
+//RS         history_field(value, "operation")?,
+//RS         "HistoryDistribution.operation",
+//RS     )?;
+//RS     let weight = history_usize_from_ct(
+//RS         history_field(value, "weight")?,
+//RS         "HistoryDistribution.weight",
+//RS     )?;
+//RS     HistoryDistribution::new(operation, weight)
+//RS         .map_err(|error| format!("invalid HistoryDistribution: {error}"))
+//RS }
+//RS 
+//RS pub(super) struct ComptimeHistoryStrategy {
+//RS     command_type: String,
+//RS     generate: CtValue,
+//RS     rebuild: CtValue,
+//RS     valid: CtValue,
+//RS     bounds: HistoryBounds,
+//RS     distributions: Vec<HistoryDistribution>,
+//RS     span: Span,
+//RS     callback_error: Rc<RefCell<Option<String>>>,
+//RS }
+//RS 
+//RS impl ComptimeHistoryStrategy {
+//RS     fn note_error(&self, reason: impl Into<String>) {
+//RS         let mut error = self.callback_error.borrow_mut();
+//RS         error.get_or_insert_with(|| reason.into());
+//RS     }
+//RS 
+//RS     fn invoke(
+//RS         &self,
+//RS         callback: &CtValue,
+//RS         args: Vec<CtValue>,
+//RS         role: &str,
+//RS     ) -> Result<CtValue, String> {
+//RS         let result = crate::Comptime::try_ambient_standalone_closure(
+//RS             callback,
+//RS             args.clone(),
+//RS             self.span,
+//RS         )
+//RS         .unwrap_or_else(|| super::invoke_standalone_closure(callback, args, self.span));
+//RS         let value = match result {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 let reason = format!("{role} callback failed: {}", error.what);
+//RS                 self.note_error(reason.clone());
+//RS                 return Err(reason);
+//RS             }
+//RS         };
+//RS         match value {
+//RS             CtValue::Failed(CtReport::Told(reason)) => {
+//RS                 let reason = format!("{role} callback returned failure: {}", reason.debug_rust());
+//RS                 self.note_error(reason.clone());
+//RS                 Err(reason)
+//RS             }
+//RS             CtValue::Failed(CtReport::Clean(_)) => {
+//RS                 let reason = format!("{role} callback returned an absent value");
+//RS                 self.note_error(reason.clone());
+//RS                 Err(reason)
+//RS             }
+//RS             value => Ok(value),
+//RS         }
+//RS     }
+//RS 
+//RS     fn invoke_mut(
+//RS         &self,
+//RS         callback: &CtValue,
+//RS         args: &mut Vec<CtValue>,
+//RS         role: &str,
+//RS     ) -> Result<CtValue, String> {
+//RS         let result = crate::Comptime::try_ambient_standalone_closure_mut(
+//RS             callback,
+//RS             args,
+//RS             self.span,
+//RS         )
+//RS         .unwrap_or_else(|| super::invoke_standalone_closure_mut_args(callback, args, self.span));
+//RS         let value = match result {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 let reason = format!("{role} callback failed: {}", error.what);
+//RS                 self.note_error(reason.clone());
+//RS                 return Err(reason);
+//RS             }
+//RS         };
+//RS         match value {
+//RS             CtValue::Failed(CtReport::Told(reason)) => {
+//RS                 let reason = format!("{role} callback returned failure: {}", reason.debug_rust());
+//RS                 self.note_error(reason.clone());
+//RS                 Err(reason)
+//RS             }
+//RS             CtValue::Failed(CtReport::Clean(_)) => {
+//RS                 let reason = format!("{role} callback returned an absent value");
+//RS                 self.note_error(reason.clone());
+//RS                 Err(reason)
+//RS             }
+//RS             value => Ok(value),
+//RS         }
+//RS     }
+//RS 
+//RS     fn callback_error(&self) -> Option<String> {
+//RS         self.callback_error.borrow().clone()
+//RS     }
+//RS }
+//RS 
+//RS impl HistoryStrategyBehavior<ComptimeHistoryCommand> for ComptimeHistoryStrategy {
+//RS     fn command_type(&self) -> &str {
+//RS         &self.command_type
+//RS     }
+//RS 
+//RS     fn bounds(&self) -> HistoryBounds {
+//RS         self.bounds
+//RS     }
+//RS 
+//RS     fn distributions(&self) -> Vec<HistoryDistribution> {
+//RS         self.distributions.clone()
+//RS     }
+//RS 
+//RS     fn generate(
+//RS         &self,
+//RS         rng: &mut HistoryRng,
+//RS         case_index: usize,
+//RS         max_steps: usize,
+//RS     ) -> Option<TypedHistoryCase<ComptimeHistoryCommand>> {
+//RS         let mut args = vec![
+//RS             history_rng_carrier(rng),
+//RS             history_count_to_ct(u64::try_from(case_index).unwrap_or(u64::MAX)),
+//RS             history_count_to_ct(u64::try_from(max_steps).unwrap_or(u64::MAX)),
+//RS         ];
+//RS         let value = match self.invoke_mut(&self.generate, &mut args, "history generate") {
+//RS             Ok(value) => value,
+//RS             Err(reason) => {
+//RS                 self.note_error(reason);
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         let value = match history_option_value(&value) {
+//RS             Ok(Some(value)) => value,
+//RS             Ok(None) => return None,
+//RS             Err(reason) => {
+//RS                 self.note_error(format!("history generate callback: {reason}"));
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         match history_typed_case_from_ct(&value) {
+//RS             Ok(value) => Some(value),
+//RS             Err(reason) => {
+//RS                 self.note_error(format!("history generate callback: {reason}"));
+//RS                 None
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn rebuild(&self, case: &HistoryCase) -> Option<TypedHistoryCase<ComptimeHistoryCommand>> {
+//RS         let value = match self.invoke(
+//RS             &self.rebuild,
+//RS             vec![history_case_to_ct(case)],
+//RS             "history rebuild",
+//RS         ) {
+//RS             Ok(value) => value,
+//RS             Err(reason) => {
+//RS                 self.note_error(reason);
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         let value = match history_option_value(&value) {
+//RS             Ok(Some(value)) => value,
+//RS             Ok(None) => return None,
+//RS             Err(reason) => {
+//RS                 self.note_error(format!("history rebuild callback: {reason}"));
+//RS                 return None;
+//RS             }
+//RS         };
+//RS 
+//RS         match history_typed_case_from_ct(&value) {
+//RS             Ok(value) => Some(value),
+//RS             Err(reason) => {
+//RS                 self.note_error(format!("history rebuild callback: {reason}"));
+//RS                 None
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn valid(&self, case: &TypedHistoryCase<ComptimeHistoryCommand>) -> bool {
+//RS         let value = match self.invoke(
+//RS             &self.valid,
+//RS             vec![history_typed_case_to_ct(case)],
+//RS             "history valid",
+//RS         ) {
+//RS             Ok(value) => value,
+//RS             Err(reason) => {
+//RS                 self.note_error(reason);
+//RS                 return false;
+//RS             }
+//RS         };
+//RS         match value {
+//RS             CtValue::Bool(value) => value,
+//RS             _ => {
+//RS                 self.note_error("history valid callback must return Bool");
+//RS                 false
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS pub(super) fn history_capture_u64(payload: &mut Vec<u8>, value: u64) {
+//RS     payload.extend_from_slice(&value.to_le_bytes());
+//RS }
+//RS 
+//RS pub(super) fn history_capture_bytes(payload: &mut Vec<u8>, value: &[u8]) {
+//RS     history_capture_u64(payload, u64::try_from(value.len()).unwrap_or(u64::MAX));
+//RS     payload.extend_from_slice(value);
+//RS }
+//RS 
+//RS pub(super) fn history_capture_text(payload: &mut Vec<u8>, value: &str) {
+//RS     history_capture_bytes(payload, value.as_bytes());
+//RS }
+//RS 
+//RS pub(super) fn history_capture_value(value: &CtValue, payload: &mut Vec<u8>) -> Result<(), String> {
+//RS     match value {
+//RS         CtValue::Int(value) => {
+//RS             payload.push(b'i');
+//RS             payload.extend_from_slice(&value.to_le_bytes());
+//RS         }
+//RS         CtValue::Float(CtFloat::F32(value)) => {
+//RS             payload.push(b'f');
+//RS             payload.push(32);
+//RS             payload.extend_from_slice(&value.to_bits().to_le_bytes());
+//RS         }
+//RS         CtValue::Float(CtFloat::F64(value)) => {
+//RS             payload.push(b'f');
+//RS             payload.push(64);
+//RS             payload.extend_from_slice(&value.to_bits().to_le_bytes());
+//RS         }
+//RS         CtValue::Bool(value) => {
+//RS             payload.extend_from_slice(if *value { b"bt" } else { b"bf" });
+//RS         }
+//RS         CtValue::Char(value) => {
+//RS             payload.push(b'c');
+//RS             payload.extend_from_slice(&(*value as u32).to_le_bytes());
+//RS         }
+//RS         CtValue::Str(value) => {
+//RS             payload.push(b's');
+//RS             history_capture_text(payload, value);
+//RS         }
+//RS         CtValue::BigInt(value) => {
+//RS             payload.push(b'n');
+//RS             history_capture_text(payload, &value.to_string_rep());
+//RS         }
+//RS         CtValue::Bytes(value) => {
+//RS             payload.push(b'b');
+//RS             history_capture_bytes(payload, value);
+//RS         }
+//RS         CtValue::List(values) => {
+//RS             payload.push(b'l');
+//RS             history_capture_u64(payload, u64::try_from(values.len()).unwrap_or(u64::MAX));
+//RS             for value in values {
+//RS                 history_capture_value(value, payload)?;
+//RS             }
+//RS         }
+//RS         CtValue::Map(values) => {
+//RS             payload.push(b'm');
+//RS             history_capture_u64(payload, u64::try_from(values.len()).unwrap_or(u64::MAX));
+//RS             for (key, value) in values {
+//RS                 history_capture_value(&key.to_value(), payload)?;
+//RS                 history_capture_value(value, payload)?;
+//RS             }
+//RS         }
+//RS         CtValue::Struct { type_name, fields } => {
+//RS             payload.push(b'r');
+//RS             history_capture_text(payload, type_name);
+//RS             let fields = fields
+//RS                 .iter()
+//RS                 .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+//RS                 .collect::<Vec<_>>();
+//RS             history_capture_u64(payload, u64::try_from(fields.len()).unwrap_or(u64::MAX));
+//RS             for (name, value) in fields {
+//RS                 history_capture_text(payload, name);
+//RS                 history_capture_value(value, payload)?;
+//RS             }
+//RS         }
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } => {
+//RS             payload.push(b'e');
+//RS             history_capture_text(payload, type_name);
+//RS             history_capture_text(payload, variant);
+//RS             history_capture_u64(payload, u64::try_from(args.len()).unwrap_or(u64::MAX));
+//RS             for (label, value) in args {
+//RS                 match label {
+//RS                     Some(label) => {
+//RS                         payload.push(1);
+//RS                         history_capture_text(payload, label);
+//RS                     }
+//RS                     None => payload.push(0),
+//RS                 }
+//RS                 history_capture_value(value, payload)?;
+//RS             }
+//RS         }
+//RS         CtValue::Present(value) => {
+//RS             payload.push(b'o');
+//RS             history_capture_value(value, payload)?;
+//RS         }
+//RS         CtValue::Failed(CtReport::Clean(ty)) => {
+//RS             payload.push(b'a');
+//RS             history_capture_text(payload, &ty.identity_key());
+//RS         }
+//RS         CtValue::Failed(CtReport::Told(value)) => {
+//RS             payload.push(b'x');
+//RS             history_capture_value(value, payload)?;
+//RS         }
+//RS         CtValue::Unit => payload.push(b'u'),
+//RS         CtValue::Closure(_) => {
+//RS             payload.push(b'f');
+//RS             let identity = history_callback_fingerprint_from_ct(value)?;
+//RS             history_capture_text(payload, &identity);
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Fingerprint one checked callback and its relevant captures without exposing
+//RS /// capture bytes.  The function identity is supplied by the checked closure
+//RS /// owner; values use a width/type-preserving canonical codec.
+//RS pub fn history_callback_fingerprint(
+//RS     function_identity: &str,
+//RS     captures: &[CtValue],
+//RS ) -> Result<String, String> {
+//RS     if function_identity.is_empty() {
+//RS         return Err("history callback has no checked function identity".to_string());
+//RS     }
+//RS     let mut payload = Vec::new();
+//RS     history_capture_text(&mut payload, "jet.history.callback.v1");
+//RS     history_capture_text(&mut payload, function_identity);
+//RS     history_capture_u64(
+//RS         &mut payload,
+//RS         u64::try_from(captures.len()).unwrap_or(u64::MAX),
+//RS     );
+//RS     for capture in captures {
+//RS         history_capture_value(capture, &mut payload)?;
+//RS     }
+//RS     Ok(jet_foundation::SHA256::sha256_hex(&payload))
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static HISTORY_CALLBACK_FINGERPRINT_STACK: RefCell<Vec<usize>> =
+//RS         const { RefCell::new(Vec::new()) };
+//RS }
+//RS 
+//RS pub(super) struct HistoryCallbackFingerprintGuard(usize);
+//RS 
+//RS impl Drop for HistoryCallbackFingerprintGuard {
+//RS     fn drop(&mut self) {
+//RS         HISTORY_CALLBACK_FINGERPRINT_STACK.with(|stack| {
+//RS             let mut stack = stack.borrow_mut();
+//RS             if let Some(index) = stack.iter().rposition(|key| *key == self.0) {
+//RS                 stack.remove(index);
+//RS             }
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn enter_history_callback_fingerprint(
+//RS     closure: &std::sync::Arc<crate::AST::ClosureData>,
+//RS ) -> Result<HistoryCallbackFingerprintGuard, String> {
+//RS     let key = std::sync::Arc::as_ptr(closure) as usize;
+//RS     HISTORY_CALLBACK_FINGERPRINT_STACK.with(|stack| {
+//RS         let mut stack = stack.borrow_mut();
+//RS         if stack.contains(&key) {
+//RS             return Err("history callback capture contains a cycle".to_string());
+//RS         }
+//RS         stack.push(key);
+//RS         Ok(HistoryCallbackFingerprintGuard(key))
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS pub(super) fn history_callback_fingerprint_from_ct(value: &CtValue) -> Result<String, String> {
+//RS     let CtValue::Closure(closure) = value else {
+//RS         return Err("history callback is not a closure".to_string());
+//RS     };
+//RS     let _guard = enter_history_callback_fingerprint(closure)?;
+//RS     if let Some(opaque) = closure.opaque.as_ref() {
+//RS         if let Some(host) = opaque.downcast_ref::<crate::Comptime::AmbientStandaloneClosure>() {
+//RS             return host.history_callback_identity();
+//RS         }
+//RS         return Err("history callback has an unknown opaque owner".to_string());
+//RS     }
+//RS     Err(
+//RS         "history callback checked source identity is unavailable for a non-MIR closure"
+//RS             .to_string(),
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn history_derived_strategy_fingerprint(
+//RS     schema: Option<&HistoryCommandSchema>,
+//RS     strategy: &jet_foundation::TestingHistory::HistorySchemaStrategy,
+//RS     bounds: HistoryBounds,
+//RS ) -> Result<String, String> {
+//RS     let schema = schema.ok_or_else(|| "history checked schema is unavailable".to_string())?;
+//RS     let mut payload = Vec::new();
+//RS     history_capture_text(&mut payload, "jet.history.derived-strategy.v1");
+//RS     history_capture_text(&mut payload, &schema.command_type);
+//RS     history_capture_u64(
+//RS         &mut payload,
+//RS         u64::try_from(schema.variants.len()).unwrap_or(u64::MAX),
+//RS     );
+//RS     for variant in &schema.variants {
+//RS         history_capture_text(&mut payload, &variant.operation);
+//RS         history_capture_text(&mut payload, &variant.variant);
+//RS         history_capture_u64(
+//RS             &mut payload,
+//RS             u64::try_from(variant.fields.len()).unwrap_or(u64::MAX),
+//RS         );
+//RS         for (label, field) in &variant.fields {
+//RS             match label {
+//RS                 Some(label) => {
+//RS                     payload.push(1);
+//RS                     history_capture_text(&mut payload, label);
+//RS                 }
+//RS                 None => payload.push(0),
+//RS             }
+//RS             match field {
+//RS                 jet_foundation::TestingHistory::HistorySchemaField::Integer { lo, hi } => {
+//RS                     payload.push(b'i');
+//RS                     payload.extend_from_slice(&lo.to_le_bytes());
+//RS                     payload.extend_from_slice(&hi.to_le_bytes());
+//RS                 }
+//RS                 jet_foundation::TestingHistory::HistorySchemaField::Boolean => payload.push(b'b'),
+//RS                 jet_foundation::TestingHistory::HistorySchemaField::Text => payload.push(b't'),
+//RS                 jet_foundation::TestingHistory::HistorySchemaField::Char => payload.push(b'c'),
+//RS             }
+//RS         }
+//RS     }
+//RS     match schema.unsupported_reason.as_deref() {
+//RS         Some(reason) => {
+//RS             payload.push(1);
+//RS             history_capture_text(&mut payload, reason);
+//RS         }
+//RS         None => payload.push(0),
+//RS     }
+//RS     for value in [
+//RS         bounds.max_steps,
+//RS         bounds.max_resources,
+//RS         bounds.max_shrink_attempts,
+//RS         bounds.max_discarded_cases,
+//RS     ] {
+//RS         history_capture_u64(&mut payload, u64::try_from(value).unwrap_or(u64::MAX));
+//RS     }
+//RS     for distribution in strategy.distributions() {
+//RS         history_capture_text(&mut payload, &distribution.operation);
+//RS         history_capture_u64(
+//RS             &mut payload,
+//RS             u64::try_from(distribution.weight).unwrap_or(u64::MAX),
+//RS         );
+//RS     }
+//RS     Ok(jet_foundation::SHA256::sha256_hex(&payload))
+//RS }
+//RS 
+//RS pub(super) fn history_provenance_for_callbacks(
+//RS     schema: Option<&HistoryCommandSchema>,
+//RS     callbacks: &[(&str, &CtValue)],
+//RS     strategy_identity: Option<String>,
+//RS ) -> Result<HistoryProvenance, String> {
+//RS     let provenance = schema
+//RS         .and_then(|schema| schema.provenance.clone())
+//RS         .ok_or_else(|| "history checked provenance is unavailable".to_string())?;
+//RS     let mut fingerprints = callbacks
+//RS         .iter()
+//RS         .map(|(role, callback)| {
+//RS             history_callback_fingerprint_from_ct(callback)
+//RS                 .map(|identity| (*role, identity))
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     if let Some(identity) = strategy_identity {
+//RS         fingerprints.push(("strategy", identity));
+//RS     }
+//RS     fingerprints.sort_unstable_by(|left, right| left.0.cmp(right.0));
+//RS     provenance
+//RS         .bind_callbacks(
+//RS             &fingerprints
+//RS                 .iter()
+//RS                 .map(|(role, identity)| (*role, identity.as_str()))
+//RS                 .collect::<Vec<_>>(),
+//RS         )
+//RS         .map_err(|error| error.to_string())
+//RS }
+//RS 
+//RS pub(super) fn history_strategy_from_ct(
+//RS     value: &CtValue,
+//RS     command_type: &str,
+//RS     span: Span,
+//RS ) -> Result<ComptimeHistoryStrategy, String> {
+//RS     let bounds = history_bounds_from_ct(history_field(value, "bounds")?)?;
+//RS     let distributions = history_list(
+//RS         history_field(value, "distributions")?,
+//RS         "HistoryStrategy.distributions",
+//RS     )?
+//RS     .iter()
+//RS     .map(history_distribution_from_ct)
+//RS     .collect::<Result<Vec<_>, _>>()?;
+//RS     Ok(ComptimeHistoryStrategy {
+//RS         command_type: command_type.to_string(),
+//RS         generate: history_field(value, "generate")?.clone(),
+//RS         rebuild: history_field(value, "rebuild")?.clone(),
+//RS         valid: history_field(value, "valid")?.clone(),
+//RS         bounds,
+//RS         distributions,
+//RS         span,
+//RS         callback_error: Rc::new(RefCell::new(None)),
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn apply_testing_histories_explicit(
+//RS     seed: u64,
+//RS     cases: usize,
+//RS     strategy_value: CtValue,
+//RS     model: CtValue,
+//RS     actual: CtValue,
+//RS     observe: CtValue,
+//RS     schema: Option<&HistoryCommandSchema>,
+//RS     command_type: &str,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let strategy = match history_strategy_from_ct(&strategy_value, command_type, span) {
+//RS         Ok(strategy) => strategy,
+//RS         Err(reason) => return Ok(CtValue::failed(Box::new(CtValue::Str(reason)))),
+//RS     };
+//RS     let provenance = match history_provenance_for_callbacks(
+//RS         schema,
+//RS         &[
+//RS             ("generate", &strategy.generate),
+//RS             ("rebuild", &strategy.rebuild),
+//RS             ("valid", &strategy.valid),
+//RS             ("model", &model),
+//RS             ("actual", &actual),
+//RS             ("observe", &observe),
+//RS         ],
+//RS         None,
+//RS     ) {
+//RS         Ok(provenance) => provenance,
+//RS         Err(reason) => return Ok(CtValue::failed(Box::new(CtValue::Str(reason)))),
+//RS     };
+//RS     let relation = jet_foundation::TestingComparison::ObservationRelation::TypedEquality;
+//RS     let config = jet_foundation::TestingHistory::HistoryConfig::new(
+//RS         seed,
+//RS         cases,
+//RS         strategy.bounds,
+//RS         provenance.source.clone(),
+//RS         provenance.tool.clone(),
+//RS         provenance.target.clone(),
+//RS         relation.clone(),
+//RS         jet_foundation::TestingHistory::OracleDeclaration::independent(
+//RS             "testing.histories.model",
+//RS         ),
+//RS     )
+//RS     .with_provenance(provenance.clone())
+//RS     .with_command_type(command_type.to_string());
+//RS     let config = strategy
+//RS         .distributions
+//RS         .iter()
+//RS         .cloned()
+//RS         .fold(config, |config, distribution| config.with_distribution(distribution));
+//RS     let runner = match jet_foundation::TestingHistory::HistoryRunner::new(config) {
+//RS         Ok(runner) => runner,
+//RS         Err(error) => return Ok(CtValue::failed(Box::new(CtValue::Str(error.to_string())))),
+//RS     };
+//RS     let invoke = |callback: &CtValue, input: CtValue, role: &str| {
+//RS         strategy.invoke(callback, vec![input], role)
+//RS     };
+//RS     let mut inputs = Vec::new();
+//RS     let mut reference_values = Vec::new();
+//RS     let mut candidate_values = Vec::new();
+//RS     let mut samples = Vec::new();
+//RS     let run = match runner.run_strategy::<ComptimeHistoryCommand, _, _>(
+//RS         &strategy,
+//RS         |typed| {
+//RS             let unavailable = |reason: String| {
+//RS                 jet_foundation::TestingComparison::ComparisonRecord::terminal(
+//RS                     relation.clone(),
+//RS                     jet_foundation::TestingComparison::ComparisonStatus::Unavailable,
+//RS                     reason,
+//RS                 )
+//RS             };
+//RS             let input = CtValue::List(
+//RS                 typed
+//RS                     .commands
+//RS                     .iter()
+//RS                     .map(|command| command.value.clone())
+//RS                     .collect(),
+//RS             );
+//RS             let observe_value = |value: CtValue| {
+//RS                 invoke(&observe, value, "observe").map(|value| {
+//RS                     jet_foundation::TestingComparison::ComparisonObservation::value(
+//RS                         crate::Comptime::JSONInterp::render_ordered_datatree(&value, false, 0),
+//RS                     )
+//RS                 })
+//RS             };
+//RS             let reference_value = match invoke(&model, input.clone(), "model") {
+//RS                 Ok(value) => value,
+//RS                 Err(reason) => return unavailable(reason),
+//RS             };
+//RS             let candidate_value = match invoke(&actual, input.clone(), "actual") {
+//RS                 Ok(value) => value,
+//RS                 Err(reason) => return unavailable(reason),
+//RS             };
+//RS             let reference_observed = match observe_value(reference_value.clone()) {
+//RS                 Ok(value) => value,
+//RS                 Err(reason) => return unavailable(reason),
+//RS             };
+//RS             let candidate_observed = match observe_value(candidate_value.clone()) {
+//RS                 Ok(value) => value,
+//RS                 Err(reason) => return unavailable(reason),
+//RS             };
+//RS             let reference_replay_value = match invoke(&model, input.clone(), "model replay") {
+//RS                 Ok(value) => value,
+//RS                 Err(reason) => return unavailable(reason),
+//RS             };
+//RS             let candidate_replay_value = match invoke(&actual, input.clone(), "actual replay") {
+//RS                 Ok(value) => value,
+//RS                 Err(reason) => return unavailable(reason),
+//RS             };
+//RS             let reference_replay = match observe_value(reference_replay_value) {
+//RS                 Ok(value) => value,
+//RS                 Err(reason) => return unavailable(reason),
+//RS             };
+//RS             let candidate_replay = match observe_value(candidate_replay_value) {
+//RS                 Ok(value) => value,
+//RS                 Err(reason) => return unavailable(reason),
+//RS             };
+//RS             let mut identity = jet_foundation::TestingComparison::ComparisonIdentity::new(
+//RS                 typed.case.case_id.clone(),
+//RS                 typed.case.input_id(),
+//RS                 provenance.source.clone(),
+//RS                 provenance.tool.clone(),
+//RS                 provenance.target.clone(),
+//RS             );
+//RS             identity.seed = Some(typed.case.seed);
+//RS             let sample = jet_foundation::TestingComparison::ComparisonSample::new(
+//RS                 identity,
+//RS                 reference_observed,
+//RS                 candidate_observed,
+//RS             )
+//RS             .with_replays(reference_replay, candidate_replay);
+//RS             inputs.push(input.clone());
+//RS             reference_values.push(reference_value);
+//RS             candidate_values.push(candidate_value);
+//RS             samples.push(sample.clone());
+//RS             jet_foundation::TestingComparison::compare_samples(relation.clone(), [sample])
+//RS         },
+//RS     ) {
+//RS         Ok(run) => run,
+//RS         Err(error) => {
+//RS             let reason = strategy
+//RS                 .callback_error()
+//RS                 .unwrap_or_else(|| error.to_string());
+//RS             return Ok(CtValue::failed(Box::new(CtValue::Str(reason))));
+//RS         }
+//RS     };
+//RS     if let Some(reason) = strategy.callback_error() {
+//RS         return Ok(CtValue::failed(Box::new(CtValue::Str(reason))));
+//RS     }
+//RS     if let Some(artifact) = run.failure {
+//RS         return Ok(CtValue::failed(Box::new(CtValue::Str(format!(
+//RS             "history-artifact {}",
+//RS             artifact.json()
+//RS         )))));
+//RS     }
+//RS     let explored_cases = run.explored_cases;
+//RS     let mut record = jet_foundation::TestingComparison::compare_samples_with_discarded(
+//RS         relation,
+//RS         samples,
+//RS         run.discarded_cases,
+//RS     );
+//RS     if explored_cases == 0 {
+//RS         record.status = jet_foundation::TestingComparison::ComparisonStatus::Unavailable;
+//RS         record.reason = Some("no history case produced an observation".to_string());
+//RS     }
+//RS     let case_ids = record
+//RS         .samples
+//RS         .iter()
+//RS         .map(|sample| CtValue::Str(sample.identity.case_id.clone()))
+//RS         .collect();
+//RS     Ok(CtValue::Present(Box::new(CtValue::Struct {
+//RS         type_name: "TestComparison".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "status".to_string(),
+//RS                 CtValue::Str(record.status.as_str().to_string()),
+//RS             ),
+//RS             (
+//RS                 "relation".to_string(),
+//RS                 CtValue::Str(record.relation.as_str().to_string()),
+//RS             ),
+//RS             (
+//RS                 "source".to_string(),
+//RS                 CtValue::Str(provenance.source.clone()),
+//RS             ),
+//RS             ("tool".to_string(), CtValue::Str(provenance.tool.clone())),
+//RS             ("target".to_string(), CtValue::Str(provenance.target.clone())),
+//RS             ("seed".to_string(), history_count_to_ct(seed)),
+//RS             ("case_ids".to_string(), CtValue::List(case_ids)),
+//RS             ("inputs".to_string(), CtValue::List(inputs)),
+//RS             (
+//RS                 "reference".to_string(),
+//RS                 CtValue::List(reference_values),
+//RS             ),
+//RS             (
+//RS                 "candidate".to_string(),
+//RS                 CtValue::List(candidate_values),
+//RS             ),
+//RS             (
+//RS                 "first_difference".to_string(),
+//RS                 CtValue::Int(record.first_difference.map(|index| index as i64).unwrap_or(-1)),
+//RS             ),
+//RS             (
+//RS                 "reason".to_string(),
+//RS                 CtValue::Str(record.reason.unwrap_or_else(|| {
+//RS                     format!("{explored_cases} observed history case(s) matched")
+//RS                 })),
+//RS             ),
+//RS             ("universal_proof".to_string(), CtValue::Bool(false)),
+//RS         ],
+//RS     })))
+//RS }
+//RS 
+//RS pub(crate) fn apply_testing_histories(
+//RS     args: Vec<CtValue>,
+//RS     type_args: &[Type],
+//RS     span: Span,
+//RS     schema: Option<&HistoryCommandSchema>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     if args.len() != 6 {
+//RS         return Err(unsupported(
+//RS             "testing.histories expects seed, cases, optional strategy, model, actual, and observe",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let Some(command_type) = type_args.first() else {
+//RS         return Ok(CtValue::failed(Box::new(CtValue::Str(
+//RS             "core.testing.histories needs one declared Command type".to_string(),
+//RS         ))));
+//RS     };
+//RS     if type_args.len() != 1 {
+//RS         return Ok(CtValue::failed(Box::new(CtValue::Str(
+//RS             "core.testing.histories needs exactly one declared Command type".to_string(),
+//RS         ))));
+//RS     }
+//RS     let command_key = command_type.identity_key();
+//RS     let data_tree_command = command_key == "DataTree" || command_key.starts_with("DataTree|");
+//RS     let Some(cases) = exact_big(&args[1]).and_then(|number| number.try_i64()) else {
+//RS         return Ok(CtValue::failed(Box::new(CtValue::Str(
+//RS             jet_foundation::TestingHistory::HISTORY_CASE_BOUND_INVALID_REASON.to_string(),
+//RS         ))));
+//RS     };
+//RS     let Some(seed) = exact_big(&args[0]).and_then(|number| number.try_i64()) else {
+//RS         return Ok(CtValue::failed(Box::new(CtValue::Str(
+//RS             jet_foundation::TestingHistory::HISTORY_SEED_INVALID_REASON.to_string(),
+//RS         ))));
+//RS     };
+//RS     let (seed, cases) =
+//RS         match jet_foundation::TestingHistory::validate_history_bounds(seed, cases) {
+//RS             Ok(bounds) => bounds,
+//RS             Err(reason) => {
+//RS                 return Ok(CtValue::failed(Box::new(CtValue::Str(reason.to_string()))));
+//RS             }
+//RS         };
+//RS     if cases == 0 {
+//RS         return Ok(CtValue::failed(Box::new(CtValue::Str(
+//RS             "history cases must be a positive Int".to_string(),
+//RS         ))));
+//RS     }
+//RS     let strategy_value = match history_option_value(&args[2]) {
+//RS         Ok(value) => value,
+//RS         Err(reason) => {
+//RS             return Ok(CtValue::failed(Box::new(CtValue::Str(reason))));
+//RS         }
+//RS     };
+//RS     if let Some(strategy_value) = strategy_value {
+//RS         return apply_testing_histories_explicit(
+//RS             seed,
+//RS             cases,
+//RS             strategy_value,
+//RS             args[3].clone(),
+//RS             args[4].clone(),
+//RS             args[5].clone(),
+//RS             schema,
+//RS             &command_key,
+//RS             span,
+//RS         );
+//RS     }
+//RS     let model = args[3].clone();
+//RS     let actual = args[4].clone();
+//RS     let observe = args[5].clone();
+//RS     let unsupported_reason = if data_tree_command {
+//RS         None
+//RS     } else {
+//RS         schema
+//RS             .and_then(|schema| schema.unsupported_reason.as_deref())
+//RS             .map(str::to_string)
+//RS             .or_else(|| {
+//RS                 schema
+//RS                     .filter(|schema| schema.variants.is_empty())
+//RS                     .map(|_| {
+//RS                         jet_foundation::TestingHistory::history_unsupported_type_reason(
+//RS                             &command_key,
+//RS                         )
+//RS                     })
+//RS             })
+//RS             .or_else(|| {
+//RS                 schema.is_none().then(|| {
+//RS                     jet_foundation::TestingHistory::history_unsupported_type_reason(&command_key)
+//RS                 })
+//RS             })
+//RS     };
+//RS     if let Some(reason) = unsupported_reason {
+//RS         return Ok(comptime_history_terminal(
+//RS             seed,
+//RS             jet_foundation::TestingComparison::ComparisonStatus::Unsupported,
+//RS             reason,
+//RS         ));
+//RS     }
+//RS     let bounds = jet_foundation::TestingHistory::HistoryBounds {
+//RS         max_steps: 8,
+//RS         max_resources: 32,
+//RS         max_shrink_attempts: 10_000,
+//RS         max_discarded_cases: 100,
+//RS     };
+//RS     let relation = jet_foundation::TestingComparison::ObservationRelation::TypedEquality;
+//RS     let strategy = if let Some(schema) = schema {
+//RS         let variants = schema
+//RS             .variants
+//RS             .iter()
+//RS             .map(|variant| {
+//RS                 jet_foundation::TestingHistory::HistorySchemaVariant::new(
+//RS                     variant.operation.clone(),
+//RS                     variant.variant.clone(),
+//RS                     variant
+//RS                         .fields
+//RS                         .iter()
+//RS                         .map(|(_, field)| field.clone())
+//RS                         .collect(),
+//RS                 )
+//RS             })
+//RS             .collect::<Option<Vec<_>>>();
+//RS         let Some(variants) = variants.and_then(|variants| {
+//RS             jet_foundation::TestingHistory::HistorySchemaStrategy::with_variants(
+//RS                 schema.command_type.clone(),
+//RS                 variants,
+//RS             )
+//RS         }) else {
+//RS             return Ok(comptime_history_terminal(
+//RS                 seed,
+//RS                 jet_foundation::TestingComparison::ComparisonStatus::Unsupported,
+//RS                 jet_foundation::TestingHistory::history_unsupported_type_reason(
+//RS                     &schema.command_type,
+//RS                 ),
+//RS             ));
+//RS         };
+//RS         variants
+//RS     } else {
+//RS         jet_foundation::TestingHistory::HistorySchemaStrategy::new("DataTree")
+//RS     };
+//RS     let strategy_identity = match history_derived_strategy_fingerprint(schema, &strategy, bounds) {
+//RS         Ok(identity) => identity,
+//RS         Err(reason) => return Ok(CtValue::failed(Box::new(CtValue::Str(reason)))),
+//RS     };
+//RS     let provenance = match history_provenance_for_callbacks(
+//RS         schema,
+//RS         &[("model", &model), ("actual", &actual), ("observe", &observe)],
+//RS         Some(strategy_identity),
+//RS     ) {
+//RS         Ok(provenance) => provenance,
+//RS         Err(reason) => return Ok(CtValue::failed(Box::new(CtValue::Str(reason)))),
+//RS     };
+//RS     let config = jet_foundation::TestingHistory::HistoryConfig::new(
+//RS         seed,
+//RS         cases,
+//RS         bounds,
+//RS         provenance.source.clone(),
+//RS         provenance.tool.clone(),
+//RS         provenance.target.clone(),
+//RS         relation.clone(),
+//RS         jet_foundation::TestingHistory::OracleDeclaration::independent(
+//RS             "testing.histories.model",
+//RS         ),
+//RS     )
+//RS     .with_provenance(provenance.clone())
+//RS     .with_command_type(strategy.command_type());
+//RS     let config = strategy
+//RS         .distributions()
+//RS         .into_iter()
+//RS         .fold(config, |config, distribution| config.with_distribution(distribution));
+//RS     let runner = match jet_foundation::TestingHistory::HistoryRunner::new(config) {
+//RS         Ok(runner) => runner,
+//RS         Err(error) => return Ok(CtValue::failed(Box::new(CtValue::Str(error.to_string())))),
+//RS     };
+//RS     let invoke = |callback: &CtValue, input: CtValue, role: &str| -> Result<CtValue, String> {
+//RS         let result = crate::Comptime::try_ambient_standalone_closure(
+//RS             callback,
+//RS             vec![input.clone()],
+//RS             span,
+//RS         )
+//RS         .unwrap_or_else(|| super::invoke_standalone_closure(callback, vec![input], span));
+//RS         match result {
+//RS             Ok(value) => Ok(value),
+//RS             Err(error) => Err(format!("{role} callback failed: {}", error.what)),
+//RS         }
+//RS     };
+//RS     let mut inputs = Vec::new();
+//RS     let mut reference_values = Vec::new();
+//RS     let mut candidate_values = Vec::new();
+//RS     let mut samples = Vec::new();
+//RS     let run = match runner
+//RS         .run_strategy::<jet_foundation::DataTree::DataTree, _, _>(
+//RS             &strategy,
+//RS             |typed| {
+//RS                 let unavailable = |reason: String| {
+//RS                     jet_foundation::TestingComparison::ComparisonRecord::terminal(
+//RS                         relation.clone(),
+//RS                         jet_foundation::TestingComparison::ComparisonStatus::Unavailable,
+//RS                         reason,
+//RS                     )
+//RS                 };
+//RS                 let command_values = match schema {
+//RS                     Some(schema) => typed
+//RS                         .case
+//RS                         .operations
+//RS                         .iter()
+//RS                         .map(|operation| comptime_history_enum_command(operation, schema))
+//RS                         .collect::<Result<Vec<_>, _>>(),
+//RS                     None => typed
+//RS                         .commands
+//RS                         .iter()
+//RS                         .map(comptime_history_data_tree_command)
+//RS                         .collect::<Result<Vec<_>, _>>(),
+//RS                 };
+//RS                 let command_values = match command_values {
+//RS                     Ok(values) => values,
+//RS                     Err(reason) => return unavailable(reason),
+//RS                 };
+//RS                 let input = CtValue::List(command_values);
+//RS                 let observe_value = |value: CtValue| {
+//RS                     invoke(&observe, value, "observe").map(|value| {
+//RS                         jet_foundation::TestingComparison::ComparisonObservation::value(
+//RS                             crate::Comptime::JSONInterp::render_ordered_datatree(
+//RS                                 &value, false, 0,
+//RS                             ),
+//RS                         )
+//RS                     })
+//RS                 };
+//RS                 let reference_value = match invoke(&model, input.clone(), "model") {
+//RS                     Ok(value) => value,
+//RS                     Err(reason) => return unavailable(reason),
+//RS                 };
+//RS                 let candidate_value = match invoke(&actual, input.clone(), "actual") {
+//RS                     Ok(value) => value,
+//RS                     Err(reason) => return unavailable(reason),
+//RS                 };
+//RS                 let reference_observed = match observe_value(reference_value.clone()) {
+//RS                     Ok(value) => value,
+//RS                     Err(reason) => return unavailable(reason),
+//RS                 };
+//RS                 let candidate_observed = match observe_value(candidate_value.clone()) {
+//RS                     Ok(value) => value,
+//RS                     Err(reason) => return unavailable(reason),
+//RS                 };
+//RS                 let reference_replay_value = match invoke(&model, input.clone(), "model replay") {
+//RS                     Ok(value) => value,
+//RS                     Err(reason) => return unavailable(reason),
+//RS                 };
+//RS                 let candidate_replay_value = match invoke(&actual, input.clone(), "actual replay") {
+//RS                     Ok(value) => value,
+//RS                     Err(reason) => return unavailable(reason),
+//RS                 };
+//RS                 let reference_replay = match observe_value(reference_replay_value) {
+//RS                     Ok(value) => value,
+//RS                     Err(reason) => return unavailable(reason),
+//RS                 };
+//RS                 let candidate_replay = match observe_value(candidate_replay_value) {
+//RS                     Ok(value) => value,
+//RS                     Err(reason) => return unavailable(reason),
+//RS                 };
+//RS                 let mut identity = jet_foundation::TestingComparison::ComparisonIdentity::new(
+//RS                     typed.case.case_id.clone(),
+//RS                     typed.case.input_id(),
+//RS                     provenance.source.clone(),
+//RS                     provenance.tool.clone(),
+//RS                     provenance.target.clone(),
+//RS                 );
+//RS                 identity.seed = Some(typed.case.seed);
+//RS                 let sample = jet_foundation::TestingComparison::ComparisonSample::new(
+//RS                     identity,
+//RS                     reference_observed,
+//RS                     candidate_observed,
+//RS                 )
+//RS                 .with_replays(reference_replay, candidate_replay);
+//RS                 inputs.push(input.clone());
+//RS                 reference_values.push(reference_value);
+//RS                 candidate_values.push(candidate_value);
+//RS                 samples.push(sample.clone());
+//RS                 jet_foundation::TestingComparison::compare_samples(relation.clone(), [sample])
+//RS             },
+//RS         )
+//RS     {
+//RS         Ok(run) => run,
+//RS         Err(error) => return Ok(CtValue::failed(Box::new(CtValue::Str(error.to_string())))),
+//RS     };
+//RS     let explored_cases = run.explored_cases;
+//RS     if let Some(artifact) = run.failure {
+//RS         return Ok(CtValue::failed(Box::new(CtValue::Str(format!(
+//RS             "history-artifact {}",
+//RS             artifact.json()
+//RS         )))));
+//RS     }
+//RS     let mut record = jet_foundation::TestingComparison::compare_samples_with_discarded(
+//RS         relation,
+//RS         samples,
+//RS         run.discarded_cases,
+//RS     );
+//RS     if explored_cases == 0 {
+//RS         record.status = jet_foundation::TestingComparison::ComparisonStatus::Unavailable;
+//RS         record.reason = Some("no history case produced an observation".to_string());
+//RS     }
+//RS     let case_ids = record
+//RS         .samples
+//RS         .iter()
+//RS         .map(|sample| CtValue::Str(sample.identity.case_id.clone()))
+//RS         .collect();
+//RS     Ok(CtValue::Present(Box::new(CtValue::Struct {
+//RS         type_name: "TestComparison".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "status".to_string(),
+//RS                 CtValue::Str(record.status.as_str().to_string()),
+//RS             ),
+//RS             (
+//RS                 "relation".to_string(),
+//RS                 CtValue::Str(record.relation.as_str().to_string()),
+//RS             ),
+//RS             (
+//RS                 "source".to_string(),
+//RS                 CtValue::Str(provenance.source.clone()),
+//RS             ),
+//RS             ("tool".to_string(), CtValue::Str(provenance.tool.clone())),
+//RS             ("target".to_string(), CtValue::Str(provenance.target.clone())),
+//RS             ("seed".to_string(), history_count_to_ct(seed)),
+//RS             ("case_ids".to_string(), CtValue::List(case_ids)),
+//RS             ("inputs".to_string(), CtValue::List(inputs)),
+//RS             (
+//RS                 "reference".to_string(),
+//RS                 CtValue::List(reference_values),
+//RS             ),
+//RS             (
+//RS                 "candidate".to_string(),
+//RS                 CtValue::List(candidate_values),
+//RS             ),
+//RS             (
+//RS                 "first_difference".to_string(),
+//RS                 CtValue::Int(record.first_difference.map(|index| index as i64).unwrap_or(-1)),
+//RS             ),
+//RS             (
+//RS                 "reason".to_string(),
+//RS                 CtValue::Str(record.reason.unwrap_or_else(|| {
+//RS                     format!("{explored_cases} observed history case(s) matched")
+//RS                 })),
+//RS             ),
+//RS             ("universal_proof".to_string(), CtValue::Bool(false)),
+//RS         ],
+//RS     })))
+//RS }
+//RS 
+// END-PORT-PENDING 0590 crates/jet-comptime/src/Comptime/Methods/core_calls/history.rs:1-1960
+

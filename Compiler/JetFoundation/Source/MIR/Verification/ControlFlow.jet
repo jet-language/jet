@@ -1,0 +1,453 @@
+// Read-only CFG, dominator, def-use, and identity analyses for canonical MIR.
+
+pub struct MIROptimizationCFGRow {
+    pub block: MIRBlockID
+    pub predecessors: [MIRBlockID]
+    pub successors: [MIRBlockID]
+    pub reachable: Bool
+}
+
+pub struct MIROptimizationDefUseRow {
+    pub value: MIRValueID
+    pub definition_block: MIRBlockID?
+    pub definition_index: Int?
+    pub use_count: Int
+}
+
+pub struct MIROptimizationFunctionAnalysis {
+    pub cfg: [MIROptimizationCFGRow]
+    pub def_use: [MIROptimizationDefUseRow]
+}
+
+pub struct MIRPassDefinition {
+    pub value: MIRValueID
+    pub block: MIRBlockID
+    pub index: Int
+}
+
+// The function's defined SSA values, places and value metadata rows, keyed
+// by stable id (the first row wins), so a reference is a map probe instead of
+// a scan.
+pub struct MIRPassDefinitions {
+    pub values: [U64:MIRPassDefinition]
+    pub places: [U64:Int]
+    pub metadata: [U64:Int]
+}
+
+pub struct MIRPassDominatorRow {
+    pub block: MIRBlockID
+    pub dominators: [MIRBlockID]
+}
+
+// Dominator-tree intervals in block order. Unnumbered blocks are outside the
+// explicit rooted graph; they neither dominate nor are dominated.
+pub struct MIRPassDominance {
+    pub blocks: [MIRBlockID]
+    pub positions: [U64:Int]
+    pub enter: [Int]
+    pub exit: [Int]
+    pub parents: [Int]
+}
+
+// The public analyses are intentionally read-only and use the same edge and
+// operand walkers as the legality pass and transforms.
+pub fn mir_optimizer_analyze_function(function: MIRFunction) -> MIROptimizationFunctionAnalysis Never! {
+    cfg :: mir_pass_cfg_rows(function)
+    defs :: mir_pass_definitions(function)
+    // One operand walk counts every value and one map finds each first
+    // definition, instead of a whole-function walk and scan per value.
+    counts :: mir_pass_value_use_counts(function)
+    rows :: loop value in function.values -> {
+        definition :: defs.values.get(value.id.value)
+        MIROptimizationDefUseRow{
+            value: value.id,
+            definition_block: definition.map(row -> row.block),
+            definition_index: definition.map(row -> row.index),
+            use_count: counts.get(value.id.value) ?? 0,
+        }
+    }
+    MIROptimizationFunctionAnalysis{cfg: cfg, def_use: rows}
+}
+
+fn mir_pass_definitions(function: MIRFunction) -> MIRPassDefinitions Never! {
+    values := [U64:MIRPassDefinition]{}
+    loop block in function.blocks {
+        index := 0
+        loop instruction in block.instructions {
+            if instruction.result == .Val(result) {
+                if values.get(result.value) == None -> &values.add(result.value, MIRPassDefinition{value: result, block: block.id, index: index}).drop("checked absent above")
+            }
+            index += 1
+        }
+    }
+    MIRPassDefinitions{values: values, places: mir_pass_place_rows(function), metadata: mir_pass_value_rows(function)}
+}
+
+pub fn mir_pass_place_rows(function: MIRFunction) -> [U64:Int] Never! {
+    rows := [U64:Int]{}
+    loop (position, place) in function.places {
+        if rows.get(place.id.value) == None -> &rows.add(place.id.value, position).drop("checked absent above")
+    }
+    rows
+}
+
+fn mir_pass_value_rows(function: MIRFunction) -> [U64:Int] Never! {
+    rows := [U64:Int]{}
+    loop (position, value) in function.values {
+        if rows.get(value.id.value) == None -> &rows.add(value.id.value, position).drop("checked absent above")
+    }
+    rows
+}
+
+fn mir_pass_find_definition(definitions: MIRPassDefinitions, value: MIRValueID) -> MIRPassDefinition? {
+    definitions.values.get(value.value)
+}
+
+fn mir_pass_definition_exists(definitions: MIRPassDefinitions, value: MIRValueID) -> Bool Never! {
+    definitions.values.get(value.value) != None
+}
+
+fn mir_pass_defined_place(function: MIRFunction, definitions: MIRPassDefinitions, id: MIRPlaceID) -> MIRPlace? {
+    position :: definitions.places.get(id.value) ?? return None
+    Val(function.places[position])
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs::reachable_blocks
+fn mir_pass_cfg_rows(function: MIRFunction) -> [MIROptimizationCFGRow] Never! {
+    reachable :: mir_pass_reachable(function)
+    reachable_members := [U64:Bool]{}
+    loop id in reachable -> &reachable_members.add(id.value, true).drop("reachable ids are unique")
+    predecessors :: mir_pass_predecessor_map(function)
+    rows := [MIROptimizationCFGRow]{}
+    loop block in function.blocks {
+        successors :: mir_terminator_targets(block.terminator)
+        &rows.push(MIROptimizationCFGRow{block: block.id, predecessors: predecessors.get(block.id.value) ?? [MIRBlockID]{}, successors: successors, reachable: reachable_members.get(block.id.value) != None})
+    }
+    rows
+}
+
+pub fn mir_pass_reachable(function: MIRFunction) -> [MIRBlockID] Never! {
+    positions := [U64:Int]{}
+    loop (position, block) in function.blocks {
+        if positions.get(block.id.value) == None -> &positions.add(block.id.value, position).drop("checked absent above")
+    }
+    pending := [MIRBlockID]{function.entry}
+    loop drop in function.drops {
+        if drop.edge == {
+            .Failure(target) | .Unwind(target) -> &pending.push(target)
+            .Normal | .Return -> {}
+        }
+    }
+    reachable := [MIRBlockID]{}
+    seen := [U64:Bool]{}
+    index := 0
+    loop index < pending.len() {
+        block_id := pending[index]
+        index += 1
+        position :: positions.get(block_id.value) ?? next
+        if seen.get(block_id.value) == None {
+            &seen.add(block_id.value, true).drop("checked absent above")
+            &reachable.push(block_id)
+            loop target in mir_terminator_targets(function.blocks[position].terminator) {
+                if seen.get(target.value) == None -> &pending.push(target)
+            }
+        }
+    }
+    reachable
+}
+
+// Block-ordered, deduplicated predecessor ids keyed by target id, from one
+// terminator walk. Buckets grow in place and land in the map once (Rust
+// `entry(target).or_default().push`); `edges` keeps each target/source pair
+// once.
+// Rust: crates/jet-foundation/src/MIROptimization.rs::predecessor_map
+pub fn mir_pass_predecessor_map(function: MIRFunction) -> [U64:[MIRBlockID]] Never! {
+    slots := [U64:Int]{}
+    targets := [U64]{}
+    buckets := [[MIRBlockID]]{}
+    edges := [String:Bool]{}
+    loop block in function.blocks {
+        loop target in mir_terminator_targets(block.terminator) {
+            edge :: "{target.value}:{block.id.value}"
+            if edges.get(edge) != None -> next
+            edges[edge] = true
+            if slots.get(target.value) == .Val(slot) {
+                &buckets[slot].push(block.id)
+            } else {
+                slots[target.value] = buckets.len()
+                &targets.push(target.value)
+                &buckets.push([MIRBlockID]{block.id})
+            }
+        }
+    }
+    predecessors := [U64:[MIRBlockID]]{}
+    loop slot in 0..<buckets.len() -> &predecessors.add(targets[slot], buckets[slot]).drop("each target has one bucket")
+    predecessors
+}
+
+// MIROptimization.rs::dominator_map: entry and cleanup targets are roots.
+pub fn mir_pass_dominators(function: MIRFunction) -> MIRPassDominance Never! {
+    roots := [MIRBlockID]{function.entry}
+    loop drop in function.drops {
+        if drop.edge == {
+            .Failure(target) | .Unwind(target) -> &roots.push(target)
+            .Normal | .Return -> {}
+        }
+    }
+    mir_compute_dominators(function, roots)
+}
+
+// MIR.rs::MirDominators::compute: explicit roots only. An unreachable region
+// neither dominates nor is dominated. Validation passes entry alone.
+pub fn mir_compute_dominators(function: MIRFunction, root_ids: [MIRBlockID]) -> MIRPassDominance Never! {
+    blocks := [MIRBlockID]{}
+    positions := [U64:Int]{}
+    successors := [[Int]]{}
+    predecessors := [[Int]]{}
+    loop (position, block) in function.blocks {
+        &blocks.push(block.id)
+        if positions.get(block.id.value) == None -> &positions.add(block.id.value, position).drop("checked absent above")
+        &successors.push([Int]{})
+        &predecessors.push([Int]{})
+    }
+    loop (position, block) in function.blocks {
+        loop target in mir_terminator_targets(block.terminator) {
+            target_at :: positions.get(target.value) ?? next
+            &successors[position].push(target_at)
+            &predecessors[target_at].push(position)
+        }
+    }
+    roots := [Bool]{}
+    visited := [Bool]{}
+    number := [Int]{}
+    enter := [Int]{}
+    exit := [Int]{}
+    parents := [Int]{}
+    loop (position, block) in function.blocks {
+        &roots.push(false)
+        &visited.push(false)
+        &number.push(-1)
+        &enter.push(-1)
+        &exit.push(-1)
+        &parents.push(-1)
+    }
+    root_order := [Int]{}
+    loop id in root_ids {
+        position :: positions.get(id.value) ?? next
+        if !roots[position] {
+            roots[position] = true
+            &root_order.push(position)
+        }
+    }
+    postorder := [Int]{}
+    loop root in root_order {
+        visited[root] = true
+        stack := [Int]{root}
+        cursors := [Int]{0}
+        loop stack.len() > 0 {
+            top :: stack.len() - 1
+            block := stack[top]
+            if cursors[top] < successors[block].len() {
+                target :: successors[block][cursors[top]]
+                cursors[top] = cursors[top] + 1
+                // Incoming edges cannot pass a root's virtual-root edge.
+                if roots[target] || visited[target] -> next
+                visited[target] = true
+                &stack.push(target)
+                &cursors.push(0)
+            } else {
+                number[block] = postorder.len()
+                &postorder.push(block)
+                _ := &stack.pop()
+                _ := &cursors.pop()
+            }
+        }
+    }
+    virtual_root :: postorder.len()
+    idom := [Int]{}
+    loop block in postorder {
+        &idom.push(if roots[block] -> virtual_root else -> -1)
+    }
+    &idom.push(virtual_root)
+    changed := true
+    loop changed {
+        changed = false
+        node := virtual_root
+        loop node > 0 {
+            node -= 1
+            block :: postorder[node]
+            if roots[block] -> next
+            candidate := -1
+            loop predecessor in predecessors[block] {
+                source :: number[predecessor]
+                // An unnumbered predecessor is outside the rooted graph.
+                if source < 0 || idom[source] < 0 -> next
+                candidate = if candidate < 0 -> source else -> mir_pass_intersect_idoms(idom, candidate, source)
+            }
+            if candidate >= 0 && candidate != idom[node] {
+                idom[node] = candidate
+                changed = true
+            }
+        }
+    }
+    children := [[Int]]{}
+    loop filler in 0..<(virtual_root + 1) -> &children.push([Int]{})
+    loop node in 0..<virtual_root {
+        &children[idom[node]].push(node)
+        if idom[node] != virtual_root -> parents[postorder[node]] = postorder[idom[node]]
+    }
+    stack := [Int]{virtual_root}
+    cursors := [Int]{0}
+    clock := 0
+    loop stack.len() > 0 {
+        top :: stack.len() - 1
+        node := stack[top]
+        if cursors[top] < children[node].len() {
+            child :: children[node][cursors[top]]
+            cursors[top] = cursors[top] + 1
+            enter[postorder[child]] = clock
+            clock += 1
+            &stack.push(child)
+            &cursors.push(0)
+        } else {
+            if node != virtual_root -> exit[postorder[node]] = clock
+            _ := &stack.pop()
+            _ := &cursors.pop()
+        }
+    }
+    MIRPassDominance{blocks: blocks, positions: positions, enter: enter, exit: exit, parents: parents}
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs::MirDominators::compute (intersect)
+fn mir_pass_intersect_idoms(idom: [Int], left: Int, right: Int) -> Int Never! {
+    a := left
+    b := right
+    loop a != b {
+        loop a < b -> a = idom[a]
+        loop b < a -> b = idom[b]
+    }
+    a
+}
+
+// Only the reduction-seed rank needs a full row, and reads only its length.
+// Materialize its ancestor chain lazily instead of storing dense sets.
+// Rust: none (Jet-only pass)
+pub fn mir_pass_dominator_row(dominance: MIRPassDominance, block: MIRBlockID) -> MIRPassDominatorRow? {
+    position :: dominance.positions.get(block.value) ?? return None
+    if dominance.enter[position] < 0 -> return None
+    dominators := [MIRBlockID]{}
+    ancestor := position
+    loop ancestor >= 0 {
+        &dominators.push(dominance.blocks[ancestor])
+        ancestor = dominance.parents[ancestor]
+    }
+    Val(MIRPassDominatorRow{block: dominance.blocks[position], dominators: dominators})
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs::MirDominators::dominates
+pub fn mir_pass_dominates(dominance: MIRPassDominance, definition: MIRBlockID, use_block: MIRBlockID) -> Bool Never! {
+    use_position :: dominance.positions.get(use_block.value) ?? return false
+    definition_position :: dominance.positions.get(definition.value) ?? return false
+    if dominance.enter[use_position] < 0 -> return false
+    if dominance.enter[definition_position] < 0 -> return false
+    dominance.enter[definition_position] <= dominance.enter[use_position] && dominance.enter[use_position] < dominance.exit[definition_position]
+}
+
+fn mir_pass_definition_dominates(definition: MIRPassDefinition, use_block: MIRBlockID, use_index: Int, dominance: MIRPassDominance) -> Bool Never! {
+    if definition.block == use_block -> definition.index < use_index else -> mir_pass_dominates(dominance, definition.block, use_block)
+}
+
+// The SSA values a place reads (its base value and index/range operands); the
+// place resolves to its first row by id through `place_rows`.
+pub fn mir_pass_place_value_uses(places: [MIRPlace], place_rows: [U64:Int], id: MIRPlaceID) -> [MIRValueID] Never! {
+    position :: place_rows.get(id.value) ?? return [MIRValueID]{}
+    place :: places[position]
+    values := [MIRValueID]{}
+    if place.base == {
+        .Parameter(value) | .Capture(value) | .Temporary(value) -> &values.push(value)
+        else -> {}
+    }
+    loop projection in place.projections {
+        if projection == {
+            .Index(_, index, _, _, _, _, _) -> &values.push(index)
+            .Range(range, _, _) -> &values.push(range)
+            else -> {}
+        }
+    }
+    values
+}
+
+// Use counts of every value, keyed by value id: place bases and projections
+// (each place resolved to its first row by id), scope deadlines, instruction
+// operands and place references, and terminators.
+pub fn mir_pass_value_use_counts(function: MIRFunction) -> [U64:Int] Never! {
+    place_rows := [U64:Int]{}
+    loop (position, place) in function.places {
+        if place_rows.get(place.id.value) == None -> &place_rows.add(place.id.value, position).drop("checked absent above")
+    }
+    counts := [U64:Int]{}
+    loop place in function.places -> mir_pass_count_place_uses(function.places, place_rows, place.id, &counts)
+    loop scope in function.scopes {
+        deadline :: scope.deadline ?? next
+        mir_pass_count_value_use(&counts, deadline)
+    }
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            loop used in mir_operation_value_uses(instruction.operation) -> mir_pass_count_value_use(&counts, used)
+            loop place in mir_pass_operation_place_refs(instruction.operation) -> mir_pass_count_place_uses(function.places, place_rows, place, &counts)
+        }
+        loop used in mir_terminator_value_uses(block.terminator) -> mir_pass_count_value_use(&counts, used)
+    }
+    counts
+}
+
+fn mir_pass_count_value_use(counts: &[U64:Int], value: MIRValueID) Never! {
+    &counts.add(value.value, (counts.get(value.value) ?? 0) + 1).drop("the count replaces the prior count")
+}
+
+fn mir_pass_count_place_uses(places: [MIRPlace], place_rows: [U64:Int], id: MIRPlaceID, counts: &[U64:Int]) Never! {
+    position :: place_rows.get(id.value) ?? return
+    place :: places[position]
+    if place.base == {
+        .Parameter(value) | .Capture(value) | .Temporary(value) -> mir_pass_count_value_use(&counts, value)
+        else -> {}
+    }
+    loop projection in place.projections {
+        if projection == {
+            .Index(_, index, _, _, _, _, _) -> mir_pass_count_value_use(&counts, index)
+            .Range(range, _, _) -> mir_pass_count_value_use(&counts, range)
+            else -> {}
+        }
+    }
+}
+
+pub fn mir_pass_block_id_seen(rows: [MIRBlockID], id: MIRBlockID) -> Bool Never! {
+    loop row in rows { if row == id -> return true }
+    false
+}
+
+pub fn mir_pass_operation_id_seen(rows: [MIROpID], id: MIROpID) -> Bool Never! {
+    loop row in rows { if row == id -> return true }
+    false
+}
+
+pub fn mir_pass_value_id_seen(rows: [MIRValueID], id: MIRValueID) -> Bool Never! {
+    loop row in rows { if row == id -> return true }
+    false
+}
+
+pub fn mir_pass_block_exists(blocks: [MIRBasicBlock], id: MIRBlockID) -> Bool Never! {
+    loop block in blocks { if block.id == id -> return true }
+    false
+}
+
+pub fn mir_pass_find_block(blocks: [MIRBasicBlock], id: MIRBlockID) -> MIRBasicBlock? {
+    loop block in blocks { if block.id == id -> return Val(block) }
+    None
+}
+
+pub fn mir_pass_block_ids_equal(left: [MIRBlockID], right: [MIRBlockID]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    loop id in left { if !mir_pass_block_id_seen(right, id) -> return false }
+    true
+}

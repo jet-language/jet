@@ -1,0 +1,952 @@
+// PORT-PENDING 0605 crates-jet-comptime-src-comptime-zstdentropy: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:1-948
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Private std-only Zstandard entropy substrate.
+//RS //!
+//RS //! This is production-compiled but not publicly dispatched until the complete
+//RS //! frame, block, dictionary, and checksum contract has closed review.
+//RS 
+//RS const BLOCK_MAX: usize = 128 * 1024;
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS struct FseEntry {
+//RS     baseline: usize,
+//RS     bits: u8,
+//RS     symbol: u8,
+//RS }
+//RS 
+//RS struct ForwardBits<'a> {
+//RS     source: &'a [u8],
+//RS     bit: usize,
+//RS }
+//RS 
+//RS impl ForwardBits<'_> {
+//RS     fn read(&mut self, count: usize) -> Option<u32> {
+//RS         if self.bit.checked_add(count)? > self.source.len() * 8 {
+//RS             return None;
+//RS         }
+//RS         let mut value = 0u32;
+//RS         for shift in 0..count {
+//RS             value |= u32::from((self.source[self.bit / 8] >> (self.bit % 8)) & 1) << shift;
+//RS             self.bit += 1;
+//RS         }
+//RS         Some(value)
+//RS     }
+//RS }
+//RS 
+//RS struct ReverseBits {
+//RS     bits: Vec<u8>,
+//RS     next: usize,
+//RS     remaining: isize,
+//RS }
+//RS 
+//RS impl ReverseBits {
+//RS     fn new(source: &[u8]) -> Option<Self> {
+//RS         let last = *source.last()?;
+//RS         if last == 0 {
+//RS             return None;
+//RS         }
+//RS         let marker = 7usize.checked_sub(last.leading_zeros() as usize)?;
+//RS         let mut bits = Vec::with_capacity((source.len() - 1) * 8 + marker);
+//RS         for bit in (0..marker).rev() {
+//RS             bits.push((last >> bit) & 1);
+//RS         }
+//RS         for byte in source[..source.len() - 1].iter().rev() {
+//RS             for bit in (0..8).rev() {
+//RS                 bits.push((byte >> bit) & 1);
+//RS             }
+//RS         }
+//RS         Some(Self {
+//RS             remaining: bits.len() as isize,
+//RS             bits,
+//RS             next: 0,
+//RS         })
+//RS     }
+//RS 
+//RS     fn read(&mut self, count: u8) -> usize {
+//RS         let mut value = 0usize;
+//RS         for _ in 0..count {
+//RS             value = (value << 1) | usize::from(*self.bits.get(self.next).unwrap_or(&0));
+//RS             self.next += 1;
+//RS             self.remaining -= 1;
+//RS         }
+//RS         value
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct FseTable {
+//RS     log: u8,
+//RS     entries: Vec<FseEntry>,
+//RS }
+//RS 
+//RS impl FseTable {
+//RS     fn parse(source: &[u8], max_log: u8, max_symbol: usize) -> Option<(Self, usize)> {
+//RS         let mut bits = ForwardBits { source, bit: 0 };
+//RS         let log = 5 + bits.read(4)? as u8;
+//RS         if log > max_log {
+//RS             return None;
+//RS         }
+//RS         let total = 1u32 << log;
+//RS         let mut sum = 0u32;
+//RS         let mut probabilities = Vec::<i32>::new();
+//RS         while sum < total {
+//RS             let remaining = total - sum + 1;
+//RS             let width = 32 - remaining.leading_zeros();
+//RS             let unchecked = bits.read(width as usize)?;
+//RS             let low = (1 << width) - 1 - remaining;
+//RS             let mask = (1 << (width - 1)) - 1;
+//RS             let small = unchecked & mask;
+//RS             let value = if small < low {
+//RS                 bits.bit = bits.bit.checked_sub(1)?;
+//RS                 small
+//RS             } else if unchecked > mask {
+//RS                 unchecked - low
+//RS             } else {
+//RS                 unchecked
+//RS             };
+//RS             let probability = value as i32 - 1;
+//RS             probabilities.push(probability);
+//RS             match probability {
+//RS                 -1 => sum += 1,
+//RS                 0 => loop {
+//RS                     let skip = bits.read(2)? as usize;
+//RS                     probabilities.resize(probabilities.len().checked_add(skip)?, 0);
+//RS                     if skip != 3 {
+//RS                         break;
+//RS                     }
+//RS                 },
+//RS                 n if n > 0 => sum = sum.checked_add(n as u32)?,
+//RS                 _ => return None,
+//RS             }
+//RS             if probabilities.len() > max_symbol + 1 || sum > total {
+//RS                 return None;
+//RS             }
+//RS         }
+//RS         let table = Self::from_probabilities(log, &probabilities)?;
+//RS         Some((table, bits.bit.div_ceil(8)))
+//RS     }
+//RS 
+//RS     fn from_probabilities(log: u8, probabilities: &[i32]) -> Option<Self> {
+//RS         let size = 1usize << log;
+//RS         let total = probabilities.iter().try_fold(0usize, |sum, probability| {
+//RS             sum.checked_add(match *probability {
+//RS                 -1 => 1,
+//RS                 value if value >= 0 => value as usize,
+//RS                 _ => return None,
+//RS             })
+//RS         })?;
+//RS         if total != size || probabilities.is_empty() || probabilities.len() > 256 {
+//RS             return None;
+//RS         }
+//RS         let mut entries = vec![
+//RS             FseEntry {
+//RS                 baseline: 0,
+//RS                 bits: 0,
+//RS                 symbol: 0
+//RS             };
+//RS             size
+//RS         ];
+//RS         let mut high = size;
+//RS         for (symbol, probability) in probabilities.iter().enumerate() {
+//RS             if *probability == -1 {
+//RS                 high = high.checked_sub(1)?;
+//RS                 entries[high] = FseEntry {
+//RS                     baseline: 0,
+//RS                     bits: log,
+//RS                     symbol: symbol as u8,
+//RS                 };
+//RS             }
+//RS         }
+//RS         let step = (size >> 1) + (size >> 3) + 3;
+//RS         let mut position = 0usize;
+//RS         for (symbol, probability) in probabilities.iter().enumerate() {
+//RS             for _ in 0..(*probability).max(0) {
+//RS                 entries[position].symbol = symbol as u8;
+//RS                 position = (position + step) & (size - 1);
+//RS                 while position >= high {
+//RS                     position = (position + step) & (size - 1);
+//RS                 }
+//RS             }
+//RS         }
+//RS         let mut counters = vec![0u32; probabilities.len()];
+//RS         for entry in &mut entries[..high] {
+//RS             let probability = probabilities[usize::from(entry.symbol)] as u32;
+//RS             let states = probability.next_power_of_two();
+//RS             let doubled = states - probability;
+//RS             let single = probability - doubled;
+//RS             let width = size as u32 / states;
+//RS             let number = counters[usize::from(entry.symbol)];
+//RS             if number < doubled {
+//RS                 entry.baseline = (single * width + number * width * 2) as usize;
+//RS                 entry.bits = width.trailing_zeros() as u8 + 1;
+//RS             } else {
+//RS                 entry.baseline = ((number - doubled) * width) as usize;
+//RS                 entry.bits = width.trailing_zeros() as u8;
+//RS             }
+//RS             counters[usize::from(entry.symbol)] += 1;
+//RS         }
+//RS         Some(Self { log, entries })
+//RS     }
+//RS 
+//RS     fn weights(&self, source: &[u8]) -> Option<Vec<u8>> {
+//RS         let mut bits = ReverseBits::new(source)?;
+//RS         let mut first = bits.read(self.log) as usize;
+//RS         let mut second = bits.read(self.log) as usize;
+//RS         let mut out = Vec::new();
+//RS         loop {
+//RS             let entry = *self.entries.get(first)?;
+//RS             out.push(entry.symbol);
+//RS             first = entry.baseline + bits.read(entry.bits);
+//RS             if bits.remaining <= -1 {
+//RS                 out.push(self.entries.get(second)?.symbol);
+//RS                 break;
+//RS             }
+//RS             let entry = *self.entries.get(second)?;
+//RS             out.push(entry.symbol);
+//RS             second = entry.baseline + bits.read(entry.bits);
+//RS             if bits.remaining <= -1 {
+//RS                 out.push(self.entries.get(first)?.symbol);
+//RS                 break;
+//RS             }
+//RS             if out.len() > 255 {
+//RS                 return None;
+//RS             }
+//RS         }
+//RS         Some(out)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS struct HuffEntry {
+//RS     symbol: u8,
+//RS     bits: u8,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct Huffman {
+//RS     log: u8,
+//RS     entries: Vec<HuffEntry>,
+//RS }
+//RS 
+//RS impl Huffman {
+//RS     fn parse(source: &[u8]) -> Option<(Self, usize)> {
+//RS         let header = *source.first()?;
+//RS         let (mut weights, used) = if header < 128 {
+//RS             let payload = source.get(1..1 + usize::from(header))?;
+//RS             let (table, table_used) = FseTable::parse(payload, 6, 255)?;
+//RS             let weights = table.weights(payload.get(table_used..)?)?;
+//RS             (weights, 1 + usize::from(header))
+//RS         } else {
+//RS             let count = usize::from(header - 127);
+//RS             let bytes = source.get(1..1 + count.div_ceil(2))?;
+//RS             let weights = (0..count)
+//RS                 .map(|index| {
+//RS                     if index % 2 == 0 {
+//RS                         bytes[index / 2] >> 4
+//RS                     } else {
+//RS                         bytes[index / 2] & 15
+//RS                     }
+//RS                 })
+//RS                 .collect();
+//RS             (weights, 1 + count.div_ceil(2))
+//RS         };
+//RS         if weights.len() > 255 {
+//RS             return None;
+//RS         }
+//RS         let sum = weights.iter().try_fold(0u32, |sum, weight| {
+//RS             (*weight <= 11).then(|| sum + if *weight == 0 { 0 } else { 1 << (*weight - 1) })
+//RS         })?;
+//RS         if sum == 0 {
+//RS             return None;
+//RS         }
+//RS         let log = (32 - sum.leading_zeros()) as u8;
+//RS         let leftover = (1u32 << log).checked_sub(sum)?;
+//RS         if !leftover.is_power_of_two() || log > 11 {
+//RS             return None;
+//RS         }
+//RS         weights.push((32 - leftover.leading_zeros()) as u8);
+//RS         if !weights.contains(&1)
+//RS             || weights
+//RS                 .iter()
+//RS                 .filter(|weight| **weight != 0)
+//RS                 .take(2)
+//RS                 .count()
+//RS                 < 2
+//RS         {
+//RS             return None;
+//RS         }
+//RS         let lengths = weights
+//RS             .iter()
+//RS             .map(|weight| if *weight == 0 { 0 } else { log + 1 - *weight })
+//RS             .collect::<Vec<_>>();
+//RS         let mut ranks = vec![0usize; usize::from(log) + 1];
+//RS         for length in &lengths {
+//RS             ranks[usize::from(*length)] += 1;
+//RS         }
+//RS         let mut starts = vec![0usize; usize::from(log) + 1];
+//RS         for bits in (1..=usize::from(log)).rev() {
+//RS             starts[bits - 1] = starts[bits] + ranks[bits] * (1 << (usize::from(log) - bits));
+//RS         }
+//RS         if starts[0] != 1 << log {
+//RS             return None;
+//RS         }
+//RS         let mut entries = vec![HuffEntry { symbol: 0, bits: 0 }; 1 << log];
+//RS         for (symbol, length) in lengths.into_iter().enumerate() {
+//RS             if length == 0 {
+//RS                 continue;
+//RS             }
+//RS             let span = 1 << (log - length);
+//RS             let start = starts[usize::from(length)];
+//RS             starts[usize::from(length)] += span;
+//RS             for entry in &mut entries[start..start + span] {
+//RS                 *entry = HuffEntry {
+//RS                     symbol: symbol as u8,
+//RS                     bits: length,
+//RS                 };
+//RS             }
+//RS         }
+//RS         Some((Self { log, entries }, used))
+//RS     }
+//RS 
+//RS     fn stream(&self, source: &[u8], expected: usize) -> Option<Vec<u8>> {
+//RS         let mut bits = ReverseBits::new(source)?;
+//RS         let mut state = bits.read(self.log);
+//RS         let mut out = Vec::with_capacity(expected);
+//RS         while bits.remaining > -isize::from(self.log) {
+//RS             let entry = *self.entries.get(state)?;
+//RS             out.push(entry.symbol);
+//RS             state = ((state << entry.bits) & (self.entries.len() - 1)) | bits.read(entry.bits);
+//RS             if out.len() > expected {
+//RS                 return None;
+//RS             }
+//RS         }
+//RS         (bits.remaining == -isize::from(self.log) && out.len() == expected).then_some(out)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS pub(super) struct HuffmanState(Option<Huffman>);
+//RS 
+//RS pub(super) fn literals(block: &[u8], state: &mut HuffmanState) -> Option<(Vec<u8>, usize)> {
+//RS     let first = *block.first()?;
+//RS     let kind = first & 3;
+//RS     let format = (first >> 2) & 3;
+//RS     if kind < 2 {
+//RS         let (header, size) = match format {
+//RS             0 | 2 => (1, usize::from(first >> 3)),
+//RS             1 => (
+//RS                 2,
+//RS                 usize::from(first >> 4) + (usize::from(*block.get(1)?) << 4),
+//RS             ),
+//RS             _ => (
+//RS                 3,
+//RS                 usize::from(first >> 4)
+//RS                     + (usize::from(*block.get(1)?) << 4)
+//RS                     + (usize::from(*block.get(2)?) << 12),
+//RS             ),
+//RS         };
+//RS         if size > BLOCK_MAX {
+//RS             return None;
+//RS         }
+//RS         return if kind == 0 {
+//RS             Some((block.get(header..header + size)?.to_vec(), header + size))
+//RS         } else {
+//RS             Some((vec![*block.get(header)?; size], header + 1))
+//RS         };
+//RS     }
+//RS     let (header, streams, regenerated, compressed) = match format {
+//RS         0 | 1 => (
+//RS             3,
+//RS             if format == 0 { 1 } else { 4 },
+//RS             usize::from(first >> 4) + ((usize::from(*block.get(1)?) & 0x3f) << 4),
+//RS             usize::from(*block.get(1)? >> 6) + (usize::from(*block.get(2)?) << 2),
+//RS         ),
+//RS         2 => (
+//RS             4,
+//RS             4,
+//RS             usize::from(first >> 4)
+//RS                 + (usize::from(*block.get(1)?) << 4)
+//RS                 + ((usize::from(*block.get(2)?) & 3) << 12),
+//RS             (usize::from(*block.get(2)?) >> 2) + (usize::from(*block.get(3)?) << 6),
+//RS         ),
+//RS         _ => (
+//RS             5,
+//RS             4,
+//RS             usize::from(first >> 4)
+//RS                 + (usize::from(*block.get(1)?) << 4)
+//RS                 + ((usize::from(*block.get(2)?) & 0x3f) << 12),
+//RS             (usize::from(*block.get(2)?) >> 6)
+//RS                 + (usize::from(*block.get(3)?) << 2)
+//RS                 + (usize::from(*block.get(4)?) << 10),
+//RS         ),
+//RS     };
+//RS     if regenerated > BLOCK_MAX || compressed == 0 || (streams == 4 && regenerated < 6) {
+//RS         return None;
+//RS     }
+//RS     let payload = block.get(header..header + compressed)?;
+//RS     let tree_used = if kind == 2 {
+//RS         let (table, used) = Huffman::parse(payload)?;
+//RS         state.0 = Some(table);
+//RS         used
+//RS     } else {
+//RS         0
+//RS     };
+//RS     let table = state.0.as_ref()?;
+//RS     let source = payload.get(tree_used..)?;
+//RS     let out = if streams == 1 {
+//RS         table.stream(source, regenerated)?
+//RS     } else {
+//RS         let one = usize::from(u16::from_le_bytes(source.get(0..2)?.try_into().ok()?));
+//RS         let two = usize::from(u16::from_le_bytes(source.get(2..4)?.try_into().ok()?));
+//RS         let three = usize::from(u16::from_le_bytes(source.get(4..6)?.try_into().ok()?));
+//RS         let source = source.get(6..)?;
+//RS         let split2 = one.checked_add(two)?;
+//RS         let split3 = split2.checked_add(three)?;
+//RS         let each = regenerated.div_ceil(4);
+//RS         let mut out = Vec::with_capacity(regenerated);
+//RS         out.extend(table.stream(source.get(..one)?, each)?);
+//RS         out.extend(table.stream(source.get(one..split2)?, each)?);
+//RS         out.extend(table.stream(source.get(split2..split3)?, each)?);
+//RS         out.extend(table.stream(source.get(split3..)?, regenerated.checked_sub(each * 3)?)?);
+//RS         out
+//RS     };
+//RS     Some((out, header + compressed))
+//RS }
+//RS 
+//RS const LL_BASE: [usize; 36] = [
+//RS     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 40, 48, 64,
+//RS     128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536,
+//RS ];
+//RS const LL_BITS: [u8; 36] = [
+//RS     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 4, 6, 7, 8, 9, 10, 11,
+//RS     12, 13, 14, 15, 16,
+//RS ];
+//RS const ML_BASE: [usize; 53] = [
+//RS     3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
+//RS     28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 41, 43, 47, 51, 59, 67, 83, 99, 131, 259, 515, 1027,
+//RS     2051, 4099, 8195, 16387, 32771, 65539,
+//RS ];
+//RS const ML_BITS: [u8; 53] = [
+//RS     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+//RS     1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+//RS ];
+//RS const LL_DEFAULT: [i32; 36] = [
+//RS     4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1,
+//RS     -1, -1, -1, -1,
+//RS ];
+//RS const ML_DEFAULT: [i32; 53] = [
+//RS     1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//RS     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1, -1, -1,
+//RS ];
+//RS const OF_DEFAULT: [i32; 29] = [
+//RS     1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1,
+//RS ];
+//RS 
+//RS pub(super) struct SequenceState {
+//RS     literal_lengths: Option<FseTable>,
+//RS     offsets: Option<FseTable>,
+//RS     match_lengths: Option<FseTable>,
+//RS     recent_offsets: [usize; 3],
+//RS }
+//RS 
+//RS impl Default for SequenceState {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             literal_lengths: None,
+//RS             offsets: None,
+//RS             match_lengths: None,
+//RS             recent_offsets: [1, 4, 8],
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn sequence_count(source: &[u8]) -> Option<(usize, usize)> {
+//RS     match *source.first()? {
+//RS         0..=127 => Some((usize::from(source[0]), 1)),
+//RS         128..=254 => Some((
+//RS             ((usize::from(source[0]) - 128) << 8) + usize::from(*source.get(1)?),
+//RS             2,
+//RS         )),
+//RS         255 => Some((
+//RS             usize::from(*source.get(1)?) + (usize::from(*source.get(2)?) << 8) + 0x7f00,
+//RS             3,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn sequence_table(
+//RS     mode: u8,
+//RS     source: &[u8],
+//RS     current: &mut Option<FseTable>,
+//RS     max_log: u8,
+//RS     max_symbol: usize,
+//RS     default_log: u8,
+//RS     default: &[i32],
+//RS ) -> Option<usize> {
+//RS     match mode {
+//RS         0 => {
+//RS             *current = Some(FseTable::from_probabilities(default_log, default)?);
+//RS             Some(0)
+//RS         }
+//RS         1 => {
+//RS             let symbol = *source.first()?;
+//RS             if usize::from(symbol) > max_symbol {
+//RS                 return None;
+//RS             }
+//RS             *current = Some(FseTable {
+//RS                 log: 0,
+//RS                 entries: vec![FseEntry {
+//RS                     baseline: 0,
+//RS                     bits: 0,
+//RS                     symbol,
+//RS                 }],
+//RS             });
+//RS             Some(1)
+//RS         }
+//RS         2 => {
+//RS             let (table, used) = FseTable::parse(source, max_log, max_symbol)?;
+//RS             *current = Some(table);
+//RS             Some(used)
+//RS         }
+//RS         3 => current.as_ref().map(|_| 0),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn update_sequence_state(
+//RS     table: &FseTable,
+//RS     entry: FseEntry,
+//RS     bits: &mut ReverseBits,
+//RS ) -> Option<usize> {
+//RS     let state = entry.baseline.checked_add(bits.read(entry.bits))?;
+//RS     (state < table.entries.len()).then_some(state)
+//RS }
+//RS 
+//RS fn resolve_offset(value: usize, literals: usize, recent: &mut [usize; 3]) -> Option<usize> {
+//RS     let actual = if literals != 0 {
+//RS         match value {
+//RS             1..=3 => recent[value - 1],
+//RS             _ => value.checked_sub(3)?,
+//RS         }
+//RS     } else {
+//RS         match value {
+//RS             1..=2 => recent[value],
+//RS             3 => recent[0].checked_sub(1)?,
+//RS             _ => value.checked_sub(3)?,
+//RS         }
+//RS     };
+//RS     if actual == 0 {
+//RS         return None;
+//RS     }
+//RS     match (literals != 0, value) {
+//RS         (true, 1) => {}
+//RS         (true, 2) | (false, 1) => {
+//RS             recent[1] = recent[0];
+//RS             recent[0] = actual;
+//RS         }
+//RS         _ => {
+//RS             recent[2] = recent[1];
+//RS             recent[1] = recent[0];
+//RS             recent[0] = actual;
+//RS         }
+//RS     }
+//RS     Some(actual)
+//RS }
+//RS 
+//RS fn append_match(
+//RS     out: &mut Vec<u8>,
+//RS     frame_start: usize,
+//RS     offset: usize,
+//RS     length: usize,
+//RS     window: usize,
+//RS     maximum: usize,
+//RS ) -> Option<()> {
+//RS     if offset > window || out.len().checked_sub(offset)? < frame_start {
+//RS         return None;
+//RS     }
+//RS     if out.len().checked_add(length)? > maximum {
+//RS         return None;
+//RS     }
+//RS     for _ in 0..length {
+//RS         out.push(out[out.len() - offset]);
+//RS     }
+//RS     Some(())
+//RS }
+//RS 
+//RS pub(super) fn sequences(
+//RS     source: &[u8],
+//RS     literals: &[u8],
+//RS     state: &mut SequenceState,
+//RS     out: &mut Vec<u8>,
+//RS     frame_start: usize,
+//RS     window: usize,
+//RS     block_max: usize,
+//RS     maximum: usize,
+//RS ) -> Option<()> {
+//RS     let block_start = out.len();
+//RS     let (count, mut used) = sequence_count(source)?;
+//RS     if count == 0 {
+//RS         if used != source.len() || out.len().checked_add(literals.len())? > maximum {
+//RS             return None;
+//RS         }
+//RS         out.extend_from_slice(literals);
+//RS         return (out.len() - block_start <= block_max).then_some(());
+//RS     }
+//RS     let modes = *source.get(used)?;
+//RS     used += 1;
+//RS     if modes & 3 != 0 {
+//RS         return None;
+//RS     }
+//RS     let ll_mode = modes >> 6;
+//RS     let of_mode = (modes >> 4) & 3;
+//RS     let ml_mode = (modes >> 2) & 3;
+//RS     let table_source = source.get(used..)?;
+//RS     used += sequence_table(
+//RS         ll_mode,
+//RS         table_source,
+//RS         &mut state.literal_lengths,
+//RS         9,
+//RS         35,
+//RS         6,
+//RS         &LL_DEFAULT,
+//RS     )?;
+//RS     let table_source = source.get(used..)?;
+//RS     used += sequence_table(
+//RS         of_mode,
+//RS         table_source,
+//RS         &mut state.offsets,
+//RS         8,
+//RS         31,
+//RS         5,
+//RS         &OF_DEFAULT,
+//RS     )?;
+//RS     let table_source = source.get(used..)?;
+//RS     used += sequence_table(
+//RS         ml_mode,
+//RS         table_source,
+//RS         &mut state.match_lengths,
+//RS         9,
+//RS         52,
+//RS         6,
+//RS         &ML_DEFAULT,
+//RS     )?;
+//RS 
+//RS     let ll_table = state.literal_lengths.as_ref()?;
+//RS     let of_table = state.offsets.as_ref()?;
+//RS     let ml_table = state.match_lengths.as_ref()?;
+//RS     let mut bits = ReverseBits::new(source.get(used..)?)?;
+//RS     let mut ll_state = bits.read(ll_table.log);
+//RS     let mut of_state = bits.read(of_table.log);
+//RS     let mut ml_state = bits.read(ml_table.log);
+//RS     if bits.remaining < 0 {
+//RS         return None;
+//RS     }
+//RS     let mut literal = 0usize;
+//RS     for index in 0..count {
+//RS         let ll_entry = *ll_table.entries.get(ll_state)?;
+//RS         let of_entry = *of_table.entries.get(of_state)?;
+//RS         let ml_entry = *ml_table.entries.get(ml_state)?;
+//RS         let ll_code = usize::from(ll_entry.symbol);
+//RS         let ml_code = usize::from(ml_entry.symbol);
+//RS         let of_code = of_entry.symbol;
+//RS         let offset_value = (1usize << of_code).checked_add(bits.read(of_code))?;
+//RS         let match_length = ML_BASE
+//RS             .get(ml_code)?
+//RS             .checked_add(bits.read(ML_BITS[ml_code]))?;
+//RS         let literal_length = LL_BASE
+//RS             .get(ll_code)?
+//RS             .checked_add(bits.read(LL_BITS[ll_code]))?;
+//RS         if bits.remaining < 0 {
+//RS             return None;
+//RS         }
+//RS         let literal_end = literal.checked_add(literal_length)?;
+//RS         let selected = literals.get(literal..literal_end)?;
+//RS         let after_sequence = out
+//RS             .len()
+//RS             .checked_add(selected.len())?
+//RS             .checked_add(match_length)?;
+//RS         if after_sequence > maximum || after_sequence.checked_sub(block_start)? > block_max {
+//RS             return None;
+//RS         }
+//RS         out.extend_from_slice(selected);
+//RS         literal = literal_end;
+//RS         let offset = resolve_offset(offset_value, literal_length, &mut state.recent_offsets)?;
+//RS         append_match(out, frame_start, offset, match_length, window, maximum)?;
+//RS         if index + 1 < count {
+//RS             ll_state = update_sequence_state(ll_table, ll_entry, &mut bits)?;
+//RS             ml_state = update_sequence_state(ml_table, ml_entry, &mut bits)?;
+//RS             of_state = update_sequence_state(of_table, of_entry, &mut bits)?;
+//RS             if bits.remaining < 0 {
+//RS                 return None;
+//RS             }
+//RS         }
+//RS     }
+//RS     if bits.remaining != 0 {
+//RS         return None;
+//RS     }
+//RS     let remaining = literals.get(literal..)?;
+//RS     let end = out.len().checked_add(remaining.len())?;
+//RS     if end > maximum || end.checked_sub(block_start)? > block_max {
+//RS         return None;
+//RS     }
+//RS     out.extend_from_slice(remaining);
+//RS     Some(())
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use std::collections::HashSet;
+//RS     use std::io::Write as _;
+//RS     use std::process::{Command, Stdio};
+//RS 
+//RS     fn compress(plain: &[u8]) -> Vec<u8> {
+//RS         compress_with(plain, &[])
+//RS     }
+//RS 
+//RS     fn compress_with(plain: &[u8], args: &[&str]) -> Vec<u8> {
+//RS         let mut child = Command::new("zstd")
+//RS             .args(["-q", "--no-check", "-c"])
+//RS             .args(args)
+//RS             .stdin(Stdio::piped())
+//RS             .stdout(Stdio::piped())
+//RS             .spawn()
+//RS             .expect("zstd in Jet test environment");
+//RS         child.stdin.take().unwrap().write_all(plain).unwrap();
+//RS         let output = child.wait_with_output().unwrap();
+//RS         assert!(output.status.success());
+//RS         output.stdout
+//RS     }
+//RS 
+//RS     fn corpus(len: usize) -> (Vec<u8>, Vec<u8>) {
+//RS         let alphabet = if len < 1_000 {
+//RS             8
+//RS         } else if len < 100_000 {
+//RS             16
+//RS         } else {
+//RS             64
+//RS         };
+//RS         let mut value = 1u32;
+//RS         let mut plain = Vec::with_capacity(len);
+//RS         let mut seen = HashSet::new();
+//RS         while plain.len() < len {
+//RS             value ^= value << 13;
+//RS             value ^= value >> 17;
+//RS             value ^= value << 5;
+//RS             let candidate = if value & 3 == 0 {
+//RS                 0
+//RS             } else {
+//RS                 1 + (value as u8 % (alphabet - 1))
+//RS             };
+//RS             if plain.len() >= 3 {
+//RS                 let at = plain.len();
+//RS                 let key =
+//RS                     u32::from_le_bytes([plain[at - 3], plain[at - 2], plain[at - 1], candidate]);
+//RS                 if !seen.insert(key) {
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS             plain.push(candidate);
+//RS         }
+//RS         let frame = compress(&plain);
+//RS         (plain, frame)
+//RS     }
+//RS 
+//RS     fn repeat_corpus(len: usize) -> Vec<u8> {
+//RS         let mut value = 1u32;
+//RS         let plain = (0..len)
+//RS             .map(|_| {
+//RS                 value = value.wrapping_mul(1_103_515_245).wrapping_add(12_345) & 0x7fff_ffff;
+//RS                 b'A' + (value % 3) as u8
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         compress(&plain)
+//RS     }
+//RS 
+//RS     fn sequence_repeat_plain() -> Vec<u8> {
+//RS         let mut value = 1u32;
+//RS         let base = (0..BLOCK_MAX)
+//RS             .map(|_| {
+//RS                 value = value.wrapping_mul(1_103_515_245).wrapping_add(12_345) & 0x7fff_ffff;
+//RS                 (value % 3) as u8
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let mut plain = Vec::with_capacity(BLOCK_MAX * 3);
+//RS         for shift in [0, 4, 8] {
+//RS             plain.extend(base.iter().map(|byte| byte + shift));
+//RS         }
+//RS         plain
+//RS     }
+//RS 
+//RS     fn blocks(frame: &[u8]) -> Vec<&[u8]> {
+//RS         assert_eq!(&frame[..4], &[40, 181, 47, 253]);
+//RS         let descriptor = frame[4];
+//RS         let single = descriptor & 0x20 != 0;
+//RS         let dict = [0usize, 1, 2, 4][usize::from(descriptor & 3)];
+//RS         let fcs = match (descriptor >> 6, single) {
+//RS             (0, false) => 0,
+//RS             (0, true) => 1,
+//RS             (1, _) => 2,
+//RS             (2, _) => 4,
+//RS             _ => 8,
+//RS         };
+//RS         let mut offset = 5 + usize::from(!single) + dict + fcs;
+//RS         let mut out = Vec::new();
+//RS         loop {
+//RS             let header =
+//RS                 u32::from_le_bytes([frame[offset], frame[offset + 1], frame[offset + 2], 0]);
+//RS             offset += 3;
+//RS             let size = (header >> 3) as usize;
+//RS             out.push(&frame[offset..offset + size]);
+//RS             offset += size;
+//RS             if header & 1 != 0 {
+//RS                 return out;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ordinary_one_and_four_stream_huffman_weights_decode() {
+//RS         for (len, streams) in [(100, 1), (10_000, 4)] {
+//RS             let (plain, frame) = corpus(len);
+//RS             let block = blocks(&frame)[0];
+//RS             assert_eq!(block[0] & 3, 2, "ordinary corpus must use Huffman literals");
+//RS             assert_eq!(if (block[0] >> 2) & 3 == 0 { 1 } else { 4 }, streams);
+//RS             let (decoded, used) = literals(block, &mut HuffmanState::default()).expect("decode");
+//RS             assert_eq!(&block[used..], &[0], "corpus must have no sequences");
+//RS             assert_eq!(decoded, plain);
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ordinary_multiblock_corpus_reuses_huffman_table() {
+//RS         let frame = repeat_corpus(300_000);
+//RS         let mut state = HuffmanState::default();
+//RS         let mut kinds = Vec::new();
+//RS         for block in blocks(&frame) {
+//RS             if block[0] & 3 >= 2 {
+//RS                 kinds.push(block[0] & 3);
+//RS                 let (literals, used) = literals(block, &mut state).expect("decode");
+//RS                 assert!(!literals.is_empty() && used < block.len());
+//RS             }
+//RS         }
+//RS         assert!(
+//RS             kinds.contains(&2) && kinds.contains(&3),
+//RS             "expected compressed + treeless: {kinds:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ordinary_multiblock_corpus_reuses_sequence_table() {
+//RS         let plain = sequence_repeat_plain();
+//RS         let frame = compress_with(&plain, &["-19"]);
+//RS         let mut huffman = HuffmanState::default();
+//RS         let mut modes = Vec::new();
+//RS         for block in blocks(&frame) {
+//RS             let (_, used) = literals(block, &mut huffman).expect("literals");
+//RS             let section = &block[used..];
+//RS             let (count, header) = sequence_count(section).expect("sequence header");
+//RS             if count != 0 {
+//RS                 modes.push(section[header]);
+//RS             }
+//RS         }
+//RS         assert!(
+//RS             modes
+//RS                 .iter()
+//RS                 .any(|modes| { [modes >> 6, (modes >> 4) & 3, (modes >> 2) & 3].contains(&3) }),
+//RS             "stock corpus must repeat an LL/ML/OF table: {modes:02x?}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sequence_modes_and_headers_enforce_spec_bounds() {
+//RS         assert_eq!(sequence_count(&[127]), Some((127, 1)));
+//RS         assert_eq!(sequence_count(&[128, 5]), Some((5, 2)));
+//RS         assert_eq!(sequence_count(&[255, 1, 2]), Some((0x8101, 3)));
+//RS 
+//RS         let mut state = SequenceState::default();
+//RS         let mut out = vec![b'A'];
+//RS         assert!(sequences(
+//RS             &[1, 0x54, 1, 0, 0, 1],
+//RS             b"B",
+//RS             &mut state,
+//RS             &mut out,
+//RS             0,
+//RS             8,
+//RS             128,
+//RS             128,
+//RS         )
+//RS         .is_some());
+//RS         assert_eq!(out, b"ABBBB");
+//RS         assert!(sequences(&[1, 0xfc, 1], b"C", &mut state, &mut out, 0, 8, 128, 128,).is_some());
+//RS         assert_eq!(out, b"ABBBBCCCC");
+//RS         let mut zero_count = Vec::new();
+//RS         assert!(sequences(
+//RS             &[128, 0],
+//RS             b"literal",
+//RS             &mut SequenceState::default(),
+//RS             &mut zero_count,
+//RS             0,
+//RS             8,
+//RS             128,
+//RS             128,
+//RS         )
+//RS         .is_some());
+//RS         assert_eq!(zero_count, b"literal");
+//RS 
+//RS         for (window, block_max) in [(0, 128), (8, 3)] {
+//RS             assert!(sequences(
+//RS                 &[1, 0x54, 1, 0, 0, 1],
+//RS                 b"B",
+//RS                 &mut SequenceState::default(),
+//RS                 &mut vec![b'A'],
+//RS                 0,
+//RS                 window,
+//RS                 block_max,
+//RS                 128,
+//RS             )
+//RS             .is_none());
+//RS         }
+//RS 
+//RS         for malformed in [
+//RS             &[0, 0][..],
+//RS             &[1, 0xfc, 1],
+//RS             &[1, 1, 1],
+//RS             &[1, 0x40, 36, 1],
+//RS             &[1, 0x10, 32, 1],
+//RS             &[1, 0x04, 53, 1],
+//RS             &[1, 0x54, 0, 0, 0, 1],
+//RS             &[1, 0x54, 1, 0, 0, 3],
+//RS         ] {
+//RS             assert!(
+//RS                 sequences(
+//RS                     malformed,
+//RS                     b"B",
+//RS                     &mut SequenceState::default(),
+//RS                     &mut vec![b'A'],
+//RS                     0,
+//RS                     8,
+//RS                     128,
+//RS                     128,
+//RS                 )
+//RS                 .is_none(),
+//RS                 "accepted malformed sequence section: {malformed:?}"
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn entropy_headers_reject_truncation_and_oversized_counts() {
+//RS         assert!(literals(&[], &mut HuffmanState::default()).is_none());
+//RS         assert!(literals(&[0xff], &mut HuffmanState::default()).is_none());
+//RS         assert!(literals(
+//RS             &[0x12, 0xc0, 0x00, 0x80, 0x20, 0x02],
+//RS             &mut HuffmanState::default(),
+//RS         )
+//RS         .is_none());
+//RS         assert!(Huffman::parse(&[0]).is_none());
+//RS         assert!(FseTable::parse(&[0xff], 6, 255).is_none());
+//RS     }
+//RS }
+// END-PORT-PENDING 0605 crates/jet-comptime/src/Comptime/ZstdEntropy.rs:1-948
+

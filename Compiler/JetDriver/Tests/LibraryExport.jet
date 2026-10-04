@@ -1,0 +1,123 @@
+// Unit suite assembled with LibraryExport.jet; private projections stay private.
+use jet_foundation.[BuildFactSnapshot, CFfi, DevtoolsRegistry, Item, LoadedModule, MIRAllocatorPolicy, MIROSTarget, MIRRuntimeLayer, PackageGuarantees, ProgramBundle, name_ledger_new]
+use jet_pkg_model.[OutputFact, OutputPayload, PackageFacts, PackageOutputKind]
+use jet_sema.[APISnapshot, API_SNAPSHOT_VERSION, FrozenFn, SemaGuestDirection, SemaGuestFunction, SemaGuestScalar]
+use jet_driver.[jet_driver_library_declared_effects]
+use core.files.runtime.kernel_path_components as library_test_paths
+
+fn library_test_output(name: String, kind: PackageOutputKind, native: Bool, bindings: [String]) -> OutputFact Never! {
+    values :: loop binding in bindings -> OutputPayload.String(binding)
+    OutputFact{kind: kind, name: name, entry: Val("Library.jet"), fields: [:], payload: OutputPayload.Object([String:OutputPayload]{"native": OutputPayload.Bool(native), "loadable": OutputPayload.Bool(true), "bindings": OutputPayload.Array(values)})}
+}
+fn library_test_snapshot(functions: [FrozenFn]) -> APISnapshot Never! {
+    APISnapshot{api_version: API_SNAPSHOT_VERSION, package: "library__demo", published_version: "1.0.0", funcs: functions}
+}
+fn library_test_export(name: String, scalar: SemaGuestScalar?) -> SemaGuestFunction Never! {
+    SemaGuestFunction{direction: SemaGuestDirection.Export, library: None, name: name, symbol: name, params: [], return_type: None, scalar: scalar}
+}
+fn library_test_bundle(usage: [String]) -> ProgramBundle Never! {
+    used := Set.new<String>()
+    loop item in usage -> &used.add(item)
+    module :: LoadedModule{path: library_test_paths.from_text("/library/Main.jet", library_test_paths.PathPlatform.Unix), display: "/library/Main.jet", source: "", alias: "main", imports: [], items: [], script_body: [], block_spans: [], web_target_ceiling: None, pub_file: false, no_prelude: false, default_target: None, html_path: None, policy_declarations: [], user_policy_declarations: [], rule_facts: []}
+    ProgramBundle{entry: 0, project_root: library_test_paths.from_text("/library", library_test_paths.PathPlatform.Unix), modules: [LoadedModule]{module}, devtools_registry: DevtoolsRegistry.default(), parse_teaching: [], used_core: used, ffi_callback_fns: Set.new<String>(), cffi: CFfi.empty(), comptime_inputs: [], name_ledger: name_ledger_new(), layer_ceiling: None, inferred_layer: MIRRuntimeLayer.Core, web_partitions: [:], web_partition_enforced: false, web_partition_report: None, dep_roots: [:], package_guarantees: PackageGuarantees.default(), program_allocator: MIRAllocatorPolicy.HostedDefault, active_os: MIROSTarget.Linux, build_facts: BuildFactSnapshot.for_host(MIROSTarget.Linux, "x86_64-unknown-linux-gnu"), edition: "2026"}
+}
+#Test("library_selection_default_explicit_and_sorted_candidates") {
+    facts := PackageFacts.default()
+    first :: library_test_output("a", PackageOutputKind.Library, true, [])
+    facts.outputs["a"] = first
+    assert_eq(library_selected_output(Val(facts), None), Ok(first))
+    facts.outputs["z"] = library_test_output("z", PackageOutputKind.Library, true, [])
+    if library_selected_output(Val(facts), None) == {
+        .Err(diagnostics) -> {
+            assert_eq(diagnostics[0].code, "E1341")
+            assert(diagnostics[0].fix.contains("candidates: a, z"))
+        }
+        .Ok(_) -> panic("multiple libraries must require selection")
+    }
+    assert_eq(library_selected_output(Val(facts), Val("a")), Ok(first))
+    if library_selected_output(Val(facts), Val("missing")) == {
+        .Err(diagnostics) -> assert(diagnostics[0].fix.contains("Library output: a, z"))
+        .Ok(_) -> panic("missing Library must fail")
+    }
+    facts.outputs["exe"] = library_test_output("exe", PackageOutputKind.Executable, false, [])
+    if library_selected_output(Val(facts), Val("exe")) == {
+        .Err(diagnostics) -> assert(diagnostics[0].what.contains("is not a Library"))
+        .Ok(_) -> panic("non-Library output must fail")
+    }
+}
+#Test("library_selection_requires_checked_package_output") {
+    if library_selected_output(None, None) == {
+        .Err(diagnostics) -> assert_eq(diagnostics[0].code, "E1341")
+        .Ok(_) -> panic("absent package cannot invent output")
+    }
+    if library_selected_output(Val(PackageFacts.default()), None) == {
+        .Err(diagnostics) -> assert_eq(diagnostics[0].code, "E1341")
+        .Ok(_) -> panic("empty outputs cannot invent Library")
+    }
+}
+#Test("library_binding_validation_precedes_native_requirement") {
+    unsupported :: library_test_output("demo", PackageOutputKind.Library, false, [String]{"unknown"})
+    if library_config_for_output(unsupported, []) == {
+        .Err(diagnostics) -> assert(diagnostics[0].what.contains("unsupported `unknown` binding"))
+        .Ok(_) -> panic("unsupported binding must fail")
+    }
+    nonnative :: library_test_output("demo", PackageOutputKind.Library, false, [String]{"c"})
+    if library_config_for_output(nonnative, []) == {
+        .Err(diagnostics) -> assert(diagnostics[0].what.contains("without `native: true`"))
+        .Ok(_) -> panic("foreign bindings need native surface")
+    }
+    native :: library_test_output("demo", PackageOutputKind.Library, true, SUPPORTED_BINDINGS)
+    config :: library_config_for_output(native, [String]{"FS", "Net"}) ?? panic("all registered bindings accepted")
+    assert_eq(config.name, "demo")
+    assert_eq(config.entry, Val("Library.jet"))
+    assert(config.loadable && config.native)
+    assert_eq(config.bindings, SUPPORTED_BINDINGS)
+    assert_eq(config.declared_effects, [String]{"FS", "Net"})
+    sealed :: library_config_for_output(library_test_output("sealed", PackageOutputKind.Library, false, []), []) ?? panic("sealed output has no foreign binding")
+    assert(!sealed.native)
+}
+#Test("library_surface_empty_scalar_and_ascii_collision") {
+    assert_eq(library_validate_surface([])[0].code, "E1341")
+    assert_eq(library_validate_surface([SemaGuestFunction]{library_test_export("add", Val(SemaGuestScalar.Int))}).len(), 0)
+    diagnostics :: library_validate_surface([SemaGuestFunction]{library_test_export("aé", Val(SemaGuestScalar.Int)), library_test_export("a🙂", Val(SemaGuestScalar.Int))})
+    assert_eq(diagnostics.len(), 1)
+    assert(diagnostics[0].what.contains("same C symbol `a_`"))
+}
+#Test("library_generated_component_and_free_symbol_collisions") {
+    rich :: library_test_export("f", None)
+    occupied :: library_test_export("f_component", Val(SemaGuestScalar.Int))
+    before :: library_validate_surface([SemaGuestFunction]{occupied, rich})
+    assert_eq(before.len(), 1)
+    assert(before[0].what.contains("needs generated component symbol `f_component`"))
+    after :: library_validate_surface([SemaGuestFunction]{rich, occupied})
+    assert_eq(after.len(), 1)
+    assert(after[0].what.contains("same C symbol `f_component`"))
+    rich_free :: library_validate_surface([SemaGuestFunction]{rich, library_test_export("jet_component_free", Val(SemaGuestScalar.Int))})
+    assert_eq(rich_free.len(), 1)
+    assert(rich_free[0].what.contains("generated C symbol `jet_component_free`"))
+    text :: library_test_export("text", Val(SemaGuestScalar.Text))
+    text_free :: library_validate_surface([SemaGuestFunction]{text, library_test_export("jet_text_free", Val(SemaGuestScalar.Int))})
+    assert_eq(text_free.len(), 1)
+    assert(text_free[0].what.contains("generated C symbol `jet_text_free`"))
+    // Merely spelling a free symbol is legal when that allocator isn't needed.
+    assert_eq(library_validate_surface([SemaGuestFunction]{library_test_export("jet_text_free", Val(SemaGuestScalar.Int))}).len(), 0)
+}
+#Test("library_api_freeze_additions_allowed_changes_and_removals_ordered") {
+    first :: FrozenFn{name: "a", signature: "fn a() Int"}
+    second :: FrozenFn{name: "b", signature: "fn b() Int"}
+    prior :: library_test_snapshot([FrozenFn]{first, second})
+    assert_eq(library_snapshot_deltas(prior, library_test_snapshot([FrozenFn]{first, second, FrozenFn{name: "c", signature: "fn c() Int"}})).len(), 0)
+    current :: library_test_snapshot([FrozenFn]{FrozenFn{name: "b", signature: "fn b() String"}})
+    deltas :: library_snapshot_deltas(prior, current)
+    assert_eq(deltas.len(), 2)
+    assert_eq(deltas[0].code, "E1257")
+    assert(deltas[0].why.contains("export `a` was removed"))
+    assert(deltas[1].why.contains("export `b` changed from `fn b() Int` to `fn b() String`"))
+    assert_eq(library_snapshot_package_key("demo"), "library__demo")
+}
+#Test("library_declared_effects_use_original_core_usage_and_deduplicate") {
+    bundle :: library_test_bundle([String]{"__core_intrinsic::core.files::read", "__core_source::core.files::read", "not_core::core.files::read", "__core_source::malformed"})
+    effects :: jet_driver_library_declared_effects(bundle)
+    assert_eq(effects, [String]{"FS"})
+    assert_eq(jet_driver_library_declared_effects(library_test_bundle([])), [String]{})
+}

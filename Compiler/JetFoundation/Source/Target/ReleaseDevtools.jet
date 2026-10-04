@@ -30,3 +30,24 @@ pub struct JetReleaseDevtoolsPolicy {
     pub stream_code: Bool
     pub deployment: JetReleaseDevtoolsDeployment
 }
+
+// Rust Package/ReleaseDevtoolsPolicy.rs::ReleaseDevtoolsDeployment::default.
+pub fn pkg_release_deployment_default() -> JetReleaseDevtoolsDeployment Never! {
+    JetReleaseDevtoolsDeployment{enabled: false, token: None, allowlist: [JetReleaseDevtoolsNetwork]{}}
+}
+
+// Rust Package/ReleaseDevtoolsPolicy.rs::ReleaseDevtoolsPolicy::development.
+// The package parser and emitter consume this single canonical constructor.
+pub fn pkg_release_policy_development() -> JetReleaseDevtoolsPolicy Never! {
+    JetReleaseDevtoolsPolicy{
+        inspect: None,
+        endpoint: JetReleaseDevtoolsEndpoint.Absent,
+        authentication: JetReleaseDevtoolsAuthentication.BearerToken,
+        authority: JetReleaseDevtoolsAuthority.LoopbackOrAllowlist,
+        publication: JetReleaseDevtoolsPublication.SiteGated,
+        local_rail: true,
+        panel_code: true,
+        stream_code: true,
+        deployment: pkg_release_deployment_default(),
+    }
+}

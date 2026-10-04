@@ -1,0 +1,22 @@
+use jet_foundation.[MIRFrameIdentity, mir_frame_identity_canonical_text, mir_execution_identity_canonical_text, MIRPlaceID]
+
+#Test("source_frame_identity_preserves_exact_execution_function_block_and_sequence") {
+    execution :: source_resource_metadata_execution()
+    frame :: MIRFrameIdentity{schema_version: 1, execution: ~execution, function: MIRFunctionID{value: U64{7}}, block: None, sequence: U64{18446744073709551615}}
+    expected :: "mir-frame-identity:1;{mir_execution_identity_canonical_text(execution)};function:7;block:none;sequence:18446744073709551615;"
+    assert_eq(mir_frame_identity_canonical_text(frame), expected)
+    with_block :: MIRFrameIdentity{schema_version: 1, execution: ~execution, function: MIRFunctionID{value: U64{7}}, block: Val(MIRBlockID{value: U64{9}}), sequence: U64{0}}
+    expected_block :: "mir-frame-identity:1;{mir_execution_identity_canonical_text(execution)};function:7;block:9;sequence:0;"
+    assert_eq(mir_frame_identity_canonical_text(with_block), expected_block)
+}
+#Test("source_frame_words_stay_lossless_and_parameter_rows_stay_separate") {
+    execution :: source_resource_metadata_execution()
+    frame :: MIRFrameIdentity{schema_version: 1, execution: ~execution, function: MIRFunctionID{value: U64{7}}, block: None, sequence: U64{0}}
+    snapshot :: MIRFrameSnapshot{identity: frame, values: [MIRFrameValue]{MIRFrameValue{value: MIRValueID{value: U64{1}}, bits: U64{18446744073709551615}}}, places: [MIRFramePlace]{MIRFramePlace{place: MIRPlaceID{value: U64{2}}, bits: U64{9223372036854775808}}}}
+    assert_eq(snapshot.values[0].bits, U64{18446744073709551615})
+    assert_eq(snapshot.places[0].bits, U64{9223372036854775808})
+    schema :: MIRFrameSchema{execution: ~execution, function: MIRFunctionID{value: U64{7}}, params: [MIRValueID]{MIRValueID{value: U64{1}}}, values: [MIRValueID]{MIRValueID{value: U64{1}}, MIRValueID{value: U64{3}}}, places: [MIRPlaceID]{MIRPlaceID{value: U64{2}}}}
+    assert_eq(schema.params.len(), 1)
+    assert_eq(schema.values.len(), 2)
+    assert_eq(schema.places.len(), 1)
+}

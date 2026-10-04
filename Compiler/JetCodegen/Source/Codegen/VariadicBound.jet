@@ -1,0 +1,377 @@
+// PORT-PENDING 0541 crates-jet-codegen-src-codegen-utils-module-group: crates/jet-codegen/src/Codegen/VariadicBound.rs:1-373
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): trait-bounded heterogeneous variadic
+//RS //! parameters (`parts: ...Renderable` / `parts: ...[A, B]`).
+//RS //!
+//RS //! A trait-bounded variadic call is represented by a closed typed function
+//RS //! identity for each call-site arity (`user_log_all__va2`, ...). Call lowering
+//RS //! records concrete argument types under that identity. The definition-side
+//RS //! helper replaces the variadic parameter with one fresh generic parameter per
+//RS //! slot and unrolls the sema-approved body into an ordinary `Func` for the
+//RS //! existing TIR lowering path.
+//RS //!
+//RS //! Sema restricts the body to one top-level `loop x in parts { … }` loop
+//RS //! (`Sema/Registration.rs::check_variadic_bound_body_shape`, E1314). The
+//RS //! helper verifies that shape locally and fails loudly if sema's invariant is
+//RS //! violated. This feature adds no TIR node kinds.
+//RS 
+//RS use super::*;
+//RS use crate::AST::{Binding, Expr, ForKind, Func, Param, Stmt, Type, TypeParam};
+//RS 
+//RS /// D-ANY-JAI1: the per-arity specialized function name shared by call-site
+//RS /// routing and definition-side synthesis. Both derive the same closed typed
+//RS /// identity.
+//RS pub(crate) fn variadic_bound_fn_name(base: &str, arity: usize) -> String {
+//RS     format!("{base}__va{arity}")
+//RS }
+//RS 
+//RS /// D-ANY-JAI1: lower a call to a trait-bounded variadic function. Sema leaves
+//RS /// the trailing arguments as individual `call.args` entries past the fixed
+//RS /// prefix (`Sema/CheckerInfer/calls.rs::check_variadic_bound_tail`) — no
+//RS /// packed list, since a heterogeneous tail has no single element type a real
+//RS /// list literal could carry — so the arity is `call.args.len() - fixed`.
+//RS /// Records the concrete call shape in `cx.jit_generic_calls`, keyed by the
+//RS /// closed per-arity name consumed by TIR specialization.
+//RS pub(crate) fn lower_variadic_bound_call(
+//RS     call: &crate::AST::Call,
+//RS     fixed: usize,
+//RS     cx: &Cx,
+//RS     env: &mut crate::Codegen::TIR::LowerEnv,
+//RS ) -> crate::Codegen::TIR::TExpr {
+//RS     use crate::Codegen::TIR::{call_return_type, lower_one_call_arg, TExpr, TExprKind};
+//RS     let sig = cx.sigs.get(&call.name).cloned();
+//RS     let tail_convention = sig
+//RS         .as_ref()
+//RS         .and_then(|params| params.get(fixed))
+//RS         .map(|(convention, _)| *convention)
+//RS         .expect("trait-bounded variadic signature must retain its tail convention");
+//RS     let arity = call.args.len().saturating_sub(fixed);
+//RS     let args: Vec<crate::Codegen::TIR::TCallArg> = call
+//RS         .args
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(i, a)| {
+//RS             // Each synthetic tail slot keeps the original access convention
+//RS             // and gets a fresh generic type. Preserve that convention when
+//RS             // lowering each tail argument so its concrete type matches the
+//RS             // specialized slot.
+//RS             let conv = if i < fixed {
+//RS                 sig.as_ref()
+//RS                     .and_then(|ps| ps.get(i))
+//RS                     .map(|(c, t)| (*c, t.clone()))
+//RS             } else {
+//RS                 Some((tail_convention, Type::Named(format!("JaiVar{}", i - fixed))))
+//RS             };
+//RS             lower_one_call_arg(a, conv, env, cx)
+//RS         })
+//RS         .collect();
+//RS     cx.jit_generic_calls
+//RS         .borrow_mut()
+//RS         .entry(variadic_bound_fn_name(&call.name, arity))
+//RS         .or_default()
+//RS         .push(args.iter().map(|arg| arg.value.ty.clone()).collect());
+//RS     let ret = call_return_type(cx, &call.name);
+//RS     TExpr {
+//RS         ty: ret,
+//RS         kind: TExprKind::Call {
+//RS             name: variadic_bound_fn_name(&call.name, arity),
+//RS             type_args: Vec::new(),
+//RS             args,
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// D-ANY-JAI1: build the typed specialized `Func` for `f` (a trait-bounded
+//RS /// variadic function) at one call-site `arity` — `arity` fresh generic type
+//RS /// parameters (each bound to `bounds`) replace the trailing variadic parameter,
+//RS /// one per call-site argument, and the body's one legal
+//RS /// `loop x in <variadic> { … }` loop is unrolled to match.
+//RS pub(crate) fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usize) -> Func {
+//RS     let last = f
+//RS         .params
+//RS         .last()
+//RS         .expect("internal compiler error: trait-bounded variadic func has no trailing param (I2/D-ANY-JAI1)");
+//RS     let mut params: Vec<Param> = f.params[..f.params.len() - 1].to_vec();
+//RS     let mut type_params = f.type_params.clone();
+//RS     for i in 0..arity {
+//RS         let tname = format!("JaiVar{i}");
+//RS         type_params.push(TypeParam {
+//RS             name: tname.clone(),
+//RS             name_span: last.name_span,
+//RS             bounds: bounds.to_vec(),
+//RS             prep: None,
+//RS         });
+//RS         params.push(Param {
+//RS             convention: last.convention,
+//RS             root: false,
+//RS             name: variadic_slot_name(&last.name, i),
+//RS             name_span: last.name_span,
+//RS             ty: Type::Named(tname),
+//RS             ty_span: last.ty_span,
+//RS             default: None,
+//RS             variadic: false,
+//RS             variadic_bound_list: None,
+//RS             declared_view_from_names: None,
+//RS             public_label: None,
+//RS             zone: crate::AST::ParamZone::Either,
+//RS         });
+//RS     }
+//RS     let body = match unroll_variadic_body(&f.body, &last.name, arity) {
+//RS         Ok(body) => body,
+//RS         Err(msg) => jet_foundation::ice!(
+//RS             None,
+//RS             "trait-bounded variadic `{}` — {} — codegen only covers a \
+//RS              single top-level `loop x in {}` loop; sema's E1314 (Sema/Registration.rs::\
+//RS              check_variadic_bound_body_shape) should have rejected this body already (D-ANY-JAI1)",
+//RS             f.name,
+//RS             msg,
+//RS             last.name
+//RS         ),
+//RS     };
+//RS     Func {
+//RS         name: variadic_bound_fn_name(&f.name, arity),
+//RS         type_params,
+//RS         params,
+//RS         body,
+//RS         ..f.clone()
+//RS     }
+//RS }
+//RS 
+//RS fn variadic_slot_name(param_name: &str, i: usize) -> String {
+//RS     format!("{param_name}__va{i}")
+//RS }
+//RS 
+//RS /// D-ANY-JAI1: replace the (sema-guaranteed unique, top-level) `loop x in
+//RS /// target { … }` loop with `arity` unrolled copies, the loop variable rebound
+//RS /// to each synthetic slot (`variadic_slot_name`) in turn. `Err` names the
+//RS /// unsupported shape found — an internal-compiler-error backstop; sema's E1314
+//RS /// should already have rejected every case that reaches it, but this function
+//RS /// verifies the invariant locally and never silently lowers the wrong body (I2).
+//RS fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Vec<Stmt>, String> {
+//RS     let mut out = Vec::new();
+//RS     let mut seen_loop = false;
+//RS     for s in stmts {
+//RS         match s {
+//RS             Stmt::For {
+//RS                 var,
+//RS                 var_span,
+//RS                 var2: None,
+//RS                 kind: ForKind::In { collection, .. },
+//RS                 body,
+//RS                 label: None,
+//RS                 ..
+//RS             } if matches!(collection, Expr::Ident(n, _) if n == target) => {
+//RS                 if seen_loop {
+//RS                     return Err(format!("more than one `for … in {target}` loop"));
+//RS                 }
+//RS                 seen_loop = true;
+//RS                 for i in 0..arity {
+//RS                     out.push(Stmt::Val(Binding {
+//RS                         mutable: false,
+//RS                         markers: Vec::new(),
+//RS                         reactive_upgrade: false,
+//RS                         meta: None,
+//RS                         name: var.clone(),
+//RS                         name_span: *var_span,
+//RS                         sigil_span: None,
+//RS                         pattern: None,
+//RS                         ty: None,
+//RS                         ty_span: None,
+//RS                         init: Expr::Ident(variadic_slot_name(target, i), *var_span),
+//RS                         is_comptime: false,
+//RS                         ct: None,
+//RS                         uninit: false,
+//RS                         arena_view: false,
+//RS                         string_view: false,
+//RS                         gc_promotion: None,
+//RS                         gc_transferred: false,
+//RS                     }));
+//RS                     out.extend(body.clone());
+//RS                 }
+//RS             }
+//RS             _ => {
+//RS                 if stmt_references_ident(s, target) {
+//RS                     return Err(format!(
+//RS                         "`{target}` used outside a `loop x in {target} {{ … }}` loop"
+//RS                     ));
+//RS                 }
+//RS                 out.push(s.clone());
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS /// Best-effort (mirrors `Sema/Registration.rs::scan_stmt_for_variadic_uses`'s
+//RS /// coverage — not exhaustive over every `Stmt`/`Expr` variant) check for
+//RS /// whether `name` is referenced anywhere in `s`.
+//RS fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
+//RS     match s {
+//RS         Stmt::Expr(e) | Stmt::DeferClose { close: e, .. } | Stmt::Return(Some(e), _) => {
+//RS             expr_references_ident(e, name)
+//RS         }
+//RS         Stmt::Val(b) => expr_references_ident(&b.init, name),
+//RS         Stmt::Assign { target, value, .. } => {
+//RS             let target_hit = match target {
+//RS                 crate::AST::LValue::Index { base, index, .. } => {
+//RS                     expr_references_ident(base, name) || expr_references_ident(index, name)
+//RS                 }
+//RS                 crate::AST::LValue::Field { base, .. } => expr_references_ident(base, name),
+//RS                 crate::AST::LValue::Local { name: n, .. } => n == name,
+//RS             };
+//RS             target_hit || expr_references_ident(value, name)
+//RS         }
+//RS         Stmt::While { cond, body, .. } => {
+//RS             expr_references_ident(cond, name) || body.iter().any(|s| stmt_references_ident(s, name))
+//RS         }
+//RS         Stmt::For { kind, body, .. } => {
+//RS             let kind_hit = match kind {
+//RS                 ForKind::Range {
+//RS                     start,
+//RS                     end,
+//RS                     step,
+//RS                     exclusive: _,
+//RS                 } => {
+//RS                     expr_references_ident(start, name)
+//RS                         || expr_references_ident(end, name)
+//RS                         || step
+//RS                             .as_ref()
+//RS                             .is_some_and(|s| expr_references_ident(s, name))
+//RS                 }
+//RS                 ForKind::In { collection, step } => {
+//RS                     expr_references_ident(collection, name)
+//RS                         || step
+//RS                             .as_ref()
+//RS                             .is_some_and(|s| expr_references_ident(s, name))
+//RS                 }
+//RS             };
+//RS             kind_hit || body.iter().any(|s| stmt_references_ident(s, name))
+//RS         }
+//RS         Stmt::Switch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             expr_references_ident(subject, name)
+//RS                 || arms.iter().any(|a| {
+//RS                     expr_references_ident(&a.cond, name)
+//RS                         || a.body.iter().any(|s| stmt_references_ident(s, name))
+//RS                 })
+//RS                 || else_body
+//RS                     .as_ref()
+//RS                     .is_some_and(|b| b.iter().any(|s| stmt_references_ident(s, name)))
+//RS         }
+//RS         Stmt::Loop { body, .. } => body.iter().any(|s| stmt_references_ident(s, name)),
+//RS         Stmt::CountedLoop {
+//RS             init,
+//RS             cond,
+//RS             step,
+//RS             body,
+//RS             ..
+//RS         } => {
+//RS             expr_references_ident(&init.init, name)
+//RS                 || expr_references_ident(cond, name)
+//RS                 || step
+//RS                     .as_ref()
+//RS                     .is_some_and(|step| stmt_references_ident(step, name))
+//RS                 || body.iter().any(|s| stmt_references_ident(s, name))
+//RS         }
+//RS         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+//RS         Stmt::BreakLabel(_, _) | Stmt::ContinueLabel(_, _) => false,
+//RS         // reference so an unsupported-but-undetected body shape becomes a loud
+//RS         // internal-compiler-error, never silently-wrong lowering (I2).
+//RS         _ => true,
+//RS     }
+//RS }
+//RS 
+//RS fn expr_references_ident(e: &Expr, name: &str) -> bool {
+//RS     match e {
+//RS         Expr::Ident(n, _) => n == name,
+//RS         Expr::Call(c) => c.args.iter().any(|a| expr_references_ident(&a.expr, name)),
+//RS         Expr::MethodCall { receiver, args, .. } => {
+//RS             expr_references_ident(receiver, name)
+//RS                 || args.iter().any(|a| expr_references_ident(&a.expr, name))
+//RS         }
+//RS         Expr::CallValue { callee, args, .. } => {
+//RS             expr_references_ident(callee, name)
+//RS                 || args.iter().any(|a| expr_references_ident(&a.expr, name))
+//RS         }
+//RS         Expr::Binary(_, l, r, _) => {
+//RS             expr_references_ident(l, name) || expr_references_ident(r, name)
+//RS         }
+//RS         Expr::Unary(_, inner, _)
+//RS         | Expr::Field(inner, _, _)
+//RS         | Expr::Deref(inner, _)
+//RS         | Expr::RawOf(inner, _)
+//RS         | Expr::Copy(inner, _)
+//RS         | Expr::Place(inner, _, _)
+//RS         | Expr::Tainted(inner, _, _)
+//RS         | Expr::Present(inner, _)
+//RS         | Expr::Ok(inner, _)
+//RS         | Expr::Err(inner, _) => expr_references_ident(inner, name),
+//RS         Expr::Try(inner, _, _, note) => {
+//RS             expr_references_ident(inner, name)
+//RS                 || note
+//RS                     .as_deref()
+//RS                     .is_some_and(|note| expr_references_ident(note, name))
+//RS         }
+//RS         Expr::OptField { base, .. } => expr_references_ident(base, name),
+//RS         Expr::Index { base, index, .. } => {
+//RS             expr_references_ident(base, name) || expr_references_ident(index, name)
+//RS         }
+//RS         Expr::Slice {
+//RS             base,
+//RS             start,
+//RS             end,
+//RS             range,
+//RS             ..
+//RS         } => {
+//RS             expr_references_ident(base, name)
+//RS                 || range.as_deref().map_or_else(
+//RS                     || expr_references_ident(start, name) || expr_references_ident(end, name),
+//RS                     |range| expr_references_ident(range, name),
+//RS                 )
+//RS         }
+//RS         Expr::ListLit(items, _) => items.iter().any(|i| expr_references_ident(i, name)),
+//RS         Expr::MapLit(pairs, _) => pairs
+//RS             .iter()
+//RS             .any(|(k, v)| expr_references_ident(k, name) || expr_references_ident(v, name)),
+//RS         Expr::StructLit { fields, .. } => fields
+//RS             .iter()
+//RS             .any(|(_, _, v)| expr_references_ident(v, name)),
+//RS         Expr::TypedLit { body, .. } => {
+//RS             let mut hit = false;
+//RS             body.for_each_expr(|v| {
+//RS                 if expr_references_ident(v, name) {
+//RS                     hit = true;
+//RS                 }
+//RS             });
+//RS             hit
+//RS         }
+//RS         Expr::TupleLit(fields, _, _) => fields.iter().any(|(_, v)| expr_references_ident(v, name)),
+//RS         Expr::EnumLit { args, .. } => args.iter().any(|a| {
+//RS             let e = match a {
+//RS                 crate::AST::EnumLitArg::Positional(e) => e,
+//RS                 crate::AST::EnumLitArg::Named { expr, .. } => expr,
+//RS             };
+//RS             expr_references_ident(e, name)
+//RS         }),
+//RS         Expr::Str(parts, _) => parts.iter().any(|p| match p {
+//RS             crate::AST::StrPart::Interp(inner, _) => expr_references_ident(inner, name),
+//RS             crate::AST::StrPart::Lit(_) => false,
+//RS         }),
+//RS         Expr::Int(..)
+//RS         | Expr::Float(..)
+//RS         | Expr::Bool(..)
+//RS         | Expr::Char(..)
+//RS         | Expr::ReduceMarker(..) => false,
+//RS         // shape sema's E1314 somehow missed into a loud internal-compiler-error
+//RS         // instead of silently-wrong lowering (I2), so an over-eager panic is the
+//RS         // safe failure direction, never an under-eager "looks fine".
+//RS         _ => true,
+//RS     }
+//RS }
+// END-PORT-PENDING 0541 crates/jet-codegen/src/Codegen/VariadicBound.rs:1-373
+

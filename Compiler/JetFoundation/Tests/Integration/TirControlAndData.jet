@@ -1,0 +1,1824 @@
+// PORT-PENDING 1171 tests-tir-control-and-data-slice-1: tests/tir_control_and_data.rs:1-1820
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! TIR control and data integration tests.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use jet::Interpreter::{dev_iteration, RunOutcome};
+//RS use tir_support::{
+//RS     assert_tiers_agree, build_and_run, build_and_run_full, compile, have_rustc, jit_run,
+//RS };
+//RS 
+//RS const RESULT_HANDLER_PACKAGE: &str =
+//RS     "name: \"result_handler_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n";
+//RS 
+//RS /// D-RESULT-DECON2=B / I9: the compact handler is only parser sugar for the
+//RS /// existing Result pattern split, so every execution tier must agree without a
+//RS /// handler-specific runtime path.
+//RS #[test]
+//RS fn result_handler_reuses_result_split_on_all_tiers() {
+//RS     let src = r#"
+//RS fn classify(ok: Bool) -> Int {
+//RS     if ok { return 7 }
+//RS     return Err("bad")
+//RS }
+//RS 
+//RS fn run() -[IO]> {
+//RS     #FX(authority: IO) {
+//RS         authority.with("IO")
+//RS         classify(true) ? ok -> {
+//RS             print("ok")
+//RS             print(ok)
+//RS             0
+//RS         } ! _error -> {
+//RS             print("error")
+//RS             0
+//RS         }
+//RS         classify(false) ? ok -> {
+//RS             print("ok")
+//RS             print(ok)
+//RS             0
+//RS         } ! _error -> {
+//RS             print("error")
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree_with_application_policy(
+//RS         "result_handler_tiers",
+//RS         src,
+//RS         "ok\n7\nerror\n",
+//RS         RESULT_HANDLER_PACKAGE,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn result_handler_evaluates_effectful_receiver_once_on_all_tiers() {
+//RS     let src = r#"
+//RS fn classify(ok: Bool) -[IO]> Int {
+//RS     print("source")
+//RS     if ok { return 7 }
+//RS     return Err("bad")
+//RS }
+//RS 
+//RS fn run() -[IO]> {
+//RS     #FX(authority: IO) {
+//RS         authority.with("IO")
+//RS         classify(false) ? _ok -> print("ok") ! _error -> print("error")
+//RS     }
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree_with_application_policy(
+//RS         "result_handler_effectful_receiver",
+//RS         src,
+//RS         "source\nerror\n",
+//RS         RESULT_HANDLER_PACKAGE,
+//RS     );
+//RS }
+//RS 
+//RS /// D-RESULT-DECON2=B: a diverging arm keeps the ordinary exhaustive-chain
+//RS /// rule, so the surviving branch still has its value on every tier.
+//RS #[test]
+//RS fn result_handler_preserves_diverging_arm_on_all_tiers() {
+//RS     let src = r#"
+//RS fn choose(ok: Bool) -> Int {
+//RS     if ok { return 7 }
+//RS     return Err("bad")
+//RS }
+//RS 
+//RS fn run() {
+//RS     #FX(authority: IO) {
+//RS         authority.with("IO")
+//RS         result :: choose(true) ? ok -> ok + 1 ! _error -> return
+//RS         print(result)
+//RS     }
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree_with_application_policy(
+//RS         "result_handler_diverging",
+//RS         src,
+//RS         "8\n",
+//RS         RESULT_HANDLER_PACKAGE,
+//RS     );
+//RS }
+//RS 
+//RS /// D-RESULT-DECON2=B / I9: handler branches keep ordinary ownership, generic,
+//RS /// nested, and value semantics. The non-Copy String payload forces the AOT
+//RS /// path to consume the Result once, while the same source runs through JIT and
+//RS /// interpreter deopt without a handler-specific carrier.
+//RS #[test]
+//RS fn result_handler_preserves_ownership_generic_and_nested_values_on_all_tiers() {
+//RS     let src = r#"
+//RS fn choose<T>(value: ^T, ok: Bool) -> T {
+//RS     if ok { return value }
+//RS     return Err("bad")
+//RS }
+//RS 
+//RS fn choose_text(value: ^String, ok: Bool) -> String {
+//RS     if ok { return value }
+//RS     return Err("bad")
+//RS }
+//RS 
+//RS fn owned(ok: Bool) -> String {
+//RS     return choose_text("owned", ok) ? success -> success ! _failure -> "bad"
+//RS }
+//RS 
+//RS fn generic<T>(value: ^T, ok: Bool) -> T {
+//RS     return choose<T>(^value, ok) ? success -> success ! _failure -> return Err("bad")
+//RS }
+//RS 
+//RS fn nested(value: Int, ok: Bool) -> Int {
+//RS     return choose<Int>(^value, ok) ? success -> {
+//RS         choose<Int>(^success, ok) ? nested_success -> nested_success + 1 ! _nested_failure -> 0
+//RS     } ! _failure -> 0
+//RS }
+//RS 
+//RS fn run() {
+//RS     #FX(authority: IO) {
+//RS         authority.with("IO")
+//RS         print(owned(true))
+//RS         print(owned(false))
+//RS         print(generic(4, true) ? generic_value -> generic_value ! _generic_failure -> 0)
+//RS         print(nested(4, true))
+//RS         print(nested(4, false))
+//RS     }
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree_with_application_policy(
+//RS         "result_handler_ownership_generic_nested",
+//RS         src,
+//RS         "owned\nbad\n4\n5\n0\n",
+//RS         RESULT_HANDLER_PACKAGE,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn result_handler_example_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "errors/result_handler",
+//RS         include_str!("../Examples/features/expected/errors/result_handler.out"),
+//RS     );
+//RS 
+//RS     let source = include_str!("../Examples/features/errors/result_handler.jet");
+//RS     let (code, stdout, stderr) = tir_support::jit_run_traced("result_handler_example_jit", source);
+//RS     assert_eq!(
+//RS         code, 0,
+//RS         "default `jet run` failed for result_handler: {stderr}"
+//RS     );
+//RS     assert_eq!(
+//RS         stdout,
+//RS         include_str!("../Examples/features/expected/errors/result_handler.out")
+//RS     );
+//RS     assert!(
+//RS         stderr
+//RS             .lines()
+//RS             .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+//RS         "default `jet run` did not execute result_handler on the resident JIT: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS /// D-TAIL-RETURN1=A / I9: a braced function tail, value arm table, and
+//RS /// explicit early return all lower through the same checked block-value path.
+//RS #[test]
+//RS fn braced_value_tails_and_arm_tables_agree_on_all_tiers() {
+//RS     let src = r#"
+//RS fn label(value: Int) -> String {
+//RS     if value == {
+//RS         1 -> { "one" }
+//RS         else -> { "other" }
+//RS     }
+//RS }
+//RS 
+//RS fn early(flag: Bool) -> String {
+//RS     if flag { return "early" }
+//RS     "late"
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(label(1))
+//RS     print(label(2))
+//RS     print(early(true))
+//RS     print(early(false))
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("tail_return_values", src, "one\nother\nearly\nlate\n");
+//RS }
+//RS 
+//RS /// A terminating value branch must not make the surviving branch's value
+//RS /// disappear from the TIR merge type. The resident JIT and the other tiers
+//RS /// must preserve the live `Bool` branch.
+//RS #[test]
+//RS fn nested_return_if_keeps_live_value_branch_type() {
+//RS     let src = r#"
+//RS fn nested_return_if(value: DataTree, right: DataTree) -> Bool Never! {
+//RS     return if value == {
+//RS         .Text(left_text) -> {
+//RS             return if right == {
+//RS                 .Text(right_text) -> left_text == right_text
+//RS                 else -> false
+//RS             }
+//RS         }
+//RS         else -> true
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(nested_return_if(DataTree.Null, DataTree.Null))
+//RS }
+//RS "#;
+//RS     let (jit_code, jit_stdout, jit_stderr) =
+//RS         tir_support::jit_run_traced("nested_return_if_live_branch", src);
+//RS     assert_eq!(jit_code, 0, "{jit_stderr}");
+//RS     assert_eq!(jit_stdout, "true\n", "{jit_stderr}");
+//RS     assert!(
+//RS         jit_stderr
+//RS             .lines()
+//RS             .any(|line| line.starts_with("nested_return_if") && line.contains("tier1 native")),
+//RS         "nested return-if deoptimized instead of running on the resident JIT: {jit_stderr}"
+//RS     );
+//RS     assert!(
+//RS         !jit_stderr.contains("nested_return_if: tier0 interp"),
+//RS         "nested return-if fell back to the interpreter: {jit_stderr}"
+//RS     );
+//RS 
+//RS     let (interp_code, interp_stdout, interp_stderr) =
+//RS         tir_support::interpreter_run("nested_return_if_live_branch_interp", src);
+//RS     assert_eq!(interp_code, 0, "{interp_stderr}");
+//RS     assert_eq!(interp_stdout, jit_stdout);
+//RS 
+//RS     if have_rustc() {
+//RS         let (aot_code, aot_stdout, aot_stderr) =
+//RS             build_and_run_full("jet_tir_test", "nested_return_if_live_branch_aot", src);
+//RS         assert_eq!(aot_code, 0, "{aot_stderr}");
+//RS         assert_eq!(aot_stdout, jit_stdout);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn value_block_tails_report_unit_and_lint_old_arm_table_shape() {
+//RS     let invalid = r#"
+//RS fn semicolon() -> Int {
+//RS     1
+//RS }
+//RS 
+//RS fn declaration() -> Int {
+//RS     value :: 1
+//RS }
+//RS 
+//RS fn assignment() -> Int {
+//RS     value := 0
+//RS     value = 1
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics = tir_support::compile_source("tail_value_errors.jet", invalid)
+//RS         .expect_err("unit-valued tails must be rejected in value blocks");
+//RS     let missing_values: Vec<_> = diagnostics.iter().filter(|d| d.code == "E0114").collect();
+//RS     assert_eq!(missing_values.len(), 3, "diagnostics: {diagnostics:?}");
+//RS     assert!(missing_values
+//RS         .iter()
+//RS         .all(|diagnostic| diagnostic.span.is_some()));
+//RS 
+//RS     let lintable = r#"
+//RS fn label(value: Int) -> String {
+//RS     if value == {
+//RS         // Keep the arm comment.
+//RS         1 -> return /* keep value comment */ "one"
+//RS     }
+//RS     // Keep the fallback comment.
+//RS     return "other" // Keep the tail comment.
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let output = tir_support::compile_source("redundant_tail_return.jet", lintable)
+//RS         .expect("the old arm-table spelling should still compile");
+//RS     let lint = output
+//RS         .lints
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "L0513")
+//RS         .expect("the redundant arm-table fallback must be linted");
+//RS     let edit = lint.edit.as_ref().expect("L0513 must carry its source fix");
+//RS     let fixed = jet::FixEngine::apply_edits(lintable, std::slice::from_ref(edit))
+//RS         .expect("the generated L0513 edit must apply");
+//RS     assert!(
+//RS         fixed.contains("else -> { \"other\" }"),
+//RS         "fixed source:\n{fixed}"
+//RS     );
+//RS     assert!(
+//RS         fixed.contains("Keep the arm comment"),
+//RS         "fixed source:\n{fixed}"
+//RS     );
+//RS     assert!(
+//RS         fixed.contains("keep value comment"),
+//RS         "fixed source:\n{fixed}"
+//RS     );
+//RS     assert!(
+//RS         fixed.contains("Keep the fallback comment"),
+//RS         "fixed source:\n{fixed}"
+//RS     );
+//RS     assert!(
+//RS         fixed.contains("Keep the tail comment"),
+//RS         "fixed source:\n{fixed}"
+//RS     );
+//RS     assert!(!fixed.contains("return"), "fixed source:\n{fixed}");
+//RS 
+//RS     let semicolon_lintable = r#"
+//RS fn label(value: Int) -> String {
+//RS     if value == {
+//RS         1 -> return "one"
+//RS     }
+//RS     return "other"
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let semicolon_output =
+//RS         tir_support::compile_source("redundant_tail_return_semicolons.jet", semicolon_lintable)
+//RS             .expect("semicolon-terminated direct returns should still be lintable");
+//RS     let semicolon_lint = semicolon_output
+//RS         .lints
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "L0513")
+//RS         .expect("semicolon-shaped fallback must be linted");
+//RS     let semicolon_fixed = jet::FixEngine::apply_edits(
+//RS         semicolon_lintable,
+//RS         std::slice::from_ref(semicolon_lint.edit.as_ref().unwrap()),
+//RS     )
+//RS     .expect("the semicolon-shaped L0513 edit must apply");
+//RS     assert!(
+//RS         !semicolon_fixed.contains("return"),
+//RS         "fixed source:\n{semicolon_fixed}"
+//RS     );
+//RS     assert!(
+//RS         !semicolon_fixed.contains(';'),
+//RS         "fixed source:\n{semicolon_fixed}"
+//RS     );
+//RS     tir_support::compile_source(
+//RS         "redundant_tail_return_semicolons_fixed.jet",
+//RS         &semicolon_fixed,
+//RS     )
+//RS     .expect("the generated value table must compile after semicolon removal");
+//RS 
+//RS     let effectful = r#"
+//RS fn label(value: Int) -> String {
+//RS     if value == {
+//RS         1 -> {
+//RS             print("side")
+//RS             return "one"
+//RS         }
+//RS         else -> { return "other" }
+//RS     }
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let effectful_output = tir_support::compile_source("effectful_tail_return.jet", effectful)
+//RS         .expect("effectful arm-table source should compile");
+//RS     assert!(!effectful_output
+//RS         .lints
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.code == "L0513"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn value_blocks_keep_early_exits_and_reject_statement_tails() {
+//RS     let valid = r#"
+//RS fn choose(flag: Bool) -> Int {
+//RS     if flag -> { return 1 } else -> { 2 }
+//RS }
+//RS 
+//RS fn fallback(value: Int?) -> Int {
+//RS     value ?? { return 9 }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(choose(true))
+//RS     print(choose(false))
+//RS     print(fallback(None))
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("tail_return_nested_exits", valid, "1\n2\n9\n");
+//RS 
+//RS     for (name, source, expected_code) in [
+//RS         (
+//RS             "nested_statement_tail",
+//RS             r#"
+//RS fn nested(flag: Bool) -> Int {
+//RS     if {
+//RS         flag -> { print("side") }
+//RS         else -> { print("other") }
+//RS     }
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS             "E0114",
+//RS         ),
+//RS         (
+//RS             "nested_declaration",
+//RS             r#"
+//RS fn nested(flag: Bool) -> Int {
+//RS     if flag -> { value :: 1 } else -> { print("other") }
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS             // A declaration cannot begin the compact value branch, so the
+//RS             // parser rejects this shape before tail totality is checked.
+//RS             "E0003",
+//RS         ),
+//RS         (
+//RS             "fallback_statement_tail",
+//RS             r#"
+//RS fn fallback(value: Int?) -> Int {
+//RS     value ?? { print("side") }
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS             "E0114",
+//RS         ),
+//RS     ] {
+//RS         let diagnostics = tir_support::compile_source(name, source).expect_err(name);
+//RS         let diagnostic = diagnostics
+//RS             .iter()
+//RS             .find(|diagnostic| diagnostic.code == expected_code)
+//RS             .unwrap_or_else(|| panic!("{name} expected {expected_code}: {diagnostics:?}"));
+//RS         assert!(diagnostic.span.is_some(), "{name}: {diagnostics:?}");
+//RS     }
+//RS }
+//RS 
+//RS /// D-TAIL-RETURN1=A: divergence, unreachable source, nested value branches,
+//RS /// fallback blocks, and infinite loops do not invent a unit tail. A loop with
+//RS /// a reachable break remains a statement tail and keeps E0114 focused there.
+//RS #[test]
+//RS fn value_tail_divergence_and_loop_flow_are_deterministic() {
+//RS     let valid = r#"
+//RS fn nested(flag: Bool) -> Int {
+//RS     // Both nested branches leave without a value.
+//RS     if {
+//RS         flag -> { panic("then") }
+//RS         else -> { panic("else") }
+//RS     }
+//RS }
+//RS 
+//RS fn infinite() -> Int {
+//RS     loop {
+//RS         panic("stop")
+//RS     }
+//RS }
+//RS 
+//RS fn infinite_true() -> Int {
+//RS     loop true {
+//RS         next
+//RS     }
+//RS }
+//RS 
+//RS fn unreachable() -> Int {
+//RS     return 1
+//RS     print(2)
+//RS }
+//RS 
+//RS fn fallback(value: Int?) -> Int {
+//RS     value ?? {
+//RS         if {
+//RS             true -> { panic("missing") }
+//RS             else -> { panic("missing") }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn unit_panic() -> () {
+//RS     panic("unit")
+//RS }
+//RS 
+//RS fn unit_loop() -> () {
+//RS     loop {
+//RS         panic("unit")
+//RS     }
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     tir_support::compile_source("tail_divergence_valid.jet", valid)
+//RS         .expect("diverging and unreachable tails should compile");
+//RS 
+//RS     let finite = r#"
+//RS fn finite() -> Int {
+//RS     loop {
+//RS         break
+//RS     }
+//RS }
+//RS fn run() {}
+//RS "#;
+//RS     let diagnostics = tir_support::compile_source("tail_divergence_finite.jet", finite)
+//RS         .expect_err("a reachable loop break leaves a unit tail");
+//RS     let diagnostic = diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E0114")
+//RS         .expect("finite loop tail should report E0114");
+//RS     assert!(diagnostic.span.is_some(), "{diagnostics:?}");
+//RS }
+//RS 
+//RS /// D-FAIL-ERROR1=A: the labelled/string shape builds a default `Err` value;
+//RS /// one positional typed value in a result arm still wraps that value.
+//RS #[test]
+//RS fn default_err_value_and_typed_err_arm_have_distinct_shapes() {
+//RS     let src = r#"
+//RS fn make() -> Err {
+//RS     return Err("bad input", code: "E_BAD", cause: Err("root cause"))
+//RS }
+//RS 
+//RS fn typed(value: Err) {
+//RS     return Err(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     return typed(make())
+//RS }
+//RS "#;
+//RS     let rust = compile("tir_default_err_value", src);
+//RS     assert!(
+//RS         rust.contains("jet_err("),
+//RS         "default Err must call the Prelude constructor"
+//RS     );
+//RS     assert!(
+//RS         rust.contains("return Err("),
+//RS         "typed Err arm must remain a Result wrapper"
+//RS     );
+//RS }
+//RS 
+//RS /// D-FAIL-ERROR1=A / I9: the default `jet run` edge renders the same Prelude
+//RS /// value and cause chain as the AOT and standalone interpreter edges.
+//RS #[test]
+//RS fn default_err_value_runs_on_the_default_jit_edge() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     return Err("unhandled", code: "E_RUN", cause: Err("root"))
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = jit_run("tir_default_err_run", src);
+//RS     assert_eq!(stdout, "");
+//RS     assert_eq!(code, 1, "default `jet run` should return an unhandled Err");
+//RS     assert_eq!(stderr, "Error [E_RUN]: unhandled\n  cause: root\n");
+//RS }
+//RS 
+//RS /// A program exit cannot forge Jet's branded ICE status. Every native and
+//RS /// interpreter adapter calls the same Prelude projection.
+//RS #[test]
+//RS fn explicit_exit_101_maps_to_user_error_on_every_tier() {
+//RS     let src = r#"
+//RS use core.process as process
+//RS fn run() {
+//RS     process.exit(101)
+//RS }
+//RS "#;
+//RS     let (jit_code, jit_stdout, jit_stderr) = jit_run("tir_exit_101_jit", src);
+//RS     assert_eq!(
+//RS         (jit_code, jit_stdout.as_str(), jit_stderr.as_str()),
+//RS         (1, "", "")
+//RS     );
+//RS 
+//RS     let (interp_code, interp_stdout, interp_stderr) =
+//RS         tir_support::interpreter_run("tir_exit_101_interp", src);
+//RS     assert_eq!(
+//RS         (interp_code, interp_stdout.as_str(), interp_stderr.as_str()),
+//RS         (1, "", "")
+//RS     );
+//RS 
+//RS     if have_rustc() {
+//RS         let (aot_code, aot_stdout, aot_stderr) =
+//RS             build_and_run_full("jet_tir_exit", "reserved_101", src);
+//RS         assert_eq!(
+//RS             (aot_code, aot_stdout.as_str(), aot_stderr.as_str()),
+//RS             (1, "", "")
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// A `?` from one typed error into a wider union must stay native on the
+//RS /// resident JIT and produce the same value on the explicit interpreter.
+//RS #[test]
+//RS fn typed_error_union_widening_runs_on_jit_and_interpreter() {
+//RS     let src = r#"
+//RS #Error
+//RS enum NarrowError { Narrow }
+//RS #Error
+//RS enum OtherError { Other }
+//RS 
+//RS fn narrow() -> Int NarrowError! -> Err(NarrowError.Narrow)
+//RS 
+//RS fn widen() -> Int (NarrowError | OtherError)! -> narrow()
+//RS 
+//RS fn run() {
+//RS     print(widen() ?? 7)
+//RS }
+//RS "#;
+//RS     let (jit_code, jit_stdout, jit_stderr) =
+//RS         tir_support::jit_run_traced("tir_error_union_widen_jit", src);
+//RS     assert_eq!(jit_code, 0, "{jit_stderr}");
+//RS     assert_eq!(jit_stdout, "7\n");
+//RS     assert!(
+//RS         jit_stderr
+//RS             .lines()
+//RS             .any(|line| line.starts_with("widen") && line.contains("tier1 native")),
+//RS         "typed error widening deoptimized instead of running on the JIT: {jit_stderr}"
+//RS     );
+//RS     assert!(!jit_stderr.contains("widen: tier0 interp"), "{jit_stderr}");
+//RS 
+//RS     let (interp_code, interp_stdout, interp_stderr) =
+//RS         tir_support::interpreter_run("tir_error_union_widen_interp", src);
+//RS     assert_eq!(interp_code, 0, "{interp_stderr}");
+//RS     assert_eq!(interp_stdout, jit_stdout);
+//RS }
+//RS 
+//RS /// D-FAILURE-FOUNDATION1=A: a plain fallible call inserts the existing
+//RS /// propagation node in every value/statement shape; only `??` handles locally.
+//RS #[test]
+//RS fn implicit_failure_propagation_covers_call_positions() {
+//RS     let src = r#"
+//RS struct Holder {
+//RS     value: Int
+//RS 
+//RS     fn bump(self, by: Int) -> Int {
+//RS         return add(self.value + by)
+//RS     }
+//RS }
+//RS 
+//RS fn source(value: Int) -> Int {
+//RS     if value == 0 {
+//RS         return Err("source failed")
+//RS     }
+//RS     return value
+//RS }
+//RS 
+//RS fn add(value: Int) -> Int -> value + 1
+//RS 
+//RS fn is_zero(value: Int) -> Bool -> value == 0
+//RS 
+//RS fn argument(value: Int) -> Int {
+//RS     return add(source(value))
+//RS }
+//RS 
+//RS fn nested(value: Int) -> Int {
+//RS     return source(value) + 1
+//RS }
+//RS 
+//RS fn branch(value: Int) -> Int {
+//RS     if is_zero(value) {
+//RS         source(value)
+//RS     }
+//RS     return value
+//RS }
+//RS 
+//RS fn branch_value(value: Int) -> Int {
+//RS     return if is_zero(value) -> { source(value) } else -> { value + 1 }
+//RS }
+//RS 
+//RS fn closure(value: Int) -> Int {
+//RS     worker :: (n: Int) Int -> source(n) + 1
+//RS     return worker(value)
+//RS }
+//RS 
+//RS fn method(value: Int) -> Int {
+//RS     holder :: Holder{ value: source(value) }
+//RS     return add(holder.bump(1))
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(argument(2) ?? 0)
+//RS     print(nested(2) ?? 0)
+//RS     print(branch(0) ?? 99)
+//RS     print(closure(2) ?? 0)
+//RS     print(method(2) ?? 0)
+//RS     print(branch_value(0) ?? 99)
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree(
+//RS         "implicit_failure_propagation_positions",
+//RS         src,
+//RS         "3\n3\n99\n3\n5\n99\n",
+//RS     );
+//RS }
+//RS /// D-FAILURE-FOUNDATION1=A / #2266: a fallible callee nested inside a
+//RS /// collection callback projects its carrier onto the callback itself. The
+//RS /// callback must remain `Result`-returning on AOT, rather than leaving a `?`
+//RS /// inside a raw-return closure; default, JIT, and interpreter agree.
+//RS #[test]
+//RS fn implicit_failure_propagation_in_map_and_filter_callbacks() {
+//RS     let src = r#"
+//RS fn source(value: Int) -> Int {
+//RS     if value == 0 {
+//RS         return Err("source failed")
+//RS     }
+//RS     return value
+//RS }
+//RS 
+//RS fn source_flag(value: Int) -> Bool {
+//RS     if value == 0 {
+//RS         return Err("source failed")
+//RS     }
+//RS     return value > 1
+//RS }
+//RS 
+//RS fn add_one(value: Int) -> Int -> value + 1
+//RS fn retain_flag(value: Bool) -> Bool -> value
+//RS 
+//RS fn run() {
+//RS     values :: [1, 2]
+//RS     mapped :: values.map((value: Int) -> add_one(source(value))) ?? []
+//RS     filtered :: values.filter((value: Int) -> retain_flag(source_flag(value))) ?? []
+//RS     mapped_block :: values.map((value: Int) -> {
+//RS         add_one(source(value))
+//RS     }) ?? []
+//RS     filtered_block :: values.filter((value: Int) -> {
+//RS         retain_flag(source_flag(value))
+//RS     }) ?? []
+//RS     mapped_failed :: [0, 1].map((value: Int) -> {
+//RS         add_one(source(value))
+//RS     }) ?? []
+//RS     filtered_failed :: [0, 1].filter((value: Int) -> {
+//RS         retain_flag(source_flag(value))
+//RS     }) ?? []
+//RS     print(mapped[0])
+//RS     print(mapped[1])
+//RS     print(filtered.len())
+//RS     print(mapped_block[0])
+//RS     print(mapped_block[1])
+//RS     print(filtered_block.len())
+//RS     print(mapped_failed.len())
+//RS     print(filtered_failed.len())
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree(
+//RS         "implicit_failure_propagation_collection_callbacks",
+//RS         src,
+//RS         "2\n3\n1\n2\n3\n1\n0\n0\n",
+//RS     );
+//RS }
+//RS 
+//RS /// `?? panic(...)` must stay on the native tier and use the full shared rich
+//RS /// stop renderer, including source and scalar-local context.
+//RS #[test]
+//RS fn jit_or_fallback_panic_keeps_rich_context() {
+//RS     let src = r#"use core.process as process
+//RS fn run() {
+//RS     count :: process.argv().len()
+//RS     missing :: process.argv().get(count + 1)
+//RS     print(missing ?? panic("missing argument"))
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = tir_support::jit_run_traced("jit_fallback_panic", src);
+//RS     assert_eq!(code, 70, "rich panic exit: out={stdout} err={stderr}");
+//RS     assert!(stdout.is_empty(), "{stdout}");
+//RS     assert!(
+//RS         stderr
+//RS             .lines()
+//RS             .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+//RS         "panic fallback deoptimized: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("Stop [E3001]: `panic: missing argument`")
+//RS             && stderr.contains("jit_fallback_panic.jet:5 in run")
+//RS             && stderr.contains("print(missing ?? panic(\"missing argument\"))")
+//RS             && stderr.contains("count = "),
+//RS         "panic fallback lost rich context: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS /// An expert Index hook miss is one ordinary program-side E3001 stop on both
+//RS /// the default run path and the explicit evaluator.
+//RS #[test]
+//RS fn index_hook_miss_uses_the_structured_runtime_stop() {
+//RS     let src = r#"struct Tile {
+//RS     value: Int
+//RS }
+//RS struct Grid {
+//RS     cells: [Tile]
+//RS }
+//RS impl Grid.Index {
+//RS     type Key = Int
+//RS     type Value = Int
+//RS     fn get(self, key: Int) -> Int? {
+//RS         if key < 0 || key >= self.cells.len() -> return None
+//RS         return Val(self.cells[key].value)
+//RS     }
+//RS }
+//RS fn run() {
+//RS     grid :: Grid{cells: [Tile{value: 1}]}
+//RS     print(grid[9])
+//RS }
+//RS "#;
+//RS     for (tier, (code, stdout, stderr)) in [
+//RS         ("default", tir_support::jit_run("index_hook_miss_jit", src)),
+//RS         (
+//RS             "interpreter",
+//RS             tir_support::interpreter_run("index_hook_miss_interp", src),
+//RS         ),
+//RS     ] {
+//RS         assert_eq!(code, 70, "{tier}: out={stdout} err={stderr}");
+//RS         assert!(stdout.is_empty(), "{tier}: {stdout}");
+//RS         assert!(
+//RS             stderr.contains("Stop [E3001]: `panic: index miss`")
+//RS                 && stderr.contains("print(grid[9])")
+//RS                 && stderr.contains("in run"),
+//RS             "{tier}: {stderr}"
+//RS         );
+//RS         assert!(!stderr.contains("unsupported"), "{tier}: {stderr}");
+//RS     }
+//RS }
+//RS 
+//RS /// D-CALLVALUE1=B / I9: the named returned-function example exercises the
+//RS /// canonical `.call(...)` projection through AOT, default `jet run`, and the
+//RS /// forced interpreter against one checked-in byte oracle.
+//RS #[test]
+//RS fn returned_function_call_example_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "functions/returned_function_call",
+//RS         include_str!("../Examples/features/expected/functions/returned_function_call.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// D-CALLVALUE1=B / I9: a named function value with declaration-local
+//RS /// parameter names keeps the same callable behavior on release AOT, default
+//RS /// JIT, and the forced interpreter.
+//RS #[test]
+//RS fn named_function_value_example_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "functions/named_function_value",
+//RS         include_str!("../Examples/features/expected/functions/named_function_value.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// D-STDLIB-OPTPARAM1=A / #2310 / I9: every signed, endian, and
+//RS /// floating-point Bytes writer has one canonical sibling spelling and one
+//RS /// byte oracle on release AOT, default `jet run`, and the forced interpreter.
+//RS #[test]
+//RS fn binary_codec_writer_example_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "parsing/binary-codecs",
+//RS         include_str!("../Examples/features/expected/parsing/binary-codecs.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// D-CALLABLE-ONE1=A / D-BODY-LAST1=B / D-SIG-SHAPE1=B / D-LOOP-STMT-ARROW1=C / I9:
+//RS /// the body-rule example
+//RS /// produces byte-identical output through AOT, default `jet run`, and the
+//RS /// forced interpreter.
+//RS #[test]
+//RS fn body_rules_example_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "basics/body_rules",
+//RS         include_str!("../Examples/features/expected/basics/body_rules.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// D-ERRSUFFIX1=B / I9: the fallible type spelling produces one output on
+//RS /// release AOT, default `jet run`, and the forced interpreter.
+//RS #[test]
+//RS fn fallible_type_spelling_example_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "errors/fallible_run",
+//RS         include_str!("../Examples/features/expected/errors/fallible_run.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// D-LOOP-SUBJECT1=A / I9: bindingless collection loops use their item as the
+//RS /// implicit subject, while the scalar example keeps its explicit binding.
+//RS #[test]
+//RS fn bindingless_loop_example_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "basics/loop_bindingless",
+//RS         include_str!("../Examples/features/expected/basics/loop_bindingless.out"),
+//RS     );
+//RS 
+//RS     let path = format!(
+//RS         "{}/Examples/features/basics/loop_bindingless.jet",
+//RS         env!("CARGO_MANIFEST_DIR")
+//RS     );
+//RS     match dev_iteration(&path, false, true) {
+//RS         RunOutcome::Ran {
+//RS             exit_code,
+//RS             stdout,
+//RS             stderr,
+//RS         } => {
+//RS             assert_eq!(exit_code, 0);
+//RS             assert_eq!(
+//RS                 stdout,
+//RS                 include_str!("../Examples/features/expected/basics/loop_bindingless.out")
+//RS             );
+//RS             assert_eq!(stderr, "");
+//RS         }
+//RS         RunOutcome::Problems(diagnostics) => {
+//RS             panic!("forced interpreter rejected bindingless loop example: {diagnostics:?}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-LOOP-GUARD1 / D-LOOP-SUBJECT1 / D-SUBJECT-CALL1 / I9: named guards,
+//RS /// bindingless subjects, and call-chain shorthand share one result across AOT,
+//RS /// default `jet run`, and the forced interpreter.
+//RS #[test]
+//RS fn comprehension_forms_example_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "basics/comprehension_forms",
+//RS         include_str!("../Examples/features/expected/basics/comprehension_forms.out"),
+//RS     );
+//RS 
+//RS     let path = format!(
+//RS         "{}/Examples/features/basics/comprehension_forms.jet",
+//RS         env!("CARGO_MANIFEST_DIR")
+//RS     );
+//RS     match dev_iteration(&path, false, true) {
+//RS         RunOutcome::Ran {
+//RS             exit_code,
+//RS             stdout,
+//RS             stderr,
+//RS         } => {
+//RS             assert_eq!(exit_code, 0);
+//RS             assert_eq!(
+//RS                 stdout,
+//RS                 include_str!("../Examples/features/expected/basics/comprehension_forms.out")
+//RS             );
+//RS             assert_eq!(stderr, "");
+//RS         }
+//RS         RunOutcome::Problems(diagnostics) => {
+//RS             panic!("forced interpreter rejected comprehension forms example: {diagnostics:?}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-LOOP-GUARD1 / I9: the loop-values example keeps its guarded yielding loop
+//RS /// byte-identical through AOT, default `jet run`, and forced interpretation.
+//RS #[test]
+//RS fn loop_values_example_matches_all_execution_tiers() {
+//RS     let expected = include_str!("../Examples/features/expected/basics/loop_values.out");
+//RS     tir_support::assert_example_cli_tiers_agree("basics/loop_values", expected);
+//RS 
+//RS     let path = format!(
+//RS         "{}/Examples/features/basics/loop_values.jet",
+//RS         env!("CARGO_MANIFEST_DIR")
+//RS     );
+//RS     match dev_iteration(&path, false, true) {
+//RS         RunOutcome::Ran {
+//RS             exit_code,
+//RS             stdout,
+//RS             stderr,
+//RS         } => {
+//RS             assert_eq!(exit_code, 0);
+//RS             assert_eq!(stdout, expected);
+//RS             assert_eq!(stderr, "");
+//RS         }
+//RS         RunOutcome::Problems(diagnostics) => {
+//RS             panic!("forced interpreter rejected loop_values example: {diagnostics:?}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-CONC-CHAN1 / D-CONC-CHAN2 / I9: plain-endpoint readiness tables, task
+//RS /// waits, and the one Duration time rail agree on AOT, default `jet run`, and
+//RS /// the forced interpreter against the executable example oracle.
+//RS #[test]
+//RS fn channel_select_examples_match_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "concurrency/select_channel",
+//RS         include_str!("../Examples/features/expected/concurrency/select_channel.out"),
+//RS     );
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "concurrency/select_generic",
+//RS         include_str!("../Examples/features/expected/concurrency/select_generic.out"),
+//RS     );
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "concurrency/channel_builtin_1560",
+//RS         include_str!("../Examples/features/expected/concurrency/channel_builtin_1560.out"),
+//RS     );
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "concurrency/task_runtime_audit",
+//RS         include_str!("../Examples/features/expected/concurrency/task_runtime_audit.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// D-CONC-FAIL1 / D-OBSERVE-TASK1 / I9: child failure identity and the
+//RS /// bounded parked-task report agree across debug AOT, release AOT, default
+//RS /// `jet run`, and the forced interpreter.
+//RS #[test]
+//RS fn task_observation_examples_match_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "concurrency/task_panic",
+//RS         70,
+//RS         include_str!("../Examples/features/expected/concurrency/task_panic.err.out"),
+//RS     );
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "concurrency/task_blocked",
+//RS         70,
+//RS         include_str!("../Examples/features/expected/concurrency/task_blocked.err.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// D-FAIL-EXIT1=A / I9: the default-fallible entry keeps its journey and exit
+//RS /// code byte-identical on debug AOT, default jet run, and the interpreter.
+//RS #[test]
+//RS fn default_entry_error_golden_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "errors/default_error_conversion",
+//RS         1,
+//RS         include_str!("../Examples/features/expected/errors/default_error_conversion.err.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// I9: an uncaught `[FieldError]` entry failure renders through the one
+//RS /// Prelude FieldError projection (`print(errors)` text) on debug/release AOT,
+//RS /// default `jet run`, and the interpreter. Resident JIT printed the structural
+//RS /// `[FieldError { path: … }]` form and AOT ICE'd on the row-less list carrier.
+//RS #[test]
+//RS fn field_error_entry_golden_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "serde/decode_error_exit",
+//RS         1,
+//RS         include_str!("../Examples/features/expected/serde/decode_error_exit.err.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// D-FAIL-CTX1=A / I9: the `?`-propagation trail is one byte oracle across
+//RS /// debug AOT, `--release`, default `jet run`, and the forced interpreter. The
+//RS /// interpreter printed `Error: file not found` with NO trail while the other
+//RS /// three printed three hops, because the evaluator records each hop on its own
+//RS /// worker thread and the report edge drained the caller's empty journey. No
+//RS /// per-stem battery named this example, so the divergence sat in the shipped
+//RS /// binary: the trail's own example now names every lens.
+//RS #[test]
+//RS fn propagation_trail_golden_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "errors/error_context",
+//RS         1,
+//RS         include_str!("../Examples/features/expected/errors/error_context.err.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// D-FAIL-BREACH1 / I9: the checked-in runtime-stop reports are one byte oracle
+//RS /// across AOT, default `jet run`, and the forced interpreter. Keep one example
+//RS /// for each shipped stop kind so exit 101 or a second renderer cannot hide in a
+//RS /// single tier.
+//RS #[test]
+//RS fn runtime_stop_goldens_match_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "collections/list_bounds",
+//RS         70,
+//RS         include_str!("../Examples/features/expected/collections/list_bounds.err.out"),
+//RS     );
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "collections/map_key",
+//RS         70,
+//RS         include_str!("../Examples/features/expected/collections/map_key.err.out"),
+//RS     );
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "errors/panic",
+//RS         70,
+//RS         include_str!("../Examples/features/expected/errors/panic.err.out"),
+//RS     );
+//RS     // #1967: the `??` right side is a stop too. `assert_example_cli_error_tiers_agree`
+//RS     // requires EMPTY stdout, so a tier that reports the panic without ending the
+//RS     // program fails here on the unreachable `print` — that is the whole point of
+//RS     // this stem, and why `errors/panic` alone did not catch it.
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "errors/qq_panic",
+//RS         70,
+//RS         include_str!("../Examples/features/expected/errors/qq_panic.err.out"),
+//RS     );
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "errors/stack_overflow",
+//RS         70,
+//RS         include_str!("../Examples/features/expected/errors/stack_overflow.err.out"),
+//RS     );
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "errors/todo_stop",
+//RS         70,
+//RS         include_str!("../Examples/features/expected/errors/todo_stop.err.out"),
+//RS     );
+//RS     tir_support::assert_example_cli_error_tiers_agree(
+//RS         "errors/u8_divide_zero",
+//RS         70,
+//RS         include_str!("../Examples/features/expected/errors/u8_divide_zero.err.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// D-FAIL-EXIT1=A: explicit process termination unwinds Jet cleanup in the
+//RS /// documented order before returning its requested code.
+//RS #[test]
+//RS fn explicit_process_exit_cleanup_golden_matches_all_execution_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree_with_package(
+//RS         "io/process_exit_cleanup",
+//RS         Some(
+//RS             r#"
+//RS name: "process-exit-cleanup"
+//RS version: "0.1.0"
+//RS authority: {
+//RS     holds: {
+//RS         allow: [Env, Exec, IO]
+//RS     }
+//RS }
+//RS "#,
+//RS         ),
+//RS         |actual| {
+//RS             assert_eq!(
+//RS                 actual,
+//RS                 include_str!("../Examples/features/expected/io/process_exit_cleanup.out")
+//RS             );
+//RS         },
+//RS     );
+//RS }
+//RS 
+//RS /// Arithmetic + a helper call + interpolation. The helper `double` and `main`
+//RS /// are both fully covered, so both route through the TIR.
+//RS #[test]
+//RS fn arithmetic_and_helper_call() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn double(n: Int) -> Int {
+//RS     return (n * 2)
+//RS }
+//RS fn run() {
+//RS     sum :: (7 + (3 * 4))
+//RS     print(\"sum {sum}\")
+//RS     print(double(sum))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_arith", src);
+//RS     assert_eq!(code, 0, "should exit cleanly");
+//RS     assert_eq!(stdout, "sum 19\n38\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn range_value_windows_are_no_copy_and_write_through() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     values := [10, 20, 30, 40, 50]
+//RS     band :: 1..<4
+//RS     window :: values[band]
+//RS     print(~window)
+//RS     edit :: &values[band]
+//RS     edit[1] = 99
+//RS     print(values)
+//RS }
+//RS "#;
+//RS     let rust = compile("tir_range_value_windows", src);
+//RS     assert!(
+//RS         rust.contains("let __jet_window = jet_view_range_new"),
+//RS         "bare Range projection must borrow without copying: {rust}"
+//RS     );
+//RS     assert!(
+//RS         rust.contains("let __jet_edit = jet_view_mut_range_new"),
+//RS         "write Range projection must borrow the owner: {rust}"
+//RS     );
+//RS     let (code, stdout) = build_and_run("tir_range_value_windows", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "[20, 30, 40]\n[10, 20, 99, 40, 50]\n");
+//RS }
+//RS 
+//RS /// An if-expression (S68) bound to a local, plus a String param helper.
+//RS #[test]
+//RS fn if_expression_and_string_param() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn shout(s: String) -> String {
+//RS     return \"{s}!\"
+//RS }
+//RS fn run() {
+//RS     n :: 7
+//RS     parity :: if ((n % 2) == 0) -> \"even\" else -> \"odd\"
+//RS     print(shout(parity))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_ifexpr", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "odd!\n");
+//RS }
+//RS 
+//RS /// Statement-form if / else-if / else with a returning helper — mirrors the
+//RS /// shape of Examples/features/basics/fizzbuzz.jet's `label`.
+//RS #[test]
+//RS fn if_else_chain_and_return() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn label(n: Int) -> String {
+//RS     if ((n % 15) == 0) {
+//RS         return \"FizzBuzz\"
+//RS     } else if ((n % 3) == 0) {
+//RS         return \"Fizz\"
+//RS     } else if ((n % 5) == 0) {
+//RS         return \"Buzz\"
+//RS     }
+//RS     return \"{n}\"
+//RS }
+//RS fn run() {
+//RS     print(label(3))
+//RS     print(label(5))
+//RS     print(label(15))
+//RS     print(label(7))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_ifchain", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "Fizz\nBuzz\nFizzBuzz\n7\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn discarded_if_does_not_unify_mixed_tail_values() {
+//RS     let src = r#"
+//RS fn branch(flag: Bool) -[IO]> {
+//RS     if {
+//RS         flag -> {
+//RS             print("returned")
+//RS             7
+//RS         }
+//RS         else -> { print("value") }
+//RS     }
+//RS }
+//RS 
+//RS fn run() -[IO]> {
+//RS     #FX(authority: IO) {
+//RS         authority.with("IO")
+//RS         branch(true)
+//RS         branch(false)
+//RS     }
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree_with_application_policy(
+//RS         "discarded_if_mixed_tails",
+//RS         src,
+//RS         "returned\nvalue\n",
+//RS         RESULT_HANDLER_PACKAGE,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn discarded_if_without_else_falls_through() {
+//RS     let src = r#"
+//RS fn branch(flag: Bool) -[IO]> {
+//RS     if flag {
+//RS         print("inside")
+//RS     }
+//RS     print("after")
+//RS }
+//RS 
+//RS fn run() -[IO]> {
+//RS     #FX(authority: IO) {
+//RS         authority.with("IO")
+//RS         branch(false)
+//RS         branch(true)
+//RS     }
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree_with_application_policy(
+//RS         "discarded_if_without_else",
+//RS         src,
+//RS         "after\ninside\nafter\n",
+//RS         RESULT_HANDLER_PACKAGE,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn parenthesized_discarded_if_matches_direct_form() {
+//RS     let src = r#"
+//RS fn branch(flag: Bool) -[IO]> {
+//RS     (if {
+//RS         flag -> {
+//RS             print("paren-returned")
+//RS             11
+//RS         }
+//RS         else -> { print("paren-value") }
+//RS     })
+//RS }
+//RS 
+//RS fn run() -[IO]> {
+//RS     #FX(authority: IO) {
+//RS         authority.with("IO")
+//RS         branch(true)
+//RS         branch(false)
+//RS     }
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree_with_application_policy(
+//RS         "parenthesized_discarded_if",
+//RS         src,
+//RS         "paren-returned\nparen-value\n",
+//RS         RESULT_HANDLER_PACKAGE,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn discarded_result_handler_evaluates_subject_once_without_tail_unification() {
+//RS     let src = r#"
+//RS fn classify(ok: Bool) -[IO]> Int {
+//RS     print("subject")
+//RS     if ok {
+//RS         return 5
+//RS     }
+//RS     return Err("bad")
+//RS }
+//RS 
+//RS fn handle(ok: Bool) -[IO]> {
+//RS         classify(ok) ? _success -> { print("success") } ! _failure -> {
+//RS             print("failure")
+//RS             9
+//RS         }
+//RS }
+//RS 
+//RS fn run() -[IO]> {
+//RS     #FX(authority: IO) {
+//RS         authority.with("IO")
+//RS         handle(true)
+//RS         handle(false)
+//RS     }
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree_with_application_policy(
+//RS         "discarded_result_handler_mixed_tails",
+//RS         src,
+//RS         "subject\nsuccess\nsubject\nfailure\n",
+//RS         RESULT_HANDLER_PACKAGE,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn deep_discarded_else_if_chain_stays_iterative() {
+//RS     let mut src = String::from("fn deep(flag: Bool) -[IO]> {\n    ");
+//RS     for _ in 0..48 {
+//RS         src.push_str("if { flag -> print(\"stop\") else -> ");
+//RS     }
+//RS     src.push_str(
+//RS         r#"print("deep-tail")"#,
+//RS     );
+//RS     for _ in 0..48 {
+//RS         src.push_str(" }");
+//RS     }
+//RS     src.push_str(
+//RS         r#"
+//RS }
+//RS 
+//RS fn run() -[IO]> {
+//RS     #FX(authority: IO) {
+//RS         authority.with("IO")
+//RS         deep(true)
+//RS         deep(false)
+//RS     }
+//RS }
+//RS "#,
+//RS     );
+//RS     tir_support::assert_tiers_agree_with_application_policy(
+//RS         "deep_discarded_else_if_chain",
+//RS         &src,
+//RS         "stop\ndeep-tail\n",
+//RS         RESULT_HANDLER_PACKAGE,
+//RS     );
+//RS }
+//RS 
+//RS /// D-IFGUARD1=A: statement/value guards share ordered `if` lowering. Heads run
+//RS /// once, stop at the first match, preserve Boolean short-circuiting, and an
+//RS /// unmatched statement table performs no action.
+//RS #[test]
+//RS fn subjectless_guards_order_totality_and_nested_forms() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn check(note: String, answer: Bool) -> Bool {
+//RS     print(note)
+//RS     return answer
+//RS }
+//RS 
+//RS fn run() {
+//RS     if {
+//RS         check("first", false) -> print("wrong")
+//RS         check("second", true) -> {
+//RS             print("chosen")
+//RS             if true -> print("nested")
+//RS         }
+//RS         check("never", true) -> print("wrong")
+//RS     }
+//RS     if {
+//RS         false && check("short-circuited", true) -> print("wrong")
+//RS     }
+//RS     label :: if {
+//RS         false -> "wrong"
+//RS         true -> "value"
+//RS         else -> "fallback"
+//RS     }
+//RS     print(label)
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("tir_subjectless_guards", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "first\nsecond\nchosen\nnested\nvalue\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn subjectless_guard_pattern_bindings_dominate_selected_body() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS enum Choice {
+//RS     A(Int)
+//RS     B(Int)
+//RS }
+//RS 
+//RS fn choose(note: String, value: Int) -> Choice {
+//RS     print(note)
+//RS     return Choice.A(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     left :: Choice.A(4)
+//RS     right :: Choice.A(6)
+//RS     if choose("first only", 4) == .B(x) && choose("never", 6) == .A(y) && x < y -> print("wrong")
+//RS     if {
+//RS         left == .A(x) && right == .A(y) && x < y -> print("table {x} {y}")
+//RS         left == .B(_) -> print(0)
+//RS     }
+//RS     if choose("left", 4) == .A(x) && choose("right", 6) == .A(y) && x < y -> print("inline {x} {y}")
+//RS     if true && left == .A(n) -> print("pre {n}")
+//RS     label :: if {
+//RS         left == .A(x) && right == .A(y) && x < y -> "value {x} {y}"
+//RS         else -> "other"
+//RS     }
+//RS     print(label)
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("tir_subjectless_guard_patterns", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "first only\ntable 4 6\nleft\nright\ninline 4 6\npre 4\nvalue 4 6\n"
+//RS     );
+//RS }
+//RS 
+//RS /// Coexistence: a free function and a method in the same program both route
+//RS /// through the executable TIR. A construct outside TIR coverage is an ICE gate,
+//RS /// not a legacy AST fallback.
+//RS #[test]
+//RS fn tir_function_and_method_coexist() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS struct Counter {
+//RS     n: Int
+//RS }
+//RS impl Counter {
+//RS     fn bumped(self) -> Int {
+//RS         return (self.n + 1)
+//RS     }
+//RS }
+//RS fn add(a: Int, b: Int) -> Int {
+//RS     return (a + b)
+//RS }
+//RS fn run() {
+//RS     c :: Counter{ n: 41 }
+//RS     print(add(c.bumped(), 0))
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_coexist", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "42\n");
+//RS }
+//RS 
+//RS /// Fixed-width integer overflow must still trap when the function is on the
+//RS /// TIR path (the `overflow` flag is computed at lowering, not in codegen).
+//RS #[test]
+//RS fn overflow_still_traps_on_tir_path() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS a :: U8{ 200 }
+//RS b :: U8{ 100 }
+//RS     print(a + b)
+//RS }
+//RS ";
+//RS     let (code, _stdout) = build_and_run("tir_overflow", src);
+//RS     assert_eq!(code, 70, "U8 overflow should trap (exit 70)");
+//RS }
+//RS 
+//RS #[test]
+//RS fn unrelated_codable_does_not_require_union_codecs() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS struct Raw {
+//RS     value: Int
+//RS }
+//RS 
+//RS fn hold(value: Int | Raw) -> Int | Raw {
+//RS     return ~value
+//RS }
+//RS 
+//RS #Codable
+//RS struct Encoded {
+//RS     value: Int
+//RS }
+//RS 
+//RS fn run() {
+//RS     raw :: Raw{ value: 7 }
+//RS     _ :: hold(raw)
+//RS     print("ok")
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("union_unrelated_codable", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "ok\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn union_codec_emission_respects_derive_direction() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS use core.encoding.json as json
+//RS 
+//RS struct WriteOnly {
+//RS     marker: Int
+//RS }
+//RS 
+//RS impl WriteOnly.Encode {
+//RS     fn encode(self) -> DataTree {
+//RS         return DataTree.Text("write")
+//RS     }
+//RS }
+//RS 
+//RS #Encode
+//RS struct Output {
+//RS     value: Int | WriteOnly
+//RS }
+//RS 
+//RS #Decode
+//RS struct ReadOnly {
+//RS     marker: Int
+//RS }
+//RS 
+//RS #Decode
+//RS struct Input {
+//RS     value: Int | ReadOnly
+//RS }
+//RS 
+//RS fn run() {
+//RS     output :: Output{ value: WriteOnly{ marker: 1 } }
+//RS     print(json.to_string(output))
+//RS     _ :: json.decode<Input>("{{\"value\":7}}") ?? panic("input")
+//RS     print("ok")
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("union_codec_direction", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "{\"value\":\"write\"}\nok\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn optional_union_null_and_enum_payload_round_trip() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS use core.encoding.json as json
+//RS 
+//RS #Codable
+//RS struct MaybeRow {
+//RS     value: Int? | String
+//RS }
+//RS 
+//RS #Codable
+//RS enum Envelope {
+//RS     Value(Int | String)
+//RS }
+//RS 
+//RS fn run() {
+//RS     decoded :: json.decode<MaybeRow>("{{\"value\":null}}") ?? panic("row")
+//RS     print(json.to_string(decoded))
+//RS 
+//RS     envelope :: Envelope.Value(7)
+//RS     envelope_wire :: json.to_string(envelope)
+//RS     print(envelope_wire)
+//RS     back :: json.decode<Envelope>(envelope_wire) ?? panic("envelope")
+//RS     print(json.to_string(back))
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("union_codable_roundtrip", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "{\"value\":null}\n{\"Value\":7}\n{\"Value\":7}\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn codable_union_distinct_member_uses_base_wire_shape() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS use core.encoding.json as json
+//RS 
+//RS #CodableAsBase
+//RS Usd :: distinct Int
+//RS 
+//RS #Codable
+//RS struct Row {
+//RS     value: Usd | String
+//RS }
+//RS 
+//RS fn run() {
+//RS     row :: Row{ value: Usd.from_int(7) }
+//RS     wire :: json.to_string(row)
+//RS     print(wire)
+//RS     decoded :: json.decode<Row>(wire) ?? panic("row")
+//RS     decoded_value :: decoded.value
+//RS     if decoded_value == {
+//RS         .Usd(value) -> print(value.raw())
+//RS         .String(value) -> print(value)
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("union_codable_distinct", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "{\"value\":7}\n7\n");
+//RS }
+//RS 
+//RS // --- c109 Phase 2: control-flow loops ---------------------------------------
+//RS 
+//RS /// Infinite `loop { … }` with a `break`, plus the `loop cond` while form. Both
+//RS /// loop kinds in plus a compound assign and an if inside, route through the TIR.
+//RS #[test]
+//RS fn infinite_and_while_loops() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     x := 0
+//RS     loop {
+//RS         x = (x + 1)
+//RS         if (x == 3) {
+//RS             break
+//RS         }
+//RS     }
+//RS     print(x)
+//RS     fuel := 3
+//RS     loop fuel > 0 {
+//RS         print(\"t-minus {fuel}\")
+//RS         fuel-= 1
+//RS     }
+//RS     print(\"liftoff\")
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_loops", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "3\nt-minus 3\nt-minus 2\nt-minus 1\nliftoff\n");
+//RS }
+//RS 
+//RS /// Numeric range loops: inclusive `1..5` and a strided `0..10 step 2`. The
+//RS /// inclusive semantics (`..=`) and the `.step_by` lowering are read off the TIR.
+//RS #[test]
+//RS fn range_loops_inclusive_and_step() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     total := 0
+//RS     loop n in 1..5 {
+//RS         total = (total + n)
+//RS     }
+//RS     print(total)
+//RS     loop k in 0..10, 2 {
+//RS         print(k)
+//RS     }
+//RS }
+//RS ";
+//RS     // 1+2+3+4+5 = 15, then 0,2,4,6,8,10 (inclusive end).
+//RS     assert_tiers_agree("tir_ranges", src, "15\n0\n2\n4\n6\n8\n10\n");
+//RS }
+//RS 
+//RS /// `[U8]` values returned by byte-buffer APIs use the evaluator's compact byte
+//RS /// carrier. Iteration must expose each byte as the same integer value as AOT.
+//RS #[test]
+//RS fn byte_buffer_for_in_uses_compact_carrier() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     bytes :: Bytes.from([65, 66, 67]).to_bytes()
+//RS     total := 0
+//RS     loop byte in bytes {
+//RS         print(byte)
+//RS         total += byte
+//RS     }
+//RS     loop (index, byte) in bytes, 2 {
+//RS         print("{index}:{byte}")
+//RS     }
+//RS     print(total)
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_byte_buffer_for_in",
+//RS         src,
+//RS         "65\n66\n67\n0:65\n2:67\n198\n",
+//RS     );
+//RS }
+//RS 
+//RS /// D-RANGE-EXCL1=C: half-open `..<` excludes the end and is empty when start >= end.
+//RS #[test]
+//RS fn range_loops_exclusive() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS     total := 0
+//RS     loop n in 0..<5 {
+//RS         total = (total + n)
+//RS     }
+//RS     print(total)
+//RS     empty := 0
+//RS     loop n in 3..<3 {
+//RS         empty = (empty + 1)
+//RS     }
+//RS     print(empty)
+//RS }
+//RS ";
+//RS     // 0+1+2+3+4 = 10; empty exclusive range runs 0 times.
+//RS     assert_tiers_agree("tir_ranges_excl", src, "10\n0\n");
+//RS }
+//RS 
+//RS /// D-RANGE-VALUE1=A: both range spellings construct one storable `Range`.
+//RS /// A Range keeps its bounds and inclusivity when passed, returned, looped,
+//RS /// queried, and used as a slice bound.
+//RS #[test]
+//RS fn range_values_store_pass_return_loop_and_slice() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn identity(band: ^Range) -> Range {
+//RS     return band
+//RS }
+//RS fn run() {
+//RS     bands :: [1..3, 8..<10]
+//RS     print(bands[0])
+//RS     print(\"{bands[1]:Debug}\")
+//RS     print(bands[0] == (1..3))
+//RS     print(bands[0] == (1..<3))
+//RS     print(bands[0].contains(3))
+//RS     band :: identity(4..<7)
+//RS     print(band.start)
+//RS     print(band.end)
+//RS     print(band.contains(6))
+//RS     print(band.contains(7))
+//RS     print((7..4).contains(5))
+//RS     total := 0
+//RS     loop n in band {
+//RS         total = (total + n)
+//RS     }
+//RS     print(total)
+//RS     xs :: [10, 20, 30, 40, 50, 60, 70, 80]
+//RS     print(~xs[band])
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_range_values", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "\
+//RS Range { start: 1, end: 3, exclusive: false }
+//RS Range { start: 8, end: 10, exclusive: true }
+//RS true
+//RS false
+//RS true
+//RS 4
+//RS 7
+//RS true
+//RS false
+//RS false
+//RS 15
+//RS [50, 60, 70]
+//RS "
+//RS     );
+//RS }
+//RS 
+//RS /// Named loops: `next(outer)` and `break(outer)` driving a nested
+//RS /// range loop. The `'__jet_<name>:` labels are resolved at lowering.
+//RS #[test]
+// END-PORT-PENDING 1171 tests/tir_control_and_data.rs:1-1820
+
